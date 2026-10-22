@@ -11,7 +11,7 @@
 docs/api/proto/
   buf.yaml                               형식 검사(STANDARD)와 하위 호환 검사(FILE) 설정
   peaket/common/v1/common.proto          공통 값(원화 금액, 결제사)
-  peaket/payment/v1/payment.proto        payment-svc: 결제창 준비·승인·조회·취소, 지급대행 판매자 등록, 지급 묶음 승인
+  peaket/payment/v1/payment.proto        payment-svc: 결제창 준비·승인·조회·취소, 새 결제 일시 정지 조회, 지급대행 판매자 등록, 지급 묶음 승인
   peaket/ticket/v1/ticket.proto          ticket-svc: 발권, 예매 취소, 후기 작성 자격, 보유 티켓 확인
   peaket/identity/v1/identity.proto      identity-svc: 결제 직전 본인확인 재확인
   peaket/trust/v1/trust.proto            trust-svc: 위험 판정
@@ -20,7 +20,7 @@ docs/api/proto/
   peaket/core/v1/core.proto              core-svc: 판매 승인 결과, 게시물 조치
 ```
 
-- 2026-10-22에 protoc(grpcio-tools 1.71.0)로 여덟 파일을 모두 컴파일해 문법·import·이름이 맞음을 확인했다(서비스 8개, 호출 19개). `buf lint`와 `buf breaking`은 아직 돌리지 않았다. CI 연결은 wbs 0.2.2다.
+- 2026-10-22에 protoc(grpcio-tools 1.71.0)로 여덟 파일을 모두 컴파일해 문법·import·이름이 맞음을 확인했다(서비스 8개, 호출 19개). 같은 날 ADR-0085로 `PaymentService.GetNewPaymentPause`를 더해 호출이 20개가 됐다. 더한 부분은 아직 컴파일해 보지 않았다. `buf lint`와 `buf breaking`은 아직 돌리지 않았다. CI 연결은 wbs 0.2.2다.
 
 ## 2. 규칙
 
@@ -57,6 +57,7 @@ docs/api/proto/
 | purchase-svc → payment-svc | `PrepareCheckout` | 결제창 준비 | — | docs/features/payment.md §2·§2.2 | 있음 |
 | purchase-svc → payment-svc | `ConfirmPayment` | 승인 | `confirm-{order_id}` | docs/features/payment.md §2·§2.1 | 있음 |
 | purchase-svc → payment-svc | `GetPayment`, `CancelPayment` | 조회, 취소(예매 취소·발권 실패 보상·일괄 환불) | `cancel-{cancellation_id}` | docs/features/payment.md §2.1, docs/features/transfer-refund.md §5 | 있음 |
+| purchase-svc → payment-svc | `GetNewPaymentPause` | 새 결제 일시 정지 조회(홀드 만료 작업이 1초마다) | — | docs/features/payment.md §9, docs/features/seat-hold.md §5, ADR-0085 | 있음 |
 | core-svc shop → payment-svc | `PrepareCheckout`, `ConfirmPayment`, `CancelPayment` | 굿즈·부가 상품 결제 | 같음 | docs/architecture.md §3.2 | 있음 |
 | core-svc → payment-svc | `RegisterPayoutSeller` | 판매 승인 때 지급대행 판매자 등록 | — | docs/features/settlement.md | 없음 |
 | ops-svc → payment-svc | `ApprovePayoutBatch` | 지급 묶음 승인 뒤 지급 요청 시작 | `batch_id` | docs/features/settlement.md | 없음 |

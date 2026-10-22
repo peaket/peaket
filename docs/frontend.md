@@ -96,7 +96,7 @@ RADIO는 서버를 검은 상자로 두라고 한다. 이 문서도 게이트웨
 | NFR-010 현장 판정 | 단말 판정 p95 150ms(오프라인 포함, 판정 백 건 중 아흔다섯 건이 이 시간 안에 끝난다는 뜻) | Worker 디코딩·검증 | 스캐너 지표(§5.5) |
 | NFR-012 사용자 체감 | INP 200ms·LCP 2.5초·CLS 0.1 이하(p75, 모바일·데스크톱 따로. INP: 조작에 화면이 반응하기까지 걸린 시간, CLS: 화면이 갑자기 밀리는 정도), FCP 1.8초·TTFB 0.8초, 주요 경로에서 50ms 이상 걸리는 긴 작업 0, 좌석맵은 대기실 통과 뒤 1초 미만, 힙 v0 대비 70% 감축, 대기실 JS 50KB(gzip)·CSS 10KB 미만 | 경로별 예산 표(§5.8), 대기실 경량 페이지(§5.1) | RUM, Lighthouse CI(코드를 올릴 때마다 자동으로 도는 페이지 검사), Playwright 추적, memlab |
 | NFR-016 보안 | 웹 앱 보안 검증 항목 목록인 ASVS 5.0.0 L2의 모든 항목 판정 | 화면 묶음별 헤더, 저장소 규칙, 공급망 | asvs/frontend.md와 기능 표 |
-| NFR-019 지원 플랫폼 | Baseline 'Widely available' 전면, 최신 기술은 점진적 향상, 소비자 최신 2개 메이저와 iOS 16.4 이상 | §1.5 표의 대체 동작 | Playwright 3엔진 + 실기 |
+| NFR-019 지원 플랫폼 | Baseline(주요 브라우저가 모두 지원하는지 알려 주는 웹 기능 기준)의 'Widely available'(모두 지원한 지 30개월이 지난 단계) 기능은 모두 쓰고, 그보다 새 기술은 점진적 향상(지원하지 않는 브라우저에서도 핵심 기능은 그대로 돌게 하는 방식)으로만 쓴다. 소비자 웹은 Chrome·Safari·Samsung Internet·Edge·Whale 최신 2개 메이저 버전과 iOS·iPadOS 16.4 이상을 지원한다 | §1.5 표의 대체 동작 | Playwright 3엔진(Chromium·WebKit·Firefox) + 실제 기기 시험(§1.5) |
 | NFR-020 접근성 | 웹 접근성 국제 기준 WCAG 2.2 AA 위반 0, 좌석 선택·결제·양도를 NVDA·VoiceOver로 끝까지 마치는 비율 100% | §5.11 | axe, 수동 시나리오 |
 | NFR-024 국제화 | ko·en·ja·zh, 로케일이 늘어도 초기 번들은 그대로, 누락 키 0 | §5.12 | 번역 키 검사, 로케일별 번들 크기 |
 | NFR-025 정합성 | 재접속 순번 보존 100%, 다중 탭·다기기 한도 초과 0 | 저장소 규칙(§3.12), 다중 탭 조정(§5.9) | 시험 FE-T5·FE-T6 |
@@ -312,7 +312,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | `/_t/rum`, `/_t/csp`, `/_t/err` | — | POST만, gw-fan 텔레메트리 입구 | 캐시하지 않는다 | — | — | 응답은 204, 본문은 없다(§5.16) |
 | 파트너 콘솔 전 경로 | 020~027·037·044·062·063 | 요청마다 셸(nonce) + CSR, tRPC `/api/trpc/*` | `private, no-store` | tRPC BFF, SSE·내려받기는 직접 호출 | B | |
 | 관제 콘솔 전 경로, `/remotes/*` | 028~032·045~049·053·064~068 | 정적 SPA(S3), 모든 경로를 `index.html`로 | `index.html`은 `no-cache`, 자산은 `immutable` | ops-api | C | 관리자 IP로 제한한 배포 |
-| `/forensics?event=`(포렌식 리플레이 2단계, 출시 뒤 선택) | 069 | 따로 여는 정적 페이지(S3 `/forensics/`, `apps/forensics` 운영 빌드). 콘솔의 `index.html` 되돌리기에서 뺀다 | `index.html`은 `no-cache`, 자산은 `immutable` | ops-api 내보내기(docs/features/forensic-replay.md §6.3) | C + COEP `require-corp`(이 경로만) | 관리자 IP로 제한한 배포다. 관제 셸·실시간 연결을 싣지 않고 새 탭으로 연다(추천 적용 2026-10-21, ADR-0080 상태 줄) |
+| `/forensics?event=`(포렌식 리플레이 2단계, 출시 뒤 선택) | 069 | 따로 여는 정적 페이지(S3 `/forensics/`, `apps/forensics` 운영 빌드). 콘솔이 모든 경로를 `index.html`로 보내는 규칙에서 이 경로를 뺀다 | `index.html`은 `no-cache`, 자산은 `immutable` | ops-api 내보내기(docs/features/forensic-replay.md §6.3) | C + COEP `require-corp`(이 경로만) | 관리자 IP로 제한한 배포다. 관제 셸·실시간 연결을 싣지 않고 새 탭으로 연다(추천 적용 2026-10-21, ADR-0080 상태 줄) |
 | 스캐너 전 경로, `/enroll` | 033~036·052 | 정적 PWA(S3) | `index.html`·서비스 워커 `no-cache`, 자산 `immutable` | scanner-api | D | 새 판은 근무 준비 때만 적용한다(devops §6.6) |
 
 - **HTTP에서 HTTPS로**: 화면 배포 넷(`www`·`partner`·`console`·`scanner`)은 시청자 규칙을 'HTTP를 HTTPS로 이동'으로 둔다. API 배포와 게이트웨이는 HTTPS만 받고 이동시키지 않는다(ASVS 4.1.2, asvs/frontend.md).
@@ -371,7 +371,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | --- | --- | --- | --- | --- |
 | 홈 피드 `HomeFeed`, 공연 카드 `EventCard` | `GET /v1/home`(CDN 30초), ISR | 배너·오픈 예정·판매 중·테마·공연장, `saleStatus`·`saleEndsAt`·`badges` | 홈 서버 컴포넌트 | ISR 태그 무효화 |
 | 랭킹 파일 `RankingFile` | www 정적 JSON | `basisDate`, `overall`, `genres` | 홈 랭킹 섹션(클라이언트) | `basisDate`가 2일 [가정] 넘게 지나면 섹션을 숨긴다(정본) |
-| 공연 상세 | 계약에 없다(S1) | 회차·등급별 가격·판매 정책·판매자 정보·셔플 커밋·좌석맵 판 | 상세 서버 컴포넌트 | ISR. wbs 0.2.3에서 경로를 정한다 |
+| 공연 상세 | 계약에 없다(design/d5 §1.6 21번, §6.2 32번) | 회차·등급별 가격·판매 정책·판매자 정보·셔플 커밋·좌석맵 판 | 상세 서버 컴포넌트 | ISR. wbs 0.2.3에서 경로를 정한다 |
 | 참가 토큰 `LobbyToken` | `POST …/lobby-participants` 201 | `lobbyToken`, `seedHash`, `drand*`, `shuffleResultAt`, `shuffleSpreadSec`, `verification`(ADR-0079 결정 4) | 대기실 상태표 | localStorage(§3.12) |
 | 사전 검증 토큰 | `POST …/pre-verifications` 201 | 토큰, 만료 시각(계약에 없다, wbs 0.2.3) | 공연 상세 진입 도우미 | localStorage, 만료 2분 [가정] 전에 갱신 |
 | 대기표 `QueueTicket` | `POST …/entries` 201 | `queueTicket`, `seq`, `generation`, `segment`, `verification` | 대기실 상태표 | localStorage |
@@ -468,7 +468,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | `selecting` | 010 | 홀드 요청 → `holding` |
 | `holding` | 010 버튼 로딩 | 201 → `held` / 409 경합 → `selecting`(고른 좌석을 되돌리는 롤백, 흔들림, 인접 좌석 추천) / 422 한도 → `selecting` / 423 → `paused` / 410 → 판매 종료 안내 / 401 → §4.1 401 규칙 |
 | `held` | 010 바텀 시트·카운트다운 | [결제하기] → 주문 생성 → `checkout` / 만료 → `selecting` / [예매 그만두기] → 홀드 풀기 → 대기실 |
-| `checkout` | 011 | 결제 시도 시작 → 결제사 SDK로 결제창 열기 → 페이지 이동(`redirecting`) |
+| `checkout` | 011 | 결제 시도 시작 → 결제사 SDK로 결제창 열기 → 페이지 이동(`redirecting`) / 503(새 결제 일시 정지) → 결제 버튼을 막고 홀드 타이머를 `holdRemainingSeconds`에서 멈춤, `Retry-After` 뒤 버튼을 다시 켬(ADR-0085) |
 | `returning` | 011 복귀 | 결제 값을 읽고 지우기 → 서명한 결제 접수 → 202 → `result` / 400 금액 불일치 → `checkout` / 409 진행 중 → `result` |
 | `result` | 012 | 결제 결과 기계로 |
 
@@ -521,7 +521,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 - **문서**: openapi `SeatMapLayout`(배치 층 + 좌석 층 + `layoutVersion`)이 저장 단위다. 에디터는 구역·좌석마다 `atomFamily`(`jotai-family`) 원자를 하나씩 두어, 바뀐 원자만 다시 그린다(architecture §6.4).
 - **되돌리기**: 명령 객체(바꾼 원자와 앞뒤 값)를 쌓은 스택이다. FR-023 인수 조건(10단계 정확 복원)을 넘는 200단계 [가정]까지 두고, 이 수를 넘으면 오래된 것부터 버린다. 화면 문구의 '무제한'은 이 상한으로 읽는다(§6.2).
 - **계산**: 자동 채우기, 겹침·도형 밖 검사, 휠체어석 W1~W3 검사는 에디터 Worker가 한다. 서버는 저장할 때 다시 검사한다.
-- **저장**: 자동 임시저장은 `PUT …/seatmap`의 `layoutVersion`으로 동시 수정을 막는다(409면 '다른 곳에서 바뀌었습니다'와 비교 보기). 공연 등록 위저드의 초안 저장 경로는 계약에 없다(S11, §6.2).
+- **저장**: 자동 임시저장은 `PUT …/seatmap`의 `layoutVersion`으로 동시 수정을 막는다(409면 '다른 곳에서 바뀌었습니다'와 비교 보기). 공연 등록 위저드의 초안 저장 경로는 계약에 없다(design/d5 §1.6 16번, §6.2 32번).
 
 ### 3.10 관제 콘솔 상태
 
@@ -671,7 +671,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 파트너 | 실시간 판매 | `new EventSource('https://partner-api…/v1/partner/events/{id}/live', {withCredentials: true})`(§4.4.3) |
 | 파트너 | 명단·리포트 내려받기, 이미지·좌석맵 올리기 | 브라우저 → `partner-api`로 직접(스트리밍·다중 파트) |
 | 파트너 | 토큰 갱신 | 브라우저 → `POST https://partner-api…/v1/partner/auth/access-tokens`(리프레시 쿠키의 경로가 이 주소이기 때문이다) |
-| 관제 | 로그인·갱신 | `POST https://ops-api…/v1/ops/auth/sessions`(본문 계약이 없다, A6) · `…/access-tokens` |
+| 관제 | 로그인·갱신 | `POST https://ops-api…/v1/ops/auth/sessions`(요청 본문과 다중 인증 절차가 계약에 없다, wbs 0.2.3) · `…/access-tokens` |
 | 관제 | 명령 | `POST /v1/ops/commands`(멱등키, 위험 명령은 재인증) → 2인 명령은 `…/approvals`(재인증) → ack는 Socket.IO `command:ack` |
 | 관제 | 위젯 데이터 | `POST https://ops-api…/graphql`(영속 쿼리) · 구독 `wss://ops-api…/graphql`(§4.4.5) |
 | 스캐너 | 로그인 | `POST /v1/scanner/device-authorizations`(빈 객체 JSON) → QR·코드 표시 → `POST /v1/scanner/token`을 `interval`(기본 5초)마다 보낸다. `slow_down`이면 간격을 5초 늘린다 |
@@ -730,7 +730,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 구역 표 | `sectionCount` × (`u16 sectionIndex`, `u32 sectionVersion`) | 구역 판 |
 | 비트맵 | 좌석 색인 순서. 바이트 안에서는 낮은 비트부터 | 1 = 점유(홀드·결제 예약·판매), 0 = 가능. 구역 하나만 실으면 그 구역 범위만 담는다 |
 
-- 전체 비트맵은 5만 석에 6,250바이트다. 정본의 '압축 약 6.25KB'는 이 비트 압축 크기다. 전송할 때의 압축은 HTTP `Content-Encoding`(br·gzip)에 맡긴다(§6.2).
+- 전체 비트맵은 5만 석에 6,250바이트다. seat-hold §2의 '약 6.25KB'가 이 크기다. 전송할 때의 압축은 HTTP `Content-Encoding`(br·gzip)에 맡긴다(§6.2).
 - 응답은 `application/octet-stream`이고 `Cache-Control: no-store`다. 헤지 요청을 허용하는 읽기다(정본).
 
 #### 4.4.3 파트너 SSE
@@ -1030,7 +1030,7 @@ sequenceDiagram
 - **구성**: 왼쪽 계층 트리(`role="tree"`) · 가운데 캔버스 · 오른쪽 속성 패널(design/d5 §6.5). 캔버스는 배치 층과 좌석 층 두 겹이다. 도구 막대는 [① 배치 그리기][② 좌석 채우기][③ 좌석 다듬기][미리보기]다.
 - **계산은 Worker**: 자동 채우기, 겹침·도형 밖 검사, 휠체어석 W1~W3, 가져오기(SVG·JSON·CSV) 해석과 행 단위 검증 보고, 내보내기를 에디터 Worker가 맡는다. 큰 파일은 진행률(CMP-016)을 보이고, 취소할 수 있다. 서버는 저장할 때 다시 검사한다.
 - **키보드와 끌기 대안**: 이동 폭은 화살표 10cm·Shift+화살표 1m [가정]이다. 모든 끌기는 숫자 입력으로도 된다(WCAG 2.5.7). 가격 등급 순서(CMP-050 DnDList)는 위로·아래로 버튼이 대안이다.
-- **되돌리기와 저장**: §3.9를 따른다. 자동 임시저장은 입력이 멈춘 뒤 2초 [가정]마다 하고, 저장 중 표시와 마지막 저장 시각을 보인다.
+- **되돌리기와 저장**: §3.9를 따른다. 자동 임시저장은 마지막 입력 뒤 2초 [가정] 동안 새 입력이 없으면 한다. 저장 중 표시와 마지막 저장 시각을 보인다.
 - **내보내기의 수식 방지**: CSV 칸이 `=`·`+`·`-`·`@`·탭·CR로 시작하면 앞에 작은따옴표를 붙인다. guidelines §9의 규칙을 브라우저가 만드는 파일에도 적용한다(§6.2).
 - **SVG 가져오기**: 화면에 SVG를 그대로 넣지 않는다. Worker가 도형·좌표만 데이터로 읽는다(ASVS 1.3.4, asvs/frontend.md).
 
@@ -1061,7 +1061,7 @@ sequenceDiagram
 | 스캐너 | 150KB [가정] + 디코더 WebAssembly(서비스 워커가 미리 저장해 둔다) | 15KB [가정] | 판정 p95 150ms(NFR-010) | 첫 실행은 근무 준비 때 | 기기 벤치, size-limit |
 | 포렌식 리플레이(1단계 데모, 2단계 페이지) | 200KB [가정](`apache-arrow` 포함) + Worker 80KB [가정] | 20KB [가정] | 필터 반영 p95 50ms [가정], 재생 p95 프레임 20ms [가정], INP 200ms | 사건 300만·파일 200MB [가정] 상한(docs/features/forensic-replay.md §4.3) | size-limit, Playwright 성능 추적, memlab |
 
-- **RUM이 정본**: 랩 숫자(Lighthouse·Playwright)는 성능 회귀를 막는 장치다. 목표 달성 여부는 RUM p75(모바일·데스크톱 따로, 28일과 온세일 창 따로)로 판정한다(NFR-012).
+- **RUM이 정본**: 랩 숫자(Lighthouse·Playwright)는 성능 회귀를 막는 장치다. 목표 달성 여부는 RUM p75(모바일·데스크톱 따로, 28일과 온세일 윈도우 따로)로 판정한다(NFR-012).
 - **Lighthouse CI**: `@lhci/cli`로 PR마다 대표 주소(홈, 공연 상세, 대기실 셸, 좌석 화면 데모, 결제 데모, 월렛)를 검사한다. 예산을 넘으면 병합을 막는다(observability §11). `@lhci/cli`는 2025-06 뒤 게시가 없어 위험 구성 요소로 본다(§5.14).
 - **좌석맵 INP 시나리오**: Playwright가 CPU를 4배 느리게 한 상태(Chrome DevTools 프로토콜)에서 확대 → 구역 구독 → 좌석 10개 연속 선택 → 홀드 버튼 누르기를 하고, 이벤트 타이밍(`interactionId`)과 긴 작업을 모은다. Chromium에서만 잰다(Safari는 INP를 26.2부터 낸다).
 
@@ -1090,7 +1090,7 @@ sequenceDiagram
 - **다섯 표준 상태**: 모든 화면이 기본·로딩·빈 화면·오류·권한 없음 상태를 그린다(planning/04 §3). 문구는 design/d2 §4 규칙(무엇이 문제인가 + 어떻게 하면 되는가)을 따른다.
 - **로딩**: 전체 화면을 막는 스피너 대신 위젯·카드 단위로 스켈레톤을 보인다. 정적 셸은 바로 그리고, 개인 영역만 스켈레톤으로 둔다(design/d2 §3.3).
 - **낙관적 갱신**: 찜·알림 토글(React 19 `useOptimistic`)과 좌석 선택에 쓴다. 좌석 선택은 경합에서 지면 되돌리고, 흔들림과 인접 좌석 추천을 보인다. 돈이 오가는 동작(홀드 확정·결제·취소)은 서버 응답 전에 성공으로 보이지 않는다.
-- **시간 제한**: 홀드 7분 + 1회 연장과 최대 체류 45분은 WCAG 2.2.1의 실시간 예외로 본다. 그래도 남은 시간·1분 전 경고·1회 연장을 둔다. 구매 세션 무활동 4분 [가정] 경고와 관리 계정 유휴 58분 [가정] 경고는 `role="alertdialog"`로 띄우고, 초점은 계속 버튼에 둔다(design/d5 §3.5).
+- **시간 제한**: 홀드 7분 + 1회 연장과 최대 체류 45분은 WCAG 2.2.1의 실시간 예외로 본다. 그래도 남은 시간·1분 전 경고·1회 연장을 둔다. 구매 세션 무활동 4분 [가정] 경고와 관리 계정 유휴 58분 [가정] 경고는 `role="alertdialog"`로 띄우고, 초점은 [계속하기]·[계속 사용] 버튼에 둔다(design/d5 §3.5).
 - **Degraded 문구**: 공연 상세는 '판매 중' 고정 문구, 대기는 '연결 확인 중', 좌석은 '실시간 연결 복구 중'·지연 표시, 결제는 '결제가 잠시 멈췄습니다. 홀드 시간을 늘려 두었습니다', 관제는 <대체 표시>를 보인다(POL-029). 원인이 되는 내부 정보는 보이지 않는다(ASVS 16.5.1).
 - **자동 재시도 안내**: 429·503은 남은 초를 글자로 보이고 자동으로 다시 시도한다(SCR-059).
 - **뒤로 가기·새로고침**: 주소에 상태를 담은 모달은 뒤로 가기로 닫힌다. 대기실은 같은 탭에서 새로고침해도 순번·진행 막대 기준을 유지한다. 결제 화면은 초안(개인정보 제외)을 되살린다. 결제 결과 화면은 주문 ID로 다시 들어온다(design/d5 §4).
@@ -1467,8 +1467,8 @@ ADR-0079의 결정 32개가 이 문서의 어디에 반영되어 있는지 보�
 | 29 | 구매 세션 나가기(LEFT)와 홀드 다시 읽기 경로가 없다 | design/d5 §1.6 19·26번 | wbs 0.2.3 |
 | 30 | 굿즈 결제 경로가 입장 토큰·구매 세션 서명을 요구하는 경로뿐이다 | openapi(굿즈 주문·결제) | wbs 0.2.3 |
 | 31 | 인기 MD 대기열이 어떤 대기열 식별자를 쓰는지 | openapi 굿즈 주문 | wbs 0.2.3 |
-| 32 | 화면이 쓰는 읽기 경로가 없다(공연 상세, 주문 내역, 파트너 공연 목록, 관제 목록 등 S1~S20) | design/d5 §1.6 | wbs 0.2.3 |
-| 33 | `operationId` 0/180, Problem 선언 6/242, 429·503 `Retry-After` 미선언 | openapi, guidelines §2 | Problem 선언(243/244, 나머지는 다른 서비스 계정으로 로그인하게 하는 표준인 OAuth의 오류)·`Retry-After`·401 `WWW-Authenticate`는 고쳤다(ADR-0081). `operationId`(0/181)는 wbs 0.2.3으로 넘긴다 |
+| 32 | 화면이 쓰는데 openapi에 없는 경로가 20개 항목이다(대부분 읽기). design/d5 §1.6에는 공연 상세(21번), 주문 내역(2번), 계정 설정·소명·배상 조회(18번), 티켓 표시 값(25번), 지연 환급 계좌(4번), 내 현장 배정(5번), 파트너 공연 목록·등록 임시저장·상품·웹훅·정산 리포트·회차 취소 요청 상태(16번), 관리 계정·파트너사·팬 조회·봇 표본·공지(8~12번)가 있다. 그 표에 없는 것은 웹 푸시 구독 정보 등록, 월렛의 티켓 상세·부가 상품 목록(SCR-013), 굿즈 상품 상세와 상품 목록 응답 형식(SCR-015), 받은 양도 요청 목록(SCR-041), 관제 명령 목록·상세(SCR-030), 법정 조치 목록·상세(SCR-032), 승인 업무·회차 취소 요청·판매 승인 대기·지급 묶음 목록(SCR-046~049)이다. 관제 목록을 REST로 둘지 GraphQL로 읽을지도 정해지지 않았다 | planning/04 화면 표, openapi, design/d5 §1.6 | wbs 0.2.3 |
+| 33 | `operationId` 0/180, Problem 선언 6/242, 429·503 `Retry-After` 미선언 | openapi, guidelines §2 | Problem 선언(243/244)·`Retry-After`(429·503 19개)·401 `WWW-Authenticate`(16개)는 고쳤다(ADR-0081). Problem을 선언하지 않은 1개는 기기 승인 토큰 엔드포인트 `POST /v1/scanner/token`의 400으로, OAuth(다른 서비스 계정으로 로그인하게 하는 표준) 오류 형식을 쓴다. 이때 작업이 180개에서 181개로, 4xx·5xx 응답이 242개에서 244개로 늘어 어긋남 칸과 전체 수가 다르다. `operationId`(0/181)는 wbs 0.2.3으로 넘긴다 |
 | 34 | 파트너 콘솔 통신이 tRPC(architecture)와 REST(openapi)로 갈린다 | architecture §6.4, openapi | 결정 11: tRPC BFF가 REST를 부른다 |
 | 35 | 관제 원격 위젯의 빌드·업로드 주체가 불분명하다 | architecture §10, devops §6.6 | 고침(결정 16) |
 | 36 | CI 유형 표가 `ds`·`telemetry`를 '라이브러리'에 두고, `validation`·`api-client`는 어느 행에도 없다 | devops §3.2 | 고침 |
@@ -1483,7 +1483,7 @@ ADR-0079의 결정 32개가 이 문서의 어디에 반영되어 있는지 보�
 | 45 | 좌석맵 내보내기(CSV)는 브라우저가 만드는데, 수식 방지 규칙은 '서버가 만들 때'로 적혔다 | guidelines §9 | 고침: 브라우저 내보내기에도 같은 규칙을 둔다 |
 | 46 | 에디터 되돌리기가 '무제한'(SCR-022)과 '10단계 정확 복원'(FR-023)으로 적혔다 | planning/02·04 | 기록: 200단계 [가정] 상한(§3.9) |
 | 47 | 스캐너 '단말 판정 지연 p95(업로드 때 함께)'의 전송 경로 | observability §3 | 기록: Dexie 버퍼 → `/_t/rum`(§5.5) |
-| 48 | 공연 이미지 파생본의 호스트 | openapi `posterUrl` 등 | 기록: www 같은 출처 경로를 기본으로 한다 [가정](§5.14.1) |
+| 48 | 공연 이미지 파생본의 호스트 | openapi `posterUrl` 등 | 기록: www 같은 출처 경로를 기본으로 한다 [가정] (§5.14.1) |
 | 49 | '배터리 15% 이하 효과 끔'의 판정 방법과 지원 범위 | planning/04 SCR-007 | 기록: Battery Status API(Chromium만, §1.5) |
 | 50 | Degraded 완화 항목 '뷰포트 밖 5초 스냅샷'이 평시 동작과 같아졌다 | planning/03 §1.3 | 기록: 감내 모드에서 바뀌는 것은 델타 1초 묶음뿐이다(seat-hold §9와 같다) |
 | 51 | 관제 RTK의 '액션 로그 자체가 불변 감사 기록·인시던트 리플레이로 직결'이라는 설명 | architecture §6.4, appendix-learning-map | 고침: architecture §6.4(감사·리플레이의 정본은 서버 감사 로그와 관측 기록이다, control-tower §7). 부록은 원문이라 고치지 않는다 |

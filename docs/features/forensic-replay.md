@@ -284,7 +284,7 @@ Apache Arrow IPC 파일 형식(`.arrow`, 앞뒤 매직 `ARROW1`)에 사건을 �
 | 기록 | §6.4 그대로(관제 감사 기록과 가명정보 이용 내역) |
 | 싣지 않는 것 | 관제 셸(머리·메뉴·경보 패널), 실시간 연결(Socket.IO·graphql-ws), 원격 위젯 |
 | 헤더 | 관제 묶음 C에 COEP `require-corp`를 이 경로에만 더한다. 관제는 이미 COOP `same-origin`이므로, 교차 출처 격리가 켜져 공유 메모리를 쓴다(docs/frontend.md §5.14.1) |
-| 배포 | console 배포의 S3(아마존의 파일·객체 저장소) `/forensics/`에 둔다. 콘솔의 'index.html로' 되돌리기 대상에서 빼고, 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것) 동작 `/forensics*`에 따로 응답 헤더 정책을 단다(docs/frontend.md §5.18, docs/devops.md §6.6) |
+| 배포 | console 배포의 S3(아마존의 파일·객체 저장소) `/forensics/`에 둔다. 콘솔이 모든 경로를 'index.html'로 보내는 규칙에서 빼고, 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것) 동작 `/forensics*`에 따로 응답 헤더 정책을 단다(docs/frontend.md §5.18, docs/devops.md §6.6) |
 | 예산 | §7 그대로. 관제 호스트 예산(docs/frontend.md §5.8)에 들지 않는다 |
 
 이유:

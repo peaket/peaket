@@ -120,7 +120,7 @@ Karpenter(필요한 만큼 서버를 붙이고 떼는 도구)가 노드를 만�
 | MSK 관측 전용 | Tempo 쓰기 경로(요청 기록) | 브로커 3 | kafka.m7g.large [가정] | 원인 분석 자료. SLO 경보와 자동 제어는 영향 없다 | 9098 | 보존은 가정(ADR-0077) | docs/observability.md §1, ADR-0077 |
 | ClickHouse(+Keeper) | 분석 브론즈·실버·골드, 실시간 표 `rt`, 법정 접속기록 DB, 봇 원시 신호 | 복제 2 + Keeper 3 | r7g.2xlarge 노드, gp3 볼륨 [가정] | RPO 1일·RTO 1시간. 관제 실시간 표 반영 p95 5초(NFR-009). 멈추면 관제 패널을 Prometheus 대체 표시로 바꾼다 | 9440(네이티브 TLS)·8443(HTTPS). 관제 지표 초당 3만 건(NFR-009) | `rt`·브론즈·실버 90일, 골드 2년, 접속기록 3개월, 봇 원시 30일. 일 1회 S3 백업 7일 [가정] | docs/infra.md §4·§6, docs/observability.md §9 |
 | MongoDB | 상품 카탈로그 | 복제 세트 3(오퍼레이터) | 데이터 풀 노드의 파드 [가정] | RPO 1일·RTO 1시간. 멈추면 정적·ISR 캐시가 읽기를 받는다 | 27017, TLS, SCRAM 인증 | 일 1회 S3 스냅샷 | docs/infra.md §4·§6 |
-| Flink | 관제 실시간 표, 봇 대기 중 재평가, 원본 적재 | 잡마다 애플리케이션 모드, JobManager 쿠버네티스 HA | docs/streaming.md §2.5 | 관제 실시간 표 신선도 p95 5초(NFR-009) | 지표 9249(Prometheus 리포터) | 체크포인트는 마지막 1개, 세이브포인트 90일 [가정](S3) | docs/infra.md §4, docs/streaming.md §2 |
+| Flink | 관제 실시간 표, 봇 대기 중 재평가, 원본 적재 | 잡마다 애플리케이션 모드, JobManager 쿠버네티스 HA | docs/streaming.md §2.5 | 관제 실시간 표 신선도 p95 5초 미만(NFR-009) | 지표 9249(Prometheus 리포터) | 체크포인트는 마지막 1개, 세이브포인트 90일 [가정] (S3) | docs/infra.md §4, docs/streaming.md §2 |
 | 관측 저장소 | 지표, 로그, 요청 기록, 프로파일 | Mimir·Loki 영역 인식 3중 복제, Tempo 마이크로서비스 모드 | 관측 풀 | 핫패스 밖. 관측이 멈춰도 SLO 경보와 자동 제어 입력은 클러스터 Prometheus가 낸다 | OTLP 4317(gRPC)·4318(HTTP) 수집기, `/metrics` 긁기 | Prometheus 15일, Mimir 원본 90일·5분 집계 13개월, Loki 30일, Tempo 14일, Pyroscope 7일(S3 백엔드) | docs/observability.md §1·§9 |
 | S3 | CDN 원본 정적 객체, 백업, Iceberg 아카이브, Flink 상태, 관측 백엔드, 진단 증거, 감사 앵커, 공개 체크포인트 | 리전 서비스 | — | 백업 버킷은 도쿄로 교차 리전 복제 | HTTPS | 버킷별 보존은 §6 | docs/infra.md §6, docs/data.md §1 |
 

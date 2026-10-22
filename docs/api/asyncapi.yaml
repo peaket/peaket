@@ -62,7 +62,7 @@ channels:
       SettlementEvent: { $ref: '#/components/messages/SettlementEvent' }
   control.settings:
     address: control.settings
-    description: 운영 설정 이벤트(봇 판정 강도·대기 중 재평가 모드, 로그 레벨, 피처 플래그, Degraded Mode 중 입장 외, 결제사 지정·결제사 전환). 모든 서비스 구독. ops-svc 발행(POL-021, ADR-0044)
+    description: 운영 설정 이벤트(봇 판정 강도·대기 중 재평가 모드, 로그 레벨, 기능 플래그, Degraded Mode 중 입장 외, 결제사 지정·결제사 전환). 모든 서비스 구독. ops-svc 발행(POL-021, ADR-0044)
     messages:
       SettingChanged: { $ref: '#/components/messages/SettingChanged' }
   control.sessions-terminated:

@@ -25,8 +25,9 @@
 | --- | --- | --- |
 | Apache Flink | 2.2.x, 공식 이미지(Java 17)를 다이제스트로 고정 | 최신 안정판 2.3.0은 Kafka 커넥터가 아직 지원하지 않는다 |
 | Flink Kafka 커넥터 | `flink-connector-kafka` 5.0.0-2.2 | 2.1.x·2.2.x 호환 |
-| Flink Kubernetes Operator | 1.16.1 | 2.3.x~1.19.x 호환, `flinkVersion: v2_2` 지원 |
+| Flink Kubernetes Operator | 1.16.1 | 1.19.x~2.3.x 호환, `flinkVersion: v2_2` 지원 |
 | Java | 17 | ClickHouse(대량 이벤트 집계에 강한 분석용 데이터베이스) 커넥터의 Flink 2.0 이상용 묶음이 요구한다 |
+| ClickHouse 서버 | 26.8 LTS(2026-08-27, 1년 지원) | `EXPLAIN ANALYZE`(26.7), 내림차순 정렬 키 상시 지원과 가상 스킵 인덱스(26.6)가 있다. 26.3 LTS와 기본값이 다르다: 비동기 삽입 기본 켬(26.3), 모든 삽입의 중복 제거 기본 켬(26.6), 25GiB 이하 표의 INSERT 때 열 통계(26.8). 다음 LTS로 옮길 때 §4.4 설정 표를 다시 맞춘다(추천 적용 2026-10-22, ADR-0086) |
 | ClickHouse 공식 Flink 커넥터 | `flink-connector-clickhouse-2.0.0` 묶음 | 제공사가 시험한 Flink는 2.0.0·2.0.1이다. 2.2에서의 동작은 확인 필요이고, wbs 4.3.1 PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험)로 본다. 안 되면 Flink 1.20 LTS(Kafka 커넥터 3.4.0, 커넥터 1.17 묶음)로 내린다 |
 | Confluent 레지스트리 Avro | `flink-avro-confluent-registry` 2.2.x | Schema Registry는 Confluent다(api/guidelines) |
 | S3 파일 시스템 | `flink-s3-fs-presto` 플러그인 | Flink 문서가 S3(클라우드 파일 저장소)에 체크포인트를 둘 때 권하는 구현이다 |
@@ -40,7 +41,7 @@
 - 잡은 DataStream API(프로그램이 기능을 불러 쓰는 창구)로 작성한다. ClickHouse 공식 커넥터는 DataStream만 지원한다. 늦게 온 사건을 같은 칸에 고쳐 쓰는 허용 지연(`allowedLateness`)도 DataStream의 창 기능이다.
 - JobManager를 멈춤 없이 쓸 수 있게 하는 고가용성은 쿠버네티스(컨테이너로 만든 앱을 여러 서버에서 실행하고 관리하는 플랫폼) HA로 한다. 체크포인트·세이브포인트·HA 메타데이터는 S3 버킷 `peaket-flink-state-<환경>`에 SSE-KMS로 암호화해 둔다. 암호화 키는 저장소 암호화 KMS(암호 키를 안전하게 보관하고 대신 써 주는 클라우드 서비스) 키다. 업그레이드는 `savepoint` 모드(docs/devops.md §6.5)로 한다.
 - Operator의 자동 확장(`job.autoscaler.enabled`, 기본값은 꺼짐)은 켜지 않고 병렬도를 고정한다. 확장 결정도 업그레이드 과정을 거쳐 반영되어 잡이 잠깐 멈추기 때문이다. 병렬도를 바꿀 때는 업그레이드와 같은 규칙(동결 창·마감 실행 중 금지, POL-028)을 따른다.
-- 네임스페이스는 `ops-rt`·`analytics-ingest`가 `data`, `trust-reassess`가 `trust`이다. Operator는 `flink-operator`에 두고 두 네임스페이스를 지켜본다 [추천 적용]. 매니페스트는 공용 차트 `peaket-flink-job`(§13)이 만든다.
+- 네임스페이스는 `ops-rt`·`analytics-ingest`가 `data`, `trust-reassess`가 `trust`이다. Operator는 `flink-operator`에 두고 두 네임스페이스를 지켜본다 (추천 적용 2026-10-20). 매니페스트는 공용 차트 `peaket-flink-job`(§13)이 만든다.
 
 `ops-rt`의 FlinkDeployment 요지(값은 §2.4·§2.5, [가정]):
 
@@ -296,6 +297,8 @@ TTL toDateTime(created_at) + INTERVAL 30 DAY;
 ```
 
 - 읽기: ops-svc는 `FINAL`(최근 몇 분 범위)이나 `argMax(value, version)`로 키마다 마지막 값을 읽는다. ReplacingMergeTree는 병합할 때만 중복을 지우고, 언제 지울지는 보장하지 않는다. 그래서 병합에 기대지 않고 읽을 때 마지막 값을 고른다.
+- 조회 규칙(추천 적용 2026-10-22, ADR-0086): ops-svc의 `rt` 조회 사용자는 설정 프로필에 `force_primary_key = 1`을 둔다. 기본 키(정렬 키)를 쓸 조건이 없는 쿼리는 오류로 막힌다(줄이는 효과까지는 검사하지 않는다, ClickHouse 문서). 회차를 넘나드는 골드 비교 조회는 다른 사용자로 둔다. `FINAL`을 쓰는 조회에 `PREWHERE`(조건에 쓰인 열을 먼저 읽고 맞는 블록만 나머지 열을 읽는 단계)를 직접 쓰지 않는다. 직접 쓴 PREWHERE는 FINAL보다 먼저 평가되어, 정렬 키 밖 열을 쓰면 결과가 틀릴 수 있다. WHERE의 정렬 키 조건은 서버가 알아서 앞으로 옮긴다. `rt.bucket`은 파티션 키 식의 열이 모두 기본 키에 있어, 기본 설정(`enable_automatic_decision_for_merging_across_partitions_for_final`)대로 FINAL이 파티션을 넘어 병합하지 않는다.
+- 진단: 조회 종류별로 `system.query_log`의 `read_rows`·`query_duration_ms`·ProfileEvents `SelectedMarks`를 본다. 26.8은 `EXPLAIN indexes = 1`(인덱스별로 고른 파트와 그래뉼(기본 8,192행 묶음) 수)과 `EXPLAIN ANALYZE`(실제 단계별 시간, 분산 실행 쿼리는 안 됨)를 쓸 수 있다. 성능을 잴 때는 조건 캐시(25.4부터 기본 켬)를 끈다. 켜 두면 같은 쿼리를 되풀이해 잴 때 실제보다 빨라 보인다(추천 적용 2026-10-22, ADR-0086).
 - '최근 10초·60초' 같은 이동 합과 10초 단위 보조 지표는 조회할 때 1초 칸을 더해 구한다. 구간별 증가량(분당 주문 등)은 누적 값의 차이로 구한다.
 - 실시간 표 안에서는 머티리얼라이즈드 뷰로 합산하지 않는다. 뷰는 삽입 묶음마다 돌아서, 다시 보낸 값도 더해 버리기 때문이다(analytics §5.5).
 - 파트너 판매 현황을 서버에서 브라우저로 한 방향으로 계속 보내는 SSE(1분 지연, control-tower §11)는 `rt.cumulative`를 읽는다.
@@ -309,8 +312,8 @@ ClickHouse 공식 커넥터의 `ClickHouseAsyncSink`(요소 변환기는 `POJOCo
 | --- | --- | --- | --- |
 | `maxBatchSize` | 2,000 | 10,000 | 묶음의 최대 레코드 수 |
 | `maxTimeInBufferMS` | 250 | 1,000 | 레코드가 버퍼에 머무는 최대 시간 |
-| `maxInFlightRequests` | 2 | 2 | 넘으면 역압이 걸린다 |
-| `maxBufferedRequests` | 20,000 | 50,000 | 넘으면 역압이 걸린다 |
+| `maxInFlightRequests` | 2 | 2 | 넘으면 백프레셔(받는 쪽이 밀리면 보내는 쪽을 늦추게 하는 장치)가 걸린다 |
+| `maxBufferedRequests` | 20,000 | 50,000 | 넘으면 백프레셔가 걸린다 |
 | `maxBatchSizeInBytes` | 8MB | 16MB | 묶음 크기 상한 |
 | `maxRecordSizeInBytes` | 64KB | 1MB | 이보다 큰 레코드는 거절한다 |
 | 재시도 | 3회(기본) | 3회(기본) | 넘으면 그 묶음을 버리고 `numOfDroppedRecords`가 늘어난다 |
@@ -318,6 +321,7 @@ ClickHouse 공식 커넥터의 `ClickHouseAsyncSink`(요소 변환기는 `POJOCo
 
 - 숫자는 [가정, 4.3.9에서 확정]이다. 묶음이 너무 작거나 너무 자주 보내면 ClickHouse의 병합이 밀려 삽입이 느려진다. 그래서 `numRequestSubmitted`·`actualRecordsPerBatch`를 보고 맞춘다(ClickHouse 문서).
 - `wait_for_async_insert=0`은 쓰지 않는다(디스크에 쓰기 전에 응답하므로 데이터를 잃을 수 있다).
+- 대상 판 26.8 LTS의 기본값과 같은 설정(`async_insert=1`, `wait_for_async_insert=1`, 모든 삽입의 중복 제거)도 표에 그대로 적어 둔다. 판을 올릴 때 기본값이 바뀌어도 동작이 그대로이게 하려는 것이다. 26.8은 25GiB 이하 표에 INSERT 때 열 통계를 만든다. 실시간 표처럼 삽입이 잦은 표의 비용을 4.3.9 측정에 넣고, 비용이 크면 그 표만 끈다(추천 적용 2026-10-22, ADR-0086).
 - 커넥터는 재시도해도 실패한 묶음을 버린다(데드 레터 큐가 없다). `numOfDroppedRecords`가 0보다 크면 SEV3다. 누적은 다음 초의 값이 메우고, 1초 칸은 버린 수를 누락률에 넣는다.
 
 ### 4.5 신선도와 지연 예산(NFR-009)
@@ -325,7 +329,7 @@ ClickHouse 공식 커넥터의 `ClickHouseAsyncSink`(요소 변환기는 `POJOCo
 - **SLI**(실제로 재는 서비스 품질 값): ops-svc가 읽을 때마다 두 길의 신선도를 낸다. 1초 칸 길의 신선도는 지금 − 화면에 보이는 마지막 `_pulse` 칸의 시작 시각(칸 안에서 가장 이른 사건을 기준으로 잡는 보수적인 값)이다. 누적 길의 신선도는 지금 − `rt.cumulative`의 `_pulse` 값(받은 심장 박동의 가장 늦은 발행 시각)이다. 이 값을 `rt_freshness_seconds{path}`로 내고, 둘 중 큰 값을 콘솔 판매 중 탭의 머리에 보여 준다(design/d5 §7.2). 1분 창의 p95(잰 값 백 개 중 아흔다섯 개가 이 값 이하라는 뜻)가 NFR-009 판정값(5초 미만)이다.
 - **심장 박동 수**: 1초 칸의 `_pulse` 값(받은 수)이 그 토픽의 파티션 수보다 작으면, 어떤 파티션의 사건이 늦거나 빠지고 있다는 뜻이다. 이 값은 엔지니어 화면에 보인다.
 - **누락률**: (`numLateRecordsDropped` + 싱크 `numOfDroppedRecords` + 거절 수 + 텔레메트리 생산자가 버린 수(ADR-0026)) ÷ 전체로 구한다. 0.1% 미만이 목표다.
-- **Degraded 전환**: 신선도 p95가 5초를 넘는 상태가 3분 넘게 이어지면 콘솔의 실시간 표 패널을 Prometheus 대체 표시로 바꾼다. 신선도 p99(잰 값 백 개 중 아흔아홉 개가 이 값 이하라는 뜻)는 60초까지 허용한다(observability §10). 신선도 p95가 5초 미만인 상태가 5분 [가정] 이어지면 실시간 표로 자동으로 되돌린다(추천 적용 2026-10-21, ADR-0078 결정 2). 체크포인트 지연과 역압은 원인을 살피는 패널로 둔다.
+- **Degraded 전환**: 신선도 p95가 5초를 넘는 상태가 3분 넘게 이어지면 콘솔의 실시간 표 패널을 Prometheus 대체 표시로 바꾼다. 신선도 p99(잰 값 백 개 중 아흔아홉 개가 이 값 이하라는 뜻)는 60초까지 허용한다(observability §10). 신선도 p95가 5초 미만인 상태가 5분 [가정] 이어지면 실시간 표로 자동으로 되돌린다(추천 적용 2026-10-21, ADR-0078 결정 2). 체크포인트 지연과 백프레셔는 원인을 살피는 패널로 둔다.
 
 | 구간 | 예산 | 근거 |
 | --- | --- | --- |
@@ -388,18 +392,18 @@ ClickHouse 공식 커넥터의 `ClickHouseAsyncSink`(요소 변환기는 `POJOCo
 - **판정 피처(동기)**: 사전 검증 요청 때 세션·캐시 Redis에 회차별 기기 공유 수 `tr:{event:E}:devshare:{deviceRef}`(HyperLogLog, 10분)와 호스팅·프록시 대역 진입 수 `tr:{event:E}:asnhost:{asn}:{10초 칸}`(카운터, 만료 30초)를 쓰고 읽는다 [가정]. 통신사 대역은 세지 않는다(사람 대부분이 몇몇 통신사 대역에 몰려 있어서 신호가 약하고, 한 키에 요청이 몰린다).
 - **재평가 모드**: 명령 5(봇 판정 강도) 프로필에 있는 값이다. 값은 끔·그림자·적용이고, 기본값은 그림자다.
   - 그림자: `TrustVerdict`(source `REASSESS`, action `NONE`, `shadow` true)만 낸다.
-  - 적용: 아직 기다리는 사람이면 queue-svc의 `IsolateWaiting`(서비스끼리 함수를 부르듯 호출하는 gRPC 방식, 메시 mTLS, 후보 `eventKey`로 멱등)을 부른다. queue-svc는 1인 1순번 키로 그 사람의 대기표(로비 참가자는 참가를 증명하는 서명된 문자열인 참가 토큰)를 찾아, 빠진 번호와 `VERIFYING`을 쓴다(queue-admission §7 격리 기록, ADR-0062). 응답은 격리함·대기 중 아님·이미 격리됨이다. 이미 입장한 사람은 라벨만 남긴다.
+  - 적용: 아직 기다리는 사람이면 queue-svc의 `IsolateWaiting`(서비스끼리 함수를 부르듯 호출하는 gRPC 방식, 메시 mTLS, 후보 `eventKey`로 멱등)을 부른다. queue-svc는 1인 1순번 중복 확인 키로 그 사람의 대기표(로비 참가자는 참가를 증명하는 서명된 문자열인 참가 토큰)를 찾아, 빠진 번호와 `VERIFYING`을 쓴다(queue-admission §7 격리 기록, ADR-0062). 응답은 격리함·대기 중 아님·이미 격리됨이다. 이미 입장한 사람은 라벨만 남긴다.
 - **후보 중복**: trust-svc는 처리한 후보 `eventKey`를 10분 [가정] 동안 기억해서, 같은 후보를 두 번 처리하지 않는다.
 - **격리 상한**: 재평가로 건 격리는 회차의 지금 대기 인원의 0.5% [가정]를 10분 안에 넘지 않는다. 넘는 몫은 그림자로만 남기고 SEV3를 띄운다. 잘못된 패턴이나 숫자 때문에 사람을 한꺼번에 격리하는 사고를 막기 위해서다.
 - 격리는 차단이 아니다. 추가 검증(사람 확인과 본인확인 재통과), 이의 제기, 자동화된 결정의 설명 요구(개인정보 보호법 §37의2, POL-006)는 그대로다.
 
 ### 5.6 그림자에서 적용으로
 
-ADR-0039 평가 절차의 그림자 실행 단계를 거친다. 그림자 기간에 낸 후보를 표본 검토(R2)와 사후 라벨로 대조해, 사람 오탐(사람을 봇으로 잘못 잡는 것)이 상한(NFR-022, 0.5%)을 넘지 않는지 확인한다. 그 뒤 commander가 명령 5로 바꾼다. 넘으면 그 패턴은 적용하지 않고 숫자를 고치거나 뺀다.
+ADR-0039 평가 절차의 그림자 실행 단계를 거친다. 그림자 기간에 낸 후보를 마감 단계 R2(오픈 7일 뒤)의 표본 검토와 사후 라벨로 대조해, 사람 오탐(사람을 봇으로 잘못 잡는 것)이 상한(NFR-022, 0.5%)을 넘지 않는지 확인한다. 그 뒤 commander가 명령 5로 재평가 모드를 그림자에서 적용으로 바꾼다. 넘으면 그 패턴은 적용하지 않고, 패턴의 기준 숫자를 고치거나 패턴을 뺀다.
 
 ### 5.7 세션 창과 CEP를 쓰지 않는 이유
 
-- 세션 창은 활동이 멈춘 뒤에야 결과를 내므로 동기 판정에 쓸 수 없다. 쉬지 않는 봇이라면 창이 닫히지도 않는다. 세션 단위의 사후 분석은 확정 길(dbt, R2 표본 검토·사후 라벨)이 맡는다.
+- 세션 창은 활동이 멈춘 뒤에야 결과를 내므로 동기 판정에 쓸 수 없다. 쉬지 않는 봇이라면 창이 닫히지도 않는다. 세션 단위의 사후 분석은 확정 길(dbt, 마감 단계 R2의 표본 검토·사후 라벨)이 맡는다.
 - CEP에는 순서가 있는 사건 기록이 필요하다. 브라우저는 원시 좌표·입력 시각의 순서를 보내지 않고 요약값만 보낸다(ADR-0065 결정 9, 개인정보 판단). 순서가 있는 서버 사건(홀드 시도 간격 등)으로 CEP를 쓰려면 계약을 따로 정한다.
 
 ### 5.8 연산자와 상태
@@ -490,9 +494,9 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 
 | 확인할 동작 | 사건·필드 | SLI | 대시보드 패널 | 경보(종류·심각도) | 배포 뒤 확인 방법 |
 | --- | --- | --- | --- | --- | --- |
-| 관제 실시간 표가 5초 안에 반영 | `_pulse` 행, `rt_freshness_seconds{path}` | 신선도 p95 ≤ 5초(NFR-009) | SCR-029 판매 중 탭 머리 신선도(design/d5 §7.2), 엔지니어 화면 '실시간 표' | 3분 넘게 5초 초과 → Degraded 전환과 SEV3(`kind` hygiene) | 카나리 동안 신선도 p95 비교 |
+| 관제 실시간 표가 5초 안에 반영 | `_pulse` 행, `rt_freshness_seconds{path}` | 신선도 1분 p95 5초 미만(NFR-009) | SCR-029 판매 중 탭 머리 신선도(design/d5 §7.2), 엔지니어 화면 '실시간 표' | 3분 넘게 5초 초과 → Degraded 전환과 SEV3(`kind` hygiene) | 카나리 동안 신선도 p95 비교 |
 | 사건을 빠뜨리지 않음 | `numLateRecordsDropped`, `numOfDroppedRecords`, `rt_rejected_total`, 생산자 버림 수 | 누락률 < 0.1% | 같은 화면 '누락' | 10분 누락률 0.1% 초과 SEV3, 싱크 버림 > 0 SEV3 | 배포 전후 누락률 |
-| 거래 사건이 끊기지 않음 | 거래 소스 `sourceIdleTime`, CDC 지연 | — | 'Flink 잡' 화면 | 온세일 창 안에서 60초 [가정] 넘게 거래 사건이 없으면 SEV3 | 배포 직후 거래 소스 처리량 |
+| 거래 사건이 끊기지 않음 | 거래 소스 `sourceIdleTime`, CDC 지연 | — | 'Flink 잡' 화면 | 온세일 윈도우 안에서 60초 [가정] 넘게 거래 사건이 없으면 SEV3 | 배포 직후 거래 소스 처리량 |
 | 잡이 멈추거나 되풀이 실패하지 않음 | `numRestarts`, Operator 상태 | — | 'Flink 잡' 화면 | 10분 안 재시작 3회 [가정] SEV3 | Operator 상태 `STABLE` |
 | 체크포인트가 이어짐 | `lastCheckpointDuration`, `numberOfFailedCheckpoints` | — | 잡별 체크포인트 | 연속 실패 3회 [가정] SEV3 | 업그레이드 뒤 첫 체크포인트 성공 |
 | 소비가 밀리지 않음 | `pendingRecords` | — | 'Flink 잡' 화면 | 10분 동안 계속 늘면 SEV3 | 배포 전후 비교 |
@@ -550,7 +554,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 | 텔레메트리 MSK 장애 | 텔레메트리 소스가 멈추고 심장 박동도 끊긴다. 거래 누적은 이어진다 | 신선도가 나빠지고 3분 뒤 Degraded 전환, SEV3 | Kafka가 돌아오면 커밋 위치에서 이어 읽는다 |
 | 거래·제어 MSK 장애 | 판매 누적이 멈춘다. 심장 박동은 텔레메트리 쪽으로 지나므로 신선도는 정상으로 보인다 | 거래 소스 `sourceIdleTime` 경보(SEV3), CDC 지연 | 위와 같다. 그동안 판매 숫자 옆에 '거래 사건 끊김'을 보여 준다 |
 | Schema Registry 장애 | 캐시한 스키마 ID는 계속 읽는다. 새 스키마 ID는 거절로 간다 | 거절 수 경보(SEV3) | 레지스트리가 회복되면 거절 구간을 다시 적재한다(RB-34) |
-| ClickHouse 장애 | 싱크가 3회 재시도한 뒤 묶음을 버리거나, 역압이 쌓인다 | 버림 수 SEV3, 신선도 악화와 Degraded | 누적은 다음 초에 맞는다. 칸은 누락으로 남는다. 원본 적재는 커버리지 대조로 다시 적재한다 |
+| ClickHouse 장애 | 싱크가 3회 재시도한 뒤 묶음을 버리거나, 백프레셔가 쌓인다 | 버림 수 SEV3, 신선도 악화와 Degraded | 누적은 다음 초에 맞는다. 칸은 누락으로 남는다. 원본 적재는 커버리지 대조로 다시 적재한다 |
 | S3 장애 | 체크포인트가 실패한다. 3회까지는 처리를 이어 간다 | 체크포인트 실패 SEV3 | 4회째에 잡이 실패한다. S3가 돌아오면 마지막 체크포인트로 복원한다 |
 | KMS 장애(원본 적재) | 가명 키를 못 얻어 잡이 실패하고 재시도한다(원문은 쓰지 않는다) | 소비 밀림 경보 | KMS가 회복되면 이어 간다 |
 | JobManager 장애 | `ops-rt`는 대기 JobManager가 이어받고, 나머지는 쿠버네티스가 다시 띄운다 | 신선도 잠깐 악화 | HA 메타데이터로 마지막 체크포인트에서 복원한다 |
@@ -561,7 +565,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 
 ## 13. 이미지·배포·시험 도구
 
-- **저장소**: peaket-data에 `flink/common`(소스·싱크 만들기, Kafka·레지스트리·ClickHouse 설정, 가명 처리, 지표), `flink/ops-rt`, `flink/analytics-ingest`를 둔다. peaket-trust의 `flink/trust-reassess`는 `flink/common`을 GitHub Packages(Maven)에서 버전을 지정해 받는다. 빌드는 Gradle과 Java 17로 한다 [추천 적용].
+- **저장소**: peaket-data에 `flink/common`(소스·싱크 만들기, Kafka·레지스트리·ClickHouse 설정, 가명 처리, 지표), `flink/ops-rt`, `flink/analytics-ingest`를 둔다. peaket-trust의 `flink/trust-reassess`는 `flink/common`을 GitHub Packages(Maven)에서 버전을 지정해 받는다. 빌드는 Gradle과 Java 17로 한다 (추천 적용 2026-10-20).
 - **이미지**: 공식 Flink 2.2 Java 17 이미지(다이제스트 고정)에 잡 JAR(`/opt/flink/usrlib/<잡>.jar`, 커넥터와 MSK IAM 라이브러리 포함)과 S3 Presto 플러그인(`/opt/flink/plugins/`)을 넣는다. 공용 빌드 워크플로가 SBOM(소프트웨어에 들어간 부품 목록)·서명·출처 증명(어느 커밋에서 어떤 빌드 절차로 만들었는지 서명해 남긴 기록)을 붙인다(devops §4). 클러스터 입장 정책이 그 서명을 확인한다.
 - **차트**: `peaket-gitops/charts/peaket-flink-job/`이 FlinkDeployment, 서비스 계정, 네트워크 정책, ExternalSecret, PodMonitor를 만든다. 환경 값은 `envs/<환경>/<잡>.yaml`(이미지 다이제스트, 병렬도, 자원)이고, AppProject는 `data`·`trust`다(devops §5.2).
 - **배포 흐름**: 잡 저장소 PR(코드 변경을 합쳐 달라는 요청) → CI(코드를 올릴 때마다 자동으로 하는 검사·빌드. 단위·통합·세이브포인트 호환 시험) → 이미지 다이제스트 갱신 PR → ArgoCD 동기화(동결 창에는 막힌다) → Operator 세이브포인트 업그레이드 → 확인(Operator `STABLE`, 첫 체크포인트, 신선도, 누락률).
@@ -574,7 +578,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 
 ## 14. 대시보드·경보·런북
 
-- **대시보드 'Flink 잡'**(지표와 로그를 그래프로 보여 주는 도구 Grafana, 잡마다): 상태와 가동 시간(`runningTime`), 재시작 수(`numRestarts`), 소비 대기(`pendingRecords`), 소스 쉼(`sourceIdleTime`), 워터마크 지연(`watermarkLag`), 바쁨·역압(`busyTimeMsPerSecond`·`backPressuredTimeMsPerSecond`), 체크포인트(`lastCheckpointDuration`·`lastCheckpointSize`·`numberOfFailedCheckpoints`), 늦어서 버린 수(`numLateRecordsDropped`), 거절 수, 싱크(`numOfDroppedRecords`·`totalBatchRetries`·`writeLatencyHistogram`·`actualRecordsPerBatch`), 신선도(`rt_freshness_seconds{path}`), 심장 박동 수, 재평가(후보·격리·상한).
+- **대시보드 'Flink 잡'**(지표와 로그를 그래프로 보여 주는 도구 Grafana, 잡마다): 상태와 가동 시간(`runningTime`), 재시작 수(`numRestarts`), 소비 대기(`pendingRecords`), 소스 쉼(`sourceIdleTime`), 워터마크 지연(`watermarkLag`), 바쁨·백프레셔(`busyTimeMsPerSecond`·`backPressuredTimeMsPerSecond`), 체크포인트(`lastCheckpointDuration`·`lastCheckpointSize`·`numberOfFailedCheckpoints`), 늦어서 버린 수(`numLateRecordsDropped`), 거절 수, 싱크(`numOfDroppedRecords`·`totalBatchRetries`·`writeLatencyHistogram`·`actualRecordsPerBatch`), 신선도(`rt_freshness_seconds{path}`), 심장 박동 수, 재평가(후보·격리·상한).
 - **경보**: §9 표의 경보를 observability §5의 'Flink 잡 신호'로 둔다. 모두 SEV3(`kind` hygiene, 재평가 상한만 control)이다. 운영 명령이 아니라 엔지니어 호출과 런북으로 이어진다. 관제 실시간 표가 낡으면 Degraded 전환은 자동으로 일어난다.
 - **런북**: RB-34 'Flink 잡 복구'(infra §10): ① Operator 상태와 쿠버네티스 이벤트로 멈춤·되풀이 실패·업그레이드 실패를 가른다 ② 의존성 장애면 회복을 기다리고(표 §12), 코드 문제면 이전 이미지로 되돌린다 ③ 세이브포인트가 맞지 않으면 커밋된 오프셋에서 다시 시작하고, `ops-rt`는 시작값(§4.7)을 만든다 ④ 원본 적재의 빈 구간과 거절 구간을 Kafka 보관 기간 안에 다시 적재한다 ⑤ 마감 리포트의 실시간 대비 대조와 커버리지를 확인한다.
 
@@ -591,7 +595,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 
 ## 16. 참고 자료(2026-10-20 확인)
 
-- Apache Flink 2.2 문서: [Windows](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/datastream/operators/windows/)(허용 지연 기본 0, 슬라이딩 겹침, 세션 창), [Generating Watermarks](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/datastream/event-time/generating_watermarks/)(빈 입력과 `withIdleness`), [Process Function](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/datastream/operators/process_function/)(타이머는 키·시각마다 하나), [Working with State](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/datastream/fault-tolerance/state/)(수명은 처리 시각만, 원소마다 수명, RocksDB 압축 때 정리, 값마다 8바이트), [Kafka 커넥터](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/connectors/datastream/kafka/)(시작 위치, 파티션 발견 기본 5분, 체크포인트 때 오프셋 커밋, 소스 지표, 싱크 전달 보장 기본 `NONE`), [Performance Tuning](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/table/tuning/)(MiniBatch·Local-Global), [Configuration](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/deployment/config/)(체크포인트·상태·재시작 키와 기본값, `web.*`, `slotmanager.redundant-taskmanager-num`), [Metrics](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/ops/metrics/)(`numLateRecordsDropped`, `numRestarts`, 역압·체크포인트 지표), [Metric Reporters](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/deployment/metric_reporters/)(Prometheus 리포터, 기본 포트 9249), [Kubernetes HA](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/deployment/ha/kubernetes_ha/), [Amazon S3](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/deployment/filesystems/s3/)(체크포인트에 Presto 구현 권장), [Checkpoints](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/ops/state/checkpoints/)(`shared/` 폴더), [Large State Tuning](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/ops/state/large_state_tuning/)(증분 체크포인트), [Confluent Avro 형식](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/connectors/table/formats/avro-confluent/)(`flink-avro-confluent-registry` 2.2.1), Flink 소스 저장소 release-2.2의 `ConfluentRegistryAvroDeserializationSchema`(`forSpecific`·`forGeneric`)
+- Apache Flink 2.2 문서: [Windows](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/datastream/operators/windows/)(허용 지연 기본 0, 슬라이딩 겹침, 세션 창), [Generating Watermarks](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/datastream/event-time/generating_watermarks/)(빈 입력과 `withIdleness`), [Process Function](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/datastream/operators/process_function/)(타이머는 키·시각마다 하나), [Working with State](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/datastream/fault-tolerance/state/)(수명은 처리 시각만, 원소마다 수명, RocksDB 압축 때 정리, 값마다 8바이트), [Kafka 커넥터](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/connectors/datastream/kafka/)(시작 위치, 파티션 발견 기본 5분, 체크포인트 때 오프셋 커밋, 소스 지표, 싱크 전달 보장 기본 `NONE`), [Performance Tuning](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/table/tuning/)(MiniBatch·Local-Global), [Configuration](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/deployment/config/)(체크포인트·상태·재시작 키와 기본값, `web.*`, `slotmanager.redundant-taskmanager-num`), [Metrics](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/ops/metrics/)(`numLateRecordsDropped`, `numRestarts`, 백프레셔·체크포인트 지표), [Metric Reporters](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/deployment/metric_reporters/)(Prometheus 리포터, 기본 포트 9249), [Kubernetes HA](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/deployment/ha/kubernetes_ha/), [Amazon S3](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/deployment/filesystems/s3/)(체크포인트에 Presto 구현 권장), [Checkpoints](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/ops/state/checkpoints/)(`shared/` 폴더), [Large State Tuning](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/ops/state/large_state_tuning/)(증분 체크포인트), [Confluent Avro 형식](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/connectors/table/formats/avro-confluent/)(`flink-avro-confluent-registry` 2.2.1), Flink 소스 저장소 release-2.2의 `ConfluentRegistryAvroDeserializationSchema`(`forSpecific`·`forGeneric`)
 - Flink Kubernetes Operator 1.16: [Job Management](https://nightlies.apache.org/flink/flink-kubernetes-operator-docs-release-1.16/docs/custom-resource/job-management/)(업그레이드 모드, 자동 확장 반영, Blue/Green), [Reference](https://nightlies.apache.org/flink/flink-kubernetes-operator-docs-release-1.16/docs/custom-resource/reference/)(`flinkVersion` v2_2, `replicas`는 HA일 때만 1보다 큼, `allowNonRestoredState`), [Pod Template](https://nightlies.apache.org/flink/flink-kubernetes-operator-docs-release-1.16/docs/custom-resource/pod-template/)(`flink-main-container`, `resources`), [Configuration](https://nightlies.apache.org/flink/flink-kubernetes-operator-docs-release-1.16/docs/operations/configuration/)(마지막 체크포인트 대체 기본 켜짐, 세이브포인트 기록 1일·10개, `job.autoscaler.enabled` 기본 꺼짐). 영어 주소가 중국어 경로로 넘어가지만 내용은 영어다. [Flink 내려받기](https://flink.apache.org/downloads/)(버전과 커넥터 호환)
 - ClickHouse 문서: [Flink 커넥터](https://clickhouse.com/docs/integrations/apache-flink)(DataStream만, 버전 호환, 적어도 한 번, `ClickHouseAsyncSink` 설정, 기본 재시도 3회, 서버 설정 전달, 기본 RowBinary, 버림 지표), [Asynchronous inserts](https://clickhouse.com/docs/optimize/asynchronous-inserts)(쓰기 조건, 적응형 시간, `wait_for_async_insert`, 26.2부터 중복 제거), [ReplacingMergeTree](https://clickhouse.com/docs/engines/table-engines/mergetree-family/replacingmergetree)(병합 때만 중복 제거), [Deduplicating inserts on retries](https://clickhouse.com/docs/guides/developer/deduplicating-inserts-on-retries)
 - AWS 문서: [Configure clients for IAM access control](https://docs.aws.amazon.com/msk/latest/developerguide/configure-clients-for-iam-access-control.html)(Java 클라이언트 `AWS_MSK_IAM` 설정)

@@ -195,7 +195,7 @@ sequenceDiagram
 * [POL-024, POL-025](../planning/03-policies-glossary.md): 개정 공연법 부정구매 방지 및 불법 게시물 24시간 차단 절차
 * [POL-044](../planning/03-policies-glossary.md), [FR-069·FR-070](../planning/02-requirements.md), [ADR-0066](../docs/adr/0066-screen-feedback-12-items.md): 후기 신고·권리 침해 삭제 요청·임시조치, 고객 문의와 문의 기록 보관
 * [POL-023](../planning/03-policies-glossary.md): 개인정보 수집·이용·제공·파기 총괄 운영 정책표
-* [POL-026](../planning/03-policies-glossary.md): 시험 윤리 규칙(자체 환경 한정, 합성 데이터, 봇 평가 사람 세션은 동의·가명·30일 삭제)
+* [POL-026](../planning/03-policies-glossary.md): 테스트·윤리 규칙(자체 환경 한정, 합성 데이터, 봇 평가 사람 세션은 동의·가명·30일 삭제)
 * [docs/data.md §6](../docs/data.md): 개인정보 데이터 보관 주기 및 필드별 암호화 방식
 * [docs/security/data-classification.md](../docs/security/data-classification.md): 개인정보 항목별 보안 등급 분류 및 법률 원문 대조표(번호별 항목 전체)
 * [POL-027](../planning/03-policies-glossary.md): 법률 메타데이터 5단계 표기 규칙([확인됨]·[해석]·[간주] 등) 및 관리 현황

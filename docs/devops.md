@@ -1,6 +1,6 @@
 # DevOps 상세 설계: 저장소·CI·공급망·승격·배포·변경 관리
 
-- **독자와 용도**: 플랫폼 엔지니어와 각 서비스 담당이 코드가 저장소에서 운영 환경까지 가는 길(저장소, 코드를 올릴 때마다 자동으로 검사하고 빌드하는 CI, 공급망 증명, 환경 승격, 워크로드별 배포와 되돌리기, 데이터 변경, 변경 동결과 정비 시간, 인프라 코드, 사람의 운영 접근, 비용 가드레일, 전달 지표)을 구현하고 운영할 때 읽는 기준 문서다. 배포 구성도·환경 정의·가용성(서비스를 멈춤 없이 쓸 수 있는 정도)·백업은 [infra.md](infra.md), SLO(팀이 정한 서비스 품질 목표)·경보·Game Day(일부러 장애를 내고 대응을 연습하는 날)는 [observability.md](observability.md), 운영 명령은 [features/control-tower.md](features/control-tower.md), 비밀과 키 목록은 [security/secrets-and-keys.md](security/secrets-and-keys.md)가 정본이다. 보안 요구사항 추적은 [security/asvs/delivery.md](security/asvs/delivery.md)다.
+- **독자와 용도**: 플랫폼 엔지니어와 각 서비스 담당이 코드가 저장소에서 운영 환경까지 가는 길(저장소, 코드를 올릴 때마다 자동으로 검사하고 빌드하는 CI, 공급망 증명, 환경 승격, 워크로드별 배포와 되돌리기, 데이터 변경, 변경 동결과 정비 시간, 인프라 코드, 사람의 운영 접근, 비용 상한 장치, 전달 지표)을 구현하고 운영할 때 읽는 기준 문서다. 배포 구성도·환경 정의·가용성(서비스를 멈춤 없이 쓸 수 있는 정도)·백업은 [infra.md](infra.md), SLO(팀이 정한 서비스 품질 목표)·경보·Game Day(일부러 장애를 내고 대응을 연습하는 날)는 [observability.md](observability.md), 운영 명령은 [features/control-tower.md](features/control-tower.md), 비밀과 키 목록은 [security/secrets-and-keys.md](security/secrets-and-keys.md)가 정본이다. 보안 요구사항 추적은 [security/asvs/delivery.md](security/asvs/delivery.md)다.
 - **원문 출처**: 설계서 15장(저장소 구조), 19장(Kubernetes, 저장소에 적어 둔 배포 상태대로 클러스터를 맞추는 GitOps, 부하에 따라 서버 수를 자동으로 늘리고 줄이는 오토스케일), 23장(AWS DevOps 운영), §9의 배포 동결(docs/infra.md §5의 6). 원문에는 절차가 없어 이 문서의 규칙은 대부분 [보완]이다. 결정 기록은 [ADR-0054](adr/0054-delivery-pipeline-change-freeze-and-safe-deploys.md)이고, 가지 규칙은 [ADR-0074](adr/0074-git-flow-branching-release-and-hotfix.md)다.
 - **기준 기획 버전**: v1.0.
 - **표시 규칙**: 2026-10-13 DevOps 검토(소유자 요청 '상세설계까지')에서 정한 규칙은 추천 적용(2026-10-13)이다. 측정으로 정할 값만 [가정, Phase N …에서 확정]으로 적는다. 외부 제품·표준 사실은 2026-10-13에 원문으로 확인했고, 출처는 §16에 있다. 가지 규칙(§2.2)의 git flow는 소유자 결정(2026-10-20, ADR-0074)이고, 이 프로젝트에 맞춘 세부 규칙은 추천 적용(2026-10-20)이다. git flow 원문과 GitHub 규칙 세트 등은 2026-10-20에 확인했다(§16). 늘 켜 두는 데모 환경은 두지 않는다(질문 24 결론, ADR-0057).
@@ -20,10 +20,10 @@
 | 변경 동결 창·정비 시간·긴급 변경 | §8 | POL-028, POL-041 |
 | 인프라 코드·플랫폼 수명주기 | §9 | infra §1·§9 |
 | 사람의 운영 접근과 감사 | §10 | NFR-017, secrets-and-keys |
-| 비용 가드레일 | §11 | infra §11, 성능 장부 |
+| 비용 상한 장치 | §11 | infra §11, 성능 장부 |
 | 변경 위험·운영 준비·런북·Game Day | §12 | infra §10, observability §12 |
 | 전달 지표(DORA 5종) | §13 | NFR-023, observability §14 |
-| 시험 포인트 D-T1~D-T26 | §14 | — |
+| 시험 포인트 D-T1~D-T28 | §14 | — |
 | 알려진 한계 | §15 | planning/01 §5.2 |
 
 ### 1.2 원칙
@@ -246,7 +246,7 @@ flowchart LR
 
 ### 4.3 배포 때 검증(Kyverno)
 
-- **이미지 입장 정책**: Kyverno의 CEL 기반 `ImageValidatingPolicy`로 다음을 확인한다: ① 서명 신원과 발급자가 §4.2와 같은가, ② SLSA 출처 증명의 소스 저장소가 PEAKET 조직이고 빌드 워크플로가 `build-image.yml`인가, ③ 이미지를 다이제스트로 참조하는가. 기존 `ClusterPolicy`의 `verifyImages`는 Kyverno v1.19에서 폐기 예정이고 v1.20에서 제거 예정이라 쓰지 않는다(2026-10-13 확인).
+- **이미지 입장 정책**: Kyverno의 CEL 기반 `ImageValidatingPolicy`로 다음을 확인한다: ① 서명 신원과 발급자가 §4.2와 같은가, ② SLSA 출처 증명의 소스 저장소가 PEAKET 조직이고 빌드 워크플로가 `build-image.yml`인가, ③ 이미지를 다이제스트로 참조하는가. 기존 `ClusterPolicy`·`Policy` 형식은 `verifyImages` 규칙을 포함해 통째로 Kyverno v1.19에서 폐기 예정이고 v1.20에서 제거 예정이라 쓰지 않는다(2026-10-13 확인, 2026-10-22 다시 확인).
 - **적용 단계**: 데모는 감사 모드로 위반을 기록하고, 스테이징·운영은 강제 모드로 기동을 거부한다.
 - **그 밖의 정책(CEL `ValidatingPolicy`)**: 자원 requests·limits 필수, 핫패스 네임스페이스를 Spot 노드(파드를 돌리는 서버 가운데 싸지만 회수될 수 있는 클라우드 서버)에 두는 것 금지(infra §7), Pod Security Standards Restricted(시스템 네임스페이스 제외), `latest` 태그 금지, hostPath 금지.
 - **메시 필수 정책(추천 적용 2026-10-22, ADR-0082)**: 운영 오버레이에는 ① 서비스 네임스페이스의 앰비언트 등록 라벨 `istio.io/dataplane-mode: ambient`와 ② 메시 전체 STRICT PeerAuthentication이 있어야 한다. ③ gRPC(서비스끼리 함수를 부르듯 빠르게 호출하는 통신 방식) 부하 분산 프로필 `headless-round-robin`(docs/api/guidelines.md §5)은 쓸 수 없다. gitops-check의 정책 시험이 최종 형태로 만든 운영 오버레이에 이 정책을 걸고, 어기면 PR이 막힌다(D-T28). 로컬·CI·데모 오버레이는 메시 없이 돌므로 이 정책을 걸지 않고, 호출자 제한은 NetworkPolicy로 둔다.
@@ -438,7 +438,7 @@ flowchart LR
 - **`deploymentId`**: 출시 후보를 빌드한 커밋 SHA를 쓴다. Next.js는 버전 차이를 알아채면 전체 새로고침을 하므로 화면 상태가 사라질 수 있다. 또 `?dpl=` 값으로 라우팅하지는 않는다(2026-10-13 확인). 대기실과 구매 경로는 정적 셸을 쓰고 게이트웨이로 바로 가므로 Next.js 서버를 거치지 않는다. 소비자 웹 앱 서버는 핫패스 묶음이라 온세일 동결 창에는 배포하지 않는다. 평시 탐색 화면에서는 카나리 중에 새로고침이 생길 수 있다(§15).
 - **여러 파드의 캐시**: ISR(미리 그려 두고 정해진 주기로 다시 그리는 방식)·데이터 캐시는 파드마다 따로 있다. 그래서 공유 저장소(세션·캐시 Redis)를 쓰는 `cacheHandler`와 `'use cache'`용 `cacheHandlers`를 두고, 메모리 캐시 크기는 0으로 둔다. `revalidateTag()`는 부른 파드의 캐시만 무효화한다. 처리기가 `refreshTags()`로 공유 저장소의 태그 상태를 읽어야 다른 파드에도 닿는다. 모든 파드는 같은 빌드와 같은 `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`(Secrets Manager)를 쓴다(Next.js 자체 호스팅 문서).
 - **관제 콘솔 MF 원격**: 원격은 저마다 관제 콘솔 호스트와 같은 출처의 `/remotes/<원격>/<SHA>/remoteEntry.js`에 올린다. 그래서 CSP(페이지가 실행할 수 있는 스크립트의 출처를 정하는 브라우저 규칙)의 `script-src 'self'` 안에 든다(`console.peaket.example`, 추천 적용 2026-10-15, ADR-0065 결정 1). 호스트는 GitOps 설정의 버전 목록(`remotes.json`)을 읽는다. 되돌리기는 이 목록을 되돌리는 것이다. 공유 의존성(화면 라이브러리인 React)은 싱글턴과 버전 범위를 E2E로 검사한다. 원격은 소유 서비스 저장소(peaket-queue·peaket-purchase)가 공용 재사용 워크플로로 빌드해 관제 콘솔 버킷에 올린다. `remotes.json`에는 `integrity`(sha384)와 계약 주판(`contractMajor`)을 함께 적는다. 호스트는 무결성과 계약 판을 확인하고, 실패하면 그 칸만 대체 카드로 바꾼다. 원격 위젯은 규모와 상관없이 온세일 윈도우(T-10분~T+60분) 동안 바꾸지 않는다 [가정](추천 적용 2026-10-21, ADR-0079 결정 16·26, docs/frontend.md §4.5).
-- **포렌식 리플레이 2단계 페이지(console, 출시 뒤 선택)**: `apps/forensics`를 운영 모드로 빌드해 console 배포 S3 `/forensics/`에 올린다. 콘솔의 'index.html로' 되돌리기에서 `/forensics*`를 빼고, 그 캐시 동작의 응답 헤더 정책이 COEP `require-corp`를 더한다. 되돌리기는 관제 호스트와 같다(추천 적용 2026-10-21, ADR-0080 상태 줄, docs/features/forensic-replay.md §6.8).
+- **포렌식 리플레이 2단계 페이지(console, 출시 뒤 선택)**: `apps/forensics`를 운영 모드로 빌드해 console 배포 S3 `/forensics/`에 올린다. 콘솔이 모든 경로를 'index.html'로 보내는 규칙에서 `/forensics*`를 빼고, 그 캐시 동작의 응답 헤더 정책이 COEP `require-corp`를 더한다. 되돌리기는 관제 호스트와 같다(추천 적용 2026-10-21, ADR-0080 상태 줄, docs/features/forensic-replay.md §6.8).
 - **지갑 PWA(web)**: 새 서비스 워커는 대기 상태로 둔다. 대기실·좌석·결제·티켓 화면에 있는 동안에는 활성화하지 않고, 다음 방문 때 적용한다. 오프라인 티켓 표시는 옛 워커로도 동작해야 한다. 서비스 워커 범위는 `/my/tickets/`만이라 대기실·좌석·결제 화면을 가로채지 않는다(추천 적용 2026-10-21, ADR-0079 결정 18).
 - **대기실 경량 페이지(web)**: `apps/web/queue-room`은 Next.js와 따로 빌드해 www 배포 S3 `/_q/`에 올린다. CloudFront(AWS의 CDN) Function이 대기실 경로를 로케일 셸로 바꿔 읽는다. 배포 때는 셸만 무효화하고, 해시 이름 자산은 위 보존 규칙을 따른다(추천 적용 2026-10-21, ADR-0079 결정 2).
 - **스캐너 PWA**: 새 버전은 근무 준비(docs/features/offline-gate.md §6.2) 때만 적용하고, 입장 시간에는 미룬다. gw-scanner는 최소 지원 버전을 알리지만, 입장 시간 중에는 옛 버전을 거부하지 않는다. 스캐너 API는 최근 2개 앱 버전과 호환되게 하고, 호환을 깨는 변경은 API 폐기 절차(api/guidelines.md §1)를 따른다.
@@ -474,13 +474,17 @@ flowchart LR
 - **잠금 대기 제한**: 문장마다 `SET lock_timeout = '3s'`와 `statement_timeout`을 건다 [가정, wbs 0.3.4에서 확정]. 잠금을 얻지 못하면 간격을 지수로 늘리며 5회 다시 시도하고, 그래도 안 되면 잡이 실패한다(RB-24). 잠금 대기열에 선 DDL이 그 뒤에 오는 핫패스 쿼리까지 막는 일을 피하려는 것이다. `lock_timeout`은 잠금 시도마다 따로 적용된다(PostgreSQL 문서).
 - **실행 잠금과 권한**: 실행기는 시작할 때 `pg_advisory_lock`을 잡아 같은 DB에서 두 실행이 겹치지 않게 한다. 마이그레이션 잡은 DDL 역할, 앱은 DML 역할만 쓴다(자격 증명 분리, ASVS 13.2.2).
 - **연결 경로**: 마이그레이션 잡은 PgBouncer를 거치지 않고 클러스터 쓰기 엔드포인트에 직접 붙는다(통신을 암호화하는 TLS, `verify-full`). 세션 단위 advisory 잠금과 세션 `SET`(위의 `lock_timeout`·`statement_timeout`)을 PgBouncer 트랜잭션 풀링이 지원하지 않기 때문이다(PgBouncer 기능 표, 추천 적용 2026-10-22, ADR-0083). 앱 연결은 PgBouncer를 거친다.
-- **파티션 표**: Drizzle 0.45.4에는 파티션(큰 표를 기간 등으로 나눈 부분) 선언이 없다. 그래서 부모 표와 첫 파티션은 `drizzle-kit generate`가 아니라 손으로 쓴 SQL 마이그레이션 파일로 만든다. 다음 파티션을 미리 만드는 일과 보존 기간이 지난 파티션을 지우는 일은 마이그레이션이 아니라 정비 잡이 한다(docs/data.md §2, ADR-0083).
+- **파티션 표**: Drizzle 0.45.4에는 파티션(큰 표를 기간 등으로 나눈 부분) 선언이 없다. 그래서 부모 표와 첫 파티션은 `drizzle-kit generate`가 아니라 손으로 쓴 SQL 마이그레이션 파일로 만든다. 다음 파티션을 미리 만드는 일과 보존 기간이 지난 파티션을 지우는 일은 마이그레이션이 아니라 정비 잡이 한다(docs/data.md §2, ADR-0083). 정비 잡은 새 파티션을 만든 직후와 매일 한 번 부모 표에 `ANALYZE`를 돌리고(자동 청소는 파티션 부모 표의 통계를 모으지 않는다), 자식 파티션을 먼저 지운 뒤 부모 파티션을 지운다(추천 적용 2026-10-22, ADR-0086).
+- **파티션 표의 인덱스(추천 적용 2026-10-22, ADR-0086)**: 부모 표에는 `CREATE INDEX CONCURRENTLY`를 쓸 수 없다(PostgreSQL 18 문서). 그래서 파티션마다 `CREATE INDEX CONCURRENTLY`를 하고, 부모에 `CREATE INDEX … ON ONLY`로 만든 뒤 파티션 인덱스를 `ALTER INDEX … ATTACH PARTITION`으로 붙인다. 부모 인덱스 만들기는 메타데이터만 바꾼다. 이 파일은 `-- peaket:no-transaction` 파일로 쓴다. 다시 만들 때 `REINDEX`는 파티션마다 따로 트랜잭션으로 돌고 트랜잭션 블록 안에서는 쓸 수 없다.
+- **부분 인덱스 조건 바꾸기(추천 적용 2026-10-22, ADR-0086)**: 상태를 더해 부분 유니크 인덱스의 조건이 바뀌면, 새 인덱스를 동시 생성으로 만들고 계획이 새 인덱스를 쓰는지 확인한 뒤 옛 인덱스를 `DROP INDEX CONCURRENTLY`로 지운다. 상태·종류 칸의 `CHECK (… IN (…))`도 같은 마이그레이션에서 `NOT VALID`로 바꾸고 나중에 검증한다(docs/data.md §2).
+- **PgBouncer와 prepared statement(추천 적용 2026-10-22, ADR-0086)**: 트랜잭션 풀링에서 핫패스의 prepared statement(미리 분석해 이름을 붙여 둔 쿼리, ADR-0037 `.prepare()`)를 쓰려면 PgBouncer `max_prepared_statements`가 0이 아니어야 한다(문서 기본 200). 열 구조를 바꾸는 마이그레이션 뒤에는 준비된 문장이 'cached plan must not change result type' 오류를 낼 수 있어, 마이그레이션 잡의 마지막 단계에서 PgBouncer 관리 콘솔에 `RECONNECT`를 보낸다(PgBouncer 문서).
 - **무거운 변경은 정비 시간에**: 큰 표의 인덱스 생성, 제약 검증, 표를 다시 쓸 위험이 있는 변경은 정비 시간(§8.3)에만 한다. 제약은 `NOT VALID`로 먼저 추가하고, 나중에 `VALIDATE CONSTRAINT`(SHARE UPDATE EXCLUSIVE 잠금)로 검증한다. 휘발성이 아닌 기본값을 가진 열 추가는 PostgreSQL 11부터 표를 다시 쓰지 않는다.
 - **공유 클러스터**: identity·ops·core는 한 Aurora(AWS가 운영해 주는 PostgreSQL 호환 데이터베이스) 클러스터 안의 서비스별 논리 DB·역할이라 마이그레이션이 서로를 막지 않는다. 다만 같은 정비 시간에 겹치면 하나씩 돌린다.
 
 ### 7.3 검사
 
-- **Squawk**로 위험 패턴을 막는다: 동시 생성이 아닌 인덱스, 트랜잭션 안의 동시 인덱스, NOT NULL 열 추가, 열 삭제, `NOT VALID` 없는 제약, `lock_timeout` 없는 문장 등.
+- **Squawk**로 위험 패턴을 막는다: 동시 생성이 아닌 인덱스, 트랜잭션 안의 동시 인덱스, NOT NULL 열 추가, 열 삭제, `NOT VALID` 없는 제약, `lock_timeout` 없는 문장 등. 파티션 부모의 `CREATE INDEX … ON ONLY`는 메타데이터만 바꾸므로 예외로 등록한다(추천 적용 2026-10-22, ADR-0086).
+- **실행 계획 검사(추천 적용 2026-10-22, ADR-0086)**: 새 쿼리나 바뀐 쿼리는 docs/data.md §5.1 표에 한 줄을 더하고, PR에 합성 데이터의 `EXPLAIN (ANALYZE, BUFFERS)`와 `EXPLAIN (GENERIC_PLAN)` 결과를 붙인다. 부분 인덱스 조건을 바인드 변수로 쓰면 일반 계획에서 그 인덱스를 쓰지 못하므로 상수로 쓴다(docs/data.md §5.2).
 - **적용 시험**: ① 빈 DB에 전체 적용, ② 직전 운영 스키마(스키마만 덤프)에 새 마이그레이션 적용, ③ N-1 앱의 통합 시험 묶음을 새 스키마에서 실행(호환 확인).
 - **실행 시간**: 합성 데이터 1/100 규모에서 실행 시간을 잰다. 운영 규모로 환산해 1분을 넘으면 정비 시간 지정을 필수로 한다 [가정].
 
@@ -603,7 +607,7 @@ peaket-infra/
 | --- | --- | --- |
 | EKS 버전 | 표준 지원(14개월) 안에 머문다. 새 버전이 나오면 3개월 [가정] 안에 데모 → 스테이징 → 운영 순으로, 마이너 버전을 하나씩 올린다 | 연장 지원은 시간당 0.60달러이고, 연장 지원이 끝나면 AWS가 예고 없이 제어 평면을 올린다(AWS 문서) |
 | 클러스터 애드온 | Renovate PR로 올리고, 데모에 먼저 적용하며, 동결·정비 규칙을 따른다 | — |
-| Kyverno | 처음부터 CEL 정책(`ValidatingPolicy`, `ImageValidatingPolicy`)으로 쓴다 | ClusterPolicy는 v1.19에서 폐기 예정, v1.20에서 제거 예정이다 |
+| Kyverno | 처음부터 CEL 정책(`ValidatingPolicy`, `ImageValidatingPolicy`)으로 쓴다 | ClusterPolicy와 Policy는 v1.19에서 폐기 예정, v1.20에서 제거 예정이다(Kyverno 문서) |
 | 서비스 메시(Istio 앰비언트, ADR-0082) | 마이너 버전을 고정하고, 정비 시간에 스테이징에 먼저 올린다(동결 창에는 하지 않는다). 순서는 제어 평면(istiod, 리비전 카나리) → istio-cni → 노드 프록시(ztunnel)를 노드 단위로(노드를 비우거나 노드 풀을 바꿔 가며) → 웨이포인트다 | ztunnel을 제자리에서 올리면, 리비전을 써도 그 노드의 앰비언트 통신이 잠깐 끊긴다. istio-cni는 리비전 카나리 업그레이드가 없고, 제어 평면을 먼저 올린다. Linkerd는 2.15(2024-02)부터 오픈소스 안정판 아티팩트가 없어 고르지 않았다 |
 | 노드 이미지 | Karpenter drift로 정비 시간에 바꾼다(§8.3) | — |
 | 기본 이미지 | 주 1회 다시 빌드한다(§4.2). 운영에 30일 넘은 이미지가 있으면 SEV3 [가정] | — |
@@ -652,7 +656,7 @@ peaket-infra/
 
 - 보존은 NFR-017(관리자 접속기록 2년, 권한 부여·변경·말소 이력 3년)을 따른다.
 
-## 11. 비용 가드레일
+## 11. 비용 상한 장치
 
 | 장치 | 내용 | 근거 |
 | --- | --- | --- |
