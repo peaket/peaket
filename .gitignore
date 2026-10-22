@@ -1,0 +1,6 @@
+# 파이썬 실행 부산물
+__pycache__/
+*.pyc
+
+# Claude Code의 개인 설정(공유 설정인 .claude/launch.json 등은 기록한다)
+.claude/settings.local.json

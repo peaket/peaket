@@ -1,0 +1,499 @@
+asyncapi: 3.0.0
+info:
+  title: PEAKET Events and Realtime
+  version: 1.0.0-draft
+  description: |
+    독자와 용도: 서비스·프론트엔드 개발자가 Kafka 토픽, Redis Stream 릴레이, WebSocket·SSE·Socket.IO 채널의 계약을 확인할 때 읽는다. Avro 스키마 원본은 peaket-contracts.
+    원문 출처: 설계서 §8 Kafka, §6 입장 흐름·좌석·결제·실시간 좌석 전파·관제, 24장, ADR-0026·0027·0011·0005. 메시지 필드는 [보완].
+    기준 기획 버전: v1.0.
+defaultContentType: application/avro
+servers:
+  kafka-trade:
+    host: kafka-trade.internal:9092
+    protocol: kafka
+    description: 거래·제어 토픽 클러스터(acks=all)
+  kafka-telemetry:
+    host: kafka-telemetry.internal:9092
+    protocol: kafka
+    description: "대량 텔레메트리 클러스터. 거래·제어 클러스터와 물리적으로 다른 클러스터다(MSK 두 클러스터, ADR-0026, docs/infra.md §1)"
+  realtime:
+    host: api.peaket.example
+    protocol: wss
+    description: gw-fan 경유 realtime-gw(좌석 델타 WebSocket)
+  realtime-partner:
+    host: partner-api.peaket.example
+    protocol: https
+    description: gw-partner 경유 파트너 실시간 현황 SSE
+  realtime-ops:
+    host: ops-api.peaket.example
+    protocol: wss
+    description: gw-ops 경유 관제 Socket.IO(허용 IP·VPN)
+channels:
+  trade.orders:
+    address: trade.orders
+    description: 주문 생성·접수·확정·실패(purchase-svc PostgreSQL Outbox). 키 = eventId(공연 단위 순서)
+    messages:
+      OrderEvent: { $ref: '#/components/messages/OrderEvent' }
+  trade.payments:
+    address: trade.payments
+    description: 결제 승인·실패·UNKNOWN·취소(payment-svc Outbox). 키 = eventId
+    messages:
+      PaymentEvent: { $ref: '#/components/messages/PaymentEvent' }
+  trade.seats:
+    address: trade.seats
+    description: 홀드·해제·만료(HELD·RELEASED·EXPIRED, 좌석 Redis Stream 릴레이)와 판매 예약·판매·다시 팔 수 있게 됨·반환(PENDING·SOLD·AVAILABLE·RETURNED, 판매 행 seat_sale의 Outbox). 홀드 원장 비동기 반영. 키 = eventId
+    messages:
+      SeatEvent: { $ref: '#/components/messages/SeatEvent' }
+  trade.purchase-sessions:
+    address: trade.purchase-sessions
+    description: 구매 세션 시작·종료(purchase-svc Redis Stream 릴레이). queue-svc가 입장 자리 점수 갱신·삭제. 각 초당 약 28건(ADR-0005). 키 = eventId(docs/streaming.md §7)
+    messages:
+      PurchaseSessionStarted: { $ref: '#/components/messages/PurchaseSessionStarted' }
+      PurchaseSessionEnded: { $ref: '#/components/messages/PurchaseSessionEnded' }
+  trade.tickets:
+    address: trade.tickets
+    description: 발권·양도·폐기·스캔 플래그(ticket-svc Outbox). 키 = eventId(docs/streaming.md §7)
+    messages:
+      TicketEvent: { $ref: '#/components/messages/TicketEvent' }
+  trade.settlements:
+    address: trade.settlements
+    description: 정산서·지급·미수금 상태(payment-svc Outbox, ADR-0047). 키 = 파트너 ID
+    messages:
+      SettlementEvent: { $ref: '#/components/messages/SettlementEvent' }
+  control.settings:
+    address: control.settings
+    description: 운영 설정 이벤트(봇 판정 강도·대기 중 재평가 모드, 로그 레벨, 피처 플래그, Degraded Mode 중 입장 외, 결제사 지정·결제사 전환). 모든 서비스 구독. ops-svc 발행(POL-021, ADR-0044)
+    messages:
+      SettingChanged: { $ref: '#/components/messages/SettingChanged' }
+  control.sessions-terminated:
+    address: control.sessions-terminated
+    description: 세션 종료 이벤트(identity 발행, 키 = accountId). 각 서비스는 sid를 종료 세션 목록(15분)에 넣음(ADR-0011)
+    messages:
+      SessionTerminated: { $ref: '#/components/messages/SessionTerminated' }
+  identity.accounts-merged:
+    address: identity.accounts-merged
+    description: 계정 병합 이벤트(identity 발행, 키 = mergedAccountId). 각 서비스가 자기 데이터의 account_id를 대표 계정으로 바꾼다(멱등, POL-034, ADR-0038)
+    messages:
+      AccountMerged: { $ref: '#/components/messages/AccountMerged' }
+  support.cases-requested:
+    address: support.cases-requested
+    description: CS 처리함 건 요청(core-svc support·review 모듈 Outbox, 키 = sourceId). 팬의 문의 접수·추가 문의와 게시물 신고를 ops-svc가 받아 CS 처리함 건을 만들거나 기존 건에 더한다. 본문·신고 상세 같은 개인정보는 싣지 않고 ops-svc가 내부 API로 읽는다(ops-svc는 팬 트래픽을 받지 않는다, 추천 적용 2026-10-19, ADR-0066)
+    messages:
+      CaseRequested: { $ref: '#/components/messages/CaseRequested' }
+  telemetry.queue:
+    address: telemetry.queue
+    description: 관제용 1초 집계(진입 수, 빠진 번호, 입장 확정 수)와 사람별 대기 기록(대기가 끝날 때 한 건, 묶어서 압축). 키는 QueueAggregate가 '회차:파드', QueueEntryRecord가 pid(ADR-0026 결정 1, ADR-0071). 피크 20만/s 입력을 queue-svc가 집계. 대기 기록은 분석 저장소가 적재 때 가명 처리(ADR-0052). rt-pulse가 1초마다 모든 파티션에 PipelinePulse를 넣고 다른 소비자는 건너뛴다(docs/streaming.md §3)
+    messages:
+      QueueAggregate: { $ref: '#/components/messages/QueueAggregate' }
+      QueueEntryRecord: { $ref: '#/components/messages/QueueEntryRecord' }
+      PipelinePulse: { $ref: '#/components/messages/PipelinePulse' }
+  telemetry.purchase:
+    address: telemetry.purchase
+    description: 홀드 시도 결과(409 경합 포함, purchase-svc). 키 = purchaseSessionId(ADR-0026 결정 1, ADR-0071). 분석 저장소의 홀드 경합 패배율·자동 배정 결과(ADR-0052, docs/features/analytics.md §3.4)와 관제 실시간 표의 1초 칸. PipelinePulse가 함께 실린다
+    messages:
+      HoldAttempt: { $ref: '#/components/messages/HoldAttempt' }
+      PipelinePulse: { $ref: '#/components/messages/PipelinePulse' }
+  telemetry.trust-verdicts:
+    address: telemetry.trust-verdicts
+    description: 봇 판정 결과와 사후 라벨(허니팟 적중, 표본 검토, 사후 라벨, 대기 중 재평가. trust-svc). 키 = queueEntryId(없으면 키 없음, ADR-0071). 행동 신호 원문과 점수 원값은 싣지 않는다(ADR-0052). PipelinePulse가 함께 실린다
+    messages:
+      TrustVerdict: { $ref: '#/components/messages/TrustVerdict' }
+      PipelinePulse: { $ref: '#/components/messages/PipelinePulse' }
+  telemetry.behavior:
+    address: telemetry.behavior
+    description: 행동 신호 요약(포인터·타이핑·헤더 특징). trust-svc가 사전 검증 때 기기 식별값을 탐지 가명으로 바꿔 발행(키 = pid). Flink trust-reassess가 대기 중 재평가와 ClickHouse 원시 적재(30일 TTL)에 쓴다. 세션 창·CEP는 쓰지 않는다(ADR-0071, docs/streaming.md §5)
+    messages:
+      BehaviorSignal: { $ref: '#/components/messages/BehaviorSignal' }
+  telemetry.trust-candidates:
+    address: telemetry.trust-candidates
+    description: 대기 중 재평가 후보(Flink trust-reassess 발행, trust-svc 구독). 키 = pid. 여러 계정 사이 패턴(기기 공유 소급·행동 요약값 복제)만 싣고 행동 요약값 원문은 싣지 않는다. trust-svc가 재평가 모드(끔·그림자·적용)와 격리 상한에 따라 처리한다(ADR-0071, docs/streaming.md §5)
+    messages:
+      TrustCandidate: { $ref: '#/components/messages/TrustCandidate' }
+  telemetry.rum:
+    address: telemetry.rum
+    description: web-vitals(대기 페이지 표본, 좌석·결제 전수) 예약 채널. 수집 경로는 브라우저 → 같은 출처 /_t/rum → gw-fan 텔레메트리 입구(화면 배포 넷 모두, CloudFront가 X-Peaket-App을 붙임, ADR-0079 결정 13) → 게이트웨이 수집기 → Prometheus(docs/observability.md §11)이고 원본 사건은 ClickHouse에 싣지 않는다(추천 적용 2026-10-21, ADR-0076). 발행·구독 주체가 없어 operation을 두지 않고, RumSample은 브라우저가 보내는 지표 속성 이름의 기준으로만 쓴다(판 2, 추천 적용 2026-10-21, ADR-0079 결정 15)
+    messages:
+      RumSample: { $ref: '#/components/messages/RumSample' }
+  ws.seat-delta:
+    address: /v1/events/{eventId}/seats/stream
+    servers: [{ $ref: '#/servers/realtime' }]
+    description: "realtime-gw WebSocket(gw-fan 경유, 입장 토큰 필요). 섹션 구독·해제, 250ms 배치 바이너리 델타(좌석 인덱스, 상태, 섹션 버전). 버전 갭이면 섹션 스냅샷 재요청. 원본은 Redis 샤드 Pub/Sub 채널 s:{event}:sec:{section}. 좌석이 보이도록 확대한 구역만 구독하고, 전체 배치 보기의 구역 상태는 스냅샷으로 갱신한다(seat-hold §7, 추천 적용 2026-10-14, ADR-0063). 인증은 WebSocket 하위 프로토콜 peaket.seats.v1과 peaket.auth.{입장 토큰}이다(서버는 peaket.seats.v1을 고르고, 게이트웨이가 핸드셰이크에서 토큰 서명·만료와 Origin을 확인하며 이 헤더를 접근 로그에서 가린다. PoC wbs 2.6.4). 서버는 15초 [가정]마다 하트비트를 보내고 클라이언트는 35초 [가정] 동안 아무것도 오지 않으면 다시 연결한다. 닫힘 코드 1012는 0~5초 무작위 뒤 재연결, 4401 토큰 무효·만료는 재연결 안 함, 4403 출처·권한, 4429 연결 과다. 바이트 형식은 docs/frontend.md §4.4의 초안이다(추천 적용 2026-10-21, ADR-0079 결정 10)"
+    parameters:
+      eventId: { description: 공연 ID }
+    messages:
+      SubscribeSections: { $ref: '#/components/messages/SubscribeSections' }
+      SeatDeltaBatch: { $ref: '#/components/messages/SeatDeltaBatch' }
+  sse.partner-live:
+    address: /v1/partner/events/{eventId}/live
+    servers: [{ $ref: '#/servers/realtime-partner' }]
+    description: "파트너 실시간 판매 현황 SSE(1분 지연, 개인정보·봇 정보 제외, Last-Event-ID 복구). 형식은 event live, id는 집계 시각(밀리초), data는 LiveSnapshot JSON 한 줄이고 메시지마다 전체 상태다. retry 10000, 15초 [가정]마다 주석 줄을 보낸다(추천 적용 2026-10-21, ADR-0079 결정 11, docs/frontend.md §4.4)"
+    messages:
+      LiveSnapshot: { $ref: '#/components/messages/LiveSnapshot' }
+  socketio.ops:
+    address: /ops
+    servers: [{ $ref: '#/servers/realtime-ops' }]
+    description: "관제 콘솔 Socket.IO(룸 = 공연, ack, presence, Redis adapter). 명령 ack와 알림 push. 네임스페이스 /ops, 엔진 경로 /socket.io/, WebSocket 전송만(롱 폴링 끔), 운영자 쿠키와 Origin으로 인증, 본문은 JSON. 서버 → 클라이언트 이벤트는 command:ack(CommandAck)·alert(OpsAlert)·presence, 클라이언트 → 서버는 room:join·room:leave·presence:hello. 명령 생성·승인은 REST이고 이 채널은 ack와 경보 push만 맡는다(추천 적용 2026-10-21, ADR-0079 결정 12). 관제 GraphQL 구독은 wss://ops-api.peaket.example/graphql의 graphql-transport-ws다(docs/frontend.md §4.4)"
+    messages:
+      CommandAck: { $ref: '#/components/messages/CommandAck' }
+      OpsAlert: { $ref: '#/components/messages/OpsAlert' }
+operations:
+  publishOrderEvent: { action: send, channel: { $ref: '#/channels/trade.orders' }, summary: purchase-svc Outbox → Debezium }
+  consumeOrderEvent: { action: receive, channel: { $ref: '#/channels/trade.orders' }, summary: "core-svc notify(알림), peaket-data ops-rt·analytics-ingest. 승인 요청과 발권은 purchase-svc 주문 Saga가 gRPC로 부른다(docs/architecture.md §3.2, payment §2)" }
+  publishPaymentEvent: { action: send, channel: { $ref: '#/channels/trade.payments' }, summary: "payment-svc Outbox(결제 원장 상태)" }
+  consumePaymentEvent: { action: receive, channel: { $ref: '#/channels/trade.payments' }, summary: "purchase-svc 주문 Saga(결제 원장 상태를 주문에 반영, payment §3. 승인 요청은 gRPC), peaket-data ops-rt·analytics-ingest" }
+  publishSeatEvent: { action: send, channel: { $ref: '#/channels/trade.seats' }, summary: "purchase-svc(홀드·해제·만료는 좌석 Redis Stream 릴레이, PENDING·SOLD·AVAILABLE·RETURNED는 seat_sale Outbox)" }
+  consumeSeatEvent: { action: receive, channel: { $ref: '#/channels/trade.seats' }, summary: "purchase-svc 홀드 원장 적재(PostgreSQL seat_hold, 펜싱 토큰으로 순서 보정, seat-hold §6), peaket-data ops-rt(판매 상태)·analytics-ingest" }
+  publishTicketEvent: { action: send, channel: { $ref: '#/channels/trade.tickets' }, summary: "ticket-svc Outbox" }
+  consumeTicketEvent: { action: receive, channel: { $ref: '#/channels/trade.tickets' }, summary: "peaket-data ops-rt(발권 수)·analytics-ingest" }
+  publishSettlementEvent: { action: send, channel: { $ref: '#/channels/trade.settlements' }, summary: "payment-svc Outbox(정산서·지급·미수금, ADR-0047)" }
+  consumeSettlementEvent: { action: receive, channel: { $ref: '#/channels/trade.settlements' }, summary: "peaket-data analytics-ingest(정산서 대조·수수료, analytics §3.1)" }
+  publishSettingChanged: { action: send, channel: { $ref: '#/channels/control.settings' }, summary: "ops-svc(운영 명령의 설정 이벤트, POL-021)" }
+  consumeSettingChanged: { action: receive, channel: { $ref: '#/channels/control.settings' }, summary: "모든 서비스, peaket-data analytics-ingest(actor는 싣지 않음, analytics §3.1)" }
+  publishPurchaseSession: { action: send, channel: { $ref: '#/channels/trade.purchase-sessions' }, summary: purchase-svc Redis Stream 릴레이 }
+  consumePurchaseSession: { action: receive, channel: { $ref: '#/channels/trade.purchase-sessions' }, summary: queue-svc(입장 자리 갱신·비우기) }
+  publishSessionTerminated: { action: send, channel: { $ref: '#/channels/control.sessions-terminated' }, summary: identity }
+  consumeSessionTerminated: { action: receive, channel: { $ref: '#/channels/control.sessions-terminated' }, summary: 모든 서비스(peaket-platform 종료 세션 목록) }
+  publishAccountMerged: { action: send, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "identity-svc" }
+  consumeAccountMerged: { action: receive, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "각 도메인 서비스(자기 데이터의 account_id를 대표 계정으로 바꿈, 멱등, POL-034)" }
+  publishCaseRequested: { action: send, channel: { $ref: '#/channels/support.cases-requested' }, summary: "core-svc support(문의 접수·추가 문의)·review(게시물 신고) Outbox" }
+  consumeCaseRequested: { action: receive, channel: { $ref: '#/channels/support.cases-requested' }, summary: "ops-svc CS 처리함(건 만들기·신고 수 더하기·기한 계산, 멱등)" }
+  streamSeatDelta: { action: send, channel: { $ref: '#/channels/ws.seat-delta' }, summary: "realtime-gw → 브라우저 Worker", messages: [{ $ref: '#/channels/ws.seat-delta/messages/SeatDeltaBatch' }] }
+  receiveSeatSubscription: { action: receive, channel: { $ref: '#/channels/ws.seat-delta' }, summary: "realtime-gw(브라우저 Worker의 섹션 구독·해제)", messages: [{ $ref: '#/channels/ws.seat-delta/messages/SubscribeSections' }] }
+  streamPartnerLive: { action: send, channel: { $ref: '#/channels/sse.partner-live' }, summary: "ops-svc → 파트너 콘솔(관제 실시간 표 rt.cumulative를 1분 지연으로, control-tower §11, docs/streaming.md §4.3)" }
+  pushOpsConsole: { action: send, channel: { $ref: '#/channels/socketio.ops' }, summary: "ops-svc → 관제 콘솔(명령 ack와 경보, 룸 = 공연)" }
+  publishHoldAttempt: { action: send, channel: { $ref: '#/channels/telemetry.purchase' }, summary: "purchase-svc(홀드 요청마다)", messages: [{ $ref: '#/channels/telemetry.purchase/messages/HoldAttempt' }] }
+  publishTrustVerdict: { action: send, channel: { $ref: '#/channels/telemetry.trust-verdicts' }, summary: "trust-svc(판정과 사후 라벨)", messages: [{ $ref: '#/channels/telemetry.trust-verdicts/messages/TrustVerdict' }] }
+  consumeTrustVerdict: { action: receive, channel: { $ref: '#/channels/telemetry.trust-verdicts' }, summary: "peaket-data ops-rt(1초 칸, shadow false만)·analytics-ingest" }
+  consumeAnalyticsIngest: { action: receive, channel: { $ref: '#/channels/telemetry.purchase' }, summary: "peaket-data analytics-ingest. trade.*, telemetry.queue(QueueEntryRecord), telemetry.trust-verdicts, control.settings도 같은 잡이 브론즈로 적재(ADR-0052). PipelinePulse는 건너뛴다(ADR-0071)" }
+  publishQueueTelemetry: { action: send, channel: { $ref: '#/channels/telemetry.queue' }, summary: "queue-svc(1초 집계 QueueAggregate, 대기가 끝날 때 사람별 대기 기록 QueueEntryRecord, queue-admission §3·§4)", messages: [{ $ref: '#/channels/telemetry.queue/messages/QueueAggregate' }, { $ref: '#/channels/telemetry.queue/messages/QueueEntryRecord' }] }
+  consumeOpsRt: { action: receive, channel: { $ref: '#/channels/telemetry.queue' }, summary: "peaket-data ops-rt(관제 실시간 표). trade.orders·payments·seats·tickets·purchase-sessions(누적, 세션 종료는 첫 홀드 상태 정리), telemetry.queue(QueueAggregate)·telemetry.purchase·telemetry.trust-verdicts(1초 칸)를 읽는다(docs/streaming.md §4, ADR-0071·0072)" }
+  publishPipelinePulse: { action: send, channel: { $ref: '#/channels/telemetry.queue' }, summary: "peaket-data rt-pulse. 1초마다 telemetry.queue·telemetry.purchase·telemetry.trust-verdicts의 모든 파티션에 파티션을 지정해 보낸다(ADR-0071)", messages: [{ $ref: '#/channels/telemetry.queue/messages/PipelinePulse' }] }
+  publishBehaviorSignal: { action: send, channel: { $ref: '#/channels/telemetry.behavior' }, summary: "trust-svc(사전 검증 때 기기 식별값을 탐지 가명으로 바꿔 발행, ADR-0071)" }
+  consumeBehaviorSignal: { action: receive, channel: { $ref: '#/channels/telemetry.behavior' }, summary: "peaket-trust trust-reassess(대기 중 재평가, 행동 신호 원시 적재, ADR-0071)" }
+  publishTrustCandidate: { action: send, channel: { $ref: '#/channels/telemetry.trust-candidates' }, summary: peaket-trust trust-reassess }
+  consumeTrustCandidate: { action: receive, channel: { $ref: '#/channels/telemetry.trust-candidates' }, summary: "trust-svc(재평가 모드·격리 상한, 적용이면 queue-svc IsolateWaiting gRPC, ADR-0071)" }
+components:
+  messages:
+    OrderEvent:
+      payload:
+        type: object
+        required: [eventId, orderId, type, occurredAt, idempotencyKey]
+        properties:
+          eventId: { type: string }
+          orderId: { type: string }
+          accountId: { type: string }
+          type: { type: string, enum: [CREATED, ACCEPTED, RESERVED, AWAITING_DEPOSIT, APPROVED, CONFIRMED, DEPOSIT_REVERSED, FAILED, COMPENSATED, PARTIALLY_REFUNDED, REFUNDED, EVENT_CANCELLATION_CONFIRMED, COMPENSATION_PAID], description: "EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID는 회차 취소 확정과 배상 지급(ADR-0046). AWAITING_DEPOSIT은 가상계좌 발급(입금 대기), DEPOSIT_REVERSED는 입금 오류로 결제사가 입금을 되돌려 확정된 주문이 입금 대기로 돌아감(planning/03 §2.4, 추천 적용 2026-10-14, ADR-0062)" }
+          amount: { type: integer }
+          seatIds: { type: array, items: { type: string } }
+          purchaseSessionId: { type: string, description: "구매 세션 ID(분석 연결 키, ADR-0052)" }
+          items: { type: array, description: "좌석별 등급·구역·가격(ADR-0052)", items: { type: object, properties: { seatId: { type: string }, tierId: { type: string }, sectionId: { type: string }, price: { type: integer } } } }
+          seatAssignment: { type: string, enum: [PICK, AUTO] }
+          occurredAt: { type: string, format: date-time }
+          idempotencyKey: { type: string, description: 멱등 컨슈머 키 }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    PaymentEvent:
+      payload:
+        type: object
+        properties:
+          eventId: { type: string }
+          orderId: { type: string }
+          pg: { type: string, enum: [TOSS, PORTONE, SIMULATOR], description: "결제 접수에서 고정된 결제사(ADR-0044). 결제사 결제 참조(토스 paymentKey, 포트원 paymentId)는 싣지 않고 주문 ID로 잇는다(ADR-0053)" }
+          type: { type: string, enum: [AWAITING_DEPOSIT, APPROVED, DEPOSIT_REVERSED, FAILED, UNKNOWN, RESOLVED, PARTIAL_CANCELED, CANCELED], description: "AWAITING_DEPOSIT은 가상계좌 발급, APPROVED는 가상계좌면 입금 확인, DEPOSIT_REVERSED는 입금 오류로 결제사가 입금을 되돌림(조회로 확인, payment §6, 추천 적용 2026-10-14, ADR-0062). RESOLVED는 UNKNOWN 해소 기록이고 해소 결과는 result에 싣는다. 결과가 승인이면 APPROVED, 가상계좌 발급이면 AWAITING_DEPOSIT, 미승인이면 FAILED 사건을 따로 낸다(추천 적용 2026-10-20, ADR-0073)" }
+          amount: { type: integer, description: 원 단위(ADR-0052) }
+          payMethodCategory: { type: string, enum: [CARD, EASY_PAY, TRANSFER, OTHER] }
+          result: { type: string, enum: [APPROVED, ALREADY_APPROVED, IN_PROGRESS, DECLINED, WAITING_FOR_DEPOSIT, UNKNOWN], description: "payment §2.1 정규화 결과. WAITING_FOR_DEPOSIT은 가상계좌 발급(RESOLVED의 결과로도 온다, ADR-0073)" }
+          failureCategory: { type: string, enum: [CARD_DECLINED, USER_ABORTED, VALIDATION, EXPIRED, PG_ERROR, THROTTLED], description: "실패일 때만. 결제 어댑터가 정한다(payment §2.1)" }
+          attemptNo: { type: integer, description: 같은 주문의 결제 시도 순번 }
+          latencyMs: { type: integer, description: 결제사 승인 응답 시간 }
+          occurredAt: { type: string, format: date-time }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    SeatEvent:
+      payload:
+        type: object
+        properties:
+          eventId: { type: string }
+          seatId: { type: string }
+          tierId: { type: string, description: "좌석 등급(선택 필드). 관제 실시간 표의 등급별 판매 좌석(ADR-0072)" }
+          sectionId: { type: string, description: "좌석 구역(선택 필드). 관제 실시간 표의 구역별 판매 좌석(ADR-0072)" }
+          type: { type: string, enum: [HELD, RELEASED, EXPIRED, PENDING, SOLD, AVAILABLE, RETURNED], description: "HELD·RELEASED·EXPIRED는 홀드(좌석 Redis Stream 릴레이), PENDING·SOLD·AVAILABLE·RETURNED는 판매 행 seat_sale의 Outbox다. AVAILABLE은 판매 예약(PENDING) 행을 지워 좌석을 다시 팔 수 있게 됨(승인 실패·승인 기한 만료, 가상계좌 입금 기한 경과·입금 전 회차 취소), RETURNED는 SOLD 좌석이 예매 취소·회차 취소로 반환됨(seat_sale RETURNED. 취소표로 다시 팔 수 있고, 판매 종료 뒤 반환은 다시 팔지 않는다, ADR-0064). seat-hold §4·§6, planning/03 §2.4" }
+          fencingToken: { type: integer }
+          sectionVersion: { type: integer }
+          holdId: { type: string, description: 홀드와 판매·만료를 잇는 키(ADR-0052) }
+          purchaseSessionId: { type: string }
+          occurredAt: { type: string, format: date-time }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    PurchaseSessionStarted:
+      payload:
+        type: object
+        required: [eventId, purchaseSessionId, admissionJti]
+        properties:
+          eventId: { type: string }
+          purchaseSessionId: { type: string, description: "구매 세션 ID(OrderEvent·SeatEvent·HoldAttempt의 purchaseSessionId와 같은 값)" }
+          admissionJti: { type: string, description: 입장 토큰 jti → 입장 자리 식별 }
+          startedAt: { type: string, format: date-time }
+          maxStayUntil: { type: string, format: date-time, description: 최대 체류 시각으로 점수 갱신 }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    PurchaseSessionEnded:
+      payload:
+        type: object
+        required: [eventId, purchaseSessionId, admissionJti, reason]
+        properties:
+          eventId: { type: string }
+          purchaseSessionId: { type: string, description: "구매 세션 ID(OrderEvent·SeatEvent·HoldAttempt의 purchaseSessionId와 같은 값)" }
+          admissionJti: { type: string }
+          reason: { type: string, enum: [COMPLETED, LEFT, IDLE, MAX_STAY], description: "과금 없는 결제 실패는 구매 세션을 끝내지 않고 좌석맵으로 돌아간다(planning/03 §2.2 Paying → Active, POL-009, 2026-10-13 전수 점검)" }
+          endedAt: { type: string, format: date-time }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    TicketEvent:
+      payload:
+        type: object
+        properties:
+          ticketId: { type: string }
+          eventId: { type: string, description: 회차 ID(ADR-0052) }
+          orderId: { type: string }
+          accountId: { type: string, description: 보유자 계정 ID. 분석 저장소는 적재 때 가명 처리 }
+          type: { type: string, enum: [ISSUED, KEY_REGISTERED, KEY_REVOKED, TRANSFER_OFFERED, TRANSFER_ACCEPTED, TRANSFER_REJECTED, TRANSFER_WITHDRAWN, TRANSFER_EXPIRED, TRANSFERRED, TICKET_RETURNED, TICKET_RECLAIMED, CANCEL_REQUESTED, REFUNDED, VOIDED, ENTRY_SCANNED, SCAN_FLAGGED, SCAN_FLAG_RESOLVED, ENTRY_CLOSED], description: "양도 요청 수명주기와 돌려주기·회수(POL-017, ADR-0046). VOIDED는 주문의 가상계좌 입금 오류로 티켓 무효(키 폐기, 재입금하면 새로 발권, 추천 적용 2026-10-14, ADR-0062). 계정 ID만 싣고 연락처는 싣지 않는다" }
+          scanId: { type: string, description: "ENTRY_SCANNED일 때 단말이 만든 스캔 ID(중복 제거 키)" }
+          scanResult: { type: string, enum: [PASS, REJECT, CHECK], description: ENTRY_SCANNED일 때 }
+          reason: { type: string, description: "ENTRY_SCANNED의 거부 사유 코드(offline-gate §6.5)" }
+          gateZone: { type: string }
+          direction: { type: string, enum: [IN, OUT] }
+          scannedAt: { type: string, format: date-time, description: 보정한 스캔 시각 }
+          occurredAt: { type: string, format: date-time }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    SettlementEvent:
+      payload:
+        type: object
+        properties:
+          promoterId: { type: string }
+          statementId: { type: string }
+          kind: { type: string, enum: [EVENT, PRODUCT], description: "EVENT는 티켓 회차 정산서, PRODUCT는 굿즈·티켓 연동 부가 상품 상품 정산서(R3 대조 대상 아님, POL-039 ②, 추천 적용 2026-10-14, ADR-0062)" }
+          performanceId: { type: [string, 'null'], description: "회차. 상품 정산서는 null" }
+          pg: { type: string, enum: [TOSS, PORTONE] }
+          pgStore: { type: string, enum: [STANDARD, ESCROW], description: "토스페이먼츠 결제 상점(토스페이먼츠만)" }
+          periodStart: { type: string, format: date, description: "상품 정산서의 주 시작(KST)" }
+          periodEnd: { type: string, format: date, description: "상품 정산서의 주 끝(KST)" }
+          amount: { type: integer, description: 지급액이나 미수금 금액(원) }
+          salesAmount: { type: integer, description: "STATEMENT_NOTIFIED 때 판매 대금(원, ADR-0052)" }
+          refundAmount: { type: integer, description: STATEMENT_NOTIFIED 때 환급(원) }
+          feeAmount: { type: integer, description: STATEMENT_NOTIFIED 때 중개수수료(원) }
+          type: { type: string, enum: [STATEMENT_NOTIFIED, STATEMENT_DISPUTED, STATEMENT_CONFIRMED, STATEMENT_CARRIED_OVER, PAYOUT_SCHEDULED, PAYOUT_COMPLETED, PAYOUT_FAILED, PAYOUT_HELD, RECEIVABLE_OPENED, RECEIVABLE_CLOSED] }
+          occurredAt: { type: string, format: date-time }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    SettingChanged:
+      payload:
+        type: object
+        properties:
+          commandId: { type: string }
+          key: { type: string, enum: [BOT_LEVEL, LOG_LEVEL, FEATURE_FLAG, DEGRADED_MODE, LOBBY_BANNER, PG_ASSIGNMENT, AUTOMATION_STOP], description: "FEATURE_FLAG는 비핵심 기능 끄기(명령 9), AUTOMATION_STOP은 입장 제어 자동화 긴급 정지(명령 11, admission-ctrl은 TCP 대역 외로도 받음). PG_ASSIGNMENT는 공연 결제사 지정(명령 12). 결제사 전환은 DEGRADED_MODE의 PAYMENT_PG_FALLBACK 값(ADR-0044)" }
+          scope: { type: string, description: "PLATFORM 또는 공연 ID. 결제사 지정·전환은 공연 단위" }
+          value: { type: string, description: "키마다 정한 값. BOT_LEVEL은 {level: RELAXED|STANDARD|AGGRESSIVE(완화·기본·강화), reassessMode: OFF|SHADOW|ENFORCE(대기 중 재평가 끔·그림자·적용, 기본 SHADOW)}의 JSON이다. 재평가 모드는 강도와 따로 고르는 명령 5의 별도 매개변수이고, ENFORCE로 바꾸는 것은 commander만 한다(추천 적용 2026-10-20, ADR-0073)" }
+          expiresAt: { type: string, format: date-time, description: 로그 레벨 30분 자동 복귀 등 }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    SessionTerminated:
+      payload:
+        type: object
+        required: [accountId, sessionId, reason, terminatedAt]
+        properties:
+          accountId: { type: string }
+          sessionId: { type: string, description: "로그인 세션 ID(액세스 토큰의 sid). 구매 세션이 아니다" }
+          reason: { type: string, enum: [LOGOUT, DELETE, ADMIN_FORCE, REFRESH_REUSE, STAFF_REVOKED, MERGED, DEVICE_LIMIT, ACCOUNT_LOCKED], description: "DEVICE_LIMIT는 기기 5대 초과로 가장 오래 쓰지 않은 세션 종료(POL-019), ACCOUNT_LOCKED는 관리 계정 연속 실패 잠금(docs/features/identity.md §4)" }
+          terminatedAt: { type: string, format: date-time }
+    AccountMerged:
+      payload:
+        type: object
+        required: [mergeId, primaryAccountId, mergedAccountId, confirmedAt]
+        properties:
+          mergeId: { type: string }
+          primaryAccountId: { type: string }
+          mergedAccountId: { type: string }
+          confirmedAt: { type: string, format: date-time }
+    CaseRequested:
+      payload:
+        type: object
+        required: [eventKey, kind, sourceId, createdAt]
+        properties:
+          eventKey: { type: string, format: uuid, description: "중복 제거 키. 같은 사건을 다시 보내면 같은 값" }
+          kind: { type: string, enum: [INQUIRY, DISPUTE, MINOR_CONTRACT_CANCEL, CONTENT_REPORT, RIGHTS_REQUEST], description: "CsCase 종류(data.md cs_case)" }
+          sourceId: { type: string, description: "문의 ID(inquiryId) 또는 신고 대상 후기 ID(reviewId)" }
+          category: { type: string, description: "문의 유형 코드 또는 신고 사유 코드(SCALPING·MACRO·ABUSE·RIGHTS·ILLEGAL_FILMING·SPAM·OFF_TOPIC·OTHER)" }
+          followUp: { type: boolean, description: "추가 문의면 true(기존 건을 다시 처리 중으로)" }
+          hold: { type: boolean, description: "불법 촬영물 신고로 후기를 바로 가렸으면 true(FILMING_HOLD, POL-044)" }
+          createdAt: { type: string, format: date-time }
+    QueueAggregate:
+      payload:
+        type: object
+        properties:
+          eventId: { type: string }
+          second: { type: string, format: date-time }
+          entries: { type: integer }
+          removed: { type: integer }
+          admissions: { type: integer }
+          soonResponses: { type: integer }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    QueueEntryRecord:
+      payload:
+        type: object
+        description: "사람별 대기 기록. 대기가 입장 확정·빠진 번호·그 회차의 판매 종료로 끝날 때 한 건(ADR-0052. 판매가 온세일 윈도우로 끝나지 않는 것은 ADR-0063 결정 11, 판매 종료 = 공연 시작 24시간 전은 ADR-0064)"
+        properties:
+          eventId: { type: string }
+          queueEntryId: { type: string }
+          pid: { type: string, description: 분석 저장소는 적재 때 회차별 가명으로 바꾼다 }
+          number: { type: integer }
+          entryMode: { type: string, enum: [LOBBY, AFTER_OPEN] }
+          enteredAt: { type: string, format: date-time }
+          firstEtaSec: { type: integer, description: 처음 보인 예상 대기(초) }
+          turnAt: { type: string, format: date-time, description: 차례가 온 시각 }
+          admittedAt: { type: string, format: date-time }
+          admissionJti: { type: string }
+          removedAt: { type: string, format: date-time }
+          removeReason: { type: string, enum: [NO_CONFIRM, LEFT, BLOCKED, SALE_END, DUPLICATE], description: "NO_CONFIRM 차례 뒤 15분 안에 입장 확정 없음, LEFT 대기 취소, BLOCKED 추가 검증 실패·이의 기각, SALE_END 차례 전(또는 차례 뒤 입장 확정 전)에 그 회차의 판매 종료(공연 시작 24시간 전 = starts_at − 24시간, 소유자 결정 2026-10-14, ADR-0064)나 매진(온세일 윈도우 종료가 아님, ADR-0063 결정 11. 예전 이름 WINDOW_END), DUPLICATE 1인 1순번 위반 무효(입장 확정 때 다른 대기표로 이미 입장, ADR-0056)" }
+          verifyRoute: { type: string, enum: [DIRECT, CHALLENGE_PASSED, CHALLENGE_FAILED, BLOCKED] }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    HoldAttempt:
+      payload:
+        type: object
+        description: "홀드 요청 결과. 409 경합도 낸다(ADR-0052)"
+        properties:
+          eventId: { type: string }
+          purchaseSessionId: { type: string }
+          mode: { type: string, enum: [PICK, AUTO] }
+          tierId: { type: string }
+          sectionId: { type: string }
+          result: { type: string, enum: [HELD, CONFLICT, LIMIT, ERROR] }
+          autoResult: { type: string, enum: [FIRST, FIRST_SPLIT, SECOND, SECOND_SPLIT, MANUAL_REQUIRED] }
+          retryNo: { type: integer }
+          latencyMs: { type: integer }
+          occurredAt: { type: string, format: date-time }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    TrustVerdict:
+      payload:
+        type: object
+        description: "봇 판정과 사후 라벨(ADR-0052). 점수 원값·규칙 가중치는 싣지 않는다"
+        properties:
+          eventId: { type: string }
+          queueEntryId: { type: string }
+          pid: { type: string, description: "사람 식별값(선택). source REASSESS 판정에만 싣는다. 재평가 후보(TrustCandidate)는 pid만 있고 그림자 모드는 IsolateWaiting을 부르지 않아 queueEntryId로 대기 기록과 이을 수 없으므로, 이 값으로 대기 기록(QueueEntryRecord)과 잇는다. 분석 저장소는 적재 때 회차별 가명으로 바꾼다(추천 적용 2026-10-20, ADR-0073)" }
+          category: { type: string, enum: [PASS, CHALLENGE_PASSED, CHALLENGE_FAILED, BLOCKED, HONEYPOT, LABELED_BOT, LABELED_HUMAN] }
+          action: { type: string, enum: [ALLOW, CHALLENGE, BLOCK, NONE] }
+          source: { type: string, enum: [REALTIME, HONEYPOT, SAMPLE_REVIEW, POST_LABEL, REASSESS], description: "REASSESS는 대기 중 재평가(ADR-0071)" }
+          shadow: { type: boolean, default: false, description: "그림자 실행 결과면 true(집행 없음, action NONE). 분석의 봇 지표는 false만 센다(ADR-0071)" }
+          occurredAt: { type: string, format: date-time }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    BehaviorSignal:
+      payload:
+        type: object
+        properties:
+          pid: { type: string }
+          deviceRef: { type: string, description: "HMAC-SHA256(탐지 가명 키, 기기 식별값). trust-svc가 Kafka에 넣기 전에 바꾼다(ADR-0053)" }
+          eventId: { type: string, description: "사전 검증한 회차(ADR-0071)" }
+          netClass: { type: string, enum: [HOSTING, PROXY, OTHER], description: "요청 IP의 네트워크 유형(ADR-0071)" }
+          asn: { type: integer, description: "netClass가 HOSTING·PROXY일 때만 싣는다(ADR-0071)" }
+          features: { type: object, description: "포인터 엔트로피, 타이핑 간격 분산, 헤더 순서 등" }
+          ts: { type: string, format: date-time }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          schemaVersion: { type: integer }
+    PipelinePulse:
+      payload:
+        type: object
+        description: "관제 실시간 표의 심장 박동(rt-pulse가 1초마다 각 파티션에 보냄). ops-rt는 다른 사건과 같은 연산자를 지나 실시간 표의 `_pulse` 행으로 남기고 그 밖 소비자는 건너뛴다. 신선도 SLI의 기준(ADR-0071·0072, docs/streaming.md §3·§4.5)"
+        properties:
+          kind: { type: string, enum: [PULSE] }
+          topic: { type: string }
+          partition: { type: integer }
+          producedAt: { type: string, format: date-time }
+          schemaVersion: { type: integer }
+    TrustCandidate:
+      payload:
+        type: object
+        description: "대기 중 재평가 후보(ADR-0071). 행동 요약값 원문·기기 가명은 싣지 않는다"
+        properties:
+          eventId: { type: string }
+          pid: { type: string }
+          pattern: { type: string, enum: [DEVICE_SHARE, BEHAVIOR_REPLAY] }
+          evidenceCount: { type: integer, description: "10분 안 같은 기기·같은 지문의 서로 다른 pid 수" }
+          windowStart: { type: string, format: date-time }
+          detectedAt: { type: string, format: date-time }
+          eventKey: { type: string, format: uuid, description: "회차·pid·패턴·10분 칸에서 만든 값. 같은 후보를 다시 내도 같다" }
+          schemaVersion: { type: integer }
+    RumSample:
+      contentType: application/json
+      payload:
+        type: object
+        description: "브라우저 지표 묶음 판 2(추천 적용 2026-10-21, ADR-0079 결정 15, docs/frontend.md §5.16). 사용자 식별값과 실제 주소·쿼리·조각은 싣지 않는다. 판 1의 page는 route로 바뀌었다"
+        required: [schemaVersion, eventKey, app, route]
+        properties:
+          schemaVersion: { type: integer, enum: [2] }
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          app: { type: string, enum: [web, queue-room, partner, console, scanner] }
+          route: { type: string, description: "경로 템플릿(예: /events/[id])" }
+          deviceClass: { type: string, enum: [mobile, tablet, desktop] }
+          navType: { type: string, enum: [navigate, reload, back_forward, prerender, soft] }
+          dpl: { type: string, description: "배포 식별자(커밋 SHA)" }
+          sampleRate: { type: number }
+          metrics: { type: object, properties: { lcp: { type: number }, inp: { type: number }, cls: { type: number }, fcp: { type: number }, ttfb: { type: number } } }
+          longTasks: { type: object, properties: { count: { type: integer }, totalMs: { type: number } } }
+          errors: { type: object, properties: { count: { type: integer } } }
+          apiFail: { type: object, properties: { network: { type: integer }, http4xx: { type: integer }, http5xx: { type: integer }, timeout: { type: integer } } }
+          marks: { type: object, properties: { queue_reflect_ms: { type: number }, seat_delta_e2e_ms: { type: number }, seatmap_ready_ms: { type: number }, payment_confirm_ms: { type: number }, ws_reconnects: { type: integer }, scan_judge_ms: { type: number } } }
+          attribution: { type: object }
+    SubscribeSections:
+      contentType: application/octet-stream
+      payload: { type: string, description: "바이너리(리틀 엔디언). u8 version 1, u8 type 16, u16 count, count × u16 sectionIndex. 매번 지금 구독할 전체 집합이다(증분 아님). 좌석이 보이는 구역만 담고 축소해 좌석이 구역 색으로 합쳐지면 뺀다(ADR-0063). 초안 [가정, wbs 2.6.4], docs/frontend.md §4.4" }
+    SeatDeltaBatch:
+      contentType: application/octet-stream
+      payload: { type: string, description: '바이너리(리틀 엔디언). u8 version 1, u8 type 1, u64 serverTimeMs, u16 sectionCount, 구역마다 u16 sectionIndex, u32 sectionVersion, u16 count, count × (u16 seatOffset, u8 state). state 0 가능, 1 다른 분 선택(홀드·결제 예약), 2 판매(스냅샷은 가용·점유 1비트, seat-hold §2). type 2는 하트비트(u64 serverTimeMs), type 3은 묶음 간격 변경(u16 intervalMs). 250ms 배치(Degraded 1초), 약 200B. 초안 [가정, wbs 2.6.1·2.6.4], docs/frontend.md §4.4' }
+    LiveSnapshot:
+      contentType: text/event-stream
+      payload:
+        type: object
+        properties:
+          sold: { type: integer, description: "판매 좌석(지금 SOLD인 좌석 수, 반환은 빠짐, ADR-0072)" }
+          remaining: { type: integer, description: "잔여석(판매 대상 − 판매 좌석). 홀드·결제 중 좌석도 남은 좌석에 센다(ADR-0072). 홀드 수는 싣지 않고 화면은 이 안내만 둔다(추천 적용 2026-10-20, ADR-0073)" }
+          projectedSoldOutAt: { type: string, format: date-time, description: "예상 매진 시각(잔여 ÷ 최근 5분 [가정] 판매 속도, design/d5 §6.9, ADR-0062)" }
+          waiting: { type: integer, description: "지금 대기 인원(진입 − 입장 − 빠진 번호, docs/streaming.md §4.1)" }
+          queueEntries: { type: integer, description: "대기열 진입 누적(화면의 '대기열 진입 n명 누적' 보조 줄)" }
+          sections: { type: array, description: "구역별 잔여석(화면의 구역별 잔여석 열지도). remaining과 같은 정의", items: { type: object, properties: { sectionId: { type: string }, remaining: { type: integer } } } }
+          soldPerMinute: { type: array, description: "분당 판매(최근 60분, 화면의 분당 판매 그래프). ops-svc가 판매 좌석 누적 값의 1분 차이로 계산한다(docs/streaming.md §4.3, 추천 적용 2026-10-20, ADR-0073)", items: { type: object, properties: { minute: { type: string, format: date-time }, sold: { type: integer } } } }
+    CommandAck:
+      contentType: application/json
+      payload:
+        type: object
+        properties:
+          commandId: { type: string }
+          target: { type: string }
+          ackedAt: { type: string, format: date-time }
+    OpsAlert:
+      contentType: application/json
+      payload:
+        type: object
+        properties:
+          alertId: { type: string, description: "Alertmanager 경보 지문(fingerprint). 같은 경보의 발생과 해제를 잇는다(추천 적용 2026-10-20, ADR-0073)" }
+          status: { type: string, enum: [firing, resolved] }
+          startsAt: { type: string, format: date-time }
+          endsAt: { type: string, format: date-time, description: "해제 때(status resolved)" }
+          severity: { type: string, enum: [SEV1, SEV2, SEV3] }
+          title: { type: string }
+          runbookUrl: { type: string }
+          dashboardUrl: { type: string }
+          kind: { type: string, enum: [slo, cause, invariant, control, hygiene, legal, field, change, security, flow], description: "경보 종류. 콘솔 경보 패널의 묶음과 억제에 쓴다(ADR-0069). flow는 처리량 급감(오류 없는 장애, ADR-0070)" }
+          eventId: { type: string, description: "온세일·회차 경보의 회차 ID. '이 회차 판단' 묶음에 쓴다(ADR-0069)" }
+          journey: { type: string, description: "여정(detail·queue·hold·payment 등). 억제 규칙의 같은 여정 판단에 쓴다(ADR-0069)" }
+          dependency: { type: string, description: "외부 의존성 원인 경보면 그 의존성(있으면). 같은 의존성의 원인 경보를 묶는다(docs/observability.md §5, ADR-0069)" }
+          exploreUrl: { type: string, description: "같은 시간 창과 그 SLI의 실패 조건으로 미리 채운 조회 링크. SLO 경보는 필수(ADR-0069)" }
+          foldedUnder: { type: string, description: "억제되어 접힌 경보면 위 경보의 alertId. 알림은 보내지 않았고 콘솔에 접힌 줄로 보인다(ADR-0069, 추천 적용 2026-10-20, ADR-0073)" }
+          context: { type: object, description: "현장 입장 경보 맥락(ADR-0051). 개인정보 없음", properties: { eventId: { type: string }, gateZone: { type: string }, kind: { type: string, enum: [DUPLICATE_SURGE, SCANNER_STALE, SCANNER_REVOKED_ACCESS] }, count: { type: integer }, deviceName: { type: string } } }

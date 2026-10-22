@@ -1,0 +1,22 @@
+# ADR-0019: Aphrodite·Fela는 PoC 후 기각한다
+
+- **상태**: 채택 (2026-10-05 설계서 §13·11장에 기록, 2026-10-08 ADR로 옮김). PoC 수치는 작성 예정
+- **관련**: 설계서 §13, 11장 Critical CSS, 6장 Tailwind
+- **관련 ID**: NFR-012(FCP·TBT), design/d2 §1
+
+## 맥락
+- 런타임 CSS-in-JS 라이브러리(Aphrodite, Fela 등)는 브라우저 자바스크립트 실행 시점에 동적으로 `<style>` 태그를 주입하므로, Next.js App Router의 React Server Components(RSC) 환경과 원천적으로 호환되지 않는다.
+- 또한 클라이언트 런타임에 동적 해싱 및 CSS 파싱 연산 오버헤드를 유발하여 메인 스레드를 점유하므로 코어 웹 바이탈 지표(FCP, TBT)를 저해하며, 빌드타임 정적 컴파일 방식인 Tailwind CSS v4와 역할이 중복된다.
+
+## 결정
+- Aphrodite 및 Fela를 프로덕션 스타일링 스택에서 전면 기각한다.
+- 플랫폼 스타일링은 Tailwind CSS v4 CSS-first 아키텍처와 디자인 토큰 파이프라인(`@seed-design/css` + tokens.json)을 채택하고, 초기 렌더링을 위한 Critical CSS는 빌드 단계에서 HTML 인라인으로 처리한다.
+
+## 검토한 대안
+| 대안 | 문제 |
+| --- | --- |
+| Aphrodite / Fela 채택 | React Server Components(RSC) 비호환, 클라이언트 런타임 스크립트 실행 비용 가중, 번들 크기 증가 |
+
+## 결과와 트레이드오프
+- 런타임 CSS 생성 비용을 완전히 제거하여 초기 렌더링 지연(FCP)과 메인 스레드 차단 시간(TBT) 성능 예산을 안정적으로 사수한다.
+- 트레이드오프: 동적 자바스크립트 객체 스타일링 방식 대신, 표준 CSS 변수와 유틸리티 클래스 기반 디자인 시스템 거버넌스를 철저히 유지해야 한다.

@@ -1,0 +1,7 @@
+# 이름=PromQL. 이름은 docs/perf-ledger.md §2.3의 규약을 따른다. 레코딩 룰 이름이 정해지면 바꾼다.
+origin_rps=sum(rate(envoy_http_downstream_rq_total{envoy_http_conn_manager_prefix="gw-queue"}[5s]))
+cdn_hit_ratio=avg(cloudfront_cache_hit_ratio)
+p99_ms=histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{service="queue-svc",route="/v1/queues/{eventId}/entries"}[5s])) by (le)) * 1000
+error_rate=sum(rate(http_server_requests_total{service="queue-svc",status_class="5xx"}[5s])) / sum(rate(http_server_requests_total{service="queue-svc"}[5s]))
+redis_cpu=avg(rate(redis_cpu_sys_seconds_total{cluster="queue"}[5s]) + rate(redis_cpu_user_seconds_total{cluster="queue"}[5s]))
+event_loop_lag_ms=histogram_quantile(0.99, sum(rate(nodejs_eventloop_lag_seconds_bucket{service="queue-svc"}[5s])) by (le)) * 1000
