@@ -106,14 +106,14 @@ flowchart TD
 
 ### ⑤ 봇 방어 시스템 장애 시의 안전 모드 (Graceful Degradation)
 
-외부 봇 탐지 서비스나 내부 위험 점수 엔진에 장애가 발생하더라도 문을 무조건 열어젖히지 않습니다. 사전에 캐시된 마지막 안전 규칙과 IP당 엄격한 속도 제한(Rate Limit)을 적용하는 '보수적 축소 운영 모드'로 즉시 전환되어 서비스를 안정적으로 유지합니다 ([FR-039](../planning/02-requirements.md), [POL-006](../planning/03-policies-glossary.md)).
+외부 봇 탐지 서비스나 내부 위험 점수 엔진에 장애가 발생하더라도 문을 무조건 열어젖히지 않습니다. 사전에 캐시된 마지막 안전 규칙과 IP당 엄격한 속도 제한(Rate Limit)을 적용하는 '보수적 축소 운영'으로 즉시 전환되어 서비스를 안정적으로 유지합니다 ([FR-039](../planning/02-requirements.md), [POL-006](../planning/03-policies-glossary.md)).
 
 ---
 
 ### ⑥ 과학적 통계 검증 프레임워크 (OWASP / ISO 기준)
 
 * **봇 등급 세분화(정교함 3단계)**: 단순 스크립트(1단계), 위장한 브라우저 자동화(2단계), 사람 손놀림을 녹화해 재생하는 봇(3단계)을 공격 목적 4가지와 엮어 12가지로 나누고 따로 잽니다. 1·2단계는 탐지율 95%가 목표이고, 3단계는 '봇이 손해를 보는가'로 판단합니다 ([ADR-0039](../docs/adr/0039-bot-detection-evaluation-protocol.md), [ADR-0048](../docs/adr/0048-bot-evaluation-sample-tiers-cost.md)).
-* **판정용 사람 표본 947개**: 사람을 봇으로 잘못 보는 비율(오탐률)이 0.5% 이하라고 말하려면 947개에서 오탐이 1건 이하여야 합니다. 600개로는 오탐이 1건만 나와도 탈락이라 좋은 시스템도 자주 떨어져서 늘렸습니다. 표본 수와 합격 기준은 모으기 전에 정해 두고, 스크린리더 사용자, 60세 이상, 회사나 PC방처럼 IP를 함께 쓰는 사람도 일정 수 넣습니다.
+* **판정용 사람 표본 947개**: 사람을 봇으로 잘못 보는 비율(오탐률)이 0.5% 이하라고 말하려면 947개에서 오탐이 1건 이하여야 합니다. 600개로는 오탐이 1건만 나와도 탈락이라 좋은 시스템도 자주 떨어져서 늘렸습니다. 표본 수와 합격 기준은 모으기 전에 정해 두고, 화면 낭독기 사용자, 60세 이상, 회사나 PC방처럼 IP를 함께 쓰는 사람도 일정 수 넣습니다.
 * **'티켓 1장당 획득 비용' 산출**: 봇이 표 1장을 얻는 데 쓴 돈(빌린 명의, 프록시, 사람 확인 풀이, 운영 시간)을 계산해 웃돈과 견줍니다. 사람 확인 풀이는 1,000건에 1.45달러라 싸고, 비싼 것은 명의입니다. 명의를 빌린 봇은 추가 확인도 통과할 수 있어서 탐지만으로는 봇을 손해 보게 만들기 어렵습니다. 웃돈 재판매 과징금(판매금액의 50배)이 기대 비용에 들어가면 손익이 크게 달라집니다.
 
 ---
@@ -145,7 +145,7 @@ flowchart TD
 * [docs/features/identity.md §5](../docs/features/identity.md), [POL-001](../planning/03-policies-glossary.md): 휴대폰 본인확인 및 암호화 CI 연계 절차
 * [POL-002](../planning/03-policies-glossary.md): 1인 1순번 보장 정책
 * [docs/features/queue-admission.md §7](../docs/features/queue-admission.md), [POL-006](../planning/03-policies-glossary.md): 추가 확인 대기열(Challenge Queue) 상세 워크플로우
-* [FR-039, NFR-022](../planning/02-requirements.md): 위험 점수와 엔진 장애 시 축소 운영 모드(FR-039), 탐지율·오탐률 목표(NFR-022)
+* [FR-039, NFR-022](../planning/02-requirements.md): 위험 점수와 엔진 장애 시 축소 운영(FR-039), 탐지율·오탐률 목표(NFR-022)
 * [ADR-0039](../docs/adr/0039-bot-detection-evaluation-protocol.md), [docs/features/queue-admission.md §11](../docs/features/queue-admission.md): 봇 탐지율 실측 평가 프레임워크
 * [docs/security/asvs/bot-defense.md](../docs/security/asvs/bot-defense.md): 봇 방어 보안 점검표 및 ASVS 요구사항 추적
 * [POL-026](../planning/03-policies-glossary.md): 봇 부하 테스트 시의 윤리 기준 및 실제 운영처 부하 금지 원칙

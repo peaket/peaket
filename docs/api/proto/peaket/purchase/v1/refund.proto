@@ -1,6 +1,6 @@
 // purchase-svc가 제공하는 회차 취소 일괄 환불 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
 // 정본: docs/features/transfer-refund.md §5(회차 취소와 일괄 환불 작업)·§6(배상 지급), POL-032·POL-038, ADR-0046.
-// 흐름도에는 있지만 통신 표(docs/architecture.md §3.2)에 아직 없는 호출이다.
+// 통신 표(docs/architecture.md §3.2)에는 2026-10-22에 더했다(ADR-0084).
 syntax = "proto3";
 
 package peaket.purchase.v1;
@@ -28,7 +28,7 @@ service EventRefundService {
 enum CancellationRuling {
   CANCELLATION_RULING_UNSPECIFIED = 0;
   // 주최 측 귀책. 배상 대상이다.
-  CANCELLATION_RULING_HOST_FAULT = 1;
+  CANCELLATION_RULING_ORGANIZER = 1;
   // 불가항력
   CANCELLATION_RULING_FORCE_MAJEURE = 2;
   // 공연 내용 변경. 배상 대상이다.

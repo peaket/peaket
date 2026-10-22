@@ -74,7 +74,7 @@
 
 ## 5. asyncapi와 다른 점과 정할 일
 
-기존 문서를 고치는 일은 쉬운 말 다듬기 작업이 반영된 뒤에 한다.
+Outbox 열(docs/data.md §4)과 Flink 소비(docs/streaming.md §2.6)는 2026-10-22에 정본에 적었다. 아래 표는 남은 일과 그 기록이다.
 
 | 항목 | 지금 | 이 초안의 처리와 제안 |
 | --- | --- | --- |
@@ -82,5 +82,5 @@
 | 필수 필드 | asyncapi에 `required`가 있는 메시지는 6개(`OrderEvent`, `PurchaseSessionStarted`, `PurchaseSessionEnded`, `SessionTerminated`, `AccountMerged`, `CaseRequested`)뿐이다. 나머지 12개는 기본값이 있는 필드 말고는 모두 null을 허용한다 | 첫 등록 전에 정해야 한다. 나중에 null 불가로 바꾸면 호환이 깨진다(§3). 제안은 메시지에 있는 `eventKey`, `type`이나 `kind`, 발생 시각, `schemaVersion`을 필수로 하는 것이다 |
 | payload 형식 | asyncapi는 `defaultContentType: application/avro`인데 payload는 JSON Schema로 적었다 | AsyncAPI 3.0.0의 Multi Format Schema Object로 payload를 이 파일에 잇는다(`schemaFormat: application/vnd.apache.avro+json;version=1.9.0`, AsyncAPI가 권하는 형식 목록에 있다) |
 | `control.settings` 키 | 정하지 않았다 | 같은 범위의 설정 변경이 순서대로 가도록 `scope`(asyncapi 설명대로 PLATFORM 또는 공연 ID)를 키로 쓰는 것을 제안한다 |
-| Outbox `payload` 열 | docs/data.md에 열 형식이 없다 | `bytea`와 `BinaryDataConverter`(§3)를 docs/data.md에 적는다 |
-| 여러 레코드가 실리는 토픽의 Flink 소비 | docs/streaming.md §2.6은 `forSpecific` 하나만 적었다 | 유니온 읽기 스키마나 이름별 분기(§3)를 PoC로 고르고 streaming.md에 적는다 |
+| Outbox `payload` 열 | docs/data.md §4에 적었다(2026-10-22) | 끝남 |
+| 여러 레코드가 실리는 토픽의 Flink 소비 | docs/streaming.md §2.6에 두 방식을 적었다(2026-10-22) | 어느 쪽인지는 wbs 0.2.2의 스키마 CI를 만들 때 정한다 |

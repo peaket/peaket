@@ -1,7 +1,7 @@
 // core-svc가 제공하는 판매 승인 결과·게시물 조치 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
 // 정본: docs/features/transfer-refund.md §2.1(판매 승인), docs/features/control-tower.md §1·§5(review API, 명령 10),
 // docs/architecture.md §3.1(core-svc review 모듈), POL-024·POL-044, ADR-0045·0066.
-// 흐름도에는 있지만 통신 표(docs/architecture.md §3.2)에 아직 없는 호출이다.
+// 통신 표(docs/architecture.md §3.2)에는 2026-10-22에 더했다(ADR-0084).
 syntax = "proto3";
 
 package peaket.core.v1;
@@ -39,14 +39,15 @@ service ReviewModerationService {
 // 게시물 조치(용어 사전의 표준어 기준).
 enum ModerationAction {
   MODERATION_ACTION_UNSPECIFIED = 0;
-  // 조치 없음(신고를 받아들이지 않음)
-  MODERATION_ACTION_NONE = 1;
-  // 임시조치
-  MODERATION_ACTION_TEMPORARY_MEASURE = 2;
-  // 노출 차단(명령 10 포함)
-  MODERATION_ACTION_DISPLAY_BLOCK = 3;
-  // 불법 촬영물 신고 가림
-  MODERATION_ACTION_ILLEGAL_FILMING_MASK = 4;
+  // 조치 없음(신고를 받아들이지 않음). REST `ReviewModeration.action`의 NO_ACTION
+  MODERATION_ACTION_NO_ACTION = 1;
+  // 임시조치(최대 30일). TEMP_BLOCK
+  MODERATION_ACTION_TEMP_BLOCK = 2;
+  // 노출 차단. BLOCK. 법정 통보에 따른 노출 차단(명령 10)도 이 값에 notice_document_id를 붙여 보낸다
+  MODERATION_ACTION_BLOCK = 3;
+  // 가린 후기를 다시 보이게 함. RELEASE
+  MODERATION_ACTION_RELEASE = 4;
+  // 불법 촬영물 신고 가림은 core-svc가 신고를 받을 때 스스로 걸어 이 호출에 없다(POL-044)
 }
 
 message ApplyModerationRequest {
@@ -58,6 +59,10 @@ message ApplyModerationRequest {
   string notice_document_id = 4;
   string reason = 5;
   string acted_by = 6;
+  // TEMP_BLOCK·BLOCK일 때 필수. REST `violation` 코드
+  string violation = 7;
+  // TEMP_BLOCK일 때 필수. RFC 3339, 최대 30일
+  string ends_at = 8;
 }
 
 message ApplyModerationResponse {

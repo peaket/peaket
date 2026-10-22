@@ -29,6 +29,7 @@ python tools/doc-check/check_all.py
 | api | openapi 경로가 URI 규칙(docs/api/guidelines.md §10)에 어긋남: 동사로 읽히는 단어, ID 앞의 단수 이름, ID 자리의 고정 단어, 3단계 이상, 대문자·밑줄, 끝 슬래시·빈 단계. 문서가 `GET /v1/…`처럼 이름을 댄 경로가 openapi에 없음(ADR 본문·review는 이력이라 제외하고, 같은 줄에 '예전'·'옛 경로'가 있으면 바뀌기 전 경로를 일부러 보인 줄로 보고 건너뜀, ADR-0081) | 프로토타입 문서(prototype/)의 경로가 openapi에 없음(프로토타입 전용 읽기 경로) |
 | secrefs | '문서 §N' 참조의 절 제목이 그 문서에 없음 | — |
 | artifacts | 줄 첫머리의 작업용 '다음:', planning·design·docs에 남은 `[충돌 C-n]` 표시 | TODO·TBD |
+| asvs | docs/security/asvs/ 추적 표에서 같은 ASVS ID의 '요구사항 요약' 문장이 표마다 다름(ID마다 ASVS 5.0.0 원문 기준 한 문장, 00-summary 질문 45-5 (가), 2026-10-23) | — |
 | wbs | wbs.csv의 상위 추정이 하위 합계와 다름, wbs.md와 wbs.csv의 레벨 3 작업 ID·추정이 다름 | — |
 | versions | 기획 버전 줄이 없음 | 문서의 '기준 기획 버전'이 planning/01의 기획 버전과 다름 |
 | coverage(선택) | — | 원문 링크·영문 용어가 새 문서에 없음 |

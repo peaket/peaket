@@ -48,7 +48,7 @@
 | **0.2** | **계약(peaket-contracts)** | | 아키텍처 그룹 | **5** | | | |
 | 0.2.1 | OpenAPI·AsyncAPI 계약 패키지와 breaking 검사 | 계약 v0 | 아키텍처 그룹 | 1.5 | 0.1.2 | docs/api/* | 예정 |
 | 0.2.2 | proto·Avro·Schema Registry CI | 스키마 CI | 아키텍처 그룹 | 1 | 0.2.1 | ADR-0026 | 예정 |
-| 0.2.3 | 화면이 쓰는 API 계약 보강: 181개 작업 operationId, `type` 목록(401 구분 포함. 4xx·5xx Problem 선언, 429·503 `Retry-After`, 401 `WWW-Authenticate`는 ADR-0081에서 함), `Date` 노출, 303 대신 2xx 본문, 구매 세션 MAC 입력과 서버 ECDH 공개키 JWK, 좌석 델타·SSE·Socket.IO 형식, 화면이 쓰는데 없는 읽기 경로 초안, 대기 상태 파일의 더할 칸, 굿즈 결제 경로 | 계약 보강판 | 아키텍처 그룹 | 2.5 | 0.2.1 | ADR-0079, docs/frontend.md §6.2 | 예정 |
+| 0.2.3 | 화면이 쓰는 API 계약 보강: 182개 작업 operationId, `type` 목록(401 구분 포함. 4xx·5xx Problem 선언, 429·503 `Retry-After`, 401 `WWW-Authenticate`는 ADR-0081에서 함), `Date` 노출, 303 대신 2xx 본문, 구매 세션 MAC 입력과 서버 ECDH 공개키 JWK, 좌석 델타·SSE·Socket.IO 형식, 화면이 쓰는데 없는 읽기 경로 초안, 대기 상태 파일의 더할 칸, 굿즈 결제 경로 | 계약 보강판 | 아키텍처 그룹 | 2.5 | 0.2.1 | ADR-0079, docs/frontend.md §6.2 | 예정 |
 | **0.3** | **서비스 템플릿(peaket-platform)** | | 플랫폼 | **12** | | | |
 | 0.3.1 | 네 신호 계측, RFC 9457, deadline 전파, 로그 가명(로그 가명 키 HMAC, IP 앞부분만), 정규 로그 줄(요청 1건 1줄 필드와 표본 비율, ADR-0069), 지연 히스토그램 표준 칸 목록(SLO 기준값 포함)과 처리 중 요청 게이지(ADR-0077) | 템플릿 계측 | 플랫폼 | 3 | 0.2.1 | NFR-011, ADR-0053, ADR-0069, ADR-0077 | 예정 |
 | 0.3.2 | 인증 가드, 종료 세션 목록, 멱등성, Outbox, Drizzle 설정, Outbox 일 파티션과 정리 잡, 파티션 미리 만들기·유일 확인 표 정리(ADR-0083), 자식 표 같은 범위 파티션·회차 범위 파티션·부모 표 ANALYZE·통계 스냅샷(ADR-0086), Redis Stream 정리(`XTRIM MINID`), CDC 슬롯 보존 WAL 지표(ADR-0070) | 템플릿 공통 모듈 | 플랫폼 | 2.5 | 0.3.1 | NFR-016, ADR-0011, ADR-0037, ADR-0070, ADR-0083, ADR-0086 | 예정 |

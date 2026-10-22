@@ -37,7 +37,7 @@
       "default": null
     },
     {
-      "name": "performanceId",
+      "name": "eventId",
       "doc": "회차. 상품 정산서는 null",
       "type": [
         "null",

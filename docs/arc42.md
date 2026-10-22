@@ -11,13 +11,13 @@
 | --- | --- | --- | --- | --- |
 | 1. 소개와 목표 | 무엇을 왜 만드나, 가장 중요한 품질 목표는 무엇인가 | planning/01-overview.md §1(해결할 문제)·§2(사용자)·§3(목표 지표), planning/02-requirements.md §2(기능 요구사항). 2쪽 요약은 planning/00-executive-summary.md | 일부 | 가장 중요한 품질 목표 셋~다섯과 그 순서가 없다 |
 | 2. 제약 | 바꿀 수 없는 조건은 무엇인가 | planning/01-overview.md §5.1(제약사항), docs/architecture.md §8.1(준수 기준), docs/api/guidelines.md, docs/devops.md §2.2(가지 규칙), ADR-0057(운영 환경을 띄우지 않음) | 갖춤 | — |
-| 3. 맥락과 범위 | 바깥의 누구·무엇과 어떻게 주고받나 | 사업 맥락: docs/architecture.md §1(C4 1단계), planning/01-overview.md §4(범위). 기술 맥락: docs/infra.md §2(데이터 흐름도), docs/architecture.md §3.2(통신 표), docs/infra-handover.md §4 | 일부 | 바깥 연동마다 채널·프로토콜·버전을 한 표로 모은 곳이 없다(docs/api/proto/README.md §4에 일부) |
+| 3. 맥락과 범위 | 바깥의 누구·무엇과 어떻게 주고받나 | 사업 맥락: docs/architecture.md §1(C4 1단계), planning/01-overview.md §4(범위). 기술 맥락: docs/infra.md §2(데이터 흐름도), docs/architecture.md §3.2(통신 표), docs/infra-handover.md §4 | 일부 | 바깥 연동마다 채널·프로토콜·버전을 한 표로 모은 곳이 없다(docs/api/guidelines.md §8 표에 연동별 통신 방식과 장애 동작은 있고, 버전은 없다) |
 | 4. 해결 전략 | 큰 방향을 어떻게 정했나 | docs/architecture.md §1(핵심 결정)·§2(문제별 기술 과제)·§6.1(기술 스택과 선정 근거) | 갖춤 | — |
 | 5. 구성 요소 보기 | 무엇으로 나뉘어 있나 | docs/architecture.md §3(서비스 분리)·§3.1(서비스 맵), docs/data.md §1(저장소 지도), docs/features/README.md, docs/frontend.md §2, 이 문서 §3(서비스 내부) | 일부 | §3의 셋 말고는 서비스 내부 그림이 없다 |
 | 6. 실행 보기 | 중요한 흐름이 실제로 어떻게 도나 | 기능 설계서의 순서도(§2 표), planning/04-ia-flows-screens.md §2(사용자 흐름 F-01~F-13), planning/03-policies-glossary.md §2(상태도) | 일부 | shop·catalog·notify·review·support·trust의 상세 설계는 구현 직전에 쓴다(docs/features/README.md). Flink 잡은 표로만 있다(docs/streaming.md) |
 | 7. 배치 보기 | 어디에 어떻게 올라가나 | docs/infra.md §1·§3·§4·§6, docs/devops.md §5, docs/infra-handover.md §2·§3 | 갖춤 | — |
 | 8. 공통 개념 | 여러 곳에 똑같이 적용하는 규칙은 무엇인가 | docs/architecture.md §5(장애 격리·시간 초과·프로브)·§6.4(상태 소유권)·§8(품질·보안 절차), docs/api/guidelines.md, docs/observability.md, docs/data.md §4·§5·§6, docs/security/, docs/frontend.md §5 | 갖춤 | 흩어져 있다. 이 표가 안내한다 |
-| 9. 아키텍처 결정 | 무엇을 왜 그렇게 정했나 | docs/adr/(86건), 목록은 docs/architecture.md §11 | 갖춤 | 결정 수십 개를 한 ADR에 묶은 것이 있다(예: ADR-0062) |
+| 9. 아키텍처 결정 | 무엇을 왜 그렇게 정했나 | docs/adr/(87건), 목록은 docs/architecture.md §11 | 갖춤 | 결정 수십 개를 한 ADR에 묶은 것이 있다(예: ADR-0062) |
 | 10. 품질 요구 | 품질을 어떻게 재고 지키나 | planning/02-requirements.md §3(NFR), docs/quality/quality-requirements.md, docs/architecture.md §7(NFR별 대응 표) | 일부 | 품질 시나리오(어떤 자극에 어떻게 반응해야 하나)와 우선순위가 없다 |
 | 11. 위험과 기술 부채 | 무엇이 잘못될 수 있고 무엇을 미뤘나 | planning/01-overview.md §5.2(주요 리스크), docs/architecture.md §9.4(먼저 검증할 위험), 기능 설계서마다의 '미결정' 절, docs/devops.md §15, docs/streaming.md §15, docs/verification.md §8 | 일부 | 위험마다 가능성·영향 등급이 없고, 기술 부채 목록이 따로 없다 |
 | 12. 용어 | 이 말은 무슨 뜻인가 | planning/03-policies-glossary.md §4(용어 사전)·§5(쉬운 말과 용어 풀이) | 갖춤 | — |
@@ -28,8 +28,8 @@
 
 | 단계 | 그림 | 위치 | 상태 |
 | --- | --- | --- | --- |
-| 1단계: 시스템 맥락 | PEAKET과 사용자·바깥 시스템 | docs/architecture.md §1 | 있음. 알림 발송, 외부 합성 점검, 상태 페이지, 공개 타임스탬프가 빠졌다 |
-| 2단계: 컨테이너 | 게이트웨이·서비스·저장소 | docs/architecture.md §3('요청 경로 중심') | 있음. gw-partner·gw-scanner·trust-svc에 연결선이 없고, 서비스가 Kafka에 쓰는 선이 없다 |
+| 1단계: 시스템 맥락 | PEAKET과 사용자·바깥 시스템 | docs/architecture.md §1 | 있음(알림 발송, 외부 감시, 상태 페이지, 공개 타임스탬프는 2026-10-22에 더했다, §4) |
+| 2단계: 컨테이너 | 게이트웨이·서비스·저장소 | docs/architecture.md §3('요청 경로 중심') | 있음(파트너·운영자·현장 스태프 경로, 게이트웨이 뒤 연결, trust-svc 연결, 서비스 → Kafka 선은 2026-10-22에 더했다, §4) |
 | 3단계: 구성 요소 | 서비스 안의 모듈 | 이 문서 §3(purchase-svc, payment-svc, queue-svc·admission-ctrl) | 셋만 있음 |
 | 4단계: 코드 | 표와 관계 | docs/data.md §2(ERD), §3(Redis 키) | 있음 |
 | 배치 | 리전·AZ·노드 풀 | docs/infra.md §1(배포 구성도), docs/infra-handover.md §2(이중화 구성도) | 있음. C4 표기가 아닌 일반 흐름도다 |

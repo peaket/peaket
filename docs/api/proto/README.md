@@ -30,7 +30,7 @@ docs/api/proto/
 | 버전 | 하위 호환이 깨지는 변경은 새 패키지(`v2`)로 낸다. 필드 번호는 다시 쓰지 않고, 지운 필드는 `reserved`로 막는다. `buf breaking`이 막는다 | docs/api/guidelines.md §1, docs/architecture.md §3.2 |
 | 업무 결과와 오류 | 거절·대기 중 아님·입금 대기처럼 정상적인 업무 결과는 응답의 결과 값(enum)으로 돌려준다. 요청을 처리하지 못했을 때만 gRPC 상태 코드를 쓴다(아래 표) | 추천 적용 |
 | 데드라인 | 부르는 쪽은 받은 데드라인의 남은 시간을 넘긴다. 남은 시간이 모자라면 시작하지 않고 `DEADLINE_EXCEEDED`로 끝낸다. 정본 값은 좌석 홀드 전체 40ms, 결제사 승인 2초, 주문-결제-발권 3초다. 나머지 호출의 값은 아직 정하지 않았고 측정 뒤 정한다 | docs/api/guidelines.md §5 |
-| 재시도 | 앱 코드는 재시도하지 않는다. gRPC 라이브러리의 투명 재시도와 메시 재시도 예산(최대 1회)만 있다. 상태를 바꾸는 호출은 멱등 키로 같은 결과를 돌려준다 | docs/api/guidelines.md §5, ADR-0082 |
+| 재시도 | 앱 코드는 네트워크 재시도를 하지 않는다. 남는 전송 재시도는 gRPC 라이브러리의 투명 재시도와 메시 재시도 예산(최대 1회)이다. 결제 승인 확인 같은 업무 재시도는 같은 멱등 키로 승인 기한 안에서만 한다(docs/architecture.md §5). 상태를 바꾸는 호출은 멱등 키로 같은 결과를 돌려준다 | docs/api/guidelines.md §5, ADR-0082 |
 | 부르는 쪽 확인 | 메시 mTLS 신원(서비스 계정)으로 부르는 쪽을 확인하고, 허용 목록 밖이면 `PERMISSION_DENIED`다 | docs/infra.md §9 |
 | 개인정보 | 계좌번호는 `RegisterPayoutSeller` 안에서만 쓰고 저장하지 않는다. 사람 확인 토큰은 저장하지 않고, 기기 식별값은 가명으로 바꾼 뒤에만 저장한다. 필드 주석에 적었다 | docs/security/data-classification.md, ADR-0053 |
 | 주석 | 한국어로 쓴다. 정본 문서를 가리키고, 정본에 없는 값은 지어내지 않는다 | planning/03-policies-glossary.md §5 |
@@ -50,7 +50,7 @@ docs/api/proto/
 
 ## 3. 호출 목록
 
-'통신 표'는 docs/architecture.md §3.2에 그 호출이 적혀 있는지다. '없음'인 호출은 흐름도에만 있어 이 초안에서 처음 계약으로 적었다. 다듬기 반영 뒤 통신 표에 더한다.
+'통신 표'는 docs/architecture.md §3.2에 그 호출이 적혀 있는지다. 흐름도에만 있던 호출은 이 초안에서 처음 계약으로 적었고, 2026-10-22에 통신 표에 더했다(ADR-0084).
 
 | 부르는 쪽 → 받는 쪽 | 호출 | 하는 일 | 멱등 키 | 정본 흐름 | 통신 표 |
 | --- | --- | --- | --- | --- | --- |
@@ -59,17 +59,17 @@ docs/api/proto/
 | purchase-svc → payment-svc | `GetPayment`, `CancelPayment` | 조회, 취소(예매 취소·발권 실패 보상·일괄 환불) | `cancel-{cancellation_id}` | docs/features/payment.md §2.1, docs/features/transfer-refund.md §5 | 있음 |
 | purchase-svc → payment-svc | `GetNewPaymentPause` | 새 결제 일시 정지 조회(홀드 만료 작업이 1초마다) | — | docs/features/payment.md §9, docs/features/seat-hold.md §5, ADR-0085 | 있음 |
 | core-svc shop → payment-svc | `PrepareCheckout`, `ConfirmPayment`, `CancelPayment` | 굿즈·부가 상품 결제 | 같음 | docs/architecture.md §3.2 | 있음 |
-| core-svc → payment-svc | `RegisterPayoutSeller` | 판매 승인 때 지급대행 판매자 등록 | — | docs/features/settlement.md | 없음 |
+| core-svc → payment-svc | `RegisterPayoutSeller` | 판매 승인 때 지급대행 판매자 등록 | — | docs/features/settlement.md | 있음 |
 | ops-svc → payment-svc | `ApprovePayoutBatch` | 지급 묶음 승인 뒤 지급 요청 시작 | `batch_id` | docs/features/settlement.md | 없음 |
 | purchase-svc → ticket-svc | `IssueTickets` | 발권 | `order_id` | docs/features/payment.md §2, docs/features/offline-gate.md §2 | 있음 |
-| purchase-svc → ticket-svc | `CancelTickets` | 예매 취소 때 티켓 키 폐기와 상태 변경 | `cancellation_id` | docs/features/payment.md §4.1, docs/features/transfer-refund.md §3.1 | 없음 |
+| purchase-svc → ticket-svc | `CancelTickets` | 예매 취소 때 티켓 키 폐기와 상태 변경 | `cancellation_id` | docs/features/payment.md §4.1, docs/features/transfer-refund.md §3.1 | 있음 |
 | core-svc review → ticket-svc | `CheckReviewEligibility` | 관람 후기 작성 자격 | — | docs/data.md(관람 후기), docs/architecture.md §3.1 | 있음(서비스 맵) |
 | core-svc shop → ticket-svc | `ListHeldTickets` | 티켓 연동 부가 상품의 보유 확인 | — | docs/architecture.md §3.2 | 있음 |
 | purchase-svc → identity-svc | `GetVerificationStatus` | 결제 직전 본인확인 재확인 | — | docs/features/identity.md, docs/features/payment.md §2 | 있음 |
 | queue-svc·identity-svc → trust-svc | `ScoreRisk` | 위험 판정(로비 입장·사전 검증·로그인) | — | docs/features/queue-admission.md §2·§7 | 있음 |
 | trust-svc → queue-svc | `IsolateWaiting` | 대기 중 격리 | `event_key` | docs/streaming.md §5.5 | 있음 |
-| ops-svc → purchase-svc | `PreviewEventRefund`, `StartEventRefund`, `GetEventRefundJob`, `ResumeEventRefundJob` | 회차 취소 일괄 환불 | `cancellation_request_id` | docs/features/transfer-refund.md §5 | 없음 |
-| ops-svc → core-svc | `RecordSaleReviewResult`, `ApplyModeration` | 판매 승인 결과, 게시물 조치(명령 10 포함) | — | docs/features/transfer-refund.md §2.1, docs/features/control-tower.md §5 | 없음 |
+| ops-svc → purchase-svc | `PreviewEventRefund`, `StartEventRefund`, `GetEventRefundJob`, `ResumeEventRefundJob` | 회차 취소 일괄 환불 | `cancellation_request_id` | docs/features/transfer-refund.md §5 | 있음 |
+| ops-svc → core-svc | `RecordSaleReviewResult`, `ApplyModeration` | 판매 승인 결과, 게시물 조치(명령 10 포함) | — | docs/features/transfer-refund.md §2.1, docs/features/control-tower.md §5 | 있음 |
 
 ## 4. 이 초안에 넣지 않은 것
 
@@ -78,6 +78,9 @@ docs/api/proto/
 | 제어 평면 TCP 채널(ops-svc·비상 런북 Job → admission-ctrl·purchase-svc·queue-svc) | 정본이 'IDL 없이 단순 바이너리 프로토콜'로 정했다(docs/features/control-tower.md §5). 장애 복구(모든 대상의 ack, 같은 명령 ID로 다시 보냄, 비상 런북)는 정본에 있지만 메시지 모양과 버전은 없다 | 계약 저장소에서 메시지 모양과 버전을 정한다. proto로 바꿀지는 그때 새 ADR로 정한다 |
 | Kafka 이벤트 스키마(Avro `.avsc`) | 정본은 asyncapi.yaml이고, Avro 원본은 `peaket-contracts`에 둔다고만 적혀 있다 | 초안은 docs/api/avro/에 있다(2026-10-22). 등록과 CI 연결은 wbs 0.2.2다 |
 | 관제 지표 서버 스트리밍(ops-svc) | 통신 표에 이름만 있고 받는 쪽과 필드가 없다 | 받는 쪽을 정한 뒤 더한다 |
+| 일괄 환불 수동 일시정지·재개(commander) | 정본에 동작만 있고 호출 모양이 없다(docs/features/transfer-refund.md §5). `refund.proto`의 `PAUSED`는 스스로 멈춘 경우만 적었다 | 호출 모양을 정한 뒤 더한다 |
+| 주최 측 귀책 배상금 송금(purchase-svc → payment-svc) | 송금 포트는 정본에 있지만(ADR-0046) 결제사 송금 계약 전이다 | 결제사 계약 뒤 더한다 |
+| 정산 계좌 변경 뒤 지급대행 등록 갱신 | 정본(docs/features/settlement.md)에 절차가 있지만 호출이 없다 | `RegisterPayoutSeller`를 다시 쓸지 정한 뒤 더한다 |
 | 웹·파트너 앱 서버 → identity-svc 세션 생성 | 통신 표에 gRPC가 아니라 '메시 mTLS 내부 호출'로 따로 적혀 있다 | 형식을 정한 뒤 더한다 |
 | 판매 승인 대기 건 등록(core-svc → ops-svc), 지급 요청 오류 알림(payment-svc → ops-svc) | 흐름도에 전달 방식이 없다. CS 처리함 건은 이벤트 `support.cases-requested`를 쓰는 길이 이미 있다 | 그 이벤트로 될지 먼저 검토한다 |
 | 좌석 변경 전송(Redis 샤드 Pub/Sub)과 좌석 WebSocket | gRPC가 아니다 | asyncapi `ws.seat-delta`가 정본이다 |

@@ -108,17 +108,17 @@ Karpenter(필요한 만큼 서버를 붙이고 떼는 도구)가 노드를 만�
 | 구성 요소 | 담는 것 | 구성(정본) | 초기 사양 | 가용성 요구 | 네트워크 | 저장 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Aurora purchase | 주문, 결제 시도, 좌석 판매 행, 1인 한도 원장, 홀드 감사 원장, Outbox | 쓰기 1 + 읽기 1, 다중 AZ 자동 전환 | db.r7g.xlarge, 읽기도 같은 크기(전환되면 쓰기를 받으므로) [가정] | RPO 0·RTO 5분. 좌석 홀드 99.95%(NFR-003)와 결제 접수 99.95%(NFR-005)가 기댄다 | PostgreSQL 5432, TLS(`verify-full`). 판매 확정 초당 약 28건, 주문 이벤트·Outbox 합산 초당 수천 건 이하, 홀드 원장 초당 약 500건 | 월 파티션. 5년 누적 주문 약 1,700만 건. 크기는 측정 전. 시점 복원(PITR) 35일, 일 스냅샷을 도쿄로 복제 | docs/infra.md §4·§6, docs/architecture.md §9.1·§9.5, docs/data.md §1 |
-| Aurora payment | 결제 원장, 웹훅 멱등 기록, 결제사 대사, 정산서·지급, Outbox | 쓰기 1 + 읽기 1 | db.r7g.large(2 vCPU·16GiB) [가정] | RPO 0·RTO 5분. 결제 접수 99.95%(NFR-005) | 5432, TLS. 결제 접수 피크 300 TPS(초당 처리 건수) | PITR 35일, 일 스냅샷 도쿄 복제 | 같음 |
+| Aurora payment | 결제 원장, 웹훅 멱등 기록, 결제사 대사, 정산서·지급, Outbox | 쓰기 1 + 읽기 1 | db.r7g.large(2 vCPU·16GiB) [가정] | RPO 0·RTO 5분. 결제 확정·완료율 99.95%(NFR-006) | 5432, TLS. 결제 승인 피크 300 TPS(초당 처리 건수) | PITR 35일, 일 스냅샷 도쿄 복제 | 같음 |
 | Aurora ticket | 티켓 원장, 기기 공개키·폐기 목록, 양도 이력, 스캔 기록 | 쓰기 1 + 읽기 1 + 도쿄 보조 클러스터 읽기 1 | db.r7g.large [가정] | RPO 0·RTO 5분. 리전 장애 때도 도쿄에서 티켓 조회 | 5432, TLS. 스캐너 동기화와 스캔 업로드(게이트당 분당 60명, NFR-010) | 5년 누적 티켓 약 3,500만 장, 스캔 기록 5년 | docs/infra.md §4·§6, ADR-0083 |
-| Aurora 공유(identity·ops·core) | 계정, 관리자, 스태프 배정, 운영 명령 감사 로그, CS 처리함, 판매자 신원정보, 공연·좌석 배치 | 쓰기 1 + 읽기 1(논리 DB와 역할로 나눔) | db.r7g.large [가정] | RPO 0·RTO 5분. 관제 명령 99.9%(NFR-008) | 5432, TLS | 감사 로그는 접속기록 2년·권한 변경 3년 이상(NFR-017), 매일 S3 Object Lock 사본 | docs/infra.md §6, docs/data.md §1 |
+| Aurora 공유(identity·ops·core) | 계정, 관리자, 스태프 배정, 운영 명령 감사 로그, CS 처리함, 판매자 신원정보, 공연·좌석 배치 | 쓰기 1 + 읽기 1(논리 DB와 역할로 나눔) | db.r7g.large [가정] | RPO 0·RTO 5분. 관제 명령 99.9%(NFR-008) | 5432, TLS | 운영 명령 감사 로그는 영구 보존, 관리자 접속기록 2년·권한 변경 이력 3년 이상(NFR-017), 매일 S3 Object Lock 사본 | docs/infra.md §6, docs/data.md §1 |
 | PgBouncer | 서비스와 Aurora 사이 연결 풀 | 배치는 아직 정하지 않았다 | 구현 때 정한다 | 서비스와 같다 | 시간 초과 설정은 docs/architecture.md §5 | — | docs/architecture.md §5, ADR-0028 |
 | Redis 대기열 | 순번 카운터, 1인 1순번 확인 키, 셔플 결과, 빠진 번호 비트맵, 입장 자리 | 샤드 3 × (주 1 + 복제 1), AZ 셋 | cache.r7g.xlarge(4 vCPU·26.32GiB) [가정]. 명령이 몰리는 두 클러스터는 한 단계 큰 노드 | 대기열 진입 99.9%(NFR-001). RTO 30초, RPO는 복제 지연분 | 6379, TLS, RBAC 사용자. 진입 피크 초당 20만 건이 순번 `INCR`로 몰린다(병목이 재어지면 파드별 묶음 `INCRBY`로 나눈다) | 영구 백업 없음. 회차 키는 판매 종료 뒤 TTL(쓸 수 있는 시간)로 지운다. 크기는 작다(빠진 번호 비트맵 100만 명당 약 125KB) | docs/infra.md §4·§6, docs/architecture.md §9.1 |
 | Redis 좌석 | 좌석 비트맵, 홀드, 펜싱 토큰, 구매 세션, 좌석 변경 채널 | 같음 | cache.r7g.xlarge [가정] | 좌석 홀드 99.95%(NFR-003). RTO 30초. 장애 중에는 DB 정렬 잠금 경로로 우회 | 6379, TLS. 홀드 피크 초당 2,000건, 샤드 Pub/Sub(`SPUBLISH`) | 영구 백업 없음. DB 원장에서 비트맵을 다시 만든다 | 같음 |
 | Redis 세션·캐시 | 세션, 레이트 리밋 카운터, 카탈로그 캐시, 굿즈 재고 카운터, 봇 피처, BullMQ 큐 | 같음 | cache.r7g.large(2 vCPU·13.07GiB) [가정] | 기본 SLO 99.9%(NFR-011). RTO 30초, 데이터 유실 허용 | 6379, TLS | 백업 없음. 원본 DB에서 다시 채운다 | 같음 |
-| MSK 거래·제어 | 주문·결제·좌석·발권 이벤트, 제어 이벤트 | 브로커 3(AZ 셋), 복제 3, `min.insync.replicas=2`, `acks=all` | kafka.m7g.large [가정] | RPO 0. 브로커는 자동 재시작 | 9098(IAM 인증 TLS). 거래 이벤트 초당 수백 건 | 보존 7일. 브로커당 저장 = 7일 유입량 × 복제 3 ÷ 브로커 3(측정 전) | docs/infra.md §4·§6, docs/architecture.md §9.1 |
-| MSK 텔레메트리 | 진입 집계, 행동 신호, 구매 텔레메트리 | 같음 | kafka.m7g.xlarge [가정] | 멈춰도 거래 이벤트는 영향 없다(클러스터를 나눈 이유) | 9098. 진입 집계 초당 약 1만 건 | 보존 7일. 분석 적재 복원에 7일 이상 [가정] 필요 | docs/infra.md §6, docs/streaming.md §11 |
-| MSK 관측 전용 | Tempo 쓰기 경로(요청 기록) | 브로커 3 | kafka.m7g.large [가정] | 원인 분석 자료. SLO 경보와 자동 제어는 영향 없다 | 9098 | 보존은 가정(ADR-0077) | docs/observability.md §1, ADR-0077 |
-| ClickHouse(+Keeper) | 분석 브론즈·실버·골드, 실시간 표 `rt`, 법정 접속기록 DB, 봇 원시 신호 | 복제 2 + Keeper 3 | r7g.2xlarge 노드, gp3 볼륨 [가정] | RPO 1일·RTO 1시간. 관제 실시간 표 반영 p95 5초(NFR-009). 멈추면 관제 패널을 Prometheus 대체 표시로 바꾼다 | 9440(네이티브 TLS)·8443(HTTPS). 관제 지표 초당 3만 건(NFR-009) | `rt`·브론즈·실버 90일, 골드 2년, 접속기록 3개월, 봇 원시 30일. 일 1회 S3 백업 7일 [가정] | docs/infra.md §4·§6, docs/observability.md §9 |
+| MSK 거래·제어 | 주문·결제·좌석·발권 이벤트, 제어 이벤트 | 브로커 3(AZ 셋), 복제 3, `min.insync.replicas=2`, `acks=all` | kafka.m7g.large [가정] | RPO 0. 브로커는 자동 재시작 | 9098(IAM 인증 TLS). 거래 사건 피크 초당 약 6,300건(좌석 약 3,000·주문 약 1,500·발권·결제 약 1,800, docs/streaming.md §11 추정) | 보존 7일. 브로커당 저장 = 7일 유입량 × 복제 3 ÷ 브로커 3(측정 전) | docs/infra.md §4·§6, docs/architecture.md §9.1 |
+| MSK 텔레메트리 | 진입 집계, 행동 신호, 구매 텔레메트리 | 같음 | kafka.m7g.xlarge [가정] | 멈춰도 거래 이벤트는 영향 없다(클러스터를 나눈 이유) | 9098. 홀드 시도 약 2,000·판정 약 1,700·1초 집계와 심장 박동 약 200건/초(진입 20만 건/초는 queue-svc가 1초 집계로 줄인다, docs/streaming.md §11 추정) | 보존 7일. 분석 적재 복원에 7일 이상 [가정] 필요 | docs/infra.md §6, docs/streaming.md §11 |
+| MSK 관측 전용 | Tempo 쓰기 경로(요청 기록) | 브로커 3 [가정, wbs 4.1.4에서 확정] | kafka.m7g.large [가정] | 원인 분석 자료. SLO 경보와 자동 제어는 영향 없다 | 9098 | 보존은 가정(ADR-0077) | docs/observability.md §1, ADR-0077 |
+| ClickHouse(+Keeper) | 분석 브론즈·실버·골드, 실시간 표 `rt`, 법정 접속기록 DB, 봇 원시 신호 | 복제 2(Keeper 수는 wbs 4.3.1 PoC에서 정한다) | r7g.2xlarge 노드, gp3 볼륨 [가정] | RPO 1일·RTO 1시간. 관제 실시간 표 반영 p95 5초(NFR-009). 멈추면 관제 패널을 Prometheus 대체 표시로 바꾼다 | 9440(네이티브 TLS)·8443(HTTPS). 관제 지표 초당 3만 건(NFR-009) | `rt`·브론즈·실버 90일, 골드 2년, 접속기록 3개월, 봇 원시 30일. 일 1회 S3 백업 7일 [가정] | docs/infra.md §4·§6, docs/observability.md §9 |
 | MongoDB | 상품 카탈로그 | 복제 세트 3(오퍼레이터) | 데이터 풀 노드의 파드 [가정] | RPO 1일·RTO 1시간. 멈추면 정적·ISR 캐시가 읽기를 받는다 | 27017, TLS, SCRAM 인증 | 일 1회 S3 스냅샷 | docs/infra.md §4·§6 |
 | Flink | 관제 실시간 표, 봇 대기 중 재평가, 원본 적재 | 잡마다 애플리케이션 모드, JobManager 쿠버네티스 HA | docs/streaming.md §2.5 | 관제 실시간 표 신선도 p95 5초 미만(NFR-009) | 지표 9249(Prometheus 리포터) | 체크포인트는 마지막 1개, 세이브포인트 90일 [가정] (S3) | docs/infra.md §4, docs/streaming.md §2 |
 | 관측 저장소 | 지표, 로그, 요청 기록, 프로파일 | Mimir·Loki 영역 인식 3중 복제, Tempo 마이크로서비스 모드 | 관측 풀 | 핫패스 밖. 관측이 멈춰도 SLO 경보와 자동 제어 입력은 클러스터 Prometheus가 낸다 | OTLP 4317(gRPC)·4318(HTTP) 수집기, `/metrics` 긁기 | Prometheus 15일, Mimir 원본 90일·5분 집계 13개월, Loki 30일, Tempo 14일, Pyroscope 7일(S3 백엔드) | docs/observability.md §1·§9 |
@@ -152,7 +152,7 @@ Karpenter(필요한 만큼 서버를 붙이고 떼는 도구)가 노드를 만�
 
 ## 4. 데이터 흐름도(DFD)
 
-DFD는 데이터가 어디서 어디로 흐르고 어느 신뢰 경계(보안 수준이 달라지는 선)를 넘는지 그린 그림이다. docs/infra.md §2의 그림을 운영 관점으로 넓혔다. 거기서 빠졌던 스캐너 경로, 파트너·관제 경로, 비동기 이벤트, 백업·재해 복구 복제를 더했다. 개인정보가 경계를 넘는 흐름의 보호 등급과 통제는 docs/infra.md §2 표가 정본이다.
+DFD는 데이터가 어디서 어디로 흐르고 어느 신뢰 경계(보안 수준이 달라지는 선)를 넘는지 그린 그림이다. docs/infra.md §2의 그림을 운영 관점으로 넓혔다. 거기서 빠졌던 파트너·관제 경로, 비동기 이벤트, 백업·재해 복구 복제를 더했다. 개인정보가 경계를 넘는 흐름의 보호 등급과 통제는 docs/infra.md §2 표가 정본이다.
 
 ### 4.1 요청과 데이터
 
@@ -248,7 +248,7 @@ flowchart LR
 
 - 지표는 수집기를 거치지 않고 Prometheus가 직접 긁는다. 그래서 수집기가 멈춰도 SLO 경보와 자동 제어 입력은 그대로다(docs/observability.md §1).
 - 관측 스택이 통째로 멈추면 Grafana도 함께 멈춘다. 그때는 외부 데드맨 수신이 온콜을 부르고, 콘솔은 Prometheus 밖 숫자(입장 제어 상태는 Redis, 실시간 표는 ClickHouse)로 판단하며, 명령은 콘솔이나 비상 런북 CLI로 낸다(docs/observability.md §10, RB-09).
-- 제어 명령은 데이터 평면(gRPC·Kafka)에 기대지 않는 대역 외 TCP 채널로 간다. ops-svc가 멈추면 비상 런북 Job이 같은 채널로 보낸다(docs/features/control-tower.md §5, RB-08).
+- 긴급 제어 명령(명령 1·2·3·7·11)은 데이터 평면(gRPC·Kafka)에 기대지 않는 대역 외 TCP 채널로 간다. 그 밖의 명령(4·5·8·9·10·12)은 WAF API, Kafka 운영 설정 사건(`control.settings`), core-svc API로 간다(docs/features/control-tower.md §3). ops-svc가 멈추면 비상 런북 Job이 같은 채널로 보낸다(docs/features/control-tower.md §5, RB-08).
 
 ## 5. 장애 대응 실행 계획
 
@@ -259,8 +259,8 @@ flowchart LR
 | 인시던트 지휘관 | 인시던트를 선언하고 판단을 이끈다. 선언한 사람이 넘길 때까지 맡는다 | docs/observability.md §5 |
 | 운영 실행자 | 명령과 런북을 실행한다 | 같음 |
 | 기록·공지 담당 | 시각과 조치를 적고 대기실 공지·상태 페이지·파트너 공지를 낸다 | 같음 |
-| operator·commander | 운영 명령의 권한. 명령 3(판매 일시정지)·5(봇 판정 강도)·6(Degraded Mode 전환)은 commander 두 명이 승인한다 | planning/03-policies-glossary.md §1.1 |
-| 긴급 접근 | GitOps 경로가 고장 났고 SEV1이 진행 중일 때만 쓴다(MFA, 1시간 세션, 맡는 순간 SEV2 경보) | docs/devops.md §10.2 |
+| operator·commander | 운영 명령의 권한. 명령 3(판매 일시정지)·5(봇 판정 강도)·6(Degraded Mode 전환)은 commander가 요청하고 요청자가 아닌 operator 이상 한 명이 승인한다(둘 다 재인증) | planning/03-policies-glossary.md §1.1 |
+| 긴급 접근 | GitOps 경로가 고장 났고 SEV1이 진행 중일 때, 선언한 인시던트에서 진단 증거를 남기거나 읽을 때(RB-31)와 느린 쿼리를 끊을 때(RB-32), KMS 키를 끄거나 삭제를 예약할 때(§6.2) 쓴다(MFA, 1시간 세션, 맡는 순간 SEV2 경보) | docs/devops.md §10.2 |
 
 - 호출과 인시던트 도구는 Grafana Cloud IRM(무료 등급, 온콜 3인), 메신저는 Slack, 티켓은 GitHub Issues, 대외 상태 페이지는 Upptime이다(ADR-0032).
 - 인시던트 선언 기준은 POL-022다: SEV1, 불변식 위반 의심 1건, 명령 2·3·6 실행, SEV2가 15분 [가정] 넘게 풀리지 않음, 온세일 예산 50% 이상 사용 등(docs/observability.md §5).
@@ -282,7 +282,7 @@ SEV1~SEV3은 장애 심각도 등급이다(숫자가 작을수록 심각하다, 
 | 관측 스택 장애·제어 입력 없음 | 데드맨 호출, 콘솔 SEV2 '자동 제어 입력 없음' | 입장 제어가 목표를 유지(늘리지도 줄이지도 않음), KEDA가 복제 수 유지 | RB-09: 외부 점검과 콘솔의 Prometheus 밖 숫자로 판단, 명령 1·2로 조절 | — | G-11, G-21 |
 | 대기 상태 파일 CDN·원본 오류 | 대기열 CDN 캐시 오류율 > 1% 1분 | CloudFront 원본 그룹이 요청마다 S3 사본으로 넘김 | RB-04: S3 사본 고정이 필요하면 명령 6 | — | G-03 |
 | 공연 페이지 원본 오류 | 공연 정보 에러 버짓 소진 경보 | `stale-if-error`로 캐시 응답 | 원인 서비스 확인 | — | G-04 |
-| 결제사 지연·장애 | 결제 확정 소요 p99 > 5초 또는 서킷 브레이커(계속 실패하는 호출을 잠시 끊는 장치) 열림 | 재시도 큐, 홀드를 승인 기한까지 연장 | RB-07: 신규 결제 진입 통제, 결제사 전환 판단(commander 2인 승인, 자동 전환 없음) | — | G-05, G-15 |
+| 결제사 지연·장애 | 결제 확정 소요 p99 > 5초 또는 서킷 브레이커(계속 실패하는 호출을 잠시 끊는 장치) 열림 | 재시도 큐, 홀드를 승인 기한까지 연장, 새 결제 진입 일시 정지(결제 접수 전 홀드의 남은 시간을 멈춤, ADR-0085)와 조건이 풀리면 자동 재개 | RB-07: 일시 정지 확인, 결제사 전환 판단(명령 6: commander 요청과 요청자가 아닌 operator 이상 1인 승인, 자동 전환 없음) | — | G-05, G-15 |
 | Flink 잡 장애 | 재시작 반복·소비 대기 증가 등 SEV3, 실시간 표 신선도 Degraded | 관제 패널을 Prometheus 대체 표시로 | RB-34 | — | G-07 |
 | 셔플 비콘 지연 | drand 대기 60초 넘음 SEV1 | 셔플 멈춤('순서 계산 중' 표시) | RB-35: 더 기다릴지 commander가 정함, 비상 셔플은 commander 두 명 서명 | — | RB-35 절차 |
 | 불변식 위반 의심 | 오버셀·이중 결제·60초 넘은 결제-발권 불일치 SEV1 | — | RB-36: 확인 → 판매 일시정지(명령 3) 검토 → 바로잡기 → 인시던트 선언 | — | — |
@@ -318,15 +318,15 @@ SEV1~SEV3은 장애 심각도 등급이다(숫자가 작을수록 심각하다, 
 | 주문·결제 시도·좌석 판매 | Aurora purchase(일 스냅샷 도쿄) | 법정 보관 5년(주문) | 같음 | purchase-svc | — | docs/data.md §1, docs/architecture.md §9.5 |
 | 결제 원장·정산 | Aurora payment(일 스냅샷 도쿄) | 법정 보관 | 같음 + 가상계좌 번호 필드 키 | payment-svc | — | docs/data.md §1, docs/security/secrets-and-keys.md |
 | 티켓·스캔 기록 | Aurora ticket(도쿄 보조 클러스터) | 스캔 기록 5년(스태프 ID는 1년 뒤 삭제) | 같음 | ticket-svc | — | docs/observability.md §9 |
-| 계정·관리자·감사 로그 | Aurora 공유(일 스냅샷 도쿄) + 감사 로그 S3 Object Lock 사본 | 접속기록 2년, 권한 변경 3년 이상 | 같음 + TOTP 시드 키, 관리자 페퍼 키, 감사 체인 키 | identity·ops·core | 감사 로그는 고치거나 지우면 체인·앵커로 드러난다 | docs/infra.md §6, docs/observability.md §9 |
+| 계정·관리자·감사 로그 | Aurora 공유(일 스냅샷 도쿄) + 감사 로그 S3 Object Lock 사본 | 운영 명령 감사 로그 영구, 관리자 접속기록 최소 2년 이상, 권한 변경 이력 3년 이상 | 같음 + TOTP 시드 키, 관리자 페퍼 키, 감사 체인 키 | identity·ops·core | 감사 로그는 고치거나 지우면 체인·앵커로 드러난다 | docs/infra.md §6, docs/observability.md §9 |
 | 연계정보 해시·사람 식별값 | Aurora 공유(identity) | 계정 보유 기간 | 연계정보 HMAC 키, pid HMAC 키 | identity-svc | 원문은 받자마자 지운다 | docs/security/secrets-and-keys.md |
 | 상품 카탈로그 | MongoDB(일 스냅샷) | 상품 운영 기간 | 저장소 암호화 키(볼륨) | core-svc shop | — | docs/data.md §1 |
-| 이벤트 | MSK 셋 | 7일 | 저장소 암호화 키 | 발행 서비스 | — | docs/infra.md §6 |
+| 이벤트 | MSK 거래·제어, 텔레메트리 | 7일 | 저장소 암호화 키 | 발행 서비스 | — | docs/infra.md §6 |
 | 분석 브론즈·실버 | ClickHouse | 90일 | 저장소 암호화 키 + 분석 가명 키(가명) | Flink `analytics-ingest` | 실버 조회는 가명정보 취급자만 | docs/observability.md §9 |
 | 분석 골드 | ClickHouse → S3 Iceberg | 2년, Iceberg 영구 | 저장소 암호화 키 | dbt 마감 실행기 | Grafana 비교 대시보드는 읽기 전용 사용자 | 같음 |
 | 법정 접속기록 | ClickHouse 접속기록 DB | 3개월 | 저장소 암호화 키, 일 해시 앵커 | 게이트웨이 접근 로그 사본 | 적법한 영장을 확인한 경우에만 반출 | 같음 |
 | 봇 원시 신호 | ClickHouse | 30일 | 탐지 가명 키(가명) | Flink `trust-reassess` | — | 같음 |
-| 지표·로그·요청 기록·프로파일 | Mimir·Loki·Tempo·Pyroscope(S3 백엔드) | 90일·13개월, 30일, 14일, 7일 | 저장소 암호화 키, 로그 가명 키 | 수집기, Prometheus | Grafana 조직 둘('PEAKET 관측', 'PEAKET 제한') | docs/observability.md §9 |
+| 지표·로그·요청 기록·프로파일 | Mimir·Loki·Tempo·Pyroscope(S3 백엔드) | 90일·13개월, 30일, 14일, 7일 | 저장소 암호화 키, 로그 가명 키 | 수집기, Prometheus, 서비스(Pyroscope SDK) | Grafana 조직 둘('PEAKET 관측', 'PEAKET 제한') | docs/observability.md §9 |
 | 진단 증거 | 운영 계정 전용 S3 버킷 | 14일 [가정](인시던트에 묶이면 30일 [가정]까지) | 진단 증거 KMS 키 | 서비스(자기 접두사에 쓰기만), 증거 수집기 | 복호화는 긴급 접근 역할만, 읽기는 CloudTrail로 기록 | docs/infra.md §9 |
 | 공개 감사 체크포인트 | 공개 게시 버킷(S3 Object Lock) | 7년 | 감사 체크포인트 서명 키(서명) | 게시 잡 `audit-anchor` | 누구나 검증 | docs/observability.md §9 |
 | Flink 상태 | S3 `peaket-flink-state-<환경>` | 체크포인트 마지막 1개, 세이브포인트 90일 [가정] | 저장소 암호화 키 | Flink 잡(자기 접두사만) | — | 같음 |
@@ -364,7 +364,7 @@ Grafana 대시보드는 Git에 코드로 두고 배포한다(Dashboards as Code)
 | 관제 콘솔 SCR-029 | 온세일 판단과 명령 | 운영자(operator·commander) | 온세일 단계별(T-30분, T=0, 판매 중, 끝난 뒤, 공연 당일) | 단계별 패널, 위젯마다 '판단:' 한 줄, 원인 분석 링크 | docs/features/control-tower.md §2, design/d5-screen-blueprint.md |
 | 서비스별 골든 시그널 | 서비스 상태와 원인 분석 | 엔지니어 | 경보 뒤, 평소 | 첫 줄 골든 시그널, 의존성 지연·오류, 배포 주석 | docs/observability.md §2·§3 |
 | SLO·에러 버짓 | 목표 대비 소진 속도 | 엔지니어, commander | 온세일 중, 주간 검토 | 여정별 SLI, 소진 배수, 경보 시점 예산 소모 | docs/observability.md §4 |
-| 서비스 지도 | 서비스 사이 호출 관계와 지연 | 엔지니어 | 원인 분석 | Tempo 서비스 그래프 | docs/observability.md §6 |
+| 서비스 지도 | 서비스 사이 호출 관계(연결만. 요청 수·지연은 꼬리 표본이라 Prometheus 지표로 본다, ADR-0078) | 엔지니어 | 원인 분석 | Tempo 서비스 그래프 | docs/observability.md §6 |
 | 경보 위생 | 조치 없이 닫힌 경보 찾기 | 플랫폼(SRE) 온콜 책임자 | 월 1회 보고와 함께 | 대기에서 발생으로 넘어간 비율 | docs/observability.md §5 |
 | 관측 스택 자체 | 수집기·저장소 상태 | 플랫폼(SRE) | 관측 신호 SEV3 뒤 | 내보내기 실패, 큐 사용률, Tempo 소비 지연, 원격 쓰기 | docs/observability.md §10 |
 | Flink 잡 | 잡 상태와 신선도 | 데이터 엔지니어 | Flink 신호 뒤 | 재시작, 소비 대기, 체크포인트, 신선도 | docs/streaming.md §14 |

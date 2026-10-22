@@ -288,6 +288,23 @@ def check_artifacts(texts, rep):
                 rep.err('artifacts', '%s:%d' % (f, n), '해소되지 않은 [충돌] 표시(기획 v1.0은 0건)')
 
 
+# ---------- 6의2. ASVS 요구사항 요약 일치(00-summary 질문 45-5 (가), 2026-10-23) ----------
+def check_asvs(texts, rep):
+    seen = {}
+    for f, text in texts.items():
+        if not f.startswith('docs/security/asvs/'):
+            continue
+        for n, line in enumerate(text.split('\n'), 1):
+            m = re.match(r'^\| (v5\.0\.0-[\d.]+) \| (L\d[^|]*?) \| (.*?) \| ', line)
+            if not m:
+                continue
+            where = '%s:%d' % (f, n)
+            if m.group(1) in seen and seen[m.group(1)][0] != m.group(3):
+                rep.err('asvs', where, '%s의 요구사항 요약이 %s와 다르다' % (m.group(1), seen[m.group(1)][1]))
+            seen.setdefault(m.group(1), (m.group(3), where))
+    rep.info['asvs_ids'] = len(seen)
+
+
 # ---------- 7. 마커 ----------
 def count_markers(texts, rep, out_path=None):
     tot_all = collections.Counter()
@@ -404,6 +421,7 @@ def main():
     check_api(texts, rep)
     check_secrefs(texts, rep)
     check_artifacts(texts, rep)
+    check_asvs(texts, rep)
     count_markers(texts, rep, a.markers_out)
     check_wbs(texts, rep)
     check_versions(texts, rep)

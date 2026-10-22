@@ -138,7 +138,7 @@ sequenceDiagram
     participant TK as ticket-svc
     participant N as notify
     S->>TK: POST /v1/transfer-recipient-lookups (휴대폰 번호 또는 회원 코드)
-    TK-->>S: 닉네임 일부, recipientRef(10분)
+    TK-->>S: 닉네임 일부, recipientRef(10분 [가정])
     S->>TK: POST /v1/tickets/{ticketId}/transfers (recipientRef, X-Reauth-Token)
     TK->>TK: 행 잠금, 허용 조건(§3.1) 확인, 양도 요청 OFFERED(기한 = min(48시간, 양도 마감))
     TK->>N: 받는 사람에게 알림
@@ -181,7 +181,7 @@ sequenceDiagram
     P-->>O: 진행률, 실패 건 → CS 처리함
 ```
 
-- **나눠 실행**: 결제사마다 토큰 버킷(일정한 속도로 채워지는 허용량 안에서만 요청을 보내게 하는 방식)을 두어 처리 한도를 지킨다. 실행이 온세일 윈도우(판매가 열리는 시각 앞뒤로 접속이 몰리는 기간)에 걸치면 그 결제사의 승인 처리와 한도를 나눠 쓴다. 그래서 실행 속도를 온세일 윈도우 밖보다 낮춘다(가용성: 서비스를 멈춤 없이 쓸 수 있는 정도, ASVS 15.1.3).
+- **나눠 실행**: 결제사마다 토큰 버킷(일정한 속도로 채워지는 허용량 안에서만 요청을 보내게 하는 방식)을 두어 처리 한도를 지킨다. 대형·중형 온세일 윈도우(판매가 열리는 시각 앞뒤로 접속이 몰리는 기간, T-10분~T+60분)에는 새 묶음을 시작하지 않고 미룬다(이미 시작한 묶음은 끝낸다, POL-028, ADR-0069). 소형 온세일 중에는 미루지 않는다. 결제사 취소 호출이 승인과 같은 한도를 쓰면 실행 속도를 낮추고(계약 때 확인, ADR-0069), 필요하면 명령 9의 '배경 작업 멈춤'으로 멈춘다(가용성: 서비스를 멈춤 없이 쓸 수 있는 정도, ASVS 15.1.3).
 - **스스로 멈춤**: 오류율이 기준을 넘으면 작업이 스스로 멈추고 알린다. 멈춘 작업은 2인 확정 범위 안에서 commander가 다시 시작한다.
 - **되돌리지 않음**: 이미 실행된 환불은 되돌리지 않는다. 실수는 미리보기와 2인 확정으로 줄일 뿐이다.
 - **연기**: 환급을 원하는 팬만 신청한다. 신청 기한은 바뀐 공연이 시작하기 전까지다(제안값).
@@ -210,7 +210,7 @@ sequenceDiagram
 | --- | --- | --- |
 | 결제 상태 불명 | UNKNOWN 상태 1시간 초과(payment §4.2 14) | 환급·확정 3영업일 |
 | 환급 실패 | 결제사 취소 재시도 소진 | 3영업일 |
-| 이상 표시 | 취소 뒤 입장, 동시 스캔(POL-032, FR-036) | 다음 영업일 |
+| 이상 표시 | 취소 뒤 입장, 중복 입장(POL-032, FR-036) | 다음 영업일 |
 | 환불 대기 | 가상계좌 결제자의 환불 계좌 미입력 | 첫 요청 뒤 3영업일(재발송: 다음 영업일·그다음 영업일 10:00, 그 뒤 7일마다 [가정]) |
 | 배상 대기 | 배상 계좌 미입력·송금 실패 | 회차 취소 확정 뒤 10영업일 [가정](재발송은 환불 대기와 같음) |
 | 남용 표시 | 취소·양도 남용 기준에 해당하는 경우(ADR-0046 결정 9) | 확인 1영업일 |
@@ -302,7 +302,7 @@ stateDiagram-v2
 | --- | --- |
 | PostgreSQL(ticket) | `ticket`(`payer_account_id` 추가, 상태 `TRANSFER_PENDING` 추가), `transfer_offer`(OFFERED·ACCEPTED·REJECTED·WITHDRAWN·EXPIRED·RECLAIMED, 기한) |
 | PostgreSQL(purchase) | `event_cancellation_request`(요청·판정·미리보기·진행률), `compensation`(대상, 금액, 재원, 상태) |
-| PostgreSQL(ops) | `approval_request`(종류, 대상, 금액, 필요한 승인 수, 승인자들, 상태, 기한), `cs_case`(종류, 대상, 기한들, 상태), `booking_restriction`, `appeal` |
+| PostgreSQL(ops) | `approval_request`(종류, 대상, 금액, 필요한 승인 수, 상태, 기한. 승인자는 자식 표 `approval_vote`, ADR-0086), `cs_case`(종류, 대상, 기한들, 상태), `booking_restriction`, `appeal` |
 | PostgreSQL(core) | `promoter` 판매자 신원정보, `event` 판매 승인 상태, `kopis_report` |
 | REST API | 위 '관련 ID'의 경로. docs/api/openapi.yaml |
 | 비동기 이벤트 | `trade.tickets`(TRANSFER_OFFERED·TRANSFER_ACCEPTED·TRANSFER_REJECTED·TRANSFER_WITHDRAWN·TRANSFER_EXPIRED·TICKET_RETURNED·TICKET_RECLAIMED), `trade.orders`(EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID) |
