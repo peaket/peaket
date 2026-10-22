@@ -1,0 +1,139 @@
+{
+  "type": "record",
+  "name": "HoldAttempt",
+  "namespace": "peaket.telemetry",
+  "doc": "홀드 시도 결과(409 경합 포함). 토픽 telemetry.purchase, 키 purchaseSessionId. purchase-svc가 홀드 요청마다 낸다. 홀드 요청 결과. 409 경합도 낸다(ADR-0052)",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "purchaseSessionId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "mode",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "HoldAttemptMode",
+          "symbols": [
+            "PICK",
+            "AUTO"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "tierId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "sectionId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "result",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "HoldAttemptResult",
+          "symbols": [
+            "HELD",
+            "CONFLICT",
+            "LIMIT",
+            "ERROR"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "autoResult",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "HoldAttemptAutoResult",
+          "symbols": [
+            "FIRST",
+            "FIRST_SPLIT",
+            "SECOND",
+            "SECOND_SPLIT",
+            "MANUAL_REQUIRED"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "retryNo",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "latencyMs",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "occurredAt",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "schemaVersion",
+      "doc": "메시지 형식 판",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    }
+  ]
+}

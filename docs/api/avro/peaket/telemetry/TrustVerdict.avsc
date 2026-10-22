@@ -1,0 +1,128 @@
+{
+  "type": "record",
+  "name": "TrustVerdict",
+  "namespace": "peaket.telemetry",
+  "doc": "봇 판정과 사후 라벨. 토픽 telemetry.trust-verdicts, 키 queueEntryId(없으면 키 없음). trust-svc가 낸다. 봇 판정과 사후 라벨(ADR-0052). 점수 원값·규칙 가중치는 싣지 않는다",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "queueEntryId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "pid",
+      "doc": "사람 식별값(선택). source REASSESS 판정에만 싣는다. 재평가 후보(TrustCandidate)는 pid만 있고 그림자 모드는 IsolateWaiting을 부르지 않아 queueEntryId로 대기 기록과 이을 수 없으므로, 이 값으로 대기 기록(QueueEntryRecord)과 잇는다. 분석 저장소는 적재 때 회차별 가명으로 바꾼다(추천 적용 2026-10-20, ADR-0073)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "category",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "TrustVerdictCategory",
+          "symbols": [
+            "PASS",
+            "CHALLENGE_PASSED",
+            "CHALLENGE_FAILED",
+            "BLOCKED",
+            "HONEYPOT",
+            "LABELED_BOT",
+            "LABELED_HUMAN"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "action",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "TrustVerdictAction",
+          "symbols": [
+            "ALLOW",
+            "CHALLENGE",
+            "BLOCK",
+            "NONE"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "source",
+      "doc": "REASSESS는 대기 중 재평가(ADR-0071)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "TrustVerdictSource",
+          "symbols": [
+            "REALTIME",
+            "HONEYPOT",
+            "SAMPLE_REVIEW",
+            "POST_LABEL",
+            "REASSESS"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "shadow",
+      "doc": "그림자 실행 결과면 true(집행 없음, action NONE). 분석의 봇 지표는 false만 센다(ADR-0071)",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "occurredAt",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "schemaVersion",
+      "doc": "메시지 형식 판",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    }
+  ]
+}

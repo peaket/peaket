@@ -75,7 +75,7 @@ docs/api/proto/
 | 통신 | 이유 | 다음 |
 | --- | --- | --- |
 | 제어 평면 TCP 채널(ops-svc·비상 런북 Job → admission-ctrl·purchase-svc·queue-svc) | 정본이 'IDL 없이 단순 바이너리 프로토콜'로 정했다(docs/features/control-tower.md §5). 장애 복구(모든 대상의 ack, 같은 명령 ID로 다시 보냄, 비상 런북)는 정본에 있지만 메시지 모양과 버전은 없다 | 계약 저장소에서 메시지 모양과 버전을 정한다. proto로 바꿀지는 그때 새 ADR로 정한다 |
-| Kafka 이벤트 스키마(Avro `.avsc`) | 정본은 asyncapi.yaml이고, Avro 원본은 `peaket-contracts`에 둔다고만 적혀 있다 | wbs 0.2.2에서 만든다 |
+| Kafka 이벤트 스키마(Avro `.avsc`) | 정본은 asyncapi.yaml이고, Avro 원본은 `peaket-contracts`에 둔다고만 적혀 있다 | 초안은 docs/api/avro/에 있다(2026-10-22). 등록과 CI 연결은 wbs 0.2.2다 |
 | 관제 지표 서버 스트리밍(ops-svc) | 통신 표에 이름만 있고 받는 쪽과 필드가 없다 | 받는 쪽을 정한 뒤 더한다 |
 | 웹·파트너 앱 서버 → identity-svc 세션 생성 | 통신 표에 gRPC가 아니라 '메시 mTLS 내부 호출'로 따로 적혀 있다 | 형식을 정한 뒤 더한다 |
 | 판매 승인 대기 건 등록(core-svc → ops-svc), 지급 요청 오류 알림(payment-svc → ops-svc) | 흐름도에 전달 방식이 없다. CS 처리함 건은 이벤트 `support.cases-requested`를 쓰는 길이 이미 있다 | 그 이벤트로 될지 먼저 검토한다 |

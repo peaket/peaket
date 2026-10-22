@@ -1,0 +1,42 @@
+{
+  "type": "record",
+  "name": "SessionTerminated",
+  "namespace": "peaket.control",
+  "doc": "로그인 세션 종료. 토픽 control.sessions-terminated, 키 accountId. identity-svc가 낸다(ADR-0011).",
+  "fields": [
+    {
+      "name": "accountId",
+      "type": "string"
+    },
+    {
+      "name": "sessionId",
+      "doc": "로그인 세션 ID(액세스 토큰의 sid). 구매 세션이 아니다",
+      "type": "string"
+    },
+    {
+      "name": "reason",
+      "doc": "DEVICE_LIMIT는 기기 5대 초과로 가장 오래 쓰지 않은 세션 종료(POL-019), ACCOUNT_LOCKED는 관리 계정 연속 실패 잠금(docs/features/identity.md §4)",
+      "type": {
+        "type": "enum",
+        "name": "SessionTerminatedReason",
+        "symbols": [
+          "LOGOUT",
+          "DELETE",
+          "ADMIN_FORCE",
+          "REFRESH_REUSE",
+          "STAFF_REVOKED",
+          "MERGED",
+          "DEVICE_LIMIT",
+          "ACCOUNT_LOCKED"
+        ]
+      }
+    },
+    {
+      "name": "terminatedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

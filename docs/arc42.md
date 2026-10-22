@@ -9,7 +9,7 @@
 
 | 칸 | 이 칸이 답하는 질문 | PEAKET에서 볼 곳 | 상태 | 빈 곳 |
 | --- | --- | --- | --- | --- |
-| 1. 소개와 목표 | 무엇을 왜 만드나, 가장 중요한 품질 목표는 무엇인가 | planning/01-overview.md §1(해결할 문제)·§2(사용자)·§3(목표 지표), planning/02-requirements.md §2(기능 요구사항) | 일부 | 가장 중요한 품질 목표 셋~다섯과 그 순서가 없다 |
+| 1. 소개와 목표 | 무엇을 왜 만드나, 가장 중요한 품질 목표는 무엇인가 | planning/01-overview.md §1(해결할 문제)·§2(사용자)·§3(목표 지표), planning/02-requirements.md §2(기능 요구사항). 2쪽 요약은 planning/00-executive-summary.md | 일부 | 가장 중요한 품질 목표 셋~다섯과 그 순서가 없다 |
 | 2. 제약 | 바꿀 수 없는 조건은 무엇인가 | planning/01-overview.md §5.1(제약사항), docs/architecture.md §8.1(준수 기준), docs/api/guidelines.md, docs/devops.md §2.2(가지 규칙), ADR-0057(운영 환경을 띄우지 않음) | 갖춤 | — |
 | 3. 맥락과 범위 | 바깥의 누구·무엇과 어떻게 주고받나 | 사업 맥락: docs/architecture.md §1(C4 1단계), planning/01-overview.md §4(범위). 기술 맥락: docs/infra.md §2(데이터 흐름도), docs/architecture.md §3.2(통신 표), docs/infra-handover.md §4 | 일부 | 바깥 연동마다 채널·프로토콜·버전을 한 표로 모은 곳이 없다(docs/api/proto/README.md §4에 일부) |
 | 4. 해결 전략 | 큰 방향을 어떻게 정했나 | docs/architecture.md §1(핵심 결정)·§2(문제별 기술 과제)·§6.1(기술 스택과 선정 근거) | 갖춤 | — |

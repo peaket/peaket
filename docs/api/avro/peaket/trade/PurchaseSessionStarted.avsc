@@ -1,0 +1,67 @@
+{
+  "type": "record",
+  "name": "PurchaseSessionStarted",
+  "namespace": "peaket.trade",
+  "doc": "구매 세션 시작. 토픽 trade.purchase-sessions, 키 eventId(회차). purchase-svc Redis Stream 릴레이에서 나간다.",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": "string"
+    },
+    {
+      "name": "purchaseSessionId",
+      "doc": "구매 세션 ID(OrderEvent·SeatEvent·HoldAttempt의 purchaseSessionId와 같은 값)",
+      "type": "string"
+    },
+    {
+      "name": "admissionJti",
+      "doc": "입장 토큰 jti → 입장 자리 식별",
+      "type": "string"
+    },
+    {
+      "name": "startedAt",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "maxStayUntil",
+      "doc": "최대 체류 시각으로 점수 갱신",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "schemaVersion",
+      "doc": "메시지 형식 판",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    }
+  ]
+}

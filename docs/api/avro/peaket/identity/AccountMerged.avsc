@@ -1,0 +1,27 @@
+{
+  "type": "record",
+  "name": "AccountMerged",
+  "namespace": "peaket.identity",
+  "doc": "계정 병합. 토픽 identity.accounts-merged, 키 mergedAccountId. identity-svc가 낸다(POL-034, ADR-0038).",
+  "fields": [
+    {
+      "name": "mergeId",
+      "type": "string"
+    },
+    {
+      "name": "primaryAccountId",
+      "type": "string"
+    },
+    {
+      "name": "mergedAccountId",
+      "type": "string"
+    },
+    {
+      "name": "confirmedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

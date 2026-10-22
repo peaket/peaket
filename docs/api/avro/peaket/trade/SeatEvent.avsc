@@ -1,0 +1,129 @@
+{
+  "type": "record",
+  "name": "SeatEvent",
+  "namespace": "peaket.trade",
+  "doc": "좌석 사건. HELD·RELEASED·EXPIRED는 좌석 Redis Stream 릴레이, PENDING·SOLD·AVAILABLE·RETURNED는 판매 행 seat_sale의 Outbox에서 나간다. 토픽 trade.seats, 키 eventId(회차).",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "seatId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "tierId",
+      "doc": "좌석 등급(선택 필드). 관제 실시간 표의 등급별 판매 좌석(ADR-0072)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "sectionId",
+      "doc": "좌석 구역(선택 필드). 관제 실시간 표의 구역별 판매 좌석(ADR-0072)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "type",
+      "doc": "HELD·RELEASED·EXPIRED는 홀드(좌석 Redis Stream 릴레이), PENDING·SOLD·AVAILABLE·RETURNED는 판매 행 seat_sale의 Outbox다. AVAILABLE은 판매 예약(PENDING) 행을 지워 좌석을 다시 팔 수 있게 됨(승인 실패·승인 기한 만료, 가상계좌 입금 기한 경과·입금 전 회차 취소), RETURNED는 SOLD 좌석이 예매 취소·회차 취소로 반환됨(seat_sale RETURNED. 취소표로 다시 팔 수 있고, 판매 종료 뒤 반환은 다시 팔지 않는다, ADR-0064). seat-hold §4·§6, planning/03 §2.4",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "SeatEventType",
+          "symbols": [
+            "HELD",
+            "RELEASED",
+            "EXPIRED",
+            "PENDING",
+            "SOLD",
+            "AVAILABLE",
+            "RETURNED"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "fencingToken",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "sectionVersion",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "holdId",
+      "doc": "홀드와 판매·만료를 잇는 키(ADR-0052)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "purchaseSessionId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "occurredAt",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "schemaVersion",
+      "doc": "메시지 형식 판",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    }
+  ]
+}

@@ -1,0 +1,176 @@
+{
+  "type": "record",
+  "name": "TicketEvent",
+  "namespace": "peaket.trade",
+  "doc": "티켓 사건(발권·양도·폐기·스캔 등). 토픽 trade.tickets, 키 eventId(회차). ticket-svc Outbox에서 나간다.",
+  "fields": [
+    {
+      "name": "ticketId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "eventId",
+      "doc": "회차 ID(ADR-0052)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "orderId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "accountId",
+      "doc": "보유자 계정 ID. 분석 저장소는 적재 때 가명 처리",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "type",
+      "doc": "양도 요청 수명주기와 돌려주기·회수(POL-017, ADR-0046). VOIDED는 주문의 가상계좌 입금 오류로 티켓 무효(키 폐기, 재입금하면 새로 발권, 추천 적용 2026-10-14, ADR-0062). 계정 ID만 싣고 연락처는 싣지 않는다",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "TicketEventType",
+          "symbols": [
+            "ISSUED",
+            "KEY_REGISTERED",
+            "KEY_REVOKED",
+            "TRANSFER_OFFERED",
+            "TRANSFER_ACCEPTED",
+            "TRANSFER_REJECTED",
+            "TRANSFER_WITHDRAWN",
+            "TRANSFER_EXPIRED",
+            "TRANSFERRED",
+            "TICKET_RETURNED",
+            "TICKET_RECLAIMED",
+            "CANCEL_REQUESTED",
+            "REFUNDED",
+            "VOIDED",
+            "ENTRY_SCANNED",
+            "SCAN_FLAGGED",
+            "SCAN_FLAG_RESOLVED",
+            "ENTRY_CLOSED"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "scanId",
+      "doc": "ENTRY_SCANNED일 때 단말이 만든 스캔 ID(중복 제거 키)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "scanResult",
+      "doc": "ENTRY_SCANNED일 때",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "TicketEventScanResult",
+          "symbols": [
+            "PASS",
+            "REJECT",
+            "CHECK"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "reason",
+      "doc": "ENTRY_SCANNED의 거부 사유 코드(offline-gate §6.5)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "gateZone",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "direction",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "TicketEventDirection",
+          "symbols": [
+            "IN",
+            "OUT"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "scannedAt",
+      "doc": "보정한 스캔 시각",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "occurredAt",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "schemaVersion",
+      "doc": "메시지 형식 판",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    }
+  ]
+}

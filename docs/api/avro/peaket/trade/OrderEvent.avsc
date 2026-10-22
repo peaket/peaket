@@ -1,0 +1,173 @@
+{
+  "type": "record",
+  "name": "OrderEvent",
+  "namespace": "peaket.trade",
+  "doc": "주문 사건(생성·접수·확정·실패·환불 등). 토픽 trade.orders, 키 eventId(회차). purchase-svc Outbox에서 나간다.",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": "string"
+    },
+    {
+      "name": "orderId",
+      "type": "string"
+    },
+    {
+      "name": "accountId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "type",
+      "doc": "EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID는 회차 취소 확정과 배상 지급(ADR-0046). AWAITING_DEPOSIT은 가상계좌 발급(입금 대기), DEPOSIT_REVERSED는 입금 오류로 결제사가 입금을 되돌려 확정된 주문이 입금 대기로 돌아감(planning/03 §2.4, 추천 적용 2026-10-14, ADR-0062)",
+      "type": {
+        "type": "enum",
+        "name": "OrderEventType",
+        "symbols": [
+          "CREATED",
+          "ACCEPTED",
+          "RESERVED",
+          "AWAITING_DEPOSIT",
+          "APPROVED",
+          "CONFIRMED",
+          "DEPOSIT_REVERSED",
+          "FAILED",
+          "COMPENSATED",
+          "PARTIALLY_REFUNDED",
+          "REFUNDED",
+          "EVENT_CANCELLATION_CONFIRMED",
+          "COMPENSATION_PAID"
+        ]
+      }
+    },
+    {
+      "name": "amount",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "seatIds",
+      "type": [
+        "null",
+        {
+          "type": "array",
+          "items": "string"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "purchaseSessionId",
+      "doc": "구매 세션 ID(분석 연결 키, ADR-0052)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "items",
+      "doc": "좌석별 등급·구역·가격(ADR-0052)",
+      "type": [
+        "null",
+        {
+          "type": "array",
+          "items": {
+            "type": "record",
+            "name": "OrderEventItem",
+            "fields": [
+              {
+                "name": "seatId",
+                "type": [
+                  "null",
+                  "string"
+                ],
+                "default": null
+              },
+              {
+                "name": "tierId",
+                "type": [
+                  "null",
+                  "string"
+                ],
+                "default": null
+              },
+              {
+                "name": "sectionId",
+                "type": [
+                  "null",
+                  "string"
+                ],
+                "default": null
+              },
+              {
+                "name": "price",
+                "type": [
+                  "null",
+                  "long"
+                ],
+                "default": null
+              }
+            ]
+          }
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "seatAssignment",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "OrderEventSeatAssignment",
+          "symbols": [
+            "PICK",
+            "AUTO"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "idempotencyKey",
+      "doc": "멱등 컨슈머 키",
+      "type": "string"
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "schemaVersion",
+      "doc": "메시지 형식 판",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    }
+  ]
+}

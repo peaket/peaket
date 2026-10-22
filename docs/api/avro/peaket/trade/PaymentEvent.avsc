@@ -1,0 +1,180 @@
+{
+  "type": "record",
+  "name": "PaymentEvent",
+  "namespace": "peaket.trade",
+  "doc": "결제 사건(승인·실패·UNKNOWN·취소 등). 토픽 trade.payments, 키 eventId(회차). payment-svc Outbox에서 나간다.",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "orderId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "pg",
+      "doc": "결제 접수에서 고정된 결제사(ADR-0044). 결제사 결제 참조(토스 paymentKey, 포트원 paymentId)는 싣지 않고 주문 ID로 잇는다(ADR-0053)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "PaymentEventPg",
+          "symbols": [
+            "TOSS",
+            "PORTONE",
+            "SIMULATOR"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "type",
+      "doc": "AWAITING_DEPOSIT은 가상계좌 발급, APPROVED는 가상계좌면 입금 확인, DEPOSIT_REVERSED는 입금 오류로 결제사가 입금을 되돌림(조회로 확인, payment §6, 추천 적용 2026-10-14, ADR-0062). RESOLVED는 UNKNOWN 해소 기록이고 해소 결과는 result에 싣는다. 결과가 승인이면 APPROVED, 가상계좌 발급이면 AWAITING_DEPOSIT, 미승인이면 FAILED 사건을 따로 낸다(추천 적용 2026-10-20, ADR-0073)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "PaymentEventType",
+          "symbols": [
+            "AWAITING_DEPOSIT",
+            "APPROVED",
+            "DEPOSIT_REVERSED",
+            "FAILED",
+            "UNKNOWN",
+            "RESOLVED",
+            "PARTIAL_CANCELED",
+            "CANCELED"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "amount",
+      "doc": "원 단위(ADR-0052)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "payMethodCategory",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "PaymentEventPayMethodCategory",
+          "symbols": [
+            "CARD",
+            "EASY_PAY",
+            "TRANSFER",
+            "OTHER"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "result",
+      "doc": "payment §2.1 정규화 결과. WAITING_FOR_DEPOSIT은 가상계좌 발급(RESOLVED의 결과로도 온다, ADR-0073)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "PaymentEventResult",
+          "symbols": [
+            "APPROVED",
+            "ALREADY_APPROVED",
+            "IN_PROGRESS",
+            "DECLINED",
+            "WAITING_FOR_DEPOSIT",
+            "UNKNOWN"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "failureCategory",
+      "doc": "실패일 때만. 결제 어댑터가 정한다(payment §2.1)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "PaymentEventFailureCategory",
+          "symbols": [
+            "CARD_DECLINED",
+            "USER_ABORTED",
+            "VALIDATION",
+            "EXPIRED",
+            "PG_ERROR",
+            "THROTTLED"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "attemptNo",
+      "doc": "같은 주문의 결제 시도 순번",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "latencyMs",
+      "doc": "결제사 승인 응답 시간",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "occurredAt",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "schemaVersion",
+      "doc": "메시지 형식 판",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    }
+  ]
+}

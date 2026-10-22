@@ -1,0 +1,70 @@
+{
+  "type": "record",
+  "name": "CaseRequested",
+  "namespace": "peaket.support",
+  "doc": "CS 처리함 건 요청. 토픽 support.cases-requested, 키 sourceId. core-svc support·review 모듈의 Outbox에서 나간다(ADR-0066).",
+  "fields": [
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키. 같은 사건을 다시 보내면 같은 값",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "kind",
+      "doc": "CsCase 종류(data.md cs_case)",
+      "type": {
+        "type": "enum",
+        "name": "CaseRequestedKind",
+        "symbols": [
+          "INQUIRY",
+          "DISPUTE",
+          "MINOR_CONTRACT_CANCEL",
+          "CONTENT_REPORT",
+          "RIGHTS_REQUEST"
+        ]
+      }
+    },
+    {
+      "name": "sourceId",
+      "doc": "문의 ID(inquiryId) 또는 신고 대상 후기 ID(reviewId)",
+      "type": "string"
+    },
+    {
+      "name": "category",
+      "doc": "문의 유형 코드 또는 신고 사유 코드(SCALPING·MACRO·ABUSE·RIGHTS·ILLEGAL_FILMING·SPAM·OFF_TOPIC·OTHER)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "followUp",
+      "doc": "추가 문의면 true(기존 건을 다시 처리 중으로)",
+      "type": [
+        "null",
+        "boolean"
+      ],
+      "default": null
+    },
+    {
+      "name": "hold",
+      "doc": "불법 촬영물 신고로 후기를 바로 가렸으면 true(FILMING_HOLD, POL-044)",
+      "type": [
+        "null",
+        "boolean"
+      ],
+      "default": null
+    },
+    {
+      "name": "createdAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

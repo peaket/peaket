@@ -1,0 +1,172 @@
+{
+  "type": "record",
+  "name": "BehaviorSignal",
+  "namespace": "peaket.telemetry",
+  "doc": "행동 신호 요약. 토픽 telemetry.behavior, 키 pid. trust-svc가 사전 검증 때 기기 식별값을 탐지 가명으로 바꿔 낸다(ADR-0053·0071).",
+  "fields": [
+    {
+      "name": "pid",
+      "doc": "사람 식별값",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "deviceRef",
+      "doc": "HMAC-SHA256(탐지 가명 키, 기기 식별값). trust-svc가 Kafka에 넣기 전에 바꾼다(ADR-0053)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "eventId",
+      "doc": "사전 검증한 회차(ADR-0071)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "netClass",
+      "doc": "요청 IP의 네트워크 유형(ADR-0071)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "BehaviorSignalNetClass",
+          "symbols": [
+            "HOSTING",
+            "PROXY",
+            "OTHER"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "asn",
+      "doc": "netClass가 HOSTING·PROXY일 때만 싣는다(ADR-0071)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "features",
+      "doc": "포인터 엔트로피, 타이핑 간격 분산, 헤더 순서 등",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "BehaviorSignalFeatures",
+          "doc": "브라우저가 낸 행동 신호 요약값. asyncapi는 형식을 정하지 않은 object라 openapi BehaviorSummary와 같은 필드로 맞췄다(추천 적용 2026-10-22, docs/streaming.md §5.2, ADR-0065 결정 9).",
+          "fields": [
+            {
+              "name": "v",
+              "doc": "형식 버전",
+              "type": "long"
+            },
+            {
+              "name": "windowMs",
+              "doc": "요약한 구간 길이(밀리초)",
+              "type": "long"
+            },
+            {
+              "name": "pointerMoves",
+              "doc": "포인터 이동 이벤트 수",
+              "type": [
+                "null",
+                "long"
+              ],
+              "default": null
+            },
+            {
+              "name": "pointerEntropy",
+              "doc": "포인터 이동 방향의 엔트로피(비트)",
+              "type": [
+                "null",
+                "double"
+              ],
+              "default": null
+            },
+            {
+              "name": "inputIntervalMeanMs",
+              "doc": "터치·키 입력 간격 평균(밀리초)",
+              "type": [
+                "null",
+                "double"
+              ],
+              "default": null
+            },
+            {
+              "name": "inputIntervalStdMs",
+              "doc": "터치·키 입력 간격 표준편차(밀리초)",
+              "type": [
+                "null",
+                "double"
+              ],
+              "default": null
+            },
+            {
+              "name": "scrollEvents",
+              "doc": "스크롤 이벤트 수",
+              "type": [
+                "null",
+                "long"
+              ],
+              "default": null
+            },
+            {
+              "name": "scrollDistancePx",
+              "doc": "스크롤 이동 거리 합(CSS 픽셀)",
+              "type": [
+                "null",
+                "long"
+              ],
+              "default": null
+            }
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "ts",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "schemaVersion",
+      "doc": "메시지 형식 판",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    }
+  ]
+}

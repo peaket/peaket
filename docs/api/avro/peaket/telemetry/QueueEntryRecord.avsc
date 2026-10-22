@@ -1,0 +1,176 @@
+{
+  "type": "record",
+  "name": "QueueEntryRecord",
+  "namespace": "peaket.telemetry",
+  "doc": "사람별 대기 기록. 토픽 telemetry.queue, 키 pid. queue-svc가 대기가 끝날 때 한 건 낸다. 사람별 대기 기록. 대기가 입장 확정·빠진 번호·그 회차의 판매 종료로 끝날 때 한 건(ADR-0052. 판매가 온세일 윈도우로 끝나지 않는 것은 ADR-0063 결정 11, 판매 종료 = 공연 시작 24시간 전은 ADR-0064)",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "queueEntryId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "pid",
+      "doc": "분석 저장소는 적재 때 회차별 가명으로 바꾼다",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "number",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "entryMode",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "QueueEntryRecordEntryMode",
+          "symbols": [
+            "LOBBY",
+            "AFTER_OPEN"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "enteredAt",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "firstEtaSec",
+      "doc": "처음 보인 예상 대기(초)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "turnAt",
+      "doc": "차례가 온 시각",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "admittedAt",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "admissionJti",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "removedAt",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "removeReason",
+      "doc": "NO_CONFIRM 차례 뒤 15분 안에 입장 확정 없음, LEFT 대기 취소, BLOCKED 추가 검증 실패·이의 기각, SALE_END 차례 전(또는 차례 뒤 입장 확정 전)에 그 회차의 판매 종료(공연 시작 24시간 전 = starts_at − 24시간, 소유자 결정 2026-10-14, ADR-0064)나 매진(온세일 윈도우 종료가 아님, ADR-0063 결정 11. 예전 이름 WINDOW_END), DUPLICATE 1인 1순번 위반 무효(입장 확정 때 다른 대기표로 이미 입장, ADR-0056)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "QueueEntryRecordRemoveReason",
+          "symbols": [
+            "NO_CONFIRM",
+            "LEFT",
+            "BLOCKED",
+            "SALE_END",
+            "DUPLICATE"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "verifyRoute",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "QueueEntryRecordVerifyRoute",
+          "symbols": [
+            "DIRECT",
+            "CHALLENGE_PASSED",
+            "CHALLENGE_FAILED",
+            "BLOCKED"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "schemaVersion",
+      "doc": "메시지 형식 판",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    }
+  ]
+}
