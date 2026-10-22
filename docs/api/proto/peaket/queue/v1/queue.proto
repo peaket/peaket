@@ -1,0 +1,43 @@
+// queue-svc가 제공하는 내부 대기열 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
+// 정본: docs/streaming.md §5.3(패턴)·§5.4(후보와 eventKey)·§5.5(trust-svc의 처리),
+// docs/features/queue-admission.md §7(격리 기록과 복귀), ADR-0071.
+syntax = "proto3";
+
+package peaket.queue.v1;
+
+// 부르는 쪽: trust-svc(대기 중 재평가가 '적용' 모드일 때).
+service QueueService {
+  // 아직 기다리는 사람을 추가 검증 큐로 옮긴다. 후보의 event_key로 멱등하다.
+  // queue-svc는 1인 1순번 키로 그 사람의 대기표(로비 참가자는 참가 토큰)를 찾아 빠진 번호와 VERIFYING을 쓴다.
+  // 격리는 차단이 아니다. 추가 검증, 이의 제기, 설명 요구는 그대로다.
+  rpc IsolateWaiting(IsolateWaitingRequest) returns (IsolateWaitingResponse);
+}
+
+// 대기 중 재평가 패턴(docs/streaming.md §5.3).
+enum ReassessPattern {
+  REASSESS_PATTERN_UNSPECIFIED = 0;
+  // R1 기기 공유 소급
+  REASSESS_PATTERN_DEVICE_SHARE = 1;
+  // R2 행동 요약값 복제
+  REASSESS_PATTERN_BEHAVIOR_REPLAY = 2;
+}
+
+message IsolateWaitingRequest {
+  string event_id = 1;
+  string pid = 2;
+  // 후보 키. SHA-256("PEAKET-reassess-v1" ‖ 회차 ID ‖ pid ‖ 패턴 ‖ 10분 칸 시작)으로 만든 UUIDv8 문자열이다.
+  string event_key = 3;
+  ReassessPattern pattern = 4;
+}
+
+enum IsolateResult {
+  ISOLATE_RESULT_UNSPECIFIED = 0;
+  ISOLATE_RESULT_ISOLATED = 1;
+  // 이미 입장했거나 대기가 끝났다. trust-svc는 라벨만 남긴다.
+  ISOLATE_RESULT_NOT_WAITING = 2;
+  ISOLATE_RESULT_ALREADY_ISOLATED = 3;
+}
+
+message IsolateWaitingResponse {
+  IsolateResult result = 1;
+}

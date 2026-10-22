@@ -1,0 +1,20 @@
+// 여러 서비스가 함께 쓰는 값. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
+syntax = "proto3";
+
+package peaket.common.v1;
+
+// 원화 금액. 원 단위 정수이고 소수는 없다.
+message Money {
+  int64 krw = 1;
+}
+
+// 결제사. openapi `PaymentAttempt.pg`와 같은 값이다.
+enum PgProvider {
+  PG_PROVIDER_UNSPECIFIED = 0;
+  // 토스페이먼츠
+  PG_PROVIDER_TOSS = 1;
+  // 포트원 V2
+  PG_PROVIDER_PORTONE = 2;
+  // 부하·시험 환경 전용 결제사 시뮬레이터
+  PG_PROVIDER_SIMULATOR = 3;
+}

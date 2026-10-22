@@ -1,0 +1,27 @@
+// identity-svc가 제공하는 내부 본인확인 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
+// 정본: docs/features/identity.md(주문 생성 때 본인확인 재확인), docs/features/payment.md §2·§9(identity-svc 장애),
+// ADR-0055(응답이 없을 때 토큰 값으로 판정), docs/architecture.md §3.2.
+syntax = "proto3";
+
+package peaket.identity.v1;
+
+// 부르는 쪽: purchase-svc(주문 생성, 결제 직전).
+service IdentityService {
+  // 본인확인 유효 상태를 다시 확인한다.
+  // 응답이 없거나 데드라인을 넘기면 부르는 쪽은 게이트웨이가 넘긴 토큰 값(ticket:buy와 pid)으로 판정한다.
+  // '유효하지 않음' 응답은 그대로 거부한다(ADR-0055).
+  rpc GetVerificationStatus(GetVerificationStatusRequest) returns (GetVerificationStatusResponse);
+}
+
+message GetVerificationStatusRequest {
+  string account_id = 1;
+  // 액세스 토큰의 세션 ID(sid). 끝난 세션이면 유효하지 않다.
+  string session_id = 2;
+}
+
+message GetVerificationStatusResponse {
+  // 휴대폰 본인확인을 마쳤고 세션이 살아 있으면 true.
+  bool verified = 1;
+  // 본인확인 때 저장한 사람 식별값. 토큰의 pid와 다르면 부르는 쪽이 거부한다.
+  string pid = 2;
+}

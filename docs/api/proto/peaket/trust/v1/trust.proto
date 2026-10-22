@@ -1,0 +1,80 @@
+// trust-svc가 제공하는 내부 위험 판정 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
+// 정본: docs/features/queue-admission.md §2(로비 입장 흐름)·§7(추가 검증 큐와 위험 점수 신호),
+// docs/features/identity.md(로그인 위험 점수), docs/streaming.md §5.5(판정 피처), docs/api/openapi.yaml `BehaviorSummary`.
+syntax = "proto3";
+
+package peaket.trust.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// 부르는 쪽: queue-svc(로비 입장·사전 검증), identity-svc(로그인).
+service TrustService {
+  // 위험 판정. 사람 확인 토큰의 서버 검증을 함께 한다.
+  // 점수 원값과 규칙 가중치는 돌려주지 않는다(POL-006). 판정 기록은 trust-svc가 telemetry.trust-verdicts로 낸다.
+  // trust-svc가 멈추면 부르는 쪽은 진입을 막지 않고 캐시 규칙과 보수적 레이트 리밋으로 축소 운영한다(FR-039).
+  rpc ScoreRisk(ScoreRiskRequest) returns (ScoreRiskResponse);
+}
+
+// 판정하는 때.
+enum ScoreContext {
+  SCORE_CONTEXT_UNSPECIFIED = 0;
+  SCORE_CONTEXT_LOBBY_ENTRY = 1;
+  SCORE_CONTEXT_PREVERIFY = 2;
+  SCORE_CONTEXT_LOGIN = 3;
+}
+
+message ScoreRiskRequest {
+  ScoreContext context = 1;
+  // 로그인 판정이면 비운다.
+  string event_id = 2;
+  // 사람 식별값(게이트웨이 내부 헤더). 로그인 전이면 비운다.
+  string pid = 3;
+  string account_id = 4;
+  // 사람 확인 토큰. trust-svc가 서버 검증한다. 300초 1회용이라 저장하지 않는다.
+  string human_check_token = 5;
+  // 브라우저가 보낸 기기 식별값. trust-svc가 탐지 가명으로 바꾼 뒤에만 저장한다(ADR-0053).
+  string device_id = 6;
+  // 공연 상세에서 잰 행동 요약값(사전 검증 때). 원시 좌표·키 값·입력한 글자는 받지 않는다.
+  BehaviorSummary behavior = 7;
+  ClientSignals client = 8;
+  // 서명을 확인한 최초 방문 쿠키의 발급 시각. 쿠키가 없으면 비운다.
+  google.protobuf.Timestamp first_visit_at = 9;
+  google.protobuf.Timestamp session_created_at = 10;
+}
+
+// openapi `BehaviorSummary`와 같은 필드다. 필드 구성과 범위는 가정이고 wbs 3.2.1에서 확정한다.
+message BehaviorSummary {
+  // 형식 버전(지금은 1)
+  int32 v = 1;
+  int32 window_ms = 2;
+  int32 pointer_moves = 3;
+  double pointer_entropy = 4;
+  double input_interval_mean_ms = 5;
+  double input_interval_std_ms = 6;
+  int32 scroll_events = 7;
+  int32 scroll_distance_px = 8;
+}
+
+// 게이트웨이가 넘긴 요청 정보.
+message ClientSignals {
+  string ip = 1;
+  string user_agent = 2;
+  // Client Hints(플랫폼, 모바일 여부 등). 헤더 이름이 키다.
+  map<string, string> client_hints = 3;
+}
+
+enum Verdict {
+  VERDICT_UNSPECIFIED = 0;
+  VERDICT_ALLOW = 1;
+  // 추가 검증 큐로 보낸다(차단이 아니다).
+  VERDICT_VERIFY = 2;
+  VERDICT_BLOCK = 3;
+}
+
+message ScoreRiskResponse {
+  Verdict verdict = 1;
+  // 사용자에게 안내할 사유 범주. 내부 가중치와 기준값은 담지 않는다.
+  string reason_category = 2;
+  // trust-svc가 캐시 규칙으로 축소 운영 중이면 true.
+  bool degraded = 3;
+}

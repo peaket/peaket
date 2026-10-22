@@ -1,0 +1,65 @@
+// core-svc가 제공하는 판매 승인 결과·게시물 조치 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
+// 정본: docs/features/transfer-refund.md §2.1(판매 승인), docs/features/control-tower.md §1·§5(review API, 명령 10),
+// docs/architecture.md §3.1(core-svc review 모듈), POL-024·POL-044, ADR-0045·0066.
+// 흐름도에는 있지만 통신 표(docs/architecture.md §3.2)에 아직 없는 호출이다.
+syntax = "proto3";
+
+package peaket.core.v1;
+
+// 부르는 쪽: ops-svc(판매 승인 SCR-048).
+service SaleReviewService {
+  // 판매 승인 결과를 반영한다. 승인이면 공개·오픈 예약이 가능해지고, 반려면 파트너에게 사유를 알린다.
+  rpc RecordSaleReviewResult(RecordSaleReviewResultRequest) returns (RecordSaleReviewResultResponse);
+}
+
+enum SaleReviewResult {
+  SALE_REVIEW_RESULT_UNSPECIFIED = 0;
+  SALE_REVIEW_RESULT_APPROVED = 1;
+  SALE_REVIEW_RESULT_REJECTED = 2;
+}
+
+message RecordSaleReviewResultRequest {
+  string event_id = 1;
+  SaleReviewResult result = 2;
+  // 반려면 꼭 채운다.
+  string reason = 3;
+  string reviewed_by = 4;
+}
+
+message RecordSaleReviewResultResponse {
+  bool applied = 1;
+}
+
+// 부르는 쪽: ops-svc(CS 처리함의 신고 처리, 명령 10 부정거래 게시물 노출 차단).
+service ReviewModerationService {
+  // 게시물에 조치를 반영한다. 명령 10은 공문 통보 문서 ID와 대상 게시물을 한 번에 묶어 반영한다.
+  rpc ApplyModeration(ApplyModerationRequest) returns (ApplyModerationResponse);
+}
+
+// 게시물 조치(용어 사전의 표준어 기준).
+enum ModerationAction {
+  MODERATION_ACTION_UNSPECIFIED = 0;
+  // 조치 없음(신고를 받아들이지 않음)
+  MODERATION_ACTION_NONE = 1;
+  // 임시조치
+  MODERATION_ACTION_TEMPORARY_MEASURE = 2;
+  // 노출 차단(명령 10 포함)
+  MODERATION_ACTION_DISPLAY_BLOCK = 3;
+  // 불법 촬영물 신고 가림
+  MODERATION_ACTION_ILLEGAL_FILMING_MASK = 4;
+}
+
+message ApplyModerationRequest {
+  repeated string review_ids = 1;
+  ModerationAction action = 2;
+  // CS 처리함 건 ID(신고 처리일 때)
+  string case_id = 3;
+  // 공문 통보 문서 ID(명령 10일 때)
+  string notice_document_id = 4;
+  string reason = 5;
+  string acted_by = 6;
+}
+
+message ApplyModerationResponse {
+  int32 applied_count = 1;
+}

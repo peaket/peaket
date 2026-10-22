@@ -1,0 +1,100 @@
+// purchase-svc가 제공하는 회차 취소 일괄 환불 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
+// 정본: docs/features/transfer-refund.md §5(회차 취소와 일괄 환불 작업)·§6(배상 지급), POL-032·POL-038, ADR-0046.
+// 흐름도에는 있지만 통신 표(docs/architecture.md §3.2)에 아직 없는 호출이다.
+syntax = "proto3";
+
+package peaket.purchase.v1;
+
+import "google/protobuf/timestamp.proto";
+import "peaket/common/v1/common.proto";
+
+// 부르는 쪽: ops-svc(관제 콘솔 SCR-047의 판정·미리보기·2인 확정).
+service EventRefundService {
+  // 판정을 넣으면 대상 주문 수, 환급 총액, 배상 대상·총액, 결제사별 건수·예상 시간을 돌려준다. 아무것도 바꾸지 않는다.
+  rpc PreviewEventRefund(PreviewEventRefundRequest) returns (PreviewEventRefundResponse);
+
+  // 2인 확정 뒤 일괄 환불 작업을 시작한다. 실행된 환불은 되돌리지 않는다.
+  // 결제사별 처리 한도 안에서 나눠 실행하고, 각 취소는 payment-svc CancelPayment(cancel-{cancellation_id})로 한다.
+  rpc StartEventRefund(StartEventRefundRequest) returns (StartEventRefundResponse);
+
+  // 진행률과 실패 건 수. 실패 건은 CS 처리함으로 간다.
+  rpc GetEventRefundJob(GetEventRefundJobRequest) returns (GetEventRefundJobResponse);
+
+  // 스스로 멈춘 작업을 다시 시작한다. 2인 확정 범위 안에서 commander만 한다.
+  rpc ResumeEventRefundJob(ResumeEventRefundJobRequest) returns (ResumeEventRefundJobResponse);
+}
+
+// 회차 취소 판정.
+enum CancellationRuling {
+  CANCELLATION_RULING_UNSPECIFIED = 0;
+  // 주최 측 귀책. 배상 대상이다.
+  CANCELLATION_RULING_HOST_FAULT = 1;
+  // 불가항력
+  CANCELLATION_RULING_FORCE_MAJEURE = 2;
+  // 공연 내용 변경. 배상 대상이다.
+  CANCELLATION_RULING_CONTENT_CHANGE = 3;
+}
+
+message PreviewEventRefundRequest {
+  string event_id = 1;
+  string cancellation_request_id = 2;
+  CancellationRuling ruling = 3;
+}
+
+message PgRefundEstimate {
+  peaket.common.v1.PgProvider pg = 1;
+  int32 orders = 2;
+  // 결제사 처리 한도로 셈한 예상 시간(초)
+  int32 estimated_seconds = 3;
+}
+
+message PreviewEventRefundResponse {
+  int32 target_orders = 1;
+  peaket.common.v1.Money refund_total = 2;
+  int32 compensation_targets = 3;
+  peaket.common.v1.Money compensation_total = 4;
+  repeated PgRefundEstimate per_pg = 5;
+}
+
+message StartEventRefundRequest {
+  string event_id = 1;
+  string cancellation_request_id = 2;
+  CancellationRuling ruling = 3;
+  // 판정한 사람과 확정한 두 번째 사람. 두 사람은 달라야 한다.
+  string ruled_by = 4;
+  string confirmed_by = 5;
+  google.protobuf.Timestamp confirmed_at = 6;
+}
+
+message StartEventRefundResponse {
+  string job_id = 1;
+}
+
+message GetEventRefundJobRequest {
+  string job_id = 1;
+}
+
+enum RefundJobState {
+  REFUND_JOB_STATE_UNSPECIFIED = 0;
+  REFUND_JOB_STATE_RUNNING = 1;
+  // 오류율이 기준을 넘어 스스로 멈췄다.
+  REFUND_JOB_STATE_PAUSED = 2;
+  REFUND_JOB_STATE_COMPLETED = 3;
+}
+
+message GetEventRefundJobResponse {
+  RefundJobState state = 1;
+  int32 total_orders = 2;
+  int32 done_orders = 3;
+  int32 failed_orders = 4;
+}
+
+message ResumeEventRefundJobRequest {
+  string job_id = 1;
+  string resumed_by = 2;
+  string reason = 3;
+}
+
+message ResumeEventRefundJobResponse {
+  RefundJobState state = 1;
+}
