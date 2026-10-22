@@ -382,5 +382,5 @@ Grafana 대시보드는 Git에 코드로 두고 배포한다(Dashboards as Code)
 | 런북 파일 | 목록만(docs/infra.md §10) | wbs 4.7.1에서 `runbooks/`에 쓰고, 런북마다 담당 역할과 목표 시간을 적는다 |
 | 외부 연락처 | 없음 | 계약 때 §5.1에 더한다 |
 | AZ 전체 장애 시험 | Game Day에 없음(관측 스택 AZ만 G-26) | 관측 외 구성 요소까지 AZ 하나를 통째로 멈추는 시나리오를 더할지 정한다 |
-| 보존 표 빈칸 | docs/observability.md §9에 Kafka 보존(관측 전용은 가정), Sentry, CloudTrail·EKS 감사·WAF 로그, 백업 보존이 없다 | 다듬기 반영 뒤 docs/observability.md §9에 행을 더한다 |
-| 문서끼리 어긋난 곳 | 운영 감사 로그 보존이 docs/observability.md §7은 '영구 보존', §9는 '접속기록 2년, 권한 변경 3년 이상'이다. docs/infra.md §1 구성도는 Kafka를 둘로 그렸지만 관측 전용 클러스터를 더해 셋이다. docs/infra.md §2 그림은 스캐너가 엣지를 거치게 그렸다 | 다듬기 반영 뒤 정본 쪽을 고친다. 이 문서의 §2·§4는 바로잡은 그림이다 |
+| 보존 표 빈칸 | 2026-10-22에 docs/observability.md §9에 Kafka(앱용 7일, 관측 전용은 가정), AWS·쿠버네티스·운영 DB 감사 기록, AWS WAF 로그, 저장소 백업 행을 더했다. Sentry 행은 이미 있었다(운영 방식과 함께 wbs 4.8.2에서 정한다) | 관측 전용 Kafka 보존은 wbs 4.1.4에서, AWS WAF 로그 보존은 따로 정한다 |
+| 문서끼리 어긋난 곳 | 2026-10-22에 고쳤다. 운영 감사 로그는 docs/observability.md §9에 영구 보존과 법정 최소(2년·3년 이상)를 함께 적었다. docs/infra.md §1 그림의 'MSK ×2'에는 관측 전용 MSK가 관측 묶음에 따로 있다고 적었다. docs/infra.md §2 그림에는 CloudFront를 거치지 않는 스캐너 경로를 더했다 | — |

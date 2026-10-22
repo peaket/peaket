@@ -163,7 +163,7 @@ spec:
 | `analytics-ingest` | 거래·제어 7개, 텔레메트리 3개 | `peaket.analytics-ingest.<환경>` | EARLIEST(보관된 7일 치 전부) | 없다 |
 
 - 인증은 MSK IAM이다. 소비자·생산자 설정에 `security.protocol=SASL_SSL`, `sasl.mechanism=AWS_MSK_IAM`, `sasl.jaas.config=software.amazon.msk.auth.iam.IAMLoginModule required;`, `sasl.client.callback.handler.class=software.amazon.msk.auth.iam.IAMClientCallbackHandler`를 넣는다(AWS 문서). 이 라이브러리가 Pod Identity 자격 증명을 읽는지는 확인 필요다(wbs 4.3.1 PoC).
-- 역직렬화는 `ConfluentRegistryAvroDeserializationSchema.forSpecific`(계약에서 만든 Avro 클래스)를 Kafka 레코드 역직렬화기로 감싸서 하고, 토픽·파티션·오프셋·Kafka 시각을 함께 넘긴다. 레지스트리가 잠시 멈춰도 이미 받은 스키마 ID는 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)에서 읽는다. 새 스키마 ID를 못 읽으면 그 레코드는 거절 처리(§4.2·§6.3)로 간다.
+- 역직렬화는 `ConfluentRegistryAvroDeserializationSchema.forSpecific`(계약에서 만든 Avro 클래스)를 Kafka 레코드 역직렬화기로 감싸서 하고, 토픽·파티션·오프셋·Kafka 시각을 함께 넘긴다. 레지스트리가 잠시 멈춰도 이미 받은 스키마 ID는 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)에서 읽는다. 새 스키마 ID를 못 읽으면 그 레코드는 거절 처리(§4.2·§6.3)로 간다. 클래스 하나로 읽는 `forSpecific`은 레코드가 한 종류인 토픽에만 맞는다. Avro는 쓴 쪽과 읽는 쪽 레코드의 이름이 같아야 맞추기 때문이다. 레코드가 여러 종류 실리는 토픽(`telemetry.queue`·`telemetry.purchase`·`telemetry.trust-verdicts`의 `PipelinePulse`, `trade.purchase-sessions`)은 그 토픽 레코드들의 유니온을 읽기 스키마로 쓰거나, 레코드 이름으로 나눠 읽는 역직렬화기를 둔다. 어느 쪽으로 할지는 wbs 0.2.2의 스키마 CI를 만들 때 정한다(추천 적용 2026-10-22, docs/api/avro/README.md §3).
 - 새 파티션을 찾는 주기는 기본값(5분)을 쓴다. 이벤트 시각은 Kafka 레코드 시각이 아니라 메시지 안의 시각(`second`·`occurredAt`·`producedAt`)이다.
 - `client.id.prefix`는 `<잡>-<환경>`이다. 소스 지표 `pendingRecords`(아직 읽지 않은 레코드 수)와 `sourceIdleTime`으로 밀림과 끊김을 본다(§14).
 - `trust-reassess`의 Kafka 싱크는 전달 보장을 `AT_LEAST_ONCE`로 적어 둔다. 기본값이 `NONE`(보장 없음)이라서, 적지 않으면 체크포인트 때 기다리지 않는다.

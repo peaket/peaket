@@ -41,7 +41,7 @@ flowchart TB
         subgraph Managed["관리형 데이터"]
             AUR["Aurora PostgreSQL ×4 클러스터\n(purchase, payment, ticket, 공유: identity·ops·core)"]
             RED["ElastiCache Valkey/Redis 클러스터 모드 ×3\n(대기열, 좌석, 세션·캐시)"]
-            MSK["MSK ×2(거래·제어 / 텔레메트리)"]
+            MSK["MSK ×2(거래·제어 / 텔레메트리)\n관측 전용 MSK는 관측 묶음에 따로"]
             S3["S3(Iceberg 아카이브, 백업, Flink 체크포인트)"]
         end
         KMS["KMS, Secrets Manager(External Secrets Operator), ACM"]
@@ -75,6 +75,7 @@ flowchart TB
 flowchart LR
     subgraph TB0["경계 0: 사용자 기기(신뢰하지 않음)"]
         B["브라우저·PWA\n기기 개인키(추출 불가), IndexedDB"]
+        SC["게이트 스캐너 PWA\n관리 기기, 기기 인증서"]
     end
     subgraph TB1["경계 1: 엣지(CDN·WAF·엣지 함수)"]
         E["캐시된 대기 상태·셔플 결과 파일\n매진 정적 응답, 도착 시각 쿠키 서명"]
@@ -92,6 +93,7 @@ flowchart LR
         X1["PG: 토스(기본)·포트원(승인·취소·웹훅)"]; X2["본인확인 업체(연계정보 → HMAC만 저장)"]; X3["사람 확인(Turnstile)"]; X4["파트너 웹훅 수신처(https, SSRF 방지)"]; X5["신고기관·수사기관(서면)"]
     end
     B -->|"HTTPS, 쿠키(httpOnly)"| E --> G --> Q & P & I & O
+    SC -->|"스캐너 API: HTTPS mTLS, CloudFront 안 거침(§4.1)"| G
     Q <--> R; P <--> R; P <--> DB; I <--> DB; O <--> DB; P & O & I --> K --> C; G --> L; O --> A
     P <-->|"시크릿 키 Basic, 호출 IP 제한"| X1; X1 -->|"웹훅(토스 결제 웹훅은 서명 없음·지급 웹훅은 서명 검증, 포트원은 서명 검증. 모두 조회 API 재확인)"| G
     I <--> X2; I -->|"위험 점수"| X3; O -->|"HMAC 서명"| X4; O -.문서.-> X5
@@ -250,7 +252,7 @@ flowchart LR
 | 서비스 간 통신 계층 | 서비스 메시 기반 상호 TLS(mTLS)로 전 구간 암호화(내부망 전송 구간 암호화 의무 준수, 개인정보보호 기술적 안내서 82쪽). 내부 인증 헤더는 API 게이트웨이와 검증된 내부 신원 파드에서만 주입 가능하도록 제한. TLS 기준은 외부 TLS 1.2 이상·1.3 우선(1.2는 ECDHE와 AEAD 스위트만, CloudFront TLSv1.2_2021 이상), 내부 메시 TLS 1.3, 관리형 저장소는 지원하는 최고 버전이다(Aurora `rds.force_ssl=1`·클라이언트 `verify-full`, ElastiCache 전송 암호화, MSK TLS 1.2. ADR-0050 결정 6). CloudFront에서 원본으로 가는 구간은 HTTPS만(최소 TLS 1.2) 쓰고, 원본 NLB 보안 그룹은 CloudFront 관리형 접두사 목록만 받으며, 게이트웨이는 원본 확인 헤더 값을 확인한다(gw-scanner는 다른 리스너와 mTLS, ADR-0053 결정 9) |
 | 저장소 인증 계층 | 저장소마다 서비스 사용자로 인증한다(ADR-0053 결정 9). Aurora는 서비스별 DB 사용자를 쓰고, ElastiCache는 RBAC 사용자(접근 문자열로 명령·키 접두사 제한, 기본 사용자 끔, 전송 암호화 필수)를 쓴다. MSK는 IAM 접근 제어(SASL/IAM)와 토픽별 권한, MongoDB는 SCRAM-SHA-256과 TLS(평문 연결 거부)를 쓴다. ClickHouse는 역할별 사용자를 두고 TLS 포트만 연다. Pyroscope와 관측 백엔드는 자체 인증을 켜지 않으므로 클러스터 내부 주소와 메시 정책으로만 연다. MongoDB·ClickHouse 볼륨과 모든 저장소 백업은 KMS로 암호화한다 |
 | 비밀 정보 및 키 관리 | AWS Secrets Manager와 AWS KMS 관리형 봉투 암호화를 함께 쓴다. External Secrets Operator로 쿠버네티스 시크릿을 동적으로 넣고, 서비스별 IAM 역할로 최소 권한 원칙을 지킨다. 파드 권한은 EKS Pod Identity로 주고, IRSA는 Pod Identity를 지원하지 않는 곳에만 쓴다(AWS 권고, ADR-0054)(자세한 목록은 `docs/security/secrets-and-keys.md` 참조) |
-| 인증서 라이프사이클 | CloudFront와 NLB 앞단은 AWS Certificate Manager(ACM)로 자동 갱신한다. 내부 게이트웨이 인증서는 cert-manager 기반 사설 CA로 자동 발급·관리한다. 게이트 스캐너 기기 인증서는 같은 사설 CA에서 관리 앱(Android Enterprise 기기 관리)이 받아 30일 [가정] 주기로 갱신한다(대안 B는 기기 키와 DPoP, ADR-0051). 서비스 메시(제품은 PoC로 선정, wbs 0.5.2)의 내부 CA가 발급하는 단기 인증서를 운용한다. 자동 갱신이 실패하는 경우에 대비해 인증서와 서명 키마다 만료까지 남은 일수를 지표로 내고, 30일 이하면 SEV3, 7일 이하면 SEV2로 알린다 [가정, Phase 4 관측 구축에서 확정]. 근거는 인증서 목록 관리와 지속 감시를 권하는 NIST SP 1800-16이다(ADR-0049, docs/observability.md §5) |
+| 인증서 라이프사이클 | CloudFront와 NLB 앞단은 AWS Certificate Manager(ACM)로 자동 갱신한다. 내부 게이트웨이 인증서는 cert-manager 기반 사설 CA로 자동 발급·관리한다. 게이트 스캐너 기기 인증서는 같은 사설 CA에서 관리 앱(Android Enterprise 기기 관리)이 받아 30일 [가정] 주기로 갱신한다(대안 B는 기기 키와 DPoP, ADR-0051). 서비스 메시(Istio 앰비언트, ADR-0082)의 내부 CA가 발급하는 단기 인증서를 운용한다. 운영 CA는 오프라인 루트가 발급한 중간 CA를 꽂고, 워크로드 인증서는 노드 프록시가 메모리에만 둔다(ADR-0082. 포트폴리오 실행은 메시 없이 돈다). 자동 갱신이 실패하는 경우에 대비해 인증서와 서명 키마다 만료까지 남은 일수를 지표로 내고, 30일 이하면 SEV3, 7일 이하면 SEV2로 알린다 [가정, Phase 4 관측 구축에서 확정]. 근거는 인증서 목록 관리와 지속 감시를 권하는 NIST SP 1800-16이다(ADR-0049, docs/observability.md §5) |
 | 소프트웨어 공급망 보안 | GitHub Actions 워크플로우가 신원을 증명하는 로그인 표준인 OIDC로 받는 단기 AWS 임시 자격 증명(장기 IAM Access Key 발급 금지), ECR 이미지 푸시 때 자동 취약점 스캔, cosign 키 없는 서명과 SLSA 출처 증명(공용 재사용 워크플로에서 빌드해 Build L3 목표), gitleaks 시크릿 유출 차단, Renovate 의존성 자동 갱신(새 버전 3일 대기), 소프트웨어에 들어간 부품 목록인 SBOM(CycloneDX) 생성, 서드파티 액션 전체 SHA 고정과 허용 목록, 워크플로 토큰 최소 권한, 자체 호스트 러너 없음, 취약점 조치 기한(치명 7일·높음 30일·중간 90일, POL-041). 자세한 내용은 docs/devops.md §4와 docs/security/asvs/delivery.md(ADR-0054) |
 | 침입 탐지 및 감사 모니터링 | 관리 콘솔의 비정상 로그인 시도 급증과 비인가 원격 IP의 이상 접근 탐지(trust-svc와 관제 시스템 연동), AWS WAF 실시간 로그 분석(고시 §6① 침입탐지시스템 운영 준수) |
 | 불변 감사 추적성 보장 | 관리자 계정 접속기록 최소 2년 이상 보존, 시스템 접근 권한 부여·변경 내역 최소 3년 이상 보존(NFR-017 준수), 운영 감사 로그의 S3 Object Lock(WORM 모드) 사본 보관. 감사 기록은 키를 건 해시 체인·5분 앵커·1시간 대조로, 고치거나 지우면 드러나게 한다(ADR-0053). 서명한 머클 체크포인트를 매일·회차 마감에 공개 타임스탬프(OpenTimestamps)에 고정해 `www.peaket.example/transparency/`에 게시한다(공개 게시 버킷 Object Lock 7년, 게시 잡의 외부 송신은 캘린더 주소만, ADR-0075) |

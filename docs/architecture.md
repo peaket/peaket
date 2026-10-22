@@ -12,6 +12,7 @@
 ```mermaid
 C4Context
     title PEAKET 시스템 컨텍스트 (C4 L1)
+    UpdateLayoutConfig($c4ShapeInRow="5", $c4BoundaryInRow="1")
     Person(fan, "팬", "소비자 웹·PWA 월렛")
     Person(partner, "파트너", "파트너 콘솔")
     Person(ops, "운영자·CS", "관제 콘솔")
@@ -25,6 +26,10 @@ C4Context
     System_Ext(gov, "신고기관·수사기관", "자료 요청, 게시물 통보")
     System_Ext(kopis, "공연예술통합전산망", "공연정보 1일 전송(FR-054)")
     System_Ext(bank, "송금 대행(은행 이체)", "배상금 지급(FR-056)")
+    System_Ext(msg, "알림 발송(이메일·문자·Web Push)", "주문·차례·취소 알림")
+    System_Ext(watch, "외부 감시", "합성 점검(Grafana Synthetic Monitoring)·데드맨 수신(Healthchecks.io), ADR-0032")
+    System_Ext(status, "상태 페이지(Upptime)", "장애 공지(GitHub Pages), ADR-0032")
+    System_Ext(ots, "OpenTimestamps(비트코인)", "감사 체크포인트 공개 타임스탬프(ADR-0075)")
     Rel(fan, peaket, "예매·굿즈·월렛")
     Rel(partner, peaket, "공연 등록·판매 승인 요청·회차 취소 요청·정산")
     Rel(ops, peaket, "관제·운영 명령")
@@ -38,6 +43,11 @@ C4Context
     Rel(gov, peaket, "서면 요청·통보")
     Rel(peaket, kopis, "공연정보 전송(1일 단위)")
     Rel(peaket, bank, "배상 송금 요청")
+    Rel(peaket, msg, "알림 발송 요청")
+    Rel(watch, peaket, "바깥에서 합성 점검")
+    Rel(peaket, watch, "데드맨 신호")
+    Rel(ops, status, "장애 공지")
+    Rel(peaket, ots, "체크포인트 해시 고정")
 ```
 
 ## 2. 비즈니스 문제별 기술 과제 (원문 §2 '해결할 기술 과제')
@@ -66,7 +76,11 @@ C4Context
 ```mermaid
 C4Container
     title PEAKET 컨테이너 구성 (C4 L2, 요청 경로 중심)
+    UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="2")
     Person(fan, "팬")
+    Person(partner, "파트너")
+    Person(opsp, "운영자·CS")
+    Person(staff, "현장 스태프")
     Container_Boundary(edge, "엣지") {
         Container(cf, "CloudFront + WAF", "CDN", "배포 3개(공연 페이지·대기열 파일·대기열 API, ADR-0058). 공연 페이지, 대기 상태 파일 1초 캐시, 셔플 결과 파일 60초 [가정] 캐시(없을 때 404는 1초), 엣지 함수(매진 응답, 도착 시각 쿠키)")
         Container(nlb, "NLB", "L4", "교차 영역 분산")
@@ -93,13 +107,15 @@ C4Container
         Container(ops, "ops-svc", "NestJS", "운영 명령·감사 로그·관제 API")
         Container(core, "core-svc", "NestJS", "catalog·notify·shop·review·support")
     }
-    ContainerDb(rq, "Redis 대기열", "Cluster")
-    ContainerDb(rs, "Redis 좌석", "Cluster, 샤드 Pub/Sub")
-    ContainerDb(rc, "Redis 세션·캐시", "Cluster")
-    ContainerDb(pg, "Aurora PostgreSQL", "purchase·payment·ticket 전용 + identity·ops·core 공유")
-    ContainerDb(mongo, "MongoDB", "상품 정의")
-    ContainerDb(kafka, "Kafka", "거래·텔레메트리·제어 토픽")
-    ContainerDb(ch, "ClickHouse", "리포트 마트 2년·분석 이벤트 90일·원시 신호 30일")
+    Container_Boundary(data, "데이터 저장소") {
+        ContainerDb(rq, "Redis 대기열", "Cluster")
+        ContainerDb(rs, "Redis 좌석", "Cluster, 샤드 Pub/Sub")
+        ContainerDb(rc, "Redis 세션·캐시", "Cluster")
+        ContainerDb(pg, "Aurora PostgreSQL", "purchase·payment·ticket 전용 + identity·ops·core 공유")
+        ContainerDb(mongo, "MongoDB", "상품 정의")
+        ContainerDb(kafka, "Kafka", "거래·텔레메트리·제어 토픽")
+        ContainerDb(ch, "ClickHouse", "리포트 마트 2년·분석 이벤트 90일·원시 신호 30일")
+    }
     Rel(fan, cf, "HTTPS")
     Rel(cf, nlb, "")
     Rel(nlb, gwq, "")
@@ -124,6 +140,28 @@ C4Container
     Rel(pur, idn, "결제 직전 본인확인 조회(gRPC)")
     Rel(idn, rc, "")
     Rel(idn, pg, "")
+    Rel(partner, cf, "HTTPS")
+    Rel(opsp, cf, "HTTPS(허용 IP·VPN)")
+    Rel(staff, nlb, "스캐너 API mTLS(CloudFront 안 거침)")
+    Rel(nlb, gwp, "")
+    Rel(nlb, gwo, "")
+    Rel(nlb, gws, "")
+    Rel(gwp, core, "파트너 콘솔 API(REST)")
+    Rel(gwp, pay, "결제사 웹훅(REST)")
+    Rel(gwp, ops, "실시간 판매 현황 SSE")
+    Rel(gwo, ops, "관제 API·Socket.IO")
+    Rel(gws, tkt, "근무 준비·변경분·스캔 업로드(REST)")
+    Rel(gws, idn, "기기 승인 로그인(REST)")
+    Rel(queue, trust, "위험 점수(gRPC)")
+    Rel(trust, queue, "대기 중 격리(gRPC)")
+    Rel(pur, kafka, "Outbox·Redis Stream 릴레이")
+    Rel(pay, kafka, "Outbox")
+    Rel(tkt, kafka, "Outbox")
+    Rel(queue, kafka, "대기열 텔레메트리")
+    Rel(trust, kafka, "판정·행동 신호")
+    Rel(ops, kafka, "운영 설정 사건")
+    Rel(idn, kafka, "세션 종료·계정 병합")
+    Rel(core, kafka, "CS 처리함 건 요청(Outbox)")
 ```
 
 - **인증 담당과 요청 경로**: 계정·세션·토큰 발급·본인확인은 `identity-svc`가 맡는다. 소셜 로그인의 인가 코드 교환은 소비자 웹 앱 서버의 Auth.js가 한다. 제공자 토큰은 `identity-svc`로 보내지 않는다. 로그인 뒤 요청의 토큰은 게이트웨이가 공개키로 확인하므로, 대기열 진입과 좌석 홀드 요청은 `identity-svc`를 거치지 않는다. 주문 생성(결제 직전) 때만 `purchase-svc`가 본인확인 상태를 조회한다(`ADR-0008`, `ADR-0011`). 이 조회에 `identity-svc`가 응답하지 못하면 토큰의 `ticket:buy`·pid로 판정한다(`ADR-0055`). 로그인 흐름은 `docs/features/identity.md` §2에 있다.
@@ -132,8 +170,8 @@ C4Container
 
 | 서비스명 | 담당 모듈과 핵심 책임 | 전용 저장소 | 내부 아키텍처 스타일 | 통신 프로토콜 | 분리 근거 |
 | --- | --- | --- | --- | --- | --- |
-| queue-svc | 로비 입장(참가 토큰 발급), 사전 검증 토큰 발급, 대기열 진입, 순번 발급, 결번 비트맵(값마다 한 비트로 줄여 적은 표) 기록, 구간별 대기 상태 파일과 셔플 결과 파일 생성·게시, 입장 확정(입장 토큰 발급과 입장 자리 등록), 구매 세션 수명 주기 이벤트 수신과 입장 자리 반환 처리 | Redis Cluster (대기열 전용) | 헥사고날 (Hexagonal) | REST (`gw-queue` 경유, CDN이 가까운 곳에 복사해 두는 캐시의 원천), gRPC (`trust-svc` 위험 점수 동기 조회), Kafka (텔레메트리 발행, 구매 세션 이벤트 구독), TCP (제어 평면 공지·판매 일시정지 수신) | 큰 진입 부하: 초당 20만 건(200,000 RPS)을 받는다 |
-| admission-ctrl | 현재 입장 번호(serving) 증가 제어, 실제 입장 전환율에 따른 AIMD 동시 입장 목표 조절, T=0 무작위 셔플 연산(리더 하나가 혼자 수행), 운영 명령 수신 | Redis Cluster (대기열 클러스터 공유), K8s Lease (리더 선출: 여러 복제 중 일을 맡을 하나를 고르는 것. Lease는 정해진 시간 동안만 유효한 권한) | 결과를 보고 다시 조절하는 제어 루프 (Control Loop) | TCP (제어 평면, 리더만 받는 호출 주소인 Service 엔드포인트), `/metrics` (제어 지표 `admission_*`를 지표를 모아 저장하는 도구인 Prometheus가 긁어 간다. Kafka 발행은 없다, ADR-0076), Prometheus HTTP (하위 서비스 p99와 오류율 관측) | 리더로 뽑힌 노드 하나에서만 실행되어야 하는, 결과를 보고 다시 조절하는 제어 루프 |
+| queue-svc | 로비 입장(참가 토큰 발급), 사전 검증 토큰 발급, 대기열 진입, 순번 발급, 결번 비트맵(값마다 한 비트로 줄여 적은 표) 기록, 구간별 대기 상태 파일 생성·게시(셔플 결과 파일은 admission-ctrl이 게시한다, §9.4·queue-admission §2), 입장 확정(입장 토큰 발급과 입장 자리 등록), 구매 세션 수명 주기 이벤트 수신과 입장 자리 반환 처리 | Redis Cluster (대기열 전용) | 헥사고날 (Hexagonal) | REST (`gw-queue` 경유, CDN이 가까운 곳에 복사해 두는 캐시의 원천), gRPC (`trust-svc` 위험 점수 동기 조회), Kafka (텔레메트리 발행, 구매 세션 이벤트 구독), TCP (제어 평면 공지·판매 일시정지 수신) | 큰 진입 부하: 초당 20만 건(200,000 RPS)을 받는다 |
+| admission-ctrl | 현재 입장 번호(serving) 증가 제어, 실제 입장 전환율에 따른 AIMD 동시 입장 목표 조절, T=0 무작위 셔플 연산과 셔플 결과 파일 약 1,000개 생성·S3 게시(리더 하나가 혼자 수행), 운영 명령 수신 | Redis Cluster (대기열 클러스터 공유), K8s Lease (리더 선출: 여러 복제 중 일을 맡을 하나를 고르는 것. Lease는 정해진 시간 동안만 유효한 권한) | 결과를 보고 다시 조절하는 제어 루프 (Control Loop) | TCP (제어 평면, 리더만 받는 호출 주소인 Service 엔드포인트), `/metrics` (제어 지표 `admission_*`를 지표를 모아 저장하는 도구인 Prometheus가 긁어 간다. Kafka 발행은 없다, ADR-0076), Prometheus HTTP (하위 서비스 p99와 오류율 관측) | 리더로 뽑힌 노드 하나에서만 실행되어야 하는, 결과를 보고 다시 조절하는 제어 루프 |
 | purchase-svc | inventory 모듈(좌석 비트맵 관리, Soft Hold, Hard Sale 확정, 1인당 매수 한도 검증, 어느 시점의 좌석 상태 전체를 찍어 둔 좌석 스냅샷 제공), booking 모듈(주문 애그리거트 관리, 분산 Saga 오케스트레이션), 구매 세션 소유(시작/종료 이벤트 발행), 비상 운영 명령인 판매 일시정지(킬스위치)의 판매 차단 집행(범위 안 회차의 새 홀드·결제 시도 시작·결제 접수 423. 입장 멈춤은 admission-ctrl, 대기 화면의 판매 상태는 queue-svc가 함께 받는다, ADR-0062), 입장 토큰 재사용 차단, 구매 세션 요청 인증(소지 증명) 확인 | Redis (비트맵, 홀드, 세션), PostgreSQL (확정 원장, 매수 한도 행, 주문 이벤트 스토어) | 클린 아키텍처 + DDD, 주문은 Event Sourcing 적용 | REST (`gw-fan` 경유), gRPC (`payment-svc`, `ticket-svc`, `identity-svc` 본인확인 조회), Kafka (Transactional Outbox, Redis Stream 릴레이), TCP (비상 킬스위치 수신) | 입장을 마친 5,000명 규모의 핵심 구매 경로다. 두 모듈은 트래픽 규모와 SLO가 같고 서로 긴밀히 묶여 있어 한 묶음으로 구성했다 |
 | payment-svc | 결제사 선택기(결제 시도마다 연동 결제사 토스페이먼츠·포트원 중 선택, 공연별 지정과 장애 전환 반영, ADR-0044)와 결제사 어댑터(결제창 값, 전자결제 승인, 상태 조회, 취소), 웹훅(일이 생기면 상대 서버가 우리 주소를 불러 알려 주는 방식) 이벤트 수신과 무결성 검증, 결제사별 대사, 배상 송금 포트(`PayoutPort`, ADR-0046), 정산서·지급 묶음·미수금(파트너에게서 돌려받을 돈)과 결제사 지급대행(결제사가 PEAKET 대신 파트너 정산 계좌로 판매 대금을 보내는 서비스) 어댑터(ADR-0047) | PostgreSQL (결제 원장) | 헥사고날 (Hexagonal) | gRPC (`purchase-svc`, `core-svc`가 호출), Webhook 수신 (`gw-partner` 경유), Kafka (Transactional Outbox) | 외부 PG사(온라인 결제를 대신 처리해 주는 회사) 장애 격리, 결제 웹훅 수신 격리, 결제사 비밀 키 엄격 격리 |
 | ticket-svc | 전자 티켓 발권, 마이 티켓 월렛 조회, 양도 요청·수락·돌려주기·회수(결제자·보유자 구분, ADR-0046), Dynamic QR 검증용 기기 공개키 등록과 폐기 목록 관리, 게이트 스캐너 오프라인 동기화(회차 목록·변경분·입장 상태 공유), 스캔 수신과 서버 입장 판정·이상 표시·입장 기록 마감, 스캐너 기기 기록·배치, 부스 재발급 허용(ADR-0051) | PostgreSQL (티켓 원장, 다른 리전의 읽기 복제본 구성. 리전은 클라우드 데이터센터가 모인 지역, 복제본은 원본을 복사해 두고 읽기를 나눠 받거나 장애 때 대신하는 저장소) | DDD 기반 계층형 | gRPC (`purchase-svc`, `core-svc`가 호출), REST (`gw-fan`, `gw-scanner` 경유), Kafka (발권과 폐기 이벤트 발행) | 다른 가용성 시간대: 공연 당일 현장 입장과 월렛 이용이 몰림 |
@@ -149,11 +187,11 @@ C4Container
 
 | 통신 방식 | 적용 경로 및 구간 | 통신 규칙 및 아키텍처 제약 |
 | --- | --- | --- |
-| gRPC (동기 RPC) | `purchase-svc` → `payment-svc`(결제창 준비·승인·취소)·`ticket-svc` (단, inventory와 booking은 한 서비스 안이므로 함수를 직접 호출), `core-svc` shop → `ticket-svc`·`payment-svc`, `queue-svc` → `trust-svc` (로비와 사전 검증 때), `trust-svc` → `queue-svc` (대기 중 재평가로 건 격리 `IsolateWaiting`, ADR-0071), `purchase-svc` → `identity-svc` (결제 직전 본인확인 검증), `ops-svc` 관제 지표 서버 스트리밍 | Protocol Buffers 기반의 엄격한 스키마 계약을 따른다(`peaket-contracts`, `buf breaking` CI 검증). HTTP/2 다중화 연결, 데드라인(Deadline) 전파. 연결 하나에 요청이 쏠리는 것을 막으려고 서비스 메시 기반 L7 로드밸런싱을 적용한다(`ADR-0010`) |
-| Kafka (비동기 이벤트) | 거래 이벤트: 주문·결제·좌석 확정·발권은 PostgreSQL Transactional Outbox 패턴, 좌석 홀드와 세션 이벤트는 Redis Stream 릴레이, `acks=all`, 파티션(토픽을 나눈 칸. 순서는 칸 안에서만 지켜진다) 키는 공연 ID. 대량 텔레메트리: 진입 로그, 사용자 행동 신호, RUM, 토픽(메시지를 종류별로 모아 두는 통로)마다 키는 docs/streaming.md §7(ADR-0026·0071). 제어·보안 이벤트: 운영 파라미터 변경, 세션 강제 종료(모두에게 보냄). 고객 문의·게시물 신고 접수: core-svc Outbox → ops-svc CS 처리함 건 등록(§3.1 아래, ADR-0066) | Apache Avro + Confluent Schema Registry (BACKWARD_TRANSITIVE 호환성 보장, ADR-0054), 멱등 컨슈머(메시지를 읽는 쪽) 구현, 처리에 실패한 메시지를 따로 모아 두는 데드 레터 큐(DLQ)를 갖춘다. 세부 명세는 `docs/api/asyncapi.yaml`을 본다 |
+| gRPC (동기 RPC) | `purchase-svc` → `payment-svc`(결제창 준비·승인·취소)·`ticket-svc` (단, inventory와 booking은 한 서비스 안이므로 함수를 직접 호출), `core-svc` shop → `ticket-svc`·`payment-svc`, `queue-svc` → `trust-svc` (로비와 사전 검증 때), `trust-svc` → `queue-svc` (대기 중 재평가로 건 격리 `IsolateWaiting`, ADR-0071), `purchase-svc` → `identity-svc` (결제 직전 본인확인 검증), `ops-svc` 관제 지표 서버 스트리밍, `ops-svc` → `payment-svc`(지급 묶음 승인 뒤 지급 요청)·`purchase-svc`(회차 취소 일괄 환불)·`core-svc`(판매 승인 결과, 게시물 조치), `core-svc` → `payment-svc`(판매 승인 때 지급대행 판매자 등록). 호출마다의 요청·응답 모양과 멱등 키는 docs/api/proto/README.md의 초안에 있다(추천 적용 2026-10-22) | Protocol Buffers 기반의 엄격한 스키마 계약을 따른다(`peaket-contracts`, `buf breaking` CI 검증). HTTP/2 다중화 연결, 데드라인(Deadline) 전파. 연결 하나에 요청이 쏠리는 것을 막으려고 서비스 메시 기반 L7 로드밸런싱을 적용한다(`ADR-0010`) |
+| Kafka (비동기 이벤트) | 거래 이벤트: 주문·결제·좌석 확정·발권은 PostgreSQL Transactional Outbox 패턴, 좌석 홀드와 세션 이벤트는 Redis Stream 릴레이, `acks=all`, 파티션(토픽을 나눈 칸. 순서는 칸 안에서만 지켜진다) 키는 공연 ID. 대량 텔레메트리: 진입 로그, 사용자 행동 신호, RUM, 토픽(메시지를 종류별로 모아 두는 통로)마다 키는 docs/streaming.md §7(ADR-0026·0071). 제어·보안 이벤트: 운영 파라미터 변경, 세션 강제 종료(모두에게 보냄). 고객 문의·게시물 신고 접수: core-svc Outbox → ops-svc CS 처리함 건 등록(§3.1 아래, ADR-0066) | Apache Avro + Confluent Schema Registry (BACKWARD_TRANSITIVE 호환성 보장, ADR-0054), 멱등 컨슈머(메시지를 읽는 쪽) 구현, 처리에 실패한 메시지를 따로 모아 두는 데드 레터 큐(DLQ)를 갖춘다. 세부 명세는 `docs/api/asyncapi.yaml`을, Avro 스키마 초안과 등록 규칙은 docs/api/avro/README.md를 본다(추천 적용 2026-10-22) |
 | Redis 샤드 Pub/Sub | `purchase-svc` → `realtime-gw` 좌석 변경분 델타 전송 (공연과 섹션별 전용 샤드 채널) | 같은 좌석 바운디드 컨텍스트 안에서 빠르게 모두에게 보내는 데만 쓴다 (`SPUBLISH`) |
 | TCP (Nest 트랜스포터, 제어 평면) | `ops-svc` → `admission-ctrl` (동시 입장 목표 조절, 입장 일시정지, 판매 일시정지의 범위 안 serving 전진 멈춤, K8s 리더 전용 Service 엔드포인트 타깃), `purchase-svc` (비상 킬스위치를 쿠버네티스에서 앱이 실행되는 가장 작은 단위인 파드 전체에 보냄), `queue-svc` (대기실 긴급 공지, 판매 일시정지 때 대기 상태 파일의 판매 상태). 판매 일시정지(명령 3)는 세 곳이 모두 ack해야 ACKED다(docs/features/control-tower.md §5, 추천 적용 2026-10-14, ADR-0062). 그 밖의 일반 명령은 Kafka 이벤트나 서비스 API를 쓴다 | 주요 데이터 평면(gRPC, Kafka, DB)이 모두 장애에 빠져도 반드시 동작해야 하는 긴급 제어 명령을 위한, 늘 열려 있는 대역 외(Out-of-band) 전용 채널 |
-| REST (HTTP/JSON) | 외부 클라이언트 ↔ API 게이트웨이 사이의 통신에만 쓴다. 내부 서비스끼리의 통신에는 REST를 절대 쓰지 않는다 | OpenAPI 3.0 스펙을 따르고(`docs/api/openapi.yaml`), RFC 9457 Problem Details 표준 에러 응답 형식을 쓴다 |
+| REST (HTTP/JSON) | 외부 클라이언트 ↔ API 게이트웨이 사이의 통신에만 쓴다. 내부 서비스끼리의 통신에는 REST를 절대 쓰지 않는다 | OpenAPI 3.1 스펙을 따르고(`docs/api/openapi.yaml`), RFC 9457 Problem Details 표준 에러 응답 형식을 쓴다 |
 | 메시 mTLS 내부 호출 | 웹과 파트너 앱 서버(Next.js Auth.js) → `identity-svc` 세션 생성과 관리자 자격증명 검증 | 서비스 메시 신원이 인정된 앱 서버 파드일 때만 호출을 받는다 (`ADR-0011`) |
 
 같은 페이로드로 REST(JSON/HTTP 1.1) vs gRPC vs Nest TCP의 p50(요청의 절반이 이 시간 안에 끝난다는 뜻)·p99 지연시간과 CPU 오버헤드를 벤치마크해, 프로토콜을 고른 근거를 숫자로 남긴다(원문 18장. 측정 전이며, 결과는 성능 장부에 적는다).
@@ -703,6 +741,7 @@ T=0 진입 20만 RPS에는 CORS 사전 요청(OPTIONS)이 더해지지 않는다
 | 0081 | 소유자가 준 REST 설계 기준을 API 규칙(guidelines §10~§12)으로 들이고 기준에 어긋난 64개 작업의 경로를 바꾼다: 동작은 명사 하위 자원(`approvals`·`acceptance` 등), 컬렉션 복수형·싱글턴 단수형, 깊이 2단계(얕은 중첩), 내 항목은 `me`, 페이지 이름 `limit`, 오류 본문은 서비스·게이트웨이·엣지 모두 Problem, 401 `WWW-Authenticate`, 끝 슬래시 404. 커서 기본·`q` 이어 붙이기 안 씀·디버그는 로컬·CI만은 기준과 다르게 정했다 | 채택(2026-10-21, 소유자 요청, 세부는 추천 적용) |
 | 0082 | 운영 설계의 서비스 메시는 Istio 앰비언트(노드 프록시 L4 mTLS, gRPC를 받는 서비스만 서비스 단위 웨이포인트, 기준을 넘는 서비스만 사이드카)다. Istio 기본값(재시도 2회, 시간 초과 없음, PERMISSIVE)은 설계에 맞게 덮어쓴다. 메시는 연결과 전송을 맡고, 앱은 데드라인·업무 재시도·차단기와 대체 응답·메시 밖 TLS·추적 헤더를 맡는다. 앱에 일반 네트워크 재시도·클라이언트 쪽 분산·파드 사이 TLS를 넣지 않는다. 포트폴리오 실행은 메시 없이 gRPC 투명 재시도·NestJS 우아한 종료·NetworkPolicy로 메우고, 예비 코드는 두지 않는다. 운영 오버레이는 메시가 있어야 배포된다. 파티션 늘리기·리샤딩은 정비 시간에만 한다. 핫패스에 일관된 해시 분산과 앱 수준 가십 감지는 쓰지 않는다. 메시 PoC는 선택이다 | 채택(2026-10-22, 소유자 승인 '추천대로', 값과 세부는 추천 적용) |
 | 0083 | 관계형 원장 DB는 Aurora PostgreSQL을 유지한다(MySQL 비교: 부분 유니크 인덱스, 밀리초 잠금 대기, 서버 쪽 시간 초과, 트랜잭션 안 DDL, 파티션 표 외래 키). 주문·결제·티켓은 UUIDv7 ID 범위로 월 파티션한다. 파티션 키를 담지 못하는 유일 규칙은 유일 확인 표(`order_idempotency`·`payment_per_order`)가 맡는다. 스캔 기록 기본 키는 `(event_id, id)`, Outbox는 부모 표 이름으로 발행하고, 파티션은 미리 만든다. 비상 경로 잠금 대기는 `SET LOCAL`로 정하고, 마이그레이션 잡은 PgBouncer를 거치지 않는다. `status` 전이는 HOT가 아님을 바로잡고, ticket 교차 리전 복제본은 Global Database 도쿄 보조 클러스터로 둔다 | 채택(2026-10-22, PostgreSQL 유지는 소유자 승인, 값과 세부는 추천 적용) |
+| 0084 | 문서를 받는 사람별로 보강한다. 문서 폴더를 Git 저장소로 관리하고(`main` 기준점, 기본 가지 `develop`, 줄바꿈 자동 변환 끔), 인프라·관제 인수 문서(docs/infra-handover.md), 내부 gRPC 계약 초안(docs/api/proto/), Avro 스키마 초안(docs/api/avro/), arc42 안내(docs/arc42.md), 경영진 요약(planning/00-executive-summary.md)을 둔다. 인스턴스 사양·가용성 등급·키 관리 권한·도쿄 전환 준비물, gRPC 상태 코드 규칙, Avro 등록 규칙(TopicRecordNameStrategy, 자동 등록 끔, Outbox `bytea`)은 추천 적용이다. 셔플 결과 파일 게시는 admission-ctrl로 맞추고, C4 1·2단계 그림, 통신 표, 보존 표, 독자 줄을 보강했다 | 채택(2026-10-22, 저장소와 새 문서 종류는 소유자 결정, 값과 규칙은 추천 적용) |
 
 작성 예정 과제: Bigtable·Dataflow·GFS/HDFS의 현대적 클라우드 대체, Web Push/알림톡 발송 대행사 선정, 휴대폰 본인확인 대행업체 비교 분석. Datadog 등 상용 관측 SaaS 평가는 ADR-0067의 Phase 4 비교 측정(wbs 4.8.2)으로 옮겼다.
 

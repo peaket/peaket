@@ -78,7 +78,7 @@
 
 | 항목 | 지금 | 이 초안의 처리와 제안 |
 | --- | --- | --- |
-| `BehaviorSignal.features` | asyncapi는 속성 없는 object이고, 설명에 '헤더 순서'가 있다 | docs/streaming.md §5.2가 '브라우저가 낸 요약값'이라고 해 openapi `BehaviorSummary`와 같은 record로 정했다. 헤더 특징이 필요하면 필드를 따로 더한다. asyncapi 설명은 다듬기 반영 뒤 맞춘다 |
+| `BehaviorSignal.features` | asyncapi는 속성 없는 object다. 예전 설명에 '헤더 순서'가 있었다 | openapi `BehaviorSummary`와 같은 record로 정했다(docs/streaming.md §5.2 '브라우저가 낸 요약값'). 헤더 순서 같은 서버 쪽 특징은 trust-svc 실시간 판정에만 쓰고 싣지 않는다. 대기 중 재평가 패턴(docs/streaming.md §5.3)이 쓰지 않아서다. asyncapi 설명도 2026-10-22에 이렇게 맞췄다(추천 적용) |
 | 필수 필드 | asyncapi에 `required`가 있는 메시지는 6개(`OrderEvent`, `PurchaseSessionStarted`, `PurchaseSessionEnded`, `SessionTerminated`, `AccountMerged`, `CaseRequested`)뿐이다. 나머지 12개는 기본값이 있는 필드 말고는 모두 null을 허용한다 | 첫 등록 전에 정해야 한다. 나중에 null 불가로 바꾸면 호환이 깨진다(§3). 제안은 메시지에 있는 `eventKey`, `type`이나 `kind`, 발생 시각, `schemaVersion`을 필수로 하는 것이다 |
 | payload 형식 | asyncapi는 `defaultContentType: application/avro`인데 payload는 JSON Schema로 적었다 | AsyncAPI 3.0.0의 Multi Format Schema Object로 payload를 이 파일에 잇는다(`schemaFormat: application/vnd.apache.avro+json;version=1.9.0`, AsyncAPI가 권하는 형식 목록에 있다) |
 | `control.settings` 키 | 정하지 않았다 | 같은 범위의 설정 변경이 순서대로 가도록 `scope`(asyncapi 설명대로 PLATFORM 또는 공연 ID)를 키로 쓰는 것을 제안한다 |

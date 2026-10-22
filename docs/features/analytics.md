@@ -1,5 +1,6 @@
 # 기능 설계: 분석 저장소와 공연 리포트
 
+- **독자와 용도**: peaket-data의 원본 적재·변환 잡과 공연 리포트를 구현하는 데이터·백엔드·프론트엔드 엔지니어, 그리고 리포트의 결정 규칙으로 다음 회차를 정하는 운영 담당자가 참조한다.
 - **범위**: 회차가 끝난 뒤 '다음 회차를 어떻게 열지' 정하는 데 쓰는 분석 저장소(대량 이벤트 집계에 강한 분석 DB인 ClickHouse와 Iceberg 아카이브), 원본 적재와 가명 처리, 브론즈·실버·골드 변환과 마감 단계, 스타 스키마(스키마는 데이터의 구조 정의), 지표 사전과 결정 규칙 판정, 공연 리포트와 파트너 판매 요약, 결정 기록과 결정 절차를 다룬다. 온세일 중 관제 화면과 운영 명령은 [control-tower.md](control-tower.md)가, 메트릭·SLO(팀이 정한 서비스 품질 목표)·경보는 [observability.md](../observability.md)가 정한다.
 - **원문 출처**: 설계서 §8의 PostgreSQL(관계형 데이터베이스)·Kafka(이벤트를 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템)·ClickHouse 데이터 파이프라인, 27장(데이터 엔지니어링: dbt 마트, 데이터 → 운영 피드백). ADR-0042(소유자 제안 2026-10-11, 승인 2026-10-12), ADR-0052(소유자 승인 2026-10-13, '추천대로 승인').
 - **관련 ID**: FR-026, FR-029, FR-031, FR-068 · NFR-009, NFR-018, NFR-026 · POL-022, 023, 027, 028, 030, 037, 039, 040 · SCR-027, SCR-029 · API(프로그램끼리 요청과 응답을 주고받는 창구) `/v1/ops/events/{eventId}/reports`, `/v1/ops/decisions`, `/v1/partner/events/{eventId}/report` · 이벤트 `trade.*`, `telemetry.queue`, `telemetry.purchase`, `telemetry.trust-verdicts`, `control.settings` · 데이터 docs/data.md §1·§2·§6(`decision_record`, `pseudonymization_log`) · K9 · ADR-0026·0042·0047·0052·0071.

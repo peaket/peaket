@@ -17,7 +17,7 @@
 | 6. 실행 보기 | 중요한 흐름이 실제로 어떻게 도나 | 기능 설계서의 순서도(§2 표), planning/04-ia-flows-screens.md §2(사용자 흐름 F-01~F-13), planning/03-policies-glossary.md §2(상태도) | 일부 | shop·catalog·notify·review·support·trust의 상세 설계는 구현 직전에 쓴다(docs/features/README.md). Flink 잡은 표로만 있다(docs/streaming.md) |
 | 7. 배치 보기 | 어디에 어떻게 올라가나 | docs/infra.md §1·§3·§4·§6, docs/devops.md §5, docs/infra-handover.md §2·§3 | 갖춤 | — |
 | 8. 공통 개념 | 여러 곳에 똑같이 적용하는 규칙은 무엇인가 | docs/architecture.md §5(장애 격리·시간 초과·프로브)·§6.4(상태 소유권)·§8(품질·보안 절차), docs/api/guidelines.md, docs/observability.md, docs/data.md §4·§5·§6, docs/security/, docs/frontend.md §5 | 갖춤 | 흩어져 있다. 이 표가 안내한다 |
-| 9. 아키텍처 결정 | 무엇을 왜 그렇게 정했나 | docs/adr/(83건), 목록은 docs/architecture.md §11 | 갖춤 | 결정 수십 개를 한 ADR에 묶은 것이 있다(예: ADR-0062) |
+| 9. 아키텍처 결정 | 무엇을 왜 그렇게 정했나 | docs/adr/(84건), 목록은 docs/architecture.md §11 | 갖춤 | 결정 수십 개를 한 ADR에 묶은 것이 있다(예: ADR-0062) |
 | 10. 품질 요구 | 품질을 어떻게 재고 지키나 | planning/02-requirements.md §3(NFR), docs/quality/quality-requirements.md, docs/architecture.md §7(NFR별 대응 표) | 일부 | 품질 시나리오(어떤 자극에 어떻게 반응해야 하나)와 우선순위가 없다 |
 | 11. 위험과 기술 부채 | 무엇이 잘못될 수 있고 무엇을 미뤘나 | planning/01-overview.md §5.2(주요 리스크), docs/architecture.md §9.4(먼저 검증할 위험), 기능 설계서마다의 '미결정' 절, docs/devops.md §15, docs/streaming.md §15, docs/verification.md §8 | 일부 | 위험마다 가능성·영향 등급이 없고, 기술 부채 목록이 따로 없다 |
 | 12. 용어 | 이 말은 무슨 뜻인가 | planning/03-policies-glossary.md §4(용어 사전)·§5(쉬운 말과 용어 풀이) | 갖춤 | — |
@@ -55,6 +55,7 @@
 ```mermaid
 C4Component
     title purchase-svc 구성 요소(C4 3단계)
+    UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="2")
     Container_Boundary(pur, "purchase-svc") {
         Component(inv, "inventory 모듈", "NestJS", "좌석 비트맵, 홀드, 판매 확정, 1인 매수 한도, 좌석 스냅샷")
         Component(book, "booking 모듈", "NestJS", "주문 애그리거트, 주문 Saga, 예매 취소 Saga, 회차 취소 일괄 환불 작업")
@@ -86,6 +87,7 @@ C4Component
 ```mermaid
 C4Component
     title payment-svc 구성 요소(C4 3단계)
+    UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="2")
     Container_Boundary(ps, "payment-svc") {
         Component(sel, "결제사 선택기", "PaymentGatewaySelector", "결제사 전환 → 공연 지정 → 플랫폼 기본")
         Component(adp, "결제 포트와 어댑터", "토스페이먼츠·포트원·시뮬레이터", "결제창 값, 승인, 조회, 취소, 웹훅 해석")
@@ -118,6 +120,7 @@ C4Component
 ```mermaid
 C4Component
     title queue-svc·admission-ctrl 구성 요소(C4 3단계)
+    UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="2")
     Container_Boundary(qs, "queue-svc") {
         Component(lob, "로비·사전 검증·추가 검증", "NestJS", "참가 토큰·사전 검증 토큰, 위험 판정 호출, 격리 기록")
         Component(ent, "진입과 순번", "NestJS", "INCR 순번, 대기표 서명, 1인 1순번")
@@ -143,7 +146,7 @@ C4Component
     Rel(ops3, cmd, "TCP 명령")
 ```
 
-- 셔플 결과 파일을 누가 게시하는지가 문서끼리 다르다. docs/architecture.md §3.1은 queue-svc가 만들고 게시한다고 적었고, docs/features/queue-admission.md §2 흐름도는 admission-ctrl이 게시한다. 이 그림은 흐름도를 따랐다. 다듬기 반영 뒤 한쪽으로 맞춘다(§4).
+- 셔플 결과 파일은 admission-ctrl의 리더가 만들어 게시한다(docs/features/queue-admission.md §2, docs/architecture.md §9.4). docs/architecture.md §3.1의 queue-svc 줄이 다르게 적고 있던 것을 2026-10-22에 이쪽으로 맞췄다.
 
 ## 4. 빈 곳과 다음 일
 
@@ -151,7 +154,7 @@ C4Component
 | --- | --- | --- |
 | 품질 목표의 순서와 품질 시나리오(arc42 1·10칸) | 핵심 품질 목표 셋~다섯을 정하고, NFR마다 '자극 → 반응 → 재는 값' 시나리오를 붙인다 | 소유자가 정한 뒤 |
 | 위험 등급과 기술 부채 목록(arc42 11칸) | planning/01 §5.2 위험에 가능성·영향 등급을 더하고, 미룬 결정과 가정을 기술 부채 목록으로 묶는다 | 소유자가 정한 뒤 |
-| C4 2단계 그림의 빠진 연결 | gw-partner·gw-scanner·trust-svc의 연결과 서비스 → Kafka 선을 더한다 | 다듬기 반영 뒤 docs/architecture.md §3 |
-| C4 1단계 그림의 빠진 바깥 시스템 | 알림 발송, 외부 합성 점검·데드맨 수신, 상태 페이지, OpenTimestamps를 더한다 | 다듬기 반영 뒤 docs/architecture.md §1 |
-| 셔플 결과 파일 게시 주체 | docs/architecture.md §3.1과 docs/features/queue-admission.md §2를 한쪽으로 맞춘다 | 다듬기 반영 뒤 |
+| C4 2단계 그림의 빠진 연결 | 2026-10-22에 파트너·운영자·현장 스태프 경로, gw-partner·gw-ops·gw-scanner 뒤의 연결, trust-svc 연결, 서비스 → Kafka 선을 더했다(docs/architecture.md §3) | 끝남 |
+| C4 1단계 그림의 빠진 바깥 시스템 | 2026-10-22에 알림 발송, 외부 감시(합성 점검·데드맨 수신), 상태 페이지, OpenTimestamps를 더했다(docs/architecture.md §1) | 끝남 |
+| 셔플 결과 파일 게시 주체 | 2026-10-22에 admission-ctrl로 맞췄다(§3 아래) | 끝남 |
 | 나머지 서비스의 3단계 그림 | 상세 설계를 쓸 때(shop·catalog·notify·review·support·trust) 함께 그린다 | 구현 직전 |
