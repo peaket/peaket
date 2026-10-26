@@ -1,11 +1,18 @@
 # 데이터 설계
 
 - **독자와 용도**: 백엔드 개발자가 도메인 엔티티, 소유 서비스, 트랜잭션(여러 변경을 한꺼번에 반영하거나 한꺼번에 취소하는 작업 단위) 경계, 동시성 제어 지점, 암호화 정책, 데이터 보존 기간을 파악할 때 보는 기준 문서다. 실제 물리 스키마(데이터의 구조 정의)의 원본은 각 서비스의 마이그레이션 파일(타입 검사가 되는 쿼리 도구 Drizzle, ADR-0037)에 있다. 이 문서는 데이터 아키텍처의 구조와 설계 결정의 맥락을 글로 정리해 둔다.
-- **원문 출처**: 설계서 §6(Redis 구성, 좌석 일관성 매트릭스, 결제, 굿즈, 오프라인 입장, 개인정보), §8(관계형 데이터베이스 PostgreSQL·메시지 시스템 Kafka·ClickHouse 데이터 파이프라인), 21장(인덱스·잠금·파티셔닝 전략), 25장, docs/security/data-classification.md, docs/security/secrets-and-keys.md, ADR-0002·0013·0014·0028.
+- **원문 출처**: [설계서 §6 <시스템 아키텍처>](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#6-시스템-아키텍처>), [설계서 §8 <용량 산정 (Back-of-the-envelope)>](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#8-용량-산정-back-of-the-envelope>), [설계서 21장 <DB와 SQL 엔지니어링·튜닝>](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#21장-db와-sql-엔지니어링튜닝>), 25장, docs/security/data-classification.md, docs/security/secrets-and-keys.md, [ADR-0002](adr/0002-queue-sequence-incr-over-sorted-set.md), [ADR-0013](adr/0013-mongodb-for-product-catalog.md), [ADR-0014](adr/0014-soft-hold-hard-sale.md), [ADR-0028](adr/0028-postgres-no-sharding-cell-scaling.md).
 - **기준 기획 버전**: v1.0.
 - **표시 규칙**: ERD의 엔티티와 필드 이름은 원문에 흩어져 있던 표현을 용어 사전의 표준 영문 표기로 하나로 모은 [보완]이다. 필드 세부 명세에는 [가정]이 들어 있으므로, 실제 서비스 마이그레이션을 구현할 때 최종 확정한다.
 
 ## 1. 저장소 지도
+
+시스템은 데이터의 성격과 부하 요구치에 따라 5대 저장소 계층을 물리적으로 분리 운영한다:
+- **인메모리 계층 (ElastiCache Valkey/Redis)**: 초고속 대기열 상태, 좌석 선점 비트맵, 실시간 쿼터 카운터 관리
+- **ACID 관계형 계층 (Aurora PostgreSQL)**: 주문·결제 원장, 티켓 발행 원장, 회원·카탈로그, 불변 운영 감사 로그
+- **문서형 계층 (MongoDB)**: 유연한 스키마의 굿즈·주차권·패키지 상품 카탈로그 관리([ADR-0013](adr/0013-mongodb-for-product-catalog.md))
+- **분석 및 이벤트 스트리밍 계층 (Kafka, ClickHouse, Apache Iceberg)**: 대용량 이벤트 파이프라인, 실시간 관제 및 사후 공연 리포트
+- **분산 엣지 및 클라이언트 계층 (CloudFront S3, IndexedDB)**: 정적 파일 엣지 캐싱 및 모바일 월렛 오프라인 서명 저장소
 
 | 저장소 | 담는 것 | 소유 | 결정 |
 | --- | --- | --- | --- |

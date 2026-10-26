@@ -18,8 +18,9 @@ SCAN_EXT = ('.md', '.yaml', '.json', '.csv')
 SKIP_DIRS = {'archive', 'tools', '.git', 'node_modules'}
 ID_KINDS = ('FR', 'NFR', 'POL', 'SCR', 'CMP', 'ADR')
 MARKERS = ('[가정', '[충돌', '[보완')
-# 존재하지 않아도 되는 경로: 외부 URL 안의 경로 문자열이라 오탐(review R-10)
-ALLOW_PATHS = {'docs/software-architecture.md'}
+# 존재하지 않아도 되는 경로: 외부 URL 안의 경로 문자열이라 오탐(review R-10),
+# 없앤 문서인데 고치지 않는 지난 기록(ADR 본문, review의 지난 행)이 가리키는 경로(ADR-0090, review R-105)
+ALLOW_PATHS = {'docs/software-architecture.md', 'docs/arc42.md'}
 
 
 class Report:

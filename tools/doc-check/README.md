@@ -38,7 +38,7 @@ python tools/doc-check/check_all.py
 
 ## 예외
 
-- 외부 URL 안의 경로 문자열처럼 오탐이 확실한 경로는 `check_all.py`의 `ALLOW_PATHS`에 이유와 함께 넣는다. 지금은 `docs/software-architecture.md` 하나다(AWS 저장소 URL, review R-10).
+- 외부 URL 안의 경로 문자열처럼 오탐이 확실한 경로와, 없앤 문서인데 고치지 않는 지난 기록(ADR 본문, review의 지난 행)이 가리키는 경로는 `check_all.py`의 `ALLOW_PATHS`에 이유와 함께 넣는다. 지금은 `docs/software-architecture.md`(AWS 저장소 URL, review R-10)와 `docs/arc42.md`(ADR-0090으로 없앤 문서, review R-105) 둘이다.
 - archive/와 tools/는 점검 대상에서 뺀다. archive/는 동결 원문이고 tools/는 예시 문자열이 많다.
 - `api` 검사의 예외는 `check_all.py`에 이유와 함께 둔다. 경로 규칙 예외 `API_EXCEPTIONS`(`/graphql`, RFC 8628 토큰 엔드포인트 `/v1/scanner/token`, 전역 검색 `/v1/search`·`/v1/search/suggestions`), 집합 명사 `API_PLURAL_EXEMPT`(`staff`), 문서가 이름을 대도 openapi에 없어도 되는 경로 `API_REF_ALLOW`(토스페이먼츠 외부 API `/v1/payments/`·`/v1/transactions`, 프로토타입 전용 `/v1/proto/`, ADR-0080 2단계 초안 `/v1/forensics/`)다. openapi의 경로·작업 수(`api` 정보 줄)는 요약 문서의 REST 수치로 그대로 옮긴다.
 

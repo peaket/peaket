@@ -1,13 +1,24 @@
 # 시스템 아키텍처
 
 - **독자와 용도**: 백엔드·인프라·프론트엔드 엔지니어가 시스템 경계, 처음부터 끝까지의 요청 경로, 핵심 기술 스택을 고른 근거, 성능이나 보안 같은 품질 요구사항인 비기능 요구사항(NFR)을 기술로 채우는 전략을 확인할 때 기준으로 보는 문서다. 개별 기술 결정의 대안 비교와 트레이드오프는 `docs/adr/`에 있다. 자세한 데이터 스키마(데이터의 구조 정의)는 [data.md](data.md), 클라우드 인프라와 배포 파이프라인은 [infra.md](infra.md), 모니터링과 관측성(지표·로그·요청 기록으로 시스템 안을 들여다보는 능력)은 [observability.md](observability.md), 도메인별 세부 동작 흐름은 `docs/features/`에 자세히 적었다.
-- **원문 출처**: 설계서 TL;DR, §0(준수 기준의 검증 방법 및 보안 절차), §2(10대 기술 과제), §3(클라이언트 앱별 기술 스택), §6(아키텍처 도입, 서비스 맵, 분리 기준, API 게이트웨이, 장애 격리, 서비스 디스커버리, 중앙 관제 구조), §8(용량 산정), §9(NFR 달성 설계, 큰 장애 때 핵심을 지키려고 부가 기능을 줄여 버티는 운영 모드인 Degraded Mode, 지연시간 예산 요약), §10(v0 모놀리스와 v1 마이크로서비스 비교), §13·§14(아키텍처 결정과 그 이유를 남긴 기록인 ADR 목록), §15(리포지토리 구조), §18(참고 문헌 전체), 5장(라우트 렌더링 전략), 4장(상태 소유권 매트릭스), 6장(토큰 파이프라인), 16장(Fastify 및 RxJS 정책), 18장(통신 프로토콜), 19장(서비스 메시: 서비스끼리 주고받는 통신을 앱 대신 처리하는 층).
+- **원문 출처**: [설계서 TL;DR](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#tldr>), [설계서 §0](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#0-준수-기준>), [설계서 §2](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#2-비즈니스-문제와-성공-지표>), [설계서 §3](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#3-제품-범위와-온세일-타임라인>), [설계서 §6](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#6-시스템-아키텍처>), [설계서 §8](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#8-용량-산정-back-of-the-envelope>), [설계서 §9](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#9-slo-설계-목표--달성-설계--검증>), [설계서 §10](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#10-수치로-증명할-기술-문제-10선-kpi>), §13·§14(ADR 목록), §15(리포지토리 구조), §18(참고 문헌), 5장(라우트 렌더링), 4장(상태 소유권), 6장(토큰), 16장(Fastify·RxJS), 18장(통신 프로토콜), 19장(서비스 메시).
 - **기준 기획 버전**: v1.0.
-- **표시 규칙**: C4 모델 다이어그램, NFR 대응 표 구조, PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험) 통과 기준은 원문에 빠진 것을 정리해 넣은 것이라 모두 [보완]으로 표시한다. 수치는 원문 설계를 이어받았고, 새로 확정한 수치에만 [가정]을 붙인다.
+- **표시 규칙**: C4 모델 다이어그램, NFR 대응 표 구조, PoC 통과 기준은 원문에 빠진 것을 정리해 넣은 것이라 모두 [보완]으로 표시한다. 수치는 원문 설계를 이어받았고, 새로 확정한 수치에만 [가정]을 붙인다.
 
 ## 1. 핵심 결정과 시스템 컨텍스트
 
-**이 아키텍처의 맨 위에 놓인 핵심 결정은 "좌석 홀드(Soft Hold)는 Redis에서 초고속으로 처리하고, 최종 판매 확정(Hard Sale)은 PostgreSQL에서 엄격한 ACID 트랜잭션으로 보장한다"는 2단계 일관성 모델이다(`ADR-0014`).** 시스템 전체는 데이터가 서로 어긋나지 않게 하는 이 2단계 흐름을 받치도록 설계했다. 백엔드는 NestJS(Node.js 서버 프레임워크)로 만든 마이크로서비스 10개로 이루어진다. 서비스는 단순히 비즈니스 개념이 아니라, 트래픽 부하 수준·요구 가용성(서비스를 멈춤 없이 쓸 수 있는 정도) 등급·런타임 실행 방식이 서로 다른 경계에 따라 나눴다(`ADR-0007`). 외부 클라이언트의 요청은 클라이언트 종류별로 맞춘 씬(Thin) API 게이트웨이 5개(API는 프로그램끼리 요청과 응답을 주고받는 창구, 게이트웨이는 그 앞에 둔 입구 서버)가 나눠 받는다(`ADR-0008`). 개발 초기 v0 단계는 같은 모듈 경계를 공유하는 모듈러 모놀리스로 시작하고, v1 단계에서 실제 분산 서비스로 배포해 아키텍처를 나눈 효과를 숫자로 잰다. 일반 사용자의 예매 진입부터 좌석 홀드(결제하는 동안 다른 사람이 가져가지 못하게 좌석을 잠시 잡아 두는 것) 완료까지는 요청이 가장 많이 지나는 경로인 핫패스(Hot Path)다. 이 구간에는 평소 데이터베이스 쓰기 I/O가 없다. 좌석용 Redis(메모리에 데이터를 두는 빠른 저장소)가 고장 나 예비 쪽으로 넘어가는 페일오버 중에는 관계형 데이터베이스인 PostgreSQL의 정렬 잠금 경로로 홀드를 처리한다(`NFR-015`). 응답 경로의 DB 쓰기는 주문 생성·결제 접수(주문 이벤트 기록)와 최종 판매 확정 때 일어나고, 홀드 원장은 응답 경로 밖에서 비동기로 쌓는다. 관제 루프는 시스템이 내보내는 운영 신호인 텔레메트리 이벤트를 초 단위로 모으고 집계해 운영자에게 보여 준다. 이상 징후가 생기면 안전 장치(가드레일)를 거쳐 동시 입장 목표를 상황에 맞춰 조절한다.
+시스템 아키텍처의 핵심 설계 결정과 구조적 특징은 다음과 같다:
+
+- **2단계 일관성 모델 ([ADR-0014](adr/0014-soft-hold-hard-sale.md))**:
+  - **좌석 선점 (Soft Hold)**: 인메모리 Redis에서 초고속으로 처리하여 핫패스(Hot Path)의 RDBMS 쓰기 I/O를 0건으로 유지한다. Redis 페일오버 중에는 PostgreSQL 정렬 잠금 경로로 안전하게 우회한다([NFR-015](../planning/02-requirements.md)).
+  - **최종 판매 확정 (Hard Sale)**: PG 결제 승인 바로 앞에 PostgreSQL에 사전 예약(PENDING)을 넣고, 활성 상태 부분 유니크 인덱스로 같은 좌석의 두 번째 판매를 막는다. 승인이 끝나면 SOLD로 바꾼다. 남는 위험은 두 가지다. 좌석 Redis 장애로 원장에 적기 전의 홀드가 사라지면, 같은 좌석을 고른 두 사람 중 한 명은 결제 승인 전에 실패 안내를 받는다(과금은 없다). 승인 결과를 모르거나 승인 뒤 발권이 실패하면 결제와 발권이 잠시 어긋나므로, 60초 안 자동 보상을 목표로 두고 부하 시험 뒤 불변식 검사와 원장 대사로 확인한다(K2·K7, docs/features/seat-hold.md §6, docs/features/payment.md §4).
+- **도메인 경계 기반 마이크로서비스 10개 분리 ([ADR-0007](adr/0007-service-boundaries-by-load-availability-runtime.md))**:
+  - 비즈니스 도메인뿐만 아니라 트래픽 부하 수준, 가용성 SLA 등급, 런타임 특성에 따라 10개 독립 서비스로 격리한다.
+  - 개발 초기 v0 단계는 모듈러 모놀리스로 검증하고, v1 단계에서 분산 서비스로 배포하여 아키텍처 분리 효과를 정량 측정한다.
+- **클라이언트 전용 Thin API 게이트웨이 5종 분리 ([ADR-0008](adr/0008-client-specific-thin-gateways.md))**:
+  - 팬 웹(`gw-fan`), 대기열(`gw-queue`), 파트너와 결제사 웹훅(`gw-partner`), 운영자(`gw-ops`), 스캐너(`gw-scanner`)마다 게이트웨이를 따로 두어, 한쪽의 폭주나 장애가 다른 쪽으로 번지는 것을 줄인다(§4).
+- **초단위 텔레메트리 관제 루프**:
+  - 시스템 분산 이벤트를 Flink와 ClickHouse로 실시간 집계하여 관제 콘솔에 제공하고, 이상 징후 발생 시 동시 입장 목표(AIMD)를 적응형으로 제어한다.
 
 ```mermaid
 C4Context
@@ -195,6 +206,109 @@ C4Container
 | 메시 mTLS 내부 호출 | 웹과 파트너 앱 서버(Next.js Auth.js) → `identity-svc` 세션 생성과 관리자 자격증명 검증 | 서비스 메시 신원이 인정된 앱 서버 파드일 때만 호출을 받는다 (`ADR-0011`) |
 
 같은 페이로드로 REST(JSON/HTTP 1.1) vs gRPC vs Nest TCP의 p50(요청의 절반이 이 시간 안에 끝난다는 뜻)·p99 지연시간과 CPU 오버헤드를 벤치마크해, 프로토콜을 고른 근거를 숫자로 남긴다(원문 18장. 측정 전이며, 결과는 성능 장부에 적는다).
+
+### 3.3 서비스 안 구성 요소(C4 3단계)
+
+서비스 하나의 안쪽을 모듈 단위로 확대한 그림이다. §1의 1단계(시스템 맥락)와 §3의 2단계(컨테이너)에 이어지며, §3.1 서비스 맵의 모듈과 책임을 그대로 그렸고 새 결정은 없다. 그림의 구성 요소 이름은 추천 적용(2026-10-22, ADR-0084)이다. 서비스 사이 호출의 모양은 docs/api/proto/README.md에 있다. 지금은 예매 핵심 경로의 세 묶음만 그렸고, 나머지 서비스는 상세 설계를 쓸 때 함께 그린다(review/open-items.md 29번, ADR-0090).
+
+**purchase-svc**
+
+```mermaid
+C4Component
+    title purchase-svc 구성 요소(C4 3단계)
+    UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="2")
+    Container_Boundary(pur, "purchase-svc") {
+        Component(inv, "inventory 모듈", "NestJS", "좌석 비트맵, 홀드, 판매 확정, 1인 매수 한도, 좌석 스냅샷")
+        Component(book, "booking 모듈", "NestJS", "주문 애그리거트, 주문 Saga, 예매 취소 Saga, 회차 취소 일괄 환불 작업")
+        Component(sess, "구매 세션과 요청 인증", "NestJS", "입장 토큰 재사용 차단, 요청 서명 확인, 세션 시작·종료 이벤트")
+        Component(ctl, "제어 수신", "NestJS TCP", "판매 일시정지(명령 3) 집행: 새 홀드·결제 시도·결제 접수 423")
+    }
+    ContainerDb(rs, "Redis 좌석", "ElastiCache", "비트맵, 홀드, 구매 세션, 좌석 변경 채널")
+    ContainerDb(pdb, "Aurora purchase", "PostgreSQL", "주문 이벤트, 판매 행, 한도 원장, Outbox")
+    Container(pay, "payment-svc", "gRPC")
+    Container(tkt, "ticket-svc", "gRPC")
+    Container(idn, "identity-svc", "gRPC")
+    Container(rt, "realtime-gw", "WebSocket")
+    ContainerQueue(kf, "MSK 거래·제어", "Kafka")
+    Container(ops, "ops-svc", "제어 평면")
+    Rel(inv, rs, "Lua 홀드, SPUBLISH 좌석 변경")
+    Rel(rt, rs, "좌석 변경 구독")
+    Rel(sess, rs, "세션·jti")
+    Rel(book, pdb, "주문 이벤트, 판매 행, Outbox")
+    Rel(book, pay, "결제창 준비, 승인, 취소")
+    Rel(inv, pay, "새 결제 일시 정지 조회(홀드 만료 작업)")
+    Rel(book, tkt, "발권, 키 폐기")
+    Rel(book, idn, "본인확인 재확인")
+    Rel(pdb, kf, "Outbox 릴레이")
+    Rel(ops, ctl, "TCP 명령")
+    Rel(ops, book, "회차 취소 미리보기·시작")
+```
+
+**payment-svc**
+
+```mermaid
+C4Component
+    title payment-svc 구성 요소(C4 3단계)
+    UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="2")
+    Container_Boundary(ps, "payment-svc") {
+        Component(sel, "결제사 선택기", "PaymentGatewaySelector", "결제사 전환 → 공연 지정 → 플랫폼 기본")
+        Component(adp, "결제 포트와 어댑터", "토스페이먼츠·포트원·시뮬레이터", "결제창 값, 승인, 조회, 취소, 웹훅 해석")
+        Component(wh, "웹훅 수신", "NestJS", "서명 검증, 멱등 기록")
+        Component(rec, "대사", "작업", "결제사별 일일 대사")
+        Component(stl, "settlement 모듈", "NestJS", "정산서, 지급 묶음, 미수금, 지급대행 어댑터")
+        Component(pout, "송금 포트", "PayoutPort", "배상 송금")
+    }
+    ContainerDb(pdb2, "Aurora payment", "PostgreSQL", "결제 원장, 웹훅 기록, 대사 결과, 정산서, Outbox")
+    System_Ext(pg, "결제사", "토스페이먼츠·포트원")
+    Container(pur2, "purchase-svc", "gRPC")
+    Container(core2, "core-svc", "gRPC")
+    Container(ops2, "ops-svc", "gRPC")
+    Container(gwp, "gw-partner", "Envoy", "결제사 웹훅 입구")
+    Rel(pur2, sel, "결제창 준비, 새 결제 일시 정지 조회")
+    Rel(pur2, adp, "승인, 취소")
+    Rel(sel, adp, "어댑터 고름")
+    Rel(adp, pg, "HTTPS, 고정 IP")
+    Rel(gwp, wh, "웹훅")
+    Rel(wh, pdb2, "멱등 기록")
+    Rel(rec, pg, "거래 조회")
+    Rel(core2, stl, "판매자 등록")
+    Rel(ops2, stl, "지급 묶음 승인")
+    Rel(stl, pg, "지급대행 API")
+    Rel(adp, pdb2, "결제 원장")
+```
+
+**queue-svc와 admission-ctrl**
+
+```mermaid
+C4Component
+    title queue-svc·admission-ctrl 구성 요소(C4 3단계)
+    UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="2")
+    Container_Boundary(qs, "queue-svc") {
+        Component(lob, "로비·사전 검증·추가 검증", "NestJS", "참가 토큰·사전 검증 토큰, 위험 판정 호출, 격리 기록")
+        Component(ent, "진입과 순번", "NestJS", "INCR 순번, 대기표 서명, 1인 1순번")
+        Component(stf, "대기 상태 파일", "NestJS", "1초마다 구간별 파일, 빠진 번호 비트맵")
+        Component(adm, "입장 확정", "NestJS", "입장 토큰(ES256), 입장 자리, 구매 세션 이벤트 구독")
+    }
+    Container_Boundary(ac, "admission-ctrl(리더 1 + 대기 2)") {
+        Component(loop, "제어 루프", "NestJS", "200ms마다 serving 전진, AIMD 목표 조절")
+        Component(shf, "셔플", "NestJS", "T=0 commit-reveal 셔플, 결과 파일 게시")
+        Component(cmd, "명령 수신", "NestJS TCP", "Lease 소유권 확인 뒤 집행")
+    }
+    ContainerDb(rq, "Redis 대기열", "ElastiCache")
+    System_Ext(cdn, "CloudFront 대기열 파일 배포", "CDN")
+    Container(tr, "trust-svc", "gRPC")
+    Container(ops3, "ops-svc", "제어 평면")
+    Rel(lob, tr, "위험 판정")
+    Rel(tr, lob, "대기 중 격리")
+    Rel(ent, rq, "순번, 1인 1순번 중복 확인 키")
+    Rel(adm, rq, "입장 자리")
+    Rel(loop, rq, "serving, 목표")
+    Rel(stf, cdn, "대기 상태 파일")
+    Rel(shf, cdn, "셔플 결과 파일")
+    Rel(ops3, cmd, "TCP 명령")
+```
+
+- 셔플 결과 파일은 admission-ctrl의 리더가 만들어 게시한다(docs/features/queue-admission.md §2, 이 문서 §9.4).
 
 ## 4. API 게이트웨이: 클라이언트 유형별 분리 및 씬 게이트웨이 (ADR-0008)
 
@@ -745,12 +859,13 @@ T=0 진입 20만 RPS에는 CORS 사전 요청(OPTIONS)이 더해지지 않는다
 | 0081 | 소유자가 준 REST 설계 기준을 API 규칙(guidelines §10~§12)으로 들이고 기준에 어긋난 64개 작업의 경로를 바꾼다: 동작은 명사 하위 자원(`approvals`·`acceptance` 등), 컬렉션 복수형·싱글턴 단수형, 깊이 2단계(얕은 중첩), 내 항목은 `me`, 페이지 이름 `limit`, 오류 본문은 서비스·게이트웨이·엣지 모두 Problem(정적 파일 404와 기기 승인 OAuth 오류는 예외), 401 `WWW-Authenticate`, 끝 슬래시 404. 커서 기본·`q` 이어 붙이기 안 씀·디버그는 로컬·CI만은 기준과 다르게 정했다 | 채택(2026-10-21, 소유자 요청, 세부는 추천 적용). 보완: 0087 |
 | 0082 | 운영 설계의 서비스 메시는 Istio 앰비언트(노드 프록시 L4 mTLS, gRPC를 받는 서비스만 서비스 단위 웨이포인트, 기준을 넘는 서비스만 사이드카)다. Istio 기본값(재시도 2회, 시간 초과 없음, PERMISSIVE)은 설계에 맞게 덮어쓴다. 메시는 연결과 전송을 맡고, 앱은 데드라인·업무 재시도·차단기와 대체 응답·메시 밖 TLS·추적 헤더를 맡는다. 앱에 일반 네트워크 재시도·클라이언트 쪽 분산·파드 사이 TLS를 넣지 않는다. 포트폴리오 실행은 메시 없이 gRPC 투명 재시도·NestJS 우아한 종료·NetworkPolicy로 메우고, 예비 코드는 두지 않는다. 운영 오버레이는 메시가 있어야 배포된다. 파티션 늘리기·리샤딩은 정비 시간에만 한다. 핫패스에 일관된 해시 분산과 앱 수준 가십 감지는 쓰지 않는다. 메시 PoC는 선택이다 | 채택(2026-10-22, 소유자 승인 '추천대로', 값과 세부는 추천 적용) |
 | 0083 | 관계형 원장 DB는 Aurora PostgreSQL을 유지한다(MySQL 비교: 부분 유니크 인덱스, 밀리초 잠금 대기, 서버 쪽 시간 초과, 트랜잭션 안 DDL, 파티션 표 외래 키). 주문·결제·티켓은 UUIDv7 ID 범위로 월 파티션한다. 파티션 키를 담지 못하는 유일 규칙은 유일 확인 표(`order_idempotency`·`payment_per_order`)가 맡는다. 스캔 기록 기본 키는 `(event_id, id)`, Outbox는 부모 표 이름으로 발행하고, 파티션은 미리 만든다. 비상 경로 잠금 대기는 `SET LOCAL`로 정하고, 마이그레이션 잡은 PgBouncer를 거치지 않는다. `status` 전이는 HOT가 아님을 바로잡고, ticket 교차 리전 복제본은 Global Database 도쿄 보조 클러스터로 둔다 | 채택(2026-10-22, PostgreSQL 유지는 소유자 승인, 값과 세부는 추천 적용). 보완: 0086 |
-| 0084 | 문서를 받는 사람별로 보강한다. 문서 폴더를 Git 저장소로 관리하고(`main` 기준점, 기본 가지 `develop`, 줄바꿈 자동 변환 끔), 인프라·관제 인수 문서(docs/infra-handover.md), 내부 gRPC 계약 초안(docs/api/proto/), Avro 스키마 초안(docs/api/avro/), arc42 안내(docs/arc42.md), 경영진 요약(planning/00-executive-summary.md)을 둔다. 인스턴스 사양·가용성 등급·키 관리 권한·도쿄 전환 준비물, gRPC 상태 코드 규칙, Avro 등록 규칙(TopicRecordNameStrategy, 자동 등록 끔, Outbox `bytea`)은 추천 적용이다. 셔플 결과 파일 게시는 admission-ctrl로 맞추고, C4 1·2단계 그림, 통신 표, 보존 표, 독자 줄을 보강했다 | 채택(2026-10-22, 저장소와 새 문서 종류는 소유자 결정, 값과 규칙은 추천 적용) |
+| 0084 | 문서를 받는 사람별로 보강한다. 문서 폴더를 Git 저장소로 관리하고(`main` 기준점, 기본 가지 `develop`, 줄바꿈 자동 변환 끔), 인프라·관제 인수 문서(docs/infra-handover.md), 내부 gRPC 계약 초안(docs/api/proto/), Avro 스키마 초안(docs/api/avro/), arc42 안내(docs/arc42.md, 2026-10-26 ADR-0090으로 없애고 C4 3단계 그림은 이 문서 §3.3, 대응표는 00-summary §2.1로 옮겼다), 경영진 요약(planning/00-executive-summary.md)을 둔다. 인스턴스 사양·가용성 등급·키 관리 권한·도쿄 전환 준비물, gRPC 상태 코드 규칙, Avro 등록 규칙(TopicRecordNameStrategy, 자동 등록 끔, Outbox `bytea`)은 추천 적용이다. 셔플 결과 파일 게시는 admission-ctrl로 맞추고, C4 1·2단계 그림, 통신 표, 보존 표, 독자 줄을 보강했다 | 채택(2026-10-22, 저장소와 새 문서 종류는 소유자 결정, 값과 규칙은 추천 적용) |
 | 0085 | 새 결제 일시 정지(결제사 장애, 채널 호출 상한, 채널 비활성 503) 동안 주문을 만들고 결제 접수 전인 홀드의 남은 시간을 멈추고, 다시 열리면 이어 센다. 멈춘 시간은 일시 정지 시작과 주문 생성 가운데 늦은 때부터 다시 열린 때까지이고, 구매 세션의 최대 체류 시각을 넘기지 않는다. purchase-svc 만료 작업이 1초마다 payment-svc에 묻고(`GetNewPaymentPause`), 503 Problem에 `holdRemainingSeconds`, 결제 시도 응답에 `holdExpiresAt`을 싣는다 | 채택(2026-10-22, 규칙은 소유자 결정, 범위·계산·신호·화면·시험은 추천 적용) |
 | 0086 | 쿼리·인덱스 규칙과 실행 계획 진단을 정하고 데이터 설계 패턴 점검의 빈칸을 채운다. 엔진 판(Aurora PostgreSQL 18.6.1 이상, ClickHouse 26.8 LTS, ElastiCache Valkey 8.1 이상 노드 기반), 취소 유일 제약과 결제 표의 회차 칸, 일련번호는 카운터 행, 자식 표 같은 범위 파티션과 회차 범위 파티션, 쿼리-인덱스 표(docs/data.md §5.1), 부분 인덱스 조건은 상수, `auto_explain` 매개변수 값 남기지 않기, ClickHouse 골드 판 바꾸기, 로비 집합 `SSCAN`과 큰 키 `UNLINK`, CHECK·승인 자식 표·판본 표 | 채택(2026-10-22, 반영은 소유자 승인, 값과 세부는 추천 적용). 보완: 0087 |
 | 0087 | 4차 전수 정합성 점검의 추천 적용: 정적 파일 404는 Problem 예외, 조건부 필수 값 누락은 422, 정산서 회차 필드 `eventId`, 판매 승인 변경 취소 API, `scan_event` 보존 기산점, 탈퇴 계정의 중복 확인 키 5일 안 삭제, 관리 계정 세션 초과 처리, `/verify/return` 서버 처리기, 키 없는 티켓은 Issued, ASVS 요약은 ID마다 원문 기준 한 문장(doc-check `asvs` 검사) 등 36가지(1부 30가지·2부 6가지. 결정 30은 소유자 결정 질문 45-5 (가)의 실행) | 채택(2026-10-23, 소유자 요청 '안맞는 부분은 모두 고쳐주세요', 추천 적용. ASVS 요약 통일은 소유자 결정 질문 45-5 (가)). 보완: 0088 |
 | 0088 | 4차 전수 정합성 점검 3부의 추천 적용: 입장 중인 회차의 티켓이 있으면 계정 병합 차단(`ENTRY_STARTED`), 파트너·관제 이미지 올리기의 `X-Requested-With`, 주문 생성·결제 시도·결제 접수의 415, 다른 기기 로그아웃 전 재인증, 로그인 기록의 인증 방식·인증 요소, 암호 목록 갱신 규칙, GitHub 조직 웹훅 사본 3년 보존, 바뀌지 않는 외부 키 위험 수용(ASVS 13.2.1 부분 적용), 월렛 QR 움직이는 무늬, 앱 개수는 4개와 데모 앱 등 18가지 | 채택(2026-10-26, 소유자 요청 '저번에 못했던 부분 계속 진행', 추천 적용). 보완: 0089 |
 | 0089 | 4차 점검에서 남긴 값: 리포트 조회 계정당 30회/분·결정 기록 쓰기 10회/분과 ClickHouse 읽기 사용자 쿼터, 분석 저장소 호출의 시간 초과·재시도, Gradle·PyPI 의존성 고정, 관리 도구 HTTPS·SSO·MFA와 EKS 공개 엔드포인트 허용 대역, 대형·중형 온세일과 겹친 대사는 윈도우 뒤(늦어도 04시), 지연 환급 계좌 `POST /v1/cancellations/{cancellationId}/account`와 환급·배상 계좌 재인증, identity-svc 접속기록 줄의 법정 사본 갈래와 관리 계정 2년 사본, 데이터 분류표·비밀 목록 행, heat 팔레트, CloudFront 지표 YACE 경로, WBS 작업 설명 등 12가지 | 채택(2026-10-26, 소유자 요청 '남긴 것들은 합리적으로 시니어 개발자 관점에서 정해주세요', 추천 적용) |
+| 0090 | arc42 안내 문서를 없애고 내용을 제자리로 옮긴다. C4 3단계 그림 3장은 이 문서 §3.3(서비스 맵 바로 뒤)으로, arc42 열두 칸·C4 그림·흐름별 순서도의 위치 표는 00-summary §2.1(문서 지도)로, 남은 일 넷은 review/open-items.md 26~29번으로 옮긴다. ADR-0084의 '대응표 문서 하나만 둔다'를 대체한다 | 채택(2026-10-26, 소유자 결정) |
 
 작성 예정 과제: Bigtable·Dataflow·GFS/HDFS의 현대적 클라우드 대체, Web Push/알림톡 발송 대행사 선정, 휴대폰 본인확인 대행업체 비교 분석. Datadog 등 상용 관측 SaaS 평가는 ADR-0067의 Phase 4 비교 측정(wbs 4.8.2)으로 옮겼다.
 

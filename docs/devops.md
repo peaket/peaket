@@ -1,11 +1,16 @@
 # DevOps 상세 설계: 저장소·CI·공급망·승격·배포·변경 관리
 
 - **독자와 용도**: 플랫폼 엔지니어와 각 서비스 담당이 코드가 저장소에서 운영 환경까지 가는 길(저장소, 코드를 올릴 때마다 자동으로 검사하고 빌드하는 CI, 공급망 증명, 환경 승격, 워크로드별 배포와 되돌리기, 데이터 변경, 변경 동결과 정비 시간, 인프라 코드, 사람의 운영 접근, 비용 상한 장치, 전달 지표)을 구현하고 운영할 때 읽는 기준 문서다. 배포 구성도·환경 정의·가용성(서비스를 멈춤 없이 쓸 수 있는 정도)·백업은 [infra.md](infra.md), SLO(팀이 정한 서비스 품질 목표)·경보·Game Day(일부러 장애를 내고 대응을 연습하는 날)는 [observability.md](observability.md), 운영 명령은 [features/control-tower.md](features/control-tower.md), 비밀과 키 목록은 [security/secrets-and-keys.md](security/secrets-and-keys.md)가 정본이다. 보안 요구사항 추적은 [security/asvs/delivery.md](security/asvs/delivery.md)다.
-- **원문 출처**: 설계서 15장(저장소 구조), 19장(Kubernetes, 저장소에 적어 둔 배포 상태대로 클러스터를 맞추는 GitOps, 부하에 따라 서버 수를 자동으로 늘리고 줄이는 오토스케일), 23장(AWS DevOps 운영), §9의 배포 동결(docs/infra.md §5의 6). 원문에는 절차가 없어 이 문서의 규칙은 대부분 [보완]이다. 결정 기록은 [ADR-0054](adr/0054-delivery-pipeline-change-freeze-and-safe-deploys.md)이고, 가지 규칙은 [ADR-0074](adr/0074-git-flow-branching-release-and-hotfix.md)다.
+- **원문 출처**: [설계서 §15 <리포지토리와 가상 팀 구조>](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#15-리포지토리와-가상-팀-구조>), [설계서 19장 <MSA, Kubernetes와 CNCF 생태계>](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#19장-msa-kubernetes와-cncf-생태계>), [설계서 23장 <AWS DevOps>](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#23장-aws-devops>), [ADR-0054](adr/0054-delivery-pipeline-change-freeze-and-safe-deploys.md), [ADR-0074](adr/0074-git-flow-branching-release-and-hotfix.md).
 - **기준 기획 버전**: v1.0.
 - **표시 규칙**: 2026-10-13 DevOps 검토(소유자 요청 '상세설계까지')에서 정한 규칙은 추천 적용(2026-10-13)이다. 측정으로 정할 값만 [가정, Phase N …에서 확정]으로 적는다. 외부 제품·표준 사실은 2026-10-13에 원문으로 확인했고, 출처는 §16에 있다. 가지 규칙(§2.2)의 git flow는 소유자 결정(2026-10-20, ADR-0074)이고, 이 프로젝트에 맞춘 세부 규칙은 추천 적용(2026-10-20)이다. git flow 원문과 GitHub 규칙 세트 등은 2026-10-20에 확인했다(§16). 늘 켜 두는 데모 환경은 두지 않는다(질문 24 결론, ADR-0057).
 
 ## 1. 범위와 원칙
+
+DevOps 파이프라인은 신뢰할 수 있는 코드 변경이 운영 환경까지 무중단으로 안전하게 전달되도록 엔지니어링 규율을 표준화한다:
+- **코드 및 브랜치 거버넌스 (Git Flow)**: `main`(운영 정본), `develop`(통합 개발), 릴리스 브랜치 격리를 통한 출시 안정성 확보([ADR-0074](adr/0074-git-flow-branching-release-and-hotfix.md))
+- **공급망 무결성 (Build Once, Deploy Anywhere)**: 한 번 빌드한 불변 컨테이너 이미지 다이제스트를 모든 환경에 동일하게 승격
+- **선언형 GitOps와 무중단 배포**: ArgoCD 기반 지속적 일치, 온세일 변경 동결(Change Freeze) 창 엄수([ADR-0054](adr/0054-delivery-pipeline-change-freeze-and-safe-deploys.md))
 
 ### 1.1 이 문서가 정하는 것
 
