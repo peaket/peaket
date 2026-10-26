@@ -22,7 +22,7 @@
 | Aurora PostgreSQL (purchase) | 주문, 결제 시도(결제사·결제창 참조), 주문 이벤트 소싱 스토어, 좌석 판매 행(PENDING/SOLD/RETURNED), 1인 예매 한도 원장, 홀드 감사 원장, 예매 취소와 환불 기록, 회차 취소 요청과 일괄 환불 작업 진행, 배상 지급 기록, Outbox(데이터베이스를 바꿀 때 보낼 이벤트를 같은 트랜잭션으로 표에 먼저 적어 두고 나중에 보내는 방식) 테이블 | purchase-svc | 판매 확정(Hard Sale: 판매 행 PENDING 예약), 쿼터 차감, 주문 상태 전이를 하나의 ACID 트랜잭션으로 원자 처리한다(주문 생성과 결제 접수는 그 앞의 따로 된 트랜잭션이다, §4). 샤딩(데이터를 여러 저장소에 나눠 담는 것)은 빼고, 큰 인스턴스 하나를 키우는 스케일업과 수평 읽기 복제로 대응한다(ADR-0028). |
 | Aurora PostgreSQL (payment) | PG사(온라인 결제를 대신 처리해 주는 결제사)별 결제 원장(가상계좌 입금 기한·번호는 입금 확정·만료 때 삭제, ADR-0062), 결제 취소 원장, 결제 상태 전이 이벤트, 웹훅(일이 생기면 상대 서버가 우리 주소를 불러 알려 주는 방식) 수신 멱등 기록, 결제사 정산 대사 결과, 정산서·지급 묶음·지급 건·미수금(파트너에게서 돌려받을 돈, ADR-0047), Outbox 테이블 | payment-svc | 결제 비밀 키와 외부 결제 대행사(PG) 통신 장애의 영향을 다른 도메인으로부터 물리적으로 격리한다. |
 | Aurora PostgreSQL (ticket, 교차 리전 읽기 복제본 포함) | 티켓 발행 원장(결제자·보유자), 기기 바인딩 공개키와 폐기 목록, 양도 요청과 소유권 양도 이력, 게이트 스캔 이벤트 로그, 스캐너 기기 등록·배치, 회차별 변경 일련번호 기록, 이상 표시, 부스 재발급 허용(ADR-0051) | ticket-svc | 공연 당일 현장 입장의 가용성(서비스를 멈춤 없이 쓸 수 있는 정도)을 최대한 높이려고, 재해 복구용으로 다른 리전(클라우드 데이터센터가 모인 지역)에 둔 읽기 복제본(아마존이 운영해 주는 관계형 데이터베이스인 Aurora의 Global Database 도쿄 보조 클러스터, 읽기 인스턴스 1대. 관리형 전환으로 쓰기를 옮기지 않는다, 추천 적용 2026-10-22, ADR-0083)을 늘 동기화한다. 복제본은 원본을 복사해 두고 읽기를 나눠 받거나 장애 때 대신하는 저장소다. 티켓 양도와 상태 변경은 행 잠금과 낙관적 락 버전 컬럼을 함께 써서 이중 처리를 막는다. |
-| Aurora PostgreSQL (공유 클러스터: identity·ops·core 개별 논리 DB 및 역할) | 계정, 세션 참조, 법적 동의, 관리자 계정, 현장 스태프 권한 배정, 스캐너 세션; 운영 명령 감사 로그, 이벤트 스토어, 법적 요청 대장, 승인 업무, CS 처리함 건(고객 문의·게시물 신고 건 포함, ADR-0066), 예매 제한과 소명(예매 제한이나 양도 회수 대상이 된 팬이 사정을 설명하는 절차), 결정 기록·가명정보(추가 정보 없이는 누구인지 알 수 없게 바꾼 정보) 처리 기록(ADR-0052), 수요 예측(`demand_forecast`, ADR-0078); 판매자 신원정보, 판매 승인 상태, 공연예술통합전산망 전송 기록, 공연·공연장·좌석 배치(공연장 캔버스·무대·구역 도형과 좌석 좌표)·좌석맵 템플릿 10종(`venue` TEMPLATE 행, 배포 때 넣는다, ADR-0066)·가격 티어·판매 정책, 판매 자격 명단(판매 기간 끝 + 1일 파기, ADR-0062), 굿즈 주문과 재고 확정, 관람 후기(`review`)와 후기 사진 기록(`review_image`, 파생본 키만)·게시물 신고(`content_report`), 후기 조치 기록(`takedown_action`, 후기 모듈), 고객 문의(`inquiry`·`inquiry_message`, support 모듈, ADR-0066), 홈 구성(배너·테마, ADR-0063), 알림 구독과 웹훅, 알림 발송 기록(`notification_delivery`, 90일 [가정], ADR-0062) | identity-svc, ops-svc, core-svc | 운영 비용을 아끼려고 물리 클러스터는 함께 쓰되, 서비스별로 독립된 논리 데이터베이스와 전용 DB 계정을 따로 둔다. 논리 DB끼리의 교차 참조와 외래키 조인은 금지한다. |
+| Aurora PostgreSQL (공유 클러스터: identity·ops·core 개별 논리 DB 및 역할) | 계정, 세션 참조, 법적 동의, 관리자 계정, 현장 스태프 권한 배정, 스캐너 세션; 운영 명령 감사 로그, 이벤트 스토어, 법적 요청 대장, 승인 업무, CS 처리함 건(고객 문의·게시물 신고 건 포함, ADR-0066), 예매 제한과 소명(예매 제한이나 양도 회수 대상이 된 팬이 사정을 설명하는 절차), 결정 기록·가명정보(추가 정보 없이는 누구인지 알 수 없게 바꾼 정보) 처리 기록(ADR-0052), 수요 예측(`demand_forecast`, ADR-0078); 판매자 신원정보, 판매 승인 상태(공연 단위), 공연예술통합전산망 전송 기록, 공연(회차 묶음)·회차·공연장(실제 장소)·아티스트·다른 이름(ADR-0093)·좌석 배치(공연장 캔버스·무대·구역 도형과 좌석 좌표)·좌석맵 템플릿 10종(`venue` TEMPLATE 행, 배포 때 넣는다, ADR-0066)·가격 티어·판매 정책, 판매 자격 명단(판매 기간 끝 + 1일 파기, ADR-0062), 굿즈 주문과 재고 확정, 관람 후기(`review`)와 후기 사진 기록(`review_image`, 파생본 키만)·게시물 신고(`content_report`), 후기 조치 기록(`takedown_action`, 후기 모듈), 고객 문의(`inquiry`·`inquiry_message`, support 모듈, ADR-0066), 홈 구성(배너·테마, ADR-0063), 검색 읽기 모델(`search_document`·`search_term`·`search_version`, ADR-0094), 알림 구독과 웹훅, 알림 발송 기록(`notification_delivery`, 90일 [가정], ADR-0062) | identity-svc, ops-svc, core-svc | 운영 비용을 아끼려고 물리 클러스터는 함께 쓰되, 서비스별로 독립된 논리 데이터베이스와 전용 DB 계정을 따로 둔다. 논리 DB끼리의 교차 참조와 외래키 조인은 금지한다. |
 | MongoDB | 상품 카탈로그 정의(굿즈, 주차권, VIP 패키지, 패스트트랙 등 비정형 티켓 연동 부가 상품 문서, 유형별 `$jsonSchema` 제약) | core-svc (shop) | 상품 유형별 유연한 스키마 확장과 속성 검색을 지원한다(ADR-0013). |
 | ClickHouse | 대규모 분석 전용 저장소(분석 저장소, ADR-0042·0052): 브론즈(이벤트·스냅샷 원본, 가명 처리만, 적재 뒤 90일), 실버(중복 제거·정리된 가명 사건과 구매 세션 누적 스냅샷, 90일), 골드(스타 스키마 집계·지표 뷰, 사람 단위 행 없음, 2년), 실시간 표 `rt`(스트림 처리 엔진 Flink `ops-rt`의 누적 덮어쓰기와 1초 칸, 관제·파트너 판매 현황의 잠정 숫자, 90일, docs/streaming.md §4.3), trust-svc 원시 탐지 신호(보관 기간 TTL 30일, 적재는 Flink `trust-reassess`), 접속기록 저장소(별도 논리 DB, 보존 3개월. 원문 미기재 저장소를 분석용 데이터베이스 ClickHouse 안의 독립 DB로 확정, 추천 적용 2026-10-09) | peaket-data(적재 잡·마감 실행기), ops-svc(골드 지표 뷰·rt 읽기), trust-svc, identity와 API 게이트웨이(프로그램 요청이 들어오는 입구 서버)의 로그 파이프라인 | 런타임 하트비트(살아 있음을 알리려고 주기적으로 보내는 신호) 부하를 제거하고, 비동기 마이크로 배치로 모아 한꺼번에 넣는다. 잠정 숫자(rt)와 확정 숫자(골드)는 다른 표에 두고, 확정 숫자의 중복 제거는 dbt SQL로 한다(docs/features/analytics.md §2·§5.5). |
 | Kafka | 토픽(메시지를 종류별로 모아 두는 통로): 핵심 거래 이벤트, 분산 텔레메트리(시스템이 내보내는 지표·로그·요청 기록 같은 운영 신호), 실시간 제어 명령 | 발행 서비스별 독립 파티셔닝 | 도메인별로 토픽을 나누고, 전송 신뢰성 수준(at-least-once)을 차등 적용한다(ADR-0026). 거래·제어 클러스터와 텔레메트리 클러스터는 물리적으로 다른 MSK(아마존이 대신 운영해 주는 이 메시지 시스템) 클러스터 둘이다(ADR-0026 결정 2, docs/infra.md §1). |
@@ -43,7 +43,12 @@ erDiagram
     account ||--|{ account_provider : "로그인 수단 1개 이상"
     account ||--o{ account_merge : "대표 계정"
     admin_account }o--|| promoter : "belongs_to (partner only)"
-    promoter ||--o{ event : organizes
+    promoter ||--o{ production : organizes
+    production ||--|{ event : "회차(ADR-0093)"
+    place ||--o{ production : "공연장(실제 장소)"
+    production ||--o{ production_artist : ""
+    artist ||--o{ production_artist : ""
+    production ||--o| search_document : "검색 읽기 모델(ADR-0094)"
     promoter ||--o{ settlement_statement : ""
     settlement_statement ||--o{ payout : ""
     settlement_statement ||--o{ statement_dispute : "이의 제기"
@@ -87,12 +92,12 @@ erDiagram
     promoter ||--o{ merch_order : "판매자(POL-037)"
     merch_order ||--o{ merch_order_item : "price snapshot"
     product_stock ||--o{ merch_order_item : confirms
-    event ||--o{ review : "관람 후기(회차 단위)"
+    event ||--o{ review : "관람 후기(쓰기는 회차, 보기는 공연 단위로 모음)"
     account ||--o{ review : writes
     purchase_order ||--o{ review : "작성 자격 근거(결제자 주문)"
-    event ||--o{ home_banner : "배너 대상"
+    production ||--o{ home_banner : "배너 대상"
     home_theme ||--o{ home_theme_item : ""
-    event ||--o{ home_theme_item : ""
+    production ||--o{ home_theme_item : ""
     admin_account ||--o{ home_banner : "작성자"
     admin_account ||--o{ home_theme : "작성자"
     takedown_notice ||--o{ takedown_action : "외래키 없음(ops와 core 논리 DB)"
@@ -125,7 +130,7 @@ erDiagram
     account ||--o{ booking_restriction : "예매 제한"
     account ||--o{ appeal : "소명"
     event ||--o{ kopis_report : "1일 전송(FR-054)"
-    event ||--o{ sale_eligibility_list : "판매 자격 명단(팬클럽 선예매)"
+    production ||--o{ sale_eligibility_list : "판매 자격 명단(팬클럽 선예매)"
     account ||--o{ notification_delivery : "알림 발송 기록(90일)"
     account ||--o{ notification_subscription : "오픈·취소표 알림 신청"
     event ||--o{ notification_subscription : ""
@@ -140,7 +145,7 @@ erDiagram
     command_event ||--o{ command_approval : "명령 승인(ADR-0086)"
     event ||--|| scanner_seq : "회차별 변경 일련번호 카운터(ADR-0086)"
     gate_flag ||--o{ gate_flag_scan : "이상 표시에 든 스캔(ADR-0086)"
-    event ||--o{ event_revision : "판매 승인 판본(ADR-0086)"
+    production ||--o{ production_revision : "판매 승인 판본(ADR-0086·0093)"
     promoter ||--o{ promoter_contract : "계약 조건과 유효 기간(ADR-0086)"
     promoter ||--o{ seller_profile_change : "판매자 정보 변경 요청(ADR-0086)"
 
@@ -213,7 +218,8 @@ erDiagram
     }
     event {
         uuid id PK
-        uuid promoter_id FK
+        uuid production_id FK "공연(회차 묶음, ADR-0093). 한 공연의 회차는 모두 같은 배치본(venue_id)을 쓴다"
+        uuid promoter_id FK "공연의 파트너와 같은 값(테넌트 검사용 사본)"
         uuid venue_id FK
         timestamptz open_at "오픈 시각(오픈 간격 규칙)"
         timestamptz entry_opens_at "입장 시작"
@@ -228,14 +234,86 @@ erDiagram
         jsonb sale_policy "DSL AST(문법 1판: design/d5 §6.7, 추천 적용 2026-10-14, ADR-0062)"
         text pg_primary "TOSS|PORTONE, 결제사 지정(POL-036). 판매 승인 뒤에는 비지 않음(비었으면 승인 때 플랫폼 기본값 저장, ADR-0062)"
         text pg_fallback "TOSS|PORTONE|NULL"
-        text status "SCHEDULED|CANCELLED|POSTPONED. 기본은 SCHEDULED(이름은 추천 적용 2026-10-20, ADR-0073), 회차 취소 요청이 확정되면 CANCELLED, 연기가 확정되면 POSTPONED(바뀐 starts_at·ends_at을 따른다, planning/03 §2.11). 판매 승인은 sale_review 칸이고, 판매 상태(판매 전·판매 중·판매 종료)는 이 칸이 아니라 open_at·starts_at으로 계산한다(ADR-0064)"
-        text sale_review "DRAFT|SUBMITTED|APPROVED|REJECTED, 판매 승인(POL-037, planning/03 §2.14)"
-        text scale "LARGE|MEDIUM|SMALL, 공연 규모(architecture §9.5). 판매 승인 때 정하고 T-30분 점검 전까지 올리기만 한다. 승인 전 NULL(ADR-0062·0078)"
+        text status "SCHEDULED|CANCELLED|POSTPONED. 기본은 SCHEDULED(이름은 추천 적용 2026-10-20, ADR-0073), 회차 취소 요청이 확정되면 CANCELLED, 연기가 확정되면 POSTPONED(바뀐 starts_at·ends_at을 따른다, planning/03 §2.11). 판매 승인은 공연의 sale_review 칸이고(ADR-0093), 판매 상태(판매 전·판매 중·판매 종료)는 이 칸이 아니라 open_at·starts_at으로 계산한다(ADR-0064)"
+        text scale "LARGE|MEDIUM|SMALL, 공연 규모(architecture §9.5). 공연의 판매 승인 때 회차마다 정하고 T-30분 점검 전까지 올리기만 한다. 승인 전 NULL(ADR-0062·0078·0093)"
+        int commission_rate_bp "판매 승인 때 promoter 값으로 고정한 중개수수료율(만분율, ADR-0060). 승인은 공연 단위라 그 공연의 회차에 같은 값을 쓴다(ADR-0093)"
+    }
+    production {
+        uuid id PK
+        uuid promoter_id FK "파트너(판매자)"
+        uuid place_id FK "공연장(실제 장소, ADR-0093)"
+        text title "공연명 1~100자 [가정]"
+        text genre "장르 정본 목록: 콘서트|뮤지컬|연극|클래식|페스티벌|팬미팅|기타. SCR-021 1단계·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063. 회차에서 옮김, ADR-0093)"
+        text age_rating "관람 연령"
+        int running_minutes "러닝타임(분)"
+        text description "공연 설명 글(정화한 서식, CMP-070)"
+        jsonb kopis_fields "공연예술통합전산망 항목 가운데 공연에 딸린 것(명칭·종류, 관람 가능 연령, 출연진·제작진 등)"
+        text sale_review "DRAFT|SUBMITTED|APPROVED|REJECTED, 판매 승인(POL-037, planning/03 §2.14). 공연마다 하나(ADR-0093)"
         timestamptz sale_approved_at "마지막 판매 승인 시각. NULL이면 비공개"
-        jsonb pending_revision "재승인 대기 변경분. 승인 때 공개본에 반영(판매 승인 단위가 공연으로 정해지면 그 엔터티로 옮긴다, ADR-0062)"
+        jsonb pending_revision "재승인 대기 변경분(회차 추가 포함). 승인 때 공개본에 반영(ADR-0062, 공연으로 옮김 ADR-0093)"
         jsonb accessible_seating_check "판매 승인 요청 때 서버가 다시 센 휠체어석 수·기준 수·위치 확인 좌석 수·온라인 판매 휠체어석 수와 파트너 확인·부족 이유(FR-023, ADR-0062)"
-        int commission_rate_bp "판매 승인 때 promoter 값으로 고정한 중개수수료율(만분율, ADR-0060)"
-        text genre "장르 정본 목록: 콘서트|뮤지컬|연극|클래식|페스티벌|팬미팅|기타. SCR-021 1단계·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)"
+        timestamptz created_at
+    }
+    production_artist {
+        uuid production_id PK
+        uuid artist_id PK
+        int sort_order "보이는 순서"
+    }
+    artist {
+        uuid id PK
+        text name "대표 이름(활동명). 판매 승인 때 운영자가 기존 아티스트에 잇거나 새로 만든다(ADR-0093)"
+        uuid created_by "만든 관리 계정"
+        timestamptz created_at
+    }
+    place {
+        uuid id PK
+        text name "공연장 이름"
+        text address "도로명 주소(SCR-002 장소 섹션)"
+        text region "시·도"
+        text status "ACTIVE|CLOSED"
+        uuid created_by "만든 관리 계정(운영자, 감사 로그)"
+    }
+    search_alias {
+        uuid id PK
+        text target_kind "PRODUCTION|ARTIST|PLACE"
+        uuid target_id "대상 ID(종류가 여럿이라 외래키 없음)"
+        text alias "다른 이름 1~100자 [가정]. 검색에만 쓰고 화면 이름은 바꾸지 않는다"
+        text source "PARTNER(공연 등록, 공연당 5개 [가정])|OPERATOR(판매 승인 화면)"
+        uuid created_by
+        text reason "운영자가 더하고 지울 때 사유(감사 로그)"
+        timestamptz removed_at
+    }
+    search_document {
+        uuid production_id PK "검색 읽기 모델의 공연 한 줄(ADR-0094). 카탈로그와 같은 트랜잭션에서 고친다"
+        text title
+        text genre
+        uuid place_id
+        jsonb artist_ids "아티스트 ID 목록"
+        uuid representative_event_id "대표 회차(ADR-0093 결정 8)"
+        timestamptz next_open_at
+        uuid next_open_event_id "공연 카드의 오픈 알림 대상"
+        text sale_status "UPCOMING|ON_SALE|SOLD_OUT|ENDED"
+        date period_start "첫 회차 시작(KST 날짜)"
+        date period_end "마지막 회차 종료(KST 날짜)"
+        timestamptz sale_ends_at "마지막 회차의 판매 종료"
+        int min_price
+        bigint interest "관심도: 오픈 전은 다음 오픈 회차의 오픈 알림 신청 수, 그 밖은 최근 7일 확정 판매 매수"
+        bigint updated_version
+    }
+    search_term {
+        uuid id PK
+        text kind "PRODUCTION|ARTIST|PLACE"
+        uuid target_id
+        text display_name "화면 이름"
+        text alias_of "다른 이름이면 원래 이름, 아니면 NULL"
+        text norm "정규화한 값(NFKC·소문자·제로폭 문자 지움·공백 정리)"
+        text norm_nospace "띄어쓰기 없앤 값. text_pattern_ops B-tree"
+        text jamo "낱자(호환 자모). text_pattern_ops B-tree"
+        text chosung "초성. text_pattern_ops B-tree"
+        bigint updated_version
+    }
+    search_version {
+        bigint version "검색 읽기 모델을 바꾸는 트랜잭션마다 UPDATE … RETURNING으로 1 올린다. 시퀀스 금지(ADR-0086). 자동완성 사전이 10초 [가정]마다 읽는다(ADR-0094)"
     }
     venue {
         uuid id PK
@@ -337,7 +415,7 @@ erDiagram
     }
     home_banner {
         uuid id PK
-        uuid event_id "대상 회차(판매 승인된 공연만)"
+        uuid production_id "대상 공연(판매 승인된 공연만, ADR-0093). 누르면 대표 회차 상세"
         text image_key "운영자가 올린 가로형 배너 원본 키. 공개는 메타데이터를 지운 파생본만"
         text alt_text "대체 텍스트, 필수"
         int sort_order
@@ -359,7 +437,7 @@ erDiagram
     }
     home_theme_item {
         uuid theme_id FK
-        uuid event_id "판매 승인된 공연만"
+        uuid production_id "판매 승인된 공연만(ADR-0093)"
         int sort_order
     }
     promoter {
@@ -884,7 +962,7 @@ erDiagram
     }
     sale_eligibility_list {
         uuid id PK
-        uuid event_id "판매 승인 단위(지금은 회차. 단위가 공연으로 정해지면 그 엔터티로, design/d5 §1.6 31번)"
+        uuid production_id "판매 승인 단위인 공연(ADR-0093). 명단은 그 공연의 회차 판매 정책이 쓴다"
         text key "영문 소문자·숫자·하이픈 3~32자, 규칙의 buyer.lists 값"
         text name "표시 이름"
         int member_count
@@ -1014,8 +1092,8 @@ erDiagram
         uuid event_id
         uuid scan_event_id PK
     }
-    event_revision {
-        uuid event_id PK
+    production_revision {
+        uuid production_id PK
         int revision_no PK
         jsonb approved_content "판매 승인한 내용"
         uuid approved_by
@@ -1058,7 +1136,7 @@ erDiagram
 - **종류별 필수 칸(상속관계)**: 한 표에 여러 종류를 담는 표는 종류마다 필수 칸을 검사한다. 예: `CHECK ((kind = 'TEMPLATE') = (template_code IS NOT NULL))`, `CHECK (kind <> 'LAYOUT' OR promoter_id IS NOT NULL)`(`venue`), `CHECK ((kind = 'EVENT') = (event_id IS NOT NULL))`(`settlement_statement`), `CHECK ((role IN ('partner_admin','partner_member')) = (promoter_id IS NOT NULL))`(`admin_account`).
 - **다형 참조의 중복 막기**: `cs_case`에 `UNIQUE (kind, target_ref) WHERE status <> 'RESOLVED' AND kind IN ('CONTENT_REPORT','RIGHTS_REQUEST')`를 건다. ops-svc는 신고 이벤트를 `INSERT … ON CONFLICT DO NOTHING`으로 받아, 같은 후기의 신고가 건 둘로 생기지 않는다. 다른 논리 DB를 가리키는 ID(`review.basis_order_id`, `content_report.case_id`, `inquiry.case_id`, `cs_case.target_ref`)는 하루 한 번 고아 행(가리키는 대상이 없는 행) 수를 세어 지표로 낸다.
 - **승인자는 자식 표**: 2인 승인의 '같은 사람 두 번 금지·요청자 본인 금지'(§5)를 DB가 지키도록, 승인을 JSON 배열 대신 자식 표(`approval_vote`·`command_approval`·`event_cancellation_approval`)에 두고 `UNIQUE (요청 ID, 승인자)`와 요청자(판정자)와 다른지 검사하는 CHECK를 건다. 이상 표시에 든 스캔 기록도 자식 표 `gate_flag_scan`에 둔다.
-- **판본 이력**: 판매 승인한 회차의 승인 판본은 `event_revision`, 파트너 계약 조건(수수료율)은 `promoter_contract`(유효 기간이 겹치지 않게 기간 키 `UNIQUE (promoter_id, valid_during WITHOUT OVERLAPS)`, `btree_gist` 확장 필요), 판매자 정보 변경 요청은 `seller_profile_change`에 남긴다. 지금 값은 지금처럼 `event`·`promoter`에 있다.
+- **판본 이력**: 판매 승인한 공연의 승인 판본은 `production_revision`(회차 단위 `event_revision`에서 공연 단위로 바꿈, ADR-0093), 파트너 계약 조건(수수료율)은 `promoter_contract`(유효 기간이 겹치지 않게 기간 키 `UNIQUE (promoter_id, valid_during WITHOUT OVERLAPS)`, `btree_gist` 확장 필요), 판매자 정보 변경 요청은 `seller_profile_change`에 남긴다. 지금 값은 `production`·`event`·`promoter`에 있다.
 - **계정 병합 사슬**: 병합할 때 흡수 계정을 가리키던 계정도 새 대표 계정을 가리키게 고쳐, `merged_into_account_id`가 한 단계만 이어지게 한다.
 
 복사한 칸 목록(역정규화, 추천 적용 2026-10-22, ADR-0086): 다른 표의 값을 복사해 둔 칸과 맞추는 방법이다.
@@ -1081,11 +1159,11 @@ erDiagram
 
 좌석맵은 두 층으로 저장한다(추천 적용 2026-10-14, ADR-0063). 배치 층은 `venue`의 캔버스 크기·무대 도형과 `section`의 도형(공연장 좌표계 다각형)·라벨 위치·기본 등급이다. 좌석 층은 `seat`의 열·번호·속성과 좌표(x·y)다. 팬 화면은 전체 배치를 먼저 그리고, 확대하면 그 범위 구역의 좌석을 그린다(docs/features/seat-hold.md §10). 회차별 좌석맵 파일은 이 두 층과 등급(`event_seat_price`)을 한 파일에 싣고 `layout_version`을 이름에 넣는다. 좌석 인덱스는 구역마다 좌석이 비트맵 인덱스의 한 범위를 차지하도록 매기고, 그 범위를 파일에 적는다. 그러면 브라우저가 스냅샷 비트맵에서 구역별 남은 좌석을 셀 수 있다.
 
-좌석맵의 소유 단위(추천 적용 2026-10-14, ADR-0063): `venue`의 TEMPLATE 행은 공연장 틀이다. 파트너가 회차 묶음(같은 공연의 회차들)의 좌석맵을 만들 때 틀을 복제해 그 공연용 배치본(LAYOUT 행, 자기 `section`·`seat`, `layout_version`)을 만든다. 같은 공연의 회차들은 같은 배치본을 가리키고(`event.venue_id`), 편집은 그 배치본에만 미친다. 틀을 고쳐도 이미 만든 배치본은 바뀌지 않고, 다른 파트너의 배치본은 보이지도 고쳐지지도 않는다. 판매 승인 뒤 배치본을 바꾸면 그 회차들은 다시 승인 대기 상태가 된다(planning/03 §2.14, 지금 규칙). 배치본을 쓰는 회차 중 하나라도 오픈(판매 시작)하면(`geometry_locked_at`) 도형·좌표·좌석 추가·삭제는 바꾸지 않는다. 기존 좌석의 속성 변경(판매 제외 등)만 지금 규칙대로 받는다. 좌석 ID와 비트맵 인덱스가 판매·홀드 기록과 이어져 있기 때문이다.
+좌석맵의 소유 단위(추천 적용 2026-10-14, ADR-0063): `venue`의 TEMPLATE 행은 공연장 틀이다. 파트너가 공연(`production`, 같은 공연의 회차 묶음, ADR-0093)의 좌석맵을 만들 때 틀을 복제해 그 공연용 배치본(LAYOUT 행, 자기 `section`·`seat`, `layout_version`)을 만든다. 같은 공연의 회차들은 같은 배치본을 가리키고(`event.venue_id`), 편집은 그 배치본에만 미친다. 틀을 고쳐도 이미 만든 배치본은 바뀌지 않고, 다른 파트너의 배치본은 보이지도 고쳐지지도 않는다. 판매 승인 뒤 배치본을 바꾸면 그 공연이 다시 승인 대기 상태가 된다(planning/03 §2.14, 지금 규칙). 배치본을 쓰는 회차 중 하나라도 오픈(판매 시작)하면(`geometry_locked_at`) 도형·좌표·좌석 추가·삭제는 바꾸지 않는다. 기존 좌석의 속성 변경(판매 제외 등)만 지금 규칙대로 받는다. 좌석 ID와 비트맵 인덱스가 판매·홀드 기록과 이어져 있기 때문이다.
 
 좌석맵 템플릿(소유자 요청 2026-10-19, 목록과 세부는 추천 적용 2026-10-19, ADR-0066): 국내에서 흔한 공연장 모양 10종(실내 아레나 엔드 스테이지·돌출 무대·센터 무대, 돔 구장, 종합운동장, 대극장(3층), 중극장(2층), 소극장, 콘서트홀(합창석), 평면 블록)을 `venue` TEMPLATE 행으로 둔다. 기본 좌석 수는 모두 [가정]이고 파트너가 바꾼다. 템플릿은 저장소의 정적 파일(`seed/seatmap-templates/*.json`, 예정)을 배포 때 넣는다. 파트너는 읽기만 하고, 운영자 편집 화면은 없다(바꿀 때는 배포한다). [템플릿에서 만들기]는 고른 템플릿의 도형(변형 반영)과 구역별 채우기 규칙(목표 좌석 수를 구역 비율대로 나눈 값, `section.editor_meta`)을 그 공연의 배치본(LAYOUT)으로 복제한다. 이미 좌석이 있는 배치본은 바꾸겠다는 확인(`replace`) 없이는 덮어쓰지 않고, 오픈 뒤 잠긴 배치본(`geometry_locked_at`)은 바꾸지 않는다. 자동 채우기 계산은 에디터(브라우저)가 한다. 서버는 저장할 때 좌석이 구역 도형 안에 있는지, 같은 구역·열·번호가 겹치지 않는지 다시 검사한다. 좌석끼리 겹치거나(중심 사이가 좌석 간격의 절반보다 가까움 [가정]) 구역 도형 밖에 있으면 경고만 한다. 템플릿은 흔한 모양을 본뜬 출발점이고 실제 공연장의 배치도가 아니다. 실제 공연장 배치도는 공연장이 준 공식 자료와 허락이 있어야 쓸 수 있으므로 넣지 않는다. 특정 공연장 이름과 다른 예매처·공연장 누리집의 배치도는 쓰지 않는다. 스탠딩(정리번호 입장) 구역은 범위 밖이라 플로어는 지정석이다(ADR-0051).
 
-관람 후기(`review`)에는 기대평 종류를 두지 않는다(소유자 결정 2026-10-14, ADR-0063). 작성 자격은 그 회차의 `event.ends_at`이 지났고, 그 회차 티켓의 결제자이며, 취소·환불·무효가 아닌 티켓이 하나 이상 남은 계정이다. 양도받은 보유자는 쓰지 않는다. 한 계정은 한 회차에 후기 하나이고, 고치거나 지울 수 있다. 별점이 낮다는 이유로 숨기지 않는다(ADR-0063). core-svc review 모듈은 후기를 쓸 때마다 ticket-svc에 결제자 티켓을 물어 확인하고(논리 DB 간 조인 금지), 확인한 주문을 `basis_order_id`로 남긴다. 취소된 회차(`status` CANCELLED)에는 쓸 수 없고, 연기된 회차는 바뀐 `ends_at`을 따른다. 공개 응답의 작성자 표시는 닉네임 첫 글자와 '**'(예: '김**'), 관람 회차 일시뿐이다. 이메일·전화번호·실명·계정 ID는 싣지 않고, 본인 후기인지는 `mine` 불리언으로만 알린다. 계정 병합 때 두 계정이 같은 회차에 후기를 하나씩 가지고 있으면, 대표 계정 후기만 남기고 흡수 계정 후기는 DELETED로 바꾼다(병합 영향 요약에 보인다)(추천 적용 2026-10-14, ADR-0063). 공연(회차 묶음) 엔터티가 없으므로(design/d5 §1.6 31번), 같은 공연의 여러 회차 후기를 한데 모아 보이는 기준은 그 결정 때 정한다. 그 전에는 회차 단위로 보인다.
+관람 후기(`review`)에는 기대평 종류를 두지 않는다(소유자 결정 2026-10-14, ADR-0063). 작성 자격은 그 회차의 `event.ends_at`이 지났고, 그 회차 티켓의 결제자이며, 취소·환불·무효가 아닌 티켓이 하나 이상 남은 계정이다. 양도받은 보유자는 쓰지 않는다. 한 계정은 한 회차에 후기 하나이고, 고치거나 지울 수 있다. 별점이 낮다는 이유로 숨기지 않는다(ADR-0063). core-svc review 모듈은 후기를 쓸 때마다 ticket-svc에 결제자 티켓을 물어 확인하고(논리 DB 간 조인 금지), 확인한 주문을 `basis_order_id`로 남긴다. 취소된 회차(`status` CANCELLED)에는 쓸 수 없고, 연기된 회차는 바뀐 `ends_at`을 따른다. 공개 응답의 작성자 표시는 닉네임 첫 글자와 '**'(예: '김**'), 관람 회차 일시뿐이다. 이메일·전화번호·실명·계정 ID는 싣지 않고, 본인 후기인지는 `mine` 불리언으로만 알린다. 계정 병합 때 두 계정이 같은 회차에 후기를 하나씩 가지고 있으면, 대표 계정 후기만 남기고 흡수 계정 후기는 DELETED로 바꾼다(병합 영향 요약에 보인다)(추천 적용 2026-10-14, ADR-0063). 후기 목록과 요약(평균 별점·후기 수)은 그 회차가 속한 공연의 모든 회차 후기를 모아 보이고, 후기마다 관람 회차 일시를 보인다. 쓰기 자격과 '한 계정 한 회차 하나'는 회차 단위 그대로다(추천 적용 2026-10-27, ADR-0093).
 
 후기 사진(`review_image`, 소유자 요청 2026-10-19, 세부는 추천 적용 2026-10-19, ADR-0066): 한 후기에 사진은 최대 3장 [가정]이다. 형식·크기는 공연 이미지와 같은 기준(JPEG·PNG·WebP, 한 장 10MB, 긴 변 20,000px·4,000만 화소 상한, ADR-0062 결정 38)에 짧은 변 320px 이상 [가정]을 더한다. 팬이 사진을 먼저 올리면(`review_id` NULL), 후기를 쓰거나 고치는 본문에서 자기 사진만 붙인다. core-svc review 모듈은 비공개 격리 위치에 받은 원본을 확장자·매직 바이트·디코딩·악성 코드로 검사한다. 파생본을 만들기 전에는 사진에서 QR 코드·바코드를 찾고, 찾으면 그 사진을 받지 않는다(어떤 QR이든, `CODE_DETECTED`). 검사를 통과하면 다시 인코딩해 메타데이터(촬영 위치 포함)를 지운 파생본 2종(목록 240px, 보기 긴 변 1,280px [가정])만 공개 정적 객체로 내고, 원본은 바로 지운다. 후기에 붙이지 않은 사진은 24시간 [가정] 뒤 지운다. 후기를 지우면 사진도 지우고, 후기를 가리면 사진도 가린다. QR 거르기는 일부만 보이거나 흐린 코드를 놓칠 수 있다(planning/01 §5.2).
 
@@ -1131,7 +1209,6 @@ MongoDB(문서 형태로 저장하는 데이터베이스)의 `products` 컬렉�
 | `scanner:enroll:{코드 SHA-256}` | 문자열 | 스캐너 기기 등록 코드(대안 B, 12자 `XXXX-XXXX-XXXX`) → 기기 ID | 값은 기기 ID다. TTL은 10분 [가정, wbs 5.4.3에서 확정]이다. 등록되면 바로 지우고, 새 코드를 만들면 이전 키를 지운다. 기기 승인 코드와 같은 방식으로 세션·캐시 클러스터에 둔다. 대안 B로 갈 때만 쓴다(추천 적용 2026-10-14, ADR-0062) |
 | `tr:{event:E}:devshare:{deviceRef}` | HyperLogLog | 회차별 기기 공유 수(그 기기 가명으로 사전 검증한 서로 다른 pid 수) | 세션·캐시 클러스터에 두고 trust-svc가 쓴다. 사전 검증 때 `PFADD` 뒤 `PFCOUNT`를 한다. 수명은 10분 [가정]이다. 앞서 통과한 사람은 Flink의 대기 중 재평가가 다시 본다(추천 적용 2026-10-20, ADR-0071, docs/streaming.md §5.5) |
 | `tr:{event:E}:asnhost:{asn}:{10초 칸}` | 문자열 (`INCR`) | 호스팅·프록시 대역 ASN의 10초 진입 수 | 두는 곳과 쓰는 곳은 위와 같다. 만료는 30초 [가정]이다. 통신사 대역은 세지 않는다(신호가 약하고 한 키에 요청이 몰린다, ADR-0071) |
-| `cat:suggest:{정규화한 입력}` | 문자열(JSON) | 연관 검색어 읽기 모델 캐시(최대 8개 [가정]) | 세션·캐시 클러스터 안의 catalog 읽기 모델 캐시 영역에 둔다. 입력을 NFKC·소문자·앞뒤 공백 제거로 정규화한 값이 키이고, TTL은 60초 [가정]이다. 2자 [가정] 미만과 50자 [가정] 초과 입력은 캐시를 만들지 않는다. CDN 캐시 키도 같은 정규화 값만 쓴다(guidelines §9, 추천 적용 2026-10-14, ADR-0063) |
 | `id:link:{proposal_id}` [보완] | Hash | 소셜 가입 때 기존 계정에 연결하자고 제안하는 임시 세션(새 제공자, sub, 검증 이메일, 대상 계정 ID, 브라우저 지문, 인증 실패 횟수) | 세션·캐시 클러스터에 저장한다. 유효 수명은 10분이다. 1회성 토큰으로 한 번만 쓰이고, 연결을 마치거나 만료되면 바로 지운다(POL-034). |
 | `id:merge:{proposal_id}` [보완] | Hash | 본인인증으로 확인한 계정 병합 제안 세션(대표 계정 ID, 흡수 계정 ID, 옮길 항목의 통계 요약, 병합을 막는 사유) | 세션·캐시 클러스터에 저장한다. 유효 수명은 10분이며, 사용자의 최종 승인을 확인한 직후 지운다(POL-034). |
 
@@ -1151,7 +1228,7 @@ MongoDB(문서 형태로 저장하는 데이터베이스)의 `products` 컬렉�
 | 1인당 구매 매수 제한 | 사실상 강한 일관성 + DB 최종 검증 | 매크로와 부정 구매를 막는 공정 예매의 핵심 규칙이다. | Redis Lua 원자 카운터(홀드와 같은 원자 처리) + PostgreSQL 쿼터 행 조건부 갱신 |
 | 대기 순번 노출 | 최종적 일관성 (AP) | 클라이언트 폴링 주기(1~20초) 정도로 순번이 잠시 늦게 보이는 것은 사용자 경험과 사업에 무해하다. | CDN 엣지(사용자 가까이에 둔 서버) 캐싱 + 클라이언트 적응형 폴링 |
 | 공연 메타데이터 | 최종적 일관성 | 쓰기는 매우 드물고 읽기 트래픽이 훨씬 많은 도메인이다. | Next.js(웹 화면을 만드는 프레임워크) ISR(미리 그려 두고 정해진 주기로 다시 그리는 방식) 캐시 + Redis 읽기 모델 캐시 |
-| 홈 피드·장르별 랭킹·후기 요약·연관 검색어 | 최종적 일관성 | 공개 표시용이라 수십 초~하루의 지연이 판매에 영향을 주지 않는다. 랭킹은 하루 1회 확정 숫자로 낸다. | 홈 ISR·CDN 캐시, 랭킹 정적 파일(매일 10:00 [가정]), 후기 요약 CDN 캐시, 연관 검색어 Redis·CDN 캐시(ADR-0063) |
+| 홈 피드·장르별 랭킹·후기 요약·검색·자동완성 | 최종적 일관성 | 공개 표시용이라 수십 초~하루의 지연이 판매에 영향을 주지 않는다. 랭킹은 하루 1회 확정 숫자로 낸다. 검색 읽기 모델은 카탈로그와 같은 트랜잭션에서 고치므로, 판매 승인이 취소된 공연은 읽기 전용 복제본 지연과 CDN 무효화 시간 안에 검색에서 빠진다(ADR-0094). | 홈 ISR·CDN 캐시, 랭킹 정적 파일(매일 10:00 [가정]), 후기 요약 CDN 캐시, 검색 CDN 캐시(30초 [가정]), 자동완성 서버 메모리 사전(판 확인 10초 [가정])과 CDN 캐시(60초 [가정])(ADR-0063·0094) |
 | 관람 후기 작성 | 쓸 때 자격을 다시 확인 | 자격(결제자·취소 아님·공연 종료 뒤)은 ticket-svc의 현재 상태로 정한다. | core-svc review 트랜잭션 + ticket-svc 조회, 계정·회차 유일 부분 인덱스 |
 | 게시물 신고·고객 문의의 CS 처리함 건 | 접수는 강한 일관성, 건 등록은 최종적 일관성 | 접수는 core-svc가 확정한다. 건 등록이 늦거나 ops-svc가 멈춰도 접수는 받는다. 같은 후기 신고는 계정당 하나다. | core-svc 트랜잭션(신고 유일 인덱스, 문의·첫 기록) + Outbox → ops-svc `cs_case`(ADR-0066) |
 | 결제 원장 | 강한 일관성 + 멱등성 | 이중 승인과 결제 누락을 막아야 한다. | PostgreSQL ACID 트랜잭션 + `Idempotency-Key` 헤더 |
@@ -1208,9 +1285,9 @@ MongoDB(문서 형태로 저장하는 데이터베이스)의 `products` 컬렉�
 | 다중 좌석 예매 시 DB 트랜잭션 간 데드락 발생 (Degraded 비상 우회 경로) | 좌석 고유 ID 오름차순으로 정렬해 잠그도록 강제한다. 트랜잭션 첫 문장은 `SET LOCAL lock_timeout = '100ms'` [가정](트랜잭션이 끝나면 사라져 PgBouncer 트랜잭션 풀링에서도 다음 사용자에게 남지 않는다. 잠금을 얻지 못하면 409 `seat-already-held`, 추천 적용 2026-10-22, ADR-0083)이다 | K3 비상 예매 경로 스트레스 테스트 |
 | Degraded 비상 예매 경로에서 좌석 상태 UPDATE 과다로 인한 성능 저하 | `seat_hold`·`seat_sale`의 `status` 전이는 부분 유니크 인덱스의 조건 열을 바꾸므로 HOT(Heap-Only Tuples) 갱신이 되지 않는다(PostgreSQL 18 `relcache.c`가 인덱스 조건 열을 HOT를 막는 열에 넣는다). `fillfactor`는 인덱스 밖 열만 바꾸는 갱신(`purchase_quota.used` 등)에 쓴다. `seat_hold`는 표별 `autovacuum_vacuum_scale_factor`를 0.02 [가정](기본 0.2)로 낮춰 청소를 앞당긴다(추천 적용 2026-10-22, ADR-0083) | K3 데이터베이스 부하 튜닝(죽은 행 수·인덱스 크기) |
 
-데이터베이스 인덱스는 다음을 표준으로 만든다. 활성 판매의 유일 부분 인덱스 `seat_sale (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`(§2), 홀드 원장의 활성 홀드 유일 부분 인덱스 `seat_hold (event_id, seat_id) WHERE status = 'HELD'`, 좌석 Redis 장애 때 대체 경로가 잠그는 `event_seat_price (event_id, seat_id)` 기본 키(회차·좌석마다 한 행이라 좌석 ID 순으로 `FOR UPDATE`한다, docs/features/seat-hold.md §9), 공연명과 아티스트 검색을 빠르게 하는 `pg_trgm` 삼중자 인덱스다. 트랜잭션 격리 수준 실험(READ COMMITTED, REPEATABLE READ, SERIALIZABLE 환경에서 쓰기 스큐 재현)으로, 애플리케이션 계층의 비즈니스 로직에만 기대지 않고 데이터베이스의 물리 유니크 제약을 마지막 안전 방어선으로 둔 설계가 타당함을 보인다.
+데이터베이스 인덱스는 다음을 표준으로 만든다. 활성 판매의 유일 부분 인덱스 `seat_sale (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`(§2), 홀드 원장의 활성 홀드 유일 부분 인덱스 `seat_hold (event_id, seat_id) WHERE status = 'HELD'`, 좌석 Redis 장애 때 대체 경로가 잠그는 `event_seat_price (event_id, seat_id)` 기본 키(회차·좌석마다 한 행이라 좌석 ID 순으로 `FOR UPDATE`한다, docs/features/seat-hold.md §9), 검색 읽기 모델 `search_term`의 띄어쓰기 없앤 값·낱자·초성에 둔 앞부분 일치용 B-tree 인덱스(`text_pattern_ops`)다(ADR-0094). 트랜잭션 격리 수준 실험(READ COMMITTED, REPEATABLE READ, SERIALIZABLE 환경에서 쓰기 스큐 재현)으로, 애플리케이션 계층의 비즈니스 로직에만 기대지 않고 데이터베이스의 물리 유니크 제약을 마지막 안전 방어선으로 둔 설계가 타당함을 보인다.
 
-- 알려진 한계(2026-10-22, ADR-0083): `pg_trgm`은 3글자 조각을 뽑지 못하는 패턴이면 인덱스 전체를 훑는다. 그래서 '공연'처럼 두 글자인 검색어는 삼중자 인덱스를 제대로 쓰지 못한다. 공연 목록이 작아서 지금은 이 한계를 받아들인다. 부하 시험에서 느리게 재지면 검색 방식을 새 ADR(아키텍처 결정과 그 이유를 남긴 기록)로 다시 본다. 두 글자 조각 확장(pg_bigm)은 Aurora PostgreSQL 18.3~18.6이 지원한다(2026-10-22 확인, ADR-0086). 넣을지는 부하 시험 뒤 정한다.
+- 알려진 한계(2026-10-22, ADR-0083)와 바꾼 것(2026-10-27, ADR-0094): `pg_trgm`은 3글자 조각을 뽑지 못하는 패턴이면 인덱스 전체를 훑고, DB 문자 분류 설정(LC_CTYPE)이 C면 한글을 단어 글자로 보지 않는다(PostgreSQL 18 소스 `ts_locale.c`). 짧은 한글 이름의 오타에도 약하다('루멘'과 '루맨'의 유사도 0.2, 기본 기준 0.3). 그래서 검색은 pg_trgm을 쓰지 않고, 앱이 미리 계산한 정규화·낱자·초성 칸의 앞부분 일치로 찾는다(docs/features/search.md §2.2). 중간 일치는 행이 수만 개라 훑기로 하고, NFR-028을 넘으면 두 글자 조각 확장(pg_bigm, Aurora PostgreSQL 18.3~18.6 지원, 2026-10-22 확인, ADR-0086)을 먼저 넣는다. DB를 만들 때 LC_CTYPE을 C·POSIX로 두지 않고, 조각 확장을 넣으면 한글 조각이 나오는지 시험한다(search SR-T7). 검색 질의는 읽기 전용 복제본과 검색 전용 연결 묶음으로 보내 같은 클러스터의 로그인 쓰기를 지킨다(ADR-0094).
 - 엔진 판(추천 적용 2026-10-22, ADR-0086): Aurora PostgreSQL 18.x, 18.6.1 이상이다. 이 절의 스킵 스캔, EXPLAIN 출력, `uuidv7()`, 기간 키는 18에 기댄다.
 
 ### 5.1 쿼리-인덱스 표
@@ -1232,7 +1309,7 @@ MongoDB(문서 형태로 저장하는 데이터베이스)의 `products` 컬렉�
 | CS 처리함(ops) | `WHERE status <> 'RESOLVED' AND next_due_at < … AND (next_due_at, id) > ($1, $2) ORDER BY next_due_at, id LIMIT 50`(종류 필터는 문장을 따로 만든다) | 새로 `cs_case (next_due_at, id) WHERE status <> 'RESOLVED'`, 다형 참조 유일(§2) | `Limit → Index Scan`, 종류는 Filter | `Rows Removed by Filter`가 결과의 10배를 넘으면 `(kind, next_due_at, id)`를 더한다 |
 | 후기 목록·요약(core) | 회차의 후기 커서 목록, 평균 별점·후기 수 | 새로 `review (event_id, created_at, id) WHERE status <> 'DELETED'`, `review (event_id) INCLUDE (rating) WHERE status = 'VISIBLE'` | 목록은 `Limit → Index Scan Backward`, 요약은 `Aggregate → Index Only Scan`. 별점 순은 정렬을 받아들인다 | Heap Fetches, CDN 캐시 적중률 |
 | 내 문의(core) | `WHERE account_id = $1 ORDER BY created_at DESC LIMIT 20 OFFSET $2` | 새로 `inquiry (account_id, created_at)` | `Limit → Index Scan Backward`(계정당 행이 적어 OFFSET 비용이 작다) | 실행 시간 |
-| 공연 검색(core) | 공연명·아티스트 부분 일치 + 장르·날짜 | 정본 `pg_trgm` GIN | `Bitmap Heap Scan → Bitmap Index Scan`, 장르·날짜는 Filter나 BitmapAnd | `Rows Removed by Index Recheck`, 두 글자 검색어 시간 |
+| 공연 검색(core, 읽기 전용 복제본) | `search_term`에서 이름(공연명·아티스트·공연장·다른 이름)의 앞부분(`LIKE '…%'`, 이스케이프)·중간 일치를 찾아 공연으로 묶고, `search_document`에서 장르·일정·상태·공연장·아티스트로 거른 뒤 정확도·오픈 임박·인기 순과 공연 ID로 정렬, `LIMIT 20 OFFSET` | `search_term (norm_nospace·jamo·chosung text_pattern_ops)` B-tree, 중간 일치는 훑기(NFR-028을 넘으면 pg_bigm GIN), `search_document` 정렬 열 | 앞부분은 `Index Scan`(범위 조건), 중간 일치는 `Seq Scan`(행 수만 개), 공연 묶기는 `HashAggregate`, 정렬은 `Sort`(top-N) | 쪽당 시간, 중간 일치 비율, `Rows Removed by Filter`, 두 글자 검색어 시간(ADR-0094) |
 | 상태 쓸기 작업(각 서비스) | `WHERE status = '<대기 상태>' AND <기한> < now() ORDER BY <기한> LIMIT n` | 새로 대기 상태만 담은 부분 인덱스: `payment (status_changed_at) WHERE status = 'UNKNOWN'`, `payment (deposit_due_at) WHERE status = 'AWAITING_DEPOSIT'`, `seat_sale (pending_until) WHERE status = 'PENDING'`, `transfer_offer (expires_at) WHERE status = 'OFFERED'`, `(purge_at) WHERE purge_at IS NOT NULL`, `order_idempotency (created_at)`, 로컬·v0 Outbox `(id) WHERE sent_at IS NULL` | `Limit → Index Scan`(끝난 행은 인덱스에 없다) | 한 번에 찾은 행 수, 부분 인덱스 크기 추이 |
 
 - 외래 키를 참조하는 쪽 열에는 인덱스를 둔다. PostgreSQL은 자동으로 만들지 않고(18 문서), 부모 행 삭제와 파티션 떼어 내기가 이 인덱스로 자식 행을 찾는다.

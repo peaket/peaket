@@ -162,6 +162,6 @@
 
 * [docs/api/guidelines.md](../docs/api/guidelines.md) §10~§12: 이 편의 정본. 주소 규칙, 검색·부분 응답·하이퍼미디어, 메서드와 상태 코드. §2는 오류 쪽지, §3은 목록 나누기
 * [ADR-0081](../docs/adr/0081-rest-api-design-criteria-audit.md): 소유자 기준 점검 결과, 기준과 다르게 정한 이유, 옛 주소와 새 주소 대응표
-* [docs/api/openapi.yaml](../docs/api/openapi.yaml): 경로 167개·작업 183개의 실제 명세
+* [docs/api/openapi.yaml](../docs/api/openapi.yaml): 경로 176개·작업 194개의 실제 명세
 * [16편: 바꾸고 내보내는 법](16-change-and-deploy.md): 계약을 바꿀 때의 검사와 배포
 * [17편: 화면 만들기](17-frontend.md): 화면이 오류 종류 이름으로 문구를 고르는 방법

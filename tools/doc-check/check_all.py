@@ -259,7 +259,7 @@ def headings(path, cache={}):
 
 
 def check_secrefs(texts, rep):
-    names = 'queue-admission|seat-hold|payment|identity|offline-gate|control-tower|transfer-refund|settlement|analytics|observability|infra|guidelines|architecture|data|devops|verification'
+    names = 'queue-admission|seat-hold|payment|identity|offline-gate|control-tower|transfer-refund|settlement|analytics|search|observability|infra|guidelines|architecture|data|devops|verification'
     bare_re = re.compile(r'(?<![\w/.-])((?:features/)?(?:%s))(?:\.md)?\s*§\s*(\d+(?:\.\d+)?)' % names)
     ref_re = re.compile(r'(`?(?:docs/[\w./-]+|planning/[\w.-]+|design/[\w.-]+|review|wbs|appendix|0[0-4]-[\w-]+|d[1-5]|[a-z]+-[a-z-]+\.md)`?)\s*§\s*(\d+(?:\.\d+)?)')
     total = 0

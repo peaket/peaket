@@ -147,11 +147,11 @@ flowchart TD
 
 ## 6. 전체 개발 일정 및 마일스톤 (WBS Phase 0 ~ 7)
 
-1인 개발 기준 주 40시간 투입을 전제로 하며, 전체 프로젝트 기간은 약 **87.7주(오차 범위 ±20% 고려 시 70.2~105.2주)**로 계획되었다 ([wbs/wbs.md](../wbs/wbs.md)).
+1인 개발 기준 주 40시간 투입을 전제로 하며, 전체 프로젝트 기간은 약 **89.4주(오차 범위 ±20% 고려 시 71.5~107.3주)**로 계획되었다 ([wbs/wbs.md](../wbs/wbs.md)).
 
 ```mermaid
 gantt
-    title 피켓 개발 마일스톤 로드맵 (8개 Phase, 총 87.7주 / 438.5일)
+    title 피켓 개발 마일스톤 로드맵 (8개 Phase, 총 89.4주 / 447일)
     dateFormat YYYY-MM-DD
     axisFormat %m월 %d일
     excludes weekends
@@ -162,7 +162,7 @@ gantt
     Phase 1 - v0 베이스라인 구현 및 한계 측정 (18.25일) :p1, after p0, 19d
     
     section Phase 2~3
-    Phase 2 - 온세일 핫패스 v1 고도화 (106일)      :p2, after p1, 106d
+    Phase 2 - 온세일 핫패스 v1 고도화 (114일)      :p2, after p1, 114d
     Phase 3 - 봇 방어 프레임워크 및 본인확인 (31.5일) :p3, after p2, 32d
     
     section Phase 4~5
@@ -171,10 +171,10 @@ gantt
     
     section Phase 6~7
     Phase 6 - 측정·검증과 100만 외삽 (15일)       :p6, after p5, 15d
-    Phase 7 - 파트너 콘솔 및 컴플라이언스 릴리스 (49.75일) :p7, after p6, 50d
+    Phase 7 - 파트너 콘솔 및 컴플라이언스 릴리스 (50.25일) :p7, after p6, 51d
 ```
 
-막대 길이는 Phase 일수를 하루 단위로 올려 그렸다. 그래서 막대를 이으면 441일로, 합계 438.5일보다 2.5일 길다.
+막대 길이는 Phase 일수를 하루 단위로 올려 그렸다. 그래서 막대를 이으면 450일로, 합계 447일보다 3일 길다.
 
 ---
 

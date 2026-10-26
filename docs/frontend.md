@@ -62,7 +62,7 @@ RADIO는 서버를 검은 상자로 두라고 한다. 이 문서도 게이트웨
 
 | 앱 | 핵심(이것이 안 되면 제품이 아님) | 있으면 좋은 것(꺼져도 핵심은 동작) |
 | --- | --- | --- |
-| 소비자 웹 | 공연 상세 보기, 본인확인, 로비 참가와 무작위로 섞은 셔플 순번 받기, 오픈 뒤 진입·대기·차례 입장, 좌석 고르기·홀드(결제하는 동안 좌석을 잠시 잡아 두는 것), 주문·결제·결과 확인, 월렛 회전 QR(오프라인), 양도·예매 취소, 로그인·세션 | 홈 랭킹·테마, 연관 검색어, 후기와 신고, 찜, 굿즈·부가 상품, 셔플 검증 화면, 오픈 알림 웹 푸시 |
+| 소비자 웹 | 공연 상세 보기, 본인확인, 로비 참가와 무작위로 섞은 셔플 순번 받기, 오픈 뒤 진입·대기·차례 입장, 좌석 고르기·홀드(결제하는 동안 좌석을 잠시 잡아 두는 것), 주문·결제·결과 확인, 월렛 회전 QR(오프라인), 양도·예매 취소, 로그인·세션 | 홈 랭킹·테마, 자동완성·관련 공연, 후기와 신고, 찜(공연 단위), 굿즈·부가 상품, 셔플 검증 화면, 오픈 알림 웹 푸시 |
 | 파트너 콘솔 | 공연 등록 위저드, 좌석맵 에디터, 판매 승인 요청, 실시간 판매 현황, 현장 스태프·현장 운영, 정산서·명단 | 상품 빌더, 웹훅(일이 생기면 서버가 미리 등록한 주소를 불러 알려 주는 방식), 판매 요약 리포트 |
 | 관제 콘솔 | 온세일(판매가 열리는 시각 앞뒤로 접속이 몰리는 기간) 대시보드(T-30분 점검·T=0·판매 중), 운영 명령과 2인 승인, 경보 패널, 판매 승인, 법정 조치 | 봇 표본 검토, 홈 구성, 리포트 판 보기 |
 | 게이트 스캐너 | 기기 승인 로그인, 근무 준비(목록 받기·시계 보정), 오프라인 판정, 기록 업로드·변경분, 현장 관리(책임자) | 기기 목록 보기, 이상 표시 처리 화면의 부가 정보 |
@@ -75,7 +75,7 @@ RADIO는 서버를 검은 상자로 두라고 한다. 이 문서도 게이트웨
 
 | 묶음 | FR | 화면 | 브라우저가 할 일 |
 | --- | --- | --- | --- |
-| 탐색·공연 정보 | FR-003·004·016·018·019·053 | SCR-001·002·003·016·018·054·057 | ISR로 화면 그리기, 개인 영역(찜·알림 상태)만 클라이언트에서 요청, 고지 문장을 본문에 늘 노출, 연관 검색어 combobox·이전 요청 취소, 오프라인 찜 대기열 |
+| 탐색·공연 정보 | FR-003·004·016·018·019·053 | SCR-001·002·003·016·018·054·057 | ISR로 화면 그리기, 개인 영역(찜·알림 상태)만 클라이언트에서 요청, 고지 문장을 본문에 늘 노출, 자동완성 combobox·이전 요청 취소·한글 조합 중 키 거르기·정규화한 요청(docs/features/search.md), 오프라인 찜 대기열 |
 | 계정·본인확인 | FR-001·002·017·048 | SCR-004·005·006·017·039·040 | 버튼을 누를 때만 로그인 시작, 기관 창을 사용자 동작 안에서 열고 결과를 `BroadcastChannel`로 받기, 재인증 대화상자, 세션 끝 사유 표시 |
 | 로비·대기열 | FR-005·006·007·008·020·038·050 | SCR-007·008·009·018·019 | 참가 토큰(로비 참가를 증명하는 서명된 문자열)·대기표 보관, 셔플·묶음 결과 분산 조회, 대기 상태 파일 적응형 폴링, 앞 인원·진행 막대 계산, 차례 판정과 입장 확정, 희망 조건 보관, 탭 제목·소리·웹 푸시 |
 | 좌석·홀드 | FR-009·010·042·050 | SCR-010 | 5만 석 Canvas, 구역 구독과 델타(바뀐 좌석만 담은 작은 메시지) 반영, 스냅샷(어느 시점의 전체 상태를 찍어 둔 것)으로 재동기화, 접근성 목록, 홀드 서명 요청, 카운트다운과 1회 연장, 자동 배정 결과 |
@@ -286,7 +286,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | --- | --- | --- | --- | --- | --- | --- |
 | `/`, `/{en,ja,zh}` | 001 | ISR(`'use cache'` + `cacheLife` 60초 + `cacheTag('home')`) | `s-maxage=30, stale-while-revalidate=60, stale-if-error=600` / `max-age=0` | 홈 피드(서버), 랭킹 파일(클라이언트, 같은 출처 정적 JSON), 찜·알림 상태(클라이언트) | A | 홈 구성 저장·판매 승인·매진 때 태그를 무효화한다(architecture §6.3) |
 | `/events/[id]` | 002·016 | ISR(`cacheTag('event:{id}')`, `cacheLife` 300초) | 위와 같다 | 공연·회차·고지(서버), 후기 요약(공개 CDN), 본인확인·사람 확인·찜·알림(클라이언트) | A + 사람 확인 | 원본에 장애가 나면 `stale-if-error`와 '판매 중' 고정 문구를 쓴다(POL-029). 급한 변경(매진·승인 취소)은 경로 무효화도 함께 부른다 |
-| `/search` | 003 | SSR(요청마다) + 클라이언트 필터 | `private, no-store`(검색 API는 CDN 30초) | 검색 API | B | 검색어는 주소 쿼리라 접근 로그에 남는다(data-classification) |
+| `/search` | 003 | 정적 셸 + CSR(주소의 매개변수로 검색 API를 부른다, ADR-0094) | `s-maxage=300` / `max-age=0`(검색 API는 CDN 30초, 자동완성 API는 60초) | 검색 API·자동완성 API | A, `noindex, follow` | 요청마다 서버가 그리지 않아 오픈 직전 검색이 몰려도 화면 서버로 가지 않는다. 검색어는 주소 쿼리라 접근 로그에 남는다(data-classification) |
 | `/events/[id]/shuffle-proof` | 019 | 정적 셸 + CSR | `s-maxage=300` / `max-age=0` | 셔플 검증 정보 API, 같은 브라우저의 토큰 해시 | A | 시드는 오픈 60분 뒤에 공개한다 |
 | `/queue/[eventId]`, `/{en,ja,zh}/queue/[eventId]`, `/shop/[productId]/queue` | 007·008·018·015 | 대기실 경량 페이지(S3, CloudFront Function이 셸로 바꿔 읽는다) | `s-maxage=300, stale-while-revalidate=60` / `max-age=0` | 대기열 API·파일(§4.2) | A′ | 배포 때 셸을 무효화한다. 셸은 로케일별로 넷이다 |
 | `/queue/[eventId]/verify` | 009 | 요청마다 셸 + CSR | `private, no-store` | 추가 검증 API | B + 사람 확인 | 심층 챌린지와 본인확인 재통과 |
@@ -369,7 +369,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 | 엔터티(계약 이름) | 출처 | 브라우저가 쓰는 필드 | 소유 구성 요소 | 신선도·보관 |
 | --- | --- | --- | --- | --- |
-| 홈 피드 `HomeFeed`, 공연 카드 `EventCard` | `GET /v1/home`(CDN 30초), ISR | 배너·오픈 예정·판매 중·테마·공연장, `saleStatus`·`saleEndsAt`·`badges` | 홈 서버 컴포넌트 | ISR 태그 무효화 |
+| 홈 피드 `HomeFeed`, 공연 카드 `ProductionCard`(공연 단위, ADR-0093) | `GET /v1/home`(CDN 30초), ISR | 배너·오픈 예정·판매 중·테마·공연장, `saleStatus`·`saleEndsAt`·`badges` | 홈 서버 컴포넌트 | ISR 태그 무효화 |
 | 랭킹 파일 `RankingFile` | www 정적 JSON | `basisDate`, `overall`, `genres` | 홈 랭킹 섹션(클라이언트) | `basisDate`가 2일 [가정] 넘게 지나면 섹션을 숨긴다(정본) |
 | 공연 상세 | 계약에 없다(design/d5 §1.6 21번, §6.2 32번) | 회차·등급별 가격·판매 정책·판매자 정보·셔플 커밋·좌석맵 판 | 상세 서버 컴포넌트 | ISR. wbs 0.2.3에서 경로를 정한다 |
 | 참가 토큰 `LobbyToken` | `POST …/lobby-participants` 201 | `lobbyToken`, `seedHash`, `drand*`, `shuffleResultAt`, `shuffleSpreadSec`, `verification`(ADR-0079 결정 4) | 대기실 상태표 | localStorage(§3.12) |
@@ -1113,7 +1113,7 @@ sequenceDiagram
 | 같은 구독은 하나로 | 관제 GraphQL(같은 영속 쿼리·변수) | 위젯 여럿이 같은 숫자를 따로 구독하지 않게 한다(ADR-0091) | FE-T26 |
 | 숨긴 탭은 주기 조회를 늦춤 | 파트너 현장 운영 60초 [가정], 관제 오류 요약은 멈춤 | 보지 않는 동안 요청을 줄인다. 다시 보이면 바로 한 번 묻는다(ADR-0091) | FE-T4 |
 | 재연결 무작위 지연 | 좌석 WebSocket(1012는 0~5초), Socket.IO, graphql-ws, SSE `retry` | 서버 재시작 직후에 몰리는 것을 막는다(devops §6.4) | FE-T11 |
-| 같은 요청 묶기·늦은 요청 취소 | TanStack Query 중복 제거, 연관 검색어 입력이 바뀌면 이전 요청 취소 | 불필요한 원본 요청을 줄인다 | 단위 시험 |
+| 같은 요청 묶기·늦은 요청 취소 | TanStack Query 중복 제거, 자동완성 입력이 바뀌면 이전 요청 취소, 받은 후보가 8개보다 적으면 더 긴 입력은 그 안에서 거르고 다시 요청하지 않음, 정규화한 값과 정해진 매개변수 순서로 요청(CDN 캐시 키, ADR-0094) | 불필요한 원본 요청을 줄인다 | 단위 시험 |
 | 낮은 우선순위 미리 받기 | 좌석 자원(대기 중), 다음 화면 덩어리 | 핵심 요청과 다투지 않게 한다 | FE-T10 |
 | 텔레메트리는 묶어서 | `/_t/rum` 60초 [가정] 묶음 + 탭을 숨길 때 | 요청 수를 줄인다 | FE-T22 |
 | 구매 경로 사전 요청 | 홀드 ID·주문 ID가 든 경로는 매번 사전 요청이 한 번 붙는다 | 지연 예산에 왕복 한 번을 넣고 잰다. 넘치면 새 ADR(아키텍처 결정과 그 이유를 남긴 기록)로 본문 헤더 방식을 검토한다 | FE-T10(측정) |
@@ -1196,7 +1196,7 @@ sequenceDiagram
 모든 묶음에 공통으로 `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, `report-to csp`(보고를 받을 주소인 엔드포인트: `Reporting-Endpoints: csp="/_t/csp"`)를 둔다. HSTS와 `nosniff`는 배포·게이트웨이 정책이 붙인다(ADR-0065 결정 3). `{n}`은 요청마다 만드는 nonce, `{h}`는 빌드 때 정한 인라인 스크립트 해시다(해시 방식은 PoC wbs 2.10.1 결과를 따른다). 모든 묶음의 `connect-src`에 `'self'`가 있는 것은 같은 출처 `/_t/*` 전송 때문이다(ADR-0079 결정 14).
 
 ```text
-[A 캐시 화면: 홈·공연 상세·굿즈·정적 문서·복귀 화면·스태프 화면·셔플 검증·월렛 셸]  붙이는 곳: 웹 앱 서버(ISR 응답), 정적 셸은 www 배포 정책
+[A 캐시 화면: 홈·공연 상세·검색 셸·굿즈·정적 문서·복귀 화면·스태프 화면·셔플 검증·월렛 셸]  붙이는 곳: 웹 앱 서버(ISR 응답), 정적 셸은 www 배포 정책
 default-src 'self'; script-src 'self' {h}; style-src 'self'; img-src 'self' data: blob:; font-src 'self';
 connect-src 'self' https://api.peaket.example https://queue.peaket.example https://queue-files.peaket.example;
 worker-src 'self'; manifest-src 'self'; frame-src 'none'; form-action 'self';
@@ -1210,7 +1210,7 @@ connect-src 'self' https://queue.peaket.example https://queue-files.peaket.examp
 frame-src https://challenges.cloudflare.com; manifest-src 'self'; form-action {본인확인기관 출처(연동 계약 때 확정)};
 object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp
 
-[B 요청마다 그리는 화면: 검색·추가 검증·결과·/my/*(월렛 셸 제외)·로그인·파트너 콘솔]  붙이는 곳: 앱 서버의 proxy.ts
+[B 요청마다 그리는 화면: 추가 검증·결과·/my/*(월렛 셸 제외)·로그인·파트너 콘솔]  붙이는 곳: 앱 서버의 proxy.ts
 default-src 'self'; script-src 'nonce-{n}' 'strict-dynamic'; style-src 'self' 'nonce-{n}'; img-src 'self' data: blob:; font-src 'self';
 connect-src 'self' https://api.peaket.example https://queue.peaket.example https://queue-files.peaket.example;
 worker-src 'self'; manifest-src 'self'; frame-src 'none'; form-action 'self';
@@ -1314,7 +1314,8 @@ allowBuilds:                     # 설치 스크립트를 허용하는 패키지
 
 ### 5.15 SEO와 공유
 
-- 공개 화면(홈, 공연 상세, 검색, 굿즈, FAQ, 정책 문서)에는 Next.js Metadata API, `next/og` 오픈그래프 이미지, schema.org `Event` JSON-LD, `sitemap.xml`, `robots.txt`, 정규 주소, 네 언어 `hreflang`을 둔다(architecture §6.3).
+- 공개 화면(홈, 공연 상세, 굿즈, FAQ, 정책 문서)에는 Next.js Metadata API, `next/og` 오픈그래프 이미지, schema.org `Event` JSON-LD, `sitemap.xml`, `robots.txt`, 정규 주소, 네 언어 `hreflang`을 둔다(architecture §6.3).
+- 검색 결과 화면(`/search`)은 `<meta name="robots" content="noindex, follow">`를 두고 sitemap에 넣지 않는다. robots.txt로 막지 않아 검색 엔진이 noindex를 읽고 결과의 공연 상세 링크를 따라간다. 구글 스팸 정책이 '분명한 둘러보기 구조보다 검색 결과에 가까운 비슷한 페이지 만들기'를 도어웨이 남용의 예로 들기 때문이다(2026-10-27 확인, ADR-0094). 검색 엔진 유입은 공연 상세(구조화 데이터)와 sitemap이 맡는다.
 - 대기실·예매·결제·마이·스태프 화면은 `noindex`로 두고 `robots.txt`에서 막는다. 대기실 경량 페이지 셸에도 `<meta name="robots" content="noindex">`를 넣는다.
 - 허니팟 요소는 화면과 접근성 트리에서 숨기고 일반 `<a>`로 둔다(라우터의 미리 가져오기를 막는다, queue-admission §7). 사이트맵에는 넣지 않는다.
 - JSON-LD는 특수 문자를 이스케이프하는 직렬화기로만 넣는다(ASVS 1.2.3).
@@ -1394,7 +1395,7 @@ allowBuilds:                     # 설치 스크립트를 허용하는 패키지
 | FE-T26 | 안 보이는 위젯 | 가짜 GraphQL·Socket.IO 서버와 가짜 시계로 탭 전환·위젯 접기·브라우저 탭 숨김·회차 바꾸기를 만든다 | PR | 열린 위젯 구독이 떠난 탭은 10초 뒤, 숨긴 탭은 30초 뒤 0. 접은 위젯은 머리만 그린다. 경보·명령 확인 수신 유지, 탭 제목의 수, 다시 보일 때 재구독·15분 창 채우기·신선도 표시(§5.7) |
 | FE-T27 | 콘솔 장시간·스트림 부하 | Playwright로 관제 판매 중 탭을 열고 가짜 스트림(위젯마다 초당 1건, 1분 동안 경보 초당 20건 [가정])을 4시간 [가정] 흘리며 탭과 회차를 20번 [가정] 바꾼다. memlab 탭 순환 시나리오를 돌린다. 파트너 판매 현황은 SSE를 8시간 [가정] 받는다 | 측정 캠페인(wbs 7.5.2) | 처음 30분 뒤 JS 힙(가비지 수거 뒤)의 시간당 증가 5% [가정] 이하, DOM 노드 수가 늘지 않음, 평상 구간 긴 작업 0, 탭 전환·명령 화면 열기 INP 200ms(데스크톱 프로필과 CPU 4배 태블릿 프로필), memlab 누수 0, 그래프 점 수가 상한 안 |
 
-- 기능 설계서의 시험(Q-T·S-T·P-T·I-T·O-T·C-T)은 서버와 흐름 전체를 본다. FE-T는 브라우저 쪽만 본다. 겹치는 시험(Q-T41 사전 요청, P-T38 복귀 화면, S-T15 좌석맵 성능)에서는 FE-T가 그 시험의 브라우저 부분이다.
+- 기능 설계서의 시험(Q-T·S-T·P-T·I-T·O-T·C-T)은 서버와 흐름 전체를 본다. FE-T는 브라우저 쪽만 본다. 검색의 브라우저 쪽 시험은 docs/features/search.md의 SR-T1(정규화)·SR-T10(한글 조합 중 키)·SR-T11(캐시 키)·SR-T14(noindex)다. 겹치는 시험(Q-T41 사전 요청, P-T38 복귀 화면, S-T15 좌석맵 성능)에서는 FE-T가 그 시험의 브라우저 부분이다.
 - Pact 소비자 계약은 `@peaket/api-client`가 만든다(devops §3.3).
 
 ### 5.18 빌드·배포·동결

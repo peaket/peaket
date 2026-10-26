@@ -34,7 +34,7 @@ sequenceDiagram
     participant C as core-svc(catalog)
     participant OC as 관제 콘솔(SCR-048)
     participant O as ops-svc
-    PC->>GP: POST /v1/partner/events/{eventId}/sale-review (판매자 정보, 신고번호)
+    PC->>GP: POST /v1/partner/productions/{productionId}/sale-review (판매자 정보, 신고번호)
     GP->>C: 공연 상태 SUBMITTED, 판매 승인 요청 기록
     C-->>O: 판매 승인 대기 건 등록(CS 처리함과 같은 목록 기반)
     OC->>O: 확인 항목 5가지 점검 후 승인 또는 반려(사유 필수)
