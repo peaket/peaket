@@ -1,9 +1,9 @@
 # 프론트엔드 상세 설계 (RADIO)
 
 - **독자와 용도**: 프론트엔드 엔지니어가 `peaket-frontend` 저장소(앱 넷과 포렌식 리플레이 데모, 공용 패키지)를 만들 때, 그리고 리뷰어가 화면 쪽 설계가 요구사항·API(프로그램끼리 요청과 응답을 주고받는 창구) 계약·보안 판정과 맞는지 검증할 때 기준으로 읽는 정본이다. 화면을 무엇으로 그리는지, 어디에 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)하는지, 상태를 어느 층에 두는지, 서버·실시간 채널·다른 앱 조각과 어떤 계약으로 말하는지를 RADIO 순서로 적는다. 성능·접근성·보안·오프라인·관측(지표·로그·요청 기록으로 시스템 안을 들여다보는 일)·시험·배포를 어떻게 지키는지도 같은 순서로 적는다.
-- **원문 출처**: 틀은 GreatFrontEnd 'Front End System Design Playbook'의 The RADIO Framework(2026-10-21 열람)를 따른다. 내용은 docs/architecture.md §6·§10(원문 설계서 3·4·5·6장의 프론트엔드 부분), planning/02·04, design/d1~d5, docs/api/*, docs/features/*, docs/security/asvs/*, docs/observability.md §11, docs/devops.md, docs/infra.md, prototype/을 모아 자세히 정했다. 결정은 [ADR-0079](adr/0079-frontend-radio-detailed-design.md)에 있다.
+- **원문 출처**: 틀은 GreatFrontEnd 'Front End System Design Playbook'의 The RADIO Framework(2026-10-21 열람)를 따른다. 내용은 docs/architecture.md §6·§10(원문 설계서 3·4·5·6장의 프론트엔드 부분), planning/02·04, design/d1~d5, docs/api/*, docs/features/*, docs/security/asvs/*, docs/observability.md §11, docs/devops.md, docs/infra.md, prototype/을 모아 자세히 정했다. 결정은 [ADR-0079](adr/0079-frontend-radio-detailed-design.md)에 있다. 전역 상태 도구를 Zustand 하나로 줄인 결정은 [ADR-0092](adr/0092-single-client-state-library-zustand.md)에 있다.
 - **기준 기획 버전**: v1.0.
-- **표시 규칙**: 잴 값은 [가정]으로, 이 문서에서 처음 정한 세부는 '추천 적용, 2026-10-21'(ADR-0079 결정 번호)로 적는다. 2026-10-27에 더한 콘솔의 켜 둔 동안 성능 규칙(화면별 늦게 싣기, 안 보이는 위젯의 구독 멈춤, Canvas 그래프와 들고 있는 양의 상한, 장시간 시험)은 '추천 적용 2026-10-27'(ADR-0091)로 적는다. 숫자에는 증명 수준을 붙인다(planning/02 §3.1 원칙 5). 증명 수준은 실측(PC), 외삽(잰 범위의 결과를 식으로 늘려 더 큰 규모의 값을 구한 것), 문서 인용, 설계 목표다. 외부 사실(라이브러리 판·브라우저 지원·표준 문장)은 2026-10-21에(ADR-0091의 것은 2026-10-27에) 원문으로 확인했고, 확인한 곳은 §6.4에 모았다.
+- **표시 규칙**: 잴 값은 [가정]으로, 이 문서에서 처음 정한 세부는 '추천 적용, 2026-10-21'(ADR-0079 결정 번호)로 적는다. 2026-10-27에 더한 콘솔의 켜 둔 동안 성능 규칙(화면별 늦게 싣기, 안 보이는 위젯의 구독 멈춤, Canvas 그래프와 들고 있는 양의 상한, 장시간 시험)은 '추천 적용 2026-10-27'(ADR-0091)로 적는다. 같은 날 정한 상태 도구의 세부(에디터 문서 모양, 관제 상태 통로, 동작 이름 규칙)는 '추천 적용 2026-10-27'(ADR-0092)로 적는다. 숫자에는 증명 수준을 붙인다(planning/02 §3.1 원칙 5). 증명 수준은 실측(PC), 외삽(잰 범위의 결과를 식으로 늘려 더 큰 규모의 값을 구한 것), 문서 인용, 설계 목표다. 외부 사실(라이브러리 판·브라우저 지원·표준 문장)은 2026-10-21에(ADR-0091의 것은 2026-10-27에) 원문으로 확인했고, 확인한 곳은 §6.4에 모았다.
 - **쉬운 설명**: 이 문서를 처음 읽는다면 [guide/17-frontend.md](../guide/17-frontend.md)를 먼저 본다. 그 편은 이 문서의 번역이고 규범이 아니다.
 
 ## 0. 이 문서를 읽는 법
@@ -257,9 +257,9 @@ Turborepo 작업은 `lint`·`typecheck`·`test`·`build`·`size`·`e2e`이고, P
 | --- | --- | --- | --- |
 | 소비자 웹 | Next.js 16.4(App Router, Cache Components, `proxy.ts`), React 19.3, TanStack Query 5, Zustand 5, XState 5, React Hook Form 7 + Zod 4, Serwist 9(월렛), Auth.js(next-auth v5 베타, §5.14 위험 구성 요소) | 웹 앱 서버: ISR·동적 화면, Auth.js(소셜 인가 코드 교환), 연결 제안 쿠키를 읽는 경로 | 좌석맵 Worker, 구매 세션 서명기, 결제사 SDK 적재기, 월렛 QR Worker, 본인확인 창 관리자 |
 | 대기실 경량 페이지 | TypeScript + rolldown(Vite 8) 빌드, 프레임워크는 쓰지 않는다 | 없다(AWS 파일 저장소인 S3의 정적 파일) | 상태표(§3.4), 폴러, 시계, 저장소, 탭 조정, 텔레메트리 lite |
-| 파트너 콘솔 | Next.js 16.4, React 19.3, tRPC 11, TanStack Query 5, Jotai 3 + `jotai-family`, RHF + Zod, `@hello-pangea/dnd` 18, Chart.js 4.6 | 파트너 앱 서버: 요청마다 셸(nonce), tRPC BFF(`/api/trpc`), Auth.js Credentials | 좌석맵 에디터 캔버스와 계산 Worker, DSL 시뮬레이터, SSE 클라이언트. 무거운 부분은 `next/dynamic`으로 쓸 때 싣는다(§5.6) |
-| 관제 콘솔 | webpack 5.112 + `@module-federation/enhanced` 2.9, React 19.3, React Router 8.5(데이터 라우터), Redux Toolkit 2.13, RxJS 7.8, urql 5 + graphql-ws 6, socket.io-client 4.8, Chart.js 4.6 | 없다(S3 정적 파일, 원격은 같은 출처 `/remotes/`) | 원격 적재기(무결성·대체·미리 받기), 화면별로 늦게 싣는 경로, RTK 스토어와 슬라이스 주입, 스트림 어댑터, 소켓·구독 연결 관리(위젯 자리별 멈춤·재개, §5.7) |
-| 스캐너 | Vite 8 + vite-plugin-pwa 2(Workbox 7), Dexie 4, zxing-wasm 3, React 19.3 | 없다(S3 정적 파일) | 카메라·디코딩·판정 Worker, Dexie 저장소, 업로드 큐, 변경분 수신기, 화면 꺼짐 방지 |
+| 파트너 콘솔 | Next.js 16.4, React 19.3, tRPC 11, TanStack Query 5, Zustand 5, RHF + Zod, `@hello-pangea/dnd` 18, Chart.js 4.6 | 파트너 앱 서버: 요청마다 셸(nonce), tRPC BFF(`/api/trpc`), Auth.js Credentials | 좌석맵 에디터 캔버스와 계산 Worker, DSL 시뮬레이터, SSE 클라이언트. 무거운 부분은 `next/dynamic`으로 쓸 때 싣는다(§5.6) |
+| 관제 콘솔 | webpack 5.112 + `@module-federation/enhanced` 2.9, React 19.3, React Router 8.5(데이터 라우터), Zustand 5, RxJS 7.8, urql 5 + graphql-ws 6, socket.io-client 4.8, Chart.js 4.6 | 없다(S3 정적 파일, 원격은 같은 출처 `/remotes/`) | 원격 적재기(무결성·대체·미리 받기), 화면별로 늦게 싣는 경로, 호스트 Zustand 저장소와 원격에 넘기는 읽기 전용 `host` 통로, 스트림 어댑터, 소켓·구독 연결 관리(위젯 자리별 멈춤·재개, §5.7) |
+| 스캐너 | Vite 8 + vite-plugin-pwa 2(Workbox 7), Dexie 4, zxing-wasm 3, React 19.3, Zustand 5, XState 5 | 없다(S3 정적 파일) | 카메라·디코딩·판정 Worker, Dexie 저장소, 업로드 큐, 변경분 수신기, 화면 꺼짐 방지 |
 
 - 판 번호는 2026-10-21 npm 레지스트리의 `latest`다. React Router 8.5와 Chart.js 4.6은 2026-10-27 레지스트리의 `latest`다(ADR-0091). 실제 고정은 착수 때 잠금 파일이 정하고, 판 올리기는 pnpm `minimumReleaseAge` 3일과 Renovate가 맡는다(devops §4.4).
 - 관제 콘솔은 정본대로 webpack 5 Module Federation이다. Rspack도 같은 런타임을 쓰지만 이번에는 바꾸지 않는다.
@@ -272,7 +272,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | 층 | 소비자 웹 | 대기실 경량 페이지 | 파트너 콘솔 | 관제 콘솔 | 스캐너 |
 | --- | --- | --- | --- | --- | --- |
 | 뷰 | React 서버·클라이언트 컴포넌트, `@peaket/ds` | DOM 템플릿 + `textContent` 갱신 | React 클라이언트 컴포넌트 | 호스트 셸 + 원격 위젯(React) | React 화면 + 판정 오버레이 |
-| 저장소(클라이언트 상태) | TanStack Query(서버 캐시), Zustand(UI·좌석 선택), XState(예매·소켓·결제 결과 흐름) | 손으로 쓴 상태표 | TanStack Query(tRPC), Jotai(에디터 원자), RHF(폼) | RTK(슬라이스 주입) + RxJS 어댑터 | Dexie(영속) + XState(로그인·동기화) |
+| 저장소(클라이언트 상태) | TanStack Query(서버 캐시), Zustand(UI·좌석 선택), XState(예매·소켓·결제 결과 흐름) | 손으로 쓴 상태표 | TanStack Query(tRPC), Zustand(에디터 문서·화면 상태), RHF(폼) | Zustand(호스트 저장소 하나 + 원격마다 저장소) + RxJS 어댑터 | Dexie(영속) + Zustand(화면 상태) + XState(로그인·동기화) |
 | 데이터 접근 | `@peaket/api-client`(교차 출처 REST·롱 폴링), 좌석 WebSocket 클라이언트(Worker 안) | 대기열 부분 클라이언트(폴러·진입·입장 확정) | tRPC 클라이언트(같은 출처) + SSE·내려받기 직접 호출 | urql(GraphQL)·Socket.IO·REST(명령) | `@peaket/api-client` 스캐너 부분(mTLS는 브라우저가 처리한다) |
 | 서버 쪽 조합 | 웹 앱 서버(ISR, Auth.js) | 없다 | 파트너 앱 서버(tRPC → gw-partner REST) | 없다 | 없다 |
 
@@ -350,17 +350,17 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 
 ### 3.1 상태 소유권
 
-architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그대로 두고 칸을 고친다(ADR-0079 결정 31). 가져오기 제한 린트가 이 표대로 지키게 한다.
+architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그대로 두고 칸을 고친다(ADR-0079 결정 31). 가져오기 제한 린트가 이 표대로 지키게 한다. 전역 UI 상태 도구는 네 앱 모두 Zustand 하나다(소유자 결정 2026-10-27, ADR-0092). Jotai와 Redux Toolkit(`jotai`·`jotai-family`·`@reduxjs/toolkit`·`react-redux`·`redux`)은 쓰지 않고, 모든 앱과 원격 위젯 저장소에서 가져오면 공용 ESLint 설정(`packages/config`)이 막는다.
 
 | 상태 종류 | 소비자 웹 | 대기실 경량 페이지 | 파트너 콘솔 | 관제 콘솔 | 스캐너 |
 | --- | --- | --- | --- | --- | --- |
-| 서버 상태 캐시 | TanStack Query | 상태표 안 값(마지막 파일) | TanStack Query(tRPC 통합) | urql 문서 캐시 + RTK | Dexie(목록·변경분) |
+| 서버 상태 캐시 | TanStack Query | 상태표 안 값(마지막 파일) | TanStack Query(tRPC 통합) | urql 문서 캐시 + Zustand(구독으로 받은 값) | Dexie(목록·변경분) |
 | 주소 상태 | Next.js 경로·검색 매개변수 | 경로(회차 ID) | Next.js 경로 | React Router 경로·`?event=&tab=` | 경로 |
 | 폼 상태 | React Hook Form + Zod | 없다 | React Hook Form + Zod | React Hook Form + Zod | 예외 통과 사유 폼만(RHF) |
-| 전역 UI 상태 | Zustand | 없다 | Jotai(에디터), Zustand는 쓰지 않는다 | RTK | Zustand |
-| 흐름 상태 기계 | XState(예매 흐름, 좌석 연결, 결제 결과, 본인확인 창) | 손으로 쓴 상태표(§3.4) | XState(위저드 단계) | RTK 상태 + 명령 수명주기 표 | XState(로그인, 근무 준비, 동기화) |
-| 대규모 세밀 편집 | — | — | Jotai 3 + `jotai-family`(`atomFamily`) | — | — |
-| 스트림 결합 | — | — | — | RTK listener + RxJS 어댑터 | — |
+| 전역 UI 상태 | Zustand | 없다 | Zustand | Zustand(호스트 저장소 하나, 원격마다 저장소, §3.10) | Zustand |
+| 흐름 상태 기계 | XState(예매 흐름, 좌석 연결, 결제 결과, 본인확인 창) | 손으로 쓴 상태표(§3.4) | XState(위저드 단계) | Zustand `commands` 슬라이스 + 명령 수명주기 표 | XState(로그인, 근무 준비, 동기화) |
+| 대규모 세밀 편집 | — | — | Zustand(정규화한 문서와 바뀐 ID 묶음, §3.9) | — | — |
+| 스트림 결합 | — | — | — | RxJS 어댑터가 묶어 Zustand 동작으로 쓴다 | — |
 | Worker가 가진 상태 | 좌석 상태 배열·좌표·연결(§3.5), QR 서명 | — | 자동 채우기·검증 계산 | — | 판정 목록 사본·디코더 |
 | 영속 저장 | §3.12 표 | §3.12 표 | sessionStorage 초안만 | 화면 설정만 | Dexie(§3.8) |
 | 환경(테마·로케일) | React Context | 빌드에 넣는다 | React Context | React Context | React Context |
@@ -518,12 +518,15 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 ### 3.9 파트너 좌석맵 에디터 문서 모델
 
-- **문서**: openapi `SeatMapLayout`(배치 층 + 좌석 층 + `layoutVersion`)이 저장 단위다. 에디터는 구역·좌석마다 `atomFamily`(`jotai-family`) 원자를 하나씩 두어, 바뀐 원자만 다시 그린다(architecture §6.4).
-- **되돌리기**: 명령 객체(바꾼 원자와 앞뒤 값)를 쌓은 스택이다. FR-023 인수 조건(10단계 정확 복원)을 넘는 200단계 [가정]까지 두고, 이 수를 넘으면 오래된 것부터 버린다. 화면 문구의 '무제한'은 이 상한으로 읽는다(§6.2).
+- **문서**: openapi `SeatMapLayout`(배치 층 + 좌석 층 + `layoutVersion`)이 저장 단위다. 에디터는 문서를 Zustand 저장소 하나에 정규화해(같은 값을 한 곳에만 두고 ID로 찾게 나눠) 둔다. 구역은 ID로 찾는 표, 좌석은 구역마다 배열이다(추천 적용 2026-10-27, ADR-0092 결정 2).
+- **갱신과 그리기**: 한 번의 편집(채우기·옮기기·줄 맞추기·번호 다시 매기기·지우기)은 저장소를 한 번만 바꾼다. 바뀐 구역만 새 배열을 만들고 나머지 구역은 그대로 같이 쓰며, 바뀐 구역·좌석 ID 묶음을 함께 남긴다. 캔버스는 저장소를 React 밖에서 구독해(`subscribeWithSelector`) 그 묶음의 좌석만 다시 그린다. 트리는 화면에 보이는 줄만 그리고(가상 스크롤), 줄마다 그 줄의 값만 선택자로 읽는다. 속성 패널은 고른 것만 읽는다. 5만 석 템플릿에서 채우기·되돌리기·고른 좌석 옮기기의 INP 200ms(§5.8)는 측정 캠페인(wbs 7.5.2)에서 잰다.
+- **되돌리기**: 명령 객체(바꾼 구역·좌석과 앞뒤 값)를 쌓은 스택이다. FR-023 인수 조건(10단계 정확 복원)을 넘는 200단계 [가정]까지 두고, 이 수를 넘으면 오래된 것부터 버린다. 화면 문구의 '무제한'은 이 상한으로 읽는다(§6.2).
 - **계산**: 자동 채우기, 겹침·도형 밖 검사, 휠체어석 W1~W3 검사는 에디터 Worker가 한다. 서버는 저장할 때 다시 검사한다.
 - **저장**: 자동 임시저장은 `PUT …/seatmap`의 `layoutVersion`으로 동시 수정을 막는다(409면 '다른 곳에서 바뀌었습니다'와 비교 보기). 공연 등록 위저드의 초안 저장 경로는 계약에 없다(design/d5 §1.6 16번, §6.2 32번).
 
 ### 3.10 관제 콘솔 상태
+
+호스트 상태는 호스트의 Zustand 저장소 하나에 슬라이스(기능별 조각)로 나눠 둔다(추천 적용 2026-10-27, ADR-0092 결정 3). 원격 위젯은 이 저장소를 바꾸지 못하고, 읽을 수 있는 슬라이스는 §4.5의 `host`가 정한다.
 
 | 슬라이스 | 내용 | 출처 |
 | --- | --- | --- |
@@ -534,10 +537,10 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | `alerts` | 경보 목록, 접힌 경보, SEV별 수 | Socket.IO `alert` |
 | `commands` | 명령 상태, 내 승인 대기, 잠금 | REST + Socket.IO `command:ack` |
 | `presence` | 접속한 운영자 | Socket.IO `presence` |
-| `widgets/<원격>` | 원격 위젯이 넣은 슬라이스 | `combineSlices().inject` |
+| (원격 위젯 상태) | 호스트 저장소에 넣지 않는다. 원격마다 자기 Zustand 저장소(이름은 `widgets/<원격 이름>`)를 위젯 자리마다 하나 만들고, 자리가 없어지면 버린다 | 원격 안 |
 
 - 위젯마다 `lastUpdatedAt`과 출처를 두고 신선도를 그린다. 출처는 실시간 표 또는 Prometheus(지표를 모아 저장하는 도구)다. 5초가 넘으면 경고 색으로 그린다(design/d5 §7.2).
-- RTK 액션 기록은 개발 중에 화면 상태를 다시 보는 데 쓴다. 감사 기록과 인시던트 리플레이(SCR-031, 대응이 필요한 장애나 보안 사건을 다시 보는 화면)의 정본은 서버 감사 로그와 관측 기록이다(control-tower §7). 운영 빌드에는 상태 저장소의 개발 도구 연결을 넣지 않는다(FE-T21).
+- 개발 빌드에서는 Zustand `devtools` 미들웨어로 저장소의 동작 기록을 Redux DevTools에 남겨 화면 상태를 다시 본다. 동작마다 이름(§4.7)을 붙이고, 초당 여러 번 오는 스트림 동작은 `actionsDenylist`로 거르며, 호스트와 원격 저장소는 한 연결에서 이름으로 나눠 본다(ADR-0092 결정 3). 감사 기록과 인시던트 리플레이(SCR-031, 대응이 필요한 장애나 보안 사건을 다시 보는 화면)의 정본은 서버 감사 로그와 관측 기록이다(control-tower §7). 운영 빌드에는 상태 저장소의 개발 도구 연결을 넣지 않는다(FE-T21).
 - **들고 있는 양의 상한**(추천 적용 2026-10-27, ADR-0091 결정 4): `alerts`에는 걸린 경보 전부와 풀린 지 60분 [가정] 안의 경보를 합쳐 500건 [가정]까지 두고, 넘으면 풀린 것 가운데 오래된 것부터 버린다. 지난 경보는 감사 로그(SCR-031)와 Grafana에서 본다. 위젯 그래프의 데이터는 선마다 최근 15분(1초 점 900개) [가정]만 고리 버퍼(정해진 크기를 돌려 쓰며 오래된 값부터 덮어쓰는 배열)에 둔다(§5.7).
 
 ### 3.11 클라이언트 출처 데이터
@@ -781,7 +784,7 @@ data: {"sold":1234,"remaining":13766,"projectedSoldOutAt":null,"waiting":3214,"q
 
 ### 4.5 관제 원격 위젯 계약
 
-`@peaket/console-contract`가 정본이다(ADR-0079 결정 16). 아래에 그 핵심만 적는다.
+`@peaket/console-contract`가 정본이다(ADR-0079 결정 16). 아래에 그 핵심만 적는다. 원격에 넘기는 상태 통로는 읽기 전용 `host`다(추천 적용 2026-10-27, ADR-0092 결정 3).
 
 ```ts
 // 원격이 내보내는 위젯 정보
@@ -810,18 +813,24 @@ export interface ConsoleServices {
   graphql: { query<T>(id: PersistedQueryId, vars?: object): Promise<T>;
              subscribe<T>(id: PersistedQueryId, vars: object, next: (v: T) => void): Unsubscribe };
   socket: { on(event: "alert" | "command:ack" | "presence", h: (p: unknown) => void): Unsubscribe };
-  store: { inject(slice: Slice): void; dispatch: Dispatch; select<T>(f: (s: RootState) => T): T };
+  host: { use<T>(f: (s: HostView) => T): T;   // 호스트 상태를 읽는 훅. 바꾸는 통로는 없다
+          get(): HostView;
+          subscribe(listener: (s: HostView) => void): Unsubscribe };
   telemetry: { mark(name: string, ms: number): void; error(e: unknown): void };
   i18n: { t(key: MessageKey, vars?: object): string };
   can(permission: Permission): boolean;
   flags: { isOn(name: string): boolean };
 }
+
+// 원격이 읽을 수 있는 호스트 상태(§3.10). session·commands는 넘기지 않는다
+export type HostView = Readonly<Pick<HostState, "scope" | "control" | "autoActions" | "alerts" | "presence">>;
 ```
 
 - **`remotes.json`**(저장소에 적어 둔 대로 배포를 맞추는 GitOps로 관리하고, 호스트가 읽는다): `[{name, sha, entry: "/remotes/<name>/<sha>/remoteEntry.js", integrity: "sha384-…", contractMajor}]`.
 - **싣는 순서**: 목록 읽기 → 계약 판 확인 → 런타임 플러그인 `createScript`가 `integrity`·`crossorigin="anonymous"`를 붙인 스크립트 요소를 만든다(시간 초과 5초 [가정]) → 실패하면 `loadEntryError`로 한 번 다시 → 또 실패하면 `errorLoadRemote`가 대체 위젯을 돌려준다. 대체 위젯은 그 칸만 design/d5 §7.2 '위젯 오류'와 같은 카드('이 위젯만 불러오지 못했습니다', [다시 시도], 지표와 로그를 그래프로 보여 주는 도구인 Grafana 링크)로 바꾼다. 위젯 안의 그리기 오류는 CMP-035 오류 경계가 그 칸만 바꾼다.
-- **공유 싱글턴**: `react`, `react-dom`, `react-redux`, `@reduxjs/toolkit`, `rxjs`, `chart.js`(처음 그래프를 그릴 때 한 번 받는다, ADR-0091 결정 4), `@peaket/ds`, `@peaket/telemetry`, `@peaket/console-contract`(이것만 `strictVersion`). 버전 범위는 E2E로 검사한다(devops §6.6).
-- **금지**: 원격 위젯이 `fetch`·WebSocket·`localStorage`를 직접 쓰거나 토큰을 갖는 것, 전역(`window`)에 값을 두는 것(ASVS 3.2.3 채택). 공용 ESLint 설정과 원격 저장소 CI가 막는다.
+- **공유 싱글턴**: `react`, `react-dom`, `zustand`, `rxjs`, `chart.js`(처음 그래프를 그릴 때 한 번 받는다, ADR-0091 결정 4), `@peaket/ds`, `@peaket/telemetry`, `@peaket/console-contract`(이것만 `strictVersion`). 버전 범위는 E2E로 검사한다(devops §6.6).
+- **금지**: 원격 위젯이 `fetch`·WebSocket·`localStorage`를 직접 쓰거나 토큰을 갖는 것, 전역(`window`)에 값을 두는 것(ASVS 3.2.3 채택), 호스트 상태를 바꾸는 것(바꿀 일은 `WidgetProps`의 콜백으로 호스트에 알린다, ADR-0092). 공용 ESLint 설정과 원격 저장소 CI가 막는다.
+- **원격 위젯의 상태**: 원격 안의 Zustand 저장소에 둔다. 위젯 자리마다 하나를 만들고 자리가 없어지면 버리며, 호스트 저장소에 끼워 넣지 않는다(§3.10, ADR-0092 결정 3).
 - **구독 수명과 보이기**(추천 적용 2026-10-27, ADR-0091 결정 3): 위젯은 `graphql.subscribe`를 효과(`useEffect`) 안에서 열고 정리 함수에서 닫는다. 그리는 중에는 구독하지 않는다. 호스트는 위젯 자리마다 따로 만든 `ConsoleServices`를 넘기고, 그 자리가 안 보이면(고르지 않은 탭, 숨긴 브라우저 탭) 그 안에서 구독을 멈췄다가 다시 연다. 화면 밖으로 스크롤된 자리에는 값을 넘기지 않고 마지막 값만 들고 있다가, 보이면 넘긴다. 위젯은 자기가 보이는지 따지지 않는다. 다만 `collapsed`가 참이면 머리(제목·상태 점·핵심 숫자 한 줄)만 그린다(§5.7, FE-T26).
 
 ### 4.6 관제 GraphQL과 파트너 tRPC
@@ -856,7 +865,7 @@ export interface ConsoleServices {
 | `ps:{jti}` | Web Locks | 구매 세션 일련번호와 요청 직렬화(§5.3) |
 | `token-refresh` | Web Locks | 팬 토큰 갱신을 탭 사이에서 한 번만 하게 한다 |
 
-**저장소 액션 이름 규칙**: Zustand는 `slice/동사명사`(예: `seat/select`), XState 이벤트는 대문자 뱀 표기(예: `HOLD_SUCCEEDED`), RTK는 `slice/past-tense`(예: `alerts/received`)로 짓는다. 원격 위젯이 넣는 슬라이스 이름은 `widgets/<원격 이름>`으로 시작한다.
+**저장소 액션 이름 규칙**(추천 적용 2026-10-27, ADR-0092 결정 4): Zustand 동작 이름은 `슬라이스/동작`으로 짓는다. 사람이 한 동작은 동사(예: `seat/select`)로, 바깥에서 온 사건은 과거형(예: `alerts/received`)으로 짓고, `set`의 셋째 인자로 넘겨 개발 도구 기록에 남긴다. 상태는 저장소가 내보낸 동작으로만 바꾸고, 저장소 밖에서 `setState`를 부르지 않는다. XState 이벤트는 대문자 뱀 표기(예: `HOLD_SUCCEEDED`)로 짓는다. 원격 위젯 저장소의 이름은 `widgets/<원격 이름>`으로 시작한다.
 
 ### 4.8 핵심 컴포넌트 API
 
@@ -1297,7 +1306,7 @@ allowBuilds:                     # 설치 스크립트를 허용하는 패키지
 
 | 구성 요소 | 걱정(2026-10-21 레지스트리) | 결정 |
 | --- | --- | --- |
-| redux-observable | `latest`가 3.0.0-rc.3(2025-12-09)이고, 안정판 3.0은 없다 | 쓰지 않는다. 대신 RTK `createListenerMiddleware` 위에 RxJS 어댑터를 둔다 |
+| redux-observable | `latest`가 3.0.0-rc.3(2025-12-09)이고, 안정판 3.0은 없다 | 쓰지 않는다. 스트림은 RxJS 어댑터가 묶어 Zustand 저장소의 동작으로 쓴다(ADR-0092) |
 | next-auth(Auth.js) v5 | 베타(5.0.0-beta.32)이고, authjs.dev가 Better Auth로 합쳐졌다고 알렸다 | 판을 고정해 쓴다. 인증 구현을 시작하기 전 Better Auth로 옮겨 보는 PoC로 계속 쓸지 정한다 |
 | `@lhci/cli` | 0.15.1(2025-06-25) 뒤로 새로 게시된 판이 없다 | 쓰되, 멈추면 `lighthouse` CLI와 자체 예산 검사로 바꿀 수 있게 설정을 단순하게 둔다 |
 | `@hello-pangea/dnd` | 18.0.1(2025-02-09) 뒤로 새로 게시된 판이 없다 | 쓰되 키보드 대안(위로·아래로 버튼)을 필수로 둔다 |
@@ -1450,7 +1459,7 @@ ADR-0079의 결정 32개가 이 문서의 어디에 반영되어 있는지 보�
 | 13 | 브라우저 지표 입구 하나 | §2.1, §5.16 |
 | 14 | 화면 묶음별 헤더, 월렛 묶음, Trusted Types 보고 모드 | §2.5, §5.14.1 |
 | 15 | 지표 묶음 판 2와 오류 수집 | §5.16 |
-| 16 | 관제 원격 위젯 계약 | §4.5, §5.7 |
+| 16 | 관제 원격 위젯 계약(상태 통로는 2026-10-27 ADR-0092가 읽기 전용 `host`로 바꿈) | §4.5, §5.7 |
 | 17 | 로그아웃 정리 | §5.14.4 |
 | 18 | 월렛 서비스 워커 | §5.4 |
 | 19 | iOS 7일 삭제 대비 | §5.4 |
@@ -1465,7 +1474,7 @@ ADR-0079의 결정 32개가 이 문서의 어디에 반영되어 있는지 보�
 | 28 | 접근성 세부 | §5.11 |
 | 29 | 다국어 범위 | §5.12 |
 | 30 | 여러 탭 조정 | §4.7, §5.9 |
-| 31 | 상태 관리 표 고침 | §3.1 |
+| 31 | 상태 관리 표 고침(파트너 에디터·관제 칸은 2026-10-27 ADR-0092가 Zustand로 다시 고침) | §3.1 |
 | 32 | 화면이 쓰는 API 계약 보강(wbs 0.2.3) | §6.2 |
 
 ADR-0091의 결정 6개는 콘솔이 켜져 있는 동안의 성능을 정한다. 모두 추천 적용(2026-10-27)이다.
@@ -1487,7 +1496,7 @@ ADR-0091의 결정 6개는 콘솔이 켜져 있는 동안의 성능을 정한다
 | --- | --- | --- | --- |
 | 1 | 'SWR(대기실 전용)'로 적혔지만 React 런타임만으로 대기실 JS 예산을 넘는다 | architecture §6.2·§6.4, NFR-012 | 고침: 대기실 경량 페이지(결정 2·31), ADR-0024 상태 줄 |
 | 2 | '제어 명령 통신: Socket.IO'로 적혔지만, 명령은 REST로 보내고 Socket.IO는 ack·경보를 맡는다 | architecture §6.2, openapi | 고침(결정 12) |
-| 3 | redux-observable은 안정판 3.0이 없다 | architecture §6.2·§6.4 | 고침: RTK listener + RxJS(결정 16·31) |
+| 3 | redux-observable은 안정판 3.0이 없다 | architecture §6.2·§6.4 | 고침: RTK listener + RxJS(결정 16·31). 2026-10-27 ADR-0092로 RxJS 어댑터 + Zustand가 됐다 |
 | 4 | 월렛 CSP가 정해지지 않았다 | architecture §6.3, asvs/offline-gate 3.4.3 | 닫음: 캐시 화면 묶음(결정 14) |
 | 5 | 구매 세션 키를 '페이지 메모리'에 두면 결제창에서 돌아오거나 새로고침할 때 잃는다 | secrets-and-keys, asvs/queue-admission·payment 14.3.1 | 고침: IndexedDB 추출 불가 키(결정 6) |
 | 6 | 303은 스크립트가 읽지 못한다 | openapi(로비·진입·입장 확정), queue-admission, design/d5 | 고침: 2xx 본문(결정 4) |
@@ -1598,8 +1607,8 @@ ADR-0091의 결정 6개는 콘솔이 켜져 있는 동안의 성능을 정한다
 | Auth.js가 Better Auth의 일부가 됐다는 알림 | https://authjs.dev |
 | pnpm `minimumReleaseAge`·`trustPolicy`·`blockExoticSubdeps`·`strictDepBuilds`·`allowBuilds`·`trustLockfile` | https://pnpm.io/settings |
 | web-vitals 6(소프트 내비게이션) | https://github.com/GoogleChrome/web-vitals |
-| Jotai 3(`atomFamily`가 `jotai-family`로) | https://github.com/pmndrs/jotai |
-| Redux Toolkit `combineSlices().inject`, `createListenerMiddleware` | https://redux.js.org/toolkit/api |
+| Jotai 3(`atomFamily`가 `jotai-family`로). ADR-0092 뒤로는 쓰지 않는다 | https://github.com/pmndrs/jotai |
+| Redux Toolkit `combineSlices().inject`, `createListenerMiddleware`. ADR-0092 뒤로는 쓰지 않는다 | https://redux.js.org/toolkit/api |
 | Sentry 브라우저 민감 데이터 처리 | https://docs.sentry.io/platforms/javascript/data-management/sensitive-data/ |
 | 디자인 토큰 형식은 W3C 커뮤니티 그룹 명세(2025.10 첫 안정판) | https://www.designtokens.org |
 | 레지스트리 판(next 16.4.2, react 19.3.1, jotai 3.0.1, redux-observable 3.0.0-rc.3, `@lhci/cli` 0.15.1, next-auth 5.0.0-beta.32, `@module-federation/enhanced` 2.9.2, serwist 9.5.13, `@tosspayments/tosspayments-sdk` 2.10.0, `@portone/browser-sdk` 0.1.13 등) | https://registry.npmjs.org |
@@ -1622,3 +1631,15 @@ ADR-0091의 사실은 2026-10-27에 열어 보고 조회했다. 판 번호는 �
 | Chrome 133 에너지 절약 모드의 숨긴 탭 얼리기(5분 넘게 숨김·소리 없음·CPU를 많이 씀, 다시 보이면 이어서 처리) | https://developer.chrome.com/blog/freezing-on-energy-saver |
 | 레지스트리 판(chart.js 4.6.1 2026-10-22, uplot 1.6.32 2025-03-14, echarts 6.1.0 2026-05-19, react-router 8.5.0, `@module-federation/enhanced` 2.9.2, rxjs 7.8.2, graphql-ws 6.4.1, memlab 2.0.5, `@tanstack/react-virtual` 3.14.23, `@hello-pangea/dnd` 18.0.1) | https://registry.npmjs.org |
 | 크기(gzip -9): Chart.js 전체 UMD 69.2 KiB, uPlot 21.5 KiB, ECharts 전체 359.3 KiB·`simple` 164.9 KiB, `@hello-pangea/dnd` UMD 28.6 KiB | jsDelivr 배포 파일을 받아 잰 값(2026-10-27) |
+
+ADR-0092의 사실은 2026-10-27에 열어 보고 조회했다. 판 번호는 그날 npm 레지스트리의 `latest`다.
+
+| 사실 | 출처 |
+| --- | --- |
+| Zustand: React 밖에서 만드는 저장소(`zustand/vanilla`의 `createStore`, `getState`·`setState`·`subscribe`), 다시 그리지 않고 구독하기(transient updates), 선택자로 고른 값만 구독하기(`subscribeWithSelector`) | https://github.com/pmndrs/zustand |
+| Zustand 슬라이스 패턴(큰 저장소를 기능별 조각으로 나눠 만들기) | https://github.com/pmndrs/zustand/blob/main/docs/learn/guides/slices-pattern.md |
+| Zustand `devtools` 미들웨어: Redux DevTools 연결, `set`의 셋째 인자로 액션 이름 붙이기, `actionsDenylist`로 거르기, 여러 저장소를 한 연결에서 이름으로 나눠 보기 | https://github.com/pmndrs/zustand/blob/main/docs/reference/middlewares/devtools.md |
+| Jotai 3.0.0(2026-09-08): `atomFamily`가 `jotai/utils`에서 `jotai-family` 패키지로 옮겨지고 `loadable`과 `setSelf`가 빠졌다 | https://github.com/pmndrs/jotai/blob/main/docs/guides/migrating-to-v3.mdx |
+| RTK `combineSlices`는 만든 뒤에도 리듀서를 더 끼워 넣게 한다(`inject`, `withLazyLoadedSlices`). listener 미들웨어는 saga·observable 같은 비동기 미들웨어의 가벼운 대안이다 | https://github.com/reduxjs/redux-toolkit/blob/master/docs/api/combineSlices.mdx, https://github.com/reduxjs/redux-toolkit/blob/master/docs/api/createListenerMiddleware.mdx |
+| 레지스트리 판(zustand 5.0.16 2026-10-22·5.0.0 2024-10-14, jotai 3.0.1, jotai-family 1.1.0, `@reduxjs/toolkit` 2.13.0 2026-09-29·2.0.0 2023-12-04, react-redux 9.3.0) | https://registry.npmjs.org |
+| 크기(압축): zustand 490B, jotai 3,329B, jotai-family 757B, `@reduxjs/toolkit` 14,546B, react-redux 3,771B | https://bundlephobia.com (2026-10-27) |

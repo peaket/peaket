@@ -474,9 +474,9 @@ C4Component
 | 클라이언트 앱 | 핵심 프레임워크 및 라이브러리 | 상태 관리 도구 체계 |
 | --- | --- | --- |
 | 소비자 웹 (`apps/web`) | Next.js 16+ App Router, React 19(화면 라이브러리), TanStack Query, Zustand, XState, Motion, Serwist/Workbox (월렛 PWA), Dexie, WebCrypto. 대기실은 프레임워크 없는 경량 페이지다(`apps/web/queue-room`, ADR-0079) | 서버 캐시: TanStack Query, 대기실 폴링: 손으로 쓴 상태표(대기실 경량 페이지), 전역 UI: Zustand, 복잡한 예매 흐름: XState |
-| 파트너 콘솔 (`apps/partner`) | Next.js, tRPC(앱 서버 BFF가 gw-partner REST를 부른다), Jotai 3(`atomFamily`는 `jotai-family`), React Hook Form + Zod, `@hello-pangea/dnd`, Chart.js(Canvas 그래프). 에디터·시뮬레이터·끌어 놓기·그래프는 쓸 때 싣는다(ADR-0091) | 폼/검증: RHF + Zod, 좌석맵의 많은 노드를 세밀하게 편집: Jotai, 서버 통신: tRPC(서버가 브라우저로 한 방향으로 계속 보내는 통신인 SSE·내려받기·올리기·토큰 갱신은 `partner-api` 직접, ADR-0079) |
-| 관제 콘솔 (`apps/console-host`) | Webpack 5 Module Federation 호스트 + 리모트 위젯(계약 `@peaket/console-contract`), Redux Toolkit(listener 미들웨어) + RxJS, GraphQL (urql + graphql-ws), Socket.IO, React Router(화면마다 따로 싣는 경로), Chart.js(Canvas 그래프, ADR-0091) | 마이크로 프론트엔드 상태 통합: RTK, 실시간 지표 스트림 결합: RxJS 어댑터, 제어 명령: REST(ack·경보 푸시는 Socket.IO, ADR-0079) |
-| 게이트 스캐너 (`apps/scanner`) | Vite PWA, mediaDevices, Web Worker(BarcodeDetector, 없으면 zxing-wasm), Dexie (IndexedDB, 브라우저 안에 데이터를 저장하는 곳), Screen Wake Lock, 일회성 Background Sync | 오프라인 검증 큐: Dexie, 변경분 수신: 화면이 켜진 동안 앱 타이머 60초, 업로드: 판정 뒤 바로 보내고 일회성 Background Sync는 재시도용 예비(주기적 백그라운드 동기화는 크롬에서 최소 12시간 간격이라 쓰지 않는다, ADR-0051), 바코드 디코딩: Web Worker |
+| 파트너 콘솔 (`apps/partner`) | Next.js, tRPC(앱 서버 BFF가 gw-partner REST를 부른다), Zustand, React Hook Form + Zod, `@hello-pangea/dnd`, Chart.js(Canvas 그래프). 에디터·시뮬레이터·끌어 놓기·그래프는 쓸 때 싣는다(ADR-0091) | 폼/검증: RHF + Zod, 전역 UI와 좌석맵 에디터 문서: Zustand(정규화한 문서와 바뀐 ID 묶음, ADR-0092), 서버 통신: tRPC(서버가 브라우저로 한 방향으로 계속 보내는 통신인 SSE·내려받기·올리기·토큰 갱신은 `partner-api` 직접, ADR-0079) |
+| 관제 콘솔 (`apps/console-host`) | Webpack 5 Module Federation 호스트 + 리모트 위젯(계약 `@peaket/console-contract`), Zustand + RxJS, GraphQL (urql + graphql-ws), Socket.IO, React Router(화면마다 따로 싣는 경로), Chart.js(Canvas 그래프, ADR-0091) | 호스트 상태: Zustand 저장소 하나(원격에는 읽기 전용), 원격 위젯 상태: 원격마다 Zustand 저장소(ADR-0092), 실시간 지표 스트림 결합: RxJS 어댑터, 제어 명령: REST(ack·경보 푸시는 Socket.IO, ADR-0079) |
+| 게이트 스캐너 (`apps/scanner`) | Vite PWA, mediaDevices, Web Worker(BarcodeDetector, 없으면 zxing-wasm), Dexie (IndexedDB, 브라우저 안에 데이터를 저장하는 곳), Screen Wake Lock, 일회성 Background Sync | 화면 상태: Zustand, 오프라인 검증 큐: Dexie, 변경분 수신: 화면이 켜진 동안 앱 타이머 60초, 업로드: 판정 뒤 바로 보내고 일회성 Background Sync는 재시도용 예비(주기적 백그라운드 동기화는 크롬에서 최소 12시간 간격이라 쓰지 않는다, ADR-0051), 바코드 디코딩: Web Worker |
 | 포렌식 리플레이 데모 (`apps/forensics`) | Vite 8 + React 19.3, Web Worker, OffscreenCanvas 2D·WebGL2, apache-arrow, `packages/seatmap` | 사건: 열 배열과 비트마스크 교차 필터(데이터 Worker), 화면: React. 합성 데이터만 쓰고 서버가 없다(ADR-0080). 2단계(출시 뒤 선택)는 같은 앱을 운영 모드로 빌드해 관제 콘솔 주소 아래 따로 여는 페이지로 둔다 |
 
 ### 6.3 렌더링 전략 (원문 5장 라우트 표)
@@ -506,16 +506,16 @@ C4Component
 
 ### 6.4 상태 소유권 매트릭스 (원문 4장)
 
-'애플리케이션 × 상태 종류'마다 전용 도구를 딱 하나만 정해, 상태 관리가 여러 도구로 흩어지는 것을 막는다. 이 규칙은 ESLint import 제한 린트로 강제한다.
+'애플리케이션 × 상태 종류'마다 전용 도구를 딱 하나만 정해, 상태 관리가 여러 도구로 흩어지는 것을 막는다. 이 규칙은 ESLint import 제한 린트로 강제한다. 전역 UI 상태 도구는 네 앱 모두 Zustand 하나다(소유자 결정 2026-10-27, ADR-0092).
 
 | 상태 분류 | 담당 애플리케이션 | 채택 도구 | 선정 사유 | 탈락 대안 및 기각 사유 |
 | --- | --- | --- | --- | --- |
 | 서버 상태 캐시 | 소비자 웹 | TanStack Query | 네트워크 요청 중복 제거, 지능형 재시도, `offlineFirst`, React Suspense 기본 지원 | SWR (기능 부족), Redux (반복해 써야 하는 보일러플레이트 코드가 많다) |
 | 대기실 실시간 상태 | 대기실 경량 페이지 | 손으로 쓴 상태표(라이브러리는 없다) | React 런타임만으로 대기실 JS 예산 50KB(gzip)를 넘는다(실측(PC) 66.0 KiB). 그래서 프레임워크 없이 상태표와 DOM 갱신으로 적응형 폴링을 구현한다(ADR-0079 결정 2) | SWR·TanStack Query(React 런타임이 필요해 예산을 넘는다) |
-| 전역 UI 상태 | 소비자 웹 | Zustand | 번들 크기가 아주 작다. 선택자(Selector)로 불필요한 다시 그리기를 막는다. React 수명주기 밖에서 하는 구독을 지원한다 | React Context API (자주 갱신하면 전체를 다시 그리게 된다) |
-| 대규모 세밀 편집 | 파트너 좌석맵 에디터 | Jotai (`atomFamily`) | 수천 개의 좌석 노드 가운데 바뀐 좌석 하나만 원자 단위로 다시 그린다 | Zustand (거대한 스토어 하나라 원자 단위의 세밀한 제어에 한계가 있다) |
+| 전역 UI 상태 | 네 앱 모두(소비자 웹·파트너 콘솔·관제 콘솔·스캐너) | Zustand | 번들 크기가 아주 작다(압축 490B, 2026-10-27). 선택자(Selector)로 불필요한 다시 그리기를 막는다. React 수명주기 밖에서 하는 구독을 지원한다. 익히고 지킬 도구가 하나다(ADR-0092) | React Context API (자주 갱신하면 전체를 다시 그리게 된다), 앱마다 다른 도구(Jotai·Redux Toolkit. 익히고 지킬 도구가 셋이 되고, 고른 이유가 지금 설계와 맞지 않는다, ADR-0092) |
+| 대규모 세밀 편집 | 파트너 좌석맵 에디터 | Zustand(정규화한 문서 저장소) | 좌석은 캔버스에 그리므로 좌석마다 화면 부품이 없다. 편집 한 번은 저장소를 한 번 바꾸고 바뀐 구역·좌석 ID 묶음을 남기며, 캔버스는 React 밖 구독으로 그 좌석만 다시 그린다(docs/frontend.md §3.9, ADR-0092) | Jotai(`atomFamily`. 원자 단위로 다시 그리는 장점이 캔버스 에디터에서는 작고, 3.0에서 `atomFamily`가 다른 패키지로 옮겨졌다, ADR-0092) |
 | 유한 상태 머신 흐름 | 예매 흐름, 소켓 연결, 스캐너 동기화 | XState | 불가능한 상태 전이를 구조적으로 차단하고, 업무 흐름 시각화와 모델 기반 자동화 테스트를 지원한다 | boolean 플래그 조합 (상태가 폭발하고 버그가 생긴다) |
-| 스트림 및 관제 상태 | 중앙 관제 콘솔 | Redux Toolkit(listener 미들웨어) + RxJS 어댑터 | 액션 단위로 화면 상태 변화를 추적할 수 있다. 감사 기록과 인시던트(대응이 필요한 장애나 보안 사건) 리플레이의 정본은 서버 감사 로그와 관측 기록이다(control-tower §7, ADR-0079). 고빈도 지표 스트림을 결합하고 스로틀링하기 쉽다. MF 리모트 리듀서의 동적 주입을 지원한다 | Zustand (복잡한 시계열 비동기 스트림 처리에 한계가 있다), redux-observable(안정판 3.0이 없다, ADR-0079) |
+| 스트림 및 관제 상태 | 중앙 관제 콘솔 | Zustand(호스트 저장소 하나 + 원격마다 저장소) + RxJS 어댑터 | 고빈도 지표 스트림은 RxJS 어댑터가 묶고 늦춰(`auditTime`) 저장소의 동작으로 쓴다. 원격은 자기 저장소를 갖고 호스트 상태는 읽기만 해서, 위젯의 결함이 세션·자동 제어 상태를 건드리지 못한다. 개발 빌드에서는 `devtools` 미들웨어로 동작 기록을 본다. 감사 기록과 인시던트(대응이 필요한 장애나 보안 사건) 리플레이의 정본은 서버 감사 로그와 관측 기록이다(control-tower §7, ADR-0079·ADR-0092) | Redux Toolkit(원격 리듀서 끼워 넣기와 정해진 틀은 장점이지만, 원격마다 저장소를 두면 끼워 넣기가 필요 없고 도구가 하나 더 는다, ADR-0092), redux-observable(안정판 3.0이 없다, ADR-0079) |
 | 유연한 데이터 구독 | 관제 콘솔 ↔ `ops-svc` | GraphQL (`urql` + `graphql-ws`) | 위젯마다 필요한 데이터 집계 구조가 다르다. WebSocket 기반 실시간 서브스크립션을 지원한다 | REST (오버페칭/언더페칭이 생기고 실시간 스트림에 한계가 있다) |
 | 내부 툴 타입 안전 통신 | 파트너 콘솔 ↔ 파트너 앱 서버(tRPC BFF가 gw-partner REST를 부른다, ADR-0079) | tRPC | 프론트엔드와 백엔드가 TypeScript 정적 타입을 100% 공유한다. 별도 API 명세서 작성이 불필요하다 | GraphQL (내부 도구 용도에는 스키마 빌드 오버헤드가 너무 크다) |
 | DI 및 환경설정 | 전 애플리케이션 | React Context API | 테마, 언어 로케일처럼 아주 드물게 바뀌는 정적 환경설정을 전파한다 | 자주 바뀌는 상태에 쓰는 것은 엄격히 금지한다 |
@@ -867,7 +867,8 @@ T=0 진입 20만 RPS에는 CORS 사전 요청(OPTIONS)이 더해지지 않는다
 | 0088 | 4차 전수 정합성 점검 3부의 추천 적용: 입장 중인 회차의 티켓이 있으면 계정 병합 차단(`ENTRY_STARTED`), 파트너·관제 이미지 올리기의 `X-Requested-With`, 주문 생성·결제 시도·결제 접수의 415, 다른 기기 로그아웃 전 재인증, 로그인 기록의 인증 방식·인증 요소, 암호 목록 갱신 규칙, GitHub 조직 웹훅 사본 3년 보존, 바뀌지 않는 외부 키 위험 수용(ASVS 13.2.1 부분 적용), 월렛 QR 움직이는 무늬, 앱 개수는 4개와 데모 앱 등 18가지 | 채택(2026-10-26, 소유자 요청 '저번에 못했던 부분 계속 진행', 추천 적용). 보완: 0089 |
 | 0089 | 4차 점검에서 남긴 값: 리포트 조회 계정당 30회/분·결정 기록 쓰기 10회/분과 ClickHouse 읽기 사용자 쿼터, 분석 저장소 호출의 시간 초과·재시도, Gradle·PyPI 의존성 고정, 관리 도구 HTTPS·SSO·MFA와 EKS 공개 엔드포인트 허용 대역, 대형·중형 온세일과 겹친 대사는 윈도우 뒤(늦어도 04시), 지연 환급 계좌 `POST /v1/cancellations/{cancellationId}/account`와 환급·배상 계좌 재인증, identity-svc 접속기록 줄의 법정 사본 갈래와 관리 계정 2년 사본, 데이터 분류표·비밀 목록 행, heat 팔레트, CloudFront 지표 YACE 경로, WBS 작업 설명 등 12가지 | 채택(2026-10-26, 소유자 요청 '남긴 것들은 합리적으로 시니어 개발자 관점에서 정해주세요', 추천 적용) |
 | 0090 | arc42 안내 문서를 없애고 내용을 제자리로 옮긴다. C4 3단계 그림 3장은 이 문서 §3.3(서비스 맵 바로 뒤)으로, arc42 열두 칸·C4 그림·흐름별 순서도의 위치 표는 00-summary §2.1(문서 지도)로, 남은 일 넷은 review/open-items.md 26~29번으로 옮긴다. ADR-0084의 '대응표 문서 하나만 둔다'를 대체한다 | 채택(2026-10-26, 소유자 결정) |
-| 0091 | 콘솔이 켜져 있는 동안의 성능을 정한다: 관제 화면별로 늦게 싣기와 파트너 콘솔의 늦게 싣는 덩어리, 안 보이는 위젯의 구독 멈춤, Canvas 그래프(Chart.js)와 들고 있는 양의 상한, 장시간 시험(FE-T25~FE-T27), design/d2 §3.3의 오류 격리 문장 고침. 숫자는 모두 측정 전 잠정값이다 | 채택(2026-10-27, 소유자 요청 '빠진 다섯 가지와 d2 §3.3 어긋남을 frontend.md에 보강하고, 결정은 새 ADR로 남겨 주세요', 추천 적용). |
+| 0091 | 콘솔이 켜져 있는 동안의 성능을 정한다: 관제 화면별로 늦게 싣기와 파트너 콘솔의 늦게 싣는 덩어리, 안 보이는 위젯의 구독 멈춤, Canvas 그래프(Chart.js)와 들고 있는 양의 상한, 장시간 시험(FE-T25~FE-T27), design/d2 §3.3의 오류 격리 문장 고침. 숫자는 모두 측정 전 잠정값이다 | 채택(2026-10-27, 소유자 요청 '빠진 다섯 가지와 d2 §3.3 어긋남을 frontend.md에 보강하고, 결정은 새 ADR로 남겨 주세요', 추천 적용). 상태 도구 이름은 0092가 고침 |
+| 0092 | 전역 클라이언트 상태 도구를 네 앱 모두 Zustand 하나로 줄인다(Jotai·Redux Toolkit 뺌). 파트너 좌석맵 에디터는 정규화한 문서 저장소와 바뀐 ID 묶음, 관제는 호스트 저장소 하나와 원격 위젯마다 저장소, 원격에는 읽기 전용 `host` 통로, 동작 이름 규칙 하나, Jotai·Redux 가져오기를 막는 린트. ADR-0024 결정 2의 에디터·관제 칸과 ADR-0079 결정 16·31의 해당 부분을 대체한다 | 채택(2026-10-27, 소유자 결정 '추천대로', 세부는 추천 적용) |
 | 0093 | 공연(회차 묶음) `production`을 데이터에 정식으로 두고 공연장 `place`·아티스트 `artist`·다른 이름 `search_alias`를 따로 관리한다. 판매 승인·카드·찜·후기 보기·랭킹은 공연 단위, 대기열·좌석·주문·정산은 회차 단위다. 대표 회차 규칙을 정하고, 공연에 딸린 API 경로(등록·회차 더하기·이미지·좌석맵·판매 승인·찜)를 공연 경로로, 수요 예측·규모 올리기를 회차 경로로 옮긴다 | 채택(2026-10-27, 소유자 결정 '추천대로', 세부는 추천 적용). 보완 대상: 0062·0063·0078 |
 | 0094 | 검색을 다시 설계한다. 입력 중 후보 창은 '자동완성', 카탈로그 관계로 고른 것은 '관련 공연'이고, 검색 기록으로 만드는 연관 검색어는 두지 않는다. 결과는 PostgreSQL 검색 읽기 모델(같은 트랜잭션, 읽기 전용 복제본), 자동완성은 서버 메모리 사전(Redis 키 없앰)이고, 둘 다 검색 포트 뒤에 두어 엔진을 바꿀 조건 넷을 정한다. 한글 정규화·낱자·초성·한/영 변환, LIKE 이스케이프, 한글 입력기 규칙, 순위와 동점 깨기, 결과 0건 제안, `/search` 정적 셸과 noindex, NFR-028. Elasticsearch·OpenSearch·Algolia는 기각 | 채택(2026-10-27, 소유자 결정 '추천대로', 세부는 추천 적용). 보완 대상: 0063·0083·0086 |
 

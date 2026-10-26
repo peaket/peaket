@@ -513,7 +513,7 @@
 | Formik + Yup | ADR-0020 |
 | CockroachDB | ADR-0021 |
 | Cassandra | ADR-0004 |
-| 상태관리 도구 여러 개 | ADR-0024(상태 소유권 매트릭스) |
+| 상태관리 도구 여러 개 | ADR-0024(상태 소유권 매트릭스), ADR-0092(전역 UI 상태 도구를 네 앱 모두 Zustand 하나로 줄였다. 본문의 Jotai·Redux Toolkit 행은 원문이라 그대로 둔다) |
 | Bigtable, Dataflow, GFS/HDFS | ADR 없음. 위 표의 '근거·매핑 증거물'이 기록이며 실험·평가 문서는 작성 예정. 다만 Dataflow 모델(창·워터마크·늦은 사건)은 ADR-0071이 Flink 설계 문서(docs/streaming.md §3·§4)로 옮겼고, 그 과정에서 세션 창·CEP는 쓰지 않기로 했다(본문의 학습 항목 행과 면접 답변 문장은 원문이라 그대로 둔다) |
 | Datadog·New Relic·Raygun | ADR-0067(관제 콘솔과 관측 도구의 역할 경계, Phase 4 비교 측정과 판정 규칙), ADR-0068(관측 스택 선택 근거와 대안 비교, AWS 관리형 후보 추가) |
 
