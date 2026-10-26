@@ -1216,7 +1216,7 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 | 헤더 | 소비자 웹 | 좌석 화면 | 결제 화면 | 파트너 | 관제 | 스캐너 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `Referrer-Policy` | `strict-origin-when-cross-origin`, 복귀·스태프 화면은 `no-referrer` | 기본 | `no-referrer` | `no-referrer` | `no-referrer` | `no-referrer` |
-| `Cross-Origin-Opener-Policy` | `same-origin-allow-popups`(본인확인 새 창) | `same-origin` | 기본(결제사 지침) | `same-origin` | `same-origin` | `same-origin` |
+| `Cross-Origin-Opener-Policy` | `same-origin-allow-popups`(본인확인 새 창) | `same-origin` | `same-origin-allow-popups`(소비자 웹 기본값, 결제창은 페이지 이동) | `same-origin` | `same-origin` | `same-origin` |
 | `Cross-Origin-Embedder-Policy` | 없다 | `require-corp`(이 경로와 Worker 스크립트) | 없다 | 없다 | 없다(포렌식 리플레이 2단계 `/forensics`만 `require-corp`) | 없다 |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), usb=(), serial=(), hid=(), bluetooth=()` | 같다 | 같다(`payment`는 두지 않는다. 결제사 수단과 호환하려고) | 같다 | 같다 | `camera=(self)`, 나머지는 끈다 |
 

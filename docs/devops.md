@@ -266,7 +266,7 @@ flowchart LR
 | --- | --- | --- |
 | 치명(Critical) | 7일 | 운영 승격 차단, SEV2 |
 | 높음(High) | 30일 | 운영 승격 차단, SEV3 |
-| 중간(Medium) | 90일 | SEV3 |
+| 중간(Medium) | 90일 | 운영 승격 차단, SEV3 |
 | 낮음(Low) | 분기별 정기 갱신 | 정기 갱신 목록 |
 
 - 수정본이 없으면 영향 분석과 완화 방법(설정 차단, 네트워크 격리)을 적은 예외를 둔다. 예외는 30일 뒤 만료된다 [가정]. 예외 기록은 검사 도구의 무시 목록 주석과 이슈 번호로 남긴다.
@@ -652,7 +652,7 @@ peaket-infra/
 | AWS API 호출 | CloudTrail 조직 추적 | 로그 파일 무결성 검증, Object Lock |
 | 쿠버네티스 API | EKS 감사 로그 | 운영에서만 켠다(수집 비용) |
 | 배포와 동기화 | ArgoCD 알림 → GitHub 배포 상태·Grafana 주석, Rollout 이벤트 | §13 |
-| GitHub 조직 활동 | GitHub 조직 감사 로그 | 규칙 세트 우회, 권한 변경 |
+| GitHub 조직 활동 | GitHub 조직 감사 로그(화면에는 최근 180일만 남는다)와, 조직 웹훅(member·organization·team 사건)을 받아 운영 감사 저장소(S3 Object Lock)에 남긴 사본 | 규칙 세트 우회, 권한 변경. 3년 보존은 웹훅 사본으로 지킨다(추천 적용 2026-10-26) |
 | 운영 DB 세션 | pgAudit | NFR-017 |
 | 긴급 접근 | CloudTrail + 세션 기록 | §10.2 |
 | 진단 증거 읽기와 파드 진단 주석 | CloudTrail S3 데이터 이벤트, EKS 감사 로그 | 접속기록 월 점검(RB-21) 대상, ADR-0070 |

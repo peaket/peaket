@@ -216,7 +216,7 @@ Flink의 워터마크는 '이 시각 이전 사건은 다 왔다'는 표시다. 
 | `ops-rt.src.trade` | 거래·제어 클러스터 소스(5개 토픽) | — | 소스 위치 | 레코드 |
 | `ops-rt.src.telemetry` | 텔레메트리 클러스터 소스(3개 토픽), 워터마크 생성 | — | 소스 위치 | 레코드 |
 | `ops-rt.parse` | Avro 레코드를 내부 사건으로 바꾼다. 쓰지 않는 종류(홀드 쪽 `SeatEvent` HELD·RELEASED·EXPIRED, 판매 예약 삭제 `SeatEvent` AVAILABLE(판매 좌석 수를 바꾸지 않는다), `QueueEntryRecord`)를 거른다. 읽지 못한 레코드는 거절 수(`rt_rejected_total{topic, reason}`)만 센다 | — | 없다 | 내부 사건 |
-| `ops-rt.dedupe.sale` | 판매류 사건(`SeatEvent` PENDING·SOLD·RETURNED, `OrderEvent`, `PaymentEvent`, `TicketEvent` ISSUED) 가운데 처음 본 `eventKey`만 통과시킨다 | `eventKey` | 본 표시, 7일 [가정] | 사건 |
+| `ops-rt.dedupe.sale` | 판매류 사건(`SeatEvent` PENDING·SOLD·RETURNED, `OrderEvent`, `PaymentEvent`, `TicketEvent` ISSUED·VOIDED) 가운데 처음 본 `eventKey`만 통과시킨다 | `eventKey` | 본 표시, 7일 [가정] | 사건 |
 | `ops-rt.dedupe.queue` | `QueueAggregate` 가운데 처음 본 `eventKey`만 통과시킨다 | `eventKey` | 본 표시, 10분 [가정] | 사건 |
 | `ops-rt.seat-state` | 좌석 판매 상태 기계(아래) | 회차, 좌석 | 마지막 판매 상태·등급·구역, 마지막 변경 뒤 180일 [가정] | 지표 변화량 |
 | `ops-rt.first-hold` | 구매 세션의 첫 HELD만 퍼널에 더한다. 세션 종료(`PurchaseSessionEnded`)를 받으면 지운다 | 구매 세션 | 첫 홀드 표시, 1일 [가정] | 지표 변화량 |
