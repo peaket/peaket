@@ -8,7 +8,7 @@
 ## 1. 저장소 지도
 
 시스템은 데이터의 성격과 부하 요구치에 따라 5대 저장소 계층을 물리적으로 분리 운영한다:
-- **인메모리 계층 (ElastiCache Valkey/Redis)**: 초고속 대기열 상태, 좌석 선점 비트맵, 실시간 쿼터 카운터 관리
+- **인메모리 계층 (ElastiCache Valkey/Redis)**: 초고속 대기열 상태, 좌석 상태 비트맵, 실시간 쿼터 카운터 관리
 - **ACID 관계형 계층 (Aurora PostgreSQL)**: 주문·결제 원장, 티켓 발행 원장, 회원·카탈로그, 불변 운영 감사 로그
 - **문서형 계층 (MongoDB)**: 유연한 스키마의 굿즈·주차권·패키지 상품 카탈로그 관리([ADR-0013](adr/0013-mongodb-for-product-catalog.md))
 - **분석 및 이벤트 스트리밍 계층 (Kafka, ClickHouse, Apache Iceberg)**: 대용량 이벤트 파이프라인, 실시간 관제 및 사후 공연 리포트

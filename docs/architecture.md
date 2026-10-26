@@ -10,7 +10,7 @@
 시스템 아키텍처의 핵심 설계 결정과 구조적 특징은 다음과 같다:
 
 - **2단계 일관성 모델 ([ADR-0014](adr/0014-soft-hold-hard-sale.md))**:
-  - **좌석 선점 (Soft Hold)**: 인메모리 Redis에서 초고속으로 처리하여 핫패스(Hot Path)의 RDBMS 쓰기 I/O를 0건으로 유지한다. Redis 페일오버 중에는 PostgreSQL 정렬 잠금 경로로 안전하게 우회한다([NFR-015](../planning/02-requirements.md)).
+  - **좌석 홀드 (Soft Hold)**: 결제하는 동안 다른 사람이 가져가지 못하게 좌석을 잠시 잡아 두는 일로, 인메모리 Redis에서 초고속으로 처리하여 핫패스(Hot Path)의 RDBMS 쓰기 I/O를 0건으로 유지한다. Redis 페일오버 중에는 PostgreSQL 정렬 잠금 경로로 안전하게 우회한다([NFR-015](../planning/02-requirements.md)).
   - **최종 판매 확정 (Hard Sale)**: PG 결제 승인 바로 앞에 PostgreSQL에 사전 예약(PENDING)을 넣고, 활성 상태 부분 유니크 인덱스로 같은 좌석의 두 번째 판매를 막는다. 승인이 끝나면 SOLD로 바꾼다. 남는 위험은 두 가지다. 좌석 Redis 장애로 원장에 적기 전의 홀드가 사라지면, 같은 좌석을 고른 두 사람 중 한 명은 결제 승인 전에 실패 안내를 받는다(과금은 없다). 승인 결과를 모르거나 승인 뒤 발권이 실패하면 결제와 발권이 잠시 어긋나므로, 60초 안 자동 보상을 목표로 두고 부하 시험 뒤 불변식 검사와 원장 대사로 확인한다(K2·K7, docs/features/seat-hold.md §6, docs/features/payment.md §4).
 - **도메인 경계 기반 마이크로서비스 10개 분리 ([ADR-0007](adr/0007-service-boundaries-by-load-availability-runtime.md))**:
   - 비즈니스 도메인뿐만 아니라 트래픽 부하 수준, 가용성 SLA 등급, 런타임 특성에 따라 10개 독립 서비스로 격리한다.
@@ -474,8 +474,8 @@ C4Component
 | 클라이언트 앱 | 핵심 프레임워크 및 라이브러리 | 상태 관리 도구 체계 |
 | --- | --- | --- |
 | 소비자 웹 (`apps/web`) | Next.js 16+ App Router, React 19(화면 라이브러리), TanStack Query, Zustand, XState, Motion, Serwist/Workbox (월렛 PWA), Dexie, WebCrypto. 대기실은 프레임워크 없는 경량 페이지다(`apps/web/queue-room`, ADR-0079) | 서버 캐시: TanStack Query, 대기실 폴링: 손으로 쓴 상태표(대기실 경량 페이지), 전역 UI: Zustand, 복잡한 예매 흐름: XState |
-| 파트너 콘솔 (`apps/partner`) | Next.js, tRPC(앱 서버 BFF가 gw-partner REST를 부른다), Jotai 3(`atomFamily`는 `jotai-family`), React Hook Form + Zod, `@hello-pangea/dnd` | 폼/검증: RHF + Zod, 좌석맵의 많은 노드를 세밀하게 편집: Jotai, 서버 통신: tRPC(서버가 브라우저로 한 방향으로 계속 보내는 통신인 SSE·내려받기·올리기·토큰 갱신은 `partner-api` 직접, ADR-0079) |
-| 관제 콘솔 (`apps/console-host`) | Webpack 5 Module Federation 호스트 + 리모트 위젯(계약 `@peaket/console-contract`), Redux Toolkit(listener 미들웨어) + RxJS, GraphQL (urql + graphql-ws), Socket.IO | 마이크로 프론트엔드 상태 통합: RTK, 실시간 지표 스트림 결합: RxJS 어댑터, 제어 명령: REST(ack·경보 푸시는 Socket.IO, ADR-0079) |
+| 파트너 콘솔 (`apps/partner`) | Next.js, tRPC(앱 서버 BFF가 gw-partner REST를 부른다), Jotai 3(`atomFamily`는 `jotai-family`), React Hook Form + Zod, `@hello-pangea/dnd`, Chart.js(Canvas 그래프). 에디터·시뮬레이터·끌어 놓기·그래프는 쓸 때 싣는다(ADR-0091) | 폼/검증: RHF + Zod, 좌석맵의 많은 노드를 세밀하게 편집: Jotai, 서버 통신: tRPC(서버가 브라우저로 한 방향으로 계속 보내는 통신인 SSE·내려받기·올리기·토큰 갱신은 `partner-api` 직접, ADR-0079) |
+| 관제 콘솔 (`apps/console-host`) | Webpack 5 Module Federation 호스트 + 리모트 위젯(계약 `@peaket/console-contract`), Redux Toolkit(listener 미들웨어) + RxJS, GraphQL (urql + graphql-ws), Socket.IO, React Router(화면마다 따로 싣는 경로), Chart.js(Canvas 그래프, ADR-0091) | 마이크로 프론트엔드 상태 통합: RTK, 실시간 지표 스트림 결합: RxJS 어댑터, 제어 명령: REST(ack·경보 푸시는 Socket.IO, ADR-0079) |
 | 게이트 스캐너 (`apps/scanner`) | Vite PWA, mediaDevices, Web Worker(BarcodeDetector, 없으면 zxing-wasm), Dexie (IndexedDB, 브라우저 안에 데이터를 저장하는 곳), Screen Wake Lock, 일회성 Background Sync | 오프라인 검증 큐: Dexie, 변경분 수신: 화면이 켜진 동안 앱 타이머 60초, 업로드: 판정 뒤 바로 보내고 일회성 Background Sync는 재시도용 예비(주기적 백그라운드 동기화는 크롬에서 최소 12시간 간격이라 쓰지 않는다, ADR-0051), 바코드 디코딩: Web Worker |
 | 포렌식 리플레이 데모 (`apps/forensics`) | Vite 8 + React 19.3, Web Worker, OffscreenCanvas 2D·WebGL2, apache-arrow, `packages/seatmap` | 사건: 열 배열과 비트마스크 교차 필터(데이터 Worker), 화면: React. 합성 데이터만 쓰고 서버가 없다(ADR-0080). 2단계(출시 뒤 선택)는 같은 앱을 운영 모드로 빌드해 관제 콘솔 주소 아래 따로 여는 페이지로 둔다 |
 
@@ -524,7 +524,7 @@ C4Component
 
 - **디자인 토큰 파이프라인**(디자인 토큰: 색·글자 크기·간격 같은 디자인 값에 이름을 붙여 정해 둔 것): `design/tokens.json`(W3C 디자인 토큰 표준 포맷, 당근이 공개한 디자인 시스템 SEED Design 3.0 기반 확장, `ADR-0040`)을 SSOT로 관리한다. Style Dictionary로 CSS 변수, Tailwind v4 `@theme`, TypeScript 상수를 자동 컴파일한다. `@peaket/ds`는 `@seed-design/react` 위에 피켓 전용 복합 컴포넌트(좌석맵, 대기 패널, 회전 QR, 관제 위젯)를 얹어 만든다. 버전은 Storybook과 Changesets로 관리한다.
 - **아키텍처 구조**: Feature-Sliced Design(FSD) 방법론(`app`, `pages`, `widgets`, `features`, `entities`, `shared`)을 쓴다. 계층 사이 의존 방향은 Steiger와 ESLint 경계 검사 린트로 강제한다.
-- **성능 예산**: 대기실 페이지 번들 크기는 Gzip 기준 JavaScript 50KB 이하, CSS 10KB 미만으로 제한한다(그래서 대기실은 프레임워크 없는 경량 페이지다, ADR-0079 결정 2. 경로별 예산은 docs/frontend.md §5.8). Lighthouse CI 예산을 초과하면 PR(코드 변경을 합쳐 달라는 요청) 병합을 막는다. 큰 좌석맵에는 OffscreenCanvas + Web Worker 그리기, TypedArray 기반 플라이웨이트 패턴, `requestAnimationFrame` 배치 처리, 대기 순번에 따른 청크 미리 받기(Prefetch)를 적용한다.
+- **성능 예산**: 대기실 페이지 번들 크기는 Gzip 기준 JavaScript 50KB 이하, CSS 10KB 미만으로 제한한다(그래서 대기실은 프레임워크 없는 경량 페이지다, ADR-0079 결정 2. 경로별 예산은 docs/frontend.md §5.8). Lighthouse CI 예산을 초과하면 PR(코드 변경을 합쳐 달라는 요청) 병합을 막는다. 큰 좌석맵에는 OffscreenCanvas + Web Worker 그리기, TypedArray 기반 플라이웨이트 패턴, `requestAnimationFrame` 배치 처리, 대기 순번에 따른 청크 미리 받기(Prefetch)를 적용한다. 하루 종일 켜 두는 파트너·관제 콘솔은 화면마다 따로 싣고 무거운 부분은 쓸 때 싣는다. 안 보이는 위젯의 구독은 멈추고, 그래프는 Canvas로 그리며 브라우저가 들고 있는 양에 상한을 둔다. 장시간 시험으로 메모리를 지킨다(docs/frontend.md §5.6·§5.7·§5.8, 추천 적용 2026-10-27, ADR-0091).
 - **클라이언트 텔레메트리**: 프레임워크에 묶이지 않는 SDK `@peaket/telemetry`로 Web Vitals와 사용자 조작 지표를 모은다. 모은 값은 같은 출처 `/_t/rum`으로 논블로킹으로 보낸다(화면 배포 넷 모두 gw-fan 텔레메트리 입구로, ADR-0079 결정 13)(`fetch` keepalive·`credentials: 'omit'`, 지원하지 않는 브라우저만 `navigator.sendBeacon`). 게이트웨이가 쿠키 헤더를 지우고 게이트웨이 수집기로 넘긴다. 표본·보호·trace 전파 규칙은 docs/observability.md §11이다(ADR-0076).
 
 ## 7. NFR별 대응 표
@@ -866,6 +866,7 @@ T=0 진입 20만 RPS에는 CORS 사전 요청(OPTIONS)이 더해지지 않는다
 | 0088 | 4차 전수 정합성 점검 3부의 추천 적용: 입장 중인 회차의 티켓이 있으면 계정 병합 차단(`ENTRY_STARTED`), 파트너·관제 이미지 올리기의 `X-Requested-With`, 주문 생성·결제 시도·결제 접수의 415, 다른 기기 로그아웃 전 재인증, 로그인 기록의 인증 방식·인증 요소, 암호 목록 갱신 규칙, GitHub 조직 웹훅 사본 3년 보존, 바뀌지 않는 외부 키 위험 수용(ASVS 13.2.1 부분 적용), 월렛 QR 움직이는 무늬, 앱 개수는 4개와 데모 앱 등 18가지 | 채택(2026-10-26, 소유자 요청 '저번에 못했던 부분 계속 진행', 추천 적용). 보완: 0089 |
 | 0089 | 4차 점검에서 남긴 값: 리포트 조회 계정당 30회/분·결정 기록 쓰기 10회/분과 ClickHouse 읽기 사용자 쿼터, 분석 저장소 호출의 시간 초과·재시도, Gradle·PyPI 의존성 고정, 관리 도구 HTTPS·SSO·MFA와 EKS 공개 엔드포인트 허용 대역, 대형·중형 온세일과 겹친 대사는 윈도우 뒤(늦어도 04시), 지연 환급 계좌 `POST /v1/cancellations/{cancellationId}/account`와 환급·배상 계좌 재인증, identity-svc 접속기록 줄의 법정 사본 갈래와 관리 계정 2년 사본, 데이터 분류표·비밀 목록 행, heat 팔레트, CloudFront 지표 YACE 경로, WBS 작업 설명 등 12가지 | 채택(2026-10-26, 소유자 요청 '남긴 것들은 합리적으로 시니어 개발자 관점에서 정해주세요', 추천 적용) |
 | 0090 | arc42 안내 문서를 없애고 내용을 제자리로 옮긴다. C4 3단계 그림 3장은 이 문서 §3.3(서비스 맵 바로 뒤)으로, arc42 열두 칸·C4 그림·흐름별 순서도의 위치 표는 00-summary §2.1(문서 지도)로, 남은 일 넷은 review/open-items.md 26~29번으로 옮긴다. ADR-0084의 '대응표 문서 하나만 둔다'를 대체한다 | 채택(2026-10-26, 소유자 결정) |
+| 0091 | 콘솔이 켜져 있는 동안의 성능을 정한다: 관제 화면별로 늦게 싣기와 파트너 콘솔의 늦게 싣는 덩어리, 안 보이는 위젯의 구독 멈춤, Canvas 그래프(Chart.js)와 들고 있는 양의 상한, 장시간 시험(FE-T25~FE-T27), design/d2 §3.3의 오류 격리 문장 고침. 숫자는 모두 측정 전 잠정값이다 | 채택(2026-10-27, 소유자 요청 '빠진 다섯 가지와 d2 §3.3 어긋남을 frontend.md에 보강하고, 결정은 새 ADR로 남겨 주세요', 추천 적용). |
 
 작성 예정 과제: Bigtable·Dataflow·GFS/HDFS의 현대적 클라우드 대체, Web Push/알림톡 발송 대행사 선정, 휴대폰 본인확인 대행업체 비교 분석. Datadog 등 상용 관측 SaaS 평가는 ADR-0067의 Phase 4 비교 측정(wbs 4.8.2)으로 옮겼다.
 
