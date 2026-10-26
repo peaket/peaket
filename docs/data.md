@@ -120,6 +120,8 @@ erDiagram
     event ||--o{ kopis_report : "1일 전송(FR-054)"
     event ||--o{ sale_eligibility_list : "판매 자격 명단(팬클럽 선예매)"
     account ||--o{ notification_delivery : "알림 발송 기록(90일)"
+    account ||--o{ notification_subscription : "오픈·취소표 알림 신청"
+    event ||--o{ notification_subscription : ""
     sale_eligibility_list ||--o{ sale_eligibility_member : ""
     event ||--o{ decision_record : "결정 기록(ADR-0052)"
     admin_account ||--o{ decision_record : "결정자"
@@ -173,6 +175,14 @@ erDiagram
         timestamptz requested_at
         timestamptz confirmed_at
         timestamptz completed_at
+    }
+    consent {
+        uuid id PK
+        uuid account_id FK
+        text kind "TERMS|PRIVACY_REQUIRED|PRIVACY_PHONE|MARKETING. 가입 화면(SCR-005 ②·③)과 계정 설정(SCR-017 ④)의 동의만 둔다. 예매·굿즈 택배 주문과 현장 스태프 배정의 동의는 그 기록의 consent_version과 시각으로 남긴다(추천 적용 2026-10-26, ADR-0089)"
+        text notice_version "동의한 고지 문안의 판. 새 판에 다시 동의하면 행을 더한다"
+        text channels "MARKETING만. 수신 채널(planning/03 §1.2)"
+        timestamptz agreed_at "선택 동의(PRIVACY_PHONE·MARKETING)를 철회하면 그 종류의 행을 지운다. 탈퇴하면 모두 지우고, 병합되면 흡수 계정의 행을 지운다(POL-034)"
     }
     session {
         uuid id PK
@@ -391,6 +401,7 @@ erDiagram
         text status "CREATED|AUTHENTICATED|ACCEPTED|RESERVED|AWAITING_DEPOSIT|APPROVED|UNKNOWN|CONFIRMED|FAILED|COMPENSATED|PARTIALLY_REFUNDED|REFUNDED(planning/03 §2.4, payment §3). trade.orders의 DEPOSIT_REVERSED·EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID는 사건이라 저장 값이 아니다"
         int amount "서버 계산"
         text idempotency_key "사본. 유일 확인은 order_idempotency(파티션 표라 여기에 유일 제약을 걸 수 없다, ADR-0083)"
+        text consent_version "판매자 제공 동의(SCR-011 ③)와 판매 조건 동의(POL-004)에 보인 고지 문안의 판. 두 동의는 주문 생성의 필수 값이라 동의 일시는 created_at이다. 주문 원장과 함께 보존(ADR-0089)"
         timestamptz created_at
     }
     order_idempotency {
@@ -461,6 +472,7 @@ erDiagram
         text status "CREATED|AWAITING_DEPOSIT|PAID|EXPIRED|FAILED(planning/03 §2.13)"
         text pg_store "STANDARD|ESCROW, 결제 상점(굿즈 택배만 에스크로 상점, POL-014)"
         bool escrow "구매자가 결제대금예치를 골랐는지"
+        text consent_version "택배(DELIVERY) 주문만. 판매자 제공 동의(SCR-015 ⑨)에 보인 고지 문안의 판. 동의 일시는 created_at(ADR-0089)"
         timestamptz purchase_confirmed_at "에스크로 구매 확정(결제사 상태, 3영업일 무선택이면 자동)"
         timestamptz created_at
     }
@@ -678,6 +690,8 @@ erDiagram
         timestamptz valid_from "입장 시작 3시간 전"
         timestamptz valid_until "공연 종료(event.ends_at) 2시간 뒤"
         text status "INVITED|ASSIGNED|REVOKED|ENDED|EXPIRED. planning/03 §2.7의 OnDuty는 저장하지 않고 ASSIGNED이면서 지금이 valid_from과 valid_until 사이인 것으로 계산한다(추천 적용 2026-10-20, ADR-0073)"
+        timestamptz accepted_at "초대 수락 시각. 수집·이용 동의와 파트너 제공 동의(SCR-050 ③·④)를 받은 일시다"
+        text consent_version "두 동의에 보인 고지 문안의 판. 배정 원장과 같이 회차 종료 1년 뒤 파기(ADR-0089)"
     }
     scanner_session {
         uuid id PK "CSPRNG 128비트 이상"
@@ -884,6 +898,18 @@ erDiagram
         text status
         timestamptz sent_at PK "월 파티션 키. 기본 키 (dedup_key, sent_at), 중복 막기는 notification_dedup(ADR-0086)"
         text provider_message_id "받는 주소·전화번호·본문은 넣지 않음, 90일 [가정] 뒤 파기(design/d5 §9.1.1, ADR-0062)"
+    }
+    notification_subscription {
+        uuid id PK
+        uuid account_id "identity 논리 DB라 외래키 없음. 병합 때 대표 계정으로 옮기고, 같은 회차·종류가 겹치면 하나만 남긴다(POL-034)"
+        uuid event_id "회차"
+        text kind "OPEN|CANCELLATION. (account_id, event_id, kind) 유일. 다시 신청하면 그 행을 ACTIVE로 되돌리고 sent_count를 0으로 한다"
+        bool night_push "밤(21:00~08:00 KST)에도 웹 푸시를 받을지, 기본 false(design/d5 §9.1.1)"
+        int sent_count "취소표 알림을 보낸 횟수. 상한(design/d5 §9.1.1)에 이르면 ENDED"
+        text status "ACTIVE|ENDED. ENDED는 취소표 알림만 쓴다. 끄면 행을 지우고, 오픈 알림 신청은 그 회차의 open_at이 지나면 지운다(오픈 30분 전 구독 수는 수요 예측이 남긴다, ADR-0078)"
+        text end_reason "SENT_MAX|BOOKED|SALE_ENDED"
+        timestamptz created_at
+        timestamptz ended_at "남은 행은 그 회차의 ends_at이 지나면 지우고, 탈퇴하면 바로 지운다(추천 적용 2026-10-26, ADR-0089)"
     }
     decision_record {
         uuid id PK
@@ -1232,7 +1258,7 @@ MongoDB(문서 형태로 저장하는 데이터베이스)의 `products` 컬렉�
 | 세션 토큰, 리프레시 토큰 | 데이터베이스에는 원문 저장을 금지하고 SHA-256 단방향 해시값만 저장한다(원문은 HttpOnly 세큐어 쿠키로 단말에 보관) | 세션이 만료되거나 직접 로그아웃하면 바로 삭제 |
 | 본인확인 연계정보 (CI) | 연계정보(본인확인 기관이 주는, 사람마다 하나인 연계 식별값)는 AWS KMS HMAC 키로 만든 HMAC-SHA256 해시값과 키 버전으로 저장한다(본인확인 때 보존 중인 모든 키 버전으로 중복 조회). pid는 별도 KMS HMAC 키로 본인확인 때 한 번 계산해 키 버전과 함께 저장한다. 발급하는 JWT(서명된 정보 묶음 형식의 토큰) 액세스 토큰에는 이 pid만 넣는다(ADR-0050) | 회원이 탈퇴하면 바로 영구 파기한다(재가입을 막으려는 보관은 일체 금지, POL-033). 단, 본인인증 수집 출처·일시·목적·대상자 메타데이터는 1년 이상 보존한다 |
 | 일반 개인정보 (성명, 전화번호, 이메일, 배송지 주소 등 P2 등급) | 스토리지 레벨 AWS KMS 암호화(EBS/RDS KMS 암호화)를 쓴다. 애플리케이션 로그를 남길 때는 pino redact로 마스킹을 강제한다 | 주문·결제 기록은 전자상거래법에 따라 5년, 소비자 불만 및 분쟁 해결 기록은 3년 보존한다. 회원이 탈퇴하면 운영 DB에서 분리해 보관하고, 법정 시한이 되면 영구 파기한다 |
-| 시스템 접속기록 (접속 일시, 접속 IP 주소, 단말기 정보) | 전용 접속기록 저장소에 스토리지 암호화를 쓴다. 하루 단위 해시 앵커(그날 접속기록 파일 목록과 SHA-256을 감사 앵커 버킷 S3 Object Lock에 남긴다)로 변조를 찾는다(추천 적용 2026-10-20, ADR-0073). 표는 ClickHouse ReplicatedMergeTree, `PARTITION BY toYYYYMMDD(ts)`(일 해시 앵커·3개월 보존과 맞아 파티션 약 92개), `ORDER BY (ts)`, 원문 IP 조회용 bloom filter 건너뛰기 색인 [가정, 4.1.4]이고, 쓰기는 에이전트 수집기의 clickhouse 내보내기다(ADR-0076 결정 7, ADR-0077 결정 8) | 최소 3개월 보존 (통신비밀보호법 시행령 §41②2호 준용, 전기통신사업자 간주 POL-025) |
+| 시스템 접속기록 (접속 일시, 접속 IP 주소, 단말기 정보) | 전용 접속기록 저장소에 스토리지 암호화를 쓴다. 하루 단위 해시 앵커(그날 접속기록 파일 목록과 SHA-256을 감사 앵커 버킷 S3 Object Lock에 남긴다)로 변조를 찾는다(추천 적용 2026-10-20, ADR-0073). 표는 ClickHouse ReplicatedMergeTree, `PARTITION BY toYYYYMMDD(ts)`(일 해시 앵커·3개월 보존과 맞아 파티션 약 92개), `ORDER BY (ts)`, 원문 IP 조회용 bloom filter 건너뛰기 색인 [가정, 4.1.4]이고, 쓰기는 에이전트 수집기의 clickhouse 내보내기이고, 원천은 게이트웨이 접근 로그와 identity-svc의 접속기록 줄(로그인·재인증·로그아웃·토큰 갱신) 둘이다(ADR-0076 결정 7, ADR-0077 결정 8, ADR-0089). 관리 계정의 줄은 ops-svc가 매일 감사 저장소로 옮겨 최소 2년 둔다. 이 읽기는 행 정책(행마다 보이는 조건을 거는 기능)으로 관리 계정 줄만 보이는 전용 사용자로 한다(docs/features/control-tower.md §7) | 최소 3개월 보존 (통신비밀보호법 시행령 §41②2호 준용, 전기통신사업자 간주 POL-025) |
 | 보안 사고·신고·통지 기록, 접속기록 점검 기록 (`security_incident`, `incident_filing`, `access_review`, `access_finding`) | ops-svc 감사 저장소, 스토리지 암호화와 WORM 사본 | 관리 계정 접속기록과 같이 2년 이상 보존한다 [가정, wbs 7.4.1 내부 관리계획 작성에서 확정]. 개인정보 원문은 넣지 않고 대상 수와 요약만 남긴다(ADR-0049) |
 | 사용자 행동 신호 원시 데이터 | ClickHouse 시계열 테이블에 TTL 적용 | 수집 후 30일이 지나면 자동 파기한다. S3 장기 보존 영역에는 식별자가 없는 비식별 집계 데이터만 옮긴다 |
 | 봇 의심 판정 라벨 (허니팟 적중, 표본 검토, 사후 이상 탐지 라벨) | ClickHouse 시계열 테이블에 TTL 적용 | 30일이 지나면 세션 ID를 완전히 지우고, 봇 탐지 등급별 통계 집계치만 보존한다(FR-049) |
@@ -1253,6 +1279,7 @@ MongoDB(문서 형태로 저장하는 데이터베이스)의 `products` 컬렉�
 | 판매 자격 명단 (`sale_eligibility_list`·`sale_eligibility_member`, 대기열 Redis 사본) | 스토리지 레벨 암호화(P2). 올린 파일은 저장하지 않고, 회원 코드를 계정 ID로 바꾼 집합만 둔다. 감사 로그에는 올린 계정·시각·건수·파일 SHA-256만 남긴다 | 판매 기간 끝 + 1일 [가정]에 DB·Redis에서 파기한다(추천 적용 2026-10-14, ADR-0062) |
 | 미성년자 계약 취소 확인 기록 | 스토리지 레벨 암호화(P2). 계정 ID·주문 ID·확인 방법·결과(계약 당시 만 19세 미만 여부)·확인 일시·확인한 서류 종류와 확인자만 남긴다. 생년월일·연계정보·서류 사본은 저장하지 않는다 | 취소 기록과 함께 5년(전자상거래법 시행령 §6①2호, 추천 적용 2026-10-14, ADR-0062) |
 | 알림 발송 기록 (`notification_delivery`) | 스토리지 레벨 암호화(P2). 중복 키·종류·대상 ID·계정 ID·채널·상태·시각·발송 대행 메시지 ID만 둔다. 받는 주소·전화번호·본문은 넣지 않는다 | 90일 [가정] 뒤 파기한다. 법정 통지를 보낸 사실은 그 건의 처리 기록에 따로 남는다(추천 적용 2026-10-14, ADR-0062). 발송 시각으로 달마다 나눠 파티션째 지우고, 중복 막기는 7일 [가정] 보존하는 `notification_dedup`이 맡는다(추천 적용 2026-10-22, ADR-0086) |
+| 오픈 알림·취소표 알림 신청 (`notification_subscription`: 계정 ID, 회차, 종류, 밤 웹 푸시 여부, 보낸 횟수, 상태) | 스토리지 레벨 암호화(P2). 받는 주소는 두지 않는다. 수요 예측에는 회차별 구독 수만 넘긴다(계정 없음, ADR-0078) | 끄면 바로 지운다. 오픈 알림 신청은 그 회차의 오픈 시각(`open_at`)이 지나면 지우고, 끝난 취소표 알림 신청과 남은 신청은 그 회차의 공연 종료 예정 시각(`ends_at`)이 지나면 지운다. 회원이 탈퇴하면 바로 파기한다(추천 적용 2026-10-26, ADR-0089) |
 | 홀드 원장 (`seat_hold`: 회차, 좌석, 계정 ID, 펜싱 토큰, 상태, 만료 시각) | 스토리지 레벨 암호화(P2) | 회차 판매 종료 + 90일 [가정] 뒤 회차 범위 파티션째 지운다. 홀드 사건은 분석 브론즈에도 가명으로 90일 있다(자체 기준, 추천 적용 2026-10-22, ADR-0086). docs/security/data-classification.md 행은 법적 근거와 함께 wbs 7.4.1 내부 관리계획에서 더한다 |
 | 정산서·지급 묶음·지급 건·미수금 | 스토리지 레벨 암호화(P2) | 전자상거래법 시행령 §6①3호의 대금결제 기록으로 5년 보존한다(ADR-0047) |
 | 관람 후기 (`review`: 작성 계정, 회차, 자격 근거 주문, 별점, 본문) | 스토리지 레벨 암호화(P2). 공개 응답에는 닉네임 첫 글자와 '**', 관람 회차 일시, 별점, 본문만 싣는다(추천 적용 2026-10-14, ADR-0063) | 작성자가 지우거나 회원이 탈퇴하면 파기한다. 행은 DELETED로 바꾸며 본문·별점·사진 키·계정 ID를 바로 비우고, 신고 기록이 가리키는 후기 ID·회차·상태·시각만 남긴다. 그 행도 신고 기록 보존이 끝나면 지운다(추천 적용 2026-10-22, ADR-0086). 통보에 따라 숨긴 후기의 법정 차단 조치 증적(`takedown_action`)은 3년 보존한다 |
@@ -1261,9 +1288,11 @@ MongoDB(문서 형태로 저장하는 데이터베이스)의 `products` 컬렉�
 | 고객 문의 (`inquiry`·`inquiry_message`: 문의한 계정, 유형, 관련 주문, 제목, 내용, 추가 문의, 답변·진행 경과) | 스토리지 레벨 암호화(P2)를 쓰고, 로그에 내용 출력을 금지한다. 첨부 파일은 받지 않고, 민감한 내용과 계좌번호는 적지 않아도 된다고 화면에서 안내한다. 담당자 개인 식별자는 ops-svc 감사 기록에만 둔다 | 닫힌 뒤 3년이 지나면 자동 파기한다(전자상거래법 시행령 §6①4호의 소비자 불만·분쟁 처리 기록. 일반 문의까지 이 기록으로 보는 것은 해석, POL-027, 추천 적용 2026-10-19, ADR-0066) |
 | 홈 구성 (`home_banner`·`home_theme`, 배너 이미지) | 스토리지 레벨 암호화. 이용자 개인정보는 없고, 작성한 운영자의 관리 계정 ID만 남는다. 출연자 사진이 든 배너는 docs/security/data-classification.md의 '홈 배너 이미지와 대체 텍스트, 공연 포스터·상세 이미지' 행과 법률 질문 23번을 따른다 | 노출 기간이 끝나고 30일 [가정] 뒤 이미지 파생본을 지운다. 구성 변경 이력은 감사 로그(관리 계정 작업, 2년 이상)에 남는다(추천 적용 2026-10-14, ADR-0063) |
 | 승인 업무·CS 처리함 기록(요청자, 승인자, 사유 코드, 확인한 증빙 종류) | 감사 로그 전용 저장소 | 분쟁 처리 기록으로 3년 보존한다(전자상거래법 시행령 §6①4호. 중개자는 자기 시스템으로 처리한 기록을 보존한다, 같은 항 단서). 증빙 내용과 진단서는 저장하지 않는다 |
+| 예매 제한 기록 (`booking_restriction`: 계정 ID, 사유 코드, 확인한 CS 책임자, 시작·끝, 소명 기한, 상태) | 스토리지 레벨 암호화(P2). 사유는 코드만 두고, 연계정보·pid는 넣지 않는다(탈퇴 뒤 다시 가입한 계정에는 제한이 이어지지 않는다) | 제한이 끝나거나(해제·만료) 회원이 탈퇴한 날부터 3년 뒤 파기한다(승인 업무·CS 처리함 기록, 소명 본문과 같은 분쟁 처리 기록 기준, 전자상거래법 시행령 §6①4호, 추천 적용 2026-10-26, ADR-0089) |
 | 소명 본문 | 스토리지 레벨 암호화(P2)를 쓴다 | 처리를 마치고 3년(분쟁 처리 기록과 같은 기준)이 지나면 자동 파기한다(웹 보안 단체가 만든 웹 앱 보안 검증 항목 목록인 ASVS의 14.2.7) |
 | 판매자 신원정보(파트너 사업자) | 스토리지 레벨 암호화(P2). 개인사업자 대표자 성명은 개인정보로 다룬다 | 파트너 계약 종료 뒤 5년(계약 기록) |
 | 계정 연동 및 계정 병합 기록 (대표·흡수 계정 ID, 연동 제공자 유형, 이관 항목 통계, 승인 일시) | 스토리지 레벨 암호화(P2)를 쓴다 | 대표 계정이 남아 있는 동안 유지한다. 대표 계정이 탈퇴하면 계정 원장과 함께 파기한다(자체 기준). 흡수된 계정의 원본 이메일과 닉네임은 병합이 끝나는 즉시 영구 파기한다(POL-034) |
+| 법적 동의 기록 (`consent`, 주문·굿즈 주문·현장 스태프 배정의 `consent_version`) | 스토리지 레벨 암호화(P2). 동의 종류·고지 문안의 판·동의 일시만 두고, 문안은 판마다 따로 보관한다 | 법정 보존 기간이 따로 없어 그 동의로 처리하는 기록과 같은 수명으로 둔다. 가입 때 동의는 회원이 탈퇴하면 파기하고(선택 동의는 철회할 때), 주문·굿즈 주문의 동의는 그 기록과 함께 5년, 현장 스태프의 동의는 배정 원장과 같이 회차 종료 1년 뒤 파기한다(추천 적용 2026-10-26, ADR-0089) |
 
 개인정보와 거래 데이터는 법정 보존 시한이 되면 PostgreSQL 월 단위 테이블 파티션 DROP(주문·결제·티켓. UUIDv7 ID 범위 파티션이고, 결제 파티션을 지울 때 같은 범위의 `payment_per_order` 행을 함께 지운다. 주문 멱등키 표 `order_idempotency`의 행은 24시간 [가정] 뒤 지운다, ADR-0083. 자식 표는 부모와 같은 범위로 나눠 자식 파티션을 먼저 지운다, ADR-0086), ClickHouse TTL 자동 만료, 정기 배치 작업의 다단계 파기 파이프라인으로 파기한다. 파기 결과는 별도의 법정 파기 관리 대장에 영구 기록한다(FR-044).
 

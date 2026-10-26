@@ -17,7 +17,7 @@
 | 6. 실행 보기 | 중요한 흐름이 실제로 어떻게 도나 | 기능 설계서의 순서도(§2 표), planning/04-ia-flows-screens.md §2(사용자 흐름 F-01~F-13), planning/03-policies-glossary.md §2(상태도) | 일부 | shop·catalog·notify·review·support·trust의 상세 설계는 구현 직전에 쓴다(docs/features/README.md). Flink 잡은 표로만 있다(docs/streaming.md) |
 | 7. 배치 보기 | 어디에 어떻게 올라가나 | docs/infra.md §1·§3·§4·§6, docs/devops.md §5, docs/infra-handover.md §2·§3 | 갖춤 | — |
 | 8. 공통 개념 | 여러 곳에 똑같이 적용하는 규칙은 무엇인가 | docs/architecture.md §5(장애 격리·시간 초과·프로브)·§6.4(상태 소유권)·§8(품질·보안 절차), docs/api/guidelines.md, docs/observability.md, docs/data.md §4·§5·§6, docs/security/, docs/frontend.md §5 | 갖춤 | 흩어져 있다. 이 표가 안내한다 |
-| 9. 아키텍처 결정 | 무엇을 왜 그렇게 정했나 | docs/adr/(88건), 목록은 docs/architecture.md §11 | 갖춤 | 결정 수십 개를 한 ADR에 묶은 것이 있다(예: ADR-0062) |
+| 9. 아키텍처 결정 | 무엇을 왜 그렇게 정했나 | docs/adr/(89건), 목록은 docs/architecture.md §11 | 갖춤 | 결정 수십 개를 한 ADR에 묶은 것이 있다(예: ADR-0062) |
 | 10. 품질 요구 | 품질을 어떻게 재고 지키나 | planning/02-requirements.md §3(NFR), docs/quality/quality-requirements.md, docs/architecture.md §7(NFR별 대응 표) | 일부 | 품질 시나리오(어떤 자극에 어떻게 반응해야 하나)와 우선순위가 없다 |
 | 11. 위험과 기술 부채 | 무엇이 잘못될 수 있고 무엇을 미뤘나 | planning/01-overview.md §5.2(주요 리스크), docs/architecture.md §9.4(먼저 검증할 위험), 기능 설계서마다의 '미결정' 절, docs/devops.md §15, docs/streaming.md §15, docs/verification.md §8 | 일부 | 위험마다 가능성·영향 등급이 없고, 기술 부채 목록이 따로 없다 |
 | 12. 용어 | 이 말은 무슨 뜻인가 | planning/03-policies-glossary.md §4(용어 사전)·§5(쉬운 말과 용어 풀이) | 갖춤 | — |

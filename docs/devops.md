@@ -256,7 +256,7 @@ flowchart LR
 
 ### 4.4 의존성과 취약점
 
-- **설치 고정**: `pnpm install --frozen-lockfile`로 설치한다. `@peaket` 범위 패키지는 GitHub Packages에서만 받도록 레지스트리를 범위별로 고정해 의존성 혼동을 막는다(ASVS 15.2.4).
+- **설치 고정**: `pnpm install --frozen-lockfile`로 설치한다. `@peaket` 범위 패키지는 GitHub Packages에서만 받도록 레지스트리를 범위별로 고정해 의존성 혼동을 막는다(ASVS 15.2.4). `peaket-data`도 같은 원칙을 따른다(추천 적용 2026-10-26, ADR-0089). Gradle(Flink 잡과 `flink/common`)은 잠금 파일(dependency locking)과 의존성 검증 파일(`gradle/verification-metadata.xml`, SHA-256)을 저장소에 두고, 저장소 내용 필터(`exclusiveContent`)로 `io.peaket` 그룹은 GitHub Packages에서만, 나머지는 Maven Central에서만 받는다. Gradle 래퍼는 `distributionSha256Sum`으로 배포본을 고정한다. dbt 이미지의 Python 의존성은 해시가 든 잠금 파일(`uv.lock`)로 고정해 `uv sync --locked`로 설치하고, 색인은 PyPI 하나만 쓴다(`--extra-index-url`은 쓰지 않는다. 같은 이름의 패키지를 다른 색인에서 받아 오는 의존성 혼동을 막는다). Renovate의 3일 대기는 Maven Central·PyPI에서 오는 새 판에도 건다(Renovate는 레지스트리가 주는 릴리스 시각으로 센다). 다만 잠금 파일을 갱신할 때 딸려 오는 전이 의존성(의존성의 의존성)은 Renovate가 보지 못하므로, uv 잠금은 `--exclude-newer`에 3일 전 시각을 넣어 갱신한다. Gradle 잠금에는 같은 장치가 없어 PR에서 검증 파일의 차이를 사람이 본다.
 - **설치 스크립트 차단**: pnpm 10부터 의존성의 설치 스크립트는 기본으로 실행되지 않는다. 필요한 패키지만 허용 목록(`allowBuilds`, pnpm 10.26 이상)에 둔다.
 - **새 버전 대기**: pnpm `minimumReleaseAge` 4,320분(3일)과 Renovate `minimumReleaseAge: "3 days"`를 같이 쓴다. Renovate 문서는 npm 패키지가 게시 뒤 72시간 안에는 내려질 수 있다며 3일을 권한다. pnpm의 이 설정은 10.16에 생겼고 단위는 분이다(2026-10-13 확인). 2025-09 npm 웜 'Shai-Hulud'(CISA 경보 2025-09-23)처럼 탈취된 계정으로 게시된 악성 판은 대개 며칠 안에 드러나 내려진다.
 - **위험 구성 요소**(ASVS 15.1.4): 마지막 릴리스가 오래됐거나, 0.x이거나, 오픈소스 안정판이 없는 구성 요소는 asvs/delivery.md에 표시하고 대안을 PoC로 살펴본다. 지금 표시한 것: kafkajs(마지막 릴리스 2023-02-27, 협력적 재조정 없음, 비교 대상 `@confluentinc/kafka-javascript`, 비교 항목은 처리량·재조정·OTel 계측·AWS가 운영해 주는 Kafka인 MSK의 IAM 인증(infra §9), wbs 0.5.1), Argo Rollouts Gateway API 트래픽 플러그인(argoproj-labs 0.x). Linkerd(2.15부터 오픈소스 안정판 아티팩트 없음)는 메시를 Istio(서비스끼리의 통신을 앱 대신 처리하는 서비스 메시 제품)로 정하면서 목록에서 뺐다(ADR-0082).
@@ -631,6 +631,7 @@ peaket-infra/
 - Grafana(지표와 로그를 그래프로 보여 주는 도구)의 제한 조직 'PEAKET 제한'(PostgreSQL 쿼리 문장)에는 지정한 DB 담당 엔지니어만 Viewer로 넣는다. 조직·팀·역할은 SSO 그룹으로 정한다(docs/observability.md §9, ADR-0078 결정 6).
 
 - IAM 사용자와 장기 키를 두지 않는다. IAM Identity Center(추가 요금 없음)와 MFA로 들어오고, EKS 접근 항목으로 권한 세트를 쿠버네티스 그룹에 묶는다.
+- **관리 도구와 원격 접속의 전송 암호화(추천 적용 2026-10-26, ADR-0089)**: Grafana·ArgoCD·Alertmanager 화면은 인터넷에 바로 내지 않고, 관제 콘솔처럼 허용 IP와 VPN으로만 닿는 내부 로드 밸런서 뒤에 둔다. 모두 HTTPS(TLS 1.2 이상, ACM 인증서)만 받고 평문 HTTP 리스너를 두지 않으며, 로그인은 SSO와 MFA로 한다(Grafana는 docs/observability.md §9). 쿠버네티스 API(EKS 엔드포인트)는 사설 엔드포인트를 켜고, 공개 엔드포인트는 허용 대역(사내망·VPN 출구)으로만 연다. CI(GitHub 호스트 러너)는 쿠버네티스 API를 부르지 않는다: 클러스터 안 설치는 ArgoCD가 하고, Terraform은 AWS API(EKS 애드온·접근 항목)만 쓴다. 노드에는 SSH를 열지 않고 SSM 세션 관리자만 쓴다. 세션 데이터는 TLS 1.2 이상으로 암호화하고, 셸 세션 기록은 S3·CloudWatch Logs에 남긴다. DB 긴급 조회처럼 포트 포워딩을 쓰면 세션 기록이 남지 않으므로 CloudTrail과 대상 쪽 감사 기록(pgAudit, §10.3)으로 남긴다.
 - 운영 클러스터에는 사람에게 늘 주어진 쓰기 권한이 없다. 변경은 GitOps로만 한다.
 
 ### 10.2 긴급 접근

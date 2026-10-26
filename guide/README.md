@@ -10,7 +10,7 @@
 
 ```mermaid
 flowchart TD
-    subgraph Track1 ["Part 1. 일반 팬의 티켓팅 여정 (1~7편)"]
+    subgraph Track1 ["Part 1. 일반 팬의 티케팅 여정 (1~7편)"]
         direction TB
         G01["01. 큰 그림"] --> G02["02. 대기실과 줄 서기"]
         G02 --> G03["03. 차례와 입장"]
