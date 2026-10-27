@@ -2,7 +2,7 @@
 
 - **독자와 용도**: peaket-data의 원본 적재·변환 잡과 공연 리포트를 구현하는 데이터·백엔드·프론트엔드 엔지니어, 그리고 리포트의 결정 규칙으로 다음 회차를 정하는 운영 담당자가 참조한다.
 - **범위**: 회차가 끝난 뒤 '다음 회차를 어떻게 열지' 정하는 데 쓰는 분석 저장소(대량 이벤트 집계에 강한 분석 DB인 ClickHouse와 Iceberg 아카이브), 원본 적재와 가명 처리, 브론즈·실버·골드 변환과 마감 단계, 스타 스키마(스키마는 데이터의 구조 정의), 지표 사전과 결정 규칙 판정, 공연 리포트와 파트너 판매 요약, 결정 기록과 결정 절차를 다룬다. 온세일 중 관제 화면과 운영 명령은 [control-tower.md](control-tower.md)가, 메트릭·SLO(팀이 정한 서비스 품질 목표)·경보는 [observability.md](../observability.md)가 정한다.
-- **원문 출처**: [설계서 §8 <용량 산정 (Back-of-the-envelope)>](<../../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#8-용량-산정-back-of-the-envelope>), [설계서 27장 <데이터 엔지니어링>](<../../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#27장-데이터-엔지니어링>), [ADR-0042](../adr/0042-analytics-store-and-decision-rules.md), [ADR-0052](../adr/0052-analytics-medallion-star-schema-close-stages.md).
+- **원문 출처**: 설계서 §8 <용량 산정 (Back-of-the-envelope)>, 설계서 27장 <데이터 엔지니어링>, [ADR-0042](../adr/0042-analytics-store-and-decision-rules.md), [ADR-0052](../adr/0052-analytics-medallion-star-schema-close-stages.md).
 - **관련 ID**: FR-026, FR-029, FR-031, FR-068 · NFR-009, NFR-018, NFR-026 · POL-022, 023, 027, 028, 030, 037, 039, 040 · SCR-027, SCR-029 · API(프로그램끼리 요청과 응답을 주고받는 창구) `/v1/ops/events/{eventId}/reports`, `/v1/ops/decisions`, `/v1/partner/events/{eventId}/report` · 이벤트 `trade.*`, `telemetry.queue`, `telemetry.purchase`, `telemetry.trust-verdicts`, `control.settings` · 데이터 docs/data.md §1·§2·§6(`decision_record`, `pseudonymization_log`) · K9 · ADR-0026·0042·0047·0052·0071.
 - **기준 기획 버전**: v1.0.
 - **표시 규칙**: 원칙과 구조는 ADR-0052의 소유자 결정이고, 필드·표 이름·시각·기준값은 추천 적용(2026-10-13)이다. 측정으로 정할 값은 [가정, Phase N …에서 확정]으로 적는다. 예시 숫자는 측정 전 가상 숫자라고 밝힌다.

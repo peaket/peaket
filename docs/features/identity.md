@@ -1,7 +1,7 @@
 # 기능 설계: 계정·인증·본인확인·세션
 
 - **독자와 용도**: identity-svc, 소비자 웹과 파트너 콘솔의 Auth.js 연동 부분, 관제 콘솔 로그인 모듈, 게이트웨이(클라이언트 종류별로 앞에 둔 입구 서버로, 인증·공통 정책·안쪽 서비스로 넘기기를 맡는다)의 인증 정책 엔진, peaket-platform 공통 인증 가드를 구현하는 엔지니어가 읽는다. 로그인의 전 과정, 토큰(권한이나 상태를 증명하려고 주고받는 서명된 문자열)·쿠키(브라우저가 사이트별로 저장했다가 요청마다 함께 보내는 작은 값) 규격, 세션 정책, 휴대폰 본인확인, 관리 계정 보안 규칙, 검증 테스트 포인트를 파악할 때 참조한다. 세부 보안 요구사항 판정은 원본인 `docs/security/asvs/auth.md`(L1·L2 149건)를, 개인정보 취급 기준은 `docs/security/data-classification.md`를, 암호화 키 관리는 `docs/security/secrets-and-keys.md`를 따른다.
-- **원문 출처**: [설계서 §6 <계정·인증: 팬은 소셜 로그인, 관리 계정은 다중 인증>](<../../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#계정인증-팬은-소셜-로그인-관리-계정은-다중-인증>), [설계서 10장 <인증 및 보안>](<../../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#10장-인증-및-보안>), [설계서 7장](<../../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#7장-폼-관리>), [ADR-0001](../adr/0001-fan-social-login-single-factor.md), [ADR-0006](../adr/0006-ticket-buyer-identity-verification-before-queue.md), [ADR-0011](../adr/0011-token-lifecycle-and-login-responsibilities.md), POL-001·002·019·020·023·025·027.
+- **원문 출처**: 설계서 §6 <계정·인증: 팬은 소셜 로그인, 관리 계정은 다중 인증>, 설계서 10장 <인증 및 보안>, 설계서 7장, [ADR-0001](../adr/0001-fan-social-login-single-factor.md), [ADR-0006](../adr/0006-ticket-buyer-identity-verification-before-queue.md), [ADR-0011](../adr/0011-token-lifecycle-and-login-responsibilities.md), POL-001·002·019·020·023·025·027.
 - **기준 기획 버전**: v1.0.
 - **관련 ID**: FR-001, 002, 017, 021, 028, 045, 046, 048 · NFR-016, 017, 018 · POL-001, 002, 019, 020, 023, 025, 027, 028, 031, 033, 034 · SCR-004, 005, 006, 017, 020, 028, 036, 037, 039, 040, 050, 051 · API(프로그램끼리 요청과 응답을 주고받는 창구) `/v1/identity/*`, `/v1/partner/auth/sessions`, `/v1/ops/auth/sessions`, `/v1/staff-invitation-lookups`, `/v1/staff-invitation-acceptances`, `/v1/device-approval-lookups`, `/v1/device-approvals`, `/v1/scanner/device-authorizations`, `/v1/scanner/token` · 이벤트 `control.sessions-terminated` · 데이터 docs/data.md §2 account·identity_verification·session·admin_account·staff_assignment·scanner_session.
 
@@ -295,7 +295,7 @@ OWASP ASVS 보안 통제 추적 표(`docs/security/asvs/auth.md`)의 각 항목�
 | I-T11 | 로그인 연속 실패 계정 잠금 | 3회 [가정] 연속 실패 뒤의 시도부터 사람 확인 챌린지가 나타나고, 5회 연속으로 인증에 실패하면 계정이 바로 잠긴다. 잠금은 운영자의 수동 재초대로만 풀린다(파트너 계정은 operator 이상, 운영자·CS 계정은 commander). | 고시 제5조 제6항 |
 | I-T12 | 관리 계정 1시간 유휴 만료 | 61분간 활동이 없는 관리자 세션은 바로 무효가 되고, 비밀번호와 TOTP 입력을 모두 다시 요구한다. | 고시 제6조 제4항 |
 | I-T13 | 관제망 허용 IP 대역 격리 | 사내 VPN이나 허가된 IP 대역 밖에서 gw-ops 엔드포인트에 접근하면 네트워크 단계에서 바로 막힌다. | FR-028 |
-| I-T14 | 관리자 비밀번호 복잡도 검증 | 15자 미만, 서비스 관련 금칙어가 든 비밀번호, HIBP에서 이미 유출된 것으로 나온 비밀번호는 등록이 거부된다. 64자 이상의 긴 암호문은 정상적으로 받아들인다. | 7장 |
+| I-T14 | 관리자 비밀번호 복잡도 검증 | 15자 미만, 서비스 관련 금칙어가 든 비밀번호, HIBP에서 이미 유출된 것으로 나온 비밀번호는 등록이 거부된다. 64자 이상의 긴 암호문은 정상적으로 받아들인다. | POL-020, ASVS 6.2.1 |
 | I-T15 | 내부 세션 생성 엔드포인트 격리 | 외부 인터넷, 허가되지 않은 서비스, API 게이트웨이 밖에서 identity 내부 세션 생성 API를 직접 부르면 mTLS 검증에서 거부된다. | ADR-0011 |
 | I-T16 | 회원 탈퇴 및 개인정보 파기 | 탈퇴하면 바로 모든 세션이 만료되고, 프로필 정보와 CI 해시가 영구 파기된다. 법정 거래 기록만 물리적으로 분리해 보관된다. | POL-023 |
 | I-T17 | 법정 접속기록 보존 검증 | 로그인, 대기열 진입, 주문, 결제 요청의 감사 로그가 접속기록 저장소에 3개월간 온전히 보존되고 정상적으로 조회된다. | FR-045 |

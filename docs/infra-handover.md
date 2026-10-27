@@ -259,7 +259,7 @@ flowchart LR
 | 인시던트 지휘관 | 인시던트를 선언하고 판단을 이끈다. 선언한 사람이 넘길 때까지 맡는다 | docs/observability.md §5 |
 | 운영 실행자 | 명령과 런북을 실행한다 | 같음 |
 | 기록·공지 담당 | 시각과 조치를 적고 대기실 공지·상태 페이지·파트너 공지를 낸다 | 같음 |
-| operator·commander | 운영 명령의 권한. 명령 3(판매 일시정지)·5(봇 판정 강도)·6(Degraded Mode 전환)은 commander가 요청하고 요청자가 아닌 operator 이상 한 명이 승인한다(둘 다 재인증) | planning/03-policies-glossary.md §1.1 |
+| operator·commander | 운영 명령의 권한. 명령 5(봇 판정 강도)·6(Degraded Mode 전환)과 명령 3·11의 재개는 commander가 요청하고 요청자가 아닌 operator 이상 한 명이 승인한다(둘 다 재인증). 멈추는 쪽인 명령 3(판매 일시정지)·11(자동화 정지)은 commander 한 명이 재인증하고 바로 실행한다(ADR-0095) | planning/03-policies-glossary.md §1.1 |
 | 긴급 접근 | GitOps 경로가 고장 났고 SEV1이 진행 중일 때, 선언한 인시던트에서 진단 증거를 남기거나 읽을 때(RB-31)와 느린 쿼리를 끊을 때(RB-32), KMS 키를 끄거나 삭제를 예약할 때(§6.2) 쓴다(MFA, 1시간 세션, 맡는 순간 SEV2 경보) | docs/devops.md §10.2 |
 
 - 호출과 인시던트 도구는 Grafana Cloud IRM(무료 등급, 온콜 3인), 메신저는 Slack, 티켓은 GitHub Issues, 대외 상태 페이지는 Upptime이다(ADR-0032).

@@ -13,7 +13,7 @@ python tools/doc-check/check_all.py
 | --- | --- |
 | `--strict` | 경고도 실패로 본다(릴리스 전 점검용) |
 | `--json` | 결과를 JSON으로 출력(CI 주석용) |
-| `--coverage` | archive/의 원문 설계서와 링크·영문 용어 대조도 한다(원문을 옮겨 쓰는 작업 뒤에만) |
+| `--coverage` | 원문 설계서와 링크·영문 용어 대조도 한다(원문을 옮겨 쓰는 작업 뒤에만). 원문은 2026-10-27에 archive/에서 지웠으므로 git 태그 `archive-original`에서 읽는다(ADR-0098). 태그가 없는 복제본에서는 '원문 없음' 경고만 낸다 |
 | `--markers-out FILE` | [가정]·[충돌]·[보완]이 있는 줄 목록을 파일로 쓴다(00-summary §6을 고칠 때) |
 
 종료 코드: 0 = 오류 없음, 1 = 오류 있음, 2 = 실행 실패.
@@ -38,8 +38,8 @@ python tools/doc-check/check_all.py
 
 ## 예외
 
-- 외부 URL 안의 경로 문자열처럼 오탐이 확실한 경로와, 없앤 문서인데 고치지 않는 지난 기록(ADR 본문, review의 지난 행)이 가리키는 경로는 `check_all.py`의 `ALLOW_PATHS`에 이유와 함께 넣는다. 지금은 `docs/software-architecture.md`(AWS 저장소 URL, review R-10)와 `docs/arc42.md`(ADR-0090으로 없앤 문서, review R-105) 둘이다.
-- archive/와 tools/는 점검 대상에서 뺀다. archive/는 동결 원문이고 tools/는 예시 문자열이 많다.
+- 외부 URL 안의 경로 문자열처럼 오탐이 확실한 경로와, 없앤 문서인데 고치지 않는 지난 기록(ADR 본문, review의 지난 행)이 가리키는 경로는 `check_all.py`의 `ALLOW_PATHS`에 이유와 함께 넣는다. 지금은 `docs/software-architecture.md`(AWS 저장소 URL, review R-10), `docs/arc42.md`(ADR-0090으로 없앤 문서, review R-105), `docs/appendix-learning-map.md`(ADR-0097로 없앤 부록, review R-115) 셋이다.
+- tools/는 점검 대상에서 뺀다(예시 문자열이 많다). archive/도 빼는 목록에 남아 있지만, 원문 설계서는 2026-10-27에 지워 git 태그 `archive-original`에만 있다(ADR-0098).
 - `api` 검사의 예외는 `check_all.py`에 이유와 함께 둔다. 경로 규칙 예외 `API_EXCEPTIONS`(`/graphql`, RFC 8628 토큰 엔드포인트 `/v1/scanner/token`, 전역 검색 `/v1/search`·`/v1/search/suggestions`), 집합 명사 `API_PLURAL_EXEMPT`(`staff`), 문서가 이름을 대도 openapi에 없어도 되는 경로 `API_REF_ALLOW`(토스페이먼츠 외부 API `/v1/payments/`·`/v1/transactions`, 프로토타입 전용 `/v1/proto/`, ADR-0080 2단계 초안 `/v1/forensics/`)다. openapi의 경로·작업 수(`api` 정보 줄)는 요약 문서의 REST 수치로 그대로 옮긴다.
 
 ## 유지보수 규칙

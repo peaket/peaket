@@ -1,7 +1,7 @@
 # 데이터 설계
 
 - **독자와 용도**: 백엔드 개발자가 도메인 엔티티, 소유 서비스, 트랜잭션(여러 변경을 한꺼번에 반영하거나 한꺼번에 취소하는 작업 단위) 경계, 동시성 제어 지점, 암호화 정책, 데이터 보존 기간을 파악할 때 보는 기준 문서다. 실제 물리 스키마(데이터의 구조 정의)의 원본은 각 서비스의 마이그레이션 파일(타입 검사가 되는 쿼리 도구 Drizzle, ADR-0037)에 있다. 이 문서는 데이터 아키텍처의 구조와 설계 결정의 맥락을 글로 정리해 둔다.
-- **원문 출처**: [설계서 §6 <시스템 아키텍처>](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#6-시스템-아키텍처>), [설계서 §8 <용량 산정 (Back-of-the-envelope)>](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#8-용량-산정-back-of-the-envelope>), [설계서 21장 <DB와 SQL 엔지니어링·튜닝>](<../archive/PEAKET(피켓) — 100만 동시접속 티케팅 + 관제 시스템 프로젝트 설계서.md#21장-db와-sql-엔지니어링튜닝>), 25장, docs/security/data-classification.md, docs/security/secrets-and-keys.md, [ADR-0002](adr/0002-queue-sequence-incr-over-sorted-set.md), [ADR-0013](adr/0013-mongodb-for-product-catalog.md), [ADR-0014](adr/0014-soft-hold-hard-sale.md), [ADR-0028](adr/0028-postgres-no-sharding-cell-scaling.md).
+- **원문 출처**: 설계서 §6 <시스템 아키텍처>, 설계서 §8 <용량 산정 (Back-of-the-envelope)>, 설계서 21장 <DB와 SQL 엔지니어링·튜닝>, 25장, docs/security/data-classification.md, docs/security/secrets-and-keys.md, [ADR-0002](adr/0002-queue-sequence-incr-over-sorted-set.md), [ADR-0013](adr/0013-mongodb-for-product-catalog.md), [ADR-0014](adr/0014-soft-hold-hard-sale.md), [ADR-0028](adr/0028-postgres-no-sharding-cell-scaling.md).
 - **기준 기획 버전**: v1.0.
 - **표시 규칙**: ERD의 엔티티와 필드 이름은 원문에 흩어져 있던 표현을 용어 사전의 표준 영문 표기로 하나로 모은 [보완]이다. 필드 세부 명세에는 [가정]이 들어 있으므로, 실제 서비스 마이그레이션을 구현할 때 최종 확정한다.
 
@@ -1272,7 +1272,7 @@ MongoDB(문서 형태로 저장하는 데이터베이스)의 `products` 컬렉�
 | 오픈 직후 대기열 순번 발급 트래픽 초당 20만 건 폭주 | Redis 키 하나에 `INCR` 연산을 쓴다. 한계에 닿으면 파드 단위로 1~2ms 동안 요청을 모아 `INCRBY`로 한꺼번에 올리는 배치 방식을 쓴다 | K1 벤치마크, PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험) 실측 평가 |
 | 1인 1순번 보장 및 중복 발급 차단 | `SET NX`로 중복 확인 키 잡기 → 순번 카운터 증가 → 계정별 순번 기록, 이 3단계를 원자적 파이프라인으로 처리한다. 클라이언트 재시도 때문에 생긴 누락 번호는 빠진 번호 비트맵에 영구 기록한다. 장애 전환으로 중복 확인 키가 사라져 나간 두 번째 순번은 입장 확정 때 사람별 입장 키로 막는다(ADR-0056) | K1 순번 연속성 및 오차율 계측, Q-T31 |
 | 동시 입장 목표 제어 | admission-ctrl 리더 파드만 serving 번호를 앞으로 옮기고, 200ms 주기로 활성 구매 세션의 빈자리를 다시 계산한다. 빈자리가 다 차면 클라이언트에 '곧 입장' 대기 상태를 돌려준다 | ADR-0005 |
-| 컨트롤러 이중화 시 리더 중복 발생 (두 파드가 동시에 serving 번호를 갱신하는 스플릿 브레인) | Kubernetes Lease로 분산 리더 선출(여러 복제 중 일을 맡을 하나를 고르는 것)을 한다. 제어 명령을 실행하기 직전에 Lease 갱신 상태를 다시 확인한다. 대기열 Redis에 쓸 때마다 리더 세대(Lease `leaseTransitions`)를 확인해 옛 리더의 쓰기를 거절한다(ADR-0056) | 33장 분산 리더 강제 종료 카오스 실험, Q-T30 |
+| 컨트롤러 이중화 시 리더 중복 발생 (두 파드가 동시에 serving 번호를 갱신하는 스플릿 브레인) | Kubernetes Lease로 분산 리더 선출(여러 복제 중 일을 맡을 하나를 고르는 것)을 한다. 제어 명령을 실행하기 직전에 Lease 갱신 상태를 다시 확인한다. 대기열 Redis에 쓸 때마다 리더 세대(Lease `leaseTransitions`)를 확인해 옛 리더의 쓰기를 거절한다(ADR-0056) | 리더 강제 종료 카오스 실험, Q-T30 |
 | Redis 마스터 장애 조치(Failover) 직후 복제 누락으로 인한 순번 중복 발급 위험 | 새로 승격한 마스터에서 카운터 값을 넉넉한 안전 여유만큼 한꺼번에 앞으로 옮기고, 발급하는 대기표에 새 세대 번호를 붙인다 | FIS (AWS Fault Injection Simulator) 장애 주입 시험(포트폴리오 기간에는 로컬 Redis 주 노드 강제 종료, docs/verification.md §5.3) |
 | 동일 주문에 대한 결제 승인 중복 호출 | 결제 대행사를 부를 때 `Idempotency-Key: confirm-{orderId}` 헤더를 보낸다. 승인 결과를 모르면 UNKNOWN 상태로 바꾸고, 나중에 결제 단건 조회 API 결과로 상태를 맞춘다 | K7 결제 무결성 검증 |
 | 결제 대행사 웹훅의 중복 및 역순 도달 | PG사별 결제 식별자로 `webhook_receipt` 유니크 제약을 건다(토스 `transmission_id`, 포트원 이벤트 종류·`paymentId`·`timestamp`) | K7, 결제 단위 테스트 (P-T17) |

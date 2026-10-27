@@ -11,16 +11,19 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+# 원문 설계서는 2026-10-27 archive/에서 지웠고 이 git 태그에만 남는다(ADR-0098). --coverage가 여기서 읽는다.
+ORIGINAL_TAG = 'archive-original'
 SCAN_EXT = ('.md', '.yaml', '.json', '.csv')
 SKIP_DIRS = {'archive', 'tools', '.git', 'node_modules'}
 ID_KINDS = ('FR', 'NFR', 'POL', 'SCR', 'CMP', 'ADR')
 MARKERS = ('[가정', '[충돌', '[보완')
 # 존재하지 않아도 되는 경로: 외부 URL 안의 경로 문자열이라 오탐(review R-10),
 # 없앤 문서인데 고치지 않는 지난 기록(ADR 본문, review의 지난 행)이 가리키는 경로(ADR-0090, review R-105)
-ALLOW_PATHS = {'docs/software-architecture.md', 'docs/arc42.md'}
+ALLOW_PATHS = {'docs/software-architecture.md', 'docs/arc42.md', 'docs/appendix-learning-map.md'}
 
 
 class Report:
@@ -229,7 +232,7 @@ ALIAS = {
     'design/d1': 'design/d1-brief.md', 'design/d2': 'design/d2-design-system.md', 'design/d5': 'design/d5-screen-blueprint.md', 'd5': 'design/d5-screen-blueprint.md',
     'design/d3': 'design/d3-screens.md', 'design/d4': 'design/d4-handoff-checklist.md',
     'd1': 'design/d1-brief.md', 'd2': 'design/d2-design-system.md', 'd3': 'design/d3-screens.md', 'd4': 'design/d4-handoff-checklist.md',
-    'review': 'review/consistency-review.md', 'wbs': 'wbs/wbs.md', 'appendix': 'docs/appendix-learning-map.md',
+    'review': 'review/consistency-review.md', 'wbs': 'wbs/wbs.md',
     '00-summary': '00-summary.md', '00-diagnosis': '00-diagnosis.md',
 }
 
@@ -261,10 +264,10 @@ def headings(path, cache={}):
 def check_secrefs(texts, rep):
     names = 'queue-admission|seat-hold|payment|identity|offline-gate|control-tower|transfer-refund|settlement|analytics|search|observability|infra|guidelines|architecture|data|devops|verification'
     bare_re = re.compile(r'(?<![\w/.-])((?:features/)?(?:%s))(?:\.md)?\s*§\s*(\d+(?:\.\d+)?)' % names)
-    ref_re = re.compile(r'(`?(?:docs/[\w./-]+|planning/[\w.-]+|design/[\w.-]+|review|wbs|appendix|0[0-4]-[\w-]+|d[1-5]|[a-z]+-[a-z-]+\.md)`?)\s*§\s*(\d+(?:\.\d+)?)')
+    ref_re = re.compile(r'(`?(?:docs/[\w./-]+|planning/[\w.-]+|design/[\w.-]+|review|wbs|0[0-4]-[\w-]+|d[1-5]|[a-z]+-[a-z-]+\.md)`?)\s*§\s*(\d+(?:\.\d+)?)')
     total = 0
     for f, text in texts.items():
-        if f.startswith('docs/appendix') or not f.endswith(('.md', '.yaml')):
+        if not f.endswith(('.md', '.yaml')):
             continue
         for n, line in enumerate(text.split('\n'), 1):
             for m in list(ref_re.finditer(line)) + list(bare_re.finditer(line)):
@@ -314,7 +317,7 @@ def count_markers(texts, rep, out_path=None):
     for f, text in texts.items():
         c = collections.Counter({k: text.count(k) for k in MARKERS})
         tot_all.update(c)
-        if f not in ('00-summary.md', 'review/consistency-review.md'):
+        if f not in ('00-summary.md', 'review/consistency-review.md', 'review/tech-review.md'):
             tot_core.update(c)
         if out_path:
             for n, line in enumerate(text.split('\n'), 1):
@@ -374,13 +377,31 @@ def check_versions(texts, rep):
 
 
 # ---------- 10. 원문 대조(선택) ----------
+def load_original():
+    """원문 설계서 본문. archive/ 폴더가 있으면 거기서, 없으면 git 태그 ORIGINAL_TAG에서 읽는다."""
+    d = os.path.join(ROOT, 'archive')
+    if os.path.isdir(d):
+        arch = sorted(f for f in os.listdir(d) if f.endswith('.md'))
+        if arch:
+            with io.open(os.path.join(d, arch[0]), encoding='utf-8') as fh:
+                return fh.read()
+    try:
+        names = subprocess.run(['git', '-C', ROOT, 'ls-tree', '-z', '--name-only', ORIGINAL_TAG, 'archive/'],
+                               capture_output=True, check=True).stdout.decode('utf-8').split('\0')
+        md = sorted(n for n in names if n.endswith('.md'))
+        if md:
+            return subprocess.run(['git', '-C', ROOT, 'show', '%s:%s' % (ORIGINAL_TAG, md[0])],
+                                  capture_output=True, check=True).stdout.decode('utf-8')
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    return None
+
+
 def check_coverage(texts, rep):
-    arch = [os.path.join(ROOT, 'archive', f) for f in os.listdir(os.path.join(ROOT, 'archive')) if f.endswith('.md')]
-    if not arch:
-        rep.warn('coverage', 'archive/', '원문 없음')
+    src = load_original()
+    if src is None:
+        rep.warn('coverage', ORIGINAL_TAG, '원문 없음(archive/ 폴더도 git 태그 %s도 읽지 못함)' % ORIGINAL_TAG)
         return
-    with io.open(arch[0], encoding='utf-8') as fh:
-        src = fh.read()
     nall = '\n'.join(texts.values())
     url_re = re.compile(r'https?://[^\s)\]>"\'`]+')
     nu = lambda u: u.rstrip('.,;:')
@@ -391,7 +412,7 @@ def check_coverage(texts, rep):
     n_urls = set(nu(u) for u in url_re.findall(nall))
     miss = [u for u in d_urls if u not in n_urls]
     for u in miss:
-        rep.warn('coverage', 'archive L%d' % d_urls[u], '원문 링크가 새 문서에 없음 %s' % u)
+        rep.warn('coverage', '원문 L%d' % d_urls[u], '원문 링크가 새 문서에 없음 %s' % u)
     tok_re = re.compile(r'(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9+#_.\-]*[A-Za-z0-9+#]')
     low = url_re.sub(' ', nall).lower()
     toks = collections.OrderedDict()
@@ -401,7 +422,7 @@ def check_coverage(texts, rep):
                 toks.setdefault(tk, n)
     mt = [tk for tk in toks if tk.lower() not in low]
     for tk in mt:
-        rep.warn('coverage', 'archive L%d' % toks[tk], '원문 영문 용어가 새 문서에 없음 %s' % tk)
+        rep.warn('coverage', '원문 L%d' % toks[tk], '원문 영문 용어가 새 문서에 없음 %s' % tk)
     rep.info['coverage'] = {'urls': len(d_urls), 'urls_missing': len(miss), 'terms': len(toks), 'terms_missing': len(mt)}
 
 
@@ -409,7 +430,7 @@ def main():
     ap = argparse.ArgumentParser(description='PEAKET 문서 점검')
     ap.add_argument('--strict', action='store_true', help='경고도 실패로 처리')
     ap.add_argument('--json', action='store_true', help='JSON으로 출력')
-    ap.add_argument('--coverage', action='store_true', help='archive/ 원문 대조(링크·영문 용어)도 실행')
+    ap.add_argument('--coverage', action='store_true', help='원문 설계서(git 태그 archive-original) 대조(링크·영문 용어)도 실행')
     ap.add_argument('--markers-out', help='마커가 있는 줄 목록을 이 파일에 씀')
     a = ap.parse_args()
     if hasattr(sys.stdout, 'reconfigure'):
