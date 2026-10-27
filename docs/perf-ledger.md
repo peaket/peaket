@@ -74,7 +74,7 @@ perf-ledger/
 | `redis_cpu` | 대기열·좌석용 Redis(메모리에 데이터를 두는 빠른 저장소) 클러스터 인스턴스의 CPU 사용률 | 병목 분석 차트 |
 | `event_loop_lag_ms` | 핫패스(요청이 가장 많이 지나는 경로)에 있는 마이크로서비스의 Node.js 이벤트 루프 지연 시간 p99 (ms) | 내부 런타임 병목 차트 |
 | `heap_after_gc_mb`, `rss_mb`, `open_fds`, `active_handles`, `db_conns`, `redis_conns` | 장시간 시험의 자원 시계열(1분 간격, GC 뒤 힙·RSS·열린 FD·활성 핸들·DB·Redis 연결 수). 데우기 30분 [가정]이 끝난 뒤 구간의 시간당 기울기로 NFR-027을 판정한다(docs/verification.md §3.6, ADR-0070) | 장시간 시험 자원 추세 차트 |
-| `rt_freshness_p95_s`, `rt_loss_ratio`, `rt_checkpoint_ms` | 관제 실시간 표 시험(NFR-009)의 심장 박동 신선도 1분 p95(초, 측정값 백 개 중 아흔다섯 개가 이 안에 든다는 뜻), 누락률(늦어서 버린 수 + 싱크가 버린 수 + 읽지 못해 거절한 수 + 생산자가 버린 수 ÷ 전체), 체크포인트(Flink가 작업 상태를 주기적으로 저장해 두는 지점) 소요 시간(ms). `kpi`는 `NFR-009`이고 결과는 '실측(PC)'이다(docs/verification.md §3.7, ADR-0071) | 트래픽 폭발 타임라인 차트 |
+| `rt_freshness_p95_s`, `rt_loss_ratio`, `rt_query_p95_ms` | 관제 실시간 표 시험(NFR-009)의 심장 박동 신선도 1분 p95(초, 측정값 백 개 중 아흔다섯 개가 이 안에 든다는 뜻), 누락률(읽지 못해 거절한 수 + 생산자가 버린 수 ÷ 전체), 조회 시점 집계의 p95(ms). 한계 찾기(V-T19)는 단계마다 입력 건수와 이 셋을 남긴다. `kpi`는 `NFR-009`이고 결과는 '실측(PC)'이다(docs/verification.md §3.7, ADR-0071·0099) | 트래픽 폭발 타임라인 차트 |
 
 앞 여섯 식별자의 쿼리 예시는 `tools/perf-ledger/queries.example.txt`에 있다. 장시간 시험과 관제 실시간 표 시험의 식별자는 그 시험을 만들 때(wbs 6.5.1·4.3.9) 더한다. 이 명세는 서비스 공통 템플릿의 Recording Rule 표준에 맞춰 동기화된다.
 

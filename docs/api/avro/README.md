@@ -47,7 +47,7 @@
 | 주제(subject) 이름 | `TopicRecordNameStrategy`로 `<토픽>-<네임스페이스.레코드>`다(예: `trade.orders-peaket.trade.OrderEvent`). 토픽 4개에 레코드가 여러 종류 실려서(§4) 모든 토픽에 이 방식을 쓴다 | 추천 적용 2026-10-22. Confluent 문서: 한 토픽에 여러 레코드 종류를 섞을 때 쓰는 방식이고, 호환 검사는 토픽 안의 레코드 이름마다 한다 |
 | 등록 | 생산자는 `auto.register.schemas=false`로 스스로 등록하지 않는다. `peaket-contracts`가 계약 패키지를 게시할 때(`main` 병합 뒤, docs/devops.md §2.2.5) 같은 워크플로가 등록한다. `use.latest.version`은 기본값(false)으로 둬, 생산자는 자기가 빌드된 판으로 쓴다 | 추천 적용 2026-10-22. 설정 이름과 동작은 Confluent 문서 |
 | Outbox 릴레이 | Outbox 표의 `payload` 열은 `bytea`로 두고, 서비스가 레지스트리 직렬화기로 만든 바이트를 넣는다. Debezium Outbox 라우터는 `value.converter=io.debezium.converters.BinaryDataConverter`로 그 바이트를 그대로 Kafka 값으로 보낸다. 커넥터의 하트비트와 트랜잭션 메타데이터는 이 변환기로 보낼 수 없어 대리 변환기 설정을 따로 둔다. 로컬과 v0의 폴링 릴레이도 같은 바이트를 보낸다 | 추천 적용 2026-10-22. Debezium 3.7 문서 'Using Apache Avro as the payload format' |
-| Flink 소비 | 레코드가 한 종류인 토픽은 docs/streaming.md §2.6대로 `forSpecific`(계약에서 만든 클래스 하나)로 읽는다. 여러 종류가 실리는 토픽은 클래스 하나로 읽을 수 없다. 그 토픽 레코드들의 유니온을 읽기 스키마로 쓰거나, 레코드 이름으로 나눠 읽는 역직렬화기를 둔다 | Avro 명세: 쓴 쪽과 읽는 쪽이 둘 다 레코드면 이름이 같아야 맞춘다. 유니온 읽기 스키마는 처음 맞는 갈래로 읽는다 |
+| 스트림 작업자 소비 | 스트림 작업자(TypeScript)는 쓴 쪽 스키마(메시지에 실린 스키마 ID)로 읽은 뒤 레코드 이름으로 나눈다. 그래서 레코드가 여러 종류 실리는 토픽도 읽기 스키마를 따로 두지 않는다(docs/streaming.md §2.6, 추천 적용 2026-10-27, ADR-0099) | Avro 명세: 쓴 쪽과 읽는 쪽이 둘 다 레코드면 이름이 같아야 맞춘다. 쓴 쪽 스키마로 읽으면 이 맞춤이 필요 없다 |
 
 ## 4. 토픽과 레코드
 
@@ -56,25 +56,25 @@
 | `trade.orders` | `OrderEvent` | `eventId` | purchase-svc(Outbox) | core-svc 알림, ops-rt |
 | `trade.payments` | `PaymentEvent` | `eventId` | payment-svc(Outbox) | purchase-svc 주문 Saga, ops-rt |
 | `trade.seats` | `SeatEvent` | `eventId` | purchase-svc(좌석 Redis Stream 릴레이, `seat_sale` Outbox) | purchase-svc 홀드 원장 적재, ops-rt |
-| `trade.purchase-sessions` | `PurchaseSessionStarted`, `PurchaseSessionEnded` | `eventId` | purchase-svc(Redis Stream 릴레이) | queue-svc, ops-rt(세션 종료) |
+| `trade.purchase-sessions` | `PurchaseSessionStarted`, `PurchaseSessionEnded` | `eventId` | purchase-svc(Redis Stream 릴레이) | queue-svc |
 | `trade.tickets` | `TicketEvent` | `eventId` | ticket-svc(Outbox) | ops-rt |
 | `trade.settlements` | `SettlementEvent` | 파트너 ID | payment-svc(Outbox) | analytics-ingest |
 | `control.settings` | `SettingChanged` | 정하지 않음(§5) | ops-svc | 모든 서비스 |
 | `control.sessions-terminated` | `SessionTerminated` | `accountId` | identity-svc | 모든 서비스 |
 | `identity.accounts-merged` | `AccountMerged` | `mergedAccountId` | identity-svc | 각 도메인 서비스 |
 | `support.cases-requested` | `CaseRequested` | `sourceId` | core-svc(Outbox) | ops-svc |
-| `telemetry.queue` | `QueueAggregate`, `QueueEntryRecord`, `PipelinePulse` | '회차:파드', `pid`, 없음 | queue-svc, rt-pulse | ops-rt(`QueueAggregate`), analytics-ingest(`QueueEntryRecord`) |
+| `telemetry.queue` | `QueueAggregate`, `QueueEntryRecord`, `PipelinePulse` | '회차:파드', `pid`, 없음 | queue-svc, rt-pulse | ops-rt(`QueueAggregate`·`PipelinePulse`), analytics-ingest(`QueueEntryRecord`) |
 | `telemetry.purchase` | `HoldAttempt`, `PipelinePulse` | `purchaseSessionId`, 없음 | purchase-svc, rt-pulse | ops-rt, analytics-ingest |
 | `telemetry.trust-verdicts` | `TrustVerdict`, `PipelinePulse` | `queueEntryId`(없으면 없음), 없음 | trust-svc, rt-pulse | ops-rt, analytics-ingest |
 | `telemetry.behavior` | `BehaviorSignal` | `pid` | trust-svc | trust-reassess |
 | `telemetry.trust-candidates` | `TrustCandidate` | `pid` | trust-reassess | trust-svc |
 
-- 분석 원본 적재 잡(analytics-ingest)은 `trade.*`, `control.settings`, `telemetry.queue`(`QueueEntryRecord`), `telemetry.purchase`, `telemetry.trust-verdicts`를 모두 읽고 심장 박동 사건(`PipelinePulse`)은 건너뛴다(asyncapi `consumeAnalyticsIngest`).
+- 분석 원본 적재 작업자(analytics-ingest)는 `trade.*`, `control.settings`, `telemetry.queue`(`QueueEntryRecord`), `telemetry.purchase`, `telemetry.trust-verdicts`를 모두 읽고 심장 박동 사건(`PipelinePulse`)은 건너뛴다(asyncapi `consumeAnalyticsIngest`).
 - `PipelinePulse`는 한 레코드를 세 토픽에 쓰므로 주제가 셋이다(`telemetry.queue-peaket.telemetry.PipelinePulse` 등).
 
 ## 5. asyncapi와 다른 점과 정할 일
 
-Outbox 열(docs/data.md §4)과 Flink 소비(docs/streaming.md §2.6)는 2026-10-22에 정본에 적었다. 아래 표는 남은 일과 그 기록이다.
+Outbox 열(docs/data.md §4)과 스트림 소비(docs/streaming.md §2.6)는 정본에 적었다(2026-10-22. 소비 방식은 2026-10-27 ADR-0099로 정했다). 아래 표는 남은 일과 그 기록이다.
 
 | 항목 | 지금 | 이 초안의 처리와 제안 |
 | --- | --- | --- |
@@ -83,4 +83,5 @@ Outbox 열(docs/data.md §4)과 Flink 소비(docs/streaming.md §2.6)는 2026-10
 | payload 형식 | asyncapi는 `defaultContentType: application/avro`인데 payload는 JSON Schema로 적었다 | AsyncAPI 3.0.0의 Multi Format Schema Object로 payload를 이 파일에 잇는다(`schemaFormat: application/vnd.apache.avro+json;version=1.9.0`, AsyncAPI가 권하는 형식 목록에 있다) |
 | `control.settings` 키 | 정하지 않았다 | 같은 범위의 설정 변경이 순서대로 가도록 `scope`(asyncapi 설명대로 PLATFORM 또는 공연 ID)를 키로 쓰는 것을 제안한다 |
 | Outbox `payload` 열 | docs/data.md §4에 적었다(2026-10-22) | 끝남 |
-| 여러 레코드가 실리는 토픽의 Flink 소비 | docs/streaming.md §2.6에 두 방식을 적었다(2026-10-22) | 어느 쪽인지는 wbs 0.2.2의 스키마 CI를 만들 때 정한다 |
+| 여러 레코드가 실리는 토픽의 소비 | docs/streaming.md §2.6 | 끝남: 스트림 작업자가 쓴 쪽 스키마로 읽고 레코드 이름으로 나눈다(2026-10-27, ADR-0099) |
+| 퍼널의 '처음' 표시 | `OrderEvent.firstInStage`·`HoldAttempt.firstHeldInSession`을 선택 필드(기본 null)로 더했다(2026-10-27, ADR-0099) | 소비자(`ops-rt`)를 먼저, 생산자(purchase-svc)를 나중에 배포한다. null인 옛 메시지는 퍼널에 세지 않는다 |

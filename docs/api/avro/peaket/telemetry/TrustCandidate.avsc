@@ -2,7 +2,7 @@
   "type": "record",
   "name": "TrustCandidate",
   "namespace": "peaket.telemetry",
-  "doc": "대기 중 재평가 후보. 토픽 telemetry.trust-candidates, 키 pid. Flink trust-reassess가 낸다(ADR-0071). 대기 중 재평가 후보(ADR-0071). 행동 요약값 원문·기기 가명은 싣지 않는다",
+  "doc": "대기 중 재평가 후보. 토픽 telemetry.trust-candidates, 키 pid. 재평가 작업자 trust-reassess가 낸다(ADR-0071·0099). 대기 중 재평가 후보(ADR-0071). 행동 요약값 원문·기기 가명은 싣지 않는다",
   "fields": [
     {
       "name": "eventId",

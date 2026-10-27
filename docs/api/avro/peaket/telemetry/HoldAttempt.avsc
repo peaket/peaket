@@ -88,6 +88,15 @@
       "default": null
     },
     {
+      "name": "firstHeldInSession",
+      "type": [
+        "null",
+        "boolean"
+      ],
+      "default": null,
+      "doc": "그 구매 세션의 첫 HELD일 때 true. 관제 실시간 표가 첫 홀드 퍼널을 구매 세션마다 한 번 센다(ADR-0099)"
+    },
+    {
       "name": "retryNo",
       "type": [
         "null",

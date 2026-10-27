@@ -54,12 +54,12 @@ GitHub 조직 계정(무료 등급) 아래 저장소 14개를 둔다. architectu
 | 저장소 | 공개 | CI 유형(§3.2) | 배포 대상 |
 | --- | --- | --- | --- |
 | peaket-frontend | 공개 | 프론트엔드 | 앱 서버 이미지 2개(web, partner), 정적 자산, 설치형 앱처럼 쓰는 웹 앱인 PWA 2개(web의 지갑, scanner), 관제 콘솔 MF 호스트 |
-| peaket-queue, peaket-purchase, peaket-ticket, peaket-trust, peaket-core | 공개 | 서비스 | 서비스 이미지 10개, 마이그레이션 잡, 관제 원격 위젯(peaket-queue·peaket-purchase, §6.6), Flink `trust-reassess` 잡 이미지(peaket-trust) |
+| peaket-queue, peaket-purchase, peaket-ticket, peaket-trust, peaket-core | 공개 | 서비스 | 서비스 이미지 10개, 마이그레이션 잡, 관제 원격 위젯(peaket-queue·peaket-purchase, §6.6), 재평가 작업자 `trust-reassess` 이미지(peaket-trust) |
 | peaket-platform | 공개 | 라이브러리 | npm 패키지(GitHub Packages) |
 | peaket-contracts | 공개 | 계약 | 언어별 계약 패키지, Pact 파일 |
 | peaket-infra | 공개 | IaC | AWS·GitHub 설정 |
 | peaket-gitops | 공개 | GitOps | 클러스터 상태 |
-| peaket-data | 공개 | 데이터 | Flink(흘러드는 이벤트를 실시간으로 계산하는 스트림 처리 엔진) 잡·dbt 이미지, Flink 공용 라이브러리 `flink/common`(GitHub Packages Maven) |
+| peaket-data | 공개 | 데이터 | 스트림 작업자(Kafka 토픽을 계속 읽어 저장소에 쓰는 TypeScript 서비스) `analytics-ingest`·`ops-rt`와 dbt 이미지, `rt` 표·뷰 이전 파일(ADR-0099) |
 | peaket-loadtest | **비공개** | 부하 시험 | k6(부하 시험 도구) 시나리오, 합성 봇 시뮬레이터 |
 | peaket-docs | 공개 | 문서 | 이 문서 묶음(doc-check) |
 | .github | 공개 | — | 조직 공용 재사용 워크플로, 이슈·PR(코드 변경을 합쳐 달라는 요청) 양식 |
@@ -198,7 +198,7 @@ flowchart LR
 | 프론트엔드(Turborepo) | 바뀐 앱·패키지만 골라(`turbo run --filter=...[origin/<대상 가지>]`) 린트·타입·단위 시험, Storybook과 axe 접근성 검사, Lighthouse CI 예산(architecture §6.5), Playwright 3엔진(CI의 kind 클러스터, 합성 데이터), `contract-check`(Pact 소비자), `security-scan`, `branch-policy` | E2E(CI의 kind) | 앱 서버 이미지와 정적 자산 업로드(§6.6), 데모 승격 PR | 태그, 운영 승격 PR, 역병합 PR |
 | 라이브러리(platform. `peaket-frontend` 안의 ds·telemetry·validation·api-client·console-contract는 프론트엔드 유형 검사에 이 행의 공개 API 차이·Changesets·게시를 더한다, ADR-0079 결정 21) | `ci-node`, `security-scan`, 공개 API(다른 프로그램이 불러 쓰는 창구)의 타입 선언 차이, `branch-policy` | — | Changesets 버전(자를 때) | GitHub Packages 게시, 출처 증명, 태그, 역병합 PR |
 | 계약(contracts) | `buf breaking`, OpenAPI·AsyncAPI 차이, Avro 호환, 소비자 Pact 파일 형식, `security-scan`, `branch-policy` | 제공자 저장소에 검증 요청(저장소 디스패치) | Changesets 버전(자를 때) | 언어별 패키지 게시, 제공자 저장소에 검증 요청, 태그, 역병합 PR |
-| 데이터(peaket-data) | Flink 잡 단위 시험, dbt `build`(대량 이벤트 집계에 강한 분석용 데이터베이스인 ClickHouse의 시험용 컨테이너와 고정 시드), 이벤트 계약 대조, `security-scan`, `branch-policy` | 같은 검사 | 이미지 빌드·서명, 데모 승격 PR | 태그, 운영 승격 PR, 역병합 PR |
+| 데이터(peaket-data) | 스트림 작업자 단위·통합 시험과 `rt` 뷰 정답 시험(docs/streaming.md §13), dbt `build`(대량 이벤트 집계에 강한 분석용 데이터베이스인 ClickHouse의 시험용 컨테이너와 고정 시드), 이벤트 계약 대조, `security-scan`, `branch-policy` | 같은 검사 | 이미지 빌드·서명, 데모 승격 PR | 태그, 운영 승격 PR, 역병합 PR |
 | IaC(infra) | `iac-check`(plan·보안 검사·비용), `security-scan`, `branch-policy` | 비운영 apply(§9.3) | 운영 plan 검토 | 운영 apply(prod 환경 승인, 정비 시간, 동결 창 밖), 태그, 역병합 PR |
 | GitOps(gitops, 가지 규칙 예외) | `gitops-check`, `security-scan`. 경보 규칙·Alertmanager 설정이 바뀌면 `alert-check`도 돈다(`promtool test rules`, `amtool config routes test`, 경보 주석 검사, docs/verification.md §2.7, ADR-0069) | — | — | ArgoCD가 끌어간다(`main` 하나) |
 | 부하 시험(loadtest) | 린트, 시나리오 형식 검사, `security-scan` | 야간 축소 성능 시험(§3.3) | — | 태그 |
@@ -234,11 +234,10 @@ flowchart LR
 
 | 산출물 | 저장 위치 | 식별자 | 증명 |
 | --- | --- | --- | --- |
-| 서비스 이미지 10개, 앱 서버 이미지 2개, 작업 이미지(close-runner, ranking-publisher, rt-pulse, freeze-calendar, evidence-collector. 마이그레이션 잡과 `audit-anchor`는 서비스 이미지(`audit-anchor`는 ops-svc)의 별도 명령이다, §7.2·ADR-0075) | ECR(계정별, 태그 변경 금지) | 다이제스트 | SBOM, 서명, 출처 증명 |
+| 서비스 이미지 10개, 앱 서버 이미지 2개, 작업 이미지(close-runner, ranking-publisher, rt-pulse, freeze-calendar, evidence-collector. 마이그레이션 잡과 `audit-anchor`는 서비스 이미지(`audit-anchor`는 ops-svc)의 별도 명령이다, §7.2·ADR-0075), 스트림 작업자 이미지 3개(analytics-ingest, ops-rt, trust-reassess, ADR-0099) | ECR(계정별, 태그 변경 금지) | 다이제스트 | SBOM, 서명, 출처 증명 |
 | npm 패키지(contracts, platform, ds, telemetry, validation, api-client, console-contract) | GitHub Packages(`@peaket` 범위) | SemVer | 출처 증명 |
-| Maven 패키지(Flink 공용 라이브러리 `flink/common`, peaket-data) | GitHub Packages(Maven) | SemVer | 출처 증명 |
 | 프론트엔드 정적 자산 | S3(AWS의 파일 저장소)의 배포별 경로. 파일 이름에 내용 해시를 넣고, 보존 기간이 지나면 지운다. 허용한 확장자만 올리고 소스 맵은 올리지 않는다 | 빌드 ID(커밋 SHA) | 파일 해시 목록과 출처 증명, 앱마다 정적 자산 묶음의 CycloneDX SBOM(추천 적용 2026-10-21, ADR-0079 결정 22·23) |
-| Flink 잡 JAR, dbt 프로젝트 | ECR 이미지로 포장 | 다이제스트 | SBOM, 서명, 출처 증명 |
+| dbt 프로젝트 | ECR 이미지로 포장 | 다이제스트 | SBOM, 서명, 출처 증명 |
 | Helm 공용 차트 | `peaket-gitops/charts` | SemVer | Git 이력 |
 | Terraform 모듈 | `peaket-infra/modules` | Git 태그 | Git 이력 |
 
@@ -261,7 +260,7 @@ flowchart LR
 
 ### 4.4 의존성과 취약점
 
-- **설치 고정**: `pnpm install --frozen-lockfile`로 설치한다. `@peaket` 범위 패키지는 GitHub Packages에서만 받도록 레지스트리를 범위별로 고정해 의존성 혼동을 막는다(ASVS 15.2.4). `peaket-data`도 같은 원칙을 따른다(추천 적용 2026-10-26, ADR-0089). Gradle(Flink 잡과 `flink/common`)은 잠금 파일(dependency locking)과 의존성 검증 파일(`gradle/verification-metadata.xml`, SHA-256)을 저장소에 두고, 저장소 내용 필터(`exclusiveContent`)로 `io.peaket` 그룹은 GitHub Packages에서만, 나머지는 Maven Central에서만 받는다. Gradle 래퍼는 `distributionSha256Sum`으로 배포본을 고정한다. dbt 이미지의 Python 의존성은 해시가 든 잠금 파일(`uv.lock`)로 고정해 `uv sync --locked`로 설치하고, 색인은 PyPI 하나만 쓴다(`--extra-index-url`은 쓰지 않는다. 같은 이름의 패키지를 다른 색인에서 받아 오는 의존성 혼동을 막는다). Renovate의 3일 대기는 Maven Central·PyPI에서 오는 새 판에도 건다(Renovate는 레지스트리가 주는 릴리스 시각으로 센다). 다만 잠금 파일을 갱신할 때 딸려 오는 전이 의존성(의존성의 의존성)은 Renovate가 보지 못하므로, uv 잠금은 `--exclude-newer`에 3일 전 시각을 넣어 갱신한다. Gradle 잠금에는 같은 장치가 없어 PR에서 검증 파일의 차이를 사람이 본다.
+- **설치 고정**: `pnpm install --frozen-lockfile`로 설치한다. `@peaket` 범위 패키지는 GitHub Packages에서만 받도록 레지스트리를 범위별로 고정해 의존성 혼동을 막는다(ASVS 15.2.4). `peaket-data`도 같은 원칙을 따른다(추천 적용 2026-10-26, ADR-0089). 스트림 작업자는 TypeScript라 같은 pnpm 규칙을 그대로 쓴다(ADR-0099). dbt 이미지의 Python 의존성은 해시가 든 잠금 파일(`uv.lock`)로 고정해 `uv sync --locked`로 설치하고, 색인은 PyPI 하나만 쓴다(`--extra-index-url`은 쓰지 않는다. 같은 이름의 패키지를 다른 색인에서 받아 오는 의존성 혼동을 막는다). Renovate의 3일 대기는 PyPI에서 오는 새 판에도 건다(Renovate는 레지스트리가 주는 릴리스 시각으로 센다). 다만 잠금 파일을 갱신할 때 딸려 오는 전이 의존성(의존성의 의존성)은 Renovate가 보지 못하므로, uv 잠금은 `--exclude-newer`에 3일 전 시각을 넣어 갱신한다.
 - **설치 스크립트 차단**: pnpm 10부터 의존성의 설치 스크립트는 기본으로 실행되지 않는다. 필요한 패키지만 허용 목록(`allowBuilds`, pnpm 10.26 이상)에 둔다.
 - **새 버전 대기**: pnpm `minimumReleaseAge` 4,320분(3일)과 Renovate `minimumReleaseAge: "3 days"`를 같이 쓴다. Renovate 문서는 npm 패키지가 게시 뒤 72시간 안에는 내려질 수 있다며 3일을 권한다. pnpm의 이 설정은 10.16에 생겼고 단위는 분이다(2026-10-13 확인). 2025-09 npm 웜 'Shai-Hulud'(CISA 경보 2025-09-23)처럼 탈취된 계정으로 게시된 악성 판은 대개 며칠 안에 드러나 내려진다.
 - **위험 구성 요소**(ASVS 15.1.4): 마지막 릴리스가 오래됐거나, 0.x이거나, 오픈소스 안정판이 없는 구성 요소는 asvs/delivery.md에 표시하고 대안을 PoC로 살펴본다. 지금 표시한 것: kafkajs(마지막 릴리스 2023-02-27, 협력적 재조정 없음, 비교 대상 `@confluentinc/kafka-javascript`, 비교 항목은 처리량·재조정·OTel 계측·AWS가 운영해 주는 Kafka인 MSK의 IAM 인증(infra §9), wbs 0.5.1), Argo Rollouts Gateway API 트래픽 플러그인(argoproj-labs 0.x). Linkerd(2.15부터 오픈소스 안정판 아티팩트 없음)는 메시를 Istio(서비스끼리의 통신을 앱 대신 처리하는 서비스 메시 제품)로 정하면서 목록에서 뺐다(ADR-0082).
@@ -306,12 +305,11 @@ flowchart LR
 
 ```text
 peaket-gitops/
-  charts/peaket-service/     공용 Helm 차트(Rollout·Service·PDB·KEDA·NetworkPolicy·ExternalSecret·우선순위)
-  charts/peaket-flink-job/   Flink 잡 차트(FlinkDeployment·서비스 계정·NetworkPolicy·ExternalSecret·PodMonitor, docs/streaming.md §13)
+  charts/peaket-service/     공용 Helm 차트(Rollout·Service·PDB·KEDA·NetworkPolicy·ExternalSecret·우선순위. 스트림 작업자는 Service 없는 Deployment 모드와 PodMonitor로 쓴다, docs/streaming.md §13)
   apps/<서비스>/values.yaml   서비스 기본 값
   envs/<환경>/<서비스>.yaml    환경 값(이미지 다이제스트, 복제본, 자원)
   envs/<환경>/flags/          릴리스 플래그 정의(§5.4)
-  platform/                   클러스터 애드온(ArgoCD, Argo Rollouts, Kyverno, KEDA, Karpenter, External Secrets, cert-manager, OTel 수집기 3종과 exporter(ADR-0076), 메시(Istio 앰비언트, ADR-0082), Flink Kubernetes Operator)
+  platform/                   클러스터 애드온(ArgoCD, Argo Rollouts, Kyverno, KEDA, Karpenter, External Secrets, cert-manager, OTel 수집기 3종과 exporter(ADR-0076), 메시(Istio 앰비언트, ADR-0082))
   policies/                   Kyverno 정책
   projects/                   ArgoCD AppProject(가상 팀별)와 ApplicationSet
   calendar/freeze.json        변경 동결 달력이 쓴 창 목록(§8.2, 봇이 갱신)
@@ -328,14 +326,14 @@ peaket-gitops/
   | `queue` | queue | queue-svc, admission-ctrl | 핫패스 | 없다 |
   | `purchase` | purchase | purchase-svc, realtime-gw, payment-svc | 핫패스(payment-svc는 일반) | 없다 |
   | `ticket` | ticket | ticket-svc | 일반 | 없다 |
-  | `trust` | trust | trust-svc, Flink `trust-reassess` | 일반, 잡은 데이터 | 없다 |
+  | `trust` | trust | trust-svc, 재평가 작업자 `trust-reassess` | 일반 | 없다 |
   | `core` | core | identity-svc, core-svc와 notify 워커, ops-svc | 일반(notify 워커는 Spot 허용) | 없다 |
   | `web` | frontend | 웹 앱 서버·파트너 앱 서버(Next.js, 추천 적용 2026-10-21, ADR-0079 결정 27) | 웹 앱 서버는 핫패스, 파트너 앱 서버는 일반 | 없다 |
-  | `data` | data | Flink `ops-rt`·`analytics-ingest`, `rt-pulse`, ClickHouse, 마감 실행기·dbt Job·랭킹 게시 잡 | 데이터 | Karpenter(필요한 만큼 서버를 붙이고 떼는 도구) NodePool `limits`의 80% [가정] |
+  | `data` | data | 스트림 작업자 `ops-rt`·`analytics-ingest`, `rt-pulse`, ClickHouse, 마감 실행기·dbt Job·랭킹 게시 잡 | 데이터 | Karpenter(필요한 만큼 서버를 붙이고 떼는 도구) NodePool `limits`의 80% [가정] |
   | `observability` | observability | Prometheus·Mimir·Loki·Tempo·Pyroscope·Alertmanager·Grafana | 관측 | Karpenter NodePool `limits`의 80% [가정] |
   | `otel` | platform | OTel 수집기 3종(에이전트는 모든 노드의 DaemonSet, ADR-0076)과 exporter | 관측, 에이전트는 모든 노드 | 없다 |
   | Envoy Gateway(차트 기본값) | platform | 컨트롤러와 gw-queue·gw-fan·gw-partner·gw-ops·gw-scanner 프록시 | 프록시는 핫패스 | 없다 |
-  | 그 밖의 애드온(차트 기본값) | platform | ArgoCD, Argo Rollouts, Kyverno, KEDA(대기 작업량 같은 지표로 파드 수를 늘리고 줄이는 도구), Karpenter, External Secrets, cert-manager, Flink Kubernetes Operator(네임스페이스 `flink-operator`, docs/streaming.md §2.2), 메시 제어 평면 | 일반 | 없다 |
+  | 그 밖의 애드온(차트 기본값) | platform | ArgoCD, Argo Rollouts, Kyverno, KEDA(대기 작업량 같은 지표로 파드 수를 늘리고 줄이는 도구), Karpenter, External Secrets, cert-manager, 메시 제어 평면 | 일반 | 없다 |
   | `ops-breakglass` | platform | 비상 런북(장애가 났을 때 따라 하는 절차서) Job(docs/infra.md §9) | 일반 | 없다 |
   | `platform` | platform | 변경 동결 달력 `freeze-calendar`·`freeze-guard`(§8.2), 증거 수집기 `evidence-collector`(docs/observability.md §5) | 일반 | 없다 |
 
@@ -392,7 +390,7 @@ flowchart LR
 | realtime-gw(WebSocket) | 한 파드씩 롤링하며 연결 비우기 | 재연결률, 델타(바뀐 좌석만 담은 작은 메시지) 전파 지연 | 롤링 | §6.4 |
 | Envoy 게이트웨이 프록시 | Envoy Gateway가 관리하는 롤링(Envoy: 요청을 받아 안쪽 서비스로 넘기는 프록시 서버), PDB | 게이트웨이 SLI(실제로 재는 서비스 품질 값) | 이전 버전 | §6.4 |
 | Kafka 소비자·워커(notify, Outbox 릴레이) | 한 파드씩 롤링 | 소비 지연, 오류 | 롤링 | §6.5 |
-| Flink 잡 | 세이브포인트(업그레이드나 되돌리기 때 일부러 남기는 작업 상태 저장본) 업그레이드 | 체크포인트(작업 상태를 주기적으로 저장해 두는 지점) 성공, 관제 실시간 표 신선도(심장 박동), 늦어서 버린 수 | 이전 세이브포인트로 복구 | §6.5 |
+| 스트림 작업자 | 롤링(새 파드 1개를 먼저 띄우고 우아한 종료) | 첫 묶음 성공, 관제 실시간 표 신선도(심장 박동), 소비 밀림, 거절 수 | 이전 이미지로 롤링 | §6.5 |
 | CronJob·Job(close-runner, ranking-publisher, 정산 작업, freeze-calendar, audit-anchor) | 다음 실행부터 새 버전 | 실행 결과 | 이전 이미지 | 실행 중인 작업은 옛 버전으로 끝낸다 |
 | Next.js 앱 서버(web, partner) | 카나리 | 오류·지연·RUM | 중단 | §6.6 |
 | 정적 자산·PWA·MF 원격 | 배포별 경로에 추가만 하고 목록을 바꾼다 | E2E | 목록을 되돌린다 | §6.6 |
@@ -437,7 +435,7 @@ flowchart LR
 
 - **Kafka 스키마 순서**: Schema Registry 호환 모드는 BACKWARD_TRANSITIVE다. BACKWARD 계열은 새 스키마의 소비자가 옛 데이터를 읽는 것을 보장한다. 그래서 소비자를 먼저, 생산자를 나중에 배포한다(Confluent 문서). TRANSITIVE를 쓰는 것은 보관 7일 안의 옛 메시지를 최신 스키마로 다시 읽는 재적재(analytics) 때문이다. 필드 삭제와 의미 변경은 확장·축소로 한다.
 - **소비자 재조정**: kafkajs는 협력적 재조정을 지원하지 않는다. 그래서 롤링 중 파드가 바뀔 때마다 그룹 전체가 재조정된다. 한 파드씩 배포하고, 처리는 멱등으로 하며(ADR-0026), 소비 지연에 경보를 건다. 클라이언트 교체는 wbs 0.5.1 PoC 뒤 새 ADR로 정한다(§4.4).
-- **Flink**: Flink Kubernetes Operator의 `savepoint` 업그레이드 모드를 쓴다. 잡을 세이브포인트와 함께 멈추고, 그 세이브포인트로 다시 시작한다. 연산자 UID는 고정하고, 상태 스키마는 호환되는 방향으로만 바꾼다. 세이브포인트가 맞지 않으면 새 잡은 같은 소비자 그룹이 마지막 체크포인트 때 커밋한 오프셋(메시지를 어디까지 읽었는지 나타내는 위치 번호)부터 읽는다. 이때 빈 구간은 생기지 않고 겹침만 생긴다. 겹침은 브론즈의 중복 허용·실버의 중복 제거와 관제 실시간 표 덮어쓰기가 흡수한다. 관제 실시간 잡의 누적값은 브론즈에서 다시 계산한 시작값으로 채운다(docs/streaming.md §4.7·§8, 추천 적용 2026-10-20, ADR-0071). 업그레이드 중에는 잡이 잠깐 멈추므로 동결 창과 마감 실행 중에는 하지 않는다. Operator 자동 확장은 끈다(확장도 재시작이다). 병렬도 변경은 업그레이드와 같은 규칙을 따른다. Flink·커넥터 버전은 docs/streaming.md §2.1에 고정하고, 마이너 버전 올리기는 PR에서 세이브포인트 호환을 시험한 뒤에만 한다. 잡 PR의 CI는 호환 시험을 돌린다. 직전 릴리스로 고정 사건을 돌려 세이브포인트를 뜨고, 그것을 새 판으로 복원한다(`allowNonRestoredState: false`, D-T20, ADR-0072). 되돌리기는 이전 이미지로 하는 같은 세이브포인트 업그레이드다. 상태 모양을 바꾼 판은 옛 판이 새 세이브포인트를 읽는지도 시험한다.
+- **스트림 작업자**: 롤링으로 올린다. 새 파드 1개가 준비된 뒤 옛 파드를 하나씩 멈추고, 옛 파드는 처리 중인 묶음을 마쳐 커밋한 뒤 소비자 그룹에서 나간다(우아한 종료, §6.4). 작업자에는 상태가 없어, 새 파드는 커밋한 오프셋(메시지를 어디까지 읽었는지 나타내는 위치 번호)부터 읽는다. 이때 빈 구간은 생기지 않고 겹침만 생긴다. 겹침은 브론즈의 중복 허용·실버의 중복 제거와 관제 실시간 표의 조회 시점 집계(`eventKey`로 중복 제거)가 흡수한다(docs/streaming.md §8, 추천 적용 2026-10-27, ADR-0099). 실시간 원시 표의 열은 더하기만 하고, 새 열을 읽는 뷰와 작업자를 먼저, 생산자를 나중에 배포한다. 동결 창과 마감 실행 중에는 올리지 않는다. 복제 수는 고정하고, 바꿀 때도 같은 규칙을 따른다. 작업자 PR의 CI는 롤링 판 올리기 시험(D-T20)을 돌린다. 되돌리기는 이전 이미지로 하는 같은 롤링이다.
 - **CronJob·Job**: 이미지가 바뀌면 다음 실행부터 새 이미지를 쓴다. 마감 실행처럼 회차 단위로 멱등인 작업은 중간에 바뀌어도 다시 돌리면 같은 결과가 나온다(ADR-0052).
 
 ### 6.6 프론트엔드·PWA·엣지
@@ -761,7 +759,7 @@ peaket-infra/
 | D-T17 | 오픈 시각을 수요일 04:10(KST)으로 등록 | 오픈 간격 규칙 검사와 같은 자리에서 거부된다(관리형 유지보수 창) |
 | D-T18 | 로컬 kind에서 파드 하나에 `peaket.io/diagnose=heap@<요청 시각>` 주석을 단다(ADR-0070) | 그 파드가 준비 상태를 내리고 진행 중인 요청을 마친다. 그 뒤 진단 보고서와 힙 스냅샷을 증거 저장소(LocalStack S3)에 올리고 다시 뜬다. 다시 뜬 프로세스는 남은 주석 때문에 같은 수집을 되풀이하지 않는다. 다른 파드의 오류는 늘지 않는다. 메모리 여유가 힙의 두 배보다 적으면 스냅샷을 건너뛰고 그 사실을 기록한다. 보고서에 환경 변수가 없다. `--disable-sigusr1`이 없는 Node 파드는 Kyverno가 거부한다. 주석부터 업로드까지 걸린 시간을 적는다 |
 | D-T19 | 서비스 템플릿의 준비 조건에 Redis 호출을 넣은 판과, 정상 판에서 Redis를 멈춘 상태(ADR-0070) | 앞의 판은 템플릿 시험이 실패해 PR이 막힌다. 정상 판은 Redis가 멈춰도 준비 상태가 그대로이고 생존 프로브 재시작은 0이다. 요청에는 즉시 실패나 대체 경로로 답한다 |
-| D-T20 | Flink 잡에서 연산자 UID를 바꾼 판과 상태에 필드를 더한 판으로 세이브포인트 호환을 시험한다(ADR-0072) | UID를 바꾼 판은 복원이 실패해 PR이 막힌다(`allowNonRestoredState: false`). 필드를 더한 판은 복원에 성공하고, 이어서 센 누적 값도 끊김 없이 같다 |
+| D-T20 | 스트림 작업자 판 올리기: 사건을 계속 보내면서 작업자를 롤링으로 올리고, 중간에 옛 파드를 강제로 종료한다(ADR-0099. 2026-10-20 ADR-0072의 세이브포인트 호환 시험을 바꿨다) | 새 파드는 커밋한 위치부터 이어 읽고, 판매 좌석·금액 누적이 끊김 없이 정답과 같다(겹친 행은 읽을 때 지운다). 쓰기 성공 전에 커밋한 묶음이 없다 |
 | D-T21 | `feature/*` 가지에서 `main`으로 PR을, 같은 가지에서 `develop`으로 PR을 연다(ADR-0074) | `main` PR은 가지 규칙 검사가 실패해 병합되지 않는다. `develop` PR은 스쿼시로 병합된다 |
 | D-T22 | `release/1.5.0`을 마무리하기 전에 `main`에만 있는 핫픽스가 있다(릴리스 가지로 역병합하지 않았다) | 병합 결과 트리가 후보 트리와 달라 필수 검사가 실패한다. `main`을 릴리스 가지에 병합하고 새 후보를 데모에서 검증한 뒤에 통과한다 |
 | D-T23 | `release/1.5.0` 마무리 | `main` 병합 커밋에 `v1.5.0` 태그와 GitHub Release가 생긴다. 운영 승격 PR은 데모에서 검증한 다이제스트로 열린다(다시 빌드 없음). `develop` 역병합 PR은 병합 커밋으로 열린다 |
@@ -799,7 +797,7 @@ peaket-infra/
 - AWS Well-Architected 운영 우수성: [Mitigate deployment risks(OPS06)](https://docs.aws.amazon.com/wellarchitected/latest/operational-excellence-pillar/mitigate-deployment-risks.html), [OPS05-BP08 Use multiple environments](https://docs.aws.amazon.com/wellarchitected/latest/operational-excellence-pillar/ops_dev_integ_multi_env.html), [OPS05-BP09](https://docs.aws.amazon.com/wellarchitected/latest/operational-excellence-pillar/ops_dev_integ_freq_sm_rev_chg.html), [OPS05-BP10](https://docs.aws.amazon.com/wellarchitected/latest/operational-excellence-pillar/ops_dev_integ_auto_integ_deploy.html)
 - Argo CD [Sync Windows](https://argo-cd.readthedocs.io/en/stable/user-guide/sync_windows/), [Notifications services](https://argo-cd.readthedocs.io/en/stable/operator-manual/notifications/services/github/); Argo Rollouts [Canary](https://argo-rollouts.readthedocs.io/en/stable/features/canary/), [Analysis](https://argo-rollouts.readthedocs.io/en/stable/features/analysis/), [Rollback Windows](https://argo-rollouts.readthedocs.io/en/stable/features/rollback/), [Gateway API 플러그인](https://rollouts-plugin-trafficrouter-gatewayapi.readthedocs.io/en/latest/)
 - Karpenter [Disruption](https://karpenter.sh/docs/concepts/disruption/), [NodePools](https://karpenter.sh/docs/concepts/nodepools/); Kyverno [ImageValidatingPolicy](https://kyverno.io/docs/policy-types/image-validating-policy/); Kubernetes [Pod termination](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination-flow), [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/); Envoy Gateway [HTTP traffic splitting](https://gateway.envoyproxy.io/docs/tasks/traffic/http-traffic-splitting/)
-- Flink Kubernetes Operator [Job management](https://nightlies.apache.org/flink/flink-kubernetes-operator-docs-release-1.16/docs/managing/job-management/); Confluent [Schema evolution and compatibility](https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html); [kafkajs 저장소](https://github.com/tulios/kafkajs), [confluent-kafka-javascript](https://github.com/confluentinc/confluent-kafka-javascript)
+- Confluent [Schema evolution and compatibility](https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html); [kafkajs 저장소](https://github.com/tulios/kafkajs), [confluent-kafka-javascript](https://github.com/confluentinc/confluent-kafka-javascript)
 - Next.js [Self-hosting](https://nextjs.org/docs/app/guides/self-hosting), [deploymentId](https://nextjs.org/docs/app/api-reference/config/next-config-js/deploymentId), [cacheHandlers](https://nextjs.org/docs/app/api-reference/config/next-config-js/cacheHandlers); OpenFeature [CNCF 프로젝트](https://www.cncf.io/projects/openfeature/), [flagd syncs](https://flagd.dev/concepts/syncs/); IANA [WebSocket Close Codes](https://www.iana.org/assignments/websocket/websocket.xhtml)
 - GitHub [Actions 요금](https://docs.github.com/en/billing/concepts/product-billing/github-actions), [환경](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments), [규칙 세트](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets), [Artifact attestations](https://docs.github.com/en/actions/concepts/security/artifact-attestations), [SHA 고정 정책(2025-08-15)](https://github.blog/changelog/2025-08-15-github-actions-policy-now-supports-blocking-and-sha-pinning-actions/)
 - [SLSA 1.2](https://slsa.dev/spec/v1.2/), [SLSA 블로그 Mini Shai-Hulud](https://slsa.dev/blog/2026/05/mini-shai-hulud-what-slsa-can-and-cannot-do); Sigstore [cosign](https://docs.sigstore.dev/cosign/signing/overview/), [Rekor](https://docs.sigstore.dev/logging/overview/); NIST [SP 800-218(SSDF) v1.1](https://csrc.nist.gov/pubs/sp/800/218/final); [OpenSSF Scorecard](https://github.com/ossf/scorecard)

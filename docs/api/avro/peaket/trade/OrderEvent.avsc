@@ -137,6 +137,15 @@
       "default": null
     },
     {
+      "name": "firstInStage",
+      "type": [
+        "null",
+        "boolean"
+      ],
+      "default": null,
+      "doc": "이 주문이 이 단계(ACCEPTED·APPROVED·CONFIRMED)에 처음 들어올 때 true. 입금 되돌림 뒤 다시 확정되면 false. 관제 실시간 표가 퍼널을 주문마다 한 번 센다(ADR-0099)"
+    },
+    {
       "name": "occurredAt",
       "type": {
         "type": "long",

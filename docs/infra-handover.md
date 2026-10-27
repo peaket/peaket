@@ -56,7 +56,7 @@ flowchart TB
             NC["NAT 게이트웨이 + 고정 IP"]
             EC ~~~ RC ~~~ DC ~~~ KC ~~~ CC ~~~ NC
         end
-        S3R["S3(리전 서비스)<br/>백업 · Iceberg · Flink 상태 · 관측 백엔드 · 감사 앵커"]
+        S3R["S3(리전 서비스)<br/>백업 · Iceberg · 관측 백엔드 · 감사 앵커"]
         KMS["KMS · Secrets Manager"]
     end
     subgraph TOKYO["도쿄 리전(ap-northeast-1)"]
@@ -97,7 +97,7 @@ Karpenter(필요한 만큼 서버를 붙이고 떼는 도구)가 노드를 만�
 | --- | --- | --- | --- | --- | --- |
 | 핫패스 | Envoy 게이트웨이 프록시 다섯(gw-queue·gw-fan·gw-partner·gw-ops·gw-scanner), queue-svc, admission-ctrl, purchase-svc, realtime-gw, 웹 앱 서버(Next.js) | c7g 계열. 기본 c7g.2xlarge(8 vCPU·16GiB), xlarge~4xlarge 허용 [가정, wbs 2.12.1 측정에서 확정] | 온디맨드(정가로 계속 쓰는 서버)만. Kyverno가 핫패스 네임스페이스의 Spot을 막는다 | AZ 셋에 고르게. 게이트웨이 유형마다 최소 3, purchase-svc 최소 3, admission-ctrl은 리더 1 + 대기 2. 피크 대수는 측정 전 | docs/infra.md §4·§5, docs/devops.md §5.2, docs/architecture.md §9.5 |
 | 일반 | identity·payment·ticket·trust·ops·core 서비스와 notify 워커, 파트너 앱 서버, 클러스터 애드온(ArgoCD·Kyverno·KEDA·메시 제어 평면 등), 비상 런북 Job | m7g 계열. 기본 m7g.xlarge(4 vCPU·16GiB) [가정] | 온디맨드. notify 워커만 Spot(싸지만 회수될 수 있는 서버) 허용 | 서비스마다 최소 2, AZ 셋 | docs/infra.md §4, docs/devops.md §5.2 |
-| 데이터 | Flink 잡 셋, rt-pulse, ClickHouse와 Keeper, MongoDB, 마감 실행기·dbt Job | Flink는 m7g.2xlarge(8 vCPU·32GiB), ClickHouse·MongoDB는 r7g.2xlarge(8 vCPU·64GiB) [가정] | 관제 실시간·봇 재평가 잡과 저장소는 온디맨드. 원본 적재 잡의 TaskManager만 Spot 허용 | ClickHouse 2(AZ 둘), Keeper 3, MongoDB 3(AZ 셋). Flink 자원은 docs/streaming.md §2.5 | docs/infra.md §4, docs/streaming.md §2.5 |
+| 데이터 | 스트림 작업자(`ops-rt`·`analytics-ingest`), rt-pulse, ClickHouse와 Keeper, MongoDB, 마감 실행기·dbt Job | 스트림 작업자는 파드마다 CPU 1·메모리 1GiB [가정]라 노드 크기에 따로 기대지 않는다. ClickHouse·MongoDB는 r7g.2xlarge(8 vCPU·64GiB) [가정] | 관제 실시간 적재 작업자와 저장소는 온디맨드. 원본 적재 작업자만 Spot 허용 | ClickHouse 2(AZ 둘), Keeper 3, MongoDB 3(AZ 셋). 작업자 자원은 docs/streaming.md §2.5 | docs/infra.md §4, docs/streaming.md §2.5 |
 | 관측 | Prometheus·Mimir·Loki·Tempo·Pyroscope·Alertmanager·Grafana, 게이트웨이·클러스터 수집기(에이전트는 모든 노드의 DaemonSet) | r7g 계열. 기본 r7g.xlarge(4 vCPU·32GiB) [가정] | 온디맨드 | Mimir·Loki 인제스터는 AZ마다 한 벌(3중 복제). 할당량은 NodePool 한도의 80% [가정] | docs/observability.md §1·§10, docs/devops.md §5.2 |
 
 - 이미지가 arm64를 지원하는지는 빌드 때 확인하고, 지원하지 않는 워크로드만 같은 크기의 amd64 노드(c7i·m7i·r7i)로 둔다 [가정].
@@ -120,9 +120,9 @@ Karpenter(필요한 만큼 서버를 붙이고 떼는 도구)가 노드를 만�
 | MSK 관측 전용 | Tempo 쓰기 경로(요청 기록) | 브로커 3 [가정, wbs 4.1.4에서 확정] | kafka.m7g.large [가정] | 원인 분석 자료. SLO 경보와 자동 제어는 영향 없다 | 9098 | 보존은 가정(ADR-0077) | docs/observability.md §1, ADR-0077 |
 | ClickHouse(+Keeper) | 분석 브론즈·실버·골드, 실시간 표 `rt`, 법정 접속기록 DB, 봇 원시 신호 | 복제 2(Keeper 수는 wbs 4.3.1 PoC에서 정한다) | r7g.2xlarge 노드, gp3 볼륨 [가정] | RPO 1일·RTO 1시간. 관제 실시간 표 반영 p95 5초(NFR-009). 멈추면 관제 패널을 Prometheus 대체 표시로 바꾼다 | 9440(네이티브 TLS)·8443(HTTPS). 관제 지표 초당 3만 건(NFR-009) | `rt`·브론즈·실버 90일, 골드 2년, 접속기록 3개월, 봇 원시 30일. 일 1회 S3 백업 7일 [가정] | docs/infra.md §4·§6, docs/observability.md §9 |
 | MongoDB | 상품 카탈로그 | 복제 세트 3(오퍼레이터) | 데이터 풀 노드의 파드 [가정] | RPO 1일·RTO 1시간. 멈추면 정적·ISR 캐시가 읽기를 받는다 | 27017, TLS, SCRAM 인증 | 일 1회 S3 스냅샷 | docs/infra.md §4·§6 |
-| Flink | 관제 실시간 표, 봇 대기 중 재평가, 원본 적재 | 잡마다 애플리케이션 모드, JobManager 쿠버네티스 HA | docs/streaming.md §2.5 | 관제 실시간 표 신선도 p95 5초 미만(NFR-009) | 지표 9249(Prometheus 리포터) | 체크포인트는 마지막 1개, 세이브포인트 90일 [가정] (S3) | docs/infra.md §4, docs/streaming.md §2 |
+| 스트림 작업자 | 관제 실시간 표의 원시 적재, 봇 대기 중 재평가, 원본 적재 | 작업자마다 Deployment 2개, 상태 없음(다시 뜨면 커밋한 위치부터 읽는다) | docs/streaming.md §2.5 | 관제 실시간 표 신선도 p95 5초 미만(NFR-009) | 지표 포트(Prometheus 수집) | 상태 저장본 없음. 실시간 원시 표 보존은 docs/streaming.md §4.7 | docs/infra.md §4, docs/streaming.md §2 |
 | 관측 저장소 | 지표, 로그, 요청 기록, 프로파일 | Mimir·Loki 영역 인식 3중 복제, Tempo 마이크로서비스 모드 | 관측 풀 | 핫패스 밖. 관측이 멈춰도 SLO 경보와 자동 제어 입력은 클러스터 Prometheus가 낸다 | OTLP 4317(gRPC)·4318(HTTP) 수집기, `/metrics` 긁기 | Prometheus 15일, Mimir 원본 90일·5분 집계 13개월, Loki 30일, Tempo 14일, Pyroscope 7일(S3 백엔드) | docs/observability.md §1·§9 |
-| S3 | CDN 원본 정적 객체, 백업, Iceberg 아카이브, Flink 상태, 관측 백엔드, 진단 증거, 감사 앵커, 공개 체크포인트 | 리전 서비스 | — | 백업 버킷은 도쿄로 교차 리전 복제 | HTTPS | 버킷별 보존은 §6 | docs/infra.md §6, docs/data.md §1 |
+| S3 | CDN 원본 정적 객체, 백업, Iceberg 아카이브, 관측 백엔드, 진단 증거, 감사 앵커, 공개 체크포인트 | 리전 서비스 | — | 백업 버킷은 도쿄로 교차 리전 복제 | HTTPS | 버킷별 보존은 §6 | docs/infra.md §6, docs/data.md §1 |
 
 - Debezium(DB 변경 기록을 읽어 Kafka로 보내는 도구, Outbox 릴레이)과 Schema Registry(이벤트 스키마 저장소, Confluent)는 쓰기로 정했지만 어디에 띄울지는 정하지 않았다(docs/data.md, docs/streaming.md §2). 구현 때 이 표에 행을 더한다.
 - 메시(Istio 앰비언트) 부품은 노드 프록시(ztunnel)가 모든 노드에, 웨이포인트는 서비스 사이 gRPC를 받는 서비스마다 여러 AZ에 여러 벌로 돈다(docs/infra.md §8, ADR-0082).
@@ -148,7 +148,7 @@ Karpenter(필요한 만큼 서버를 붙이고 떼는 도구)가 노드를 만�
 | 1등급: 판매 경로 | 온세일 판매가 멈춘다 | CloudFront 배포 셋, NLB, gw-queue·gw-fan, queue-svc, admission-ctrl, purchase-svc, payment-svc, 웹 앱 서버, Redis 대기열·좌석, Aurora purchase·payment, 결제사 | AZ 셋에 나눔, 오픈 전 프리워밍(T-40분 [가정]), 변경 동결 창, 온세일 에러 버짓(목표가 허용하는 실패의 총량, NFR-014) |
 | 1등급: 공연 당일 | 입장 기록과 동기화가 막힌다. 스캐너는 오프라인 판정으로 버틴다 | gw-scanner, ticket-svc, Aurora ticket(+도쿄 보조 클러스터) | 게이트 판정 NFR-010, 리전 장애 때 도쿄 읽기 |
 | 2등급: 판단·보조 | 판매는 이어지지만 판단·보조 기능이 줄어든다 | realtime-gw(실시간 좌석), identity-svc(로그인), trust-svc(캐시 규칙으로 축소 운영), ops-svc·관제 콘솔(대역 외 런북이 대신), MSK 거래·제어, Redis 세션·캐시 | 각 Degraded Mode(큰 장애 때 핵심만 지키고 부가 기능을 줄여 버티는 모드) 규칙, planning/03-policies-glossary.md §1.3 |
-| 3등급: 사후·분석·관측 | 판매와 판단 숫자는 이어지고 분석·원인 자료가 늦어진다 | ClickHouse, Flink 원본 적재, MSK 텔레메트리·관측, 관측 저장소, MongoDB(캐시가 받음), core-svc의 비핵심 기능 | RPO 1일·RTO 1시간 수준, 외부 감시가 관측 장애를 받는다 |
+| 3등급: 사후·분석·관측 | 판매와 판단 숫자는 이어지고 분석·원인 자료가 늦어진다 | ClickHouse, 원본 적재 작업자, MSK 텔레메트리·관측, 관측 저장소, MongoDB(캐시가 받음), core-svc의 비핵심 기능 | RPO 1일·RTO 1시간 수준, 외부 감시가 관측 장애를 받는다 |
 
 ## 4. 데이터 흐름도(DFD)
 
@@ -170,7 +170,7 @@ flowchart LR
     end
     subgraph TB3["경계 3: 서비스 메시(mTLS, 내부 신원)"]
         Q["queue-svc · admission-ctrl"]; P["purchase-svc · payment-svc"]; T["ticket-svc"]; I["identity-svc · trust-svc"]; O["ops-svc · core-svc"]
-        RLY["Outbox 릴레이(Debezium)"]; FL["Flink 잡 셋"]
+        RLY["Outbox 릴레이(Debezium)"]; FL["스트림 작업자 셋"]
     end
     subgraph TB4["경계 4: 저장소(KMS 저장 암호화)"]
         RD["Redis 셋"]; AU["Aurora 넷"]; KF["MSK 셋"]; CH["ClickHouse"]; MG["MongoDB"]; S3B["S3 백업·Iceberg"]
@@ -205,7 +205,7 @@ flowchart LR
 
 ### 4.2 관제·관측(직접 만든 감시·제어 시스템)
 
-관제 콘솔, 관제 실시간 표(Flink `ops-rt`), 진단 증거 수집기, 감사 기록 공개 앵커는 PEAKET이 직접 만드는 시스템이다. 그 데이터 흐름을 따로 그린다. 표준 수집 도구(OpenTelemetry, 지표·로그·요청 기록을 모으는 공통 표준과 도구)의 동작은 docs/observability.md §1이 정본이다.
+관제 콘솔, 관제 실시간 표(스트림 작업자 `ops-rt`와 조회 시점 집계), 진단 증거 수집기, 감사 기록 공개 앵커는 PEAKET이 직접 만드는 시스템이다. 그 데이터 흐름을 따로 그린다. 표준 수집 도구(OpenTelemetry, 지표·로그·요청 기록을 모으는 공통 표준과 도구)의 동작은 docs/observability.md §1이 정본이다.
 
 ```mermaid
 flowchart LR
@@ -237,7 +237,7 @@ flowchart LR
     PR --> AM --> IRM
     AM -.Watchdog.-> HC
     PR & LK & OK -->|"판단 숫자·원인 링크"| OPS
-    RTT["Kafka → Flink ops-rt → ClickHouse rt"] --> OPS
+    RTT["Kafka → ops-rt 작업자 → ClickHouse rt(조회 시점 집계)"] --> OPS
     UI <-->|"GraphQL·Socket.IO"| OPS
     OPS -->|"명령(검증·2인 승인)"| CTL
     JOB -.TCP 대역 외.-> CTL
@@ -283,7 +283,7 @@ SEV1~SEV3은 장애 심각도 등급이다(숫자가 작을수록 심각하다, 
 | 대기 상태 파일 CDN·원본 오류 | 대기열 CDN 캐시 오류율 > 1% 1분 | CloudFront 원본 그룹이 요청마다 S3 사본으로 넘김 | RB-04: S3 사본 고정이 필요하면 명령 6 | — | G-03 |
 | 공연 페이지 원본 오류 | 공연 정보 에러 버짓 소진 경보 | `stale-if-error`로 캐시 응답 | 원인 서비스 확인 | — | G-04 |
 | 결제사 지연·장애 | 결제 확정 소요 p99 > 5초 또는 서킷 브레이커(계속 실패하는 호출을 잠시 끊는 장치) 열림 | 재시도 큐, 홀드를 승인 기한까지 연장, 새 결제 진입 일시 정지(결제 접수 전 홀드의 남은 시간을 멈춤, ADR-0085)와 조건이 풀리면 자동 재개 | RB-07: 일시 정지 확인, 결제사 전환 판단(명령 6: commander 요청과 요청자가 아닌 operator 이상 1인 승인, 자동 전환 없음) | — | G-05, G-15 |
-| Flink 잡 장애 | 재시작 반복·소비 대기 증가 등 SEV3, 실시간 표 신선도 Degraded | 관제 패널을 Prometheus 대체 표시로 | RB-34 | — | G-07 |
+| 스트림 작업자 장애 | 재시작 반복·소비 밀림 증가·삽입 재시도 등 SEV3, 실시간 표 신선도 Degraded | 관제 패널을 Prometheus 대체 표시로 | RB-34 | — | G-07 |
 | 셔플 비콘 지연 | drand 대기 60초 넘음 SEV1 | 셔플 멈춤('순서 계산 중' 표시) | RB-35: 더 기다릴지 commander가 정함, 비상 셔플은 commander 두 명 서명 | — | RB-35 절차 |
 | 불변식 위반 의심 | 오버셀·이중 결제·60초 넘은 결제-발권 불일치 SEV1 | — | RB-36: 확인 → 판매 일시정지(명령 3) 검토 → 바로잡기 → 인시던트 선언 | — | — |
 | 오류 없이 처리량이 줄어듦 | 처리량 급감 SEV2 | — | RB-33: 막힌 단계 찾기, 최근 변경이면 되돌리기(RB-23), 모르면 명령 2 | 탐지 6분 [가정] 안 | G-25 |
@@ -322,14 +322,14 @@ SEV1~SEV3은 장애 심각도 등급이다(숫자가 작을수록 심각하다, 
 | 연계정보 해시·사람 식별값 | Aurora 공유(identity) | 계정 보유 기간 | 연계정보 HMAC 키, pid HMAC 키 | identity-svc | 원문은 받자마자 지운다 | docs/security/secrets-and-keys.md |
 | 상품 카탈로그 | MongoDB(일 스냅샷) | 상품 운영 기간 | 저장소 암호화 키(볼륨) | core-svc shop | — | docs/data.md §1 |
 | 이벤트 | MSK 거래·제어, 텔레메트리 | 7일 | 저장소 암호화 키 | 발행 서비스 | — | docs/infra.md §6 |
-| 분석 브론즈·실버 | ClickHouse | 90일 | 저장소 암호화 키 + 분석 가명 키(가명) | Flink `analytics-ingest` | 실버 조회는 가명정보 취급자만 | docs/observability.md §9 |
+| 분석 브론즈·실버 | ClickHouse | 90일 | 저장소 암호화 키 + 분석 가명 키(가명) | 원본 적재 작업자 `analytics-ingest` | 실버 조회는 가명정보 취급자만 | docs/observability.md §9 |
 | 분석 골드 | ClickHouse → S3 Iceberg | 2년, Iceberg 영구 | 저장소 암호화 키 | dbt 마감 실행기 | Grafana 비교 대시보드는 읽기 전용 사용자 | 같음 |
 | 법정 접속기록 | ClickHouse 접속기록 DB | 3개월 | 저장소 암호화 키, 일 해시 앵커 | 게이트웨이 접근 로그 사본 | 적법한 영장을 확인한 경우에만 반출 | 같음 |
-| 봇 원시 신호 | ClickHouse | 30일 | 탐지 가명 키(가명) | Flink `trust-reassess` | — | 같음 |
+| 봇 원시 신호 | ClickHouse | 30일 | 탐지 가명 키(가명) | 재평가 작업자 `trust-reassess` | — | 같음 |
 | 지표·로그·요청 기록·프로파일 | Mimir·Loki·Tempo·Pyroscope(S3 백엔드) | 90일·13개월, 30일, 14일, 7일 | 저장소 암호화 키, 로그 가명 키 | 수집기, Prometheus, 서비스(Pyroscope SDK) | Grafana 조직 둘('PEAKET 관측', 'PEAKET 제한') | docs/observability.md §9 |
 | 진단 증거 | 운영 계정 전용 S3 버킷 | 14일 [가정](인시던트에 묶이면 30일 [가정]까지) | 진단 증거 KMS 키 | 서비스(자기 접두사에 쓰기만), 증거 수집기 | 복호화는 긴급 접근 역할만, 읽기는 CloudTrail로 기록 | docs/infra.md §9 |
 | 공개 감사 체크포인트 | 공개 게시 버킷(S3 Object Lock) | 7년 | 감사 체크포인트 서명 키(서명) | 게시 잡 `audit-anchor` | 누구나 검증 | docs/observability.md §9 |
-| Flink 상태 | S3 `peaket-flink-state-<환경>` | 체크포인트 마지막 1개, 세이브포인트 90일 [가정] | 저장소 암호화 키 | Flink 잡(자기 접두사만) | — | 같음 |
+| 관제 실시간 원시 표 | ClickHouse `rt` | 판매류·대기열·홀드 400일, 판정 90일, 심장 박동 7일 [가정] | 저장소 암호화 키 | 실시간 적재 작업자 `ops-rt` | 사람 식별값을 싣지 않는다 | docs/streaming.md §4.7 |
 | 백업 | S3 백업 전용 버킷(도쿄 교차 리전 복제) | 저장소마다(docs/infra.md §6) | 저장소 암호화 키, 도쿄 사본은 도쿄 키로 다시 암호화 | 백업 작업 | 백업 역할만 읽음 | docs/infra.md §6 |
 | 비밀 | Secrets Manager | 교체 주기마다 | KMS | 각 서비스(External Secrets Operator) | — | docs/security/secrets-and-keys.md |
 | 기기 키·오프라인 티켓 | 사용자 브라우저 IndexedDB | 티켓 수명 | 브라우저의 꺼낼 수 없는 WebCrypto 키 | 월렛 PWA, 스캐너 PWA | 서버는 공개키만 | docs/data.md §1 |
@@ -367,7 +367,7 @@ Grafana 대시보드는 Git에 코드로 두고 배포한다(Dashboards as Code)
 | 서비스 지도 | 서비스 사이 호출 관계(연결만. 요청 수·지연은 꼬리 표본이라 Prometheus 지표로 본다, ADR-0078) | 엔지니어 | 원인 분석 | Tempo 서비스 그래프 | docs/observability.md §6 |
 | 경보 위생 | 조치 없이 닫힌 경보 찾기 | 플랫폼(SRE) 온콜 책임자 | 월 1회 보고와 함께 | 대기에서 발생으로 넘어간 비율 | docs/observability.md §5 |
 | 관측 스택 자체 | 수집기·저장소 상태 | 플랫폼(SRE) | 관측 신호 SEV3 뒤 | 내보내기 실패, 큐 사용률, Tempo 소비 지연, 원격 쓰기 | docs/observability.md §10 |
-| Flink 잡 | 잡 상태와 신선도 | 데이터 엔지니어 | Flink 신호 뒤 | 재시작, 소비 대기, 체크포인트, 신선도 | docs/streaming.md §14 |
+| 스트림 작업자 | 작업자 상태와 신선도 | 데이터 엔지니어 | 스트림 작업자 신호 뒤 | 재시작, 소비 밀림, 삽입 재시도, 조회 시간, 신선도 | docs/streaming.md §14 |
 | 배포와 DORA 지표 | 변경 리드타임·실패율 등 | 플랫폼, 소유자 | 주간 | 배포 주석, DORA 5종 | docs/devops.md §13 |
 | 비교 대시보드 | 지난 회차와 이번 회차 비교 | 운영·사업 담당 | 회차 마감 뒤 | 골드의 확정 숫자 | docs/features/analytics.md §8.1 |
 | PostgreSQL 쿼리 | 느린 쿼리 원인 | 지정한 DB 담당 엔지니어 | 원인 분석 | 쿼리 통계(제한 조직 'PEAKET 제한') | docs/observability.md §9 |

@@ -71,7 +71,7 @@ flowchart TD
     end
 
     subgraph Stream ["스트림 처리"]
-        FLK["Apache Flink<br>(ops-rt · trust-reassess · analytics-ingest)"]
+        FLK["스트림 작업자<br>(ops-rt · trust-reassess · analytics-ingest)"]
     end
 
     FanQueue --> CF --> GW_Q --> S_Queue
@@ -176,7 +176,7 @@ flowchart LR
 | **Redis (세션)** | 소셜 로그인 세션, 공통 캐시, 굿즈 재고 | 범용 캐싱 및 고속 조회 |
 | **PostgreSQL (Aurora)** | 주문·좌석 최종 확정, 결제 원장, 티켓 원장, 계정 | 데이터 유실을 절대 용납하지 않는 ACID 영구 장부 |
 | **Kafka** | 마이크로서비스 간 비동기 이벤트 스트리밍 | 한쪽의 폭주나 지연이 다른 쪽을 막지 않음 |
-| **ClickHouse** | Flink가 Kafka 이벤트로 만든 관제 실시간 표(판매 누적·잔여석 등), 공연 리포트용 분석 장부, 봇 행동 신호 원본 | 수억 건의 대규모 이벤트를 초 단위로 고속 분석 |
+| **ClickHouse** | 스트림 작업자가 Kafka에서 옮겨 쌓은 관제 실시간 사건(읽을 때 판매 누적·잔여석 등을 센다), 공연 리포트용 분석 장부, 봇 행동 신호 원본 | 수억 건의 대규모 이벤트를 초 단위로 고속 분석 |
 | **MongoDB** | 굿즈 및 복합 패키지 상품 스키마 | 상품 유형마다 옵션이 유연하게 달라지는 도큐먼트 모델 |
 
 데이터를 나눠 담고(파티션), 여러 벌 복제하고, 백업하는 장치는 이미 저장소마다 있다. 2026-10-22에 규칙 세 가지를 더했다([ADR-0082](../docs/adr/0082-istio-ambient-mesh-app-boundary-meshless-portfolio-runs.md)).
@@ -246,4 +246,4 @@ flowchart TD
 * [docs/infra.md §9](../docs/infra.md): 인프라 보안 구성
 * [docs/infra.md §11](../docs/infra.md): 클라우드 비용 통제 전략 및 인프라 FinOps 설계
 * [docs/devops.md §6, §8](../docs/devops.md), [16편](16-change-and-deploy.md): 서버 종류별 배포 방법, 변경 동결 창과 정비 시간
-* [docs/streaming.md](../docs/streaming.md), [ADR-0071](../docs/adr/0071-flink-design-verification-rt-upsert-heartbeat-bot-reassess.md), [ADR-0072](../docs/adr/0072-flink-detailed-design-operators-config-capacity-operations.md): Kafka와 ClickHouse 사이의 Flink 잡 세 개(관제 실시간 표 `ops-rt`, 봇 대기 중 재평가 `trust-reassess`, 원본 적재 `analytics-ingest`)
+* [docs/streaming.md](../docs/streaming.md), [ADR-0099](../docs/adr/0099-drop-flink-typescript-stream-workers-read-time-aggregation.md): Kafka와 ClickHouse·Redis 사이의 스트림 작업자 셋(관제 실시간 원시 적재 `ops-rt`, 봇 대기 중 재평가 `trust-reassess`, 원본 적재 `analytics-ingest`)과, 스트림 처리 엔진 Flink를 쓰지 않는 이유·다시 볼 조건. 그 전의 Flink 설계는 [ADR-0071](../docs/adr/0071-flink-design-verification-rt-upsert-heartbeat-bot-reassess.md)·[ADR-0072](../docs/adr/0072-flink-detailed-design-operators-config-capacity-operations.md)에 있다
