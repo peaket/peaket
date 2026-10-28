@@ -35,7 +35,7 @@
 
 - **null 규칙**: asyncapi `required`에 있는 필드는 null을 허용하지 않는다. JSON 기본값이 있는 필드(`TrustVerdict.shadow`의 false)는 null 없이 그 기본값을 둔다. 그 밖의 필드는 `["null", 타입]`과 기본값 null이다. null을 첫 갈래에 둔다. Avro 명세가 유니온의 기본값을 처음으로 맞는 갈래로 읽기 때문이다.
 - **설명**: asyncapi 설명을 `doc`에 그대로 옮겼다. 설명이 없는 `eventId`·`pid`에는 '회차 ID'·'사람 식별값'만 붙였다. 모든 메시지에 있던 `schemaVersion`(메시지 형식 판)과 `OrderEvent.idempotencyKey`는 2026-10-28에 뺐다. 판은 레지스트리의 스키마 ID가 말하고, 중복 제거 키는 `eventKey` 하나이기 때문이다. `SettingChanged.value`는 문자열 JSON에서 키별 레코드 일곱(`BotLevelValue` 등)의 유니온으로 바꿨다(추천 적용 2026-10-28, 기술 검토 낮음-026, asyncapi info '공통 필드').
-- **Kafka 키**: 키는 레지스트리 직렬화기로 감싸지 않고 UTF-8 문자열로 둔다. 레지스트리 형식은 메시지 안에 스키마 ID를 넣으므로(Confluent 문서), 키를 그렇게 쓰면 같은 회차라도 스키마 ID에 따라 키 바이트가 달라질 수 있다. 키 필드는 docs/streaming.md §7을 따른다.
+- **Kafka 키**: 키는 레지스트리 직렬화기로 감싸지 않고 UTF-8 문자열로 둔다. 레지스트리 형식은 메시지 안에 스키마 ID를 넣으므로(Confluent 문서), 키를 그렇게 쓰면 같은 회차라도 스키마 ID에 따라 키 바이트가 달라질 수 있다. 키 필드는 docs/streaming.md §7을 따른다. 모든 생산자는 파티셔너(키로 파티션을 고르는 규칙) `murmur2_random`(자바 클라이언트 기본과 같은 murmur2 해시)을 쓴다. librdkafka 기본(`consistent_random`, CRC32)과 섞이면 같은 회차가 다른 파티션으로 가 '한 회차는 토픽마다 한 파티션' 전제가 깨진다(docs/streaming.md §2.6, D-T45, ADR-0142 결정 3).
 - **추적 정보**: W3C Trace Context(docs/observability.md §2)는 스키마 필드가 아니라 Kafka 레코드 헤더로 보낸다.
 
 ## 3. 등록과 호환

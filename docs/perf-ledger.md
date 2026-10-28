@@ -26,7 +26,7 @@ perf-ledger/
     k6-summary.json         k6 부하 도구 출력 원시 요약 JSON
     metrics-summary.json    쿼리 식별자별 요약(예열을 뺀 구간의 p50·p99·최대·평균). collect.py가 원본에서 만든다
     metrics/<name>.csv      Prometheus 시계열 메트릭 원본 (쿼리 식별자별 분리. 큰 원본이라 Git이 아니라 S3 원본 버킷에 둔다, §9)
-    invariants.csv          비즈니스 불변식 검증 결과 (총 판매 수 ≤ 좌석 재고, 좌석당 판매 1건, 인당 구매 수 ≤ 한도, 이중 결제 0건)
+    invariants.csv          비즈니스 불변식 검증 결과 (docs/verification.md §2.5의 불변식 SQL: 차례 전 입장, 같은 세대 순번 중복, 오버셀, 1인 한도 초과, 이중 결제, 결제-발권 불일치, 정산 돈 불변식)
     traces/                 p99 이상치 요청의 OpenTelemetry 분산 트레이스 JSON (선택 사항)
     grafana/                측정 구간 Grafana 대시보드 렌더링 이미지 및 스냅샷 URL (보조 자료)
     infra.txt               실행 당시 측정 환경 사양(로컬은 CPU·메모리·WSL 설정과 CPU 배치, 클라우드는 인스턴스 타입), 커널 및 소프트웨어 버전 원본
@@ -37,13 +37,14 @@ perf-ledger/
     backend_cost.csv        관측 백엔드 비교의 비용 환산 입력·가격·결과 (§11, wbs 4.8.2 비교 실행 한정)
     confusion.csv           봇 탐지 등급·라운드별 오차 행렬과 사람 층별 집계 (K6 봇 탐지 한정, ADR-0039·0048)
     bot_cost.csv            등급·라운드별 1장당 획득 비용 원본 수량 (K6, §10.4)
+    bot_outcomes.csv        봇 세션 끝 결과(등급·라운드·풀이 성공률별, K6, §10.5)
     bot_prices.json         1장당 획득 비용 단가 (K6, §10.4)
     SHA256SUMS              디렉터리 내 전체 산출물 파일(S3에 둔 원본 포함)의 암호학적 해시 지문 목록
   charts/                   charts.py가 원시 CSV로부터 생성한 표준 SVG 차트
   timestamps/<날짜>.txt     그날 끝난 실행들의 `SHA256SUMS` 해시 목록과, 그 파일의 OpenTimestamps 증명 `<날짜>.txt.ots`(§9)
 ```
 
-Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2026-10-28, 기술 검토 낮음-056). Git에는 `manifest.json`, `k6-summary.json`, `metrics-summary.json`, `invariants.csv`, `infra.txt`, 작은 CSV(`cost.csv`·`timeline.csv`·`hint_compare.csv`·`backend_cost.csv`·`confusion.csv`·`bot_cost.csv`), `bot_prices.json`, `SHA256SUMS`, `charts/`, `timestamps/`를 둔다. 큰 원본(`metrics/*.csv`, `traces/`, `grafana/`, `stdout.log`)은 S3 원본 버킷의 `runs/<run-id>/`에 두고, Git에는 해시만 남는다. 원본 위치는 manifest의 `raw_uri`에 적는다. 그래서 측정이 쌓여도 저장소가 GitHub 권장 크기(1GB 미만이 이상적, 5GB 미만을 강하게 권함, GitHub 문서 2026-10-27 확인)를 넘지 않는다.
+Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2026-10-28, 기술 검토 낮음-056). Git에는 `manifest.json`, `k6-summary.json`, `metrics-summary.json`, `invariants.csv`, `infra.txt`, 작은 CSV(`cost.csv`·`timeline.csv`·`hint_compare.csv`·`backend_cost.csv`·`confusion.csv`·`bot_cost.csv`·`bot_outcomes.csv`), `bot_prices.json`, `SHA256SUMS`, `charts/`, `timestamps/`를 둔다. 큰 원본(`metrics/*.csv`, `traces/`, `grafana/`, `stdout.log`)은 S3 원본 버킷의 `runs/<run-id>/`에 두고, Git에는 해시만 남는다. 원본 위치는 manifest의 `raw_uri`에 적는다. 그래서 측정이 쌓여도 저장소가 GitHub 권장 크기(1GB 미만이 이상적, 5GB 미만을 강하게 권함, GitHub 문서 2026-10-27 확인)를 넘지 않는다.
 
 ### 2.2 manifest.json 필수 메타데이터 필드
 
@@ -69,6 +70,8 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | `notes` | 스팟 인스턴스 회수, 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)를 데우는 구간의 예외 처리 같은 특이 사항 | 자유롭게 적는다 |
 | `k6_eval`, `k6_plan`, `k6_cost` | K6 봇 탐지에만 쓴다. 등급·라운드별 탐지율과 Wilson 95% 구간(3단계는 목표가 없다), 등급별 하락폭, 사람 오탐(사람을 봇으로 잘못 잡는 것)과 Clopper-Pearson 단측 95% 상한(판정 세션끼리 독립 가정, 1인 1판정 세션), 층별 오탐 수, 사람 단위 확인과 사람 안 상관(ADR-0112), 사전 등록 계획 판정, 1장당 획득 비용과 웃돈별 손익(`collect.py --confusion --k6-plan --bot-cost --bot-prices`, §10) | 1단계 물량형 봇 탐지 96.2%(94.8~97.2%), 사람 오탐 1/947명(상한 0.50%, 계획 통과) |
 | `latency_crosscheck` | 같은 시간 창의 k6 p99(요청 백 건 중 아흔아홉 건이 이 시간 안에 끝난다는 뜻)와, 서버가 실제로 잰 품질 값인 서버 SLI(같은 경로에서 값을 구간별로 나눠 센 서버 히스토그램의 p99와 기준값 안 비율), 둘의 차이, '측정 지점 의심' 표시(서버 SLI는 목표 안인데 k6 값이 목표 밖일 때, ADR-0077) | 진입 k6 p99 182ms, 서버 p99 151ms·200ms 안 99.6%, 차이 31ms, 의심 아님 |
+| `pg_sim` | 결제 시뮬레이터의 기본 승인 지연 분포와 매개변수, 시험이 넣은 지연, 결제 확정 p99를 우리 몫(결제사 승인 호출 구간을 뺀 값)과 가정 분포를 더한 종단 둘로 나눈 값(docs/features/payment.md §2.1, NFR-006, 기술 검토 낮음-120) | `dist: lognormal`, `p50_ms: 300`, `p99_ms: 1500`, `own_p99_ms`, `e2e_p99_ms` |
+| `trials`, `violations`, `cp_upper` | 비율·백분위 목표마다 시행 수 n, 목표를 어긴 수 k, 정확 이항 단측 95% 상한(§7, 기술 검토 중간-002). 수집 도구 반영은 wbs 1.4.1 | `n: 3000`, `k: 0`, `cp_upper: 0.000998` |
 
 ### 2.3 서버 시계열 메트릭 규약 (Prometheus Query Alias)
 
@@ -99,7 +102,7 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 8. **산출물 자동 수집**: 결과 디렉터리를 만들고 산출물을 모으는 일은 `collect.py` 자동화 스크립트로만 한다. 엔지니어가 손으로 파일을 옮기거나 고치는 것은 금지한다.
 9. **장부 인덱스 자동 갱신**: `index.py` 스크립트를 실행해 이 문서 §5의 요약 표를 자동으로 맞춘다. 마크다운 표를 손으로 고치는 것은 금지한다.
 10. **무효 측정의 투명한 보존**: 부하 발생기 병목, 스팟 인스턴스 중도 회수, NTP 시계 오차, 인프라 사양 불일치, 데이터 불변식 위반이 드러난 측정도 지우지 않는다. `valid: false` 플래그와 자세한 무효 사유를 적어 영구 보존한다.
-11. **같은 PC에서의 측정**: 발생기와 대상을 같은 PC에서 돌리면 CPU를 나눠 쓰고, 그 배치를 `infra.txt`에 적는다. 발생기 CPU 사용률은 80% 이하로 둔다(k6 권고). WSL 안에서 CPU를 고정해도 실제 코어가 고정된다는 보장은 없으므로 반복 사이의 편차를 함께 적는다(docs/verification.md §3.2·§3.5). 점마다 호스트 지표를 `host`에 남기고, 호스트가 포화한 점은 계산에서 빼되 지우지는 않는다(ADR-0096).
+11. **같은 PC에서의 측정**: 발생기와 대상을 같은 PC에서 돌리면 CPU를 나눠 쓰고, 그 배치를 `infra.txt`에 적는다. 발생기 CPU 사용률은 80% 이하, 메모리는 90% 이하로 둔다(k6 권고, docs/verification.md §3.5 3번). WSL 안에서 CPU를 고정해도 실제 코어가 고정된다는 보장은 없으므로 반복 사이의 편차를 함께 적는다(docs/verification.md §3.2·§3.5). 점마다 호스트 지표를 `host`에 남기고, 호스트가 포화한 점은 계산에서 빼되 지우지는 않는다(ADR-0096).
 12. **클라이언트·서버 지연 대조(ADR-0077)**: 측정마다 같은 시간 창의 k6 p99와 서버 SLI를 `latency_crosscheck`에 함께 남긴다. 차이는 네트워크·게이트웨이·클라이언트 쪽 지연이다. 서버 SLI는 목표 안인데 k6 값이 목표 밖이면 '측정 지점 의심'으로 표시하고, SLI를 재는 위치(게이트웨이·서비스)를 다시 본다.
 
 ## 4. 인프라 환경 프로파일
@@ -170,7 +173,7 @@ K8(Game Day) 실행 행은 p99 칸에 장애별 탐지 시간($T_1 - T_0$)의 �
 | K5 | 랩 판정(Playwright + web-vitals, 중급 모바일 프로필) | RUM 판정은 운영 뒤라 포트폴리오에서는 설계만 |
 | K6 | 합성 봇 12칸과 판정용 사람 947명 세션 | 운영 환경 봇 침투율은 하한선 추정(출시 뒤) |
 | K7 | 결제 시뮬레이터에 장애를 넣은 1만 건 | 실제 결제사의 승인 한도·시간 초과는 계산만(추정, ADR-0036) |
-| K8 | 로컬 실행·대체 장애 Game Day(docs/verification.md §5.2) | 모의 진행(G-17·G-28)과 G-26(관측 스택 AZ 장애)은 설계만 |
+| K8 | 로컬 실행·대체 장애 Game Day(docs/verification.md §5.2) | 모의 진행(G-17·G-28·G-32·G-33)과 G-26(관측 스택 AZ 장애)은 설계만 |
 | K9 | 로컬 파드 확장 시간선 | 노드 기동 시간은 계산만(문서 인용), 온세일 1회 비용은 계산만(가격표 추정) |
 | K10 | 시뮬레이션과 기기 벤치(오프라인 판정, 중복 입장 탐지) | 실제 관리형 기기 무리와 현장 망은 설계만 |
 
@@ -192,7 +195,7 @@ K8(Game Day) 실행 행은 p99 칸에 장애별 탐지 시간($T_1 - T_0$)의 �
   - 간격은 운영 설정(docs/observability.md §4 '긁기·평가·알림 간격')과 같아야 한다. 다르면 그 실행은 K8 판정에 쓰지 않고 manifest의 `valid` 사유에 적는다. 간격을 줄인 시험 설정은 탐지 시간을 실제보다 짧게 보이게 한다.
   - 번 레이트 경보로 잡는 시나리오는 주입 세기(소진 배수 k)를 함께 적는다. SEV1(2분 창 10배)의 탐지 시간은 약 120초 × 10 ÷ k에 간격 합(약 15초)을 더한 값이라, k가 약 27보다 작으면 60초를 넘을 수 있다(docs/observability.md §4).
 - 제어 명령 전파 반영 시간 = $T_3 - T_2$
-- Game Day 시나리오 30종 전체 목록은 docs/observability.md §12에 있다.
+- Game Day 시나리오 33종 전체 목록은 docs/observability.md §12에 있다.
 - Datadog 이상 탐지 힌트 비교(소유자 결정 2026-10-21, ADR-0076 상태 줄, docs/observability.md §13): 장애마다 $T_0$·$T_1$·$T_{1d}$, 우리 규칙과 Datadog 각각의 탐지 여부, 표시한 쪽(Watchdog 로그 이상·Watchdog 지표 이상·이상 탐지 모니터)을 `runs/<run-id>/hint_compare.csv`로 남긴다. 주입과 관계없는 이상 표시는 헛경보 행으로 같은 파일에 남기고, 같은 시간대에 우리 규칙이 낸 헛경보도 센다. Datadog이 먼저 잡은 시간은 $T_1 - T_{1d}$다. 체험 기간이 14일이라 Watchdog 지표 이상이 기준선 부족으로 동작하지 않았으면 그 사실을 `valid` 사유에 적는다.
 
 ## 9. 장기 보관 및 아카이빙 정책

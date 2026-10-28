@@ -166,6 +166,15 @@
       "default": null
     },
     {
+      "name": "eventSeq",
+      "doc": "결제 하나 안에서 늘어나기만 하는 사건 순번(payment_event 행의 순번). 결과 당기기(BatchGetPayments)로 받은 결과와 같은 사건인지, 앞선 사건인지 가린다(ADR-0140)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
       "name": "eventKey",
       "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
       "type": [

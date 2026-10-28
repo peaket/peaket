@@ -2,7 +2,7 @@
   "type": "record",
   "name": "PipelinePulse",
   "namespace": "peaket.telemetry",
-  "doc": "심장 박동 사건. rt-pulse가 1초마다 telemetry.queue·telemetry.purchase·telemetry.trust-verdicts의 모든 파티션에 파티션을 지정해 넣는다(키 없음). 관제 실시간 표의 심장 박동(rt-pulse가 1초마다 각 파티션에 보냄). ops-rt는 다른 사건과 같은 연산자를 지나 실시간 표의 `_pulse` 행으로 남기고 그 밖 소비자는 건너뛴다. 신선도 SLI의 기준(ADR-0071·0072, docs/streaming.md §3·§4.5)",
+  "doc": "심장 박동 사건. rt-pulse가 1초마다 telemetry.queue·telemetry.purchase·telemetry.trust-verdicts의 모든 파티션에 파티션을 지정해 넣는다(키 없음). 관제 실시간 표의 심장 박동(rt-pulse가 1초마다 각 파티션에 보냄). ops-rt는 실시간 원시 표 `rt.pulse`에 싣고 그 밖 소비자는 건너뛴다. 신선도 SLI의 기준(ADR-0071·0099, docs/streaming.md §3·§4.5)",
   "fields": [
     {
       "name": "kind",

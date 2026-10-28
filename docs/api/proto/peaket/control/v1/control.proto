@@ -1,7 +1,8 @@
-// 제어 명령을 받는 서비스(admission-ctrl·purchase-svc·queue-svc)가 함께 구현하는 직접 제어 채널 계약.
+// 제어 명령을 받는 서비스(admission-ctrl·purchase-svc·queue-svc·payment-svc)가 함께 구현하는 직접 제어 채널 계약.
+// payment-svc는 명령 6의 대체 결제사 전환만 받는다(추천 적용 2026-10-29, ADR-0143 결정 1).
 // 초안(추천 적용 2026-10-28), 안내는 docs/api/proto/README.md.
-// 정본: docs/features/control-tower.md §3·§5(전달 경로와 제어 상태), ADR-0102(제어 전용 gRPC), ADR-0103(제어 상태와 판 번호, ack의 뜻).
-// 받는 서비스가 셋이라 패키지는 받는 서비스 이름이 아니라 peaket.control.v1 하나로 둔다(README §2의 예외).
+// 정본: docs/features/control-tower.md §3·§5(전달 경로와 제어 상태), ADR-0102(제어 전용 gRPC), ADR-0103(제어 상태와 판 번호, ack의 뜻), ADR-0143(대체 결제사 전환).
+// 받는 서비스가 넷이라 패키지는 받는 서비스 이름이 아니라 peaket.control.v1 하나로 둔다(README §2의 예외).
 syntax = "proto3";
 
 package peaket.control.v1;
@@ -10,13 +11,15 @@ import "google/protobuf/timestamp.proto";
 
 // 부르는 쪽: ops-svc, 비상 런북 Job(ops-svc가 멈췄을 때).
 // 받는 쪽은 업무 포트와 다른 제어 포트를 열고, 웨이포인트를 붙이지 않은 제어 전용 Service(<서비스>-control)로 받는다.
-// admission-ctrl은 리더 파드만 엔드포인트로 내놓고, purchase-svc·queue-svc는 파드마다 부르는 헤드리스 Service다.
+// admission-ctrl은 리더 파드만 엔드포인트로 내놓고, purchase-svc·queue-svc·payment-svc는 파드마다 부르는 헤드리스 Service다.
 // 데드라인은 1초 [가정]이다. 같은 명령 ID와 판 번호로 다시 보내면 같은 결과를 돌려준다(멱등).
 service ControlReceiver {
   // 바라는 제어 상태를 받아, 판 번호가 지금 것보다 크면 자기 저장소에 쓰고 적용한다.
   // 같거나 작은 판이면 아무것도 바꾸지 않고 지금 적용한 판 번호만 돌려준다.
   // purchase-svc는 purchase DB sale_control(원본)과 좌석 Redis s:{event:E}:ctl(사본)에, admission-ctrl 리더는
   // q:{event:E}:ctl·q:{admission}:ctl에(리더 세대 확인, ADR-0056), queue-svc는 q:{event:E}:notice에 쓴다.
+  // 대체 결제사 전환(CONTROL_KIND_PG_SWITCH)이면 payment-svc는 payment DB pg_switch에, admission-ctrl 리더는 q:{event:E}:ctl에
+  // 판 번호와 함께 쓴다. payment-svc 모든 파드는 pg_switch를 2초 [가정]마다 다시 읽어 맞추고, 새 파드는 이 표를 읽어야 준비 상태가 된다(ADR-0143 결정 1).
   rpc ApplyControl(ApplyControlRequest) returns (ApplyControlResponse);
 }
 
@@ -38,6 +41,10 @@ enum ControlKind {
   // 판매 승인의 판매 중지(planning/03 §2.14, ADR-0123). 명령 3과 같은 효과를 회차 범위로 따로 건다(admission-ctrl·purchase-svc·queue-svc).
   // 명령 3의 재개로는 풀리지 않고 판매 재개로만 풀린다. command_id는 승인 업무 ID, 바라는 상태는 {"suspended": true}다.
   CONTROL_KIND_SALE_SUSPENSION = 7;
+  // 명령 6 가운데 대체 결제사 전환(payment-svc 준비된 모든 파드·admission-ctrl 리더, 추천 적용 2026-10-29, ADR-0143 결정 1).
+  // admission-ctrl 리더는 대체 결제사의 채널 상한으로 동시 입장 목표 상한을 다시 계산한다. 범위는 scope 칸 그대로다.
+  // 바라는 상태는 {"switched": true}(해제는 false) [가정]이다. 옮겨 갈 결제사는 미리 지정한 대체 결제사다(docs/features/payment.md §2.2).
+  CONTROL_KIND_PG_SWITCH = 8;
 }
 
 message ApplyControlRequest {

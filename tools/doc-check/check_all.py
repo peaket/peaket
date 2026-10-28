@@ -1,9 +1,10 @@
 """PEAKET 문서 점검: YAML 중복 키, ID 참조, FR→시험 연결, 표, 펜스, 경로, REST 경로 규칙과 openapi 계약, 절 번호 참조,
-작업 흔적, ASVS 표, 결정이 많은 ADR의 결정별 표, 마커, WBS 일치, 기획 버전.
+작업 흔적, ASVS 표, 결정이 많은 ADR의 결정별 표, 마커, WBS 일치, 기획 버전, mermaid 그림.
 
 사용법: python tools/doc-check/check_all.py [--strict] [--json] [--coverage] [--markers-out FILE]
 종료 코드: 0 = 오류 없음, 1 = 오류 있음(--strict면 경고도 오류로 봄), 2 = 실행 실패.
-표준 라이브러리만 쓴다(Python 3.10 이상). 규칙과 예외는 tools/doc-check/README.md.
+표준 라이브러리만 쓴다(Python 3.10 이상). mermaid 문법 검사만 node와 tools/doc-check/mermaid의 의존성을 쓰고,
+없으면 경고를 내고 건너뛴다. 규칙과 예외는 tools/doc-check/README.md.
 """
 import argparse
 import collections
@@ -12,6 +13,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -940,7 +942,92 @@ def check_versions(texts, rep):
     rep.info['plan_version'] = v
 
 
-# ---------- 10. 원문 대조(선택) ----------
+# ---------- 10. mermaid 그림 ----------
+# 그림 쓰기 규칙은 planning/03 §5.5(ADR-0138). 문법은 리더기와 같은 mermaid 버전(tools/doc-check/mermaid/package.json)으로 읽는다.
+MERMAID_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mermaid')
+MERMAID_LINE_KINDS = ('flowchart', 'graph', 'stateDiagram')  # 선 수·라벨 길이를 보는 그림
+MERMAID_MAX_EDGES = 25
+MERMAID_MAX_LABEL = 40
+# mermaid 설정 maxTextSize의 기본값. 이보다 긴 그림은 읽기(parse)는 되지만 그릴 때 'Maximum text size in diagram exceeded'로 멈춘다
+MERMAID_MAX_TEXT = 50000
+MERMAID_CODE_RE = re.compile(r'^([A-Z]\d{1,2})(?=\s|$)')  # 선 라벨 앞의 전이 번호(T1, E2)
+# 선이 많아도 배치 엔진(ELK)으로 그려 교차가 적은 것을 확인한 그림은 그림 안에 이 주석과 이유를 적는다
+MERMAID_EDGE_EXCEPTION_RE = re.compile(r'^\s*%%\s*선 수 예외:\s*\S', re.M)
+
+
+def mermaid_blocks(texts):
+    blocks = []
+    for f, text in texts.items():
+        if not f.endswith('.md'):
+            continue
+        lines = text.split('\n')
+        i = 0
+        while i < len(lines):
+            if lines[i].strip() == '```mermaid':
+                j = i + 1
+                while j < len(lines) and not lines[j].strip().startswith('```'):
+                    j += 1
+                blocks.append({'id': len(blocks), 'file': f, 'line': i + 1, 'end': j + 1,
+                               'code': '\n'.join(lines[i + 1:j]) + '\n'})
+                i = j + 1
+            else:
+                i += 1
+    return blocks
+
+
+def check_mermaid(texts, rep):
+    blocks = mermaid_blocks(texts)
+    node = shutil.which('node')
+    if not node or not os.path.isdir(os.path.join(MERMAID_DIR, 'node_modules', 'mermaid')):
+        rep.warn('mermaid', 'tools/doc-check/mermaid', '문법 검사를 건너뜀(node 22 이상과 이 폴더에서 `npm ci --ignore-scripts`가 필요)')
+        rep.info['mermaid'] = {'blocks': len(blocks), 'checked': 0}
+        return
+    payload = json.dumps([{'id': b['id'], 'code': b['code']} for b in blocks], ensure_ascii=False)
+    run = subprocess.run([node, 'parse.mjs'], cwd=MERMAID_DIR, input=payload, capture_output=True,
+                         encoding='utf-8', timeout=600)
+    if run.returncode != 0:
+        raise RuntimeError('mermaid 검사 실행 실패: %s' % run.stderr.strip()[:500])
+    results = {r['id']: r for r in json.loads(run.stdout)}
+    over = 0
+    for b in blocks:
+        r = results[b['id']]
+        where = '%s:%d' % (b['file'], b['line'])
+        if len(b['code']) > MERMAID_MAX_TEXT:
+            rep.err('mermaid', where, '그림 글자 수 %d자(mermaid 기본 한도 %d자를 넘어 그려지지 않는다. 나눠 그린다, planning/03 §5.5)'
+                    % (len(b['code']), MERMAID_MAX_TEXT))
+        if not r['ok']:
+            rep.err('mermaid', where, '문법 오류: %s' % r['error'])
+            continue
+        if r['type'].startswith('c4'):
+            # C4 문법은 자동 배치 없이 곧은 선으로 그려 상자를 가로지른다. C4 표기를 라벨에 남긴 흐름도로 그린다
+            rep.warn('mermaid', where, 'C4 문법(%s)은 자동 배치가 없어 선이 상자를 가로지른다. 흐름도로 그린다(planning/03 §5.5)' % r['type'])
+        if r['edges'] is None or not r['type'].startswith(MERMAID_LINE_KINDS):
+            continue
+        edges = r['edges']
+        if len(edges) > MERMAID_MAX_EDGES:
+            over += 1
+            if not MERMAID_EDGE_EXCEPTION_RE.search(b['code']):
+                rep.warn('mermaid', where, '선 %d개(그림 하나에 %d개 이하, 넘으면 나누거나 `%%%% 선 수 예외:`에 이유, planning/03 §5.5)'
+                         % (len(edges), MERMAID_MAX_EDGES))
+        long_labels = [e for e in edges if len(e) > MERMAID_MAX_LABEL]
+        if long_labels:
+            rep.warn('mermaid', where, '%d자를 넘는 선 라벨 %d개(조건은 그림 아래 표로, planning/03 §5.5): %s'
+                     % (MERMAID_MAX_LABEL, len(long_labels), long_labels[0][:40]))
+        codes = {m.group(1) for e in edges for m in [MERMAID_CODE_RE.match(e)] if m}
+        if codes:
+            # 번호를 붙인 선은 그림 바로 아래(다음 제목 전) 표의 첫 칸에 같은 번호가 있어야 한다
+            after = []
+            for line in texts[b['file']].split('\n')[b['end']:]:
+                if re.match(r'^#{1,6} ', line):
+                    break
+                after.append(line)
+            rows = {m.group(1) for line in after for m in [re.match(r'^\| (?:\*\*)?([A-Z]\d{1,2})(?:\*\*)? \|', line)] if m}
+            for c in sorted(codes - rows, key=lambda x: (x[0], int(x[1:]))):
+                rep.err('mermaid', where, '선 라벨의 번호 %s가 그림 아래 표에 없음(planning/03 §5.5)' % c)
+    rep.info['mermaid'] = {'blocks': len(blocks), 'checked': len(results), 'over_edges': over}
+
+
+# ---------- 11. 원문 대조(선택) ----------
 def load_original():
     """원문 설계서 본문. archive/ 폴더가 있으면 거기서, 없으면 git 태그 ORIGINAL_TAG에서 읽는다."""
     d = os.path.join(ROOT, 'archive')
@@ -1015,6 +1102,7 @@ def main():
     count_markers(texts, rep, a.markers_out)
     check_wbs(texts, rep)
     check_versions(texts, rep)
+    check_mermaid(texts, rep)
     if a.coverage:
         check_coverage(texts, rep)
     failed = bool(rep.errors) or (a.strict and bool(rep.warnings))

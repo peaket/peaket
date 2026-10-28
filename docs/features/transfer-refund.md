@@ -78,6 +78,7 @@ sequenceDiagram
 - **보내는 것**: 공연법 시행규칙 §2의 10개 항목이다. 공연 명칭·종류, 기간·장소, 시간, 예매·결제 금액, 관람자 수, 관람 가능 연령, 출연진·제작진·기획사·제작사, 좌석 등급·요금, 입장권 판매처, 안내 사항.
 - **보내는 방식**: 1일 단위로 집계되도록 보낸다(시행령 §3의2). core-svc 일 단위 작업이 대사가 끝난 원장(payment §8)을 집계해 보낸다.
 - **실패 처리**: 전송에 실패하면 재시도한다. 다음 날까지 실패하면 CS 처리함에 올리고 경보를 낸다.
+- **온세일 때 미루기(추천 적용 2026-10-20, ADR-0069 결정 10)**: 대형·중형 온세일 윈도우(판매가 열리는 시각 앞뒤로 접속이 몰리는 기간, T-10분~T+60분)에는 재전송의 새 묶음을 시작하지 않고 미룬다. 이미 시작한 묶음은 끝낸다. 소형 온세일은 미루지 않는다 [가정]. 창은 변경 동결 달력(배포를 멈추는 시간표)과 같은 온세일 일정으로 계산하고, 일정을 읽지 못하면 마지막으로 읽은 일정을 쓰고 SEV3를 낸다 [가정]. 미루는 시간은 최대 70분이다(docs/devops.md §8.2, POL-028). 그 밖의 때 멈춰야 하면 명령 9의 '배경 작업 멈춤'으로 멈춘다.
 - **연동 규격**: 운영기관에서 받아 확인한다. 그 전에는 시뮬레이터 어댑터로 시험한다.
 - **위험**: 고의로 빠뜨리거나 조작해 보내면 과태료 대상이다(공연법 §43③1호). 전송 기록은 원장 대조값(원래 값으로 되돌릴 수 없게 바꾼 고정 길이 값인 해시)과 함께 남긴다.
 
@@ -263,29 +264,50 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Requested: 요청(사유, 증빙 확인, 대상, 금액)
-    Requested --> PendingApproval: 서버가 필요한 승인 인원 판정(1인·2인)
-    PendingApproval --> PendingApproval: 첫 승인(2인 업무)
-    PendingApproval --> Approved: 필요한 승인 완료(요청자 제외)
-    PendingApproval --> Rejected: 반려(사유)
-    PendingApproval --> Escalated: 1영업일 무응답 → 상위 승인자 알림
+    [*] --> Requested: T1 요청
+    Requested --> PendingApproval: T2 필요 승인 인원 판정
+    PendingApproval --> PendingApproval: T3 첫 승인
+    PendingApproval --> Approved: T4 필요한 승인 완료
+    PendingApproval --> Rejected: T5 반려
+    PendingApproval --> Escalated: T6 1영업일 무응답
     Escalated --> PendingApproval
-    Requested --> Withdrawn: 요청자가 거둠(사유 필수)
-    PendingApproval --> Withdrawn: 요청자가 거둠(사유 필수)
-    Escalated --> Withdrawn: 요청자가 거둠(사유 필수)
-    Requested --> Expired: 대상 상태가 바뀜·처리 기한 지남(시스템)
-    PendingApproval --> Expired: 대상 상태가 바뀜·처리 기한 지남(시스템)
-    Escalated --> Expired: 대상 상태가 바뀜·처리 기한 지남(시스템)
-    Approved --> Executing: 실행 직전 관리 계정 재인증
-    Executing --> Done: 환불·회수·제한 반영
-    Executing --> Failed: 실패 → CS 처리함
-    Failed --> Executing: 원인을 고친 뒤 승인자가 approve를 다시 부르면(재인증) 같은 대상·금액으로 다시 실행(처리 기한 안, 새 경로 없음)
+    Requested --> Withdrawn: T7 요청자가 거둠
+    PendingApproval --> Withdrawn: T8 요청자가 거둠
+    Escalated --> Withdrawn: T9 요청자가 거둠
+    Requested --> Expired: T10 대상 변경·기한 지남
+    PendingApproval --> Expired: T11 대상 변경·기한 지남
+    Escalated --> Expired: T12 대상 변경·기한 지남
+    Approved --> Executing: T13 실행 직전 재인증
+    Executing --> Done: T14 환불·회수·제한 반영
+    Executing --> Failed: T15 실패
+    Failed --> Executing: T16 원인 수정 뒤 다시 실행
     Done --> [*]
     Rejected --> [*]
     Withdrawn --> [*]
     Expired --> [*]
     Failed --> [*]
 ```
+
+전이 표(번호는 그림과 같다. 조건의 정본은 이 표다, planning/03 §5.5):
+
+| 번호 | 출발 | 도착 | 전이와 조건 |
+| --- | --- | --- | --- |
+| T1 | (시작) | Requested | 요청(사유, 증빙 확인, 대상, 금액) |
+| T2 | Requested | PendingApproval | 서버가 필요한 승인 인원 판정(1인·2인) |
+| T3 | PendingApproval | PendingApproval | 첫 승인(2인 업무) |
+| T4 | PendingApproval | Approved | 필요한 승인 완료(요청자 제외) |
+| T5 | PendingApproval | Rejected | 반려(사유) |
+| T6 | PendingApproval | Escalated | 1영업일 무응답 → 상위 승인자 알림 |
+| T7 | Requested | Withdrawn | 요청자가 거둠(사유 필수) |
+| T8 | PendingApproval | Withdrawn | 요청자가 거둠(사유 필수) |
+| T9 | Escalated | Withdrawn | 요청자가 거둠(사유 필수) |
+| T10 | Requested | Expired | 대상 상태가 바뀜·처리 기한 지남(시스템) |
+| T11 | PendingApproval | Expired | 대상 상태가 바뀜·처리 기한 지남(시스템) |
+| T12 | Escalated | Expired | 대상 상태가 바뀜·처리 기한 지남(시스템) |
+| T13 | Approved | Executing | 실행 직전 관리 계정 재인증 |
+| T14 | Executing | Done | 환불·회수·제한 반영 |
+| T15 | Executing | Failed | 실패 → CS 처리함 |
+| T16 | Failed | Executing | 원인을 고친 뒤 승인자가 approve를 다시 부르면(재인증) 같은 대상·금액으로 다시 실행(처리 기한 안, 새 경로 없음) |
 
 - **철회와 만료(추천 적용 2026-10-28, 기술 검토 낮음-087)**: 요청자는 승인 전에 사유를 적어 요청을 거둔다(`POST /v1/ops/approval-requests/{approvalId}/withdrawals`). 대상이 사라져 쓸모없어진 요청은 시스템이 만료한다. 그래서 1영업일마다 상위 승인자 알림이 되풀이되거나, 늦게 승인한 뒤 실행 단계에서야 실패하는 일을 줄인다. 만료 조건은 종류마다 POL-038 공통 규칙에 있다(양도 회수: 입장 시작이나 대상 티켓 환급·무효, 지급 묶음: 지급일 전 영업일 15시 등). 만료 판정은 승인 직전에도 한 번 더 해서, 조건을 넘긴 요청은 승인해도 실행하지 않는다.
 
@@ -337,14 +359,16 @@ stateDiagram-v2
 | 종류 | 세부 |
 | --- | --- |
 | PostgreSQL(ticket) | `ticket`(`payer_account_id` 추가, 상태 `TRANSFER_PENDING` 추가), `transfer_offer`(OFFERED·ACCEPTED·REJECTED·WITHDRAWN·EXPIRED·RECLAIMED, 기한, 철회 사유. 회차 취소·연기의 시스템 철회는 `EVENT_CANCELLED`·`EVENT_POSTPONED`, 기술 검토 중간-044) |
-| PostgreSQL(purchase) | `event_cancellation_request`(요청·판정·미리보기·진행률), `compensation`(대상, 금액, 미수금 ID, 상태) |
+| PostgreSQL(purchase) | `event_cancellation_request`(요청·판정·미리보기·진행률), `event_refund_pg_part`(일괄 환불의 결제사 몫: RUNNING·PAUSED·COMPLETED와 멈춘 이유, 기술 검토 중간-045), `event_cancellation_approval`(판정자가 아닌 승인자, ADR-0086), `order_cancellation`(공제율 기준점·환급액·사유·상태, 티켓당 진행 중 취소 1건 유일), `compensation`(대상, 금액, 미수금 ID, 상태) |
 | PostgreSQL(ops) | `approval_request`(종류, 대상, 금액, 필요한 승인 수, 상태, 기한. 승인자는 자식 표 `approval_vote`, ADR-0086), `cs_case`(종류, 대상, 기한들, 상태), `booking_restriction`, `appeal` |
-| PostgreSQL(core) | `promoter` 판매자 신원정보, `event` 판매 승인 상태, `kopis_report` |
+| PostgreSQL(core) | `promoter` 판매자 신원정보, `production` 판매 승인 상태(`sale_review`, 공연 단위, ADR-0093. `SUSPENDED`는 판매 중지, ADR-0123), `kopis_report` |
 | REST API | 위 '관련 ID'의 경로. docs/api/openapi.yaml |
 | 비동기 이벤트 | `trade.tickets`(TRANSFER_OFFERED·TRANSFER_ACCEPTED·TRANSFER_REJECTED·TRANSFER_WITHDRAWN·TRANSFER_EXPIRED·TICKET_RETURNED·TICKET_RECLAIMED), `trade.orders`(EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID) |
 | UI 화면 | SCR-041 양도 받기, SCR-042 소명 제출, SCR-043 배상금 계좌 입력, SCR-044 회차 취소·연기 요청, SCR-045 CS 처리함, SCR-046 승인 업무, SCR-047 회차 취소 판정·일괄 환불, SCR-048 판매 승인 |
 
 ## 11. 테스트 포인트
+
+규칙 검사: 양도와 입장이 맞물리는 규칙은 docs/verification.md §2.1의 `entry` 명세(입장 시작부터 입장 기록 마감까지 소유권 이전 0, 같은 티켓의 두 스캔 기록이 모두 서버에 올라오면 중복 입장 표시)를 규칙 모델 검사(규칙을 작은 모델로 써서 일이 벌어질 수 있는 순서를 기계로 모두 따져 보는 검사)로 먼저 본다(docs/features/offline-gate.md §11과 같은 명세). 아래 표는 기능 동작을 본다.
 
 | ID | 시나리오 | 기대 결과 | 관련 |
 | --- | --- | --- | --- |

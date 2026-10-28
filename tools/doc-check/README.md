@@ -1,9 +1,15 @@
 # 문서 점검 도구(doc-check)
 
 - **독자와 용도**: 문서를 고친 사람이 커밋하기 전에, 그리고 CI가 PR마다 문서 묶음의 정합성을 기계적으로 확인할 때 쓴다. 2026-10-08 재구성 때 세션 임시 폴더에서 쓰던 점검 스크립트 3개를 합쳐 저장소에 넣었다(00-summary §7 질문 15).
-- **실행 환경**: Python 3.10 이상, 표준 라이브러리만.
+- **실행 환경**: Python 3.10 이상, 표준 라이브러리만. `mermaid` 검사만 node 22 이상과 tools/doc-check/mermaid의 의존성(mermaid·jsdom, 판 고정)을 쓴다. 없으면 경고 하나를 내고 그 검사만 건너뛴다(ADR-0138).
 
 ## 실행
+
+처음 한 번(또는 tools/doc-check/mermaid/package-lock.json이 바뀌었을 때) mermaid 검사 의존성을 받는다. 설치 스크립트는 돌리지 않는다.
+
+```bash
+npm ci --ignore-scripts --prefix tools/doc-check/mermaid
+```
 
 ```bash
 python tools/doc-check/check_all.py
@@ -35,6 +41,7 @@ python tools/doc-check/check_all.py
 | adr | — | 결정이 10개를 넘고(`## 결정` 절의 번호 항목 11개 이상) 상태 줄이 1,000자를 넘는 ADR인데 docs/architecture.md §11.1에 그 ADR의 결정별 현재 판 표(`ADR-NNNN(` 머리 줄)가 없음(docs/architecture.md §11, 기술 검토 낮음-150) |
 | wbs | wbs.csv의 상위 추정이 하위 합계와 다름, wbs.md와 wbs.csv의 레벨 3 작업 ID·추정이 다름 | — |
 | versions | 기획 버전 줄이 없음 | 문서의 '기준 기획 버전'이 planning/01의 기획 버전과 다름 |
+| mermaid | 문서의 mermaid 그림을 리더기와 같은 판(tools/doc-check/mermaid/package.json, 지금 12.2.0)으로 읽어 문법 오류가 남. 그림 하나의 원문이 50,000자(mermaid 기본 `maxTextSize`)를 넘음(읽기는 되지만 그릴 때 멈춘다). 흐름도·상태도의 선 라벨 앞 번호(`T1`·`E2`·`F1`처럼 영문 대문자 하나와 숫자)가 그림 아래(다음 제목 전) 표의 첫 칸에 없음(planning/03 §5.5) | 흐름도·상태도의 선이 25개를 넘는데 그림 안에 `%% 선 수 예외: <이유>` 주석이 없음, 40자를 넘는 선 라벨, C4 문법(`C4Context` 등. 자동 배치가 없어 흐름도로 그린다), node나 의존성이 없어 검사를 건너뜀. 상태도 메모를 상태보다 앞에 두어 그려지지 않는 경우처럼 그릴 때만 드러나는 문제는 잡지 못한다(리더기에서 확인) |
 | coverage(선택) | — | 원문 링크·영문 용어가 새 문서에 없음 |
 
 마커 수(`markers_all`, `markers_excl_summary_review`)와 ID 정의 수, FR→시험 연결 수(`frtrace`: FR 수·연결된 FR 수·시험 행 수), openapi 보고(`api`: 경로·작업 수, 4xx·5xx 응답 수와 그중 Problem 선언 수, `operationId`·호스트·`security`가 빠진 작업 수, 공개 작업 수, If-Match를 받는 작업과 예외 수. `api_hosts`: 호스트별 작업 수. `api_problem_exempt`: Problem 예외 응답 목록. guidelines §12 '자기 서술성 점검', 기술 검토 낮음-032), §11.1 표가 있는 ADR(`adr_decision_tables`), WBS 합계는 정보로만 출력한다. 요약 문서에 숫자를 적을 때는 이 출력을 그대로 옮긴다(손으로 세지 않는다).

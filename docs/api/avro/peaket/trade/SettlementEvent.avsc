@@ -143,6 +143,24 @@
       "default": null
     },
     {
+      "name": "revision",
+      "doc": "STATEMENT_NOTIFIED 때 정산서 판본. 다시 계산해 새로 알린 판이면 2 이상이다(settlement §4.1, 추천 적용 2026-10-29)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "supersedesId",
+      "doc": "STATEMENT_NOTIFIED 때 이 판이 대신한 옛 판의 statementId(첫 판은 null). 새 판의 통지가 옛 판을 대신한다는 것을 이 값으로 알리므로 옛 판이 SUPERSEDED가 되는 사건 종류는 따로 두지 않는다(추천 적용 2026-10-29)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
       "name": "type",
       "type": [
         "null",

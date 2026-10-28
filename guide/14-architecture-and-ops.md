@@ -50,7 +50,7 @@ flowchart TD
         GW_Q["gw-queue (대기열 전용)"]
         GW_F["gw-fan (예매·결제·팬 전용)"]
         GW_P["gw-partner (기획사 전용)"]
-        GW_O["gw-ops (관제실 VPN 전용)"]
+        GW_O["gw-ops (관제실 허용 IP 전용)"]
         GW_S["gw-scanner (현장 스캐너 기기 키 DPoP)"]
     end
 
@@ -77,7 +77,7 @@ flowchart TD
     FanQueue --> CF --> GW_Q --> S_Queue
     FanBuy --> CF --> GW_F --> S_Buy
     PartnerUser --> CF --> GW_P
-    OpsUser -->|허용 IP·VPN| CF --> GW_O --> S_Ops
+    OpsUser -->|허용 IP| CF --> GW_O --> S_Ops
     ScannerUser -->|CDN 완전 우회 HTTPS + DPoP| GW_S --> S_Ticket
 
     S_Queue --> R_Q
@@ -132,7 +132,7 @@ flowchart LR
     GW1["gw-queue"] -->|초당 20만 건| T1["대기열 트래픽만 전담 (예매 통로 침범 차단)"]
     GW2["gw-fan"] -->|정식 입장자| T2["핵심 예매 및 결제 트랜잭션 통로"]
     GW3["gw-partner"] -->|관리자 소용량| T3["파트너 콘솔 및 PG사 웹훅 수신"]
-    GW4["gw-ops"] -->|사내 VPN 전용| T4["재난 시에도 통제권 유지하는 관제 채널"]
+    GW4["gw-ops"] -->|허용 IP 전용, 앞단 부하 분산기 따로| T4["재난 시에도 통제권 유지하는 관제 채널"]
     GW5["gw-scanner"] -->|기기 키 DPoP 단말 인증| T5["CDN 캐시 계층 우회 현장 검표 전용"]
 ```
 

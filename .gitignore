@@ -2,5 +2,8 @@
 __pycache__/
 *.pyc
 
+# doc-check의 mermaid 문법 검사 의존성(tools/doc-check/mermaid에서 npm ci --ignore-scripts로 받는다, ADR-0138)
+node_modules/
+
 # Claude Code의 개인 설정(공유 설정인 .claude/launch.json 등은 기록한다)
 .claude/settings.local.json

@@ -197,7 +197,7 @@ sequenceDiagram
 | 핵심 사용자 여정 | 성능 저하를 감수하는 영역 | 어떠한 상황에서도 사수하는 영역 |
 | :--- | :--- | :--- |
 | **대기열 진입** | 대기열 진입 처리(진입 확정)가 1초까지 늦어짐 | **도착 순서와 추첨 순번의 공정성** |
-| **좌석 홀드** | 좌석도 응답 0.3초 지연, 입장 정원 절반 축소 | **중복 좌석 판매 (오버셀) 0건** |
+| **좌석 홀드** | 좌석 저장소(Redis)를 예비 쪽으로 넘기는 동안 새 홀드를 30초 이하로 잠시 미룸(다시 시도할 시각을 알려 줌), 입장 정원 절반 축소 | **중복 좌석 판매 (오버셀) 0건** |
 | **결제 승인** | 결제 승인 확정 최대 60초 지연, 신규 결제 일시정지, 운영자 2인 승인 시 새 결제는 다른 결제사로 | **이중 출금 0건, 10분 초과 결제 차단, 접수된 결제의 결제사 변경 금지** |
 | **공연장 검표** | 게이트 스캔 기록의 클라우드 동기화 지연 | **오프라인 0.15초 판정, 위조 통과 0건** |
 | **관제 명령** | 명령 전파 속도가 최대 10초까지 지연됨 | **2인 승인 절차 준수, 감사 로그 보존** |
@@ -347,7 +347,7 @@ sequenceDiagram
 * [docs/features/control-tower.md §6](../docs/features/control-tower.md): 사람의 통제권과 자동화 제어 사이의 우선순위 규칙
 * [docs/observability.md §4, §5](../docs/observability.md), [POL-022](../planning/03-policies-glossary.md): SLO 정의, 오류 예산(Error Budget), 알림 단계 설계
 * [POL-029](../planning/03-policies-glossary.md), [docs/architecture.md §7](../docs/architecture.md): 단계별 Degraded Mode와 불변식
-* [docs/observability.md §12](../docs/observability.md): 30가지 장애 대응 훈련(Game Day) 시나리오(장애 주입 10, 관제 자체 감시 4, 장애 격리 5, 보안 사고 1, 변경 안전 3, 자동 제어 안전 2, 장애 대응 3, 제어 경로 의존 장애 2)
+* [docs/observability.md §12](../docs/observability.md): 33가지 장애 대응 훈련(Game Day) 시나리오(장애 주입 10, 관제 자체 감시 4, 장애 격리 7, 보안 사고 1, 변경 안전 4, 자동 제어 안전 2, 장애 대응 3, 제어 경로 의존 장애 2)
 * [docs/observability.md §14](../docs/observability.md), [ADR-0049](../docs/adr/0049-onsale-alert-windows-and-ops-metrics.md): 지표마다의 근거와 출처, 경보 창을 정한 이유
 * [docs/features/control-tower.md §2, §9](../docs/features/control-tower.md): 오픈 전 점검 판정, 보안 사고 신고·통지와 접속기록 점검 화면
 * [docs/observability.md §13](../docs/observability.md), [ADR-0042](../docs/adr/0042-analytics-store-and-decision-rules.md): ClickHouse 기반 사후 분석 저장소 및 공연 리포트 자동 생성 구조

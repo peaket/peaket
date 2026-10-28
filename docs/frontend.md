@@ -42,7 +42,7 @@ RADIO는 서버를 검은 상자로 두라고 한다. 이 문서도 게이트웨
 ### 0.3 이 문서에서 쓰는 이름
 
 - **앱**: 소비자 웹(`apps/web`, `www.peaket.example`), 파트너 콘솔(`apps/partner`, `partner.peaket.example`), 관제 콘솔(`apps/console-host`, `console.peaket.example`), 게이트 스캐너 PWA(설치형 앱처럼 쓰는 웹 앱. `apps/scanner`, `scanner.peaket.example`). 소비자 웹 안의 **대기실 경량 페이지**(`apps/web/queue-room`)와 **월렛**(`/my/tickets`)은 따로 부른다.
-- **API 호스트**: `api`(gw-fan), `queue`(gw-queue), `queue-files`(대기열 파일 배포), `partner-api`(gw-partner), `ops-api`(gw-ops), `scanner-api`(gw-scanner). 모두 화면 호스트와 다른 출처이고 같은 사이트(`peaket.example`)다.
+- **API 호스트**: `api`(gw-fan), `queue`(gw-queue), `queue-files`(대기열 파일 배포), `partner-api`(gw-partner, partner 배포), `ops-api`(gw-ops, console 배포), `scanner-api`(gw-scanner). 모두 화면 호스트와 다른 출처이고 같은 사이트(`peaket.example`)다.
 - **원격 위젯**: 관제 콘솔에 Module Federation으로 끼우는 서비스 저장소의 화면 조각이다.
 - **흐름 표시값**: 브라우저가 재서 보내는 업무 지연(대기 반영 시간, 좌석 델타 종단 지연, 좌석맵 준비 시간, 결제 확정 시간, 스캔 판정 시간).
 
@@ -180,38 +180,34 @@ flowchart LR
     S[스캐너 PWA + Worker]
   end
   subgraph E[CloudFront]
+    EQ[queue 배포]
+    EF[queue-files 배포]
+    EA[api 배포]
     EW[www 배포]
     EP[partner 배포]
     EC[console 배포]
     ES[scanner 배포]
-    EQ[queue 배포]
-    EF[queue-files 배포]
-    EA[api 배포]
   end
-  W --> EW
-  QR --> EW
-  WL --> EW
-  P --> EP
-  C --> EC
-  S --> ES
   QR -->|진입·입장 확정 text/plain| EQ
   QR -->|대기 상태·셔플 결과 파일| EF
   W -->|REST·좌석 WebSocket| EA
-  P -->|REST·SSE·내려받기| PAPI[partner-api]
-  C -->|REST·SSE| OAPI[ops-api]
+  W --> EW
+  QR --> EW
+  WL --> EW
+  P -->|"화면, partner-api(REST·내려받기)"| EP
+  C -->|"화면, ops-api(REST·SSE)"| EC
+  S --> ES
   S -->|HTTPS + DPoP| SAPI[scanner-api]
-  EW -->|정적 파일| S3[(S3)]
   EW -->|동적 화면| WAS[웹 앱 서버]
   EP --> PAS[파트너 앱 서버]
+  EW -->|정적 파일| S3[(S3)]
   EC --> S3
   ES --> S3
-  EW -->|/_t/*| T[gw-fan 텔레메트리 입구]
-  EP -->|/_t/*| T
-  EC -->|/_t/*| T
-  ES -->|/_t/*| T
+  E -.->|"/_t/*(www·partner·console·scanner 배포)"| T[gw-fan 텔레메트리 입구]
 ```
 
 - 화면 호스트 넷과 API 호스트 여섯은 서로 다른 출처이고 같은 사이트다(ADR-0065 결정 1). 그래서 화면에서 API로 가는 호출은 모두 교차 출처이고, CORS(다른 주소에서 온 요청을 브라우저가 허용할지 정하는 규칙)를 거친다.
+- CloudFront 배포는 그림의 일곱이다. API 호스트 `partner-api`는 partner 배포에, `ops-api`는 console 배포에 대체 도메인으로 두고, 경로 `/v1/*`가 각 게이트웨이(gw-partner·gw-ops)로 간다. 화면과 같은 배포를 쓰지만 호스트가 달라 출처도 다르다. `scanner-api`만 CloudFront를 거치지 않고 스캐너 NLB로 바로 간다(추천 적용 2026-10-29, ADR-0144 결정 3).
 - 브라우저 지표(`/_t/*`)만 화면 호스트의 같은 출처 경로다. 네 배포 모두 이 지표를 gw-fan의 텔레메트리(시스템이 내보내는 지표·로그·요청 기록 같은 운영 신호) 입구로 보낸다(ADR-0079 결정 13).
 - 요청이 가장 많이 지나는 핫패스(대기열 진입, 좌석 홀드, 결제 접수)는 Next.js(웹 화면을 만드는 프레임워크) 앱 서버를 거치지 않고, 브라우저에서 게이트웨이로 바로 간다(architecture §4).
 
@@ -621,7 +617,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 | 항목 | 규칙 |
 | --- | --- |
-| 호스트 | openapi는 경로마다 서버를 묶어 두지 않았다(5개 경로만 묶었다). 그래서 태그 → 호스트 표를 둔다: `queue` → `queue`(파일 세 경로는 `queue-files`), `seats`·`orders`·`tickets`·`shop`·`catalog`·`reviews`·`support`·`identity` → `api`(좌석맵·랭킹 파일은 `www`), `partner` → `partner-api`, `ops` → `ops-api`, `scanner` → `scanner-api`. 환경마다 기본 주소만 바뀐다 |
+| 호스트 | 호스트는 openapi 맨 위 `x-peaket-gateways`(경로 접두사 → 서버, 위에서 처음 맞는 것)와 경로의 `servers`(정적 파일 `queue-files`·`www`, 계정 연결 제안 `www` 앱 서버)가 정한다. api-client는 이 표를 생성 단계에서 읽고, 태그로 호스트를 고르지 않는다. 태그는 화면 묶음이라 게이트웨이와 일대일이 아니기 때문이다(태그 표대로면 identity 태그의 계정 연결 제안을 `api`로 잘못 보낸다). 환경마다 기본 주소만 바뀐다(docs/api/guidelines.md §10, 추천 적용 2026-10-28, 기술 검토 낮음-031) |
 | 자격 증명 | 쿠키를 쓰는 API(`api`·`queue`·`partner-api`·`ops-api`)는 `credentials: 'include'`로 보낸다. 대기열 파일과 정적 JSON은 `'omit'`이다. 쿠키 없이 배포하므로 자격 증명을 실으면 브라우저가 응답을 막는다. 스캐너는 `'omit'`이다. 기기 자격은 브라우저가 알아서 싣는 쿠키·인증서가 아니라, 요청마다 기기 키로 만드는 `DPoP` 헤더와 `Authorization: DPoP` 토큰이다(docs/features/offline-gate.md §6.1, 추천 적용 2026-10-28, 기술 검토 중간-057). mTLS 선택지를 쓰면 인증서가 실리도록 `'include'`로 바꾸고 선택 PoC(wbs 5.4.3)로 확인한다 |
 | 이동 | `redirect: 'error'`. API는 이동을 쓰지 않는다(303은 ADR-0079 결정 4로 없앴다) |
 | 본문 | `application/json`을 쓴다. 예외는 T=0의 두 호출(대기열 진입, 입장 확정)이다. 이 둘은 본문을 JSON 문자열로 보내고 `Content-Type: text/plain;charset=UTF-8`을 쓰며, safelisted가 아닌 헤더는 금지한다(`Idempotency-Key`·`traceparent` 포함). 이 두 경로 밖에서 `text/plain`을 쓰면 클라이언트가 거절한다(FE-T3) |
@@ -1202,7 +1198,7 @@ sequenceDiagram
 | 안 보이는 위젯은 구독을 닫음 | 관제 위젯(고르지 않은 탭은 10초 [가정] 뒤, 숨긴 브라우저 탭은 30초 [가정] 뒤) | 보지 않는 숫자를 받고 그리지 않는다. 경보·명령 확인·자동 제어 상태는 그대로 받는다(ADR-0091) | FE-T26 |
 | 같은 구독은 하나로 | 관제 위젯 흐름(같은 위젯 키) | 위젯 여럿이 같은 숫자를 따로 구독하지 않게 한다(ADR-0091·0100) | FE-T26 |
 | 숨긴 탭은 주기 조회를 늦춤 | 파트너 현장 운영 60초 [가정], 관제 오류 요약은 멈춤 | 보지 않는 동안 요청을 줄인다. 다시 보이면 바로 한 번 묻는다(ADR-0091) | FE-T4 |
-| 재연결 무작위 지연 | 좌석 WebSocket(1012는 0~5초), SSE `retry`(관제 흐름 둘과 파트너, 10초에 0~5초 무작위) | 서버 재시작 직후에 몰리는 것을 막는다(devops §6.4) | FE-T11 |
+| 재연결 무작위 지연 | 좌석 WebSocket(1012는 0~5초), SSE `retry`(관제 흐름 둘, 10초에 0~5초 무작위. 파트너 판매 현황은 1분 주기 조회라 SSE가 아니다) | 서버 재시작 직후에 몰리는 것을 막는다(devops §6.4) | FE-T11 |
 | 같은 요청 묶기·늦은 요청 취소 | TanStack Query 중복 제거, 자동완성 입력이 바뀌면 이전 요청 취소, 받은 후보가 8개보다 적으면 더 긴 입력은 그 안에서 거르고 다시 요청하지 않음(앞선 입력이 두 글자(한글은 두 음절) 이상이고 입력 종류가 같으며 거른 결과가 0건이 아닐 때만, docs/features/search.md §4.5, 기술 검토 낮음-036), 정규화한 값과 정해진 매개변수 순서로 요청(CDN 캐시 키, ADR-0094) | 불필요한 원본 요청을 줄인다 | 단위 시험 |
 | 낮은 우선순위 미리 받기 | 좌석 자원(대기 중), 다음 화면 덩어리 | 핵심 요청과 다투지 않게 한다 | FE-T10 |
 | 텔레메트리는 묶어서 | `/_t/rum` 60초 [가정] 묶음 + 탭을 숨길 때 | 요청 수를 줄인다 | FE-T22 |
@@ -1560,7 +1556,7 @@ allowBuilds:
 - 지난 온세일을 좌석맵 위에서 다시 보고 걸러 가며 봇 후보를 찾는 화면(SCR-069)이 있다. 그 1단계는 합성 데이터만 쓰는 정적 앱 `apps/forensics`다. 정본은 docs/features/forensic-replay.md이고, 보안 요구사항 추적은 docs/security/asvs/forensic-replay.md에서 한다.
 - 이 문서와 맞춘 것: 좌석맵을 그리는 렌더러는 `packages/seatmap`으로 올려 소비자 웹과 같이 쓴다(§2.2). 긴 작업 나누기는 §5.2의 공용 함수를 쓴다. 그리기는 OffscreenCanvas 2D와 WebGL2로 한다. 1단계는 공유 메모리 없이 복사 방식 하나로 만들고, 성능 목표를 못 맞출 때만 교차 출처 격리가 있는 곳에서 공유 시계를 더한다(docs/features/forensic-replay.md §3.3, 기술 검토 낮음-049). 헤더는 §5.14.1 묶음 G, 예산은 §5.8 표, 브라우저 저장은 §3.12의 `peaket-forensics` 행을 따른다.
 - 쓰지 않는 것: DuckDB-WASM, WebGPU, `scheduler.yield`. 사건 값은 지표·오류 도구로 보내지 않는다(§5.16).
-- 2단계(출시 뒤 선택)는 관제 콘솔 화면 묶음 안의 경로나 원격 위젯으로 옮기지 않는다. 같은 `apps/forensics` 코드를 운영 모드로 빌드해, 콘솔 주소 아래 따로 여는 페이지(`/forensics?event=`)로 둔다(추천 적용 2026-10-21, ADR-0080 상태 줄, docs/features/forensic-replay.md §6.8). 관제 메뉴와 SCR-031·SCR-067에서 새 탭으로 연다. 같은 출처이므로 운영자 쿠키·관리자 IP 제한·서버의 역할 확인을 그대로 받는다. 관제 셸(머리·메뉴·경보 패널)과 실시간 연결(Socket.IO·graphql-ws)은 싣지 않는다. 헤더는 묶음 C에 COEP `require-corp`를 이 경로에만 더해(관제는 이미 COOP `same-origin`) 공유 메모리를 쓴다. 예산은 §5.8의 포렌식 행을 따르고, 관제 호스트 예산에는 들지 않는다. 내려받은 가명 기록은 메모리에만 두고, §3.12 표에 행을 더하지 않는다.
+- 2단계(출시 뒤 선택)는 관제 콘솔 화면 묶음 안의 경로나 원격 위젯으로 옮기지 않는다. 같은 `apps/forensics` 코드를 운영 모드로 빌드해, 콘솔 주소 아래 따로 여는 페이지(`/forensics?event=`)로 둔다(추천 적용 2026-10-21, ADR-0080 상태 줄, docs/features/forensic-replay.md §6.8). 관제 메뉴와 SCR-031·SCR-067에서 새 탭으로 연다. 같은 출처이므로 운영자 쿠키·관리자 IP 제한·서버의 역할 확인을 그대로 받는다. 관제 셸(머리·메뉴·경보 패널)과 실시간 연결(관제 SSE 흐름 둘)은 싣지 않는다. 헤더는 묶음 C에 COEP `require-corp`를 이 경로에만 더해 교차 출처 격리를 켠다(관제는 이미 COOP `same-origin`). 앱은 복사 방식 하나로 돌고, 공유 시계는 docs/features/forensic-replay.md §3.3의 더할 조건이 생겼을 때만 켠다(기술 검토 낮음-049). 예산은 §5.8의 포렌식 행을 따르고, 관제 호스트 예산에는 들지 않는다. 내려받은 가명 기록은 메모리에만 두고, §3.12 표에 행을 더하지 않는다.
 
 ## 6. 결정·어긋남·한계
 
@@ -1715,7 +1711,7 @@ ADR-0111의 결정은 서버가 그린 화면의 SEED 스타일 속성과 CSP를
 - CLS는 Chromium에서만 재고, INP·LCP는 Safari 26.2부터 잰다. 그래서 iOS 16.4~26.1의 체감 지표가 비어 있다.
 - 대기실과 좌석 화면의 서버 시각 보정은 밀리초 서버 시각과 왕복으로 한다. 그래도 왕복이 한쪽으로 치우친 몫의 절반(대개 수십 ms [추정])과 표본 뒤 단조 시계의 흔들림(수십 ppm [추정])이 남는다. 그 밖 화면은 캐시하지 않는 응답의 `Date`(초 단위)라 ±1초 안팎이다(ADR-0110).
 - 배터리 상태에 따라 효과를 끄는 기능은 Android Chrome에서만 동작한다.
-- 셔플 파일 규칙, 좌석 이진 형식, MAC 입력, SSE 형식(파트너·관제)은 서버와 맞추기 전의 초안이다(wbs 0.2.3·2.6.4·2.10.7).
+- 셔플 파일 규칙, 좌석 이진 형식, MAC 입력, SSE 형식(관제)과 파트너 판매 현황 조회 형식은 서버와 맞추기 전의 초안이다(wbs 0.2.3·2.6.4·2.10.7).
 - 관제 SSE는 HTTP/2가 아니면 브라우저당 연결 6개 한도에 걸린다. 관제 PC가 HTTP/2를 쓰지 못하는 프록시 뒤에 있으면 탭 셋째부터 흐름이 막힌다. 접속자 표시는 나간 운영자가 최대 45초 [가정] 남아 보인다. 알림 표 보관(1시간 [가정])보다 오래 끊겼다 붙으면 `reset` 뒤 REST로 다시 읽는 몇 초 동안 목록이 비어 보인다(ADR-0100).
 - 인앱 브라우저 감지는 사용자 에이전트 문자열에 기댄다. 그래서 새 앱이나 표지를 바꾼 앱은 못 잡는다.
 - 브라우저가 숨긴 관제 탭을 얼리면(Chrome 133부터 에너지 절약 모드, 5분 넘게 숨겨지고 CPU를 많이 쓰는 탭) 경보와 2인 승인 요청도 탭이 다시 보일 때까지 처리되지 않는다. 숨긴 동안 위젯을 멈춰 CPU 사용을 줄일 뿐이다. 경보의 1차 통로는 온콜 알림이지만 2인 승인 요청은 관제 푸시 팝업으로만 오고, 온콜 채널로도 보낼지는 정하지 않았다(review/open-items.md 34번, ADR-0091).

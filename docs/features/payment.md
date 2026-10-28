@@ -71,6 +71,11 @@ sequenceDiagram
             PAY-->>P: trade.payments FAILED
             P->>DB: PENDING 삭제, 좌석 해제 이벤트, 주문 FAILED(과금 없음)
         end
+        opt 결과 사건이 5초 [가정] 안에 오지 않음(당기기, ADR-0140)
+            P->>PAY: gRPC BatchGetPayments(주문 최대 100건 [가정])
+            PAY-->>P: 주문마다 결제 상태, 마지막 결제 사건의 eventKey·순번
+            P->>DB: 사건과 같은 처리기로 반영(이미 반영한 순번 이하는 건너뜀)
+        end
     end
     B->>G: GET /orders/{id}/payment-status (long polling 최대 25초 [가정])
     G-->>B: CONFIRMED | APPROVED(issueDelayed, 티켓 발급 중) | FAILED(사유) | UNKNOWN(알림으로 결과 통보)
@@ -82,6 +87,15 @@ sequenceDiagram
   - 결제사 HTTP 호출은 keep-alive 연결을 쓰고, 읽기 시간 초과(응답을 기다리는 최대 시간)는 두 결제사 권장대로 60초 [가정, 계약 때 확인]다. 연결 시간 초과는 3초 [가정]다. 토스페이먼츠 개발자센터 용어집 '타임아웃'은 결제 처리 API의 읽기 시간 초과를 60초로 두라고 하고, 포트원 V2 REST API 개요의 '요청 타임아웃 정책'은 최소 60초를 권한다(2026-10-28 원문 확인). 2초에 끊어도 결제사는 빨라지지 않고, 끊긴 요청은 결제사 안에서 계속 처리된다. 그러면 같은 멱등키로 다시 보내 '처리 중'을 받고, 결과 모름 조회로 가고, 그 호출이 결제사 한도를 깎는다.
   - 느린 결제사로부터 자원을 지키는 일은 끊는 시간이 아니라 결제사 채널별 동시 승인 호출 상한(벌크헤드: 의존성별로 나눈 연결·동시 호출 몫)과 서킷 브레이커가 맡는다. 상한은 채널 추정 상한 × 2초 [가정](토스 600건, 포트원 100건)이고 payment-svc 파드 수로 나눠 파드마다 건다. 자리가 없으면 승인 명령은 승인 기한 안에서 재시도 큐에서 기다린다.
   - purchase-svc의 승인 요청 gRPC(서비스끼리 함수를 부르듯 빠르게 호출하는 통신 방식)는 payment-svc가 승인 명령을 받아 적었다는 답만 짧게 기다린다(데드라인 200ms [가정]). 승인 결과는 `trade.payments` 사건으로 받는다. 그래서 gRPC 데드라인과 결제사 지연이 묶이지 않는다. 결과가 Outbox 릴레이를 한 번 더 거치므로 내부 처리 1초 예산 안인지 P-T5로 잰다. 넘으면 결과 알림 경로를 다시 본다.
+  - **결과 당기기(밀기와 당기기, 추천 적용 2026-10-29, ADR-0140)**: 결과는 평소처럼 `trade.payments` 사건으로 받는다(밀기). 사건은 Kafka(사건을 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템)를 거친다. 결과 사건이 5초 [가정] 안에 오지 않으면 purchase-svc가 payment-svc `BatchGetPayments`로 직접 묻는다(당기기, ADR-0140).
+    - purchase-svc의 '결과 늦음 점검'이 1초 [가정]마다 돌며, 승인 요청이 접수된 지 5초 [가정]가 지나도 결과를 반영하지 못한 주문을 모은다. 그 주문들을 한 번에 최대 100건 [가정]씩 묻고, 같은 주문은 5초 [가정]에 한 번만 묻는다.
+    - 답에는 주문마다 결제 원장의 지금 상태와 마지막 결제 사건(`payment_event` 행)의 `eventKey`와 순번이 든다. purchase-svc는 사건으로 받은 것과 같은 처리기로 반영하고, 이미 반영한 순번 이하는 건너뛴다. 그래서 사건이 뒤늦게 와도 두 번 반영되지 않는다. 결과가 아직 없으면(승인 중) 다음 점검에서 다시 묻는다.
+    - payment-svc는 payment DB 쓰기 인스턴스의 `payment.order_id` 유일 색인으로 읽는다. 읽기 복제본은 복제가 늦으면 방금 승인한 건을 놓치므로 쓰지 않는다. 결제사는 부르지 않는다. 결과를 모르는 건(UNKNOWN)은 지금처럼 결제사 단독 조회 규칙(§4)이 맡는다. 데드라인은 500ms [가정]이고, purchase-svc 파드마다 동시 요청 4개 [가정]까지 보낸다. 사건 길이 멈춘 동안의 당기기는 초당 수백 건 수준이다 [추정: 결과를 기다리는 주문은 승인 초당 300건 × 10초 안팎이고, 한 주문을 5초마다 묻는다].
+    - 당기기는 사건 길을 대신하지 않는다. 확정이 멈추지 않게 하는 보조 길이다. 평소에는 사건이 1초 안에 오므로 거의 돌지 않고, 돌면 그 자체가 경보 신호다(§9). 그래서 Kafka는 결제 확정의 '정확성 경로'가 아니라 '지연 경로'가 된다. 사건 길의 지연은 RB-39·RB-11로 고친다.
+  - **주문 Saga 소비자의 키 단위 동시 처리(추천 적용 2026-10-29, ADR-0142)**: `trade.payments`의 키는 회차라, 인기 회차의 결제 결과는 한 파티션(토픽을 나눈 칸. 한 파티션은 소비자 하나만 읽는다)으로 몰린다. 그래서 주문 Saga 소비자는 파티션 안에서 업무 키(주문 ID) 단위로 동시에 처리하고, 앞 사건이 모두 끝난 위치까지만 커밋(어디까지 읽었는지 Kafka에 적는 것)한다(ADR-0142).
+    - 같은 주문의 사건은 순서대로, 다른 주문의 사건은 동시에 처리한다. 파티션마다 동시에 처리하는 주문은 32개 [가정]이다. 재조정(소비자끼리 파티션을 다시 나누는 일) 때는 처리 중인 주문을 마치고 그 위치를 커밋한 뒤 넘기고, 다시 받은 사건은 `eventKey`로 거른다.
+    - 처리 못 하는 사건은 Kafka 데드 레터 토픽이 아니라 그 서비스 DB의 보류 표 `held_event`로 옮기고, 같은 업무 키의 뒤 사건도 함께 보류한다(ADR-0142). 다시 해도 같은 결과일 실패(검증 실패, 상태 전이 불가, 코드 예외)를 5회 [가정] 겪은 사건이 대상이고, 다른 주문은 계속 처리한다. 저장소 연결 실패·시간 초과는 보류하지 않고 그 파티션을 멈춰 기다린다. 보류가 1건이라도 있으면 SEV2이고, RB-11 '보류 사건 다시 처리'로 원인을 고친 뒤 다시 넣는다. 보류된 주문의 결제 상태는 당기기가 다시 맞추지만, 보류 원인이 처리기 오류면 같은 오류를 낸다(남는 한계).
+    - 인기 회차 결제 결과를 한 파티션에 승인 초당 300건으로 넣어도 결제 확정 p99 3초 안인지 P-T48로 잰다.
   - 최종 결과는 클라이언트의 Long Polling(서버가 결과가 생길 때까지 응답을 미루는 조회) 연결로 실시간 전달한다(NFR-006). 서버는 최대 25초 [가정] 기다린 뒤 그때의 상태로 답한다. `api` 호스트 앞의 CloudFront는 원본이 원본 응답 시간 초과(기본 30초) 안에 답하지 않으면 GET을 원본에 다시 보내므로, 서버 상한을 그보다 짧게 둔다. 게이트웨이 경로 시간 초과는 27초 [가정], 브라우저 시간 초과는 30초 [가정]다(docs/infra.md §4.1, 추천 적용 2026-10-28, 기술 검토 중간-047. 처음 상한 30초는 추천 적용 2026-10-09).
 - 주문 애그리거트는 '상태 + 덧붙이기 이력 + Outbox'로 저장한다(추천 적용 2026-10-28, ADR-0113). 원본은 `purchase_order`의 지금 상태이고, 상태를 바꾸는 트랜잭션이 전이 이력(`order_event`: 이전 상태, 새 상태, 원인, 행위자, 시각, 빈틈 없는 번호)을 덧붙이고 Outbox 행을 마지막에 넣는다. 상태는 주문 전이 함수 하나로만 바꾸고, 정비 잡이 매일 마지막 이력과 지금 상태가 같은지 검사한다. 이벤트 소싱(상태를 사건의 재생으로만 만드는 방식)은 아니다. 이 이력으로 주문의 좌석 예약 상태를 시점별로 거슬러 올라가 다시 만들 수 있다(홀드 이력은 비동기로 적재되는 홀드 원장에서 가져오므로, 메모리에 데이터를 두는 빠른 저장소인 Redis의 장애 직전 원장에 적재되지 못한 홀드는 빠질 수 있다, docs/features/seat-hold.md §6). 이 기록은 고객 분쟁 해결의 법적 증거로 쓴다(FR-031).
 - 계정을 병합해도 주문·결제 기록(주문 행, 덧붙이기 이력 `order_event`, 결제 원장, `payment_event`)의 `account_id`는 고치지 않는다(추천 적용 2026-10-28, 기술 검토 중간-054). 이력은 덧붙이기만 하는 기록이고, 주문·결제는 5년 보존하는 계약·대금결제 기록이기 때문이다. purchase-svc는 `identity.accounts-merged`로 흡수 계정 → 대표 계정 대응표 `merged_account`를 채운다. '내 주문'과 주문 소유 확인(취소·환불 요청 포함)은 대표 계정과 흡수 계정 ID 묶음으로 한다. 그래서 주문 행과 이력이 늘 같은 계정을 가리키고, 대표 계정은 흡수 계정의 주문을 그대로 보고 다룬다(docs/data.md §4 경계 9, docs/features/identity.md §2.1).
@@ -135,7 +149,7 @@ sequenceDiagram
 
 | 단계 | 정하는 것 | 규칙 |
 | --- | --- | --- |
-| 결제 시도 시작(`POST /v1/orders/{orderId}/payments`) | 이번 결제창의 결제사 | ① 공연에 결제사 전환이 켜져 있고 대체 결제사가 있으면 대체 결제사 ② 공연에 지정된 기본 결제사 ③ 지정이 없으면 플랫폼 기본값(기본 토스페이먼츠, 대체 포트원. 설정 파일에 두고 배포로만 바꾼다). 고른 채널이 서버 승인을 지원하지 않거나 비활성이면 503과 새 결제 일시 정지 안내(§9)로 응답하고 경보를 낸다. 이 동안에도 주문을 만들고 결제 접수 전인 홀드의 남은 시간은 멈춘다(ADR-0085). 다른 결제사로 몰래 넘기지 않는다 |
+| 결제 시도 시작(`POST /v1/orders/{orderId}/payments`) | 이번 결제창의 결제사 | ① 공연에 결제사 전환이 켜져 있고(payment DB `pg_switch`, 아래 '장애 시 전환', ADR-0143) 대체 결제사가 있으면 대체 결제사 ② 공연에 지정된 기본 결제사 ③ 지정이 없으면 플랫폼 기본값(기본 토스페이먼츠, 대체 포트원. 설정 파일에 두고 배포로만 바꾼다). 고른 채널이 서버 승인을 지원하지 않거나 비활성이면 503과 새 결제 일시 정지 안내(§9)로 응답하고 경보를 낸다. 이 동안에도 주문을 만들고 결제 접수 전인 홀드의 남은 시간은 멈춘다(ADR-0085). 다른 결제사로 몰래 넘기지 않는다 |
 | 결제창을 닫고 다시 시도 | 결제사 다시 고르기 | 주문당 활성 결제 시도는 1건이다(§4.2 1·2). 접수 전의 이전 시도는 SUPERSEDED가 되고, 새 시도는 그때의 규칙으로 고른다. 승인 요청 전에는 돈이 움직이지 않으므로, 결제사가 바뀌어도 이중 결제가 생기지 않는다 |
 | 결제 접수(`POST /v1/orders/{orderId}/payment-acceptance`) | 결제사 고정 | 본문의 `pg`가 활성 시도의 결제사와 다르면 409를 돌려준다. 접수 뒤 승인·재시도·조회·취소·환불·웹훅·대사는 결제 기록의 결제사로만 간다. 승인 요청을 보낸 결제는 다른 결제사로 옮기지 않는다 |
 
@@ -148,7 +162,7 @@ sequenceDiagram
 
 - **결제 토큰 보관**: 포트원 결제 토큰은 승인 결과가 정해질 때까지만 접수 Outbox와 결제 원장(`pg_confirm_token`)에 두고, 승인·거절·만료가 정해지면 지운다. 로그·응답·분석 이벤트에는 넣지 않는다(docs/security/asvs/payment.md).
 - **공연별 지정**: 운영자가 운영 명령 12 '결제사 지정'으로 공연의 기본·대체 결제사를 정한다. 온세일 윈도우(판매가 열리는 시각 앞뒤로 접속이 몰리는 기간) 밖에서 1인 승인으로 하고, dry-run이 바뀌는 동시 입장 목표 상한을 보여 준다(docs/features/control-tower.md §3). core-svc가 공연에 저장하고, payment-svc와 admission-ctrl은 설정 이벤트로 받는다. 파트너와 구매자는 결제사를 고르지 않는다. 판매 승인 때 지정이 비어 있으면 그때의 플랫폼 기본값을 공연 지정으로 저장한다. 그래서 판매 승인된 공연은 늘 지정이 있고, 플랫폼 기본값을 배포로 바꿔도 이미 승인한 공연의 결제사와 동시 입장 상한은 바뀌지 않는다(추천 적용 2026-10-14, ADR-0062).
-- **장애 시 전환**: 결제 감내 모드인 '대체 결제사 전환'(명령 6, commander 요청 + 요청자가 아닌 operator 이상 1인 승인, 둘 다 재인증)을 켜면, 새 결제 시도부터 대체 결제사로 간다. 범위는 공연 하나 또는 플랫폼 전체다. 이미 접수된 결제는 원래 결제사의 재시도 큐에서 승인 기한 안에 처리되거나 과금 없이 만료된다(§9). 시스템은 서킷 브레이커(계속 실패하는 호출을 잠시 끊어 장애가 번지지 않게 하는 장치)가 열린 상태가 이어지면 전환을 후보로 추천만 한다(POL-021 C-3).
+- **장애 시 전환**: 결제 감내 모드인 '대체 결제사 전환'(명령 6, commander 요청 + 요청자가 아닌 operator 이상 1인 승인, 둘 다 재인증)을 켜면, 새 결제 시도부터 대체 결제사로 간다. 범위는 회차 하나 또는 플랫폼 전체다(결제사 지정은 회차 칸이다, ADR-0093. 운영자가 공연을 고르면 ops-svc가 그 공연의 회차마다 명령을 낸다). 전환은 Kafka 설정 사건이 아니라 제어 gRPC(`ControlReceiver/ApplyControl`)로 payment-svc의 준비된 모든 파드와 admission-ctrl 리더에 보낸다(명령 3과 같은 길, 데드라인 1초 [가정], 같은 명령 ID·판 번호로 다시 보냄). payment-svc는 payment DB `pg_switch`(범위: 회차 또는 플랫폼, 판 번호)에 판 번호가 지금보다 클 때만 쓰고, 모든 파드가 2초 [가정]마다 다시 읽어 맞추며, 새 파드는 이 표를 읽어야 준비 상태가 된다. admission-ctrl은 대체 결제사 채널 상한으로 동시 입장 목표 상한을 다시 계산하려고 리더 상태에 판 번호와 함께 적는다. ack(받았다는 확인)는 집행하는 모든 곳이 그 판 이상을 적용한 것이다. 그래서 결제사 장애와 Kafka 장애가 겹쳐도 전환이 퍼진다. `control.settings` 사건도 그대로 내지만 분석·감사·다른 서비스의 표시용이다(추천 적용 2026-10-29, ADR-0143 결정 1). 명령 12(결제사 지정)는 온세일 윈도우 밖에서만 하므로 지금처럼 설정 사건으로 둔다. 이미 접수된 결제는 원래 결제사의 재시도 큐에서 승인 기한 안에 처리되거나 과금 없이 만료된다(§9). 시스템은 서킷 브레이커(계속 실패하는 호출을 잠시 끊어 장애가 번지지 않게 하는 장치)가 열린 상태가 이어지면 전환을 후보로 추천만 한다(POL-021 C-3).
 - **대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토 중간-042)**: 포트원은 여러 결제사를 묶어 주는 중계 서비스라서, 채널마다 실제로 결제를 처리하는 하위 결제사가 있다. 포트원 V2는 토스페이먼츠도 하위 결제사로 붙일 수 있다(포트원 연동 안내 '토스페이먼츠(신모듈)', 2026-10-28 원문 확인). 대체 채널이 토스페이먼츠를 거치면 토스페이먼츠 장애 때 함께 멈춰 전환이 소용없다. 그래서 같은 공연의 기본과 대체는 하위 결제사까지 달라야 한다.
   - 포트원 채널의 하위 결제사(`pgProvider`)가 `TOSSPAYMENTS`이거나 토스페이먼츠 상품인 `TOSS_BRANDPAY`(토스페이먼츠 브랜드페이)면 토스페이먼츠와 같은 결제사로 본다. 명령 12는 이런 채널을 토스페이먼츠 공연의 대체로 지정하는 것(그 반대도)을 422로 거절하고, 플랫폼 기본값(기본 토스페이먼츠, 대체 포트원) 설정은 배포 전 설정 검사가 막는다.
   - 공개 V2 API에는 채널을 조회하는 경로가 없다(v2 OpenAPI 1.16.0). 그래서 채널을 등록할 때 콘솔의 채널 설정에서 본 하위 결제사를 payment-svc 설정의 채널 표에 적는다. 결제 응답과 결제 조회에 실리는 `channel.pgProvider`(포트원 V2 `SelectedChannel`, 필수 칸)가 적은 값과 다르면 SEV2로 알리고, 그 채널을 대체로 고르지 않는다. 결제가 아직 없는 채널은 정기 스모크 시험(§2.1)의 결제로 처음 확인한다.
@@ -168,35 +182,67 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> CREATED: 주문 생성, 금액 서버 계산
-    CREATED --> CREATED: 새 결제 시도(접수 전, 이전 시도 대체, 결제사 다시 선택, §2.2)
-    CREATED --> AUTHENTICATED: 결제 시도의 결제창 인증 완료(결제사 복귀 값, 클라이언트)
-    AUTHENTICATED --> ACCEPTED: 결제 접수 202, 금액 대조, Saga 시작
-    CREATED --> EXPIRED: 결제하지 않고 끝남(구매 세션 종료·홀드 해제·결제 시도 만료 가운데 마지막 것), 과금 없음(ADR-0107)
-    AUTHENTICATED --> EXPIRED: 같은 조건(접수하지 않음), 과금 없음(ADR-0107)
-    ACCEPTED --> RESERVED: 판매 행 PENDING 예약 성공
-    ACCEPTED --> FAILED: 예약 실패(좌석 이미 팔림), 과금 없음
-    RESERVED --> APPROVED: 고정된 결제사 승인 성공(승인 기한 안, 토스 10분·포트원 추정 10분)
-    RESERVED --> AWAITING_DEPOSIT: 가상계좌 발급(승인 응답이 입금 대기). 구매 세션은 끝나고 좌석은 PENDING 유지
-    RESERVED --> FAILED: 승인 실패·기한 초과, PENDING 삭제·좌석 해제
-    RESERVED --> UNKNOWN: 승인 응답 유실
-    UNKNOWN --> APPROVED: 조회 API로 확정
-    UNKNOWN --> AWAITING_DEPOSIT: 조회 결과 가상계좌 발급됨
-    UNKNOWN --> FAILED: 조회 결과 미승인
-    AWAITING_DEPOSIT --> APPROVED: 입금 확인(입금 웹훅 뒤 조회 API로 입금 완료 확인)
-    AWAITING_DEPOSIT --> FAILED: 입금 기한 경과(기한 + 10분에 조회로 미입금 확인) 또는 입금 전 취소(회차 취소). PENDING 삭제·좌석 해제, 과금 없음
-    APPROVED --> CONFIRMED: SOLD 확정 → 발권 → 알림
-    APPROVED --> APPROVED: 발권 실패(잠깐의 장애) → 같은 주문 ID로 다시 발권(발권 재시도 큐, 발권 기한 승인 뒤 30분 [가정], ADR-0106)
-    APPROVED --> COMPENSATED: 업무상 발권 불가(회차 취소 확정) 또는 기한을 넘겨 CS가 확인 → 결제 취소(멱등키. 가상계좌는 환불 대기를 거친다)
-    CONFIRMED --> AWAITING_DEPOSIT: 가상계좌 입금 오류(결제사가 입금 완료를 되돌림, 웹훅 뒤 조회로 확인). 발권한 티켓 무효, 좌석은 PENDING으로, 재입금 안내
-    CONFIRMED --> PARTIALLY_REFUNDED: 일부 티켓 예매 취소(POL-032)
-    PARTIALLY_REFUNDED --> REFUNDED: 남은 티켓도 취소
-    CONFIRMED --> REFUNDED: 전체 취소 또는 공연 취소 일괄 환급(POL-032, 보유 수 감소)
-    PARTIALLY_REFUNDED --> PARTIALLY_REFUNDED: 승인된 예외 환불로 공제분 추가 환급(POL-038)
-    REFUNDED --> REFUNDED: 승인된 예외 환불로 공제분 추가 환급(POL-038)
+    %% 선 수 예외: 주문·결제 전이를 한 그림에 둔다. ELK 배치에서 선 교차 1(2026-10-28 측정, ADR-0138)
+    [*] --> CREATED: T1 주문 생성
+    CREATED --> CREATED: T2 새 결제 시도
+    CREATED --> AUTHENTICATED: T3 결제창 인증 완료
+    AUTHENTICATED --> ACCEPTED: T4 결제 접수 202
+    CREATED --> EXPIRED: T5 접수 없이 끝남
+    AUTHENTICATED --> EXPIRED: T6 접수 없이 끝남
+    ACCEPTED --> RESERVED: T7 PENDING 예약 성공
+    ACCEPTED --> FAILED: T8 예약 실패
+    RESERVED --> APPROVED: T9 결제사 승인 성공
+    RESERVED --> AWAITING_DEPOSIT: T10 가상계좌 발급
+    RESERVED --> FAILED: T11 승인 실패·기한 초과
+    RESERVED --> UNKNOWN: T12 승인 응답 유실
+    UNKNOWN --> APPROVED: T13 조회 API로 확정
+    UNKNOWN --> AWAITING_DEPOSIT: T14 조회 결과 가상계좌 발급
+    UNKNOWN --> FAILED: T15 조회 결과 미승인
+    AWAITING_DEPOSIT --> APPROVED: T16 입금 확인
+    AWAITING_DEPOSIT --> FAILED: T17 입금 기한 경과·입금 전 취소
+    APPROVED --> CONFIRMED: T18 SOLD 확정
+    APPROVED --> APPROVED: T19 발권 실패, 다시 발권
+    APPROVED --> COMPENSATED: T20 업무상 발권 불가
+    CONFIRMED --> AWAITING_DEPOSIT: T21 가상계좌 입금 오류
+    CONFIRMED --> PARTIALLY_REFUNDED: T22 일부 티켓 예매 취소
+    PARTIALLY_REFUNDED --> REFUNDED: T23 남은 티켓도 취소
+    CONFIRMED --> REFUNDED: T24 전체 취소·공연 취소 환급
+    PARTIALLY_REFUNDED --> PARTIALLY_REFUNDED: T25 예외 환불 추가 환급
+    REFUNDED --> REFUNDED: T26 예외 환불 추가 환급
 ```
 
-상태는 planning/03 §2.4 Order 상태도와 같고, 이 문서는 저장 값(docs/data.md `purchase_order.status`, openapi `Order.status`)과 같은 대문자로 쓴다. 티켓 발권 뒤의 개별 티켓 수명주기(Issued·Active·Transferred·CancelRequested 등)는 Ticket 상태 머신에서 따로 관리하고, 주문 상태와 섞어 쓰지 않는다. payment-svc 내부의 결제 원장 상태(ACCEPTED·AWAITING_DEPOSIT·APPROVED·UNKNOWN·FAILED·PARTIAL_CANCELED·CANCELED)는 따로 관리되며, Kafka(이벤트를 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템) 토픽(메시지를 종류별로 모아 두는 통로) `trade.payments`로 주문 Saga에 전달된다. 결제 시도 상태(READY·ACCEPTED·SUPERSEDED·EXPIRED)는 purchase-svc의 `payment_attempt`가 관리하며, 주문의 CREATED 단계 안에서만 바뀐다(§2.2). READY는 만든 지 40분 [가정](결제창 인증 유효 시간 30분 + 인증 뒤 승인 기한 10분, §2.1)이 지나면 EXPIRED가 된다(추천 적용 2026-10-28, ADR-0107).
+전이 표(번호는 그림과 같다. 조건의 정본은 이 표다, planning/03 §5.5):
+
+| 번호 | 출발 | 도착 | 전이와 조건 |
+| --- | --- | --- | --- |
+| T1 | (시작) | CREATED | 주문 생성, 금액 서버 계산 |
+| T2 | CREATED | CREATED | 새 결제 시도(접수 전, 이전 시도 대체, 결제사 다시 선택, §2.2) |
+| T3 | CREATED | AUTHENTICATED | 결제 시도의 결제창 인증 완료(결제사 복귀 값, 클라이언트) |
+| T4 | AUTHENTICATED | ACCEPTED | 결제 접수 202, 금액 대조, Saga 시작 |
+| T5 | CREATED | EXPIRED | 결제하지 않고 끝남(구매 세션 종료·홀드 해제·결제 시도 만료 가운데 마지막 것), 과금 없음(ADR-0107) |
+| T6 | AUTHENTICATED | EXPIRED | 같은 조건(접수하지 않음), 과금 없음(ADR-0107) |
+| T7 | ACCEPTED | RESERVED | 판매 행 PENDING 예약 성공 |
+| T8 | ACCEPTED | FAILED | 예약 실패(좌석 이미 팔림), 과금 없음 |
+| T9 | RESERVED | APPROVED | 고정된 결제사 승인 성공(승인 기한 안, 토스 10분·포트원 추정 10분) |
+| T10 | RESERVED | AWAITING_DEPOSIT | 가상계좌 발급(승인 응답이 입금 대기). 구매 세션은 끝나고 좌석은 PENDING 유지 |
+| T11 | RESERVED | FAILED | 승인 실패·기한 초과, PENDING 삭제·좌석 해제 |
+| T12 | RESERVED | UNKNOWN | 승인 응답 유실 |
+| T13 | UNKNOWN | APPROVED | 조회 API로 확정 |
+| T14 | UNKNOWN | AWAITING_DEPOSIT | 조회 결과 가상계좌 발급됨 |
+| T15 | UNKNOWN | FAILED | 조회 결과 미승인 |
+| T16 | AWAITING_DEPOSIT | APPROVED | 입금 확인(입금 웹훅 뒤 조회 API로 입금 완료 확인) |
+| T17 | AWAITING_DEPOSIT | FAILED | 입금 기한 경과(기한 + 10분에 조회로 미입금 확인) 또는 입금 전 취소(회차 취소). PENDING 삭제·좌석 해제, 과금 없음 |
+| T18 | APPROVED | CONFIRMED | SOLD 확정 → 발권 → 알림 |
+| T19 | APPROVED | APPROVED | 발권 실패(잠깐의 장애) → 같은 주문 ID로 다시 발권(발권 재시도 큐, 발권 기한 승인 뒤 30분 [가정], ADR-0106) |
+| T20 | APPROVED | COMPENSATED | 업무상 발권 불가(회차 취소 확정) 또는 기한을 넘겨 CS가 확인 → 결제 취소(멱등키. 가상계좌는 환불 대기를 거친다) |
+| T21 | CONFIRMED | AWAITING_DEPOSIT | 가상계좌 입금 오류(결제사가 입금 완료를 되돌림, 웹훅 뒤 조회로 확인). 발권한 티켓 무효, 좌석은 PENDING으로, 재입금 안내 |
+| T22 | CONFIRMED | PARTIALLY_REFUNDED | 일부 티켓 예매 취소(POL-032) |
+| T23 | PARTIALLY_REFUNDED | REFUNDED | 남은 티켓도 취소 |
+| T24 | CONFIRMED | REFUNDED | 전체 취소 또는 공연 취소 일괄 환급(POL-032, 보유 수 감소) |
+| T25 | PARTIALLY_REFUNDED | PARTIALLY_REFUNDED | 승인된 예외 환불로 공제분 추가 환급(POL-038) |
+| T26 | REFUNDED | REFUNDED | 승인된 예외 환불로 공제분 추가 환급(POL-038) |
+
+상태는 planning/03 §2.4 Order 상태도와 같고, 이 문서는 저장 값(docs/data.md `purchase_order.status`, openapi `Order.status`)과 같은 대문자로 쓴다. 티켓 발권 뒤의 개별 티켓 수명주기(Issued·Active·Transferred·CancelRequested 등)는 Ticket 상태 머신에서 따로 관리하고, 주문 상태와 섞어 쓰지 않는다. payment-svc 내부의 결제 원장 상태(ACCEPTED·AWAITING_DEPOSIT·APPROVED·UNKNOWN·FAILED·PARTIAL_CANCELED·CANCELED)는 따로 관리되며, Kafka(이벤트를 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템) 토픽(메시지를 종류별로 모아 두는 통로) `trade.payments`로 주문 Saga에 전달된다(사건이 늦으면 `BatchGetPayments` 당기기로 받는다, §2, ADR-0140). 결제 시도 상태(READY·ACCEPTED·SUPERSEDED·EXPIRED)는 purchase-svc의 `payment_attempt`가 관리하며, 주문의 CREATED 단계 안에서만 바뀐다(§2.2). READY는 만든 지 40분 [가정](결제창 인증 유효 시간 30분 + 인증 뒤 승인 기한 10분, §2.1)이 지나면 EXPIRED가 된다(추천 적용 2026-10-28, ADR-0107).
 
 - **결제하지 않은 주문의 만료(추천 적용 2026-10-28, ADR-0107)**: CREATED·AUTHENTICATED 주문은 구매 세션 종료(사용자 나가기·최대 체류), 그 주문의 홀드 해제·만료, 활성 결제 시도 없음(READY 만료·대체, 또는 결제 시도를 만들지 않음)이 모두 끝나면 EXPIRED로 끝난다. purchase-svc가 세 사건을 처리할 때마다 조건을 다시 보고, 상태가 CREATED·AUTHENTICATED일 때만 바꾸는 조건부 UPDATE로 주문 EXPIRED·주문 사건·Outbox를 한 트랜잭션에 쓴다. 사건이 빠질 때를 대비해 10분 [가정]마다 만든 지 90분 [가정]이 지난 CREATED·AUTHENTICATED 주문을 찾아 끝낸다(docs/data.md §5.1). 만료된 주문의 결제 시도 시작과 결제 접수는 409(`order-expired`)로 거절하고 결제사 승인을 부르지 않는다. 결제를 접수한 뒤(ACCEPTED부터)는 만료 대상이 아니다. 접수 뒤 승인 기한을 넘긴 주문은 FAILED(실패 범주 `EXPIRED`)로 끝나므로, 주문 상태 EXPIRED는 '접수하지 않고 끝남', FAILED는 '접수 뒤 과금 없이 실패'로 나눠 쓴다.
 - **승인 뒤 발권(추천 적용 2026-10-28, ADR-0106)**: 결제 승인은 이 Saga의 고비 단계(되돌리기 어려운 단계)다. 승인 앞의 실패는 PENDING을 지워 되돌리고, 승인 뒤의 발권 실패는 결제를 취소하지 않고 같은 주문 ID로 다시 발권한다. purchase-svc는 승인 결과를 받으면 `seat_sale` SOLD, 주문 APPROVED, 발권 재시도 큐 행(`ticket_issue_job`, docs/data.md §2), Outbox를 한 트랜잭션으로 쓴 뒤 발권을 부르고, 성공하면 주문 CONFIRMED와 큐 행 삭제를 한 트랜잭션으로 쓴다. gRPC `UNAVAILABLE`·`DEADLINE_EXCEEDED`·`RESOURCE_EXHAUSTED`는 1초에서 두 배씩 최대 60초 간격 [가정]으로 다시 보낸다. 다시 보내도 결과가 같은 오류(`FAILED_PRECONDITION`·`INVALID_ARGUMENT`·`NOT_FOUND`)는 자동으로 다시 보내지 않고 SEV2와 CS 처리함 '결제 뒤 미발권(`TICKET_NOT_ISSUED`)' 건을 올린다. 큐 행이 60초 [가정] 넘게 남으면 SEV2와 `trade.orders` `ISSUE_DELAYED`(알림 '결제 완료, 티켓 발급 중')를 낸다. 발권 기한(승인 뒤 30분 [가정])을 넘기면 SEV1과 `TICKET_NOT_ISSUED` 건을 올리고 재시도는 이어 간다. 결제 취소는 회차 취소가 확정됐을 때(일괄 환불 작업이 발권 대기 주문도 대상에 넣는다, transfer-refund §5)와, `TICKET_NOT_ISSUED` 건에서 CS가 확인한 뒤 승인 업무 '시스템 잘못이 확인된 환불'(transfer-refund §3.2)로 할 때만 한다.
@@ -336,10 +382,11 @@ sequenceDiagram
 | 장애 상황 | 감지 임계 조건 | Degraded Mode 동작 | 완화 SLO | 절대적 보장 원칙 |
 | --- | --- | --- | --- | --- |
 | PG 승인 API 장애 | 결제사 서킷 브레이커 열림 또는 결제 확정 소요 p99 5초 초과(같은 멱등키 재시도·결과 모름 조회 포함, 재시도 큐 건은 뺀다. `payment_confirm_resolution_seconds{pg, path="direct"}`, ADR-0069 결정 7·ADR-0105) | 같은 멱등키를 유지한 채 백그라운드 승인 재시도 큐로 옮긴다(승인 기한 10분 안의 건만). 좌석 홀드 TTL은 그 결제의 승인 기한(결제창 인증 뒤 10분)까지 자동으로 늘린다(추천 적용 2026-10-20, ADR-0073). 새 결제 진입은 잠시 멈춘다(버튼 비활성화와 안내 문구 표시). 멈춘 동안 주문을 만들고 결제 접수 전인 홀드는 남은 시간을 세지 않고, 다시 열리면 이어 센다(그 구매 세션의 최대 체류 시각까지, 소유자 결정 2026-10-22, ADR-0085). 다시 여는 것은 아래 '새 결제 진입 정지와 다시 열기'의 단계(확인 호출 → 시험 재개 → 모두 엶)를 따르고, commander가 명령 6 해제로 바로 열 수도 있다(추천 적용 2026-10-28, ADR-0105. 2026-10-21 ADR-0078 결정 2의 '서킷 닫힘과 p99 5초 아래 5분'은 정지 중에 표본이 생기지 않아 바꿨다). 유효 기한을 넘긴 건은 승인을 시도하지 않고, 과금 없이 안전하게 만료한다. | 결제 확정 p99 60초 | 결제 접수 p99 150ms 유지, 이중 결제 0건, 승인 뒤 60초 안에 발권되지도 발권 재시도 큐에 들어가지도 않은 결제 0건 유지(ADR-0106) |
-| 결제사 장애가 이어짐(대체 결제사가 지정된 공연) | 서킷 브레이커 Open이 이어지고 시스템이 전환 후보를 추천 | 운영자가 결제 감내 모드 '대체 결제사 전환'(명령 6, commander 요청 + 요청자 아닌 operator 이상 1인 승인, 둘 다 재인증)을 켜면, 새 결제 시도부터 대체 결제사로 간다. 그 공연의 동시 입장 목표는 대체 결제사 채널 상한에 맞춰 바로 낮아진다. 이미 접수된 결제는 원래 결제사의 재시도 큐에 남는다 | 결제 확정 p99 60초 | 승인 요청 뒤 결제사 이동 0건, 이중 결제 0건 |
+| 결제사 장애가 이어짐(대체 결제사가 지정된 공연) | 서킷 브레이커 Open이 이어지고 시스템이 전환 후보를 추천 | 운영자가 결제 감내 모드 '대체 결제사 전환'(명령 6, commander 요청 + 요청자 아닌 operator 이상 1인 승인, 둘 다 재인증)을 켜면, 새 결제 시도부터 대체 결제사로 간다. 전환은 제어 gRPC로 퍼지고 payment DB `pg_switch`에 남으므로 Kafka가 함께 흔들려도 퍼진다(§2.2, ADR-0143). 그 공연의 동시 입장 목표는 대체 결제사 채널 상한에 맞춰 바로 낮아진다. 이미 접수된 결제는 원래 결제사의 재시도 큐에 남는다 | 결제 확정 p99 60초 | 승인 요청 뒤 결제사 이동 0건, 이중 결제 0건 |
 | identity-svc 장애 | 주문 생성의 본인확인 재확인 호출이 서킷 브레이커 열림·gRPC 데드라인 초과·연결 실패(`UNAVAILABLE`)로 끝나는 경우. 업무 재시도(한 번, 남은 데드라인 안) 뒤에도 `RESOURCE_EXHAUSTED`(벌크헤드 가득)·`INTERNAL`·`UNKNOWN`으로 끝나는 경우도 같다(추천 적용 2026-10-28, 기술 검토 낮음-153) | 게이트웨이(클라이언트 종류별로 앞에 둔 입구 서버)가 넘긴 토큰 값(`ticket:buy`와 pid)으로 판정해 주문을 만든다. identity-svc의 '무효' 응답은 그대로 거부하고, 세션 종료 목록 검사도 그대로 한다. `PERMISSION_DENIED`·`INVALID_ARGUMENT`는 장애가 아니라 설정·버그라 대체 판정하지 않고 거부하며 SEV2로 알린다. 대체 판정은 지표 `purchase_identity_recheck_fallback_total`(사유 라벨 `circuit_open`·`deadline`·`unavailable`·`exhausted`·`internal`. `UNKNOWN`은 `internal`로 센다)과 주문 ID가 든 보안 이벤트 로그로 남긴다(ADR-0055). 온세일 피크에 벌크헤드가 차거나 identity-svc가 내부 오류를 내도, 입장해 좌석을 잡은 사람의 주문이 '무효 계정'이 아닌 이유로 막히지 않게 하려는 것이다. 장애가 15분 넘게 이어지면 토큰 갱신이 멈추므로, 토큰이 끝난 사람의 요청은 게이트웨이에서 거부된다 | — | 본인확인 표시가 없는 토큰으로 주문 생성 0건, '무효' 응답을 무시한 주문 생성 0건 |
-| payment-svc 내부 지연 | 승인 명령 접수 응답이 데드라인(200ms [가정])을 넘는 비율이 오름 | purchase-svc의 2차 서킷 브레이커와 gRPC 데드라인이 동작해, 연결 풀과 스레드가 바닥나지 않게 막고 요청을 격리한다. 접수되지 않은 승인 명령은 승인 기한 안에서 같은 주문 ID로 다시 보낸다(payment-svc는 주문 ID로 멱등하다). 결제사 지연은 이 경로에 걸리지 않는다(§2, 추천 적용 2026-10-28, 기술 검토 높음-16). | — | 결제 접수 핵심 경로 보호 |
+| payment-svc 내부 지연 | 승인 명령 접수 응답이 데드라인(200ms [가정])을 넘는 비율이 오름 | purchase-svc의 2차 서킷 브레이커와 gRPC 데드라인이 동작해, 연결 풀과 스레드가 바닥나지 않게 막고 요청을 격리한다. 접수되지 않은 승인 명령은 승인 기한 안에서 같은 주문 ID로 다시 보낸다(payment-svc는 주문 ID로 멱등하다). 결제사 지연은 이 경로에 걸리지 않는다(§2, 추천 적용 2026-10-28, 기술 검토 높음-16). payment-svc 5초 지연 주입은 Game Day(일부러 장애를 내고 대응을 연습하는 날) G-15로 연습한다. | — | 결제 접수 핵심 경로 보호 |
 | ticket-svc 장애(승인 뒤 발권 실패) | 발권 gRPC가 `UNAVAILABLE`·`DEADLINE_EXCEEDED`·`RESOURCE_EXHAUSTED`로 실패 | 결제를 취소하지 않는다. 같은 주문 ID로 다시 발권한다(발권 재시도 큐, 1초에서 두 배씩 최대 60초 간격 [가정]). 큐 행이 60초 [가정] 넘게 남으면 SEV2와 '결제 완료, 티켓 발급 중' 알림, 발권 기한(승인 뒤 30분 [가정])을 넘기면 SEV1과 CS 처리함 '결제 뒤 미발권' 건이다(§3, 추천 적용 2026-10-28, ADR-0106). | 발권 기한 30분 [가정] | 이중 발권 0건, 승인 뒤 60초 안에 발권되지도 큐에 들어가지도 않은 결제 0건, 회차 취소 확정·CS 확인 밖의 환불 0건 |
+| 거래·제어 MSK·payment 릴레이 장애(승인 결과 사건이 늦거나 멈춤. MSK는 아마존이 대신 운영해 주는 Kafka) | 당기기로 반영한 건수 `payment_result_pulled_total`이 1분 동안 0보다 크면 SEV3(사건 길이 늦다는 신호, `kind` cause, `dependency` kafka-trade 또는 outbox-relay). `BatchGetPayments` 실패가 1분 이어지면 SEV2. 릴레이 지연(`outbox_relay_lag_seconds`, SEV2, RB-39)과 MSK 브로커 경보(ADR-0141)도 함께 본다(추천 적용 2026-10-29, ADR-0140 결정 4) | 결제 확정은 당기기(§2)로 이어진다. purchase-svc가 결과 사건이 5초 [가정] 안에 오지 않은 주문을 `BatchGetPayments`로 묻고, 사건과 같은 처리기로 SOLD·주문 APPROVED·발권 재시도 큐 행을 쓴다. 결제 확인 알림(`trade.orders` → core-svc notify)·관제 실시간 표·설정형 명령·세션 종료 전파·홀드 원장 적재는 Kafka가 돌아올 때까지 늦는다. 돌아오면 Outbox에 쌓인 사건이 이어 나가고, 늦게 온 사건은 순번과 `eventKey`로 걸러 다시 반영하지 않는다. 사건 길의 지연은 RB-39·RB-11로 고치고, RB-39 ⑤(결제 확정이 늦어진 동안의 주문 맞추기)는 당기기가 맞춘다. 운영자는 당기기 지표와 경보를 본다(ADR-0140 결정 6) | 결제 확정 지연이 5~10초 [추정] 늘어난다(당기기 사이 간격 때문에 최대 약 6초 [추정] 늦다. P-T47 기준 p99 10초 [가정]) | 승인 뒤 60초 안에 발권되지도 발권 재시도 큐에 들어가지도 않은 결제 0건(60초 불변식 SEV1 0건), 같은 결과의 중복 반영 0건. Kafka와 payment-svc가 함께 멈추면 결제 확정도 멈춘다. 그때는 60초 SEV1과 RB-36이 맡는다(남는 한계, ADR-0140). 거래·제어 MSK 전체 정지 5분은 Game Day G-31로 연습한다(docs/observability.md §12) |
 | purchase DB 페일오버 | 프라이머리 DB의 페일오버(고장 난 쪽 대신 예비 쪽으로 넘기는 것) 발생 | 잠시 실패한 접수 요청은 클라이언트 멱등키 기반 자동 재시도로 흡수한다. 복구까지 걸려도 되는 시간인 RTO 5분 이내에 서비스를 정상으로 복구한다(NFR-015). | — | 이중 결제 발생 0건 보장 |
 | PG 채널 호출 상한 도달 | 토스 피크 300 TPS 또는 포트원 초당 50건 초과 | 한도를 넘는 승인 요청은 멱등키를 유지한 채 재시도 대기열에 차례로 쌓아 둔다(승인 기한 안의 건만). 확정 지연이 완화 SLO를 넘으면 새 결제 진입을 잠시 멈춘다(그동안 주문을 만들고 결제 접수 전인 홀드는 위 행처럼 남은 시간을 멈춘다). 첫 승인 호출(같은 멱등키로 다시 보낸 호출과 결과 모름 조회는 뺀다)에서 HTTP 429를 받으면 그 채널 상한을 바로 낮추고, 그 회차 동안 유지한다. 다시 보낸 호출이나 조회에서 받은 429는 그 호출의 다음 시도만 늦추고 상한은 낮추지 않는다. 우리 재시도가 만든 429로 판매 전체를 늦추지 않기 위해서다(추천 적용 2026-10-28, 기술 검토 높음-16). 다음 회차의 상한은 R1 검토에서 ADR-0036 추정을 갱신해 정한다. 이때 새 결제 진입 정지는 그 채널의 예상 대기(대기 건수 ÷ 채널 상한)가 10초 [가정] 아래로 1분 [가정] 이어지면 푼다. 결제사는 정상이라 확인 호출과 시험 재개를 쓰지 않는다(추천 적용 2026-10-28, ADR-0105). 채널 상한이 낮아지면 admission-ctrl이 그 공연의 serving 전진 속도 상한(승인 상한 ÷ 결제 비율)과 동시 입장 목표 상한을 함께 낮춰, 새로 들어오는 결제가 낮아진 상한을 넘지 않게 한다(docs/features/queue-admission.md §5, 추천 적용 2026-10-28, 기술 검토 중간-027). 합산 동시 입장 상한은 좌석·결제 계층 용량으로 정한 5,000으로 둔다(docs/architecture.md §9.5). | 결제 확정 p99 60초 | 이중 결제 0건, 기한을 넘긴 건은 전부 무과금 보장 |
 | PG 취소 API 장애 | PG 취소 엔드포인트 중단 | 티켓 키 폐기와 좌석 반환은 정상으로 접수해 시스템에 반영을 마친다. 실제 금융 환급은 백그라운드 재시도 큐로 따로 떼어 두었다가, 복구 뒤 차례로 실행한다. 가상계좌 결제분은 계좌번호를 큐에 두지 않고, 복구 뒤 알림으로 다시 받는다(ADR-0050 결정 3). | — | 이중 환급 발생 0건 보장 |
@@ -359,20 +406,22 @@ sequenceDiagram
 - **지표와 화면**: `payment_new_entry_pause_stage{pg}`(0 열림, 1 확인 호출, 2 시험 재개), `payment_pg_probe_total{pg, outcome}`, `payment_entry_trial_total{pg, outcome}`. 관제 콘솔 '걸린 자동 조치' 위젯이 단계와 막대(확인 호출 n분/3분, 시험 결제 n/20건)를 보인다(design/d5 §7.2). 정지가 15분 [가정] 넘게 풀리지 않으면 인시던트 선언 기준(POL-022)에 걸린다.
 - **남는 한계**: 확인 호출은 조회 API만 본다. 승인 경로만 아픈 장애는 시험 재개에서 드러나고, 시험으로 받은 팬 일부가 실패를 겪는다(과금은 없다). 결제사가 회복해도 다시 열기까지 몇 분이 걸리고, 그동안 홀드는 멈춰 있다. 시험 재개에서 먼저 결제하는 사람은 무작위로 정해진다(ADR-0105).
 
-관측(지표·로그·요청 기록으로 시스템 안을 들여다보는 일, ADR-0049·0069): 결제사 지연 기준은 두 단계다. 임박(장애 심각도 등급 SEV2. 숫자가 작을수록 심각하다)은 1분 창에서 승인 호출 p99가 2초를 넘는 것(호출의 1% 이상이 2초를 넘는 상태)·서킷 열림·오류율 상승·한도 초과 응답이다. 2초는 승인 호출을 끊는 값이 아니라 이 경보와 NFR-006 측정의 기준이다(§2, 추천 적용 2026-10-28, 기술 검토 높음-16). 전환 검토(RB-07, POL-013의 결제 Degraded)는 결제 확정 소요 `payment_confirm_resolution_seconds{pg}`(승인 요청 시작부터 승인 결과가 정해질 때까지, 같은 멱등키 재시도와 결과 모름 조회 포함)의 p99가 5초를 넘거나 서킷이 열리는 것이다. 승인 호출 한 번의 시간은 읽기 시간 초과 60초 [가정]까지 잴 수 있지만, 호출 한 번이 빨라도 다시 보내기가 쌓이면 확정이 늦으므로 전환 검토는 확정 소요로 본다. 결제사별 한도 사용률(초당 첫 승인 호출 ÷ 채널 추정 상한. 같은 멱등키로 다시 보낸 호출과 결과 모름 조회는 따로 센다), 채널별 동시 승인 호출 수와 그 상한 대비 사용률, 한도 초과 응답(HTTP 429 등) 수를 지표로 낸다. 한도 초과 응답이 1건이라도 오면 SEV2로 알리고, ADR-0036의 추정 상한을 다시 본다. 피크 때 한도 사용률은 공연 리포트에 남긴다. 온세일 중 결제 확정의 SEV2 경고는 확실하고 임박한 원인이 있을 때 낸다. 결제사 승인 호출 p99가 1분 동안 2초를 넘거나, 서킷 브레이커가 열리거나, 결제사 오류율이 오르거나, 한도 초과 응답이 오는 경우다. 70분 동안 허용되는 실패가 약 12건이라, 소진 배수로는 헛경보 없이 빠른 경고를 만들 수 없기 때문이다(docs/observability.md §4).
+관측(지표·로그·요청 기록으로 시스템 안을 들여다보는 일, ADR-0049·0069): 결제사 지연 기준은 두 단계다. 임박(장애 심각도 등급 SEV2. 숫자가 작을수록 심각하다)은 1분 창에서 승인 호출 p99가 2초를 넘는 것(호출의 1% 이상이 2초를 넘는 상태)·서킷 열림·오류율 상승·한도 초과 응답이다. 2초는 승인 호출을 끊는 값이 아니라 이 경보와 NFR-006 측정의 기준이다(§2, 추천 적용 2026-10-28, 기술 검토 높음-16). 전환 검토(RB-07, POL-013의 결제 Degraded)는 결제 확정 소요 `payment_confirm_resolution_seconds{pg}`(승인 요청 시작부터 승인 결과가 정해질 때까지, 같은 멱등키 재시도와 결과 모름 조회 포함)의 p99가 5초를 넘거나 서킷이 열리는 것이다. 승인 호출 한 번의 시간은 읽기 시간 초과 60초 [가정]까지 잴 수 있지만, 호출 한 번이 빨라도 다시 보내기가 쌓이면 확정이 늦으므로 전환 검토는 확정 소요로 본다. 결제사별 한도 사용률(초당 첫 승인 호출 ÷ 채널 추정 상한. 같은 멱등키로 다시 보낸 호출과 결과 모름 조회는 따로 센다), 채널별 동시 승인 호출 수와 그 상한 대비 사용률, 한도 초과 응답(HTTP 429 등) 수를 지표로 낸다. 한도 초과 응답이 1건이라도 오면 SEV2로 알리고, ADR-0036의 추정 상한을 다시 본다. 피크 때 한도 사용률은 공연 리포트에 남긴다. 온세일 중 결제 확정의 SEV2 경고는 확실하고 임박한 원인이 있을 때 낸다. 결제사 승인 호출 p99가 1분 동안 2초를 넘거나, 서킷 브레이커가 열리거나, 결제사 오류율이 오르거나, 한도 초과 응답이 오는 경우다. 70분 동안 허용되는 실패가 약 12건이라, 소진 배수로는 헛경보 없이 빠른 경고를 만들 수 없기 때문이다(docs/observability.md §4). 승인 결과가 오는 사건 길의 신호는 당기기로 반영한 건수 `payment_result_pulled_total`(1분 동안 0보다 크면 SEV3)과 `BatchGetPayments` 실패(1분 이어지면 SEV2)다(위 표 '거래·제어 MSK·payment 릴레이 장애' 행, 추천 적용 2026-10-29, ADR-0140 결정 4). 결제 화면의 결제사 SDK 로드가 막혀 결제 접수가 조용히 줄면, 실패한 요청이 없어 실패 비율로 거는 경보는 울리지 않고 처리량 급감 경보(첫 홀드 성공 → 결제 접수, SEV2)만 울린다. 그때는 RB-33으로 막힌 단계와 원인(SDK 로드 실패, 새 오류 종류)을 찾는다(Game Day G-25, ADR-0070, docs/observability.md §12).
 
 ## 10. 데이터·API 참조
 
 | 종류 | 세부 항목 |
 | --- | --- |
-| PostgreSQL(purchase) | `purchase_order`(지금 상태, UUIDv7 `id`, 표는 나누지 않고 보존 기한이 지난 행을 나눠 지운다(ADR-0114), 서버가 계산한 amount, 상태 이력 번호 `event_seq`), `order_idempotency`(멱등 기록 표, 계정 × 작업 범위(기술 검토 중간-046), 24시간 [가정] 보존, ADR-0083), `order_event`(상태 전이 이력, 같은 트랜잭션에서 덧붙인다, ADR-0113), `payment_attempt`(결제사, 결제창 참조, READY·ACCEPTED·SUPERSEDED·EXPIRED, 활성 시도 부분 유니크), `seat_sale`(PENDING·SOLD·RETURNED, 활성 상태 부분 유니크 인덱스), `purchase_quota`, `order_cancellation`(공제율·환급액·사유·상태), `ticket_issue_job`(발권 재시도 큐, 승인과 같은 트랜잭션에서 넣고 발권·보상 때 지운다, 발권 기한, ADR-0106), Transactional Outbox |
-| PostgreSQL(payment) | `payment`(UUIDv7 `id`, 표는 나누지 않는다(ADR-0114), order_id UNIQUE(주문당 결제 1건), attempt_id, pg(결제 시도에서 고정), pg_payment_ref, pg_confirm_token(결과 확정 때 삭제), status, idempotency_key `confirm-{orderId}`, authenticated_at 기록으로 승인 기한 통제), `payment_cancel`(취소액, `cancel-{cancellationId}`, 상태), `payment_event`, `webhook_receipt`(PG별 중복 제거 식별자 UNIQUE), 일일 대사 결과 원장, Transactional Outbox |
+| PostgreSQL(purchase) | `purchase_order`(지금 상태, UUIDv7 `id`, 표는 나누지 않고 보존 기한이 지난 행을 나눠 지운다(ADR-0114), 서버가 계산한 amount, 상태 이력 번호 `event_seq`), `order_idempotency`(멱등 기록 표, 계정 × 작업 범위(기술 검토 중간-046), 24시간 [가정] 보존, ADR-0083), `order_event`(상태 전이 이력, 같은 트랜잭션에서 덧붙인다, ADR-0113), `payment_attempt`(결제사, 결제창 참조, READY·ACCEPTED·SUPERSEDED·EXPIRED, 활성 시도 부분 유니크), `seat_sale`(PENDING·SOLD·RETURNED, 활성 상태 부분 유니크 인덱스), `purchase_quota`, `order_cancellation`(공제율·환급액·사유·상태), `ticket_issue_job`(발권 재시도 큐, 승인과 같은 트랜잭션에서 넣고 발권·보상 때 지운다, 발권 기한, ADR-0106), `held_event`(처리 못 한 사건의 보류 표, 다시 처리한 뒤 7일 [가정], ADR-0142), Transactional Outbox |
+| PostgreSQL(payment) | `payment`(UUIDv7 `id`, 표는 나누지 않는다(ADR-0114), order_id UNIQUE(주문당 결제 1건), attempt_id, pg(결제 시도에서 고정), pg_payment_ref, pg_confirm_token(결과 확정 때 삭제), status, idempotency_key `confirm-{orderId}`, authenticated_at 기록으로 승인 기한 통제), `payment_cancel`(취소액, `cancel-{cancellationId}`, 상태), `payment_event`, `webhook_receipt`(PG별 중복 제거 식별자 UNIQUE), 일일 대사 결과 원장, `pg_switch`(대체 결제사 전환 상태: 범위(회차 또는 플랫폼)·판 번호, ADR-0143), `payment_entry_pause`(결제사·채널별 새 결제 진입 정지 단계 OPEN·PROBING·TRIAL, 사유, 판 번호, ADR-0105), `payment_entry_trial`(시험 재개로 받은 결제와 첫 승인 결과, 회차 판매 종료 뒤 지운다, ADR-0105), Transactional Outbox. `payment`의 가상계좌 칸: `deposit_due_at`(입금 기한), `virtual_account_no`·`virtual_account_bank`(필드 암호화, 입금 확정·만료 때 삭제), `deposit_secret_hash`(입금 콜백 secret의 SHA-256, 같은 수명, ADR-0050)(docs/data.md §2 ④). 내부 gRPC `BatchGetPayments`(결과 당기기, 쓰기 인스턴스에서 읽음, ADR-0140) |
 | REST API | `POST /v1/orders`, `POST /v1/orders/{orderId}/payments`, `POST /v1/orders/{orderId}/payment-acceptance`, `GET /v1/orders/{orderId}/payment-status`, `GET /v1/tickets/{ticketId}/cancellation-quote`, `POST /v1/tickets/{ticketId}/cancellation`(가상계좌 환불 계좌는 바로 환급할 때만), `POST /v1/partner/events/{eventId}/cancellation`(회차 취소 요청, 확정은 운영자 2인), `POST /v1/webhooks/toss`, `POST /v1/webhooks/portone` |
-| 비동기 이벤트 | `trade.orders`(CREATED·ACCEPTED·RESERVED·AWAITING_DEPOSIT·APPROVED·CONFIRMED·DEPOSIT_REVERSED·FAILED·COMPENSATED·PARTIALLY_REFUNDED·REFUNDED·EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID·EXPIRED·ISSUE_DELAYED. EXPIRED는 결제를 접수하지 않고 끝난 주문(ADR-0107), ISSUE_DELAYED는 승인 뒤 발권이 60초 [가정] 넘게 끝나지 않은 주문(ADR-0106)), `trade.payments`(AWAITING_DEPOSIT·APPROVED·DEPOSIT_REVERSED·FAILED·UNKNOWN·RESOLVED·PARTIAL_CANCELED·CANCELED), `trade.tickets`(ISSUED·CANCEL_REQUESTED·REFUNDED·VOIDED) |
+| 비동기 이벤트 | `trade.orders`(CREATED·ACCEPTED·RESERVED·AWAITING_DEPOSIT·APPROVED·CONFIRMED·DEPOSIT_REVERSED·FAILED·COMPENSATED·PARTIALLY_REFUNDED·REFUNDED·EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID·EXPIRED·ISSUE_DELAYED. EXPIRED는 결제를 접수하지 않고 끝난 주문(ADR-0107), ISSUE_DELAYED는 승인 뒤 발권이 60초 [가정] 넘게 끝나지 않은 주문(ADR-0106). `OrderEvent.firstInStage`는 이 주문이 ACCEPTED·APPROVED·CONFIRMED에 처음 들어갈 때 true이고, 입금 되돌림 뒤 다시 CONFIRMED가 되면 false다. purchase-svc가 주문 상태 이력으로 정하고, 관제 실시간 퍼널(단계별 인원)이 주문마다 한 번 센다(docs/streaming.md §4.2, ADR-0099). 지표 사전이 바뀌면 이 규칙도 같은 PR에서 바꾼다(docs/streaming.md §15)), `trade.payments`(AWAITING_DEPOSIT·APPROVED·DEPOSIT_REVERSED·FAILED·UNKNOWN·RESOLVED·PARTIAL_CANCELED·CANCELED), `trade.tickets`(ISSUED·CANCEL_REQUESTED·REFUNDED·VOIDED) |
 | 외부 규격 및 공식 문서 | PG사 공식 승인·조회·취소 API와 웹훅 규격(docs/api/guidelines.md §8 참조). 토스 [웹훅 이벤트](https://docs.tosspayments.com/reference/using-api/webhook-events)·[멱등키 가이드](https://docs.tosspayments.com/reference/using-api/authorization)·[개발 환경](https://docs.tosspayments.com/guides/v2/get-started/environment)·[웹훅 재전송](https://docs.tosspayments.com/guides/v2/webhook)·[에러 코드](https://docs.tosspayments.com/reference/error-codes), 포트원 [수동 승인](https://developers.portone.io/opi/ko/extra/manual-confirm/readme-v2?v=v2)·[웹훅 연동](https://developers.portone.io/opi/ko/integration/webhook/readme-v2?v=v2)·[서버 SDK 웹훅 검증](https://github.com/portone-io/server-sdk/blob/main/javascript/src/webhook.ts)·[Standard Webhooks 규격](https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md)·[REST V2 멱등성](https://developers.portone.io/api/rest-v2/overview?v=v2)·[결제 취소](https://developers.portone.io/opi/ko/integration/cancel/v2/readme?v=v2)·[결제 연동](https://developers.portone.io/opi/ko/integration/start/v2/checkout?v=v2)·[requestPayment 응답 형식](https://developers.portone.io/sdk/ko/v2-sdk/payment-response?v=v2)·[인증 결제 수동 승인 API](https://developers.portone.io/api/rest-v2/payment?v=v2) |
 | UI 화면 정의 | SCR-011 주문·결제(결제사별 결제 프레임, 가상계좌 노출 차단, 홀드 남은 시간 표시, 중복 제출 방지, 취소 공제율 미리 알림), SCR-012 결제 결과(접수 완료 뒤 확정 대기, UNKNOWN 처리 안내, 결제 완료·티켓 발급 중(ADR-0106)), SCR-038 예매 취소, SCR-029·SCR-030 관제 콘솔(결제사별 상태, 결제사 지정·전환 명령) |
 
 ## 11. 테스트 포인트
+
+규칙 검사: '규칙이 맞는가'는 docs/verification.md §2.1의 `payment` 명세(이중 결제 0, 결제 접수 뒤 결제사 바뀜 0, 승인 없는 발권 0, 회차 취소 확정·CS 확인 없는 승인 뒤 환불 0)를 규칙 모델 검사(규칙을 작은 모델로 써서 일이 벌어질 수 있는 순서를 기계로 모두 따져 보는 검사)로 먼저 본다. 같은 규칙을 결제 Saga와 웹훅 처리의 모델 기반 시험(같은 규칙의 동작을 무작위 순서로 실제 코드에 돌려 보는 시험, §2.4, wbs 2.7.6)과 장애 주입 뒤 기록 검사(§2.5)로 코드에서 다시 본다. 아래 표는 기능 동작과 시간·처리량 목표를 본다.
 
 | # | 테스트 시나리오 | 검증 방법 | 합격 판정 기준 | 연결 요구사항 |
 | --- | --- | --- | --- | --- |
@@ -380,7 +429,7 @@ sequenceDiagram
 | P-T2 | 승인 실패 모의 검증 | 토스 테스트 코드 헤더로 여러 결제 실패 코드를 주입 | DB PENDING 레코드 삭제, 좌석 비트맵 해제, 금융 과금 0건, 사용자 안내가 정상인지 확인한다. | POL-013 |
 | P-T3 | 승인 응답 유실 및 재전송 | 승인 응답 패킷을 버린 뒤 같은 멱등키로 재전송, `IN_PROGRESS` 처리, UNKNOWN으로 바뀐 뒤 단독 조회로 확정하는지 검증 | 결제가 단 1건만 최종 체결되고 중복 승인이 0건임을 입증한다. | §4 |
 | P-T4 | 결제 접수 p99 지연시간 | 부하 시험 도구 k6로 300 TPS 부하를 주입 | 202 Accepted 응답의 p99 지연시간 < 150ms와, 서비스를 멈춤 없이 쓸 수 있는 정도인 가용성 99.95%를 유지한다. | NFR-005 |
-| P-T5 | 결제 최종 확정 p99 지연시간 | OpenTelemetry(지표·로그·요청 기록을 모으는 공통 표준과 도구) 분산 트레이싱으로 처음부터 끝까지의 지연시간 계측 | 결제 확정 p99 3초 이내(PG 2초 + 내부 1초. 2초는 끊는 값이 아니라 나눠 재는 예산이다)와 결제 완료율 99.95%를 달성한다. 승인 결과가 `trade.payments`로 오는 구간(Outbox 릴레이와 Kafka)을 따로 재어 내부 1초 안인지 본다(§2, 기술 검토 높음-16). | NFR-006 |
+| P-T5 | 결제 최종 확정 p99 지연시간 | OpenTelemetry(지표·로그·요청 기록을 모으는 공통 표준과 도구) 분산 트레이싱으로 처음부터 끝까지의 지연시간 계측 | 결제 확정 p99 3초 이내(PG 2초 + 내부 1초. 2초는 끊는 값이 아니라 나눠 재는 예산이다)와 결제 완료율 99.95%를 달성한다. 완료율 99.95%는 결제 5,990건 이상에서 실패 0건일 때 적는다(실패 비율의 정확 이항 단측 95% 상한(잰 건수로 보아 실제 실패율이 이보다 클 가능성이 5% 이하인 값)이 0.05% 이하, planning/02 §3.1 원칙 6, docs/perf-ledger.md §7). 승인 결과가 `trade.payments`로 오는 구간(Outbox 릴레이와 Kafka)을 따로 재어 내부 1초 안인지 본다(§2, 기술 검토 높음-16). 같은 측정을 거래·제어 Kafka 브로커 하나를 다시 시작하는 구간(MSK 패치 흉내, 최대 약 2분·p99 지연 최대 약 2초)에서도 평소 구간과 나눠 남긴다. 그 구간에서 3초를 넘으면 당기기(ADR-0140)로 반영한 수와 함께 적는다(docs/verification.md V-T27, 추천 적용 2026-10-29, ADR-0141 결정 7). | NFR-006 |
 | P-T6 | 승인 유효기한 초과 검증 | 토스 결제 승인 API 호출을 일부러 11분간 지연 | 승인 API를 호출하지 않고 주문을 안전하게 만료로 끝내며, 금융 과금 0건을 확인한다. | §4 |
 | P-T7 | 결제 금액 변조 차단 | successUrl의 amount 파라미터를 마음대로 바꿔 접수 API 호출 | 서버 검증에서 400 Bad Request로 바로 거절되고, 결제 접수가 막힌다. | §2 |
 | P-T8 | 웹훅 중복 및 본문 위조 방어 | 같은 transmission-id 웹훅을 2회 연속 수신하고 가짜 승인 본문을 주입 | 중복 건은 1회 처리되고, 가짜 본문은 단독 조회 API로 검증해 안전하게 무시된다. | FR-041 |
@@ -390,7 +439,7 @@ sequenceDiagram
 | P-T12 | 결제 중 세션 수명 유지 | 주문서를 만든 뒤 결제창에서 25분간 아무 조작 없이 대기 | 구매 세션과 입장 자리가 만료되지 않고 유지되며, 결제에 성공하면 바로 안전하게 비워진다. | POL-009 |
 | P-T13 | 주문 상태 이력 역추적(추천 적용 2026-10-28, ADR-0113) | 주문 ID로 `order_event`를 번호 순으로 읽고 홀드 원장과 합쳐 좌석의 시간대별 상태 전이를 다시 구성한다. 장애 주입 시험(wbs 2.12.3) 뒤에도 같은 검사를 돌린다 | 다시 구성한 전이가 실제 좌석 전이와 정확히 일치한다. 시험 데이터의 모든 주문에서 마지막 이력의 새 상태가 지금 상태와 같고, 빈 번호가 없으며, `event_seq`가 마지막 번호와 같다 | FR-031 |
 | P-T14 | PG 시뮬레이터 전환 검증 | 부하 테스트 환경에서 외부 PG 대신 내부 시뮬레이터 어댑터를 연결 | 실제 외부 PG 호출을 0건으로 유지하면서 대규모 결제 SLO를 정밀하게 잰다. | POL-026 |
-| P-T15 | 멱등 처리 무결성 | 주문 Saga의 발권 gRPC 호출을 재시도로 중복 전달하고, `trade.orders`·`trade.payments` 사건도 소비자에게 중복 전달 | 티켓 발권이 정확히 1회만 실행되고(발권은 Saga가 gRPC로 부른다, architecture §3.2), 소비자가 같은 `eventKey`를 한 번만 처리한다는 것을 입증한다. | K7, NFR-005 |
+| P-T15 | 멱등 처리 무결성 | 주문 Saga의 발권 gRPC 호출을 재시도로 중복 전달하고, `trade.orders`·`trade.payments` 사건도 소비자에게 중복 전달. 같은 결제 결과를 사건과 당기기(`BatchGetPayments`) 두 길로 보내고, 당기기로 반영한 뒤 그 앞 순번의 사건을 늦게 넣는다(추천 적용 2026-10-29, ADR-0140) | 티켓 발권이 정확히 1회만 실행되고(발권은 Saga가 gRPC로 부른다, architecture §3.2), 소비자가 같은 `eventKey`를 한 번만 처리한다는 것을 입증한다. 두 길로 온 같은 결과는 한 번만 반영되고, 늦게 온 앞 순번 사건은 건너뛴다. | K7, NFR-005 |
 | P-T16 | PG 어댑터 계약 테스트 | 시뮬레이터(매 PR), 토스와 포트원 샌드박스(1일 1회)에 같은 계약 테스트를 실행 | 세 어댑터 모두 같은 정규화 계약 결과를 돌려주고, 포트원 멱등키 따옴표 규격을 지킨다. | ADR-0029 |
 | P-T17 | 포트원 웹훅 서명 검증 | 잘못된 서명, 필수 헤더 누락, 5분을 넘는 시각 차이, 같은 `webhook-id` 중복(`webhook-timestamp`만 바꾼 재전송 포함), 알 수 없는 이벤트를 주입. 포트원 테스트 채널에서 웹훅 재전송을 한 번 일으켜 `webhook-id`가 같은지 본다 | 서명이나 헤더에 결함이 있는 요청은 바로 거절된다. 중복 건은 1회 처리되고, 지원하지 않는 이벤트는 안전하게 무시된다. 재전송의 `webhook-id`가 다르면 중복 키를 다시 정한다(기술 검토 낮음-070). | FR-041, ADR-0036 |
 | P-T18 | 공제율 산정 정확도 검증 | 공연 12일 전, 8일 전, 5일 전, 2일 전, 당일과 예매 후 20시간(주말 포함/제외)의 경계값 테스트 | 공제 없음(전액 환불), 10%, 20%, 30%, 90% 공제가 정확히 적용되고, 24시간 이내 전액 환급에서 비영업일이 정확히 빠진다. 끝수(추천 적용 2026-10-28, 기술 검토 낮음-095): 33,333원 티켓은 10% 공제 3,333원·환급 30,000원, 20% 공제 6,666원·환급 26,667원, 30% 공제 9,999원·환급 23,334원, 90% 공제 29,999원·환급 3,334원이고, 화면 견적·결제사 부분 취소 요청·정산서 환급의 값이 같다. | POL-032 |
@@ -414,7 +463,7 @@ sequenceDiagram
 | P-T36 | 가상계좌 입금 대기 | 일반 공연에서 가상계좌 발급 뒤 ① 기한 안 입금 ② 입금 없이 기한 + 10분 ③ 기한 직전 입금이 늦게 처리되는 경우 ④ 입금 뒤 입금 오류 웹훅 ⑤ 입금 대기 중 회차 취소 확정 | ① 발권 ② 주문 FAILED·좌석 반환·한도 복구, 웹훅 없이 조회로 판정 ③ 조회가 입금 완료면 발권(좌석 유지) ④ 티켓 VOIDED·키 폐기·좌석 PENDING, 재입금하면 새로 발권 ⑤ 입금 전 취소로 FAILED. 모든 경우에 이중 발권 0건 | POL-014, FR-011, K8 |
 | P-T37 | 판매 종료 전후 주문 | 데모 시계로 회차 시작 24시간 전을 넘기며 ① 판매 종료 1분 전 홀드 → 판매 종료 뒤 주문 생성·결제 시도·접수 ② 같은 홀드로 결제창 단계 실패 뒤 다시 시도 ③ 판매 종료 뒤, 판매 종료 전 홀드가 아닌 holdId(위조·다른 회차)로 주문 생성 | ① 홀드·결제 시간 안이면 201·202와 CONFIRMED ② 지금 규칙대로 다시 시도 가능 ③ 410 `sale-ended`, 주문·과금 0건 | FR-011, POL-030, ADR-0064 |
 | P-T38 | 결제창에서 돌아온 첫 요청 | 로그인한 상태로 결제창(토스 이동 방식, 포트원 리디렉션 방식)을 열었다가 다른 사이트에서 오는 이동으로 복귀 화면을 연다 | 복귀 화면의 첫 요청에는 팬 쿠키가 실리지 않고, 응답은 정적 셸이다(서버는 결제 값을 읽거나 로그에 남기지 않는다). 쿠키가 필요한 결제 접수는 페이지 스크립트의 같은 사이트 요청으로 가서 202 응답을 받고, 주소창의 결제 값은 읽은 즉시 지워진다 | ADR-0065 |
-| P-T39 | 승인 뒤 발권 재시도와 발권 기한 | ① ticket-svc를 2분 멈춘 채 결제 승인 ② 데모 시계로 발권 기한(승인 뒤 30분 [가정])을 넘김 ③ 발권 대기 중 그 회차의 취소를 2인 확정 ④ ticket-svc가 `FAILED_PRECONDITION`으로 답하게 함 ⑤ purchase-svc가 결제 승인 사건을 70초 동안 읽지 못하게 막음 | ① 결제 취소 0건, 재시도로 발권, 화면은 '결제 완료, 티켓 발급 중'이고 60초 넘으면 알림(`ISSUE_DELAYED`)과 SEV2 ② SEV1과 CS 처리함 `TICKET_NOT_ISSUED` 건, 재시도는 이어 간다 ③ 일괄 환불 작업이 발권을 멈추고 결제를 취소해 COMPENSATED, 좌석 반환 ④ 자동 재시도를 멈추고 SEV2와 `TICKET_NOT_ISSUED` 건, 결제 취소 0건 ⑤ 불변식 SEV1(승인 뒤 60초 안에 발권도 큐 등록도 안 된 결제). 모든 경우에 이중 발권 0건 | NFR-006, ADR-0106 |
+| P-T39 | 승인 뒤 발권 재시도와 발권 기한 | ① ticket-svc를 2분 멈춘 채 결제 승인 ② 데모 시계로 발권 기한(승인 뒤 30분 [가정])을 넘김 ③ 발권 대기 중 그 회차의 취소를 2인 확정 ④ ticket-svc가 `FAILED_PRECONDITION`으로 답하게 함 ⑤ purchase-svc가 결제 승인 사건과 당기기(`BatchGetPayments`)를 함께 70초 동안 쓰지 못하게 막음(사건만 막는 경우는 P-T47, 추천 적용 2026-10-29, ADR-0140) | ① 결제 취소 0건, 재시도로 발권, 화면은 '결제 완료, 티켓 발급 중'이고 60초 넘으면 알림(`ISSUE_DELAYED`)과 SEV2 ② SEV1과 CS 처리함 `TICKET_NOT_ISSUED` 건, 재시도는 이어 간다 ③ 일괄 환불 작업이 발권을 멈추고 결제를 취소해 COMPENSATED, 좌석 반환 ④ 자동 재시도를 멈추고 SEV2와 `TICKET_NOT_ISSUED` 건, 결제 취소 0건 ⑤ 불변식 SEV1(승인 뒤 60초 안에 발권도 큐 등록도 안 된 결제). 모든 경우에 이중 발권 0건 | NFR-006, ADR-0106 |
 | P-T40 | 결제사 지연과 읽기 시간 초과 | 시뮬레이터의 승인 응답을 ① 10초 늦춤 ② 70초 늦춤 ③ 300 TPS 부하에서 채널 동시 승인 호출 상한을 넘김 ④ 같은 멱등키로 다시 보낸 호출에만 429를 돌려줌 | ① 끊지 않고 결과를 받아 확정, 다시 보낸 호출 0건, 1분 창 p99 2초 초과로 SEV2 ② 60초 [가정]에서 끊고 같은 멱등키 재전송·결과 모름 조회로 확정, 이중 승인 0건 ③ 상한을 넘는 승인 명령은 재시도 큐에서 승인 기한 안에 처리되고, 열린 결제사 연결 수가 상한을 넘지 않는다 ④ 채널 상한이 낮아지지 않고 그 호출만 다음 시도가 늦춰진다. 승인 명령 접수 gRPC는 모든 경우에 데드라인(200ms [가정]) 안에 답한다 | NFR-006, 기술 검토 높음-16 |
 | P-T41 | 결제하지 않은 티켓 주문의 만료 | ① 주문을 만들고 결제창을 닫은 채 떠남 ② 결제 시도를 만들지 않고 떠남 ③ 결제 시도 만료(40분 [가정]) 직전에 결제 접수 ④ 구매 세션 종료 사건을 빠뜨림 | ① 세 조건이 모두 끝난 때 주문 EXPIRED와 `trade.orders` EXPIRED, 결제사 호출 0건 ② 세션 종료와 홀드 해제 뒤 EXPIRED ③ 접수가 먼저면 만료하지 않고 지금 규칙대로 처리, 만료 뒤의 시도·접수는 409 `order-expired` ④ 안전망이 만든 지 90분 [가정] 지난 주문을 끝낸다. 과금 0건 | ADR-0107 |
 | P-T42 | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서 여기에 두고, shop 상세 설계를 쓸 때 옮긴다) | 한정 재고 상품으로 ① 주문 뒤 15분 [가정] 결제하지 않음 ② 결제 접수 뒤 승인 기한까지 연장 ③ 만료 작업과 결제 승인을 같은 때 일으킴 ④ 같은 계정이 결제하지 않은 주문을 두고 같은 상품을 다시 주문 ⑤ 만료 작업을 Redis 반영 전에 죽였다가 다시 띄움 | ① 주문 Expired, 재고가 돌아와 다시 살 수 있다 ② 연장된 시각까지 만료하지 않는다 ③ 하나만 이긴다(승인이면 재고 확정, 만료면 과금 0건) ④ 이전 주문이 Expired로 끝나고 재고를 돌린 뒤 새 주문이 생긴다 ⑤ 재고는 한 번만 돌아온다. 모든 경우에 초과 판매 0건 | FR-015, NFR-025, ADR-0107 |
@@ -422,6 +471,8 @@ sequenceDiagram
 | P-T44 | 결제 결과 롱 폴링의 시간 초과 순서(추천 적용 2026-10-28, 기술 검토 중간-047) | 스테이징 `api` 배포(CloudFront, 원본 응답 시간 초과 기본 30초) 뒤에서 결과가 ① 3초 ② 26초 ③ 70초 뒤에 정해지는 주문의 결과를 롱 폴링으로 묻는다. ④ purchase-svc의 응답을 일부러 멈춰 롱 폴링이 답하지 않게 한다. 원본 요청 기록으로 같은 조회가 몇 번 원본에 갔는지 센다 | ① 3초에 확정으로 답한다 ② 25초에 '확정 전' 상태로 답하고, 브라우저가 다시 물어 두 번째 응답에서 확정을 받는다 ③ 같은 식으로 이어 묻다가 확정을 받는다 ④ 게이트웨이가 27초에 504 Problem으로 끝내고 브라우저가 다시 묻는다. 모든 경우에 CloudFront가 한 조회를 원본에 다시 보낸 기록이 0건이고, 경계의 504는 ④에서만 나온다 | NFR-006, docs/infra.md §4.1 |
 | P-T45 | 주문·결제 멱등키의 범위·지문·처리 중·보관(추천 적용 2026-10-28, 기술 검토 중간-046) | ① 같은 키·같은 본문으로 주문 생성을 두 번 ② 같은 키로 다른 `holdId`의 주문 생성 ③ 첫 결제 접수 트랜잭션을 3초 붙잡은 채 같은 키로 다시 접수 ④ 다른 계정이 같은 키로 주문 생성 ⑤ 같은 키를 주문 생성과 결제 시도 시작에 함께 씀 ⑥ 데모 시계로 24시간 [가정]을 넘긴 뒤 같은 키 ⑦ 키 없이, 큰따옴표로 감싼 UUID로 각각 요청 | ① 두 번째도 같은 201과 같은 주문 ID ② 422 `idempotency-key-reused`, 새 주문 없음 ③ 1초 [가정] 기다린 뒤 409 `idempotency-request-in-progress`와 `Retry-After`, 첫 접수가 끝난 뒤 다시 보내면 처음 응답(202) ④·⑤ 서로 다른 작업으로 따로 처리된다 ⑥ 새 요청으로 처리된다(주문은 이미 있으므로 홀드 상태에 따라 409 등 업무 규칙대로 끝난다) ⑦ 둘 다 400 `idempotency-key-invalid` | FR-011, docs/api/guidelines.md §4 |
 | P-T46 | 대체 채널의 하위 결제사(추천 적용 2026-10-28, 기술 검토 중간-042) | 포트원형 시뮬레이터의 채널 표에 하위 결제사를 둔다. ① 토스페이먼츠 공연의 대체로 하위 결제사가 `TOSSPAYMENTS`인 포트원 채널을 명령 12로 지정한다 ② `TOSS_BRANDPAY`·`TOSSPAY` 채널로 같은 일을 한다 ③ 플랫폼 기본값 설정에 ①의 채널을 넣고 배포 검사를 돌린다 ④ 표에는 `KCP_V2`로 적었는데 결제 응답의 `channel.pgProvider`가 `TOSSPAYMENTS`인 채널로 결제한다 ⑤ 하위 결제사가 다른 채널을 대체로 두고 토스형 시뮬레이터를 멈춘 뒤 명령 6으로 전환한다 | ① 422이고 지정이 바뀌지 않는다 ② 둘 다 422다(브랜드페이는 토스페이먼츠 상품, 토스페이는 확인 전) ③ 배포 검사가 실패한다 ④ SEV2가 뜨고 그 채널이 대체 후보에서 빠진다 ⑤ 새 결제 시도가 포트원형으로 열리고 승인된다 | POL-036, ADR-0044 |
+| P-T47 | 결제 결과 당기기(추천 적용 2026-10-29, ADR-0140) | 300 TPS 결제 부하에서 purchase-svc가 `trade.payments` 승인 사건을 70초 동안 읽지 못하게 막는다(당기기는 열어 둔다). 이어서 막힘을 풀어 밀린 사건이 들어오게 한다 | 막힌 동안에도 당기기로 결제 확정이 p99 10초 [가정] 안에 끝나고, 60초 불변식 SEV1(승인 뒤 60초 안에 발권도 큐 등록도 안 된 결제)이 0건이다. 당기기 반영 SEV3가 1분 안에 난다. 막힘을 풀면 늦게 온 사건이 중복 반영되지 않는다(이중 발권 0건, 주문 상태 되돌아감 0건) | NFR-006, ADR-0140, Game Day G-31 |
+| P-T48 | 인기 회차 결제 결과의 키 단위 동시 처리(추천 적용 2026-10-29, ADR-0142 결정 1) | 한 회차의 결제 결과를 `trade.payments` 한 파티션에 승인 초당 300건으로 넣는다. 처리기 지연은 건당 10ms [설명용 가정]로 둔다 | 결제 확정 p99 3초 안이다. 같은 주문의 사건은 순서대로 반영되고, 소비 지연(lag)이 늘기만 하지 않는다. 통과하지 못하면 결제 토픽을 주문 키 새 토픽으로 옮기는 것을 검토한다(ADR-0142 되돌릴 조건) | NFR-006, ADR-0142 |
 
 ## 12. 미결정·[가정]
 
@@ -433,3 +484,4 @@ sequenceDiagram
 - 취소 환불 정책은 POL-032로 정했다. 대한민국 공휴일 달력 데이터를 받는 방식(공공데이터 포털 API 연동이냐, 손으로 관리하는 파일이냐)은 세부 구현 단계(wbs 5.3.1)에서 정한다. 정산 지급처럼 돈이 실제로 나가는 날은 공휴일 달력이 아니라 은행 영업일 달력으로 센다. 두 달력의 출처와 서로 다른 날이 있는지는 같은 작업에서 원문으로 확인한다(확인 필요, docs/features/settlement.md §5.1, 추천 적용 2026-10-28, 기술 검토 낮음-085).
 - §4.2에 정한 주문당 활성 결제 1건 제한, 결제 거절 재시도 3회 제한, UNKNOWN을 수동 처리로 옮기는 기준 1시간은 2026-10-11에 보강한 운영 규칙이다. 세부 파라미터는 [가정, Phase 2에서 확정]한다.
 - 2026-10-28에 정한 값은 모두 [가정]이다(추천 적용). 결제사 읽기 시간 초과 60초는 결제사 계약 때 확인하고, 연결 시간 초과 3초·승인 명령 접수 데드라인 200ms·채널별 동시 승인 호출 상한(채널 상한 × 2초)은 wbs 2.7.2 부하 시험에서 정한다(기술 검토 높음-16). 발권 기한 30분·발권 재시도 간격(1초~60초)·발권 지연 SEV2와 알림 60초는 P-T1·P-T39로 정한다(ADR-0106). 결제 시도 만료 40분·주문 만료 안전망 90분·굿즈 재고 예약 15분은 P-T41·P-T42와 운영 데이터로 정한다(ADR-0107).
+- 2026-10-29에 정한 값도 모두 [가정]이다(추천 적용 2026-10-29). 결과 당기기의 점검 주기 1초·결과 늦음 기준 5초·한 번에 최대 100건·같은 주문 5초에 한 번·`BatchGetPayments` 데드라인 500ms·파드마다 동시 요청 4개는 P-T47로 정한다(ADR-0140). 확정 지연 증가 5~10초와 당기기 간격 때문의 최대 약 6초 늦음은 [추정]이다. 당기기가 payment DB 쓰기 인스턴스 CPU를 5%p [가정] 넘게 올리면 읽기 복제본 + 순번 확인(복제본의 순번이 모자라면 쓰기 인스턴스로 다시 읽기)으로 바꾼다(ADR-0140 되돌릴 조건). 주문 Saga 소비자의 파티션마다 동시 처리 키 32개·보류로 옮기기 전 재시도 5회·보류 행 7일 보존은 P-T48·ST-T18·ST-T19로 정한다(ADR-0142). 대체 결제사 전환의 제어 gRPC 데드라인 1초와 `pg_switch` 다시 읽기 2초는 C-T53으로 정한다(ADR-0143).
