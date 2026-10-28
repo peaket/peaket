@@ -47,6 +47,7 @@ erDiagram
     account ||--o| identity_verification : "verified_by (ci_hmac)"
     account ||--|{ account_provider : "로그인 수단 1개 이상"
     account ||--o{ account_merge : "대표 계정"
+    account ||--o{ account_hold : "병합 막는 건(ADR-0148)"
     admin_account }o--|| promoter : "belongs_to (partner only)"
     admin_account ||--o{ admin_passkey : "단계 인증 패스키(기술 검토 중간-051)"
     admin_account ||--o{ admin_recovery_code : "비상 복구 코드"
@@ -94,6 +95,14 @@ erDiagram
         timestamptz requested_at
         timestamptz confirmed_at
         timestamptz completed_at
+    }
+    account_hold {
+        uuid account_id FK
+        text kind "VERIFICATION_APPEAL|DISPUTE|APPEAL. ops-svc가 이의 제기·소명 건을 열고 닫을 때 SetAccountHold로 알린다(추천 적용 2026-10-29, ADR-0148 결정 5)"
+        uuid source_ref "UNIQUE, ops 건 ID(멱등)"
+        text state "OPEN|CLOSED. CLOSED 행은 30일 [가정] 남겨 늦게 온 열림을 무시하고 그 뒤 지운다"
+        bigint source_version "ops 건 상태의 판 번호. 저장한 판보다 클 때만 반영"
+        timestamptz updated_at
     }
     consent {
         uuid id PK
@@ -1190,7 +1199,7 @@ erDiagram
     takedown_notice ||--o{ takedown_action : "외래키 없음(ops와 core 논리 DB)"
     review ||--o{ takedown_action : ""
     cs_case |o--o{ takedown_action : "신고 처리 조치(외래키 없음)"
-    admin_account ||--o{ command_event : "actor/approver"
+    admin_account ||--o{ command_actor : "사람 대응(3년, ADR-0149)"
     data_request ||--o{ provision_ledger : ""
     security_incident ||--o{ incident_filing : "의무별 신고·통지"
     access_review ||--o{ access_finding : ""
@@ -1221,7 +1230,8 @@ erDiagram
         uuid command_id
         int seq
         text type
-        uuid actor "or 'system'"
+        uuid actor_ref "기록마다 새 무작위 참조. 관리 계정 ID는 command_actor에만(추천 적용 2026-10-29, ADR-0149)"
+        text actor_role "viewer|operator|commander|system(그때의 역할)"
         text reason
         jsonb dry_run
         timestamptz acked_at
@@ -1433,9 +1443,18 @@ erDiagram
     }
     command_approval {
         uuid command_id PK
-        uuid approver_id PK
-        uuid requester_id "CHECK (approver_id <> requester_id)"
+        uuid approver_ref PK "가명 참조(ADR-0149)"
+        text approver_role
+        uuid requester_ref "가명 참조"
         timestamptz approved_at
+    }
+    command_actor {
+        uuid actor_ref PK
+        uuid command_id "UNIQUE (command_id, admin_account_id): 같은 사람 두 번·요청자 본인 승인 금지(ADR-0086의 검사를 옮김)"
+        text side "REQUESTER|APPROVER"
+        uuid admin_account_id
+        timestamptz recorded_at "3년 [가정] 뒤 행을 지운다. 기록·체인은 고치지 않는다(ADR-0149)"
+        uuid delete_hold_ref "optional, 삭제 보류 근거 건 ID(수사 요청·진행 중 분쟁)"
     }
 ```
 
@@ -1480,7 +1499,7 @@ erDiagram
 - **금액 칸 자료형(추천 적용 2026-10-28, 기술 검토 높음-20)**: 금액은 모두 원 단위 정수다. 결제 한 건에 딸린 금액(주문·결제·결제 취소 금액, 주문 취소의 환급, 배상, 상품·좌석 가격)은 `int`(약 21억 4,748만 원까지)로 둔다. 여러 건을 모은 금액(정산서 항목, 수기 조정, 지급 묶음 합계, 지급 건, 미수금, 결제사 잔액)과 그런 금액을 담는 승인 업무 금액(`approval_request.amount`)은 `bigint`로 둔다. 큰 공연 하나의 정산서만으로도 `int`를 넘기 때문이다(25억 원 정산서, docs/features/settlement.md J-T4). openapi는 `bigint` 칸에 `format: int64`를 붙인다. 앱은 `bigint` 칸을 Drizzle `mode: 'number'`로 받는다. JavaScript 숫자는 2^53 − 1(약 9,007조)까지 정확하고, Drizzle 문서도 2^31을 넘고 2^53보다 작은 값에 이 방식을 권한다(2026-10-28 확인). 금액에는 값을 32비트로 자르는 비트 연산을 쓰지 않는다.
 - **종류별 필수 칸(상속관계)**: 한 표에 여러 종류를 담는 표는 종류마다 필수 칸을 검사한다. 예: `CHECK ((kind = 'TEMPLATE') = (template_code IS NOT NULL))`, `CHECK (kind <> 'LAYOUT' OR promoter_id IS NOT NULL)`(`venue`), `CHECK ((kind = 'EVENT') = (event_id IS NOT NULL))`(`settlement_statement`), `CHECK ((role IN ('partner_admin','partner_member')) = (promoter_id IS NOT NULL))`(`admin_account`).
 - **다형 참조의 중복 막기**: `cs_case`에 `UNIQUE (kind, target_ref) WHERE status <> 'RESOLVED' AND kind IN ('CONTENT_REPORT','RIGHTS_REQUEST','PORTONE_LEDGER_MISMATCH')`를 건다. ops-svc는 신고 이벤트를 `INSERT … ON CONFLICT DO NOTHING`으로 받아, 같은 후기의 신고가 건 둘로 생기지 않는다. 포트원 원장 불일치도 같은 방식이라 30분마다 대사해도 같은 이체·파트너의 건이 하나다(추천 적용 2026-10-28, ADR-0108). 다른 논리 DB를 가리키는 ID(`review.basis_order_id`, `content_report.case_id`, `inquiry.case_id`, `cs_case.target_ref`)는 하루 한 번 고아 행(가리키는 대상이 없는 행) 수를 세어 지표로 낸다.
-- **승인자는 자식 표**: 2인 승인의 '같은 사람 두 번 금지·요청자 본인 금지'(§5)를 DB가 지키도록, 승인을 JSON 배열 대신 자식 표(`approval_vote`·`command_approval`·`event_cancellation_approval`)에 두고 `UNIQUE (요청 ID, 승인자)`와 요청자(판정자)와 다른지 검사하는 CHECK를 건다. 이상 표시에 든 스캔 기록도 자식 표 `gate_flag_scan`에 둔다.
+- **승인자는 자식 표**: 2인 승인의 '같은 사람 두 번 금지·요청자 본인 금지'(§5)를 DB가 지키도록, 승인을 JSON 배열 대신 자식 표(`approval_vote`·`command_approval`·`event_cancellation_approval`)에 두고 `UNIQUE (요청 ID, 승인자)`와 요청자(판정자)와 다른지 검사하는 CHECK를 건다. 운영 명령은 기록의 사람 칸이 가명 참조라, 이 검사를 대응 표 `command_actor`의 `UNIQUE (command_id, admin_account_id)`가 한다(추천 적용 2026-10-29, ADR-0149). 이상 표시에 든 스캔 기록도 자식 표 `gate_flag_scan`에 둔다.
 - **판본 이력**: 판매 승인한 공연의 승인 판본은 `production_revision`(회차 단위 `event_revision`에서 공연 단위로 바꿈, ADR-0093), 파트너 계약 조건(수수료율)은 `promoter_contract`(유효 기간이 겹치지 않게 기간 키 `UNIQUE (promoter_id, valid_during WITHOUT OVERLAPS)`, `btree_gist` 확장 필요), 판매자 정보 변경 요청은 `seller_profile_change`에 남긴다. 지금 값은 `production`·`event`·`promoter`에 있다.
 - **계정 병합 사슬**: 병합할 때 흡수 계정을 가리키던 계정도 새 대표 계정을 가리키게 고쳐, `merged_into_account_id`가 한 단계만 이어지게 한다.
 
@@ -1654,7 +1673,7 @@ erDiagram
      - 자격 갱신 주기를 넘겨 이어지는지는 실제 MSK와 EKS에서만 확인된다 [확인 필요, review/open-items.md 42번].
    - 연결 풀의 유휴 연결 회수와 DB·Redis 시간 초과 기본값은 docs/architecture.md §5 '시간 초과 기본값'을 따른다. 세션 `idle_session_timeout`은 연결 풀과 맞지 않아 쓰지 않는다.
 8. **예매 취소 오케스트레이션 (purchase → ticket → payment)**: purchase 서비스가 `order_cancellation` 등록, 주문 이벤트 기록, Outbox 적재를 트랜잭션 하나로 한다. 같은 티켓에 진행 중인 취소가 이미 있으면 유일 제약(§2)에 걸리므로 새 행을 만들지 않고 그 취소를 이어서 처리한다(추천 적용 2026-10-22, ADR-0086). 이어 ticket 서비스가 티켓 키를 폐기하고 상태를 바꾼다(행 잠금 + 버전 검증). 그 뒤 purchase 서비스가 `seat_sale`을 RETURNED 상태로 바꾸고, 쿼터를 되돌리고, Redis 비트맵을 복원한다. 마지막으로 payment 서비스가 PG사 결제 취소 API를 부르고 `payment_cancel`을 기록한다. 단, 현장 입장이 시작된 뒤 접수된 취소 건은 악의적으로 입장한 뒤 환불받는 일을 막으려고, 마지막 결제 취소 단계를 입장 기록 마감(docs/features/offline-gate.md §7.3) 뒤로 미룬다(POL-032, ADR-0051 결정 13).
-9. **계정 병합 오케스트레이션 (identity → 각 분산 서비스)**: identity 서비스가 흡수 대상 계정 상태를 MERGED로 바꾸고, 소셜 로그인 제공자 연결(`account_provider`)을 옮기고, `account_merge` 이력 기록과 Outbox 메시지 발행을 트랜잭션 하나로 끝낸다. 그 뒤 각 분산 서비스는 `identity.accounts-merged` 이벤트를 받아 자기 데이터를 두 종류로 나눠 처리한다(추천 적용 2026-10-28, 기술 검토 중간-054). ① 지금의 소유·상태 값(core의 찜·오픈 알림 구독, 배송지)은 `account_id`를 대표 계정 ID로 멱등하게 고친다(`merge_id` 멱등키). ② 사건·원장·법정 보존 기록(purchase의 주문·`order_event`·굿즈 주문·주문 취소, payment의 결제 원장·`payment_event`·정산, ticket의 스캔 기록, 접속기록)은 원래 `account_id`를 고치지 않는다. 덧붙이기만 하는 사건 기록이라는 전제와 5년 보존 기록(전자상거래법 §6), 봇·부정 조사의 '실제로 산 계정'을 지키려는 것이다. 대신 그 서비스가 자기 DB의 대응표 `merged_account(absorbed_account_id PK, representative_account_id, merged_at)`를 이 이벤트로 채우고, '내 주문' 조회와 소유 확인을 `account_id = ANY(대표 계정 + 흡수 계정 ID들)`로 한다. 흡수 계정은 본인확인 전 계정이라 티켓·관람 후기가 없으므로 ticket-svc의 소유권 이전·기기 키 폐기 단계는 두지 않는다. identity가 병합을 확정하기 전에 ticket-svc와 core(후기)에 흡수 계정의 티켓·후기 수를 물어 0이 아니면 불변식 위반으로 막는다(POL-034).
+9. **계정 병합 오케스트레이션 (identity → 각 분산 서비스)**: identity 서비스가 흡수 대상 계정 상태를 MERGED로 바꾸고, 소셜 로그인 제공자 연결(`account_provider`)을 옮기고, `account_merge` 이력 기록과 Outbox 메시지 발행을 트랜잭션 하나로 끝낸다. 그 뒤 각 분산 서비스는 `identity.accounts-merged` 이벤트를 받아 자기 데이터를 두 종류로 나눠 처리한다(추천 적용 2026-10-28, 기술 검토 중간-054). ① 지금의 소유·상태 값(core의 찜·오픈 알림 구독, 배송지)은 `account_id`를 대표 계정 ID로 멱등하게 고친다(`merge_id` 멱등키). ② 사건·원장·법정 보존 기록(purchase의 주문·`order_event`·굿즈 주문·주문 취소, payment의 결제 원장·`payment_event`·정산, ticket의 스캔 기록, 접속기록)은 원래 `account_id`를 고치지 않는다. 덧붙이기만 하는 사건 기록이라는 전제와 5년 보존 기록(전자상거래법 §6), 봇·부정 조사의 '실제로 산 계정'을 지키려는 것이다. 대신 그 서비스가 자기 DB의 대응표 `merged_account(absorbed_account_id PK, representative_account_id, merged_at)`를 이 이벤트로 채우고, '내 주문' 조회와 소유 확인을 `account_id = ANY(대표 계정 + 흡수 계정 ID들)`로 한다. 흡수 계정은 본인확인 전 계정이라 티켓·관람 후기가 없으므로 ticket-svc의 소유권 이전·기기 키 폐기 단계는 두지 않는다. identity가 병합 제안을 만들 때와 확정하기 바로 앞에 purchase-svc·ticket-svc·core-svc의 `CheckAccountMerge`로 막는 사유를 묻는다. 흡수 계정의 티켓·후기가 0이 아니면 불변식 위반으로 막고(POL-034), 한 곳이라도 1초 [가정] 안에 답하지 않으면 확정하지 않는다. ops 데이터의 이의 제기·소명 계류는 ops-svc가 알려 둔 `account_hold`로 본다. 병합 뒤 1인 한도 검사는 `merged_account`로 계정 묶음을 함께 센다(추천 적용 2026-10-29, ADR-0148).
 10. **양도 수락·돌려주기·회수 (ticket)**: 티켓 행을 잠근 상태에서 양도 요청 상태와 기한을 다시 확인한다. 그리고 보유자 변경, 이전 키 폐기, `transfer_offer` 상태 전이, Outbox 적재를 트랜잭션 하나로 처리한다(ADR-0046). 새 보유자의 키는 등록 버튼으로만 따로 만든다(ADR-0051 결정 10).
 11. **승인 업무 실행 (ops → purchase·ticket·payment)**: ops 서비스가 `approval_request` 상태를 EXECUTING으로 바꾸고, 감사 이벤트와 Outbox를 같은 트랜잭션에 쓴다. 대상 서비스는 승인 ID를 멱등키로 쓰므로 다시 전달돼도 한 번만 반영된다. 실패하면 Failed 상태와 CS 처리함 건이 남는다. 원인을 고친 뒤 승인자가 같은 approve를 다시 부르면(재인증) 같은 승인 ID로 다시 실행하고, 새 경로는 두지 않는다(추천 적용 2026-10-20, ADR-0073).
 12. **일괄 환불 작업 (purchase → payment)**: 주문마다 `order_cancellation`을 만들고 `cancel-{cancellationId}`로 결제사 취소를 호출한다. 대상 주문은 회차의 환급 대상 주문을 주문 ID 커서로 500개씩 [가정] 고른다(§5.1). 취소 행은 `event_cancellation_request_id`를 담아 `INSERT … ON CONFLICT DO NOTHING`으로 넣는다. 작업이 멈췄다가 다시 시작돼도 '티켓당 진행 중 취소 하나' 유일 제약(§2) 때문에 취소 행과 멱등키가 둘 생기지 않아 환급이 중복되지 않는다. 진행률의 원본은 `order_cancellation`을 요청별 상태로 묶어 센 값이고, `event_cancellation_request`의 진행 수와 실패 수는 작업자가 묶음마다 한 번 올리는 화면용 값이다(추천 적용 2026-10-22, ADR-0086).
@@ -1759,7 +1778,7 @@ erDiagram
 | 결정 기록 (`decision_record`) | ops-svc 논리 DB, 스토리지 레벨 암호화. 분석 요약에 개인정보를 쓰지 않는다 | 결정이 유효한 동안 유지하고, 철회·대체된 기록은 5년 [가정] 뒤 파기한다(자체 기준, POL-040) |
 | 수사기관 제공 대장 및 통신자료 요청서 | 감사 로그 전용 저장소(WORM 사본과 키 건 해시 체인으로 변조를 찾는다, ADR-0053) | 통신사실확인자료 제공 대장은 7년 보존, 통신이용자정보 제공 대장은 1년 보존 |
 | 관리자 계정 접속 로그 및 시스템 권한 변경 이력 | 감사 로그 전용 저장소 | 관리자 접속 기록은 최소 2년 이상, 관리자 권한 부여·회수 이력은 3년 이상 보존 |
-| 운영 명령 감사 기록 (`command_event`·`command_approval`: 명령 ID, 종류, 요청자·승인자 관리 계정 ID, 사유, 재인증·서명, 시각, 자동 제어 조치·Degraded 전환) | ops 전용 Aurora의 불변 감사 저장소(키 건 해시 체인, 감사 앵커 버킷 S3 Object Lock 사본, ADR-0053·0075), 스토리지 레벨 암호화(P2) | 영구 보존한다(운영 제어 감사 로그, NFR-017). 다만 관리 계정 ID를 퇴직 뒤까지 영구히 두는 법적 근거는 문서만으로 확인하지 못해 확인 필요다(POL-027). 일정 기간 뒤 계정 ID를 역할 이름과 가명 참조로 바꾸는 안(감사 체인은 잎 솔트로 해시 유지)은 소유자 결정으로 남겼다(review/open-items.md 65번, 추천 적용 2026-10-29, ADR-0146 결정 3) |
+| 운영 명령 감사 기록 (`command_event`·`command_approval`: 명령 ID, 종류, 요청자·승인자 관리 계정 ID, 사유, 재인증·서명, 시각, 자동 제어 조치·Degraded 전환) | ops 전용 Aurora의 불변 감사 저장소(키 건 해시 체인, 감사 앵커 버킷 S3 Object Lock 사본, ADR-0053·0075), 스토리지 레벨 암호화(P2) | 영구 보존한다(운영 제어 감사 로그, NFR-017). 기록의 요청자·승인자 칸은 처음부터 가명 참조와 역할 이름이고, 관리 계정 ID는 대응 표 `command_actor`에만 둔다. 대응 행은 3년 [가정] 뒤 지우고(삭제 보류가 걸린 행은 그 건이 끝날 때까지 둔다), 기록·체인·체크포인트는 고치지 않는다(추천 적용 2026-10-29, ADR-0149). 3년이 법에 맞는지는 확인 필요다(POL-027, 법률 검토 wbs 7.4.1) |
 | 감사 기록 잎 솔트(`audit_chain.leaf_salt`)와 공개 감사 체크포인트(`audit_checkpoint`) | 잎 솔트는 감사 저장소(스토리지 암호화)에만 둔다. 체크포인트에는 해시·번호·건수·시각·서명·공개 타임스탬프 증명만 담고, 공개 게시 버킷(S3 Object Lock 컴플라이언스 7년)에 게시한다(ADR-0075) | 잎 솔트는 그 감사 기록과 같은 보존 기간이 지나면 기록과 함께 파기한다. 체크포인트는 7년 보존한다 |
 | 주민등록번호, 신용카드 번호, 은행 계좌번호, 생체 인식 정보 | 주민등록번호·신용카드 번호·생체 인식 정보는 받지 않는다. 은행 계좌번호는 환불·배상·정산 때 받아 결제사·송금 요청에 바로 넘기고 저장하지 않는다(아래 '환불·배상·정산 계좌' 행). 결제사가 입금용으로 발급한 가상계좌 번호는 이용자의 계좌가 아니다. 이 번호는 아래 '가상계좌 입금 안내' 행을 따른다 | 일체 저장하지 않는다 |
 | 모바일 월렛 기기 개인키 | 클라이언트 브라우저의 WebCrypto API로 만든 추출 불가(non-exportable) 키로 브라우저 프로필에 저장한다(하드웨어 보관 아님, ADR-0050 결정 1). 서버에는 단말 공개키만 등록한다 | 티켓 재발급, 양도, 돌려주기, 회수, 예매 취소 때 바로 폐기 목록에 올린다. 재발급은 입장 시작 전이면 재인증 뒤 티켓당 24시간에 1회, 입장 시작 뒤면 현장 부스에서만 한다 |

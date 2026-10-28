@@ -774,18 +774,18 @@ AI로 많이 만들 수 있으니 기술의 수는 문제가 아니다. 면접�
 > 2026-10-28 반영 때 원문으로 확인한 사실(예: NIST SP 800-57 표 1, PgBouncer 변경 기록, 정보통신망법·공연법 조문)은 각 ADR과 정본에 출처와 함께 적었다. 아래 목록은 2026-10-27 검토 때의 것이고, 확인하지 못해 남은 것은 정본에 '확인 필요'로, 정할 때가 있는 것은 review/open-items.md에 있다.
 
 **클라우드·CDN·네트워크**
-- AWS WAF Bot Control이 CloudFront 캐시에서 바로 응답한 요청도 검사(과금)하는지와 요청당 금액(A00-I09·A01, 중간-025).
-- CloudFront가 `Expires`로 엣지 만료를 맞추는지, 리전 캐시가 `Age`를 반영하는지(A06-I04·A13-I02, 높음-24).
-- CloudFront 배포 설정 변경이 모든 엣지에 반영되는 데 걸리는 시간(A05-I23).
-- MSK에서 IAM 인증과 클라이언트 할당량을 함께 쓸 수 있는지(A01).
+- AWS WAF Bot Control이 CloudFront 캐시에서 바로 응답한 요청도 검사(과금)하는지와 요청당 금액(A00-I09·A01, 중간-025). → 2026-10-29 확인: 금액은 그대로다(검사한 요청 100만 건당 0.60달러, Bot Control Common 월 1,000만 건 넘는 몫 1달러·Targeted 월 100만 건 넘는 몫 10달러, AWS 가격 자료 2026-09-14판). 캐시 응답의 검사·과금은 WAF·CloudFront 안내서·가격 페이지·DDoS 백서에서 찾지 못해 확인 못 함(open-items 50번에 남김).
+- CloudFront가 `Expires`로 엣지 만료를 맞추는지, 리전 캐시가 `Age`를 반영하는지(A06-I04·A13-I02, 높음-24). → 2026-10-29 확인: `Expires`는 맞춘다(최소 TTL < `Expires` < 최대 TTL이면 그 시각까지 캐시, AWS 안내서 'Manage how long content stays in the cache'). `Age` 처리는 안내서에서 찾지 못해 확인 못 함. 다만 '요청 때 동적으로 판단된 요청은 리전 캐시를 거치지 않는다'는 문장과 Origin Shield 요금의 'TTL 3,600초 미만 GET은 동적'을 이으면 1초 파일은 리전 캐시를 건너뛸 가능성이 크다(해석).
+- CloudFront 배포 설정 변경이 모든 엣지에 반영되는 데 걸리는 시간(A05-I23). → 2026-10-29 확인: AWS 안내서에 수치가 없다('모든 엣지에 동시에 퍼지지 않는다', 상태가 Deploying에서 완료 시각으로 바뀐다). 키 값 저장소 값은 AWS 블로그(2023-11)가 '몇 초 안에'라고 적었을 뿐 보장 수치는 아니다.
+- MSK에서 IAM 인증과 클라이언트 할당량을 함께 쓸 수 있는지(A01). → 2026-10-29 확인: 쓸 수 있다. 사용자 이름은 `arn:aws:sts::<계정>:assumed-role/<역할>/<세션 이름>`이고 할당량은 브로커마다 센다(MSK 개발자 안내서 'Managing throughput with Kafka quotas', AWS 빅데이터 블로그). 세션 이름 고정이 전제다.
 - 초당 20만 건 ES256 서명 검증에 드는 게이트웨이 CPU(A01, 측정 대상).
-- Envoy Gateway에서 메서드를 좁힌 경로가 CORS 사전 요청(OPTIONS)을 404로 만드는지(A02-I16), 게이트웨이가 만드는 오류 본문에 `traceId`를 넣을 수 있는지(A02-I23).
-- 2026년 현재 Chrome이 CORS 사전 요청에 클라이언트 인증서를 싣는지(A07).
-- ElastiCache에서 Roaring 비트맵 모듈을 쓸 수 있는지(A13-I05).
-- AWS가 노드 기동 시간을 보장 수치로 공개하는지(A11, K9).
-- AWS KMS HMAC 키 교체 지원의 오늘 상태(A14).
+- Envoy Gateway에서 메서드를 좁힌 경로가 CORS 사전 요청(OPTIONS)을 404로 만드는지(A02-I16), 게이트웨이가 만드는 오류 본문에 `traceId`를 넣을 수 있는지(A02-I23). → 2026-10-29 확인: ①404가 된다. SecurityPolicy CORS는 대상 라우트가 OPTIONS를 받아야 동작한다(EG CORS 안내서). HTTPRoute CORS 필터는 v1.6.0부터 OPTIONS를 스스로 더하고, SecurityPolicy용 같은 처리(이슈 #7372)는 아직 열려 있다. ②`responseOverride` 본문은 Envoy 치환 형식 문자열로 넘어가(PR #6297, 소스) `%TRACE_ID%`를 넣을 수 있어 보인다. 실제로 채워지는지는 D-T43 PoC로 본다.
+- 2026년 현재 Chrome이 CORS 사전 요청에 클라이언트 인증서를 싣는지(A07). → 2026-10-29 확인: 싣는다(소스 기준). 크롬 main의 `CredentialsMode::kOmit` 주석이 '인증서가 있으면 보내고 없으면 고르게 하려고 연결을 끊는다'는 버그(crbug.com/40089326)를 아직 적고 있고, 사전 요청은 그 모드를 쓴다. Fetch 표준은 그대로이고 whatwg/fetch #869도 열려 있다. 실제 기기 동작은 PoC ⑤.
+- ElastiCache에서 Roaring 비트맵 모듈을 쓸 수 있는지(A13-I05). → 2026-10-29 확인: 쓸 수 없다고 본다. 지원 명령 목록에 모듈을 올리는 명령이 없고, 기본 명령 밖의 확장은 JSON·Bloom 필터·검색뿐이다(ElastiCache 안내서 'Supported and restricted ... commands'). 정본은 이미 Redis 문자열 비트맵으로 정했다(ADR-0137 낮음-135).
+- AWS가 노드 기동 시간을 보장 수치로 공개하는지(A11, K9). → 2026-10-29 확인: 공개하지 않는다. EC2 SLA(2022-05-25판)와 EKS SLA(2026-03-20판)는 가동률만 약속한다.
+- AWS KMS HMAC 키 교체 지원의 오늘 상태(A14). → 2026-10-29 확인: HMAC 키는 자동 교체도 즉시 교체(on-demand)도 안 되고 수동 교체만 된다(KMS 개발자 안내서 'Rotate AWS KMS keys'). 즉시 교체는 대칭 암호화 키(AWS 생성·가져온 키 재료)만 된다.
 - ClickHouse Kafka Connect 최신 판, `flink-connector-aws` 목록, Glue 스키마 레지스트리 형식이 Flink 2.2에서 도는지(A15) 2026-10-27 ADR-0099로 Flink를 쓰지 않아 Flink 부분은 확인할 필요가 없어졌다.
-- JavaScript MSK IAM 서명 도구로 EKS Pod Identity 자격을 쓸 때도 재인증에서 주체가 바뀌어 연결이 끊기는지, 역할을 맡는 방식(`generateAuthTokenFromRole`, 고정 세션 이름)으로 피할 수 있는지(§12.3, 높음-26).
+- JavaScript MSK IAM 서명 도구로 EKS Pod Identity 자격을 쓸 때도 재인증에서 주체가 바뀌어 연결이 끊기는지, 역할을 맡는 방식(`generateAuthTokenFromRole`, 고정 세션 이름)으로 피할 수 있는지(§12.3, 높음-26). → 2026-10-29 확인: JS 저장소에도 같은 실패가 보고됐다(이슈 #19·#27, IRSA·kube2iam). 1.0.1의 기본 사슬 세션 이름 고정(PR #29)은 웹 ID 토큰 방식에만 먹고 Pod Identity 자격에는 먹지 않는다(AWS SDK 소스). `generateAuthTokenFromRole`은 고정 세션 이름으로 STS 역할 맡기를 하므로 피할 수 있다(1.0.3 소스). 실제 재인증은 ST-T14 PoC로 본다.
 
 **결제·정산**
 - 결제사 계약 때의 실제 시간 초과와 처리 한도(A06, 높음-16).

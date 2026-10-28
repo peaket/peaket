@@ -1,7 +1,11 @@
-// core-svc가 제공하는 판매 승인 결과·게시물 조치 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
+// core-svc가 제공하는 판매 승인 결과·게시물 조치·계정 병합 확인·CS 문의·카탈로그 관리 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
 // 정본: docs/features/transfer-refund.md §2.1(판매 승인), docs/features/control-tower.md §1·§5(review API, 명령 10),
 // docs/architecture.md §3.1(core-svc review 모듈), POL-024·POL-044, ADR-0045·0066·0093(판매 승인은 공연 단위, 2026-10-28 반영).
 // 통신 표(docs/architecture.md §3.2)에는 2026-10-22에 더했다(ADR-0084).
+// AccountMergeCheckService·SupportCaseService·CatalogAdminService와 ReviewModerationService.GetReportedReview는 2026-10-29에 더했다(초안, 추천 적용 2026-10-29, ADR-0148).
+// 그 정본: docs/features/identity.md §2.1·POL-034(계정 병합 막는 사유), docs/api/openapi.yaml `/v1/ops/cases*`·`CsCaseDetail`·`CaseReply`·`InquiryMessage`,
+// `/v1/ops/home-layout*`·`HomeLayout`, `/v1/ops/artists*`·`/v1/ops/places*`·`/v1/ops/productions/{productionId}/aliases`,
+// docs/data.md 고객 문의(`inquiry`·`inquiry_message`)·홈 구성·`review_image`·`content_report`, POL-044·POL-045, ADR-0063·0066·0093·0094.
 syntax = "proto3";
 
 package peaket.core.v1;
@@ -65,6 +69,11 @@ message RecordSaleReviewResultResponse {
 service ReviewModerationService {
   // 게시물에 조치를 반영한다. 명령 10은 공문 통보 문서 ID와 대상 게시물을 한 번에 묶어 반영한다.
   rpc ApplyModeration(ApplyModerationRequest) returns (ApplyModerationResponse);
+
+  // 게시물 신고 건 상세 읽기(CS 처리함 상세 SCR-045의 CONTENT_REPORT·RIGHTS_REQUEST 건, 추천 적용 2026-10-29, ADR-0148 결정 7).
+  // 사유별 신고 수, 신고 상세, 후기 본문과 사진 파생본 키를 돌려준다. openapi `CsCaseDetail`의 reportSummary·reports·review의 출처다.
+  // 신고한 계정은 싣지 않는다. 읽기라 멱등 키가 없다.
+  rpc GetReportedReview(GetReportedReviewRequest) returns (GetReportedReviewResponse);
 }
 
 // 게시물 조치(용어 사전의 표준어 기준).
@@ -98,4 +107,660 @@ message ApplyModerationRequest {
 
 message ApplyModerationResponse {
   int32 applied_count = 1;
+}
+
+message GetReportedReviewRequest {
+  // 신고된 후기 ID(그 CS 건의 target_ref)
+  string review_id = 1;
+  // 조회한 관리 계정 ID. 신고 기록에는 남기지 않는다.
+  string acted_by = 2;
+}
+
+// 신고 사유 8종(POL-044, openapi `CsCaseDetail.reports.category`).
+enum ReportCategory {
+  REPORT_CATEGORY_UNSPECIFIED = 0;
+  // 암표·부정판매
+  REPORT_CATEGORY_SCALPING = 1;
+  // 매크로·부정 예매 프로그램
+  REPORT_CATEGORY_MACRO = 2;
+  // 욕설·비방·혐오 표현
+  REPORT_CATEGORY_ABUSE = 3;
+  // 개인정보 노출·명예훼손(본인이면 권리 침해 삭제 요청)
+  REPORT_CATEGORY_RIGHTS = 4;
+  // 음란물·불법 촬영물
+  REPORT_CATEGORY_ILLEGAL_FILMING = 5;
+  // 광고·도배
+  REPORT_CATEGORY_SPAM = 6;
+  // 공연과 관계없는 내용
+  REPORT_CATEGORY_OFF_TOPIC = 7;
+  // 기타
+  REPORT_CATEGORY_OTHER = 8;
+}
+
+// 처리 결과를 받을 곳(openapi `CsCaseDetail.reports.notifyChannel`).
+enum ReportNotifyChannel {
+  // 고르지 않았다
+  REPORT_NOTIFY_CHANNEL_UNSPECIFIED = 0;
+  REPORT_NOTIFY_CHANNEL_APP = 1;
+  REPORT_NOTIFY_CHANNEL_EMAIL = 2;
+}
+
+message ReportCategoryCount {
+  ReportCategory category = 1;
+  int32 count = 2;
+}
+
+// 신고 하나. 신고한 계정은 싣지 않는다.
+message ReviewReport {
+  ReportCategory category = 1;
+  // 자세한 내용(0~500자 [가정]). 없으면 비운다.
+  string detail = 2;
+  // RIGHTS일 때 권리를 침해받은 본인의 삭제 요청인지(정보통신망법 §44의2①)
+  bool rights_holder = 3;
+  // 권리 침해 삭제 요청이면 신청인이 고른 통지 수단
+  ReportNotifyChannel notify_channel = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+// 후기 사진 하나(docs/data.md `review_image`). 메타데이터를 지운 파생본 2종의 키만 있고 원본은 없다.
+message ReviewPhoto {
+  string image_id = 1;
+  // 목록 파생본(240px [가정]) 키
+  string thumb_key = 2;
+  // 보기 파생본(긴 변 1,280px [가정]) 키. ops-svc가 화면 주소로 바꿔 보인다.
+  string view_key = 3;
+  // 사진 설명(대체 텍스트). 비었으면 화면이 '후기 사진 1/3'으로 읽는다.
+  string alt = 4;
+  int32 width = 5;
+  int32 height = 6;
+}
+
+message GetReportedReviewResponse {
+  string review_id = 1;
+  // 별점 1~5
+  int32 rating = 2;
+  string body = 3;
+  // 후기 안 순서대로(최대 3장 [가정])
+  repeated ReviewPhoto photos = 4;
+  // 신고 수 합계와 사유별 수(openapi `CsCase.reportSummary`)
+  int32 report_total = 5;
+  repeated ReportCategoryCount report_counts = 6;
+  // 신고마다 사유·자세한 내용·접수 시각(openapi `CsCaseDetail.reports`)
+  repeated ReviewReport reports = 7;
+}
+
+// 부르는 쪽: identity-svc만. 계정 병합 제안을 만들 때(막는 사유를 화면에 보이려고)와 확정 트랜잭션 바로 앞에 부른다
+// (docs/features/identity.md §2.1, ADR-0148 결정 3·4). purchase-svc·ticket-svc의 같은 이름 서비스와 모양이 같다.
+// 읽기라 멱등 키가 없다. 데드라인은 1초 [가정]이다. 답이 없거나 기한을 넘기면 identity-svc는 확정하지 않고 503과 Retry-After로 미룬다.
+// 병합 뒤 shop의 1인 한도 검사는 대응표 merged_account로 계정 묶음을 함께 센다(ADR-0148 결정 6).
+service AccountMergeCheckService {
+  // core-svc 데이터(review·shop 모듈)로 본 막는 사유를 모두 돌려준다. 막는 것이 없으면 빈 목록이다.
+  rpc CheckAccountMerge(CheckAccountMergeRequest) returns (CheckAccountMergeResponse);
+}
+
+message CheckAccountMergeRequest {
+  // 대표 계정(병합 뒤 남는 계정, POL-034)
+  string primary_account_id = 1;
+  // 흡수 계정(병합 뒤 MERGED로 잠기는 계정)
+  string absorbed_account_id = 2;
+}
+
+// 계정 병합을 막는 사유 가운데 core-svc 데이터로 보는 것(POL-034).
+enum MergeBlockReason {
+  MERGE_BLOCK_REASON_UNSPECIFIED = 0;
+  // 불변식 위반: 흡수 계정에 관람 후기가 있다. 흡수 계정은 본인확인 전이라 후기가 없어야 한다. identity-svc는 409와 SEV3을 낸다.
+  MERGE_BLOCK_REASON_ABSORBED_HAS_REVIEWS = 1;
+  // 두 계정을 더한 한정 수량 MD 상품 보유량이 1인 구매 한도를 넘는다(POL-011, FR-015)
+  MERGE_BLOCK_REASON_LIMITED_MERCH_OVER_LIMIT = 2;
+}
+
+message MergeBlock {
+  MergeBlockReason reason = 1;
+  // 그 사유가 걸린 계정. 합산 한도 초과는 대표 계정 ID를 싣는다.
+  string account_id = 2;
+  // 참조 ID. ABSORBED_HAS_REVIEWS면 후기 ID, LIMITED_MERCH_OVER_LIMIT면 상품 ID다.
+  string ref_id = 3;
+}
+
+message CheckAccountMergeResponse {
+  repeated MergeBlock blocks = 1;
+}
+
+// 부르는 쪽: ops-svc만(CS 처리함 상세 SCR-045의 문의 건, ADR-0148 결정 7).
+// ops-svc가 권한(planning/03 §3 'CS 처리함' 행)과 감사 기록을 처리한 뒤 관리 계정 ID(acted_by)를 실어 부른다.
+// core-svc support 모듈은 관리 권한을 다시 판정하지 않고, 웨이포인트 허용 목록으로 ops-svc만 받는다.
+// 대상은 문의가 이어진 건(INQUIRY와 문의로 접수한 DISPUTE·MINOR_CONTRACT_CANCEL)이고, inquiry_id는 그 CS 건의 target_ref다.
+// 바꾸는 호출은 request_id(ops-svc 감사 기록 ID)로 멱등하다. 같은 request_id에 다른 내용이 오면 ALREADY_EXISTS다.
+// 팬에게는 '피켓 고객센터'로만 보이고 담당자 이름은 싣지 않는다.
+service SupportCaseService {
+  // 문의와 문의 기록(팬·답변·진행 경과, 시간 순)을 읽는다. openapi `CsCaseDetail.messages`의 출처다.
+  rpc GetInquiryRecord(GetInquiryRecordRequest) returns (GetInquiryRecordResponse);
+
+  // 답변(ANSWER)이나 진행 경과(PROGRESS)를 문의 기록에 남기고 팬에게 알린다(앱 알림·이메일).
+  // ANSWER면 문의가 답변 완료가 되고, 답변 뒤 14일 [가정] 동안 추가 문의가 없으면 core-svc가 닫는다.
+  rpc AddInquiryReply(AddInquiryReplyRequest) returns (AddInquiryReplyResponse);
+
+  // 담당자가 문의를 닫는다(PATCH /v1/ops/cases/{caseId}의 status RESOLVED). 이미 닫힌 문의면 바꾸지 않고 지금 상태를 돌려준다.
+  rpc CloseInquiry(CloseInquiryRequest) returns (CloseInquiryResponse);
+}
+
+// 문의 상태(openapi `Inquiry.status`).
+enum InquiryStatus {
+  INQUIRY_STATUS_UNSPECIFIED = 0;
+  // 접수됨
+  INQUIRY_STATUS_RECEIVED = 1;
+  // 처리 중
+  INQUIRY_STATUS_IN_PROGRESS = 2;
+  // 답변 완료
+  INQUIRY_STATUS_ANSWERED = 3;
+  // 닫힘
+  INQUIRY_STATUS_CLOSED = 4;
+}
+
+// 문의 기록 한 줄을 쓴 쪽(openapi `InquiryMessage.authorKind`).
+enum InquiryAuthorKind {
+  INQUIRY_AUTHOR_KIND_UNSPECIFIED = 0;
+  INQUIRY_AUTHOR_KIND_FAN = 1;
+  // 화면에는 '피켓 고객센터'로만 보인다. 담당자 개인 식별자는 ops-svc 감사 기록에만 둔다.
+  INQUIRY_AUTHOR_KIND_AGENT = 2;
+  INQUIRY_AUTHOR_KIND_SYSTEM = 3;
+}
+
+// 문의 기록 한 줄의 종류(openapi `InquiryMessage.kind`).
+enum InquiryMessageKind {
+  INQUIRY_MESSAGE_KIND_UNSPECIFIED = 0;
+  // 문의·추가 문의
+  INQUIRY_MESSAGE_KIND_MESSAGE = 1;
+  // 진행 경과
+  INQUIRY_MESSAGE_KIND_PROGRESS = 2;
+  // 답변
+  INQUIRY_MESSAGE_KIND_ANSWER = 3;
+}
+
+// 문의 기록 한 줄(openapi `InquiryMessage`). 담당자 이름·계정 ID는 싣지 않는다.
+message InquiryMessage {
+  string message_id = 1;
+  InquiryAuthorKind author_kind = 2;
+  InquiryMessageKind kind = 3;
+  string body = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message GetInquiryRecordRequest {
+  string inquiry_id = 1;
+  // 조회한 관리 계정 ID. 문의 기록에는 남기지 않는다.
+  string acted_by = 2;
+}
+
+message GetInquiryRecordResponse {
+  string inquiry_id = 1;
+  // 접수 번호 Q-YYMM-NNNN [가정]
+  string number = 2;
+  // 문의한 계정 ID. 이름·연락처는 싣지 않는다(가림 해제는 ops-svc 팬 조회 SCR-066 규칙).
+  // ops-svc가 문의로 접수한 DISPUTE 건의 열림·닫힘을 identity-svc SetAccountHold로 알릴 때도 이 값을 쓴다(ADR-0148 결정 5).
+  string account_id = 3;
+  // 문의 유형 코드(openapi `InquiryCategory` 11개 그대로)
+  string category = 4;
+  // 관련 주문(이 계정의 예매번호·굿즈 주문번호). 없으면 비운다.
+  string order_ref = 5;
+  string title = 6;
+  InquiryStatus status = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp answered_at = 9;
+  google.protobuf.Timestamp closed_at = 10;
+  // 시간 순
+  repeated InquiryMessage messages = 11;
+}
+
+// 담당자가 남기는 기록의 종류(openapi `CaseReply.kind`).
+enum InquiryReplyKind {
+  INQUIRY_REPLY_KIND_UNSPECIFIED = 0;
+  INQUIRY_REPLY_KIND_ANSWER = 1;
+  INQUIRY_REPLY_KIND_PROGRESS = 2;
+}
+
+message AddInquiryReplyRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  string inquiry_id = 2;
+  InquiryReplyKind kind = 3;
+  // NFC 정규화 뒤 grapheme 2,000자까지(openapi `CaseReply.body`). ops-svc가 먼저 확인하고, 넘으면 INVALID_ARGUMENT다.
+  string body = 4;
+  // 담당자 관리 계정 ID. 문의 기록과 팬 알림에는 싣지 않는다(docs/data.md 고객 문의).
+  string acted_by = 5;
+}
+
+// 답변·진행 경과 남기기의 업무 결과.
+enum InquiryReplyResult {
+  INQUIRY_REPLY_RESULT_UNSPECIFIED = 0;
+  // 남겼다
+  INQUIRY_REPLY_RESULT_RECORDED = 1;
+  // 닫힌 문의라 남기지 않았다(REST 409)
+  INQUIRY_REPLY_RESULT_INQUIRY_CLOSED = 2;
+}
+
+message AddInquiryReplyResponse {
+  InquiryReplyResult result = 1;
+  // RECORDED면 남긴 기록 한 줄(REST 201 본문 `InquiryMessage`)
+  InquiryMessage message = 2;
+  // 호출 뒤의 문의 상태
+  InquiryStatus status = 3;
+}
+
+message CloseInquiryRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  string inquiry_id = 2;
+  // 닫은 담당자의 관리 계정 ID. 문의 기록에는 남기지 않는다.
+  string acted_by = 3;
+}
+
+message CloseInquiryResponse {
+  // 호출 뒤의 문의 상태(CLOSED)
+  InquiryStatus status = 1;
+  // 닫힌 시각. 닫힌 뒤 3년이 지나면 지운다(docs/data.md 고객 문의).
+  google.protobuf.Timestamp closed_at = 2;
+}
+
+// 부르는 쪽: ops-svc만(SCR-068 [홈 구성] 탭, 판매 승인 화면의 아티스트·공연장, ADR-0148 결정 7).
+// ops-svc가 권한(operator)·사유·감사 기록을 처리한 뒤 관리 계정 ID(acted_by)를 실어 부른다.
+// core-svc catalog 모듈은 관리 권한을 다시 판정하지 않고, 웨이포인트 허용 목록으로 ops-svc만 받는다.
+// 바꾸는 호출은 모두 request_id(ops-svc 감사 기록 ID)로 멱등하다. 같은 request_id에 다른 내용이 오면 ALREADY_EXISTS다.
+// 본문은 openapi 같은 경로의 본문과 같다. expected_version은 REST If-Match로 받은 판(ETag의 큰따옴표를 뗀 수)이다.
+// 대상이 없으면 gRPC NOT_FOUND(REST 404)다. 읽기 호출은 멱등 키가 없다.
+service CatalogAdminService {
+  // 홈 구성 읽기(배너·테마와 판, GET /v1/ops/home-layout, viewer 이상).
+  rpc GetHomeLayout(GetHomeLayoutRequest) returns (GetHomeLayoutResponse);
+
+  // 홈 배너 이미지 올리기 주소 만들기(POST /v1/ops/home-layout/banner-images의 첫 단계, 추천 적용 2026-10-29, ADR-0148 결정 7).
+  // core-svc는 이미지 ID와 격리 버킷의 객체 키, 그 키에만 쓸 수 있는 올리기 주소(5분 [가정])를 만든다.
+  // 이 주소는 브라우저에 주지 않는다. ops-svc가 받은 파일을 서버 쪽에서 이 주소로 격리 버킷에 넣은 뒤 CompleteBannerUpload를 부른다.
+  // 받은(ACCEPTED) 이미지만 PublishHomeLayout의 image_id로 쓸 수 있다(그 밖은 IMAGE_NOT_FOUND).
+  rpc CreateBannerUpload(CreateBannerUploadRequest) returns (CreateBannerUploadResponse);
+
+  // 홈 배너 이미지 처리 맡기기(올리기의 둘째 단계). 후기 사진(openapi `ReviewImageUpload`)처럼 처리가 끝난 뒤 답한다.
+  // core-svc는 이 호출 안에서 이미지 작업을 작업 표에 적고, 작업 워커가 image-worker ProcessImage(종류 HOME_BANNER)로 맡긴 결과를 기다린다(기한 30초 [가정]).
+  // ACCEPTED면 미리보기 파생본 키·폭·높이를, REJECTED면 거절 사유를 돌려준다(REST는 UNSUPPORTED_TYPE이면 415, 그 밖은 422).
+  // 검사 결과를 기다리는 중(SCAN_PENDING)이 기한 안에 풀리지 않으면 UNAVAILABLE로 끝나고, ops-svc는 '잠시 뒤 다시'로 안내한다.
+  // request_id로 멱등하다. 같은 request_id로 다시 오면 끝난 결과는 그대로 돌려주고, 아직 끝나지 않았으면 다시 기다린다.
+  rpc CompleteBannerUpload(CompleteBannerUploadRequest) returns (CompleteBannerUploadResponse);
+
+  // 홈 구성 저장(배너·테마 통째로, PUT /v1/ops/home-layout). 저장하면 홈 캐시 태그를 무효화한다.
+  // 운영 명령이 아닌 콘텐츠 설정이라 되돌리기 명령이 없고, 되돌리려면 이전 판을 다시 저장한다.
+  rpc PublishHomeLayout(PublishHomeLayoutRequest) returns (PublishHomeLayoutResponse);
+
+  // 아티스트 찾기(GET /v1/ops/artists, 판매 승인 화면, viewer 이상). 이름과 다른 이름으로 찾는다(정규화·낱자·초성).
+  rpc SearchArtists(SearchArtistsRequest) returns (SearchArtistsResponse);
+
+  // 아티스트 만들기(POST /v1/ops/artists). 정규화한 이름이 같은 아티스트가 있으면 만들지 않고 그 ID를 돌려준다.
+  rpc CreateArtist(CreateArtistRequest) returns (CreateArtistResponse);
+
+  // 아티스트 다른 이름 목록 통째로 바꾸기(PUT /v1/ops/artists/{artistId}/aliases). 검색에만 쓰고 화면 이름은 바꾸지 않는다.
+  // 다음 판 확인(10초 [가정]) 때 자동완성 사전에 반영된다.
+  rpc SetArtistAliases(SetArtistAliasesRequest) returns (SetArtistAliasesResponse);
+
+  // 공연장 찾기(GET /v1/ops/places, 판매 승인 화면, viewer 이상). 이름과 다른 이름으로 찾는다.
+  rpc SearchPlaces(SearchPlacesRequest) returns (SearchPlacesResponse);
+
+  // 공연장 만들기(POST /v1/ops/places). 정규화한 이름과 주소가 같은 공연장이 있으면 만들지 않고 그 ID를 돌려준다.
+  rpc CreatePlace(CreatePlaceRequest) returns (CreatePlaceResponse);
+
+  // 공연장 고치기(PATCH /v1/ops/places/{placeId}, 이름·주소·운영 상태). 채운 칸만 바꾼다.
+  // 바꾸면 그 공연장 공연의 검색 읽기 모델을 같은 트랜잭션에서 고친다(ADR-0094).
+  rpc UpdatePlace(UpdatePlaceRequest) returns (UpdatePlaceResponse);
+
+  // 공연장 다른 이름 목록 통째로 바꾸기(PUT /v1/ops/places/{placeId}/aliases). 검색에만 쓴다.
+  rpc SetPlaceAliases(SetPlaceAliasesRequest) returns (SetPlaceAliasesResponse);
+
+  // 공연 다른 이름 목록 통째로 바꾸기(PUT /v1/ops/productions/{productionId}/aliases). 승인 뒤에도 고치고 재승인 대상이 아니다.
+  rpc SetProductionAliases(SetProductionAliasesRequest) returns (SetProductionAliasesResponse);
+}
+
+// 카탈로그 관리 호출의 업무 결과.
+enum CatalogWriteResult {
+  CATALOG_WRITE_RESULT_UNSPECIFIED = 0;
+  // 반영했다
+  CATALOG_WRITE_RESULT_APPLIED = 1;
+  // expected_version이 지금 판과 다르다. 다른 운영자가 먼저 고쳤다(REST 412)
+  CATALOG_WRITE_RESULT_VERSION_MISMATCH = 2;
+  // 같은 정규화 이름(공연장은 이름과 주소)이 이미 있다. 응답의 ID가 기존 것이다(REST 409 artist-exists·place-exists)
+  CATALOG_WRITE_RESULT_DUPLICATE = 3;
+  // 홈 구성 내용이 규칙에 맞지 않는다. 응답의 issues에 무엇이 틀렸는지 있다(REST 422)
+  CATALOG_WRITE_RESULT_INVALID_CONTENT = 4;
+}
+
+// 홈 배너 하나(openapi `HomeLayout.banners`).
+message HomeBanner {
+  // 기존 배너를 그대로 둘 때 그 ID. 새 배너면 비운다.
+  string banner_id = 1;
+  // 판매 승인된 공연만(ADR-0093). 누르면 대표 회차 상세로 간다.
+  string production_id = 2;
+  // POST /v1/ops/home-layout/banner-images로 먼저 올린 이미지 ID
+  string image_id = 3;
+  // 대체 텍스트(1~300자). 이미지에만 있는 정보(일시·장소)도 적는다.
+  string alt = 4;
+  google.protobuf.Timestamp display_from = 5;
+  // 노출 끝은 시작 뒤여야 한다.
+  google.protobuf.Timestamp display_until = 6;
+}
+
+// 홈 테마 하나(openapi `HomeLayout.themes`).
+message HomeTheme {
+  // 기존 테마를 그대로 둘 때 그 ID. 새 테마면 비운다.
+  string theme_id = 1;
+  // 1~30자
+  string name = 2;
+  // 판매 승인된 공연만, 보이는 순서대로 1~20개
+  repeated string production_ids = 3;
+  google.protobuf.Timestamp display_from = 4;
+  google.protobuf.Timestamp display_until = 5;
+}
+
+// 홈 구성 전체(openapi `HomeLayout`). 개수 상한은 [가정]이다(ADR-0063).
+message HomeLayout {
+  // 판. REST ETag가 이 값이다.
+  int64 version = 1;
+  // 10개까지
+  repeated HomeBanner banners = 2;
+  // 5개까지
+  repeated HomeTheme themes = 3;
+  // 마지막으로 저장한 운영자의 관리 계정 ID
+  string updated_by = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+// 홈 구성에서 틀린 곳의 종류(REST 422 '판매 승인 전 공연·기간 오류·없는 이미지').
+enum HomeLayoutProblem {
+  HOME_LAYOUT_PROBLEM_UNSPECIFIED = 0;
+  // 판매 승인 전 공연
+  HOME_LAYOUT_PROBLEM_PRODUCTION_NOT_APPROVED = 1;
+  // 노출 끝이 시작 앞이다
+  HOME_LAYOUT_PROBLEM_INVALID_PERIOD = 2;
+  // CreateBannerUpload로 올리지 않았거나 이미지 처리에서 받지 않은(ACCEPTED가 아닌) 이미지
+  HOME_LAYOUT_PROBLEM_IMAGE_NOT_FOUND = 3;
+}
+
+message HomeLayoutIssue {
+  HomeLayoutProblem problem = 1;
+  // 틀린 대상의 ID(공연 ID, 이미지 ID, 기간이 틀린 배너·테마 ID). 새 배너·테마라 ID가 없으면 비운다.
+  string ref_id = 2;
+}
+
+message GetHomeLayoutRequest {
+  // 조회한 관리 계정 ID
+  string acted_by = 1;
+}
+
+message GetHomeLayoutResponse {
+  // 지금 홈 구성과 판(REST ETag)
+  HomeLayout layout = 1;
+}
+
+message CreateBannerUploadRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다. 다시 오면 같은 이미지 ID와 객체 키를 돌려준다.
+  string request_id = 1;
+  // 파일 형식(image/jpeg·image/png·image/webp, ADR-0062 결정 38). ops-svc가 먼저 확인한다(아니면 REST 415).
+  string content_type = 2;
+  // 파일 크기(바이트). 10MB 이하다. ops-svc가 먼저 확인한다(넘으면 REST 413).
+  int64 size_bytes = 3;
+  // 올린 운영자의 관리 계정 ID
+  string acted_by = 4;
+}
+
+message CreateBannerUploadResponse {
+  // PublishHomeLayout의 image_id로 쓸 이미지 ID
+  string image_id = 1;
+  // 격리 버킷의 원본 객체 키(ProcessImage의 source_key)
+  string object_key = 2;
+  // 이 객체 키 하나에만 쓸 수 있는 올리기 주소. ops-svc가 서버 쪽에서만 쓰고, 브라우저에 주거나 로그·추적 속성에 남기지 않는다.
+  string upload_url = 3;
+  // 올리기 주소의 만료 시각(만든 뒤 5분 [가정])
+  google.protobuf.Timestamp upload_expires_at = 4;
+}
+
+message CompleteBannerUploadRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  // CreateBannerUpload가 준 이미지 ID
+  string image_id = 2;
+  // 올린 운영자의 관리 계정 ID
+  string acted_by = 3;
+}
+
+// 홈 배너 이미지 처리의 업무 결과.
+enum BannerUploadResult {
+  BANNER_UPLOAD_RESULT_UNSPECIFIED = 0;
+  // 받았다. 미리보기 파생본 키가 있다(REST 201)
+  BANNER_UPLOAD_RESULT_ACCEPTED = 1;
+  // 받지 않았다. 거절 사유가 있다(REST 415·422)
+  BANNER_UPLOAD_RESULT_REJECTED = 2;
+}
+
+// 홈 배너 이미지 거절 사유(image-worker ProcessImage의 거절 사유와 같은 값).
+enum BannerRejectReason {
+  BANNER_REJECT_REASON_UNSPECIFIED = 0;
+  // JPEG·PNG·WebP가 아니거나 내용과 확장자가 다르다(REST 415)
+  BANNER_REJECT_REASON_UNSUPPORTED_TYPE = 1;
+  // 화소 상한을 넘는다(REST 422)
+  BANNER_REJECT_REASON_TOO_LARGE = 2;
+  // 가로형 1240×400 [가정]에 못 미친다(REST 422)
+  BANNER_REJECT_REASON_TOO_SMALL = 3;
+  // 악성 코드 검사에 걸렸다(REST 422)
+  BANNER_REJECT_REASON_MALWARE = 4;
+}
+
+message CompleteBannerUploadResponse {
+  BannerUploadResult result = 1;
+  // ACCEPTED면 미리보기 파생본 키. ops-svc가 미리보기 주소로 바꿔 REST 201에 싣는다.
+  string preview_key = 2;
+  // ACCEPTED면 원본의 폭·높이(px)
+  int32 width = 3;
+  int32 height = 4;
+  // REJECTED일 때만 채운다.
+  BannerRejectReason reject_reason = 5;
+}
+
+message PublishHomeLayoutRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  // If-Match로 받은 판
+  int64 expected_version = 2;
+  repeated HomeBanner banners = 3;
+  repeated HomeTheme themes = 4;
+  // 저장 사유(1~500자). ops-svc 감사 기록에 전후 차이와 함께 남는다.
+  string reason = 5;
+  // 저장한 운영자의 관리 계정 ID. updated_by에 남긴다.
+  string acted_by = 6;
+}
+
+message PublishHomeLayoutResponse {
+  CatalogWriteResult result = 1;
+  // APPLIED면 저장한 홈 구성(새 version)
+  HomeLayout layout = 2;
+  // INVALID_CONTENT면 틀린 곳
+  repeated HomeLayoutIssue issues = 3;
+}
+
+message SearchArtistsRequest {
+  // 찾는 말(1~50자)
+  string q = 1;
+  // 이전 응답의 next_cursor. 첫 쪽이면 비운다.
+  string cursor = 2;
+  // 한 번에 받을 건수. 최대 100(docs/api/guidelines.md §3).
+  int32 limit = 3;
+  // 조회한 관리 계정 ID
+  string acted_by = 4;
+}
+
+// 찾기 결과의 아티스트 하나(openapi GET /v1/ops/artists 항목).
+message ArtistSummary {
+  string artist_id = 1;
+  string name = 2;
+  repeated string aliases = 3;
+}
+
+message SearchArtistsResponse {
+  repeated ArtistSummary artists = 1;
+  // 다음 쪽 커서. 마지막 쪽이면 비운다.
+  string next_cursor = 2;
+}
+
+message CreateArtistRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  // 1~100자
+  string name = 2;
+  // 1~500자
+  string reason = 3;
+  string acted_by = 4;
+}
+
+message CreateArtistResponse {
+  // APPLIED 또는 DUPLICATE
+  CatalogWriteResult result = 1;
+  // APPLIED면 새 아티스트 ID, DUPLICATE면 정규화 이름이 같은 기존 아티스트 ID
+  string artist_id = 2;
+}
+
+message SetArtistAliasesRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  string artist_id = 2;
+  // If-Match로 받은 판
+  int64 expected_version = 3;
+  // 다른 이름 최종 목록. 20개 [가정]까지, 하나에 1~100자
+  repeated string aliases = 4;
+  // 1~500자
+  string reason = 5;
+  string acted_by = 6;
+}
+
+message SetArtistAliasesResponse {
+  // APPLIED 또는 VERSION_MISMATCH
+  CatalogWriteResult result = 1;
+  // APPLIED면 새 판
+  int64 version = 2;
+}
+
+message SearchPlacesRequest {
+  // 찾는 말(1~50자)
+  string q = 1;
+  // 이전 응답의 next_cursor. 첫 쪽이면 비운다.
+  string cursor = 2;
+  // 한 번에 받을 건수. 최대 100(docs/api/guidelines.md §3).
+  int32 limit = 3;
+  // 조회한 관리 계정 ID
+  string acted_by = 4;
+}
+
+// 찾기 결과의 공연장 하나(openapi GET /v1/ops/places 항목).
+message PlaceSummary {
+  string place_id = 1;
+  string name = 2;
+  // 도로명 주소
+  string address = 3;
+  // 시·도
+  string region = 4;
+  PlaceStatus status = 5;
+  repeated string aliases = 6;
+}
+
+message SearchPlacesResponse {
+  repeated PlaceSummary places = 1;
+  // 다음 쪽 커서. 마지막 쪽이면 비운다.
+  string next_cursor = 2;
+}
+
+message CreatePlaceRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  // 1~100자
+  string name = 2;
+  // 도로명 주소(1~200자)
+  string address = 3;
+  // 시·도
+  string region = 4;
+  // 1~500자
+  string reason = 5;
+  string acted_by = 6;
+}
+
+message CreatePlaceResponse {
+  // APPLIED 또는 DUPLICATE
+  CatalogWriteResult result = 1;
+  // APPLIED면 새 공연장 ID, DUPLICATE면 이름·주소가 같은 기존 공연장 ID
+  string place_id = 2;
+}
+
+// 공연장 운영 상태(openapi `/v1/ops/places` 항목의 status).
+enum PlaceStatus {
+  // 고치기에서는 '바꾸지 않음'이다.
+  PLACE_STATUS_UNSPECIFIED = 0;
+  PLACE_STATUS_ACTIVE = 1;
+  PLACE_STATUS_CLOSED = 2;
+}
+
+message UpdatePlaceRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  string place_id = 2;
+  // If-Match로 받은 판
+  int64 expected_version = 3;
+  // 아래 넷은 채운 것만 바꾼다(REST PATCH와 같다).
+  optional string name = 4;
+  optional string address = 5;
+  optional string region = 6;
+  PlaceStatus status = 7;
+  // 이름이 바뀔 때 옛 이름을 다른 이름으로 남길지. 비우면 true다(openapi 기본값, 예: 올림픽체조경기장 → KSPO DOME).
+  optional bool keep_old_name_as_alias = 8;
+  // 1~500자
+  string reason = 9;
+  string acted_by = 10;
+}
+
+message UpdatePlaceResponse {
+  // APPLIED 또는 VERSION_MISMATCH
+  CatalogWriteResult result = 1;
+  // APPLIED면 새 판
+  int64 version = 2;
+}
+
+message SetPlaceAliasesRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  string place_id = 2;
+  // If-Match로 받은 판
+  int64 expected_version = 3;
+  // 다른 이름 최종 목록. 20개 [가정]까지, 하나에 1~100자
+  repeated string aliases = 4;
+  // 1~500자
+  string reason = 5;
+  string acted_by = 6;
+}
+
+message SetPlaceAliasesResponse {
+  // APPLIED 또는 VERSION_MISMATCH
+  CatalogWriteResult result = 1;
+  // APPLIED면 새 판
+  int64 version = 2;
+}
+
+message SetProductionAliasesRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  string production_id = 2;
+  // If-Match로 받은 판
+  int64 expected_version = 3;
+  // 다른 이름 최종 목록. 5개 [가정]까지, 하나에 1~100자(POL-045)
+  repeated string aliases = 4;
+  // 1~500자
+  string reason = 5;
+  string acted_by = 6;
+}
+
+message SetProductionAliasesResponse {
+  // APPLIED 또는 VERSION_MISMATCH
+  CatalogWriteResult result = 1;
+  // APPLIED면 새 판
+  int64 version = 2;
 }

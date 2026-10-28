@@ -1,7 +1,10 @@
-// identity-svc가 제공하는 내부 본인확인·세션 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
+// identity-svc가 제공하는 내부 본인확인·세션·계정 병합 막는 건·스캐너 세션 별명 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
 // 정본: docs/features/identity.md(주문 생성 때 본인확인 재확인, §2 소셜 로그인 흐름), docs/features/payment.md §2·§9(identity-svc 장애),
 // ADR-0055(응답이 없을 때 토큰 값으로 판정), ADR-0011·0119(세션 생성은 소비자 웹 앱 서버만), docs/architecture.md §3.2.
 // SessionService는 2026-10-28에 더했다(추천 적용 2026-10-28, 기술 검토 중간-083).
+// AccountHoldService·ScannerSessionQueryService는 2026-10-29에 더했다(초안, 추천 적용 2026-10-29, ADR-0148). 그 정본: docs/features/identity.md §2.1·POL-034(병합 차단 사유),
+// docs/data.md `account_hold`·`scanner_session`·§4 경계 9, planning/03-policies-glossary.md '소명'(appeal), docs/api/openapi.yaml `ScannerDevice`,
+// ADR-0082·0102(ops-svc는 업무 gRPC를 받지 않는다).
 syntax = "proto3";
 
 package peaket.identity.v1;
@@ -99,4 +102,77 @@ message EndSessionRequest {
 message EndSessionResponse {
   // 이번 호출로 끝냈으면 true, 이미 끝나 있었으면 false.
   bool ended = 1;
+}
+
+// 부르는 쪽: ops-svc만. 계정에 걸린 이의 제기(CS 처리함 VERIFICATION_APPEAL·DISPUTE 건)나 소명(appeal)이 열리고 닫힐 때 부른다.
+// ops-svc는 업무 gRPC를 받지 않으므로 identity-svc가 묻지 않고, ops-svc가 먼저 알린다(ADR-0148 결정 5).
+// ops-svc는 건 상태 변경과 같은 트랜잭션에 보낼 일을 적고, 호출이 실패하면 작업 워커가 성공할 때까지 다시 보낸다.
+// 다시 보내는 동안(작업 워커 주기 1분 [가정] 안팎)에는 병합이 지나갈 수 있다. 남는 한계다(ADR-0148 '결과와 트레이드오프').
+service AccountHoldService {
+  // identity DB account_hold 행(source_ref마다 하나)에 건의 상태(OPEN·CLOSED)와 판 번호를 쓴다. source_ref(건 ID)로 멱등하다.
+  // source_version이 저장한 판보다 클 때만 반영하고, 같거나 작으면 아무것도 바꾸지 않는다.
+  // 닫힌 건도 행을 CLOSED로 30일 [가정] 남겨, 재시도로 늦게 온 '열림'이 닫힌 건을 다시 열지 않게 한다. 30일이 지나면 지운다.
+  // 같은 source_ref에 다른 account_id·kind가 오면 ALREADY_EXISTS다.
+  // identity-svc는 계정 병합 제안·확정 때 OPEN 행을 자기 데이터처럼 보고, 흡수 계정에 있으면 병합을 막는다(POL-034 '이의 제기 계류').
+  rpc SetAccountHold(SetAccountHoldRequest) returns (SetAccountHoldResponse);
+}
+
+// 병합을 막는 ops-svc 건의 종류(docs/data.md `account_hold.kind`).
+enum AccountHoldKind {
+  ACCOUNT_HOLD_KIND_UNSPECIFIED = 0;
+  // 추가 검증 이의 제기(CS 처리함 VERIFICATION_APPEAL)
+  ACCOUNT_HOLD_KIND_VERIFICATION_APPEAL = 1;
+  // 분쟁(CS 처리함 DISPUTE)
+  ACCOUNT_HOLD_KIND_DISPUTE = 2;
+  // 예매 제한·양도 회수 대상이 된 팬의 소명(ops appeal, POL-038)
+  ACCOUNT_HOLD_KIND_APPEAL = 3;
+}
+
+enum AccountHoldState {
+  ACCOUNT_HOLD_STATE_UNSPECIFIED = 0;
+  // 건이 열렸다(계류 중)
+  ACCOUNT_HOLD_STATE_OPEN = 1;
+  // 건이 닫혔다
+  ACCOUNT_HOLD_STATE_CLOSED = 2;
+}
+
+message SetAccountHoldRequest {
+  // 건이 걸린 계정
+  string account_id = 1;
+  AccountHoldKind kind = 2;
+  // 출처 건 ID(CS 처리함 건 ID 또는 소명 ID). 멱등 키이고 account_hold.source_ref(UNIQUE)에 들어간다.
+  // 문의로 접수한 분쟁 건의 계정 ID는 ops-svc가 core-svc SupportCaseService.GetInquiryRecord로 읽는다(ADR-0148 결정 5).
+  string source_ref = 3;
+  AccountHoldState state = 4;
+  // ops 건 상태의 판 번호. 같은 건에서 늘어나기만 한다. 저장한 판(account_hold.source_version)보다 클 때만 반영한다.
+  int64 source_version = 5;
+}
+
+message SetAccountHoldResponse {
+  // 이번 호출로 반영했으면 true, 판이 같거나 작아 바꾸지 않았으면 false.
+  bool changed = 1;
+}
+
+// 부르는 쪽: ops-svc만(관제 콘솔 '스캐너 기기 관리' SCR-053의 목록). 허용 목록을 서비스 단위로 걸려고 AccountHoldService와 나눴다.
+// 기기 원장은 ticket-svc에 있고 스태프 세션(scanner_session)은 identity 데이터라, ops-svc가 ticket-svc ListScannerDevices로 받은
+// 기기 목록에 이 호출의 별명을 합친다(ADR-0148 결정 1). 읽기라 멱등 키가 없다.
+service ScannerSessionQueryService {
+  // 기기마다 지금 로그인한 스태프 세션의 별명을 돌려준다.
+  rpc ListActiveScannerSessions(ListActiveScannerSessionsRequest) returns (ListActiveScannerSessionsResponse);
+}
+
+message ListActiveScannerSessionsRequest {
+  // 기기 ID 목록. 목록 한 쪽 크기인 100개(docs/api/guidelines.md §3)까지다.
+  repeated string device_ids = 1;
+}
+
+message ActiveScannerSession {
+  string device_id = 1;
+  // 지금 로그인한 스태프 세션의 별명(openapi `ScannerDevice.activeSessionNickname`). 그 기기에 끝나지 않은 세션이 없으면 비운다.
+  string nickname = 2;
+}
+
+message ListActiveScannerSessionsResponse {
+  // 요청한 기기 ID마다 한 줄, 요청 순서대로
+  repeated ActiveScannerSession sessions = 1;
 }

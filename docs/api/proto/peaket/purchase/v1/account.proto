@@ -1,0 +1,46 @@
+// purchase-svc가 제공하는 계정 병합 사전 확인 계약. 초안(추천 적용 2026-10-29, ADR-0148), 안내는 docs/api/proto/README.md.
+// 정본: docs/features/identity.md §2.1(병합 차단 사유와 확정 흐름), planning/03-policies-glossary.md POL-034·계정 연결 전이 표 T9,
+// docs/data.md §4 경계 9(계정 병합 오케스트레이션), ADR-0038·0148(결정 3·4·6).
+syntax = "proto3";
+
+package peaket.purchase.v1;
+
+// 부르는 쪽: identity-svc만. 계정 병합 제안을 만들 때(막는 사유를 화면에 보이려고)와 확정 트랜잭션 바로 앞에 부른다.
+// ticket-svc·core-svc의 같은 이름 서비스와 모양이 같다. 읽기라 멱등 키가 없다. 데드라인은 1초 [가정]이다.
+// 답이 없거나 기한을 넘기면 identity-svc는 확정하지 않고 503과 Retry-After로 미룬다(모르면 막는 쪽으로 닫는다, ADR-0148 결정 4).
+// 확정 직전 확인과 확정 트랜잭션 사이에 대표 계정으로 새 홀드·주문이 생길 수 있다. 병합 뒤 1인 한도 검사는
+// 대응표 merged_account로 계정 묶음을 함께 세어, 그 틈에서 생긴 주문도 다음 주문부터 한도에 든다(ADR-0148 결정 6).
+service AccountMergeCheckService {
+  // purchase-svc 데이터로 본 막는 사유를 모두 돌려준다. 막는 것이 없으면 빈 목록이다.
+  rpc CheckAccountMerge(CheckAccountMergeRequest) returns (CheckAccountMergeResponse);
+}
+
+message CheckAccountMergeRequest {
+  // 대표 계정(병합 뒤 남는 계정, POL-034)
+  string primary_account_id = 1;
+  // 흡수 계정(병합 뒤 MERGED로 잠기는 계정)
+  string absorbed_account_id = 2;
+}
+
+// 계정 병합을 막는 사유 가운데 purchase-svc 데이터로 보는 것(POL-034). 두 계정 어느 쪽이든 본다.
+enum MergeBlockReason {
+  MERGE_BLOCK_REASON_UNSPECIFIED = 0;
+  // 진행 중인 좌석 홀드가 있다(결제하는 동안 좌석을 잠시 잡아 둔 것)
+  MERGE_BLOCK_REASON_SEAT_HOLD = 1;
+  // 활성 구매 세션이 있다
+  MERGE_BLOCK_REASON_PURCHASE_SESSION = 2;
+  // 결제 승인을 기다리는 주문이 있다
+  MERGE_BLOCK_REASON_PAYMENT_PENDING_ORDER = 3;
+}
+
+message MergeBlock {
+  MergeBlockReason reason = 1;
+  // 그 사유가 걸린 계정(primary_account_id나 absorbed_account_id)
+  string account_id = 2;
+  // 참조 ID. SEAT_HOLD·PURCHASE_SESSION이면 회차 ID, PAYMENT_PENDING_ORDER면 주문 ID다.
+  string ref_id = 3;
+}
+
+message CheckAccountMergeResponse {
+  repeated MergeBlock blocks = 1;
+}
