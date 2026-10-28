@@ -18,7 +18,9 @@
       "type": {
         "type": "enum",
         "name": "CaseRequestedKind",
+        "default": "UNRECOGNIZED",
         "symbols": [
+          "UNRECOGNIZED",
           "INQUIRY",
           "DISPUTE",
           "MINOR_CONTRACT_CANCEL",

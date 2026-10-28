@@ -28,7 +28,9 @@
         {
           "type": "enum",
           "name": "SettlementEventKind",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "EVENT",
             "PRODUCT"
           ]
@@ -52,7 +54,9 @@
         {
           "type": "enum",
           "name": "SettlementEventPg",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "TOSS",
             "PORTONE"
           ]
@@ -68,7 +72,9 @@
         {
           "type": "enum",
           "name": "SettlementEventPgStore",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "STANDARD",
             "ESCROW"
           ]
@@ -143,7 +149,9 @@
         {
           "type": "enum",
           "name": "SettlementEventType",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "STATEMENT_NOTIFIED",
             "STATEMENT_DISPUTED",
             "STATEMENT_CONFIRMED",
@@ -179,15 +187,6 @@
           "type": "string",
           "logicalType": "uuid"
         }
-      ],
-      "default": null
-    },
-    {
-      "name": "schemaVersion",
-      "doc": "메시지 형식 판",
-      "type": [
-        "null",
-        "long"
       ],
       "default": null
     }

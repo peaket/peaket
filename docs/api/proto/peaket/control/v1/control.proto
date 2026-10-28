@@ -1,0 +1,79 @@
+// 제어 명령을 받는 서비스(admission-ctrl·purchase-svc·queue-svc)가 함께 구현하는 직접 제어 채널 계약.
+// 초안(추천 적용 2026-10-28), 안내는 docs/api/proto/README.md.
+// 정본: docs/features/control-tower.md §3·§5(전달 경로와 제어 상태), ADR-0102(제어 전용 gRPC), ADR-0103(제어 상태와 판 번호, ack의 뜻).
+// 받는 서비스가 셋이라 패키지는 받는 서비스 이름이 아니라 peaket.control.v1 하나로 둔다(README §2의 예외).
+syntax = "proto3";
+
+package peaket.control.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// 부르는 쪽: ops-svc, 비상 런북 Job(ops-svc가 멈췄을 때).
+// 받는 쪽은 업무 포트와 다른 제어 포트를 열고, 웨이포인트를 붙이지 않은 제어 전용 Service(<서비스>-control)로 받는다.
+// admission-ctrl은 리더 파드만 엔드포인트로 내놓고, purchase-svc·queue-svc는 파드마다 부르는 헤드리스 Service다.
+// 데드라인은 1초 [가정]이다. 같은 명령 ID와 판 번호로 다시 보내면 같은 결과를 돌려준다(멱등).
+service ControlReceiver {
+  // 바라는 제어 상태를 받아, 판 번호가 지금 것보다 크면 자기 저장소에 쓰고 적용한다.
+  // 같거나 작은 판이면 아무것도 바꾸지 않고 지금 적용한 판 번호만 돌려준다.
+  // purchase-svc는 purchase DB sale_control(원본)과 좌석 Redis s:{event:E}:ctl(사본)에, admission-ctrl 리더는
+  // q:{event:E}:ctl·q:{admission}:ctl에(리더 세대 확인, ADR-0056), queue-svc는 q:{event:E}:notice에 쓴다.
+  rpc ApplyControl(ApplyControlRequest) returns (ApplyControlResponse);
+}
+
+// 제어 종류. 운영 명령 번호는 docs/features/control-tower.md §3이다.
+enum ControlKind {
+  CONTROL_KIND_UNSPECIFIED = 0;
+  // 명령 1 동시 입장 목표 조정(admission-ctrl)
+  CONTROL_KIND_ADMISSION_TARGET = 1;
+  // 명령 2 입장 일시정지(admission-ctrl, 만료 있음)
+  CONTROL_KIND_ADMISSION_PAUSE = 2;
+  // 명령 3 판매 일시정지(admission-ctrl·purchase-svc·queue-svc, 만료 없음)
+  CONTROL_KIND_SALE_PAUSE = 3;
+  // 명령 6 가운데 대기열 진입 Degraded(admission-ctrl)
+  CONTROL_KIND_ENTRY_DEGRADED = 4;
+  // 명령 7 대기실 공지 배너(queue-svc)
+  CONTROL_KIND_LOBBY_BANNER = 5;
+  // 명령 11 입장 제어 자동화 긴급 정지(admission-ctrl)
+  CONTROL_KIND_AUTOMATION_STOP = 6;
+  // 판매 승인의 판매 중지(planning/03 §2.14, ADR-0123). 명령 3과 같은 효과를 회차 범위로 따로 건다(admission-ctrl·purchase-svc·queue-svc).
+  // 명령 3의 재개로는 풀리지 않고 판매 재개로만 풀린다. command_id는 승인 업무 ID, 바라는 상태는 {"suspended": true}다.
+  CONTROL_KIND_SALE_SUSPENSION = 7;
+}
+
+message ApplyControlRequest {
+  // 운영 명령 ID(UUIDv7). 되돌리기도 같은 종류의 새 판으로 보낸다.
+  string command_id = 1;
+  // 범위. 'PLATFORM' 또는 회차 ID다.
+  string scope = 2;
+  ControlKind kind = 3;
+  // 판 번호. 같은 범위·종류에서 늘어나기만 하는 수이고, ops-svc 명령 원장이 매긴다.
+  int64 version = 4;
+  // 바라는 상태. 종류마다 정한 JSON이다(예: 판매 일시정지는 {"paused": true}, 입장 일시정지는 {"paused": true, "expiresAt": "…"}).
+  string desired_state_json = 5;
+  // 비상 런북일 때만 싣는다. RFC 8785로 정규화한 명령 묶음과 운영자 KMS 서명(ADR-0053 결정 11, ADR-0095).
+  // 받는 쪽은 배포에 든 운영자 공개키로 확인한다. ops-svc가 부를 때는 비운다(메시 신원으로 부르는 쪽을 확인한다).
+  RunbookBundle runbook_bundle = 6;
+}
+
+message RunbookBundle {
+  // 정규화한 명령 묶음 바이트.
+  bytes canonical_bundle = 1;
+  // 서명. 명령 3 정지 묶음은 commander 한 명, 그 밖에는 서로 다른 운영자 두 명이다.
+  repeated OperatorSignature signatures = 2;
+}
+
+message OperatorSignature {
+  // 운영자 서명 키 ID(다중 리전 키라 서울과 도쿄 복제 키가 같다).
+  string key_id = 1;
+  // ECDSA P-256 서명(DER).
+  bytes signature = 2;
+}
+
+message ApplyControlResponse {
+  // 이 파드(또는 리더)가 지금 적용한 판 번호. 요청한 판 이상이면 그 판을 적용한 것이다.
+  int64 applied_version = 1;
+  // 응답한 파드 이름. ops-svc는 준비된 모든 파드가 판 이상을 답했는지 이것으로 센다(ADR-0103 결정 5).
+  string pod_name = 2;
+  // 적용한 시각. 다른 계약과 같게 Timestamp다(2026-10-28 문자열에서 바꿨다, 기술 검토 낮음-028).
+  google.protobuf.Timestamp applied_at = 3;
+}

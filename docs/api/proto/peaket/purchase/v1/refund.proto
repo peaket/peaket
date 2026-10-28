@@ -17,10 +17,15 @@ service EventRefundService {
   // 결제사별 처리 한도 안에서 나눠 실행하고, 각 취소는 payment-svc CancelPayment(cancel-{cancellation_id})로 한다.
   rpc StartEventRefund(StartEventRefundRequest) returns (StartEventRefundResponse);
 
-  // 진행률과 실패 건 수. 실패 건은 CS 처리함으로 간다.
+  // 진행률과 실패 건 수. 실패 건은 CS 처리함으로 간다. 결제사 몫마다의 상태와 멈춘 이유를 함께 돌려준다.
   rpc GetEventRefundJob(GetEventRefundJobRequest) returns (GetEventRefundJobResponse);
 
-  // 스스로 멈춘 작업을 다시 시작한다. 2인 확정 범위 안에서 commander만 한다.
+  // 작업 전체나 결제사 몫 하나를 멈춘다(commander, 사유 필수). 이미 보낸 호출의 답은 기다리고 새 호출만 보내지 않는다.
+  // 스스로 멈추는 기준은 docs/features/transfer-refund.md §5다(추천 적용 2026-10-28, 기술 검토 중간-045).
+  rpc PauseEventRefundJob(PauseEventRefundJobRequest) returns (PauseEventRefundJobResponse);
+
+  // 멈춘 작업(스스로 멈춤·수동 일시정지)을 다시 시작한다. 2인 확정 범위 안에서 commander만 한다.
+  // 결과 모름 건을 결제사 조회로 먼저 끝낸 뒤 새 취소를 보낸다. 자동 정지 기준은 재개 뒤에도 그대로다.
   rpc ResumeEventRefundJob(ResumeEventRefundJobRequest) returns (ResumeEventRefundJobResponse);
 }
 
@@ -74,12 +79,40 @@ message GetEventRefundJobRequest {
   string job_id = 1;
 }
 
+// 작업과 결제사 몫의 상태. 작업은 결제사 몫이 모두 멈췄거나 commander가 전체를 멈추면 PAUSED다.
 enum RefundJobState {
   REFUND_JOB_STATE_UNSPECIFIED = 0;
   REFUND_JOB_STATE_RUNNING = 1;
-  // 오류율이 기준을 넘어 스스로 멈췄다.
+  // 멈췄다. 이유는 RefundPauseReason에 있다.
   REFUND_JOB_STATE_PAUSED = 2;
   REFUND_JOB_STATE_COMPLETED = 3;
+}
+
+// 멈춘 이유(추천 적용 2026-10-28, 기술 검토 중간-045). 숫자는 [가정]이고 정본은 transfer-refund §5다.
+enum RefundPauseReason {
+  REFUND_PAUSE_REASON_UNSPECIFIED = 0;
+  // 스스로 멈춤: 1분 창 취소 실패율 5% 이상(그 창의 호출이 20건 이상일 때)
+  REFUND_PAUSE_REASON_AUTO_FAILURE_RATE = 1;
+  // 스스로 멈춤: 연속 실패 20건
+  REFUND_PAUSE_REASON_AUTO_CONSECUTIVE_FAILURES = 2;
+  // 스스로 멈춤: 그 결제사의 서킷 브레이커 열림
+  REFUND_PAUSE_REASON_AUTO_CIRCUIT_OPEN = 3;
+  // 스스로 멈춤: 1분 창 업무 거절률 5% 이상. 금액·대상 계산 잘못일 수 있어 작업 전체를 멈춘다
+  REFUND_PAUSE_REASON_AUTO_REJECT_RATE = 4;
+  // commander의 수동 일시정지
+  REFUND_PAUSE_REASON_MANUAL = 5;
+}
+
+// 결제사 몫 하나의 진행.
+message PgRefundPart {
+  peaket.common.v1.PgProvider pg = 1;
+  RefundJobState state = 2;
+  // PAUSED일 때만 채운다
+  RefundPauseReason pause_reason = 3;
+  int32 done_orders = 4;
+  int32 failed_orders = 5;
+  // 결과 모름으로 재시도 큐에 있는 건. 재개 때 조회로 먼저 끝낸다
+  int32 unknown_orders = 6;
 }
 
 message GetEventRefundJobResponse {
@@ -87,12 +120,27 @@ message GetEventRefundJobResponse {
   int32 total_orders = 2;
   int32 done_orders = 3;
   int32 failed_orders = 4;
+  repeated PgRefundPart per_pg = 5;
+}
+
+message PauseEventRefundJobRequest {
+  string job_id = 1;
+  // PG_PROVIDER_UNSPECIFIED면 작업 전체를 멈춘다
+  peaket.common.v1.PgProvider pg = 2;
+  string paused_by = 3;
+  string reason = 4;
+}
+
+message PauseEventRefundJobResponse {
+  RefundJobState state = 1;
 }
 
 message ResumeEventRefundJobRequest {
   string job_id = 1;
   string resumed_by = 2;
   string reason = 3;
+  // PG_PROVIDER_UNSPECIFIED면 멈춘 몫을 모두 다시 시작한다(추천 적용 2026-10-28, 기술 검토 중간-045)
+  peaket.common.v1.PgProvider pg = 4;
 }
 
 message ResumeEventRefundJobResponse {

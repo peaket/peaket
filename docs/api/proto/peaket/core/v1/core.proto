@@ -1,14 +1,16 @@
 // core-svc가 제공하는 판매 승인 결과·게시물 조치 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
 // 정본: docs/features/transfer-refund.md §2.1(판매 승인), docs/features/control-tower.md §1·§5(review API, 명령 10),
-// docs/architecture.md §3.1(core-svc review 모듈), POL-024·POL-044, ADR-0045·0066.
+// docs/architecture.md §3.1(core-svc review 모듈), POL-024·POL-044, ADR-0045·0066·0093(판매 승인은 공연 단위, 2026-10-28 반영).
 // 통신 표(docs/architecture.md §3.2)에는 2026-10-22에 더했다(ADR-0084).
 syntax = "proto3";
 
 package peaket.core.v1;
 
+import "google/protobuf/timestamp.proto";
+
 // 부르는 쪽: ops-svc(판매 승인 SCR-048).
 service SaleReviewService {
-  // 판매 승인 결과를 반영한다. 승인이면 공개·오픈 예약이 가능해지고, 반려면 파트너에게 사유를 알린다.
+  // 판매 승인 결과를 공연 단위로 반영한다(그 공연의 회차를 모두 함께). 승인이면 공개·오픈 예약이 가능해지고, 반려면 파트너에게 사유를 알린다.
   rpc RecordSaleReviewResult(RecordSaleReviewResultRequest) returns (RecordSaleReviewResultResponse);
 }
 
@@ -16,14 +18,43 @@ enum SaleReviewResult {
   SALE_REVIEW_RESULT_UNSPECIFIED = 0;
   SALE_REVIEW_RESULT_APPROVED = 1;
   SALE_REVIEW_RESULT_REJECTED = 2;
+  // 판매 중지(planning/03 §2.14, ADR-0123). 승인 업무 SALE_SUSPENSION(2인)을 실행할 때 부른다. reason을 꼭 채운다.
+  // 한 트랜잭션으로 비공개·검색 읽기 모델과 홈에서 빼기·오픈 예약 멈춤·기다리던 변경분 거두기를 쓴다. 판매를 막는 제어 상태는 ops-svc가 따로 건다.
+  SALE_REVIEW_RESULT_SUSPENDED = 3;
+  // 판매 재개(승인 업무 SALE_RESUMPTION). 마지막 승인 내용으로 다시 공개한다. 5~8은 채우지 않는다.
+  SALE_REVIEW_RESULT_RESUMED = 4;
 }
 
 message RecordSaleReviewResultRequest {
-  string event_id = 1;
+  // 판매 승인 대상 공연 ID. 판매 승인은 공연 단위다(ADR-0093 결정 7).
+  // 계약 저장소로 옮기기 전 초안이라 번호 1을 다시 썼다(옛 이름 event_id, README §3). 옮긴 뒤에는 README §2 '버전' 규칙대로 새 번호와 reserved를 쓴다.
+  string production_id = 1;
   SaleReviewResult result = 2;
   // 반려면 꼭 채운다.
   string reason = 3;
   string reviewed_by = 4;
+  // 5~8은 승인이면 꼭 채운다. 값은 openapi 승인 본문(POST /v1/ops/sale-reviews/{productionId}/approvals)과 같다.
+  // 그 공연의 회차마다 공연 규모. 빠진 회차가 있으면 INVALID_ARGUMENT다.
+  repeated EventScale scales = 5;
+  // 운영자가 확인한 공연장 ID(ADR-0093 결정 3).
+  string place_id = 6;
+  // 운영자가 확인한 아티스트 ID(보이는 순서, 없으면 비운다, ADR-0093 결정 4).
+  repeated string artist_ids = 7;
+  // 공연의 다른 이름 최종 목록(5개까지, POL-045, ADR-0093 결정 5).
+  repeated string aliases = 8;
+}
+
+// 회차 하나의 공연 규모(docs/architecture.md §9.5). 규모는 회차 칸이다(ADR-0093 결정 2).
+message EventScale {
+  string event_id = 1;
+  ScaleLevel level = 2;
+}
+
+enum ScaleLevel {
+  SCALE_LEVEL_UNSPECIFIED = 0;
+  SCALE_LEVEL_LARGE = 1;
+  SCALE_LEVEL_MEDIUM = 2;
+  SCALE_LEVEL_SMALL = 3;
 }
 
 message RecordSaleReviewResultResponse {
@@ -61,8 +92,8 @@ message ApplyModerationRequest {
   string acted_by = 6;
   // TEMP_BLOCK·BLOCK일 때 필수. REST `violation` 코드
   string violation = 7;
-  // TEMP_BLOCK일 때 필수. RFC 3339, 최대 30일
-  string ends_at = 8;
+  // TEMP_BLOCK일 때 필수. 최대 30일. 다른 계약과 같게 시각은 Timestamp다(2026-10-28 문자열에서 바꿨다. 초안이라 번호 8을 다시 썼다, 기술 검토 낮음-028)
+  google.protobuf.Timestamp ends_at = 8;
 }
 
 message ApplyModerationResponse {

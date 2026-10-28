@@ -1,4 +1,5 @@
-"""PEAKET 문서 점검: ID 참조, 표, 펜스, 경로, REST 경로 규칙, 절 번호 참조, 작업 흔적, 마커, WBS 일치, 기획 버전.
+"""PEAKET 문서 점검: YAML 중복 키, ID 참조, FR→시험 연결, 표, 펜스, 경로, REST 경로 규칙과 openapi 계약, 절 번호 참조,
+작업 흔적, ASVS 표, 결정이 많은 ADR의 결정별 표, 마커, WBS 일치, 기획 버전.
 
 사용법: python tools/doc-check/check_all.py [--strict] [--json] [--coverage] [--markers-out FILE]
 종료 코드: 0 = 오류 없음, 1 = 오류 있음(--strict면 경고도 오류로 봄), 2 = 실행 실패.
@@ -72,6 +73,383 @@ def strip_fences(text):
     return out
 
 
+# ---------- YAML 읽기(표준 라이브러리만) ----------
+class YamlError(Exception):
+    def __init__(self, line, msg):
+        super().__init__('%d줄: %s' % (line, msg))
+        self.line = line
+
+
+class YamlReader:
+    """이 저장소의 계약 YAML이 쓰는 부분(블록·흐름 매핑과 목록, 따옴표·일반 글자, |·> 블록 글자)만 읽는다.
+
+    값은 dict·list·str·None으로 돌려준다(숫자·참거짓을 바꾸지 않는다). 같은 매핑에 같은 키가 두 번 나오면
+    dups에 (줄, 키, 앞 줄)을 모은다. 앵커·별칭·태그·복합 키는 쓰지 않으므로 만나면 YamlError다.
+    """
+
+    def __init__(self, text):
+        self.lines = text.split('\n')
+        self.i = 0
+        self.dups = []
+
+    # --- 줄 다루기 ---
+    @staticmethod
+    def _indent(raw):
+        return len(raw) - len(raw.lstrip(' '))
+
+    def _skip(self):
+        while self.i < len(self.lines):
+            s = self.lines[self.i].strip()
+            if s and not s.startswith('#') and s not in ('---', '...'):
+                return True
+            self.i += 1
+        return False
+
+    def _peek(self):
+        if not self._skip():
+            return None, None
+        raw = self.lines[self.i]
+        return self._indent(raw), raw.strip(' ')
+
+    @staticmethod
+    def _is_seq(content):
+        return content == '-' or content.startswith('- ')
+
+    def _key_end(self, s):
+        """s가 '키: …' 꼴이면 (키, ':' 다음 위치), 아니면 None."""
+        if not s or s[0] in '[{&*!|>%@`?':
+            return None
+        if s[0] in '"\'':
+            val, p = self._quoted(s, 0, 0)
+            while p < len(s) and s[p] == ' ':
+                p += 1
+            if p < len(s) and s[p] == ':' and (p + 1 == len(s) or s[p + 1] == ' '):
+                return val, p + 1
+            return None
+        p = 0
+        while p < len(s):
+            if s[p] == ':' and (p + 1 == len(s) or s[p + 1] == ' '):
+                return s[:p].rstrip(), p + 1
+            if s[p] == '#' and p and s[p - 1] == ' ':
+                return None
+            p += 1
+        return None
+
+    def _dup(self, seen, key, line):
+        if key in seen:
+            self.dups.append((line, key, seen[key]))
+        else:
+            seen[key] = line
+
+    # --- 블록 ---
+    def parse(self):
+        ind, content = self._peek()
+        if ind is None:
+            return None
+        node = self._node(ind)
+        if self._skip():
+            raise YamlError(self.i + 1, '해석하지 못한 줄(들여쓰기가 맞지 않음)')
+        return node
+
+    def _node(self, ind):
+        _, content = self._peek()
+        if self._is_seq(content):
+            return self._seq(ind)
+        if self._key_end(content):
+            return self._map(ind)
+        line = self.i + 1
+        self.i += 1
+        return self._value(content, ind - 1, line)
+
+    def _map(self, ind):
+        out, seen = {}, {}
+        while True:
+            li, content = self._peek()
+            if li is None or li < ind or self._is_seq(content):
+                break
+            if li > ind:
+                raise YamlError(self.i + 1, '들여쓰기가 맞지 않음')
+            ke = self._key_end(content)
+            if not ke:
+                raise YamlError(self.i + 1, "'키: 값' 꼴이 아님")
+            key, p = ke
+            line = self.i + 1
+            self._dup(seen, key, line)
+            self.i += 1
+            out[key] = self._value(content[p:], ind, line)
+        return out
+
+    def _seq(self, ind):
+        out = []
+        while True:
+            li, content = self._peek()
+            if li is None or li != ind or not self._is_seq(content):
+                break
+            after = content[1:]
+            item = after.lstrip(' ')
+            col = ind + 1 + (len(after) - len(item))
+            line = self.i + 1
+            if not item or item.startswith('#'):
+                self.i += 1
+                nli, _ = self._peek()
+                out.append(self._node(nli) if nli is not None and nli > ind else None)
+            elif self._is_seq(item) or self._key_end(item):
+                self.lines[self.i] = ' ' * col + item  # '- 키: 값'은 그 칸에서 시작하는 매핑
+                out.append(self._node(col))
+            else:
+                self.i += 1
+                out.append(self._value(item, ind, line))
+        return out
+
+    def _value(self, rest, ind, line):
+        """'키:' 뒤(또는 목록 항목)의 값. ind는 부모의 들여쓰기."""
+        r = rest.strip(' ')
+        if not r or r.startswith('#'):
+            li, content = self._peek()
+            if li is None:
+                return None
+            if li > ind:
+                return self._node(li)
+            if li == ind and self._is_seq(content):
+                return self._seq(ind)
+            return None
+        c = r[0]
+        if c in '&*!':
+            raise YamlError(line, '앵커·별칭·태그는 읽지 않는다')
+        if c in '|>':
+            return self._block_scalar(r, ind, line)
+        if c in '[{"\'':
+            text, start = r, self.i
+            while True:
+                try:
+                    val, p = self._flow(text, 0, line) if c in '[{' else self._quoted(text, 0, line)
+                    break
+                except YamlError:
+                    if self.i >= len(self.lines) or (self.lines[self.i].strip() and self._indent(self.lines[self.i]) <= ind):
+                        raise
+                    text += '\n' + self.lines[self.i]
+                    self.i += 1
+            tail = text[p:].strip()
+            if tail and not tail.startswith('#'):
+                raise YamlError(line, '값 뒤에 남은 글자: %s' % tail[:30])
+            return val
+        parts = [self._plain_line(r)]
+        while self.i < len(self.lines):
+            raw = self.lines[self.i]
+            if raw.strip() and (self._indent(raw) <= ind or raw.strip().startswith('#')):
+                break
+            if not raw.strip():
+                j = self.i
+                while j < len(self.lines) and not self.lines[j].strip():
+                    j += 1
+                if j >= len(self.lines) or self._indent(self.lines[j]) <= ind:
+                    break
+                parts.append('\n')
+            else:
+                parts.append(self._plain_line(raw.strip()))
+            self.i += 1
+        out = ''
+        for part in parts:
+            if part.endswith(':') or ': ' in part:
+                raise YamlError(line, "일반 글자 안에 ': '가 있음(따옴표로 감싸거나 들여쓰기를 고친다)")
+            out += part if part == '\n' or not out or out.endswith('\n') else ' ' + part
+        return out
+
+    @staticmethod
+    def _plain_line(s):
+        p = s.find(' #')
+        return (s[:p] if p >= 0 else s).rstrip()
+
+    def _block_scalar(self, header, ind, line):
+        h = self._plain_line(header)
+        chomp = '-' if '-' in h else ('+' if '+' in h else '')
+        digits = [ch for ch in h if ch.isdigit()]
+        body = []
+        while self.i < len(self.lines):
+            raw = self.lines[self.i]
+            if raw.strip() and self._indent(raw) <= ind:
+                break
+            body.append(raw)
+            self.i += 1
+        nonblank = [b for b in body if b.strip()]
+        cut = ind + int(digits[0]) if digits else (min(self._indent(b) for b in nonblank) if nonblank else 0)
+        rows = [b[cut:] if b.strip() else '' for b in body]
+        while rows and not rows[-1] and chomp != '+':
+            rows.pop()
+        if h[0] == '|':
+            text = '\n'.join(rows)
+        else:
+            text, prev_more = '', False
+            for k, row in enumerate(rows):
+                more = row.startswith(' ')
+                if k == 0:
+                    text = row
+                elif not row:
+                    text += '\n'
+                elif more or prev_more or text.endswith('\n'):
+                    text += ('\n' if not text.endswith('\n') or more else '') + row
+                else:
+                    text += ' ' + row
+                prev_more = more
+        if chomp == '-':
+            return text
+        return text + '\n' if rows else ''
+
+    # --- 따옴표와 흐름 ---
+    @staticmethod
+    def _quoted(s, p, line):
+        q, p, out = s[p], p + 1, []
+        esc = {'n': '\n', 't': '\t', 'r': '\r', '"': '"', '\\': '\\', '/': '/', '0': '\0', ' ': ' ', 'b': '\b', 'e': '\x1b'}
+        while p < len(s):
+            ch = s[p]
+            if q == "'" and ch == "'":
+                if s[p + 1:p + 2] == "'":
+                    out.append("'")
+                    p += 2
+                    continue
+                return ''.join(out), p + 1
+            if q == '"' and ch == '"':
+                return ''.join(out), p + 1
+            if q == '"' and ch == '\\':
+                n = s[p + 1:p + 2]
+                if n in ('x', 'u', 'U'):
+                    w = {'x': 2, 'u': 4, 'U': 8}[n]
+                    out.append(chr(int(s[p + 2:p + 2 + w], 16)))
+                    p += 2 + w
+                    continue
+                if n == '\n':
+                    p += 2
+                    while p < len(s) and s[p] in ' \t':
+                        p += 1
+                    continue
+                out.append(esc.get(n, n))
+                p += 2
+                continue
+            if ch == '\n':  # 여러 줄 따옴표 글자: 줄바꿈 하나는 빈칸, 빈 줄은 줄바꿈
+                while out and out[-1] in ' \t':
+                    out.pop()
+                p += 1
+                blank = 0
+                while p < len(s) and s[p] in ' \t\n':
+                    blank += s[p] == '\n'
+                    p += 1
+                out.append('\n' * blank if blank else ' ')
+                continue
+            out.append(ch)
+            p += 1
+        raise YamlError(line, '따옴표가 닫히지 않음')
+
+    def _ws(self, s, p):
+        while p < len(s):
+            if s[p] in ' \t\n\r':
+                p += 1
+            elif s[p] == '#' and (p == 0 or s[p - 1] in ' \t\n'):
+                while p < len(s) and s[p] != '\n':
+                    p += 1
+            else:
+                break
+        return p
+
+    def _flow(self, s, p, line):
+        p = self._ws(s, p)
+        if p >= len(s):
+            raise YamlError(line, '흐름 값이 끝나지 않음')
+        ch = s[p]
+        if ch == '{':
+            out, seen, p = {}, {}, p + 1
+            while True:
+                p = self._ws(s, p)
+                if p >= len(s):
+                    raise YamlError(line, "'}'가 없음")
+                if s[p] == '}':
+                    return out, p + 1
+                key, p = self._flow_scalar(s, p, line, True)
+                p = self._ws(s, p)
+                val = None
+                if p < len(s) and s[p] == ':':
+                    p = self._ws(s, p + 1)
+                    if p < len(s) and s[p] not in ',}':
+                        val, p = self._flow(s, p, line)
+                self._dup(seen, key, line + s.count('\n', 0, p))
+                out[key] = val
+                p = self._ws(s, p)
+                if p < len(s) and s[p] == ',':
+                    p += 1
+                elif p < len(s) and s[p] == '}':
+                    continue
+                else:
+                    raise YamlError(line, "흐름 매핑에 ',' 또는 '}'가 없음")
+        if ch == '[':
+            out, p = [], p + 1
+            while True:
+                p = self._ws(s, p)
+                if p >= len(s):
+                    raise YamlError(line, "']'가 없음")
+                if s[p] == ']':
+                    return out, p + 1
+                val, p = self._flow(s, p, line)
+                q = self._ws(s, p)
+                if q < len(s) and s[q] == ':' and not isinstance(val, (dict, list)):  # [키: 값] 한 쌍 매핑
+                    q = self._ws(s, q + 1)
+                    inner, p = self._flow(s, q, line)
+                    val = {val: inner}
+                out.append(val)
+                p = self._ws(s, p)
+                if p < len(s) and s[p] == ',':
+                    p += 1
+                elif p < len(s) and s[p] == ']':
+                    continue
+                else:
+                    raise YamlError(line, "흐름 목록에 ',' 또는 ']'가 없음")
+        return self._flow_scalar(s, p, line, False)
+
+    def _flow_scalar(self, s, p, line, is_key):
+        if s[p] in '"\'':
+            return self._quoted(s, p, line)
+        if s[p] in '&*!':
+            raise YamlError(line, '앵커·별칭·태그는 읽지 않는다')
+        start = p
+        while p < len(s):
+            ch = s[p]
+            if ch in ',[]{}':
+                break
+            if ch == ':' and (p + 1 == len(s) or s[p + 1] in ' \t\n,[]{}'):
+                break
+            if ch == '#' and s[p - 1] in ' \t\n':
+                break
+            p += 1
+        text = ' '.join(x.strip() for x in s[start:p].split('\n') if x.strip())
+        return text, p
+
+
+def yaml_load(text):
+    """(값, 중복 키 목록)."""
+    r = YamlReader(text)
+    return r.parse(), r.dups
+
+
+# ---------- 0. YAML 중복 키(기술 검토 낮음-027) ----------
+def check_yaml(texts, rep):
+    """저장소의 .yaml(openapi·asyncapi·buf.yaml)을 읽어 같은 매핑의 같은 키와 읽을 수 없는 줄을 오류로 낸다.
+
+    읽은 값을 {파일: 값}으로 돌려준다(읽지 못한 파일은 None). api 검사가 openapi 값을 쓴다.
+    """
+    docs = {}
+    for f, text in texts.items():
+        if not f.endswith('.yaml'):
+            continue
+        try:
+            docs[f], dups = yaml_load(text)
+        except YamlError as e:
+            rep.err('yaml', '%s:%d' % (f, e.line), '읽을 수 없는 YAML: %s' % e)
+            docs[f] = None
+            continue
+        for line, key, first in dups:
+            rep.err('yaml', '%s:%d' % (f, line), "같은 매핑에 키 '%s'가 두 번 있음(처음은 %d줄)" % (key, first))
+    rep.info['yaml_files'] = len(docs)
+    return docs
+
+
 # ---------- 1. ID 정의와 참조 ----------
 def check_ids(texts, rep):
     t = texts
@@ -104,6 +482,58 @@ def check_ids(texts, rep):
                     rep.err('ids', '%s:%d' % (f, n), '정의 없는 ID %s' % tok)
     rep.info['ids'] = {k: len(sets[k]) for k in ID_KINDS}
     return sets
+
+
+# ---------- 1의2. FR → 시험 연결(planning/02 §2, 기술 검토 중간-005) ----------
+# 시험 행: 첫 칸이 시험 ID(예: Q-T12, FE-T3, **SR-T1**)인 표 행. 그 행 안의 FR 참조를 센다.
+TEST_ROW_RE = re.compile(r'^\| (?:\*\*)?([A-Z]{1,3}-T\d+)(?:\*\*)? \|(.*)$')
+# FR 참조와 그 뒤에 붙은 묶음(FR-005~008, FR-005~FR-008, FR-026·028~034, FR-001, 002). NFR-은 앞 글자 때문에 빠진다.
+FR_TOKEN_RE = re.compile(r'(?<![A-Za-z])FR-(\d{3})((?:\s*(?:~|·|,)\s*(?:FR-)?\d{3}(?!\d))*)')
+FR_TRACE_SKIP = ('review/', 'docs/adr/')  # 검토 기록과 ADR 본문은 시험 표가 아니다(tools/는 처음부터 읽지 않는다)
+
+
+def expand_fr(m):
+    """FR_TOKEN_RE 일치 하나를 FR ID 목록으로 펼친다. '~'는 범위, '·'와 ','는 낱개다."""
+    first = int(m.group(1))
+    out, prev = [first], first
+    for sep, num in re.findall(r'\s*(~|·|,)\s*(?:FR-)?(\d{3})(?!\d)', m.group(2)):
+        n = int(num)
+        if sep == '~':
+            out.extend(range(prev + 1, n + 1))
+        else:
+            out.append(n)
+        prev = n
+    return ['FR-%03d' % x for x in out]
+
+
+def check_frtrace(texts, rep):
+    req = texts.get('planning/02-requirements.md')
+    if req is None:
+        rep.err('frtrace', 'planning/02-requirements.md', '정의 파일 없음')
+        return
+    frs = collections.OrderedDict()  # FR ID → 정의 줄 번호
+    for n, line in enumerate(req.split('\n'), 1):
+        m = re.match(r'^\| (FR-\d{3}) \|', line)
+        if m:
+            frs.setdefault(m.group(1), n)
+    linked = {f: 0 for f in frs}
+    rows = 0
+    for f, text in texts.items():
+        if not f.endswith('.md') or f.startswith(FR_TRACE_SKIP):
+            continue
+        for line in strip_fences(text):
+            m = TEST_ROW_RE.match(line)
+            if not m:
+                continue
+            rows += 1
+            for tm in FR_TOKEN_RE.finditer(m.group(2)):
+                for fr in expand_fr(tm):
+                    if fr in linked:
+                        linked[fr] += 1
+    for fr, n in frs.items():
+        if not linked[fr]:
+            rep.err('frtrace', 'planning/02-requirements.md:%d' % n, '%s를 가리키는 시험 표 행이 없음' % fr)
+    rep.info['frtrace'] = {'fr': len(frs), 'linked': sum(1 for v in linked.values() if v), 'test_rows': rows}
 
 
 # ---------- 2. 표 열 수, 3. 펜스 ----------
@@ -156,7 +586,7 @@ API_EXCEPTIONS = {'/graphql': 'GraphQL(REST 밖)', '/v1/scanner/token': 'RFC 862
 API_PLURAL_EXEMPT = {'staff'}  # 집합 명사
 # 문서가 이름을 대도 openapi에 없어도 되는 경로 접두사: 이유
 API_REF_ALLOW = {'/v1/payments/': '토스페이먼츠 API(외부)', '/v1/transactions': '토스페이먼츠 API(외부)',
-                 '/v1/proto/': '프로토타입 전용 가짜 API', '/v1/forensics/': 'ADR-0080 2단계 초안'}
+                 '/v1/settlements': '토스페이먼츠 API(외부)', '/v1/proto/': '프로토타입 전용 가짜 API', '/v1/forensics/': 'ADR-0080 2단계 초안'}
 
 
 def api_paths(texts):
@@ -220,6 +650,114 @@ def check_api(texts, rep):
                     rep.warn('api', '%s:%d' % (f, n), 'openapi에 없는 경로 %s(프로토타입 전용 읽기 경로면 wbs 0.2.3)' % q)
                 else:
                     rep.err('api', '%s:%d' % (f, n), 'openapi에 없는 경로 %s' % q)
+
+
+# ---------- 4의3. openapi 계약: 호스트·인증·Problem·동시 수정·보고 수(guidelines §10·§12, 기술 검토 낮음-030·031·032) ----------
+HTTP_METHODS = ('get', 'put', 'post', 'patch', 'delete', 'head', 'options', 'trace')
+# Problem 본문을 약속하지 않는 오류 응답(guidelines §2·§12의 예외 둘): (메서드, 경로, 코드) → 이유. 정적 파일 404는 아래 규칙으로 따로 본다
+PROBLEM_EXEMPT = {('POST', '/v1/scanner/token', '400'): 'RFC 8628·RFC 6749 §5.2 OAuth 오류 본문'}
+STATIC_FILE_RE = re.compile(r'\.[a-z]+$')  # 확장자가 붙은 경로 = CDN이 내는 정적 파일(guidelines §10)
+# If-Match 없이 마지막 저장이 이기는 자기 상태(guidelines §12 '동시 수정'의 예외 셋): (메서드, 경로) → 이유
+IF_MATCH_EXEMPT = {('PUT', '/v1/productions/{productionId}/wish'): '내 찜',
+                   ('PUT', '/v1/scanner/shift/readiness'): '그 기기의 근무 준비',
+                   ('PATCH', '/v1/reviews/{reviewId}'): '작성자만 고치는 내 후기'}
+
+
+def check_api_contract(spec, rep):
+    where0 = 'docs/api/openapi.yaml'
+    if not isinstance(spec, dict) or not isinstance(spec.get('paths'), dict):
+        rep.err('api', where0, 'openapi를 읽지 못해 계약 검사를 못 함')
+        return
+    comp = spec.get('components') or {}
+    schemes = set((comp.get('securitySchemes') or {}).keys())
+    responses = comp.get('responses') or {}
+    rules = ((spec.get('x-peaket-gateways') or {}).get('rules')) or []
+    global_sec = spec.get('security')
+    for req in global_sec or []:
+        for name in (req or {}):
+            if name not in schemes:
+                rep.err('api', where0 + ' security', '전역 security의 %s가 securitySchemes에 없음' % name)
+
+    def is_problem(r, depth=0):
+        if not isinstance(r, dict) or depth > 5:
+            return False
+        if r.get('$ref'):
+            return is_problem(responses.get(r['$ref'].rsplit('/', 1)[-1]), depth + 1)
+        content = r.get('content') or {}
+        if 'application/problem+json' in content:
+            return True
+        return any(str(((v or {}).get('schema') or {}).get('$ref', '')).endswith('/Problem') for v in content.values())
+
+    hosts = collections.Counter()
+    n = {'operations': 0, 'error_responses': 0, 'problem_responses': 0, 'missing_operation_id': 0,
+         'missing_host': 0, 'missing_security': 0, 'public': 0, 'if_match_required': 0, 'if_match_exempt': 0}
+    exempt_seen = []
+    for path, item in spec['paths'].items():
+        if not isinstance(item, dict):
+            continue
+        for method in HTTP_METHODS:
+            op = item.get(method)
+            if not isinstance(op, dict):
+                continue
+            n['operations'] += 1
+            M = method.upper()
+            where = '%s %s %s' % (where0, M, path)
+            if not op.get('operationId'):
+                n['missing_operation_id'] += 1
+            srv = op.get('servers') or item.get('servers')
+            if srv:
+                hs = {(s or {}).get('url') for s in srv} - {None}
+            else:
+                hs = {next((r.get('server') for r in rules if isinstance(r, dict) and path.startswith(str(r.get('prefix')))), None)} - {None}
+            if len(hs) == 1:
+                hosts[re.sub(r'^https?://|\.peaket\.example$', '', next(iter(hs)))] += 1
+            else:
+                n['missing_host'] += 1
+                rep.err('api', where, '호스트가 하나로 정해지지 않음(x-peaket-gateways 규칙이나 경로 servers, guidelines §10): %s' % (sorted(hs) or '없음'))
+            if 'security' in op:
+                sec = op.get('security') or []
+                if not sec:
+                    n['public'] += 1
+                for req in sec:
+                    for name in (req or {}):
+                        if name not in schemes:
+                            rep.err('api', where, 'security의 %s가 securitySchemes에 없음' % name)
+            else:
+                n['missing_security'] += 1
+                if not global_sec:
+                    rep.err('api', where, 'security가 없고 전역 security도 없음(인증 없는 작업은 security: [], guidelines §10)')
+            for code, r in (op.get('responses') or {}).items():
+                code = str(code)
+                if code[:1] not in ('4', '5'):
+                    continue
+                n['error_responses'] += 1
+                if is_problem(r):
+                    n['problem_responses'] += 1
+                elif (M, path, code) in PROBLEM_EXEMPT or (code == '404' and STATIC_FILE_RE.search(path)):
+                    exempt_seen.append('%s %s %s' % (M, path, code))
+                else:
+                    rep.err('api', where, '%s 응답이 Problem을 선언하지 않음(guidelines §2·§12)' % code)
+            if method in ('put', 'patch'):
+                params = list(op.get('parameters') or []) + list(item.get('parameters') or [])
+                has = any(isinstance(p, dict) and (str(p.get('$ref', '')).endswith('/IfMatch')
+                                                   or (p.get('in') == 'header' and str(p.get('name', '')).lower() == 'if-match'))
+                          for p in params)
+                codes = {str(c) for c in (op.get('responses') or {})}
+                if (M, path) in IF_MATCH_EXEMPT:
+                    n['if_match_exempt'] += 1
+                elif not has:
+                    rep.err('api', where, 'PUT·PATCH에 If-Match(IfMatch 파라미터)가 없음(guidelines §12 동시 수정)')
+                else:
+                    n['if_match_required'] += 1
+                    missing = [c for c in ('412', '428') if c not in codes]
+                    if missing:
+                        rep.err('api', where, 'If-Match를 받는데 %s 응답을 선언하지 않음(guidelines §12)' % '·'.join(missing))
+    counted = rep.info.get('api', {}).get('operations')
+    if counted is not None and counted != n['operations']:
+        rep.err('api', where0, '작업 수를 줄 규칙(%d)과 YAML 읽기(%d)로 센 값이 다름' % (counted, n['operations']))
+    rep.info.setdefault('api', {}).update(n)
+    rep.info['api_hosts'] = dict(sorted(hosts.items(), key=lambda x: -x[1]))
+    rep.info['api_problem_exempt'] = exempt_seen
 
 
 # ---------- 5. 절 번호 참조 ----------
@@ -299,14 +837,40 @@ def check_asvs(texts, rep):
         if not f.startswith('docs/security/asvs/'):
             continue
         for n, line in enumerate(text.split('\n'), 1):
-            m = re.match(r'^\| (v5\.0\.0-[\d.]+) \| (L\d[^|]*?) \| (.*?) \| ', line)
+            m = re.match(r'^\| (v5\.0\.0-[\d.]+) \| ([^|]*?) \| (.*?) \| ', line)
             if not m:
                 continue
             where = '%s:%d' % (f, n)
+            if m.group(2) not in ('L1', 'L2', 'L3'):
+                rep.err('asvs', where, "%s의 레벨 칸이 L1·L2·L3이 아님: '%s'(기술 검토 낮음-089)" % (m.group(1), m.group(2)))
             if m.group(1) in seen and seen[m.group(1)][0] != m.group(3):
                 rep.err('asvs', where, '%s의 요구사항 요약이 %s와 다르다' % (m.group(1), seen[m.group(1)][1]))
             seen.setdefault(m.group(1), (m.group(3), where))
     rep.info['asvs_ids'] = len(seen)
+
+
+# ---------- 6의3. 결정이 많은 ADR의 결정별 현재 판(docs/architecture.md §11·§11.1, 기술 검토 낮음-150) ----------
+ADR_TABLE_MIN_DECISIONS = 11   # §11 '결정이 10개를 넘는 ADR'
+ADR_TABLE_MIN_STATUS = 1000    # 상태 줄이 이 글자 수를 넘어 바꾼 기록이 쌓인 것(l9 권고: 둘 다일 때만 경고)
+
+
+def check_adr_tables(texts, rep):
+    arch = texts.get('docs/architecture.md', '')
+    sec = arch.split('\n### 11.1', 1)[1].split('\n## ', 1)[0] if '\n### 11.1' in arch else ''
+    tabled = set(re.findall(r'^ADR-(\d{4})\(', sec, re.M))
+    for f, text in texts.items():
+        m = re.match(r'docs/adr/(\d{4})-.*\.md$', f)
+        if not m:
+            continue
+        lines = text.split('\n')
+        st = next((i for i, l in enumerate(lines) if l.startswith('- **상태**')), None)
+        body = re.search(r'^## 결정[^\n]*\n(.*?)(?=^## |\Z)', text, re.M | re.S)
+        decisions = len(re.findall(r'^\d+\. ', body.group(1), re.M)) if body else 0
+        if st is None or decisions < ADR_TABLE_MIN_DECISIONS or len(lines[st]) <= ADR_TABLE_MIN_STATUS or m.group(1) in tabled:
+            continue
+        rep.warn('adr', '%s:%d' % (f, st + 1), '결정 %d개·상태 줄 %d자인데 docs/architecture.md §11.1에 결정별 현재 판 표가 없음'
+                 % (decisions, len(lines[st])))
+    rep.info['adr_decision_tables'] = sorted(tabled)
 
 
 # ---------- 7. 마커 ----------
@@ -437,13 +1001,17 @@ def main():
         sys.stdout.reconfigure(encoding='utf-8')
     rep = Report()
     texts = load_files()
+    yaml_docs = check_yaml(texts, rep)
     check_ids(texts, rep)
+    check_frtrace(texts, rep)
     check_tables_fences(texts, rep)
     check_paths(texts, rep)
     check_api(texts, rep)
+    check_api_contract(yaml_docs.get('docs/api/openapi.yaml'), rep)
     check_secrefs(texts, rep)
     check_artifacts(texts, rep)
     check_asvs(texts, rep)
+    check_adr_tables(texts, rep)
     count_markers(texts, rep, a.markers_out)
     check_wbs(texts, rep)
     check_versions(texts, rep)

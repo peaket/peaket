@@ -34,6 +34,8 @@ def chart_scale(root, runs, out):
             continue
         start = L.parse_time(m.get('started_at')) if m.get('started_at') else None
         rps = L.mean_after_warmup(L.read_metric_csv(root, r, 'origin_rps'), (m.get('scale') or {}).get('warmup_s'), start)
+        if rps is None:  # 원본을 S3 원본 버킷으로 옮긴 실행은 metrics-summary.json의 평균(예열 뺌)을 쓴다
+            rps = (L.read_metrics_summary(root, r).get('origin_rps') or {}).get('mean')
         p99 = (m.get('k6') or {}).get('p99_ms')
         pts_rps.append((users, rps))
         pts_p99.append((users, p99))
@@ -69,6 +71,8 @@ def chart_timeline(root, run, series, out):
     svg = L.Svg(900, 60 + 240 * n, f'시간선: {run}')
     for i, name in enumerate(series):
         pts = L.read_metric_csv(root, run, name)
+        if not pts and m.get('raw_uri'):
+            print(f'metrics/{name}.csv가 폴더에 없다. 원본은 {m["raw_uri"]}metrics/{name}.csv.gz에 있으니 받아서 풀어 둔 뒤 다시 그린다')
         t0 = start if start else (pts[0][0] if pts else 0)
         rel = [((t - t0), v) for t, v in pts]
         L.panel(svg, 80, 50 + 240 * i, 780, 170, [(name, rel)], '시작 후 초', name)

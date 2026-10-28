@@ -1,0 +1,98 @@
+{
+  "type": "record",
+  "name": "EventSaleChanged",
+  "namespace": "peaket.trade",
+  "doc": "회차 판매 상태가 바뀜(planning/03 §2.15, 추천 적용 2026-10-28, ADR-0122). purchase-svc가 event_sale을 바꾸는 트랜잭션의 Outbox로 trade.seats에 낸다(키 eventId라 그 회차의 SeatEvent와 순서가 맞는다). 판정: 가용 0이 5초 [가정] 이어지면 ALL_HELD, 가용·홀드·결제 중이 0인 판정이 두 번 이어지면 SOLD_OUT, 매진 뒤 판매 종료 전에 좌석이 돌아오면 ON_SALE(매진 풀림). 입금 대기·결과 모름의 판매 예약은 팔린 쪽으로 센다. 토픽 trade.seats, 키 eventId(회차).",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": "string"
+    },
+    {
+      "name": "status",
+      "doc": "바뀐 뒤 상태. ALL_HELD는 일시 매진(가용 0, 홀드나 결제 중 남음, 대기는 이어지고 입장만 멈춤)",
+      "type": {
+        "type": "enum",
+        "name": "EventSaleChangedStatus",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "UPCOMING",
+          "ON_SALE",
+          "ALL_HELD",
+          "SOLD_OUT",
+          "ENDED"
+        ]
+      }
+    },
+    {
+      "name": "previousStatus",
+      "doc": "바뀌기 전 상태. SOLD_OUT → ON_SALE이 매진 풀림이다(취소표 알림)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "EventSaleChangedPreviousStatus",
+          "default": "UNRECOGNIZED",
+          "symbols": [
+            "UNRECOGNIZED",
+            "UPCOMING",
+            "ON_SALE",
+            "ALL_HELD",
+            "SOLD_OUT",
+            "ENDED"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "available",
+      "doc": "판정 때 가용 좌석(비트맵에서 비어 있는 판매 대상 좌석)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "held",
+      "doc": "판정 때 홀드 수",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "paying",
+      "doc": "판정 때 결제 중인 판매 예약(승인 결과를 기다리는 PENDING) 수",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "version",
+      "doc": "판 번호. 회차마다 늘어나기만 하고, 받는 쪽은 지금 값보다 클 때만 적용한다",
+      "type": "long"
+    },
+    {
+      "name": "changedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    }
+  ]
+}

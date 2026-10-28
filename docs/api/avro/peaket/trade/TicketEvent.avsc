@@ -46,7 +46,9 @@
         {
           "type": "enum",
           "name": "TicketEventType",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "ISSUED",
             "KEY_REGISTERED",
             "KEY_REVOKED",
@@ -87,7 +89,9 @@
         {
           "type": "enum",
           "name": "TicketEventScanResult",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "PASS",
             "REJECT",
             "CHECK"
@@ -120,7 +124,9 @@
         {
           "type": "enum",
           "name": "TicketEventDirection",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "IN",
             "OUT"
           ]
@@ -160,15 +166,6 @@
           "type": "string",
           "logicalType": "uuid"
         }
-      ],
-      "default": null
-    },
-    {
-      "name": "schemaVersion",
-      "doc": "메시지 형식 판",
-      "type": [
-        "null",
-        "long"
       ],
       "default": null
     }

@@ -37,7 +37,9 @@
         {
           "type": "enum",
           "name": "TrustVerdictCategory",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "PASS",
             "CHALLENGE_PASSED",
             "CHALLENGE_FAILED",
@@ -57,7 +59,9 @@
         {
           "type": "enum",
           "name": "TrustVerdictAction",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "ALLOW",
             "CHALLENGE",
             "BLOCK",
@@ -75,7 +79,9 @@
         {
           "type": "enum",
           "name": "TrustVerdictSource",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "REALTIME",
             "HONEYPOT",
             "SAMPLE_REVIEW",
@@ -112,15 +118,6 @@
           "type": "string",
           "logicalType": "uuid"
         }
-      ],
-      "default": null
-    },
-    {
-      "name": "schemaVersion",
-      "doc": "메시지 형식 판",
-      "type": [
-        "null",
-        "long"
       ],
       "default": null
     }

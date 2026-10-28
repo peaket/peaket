@@ -54,8 +54,8 @@ RADIO는 서버를 검은 상자로 두라고 한다. 이 문서도 게이트웨
 | --- | --- | --- | --- | --- | --- | --- |
 | 소비자 웹 | 팬(현장 스태프의 휴대폰 화면 SCR-050·051·061 포함) | 휴대폰 우선, 태블릿, 데스크톱. iOS·iPadOS 16.4 이상(NFR-019) | 동시 대기 100만, T=0 진입 초당 20만, 공연 페이지 초당 30만, 좌석 단계 동시 5,000(architecture §9.1) | web-default, web-focus(대기실·좌석·결제), web-staff | 시스템 따라 | 소셜 로그인 + 휴대폰 본인확인, 팬 쿠키(브라우저가 사이트별로 저장했다가 요청마다 함께 보내는 작은 값) |
 | 파트너 콘솔 | `partner_admin`·`partner_member` | 데스크톱·태블릿, 휴대폰은 보기와 일부 일(design/d5 §3.9) | 운영자 수십 명 [가정] | partner | 시스템 따라 | 비밀번호 + 인증 앱이 시간에 따라 새로 만드는 일회용 코드(TOTP), 파트너 쿠키 |
-| 관제 콘솔 | viewer·operator·commander·`cs_agent`·`cs_lead` | 데스크톱 1280×800 기본, 태블릿·휴대폰(360px부터) | 운영자 10명 동시, 설계 50명(NFR-008) | console | 다크 고정 | 비밀번호 + 인증 앱, 허용 IP·VPN, 운영자 쿠키 |
-| 게이트 스캐너 | `gate_staff`·`gate_lead` | 관리형 Android 휴대폰·태블릿, Chrome 설치형 PWA | 게이트당 분당 60명(NFR-010) | scanner | 라이트 고정 | 기기 인증서(mTLS, 양쪽이 서로 인증서를 확인하는 TLS) + 기기 승인 로그인(RFC 8628) |
+| 관제 콘솔 | viewer·operator·commander·`cs_agent`·`cs_lead` | 데스크톱 1280×800 기본, 태블릿·휴대폰(360px부터) | 운영자 10명 동시, 설계 50명(NFR-008) | console | 데스크톱 배치는 다크 기본, 휴대폰·태블릿 배치는 OS 테마가 처음 값(`/me`의 [화면 테마]로 바꿈, design/d1 §4, 기술 검토 낮음-104) | 비밀번호 + 인증 앱, 허용 IP·VPN, 운영자 쿠키 |
+| 게이트 스캐너 | `gate_staff`·`gate_lead` | 관리형 Android 휴대폰·태블릿, Chrome 설치형 PWA | 게이트당 분당 60명(NFR-010) | scanner | 라이트 고정 | 기기 키 DPoP(요청마다 기기 안의 키로 서명한 증명, RFC 9449. mTLS는 운영 선택지) + 기기 승인 로그인(RFC 8628) |
 | 포렌식 리플레이 1단계 데모(ADR-0080) | 누구나(합성 데이터라 개인정보가 없다) | 데스크톱·태블릿, 휴대폰은 리플레이 보기만 | 사건 300만·좌석 10만 [가정] | 없다(자체 머리) | 다크 고정(관제와 같은 디자인 토큰) | 없다(2단계는 관제 콘솔 인증) |
 
 ### 1.2 핵심 사용 사례와 있으면 좋은 것
@@ -89,15 +89,15 @@ RADIO는 서버를 검은 상자로 두라고 한다. 이 문서도 게이트웨
 
 | NFR | 목표(정본 숫자) | 브라우저 쪽 의미 | 재는 곳 |
 | --- | --- | --- | --- |
-| NFR-002 대기 상태 전파 | 입장 임박군 serving 반영 p99 2초(p99: 백 건 중 아흔아홉 건이 이 시간 안에 끝난다는 뜻), 그 밖은 폴링 주기 + 1초 | 1초 폴링 구간의 반영 시간을 흐름 표시값 `queue_reflect_ms`로 잰다 | RUM(서버 시각 보정, §3.3) |
-| NFR-004 좌석 상태 전파 | 종단 p99 300ms, 버전 갭을 30초 안에 스스로 메우는 비율 99.9% | 델타 머리에 적힌 서버 시각과 화면에 반영한 시각의 차이 `seat_delta_e2e_ms` | RUM |
+| NFR-002 대기 상태 전파 | 입장 임박군 차례 반영 p99 2초(p99: 백 건 중 아흔아홉 건이 이 시간 안에 끝난다는 뜻), 그 밖은 '폴링 주기 × 1.2 + 생성 1초 + 그 구간 캐시 수명'(설계 식) | 0.5초 폴링 구간에서 차례(serving ≥ 내 번호)를 그린 시각과 serving이 내 번호를 넘은 전진 시각(`servingSteps`)의 차이를 흐름 표시값 `queue_reflect_ms`로 잰다(ADR-0110) | RUM(밀리초 서버 시각 보정, §3.3) |
+| NFR-004 좌석 상태 전파 | 종단 p99 300ms(변경 → 화면, 묶음 대기 포함), 버전 갭을 30초 안에 스스로 메우는 비율 99.9% | 델타 머리의 서버 시각에서 묶음 대기(`maxWaitMs`)를 뺀 변경 시각과 화면에 반영한 시각의 차이 `seat_delta_e2e_ms`(ADR-0110) | RUM(WebSocket 왕복 시계 보정) |
 | NFR-006 결제 확정 | 결제 요청부터 확정 화면을 그릴 때까지 p99 3초 | 결제 접수 직전부터 확정 화면을 그릴 때까지 `payment_confirm_ms` | RUM + 서버 추적 |
 | NFR-007 공연 페이지 | 엣지 TTFB p99 150ms, LCP p75 2.5초(LCP: 화면의 가장 큰 요소가 보이기까지 걸린 시간) | ISR·엣지 캐시, 이미지·글꼴 최적화 | CloudFront(AWS의 CDN) 지표, RUM |
 | NFR-010 현장 판정 | 단말 판정 p95 150ms(오프라인 포함, 판정 백 건 중 아흔다섯 건이 이 시간 안에 끝난다는 뜻) | Worker 디코딩·검증 | 스캐너 지표(§5.5) |
-| NFR-012 사용자 체감 | INP 200ms·LCP 2.5초·CLS 0.1 이하(p75, 모바일·데스크톱 따로. INP: 조작에 화면이 반응하기까지 걸린 시간, CLS: 화면이 갑자기 밀리는 정도), FCP 1.8초·TTFB 0.8초, 주요 경로에서 50ms 이상 걸리는 긴 작업 0, 좌석맵은 대기실 통과 뒤 1초 미만, 힙 v0 대비 70% 감축, 대기실 JS 50KB(gzip)·CSS 10KB 미만 | 경로별 예산 표(§5.8), 대기실 경량 페이지(§5.1) | RUM, Lighthouse CI(코드를 올릴 때마다 자동으로 도는 페이지 검사), Playwright 추적, memlab |
+| NFR-012 사용자 체감 | INP 200ms·LCP 2.5초·CLS 0.1 이하(p75, 모바일·데스크톱 따로. INP: 조작에 화면이 반응하기까지 걸린 시간, CLS: 화면이 갑자기 밀리는 정도), FCP 1.8초·TTFB 0.8초, 주요 경로에서 50ms 이상 걸리는 긴 작업 0, 좌석맵은 대기실 통과 뒤 1초 미만, 힙 v0 대비 70% 감축, 대기실 JS 50KB(gzip)·CSS 10KB 미만 | 경로별 예산 표(§5.8), 대기실 경량 페이지(§5.1) | 포트폴리오 판정은 랩(Playwright 조작 + web-vitals, 20회 [가정] 반복 p75), 운영 판정은 RUM(§5.8). Lighthouse CI(코드를 올릴 때마다 자동으로 도는 페이지 검사)는 회귀 방지, memlab |
 | NFR-016 보안 | 웹 앱 보안 검증 항목 목록인 ASVS 5.0.0 L2의 모든 항목 판정 | 화면 묶음별 헤더, 저장소 규칙, 공급망 | asvs/frontend.md와 기능 표 |
 | NFR-019 지원 플랫폼 | Baseline(주요 브라우저가 모두 지원하는지 알려 주는 웹 기능 기준)의 'Widely available'(모두 지원한 지 30개월이 지난 단계) 기능은 모두 쓰고, 그보다 새 기술은 점진적 향상(지원하지 않는 브라우저에서도 핵심 기능은 그대로 돌게 하는 방식)으로만 쓴다. 소비자 웹은 Chrome·Safari·Samsung Internet·Edge·Whale 최신 2개 메이저 버전과 iOS·iPadOS 16.4 이상을 지원한다 | §1.5 표의 대체 동작 | Playwright 3엔진(Chromium·WebKit·Firefox) + 실제 기기 시험(§1.5) |
-| NFR-020 접근성 | 웹 접근성 국제 기준 WCAG 2.2 AA 위반 0, 좌석 선택·결제·양도를 NVDA·VoiceOver로 끝까지 마치는 비율 100% | §5.11 | axe, 수동 시나리오 |
+| NFR-020 접근성 | 웹 접근성 국제 기준 WCAG 2.2 AA 위반 0, 좌석 선택·결제·양도를 NVDA·VoiceOver·TalkBack으로 끝까지 마치는 비율 100%(조합·시나리오마다 3회 [가정], 개발자 수동 시험) | §5.11 | axe, 수동 시나리오 |
 | NFR-024 국제화 | ko·en·ja·zh, 로케일이 늘어도 초기 번들은 그대로, 누락 키 0 | §5.12 | 번역 키 검사, 로케일별 번들 크기 |
 | NFR-025 정합성 | 재접속 순번 보존 100%, 다중 탭·다기기 한도 초과 0 | 저장소 규칙(§3.12), 다중 탭 조정(§5.9) | 시험 FE-T5·FE-T6 |
 
@@ -114,19 +114,22 @@ K5(5만 석 좌석맵 프론트 성능)와 K10(오프라인 입장)은 planning/
 | IndexedDB(추출 불가 `CryptoKey` 저장) | 구매 세션 키, 월렛, 스캐너 | Baseline | 사생활 보호 모드 등에서 열리지 않으면 예매 단계는 SCR-059 '미지원'을, 월렛은 '이 브라우저에서는 입장용 등록을 할 수 없습니다'를 보인다 |
 | Web Locks, BroadcastChannel | 일련번호 잠금, 탭 조정 | Safari 15.4부터 | 지원 범위(16.4) 안이라 대체 동작을 두지 않는다 |
 | OffscreenCanvas 2D, Worker 안 `requestAnimationFrame` | 좌석맵 | Safari 16.4부터 | 같은 그리기 모듈을 메인 스레드에서 돌린다(§5.2) |
-| SharedArrayBuffer(교차 출처 격리) | 좌석 상태 공유(선택) | COOP·COEP를 둔 좌석 라우트에서만 | 바뀐 구역만 메시지로 받는다 |
+| SharedArrayBuffer(교차 출처 격리) | 포렌식 리플레이 데모가 성능 목표를 못 맞출 때만 더한다(§5.19, 1단계는 복사 방식 하나, 기술 검토 낮음-049). 좌석맵은 쓰지 않고, 바뀐 구역만 메시지로 받는 한 길이다(§5.2, 추천 적용 2026-10-28, 기술 검토 중간-015) | COOP·COEP로 교차 출처 격리를 켠 문서에서만. 좌석 라우트에는 COEP를 두지 않는다 | 포렌식 데모는 복사 방식으로 돈다(docs/features/forensic-replay.md §3.3) |
 | Service Worker, Push | 월렛 오프라인, 웹 푸시 | Baseline. iOS 웹 푸시는 홈 화면 앱에서만 | 오프라인 QR은 IndexedDB(브라우저 안에 데이터를 저장하는 곳)만으로도 그린다(앱 셸이 캐시에 없으면 '연결이 필요합니다'). 웹 푸시가 없으면 탭 제목·소리·이메일(CMP-068)로 알린다 |
 | `StorageManager.persist()`·`estimate()` | 월렛·스캐너 | persist Safari 15.2, estimate Safari 17 | 요청 실패를 기록하고 iOS 7일 안내(§5.4)를 보인다 |
 | Screen Wake Lock | 월렛 QR, 스캐너 | iOS 18.4, Android Chrome 84 | 밝기·자동 잠금 안내 글자만 보인다 |
 | BarcodeDetector | 스캐너 | Android Chrome만 | zxing-wasm(§5.5) |
 | Battery Status API | 저전력 때 로비 효과 끄기(SCR-007) | Chromium만(Safari는 지원하지 않는다) | 움직임 줄이기 설정만 따른다(§6.3 한계) |
 | `scheduler.yield()` | 긴 작업 나누기 | Safari는 지원하지 않는다 | `MessageChannel`로 다음 작업에 넘기는 공용 함수 |
+| `AbortSignal.any` | api-client의 시간 초과와 화면을 떠날 때의 취소 신호 묶기(§4.1) | Chrome 116·Firefox 124·Safari 17.4부터(BCD 8.1.7, 2026-10-28 조회). 그래서 지원 범위 안의 iOS·iPadOS 16.4~17.3에는 없다. `AbortSignal.timeout`은 Safari 16부터라 범위 안이다 | 공용 함수 `anySignal(signals)`가 대신한다(추천 적용 2026-10-28, 기술 검토 중간-095). `AbortController` 하나를 만들어 두 신호의 `abort` 사건을 잇고, 먼저 끊긴 신호의 `reason`(`TimeoutError`·`AbortError`)을 그대로 넘긴다. 이미 끊긴 신호가 있으면 바로 끊고, 끝나면 듣기를 지워 오래 사는 신호에 쌓이지 않게 한다. `AbortSignal.any`가 있으면 그것을 쓴다 |
 | Trusted Types | 악성 스크립트를 페이지에 끼워 넣는 DOM XSS 줄이기(보고 모드) | Baseline 2026-02(Safari 26, Firefox 148) | 무시된다(보고만 비어 있다) |
 | `fetch` keepalive | `/_t/*` 전송 | Firefox 133·Safari 13부터 | `sendBeacon`(쿠키가 실려 가므로 게이트웨이가 지운다, observability §11) |
 | CSP `report-to`·`Reporting-Endpoints` | 위반 보고 | Safari 16.4, Firefox 149 | 보고가 빠질 뿐 차단은 동작한다 |
 | LCP·INP 측정 | RUM | LCP·INP Safari 26.2, Firefox 122·144. CLS는 Chromium만 | 그 지표 칸을 비운다(0으로 채우지 않는다) |
 | `Element.ariaNotify` | 쓰지 않는다 | 새 기능(Baseline이 아니다) | `aria-live` 영역 |
 | 인앱 브라우저 | 둘러보기·상세까지 | 앱마다 다르다 | 대기실·입장용 등록 전에 SCR-058을 보인다 |
+
+새 브라우저 기능은 쓰기 전에 지원 판을 확인한다. `packages/config`의 ESLint 설정에 `eslint-plugin-compat`을 두고, 목표 브라우저는 browserslist로 NFR-019와 같게 적는다(주요 브라우저의 최신 2개 판과 iOS·iPadOS Safari 16.4 이상). 이 린트는 목표 밖의 웹 API(예: `AbortSignal.any`)를 쓴 PR을 막는다. ES 내장 기능(예: `Promise.withResolvers`, Safari 17.4부터)은 실험 설정 `lintAllEsApis`를 켜야 보므로 켠다. `if (AbortSignal.any)`처럼 기능을 먼저 확인하고 쓰는 코드는 보고하지 않고, 위 표의 대체 함수는 `polyfills` 설정에 적는다. 린트가 쓰는 판 자료가 늦을 수 있어 정본은 위 표다(추천 적용 2026-10-28, 기술 검토 중간-095).
 
 브라우저 사이의 차이는 Playwright 3엔진(Chromium·WebKit·Firefox)으로 PR(코드 변경을 합쳐 달라는 요청)마다 하는 시험과, 메이저 릴리스마다 실제 기기로 하는 시험(iOS Safari·Samsung Internet·카카오톡 인앱, 콘솔은 iOS·iPadOS Safari·Android Chrome)으로 본다(NFR-019).
 
@@ -138,7 +141,7 @@ K5(5만 석 좌석맵 프론트 성능)와 K10(오프라인 입장)은 planning/
 | --- | --- | --- | --- |
 | T=0 오픈 직후 진입 | 진입 `POST`를 `text/plain` 본문으로, 사용자 헤더 없이 보낸다 | 초당 20만(새로고침 증폭 포함, 설계 목표). 사전 요청은 0 | §4.1 T=0 두 호출 규칙, FE-T3 |
 | 셔플 결과 받기 | 참가 토큰의 해시(원래 값으로 되돌릴 수 없게 바꾼 고정 길이 값)로 정한 0~8초 [가정] 안에 한 번 받는다 | 초당 약 12.5만, 약 36Gbps(외삽) | 해시로 정한 지연은 토큰마다 고정이라 새로고침해도 빨라지지 않는다(§4.2) |
-| 대기 상태 폴링 | 예상 대기 1분 이내면 1초, 1~5분이면 5초, 그 밖은 20초 간격, ±20% 지터 | CDN(사용자 가까운 곳에 파일을 복사해 두고 대신 응답하는 전송망) 초당 약 5.3만, 원본 초당 약 1,000(외삽) | 같은 회차를 연 여러 탭 가운데 한 탭만 폴링한다(§5.9) |
+| 대기 상태 폴링 | 예상 대기 1분 이내면 0.5초, 1~5분이면 5초, 그 밖은 20초 간격, ±20% 지터, `cache: "no-store"`(ADR-0110) | CDN(사용자 가까운 곳에 파일을 복사해 두고 대신 응답하는 전송망) 초당 약 5.4만, 원본 초당 약 1,000(외삽) | 같은 회차를 연 여러 탭 가운데 한 탭만 폴링한다(§5.9) |
 | 차례 직전 직접 확인(자동 배정) | 예상 대기 10초 [가정] 안에서 1초 이상 간격 | 원본 초당 수백 건(외삽) | `NOT_YET`의 `retryAfterMs`를 지킨다 |
 | 좌석 단계 | WebSocket 1개, 보이는 구역만 구독, 전체 보기 구역은 5초 [가정] 스냅샷 | 연결 5,000, 스냅샷 초당 약 1,000건(외삽) | 구독 전환은 1초 머문 뒤, 재연결 지터(§4.4) |
 | 구매 경로 사전 요청 | `X-Admission-Token`·`X-Purchase-*`·`Idempotency-Key` 때문에 교차 출처 사전 요청이 생긴다 | 홀드 경로는 첫 요청에 한 번(캐시 7,200초), 홀드 ID·주문 ID가 든 경로는 매번 한 번 | 지연 예산에 왕복 한 번을 넣고 wbs 7.5.2에서 잰다(§5.9) |
@@ -194,9 +197,9 @@ flowchart LR
   QR -->|진입·입장 확정 text/plain| EQ
   QR -->|대기 상태·셔플 결과 파일| EF
   W -->|REST·좌석 WebSocket| EA
-  P -->|SSE·내려받기| PAPI[partner-api]
-  C -->|REST·GraphQL·Socket.IO| OAPI[ops-api]
-  S -->|mTLS| SAPI[scanner-api]
+  P -->|REST·SSE·내려받기| PAPI[partner-api]
+  C -->|REST·SSE| OAPI[ops-api]
+  S -->|HTTPS + DPoP| SAPI[scanner-api]
   EW -->|정적 파일| S3[(S3)]
   EW -->|동적 화면| WAS[웹 앱 서버]
   EP --> PAS[파트너 앱 서버]
@@ -220,19 +223,20 @@ flowchart LR
 peaket-frontend/
   apps/
     web/                 소비자 웹(Next.js 16 App Router)
-      src/app/           경로(App Router). FSD의 app·pages 층
+      app/               Next.js 경로(App Router). src/_app·src/_pages의 것을 다시 내보내기만 한다. 루트 레이아웃이 다른 경로 묶음 둘: (cached) 묶음 A, (request) 묶음 B·E·F(§2.5)
+      src/_app/ _pages/  FSD의 app·pages 층(Next.js 폴더 이름과 겹치지 않게 밑줄을 붙인다)
       src/widgets/ features/ entities/ shared/   FSD 층
       queue-room/        대기실 경량 페이지(별도 빌드, React 없음)
       workers/           좌석 Worker 진입점(packages/seatmap + purchase-signer)
       wallet-sw/         월렛 서비스 워커
-    partner/             파트너 콘솔(Next.js 16, tRPC BFF)
+    partner/             파트너 콘솔(Next.js 16, api-client 훅, 묶는 화면만 서버 컴포넌트)
     console-host/        관제 콘솔 호스트(webpack 5 + Module Federation)
     scanner/             스캐너 PWA(Vite 8 + vite-plugin-pwa)
     forensics/           포렌식 리플레이 1단계 데모(Vite 8, 정적, ADR-0080)
   packages/
     api-client/          orval 생성물 + 실행 정책(§4.1)
     telemetry/           lite(대기실)·full 두 판(§5.16)
-    validation/          Zod 4 스키마 + 판매 정책 DSL AST 평가기(서버와 같이 씀)
+    validation/          Zod 4 스키마(요청·응답은 openapi에서 orval이 만든 src/gen/, 손으로는 계약에 적을 수 없는 규칙만) + 판매 정책 DSL AST 평가기(서버와 같이 씀)
     ds/                  디자인 토큰 빌드(Style Dictionary 5) + 컴포넌트(@seed-design/react 3)
     console-contract/    관제 원격 위젯 계약(§4.5)
     seatmap/             좌석맵 열 배열·격자 색인·그리기 Worker(web·forensics, ADR-0080 결정 5)
@@ -241,12 +245,15 @@ peaket-frontend/
 
 | 규칙 | 내용 |
 | --- | --- |
-| 층 의존 | FSD 층은 위에서 아래로만 가져온다(`app` → `pages` → `widgets` → `features` → `entities` → `shared`). Steiger와 `eslint-plugin-boundaries`로 이를 어기는 가져오기를 막는다(architecture §6.5) |
+| 층 의존 | FSD 층은 위에서 아래로만 가져온다(`_app` → `_pages` → `widgets` → `features` → `entities` → `shared`). 이 규칙은 FSD 구조 검사 도구 Steiger의 `fsd/forbidden-imports`(위 층 가져오기와 같은 층 조각끼리 가져오기를 막는 규칙) 하나로 막는다. ESLint 가져오기 제한은 앱·패키지 사이 경계(아래 '앱 사이'·'대기실 경량 페이지'·'원격 위젯' 행)만 맡는다. 같은 규칙을 두 도구로 막지 않는다(architecture §6.5, 추천 적용 2026-10-28, 기술 검토 낮음-098) |
+| Next.js 경로 폴더 | 소비자 웹과 파트너 콘솔은 Next.js `app/`을 앱 뿌리에 두고, 그 안의 `page.tsx`·`layout.tsx`·경로 처리기는 `src/_pages`·`src/_app`의 것을 다시 내보내기만 한다. FSD 층 `app`·`pages`는 `src/_app`·`src/_pages`로 이름을 바꾼다. FSD 공식 Next.js 안내가 이름이 겹치지 않게 이렇게 하라고 하고, 그래야 Steiger가 pages 층을 따로 본다(추천 적용 2026-10-28, 기술 검토 낮음-098) |
 | 앱 사이 | 앱은 다른 앱을 가져오지 않는다. 함께 쓰는 것은 `packages/`로 올린다 |
 | 대기실 경량 페이지 | `queue-room/`은 `packages/api-client`의 대기열 부분, `packages/telemetry`의 lite 판, `packages/ds`의 토큰 부분집합 CSS만 가져온다. React(화면 라이브러리)·Next.js를 가져오면 린트가 막는다 |
-| 원격 위젯 | 서비스 저장소의 원격 모듈은 `@peaket/console-contract`와 공유 싱글턴만 가져온다(§4.5) |
+| 소비자 웹 경로 묶음 | `app/(cached)/`에는 CDN이 캐시하는 화면(헤더 묶음 A)만, `app/(request)/`에는 요청마다 nonce로 그리는 화면(B·E·F)만 둔다. 두 묶음은 루트 레이아웃(모든 화면을 감싸는 맨 바깥 레이아웃)을 따로 갖는다. `(request)`의 루트 레이아웃은 요청의 nonce를 읽어 정적 셸 없이 그린다(§2.5). 어느 묶음에 둘지는 §2.5 표의 헤더 묶음 열을 따르고, 맞지 않으면 린트가 막는다(추천 적용 2026-10-28, 기술 검토 중간-094) |
+| SEED CSS | SEED 전체 CSS(`all*.css`)는 가져오지 않는다(린트가 막는다). 부품 CSS는 `@seed-design/react` 부품이 가져오는 자기 recipe만 실리고, base·recipe 모두 층 판(`*.layered.css`)이다. 층 순서 선언 `@layer theme, base, seed-base, seed-components, components, utilities;`는 앱이 가장 먼저 싣는 CSS 파일 맨 앞에 둔다. 층 판은 내보내기 조건 `seed-layered`로 고르는데(Vite `resolve.conditions`, webpack `resolve.conditionNames`), Next.js 앱의 Turbopack이 이것을 고를 수 있는지는 PoC FE-T36(wbs 0.6.1)으로 본다(design/d2 §1, 추천 적용 2026-10-28, 기술 검토 중간-097) |
+| 원격 위젯 | 서비스 저장소의 원격 모듈은 `@peaket/console-contract`와 공유 싱글턴만 가져온다(§4.5). 같은 소스를 위젯 패키지 `@peaket/widget-<원격 이름>`로도 게시해, 호스트가 한 앱 기준선을 빌드한다(FE-T29, 추천 적용 2026-10-28, ADR-0100) |
 | 좌석맵 패키지 | `packages/seatmap`은 화면 상태를 모르고 열 배열·격자 색인·그리기만 한다. 소비자 웹은 실시간 델타를, 포렌식 앱은 재생 사건을 넣는다(ADR-0080 결정 5) |
-| 생성물 | `packages/api-client/src/gen/`은 손으로 고치지 않는다. 계약(openapi·asyncapi)이 바뀌면 다시 만든다 |
+| 생성물 | `packages/api-client/src/gen/`과 `packages/validation/src/gen/`(orval이 계약에서 만든 요청·응답 Zod 스키마)은 손으로 고치지 않는다. 계약(openapi·asyncapi)이 바뀌면 다시 만들고, CI가 다시 만든 결과와 차이가 없는지 본다(`contract-check`). 손으로 쓰는 Zod는 생성 스키마를 넓히지 않고 규칙만 덧붙인다(계약에 적을 수 없는 grapheme 단위 길이, 금칙어, 판매 정책 DSL. 이름은 그 필드의 openapi 설명에 적는다, docs/api/guidelines.md §1, 추천 적용 2026-10-28, 기술 검토 중간-085) |
 | 게시 | `packages/*`는 Changesets로 SemVer 판을 매겨 GitHub Packages의 `@peaket` 범위에 게시한다(devops §2.2). 대상은 `ds`·`telemetry`·`validation`·`api-client`·`console-contract`다(원격 위젯 저장소는 `console-contract`·`ds`·`telemetry`를, 서버는 `validation`을 쓴다, devops §3.2) |
 
 Turborepo 작업은 `lint`·`typecheck`·`test`·`build`·`size`·`e2e`이고, PR에서는 바뀐 앱·패키지의 작업만 돈다(devops §3.2).
@@ -255,14 +262,14 @@ Turborepo 작업은 `lint`·`typecheck`·`test`·`build`·`size`·`e2e`이고, P
 
 | 앱 | 프레임워크와 판(2026-10-21 레지스트리) | 서버 쪽 | 브라우저 쪽 핵심 구성 요소 |
 | --- | --- | --- | --- |
-| 소비자 웹 | Next.js 16.4(App Router, Cache Components, `proxy.ts`), React 19.3, TanStack Query 5, Zustand 5, XState 5, React Hook Form 7 + Zod 4, Serwist 9(월렛), Auth.js(next-auth v5 베타, §5.14 위험 구성 요소) | 웹 앱 서버: ISR·동적 화면, Auth.js(소셜 인가 코드 교환), 연결 제안 쿠키를 읽는 경로 | 좌석맵 Worker, 구매 세션 서명기, 결제사 SDK 적재기, 월렛 QR Worker, 본인확인 창 관리자 |
+| 소비자 웹 | Next.js 16.4(App Router, Cache Components, `proxy.ts`), React 19.3, TanStack Query 5, Zustand 5, XState 5, React Hook Form 7 + Zod 4, Serwist 9(월렛), `oauth4webapi` 3(소셜 로그인의 얇은 OIDC 클라이언트, ADR-0119) | 웹 앱 서버: ISR·동적 화면, 소셜 로그인(인가 코드 교환과 ID 토큰 확인, 로그인 진행 쿠키), 연결 제안 쿠키를 읽는 경로 | 좌석맵 Worker, 구매 세션 서명기, 결제사 SDK 적재기, 월렛 QR Worker, 본인확인 창 관리자 |
 | 대기실 경량 페이지 | TypeScript + rolldown(Vite 8) 빌드, 프레임워크는 쓰지 않는다 | 없다(AWS 파일 저장소인 S3의 정적 파일) | 상태표(§3.4), 폴러, 시계, 저장소, 탭 조정, 텔레메트리 lite |
-| 파트너 콘솔 | Next.js 16.4, React 19.3, tRPC 11, TanStack Query 5, Zustand 5, RHF + Zod, `@hello-pangea/dnd` 18, Chart.js 4.6 | 파트너 앱 서버: 요청마다 셸(nonce), tRPC BFF(`/api/trpc`), Auth.js Credentials | 좌석맵 에디터 캔버스와 계산 Worker, DSL 시뮬레이터, SSE 클라이언트. 무거운 부분은 `next/dynamic`으로 쓸 때 싣는다(§5.6) |
-| 관제 콘솔 | webpack 5.112 + `@module-federation/enhanced` 2.9, React 19.3, React Router 8.5(데이터 라우터), Zustand 5, RxJS 7.8, urql 5 + graphql-ws 6, socket.io-client 4.8, Chart.js 4.6 | 없다(S3 정적 파일, 원격은 같은 출처 `/remotes/`) | 원격 적재기(무결성·대체·미리 받기), 화면별로 늦게 싣는 경로, 호스트 Zustand 저장소와 원격에 넘기는 읽기 전용 `host` 통로, 스트림 어댑터, 소켓·구독 연결 관리(위젯 자리별 멈춤·재개, §5.7) |
+| 파트너 콘솔 | Next.js 16.4, React 19.3, TanStack Query 5(`@peaket/api-client` 훅), Zustand 5, RHF + Zod, TanStack Table 9(CMP-031 표 논리, 기술 검토 낮음-100), Chart.js 4.6, Konva 10.9(좌석맵 에디터 편집 캔버스, 명령형으로 쓴다, §5.6) | 파트너 앱 서버: 요청마다 셸(nonce), 여러 호출을 묶는 화면의 서버 컴포넌트. 로그인은 화면이 gw-partner를 바로 부르고 앱 서버에는 로그인 상태가 없다(ADR-0119). tRPC는 쓰지 않는다(ADR-0100) | 좌석맵 에디터 캔버스와 계산 Worker, DSL 시뮬레이터, SSE 클라이언트. 무거운 부분은 `next/dynamic`으로 쓸 때 싣는다(§5.6) |
+| 관제 콘솔 | webpack 5.112 + `@module-federation/enhanced` 2.9, React 19.3, React Router 8.5(데이터 라우터), Zustand 5, TanStack Query 5(`@peaket/api-client` 훅), TanStack Table 9(CMP-031 표 논리), EventSource(브라우저 내장 SSE), Chart.js 4.6 | 없다(S3 정적 파일, 원격은 같은 출처 `/remotes/`) | 원격 적재기(무결성·대체·미리 받기), 화면별로 늦게 싣는 경로, 호스트 Zustand 저장소와 원격에 넘기는 읽기 전용 `host` 통로, 스트림 어댑터, SSE 흐름 관리(늘 여는 흐름, 보이는 위젯 목록이 바뀌면 위젯 흐름 다시 열기, §5.7, ADR-0100) |
 | 스캐너 | Vite 8 + vite-plugin-pwa 2(Workbox 7), Dexie 4, zxing-wasm 3, React 19.3, Zustand 5, XState 5 | 없다(S3 정적 파일) | 카메라·디코딩·판정 Worker, Dexie 저장소, 업로드 큐, 변경분 수신기, 화면 꺼짐 방지 |
 
-- 판 번호는 2026-10-21 npm 레지스트리의 `latest`다. React Router 8.5와 Chart.js 4.6은 2026-10-27 레지스트리의 `latest`다(ADR-0091). 실제 고정은 착수 때 잠금 파일이 정하고, 판 올리기는 pnpm `minimumReleaseAge` 3일과 Renovate가 맡는다(devops §4.4).
-- 관제 콘솔은 정본대로 webpack 5 Module Federation이다. Rspack도 같은 런타임을 쓰지만 이번에는 바꾸지 않는다.
+- 판 번호는 2026-10-21 npm 레지스트리의 `latest`다. React Router 8.5와 Chart.js 4.6은 2026-10-27 레지스트리의 `latest`다(ADR-0091). Konva 10.9는 2026-10-28 레지스트리의 `latest`다(기술 검토 중간-016). 실제 고정은 착수 때 잠금 파일이 정하고, 판 올리기는 pnpm `minimumReleaseAge` 3일과 Renovate가 맡는다(devops §4.4).
+- 관제 콘솔은 정본대로 webpack 5 Module Federation이다. Rspack도 같은 런타임을 쓰지만 이번에는 바꾸지 않는다. Module Federation은 가상 팀이 위젯을 따로 배포하는 구조를 보이는 쇼케이스이고, 같은 위젯 패키지로 만든 한 앱 빌드와 FE-T29로 견준다. 한 앱보다 느리거나 크고 따로 배포할 이득을 쓰는 원격이 하나뿐이면 한 앱으로 바꾼다(추천 적용 2026-10-28, ADR-0100 결정 6).
 - 스캐너는 React로 화면을 그리지만 판정 경로(카메라 → 디코딩 → 판정)는 React 밖 Worker에서 돈다(§5.5).
 
 ### 2.4 계층과 관심사 분리
@@ -272,9 +279,9 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | 층 | 소비자 웹 | 대기실 경량 페이지 | 파트너 콘솔 | 관제 콘솔 | 스캐너 |
 | --- | --- | --- | --- | --- | --- |
 | 뷰 | React 서버·클라이언트 컴포넌트, `@peaket/ds` | DOM 템플릿 + `textContent` 갱신 | React 클라이언트 컴포넌트 | 호스트 셸 + 원격 위젯(React) | React 화면 + 판정 오버레이 |
-| 저장소(클라이언트 상태) | TanStack Query(서버 캐시), Zustand(UI·좌석 선택), XState(예매·소켓·결제 결과 흐름) | 손으로 쓴 상태표 | TanStack Query(tRPC), Zustand(에디터 문서·화면 상태), RHF(폼) | Zustand(호스트 저장소 하나 + 원격마다 저장소) + RxJS 어댑터 | Dexie(영속) + Zustand(화면 상태) + XState(로그인·동기화) |
-| 데이터 접근 | `@peaket/api-client`(교차 출처 REST·롱 폴링), 좌석 WebSocket 클라이언트(Worker 안) | 대기열 부분 클라이언트(폴러·진입·입장 확정) | tRPC 클라이언트(같은 출처) + SSE·내려받기 직접 호출 | urql(GraphQL)·Socket.IO·REST(명령) | `@peaket/api-client` 스캐너 부분(mTLS는 브라우저가 처리한다) |
-| 서버 쪽 조합 | 웹 앱 서버(ISR, Auth.js) | 없다 | 파트너 앱 서버(tRPC → gw-partner REST) | 없다 | 없다 |
+| 저장소(클라이언트 상태) | TanStack Query(서버 캐시), Zustand(UI·좌석 선택), XState(예매·소켓·결제 결과 흐름) | 손으로 쓴 상태표 | TanStack Query(api-client 훅), Zustand(에디터 문서·화면 상태), RHF(폼) | Zustand(호스트 저장소 하나 + 원격마다 저장소) + 호스트 스트림 어댑터(작은 유틸 둘, §3.1) | Dexie(영속) + Zustand(화면 상태) + XState(로그인·동기화) |
+| 데이터 접근 | `@peaket/api-client`(교차 출처 REST·롱 폴링), 좌석 WebSocket 클라이언트(Worker 안) | 대기열 부분 클라이언트(폴러·진입·입장 확정) | `@peaket/api-client`(`partner-api` 직접) + SSE·내려받기 | `@peaket/api-client`(REST: 명령·조회) + SSE 흐름 둘 | `@peaket/api-client` 스캐너 부분(요청마다 기기 키로 DPoP 증명을 붙인다. mTLS 선택지면 인증서는 브라우저가 처리한다) |
+| 서버 쪽 조합 | 웹 앱 서버(ISR, 소셜 로그인 경로) | 없다 | 파트너 앱 서버의 서버 컴포넌트(여러 호출을 묶는 화면만 gw-partner REST를 묶어 읽는다) | 없다 | 없다 |
 
 뷰는 데이터 접근 층을 직접 부르지 않고 저장소 층의 훅(쿼리·액션)만 부른다. 원격 위젯은 데이터 접근 층을 갖지 않고 호스트가 넘긴 `ConsoleServices`만 쓴다(§4.5).
 
@@ -285,12 +292,12 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | 경로 | SCR | 렌더링 | HTML 캐시(엣지 / 브라우저) | 데이터 | 헤더 묶음 | 비고 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `/`, `/{en,ja,zh}` | 001 | ISR(`'use cache'` + `cacheLife` 60초 + `cacheTag('home')`) | `s-maxage=30, stale-while-revalidate=60, stale-if-error=600` / `max-age=0` | 홈 피드(서버), 랭킹 파일(클라이언트, 같은 출처 정적 JSON), 찜·알림 상태(클라이언트) | A | 홈 구성 저장·판매 승인·매진 때 태그를 무효화한다(architecture §6.3) |
-| `/events/[id]` | 002·016 | ISR(`cacheTag('event:{id}')`, `cacheLife` 300초) | 위와 같다 | 공연·회차·고지(서버), 후기 요약(공개 CDN), 본인확인·사람 확인·찜·알림(클라이언트) | A + 사람 확인 | 원본에 장애가 나면 `stale-if-error`와 '판매 중' 고정 문구를 쓴다(POL-029). 급한 변경(매진·승인 취소)은 경로 무효화도 함께 부른다 |
+| `/events/[id]` | 002·016 | ISR(`cacheTag('event:{id}')`, `cacheLife` 300초) | 위와 같다 | 공연·회차·고지(서버), 후기 요약(공개 CDN), 본인확인·사람 확인·찜·알림(클라이언트) | A + 사람 확인 | 원본에 장애가 나면 `stale-if-error`와 '판매 중' 고정 문구를 쓴다(POL-029). 급한 변경(매진·승인 취소)은 CDN 태그 무효화(`#event:{id}`)도 함께 부른다. 응답은 ISR 태그와 같은 값을 CDN 태그 헤더 `x-peaket-cache-tag` [가정]에 싣는다(docs/infra.md §4.1, 기술 검토 낮음-067) |
 | `/search` | 003 | 정적 셸 + CSR(주소의 매개변수로 검색 API를 부른다, ADR-0094) | `s-maxage=300` / `max-age=0`(검색 API는 CDN 30초, 자동완성 API는 60초) | 검색 API·자동완성 API | A, `noindex, follow` | 요청마다 서버가 그리지 않아 오픈 직전 검색이 몰려도 화면 서버로 가지 않는다. 검색어는 주소 쿼리라 접근 로그에 남는다(data-classification) |
 | `/events/[id]/shuffle-proof` | 019 | 정적 셸 + CSR | `s-maxage=300` / `max-age=0` | 셔플 검증 정보 API, 같은 브라우저의 토큰 해시 | A | 시드는 오픈 60분 뒤에 공개한다 |
 | `/queue/[eventId]`, `/{en,ja,zh}/queue/[eventId]`, `/shop/[productId]/queue` | 007·008·018·015 | 대기실 경량 페이지(S3, CloudFront Function이 셸로 바꿔 읽는다) | `s-maxage=300, stale-while-revalidate=60` / `max-age=0` | 대기열 API·파일(§4.2) | A′ | 배포 때 셸을 무효화한다. 셸은 로케일별로 넷이다 |
 | `/queue/[eventId]/verify` | 009 | 요청마다 셸 + CSR | `private, no-store` | 추가 검증 API | B + 사람 확인 | 심층 챌린지와 본인확인 재통과 |
-| `/booking/[eventId]/seats` | 010 | 요청마다 셸 + CSR(Worker) | `private, no-store` | 스냅샷·좌석맵 파일·WebSocket·홀드 | F | COOP `same-origin` + COEP `require-corp`(이 경로와 Worker 스크립트만) |
+| `/booking/[eventId]/seats` | 010 | 요청마다 셸 + CSR(Worker) | `private, no-store` | 스냅샷·좌석맵 파일·WebSocket·홀드 | F | COOP `same-origin`만 둔다. COEP는 두지 않는다(좌석 상태를 공유 메모리로 나누지 않는다, 추천 적용 2026-10-28, 기술 검토 중간-015) |
 | `/booking/[eventId]/checkout` | 011 | 요청마다 셸 + CSR | `private, no-store` | 주문·결제 시도, 결제사 SDK | E | 결제사 SDK는 nonce를 붙인 적재기로 불러온다 |
 | `/booking/[eventId]/checkout/return` | 011 | 정적 셸 + CSR | `s-maxage=300` / `max-age=0` | 결제 접수(서명) | A, `Referrer-Policy: no-referrer` | 쿠키 없이 들어오는 첫 요청이다(ADR-0065 결정 8). 주소에 담긴 결제 값은 바로 지운다 |
 | `/booking/[eventId]/result` | 012 | 요청마다 셸 + CSR | `private, no-store` | 결제 결과 롱 폴링 | B | 서버는 쿠키로 로그인 여부를 정하지 않는다 |
@@ -299,7 +306,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | `/my/orders*`, `/my/transfers/*`, `/my/compensations/*`, `/my/refunds/*`, `/my/appeals/*`, `/my/likes`, `/my/settings*`, `/staff` | 055·041·043·060·042·054·017·040·061 | 요청마다 셸 + CSR | `private, no-store` | 각 API | B | 알림 링크로 들어와도 서버는 쿠키로 로그인 여부를 정하지 않는다. 화면 스크립트가 401을 받으면 로그인 뒤 같은 주소로 돌아온다 |
 | `/verify/return` | 006 | 요청마다(기관이 POST로 보낸 결과 값을 받는 서버 처리기, 값은 저장·로그하지 않는다) + CSR | `private, no-store` | 본인확인 결과 경로 | A, `no-referrer` | 결과는 `BroadcastChannel`로 알리고 창을 닫는다 |
 | `/staff/invitations`, `/staff/approve` | 050·051 | 정적 셸 + CSR | `s-maxage=300` / `max-age=0` | 조회·수락·승인 API | A, `no-referrer` | URL 조각은 바로 지운다(ADR-0065 결정 10) |
-| `/login`, `/login/link`, `/signup/consent` | 004·039·005 | 요청마다(Auth.js) | `private, no-store` | Auth.js, 연결 제안 | B | 연결 제안 쿠키는 앱 서버만 읽는다 |
+| `/login`, `/login/link`, `/signup/consent` | 004·039·005 | 요청마다(앱 서버 로그인 경로) | `private, no-store` | 소셜 로그인(얇은 OIDC 클라이언트, ADR-0119), 연결 제안 | B | 로그인 진행 쿠키와 연결 제안 쿠키는 앱 서버만 읽는다 |
 | `/shop`, `/shop/[productId]` | 015 | ISR(`cacheTag('product:{id}')`, 300초) | 위 ISR과 같다 | 상품 목록(공개) | A | design/d5의 ISR 제안을 채택했다(추천 적용, ADR-0079) |
 | `/shop/cart`, `/shop/checkout` | 015 | 요청마다 셸 + CSR | `private, no-store` | 굿즈 주문·결제 | E | 굿즈 결제 경로는 계약에 없다(§6.2) |
 | `/help` | 056 FAQ | ISR(1일) | ISR과 같다 | 정적 문서 | A | |
@@ -310,7 +317,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | `/_next/static/*`, `/_q/assets/*` | — | 빌드 산출물(내용 해시로 지은 이름) | `public, max-age=31536000, immutable` | — | `nosniff` | 30일 또는 최근 5빌드를 보존한다(devops §6.6) |
 | `/v1/events/*/seatmap-layouts/*.json`, `/v1/home/rankings.json` | 010·001 | S3 정적 JSON | 좌석맵 `immutable`, 랭킹 3,600초·게시 때 무효화(정본) | — | — | |
 | `/_t/rum`, `/_t/csp`, `/_t/err` | — | POST만, gw-fan 텔레메트리 입구 | 캐시하지 않는다 | — | — | 응답은 204, 본문은 없다(§5.16) |
-| 파트너 콘솔 전 경로 | 020~027·037·044·062·063 | 요청마다 셸(nonce) + CSR, tRPC `/api/trpc/*` | `private, no-store` | tRPC BFF, SSE·내려받기는 직접 호출 | B | |
+| 파트너 콘솔 전 경로 | 020~027·037·044·062·063 | 요청마다 셸(nonce) + CSR(여러 호출을 묶는 화면은 서버 컴포넌트가 첫 화면을 묶어 읽는다) | `private, no-store` | `partner-api` 직접(api-client 훅), SSE·내려받기도 직접(ADR-0100) | B | |
 | 관제 콘솔 전 경로, `/remotes/*` | 028~032·045~049·053·064~068 | 정적 SPA(S3), 모든 경로를 `index.html`로 | `index.html`은 `no-cache`, 자산은 `immutable` | ops-api | C | 관리자 IP로 제한한 배포 |
 | `/forensics?event=`(포렌식 리플레이 2단계, 출시 뒤 선택) | 069 | 따로 여는 정적 페이지(S3 `/forensics/`, `apps/forensics` 운영 빌드). 콘솔이 모든 경로를 `index.html`로 보내는 규칙에서 이 경로를 뺀다 | `index.html`은 `no-cache`, 자산은 `immutable` | ops-api 내보내기(docs/features/forensic-replay.md §6.3) | C + COEP `require-corp`(이 경로만) | 관리자 IP로 제한한 배포다. 관제 셸·실시간 연결을 싣지 않고 새 탭으로 연다(추천 적용 2026-10-21, ADR-0080 상태 줄) |
 | 스캐너 전 경로, `/enroll` | 033~036·052 | 정적 PWA(S3) | `index.html`·서비스 워커 `no-cache`, 자산 `immutable` | scanner-api | D | 새 판은 근무 준비 때만 적용한다(devops §6.6) |
@@ -318,6 +325,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 - **HTTP에서 HTTPS로**: 화면 배포 넷(`www`·`partner`·`console`·`scanner`)은 시청자 규칙을 'HTTP를 HTTPS로 이동'으로 둔다. API 배포와 게이트웨이는 HTTPS만 받고 이동시키지 않는다(ASVS 4.1.2, asvs/frontend.md).
 - **알림·외부 링크 착지 규칙**: 다른 사이트에서 오는 첫 이동에는 `SameSite=Strict` 팬 쿠키가 실리지 않는다. 그래서 링크로 처음 들어올 수 있는 화면은 정적 셸이든 요청마다 그리는 셸이든 서버가 쿠키로 로그인 여부를 정하지 않는다. 화면 스크립트가 같은 사이트 요청으로 확인한다(ADR-0065 결정 8). 이 규칙이 걸리는 화면은 design/d5 §9.1의 알림 34묶음이 여는 화면 전부다.
 - **배포 식별자**: 출시 후보 커밋 SHA가 Next.js `deploymentId`다(devops §6.6). 대기실 → 좌석 → 결제는 페이지 전체를 다시 불러오는 이동으로 오간다. 그래서 식별자 차이로 새로고침이 생겨도 구매 상태(입장 토큰·구매 세션 키·홀드)는 저장소와 서버에 있어 잃지 않는다(ADR-0079 결정 26).
+- **Cache Components와 nonce 화면**(추천 적용 2026-10-28, 기술 검토 중간-094): 소비자 웹은 Cache Components(`cacheComponents`, 화면 조각마다 캐시를 정하는 Next.js 16 기능)를 켠다. 그러면 PPR(부분 사전 렌더링. 빌드 때 화면의 정적 껍데기인 정적 셸을 미리 만들고, 요청 때 바뀌는 부분만 채워 보내는 방식)이 App Router 전체의 기본이 된다. 그런데 정적 셸은 빌드 때 만들어져 그 안의 스크립트가 요청마다 바뀌는 nonce를 받지 못한다. 그래서 Next.js CSP 문서는 PPR과 nonce CSP를 함께 쓸 수 없다고 적는다. 그래서 묶음 B·E·F 화면은 `(request)` 경로 묶음에 모으고, 그 묶음의 루트 레이아웃이 `<html>`을 그리기 전에 요청 헤더의 nonce를 읽는다. 요청 값을 맨 바깥에서 읽으면 그 아래 전체가 요청 때 그려져 정적 셸이 생기지 않는다. 그 루트 레이아웃에는 `instant = false`(Next.js 16.3부터, 이 경로가 정적 셸 없이 기다려도 된다고 표시하는 설정)를 둔다. 묶음 A 화면은 `(cached)` 경로 묶음에 두고, 그 루트 레이아웃은 요청 값을 읽지 않는다. 루트 레이아웃이 다른 화면 사이의 이동은 페이지 전체를 다시 불러온다(Next.js 경로 묶음 문서). 구매 흐름(대기실 → 좌석 → 결제)은 이미 전체 이동이라 바뀌지 않는다. 새로 전체 이동이 되는 것은 홈·상세에서 로그인·마이 화면으로, 월렛 티켓에서 양도·취소로, 굿즈 상세에서 장바구니로, 고객센터에서 문의로 가는 이동이다. 이때 해시 이름이 붙은 자산은 브라우저 캐시에서 오고, 같은 묶음 안의 이동은 그대로 페이지 안 이동이다. 이 구조는 PoC FE-T35(wbs 2.10.1)로 확정한다. 빌드 산출물에 `(request)` 경로의 정적 셸이 남거나 nonce 없는 `<script>`가 하나라도 나오면, 묶음 B·E·F 화면을 Cache Components를 끈 별도 Next.js 앱으로 나누고 같은 `www` 배포의 다른 원본 경로(CloudFront 경로 규칙)로 낸다. 두 앱은 `packages/`의 코드를 같이 쓰고 같은 `deploymentId`로 함께 배포한다.
 
 ### 2.6 계산 위치
 
@@ -329,7 +337,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | 구역별 남은 좌석 상태(많음·적음·매진) | 브라우저(스냅샷 비트맵을 좌석맵 파일의 구역 범위로 센다) | 구역 요약 API 없이 5초 스냅샷으로 충분하다(seat-hold §7) |
 | 금액 | 서버 | 클라이언트 금액은 믿지 않는다(payment §2) |
 | 좌석 자동 채우기(에디터) | 브라우저 Worker가 하고, 저장할 때 서버가 다시 검사한다 | FR-023 인수 조건(완료로 인정하는 조건) |
-| 판매 정책 시뮬레이션 | 브라우저와 서버가 같은 DSL AST 평가기(`@peaket/validation`)를 쓴다 | SCR-024 |
+| 판매 정책 시뮬레이션 | 브라우저와 서버가 같은 Zod 스키마와 DSL AST 평가기(`@peaket/validation`)를 쓴다. 파트너 화면은 규칙 종류별 폼만 두고 JSON 텍스트 편집기는 두지 않는다(JSON은 SCR-048의 읽기 전용 미리보기와 파트너 화면의 [JSON 보기](읽기 전용, 복사 가능, 기술 검토 낮음-110), design/d5 §6.7, 추천 적용 2026-10-28, 기술 검토 낮음-134). 오류는 줄·열 위치 대신 폼 칸에 붙인다 | SCR-024 |
 | 좌석맵 내보내기(SVG·JSON·CSV) | 브라우저. CSV 칸 앞 작은따옴표 규칙도 브라우저가 지킨다 | 정본은 '서버가 파일을 만들 때'라 적었지만 이 내보내기는 브라우저가 만든다(§6.2) |
 | 회전 QR 서명 | 브라우저(밖으로 꺼낼 수 없는 키, Worker) | 완전 오프라인(offline-gate §3) |
 | QR 검증·입장 판정 | 스캐너 브라우저(Worker) | 완전 오프라인(offline-gate §6.4) |
@@ -354,16 +362,19 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 | 상태 종류 | 소비자 웹 | 대기실 경량 페이지 | 파트너 콘솔 | 관제 콘솔 | 스캐너 |
 | --- | --- | --- | --- | --- | --- |
-| 서버 상태 캐시 | TanStack Query | 상태표 안 값(마지막 파일) | TanStack Query(tRPC 통합) | urql 문서 캐시 + Zustand(구독으로 받은 값) | Dexie(목록·변경분) |
+| 서버 상태 캐시 | TanStack Query | 상태표 안 값(마지막 파일) | TanStack Query(api-client 훅) | TanStack Query(api-client 훅, REST 조회) + Zustand(SSE로 받은 값, ADR-0100) | Dexie(목록·변경분) |
 | 주소 상태 | Next.js 경로·검색 매개변수 | 경로(회차 ID) | Next.js 경로 | React Router 경로·`?event=&tab=` | 경로 |
 | 폼 상태 | React Hook Form + Zod | 없다 | React Hook Form + Zod | React Hook Form + Zod | 예외 통과 사유 폼만(RHF) |
 | 전역 UI 상태 | Zustand | 없다 | Zustand | Zustand(호스트 저장소 하나, 원격마다 저장소, §3.10) | Zustand |
 | 흐름 상태 기계 | XState(예매 흐름, 좌석 연결, 결제 결과, 본인확인 창) | 손으로 쓴 상태표(§3.4) | XState(위저드 단계) | Zustand `commands` 슬라이스 + 명령 수명주기 표 | XState(로그인, 근무 준비, 동기화) |
 | 대규모 세밀 편집 | — | — | Zustand(정규화한 문서와 바뀐 ID 묶음, §3.9) | — | — |
-| 스트림 결합 | — | — | — | RxJS 어댑터가 묶어 Zustand 동작으로 쓴다 | — |
+| 스트림 결합 | — | — | — | 호스트 스트림 어댑터(작은 유틸 둘: `latestEvery`·`shareByKey`)가 묶어 Zustand 동작으로 쓴다(아래, 기술 검토 낮음-097) | — |
 | Worker가 가진 상태 | 좌석 상태 배열·좌표·연결(§3.5), QR 서명 | — | 자동 채우기·검증 계산 | — | 판정 목록 사본·디코더 |
 | 영속 저장 | §3.12 표 | §3.12 표 | sessionStorage 초안만 | 화면 설정만 | Dexie(§3.8) |
 | 환경(테마·로케일) | React Context | 빌드에 넣는다 | React Context | React Context | React Context |
+
+- **흐름 상태 기계는 XState로 두고, 시험은 기계에서 만든다(추천 적용 2026-10-28, 기술 검토 낮음-096)**: XState를 고른 이유는 둘이다. 안 되는 전이를 구조로 막는 것과, 기계 정의에서 시험 경로를 만들어 모든 전이를 도는 모델 기반 시험이다. 그래서 XState 기계마다 시험 파일이 `@xstate/graph`(MIT, 3.0)의 `createTestModel`로 기계에서 경로(`getShortestPaths`·`getSimplePaths`)를 만들고, 경로마다 가짜 서버나 화면으로 같은 사건을 일으켜 도착한 상태를 본다. 사람이 고른 경우 목록이 아니라 기계가 시험 범위를 정하므로, 전이를 더하면 시험 경로도 함께 는다. 좌석 연결(FE-T11)과 결제 결과(FE-T24)가 이 방식이고, 예매 흐름·본인확인 창·파트너 위저드·스캐너 로그인과 동기화 기계도 같다. 대기실 경량 페이지는 번들 예산 때문에 XState 없이 손으로 쓴 타입 있는 상태표이고(§3.4), FE-T2가 그 표의 모든 전이를 돈다. 바꿀 조건: 모든 전이를 덮는 최단 경로만 돌려도 PR 시험이 5분 [가정]을 넘거나, XState 기계가 셋 이하로 줄면, 대기실과 같은 타입 있는 손 상태표 하나로 맞추고 XState를 빼는 안을 다시 본다(번들과 익힐 도구가 하나 준다).
+- **관제 스트림 결합은 RxJS 없이 작은 유틸 둘로 한다(추천 적용 2026-10-28, 기술 검토 낮음-097)**: RxJS(여러 비동기 흐름을 연산자로 합치는 라이브러리)는 둘 이상의 흐름을 시간 창과 함께 합치는 곳이 있을 때만 둔다. 예를 들면 화면에서 경보를 묶는 규칙이나, 명령 확인을 REST 응답·SSE 사건·시간 초과를 합쳐 판정하는 곳이다. 지금 설계에는 그런 곳이 없다. 경보 묶기·억제는 서버의 경보 관리자가 하고(control-tower C-T32), 명령 확인의 정본은 REST 명령 상태라 `commands` 슬라이스가 명령마다 타이머 하나(3초 '전파 지연', 10초 실패, §5.7)로 처리한다. 남는 쓰임은 위젯마다 250ms 묶기와 위젯 키별 구독 나눠 쓰기 둘이다. 그래서 호스트 스트림 어댑터에 작은 함수 둘을 둔다. `latestEvery(ms)`는 값이 오면 `ms` 뒤에 그동안의 마지막 값 하나만 넘긴다(RxJS `auditTime`과 같은 동작). `shareByKey(key, open, lingerMs)`는 같은 키의 구독을 하나로 묶어 구독자 수를 세고, 0이 되면 `lingerMs` 뒤에 닫으며 그 전에 다시 구독하면 타이머를 지운다. 원격 위젯 계약(§4.5)은 콜백 방식이라 원격은 이 함수를 모르고, `rxjs`를 공유 싱글턴으로 두지 않는다(원격과 판을 맞출 패키지가 하나 준다). 위 조건에 맞는 곳이 생기면 RxJS를 호스트 안에서만 쓰는 안을 그때 다시 본다.
 
 ### 3.2 서버 출처 데이터
 
@@ -388,18 +399,24 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 티켓 `Ticket` | `GET /v1/tickets` | `ticketId`, `eventId`, `seatLabel`, `gateZone`, `status`, 기한들. 표시 값(공연명·장소·시각)은 계약에 없다(design/d5 §1.6 25번) | 월렛 | IndexedDB(§3.7) |
 | 양도 `TransferOffer`, 취소 견적 `CancellationQuote` | 양도·취소 경로 | 상태·기한·공제율·환급액 | 양도·취소 화면 | 메모리 |
 | 본인확인 `VerificationStart`·`VerificationResult` | 본인확인 경로 | `verificationId`, `window`, `status`, `next` | 본인확인 창 관리자 | sessionStorage(진행 표시만) |
-| 파트너 실시간 `LiveSnapshot` | SSE(§4.4) | 판매·잔여·대기·구역별 잔여·분당 판매(최근 180분 [가정]) | 판매 현황 화면 | 메모리(받을 때마다 통째로 바꾼다) |
-| 관제 명령 `CommandState`, 경보 `OpsAlert`, ack `CommandAck` | REST·Socket.IO | 상태 11가지, 승인, 만료 / 경보 필드 / ack 시각 | 명령·경보 슬라이스 | 메모리 |
-| 관제 위젯 데이터 | GraphQL(영속 쿼리) | 위젯마다 다르다 | 원격 위젯(호스트 서비스를 거쳐) | urql 캐시 |
+| 파트너 실시간 `LiveSnapshot` | REST 1분 주기 조회(§4.4.3. 2026-10-28 SSE에서 바꿈, 기술 검토 낮음-024) | 판매·잔여·대기·구역별 잔여·분당 판매(최근 180분 [가정]) | 판매 현황 화면 | 메모리(받을 때마다 통째로 바꾼다) |
+| 관제 명령 `CommandState`, 경보 `OpsAlert`, ack `CommandAck` | REST·SSE 늘 여는 흐름(`/v1/ops/live`) | 상태 11가지, 승인, 만료 / 경보 필드 / ack 시각 | 명령·경보 슬라이스 | 메모리 |
+| 관제 위젯 데이터 | REST 위젯 조회(`/v1/ops/widgets/{widgetKey}`) + SSE 위젯 흐름(`/v1/ops/events/{eventId}/live`) | 위젯마다 다르다(위젯 키별 응답 모양, wbs 0.2.3) | 원격 위젯(호스트 서비스를 거쳐) | TanStack Query 캐시(조회), 위젯 저장소(흐름) |
 | 스캐너 목록 `ScannerPackage`, 변경분 `ScannerChanges` | scanner-api | 티켓별 구역·좌석 표시·상태·유효 키·입장 상태, 폐기 keyId, 마지막 일련번호 / `seq`, `kind`, `payload` | 스캐너 판정 Worker | Dexie(§3.8) |
 
 ### 3.3 시간과 시계 보정
 
-- **단조 시계와 벽시계를 나눈다**: 주기·시간 초과·애니메이션은 `performance.now()`로 잰다. 서버와 비교하는 시각(셔플 공개 시각, 홀드 만료, 카운트다운)은 '보정한 벽시계' = `Date.now() + offset`으로 계산한다.
-- **보정값 재기**(ADR-0079 결정 3): 응답의 `Date` 헤더(초 단위)와 요청 왕복 시간으로 `offset = Date + rtt/2 − 받은 시각`을 구한다. 최근 8개 [가정] 표본 가운데 왕복이 가장 짧은 표본을 쓴다. `Date`는 교차 출처 응답에서는 기본으로 읽히지 않는다. 그래서 `queue`·`queue-files`·`api`·`scanner-api` 응답이 `Access-Control-Expose-Headers`에 `Date`를 넣는다.
-- **더 정확한 원천**: 좌석 화면은 WebSocket 하트비트(연결이 살아 있음을 알리려고 주기적으로 보내는 신호)에 담긴 서버 시각(밀리초)을 쓴다(§4.4). 스캐너는 근무 준비 때 잰 보정값을 근무 준비 완료 보고(`PUT /v1/scanner/shift/readiness`)의 `clockOffsetMs`로 보고하고, 판정의 ±30초 창에 쓴다(offline-gate §3).
+- **단조 시계와 벽시계를 나눈다**: 주기·시간 초과·애니메이션은 `performance.now()`로 잰다. 서버와 비교하는 시각(셔플 공개 시각, 홀드 만료, 카운트다운)은 '보정한 벽시계'로 계산한다. 보정한 벽시계는 '고른 표본의 서버 시각 + 그 뒤 `performance.now()`로 잰 경과'다. 기기 시계가 그사이 바뀌어도 흔들리지 않게 하려는 것이다(추천 적용 2026-10-28, ADR-0110).
+- **보정값 재기**(ADR-0079 결정 3, 표본 규칙은 추천 적용 2026-10-28, ADR-0110): 서버 시각과 요청 왕복 시간으로 `offset = 서버 시각 + rtt/2 − 받은 시각`을 구한다. 최근 8개 [가정] 표본 가운데 왕복이 가장 짧은 표본을 쓴다.
+  - **캐시한 응답은 표본이 아니다**: CDN이 캐시한 응답(`queue-files`, 캐시하는 공개 카탈로그 읽기)의 `Date`는 어느 화면도 쓰지 않는다. CloudFront는 캐시 응답의 `Date`를 원본이 만든 시각 그대로 두고 `Age`만 붙인다(review/tech-review.md §9). 그래서 왕복이 가장 짧은 표본(대개 캐시 적중)이 오히려 가장 늦은 시각을 준다. `queue-files`는 `Date`를 노출하지 않는다(`Access-Control-Expose-Headers: Retry-After`).
+  - **대기실**: 본문에 `serverTimeMs`(밀리초)가 실린 대기열 API 응답(로비 입장·진입·입장 확정, 모두 캐시하지 않는다)만 표본으로 쓴다(openapi `LobbyToken`·`QueueTicket`·`BatchingResponse`·`AdmissionResult`).
+  - **그 밖의 화면**: 캐시하지 않는(`no-store`) `api`·`scanner-api` 응답의 `Date`(초 단위)를 쓴다. 캐시하지 않는 응답의 `Date`는 맞는 시각이라 `queue`·`api`·`scanner-api`는 `Access-Control-Expose-Headers`에 `Date`를 그대로 넣는다.
+  - **다시 연 탭**: 보정값(서버 시각과의 차, 표본 시각, 왕복)은 `peaket.clock`(§3.12)에 두고, 30분 [가정] 안이면 다시 연 탭도 그 값을 쓴다. 대기 중에 다시 열면 입장 확정 전까지 대기열 API를 부르지 않기 때문이다. 값이 없거나 낡았으면 다음 대기열 API 응답까지 기기 시계를 그대로 쓰고, 그동안의 `queue_reflect_ms`는 재지 않는다. 로비에서 다시 열었는데 값이 없으면 셔플 결과를 받는 시각이 기기 시계의 오차만큼 어긋난다. 이르면 404 뒤 다시 받기(§4.2.1)가, 늦으면 그만큼의 대기가 남는다(추천 적용 2026-10-28, ADR-0110).
+- **더 정확한 원천**: 좌석 화면은 WebSocket 왕복으로 맞춘다. 연결 직후와 60초 [가정]마다 `TimeSync{clientTimeMs}`를 보내고, 서버가 바로 돌려준 하트비트의 `serverTimeMs`와 `echoClientTimeMs`로 왕복을 잰다(§4.4.1, 추천 적용 2026-10-28, ADR-0110). 서버가 보내기만 하는 하트비트는 망 한쪽 지연만큼 늦게 잡혀, 종단 지연을 그만큼 작게 쟀다. 스캐너는 근무 준비 때 잰 보정값을 근무 준비 완료 보고(`PUT /v1/scanner/shift/readiness`)의 `clockOffsetMs`로 보고하고, 판정의 ±30초 창에 쓴다(offline-gate §3).
 - **표시**: 팬 화면은 공연장 현지 시각(국내는 KST)으로 보인다. 기기 시간대가 다르면 괄호로 내 시각을 붙인다. 파트너·관제 화면은 시간대를 붙인 KST, 기록은 UTC다(design/d5 §3). 표시는 `Intl.DateTimeFormat`으로 한다.
-- **흐름 표시값의 시각**: `queue_reflect_ms`(파일을 만든 시각부터 화면에 반영될 때까지)는 대기 상태 파일의 `Last-Modified`(교차 출처에서 읽히는 헤더)와 보정한 벽시계로 잰다. `seat_delta_e2e_ms`는 델타 묶음 머리에 담긴 서버 시각으로 잰다.
+- **흐름 표시값의 시각**(추천 적용 2026-10-28, ADR-0110): 둘 다 밀리초 서버 시각으로 잰다. 초 단위 `Last-Modified`·`Date`로 재면 두 번 버림한 오차가 각각 최대 1초라 2초 목표를 판정할 수 없었다.
+  - `queue_reflect_ms`(NFR-002) = 내 차례(serving ≥ 내 번호)를 화면에 그린 시각(보정 시계) − serving이 내 번호를 넘은 전진의 시각. 전진 시각은 입장 임박 구간 파일의 `servingSteps`에서 찾는다. 사람마다 차례가 올 때 한 번 재고, 대기실 표본(1%)과 상관없이 모두 보낸다(초당 약 28건, 좌석 화면으로 넘어가기 전에 `keepalive`로). 넘은 시각이 기록 밖이거나(5초 [가정] 넘게 파일을 받지 못함) 탭이 숨겨져 있었으면 재지 않는다.
+  - `seat_delta_e2e_ms`(NFR-004) = 그린 시각(보정 시계) − (`serverTimeMs` − `maxWaitMs`). 묶음 대기를 넣은 값이고, 묶음에서 가장 오래 걸린 변경 기준이다.
 
 ### 3.4 대기실 상태 기계
 
@@ -409,20 +426,21 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | --- | --- | --- | --- | --- |
 | `boot` | — | 페이지 열림 | 저장소에서 회차 표 읽기, 시계 보정, 다른 탭 확인(§5.9) | 참가 토큰만 있으면 → `lobby` / 대기표가 있으면 → `waiting` / 둘 다 없고 오픈 전 → `lobby-join` / 오픈 뒤 → `enter` |
 | `lobby-join` | 007 | 참가 전 | 본인확인 여부 확인(없으면 [휴대폰 본인확인]), 사람 확인 위젯을 필요할 때 불러오기, `POST …/lobby-participants` | 201 → `lobby` / `verification: REQUIRED` → `verify-redirect` / 409 → `other-device` |
-| `lobby` | 007 | 참가 토큰이 있다 | 오픈까지 카운트다운(30초 낭독), 공시 값 표시 | 셔플 공개 시각 + 분산 지연 → `shuffle-fetch` |
+| `lobby` | 007 | 참가 토큰이 있다 | 오픈까지 카운트다운(남은 5분·1분·10초에 낭독, §4.8), 공시 값 표시 | 셔플 공개 시각 + 분산 지연 → `shuffle-fetch` |
 | `shuffle-fetch` | 007 '순서 계산 중' | 공개 시각이 지났다 | 결과 파일 받기, 404면 간격을 2초→20초로 두 배씩 늘리며 다시 받기(정본) | 순번 받음 → `waiting` / 60초 넘음 → `shuffle-delayed`(SEV1 화면 안내. 장애 심각도 등급은 숫자가 작을수록 심각하다) |
 | `enter` | 008 | 오픈 뒤 첫 진입 | `POST …/entries`(`text/plain`) | 201 → `waiting` / 202 → `batching` / 409 → `other-device` 또는 `already-admitted` / 410 → `sold-out` 또는 `ended` / 503 → `Retry-After` 뒤 다시 보내기 |
 | `batching` | 008 '순서를 정하는 중' | 202 | 묶음 결과 파일을 같은 규칙으로 받기 | 순번 받음 → `waiting` |
-| `waiting` | 008 | 순번이 있다 | 내 대기 상태 파일 폴링(§5.1), 앞 인원·진행 막대·예상 시간 표시, 차례 1분 전 토큰 갱신, 좌석 자원 미리 받기 | serving ≥ 순번 → `turn` / `PAUSED` → `paused` / `SOLD_OUT` → `sold-out` / `ENDED` → `ended` / 연속 실패 → `stale` |
+| `waiting` | 008 | 순번이 있다 | 내 대기 상태 파일 폴링(§5.1), 앞 인원·진행 막대·예상 시간 표시, 차례 1분 전 토큰 갱신, 좌석 자원 미리 받기 | serving ≥ 순번 → `turn` / `PAUSED` → `paused` / `ALL_HELD` → `all-held` / `SOLD_OUT` → `sold-out` / `ENDED` → `ended` / 연속 실패 → `stale` |
 | `stale` | 008 '연결 확인 중' | 연속 3회 [가정] 실패 또는 30초 [가정] 무응답 | 마지막 값을 그대로 두기, 실패 뒤 대기 간격 늘리기 | 성공 → 이전 상태 |
 | `paused` | 008 '판매가 잠시 멈췄습니다' | `saleStatus=PAUSED` | 폴링 계속 | `ON_SALE` → `waiting` |
+| `all-held` | 008 '남은 좌석이 모두 결제 중입니다' | `saleStatus=ALL_HELD`(일시 매진, 추천 적용 2026-10-28, ADR-0122) | 폴링 계속. 앞 인원은 그대로 보이고 예상 시간은 숨긴다. "결제되지 않은 좌석이 풀리면 차례대로 이어집니다" | `ON_SALE` → `waiting` / `SOLD_OUT` → `sold-out` / `ENDED` → `ended` |
 | `turn` | 008 '입장 중' | 차례가 왔다 | `POST …/admission`(`text/plain`) | `ADMITTED` → `admitted` / `SOON` → `soon` / `NOT_YET` → `waiting`(자동 배정의 이른 확인) / `VERIFYING` → `verify-redirect` / 409 → `duplicate` / 410 → `expired` 또는 `ended` |
 | `soon` | 008 '곧 입장합니다' | `SOON` | 남은 초 표시, 지터를 넣어 다시 `turn` | — |
 | `admitted` | → 010 | 입장 토큰을 받았다 | 토큰을 sessionStorage에 두고 좌석 화면으로 전체 이동 | — |
 | `verify-redirect` | → 009 | 추가 검증 필요 | `/queue/[eventId]/verify`로 이동 | — |
 | `other-device` | 007·008 | 409 다른 기기·탭 | "처음 기기에서 계속하세요" + ( 이 기기에서 다시 참가 › ) | 확인 → 기존 참가·대기를 취소한 뒤 `lobby-join` 또는 `enter` |
 | `cancelled-elsewhere` | 007·008 | 취소된 토큰으로 요청해 받은 거절 | "다른 기기에서 이 참가를 취소했습니다" | 공연 상세 화면으로 |
-| `already-admitted`, `duplicate` | 008 | 409 `ALREADY_ADMITTED`·`DUPLICATE_ADMISSION` | 정본 문구 | 끝 |
+| `already-admitted`, `duplicate` | 008 | 409 `ALREADY_ADMITTED`·`DUPLICATE_ADMISSION`, 또는 리더 탭의 입장 결과 방송(`duplicate`, §5.1 '여러 탭') | 정본 문구 | 끝 |
 | `expired` | 008 | 410 대기표 만료 | `rejoinAllowed`면 [다시 줄 서기] | 확인 → 저장소를 지우고 `enter` |
 | `sold-out` | 018 | 매진 | 폴링 바로 멈춤, 취소표 알림·다른 회차 | 끝 |
 | `ended` | 008 '판매 시간이 끝났습니다' | `ENDED` 또는 410 `sale-ended` | 폴링 멈춤, 저장소 지움 | 끝 |
@@ -430,6 +448,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | `offline` | 008 | `offline` 이벤트 | 오프라인 배너, 마지막 값 표시 | `online` → 바로 한 번 묻고 이전 상태로 |
 
 - **앞 인원**: `(내 순번 − serving − 1) − (그 사이 빠진 번호)`. 빠진 번호는 `removedUpToServing`, `removedBeforeSegment`, 내 구간의 `removedBitmap`으로 센다(queue-admission §4). 결과가 음수면 0으로 본다.
+- **오래된 파일 버리기(단조 읽기, 추천 적용 2026-10-28, 기술 검토 낮음-105)**: 폴러는 마지막으로 반영한 파일의 `generatedAtMs`와 serving을 기억한다. 받은 파일의 `generatedAtMs`가 그보다 늦지 않으면 버린다. 생성 시각은 새롭지만 serving이 작으면 `saleStatus`·공지·`pollHintMs`만 반영하고 앞 인원·진행 막대·예상 시간은 그대로 둔다. 그런 파일만 10초 [가정] 넘게 이어지면(대기열 Redis 장애 조치로 serving이 정말 되돌아간 경우) 새 값을 받는다(queue-admission §4, Q-T37).
 - **진행 막대**: `(처음 앞 인원 − 지금 앞 인원) ÷ 처음 앞 인원`을 0~100% 범위로 자른다. 처음 값이 0이면 100%다. 처음 앞 인원은 sessionStorage에 둔다(정본).
 - **예상 대기**: 앞 인원 ÷ `servingRate`로 구한다. 속도가 0이거나 일시정지면 숫자를 보이지 않고 '잠시 멈춤'으로 표시한다.
 
@@ -439,12 +458,13 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 | 배열 | 형식 | 크기(5만 석) | 내용 |
 | --- | --- | --- | --- |
-| `state` | `Uint8Array(N)`(교차 출처 격리 상태면 `SharedArrayBuffer` 위에 둔다) | 50KB | 0 가능, 1 다른 분 선택(홀드·결제 예약), 2 판매, 3 선택 불가(스냅샷으로 처음 그릴 때의 점유) |
+| `state` | `Uint8Array(N)`(Worker 안에만 둔다. 메인 스레드는 바뀐 구역만 메시지로 받는다, §5.2) | 50KB | 0 가능, 1 다른 분 선택(홀드·결제 예약), 2 판매, 3 선택 불가(스냅샷으로 처음 그릴 때의 점유) |
 | `mine` | `Uint8Array(⌈N/8⌉)` | 6.25KB | 내 홀드 좌석 비트(서버 델타에서는 '다른 분 선택'으로 오므로 겹쳐 그린다) |
 | `x`, `y` | `Float32Array(N)` 둘 | 400KB | 공연장 좌표(1단위 = 1cm [가정]) |
 | `attr` | `Uint8Array(N)` | 50KB | 등급 색인, 휠체어석, 판매 제외 비트 |
 | `sectionStart`, `sectionEnd` | `Uint32Array(S)` | 구역 수 × 8B | `seatIndexRange` |
-| `sectionVersion` | `Uint32Array(S)` | 구역 수 × 4B | 마지막으로 반영한 판 |
+| `sectionVersion` | `Uint32Array(S)` | 구역 수 × 4B | 마지막으로 반영한 구역별 일련번호(같은 회차 세대 안에서만 비교한다) |
+| `seatEpoch` | 숫자 하나 | 4B | 마지막으로 맞춘 회차 세대. 장애 조치·다시 만들기 뒤 오르면 구역을 모두 스냅샷으로 다시 맞춘다(§4.4.1, 추천 적용 2026-10-28, 기술 검토 중간-040) |
 | 공간 색인 | 구역별 격자 칸 → 좌석 색인 목록 | 좌석 수에 비례 | 누른 좌석 찾기 |
 
 - 좌석 ID 문자열은 좌석맵 파일에만 있다. Worker는 좌석을 색인으로 다룬다. 홀드 요청을 만들 때만 색인을 ID로 바꾼다.
@@ -477,11 +497,12 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 결제 상태 | 화면 상태 | 하는 일 |
 | --- | --- | --- |
 | `ACCEPTED`·`RESERVED`·`APPROVED` | 확인 중(진행 표시) | 롱 폴링으로 다시 묻는다(0.5~1.5초 [가정] 지터). 접수부터 120초 [가정]가 지나면 '결과 확인 중'과 알림 안내, 주문 내역 링크를 보인다 |
+| `APPROVED` + `issueDelayed` | 결제 완료·티켓 발급 중 | "결제가 완료되었습니다. 티켓을 발급하고 있습니다. 발급되면 알림으로 알려 드립니다"와 주문 내역 링크. 롱 폴링을 이어 가고 `CONFIRMED`가 오면 확정으로 바꾼다(추천 적용 2026-10-28, ADR-0106) |
 | `CONFIRMED` | 확정(`role="alert"` 한 번) | 예매번호 복사, 마이 티켓, 홈 화면 추가 안내, 구매 세션 저장물 정리 |
 | `AWAITING_DEPOSIT` | 입금 대기 | 은행·계좌·기한 표시, 구매 세션 저장물 정리(세션은 끝난다) |
 | `FAILED` | 과금 없는 실패 | `reason`별 문구(design/d5 §9.2), 좌석 선택 화면으로(세션은 이어진다) |
 | `UNKNOWN` | 결과 불명 | "결과가 확정되는 대로 알림으로" + "중복 청구는 발생하지 않습니다"(1시간이 넘으면 정본 문구) |
-| `COMPENSATED` | 발권 실패 자동 취소 | "요금은 청구되지 않습니다" |
+| `COMPENSATED` | 발권 불가 결제 취소 | "티켓을 발급하지 못해 결제를 취소(환불)했습니다". 회차 취소 확정이나 CS 확인 뒤에만 생긴다(ADR-0106). 결제는 이미 승인됐으므로 '요금은 청구되지 않습니다'는 쓰지 않는다(ADR-0087 결정 35) |
 
 - 화면이 보이는 동안에는 120초가 지난 뒤에도 30초 [가정]마다, 10분 [가정]까지 확인한다. 화면을 닫았다면 알림 링크와 주문 내역(SCR-055)에서 다시 본다.
 - 401(팬 쿠키 만료)이면 갱신한 뒤 다시 묻는다. 결과 확인 경로에는 구매 세션 서명이 없다.
@@ -496,9 +517,9 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | `keys` | `ticketId` | `{privateKey: CryptoKey(ECDSA P-256, extractable=false), keyId}` | 공개키는 등록 때 서버에 보낸다(`publicKeyJwk`) |
 | `meta` | 고정 키 | `lastSyncAt`, `persistGranted`, `schemaVersion` | |
 
-- **QR v1**(offline-gate §3): 형식 버전 1바이트 ‖ 티켓 ID 16바이트 ‖ keyId 8바이트 ‖ 시각 4바이트(UNIX 초) ‖ 서명 64바이트(P1363) = 93바이트. 서명 대상은 `"PEAKET-QR-v1" ‖ 티켓 ID ‖ keyId ‖ 시각`이다.
-- **회전**: 15초마다 QR Worker가 새 시각으로 서명하고, 메인 스레드가 교차 전환(fast)으로 바꿔 보인다. `aria-live`는 두지 않는다(정본). 시각은 보정한 벽시계(§3.3)를 쓰고, 오프라인이면 마지막으로 잰 보정값을 쓴다.
-- **QR 문자 인코딩**(바이너리 모드인지 base45인지)과 오류 정정 수준은 wbs 5.1.3 PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험)에서 인식 시간을 기준으로 정한다(정본).
+- **QR v1**(offline-gate §3): 형식 버전 1바이트 ‖ 티켓 ID 16바이트 ‖ keyId 8바이트 ‖ 시각 4바이트(부호 없는 32비트 빅엔디언 UNIX 초) ‖ 서명 64바이트(P1363) = 93바이트. 서명 대상은 `"PEAKET-QR-v1" ‖ 티켓 ID ‖ keyId ‖ 시각`이다.
+- **회전**(추천 적용 2026-10-28, 기술 검토 낮음-076): 화면이 다시 보이는 순간(`visibilitychange`)과 보이는 동안 15초마다, 그 순간의 보정 시각으로 다시 서명해 그린다. QR 그림은 한 프레임에 바로 바꾸고 겹치는 전환은 쓰지 않는다(겹친 두 QR은 어느 쪽도 읽히지 않는다. 스캐너가 ±30초 안의 시각을 받으므로 바뀌기 직전 QR도 통과한다, offline-gate §6.4, 추천 적용 2026-10-28, 기술 검토 낮음-106). `aria-live`는 두지 않는다(정본). 서명은 메인 스레드에서 해도 되고, QR Worker는 선택이다. 보정 시각은 마지막 보정 때의 서버 시각에 그 뒤 흐른 단조 시계(`performance.now()`) 값을 더해 센다. 그래서 화면이 켜진 동안에는 사용자가 기기 시계를 바꿔도 틀어지지 않는다. Windows가 아닌 기기의 브라우저는 기기가 잠든 동안 단조 시계가 멈추므로(MDN), 화면이 다시 보이거나 페이지를 새로 열면 보정한 벽시계(§3.3, 기기 시계 + 마지막 오차)로 기준을 다시 잡고, 온라인이면 다시 잰다.
+- **QR 글자 인코딩**은 base45(RFC 9285)이고 QR 영숫자 모드로 싣는다(93바이트 → 140자). 스캐너의 BarcodeDetector가 읽은 값을 글자로만 돌려주기 때문이다(offline-gate §3, 추천 적용 2026-10-28, 기술 검토 낮음-075). 오류 정정 수준은 wbs 5.1.3 PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험)에서 인식 시간을 기준으로 정한다(정본).
 
 ### 3.8 스캐너 로컬 데이터
 
@@ -507,22 +528,25 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 표 | 키·색인 | 값 | 지우는 때 |
 | --- | --- | --- | --- |
 | `meta` | 고정 키 | 기기 이름, 배정, 앱 판, `clockOffsetMs`, `packageSeq`, 스키마(데이터의 구조 정의) 판 | 기기 등록을 풀 때 |
+| `deviceKey` | 고정 키 | 기기 키(WebCrypto ECDSA P-256 `CryptoKey`, `extractable=false`. 화면과 서비스 워커가 함께 꺼내 DPoP 증명에 서명한다), 공개키 지문 `jkt`, 등록한 기기 ID(추천 적용 2026-10-28, 기술 검토 중간-057) | 기기 폐기·다시 등록 때. 로그아웃해도 남긴다 |
 | `tickets` | `ticketId`, 색인 `gateZone` | 좌석 표시, 구역, 상태, 유효 `keyId` 목록 | 회차 끝 + 24시간 [가정] |
 | `keys` | `keyId` | 공개키(검증용 `CryptoKey` 캐시는 Worker 메모리에 둔다), `ticketId` | 위와 같다 |
 | `revoked` | `keyId` | 폐기 사유(옛 QR·위조 구분) | 위와 같다 |
 | `entryState` | `ticketId` | 마지막 방향·시각·구역·출처(이 기기·변경분) | 위와 같다 |
-| `scanQueue` | `id`(UUIDv7), 색인 `uploaded` | `ScanEvent` 전체 | 업로드 확인(`acceptedIds`) 뒤 7일 [가정] |
+| `scanQueue` | `id`(UUIDv7), 색인 `uploaded` | `ScanEvent` 전체. 아래 따로 둔 DB `peaket-scanner-queue`에 있다 | 업로드 확인(`acceptedIds`) 뒤 7일 [가정] |
 | `cursor` | `eventId` | 마지막 변경분 `seq` | 회차 끝 |
 | `telemetry` | 자동 키 | 판정 지연 표본, 오류 사건 | 보낸 뒤 바로 |
 | `session` | 고정 키 | 현장 스태프 토큰, 역할, 유효 기간 끝 | 로그아웃(업로드를 비운 뒤)·유효 기간 끝 |
 
+**Dexie DB `peaket-scanner-queue`**(판 1, 추천 적용 2026-10-28, 기술 검토 중간-059). `scanQueue` 표 하나만 두고, DB 옵션 `chromeTransactionDurability: 'strict'`로 연다. 크롬은 121부터 IndexedDB 쓰기의 기본 내구성을 strict에서 relaxed로 바꿨다. relaxed는 변경이 운영체제 버퍼에 닿으면 바로 '완료'를 알리고, 디스크에는 보통 몇 초 뒤에 쓴다(크롬 블로그, IndexedDB 3.0 `durability`). 그래서 배터리가 갑자기 꺼지면 통과시킨 마지막 기록을 잃을 수 있다. strict는 디스크에 쓴 뒤 완료를 알린다. Dexie의 이 옵션은 DB 단위라 스캔 큐만 따로 DB로 나누고, 나머지 표(목록·텔레메트리 등)는 `peaket-scanner`에서 기본(relaxed)으로 둔다. 통과 화면은 이 쓰기가 끝난 뒤에 띄운다(§5.5). 저장 장치 고장이나 기기 분실로 잃는 기록은 그대로 남는 위험이다(offline-gate §9).
+
 ### 3.9 파트너 좌석맵 에디터 문서 모델
 
 - **문서**: openapi `SeatMapLayout`(배치 층 + 좌석 층 + `layoutVersion`)이 저장 단위다. 에디터는 문서를 Zustand 저장소 하나에 정규화해(같은 값을 한 곳에만 두고 ID로 찾게 나눠) 둔다. 구역은 ID로 찾는 표, 좌석은 구역마다 배열이다(추천 적용 2026-10-27, ADR-0092 결정 2).
-- **갱신과 그리기**: 한 번의 편집(채우기·옮기기·줄 맞추기·번호 다시 매기기·지우기)은 저장소를 한 번만 바꾼다. 바뀐 구역만 새 배열을 만들고 나머지 구역은 그대로 같이 쓰며, 바뀐 구역·좌석 ID 묶음을 함께 남긴다. 캔버스는 저장소를 React 밖에서 구독해(`subscribeWithSelector`) 그 묶음의 좌석만 다시 그린다. 트리는 화면에 보이는 줄만 그리고(가상 스크롤), 줄마다 그 줄의 값만 선택자로 읽는다. 속성 패널은 고른 것만 읽는다. 5만 석 템플릿에서 채우기·되돌리기·고른 좌석 옮기기의 INP 200ms(§5.8)는 측정 캠페인(wbs 7.5.2)에서 잰다.
+- **갱신과 그리기**: 한 번의 편집(채우기·옮기기·줄 맞추기·번호 다시 매기기·지우기)은 저장소를 한 번만 바꾼다. 바뀐 구역만 새 배열을 만들고 나머지 구역은 그대로 같이 쓰며, 바뀐 구역·좌석 ID 묶음을 함께 남긴다. 캔버스(Konva 장면, §5.6)는 저장소를 React 밖에서 구독해(`subscribeWithSelector`) 그 묶음의 구역 노드와 그 구역의 좌석 도형만 고쳐 다시 그린다. 트리는 화면에 보이는 줄만 그리고(가상 스크롤), 줄마다 그 줄의 값만 선택자로 읽는다. 속성 패널은 고른 것만 읽는다. 5만 석 템플릿에서 채우기·되돌리기·고른 좌석 옮기기의 INP 200ms(§5.8)는 측정 캠페인(wbs 7.5.2)에서 잰다.
 - **되돌리기**: 명령 객체(바꾼 구역·좌석과 앞뒤 값)를 쌓은 스택이다. FR-023 인수 조건(10단계 정확 복원)을 넘는 200단계 [가정]까지 두고, 이 수를 넘으면 오래된 것부터 버린다. 화면 문구의 '무제한'은 이 상한으로 읽는다(§6.2).
 - **계산**: 자동 채우기, 겹침·도형 밖 검사, 휠체어석 W1~W3 검사는 에디터 Worker가 한다. 서버는 저장할 때 다시 검사한다.
-- **저장**: 자동 임시저장은 `PUT …/seatmap`의 `layoutVersion`으로 동시 수정을 막는다(409면 '다른 곳에서 바뀌었습니다'와 비교 보기). 공연 등록 위저드의 초안 저장 경로는 계약에 없다(design/d5 §1.6 16번, §6.2 32번).
+- **저장**: 자동 임시저장은 `PUT …/seatmap`의 `If-Match`(불러온 응답의 `ETag`, 곧 `layoutVersion`)로 동시 수정을 막는다(412면 '다른 곳에서 바뀌었습니다'와 비교 보기. 409는 오픈 뒤 도형 잠금 `seatmap-geometry-locked`다. 판 불일치를 409에서 412로 바꾼 것은 docs/api/guidelines.md §12 '동시 수정', 추천 적용 2026-10-28, 기술 검토 낮음-030). 공연 등록 위저드의 초안 저장 경로는 계약에 없다(design/d5 §1.6 16번, §6.2 32번).
 
 ### 3.10 관제 콘솔 상태
 
@@ -532,11 +556,11 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | --- | --- | --- |
 | `session` | 계정·역할·유휴 시각·재인증 상태 | REST |
 | `scope` | 고른 회차, 단계 탭, 시간대 | 주소 |
-| `control` | 자동 제어의 5가지 값(정상·일시정지·자동 증액 멈춤·입력 없음·긴급 정지)과 우선순위(design/d5 §3.3) | GraphQL 구독 |
-| `autoActions` | 걸려 있는 자동 조치(이름·대상·묶음·상태·시작 시각·왜·풀림 조건·지금 값·조건을 채운 시간), 최근 10분 [가정] 사이에 풀린 조치, 상태 바의 수(design/d5 §3.3·§7.2, ADR-0078 결정 2) | GraphQL 구독 |
-| `alerts` | 경보 목록, 접힌 경보, SEV별 수 | Socket.IO `alert` |
-| `commands` | 명령 상태, 내 승인 대기, 잠금 | REST + Socket.IO `command:ack` |
-| `presence` | 접속한 운영자 | Socket.IO `presence` |
+| `control` | 자동 제어의 5가지 값(정상·일시정지·자동 증액 멈춤·입력 없음·긴급 정지)과 우선순위(design/d5 §3.3) | SSE 늘 여는 흐름 `control` |
+| `autoActions` | 걸려 있는 자동 조치(이름·대상·묶음·상태·시작 시각·왜·풀림 조건·지금 값·조건을 채운 시간), 최근 10분 [가정] 사이에 풀린 조치, 상태 바의 수(design/d5 §3.3·§7.2, ADR-0078 결정 2) | SSE 늘 여는 흐름 `autoAction` |
+| `alerts` | 경보 목록, 접힌 경보, SEV별 수 | SSE 늘 여는 흐름 `alert` |
+| `commands` | 명령 상태, 내 승인 대기, 잠금 | REST + SSE 늘 여는 흐름 `command`·`approval` |
+| `presence` | 접속한 운영자 | SSE 늘 여는 흐름 `presence` |
 | (원격 위젯 상태) | 호스트 저장소에 넣지 않는다. 원격마다 자기 Zustand 저장소(이름은 `widgets/<원격 이름>`)를 위젯 자리마다 하나 만들고, 자리가 없어지면 버린다 | 원격 안 |
 
 - 위젯마다 `lastUpdatedAt`과 출처를 두고 신선도를 그린다. 출처는 실시간 표 또는 Prometheus(지표를 모아 저장하는 도구)다. 5초가 넘으면 경고 색으로 그린다(design/d5 §7.2).
@@ -567,6 +591,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | localStorage | `peaket.device` | `deviceId`(CSPRNG 128비트, base64url 22자) | 사용자가 지울 때까지 | 사이트 데이터 삭제 | P2(기기 식별값) |
 | localStorage | `peaket.queue.{eventId}` | 참가 토큰, 사전 검증 토큰과 발급 시각, 대기표, 순번·구간, 저장 시각 | 회차 판매 종료까지 | 로그아웃, 대기 취소, 410, 판매 종료, 앱 시작 때 2일 [가정]이 지난 항목 | P2 |
 | sessionStorage | `peaket.queue.{eventId}.firstAhead` | 처음 앞 인원 | 탭 | 탭 닫힘 | 등급 밖(숫자) |
+| localStorage | `peaket.clock` | 서버 시각 보정값(밀리초 차), 표본 시각, 왕복(§3.3, ADR-0110) | 30분 [가정] | 앱 시작 때 30분이 지난 값, 로그아웃 | 등급 밖(숫자) |
 | sessionStorage | `peaket.admission.{eventId}` | 입장 토큰, 서버 ECDH 공개키(JWK), 좌석맵 파일 경로, 받은 시각 | 구매 세션 | 세션 끝·로그아웃·만료 | P1(구매 세션 자격) |
 | IndexedDB `peaket-purchase` | `sessions/{jti}` | HMAC `CryptoKey`(위조 확인용 값을 만드는 비밀 키. 추출 불가), 일련번호, 만료 | 구매 세션 | 세션 끝·로그아웃·만료, 앱 시작 때 만료 항목 | P1 |
 | 메모리 | — | 재인증 토큰 | 5분, 한 번 | 쓴 뒤 | P1 |
@@ -574,13 +599,13 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | sessionStorage | `peaket.checkout.{holdId}` | 동의 체크, 고른 결제 수단(이름·전화는 없다) | 탭 | 결제 접수, 구매 세션 끝 | 등급 밖 |
 | sessionStorage | `peaket.accept.{orderId}` | 결제 접수를 보낸 시각과 그 멱등키(결제사 값은 넣지 않는다) | 탭 | 결과 확정, 구매 세션 끝 | 등급 밖 |
 | localStorage | `peaket.recentSearches` | 검색어 최대 10개 [가정] | 사용자가 지울 때까지 | 하나씩·전체 지우기. 로그아웃 때는 지우지 않는다(비로그인 상태에서도 쓴다) | 수집 안 함(data-classification) |
-| localStorage | `peaket.wishQueue` | 오프라인 찜·해제 대기(회차 ID, 동작, 시각) | 보낼 때까지 | 보낸 뒤, 로그아웃 | 등급 밖 |
+| localStorage | `peaket.wishQueue` | 오프라인 찜·해제 대기(공연 ID, 동작, 시각. 같은 공연은 마지막 동작 하나만 남긴다, ADR-0093, 기술 검토 낮음-060) | 보낼 때까지 | 보낸 뒤, 로그아웃 | 등급 밖 |
 | sessionStorage | `peaket.staff.fragment` | 초대 토큰 또는 승인 코드(URL 조각에서 옮겨 온 값) | 10분 [가정] | 조회 성공, 탭 닫힘 | P1 |
 | sessionStorage | `peaket.verify.{verificationId}` | 목적, 시작 시각(결과 대조용) | 10분 [가정] | 결과를 받았을 때 | 등급 밖 |
 | IndexedDB `peaket-wallet` | §3.7 | 오프라인 티켓 표시 값, 기기 키(추출 불가) | 공연 끝 + 7일 [가정] | 기본은 로그아웃해도 남긴다. '이 기기의 입장 키도 지우기'를 고르면 지운다. 키를 폐기·재발급할 때는 그 티켓 | P2 |
 | Cache Storage(월렛 서비스 워커) | `wallet-shell-{판}` | 월렛 셸 HTML·JS·CSS·글꼴 | 다음 판까지 | 새 판 활성화, 킬 스위치, 입장 키 지우기 선택 | 개인정보는 없다 |
 | Dexie `peaket-scanner`(스캐너 출처) | §3.8 | 회차 목록·키·폐기 목록·입장 상태·스캔 큐 | §3.8 | §3.8 | P2(현장 검표 기록) |
-| localStorage(관제 출처) | `peaket.console.ui` | 접은 위젯, 표 열 너비 | 사용자가 지울 때까지 | 로그아웃 때 `Clear-Site-Data` | 등급 밖 |
+| localStorage(관제 출처) | `peaket.console.ui` | 접은 위젯, 표 열 너비, 한 글자 단축키 켬(처음은 끔, 값이 없으면 끔으로 본다, design/d3 §0), 화면 테마(자동·다크·라이트, 값이 없으면 자동, design/d1 §4) | 사용자가 지울 때까지 | 로그아웃 정리 루틴(§5.14.4 2번. 관제 로그아웃 응답은 교차 출처인 `ops-api`에서 와서 `Clear-Site-Data`로는 이 출처를 지우지 못한다, 추천 적용 2026-10-28, 기술 검토 중간-067) | 등급 밖 |
 | IndexedDB `peaket-forensics`(포렌식 데모 출처) | `scenarios/{시드}` | 합성 시나리오 사건(개인정보는 없다) | 사용자가 지울 때까지 | [캐시 지우기], 사이트 데이터 삭제 | 개인정보는 없다(ADR-0080) |
 
 - **저장하지 않는 것**: 이름·전화·이메일·주소·계좌번호·카드 값·결제사 토큰(`paymentKey`·`paymentToken`)·인증 앱 코드·비밀번호·문의·신고·소명(예매 제한이나 양도 회수 대상이 된 팬이 사정을 설명하는 절차) 본문·본인확인 결과 값·서버 오류 원문. 결제창 복귀 주소의 값은 읽자마자 주소에서 지우고, 저장하지 않는다(asvs/payment).
@@ -592,23 +617,23 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 ### 4.1 api-client 공통 정책
 
-`@peaket/api-client`는 openapi에서 orval로 만든 타입·호출 함수·MSW 처리기를 바탕으로, 그 위에 아래 실행 정책을 한 곳에 모아 둔다(ADR-0079 결정 21). 화면 코드는 `fetch`를 직접 부르지 않는다(린트로 막는다. `/_t/*` 전송만 예외다).
+`@peaket/api-client`는 openapi에서 orval로 만든 타입·호출 함수·MSW 처리기를 바탕으로, 그 위에 아래 실행 정책을 한 곳에 모아 둔다(ADR-0079 결정 21). 폼과 요청 본문의 검사는 같은 계약에서 만든 `@peaket/validation`의 생성 Zod 스키마로 한다(§2.2 생성물, 추천 적용 2026-10-28, 기술 검토 중간-085). 화면 코드는 `fetch`를 직접 부르지 않는다(린트로 막는다. `/_t/*` 전송만 예외다).
 
 | 항목 | 규칙 |
 | --- | --- |
 | 호스트 | openapi는 경로마다 서버를 묶어 두지 않았다(5개 경로만 묶었다). 그래서 태그 → 호스트 표를 둔다: `queue` → `queue`(파일 세 경로는 `queue-files`), `seats`·`orders`·`tickets`·`shop`·`catalog`·`reviews`·`support`·`identity` → `api`(좌석맵·랭킹 파일은 `www`), `partner` → `partner-api`, `ops` → `ops-api`, `scanner` → `scanner-api`. 환경마다 기본 주소만 바뀐다 |
-| 자격 증명 | 쿠키를 쓰는 API(`api`·`queue`·`partner-api`·`ops-api`)는 `credentials: 'include'`로 보낸다. 대기열 파일과 정적 JSON은 `'omit'`이다. 쿠키 없이 배포하므로 자격 증명을 실으면 브라우저가 응답을 막는다. 스캐너는 `'include'`다. 기기 인증서는 브라우저가 TLS(통신을 암호화하는 표준) 연결을 맺을 때 고른다(PoC 5.4.3) |
+| 자격 증명 | 쿠키를 쓰는 API(`api`·`queue`·`partner-api`·`ops-api`)는 `credentials: 'include'`로 보낸다. 대기열 파일과 정적 JSON은 `'omit'`이다. 쿠키 없이 배포하므로 자격 증명을 실으면 브라우저가 응답을 막는다. 스캐너는 `'omit'`이다. 기기 자격은 브라우저가 알아서 싣는 쿠키·인증서가 아니라, 요청마다 기기 키로 만드는 `DPoP` 헤더와 `Authorization: DPoP` 토큰이다(docs/features/offline-gate.md §6.1, 추천 적용 2026-10-28, 기술 검토 중간-057). mTLS 선택지를 쓰면 인증서가 실리도록 `'include'`로 바꾸고 선택 PoC(wbs 5.4.3)로 확인한다 |
 | 이동 | `redirect: 'error'`. API는 이동을 쓰지 않는다(303은 ADR-0079 결정 4로 없앴다) |
 | 본문 | `application/json`을 쓴다. 예외는 T=0의 두 호출(대기열 진입, 입장 확정)이다. 이 둘은 본문을 JSON 문자열로 보내고 `Content-Type: text/plain;charset=UTF-8`을 쓰며, safelisted가 아닌 헤더는 금지한다(`Idempotency-Key`·`traceparent` 포함). 이 두 경로 밖에서 `text/plain`을 쓰면 클라이언트가 거절한다(FE-T3) |
-| 멱등키 | openapi가 `IdempotencyKey`를 붙인 쓰기 요청은 사용자 동작 하나에 `crypto.randomUUID()`(UUID v4)로 키 하나를 만든다. 그 동작을 다시 시도할 때는 같은 키를 쓴다(guidelines §4) |
+| 멱등키 | openapi가 `IdempotencyKey`를 붙인 쓰기 요청은 사용자 동작 하나에 `crypto.randomUUID()`(UUID v4, 따옴표 없이)로 키 하나를 만든다. 그 동작을 다시 시도할 때는 같은 키와 처음 만든 본문 문자열을 그대로 쓴다(서버는 본문 지문으로 같은 요청인지 본다. 일련번호·서명 헤더는 지문에 들지 않는다). 422 `idempotency-key-reused`는 버그로 보고 다시 보내지 않고 오류 수집에 남긴다. 409 `idempotency-request-in-progress`는 `Retry-After` 뒤 같은 키로 다시 보낸다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046) |
 | 재인증 | `X-Reauth-Token`은 메모리에서만 꺼내 붙이고, 한 번 쓰면 버린다. 403 `reauth-required`면 CMP-064를 띄우고 새 토큰으로 한 번 다시 보낸다 |
 | 구매 세션 | 여섯 작업(홀드, 홀드 해제, 연장, 주문, 결제 시도, 결제 접수)은 서명기(§5.3)를 거쳐 `X-Admission-Token`·`X-Purchase-Seq`·`X-Purchase-Mac`을 붙인다. 스냅샷 요청에는 `X-Admission-Token`을 붙인다(첫 사용 때는 `X-Client-Ephemeral-Key`도) |
-| 시간 초과 | 읽기 10초, 쓰기 15초, 결제 결과 롱 폴링 35초, 대기 상태 파일 5초, 올리기 120초 [가정]. `AbortSignal.timeout`과 화면을 떠날 때의 신호를 `AbortSignal.any`로 묶는다 |
+| 시간 초과 | 읽기 10초, 쓰기 15초, 결제 결과 롱 폴링 30초(서버 상한 25초 + 5초. 게이트웨이 27초·CloudFront 원본 응답 시간 초과 30초와의 순서는 docs/infra.md §4.1, 추천 적용 2026-10-28, 기술 검토 중간-047), 대기 상태 파일 5초, 올리기 120초 [가정]. `AbortSignal.timeout`과 화면을 떠날 때의 신호를 `AbortSignal.any`로 묶는다. `AbortSignal.any`가 없는 브라우저(iOS·iPadOS 16.4~17.3)에서는 §1.5의 대체 함수 `anySignal`로 묶는다(기술 검토 중간-095) |
 | 자동 재시도 | 읽기와 멱등키가 있는 쓰기만 자동으로 다시 시도한다. 네트워크 오류·시간 초과·`Retry-After`가 붙은 503일 때 최대 2회 [가정] 다시 시도한다. 구매 세션 쓰기는 같은 멱등키로 1회 다시 보내되, 일련번호와 MAC은 새로 만든다. 멱등키가 없는 생성형 쓰기(소명, 부스 요청, 알림 신청 등)는 자동으로 다시 시도하지 않는다 |
-| 기다림 | `Retry-After`(초 또는 HTTP 날짜)를 하한으로 삼아 ±20% 지터를 준다(guidelines §5). 없으면 전체 지터를 쓰고, 시작 0.5초·상한 8초 [가정]로 한다. 한 페이지의 자동 재시도는 분당 60회를 넘지 않는다(guidelines §5의 재시도 예산) |
+| 기다림 | 서버가 준 다시 시도 시각(`Retry-After`(초 또는 HTTP 날짜), 본문의 `retryAfterSeconds`·`pollHintMs`)은 하한이다. 기다림 = `하한 × (1 + U(0, 0.2))`로, 하한보다 이르게 보내지 않고 위쪽으로만 0~20% 퍼뜨린다(U는 0~0.2의 고른 무작위 값, guidelines §5, 추천 적용 2026-10-28, 기술 검토 중간-038). 하한으로 자르기만 하면 503을 같은 1초에 받은 사람들이 정확히 같은 때 다시 온다. 예외로 `NOT_YET`의 `retryAfterMs`는 사람마다 계산한 예상 도래 시각이라 지터 없이 그 시각에 보낸다(§5.1). 하한이 없으면 전체 지터(0부터 지금 상한 사이의 고른 무작위 값)를 쓰고, 시작 0.5초·상한 8초 [가정]로 한다. 한 페이지의 자동 재시도는 분당 60회를 넘지 않는다(guidelines §5의 재시도 예산) |
 | 오류 모양 | `application/problem+json`이면 `ApiError{status, type, title, detail, traceId, 확장 필드}`로 읽는다. `type`은 주소의 끝 경로(케밥 표기)다. 화면은 `type` → 문구 키 표(§5.12)로 문구를 고르고, 서버의 `title`·`detail` 원문은 보이지 않는다. 5xx 화면에는 문의용 `traceId`만 보인다 |
 | 401 | 팬: 갱신을 한 번만 한다(`POST /v1/identity/access-tokens`, Web Locks `token-refresh`로 탭 사이에서도 한 번만). 그 뒤 원래 요청을 한 번 다시 보낸다. 갱신 요청이 401이면 세션이 끝난다(SCR-004). 구매 경로의 401에는 쿠키 만료·입장 토큰 만료·서명 불일치를 가를 `type`이 없다(wbs 0.2.3). 그래서 갱신 한 번 뒤에도 401이면 구매 세션이 끝난 것으로 본다. 관리 계정: 결정 11의 사람 동작 조건을 지킨다 |
-| 추적 | `traceparent`는 같은 출처 요청(웹·파트너 앱 서버의 경로)에만 붙인다(observability §2·§11). API 호스트로 가는 요청에는 붙이지 않는다. 그래서 브라우저 추적이 서버 추적과 이어지는 것은 앱 서버 요청뿐이다 |
+| 추적 | `traceparent`는 같은 출처 요청(웹·파트너 앱 서버의 경로)에만 붙인다(observability §2·§11). API 호스트로 가는 요청에는 붙이지 않는다. 엣지 게이트웨이가 바깥에서 온 추적 문맥을 지우고 새 trace를 시작하므로, 붙여도 이어지지 않는다. 앱 서버도 받은 값을 부모로 쓰지 않고 span 링크로만 남긴다(observability §6, 추천 적용 2026-10-28, 기술 검토 중간-066). 그래서 브라우저 추적은 앱 서버 요청만 링크로 서버 추적과 이어지고, API 호출은 오류 응답의 `traceId`로 찾는다 |
 | 지표 | 실패를 `rum_api_fail_total{app, route, class}`로 센다(§5.16). 409 홀드 경합과 423은 실패로 세지 않는다(guidelines §2) |
 
 ### 4.2 흐름별 호출 순서
@@ -620,8 +645,8 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 1 | `POST https://queue…/v1/queues/{eventId}/lobby-participants` | JSON `{humanCheckToken, deviceId}`, 쿠키, 사전 요청이 있다(T=0 전) | 201 참가 토큰(`verification`이 `REQUIRED`면 SCR-009) / 403 본인확인 전 / 409 다른 기기 |
 | 2 | 셔플 결과 파일 `GET https://queue-files…/v1/queues/{eventId}/shuffle-results/{hashPrefix}.json` | 쿠키는 없고, 사용자 헤더도 없다 | `shuffleResultAt` + 지연이 지난 뒤 한 번 받는다. 404면 간격을 2초부터 두 배씩 늘리고(최대 20초), 간격 안의 무작위 시각에 다시 받는다 |
 | 3 | 사전 검증(공연 상세에서) `POST …/pre-verifications` | JSON `{humanCheckToken, deviceId, behaviorSummary}` | 201 토큰(만료 2분 [가정] 전, 사람 확인을 보이지 않는 모드로 다시 실행해 갱신한다. 조작이 필요하면 위젯을 보인다) |
-| 4 | 진입 `POST https://queue…/v1/queues/{eventId}/entries` | `text/plain` JSON 문자열 `{preverifyToken, deviceId}` | 201 대기표 / 202 묶음 / 409 / 410 / 503 `Retry-After` |
-| 5 | 대기 상태 파일 `GET https://queue-files…/v1/queues/{eventId}/segment-states/{segment}.json` | 쿠키·사용자 헤더가 없다 | 주기·지터·`Retry-After`(§5.1). `segment = floor((순번 − 1) ÷ 1000)` [가정, 순번은 1부터] |
+| 4 | 진입 `POST https://queue…/v1/queues/{eventId}/entries` | `text/plain` JSON 문자열 `{preverifyToken, deviceId, entryRequestId}`. `entryRequestId`는 진입 시도 하나에 `crypto.randomUUID()`로 만들고, 응답을 못 받아 다시 보낼 때 같은 값을 쓴다(헤더가 아니라 본문이라 사전 요청이 생기지 않는다, 기술 검토 중간-035) | 201 대기표(같은 `entryRequestId`로 다시 보내면 같은 번호의 대기표) / 202 묶음 / 409 / 410 / 503 `Retry-After` |
+| 5 | 대기 상태 파일 `GET https://queue-files…/v1/queues/{eventId}/segment-states/{segment}.json` | 쿠키·사용자 헤더가 없다. `cache: "no-store"`(ADR-0110) | 주기·지터·본문 `pollHintMs`(503이면 `Retry-After`, 기술 검토 중간-032, §5.1). `segment = floor((순번 − 1) ÷ 1000)` [가정, 순번은 1부터]. 입장 임박 구간 파일의 `servingSteps`로 차례 반영 지연을 잰다(§3.3) |
 | 6 | 입장 확정 `POST https://queue…/v1/queues/{eventId}/admission` | `text/plain` JSON 문자열 `{queueTicket}` 또는 `{lobbyToken}` | `ADMITTED`·`SOON`·`NOT_YET`·`VERIFYING` / 409 / 410 |
 | 7 | 대기 취소 `DELETE …/entries/me`, 로비 취소 `DELETE …/lobby-participants/me` | 쿠키 | 204 → 저장소를 지운다 |
 
@@ -652,7 +677,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 2 | `POST …/orders/{orderId}/payments`(멱등키, 구매 세션 헤더, `{payMethod}`) | 201 `PaymentAttempt`(`pg`, `switched`, `checkout`). `switched`면 CMP-027의 pg-switched 안내를 보인다 |
 | 3 | 결제사 SDK 결제창(§5.3) | 연동한 두 결제사 가운데 토스페이먼츠는 `successUrl`·`failUrl`로, 포트원은 `redirectUrl` + `forceRedirect: true`로 복귀 화면에 이동한다 |
 | 4 | 복귀 화면이 `POST …/payment-acceptance`(멱등키, 구매 세션 헤더, 결제사별 `PaymentAccept`) | 202 → 결과 / 400 금액 불일치 / 409 다른 탭에서 진행 중 / 423 |
-| 5 | `GET …/orders/{orderId}/payment-status`(롱 폴링 최대 30초) | §3.6 결제 결과 기계 |
+| 5 | `GET …/orders/{orderId}/payment-status`(롱 폴링 최대 25초 [가정]) | §3.6 결제 결과 기계 |
 
 - 복귀 주소는 서버가 정한다. `https://www.peaket.example/booking/{eventId}/checkout/return?order={orderId}` 뒤에 결제사가 자기 쿼리를 붙인다(ADR-0079 결정 7). 화면은 결제 값(`paymentKey`·`amount`, 또는 `paymentId`·`txId`·`paymentToken`)을 읽자마자 `history.replaceState`로 지운다.
 
@@ -671,13 +696,16 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 | 앱 | 흐름 | 호출 |
 | --- | --- | --- |
-| 파트너 | 화면 데이터 | 브라우저 → 같은 출처 tRPC(`POST /api/trpc/{프로시저}`) → 파트너 앱 서버 → gw-partner REST(§4.6) |
-| 파트너 | 실시간 판매 | `new EventSource('https://partner-api…/v1/partner/events/{id}/live', {withCredentials: true})`(§4.4.3) |
+| 파트너 | 화면 데이터 | 브라우저 → `partner-api` REST(api-client 훅). 여러 호출을 묶어 첫 화면을 그리는 곳만 파트너 앱 서버의 서버 컴포넌트가 gw-partner REST를 묶어 읽는다(§4.6, ADR-0100) |
+| 파트너 | 실시간 판매 | `GET https://partner-api…/v1/partner/events/{id}/live-snapshot`(1분 주기 조회, TanStack Query, §4.4.3) |
 | 파트너 | 명단·리포트 내려받기, 이미지·좌석맵 올리기 | 브라우저 → `partner-api`로 직접(스트리밍·다중 파트) |
+| 파트너 | 로그인 | 브라우저 → `POST https://partner-api…/v1/partner/auth/sessions`(이메일·비밀번호 → TOTP 두 단계, 쿠키는 gw-partner 응답이 준다. 관제와 같은 모양, ADR-0119) |
 | 파트너 | 토큰 갱신 | 브라우저 → `POST https://partner-api…/v1/partner/auth/access-tokens`(리프레시 쿠키의 경로가 이 주소이기 때문이다) |
 | 관제 | 로그인·갱신 | `POST https://ops-api…/v1/ops/auth/sessions`(요청 본문과 다중 인증 절차가 계약에 없다, wbs 0.2.3) · `…/access-tokens` |
-| 관제 | 명령 | `POST /v1/ops/commands`(멱등키, 위험 명령은 재인증) → 2인 명령은 `…/approvals`(재인증) → ack는 Socket.IO `command:ack` |
-| 관제 | 위젯 데이터 | `POST https://ops-api…/graphql`(영속 쿼리) · 구독 `wss://ops-api…/graphql`(§4.4.5) |
+| 관제 | 명령 | `POST /v1/ops/commands`(멱등키, 위험 명령은 재인증) → 2인 명령은 `…/approvals`(재인증) → ack는 늘 여는 SSE 흐름의 `command`(§4.4.4) |
+| 관제 | 실시간 | 늘 여는 흐름 `GET https://ops-api…/v1/ops/live` · 위젯 흐름 `GET https://ops-api…/v1/ops/events/{eventId}/live`(§4.4.4·§4.4.5) |
+| 관제 | 위젯 데이터 | `GET https://ops-api…/v1/ops/widgets/{widgetKey}`(처음 그릴 때와 다시 보일 때의 지난 값, §4.4.5) |
+| 스캐너 | 기기 등록 | `deviceKey`가 없으면(처음 켤 때, 저장소를 잃었을 때) WebCrypto 키를 만들고, 등록 코드(QR `#code=` 조각이나 입력)와 그 키의 DPoP 증명으로 `POST /v1/scanner/device-enrollments`를 보낸다. 그 뒤 모든 스캐너 요청에 새 `DPoP` 증명을 붙인다(`jti`·`htm`·`htu`·보정한 `iat`, 토큰이 있으면 `ath`). 스태프 토큰은 `Authorization: DPoP <토큰>`이다(추천 적용 2026-10-28, 기술 검토 중간-057) |
 | 스캐너 | 로그인 | `POST /v1/scanner/device-authorizations`(빈 객체 JSON) → QR·코드 표시 → `POST /v1/scanner/token`을 `interval`(기본 5초)마다 보낸다. `slow_down`이면 간격을 5초 늘린다 |
 | 스캐너 | 근무 준비 | `GET /v1/scanner/shift` → `GET …/package` → `PUT /v1/scanner/shift/readiness`(준비 완료 보고) → `GET …/changes?after=` 60초 주기 |
 | 스캐너 | 업로드 | `POST /v1/scanner/scans`(최대 500건 [가정], 기기 인증만으로도) → `acceptedIds` 표시 |
@@ -702,7 +730,10 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 ### 4.4 실시간 채널 계약
 
-계약에 비어 있던 바이트 형식·인증·하트비트·이벤트 이름을 아래 초안으로 정한다(ADR-0079 결정 10~12). wbs 0.2.3에서 asyncapi에 옮기고 서버와 맞춘다. 모든 숫자는 [가정]이다.
+계약에 비어 있던 바이트 형식·인증·하트비트·이벤트 이름을 아래 초안으로 정한다(ADR-0079 결정 10~12. 관제 채널은 2026-10-28 ADR-0100이 SSE로 바꿨다). wbs 0.2.3에서 asyncapi에 옮기고 서버와 맞춘다. 모든 숫자는 [가정]이다.
+
+- **SSE 경로의 게이트웨이 설정(추천 적용 2026-10-28, ADR-0100)**: SSE 경로(관제 두 흐름. 파트너 판매 현황은 2026-10-28 1분 주기 조회로 바꿔 SSE가 아니다, 기술 검토 낮음-024)는 HTTPRoute `timeouts.request: 0s`로 시간 초과를 끄고 응답을 버퍼에 모으지 않는다. Envoy 경로 시간 초과의 기본값은 15초이고 응답이 끝날 때까지를 재므로, 그대로 두면 흐름이 15초마다 끊긴다(Envoy 문서). Gateway API는 0초를 '시간 초과를 끈다'로 읽게 한다. 끊긴 연결은 서버의 15초 주석 줄과 브라우저의 35초 [가정] 무응답 판단으로 찾는다.
+- **HTTP/2**: SSE는 HTTP/2가 아니면 브라우저당 열린 연결 6개 한도에 걸린다(MDN). 화면과 API 호스트 사이는 HTTP/2이고, 탭 하나의 흐름과 REST는 한 연결을 나눠 쓴다.
 
 #### 4.4.1 좌석 델타 WebSocket
 
@@ -712,13 +743,15 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 | type | 방향 | 이름 | 본문 |
 | --- | --- | --- | --- |
-| 1 | 서버 → 클라이언트 | `SeatDeltaBatch` | `u64 serverTimeMs`(묶음을 보낸 서버 시각), `u16 sectionCount`, 구역마다 `u16 sectionIndex`, `u32 sectionVersion`, `u16 count`, 그리고 `count`번 `u16 seatOffset`(그 구역 `seatIndexRange.from`에서의 거리), `u8 state` |
-| 2 | 서버 → 클라이언트 | `Heartbeat` | `u64 serverTimeMs`(15초마다) |
-| 3 | 서버 → 클라이언트 | `BatchInterval` | `u16 intervalMs`(250 또는 Degraded 1000, 바뀔 때만) |
+| 1 | 서버 → 클라이언트 | `SeatDeltaBatch` | `u64 serverTimeMs`(묶음을 보낸 서버 시각), `u16 maxWaitMs`(묶음 안에서 가장 먼저 바뀐 변경이 보내질 때까지 기다린 시간, ADR-0110), `u32 seatEpoch`(회차 세대. 한 묶음에는 한 세대만 싣는다, 기술 검토 중간-040), `u16 sectionCount`, 구역마다 `u16 sectionIndex`, `u32 sectionVersion`, `u16 count`, 그리고 `count`번 `u16 seatOffset`(그 구역 `seatIndexRange.from`에서의 거리), `u8 state` |
+| 2 | 서버 → 클라이언트 | `Heartbeat` | `u64 serverTimeMs`, `u64 echoClientTimeMs`(15초마다. `TimeSync`를 받으면 바로 보내고 받은 `clientTimeMs`를 싣는다. 그 밖에는 0, ADR-0110) |
+| 3 | 서버 → 클라이언트 | `BatchInterval` | `u16 intervalMs`(100 또는 Degraded 1000, 바뀔 때만) |
 | 16 | 클라이언트 → 서버 | `SubscribeSections` | `u16 count`, `count`번 `u16 sectionIndex`. 매번 지금 구독할 전체 집합을 보낸다(증분이 아니다) |
+| 18 | 클라이언트 → 서버 | `TimeSync` | `u64 clientTimeMs`(보낼 때의 `performance.now()`). 연결 직후와 60초 [가정]마다 보낸다(ADR-0110) |
 
-- `state` 값: 0 가능, 1 다른 분 선택(홀드·결제 예약), 2 판매. 묶음의 `serverTimeMs`는 종단 전파 지연(NFR-004)을 재는 데 쓴다. 한 묶음 약 200B(정본)는 구역 셋·변경 수십 건 정도다(외삽).
-- **판 처리**: 받은 `sectionVersion`이 마지막 판 + 1이면 반영한다. 같거나 작으면 버린다. 건너뛰면 그 구역 스냅샷을 다시 받는다(seat-hold §7). 스냅샷을 받는 동안 온 델타는 판 번호로 걸러 다시 얹는다.
+- `state` 값: 0 가능, 1 다른 분 선택(홀드·결제 예약), 2 판매. 종단 전파 지연(NFR-004)은 '그린 시각 − (`serverTimeMs` − `maxWaitMs`)'로 잰다(묶음 대기 포함, ADR-0110). 묶음 간격은 100ms이고 바뀐 것이 있을 때만 보낸다(250ms였다, 추천 적용 2026-10-28, ADR-0110). 한 묶음 약 200B(정본) 이하이고, 한 묶음에 그 연결이 구독한 구역을 모두 싣는다(외삽).
+- **시계 맞추기**: `TimeSync`에 대한 하트비트를 받으면 왕복 = 지금 `performance.now()` − `echoClientTimeMs`, 보정값 = `serverTimeMs` + 왕복 ÷ 2 − 받은 시각이다. 최근 8개 [가정] 가운데 왕복이 가장 짧은 값을 쓴다(§3.3).
+- **판 처리**: 먼저 `seatEpoch`를 본다. 지금 세대보다 크면 구독한 구역을 모두 스냅샷으로 다시 받고 새 세대로 바꾼다. 스냅샷 요청은 0~1초 [가정] 무작위로 늦춰 보낸다. 지금 세대보다 작으면 버린다. 같으면 구역별 일련번호를 본다. 받은 `sectionVersion`이 마지막 번호 + 1이면 반영한다. 같거나 작으면 버린다. 건너뛰면 그 구역 스냅샷을 다시 받는다(seat-hold §7). 스냅샷을 받는 동안 온 델타는 세대와 번호로 걸러 다시 얹는다. 장애 조치로 새 주 노드가 더 작은 번호부터 다시 세면 세대가 함께 오르므로, 새 델타를 중복으로 버리지 않는다(추천 적용 2026-10-28, 기술 검토 중간-040, ADR-0121).
 - **닫힘 코드**: 1000 정상, 1012 서버 재시작(0~5초 사이 무작위 시간이 지난 뒤 다시 연결, 정본), 4401 토큰 무효·만료(다시 붙지 않는다), 4403 출처·권한, 4429 연결 과다(10초 이상 지난 뒤 다시). 그 밖의 비정상 종료는 0.5초부터 두 배씩 늘리는 전체 지터로 다시 붙는다(상한 10초). 다시 붙는 것은 입장 토큰 만료 시각까지다.
 - **살아 있음**: 35초 동안 어떤 프레임도 없으면 끊고 다시 연결한다. 다시 붙으면 `SubscribeSections`를 먼저 보내고, 구독 구역의 스냅샷을 받는다.
 - **대체**: 게이트웨이가 하위 프로토콜 값을 읽어 검증하지 못하면(PoC wbs 2.6.4), 연결한 뒤 2초 안에 `type` 17 `Auth{u16 length, 토큰 바이트}`를 보내는 방식으로 바꾼다.
@@ -730,55 +763,71 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | `version` | u8 | 1 |
 | `flags` | u8 | 비트 0: 구역 하나만(`?section=`) |
 | `layoutVersion` | u32 | 좌석맵 판. 내가 가진 판과 다르면 좌석맵 파일을 다시 받는다 |
+| `seatEpoch` | u32 | 회차 세대. 델타의 세대와 같은 규칙으로 비교한다(§4.4.1, 기술 검토 중간-040) |
 | `sectionCount` | u16 | 실린 구역 수(전체면 모든 구역) |
-| 구역 표 | `sectionCount` × (`u16 sectionIndex`, `u32 sectionVersion`) | 구역 판 |
+| 구역 표 | `sectionCount` × (`u16 sectionIndex`, `u32 sectionVersion`) | 구역별 일련번호 |
 | 비트맵 | 좌석 색인 순서. 바이트 안에서는 낮은 비트부터 | 1 = 점유(홀드·결제 예약·판매), 0 = 가능. 구역 하나만 실으면 그 구역 범위만 담는다 |
 
 - 전체 비트맵은 5만 석에 6,250바이트다. seat-hold §2의 '약 6.25KB'가 이 크기다. 전송할 때의 압축은 HTTP `Content-Encoding`(br·gzip)에 맡긴다(§6.2).
-- 응답은 `application/octet-stream`이고 `Cache-Control: no-store`다. 구매 세션이 열린 뒤의 재요청은 헤지 요청을 허용하는 읽기다. 구매 세션을 여는 첫 요청은 헤지하지 않는다(seat-hold §2, ADR-0087 결정 21).
+- 응답은 `application/octet-stream`이고 `Cache-Control: no-store`다. 스냅샷 요청은 첫 요청(구매 세션을 연다)이든 재요청이든 헤지 요청(응답이 늦으면 같은 요청을 하나 더 보내 먼저 온 응답을 쓰는 방식)을 쓰지 않는다(seat-hold §2, 추천 적용 2026-10-28, ADR-0117). 재요청은 읽기라 §4.1의 읽기 규칙(시간 초과, `Retry-After`와 지터를 지킨 자동 재시도, 분당 재시도 예산)을 따른다. 같은 구역의 재요청은 한 번에 하나만 보내고, 그 사이 갭이 또 생기면 앞 요청의 결과를 기다린다.
 
-#### 4.4.3 파트너 SSE
+#### 4.4.3 파트너 판매 현황(1분 주기 조회)
+
+2026-10-28에 SSE에서 1분 주기 조회로 바꿨다(추천 적용 2026-10-28, 기술 검토 낮음-024). 값은 1분 늦게 집계한 전체 상태가 1분마다 한 번 바뀌는 것이라, 조회로도 같은 신선도를 얻는다. 그 대신 열린 연결(파트너 수만큼), 게이트웨이 경로 시간 초과 끄기, `Last-Event-ID` 복구, 배포 때의 연결 비우기가 필요 없다. 같은 콘솔의 현장 운영 화면도 이미 조회(10초)다.
+
+```http
+GET https://partner-api.peaket.example/v1/partner/events/{eventId}/live-snapshot
+200 application/json, Cache-Control: no-store
+{"asOf":"2026-10-25T09:41:00Z","nextUpdateAt":"2026-10-25T09:42:00Z","sold":1234,"remaining":13766,"projectedSoldOutAt":null,"waiting":3214,"queueEntries":50120,"sections":[{"sectionId":"R1","remaining":120}],"soldPerMinute":[{"minute":"2026-10-25T09:41:00Z","sold":42}]}
+```
+
+- 응답은 늘 전체 상태다(변경분이 아니다). `asOf`는 집계 시각, `nextUpdateAt`은 다음 집계 시각이다.
+- 화면(TanStack Query)은 `nextUpdateAt`에 0~5초 [가정] 무작위를 더한 때 다시 묻는다. 그래서 집계가 나온 직후에 받아, SSE와 같이 '1분 지연 + 몇 초'로 보인다. 여러 탭이 같은 때 몰리지 않게 무작위를 둔다. ops-svc는 회차마다 1분에 한 번 계산한 값을 메모리에 두고 나눠 준다.
+- 화면은 '마지막 갱신 n초 전'(`asOf` 기준)과 '잠정'을 보인다. 조회가 두 번 잇달아 실패하거나 `asOf`가 3분 [가정]보다 오래되면 연결 표시등을 경고로 바꾼다.
+- 숨긴 탭은 5분 [가정]마다 묻고, 다시 보이면 바로 한 번 묻는다(ADR-0091의 숨긴 탭 규칙. 2026-10-27에는 '연결을 그대로 둔다'였다).
+- 교차 출처 요청이라 `credentials: 'include'`와 `Access-Control-Allow-Credentials`가 필요하다.
+- `soldPerMinute`는 최근 180분 [가정](점 180개)만 싣는다. 응답마다 전체 상태라, 판매가 길어져도 응답과 화면이 들고 있는 양이 늘지 않게 하려는 것이다(ADR-0091 결정 4).
+- 되돌릴 조건: 파트너에게 1분보다 짧은 지연(예: 10초 안)을 약속하게 되면, 그때 SSE(관제와 같은 `@Sse()` 흐름)나 짧은 주기 조회를 견준다.
+
+#### 4.4.4 관제 SSE: 늘 여는 흐름
+
+관제 콘솔의 서버 통신은 REST와 SSE 둘이다. GraphQL과 Socket.IO는 쓰지 않는다(소유자 승인 2026-10-28 '추천안 동의', 세부는 추천 적용, ADR-0100).
 
 ```text
 retry: 10000
-event: live
-id: 1792834567000
-data: {"sold":1234,"remaining":13766,"projectedSoldOutAt":null,"waiting":3214,"queueEntries":50120,"sections":[{"sectionId":"R1","remaining":120}],"soldPerMinute":[{"minute":"2026-10-25T09:41:00Z","sold":42}]}
+event: command
+id: 48213
+data: {"commandId":"…","state":"ACKED","appliedVersion":7,"ackedAt":"2026-10-28T10:00:02Z"}
 
 : hb
 ```
 
-- `id`는 집계 시각(밀리초)이다. 다시 붙을 때 브라우저가 이 값을 `Last-Event-ID`로 보내면, 서버는 그 뒤의 첫 전체 상태부터 보낸다. 메시지는 늘 전체 상태다(변경분이 아니다).
-- 서버는 1분 늦게 집계한 값을 1분마다 보내고, 15초마다 주석 줄(`: hb`)을 보낸다. 화면은 '마지막 갱신 n초 전'과 '잠정'을 보인다. 2분 [가정] 넘게 새 `live`가 없으면 연결 표시등을 경고로 바꾼다.
-- 교차 출처 연결이라 `withCredentials: true`와 `Access-Control-Allow-Credentials`가 필요하다.
-- `soldPerMinute`는 최근 180분 [가정](점 180개)만 싣는다. 메시지마다 전체 상태라, 판매가 길어져도 메시지와 화면이 들고 있는 양이 늘지 않게 하려는 것이다. 화면을 숨겨도 연결은 그대로 둔다(1분에 한 번이라 작다. 추천 적용 2026-10-27, ADR-0091 결정 3·4).
-
-#### 4.4.4 관제 Socket.IO
-
 | 항목 | 값 |
 | --- | --- |
-| 연결 | `io("https://ops-api.peaket.example/ops", {path: "/socket.io/", transports: ["websocket"], withCredentials: true})`. 롱 폴링을 끄면 여러 파드(쿠버네티스에서 앱이 실행되는 가장 작은 단위) 앞의 고정 세션이 필요 없다 |
-| 인증 | 핸드셰이크에 실린 운영자 쿠키와 `Origin`(`https://console.peaket.example`)으로 인증한다 |
-| 클라이언트 → 서버 | `room:join {eventId}`, `room:leave {eventId}`, `presence:hello {screen}` |
-| 서버 → 클라이언트 | `command:ack`(`CommandAck`), `alert`(`OpsAlert`), `presence {eventId, operators: [{accountRef, role}]}` |
-| 본문 | JSON(asyncapi의 기본값 `application/avro`를 이 채널에서는 `application/json`으로 고쳤다) |
-| 재연결 | Socket.IO에 들어 있는 재연결을 쓴다. 첫 지연 1초·상한 10초·무작위 0.5. 다시 붙으면 방에 다시 들어가고, 명령 상태를 REST로 다시 읽는다 |
-| 숨긴 탭 | 끊지 않는다. 경보·명령 확인·접속자는 화면을 숨겨도 받는다(추천 적용 2026-10-27, ADR-0091 결정 3, §5.7) |
+| 연결 | `new EventSource("https://ops-api.peaket.example/v1/ops/live?eventId={eventId}", {withCredentials: true})`. 고른 회차가 없으면 `eventId`를 뺀다 |
+| 인증 | 운영자 쿠키와 gw-ops의 `Origin`(`https://console.peaket.example`) 확인. EventSource는 요청 헤더를 붙일 수 없어 재인증 토큰 같은 헤더를 쓰지 않는다(명령은 REST다) |
+| 사건(`event:`) | `command`(명령 상태가 바뀔 때, `CommandState`의 요약과 ack), `approval`(내 승인 대기), `alert`(`OpsAlert`), `control`(자동 제어 다섯 값), `autoAction`(걸린 자동 조치와 풀림), `presence`(`{eventId, operators: [{accountRef, role, screen}]}`), `reset`(아래) |
+| `id`와 다시 붙기 | `id`는 ops DB 알림 표 `ops_push_event`의 순번이다. 다시 붙을 때 브라우저가 보내는 `Last-Event-ID` 뒤의 사건을 서버가 다시 보낸다. 표에 남은 1시간 [가정]보다 오래된 번호면 `reset`을 보내고, 화면은 명령·경보·승인 대기를 REST로 다시 읽는다 |
+| 하트비트 | 서버는 15초 [가정]마다 주석 줄(`: hb`)을 보낸다. 35초 [가정] 동안 아무것도 오지 않으면 끊고 다시 연다. `retry` 10초에 0~5초 [가정] 무작위를 더한다 |
+| 닫힘 | 서버는 액세스 토큰의 만료 시각과 세션 종료(종료 세션 목록)에 흐름을 닫는다. 브라우저는 토큰을 갱신한 뒤 다시 붙는다. 갱신이 401이면 로그인 화면으로 간다 |
+| 명령 확인 | 명령 확인의 정본은 REST의 명령 상태다. 흐름은 빨리 알리는 길이고, 다시 붙은 뒤 빠진 것은 `Last-Event-ID`로 받는다 |
+| 숨긴 탭 | 끊지 않는다. 경보·명령 확인·자동 제어 상태·접속자는 화면을 숨겨도 받는다(ADR-0091 결정 3, §5.7) |
 
-#### 4.4.5 관제 GraphQL
+#### 4.4.5 관제 SSE: 위젯 흐름과 위젯 조회
 
-- HTTP: `POST https://ops-api.peaket.example/graphql`. 본문은 `{id: 영속 쿼리 ID, variables}`만 보낸다. 임의 쿼리 문자열은 보내지 않는다(asvs/analytics의 허용 목록·깊이 제한과 맞춘다).
-- 구독: `wss://ops-api.peaket.example/graphql`에 하위 프로토콜 `graphql-transport-ws`(graphql-ws 6)로 붙는다. 인증은 쿠키와 `Origin`으로 하고, `connection_init` 본문은 비운다.
-- 타입: 운영에서는 인트로스펙션을 끈다. 그래서 ops-svc가 내는 스키마 산출물(`schema.graphql`)과 영속 쿼리 목록으로 타입을 만든다(§4.6).
-- 구독 수명(추천 적용 2026-10-27, ADR-0091 결정 3): 같은 영속 쿼리·변수의 구독은 호스트가 하나로 묶어 나눠 주고, 마지막 구독자가 떠나도 10초 [가정] 뒤에 닫는다. 브라우저 탭을 30초 [가정] 넘게 숨기면 위젯 구독을 닫는다(`control`·`autoActions`는 그대로). 닫을 때는 연결을 끊지 않고 그 구독에만 `complete`를 보낸다(§4.5, §5.7).
+- **위젯 흐름**: `new EventSource("https://ops-api.peaket.example/v1/ops/events/{eventId}/live?widgets=<위젯 키 목록>", {withCredentials: true})`. 사건은 `widget`(`{widgetKey, at, value}`, 위젯 키마다 그 위젯의 전체 값) 하나다. `id`는 값을 계산한 시각(밀리초)이고, 메시지마다 전체 값이라 다시 붙으면 지금 값부터 받는다. 하트비트·닫힘은 늘 여는 흐름과 같다.
+- **위젯 조회**: `GET https://ops-api.peaket.example/v1/ops/widgets/{widgetKey}?eventId=&from=&to=`. 위젯을 처음 그리거나 다시 보일 때 그래프의 최근 15분 창 같은 지난 값을 받는다. 응답 모양은 위젯 키마다 openapi에 적는다(wbs 0.2.3). `@peaket/api-client`의 `ops` 묶음이고 TanStack Query로 캐시한다.
+- **구독 수명(ADR-0091 결정 3의 수단을 바꿈)**: 호스트가 보이는 위젯 키를 모은다. 같은 위젯 키는 한 번만 받아 나눠 주고, 마지막 구독자가 떠나도 10초 [가정] 뒤에 목록에서 뺀다. 브라우저 탭을 30초 [가정] 넘게 숨기면 위젯 키를 모두 뺀다. 목록이 바뀌면 1초 [가정] 묶어 위젯 흐름만 새 `widgets`로 다시 연다. 늘 여는 흐름은 그대로다(§4.5, §5.7).
+- **서버**: ops-svc가 NestJS 기본 SSE(`@Sse()`)로 낸다. 클라이언트가 읽지 않아 쌓이는 양에 상한을 두고 넘으면 연결을 끊는다. 위젯 값은 파드마다 회차별로 한 번 계산해 그 파드의 연결에 나눠 준다(docs/streaming.md §4). 파드 사이 전달은 공유 Redis가 아니라 ops DB 알림 표를 파드마다 0.5초 [가정]마다 읽는 방식이다(ADR-0100 결정 4).
 
 #### 4.4.6 HTTP로 하는 준실시간
 
 | 채널 | 주기 | 근거 |
 | --- | --- | --- |
-| 대기 상태 파일 | 1·5·20초 ±20% | ADR-0003 |
-| 결제 결과 | 롱 폴링 최대 30초 + 다시 묻기(§3.6) | payment §2 |
+| 대기 상태 파일 | 0.5·5·20초 ±20% | ADR-0003, ADR-0110 |
+| 결제 결과 | 롱 폴링 최대 25초 [가정] + 다시 묻기(§3.6) | payment §2, docs/infra.md §4.1 |
 | 스캐너 변경분 | 화면이 켜진 동안 60초 | offline-gate §6.3 |
+| 파트너 판매 현황 | 1분(응답의 다음 집계 시각 + 0~5초 [가정]). 숨긴 탭은 5분 [가정], 다시 보이면 바로 한 번(ADR-0091) | §4.4.3, 기술 검토 낮음-024 |
 | 파트너 현장 운영 | 10초 [가정]. 숨긴 탭은 60초 [가정]로 늘리고, 다시 보이면 바로 한 번 묻는다(ADR-0091) | design/d5 §10.5 |
 | 관제 오류 요약 | 1분 [가정]. 숨긴 탭에서는 멈춘다(ADR-0091) | observability §11 |
 
@@ -808,11 +857,11 @@ export interface WidgetProps {
   onStatus(s: { freshnessMs: number; source: "rt" | "prometheus"; error?: MessageKey }): void;
 }
 
-// 원격이 쓰는 유일한 바깥 통로
+// 원격이 쓰는 유일한 바깥 통로(통신은 2026-10-28 ADR-0100이 REST·SSE로 바꿨다)
 export interface ConsoleServices {
-  graphql: { query<T>(id: PersistedQueryId, vars?: object): Promise<T>;
-             subscribe<T>(id: PersistedQueryId, vars: object, next: (v: T) => void): Unsubscribe };
-  socket: { on(event: "alert" | "command:ack" | "presence", h: (p: unknown) => void): Unsubscribe };
+  data: { query<T>(key: WidgetKey, vars?: object): Promise<T>;       // REST 위젯 조회(§4.4.5)
+          subscribe<T>(key: WidgetKey, vars: object, next: (v: T) => void): Unsubscribe };  // 위젯 흐름
+  live: { on(event: "alert" | "command" | "presence", h: (p: unknown) => void): Unsubscribe };  // 늘 여는 흐름(§4.4.4)
   host: { use<T>(f: (s: HostView) => T): T;   // 호스트 상태를 읽는 훅. 바꾸는 통로는 없다
           get(): HostView;
           subscribe(listener: (s: HostView) => void): Unsubscribe };
@@ -828,20 +877,24 @@ export type HostView = Readonly<Pick<HostState, "scope" | "control" | "autoActio
 
 - **`remotes.json`**(저장소에 적어 둔 대로 배포를 맞추는 GitOps로 관리하고, 호스트가 읽는다): `[{name, sha, entry: "/remotes/<name>/<sha>/remoteEntry.js", integrity: "sha384-…", contractMajor}]`.
 - **싣는 순서**: 목록 읽기 → 계약 판 확인 → 런타임 플러그인 `createScript`가 `integrity`·`crossorigin="anonymous"`를 붙인 스크립트 요소를 만든다(시간 초과 5초 [가정]) → 실패하면 `loadEntryError`로 한 번 다시 → 또 실패하면 `errorLoadRemote`가 대체 위젯을 돌려준다. 대체 위젯은 그 칸만 design/d5 §7.2 '위젯 오류'와 같은 카드('이 위젯만 불러오지 못했습니다', [다시 시도], 지표와 로그를 그래프로 보여 주는 도구인 Grafana 링크)로 바꾼다. 위젯 안의 그리기 오류는 CMP-035 오류 경계가 그 칸만 바꾼다.
-- **공유 싱글턴**: `react`, `react-dom`, `zustand`, `rxjs`, `chart.js`(처음 그래프를 그릴 때 한 번 받는다, ADR-0091 결정 4), `@peaket/ds`, `@peaket/telemetry`, `@peaket/console-contract`(이것만 `strictVersion`). 버전 범위는 E2E로 검사한다(devops §6.6).
+- **공유 싱글턴**: `react`, `react-dom`, `zustand`, `chart.js`(처음 그래프를 그릴 때 한 번 받는다, ADR-0091 결정 4), `@peaket/ds`, `@peaket/telemetry`, `@peaket/console-contract`(이것만 `strictVersion`). 버전 범위는 E2E로 검사한다(devops §6.6).
 - **금지**: 원격 위젯이 `fetch`·WebSocket·`localStorage`를 직접 쓰거나 토큰을 갖는 것, 전역(`window`)에 값을 두는 것(ASVS 3.2.3 채택), 호스트 상태를 바꾸는 것(바꿀 일은 `WidgetProps`의 콜백으로 호스트에 알린다, ADR-0092). 공용 ESLint 설정과 원격 저장소 CI가 막는다.
 - **원격 위젯의 상태**: 원격 안의 Zustand 저장소에 둔다. 위젯 자리마다 하나를 만들고 자리가 없어지면 버리며, 호스트 저장소에 끼워 넣지 않는다(§3.10, ADR-0092 결정 3).
-- **구독 수명과 보이기**(추천 적용 2026-10-27, ADR-0091 결정 3): 위젯은 `graphql.subscribe`를 효과(`useEffect`) 안에서 열고 정리 함수에서 닫는다. 그리는 중에는 구독하지 않는다. 호스트는 위젯 자리마다 따로 만든 `ConsoleServices`를 넘기고, 그 자리가 안 보이면(고르지 않은 탭, 숨긴 브라우저 탭) 그 안에서 구독을 멈췄다가 다시 연다. 화면 밖으로 스크롤된 자리에는 값을 넘기지 않고 마지막 값만 들고 있다가, 보이면 넘긴다. 위젯은 자기가 보이는지 따지지 않는다. 다만 `collapsed`가 참이면 머리(제목·상태 점·핵심 숫자 한 줄)만 그린다(§5.7, FE-T26).
+- **구독 수명과 보이기**(추천 적용 2026-10-27, ADR-0091 결정 3. 통로 이름은 ADR-0100): 위젯은 `data.subscribe`를 효과(`useEffect`) 안에서 열고 정리 함수에서 닫는다. 그리는 중에는 구독하지 않는다. 호스트는 위젯 자리마다 따로 만든 `ConsoleServices`를 넘기고, 그 자리가 안 보이면(고르지 않은 탭, 숨긴 브라우저 탭) 그 안에서 구독을 멈췄다가 다시 연다. 화면 밖으로 스크롤된 자리에는 값을 넘기지 않고 마지막 값만 들고 있다가, 보이면 넘긴다. 위젯은 자기가 보이는지 따지지 않는다. 다만 `collapsed`가 참이면 머리(제목·상태 점·핵심 숫자 한 줄)만 그린다(§5.7, FE-T26).
+- **한 앱 기준선(추천 적용 2026-10-28, ADR-0100 결정 6)**: 원격을 가진 서비스 저장소는 같은 위젯 소스를 위젯 패키지(`@peaket/widget-<원격 이름>`)로도 게시한다. 호스트 저장소는 같은 판의 패키지를 한 앱(경로별 `lazy` + 위젯 자리 오류 경계 + 위젯마다 Zustand 저장소)으로도 빌드해, 같은 화면에서 첫 그림 시간·첫 JS·원격 실패 때 격리·위젯 하나를 내보내는 시간을 Module Federation 빌드와 견준다(FE-T29). 두 빌드는 같은 계약을 쓰므로 위젯 코드는 하나다.
 
-### 4.6 관제 GraphQL과 파트너 tRPC
+### 4.6 관제 REST·SSE와 파트너 REST(ADR-0100)
 
-| 항목 | 관제 GraphQL | 파트너 tRPC |
+관제 GraphQL과 파트너 tRPC는 2026-10-28에 뺐다(소유자 승인 '추천안 동의', 세부는 추천 적용, ADR-0100). 두 콘솔 모두 openapi에서 orval로 만든 `@peaket/api-client`를 쓴다.
+
+| 항목 | 관제 콘솔 | 파트너 콘솔 |
 | --- | --- | --- |
-| 스키마 원천 | ops-svc가 빌드 때 내는 `schema.graphql`과 영속 쿼리 목록(원격·호스트의 `.graphql` 파일에서 해시로 만든다). 인트로스펙션은 운영에서 끈다 | 파트너 앱 서버의 tRPC 라우터. 입력·출력은 Zod(`@peaket/validation`) |
-| 이름 | 쿼리·구독 이름은 `위젯이름_대상`(예: `QueueMonitor_Serving`) [가정] | 프로시저 이름은 REST `operationId`와 같게 짓는다(예: `partner.events.saveSeatmap`) |
-| 범위 | 위젯 데이터와 감사 로그 조회. 명령은 REST로 한다 | REST 작업과 1:1인 얇은 껍질 + 화면 조합 프로시저(예: 공연 허브 한 번에 읽기). 업무 규칙은 없다 |
-| 오류 | GraphQL `errors[].extensions.type`에 Problem `type`을 싣는다 [가정] | `TRPCError`의 `cause`에 REST Problem을 그대로 실어, 화면 문구 표(§5.12)를 같이 쓴다 |
-| 출력 | 위젯이 쓰는 필드만 | 화면이 쓰는 필드만(ASVS 15.3.1) |
+| 계약 원천 | openapi의 `ops` 경로(명령·조회·위젯 조회·SSE 흐름 둘)와 asyncapi의 `sse.ops-live`·`sse.ops-event-live` | openapi의 `partner` 경로(판매 현황 조회 `live-snapshot` 포함. asyncapi 채널은 없다, 기술 검토 낮음-024) |
+| 이름 | 위젯 키는 `위젯이름.대상`(예: `queue-monitor.serving`) [가정]이고 openapi `widgetKey` 열거로 적는다 | 훅 이름은 REST `operationId`에서 orval이 만든다 |
+| 범위 | 명령·승인·위젯 조회·감사 로그 조회는 REST, 서버가 미는 것은 SSE 흐름 둘 | 화면은 훅으로 `partner-api`를 직접 부른다. 여러 호출을 묶어 첫 화면을 그리는 곳(예: 공연 허브 한 번에 읽기)만 파트너 앱 서버의 서버 컴포넌트가 REST를 묶어 읽고, 쿠키는 그대로 넘긴다. 업무 규칙은 앱 서버에 두지 않는다 |
+| 오류 | REST는 Problem(§4.1). SSE는 흐름을 닫고 브라우저가 다시 붙는다(토큰 만료면 갱신 뒤) | Problem(§4.1). 서버 컴포넌트도 같은 문구 표(§5.12)를 쓴다 |
+| 출력 | 위젯이 쓰는 필드만 | 화면이 쓰는 필드만(ASVS 15.3.1. 서버 컴포넌트는 묶은 응답에서 화면 필드만 고른다) |
+| 다시 볼 조건 | 브라우저에서 서버로 자주 보내는 실시간 입력이 생기면 WebSocket을 다시 비교한다 | 앱 서버에 업무 로직이 생기거나 서버에서 묶는 화면이 열 개 [가정]를 넘으면 tRPC를 다시 비교한다 |
 
 ### 4.7 클라이언트 안 인터페이스
 
@@ -849,7 +902,7 @@ export type HostView = Readonly<Pick<HostState, "scope" | "control" | "autoActio
 
 | Worker | 메인 → Worker | Worker → 메인 |
 | --- | --- | --- |
-| 좌석맵(`seatmap.worker`) | `init{canvas: OffscreenCanvas, layoutUrl, admission, dpr, theme}`, `viewport{w, h, dpr}`, `camera{zoom, x, y}`, `pointer{type, x, y}`, `select{seatIndex}`, `hold{seatIndexes}`, `subscribe{sections}`(디버그용), `dispose` | `ready{firstPaintMs}`, `hit{seatIndex, seatId, label, tier, price}`, `sections{visible, subscribed}`, `stateChanged{section, offsets}`(SharedArrayBuffer가 없을 때), `connection{state}`, `holdResult{…}`, `metrics{…}` |
+| 좌석맵(`seatmap.worker`) | `init{canvas: OffscreenCanvas, layoutUrl, admission, dpr, theme}`, `viewport{w, h, dpr}`, `camera{zoom, x, y}`, `pointer{type, x, y}`, `select{seatIndex}`, `hold{seatIndexes}`, `listSection{section}`(접근성 목록이 연 구역, 닫으면 `null`), `subscribe{sections}`(디버그용), `dispose` | `ready{firstPaintMs}`, `hit{seatIndex, seatId, label, tier, price}`, `sections{visible, subscribed}`, `sectionState{section, version, states}`(목록이 구역을 열 때 한 번), `stateChanged{section, version, offsets, states}`(목록이 연 구역과 고른 좌석에 바뀐 것이 있을 때만. 두 배열은 복사하지 않고 넘긴다(Transferable), §5.2, 추천 적용 2026-10-28, 기술 검토 중간-015), `connection{state}`, `holdResult{…}`, `metrics{…}` |
 | 월렛 QR(`qr.worker`) | `start{ticketId, keyRef}`, `stop` | `frame{payload: Uint8Array, at}`, `error{code}` |
 | 스캐너 판정(`judge.worker`) | `frame{bitmap: ImageBitmap}`(옮김), `setPlacement{…}`, `syncDone{seq}` | `result{verdict, reason, seat, ms}`, `decodeError` |
 | 파트너 에디터(`editor.worker`) | `fill{rule, shape}`, `validate{layout}`, `import{file, format}`, `export{format}` | `fillResult{…}`, `report{rows}`, `progress{pct}`, `file{blob}` |
@@ -859,9 +912,9 @@ export type HostView = Readonly<Pick<HostState, "scope" | "control" | "autoActio
 | 이름 | 종류 | 쓰임 |
 | --- | --- | --- |
 | `peaket.session` | BroadcastChannel | `logout`, `session-ended{reason}`, `token-refreshed` |
-| `peaket.queue.{eventId}` | BroadcastChannel | 폴링 리더가 받은 `QueueState`·상태 전이를 다른 탭에 나눠 준다 |
+| `peaket.queue.{eventId}` | BroadcastChannel | 폴링 리더가 받은 `QueueState`·상태 전이(입장 확정 결과 포함)를 다른 탭에 나눠 준다. 리더가 없을 때 폴링한 숨긴 탭도 같은 채널로 나눈다(§5.1) |
 | `peaket.verify` | BroadcastChannel | 본인확인 결과 `{verificationId, status}` |
-| `queue-poll:{eventId}` | Web Locks | 그 회차 대기실 폴링 리더 |
+| `queue-poll:{eventId}` | Web Locks | 그 회차 대기실 폴링 리더. 보이는 탭만 청하고, 리더가 숨겨지면 바로 놓는다(숨긴 탭은 청하지 않는다). 입장 확정도 이 잠금을 쥔 탭만 보낸다(추천 적용 2026-10-28, 기술 검토 중간-037, §5.1) |
 | `ps:{jti}` | Web Locks | 구매 세션 일련번호와 요청 직렬화(§5.3) |
 | `token-refresh` | Web Locks | 팬 토큰 갱신을 탭 사이에서 한 번만 하게 한다 |
 
@@ -875,9 +928,9 @@ RADIO의 컴포넌트 API 분류(데이터·이벤트·설정·스타일·렌더
 | --- | --- | --- | --- | --- |
 | `SeatPicker`(CMP-026) | `eventId`, `layoutPath`, `admission` | `onHold(seatIds)`, `onError(e)` | `mode: "pick" \| "auto"`, `maxSeats`, `stateReducer`(`useSeatSelection`) | `.Map`·`.Legend`·`.Summary` 합성 |
 | `SeatMap`(CMP-021) | (SeatPicker 문맥) | `onSeatFocus`, `onZoomChange` | `minSeatPx: 24`(2.5.8), `showMinimap` | 없다(Canvas, `aria-hidden`) |
-| `SeatList`(CMP-022) | 보이는 구역 상태 | `onSelect` | 그룹 방식(구역 → 열) | `getSeatProps(seat)` 속성 함수 |
+| `SeatList`(CMP-022) | 보이는 구역 상태 | `onSelect` | 그룹 방식(구역 → 열), 구조는 `tree`(가상 스크롤 때 `aria-level`·`aria-setsize`·`aria-posinset`, 기술 검토 중간-098) | `getSeatProps(seat)` 속성 함수 |
 | `QueuePanel`(CMP-015) | `QueueViewModel`(앞 인원·막대·예상·상태) | `onCancel`, `onRejoin` | `variant: "waiting" \| "soon" \| "sold-out"` | `renderNotice(state)`(React 판). 대기실 경량 페이지는 같은 뷰 모델을 DOM 템플릿으로 그린다 |
-| `Countdown`(CMP-014) | `deadline`(보정한 벽시계) | `onExpire` | `announce: "periodic" \| "threshold"`, `periodSec`, `thresholdSec` | — |
+| `Countdown`(CMP-014) | `deadline`(보정한 벽시계) | `onExpire` | `announce: "milestones" \| "threshold"`, `milestonesSec`(기본 `[300, 60, 10]`), `thresholdSec` | — |
 | `RotatingQR`(CMP-029) | `ticketId` | `onStale`, `onError` | `rotateMs: 15000` | — |
 | `PaymentWidgetFrame`(CMP-027) | `attempt: PaymentAttempt` | `onReady`, `onRedirecting`, `onError` | `pg` | — |
 | `HumanCheckBox`(CMP-047) | `siteKey` | `onToken(token)`, `onExpire`, `onError` | `mode: "managed" \| "invisible"` | — |
@@ -885,15 +938,16 @@ RADIO의 컴포넌트 API 분류(데이터·이벤트·설정·스타일·렌더
 | `ScanResult`(CMP-041) | `verdict`, `reason`, `seat` | `onDismiss` | `holdMs: 2000`(정본 2초 [가정]) | — |
 | `CameraView`(CMP-042) | — | `onFrame(bitmap)`, `onPermission(state)` | `fps: 15`, `facing: "environment"` | — |
 | `Widget`(CMP-035) | `manifest`, `props` | `onOpenDetail` | — | `.Header`·`.Body`·`.Actions`, 오류 경계 |
-| `CommandCard`(CMP-036) | `command`, `state` | `onRequest`, `onApprove`, `onRevert` | `approval: "one-person" \| "two-person"` | — |
+| `CommandCard`(CMP-036) | `command`, `state`, `disabledReason`(권한이 모자랄 때 카드에 늘 보이는 이유 글, design/d2 §3.6) | `onRequest`, `onApprove`, `onRevert` | `approval: "one-person" \| "two-person"` | — |
 | `AppShell`(CMP-065) | 세션·셸 상태 | `onLogout` | `variant` 여섯 가지 | 머리·내비·본문 슬롯 |
 
 - 스타일은 모든 컴포넌트가 `className`(Tailwind v4 유틸)과 토큰 변수만 받는다. 원시 색을 코드에 직접 적는 것은 린트가 막는다(design/d2 §1).
 - 표 칸 안의 `\|`는 '또는'이다.
+- **Countdown 갱신 방식(추천 적용 2026-10-28, 기술 검토 낮음-101)**: 다음 초 경계까지 `setTimeout`으로 기다렸다 깨어나고, 깰 때마다 보정한 벽시계(§3.3)로 남은 시간을 다시 계산한다. 타이머가 늦게 깨어나도 다음 계산에서 맞으므로 오차가 쌓이지 않는다. 화면이 다시 보이면(`visibilitychange`) 바로 한 번 다시 맞춘다. 움직임 줄이기 설정이면 숫자만 바꾼다. `requestAnimationFrame`은 쓰지 않는다. 보이는 동안 화면 갱신마다(흔히 초당 60번) 깨어나 1초 단위 표시에는 배터리와 CPU를 더 쓰고, 숨긴 탭에서는 멈추기 때문이다(MDN). 로비에는 T-10분부터 100만 명이 이 화면을 연다. 밀리초 단위로 움직이는 진행 막대 보간(CMP-016)만 `requestAnimationFrame`을 쓴다. 낭독은 `announce`로 고른다. `milestones`는 남은 시간이 `milestonesSec`의 값(기본 5분·1분·10초)을 지날 때 한 번씩, `threshold`는 `thresholdSec` 전에 한 번 읽는다(design/d1 §5). 시험은 FE-T42다.
 
 ## 5. 최적화와 깊이 파기(O)
 
-RADIO는 이 단계에 시간의 40%를 쓰고, 그 제품에만 있는 곳을 깊이 파라고 한다. PEAKET에서 그런 곳은 T=0의 100만 명(§5.1), 5만 석 실시간 좌석맵(§5.2), 결제창을 오가는 구매 세션(§5.3), 오프라인 입장(§5.4·§5.5), 그리고 여러 팀이 화면 조각을 만들어 넣는 관제 콘솔(§5.7)이다. 그 뒤에 성능 예산·네트워크·UX·접근성·다국어·다기기·보안·SEO·관측·시험·배포를 차례로 다룬다.
+RADIO는 이 단계에 시간의 40%를 쓰고, 그 제품에만 있는 곳을 깊이 파라고 한다. PEAKET에서 그런 곳은 T=0의 100만 명(§5.1), 5만 석 실시간 좌석맵(§5.2), 결제창을 오가는 구매 세션(§5.3), 오프라인 입장(§5.4·§5.5), 그리고 여러 팀이 화면 조각을 만들어 넣는 관제 콘솔(§5.7. 가상 팀의 따로 배포를 보이는 쇼케이스이고 한 앱 기준선과 견준다, ADR-0100)이다. 그 뒤에 성능 예산·네트워크·UX·접근성·다국어·다기기·보안·SEO·관측·시험·배포를 차례로 다룬다.
 
 ### 5.1 T=0 순간: 대기실 경량 페이지
 
@@ -927,27 +981,36 @@ React 런타임만으로도 JS 예산을 넘고, SEED CSS 전체는 CSS 예산�
 ```ts
 function nextDelayMs(s: QueueView, net: NetState, vis: DocumentVisibilityState): number {
   const eta = s.aheadCount / Math.max(s.servingRate, 0.001);      // 초
-  let base = eta <= 60 ? 1000 : eta <= 300 ? 5000 : 20000;         // 정본 1·5·20초
+  let base = eta <= 60 ? 500 : eta <= 300 ? 5000 : 20000;          // 정본 0.5·5·20초(ADR-0110)
   if (net.consecutiveFailures > 0) base = Math.min(base * 2 ** net.consecutiveFailures, 60000); // [가정] 상한 60초
   if (vis === "hidden") base = Math.max(base, 5000);               // [가정] 숨긴 탭 최소 5초
-  const jittered = base * (0.8 + Math.random() * 0.4);              // ±20%
-  return Math.max(jittered, net.retryAfterMs ?? 0);                 // Retry-After가 하한
+  // 서버 하한: 본문 pollHintMs(중간-032)와 503의 Retry-After. retryAfterMs는 503에서만 채우고 200을 받으면 지운다
+  const floor = Math.max(s.pollHintMs ?? 0, net.retryAfterMs ?? 0);
+  if (floor > 0) return Math.max(base, floor) * (1 + Math.random() * 0.2); // 하한 위로만 0~20%(중간-038)
+  return base * (0.8 + Math.random() * 0.4);                        // 하한이 없으면 ±20%
 }
 ```
 
-- `Retry-After`는 응답 헤더로만 온다(`queue-files`가 노출한다, guidelines §9). 서버는 Degraded 때 이 값으로 모든 클라이언트의 주기를 두 배로 늘린다(정본).
-- 매진(`SOLD_OUT`)·판매 종료(`ENDED`)면 폴링을 멈춘다. 먼 구간의 매진 감지는 최대 약 25초 걸린다(정본).
-- 같은 회차를 연 탭이 여럿이면 Web Locks `queue-poll:{eventId}`를 잡은 탭만 폴링하고, 받은 값을 `BroadcastChannel`로 다른 탭에 나눈다(§5.9).
+- **폴링 힌트는 본문으로 온다(추천 적용 2026-10-28, 기술 검토 중간-032)**: 서버가 폴링을 늦추라고 주는 값은 대기 상태 파일 본문의 `pollHintMs`(다음 폴링까지의 최소 간격, 밀리초)다. 상태 조회 Degraded 때 queue-svc의 파일 생성 작업과 S3 사본이 같은 값(그 구간 거리별 주기의 2배)을 싣는다. 그래서 원본이 S3 사본으로 넘어가도 모든 클라이언트의 주기가 두 배가 된다. S3 객체 메타데이터로는 `Retry-After`를 줄 수 없다(queue-admission §4). `Retry-After` 헤더는 503 응답에서만 읽고(`queue-files`가 노출한다, guidelines §9), 200 응답에 헤더가 있어도 읽지 않는다. 본문 값이 늘 앞선다.
+- **하한이 있으면 위쪽으로만 흔든다(추천 적용 2026-10-28, 기술 검토 중간-038)**: `Math.max(지터 값, 하한)`으로 자르면 `Retry-After`가 기본 간격보다 클 때 지터가 사라져, T=0에 같은 1초 안에 503을 받은 사람들이 정확히 N초 뒤 한꺼번에 다시 온다. 그래서 하한이 있으면 하한~1.2배 사이에 고르게 퍼뜨린다. 하한이 없는 보통 폴링은 지금처럼 ±20%라, 입장 임박 구간은 0.4~0.6초 간격이고 ADR-0110의 지연 예산(다음 폴링까지 0~0.6초)이 그대로다.
+- **브라우저 캐시를 건너뛴다(추천 적용 2026-10-28, ADR-0110)**: 폴링은 `fetch(주소, {cache: "no-store"})`로 보낸다. 입장 임박 구간 파일은 `Expires`(다음 생성 시각)로 캐시되는데, 브라우저는 그 수명을 초 단위 `Date`로 계산해 같은 파일을 생성 뒤 최대 1초 더 내줄 수 있기 때문이다. 이때 브라우저가 스스로 붙이는 `Cache-Control: no-cache`·`Pragma: no-cache`는 사전 요청을 만들지 않고(Fetch 표준은 사전 요청 여부를 정한 뒤 이 두 헤더를 붙인다), CloudFront는 시청자 요청의 두 헤더를 무시해 엣지 캐시로 답한다(AWS 개발자 안내서, 2026-10-28 확인). 쿼리 문자열로 캐시를 깨는 방식은 CDN 캐시 키가 갈라져 쓰지 않는다.
+- 매진(`SOLD_OUT`)·판매 종료(`ENDED`)면 폴링을 멈춘다. 먼 구간의 매진 감지는 최대 약 25초 걸린다(정본). 일시 매진(`ALL_HELD`)은 좌석이 돌아올 수 있으므로 폴링을 그대로 이어 간다(ADR-0122).
+- **여러 탭: 보이는 탭이 리더다(추천 적용 2026-10-28, 기술 검토 중간-037)**: 같은 회차를 연 탭이 여럿이면 Web Locks `queue-poll:{eventId}`를 쥔 탭(리더)만 폴링하고, 받은 값을 `BroadcastChannel`로 다른 탭에 나눈다(§4.7·§5.9). 숨긴 탭이 리더면 간격이 최소 5초가 되고, Chrome은 5분 넘게 숨긴 소리 없는 탭의 연쇄 타이머를 1분에 한 번만 깨운다(Chrome 88부터, Chrome 개발자 블로그 'Heavy throttling of chained JS timers', 2026-10-28 확인). 그러면 보고 있는 탭도 1분에 한 번만 값을 받아 차례 판정·'곧 입장' 표시·입장 확정이 늦어진다. 그래서 다음처럼 한다.
+  - 잠금은 보이는 탭만 청한다. 리더가 숨겨지면(`visibilitychange`) 잠금을 바로 놓고, 기다리던 보이는 탭이 이어받는다. 숨겨진 탭은 청해 둔 요청도 거둔다(`AbortSignal`).
+  - 리더가 아닌 보이는 탭은 리더의 마지막 방송이 자기 간격의 2배보다 오래되면 스스로 한 번 묻고 방송한다(리더가 멈췄거나 잠금 넘김이 늦은 경우).
+  - 보이는 탭이 하나도 없으면 리더도 없다. 숨긴 탭은 각자 숨긴 간격(최소 5초)으로 묻되, 다른 탭의 방송이 자기 간격의 2배 안에 있었으면 묻지 않는다. 그래서 숨긴 탭이 여럿이어도 대개 한 탭만 묻는다.
+  - 차례가 오면 입장 확정은 리더(보이는 탭)만 보낸다. 자동 배정 공연의 차례 직전 직접 확인도 같다. 보이는 탭이 없으면 숨긴 탭은 입장 확정을 보내지 않고 탭 제목·소리·웹 푸시로 알린다. 탭이 보이면 그 탭이 리더가 되어 바로 보낸다. 보는 사람이 없는 동안 입장 자리(첫 사용 기한 5분)를 잡아 두지 않으려는 것이고, 늦게 와도 15분 유예가 있다(POL-008). 다른 탭은 리더의 입장 결과 방송을 받으면 `duplicate` 상태(화면 invalid, "이미 다른 기기나 탭의 대기표로 입장했습니다. 처음 입장한 곳에서 계속하세요", design/d5 §5.8)로 끝낸다.
+  - 남는 한계: 리더가 바뀌는 순간에는 묻기가 한 번 겹치거나 한 간격만큼 빌 수 있다. 모든 탭이 숨겨진 동안은 지금처럼 차례를 늦게 알아챌 수 있고, 15분 유예가 받는다.
 
 **차례와 입장**
 
-- serving ≥ 내 순번이면 바로 입장 확정을 보낸다. 자동 배정 공연은 예상 대기가 10초 [가정] 안으로 들어오면, 차례가 올 예상 시각에 맞춰 직접 확인을 보낸다. `NOT_YET`이면 `retryAfterMs` 뒤 다시 보낸다(정본, 시도 간격 1초 이상).
+- serving ≥ 내 순번이면 리더 탭(보이는 탭)이 바로 입장 확정을 보낸다(위 '여러 탭'). 자동 배정 공연은 예상 대기가 10초 [가정] 안으로 들어오면, 차례가 올 예상 시각에 맞춰 직접 확인을 보낸다. `NOT_YET`이면 `retryAfterMs` 뒤 지터 없이 다시 보낸다(정본, 시도 간격 1초 이상, §4.1). `SOON`의 `retryAfterSeconds`는 하한이라 위쪽으로만 0~20% 흔든다(§4.1).
 - 차례 1분 [가정] 전에 팬 토큰을 미리 갱신한다. 좌석 화면 자원(좌석맵 파일과 좌석 화면 자산 목록 `/_q/seat-preload.json`의 파일)은 `fetch(…, {priority: "low"})`로 미리 받는다. 좌석맵 파일 경로는 아직 대기 상태 파일에 없어서 wbs 0.2.3에서 더한다(§6.2). Safari는 `<link rel="prefetch">`를 지원하지 않으므로 `fetch`로 HTTP 캐시를 미리 채운다.
 - 차례가 가까울 때의 알림: 탭 제목 카운트다운, 짧은 효과음(사용자가 [차례 알림 받기]를 누른 동작으로 오디오를 열어 둔다), 웹 푸시(권한이 있을 때 서버가 보낸다). 백그라운드 탭은 타이머가 제한되어 늦게 알아챌 수 있다. 그래서 15분 유예가 있다(POL-008).
 
 **인앱 브라우저**: 대기실과 입장용 등록 전에, 사용자 에이전트 문자열(카카오톡·네이버·인스타그램·페이스북·라인 등의 인앱 표지)로 인앱 브라우저를 감지해 SCR-058로 보낸다 [가정, 표지 목록은 wbs 2.10.6에서 실기로 확정]. 감지는 안내용이고, 서버 판정에는 쓰지 않는다.
 
-**텔레메트리 lite**: 표본(1% [가정])에 든 브라우저는 대기 반영 시간·폴링 실패·화면 오류 수를 60초마다, 그리고 탭이 숨겨질 때 `/_t/rum`으로 보낸다. 오류 도구 SDK는 싣지 않고, `error`·`unhandledrejection`을 최소 사건으로 보낸다(§5.16).
+**텔레메트리 lite**: 표본(1% [가정])에 든 브라우저는 폴링 실패·화면 오류 수를 60초마다, 그리고 탭이 숨겨질 때 `/_t/rum`으로 보낸다. 차례 반영 지연(`queue_reflect_ms`)은 표본과 상관없이 모든 브라우저가 차례가 올 때 한 번 보낸다(초당 약 28건. p99를 판정할 표본 수를 얻으려는 것이다, 추천 적용 2026-10-28, ADR-0110). 오류 도구 SDK는 싣지 않고, `error`·`unhandledrejection`을 최소 사건으로 보낸다(§5.16).
 
 ### 5.2 좌석맵 렌더링과 실시간 델타
 
@@ -966,11 +1029,13 @@ function nextDelayMs(s: QueueView, net: NetState, vis: DocumentVisibilityState):
 - **좌석맵 파일 크기**: 5만 석 JSON은 객체 배열로 내면 수 MB가 될 수 있다. 구역별 열 단위 배열(`row[]`, `number[]`, `x[]`, `y[]`, `tier[]`, `flags[]`)로 내면 압축 전 1MB 안팎, brotli 압축 뒤 수백 KB로 본다(추정, K5에서 잰다). 판 번호가 파일 이름에 들어가 `immutable`이고 대기 중에 미리 받으므로, 통과 뒤 경로에서는 대개 내려받지 않는다.
 - **그리기**: 전체 배치도는 구역 도형만 그린다. 좌석이 보이는 배율에서는 화면에 보이는 구역만 그리되, 구역별로 미리 그린 비트맵 위에 바뀐 좌석만 덧칠한다. 비트맵 캐시는 LRU로 64MB [가정]를 넘지 않는다. 확대·축소는 카메라 행렬만 바꾼다(seat-hold §10).
 - **메인 스레드**: 입력 처리기는 16ms 안에 끝내고, 계산은 Worker로 보낸다. 긴 작업은 `MessageChannel`로 다음 작업에 넘기는 공용 함수로 쪼갠다(`scheduler.yield()`는 Safari에 없다).
-- **접근성 목록**(CMP-022): 지금 구역의 열·좌석만 DOM으로 그리고, 가상 스크롤(TanStack Virtual)을 쓴다. 교차 출처 격리 상태면 SharedArrayBuffer의 상태를 바로 읽는다. 아니면 Worker가 보낸 구역 변경분으로 갱신한다.
+- **접근성 목록**(CMP-022): 지금 구역의 열·좌석만 DOM으로 그리고, 가상 스크롤(TanStack Virtual)을 쓴다. 좌석 상태는 Worker가 보내는 메시지로만 받는다(추천 적용 2026-10-28, 기술 검토 중간-015). 목록이 구역을 열면 그 구역의 상태 전체(`sectionState`)를 한 번 받고, 그 뒤에는 바뀐 좌석만(`stateChanged`) 받는다(§4.7). 배열은 복사하지 않고 소유권을 넘겨 보낸다(Transferable). 구역 하나의 상태는 좌석 수만큼의 바이트라, 큰 구역도 수 KB [가정]다.
+- **공유 메모리를 쓰지 않는 이유**(추천 적용 2026-10-28, 기술 검토 중간-015): 좌석 상태를 SharedArrayBuffer(여러 스레드가 함께 읽고 쓰는 메모리)로 메인 스레드와 나누려면 문서에 교차 출처 격리를 켜야 한다. 그러려면 좌석 라우트에 COEP `require-corp`를 두어야 하고, 그 경로의 모든 교차 출처 자원(이미지·사람 확인 위젯 등)이 CORP나 CORS 헤더를 보내야 한다. 메시지 길은 격리가 없는 브라우저 때문에 어차피 있어야 하고, 공유 메모리로 얻는 이득은 잰 적이 없다. 그래서 길을 하나만 둔다.
+- **메시지 비용 예산과 바꿀 조건**: 메인 스레드가 상태 메시지 하나를 받아 목록에 반영하는 시간은 p95 2ms [가정] 이하이고, 이 처리가 조작 경로의 긴 작업(50ms를 넘는 작업)이 되지 않아야 한다. FE-T10이 측정 캠페인(wbs 7.5.2)에서 잰다. 이 예산을 넘고 원인이 메시지 복사·해독으로 확인되면, 그때 공유 메모리 길을 새 ADR로 다시 검토한다. 그 ADR에는 COEP와 교차 출처 자원 헤더의 비용을 함께 적는다.
 - **누른 좌석 찾기**: Worker의 구역별 격자 색인으로 찾고, 결과(`hit`)를 메인 스레드에 보낸다. 좌석은 고를 수 있는 배율에서 24×24 CSS px 이상으로 그린다(WCAG 2.5.8, §5.11).
 - **Degraded**: 서버가 `BatchInterval`(1초)을 보내면 화면에 '지연 표시'를 띄우고, 헛클릭 409가 늘 수 있다고 안내한다. 전체 보기 구역의 5초 스냅샷은 평시와 같다(정본, §6.2).
 - **측정**: `seatmap_ready_ms`(통과부터 첫 그림), `seat_delta_e2e_ms`, 조작 INP, 긴 작업, 힙(memlab). Lighthouse CI는 CPU를 4배 느리게 하는 스로틀로 돈다(NFR-012).
-- **PoC**(wbs 2.6.4, 2.10.1): iOS 16.4~17의 OffscreenCanvas 성능, Worker 스크립트의 COEP·SharedArrayBuffer, 5만 석 파일 크기와 해독 시간.
+- **PoC**(wbs 2.6.4, 2.10.1): iOS 16.4~17의 OffscreenCanvas 성능, 5만 석 파일 크기와 해독 시간. 좌석 라우트의 COEP·SharedArrayBuffer PoC는 공유 메모리 길을 두지 않으므로 하지 않는다(기술 검토 중간-015).
 
 ### 5.3 구매 세션 서명과 결제 복귀
 
@@ -998,6 +1063,7 @@ sequenceDiagram
   R->>R: 결과 화면, 세션 끝나면 키 삭제
 ```
 
+- **남길지(추천 적용 2026-10-28, ADR-0124)**: 이 서명기는 wbs 3.4.1의 탈취 재현 시험(S-T16)이 '막는 피해가 방해 수준뿐'으로 나오면 빠진다. 그때는 아래 키 저장(`peaket-purchase`)·Web Locks `ps:{jti}`·서명 시험 벡터(FE-T7)를 지우고, 구매 세션은 gw-fan이 주는 `__Host-peaket_ps` 쿠키(HttpOnly)와 기기 식별값 확인으로 묶는다. 화면이 따로 할 일은 없다(쿠키는 브라우저가 싣는다).
 - **서명**: `mac = base64url(HMAC-SHA256(key, utf8(METHOD + "\n" + pathAndQuery + "\n" + seq + "\n" + base64url(SHA-256(body)))))`. `pathAndQuery`는 보낸 주소의 경로와 쿼리를 호스트 없이 그대로 쓴다. 본문이 없으면 빈 바이트의 해시를 쓴다. 서버와 같은 시험 벡터를 `@peaket/api-client`와 purchase-svc가 함께 쓴다(FE-T7).
 - **순서 보장**: Web Locks `ps:{jti}`를 잡고, IndexedDB에서 일련번호를 올린 뒤 요청을 보낸다. 잠금은 응답(또는 시간 초과)이 올 때까지 놓지 않는다. 복제한 탭이 같은 입장 토큰을 가져도, 두 요청이 겹쳐 날아가 번호가 뒤집히는 일이 없다. 구매 세션 요청은 사람이 누를 때만 생기므로, 하나씩 차례로 보내도(직렬화) 느려지지 않는다.
 - **401**: 서명 불일치·일련번호 재사용·입장 토큰 만료를 가를 `type`이 아직 없다(wbs 0.2.3). 팬 쿠키를 한 번 갱신한 뒤에도 401이면 구매 세션이 끝난 것으로 본다. 키를 지우고 SCR-010 '예매 시간이 끝났습니다'로 간다. 차례가 온 뒤 15분 안이면 대기실에서 같은 대기표로 다시 입장한다.
@@ -1014,7 +1080,7 @@ sequenceDiagram
 - **킬 스위치**: 같은 주소로 '등록 풀기와 캐시 지우기'만 하는 워커를 내면, 다음 방문 때 정리된다. 이 방법은 RB-23(되돌리기)에서 쓴다.
 - **입장용 휴대폰 등록**: 데스크톱이면 휴대폰을 먼저 권한다. iOS 브라우저 탭이면 홈 화면 앱에서 등록하라고 안내하고, 인앱 브라우저면 SCR-058로 보낸다(정본). 등록할 때 `navigator.storage.persist()`를 요청하고, 결과를 `meta.persistGranted`에 둔다.
 - **iOS 7일 삭제**(ADR-0079 결정 19, offline-gate §4): 월렛을 열 때마다 `persist()`를 다시 요청한다. 서버가 등록했다는 티켓의 키가 이 기기에 없으면 design/d5 §5.13의 '저장소 유실' 상태를 보인다. 입장 시작 전이면 "이 기기에서 티켓을 다시 받아야 합니다"와 함께 재인증 뒤 다시 받기를 보인다(티켓당 24시간 1회). 입장이 시작된 뒤면 부스 재발급을 안내한다. 공연 전날·당일 알림(design/d5 §9.1 8번)에는 '티켓 화면을 한 번 열어 주세요'라고 쓴다.
-- **QR 그리기**: QR Worker가 15초마다 서명하고, 메인 스레드가 QR 부호화 라이브러리로 Canvas에 그린다. 라이브러리는 wbs 5.1.3 PoC에서 인식 시간을 기준으로 고른다(후보의 마지막 게시가 2024년이라 위험 구성 요소로 본다, §5.14). 화면 폭 90%, 밝기 안내, QR이 보이는 동안 화면 꺼짐 방지(iOS 18.4부터)를 둔다.
+- **QR 그리기**: 화면이 다시 보이는 순간과 보이는 동안 15초마다 그 순간의 보정 시각으로 서명하고(메인 스레드에서 해도 되고 QR Worker는 선택이다, §3.7, 추천 적용 2026-10-28, 기술 검토 낮음-076), 메인 스레드가 QR 부호화 라이브러리로 base45 글자를 영숫자 모드로 Canvas에 그린다. 라이브러리는 wbs 5.1.3 PoC에서 인식 시간을 기준으로 고른다(후보의 마지막 게시가 2024년이라 위험 구성 요소로 본다, §5.14). 화면 폭 90%, 밝기 안내, QR이 보이는 동안 화면 꺼짐 방지(iOS 18.4부터)를 둔다.
 - **로그아웃**: 기본은 키와 오프라인 티켓을 남긴다. '이 기기의 입장 키도 지우기'를 고르면 `peaket-wallet`과 서비스 워커 캐시를 지우고 등록을 푼다(ADR-0079 결정 17).
 
 ### 5.5 스캐너 오프라인 판정
@@ -1025,16 +1091,17 @@ sequenceDiagram
 | --- | --- | --- |
 | 1 | 카메라 프레임 → `createImageBitmap` → 판정 Worker로 옮긴다 | 10ms |
 | 2 | 디코딩: Worker에 `BarcodeDetector`가 있으면 그것을 쓰고, 없으면 zxing-wasm을 쓴다 | 60ms |
-| 3 | 형식 해독(93바이트), 시각 창 ±30초 확인 | 1ms |
+| 3 | base45 글자를 93바이트로 풀고 형식 해독, 시각 창 ±30초 확인 | 1ms |
 | 4 | Dexie 조회(티켓·키·폐기·입장 상태) | 10ms |
 | 5 | WebCrypto ECDSA P-256 검증(공개키 `CryptoKey`는 Worker 메모리에 캐시해 둔다) | 5ms |
-| 6 | 결과를 메인 스레드에 보내 오버레이·소리·진동으로 알린다 | 20ms |
-| 합 | | 약 106ms |
+| 6 | 스캔 기록을 `peaket-scanner-queue`에 strict 내구성으로 쓰고 완료를 기다린다(추천 적용 2026-10-28, 기술 검토 중간-059) | 20ms [가정, wbs 5.4.7에서 측정] |
+| 7 | 결과를 메인 스레드에 보내 오버레이·소리·진동으로 알린다 | 20ms |
+| 합 | | 약 126ms |
 
 - **카메라**: 후면, 1280×720, 초당 15프레임 [가정]. 같은 QR을 2초 [가정] 안에 다시 읽으면 무시하고, 판정 오버레이가 떠 있는 2초 동안은 다음 프레임을 버린다(정본: 2초 [가정] 뒤 뷰파인더로 돌아온다).
 - **판정 순서**: offline-gate §6.4가 정본이다. 판정 중 예외는 통과가 아니라 '다시 찍어 주세요'로 처리한다(fail-closed).
 - **CSP**: zxing-wasm 때문에 스캐너에만 `'wasm-unsafe-eval'`을 둔다. JavaScript 문자열 실행(`eval`)은 여전히 막힌다.
-- **기록과 업로드**: 판정마다 `ScanEvent`(UUIDv7)를 Dexie `scanQueue`에 먼저 쓰고, 온라인이면 5초 [가정] 단위로 묶어 올린다. 실패하면 지수적으로 늘어나는 대기(1초 → 30초 상한 [가정])를 두고 다시 올린다. 일회성 Background Sync는 예비 수단이다(ADR-0051). 로그아웃은 업로드를 비운 뒤 한다.
+- **기록과 업로드**: 판정마다 `ScanEvent`(UUIDv7)를 Dexie `scanQueue`(DB `peaket-scanner-queue`, strict, §3.8)에 먼저 쓰고, 쓰기 트랜잭션이 끝난 뒤에 통과·거부 화면을 띄운다. 그래서 통과를 보인 기록은 배터리가 갑자기 꺼져도 남는다. strict 쓰기가 판정 지연 예산(p95 150ms)을 넘기면 wbs 5.4.7에서 잰 값으로 단계 6을 다시 정하되, 쓰기 완료 전에 통과를 보이지는 않는다. 온라인이면 5초 [가정] 단위로 묶어 올린다. 실패하면 지수적으로 늘어나는 대기(1초 → 30초 상한 [가정])를 두고 다시 올린다. 업로드가 401 `invalid_token`이면(해제·교대·만료로 세션이 끝남) `session`의 토큰을 지우고 같은 묶음을 토큰 없이 기기 키 증명만으로 바로 다시 보낸다. `invalid_dpop_proof`면 토큰은 두고 증명만 새로 만든다(offline-gate §6.5, 추천 적용 2026-10-28, 기술 검토 낮음-074). 일회성 Background Sync는 예비 수단이다(ADR-0051). 로그아웃은 업로드를 비운 뒤 한다.
 - **변경분**: 화면이 켜진 동안 60초마다 `after=cursor`로 받는다. 2분 [가정] 넘게 받지 못하면 상단 띠와 관제·파트너에 동기화 경보가 간다(정본).
 - **화면 유지**: 스캔 화면에서 Wake Lock을 잡고, 화면이 다시 보이면(`visibilitychange`) 다시 잡는다(잠금은 화면을 숨기면 풀린다). 관리형 기기라 전체 화면·화면 방향 잠금(Android Chrome)도 쓴다.
 - **새 판**: 근무 준비 때만 적용하고, 입장 시간에는 보류한다. 스캐너 API는 최근 두 앱 판과 호환된다(devops §6.6).
@@ -1043,31 +1110,41 @@ sequenceDiagram
 ### 5.6 파트너 콘솔: 좌석맵 에디터와 늦게 싣기
 
 - **구성**: 왼쪽 계층 트리(`role="tree"`) · 가운데 캔버스 · 오른쪽 속성 패널(design/d5 §6.5). 캔버스는 배치 층과 좌석 층 두 겹이다. 도구 막대는 [① 배치 그리기][② 좌석 채우기][③ 좌석 다듬기][미리보기]다.
+- **편집 캔버스는 Konva로 만든다(추천 적용 2026-10-28, 기술 검토 중간-016)**: 편집 캔버스는 MIT 라이브러리 Konva 10.9로 만든다. Konva는 도형마다 사건·끌기·변형을 가진 장면 그래프(그릴 것을 나무 모양으로 들고 있는 구조)를 Canvas 2D 위에 주는 라이브러리이고, 런타임 의존 패키지가 없다. React 묶음(react-konva)은 쓰지 않는다. CMP-051이 Stage(Konva의 그리기 판)를 만들어 명령형으로 다루고, 저장소 구독으로 고친다(§3.9).
+  - Konva에 맡기는 것: 고른 도형의 모서리·변 손잡이와 회전(`Transformer`), 끌기, 누른 도형 찾기, 화면 확대·이동(Stage 변형), 끌어 상자 고르기.
+  - Konva 위에 만드는 것: 다각형 꼭짓점과 '＋ 꼭짓점 더하기' 점, 부채꼴·곡선 띠의 반지름·각도 손잡이(끌 수 있는 작은 도형), 정렬 안내선·치수·격자 맞춤(끄는 동안의 사건에서 계산), 좌우 대칭 복제.
+  - 좌석은 노드로 만들지 않는다. 구역마다 사용자 도형 하나가 그 구역의 좌석 배열을 한 번에 그린다. 5만 석을 노드 5만 개로 만들면 장면을 관리하는 비용이 커지기 때문이다 [가정, FE-T33으로 확인]. 그래서 좌석 누르기·상자 고르기·행 고르기는 팬 좌석맵처럼 구역별 격자 색인으로 찾는다.
+  - 좌석맵만의 계산(자동 채우기, 줄 맞추기·간격 고르게·통로 만들기·번호 다시 매기기, 검사, 내보내기)은 지금처럼 에디터 Worker와 저장소 명령이 한다. Konva는 그리기와 조작만 맡는다.
+  - 직접 만들지 않는 이유: 손잡이·회전·끌기·누른 도형 찾기는 좌석맵만의 일이 아니라 흔한 편집기의 일이다. 오래 다듬어진 라이브러리를 쓰면 마우스·터치·펜과 고해상도 화면에서 생기는 가장자리 경우를 다시 겪지 않는다. 팬 좌석맵과 그리기 엔진을 나눠 쓰는 이득은 작다. 팬 좌석맵은 Worker 안 OffscreenCanvas에서 보기와 누르기만 하고, 에디터는 메인 스레드에서 고르고 끈다. 그래서 미리보기만 팬 렌더러(`packages/seatmap`)를 쓴다. 숫자 입력과도 맞는다. 노드의 x·y·크기·회전을 속성 패널 값과 1:1로 잇는다.
+  - 견준 것: Fabric.js 7.4(MIT, 손잡이가 들어 있지만 전체 배포 파일이 gzip 89.8 KiB로 Konva 57.0 KiB보다 크고, 자체 객체 모델을 따로 익혀야 한다), PixiJS 8(MIT, WebGL로 많은 점을 빨리 그리지만 손잡이·고르기가 없어 직접 만들어야 한다), tldraw(운영 환경에는 라이선스 키가 필요해 뺐다), 직접 만들기(위 이유).
+  - 덩어리 예산: 에디터 300KB [가정]은 그대로다. Konva는 핵심 묶음(`konva/lib/Core`)에 쓰는 도형만 더해 싣는다.
+  - 성능 목표와 바꿀 조건: FE-T33(§5.17)이 잰다. 목표를 못 맞추고 원인이 Konva 장면(노드 수·손잡이 계산)이면, 먼저 좌석 층을 Konva 밖의 캔버스 한 장으로 뺀다. 그래도 못 맞추면 편집 캔버스를 직접 만드는 쪽을 새 ADR로 정한다.
+  - Trusted Types(DOM에 HTML을 넣는 곳을 정책으로만 허용하는 브라우저 규칙): Konva 10.9.0은 Stage를 만들 때 담는 요소를 `innerHTML = ""`로 비운다(배포 파일에서 확인). 파트너 콘솔에 Trusted Types를 강제하기 전에, 기본 정책이 이 빈 문자열만 통과시켜도 되는지 확인한다(확인 필요, ADR-0079 결정 14의 넓히는 순서).
 - **계산은 Worker**: 자동 채우기, 겹침·도형 밖 검사, 휠체어석 W1~W3, 내보내기를 에디터 Worker가 맡는다. 가져오기(SVG·JSON·CSV)는 서버(`POST …/seatmap-imports`)가 해석해 행별 검증 결과를 돌려준다. 큰 파일은 진행률(CMP-016)을 보이고, 취소할 수 있다. 서버는 저장할 때 다시 검사한다.
-- **키보드와 끌기 대안**: 이동 폭은 화살표 10cm·Shift+화살표 1m [가정]이다. 모든 끌기는 숫자 입력으로도 된다(WCAG 2.5.7). 가격 등급 순서(CMP-050 DnDList)는 위로·아래로 버튼이 대안이다.
+- **키보드와 끌기 대안**: 이동 폭은 화살표 10cm·Shift+화살표 1m [가정]이다. 모든 끌기는 숫자 입력으로도 된다(WCAG 2.5.7). 목록 순서 바꾸기(CMP-050 ReorderList: 가격 등급, 관제 홈 구성의 배너·테마)는 위로·아래로 버튼으로만 한다. 끌어 놓기 라이브러리(`@hello-pangea/dnd`)는 쓰지 않는다. 목록이 짧아 버튼으로 충분하고, 버튼은 어차피 필수이며(2.5.7), 그 라이브러리는 2025-02 뒤로 새 판이 없는 위험 구성 요소였다(§5.14.5, 추천 적용 2026-10-28, 기술 검토 낮음-098).
 - **되돌리기와 저장**: §3.9를 따른다. 자동 임시저장은 마지막 입력 뒤 2초 [가정] 동안 새 입력이 없으면 한다. 저장 중 표시와 마지막 저장 시각을 보인다.
 - **내보내기의 수식 방지**: CSV 칸이 `=`·`+`·`-`·`@`·탭·CR로 시작하면 앞에 작은따옴표를 붙인다. guidelines §9의 규칙을 브라우저가 만드는 파일에도 적용한다(§6.2).
 - **SVG 가져오기**: 화면에 SVG를 그대로 넣지 않는다. 서버 가져오기가 돌려준 도형·좌표 데이터만 에디터가 그린다(ASVS 1.3.4, asvs/frontend.md).
-- **늦게 싣기**(추천 적용 2026-10-27, ADR-0091 결정 2): 경로 사이의 코드 분할(코드를 화면별로 쪼개 필요한 만큼만 보내는 것)은 Next.js App Router가 한다. 서버 컴포넌트는 경로마다 저절로 나뉘고, 한 경로 안의 무거운 클라이언트 부분은 클라이언트 컴포넌트 파일 안에서 `next/dynamic`으로 쓸 때 싣는다(`ssr: false`는 클라이언트 컴포넌트 안에서만 쓸 수 있다). 늦게 싣는 것은 아래 넷이고, 이것이 경로의 첫 화면 묶음에 들어가면 CI가 실패한다(FE-T25).
+- **늦게 싣기**(추천 적용 2026-10-27, ADR-0091 결정 2): 경로 사이의 코드 분할(코드를 화면별로 쪼개 필요한 만큼만 보내는 것)은 Next.js App Router가 한다. 서버 컴포넌트는 경로마다 저절로 나뉘고, 한 경로 안의 무거운 클라이언트 부분은 클라이언트 컴포넌트 파일 안에서 `next/dynamic`으로 쓸 때 싣는다(`ssr: false`는 클라이언트 컴포넌트 안에서만 쓸 수 있다). 늦게 싣는 것은 아래 넷이고(끌어 놓기 목록은 기술 검토 낮음-098로 빼고, 서식 글 편집기는 낮음-100으로 더했다), 이것이 경로의 첫 화면 묶음에 들어가면 CI가 실패한다(FE-T25).
 
 | 부분 | 화면 | 싣는 때 | 덩어리 예산(gzip) |
 | --- | --- | --- | --- |
 | 좌석맵 에디터 캔버스·에디터 Worker·도구 | SCR-022 | 에디터 경로에서 계층 트리와 뼈대를 그린 뒤(`ssr: false`) | 300KB [가정](§5.8) |
 | 판매 정책 시뮬레이터(DSL AST 평가기, `@peaket/validation/dsl` 하위 진입점) | SCR-024 | [시뮬레이션]을 열 때 | 30KB [가정] |
-| 끌어 놓기 목록(`@hello-pangea/dnd`, CMP-050) | SCR-021 가격 등급 단계 | 그 단계에 들어올 때 | 40KB [가정](배포 파일 전체 28.6 KiB, 2026-10-27에 잰 값) |
+| 서식 글 편집기(CMP-070, 후보 Lexical·Tiptap, 기술 검토 낮음-100) | SCR-021 공연 설명 칸 | 그 단계에 들어올 때 | 80KB [가정, FE-T41에서 확정] |
 | 그래프·히트맵(Chart.js, CMP-033·034) | SCR-023·026·027 | 숫자 타일을 먼저 그린 뒤 | 60KB [가정] |
 
 ### 5.7 관제 콘솔: 원격 위젯과 명령
 
 - **위젯 격자**: xl 4열·lg 3열·md 2열·sm 접힌 목록(design/d5 §3.3). 위젯마다 오류 경계와 스켈레톤이 따로 있어, 하나가 실패해도 나머지는 그린다(CMP-035).
-- **신선도**: 위젯 머리에 'n초 전'을 두고, 5초를 넘으면 경고 색으로 바꾼다. 실시간 표가 3분 넘게 늦으면 Prometheus 대체 표시와 <대체 표시> 배지를 보인다(정본). 실시간 숫자의 화면 갱신은 위젯마다 250ms [가정] 단위로 묶어(RxJS `auditTime`), 그리기가 몰리는 것을 막는다.
+- **신선도**: 위젯 머리에 'n초 전'을 두고, 5초를 넘으면 경고 색으로 바꾼다. 실시간 표가 3분 넘게 늦으면 Prometheus 대체 표시와 <대체 표시> 배지를 보인다(정본). 실시간 숫자의 화면 갱신은 위젯마다 250ms [가정] 단위로 묶어(호스트 스트림 어댑터의 `latestEvery`, §3.1), 그리기가 몰리는 것을 막는다.
 - **원격 실패**: §4.5의 대체 카드를 보인다. 실패는 `remote_load_failed_total{remote, reason}`로 센다(§5.16).
-- **명령 수명주기 화면**: CMP-036 상태(disabled·pending-approval·rejected·propagating·acked·failed·revert-pending·reverted·auto-expired)를 REST 상태와 Socket.IO ack로 갱신한다. ack가 3초를 넘으면 '전파 지연'을 보인다. 10초 [가정]를 넘으면 실패로 보고 수동 재시도와 비상 런북(장애가 났을 때 따라 하는 절차서) CLI를 안내한다(design/d5 §7.3). 2인 승인 요청은 승인 권한자에게 푸시 팝업으로 온다.
+- **명령 수명주기 화면**: CMP-036 상태(disabled·pending-approval·rejected·propagating·acked·failed·revert-pending·reverted·auto-expired)를 REST 상태와 늘 여는 SSE 흐름의 `command`로 갱신한다(ADR-0100). ack는 받는 쪽에서 집행하는 모든 곳이 판 N 이상을 적용했다는 뜻이다(ADR-0103). ack가 3초를 넘으면 '전파 지연'을 보인다. 10초 [가정]를 넘으면 실패로 보고 수동 재시도와 비상 런북(장애가 났을 때 따라 하는 절차서) CLI를 안내한다(design/d5 §7.3). 2인 승인 요청은 승인 권한자에게 푸시 팝업으로 온다.
 - **재인증과 유휴**: 위험 명령은 비밀번호·인증 앱 코드로 5분짜리 재인증 토큰을 받는다. 토큰은 지난 갱신 뒤 사람 입력이 있을 때만 갱신하고, 58분 [가정]에 '2분 뒤 자동으로 잠깁니다'를 띄운다(ADR-0079 결정 12, design/d5 §3.5).
 - **휴대폰**: 휴대폰 범위 밖의 일은 버튼을 숨기지 않고 안내 카드로 바꾼다. 서버는 화면 크기를 믿지 않는다(ADR-0061).
 - **콘솔 밖 도구**: Grafana·Sentry(앱 오류를 모아 알려 주는 서비스)는 '자세히 보기 ↗' 새 탭 링크로만 연다. 콘솔 안에 iframe으로 끼우지 않는다(ADR-0067).
 - **화면별 늦게 싣기**(추천 적용 2026-10-27, ADR-0091 결정 1): 관제 호스트는 React Router 8 데이터 라우터(`createBrowserRouter`)의 경로 `lazy`로 화면 16개(SCR-028~032·045~049·053·064~068)를 화면마다 따로 싣는다. 첫 화면 묶음에는 셸(위 상태 바·메뉴·경보 패널)과 로그인·대시보드 틀만 넣는다. 대시보드를 처음 그린 뒤 2초 [가정]가 지나면 명령 화면(SCR-030) 덩어리를 낮은 우선순위로 받아, 비상 때 첫 클릭이 내려받기를 기다리지 않게 한다. 그다음 다음 단계 탭(T-30분 점검 → T=0 → 판매 중 → 종료 후. 입장 탭은 공연 당일)의 원격을 Module Federation 런타임 `preloadRemote`로 미리 받는다. 메뉴 항목에 포인터가 올라가거나 초점이 가면 그 화면의 `lazy`를 미리 부른다. 화면 덩어리를 받지 못하면 그 화면 자리만 "화면을 불러오지 못했습니다 [다시 시도]"로 바꾸고, 배포 식별자가 바뀌었으면 "새 버전이 있습니다 [새로고침]"을 함께 보인다. 셸과 경보 패널은 그대로 둔다.
-- **안 보이는 위젯**(ADR-0091 결정 3): 호스트가 위젯 자리마다 구독을 멈추고 다시 연다(§4.5). 같은 영속 쿼리·변수의 구독은 하나로 묶고, 마지막 구독자가 떠나도 10초 [가정] 뒤에 닫는다(RxJS `share`의 `resetOnRefCountZero`에 10초 타이머). 그래서 탭을 오가며 확인해도 구독을 닫았다 여는 일이 반복되지 않는다.
+- **안 보이는 위젯**(ADR-0091 결정 3, 수단은 ADR-0100): 호스트가 위젯 자리마다 구독을 멈추고 다시 연다(§4.5). 같은 위젯 키의 구독은 하나로 묶고, 마지막 구독자가 떠나도 10초 [가정] 뒤에 목록에서 뺀다(호스트 스트림 어댑터의 `shareByKey`에 10초 타이머, §3.1). 보이는 위젯 목록이 바뀌면 1초 [가정] 묶어 위젯 SSE 흐름을 새 목록으로 다시 연다(§4.4.5). 그래서 탭을 오가며 확인해도 흐름을 닫았다 여는 일이 반복되지 않는다.
 
 | 상황 | 위젯 구독 | 그리기 |
 | --- | --- | --- |
@@ -1075,10 +1152,11 @@ sequenceDiagram
 | 접은 위젯 | 그대로 둔다(접힌 줄의 핵심 숫자가 계속 바뀌어야 한다) | 머리(제목·상태 점·핵심 숫자 한 줄)만 그린다. 휴대폰의 접힌 위젯 목록(design/d5 §3.3)과 같다 |
 | 화면 밖으로 스크롤됨 | 그대로 둔다(위젯마다 초당 1건 안팎이라 작다) | 멈춘다. 다시 보이면 마지막 값으로 한 번 그린다(`IntersectionObserver`) |
 | 브라우저 탭을 30초 [가정] 넘게 숨김 | 닫는다. 주기 조회도 멈춘다 | 그리지 않는다 |
-| 회차를 바꿈 | 이전 회차 것을 10초를 기다리지 않고 바로 닫고 방을 옮긴다(`room:leave`·`room:join`) | — |
+| 회차를 바꿈 | 이전 회차 것을 10초를 기다리지 않고 바로 닫는다. 위젯 흐름을 새 회차 주소로 다시 열고, 늘 여는 흐름도 새 `eventId`(접속자)로 다시 붙는다(`Last-Event-ID`로 빠진 사건은 없다) | — |
 
-- **멈추지 않는 것**: Socket.IO(`alert`·`command:ack`·`presence`), 위 상태 바가 쓰는 `control`·`autoActions` 구독, 세션·유휴 처리. 탭을 숨긴 동안 SEV1·SEV2 경보나 내 승인 대기가 있으면 탭 제목 앞에 그 수를 붙인다(예: `(SEV1 1 · 승인 1) 관제`, design/d5 §3.3).
-- **다시 보일 때**: 닫았던 구독을 다시 연다. 그래프 위젯은 최근 15분 창을 영속 쿼리로 한 번 받아 채운다. 첫 값이 오기 전에는 마지막 값을 'n초 전'과 함께 보인다(5초가 넘으면 경고 색, 위 신선도 규칙). graphql-ws는 구독마다 `complete`로 닫으므로 연결은 다시 맺지 않는다.
+- **멈추지 않는 것**: 늘 여는 SSE 흐름(`command`·`approval`·`alert`·`control`·`autoAction`·`presence`)과 세션·유휴 처리. 탭을 숨긴 동안 SEV1·SEV2 경보나 내 승인 대기가 있으면 탭 제목 앞에 그 수를 붙인다(예: `(SEV1 1 · 승인 1) 관제`, design/d5 §3.3).
+- **다시 보일 때**: 닫았던 구독을 다시 연다. 그래프 위젯은 최근 15분 창을 REST 위젯 조회(`/v1/ops/widgets/{widgetKey}`)로 한 번 받아 채운다. 첫 값이 오기 전에는 마지막 값을 'n초 전'과 함께 보인다(5초가 넘으면 경고 색, 위 신선도 규칙). 늘 여는 흐름은 그대로이고 위젯 흐름만 새 목록으로 다시 연다.
+- **Module Federation 쇼케이스와 기준선(추천 적용 2026-10-28, ADR-0100 결정 6)**: 같은 위젯 패키지로 만든 한 앱 빌드와 같은 화면을 견준다(FE-T29). 잴 것은 대시보드 첫 그림 시간(4배 느린 CPU, 빈 캐시·채운 캐시), 첫 화면 JS와 화면별 덩어리 크기, 원격 하나가 실패할 때 나머지 위젯·셸·경보 패널이 그대로인지, 위젯 하나를 고쳐 운영에 내기까지 다시 빌드·배포하는 저장소 수와 시간이다. 첫 그림 p75가 300ms [가정] 넘게 늦거나 첫 JS가 20% [가정] 넘게 크고, 따로 배포할 이득을 쓰는 원격이 하나뿐이면 한 앱으로 바꾼다.
 - **그래프와 들고 있는 양**(ADR-0091 결정 4): CMP-033 TimeSeriesChart는 Chart.js 4로 Canvas 2D에 그린다. 선·막대 컨트롤러와 요소, `LinearScale`, `Filler`·`Decimation`·`Tooltip` 플러그인만 등록한다. x축은 `linear`(밀리초)이고 눈금 글자는 `Intl.DateTimeFormat`으로 쓴다(시간 축은 날짜 라이브러리와 어댑터가 더 필요해서 쓰지 않는다). 실시간 갱신은 `animation: false`, `parsing: false`, `normalized: true`, 축의 최소·최대 지정, `chart.update('none')`로 한다. 점이 캔버스 폭의 4배(플러그인 기본값)를 넘으면 `min-max` 방식으로 줄인다(꼭짓점을 지킨다). 라이브러리는 `@peaket/ds`의 `TimeSeriesChart` API 뒤에 둔다. 그래프 한 선은 최근 15분(1초 점 900개) [가정]만 들고, 한 장의 선은 6개 [가정]까지다. 더 긴 기간은 '자세히 보기 ↗'(Grafana)로 본다(ADR-0067). Canvas 내용은 화면 낭독기가 읽지 못하므로 `<canvas role="img" aria-label="{요약}">`과 표 보기 전환을 둔다. CMP-034 HeatmapGrid는 DOM 격자로 그리고 값이 바뀐 칸만 다시 그리며, 구역이 400개 [가정]를 넘으면 표 보기로 연다. 경보 목록은 500건 [가정]까지 두고(§3.10), 50줄 [가정]을 넘으면 가상 스크롤로 그린다.
 - **관제 PC 브라우저 설정**(ADR-0091 결정 3): Chrome의 메모리 절약 기능(기본으로 켜짐)은 쓰지 않는 탭을 비활성화하고, 다시 열면 새로 불러온다. 그래서 관제 PC는 기업 정책 `TabDiscardingExceptions`(Chrome 108부터) 또는 설정의 '항상 활성 상태로 유지할 사이트'에 콘솔 주소를 넣는다. Chrome 133부터 에너지 절약 모드는 5분 넘게 숨겨지고 소리가 없으며 CPU를 많이 쓰는 탭을 얼린다. 숨긴 동안 위젯을 멈추면 CPU를 덜 쓰지만, 얼리지 않는다고 장담하지는 못한다(§6.3).
 
@@ -1089,40 +1167,43 @@ sequenceDiagram
 | 경로 묶음 | 첫 JS | CSS | 체감 목표 | 그 밖 | 강제 도구 |
 | --- | --- | --- | --- | --- | --- |
 | 대기실 경량 페이지 | 50KB 이하(정본), 목표 15KB [가정] | 10KB 미만(정본), 목표 8KB [가정] | LCP 2.5초, CLS 0.1 | 대기 반영 p99 2초(NFR-002) | size-limit(PR 실패), Lighthouse CI |
-| 홈·공연 상세·굿즈(ISR) | 170KB [가정] | 25KB [가정] | LCP p75 2.5초, TTFB 0.8초, CLS 0.1 | 공연 이미지 AVIF·WebP, Pretendard 서브셋 | size-limit, Lighthouse CI(모바일 4배 CPU) |
+| 홈·공연 상세·굿즈(ISR) | 170KB [가정] | 25KB [가정] | LCP p75 2.5초, TTFB 0.8초, CLS 0.1 | 공연 이미지 AVIF·WebP(올릴 때 만든 파생본을 `srcset`으로 고른다, §5.14.1), Pretendard 서브셋 | size-limit, Lighthouse CI(모바일 4배 CPU) |
 | 좌석 화면 | 200KB [가정] + Worker 60KB [가정] | 20KB [가정] | 통과 뒤 첫 그림 1초 미만, INP 200ms(4배 CPU), 긴 작업 0 | 비트맵 캐시 64MB [가정]. v0(메인 스레드 Canvas) 대비 힙 감축률은 보조 숫자로 적고 합격 판정에 쓰지 않는다(ADR-0096) | size-limit, Playwright 성능 추적, memlab, Lighthouse CI |
 | 결제 화면 | 180KB [가정](결제사 SDK 제외) | 20KB [가정] | INP 200ms, 결제 확정 p99 3초(NFR-006) | 결제사 SDK를 싣는 시간은 따로 잰다(G-25) | size-limit, RUM |
 | 월렛 | 120KB [가정] | 15KB [가정] | 오프라인 첫 그림 1초 [가정] | QR 회전 그리기 50ms [가정] | size-limit, Playwright 오프라인 |
 | 그 밖 소비자 화면 | 200KB [가정] | 25KB [가정] | INP 200ms, LCP 2.5초 | | size-limit |
-| 파트너 콘솔 | 경로마다 250KB [가정]. 늦게 싣는 덩어리: 에디터 300KB [가정], 시뮬레이터 30KB [가정], 끌어 놓기 40KB [가정], 그래프 60KB [가정](§5.6) | 30KB [가정] | INP 200ms(전 화면, NFR-012) | 10MB 파일 가져오기의 진행률 표시, 판매 현황을 8시간 [가정] 켜 둔 뒤의 힙·DOM 기준(FE-T27) | size-limit, FE-T25, Lighthouse CI(판매 현황 데모), Playwright, memlab(FE-T27) |
-| 관제 콘솔 | 호스트 250KB [가정], 화면으로 처음 이동할 때 더 받는 덩어리마다 80KB [가정], 원격마다 80KB [가정], 그래프 공유 덩어리 60KB [가정] | 30KB [가정] | INP 200ms, 지표 반영 p95 5초(NFR-009) | 위젯 그리기 묶음 250ms [가정], 4시간 [가정] 켜 둔 뒤의 힙 증가 시간당 5% [가정] 이하·긴 작업 0(FE-T27) | size-limit(원격 저장소 CI에도), FE-T25·FE-T26, Lighthouse CI(대시보드 데모), Playwright 성능 추적·memlab(FE-T27) |
+| 파트너 콘솔 | 경로마다 250KB [가정]. 늦게 싣는 덩어리: 에디터 300KB [가정], 시뮬레이터 30KB [가정], 그래프 60KB [가정], 서식 글 편집기 80KB [가정](§5.6. 끌어 놓기 덩어리는 기술 검토 낮음-098로 없앴다) | 30KB [가정] | INP 200ms(전 화면, NFR-012) | 10MB 파일 가져오기의 진행률 표시, 판매 현황을 8시간 [가정] 켜 둔 뒤의 힙·DOM 기준(FE-T27) | size-limit, FE-T25, Lighthouse CI(판매 현황 데모), Playwright, memlab(FE-T27) |
+| 관제 콘솔 | 호스트 250KB [가정], 화면으로 처음 이동할 때 더 받는 덩어리마다 80KB [가정], 원격마다 80KB [가정], 그래프 공유 덩어리 60KB [가정] | 30KB [가정] | INP 200ms, 지표 반영 p95 5초(NFR-009) | 위젯 그리기 묶음 250ms [가정], 4시간 [가정] 켜 둔 뒤의 힙 증가 시간당 5% [가정] 이하·긴 작업 0(FE-T27) | size-limit(원격 저장소 CI에도), FE-T25·FE-T26, Lighthouse CI(대시보드 데모), Playwright 성능 추적·memlab(FE-T27), 한 앱 기준선 비교(FE-T29, ADR-0100) |
 | 스캐너 | 150KB [가정] + 디코더 WebAssembly(서비스 워커가 미리 저장해 둔다) | 15KB [가정] | 판정 p95 150ms(NFR-010) | 첫 실행은 근무 준비 때 | 기기 벤치, size-limit |
 | 포렌식 리플레이(1단계 데모, 2단계 페이지) | 200KB [가정](`apache-arrow` 포함) + Worker 80KB [가정] | 20KB [가정] | 필터 반영 p95 50ms [가정], 재생 p95 프레임 20ms [가정], INP 200ms | 사건 300만·파일 200MB [가정] 상한(docs/features/forensic-replay.md §4.3) | size-limit, Playwright 성능 추적, memlab |
 
-- **RUM이 정본**: 랩 숫자(Lighthouse·Playwright)는 성능 회귀를 막는 장치다. 목표 달성 여부는 RUM p75(모바일·데스크톱 따로, 28일과 온세일 윈도우 따로)로 판정한다(NFR-012).
-- **Lighthouse CI**: `@lhci/cli`로 PR마다 대표 주소(홈, 공연 상세, 대기실 셸, 좌석 화면 데모, 결제 데모, 월렛, 관제 대시보드 데모, 파트너 판매 현황 데모. 콘솔 둘은 가짜 API로 띄운다, ADR-0091)를 검사한다. 예산을 넘으면 병합을 막는다(observability §11). `@lhci/cli`는 2025-06 뒤 게시가 없어 위험 구성 요소로 본다(§5.14).
-- **좌석맵 INP 시나리오**: Playwright가 CPU를 4배 느리게 한 상태(Chrome DevTools 프로토콜)에서 확대 → 구역 구독 → 좌석 10개 연속 선택 → 홀드 버튼 누르기를 하고, 이벤트 타이밍(`interactionId`)과 긴 작업을 모은다. Chromium에서만 잰다(Safari는 INP를 26.2부터 낸다).
+- **판정은 둘로 나눈다(추천 적용 2026-10-28, 기술 검토 중간-003)**: 운영 판정은 RUM(실제 사용자 브라우저에서 잰 값) p75(모바일·데스크톱 따로, 28일과 온세일 윈도우 따로)다(NFR-012). 포트폴리오에는 실제 사용자가 없어 RUM 판정을 할 수 없다. 그래서 포트폴리오 판정은 랩으로 하고 '랩 판정'으로 표시한다. 합성 세션을 RUM이라 부르지 않는다. 랩 판정은 Playwright 스크립트 조작 + web-vitals 계측이고, 중급 모바일 프로필(Lighthouse 모바일 기본값: 화면 412×823, CPU 4배 느림, 망 왕복 150ms·내려받기 1.6Mbps)에서 같은 시나리오를 20회 [가정] 반복해 p75로 낸다. CPU 4배는 고성능 PC를 중급 모바일 쪽으로 옮기는 Lighthouse 기본 배수다. 측정 PC가 다르면 Lighthouse 안내의 성능 지수(`benchmarkIndex`) 표로 배수를 고쳐 `infra.txt`에 적는다(docs/perf-ledger.md §2.1). 반복마다 INP·긴 작업 수·LoAF 수를 성능 장부에 남긴다.
+- **회귀 방지와 판정의 도구가 다르다**: Lighthouse CI의 탐색 모드(기본 모드)는 페이지 적재 한 번만 분석해 INP를 내지 못한다. Lighthouse의 INP 감사는 조작이 들어간 시간 구간을 재는 타임스팬 모드에서만 돈다(Lighthouse 13 소스와 사용자 흐름 문서, 2026-10-28 확인). 그래서 INP는 Playwright(아래 좌석맵 INP 시나리오)나 Lighthouse 타임스팬 모드로 재고, Lighthouse CI는 적재 지표(LCP·CLS·총 차단 시간)와 번들 예산의 회귀를 막는 데만 쓴다.
+- **Lighthouse CI**: `@lhci/cli`로 PR마다 대표 주소(홈, 공연 상세, 대기실 셸, 좌석 화면 데모, 결제 데모, 월렛, 관제 대시보드 데모, 파트너 판매 현황 데모. 콘솔 둘은 가짜 API로 띄운다, ADR-0091)를 검사한다. 예산을 넘으면 병합을 막는다(observability §11). `@lhci/cli`는 2025-06 뒤 게시가 없어 위험 구성 요소로 본다(§5.14). `@lhci/cli` 설정 문서에는 사용자 흐름(타임스팬) 설정이 없다(2026-10-28 확인).
+- **좌석맵 INP 시나리오**: Playwright가 CPU를 4배 느리게 한 상태(Chrome DevTools 프로토콜)에서 확대 → 구역 구독 → 좌석 10개 연속 선택 → 홀드 버튼 누르기를 하고, 이벤트 타이밍(`interactionId`)과 긴 작업, 긴 애니메이션 프레임(LoAF: 화면 한 장을 그리기까지 50ms 넘게 걸린 프레임과 그 원인 스크립트, `long-animation-frame` 항목)을 모은다. web-vitals의 속성 정보 빌드(`attribution`)는 INP에 겹친 LoAF 항목을 함께 준다. 긴 작업은 무엇이 막았는지 알려 주지 않지만 LoAF는 원인 스크립트와 그리기 시간을 나눠 준다. Chromium에서만 잰다(LoAF는 Chrome 123부터 있고 Firefox·Safari에는 없다. Safari는 INP를 26.2부터 낸다).
+- **관측 라이브러리의 몫**(추천 적용 2026-10-28, 기술 검토 낮음-053): 첫 JS에 드는 관측 코드는 web-vitals(속성 정보 빌드)와 `@peaket/telemetry`, 그리고 대기실 경량 페이지를 뺀 앱의 Sentry 오류 SDK다. 브라우저 span을 내보내지 않으므로 OTel 브라우저 SDK는 예산에 넣지 않는다(observability §11). 셋의 크기는 size-limit 보고에 따로 적는다.
 - **콘솔 장시간 시나리오**(FE-T27, 추천 적용 2026-10-27, ADR-0091 결정 5): 처음 열 때의 크기만으로는 하루 종일 켜 두는 콘솔의 부담을 볼 수 없다. 그래서 가짜 스트림을 몇 시간 흘리며 힙·DOM 노드 수·긴 작업·조작 반응을 잰다(§5.17).
+- **CSS 열**(추천 적용 2026-10-28, 기술 검토 중간-097): 첫 화면에 실리는 CSS 전체(gzip)다. SEED 층 판 base, 그 화면이 쓰는 SEED 부품 recipe, Tailwind 유틸, 피켓 토큰·부품 CSS를 더한 값이다. SEED 전체 CSS(42.2KiB)는 싣지 않는다(design/d2 §1). size-limit의 CSS 항목이 경로 묶음마다 PR에서 막는다. 2026-10-28 실측으로 base 7.8KiB에 소비자 화면에 흔한 부품 34개의 recipe(최소화 전 17.7KiB)를 더하면 약 25.5KiB, 결제 화면 부품 21개면 약 19.1KiB다. 그래서 홈·상세 25KB와 결제 20KB 예산이 빠듯하다. 넘치면 그 화면에 실린 부품을 줄이거나, 실제로 잰 크기와 LCP로 예산을 고친다(wbs 7.5.2). 층 순서와 Next.js 앱의 층 판 선택은 FE-T36이 본다.
 
 ### 5.9 네트워크: 서버를 지키는 클라이언트 규칙
 
 | 규칙 | 어디서 | 왜 | 시험 |
 | --- | --- | --- | --- |
-| 모든 주기 요청에 ±20% 지터 | 대기 상태 폴링, 결제 결과 다시 묻기, 스캐너 변경분 | 같은 시각에 몰리지 않게 한다(guidelines §5) | FE-T4 |
-| `Retry-After`를 하한으로 | 모든 api-client 호출, 대기 폴링 | 서버가 부하를 조절한다(ADR-0003) | FE-T4 |
+| 하한이 없는 주기 요청에 ±20% 지터 | 대기 상태 폴링, 결제 결과 다시 묻기, 스캐너 변경분 | 같은 시각에 몰리지 않게 한다(guidelines §5) | FE-T4 |
+| 서버가 준 하한(`Retry-After`, 본문 `retryAfterSeconds`·`pollHintMs`)은 지키고 위쪽으로만 0~20% 지터 | 모든 api-client 호출, 대기 폴링, 곧 입장 다시 시도 | 서버가 부하를 조절하고(ADR-0003), 503을 같은 1초에 받은 사람들이 같은 때 다시 오지 않게 한다. 기다림 = 하한 × (1 + U(0, 0.2)). `NOT_YET`의 `retryAfterMs`만 지터 없이 그 시각에 보낸다(추천 적용 2026-10-28, 기술 검토 중간-038) | FE-T4 |
 | 실패하면 두 배씩 기다림, 상한 있음 | 폴링 60초, 재연결 10초, 업로드 30초 [가정] | 장애 때 재시도가 한꺼번에 몰리는 것을 막는다 | FE-T4 |
-| 같은 회차는 한 탭만 폴링 | 대기실(Web Locks 리더) | 새로고침·여러 탭으로 요청이 불어나는 것을 줄인다(초당 20만 계산의 '새로고침 증폭') | FE-T6 |
-| 숨긴 탭은 최소 5초 [가정] | 대기실 | 배터리·CDN 부하 때문이다. 브라우저도 숨긴 탭의 타이머를 늦춘다(POL-008) | FE-T4 |
+| 같은 회차는 보이는 탭 하나만 폴링 | 대기실(Web Locks 리더는 보이는 탭만 맡고, 숨겨지면 놓는다. 보이는 탭이 없으면 숨긴 탭은 다른 탭의 방송이 자기 간격의 2배 안이면 묻지 않는다. 입장 확정도 리더만 보낸다) | 새로고침·여러 탭으로 요청이 불어나는 것을 줄인다(초당 20만 계산의 '새로고침 증폭'). 숨긴 리더는 브라우저가 1분에 한 번만 깨워 보이는 탭까지 늦어지므로 맡기지 않는다(추천 적용 2026-10-28, 기술 검토 중간-037, §5.1) | FE-T6 |
+| 숨긴 탭은 최소 5초 [가정] | 대기실 | 배터리·CDN 부하 때문이다. 브라우저도 숨긴 탭의 타이머를 늦춘다(POL-008). 숨긴 탭은 폴링 리더가 되지 않는다 | FE-T4 |
 | T=0 두 호출은 사전 요청 없이 | 진입, 입장 확정 | OPTIONS 요청이 같은 수만큼 더 붙는 것을 막는다(ADR-0065 결정 6) | FE-T3 |
 | 셔플 결과는 토큰마다 고정된 지연 | 셔플·묶음 결과 받기 | 새로고침해도 빨라지지 않으므로 분산이 지켜진다(ADR-0058) | FE-T4 |
-| 대기열 파일에 쿠키·사용자 헤더·캐시 버스터를 붙이지 않음 | `queue-files` | 캐시 키가 갈리지 않게, 사전 요청이 없게 한다 | FE-T3 |
+| 대기열 파일에 쿠키·사용자 헤더·캐시 버스터를 붙이지 않음 | `queue-files` | 캐시 키가 갈리지 않게, 사전 요청이 없게 한다. 브라우저 HTTP 캐시만 `cache: "no-store"`로 건너뛴다(ADR-0110) | FE-T3, FE-T32 |
 | 미리 연결 | 공연 상세·대기실 셸의 `<link rel="preconnect">`: `https://queue.peaket.example`(`crossorigin="use-credentials"`), `https://queue-files.peaket.example`(`crossorigin="anonymous"`) | T=0 직전의 TLS 왕복을 미리 해 둔다. 자격 증명 방식이 실제 요청과 같아야 그 연결을 다시 쓴다 | FE-T10(측정) |
 | 구독 전환 1초 머묾 | 좌석 구역 구독 | 확대·축소할 때마다 구독 해제·재구독이 쏟아지지 않게 한다(정본) | FE-T11 |
 | 안 보이는 위젯은 구독을 닫음 | 관제 위젯(고르지 않은 탭은 10초 [가정] 뒤, 숨긴 브라우저 탭은 30초 [가정] 뒤) | 보지 않는 숫자를 받고 그리지 않는다. 경보·명령 확인·자동 제어 상태는 그대로 받는다(ADR-0091) | FE-T26 |
-| 같은 구독은 하나로 | 관제 GraphQL(같은 영속 쿼리·변수) | 위젯 여럿이 같은 숫자를 따로 구독하지 않게 한다(ADR-0091) | FE-T26 |
+| 같은 구독은 하나로 | 관제 위젯 흐름(같은 위젯 키) | 위젯 여럿이 같은 숫자를 따로 구독하지 않게 한다(ADR-0091·0100) | FE-T26 |
 | 숨긴 탭은 주기 조회를 늦춤 | 파트너 현장 운영 60초 [가정], 관제 오류 요약은 멈춤 | 보지 않는 동안 요청을 줄인다. 다시 보이면 바로 한 번 묻는다(ADR-0091) | FE-T4 |
-| 재연결 무작위 지연 | 좌석 WebSocket(1012는 0~5초), Socket.IO, graphql-ws, SSE `retry` | 서버 재시작 직후에 몰리는 것을 막는다(devops §6.4) | FE-T11 |
-| 같은 요청 묶기·늦은 요청 취소 | TanStack Query 중복 제거, 자동완성 입력이 바뀌면 이전 요청 취소, 받은 후보가 8개보다 적으면 더 긴 입력은 그 안에서 거르고 다시 요청하지 않음, 정규화한 값과 정해진 매개변수 순서로 요청(CDN 캐시 키, ADR-0094) | 불필요한 원본 요청을 줄인다 | 단위 시험 |
+| 재연결 무작위 지연 | 좌석 WebSocket(1012는 0~5초), SSE `retry`(관제 흐름 둘과 파트너, 10초에 0~5초 무작위) | 서버 재시작 직후에 몰리는 것을 막는다(devops §6.4) | FE-T11 |
+| 같은 요청 묶기·늦은 요청 취소 | TanStack Query 중복 제거, 자동완성 입력이 바뀌면 이전 요청 취소, 받은 후보가 8개보다 적으면 더 긴 입력은 그 안에서 거르고 다시 요청하지 않음(앞선 입력이 두 글자(한글은 두 음절) 이상이고 입력 종류가 같으며 거른 결과가 0건이 아닐 때만, docs/features/search.md §4.5, 기술 검토 낮음-036), 정규화한 값과 정해진 매개변수 순서로 요청(CDN 캐시 키, ADR-0094) | 불필요한 원본 요청을 줄인다 | 단위 시험 |
 | 낮은 우선순위 미리 받기 | 좌석 자원(대기 중), 다음 화면 덩어리 | 핵심 요청과 다투지 않게 한다 | FE-T10 |
 | 텔레메트리는 묶어서 | `/_t/rum` 60초 [가정] 묶음 + 탭을 숨길 때 | 요청 수를 줄인다 | FE-T22 |
 | 구매 경로 사전 요청 | 홀드 ID·주문 ID가 든 경로는 매번 사전 요청이 한 번 붙는다 | 지연 예산에 왕복 한 번을 넣고 잰다. 넘치면 새 ADR(아키텍처 결정과 그 이유를 남긴 기록)로 본문 헤더 방식을 검토한다 | FE-T10(측정) |
@@ -1132,7 +1213,7 @@ sequenceDiagram
 - **다섯 표준 상태**: 모든 화면이 기본·로딩·빈 화면·오류·권한 없음 상태를 그린다(planning/04 §3). 문구는 design/d2 §4 규칙(무엇이 문제인가 + 어떻게 하면 되는가)을 따른다.
 - **로딩**: 전체 화면을 막는 스피너 대신 위젯·카드 단위로 스켈레톤을 보인다. 정적 셸은 바로 그리고, 개인 영역만 스켈레톤으로 둔다(design/d2 §3.3).
 - **낙관적 갱신**: 찜·알림 토글(React 19 `useOptimistic`)과 좌석 선택에 쓴다. 좌석 선택은 경합에서 지면 되돌리고, 흔들림과 인접 좌석 추천을 보인다. 돈이 오가는 동작(홀드 확정·결제·취소)은 서버 응답 전에 성공으로 보이지 않는다.
-- **시간 제한**: 홀드 7분 + 1회 연장과 최대 체류 45분은 WCAG 2.2.1의 실시간 예외로 본다. 그래도 남은 시간·1분 전 경고·1회 연장을 둔다. 구매 세션 무활동 4분 [가정] 경고와 관리 계정 유휴 58분 [가정] 경고는 `role="alertdialog"`로 띄우고, 초점은 [계속하기]·[계속 사용] 버튼에 둔다(design/d5 §3.5).
+- **시간 제한**: 홀드 7분 + 1회 연장과 최대 체류 45분은 WCAG 2.2.1의 필수 예외(W3C 해설이 온라인 티켓 구매의 좌석 확정 시간을 이 예로 든다. 실시간 예외가 아니다)로 본다. 시간에 묶이지 않는 입력(희망 조건, 본인확인)은 차례가 오기 전으로 옮겼다(docs/features/seat-hold.md §5, 기술 검토 낮음-154). 그래도 남은 시간·1분 전 경고·1회 연장을 둔다. 구매 세션 무활동 4분 [가정] 경고와 관리 계정 유휴 58분 [가정] 경고는 `role="alertdialog"`로 띄우고, 초점은 [계속하기]·[계속 사용] 버튼에 둔다(design/d5 §3.5).
 - **Degraded 문구**: 공연 상세는 '판매 중' 고정 문구, 대기는 '연결 확인 중', 좌석은 '실시간 연결 복구 중'·지연 표시, 결제는 '결제가 잠시 멈췄습니다. 홀드 시간을 늘려 두었습니다', 관제는 <대체 표시>를 보인다(POL-029). 원인이 되는 내부 정보는 보이지 않는다(ASVS 16.5.1).
 - **자동 재시도 안내**: 429·503은 남은 초를 글자로 보이고 자동으로 다시 시도한다(SCR-059).
 - **뒤로 가기·새로고침**: 주소에 상태를 담은 모달은 뒤로 가기로 닫힌다. 대기실은 같은 탭에서 새로고침해도 순번·진행 막대 기준을 유지한다. 결제 화면은 초안(개인정보 제외)을 되살린다. 결제 결과 화면은 주문 ID로 다시 들어온다(design/d5 §4).
@@ -1145,22 +1226,31 @@ sequenceDiagram
 | --- | --- |
 | 경로 바뀜 | 새 화면의 h1로 초점을 옮기고(`tabindex="-1"`) 제목을 알린다. Next.js 경로 알림기와 겹치지 않게 앱이 직접 한다 |
 | 랜드마크 | `header`·`nav`·`main`·`footer`와 본문 바로가기(CMP-065) |
-| 라이브 영역 빈도 | 로비 카운트다운은 30초, 대기 앞 인원·막대는 합쳐서 1분에 한 번, 홀드는 만료 1분 전에만 알린다. 회전 QR은 알림이 없다. 결제 확정·매진·판정은 `role="alert"`로 한 번 알린다(design/d4) |
+| 라이브 영역 빈도 | 로비 카운트다운은 남은 5분·1분·10초에 한 번씩(그 사이는 사용자가 카운트다운으로 옮겨 가면 읽는다, design/d1 §5, 기술 검토 낮음-102), 대기 앞 인원·막대는 합쳐서 1분에 한 번, 홀드는 만료 1분 전에만 알린다. 회전 QR은 알림이 없다. 결제 확정·매진·판정은 `role="alert"`로 한 번 알린다(design/d4). 단 `role="alert"`는 같은 화면 안에서 상태가 바뀔 때(대기열이 매진으로, 결과 확인 중이 확정으로 바뀌는 순간)에만 쓴다. 화면 이동으로 처음 연 매진·결과 화면은 위 '경로 바뀜' 규칙대로 h1 초점으로 읽게 한다. 페이지를 열 때 이미 있는 alert는 화면 낭독기가 알리지 않는다(W3C APG 알림 패턴, 추천 적용 2026-10-28, 기술 검토 낮음-108) |
 | 초점이 가려지지 않게 | 고정 머리·하단 바텀 시트에는 `scroll-padding-top`·`scroll-padding-bottom`을 그 높이만큼 둔다(2.4.11) |
-| 대상 크기 | 최소 24×24 CSS px, 모바일 핵심 버튼은 44×44(정본). 좌석은 고를 수 있는 배율에서 24×24 이상으로 그린다. 그보다 작으면 고르지 못하게 하고, 확대·목록을 안내한다(2.5.8) |
+| 재배치·글자 확대·글자 간격 | 폭 320 CSS px(1280 화면의 400% 확대)까지 두 방향 스크롤이 없다(1.4.10). 표·좌석맵·좌석맵 에디터·그래프는 예외이고 그 상자 안에서만 두 방향으로 민다. 글자 200%(화면 전체 확대)와 글자 간격(줄 높이 1.5배·문단 뒤 2배·글자 사이 0.12배·단어 사이 0.16배)에서 글자가 잘리거나 겹치지 않는다(1.4.4·1.4.12). 그래서 글자가 든 상자는 높이를 고정하지 않고 넘친 글자를 숨겨 자르지 않는다(design/d2 §1). 브라우저 글자 크기 설정만으로는 SEED 상한 때문에 1.5배까지 커진다(review/open-items.md 43번). 시험은 FE-T31이다(추천 적용 2026-10-28, 기술 검토 높음-28) |
+| 대상 크기 | 최소 24×24 CSS px, 모바일 핵심 버튼은 44×44(정본). 스캐너의 주요 버튼은 장갑 낀 손을 생각해 높이 56·버튼 사이 16 이상 [가정](design/d1 §5, 기술 검토 낮음-111). 좌석은 고를 수 있는 배율에서 24×24 이상으로 그린다. 그보다 작으면 고르지 못하게 하고, 확대·목록을 안내한다(2.5.8) |
 | 끌기 | 좌석맵 확대·이동은 [+]·[−]·[전체 보기]·키보드로, 에디터의 모든 끌기는 숫자 입력으로, 순서 바꾸기는 위로·아래로 버튼으로(2.5.7) |
-| 좌석 상태 | 색 + 무늬 + 글자로 보인다(토큰 `pattern.seat`). 색만으로 구분하는 것은 금지한다(NFR-020) |
-| 좌석 대안 | Canvas는 `aria-hidden`으로 숨긴다. 같은 탭 순서 자리에 SeatList(구역 → 열 → 좌석, 방향키)와 [자동 좌석 배정](CMP-022)을 둔다 |
-| 인증 | 비밀번호·인증 앱 코드 칸은 붙여넣기와 비밀번호 관리자를 허용한다(3.3.8). 사람 확인은 기본으로 비대화형이다(사람 확인 서비스 Turnstile) |
+| 좌석 상태 | 색 + 무늬 + 글자로 보인다(무늬 값 `pattern.seat`: tokens.json의 확장 칸에서 만든 TS 상수, design/d2 §1). 색만으로 구분하는 것은 금지한다(NFR-020) |
+| 좌석 대안 | Canvas는 `aria-hidden`으로 숨긴다. 같은 탭 순서 자리에 SeatList(구역 → 열 → 좌석, 방향키)와 [자동 좌석 배정](CMP-022)을 둔다. SeatList는 `tree`(구역·열·좌석이 모두 `treeitem`)이고, 가상 스크롤로 일부만 그리므로 `aria-level`·`aria-setsize`·`aria-posinset`를 둔다. 중첩 `listbox`는 ARIA가 허용하지 않아 쓰지 않는다(design/d2 CMP-022, 추천 적용 2026-10-28, 기술 검토 중간-098) |
+| 일부만 그리는 표·트리 | 가상 스크롤 표(CMP-031: 감사 로그·CS 처리함·명단)는 `aria-rowcount`(전체, 모르면 -1)와 행마다 `aria-rowindex`를 둔다. 펼친 가지만 그리는 트리(좌석맵 에디터 계층 트리 CMP-051, SeatList)는 `treeitem`마다 `aria-setsize`·`aria-posinset`를 둔다. ARIA는 모든 항목이 DOM에 없을 때 이 값을 쓰라고 한다(design/d2 CMP-031·CMP-051, 추천 적용 2026-10-28, 기술 검토 낮음-107) |
+| 인증 | 비밀번호·인증 앱 코드 칸은 붙여넣기와 비밀번호 관리자를 허용한다(3.3.8). 인증 앱 코드는 칸을 여섯 개로 나누지 않고, 입력 칸 하나를 여섯 칸처럼 보이게 그린다(CMP-007, 기술 검토 중간-098). 사람 확인은 기본으로 비대화형이다(사람 확인 서비스 Turnstile) |
 | 움직임 | `prefers-reduced-motion`이면 이동·크기 변화를 투명도 변화로만 보인다. 모션은 `transform`·`opacity`만 쓴다 |
 | 저전력 | Battery Status API가 있는 브라우저(Chromium)에서는 배터리가 15% 이하면 효과를 끈다. 다른 브라우저는 움직임 줄이기 설정만 따른다(§1.5) |
-| 폼 | 라벨은 필수다. 오류 요약과 첫 오류로 초점 옮기기, `autocomplete`·`inputmode`를 쓴다(design/d2 §3.1) |
+| 폼 | 라벨은 필수다. 오류 요약과 첫 오류로 초점 옮기기, `autocomplete`·`inputmode`를 쓴다(design/d2 §3.1). 아주 빠른 입력·같은 문자 반복을 화면에서 막지 않고, 성명 칸의 문자 집합을 제한하지 않는다(길이와 제어 문자만 거른다). 악용 판정은 서버가 한다(기술 검토 중간-098) |
+| 다시 입력 | 같은 과정(예매·주문·탈퇴, 단계별 입력) 안에서 앞서 넣었거나 이미 아는 값은 다시 묻지 않고, 다시 보여야 하면 채워 두거나 고르게 한다(3.3.7). 브라우저 자동 완성은 이것을 대신하지 않는다. 재인증 비밀번호·인증 앱 코드처럼 보안 때문에 다시 넣는 값과 만료된 값은 예외다. 채운 값은 화면 메모리에만 두고 §3.12에 없는 저장소에 남기지 않는다(design/d2 §3.1) |
+| 도움말 위치 | 여러 화면에 되풀이되는 고객센터 링크는 셸(CMP-065)만 그려, 같은 셸을 쓰는 화면에서 같은 순서에 있다(3.2.6). 본문의 ( 문의하기 › ) 같은 상황별 링크는 셸 링크를 대신하지 않는다 |
+| 한 글자 단축키 | 관제 콘솔에만 있고, 처음에 꺼져 있다. `/me`의 스위치로 켜고(값은 `peaket.console.ui`), 켜도 입력 칸·선택 상자·편집 영역에 초점이 있으면 동작하지 않는다. 감사 리플레이 Space는 플레이어에 초점이 있을 때만이다(2.1.4, design/d3 §0, design/d5 §3.3) |
+| 비활성 버튼 | 이유를 알려야 하는 비활성 버튼(권한 밖·조건 미충족·품절)은 `disabled` 대신 `aria-disabled="true"`로 둬 초점을 받게 하고, 공용 버튼 부품(CMP-001)이 누르기·Enter·Space를 막는다. 모양은 SEED 비활성 표시(`data-disabled`)를 같이 붙인다. 이유는 버튼 바로 위·아래의 늘 보이는 글로 두고 `aria-describedby`로 잇는다. 툴팁만으로 이유를 전하지 않는다(2.1.1·1.4.13, design/d2 §3.6, 추천 적용 2026-10-28, 기술 검토 중간-101) |
+| 글자 모션의 이름 | 글자를 하나씩 보이는 모션은 원래 문장을 화면에서만 숨긴 글로 두고 글자 묶음은 `aria-hidden`이다. 역할 없는 span·div에는 `aria-label`을 쓰지 않는다(ARIA가 금지한다, design/d1 §5, 기술 검토 중간-100) |
 | 쓰지 않는 것 | `Element.ariaNotify`(Baseline이 아니다) |
-| 시험 | `@axe-core/playwright`(PR), Storybook `addon-a11y`, NVDA·VoiceOver 수동 시나리오(좌석 선택·결제·양도 완주, 메이저 릴리스마다)(FE-T18) |
+| 시험 | `@axe-core/playwright`(PR), Storybook `addon-a11y`, NVDA·VoiceOver·TalkBack 수동 시나리오(좌석 선택·결제·양도 완주, 조합·시나리오마다 3회 [가정], 메이저 릴리스마다, 개발자 수동 시험으로 표시, NFR-020, 기술 검토 낮음-114)(FE-T18). axe-core는 WCAG 2.2 규칙(대상 크기 `target-size`)을 기본으로 끄므로 `wcag22aa` 태그를 켜서 돌리고, axe가 보지 않는 재배치·초점 가림은 FE-T31·FE-T18이 본다. 기준마다 막는 장치는 design/d4 §1의 '자동 검사' 열이 정본이다 |
 
 ### 5.12 다국어
 
 - **범위**(ADR-0079 결정 29): 소비자 웹은 ko·en·ja·zh를 지원한다(NFR-024). 파트너·관제·스캐너는 v1에서 한국어만 내되, 문구는 같은 키 구조로 둔다. 관제의 대기실 공지 템플릿은 네 언어가 있어야 승인된다(정본).
+- **구매 조건 알림(추천 적용 2026-10-28, 기술 검토 중간-113)**: 구매(로비·대기열 진입)는 언어와 관계없이 한국 휴대폰 본인확인이 필요하다(POL-001). 한국 휴대폰이 없는 해외 팬은 둘러보기와 안내만 쓸 수 있다(planning/01 §4.2). 그래서 en·ja·zh 화면은 공연 상세의 예매 버튼 가까이와 로그인 화면에 이 조건을 한 줄로 미리 알린다(문구 키 `identity.domesticPhoneRequired`). 대기열 앞에서 막힌 뒤에야 알게 되지 않게 하려는 것이다.
+- **번역 품질 표시(추천 적용 2026-10-28, 기술 검토 중간-113)**: 기계 번역으로 만든 문구는 번역 파일의 문구마다 `review: machine | native` 표시를 둔다. 원어민 검토 전 문구가 남은 언어는 출시 전 점검 목록에 남기고, 품질 한계로 적는다(planning/01 §5.2).
 - **주소**: 한국어 주소에는 접두가 없고, 다른 언어는 `/en`·`/ja`·`/zh`로 시작한다. 페이지마다 `hreflang`을 둔다. 브라우저 언어로 자동 이동하지 않고, 언어 쿠키도 없다(ADR-0060).
 - **도구**: i18next 26 + ICU MessageFormat(i18next-icu)을 쓴다. 경로별 네임스페이스와 동적 import로, 첫 번들이 로케일 수에 따라 늘지 않게 한다. 대기실 경량 페이지는 문구를 빌드에 넣어, 로케일마다 셸을 따로 낸다.
 - **형식**: 날짜·시각·통화는 `Intl`로 표시한다. 공연 일시는 공연장 현지 시각과 기기 시각을 함께 보인다(§3.3). 글자 수는 `Intl.Segmenter` grapheme 단위로 센다(design/d2).
@@ -1189,7 +1279,8 @@ sequenceDiagram
 
 ### 5.13 다기기·반응형
 
-- **구간**: `sm` 360 · `md` 768 · `lg` 1024 · `xl` 1440(토큰 `breakpoint.*`). 360~1440 전 구간에서 비정상 가로 스크롤은 0이다(design/d4).
+- **구간**: `sm` 480 · `md` 768 · `lg` 1280 · `xl` 1440(토큰 `breakpoint.*`, SEED 값 그대로. 추천 적용 2026-10-28, 기술 검토 중간-096). 배치는 휴대폰(`md` 미만)·태블릿(768~1279)·데스크톱(1280부터)·고밀도(1440부터)이고, `sm`은 배치를 바꾸지 않는다(design/d1 §4). SEED 부품의 반응형 속성(`hideFrom`, 반응형 스타일 값, `ResponsiveDialog`, `useBreakpoint`)과 SEED CSS의 매체 질의가 이 값에서 바뀌므로, Tailwind 중단점도 토큰으로 같은 값만 만든다(Tailwind 기본 중단점은 `--breakpoint-*: initial`로 지운다). 휴대폰 시안 폭 360부터 1440까지 전 구간에서 비정상 가로 스크롤은 0이다(design/d4 #17).
+- **재배치 하한**: 중단점과 따로, 폭 320 CSS px(1280 화면의 400% 확대)까지 두 방향 스크롤이 없다(WCAG 1.4.10. 표·좌석맵·좌석맵 에디터·그래프는 예외). 360보다 좁은 폭에서는 휴대폰 배치를 그대로 쓴다. 글자 200%·글자 간격 규칙은 §5.11이고, 시험은 FE-T31이다(design/d1 §4, 추천 적용 2026-10-28, 기술 검토 높음-28).
 - **콘솔의 휴대폰·태블릿**: 태블릿은 데스크톱과 기능이 같고 배치만 다르다. 휴대폰 범위 밖의 일은 안내 카드로 바꾼다(design/d5 §3.9, ADR-0061).
 - **입력 방식**: `@media (pointer: coarse)`에서는 대상 크기를 키운다. `hover`가 없는 기기에서는 팝오버(좌석 정보)를 길게 누르기나 초점으로 연다.
 - **높이**: 대기실·좌석 화면은 `100dvh`·`svh`를 쓴다(design/d1). 바텀 시트에는 `env(safe-area-inset-bottom)`을 둔다.
@@ -1204,9 +1295,11 @@ sequenceDiagram
 
 모든 묶음에 공통으로 `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, `report-to csp`(보고를 받을 주소인 엔드포인트: `Reporting-Endpoints: csp="/_t/csp"`)를 둔다. HSTS와 `nosniff`는 배포·게이트웨이 정책이 붙인다(ADR-0065 결정 3). `{n}`은 요청마다 만드는 nonce, `{h}`는 빌드 때 정한 인라인 스크립트 해시다(해시 방식은 PoC wbs 2.10.1 결과를 따른다). 모든 묶음의 `connect-src`에 `'self'`가 있는 것은 같은 출처 `/_t/*` 전송 때문이다(ADR-0079 결정 14).
 
+스타일은 요소와 속성을 나눠 받는다(추천 적용 2026-10-28, ADR-0111). `<style>` 요소와 스타일시트 파일은 `style-src`(A는 `'self'`, B·E·F는 `'self'`와 nonce)로만 받는다. HTML 요소의 `style="…"` 속성은 묶음 A·B(그 위의 E·F 포함)에서 `style-src-attr 'unsafe-inline'`으로 받는다. SEED 부품이 여백·색·글자 크기를 CSS 변수(이름을 붙인 스타일 값)로 `style` 속성에 넣고 `next/image`도 `style` 속성을 내는데, Next.js가 이것을 서버에서 HTML로 그리기 때문이다. nonce는 속성에 걸리지 않고, React는 하이드레이션(서버가 보낸 HTML에 브라우저 쪽 React를 붙이는 일) 때 막힌 속성을 다시 넣지 않는다. 브라우저에서만 그리는 C·D·G와 React를 쓰지 않는 A′는 속성을 받지 않는다. 스크립트 허용 방식은 바꾸지 않는다. 이 값은 기본안이고 PoC FE-T30(wbs 2.10.1)으로 확정한다. 실패하면 서버가 그리는 부품은 클래스만 쓰는 쪽(ADR-0111 결정 5)으로 바꾼다.
+
 ```text
 [A 캐시 화면: 홈·공연 상세·검색 셸·굿즈·정적 문서·복귀 화면·스태프 화면·셔플 검증·월렛 셸]  붙이는 곳: 웹 앱 서버(ISR 응답), 정적 셸은 www 배포 정책
-default-src 'self'; script-src 'self' {h}; style-src 'self'; img-src 'self' data: blob:; font-src 'self';
+default-src 'self'; script-src 'self' {h}; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self';
 connect-src 'self' https://api.peaket.example https://queue.peaket.example https://queue-files.peaket.example;
 worker-src 'self'; manifest-src 'self'; frame-src 'none'; form-action 'self';
 object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp
@@ -1220,7 +1313,7 @@ frame-src https://challenges.cloudflare.com; manifest-src 'self'; form-action {�
 object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp
 
 [B 요청마다 그리는 화면: 추가 검증·결과·/my/*(월렛 셸 제외)·로그인·파트너 콘솔]  붙이는 곳: 앱 서버의 proxy.ts
-default-src 'self'; script-src 'nonce-{n}' 'strict-dynamic'; style-src 'self' 'nonce-{n}'; img-src 'self' data: blob:; font-src 'self';
+default-src 'self'; script-src 'nonce-{n}' 'strict-dynamic'; style-src 'self' 'nonce-{n}'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self';
 connect-src 'self' https://api.peaket.example https://queue.peaket.example https://queue-files.peaket.example;
 worker-src 'self'; manifest-src 'self'; frame-src 'none'; form-action 'self';
 object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp
@@ -1237,10 +1330,10 @@ connect-src에 wss://api.peaket.example   ('self'가 ws 스킴을 모든 브라�
 
 [C 관제 콘솔]  붙이는 곳: console 배포 응답 헤더 정책
 default-src 'none'; script-src 'self' {h}; style-src 'self'; img-src 'self' data:; font-src 'self';
-connect-src 'self' https://ops-api.peaket.example wss://ops-api.peaket.example;
+connect-src 'self' https://ops-api.peaket.example;   (관제 실시간은 SSE라 wss 출처가 없다, ADR-0100)
 worker-src 'self'; manifest-src 'self'; form-action 'self';
 object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp
-  + Content-Security-Policy-Report-Only: require-trusted-types-for 'script'; trusted-types peaket default; report-to csp
+  + Content-Security-Policy-Report-Only: require-trusted-types-for 'script'; trusted-types peaket peaket-webpack-host peaket-webpack-{원격 이름…} peaket-remote default; report-to csp   (정책 이름 목록은 아래 'Trusted Types')
 
 [D 스캐너]  붙이는 곳: scanner 배포 응답 헤더 정책
 default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; font-src 'self';
@@ -1258,14 +1351,16 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 | 헤더 | 소비자 웹 | 좌석 화면 | 결제 화면 | 파트너 | 관제 | 스캐너 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `Referrer-Policy` | `strict-origin-when-cross-origin`, 복귀·스태프 화면은 `no-referrer` | 기본 | `no-referrer` | `no-referrer` | `no-referrer` | `no-referrer` |
-| `Cross-Origin-Opener-Policy` | `same-origin-allow-popups`(본인확인 새 창) | `same-origin` | `same-origin-allow-popups`(소비자 웹 기본값, 결제창은 페이지 이동) | `same-origin` | `same-origin` | `same-origin` |
-| `Cross-Origin-Embedder-Policy` | 없다 | `require-corp`(이 경로와 Worker 스크립트) | 없다 | 없다 | 없다(포렌식 리플레이 2단계 `/forensics`만 `require-corp`) | 없다 |
+| `Cross-Origin-Opener-Policy` | `same-origin-allow-popups`(본인확인 새 창) | `same-origin`(이 화면은 새 창을 열지 않는다) | `same-origin-allow-popups`(소비자 웹 기본값, 결제창은 페이지 이동) | `same-origin` | `same-origin` | `same-origin` |
+| `Cross-Origin-Embedder-Policy` | 없다 | 없다(좌석 상태를 메시지로만 받는다, 추천 적용 2026-10-28, 기술 검토 중간-015) | 없다 | 없다 | 없다(포렌식 리플레이 2단계 `/forensics`만 `require-corp`) | 없다 |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), usb=(), serial=(), hid=(), bluetooth=()` | 같다 | 같다(`payment`는 두지 않는다. 결제사 수단과 호환하려고) | 같다 | 같다 | `camera=(self)`, 나머지는 끈다 |
 
 - **CSP 길이**: CloudFront 응답 헤더 정책의 CSP 값은 1,783자 이하다(ADR-0065). 위 묶음 C·D·A′는 그 안에 든다.
-- **포렌식 리플레이 데모(묶음 G, ADR-0080)**: `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`(공유 메모리를 쓰려고 둔다. 같은 출처 자산만 써서 막히는 자원이 없다), `Permissions-Policy`는 관제와 같다. 헤더를 줄 수 없는 공개 위치에는 올리지 않는다. 2단계 페이지는 관제 묶음 C에 COEP `require-corp`만 더한다(관제는 이미 COOP `same-origin`이고, 같은 출처 자산만 쓴다).
-- **Trusted Types**(ADR-0079 결정 14): 관제 콘솔에서 보고 모드로 시작해, 30일 [가정] 위반이 없으면 파트너, 소비자 웹 순으로 넓힌다. 기본 정책 `peaket`에서는 `@peaket/ds`의 정화한 서식 글 컴포넌트만 HTML을 만든다.
+- **포렌식 리플레이 데모(묶음 G, ADR-0080)**: `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`(있으면 좋은 헤더다. 1단계는 복사 방식 하나로 돌고, 공유 시계는 성능 목표를 못 맞출 때만 더해 이 헤더가 있는 곳에서 켠다, docs/features/forensic-replay.md §3.3, 기술 검토 낮음-049. 같은 출처 자산만 써서 막히는 자원이 없다), `Permissions-Policy`는 관제와 같다. 헤더를 줄 수 없는 공개 위치에는 올리지 않는다. 2단계 페이지는 관제 묶음 C에 COEP `require-corp`만 더한다(관제는 이미 COOP `same-origin`이고, 같은 출처 자산만 쓴다).
+- **Trusted Types**(ADR-0079 결정 14): 관제 콘솔에서 보고 모드로 시작해, 30일 [가정] 위반이 없으면 파트너, 소비자 웹 순으로 넓힌다. 기본 정책 `peaket`에서는 `@peaket/ds`의 정화한 서식 글 컴포넌트만 HTML을 만든다(서식 글이 구조 문서 기본안으로 정해지면 이 정책으로 HTML을 만드는 곳이 없어진다, §5.14.3).
+  - **보고 모드를 켜기 전 조건(추천 적용 2026-10-28, 기술 검토 낮음-098)**: webpack은 Trusted Types 지원(`output.trustedTypes`)이 기본으로 꺼져 있어, 켜지 않으면 화면별 덩어리와 원격을 실을 때마다 스크립트 주소를 문자열로 넣어 위반 보고가 늘 난다(webpack 설정 문서). 그래서 ① 관제 호스트와 원격 빌드마다 `output.trustedTypes.policyName`을 켜고 이름을 따로 준다(호스트 `peaket-webpack-host`, 원격 `peaket-webpack-<원격 이름>`). 목록에 없는 이름이나 이미 만든 이름으로 정책을 만들면 실패하므로(보고 모드에서는 위반 보고로 남는다) 이름을 나누고, `'allow-duplicates'`는 쓰지 않는다 ② 원격 적재기(§4.5의 런타임 플러그인 `createScript`)는 스크립트 주소를 정책 `peaket-remote`로 만든다. 이 정책은 `remotes.json`에 있는 `/remotes/<이름>/<sha>/remoteEntry.js`만 통과시킨다 ③ 이 이름들을 묶음 C의 `trusted-types` 목록에 넣는다. 원격을 더하거나 빼면 목록도 함께 고친다 ④ FE-T39가 덩어리와 모든 원격을 싣는 동안 위반 보고 0을 확인한다. 넷을 다 채운 뒤 보고 모드를 켠다. 파트너·소비자 웹으로 넓힐 때 Next.js 빌드의 덩어리 적재가 Trusted Types 정책을 쓰는지는 그때 확인한다(확인 필요).
 - **이미지 출처**: 공연 포스터·후기 사진 파생본의 호스트가 계약에 없다(openapi `posterUrl` 등). 그래서 www 배포의 같은 출처 경로로 내는 것을 기본으로 둔다 [가정]. 다른 호스트로 내면 `img-src`에 그 출처를 더한다(§6.2).
+- **이미지 경로는 하나다(추천 적용 2026-10-28, 기술 검토 중간-068)**: 이미지는 올릴 때 `image-worker`가 만든 파생본(폭 단계 × 형식, docs/data.md §1 'S3 공개 정적 객체')을 CDN에서 바로 받는다. Next.js 이미지 최적화(`/_next/image`)는 쓰지 않는다. `next/image`는 파생본 주소를 돌려주는 사용자 로더(`images.loader: 'custom'`, 폭 목록은 파생본 단계와 같다)로만 쓰고, AVIF·WebP는 `getImageProps()`로 만든 `<picture>`가 고른다(AVIF 먼저, WebP 대체). CloudFront와 게이트웨이에는 `/_next/image` 경로를 두지 않는다. 그래서 앱 서버는 이미지를 가져오지도 다시 인코딩하지도 않아, 같은 이미지를 두 번 처리하지 않고, 온세일 직전 새 포스터의 첫 요청이 앱 서버 CPU를 쓰지 않으며, 앱 서버 쪽 SSRF·자원 고갈 경로가 하나 준다(asvs/frontend 1.3.6).
 
 #### 5.14.2 외부 스크립트 결정(ASVS 3.6.1)
 
@@ -1277,7 +1372,7 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 
 #### 5.14.3 출력·주소·메시지 규칙
 
-- **출력**: React 텍스트 노드(문자열을 글자 그대로 넣는 화면 조각)와 `textContent`만 쓴다. `dangerouslySetInnerHTML`·`innerHTML`은 공용 ESLint가 막는다. 예외는 정화한 공연 설명을 그리는 `@peaket/ds` 서식 글 컴포넌트 하나다(asvs/catalog-review).
+- **출력**: React 텍스트 노드(문자열을 글자 그대로 넣는 화면 조각)와 `textContent`만 쓴다. `dangerouslySetInnerHTML`·`innerHTML`은 공용 ESLint가 막는다. 공연 설명(서식 글)의 기본안은 허용 노드만 담은 구조 문서(JSON)를 노드마다 React 요소로 그리는 것이라 예외가 없다(design/d2 CMP-070, 추천 적용 2026-10-28, 기술 검토 낮음-100). 편집기 PoC(FE-T41)가 이 안을 못 넘어 HTML 정화 대체안으로 가면, 정화한 공연 설명을 그리는 `@peaket/ds` 서식 글 컴포넌트 하나만 예외다(asvs/catalog-review 1.3.1). 그때 정화기는 DOMPurify 하나다. 서버(저장할 때·ISR로 그릴 때)에서는 최신 jsdom과 함께 쓰고, happy-dom은 쓰지 않는다(DOMPurify 안내는 서버에서 최신 jsdom을 강하게 권하고 happy-dom은 안전하지 않다고 밝힌다, 2026-10-28 확인). 허용 목록 설정은 공용 패키지 하나에 두어 저장 때와 표시 때가 같은 목록을 쓴다(추천 적용 2026-10-28, 기술 검토 낮음-094).
 - **돌아갈 주소 `safeNext()`**: 512자 이하이고, `/`로 시작하며, `//`·`/\`로 시작하지 않고, 제어 문자·백슬래시·`%2f%2f`·`%5c`(대소문자 무시)가 없는 같은 출처 경로만 받는다. 결과는 경로와 쿼리이고, 조각(`#`)은 버린다. 아니면 앱 첫 화면으로 보낸다. 로그인 `next`, 본인확인 `next`, 알림 착지 주소가 모두 이 함수를 쓴다(FE-T12).
 - **URL 조각 비밀값**: `#token=`·`#code=`는 읽자마자 `history.replaceState`로 지우고, 탭 세션 저장소에 잠시 둔다(ADR-0065 결정 10).
 - **창·탭 메시지**: 우리가 받는 창 메시지는 본인확인 결과 하나다. 이 메시지는 같은 출처 `BroadcastChannel`로 받고, `verificationId`와 형식을 확인한다. `postMessage`를 보낼 때는 `targetOrigin`에 정확한 출처를 쓰고 `*`를 쓰지 않는다(Semgrep 규칙). Worker·탭 메시지는 Zod로 검사한다.
@@ -1286,47 +1381,48 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 #### 5.14.4 로그아웃 정리 루틴(ADR-0079 결정 17)
 
 1. 화면이 로그아웃 확인 대화상자를 띄운다("로그아웃합니다", ☐ 이 기기의 입장 키도 지우기, 기본은 해제, design/d5 §3).
-2. 서버 응답을 기다리지 않고, §3.12 표에서 지우는 때에 '로그아웃'이 있는 값을 지운다: 회차 대기 정보, 입장 토큰, 구매 세션 키, 희망 조건, 결제 초안, 오프라인 찜 대기열, 재인증 토큰, 텔레메트리 버퍼. 기기 식별값과 최근 검색어는 남긴다.
+2. 서버 응답을 기다리지 않고, §3.12 표에서 지우는 때에 '로그아웃'이 있는 값을 지운다: 회차 대기 정보, 입장 토큰, 구매 세션 키, 희망 조건, 결제 초안, 오프라인 찜 대기열, 재인증 토큰, 텔레메트리 버퍼, 관제 콘솔의 `peaket.console.ui`. 기기 식별값과 최근 검색어는 남긴다. 화면 출처의 저장물은 이 루틴이 정본이다. 서버 응답의 `Clear-Site-Data`는 응답 주소의 출처에만 걸려 교차 출처 API 응답으로는 화면 출처를 지우지 못하기 때문이다(5번).
 3. 체크했다면 `peaket-wallet`을 지우고, 월렛 서비스 워커 등록을 풀고, 캐시를 지운다.
 4. `BroadcastChannel('peaket.session')`으로 `logout`을 알린다. 다른 탭도 같은 정리를 하고 로그인 화면으로 간다.
-5. 로그아웃 요청 응답이 `Clear-Site-Data: "cache", "cookies"`를 보낸다(소비자 웹). 파트너·관제는 `"cache", "cookies", "storage"`를 보내고, 스캐너는 업로드를 비운 뒤 Dexie `session`만 지운다.
+5. 로그아웃 응답은 그 앱이 준 쿠키만 `Set-Cookie`(같은 이름·`Domain`·`Path`, `Max-Age=0`)로 지운다(docs/features/identity.md §3, 추천 적용 2026-10-28, 기술 검토 중간-067). `Clear-Site-Data`에는 `"cookies"`를 넣지 않는다. 이 값은 응답 출처의 등록 도메인(`peaket.example`) 전체 쿠키를 지워, 같은 브라우저의 다른 앱 로그인과 도착 시각·최초 방문 쿠키까지 지우기 때문이다(W3C Clear Site Data 명세, 2026-10-28 확인). `"cache"`·`"storage"`는 응답 주소의 출처에만 걸리므로 화면과 같은 출처에서 응답할 때만 보낸다. 소비자 웹 앱 서버는 `"cache"`만 보낸다(월렛 입장 키를 기본으로 남기려고 `"storage"`는 넣지 않는다, 결정 17). 파트너 콘솔은 로그인·갱신과 같이 로그아웃 응답도 `gw-partner`(`partner-api`, 교차 출처)가 주고(ADR-0119), 관제 콘솔은 앱 서버가 없어 `ops-api`(교차 출처)가 준다. 둘은 `Clear-Site-Data`를 보내지 않고, 화면 출처는 2번이 지운다. 스캐너는 업로드를 비운 뒤 Dexie `session`만 지운다. 시험은 FE-T34다.
 
 #### 5.14.5 공급망과 위험 구성 요소(ADR-0079 결정 22)
 
+pnpm 공급망 설정(`minimumReleaseAge`·`trustPolicy`·`blockExoticSubdeps`·`strictDepBuilds`·`trustLockfile`·`allowBuilds`)과 판(pnpm 12)은 docs/devops.md §4.4가 모든 Node 저장소의 정본이다. 이 저장소는 그 공통 설정을 그대로 쓰고, 설치 스크립트 허용 목록만 더한다(추천 적용 2026-10-28, 기술 검토 낮음-014).
+
 ```yaml
-# pnpm-workspace.yaml (요지, pnpm 12)
-minimumReleaseAge: 4320          # 3일(정본, devops §4.4)
-trustPolicy: no-downgrade        # 신뢰 증거가 약해진 판은 설치 실패
-blockExoticSubdeps: true         # 전이 의존성의 git·tarball 주소 차단
-strictDepBuilds: true            # 검토 안 한 설치 스크립트가 있으면 실패
-trustLockfile: false             # 외부 기여자가 잠금 파일을 고칠 수 있는 공개 저장소
-allowBuilds:                     # 설치 스크립트를 허용하는 패키지(빈 목록에서 시작)
+# pnpm-workspace.yaml(peaket-frontend). 공통 설정은 devops §4.4 그대로이고 이 저장소에만 더하는 것
+allowBuilds:
   esbuild: true
 ```
 
+표에 올리는 기준은 devops §4.4와 같다. 오래된 판의 기준은 '어느 배포 태그든(베타 포함) 마지막 게시가 12개월보다 오래됨' 하나다. 안정판만 오래되고 다음 판을 12개월 안에 내고 있으면 올리지 않는다(추천 적용 2026-10-28, 기술 검토 낮음-172). ADR-0091의 uPlot 기각과 Chart.js를 바꿀 조건도 같은 기준이다. 표에 올린 것은 쓰지 않는다는 뜻이 아니라 대안과 바꿀 조건을 적는다는 뜻이다.
+
 | 구성 요소 | 걱정(2026-10-21 레지스트리) | 결정 |
 | --- | --- | --- |
-| redux-observable | `latest`가 3.0.0-rc.3(2025-12-09)이고, 안정판 3.0은 없다 | 쓰지 않는다. 스트림은 RxJS 어댑터가 묶어 Zustand 저장소의 동작으로 쓴다(ADR-0092) |
-| next-auth(Auth.js) v5 | 베타(5.0.0-beta.32)이고, authjs.dev가 Better Auth로 합쳐졌다고 알렸다 | 판을 고정해 쓴다. 인증 구현을 시작하기 전 Better Auth로 옮겨 보는 PoC로 계속 쓸지 정한다 |
+| redux-observable | `latest`가 3.0.0-rc.3(2025-12-09)이고, 안정판 3.0은 없다 | 쓰지 않는다. 스트림은 호스트 스트림 어댑터(작은 유틸 둘, §3.1)가 묶어 Zustand 저장소의 동작으로 쓴다(ADR-0092. RxJS도 2026-10-28 기술 검토 낮음-097로 뺐다) |
+| next-auth(Auth.js) v5 | 베타(5.0.0-beta.32, 2026-07-20)이고, 저장소 README가 Better Auth의 일부가 됐다며 새 프로젝트에 Better Auth를 권한다. 자기 세션 쿠키를 두어 identity와 세션이 두 층이 된다 | 기본으로 쓰지 않는다. 소셜 로그인은 얇은 OIDC 클라이언트(`oauth4webapi` 3, 의존성 없음, MIT. Auth.js core도 이것 위에서 돈다)를 기본안으로 두고, 인증 구현 전 PoC(I-T51)에서 C가 실패하면 v5 고정 판으로 간다. Better Auth는 무상태 모드도 자기 세션 쿠키를 둬 문서로 뺐다. 파트너 콘솔의 Credentials는 뺐다(추천 적용 2026-10-28, ADR-0119) |
 | `@lhci/cli` | 0.15.1(2025-06-25) 뒤로 새로 게시된 판이 없다 | 쓰되, 멈추면 `lighthouse` CLI와 자체 예산 검사로 바꿀 수 있게 설정을 단순하게 둔다 |
-| `@hello-pangea/dnd` | 18.0.1(2025-02-09) 뒤로 새로 게시된 판이 없다 | 쓰되 키보드 대안(위로·아래로 버튼)을 필수로 둔다 |
+| `@hello-pangea/dnd` | 18.0.1(2025-02-09) 뒤로 새로 게시된 판이 없다 | 쓰지 않는다. 순서 바꾸기는 위로·아래로 버튼으로만 한다(§5.6, 추천 적용 2026-10-28, 기술 검토 낮음-098. 그 전에는 키보드 대안을 필수로 두고 썼다) |
+| Konva | npm 게시 권한이 한 사람에게만 있다. 판은 자주 나온다(2026-09-08~10-15에 6판, 2026-10-28 레지스트리) | 쓴다(§5.6). 판을 잠금 파일로 고정하고 새 판 3일 대기를 지킨다. CMP-051 밖에서는 부르지 않아, 바꿀 때 고칠 곳을 한 곳에 모은다(기술 검토 중간-016) |
 | comlink | 4.4.2(2024-11) | 쓰지 않는다. Worker 메시지는 §4.7의 작은 형식을 쓴다 |
 | QR 생성 라이브러리 | 후보는 `qrcode` 1.5.4(2024-08)와 `uqr` 0.1.3이다 | wbs 5.1.3 PoC에서 인식 시간과 함께 보고 고른다 |
-| `@opentelemetry/sdk-trace-web` | 지원 중단 표시가 붙었다("Use @opentelemetry/sdk-trace package") | 후속 패키지를 쓴다 |
+| `@portone/browser-sdk` | 0.1.13(2026-09-29, 2026-10-28 레지스트리)으로 아직 0.x이고, 결제 화면에 들어간다 | 쓴다. 포트원 V2 결제창을 여는 결제사 SDK라 바꿀 곳이 없다. 판을 잠금 파일로 고정하고 새 판 3일 대기를 지키며, 결제 화면에서만 동적 import한다(§5.3). 같은 기준으로 서버 쪽 목록은 docs/devops.md §4.4다(기술 검토 낮음-145) |
+| `@opentelemetry/sdk-trace-web` | 지원 중단 표시가 붙었다("Use @opentelemetry/sdk-trace package") | 싣지 않는다. 브라우저 span을 내보내지 않으므로 OTel 브라우저 SDK를 빼고, `traceparent`는 `@peaket/telemetry`의 작은 함수가 만든다(observability §11, 추천 적용 2026-10-28, 기술 검토 낮음-053) |
 
 - **SBOM**: 앱 서버 이미지만이 아니라 앱마다 정적 자산 묶음의 CycloneDX SBOM(소프트웨어에 들어간 부품(라이브러리) 목록)도 만든다. 결제사·사람 확인처럼 실행 중에 외부에서 받아 오는 스크립트는 SBOM 비고에 적는다(ADR-0079 결정 22).
 
 #### 5.14.6 비밀과 빌드 변수
 
 - 브라우저 묶음에는 비밀을 넣지 않는다(secrets-and-keys 관리 규칙). 브라우저로 가는 값은 `NEXT_PUBLIC_*`(Next.js)·`VITE_*`(스캐너) 접두사가 붙은 값만이다. 이 값은 공개해도 되는 값(사람 확인 사이트 키, 결제사 클라이언트 키, 배포 식별자)뿐이다. CI가 묶음에서 비밀처럼 생긴 문자열을 찾는다(FE-T21).
-- 서버에만 있는 값: Auth.js 비밀, `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`(모든 앱 서버 파드가 같은 값을 쓴다, devops §6.6), 사람 확인 비밀 키(서버 검증용), 소스 맵 올리기 토큰(CI). 이 값들을 docs/security/secrets-and-keys.md에 행으로 올린다.
+- 서버에만 있는 값: 소셜 제공자 OAuth 클라이언트 시크릿과 로그인 진행 쿠키 암호화 키(소비자 웹 앱 서버만, ADR-0119), `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`(모든 앱 서버 파드가 같은 값을 쓴다, devops §6.6), 사람 확인 비밀 키(서버 검증용), 소스 맵 올리기 토큰(CI). 이 값들을 docs/security/secrets-and-keys.md에 행으로 올린다.
 
 ### 5.15 SEO와 공유
 
 - 공개 화면(홈, 공연 상세, 굿즈, FAQ, 정책 문서)에는 Next.js Metadata API, `next/og` 오픈그래프 이미지, schema.org `Event` JSON-LD, `sitemap.xml`, `robots.txt`, 정규 주소, 네 언어 `hreflang`을 둔다(architecture §6.3).
 - 검색 결과 화면(`/search`)은 `<meta name="robots" content="noindex, follow">`를 두고 sitemap에 넣지 않는다. robots.txt로 막지 않아 검색 엔진이 noindex를 읽고 결과의 공연 상세 링크를 따라간다. 구글 스팸 정책이 '분명한 둘러보기 구조보다 검색 결과에 가까운 비슷한 페이지 만들기'를 도어웨이 남용의 예로 들기 때문이다(2026-10-27 확인, ADR-0094). 검색 엔진 유입은 공연 상세(구조화 데이터)와 sitemap이 맡는다.
 - 대기실·예매·결제·마이·스태프 화면은 `noindex`로 두고 `robots.txt`에서 막는다. 대기실 경량 페이지 셸에도 `<meta name="robots" content="noindex">`를 넣는다.
-- 허니팟 요소는 화면과 접근성 트리에서 숨기고 일반 `<a>`로 둔다(라우터의 미리 가져오기를 막는다, queue-admission §7). 사이트맵에는 넣지 않는다.
+- 허니팟 요소는 화면과 접근성 트리에서 숨기고 일반 `<a>`로 둔다(라우터의 미리 가져오기를 막는다, queue-admission §7). 사이트맵에는 넣지 않는다. 형식은 이 숨긴 링크 하나로 정하고, 숨긴 입력 칸은 두지 않는다(자동 완성과 비밀번호 관리자(3.3.8에서 허용한다)가 사람 대신 채울 수 있다). 적중은 확정 라벨이 아니라 높은 확신 신호이고, 정밀도는 표본 검토로 잰다(FR-049, 추천 적용 2026-10-28, 기술 검토 낮음-122).
 - JSON-LD는 특수 문자를 이스케이프하는 직렬화기로만 넣는다(ASVS 1.2.3).
 
 ### 5.16 관측
@@ -1353,13 +1449,13 @@ allowBuilds:                     # 설치 스크립트를 허용하는 패키지
 - **보내기**: `fetch(…, {method: "POST", keepalive: true, credentials: "omit"})`로 보낸다. 묶음은 64KiB 이하다. 화면이 보이는 동안 60초 [가정]마다 보내고, `visibilitychange`로 화면이 숨김 상태가 될 때도 보낸다. keepalive를 지원하지 않으면 `sendBeacon`을 쓴다(observability §11).
 - **Prometheus 이름**(게이트웨이 수집기가 만든다): `rum_lcp_seconds`, `rum_inp_seconds`, `rum_cls`, `rum_fcp_seconds`, `rum_ttfb_seconds`, `rum_long_task_total`, `rum_js_error_total`, `rum_api_fail_total`, `queue_reflect_seconds`, `seat_delta_e2e_seconds`, `seatmap_ready_seconds`, `payment_confirm_seconds`, `ws_reconnect_total`, `scanner_judge_seconds`, `remote_load_failed_total`. 라벨은 `app`, `route`, `device_class`와 값의 가짓수가 정해진 분류 라벨(`rum_api_fail_total`의 `class`, `remote_load_failed_total`의 `remote`·`reason`, `csp_violation_total`의 `directive`)만 쓴다(카디널리티 규칙: 지표에 붙는 이름표 값의 가짓수가 많으면 저장 비용이 커진다, observability §8). 히스토그램(값을 구간별로 나눠 센 분포 지표)의 구간 경계에는 SLO(팀이 정한 목표) 기준값을 넣는다(ADR-0077).
 - **오류 도구**: Sentry 브라우저 SDK는 대기실 경량 페이지를 뺀 앱에 싣는다. 오류는 같은 출처의 터널 `/_t/err` [가정]로 보내므로 `connect-src`에 Sentry 출처를 넣지 않는다. 수집 설정 잠금(IP 끔, 본문 끔, 쿠키·헤더·쿼리 거름, `beforeSend` 마스킹, `accountRef`만)의 정본은 observability §11이다. 화면 녹화는 운영에서 쓰지 않는다. 릴리스 이름은 `dpl`이다.
-- **추적**: OpenTelemetry(지표·로그·요청 기록을 모으는 공통 표준과 도구) 브라우저 SDK는 같은 출처 요청(앱 서버)에만 `traceparent`를 붙인다(§4.1).
+- **추적**: 브라우저 span(요청 하나가 지난 구간의 기록)은 내보내지 않고, OpenTelemetry(지표·로그·요청 기록을 모으는 공통 표준과 도구) 브라우저 SDK도 싣지 않는다. `@peaket/telemetry` 전체 판의 작은 함수가 같은 출처 요청(앱 서버)에만 무작위 `traceparent`(표본 표시 `00`)를 붙이고, 그 요청이 실패하면 같은 trace-id를 Sentry 사건 태그 `browserTraceId`에 싣는다. Sentry는 `tracePropagationTargets: []`로 자기 추적 헤더를 붙이지 않는다(§4.1, observability §11, 추천 적용 2026-10-28, 기술 검토 낮음-053).
 
 **운영 확인 표**(architecture §8.4)
 
 | 확인할 동작 | 사건·필드 | SLI | 대시보드 패널 | 경보(종류·심각도) | 배포 뒤 확인 방법 |
 | --- | --- | --- | --- | --- | --- |
-| 대기 화면이 2초 안에 차례를 반영 | `marks.queue_reflect_ms`(1초 폴링 구간) | p99 2초(NFR-002) | RUM '대기 반영' | 없음(브라우저 지표로는 사람을 부르지 않는다, observability §11) | 카나리 전후 p99 비교 |
+| 대기 화면이 2초 안에 차례를 반영 | `marks.queue_reflect_ms`(0.5초 폴링 구간의 차례 순간, 사람마다 한 번, ADR-0110) | p99 2초(NFR-002) | RUM '대기 반영' | 없음(브라우저 지표로는 사람을 부르지 않는다, observability §11) | 카나리 전후 p99 비교 |
 | 대기실이 예산 안 | 빌드 크기 보고 | — | — | PR 실패(size-limit) | CI |
 | 좌석 델타가 300ms 안 | `marks.seat_delta_e2e_ms` | p99 300ms(NFR-004) | RUM '좌석 전파' | 없음(서버 쪽 경보는 realtime-gw가 맡는다) | 카나리 전후 |
 | 좌석맵이 1초 안에 뜸 | `marks.seatmap_ready_ms` | 1초 미만(NFR-012) | RUM '좌석맵 준비' | 없음 | 카나리 전후 |
@@ -1374,35 +1470,64 @@ allowBuilds:                     # 설치 스크립트를 허용하는 패키지
 
 프론트엔드 시험 ID는 FE-T로 둔다(ADR-0079 결정 25). 시험 배치는 devops §3.3을 따른다.
 
+**실행 도구(추천 적용 2026-10-28, 기술 검토 중간-020)**: 시험을 돌리는 러너(시험 실행기)·단언·가짜 함수 도구는 한 벌로 맞춘다.
+
+| 종류 | 도구 | 쓰는 시험(예) |
+| --- | --- | --- |
+| 단위·컴포넌트(jsdom: Node 안에서 흉내 낸 브라우저 환경) | Vitest + React Testing Library. 가짜 시계는 `vi.useFakeTimers` | FE-T2·FE-T4·FE-T9·FE-T12·FE-T23·FE-T24 |
+| 실제 브라우저 Web API(WebCrypto·IndexedDB·Web Locks·BroadcastChannel·EventSource) | Vitest 브라우저 모드 + Playwright 공급자(`@vitest/browser-playwright`), Chromium·Firefox·WebKit 세 엔진 | FE-T7·FE-T13·FE-T15·FE-T28 |
+| E2E·성능 | Playwright(`@playwright/test`) 세 엔진(CI의 kind), 성능 추적, memlab | FE-T3·FE-T5·FE-T6·FE-T8·FE-T10·FE-T14·FE-T27 |
+| 접근성 | axe-core(`@axe-core/playwright`, Storybook 접근성 검사)와 키보드·화면 낭독기 수동 확인 | FE-T18 |
+| 빌드 산출물 검사 | size-limit, Lighthouse CI, 빌드 목록 검사 스크립트 | FE-T1·FE-T21·FE-T22·FE-T25 |
+| 시각 회귀 | Playwright `toHaveScreenshot`(판을 고정한 같은 컨테이너 이미지), Storybook 정적 빌드. 유료 서비스는 쓰지 않는다(design/d2 §1, 기술 검토 낮음-100) | FE-T40 |
+
+- 단언과 가짜 함수는 Vitest 하나(`expect`, `vi.fn`, `vi.useFakeTimers`)로 쓴다. 원문 ADR-0018의 `@web/test-runner` + mocha + chai + sinon은 쓰지 않는다. 같은 시험 파일을 jsdom과 실제 브라우저에서 같은 러너로 돌리기 때문이다.
+- Vitest 브라우저 모드는 Vitest 4.0(2025-10-22)부터 안정판이다. 공급자는 따로 받는 패키지다. 2026-10-28 레지스트리 판은 vitest 5.0.5, `@vitest/browser-playwright` 5.0.5, `@playwright/test` 1.64.1, axe-core 4.14.0이다.
+
 | ID | 무엇 | 어떻게 | 언제 | 통과 기준 |
 | --- | --- | --- | --- | --- |
 | FE-T1 | 대기실 경량 페이지 예산 | size-limit(gzip) | PR | JS ≤ 50KB, CSS < 10KB |
 | FE-T2 | 대기실 상태표 | 상태·전이를 빠짐없이 보는 단위 시험(가짜 시계, 응답 표본) | PR | §3.4의 모든 전이 |
 | FE-T3 | T=0 두 호출의 사전 요청 0 | Playwright 3엔진에서 OPTIONS를 지켜보고, api-client가 다른 경로의 `text/plain`을 거절하는지 본다 | PR·출시 후보 | OPTIONS 0, 거절 동작 |
-| FE-T4 | 서버를 지키는 규칙 | 가짜 시계로 지터 분포, `Retry-After` 하한, 실패 뒤 대기, 숨긴 탭의 최소 간격, 재연결 상한, 셔플 고정 지연을 본다 | PR | §5.9 표의 값 |
+| FE-T4 | 서버를 지키는 규칙 | 가짜 시계로 지터 분포, `Retry-After`·본문 하한(`pollHintMs`·`retryAfterSeconds`), 실패 뒤 대기, 숨긴 탭의 최소 간격, 재연결 상한, 셔플 고정 지연을 본다. 하한은 기본 간격보다 큰 값(예 `Retry-After: 3`)과 작은 값을 함께 넣고 1만 번 뽑는다 | PR | §5.9 표의 값. 하한이 있으면 모든 기다림이 하한 이상이고 1.2배 이하로 고르게 퍼진다(0.1배 칸마다 9~11% [가정], 기술 검토 중간-038). 200 응답의 `Retry-After` 헤더는 쓰지 않고 본문 값을 쓴다(중간-032) |
 | FE-T5 | 재접속 순번 보존 | 창을 닫고 다시 열기, 5분 끊김, 새로고침 | develop | 순번·앞 인원 유지(NFR-025) |
-| FE-T6 | 여러 탭 | 같은 회차를 연 탭 3개, 복제한 탭에서 구매 | develop | 폴링 리더 하나, 일련번호 역전 0 |
+| FE-T6 | 여러 탭 | 같은 회차를 연 탭 3개, 복제한 탭에서 구매. 리더 탭을 숨김(다른 탭은 보임), 모든 탭을 숨김, 리더 탭을 멈춤(방송 끊김), 숨긴 채 차례가 옴(기술 검토 중간-037) | develop | 폴링 리더 하나, 일련번호 역전 0. 리더를 숨기면 1초 [가정] 안에 보이는 탭이 리더가 되어 자기 간격으로 묻는다. 모든 탭이 숨겨지면 묻기가 숨긴 간격마다 대개 한 번이다. 방송이 끊기면 보이는 탭이 자기 간격의 2배 뒤에 스스로 묻는다. 입장 확정은 보이는 리더만 보내고, 숨긴 탭은 보내지 않는다 |
 | FE-T7 | 구매 세션 서명 | 서버와 같은 시험 벡터(MAC 입력·HKDF·키 형식) | PR | 벡터 일치 |
 | FE-T8 | 결제 복귀 | 시뮬레이터로 두 결제사의 성공·실패·새로고침과 쿠키 없는 첫 요청을 본다 | develop | 결제 값이 담긴 주소를 바로 지운다, 접수 202 |
 | FE-T9 | 이진 해독기 경계 | 잘린 프레임, 큰 개수, 모르는 판, 음수 없는 범위를 넣는 퍼징 | PR | 예외 없이 버리고, 경계 밖 읽기 0 |
-| FE-T10 | 좌석맵 성능과 네트워크 | Playwright 성능 추적(CPU 4배), memlab, 사전 요청 수 | 측정 캠페인(wbs 7.5.2) | 첫 그림 1초, INP 200ms, 긴 작업 0, 힙 70% |
-| FE-T11 | 좌석 연결 상태 | 가짜 서버로 1012·4401·하트비트 끊김·버전 갭·구독 전환을 만든다 | PR | §3.5 전이, 30초 안에 스스로 회복 |
+| FE-T10 | 좌석맵 성능과 네트워크 | Playwright 성능 추적(CPU 4배), memlab, 사전 요청 수, 접근성 목록을 연 채 다른 세션이 그 구역 좌석을 홀드할 때의 상태 메시지 처리 시간(§5.2, 기술 검토 중간-015) | 측정 캠페인(wbs 7.5.2) | 첫 그림 1초, INP 200ms, 긴 작업 0, 힙 70%, 상태 메시지 처리 p95 2ms [가정] |
+| FE-T11 | 좌석 연결 상태 | 가짜 서버로 1012·4401·하트비트 끊김·버전 갭·구독 전환을 만든다. 스냅샷 재요청에 지연과 503을 넣고 같은 구역에 갭을 잇따라 만든다(ADR-0117). 연결 기계에서 `@xstate/graph`로 만든 최단 경로로 모든 전이를 한 번 이상 돈다(§3.1, 기술 검토 낮음-096) | PR | §3.5 전이, 기계의 모든 전이를 경로가 덮는다, 30초 안에 스스로 회복, 같은 구역 스냅샷 재요청은 동시에 하나 |
 | FE-T12 | 돌아갈 주소와 URL 조각 | `//evil`, `/\evil`, `%2F%2F`, 제어 문자, 조각 토큰 | PR | 모두 첫 화면으로 보내고 조각은 바로 지운다 |
 | FE-T13 | 저장소 정리 | 시작할 때 만료된 항목, 로그아웃, 다른 탭에 알리기 | develop | §3.12 표대로 |
 | FE-T14 | 월렛 오프라인 | 비행기 모드에서 QR 15초 회전, 서비스 워커 범위, 킬 스위치 | develop | 오프라인 QR, 범위 밖 가로채기 0 |
-| FE-T15 | 미지원 기능 대체 | WebCrypto·IndexedDB·OffscreenCanvas를 없앤 브라우저 | develop | §1.5 표대로 |
-| FE-T16 | 헤더 값 | 빌드한 앱과 배포 정책의 CSP·COOP·COEP·Permissions-Policy 스냅샷 | 출시 후보 | §5.14.1과 같다 |
+| FE-T15 | 미지원 기능 대체 | WebCrypto·IndexedDB·OffscreenCanvas를 없앤 브라우저. `AbortSignal.any`를 지운 페이지(Playwright가 페이지 스크립트보다 먼저 넣는 `addInitScript`로 지운다)에서 api-client의 읽기·쓰기를 부르고, 시간 초과와 화면 떠남을 일으킨다(기술 검토 중간-095). PR에서는 `eslint-plugin-compat`이 목표 밖 API를 막는다(§1.5) | develop | §1.5 표대로. `AbortSignal.any`가 없어도 호출이 예외 없이 나가고, 시간 초과는 `TimeoutError`, 화면 떠남은 `AbortError`로 끝나며, 끝난 뒤 남은 사건 듣기가 0이다 |
+| FE-T16 | 헤더 값과 메서드 | 빌드한 앱과 배포 정책의 CSP·COOP·COEP·Permissions-Policy 스냅샷. 화면 배포마다 정적 경로·앱 서버 경로·`/_t/*`에 PUT·DELETE·TRACE 요청을 보낸 응답 스냅샷(기술 검토 낮음-099, docs/infra.md) | 출시 후보 | §5.14.1과 같다. 앱 서버 경로와 `/_t/*`의 PUT·DELETE는 405, 정적 경로는 CloudFront가 거절하고, 어느 경로든 TRACE와 허용 밖 메서드에 2xx 0 |
 | FE-T17 | 원격 위젯 | 무결성 불일치·시간 초과·계약 판 불일치 | develop | 그 칸만 대체 카드로 바뀐다 |
-| FE-T18 | 접근성 | axe(PR), 키보드 완주(좌석·결제·양도), NVDA·VoiceOver 수동 확인 | PR·메이저 릴리스 | 위반 0, 완주 100% |
+| FE-T18 | 접근성 | axe(PR. axe는 WCAG 2.2 규칙을 기본으로 끄므로 `wcag22aa` 태그를 켠다), 키보드 완주(좌석·결제·양도), NVDA·VoiceOver·TalkBack 수동 확인(조합·시나리오마다 3회 [가정], NFR-020). 키보드 시나리오에 한 글자 단축키(꺼짐·입력 칸 초점, 2.1.4), Tab으로 옮긴 초점이 고정 머리·하단 바에 다 가려지지 않는지(2.4.11), 로그인 칸의 붙여넣기(3.3.8)를 더한다(추천 적용 2026-10-28, 기술 검토 높음-28). 인증 앱 코드 여섯 자리를 한 번에 붙여넣기, 이유가 있는 비활성 버튼(`aria-disabled`)에 Tab이 닿는지와 Enter·Space·클릭이 아무 일도 하지 않는지, 그 버튼의 `aria-describedby`가 가리키는 이유 글이 화면에 보이는지를 더한다. axe의 `aria-required-children`·`aria-required-parent`(SeatList `tree` 구조)와 `aria-prohibited-attr`(span·div에 붙인 `aria-label`)를 켠다. SeatList는 구현 전에 시안으로 NVDA·VoiceOver 완주를 한 번 돌린다(기술 검토 중간-098·100·101) | PR·메이저 릴리스 | 위반 0, 완주 100%, 단축키가 꺼졌거나 입력 칸에 초점이 있을 때 동작 0, 다 가려진 초점 0, 비활성 버튼의 동작 0과 이유 글 연결 100% |
 | FE-T19 | 다국어 | 누락 키, 로케일별 초기 번들 크기, 대기실 셸 넷 | PR | 누락 0, 크기가 같다 |
 | FE-T20 | 스캐너 판정 | 관리형 기기 벤치, 판정 표 14행 | 측정 캠페인 | p95 150ms, 표대로 |
 | FE-T21 | 운영 묶음 검사 | 개발 도구·MSW·데모 막대(2인 승인 시연 버튼 포함, ADR-0095)·시뮬레이터·소스 맵 링크·비밀처럼 생긴 문자열, 허용 확장자 | 출시 후보 | 0건 |
 | FE-T22 | 지표 묶음 | 64KiB, 식별값·쿼리·조각 없음, 표본 | PR | 규칙대로 |
 | FE-T23 | 관리 계정 유휴 | 사람 입력 없이 폴링만 할 때 갱신 안 하기, 58분 경고 | PR | 갱신 0, 경고 시각 |
-| FE-T24 | 결제 결과 기계 | 상태 8가지, 120초 뒤 결과 확인 중, 다시 들어오기 | PR | §3.6 표대로 |
-| FE-T25 | 콘솔 덩어리 나눔 | 빌드 산출물의 덩어리 목록에서 관제 첫 화면 묶음에 다른 화면 덩어리가 있는지, 화면 덩어리 크기, 파트너 첫 화면 묶음에 에디터·시뮬레이터·끌어 놓기·그래프가 있는지 본다 | PR | 관제 화면 덩어리 80KB 이하 [가정], 첫 화면 묶음에 늦게 싣는 부분 0 |
-| FE-T26 | 안 보이는 위젯 | 가짜 GraphQL·Socket.IO 서버와 가짜 시계로 탭 전환·위젯 접기·브라우저 탭 숨김·회차 바꾸기를 만든다 | PR | 열린 위젯 구독이 떠난 탭은 10초 뒤, 숨긴 탭은 30초 뒤 0. 접은 위젯은 머리만 그린다. 경보·명령 확인 수신 유지, 탭 제목의 수, 다시 보일 때 재구독·15분 창 채우기·신선도 표시(§5.7) |
-| FE-T27 | 콘솔 장시간·스트림 부하 | Playwright로 관제 판매 중 탭을 열고 가짜 스트림(위젯마다 초당 1건, 1분 동안 경보 초당 20건 [가정])을 4시간 [가정] 흘리며 탭과 회차를 20번 [가정] 바꾼다. memlab 탭 순환 시나리오를 돌린다. 파트너 판매 현황은 SSE를 8시간 [가정] 받는다 | 측정 캠페인(wbs 7.5.2) | 처음 30분 뒤 JS 힙(가비지 수거 뒤)의 시간당 증가 5% [가정] 이하, DOM 노드 수가 늘지 않음, 평상 구간 긴 작업 0, 탭 전환·명령 화면 열기 INP 200ms(데스크톱 프로필과 CPU 4배 태블릿 프로필), memlab 누수 0, 그래프 점 수가 상한 안 |
+| FE-T24 | 결제 결과 기계 | 상태 8가지, 120초 뒤 결과 확인 중, 다시 들어오기. 기계에서 `@xstate/graph`로 만든 최단 경로로 모든 전이를 돈다(가짜 시계, §3.1, 기술 검토 낮음-096) | PR | §3.6 표대로, 기계의 모든 전이를 경로가 덮는다 |
+| FE-T25 | 콘솔 덩어리 나눔 | 빌드 산출물의 덩어리 목록에서 관제 첫 화면 묶음에 다른 화면 덩어리가 있는지, 화면 덩어리 크기, 파트너 첫 화면 묶음에 에디터·시뮬레이터·그래프가 있는지, 파트너·관제 묶음에 끌어 놓기 라이브러리가 있는지(기술 검토 낮음-098) 본다 | PR | 관제 화면 덩어리 80KB 이하 [가정], 첫 화면 묶음에 늦게 싣는 부분 0 |
+| FE-T26 | 안 보이는 위젯 | 가짜 SSE 서버(늘 여는 흐름·위젯 흐름)와 가짜 시계로 탭 전환·위젯 접기·브라우저 탭 숨김·회차 바꾸기를 만든다(ADR-0100) | PR | 위젯 흐름의 위젯 목록에서 떠난 탭의 위젯은 10초 뒤, 숨긴 탭은 30초 뒤 0. 목록이 바뀔 때 위젯 흐름을 1초 묶어 한 번만 다시 연다. 접은 위젯은 머리만 그린다. 늘 여는 흐름은 끊기지 않고 경보·명령 확인 수신 유지, 탭 제목의 수, 다시 보일 때 위젯 조회로 15분 창 채우기·신선도 표시(§5.7) |
+| FE-T27 | 콘솔 장시간·스트림 부하 | Playwright로 관제 판매 중 탭을 열고 가짜 스트림(위젯마다 초당 1건, 1분 동안 경보 초당 20건 [가정])을 4시간 [가정] 흘리며 탭과 회차를 20번 [가정] 바꾼다. memlab 탭 순환 시나리오를 돌린다. 파트너 판매 현황은 1분 주기 조회를 8시간 [가정] 돌린다(숨김·보임 전환 20번 [가정] 포함, 기술 검토 낮음-024) | 측정 캠페인(wbs 7.5.2) | 처음 30분 뒤 JS 힙(가비지 수거 뒤)의 시간당 증가 5% [가정] 이하, DOM 노드 수가 늘지 않음, 평상 구간 긴 작업 0, 탭 전환·명령 화면 열기 INP 200ms(데스크톱 프로필과 CPU 4배 태블릿 프로필), memlab 누수 0, 그래프 점 수가 상한 안 |
+| FE-T28 | 관제 SSE 흐름 계약 | 가짜 SSE 서버로 ① 늘 여는 흐름을 끊었다 붙이고 ② 1시간 넘은 `Last-Event-ID`로 다시 붙고 ③ 35초 동안 하트비트를 멈추고 ④ 액세스 토큰 만료·세션 종료로 서버가 흐름을 닫고 ⑤ 보이는 위젯 목록을 바꾼다. 게이트웨이 설정 검사로 SSE 경로의 `timeouts.request: 0s`를 본다(ADR-0100) | PR | ① 빠진 `command`·`alert`가 없다 ② `reset` 뒤 명령·경보·승인 대기를 REST로 다시 읽는다 ③ 35초 뒤 다시 연다(10초 + 0~5초 무작위) ④ 토큰을 갱신한 뒤 다시 붙고, 갱신이 401이면 로그인으로 간다 ⑤ 위젯 흐름만 다시 열고 늘 여는 흐름은 그대로다. 콘솔 번들에 urql·graphql-ws·socket.io-client가 없다 |
+| FE-T29 | 관제 Module Federation과 한 앱 기준선 | 같은 위젯 판으로 Module Federation 빌드와 한 앱 빌드(위젯 패키지 + 경로별 `lazy` + 오류 경계)를 만들어, 같은 대시보드에서 ① 첫 그림 시간(CPU 4배, 빈 캐시·채운 캐시) ② 첫 화면 JS와 화면별 덩어리 크기 ③ 원격 하나(한 앱은 위젯 덩어리 하나)를 막았을 때의 격리 ④ 위젯 하나를 고쳐 운영에 내기까지 다시 빌드·배포하는 저장소 수와 시간을 3회씩 잰다(ADR-0100 결정 6) | 측정 캠페인(wbs 4.5.6) | 판정이 아니라 기록이다. 결과를 성능 장부(`kpi: FE-T29`)에 두고, 바꿀 조건(첫 그림 p75 300ms [가정] 넘게 늦음 또는 첫 JS 20% [가정] 넘게 큼, 그리고 따로 배포할 이득을 쓰는 원격이 하나뿐)에 닿으면 한 앱으로 바꾸는 새 ADR을 쓴다. ③은 두 빌드 모두 셸·경보 패널과 다른 위젯이 그대로여야 한다 |
+| FE-T30 | 서버가 그린 SEED 부품의 스타일과 CSP(ADR-0111) | 운영 빌드와 운영 헤더(묶음 A·B·E·F)로 SEED 부품(Box·Flex·Stack·Text·ActionButton·Dialog·Grid)과 `next/image`(`fill` 포함)를 담은 시험 화면을 서버에서 그린다. Playwright 3엔진에서 CSP를 끄지 않고(`bypassCSP` 없이) 열어, 계산된 스타일을 브라우저에서만 그린 같은 부품과 비교한다. 경로별 서버 HTML의 `style` 속성 수와 그 출처(우리 스타일 속성·SEED 내부·`next/image`), `style-src-attr`를 넣기 전과 뒤의 위반 보고 수를 남기고, nonce 없는 `<style>` 요소와 인라인 스크립트가 계속 막히는지 본다 | PoC(wbs 2.10.1)·출시 후보 | 세 엔진 모두 계산된 스타일 차이 0, style 속성 위반 보고 0, nonce 없는 `<style>`·인라인 스크립트는 막힘 |
+| FE-T31 | 재배치·확대·글자 간격(WCAG 1.4.10·1.4.4·1.4.12, 추천 적용 2026-10-28, 기술 검토 높음-28) | Playwright 뷰포트 프로젝트 둘을 더한다. 320×256(1280×1024 화면을 400% 확대한 것과 같은 크기 [가정])에서는 표·좌석맵·좌석맵 에디터·그래프 밖의 가로 스크롤을 본다. 640×400(1280×800 화면을 200% 확대한 것과 같은 배치)과, 글자 간격을 줄 높이 1.5배·문단 뒤 2배·글자 사이 0.12배·단어 사이 0.16배로 덮어쓴 화면에서는 글자를 담은 요소가 잘리거나 겹치는지 센다(`overflow`를 숨긴 요소의 `scrollWidth`·`scrollHeight`가 보이는 크기보다 큰 것). 글자 간격은 스크립트로 스타일 규칙을 더하는 CSSOM `insertRule`로 넣어 CSP를 끄지 않는다(MDN: 브라우저가 이 방식은 막지 않는다). 소비자 웹·파트너·관제의 주요 흐름을 ko·en 두 로케일로 돈다 | PR(주요 흐름)·출시 후보(전 화면) | 예외 영역 밖 가로 스크롤 0, 잘림·겹침 0, 모든 조작 요소에 닿는다 |
+| FE-T32 | 시계 표본 규칙과 차례 반영 측정(추천 적용 2026-10-28, ADR-0110) | 가짜 시계와 응답 표본으로 기기 시계를 서버보다 3초 [가정] 늦게 둔다. ① 캐시 적중 응답(오래된 `Date`·큰 `Age`)만 받는 동안 ② 대기열 API 응답(`serverTimeMs`)을 받은 뒤 ③ 기기 시계를 중간에 2초 바꾼 뒤 ④ 탭을 닫았다가 29분·31분 [가정] 뒤 다시 연 뒤 보정값을 본다. `servingSteps`가 있는 파일로 차례를 만들고, 파일을 6초 받지 못한 경우와 탭을 숨긴 경우도 넣는다. Playwright 3엔진에서 `cache: "no-store"` 폴링의 네트워크 기록을 본다 | PR | ① 보정값이 바뀌지 않는다 ② `serverTimeMs`로만 바뀐다 ③ 보정 시계가 흔들리지 않는다 ④ 29분 뒤에는 저장한 보정값을 쓰고, 31분 뒤에는 다음 대기열 API 응답 전까지 `queue_reflect_ms`를 보내지 않는다. `queue_reflect_ms`가 가짜 시계 기준 ±20ms [가정] 안이고, 기록 밖·숨긴 탭이면 보내지 않는다. 폴링에 OPTIONS가 0이고 HTTP 캐시에서 답한 응답이 0이다 |
+| FE-T33 | 좌석맵 에디터 편집 캔버스(Konva, 추천 적용 2026-10-28, 기술 검토 중간-016) | Playwright 성능 추적으로 STADIUM 템플릿(약 5만 석)을 연다. ① 구역 하나를 5초 끌기 ② 회전 손잡이로 5초 돌리기 ③ 좌석 다듬기에서 상자로 1,000석 [가정]을 골라 화살표로 옮기기를 CPU 스로틀 없이 한 번, 4배 느린 CPU로 한 번 한다. 장면의 노드 수와 프레임별 그리기 시간을 함께 남긴다 | 측정 캠페인(wbs 7.5.2) | 끌기·돌리기 중 프레임 시간 p95 16.7ms [가정](스로틀 없음)·50ms [가정](4배), 조작 INP 200ms(NFR-012), 스로틀 없음에서 긴 작업 0. 못 맞추면 §5.6의 바꿀 조건 |
+| FE-T34 | 로그아웃 쿠키 격리(추천 적용 2026-10-28, 기술 검토 중간-067) | 한 브라우저에서 소비자 웹·파트너 콘솔·관제 콘솔에 모두 로그인하고 대기열 호스트의 도착 시각·최초 방문 쿠키를 받은 뒤 ① 소비자 웹 ② 파트너 콘솔 ③ 관제 콘솔 순으로 하나씩 로그아웃한다. 단계마다 Playwright로 쿠키 저장소와 출처별 저장소(localStorage·IndexedDB), 로그아웃 응답 헤더를 기록한다 | PR(CI의 kind)·출시 후보 | 로그아웃 응답의 `Clear-Site-Data`에 `"cookies"`가 없다. 각 단계에서 그 앱의 쿠키만 사라지고 다른 두 앱은 로그인 상태로 남는다. 도착 시각·최초 방문 쿠키는 셋 다 끝나도 남는다. ③ 뒤 관제 출처의 `peaket.console.ui`가 지워지고, ① 뒤 월렛 입장 키는 기본으로 남는다 |
+| FE-T35 | Cache Components와 nonce 화면 묶음(추천 적용 2026-10-28, 기술 검토 중간-094) | 운영 빌드에서 `(request)` 경로 묶음의 화면(추가 검증·좌석·결제·결과·마이·로그인·굿즈 결제)과 `(cached)` 묶음의 화면(홈·상세·월렛 셸)을 운영 헤더로 연다. 빌드 산출물의 사전 렌더 목록과 HTML에서 `(request)` 경로의 정적 셸이 있는지, 응답마다 모든 `<script>`(Next.js 부트스트랩·스트리밍 조각 포함)에 그 응답의 nonce가 붙었는지, 두 번 요청한 nonce가 다른지 본다. 두 묶음 사이를 링크로 오가 전체 이동이 되는지, 같은 묶음 안에서는 페이지 안 이동인지 본다 | PoC(wbs 2.10.1)·출시 후보 | `(request)` 경로의 정적 셸 0, nonce 없는 `<script>` 0, CSP 위반 보고 0, `(cached)` 화면은 CDN 캐시 적중. 실패하면 §2.5의 별도 앱 대안으로 간다 |
+| FE-T36 | SEED CSS 싣기와 층 순서(추천 적용 2026-10-28, 기술 검토 중간-097) | 앱 다섯(웹·파트너·관제·스캐너·포렌식)의 운영 빌드에서 경로 묶음마다 첫 화면 CSS를 모은다. ① 처음 실리는 CSS 파일의 첫 규칙이 층 순서 선언인지 ② SEED 부품 CSS가 `seed-components` 층 안에 있는지(Next.js 앱은 `turbopack.resolveAlias`로 recipe를 층 판으로 돌린 빌드) ③ SEED 전체 CSS(`all*.css`)가 없는지 ④ 같은 요소에 SEED 부품 클래스와 Tailwind 유틸을 함께 준 시험 부품에서 유틸이 이기는지, Tailwind 초기화가 SEED 부품을 덮지 않는지를 Playwright 3엔진의 계산된 스타일로 본다. 경로 묶음마다 CSS 크기(gzip)를 남긴다 | PoC(wbs 0.6.1)·PR | ①~④ 모두 맞고, 크기는 §5.8 CSS 열 안. Next.js 앱에서 ②가 안 되면 SEED 부품 요소에 Tailwind 유틸을 겹치지 않는 린트로 바꾼다(design/d2 §1) |
+| FE-T37 | 찜 오프라인 동기화(추천 적용 2026-10-28, 기술 검토 중간-005) | Playwright로 오프라인(`context.setOffline`)에서 공연 셋을 찜하고 하나를 다시 푼 뒤 온라인으로 돌린다. 다른 탭에서도 같은 공연 하나를 찜한다 | PR | 오프라인에서 화면이 바로 바뀌고, 온라인이 된 뒤 백그라운드에서 서버 저장이 끝나 서버 찜 목록이 화면과 같다(공연 둘). 같은 공연의 중복 저장은 0건이다. 연결: FR-019 |
+| FE-T38 | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28, 기술 검토 중간-005) | 템플릿 하나로 배치 층(구역 도형·이름·등급·입장 게이트)과 좌석 층(행·좌석 배치 도구)을 만든 뒤 JSON으로 내보내고 다시 가져온다. SVG·CSV 가져오기도 한다. 구역 도형 밖 좌석과 겹친 좌석을 하나씩 넣는다 | PR | JSON으로 다시 가져온 배치의 구역·좌석 수와 좌표가 내보낸 것과 같고, SVG·CSV 가져오기도 같은 구역·좌석 수를 만든다. 도형 밖 좌석과 겹침은 경고가 글자로 보이고 저장은 막지 않는다(ADR-0063·0066). 미리보기는 전체 → 확대 순서다. 연결: FR-023 |
+| FE-T39 | 관제 Trusted Types 보고 모드 시작 조건(추천 적용 2026-10-28, 기술 검토 낮음-098) | 관제 호스트와 원격의 운영 빌드를 묶음 C 헤더(보고 모드 Trusted Types 포함)로 연다. Playwright로 화면 16개를 모두 열어 화면 덩어리를 싣고, `remotes.json`의 원격을 모두 싣고, 원격 하나의 주소를 목록에 없는 주소로 바꿔 싣는다. `/_t/csp`로 온 위반 보고와 페이지가 만든 정책 이름을 기록한다 | PR(관제 호스트)·원격 배포 뒤 E2E | 덩어리·원격 적재에서 나온 Trusted Types 위반 보고 0, 만든 정책 이름이 모두 `trusted-types` 목록에 있고 이름이 겹치지 않는다, 목록에 없는 원격 주소는 `peaket-remote`가 거절한다(§5.14.1) |
+| FE-T40 | 시각 회귀(추천 적용 2026-10-28, 기술 검토 낮음-100) | Storybook 정적 빌드의 이야기(부품 상태마다 하나)와 대기실 경량 페이지 셸(waiting·soon·paused·stale), 같은 상태의 소비자 웹 React 대기 화면을 판을 고정한 같은 Playwright 컨테이너 이미지의 Chromium·WebKit에서 `toHaveScreenshot`으로 찍어 기준 이미지와 견준다. 라이트·다크를 모두 찍는다(관제는 다크 기본·라이트, 스캐너는 라이트). 기준 이미지는 저장소에 두고, 바꿀 때는 PR에서 그림 차이를 보고 승인한다 | PR(토큰·`@peaket/ds`를 바꾼 PR은 필수) | 픽셀 차이 비율이 문턱 0.1% [가정] 이하. 대기실 셸과 React 대기 화면의 같은 상태 사이도 같은 문턱(§6.3) |
+| FE-T41 | 서식 글 편집기 PoC(추천 적용 2026-10-28, 기술 검토 낮음-100) | 후보 Lexical·Tiptap으로 CMP-070을 만들어 파트너 운영 헤더(묶음 B)와 Trusted Types 보고 모드에서 연다. Word·웹 페이지에서 표·그림·스타일이 든 글을 붙여넣고, 구조 문서(JSON)로 저장한 뒤 소비자 웹에서 React 요소로 그린다. 늦게 싣는 덩어리 크기(gzip)와 키보드·낭독기(`textbox`·`toolbar`) 동작을 본다 | PoC(wbs 2.10.1) | CSP·Trusted Types 위반 보고 0(Tiptap은 기본으로 `<style>` 요소를 넣으므로 `injectCSS: false`나 nonce 설정으로 맞춘다), 저장 문서에 허용 노드 다섯 가지 밖 노드·속성 0, 다시 그린 글이 편집기 화면과 같다, 덩어리 80KB [가정] 이하. 두 후보가 모두 통과하면 덩어리가 작은 쪽을 고른다. 둘 다 구조 문서 기준을 못 넘으면 HTML 정화 대체안(asvs/catalog-review 1.3.1)으로 간다 |
+| FE-T42 | 카운트다운 갱신과 낭독(추천 적용 2026-10-28, 기술 검토 낮음-101·102) | 가짜 시계(`vi.useFakeTimers`)로 로비 카운트다운 10분을 돌리며 타이머를 300ms 늦게 깨우기, 탭을 숨겼다가 2분 뒤 다시 보이기, 기기 시계를 2초 바꾸기, 움직임 줄이기를 넣는다. 실제 브라우저(Playwright 성능 추적)에서는 보이는 동안 1분의 깨어남 수를 센다 | PR(가짜 시계)·측정 캠페인(wbs 7.5.2, 실제 브라우저) | 보이는 동안 초당 깨어남 2회 이하, 표시 숫자는 늦게 깨어난 바로 다음 표시부터 보정 시계의 남은 초와 같다, 다시 보이면 첫 표시가 맞는 숫자다, 카운트다운이 `requestAnimationFrame`을 부르지 않는다, 낭독은 남은 5분·1분·10초에 한 번씩(10분 동안 3번) |
 
 - 기능 설계서의 시험(Q-T·S-T·P-T·I-T·O-T·C-T)은 서버와 흐름 전체를 본다. FE-T는 브라우저 쪽만 본다. 검색의 브라우저 쪽 시험은 docs/features/search.md의 SR-T1(정규화)·SR-T10(한글 조합 중 키)·SR-T11(캐시 키)·SR-T14(noindex)다. 겹치는 시험(Q-T41 사전 요청, P-T38 복귀 화면, S-T15 좌석맵 성능)에서는 FE-T가 그 시험의 브라우저 부분이다.
 - Pact 소비자 계약은 `@peaket/api-client`가 만든다(devops §3.3).
@@ -1418,6 +1543,7 @@ allowBuilds:                     # 설치 스크립트를 허용하는 패키지
 | 파트너 앱 서버 이미지 | 같은 저장소 | ECR | 카나리 | 위와 같다 |
 | 관제 호스트 | 같은 저장소 | console 배포 S3 | 목록과 함께 | 목록 되돌리기 |
 | 관제 원격 위젯 | 서비스 저장소(공용 워크플로 `build-remote.yml`) | console 배포 S3 `/remotes/<원격>/<SHA>/` | GitOps로 `remotes.json`을 바꾼다 | 목록 되돌리기 |
+| 관제 위젯 패키지(한 앱 기준선) | 서비스 저장소(같은 워크플로가 원격과 함께 게시) | GitHub Packages `@peaket/widget-<원격 이름>` | 운영에는 내지 않는다. FE-T29 비교 빌드에만 쓴다(ADR-0100) | — |
 | 포렌식 리플레이 2단계 페이지(출시 뒤 선택) | `peaket-frontend` `apps/forensics` 운영 빌드 | console 배포 S3 `/forensics/` | 관제 호스트와 같다 | 목록 되돌리기 |
 | 스캐너 PWA | `peaket-frontend` | scanner 배포 S3 | 근무 준비 때 적용 | 목록 되돌리기 |
 | 경로를 바꿔 읽는 엣지 함수 | `peaket-infra` | CloudFront Functions(개발 단계 시험 뒤 게시) | 정본 절차(devops §6.6) | 이전 코드를 다시 게시 |
@@ -1432,7 +1558,7 @@ allowBuilds:                     # 설치 스크립트를 허용하는 패키지
 ### 5.19 포렌식 리플레이 데모(ADR-0080)
 
 - 지난 온세일을 좌석맵 위에서 다시 보고 걸러 가며 봇 후보를 찾는 화면(SCR-069)이 있다. 그 1단계는 합성 데이터만 쓰는 정적 앱 `apps/forensics`다. 정본은 docs/features/forensic-replay.md이고, 보안 요구사항 추적은 docs/security/asvs/forensic-replay.md에서 한다.
-- 이 문서와 맞춘 것: 좌석맵을 그리는 렌더러는 `packages/seatmap`으로 올려 소비자 웹과 같이 쓴다(§2.2). 긴 작업 나누기는 §5.2의 공용 함수를 쓴다. 그리기는 OffscreenCanvas 2D와 WebGL2로 한다. 공유 메모리는 교차 출처 격리가 있을 때만 쓴다. 헤더는 §5.14.1 묶음 G, 예산은 §5.8 표, 브라우저 저장은 §3.12의 `peaket-forensics` 행을 따른다.
+- 이 문서와 맞춘 것: 좌석맵을 그리는 렌더러는 `packages/seatmap`으로 올려 소비자 웹과 같이 쓴다(§2.2). 긴 작업 나누기는 §5.2의 공용 함수를 쓴다. 그리기는 OffscreenCanvas 2D와 WebGL2로 한다. 1단계는 공유 메모리 없이 복사 방식 하나로 만들고, 성능 목표를 못 맞출 때만 교차 출처 격리가 있는 곳에서 공유 시계를 더한다(docs/features/forensic-replay.md §3.3, 기술 검토 낮음-049). 헤더는 §5.14.1 묶음 G, 예산은 §5.8 표, 브라우저 저장은 §3.12의 `peaket-forensics` 행을 따른다.
 - 쓰지 않는 것: DuckDB-WASM, WebGPU, `scheduler.yield`. 사건 값은 지표·오류 도구로 보내지 않는다(§5.16).
 - 2단계(출시 뒤 선택)는 관제 콘솔 화면 묶음 안의 경로나 원격 위젯으로 옮기지 않는다. 같은 `apps/forensics` 코드를 운영 모드로 빌드해, 콘솔 주소 아래 따로 여는 페이지(`/forensics?event=`)로 둔다(추천 적용 2026-10-21, ADR-0080 상태 줄, docs/features/forensic-replay.md §6.8). 관제 메뉴와 SCR-031·SCR-067에서 새 탭으로 연다. 같은 출처이므로 운영자 쿠키·관리자 IP 제한·서버의 역할 확인을 그대로 받는다. 관제 셸(머리·메뉴·경보 패널)과 실시간 연결(Socket.IO·graphql-ws)은 싣지 않는다. 헤더는 묶음 C에 COEP `require-corp`를 이 경로에만 더해(관제는 이미 COOP `same-origin`) 공유 메모리를 쓴다. 예산은 §5.8의 포렌식 행을 따르고, 관제 호스트 예산에는 들지 않는다. 내려받은 가명 기록은 메모리에만 두고, §3.12 표에 행을 더하지 않는다.
 
@@ -1454,12 +1580,12 @@ ADR-0079의 결정 32개가 이 문서의 어디에 반영되어 있는지 보�
 | 8 | 결제 결과 확인 | §3.6 |
 | 9 | 좌석맵 Worker 구조 | §3.5, §5.2 |
 | 10 | 좌석 델타 WebSocket 계약 | §4.4.1, §4.4.2 |
-| 11 | 파트너 통신 경계, SSE 형식, 사람 동작 갱신 | §4.2.5, §4.4.3, §4.6 |
-| 12 | 관제 실시간 계약 | §4.4.4, §4.4.5, §5.7 |
+| 11 | 파트너 통신 경계, SSE 형식, 사람 동작 갱신(tRPC는 2026-10-28 ADR-0100이 빼고 api-client 훅으로 바꿈) | §4.2.5, §4.4.3, §4.6 |
+| 12 | 관제 실시간 계약(2026-10-28 ADR-0100이 Socket.IO·GraphQL을 SSE 흐름 둘과 REST 위젯 조회로 바꿈) | §4.4.4, §4.4.5, §5.7 |
 | 13 | 브라우저 지표 입구 하나 | §2.1, §5.16 |
 | 14 | 화면 묶음별 헤더, 월렛 묶음, Trusted Types 보고 모드 | §2.5, §5.14.1 |
 | 15 | 지표 묶음 판 2와 오류 수집 | §5.16 |
-| 16 | 관제 원격 위젯 계약(상태 통로는 2026-10-27 ADR-0092가 읽기 전용 `host`로 바꿈) | §4.5, §5.7 |
+| 16 | 관제 원격 위젯 계약(상태 통로는 2026-10-27 ADR-0092가 읽기 전용 `host`로, 통신 통로는 2026-10-28 ADR-0100이 `data`·`live`로 바꿈. Module Federation은 쇼케이스로 남기고 FE-T29로 견줌) | §4.5, §5.7 |
 | 17 | 로그아웃 정리 | §5.14.4 |
 | 18 | 월렛 서비스 워커 | §5.4 |
 | 19 | iOS 7일 삭제 대비 | §5.4 |
@@ -1488,6 +1614,15 @@ ADR-0091의 결정 6개는 콘솔이 켜져 있는 동안의 성능을 정한다
 | 5 | 시험 FE-T25~FE-T27, Lighthouse CI 대상에 콘솔 둘 | §5.8, §5.17 |
 | 6 | design/d2 §3.3의 관제 위젯 오류 격리 문장 고침 | §6.2 |
 
+ADR-0111의 결정은 서버가 그린 화면의 SEED 스타일 속성과 CSP를 맞춘다. 방향(PoC로 확인해 둘 중 하나)은 소유자 승인이고, 기본안과 세부는 추천 적용(2026-10-28)이다.
+
+| 결정 | 요지 | 이 문서 |
+| --- | --- | --- |
+| 1·2 | 기본안: 묶음 A·B(E·F 포함)에 `style-src-attr 'unsafe-inline'`만 더하고 `style-src`·스크립트 규칙은 그대로 | §5.14.1 |
+| 3 | 스타일 속성 값은 토큰과 코드 상수에서만 | §5.14.1, design/d2 §1 |
+| 4 | PoC FE-T30 | §5.17, §6.3 |
+| 5 | 클래스만 쓰는 쪽으로 바꿀 조건과 속성 허용을 뺄 조건 | §6.3 |
+
 ### 6.2 정본과 어긋난 곳과 처리
 
 '고침'은 이번에 그 문서를 고쳤다는 뜻이다. 'wbs 0.2.3'은 계약 보강 작업으로 넘긴다는 뜻이다. 이 문서에 초안이 있으면 그 절을 적었다.
@@ -1495,8 +1630,8 @@ ADR-0091의 결정 6개는 콘솔이 켜져 있는 동안의 성능을 정한다
 | # | 어긋남·빈칸 | 출처 | 처리 |
 | --- | --- | --- | --- |
 | 1 | 'SWR(대기실 전용)'로 적혔지만 React 런타임만으로 대기실 JS 예산을 넘는다 | architecture §6.2·§6.4, NFR-012 | 고침: 대기실 경량 페이지(결정 2·31), ADR-0024 상태 줄 |
-| 2 | '제어 명령 통신: Socket.IO'로 적혔지만, 명령은 REST로 보내고 Socket.IO는 ack·경보를 맡는다 | architecture §6.2, openapi | 고침(결정 12) |
-| 3 | redux-observable은 안정판 3.0이 없다 | architecture §6.2·§6.4 | 고침: RTK listener + RxJS(결정 16·31). 2026-10-27 ADR-0092로 RxJS 어댑터 + Zustand가 됐다 |
+| 2 | '제어 명령 통신: Socket.IO'로 적혔지만, 명령은 REST로 보내고 Socket.IO는 ack·경보를 맡는다 | architecture §6.2, openapi | 고침(결정 12). 2026-10-28 ADR-0100으로 Socket.IO를 빼고 ack·경보는 SSE 늘 여는 흐름이 맡는다 |
+| 3 | redux-observable은 안정판 3.0이 없다 | architecture §6.2·§6.4 | 고침: RTK listener + RxJS(결정 16·31). 2026-10-27 ADR-0092로 RxJS 어댑터 + Zustand가 됐다. 2026-10-28 기술 검토 낮음-097로 RxJS를 빼고 호스트의 작은 유틸 둘(`latestEvery`·`shareByKey`)로 바꿨다(§3.1) |
 | 4 | 월렛 CSP가 정해지지 않았다 | architecture §6.3, asvs/offline-gate 3.4.3 | 닫음: 캐시 화면 묶음(결정 14) |
 | 5 | 구매 세션 키를 '페이지 메모리'에 두면 결제창에서 돌아오거나 새로고침할 때 잃는다 | secrets-and-keys, asvs/queue-admission·payment 14.3.1 | 고침: IndexedDB 추출 불가 키(결정 6) |
 | 6 | 303은 스크립트가 읽지 못한다 | openapi(로비·진입·입장 확정), queue-admission, design/d5 | 고침: 2xx 본문(결정 4) |
@@ -1510,10 +1645,10 @@ ADR-0091의 결정 6개는 콘솔이 켜져 있는 동안의 성능을 정한다
 | 14 | 좌석 델타에 입장 토큰을 싣는 법·바이트 형식·하트비트·닫힘 코드·재연결 | asyncapi, seat-hold §7 | 초안 §4.4.1, asyncapi 설명 고침, 확정은 wbs 2.6.4 |
 | 15 | 스냅샷 형식이 비어 있고, '압축 약 6.25KB'는 비트 압축 크기다 | openapi, seat-hold §2 | 초안 §4.4.2, 기록 |
 | 16 | SSE `event`·`id`·`retry`·전체 상태 여부 | asyncapi, openapi | 초안 §4.4.3, asyncapi 설명 고침 |
-| 17 | Socket.IO 이벤트 이름·방향·인증, 그리고 본문이 기본값 `application/avro`로 잡힌다 | asyncapi | 고침: 이벤트와 `application/json`(결정 12) |
-| 18 | graphql-ws 구독 주소·하위 프로토콜이 asyncapi에 없다 | openapi `/graphql` | 초안 §4.4.5, asyncapi `socketio.ops` 설명에 적음(채널 정의는 wbs 0.2.3) |
+| 17 | Socket.IO 이벤트 이름·방향·인증, 그리고 본문이 기본값 `application/avro`로 잡힌다 | asyncapi | 고침: 이벤트와 `application/json`(결정 12). 2026-10-28 ADR-0100으로 채널을 `sse.ops-live`·`sse.ops-event-live`(본문 JSON)로 바꿨다 |
+| 18 | graphql-ws 구독 주소·하위 프로토콜이 asyncapi에 없다 | openapi `/graphql` | 2026-10-28 ADR-0100으로 GraphQL을 빼서 닫혔다. 관제 흐름 둘과 위젯 조회는 openapi·asyncapi에 적었다 |
 | 19 | 셔플·묶음 파일의 해시 함수·앞자리·키 표기·지연 계산 | openapi, queue-admission §2 | 초안 §4.2.1, wbs 0.2.3 |
-| 20 | 교차 출처에서 `Date`가 읽히지 않아 시계 보정 근거가 없다 | guidelines §9, Fetch 표준 | 고침: `Access-Control-Expose-Headers`에 `Date`(결정 3) |
+| 20 | 교차 출처에서 `Date`가 읽히지 않아 시계 보정 근거가 없다 | guidelines §9, Fetch 표준 | 고침: `Access-Control-Expose-Headers`에 `Date`(결정 3). 2026-10-28 다시 고침: CDN이 캐시한 응답의 `Date`는 원본 시각 그대로라 쓰지 않는다. 대기실은 대기열 API 응답 본문의 `serverTimeMs`를 쓰고, `queue-files`는 `Date`를 노출하지 않는다(§3.3, ADR-0110) |
 | 21 | `deviceId` 만드는 법·보관 위치, 토큰 보관 위치 | openapi, queue-admission §2·§3 | 결정 5, §3.12 |
 | 22 | 사전 검증 토큰 만료 시각, 입장 토큰 최대 체류 시각이 응답에 없다 | openapi | wbs 0.2.3. 그때까지 사전 검증 만료는 발급 시각 + 15분으로 보고, 남은 구매 시간은 입장 토큰 `exp`를 표시용으로만 읽는다 |
 | 23 | 구매 경로 401이 쿠키 만료·입장 토큰 만료·서명 불일치를 가르지 않는다 | openapi | wbs 0.2.3, 그때까지는 §4.1 401 규칙을 따른다 |
@@ -1527,7 +1662,7 @@ ADR-0091의 결정 6개는 콘솔이 켜져 있는 동안의 성능을 정한다
 | 31 | 인기 MD 대기열이 어떤 대기열 식별자를 쓰는지 | openapi 굿즈 주문 | wbs 0.2.3 |
 | 32 | 화면이 쓰는데 openapi에 없는 경로가 20개 항목이다(대부분 읽기). design/d5 §1.6에는 공연 상세(21번), 주문 내역(2번), 계정 설정·소명·배상 조회(18번), 티켓 표시 값(25번), 지연 환급 계좌(4번), 내 현장 배정(5번), 파트너 공연 목록·등록 임시저장·상품·웹훅·정산 리포트·회차 취소 요청 상태(16번), 관리 계정·파트너사·팬 조회·봇 표본·공지(8~12번)가 있다. 그 표에 없는 것은 웹 푸시 구독 정보 등록, 월렛의 티켓 상세·부가 상품 목록(SCR-013), 굿즈 상품 상세와 상품 목록 응답 형식(SCR-015), 받은 양도 요청 목록(SCR-041), 관제 명령 목록·상세(SCR-030), 법정 조치 목록·상세(SCR-032), 승인 업무·회차 취소 요청·판매 승인 대기·지급 묶음 목록(SCR-046~049)이다. 관제 목록을 REST로 둘지 GraphQL로 읽을지도 정해지지 않았다 | planning/04 화면 표, openapi, design/d5 §1.6 | wbs 0.2.3 |
 | 33 | `operationId` 0/180, Problem 선언 6/242, 429·503 `Retry-After` 미선언 | openapi, guidelines §2 | Problem 선언(243/244)·`Retry-After`(429·503 19개)·401 `WWW-Authenticate`(16개)는 고쳤다(ADR-0081). Problem을 선언하지 않은 1개는 기기 승인 토큰 엔드포인트 `POST /v1/scanner/token`의 400으로, OAuth(다른 서비스 계정으로 로그인하게 하는 표준) 오류 형식을 쓴다. 이때 작업이 180개에서 181개로, 4xx·5xx 응답이 242개에서 244개로 늘어 어긋남 칸과 전체 수가 다르다. `operationId`(0/182)는 wbs 0.2.3으로 넘긴다 |
-| 34 | 파트너 콘솔 통신이 tRPC(architecture)와 REST(openapi)로 갈린다 | architecture §6.4, openapi | 결정 11: tRPC BFF가 REST를 부른다 |
+| 34 | 파트너 콘솔 통신이 tRPC(architecture)와 REST(openapi)로 갈린다 | architecture §6.4, openapi | 결정 11: tRPC BFF가 REST를 부른다. 2026-10-28 ADR-0100으로 tRPC를 빼고 화면이 api-client 훅으로 REST를 직접 부른다 |
 | 35 | 관제 원격 위젯의 빌드·업로드 주체가 불분명하다 | architecture §10, devops §6.6 | 고침(결정 16) |
 | 36 | CI 유형 표가 `ds`·`telemetry`를 '라이브러리'에 두고, `validation`·`api-client`는 어느 행에도 없다 | devops §3.2 | 고침 |
 | 37 | `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`·소스 맵 올리기 토큰·사람 확인 비밀 키가 비밀 목록에 없다 | devops §6.6, secrets-and-keys | 고침 |
@@ -1545,7 +1680,7 @@ ADR-0091의 결정 6개는 콘솔이 켜져 있는 동안의 성능을 정한다
 | 49 | '배터리 15% 이하 효과 끔'의 판정 방법과 지원 범위 | planning/04 SCR-007 | 기록: Battery Status API(Chromium만, §1.5) |
 | 50 | Degraded 완화 항목 '뷰포트 밖 5초 스냅샷'이 평시 동작과 같아졌다 | planning/03 §1.3 | 기록: 감내 모드에서 바뀌는 것은 델타 1초 묶음뿐이다(seat-hold §9와 같다) |
 | 51 | 관제 RTK의 '액션 로그 자체가 불변 감사 기록·인시던트 리플레이로 직결'이라는 설명 | architecture §6.4, appendix-learning-map | 고침: architecture §6.4(감사·리플레이의 정본은 서버 감사 로그와 관측 기록이다, control-tower §7). 부록은 원문이라 고치지 않는다 |
-| 52 | 관제 위젯의 오류 격리를 `useSuspenseQuery`·`QueryErrorResetBoundary`(TanStack Query 라이브러리의 기능)로 적었다. 관제 콘솔의 서버 데이터 도구는 urql이다(§3.1) | design/d2 §3.3, appendix-learning-map | 고침(2026-10-27, ADR-0091 결정 6): 위젯마다 오류 경계(CMP-035)가 그 칸만 바꾸고 [다시 시도]는 그 위젯의 쿼리만 다시 실행한다. 부록은 원문이라 고치지 않는다 |
+| 52 | 관제 위젯의 오류 격리를 `useSuspenseQuery`·`QueryErrorResetBoundary`(TanStack Query 라이브러리의 기능)로 적었다. 관제 콘솔의 서버 데이터 도구는 urql이다(§3.1) | design/d2 §3.3, appendix-learning-map | 고침(2026-10-27, ADR-0091 결정 6): 위젯마다 오류 경계(CMP-035)가 그 칸만 바꾸고 [다시 시도]는 그 위젯의 쿼리만 다시 실행한다. 부록은 원문이라 고치지 않는다. 2026-10-28 ADR-0100으로 관제의 서버 데이터 도구는 urql이 아니라 api-client 훅(TanStack Query)과 SSE 흐름이다 |
 
 ### 6.3 PoC와 남는 한계
 
@@ -1554,26 +1689,34 @@ ADR-0091의 결정 6개는 콘솔이 켜져 있는 동안의 성능을 정한다
 | 확인할 것 | 실패하면 | wbs |
 | --- | --- | --- |
 | Next.js 해시 방식(SRI)이 App Router 인라인 스크립트까지 덮는지 | 캐시 화면 CSP를 새 ADR로 정한다(ADR-0065를 되돌릴 조건) | 2.10.1 |
+| Cache Components를 켠 앱 안에서 nonce 화면 묶음(B·E·F)을 정적 셸 없이 그리는지: `(request)` 경로 묶음의 루트 레이아웃이 요청 nonce를 읽고 `instant = false`를 둘 때, 빌드 산출물에 그 경로의 정적 셸이 없고 응답의 모든 `<script>`에 그 응답의 nonce가 붙는지(§2.5, FE-T35, 기술 검토 중간-094) | 묶음 B·E·F 화면을 Cache Components를 끈 별도 Next.js 앱으로 나눠 같은 `www` 배포의 다른 원본 경로로 낸다 | 2.10.1 |
+| Next.js 앱(Turbopack)이 SEED 층 판 recipe를 고를 수 있는지(`turbopack.resolveAlias`), 빌드 산출물의 첫 CSS가 층 순서 선언으로 시작하는지, 경로별 CSS가 예산 안인지(FE-T36, 기술 검토 중간-097) | Next.js 앱에서는 SEED 부품 CSS를 층 밖에 두고, SEED 부품 요소에 Tailwind 유틸을 겹치지 않는 린트로 막는다(design/d2 §1) | 0.6.1 |
+| 서버가 그린 SEED 부품과 `next/image`의 `style` 속성이 `style-src-attr 'unsafe-inline'`에서 세 엔진 모두 살아 있는지, nonce 없는 `<style>`과 인라인 스크립트는 계속 막히는지(FE-T30, ADR-0111) | 서버가 그리는 부품은 SEED 스타일 속성 대신 클래스만 쓰고, 서버 HTML의 `style` 속성 0을 검사로 막는다(ADR-0111 결정 5) | 2.10.1 |
 | CloudFront Function으로 대기실 경로를 셸로 바꿔 읽기, 셸 캐시와 무효화 | 대기실 셸을 회차 경로마다 S3에 미리 올린다 | 2.10.6 |
 | 게이트웨이가 WebSocket 하위 프로토콜의 입장 토큰을 읽어 검증 | 첫 메시지 인증(§4.4.1 대체) | 2.6.4 |
-| 좌석 라우트 COEP와 Worker 스크립트, SharedArrayBuffer, iOS 16.4~17 OffscreenCanvas 성능, 5만 석 파일 크기·해독 시간 | SharedArrayBuffer 없이 메시지로 주고받고, 열 단위 파일 형식을 조정한다 | 2.6.4, 7.5.2 |
+| iOS 16.4~17 OffscreenCanvas 성능, 5만 석 파일 크기·해독 시간, 좌석 상태 메시지 비용(FE-T10). 좌석 라우트 COEP·SharedArrayBuffer는 두지 않아 PoC하지 않는다(기술 검토 중간-015) | 열 단위 파일 형식을 조정한다. 메시지 비용이 예산을 넘으면 공유 메모리 길을 새 ADR로 다시 검토한다(§5.2) | 2.6.4, 7.5.2 |
 | Serwist 9 + Turbopack으로 월렛 서비스 워커 | 워커를 따로 빌드한다 | 5.1.4 |
+| 좌석맵 에디터 Konva 편집 캔버스의 끌기·돌리기 프레임(FE-T33)과, Trusted Types를 강제할 때 Stage의 `innerHTML = ""`(기술 검토 중간-016) | 좌석 층을 Konva 밖 캔버스로 빼고, 그래도 넘으면 편집 캔버스를 직접 만든다(새 ADR). 기본 정책이 빈 문자열만 받게 한다 | 2.9.2, 7.5.2 |
 | Module Federation `createScript` 훅으로 원격 무결성, 그리고 `preloadRemote`로 미리 받을 때도 같은 확인을 거치는지(ADR-0091) | 호스트가 받아 해시를 확인한 뒤 실행하는 적재기. 미리 받기가 확인을 거치지 않으면 원격은 미리 받지 않는다 | 4.5.5 |
 | 스캐너 Worker 안 `BarcodeDetector`, zxing-wasm 판정 시간(관리형 기기) | 디코딩을 메인 스레드 `BarcodeDetector`로 옮긴다 | 5.4.7 |
 | 결제사 npm 적재기가 부르는 주소와 결제창 하위 출처 | CSP 보고 모드 기간을 늘린다 | 2.10.2 |
-| Better Auth 이전(Auth.js v5가 베타인 채로 남을 때) | Auth.js v5 고정 판을 계속 쓴다 | 인증 구현 시작 전 |
+| 소셜 로그인 구현 비교(I-T51, ADR-0119): A next-auth v5 고정 판 대 C 앱 서버의 얇은 OIDC 클라이언트(`oauth4webapi`·`openid-client`), B Better Auth 무상태 모드는 문서로 판정. 기준은 세션 층 수·판 유지 상태·코드 양·ASVS 10.x·제공자 설정(네이버 이메일, `sub`) | C가 ASVS 10.x나 제공자 설정을 통과하지 못하고 고칠 수 없으면 A(Auth.js v5 고정 판)로 간다 | 인증 구현 시작 전(wbs 2.1) |
 | 인앱 브라우저 사용자 에이전트 표지 | 표지를 늘린다(안내용이라 판정에는 쓰지 않는다) | 2.10.6 |
 
 **남는 한계**(planning/01 §5.2와 guide/17에도 적었다)
 
-- 대기실 경량 페이지와 소비자 웹 React 화면이 대기 화면 요소를 두 벌로 갖는다. 디자인 토큰·문구 키를 같이 쓰고, 시각 회귀 시험으로 둘을 맞춘다.
+- 대기실 경량 페이지와 소비자 웹 React 화면이 대기 화면 요소를 두 벌로 갖는다. 디자인 토큰·문구 키를 같이 쓰고, 시각 회귀 시험(FE-T40)으로 둘을 맞춘다.
 - 구매 세션 키와 월렛 키는 꺼낼 수 없다. 하지만 같은 출처의 XSS가 서명을 부를 수 있다(ADR-0065와 같은 한계). CSP·Trusted Types(보고 모드)·출력 규칙으로 줄일 뿐이다.
+- 화면 묶음 A·B(E·F 포함)는 HTML의 `style` 속성을 받는다(ADR-0111). 그래서 스크립트 없는 HTML 주입이 생기면, 주입한 요소의 모양을 바꿔 결제 버튼 위에 가짜 버튼을 겹치는 식으로 화면을 위장할 수 있다. 스크립트는 돌지 않고, 바깥 주소로 보내는 것은 `img-src`·`font-src`가 막는다. 출력 규칙·서식 글 정화·Trusted Types로 주입 자체를 줄일 뿐이다.
+- 소비자 웹의 캐시 화면 묶음과 nonce 화면 묶음은 루트 레이아웃이 달라, 둘 사이를 오가면 페이지 전체를 다시 불러온다(§2.5, 기술 검토 중간-094). 로그인·마이·월렛 양도·장바구니로 들어갈 때 화면이 한 번 새로 그려진다. 이 구조가 Cache Components 안에서 정적 셸 없이 도는지는 PoC FE-T35 전이고, 안 되면 앱을 둘로 나눈다.
+- SEED 부품 CSS는 쓰는 부품만 실어도 홈·결제 CSS 예산에 빠듯하다(§5.8). Next.js 앱이 SEED 층 판을 고르지 못하면 SEED 부품 CSS가 층 밖에 실려, 그 앱에서는 Tailwind 유틸로 SEED 부품의 모양을 덮지 못한다(FE-T36 전, 기술 검토 중간-097).
 - 구매 경로에서는 홀드 ID·주문 ID 경로마다 교차 출처 사전 요청이 생긴다. 이 지연을 예산에 넣어 재지만, 없애지는 못한다(§5.9).
 - iOS의 7일 삭제는 홈 화면 앱·`persist()`·알림으로 줄일 뿐, 막지는 못한다.
 - CLS는 Chromium에서만 재고, INP·LCP는 Safari 26.2부터 잰다. 그래서 iOS 16.4~26.1의 체감 지표가 비어 있다.
-- `Date` 헤더가 초 단위라 서버 시각 보정은 ±1초 안팎이다. 좌석 화면은 하트비트(밀리초)로 더 정확하다.
+- 대기실과 좌석 화면의 서버 시각 보정은 밀리초 서버 시각과 왕복으로 한다. 그래도 왕복이 한쪽으로 치우친 몫의 절반(대개 수십 ms [추정])과 표본 뒤 단조 시계의 흔들림(수십 ppm [추정])이 남는다. 그 밖 화면은 캐시하지 않는 응답의 `Date`(초 단위)라 ±1초 안팎이다(ADR-0110).
 - 배터리 상태에 따라 효과를 끄는 기능은 Android Chrome에서만 동작한다.
-- 셔플 파일 규칙, 좌석 이진 형식, MAC 입력, SSE·Socket.IO 형식은 서버와 맞추기 전의 초안이다(wbs 0.2.3·2.6.4·2.10.7).
+- 셔플 파일 규칙, 좌석 이진 형식, MAC 입력, SSE 형식(파트너·관제)은 서버와 맞추기 전의 초안이다(wbs 0.2.3·2.6.4·2.10.7).
+- 관제 SSE는 HTTP/2가 아니면 브라우저당 연결 6개 한도에 걸린다. 관제 PC가 HTTP/2를 쓰지 못하는 프록시 뒤에 있으면 탭 셋째부터 흐름이 막힌다. 접속자 표시는 나간 운영자가 최대 45초 [가정] 남아 보인다. 알림 표 보관(1시간 [가정])보다 오래 끊겼다 붙으면 `reset` 뒤 REST로 다시 읽는 몇 초 동안 목록이 비어 보인다(ADR-0100).
 - 인앱 브라우저 감지는 사용자 에이전트 문자열에 기댄다. 그래서 새 앱이나 표지를 바꾼 앱은 못 잡는다.
 - 브라우저가 숨긴 관제 탭을 얼리면(Chrome 133부터 에너지 절약 모드, 5분 넘게 숨겨지고 CPU를 많이 쓰는 탭) 경보와 2인 승인 요청도 탭이 다시 보일 때까지 처리되지 않는다. 숨긴 동안 위젯을 멈춰 CPU 사용을 줄일 뿐이다. 경보의 1차 통로는 온콜 알림이지만 2인 승인 요청은 관제 푸시 팝업으로만 오고, 온콜 채널로도 보낼지는 정하지 않았다(review/open-items.md 34번, ADR-0091).
 - 관제 PC의 브라우저 설정(탭 비활성화 예외)은 사람이 한다. 빠진 PC에서는 숨긴 콘솔 탭이 돌아올 때 새로 불린다(주소의 회차·탭과 세션은 남는다).
@@ -1604,13 +1747,13 @@ ADR-0091의 결정 6개는 콘솔이 켜져 있는 동안의 성능을 정한다
 | WCAG 2.2 새 성공 기준(2.4.11, 2.5.7, 2.5.8, 3.3.8 등) | https://www.w3.org/TR/WCAG22/ |
 | 토스페이먼츠 SDK v2 주소와 npm 적재기 | https://docs.tosspayments.com/sdk/v2/js/environment |
 | 포트원 V2 `requestPayment`의 `windowType`·`redirectUrl`·`forceRedirect` | https://developers.portone.io/sdk/ko/v2-sdk/payment-request |
-| Auth.js가 Better Auth의 일부가 됐다는 알림 | https://authjs.dev |
+| Auth.js가 Better Auth의 일부가 됐다는 알림(2026-10-28 README 재확인: 새 프로젝트에 Better Auth 권장) | https://authjs.dev, https://github.com/nextauthjs/next-auth |
 | pnpm `minimumReleaseAge`·`trustPolicy`·`blockExoticSubdeps`·`strictDepBuilds`·`allowBuilds`·`trustLockfile` | https://pnpm.io/settings |
 | web-vitals 6(소프트 내비게이션) | https://github.com/GoogleChrome/web-vitals |
 | Jotai 3(`atomFamily`가 `jotai-family`로). ADR-0092 뒤로는 쓰지 않는다 | https://github.com/pmndrs/jotai |
 | Redux Toolkit `combineSlices().inject`, `createListenerMiddleware`. ADR-0092 뒤로는 쓰지 않는다 | https://redux.js.org/toolkit/api |
 | Sentry 브라우저 민감 데이터 처리 | https://docs.sentry.io/platforms/javascript/data-management/sensitive-data/ |
-| 디자인 토큰 형식은 W3C 커뮤니티 그룹 명세(2025.10 첫 안정판) | https://www.designtokens.org |
+| 디자인 토큰 형식은 W3C 커뮤니티 그룹 명세(DTCG, 2025.10 첫 안정판)다. 다만 design/tokens.json은 Style Dictionary 5가 2025.10의 객체 값을 다 지원할 때까지 이전 초안의 문자열 값 표기로 적고, 이름 규칙(마침표·중괄호 금지)과 정한 형식만 쓰는 규칙은 지킨다(design/d2 §1, 2026-10-28 고침, 기술 검토 중간-099) | https://www.designtokens.org, https://www.designtokens.org/tr/2025.10/format/ |
 | 레지스트리 판(next 16.4.2, react 19.3.1, jotai 3.0.1, redux-observable 3.0.0-rc.3, `@lhci/cli` 0.15.1, next-auth 5.0.0-beta.32, `@module-federation/enhanced` 2.9.2, serwist 9.5.13, `@tosspayments/tosspayments-sdk` 2.10.0, `@portone/browser-sdk` 0.1.13 등) | https://registry.npmjs.org |
 | 로컬 실측(React 19.3 최소 66.0 KiB gzip, 대기실 모형 2.73 KiB, SEED CSS 42.2 KiB) | 실측(PC), rolldown 1.2.13, 이 작업의 측정 스크립트 |
 
@@ -1622,7 +1765,11 @@ ADR-0091의 사실은 2026-10-27에 열어 보고 조회했다. 판 번호는 �
 | React Router 데이터 라우터의 경로 객체 `lazy`로 첫 묶음을 줄인다(8.5.0, 2026-10-19) | https://reactrouter.com/start/data/route-object |
 | Module Federation 런타임 `preloadRemote`: 진입 파일·내보낸 모듈·동기·비동기 자원을 미리 받고, 실패·시간 초과면 거절 | https://module-federation.io/guide/runtime/runtime-api.html |
 | RxJS `share`의 `resetOnRefCountZero`에 알림 함수를 주면 원천 구독을 늦춰 끊을 수 있다(7.8.2) | https://rxjs.dev/api/index/interface/ShareConfig |
-| graphql-ws: 작업마다 ID, 클라이언트의 `Complete`는 그 구독만 멈춘다 | https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md |
+| graphql-ws: 작업마다 ID, 클라이언트의 `Complete`는 그 구독만 멈춘다(2026-10-28 ADR-0100으로 관제에서 GraphQL을 빼 쓰지 않는다) | https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md |
+| SSE는 HTTP/2가 아니면 브라우저당 열린 연결 수 한도(6)에 걸리고, HTTP/2에서는 동시 스트림 수를 협상한다(기본 100)(2026-10-28 확인, ADR-0100) | https://developer.mozilla.org/en-US/docs/Web/API/EventSource |
+| Envoy 경로 시간 초과는 지정하지 않으면 15초이고 요청을 다 받은 뒤부터 응답을 다 받을 때까지를 잰다. 0이면 끈다(2026-10-28 확인) | https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/route/v3/route_components.proto |
+| Gateway API `HTTPRouteTimeouts.request`를 0초로 두면 시간 초과를 꺼야 한다(SHOULD). 끌 수 없는 구현은 가장 긴 값으로 읽는다(2026-10-28 확인) | https://github.com/kubernetes-sigs/gateway-api/blob/main/apis/v1/httproute_types.go |
+| NestJS `@Sse()`: 기본 메서드 GET, 읽지 않는 클라이언트에 쌓이는 양의 상한 `maxPendingDataLength`(기본 4M 글자)를 넘으면 연결을 끊는다(2026-10-28 확인) | https://github.com/nestjs/nest/blob/master/packages/common/decorators/http/sse.decorator.ts |
 | Chart.js: 필요한 컨트롤러·요소·축·플러그인만 등록(트리 셰이킹), 점 줄이기 플러그인 조건(선 그래프, x축 `linear`·`time`, `parsing: false`)과 방식(`lttb`, `min-max`), 기본 시작 기준 캔버스 폭의 4배 | https://www.chartjs.org/docs/latest/getting-started/integration.html, https://www.chartjs.org/docs/latest/configuration/decimation.html |
 | Chart.js 성능 안내(`parsing: false`, `normalized: true`, 애니메이션 끄기와 Path2D 캐시, 축 최소·최대), 시간 축은 날짜 어댑터가 필요, Canvas 접근성은 `role`·`aria-label`이나 대체 내용으로 | https://www.chartjs.org/docs/latest/general/performance.html, https://www.chartjs.org/docs/latest/axes/cartesian/time.html, https://www.chartjs.org/docs/latest/general/accessibility.html |
 | CSP `style-src`는 `style` 속성·`setAttribute("style")`·`cssText`를 막고, `element.style.속성 = 값`은 막지 않는다. Chart.js 4.6.1 배포 파일은 뒤의 방식(`.style.width`·`.style.height`)만 쓴다 | https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/style-src, jsDelivr `chart.js@4.6.1/dist/chart.umd.js` 검색 |
@@ -1631,6 +1778,9 @@ ADR-0091의 사실은 2026-10-27에 열어 보고 조회했다. 판 번호는 �
 | Chrome 133 에너지 절약 모드의 숨긴 탭 얼리기(5분 넘게 숨김·소리 없음·CPU를 많이 씀, 다시 보이면 이어서 처리) | https://developer.chrome.com/blog/freezing-on-energy-saver |
 | 레지스트리 판(chart.js 4.6.1 2026-10-22, uplot 1.6.32 2025-03-14, echarts 6.1.0 2026-05-19, react-router 8.5.0, `@module-federation/enhanced` 2.9.2, rxjs 7.8.2, graphql-ws 6.4.1, memlab 2.0.5, `@tanstack/react-virtual` 3.14.23, `@hello-pangea/dnd` 18.0.1) | https://registry.npmjs.org |
 | 크기(gzip -9): Chart.js 전체 UMD 69.2 KiB, uPlot 21.5 KiB, ECharts 전체 359.3 KiB·`simple` 164.9 KiB, `@hello-pangea/dnd` UMD 28.6 KiB | jsDelivr 배포 파일을 받아 잰 값(2026-10-27) |
+| Konva 10.9.0(2026-10-15 게시, MIT, 런타임 의존 없음): 도형마다 사건·끌기·변형·캐시를 가진 장면 그래프, 고른 도형의 크기·회전 손잡이 `Transformer`, 필요한 것만 싣는 `konva/lib/Core`. react-konva 19.3.2는 React ^19.3을 받지만 쓰지 않는다(2026-10-28 확인, 기술 검토 중간-016) | https://registry.npmjs.org/konva, https://raw.githubusercontent.com/konvajs/konva/master/README.md, https://registry.npmjs.org/react-konva/latest |
+| 크기(gzip -9): Konva 10.9.0 전체 `konva.min.js` 57.0 KiB(원본 196,260바이트), Fabric.js 7.4.0 전체 `index.min.js` 89.8 KiB(둘 다 MIT). Konva 배포 파일은 Stage를 만들 때 담는 요소를 `innerHTML = ""`로 비우는 곳이 1곳이고, `eval`·`new Function`·`cssText`·`setAttribute("style")`는 없다. PixiJS 8.22.0은 MIT이고 런타임 의존 10개다 | jsDelivr 배포 파일을 받아 잰 값과 문자열 검색, npm 레지스트리(2026-10-28) |
+| tldraw 5.5.2는 tldraw license다. 운영 환경에서는 라이선스 키(평가판·상용)가 있어야 쓸 수 있다 | https://raw.githubusercontent.com/tldraw/tldraw/main/LICENSE.md |
 
 ADR-0092의 사실은 2026-10-27에 열어 보고 조회했다. 판 번호는 그날 npm 레지스트리의 `latest`다.
 
@@ -1643,3 +1793,54 @@ ADR-0092의 사실은 2026-10-27에 열어 보고 조회했다. 판 번호는 �
 | RTK `combineSlices`는 만든 뒤에도 리듀서를 더 끼워 넣게 한다(`inject`, `withLazyLoadedSlices`). listener 미들웨어는 saga·observable 같은 비동기 미들웨어의 가벼운 대안이다 | https://github.com/reduxjs/redux-toolkit/blob/master/docs/api/combineSlices.mdx, https://github.com/reduxjs/redux-toolkit/blob/master/docs/api/createListenerMiddleware.mdx |
 | 레지스트리 판(zustand 5.0.16 2026-10-22·5.0.0 2024-10-14, jotai 3.0.1, jotai-family 1.1.0, `@reduxjs/toolkit` 2.13.0 2026-09-29·2.0.0 2023-12-04, react-redux 9.3.0) | https://registry.npmjs.org |
 | 크기(압축): zustand 490B, jotai 3,329B, jotai-family 757B, `@reduxjs/toolkit` 14,546B, react-redux 3,771B | https://bundlephobia.com (2026-10-27) |
+| SEED React의 Box(그 위의 Flex·Stack)·ActionButton·Dialog 본문은 스타일 속성을 `useStyleProps`로 CSS 변수(`--seed-box-*`)로 바꿔 `style` 속성에 넣고, Text·Grid도 `--seed-text-*`·`--seed-grid-*`를 같은 방식으로 넣는다. 값을 넘긴 속성만 나간다(dev 커밋 69ae3e6, 2026-10-28) | https://github.com/daangn/seed-design/blob/dev/packages/react/src/utils/styled.tsx, 같은 저장소 `components/Box/Box.tsx`·`Text/Text.tsx`·`ActionButton/ActionButton.tsx`·`Dialog/Dialog.tsx`·`Grid/Grid.tsx` |
+| React 서버 렌더링은 `style`의 빈 값을 건너뛰고 남는 값이 없으면 속성을 쓰지 않는다. 브라우저 쪽은 `style.setProperty`·`style[이름]`으로 넣는다. 하이드레이션은 속성 차이를 고쳐 넣는다는 보장이 없다(2026-10-28) | https://github.com/facebook/react/blob/main/packages/react-dom-bindings/src/server/ReactFizzConfigDOM.js, 같은 저장소 `client/CSSPropertyOperations.js`, https://react.dev/reference/react-dom/client/hydrateRoot |
+| `next/image`는 `style` 속성으로 `color: transparent`를 넣고, `fill`이면 위치·크기 값을 넣는다(2026-10-28) | https://github.com/vercel/next.js/blob/canary/packages/next/src/shared/lib/get-img-props.ts |
+| `style-src-attr`는 요소의 `style` 속성만 정하고 `'unsafe-inline'`·`'unsafe-hashes'`를 받는다. 지원은 Chrome 75·Firefox 108·Safari 15.4부터다. `style-src-elem`은 Safari 15.4~26.1에서 효과가 없었다(WebKit 버그 276931). 한 지시어에 nonce나 해시가 있으면 `'unsafe-inline'`은 무시된다(2026-10-28) | https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/style-src-attr, https://github.com/mdn/browser-compat-data/blob/main/http/headers/Content-Security-Policy.json, https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy |
+| ASVS 5.0 3.4.3은 CSP의 목적을 악성 JavaScript 실행을 줄이는 것으로 적는다(2026-10-28) | https://github.com/OWASP/ASVS/blob/master/5.0/en/0x12-V3-Web-Frontend-Security.md |
+| WCAG 2.2 원문: 1.4.10 재배치는 320 CSS px(1280 폭의 400% 확대) 기준이고 두 방향 배치가 필요한 부분은 예외다. 1.4.4는 글자 200%, 1.4.12는 줄 높이 1.5배·문단 뒤 2배·글자 사이 0.12배·단어 사이 0.16배, 2.1.4는 한 글자 단축키를 끄기·바꾸기·초점이 있을 때만 중 하나로, 3.2.6은 여러 화면에 되풀이되는 도움말을 같은 순서에, 3.3.7은 같은 과정에서 앞서 넣은 값을 채우거나 고르게 한다(2026-10-28) | https://github.com/w3c/wcag/tree/main/guidelines/sc (21/reflow·20/resize-text·21/text-spacing·21/character-key-shortcuts·22/consistent-help·22/redundant-entry) |
+| W3C 이해 문서: 1.4.4는 화면 전체 확대로도 맞출 수 있다. 3.3.7은 브라우저 자동 완성으로는 충분하지 않다고 본다. 3.2.6은 상황별 도움말을 따로 본다(2026-10-28) | https://github.com/w3c/wcag/tree/main/understanding (20/resize-text·22/redundant-entry·22/consistent-help) |
+| axe-core 4.14.0은 WCAG 2.2 규칙(`target-size`)을 기본으로 끈다. 1.4.12 관련 `avoid-inline-spacing`, 1.4.4 관련 `meta-viewport`가 있다. 1.4.10·1.4.11·2.4.11을 보는 규칙은 없다(2026-10-28) | https://github.com/dequelabs/axe-core/blob/develop/doc/rule-descriptions.md |
+| SEED 글자 크기는 rem(브라우저 기본 글자 크기)을 따라 커지되 기본 크기의 1.5배(`--seed-font-size-limit-max`)에서 멈춘다(2026-10-28) | https://github.com/daangn/seed-design/blob/dev/packages/css/base.css |
+
+기술 검토 중간-094~101 반영에 쓴 사실은 2026-10-28에 원문을 열어 보거나 npm 패키지를 받아 열어 확인했다. 판 번호는 그날 npm 레지스트리의 `latest`다.
+
+| 사실 | 출처 |
+| --- | --- |
+| `cacheComponents`를 켜면 PPR이 App Router의 기본 동작이 된다 | https://github.com/vercel/next.js/blob/canary/docs/01-app/03-api-reference/05-config/01-next-config-js/cacheComponents.mdx |
+| nonce는 동적 렌더링이 있어야 하고, PPR은 정적 셸 스크립트가 nonce를 받지 못해 nonce CSP와 함께 쓸 수 없다 | https://nextjs.org/docs/app/guides/content-security-policy |
+| `instant` 설정은 16.3.0에서 안정판이 됐다(Cache Components 전용). 경로 맨 위의 `false`는 정적 셸 검사를 끈다. 루트 레이아웃에서 쿠키·헤더 값을 읽으면 그 아래 전체가 요청에 묶인다 | https://github.com/vercel/next.js/blob/canary/docs/01-app/03-api-reference/03-file-conventions/02-route-segment-config/instant.mdx, https://github.com/vercel/next.js/blob/canary/docs/01-app/02-guides/migrating-to-cache-components.mdx |
+| 루트 레이아웃이 다른 경로 사이를 오가면 페이지 전체를 다시 불러온다 | https://github.com/vercel/next.js/blob/canary/docs/01-app/03-api-reference/03-file-conventions/route-groups.mdx |
+| Turbopack 설정은 `root`·`rules`·`resolveAlias`·`resolveExtensions`·`debugIds`이고, 조건부 별칭은 `browser` 조건만 받는다 | https://github.com/vercel/next.js/blob/canary/docs/01-app/03-api-reference/05-config/01-next-config-js/turbopack.mdx |
+| `AbortSignal.any`는 Chrome 116·Firefox 124·Safari 17.4부터, `AbortSignal.timeout`은 Safari 16부터(Chrome 103~123은 시간 초과를 `AbortError`로 낸다), `Promise.withResolvers`는 Safari 17.4부터다(@mdn/browser-compat-data 8.1.7) | https://github.com/mdn/browser-compat-data/blob/main/api/AbortSignal.json, 같은 저장소 `javascript/builtins/Promise.json` |
+| eslint-plugin-compat 7.0.2는 browserslist 목표로 웹 API를 검사하고, ES 내장 기능은 실험 설정 `lintAllEsApis`를 켜야 본다. `if (fetch)` 같은 기능 검사는 기본으로 보고하지 않고, `polyfills` 설정으로 대체한 이름을 알린다 | npm `eslint-plugin-compat@7.0.2` README |
+| SEED CSS 3.0.3의 중단점은 sm 480·md 768·lg 1280·xl 1440이다. 만들어진 CSS에는 `min-width: 1280px` 매체 질의가 48개(입력 칸·선택 상자의 `responsive` 크기, 레이아웃 중밀도 폭 720 → 1040 등), 768px가 10개, 480·1440px가 하나씩 있다 | https://unpkg.com/@seed-design/css@3.0.3/breakpoints/index.mjs, 같은 패키지 `all.css`·`recipes/*.css` |
+| SEED React 3.0.1의 Box `hideFrom`, 반응형 스타일 값, `ResponsiveDialog`·`ResponsiveSidePanel`·`useBreakpoint`는 `@seed-design/css/breakpoints` 값을 쓴다. 부품은 자기 recipe(`@seed-design/css/recipes/<부품>`)를 가져오고, recipe 모듈은 자기 CSS를 가져온다. 내보내기 조건 `seed-layered`는 층 판(`*.layered.css`)을 고른다. 층 이름은 `seed-base`·`seed-components`다. 비활성 모양은 `:disabled`·`[disabled]`·`[data-disabled]`에 걸린다 | npm `@seed-design/react@3.0.1`·`@seed-design/css@3.0.3` 패키지 파일 |
+| `@seed-design/vite-plugin`·`webpack-plugin` 2.1.1은 `color-scheme` 메타와 색 모드 스크립트를 HTML에 넣는 일만 한다(vite 플러그인 README의 'recipe 주석으로 CSS 자동 가져오기'는 2.1.1 소스에 없다). webpack 플러그인은 html-webpack-plugin이나 Rspack의 HTML 플러그인이 있어야 돈다 | npm `@seed-design/vite-plugin@2.1.1`·`@seed-design/webpack-plugin@2.1.1` 패키지 `src/index.ts` |
+| SEED CSS gzip(-9): 층 판 base 7.8 KiB, 층 판 전체 42.3 KiB. 소비자 화면에 흔한 부품 34개의 층 판 recipe(최소화 전) 17.7 KiB, 결제 화면 부품 21개 11.3 KiB | 실측(PC), `@seed-design/css` 3.0.3 |
+| Tailwind CSS 4.3.3은 `@layer theme, base, components, utilities;`를 선언하고 초기화 규칙(preflight)을 `base` 층에 넣는다. 기본 중단점은 sm 40rem·md 48rem·lg 64rem·xl 80rem·2xl 96rem이고 `--breakpoint-*: initial`로 모두 지울 수 있다. `@seed-design/tailwind4-theme` 3.0.2는 중단점을 정하지 않는다 | npm `tailwindcss@4.3.3` `index.css`·`theme.css`, https://github.com/tailwindlabs/tailwindcss.com/blob/main/src/docs/responsive-design.mdx |
+| CSS 층은 처음 나온 순서로 정해지고 먼저 선언된 층이 가장 약하다. `@import`는 `@charset`과 `@layer` 문장만 앞에 둘 수 있다. 층 밖 규칙은 층 안 규칙을 이긴다 | https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@layer |
+| DTCG 2025.10(최종 커뮤니티 그룹 보고서, 2025-10-28): 토큰·그룹 이름은 `$`로 시작하지 않고 `{`·`}`·`.`을 쓰지 않는다. 모든 토큰은 명세가 정한 형식(색·치수·글꼴·글꼴 두께·시간·3차 베지어·수와 복합 형식) 가운데 하나를 쓴다. 치수·시간 값은 `{value, unit}` 객체이고 색 값은 `colorSpace`·`components` 객체다. `$extensions` 키는 역도메인 이름을 권하고, 값을 이해하는 데 꼭 필요한 정보는 넣지 말라고 권한다. JSON 스키마는 아직 검토 중이다 | https://www.designtokens.org/tr/2025.10/format/, https://www.designtokens.org/tr/2025.10/color/ |
+| Style Dictionary는 2025.10 형식을 아직 다 지원하지 않는다(v5에서 작업 중). 5.7.1은 별칭 경로를 점(`.`)으로 나눈다 | https://styledictionary.com/info/dtcg/, npm `style-dictionary@5.7.1` `lib/utils/references/getPathFromName.js` |
+| ARIA: `listbox` 아래에는 `option`이나 `option`을 담은 `group`만 온다. `tree` 아래에는 `treeitem`이 오고, `treeitem`은 `tree`나 `treeitem` 안의 `group`에 든다. 일부 항목만 문서에 있으면 `aria-setsize`·`aria-posinset`를 반드시 둔다. `generic` 역할(span·div)에는 `aria-label`·`aria-labelledby`를 쓸 수 없다(이름을 받지 않는다) | https://raw.githubusercontent.com/w3c/aria/main/index.html |
+| HTML `disabled` 버튼은 초점을 받지 못하고 마우스·초점 사건도 받지 않는다. `aria-disabled`는 초점 순서를 바꾸지 않아, 동작은 스크립트로 막고 모양은 따로 입힌다 | https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Attributes/disabled, https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-disabled |
+| axe-core 4.14에는 `aria-prohibited-attr`(역할이 막은 ARIA 속성)·`aria-required-children`·`aria-required-parent` 규칙이 있다 | https://github.com/dequelabs/axe-core/blob/develop/doc/rule-descriptions.md |
+
+기술 검토 중간-019·020 반영(ADR-0119, §5.17 실행 도구)에 쓴 사실은 2026-10-28에 원문을 열어 보고 조회했다. 판 번호는 그날 npm 레지스트리의 `latest`다.
+
+| 사실 | 출처 |
+| --- | --- |
+| next-auth `latest` 4.24.15·`beta` 5.0.0-beta.32(둘 다 2026-07-20). README: Auth.js가 Better Auth의 일부가 됐고 새 프로젝트에 Better Auth를 권한다 | https://registry.npmjs.org/next-auth, https://github.com/nextauthjs/next-auth |
+| `@auth/core` 0.41.3은 `oauth4webapi` ^3.3.0에 기댄다. `oauth4webapi` 3.8.8(의존성 없음, MIT), `openid-client` 6.8.8(`oauth4webapi`·`jose` 위, MIT), 둘 다 2026-09-05 | https://registry.npmjs.org/@auth/core, https://registry.npmjs.org/oauth4webapi, https://registry.npmjs.org/openid-client |
+| Auth.js Credentials는 비밀번호 방식을 권하지 않으려고 기능을 일부러 줄였다(소스 주석) | https://github.com/nextauthjs/next-auth/blob/main/packages/core/src/providers/credentials.ts |
+| Better Auth 1.7.14: 세션은 기본으로 자기 DB에, DB가 없으면 서명·암호화한 쿠키에 두고 제공자 계정 자료를 `account_data` 쿠키에 둔다 | https://github.com/better-auth/better-auth/blob/main/docs/content/docs/concepts/session-management.mdx |
+| OIDC 발견 문서: 카카오 `https://kauth.kakao.com`, 네이버 `https://nid.naver.com`(이메일 클레임 없음), 구글 `https://accounts.google.com`. 셋 모두 PKCE `S256`, ID 토큰 RS256 | 각 issuer의 `/.well-known/openid-configuration` |
+| Vitest 브라우저 모드는 4.0(2025-10-22)부터 안정판이고 공급자 패키지(`@vitest/browser-playwright`)를 따로 받는다. Playwright 공급자는 Chromium·Firefox·WebKit을 돌린다. vitest 5.0.5(2026-10-15), `@playwright/test` 1.64.1, `@web/test-runner` 1.0.0 | https://vitest.dev/blog/vitest-4, https://vitest.dev/guide/browser/, https://registry.npmjs.org/vitest |
+| `@xstate/graph` 3.0.4(MIT, xstate ^5.19.4 위)는 `createTestModel`·`getShortestPaths`·`getSimplePaths`를 내보낸다(기계에서 시험 경로를 만든다). xstate 5.33.3(2026-10-28 확인, 기술 검토 낮음-096) | https://registry.npmjs.org/@xstate/graph, https://unpkg.com/@xstate/graph@3.0.4/dist/declarations/src/index.d.ts |
+| FSD 공식 Next.js 안내: 이름이 겹치지 않게 FSD 층 `app`·`pages`를 `_app`·`_pages`로 바꾸고, Next.js `app`에는 `src/_pages`의 것을 다시 내보낸다. Steiger와 맞는다. Steiger `fsd/forbidden-imports`는 위 층 가져오기와 같은 층 조각끼리 가져오기를 막는다(steiger 0.8.0, 기술 검토 낮음-098) | https://github.com/feature-sliced/documentation(guides/tech/with-nextjs.mdx), https://github.com/feature-sliced/steiger(forbidden-imports/README.md) |
+| webpack `output.trustedTypes`(5.37.0부터)는 기본으로 꺼져 있고, 켜면 동적으로 싣는 스크립트 주소를 Trusted Types 정책으로 만든다. 정책 이름은 `policyName`. 이름이 CSP `trusted-types` 목록에 없거나 이미 있으면 정책 만들기가 실패한다(`onPolicyCreationFailure` 기본 `stop`, 기술 검토 낮음-098) | https://webpack.js.org/configuration/output/#outputtrustedtypes |
+| CloudFront 캐시 동작의 허용 메서드는 GET·HEAD / GET·HEAD·OPTIONS / GET·HEAD·OPTIONS·PUT·POST·PATCH·DELETE 세 묶음 가운데 하나다(기술 검토 낮음-099) | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesCacheBehavior.html |
+| Playwright `toHaveScreenshot`은 기준 이미지와 견주고, 브라우저 그리기가 OS·판·설정에 따라 달라 기준을 만든 환경과 같은 환경에서 찍으라고 한다. TanStack Table 9.3.1(MIT, 화면 없이 표 논리만 주는 라이브러리). Lexical 0.52.0(MIT, 편집기 상태를 JSON으로 꺼낸다). Tiptap 3.32.0(MIT 핵심, 기본으로 `<style>` 요소를 넣고 `injectCSS`·`injectNonce`로 바꾼다, `getJSON()`). DOMPurify 3.4.17(MPL-2.0 또는 Apache-2.0)(2026-10-28 확인, 기술 검토 낮음-100) | https://playwright.dev/docs/test-snapshots, https://registry.npmjs.org/@tanstack/react-table, https://unpkg.com/lexical@0.52.0/README.md, https://github.com/ueberdosis/tiptap(packages/core/src/Editor.ts), https://registry.npmjs.org/dompurify |
+| `requestAnimationFrame`은 보통 화면 갱신율(흔히 60Hz)만큼 부르고, 대부분 브라우저가 숨긴 탭에서 멈춘다(기술 검토 낮음-101) | https://developer.mozilla.org/docs/Web/API/Window/requestAnimationFrame |
+| WAI-ARIA 1.2: `timer`는 기본 `aria-live`가 off다. `aria-rowcount`·`aria-rowindex`는 행 일부만 DOM에 있을 때 둔다(전체를 모르면 -1). `aria-setsize`·`aria-posinset`는 모든 항목이 DOM에 있지 않을 때 둔다(기술 검토 낮음-102·107) | https://www.w3.org/TR/wai-aria-1.2/#timer, https://github.com/w3c/aria(index.html) |
+| W3C APG: 자동으로 도는 캐러셀은 키보드 초점이 들어오면 멈추고 사용자가 다시 켜기 전에는 다시 돌지 않으며, 마우스가 올라가 있는 동안 멈춘다. 페이지를 다 열기 전에 이미 있는 alert는 화면 낭독기가 알리지 않는다(기술 검토 낮음-108) | https://github.com/w3c/aria-practices(content/patterns/carousel·alert) |

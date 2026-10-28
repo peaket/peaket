@@ -28,7 +28,9 @@
         {
           "type": "enum",
           "name": "HoldAttemptMode",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "PICK",
             "AUTO"
           ]
@@ -59,7 +61,9 @@
         {
           "type": "enum",
           "name": "HoldAttemptResult",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "HELD",
             "CONFLICT",
             "LIMIT",
@@ -76,7 +80,9 @@
         {
           "type": "enum",
           "name": "HoldAttemptAutoResult",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "FIRST",
             "FIRST_SPLIT",
             "SECOND",
@@ -132,15 +138,6 @@
           "type": "string",
           "logicalType": "uuid"
         }
-      ],
-      "default": null
-    },
-    {
-      "name": "schemaVersion",
-      "doc": "메시지 형식 판",
-      "type": [
-        "null",
-        "long"
       ],
       "default": null
     }

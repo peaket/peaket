@@ -47,7 +47,9 @@
         {
           "type": "enum",
           "name": "SeatEventType",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "HELD",
             "RELEASED",
             "EXPIRED",
@@ -70,6 +72,16 @@
     },
     {
       "name": "sectionVersion",
+      "doc": "구역별 일련번호. 같은 seatEpoch 안에서만 비교한다(기술 검토 중간-040)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null
+    },
+    {
+      "name": "seatEpoch",
+      "doc": "회차 세대. 좌석 Redis 장애 조치·다시 만들기 때 오른다(ADR-0121, 기술 검토 중간-040)",
       "type": [
         "null",
         "long"
@@ -113,15 +125,6 @@
           "type": "string",
           "logicalType": "uuid"
         }
-      ],
-      "default": null
-    },
-    {
-      "name": "schemaVersion",
-      "doc": "메시지 형식 판",
-      "type": [
-        "null",
-        "long"
       ],
       "default": null
     }

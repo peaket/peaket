@@ -1,6 +1,7 @@
 """성능 장부 도구 공통 함수(표준 라이브러리만)."""
 import csv
 import datetime as dt
+import hashlib
 import io
 import json
 import math
@@ -14,7 +15,25 @@ except (AttributeError, ValueError):
     pass
 
 RUNS = os.path.join('perf-ledger', 'runs')
+TIMESTAMPS = os.path.join('perf-ledger', 'timestamps')  # 하루 해시 묶음과 OpenTimestamps 증명(docs/perf-ledger.md §9)
 LEDGER_DOC = os.path.join('docs', 'perf-ledger.md')
+# Git이 아니라 S3 원본 버킷에 두는 큰 원본(docs/perf-ledger.md §2.1·§9, 기술 검토 낮음-056)
+RAW_DIRS = ('metrics/', 'traces/', 'grafana/')
+RAW_FILES = ('stdout.log',)
+
+
+def is_raw(rel):
+    """실행 폴더 안 상대 경로가 S3 원본 버킷에 두는 큰 원본인지."""
+    rel = rel.replace('\\', '/')
+    return rel in RAW_FILES or rel.startswith(RAW_DIRS)
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def find_root(start=None):
@@ -104,14 +123,63 @@ def read_metric_csv(root, run_id, name):
     return rows
 
 
-def mean_after_warmup(points, warmup_s, start_ts):
+def _after_warmup(points, warmup_s, start_ts):
     if not points:
-        return None
+        return []
     cut = (start_ts or points[0][0]) + (warmup_s or 0)
     vals = [v for t, v in points if t >= cut and not math.isnan(v)]
-    if not vals:
-        vals = [v for _, v in points if not math.isnan(v)]
+    return vals or [v for _, v in points if not math.isnan(v)]
+
+
+def mean_after_warmup(points, warmup_s, start_ts):
+    vals = _after_warmup(points, warmup_s, start_ts)
     return sum(vals) / len(vals) if vals else None
+
+
+def percentile(vals, q):
+    """가장 가까운 순위 방식의 백분위(q는 0~1): 정렬한 값의 ceil(q × n)번째."""
+    if not vals:
+        return None
+    s = sorted(vals)
+    return s[max(0, min(len(s) - 1, math.ceil(q * len(s)) - 1))]
+
+
+def metrics_summary(run_dir, start_ts, warmup_s):
+    """metrics/<이름>.csv마다 예열을 뺀 구간의 p50·p99·최대·평균(docs/perf-ledger.md §2.1 metrics-summary.json).
+
+    시계열이 여럿이면 첫 시계열만 쓴다(charts.py와 같다). 시계열 수와 첫 시계열의 라벨을 함께 적는다.
+    """
+    out = {}
+    mdir = os.path.join(run_dir, 'metrics')
+    if not os.path.isdir(mdir):
+        return out
+    for fn in sorted(os.listdir(mdir)):
+        if not fn.endswith('.csv'):
+            continue
+        series, first, pts = [], None, []
+        with io.open(os.path.join(mdir, fn), encoding='utf-8', newline='') as f:
+            for r in csv.DictReader(f):
+                labels = r.get('labels', '')
+                if labels not in series:
+                    series.append(labels)
+                if first is None:
+                    first = labels
+                if labels != first:
+                    continue
+                try:
+                    pts.append((float(r['ts']), float(r['value'])))
+                except (KeyError, ValueError):
+                    continue
+        vals = _after_warmup(pts, warmup_s, start_ts)
+        out[fn[:-4]] = {'points': len(vals), 'series': len(series), 'labels': first,
+                        'p50': percentile(vals, 0.5), 'p99': percentile(vals, 0.99),
+                        'max': max(vals) if vals else None, 'mean': (sum(vals) / len(vals)) if vals else None}
+    return out
+
+
+def read_metrics_summary(root, run_id):
+    path = os.path.join(root, RUNS, run_id, 'metrics-summary.json')
+    return load_json(path) if os.path.exists(path) else {}
 
 
 # ---------------- K6(봇 탐지) 통계, ADR-0039·0048 ----------------
@@ -161,6 +229,88 @@ def cp_upper(k, n, alpha=0.05):
     return hi
 
 
+def betainc(a, b, x):
+    """정규화한 불완전 베타 함수 I_x(a, b). 연분수(Lentz 방법)로 계산한다(표준 라이브러리만)."""
+    if x <= 0:
+        return 0.0
+    if x >= 1:
+        return 1.0
+
+    def cf(a, b, x):
+        tiny, qab, qap, qam = 1e-300, a + b, a + 1, a - 1
+        c, d = 1.0, 1 - qab * x / qap
+        d = 1 / (d if abs(d) > tiny else tiny)
+        h = d
+        for m in range(1, 20001):
+            m2 = 2 * m
+            for aa in (m * (b - m) * x / ((qam + m2) * (a + m2)), -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))):
+                d = 1 + aa * d
+                d = 1 / (d if abs(d) > tiny else tiny)
+                c = 1 + aa / c
+                c = c if abs(c) > tiny else tiny
+                h *= d * c
+            if abs(d * c - 1) < 1e-15:
+                break
+        return h
+
+    lbt = math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x)
+    if x < (a + 1) / (a + b + 2):
+        return math.exp(lbt) * cf(a, b, x) / a
+    return 1 - math.exp(lbt) * cf(b, a, 1 - x) / b
+
+
+def f_cdf(x, d1, d2):
+    """F 분포(자유도 d1, d2)의 누적 확률 P(F ≤ x)."""
+    if x <= 0:
+        return 0.0
+    return betainc(d1 / 2, d2 / 2, d1 * x / (d1 * x + d2))
+
+
+def f_ppf(p, d1, d2):
+    """F 분포의 p 분위수. 누적 확률을 이분법으로 맞춘다."""
+    lo, hi = 0.0, 1.0
+    while f_cdf(hi, d1, d2) < p and hi < 1e12:
+        lo, hi = hi, hi * 2
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if f_cdf(mid, d1, d2) < p:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def icc1(groups, alpha=0.05):
+    """일원 랜덤 효과 ICC(1)과 단측 (1-alpha) 상한(F 분포). groups = 사람마다 점수 목록. 2개 이상인 사람만 쓴다.
+
+    ICC(1) = (MSB − MSW) ÷ (MSB + (k0 − 1)·MSW), k0 = (N − Σnᵢ² ÷ N) ÷ (g − 1)(사람마다 세션 수가 달라도 되는 꼴).
+    상한은 F = MSB ÷ MSW에 F 분포의 (1-alpha) 분위수(자유도 N−g, g−1)를 곱한 F_U로 (F_U − 1) ÷ (F_U + k0 − 1)이다.
+    사람이 2명보다 적거나 점수가 모두 같으면 None.
+    """
+    gs = [[float(v) for v in g] for g in groups if len(g) >= 2]
+    g, n_all = len(gs), sum(len(x) for x in gs)
+    if g < 2:
+        return None
+    grand = sum(sum(x) for x in gs) / n_all
+    means = [sum(x) / len(x) for x in gs]
+    ssb = sum(len(x) * (m - grand) ** 2 for x, m in zip(gs, means))
+    ssw = sum((v - m) ** 2 for x, m in zip(gs, means) for v in x)
+    df1, df2 = g - 1, n_all - g
+    msb, msw = ssb / df1, ssw / df2
+    k0 = (n_all - sum(len(x) ** 2 for x in gs) / n_all) / df1
+    out = {'people': g, 'sessions': n_all, 'k0': round(k0, 4), 'df': [df1, df2], 'alpha_one_sided': alpha}
+    if msw == 0:
+        if msb == 0:
+            return None
+        out.update({'icc': 1.0, 'f': None, 'upper_one_sided': 1.0})
+        return out
+    f = msb / msw
+    fu = f * f_ppf(1 - alpha, df2, df1)
+    out.update({'icc': round((msb - msw) / (msb + (k0 - 1) * msw), 5), 'f': round(f, 4),
+                'upper_one_sided': round((fu - 1) / (fu + k0 - 1), 5)})
+    return out
+
+
 def tier_level(tier):
     """등급 이름 '<유형>-L<단계>'(예: volume-L1)에서 단계 1~3을 꺼낸다. 형식이 다르면 None."""
     m = re.search(r'-L([123])$', tier or '')
@@ -168,7 +318,7 @@ def tier_level(tier):
 
 
 def k6_plan_parse(text):
-    """사전 등록 계획 'N:C'(판정용 사람 표본 수:합격 오탐 수) → dict. 오탐 C건의 상한이 0.5%를 넘으면 ValueError."""
+    """사전 등록 계획 'N:C'(판정 세션을 낸 사람 수:합격 오탐 수, ADR-0112) → dict. 오탐 C건의 상한이 0.5%를 넘으면 ValueError."""
     try:
         n, c = (int(x) for x in str(text).split(':'))
     except ValueError:
@@ -182,7 +332,7 @@ def k6_plan_parse(text):
 def k6_eval_from_confusion(path, plan=None):
     """confusion.csv(tier,round,label,predicted,count[,stratum]) → 등급·라운드별 탐지율, 등급별 하락폭, 사람 오탐 상한.
 
-    label·predicted는 bot 또는 human. 사람 행의 tier는 '-'로 둔다. 사람 행 중 stratum이 빈 행만 합계에 쓰고,
+    label·predicted는 bot 또는 human. 사람 행의 tier는 '-'로 두고 판정 세션만 센다(ADR-0112). 사람 행 중 stratum이 빈 행만 합계에 쓰고,
     stratum이 있는 행은 층별 집계에만 쓴다(한 세션이 여러 층에 속할 수 있다). 3단계 등급은 탐지율 목표가 없다.
     plan(k6_plan_parse 결과)이 있으면 마지막 라운드 사람 합계로 PASS·FAIL·INSUFFICIENT를 낸다(ADR-0048).
     """
@@ -238,8 +388,195 @@ def k6_eval_from_confusion(path, plan=None):
             ok = h['false_pos'] <= plan['max_fp'] and h['upper95_one_sided'] <= K6_TARGET_FP_UPPER
             out['plan_verdict'] = 'PASS' if ok else 'FAIL'
             if h['n'] != plan['holdout_n']:
-                out['plan_note'] = '사람 표본 수가 사전 등록과 다르다'
+                out['plan_note'] = '판정 세션을 낸 사람 수가 사전 등록과 다르다'
     return out
+
+
+class K6InputError(ValueError):
+    """K6 입력 파일끼리 어긋나서 판정하지 않고 실행을 거부해야 할 때(docs/perf-ledger.md §10.5)."""
+
+
+def _read_rows(path, columns, name):
+    with io.open(path, encoding='utf-8', newline='') as f:
+        rd = csv.DictReader(f)
+        missing = [c for c in columns if c not in (rd.fieldnames or [])]
+        if missing:
+            raise K6InputError(f'{name}에 열이 없다: {", ".join(missing)}(필요한 열: {",".join(columns)})')
+        return list(rd)
+
+
+def _examples(codes, limit=3):
+    codes = sorted(codes)
+    return ', '.join(codes[:limit]) + (' 등' if len(codes) > limit else '')
+
+
+HUMAN_SESSION_COLUMNS = ('participant', 'site', 'role', 'stratum', 'round', 'predicted', 'score')
+
+
+def k6_human_units(path, ev, plan):
+    """human_sessions.csv(participant,site,role,stratum,round,predicted,score)로 사람 단위를 확인하고 집계한다(ADR-0112).
+
+    확인(하나라도 어긋나면 K6InputError로 실행을 거부한다):
+      ① 참가자마다 판정 세션(role=judge)이 꼭 하나다. ② 판정 세션 수가 --k6-plan의 N과 같다.
+      ③ 판정 세션 수와 그 오탐 수가 confusion.csv의 마지막 라운드 사람 합계(n, 오탐)와 같다.
+    집계(가명 코드는 내보내지 않는다): human_units, sessions_per_person(사람당 세션 수 → 사람 수),
+      human_icc(세션 2개 이상인 사람의 위험 점수로 낸 ICC(1)과 단측 95% 상한), ref_strata(참고 세션의 층별 오탐),
+      judged_fp_refs(판정 세션이 오탐인 사람의 참고 세션 결과 건수).
+    stratum은 한 세션이 여러 층에 속하면 ';'로 나눠 적는다. score가 빈 세션은 상관 계산에서만 뺀다.
+    """
+    rows = _read_rows(path, HUMAN_SESSION_COLUMNS, 'human_sessions.csv')
+    problems, people = [], {}
+    for i, r in enumerate(rows, 2):
+        code = (r.get('participant') or '').strip()
+        role = (r.get('role') or '').strip().lower()
+        pred = (r.get('predicted') or '').strip().lower()
+        score = (r.get('score') or '').strip()
+        if not code or role not in ('judge', 'ref') or pred not in ('bot', 'human'):
+            problems.append(f'{i}행: participant가 비었거나 role(judge·ref)·predicted(bot·human)가 규칙 밖이다')
+            continue
+        try:
+            val = float(score) if score else None
+            rnd = int(float(r.get('round') or 1))
+        except ValueError:
+            problems.append(f'{i}행: score나 round가 숫자가 아니다')
+            continue
+        strata = [s.strip() for s in (r.get('stratum') or '').split(';') if s.strip()]
+        people.setdefault(code, []).append({'role': role, 'fp': pred == 'bot', 'score': val, 'round': rnd, 'strata': strata})
+    judges = {p: sum(1 for s in ss if s['role'] == 'judge') for p, ss in people.items()}
+    many = [p for p, c in judges.items() if c > 1]
+    none = [p for p, c in judges.items() if c == 0]
+    if many:
+        problems.append(f'판정 세션이 둘 이상인 참가자 {len(many)}명({_examples(many)})')
+    if none:
+        problems.append(f'판정 세션이 없는 참가자 {len(none)}명({_examples(none)})')
+    n_judge = sum(judges.values())
+    judge_fp = sum(1 for ss in people.values() for s in ss if s['role'] == 'judge' and s['fp'])
+    if not plan:
+        problems.append('--k6-plan N:C가 없어 판정 세션 수를 확인할 수 없다')
+    elif n_judge != plan['holdout_n']:
+        problems.append(f'판정 세션 {n_judge}개가 사전 등록한 N={plan["holdout_n"]}과 다르다')
+    humans = (ev or {}).get('humans') or []
+    if not humans:
+        problems.append('confusion.csv에 사람 합계 행(stratum이 빈 사람 행)이 없다')
+    else:
+        h = humans[-1]
+        if (n_judge, judge_fp) != (h['n'], h['false_pos']):
+            problems.append(f'판정 세션 {n_judge}개·오탐 {judge_fp}건이 confusion.csv 라운드 {h["round"]} 사람 합계 '
+                            f'{h["n"]}개·오탐 {h["false_pos"]}건과 다르다')
+    if problems:
+        raise K6InputError('; '.join(problems))
+    refs = [s for ss in people.values() for s in ss if s['role'] == 'ref']
+    per_person = {}
+    for ss in people.values():
+        per_person[len(ss)] = per_person.get(len(ss), 0) + 1
+    strata = {}
+    for s in refs:
+        for name in s['strata']:
+            c = strata.setdefault((s['round'], name), [0, 0])
+            c[0] += 1
+            c[1] += s['fp']
+    fp_people = [ss for ss in people.values() if any(s['role'] == 'judge' and s['fp'] for s in ss)]
+    fp_refs = [s for ss in fp_people for s in ss if s['role'] == 'ref']
+    icc = icc1([[s['score'] for s in ss if s['score'] is not None] for ss in people.values()])
+    if icc:
+        icc['upper95_one_sided'] = icc.pop('upper_one_sided')
+    return {
+        'human_units': {'participants': len(people), 'judge_sessions': n_judge, 'ref_sessions': len(refs),
+                        'judge_false_pos': judge_fp, 'ref_false_pos': sum(s['fp'] for s in refs),
+                        'checks': {'one_judge_per_person': True, 'judge_sessions_equal_plan_n': True,
+                                   'matches_confusion_last_round': True},
+                        'source_copied': False},
+        'sessions_per_person': {str(k): per_person[k] for k in sorted(per_person)},
+        'human_icc': icc,
+        'ref_strata': [{'round': rnd, 'stratum': name, 'n': n, 'false_pos': k} for (rnd, name), (n, k) in sorted(strata.items())],
+        'judged_fp_refs': {'people': len(fp_people), 'ref_sessions': len(fp_refs), 'ref_false_pos': sum(s['fp'] for s in fp_refs)},
+    }
+
+
+BOT_OUTCOME_COLUMNS = ('tier', 'round', 'solve_rate', 'sessions', 'detected', 'blocked', 'verify_passed', 'admitted')
+K6_SCENARIO_BOTS = 500000     # planning/01 §3.2 표준 시나리오: 진입 시도 100만 건 중 봇 50만
+K6_SCENARIO_HUMANS = 500000   # 정상 이용자 50만. 오탐 0.5%를 빼면 49.75만이 통과한다
+
+
+def k6_bot_outcomes(path, ev):
+    """bot_outcomes.csv(tier,round,solve_rate,sessions,detected,blocked,verify_passed,admitted) → 추가 검증 통과율,
+    끝에서 끝까지의 봇 성공률, 봇 점유율 추정(docs/perf-ledger.md §10.2·§10.5, 기술 검토 중간-104).
+
+    확인(어긋나면 K6InputError로 실행을 거부한다): 같은 등급·라운드에서 풀이 성공률별 detected 합 = confusion.csv의 봇 판정 수,
+    blocked + verify_passed ≤ detected, admitted ≤ sessions. 같은 등급·라운드·풀이 성공률 행이 여럿이면 더한다.
+    verify_pass = verify_passed ÷ detected, e2e_success = admitted ÷ sessions(둘 다 Wilson 95% 구간).
+    bot_share_est: 마지막 라운드 1·2단계 등급을 합친 탐지율 d와, 같은 등급을 합친 풀이 성공률별 통과율 r로
+      통과 봇 = 50만 × (1 − d) + 50만 × d × r, 봇 점유율 = 통과 봇 ÷ (통과 봇 + 49.75만)(planning/01 §3.2).
+    """
+    rows = _read_rows(path, BOT_OUTCOME_COLUMNS, 'bot_outcomes.csv')
+    agg, problems = {}, []
+    for i, r in enumerate(rows, 2):
+        try:
+            key = ((r.get('tier') or '').strip(), int(float(r.get('round') or 1)), float(r.get('solve_rate') or 0))
+            vals = [int(float(r.get(c) or 0)) for c in BOT_OUTCOME_COLUMNS[3:]]
+        except ValueError:
+            problems.append(f'{i}행: 숫자가 아닌 칸이 있다')
+            continue
+        if min(vals) < 0:
+            problems.append(f'{i}행: 음수가 있다')
+        a = agg.setdefault(key, [0, 0, 0, 0, 0])
+        for j, v in enumerate(vals):
+            a[j] += v
+    conf = {(b['tier'], b['round']): b['detected'] for b in (ev or {}).get('bots', [])}
+    det = {}
+    for (tier, rnd, s), (sess, d, blk, vp, adm) in sorted(agg.items()):
+        det[(tier, rnd)] = det.get((tier, rnd), 0) + d
+        if blk + vp > d:
+            problems.append(f'{tier} 라운드 {rnd} 풀이 {s:g}: blocked + verify_passed({blk + vp}) > detected({d})')
+        if adm > sess:
+            problems.append(f'{tier} 라운드 {rnd} 풀이 {s:g}: admitted({adm}) > sessions({sess})')
+    for key in sorted(set(det) | set(conf)):
+        if det.get(key, 0) != conf.get(key, 0):
+            problems.append(f'{key[0]} 라운드 {key[1]}: detected 합 {det.get(key, 0)}이 confusion.csv 봇 판정 수 {conf.get(key, 0)}와 다르다')
+    if problems:
+        raise K6InputError('; '.join(problems))
+
+    def interval(k, n):
+        w = wilson(k, n)
+        return None if w is None else [round(w[0], 5), round(w[1], 5)]
+
+    out = {'verify_pass': [], 'e2e_success': [], 'bot_share_est': None}
+    order = sorted(agg.items(), key=lambda x: (x[0][1], x[0][0], x[0][2]))
+    for (tier, rnd, s), (sess, d, blk, vp, adm) in order:
+        base = {'tier': tier, 'level': tier_level(tier), 'round': rnd, 'solve_rate': s}
+        out['verify_pass'].append(dict(base, detected=d, blocked=blk, verify_passed=vp,
+                                       rate=round(vp / d, 5) if d else None, wilson95=interval(vp, d)))
+        out['e2e_success'].append(dict(base, sessions=sess, admitted=adm,
+                                       rate=round(adm / sess, 5) if sess else None, wilson95=interval(adm, sess)))
+    bots = [b for b in (ev or {}).get('bots', []) if b.get('level') in (1, 2)]
+    if bots:
+        last = max(b['round'] for b in (ev or {}).get('bots', []))
+        scored = [b for b in bots if b['round'] == last]
+        n, k = sum(b['n'] for b in scored), sum(b['detected'] for b in scored)
+        if n:
+            d_rate = k / n
+            humans_passing = round(K6_SCENARIO_HUMANS * (1 - K6_TARGET_FP_UPPER))
+            keys = {(b['tier'], b['round']) for b in scored}
+            per_rate = []
+            for s in sorted({key[2] for key in agg if (key[0], key[1]) in keys}):
+                dd = sum(v[1] for key, v in agg.items() if (key[0], key[1]) in keys and key[2] == s)
+                vv = sum(v[3] for key, v in agg.items() if (key[0], key[1]) in keys and key[2] == s)
+                r_rate = vv / dd if dd else 0.0
+                passing = K6_SCENARIO_BOTS * (1 - d_rate) + K6_SCENARIO_BOTS * d_rate * r_rate
+                per_rate.append({'solve_rate': s, 'verify_pass': round(r_rate, 5),
+                                 'bot_share': round(passing / (passing + humans_passing), 5)})
+            out['bot_share_est'] = {'round': last, 'tiers': sorted(t for t, _ in keys), 'detection_rate': round(d_rate, 5),
+                                    'scenario': {'bots': K6_SCENARIO_BOTS, 'humans_passing': humans_passing},
+                                    'by_solve_rate': per_rate}
+    return out
+
+
+def bot_share_note(est):
+    """manifest notes에 붙일 봇 점유율 추정 한 줄(docs/perf-ledger.md §10.2)."""
+    if not est or not est.get('by_solve_rate'):
+        return None
+    parts = ', '.join('풀이 %g%% %.2f%%' % (x['solve_rate'] * 100, x['bot_share'] * 100) for x in est['by_solve_rate'])
+    return '봇 점유율 추정(planning/01 §3.2, 라운드 %d 1·2단계 탐지율 %.1f%%): %s' % (est['round'], est['detection_rate'] * 100, parts)
 
 
 def k6_cost(path, prices, usd_krw=None):
@@ -294,7 +631,7 @@ def k6_summary(ev, cost=None):
             parts.append('3단계 %s %.1f%%(목표 없음)' % (w3['tier'], w3['rate'] * 100))
     if ev and ev.get('humans'):
         h = ev['humans'][-1]
-        s = '오탐 %d/%d, 상한 %.2f%%' % (h['false_pos'], h['n'], h['upper95_one_sided'] * 100)
+        s = '오탐 %d/%d명, 상한 %.2f%%' % (h['false_pos'], h['n'], h['upper95_one_sided'] * 100)
         if ev.get('plan_verdict'):
             s += ', 계획 ' + {'PASS': '통과', 'FAIL': '실패', 'INSUFFICIENT': '판정 보류'}[ev['plan_verdict']]
         parts.append(s)

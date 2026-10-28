@@ -29,7 +29,9 @@
         {
           "type": "enum",
           "name": "PaymentEventPg",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "TOSS",
             "PORTONE",
             "SIMULATOR"
@@ -46,7 +48,9 @@
         {
           "type": "enum",
           "name": "PaymentEventType",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "AWAITING_DEPOSIT",
             "APPROVED",
             "DEPOSIT_REVERSED",
@@ -76,7 +80,9 @@
         {
           "type": "enum",
           "name": "PaymentEventPayMethodCategory",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "CARD",
             "EASY_PAY",
             "TRANSFER",
@@ -94,7 +100,9 @@
         {
           "type": "enum",
           "name": "PaymentEventResult",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "APPROVED",
             "ALREADY_APPROVED",
             "IN_PROGRESS",
@@ -114,7 +122,9 @@
         {
           "type": "enum",
           "name": "PaymentEventFailureCategory",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "CARD_DECLINED",
             "USER_ABORTED",
             "VALIDATION",
@@ -164,15 +174,6 @@
           "type": "string",
           "logicalType": "uuid"
         }
-      ],
-      "default": null
-    },
-    {
-      "name": "schemaVersion",
-      "doc": "메시지 형식 판",
-      "type": [
-        "null",
-        "long"
       ],
       "default": null
     }

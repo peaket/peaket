@@ -39,7 +39,9 @@
         {
           "type": "enum",
           "name": "BehaviorSignalNetClass",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "HOSTING",
             "PROXY",
             "OTHER"
@@ -156,15 +158,6 @@
           "type": "string",
           "logicalType": "uuid"
         }
-      ],
-      "default": null
-    },
-    {
-      "name": "schemaVersion",
-      "doc": "메시지 형식 판",
-      "type": [
-        "null",
-        "long"
       ],
       "default": null
     }

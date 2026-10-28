@@ -14,13 +14,15 @@
     },
     {
       "name": "key",
-      "doc": "FEATURE_FLAG는 비핵심 기능 끄기(명령 9), AUTOMATION_STOP은 입장 제어 자동화 긴급 정지(명령 11, admission-ctrl은 TCP 대역 외로도 받음). PG_ASSIGNMENT는 공연 결제사 지정(명령 12). 결제사 전환은 DEGRADED_MODE의 PAYMENT_PG_FALLBACK 값(ADR-0044)",
+      "doc": "FEATURE_FLAG는 비핵심 기능 끄기(명령 9), AUTOMATION_STOP은 입장 제어 자동화 긴급 정지(명령 11, admission-ctrl은 제어 gRPC로도 받음, ADR-0102). PG_ASSIGNMENT는 회차 결제사 지정(명령 12). 결제사 전환은 DEGRADED_MODE의 PAYMENT_PG_FALLBACK 값(ADR-0044)",
       "type": [
         "null",
         {
           "type": "enum",
           "name": "SettingChangedKey",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "BOT_LEVEL",
             "LOG_LEVEL",
             "FEATURE_FLAG",
@@ -35,7 +37,7 @@
     },
     {
       "name": "scope",
-      "doc": "PLATFORM 또는 공연 ID. 결제사 지정·전환은 공연 단위",
+      "doc": "PLATFORM 또는 회차 ID. 결제사 지정·전환은 회차 단위(결제사 지정은 회차 칸, ADR-0093 결정 2)",
       "type": [
         "null",
         "string"
@@ -44,10 +46,148 @@
     },
     {
       "name": "value",
-      "doc": "키마다 정한 값. BOT_LEVEL은 {level: RELAXED|STANDARD|AGGRESSIVE(완화·기본·강화), reassessMode: OFF|SHADOW|ENFORCE(대기 중 재평가 끔·그림자·적용, 기본 SHADOW)}의 JSON이다. 재평가 모드는 강도와 따로 고르는 명령 5의 별도 매개변수이고, ENFORCE로 바꾸는 것은 commander만 한다(추천 적용 2026-10-20, ADR-0073)",
+      "doc": "키마다 정한 값의 레코드(추천 적용 2026-10-28, 기술 검토 낮음-026. 문자열 JSON이던 것을 바꿨다). 어느 갈래인지는 key가 정하고, 생산자는 key와 맞는 갈래만 낸다. 갈래를 더할 때는 소비자를 먼저 배포한다. 대상(기능 플래그 이름, 로그 레벨을 바꿀 서비스, Degraded 모드 이름)은 메시지 키에 있다. 재평가 모드는 강도와 따로 고르는 명령 5의 별도 매개변수이고, ENFORCE로 바꾸는 것은 commander만 한다(추천 적용 2026-10-20, ADR-0073)",
       "type": [
         "null",
-        "string"
+        {
+          "type": "record",
+          "name": "BotLevelValue",
+          "doc": "BOT_LEVEL(명령 5)",
+          "fields": [
+            {
+              "name": "level",
+              "doc": "완화·기본·강화",
+              "type": {
+                "type": "enum",
+                "name": "BotLevelValueLevel",
+                "default": "UNRECOGNIZED",
+                "symbols": [
+                  "UNRECOGNIZED",
+                  "RELAXED",
+                  "STANDARD",
+                  "AGGRESSIVE"
+                ]
+              }
+            },
+            {
+              "name": "reassessMode",
+              "doc": "대기 중 재평가 끔·그림자·적용(기본 SHADOW)",
+              "type": {
+                "type": "enum",
+                "name": "BotLevelValueReassessMode",
+                "default": "UNRECOGNIZED",
+                "symbols": [
+                  "UNRECOGNIZED",
+                  "OFF",
+                  "SHADOW",
+                  "ENFORCE"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "LogLevelValue",
+          "doc": "LOG_LEVEL(명령 8). 30분 뒤 기본 INFO로 돌아간다(expiresAt)",
+          "fields": [
+            {
+              "name": "level",
+              "type": {
+                "type": "enum",
+                "name": "LogLevelValueLevel",
+                "default": "UNRECOGNIZED",
+                "symbols": [
+                  "UNRECOGNIZED",
+                  "INFO",
+                  "DEBUG",
+                  "TRACE"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "FeatureFlagValue",
+          "doc": "FEATURE_FLAG(명령 9). 플래그 이름은 메시지 키의 대상",
+          "fields": [
+            {
+              "name": "enabled",
+              "type": "boolean"
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "DegradedModeValue",
+          "doc": "DEGRADED_MODE(명령 6). 모드 이름(결제사 전환은 PAYMENT_PG_FALLBACK)은 메시지 키의 대상",
+          "fields": [
+            {
+              "name": "enabled",
+              "type": "boolean"
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "LobbyBannerValue",
+          "doc": "LOBBY_BANNER(명령 7, purchase-svc 쪽). 미리 승인한 문구 템플릿만",
+          "fields": [
+            {
+              "name": "templateId",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "PgAssignmentValue",
+          "doc": "PG_ASSIGNMENT(명령 12). 회차의 기본 결제사와 대체 결제사",
+          "fields": [
+            {
+              "name": "primaryPg",
+              "type": {
+                "type": "enum",
+                "name": "PgAssignmentValuePrimaryPg",
+                "default": "UNRECOGNIZED",
+                "symbols": [
+                  "UNRECOGNIZED",
+                  "TOSS",
+                  "PORTONE"
+                ]
+              }
+            },
+            {
+              "name": "fallbackPg",
+              "type": [
+                "null",
+                {
+                  "type": "enum",
+                  "name": "PgAssignmentValueFallbackPg",
+                  "default": "UNRECOGNIZED",
+                  "symbols": [
+                    "UNRECOGNIZED",
+                    "TOSS",
+                    "PORTONE"
+                  ]
+                }
+              ],
+              "default": null
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "AutomationStopValue",
+          "doc": "AUTOMATION_STOP(명령 11)",
+          "fields": [
+            {
+              "name": "stopped",
+              "type": "boolean"
+            }
+          ]
+        }
       ],
       "default": null
     },
@@ -91,15 +231,6 @@
           "type": "string",
           "logicalType": "uuid"
         }
-      ],
-      "default": null
-    },
-    {
-      "name": "schemaVersion",
-      "doc": "메시지 형식 판",
-      "type": [
-        "null",
-        "long"
       ],
       "default": null
     }

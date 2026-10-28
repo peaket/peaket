@@ -11,7 +11,9 @@
         {
           "type": "enum",
           "name": "PipelinePulseKind",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "PULSE"
           ]
         }
@@ -42,15 +44,6 @@
           "type": "long",
           "logicalType": "timestamp-millis"
         }
-      ],
-      "default": null
-    },
-    {
-      "name": "schemaVersion",
-      "doc": "메시지 형식 판",
-      "type": [
-        "null",
-        "long"
       ],
       "default": null
     }

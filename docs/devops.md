@@ -65,8 +65,12 @@ GitHub 조직 계정(무료 등급) 아래 저장소 14개를 둔다. architectu
 | .github | 공개 | — | 조직 공용 재사용 워크플로, 이슈·PR(코드 변경을 합쳐 달라는 요청) 양식 |
 
 - **공개 기본(추천 적용, 2026-10-13)**: GitHub 무료 등급에서 브랜치 보호·규칙 세트는 공개 저장소에만 있다. 비공개 저장소의 환경(environment)에는 유료 등급이, 환경 보호 규칙(필수 검토자)에는 Enterprise가 필요하다. 코드 스캐닝은 공개 저장소에서 무료이고, 출처 증명(artifact attestation)은 공개 저장소만 모든 등급에서 쓸 수 있다. 호스트 러너 사용은 공개 저장소에서 무료이고, 비공개는 월 2,000분을 넘으면 과금된다(2026-10-13 GitHub 문서). 포트폴리오를 공개하려는 목적과도 맞는다.
+- **문서 저장소의 줄바꿈(추천 적용 2026-10-28, 기술 검토 낮음-168)**: 문서 저장소의 텍스트 파일은 모두 LF로 둔다. `.gitattributes`는 `* text=auto eol=lf`로 하고, 그림·PDF 같은 바이너리 형식은 `binary`로 적는다. 2026-10-22에 만든 기준점 커밋(c037a15)은 그대로 두고, 섞여 있던 CRLF 파일(2026-10-28 기준 15개)은 줄바꿈만 바꾸는 정리 커밋 하나로 LF로 바꾼다. 그 커밋에는 내용 수정을 섞지 않는다. 줄바꿈을 그대로 두는 지금 설정(`* -text`)은 스크립트로 고칠 때마다 파일별 줄바꿈을 지켜야 하고, 실수하면 파일 전체가 바뀐 것처럼 보이는 함정이 남는다.
 - **비공개 예외**: `peaket-loadtest`는 합성 봇 시뮬레이터가 있어 비공개다(POL-026: 3단계 봇 코드는 무력화 형태로도 공개하지 않는다). 이 저장소는 운영으로 배포하지 않으므로 브랜치 보호가 없어도 운영 경로에 영향이 없다. 봇 탐지 규칙의 기준값과 가중치는 `peaket-trust` 코드가 아니라 비공개 설정(Secrets Manager 매개변수)으로 둔다.
 - **공개 저장소에 넣지 않는 것**: 비밀 값, 운영 데이터, 운영 계정의 내부 엔드포인트(API를 부르는 주소) 목록. 저장소에는 비밀의 경로(이름)만 둔다(ExternalSecret).
+- **저장소를 나눈 이유(추천 적용 2026-10-28, 기술 검토 중간-112)**: 저장소 14개는 서비스를 나눈 기술 근거가 아니다. 서비스 분리는 부하 규모·가용성 등급·실행 방식의 차이로 정했다(architecture §3, ADR-0007). 저장소 경계는 여러 팀이 저장소·코드 주인(CODEOWNERS)·배포 경계를 나눠 일하는 거버넌스와, 저장소를 건너는 변경의 비용(교차 PR 수·변경 리드타임, ADR-0016)을 실제로 겪어 보이려는 포트폴리오 목표다. 모노레포로도 경로 필터 CI·서비스별 이미지·디렉터리 CODEOWNERS로 독립 배포와 팀 경계를 보일 수 있다. 프론트엔드 Turborepo가 이미 그렇게 한다. 그래서 백엔드에 모노레포를 고르지 않은 이유는 '증명할 수 없어서'가 아니라 '저장소를 건너는 변경을 직접 보이려고'다. 바꿀 조건: Phase 2 끝에 교차 PR 수와 변경 리드타임을 보고, 저장소를 건너는 변경이 기능 변경의 대부분이어서 보일 거리보다 비용이 크다고 판단되면 백엔드 모노레포(경로별 파이프라인·서비스별 이미지·디렉터리 CODEOWNERS)로 합치는 새 ADR을 쓴다. git flow(ADR-0074)는 어느 쪽이든 그대로다.
+- **공개 재현 경로(추천 적용 2026-10-28, 기술 검토 중간-112)**: GitHub Packages는 공개 패키지도 설치할 때 접근 토큰이 필요하다(GitHub Docs, 2026-10-27·10-28 확인). 그래서 공개 저장소 하나를 받은 사람은 `@peaket/*` 패키지를 받지 못해 바로 빌드할 수 없다. 이를 위해 `peaket-docs`에 작업 공간 스크립트를 둔다. 스크립트는 빌드에 필요한 공개 저장소를 한 폴더에 받고, `@peaket/*` 패키지를 레지스트리 대신 받은 저장소의 소스로 잇는 pnpm 작업 공간을 만들어, 토큰 없이 모두 빌드하고 시험한다(비공개 `peaket-loadtest`는 받지 않는다, wbs 0.1.1). CI는 지금처럼 GitHub Packages를 워크플로 토큰으로 쓴다. 공개 npm 레지스트리에 함께 게시하는 안도 견줬다. 토큰 없이 설치되지만 게시 경로가 둘이 되고, 그 레지스트리에서 `@peaket` 범위를 가질 수 있는지 확인해야 해서(확인 필요) 기본으로 두지 않았다. 외부 사용자가 패키지 하나만 받아 쓰려는 요구가 생기면 다시 본다.
+- **저장소를 건너는 변경 시연(추천 적용 2026-10-28, 기술 검토 중간-112)**: `peaket-contracts`에 계약 변경을 게시하면, Renovate가 그 계약을 쓰는 저장소마다 판 올림 PR을 열고, 각 저장소 CI(계약 시험·Pact)가 통과하거나 막는 과정을 녹화와 재현 스크립트로 보인다(wbs 0.4.3, docs/verification.md §7). 교차 PR 수와 걸린 시간은 ADR-0016의 사후 평가에 쓴다.
 
 ### 2.2 가지 규칙(git flow)과 커밋·버전
 
@@ -141,7 +145,7 @@ flowchart LR
 | platform, contracts | 같은 규칙을 따른다. 패키지는 `main`에 병합한 뒤 게시한다 |
 | infra | 같은 규칙을 따른다. 비운영 환경에는 `develop`에 병합한 뒤, 운영에는 `main`에 병합한 뒤 적용한다(§9.3) |
 | .github | 같은 규칙을 따른다. 여기 있는 워크플로를 부르는 저장소는 출시 태그가 가리키는 커밋 SHA로 고정한다. 새 태그가 나오면 Renovate가 SHA 갱신 PR을 각 저장소의 `develop`에 연다 |
-| docs | 같은 규칙을 따른다. 새 결정·요구사항은 `feat`, 정정은 `fix`로 적는다. 기획 버전(review §9의 판정)은 저장소 태그와 별개다 |
+| docs | 같은 규칙을 따른다. 새 결정·요구사항은 `feat`, 정정은 `fix`로 적는다. 기획 버전(review §9의 판정)은 저장소 태그와 별개다. 예외(추천 적용 2026-10-28, 기술 검토 낮음-162): 원격 저장소(`peaket-docs`)를 만들기 전까지는 작업 가지·PR 없이 `develop`에 스쿼시 형식 커밋(작업 하나에 커밋 하나, Conventional Commits 제목, 본문에 관련 ID)을 바로 쌓는다. 원격이 없어 PR을 열 곳과 규칙 세트(§2.2.6)를 걸 곳이 없고, 여러 작업 세션이 한 작업 트리를 함께 써서 가지를 바꾸면 다른 세션이 고치던 파일이 섞이기 때문이다. 원격을 만든 날부터 위 규칙과 규칙 세트를 그대로 건다 |
 | loadtest(비공개) | 같은 규칙을 관례로 따른다. 무료 등급의 비공개 저장소에는 규칙 세트가 없어 강제되지 않는다(§15) |
 | gitops(예외) | `main` 하나와 환경 디렉터리(§5.2)를 쓴다. 바꿀 때는 짧은 작업 가지와 봇 승격 PR만 쓴다. 이 저장소에서는 병합이 곧 배포이고, 환경 승격은 환경 디렉터리의 다이제스트가 맡는다. 그래서 `develop`·릴리스 가지를 두면 같은 환경의 원하는 상태가 두 벌이 되어 서로 어긋난다 |
 
@@ -155,6 +159,7 @@ flowchart LR
   - 1인 기간의 필수 승인 수는 0이다(§2.3).
   - Terraform GitHub 제공자는 v6.10.0부터 규칙 세트의 허용 병합 방식(`allowed_merge_methods`)을 다룬다. 그래서 그 이상 판으로 고정한다(2026-10-20 릴리스 노트 확인).
 - **가지 규칙 검사**(`branch-policy`, 필수 검사): PR이 보내는 가지(머리 가지)의 종류와 대상 가지가 허용된 쌍인지 본다. 허용하는 쌍: 작업 가지와 `renovate/*` → `develop`, `bugfix/*` → 열린 `release/*`·`hotfix/*`, `release/*` → `main`·`develop`, `hotfix/*` → `main`·`develop`·열린 `release/*`, `merge/*` → `develop`·`release/*`. 그 밖의 쌍이면 검사가 실패한다. 작업 가지가 3일 [가정]을 넘기거나 열린 작업 가지가 3개를 넘으면 경고한다.
+- **PR 제목 형식 검사**(`branch-policy`의 한 단계, 필수 검사, 추천 적용 2026-10-28, 기술 검토 낮음-017): 스쿼시 커밋 메시지가 PR 제목이고, 버전 계산과 변경 기록이 그 제목을 읽는다(§2.2.1·§2.2.5). 그래서 제목 형식이 틀리면 판 계산이 조용히 틀린다. 검사는 셋을 본다. ① 형식: Conventional Commits 1.0.0의 `<종류>[(범위)][!]: <설명>`이다. ② 허용 종류: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `style`, `revert`다(명세는 `feat`·`fix` 밖의 종류도 허용하고 `@commitlint/config-conventional`의 목록을 예로 든다, 2026-10-28 확인). ③ 호환을 깨는 변경 표시: PR 본문에 `BREAKING CHANGE:` 꼬리말이 있으면 제목에도 `!`가 있어야 한다. 버전 계산이 제목만 읽어도 MAJOR(운영 출시 전에는 y)를 놓치지 않게 하려는 것이다. 제목을 고치면 검사가 다시 돈다(`pull_request`의 `edited` 사건). 릴리스 봇의 PR은 `chore(release): X.Y.Z`처럼 같은 형식의 제목을 쓰고, Renovate는 `semanticCommits: "enabled"`로 `chore(deps): …` 제목을 만든다(Renovate 문서). 시험은 D-T41이다.
 - **병합 방식 실수**: 규칙 세트는 병합 방식을 대상 가지마다 정한다. 그래서 `develop`에 작업 가지를 병합 커밋으로 넣는 실수는 막지 못한다. 역병합은 봇만 한다. 주간 점검은 `develop`의 병합 커밋 가운데 두 번째 부모가 릴리스·핫픽스·역병합 가지가 아닌 것을 찾아 경고한다.
 - **릴리스 봇**: GitHub 앱이다(가지·태그 만들기, PR 만들기·병합). 규칙 세트 우회 목록에는 이 앱만 둔다. 앱의 개인 키는 GitHub `release` 환경의 비밀로 둔다. 그 환경은 `develop`·`release/*`·`hotfix/*`·`main`에서 도는 공용 워크플로만 쓴다([secrets-and-keys](security/secrets-and-keys.md)).
 - **도구**: git-flow 명령줄 도구는 쓰지 않는다. 가지 작업은 공용 워크플로 `release.yml`이 PR로 한다. 규칙은 규칙 세트와 필수 검사로 강제한다.
@@ -174,15 +179,15 @@ flowchart LR
 
 | 워크플로 | 하는 일 | 쓰는 저장소 |
 | --- | --- | --- |
-| `ci-node.yml` | 잠금 파일대로 고정 설치, 린트·타입 검사, 단위 시험, 통합 시험, ASVS 태그 보고. 통합 시험은 관계형 데이터베이스 PostgreSQL, Valkey, 메시지 시스템 Kafka를 실제 컨테이너(앱과 실행 환경을 한 묶음으로 만든 실행 단위)로 띄워서 한다 | 서비스, platform, frontend, contracts |
+| `ci-node.yml` | 잠금 파일대로 고정 설치, 린트(서비스 저장소는 서비스 템플릿의 층 의존 방향 규칙 포함, architecture §3.1, 추천 적용 2026-10-28, 기술 검토 낮음-008)·타입 검사, 단위 시험, 통합 시험, ASVS 태그 보고. 통합 시험은 관계형 데이터베이스 PostgreSQL, Valkey, 메시지 시스템 Kafka를 실제 컨테이너(앱과 실행 환경을 한 묶음으로 만든 실행 단위)로 띄워서 한다 | 서비스, platform, frontend, contracts |
 | `security-scan.yml` | gitleaks CLI(비밀 탐지), Semgrep(직접 만든 규칙: `sql.raw()`를 허용 목록 밖에서 부르는 곳, 프로토타입 오염 위험 패턴 등), CodeQL(공개 저장소), 의존성 취약점·라이선스 검사, OpenSSF Scorecard(주 1회) | 전체 |
-| `build-image.yml` | 다단계 빌드(기본 이미지 다이제스트 고정), CycloneDX SBOM, 이미지 취약점 검사, ECR 푸시(신원 확인 표준인 OIDC로 받은 단기 자격 증명), cosign 키 없는 서명, SLSA 출처 증명 | 서비스, frontend, data |
+| `build-image.yml` | 두 잡으로 나눈다(추천 적용 2026-10-28, 기술 검토 중간-062). ① 빌드 잡: 다단계 빌드(기본 이미지 다이제스트 고정)로 OCI 묶음(이미지를 파일 하나로 담은 꾸러미)과 다이제스트만 만든다. 서명 신원을 받는 OIDC 토큰, 레지스트리 쓰기, 출처 증명 권한이 없다. ② 게시 잡: 저장소 코드를 체크아웃하거나 실행하지 않는다. 빌드 잡이 넘긴 묶음의 다이제스트를 다시 계산해 맞춘 뒤 CycloneDX SBOM과 이미지 취약점 검사, 레지스트리 푸시(운영 설계의 ECR은 신원 확인 표준인 OIDC로 받은 단기 자격 증명, 포트폴리오 기간의 GHCR은 워크플로 토큰, §4.1), cosign 키 없는 서명, SLSA 출처 증명을 한다. 게시 잡은 빌드 잡과 필수 검사가 모두 통과해야 시작한다. 다중 아키텍처(추천 적용 2026-10-28, 기술 검토 낮음-167): 운영 노드가 Graviton(arm64)이고 로컬 kind·데모는 x86(amd64)이라 두 플랫폼을 다 만든다. 빌드 잡은 플랫폼마다 따로 돌아, amd64는 `ubuntu-24.04`, arm64는 `ubuntu-24.04-arm` 호스트 러너에서 에뮬레이션 없이 빌드한다(공개 저장소는 두 러너 모두 무료, GitHub 문서 2026-10-28 확인). 게시 잡은 두 묶음으로 이미지 인덱스(플랫폼별 이미지를 묶은 목록) 하나를 만든다. SBOM·취약점 검사는 플랫폼 이미지마다 하고, 서명은 인덱스와 플랫폼 이미지 모두에(cosign `--recursive`), 출처 증명은 인덱스 다이제스트에 한다. 승격과 배포 매니페스트는 인덱스 다이제스트로 고정하고, 노드가 자기 플랫폼 이미지를 고른다 | 서비스, frontend, data |
 | `migration-check.yml` | 마이그레이션 SQL 검사(Squawk), 빈 DB에 전체 적용, 직전 운영 스키마(데이터의 구조 정의)에 새 마이그레이션 적용, N-1 시험(§7.3) | DB를 가진 서비스 |
-| `contract-check.yml` | `buf lint`·`buf breaking`, OpenAPI·AsyncAPI 차이 검사, Avro 호환 검사(Schema Registry BACKWARD_TRANSITIVE), Pact 검증(§3.3) | contracts, 서비스, frontend |
+| `contract-check.yml` | `buf lint`·`buf breaking`, OpenAPI·AsyncAPI 차이 검사(`oasdiff breaking`·`asyncapi diff`, 깨짐 기준은 docs/api/guidelines.md §1, 기술 검토 낮음-019), Avro 호환 검사(계약 저장소의 지난 판을 모두 올린 로컬 레지스트리 컨테이너에서 BACKWARD_TRANSITIVE. 운영·데모 레지스트리에는 닿지 않는다)와 열거 규칙 검사(맨 앞 `UNRECOGNIZED`와 기본값, 기호 지우기 금지), Pact 검증(§3.3). 서비스 저장소에서는 `@nestjs/swagger`로 만든 OpenAPI 문서를 CI 안에서만 파일로 뽑아(실행 중인 서비스는 문서 경로를 내지 않는다) 계약 저장소의 openapi와 견주고, 어긋나면 PR을 실패시킨다(경로·메서드·매개변수·요청과 응답 본문의 모양만 견준다. D-T38). 프론트엔드에서는 orval 생성물(타입·호출 함수·Zod 스키마)을 다시 만들어 차이가 없는지 본다(추천 적용 2026-10-28, 기술 검토 중간-085·087·088) | contracts, 서비스, frontend |
 | `iac-check.yml` | `terraform fmt`·`validate`, tflint, IaC 보안 검사(Trivy 설정 검사), 읽기 전용 역할로 돌리는 plan, Infracost 비용 차이 댓글 | infra |
-| `gitops-check.yml` | 매니페스트를 최종 형태로 만들어 스키마 검사(kubeconform), Kyverno(쿠버네티스에 들어오는 설정을 규칙으로 검사하는 도구) 정책 시험, 이미지 서명·출처 증명 검증, 변경 동결 게이트(§8.2), ArgoCD(저장소의 배포 정의대로 쿠버네티스를 맞추는 배포 도구) 차이 미리보기 | gitops |
-| `promote.yml` | 승격 PR 만들기(데모: 출시 후보 다이제스트, 운영: 출시 태그의 후보 다이제스트. 변경 기록과 SBOM 요약을 붙인다) | 서비스, frontend, data의 후보 빌드 뒤와 `main` 병합 뒤 |
-| `branch-policy.yml` | 가지 규칙 검사(머리 가지 종류와 대상 가지의 쌍), 작업 가지의 나이·개수 경고, `develop` 병합 방식 주간 점검(§2.2.6) | gitops를 뺀 전체 |
+| `gitops-check.yml` | HTTPRoute 생성 대조(고정한 계약 판의 openapi에서 게이트웨이별 라우트 규칙(경로 틀과 메서드, 교차 출처 경로의 OPTIONS)을 다시 만들어 저장소의 생성 파일과 다르면 실패, D-T42, 추천 적용 2026-10-28, 기술 검토 낮음-020), 매니페스트를 최종 형태로 만들어 스키마 검사(kubeconform), Kyverno(쿠버네티스에 들어오는 설정을 규칙으로 검사하는 도구) 정책 시험, 이미지 서명·출처 증명 검증, 변경 동결 게이트(§8.2), ArgoCD(저장소의 배포 정의대로 쿠버네티스를 맞추는 배포 도구) 차이 미리보기 | gitops |
+| `promote.yml` | 승격 PR 만들기(데모: 출시 후보 다이제스트, 운영: 출시 태그의 후보 다이제스트. 변경 기록과 SBOM 요약을 붙인다). 되돌리기 모드는 직전 승격 PR을 거꾸로 만든 긴급 라벨 PR을 연다(§6.7 6번, 기술 검토 낮음-018) | 서비스, frontend, data의 후보 빌드 뒤와 `main` 병합 뒤 |
+| `branch-policy.yml` | 가지 규칙 검사(머리 가지 종류와 대상 가지의 쌍), PR 제목 형식 검사(Conventional Commits 형식·허용 종류·`!`와 `BREAKING CHANGE` 꼬리말의 일치, 기술 검토 낮음-017), 작업 가지의 나이·개수 경고, `develop` 병합 방식 주간 점검(§2.2.6) | gitops를 뺀 전체 |
 | `release.yml` | 릴리스·핫픽스 시작(버전 계산, 변경 기록, Changesets 버전), 병합 결과 트리 검사, 마무리(태그, GitHub Release, 운영 승격 PR, 역병합 PR, 가지 삭제)(§2.2.2~§2.2.4) | gitops를 뺀 전체 |
 | `docs-check.yml` | `python tools/doc-check/check_all.py`, 링크 검사 | docs |
 | `build-remote.yml` | 관제 원격 위젯 빌드, size-limit, 무결성 해시(sha384), console 배포 S3 업로드(§6.6, docs/frontend.md §5.18) | queue, purchase |
@@ -195,9 +200,9 @@ flowchart LR
 | CI 유형 | PR 필수 검사 | `develop` 병합 뒤 | 릴리스·핫픽스 가지(출시 후보) | `main` 병합 뒤 |
 | --- | --- | --- | --- | --- |
 | 서비스(NestJS) | `ci-node`, `security-scan`, `migration-check`(DB가 있으면), `contract-check`, 이미지 빌드 시험(푸시 없이), `branch-policy` | 같은 검사, E2E(CI의 kind), 야간 축소 성능 시험 | 이미지 빌드·서명·출처 증명·푸시, 데모 승격 PR | 태그, 운영 승격 PR(후보 다이제스트), 역병합 PR |
-| 프론트엔드(Turborepo) | 바뀐 앱·패키지만 골라(`turbo run --filter=...[origin/<대상 가지>]`) 린트·타입·단위 시험, Storybook과 axe 접근성 검사, Lighthouse CI 예산(architecture §6.5), Playwright 3엔진(CI의 kind 클러스터, 합성 데이터), `contract-check`(Pact 소비자), `security-scan`, `branch-policy` | E2E(CI의 kind) | 앱 서버 이미지와 정적 자산 업로드(§6.6), 데모 승격 PR | 태그, 운영 승격 PR, 역병합 PR |
+| 프론트엔드(Turborepo) | 바뀐 앱·패키지만 골라(`turbo run --filter=...[origin/<대상 가지>]`) 린트·타입·단위 시험(Vitest, jsdom)과 실제 브라우저 Web API 시험(Vitest 브라우저 모드 + Playwright 공급자, 세 엔진. 도구 표는 docs/frontend.md §5.17, 추천 적용 2026-10-28, 기술 검토 중간-020), Storybook과 axe 접근성 검사, Lighthouse CI 예산(architecture §6.5), Playwright 3엔진(CI의 kind 클러스터, 합성 데이터), `contract-check`(Pact 소비자), `security-scan`, `branch-policy` | E2E(CI의 kind) | 앱 서버 이미지와 정적 자산 업로드(§6.6), 데모 승격 PR | 태그, 운영 승격 PR, 역병합 PR |
 | 라이브러리(platform. `peaket-frontend` 안의 ds·telemetry·validation·api-client·console-contract는 프론트엔드 유형 검사에 이 행의 공개 API 차이·Changesets·게시를 더한다, ADR-0079 결정 21) | `ci-node`, `security-scan`, 공개 API(다른 프로그램이 불러 쓰는 창구)의 타입 선언 차이, `branch-policy` | — | Changesets 버전(자를 때) | GitHub Packages 게시, 출처 증명, 태그, 역병합 PR |
-| 계약(contracts) | `buf breaking`, OpenAPI·AsyncAPI 차이, Avro 호환, 소비자 Pact 파일 형식, `security-scan`, `branch-policy` | 제공자 저장소에 검증 요청(저장소 디스패치) | Changesets 버전(자를 때) | 언어별 패키지 게시, 제공자 저장소에 검증 요청, 태그, 역병합 PR |
+| 계약(contracts) | `buf breaking`, OpenAPI·AsyncAPI 차이, Avro 호환, 소비자 Pact 파일 형식, `security-scan`, `branch-policy` | 제공자 저장소에 검증 요청(저장소 디스패치) | Changesets 버전(자를 때) | 언어별 패키지 게시, 개발자 포털 정적 사이트 빌드·게시(openapi·asyncapi에서 웹훅과 오류 `type` 문서만, docs/api/guidelines.md §1, 추천 적용 2026-10-28, 기술 검토 중간-085), 제공자 저장소에 검증 요청, 태그, 역병합 PR |
 | 데이터(peaket-data) | 스트림 작업자 단위·통합 시험과 `rt` 뷰 정답 시험(docs/streaming.md §13), dbt `build`(대량 이벤트 집계에 강한 분석용 데이터베이스인 ClickHouse의 시험용 컨테이너와 고정 시드), 이벤트 계약 대조, `security-scan`, `branch-policy` | 같은 검사 | 이미지 빌드·서명, 데모 승격 PR | 태그, 운영 승격 PR, 역병합 PR |
 | IaC(infra) | `iac-check`(plan·보안 검사·비용), `security-scan`, `branch-policy` | 비운영 apply(§9.3) | 운영 plan 검토 | 운영 apply(prod 환경 승인, 정비 시간, 동결 창 밖), 태그, 역병합 PR |
 | GitOps(gitops, 가지 규칙 예외) | `gitops-check`, `security-scan`. 경보 규칙·Alertmanager 설정이 바뀌면 `alert-check`도 돈다(`promtool test rules`, `amtool config routes test`, 경보 주석 검사, docs/verification.md §2.7, ADR-0069) | — | — | ArgoCD가 끌어간다(`main` 하나) |
@@ -212,18 +217,26 @@ flowchart LR
 | 통합(실제 저장소 컨테이너) | CI 러너 | PR | 실패 0 |
 | 계약(buf, OpenAPI·AsyncAPI 차이, Avro, Pact) | CI | PR, 운영 승격 전 | 실패 0 |
 | 마이그레이션(빈 DB, 직전 스키마, N-1) | CI | PR | 실패 0, Squawk 오류 0 |
+| 계획 회귀 가벼운 판(축소 데이터, `enable_seqscan` 끔, docs/data.md §5.2) | CI 러너 | DB 스키마·쿼리를 바꾸는 PR | §5.1 쿼리마다 기대한 인덱스를 씀(추천 적용 2026-10-28, 기술 검토 낮음-169) |
+| 계획 회귀 전체 판(합성 5년치, docs/data.md §5.2) | 로컬 측정 PC(메모리 32GB). 5년치가 호스트 러너 디스크(SSD 14GB)에 들어가지 않는다 | 야간(측정 PC의 예약 작업), 출시 후보를 자르기 전 마지막 결과 | 금지 노드 0, 비용 변화는 성능 장부에 기록(추천 적용 2026-10-28, 기술 검토 낮음-169) |
 | E2E(Playwright 3엔진) | CI의 kind 클러스터 | 프론트엔드 PR, `develop` 병합 뒤, 출시 후보 | 실패 0 |
-| 축소 성능(k6, 1/100 규모) | CI 러너 또는 로컬 | 핫패스(요청이 가장 많이 지나는 경로) 서비스의 `develop` 야간, 출시 후보 | p99(요청 백 건 중 아흔아홉 건이 끝나는 시간)가 직전 기준 대비 +20% 이내 [가정, Phase 1 1.4.1에서 확정] |
+| 축소 성능(k6, 1/100 규모) | CI 러너(같은 실행 안의 상대 비교), 측정 PC(절대값) | 핫패스(요청이 가장 많이 지나는 경로) 서비스의 `develop` 야간, 출시 후보 | CI: 같은 러너에서 기준판과 새 판을 번갈아 잰 p99(요청 백 건 중 아흔아홉 건이 끝나는 시간) 비율이 A/A 잡음 폭으로 정한 기준 안. 측정 PC: p99가 직전 기준 대비 +20% 이내 [가정, Phase 1 1.4.1에서 확정]. 아래 '축소 성능 시험의 판정' |
 | 승격 뒤 스모크 | 데모 | 승격 때 | 실패 0이면 카나리를 이어 간다 |
 | DAST(ZAP 기준선 점검) | 데모(출시 후보), CI의 kind(`develop`) | 출시 후보마다, 야간 | High 이상 0(wbs 3.6.1) |
 | 규모별 부하·카오스·Game Day | 로컬 측정 환경(`local-*`). 클라우드는 선택 사항인 보정에만 쓴다(ADR-0057) | 측정 캠페인 | 성능 장부(docs/perf-ledger.md), docs/verification.md |
 
+- **축소 성능 시험의 판정(추천 적용 2026-10-28, 기술 검토 낮음-016)**: GitHub 호스트 러너는 실행마다 다른 가상 머신이라 벽시계 시간의 잡음이 크다(지속 벤치마크 도구 Bencher의 문서도 일반 CI 환경의 시간 측정은 잡음이 크고 고르지 않다고 적는다. 업체 문서라 보조 근거다). 그래서 날짜가 다른 두 실행의 p99를 견주어 판정하지 않는다.
+  - CI(야간·출시 후보): 한 잡 안에서 기준판(직전 출시 태그의 이미지)과 새 판(그날 `develop` 이미지나 출시 후보)을 같은 러너에서 번갈아(기준·새·기준·새…, 판마다 5번 [가정]) 돌린다. 판마다 p99의 중앙값을 내고, 새 판 ÷ 기준판의 비율로 판정한다. 같은 러너·같은 시간대라 러너 사이의 차이가 비율에서 빠진다.
+  - 기준값: 1.4.1에서 같은 판끼리 번갈아 잰 A/A 실행을 10번 [가정] 돌려 비율의 잡음 폭(가장 큰 벗어남)을 잰 뒤, 그 폭 바깥을 실패로 정한다. 정하기 전에는 경고만 하고 병합·승격을 막지 않는다.
+  - 측정 PC: 날짜 사이의 절대값 비교(직전 기준 대비 +20% [가정])는 성능 장부의 측정 PC(`local-*` 프로파일, docs/perf-ledger.md §4)에서 잰 값으로만 하고 장부에 남긴다. 측정 PC는 자체 호스트 러너가 아니라(§4.5) 측정 캠페인과 출시 후보 전 측정 때 사람이 돌린다.
+  - 시험: D-T40.
 - **Pact는 브로커 없이 운영한다(추천 적용, 2026-10-13).** 소비자(프론트엔드) CI가 만든 Pact 파일은 `peaket-contracts`의 `pacts/`에 `develop`으로 가는 PR로 올린다. 제공자 CI는 그 파일 전부를 검증한다. 데모 승격 검사는 '제공자 다이제스트가 계약 저장소 `develop`의 모든 Pact를 통과했는가'를, 운영 승격 검사는 '`main`(출시된 계약)의 모든 Pact를 통과했는가'를 본다(ADR-0074). 자체 호스팅 브로커는 PostgreSQL이 필요해 늘 비용이 든다. PactFlow 무료 등급은 통합이 2개라서 소비자·제공자 쌍이 모자란다(2026-10-13 확인).
 - **시험 데이터**: Faker로 만든 합성 데이터와 고정 시드만 쓴다. 운영 데이터는 복사하지 않는다(POL-026, infra §3). 시험 데이터 때문에 시험 범위가 좁아지지 않게 시드를 저장소에 둔다(DORA 'Test data management').
 
 ### 3.4 CI 속도와 신뢰
 
 - PR 검사 결과는 10분 안에 나오게 한다(DORA 'Continuous integration': 피드백은 몇 분, 상한 약 10분) [가정, wbs 0.1.2에서 측정]. 넘으면 캐시(이미 받거나 만든 결과를 가까운 곳에 복사해 두고 다시 쓰는 것), 병렬화, 영향받는 범위만 빌드하기로 줄인다.
+- **출시 후보 빌드는 캐시를 쓰지 않는다(추천 적용 2026-10-28, 기술 검토 중간-062)**: 릴리스·핫픽스 가지의 후보 빌드 잡은 `cache-mode: none`으로 CI 캐시를 복원도 저장도 하지 않고, 도커 층 캐시도 끈다. GitHub Actions에서 실행은 자기 가지와 기본 가지(`develop`)의 캐시를 복원할 수 있다(GitHub 문서 'Dependency caching reference', 2026-10-28 확인). 그래서 기본 가지 범위의 캐시가 오염되면 출시 빌드가 그것을 그대로 쓴다. 2026-05-11 'Mini Shai-Hulud' 공격이 이 길로 들어왔다(SLSA 블로그). 그만큼 후보 빌드가 느려지지만, 10분 목표는 PR 검사에만 건다. PR·`develop` 빌드는 캐시를 쓰고, 그 산출물은 승격하지 않는다.
 - `develop`이 깨지면 10분 안에 고치거나 되돌린다(같은 DORA 문서). 30분 넘게 깨져 있으면 SEV3로 다룬다 [가정]. `main`과 릴리스·핫픽스 가지는 병합 전 필수 검사로 깨지지 않게 한다. 그래도 깨지면 같은 규칙을 쓴다.
 - 다시 돌렸을 때 결과가 바뀌는 불안정 시험은 격리 목록에 넣고 7일 안에 고친다. 격리에는 만료 기한이 있다 [가정].
 - 같은 PR에서 앞서 시작한 실행은 취소한다(concurrency group). 포크 PR에는 비밀을 주지 않는다.
@@ -234,10 +247,10 @@ flowchart LR
 
 | 산출물 | 저장 위치 | 식별자 | 증명 |
 | --- | --- | --- | --- |
-| 서비스 이미지 10개, 앱 서버 이미지 2개, 작업 이미지(close-runner, ranking-publisher, rt-pulse, freeze-calendar, evidence-collector. 마이그레이션 잡과 `audit-anchor`는 서비스 이미지(`audit-anchor`는 ops-svc)의 별도 명령이다, §7.2·ADR-0075), 스트림 작업자 이미지 3개(analytics-ingest, ops-rt, trust-reassess, ADR-0099) | ECR(계정별, 태그 변경 금지) | 다이제스트 | SBOM, 서명, 출처 증명 |
+| 서비스 이미지 10개, 앱 서버 이미지 2개, 작업 이미지(close-runner, ranking-publisher, rt-pulse, freeze-calendar, evidence-collector. 마이그레이션 잡과 `audit-anchor`는 서비스 이미지(`audit-anchor`는 ops-svc)의 별도 명령이다, §7.2·ADR-0075), 스트림 작업자 이미지 3개(analytics-ingest, ops-rt, trust-reassess, ADR-0099) | 운영 설계: ECR(계정별, 태그 변경 금지). 포트폴리오 기간: GHCR(GitHub 컨테이너 레지스트리) 공개 패키지 `ghcr.io/<조직>/<이미지>`. 공개 패키지는 저장·전송이 무료이고 익명으로 받을 수 있으며, cosign 서명과 출처 증명이 ECR과 같은 방식으로 붙는다(GitHub 문서, 2026-10-28 확인). 어느 쪽이든 다이제스트로만 참조한다(추천 적용 2026-10-28, 기술 검토 중간-063) | 다이제스트 | SBOM, 서명, 출처 증명 |
 | npm 패키지(contracts, platform, ds, telemetry, validation, api-client, console-contract) | GitHub Packages(`@peaket` 범위) | SemVer | 출처 증명 |
 | 프론트엔드 정적 자산 | S3(AWS의 파일 저장소)의 배포별 경로. 파일 이름에 내용 해시를 넣고, 보존 기간이 지나면 지운다. 허용한 확장자만 올리고 소스 맵은 올리지 않는다 | 빌드 ID(커밋 SHA) | 파일 해시 목록과 출처 증명, 앱마다 정적 자산 묶음의 CycloneDX SBOM(추천 적용 2026-10-21, ADR-0079 결정 22·23) |
-| dbt 프로젝트 | ECR 이미지로 포장 | 다이제스트 | SBOM, 서명, 출처 증명 |
+| dbt 프로젝트 | 이미지로 포장(저장 위치는 첫 행과 같다: 운영 설계 ECR, 포트폴리오 GHCR) | 다이제스트 | SBOM, 서명, 출처 증명 |
 | Helm 공용 차트 | `peaket-gitops/charts` | SemVer | Git 이력 |
 | Terraform 모듈 | `peaket-infra/modules` | Git 태그 | Git 이력 |
 
@@ -246,13 +259,14 @@ flowchart LR
 - **기본 이미지**: distroless Node.js LTS 이미지를 다이제스트로 고정한다. 주 1회 다시 빌드해 OS 패치를 반영한다(Renovate가 다이제스트 갱신 PR을 연다). 컨테이너의 기본은 비루트 사용자, 읽기 전용 루트 파일 시스템, 셸 없음이다.
 - **Node 실행 옵션(추천 적용 2026-10-20, ADR-0070)**: 서비스 템플릿이 `--disable-sigusr1 --report-on-fatalerror --report-exclude-env --report-exclude-network`와 `--max-old-space-size`(컨테이너 메모리 한도의 75% [가정])를 넣는다. 진단 보고서는 쓰기 가능한 emptyDir `/diag`(크기 한도는 메모리 한도의 2배 [가정])에 쓰고, 다시 뜬 프로세스가 이를 진단 증거 저장소에 올린다. 운영 네임스페이스의 Kyverno 정책은 `--disable-sigusr1`이 없는 Node 파드(쿠버네티스에서 앱이 실행되는 가장 작은 단위)를 거부한다(인스펙터 플래그 거부와 같은 자리, docs/security/asvs/delivery.md 13.4.2). 힙 상한 근처에서 찍는 힙 스냅샷(그 순간의 메모리 상태를 통째로 찍어 둔 것) 옵션은 기본으로 끈다. 누수가 의심되는 서비스에만 표준 변경으로 켜고, 그때 힙 상한을 40% [가정]로 낮춘다.
 - **SBOM**: 이미지마다 CycloneDX JSON을 만들어 이미지에 증명으로 붙이고, 릴리스마다 보관한다(ASVS 15.1.2).
-- **서명**: cosign 키 없는 서명을 쓴다. Sigstore Fulcio가 GitHub Actions OIDC 토큰으로 10분짜리 인증서를 주고, 서명 기록은 Rekor 투명성 로그에 남는다. 인증서에 담긴 신원은 재사용 워크플로 경로와 ref(`https://github.com/<조직>/.github/.github/workflows/build-image.yml@<커밋 SHA>`. 부르는 저장소가 `.github` 출시 태그의 커밋 SHA로 고정하므로(§2.2.5) ref 자리에 그 SHA가 들어간다)이고, 발급자는 `https://token.actions.githubusercontent.com`이다.
+- **서명**: cosign 키 없는 서명을 쓴다. Sigstore Fulcio가 GitHub Actions OIDC 토큰으로 10분짜리 인증서를 주고, 서명 기록은 Rekor 투명성 로그에 남는다. 인증서에 담긴 신원은 재사용 워크플로 경로와 ref(`https://github.com/<조직>/.github/.github/workflows/build-image.yml@<커밋 SHA>`. 부르는 저장소가 `.github` 출시 태그의 커밋 SHA로 고정하므로(§2.2.5) ref 자리에 그 SHA가 들어간다)이고, 발급자는 `https://token.actions.githubusercontent.com`이다. 인증서에는 빌드를 부른 소스 ref(Source Repository Ref, 예: `refs/heads/release/1.5.0`)와 실행기 종류(Runner Environment, GitHub 호스트 러너면 `github-hosted`)도 확장 필드로 들어간다(Sigstore Fulcio OID 문서, 2026-10-28 확인). §4.3이 이 둘도 확인한다.
+- **서명은 게시 잡만 한다(추천 적용 2026-10-28, 기술 검토 중간-062)**: OIDC 토큰은 저장소 코드를 돌리지 않는 게시 잡(§3.1 `build-image.yml` ②)만 받는다. 그래서 빌드 단계에서 도는 코드(의존성 설치 스크립트, 빌드 스크립트)는 서명 신원을 꺼낼 수 없다. SLSA Build L3는 '빌드가 빌드 플랫폼의 비밀(출처 증명 서명 키 같은 것)에 닿을 수 없어야 한다'를 요구하고, 'Mini Shai-Hulud'(2026-05-11)는 실행기 메모리에서 꺼낸 OIDC 토큰으로 유효한 출처 증명을 만들었다(SLSA 블로그, 2026-05-15). GitHub 호스트 러너는 잡마다 새 가상 머신이라(단일 CPU 러너는 빼고, GitHub 문서) 빌드 잡의 프로세스가 게시 잡에 남지 않는다. 남는 위험: 빌드 잡의 코드가 묶음 자체를 바꾸는 것은 막지 못한다. 그 묶음은 '그 커밋으로 그 빌드가 만든 것'으로 정확히 서명되므로, 코드 검토·의존성 3일 대기·SBOM 추적으로 다룬다(§4.4·§15).
 - **출처 증명**: GitHub 출처 증명(`actions/attest`)으로 SLSA v1 형식의 출처 증명을 만든다. GitHub 문서에 따르면 출처 증명만으로는 SLSA Build L2이고, 공용 재사용 워크플로에서 빌드하면 L3에 이를 수 있다. PEAKET은 `build-image.yml`을 공용 재사용 워크플로로 두어 L3를 목표로 한다.
 - **증명이 말하지 않는 것**: 서명과 출처 증명은 '어느 저장소의 어느 커밋을 어느 워크플로가 빌드했나'를 증명한다. 코드와 의존성이 안전하다는 증명은 아니다(§15).
 
 ### 4.3 배포 때 검증(Kyverno)
 
-- **이미지 입장 정책**: Kyverno의 CEL 기반 `ImageValidatingPolicy`로 다음을 확인한다: ① 서명 신원(워크플로 경로와 `.github` 출시 태그의 커밋 SHA)과 발급자가 §4.2와 같은가, ② SLSA 출처 증명의 소스 저장소가 PEAKET 조직이고 빌드 워크플로가 `build-image.yml`인가, ③ 이미지를 다이제스트로 참조하는가. 기존 `ClusterPolicy`·`Policy` 형식은 `verifyImages` 규칙을 포함해 통째로 Kyverno v1.19에서 폐기 예정이고 v1.20에서 제거 예정이라 쓰지 않는다(2026-10-13 확인, 2026-10-22 다시 확인).
+- **이미지 입장 정책**: Kyverno의 CEL 기반 `ImageValidatingPolicy`로 다음을 확인한다: ① 서명 신원(워크플로 경로와 `.github` 출시 태그의 커밋 SHA)과 발급자가 §4.2와 같은가, ② SLSA 출처 증명의 소스 저장소가 PEAKET 조직이고 빌드 워크플로가 `build-image.yml`인가, ③ 이미지를 다이제스트로 참조하는가, ④ 인증서의 소스 ref가 `refs/heads/release/*`나 `refs/heads/hotfix/*`이고 실행기 종류가 `github-hosted`인가(출시 후보 빌드만 이미지를 서명·게시한다, §3.2. 추천 적용 2026-10-28, 기술 검토 중간-062), ⑤ 이미지가 그 오버레이의 허용 레지스트리에서 오는가(정책 값. 운영·스테이징 오버레이는 PEAKET ECR, 로컬·CI·데모 오버레이는 `ghcr.io/<조직>/`. 운영 오버레이에 GHCR 이미지를 넣으면 `gitops-check` 정책 시험이 PR을 막는다, D-T33. 추천 적용 2026-10-28, 기술 검토 중간-063). `gitops-check`도 승격 PR에서 ①~⑤를 같은 값으로 검사한다(D-T32). 기존 `ClusterPolicy`·`Policy` 형식은 `verifyImages` 규칙을 포함해 통째로 Kyverno v1.19에서 폐기 예정이고 v1.20에서 제거 예정이라 쓰지 않는다(2026-10-13 확인, 2026-10-22 다시 확인).
 - **적용 단계**: 데모는 감사 모드로 위반을 기록하고, 스테이징·운영은 강제 모드로 기동을 거부한다.
 - **그 밖의 정책(CEL `ValidatingPolicy`)**: 자원 requests·limits 필수, 핫패스 네임스페이스를 Spot 노드(파드를 돌리는 서버 가운데 싸지만 회수될 수 있는 클라우드 서버)에 두는 것 금지(infra §7), Pod Security Standards Restricted(시스템 네임스페이스 제외), `latest` 태그 금지, hostPath 금지, 데모 전용 이미지(PG 시뮬레이터·본인확인 시뮬레이터, 2인 승인 시연의 데모 도우미) 금지(스테이징·운영 네임스페이스. gitops-check의 정책 시험이 운영 오버레이에서도 막는다, ADR-0095).
 - **메시 필수 정책(추천 적용 2026-10-22, ADR-0082)**: 운영 오버레이에는 ① 서비스 네임스페이스의 앰비언트 등록 라벨 `istio.io/dataplane-mode: ambient`와 ② 메시 전체 STRICT PeerAuthentication이 있어야 한다. ③ gRPC(서비스끼리 함수를 부르듯 빠르게 호출하는 통신 방식) 부하 분산 프로필 `headless-round-robin`(docs/api/guidelines.md §5)은 쓸 수 없다. gitops-check의 정책 시험이 최종 형태로 만든 운영 오버레이에 이 정책을 걸고, 어기면 PR이 막힌다(D-T28). 로컬·CI·데모 오버레이는 메시 없이 돌므로 이 정책을 걸지 않고, 호출자 제한은 NetworkPolicy로 둔다.
@@ -260,10 +274,32 @@ flowchart LR
 
 ### 4.4 의존성과 취약점
 
-- **설치 고정**: `pnpm install --frozen-lockfile`로 설치한다. `@peaket` 범위 패키지는 GitHub Packages에서만 받도록 레지스트리를 범위별로 고정해 의존성 혼동을 막는다(ASVS 15.2.4). `peaket-data`도 같은 원칙을 따른다(추천 적용 2026-10-26, ADR-0089). 스트림 작업자는 TypeScript라 같은 pnpm 규칙을 그대로 쓴다(ADR-0099). dbt 이미지의 Python 의존성은 해시가 든 잠금 파일(`uv.lock`)로 고정해 `uv sync --locked`로 설치하고, 색인은 PyPI 하나만 쓴다(`--extra-index-url`은 쓰지 않는다. 같은 이름의 패키지를 다른 색인에서 받아 오는 의존성 혼동을 막는다). Renovate의 3일 대기는 PyPI에서 오는 새 판에도 건다(Renovate는 레지스트리가 주는 릴리스 시각으로 센다). 다만 잠금 파일을 갱신할 때 딸려 오는 전이 의존성(의존성의 의존성)은 Renovate가 보지 못하므로, uv 잠금은 `--exclude-newer`에 3일 전 시각을 넣어 갱신한다.
-- **설치 스크립트 차단**: pnpm 10부터 의존성의 설치 스크립트는 기본으로 실행되지 않는다. 필요한 패키지만 허용 목록(`allowBuilds`, pnpm 10.26 이상)에 둔다.
+- **설치 고정**: `pnpm install --frozen-lockfile`로 설치한다. `@peaket` 범위 패키지는 GitHub Packages에서만 받도록 레지스트리를 범위별로 고정해 의존성 혼동을 막는다(ASVS 15.2.4). CI는 워크플로 토큰(`packages: read`, 패키지 설정에서 그 저장소에 읽기 권한을 준다)으로 받고, 개인 접근 토큰을 두지 않는다. 사람과 외부 검토자는 작업 공간 스크립트(§2.1)로 소스에서 빌드해 토큰이 필요 없다(추천 적용 2026-10-28, 기술 검토 중간-112). `peaket-data`도 같은 원칙을 따른다(추천 적용 2026-10-26, ADR-0089). 스트림 작업자는 TypeScript라 같은 pnpm 규칙을 그대로 쓴다(ADR-0099). dbt 이미지의 Python 의존성은 해시가 든 잠금 파일(`uv.lock`)로 고정해 `uv sync --locked`로 설치하고, 색인은 PyPI 하나만 쓴다(`--extra-index-url`은 쓰지 않는다. 같은 이름의 패키지를 다른 색인에서 받아 오는 의존성 혼동을 막는다). Renovate의 3일 대기는 PyPI에서 오는 새 판에도 건다(Renovate는 레지스트리가 주는 릴리스 시각으로 센다). 다만 잠금 파일을 갱신할 때 딸려 오는 전이 의존성(의존성의 의존성)은 Renovate가 보지 못하므로, uv 잠금은 `--exclude-newer`에 3일 전 시각을 넣어 갱신한다.
+- **설정이 기대는 최소 판(추천 적용 2026-10-28, 기술 검토 낮음-038)**: 개인정보·보안 설정이 어느 판부터 생긴 기능에 기대면, 그 판을 최소 판으로 여기 적는다. 판이 낮으면 설정이 오류 없이 조용히 먹지 않기 때문이다. CI는 잠금 파일(이미지는 판 이름표)의 판이 최소 판보다 낮으면 막는다.
+  - Sentry JavaScript SDK(브라우저·Node 패키지가 같은 판으로 나온다): 10.57.0 이상, 브라우저와 서버가 같은 판. 수집 설정 `dataCollection`이 10.57.0에 생겼다(Sentry 옵션 문서, 2026-10-28 확인, docs/observability.md §11).
+  - PgBouncer 이미지: 1.26.1 이상. 트랜잭션 풀링의 prepared statement(1.21.0부터)와 `auth_file` SCRAM 인증 결함 수정(1.26.1)에 기댄다. 이미지는 판 이름표와 다이제스트로 고정한다(§4.3 ③, docs/data.md §1 끝, 추천 적용 2026-10-28, 기술 검토 낮음-040).
+- **pnpm 공급망 설정(모든 Node 저장소의 정본, 추천 적용 2026-10-28, 기술 검토 낮음-014)**: 서비스·`peaket-platform`·`peaket-frontend`·`peaket-contracts`·`peaket-data`(스트림 작업자)는 pnpm 12(2026-10-28 레지스트리 `latest` 12.15.0)와 아래 공통 설정을 쓴다. 판은 `packageManager` 칸으로 고정한다. docs/frontend.md §5.14.5는 이 절을 가리키고, 저장소마다 다른 것은 `allowBuilds` 목록뿐이다. 기본값과 같은 값도 적어 두는 것은, 판을 올릴 때 기본값이 바뀌어도 설정이 약해지지 않게 하려는 것이다(pnpm 문서 'Settings'·'Mitigating supply chain attacks', 2026-10-28 확인: 기본값은 `minimumReleaseAge` 1440, `trustPolicy` off, `blockExoticSubdeps`·`strictDepBuilds` true, `trustLockfile` false).
+
+```yaml
+# pnpm-workspace.yaml 공통 설정(pnpm 12)
+minimumReleaseAge: 4320     # 새 판은 게시 뒤 3일(분 단위)이 지나야 설치한다. 전이 의존성에도 걸린다
+trustPolicy: no-downgrade   # 앞서 나온 판보다 신뢰 증거(신뢰 게시·출처 증명)가 약해진 판은 설치 실패. packageManager로 고정한 pnpm 판에도 걸린다
+blockExoticSubdeps: true    # 전이 의존성이 git 저장소·tarball 주소에서 오는 것을 막는다
+strictDepBuilds: true       # 허용 목록에 없는 설치 스크립트가 있으면 설치가 실패한다
+trustLockfile: false        # 잠금 파일의 항목도 위 검사를 다시 받는다. 외부 기여자가 잠금 파일을 고칠 수 있는 공개 저장소라서다
+allowBuilds: {}             # 설치 스크립트를 허용할 패키지. 저장소마다 빈 목록에서 시작해 PR 검토로만 더한다
+```
+
+- **설치 스크립트 차단**: 의존성의 설치 스크립트는 `allowBuilds`에 든 패키지만 돈다. 검토하지 않은 스크립트가 있으면 `strictDepBuilds`로 설치가 실패한다. 근거 사례는 npm 웜의 2차 확산(Shai-Hulud 2.0)이다. 감염된 판은 2025-11-21~23에 게시됐고 설치 전 단계(preinstall) 스크립트에서만 돌았다(Wiz 연구 글 2025-11-24, 2026-10-28 확인). 허용 목록에 없는 패키지라면 이 스크립트는 돌지 않는다. 남는 위험: 허용 목록에 든 패키지(예: `esbuild`)의 새 판이 탈취되면 이 장치로는 막지 못한다. 그래서 그 패키지의 판 올림은 3일 대기와 `trustPolicy` 확인을 함께 받는다(pnpm 문서도 설치 스크립트가 있는 믿는 패키지를 올릴 때 조심하라고 한다).
+  - 서비스와 스트림 작업자 저장소의 허용 목록에는 Kafka 클라이언트 `@confluentinc/kafka-javascript`가 든다(추천 적용 2026-10-28, 기술 검토 낮음-152). 네이티브 모듈이라 설치 스크립트(`node-pre-gyp install --fallback-to-build`)가 GitHub 릴리스에서 미리 빌드한 librdkafka 바인딩을 받고, 맞는 것이 없으면 소스에서 빌드한다(npm 1.11.0 패키지 정보, 2026-10-28 확인). 그래서 이미지 빌드 잡은 다단계 빌드의 빌드 단계에서만 이 설치를 허용하고(그 내려받기 주소를 나가는 연결 허용 목록에 두거나, 빌드 도구를 둔 단계에서 소스로 빌드한다), distroless 실행 단계에는 결과물만 옮긴다. 둘 가운데 어느 쪽으로 할지는 wbs 0.5.1 PoC에서 정한다. 이 패키지도 허용 목록에 든 패키지라 위의 남는 위험을 같이 진다.
 - **새 버전 대기**: pnpm `minimumReleaseAge` 4,320분(3일)과 Renovate `minimumReleaseAge: "3 days"`를 같이 쓴다. Renovate 문서는 npm 패키지가 게시 뒤 72시간 안에는 내려질 수 있다며 3일을 권한다. pnpm의 이 설정은 10.16에 생겼고 단위는 분이다(2026-10-13 확인). 2025-09 npm 웜 'Shai-Hulud'(CISA 경보 2025-09-23)처럼 탈취된 계정으로 게시된 악성 판은 대개 며칠 안에 드러나 내려진다.
-- **위험 구성 요소**(ASVS 15.1.4): 마지막 릴리스가 오래됐거나, 0.x이거나, 오픈소스 안정판이 없는 구성 요소는 asvs/delivery.md에 표시하고 대안을 PoC로 살펴본다. 지금 표시한 것: kafkajs(마지막 릴리스 2023-02-27, 협력적 재조정 없음, 비교 대상 `@confluentinc/kafka-javascript`, 비교 항목은 처리량·재조정·OTel 계측·AWS가 운영해 주는 Kafka인 MSK의 IAM 인증(infra §9), wbs 0.5.1), Argo Rollouts Gateway API 트래픽 플러그인(argoproj-labs 0.x). Linkerd(2.15부터 오픈소스 안정판 아티팩트 없음)는 메시를 Istio(서비스끼리의 통신을 앱 대신 처리하는 서비스 메시 제품)로 정하면서 목록에서 뺐다(ADR-0082).
+- **위험 구성 요소**(ASVS 15.1.4): 마지막 릴리스가 오래됐거나, 0.x이거나, 오픈소스 안정판이 없는 구성 요소는 asvs/delivery.md에 표시하고 대안을 PoC로 살펴본다. '오래됐다'의 기준은 하나다: 어느 배포 태그든(베타 포함) 마지막 게시가 12개월보다 오래됐다(추천 적용 2026-10-28, 기술 검토 낮음-172). 안정판만 오래되고 같은 프로젝트가 다음 판을 12개월 안에 내고 있으면 올리지 않고, 다음 안정판이 나오면 옮길지 본다. 예: RxJS는 안정판 7.8.2가 2025-02-22이지만 9.0.0-beta.1을 2026-10-09에 냈다. 백엔드는 NestJS의 동반 의존성(`rxjs` ^7.1.0)으로만 쓴다(npm 레지스트리 2026-10-28 확인, 관제 콘솔은 RxJS를 쓰지 않는다, docs/frontend.md §3.1). 표에 올린다는 것은 쓰지 않는다는 뜻이 아니라 대안과 바꿀 조건을 적는다는 뜻이다. ADR-0091이 uPlot을 뺀 이유('1년 넘게 새 판 없음')와 Chart.js를 바꿀 조건도 이 기준으로 읽는다. 화면 쪽 의존성은 같은 기준으로 docs/frontend.md §5.14.5 표가 정본이다. 지금 표시한 것(npm 레지스트리 2026-10-28 확인, 추천 적용 2026-10-28, 기술 검토 낮음-145·152):
+  - drizzle-orm·drizzle-kit: 안정판이 0.x(0.45.4·0.31.11)이고 1.0은 후보판(1.0.0-rc.5, 2026-10-21)이다. 대응은 ADR-0037 결정 1(1.0 정식 전에는 Relational Queries를 쓰지 않고 SQL형 빌더만 써서 1.0의 깨지는 변경을 줄이고, 정식이 나오면 `drizzle-kit up`으로 옮긴다)과 그 ADR의 되돌릴 조건이다.
+  - OTel Node SDK의 실험 패키지(`@opentelemetry/sdk-node` 0.300.0, 자동 계측과 계측 패키지 0.x): 판을 잠금 파일로 고정하고, SDK 설정은 `peaket-platform` 시작 코드 한 곳에서만 부른다. 서비스 코드는 안정판 `@opentelemetry/api`(1.x)만 쓴다.
+  - Node용 Prometheus 계측 `@prometheus-io/client`(0.16.1): 지표 정의를 `peaket-platform` 한 곳에 모아, 바꿀 때 고칠 곳을 줄인다.
+  - Argo Rollouts Gateway API 트래픽 플러그인(argoproj-labs 0.x).
+  - kafkajs(마지막 릴리스 2.2.4, 2023-02-27, 협력적 재조정 없음)는 기본 클라이언트에서 내렸다. 기본은 Confluent 공식 클라이언트 `@confluentinc/kafka-javascript`(1.11.0, 2026-10-07, MIT, librdkafka 기반, KafkaJS 호환 API)다. kafkajs는 그 PoC(wbs 0.5.1, docs/architecture.md §9.4)가 실패할 때의 대체안으로만 남는다.
+  - 목록에서 뺀 것: Linkerd(2.15부터 오픈소스 안정판 아티팩트 없음)는 메시를 Istio(서비스끼리의 통신을 앱 대신 처리하는 서비스 메시 제품)로 정하면서 목록에서 뺐다(ADR-0082).
 - **취약점 조치 기한**(ASVS 15.1.1·15.2.1, POL-041, 추천 적용 2026-10-13)
 
 | 등급 | 기한(수정본 공개일부터) | 넘기면 |
@@ -275,7 +311,9 @@ flowchart LR
 
 - 수정본이 없으면 영향 분석과 완화 방법(설정 차단, 네트워크 격리)을 적은 예외를 둔다. 예외는 30일 뒤 만료된다 [가정]. 예외 기록은 검사 도구의 무시 목록 주석과 이슈 번호로 남긴다.
 - **라이선스**: 허용 목록(MIT, Apache-2.0, BSD, ISC 등) 밖의 라이선스는 PR에서 경고하고 사람이 확인한다. SEED Design(당근이 공개한 디자인 시스템)은 Apache-2.0 고지를 붙인다(wbs 0.6.2).
-- **조사 장치**: 이미지와 패키지의 SBOM을 모아 두어, 새 취약점이 공개되면 '어느 운영 이미지에 들었나'를 한 번에 찾는다.
+- **조사 장치**: 이미지와 패키지의 SBOM을 모아 두어, 새 취약점이 공개되면 '어느 운영 이미지에 들었나'를 한 번에 찾는다. 모으는 곳과 찾는 방법(추천 적용 2026-10-28, 기술 검토 낮음-019):
+  - 저장: SBOM(CycloneDX JSON)은 이미지마다 레지스트리의 증명으로 붙고(§4.2), 같은 파일을 릴리스마다 GitHub Release의 산출물(서비스·이미지별 파일과 프론트엔드 앱별 정적 자산 SBOM)로도 올린다. 출시 태그를 지우지 않으므로(§2.2.6) 산출물도 남는다. 운영 설계에서는 같은 파일을 버전 관리를 켠 S3 감사 버킷에도 복사한다.
+  - 찾기: `.github` 저장소의 조회 스크립트(`sbom-find`)가 GitOps 저장소의 환경 디렉터리에서 지금 운영(출시 전에는 데모)에 올라간 다이제스트를 읽고, 그 다이제스트의 SBOM에서 패키지 이름·판 범위를 찾아 '환경, 서비스, 다이제스트, 패키지 판' 표를 낸다. 조치 기한(아래 표)은 그 표의 운영 이미지마다 센다.
 
 ### 4.5 CI 자체의 보안
 
@@ -283,9 +321,10 @@ flowchart LR
 | --- | --- | --- |
 | 장기 클라우드 키 유출 | AWS 접근에는 OIDC 단기 자격 증명만 쓴다. 역할의 신뢰 조건을 저장소·환경으로 고정한다(`repo:<조직>/<저장소>:environment:<환경>`) | infra §9 |
 | 서드파티 액션 탈취 | 전체 커밋 SHA로 고정하고 허용 목록을 둔다(조직 정책으로 SHA 고정 강제, 2025-08 도입). Renovate가 SHA를 갱신하되 3일을 기다린다 | tj-actions/changed-files(CVE-2025-30066, 2025-03, 저장소 2만 3천여 곳), Trivy 액션(CVE-2026-33634, 2026-03) |
-| 과한 토큰 권한 | 워크플로 토큰은 기본으로 읽기 전용이고, 잡별로 최소 권한만 준다. `id-token: write`·`attestations: write`는 빌드 잡에만 준다 | — |
-| 신뢰하지 않는 코드에 비밀 노출 | `pull_request_target` 금지. 포크 PR에는 비밀이 없다. 비밀은 환경 비밀로만 둔다 | — |
-| 러너 장악 | 자체 호스트 러너를 두지 않는다(공개 저장소). GitHub 호스트 러너만 쓴다 | npm 웜의 2차 확산(2025-12)이 자체 호스트 러너 등록을 썼다 |
+| 과한 토큰 권한 | 워크플로 토큰은 기본으로 읽기 전용이고, 잡별로 최소 권한만 준다. `id-token: write`·`attestations: write`(GHCR에 올릴 때는 `packages: write`도)는 저장소 코드를 돌리지 않는 게시 잡에만 주고, 빌드 잡은 `contents: read`만 받는다(§3.1, 추천 적용 2026-10-28, 기술 검토 중간-062). 정적 자산·관제 원격 위젯 업로드와 패키지 게시도 같은 두 잡 구조로 한다 | Mini Shai-Hulud(2026-05-11): 같은 잡에서 돈 공격 코드가 실행기 메모리의 OIDC 토큰을 꺼내 게시했다(SLSA 블로그) |
+| 캐시 오염 | 출시·핫픽스 후보 빌드는 CI 캐시를 복원·저장하지 않는다(`cache-mode: none`, §3.4). PR·`develop` 빌드의 캐시를 쓴 산출물은 승격하지 않는다 | 같은 공격이 기본 가지 범위의 pnpm 캐시를 오염시켜 출시 워크플로가 복원하게 했다(SLSA 블로그) |
+| 신뢰하지 않는 코드에 비밀 노출 | `pull_request_target` 금지. 포크 PR에는 비밀이 없다. 비밀은 환경 비밀로만 둔다. 통합 시험이 쓰는 LocalStack CI 인증 토큰(`LOCALSTACK_AUTH_TOKEN`, docs/security/secrets-and-keys.md)도 같아서, LocalStack이 필요한 시험은 포크 PR에서 건너뛰었다고 표시하고 조직 안 PR에서 돈다(추천 적용 2026-10-28, 기술 검토 낮음-010, infra §3) | — |
+| 러너 장악 | 자체 호스트 러너를 두지 않는다(공개 저장소). GitHub 호스트 러너만 쓴다 | npm 웜의 2차 확산(Shai-Hulud 2.0, 2025-11-21~23 게시)이 감염된 기기를 자체 호스트 러너로 등록했다(Wiz 연구 글 2025-11-24. 날짜는 2026-10-28 기술 검토 낮음-015로 바로잡았다) |
 | 패키지 게시 토큰 탈취 | 패키지는 GitHub Packages에 워크플로 토큰으로 게시하고, 개인 게시 토큰은 두지 않는다 | Shai-Hulud(2025-09) |
 
 ## 5. 환경과 승격
@@ -295,7 +334,7 @@ flowchart LR
 | 환경 | 받는 것 | 승격 | 동결 |
 | --- | --- | --- | --- |
 | 로컬·CI(kind) | PR 코드와 `develop`(E2E, 야간 시험) | 직접 | 없다 |
-| 데모 | 릴리스·핫픽스 가지의 출시 후보(§2.2). 포트폴리오 기간에는 로컬 kind의 데모 오버레이를 쓴다(임시 클라우드 데모도 같은 오버레이를 쓴다) | 자동(검사를 통과하면 승격 PR을 자동 병합) | 데모 회차의 동결 창 |
+| 데모 | 릴리스·핫픽스 가지의 출시 후보(§2.2). 포트폴리오 기간에는 로컬 kind의 데모 오버레이를 쓴다(임시 클라우드 데모도 같은 오버레이를 쓴다). 데모 오버레이는 서명된 다이제스트를 GHCR 공개 패키지에서 받는다. 공개 패키지라 kind가 인증 없이 끌어온다(§4.1, 추천 적용 2026-10-28, 기술 검토 중간-063) | 자동(검사를 통과하면 승격 PR을 자동 병합) | 데모 회차의 동결 창 |
 | 스테이징 | 측정 캠페인 때 고정한 다이제스트 묶음(성능 장부에 기록). 포트폴리오 기간에는 띄우지 않고, 로컬 측정 환경과 선택 보정이 그 역할을 맡는다 | 수동(캠페인 시작) | 없다(측정 환경) |
 | 운영 | 데모에서 카나리를 통과하고 `main`에 출시 태그가 붙은 후보 다이제스트 | 승격 PR(릴리스 봇이 연다), 필수 검사, 동결 게이트 | §8 |
 
@@ -327,14 +366,14 @@ peaket-gitops/
   | `purchase` | purchase | purchase-svc, realtime-gw, payment-svc | 핫패스(payment-svc는 일반) | 없다 |
   | `ticket` | ticket | ticket-svc | 일반 | 없다 |
   | `trust` | trust | trust-svc, 재평가 작업자 `trust-reassess` | 일반 | 없다 |
-  | `core` | core | identity-svc, core-svc와 notify 워커, ops-svc | 일반(notify 워커는 Spot 허용) | 없다 |
+  | `core` | core | identity-svc, core-svc와 notify 워커, ops-svc | 일반(notify 워커는 Spot 허용). ops-svc만 관제·시스템 풀(ADR-0102) | 없다 |
   | `web` | frontend | 웹 앱 서버·파트너 앱 서버(Next.js, 추천 적용 2026-10-21, ADR-0079 결정 27) | 웹 앱 서버는 핫패스, 파트너 앱 서버는 일반 | 없다 |
   | `data` | data | 스트림 작업자 `ops-rt`·`analytics-ingest`, `rt-pulse`, ClickHouse, 마감 실행기·dbt Job·랭킹 게시 잡 | 데이터 | Karpenter(필요한 만큼 서버를 붙이고 떼는 도구) NodePool `limits`의 80% [가정] |
   | `observability` | observability | Prometheus·Mimir·Loki·Tempo·Pyroscope·Alertmanager·Grafana | 관측 | Karpenter NodePool `limits`의 80% [가정] |
   | `otel` | platform | OTel 수집기 3종(에이전트는 모든 노드의 DaemonSet, ADR-0076)과 exporter | 관측, 에이전트는 모든 노드 | 없다 |
-  | Envoy Gateway(차트 기본값) | platform | 컨트롤러와 gw-queue·gw-fan·gw-partner·gw-ops·gw-scanner 프록시 | 프록시는 핫패스 | 없다 |
-  | 그 밖의 애드온(차트 기본값) | platform | ArgoCD, Argo Rollouts, Kyverno, KEDA(대기 작업량 같은 지표로 파드 수를 늘리고 줄이는 도구), Karpenter, External Secrets, cert-manager, 메시 제어 평면 | 일반 | 없다 |
-  | `ops-breakglass` | platform | 비상 런북(장애가 났을 때 따라 하는 절차서) Job(docs/infra.md §9) | 일반 | 없다 |
+  | Envoy Gateway(차트 기본값) | platform | 컨트롤러와 gw-queue·gw-fan·gw-partner·gw-ops·gw-scanner 프록시 | 프록시는 핫패스(gw-ops는 관제·시스템), 컨트롤러는 관제·시스템 | 없다 |
+  | 그 밖의 애드온(차트 기본값) | platform | ArgoCD, Argo Rollouts, Kyverno, KEDA(대기 작업량 같은 지표로 파드 수를 늘리고 줄이는 도구), Karpenter, External Secrets, cert-manager, 메시 제어 평면 | 관제·시스템(EKS 관리형 노드 그룹, 우선순위 클래스 `peaket-control`·`peaket-addon` [가정], 추천 적용 2026-10-28, 기술 검토 낮음-013, docs/infra-handover.md §3.1) | 없다 |
+  | `ops-breakglass` | platform | 비상 런북(장애가 났을 때 따라 하는 절차서) Job(docs/infra.md §9) | 관제·시스템을 먼저 고르고, 그 풀이 멈추면 일반(우선순위 클래스 `peaket-control`, ADR-0102 결정 3) | 없다 |
   | `platform` | platform | 변경 동결 달력 `freeze-calendar`·`freeze-guard`(§8.2), 증거 수집기 `evidence-collector`(docs/observability.md §5) | 일반 | 없다 |
 
   - 자원 할당량(ResourceQuota)은 `data`·`observability`에만 둔다. 배치 작업(dbt Job·마감 실행기)이나 잘못된 확장 설정이 그 노드 풀을 다 써 버리면, 같은 풀의 실시간 잡이나 다른 관측(지표·로그·요청 기록으로 시스템 안을 들여다보는 일) 구성 요소가 뜨지 못한다. 할당량은 이것을 막는다. Kyverno가 requests·limits를 필수로 하므로(§4.3), 할당량은 그 네임스페이스의 모든 파드에 걸린다.
@@ -361,8 +400,9 @@ flowchart LR
 ```
 
 - 같은 다이제스트만 승격한다. 환경마다 다시 빌드하지 않고, `main`에 병합한 뒤에도 다시 빌드하지 않는다(병합 결과 트리 검사, §2.2.4).
+- **이벤트 스키마 등록(추천 적용 2026-10-28, 기술 검토 중간-088)**: 데모·운영 레지스트리 등록은 GitOps가 한다. Avro로 내는 서비스의 ArgoCD 동기화 앞(PreSync 훅)에 등록 Job이 돌아, 그 서비스가 내는 주제를 그 환경의 레지스트리에 등록하고 주제별 스키마 ID를 그 네임스페이스의 ConfigMap `schema-ids`에 쓴다. 호환 검사에 걸리면 Job이 실패하고 동기화가 멈춰 생산자가 배포되지 않는다. 생산자는 이 ID로 Avro 바이트를 만들어 실행 중에 레지스트리를 부르지 않는다. CI는 운영 레지스트리에 닿지 않는다(§3.1 `contract-check`, §10.1). 소비자를 먼저, 생산자를 나중에 배포하는 순서(§6.5)는 그대로다(docs/api/avro/README.md §3, D-T39).
 - 한 환경에서 동시에 돌리는 카나리는 하나다(SRE Workbook 16장: 한 번에 하나의 카나리를 권한다. 신호가 섞이고 사람의 판단 부담이 커지기 때문이다). `gitops-check`는 그 환경에 진행 중인 롤아웃이 있으면 다음 승격 PR의 병합을 기다리게 한다.
-- **운영 승격 필수 조건**: 그 다이제스트가 출시 태그 `vX.Y.Z`의 후보일 것, 데모 카나리 통과, 데모 체류 1시간 이상 [가정], 운영 28일 오류 예산이 남아 있을 것(다 쓰면 신뢰성 수정만, POL-022), 동결 창 밖일 것(§8), 조치 기한을 넘긴 취약점이 없을 것(§4.4), 제공자 Pact 검증 통과(§3.3).
+- **운영 승격 필수 조건**: 그 다이제스트가 출시 태그 `vX.Y.Z`의 후보일 것, 데모 카나리 통과, 데모 체류 1시간 이상 [가정], 운영 28일 오류 예산이 남아 있을 것(다 쓰면 신뢰성 수정만, POL-022. 남은 예산은 클러스터 Prometheus(15일 보존)가 아니라 Mimir `raw`(90일)에서 Mimir 규칙 평가기가 계산한 `slo:error_budget_remaining:ratio28d` 하나를 읽는다. 그 값을 읽지 못하거나 15분 [가정]보다 낡으면 잠금 상태를 지금대로 유지한다. 추천 적용 2026-10-28, 기술 검토 높음-13, observability §8), 동결 창 밖일 것(§8), 조치 기한을 넘긴 취약점이 없을 것(§4.4), 제공자 Pact 검증 통과(§3.3), 그 후보의 arm64 이미지가 한 번은 돌았을 것(추천 적용 2026-10-28, 기술 검토 낮음-167). 데모(로컬 kind)는 amd64 이미지만 돌리므로, 운영 플랫폼인 arm64 이미지는 출시 후보마다 `ubuntu-24.04-arm` 러너에서 스모크(컨테이너 시작, 준비 프로브, 계약 시험 일부)를 통과해야 한다. 선택 보정 측정(docs/verification.md §6, c7g.xlarge)도 arm64 이미지로 돈다.
 - 데모 승격 PR은 검사를 통과하면 자동 병합한다. 운영 승격 PR은 `main` 병합 뒤 릴리스 봇이 열고 사람이 병합한다(1인 기간에는 소유자). 한 릴리스에서 바뀐 서비스가 여럿이면 서비스마다 차례로 승격한다.
 - **출시 확정과 운영 배포**: `main` 병합과 태그가 출시 확정이고, 운영 배포는 그 뒤의 승격이다. 변경 동결 창이라도 병합과 태그는 그대로 하고, 운영 승격 PR만 창이 끝날 때까지 기다린다(D-T26).
 
@@ -407,20 +447,20 @@ flowchart LR
 
 | 지표 | 실패 조건 | 비고 |
 | --- | --- | --- |
-| 서버 오류 비율(5xx·타임아웃) | 카나리가 안정판의 2배를 넘고, 동시에 안정판보다 0.5%p 이상 높다 | 의도된 403·429와 좌석 경합 409는 정상으로 본다(observability §4 SLI 정의) |
-| p99 지연 | 카나리가 안정판 × 1.2 + 5ms를 넘는다 | 성공한 요청만 본다 |
+| 서버 오류 비율(5xx·타임아웃) | 카나리가 안정판의 2배를 넘고, 동시에 안정판보다 0.5%p 이상 높고, 카나리 오류가 5건 [가정] 이상이다 | 의도된 403·429와 좌석 경합 409는 정상으로 본다(observability §4 SLI 정의). 오류 건수 하한은 요청 200건에서 오류 1건(0.5%)만으로 중단되는 헛판정을 막는다(추천 적용 2026-10-28, 기술 검토 중간-002) |
+| p99 지연 | 카나리가 안정판 × 1.2 + 5ms를 넘는다 | 성공한 요청만 본다. 꼬리 표본(카나리 요청 수 × 1%)이 10건 이상, 곧 카나리 요청이 1,000건 이상인 구간에서만 판정한다. 모자라면 같은 식을 p95로 보고(꼬리 10건 = 200건), 그것도 모자라면 지연은 판정하지 않는다. 지연 비교는 25% 단계부터 한다 |
 | 불변식 위반(오버셀, 이중 결제, 차례 전 입장, 1인 한도 초과) | 1건 | 즉시 실패(NFR-025, POL-029) |
 | 이벤트 루프 지연 p99 | 카나리가 안정판의 1.5배를 넘는다 | 포화 |
 | 절대 SLO | 카나리 구간의 오류 예산 소진 속도가 10배 이상이다 | observability §4 |
 
 - 수치는 [가정, Phase 4 4.6.2에서 확정]이다. 집계 간격은 분석 단계 시간(5분)보다 짧게 둔다(Workbook: 집계 간격이 카나리 기간보다 길면 안 된다).
-- **최소 표본**: 분석 구간마다 카나리 요청 200건 [가정]. 모자라면 판정 불가로 멈추고 사람이 정한다. 데모 환경에는 카나리 동안 합성 트래픽(k6 스모크 여정)을 흘린다.
+- **최소 표본**: 지표마다 따로 둔다(추천 적용 2026-10-28, 기술 검토 중간-002). 오류 비율은 분석 구간마다 카나리 요청 200건 [가정]과 카나리 오류 5건 [가정]이 함께 있어야 실패로 본다. 백분위는 꼬리 표본이 10건 이상일 때만 비교한다(p99는 요청 1,000건, p95는 200건). 표본이 적은 백분위는 사실상 최댓값이기 때문이다(planning/02 §3.1 원칙 6). 5% 단계는 오류 비율·불변식·충돌만 보고, 지연 비교는 25% 단계부터 한다. 오류 건수 하한 대신 이항 검정(안정판 오류율로 본 카나리 오류 수의 꼬리 확률)도 견줬으나, 안정판 오류가 0건인 평시에 기준이 흔들려 건수 하한을 골랐다. 요청이 200건에 못 미치면 판정 불가로 멈추고 사람이 정한다. 데모 환경에는 카나리 동안 합성 트래픽(k6 스모크 여정)을 흘리고, 25% 단계부터는 구간마다 요청 1,000건 이상이 되게 맞춘다.
 - **실패하면**: 자동으로 중단하고(안정판 100%, Rollout은 Degraded) SEV2 경보를 낸다(RB-23 링크). 트래픽 라우팅을 쓰면 중단된 카나리 ReplicaSet은 30초 뒤 줄어든다(Argo Rollouts 기본값).
 - **분석이 못 보는 것**: 카나리는 평시 트래픽에서 돈다. 부하에서만 드러나는 결함은 놓칠 수 있다(Workbook). 이 몫은 축소 성능 시험(§3.3)과 측정 캠페인이 맡는다(§15).
 
 ### 6.3 admission-ctrl(활성 리더 1)
 
-- **롤링**: 복제본 3(활성 1, 대기 2), `maxUnavailable: 1`, `maxSurge: 0`. 종료 신호를 받은 리더는 쓰기를 멈춘 뒤 Lease(정해진 시간 동안만 유효한 권한. 갱신하지 않으면 다른 쪽이 가져간다)를 바로 놓고, 대기 파드가 다음 재시도 주기 안에 잡는다(infra §8). 새 리더는 진행 중인 회차의 리더 세대를 먼저 올리고, Redis(메모리에 데이터를 두는 빠른 저장소)의 리더 상태를 읽은 뒤 시작한다(ADR-0056). 롤링 순서는 보장되지 않아서 한 번의 배포에 리더 교체가 최대 2번 생긴다. 교체당 serving이 멈추는 시간은 5초 이하를 목표로 한다 [가정, Phase 2 부하 시험에서 확정].
+- **롤링**: 복제본 3(활성 1, 대기 2), `maxUnavailable: 1`, `maxSurge: 0`. 종료 신호를 받은 리더는 쓰기를 멈춘 뒤 Lease(정해진 시간 동안만 유효한 권한. 갱신하지 않으면 다른 쪽이 가져간다)를 바로 놓고, 대기 파드가 다음 재시도 주기 안에 잡는다(infra §8). 새 리더는 진행 중인 회차의 리더 세대를 먼저 올리고, Redis(메모리에 데이터를 두는 빠른 저장소)의 리더 상태를 읽은 뒤 시작한다(ADR-0056). 교체당 serving이 멈추는 시간은 5초 이하를 목표로 한다 [가정, Phase 2 부하 시험에서 확정]. 리더 교체 횟수(추천 적용 2026-10-28, 기술 검토 중간-080): 쿠버네티스는 옛 ReplicaSet을 줄일 때 값이 같으면 더 최근에 만든 파드를 먼저 지운다. 그래서 주석이 없으면 리더를 이어받은 옛 대기 파드가 다시 지워질 수 있어, 복제본 3이면 최악 3번(serving 멈춤 최악 약 15초 [가정])이다. 이전 문서의 '최대 2번'은 이 순서를 빠뜨린 계산이었다. 그래서 리더는 자기 파드에 높은 `controller.kubernetes.io/pod-deletion-cost`를 달고 리더를 놓을 때 지운다(infra §8). 대기 파드부터 지워져 리더는 마지막에 한 번만 바뀐다. 이 주석은 최선 노력이라 순서를 보장하지 않으므로, 상한은 '보통 1번, 최악 복제본 수만큼'으로 적는다. 롤링 시험 D-T31에서 교체 횟수와 serving 멈춤을 잰다.
 - **상태 호환**: 새 리더는 옛 리더가 쓴 Redis 상태(serving, 입장 자리, 목표치)를 그대로 읽어야 한다. 상태 형식이 바뀌면 확장·축소로 한다(§7.5).
 - **그림자 계산**: 알고리즘(정상이면 조금씩 늘리고 나빠지면 크게 줄이는 AIMD 방식의 매개변수, 판정 규칙)을 바꿀 때는 새 버전을 Lease에 참여하지 않는 `admission-ctrl-shadow`로 먼저 띄운다. 그림자는 같은 입력으로 결정(입장 비율, 목표치)을 계산만 하고, 그 차이를 `admission_shadow_diff` 지표로 남긴다. 그림자는 쓰기 권한이 없는 Redis 계정(읽기 전용 ACL)을 쓴다. 온세일 1회 이상에서 차이를 본 뒤 승격한다. 리더가 아닌 파드는 아무 결정도 하지 않으므로, 트래픽 비율 카나리는 의미가 없다.
 - 핫패스 묶음에 속하므로 모든 온세일의 동결 창에 묶인다(§8.1).
@@ -433,8 +473,8 @@ flowchart LR
 
 ### 6.5 비동기 처리
 
-- **Kafka 스키마 순서**: Schema Registry 호환 모드는 BACKWARD_TRANSITIVE다. BACKWARD 계열은 새 스키마의 소비자가 옛 데이터를 읽는 것을 보장한다. 그래서 소비자를 먼저, 생산자를 나중에 배포한다(Confluent 문서). TRANSITIVE를 쓰는 것은 보관 7일 안의 옛 메시지를 최신 스키마로 다시 읽는 재적재(analytics) 때문이다. 필드 삭제와 의미 변경은 확장·축소로 한다.
-- **소비자 재조정**: kafkajs는 협력적 재조정을 지원하지 않는다. 그래서 롤링 중 파드가 바뀔 때마다 그룹 전체가 재조정된다. 한 파드씩 배포하고, 처리는 멱등으로 하며(ADR-0026), 소비 지연에 경보를 건다. 클라이언트 교체는 wbs 0.5.1 PoC 뒤 새 ADR로 정한다(§4.4).
+- **Kafka 스키마 순서**: Schema Registry 호환 모드는 BACKWARD_TRANSITIVE다. BACKWARD 계열은 새 스키마의 소비자가 옛 데이터를 읽는 것을 보장한다. 그래서 소비자를 먼저, 생산자를 나중에 배포한다(Confluent 문서). TRANSITIVE를 쓰는 것은 보관 7일 안의 옛 메시지를 최신 스키마로 다시 읽는 재적재(analytics) 때문이다. 필드 삭제와 의미 변경은 확장·축소로 한다. 열거에 기호를 더할 때 소비자를 빠짐없이 먼저 올리지 못해도(동결 창·마감 실행 중인 스트림 작업자 등) 늦은 소비자는 새 기호를 `UNRECOGNIZED`로 읽어 세고 경보한다. 레코드를 버리지 않으므로 숫자가 조용히 빠지지 않는다(docs/api/avro/README.md §3, 추천 적용 2026-10-28, 기술 검토 중간-087).
+- **소비자 재조정(추천 적용 2026-10-28, 기술 검토 낮음-152)**: 기본 클라이언트 `@confluentinc/kafka-javascript`는 소비자의 파티션 배정 방식으로 range·roundRobin과 함께 cooperativeSticky(협력적 재조정: 옮겨 갈 파티션만 내려놓고 나머지는 계속 읽는다)를 받는다(MIGRATION.md, 2026-10-28 확인). 그래서 cooperativeSticky를 기본으로 두고, 롤링 중 파드가 바뀌어도 그룹 전체가 멈추지 않는지 wbs 0.5.1 PoC에서 잰다. 그래도 한 파드씩 배포하고, 처리는 멱등으로 하며(ADR-0026), 소비 지연에 경보를 건다. PoC가 실패해 kafkajs로 가면 kafkajs는 협력적 재조정을 지원하지 않으므로, 파드가 바뀔 때마다 그룹 전체가 재조정된다는 것을 받아들인다(§4.4).
 - **스트림 작업자**: 롤링으로 올린다. 새 파드 1개가 준비된 뒤 옛 파드를 하나씩 멈추고, 옛 파드는 처리 중인 묶음을 마쳐 커밋한 뒤 소비자 그룹에서 나간다(우아한 종료, §6.4). 작업자에는 상태가 없어, 새 파드는 커밋한 오프셋(메시지를 어디까지 읽었는지 나타내는 위치 번호)부터 읽는다. 이때 빈 구간은 생기지 않고 겹침만 생긴다. 겹침은 브론즈의 중복 허용·실버의 중복 제거와 관제 실시간 표의 조회 시점 집계(`eventKey`로 중복 제거)가 흡수한다(docs/streaming.md §8, 추천 적용 2026-10-27, ADR-0099). 실시간 원시 표의 열은 더하기만 하고, 새 열을 읽는 뷰와 작업자를 먼저, 생산자를 나중에 배포한다. 동결 창과 마감 실행 중에는 올리지 않는다. 복제 수는 고정하고, 바꿀 때도 같은 규칙을 따른다. 작업자 PR의 CI는 롤링 판 올리기 시험(D-T20)을 돌린다. 되돌리기는 이전 이미지로 하는 같은 롤링이다.
 - **CronJob·Job**: 이미지가 바뀌면 다음 실행부터 새 이미지를 쓴다. 마감 실행처럼 회차 단위로 멱등인 작업은 중간에 바뀌어도 다시 돌리면 같은 결과가 나온다(ADR-0052).
 
@@ -443,7 +483,7 @@ flowchart LR
 - **정적 자산**: 빌드마다 내용 해시 이름의 파일을 S3의 배포별 경로에 더하기만 하고, 바로 지우지 않는다. 30일 또는 최근 5개 빌드 중 긴 쪽을 보존한 뒤 지운다 [가정]. 오래 열어 둔 탭(대기실)이 옛 자산을 받아도 404가 나지 않는다. 내용 해시 자산을 계속 더하는 방식이면 자산의 버전이 어긋나지 않는다(Next.js 자체 호스팅 문서).
 - **`deploymentId`**: 출시 후보를 빌드한 커밋 SHA를 쓴다. Next.js는 버전 차이를 알아채면 전체 새로고침을 하므로 화면 상태가 사라질 수 있다. 또 `?dpl=` 값으로 라우팅하지는 않는다(2026-10-13 확인). 대기실은 정적 셸이고 좌석·결제 화면은 요청마다 그리는 셸이지만, 화면 사이를 전체 이동으로 오가고 구매 요청은 게이트웨이로 바로 가므로 식별자 차이로 새로고침이 생겨도 구매 상태를 잃지 않는다(docs/frontend.md §2.5, ADR-0079 결정 26). 소비자 웹 앱 서버는 핫패스 묶음이라 온세일 동결 창에는 배포하지 않는다. 평시 탐색 화면에서는 카나리 중에 새로고침이 생길 수 있다(§15).
 - **여러 파드의 캐시**: ISR(미리 그려 두고 정해진 주기로 다시 그리는 방식)·데이터 캐시는 파드마다 따로 있다. 그래서 공유 저장소(세션·캐시 Redis)를 쓰는 `cacheHandler`와 `'use cache'`용 `cacheHandlers`를 두고, 메모리 캐시 크기는 0으로 둔다. `revalidateTag()`는 부른 파드의 캐시만 무효화한다. 처리기가 `refreshTags()`로 공유 저장소의 태그 상태를 읽어야 다른 파드에도 닿는다. 모든 파드는 같은 빌드와 같은 `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`(Secrets Manager)를 쓴다(Next.js 자체 호스팅 문서).
-- **관제 콘솔 MF 원격**: 원격은 저마다 관제 콘솔 호스트와 같은 출처의 `/remotes/<원격>/<SHA>/remoteEntry.js`에 올린다. 그래서 CSP(페이지가 실행할 수 있는 스크립트의 출처를 정하는 브라우저 규칙)의 `script-src 'self'` 안에 든다(`console.peaket.example`, 추천 적용 2026-10-15, ADR-0065 결정 1). 호스트는 GitOps 설정의 버전 목록(`remotes.json`)을 읽는다. 되돌리기는 이 목록을 되돌리는 것이다. 공유 의존성(화면 라이브러리인 React)은 싱글턴과 버전 범위를 E2E로 검사한다. 원격은 소유 서비스 저장소(peaket-queue·peaket-purchase)가 공용 재사용 워크플로 `build-remote.yml`로 빌드해 관제 콘솔 버킷에 올린다. `remotes.json`에는 `integrity`(sha384)와 계약 주판(`contractMajor`)을 함께 적는다. 호스트는 무결성과 계약 판을 확인하고, 실패하면 그 칸만 대체 카드로 바꾼다. 원격 위젯은 규모와 상관없이 온세일 윈도우(T-10분~T+60분) 동안 바꾸지 않는다 [가정](추천 적용 2026-10-21, ADR-0079 결정 16·26, docs/frontend.md §4.5).
+- **관제 콘솔 MF 원격**: 원격은 저마다 관제 콘솔 호스트와 같은 출처의 `/remotes/<원격>/<SHA>/remoteEntry.js`에 올린다. 그래서 CSP(페이지가 실행할 수 있는 스크립트의 출처를 정하는 브라우저 규칙)의 `script-src 'self'` 안에 든다(`console.peaket.example`, 추천 적용 2026-10-15, ADR-0065 결정 1). 호스트는 GitOps 설정의 버전 목록(`remotes.json`)을 읽는다. 되돌리기는 이 목록을 되돌리는 것이다. 공유 의존성(화면 라이브러리인 React)은 싱글턴과 버전 범위를 E2E로 검사한다. 원격은 소유 서비스 저장소(peaket-queue·peaket-purchase)가 공용 재사용 워크플로 `build-remote.yml`로 빌드해 관제 콘솔 버킷에 올린다. `remotes.json`에는 `integrity`(sha384)와 계약 주판(`contractMajor`)을 함께 적는다. 호스트는 무결성과 계약 판을 확인하고, 실패하면 그 칸만 대체 카드로 바꾼다. 원격 위젯은 규모와 상관없이 온세일 윈도우(T-10분~T+60분) 동안 바꾸지 않는다 [가정](추천 적용 2026-10-21, ADR-0079 결정 16·26, docs/frontend.md §4.5). Module Federation은 가상 팀의 따로 배포를 보이는 쇼케이스다. `build-remote.yml`은 같은 위젯 소스를 위젯 패키지 `@peaket/widget-<원격 이름>`(GitHub Packages)로도 게시하고, 호스트 저장소는 그 패키지로 한 앱 기준선을 빌드해 FE-T29로 견준다. 패키지는 운영에 내지 않는다(추천 적용 2026-10-28, ADR-0100 결정 6).
 - **포렌식 리플레이 2단계 페이지(console, 출시 뒤 선택)**: `apps/forensics`를 운영 모드로 빌드해 console 배포 S3 `/forensics/`에 올린다. 콘솔이 모든 경로를 'index.html'로 보내는 규칙에서 `/forensics*`를 빼고, 그 캐시 동작의 응답 헤더 정책이 COEP `require-corp`를 더한다. 되돌리기는 관제 호스트와 같다(추천 적용 2026-10-21, ADR-0080 상태 줄, docs/features/forensic-replay.md §6.8).
 - **지갑 PWA(web)**: 새 서비스 워커는 대기 상태로 둔다. 대기실·좌석·결제·티켓 화면에 있는 동안에는 활성화하지 않고, 다음 방문 때 적용한다. 오프라인 티켓 표시는 옛 워커로도 동작해야 한다. 서비스 워커 범위는 `/my/tickets/`만이라 대기실·좌석·결제 화면을 가로채지 않는다(추천 적용 2026-10-21, ADR-0079 결정 18).
 - **대기실 경량 페이지(web)**: `apps/web/queue-room`은 Next.js와 따로 빌드해 www 배포 S3 `/_q/`에 올린다. CloudFront(AWS의 CDN) Function이 대기실 경로를 로케일 셸로 바꿔 읽는다. 배포 때는 셸만 무효화하고, 해시 이름 자산은 위 보존 규칙을 따른다(추천 적용 2026-10-21, ADR-0079 결정 2).
@@ -458,6 +498,15 @@ flowchart LR
 3. **스키마가 바뀐 배포**: 이전 버전은 지금 스키마로 동작한다(N-1 호환, §7.1). 앱만 되돌리고 스키마는 되돌리지 않는다.
 4. **동결 창 안**: §8.4 긴급 변경으로 한다.
 5. **목표**: 되돌리기를 결정한 때부터 이전 버전 100%까지 5분 이내 [가정, Game Day G-18에서 확정].
+6. **변경 감지 경로와 시간 예산(추천 적용 2026-10-28, 기술 검토 낮음-018)**: ArgoCD는 웹훅이 없으면 3분마다 Git을 조회한다(ArgoCD 문서 'Webhook Configuration', 2026-10-28 확인). 그런데 ArgoCD는 VPN·허용 IP로만 닿는 내부 로드 밸런서 뒤에 있어(§10.1) GitHub 웹훅이 닿지 않는다. 웹훅 경로(`/api/webhook`)만 인터넷에 여는 것은 쓰지 않는다. 그 경로에는 아직 레이트 리밋이 없고(같은 문서), 관리 도구를 바깥에 열지 않는다는 원칙(ADR-0089)과 맞지 않기 때문이다. 대신 되돌리기 PR을 병합한 사람(commander)이 VPN 경로로 `argocd app sync <앱>`을 바로 부른다(운영 수동 동기화 권한, §10.1 역할 표, RB-23). 3분 조회는 사람이 빠뜨렸을 때의 안전망으로 남는다. 단계별 예산 [가정, G-18에서 잰다]:
+
+   | 단계 | 예산 | 줄이는 장치 |
+   | --- | --- | --- |
+   | 되돌리기 PR 만들기(이전 다이제스트로 바꾸는 커밋, 긴급 라벨) | 0.5분 | `promote.yml`의 되돌리기 모드가 직전 승격 PR을 거꾸로 만든다 |
+   | 필수 검사(`gitops-check`) | 2분 | 이미 검증한 다이제스트라 서명·출처 확인이 빠르다. 2분을 넘기면 검사 단계별 시간을 G-18 기록에 남긴다 |
+   | 병합과 감지 | 0.5분 | 병합 직후 `argocd app sync` |
+   | 롤아웃 | 1.5분 | `rollbackWindow` 안이면 단계와 분석을 건너뛴다. 파드 준비 시간이 대부분이다 |
+   | 합계 | 4.5분 | 남는 0.5분은 사람이 PR을 확인하는 시간이다 |
 
 ## 7. 데이터 변경 관리
 
@@ -477,13 +526,18 @@ flowchart LR
 
 - **실행 주체와 시점**: 서비스마다 마이그레이션 잡을 둔다. 이미지는 서비스와 같은 다이제스트이고 명령만 다르다. 잡은 ArgoCD PreSync 훅으로 돈다. 잡이 실패하면 동기화가 실패하고 롤아웃이 시작되지 않는다. 동결 창에는 동기화가 막히므로 마이그레이션도 돌지 않는다.
 - **트랜잭션 밖 단계**: SQL형 쿼리 도구인 Drizzle의 마이그레이터(0.45 계열과 1.0 RC, `drizzle-kit migrate`도 같다)는 대기 중인 마이그레이션 전부를 한 트랜잭션(여러 변경을 한꺼번에 반영하거나 한꺼번에 취소하는 작업 단위)으로 실행한다. 그런데 PostgreSQL은 `CREATE INDEX CONCURRENTLY`를 트랜잭션 블록 안에서 실행하지 못한다. 그래서 `peaket-platform`의 실행기가 `drizzle-kit generate`가 만든 SQL 파일을 읽어 파일마다 트랜잭션을 걸고, 첫 줄에 `-- peaket:no-transaction` 표시가 있는 파일만 트랜잭션 밖에서 문장 단위로 실행한다. 실행 기록은 같은 기록 표에 남긴다(wbs 0.3.4).
+- **실행기를 만들기 전에 기성 도구와 견준다(추천 적용 2026-10-28, 기술 검토 낮음-151)**: 실행기는 운영 DB를 바꾸는 가장 위험한 코드라, 같은 일을 하는 기성 실행 도구가 요구를 채우면 만들지 않는다. 그때 Drizzle은 SQL 파일을 만드는 데(`drizzle-kit generate`)만 쓴다. 요구는 넷이다. ① 파일마다 트랜잭션, 표시한 파일만 트랜잭션 밖 ② 같은 DB에서 두 실행이 겹치지 않는 실행 잠금 ③ 문장마다 `lock_timeout`·`statement_timeout`을 걸고 잠금을 못 얻으면 다시 시도(아래 '잠금 대기 제한') ④ DDL 역할로 PgBouncer를 거치지 않고 직접 붙기(아래 '실행 잠금과 권한'·'연결 경로').
+  - 후보 1 Atlas: 기본이 파일마다 트랜잭션(`--tx-mode file`)이고, 파일 첫 줄 `-- atlas:txmode none`이면 그 파일만 트랜잭션 밖에서 돈다. 실행 잠금은 PostgreSQL advisory lock이다(기다리는 상한 `--lock-timeout`, 기본 10초. Atlas 'versioned apply' 문서, 2026-10-28 확인). 사용권 조건(무료로 쓸 수 있는 판과 기능 범위)은 확인 필요다.
+  - 후보 2 node-pg-migrate(9.0.0, MIT): `--no-single-transaction`이면 마이그레이션마다 따로 트랜잭션이고, `pgm.noTransaction()`을 부른 마이그레이션은 트랜잭션 밖에서 돈다. 실행 잠금은 advisory lock이다(`advisory-lock-mode`). SQL 파일 마이그레이션도 받는다(node-pg-migrate 문서, 2026-10-28 확인).
+  - ③의 문장별 `lock_timeout`과 다시 시도는 두 도구의 문서에서 기본 기능으로 찾지 못했다. 파일 안의 `SET`이나 도구를 감싼 작은 스크립트로 채울 수 있는지 함께 본다.
+  - 판정은 D-T44로 한다. 기성 도구가 ①~④를 채우면 그 도구를 쓰고 자체 실행기를 만들지 않는다. 하나라도 못 채우면 지금처럼 자체 실행기를 만들되, 못 채운 항목을 그 이유로 적는다.
 - **잠금 대기 제한**: 문장마다 `SET lock_timeout = '3s'`와 `statement_timeout`을 건다 [가정, wbs 0.3.4에서 확정]. 잠금을 얻지 못하면 간격을 지수로 늘리며 5회 다시 시도하고, 그래도 안 되면 잡이 실패한다(RB-24). 잠금 대기열에 선 DDL이 그 뒤에 오는 핫패스 쿼리까지 막는 일을 피하려는 것이다. `lock_timeout`은 잠금 시도마다 따로 적용된다(PostgreSQL 문서).
 - **실행 잠금과 권한**: 실행기는 시작할 때 `pg_advisory_lock`을 잡아 같은 DB에서 두 실행이 겹치지 않게 한다. 마이그레이션 잡은 DDL 역할, 앱은 DML 역할만 쓴다(자격 증명 분리, ASVS 13.2.2).
 - **연결 경로**: 마이그레이션 잡은 PgBouncer를 거치지 않고 클러스터 쓰기 엔드포인트에 직접 붙는다(통신을 암호화하는 TLS, `verify-full`). 세션 단위 advisory 잠금과 세션 `SET`(위의 `lock_timeout`·`statement_timeout`)을 PgBouncer 트랜잭션 풀링이 지원하지 않기 때문이다(PgBouncer 기능 표, 추천 적용 2026-10-22, ADR-0083). 앱 연결은 PgBouncer를 거친다.
-- **파티션 표**: Drizzle 0.45.4에는 파티션(큰 표를 기간 등으로 나눈 부분) 선언이 없다. 그래서 부모 표와 첫 파티션은 `drizzle-kit generate`가 아니라 손으로 쓴 SQL 마이그레이션 파일로 만든다. 다음 파티션을 미리 만드는 일과 보존 기간이 지난 파티션을 지우는 일은 마이그레이션이 아니라 정비 잡이 한다(docs/data.md §2, ADR-0083). 정비 잡은 새 파티션을 만든 직후와 매일 한 번 부모 표에 `ANALYZE`를 돌리고(자동 청소는 파티션 부모 표의 통계를 모으지 않는다), 자식 파티션을 먼저 지운 뒤 부모 파티션을 지운다(추천 적용 2026-10-22, ADR-0086).
+- **파티션 표**: Drizzle 0.45.4에는 파티션(큰 표를 기간 등으로 나눈 부분) 선언이 없다. 그래서 부모 표와 첫 파티션은 `drizzle-kit generate`가 아니라 손으로 쓴 SQL 마이그레이션 파일로 만든다. 다음 파티션을 미리 만드는 일과 보존 기간이 지난 파티션을 지우는 일은 마이그레이션이 아니라 정비 잡이 한다(docs/data.md §2, ADR-0083). 정비 잡은 새 파티션을 만든 직후와 매일 한 번 부모 표에 `ANALYZE`를 돌리고(자동 청소는 파티션 부모 표의 통계를 모으지 않는다), 그 범위를 가리키는 행을 먼저 지운 뒤 파티션을 떼어 낸다(추천 적용 2026-10-22, ADR-0086). 파티션 표는 Outbox·`scan_event`·`seat_hold`·`scanner_change`·`notification_delivery`다. 주문·결제·티켓과 그 자식 표는 나누지 않고, 보존 기한이 지난 행을 같은 정비 잡이 1만 건 [가정]씩 나눠 지운다(묶음마다 한 트랜잭션, 자식 행 먼저, 읽기 복제본 지연 1초 [가정]를 넘으면 그날 밤은 멈춘다, docs/data.md §2, 추천 적용 2026-10-28, ADR-0114). 미리 만들기를 pg_partman(Aurora 18.6에서 5.4.3)으로 옮기는 조건은 ADR-0114 결정 5다.
 - **파티션 표의 인덱스(추천 적용 2026-10-22, ADR-0086)**: 부모 표에는 `CREATE INDEX CONCURRENTLY`를 쓸 수 없다(PostgreSQL 18 문서). 그래서 파티션마다 `CREATE INDEX CONCURRENTLY`를 하고, 부모에 `CREATE INDEX … ON ONLY`로 만든 뒤 파티션 인덱스를 `ALTER INDEX … ATTACH PARTITION`으로 붙인다. 부모 인덱스 만들기는 메타데이터만 바꾼다. 이 파일은 `-- peaket:no-transaction` 파일로 쓴다. 다시 만들 때 `REINDEX`는 파티션마다 따로 트랜잭션으로 돌고 트랜잭션 블록 안에서는 쓸 수 없다.
 - **부분 인덱스 조건 바꾸기(추천 적용 2026-10-22, ADR-0086)**: 상태를 더해 부분 유니크 인덱스의 조건이 바뀌면, 새 인덱스를 동시 생성으로 만들고 계획이 새 인덱스를 쓰는지 확인한 뒤 옛 인덱스를 `DROP INDEX CONCURRENTLY`로 지운다. 상태·종류 칸의 `CHECK (… IN (…))`도 같은 마이그레이션에서 `NOT VALID`로 바꾸고 나중에 검증한다(docs/data.md §2).
-- **PgBouncer와 prepared statement(추천 적용 2026-10-22, ADR-0086)**: 트랜잭션 풀링에서 핫패스의 prepared statement(미리 분석해 이름을 붙여 둔 쿼리, ADR-0037 `.prepare()`)를 쓰려면 PgBouncer `max_prepared_statements`가 0이 아니어야 한다(문서 기본 200). 열 구조를 바꾸는 마이그레이션 뒤에는 준비된 문장이 'cached plan must not change result type' 오류를 낼 수 있어, 마이그레이션 잡의 마지막 단계에서 PgBouncer 관리 콘솔에 `RECONNECT`를 보낸다(PgBouncer 문서).
+- **PgBouncer와 prepared statement(추천 적용 2026-10-22, ADR-0086)**: 트랜잭션 풀링에서 핫패스의 prepared statement(미리 분석해 이름을 붙여 둔 쿼리, ADR-0037 `.prepare()`)를 쓰려면 PgBouncer `max_prepared_statements`가 0이 아니어야 한다(문서 기본 200). 이 기능은 PgBouncer 1.21.0에 생겼고 기본값 200은 1.24.0부터라, 판은 1.26.1 이상으로 고정한다(docs/data.md §1 끝 엔진 판, §4.4 '설정이 기대는 최소 판', 기술 검토 낮음-040). 열 구조를 바꾸는 마이그레이션 뒤에는 준비된 문장이 'cached plan must not change result type' 오류를 낼 수 있어, 마이그레이션 잡의 마지막 단계에서 그 DB의 PgBouncer 배치(DB마다 공용 Deployment `pgbouncer-<DB>`, 복제 3, wbs 2.11.2, ADR-0116)의 모든 인스턴스에 `RECONNECT`를 보낸다(PgBouncer 문서). PgBouncer는 파드마다 따로 서버 연결을 쥐므로, 한 관리 콘솔에만 보내면 다른 파드의 연결이 옛 계획을 그대로 쓴다. 그래서 헤드리스 Service로 파드를 하나씩 찾아 각 관리 콘솔에 보내고, 닿지 않는 파드가 있으면 3번 [가정] 다시 시도한 뒤 잡이 실패한다(RB-24. 추천 적용 2026-10-28, 기술 검토 낮음-019).
 - **무거운 변경은 정비 시간에**: 큰 표의 인덱스 생성, 제약 검증, 표를 다시 쓸 위험이 있는 변경은 정비 시간(§8.3)에만 한다. 제약은 `NOT VALID`로 먼저 추가하고, 나중에 `VALIDATE CONSTRAINT`(SHARE UPDATE EXCLUSIVE 잠금)로 검증한다. 휘발성이 아닌 기본값을 가진 열 추가는 PostgreSQL 11부터 표를 다시 쓰지 않는다.
 - **공유 클러스터**: identity·ops·core는 한 Aurora(AWS가 운영해 주는 PostgreSQL 호환 데이터베이스) 클러스터 안의 서비스별 논리 DB·역할이라 마이그레이션이 서로를 막지 않는다. 다만 같은 정비 시간에 겹치면 하나씩 돌린다.
 
@@ -504,9 +558,9 @@ flowchart LR
 | --- | --- |
 | Redis(대기열·좌석) 키와 Lua | 스크립트는 이미지에 들어 있고, 기동 때 등록한다. `EVALSHA`가 NOSCRIPT를 받으면 다시 등록한다. 스크립트 캐시는 데이터가 아니어서 재시작·장애 조치 뒤 사라진다(Valkey 문서). 카나리 중에는 두 버전의 스크립트가 같은 키를 다루므로, 키의 뜻을 제자리에서 바꾸지 않는다. 형식을 바꿀 때는 새 키 접두사(`v2:`)로 확장·축소한다. 펜싱·세대 번호 규칙(ADR-0002·0014)은 그대로다 |
 | Kafka·Avro | BACKWARD_TRANSITIVE, 소비자 먼저 배포(§6.5). 토픽(메시지를 종류별로 모아 두는 통로)과 파티션 변경은 `peaket-contracts` PR로 정하고 IaC로 적용한다. 파티션 수는 줄이지 않는다. 늘리기는 정비 시간에만 한다(§12.1). 메시지의 자리는 키 해시를 파티션 수로 나눠 정하므로, 키 순서가 필요한 거래 토픽은 파티션을 늘리지 않고 판매가 없는 날 새 토픽으로 옮긴다(ADR-0082) |
-| ClickHouse | 브론즈 표에는 열 추가만 한다. 형식을 바꿀 때는 새 표를 만들고 dbt로 다시 생성한다. dbt 모델은 회차 단위로 다시 만든다(ADR-0052) |
-| MongoDB `$jsonSchema` | 검증을 강화할 때는 먼저 `validationLevel: moderate`로 건다(새 문서와, 이미 규칙에 맞는 문서의 갱신만 검사한다. 규칙에 맞지 않는 기존 문서의 갱신은 검사하지 않는다). 백필한 뒤 `strict`로 올린다 |
-| S3 Iceberg | 스키마 진화는 열 추가만 한다 |
+| ClickHouse | 브론즈 표에는 열 추가만 한다. 형식을 바꿀 때는 새 표를 만들고 dbt로 다시 생성한다. dbt 모델은 회차 단위로 다시 만든다(ADR-0052). 법정 접속기록 표는 TTL을 3개월보다 짧게 바꾸거나 파티션을 지우는 마이그레이션을 CI 검사가 막는다. 지우기·표 바꾸기는 마이그레이션 역할만 하고, 넣는 사용자(수집기)와 읽는 사용자에게는 그 권한이 없다(docs/observability.md §7, 추천 적용 2026-10-28, 기술 검토 높음-21) |
+| 상품 속성 스키마(`product.attributes`, Zod 판) | 상품 정의는 PostgreSQL `product` 표의 JSONB 칸이고, 모양은 코드의 Zod 스키마 판(`schema_version`)이 정한다(ADR-0101. MongoDB `$jsonSchema` 규칙은 없앴다). 검증을 강화할 때는 새 판을 만들어 새 상품부터 쓰고, 옛 판 상품은 읽을 때 옛 판으로 검사한다. 백필 작업으로 옛 판 상품을 새 판으로 옮기고, 속성 검증 잡의 실패가 0인 것을 본 뒤 옛 판 코드를 없앤다. 새 상품 유형은 스키마 파일·화면 설정·`product_type` 행(배포 때 넣는 자료)으로 더하고 DDL을 쓰지 않는다 |
+| S3 분석 아카이브(회차별 Parquet 파일, ADR-0115) | 골드 표의 스키마 진화는 열 추가만 한다. 옛 파일에 없는 칸은 읽을 때 기본값으로 채워진다(ClickHouse 26.8 `input_format_parquet_allow_missing_columns` 기본 켬). 칸 뜻을 바꾸려면 새 칸을 더하고 읽기 뷰 `archive.<표>`에서 옛 칸과 맞춘다. 한 번 쓴 파일은 고치지 않는다 |
 
 ## 8. 변경 동결과 정비 시간
 
@@ -549,6 +603,11 @@ flowchart LR
 ### 8.3 정비 시간과 관리형 유지보수
 
 - **정비 시간**: 매일 04:00~06:00(KST) [가정, Phase 4 운영 리허설에서 확정]. 이 시간에 무거운 DB 변경(§7.2), 장애 조치를 일으키는 인프라 교체(인스턴스 형식 변경), 노드 이미지 교체(Karpenter drift), 클러스터 애드온과 EKS(AWS가 운영해 주는 쿠버네티스) 버전 올리기, 비밀 자동 교체(Secrets Manager 교체 일정), 백필 재개를 한다. 대형·중형 동결 창이 정비 시간과 겹치는 날은 그날 정비를 건너뛴다.
+- **저장소 비밀 교체(추천 적용 2026-10-28, 기술 검토 중간-064)**: 30일 자동 교체(docs/security/secrets-and-keys.md)가 실행 중인 파드의 새 연결을 끊지 않게 다음을 지킨다.
+  - **교대 사용자 전략**: Aurora 서비스 DB 사용자, ClickHouse 주체별 사용자, Schema Registry 자격은 Secrets Manager의 '교대 사용자' 전략으로 바꾼다. 사용자를 둘(예: `purchase_app`·`purchase_app_clone`) 두고, 교체 때마다 지금 쓰지 않는 쪽의 비밀번호만 바꾼 뒤 비밀의 현재 판을 그쪽으로 옮긴다. 그래서 옛 판 사용자도 다음 교체까지 30일 더 유효하다(AWS 문서 'Rotation strategy: alternating users', 2026-10-28 확인). 단일 사용자 전략은 비밀번호가 바뀐 순간부터 옛 값으로 맺는 새 연결이 거절되므로 쓰지 않는다. 앱 연결 풀은 유휴 연결을 10초 뒤 닫고 연결을 최대 30분만 쓰므로(docs/architecture.md §5) 새 연결을 자주 맺기 때문이다. 두 사용자는 같은 권한이어야 해서 권한은 로그인하지 않는 그룹 역할에 주고 두 사용자를 그 역할의 구성원으로 둔다. 표는 마이그레이션 역할이 가진다(§7.2). 사용자를 복제하려면 더 높은 권한이 있어야 하므로, 교체 함수는 저장소마다 교체 전용 관리자 비밀을 따로 쓰고 그 비밀은 교체 함수만 읽는다. ElastiCache는 비밀번호 두 개를 겹쳐 두고, MSK는 IAM이라 비밀번호가 없다.
+  - **파드 반영**: External Secrets Operator가 비밀을 환경변수로 넣으므로 실행 중인 파드는 새 값을 모른다. 그래서 교체한 뒤 다음 교체 전(30일 안)에 그 비밀을 쓰는 파드가 모두 한 번 이상 다시 뜨게 한다. 주 1회 릴리스로 다시 뜨지 않은 워크로드는 재시작 잡이 동결 창이 아닌 정비 시간에 롤링 재시작한다 [가정]. 비밀을 파일 볼륨으로 받아 새 연결마다 다시 읽는 방식은 앱마다 다시 읽는 코드가 있어야 해서 지금은 쓰지 않는다. 30일 안 재시작을 지키지 못하는 워크로드가 생기면 그 워크로드만 이 방식으로 바꾼다.
+  - **PgBouncer 인증**: PgBouncer는 `auth_query`를 쓰지 않는다. RDS에서는 가장 높은 권한 사용자도 `pg_authid`를 읽지 못해(PgBouncer 문서 'Note on managed servers', 2026-10-28 확인) 저장된 SCRAM 비밀을 가져올 수 없기 때문이다. Aurora도 RDS와 같은 관리형 권한 모델이라 같은 제약으로 보고 설계하고, 운영 전환 전에 Aurora에서 확인한다. 대신 교체 함수가 새 비밀번호의 SCRAM-SHA-256 비밀을 직접 계산해 DB에 그 값으로 넣고(`ALTER ROLE … PASSWORD 'SCRAM-SHA-256$…'`), 같은 값을 PgBouncer 사용자 목록 비밀(`auth_file`)에 둔다. 목록에는 두 사용자의 항목이 모두 있다. PgBouncer는 목록을 파일 볼륨으로 받아 바뀌면 다시 읽고(`RELOAD`), DB에도 같은 SCRAM 비밀로 붙는다(클라이언트가 SCRAM으로 인증하고 비밀이 DB와 같을 때만 된다, PgBouncer 문서). 앱이 새 판을 PgBouncer보다 먼저 받지 않게, 사용자 목록 비밀은 1분, 앱 비밀은 1시간마다 다시 가져온다 [가정]. MD5 비밀번호는 쓰지 않는다.
+  - **확인**: 서비스 템플릿이 저장소 새 연결의 인증 실패를 `datastore_auth_failures_total{store}`로 세고, 0보다 크면 SEV2다 [가정]. 교체 함수가 끝나면 두 판의 사용자로 PgBouncer를 거쳐 한 번씩 접속해 본다(D-T34).
 - **drift는 정비 시간에만**: 모든 NodePool에 drift 사유의 중단 예산 `nodes: "0"`을 매일 06:00(KST)부터 22시간 건다(UTC 크론 `0 21 * * *`, `duration: 22h`).
 - **관리형 유지보수 창을 기본값으로 두지 않는다.** 서울 리전(클라우드 데이터센터가 모인 지역)의 기본값은 Aurora가 22:00~06:00(KST) 안의 임의 30분, ElastiCache가 21:00~05:00 안의 임의 60분이다. 그래서 저녁 오픈(예: 20:30 오픈의 T+60분은 21:30)과 겹칠 수 있다. Aurora의 필수 패치는 무기한 미룰 수 없고, 유지보수는 창이 끝난 뒤에도 이어질 수 있다(AWS 문서).
 
@@ -597,7 +656,7 @@ peaket-infra/
 
 ### 9.2 계정 구조
 
-- AWS Organizations로 관리(청구와 조직 정책만), 비운영(데모·스테이징), 운영(출시 전에는 비워 둔다)의 3계정을 둔다(추천 적용, 2026-10-13).
+- AWS Organizations로 관리(청구와 조직 정책만), 비운영(데모·스테이징), 운영(출시 전에는 비워 둔다)의 3계정을 둔다(추천 적용, 2026-10-13). 여기에 비상 접근 계정을 더해 4계정이다. 이 계정에는 IAM Identity Center가 멈췄을 때만 쓰는 IAM 사용자 둘과, 운영 계정으로 넘어가는 교차 계정 역할 하나만 둔다(§10.2, 추천 적용 2026-10-28, ADR-0102).
 - 조직 정책: 허용 리전(서울, 도쿄) 밖은 거부한다(전역 서비스 제외). 루트 사용자 사용과 CloudTrail·Config 끄기도 거부한다.
 - CloudTrail 조직 추적(관리 이벤트 첫 사본은 무료)을 관리 계정의 로그 버킷(Object Lock)에 모은다.
 
@@ -618,7 +677,8 @@ peaket-infra/
 | 노드 이미지 | Karpenter drift로 정비 시간에 바꾼다(§8.3) | — |
 | 기본 이미지 | 주 1회 다시 빌드한다(§4.2). 운영에 30일 넘은 이미지가 있으면 SEV3 [가정] | — |
 | Node.js | 짝수 LTS만 쓰고, LTS 종료 6개월 전에 올린다 [가정] | — |
-| 서비스 권한 | EKS Pod Identity로 주고, IRSA는 Pod Identity를 지원하지 않는 곳에만 쓴다 | AWS는 가능하면 Pod Identity를 권한다(리눅스 EC2 노드, Fargate 미지원) |
+| 서비스 권한 | EKS Pod Identity로 주고, IRSA는 Pod Identity를 지원하지 않는 곳에만 쓴다. MSK 권한만은 Pod Identity 역할에 주지 않고 아래 행의 MSK 전용 역할에 준다 | AWS는 가능하면 Pod Identity를 권한다(리눅스 EC2 노드, Fargate 미지원) |
+| MSK IAM 클라이언트(추천 적용 2026-10-28, 기술 검토 높음-26) | MSK(AWS가 운영해 주는 Kafka)에 IAM으로 붙는 워크로드마다 MSK 전용 IAM 역할을 둔다. 토픽·소비자 그룹 권한은 그 역할에만 주고, 그 역할의 신뢰 정책은 그 워크로드의 Pod Identity 역할만 믿는다(`sts:AssumeRole`). 클라이언트는 그 역할을 고정 세션 이름 `<워크로드>-<환경>`으로 맡아 토큰을 만든다. 역할을 맡지 못하면 기본 자격으로 넘어가지 않고 연결을 실패시킨다. Pod Identity 역할에는 MSK 권한이 없으므로, 설정이 틀려 Pod Identity 자격 그대로 붙으면 권한이 없어 바로 드러난다. 클라이언트별 설정: JavaScript(서비스·스트림 작업자·서비스별 Outbox 릴레이)는 [streaming.md](streaming.md) §2.6, 자바(직접 띄운 Schema Registry. Debezium이 돌던 Kafka Connect는 2026-10-28에 빠졌다, ADR-0116)는 [data.md](data.md) §4의 7번, Go(관측 전용 MSK의 수집기·Tempo)는 [observability.md](observability.md) §1. 정적 검사는 D-T30. 실제 MSK에서 재인증(연결을 유지한 채 새 토큰으로 다시 인증하는 것)이 그래도 끊기면(streaming.md ST-T14 ②) 그 워크로드만 IRSA(웹 ID 토큰으로 역할을 맡는 방식. 세션 이름을 고정할 수 있다)로 바꾼다 | aws-msk-iam-auth README 문제 해결 절: EKS Pod Identity처럼 STS(임시 자격을 내주는 AWS 서비스) 세션 이름이 바뀌는 자격은 재인증 때 'Cannot change principals during re-authentication'으로 연결이 끊기고, 전용 역할과 고정 세션 이름이 우회 방법이다. 같은 README와 2.3.9 릴리스 노트(2026-09-24): 역할을 못 맡으면 기본 자격으로 넘어가고(2.3.9부터 경고만 남긴다), `awsAddDefaultProviders="false"`가 그 대신 실패하게 한다(2026-10-28 확인) |
 
 ## 10. 사람의 접근과 감사
 
@@ -631,17 +691,22 @@ peaket-infra/
 | commander | 운영 읽기 | 운영 view | 운영 수동 동기화(긴급 변경) | — | 'PEAKET 관측' Viewer(콘솔 장애 때 읽기) |
 | 긴급 접근 | 운영 관리자(MFA, 1시간 세션) | 운영 cluster-admin | admin | — | — |
 
-- Grafana(지표와 로그를 그래프로 보여 주는 도구)의 제한 조직 'PEAKET 제한'(PostgreSQL 쿼리 문장)에는 지정한 DB 담당 엔지니어만 Viewer로 넣는다. 조직·팀·역할은 SSO 그룹으로 정한다(docs/observability.md §9, ADR-0078 결정 6).
+- Grafana(지표와 로그를 그래프로 보여 주는 도구)의 제한 조직 'PEAKET 제한'(PostgreSQL 쿼리 문장)에는 지정한 DB 담당 엔지니어만 Viewer로 넣는다. 조직·팀·역할은 SSO 그룹으로 정한다(docs/observability.md §9, ADR-0078 결정 6). 이 조직은 로컬·포트폴리오 측정용이다. 운영 설계에서는 DB 담당 엔지니어의 권한 세트에만 Database Insights의 SQL 문장 차원 조회와 Aurora 로그 그룹(CloudWatch Logs) 읽기를 넣는다(추천 적용 2026-10-28, 기술 검토 낮음-160).
 
-- IAM 사용자와 장기 키를 두지 않는다. IAM Identity Center(추가 요금 없음)와 MFA로 들어오고, EKS 접근 항목으로 권한 세트를 쿠버네티스 그룹에 묶는다.
-- **관리 도구와 원격 접속의 전송 암호화(추천 적용 2026-10-26, ADR-0089)**: Grafana·ArgoCD·Alertmanager 화면은 인터넷에 바로 내지 않고, 관제 콘솔처럼 허용 IP와 VPN으로만 닿는 내부 로드 밸런서 뒤에 둔다. 모두 HTTPS(TLS 1.2 이상, ACM 인증서)만 받고 평문 HTTP 리스너를 두지 않으며, 로그인은 SSO와 MFA로 한다(Grafana는 docs/observability.md §9). 쿠버네티스 API(EKS 엔드포인트)는 사설 엔드포인트를 켜고, 공개 엔드포인트는 허용 대역(사내망·VPN 출구)으로만 연다. CI(GitHub 호스트 러너)는 쿠버네티스 API를 부르지 않는다: 클러스터 안 설치는 ArgoCD가 하고, Terraform은 AWS API(EKS 애드온·접근 항목)만 쓴다. 노드에는 SSH를 열지 않고 SSM 세션 관리자만 쓴다. 세션 데이터는 TLS 1.2 이상으로 암호화하고, 셸 세션 기록은 S3·CloudWatch Logs에 남긴다. DB 긴급 조회처럼 포트 포워딩을 쓰면 세션 기록이 남지 않으므로 CloudTrail과 대상 쪽 감사 기록(pgAudit, §10.3)으로 남긴다.
+- IAM 사용자와 장기 키를 두지 않는다. IAM Identity Center(추가 요금 없음)와 MFA로 들어오고, EKS 접근 항목으로 권한 세트를 쿠버네티스 그룹에 묶는다. 유일한 예외는 비상 접근 계정의 IAM 사용자 둘이다(§10.2, 추천 적용 2026-10-28, ADR-0102).
+- **관리 도구와 원격 접속의 전송 암호화(추천 적용 2026-10-26, ADR-0089)**: Grafana·ArgoCD·Alertmanager 화면은 인터넷에 바로 내지 않고, 관제 콘솔처럼 허용 IP와 VPN으로만 닿는 내부 로드 밸런서 뒤에 둔다. 모두 HTTPS(TLS 1.2 이상, ACM 인증서)만 받고 평문 HTTP 리스너를 두지 않으며, 로그인은 SSO와 MFA로 한다(Grafana는 docs/observability.md §9). 쿠버네티스 API(EKS 엔드포인트)는 사설 엔드포인트만 켜고 공개 엔드포인트는 끈다(추천 적용 2026-10-28, 기술 검토 낮음-171). 그러면 API 서버로 가는 요청은 모두 클러스터의 VPC나 그와 이은 망에서만 온다(EKS 문서, 2026-10-28 확인). CI(GitHub 호스트 러너)는 쿠버네티스 API를 부르지 않는다: 클러스터 안 설치는 ArgoCD가 하고, Terraform은 AWS API(EKS 애드온·접근 항목)만 쓴다. 그래서 공개 엔드포인트가 필요한 곳은 사람의 접속뿐이고, 사람은 두 길로 들어온다. ① VPN이 VPC로 이어지면(사설 대역으로 라우팅) 그 길로 사설 엔드포인트에 닿는다. ② 그렇지 않거나 VPN이 멈췄으면 SSM 세션 관리자의 원격 호스트 포트 포워딩(`AWS-StartPortForwardingSessionToRemoteHost`)으로 사설 서브넷의 작은 중계 인스턴스(공인 IP 없음, 나가는 통신은 EKS 엔드포인트 443만 [가정])를 거쳐 닿는다. 클러스터 보안 그룹은 VPN 대역과 중계 인스턴스에서 오는 443만 받는다. ArgoCD를 처음 올리는 설치도 ②로 한 번 한다. 긴급 접근(§10.2)과 비상 접근 계정의 비상 런북 Job 만들기도 ②를 쓰므로 VPN이 멈춰도 막히지 않는다. 자체 호스트 러너를 들여도 VPC 안에 두므로 공개 엔드포인트를 다시 켤 이유가 되지 않는다. 노드에는 SSH를 열지 않고 SSM 세션 관리자만 쓴다. 세션 데이터는 TLS 1.2 이상으로 암호화하고, 셸 세션 기록은 S3·CloudWatch Logs에 남긴다. DB 긴급 조회처럼 포트 포워딩을 쓰면 세션 기록이 남지 않으므로 CloudTrail과 대상 쪽 감사 기록(pgAudit, §10.3)으로 남긴다.
 - 운영 클러스터에는 사람에게 늘 주어진 쓰기 권한이 없다. 변경은 GitOps로만 한다.
 
 ### 10.2 긴급 접근
 
 - 쓰는 때: GitOps 경로가 고장 났고(RB-25) SEV1이 진행 중일 때다. 그리고 선언한 인시던트에서 재시작 전 진단 증거를 남기거나(RB-31: 파드 하나에 진단 주석) 느린 쿼리를 끊을 때(RB-32), 진단 증거를 읽을 때(ADR-0070), KMS 키를 끄거나 삭제를 예약할 때(commander 1인 승인을 더한다, ADR-0084)다.
 - 긴급 접근 역할을 맡는 순간, CloudTrail 이벤트로 SEV2 경보와 Slack 알림이 나간다. 세션은 기록한다. 사후 검토는 필수다. 72시간 [가정] 안에 GitOps 상태를 실제와 맞춘다.
-- 관제 비상 명령의 대역 외 경로(런북 CLI)는 이 긴급 접근과 별개다. 이 경로는 `ops-breakglass` 네임스페이스의 Job과 두 운영자의 KMS 서명으로만 돈다(infra §9 '비상 런북 통제', ADR-0053).
+- 관제 비상 명령의 비상 런북 경로(런북 CLI)는 이 긴급 접근과 별개다. 이 경로는 `ops-breakglass` 네임스페이스의 Job과 운영자의 KMS 서명(서로 다른 두 명, 명령 3 정지 묶음은 commander 한 명, ADR-0095)으로만 돌고, 직접 제어 채널(제어 전용 gRPC)로 명령을 넣는다(infra §9 '비상 런북 통제', ADR-0053·0102).
+- **비상 접근 계정(추천 적용 2026-10-28, ADR-0102, ADR-0054 결정 15의 유일한 예외)**: IAM Identity Center가 멈추거나 잘못 설정돼 위의 긴급 접근 역할로도 들어오지 못할 때만 쓴다.
+  - 비상 접근 계정에 하드웨어 MFA(FIDO 보안 키)를 건 IAM 사용자 둘을 두고, 각각 commander 한 명에 묶는다. 비밀번호와 보안 키는 봉인해 서로 다른 곳에 둔다(docs/security/secrets-and-keys.md).
+  - 운영 계정으로 넘어가는 교차 계정 역할 하나로 할 수 있는 일은 `ops-breakglass` 네임스페이스의 비상 런북 Job 만들기와, 묶인 commander의 비상 런북 서명 키로 `kms:Sign`뿐이다. 진단 증거 복호와 데이터 읽기는 넣지 않는다.
+  - 로그인하는 순간 CloudTrail 이벤트로 SEV1이 난다. 쓴 뒤에는 사후 검토, 비밀번호·보안 키 교체, 다시 봉인이 필수다. 분기마다 [가정] 로그인만 해 보는 점검을 한다(RB-37).
+  - 운영 설계 범위다. 포트폴리오에는 Terraform 코드와 런북(RB-37)으로만 둔다(ADR-0057).
 
 ### 10.3 운영 DB 직접 접근
 
@@ -655,7 +720,7 @@ peaket-infra/
 | --- | --- | --- |
 | AWS API 호출 | CloudTrail 조직 추적 | 로그 파일 무결성 검증, Object Lock |
 | 쿠버네티스 API | EKS 감사 로그 | 운영에서만 켠다(수집 비용) |
-| 배포와 동기화 | ArgoCD 알림 → GitHub 배포 상태·Grafana 주석, Rollout 이벤트 | §13 |
+| 배포와 동기화 | ArgoCD 알림 → GitHub 배포 상태, Argo CD 동기화 이벤트(쿠버네티스 이벤트 → Loki, 배포 주석은 Loki 주석 조회로 그린다, 기술 검토 낮음-170), Rollout 이벤트 | §13 |
 | GitHub 조직 활동 | GitHub 조직 감사 로그(화면에는 최근 180일만 남는다)와, 조직 웹훅(member·organization·team 사건)을 받아 운영 감사 저장소(S3 Object Lock)에 남긴 사본 | 규칙 세트 우회, 권한 변경. 3년 보존은 웹훅 사본으로 지킨다(추천 적용 2026-10-26) |
 | 운영 DB 세션 | pgAudit | NFR-017 |
 | 긴급 접근 | CloudTrail + 세션 기록 | §10.2 |
@@ -706,7 +771,7 @@ peaket-infra/
 
 | ID | 런북 | 발동 |
 | --- | --- | --- |
-| RB-23 | 배포 되돌리기와 동결 중 긴급 변경(카나리 중단, Git 되돌리기, `rollbackWindow`, commander 수동 동기화, 포스트모템) | 카나리 자동 중단 경보, 배포 직후 SLO 소진, 온세일 중 배포 원인 의심 |
+| RB-23 | 배포 되돌리기와 동결 중 긴급 변경(카나리 중단, Git 되돌리기, 병합 직후 VPN 경로로 `argocd app sync`(3분 조회를 기다리지 않는다, §6.7 6번), `rollbackWindow`, commander 수동 동기화, 단계별 시간 기록, 포스트모템) | 카나리 자동 중단 경보, 배포 직후 SLO 소진, 온세일 중 배포 원인 의심 |
 | RB-24 | DB 마이그레이션 실패와 잠금 대기(재시도·중단, 부분 적용 확인, 트랜잭션 밖 단계 정리, 앞으로 고침) | PreSync 잡 실패, `lock_timeout` 반복 |
 | RB-25 | 배포 경로 장애(GitHub Actions, ECR, ArgoCD, Sigstore): 원인 경로별 대체, 긴급 접근 적용과 사후 GitOps 상태 맞추기 | 승격 실패 연속, 동기화 오류, 서명 실패 |
 | RB-26 | 비밀 유출 대응(즉시 폐기와 재발급, 사용 이력 조사, 저장소 이력 정리, 보안 사고 판단은 RB-20) | gitleaks 탐지, 비밀 사용 이상(CloudTrail), 외부 제보 |
@@ -716,7 +781,7 @@ peaket-infra/
 
 | ID | Game Day | 기대 경보 | 기대 대응 |
 | --- | --- | --- | --- |
-| G-18 | 나쁜 배포: 서버 오류 2%와 p99 2배를 내는 버전을 카나리로 배포 | 카나리 분석 실패(SEV2) | 분석 두 구간 안에 자동 중단, 안정판 100%, 되돌리기를 결정한 때부터 이전 버전 100%까지 걸린 시간 측정(목표 5분) |
+| G-18 | 나쁜 배포: 서버 오류 2%와 p99 2배를 내는 버전을 카나리로 배포 | 카나리 분석 실패(SEV2) | 분석 두 구간 안에 자동 중단, 안정판 100%, 되돌리기를 결정한 때부터 이전 버전 100%까지 걸린 시간 측정(목표 5분). 완료된 배포의 되돌리기도 한 번 해서 PR 만들기·검사·병합과 감지(`argocd app sync`)·롤아웃의 단계별 시간을 §6.7 6번 예산과 견주고, 동기화를 부르지 않은 판(3분 조회만)도 한 번 재 둔다 |
 | G-19 | 동결 창 위반 시도와 달력 장애: 대형 회차 T-60분에 운영 승격 PR 병합 시도, 같은 때 `freeze-calendar` 정지 | 달력 신선도 SEV2 | `gitops-check`와 ArgoCD deny 창이 막고, 이미 걸린 창이 유지되며, T-30분 점검의 동결 항목이 통과한다 |
 | G-20 | 입장 정책 의존 장애 중 확장: Kyverno 파드 1개 제거와 투명성 로그 접근 차단 상태에서 핫패스 확장 | 검증 오류율 경보 | 파드가 60초 안에 뜬다(K9). 못 뜨면 RB-27과 ADR-0054 결정 4의 대안으로 바꾼다 |
 
@@ -732,8 +797,10 @@ peaket-infra/
 
 - 목표를 두지 않고 추세만 본다(NFR-023: 지표를 목표로 삼으면 왜곡된다는 DORA 권고). 공용 워크플로가 주 1회 계산해 보고와 Grafana 패널을 만든다.
 - git flow에서는 변경 리드타임에 릴리스 대기(주기 최대 1주와 릴리스 수명 최대 3영업일, 둘 다 [가정])가 들어간다(ADR-0074). 추세가 꾸준히 1주를 넘으면 ADR-0074의 되돌릴 조건을 확인한다.
-- 출시 전에는 운영 배포가 없으므로 지표는 데모 환경 값이다. 보고서에는 '데모 환경 기준'이라고 표시한다.
-- ArgoCD 알림의 GitHub 서비스(배포 상태, 커밋 상태)와 Grafana 서비스(주석)를 쓴다.
+- 출시 전에는 운영 배포가 없으므로 지표는 데모 환경 값이다. 보고서에는 '데모 환경 기준'이라고 표시한다. 운영 배포가 생기면 그때부터 운영 기준으로 바꾸고, 두 기준의 값을 한 추세선에 잇지 않는다(추천 적용 2026-10-28, 기술 검토 낮음-057).
+- **포트폴리오 기간의 정의(추천 적용 2026-10-28, 기술 검토 낮음-121)**: 운영 장애가 없어 위 표의 운영 정의로는 값이 비거나 뜻이 바뀌므로, 데모 환경 기준 값은 이렇게 센다. 배포는 데모 승격(로컬 kind의 데모 오버레이, 임시 클라우드 데모도 같은 오버레이, §5)이다. 운영 오버레이는 메시가 있어야 배포되고(§4.3) 운영 저장소(ECR) 이미지만 받으므로 포트폴리오 기간의 배포로 세지 않는다. 실패는 카나리 자동 판정의 중단과 그에 따른 되돌리기다. 실패한 배포 복구 시간은 그 되돌리기를 시작한 때부터 데모의 SLI가 정상으로 돌아올 때까지다. 재작업은 `hotfix/` 가지를 병합해 나간 배포다(§2.2). 표의 운영 정의는 운영 설계로 남기고, 운영 배포가 생기면 그것으로 바꾼다.
+- DORA 지표는 전달 과정의 성과라 ISO/IEC 25023의 유지보수성 측정량(모듈성·재사용성)에 대응시키지 않는다. 제품의 유지보수성은 서비스 사이 의존 규칙 위반 수와 계약 변경 영향 범위로 따로 잰다(docs/quality/quality-requirements.md QR-MA-1·QR-MA-2).
+- ArgoCD 알림은 GitHub 서비스(배포 상태, 커밋 상태)만 쓴다. Grafana 배포 주석은 알림이 쓰지 않고, 대시보드가 Loki에 모인 Argo CD 동기화 이벤트를 주석 조회로 읽는다. 주석 쓰기 토큰은 Editor 권한이 필요해 대시보드까지 고칠 수 있으므로 만들지 않는다(docs/observability.md §7, 추천 적용 2026-10-28, 기술 검토 낮음-170).
 - **파이프라인 지표**: PR 검사 시간 p50·p90(검사의 절반·열에 아홉이 이 시간 안에 끝난다는 뜻), `develop`이 깨져 있던 시간, 릴리스 가지 수명, 역병합 충돌 수, 3일 넘은 작업 가지 수, 불안정 시험 수, 승격 대기 시간, 동결로 미뤄진 승격 수, 조치 기한을 넘긴 취약점 수, 운영 이미지 나이.
 
 ## 14. 시험 포인트
@@ -745,8 +812,8 @@ peaket-infra/
 | D-T3 | 대형 회차에서 T-100분에 시작한 카나리(§6.2)가 표본 부족으로 판정 불가에 멈춘 채 T-45분에도 아직 진행 중이다 | `freeze-guard`가 카나리를 중단하고, T-30분 점검의 '진행 중 배포 0건'이 통과한다 |
 | D-T4 | `freeze-calendar`가 ops-svc를 읽지 못한다 | 파일은 그대로다. 30분 뒤 SEV2 경보가 나고, 2시간 뒤 운영 승격이 거부된다 |
 | D-T5 | 동결 중에 `emergency-change` 라벨과 인시던트 번호가 붙은 되돌리기 PR | 이전 다이제스트로 바꾸는 변경이면 게이트를 통과하고, commander만 수동 동기화할 수 있다. 새 다이제스트를 넣으면 거부된다. `rollbackWindow` 안이면 단계와 분석을 건너뛴다 |
-| D-T6 | 서버 오류 2%를 내는 카나리 | 분석이 실패해 자동 중단되고 안정판이 100%가 된다. SEV2 경보에는 RB-23 링크가 붙는다 |
-| D-T7 | 분석 구간의 카나리 요청이 200건 미만 | 판정 불가로 멈추고 사람의 결정을 기다린다 |
+| D-T6 | 서버 오류 2%를 내는 카나리(구간 요청 1,000건, 오류 20건). 같은 구간에서 오류 1건(요청 200건, 0.5%)만 내는 카나리 | 앞의 것은 분석이 실패해 자동 중단되고 안정판이 100%가 된다. SEV2 경보에는 RB-23 링크가 붙는다. 뒤의 것은 오류 5건 [가정]에 못 미쳐 실패로 보지 않고 다음 단계로 간다(추천 적용 2026-10-28, 기술 검토 중간-002) |
+| D-T7 | 분석 구간의 카나리 요청이 200건 미만. 요청이 200~999건인 25% 단계. 5% 단계에서 p99만 나쁜 카나리 | 200건 미만이면 판정 불가로 멈추고 사람의 결정을 기다린다. 200~999건이면 p99 대신 p95로 지연을 비교한다. 5% 단계에서는 지연을 비교하지 않아 다음 단계로 가고, 25% 단계에서 판정한다 |
 | D-T8 | 확장 마이그레이션을 적용한 DB에서 N-1 앱 시험 묶음을 실행한다 | 통과한다. 옛 열을 지우는 축소 마이그레이션을 같은 배포에 넣으면 N-1 시험이 실패해 PR이 막힌다 |
 | D-T9 | `-- peaket:no-transaction` 표시가 있는 파일의 `CREATE INDEX CONCURRENTLY` | 트랜잭션 밖에서 성공하고 기록 표에 남는다. 표시가 없는 파일에 같은 문장이 있으면 Squawk가 막는다 |
 | D-T10 | 핫 테이블에 긴 트랜잭션이 열린 상태에서 그 표를 바꾸는 마이그레이션 | 3초 뒤 물러나 5회 다시 시도한 뒤 잡이 실패한다. 롤아웃은 시작되지 않는다. 그동안 핫패스 p99는 변하지 않는다 |
@@ -758,7 +825,7 @@ peaket-infra/
 | D-T16 | `ttl` 6시간이 지난 스테이징 스택 | 다음 정리 실행 때 삭제된다. 삭제가 실패하면 SEV2 경보가 난다 |
 | D-T17 | 오픈 시각을 수요일 04:10(KST)으로 등록 | 오픈 간격 규칙 검사와 같은 자리에서 거부된다(관리형 유지보수 창) |
 | D-T18 | 로컬 kind에서 파드 하나에 `peaket.io/diagnose=heap@<요청 시각>` 주석을 단다(ADR-0070) | 그 파드가 준비 상태를 내리고 진행 중인 요청을 마친다. 그 뒤 진단 보고서와 힙 스냅샷을 증거 저장소(LocalStack S3)에 올리고 다시 뜬다. 다시 뜬 프로세스는 남은 주석 때문에 같은 수집을 되풀이하지 않는다. 다른 파드의 오류는 늘지 않는다. 메모리 여유가 힙의 두 배보다 적으면 스냅샷을 건너뛰고 그 사실을 기록한다. 보고서에 환경 변수가 없다. `--disable-sigusr1`이 없는 Node 파드는 Kyverno가 거부한다. 주석부터 업로드까지 걸린 시간을 적는다 |
-| D-T19 | 서비스 템플릿의 준비 조건에 Redis 호출을 넣은 판과, 정상 판에서 Redis를 멈춘 상태(ADR-0070) | 앞의 판은 템플릿 시험이 실패해 PR이 막힌다. 정상 판은 Redis가 멈춰도 준비 상태가 그대로이고 생존 프로브 재시작은 0이다. 요청에는 즉시 실패나 대체 경로로 답한다 |
+| D-T19 | 서비스 템플릿의 준비 조건에 Redis 호출을 넣은 판과, 정상 판에서 Redis를 멈춘 상태(ADR-0070). 정상 판에 부하를 건 채 이벤트 루프를 2초씩 막는 작업을 몇 초 간격으로 계속 넣는다(추천 적용 2026-10-28, 기술 검토 중간-079) | 앞의 판은 템플릿 시험이 실패해 PR이 막힌다. 정상 판은 Redis가 멈춰도 준비 상태가 그대로이고 생존 프로브 재시작은 0이다. 요청에는 즉시 실패나 대체 경로로 답한다. 이벤트 루프를 2초씩 막아도 준비 상태가 유지되고(준비 프로브 5초·시간 초과 3초·연속 6회 [가정]) Service에서 빠지는 파드는 0이다. 같은 시험을 쿠버네티스 기본값(시간 초과 1초·연속 3회)으로 돌리면 빠지는 것을 기록해 값의 근거로 남긴다. 값은 0.3.6에서 온세일 부하 측정의 이벤트 루프 지연 p99로 정한다(docs/architecture.md §5 프로브 규칙) |
 | D-T20 | 스트림 작업자 판 올리기: 사건을 계속 보내면서 작업자를 롤링으로 올리고, 중간에 옛 파드를 강제로 종료한다(ADR-0099. 2026-10-20 ADR-0072의 세이브포인트 호환 시험을 바꿨다) | 새 파드는 커밋한 위치부터 이어 읽고, 판매 좌석·금액 누적이 끊김 없이 정답과 같다(겹친 행은 읽을 때 지운다). 쓰기 성공 전에 커밋한 묶음이 없다 |
 | D-T21 | `feature/*` 가지에서 `main`으로 PR을, 같은 가지에서 `develop`으로 PR을 연다(ADR-0074) | `main` PR은 가지 규칙 검사가 실패해 병합되지 않는다. `develop` PR은 스쿼시로 병합된다 |
 | D-T22 | `release/1.5.0`을 마무리하기 전에 `main`에만 있는 핫픽스가 있다(릴리스 가지로 역병합하지 않았다) | 병합 결과 트리가 후보 트리와 달라 필수 검사가 실패한다. `main`을 릴리스 가지에 병합하고 새 후보를 데모에서 검증한 뒤에 통과한다 |
@@ -768,6 +835,22 @@ peaket-infra/
 | D-T26 | 대형 회차 동결 창 안에서 `hotfix/1.5.2`를 마무리한다 | `main` 병합과 태그는 된다. 운영 승격 PR은 동결 게이트에 막혔다가 창이 끝난 뒤 진행된다 |
 | D-T27 | 서비스 템플릿에서 `app.enableShutdownHooks()`나 gRPC `gracefulShutdown: true`를 뺀 판과 정상 판이, 2초 걸리는 gRPC 호출을 처리하는 중에 SIGTERM을 받는다(ADR-0082) | 앞의 판은 진행 중이던 호출이 끊겨 템플릿 시험이 실패하고 PR이 막힌다. 정상 판은 그 호출을 성공으로 끝내고 새 호출은 받지 않는다 |
 | D-T28 | 운영 오버레이에서 서비스 네임스페이스의 앰비언트 등록 라벨을 지우거나, 메시 전체 STRICT PeerAuthentication을 빼거나, gRPC 부하 분산 프로필을 `headless-round-robin`으로 바꾼 PR(ADR-0082) | gitops-check의 정책 시험이 실패해 PR이 막힌다. 로컬·데모 오버레이의 같은 설정은 통과한다 |
+| D-T29 | 서비스 템플릿의 시작 작업(추천 적용 2026-10-28, ADR-0103): ① purchase-svc가 `sale_control`을 읽지 못한 채 뜬다 ② `control.settings`를 끝까지 읽기 전이다 ③ `control.sessions-terminated`를 '지금 − 15분'부터 읽기 전이다 ④ Kafka를 막은 채 뜬다. 정상 판과 준비 조건에 공유 의존성 호출을 넣은 판을 함께 돌린다 | ①②③ 동안은 준비 상태가 아니다. ①은 계속 준비 상태가 아니고, ④는 30초 [가정] 뒤 준비 상태가 되며 SEV2 `control_sync_lagging{kind}`가 뜬다. 준비 프로브는 시작 작업이 켠 표시만 본다. 공유 의존성을 부르는 판은 템플릿 시험이 실패해 PR이 막힌다(D-T19와 같은 시험) |
+| D-T30 | IAM 코드에서 워크로드의 Pod Identity 역할에 `kafka-cluster:*` 권한을 넣은 PR, MSK 전용 역할의 신뢰 정책에 그 워크로드가 아닌 주체를 넣은 PR, 서비스의 토큰 함수를 기본 자격 사슬(`generateAuthToken`)로 바꾼 PR(기술 검토 높음-26, §9.4) | 셋 모두 정적 검사가 PR을 막는다. 워크로드마다 MSK 전용 역할 하나와, 그 역할만 맡을 수 있는 Pod Identity 역할의 짝이면 통과한다 |
+| D-T32 | 공급망 잡 분리(추천 적용 2026-10-28, 기술 검토 중간-062): ① `build-image.yml` 빌드 잡에 OIDC 토큰 요청이나 레지스트리 푸시 단계를 넣은 PR ② 출시 가지 후보 빌드에 캐시 복원 단계를 넣은 PR ③ `develop`에서 서명한 이미지, 자체 호스트 실행기에서 서명한 이미지를 운영 승격 PR에 넣는다 | ①②는 `.github` 저장소의 워크플로 검사(잡별 `permissions`·`cache-mode`)가 PR을 막는다. 빌드 잡에는 `id-token` 권한이 없어 토큰 요청도 실패한다. ③은 `gitops-check`가 인증서의 소스 ref·실행기 종류로 거부하고, 스테이징·운영 입장 정책도 기동을 거부한다. 출시·핫픽스 가지를 GitHub 호스트 러너에서 빌드하고 게시 잡이 서명한 이미지만 통과한다 |
+| D-T33 | 오버레이별 허용 레지스트리(추천 적용 2026-10-28, 기술 검토 중간-063): 최종 형태로 만든 오버레이에 ① 데모 오버레이의 GHCR 서명 다이제스트 ② 운영 오버레이의 같은 GHCR 다이제스트를 넣고, ③ 로컬 kind가 끌어오기 비밀 없이 GHCR 다이제스트를 받는다 | ①은 통과한다. ②는 `gitops-check`가 허용 레지스트리 밖이라 PR을 막는다. ③은 인증 없이 받는다. 데모 입장 정책(감사 모드)은 GHCR 이미지의 서명·출처도 §4.2와 같은 신원으로 확인해 위반을 0건으로 기록한다 |
+| D-T34 | 저장소 비밀의 교대 사용자 교체(추천 적용 2026-10-28, 기술 검토 중간-064): 로컬(PostgreSQL, PgBouncer, LocalStack Secrets Manager)에서 교체를 세 번 돌리며 ① 교체 직후 옛 판 비밀을 가진 파드와 새 판 비밀을 가진 파드가 PgBouncer로 새 연결을 맺는다 ② PgBouncer가 사용자 목록을 다시 읽기 전에 새 판 비밀을 받은 파드가 뜬다 ③ 두 번째 교체 뒤에도 첫 판 비밀을 쥔 파드가 남아 있다 | ①은 둘 다 성공한다. ②는 연결 재시도 안에서 성공하고 실패 수만 남는다. ③은 인증이 실패하고 `datastore_auth_failures_total`의 SEV2 경보가 뜬다. 재시작 잡이 교체 사이에 그 파드를 다시 띄운 판에서는 실패가 0이다 |
+| D-T35 | 이미지 처리 작업 격리(추천 적용 2026-10-28, 기술 검토 중간-068): ① `image-worker` 배포에 DB·Kafka 비밀을 넣은 PR ② 루트 사용자나 쓰기 가능한 루트 파일 시스템으로 바꾼 PR ③ S3 밖으로 나가는 통신을 연 PR ④ 로컬에서 EICAR 시험 파일(백신 시험용 표준 문자열)과 4,000만 화소를 넘는 이미지를 올린다 | ①②③은 `gitops-check` 정책 시험이 막는다. 작업 신원의 IAM 정책에는 격리 버킷 읽기와 파생본 쓰기만 있어 IAM 정적 검사도 다른 권한을 막는다. ④는 모의 검사기가 `THREATS_FOUND`를 붙여 `MALWARE`로 거절하고, 큰 이미지는 디코딩 전에 `TOO_LARGE`로 거절한다. 두 경우 모두 core-svc 파드는 이미지를 디코딩하지 않는다 |
+| D-T36 | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토 중간-071): 운영 오버레이의 인가 정책을 최종 형태로 만들어 docs/architecture.md §5 '포트별 허용 표'에서 만든 기대값과 비교한다. 로컬 kind에서는 같은 표로 만든 NetworkPolicy로 ① 게이트웨이 → 서비스 REST 포트 ② §3.2 통신 표에 없는 파드 → gRPC 포트 ③ 웹 앱 서버 → identity-svc 내부 포트 ④ 게이트웨이 → 제어 gRPC 포트 ⑤ 런북 Job → 제어 gRPC 포트를 시험한다 | 정책이 표와 다르면 PR이 막힌다. 운영 오버레이에서 gRPC 포트의 허용 주체는 그 서비스의 웨이포인트 하나뿐이다. 로컬에서 ①③⑤는 연결되고 ②④는 거부된다 |
+| D-T31 | admission-ctrl 롤링의 리더 교체 횟수(추천 적용 2026-10-28, 기술 검토 중간-080): 복제본 3(`maxUnavailable: 1`, `maxSurge: 0`)으로 롤링을 20번 [가정] 한다. 리더 파드의 `pod-deletion-cost` 주석을 단 판과 단 적 없는 판을 함께 돌린다. 리더를 놓은 파드에 주석이 남는지, 다른 앱 파드의 주석을 바꾸려 하면 막히는지도 본다 | 주석을 단 판은 롤링마다 리더 교체가 보통 1번이고, 2번 넘는 회차가 있으면 그 회차와 이유를 남긴다. 단 적 없는 판은 교체 횟수 분포(최악 3번)를 남겨 비교 근거로 쓴다. 교체당 serving 멈춤 5초 [가정] 이하, serving 중복 증가 0건(G-09와 같은 판정). 리더를 놓은 파드에서는 주석이 지워지고, 다른 앱 파드의 주석 변경은 Kyverno가 거부한다 |
+| D-T40 | 축소 성능 상대 비교(추천 적용 2026-10-28, 기술 검토 낮음-016): ① 같은 이미지를 기준판·새 판으로 놓고 번갈아 재는 A/A 실행을 10번 [가정] 돌린다 ② 핫패스 경로에 30ms [가정] 지연을 넣은 판을 새 판으로 넣는다 ③ 기준값을 정하기 전의 ②를 돌린다 | ①은 실행마다 p99 비율을 남기고, 그 가장 큰 벗어남이 기준값의 근거가 된다. ②는 기준값을 넘어 야간 시험이 실패하고 SEV3 알림이 난다. ③은 경고만 남기고 병합·승격을 막지 않는다 |
+| D-T41 | PR 제목 형식(추천 적용 2026-10-28, 기술 검토 낮음-017): ① `Add login`(형식 틀림) ② `wip: queue`(허용 밖 종류) ③ `feat(queue): …`인데 본문에 `BREAKING CHANGE:`가 있다 ④ `feat(queue)!: …` ⑤ ①의 제목을 `fix: …`로 고친다 | ①②③은 `branch-policy`가 실패해 병합되지 않는다. ④는 통과하고, 릴리스를 자를 때 버전 계산이 MAJOR를 올린다(운영 출시 전에는 y). ⑤는 제목을 고친 사건으로 검사가 다시 돌아 통과한다 |
+| D-T42 | 게이트웨이 라우트 생성과 사전 요청(추천 적용 2026-10-28, 기술 검토 낮음-020): ① 생성 파일을 손으로 고쳐 메서드 하나를 더한 PR ② 계약 판을 올렸는데 생성 파일을 다시 만들지 않은 PR ③ 로컬 kind에서 `partner-api`의 POST만 받는 경로에 화면 출처로 사전 요청(OPTIONS, `Access-Control-Request-Method: POST`)을 보낸다 ④ 같은 경로에 GET을 보낸다 | ①②는 `gitops-check`의 생성 대조가 실패해 PR이 막힌다. ③은 204와 `Access-Control-Allow-Origin`(화면 호스트 하나)·`Allow-Credentials`·`Max-Age`를 받는다. OPTIONS를 빼고 만든 판으로도 한 번 보내, 메서드를 좁힌 라우트에서 사전 요청이 어떻게 끝나는지 기록한다. ④는 서비스에 닿지 않고 게이트웨이에서 끝난다 |
+| D-T44 | 마이그레이션 실행 도구 비교(추천 적용 2026-10-28, 기술 검토 낮음-151, §7.2): 같은 마이그레이션 묶음(① 보통 DDL 파일 ② 트랜잭션 밖 표시를 한 `CREATE INDEX CONCURRENTLY` 파일 ③ 다른 트랜잭션이 잠금을 쥔 표의 DDL ④ 같은 DB에 잡 두 개를 동시에 띄움 ⑤ PgBouncer를 거치지 않는 DDL 역할 연결)을 'Drizzle SQL 파일 + Atlas', 'Drizzle SQL 파일 + node-pg-migrate', '자체 실행기' 세 가지로 로컬 PostgreSQL에서 돌린다 | ①은 파일마다 트랜잭션, ②는 트랜잭션 밖에서 끝난다. ③은 `lock_timeout`에 걸려 다시 시도한 뒤 잡이 실패한다. ④는 하나만 돌고 다른 하나는 기다리거나 실패한다. ⑤는 DDL 역할로만 붙는다. 기성 도구 하나가 ①~⑤를 모두 채우면 그 도구로 정하고 자체 실행기는 만들지 않는다. 결과는 성능 장부가 아니라 이 표와 ADR-0054 상태 줄에 남긴다 |
+| D-T43 | 게이트웨이가 만든 오류와 추적 헤더(추천 적용 2026-10-28, 기술 검토 낮음-023): 로컬 kind에서 ① 레이트 리밋 429·본문 상한 413·없는 경로 404를 일으킨다 ② 서비스가 낸 409를 받는다 ③ CDN 캐시 공개 읽기(홈·검색)를 두 번 받는다 ④ `EnvoyPatchPolicy`로 `local_reply_config` 형식 문자열에 trace-id를 넣는 판을 시험한다(PoC) | ①은 `application/problem+json` 본문에 `type`·`status`·`title`이 있고 응답 헤더에 `X-Trace-Id`가 있다. ②는 본문 `traceId`와 헤더 `X-Trace-Id`가 같다. ③의 응답에는 `X-Trace-Id`가 없다. ④는 본문에 그 요청의 trace-id가 실리는지와 판 올림에서 깨지는지를 기록하고, 되면 guidelines §2의 기본을 바꾼다 |
+| D-T38 | 서비스 저장소 PR에서 계약에 없는 응답 필드를 가진 컨트롤러와, 계약의 경로 하나를 빼먹은 판을 올린다(추천 적용 2026-10-28, 기술 검토 중간-085). 운영 이미지를 띄워 문서 경로(`/api`, `/api-json` 등)를 부른다 | 두 PR 모두 `contract-check`의 OpenAPI 차이 검사가 실패해 병합되지 않는다. 계약과 같은 판은 통과한다. 운영 이미지에는 문서 경로가 없어 404다 |
+| D-T39 | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토 중간-088): ① BACKWARD_TRANSITIVE를 깨는 스키마를 가진 생산자 판을 동기화한다 ② 정상 판을 동기화한다 ③ ConfigMap `schema-ids`에 없는 주제를 내는 생산자 판을 띄운다 ④ 같은 판을 다시 동기화한다 | ①: PreSync Job이 실패해 동기화가 멈추고 생산자는 배포되지 않는다. ②: 주제별 ID가 ConfigMap에 쓰이고, 생산자는 실행 중 레지스트리 호출 0건으로 Outbox 바이트를 만든다. ③: 생산자가 시작하지 않아 카나리가 멈춘다. ④: 같은 ID가 돌아와 ConfigMap이 그대로다 |
+| D-T37 | WAF 규칙표 정적 검사(추천 적용 2026-10-28, 기술 검토 중간-025): `iac-check`가 Terraform plan에서 ① 대기열 파일 배포에 웹 ACL을 붙인 판 ② Bot Control 규칙 묶음을 범위 축소문 없이 넣은 판 ③ Targeted 단계를 켠 판 ④ 로그 설정에 허용 판정을 버리는 필터나 쿼리 문자열 가림이 없는 판 ⑤ 규칙 순서가 규칙표(IP 평판 → 기본 규칙 → IP 속도 제한 → Bot Control)와 다른 판을 본다(docs/infra.md §9) | ①~⑤ 모두 검사가 실패해 PR이 막힌다. 규칙표와 같은 정상 판은 통과한다 |
 
 ## 15. 알려진 한계
 
@@ -775,8 +858,8 @@ peaket-infra/
 | --- | --- | --- |
 | 1인 기간의 승인 | 2인 승인·동료 검토·commander 결정이 모두 한 사람이 스스로 확인하는 것이다. GitHub는 작성자의 자기 승인을 막으므로 필수 승인 수를 0으로 둔다 | 필수 검사와 감사 기록으로 대신한다. 팀이 생기면 승인 수를 올린다 |
 | 평시 카나리 | 카나리는 평소 트래픽에서만 돈다. 부하가 클 때만 드러나는 결함은 놓칠 수 있다 | 축소 성능 시험(§3.3), 측정 캠페인, 데모의 합성 트래픽 |
-| 공급망 증명의 범위 | 서명과 출처 증명은 '어디서 어떻게 빌드됐나'만 증명한다. 2026-05-11 'Mini Shai-Hulud' 공격에서는 훔친 OIDC 토큰으로 유효한 출처 증명이 만들어졌다(SLSA 블로그). 새 버전을 3일 기다리는 규칙은 그 안에 드러난 악성 버전만 거른다 | 최소 권한 토큰, 액션 SHA 고정, 자체 호스트 러너 없음, SBOM으로 사후 추적 |
-| 외부 서비스 의존 | 빌드·서명·배포가 GitHub, Sigstore, ECR에 기댄다. 이들이 멈추면 새 배포도 멈춘다 | 운영 중인 서비스는 영향이 없다. 긴급 경로(RB-25), 입장 검증의 오프라인 확인 PoC(G-20) |
+| 공급망 증명의 범위 | 서명과 출처 증명은 '어디서 어떻게 빌드됐나'만 증명한다. 2026-05-11 'Mini Shai-Hulud' 공격에서는 훔친 OIDC 토큰으로 유효한 출처 증명이 만들어졌다(SLSA 블로그). 새 버전을 3일 기다리는 규칙은 그 안에 드러난 악성 버전만 거른다 | 최소 권한 토큰, 액션 SHA 고정, 자체 호스트 러너 없음, SBOM으로 사후 추적. 2026-10-28에 넷을 더했다(추천 적용, 기술 검토 중간-062): ① 빌드 잡은 OIDC 권한 없이 OCI 묶음과 다이제스트만 만든다 ② 저장소 코드를 돌리지 않는 게시 잡이 푸시·cosign 서명·출처 증명을 한다(§3.1·§4.2) ③ 출시·핫픽스 후보 빌드는 캐시를 복원·저장하지 않는다(§3.4) ④ 입장 정책과 `gitops-check`가 인증서의 소스 ref(`refs/heads/release/*`·`hotfix/*`)와 실행기 종류(`github-hosted`)를 확인한다(§4.3, D-T32). 그래도 빌드 잡의 코드가 묶음 내용을 바꾸는 것과, 공용 재사용 워크플로 자체가 탈취되는 것은 남는다(신뢰의 뿌리가 그 워크플로로 옮겨 갈 뿐이다, SLSA 블로그). `.github` 저장소의 규칙 세트와 출시 태그 고정이 이를 줄인다 |
+| 외부 서비스 의존 | 빌드·서명·배포가 GitHub(포트폴리오 기간에는 GHCR 포함), Sigstore, ECR에 기댄다. 이들이 멈추면 새 배포도 멈춘다 | 운영 중인 서비스는 영향이 없다. 긴급 경로(RB-25), 입장 검증의 오프라인 확인 PoC(G-20) |
 | MSK 유지보수 | 유지보수 시점을 고를 수 없다. 온세일 중에 브로커 재시작이 겹치면 최대 약 2분 동안 p99가 최대 약 2초 늘 수 있다 | 거래 경로는 Outbox 재시도와 멱등 소비로 흡수한다. 관제 지표가 늦어지는 문제는 남는다 |
 | 0.x 플러그인 | Gateway API 트래픽 플러그인이 0.x 버전이다 | 깨지면 복제본 비율 카나리로 돌아간다(판정 정밀도가 떨어진다) |
 | Next.js 카나리 | 다른 버전의 파드에 닿은 사용자는 페이지 전체가 새로 고쳐질 수 있다 | 대기실은 Next.js를 거치지 않는다. 좌석·결제 화면은 Next.js 셸이지만 전체 이동으로 오가고 구매 요청은 게이트웨이로 바로 가서, 새로고침돼도 구매 상태를 잃지 않는다(§6.6). 온세일 중에는 배포하지 않는다 |
@@ -786,6 +869,7 @@ peaket-infra/
 | 운영 진단 경로 | 파드 진단은 주석을 단 뒤 kubelet이 파일을 고칠 때까지 기다려야 해서 1분 [가정]쯤 늦을 수 있다. 메모리 여유가 없으면 힙 스냅샷을 뜨지 못한다. 커널 OOM으로 죽은 프로세스는 보고서를 남기지 못한다(ADR-0070) | V8 힙 상한을 메모리 한도의 75%로 둬, 힙 부족이 먼저 일어나 보고서를 남기게 한다. 나머지 파드는 진단을 기다리지 않고 다시 띄운다. 반영 시간은 wbs 0.3.6에서 잰다 |
 | git flow의 대기와 가지 수 | 운영 배포가 릴리스 단위(기본 주 1회 [가정])라 변경 리드타임에 대기 시간이 더해진다. 영구 가지 둘과 릴리스 안정화 단계 때문에, DORA가 높은 성과와 연결한 '활성 가지 3개 이하, 하루 한 번 트렁크 병합, 통합 단계 없음'을 그대로 지키지 못한다. 역병합 충돌도 생긴다(ADR-0074) | 작업 가지는 하루 한 번 이상 `develop`에 병합하고, 3일이 되면 경고한다. 릴리스 수명은 3영업일이고, 미완성 기능은 릴리스 플래그 뒤에 두고 병합한다. 리드타임·릴리스 수명·역병합 충돌 수를 §13에서 추세로 보고 ADR-0074의 되돌릴 조건을 따른다 |
 | 비공개 저장소의 가지 규칙 | `peaket-loadtest`는 무료 등급의 비공개 저장소라 규칙 세트가 없다. 그래서 git flow는 관례로만 지켜진다 | 운영에 배포하지 않는 저장소라 운영 경로에 영향이 없다. 가지 규칙 검사는 돌리지만 필수로 걸 수 없다 |
+| 비상 접근 계정의 IAM 사용자 | IAM 사용자와 장기 비밀번호를 두지 않는다는 원칙에 예외가 하나 생긴다(ADR-0102). 봉인한 비밀번호·보안 키를 잃거나 두 사용자가 모두 쓸 수 없으면, IAM Identity Center 장애 때 AWS 쪽 비상 경로가 없다 | 하드웨어 MFA, 교차 계정 역할의 좁은 권한(Job 만들기와 `kms:Sign`만), 로그인 SEV1, 분기 점검(RB-37), 서로 다른 보관 장소 |
 | 병합 방식 실수 | 규칙 세트는 병합 방식을 대상 가지 단위로 정한다. 그래서 `develop`에 작업 가지를 병합 커밋으로 넣는 실수는 막지 못한다 | 역병합은 봇만 하고, 주간 점검이 경고한다(§2.2.6) |
 
 ## 16. 참고 자료(2026-10-13 열람)
@@ -801,8 +885,8 @@ peaket-infra/
 - Next.js [Self-hosting](https://nextjs.org/docs/app/guides/self-hosting), [deploymentId](https://nextjs.org/docs/app/api-reference/config/next-config-js/deploymentId), [cacheHandlers](https://nextjs.org/docs/app/api-reference/config/next-config-js/cacheHandlers); OpenFeature [CNCF 프로젝트](https://www.cncf.io/projects/openfeature/), [flagd syncs](https://flagd.dev/concepts/syncs/); IANA [WebSocket Close Codes](https://www.iana.org/assignments/websocket/websocket.xhtml)
 - GitHub [Actions 요금](https://docs.github.com/en/billing/concepts/product-billing/github-actions), [환경](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments), [규칙 세트](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets), [Artifact attestations](https://docs.github.com/en/actions/concepts/security/artifact-attestations), [SHA 고정 정책(2025-08-15)](https://github.blog/changelog/2025-08-15-github-actions-policy-now-supports-blocking-and-sha-pinning-actions/)
 - [SLSA 1.2](https://slsa.dev/spec/v1.2/), [SLSA 블로그 Mini Shai-Hulud](https://slsa.dev/blog/2026/05/mini-shai-hulud-what-slsa-can-and-cannot-do); Sigstore [cosign](https://docs.sigstore.dev/cosign/signing/overview/), [Rekor](https://docs.sigstore.dev/logging/overview/); NIST [SP 800-218(SSDF) v1.1](https://csrc.nist.gov/pubs/sp/800/218/final); [OpenSSF Scorecard](https://github.com/ossf/scorecard)
-- 공급망 사고: [GHSA-mrrh-fwg8-r2c3(tj-actions)](https://github.com/advisories/GHSA-mrrh-fwg8-r2c3), [CISA 2025-03-18](https://www.cisa.gov/news-events/alerts/2025/03/18/supply-chain-compromise-third-party-tj-actionschanged-files-cve-2025-30066-and-reviewdogaction), [GHSA-69fq-xp46-6x23(Trivy)](https://github.com/aquasecurity/trivy/security/advisories/GHSA-69fq-xp46-6x23), [CISA 2025-09-23 npm](https://www.cisa.gov/news-events/alerts/2025/09/23/widespread-supply-chain-compromise-impacting-npm-ecosystem)
-- 도구: [gitleaks-action](https://github.com/gitleaks/gitleaks-action), [Pact Broker](https://docs.pact.io/pact_broker), [PactFlow 요금](https://pactflow.io/pricing/), [Infracost 요금](https://www.infracost.io/pricing/), [Trivy](https://trivy.dev/docs/latest/scanner/misconfiguration/), [Renovate minimumReleaseAge](https://docs.renovatebot.com/configuration-options/#minimumreleaseage), [pnpm 설정](https://pnpm.io/10.x/settings), [Squawk](https://squawkhq.com/docs/rules)
+- 공급망 사고: [GHSA-mrrh-fwg8-r2c3(tj-actions)](https://github.com/advisories/GHSA-mrrh-fwg8-r2c3), [CISA 2025-03-18](https://www.cisa.gov/news-events/alerts/2025/03/18/supply-chain-compromise-third-party-tj-actionschanged-files-cve-2025-30066-and-reviewdogaction), [GHSA-69fq-xp46-6x23(Trivy)](https://github.com/aquasecurity/trivy/security/advisories/GHSA-69fq-xp46-6x23), [CISA 2025-09-23 npm](https://www.cisa.gov/news-events/alerts/2025/09/23/widespread-supply-chain-compromise-impacting-npm-ecosystem), [Wiz Shai-Hulud 2.0(2025-11-24)](https://www.wiz.io/blog/shai-hulud-2-0-ongoing-supply-chain-attack)
+- 도구: [gitleaks-action](https://github.com/gitleaks/gitleaks-action), [Pact Broker](https://docs.pact.io/pact_broker), [PactFlow 요금](https://pactflow.io/pricing/), [Infracost 요금](https://www.infracost.io/pricing/), [Trivy](https://trivy.dev/docs/latest/scanner/misconfiguration/), [Renovate minimumReleaseAge](https://docs.renovatebot.com/configuration-options/#minimumreleaseage), [pnpm 설정](https://pnpm.io/settings)과 [pnpm 공급망 공격 줄이기](https://pnpm.io/supply-chain-security)(2026-10-28 확인), [Squawk](https://squawkhq.com/docs/rules)
 - 데이터베이스: [Drizzle pg-core dialect(소스)](https://github.com/drizzle-team/drizzle-orm/blob/main/drizzle-orm/src/pg-core/dialect.ts), PostgreSQL [CREATE INDEX](https://www.postgresql.org/docs/current/sql-createindex.html), [ALTER TABLE](https://www.postgresql.org/docs/current/sql-altertable.html), [lock_timeout](https://www.postgresql.org/docs/current/runtime-config-client.html); Valkey [Functions](https://valkey.io/topics/functions-intro/), [Eval](https://valkey.io/topics/eval-intro/)
 - AWS: [Aurora 유지보수](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_UpgradeDBInstance.Maintenance.html), [ElastiCache 유지보수 창](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/maintenance-window.html), [MSK 패치 영향](https://docs.aws.amazon.com/msk/latest/developerguide/patching-impact.html), [EKS 버전](https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html), [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html), [NLB 대상 그룹 속성](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/edit-target-group-attributes.html), [Aurora pgAudit](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Appendix.PostgreSQL.CommonDBATasks.pgaudit.html), [CloudFront Functions 게시](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/publish-function.html), [Terraform S3 백엔드](https://developer.hashicorp.com/terraform/language/backend/s3), [AWS Budgets 요금](https://aws.amazon.com/aws-cost-management/aws-budgets/pricing/), [EC2 시험 정책](https://aws.amazon.com/ec2/testing/)
 - git flow·가지 규칙(2026-10-20 열람): Vincent Driessen [A successful Git branching model](https://nvie.com/posts/a-successful-git-branching-model/)(2010, 2020-03-05 메모), GitHub [Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets), [Events that trigger workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)(예약 워크플로는 기본 가지에서만), Terraform GitHub 제공자 [v6.10.0 릴리스 노트](https://github.com/integrations/terraform-provider-github/releases/tag/v6.10.0)(규칙 세트 `allowed_merge_methods`), Git [git-merge-tree](https://git-scm.com/docs/git-merge-tree), [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/), [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html)

@@ -15,16 +15,18 @@ service PaymentService {
   // 결제 시도(READY) 기록은 부르는 쪽이 자기 DB에 한다.
   rpc PrepareCheckout(PrepareCheckoutRequest) returns (PrepareCheckoutResponse);
 
-  // 승인. 결제 시도에 기록된 결제사로만 승인 API를 부른다.
-  // 결제사 호출의 데드라인은 2초다. 같은 주문의 결제사 멱등키는 confirm-{order_id}다.
-  // 결과가 정해지지 않으면 UNKNOWN을 돌려주고, payment-svc가 조회로 확정한 뒤 trade.payments로 알린다.
+  // 승인 명령. 결제 시도에 기록된 결제사로만 승인 API를 부른다. 같은 주문의 결제사 멱등키는 confirm-{order_id}다.
+  // payment-svc는 승인 명령을 받아 적은 뒤 바로 답한다(부르는 쪽 데드라인 200ms [가정]). 결과는 trade.payments로 알린다.
+  // 결제사 호출은 끊지 않고 읽기 시간 초과 60초 [가정, 계약 때 확인]까지 기다리고, 채널별 동시 승인 호출 상한 안에서 보낸다.
+  // 2초는 '임박' 경보와 측정의 기준일 뿐이다(docs/features/payment.md §2, 2026-10-28 기술 검토 높음-16).
+  // 같은 order_id로 다시 보내면 이미 받은 명령으로 보고 같은 답을 돌려준다.
   rpc ConfirmPayment(ConfirmPaymentRequest) returns (ConfirmPaymentResponse);
 
   // 결제 상태 조회. 결과를 모르는 건의 정리와 대사가 쓴다.
   rpc GetPayment(GetPaymentRequest) returns (GetPaymentResponse);
 
   // 취소(전액·부분). 결제사 멱등키는 cancel-{cancellation_id}다.
-  // 예매 취소, 회차 취소 일괄 환불, 발권 실패 보상이 쓴다. 실패 건의 재시도는 payment-svc 워커가 맡는다.
+  // 예매 취소, 회차 취소 일괄 환불, 발권 불가 보상(회차 취소 확정·CS 확인 뒤, ADR-0106)이 쓴다. 실패 건의 재시도는 payment-svc 워커가 맡는다.
   rpc CancelPayment(CancelPaymentRequest) returns (CancelPaymentResponse);
 
   // 지급대행 판매자 등록(판매 승인 때 core-svc가 부른다).
@@ -37,6 +39,8 @@ service PaymentService {
 
   // 새 결제 일시 정지 조회(payment §9, ADR-0085). purchase-svc의 홀드 만료 작업이 1초마다 자기가 맡은 회차를 묻는다.
   // 회차의 결제사는 결제사 선택(결제사 전환 → 공연 지정 → 플랫폼 기본)으로 정하고, 일시 정지 중인 회차만 돌려준다.
+  // 정지 판정자가 payment DB payment_entry_pause에 쓴 상태를 모든 파드가 1초마다 읽어 답한다(ADR-0105).
+  // 확인 호출 단계와 시험 재개 단계는 모두 일시 정지로 돌려준다. 모두 열거나 commander가 명령 6 해제로 열면 빠진다.
   rpc GetNewPaymentPause(GetNewPaymentPauseRequest) returns (GetNewPaymentPauseResponse);
 }
 
@@ -52,7 +56,8 @@ enum OrderKind {
 message PrepareCheckoutRequest {
   OrderKind order_kind = 1;
   string order_id = 2;
-  // 공연 지정 결제사를 찾는 데 쓴다. 공연과 무관한 굿즈 주문이면 비운다.
+  // 회차 ID. '공연 지정' 결제사를 찾는 데 쓴다. 결제사 지정은 회차 칸이라(ADR-0093 결정 2) 판매 승인과 달리 회차 단위 그대로다.
+  // 공연과 무관한 굿즈 주문이면 비운다.
   string event_id = 3;
   // 서버가 계산한 금액. 클라이언트가 보낸 값을 쓰지 않는다.
   peaket.common.v1.Money amount = 4;
@@ -72,8 +77,40 @@ message PrepareCheckoutResponse {
   peaket.common.v1.PgProvider pg = 1;
   // 결제사 전환(감내 모드)으로 대체 결제사가 골라졌으면 true. 화면이 안내 문구를 띄운다.
   bool switched = 2;
-  // 결제사 SDK에 넘길 값. 키 이름은 openapi `PaymentAttempt.checkout` 설명을 따른다.
-  map<string, string> checkout = 3;
+  // 결제사 SDK에 넘길 값. 결제사마다 메시지를 따로 두어 키 이름 실수를 컴파일과 buf가 잡게 한다(openapi `PaymentAttempt.checkout`과 같은 칸).
+  // 2026-10-28에 map<string, string>에서 바꿨다. 계약 저장소로 옮기기 전 초안이라 번호 3을 다시 썼다(README §2 '버전', 기술 검토 낮음-028).
+  oneof checkout {
+    TossCheckout toss = 3;
+    PortoneCheckout portone = 4;
+    // 결제사 시뮬레이터는 토스와 같은 값을 쓴다(부하·시험 환경 전용).
+    TossCheckout simulator = 5;
+  }
+}
+
+// 토스페이먼츠 결제창 값.
+message TossCheckout {
+  string client_key = 1;
+  string customer_key = 2;
+  string order_id = 3;
+  string order_name = 4;
+  peaket.common.v1.Money amount = 5;
+  string success_url = 6;
+  string fail_url = 7;
+}
+
+// 포트원 V2 결제창 값.
+message PortoneCheckout {
+  string store_id = 1;
+  string channel_key = 2;
+  // pay-{order_id}
+  string payment_id = 3;
+  string order_name = 4;
+  peaket.common.v1.Money total_amount = 5;
+  // 결제 통화. SDK에 넘기는 값의 표기는 연동 때 포트원 문서로 확인한다.
+  string currency = 6;
+  string redirect_url = 7;
+  // 채널이 요구할 때만 채운다(처리방침에 수탁자로 공개, ADR-0044 결정 10).
+  BuyerContact customer = 8;
 }
 
 message ConfirmPaymentRequest {
@@ -107,7 +144,8 @@ enum ConfirmResult {
   CONFIRM_RESULT_APPROVED = 1;
   // 이미 승인된 건. 조회로 금액이 맞으면 APPROVED와 같게 처리한다.
   CONFIRM_RESULT_ALREADY_APPROVED = 2;
-  // 결제사가 처리 중. payment-svc가 승인 기한 안에서 같은 멱등키로 다시 보내고, 결과는 trade.payments와 GetPayment로 알린다.
+  // 승인 명령을 받았고 결과는 아직이다(ConfirmPayment가 보통 돌려주는 값). 결제사가 처리 중이면 payment-svc가
+  // 승인 기한 안에서 같은 멱등키로 다시 보낸다. 결과는 trade.payments와 GetPayment로 알린다.
   CONFIRM_RESULT_IN_PROGRESS = 3;
   // 거절. 좌석 PENDING을 지우고 과금 없이 실패 처리한다.
   CONFIRM_RESULT_DECLINED = 4;

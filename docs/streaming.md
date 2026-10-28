@@ -10,7 +10,7 @@
 | 작업자 | 저장소 | 하는 일 | 입력 | 상태 | 출력 | 전달 보장 | 자원 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `analytics-ingest` | peaket-data | 원본 적재, 회차별 가명, 금지 필드 제거(analytics §3) | analytics §3.1의 토픽(메시지를 종류별로 모아 두는 통로) 10개. 거래·제어 클러스터 7개와, 시스템이 내보내는 운영 신호인 텔레메트리 클러스터 3개다 | 없다(회차 키 캐시는 메모리) | 브론즈, 적재 거절 기록 | 적어도 한 번. 중복은 실버가 지우고, 빠짐은 커버리지 대조(§6)가 잡는다 | Spot(싸지만 회수될 수 있는 클라우드 서버) 허용 |
-| `ops-rt` | peaket-data | 관제 실시간 표의 원시 사건 적재(§4). 집계하지 않는다 | 거래·제어 클러스터의 `trade.orders`·`trade.payments`·`trade.seats`·`trade.tickets`, 텔레메트리 클러스터의 `telemetry.queue`(`QueueAggregate`·`PipelinePulse`)·`telemetry.purchase`·`telemetry.trust-verdicts` | 없다 | `rt` 원시 표 다섯(§4.3) | 적어도 한 번. 중복은 조회 시점 집계가 `eventKey`로 지운다 | 온디맨드(정가로 계속 쓰는 서버) |
+| `ops-rt` | peaket-data | 관제 실시간 표의 원시 사건 적재(§4). 집계하지 않는다 | 거래·제어 클러스터의 `trade.orders`·`trade.payments`·`trade.seats`(`SeatEvent`만. 같은 토픽의 회차 판매 상태 `EventSaleChanged`는 건너뛴다, ADR-0122)·`trade.tickets`, 텔레메트리 클러스터의 `telemetry.queue`(`QueueAggregate`·`PipelinePulse`)·`telemetry.purchase`·`telemetry.trust-verdicts` | 없다 | `rt` 원시 표 다섯(§4.3) | 적어도 한 번. 중복은 조회 시점 집계가 `eventKey`로 지운다 | 온디맨드(정가로 계속 쓰는 서버) |
 | `trust-reassess` | peaket-trust | 봇 대기 중 재평가와 행동 신호 원시 적재(§5) | 텔레메트리 클러스터의 `telemetry.behavior` | 세션·캐시 Redis의 정렬 집합(10분) | `telemetry.trust-candidates`, 행동 신호 원시 표(30일) | 적어도 한 번. 후보는 `eventKey`로 중복 제거 | 온디맨드 |
 
 - `rt-pulse`(peaket-data)는 1초마다 §3의 토픽 셋의 모든 파티션(토픽을 나눈 칸)에 `PipelinePulse`를 쓰는 작은 Deployment(복제 1개 [가정])다. 이것이 멈추면 신선도가 나빠진 것으로 보이므로 따로 감시하지 않는다.
@@ -26,11 +26,11 @@
 | 구성요소 | 판·산출물 | 이유 |
 | --- | --- | --- |
 | 공용 소비 모듈 | peaket-platform `@peaket/stream-worker` | 커밋 순서, 묶음, 중복 거르기 표시, 다시 시도, 거절 기록, 지표를 한 곳에 둔다. 서비스의 Kafka 소비자도 같은 모듈을 쓴다 |
-| Kafka 클라이언트 | Confluent 공식 JavaScript 클라이언트 `@confluentinc/kafka-javascript`(1.11.0, librdkafka 기반) 또는 kafkajs | 서비스와 같은 클라이언트를 쓴다. 어느 쪽인지는 wbs 0.5.1 PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험)에서 정한다 |
+| Kafka 클라이언트 | Confluent 공식 JavaScript 클라이언트 `@confluentinc/kafka-javascript`(1.11.0, librdkafka 기반, KafkaJS 호환 API)가 기본이다. kafkajs는 대체안이다(추천 적용 2026-10-28, 기술 검토 낮음-152) | 서비스와 같은 클라이언트를 쓴다. 기본 클라이언트가 처리량·협력적 재조정·OTel 계측·MSK IAM을 채우는지는 wbs 0.5.1 PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험)에서 확인하고, 못 채우면 kafkajs와 견준다(docs/architecture.md §9.4) |
 | Schema Registry와 Avro | `@confluentinc/schemaregistry`(1.11.0) | Schema Registry는 Confluent다(api/guidelines) |
-| MSK IAM 인증 | `aws-msk-iam-sasl-signer-js`(1.0.3)로 OAUTHBEARER 토큰을 만든다 | MSK IAM 인증(wbs 2.11.2). Pod Identity 자격으로 재인증(토큰 갱신)이 이어지는지는 확인 필요다(wbs 0.5.1 PoC). 이 도구는 역할을 맡아 토큰을 만드는 `generateAuthTokenFromRole`도 둔다 |
+| MSK IAM 인증 | `aws-msk-iam-sasl-signer-js`(1.0.3)의 `generateAuthTokenFromRole`로 OAUTHBEARER 토큰을 만든다. 작업자별 MSK 전용 역할을 고정 세션 이름으로 맡는다(§2.3·§2.6) | MSK IAM 인증(wbs 2.11.2). EKS Pod Identity(쿠버네티스 파드에 AWS 권한을 주는 기능) 자격을 그대로 쓰면 자격이 갱신될 때 세션 이름이 바뀌어 재인증(연결을 유지한 채 새 토큰으로 다시 인증하는 것)이 끊긴다(자바 aws-msk-iam-auth README의 문제 해결 절). 그래서 기본 자격 사슬(환경 변수·파드 권한 같은 자격을 정해진 순서로 찾는 방식)로 토큰을 만드는 `generateAuthToken`은 운영 환경에서 쓰지 않는다(추천 적용 2026-10-28, 기술 검토 높음-26). 자격 갱신 주기를 넘겨 계속 소비되는지는 확인 필요다(wbs 0.5.1 PoC, ST-T14) |
 | ClickHouse 클라이언트 | `@clickhouse/client`(1.24.1, 공식 Node 클라이언트) | HTTPS 삽입·조회와 서버 설정 전달 |
-| ClickHouse 서버 | 26.8 LTS(2026-08-27, 1년 지원) | ClickHouse는 대량 이벤트 집계에 강한 분석용 데이터베이스다. `EXPLAIN ANALYZE`(26.7)가 있고, 내림차순 정렬 키 상시 지원과 가상 스킵 인덱스(26.6)가 있다. 26.3 LTS와 기본값이 다르다: 모든 삽입의 중복 판정 기본 켬(26.2·26.6), 25GiB 이하 표의 INSERT 때 열 통계(26.8). 비동기 삽입 기본 켬은 26.3 LTS부터 같다. 다음 LTS로 옮길 때 §4.4 설정 표를 다시 맞춘다(추천 적용 2026-10-22, ADR-0086) |
+| ClickHouse 서버 | 26.8 LTS(2026-08-27, 1년 지원) | ClickHouse는 대량 이벤트 집계에 강한 분석용 데이터베이스다. `EXPLAIN ANALYZE`(26.7)가 있고, 내림차순 정렬 키 상시 지원과 가상 스킵 인덱스(26.6)가 있다. 26.3 LTS와 다른 기본값은 둘이다. ① 삽입 중복 판정의 단위: 26.6부터 삽입 한 건 단위다(서버 설정 `insert_deduplication_version`의 기본값이 `new_unified_hash`로 바뀌었고, 26.7부터는 이 방식만 남았다). 같은 삽입을 다시 보내면 거르지만, 서로 다른 삽입이 같은 파트를 만들어도 지우지 않는다. 그래서 묶음 경계가 달라진 중복은 여전히 실버와 조회 시점 집계가 지운다(§2.4). ② 25GiB 이하 표의 INSERT 때 열 통계(26.8). 모든 삽입의 중복 판정 기본 켬(`deduplicate_insert='enable'`, 비동기 삽입 포함, 26.2)과 비동기 삽입 기본 켬은 26.3 LTS에도 있다(ClickHouse CHANGELOG 26.2·26.6·26.7, v26.3.9.8-lts·v26.8.9.10-lts의 `Settings.cpp`·`ServerSettings.cpp`, 2026-10-28 확인, 기술 검토 중간-091). 다음 LTS로 옮길 때 §4.4 설정 표를 다시 맞춘다(추천 적용 2026-10-22, ADR-0086) |
 
 - 판은 Renovate가 올리고, 공통 조치 기한(POL-041, asvs/analytics 15.1.1)을 따른다. 서비스와 같은 pnpm 잠금 파일과 레지스트리 고정 규칙(devops §4.4)을 쓴다.
 
@@ -45,15 +45,16 @@
 
 - 작업자에 들어오는 연결은 지표 수집(Prometheus)과 상태 확인뿐이다. 관리 API는 없다. Prometheus는 지표를 모아 저장하는 도구다.
 - 쿠버네티스 서비스 계정은 작업자마다 하나씩 두고, 쿠버네티스 API 권한은 주지 않는다. AWS 권한은 Pod Identity 역할로 작업자마다 나눈다. 쿠버네티스는 컨테이너로 만든 앱을 여러 서버에서 실행하고 관리하는 플랫폼이다.
+- MSK 권한은 두 단계로 준다(추천 적용 2026-10-28, 기술 검토 높음-26, 규칙은 docs/devops.md §9.4). 작업자의 Pod Identity 역할 → 작업자별 MSK 전용 역할(`sts:AssumeRole`) → 아래 표의 토픽·소비자 그룹 권한 순이다. Pod Identity 역할에는 S3·KMS 권한과 그 MSK 전용 역할을 맡는 권한만 있고 MSK 권한은 없다. MSK 전용 역할의 신뢰 정책은 그 작업자의 Pod Identity 역할만 믿는다. Pod Identity 자격을 그대로 쓰지 않는 이유는 자격이 갱신될 때 STS(임시 자격을 내주는 AWS 서비스) 세션 이름이 바뀌어, MSK가 재인증 때 '주체가 바뀌었다'며 연결을 끊기 때문이다(aws-msk-iam-auth README, 2026-10-28 확인).
 
-| 작업자 | S3·KMS | MSK(IAM) | 저장소 사용자 |
+| 작업자 | S3·KMS | MSK(IAM, 작업자별 MSK 전용 역할) | 저장소 사용자 |
 | --- | --- | --- | --- |
 | `ops-rt` | 없다 | 거래·제어 4개 토픽과 텔레메트리 3개 토픽 읽기, 자기 소비자 그룹 | ClickHouse `rt_writer`(`rt` 원시 표 쓰기만) |
-| `analytics-ingest` | 분석 수집 버킷 읽기, 분석 가명 키 `kms:GenerateMac` | 10개 토픽 읽기 | ClickHouse `bronze_writer` |
-| `trust-reassess` | 없다 | `telemetry.behavior` 읽기, `telemetry.trust-candidates` 쓰기 | ClickHouse `trust_raw_writer`, 세션·캐시 Redis 사용자(재평가 키 접두사 `tr:{event:*}:ra:`만, RBAC) |
+| `analytics-ingest` | 분석 가명 키 `kms:GenerateMac`(S3 권한은 없다. 수집 버킷 파일은 마감 실행기가 싣는다, §6.1) | 10개 토픽 읽기 | ClickHouse `bronze_writer` |
+| `trust-reassess` | 없다 | `telemetry.behavior` 읽기, `telemetry.trust-candidates` 쓰기 | ClickHouse `trust_raw_writer`, 세션·캐시 Redis 사용자(재평가 키 접두사 `tr:ra:`만, RBAC) |
 
 - 작업자 파드도 서비스 메시(서비스끼리 주고받는 통신을 앱 대신 처리하는 층)의 앰비언트 L4 경로에 넣어 전송을 암호화한다(docs/architecture.md 보안 기본 규칙의 '전송 구간 암호화 강제', ADR-0082). 포트폴리오의 로컬 실행은 메시 없이 돈다.
-- 비밀 값(ClickHouse 사용자, Schema Registry 자격, Redis 사용자)은 Secrets Manager에 두고, External Secrets Operator가 파드에 넣는다(ADR-0053).
+- 비밀 값(ClickHouse 사용자, Schema Registry 자격, Redis 사용자)은 Secrets Manager에 두고, External Secrets Operator가 파드에 넣는다(ADR-0053). 파드는 시작할 때 읽은 값을 끝까지 쓰므로, 30일 자동 교체는 다른 서비스 파드와 같은 규칙을 따른다: ClickHouse·Schema Registry는 교대 사용자 전략이라 옛 판도 다음 교체까지 유효하고, 교체 사이에 작업자 파드가 한 번 이상 다시 뜨게 한다(docs/devops.md §8.3 '저장소 비밀 교체', 추천 적용 2026-10-28, 기술 검토 중간-064). Redis 사용자는 비밀번호 두 개를 겹쳐 둔다.
 - 파드는 Pod Security Standards의 Restricted 기준(devops §4.3)을 맞추고, 읽기 전용 루트 파일 시스템으로 돈다. 작업자는 디스크에 쓰지 않는다.
 
 네트워크 정책(작업자마다):
@@ -64,7 +65,7 @@
 | 나감 | MSK 두 클러스터(IAM 인증), Schema Registry | 소비·생산, 스키마(데이터의 구조 정의) 조회 |
 | 나감 | ClickHouse(HTTPS) | 삽입 |
 | 나감 | 세션·캐시 Redis(TLS, `trust-reassess`만) | 재평가 |
-| 나감 | S3·KMS·STS(내부망에서 이 서비스들을 부르는 주소인 VPC 엔드포인트, S3·KMS는 `analytics-ingest`만), DNS | 분석 수집 버킷, 가명 키, 자격 증명 |
+| 나감 | KMS·STS(내부망에서 이 서비스들을 부르는 주소인 VPC 엔드포인트, KMS는 `analytics-ingest`만), DNS | 가명 키, 자격 증명 |
 
 ### 2.4 커밋·묶음·다시 시도
 
@@ -78,7 +79,7 @@
 
 - 커밋은 파티션마다, 그 파티션의 앞선 묶음이 모두 성공했을 때 '끝 오프셋 + 1'로 한다.
 - 재시작 뒤 묶음 경계가 달라지면 같은 사건이 다른 묶음으로 다시 들어갈 수 있다. 이 중복은 실버(브론즈)와 조회 시점 집계(`rt`)가 `eventKey`로 지운다. 모든 소비자는 중복을 전제한다(ADR-0026 결정 3).
-- 읽지 못한 레코드(역직렬화 실패, 모르는 스키마 ID, 필수 필드 없음)는 원문을 복사하지 않고 위치만 남긴다. 원본 적재는 `bronze.brz_rejected`(§6.3)에, 나머지 둘은 거절 수(`stream_rejected_total`)와 위치 로그에 남긴다. 데드 레터 토픽(처리에 실패한 메시지를 옮겨 두는 토픽)은 두지 않는다. 가명 처리 전 식별값이 다른 토픽에 한 벌 더 생기기 때문이다(ADR-0072 결정 7).
+- 읽지 못한 레코드(역직렬화 실패, 레지스트리가 모른다고 답한 스키마 ID, 필수 필드 없음)는 원문을 복사하지 않고 위치만 남긴다. 레지스트리에 닿지 않아 처음 보는 ID를 읽지 못한 것은 읽지 못한 레코드가 아니라 다시 시도할 장애로 보고, 그 파티션 소비를 멈춘다(§2.6, 추천 적용 2026-10-28, 기술 검토 중간-088). 모르는 열거 기호는 읽지 못한 레코드가 아니다(§2.6). 원본 적재는 `bronze.brz_rejected`(§6.3)에, 나머지 둘은 거절 수(`stream_rejected_total`)와 위치 로그에 남긴다. 데드 레터 토픽(처리에 실패한 메시지를 옮겨 두는 토픽)은 두지 않는다. 가명 처리 전 식별값이 다른 토픽에 한 벌 더 생기기 때문이다(ADR-0072 결정 7).
 - 재조정과 종료 때는 처리 중인 묶음을 마치고 커밋한 뒤 파티션을 넘긴다. 마치지 못한 묶음은 커밋하지 않는다.
 - 작업자에는 체크포인트·세이브포인트 같은 상태 저장본이 없다. 다시 뜨면 커밋한 위치부터 읽는다.
 
@@ -103,21 +104,25 @@
 | `trust-reassess` | 텔레메트리 클러스터 `telemetry.behavior` | `peaket.trust-reassess.<환경>` | 가장 늦은 곳(LATEST). 상태가 10분이라 지난 사건이 필요 없다 |
 
 - 인증은 MSK IAM이다. 클라이언트에 `security.protocol=SASL_SSL`, `sasl.mechanism=OAUTHBEARER`를 두고, 토큰 함수가 서명 도구(§2.1)로 토큰을 만든다.
-- 역직렬화는 `@confluentinc/schemaregistry`의 Avro 역직렬화기로 한다. 쓴 쪽 스키마(메시지에 실린 스키마 ID)로 읽은 뒤 레코드 이름으로 나눈다. 그래서 레코드가 여러 종류 실리는 토픽(`telemetry.queue`·`telemetry.purchase`·`telemetry.trust-verdicts`의 `PipelinePulse`)도 따로 읽기 스키마를 두지 않는다(docs/api/avro/README.md §3). 토픽·파티션·오프셋·Kafka 시각도 함께 넘긴다. 레지스트리가 잠시 멈춰도 이미 받은 스키마 ID는 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)에서 읽는다. 새 스키마 ID를 못 읽으면 그 레코드는 거절 처리로 간다.
+- 토큰 함수는 `generateAuthTokenFromRole({ region: 'ap-northeast-2', awsRoleArn: <작업자별 MSK 전용 역할>, awsRoleSessionName: '<작업자>-<환경>' })`를 부른다(추천 적용 2026-10-28, 기술 검토 높음-26). 세션 이름이 바뀌지 않으므로 재인증 때 주체가 같다. 이 함수는 Pod Identity 자격으로 그 역할을 맡는다(AWS SDK `fromTemporaryCredentials`가 기본 자격 사슬로 STS를 부른다). 역할을 맡지 못하면 예외를 던져 연결이 실패하고, 기본 자격으로 넘어가 다른 신원으로 붙지 않는다(서명 도구 1.0.3과 AWS SDK 소스, 2026-10-28 확인). 그 실패는 소비 밀림 경보와 재시작 수로 드러난다(§9).
+- 서비스(NestJS)의 Kafka 생산자·소비자도 같은 공용 모듈의 같은 토큰 함수를 쓴다. 역할과 세션 이름만 서비스별이다(docs/devops.md §9.4). 서비스별 Outbox 릴레이(`<서비스>-outbox-relay`)도 같은 함수를 쓰고, 세션 이름은 `<서비스>-outbox-relay-<환경>`이다(ADR-0116).
+- 토큰 함수가 고정 세션 이름으로 역할을 맡는지, 역할을 못 맡을 때 실패하는지는 로컬에서 STS를 흉내 내어 확인한다. 자격 갱신 주기를 넘겨 재인증이 이어지는지는 실제 MSK와 EKS Pod Identity가 있어야 확인된다(ST-T14, wbs 0.5.1 PoC) [확인 필요].
+- 역직렬화는 `@confluentinc/schemaregistry`의 Avro 역직렬화기로 한다. 쓴 쪽 스키마(메시지에 실린 스키마 ID)로 읽은 뒤 레코드 이름으로 나눈다. 그래서 레코드가 여러 종류 실리는 토픽(`telemetry.queue`·`telemetry.purchase`·`telemetry.trust-verdicts`의 `PipelinePulse`)도 따로 읽기 스키마를 두지 않는다(docs/api/avro/README.md §3). 토픽·파티션·오프셋·Kafka 시각도 함께 넘긴다. 레지스트리가 잠시 멈춰도 이미 받은 스키마 ID는 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)에서 읽는다. 처음 보는 스키마 ID를 레지스트리에 닿지 못해 읽지 못하면(시간 초과·5xx) 그 파티션 소비를 멈추고 §2.4의 다시 시도 규칙으로 기다린다. 거절하지 않으므로 빠지는 레코드가 없고, 그동안 소비 밀림이 는다. 새로 뜬 파드는 캐시가 비어 있어 이 경우를 먼저 겪는다. 레지스트리가 그 ID를 모른다고 답할 때(404)만 거절 처리로 간다(ST-T16, 추천 적용 2026-10-28, 기술 검토 중간-088).
+- 모르는 열거 기호: 쓴 쪽 스키마로 읽으면 Avro의 열거 기본값 맞추기를 거치지 않는다. 그래서 공용 소비 모듈이 작업자가 빌드된 계약 판의 기호 목록에 없는 값을 `UNRECOGNIZED`로 바꿔 넘기고 `stream_unrecognized_symbol_total{worker, topic, record, field}`로 센다. 레코드는 버리지 않는다. `ops-rt`는 그 사건을 '모르는 상태'로 싣고, 원본 적재는 원래 기호를 그대로 싣는다(브론즈는 원문 보관이다). 생산자가 새 기호를 소비자보다 먼저 내도(배포 순서 어김, 동결 창·마감 실행 중이라 작업자를 못 올린 때) 숫자가 조용히 빠지지 않고 경보로 보인다(docs/api/avro/README.md §3, ST-T15, 추천 적용 2026-10-28, 기술 검토 중간-087).
 - 이벤트 시각은 Kafka 레코드 시각이 아니라 메시지 안의 시각(`second`·`occurredAt`·`producedAt`)이다.
 - `client.id`는 `<작업자>-<환경>-<파드>`다. 소비 밀림(아직 읽지 않은 메시지 수)은 파티션마다 `stream_consumer_lag_records`로 본다(§14).
 - `trust-reassess`의 Kafka 생산은 `acks=all`과 멱등 생산자(같은 메시지를 두 번 보내도 한 번만 남기는 생산자 설정)로 한다. 트랜잭션 생산자는 쓰지 않는다(ADR-0026 결정 3). 발행 확인을 받은 뒤에 입력 오프셋을 커밋한다.
 
 ### 2.7 지표와 로그
 
-- 지표는 서비스와 같은 OTel·Prometheus 경로로 내고, 클러스터의 Prometheus가 PodMonitor로 수집한다. 쓰는 지표는 `stream_consumer_lag_records{worker, topic, partition}`, `stream_insert_seconds{worker, table}`, `stream_insert_retries_total{worker}`, `stream_rejected_total{worker, topic, reason}`, `stream_paused_partitions{worker}`, ops-svc의 `rt_query_seconds{view}`·`rt_freshness_seconds{path}`다(§14).
+- 지표는 서비스와 같은 OTel·Prometheus 경로로 내고, 클러스터의 Prometheus가 PodMonitor로 수집한다. 쓰는 지표는 `stream_consumer_lag_records{worker, topic, partition}`, `stream_insert_seconds{worker, table}`, `stream_insert_retries_total{worker}`, `stream_rejected_total{worker, topic, reason}`, `stream_unrecognized_symbol_total{worker, topic, record, field}`(모르는 열거 기호, §2.6), `stream_paused_partitions{worker}`, ops-svc의 `rt_query_seconds{view}`·`rt_freshness_seconds{path}`다(§14).
 - 로그는 표준 출력으로 낸다. OTel 수집기(노드 에이전트 → 중앙 수집 단계인 게이트웨이, ADR-0076)가 이 로그를 Loki(로그 저장소)로 보낸다(observability §7). 레코드 내용(가명 처리 전 식별값, 행동 요약값)은 로그에 남기지 않는다.
 
 ## 3. 시간 기준과 심장 박동
 
 1. 작업자는 시간 창을 만들지 않는다. 사건 시각을 열로 싣고, 칸은 읽을 때 나눈다(§4.3). 그래서 '이 시각 전 사건은 다 왔다'는 기준(Flink의 워터마크)을 기다리지 않고, 사건이 없는 파티션이 계산을 붙잡지도 않는다. 늦게 온 사건도 버리지 않고 제 칸에 들어간다.
 2. 심장 박동: `rt-pulse`가 1초마다 텔레메트리 토픽 셋(`telemetry.queue`·`telemetry.purchase`·`telemetry.trust-verdicts`)의 모든 파티션에 `PipelinePulse`(파티션 직접 지정)를 넣는다. `ops-rt`가 이를 `rt.pulse`에 싣고, ops-svc가 이것으로 신선도(§4.5)와 파티션별 끊김을 잰다.
-3. 거래 토픽(`trade.*`)에는 심장 박동을 넣지 않는다. 거래 토픽의 생산자는 Outbox 릴레이 하나로 둔다. 거래 쪽 끊김은 소비 밀림, 온세일 중 60초 무사건 경보, CDC 지연으로 본다(§9·§14). CDC는 데이터베이스의 변경 기록을 읽어 다른 시스템으로 흘려보내는 방식이다.
+3. 거래 토픽(`trade.*`)에는 심장 박동을 넣지 않는다. 거래 토픽의 생산자는 Outbox 릴레이 하나로 둔다. Outbox 릴레이는 서비스마다 둔 폴링 릴레이이고(DB의 Outbox 표를 짧은 주기로 읽어 Kafka로 보낸다), 거래 토픽 쓰기 권한은 릴레이 역할(Outbox 릴레이, `trade.seats`·`trade.purchase-sessions`는 Redis Stream 릴레이도)에 주고 요청 처리 파드에는 주지 않는다(docs/data.md §4의 7번, ADR-0116). 거래 쪽 끊김은 소비 밀림, 온세일 중 60초 무사건 경보, Outbox 릴레이 지연(`outbox_relay_lag_seconds`)으로 본다(§9·§14).
 4. 사건이 드문 토픽(`control.settings`)은 `ops-rt`가 읽지 않는다. 설정이 바뀐 시각은 조회할 때 ops-svc 명령 기록에서 가져와 붙인다.
 5. `PipelinePulse`가 실리는 토픽의 다른 소비자(`analytics-ingest` 등)는 이 메시지를 건너뛴다(계약 시험으로 확인).
 
@@ -270,7 +275,7 @@ FROM sale WHERE source = 'PAYMENT'
 ```
 
 - 퍼널 단계는 '처음' 표시가 true인 사건의 `eventKey` 서로 다른 개수로 센다(`uniqExact`). 대기열 누적은 `eventKey`로 중복을 지운 `QueueAggregate`의 합이다. 1초 칸은 `toStartOfSecond(occurred_at)`로 나누고, 칸마다 `eventKey`의 서로 다른 개수로 센다.
-- ops-svc는 회차마다 0.5초 [가정]에 한 번 세 뷰를 읽고, 결과를 회차마다 한 번만 계산해 여러 화면(콘솔 구독, 파트너 판매 현황)에 나눠 준다. 1초 칸은 끝난 칸(지금보다 1초 앞까지)만 그린다. 이미 그린 칸에 늦은 사건이 들어오면 다음 조회에서 고쳐 그린다.
+- ops-svc는 회차마다 0.5초 [가정]에 한 번 세 뷰를 읽고, 결과를 회차마다 한 번만 계산해 여러 화면(콘솔의 SSE 위젯 흐름(ADR-0100), 파트너 판매 현황)에 나눠 준다. 1초 칸은 끝난 칸(지금보다 1초 앞까지)만 그린다. 이미 그린 칸에 늦은 사건이 들어오면 다음 조회에서 고쳐 그린다.
 - '최근 10초·60초' 같은 이동 합과 10초 단위 보조 지표는 1초 칸을 더해 구한다. 구간별 증가량(분당 주문 등)은 누적 값의 차이로 구한다.
 - 조회 규칙(추천 적용 2026-10-22, ADR-0086): ops-svc의 `rt` 조회 사용자(`an_rt_reader`)는 설정 프로필에 `force_primary_key = 1`을 둔다. 기본 키(정렬 키)를 쓸 조건이 없는 쿼리는 오류로 막힌다(줄이는 효과까지는 검사하지 않는다, ClickHouse 문서). 뷰는 모두 회차 ID로 정렬 키의 앞을 고른다. 조회마다 실행 시간 상한은 1초 [가정]이다. 회차를 넘나드는 골드 비교 조회는 다른 사용자로 둔다.
 - 진단: 조회 종류별로 `system.query_log`의 `read_rows`·`query_duration_ms`·ProfileEvents `SelectedMarks`를 본다. 26.8은 `EXPLAIN indexes = 1`(인덱스별로 고른 파트와 그래뉼(기본 8,192행 묶음) 수)과 `EXPLAIN ANALYZE`(실제 단계별 시간, 분산 실행 쿼리는 안 됨)를 쓸 수 있다. 성능을 잴 때는 조건 캐시(25.4부터 기본 켬)를 끈다. 켜 두면 같은 쿼리를 되풀이해 잴 때 실제보다 빨라 보인다(추천 적용 2026-10-22, ADR-0086).
@@ -286,7 +291,7 @@ FROM sale WHERE source = 'PAYMENT'
 | 묶음 크기 상한 | 8MB | 16MB | 넘으면 묶음을 나눈다 |
 | 레코드 크기 상한 | 64KB | 1MB | 넘는 레코드는 거절한다 |
 | 다시 시도 | 버리지 않는다(§2.4) | 같다 | 그동안 그 파티션 소비를 멈춘다 |
-| 서버 설정 | `async_insert=1`, `wait_for_async_insert=1`, `insert_deduplication_token` | 같다 | 디스크에 쓴 뒤 응답하고, 같은 묶음을 다시 보내면 거른다 |
+| 서버 설정 | `async_insert=1`, `wait_for_async_insert=1`, `deduplicate_insert='enable'`, `insert_deduplication_token` | 같다 | 디스크에 쓴 뒤 응답하고, 같은 묶음을 다시 보내면 거른다 |
 
 - 숫자는 [가정, 4.3.9에서 확정]이다. 묶음이 너무 작거나 너무 자주 보내면 ClickHouse의 병합이 밀려 삽입이 느려진다. 그래서 `stream_insert_seconds`와 묶음당 건수를 보고 맞춘다(ClickHouse 문서).
 - `wait_for_async_insert=0`은 쓰지 않는다(디스크에 쓰기 전에 응답하므로 데이터를 잃을 수 있다).
@@ -311,11 +316,11 @@ FROM sale WHERE source = 'PAYMENT'
 | 1초 칸 | 약 2.4초 [추정] | 끝난 칸만 그려 1초를 더한다 |
 
 - Flink로 짠 설계는 누적 약 2.3초, 1초 칸 약 3.9초였다[추정]. 칸이 닫히고 워터마크가 나아갈 때까지 기다려야 했기 때문이다.
-- 심장 박동은 텔레메트리 경로만 지난다. 그래서 거래 쪽 앞단 지연(Outbox → Kafka)과 끊김은 CDC 지연 지표와 거래 토픽의 소비 밀림·마지막 사건 시각(§14)으로 따로 본다.
+- 심장 박동은 텔레메트리 경로만 지난다. 그래서 거래 쪽 앞단 지연(Outbox → Kafka)과 끊김은 Outbox 릴레이 지연 지표(`outbox_relay_lag_seconds`, 폴링 주기 100ms [가정], ADR-0116)와 거래 토픽의 소비 밀림·마지막 사건 시각(§14)으로 따로 본다.
 
 ### 4.6 실시간 대비 대조(analytics §4.4)
 
-- 마감 때 판매 좌석·판매 금액은 `rt.v_cumulative`의 값과 골드를 비교한다. 둘은 같은 사건을 같은 `eventKey`로 중복을 지우고 같은 규칙의 SQL로 센다. 그래서 원천 유실이 없고 규칙이 지표 사전과 같으면 차이는 0이다. 규칙이 같은지는 같은 고정 사건을 dbt 모델과 실시간 뷰에 넣어 시험한다(§10 ST-T9).
+- 마감 때 판매 좌석·판매 금액은 `rt.v_cumulative`의 값과 골드를 비교한다. 둘은 같은 사건을 같은 `eventKey`로 중복을 지우고 같은 규칙의 SQL로 센다. 그래서 원천 유실이 없고 규칙이 지표 사전과 같으면 차이는 0이다. 규칙이 같은지는 같은 고정 사건을 dbt 모델과 실시간 뷰에 넣어 시험한다(§10 ST-T9). R3의 골드 쪽 값은 날짜별 판매 사실(`fct_sales_daily`)의 합이라, R2 뒤에 판 몫도 들어간다. 원시 표 보존 400일(§4.7)이 같은 범위를 덮는다(analytics §4.3, 추천 적용 2026-10-28, 기술 검토 높음-23).
 - 차이가 나면 원인은 원천 유실, `eventKey`가 다른 재발행, 규칙 차이 중 하나다. 그 지표의 결정 규칙은 '판정 보류'로 두고, 원인을 데이터 품질 절에 적는다.
 
 ### 4.7 원시 행의 보존과 다시 채우기
@@ -349,7 +354,7 @@ FROM sale WHERE source = 'PAYMENT'
 
 ### 5.2 입력
 
-입력은 `telemetry.behavior`의 `BehaviorSignal`이다. trust-svc가 사전 검증 때 기기 식별값을 탐지 가명으로 바꾼 뒤 낸다(ADR-0053). 필드는 `pid`, `deviceRef`, `eventId`, `netClass`(HOSTING·PROXY·OTHER), `asn`(HOSTING·PROXY일 때만), `features`(브라우저가 낸 요약값, ADR-0065 결정 9), `ts`, `eventKey`, `schemaVersion`이다.
+입력은 `telemetry.behavior`의 `BehaviorSignal`이다. trust-svc가 사전 검증 때 기기 식별값을 탐지 가명으로 바꾼 뒤 낸다(ADR-0053). 필드는 `pid`, `deviceRef`, `eventId`, `netClass`(HOSTING·PROXY·OTHER), `asn`(HOSTING·PROXY일 때만), `features`(브라우저가 낸 요약값, ADR-0065 결정 9), `ts`, `eventKey`다(`schemaVersion`은 2026-10-28에 뺐다, 기술 검토 낮음-026).
 
 ### 5.3 패턴
 
@@ -364,12 +369,12 @@ FROM sale WHERE source = 'PAYMENT'
 
 ### 5.4 출력
 
-- `telemetry.trust-candidates`(`TrustCandidate`, 키 pid): `eventId`, `pid`, `pattern`, `evidenceCount`, `windowStart`, `detectedAt`, `eventKey`, `schemaVersion`. `eventKey`는 `SHA-256("PEAKET-reassess-v1" ‖ 회차 ID ‖ pid ‖ 패턴 ‖ 10분 칸 시작)`으로 만든 UUIDv8(RFC 9562 §5.8)이다. 그래서 같은 후보를 다시 내도 값이 같다.
+- `telemetry.trust-candidates`(`TrustCandidate`, 키 pid): `eventId`, `pid`, `pattern`, `evidenceCount`, `windowStart`, `detectedAt`, `eventKey`. `eventKey`는 `SHA-256("PEAKET-reassess-v1" ‖ 회차 ID ‖ pid ‖ 패턴 ‖ 10분 칸 시작)`으로 만든 UUIDv8(RFC 9562 §5.8)이다. 그래서 같은 후보를 다시 내도 값이 같다.
 - 행동 신호 원시 표(ClickHouse `trust.behavior_raw`, 30일 TTL, data-classification 행동 신호 행): 입력을 그대로 적재한다. 정렬 키는 `(event_id, ts)`, 파티션은 `toYYYYMMDD(ts)`(30일 보존과 맞는다, ADR-0077)이고, 복제 엔진을 쓴다. 적재는 §2.4·§4.4 규칙을 따른다.
 
 ### 5.5 trust-svc의 처리
 
-- **판정 피처(동기)**: 사전 검증 요청 때 세션·캐시 Redis에 회차별 기기 공유 수 `tr:{event:E}:devshare:{deviceRef}`(HyperLogLog, 10분)와 호스팅·프록시 대역 진입 수 `tr:{event:E}:asnhost:{asn}:{10초 칸}`(카운터, 만료 30초)를 쓰고 읽는다 [가정]. 통신사 대역은 세지 않는다(사람 대부분이 몇몇 통신사 대역에 몰려 있어서 신호가 약하고, 한 키에 요청이 몰린다).
+- **판정 피처(동기)**: 사전 검증 요청 때 세션·캐시 Redis에 회차별 기기 공유 수 `tr:devshare:{deviceRef}:E`(Set, 10분, 원소 상한 20개)와 호스팅·프록시 대역 진입 수 `tr:asnhost:{asn}:E:{10초 칸}`(카운터, 만료 30초)를 쓰고 읽는다 [가정]. 기기 공유 수는 작은 정수를 문턱과 견주므로 어림값(HyperLogLog)이 아니라 Set으로 정확히 센다. 두 키는 다른 키와 한 Lua에서 함께 쓰지 않아 해시 태그를 회차가 아니라 기기 가명·ASN에 둔다. 그래서 오픈 직전 사전 검증이 몰려도 한 회차의 키가 한 샤드에 모이지 않는다(추천 적용 2026-10-28, 기술 검토 낮음-033, docs/data.md §3). 통신사 대역은 세지 않는다(사람 대부분이 몇몇 통신사 대역에 몰려 있어서 신호가 약하고, 한 키에 요청이 몰린다).
 - **재평가 모드**: 명령 5(봇 판정 강도) 프로필에 있는 값이다. 값은 끔·그림자·적용이고, 기본값은 그림자다.
   - 그림자: `TrustVerdict`(source `REASSESS`, action `NONE`, `shadow` true)만 낸다.
   - 적용: 아직 기다리는 사람이면 queue-svc의 `IsolateWaiting`(서비스끼리 함수를 부르듯 호출하는 gRPC 방식, 메시 mTLS, 후보 `eventKey`로 멱등)을 부른다. queue-svc는 1인 1순번 중복 확인 키로 그 사람의 대기표(로비 참가자는 참가를 증명하는 서명된 문자열인 참가 토큰)를 찾아, 빠진 번호와 `VERIFYING`을 쓴다(queue-admission §7 격리 기록, ADR-0062). 응답은 격리함·대기 중 아님·이미 격리됨이다. 이미 입장한 사람은 라벨만 남긴다.
@@ -390,8 +395,8 @@ ADR-0039 평가 절차의 그림자 실행 단계를 거친다. 그림자 기간
 
 | 키 | 자료형 | 내용 | 수명 |
 | --- | --- | --- | --- |
-| `tr:{event:E}:ra:dev:{deviceRef}` | 정렬 집합(점수로 정렬되는 집합) | R1: pid → 받은 시각(ms) | 10분(쓸 때마다 늘린다) |
-| `tr:{event:E}:ra:fp:{지문}` | 정렬 집합 | R2: 같은 모양 | 10분 |
+| `tr:ra:dev:{deviceRef}:E` | 정렬 집합(점수로 정렬되는 집합) | R1: pid → 받은 시각(ms) | 10분(쓸 때마다 늘린다) |
+| `tr:ra:fp:{지문}:E` | 정렬 집합 | R2: 같은 모양 | 10분 |
 | 위 키 뒤에 `:over`를 붙인 키 | 문자열 | 넘음 표시. 값은 표시를 켠 메시지의 (파티션, 오프셋) | 10분 |
 
 - Lua 스크립트(Redis 안에서 한 번에 도는 짧은 프로그램) 하나가 메시지마다 아래를 원자적으로 한다.
@@ -399,7 +404,7 @@ ADR-0039 평가 절차의 그림자 실행 단계를 거친다. 그림자 기간
   2. 넘음 표시가 없으면 pid를 넣고, 10분보다 오래된 것을 지우고, 서로 다른 pid 수를 센다.
   3. 문턱(5·20)에 닿으면 넘음 표시를 켜고(값은 이 메시지의 파티션·오프셋) 집합 전체를 후보로 돌려준다. 그 뒤로는 집합에 더 넣지 않는다. 그래서 키 하나의 크기는 문턱보다 크게 자라지 않는다.
 - 작업자는 돌려받은 후보를 `TrustCandidate`로 Kafka에 내고, 발행 확인을 받은 뒤 입력 오프셋을 커밋한다. 발행 전에 작업자가 죽으면 그 메시지를 다시 읽어 같은 후보를 다시 낸다(1의 예외 규칙). trust-svc는 같은 후보를 `eventKey`로 한 번만 처리한다. Flink 때는 체크포인트가 상태와 읽은 위치를 함께 되돌려 이 일을 했다.
-- 한 회차의 키는 해시 태그 `{event:E}`로 같은 슬롯에 모인다. 판정 피처 키(`tr:{event:E}:devshare:…`)와 같은 방식이다. 대형 회차 로비 피크에서도 초당 수천 건의 스크립트 호출이라 한 샤드로 충분하다 [추정].
+- 해시 태그는 기기 가명·지문이다. 스크립트는 키 하나와 그 `:over` 키만 함께 쓰므로 둘이 같은 슬롯이면 되고, 회차 단위로 모을 까닭이 없다. 판정 피처 키(`tr:devshare:…`)와 같은 규칙이고, 한 회차의 키를 여러 샤드에 흩는다(추천 적용 2026-10-28, 기술 검토 낮음-033. ADR-0099 때는 회차 태그 `{event:E}`로 한 샤드에 모았다). 대형 회차 로비 피크에서도 초당 수천 건의 스크립트 호출이라, 모았더라도 한 샤드로 버틸 양이다 [추정].
 - 메모리는 10분 피크 신호 약 100만 개 기준 약 100MB다 [추정]. 세션·캐시 클러스터가 메모리를 비우려고 키를 지우면 그 키의 문맥(최대 10분)을 잃는다(§15).
 
 ## 6. 원본 적재(`analytics-ingest`)
@@ -420,6 +425,8 @@ ADR-0039 평가 절차의 그림자 실행 단계를 거친다. 그림자 기간
 | 나누기 | 원천별 브론즈 표로 나눈다 | 표별 행 |
 | 삽입 | 브론즈 표마다 묶어 넣는다(§4.4 설정) | ClickHouse |
 | 거절 기록 | 위치만 넣는다 | `bronze.brz_rejected` |
+
+- 분석 수집 버킷의 파일(기준 자료·운영 기록·비용·SLO)은 이 작업자가 싣지 않는다. 개인정보가 없는 파일이라 가명 처리가 필요 없어, 마감 실행기(`close-runner`, 쿠버네티스 CronJob)가 ClickHouse `s3()` 표 함수로 크기 상한·형식 검사를 거쳐 브론즈에 싣는다(analytics §3.2, 추천 적용 2026-10-28, 기술 검토 낮음-042). Flink 때 '파일 소스를 넣을지'로 남았던 빈칸은 이것으로 닫는다.
 
 ### 6.2 가명 처리와 키
 
@@ -452,7 +459,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 
 | 토픽 | 메시지 | 키 |
 | --- | --- | --- |
-| `trade.*` | 거래 사건 | 회차(`eventId`, 공연 단위 순서). 정산은 파트너 ID |
+| `trade.*` | 거래 사건 | 회차(`eventId`. 한 회차는 토픽마다 한 파티션이고, 순서는 아래 범위만 지켜진다). 정산은 파트너 ID |
 | `telemetry.queue` | `QueueAggregate` | '회차:파드' |
 | `telemetry.queue` | `QueueEntryRecord` | pid |
 | `telemetry.purchase` | `HoldAttempt` | `purchaseSessionId` |
@@ -462,6 +469,8 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 | 위 텔레메트리 셋 | `PipelinePulse` | 키 없음, 파티션 직접 지정 |
 
 - 회차 하나의 거래 사건은 토픽마다 한 파티션에 온다. 그래서 `rt.sale_event`의 Kafka 위치 순서가 그 회차의 사건 순서다. 판매 좌석 규칙(§4.3)은 이 전제에 기댄다. 키 규칙을 바꾸면 생산자가 늘어나기만 하는 순번을 실어야 한다(§15).
+- 같은 좌석·주문의 사건이 커밋 순서대로 Kafka에 들어가는 것은 Outbox 릴레이의 보내는 규칙이 지킨다(Outbox 행의 `seq` 순서, 트랜잭션 마지막에 넣기, 리더 하나, `SKIP LOCKED` 없이 잠금을 기다리기, docs/data.md §4의 7번, ADR-0116). 서로 다른 좌석 사이의 순서는 커밋 순서와 다를 수 있고, 판매 좌석 규칙은 그 순서를 쓰지 않는다. 확인은 V-T28이다. `trade.seats`에는 생산자가 둘이다(홀드 사건은 좌석 Redis Stream 릴레이, 판매 사건과 `EventSaleChanged`는 purchase-svc Outbox 릴레이). 두 생산자 사이의 순서는 보장하지 않으므로, 받는 쪽은 펜싱 토큰·판 번호·상태 기계로 늦게 온 사건을 거른다(asyncapi info '키와 순서', 추천 적용 2026-10-28, 기술 검토 낮음-025).
+- 인기 회차 쏠림: 키가 회차라 인기 회차 하나의 거래 사건은 토픽마다 파티션 하나, 곧 소비자 파드 하나에 몰린다(메시가 공연 ID 해시 분산을 기각한 것과 같은 쏠림, docs/architecture.md §5). 대형 온세일 피크의 한 회차 몫(`SeatEvent` 약 3,000/초, `OrderEvent` 약 1,500/초, §11)을 한 파티션에 넣어, 그 파티션을 맡은 `ops-rt`·`analytics-ingest` 파드가 따라잡는지를 ST-T17(wbs 4.3.3)에서 잰다. 생산자는 운영과 같은 폴링 Outbox 릴레이다(ADR-0116이라 측정 길과 운영 길이 같다).
 - 파티션 수는 계약 저장소에서 정하고, 줄이지 않는다(devops §7.5). 이 문서의 계산은 토픽마다 파티션 12개 [가정, 4.3.3에서 확정]로 잡았다.
 
 ## 8. 복구와 판 올리기
@@ -477,7 +486,8 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 | --- | --- | --- | --- | --- | --- |
 | 관제 실시간 표가 5초 안에 반영 | `rt.pulse`, `rt_freshness_seconds{path}` | 신선도 1분 p95 5초 미만(NFR-009) | SCR-029 판매 중 탭 머리 신선도(design/d5 §7.2), 엔지니어 화면 '실시간 표' | 3분 넘게 5초 초과 → Degraded 전환과 SEV3(`kind` hygiene) | 카나리 동안 신선도 p95 비교 |
 | 사건을 빠뜨리지 않음 | `stream_rejected_total`, 생산자 버림 수 | 누락률 < 0.1% | 같은 화면 '누락' | 10분 누락률 0.1% 초과 SEV3, 거절 > 0 SEV3 | 배포 전후 누락률 |
-| 거래 사건이 끊기지 않음 | 거래 토픽 소비 밀림·마지막 사건 시각, CDC 지연 | — | '스트림 작업자' 화면 | 온세일 윈도우 안에서 60초 [가정] 넘게 거래 사건이 없으면 SEV3 | 배포 직후 거래 처리량 |
+| 모르는 열거 기호가 숫자에서 조용히 빠지지 않음(추천 적용 2026-10-28, 기술 검토 중간-087) | `stream_unrecognized_symbol_total{worker, topic, record, field}` | — | '스트림 작업자' 화면 '모르는 기호' | 5분 [가정] 넘게 0보다 크면 SEV3(`kind` hygiene). 그 열거에 기호를 더한 생산자 배포가 소비자보다 먼저 나갔다는 뜻이다 | 생산자 배포 전후 이 수가 0인지 본다 |
+| 거래 사건이 끊기지 않음 | 거래 토픽 소비 밀림·마지막 사건 시각, Outbox 릴레이 지연(`outbox_relay_lag_seconds`) | — | '스트림 작업자' 화면 | 온세일 윈도우 안에서 60초 [가정] 넘게 거래 사건이 없으면 SEV3. 릴레이 지연이 5초 [가정]를 1분 넘게 넘으면 SEV2(ADR-0116) | 배포 직후 거래 처리량 |
 | 작업자가 멈추거나 되풀이 실패하지 않음 | 재시작 수, 파드 상태 | — | '스트림 작업자' 화면 | 10분 안 재시작 3회 [가정] SEV3 | 롤링 뒤 준비 상태 |
 | 삽입이 이어짐 | `stream_insert_retries_total`, `stream_paused_partitions`, `stream_insert_seconds` | — | 작업자별 삽입 | 재시도가 5분 [가정] 넘게 이어지면 SEV3 | 배포 뒤 첫 묶음 성공 |
 | 소비가 밀리지 않음 | `stream_consumer_lag_records` | — | '스트림 작업자' 화면 | 10분 동안 계속 늘면 SEV3 | 배포 전후 비교 |
@@ -502,6 +512,10 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 | ST-T11 | 사건을 계속 보내면서 작업자를 롤링으로 올린다 | 누적이 끊김 없이 정답과 같다. 새 파드는 커밋한 위치에서 이어 읽는다 | wbs 4.6.2, devops D-T20 |
 | ST-T12 | 가명 키 요청(KMS)을 실패하게 함 | 원문을 쓰지 않고 그 파티션에서 멈춰 다시 시도하며, 소비 밀림 경보가 뜬다. KMS가 돌아오면 빠짐 없이 이어 간다 | 4.3.4 |
 | ST-T13 | 재평가 문턱을 넘긴 메시지를 처리한 직후, 후보를 발행하기 전에 `trust-reassess`를 강제로 종료한다 | 다시 뜬 뒤 그 메시지를 다시 읽어 문턱 때의 후보 전체를 다시 낸다. trust-svc는 같은 후보를 한 번만 처리한다 | 4.3.8 |
+| ST-T14 | MSK IAM 토큰 함수(기술 검토 높음-26). ① 로컬: 흉내 낸 STS로 토큰 함수를 부르고, 역할 신뢰를 거둬 역할을 맡지 못하게 한다. ② 실제 MSK와 EKS Pod Identity: 작업자를 Pod Identity 자격과 MSK 토큰이 각각 한 번 이상 바뀔 때까지 돌린다(만료 시각을 기록해 확인한다) | ①: 맡은 역할의 세션 이름이 늘 `<작업자>-<환경>`이다. 역할을 못 맡으면 기본 자격으로 넘어가지 않고 연결이 실패하며 소비 밀림 경보가 뜬다. ②: 재인증 실패('Cannot change principals during re-authentication')와 연결 끊김이 0건이고 소비 밀림이 늘지 않는다 [확인 필요] | wbs 0.5.1, devops §9.4 |
+| ST-T15 | 모르는 열거 기호(기술 검토 중간-087): 작업자가 빌드된 계약 판에 없는 기호(예: `OrderEventType`의 새 상태)를 넣은 새 판 스키마로 사건을 내고, 옛 판으로 빌드한 `ops-rt`·`analytics-ingest`가 읽는다 | 레코드를 거절하지 않는다. `ops-rt`는 `UNRECOGNIZED`로 싣고 `stream_unrecognized_symbol_total`이 늘며 5분 [가정] 뒤 SEV3가 뜬다. 원본 적재는 원래 기호를 그대로 싣는다. 나머지 판매 누적은 정답과 같다 | wbs 0.2.2, docs/api/avro/README.md §3 |
+| ST-T17 | 인기 회차 한 파티션(추천 적용 2026-10-28, 기술 검토 낮음-025): 로컬에서 한 회차의 `trade.seats`(약 3,000/초)와 `trade.orders`(약 1,500/초) 사건을 폴링 Outbox 릴레이와 좌석 Redis Stream 릴레이로 30분 [가정] 넣는다. 같은 때 다른 회차 11개는 그 10분의 1로 넣는다 | 그 파티션을 맡은 `ops-rt`·`analytics-ingest` 파드의 소비 밀림이 5초 [가정] 안에 머물고 신선도 p95가 NFR-009 안이다. 파드 하나의 그 파티션 처리량 상한과 CPU를 성능 장부에 '실측(PC)'으로 남긴다. 밀림이 계속 늘면 그 값을 §11의 파드당 처리량과 견주어 키 규칙(§15) 재검토 조건으로 기록한다 | 4.3.3 |
+| ST-T16 | 레지스트리 정지(기술 검토 중간-088): 컨테이너 레지스트리를 멈춘 채 ① 작업자 파드를 하나 새로 띄우고 ② 서비스 생산자 파드를 새로 띄워 주문을 만든다. 그 뒤 레지스트리를 되살린다 | ①: 새 파드는 처음 보는 ID에서 그 파티션 소비를 멈추고 다시 시도한다. 거절은 0건이고, 되살린 뒤 빠짐 없이 이어 읽는다. ②: 생산자는 설정의 스키마 ID로 Outbox 바이트를 만들어 주문이 성공하고, 시작 확인 실패 경보(SEV3)만 뜬다 | wbs 0.2.2, G-30 |
 
 ## 11. 용량 산정
 
@@ -537,8 +551,8 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 | 장애 | 작업자의 동작 | 화면과 경보 | 회복 |
 | --- | --- | --- | --- |
 | 텔레메트리 MSK 장애 | 텔레메트리 소비가 멈추고 심장 박동도 끊긴다. 거래 누적은 이어진다 | 신선도가 나빠지고 3분 뒤 Degraded 전환, SEV3 | Kafka가 돌아오면 커밋 위치에서 이어 읽는다 |
-| 거래·제어 MSK 장애 | 판매 누적이 멈춘다. 심장 박동은 텔레메트리 쪽으로 지나므로 신선도는 정상으로 보인다 | 온세일 중 거래 사건 60초 없음 경보(SEV3), CDC 지연 | 위와 같다. 그동안 판매 숫자 옆에 '거래 사건 끊김'을 보여 준다 |
-| Schema Registry 장애 | 캐시한 스키마 ID는 계속 읽는다. 새 스키마 ID는 거절로 간다 | 거절 수 경보(SEV3) | 레지스트리가 회복되면 거절 구간을 다시 적재한다(RB-34) |
+| 거래·제어 MSK 장애 | 판매 누적이 멈춘다. 심장 박동은 텔레메트리 쪽으로 지나므로 신선도는 정상으로 보인다 | 온세일 중 거래 사건 60초 없음 경보(SEV3), Outbox 릴레이 지연(SEV2, 릴레이가 보내지 못해 Outbox 표에 쌓인다) | 위와 같다. 그동안 판매 숫자 옆에 '거래 사건 끊김'을 보여 준다. MSK가 돌아오면 릴레이가 쌓인 행을 `seq` 순서로 이어 보낸다 |
+| Schema Registry 장애 | 캐시한 스키마 ID는 계속 읽는다. 처음 보는 ID(새로 뜬 파드는 모두 처음이다)는 거절하지 않고 그 파티션 소비를 멈춰 다시 시도한다. 생산자(서비스·rt-pulse)는 실행 중에 레지스트리를 부르지 않아 영향이 없다(docs/api/avro/README.md §3 '생산자 스키마 ID', 추천 적용 2026-10-28, 기술 검토 중간-088) | 소비 밀림·멈춘 파티션 SEV3, 신선도가 나빠지면 Degraded | 레지스트리를 되살리면 커밋 위치부터 이어 읽는다. 빠진 레코드는 없다(RB-34, G-30) |
 | ClickHouse 장애 | 작업자가 그 파티션 소비를 멈추고 다시 시도한다(버리지 않는다). 조회도 실패한다 | 삽입 재시도·소비 밀림 SEV3, 신선도 악화와 Degraded | 회복하면 밀린 것을 이어 싣는다. 누락은 없다 |
 | Redis 장애(재평가) | 스크립트가 실패해 그 파티션 소비를 멈추고 다시 시도한다 | 소비 밀림 SEV3 | 회복하면 이어 간다. 키가 지워졌으면 최대 10분 문맥을 잃는다 |
 | KMS 장애(원본 적재) | 가명 키를 못 얻어 그 파티션에서 멈추고 다시 시도한다(원문은 쓰지 않는다) | 소비 밀림 경보 | KMS가 회복되면 이어 간다 |
@@ -557,7 +571,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
   1. 단위: 소비 모듈의 커밋 순서(쓰기 성공 전에는 커밋하지 않는다), 다시 시도와 멈춤, 거절, 재조정 중 처리를 본다. 재평가 Lua 스크립트(문턱, 넘음 표시, 다시 읽을 때 다시 내기)는 컨테이너(앱과 실행 환경을 한 묶음으로 만든 실행 단위)로 띄운 실제 Redis로 본다.
   2. 뷰: 고정 사건으로 매개변수 뷰의 결과를 정답과 맞춘다(ST-T9·T10, ClickHouse 컨테이너).
   3. 통합: 컨테이너로 띄운 Kafka, Schema Registry, ClickHouse, Redis로 ST-T1~T4·T7·T11~T13을 돌린다.
-  4. 계약: Avro 호환은 `contract-check.yml`(BACKWARD_TRANSITIVE)이 본다. `PipelinePulse` 건너뛰기와 새 필드(`firstInStage`·`firstHeldInSession`)는 소비자 계약 시험으로 본다.
+  4. 계약: Avro 호환은 `contract-check.yml`(BACKWARD_TRANSITIVE)이 계약 저장소의 지난 판을 모두 올린 로컬 레지스트리 컨테이너로 본다. 열거 규칙(맨 앞 `UNRECOGNIZED`와 기본값, 기호 지우기 금지)도 같은 검사가 본다(추천 적용 2026-10-28, 기술 검토 중간-087·088). `PipelinePulse` 건너뛰기와 새 필드(`firstInStage`·`firstHeldInSession`)는 소비자 계약 시험으로 본다.
   5. 성능: docs/verification.md §3.7(V-T12~V-T15, V-T19).
 
 ## 14. 대시보드·경보·런북
@@ -572,8 +586,9 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 - 판매 좌석의 순서는 회차 하나의 거래 사건이 한 파티션에 온다는 키 규칙(§7)에 기댄다. 키 규칙을 바꾸면 생산자가 늘어나기만 하는 순번을 실어야 한다.
 - 퍼널의 '처음' 표시가 틀리면 퍼널도 틀린다. 생산자(purchase-svc)의 규칙이 지표 사전과 같은지는 ST-T9(골드 대조)로만 확인한다. 지표 사전이 바뀌면 뷰 규칙과 생산자 규칙도 같은 PR에서 바꾼다.
 - 재평가 상태는 세션·캐시 Redis에 있다. Redis 장애나 메모리 정리로 키가 지워지면 최대 10분의 문맥을 잃는다.
-- Node.js 소비자의 파티션당 처리량과, MSK IAM 서명 도구의 Pod Identity 재인증은 확인 필요다(wbs 0.5.1 PoC, 4.3.9).
-- 심장 박동 신선도는 텔레메트리 경로만 잰다. 거래 쪽 앞단 지연과 끊김은 CDC 지연 지표, 거래 토픽 소비 밀림, 60초 무사건 경보로 본다. Prometheus 판단 숫자의 신선도는 제어 입력 없음 규칙(ADR-0069)으로 본다.
+- Node.js 소비자의 파티션당 처리량은 확인 필요다(wbs 0.5.1 PoC, 4.3.9).
+- MSK IAM 재인증 실패는 전용 역할과 고정 세션 이름(§2.3·§2.6)으로 피하도록 짰다. 자바 클라이언트 README가 안내하는 우회와 같은 원리지만, JavaScript 클라이언트(기본 `@confluentinc/kafka-javascript`, 대체 kafkajs)로 자격 갱신 주기를 넘겨 이어지는지는 아직 확인하지 않았다. 확인에는 실제 MSK와 EKS가 있어야 하고, 포트폴리오는 운영 클러스터를 띄우지 않는다(ADR-0057). 그래서 확인 전까지 이 규칙은 원문 근거의 설계로만 둔다(ST-T14, review/open-items.md 42번).
+- 심장 박동 신선도는 텔레메트리 경로만 잰다. 거래 쪽 앞단 지연과 끊김은 Outbox 릴레이 지연 지표, 거래 토픽 소비 밀림, 60초 무사건 경보로 본다. Outbox 릴레이의 순서 보장은 '같은 주문·좌석의 트랜잭션은 잠금으로 줄을 선다'와 'Outbox 행은 마지막에 넣는다'에 기댄다. 이 규칙을 어긴 코드는 V-T28과 코드 검토로만 잡는다(ADR-0116). Prometheus 판단 숫자의 신선도는 제어 입력 없음 규칙(ADR-0069)으로 본다.
 - R1은 공용 기기(PC방, 가족 태블릿)를 잡을 수 있다. 격리는 추가 검증이라서 사람은 통과한다. 상한과 그림자 모드 시작으로 피해 규모를 묶어 둔다.
 - R2는 녹화한 움직임을 재생하면서 잡음을 섞는 봇을 놓친다. CEP를 쓰지 않으므로 순서 패턴은 브라우저 요약값(입력 간격 분산)과 서버 쪽 신호에만 기댄다.
 - 수치(묶음, 조회 주기, 복제·자원, 보존, 패턴 숫자, 격리 상한, 지연 예산, 파티션 수)는 [가정]이고, 4.3.8·4.3.9·V-T19와 그림자 기간의 표본 검토에서 정한다.
@@ -603,10 +618,11 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 
 ## 17. 참고 자료(2026-10-27 확인)
 
-- Kafka·Schema Registry 클라이언트: [confluent-kafka-javascript](https://github.com/confluentinc/confluent-kafka-javascript)(README·MIGRATION.md: librdkafka 기반, KafkaJS 모양의 설정, OAUTHBEARER 토큰 함수), npm `@confluentinc/kafka-javascript` 1.11.0·`@confluentinc/schemaregistry` 1.11.0, [aws-msk-iam-sasl-signer-js](https://github.com/aws/aws-msk-iam-sasl-signer-js)(1.0.3, 기본 자격 사슬·`generateAuthTokenFromRole`·자격 공급자 지정)
+- Kafka·Schema Registry 클라이언트: [confluent-kafka-javascript](https://github.com/confluentinc/confluent-kafka-javascript)(README·MIGRATION.md: librdkafka 기반, KafkaJS 모양의 설정, OAUTHBEARER 토큰 함수), npm `@confluentinc/kafka-javascript` 1.11.0·`@confluentinc/schemaregistry` 1.11.0, [aws-msk-iam-sasl-signer-js](https://github.com/aws/aws-msk-iam-sasl-signer-js)(1.0.3, 기본 자격 사슬·`generateAuthTokenFromRole`·자격 공급자 지정. 2026-10-28에 v1.0.3 소스 `src/mskCredentialProvider.ts`·`src/getMSKAuthToken.ts`를 확인했다: 역할은 AWS SDK `fromTemporaryCredentials`로 맡고 세션 이름을 주지 않으면 `MSKSASLDefaultSession`이며, 역할을 못 맡으면 예외를 던진다. 토큰 수명은 자격의 남은 시간과 900초 가운데 짧은 쪽이다)
+- MSK IAM 재인증: [aws-msk-iam-auth README](https://github.com/aws/aws-msk-iam-auth)의 문제 해결 절 'Failure during re-authentication due to session name change (EKS Pod Identity/Other Credential Providers)'(전용 역할과 고정 세션 이름 `awsRoleArn`·`awsRoleSessionName`, `awsStsRegion`, 역할을 못 맡을 때 기본 자격으로 넘어가지 않게 하는 `awsAddDefaultProviders="false"`), 같은 저장소의 v2.3.9 릴리스 노트(2026-09-24, 기본 자격으로 넘어갈 때 경고를 남김), AWS SDK for JavaScript v3 소스 `packages/credential-providers/src/fromTemporaryCredentials.ts`(맡을 때 쓰는 자격을 주지 않으면 Node 기본 자격 사슬로 STS를 부른다). 모두 2026-10-28 확인(기술 검토 높음-26)
 - ClickHouse: [Node.js 클라이언트](https://github.com/ClickHouse/clickhouse-js)(npm `@clickhouse/client` 1.24.1), [CREATE VIEW](https://clickhouse.com/docs/sql-reference/statements/create/view)(매개변수 뷰), [Deduplicating inserts on retries](https://clickhouse.com/docs/guides/developer/deduplicating-inserts-on-retries)(`deduplicate_insert` 26.2부터 기본 켬, `insert_deduplication_token`, 뷰 대상까지 중복 거르기), [Asynchronous inserts](https://clickhouse.com/docs/optimize/asynchronous-inserts)(쓰기 조건, 적응형 시간, `wait_for_async_insert`), [Incremental materialized view](https://clickhouse.com/docs/materialized-view/incremental-materialized-view)(넣는 묶음에만 도는 트리거, 다시 채우기), [Refreshable materialized view](https://clickhouse.com/docs/materialized-view/refreshable-materialized-view), [Kafka 엔진](https://clickhouse.com/docs/engines/table-engines/integrations/kafka)(`AWS_MSK_IAM`), 소스 `src/Core/Settings.cpp`(`materialized_views_ignore_errors` 기본 끔: 뷰 오류가 원본 삽입을 실패시킨다), [Kafka Connect Sink](https://clickhouse.com/docs/integrations/kafka/clickhouse-kafka-connect-sink)와 [clickhouse-kafka-connect DESIGN.md](https://github.com/ClickHouse/clickhouse-kafka-connect/blob/main/docs/DESIGN.md)(1.7.0, 정확히 한 번 기본 꺼짐·KeeperMap 상태·같은 묶음 다시 보내기, 데드 레터)
 - Apache Kafka 소스: `connect/runtime` `SinkConnectorConfig`(데드 레터 토픽은 싱크·변환·변환기에서 실패한 메시지를 받는다), `connect/transforms`(기본 변환 16종, MaskField는 빈 값이나 정해 둔 값으로 덮는다, InsertField의 `offset.field`)
-- [Debezium FAQ](https://debezium.io/documentation/faq/)(Kafka Connect가 갑자기 멈추면 같은 사건을 다시 보낼 수 있고, 소비자는 중복을 전제해야 한다)
+- [Debezium FAQ](https://debezium.io/documentation/faq/)(Kafka Connect가 갑자기 멈추면 같은 사건을 다시 보낼 수 있고, 소비자는 중복을 전제해야 한다). 2026-10-28부터 Outbox 릴레이는 Debezium이 아니라 폴링 릴레이지만(ADR-0116), 보낸 뒤 표시하기 전에 멈추면 같은 행을 다시 보내므로 중복 전제는 같다
 - RisingWave: GitHub 릴리스 3.1.0(2026-09-21)·저장소 정보(Apache-2.0), 문서 [Architecture](https://docs.risingwave.com/get-started/architecture)(서빙·스트리밍·메타·압축 노드, 객체 저장소), [Kafka](https://docs.risingwave.com/ingestion/sources/kafka)(Avro·Schema Registry), Amazon MSK(`AWS_MSK_IAM`), [ClickHouse 싱크](https://docs.risingwave.com/integrations/destinations/clickhouse)(복구 중 중복 쓰기, ReplacingMergeTree 권장), [JavaScript UDF](https://docs.risingwave.com/sql/udfs/use-udfs-in-javascript)(내장 QuickJS, 외부 네트워크 없음)
 - Apache Flink 2.2 문서: [MATCH_RECOGNIZE](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/table/sql/queries/match_recognize/), [Python API](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/dev/python/overview/). 2026-10-20에 확인한 Flink·Operator·ClickHouse Flink 커넥터 사실은 ADR-0071·0072에 있다
 - AWS 문서: [What is Amazon Managed Service for Apache Flink?](https://docs.aws.amazon.com/managed-flink/latest/java/what-is.html)(자바·스칼라·Python·SQL), [MSK Connect](https://docs.aws.amazon.com/msk/latest/developerguide/msk-connect.html), [Configure clients for IAM access control](https://docs.aws.amazon.com/msk/latest/developerguide/configure-clients-for-iam-access-control.html)

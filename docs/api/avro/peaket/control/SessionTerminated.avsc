@@ -19,7 +19,9 @@
       "type": {
         "type": "enum",
         "name": "SessionTerminatedReason",
+        "default": "UNRECOGNIZED",
         "symbols": [
+          "UNRECOGNIZED",
           "LOGOUT",
           "DELETE",
           "ADMIN_FORCE",

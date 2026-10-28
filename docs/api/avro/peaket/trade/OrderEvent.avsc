@@ -23,11 +23,13 @@
     },
     {
       "name": "type",
-      "doc": "EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID는 회차 취소 확정과 배상 지급(ADR-0046). AWAITING_DEPOSIT은 가상계좌 발급(입금 대기), DEPOSIT_REVERSED는 입금 오류로 결제사가 입금을 되돌려 확정된 주문이 입금 대기로 돌아감(planning/03 §2.4, 추천 적용 2026-10-14, ADR-0062)",
+      "doc": "EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID는 회차 취소 확정과 배상 지급(ADR-0046). AWAITING_DEPOSIT은 가상계좌 발급(입금 대기), DEPOSIT_REVERSED는 입금 오류로 결제사가 입금을 되돌려 확정된 주문이 입금 대기로 돌아감(planning/03 §2.4, 추천 적용 2026-10-14, ADR-0062). EXPIRED는 결제를 접수하지 않고 끝난 주문(ADR-0107), ISSUE_DELAYED는 승인 뒤 발권이 60초 [가정] 넘게 끝나지 않아 다시 발권하는 중인 주문(ADR-0106). 두 기호는 2026-10-28에 끝에 더했고 소비자를 먼저 배포한다",
       "type": {
         "type": "enum",
         "name": "OrderEventType",
+        "default": "UNRECOGNIZED",
         "symbols": [
+          "UNRECOGNIZED",
           "CREATED",
           "ACCEPTED",
           "RESERVED",
@@ -40,7 +42,9 @@
           "PARTIALLY_REFUNDED",
           "REFUNDED",
           "EVENT_CANCELLATION_CONFIRMED",
-          "COMPENSATION_PAID"
+          "COMPENSATION_PAID",
+          "EXPIRED",
+          "ISSUE_DELAYED"
         ]
       }
     },
@@ -128,7 +132,9 @@
         {
           "type": "enum",
           "name": "OrderEventSeatAssignment",
+          "default": "UNRECOGNIZED",
           "symbols": [
+            "UNRECOGNIZED",
             "PICK",
             "AUTO"
           ]
@@ -153,11 +159,6 @@
       }
     },
     {
-      "name": "idempotencyKey",
-      "doc": "멱등 컨슈머 키",
-      "type": "string"
-    },
-    {
       "name": "eventKey",
       "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
       "type": [
@@ -166,15 +167,6 @@
           "type": "string",
           "logicalType": "uuid"
         }
-      ],
-      "default": null
-    },
-    {
-      "name": "schemaVersion",
-      "doc": "메시지 형식 판",
-      "type": [
-        "null",
-        "long"
       ],
       "default": null
     }
