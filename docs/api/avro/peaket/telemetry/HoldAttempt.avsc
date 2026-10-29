@@ -7,44 +7,28 @@
     {
       "name": "eventId",
       "doc": "회차 ID",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "purchaseSessionId",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "mode",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "HoldAttemptMode",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "PICK",
-            "AUTO"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "HoldAttemptMode",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "PICK",
+          "AUTO"
+        ]
+      }
     },
     {
       "name": "tierId",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "sectionId",
@@ -56,22 +40,18 @@
     },
     {
       "name": "result",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "HoldAttemptResult",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "HELD",
-            "CONFLICT",
-            "LIMIT",
-            "ERROR"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "HoldAttemptResult",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "HELD",
+          "CONFLICT",
+          "LIMIT",
+          "ERROR"
+        ]
+      }
     },
     {
       "name": "autoResult",
@@ -91,55 +71,43 @@
           ]
         }
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "mode": [
+            "AUTO"
+          ]
+        }
+      ]
     },
     {
       "name": "firstHeldInSession",
-      "type": [
-        "null",
-        "boolean"
-      ],
-      "default": null,
+      "type": "boolean",
+      "default": false,
       "doc": "그 구매 세션의 첫 HELD일 때 true. 관제 실시간 표가 첫 홀드 퍼널을 구매 세션마다 한 번 센다(ADR-0099)"
     },
     {
       "name": "retryNo",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null
+      "type": "long"
     },
     {
       "name": "latencyMs",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null
+      "type": "long"
     },
     {
       "name": "occurredAt",
-      "type": [
-        "null",
-        {
-          "type": "long",
-          "logicalType": "timestamp-millis"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
     },
     {
       "name": "eventKey",
       "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
-      "type": [
-        "null",
-        {
-          "type": "string",
-          "logicalType": "uuid"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
     }
   ]
 }

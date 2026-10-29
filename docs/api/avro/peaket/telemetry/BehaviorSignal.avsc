@@ -7,11 +7,7 @@
     {
       "name": "pid",
       "doc": "사람 식별값",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "deviceRef",
@@ -25,30 +21,22 @@
     {
       "name": "eventId",
       "doc": "사전 검증한 회차(ADR-0071)",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "netClass",
       "doc": "요청 IP의 네트워크 유형(ADR-0071)",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "BehaviorSignalNetClass",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "HOSTING",
-            "PROXY",
-            "OTHER"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "BehaviorSignalNetClass",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "HOSTING",
+          "PROXY",
+          "OTHER"
+        ]
+      }
     },
     {
       "name": "asn",
@@ -57,7 +45,15 @@
         "null",
         "long"
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "netClass": [
+            "HOSTING",
+            "PROXY"
+          ]
+        }
+      ]
     },
     {
       "name": "features",
@@ -140,26 +136,18 @@
     },
     {
       "name": "ts",
-      "type": [
-        "null",
-        {
-          "type": "long",
-          "logicalType": "timestamp-millis"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
     },
     {
       "name": "eventKey",
       "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
-      "type": [
-        "null",
-        {
-          "type": "string",
-          "logicalType": "uuid"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
     }
   ]
 }

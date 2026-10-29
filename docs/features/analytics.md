@@ -135,7 +135,7 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 
 ### 3.4 이벤트 계약 보강
 
-`docs/api/asyncapi.yaml`에 아래 필드를 선택 필드로 더한다(Avro BACKWARD_TRANSITIVE 호환, 소비자 먼저 배포, ADR-0026·0054).
+`docs/api/asyncapi.yaml`에 아래 필드를 더한다(ADR-0026·0054). 첫 등록 전이라, 칸마다 필수인지 사건 종류에 따른 조건부인지는 docs/api/avro/README.md §6의 판정을 따른다(소유자 결정 2026-10-29, ADR-0150). 등록 뒤에 더하는 필드는 null 허용이거나 기본값이 있어야 한다(Avro BACKWARD_TRANSITIVE 호환, 소비자 먼저 배포).
 
 | 메시지 | 추가 필드 | 쓰는 지표 |
 | --- | --- | --- |

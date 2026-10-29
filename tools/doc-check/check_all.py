@@ -832,6 +832,47 @@ def check_artifacts(texts, rep):
                 rep.err('artifacts', '%s:%d' % (f, n), '해소되지 않은 [충돌] 표시(기획 v1.0은 0건)')
 
 
+# ---------- 6의1의2. 공개 문서에 실제 운영 값이 없음(ADR-0153, docs/devops.md §2.1) ----------
+PUBLIC_ARN = re.compile(r'arn:aws[a-z-]*:[a-z0-9-]*:[a-z0-9-]*:\d{12}:')
+PUBLIC_ACCOUNT = re.compile(r'(?<![\d,.])\d{12}(?![\d,.])')
+PUBLIC_DOMAIN = re.compile(r'\bpeaket\.(?:co\.kr|com|net|org|io|kr|app|dev|ai|co|me)\b', re.I)
+PUBLIC_CIDR = re.compile(r'(?<![\d.])((?:\d{1,3}\.){3}\d{1,3})/(\d{1,2})(?!\d)')
+# 문서에 적어도 되는 대역: 사설·공유(CGNAT)·링크 로컬·루프백·문서용(RFC 5737)·전체(0.0.0.0/0)
+PUBLIC_CIDR_OK = ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', '169.254.0.0/16',
+                  '127.0.0.0/8', '192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24')
+
+
+def check_public(texts, rep):
+    import ipaddress
+    ok_nets = [ipaddress.ip_network(n) for n in PUBLIC_CIDR_OK]
+    hits = 0
+    for f, text in texts.items():
+        for n, line in enumerate(text.split('\n'), 1):
+            where = '%s:%d' % (f, n)
+            if PUBLIC_ARN.search(line):
+                rep.err('public', where, 'ARN에 실제 계정 번호(12자리)가 있음. 자리표시값을 쓴다')
+                hits += 1
+            elif PUBLIC_ACCOUNT.search(line):
+                rep.err('public', where, '12자리 숫자(계정 번호로 읽힘). 실제 계정 번호면 지우고, 아니면 자릿수 구분 쉼표를 넣는다')
+                hits += 1
+            for m in PUBLIC_DOMAIN.finditer(line):
+                # 쿠버네티스 레이블·주석 키 접두사(`peaket.io/pool` 등)는 주소가 아니라 이름이다
+                if line[m.end():m.end() + 1] == '/' and line[m.start() - 1:m.start()] not in ('.', '/', ':', '@'):
+                    continue
+                rep.err('public', where, "실제 도메인으로 읽히는 '%s'. 공개 문서는 peaket.example만 쓴다" % m.group(0))
+                hits += 1
+            for m in PUBLIC_CIDR.finditer(line):
+                try:
+                    net = ipaddress.ip_network('%s/%s' % (m.group(1), m.group(2)), strict=False)
+                except ValueError:
+                    continue
+                if net.prefixlen == 0 or any(net.subnet_of(o) for o in ok_nets):
+                    continue
+                rep.err('public', where, "공인 대역 '%s'. 공개 문서는 사설·문서용 대역만 쓴다" % m.group(0))
+                hits += 1
+    rep.info['public_hits'] = hits
+
+
 # ---------- 6의2. ASVS 요구사항 요약 일치(00-summary 질문 45-5 (가), 2026-10-23) ----------
 def check_asvs(texts, rep):
     seen = {}
@@ -1097,6 +1138,7 @@ def main():
     check_api_contract(yaml_docs.get('docs/api/openapi.yaml'), rep)
     check_secrefs(texts, rep)
     check_artifacts(texts, rep)
+    check_public(texts, rep)
     check_asvs(texts, rep)
     check_adr_tables(texts, rep)
     count_markers(texts, rep, a.markers_out)

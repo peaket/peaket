@@ -7,71 +7,51 @@
     {
       "name": "eventId",
       "doc": "회차 ID",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "orderId",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "pg",
       "doc": "결제 접수에서 고정된 결제사(ADR-0044). 결제사 결제 참조(토스 paymentKey, 포트원 paymentId)는 싣지 않고 주문 ID로 잇는다(ADR-0053)",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "PaymentEventPg",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "TOSS",
-            "PORTONE",
-            "SIMULATOR"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "PaymentEventPg",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "TOSS",
+          "PORTONE",
+          "SIMULATOR"
+        ]
+      }
     },
     {
       "name": "type",
       "doc": "AWAITING_DEPOSIT은 가상계좌 발급, APPROVED는 가상계좌면 입금 확인, DEPOSIT_REVERSED는 입금 오류로 결제사가 입금을 되돌림(조회로 확인, payment §6, 추천 적용 2026-10-14, ADR-0062). RESOLVED는 UNKNOWN 해소 기록이고 해소 결과는 result에 싣는다. 결과가 승인이면 APPROVED, 가상계좌 발급이면 AWAITING_DEPOSIT, 미승인이면 FAILED 사건을 따로 낸다(추천 적용 2026-10-20, ADR-0073)",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "PaymentEventType",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "AWAITING_DEPOSIT",
-            "APPROVED",
-            "DEPOSIT_REVERSED",
-            "FAILED",
-            "UNKNOWN",
-            "RESOLVED",
-            "PARTIAL_CANCELED",
-            "CANCELED"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "PaymentEventType",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "AWAITING_DEPOSIT",
+          "APPROVED",
+          "DEPOSIT_REVERSED",
+          "FAILED",
+          "UNKNOWN",
+          "RESOLVED",
+          "PARTIAL_CANCELED",
+          "CANCELED"
+        ]
+      }
     },
     {
       "name": "amount",
-      "doc": "원 단위(ADR-0052)",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null
+      "doc": "결제 금액(원, payment.amount, ADR-0052). 취소·부분 취소 사건도 결제 금액이고, 취소한 금액은 이 칸이 아니다(ADR-0150)",
+      "type": "long"
     },
     {
       "name": "payMethodCategory",
@@ -134,16 +114,19 @@
           ]
         }
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "FAILED"
+          ]
+        }
+      ]
     },
     {
       "name": "attemptNo",
       "doc": "같은 주문의 결제 시도 순번",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null
+      "type": "long"
     },
     {
       "name": "latencyMs",
@@ -156,35 +139,23 @@
     },
     {
       "name": "occurredAt",
-      "type": [
-        "null",
-        {
-          "type": "long",
-          "logicalType": "timestamp-millis"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
     },
     {
       "name": "eventSeq",
       "doc": "결제 하나 안에서 늘어나기만 하는 사건 순번(payment_event 행의 순번). 결과 당기기(BatchGetPayments)로 받은 결과와 같은 사건인지, 앞선 사건인지 가린다(ADR-0140)",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null
+      "type": "long"
     },
     {
       "name": "eventKey",
       "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
-      "type": [
-        "null",
-        {
-          "type": "string",
-          "logicalType": "uuid"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
     }
   ]
 }

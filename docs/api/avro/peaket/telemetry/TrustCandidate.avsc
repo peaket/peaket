@@ -7,80 +7,52 @@
     {
       "name": "eventId",
       "doc": "회차 ID",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "pid",
       "doc": "사람 식별값",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "pattern",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "TrustCandidatePattern",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "DEVICE_SHARE",
-            "BEHAVIOR_REPLAY"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "TrustCandidatePattern",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "DEVICE_SHARE",
+          "BEHAVIOR_REPLAY"
+        ]
+      }
     },
     {
       "name": "evidenceCount",
       "doc": "10분 안 같은 기기·같은 지문의 서로 다른 pid 수",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null
+      "type": "long"
     },
     {
       "name": "windowStart",
-      "type": [
-        "null",
-        {
-          "type": "long",
-          "logicalType": "timestamp-millis"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
     },
     {
       "name": "detectedAt",
-      "type": [
-        "null",
-        {
-          "type": "long",
-          "logicalType": "timestamp-millis"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
     },
     {
       "name": "eventKey",
       "doc": "SHA-256(\"PEAKET-reassess-v1\" ‖ 회차 ID ‖ pid ‖ 패턴 ‖ 10분 칸 시작)으로 만든 UUIDv8(RFC 9562 §5.8). 같은 후보를 다시 내도 같다(docs/streaming.md §5.4)",
-      "type": [
-        "null",
-        {
-          "type": "string",
-          "logicalType": "uuid"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
     }
   ]
 }

@@ -7,28 +7,16 @@
     {
       "name": "eventId",
       "doc": "회차 ID",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "queueEntryId",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "pid",
       "doc": "분석 저장소는 적재 때 회차별 가명으로 바꾼다",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "number",
@@ -40,31 +28,23 @@
     },
     {
       "name": "entryMode",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "QueueEntryRecordEntryMode",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "LOBBY",
-            "AFTER_OPEN"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "QueueEntryRecordEntryMode",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "LOBBY",
+          "AFTER_OPEN"
+        ]
+      }
     },
     {
       "name": "enteredAt",
-      "type": [
-        "null",
-        {
-          "type": "long",
-          "logicalType": "timestamp-millis"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
     },
     {
       "name": "firstEtaSec",
@@ -141,34 +121,26 @@
     },
     {
       "name": "verifyRoute",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "QueueEntryRecordVerifyRoute",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "DIRECT",
-            "CHALLENGE_PASSED",
-            "CHALLENGE_FAILED",
-            "BLOCKED"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "QueueEntryRecordVerifyRoute",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "DIRECT",
+          "CHALLENGE_PASSED",
+          "CHALLENGE_FAILED",
+          "BLOCKED"
+        ]
+      }
     },
     {
       "name": "eventKey",
       "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
-      "type": [
-        "null",
-        {
-          "type": "string",
-          "logicalType": "uuid"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
     }
   ]
 }

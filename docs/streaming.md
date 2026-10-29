@@ -132,6 +132,7 @@
 | 생산자 | 파티셔너(키로 파티션을 고르는 규칙) | `murmur2_random` | 자바 클라이언트와 같은 파티션을 고른다. librdkafka 네이티브 설정의 기본(`consistent_random`, CRC32)과 섞이면 같은 회차가 다른 파티션으로 갈 수 있다 |
 | 생산자 | 전달 상한(`message.timeout.ms`) | Outbox 릴레이 10초(docs/architecture.md §5의 'Kafka 보내기 상한'과 같다), 그 밖의 생산자 5초 [가정] | 브로커가 멈췄을 때 기다리는 끝을 정한다 |
 | 생산자(텔레메트리) | 버퍼가 찼을 때 | 새 사건을 버리고 `telemetry_dropped_total{record}`로 센다(ADR-0141 결정 6) | 요청 처리를 막지 않는다. 버린 수는 누락률(§4.5)과 분석 커버리지에 들어간다 |
+| 생산자(텔레메트리) | 필수 칸이 비어 Avro로 만들지 못할 때 | 버퍼가 찼을 때와 같이 버리고 같은 지표로 센다. 오류 기록에는 레코드와 칸 이름만 남긴다(소유자 결정 2026-10-29, ADR-0150 결정 5) | 요청 처리를 막지 않는다. 한 종류가 계속 실패하면 누락률 경보로 보인다. 거래 사건(Outbox)은 사건을 만드는 일이 업무 트랜잭션 안에 있어 그 트랜잭션이 함께 실패한다 |
 | 소비자 | 자동 커밋 | 끔 | 처리를 마친 뒤에만 커밋한다(§2.4) |
 | 소비자 | 재조정 | 협력적 방식(`cooperative-sticky`) | 파드 하나가 바뀔 때 그룹 전체가 멈추지 않는다 |
 | 소비자 | 세션 시간 초과·그룹 프로토콜(`group.protocol`) | 45초(기본값). 그룹 프로토콜은 `classic`(이전 방식)을 명시한다 | 세션 시간 초과와 위의 협력적 재조정은 이전 방식의 설정이다. 새 방식(KIP-848, `consumer`)에서는 이 설정들을 쓸 수 없고 브로커가 정한다. 새 방식은 Kafka 3.9에서 조기 접근(운영에 쓰지 말라고 적음)이고 4.0부터 정식이다. librdkafka 문서는 기본값을 다음 판들에서 `consumer`로 바꾼다고 적으므로 기본값에 맡기지 않는다(2026-10-29 확인, https://kafka.apache.org/39/configuration/broker-configs/, https://kafka.apache.org/41/operations/consumer-rebalance-protocol/, https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md, 그룹 프로토콜 명시는 추천 적용 2026-10-29) |

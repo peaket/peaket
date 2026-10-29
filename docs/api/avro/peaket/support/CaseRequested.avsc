@@ -37,29 +37,19 @@
     {
       "name": "category",
       "doc": "문의 유형 코드 또는 신고 사유 코드(SCALPING·MACRO·ABUSE·RIGHTS·ILLEGAL_FILMING·SPAM·OFF_TOPIC·OTHER)",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "followUp",
       "doc": "추가 문의면 true(기존 건을 다시 처리 중으로)",
-      "type": [
-        "null",
-        "boolean"
-      ],
-      "default": null
+      "type": "boolean",
+      "default": false
     },
     {
       "name": "hold",
       "doc": "불법 촬영물 신고로 후기를 바로 가렸으면 true(FILMING_HOLD, POL-044)",
-      "type": [
-        "null",
-        "boolean"
-      ],
-      "default": null
+      "type": "boolean",
+      "default": false
     },
     {
       "name": "createdAt",

@@ -6,46 +6,30 @@
   "fields": [
     {
       "name": "kind",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "PipelinePulseKind",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "PULSE"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "PipelinePulseKind",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "PULSE"
+        ]
+      }
     },
     {
       "name": "topic",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "partition",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null
+      "type": "long"
     },
     {
       "name": "producedAt",
-      "type": [
-        "null",
-        {
-          "type": "long",
-          "logicalType": "timestamp-millis"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
     }
   ]
 }

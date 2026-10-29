@@ -6,49 +6,36 @@
   "fields": [
     {
       "name": "commandId",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "key",
       "doc": "FEATURE_FLAG는 비핵심 기능 끄기(명령 9), AUTOMATION_STOP은 입장 제어 자동화 긴급 정지(명령 11, admission-ctrl은 제어 gRPC로도 받음, ADR-0102). PG_ASSIGNMENT는 회차 결제사 지정(명령 12). 결제사 전환은 DEGRADED_MODE의 PAYMENT_PG_FALLBACK 값(ADR-0044)",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "SettingChangedKey",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "BOT_LEVEL",
-            "LOG_LEVEL",
-            "FEATURE_FLAG",
-            "DEGRADED_MODE",
-            "LOBBY_BANNER",
-            "PG_ASSIGNMENT",
-            "AUTOMATION_STOP"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "SettingChangedKey",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "BOT_LEVEL",
+          "LOG_LEVEL",
+          "FEATURE_FLAG",
+          "DEGRADED_MODE",
+          "LOBBY_BANNER",
+          "PG_ASSIGNMENT",
+          "AUTOMATION_STOP"
+        ]
+      }
     },
     {
       "name": "scope",
       "doc": "PLATFORM 또는 회차 ID. 결제사 지정·전환은 회차 단위(결제사 지정은 회차 칸, ADR-0093 결정 2)",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "value",
       "doc": "키마다 정한 값의 레코드(추천 적용 2026-10-28, 기술 검토 낮음-026. 문자열 JSON이던 것을 바꿨다). 어느 갈래인지는 key가 정하고, 생산자는 key와 맞는 갈래만 낸다. 갈래를 더할 때는 소비자를 먼저 배포한다. 대상(기능 플래그 이름, 로그 레벨을 바꿀 서비스, Degraded 모드 이름)은 메시지 키에 있다. 재평가 모드는 강도와 따로 고르는 명령 5의 별도 매개변수이고, ENFORCE로 바꾸는 것은 commander만 한다(추천 적용 2026-10-20, ADR-0073)",
       "type": [
-        "null",
         {
           "type": "record",
           "name": "BotLevelValue",
@@ -188,8 +175,7 @@
             }
           ]
         }
-      ],
-      "default": null
+      ]
     },
     {
       "name": "expiresAt",
@@ -201,38 +187,37 @@
           "logicalType": "timestamp-millis"
         }
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "key": [
+            "LOG_LEVEL"
+          ]
+        }
+      ]
     },
     {
       "name": "actor",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "doc": "명령 기록의 가명 참조 actor_ref(UUIDv4, ADR-0149). 관리 계정 ID를 싣지 않는다. 압축 토픽이라 키마다 마지막 사건이 오래 남는다(ADR-0150)",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
     },
     {
       "name": "occurredAt",
-      "type": [
-        "null",
-        {
-          "type": "long",
-          "logicalType": "timestamp-millis"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
     },
     {
       "name": "eventKey",
       "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
-      "type": [
-        "null",
-        {
-          "type": "string",
-          "logicalType": "uuid"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
     }
   ]
 }

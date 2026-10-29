@@ -50,29 +50,17 @@
     {
       "name": "available",
       "doc": "판정 때 가용 좌석(비트맵에서 비어 있는 판매 대상 좌석)",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null
+      "type": "long"
     },
     {
       "name": "held",
       "doc": "판정 때 홀드 수",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null
+      "type": "long"
     },
     {
       "name": "paying",
       "doc": "판정 때 결제 중인 판매 예약(승인 결과를 기다리는 PENDING) 수",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null
+      "type": "long"
     },
     {
       "name": "version",

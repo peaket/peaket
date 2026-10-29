@@ -7,11 +7,7 @@
     {
       "name": "eventId",
       "doc": "회차 ID",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "queueEntryId",
@@ -28,69 +24,64 @@
         "null",
         "string"
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "source": [
+            "REASSESS"
+          ]
+        }
+      ]
     },
     {
       "name": "category",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "TrustVerdictCategory",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "PASS",
-            "CHALLENGE_PASSED",
-            "CHALLENGE_FAILED",
-            "BLOCKED",
-            "HONEYPOT",
-            "LABELED_BOT",
-            "LABELED_HUMAN"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "TrustVerdictCategory",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "PASS",
+          "CHALLENGE_PASSED",
+          "CHALLENGE_FAILED",
+          "BLOCKED",
+          "HONEYPOT",
+          "LABELED_BOT",
+          "LABELED_HUMAN"
+        ]
+      }
     },
     {
       "name": "action",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "TrustVerdictAction",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "ALLOW",
-            "CHALLENGE",
-            "BLOCK",
-            "NONE"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "TrustVerdictAction",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "ALLOW",
+          "CHALLENGE",
+          "BLOCK",
+          "NONE"
+        ]
+      }
     },
     {
       "name": "source",
       "doc": "REASSESS는 대기 중 재평가(ADR-0071)",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "TrustVerdictSource",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "REALTIME",
-            "HONEYPOT",
-            "SAMPLE_REVIEW",
-            "POST_LABEL",
-            "REASSESS"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "TrustVerdictSource",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "REALTIME",
+          "HONEYPOT",
+          "SAMPLE_REVIEW",
+          "POST_LABEL",
+          "REASSESS"
+        ]
+      }
     },
     {
       "name": "shadow",
@@ -100,26 +91,18 @@
     },
     {
       "name": "occurredAt",
-      "type": [
-        "null",
-        {
-          "type": "long",
-          "logicalType": "timestamp-millis"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
     },
     {
       "name": "eventKey",
       "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
-      "type": [
-        "null",
-        {
-          "type": "string",
-          "logicalType": "uuid"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
     }
   ]
 }

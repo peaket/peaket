@@ -15,11 +15,7 @@
     },
     {
       "name": "accountId",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "type",
@@ -50,105 +46,78 @@
     },
     {
       "name": "amount",
-      "type": [
-        "null",
-        "long"
-      ],
-      "default": null
+      "doc": "주문 금액(원). 서버가 계산한 purchase_order.amount이고 사건 종류와 상관없이 같은 값이다. 환급액은 이 칸이 아니다(ADR-0150)",
+      "type": "long"
     },
     {
       "name": "seatIds",
-      "type": [
-        "null",
-        {
-          "type": "array",
-          "items": "string"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "array",
+        "items": "string"
+      }
     },
     {
       "name": "purchaseSessionId",
-      "doc": "구매 세션 ID(분석 연결 키, ADR-0052)",
+      "doc": "구매 세션 ID(분석 연결 키, ADR-0052). CREATED에만 싣는다. 주문 표에 저장하지 않는 값이라 뒤의 사건은 주문 ID로 잇는다(ADR-0150)",
       "type": [
         "null",
         "string"
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "CREATED"
+          ]
+        }
+      ]
     },
     {
       "name": "items",
       "doc": "좌석별 등급·구역·가격(ADR-0052)",
-      "type": [
-        "null",
-        {
-          "type": "array",
-          "items": {
-            "type": "record",
-            "name": "OrderEventItem",
-            "fields": [
-              {
-                "name": "seatId",
-                "type": [
-                  "null",
-                  "string"
-                ],
-                "default": null
-              },
-              {
-                "name": "tierId",
-                "type": [
-                  "null",
-                  "string"
-                ],
-                "default": null
-              },
-              {
-                "name": "sectionId",
-                "type": [
-                  "null",
-                  "string"
-                ],
-                "default": null
-              },
-              {
-                "name": "price",
-                "type": [
-                  "null",
-                  "long"
-                ],
-                "default": null
-              }
-            ]
-          }
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "OrderEventItem",
+          "fields": [
+            {
+              "name": "seatId",
+              "type": "string"
+            },
+            {
+              "name": "tierId",
+              "type": "string"
+            },
+            {
+              "name": "sectionId",
+              "type": "string"
+            },
+            {
+              "name": "price",
+              "type": "long"
+            }
+          ]
         }
-      ],
-      "default": null
+      }
     },
     {
       "name": "seatAssignment",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "OrderEventSeatAssignment",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "PICK",
-            "AUTO"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "OrderEventSeatAssignment",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "PICK",
+          "AUTO"
+        ]
+      }
     },
     {
       "name": "firstInStage",
-      "type": [
-        "null",
-        "boolean"
-      ],
-      "default": null,
+      "type": "boolean",
+      "default": false,
       "doc": "이 주문이 이 단계(ACCEPTED·APPROVED·CONFIRMED)에 처음 들어올 때 true. 입금 되돌림 뒤 다시 확정되면 false. 관제 실시간 표가 퍼널을 주문마다 한 번 센다(ADR-0099)"
     },
     {
@@ -161,14 +130,10 @@
     {
       "name": "eventKey",
       "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
-      "type": [
-        "null",
-        {
-          "type": "string",
-          "logicalType": "uuid"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
     }
   ]
 }

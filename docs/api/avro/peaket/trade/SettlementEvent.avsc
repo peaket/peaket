@@ -6,37 +6,25 @@
   "fields": [
     {
       "name": "promoterId",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "statementId",
-      "type": [
-        "null",
-        "string"
-      ],
-      "default": null
+      "type": "string"
     },
     {
       "name": "kind",
       "doc": "EVENT는 티켓 회차 정산서, PRODUCT는 굿즈·티켓 연동 부가 상품 상품 정산서(R3 대조 대상 아님, POL-039 ②, 추천 적용 2026-10-14, ADR-0062)",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "SettlementEventKind",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "EVENT",
-            "PRODUCT"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "SettlementEventKind",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "EVENT",
+          "PRODUCT"
+        ]
+      }
     },
     {
       "name": "eventId",
@@ -45,24 +33,27 @@
         "null",
         "string"
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "kind": [
+            "EVENT"
+          ]
+        }
+      ]
     },
     {
       "name": "pg",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "SettlementEventPg",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "TOSS",
-            "PORTONE"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "SettlementEventPg",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "TOSS",
+          "PORTONE"
+        ]
+      }
     },
     {
       "name": "pgStore",
@@ -80,7 +71,14 @@
           ]
         }
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "pg": [
+            "TOSS"
+          ]
+        }
+      ]
     },
     {
       "name": "periodStart",
@@ -92,7 +90,14 @@
           "logicalType": "date"
         }
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "kind": [
+            "PRODUCT"
+          ]
+        }
+      ]
     },
     {
       "name": "periodEnd",
@@ -104,7 +109,14 @@
           "logicalType": "date"
         }
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "kind": [
+            "PRODUCT"
+          ]
+        }
+      ]
     },
     {
       "name": "amount",
@@ -113,7 +125,19 @@
         "null",
         "long"
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "PAYOUT_SCHEDULED",
+            "PAYOUT_COMPLETED",
+            "PAYOUT_FAILED",
+            "PAYOUT_HELD",
+            "RECEIVABLE_OPENED",
+            "RECEIVABLE_CLOSED"
+          ]
+        }
+      ]
     },
     {
       "name": "salesAmount",
@@ -122,7 +146,14 @@
         "null",
         "long"
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "STATEMENT_NOTIFIED"
+          ]
+        }
+      ]
     },
     {
       "name": "refundAmount",
@@ -131,7 +162,14 @@
         "null",
         "long"
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "STATEMENT_NOTIFIED"
+          ]
+        }
+      ]
     },
     {
       "name": "feeAmount",
@@ -140,7 +178,14 @@
         "null",
         "long"
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "STATEMENT_NOTIFIED"
+          ]
+        }
+      ]
     },
     {
       "name": "revision",
@@ -149,7 +194,14 @@
         "null",
         "long"
       ],
-      "default": null
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "STATEMENT_NOTIFIED"
+          ]
+        }
+      ]
     },
     {
       "name": "supersedesId",
@@ -162,51 +214,39 @@
     },
     {
       "name": "type",
-      "type": [
-        "null",
-        {
-          "type": "enum",
-          "name": "SettlementEventType",
-          "default": "UNRECOGNIZED",
-          "symbols": [
-            "UNRECOGNIZED",
-            "STATEMENT_NOTIFIED",
-            "STATEMENT_DISPUTED",
-            "STATEMENT_CONFIRMED",
-            "STATEMENT_CARRIED_OVER",
-            "PAYOUT_SCHEDULED",
-            "PAYOUT_COMPLETED",
-            "PAYOUT_FAILED",
-            "PAYOUT_HELD",
-            "RECEIVABLE_OPENED",
-            "RECEIVABLE_CLOSED"
-          ]
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "enum",
+        "name": "SettlementEventType",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "STATEMENT_NOTIFIED",
+          "STATEMENT_DISPUTED",
+          "STATEMENT_CONFIRMED",
+          "STATEMENT_CARRIED_OVER",
+          "PAYOUT_SCHEDULED",
+          "PAYOUT_COMPLETED",
+          "PAYOUT_FAILED",
+          "PAYOUT_HELD",
+          "RECEIVABLE_OPENED",
+          "RECEIVABLE_CLOSED"
+        ]
+      }
     },
     {
       "name": "occurredAt",
-      "type": [
-        "null",
-        {
-          "type": "long",
-          "logicalType": "timestamp-millis"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
     },
     {
       "name": "eventKey",
       "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
-      "type": [
-        "null",
-        {
-          "type": "string",
-          "logicalType": "uuid"
-        }
-      ],
-      "default": null
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
     }
   ]
 }
