@@ -288,7 +288,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | 경로 | SCR | 렌더링 | HTML 캐시(엣지 / 브라우저) | 데이터 | 헤더 묶음 | 비고 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `/`, `/{en,ja,zh}` | 001 | ISR(`'use cache'` + `cacheLife` 60초 + `cacheTag('home')`) | `s-maxage=30, stale-while-revalidate=60, stale-if-error=600` / `max-age=0` | 홈 피드(서버), 랭킹 파일(클라이언트, 같은 출처 정적 JSON), 찜·알림 상태(클라이언트) | A | 홈 구성 저장·판매 승인·매진 때 태그를 무효화한다(architecture §6.3) |
-| `/events/[id]` | 002·016 | ISR(`cacheTag('event:{id}')`, `cacheLife` 300초) | 위와 같다 | 공연·회차·고지(서버), 후기 요약(공개 CDN), 본인확인·사람 확인·찜·알림(클라이언트) | A + 사람 확인 | 원본에 장애가 나면 `stale-if-error`와 '판매 중' 고정 문구를 쓴다(POL-029). 급한 변경(매진·승인 취소)은 CDN 태그 무효화(`#event:{id}`)도 함께 부른다. 응답은 ISR 태그와 같은 값을 CDN 태그 헤더 `x-peaket-cache-tag` [가정]에 싣는다(docs/infra.md §4.1, 기술 검토 낮음-067) |
+| `/events/[id]` | 002·016 | ISR(`cacheTag('event:{id}')`, `cacheLife` 300초) | 위와 같다 | 공연·회차·고지(서버. 공개 회차 요약 `GET /v1/events/{eventId}`는 공연명·회차 시작·판매자 상호만 주고, 나머지 칸은 공연 상세 계약과 함께 wbs 0.2.3에서 더한다), 후기 요약(공개 CDN), 본인확인·사람 확인·찜·알림·예매 제한 상태(`GET /v1/booking-restrictions/me`)(클라이언트) | A + 사람 확인 | 원본에 장애가 나면 `stale-if-error`와 '판매 중' 고정 문구를 쓴다(POL-029). 급한 변경(매진·승인 취소)은 CDN 태그 무효화(`#event:{id}`)도 함께 부른다. 공개 회차 요약 API(`max-age=300`)도 판매 승인·판매자 정보 변경·판매 중지·회차 변경 때 같은 태그(`event:{eventId}`)로 함께 무효화한다(openapi `GET /v1/events/{eventId}`). 스캐너 승인 화면(SCR-051)은 같은 API에서 배정 파트너의 상호를 읽는다(소유자 결정 2026-10-30, open-items 78번, 2026-10-30 맞춤). 응답은 ISR 태그와 같은 값을 CDN 태그 헤더 `x-peaket-cache-tag` [가정]에 싣는다(docs/infra.md §4.1, 기술 검토 낮음-067) |
 | `/search` | 003 | 정적 셸 + CSR(주소의 매개변수로 검색 API를 부른다, ADR-0094) | `s-maxage=300` / `max-age=0`(검색 API는 CDN 30초, 자동완성 API는 60초) | 검색 API·자동완성 API | A, `noindex, follow` | 요청마다 서버가 그리지 않아 오픈 직전 검색이 몰려도 화면 서버로 가지 않는다. 검색어는 주소 쿼리라 접근 로그에 남는다(data-classification) |
 | `/events/[id]/shuffle-proof` | 019 | 정적 셸 + CSR | `s-maxage=300` / `max-age=0` | 셔플 검증 정보 API, 같은 브라우저의 토큰 해시 | A | 시드는 오픈 60분 뒤에 공개한다 |
 | `/queue/[eventId]`, `/{en,ja,zh}/queue/[eventId]`, `/shop/[productId]/queue` | 007·008·018·015 | 대기실 경량 페이지(S3, CloudFront Function이 셸로 바꿔 읽는다) | `s-maxage=300, stale-while-revalidate=60` / `max-age=0` | 대기열 API·파일(§4.2) | A′ | 배포 때 셸을 무효화한다. 셸은 로케일별로 넷이다 |
@@ -422,7 +422,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 상태 | 화면(SCR) | 들어오는 조건 | 하는 일 | 나가는 조건 → 다음 상태 |
 | --- | --- | --- | --- | --- |
 | `boot` | — | 페이지 열림 | 저장소에서 회차 표 읽기, 시계 보정, 다른 탭 확인(§5.9) | 참가 토큰만 있으면 → `lobby` / 대기표가 있으면 → `waiting` / 둘 다 없고 오픈 전 → `lobby-join` / 오픈 뒤 → `enter` |
-| `lobby-join` | 007 | 참가 전 | 본인확인 여부 확인(없으면 [휴대폰 본인확인]), 사람 확인 위젯을 필요할 때 불러오기, `POST …/lobby-participants` | 201 → `lobby` / `verification: REQUIRED` → `verify-redirect` / 409 → `other-device` |
+| `lobby-join` | 007 | 참가 전 | 이 기기의 로비 버튼 열리는 시각(§5.9 '로비 버튼은 기기마다 고정된 지연') 전이면 "곧 들어갈 수 있습니다"와 남은 초를 보이며 기다린다. 그 뒤 본인확인 여부 확인(없으면 [휴대폰 본인확인]), 사람 확인 위젯을 필요할 때 불러오기, `POST …/lobby-participants` | 201 → `lobby` / `verification: REQUIRED` → `verify-redirect` / 409 → `other-device` |
 | `lobby` | 007 | 참가 토큰이 있다 | 오픈까지 카운트다운(남은 5분·1분·10초에 낭독, §4.8), 공시 값 표시 | 셔플 공개 시각 + 분산 지연 → `shuffle-fetch` |
 | `shuffle-fetch` | 007 '순서 계산 중' | 공개 시각이 지났다 | 결과 파일 받기, 404면 간격을 2초→20초로 두 배씩 늘리며 다시 받기(정본) | 순번 받음 → `waiting` / 60초 넘음 → `shuffle-delayed`(SEV1 화면 안내. 장애 심각도 등급은 숫자가 작을수록 심각하다) |
 | `enter` | 008 | 오픈 뒤 첫 진입 | `POST …/entries`(`text/plain`) | 201 → `waiting` / 202 → `batching` / 409 → `other-device` 또는 `already-admitted` / 410 → `sold-out` 또는 `ended` / 503 → `Retry-After` 뒤 다시 보내기 |
@@ -663,8 +663,8 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 2 | 스냅샷 `GET https://api…/v1/events/{eventId}/seatmap-snapshot` | `X-Admission-Token`, 첫 요청에 `X-Client-Ephemeral-Key`(직접 선택하는 공연) | 입장 토큰을 처음 쓰는 때가 구매 세션의 시작이다. 이진 형식은 §4.4.2 |
 | 3 | WebSocket `wss://api…/v1/events/{eventId}/seats/stream` | 하위 프로토콜 `peaket.seats.v1`, `peaket.auth.{입장 토큰}` | §4.4.1 |
 | 4 | 구역 스냅샷 `GET …/seatmap-snapshot?section={구역 색인}` | 위와 같다 | 버전 갭(중간 판을 놓친 경우), 재연결, 전체 보기 구역의 5초 [가정] 갱신 |
-| 5 | 홀드 `POST https://api…/v1/events/{eventId}/holds` | `HoldRequest`(직접 선택은 `seatIds`를 정렬해 보내고, 자동 배정은 `auto` + `clientEphemeralPublicKey`), 멱등키, 구매 세션 헤더 | 201 / 409(`suggestedSeats`) / 422 / 423 / 410 / 401 |
-| 6 | 연장 `POST …/holds/{holdId}/extension`, 해제 `DELETE …/holds/{holdId}` | 구매 세션 헤더 | 두 번째 연장은 409 |
+| 5 | 홀드 `POST https://api…/v1/events/{eventId}/holds` | `HoldRequest`(직접 선택은 `seatIds`를 정렬해 보내고, 자동 배정은 `auto` + `clientEphemeralPublicKey`), 멱등키, 구매 세션 헤더 | 201 / 409(`seat-already-held`면 `suggestedSeats`, `seat-recently-released`면 `recentlyReleasedSeats`·`reholdAvailableAt`) / 422 / 423 / 410 / 401 |
+| 6 | 연장 `POST …/holds/{holdId}/extension`, 해제 `DELETE …/holds/{holdId}` | 구매 세션 헤더 | 두 번째 연장은 409. 해제가 204로 끝나거나 홀드가 만료되면 그 좌석 ID와 시각을 좌석 Worker 상태에 30초 [가정] 동안 둔다. 그동안 그 좌석은 이 화면에서만 '방금 놓은 좌석'으로 흐리게 그리고 홀드 요청을 보내지 않는다. 30초는 서버 설정과 같은 상수이고, 다르면 409의 `reholdAvailableAt`으로 맞춘다(소유자 결정 2026-10-30, open-items 67번, 화면 동작은 추천 적용 2026-10-30, design/d5 §5.10) |
 | 7 | 구매 세션 나가기 | 계약에 없다(design/d5 §1.6 19번) | 지금은 홀드를 해제한 뒤 대기실로 가고, 무활동 5분이 지나면 서버가 세션을 닫는다. 경로는 wbs 0.2.3에서 정한다 |
 
 #### 4.2.3 주문·결제·결과
@@ -1214,6 +1214,7 @@ sequenceDiagram
 | 숨긴 탭은 최소 5초 [가정] | 대기실 | 배터리·CDN 부하 때문이다. 브라우저도 숨긴 탭의 타이머를 늦춘다(POL-008). 숨긴 탭은 폴링 리더가 되지 않는다 | FE-T4 |
 | T=0 두 호출은 사전 요청 없이 | 진입, 입장 확정 | OPTIONS 요청이 같은 수만큼 더 붙는 것을 막는다(ADR-0065 결정 6) | FE-T3 |
 | 셔플 결과는 토큰마다 고정된 지연 | 셔플·묶음 결과 받기 | 새로고침해도 빨라지지 않으므로 분산이 지켜진다(ADR-0058) | FE-T4 |
+| 로비 버튼은 기기마다 고정된 지연(소유자 결정 2026-10-30, open-items 66번) | 공연 상세(SCR-002) ⑦ [로비 입장]과 로비 화면(SCR-007)의 참가 전 상태. 열리는 시각 = 로비 개방 시각 + `u32be(SHA-256("PEAKET-lobby-open-v1" ‖ 회차 ID ‖ deviceId)[0..4]) mod (lobbySpreadSec × 1000)` 밀리초, `lobbySpreadSec` 60 [가정](queue-admission §2와 같은 설정값). `deviceId`는 `peaket.device`(§3.12)의 값이다. 비교는 보정한 벽시계(§3.3)로 한다. 공연 상세에는 대기열 API 응답이 없으므로 캐시하지 않는 `api` 응답의 `Date`를 표본으로 쓰고(초 단위라 1초 안에서 어긋난다), 표본이 없으면 기기 시계를 쓴다 | 공연 상세를 열어 둔 채 기다리던 사람이 로비 개방 순간 함께 누르는 몰림을 첫 1분에 고르게 편다. 기기마다 고정이라 새로고침이나 탭을 여럿 여는 것으로 빨라지지 않는다. 열리기 전에는 "로비 안에서는 언제 들어와도 순번이 같습니다"를 보인다(POL-004, design/d5 §5.2. 식과 화면 동작은 추천 적용 2026-10-30) | Q-T57 ②·③ |
 | 대기열 파일에 쿠키·사용자 헤더·캐시 버스터를 붙이지 않음 | `queue-files` | 캐시 키가 갈리지 않게, 사전 요청이 없게 한다. 브라우저 HTTP 캐시만 `cache: "no-store"`로 건너뛴다(ADR-0110) | FE-T3, FE-T32 |
 | 미리 연결 | 공연 상세·대기실 셸의 `<link rel="preconnect">`: `https://queue.peaket.example`(`crossorigin="use-credentials"`), `https://queue-files.peaket.example`(`crossorigin="anonymous"`) | T=0 직전의 TLS 왕복을 미리 해 둔다. 자격 증명 방식이 실제 요청과 같아야 그 연결을 다시 쓴다 | FE-T10(측정) |
 | 구독 전환 1초 머묾 | 좌석 구역 구독 | 확대·축소할 때마다 구독 해제·재구독이 쏟아지지 않게 한다(정본) | FE-T11 |
@@ -1277,6 +1278,8 @@ sequenceDiagram
 | `type` 또는 응답 | 문구 키 | 화면 문구(design/d5 §9.2) |
 | --- | --- | --- |
 | `seat-already-held` | `seat.hold.conflict` | 17번 |
+| `seat-recently-released` | `seat.hold.recentlyReleased` | 55번(추천 적용 2026-10-30, open-items 67번) |
+| `booking-restricted` | `queue.admission.restricted`, `order.create.restricted` | 56·57번(추천 적용 2026-10-30, open-items 75번. openapi 입장 확정·주문 생성의 403, 2026-10-30 더함) |
 | `manual-selection-required` | `seat.auto.noMatch` | 22번 |
 | `sale-ended` | `sale.ended` | 12·20번 |
 | `reauth-required` | `auth.reauth.expired` | 3·41번 |

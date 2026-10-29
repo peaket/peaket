@@ -331,7 +331,9 @@ message ReclaimTicketResponse {
 // 부르는 쪽: identity-svc만. 스캐너 기기 승인 로그인(RFC 8628)의 승인 요청(POST /v1/scanner/device-authorizations)과
 // 토큰 발급(POST /v1/scanner/token) 때, DPoP 증명의 키 지문(jkt)이나 mTLS 인증서 지문으로 등록 기기를 찾고 상태를 본다
 // (docs/features/identity.md §6.1). 기기 원장(scanner_device)의 주인은 ticket-svc라 identity-svc가 직접 읽지 않는다(ADR-0007).
-// 승인 화면(SCR-051)에 보일 기기 이름과 배정 파트너도 함께 돌려준다. 읽기라 멱등 키가 없다.
+// 승인 화면(SCR-051)에 보일 기기 이름과 배정 파트너 ID도 함께 돌려준다. 파트너 이름(상호)은 싣지 않는다. 상호는 공개 정보라
+// 승인 화면이 배정 회차의 회차 공개 요약(openapi GET /v1/events/{eventId}의 sellerName)에서 읽고, 이름을 위한 내부 호출은 두지 않는다
+// (소유자 결정 2026-10-30, open-items 78번, docs/features/identity.md §6.1). identity-svc는 promoter_id를 배정 파트너 대조(I-T22)에만 쓴다. 읽기라 멱등 키가 없다.
 // identity-svc는 결과를 캐시하지 않는다(기기 승인은 근무 시작 때만 드물게 온다). 답이 없으면 승인 요청·토큰 발급을 503으로 미룬다
 // (기기 상태를 모른 채 로그인을 열지 않는다, 초안, 추천 적용 2026-10-30).
 service ScannerDeviceLookupService {
@@ -350,7 +352,8 @@ message GetScannerDeviceByCredentialResponse {
   string device_id = 2;
   // ACTIVE가 아니면 identity-svc는 403(기기 폐기)으로 답한다.
   ScannerDeviceStatus status = 3;
-  // 승인 화면에 보일 기기 이름과 배정 파트너
+  // 승인 화면에 보일 기기 이름
   string name = 4;
+  // 배정 파트너 ID. 승인 때 스태프 배정의 파트너와 같은지 대조한다. 이름은 싣지 않는다(위 주석).
   string promoter_id = 5;
 }

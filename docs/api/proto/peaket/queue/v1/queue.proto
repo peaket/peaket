@@ -3,6 +3,7 @@
 // docs/features/queue-admission.md §7(격리 기록과 복귀), docs/features/bot-defense.md §8(격리 상한)·§12(이의 제기), ADR-0071·0156.
 // 2026-10-30에 격리 '상한 도달' 결과와 이의 제기 처리 계약(VerificationAppealService)을 더했다
 // (초안, 추천 적용 2026-10-30, docs/features/bot-defense.md §20, ADR-0156 결정 10·14).
+// 같은 날 예매 제한 반영 계약(BookingRestrictionService)을 더했다(초안, 소유자 결정 2026-10-30 open-items 75번, docs/features/queue-admission.md §6).
 syntax = "proto3";
 
 package peaket.queue.v1;
@@ -130,4 +131,40 @@ enum ResolveAppealResult {
 
 message ResolveVerificationAppealResponse {
   ResolveAppealResult result = 1;
+}
+
+// 부르는 쪽: ops-svc만(승인 업무 '예매 제한'의 실행 T14와 소명 인정으로 푸는 때, 작업 워커의 다시 보내기).
+// 초안(소유자 결정 2026-10-30, open-items 75번. 계약 모양은 추천 적용 2026-10-30), 정본은 docs/features/queue-admission.md §6 '예매 제한 확인'.
+// queue-svc는 대기열 Redis q:rst:{account}에 사본을 두고, 입장 확정 때 ACTIVE이고 끝 시각 전이면 403 booking-restricted로 거절한다.
+// 판 번호가 저장한 판보다 클 때만 반영한다. 같은 판이면 바꾸지 않고 changed false로 답한다(작업 워커가 10분 [가정]마다 같은 판으로 다시 보낸다).
+// purchase-svc의 같은 이름 서비스(purchase/v1/account.proto)와 모양이 같다. ops-svc는 두 서비스가 모두 반영해야 실행을 끝낸다.
+// 데드라인은 1초 [가정]이다. 같은 restriction_id에 다른 account_id가 오면 ALREADY_EXISTS다.
+service BookingRestrictionService {
+  rpc SetBookingRestriction(SetBookingRestrictionRequest) returns (SetBookingRestrictionResponse);
+}
+
+// 예매 제한 사본의 상태(docs/data.md booking_restriction.status의 ACTIVE·LIFTED. EXPIRED는 끝 시각으로 받는 쪽이 스스로 판단해 보내지 않는다).
+enum BookingRestrictionState {
+  BOOKING_RESTRICTION_STATE_UNSPECIFIED = 0;
+  // 제한 중
+  BOOKING_RESTRICTION_STATE_ACTIVE = 1;
+  // 소명 인정 등으로 풀렸다
+  BOOKING_RESTRICTION_STATE_LIFTED = 2;
+}
+
+message SetBookingRestrictionRequest {
+  // 제한한 계정
+  string account_id = 1;
+  // ops DB booking_restriction.id. 멱등 키다.
+  string restriction_id = 2;
+  BookingRestrictionState state = 3;
+  // 제한이 끝나는 시각(booking_restriction.ends_at). 끝이 정해지지 않았으면 비운다.
+  google.protobuf.Timestamp ends_at = 4;
+  // ops 제한 기록의 판 번호. 같은 제한에서 늘어나기만 한다.
+  int64 version = 5;
+}
+
+message SetBookingRestrictionResponse {
+  // 이번 호출로 반영했으면 true, 판이 같거나 작아 바꾸지 않았으면 false.
+  bool changed = 1;
 }

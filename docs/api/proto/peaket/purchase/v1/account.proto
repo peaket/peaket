@@ -1,9 +1,12 @@
 // purchase-svc가 제공하는 계정 병합 사전 확인 계약. 초안(추천 적용 2026-10-29, ADR-0148), 안내는 docs/api/proto/README.md.
 // 정본: docs/features/identity.md §2.1(병합 차단 사유와 확정 흐름), planning/03-policies-glossary.md POL-034·계정 연결 전이 표 T9,
 // docs/data.md §4 경계 9(계정 병합 오케스트레이션), ADR-0038·0148(결정 3·4·6).
+// 2026-10-30에 예매 제한 반영 계약(BookingRestrictionService)을 더했다(초안, 소유자 결정 2026-10-30 open-items 75번).
 syntax = "proto3";
 
 package peaket.purchase.v1;
+
+import "google/protobuf/timestamp.proto";
 
 // 부르는 쪽: identity-svc만. 계정 병합 제안을 만들 때(막는 사유를 화면에 보이려고)와 확정 트랜잭션 바로 앞에 부른다.
 // ticket-svc·core-svc의 같은 이름 서비스와 모양이 같다. 읽기라 멱등 키가 없다. 데드라인은 1초 [가정]이다.
@@ -43,4 +46,39 @@ message MergeBlock {
 
 message CheckAccountMergeResponse {
   repeated MergeBlock blocks = 1;
+}
+
+// 부르는 쪽: ops-svc만(승인 업무 '예매 제한'의 실행 T14와 소명 인정으로 푸는 때, 작업 워커의 다시 보내기).
+// 초안(소유자 결정 2026-10-30, open-items 75번. 계약 모양은 추천 적용 2026-10-30), 정본은 docs/features/queue-admission.md §6 '예매 제한 확인'과
+// docs/features/payment.md §2 '예매 제한 확인'. queue-svc의 같은 이름 서비스(queue/v1/queue.proto)와 모양이 같다.
+// purchase-svc는 좌석 Redis s:rst:{account}에 사본을 두고, 주문 생성 때 ACTIVE이고 끝 시각 전이면 403 booking-restricted로 거절하고
+// 그 구매 세션의 홀드를 푼다. 판 번호가 저장한 판보다 클 때만 반영한다. 데드라인은 1초 [가정]이다.
+service BookingRestrictionService {
+  rpc SetBookingRestriction(SetBookingRestrictionRequest) returns (SetBookingRestrictionResponse);
+}
+
+// 예매 제한 사본의 상태(docs/data.md booking_restriction.status의 ACTIVE·LIFTED).
+enum BookingRestrictionState {
+  BOOKING_RESTRICTION_STATE_UNSPECIFIED = 0;
+  // 제한 중
+  BOOKING_RESTRICTION_STATE_ACTIVE = 1;
+  // 소명 인정 등으로 풀렸다
+  BOOKING_RESTRICTION_STATE_LIFTED = 2;
+}
+
+message SetBookingRestrictionRequest {
+  // 제한한 계정
+  string account_id = 1;
+  // ops DB booking_restriction.id. 멱등 키다.
+  string restriction_id = 2;
+  BookingRestrictionState state = 3;
+  // 제한이 끝나는 시각(booking_restriction.ends_at). 끝이 정해지지 않았으면 비운다.
+  google.protobuf.Timestamp ends_at = 4;
+  // ops 제한 기록의 판 번호. 같은 제한에서 늘어나기만 한다.
+  int64 version = 5;
+}
+
+message SetBookingRestrictionResponse {
+  // 이번 호출로 반영했으면 true, 판이 같거나 작아 바꾸지 않았으면 false.
+  bool changed = 1;
 }

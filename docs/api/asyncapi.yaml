@@ -183,7 +183,7 @@ operations:
   consumeSessionTerminated: { action: receive, channel: { $ref: '#/channels/control.sessions-terminated' }, summary: "모든 서비스의 모든 파드(peaket-platform 종료 세션 목록. 파드마다 따로 읽고, 뜰 때 지금 − 15분부터 다시 읽는다, ADR-0103)" }
   publishAccountMerged: { action: send, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "identity-svc" }
   consumeAccountMerged: { action: receive, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "각 도메인 서비스(지금의 소유·상태 값만 대표 계정으로 바꾸고 사건·원장·법정 보존 기록은 고치지 않고 merged_account 대응표를 채움, mergeId로 멱등, docs/data.md §4의 9번, POL-034)" }
-  publishCaseRequested: { action: send, channel: { $ref: '#/channels/support.cases-requested' }, summary: "core-svc support(문의 접수·추가 문의)·review(게시물 신고) Outbox. queue-svc(봇 판정 이의 제기 VERIFICATION_APPEAL): DB가 없어 Outbox 없이 바로 낸다. 발행에 실패하면 이의 접수 요청에 503과 Retry-After로 답하고 화면이 다시 보낸다. 같은 이의는 같은 eventKey라 ops-svc가 중복을 지운다(추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14)" }
+  publishCaseRequested: { action: send, channel: { $ref: '#/channels/support.cases-requested' }, summary: "core-svc support(문의 접수·추가 문의, 소명 APPEAL. 소명은 추천 적용 2026-10-30)·review(게시물 신고) Outbox. queue-svc(봇 판정 이의 제기 VERIFICATION_APPEAL): DB가 없어 Outbox 없이 바로 낸다. 발행에 실패하면 이의 접수 요청에 503과 Retry-After로 답하고 화면이 다시 보낸다. 같은 이의는 같은 eventKey라 ops-svc가 중복을 지운다(추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14)" }
   consumeCaseRequested: { action: receive, channel: { $ref: '#/channels/support.cases-requested' }, summary: "ops-svc CS 처리함(건 만들기·신고 수 더하기·기한 계산, 멱등)" }
   streamSeatDelta: { action: send, channel: { $ref: '#/channels/ws.seat-delta' }, summary: "realtime-gw → 브라우저 Worker(델타 묶음, 하트비트, 묶음 간격 변경)", messages: [{ $ref: '#/channels/ws.seat-delta/messages/SeatDeltaBatch' }, { $ref: '#/channels/ws.seat-delta/messages/Heartbeat' }, { $ref: '#/channels/ws.seat-delta/messages/BatchInterval' }] }
   receiveSeatSubscription: { action: receive, channel: { $ref: '#/channels/ws.seat-delta' }, summary: "realtime-gw(브라우저 Worker의 섹션 구독·해제)", messages: [{ $ref: '#/channels/ws.seat-delta/messages/SubscribeSections' }] }
@@ -361,7 +361,7 @@ components:
         properties:
           accountId: { type: string }
           sessionId: { type: string, description: "로그인 세션 ID(액세스 토큰의 sid). 구매 세션이 아니다" }
-          reason: { type: string, enum: [LOGOUT, DELETE, ADMIN_FORCE, REFRESH_REUSE, STAFF_REVOKED, MERGED, DEVICE_LIMIT, ACCOUNT_LOCKED, ROLE_CHANGED, PASSWORD_CHANGED], description: "DEVICE_LIMIT는 동시 세션 한도(팬 기기 5대, 파트너·운영자 2개) 초과로 가장 오래 쓰지 않은 세션 종료(POL-019), ACCOUNT_LOCKED는 관리 계정 연속 실패 잠금(docs/features/identity.md §4). ADMIN_FORCE는 관제 콘솔의 관리 계정 세션 강제 종료(identity.proto AdminSessionService)다. ROLE_CHANGED는 관리 계정의 역할을 바꾸거나 거두거나 파트너 계정의 테넌트가 바뀌어 그 계정의 모든 세션을 끝낸 것이다(docs/security/authz-matrix.md §5.4, ADR-0157 결정 11). PASSWORD_CHANGED는 관리 계정이 비밀번호를 바꿔 그 계정의 다른 세션을 끝낸 것이다(docs/security/auth-controls.md §3.5)(두 값은 추천 적용 2026-10-30)" }
+          reason: { type: string, enum: [LOGOUT, DELETE, ADMIN_FORCE, REFRESH_REUSE, STAFF_REVOKED, MERGED, DEVICE_LIMIT, ACCOUNT_LOCKED, ROLE_CHANGED, PASSWORD_CHANGED], description: "LOGOUT은 로그아웃이다. DELETE는 계정이 없어져 끝낸 것이다: 팬의 회원 탈퇴(DELETE /v1/identity/account)와 관리 계정 삭제(POST /v1/ops/admin-accounts/{adminAccountId}/removal, 상태 REMOVED)를 함께 뜻한다(docs/features/identity.md §3 '세션 즉시 무효화 전파'의 회원 탈퇴, 관리 계정 삭제는 2026-10-30 추천 적용). REFRESH_REUSE는 리프레시 토큰 재사용 감지다. DEVICE_LIMIT는 동시 세션 한도(팬 기기 5대, 파트너·운영자 2개) 초과로 가장 오래 쓰지 않은 세션 종료(POL-019), ACCOUNT_LOCKED는 관리 계정 연속 실패 잠금(docs/features/identity.md §4). ADMIN_FORCE는 관제 콘솔의 관리 계정 세션 강제 종료(identity.proto AdminSessionService)다. ROLE_CHANGED는 관리 계정의 역할을 바꾸거나 거두거나 파트너 계정의 테넌트가 바뀌어 그 계정의 모든 세션을 끝낸 것이다(docs/security/authz-matrix.md §5.4, ADR-0157 결정 11). PASSWORD_CHANGED는 관리 계정이 비밀번호를 바꿔 그 계정의 다른 세션을 끝낸 것이다(docs/security/auth-controls.md §3.5)(두 값은 추천 적용 2026-10-30)" }
           terminatedAt: { type: string, format: date-time }
     AccountMerged:
       payload:
@@ -378,9 +378,9 @@ components:
         required: [eventKey, kind, sourceId, category, createdAt]
         properties:
           eventKey: { type: string, format: uuid, description: "중복 제거 키. 같은 사건을 다시 보내면 같은 값" }
-          kind: { type: string, enum: [INQUIRY, DISPUTE, MINOR_CONTRACT_CANCEL, CONTENT_REPORT, RIGHTS_REQUEST, VERIFICATION_APPEAL], description: "CsCase 종류(data.md cs_case). VERIFICATION_APPEAL은 queue-svc가 내는 봇 판정 이의 제기(설명 요구·재검토 신청)다(추천 적용 2026-10-30, docs/features/bot-defense.md §12)" }
-          sourceId: { type: string, description: "문의 ID(inquiryId), 신고 대상 후기 ID(reviewId), 또는 이의 ID(appealId, queue-svc가 접수 때 만든다)" }
-          category: { type: string, description: "문의 유형 코드, 신고 사유 코드(SCALPING·MACRO·ABUSE·RIGHTS·ILLEGAL_FILMING·SPAM·OFF_TOPIC·OTHER), 또는 이의 제기면 격리 때 이용자에게 보인 사유 범주(trust.proto ReasonCategory 이름, 예 REASON_CATEGORY_DEVICE_HISTORY)" }
+          kind: { type: string, enum: [INQUIRY, DISPUTE, MINOR_CONTRACT_CANCEL, CONTENT_REPORT, RIGHTS_REQUEST, VERIFICATION_APPEAL, APPEAL], description: "CsCase 종류(data.md cs_case). VERIFICATION_APPEAL은 queue-svc가 내는 봇 판정 이의 제기(설명 요구·재검토 신청)다(추천 적용 2026-10-30, docs/features/bot-defense.md §12). APPEAL은 core-svc support 모듈이 내는 소명(예매 제한·양도 회수 대상 팬의 사정 설명, openapi POST /v1/appeals)이다(추천 적용 2026-10-30, docs/features/transfer-refund.md §7.1)" }
+          sourceId: { type: string, description: "문의 ID(inquiryId), 신고 대상 후기 ID(reviewId), 이의 ID(appealId, queue-svc가 접수 때 만든다), 또는 소명 ID(core DB appeal.id, support 모듈이 만든다)" }
+          category: { type: string, description: "문의 유형 코드, 신고 사유 코드(SCALPING·MACRO·ABUSE·RIGHTS·ILLEGAL_FILMING·SPAM·OFF_TOPIC·OTHER), 이의 제기면 격리 때 이용자에게 보인 사유 범주(trust.proto ReasonCategory 이름, 예 REASON_CATEGORY_DEVICE_HISTORY), 또는 소명이면 대상 종류(RESTRICTION·RECLAIM). 소명의 대상 ID·계정·본문은 싣지 않고 ops-svc가 support 모듈 내부 API로 읽는다(문의와 같다)" }
           followUp: { type: boolean, default: false, description: "추가 문의면 true(기존 건을 다시 처리 중으로)" }
           hold: { type: boolean, default: false, description: "불법 촬영물 신고로 후기를 바로 가렸으면 true(FILMING_HOLD, POL-044)" }
           createdAt: { type: string, format: date-time }

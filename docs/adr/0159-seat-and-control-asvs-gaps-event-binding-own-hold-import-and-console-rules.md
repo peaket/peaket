@@ -1,6 +1,6 @@
 # ADR-0159: 좌석·관제 보안 추적 표를 판정하며 찾은 빈틈을 막는다 — 입장 토큰의 회차 묶기, 자기 홀드만, 서버의 좌석 확인, 구독 상한, 가져오기 파일과 관제 링크·원본 파일 규칙(2026-10-30)
 
-- **상태**: 채택 (2026-10-30. 소유자가 ADR-0154 결정 3으로 좌석·관제 보안 추적 표를 지금 쓰기로 정했다. 판정하며 막은 빈틈의 방법은 모두 추천 적용이다. 큰 판단 일곱은 고치지 않고 review/open-items.md에 남겼다. 정본은 docs/security/asvs/seat-hold.md, asvs/control-tower.md, docs/features/seat-hold.md §2·§3·§7·§10, docs/features/control-tower.md §5·§8·§9다.)
+- **상태**: 채택 (2026-10-30. 소유자가 ADR-0154 결정 3으로 좌석·관제 보안 추적 표를 지금 쓰기로 정했다. 판정하며 막은 빈틈의 방법은 모두 추천 적용이다. 큰 판단 일곱은 고치지 않고 review/open-items.md에 남겼다. 정본은 docs/security/asvs/seat-hold.md, asvs/control-tower.md, docs/features/seat-hold.md §2·§3·§7·§10, docs/features/control-tower.md §5·§8·§9다.) 2026-10-30(소유자 결정, ADR-0161·0162): 남긴 큰 판단을 정했다. 1(좌석 붙잡기)은 계정 단위 재홀드 30초, 2(수사기관 자료 승인)는 commander 승인 뒤 추출·제출, 3(1인 기간 점검)은 시연에서만 자기 점검, 5(만료 WAF 차단)는 `waf-block-expirer`, 6(SVG 해석)은 `seatmap-worker`, 7(제어 gRPC 서명)은 더하지 않음. 4(제출 파일 보관 기간)는 법률 검토로 넘겼다. 주문·결제 경로의 '자기 것만'(404)은 ADR-0161 이후 문서에 맞췄다.
 - **관련**: ADR-0053(구매 세션 소지 증명), ADR-0065(웹 보안 기본값), ADR-0149(감사 기록의 사람 칸), ADR-0154, POL-021 B(운영 명령 카탈로그), [docs/security/asvs/seat-hold.md](../security/asvs/seat-hold.md), [docs/security/asvs/control-tower.md](../security/asvs/control-tower.md), [docs/security/authz-matrix.md](../security/authz-matrix.md)
 
 ## 맥락

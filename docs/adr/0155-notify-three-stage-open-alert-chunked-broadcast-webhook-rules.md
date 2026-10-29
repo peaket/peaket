@@ -1,6 +1,6 @@
 # ADR-0155: 오픈 알림은 세 단계로 나눠 로비가 열린 동안 흩어 보내고, 대량 발송은 조각 원장으로 하며, 웹 푸시 구독·수신 거부·파트너 웹훅의 규칙을 정한다(2026-10-30)
 
-- **상태**: 채택 (2026-10-30. 소유자가 ADR-0154 결정 3으로 알림과 찜·오픈 알림 구독의 상세 설계를 지금 쓰기로 정했다. 이 ADR의 설계 판단은 모두 추천 적용이다. 정본은 docs/features/notify.md, 보안 추적 표는 docs/security/asvs/notify.md다.)
+- **상태**: 채택 (2026-10-30. 소유자가 ADR-0154 결정 3으로 알림과 찜·오픈 알림 구독의 상세 설계를 지금 쓰기로 정했다. 이 ADR의 설계 판단은 모두 추천 적용이다. 정본은 docs/features/notify.md, 보안 추적 표는 docs/security/asvs/notify.md다.) 2026-10-30(ADR-0161): 대기실 오픈 안내 ③(로비 열림 푸시)은 로비 참가 버튼이 기기마다 퍼지는 60초가 끝난 뒤부터 보낸다. 창 길이 6분과 발송 속도는 그대로다(docs/features/notify.md §5.2).
 - **관련**: ADR-0053(파트너 웹훅 서명·SSRF 방지), ADR-0062·0063·0064(알림 신청 규칙, 취소표 알림, 판매 종료), ADR-0093(찜은 공연 단위, 오픈 알림은 회차 단위), ADR-0109(core DB 발송 원장 워커), ADR-0139(국외 이전), ADR-0154, POL-004(로비 안에서는 들어온 때와 순번이 무관), [docs/features/notify.md](../features/notify.md), [docs/security/asvs/notify.md](../security/asvs/notify.md), [design/d5-screen-blueprint.md](../../design/d5-screen-blueprint.md) §9.1
 
 ## 맥락

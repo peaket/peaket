@@ -1,5 +1,6 @@
-"""PEAKET 문서 점검: YAML 중복 키, ID 참조, FR→시험 연결, 표, 펜스, 경로, REST 경로 규칙과 openapi 계약, 절 번호 참조,
-작업 흔적, ASVS 표, 결정이 많은 ADR의 결정별 표, 마커, WBS 일치, 기획 버전, mermaid 그림.
+"""PEAKET 문서 점검: YAML 중복 키, ID 참조, FR→시험 연결, 표, 펜스, 경로와 링크(절대 경로·대상 파일·위치 표시),
+REST 경로 규칙과 openapi 계약, 절 번호 참조, 작업 흔적, ASVS 표, 차단 조건 목록 대조, 결정이 많은 ADR의 결정별 표,
+마커, WBS 일치, 기획 버전, mermaid 그림.
 
 사용법: python tools/doc-check/check_all.py [--strict] [--json] [--coverage] [--markers-out FILE]
 종료 코드: 0 = 오류 없음, 1 = 오류 있음(--strict면 경고도 오류로 봄), 2 = 실행 실패.
@@ -9,6 +10,7 @@
 import argparse
 import collections
 import csv
+import html
 import io
 import json
 import os
@@ -16,6 +18,8 @@ import re
 import shutil
 import subprocess
 import sys
+import unicodedata
+import urllib.parse
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 # 원문 설계서는 2026-10-27 archive/에서 지웠고 이 git 태그에만 남는다(ADR-0098). --coverage가 여기서 읽는다.
@@ -577,6 +581,153 @@ def check_paths(texts, rep):
                     rep.err('paths', '%s:%d' % (f, n), '없는 경로 %s' % p)
 
 
+# ---------- 4의1. 링크: 절대 경로, 대상 파일, 위치 표시(review/open-items.md 32번, 소유자 결정 2026-10-30) ----------
+# 위 경로 검사는 저장소 기준 경로 글자만 보므로 `file:///d:/…` 안의 경로와 상대 링크(`../planning/…`), `#제목`을 보지 않았다.
+CODE_SPAN_RE = re.compile(r'(`+)(.+?)\1')
+# 마크다운 인라인 링크 [글](대상 "제목")와 참조 정의 [이름]: 대상. 그림 ![글](대상)도 같은 꼴이다
+LINK_RE = re.compile(r'!?\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\(\s*(<[^>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)(?:\s+(?:"[^"]*"|\'[^\']*\'))?\s*\)')
+LINK_DEF_RE = re.compile(r'^ {0,3}\[[^\]]+\]:\s*(<[^>]*>|\S+)')
+# 이 컴퓨터에서만 열리는 절대 경로: file: 주소(뒤에 경로 글자가 붙은 것만. 코드 표시 안의 `file:///`와, 경로 없이 'file:/// 링크'처럼
+# 말로 가리킨 것은 빠진다. review R-106 행이 그렇다)와 드라이브 경로(D:/…)
+FILE_URL_RE = re.compile(r'(?<![\w])file:/{1,3}[^\s/`\'")\]>|]', re.I)
+DRIVE_PATH_RE = re.compile(r'^[A-Za-z]:[\\/]')
+URL_SCHEME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9+.-]*:')
+# 파일·폴더를 가리키는 대상만 본다. 화면 설계의 버튼 표기 '[ 승인 ](재인증)'은 링크 꼴이지만 대상이 낱말이라 빠진다
+LINK_FILE_RE = re.compile(r'\.(?:md|yaml|yml|json|csv|py|mjs|js|html|txt|proto|png|svg|jpe?g|gif|webp|pdf|bat)$|/$', re.I)
+HEADING_LINE_RE = re.compile(r'^ {0,3}(#{1,6})(?=[ \t]|$)(.*)$')
+HTML_ANCHOR_RE = re.compile(r'<a\s+(?:[^>]*\s)?(?:id|name)=["\']([^"\']+)["\']', re.I)
+# 위치 표시가 맞지 않아도 되는 링크: (링크가 있는 파일, 링크 대상 글자) → 이유.
+# 고치지 않는 지난 기록(ADR 본문, review의 지난 행)이 그 뒤 바뀐 제목을 가리킬 때만 넣는다(ALLOW_PATHS와 같은 방식). 지금은 없다
+ALLOW_ANCHORS = {}
+
+
+def gh_slug(text):
+    """GitHub가 제목에 붙이는 위치 표시(id). 제목을 화면 글자로 바꾼 뒤 소문자로 하고, 문자·결합 부호·십진 숫자·밑줄·하이픈·빈칸만
+    남기고, 빈칸 하나를 '-' 하나로 바꾼다(빈칸을 합치지 않는다). 한국어 글자는 그대로 남는다. 같은 제목의 뒷번호는 heading_ids가 붙인다.
+    저장소 제목 2,041개(겹치지 않는 것)를 GitHub Markdown API로 그려 받은 id와 모두 같았다(2026-10-30)."""
+    out, pos = [], 0
+
+    def plain(s):
+        s = re.sub(r'!\[[^\]]*\]\([^)]*\)', '', s)          # 그림은 화면 글자가 없다
+        s = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', s)       # 링크는 글만 남는다
+        s = re.sub(r'<[^>]+>', '', s)                         # HTML 태그
+        s = re.sub(r'\\([!-/:-@\[-`{-~])', r'\1', s)         # 역슬래시로 푼 문장 부호
+        s = re.sub(r'\*+|(?<!\w)_+|_+(?!\w)', '', s)          # 강조 표시(낱말 안의 밑줄은 남긴다)
+        return html.unescape(s)
+
+    for m in CODE_SPAN_RE.finditer(text):
+        out.append(plain(text[pos:m.start()]))
+        c = m.group(2)
+        if len(c) > 1 and c[0] == ' ' and c[-1] == ' ' and c.strip():
+            c = c[1:-1]
+        out.append(c)                                         # 코드 표시 안은 글자 그대로
+        pos = m.end()
+    out.append(plain(text[pos:]))
+    s = ''.join(out).strip().lower()
+    # 남기는 글자: 문자(L)·결합 부호(M)·십진 숫자(Nd)·연결 부호(Pc, 밑줄). ②·²·½ 같은 다른 숫자는 지운다(GitHub 렌더링으로 확인 2026-10-30)
+    s = ''.join(ch for ch in s if ch in ' -' or unicodedata.category(ch)[0] in 'LM' or unicodedata.category(ch) in ('Nd', 'Pc'))
+    return s.replace(' ', '-')
+
+
+def heading_ids(path, texts, cache={}):
+    """문서 제목들의 위치 표시 집합. 같은 표시가 또 나오면 -1, -2를 붙인다(GitHub와 같은 순서). 코드 펜스 안은 제목이 아니다.
+    점검 대상이 아닌 파일(tools/ 아래 등)은 디스크에서 읽는다."""
+    if path not in cache:
+        ids, seen = set(), {}
+        if path in texts:
+            lines = strip_fences(texts[path])
+        else:
+            with io.open(os.path.join(ROOT, path), encoding='utf-8') as fh:
+                lines = strip_fences(fh.read())
+        for l in lines:
+            ids.update(HTML_ANCHOR_RE.findall(l))
+            m = HEADING_LINE_RE.match(l)
+            if not m:
+                continue
+            title = re.sub(r'(?:^|[ \t]+)#+[ \t]*$', '', m.group(2).strip()).strip()  # 닫는 # 줄
+            base = slug = gh_slug(title)
+            while slug in seen:
+                seen[base] += 1
+                slug = '%s-%d' % (base, seen[base])
+            seen[slug] = 0
+            ids.add(slug)
+        cache[path] = ids
+    return cache[path]
+
+
+def exists_exact(relpath, cache={}):
+    """대소문자까지 같은 파일·폴더가 있는가(Windows에서도 GitHub처럼 본다)."""
+    cur = ROOT
+    for part in [p for p in relpath.split('/') if p]:
+        if cur not in cache:
+            cache[cur] = set(os.listdir(cur)) if os.path.isdir(cur) else set()
+        if part not in cache[cur]:
+            return False
+        cur = os.path.join(cur, part)
+    return True
+
+
+def check_links(texts, rep):
+    n = collections.Counter()
+    for f, text in texts.items():
+        md = f.endswith('.md')
+        lines = strip_fences(text) if md else text.split('\n')
+        for no, raw in enumerate(lines, 1):
+            if not raw or ('](' not in raw and ':' not in raw):
+                continue
+            line = CODE_SPAN_RE.sub(lambda m: ' ' * len(m.group(0)), raw)  # 코드 표시 안의 예시는 링크가 아니다
+            where = '%s:%d' % (f, no)
+            for m in FILE_URL_RE.finditer(line):
+                n['absolute'] += 1
+                shown = re.split(r'[\s)>\]]', line[m.start():m.start() + 60])[0]
+                rep.err('paths', where, "절대 경로 링크 '%s'(이 컴퓨터에서만 열린다). 저장소 안 상대 경로로 쓴다" % shown)
+            targets = [m.group(2) for m in LINK_RE.finditer(line)]
+            d = LINK_DEF_RE.match(line)
+            if d:
+                targets.append(d.group(1))
+            for t in targets:
+                t = t.strip('<>').strip()
+                if DRIVE_PATH_RE.match(t):
+                    n['absolute'] += 1
+                    rep.err('paths', where, "절대 경로 링크 '%s'(이 컴퓨터에서만 열린다). 저장소 안 상대 경로로 쓴다" % t[:60])
+                    continue
+                if not t or URL_SCHEME_RE.match(t):
+                    continue  # 바깥 주소(https·mailto)와 file:(위에서 봄)
+                path, hashmark, frag = t.partition('#')
+                path, frag = urllib.parse.unquote(path), urllib.parse.unquote(frag)
+                if path and not LINK_FILE_RE.search(path):
+                    continue
+                n['links'] += 1
+                if path:
+                    full = os.path.normpath(os.path.join(ROOT, path.lstrip('/')) if path.startswith('/')
+                                            else os.path.join(ROOT, os.path.dirname(f), path))
+                    tgt = rel(full)
+                    if tgt.startswith('../') or tgt == '..':
+                        rep.err('paths', where, '저장소 밖을 가리키는 링크 %s' % t)
+                        continue
+                    if not exists_exact(tgt) and tgt not in ALLOW_PATHS:
+                        n['missing'] += 1
+                        if '예정' in raw:
+                            rep.warn('paths', where, '예정 문서 링크 %s' % t)
+                        else:
+                            rep.err('paths', where, '없는 링크 대상 %s(%s)' % (t, tgt))
+                        continue
+                else:
+                    tgt = f
+                if not hashmark or not frag:
+                    continue
+                n['anchors'] += 1
+                if not tgt.endswith('.md') or not (tgt in texts or os.path.isfile(os.path.join(ROOT, tgt))):
+                    n['anchors_not_md'] += 1  # 마크다운이 아닌 파일의 위치 표시(openapi의 #/components 등)는 보지 않는다
+                    continue
+                if frag in heading_ids(tgt, texts) or (f, t) in ALLOW_ANCHORS:
+                    continue
+                n['bad_anchors'] += 1
+                rep.err('paths', where, '위치 표시 #%s: %s에 이 표시로 바뀌는 제목이 없음(GitHub 방식 제목 변환: 소문자, 빈칸은 -, 문장 부호 제거, 같은 제목은 -1·-2)'
+                        % (frag, tgt))
+    rep.info['links'] = {k: n[k] for k in ('links', 'anchors', 'anchors_not_md', 'missing', 'bad_anchors', 'absolute')}
+
+
 # ---------- 4의2. REST 경로 규칙과 문서의 경로 참조(docs/api/guidelines.md §10, ADR-0081) ----------
 API_NAMESPACES = {'partner', 'ops', 'scanner', 'identity', 'shop', 'auth', 'compliance', 'webhooks'}
 API_VERBS = {'get', 'create', 'update', 'delete', 'approve', 'reject', 'accept', 'withdraw', 'extend', 'revert', 'resend',
@@ -762,6 +913,93 @@ def check_api_contract(spec, rep):
     rep.info['api_problem_exempt'] = exempt_seen
 
 
+# ---------- 4의4. 작업별 허용 역할(x-peaket-roles, docs/security/authz-matrix.md §5.5, open-items 71번) ----------
+# 허용 역할 값의 정본은 권한 표 §5.5의 표 하나다. 첫 칸이 `값`인 행에서 값, '알아보는 자격', '함께 오는 자격'을 읽는다.
+# 자격 칸의 코드 표시 가운데 securitySchemes의 이름은 인증 방식이고, `{}`는 빈 요구(공개)다.
+ROLE_DOC = 'docs/security/authz-matrix.md'
+ROLE_SEC = '5.5'
+ROLE_KEY = 'x-peaket-roles'
+ROLE_ROW_RE = re.compile(r'^\| `([a-z][a-z0-9_]*)` \|')
+
+
+def role_catalog(texts, schemes):
+    """{값: (알아보는 자격 set, 함께 오는 자격 set, 빈 요구와 맞는지)}와 (시작 줄)."""
+    start, sl = section_lines(texts.get(ROLE_DOC, ''), ROLE_SEC)
+    cat = {}
+    for line in sl:
+        m = ROLE_ROW_RE.match(line)
+        if not m:
+            continue
+        cells = [c.strip() for c in line.strip().strip('|').split('|')]
+        if len(cells) < 4:
+            continue
+        ident = re.findall(r'`([^`]+)`', cells[2])
+        comp = re.findall(r'`([^`]+)`', cells[3])
+        cat[m.group(1)] = ({x for x in ident if x in schemes}, {x for x in comp if x in schemes}, '{}' in ident)
+    return cat, start
+
+
+def check_roles(texts, spec, rep):
+    where0 = 'docs/api/openapi.yaml'
+    if not isinstance(spec, dict) or not isinstance(spec.get('paths'), dict):
+        rep.err('roles', where0, 'openapi를 읽지 못해 허용 역할을 검사하지 못함')
+        return
+    schemes = set(((spec.get('components') or {}).get('securitySchemes') or {}).keys())
+    cat, start = role_catalog(texts, schemes)
+    if not cat:
+        rep.err('roles', ROLE_DOC, "허용 역할 값 표(§%s, 첫 칸이 `값`인 행)를 찾지 못함(tools/doc-check/check_all.py ROLE_DOC·ROLE_SEC를 고친다)" % ROLE_SEC)
+        return
+    listed = set().union(*[a | b for a, b, _ in cat.values()])
+    for s in sorted(schemes - listed):
+        rep.err('roles', '%s:%d' % (ROLE_DOC, start), '인증 방식 %s를 받을 역할 값이 §%s 표에 없음' % (s, ROLE_SEC))
+
+    def matches(req, role):
+        ident, comp, public = cat[role]
+        if not req:
+            return public
+        return bool(req & ident) and req <= ident | comp
+
+    global_sec = spec.get('security')
+    per_role = collections.Counter()
+    n = {'operations': 0, 'with_roles': 0}
+    for path, item in spec['paths'].items():
+        if not isinstance(item, dict):
+            continue
+        for method in HTTP_METHODS:
+            op = item.get(method)
+            if not isinstance(op, dict):
+                continue
+            n['operations'] += 1
+            where = '%s %s %s' % (where0, method.upper(), path)
+            roles = op.get(ROLE_KEY)
+            if roles is None:
+                rep.err('roles', where, '%s가 없음(공개 작업은 [public], docs/security/authz-matrix.md §5.5)' % ROLE_KEY)
+                continue
+            if not isinstance(roles, list) or not roles or not all(isinstance(r, str) and r for r in roles):
+                rep.err('roles', where, '%s가 값이 하나 이상인 목록이 아님: %r' % (ROLE_KEY, roles))
+                continue
+            n['with_roles'] += 1
+            dup = sorted({r for r in roles if roles.count(r) > 1})
+            if dup:
+                rep.err('roles', where, '%s에 같은 값이 두 번 있음: %s' % (ROLE_KEY, ', '.join(dup)))
+            unknown = [r for r in roles if r not in cat]
+            if unknown:
+                rep.err('roles', where, '%s에 §%s 표에 없는 값: %s' % (ROLE_KEY, ROLE_SEC, ', '.join(unknown)))
+            known = [r for r in dict.fromkeys(roles) if r in cat]
+            for r in known:
+                per_role[r] += 1
+            sec = op['security'] if 'security' in op else global_sec
+            reqs = [set((q or {}).keys()) for q in (sec or [{}])]
+            for q in reqs:
+                if known and not any(matches(q, r) for r in known):
+                    rep.err('roles', where, 'security 요구 %s를 받을 값이 %s에 없음' % ('{' + ', '.join(sorted(q)) + '}', ROLE_KEY))
+            for r in known:
+                if not any(matches(q, r) for q in reqs):
+                    rep.err('roles', where, "%s의 '%s'가 이 작업의 security와 맞지 않음(§%s 표의 자격)" % (ROLE_KEY, r, ROLE_SEC))
+    n['per_role'] = {r: per_role[r] for r in cat}
+    rep.info['roles'] = n
+
+
 # ---------- 5. 절 번호 참조 ----------
 ALIAS = {
     '01-overview': 'planning/01-overview.md', '02-requirements': 'planning/02-requirements.md',
@@ -890,6 +1128,96 @@ def check_asvs(texts, rep):
                 rep.err('asvs', where, '%s의 요구사항 요약이 %s와 다르다' % (m.group(1), seen[m.group(1)][1]))
             seen.setdefault(m.group(1), (m.group(3), where))
     rep.info['asvs_ids'] = len(seen)
+
+
+# ---------- 6의2의2. 차단 조건 목록 대조(review/open-items.md 51번, 소유자 결정 2026-10-30) ----------
+# 같은 차단 조건 목록이 정책(planning/03 §1)·상태도(planning/03 §2)·화면(planning/04 F-·SCR-)·API(openapi)에 흩어져 있다.
+# API에 적힌 차단 사유 코드(대문자와 밑줄, 예: ENTRY_STARTED)를 기준으로, 각 자리에 적힌 코드 묶음이 같은지 본다.
+# 자리는 (파일, 절, 줄 머리)다. 절은 제목의 첫 낱말(예: '2.8', 'F-11')이고 그 제목 아래 다음 같은·높은 단계 제목 전까지를 본다.
+# 줄 머리가 있으면 그 절에서 이 글자로 시작하는 첫 줄만, 없으면 절 전체(그림 포함)를 본다.
+# API 기준: ('schema', 스키마, 속성) = 그 배열 속성의 열거값, ('409', ((메서드, 경로), …)) = 그 작업들의 409 응답 설명에 적힌 코드.
+BLOCKER_LISTS = (
+    {'name': '계정 병합 차단 사유',
+     'api': ('schema', 'MergeProposal', 'blockers'),
+     'places': (('planning/03-policies-glossary.md', '1.', '| POL-034 |'),
+                ('planning/03-policies-glossary.md', '2.8', '| T9 |'),
+                ('planning/04-ia-flows-screens.md', 'F-11', None),
+                ('planning/04-ia-flows-screens.md', '3.1', '| SCR-040 |'),
+                ('docs/features/identity.md', '2.1', '- 계정 병합 차단 사유'),
+                ('design/d5-screen-blueprint.md', '5.22', '| blocked |'))},
+    {'name': '입장 중 소유권 동결(양도 수락·돌려주기)',
+     'api': ('409', (('POST', '/v1/transfers/{offerId}/acceptance'), ('POST', '/v1/tickets/{ticketId}/returns'))),
+     'places': (('planning/03-policies-glossary.md', '1.', '| POL-017 |'),
+                ('planning/03-policies-glossary.md', '2.5', '| T8 |'),
+                ('planning/03-policies-glossary.md', '2.5', '| T9 |'),
+                ('planning/04-ia-flows-screens.md', '3.1', '| SCR-013 |'),
+                ('planning/04-ia-flows-screens.md', '3.1', '| SCR-041 |'))},
+)
+BLOCKER_CODE_RE = re.compile(r'(?<![A-Za-z0-9_])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![A-Za-z0-9_])')
+
+
+def section_lines(text, sec):
+    """제목의 첫 낱말이 sec인 절의 (첫 줄 번호, 줄 목록). 없으면 (None, [])."""
+    lines = text.split('\n')
+    fenced = strip_fences(text)
+    for i, l in enumerate(fenced):
+        m = re.match(r'^(#{1,6})\s+(\S+)', l)
+        if m and m.group(2) == sec:
+            level, j = len(m.group(1)), i + 1
+            while j < len(fenced):
+                h = re.match(r'^(#{1,6})\s', fenced[j])
+                if h and len(h.group(1)) <= level:
+                    break
+                j += 1
+            return i + 1, lines[i:j]
+    return None, []
+
+
+def check_blockers(texts, spec, rep):
+    if not isinstance(spec, dict):
+        rep.err('blockers', 'docs/api/openapi.yaml', 'openapi를 읽지 못해 차단 조건 목록을 대조하지 못함')
+        return
+    info = {}
+    for b in BLOCKER_LISTS:
+        kind = b['api'][0]
+        try:
+            if kind == 'schema':
+                prop = spec['components']['schemas'][b['api'][1]]['properties'][b['api'][2]]
+                canon = set((prop.get('items') or {}).get('enum') or [])
+                api_where = 'docs/api/openapi.yaml %s.%s' % b['api'][1:]
+            else:
+                canon = set()
+                for method, path in b['api'][1]:
+                    r = spec['paths'][path][method.lower()]['responses']['409']
+                    canon |= set(BLOCKER_CODE_RE.findall(str((r or {}).get('description', ''))))
+                api_where = 'docs/api/openapi.yaml ' + '·'.join('%s %s' % x for x in b['api'][1]) + ' 409'
+        except (KeyError, TypeError, AttributeError):
+            rep.err('blockers', 'docs/api/openapi.yaml', "'%s'의 API 기준 %s를 찾지 못함" % (b['name'], b['api']))
+            continue
+        if not canon:
+            rep.err('blockers', api_where, "'%s'의 API 기준에 차단 사유 코드가 없음" % b['name'])
+            continue
+        for f, sec, head in b['places']:
+            start, sl = section_lines(texts.get(f, ''), sec)
+            if start is None:
+                rep.err('blockers', f, "'%s'를 대조할 절 %s가 없음(tools/doc-check/check_all.py BLOCKER_LISTS를 고친다)" % (b['name'], sec))
+                continue
+            if head:
+                k = next((k for k, l in enumerate(sl) if l.startswith(head)), None)
+                if k is None:
+                    rep.err('blockers', '%s:%d' % (f, start), "'%s'를 대조할 줄 '%s'가 절 %s에 없음" % (b['name'], head.strip('| '), sec))
+                    continue
+                where, body = '%s:%d' % (f, start + k), sl[k]
+            else:
+                where, body = '%s:%d' % (f, start), '\n'.join(sl)
+            found = set(BLOCKER_CODE_RE.findall(body))
+            missing, extra = sorted(canon - found), sorted(found - canon)
+            if missing:
+                rep.warn('blockers', where, "'%s'에 API(%s)의 사유 %s가 없음" % (b['name'], api_where, '·'.join(missing)))
+            if extra:
+                rep.warn('blockers', where, "'%s'에 API(%s)에 없는 사유 %s가 있음" % (b['name'], api_where, '·'.join(extra)))
+        info[b['name']] = {'codes': len(canon), 'places': len(b['places'])}
+    rep.info['blockers'] = info
 
 
 # ---------- 6의3. 결정이 많은 ADR의 결정별 현재 판(docs/architecture.md §11·§11.1, 기술 검토 낮음-150) ----------
@@ -1134,8 +1462,11 @@ def main():
     check_frtrace(texts, rep)
     check_tables_fences(texts, rep)
     check_paths(texts, rep)
+    check_links(texts, rep)
     check_api(texts, rep)
     check_api_contract(yaml_docs.get('docs/api/openapi.yaml'), rep)
+    check_roles(texts, yaml_docs.get('docs/api/openapi.yaml'), rep)
+    check_blockers(texts, yaml_docs.get('docs/api/openapi.yaml'), rep)
     check_secrefs(texts, rep)
     check_artifacts(texts, rep)
     check_public(texts, rep)

@@ -6,6 +6,7 @@
 // 그 정본: docs/features/identity.md §2.1·POL-034(계정 병합 막는 사유), docs/api/openapi.yaml `/v1/ops/cases*`·`CsCaseDetail`·`CaseReply`·`InquiryMessage`,
 // `/v1/ops/home-layout*`·`HomeLayout`, `/v1/ops/artists*`·`/v1/ops/places*`·`/v1/ops/productions/{productionId}/aliases`,
 // docs/data.md 고객 문의(`inquiry`·`inquiry_message`)·홈 구성·`review_image`·`content_report`, POL-044·POL-045, ADR-0063·0066·0093·0094.
+// BookingRestrictionViewService는 2026-10-30에 더했다(예매 제한의 화면용 사본, 추천 적용 2026-10-30, design/d5 §1.6 21번).
 syntax = "proto3";
 
 package peaket.core.v1;
@@ -763,4 +764,45 @@ message SetProductionAliasesResponse {
   CatalogWriteResult result = 1;
   // APPLIED면 새 판
   int64 version = 2;
+}
+
+// 부르는 쪽: ops-svc만(승인 업무 '예매 제한'의 실행 T14 뒤, 소명 인정·끝 시각으로 풀릴 때, 작업 워커의 다시 보내기).
+// 초안(소유자 결정 2026-10-30 open-items 75번의 화면 쪽, 계약 모양은 추천 적용 2026-10-30), 정본은 docs/features/queue-admission.md §6 '예매 제한 확인'.
+// core-svc support 모듈은 세션·캐시 Redis sup:rst:{account}에 화면용 사본을 두고 팬의 GET /v1/booking-restrictions/me에 답한다(design/d5 §1.6 21번).
+// 집행 사본이 아니다. 입장 확정(queue-svc)과 주문 생성(purchase-svc)은 각자의 BookingRestrictionService 사본으로 막고,
+// ops-svc는 그 두 곳의 반영으로 실행(T14)을 끝낸다. 이 호출이 실패해도 실행은 끝나고, 작업 워커가 실패한 호출과 10분 [가정]마다의 ACTIVE를 다시 보낸다.
+// 판 번호가 저장한 판보다 클 때만 반영한다(queue.proto BookingRestrictionService와 같은 규칙). 데드라인은 1초 [가정]이다.
+service BookingRestrictionViewService {
+  rpc SetBookingRestrictionView(SetBookingRestrictionViewRequest) returns (SetBookingRestrictionViewResponse);
+}
+
+// 화면용 사본의 상태(booking_restriction.status의 ACTIVE·LIFTED. EXPIRED는 끝 시각으로 받는 쪽이 스스로 판단한다).
+enum BookingRestrictionViewState {
+  BOOKING_RESTRICTION_VIEW_STATE_UNSPECIFIED = 0;
+  // 제한 중
+  BOOKING_RESTRICTION_VIEW_STATE_ACTIVE = 1;
+  // 소명 인정 등으로 풀렸다
+  BOOKING_RESTRICTION_VIEW_STATE_LIFTED = 2;
+}
+
+message SetBookingRestrictionViewRequest {
+  // 제한한 계정
+  string account_id = 1;
+  // ops DB booking_restriction.id. 멱등 키이고, 팬이 소명을 낼 때의 targetId(POST /v1/appeals)다.
+  string restriction_id = 2;
+  BookingRestrictionViewState state = 3;
+  // booking_restriction.reason_code. 화면은 이 코드로 사유 범주 문구를 고른다.
+  string reason_code = 4;
+  google.protobuf.Timestamp starts_at = 5;
+  // 끝이 정해지지 않았으면 비운다.
+  google.protobuf.Timestamp ends_at = 6;
+  // 소명 기한(booking_restriction.appeal_due_at)
+  google.protobuf.Timestamp appeal_due_at = 7;
+  // ops 제한 기록의 판 번호. queue-svc·purchase-svc에 보내는 값과 같다.
+  int64 version = 8;
+}
+
+message SetBookingRestrictionViewResponse {
+  // 이번 호출로 반영했으면 true, 판이 같거나 작아 바꾸지 않았으면 false.
+  bool changed = 1;
 }

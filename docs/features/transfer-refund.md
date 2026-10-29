@@ -240,6 +240,7 @@ sequenceDiagram
 | 환불 대기 | 가상계좌 결제자의 환불 계좌 미입력 | 첫 요청 뒤 3영업일(재발송: 다음 영업일·그다음 영업일 10:00, 그 뒤 7일마다 [가정]) |
 | 배상 대기 | 배상 계좌 미입력·송금 실패 | 회차 취소 확정 뒤 10영업일 [가정](재발송은 환불 대기와 같음) |
 | 남용 표시 | 취소·양도 남용 기준에 해당하는 경우(ADR-0046 결정 9) | 확인 1영업일 |
+| 소명(`APPEAL`) | 예매 제한·양도 회수 대상 팬의 소명 제출(SCR-042, `POST /v1/appeals`). core-svc support 모듈이 받아 건을 요청한다(아래 '소명이 들어오는 길', 추천 적용 2026-10-30) | 예매 제한 소명은 결과 3영업일 [가정], 양도 회수 소명은 그 승인 업무의 기한(입장 시작 전)을 따른다 |
 | 분쟁 접수 | 팬 문의(SCR-056) 중 분쟁 유형·불만 | 진행 경과 3영업일, 결과 10영업일 |
 | 문의(`INQUIRY`) | 팬 문의(SCR-056). 분쟁 유형은 '분쟁 접수'로, 미성년자 계약 취소 유형은 같은 이름의 종류로 등록한다(추천 적용 2026-10-19, ADR-0066) | 답변 3영업일 [가정] |
 | 게시물 신고(`CONTENT_REPORT`) | 후기 신고(SCR-016). 같은 후기에 들어온 신고는 한 건으로 모으고 신고 수를 센다(추천 적용 2026-10-19, ADR-0066, POL-044) | 결과 3영업일 [가정]. 음란물·불법 촬영물을 사유로 한 신고는 들어오는 즉시 가리고 1영업일 [가정] 안에 판단한다 |
@@ -255,8 +256,11 @@ sequenceDiagram
 | 양도 회수 실패(`DISPUTE`, FR-059) | 회수를 승인한 뒤 입장이 시작되는 등의 이유로 회수에 실패한 경우 | 분쟁 접수와 같다(진행 경과 3영업일, 결과 10영업일) |
 | 분실 기기 기록 손실(`SCANNER_UNREPORTED`, RB-22) | 분실·도난 기기 폐기 | 3영업일 [가정] |
 | 미성년자 계약 취소(`MINOR_CONTRACT_CANCEL`) | SCR-056 문의·고객센터 | 확인 결과 3영업일, 승인 뒤 환급 3영업일 |
+| 정산 이의(`STATEMENT_DISPUTE`) | 파트너 관리자의 정산서 이의 제기(통지 뒤 2영업일 안, docs/features/settlement.md §4.2) | 진행 경과 3영업일, 결과 10영업일(내부 기준, settlement §4.2). 처리: `cs_lead`가 이 건 상세에서 이의를 기각하거나, 이의를 인정해 수기 조정을 요청한다(commander 승인). 건에는 그 정산서 하나의 금액 항목·상태·이의 내용만 붙고 결제사 내부 ID·결제사 오류 원문·정산 계좌는 없다(소유자 결정 2026-10-30, open-items 72번, 세부는 추천 적용 2026-10-30) |
 
+- **CS 담당자에게 보이는 정산 건(소유자 결정 2026-10-30, open-items 72번, 건 종류의 나눔은 추천 적용 2026-10-30)**: CS 처리함의 정산 건 가운데 CS 담당자(`cs_agent`·`cs_lead`)의 목록에 나오는 것은 '정산 이의' 하나다. 지급·대사·KYC 건(KYC 필요, 지급 요청 오류·실패·지연, 포트원 일괄 지급 실행, 포트원 원장 불일치, 결제사 잔액 대사 차이)은 관제 역할(viewer·operator·commander)만 보고 처리하며, CS 담당자가 그 건 상세를 열면 없는 건과 같은 404다(openapi `/v1/ops/cases`·`/v1/ops/cases/{caseId}`, docs/features/settlement.md §9, 시험 J-T27). 종류별 기한과 처리 행동은 design/d5 §7.6 표에 있다.
 - 종류별 기한과 처리 행동은 2026-10-14에 추천 적용으로 정했다(ADR-0062, 처리 행동은 design/d5 §7.6 표, 기한·주기 수치는 [가정]). 문의·게시물 신고·권리 침해 삭제 요청 세 종류는 2026-10-19에 더했다(ADR-0066, POL-044). 가상계좌 결제자가 환불 계좌를 주지 않아 3영업일을 넘긴 환급이 전자상거래법 §18②의 지연배상금 대상인지는 확인 필요다. 의무인지와 관계없이 첫 요청은 환급을 실행하는 즉시 보내고, 3영업일 안에 세 번 보내 지연을 줄인다.
+- **소명이 들어오는 길(추천 적용 2026-10-30)**: 소명(예매 제한이나 양도 회수 대상이 된 팬이 사정을 설명하는 절차, POL-038 ③·⑤)은 고객 문의와 같은 길로 받는다(ADR-0066). 소명의 원본 대상인 예매 제한(`booking_restriction`)과 양도 회수 승인 업무는 ops DB에 있지만, ops-svc는 팬 요청을 받지 않는다(독립 제어 평면). 그래서 gw-fan → core-svc support 모듈이 `POST /v1/appeals`를 받아 소명 글을 core DB `appeal`에 두고, 같은 트랜잭션의 Outbox(보낼 이벤트를 같은 트랜잭션으로 DB 표에 먼저 적어 두고 나중에 보내는 방식)로 CS 처리함 건 요청(`support.cases-requested`, kind `APPEAL`, 본문 없음)을 낸다. ops-svc는 건 `APPEAL`을 만들고 support 모듈 내부 API로 대상 ID·계정을 읽어 그 예매 제한이나 승인 업무에 잇는다. 대상이 그 계정의 것인지와 소명 기한은 원본을 가진 ops-svc가 이때 확인하고, 맞지 않으면 그 소명을 '대상 아님·기한 경과'로 닫고 팬에게 알린다. 예매 제한 소명은 support가 가진 화면용 사본(queue-admission §6)으로 기한 경과를 먼저 409로 돌려준다. 예매 제한 소명은 `cs_lead`가 읽고 제한을 풀거나 유지하며, 양도 회수 소명은 그 승인 업무(SCR-046)의 '받은 분 소명 <제출됨>'으로 붙어 commander가 승인 때 본다. 결과는 ops-svc가 support 모듈 내부 API로 적고 팬에게 알린다(design/d5 SCR-042 결과). 소명이 열리고 닫힐 때 ops-svc가 계정 병합을 막는 건 알림(`SetAccountHold`, kind `APPEAL`)을 보낸다(docs/data.md `account_hold`). support 모듈의 소명 읽기·결과 기록 호출은 proto 초안에 아직 없다(wbs 0.2.3).
 - 기한이 1영업일 남으면 담당자와 `cs_lead`에게 알린다. 영업일은 공휴일 달력으로 센다(payment §12).
 - 처리함의 건 하나에서 바로 승인 업무(SCR-046)를 만들 수 있다.
 
@@ -305,7 +309,7 @@ stateDiagram-v2
 | T11 | PendingApproval | Expired | 대상 상태가 바뀜·처리 기한 지남(시스템) |
 | T12 | Escalated | Expired | 대상 상태가 바뀜·처리 기한 지남(시스템) |
 | T13 | Approved | Executing | 실행 직전 관리 계정 재인증 |
-| T14 | Executing | Done | 환불·회수·제한 반영 |
+| T14 | Executing | Done | 환불·회수·제한 반영. 예매 제한·해제의 '제한 반영'은 집행하는 두 서비스가 모두 반영한 것이다: queue-svc(대기열 Redis `q:rst:{account}`, 입장 확정에서 막음)와 purchase-svc(좌석 Redis `s:rst:{account}`, 주문 생성에서 막음). ops-svc가 두 곳에 `SetBookingRestriction`을 보내고 둘 다 반영해야 Done이다. 하나라도 실패하면 ops-svc 작업 워커가 다시 보내고, 처리 기한(1영업일) 안에 끝나지 않으면 T15다. 공연 상세·계정 설정이 읽는 화면용 사본(core-svc support, `SetBookingRestrictionView`)은 집행 사본이 아니라 Done을 기다리게 하지 않는다(소유자 결정 2026-10-30, open-items 75번, 세부는 추천 적용 2026-10-30, docs/features/queue-admission.md §6) |
 | T15 | Executing | Failed | 실패 → CS 처리함 |
 | T16 | Failed | Executing | 원인을 고친 뒤 승인자가 approve를 다시 부르면(재인증) 같은 대상·금액으로 다시 실행(처리 기한 안, 새 경로 없음) |
 
@@ -360,8 +364,8 @@ stateDiagram-v2
 | --- | --- |
 | PostgreSQL(ticket) | `ticket`(`payer_account_id` 추가, 상태 `TRANSFER_PENDING` 추가), `transfer_offer`(OFFERED·ACCEPTED·REJECTED·WITHDRAWN·EXPIRED·RECLAIMED, 기한, 철회 사유. 회차 취소·연기의 시스템 철회는 `EVENT_CANCELLED`·`EVENT_POSTPONED`, 기술 검토 중간-044) |
 | PostgreSQL(purchase) | `event_cancellation_request`(요청·판정·미리보기·진행률), `event_refund_pg_part`(일괄 환불의 결제사 몫: RUNNING·PAUSED·COMPLETED와 멈춘 이유, 기술 검토 중간-045), `event_cancellation_approval`(판정자가 아닌 승인자, ADR-0086), `order_cancellation`(공제율 기준점·환급액·사유·상태, 티켓당 진행 중 취소 1건 유일), `compensation`(대상, 금액, 미수금 ID, 상태) |
-| PostgreSQL(ops) | `approval_request`(종류, 대상, 금액, 필요한 승인 수, 상태, 기한. 승인자는 자식 표 `approval_vote`, ADR-0086), `cs_case`(종류, 대상, 기한들, 상태), `booking_restriction`, `appeal` |
-| PostgreSQL(core) | `promoter` 판매자 신원정보, `production` 판매 승인 상태(`sale_review`, 공연 단위, ADR-0093. `SUSPENDED`는 판매 중지, ADR-0123), `kopis_report` |
+| PostgreSQL(ops) | `approval_request`(종류, 대상, 금액, 필요한 승인 수, 상태, 기한. 승인자는 자식 표 `approval_vote`, ADR-0086), `cs_case`(종류, 대상, 기한들, 상태), `booking_restriction` |
+| PostgreSQL(core) | `appeal`(소명, support 모듈. 대상 종류·대상 ID·본문·결과, 추천 적용 2026-10-30, §7.1 '소명이 들어오는 길'), `promoter` 판매자 신원정보, `production` 판매 승인 상태(`sale_review`, 공연 단위, ADR-0093. `SUSPENDED`는 판매 중지, ADR-0123), `kopis_report` |
 | REST API | 위 '관련 ID'의 경로. docs/api/openapi.yaml |
 | 비동기 이벤트 | `trade.tickets`(TRANSFER_OFFERED·TRANSFER_ACCEPTED·TRANSFER_REJECTED·TRANSFER_WITHDRAWN·TRANSFER_EXPIRED·TICKET_RETURNED·TICKET_RECLAIMED), `trade.orders`(EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID) |
 | UI 화면 | SCR-041 양도 받기, SCR-042 소명 제출, SCR-043 배상금 계좌 입력, SCR-044 회차 취소·연기 요청, SCR-045 CS 처리함, SCR-046 승인 업무, SCR-047 회차 취소 판정·일괄 환불, SCR-048 판매 승인 |

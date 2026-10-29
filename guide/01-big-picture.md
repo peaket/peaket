@@ -131,7 +131,7 @@ flowchart LR
 
 ## 더 알아보기
 
-* [planning/01-overview.md §1](../planning/01-overview.md#L1): 9대 핵심 손실과 정량 성공 기준 상세 명세
+* [planning/01-overview.md §1](../planning/01-overview.md#1-해결할-문제와-근거): 9대 핵심 손실과 정량 성공 기준 상세 명세
 * [planning/01-overview.md §2](../planning/01-overview.md): 사용자 유형 정의와 비즈니스 목표
 * [planning/01-overview.md §3](../planning/01-overview.md): 기술적 검증 과제 10가지와 측정 방법론
 * [planning/01-overview.md §4](../planning/01-overview.md): 개발 범위(In-Scope)와 제외 항목(Out-of-Scope)
