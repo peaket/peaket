@@ -5,6 +5,10 @@
 // AccountHoldService·ScannerSessionQueryService는 2026-10-29에 더했다(초안, 추천 적용 2026-10-29, ADR-0148). 그 정본: docs/features/identity.md §2.1·POL-034(병합 차단 사유),
 // docs/data.md `account_hold`·`scanner_session`·§4 경계 9, planning/03-policies-glossary.md '소명'(appeal), docs/api/openapi.yaml `ScannerDevice`,
 // ADR-0082·0102(ops-svc는 업무 gRPC를 받지 않는다).
+// ScannerSessionCheckService·RecipientQueryService·AdminSessionService·ReverificationCheckService·AdminDesignationService는 2026-10-30에 더했다(초안, 추천 적용 2026-10-30).
+// 그 정본: docs/features/identity.md §6.1 '스캐너 세션 확인', docs/features/offline-gate.md §6 흐름도(ADR-0051 결정 4),
+// docs/features/notify.md §2.1 E6·§4.2(받는 사람 묶음 조회, ADR-0155), docs/features/control-tower.md §12 '휴대폰·태블릿'·planning/04 SCR-064(관리 계정 세션 강제 종료),
+// docs/features/bot-defense.md §5.2 3단계(추가 검증의 본인확인 재통과 확인), docs/security/authz-matrix.md §3.1·§3.7(지정 조회).
 syntax = "proto3";
 
 package peaket.identity.v1;
@@ -70,6 +74,10 @@ message CreateSessionRequest {
   string user_agent = 9;
   // 제공자가 준 acr·amr. 없으면 단일 요소 인증으로 본다(ASVS 6.8.4, ADR-0001).
   repeated string auth_methods = 10;
+  // CloudFront가 붙인 CloudFront-Viewer-ASN 값. 앱 서버는 원본 확인 헤더가 맞는 요청에서만 읽고, 없으면 0이다.
+  // identity-svc가 로그인 판정(trust.proto ScoreRisk LOGIN)의 ClientSignals.asn으로 넘긴다
+  // (추천 적용 2026-10-30, docs/infra.md §4.1 'ASN 헤더와 분류표', docs/features/bot-defense.md §3.1).
+  int64 asn = 11;
 }
 
 message CreateSessionResponse {
@@ -175,4 +183,169 @@ message ActiveScannerSession {
 message ListActiveScannerSessionsResponse {
   // 요청한 기기 ID마다 한 줄, 요청 순서대로
   repeated ActiveScannerSession sessions = 1;
+}
+
+// 부르는 쪽: ticket-svc만(스캐너 경로 가드). 스태프 토큰을 붙인 스캐너 요청마다 그 스캐너 세션이 지금 유효한지 묻는다.
+// 스캐너 세션(scanner_session)과 배정(staff_assignment)은 identity 데이터이고, 기기 상태(scanner_device ACTIVE)는 ticket 데이터라 가드가 직접 보고 여기 넣지 않는다.
+// 가드는 결과를 5초 [가정] 캐시한다(ADR-0051 결정 4). 그래서 배정을 해제하면 늦어도 5초 뒤 요청부터 401(invalid_token)이다(O-T21).
+// 기기 인증만으로 받는 스캔 업로드(POST /v1/scanner/scans)는 이 확인 없이 받고, 서버가 그 기록 시각에 세션이 유효했는지 따로 본다(offline-gate §6.5).
+// 읽기라 멱등 키가 없다(초안, 추천 적용 2026-10-30, docs/features/identity.md §6.1, docs/features/offline-gate.md §6).
+service ScannerSessionCheckService {
+  rpc CheckScannerSession(CheckScannerSessionRequest) returns (CheckScannerSessionResponse);
+}
+
+message CheckScannerSessionRequest {
+  // 스태프 토큰이 가리키는 스캐너 세션 ID
+  string scanner_session_id = 1;
+  // 요청한 기기 ID(DPoP 증명의 키 지문으로 가드가 찾은 등록 기기)
+  string device_id = 2;
+}
+
+// 현장 스태프 역할(docs/data.md staff_assignment, openapi StaffAssignment)
+enum StaffRole {
+  STAFF_ROLE_UNSPECIFIED = 0;
+  STAFF_ROLE_GATE_STAFF = 1;
+  STAFF_ROLE_GATE_LEAD = 2;
+}
+
+message CheckScannerSessionResponse {
+  // 세션이 끝나지 않았고(terminated_at 없음, 만료 시각 전) 그 기기의 지금 활성 세션이며,
+  // 이어진 staff_assignment가 ASSIGNED이고 역할 유효 시간 안이면 true다.
+  bool valid = 1;
+  // valid일 때만 채운다. 그때의 역할과 회차
+  StaffRole role = 2;
+  string event_id = 3;
+}
+
+// 부르는 쪽: core-svc의 팬 알림 발송 워커(core-notify-sender 배포의 서비스 계정)만. 대량 발송 조각 하나의 받는 사람을 한 번에 묻는다.
+// identity-svc는 읽기 전용 복제본으로 답한다. 그래서 복제 지연만큼 늦은 값일 수 있다(notify.md §2.1 E6).
+// 실패하면 웹 푸시 단계는 본인확인 여부와 상관없는 중립 문구로 보내고, 이메일 단계는 조각을 미루고 다시 묻는다(notify.md §10, ADR-0155 결정 14).
+// 읽기라 멱등 키가 없다. 데드라인은 아직 정하지 않았다(초안, 추천 적용 2026-10-30, docs/features/notify.md §4.2).
+service RecipientQueryService {
+  rpc BatchGetRecipients(BatchGetRecipientsRequest) returns (BatchGetRecipientsResponse);
+}
+
+message BatchGetRecipientsRequest {
+  // 계정 ID 목록. 대량 발송 조각 하나의 크기인 500개 [가정]까지다. 넘으면 INVALID_ARGUMENT다.
+  repeated string account_ids = 1;
+  // 이메일 단계만 true. 웹 푸시 단계는 주소를 받지 않는다(받는 값을 줄인다).
+  bool include_email = 2;
+}
+
+// 계정 상태(docs/data.md account.status). 계정이 없으면 NOT_FOUND다.
+enum RecipientStatus {
+  RECIPIENT_STATUS_UNSPECIFIED = 0;
+  RECIPIENT_STATUS_ACTIVE = 1;
+  // 탈퇴 유예. 알림은 받는다(docs/data.md account.status)
+  RECIPIENT_STATUS_WITHDRAWAL_PENDING = 2;
+  // 병합된 흡수 계정. 신청은 대표 계정으로 옮겨졌으므로 보내지 않는다(POL-034)
+  RECIPIENT_STATUS_MERGED = 3;
+  RECIPIENT_STATUS_DELETED = 4;
+  RECIPIENT_STATUS_NOT_FOUND = 5;
+}
+
+message Recipient {
+  string account_id = 1;
+  RecipientStatus status = 2;
+  // 휴대폰 본인확인을 마쳤으면 true(오픈 알림 ② 본인확인 안내 푸시의 대상 고르기, notify.md §5.2)
+  bool verified = 3;
+  // 알림 문구 언어(ko·en·ja·zh, NFR-024). 계정의 언어 칸 docs/data.md account.locale [가정]이고, 값이 없으면 ko다
+  // (2026-10-30 계정 표에 더함, 추천 적용 2026-10-30).
+  string locale = 4;
+  // include_email이 true일 때만 채운다
+  string email = 5;
+}
+
+message BatchGetRecipientsResponse {
+  // 요청한 계정 ID마다 한 줄, 요청 순서대로
+  repeated Recipient recipients = 1;
+}
+
+// 부르는 쪽: ops-svc만(관제 콘솔 '관리 계정·세션 관리' SCR-064의 세션 강제 종료). 운영자·CS·파트너 관리 계정의 세션을 끝낸다.
+// ops-svc가 권한(planning/03 §3)을 확인하고 감사 기록을 남긴 뒤 부른다. identity-svc는 관리 권한을 다시 판정하지 않는다(ScannerDeviceService와 같은 방식).
+// 휴대폰에서도 하는 안전 쪽 조치다(docs/features/control-tower.md §12). 끝낸 세션마다 control.sessions-terminated(reason ADMIN_FORCE)를 낸다.
+// 팬 계정의 세션은 받지 않는다(FAILED_PRECONDITION). REST 경로(openapi)는 아직 없다(초안, 추천 적용 2026-10-30).
+service AdminSessionService {
+  // request_id(ops-svc 감사 기록 ID)로 멱등하다. 같은 request_id로 다시 오면 다시 끝내지 않고 already_done만 true로 돌려준다.
+  rpc TerminateAdminSessions(TerminateAdminSessionsRequest) returns (TerminateAdminSessionsResponse);
+}
+
+message TerminateAdminSessionsRequest {
+  string request_id = 1;
+  // 대상 관리 계정
+  string admin_account_id = 2;
+  // 끝낼 세션 하나. 비우면 그 계정의 모든 세션을 끝낸다.
+  string session_id = 3;
+  // 처리한 관리 계정 ID
+  string acted_by = 4;
+}
+
+message TerminateAdminSessionsResponse {
+  // 이번 호출로 끝낸 세션 수
+  int32 ended_count = 1;
+  // 같은 request_id로 이미 처리했으면 true
+  bool already_done = 2;
+}
+
+// 부르는 쪽: queue-svc만. 추가 검증 제출(POST /v1/queues/{eventId}/verification)에서 휴대폰 본인확인 재통과를 확인한다
+// (docs/features/bot-defense.md §5.2 3단계). 화면은 추가 검증 화면(SCR-009)에서 목적 REVERIFY로 본인확인기관 창을 연다(SCR-006).
+// 결제 직전 재확인(IdentityService.GetVerificationStatus)은 '본인확인을 한 적이 있는가'만 답해 재통과를 가리지 못하고,
+// 그 서비스는 purchase-svc 신원만 받으므로 허용 목록을 서비스 단위로 걸려고 따로 둔다(AccountHoldService와 같은 방식).
+// identity-svc는 그 계정의 REVERIFY 본인확인 가운데 not_before_ms 뒤에 VERIFIED로 확정된 건이 있는지 본다.
+// 결과 경로가 계정에 저장된 ci_hmac과 같은 사람으로 확정한 건만 센다(다른 사람의 재확인은 통과가 아니다).
+// 읽기라 멱등 키가 없다. 데드라인은 추가 검증 제출의 ScoreRisk와 같은 800ms [가정] 안에서 남은 시간을 쓴다.
+// 답이 없으면 queue-svc는 통과로 보지 않고 503으로 답한다(trust-svc가 멈췄을 때와 같은 규칙, 초안, 추천 적용 2026-10-30).
+service ReverificationCheckService {
+  rpc CheckReverification(CheckReverificationRequest) returns (CheckReverificationResponse);
+}
+
+message CheckReverificationRequest {
+  // 게이트웨이 내부 헤더의 계정 ID와 pid(X-User-Id, X-User-Pid)
+  string account_id = 1;
+  string pid = 2;
+  // 추가 검증을 시작한 시각(q:{event:E}:verify의 VERIFYING 시각, epoch 밀리초). 이 시각 앞의 본인확인은 재통과로 세지 않는다.
+  int64 not_before_ms = 3;
+}
+
+enum ReverificationResult {
+  REVERIFICATION_RESULT_UNSPECIFIED = 0;
+  // not_before 뒤에 같은 사람으로 재확인을 마쳤다
+  REVERIFICATION_RESULT_PASSED = 1;
+  // not_before 뒤에 확정된 재확인이 없다(시작하지 않음, 창을 닫음, 실패, 기관 장애)
+  REVERIFICATION_RESULT_NOT_FOUND = 2;
+  // 재확인 결과가 계정의 본인과 다른 사람이었다
+  REVERIFICATION_RESULT_PERSON_MISMATCH = 3;
+}
+
+message CheckReverificationResponse {
+  ReverificationResult result = 1;
+  // PASSED일 때만 채운다(epoch 밀리초)
+  int64 verified_at_ms = 2;
+}
+
+// 부르는 쪽: ops-svc만. 지정된 사람만 하는 작업(분석 실버 조회·포렌식 리플레이 2단계 내보내기의 가명정보 취급자,
+// 접속기록 정기 점검의 점검자) 앞에서 그 관리 계정의 살아 있는 지정을 묻는다(docs/security/authz-matrix.md §3.1·§3.7).
+// 지정은 토큰에 싣지 않으므로(지정을 거두면 다음 요청부터 막히게) ops-svc가 요청마다 묻고 5초 [가정] 캐시한다.
+// 지정 기록은 identity DB admin_designation이다(revoked_at이 빈 행만 센다). 읽기라 멱등 키가 없다.
+// 답이 없으면 ops-svc는 지정이 없는 것으로 보고 403으로 답한다(지정이 필요한 작업만, 초안, 추천 적용 2026-10-30).
+service AdminDesignationService {
+  rpc GetAdminDesignations(GetAdminDesignationsRequest) returns (GetAdminDesignationsResponse);
+}
+
+message GetAdminDesignationsRequest {
+  string admin_account_id = 1;
+}
+
+// 지정 종류(docs/data.md admin_designation.kind)
+enum DesignationKind {
+  DESIGNATION_KIND_UNSPECIFIED = 0;
+  // 접속기록 점검자
+  DESIGNATION_KIND_ACCESS_REVIEWER = 1;
+  // 가명정보 취급자
+  DESIGNATION_KIND_PSEUDONYM_HANDLER = 2;
+}
+
+message GetAdminDesignationsResponse {
+  // 살아 있는 지정. 없으면 비운다. commander가 아닌 계정은 늘 비어 있다.
+  repeated DesignationKind kinds = 1;
 }

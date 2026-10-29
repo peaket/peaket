@@ -1,26 +1,52 @@
-// trust-svc가 제공하는 내부 위험 판정 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
-// 정본: docs/features/queue-admission.md §2(로비 입장 흐름)·§7(추가 검증 큐와 위험 점수 신호),
+// trust-svc가 제공하는 내부 위험 판정·라벨 반영 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
+// 정본: docs/features/bot-defense.md(판정 흐름·점수기·축소 운영·이의 제기, ADR-0156), docs/features/queue-admission.md §2(로비 입장 흐름)·§7(추가 검증 큐와 위험 점수 신호),
 // docs/features/identity.md(로그인 위험 점수), docs/streaming.md §5.5(판정 피처), docs/api/openapi.yaml `BehaviorSummary`.
+// 2026-10-30에 추가 검증 제출 맥락, 회차 정렬 설정, ASN, 사유 분류 코드, 라벨 반영 호출(TrustLabelService)을 더하고
+// 허니팟 기록의 입구를 주석으로 적었다(초안, 추천 적용 2026-10-30, docs/features/bot-defense.md §20, ADR-0156).
+// 같은 날 CS 이의 심사 화면이 판정 근거를 읽는 TrustEvidenceService를 더했다(초안, 추천 적용 2026-10-30, docs/features/bot-defense.md §12).
 syntax = "proto3";
 
 package peaket.trust.v1;
 
 import "google/protobuf/timestamp.proto";
 
-// 부르는 쪽: queue-svc(로비 입장·사전 검증), identity-svc(로그인).
+// 부르는 쪽: queue-svc(로비 입장·사전 검증·추가 검증 제출), identity-svc(로그인).
 service TrustService {
-  // 위험 판정. 사람 확인 토큰의 서버 검증을 함께 한다.
-  // 점수 원값과 규칙 가중치는 돌려주지 않는다(POL-006). 판정 기록은 trust-svc가 telemetry.trust-verdicts로 낸다.
-  // trust-svc가 멈추면 부르는 쪽은 진입을 막지 않고 캐시 규칙과 보수적 레이트 리밋으로 축소 운영한다(FR-039).
+  // 위험 판정. 사람 확인 토큰의 서버 검증을 함께 한다. 확정 신호(차단 기기 목록·허니팟)로 판정이 정해져도 검증은 한다(토큰이 1회용이다).
+  // 점수 원값과 규칙 가중치·기준값·어느 확정 신호였는지는 돌려주지 않는다(POL-006). 판정 기록은 trust-svc가 telemetry.trust-verdicts로 낸다.
+  // queue-svc의 데드라인은 800ms [가정]이다(docs/features/bot-defense.md §4.6).
+  // 축소 운영은 두 층이다(docs/features/bot-defense.md §11.1, 추천 적용 2026-10-30).
+  //   ① trust-svc는 살아 있고 의존성 일부가 멈춤: trust-svc가 남은 점수기로 판정하고 degraded를 참으로 답한다.
+  //   ② trust-svc 전체가 답하지 않음(부르는 쪽 서킷 열림): 부르는 쪽(queue-svc)이 진입을 막지 않고 캐시한 규칙과 보수적 레이트 리밋으로 이어 간다(FR-039).
+  // 추가 검증 제출(VERIFICATION)은 두 층 어디에서도 통과로 보지 않는다. 축소 운영의 '막지 않는다'는 대기열에 들어오는 일의 규칙이다(FR-020).
   rpc ScoreRisk(ScoreRiskRequest) returns (ScoreRiskResponse);
 }
 
-// 판정하는 때.
+// 판정하는 때(docs/features/bot-defense.md §3.1).
 enum ScoreContext {
   SCORE_CONTEXT_UNSPECIFIED = 0;
   SCORE_CONTEXT_LOBBY_ENTRY = 1;
   SCORE_CONTEXT_PREVERIFY = 2;
+  // 팬 소셜 로그인(identity-svc). 팬 로그인 화면에는 사람 확인 위젯이 없어 human_check_token을 비우고, HumanCheck는 원래 없는 값이다(degraded 아님).
+  // 관리 계정 로그인의 사람 확인 토큰은 identity-svc가 직접 서버 검증하고 이 판정에 싣지 않는다(docs/features/bot-defense.md §6, 추천 적용 2026-10-30).
+  // 결과의 처리(세션의 login_verdict, 양도·계좌 입력 때의 추가 검증)는 docs/features/identity.md §7이 정본이다.
   SCORE_CONTEXT_LOGIN = 3;
+  // 추가 검증 제출(SCR-009의 심층 챌린지). HumanCheck만 돌리고 가중합을 하지 않는다. 성공이면 ALLOW, 아니면 CHALLENGE다.
+  // 가중합을 다시 하면 차단 기기 목록 같은 같은 근거로 또 걸려 '사람임을 다시 보이면 원래 순번으로 돌아간다'(FR-020)가 깨진다.
+  // 사람 확인 토큰의 action은 verify여야 한다. 휴대폰 본인확인 재통과는 queue-svc가 identity-svc 결과로 따로 본다
+  // (추천 적용 2026-10-30, docs/features/bot-defense.md §3.1·§5.2, ADR-0156 결정 8).
+  SCORE_CONTEXT_VERIFICATION = 4;
+}
+
+// 회차의 정렬 설정 가운데 판정 프로필을 고르는 값(POL-003의 로비 셔플 켬·끔).
+// 프로필은 '강도(명령 5) × 정렬 방식'이다(추천 적용 2026-10-30, docs/features/bot-defense.md §4.4, ADR-0156 결정 5).
+enum LobbyShuffle {
+  // 로그인·추가 검증 제출 판정은 이 값을 쓴다.
+  LOBBY_SHUFFLE_UNSPECIFIED = 0;
+  // 로비 셔플을 켠 회차(하이브리드·사전 셔플). 계정 나이·기기 신뢰도·한 기기의 여러 계정에 가중치를 높인 전용 프로필이다.
+  LOBBY_SHUFFLE_ON = 1;
+  // 로비 셔플을 끈 회차(선착순)
+  LOBBY_SHUFFLE_OFF = 2;
 }
 
 message ScoreRiskRequest {
@@ -31,15 +57,19 @@ message ScoreRiskRequest {
   string pid = 3;
   string account_id = 4;
   // 사람 확인 토큰. trust-svc가 서버 검증한다. 300초 1회용이라 저장하지 않는다.
+  // 허용 hostname은 www이고 action은 맥락마다 정해져 있다(docs/features/bot-defense.md §6 표). 팬 로그인 판정이면 비운다.
   string human_check_token = 5;
   // 브라우저가 보낸 기기 식별값. trust-svc가 탐지 가명으로 바꾼 뒤에만 저장한다(ADR-0053).
   string device_id = 6;
-  // 공연 상세에서 잰 행동 요약값(사전 검증 때). 원시 좌표·키 값·입력한 글자는 받지 않는다.
+  // 공연 상세에서 잰 행동 요약값(사전 검증 때). 로비 입장에는 없다. 원시 좌표·키 값·입력한 글자는 받지 않는다.
   BehaviorSummary behavior = 7;
   ClientSignals client = 8;
   // 서명을 확인한 최초 방문 쿠키의 발급 시각. 쿠키가 없으면 비운다.
   google.protobuf.Timestamp first_visit_at = 9;
   google.protobuf.Timestamp session_created_at = 10;
+  // 회차의 정렬 설정. queue-svc가 회차 설정에서 읽어 로비 입장·사전 검증 판정에 싣는다.
+  // 두 판정에서 UNSPECIFIED면 INVALID_ARGUMENT다(추천 적용 2026-10-30, docs/features/bot-defense.md §4.4).
+  LobbyShuffle lobby_shuffle = 11;
 }
 
 // openapi `BehaviorSummary`와 같은 필드다. 필드 구성과 범위는 가정이고 wbs 3.2.1에서 확정한다.
@@ -61,6 +91,9 @@ message ClientSignals {
   string user_agent = 2;
   // Client Hints(플랫폼, 모바일 여부 등). 헤더 이름이 키다.
   map<string, string> client_hints = 3;
+  // CloudFront가 붙인 CloudFront-Viewer-ASN 값(인터넷 사업자·데이터센터의 네트워크 번호). trust-svc는 IP로 ASN을 찾지 않는다.
+  // 헤더가 없으면 0이고, NetworkScore는 '그 밖'으로 본다(추천 적용 2026-10-30, docs/features/bot-defense.md §3.1·§4.2, ADR-0156 결정 6).
+  int64 asn = 4;
 }
 
 enum Verdict {
@@ -68,13 +101,166 @@ enum Verdict {
   VERDICT_ALLOW = 1;
   // 추가 검증 큐로 보낸다(차단이 아니다).
   VERDICT_CHALLENGE = 2;
+  // 쓰지 않는다. 대기열 경로의 판정은 ALLOW와 CHALLENGE뿐이고, 의심 계정은 막지 않고 추가 검증 큐로 보낸다(POL-006).
+  // 값을 지우면 하위 호환 검사(buf breaking FILE)가 깨지는 변경으로 막으므로 값은 남긴다(추천 적용 2026-10-30, docs/features/bot-defense.md §1, ADR-0156 결정 1).
   VERDICT_BLOCK = 3;
+}
+
+// 이용자에게 알릴 사유 범주(docs/features/bot-defense.md §4.5). 그 판정에 가장 크게 기여한 쪽 하나만 싣는다.
+// 코드는 [가정]이고 화면 문구는 법률 검토(wbs 7.4.1)에서 정한다(추천 적용 2026-10-30, ADR-0156 결정 5).
+enum ReasonCategory {
+  // ALLOW 판정에는 사유가 없다.
+  REASON_CATEGORY_UNSPECIFIED = 0;
+  // 짧은 시간 많은 요청(NetworkScore, 재평가 R1)
+  REASON_CATEGORY_RAPID_REQUESTS = 1;
+  // 이 기기의 이용 기록(DeviceTrust, 차단 기기 목록)
+  REASON_CATEGORY_DEVICE_HISTORY = 2;
+  // 접속 환경(NetworkScore)
+  REASON_CATEGORY_NETWORK = 3;
+  // 화면 조작 모양(BehaviorScore, ConsistencyScore, 허니팟)
+  REASON_CATEGORY_INTERACTION = 4;
+  // 사람 확인 결과(HumanCheck)
+  REASON_CATEGORY_HUMAN_CHECK = 5;
+  // 여러 계정에서 같은 모양(재평가 R2). ScoreRisk 응답에는 나오지 않고 재평가 격리에만 쓴다.
+  REASON_CATEGORY_SHARED_PATTERN = 6;
 }
 
 message ScoreRiskResponse {
   Verdict verdict = 1;
-  // 사용자에게 안내할 사유 범주. 내부 가중치와 기준값은 담지 않는다.
-  string reason_category = 2;
-  // trust-svc가 캐시 규칙으로 축소 운영 중이면 true.
+  // 쓰지 않는다. 사유 범주는 4번 reason으로 옮겼다. 형을 바꾸면 하위 호환 검사가 깨지는 변경이라 칸은 남긴다(추천 적용 2026-10-30).
+  string reason_category = 2 [deprecated = true];
+  // 의존성 장애(피처 Redis 오류, 사람 확인 검증 보류) 때문에 값이 없게 된 점수기가 있으면 true(축소 운영 ① 층).
+  // 로비 입장의 행동 요약처럼 원래 없는 값은 degraded가 아니다. trust-svc 전체 장애(② 층)는 부르는 쪽이 정한다
+  // (추천 적용 2026-10-30, docs/features/bot-defense.md §4.4·§11.1).
   bool degraded = 3;
+  // 이용자에게 알릴 사유 범주. CHALLENGE일 때만 채운다. 내부 가중치와 기준값은 담지 않는다.
+  ReasonCategory reason = 4;
+}
+
+// 부르는 쪽: ops-svc만. 사람이 확인한 판정(표본 검토, CS의 부정구매 확인, 이의 제기 인정)을 trust-svc에 알린다.
+// ops-svc는 업무 gRPC를 받지 않으므로 trust-svc가 묻지 않고 ops-svc가 먼저 알린다(ADR-0148 결정 5와 같은 방식).
+// ops-svc는 건 상태 변경과 같은 트랜잭션에 보낼 일을 적고, 실패하면 작업 워커가 성공할 때까지 다시 보낸다
+// (초안, 추천 적용 2026-10-30, docs/features/bot-defense.md §9·§12·§13, ADR-0156 결정 11·14).
+service TrustLabelService {
+  // 라벨을 반영한다. source_ref(건 ID)와 source_version(판 번호)으로 멱등하다.
+  // 저장한 판보다 클 때만 반영하고, 같거나 작으면 아무것도 바꾸지 않는다. 같은 source_ref에 다른 source가 오면 ALREADY_EXISTS다.
+  // 판이 커지면 label은 바뀔 수 있다(표본 검토에서 '사람'으로 다시 판정하면 그 기기의 차단 키를 지운다, docs/features/bot-defense.md §9).
+  // trust-svc는 판정 근거 키(tr:vb:{pid}:E)나 행동 신호 원시 표(trust.behavior_raw, 30일)에서 그 사람의 기기 가명을 찾는다.
+  //   - 표본 검토 BOT, 부정구매 확인 BOT: 차단 기기 목록 tr:block:{deviceRef}에 올리고 확정 출처를 값에 적는다.
+  //   - 표본 검토 HUMAN: 그 기기의 차단 키가 있으면 지운다.
+  //   - 이의 제기 인정 HUMAN: 판정 근거에 차단 기기 목록이 있었으면 그 키를 지운다. 지운 기록은 trust-svc 보안 로그 줄(기기 가명, 건 ID, 처리자, 시각)에 남기고,
+  //     처리자 관리 계정 ID는 판정 기록(TrustVerdict)에 싣지 않는다. ops-svc는 응답의 block_list를 처리함 건에 처리자·시각과 함께 적는다
+  //     (추천 적용 2026-10-30, docs/features/bot-defense.md §12).
+  // 라벨은 telemetry.trust-verdicts(TrustVerdict category LABELED_BOT·LABELED_HUMAN)로 낸다. source는 표본 검토가 SAMPLE_REVIEW,
+  // 부정구매 확인과 이의 제기 인정이 POST_LABEL이다(추천 적용 2026-10-30).
+  // 이의 제기 기각은 부르지 않는다. 기각은 '봇으로 확정'이 아니라 '판정을 유지함'이다(docs/features/bot-defense.md §12).
+  // 추가 검증 실패, 허니팟 적중, 재평가 후보 같은 자동 신호로는 차단 기기 목록에 올리지 않는다(§9). 이 호출 말고는 목록에 올리는 길이 없다.
+  rpc ApplyLabel(ApplyLabelRequest) returns (ApplyLabelResponse);
+}
+
+// 라벨의 출처(사람이 확인한 일)
+enum LabelSource {
+  LABEL_SOURCE_UNSPECIFIED = 0;
+  // 봇 판정 표본 검토(SCR-067)
+  LABEL_SOURCE_SAMPLE_REVIEW = 1;
+  // CS가 부정구매로 확인한 신고 건
+  LABEL_SOURCE_FRAUD_CONFIRMED = 2;
+  // 추가 검증 이의 제기 인정(CS 처리함 VERIFICATION_APPEAL). label은 HUMAN만 받는다(BOT이면 INVALID_ARGUMENT).
+  LABEL_SOURCE_APPEAL_ACCEPTED = 3;
+}
+
+enum Label {
+  LABEL_UNSPECIFIED = 0;
+  LABEL_BOT = 1;
+  LABEL_HUMAN = 2;
+}
+
+message ApplyLabelRequest {
+  // 출처 건 ID(표본 검토 건, CS 처리함 건). 멱등 키다.
+  string source_ref = 1;
+  // 출처 건 상태의 판 번호. 같은 건에서 늘어나기만 한다.
+  int64 source_version = 2;
+  LabelSource source = 3;
+  Label label = 4;
+  // 판정한 회차와 사람 식별값. 판정 근거 키와 행동 신호 원시 표를 찾는 열쇠다.
+  string event_id = 5;
+  string pid = 6;
+  // 대기 번호가 생긴 뒤의 판정이면 그 대기 기록 ID(TrustVerdict의 키). 없으면 비운다.
+  string queue_entry_id = 7;
+  // 처리한 관리 계정 ID. 차단 기기 키를 바꾼 보안 로그 줄에만 남긴다(텔레메트리에는 싣지 않는다). ops-svc가 권한과 감사 기록을 처리한 뒤 싣는다.
+  string acted_by = 8;
+}
+
+// 차단 기기 목록에 생긴 일
+enum BlockListChange {
+  BLOCK_LIST_CHANGE_UNSPECIFIED = 0;
+  // 바뀐 것이 없다(이미 있거나 이미 없다)
+  BLOCK_LIST_CHANGE_NONE = 1;
+  BLOCK_LIST_CHANGE_ADDED = 2;
+  BLOCK_LIST_CHANGE_REMOVED = 3;
+  // 판정 근거 키와 행동 신호 원시 표가 모두 없어 기기 가명을 찾지 못했다(30일이 지남, docs/features/bot-defense.md §12).
+  // 라벨은 남기지만 차단 키는 바꾸지 못한다. 그 키도 90일 [가정] 뒤 사라진다.
+  BLOCK_LIST_CHANGE_DEVICE_NOT_FOUND = 4;
+}
+
+message ApplyLabelResponse {
+  // 이번 호출로 반영했으면 true, 판이 같거나 작아 바꾸지 않았으면 false.
+  bool changed = 1;
+  BlockListChange block_list = 2;
+}
+
+// 허니팟 기록(gRPC가 아니다, docs/features/bot-defense.md §7, ADR-0156 결정 9).
+// 숨긴 링크는 소비자 웹과 같은 출처의 /_t/ 아래 경로이고, gw-fan의 HTTP 라우트가 trust-svc의 허니팟 기록 처리기(HTTP)로 바로 넘긴다.
+// 게이트웨이는 서비스의 REST 포트로만 보내므로 이 계약 파일에 호출을 두지 않는다. 경로와 규칙은 docs/api/guidelines.md §9 '브라우저 텔레메트리 입구'가 정본이다.
+// 처리기는 Sec-Fetch-Site: same-origin이고 Sec-Purpose에 prefetch가 없으며 Next-Router-Prefetch가 없는 요청만 적중으로 세고, 언제나 204·빈 본문으로 답한다.
+// 로그인한 요청(게이트웨이 내부 헤더의 pid)이면 tr:hp:{pid}를 24시간 [가정] 쓰고 TrustVerdict(source HONEYPOT, category HONEYPOT)를 낸다.
+// 그 사람의 다음 로비 입장·사전 검증이 확정 신호로 CHALLENGE가 된다. 이미 판정을 통과해 기다리는 사람은 적중만으로 격리하지 않는다.
+// 로그인하지 않은 요청은 지표 trust_honeypot_hits_total{signed_in}로만 센다(추천 적용 2026-10-30).
+
+// 부르는 쪽: ops-svc만. CS 이의 심사(SCR-045)가 봇 판정 이의 제기 건을 열 때 그 판정의 근거를 읽는다(docs/features/bot-defense.md §12).
+// trust-svc의 판정 근거 키(tr:vb:{pid}:E, 30일 [가정])와 기기 신뢰 이력(tr:devhist)에서 읽기만 한다. 읽기라 멱등 키가 없다.
+// 점수 원값·가중치·기준값·기기 가명은 CS에게도 보이지 않으므로 응답에 싣지 않는다(POL-006, SCR-067과 같은 원칙).
+// 근거 키가 없으면(30일이 지났거나 키를 잃음) found가 false이고, CS는 처리함 건의 사유 범주로만 판단한다
+// (초안, 추천 적용 2026-10-30).
+service TrustEvidenceService {
+  rpc GetVerdictEvidence(GetVerdictEvidenceRequest) returns (GetVerdictEvidenceResponse);
+}
+
+message GetVerdictEvidenceRequest {
+  // 이의 건의 회차와 사람 식별값(queue.proto GetVerificationAppealResponse의 event_id·pid)
+  string event_id = 1;
+  string pid = 2;
+}
+
+// 판정을 앞에서 끝낸 확정 신호(docs/features/bot-defense.md §4.3)
+enum HardSignal {
+  HARD_SIGNAL_UNSPECIFIED = 0;
+  // 확정 신호 없이 가중합으로 정했다
+  HARD_SIGNAL_NONE = 1;
+  HARD_SIGNAL_BLOCK_LIST = 2;
+  HARD_SIGNAL_HONEYPOT = 3;
+}
+
+// 판정을 낸 곳
+enum EvidenceSource {
+  EVIDENCE_SOURCE_UNSPECIFIED = 0;
+  // 로비 입장·사전 검증의 실시간 판정
+  EVIDENCE_SOURCE_REALTIME = 1;
+  // 대기 중 재평가의 격리
+  EVIDENCE_SOURCE_REASSESS = 2;
+}
+
+message GetVerdictEvidenceResponse {
+  bool found = 1;
+  // 이용자에게 보인 사유 범주
+  ReasonCategory reason = 2;
+  HardSignal hard_signal = 3;
+  EvidenceSource source = 4;
+  // 판정 시각과 판정에 쓴 프로필 판 번호(비공개 설정의 판. 가중치 값은 아니다)
+  google.protobuf.Timestamp decided_at = 5;
+  int64 profile_version = 6;
+  // 그 기기의 지난 30일 추가 검증 보냄·통과·실패 수(tr:devhist). 이번 시도도 들어 있다. 기기 식별값 없이 수만 준다.
+  int32 device_challenges_sent = 7;
+  int32 device_challenges_passed = 8;
+  int32 device_challenges_failed = 9;
 }

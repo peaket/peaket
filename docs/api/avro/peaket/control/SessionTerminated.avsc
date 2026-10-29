@@ -15,7 +15,7 @@
     },
     {
       "name": "reason",
-      "doc": "DEVICE_LIMIT는 기기 5대 초과로 가장 오래 쓰지 않은 세션 종료(POL-019), ACCOUNT_LOCKED는 관리 계정 연속 실패 잠금(docs/features/identity.md §4)",
+      "doc": "DEVICE_LIMIT는 기기 5대 초과로 가장 오래 쓰지 않은 세션 종료(POL-019), ACCOUNT_LOCKED는 관리 계정 연속 실패 잠금(docs/features/identity.md §4). ADMIN_FORCE는 관제 콘솔의 관리 계정 세션 강제 종료(identity.proto AdminSessionService)다. ROLE_CHANGED는 관리 계정의 역할을 바꾸거나 거두거나 파트너 계정의 테넌트가 바뀌어 그 계정의 모든 세션을 끝낸 것이다(docs/security/authz-matrix.md §5.4, ADR-0157 결정 11). PASSWORD_CHANGED는 관리 계정이 비밀번호를 바꿔 그 계정의 다른 세션을 끝낸 것이다(docs/security/auth-controls.md §3.5)(두 값은 추천 적용 2026-10-30)",
       "type": {
         "type": "enum",
         "name": "SessionTerminatedReason",
@@ -29,7 +29,9 @@
           "STAFF_REVOKED",
           "MERGED",
           "DEVICE_LIMIT",
-          "ACCOUNT_LOCKED"
+          "ACCOUNT_LOCKED",
+          "ROLE_CHANGED",
+          "PASSWORD_CHANGED"
         ]
       }
     },

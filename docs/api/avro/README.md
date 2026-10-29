@@ -17,6 +17,7 @@
   - Schema Registry 등록과 호환 검사는 아직 하지 않았다. CI에 붙이는 일은 wbs 0.2.2다.
 - **검사(2026-10-28)**: 열거 31개 모두에 `UNRECOGNIZED`(맨 앞 기호)와 `"default": "UNRECOGNIZED"`를 더한 뒤, 18개 파일이 JSON으로 읽히고, 이름 붙은 타입 51개가 겹치지 않고, 열거마다 기본값이 기호 목록 안에 있으며, 파일 경로·네임스페이스가 맞는 것을 직접 쓴 검사로 확인했다. 작업 환경에 Avro 라이브러리가 없어 라이브러리로 다시 읽는 검사는 하지 않았다(wbs 0.2.2의 CI가 한다). 같은 날 `trade/EventSaleChanged.avsc`(레코드 하나, 열거 둘, ADR-0122)를 더한 뒤 같은 검사를 다시 돌려 19개 파일, 이름 붙은 타입 53개, 열거 33개에서 겹침과 기본값 오류가 없음을 확인했다. 같은 날 `schemaVersion`·`OrderEvent.idempotencyKey`를 빼고 `SettingChanged.value`를 레코드 유니온으로 바꾼 뒤(기술 검토 낮음-026) 다시 돌려, 19개 파일이 JSON으로 읽히고 이름 붙은 타입 66개·열거 38개에서 겹침이 없으며 열거마다 맨 앞 `UNRECOGNIZED`와 기본값이 있음을 확인했다(다른 묶음이 같은 날 더한 타입 포함).
 - **검사(2026-10-29, ADR-0150)**: 필수 여부를 §6대로 바꾼 뒤 직접 쓴 검사로 다시 확인했다. 19개 파일이 JSON으로 읽히고, 이름 붙은 타입 66개가 겹치지 않으며, 열거마다 맨 앞 `UNRECOGNIZED`와 기본값이 있다. asyncapi와 견준 필드 이름·순서, 필수 목록, 기본값, `x-present-when`, 열거 기호, uuid 형식도 어긋남이 0건이었다. 조건(`x-present-when`)이 같은 메시지의 필수 열거 칸을 가리키는지, 조건부 칸을 가리키면 그 칸이 있어야 하는 조건이 이 조건 안에 들어 있는지, 조건 값이 그 열거의 기호인지도 본다. 일부러 틀리게 고친 세 곳(필수 칸 하나를 null 허용으로, 조건 하나를 다른 기호로, 기본값 false 하나를 지움)을 모두 잡았고, 고치기 전 판에 돌려도 어긋남은 0건이었다. Avro 라이브러리 검사는 이번에도 하지 못했다(wbs 0.2.2의 CI가 한다).
+- **바꿈(2026-10-30)**: 열거 기호를 셋 더했다. `CaseRequestedKind`에 봇 판정 이의 제기 `VERIFICATION_APPEAL`(queue-svc가 냄, docs/features/bot-defense.md §12), `SessionTerminatedReason`에 역할 변경 `ROLE_CHANGED`(docs/security/authz-matrix.md §5.4)와 비밀번호 바꾸기 `PASSWORD_CHANGED`(docs/security/auth-controls.md §3.5)다. 열거 끝에 더해 기존 기호의 순서는 그대로이고, 새 기호를 모르는 옛 읽는 쪽은 기본값 `UNRECOGNIZED`로 읽는다(§2). `BehaviorSignal`은 로비 입장 때도 낸다는 설명만 바꿨다(칸 변화 없음). 칸 수와 이름 붙은 타입 수(66개)는 그대로다. 세 파일이 JSON으로 읽히고 열거마다 맨 앞 `UNRECOGNIZED`와 기본값이 있으며, asyncapi 열거와 기호가 같음을 직접 쓴 검사로 확인했다(추천 적용 2026-10-30).
 
 ## 2. 옮긴 규칙(추천 적용 2026-10-22)
 
@@ -66,7 +67,7 @@
 | `control.settings` | `SettingChanged` | `<범위>:<종류>:<대상>`(압축 토픽, §5) | ops-svc | 모든 서비스의 모든 파드(파드마다 따로) |
 | `control.sessions-terminated` | `SessionTerminated` | `accountId` | identity-svc | 모든 서비스의 모든 파드(파드마다 따로, 뜰 때 15분 되감기) |
 | `identity.accounts-merged` | `AccountMerged` | `mergedAccountId` | identity-svc | 각 도메인 서비스 |
-| `support.cases-requested` | `CaseRequested` | `sourceId` | core-svc(Outbox) | ops-svc |
+| `support.cases-requested` | `CaseRequested` | `sourceId` | core-svc(Outbox), queue-svc(봇 판정 이의 제기, Outbox 없이 바로 냄. 추천 적용 2026-10-30, docs/features/bot-defense.md §12) | ops-svc |
 | `telemetry.queue` | `QueueAggregate`, `QueueEntryRecord`, `PipelinePulse` | '회차:파드', `pid`, 없음 | queue-svc, rt-pulse | ops-rt(`QueueAggregate`·`PipelinePulse`), analytics-ingest(`QueueEntryRecord`) |
 | `telemetry.purchase` | `HoldAttempt`, `PipelinePulse` | `purchaseSessionId`, 없음 | purchase-svc, rt-pulse | ops-rt, analytics-ingest |
 | `telemetry.trust-verdicts` | `TrustVerdict`, `PipelinePulse` | `queueEntryId`(없으면 없음), 없음 | trust-svc, rt-pulse | ops-rt, analytics-ingest |
@@ -112,7 +113,7 @@ Outbox 열(docs/data.md §4)과 스트림 소비(docs/streaming.md §2.6)는 정
 | `SettingChanged` | 8 | `commandId`·`key`·`scope`·`value`·`actor`·`occurredAt`·`eventKey` | — | `expiresAt`: `x-present-when` key LOG_LEVEL |
 | `AccountMerged` | 4 | `mergeId`·`primaryAccountId`·`mergedAccountId`·`confirmedAt` | — | — |
 | `CaseRequested` | 7 | `eventKey`·`kind`·`sourceId`·`category`·`createdAt` | `followUp`·`hold` | — |
-| `BehaviorSignal` | 8 | `pid`·`eventId`·`netClass`·`ts`·`eventKey` | — | `deviceRef`: 사전 검증 본문에 기기 ID가 있을 때; `asn`: `x-present-when` netClass HOSTING·PROXY; `features`: 사전 검증 본문에 행동 요약이 있을 때 |
+| `BehaviorSignal` | 8 | `pid`·`eventId`·`netClass`·`ts`·`eventKey` | — | `deviceRef`: 로비 입장·사전 검증 본문에 기기 ID가 있을 때; `asn`: `x-present-when` netClass HOSTING·PROXY; `features`: 사전 검증 본문에 행동 요약이 있을 때(로비 입장에는 없다. 로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1) |
 | `HoldAttempt` | 12 | `eventId`·`purchaseSessionId`·`mode`·`tierId`·`result`·`retryNo`·`latencyMs`·`occurredAt`·`eventKey` | `firstHeldInSession` | `sectionId`: PICK이거나, AUTO에서 좌석을 잡았을 때; `autoResult`: `x-present-when` mode AUTO |
 | `PipelinePulse` | 4 | `kind`·`topic`·`partition`·`producedAt` | — | — |
 | `QueueAggregate` | 7 | `eventId`·`second`·`entries`·`removed`·`admissions`·`soonResponses`·`eventKey` | — | — |
@@ -120,4 +121,4 @@ Outbox 열(docs/data.md §4)과 스트림 소비(docs/streaming.md §2.6)는 정
 | `TrustCandidate` | 7 | `eventId`·`pid`·`pattern`·`evidenceCount`·`windowStart`·`detectedAt`·`eventKey` | — | — |
 | `TrustVerdict` | 9 | `eventId`·`category`·`action`·`source`·`occurredAt`·`eventKey` | `shadow` | `queueEntryId`: 대기 번호가 생긴 뒤의 판정; `pid`: `x-present-when` source REASSESS |
 
-- **구현 때 생산자 시험으로 확인할 판정**(ADR-0150 '남는 한계'): `HoldAttempt.tierId`(좌석 선택 방식의 오류 응답에서도 등급을 아는지), `PaymentEvent`의 `result`·`payMethodCategory`·`latencyMs` 조건, `QueueEntryRecord`의 순번·결과 칸 조건, `EventSaleChanged.previousStatus`(회차의 첫 상태도 사건으로 내는지), `BehaviorSignal`의 `deviceRef`·`features`(사전 검증 본문의 선택 칸). 필수 칸이 실제로 빌 수 있으면 소비자를 먼저 고친 뒤 그 칸만 null 허용으로 푼다(§3).
+- **구현 때 생산자 시험으로 확인할 판정**(ADR-0150 '남는 한계'): `HoldAttempt.tierId`(좌석 선택 방식의 오류 응답에서도 등급을 아는지), `PaymentEvent`의 `result`·`payMethodCategory`·`latencyMs` 조건, `QueueEntryRecord`의 순번·결과 칸 조건, `EventSaleChanged.previousStatus`(회차의 첫 상태도 사건으로 내는지), `BehaviorSignal`의 `deviceRef`·`features`(로비 입장·사전 검증 본문의 선택 칸). 필수 칸이 실제로 빌 수 있으면 소비자를 먼저 고친 뒤 그 칸만 null 허용으로 푼다(§3).

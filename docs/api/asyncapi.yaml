@@ -87,7 +87,7 @@ channels:
   support.cases-requested:
     address: support.cases-requested
     servers: [{ $ref: '#/servers/kafka-trade' }]
-    description: CS 처리함 건 요청(core-svc support·review 모듈 Outbox, 키 = sourceId). 팬의 문의 접수·추가 문의와 게시물 신고를 ops-svc가 받아 CS 처리함 건을 만들거나 기존 건에 더한다. 본문·신고 상세 같은 개인정보는 싣지 않고 ops-svc가 내부 API로 읽는다(ops-svc는 팬 트래픽을 받지 않는다, 추천 적용 2026-10-19, ADR-0066)
+    description: CS 처리함 건 요청(core-svc support·review 모듈 Outbox와 queue-svc의 봇 판정 이의 제기, 키 = sourceId). 팬의 문의 접수·추가 문의와 게시물 신고, 추가 검증 화면(SCR-009)의 이의 제기를 ops-svc가 받아 CS 처리함 건을 만들거나 기존 건에 더한다. 본문·신고 상세·이의 글 같은 개인정보는 싣지 않고 ops-svc가 내부 API로 읽는다(이의 글은 queue-svc VerificationAppealService.GetVerificationAppeal, docs/api/proto/README.md §3). ops-svc는 팬 트래픽을 받지 않는다(추천 적용 2026-10-19, ADR-0066. 이의 제기는 추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14)
     messages:
       CaseRequested: { $ref: '#/components/messages/CaseRequested' }
   telemetry.queue:
@@ -115,7 +115,7 @@ channels:
   telemetry.behavior:
     address: telemetry.behavior
     servers: [{ $ref: '#/servers/kafka-telemetry' }]
-    description: 행동 신호 요약(포인터 이동·입력 간격 같은 브라우저 요약값. 헤더 순서 같은 서버 쪽 특징은 trust-svc 실시간 판정에만 쓰고 싣지 않는다, 추천 적용 2026-10-22). trust-svc가 사전 검증 때 기기 식별값을 탐지 가명으로 바꿔 발행(키 = pid). 재평가 작업자 trust-reassess가 대기 중 재평가와 ClickHouse 원시 적재(30일 TTL)에 쓴다. 세션 창·CEP는 쓰지 않는다(ADR-0071·0099, docs/streaming.md §5)
+    description: 행동 신호 요약(포인터 이동·입력 간격 같은 브라우저 요약값. 헤더 순서 같은 서버 쪽 특징은 trust-svc 실시간 판정에만 쓰고 싣지 않는다, 추천 적용 2026-10-22). trust-svc가 로비 입장·사전 검증 때 기기 식별값을 탐지 가명으로 바꿔 발행(키 = pid). 로비 입장에는 행동 요약이 없어 features가 비고, 재평가의 기기 공유 소급(R1)에만 쓰인다(로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1). 재평가 작업자 trust-reassess가 대기 중 재평가와 ClickHouse 원시 적재(30일 TTL)에 쓴다. 세션 창·CEP는 쓰지 않는다(ADR-0071·0099, docs/streaming.md §5)
     messages:
       BehaviorSignal: { $ref: '#/components/messages/BehaviorSignal' }
   telemetry.trust-candidates:
@@ -133,7 +133,7 @@ channels:
   ws.seat-delta:
     address: /v1/events/{eventId}/seats/stream
     servers: [{ $ref: '#/servers/realtime' }]
-    description: "realtime-gw WebSocket(gw-fan 경유, 입장 토큰 필요). 섹션 구독·해제, 100ms 배치 바이너리 델타(바뀐 것이 있을 때만. 좌석 인덱스, 상태, 회차 세대 seatEpoch·구역별 일련번호, 묶음 안 가장 이른 변경의 대기 maxWaitMs, 추천 적용 2026-10-28, ADR-0110). 클라이언트는 연결 직후와 60초 [가정]마다 TimeSync를 보내고, 서버는 바로 하트비트에 그 값을 되돌려 실어 왕복으로 시계를 맞춘다(ADR-0110). 세대가 커지면 구독 구역 모두, 일련번호가 건너뛰면 그 섹션 스냅샷 재요청(기술 검토 중간-040). 원본은 Redis 샤드 Pub/Sub 채널 s:{event}:sec:{section}. 좌석이 보이도록 확대한 구역만 구독하고, 전체 배치 보기의 구역 상태는 스냅샷으로 갱신한다(seat-hold §7, 추천 적용 2026-10-14, ADR-0063). 인증은 WebSocket 하위 프로토콜 peaket.seats.v1과 peaket.auth.{입장 토큰}이다(서버는 peaket.seats.v1을 고르고, 게이트웨이가 핸드셰이크에서 토큰 서명·만료와 Origin을 확인하며 이 헤더를 접근 로그에서 가린다. PoC wbs 2.6.4). 서버는 15초 [가정]마다 하트비트를 보내고 클라이언트는 35초 [가정] 동안 아무것도 오지 않으면 다시 연결한다. 닫힘 코드 1012는 0~5초 무작위 뒤 재연결, 4401 토큰 무효·만료는 재연결 안 함, 4403 출처·권한, 4429 연결 과다(10초 이상 지난 뒤 재연결). 그 밖의 비정상 종료는 0.5초부터 두 배씩 늘리는 전체 지터로 재연결한다(상한 10초, 입장 토큰 만료 시각까지). 바이트 형식은 docs/frontend.md §4.4의 초안이다(추천 적용 2026-10-21, ADR-0079 결정 10)"
+    description: "realtime-gw WebSocket(gw-fan 경유, 입장 토큰 필요). 섹션 구독·해제, 100ms 배치 바이너리 델타(바뀐 것이 있을 때만. 좌석 인덱스, 상태, 회차 세대 seatEpoch·구역별 일련번호, 묶음 안 가장 이른 변경의 대기 maxWaitMs, 추천 적용 2026-10-28, ADR-0110). 클라이언트는 연결 직후와 60초 [가정]마다 TimeSync를 보내고, 서버는 바로 하트비트에 그 값을 되돌려 실어 왕복으로 시계를 맞춘다(ADR-0110). 세대가 커지면 구독 구역 모두, 일련번호가 건너뛰면 그 섹션 스냅샷 재요청(기술 검토 중간-040). 원본은 Redis 샤드 Pub/Sub 채널 s:{event}:sec:{section}. 좌석이 보이도록 확대한 구역만 구독하고, 전체 배치 보기의 구역 상태는 스냅샷으로 갱신한다(seat-hold §7, 추천 적용 2026-10-14, ADR-0063). 인증은 WebSocket 하위 프로토콜 peaket.seats.v1과 peaket.auth.{입장 토큰}이다(서버는 peaket.seats.v1을 고르고, 게이트웨이가 핸드셰이크에서 토큰 서명·만료와 Origin을 확인하며 이 헤더를 접근 로그에서 가린다. PoC wbs 2.6.4). 서버는 15초 [가정]마다 하트비트를 보내고 클라이언트는 35초 [가정] 동안 아무것도 오지 않으면 다시 연결한다. 닫힘 코드 1012는 0~5초 무작위 뒤 재연결, 4401 토큰 무효·만료는 재연결 안 함, 4403 출처·권한, 4429 연결 과다(10초 이상 지난 뒤 재연결). 4403에는 주소의 회차 ID가 입장 토큰의 event와 다른 경우(gw-fan이 핸드셰이크에서 본다)와, SubscribeSections의 구역 색인이 그 회차 좌석맵 판의 구역 수 밖이거나 겹치는 경우가 든다. 4429에는 한 연결이 구독하는 구역이 16개 [가정]를 넘거나 구독 바꾸기가 초당 2번 [가정]을 넘는 경우가 든다(정상 화면은 이 상한에 닿지 않는다). 브라우저가 보내는 프레임은 SubscribeSections(4 + 2 × 구역 수 바이트)와 TimeSync(10바이트)뿐이고, 정한 길이와 다른 프레임과 정하지 않은 type은 받지 않고 4403으로 닫는다(docs/frontend.md §4.4.1 '구독 상한과 서버가 닫는 경우', seat-hold S-T31 ④와 맞춤, 2026-10-30). TimeSync가 초당 1번 [가정]을 넘으면 답하지 않는다(추천 적용 2026-10-30, docs/features/seat-hold.md §2·§7, ADR-0159 결정 1·4). 그 밖의 비정상 종료는 0.5초부터 두 배씩 늘리는 전체 지터로 재연결한다(상한 10초, 입장 토큰 만료 시각까지). 바이트 형식은 docs/frontend.md §4.4의 초안이다(추천 적용 2026-10-21, ADR-0079 결정 10)"
     parameters:
       eventId: { description: 회차 ID }
     messages:
@@ -183,7 +183,7 @@ operations:
   consumeSessionTerminated: { action: receive, channel: { $ref: '#/channels/control.sessions-terminated' }, summary: "모든 서비스의 모든 파드(peaket-platform 종료 세션 목록. 파드마다 따로 읽고, 뜰 때 지금 − 15분부터 다시 읽는다, ADR-0103)" }
   publishAccountMerged: { action: send, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "identity-svc" }
   consumeAccountMerged: { action: receive, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "각 도메인 서비스(지금의 소유·상태 값만 대표 계정으로 바꾸고 사건·원장·법정 보존 기록은 고치지 않고 merged_account 대응표를 채움, mergeId로 멱등, docs/data.md §4의 9번, POL-034)" }
-  publishCaseRequested: { action: send, channel: { $ref: '#/channels/support.cases-requested' }, summary: "core-svc support(문의 접수·추가 문의)·review(게시물 신고) Outbox" }
+  publishCaseRequested: { action: send, channel: { $ref: '#/channels/support.cases-requested' }, summary: "core-svc support(문의 접수·추가 문의)·review(게시물 신고) Outbox. queue-svc(봇 판정 이의 제기 VERIFICATION_APPEAL): DB가 없어 Outbox 없이 바로 낸다. 발행에 실패하면 이의 접수 요청에 503과 Retry-After로 답하고 화면이 다시 보낸다. 같은 이의는 같은 eventKey라 ops-svc가 중복을 지운다(추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14)" }
   consumeCaseRequested: { action: receive, channel: { $ref: '#/channels/support.cases-requested' }, summary: "ops-svc CS 처리함(건 만들기·신고 수 더하기·기한 계산, 멱등)" }
   streamSeatDelta: { action: send, channel: { $ref: '#/channels/ws.seat-delta' }, summary: "realtime-gw → 브라우저 Worker(델타 묶음, 하트비트, 묶음 간격 변경)", messages: [{ $ref: '#/channels/ws.seat-delta/messages/SeatDeltaBatch' }, { $ref: '#/channels/ws.seat-delta/messages/Heartbeat' }, { $ref: '#/channels/ws.seat-delta/messages/BatchInterval' }] }
   receiveSeatSubscription: { action: receive, channel: { $ref: '#/channels/ws.seat-delta' }, summary: "realtime-gw(브라우저 Worker의 섹션 구독·해제)", messages: [{ $ref: '#/channels/ws.seat-delta/messages/SubscribeSections' }] }
@@ -197,7 +197,7 @@ operations:
   publishQueueTelemetry: { action: send, channel: { $ref: '#/channels/telemetry.queue' }, summary: "queue-svc(1초 집계 QueueAggregate, 대기가 끝날 때 사람별 대기 기록 QueueEntryRecord, queue-admission §3·§4)", messages: [{ $ref: '#/channels/telemetry.queue/messages/QueueAggregate' }, { $ref: '#/channels/telemetry.queue/messages/QueueEntryRecord' }] }
   consumeOpsRt: { action: receive, channel: { $ref: '#/channels/telemetry.queue' }, summary: "peaket-data ops-rt(관제 실시간 원시 적재 작업자). trade.orders·payments·seats·tickets, telemetry.queue(QueueAggregate·PipelinePulse)·telemetry.purchase·telemetry.trust-verdicts를 읽어 rt 원시 표에 싣는다. 누적과 1초 칸은 ops-svc가 읽을 때 센다(docs/streaming.md §4, ADR-0071·0099)" }
   publishPipelinePulse: { action: send, channel: { $ref: '#/channels/telemetry.queue' }, summary: "peaket-data rt-pulse. 1초마다 telemetry.queue·telemetry.purchase·telemetry.trust-verdicts의 모든 파티션에 파티션을 지정해 보낸다(ADR-0071)", messages: [{ $ref: '#/channels/telemetry.queue/messages/PipelinePulse' }] }
-  publishBehaviorSignal: { action: send, channel: { $ref: '#/channels/telemetry.behavior' }, summary: "trust-svc(사전 검증 때 기기 식별값을 탐지 가명으로 바꿔 발행, ADR-0071)" }
+  publishBehaviorSignal: { action: send, channel: { $ref: '#/channels/telemetry.behavior' }, summary: "trust-svc(로비 입장·사전 검증 때 기기 식별값을 탐지 가명으로 바꿔 발행, ADR-0071. 로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1)" }
   consumeBehaviorSignal: { action: receive, channel: { $ref: '#/channels/telemetry.behavior' }, summary: "peaket-trust trust-reassess(대기 중 재평가, 행동 신호 원시 적재, ADR-0071)" }
   publishTrustCandidate: { action: send, channel: { $ref: '#/channels/telemetry.trust-candidates' }, summary: peaket-trust trust-reassess }
   consumeTrustCandidate: { action: receive, channel: { $ref: '#/channels/telemetry.trust-candidates' }, summary: "trust-svc(재평가 모드·격리 상한, 적용이면 queue-svc IsolateWaiting gRPC, ADR-0071)" }
@@ -361,7 +361,7 @@ components:
         properties:
           accountId: { type: string }
           sessionId: { type: string, description: "로그인 세션 ID(액세스 토큰의 sid). 구매 세션이 아니다" }
-          reason: { type: string, enum: [LOGOUT, DELETE, ADMIN_FORCE, REFRESH_REUSE, STAFF_REVOKED, MERGED, DEVICE_LIMIT, ACCOUNT_LOCKED], description: "DEVICE_LIMIT는 동시 세션 한도(팬 기기 5대, 파트너·운영자 2개) 초과로 가장 오래 쓰지 않은 세션 종료(POL-019), ACCOUNT_LOCKED는 관리 계정 연속 실패 잠금(docs/features/identity.md §4)" }
+          reason: { type: string, enum: [LOGOUT, DELETE, ADMIN_FORCE, REFRESH_REUSE, STAFF_REVOKED, MERGED, DEVICE_LIMIT, ACCOUNT_LOCKED, ROLE_CHANGED, PASSWORD_CHANGED], description: "DEVICE_LIMIT는 동시 세션 한도(팬 기기 5대, 파트너·운영자 2개) 초과로 가장 오래 쓰지 않은 세션 종료(POL-019), ACCOUNT_LOCKED는 관리 계정 연속 실패 잠금(docs/features/identity.md §4). ADMIN_FORCE는 관제 콘솔의 관리 계정 세션 강제 종료(identity.proto AdminSessionService)다. ROLE_CHANGED는 관리 계정의 역할을 바꾸거나 거두거나 파트너 계정의 테넌트가 바뀌어 그 계정의 모든 세션을 끝낸 것이다(docs/security/authz-matrix.md §5.4, ADR-0157 결정 11). PASSWORD_CHANGED는 관리 계정이 비밀번호를 바꿔 그 계정의 다른 세션을 끝낸 것이다(docs/security/auth-controls.md §3.5)(두 값은 추천 적용 2026-10-30)" }
           terminatedAt: { type: string, format: date-time }
     AccountMerged:
       payload:
@@ -378,9 +378,9 @@ components:
         required: [eventKey, kind, sourceId, category, createdAt]
         properties:
           eventKey: { type: string, format: uuid, description: "중복 제거 키. 같은 사건을 다시 보내면 같은 값" }
-          kind: { type: string, enum: [INQUIRY, DISPUTE, MINOR_CONTRACT_CANCEL, CONTENT_REPORT, RIGHTS_REQUEST], description: "CsCase 종류(data.md cs_case)" }
-          sourceId: { type: string, description: "문의 ID(inquiryId) 또는 신고 대상 후기 ID(reviewId)" }
-          category: { type: string, description: "문의 유형 코드 또는 신고 사유 코드(SCALPING·MACRO·ABUSE·RIGHTS·ILLEGAL_FILMING·SPAM·OFF_TOPIC·OTHER)" }
+          kind: { type: string, enum: [INQUIRY, DISPUTE, MINOR_CONTRACT_CANCEL, CONTENT_REPORT, RIGHTS_REQUEST, VERIFICATION_APPEAL], description: "CsCase 종류(data.md cs_case). VERIFICATION_APPEAL은 queue-svc가 내는 봇 판정 이의 제기(설명 요구·재검토 신청)다(추천 적용 2026-10-30, docs/features/bot-defense.md §12)" }
+          sourceId: { type: string, description: "문의 ID(inquiryId), 신고 대상 후기 ID(reviewId), 또는 이의 ID(appealId, queue-svc가 접수 때 만든다)" }
+          category: { type: string, description: "문의 유형 코드, 신고 사유 코드(SCALPING·MACRO·ABUSE·RIGHTS·ILLEGAL_FILMING·SPAM·OFF_TOPIC·OTHER), 또는 이의 제기면 격리 때 이용자에게 보인 사유 범주(trust.proto ReasonCategory 이름, 예 REASON_CATEGORY_DEVICE_HISTORY)" }
           followUp: { type: boolean, default: false, description: "추가 문의면 true(기존 건을 다시 처리 중으로)" }
           hold: { type: boolean, default: false, description: "불법 촬영물 신고로 후기를 바로 가렸으면 true(FILMING_HOLD, POL-044)" }
           createdAt: { type: string, format: date-time }
@@ -456,10 +456,10 @@ components:
         properties:
           pid: { type: string }
           deviceRef: { type: string, description: "HMAC-SHA256(탐지 가명 키, 기기 식별값). trust-svc가 Kafka에 넣기 전에 바꾼다(ADR-0053)" }
-          eventId: { type: string, description: "사전 검증한 회차(ADR-0071)" }
+          eventId: { type: string, description: "로비 입장·사전 검증을 판정한 회차(ADR-0071. 로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1)" }
           netClass: { type: string, enum: [HOSTING, PROXY, OTHER], description: "요청 IP의 네트워크 유형(ADR-0071)" }
           asn: { x-present-when: [{ netClass: [HOSTING, PROXY] }], type: integer, description: "netClass가 HOSTING·PROXY일 때만 싣는다(ADR-0071)" }
-          features: { type: object, description: "브라우저가 낸 행동 신호 요약값(openapi BehaviorSummary와 같은 필드: 포인터 이동 수·엔트로피, 입력 간격 평균·표준편차, 스크롤, ADR-0065 결정 9). 헤더 순서 같은 서버 쪽 특징은 싣지 않는다(재평가 패턴이 쓰지 않음, docs/streaming.md §5.3, 추천 적용 2026-10-22)" }
+          features: { type: object, description: "브라우저가 낸 행동 신호 요약값(openapi BehaviorSummary와 같은 필드: 포인터 이동 수·엔트로피, 입력 간격 평균·표준편차, 스크롤, ADR-0065 결정 9). 헤더 순서 같은 서버 쪽 특징은 싣지 않는다(재평가 패턴이 쓰지 않음, docs/streaming.md §5.3, 추천 적용 2026-10-22). 로비 입장에는 행동 요약이 없어 비운다(추천 적용 2026-10-30, docs/features/bot-defense.md §4.1)" }
           ts: { type: string, format: date-time }
           eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
     PipelinePulse:
@@ -508,7 +508,7 @@ components:
           attribution: { type: object, description: "INP·LCP·CLS의 원인 요소(선택자 수준, observability §11, docs/frontend.md §5.16)" }
     SubscribeSections:
       contentType: application/octet-stream
-      payload: { type: string, description: "바이너리(리틀 엔디언). u8 version 1, u8 type 16, u16 count, count × u16 sectionIndex. 매번 지금 구독할 전체 집합이다(증분 아님). 좌석이 보이는 구역만 담고 축소해 좌석이 구역 색으로 합쳐지면 뺀다(ADR-0063). 초안 [가정, wbs 2.6.4], docs/frontend.md §4.4" }
+      payload: { type: string, description: "바이너리(리틀 엔디언). u8 version 1, u8 type 16, u16 count, count × u16 sectionIndex. 매번 지금 구독할 전체 집합이다(증분 아님). 좌석이 보이는 구역만 담고 축소해 좌석이 구역 색으로 합쳐지면 뺀다(ADR-0063). 프레임 길이는 4 + 2 × count 바이트여야 한다. count는 16 [가정] 이하이고, 구역 색인은 그 회차 좌석맵 판의 구역 수 미만이며 서로 겹치지 않아야 한다. 범위 밖·겹침은 4403, 16개 초과·초당 2번 [가정]을 넘는 바꾸기는 4429로 닫는다(추천 적용 2026-10-30, docs/features/seat-hold.md §7). 초안 [가정, wbs 2.6.4], docs/frontend.md §4.4" }
     SeatDeltaBatch:
       contentType: application/octet-stream
       payload: { type: string, description: '바이너리(리틀 엔디언). u8 version 1, u8 type 1, u64 serverTimeMs, u16 maxWaitMs(묶음 안에서 가장 먼저 바뀐 변경이 보내질 때까지 기다린 시간. 종단 지연은 그린 시각 − (serverTimeMs − maxWaitMs), ADR-0110), u32 seatEpoch(회차 세대. 커지면 구독 구역을 모두 스냅샷으로 다시 맞춘다. 한 묶음에 한 세대, 기술 검토 중간-040), u16 sectionCount, 구역마다 u16 sectionIndex, u32 sectionVersion, u16 count, count × (u16 seatOffset, u8 state). state 0 가능, 1 다른 분 선택(홀드·결제 예약), 2 판매(스냅샷은 가용·점유 1비트, seat-hold §2). type 2는 하트비트(u64 serverTimeMs, u64 echoClientTimeMs. TimeSync에 답할 때 받은 clientTimeMs, 그 밖에는 0), type 3은 묶음 간격 변경(u16 intervalMs). 100ms 배치(바뀐 것이 있을 때만, Degraded 1초), 약 200B 이하. 초안 [가정, wbs 2.6.1·2.6.4], docs/frontend.md §4.4' }

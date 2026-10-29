@@ -400,12 +400,14 @@ SEV1~SEV3은 장애 심각도 등급이다(숫자가 작을수록 심각하다, 
 | 연계정보 해시·사람 식별값 | Aurora 공유(identity)(일 스냅샷 도쿄) | 계정 보유 기간 | 연계정보 HMAC 키, pid HMAC 키 | identity-svc | 원문은 받자마자 지운다 | docs/security/secrets-and-keys.md |
 | 상품 카탈로그(굿즈·부가 상품 정의) | Aurora 공유(core, 일 스냅샷 도쿄) | 상품 운영 기간 | 저장소 암호화 KMS 키 | core-svc shop | — | docs/data.md §2, ADR-0101 |
 | 알림·파트너 웹훅 발송 작업과 원장 | Aurora 공유(core, 일 스냅샷 도쿄) | 알림 작업은 보낼 때까지, 발송 기록 90일 [가정], 웹훅 원장은 끝난 뒤 30일 [가정] | 저장소 암호화 KMS 키, 파트너 웹훅 서명 비밀(Secrets Manager) | core-svc notify | 파트너는 SCR-025에서 자기 엔드포인트 이력만 보고 다시 보낸다 | docs/data.md §2·§6, ADR-0109 |
+| 탈퇴 회원 거래 기록의 개인 식별 칸(예매자 성명·휴대폰 번호, 굿즈 수령인·배송지, 문의 글, 소명 본문) | 그 기록을 가진 서비스 Aurora(purchase·core·ops)의 보존 전용 스키마 `retention` [가정](일 스냅샷 도쿄) | 주문·결제 기록 5년, 소비자 불만·분쟁 처리 기록 3년 | 그 서비스 DB와 같은 저장소 암호화 키 | 탈퇴 처리 잡(옮기기), 파기 잡(지우기). 서비스 역할은 읽지 못한다 | 읽는 역할은 DB마다 하나이고, 분쟁·수사기관 요청 때 사유를 적고 쓴다. 접속기록 점검 대상이다 | docs/data.md §6, docs/security/internal-management-plan.md §5(추천 적용 2026-10-30) |
 | 이벤트 | MSK 거래·제어, 텔레메트리 | 7일 | 저장소 암호화 키 | 발행 서비스 | — | docs/infra.md §6 |
 | 보류 사건(`held_event`, 추천 적용 2026-10-29, ADR-0142) | 그 서비스의 Aurora(처리 못 한 사건을 Kafka 데드 레터 토픽 대신 옮겨 둔다) | 다시 처리한 뒤 7일 [가정] | 그 서비스 DB와 같은 저장소 암호화 키 | 서비스 소비자(purchase-svc 주문 Saga·홀드 원장 적재, core-svc 알림) | RB-11로 원인을 고친 뒤 다시 넣는다. 사건 값이 들어 있다 | docs/streaming.md §2.4 |
 | 분석 브론즈·실버 | ClickHouse | 90일 | 저장소 암호화 키 + 분석 가명 키(가명) | 원본 적재 작업자 `analytics-ingest` | 실버 조회는 가명정보 취급자만 | docs/observability.md §9 |
 | 분석 골드 | ClickHouse → S3 아카이브(회차별 Parquet 파일, ADR-0115. 아카이브는 도쿄 교차 리전 복제) | 2년, 아카이브 영구 | 저장소 암호화 키(아카이브 버킷은 SSE-KMS 분석 데이터 키) | dbt 마감 실행기(아카이브는 쓰기만, 지우기 권한 없음) | Grafana 비교 대시보드는 읽기 전용 사용자. 아카이브는 ClickHouse 뷰 `archive.<표>`로만 읽는다 | 같음 |
 | 법정 접속기록 | ClickHouse 접속기록 DB + 하루 파티션 사본(접속기록 사본 버킷, S3 Object Lock 준수 모드). ClickHouse 일 백업은 S3 백업 전용 버킷으로 도쿄에 복제 | 3개월(사본은 그 날짜의 3개월 보존 + 7일 [가정]) | 저장소 암호화 키, 일 해시 앵커(사본 파일의 SHA-256·행 수) | 게이트웨이 접근 로그 사본, identity-svc 접속기록 줄(잃지 않는 갈래), 내보내기 잡 `access-log-export` | 적법한 영장을 확인한 경우에만 반출. 사본은 복원 역할(RB-38)만 읽는다 | docs/observability.md §7·§9 |
 | 봇 원시 신호 | ClickHouse(일 백업은 S3 백업 전용 버킷으로 도쿄에 복제) | 30일 | 탐지 가명 키(가명) | 재평가 작업자 `trust-reassess` | — | 같음 |
+| ASN 분류표(ASN을 호스팅·프록시·그 밖으로 나눈 파일, 개인정보 없음) | 서울 S3 버킷(공개 접근 차단, 버전 관리) | 판마다 하루 한 번 [가정] 새로 쓴다 | 저장소 암호화 KMS 키 | trust-svc 작업(쓰기만), trust-svc·queue-svc 파드(읽기만) | — | docs/infra.md §4.1, docs/features/bot-defense.md §3.1(추천 적용 2026-10-30) |
 | 지표·로그·요청 기록·프로파일 | Mimir·Loki·Tempo·Pyroscope(S3 백엔드) | 90일·13개월, 30일, 14일, 7일 | 저장소 암호화 키, 로그 가명 키 | 수집기, Prometheus, 서비스(Pyroscope SDK) | Grafana 조직 둘('PEAKET 관측', 'PEAKET 제한') | docs/observability.md §9 |
 | 진단 증거 | 운영 계정 전용 S3 버킷 | 14일 [가정](인시던트에 묶이면 30일 [가정]까지) | 진단 증거 KMS 키 | 서비스(자기 접두사에 쓰기만), 증거 수집기 | 복호화는 긴급 접근 역할만, 읽기는 CloudTrail로 기록 | docs/infra.md §9 |
 | 공개 감사 체크포인트 | 공개 게시 버킷(S3 Object Lock) | 7년 | 감사 체크포인트 서명 키(서명) | 게시 잡 `audit-anchor` | 누구나 검증 | docs/observability.md §9 |

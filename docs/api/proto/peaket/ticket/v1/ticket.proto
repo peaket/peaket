@@ -5,6 +5,10 @@
 // ScannerDeviceService·AccountMergeCheckService는 2026-10-29에 더했다(초안, 추천 적용 2026-10-29, ADR-0148).
 // 그 정본: docs/api/openapi.yaml `/v1/ops/scanner-devices*`·`ScannerDevice`, docs/features/offline-gate.md §6.1(기기 등록·폐기),
 // docs/data.md `scanner_device`·§4 경계 9, docs/features/identity.md §2.1·POL-034(계정 병합 막는 사유), ADR-0051·0062.
+// TicketReclaimService는 2026-10-30에 더했다(초안, 추천 적용 2026-10-30). 그 정본: docs/features/transfer-refund.md §3.1·§3.2·§4(양도 회수)·§7.2(T14),
+// docs/architecture.md §3.2(ops-svc → ticket-svc 승인된 양도 회수의 실행).
+// ScannerDeviceLookupService는 2026-10-30에 더했다(초안, 추천 적용 2026-10-30). 그 정본: docs/features/identity.md §6.1(기기 승인 때 기기 상태 확인),
+// docs/data.md `scanner_device`(credential_thumbprint·status).
 syntax = "proto3";
 
 package peaket.ticket.v1;
@@ -289,4 +293,64 @@ message MergeBlock {
 
 message CheckAccountMergeResponse {
   repeated MergeBlock blocks = 1;
+}
+
+// 부르는 쪽: ops-svc만. 승인 업무 '양도 회수(계정 탈취)'가 승인되면(cs_lead 요청 + commander 승인, 실행 직전 재인증) 실행 단계(T14)에서 부른다.
+// ops-svc가 권한과 감사 기록을 처리한 뒤 부르고, ticket-svc는 운영자 권한을 다시 판정하지 않는다.
+// ticket-svc는 티켓 행 잠금 안에서 조건(입장 시작 전, 입장 기록 없음, 양도로 보유자가 결제자와 다름)을 다시 확인하고,
+// 돌려주기와 같은 절차로 결제자에게 되돌린다(보유자의 기기 키 폐기, 보유자 변경, trade.tickets TICKET_RECLAIMED, 받은 사람 알림).
+// 조건이 맞지 않으면 결과 값으로 돌려주고, ops-svc는 승인 업무를 Failed로 두어 CS 처리함 분쟁(DISPUTE)으로 잇는다(transfer-refund §7.1)
+// (초안, 추천 적용 2026-10-30, docs/features/transfer-refund.md §4).
+service TicketReclaimService {
+  // approval_id(승인 업무 ID)로 멱등하다. 같은 approval_id로 다시 오면 처음 결과를 돌려준다. 같은 approval_id에 다른 ticket_id가 오면 ALREADY_EXISTS다.
+  rpc ReclaimTicket(ReclaimTicketRequest) returns (ReclaimTicketResponse);
+}
+
+message ReclaimTicketRequest {
+  // 승인 업무 ID(approval_request.id). 멱등 키다.
+  string approval_id = 1;
+  string ticket_id = 2;
+  // 실행 직전에 재인증한 승인자의 관리 계정 ID
+  string acted_by = 3;
+}
+
+enum ReclaimResult {
+  RECLAIM_RESULT_UNSPECIFIED = 0;
+  // 결제자에게 되돌렸다
+  RECLAIM_RESULT_RECLAIMED = 1;
+  // 입장이 시작됐거나 입장 기록이 있어 회수하지 않았다(R-T17의 ENTRY_STARTED와 같은 조건)
+  RECLAIM_RESULT_ENTRY_STARTED = 2;
+  // 회수할 것이 없다(이미 결제자가 보유자, 환급·무효 티켓)
+  RECLAIM_RESULT_NOT_RECLAIMABLE = 3;
+}
+
+message ReclaimTicketResponse {
+  ReclaimResult result = 1;
+}
+
+// 부르는 쪽: identity-svc만. 스캐너 기기 승인 로그인(RFC 8628)의 승인 요청(POST /v1/scanner/device-authorizations)과
+// 토큰 발급(POST /v1/scanner/token) 때, DPoP 증명의 키 지문(jkt)이나 mTLS 인증서 지문으로 등록 기기를 찾고 상태를 본다
+// (docs/features/identity.md §6.1). 기기 원장(scanner_device)의 주인은 ticket-svc라 identity-svc가 직접 읽지 않는다(ADR-0007).
+// 승인 화면(SCR-051)에 보일 기기 이름과 배정 파트너도 함께 돌려준다. 읽기라 멱등 키가 없다.
+// identity-svc는 결과를 캐시하지 않는다(기기 승인은 근무 시작 때만 드물게 온다). 답이 없으면 승인 요청·토큰 발급을 503으로 미룬다
+// (기기 상태를 모른 채 로그인을 열지 않는다, 초안, 추천 적용 2026-10-30).
+service ScannerDeviceLookupService {
+  rpc GetScannerDeviceByCredential(GetScannerDeviceByCredentialRequest) returns (GetScannerDeviceByCredentialResponse);
+}
+
+message GetScannerDeviceByCredentialRequest {
+  ScannerCredentialType credential_type = 1;
+  // 기기 키 JWK SHA-256 지문(jkt, RFC 7638) 또는 인증서 SHA-256 지문. 게이트웨이·가드가 DPoP 증명이나 인증서를 검증한 뒤의 값이다.
+  bytes credential_thumbprint = 2;
+}
+
+message GetScannerDeviceByCredentialResponse {
+  // 등록된 기기가 없으면 false이고 나머지 칸은 비운다. identity-svc는 403(미등록 기기)으로 답한다.
+  bool found = 1;
+  string device_id = 2;
+  // ACTIVE가 아니면 identity-svc는 403(기기 폐기)으로 답한다.
+  ScannerDeviceStatus status = 3;
+  // 승인 화면에 보일 기기 이름과 배정 파트너
+  string name = 4;
+  string promoter_id = 5;
 }

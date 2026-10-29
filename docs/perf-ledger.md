@@ -113,8 +113,9 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | `local-bot` | 로컬 kind/k3d 클러스터에 봇 등급 분류표(ADR-0039)에 따른 합성 봇과 정상 사용자 세션을 넣어 판정 정확도를 잰다(K6 검증, 절차 §10). 다른 상용 사이트를 공격하는 것은 엄격히 금지한다(POL-026) | 0원 (로컬 자원) |
 | `cloud-calib` | 선택 보정이다. 서울 리전 c7g.xlarge 8대를 3시간 [가정] 띄워 진입 서버 1·2·4대의 처리량을 재고, PC와 비교한 환산 계수를 얻는다(docs/verification.md §6) | 약 4달러(정가로 계속 쓰는 온디맨드 서버의 가격표, 2026-10-13 조회) |
 | `cloud-cdn` | 선택 보정이다. PC에서 CloudFront 배포 1개에 무료 범위(월 요청 1,000만 건, 전송 1 TB) 안의 요청을 보내 같은 파일 요청을 묶는지 확인한다. 엣지 1곳 몫만 확인된다(docs/verification.md §6) | 무료 범위 안(넘으면 요청 건수만큼 요금이 붙는다) |
+| `cloud-msk-iam` | 선택 보정이다. 서울 리전에 EKS 클러스터 1개(노드 c7g.xlarge 1대)와 MSK kafka.t3.small 2대를 9시간 [가정] 띄워, Pod Identity 자격과 MSK 토큰이 바뀌는 동안 재인증이 이어지는지 본다(ST-T14 ②, docs/verification.md §6, ADR-0154). 재는 것은 성능이 아니라 재인증 실패·연결 끊김 건수다 | 약 3.5달러(EKS·MSK·노드·공인 IPv4의 시간 요금, 2026-10-30 가격표) |
 | `cloud-burst` | 실행하지 않는다(ADR-0057). 지출 상한이 늘면 진입 폭발(20만 RPS) 측정 1회를 먼저 한다 | 시간 단위 인스턴스 요금·요청 요금 |
-| `cloud-failover` | 실행하지 않는다. 선택 보정은 `cloud-calib`·`cloud-cdn` 두 가지만 하므로(ADR-0057) 관리형 Aurora PostgreSQL(AWS가 운영해 주는 PostgreSQL 호환 관계형 데이터베이스)·ElastiCache의 장애 조치 시간은 문서 인용으로 둔다(docs/verification.md §5.3). 나중에 재기로 하면 새 ADR(아키텍처 결정과 그 이유를 남긴 기록)로 정한다 | 0원 |
+| `cloud-failover` | 실행하지 않는다. 선택 보정은 `cloud-calib`·`cloud-cdn`·`cloud-msk-iam` 세 가지만 하므로(ADR-0057, ADR-0154) 관리형 Aurora PostgreSQL(AWS가 운영해 주는 PostgreSQL 호환 관계형 데이터베이스)·ElastiCache의 장애 조치 시간은 문서 인용으로 둔다(docs/verification.md §5.3). 나중에 재기로 하면 새 ADR(아키텍처 결정과 그 이유를 남긴 기록)로 정한다 | 0원 |
 | `cloud-staging` | 설계로만 둔다. 운영과 같은 다중 AZ(리전 안의 독립된 데이터센터 묶음) 구성이다(docs/infra.md §3). 포트폴리오 기간에는 띄우지 않고, Game Day는 로컬 측정 환경에서 한다(ADR-0057) | 대규모 비용(실행하지 않는다) |
 
 프로파일마다 자세한 인프라 구성(토폴로지)과 FinOps 예산 지침은 docs/infra.md §3과 planning/01 §5.1을 따른다. 장부에는 프로파일 이름과 `infra.txt` 스냅샷(어느 시점의 전체 상태를 찍어 둔 것)을 영구 보존한다.

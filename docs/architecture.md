@@ -1,24 +1,24 @@
 # 시스템 아키텍처
 
-- **독자와 용도**: 백엔드·인프라·프론트엔드 엔지니어가 시스템 경계, 처음부터 끝까지의 요청 경로, 핵심 기술 스택을 고른 근거, 성능이나 보안 같은 품질 요구사항인 비기능 요구사항(NFR)을 기술로 채우는 전략을 확인할 때 기준으로 보는 문서다. 개별 기술 결정의 대안 비교와 트레이드오프는 `docs/adr/`에 있다. 자세한 데이터 스키마(데이터의 구조 정의)는 [data.md](data.md), 클라우드 인프라와 배포 파이프라인은 [infra.md](infra.md), 모니터링과 관측성(지표·로그·요청 기록으로 시스템 안을 들여다보는 능력)은 [observability.md](observability.md), 도메인별 세부 동작 흐름은 `docs/features/`에 자세히 적었다.
+- **독자와 용도**: 백엔드·인프라·프론트엔드 엔지니어가 시스템 경계, 처음부터 끝까지의 요청 경로, 핵심 기술 스택을 고른 근거, 성능이나 보안 같은 품질 요구사항인 비기능 요구사항(NFR)을 기술로 채우는 전략을 확인할 때 기준으로 보는 문서다. 개별 기술 결정의 대안 비교와 트레이드오프는 `docs/adr/`의 ADR(아키텍처 결정과 그 이유를 남긴 기록)에 있다. 자세한 데이터 스키마(데이터의 구조 정의)는 [data.md](data.md), 클라우드 인프라와 배포 파이프라인은 [infra.md](infra.md), 모니터링과 관측성(지표·로그·요청 기록으로 시스템 안을 들여다보는 능력)은 [observability.md](observability.md), 도메인별 세부 동작 흐름은 `docs/features/`에 자세히 적었다.
 - **원문 출처**: 설계서 TL;DR, 설계서 §0, 설계서 §2, 설계서 §3, 설계서 §6, 설계서 §8, 설계서 §9, 설계서 §10, §13·§14(ADR 목록), §15(리포지토리 구조), §18(참고 문헌), 5장(라우트 렌더링), 4장(상태 소유권), 6장(토큰), 16장(Fastify·RxJS), 18장(통신 프로토콜), 19장(서비스 메시).
 - **기준 기획 버전**: v1.0.
-- **표시 규칙**: C4 모델 다이어그램, NFR 대응 표 구조, PoC 통과 기준은 원문에 빠진 것을 정리해 넣은 것이라 모두 [보완]으로 표시한다. 수치는 원문 설계를 이어받았고, 새로 확정한 수치에만 [가정]을 붙인다.
+- **표시 규칙**: C4 모델 다이어그램, NFR 대응 표 구조, PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험) 통과 기준은 원문에 빠진 것을 정리해 넣은 것이라 모두 [보완]으로 표시한다. 수치는 원문 설계를 이어받았고, 새로 확정한 수치에만 [가정]을 붙인다.
 
 ## 1. 핵심 결정과 시스템 컨텍스트
 
 시스템 아키텍처의 핵심 설계 결정과 구조적 특징은 다음과 같다:
 
 - **2단계 일관성 모델 ([ADR-0014](adr/0014-soft-hold-hard-sale.md))**:
-  - **좌석 홀드 (Soft Hold)**: 결제하는 동안 다른 사람이 가져가지 못하게 좌석을 잠시 잡아 두는 일로, 인메모리 Redis에서 초고속으로 처리하여 핫패스(Hot Path)의 RDBMS 쓰기 I/O를 0건으로 유지한다. Redis 페일오버 중에는 그 회차의 구매 요청을 503으로 잠시 미룬다. PostgreSQL로 홀드를 주는 비상 경로는 두지 않아, 홀드를 주는 곳은 늘 하나다([NFR-015](../planning/02-requirements.md), 추천 적용 2026-10-28, ADR-0121).
+  - **좌석 홀드 (Soft Hold)**: 결제하는 동안 다른 사람이 가져가지 못하게 좌석을 잠시 잡아 두는 일로, Redis(메모리에 데이터를 두는 빠른 저장소)에서 초고속으로 처리하여 핫패스(Hot Path)의 RDBMS 쓰기 I/O를 0건으로 유지한다. Redis 페일오버 중에는 그 회차의 구매 요청을 503으로 잠시 미룬다. PostgreSQL로 홀드를 주는 비상 경로는 두지 않아, 홀드를 주는 곳은 늘 하나다([NFR-015](../planning/02-requirements.md), 추천 적용 2026-10-28, ADR-0121).
   - **최종 판매 확정 (Hard Sale)**: PG 결제 승인 바로 앞에 PostgreSQL에 사전 예약(PENDING)을 넣고, 활성 상태 부분 유니크 인덱스로 같은 좌석의 두 번째 판매를 막는다. 승인이 끝나면 SOLD로 바꾼다. 남는 위험은 두 가지다. 좌석 Redis 장애로 원장에 적기 전의 홀드가 사라지면, 같은 좌석을 고른 두 사람 중 한 명은 결제 승인 전에 실패 안내를 받는다(과금은 없다). 승인 결과를 모르거나 승인 뒤 발권이 실패하면 결제와 발권이 잠시 어긋난다. 결제 승인은 되돌리기 어려운 고비 단계라, 승인 뒤에는 결제를 취소하지 않고 같은 주문 ID로 발권을 다시 시도한다(발권 기한 승인 뒤 30분 [가정], ADR-0106). 승인 뒤 60초 안에 발권되지도 발권 재시도 큐에 들어가지도 않은 결제 0건을 목표로 두고, 부하 시험 뒤 불변식 검사와 원장 대사로 확인한다(K2·K7, docs/features/seat-hold.md §6, docs/features/payment.md §3·§4).
 - **도메인 경계 기반 마이크로서비스 10개 분리 ([ADR-0007](adr/0007-service-boundaries-by-load-availability-runtime.md))**:
-  - 비즈니스 도메인뿐만 아니라 트래픽 부하 수준, 가용성 SLA 등급, 런타임 특성에 따라 10개 독립 서비스로 격리한다.
+  - 비즈니스 도메인뿐만 아니라 트래픽 부하 수준, 가용성(서비스를 멈춤 없이 쓸 수 있는 정도) SLA 등급, 런타임 특성에 따라 10개 독립 서비스로 격리한다.
   - 개발 초기 v0 단계는 모듈러 모놀리스로 검증하고, v1 단계에서 분산 서비스로 배포한다. 분리 효과는 한 프로세스 합본·역할별 배포·10개 서비스의 세 구성을 같은 자원 합계로 재서, 실행을 나눈 몫과 서비스로 나눈 몫을 따로 정량 측정한다(ADR-0096).
 - **클라이언트 전용 Thin API 게이트웨이 5종 분리 ([ADR-0008](adr/0008-client-specific-thin-gateways.md))**:
-  - 팬 웹(`gw-fan`), 대기열(`gw-queue`), 파트너와 결제사 웹훅(`gw-partner`), 운영자(`gw-ops`), 스캐너(`gw-scanner`)마다 게이트웨이를 따로 두어, 한쪽의 폭주나 장애가 다른 쪽으로 번지는 것을 줄인다(§4).
+  - 팬 웹(`gw-fan`), 대기열(`gw-queue`), 파트너와 결제사 웹훅(`gw-partner`), 운영자(`gw-ops`), 스캐너(`gw-scanner`)마다 API 게이트웨이(API는 프로그램끼리 요청과 응답을 주고받는 창구, 게이트웨이는 그 앞에 둔 입구 서버)를 따로 두어, 한쪽의 폭주나 장애가 다른 쪽으로 번지는 것을 줄인다(§4).
 - **초단위 텔레메트리 관제 루프**:
-  - 시스템 분산 이벤트를 TypeScript 스트림 작업자로 ClickHouse에 싣고 읽을 때 집계하여(조회 시점 집계) 관제 콘솔에 제공하고, 이상 징후 발생 시 동시 입장 목표(AIMD)를 적응형으로 제어한다.
+  - 시스템 분산 이벤트를 TypeScript 스트림 작업자로 ClickHouse에 싣고 읽을 때 집계하여(조회 시점 집계) 관제 콘솔에 제공하고, 이상 징후 발생 시 안전 한계(POL-010) 안에서 동시 입장 목표(AIMD)를 적응형으로 제어한다.
 
 **PEAKET 시스템 컨텍스트 (C4 L1)**
 
@@ -159,15 +159,19 @@ flowchart LR
         pay["payment-svc<br/>[Container: NestJS]<br/>결제사 선택기, 토스·포트원 어댑터"]:::container
         ops["ops-svc<br/>[Container: NestJS]<br/>운영 명령·감사 로그·관제 API"]:::container
         tkt["ticket-svc<br/>[Container: NestJS]<br/>발권·월렛·양도·스캐너 동기화"]:::container
+        trust["trust-svc<br/>[Container: NestJS]<br/>위험 점수·추가 검증 큐"]:::container
     end
     rc[("Redis 세션·캐시<br/>[Container DB: Cluster]")]:::db
     gwq -->|"REST"| queue
     gwf -->|"REST"| pur
     gwf -->|"WebSocket"| rt
     gwf -->|"토큰 갱신·본인확인(REST)"| idn
+    gwf -->|"허니팟 경로(REST)"| trust
     gwf -->|"일반 API 한도 판정(gRPC)"| rls
     gwp -->|"일반 API 한도 판정(gRPC)"| rls
     gwp -->|"파트너 콘솔 API(REST)"| core
+    gwp -->|"파트너 로그인·현장 스태프 초대(REST)"| idn
+    gwp -->|"기기 배치·현장 현황(REST)"| tkt
     gwp -->|"결제사 웹훅(REST)"| pay
     gwp -->|"실시간 판매 현황 조회(1분 주기)"| ops
     gwo -->|"관제 API(REST)·SSE 흐름"| ops
@@ -182,6 +186,8 @@ flowchart LR
     style svc fill:none,stroke-dasharray:5 5
 ```
 
+- gw-partner → identity-svc(파트너 로그인, 현장 스태프 초대)와 gw-partner → ticket-svc(기기 배치 `/v1/partner/events/{eventId}/device-placements/{deviceId}`, 현장 현황 `/v1/partner/events/{eventId}/gate-status`), gw-fan → trust-svc(허니팟 경로 `/_t/*`) 선은 §3.3 구성 요소 그림에 맞춰 더했다(추천 적용 2026-10-30, §3.3 identity-svc·ticket-svc·trust-svc, docs/features/bot-defense.md §7). 파트너 로그인을 gw-partner로 받는 것은 ADR-0119다.
+
 **③ 서비스 사이와 저장소**
 
 ```mermaid
@@ -190,7 +196,7 @@ flowchart LR
         ops["ops-svc<br/>[Container]"]:::container
         adm["admission-ctrl<br/>[Container: NestJS]<br/>serving 제어 루프, 셔플(리더)"]:::container
         queue["queue-svc<br/>[Container]"]:::container
-        trust["trust-svc<br/>[Container: NestJS]<br/>위험 점수·추가 검증 큐"]:::container
+        trust["trust-svc<br/>[Container]"]:::container
         pur["purchase-svc<br/>[Container]"]:::container
         rt["realtime-gw<br/>[Container]"]:::container
         pay["payment-svc<br/>[Container]"]:::container
@@ -238,20 +244,20 @@ flowchart LR
 
 ### 3.1 서비스 맵
 
-**서비스 안 구조의 기본값(추천 적용 2026-10-28, 기술 검토 낮음-008)**: 서비스 열 개는 '포트와 어댑터를 쓰는 모듈 계층 구조' 하나를 기본으로 쓴다. 바운디드 컨텍스트 하나가 NestJS 모듈 하나이고, 모듈 안은 받는 층(REST·gRPC 처리기, Kafka 소비자) → 유스케이스 층 → 도메인 층(업무 규칙과 상태. 프레임워크와 저장소를 모른다)으로 나눈다. 저장소·결제사·다른 서비스 같은 바깥 의존은 도메인 쪽이 정한 포트(인터페이스) 뒤에 어댑터로 붙이고, 의존은 안쪽으로만 향한다. 서비스마다 구조 이름이 다르면 공용 라이브러리·서비스 템플릿·리뷰 기준이 함께 갈라지므로 하나로 정했다. 서비스 템플릿(`peaket-platform`, §10)이 이 폴더 뼈대를 주고, 층을 거꾸로 부르는 import는 공용 ESLint 설정(`no-restricted-imports`)이 막는다 [가정, wbs 0.3.2]. 아래 표의 '내부 구조' 칸은 이 기본에서 벗어난 곳만 이유와 함께 적고, 점수기 파이프라인·애그리거트 같은 코드 수준의 설계 패턴은 '주요 패턴' 칸에 따로 적는다. 기본에서 벗어난 곳은 셋이다. admission-ctrl은 요청을 받는 서비스가 아니라 리더 하나가 도는 제어 루프이고, realtime-gw는 업무 규칙이 없는 스트리밍 서버이며, ops-svc의 운영 명령 기록은 이벤트 소싱이다.
+**서비스 안 구조의 기본값(추천 적용 2026-10-28, 기술 검토 낮음-008)**: 서비스 열 개는 '포트와 어댑터를 쓰는 모듈 계층 구조' 하나를 기본으로 쓴다. 바운디드 컨텍스트 하나가 NestJS(Node.js 서버 프레임워크) 모듈 하나이고, 모듈 안은 받는 층(REST·gRPC 처리기, Kafka 소비자) → 유스케이스 층 → 도메인 층(업무 규칙과 상태. 프레임워크와 저장소를 모른다)으로 나눈다. 저장소·결제사·다른 서비스 같은 바깥 의존은 도메인 쪽이 정한 포트(인터페이스) 뒤에 어댑터로 붙이고, 의존은 안쪽으로만 향한다. 서비스마다 구조 이름이 다르면 공용 라이브러리·서비스 템플릿·리뷰 기준이 함께 갈라지므로 하나로 정했다. 서비스 템플릿(`peaket-platform`, §10)이 이 폴더 뼈대를 주고, 층을 거꾸로 부르는 import는 공용 ESLint 설정(`no-restricted-imports`)이 막는다 [가정, wbs 0.3.2]. 아래 표의 '내부 구조' 칸은 이 기본에서 벗어난 곳만 이유와 함께 적고, 점수기 파이프라인·애그리거트 같은 코드 수준의 설계 패턴은 '주요 패턴' 칸에 따로 적는다. 기본에서 벗어난 곳은 셋이다. admission-ctrl은 요청을 받는 서비스가 아니라 리더 하나가 도는 제어 루프이고, realtime-gw는 업무 규칙이 없는 스트리밍 서버이며, ops-svc의 운영 명령 기록은 이벤트 소싱이다.
 
 | 서비스명 | 담당 모듈과 핵심 책임 | 전용 저장소 | 내부 구조(기본에서 벗어난 점) | 주요 패턴 | 통신 프로토콜 | 분리 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| queue-svc | 로비 입장(참가 토큰 발급), 사전 검증 토큰 발급, 대기열 진입, 순번 발급, 결번 비트맵(값마다 한 비트로 줄여 적은 표) 기록, 구간별 대기 상태 파일 생성·게시(셔플 결과 파일은 admission-ctrl이 게시한다, §9.4·queue-admission §2), 입장 확정(입장 토큰 발급과 입장 자리 등록), 구매 세션 수명 주기 이벤트 수신과 입장 자리 반환 처리 | Redis Cluster (대기열 전용) | 기본 | 결번 비트맵, 서명한 대기표(HMAC), 한 번에 끝나는 Redis 원자 연산(`SET NX`·`INCR`) | REST (`gw-queue` 경유, CDN이 가까운 곳에 복사해 두는 캐시의 원천), gRPC (`trust-svc` 위험 점수 동기 조회), Kafka (텔레메트리 발행, 구매 세션 이벤트 구독), 제어 gRPC (대기실 공지·판매 일시정지 수신. 상태는 `q:{event:E}:notice`, ADR-0102·0103) | 큰 진입 부하: 초당 20만 건(200,000 RPS)을 받는다 |
+| queue-svc | 로비 입장(참가 토큰 발급), 사전 검증 토큰 발급, 대기열 진입, 순번 발급, 결번 비트맵(값마다 한 비트로 줄여 적은 표) 기록, 구간별 대기 상태 파일 생성·게시(셔플 결과 파일은 admission-ctrl이 게시한다, §9.4·queue-admission §2), 입장 확정(입장 토큰 발급과 입장 자리 등록), 구매 세션 수명 주기 이벤트 수신과 입장 자리 반환 처리 | Redis Cluster (대기열 전용) | 기본 | 결번 비트맵, 서명한 대기표(HMAC), 한 번에 끝나는 Redis 원자 연산(`SET NX`·`INCR`) | REST (`gw-queue` 경유, CDN이 가까운 곳에 복사해 두는 캐시의 원천), gRPC (`trust-svc` 위험 점수 동기 조회), Kafka (텔레메트리 발행, 구매 세션 이벤트 구독, 봇 판정 이의 제기의 CS 처리함 건 요청 `VERIFICATION_APPEAL`), 제어 gRPC (대기실 공지·판매 일시정지 수신. 상태는 `q:{event:E}:notice`, ADR-0102·0103), gRPC (`ops-svc`의 이의 결과 반영(`PASSED`·기각)과 이의 내용 읽기, 추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14), gRPC (`identity-svc`에 추가 검증의 본인확인 재통과를 확인한다, 추천 적용 2026-10-30, docs/features/bot-defense.md §5.2) | 큰 진입 부하: 초당 20만 건(200,000 RPS)을 받는다 |
 | admission-ctrl | 현재 입장 번호(serving) 증가 제어(실제 입장 비율 반영), AIMD 동시 입장 목표 조절, T=0 무작위 셔플 연산과 셔플 결과 파일 약 1,000개 생성·S3 게시(리더 하나가 혼자 수행), 운영 명령 수신 | Redis Cluster (대기열 클러스터 공유), K8s Lease (리더 선출: 여러 복제 중 일을 맡을 하나를 고르는 것. Lease는 정해진 시간 동안만 유효한 권한) | 예외: 결과를 보고 다시 조절하는 제어 루프(Control Loop). 요청을 받아 처리하는 서비스가 아니라 리더 하나가 주기마다 지표를 읽고 serving을 올리므로, 받는 층은 제어 gRPC뿐이고 유스케이스는 루프의 한 단계다 | 리더 선출과 리더 세대 펜싱(ADR-0056), AIMD 조절 | 제어 gRPC (직접 제어 채널, 리더만 받는 제어 전용 Service 엔드포인트, ADR-0102), `/metrics` (제어 지표 `admission_*`를 지표를 모아 저장하는 도구인 Prometheus가 긁어 간다. Kafka 발행은 없다, ADR-0076), Prometheus HTTP (하위 서비스 p99와 오류율 관측) | 리더로 뽑힌 노드 하나에서만 실행되어야 하는, 결과를 보고 다시 조절하는 제어 루프 |
 | purchase-svc | inventory 모듈(좌석 비트맵 관리, Soft Hold, Hard Sale 확정, 1인당 매수 한도 검증, 어느 시점의 좌석 상태 전체를 찍어 둔 좌석 스냅샷 제공), booking 모듈(주문 애그리거트 관리, 분산 Saga 오케스트레이션), 구매 세션 소유(시작/종료 이벤트 발행), 비상 운영 명령인 판매 일시정지(킬스위치)의 판매 차단 집행(범위 안 회차의 새 홀드·결제 시도 시작·결제 접수 423. 입장 멈춤은 admission-ctrl, 대기 화면의 판매 상태는 queue-svc가 함께 받는다, ADR-0062. 정지 상태는 purchase DB `sale_control`에 두고 좌석 Redis `s:{event:E}:ctl` 사본을 홀드 Lua가 함께 읽으며, 새로 뜬 파드는 그 상태를 읽어야 준비 상태가 된다, ADR-0103), 입장 토큰 재사용 차단, 구매 세션 요청 인증(소지 증명) 확인 | Redis (비트맵, 홀드, 세션), PostgreSQL (확정 원장, 매수 한도 행, 주문 상태 이력 `order_event`) | 기본. 주문은 '상태 + 덧붙이기 이력 + Outbox(보낼 이벤트를 같은 트랜잭션으로 DB 표에 먼저 적어 두고 나중에 보내는 방식)'다. 지금 상태 칸을 바꾸는 트랜잭션에서 전이 이력과 Outbox 행을 함께 쓴다. 이벤트 소싱(상태를 사건의 재생으로만 만드는 방식)은 아니다(추천 적용 2026-10-28, ADR-0113) | 주문 애그리거트(함께 바뀌어야 하는 객체를 한 묶음으로 다루는 DDD 패턴), Saga 오케스트레이션, 펜싱 토큰, 좌석 홀드 Lua | REST (`gw-fan` 경유), gRPC (`payment-svc`, `ticket-svc`, `identity-svc` 본인확인 조회), Kafka (Transactional Outbox와 서비스별 Outbox 릴레이(ADR-0116), Redis Stream 릴레이), 제어 gRPC (비상 킬스위치 수신, 파드마다 부르는 헤드리스 제어 Service, ADR-0102) | 입장을 마친 5,000명 규모의 핵심 구매 경로다. 두 모듈은 트래픽 규모와 SLO가 같고 서로 긴밀히 묶여 있어 한 묶음으로 구성했다 |
 | payment-svc | 결제사 선택기(결제 시도마다 연동 결제사 토스페이먼츠·포트원 중 선택, 공연별 지정과 장애 전환 반영, ADR-0044)와 결제사 어댑터(결제창 값, 전자결제 승인, 상태 조회, 취소), 웹훅(일이 생기면 상대 서버가 우리 주소를 불러 알려 주는 방식) 이벤트 수신과 무결성 검증, 결제사별 대사, 배상 송금 포트(`CompensationTransferPort`, ADR-0046, 정산 지급과 구분하려고 2026-10-28 이름을 바꿨다, 기술 검토 낮음-088), 정산서·지급 묶음·미수금(파트너에게서 돌려받을 돈)과 결제사 지급대행(결제사가 PEAKET 대신 파트너 정산 계좌로 판매 대금을 보내는 서비스) 어댑터(ADR-0047) | PostgreSQL (결제 원장, 대체 결제사 전환 상태 `pg_switch`, ADR-0143) | 기본 | 결제사 포트(`PaymentGatewayPort`) 하나에 어댑터 둘(토스페이먼츠·포트원)과 결제 시도마다 고르는 선택기(ADR-0044), 배상 송금 포트(`CompensationTransferPort`) | gRPC (`purchase-svc`, `core-svc`, `ops-svc`가 호출), Webhook 수신 (`gw-partner` 경유), Kafka (Transactional Outbox), 제어 gRPC (명령 6의 대체 결제사 전환 수신, 파드마다 부르는 헤드리스 제어 Service. 판 번호와 함께 payment DB `pg_switch`에 쓴다, ADR-0143) | 외부 PG사(온라인 결제를 대신 처리해 주는 회사) 장애 격리, 결제 웹훅 수신 격리, 결제사 비밀 키 엄격 격리 |
-| ticket-svc | 전자 티켓 발권, 마이 티켓 월렛 조회, 양도 요청·수락·돌려주기·회수(결제자·보유자 구분, ADR-0046), Dynamic QR 검증용 기기 공개키 등록과 폐기 목록 관리, 게이트 스캐너 오프라인 동기화(회차 목록·변경분·입장 상태 공유), 스캔 수신과 서버 입장 판정·이상 표시·입장 기록 마감, 스캐너 기기 기록·배치, 부스 재발급 허용(ADR-0051) | PostgreSQL (티켓 원장, 다른 리전의 읽기 복제본 구성(티켓 원장 보존과 복구 기준점이고 리전 장애 당일 조회에는 쓰지 않는다, 기술 검토 중간-081). 리전은 클라우드 데이터센터가 모인 지역, 복제본은 원본을 복사해 두고 읽기를 나눠 받거나 장애 때 대신하는 저장소) | 기본 | 티켓 애그리거트(발권·양도·폐기 상태), 스캐너 동기화의 서버 변경 일련번호와 두 칸 버전 벡터(ADR-0051) | gRPC (`purchase-svc`, `core-svc`, `ops-svc`(스캐너 기기 관리)가 호출), REST (`gw-fan`, `gw-scanner` 경유), Kafka (발권과 폐기 이벤트 발행) | 다른 가용성 시간대: 공연 당일 현장 입장과 월렛 이용이 몰림 |
+| ticket-svc | 전자 티켓 발권, 마이 티켓 월렛 조회, 양도 요청·수락·돌려주기·회수(결제자·보유자 구분, ADR-0046), Dynamic QR 검증용 기기 공개키 등록과 폐기 목록 관리, 게이트 스캐너 오프라인 동기화(회차 목록·변경분·입장 상태 공유), 스캔 수신과 서버 입장 판정·이상 표시·입장 기록 마감, 스캐너 기기 기록·배치, 부스 재발급 허용(ADR-0051) | PostgreSQL (티켓 원장, 다른 리전의 읽기 복제본 구성(티켓 원장 보존과 복구 기준점이고 리전 장애 당일 조회에는 쓰지 않는다, 기술 검토 중간-081). 리전은 클라우드 데이터센터가 모인 지역, 복제본은 원본을 복사해 두고 읽기를 나눠 받거나 장애 때 대신하는 저장소), Redis (세션·캐시 클러스터 공유: 스캐너 기기 등록 코드 `scanner:enroll:*`, 스캐너 DPoP 증명 `jti` `scanner:dpop:*`, docs/data.md §3, 추천 적용 2026-10-30) | 기본 | 티켓 애그리거트(발권·양도·폐기 상태), 스캐너 동기화의 서버 변경 일련번호와 두 칸 버전 벡터(ADR-0051) | gRPC (`purchase-svc`, `core-svc`, `ops-svc`(스캐너 기기 관리, 승인된 양도 회수), `identity-svc`(기기 승인 로그인 때 기기 찾기, 추천 적용 2026-10-30)가 호출. ticket-svc는 `identity-svc`에 스캐너 세션을 확인한다), REST (`gw-fan`, `gw-scanner`, `gw-partner`(기기 배치·현장 현황) 경유. gw-partner 경로는 추천 적용 2026-10-30, §3.3 ticket-svc), Kafka (발권과 폐기 이벤트 발행) | 다른 가용성 시간대: 공연 당일 현장 입장과 월렛 이용이 몰림 |
 | realtime-gw | 좌석 홀드 변경분(델타)을 WebSocket(연결을 열어 둔 채 서버와 브라우저가 주고받는 통신 방식)으로 많은 접속자에게 나눠 보내기 (API 게이트웨이가 아닌 전용 스트리밍 서비스) | 전용 저장소 없음 (좌석 Redis의 Pub/Sub 채널만 실시간 구독) | 예외: 여러 연결에 나눠 보내는 무상태 스트리밍 서버. 업무 규칙과 저장소가 없어(좌석 Redis 채널을 구독만 한다) 도메인 층을 두지 않는다 | 구독한 구역별로 나눠 보내기, 100ms 묶음(ADR-0110) | WebSocket (`gw-fan` 경유), Redis 샤드 Pub/Sub 구독 (`SPUBLISH`) | 오래 유지되는 연결(Long-lived Connection) 수에 비례해 따로 수평 확장 |
-| identity-svc | 소셜 계정 식별자 관리, 활성 세션 제어, 액세스/리프레시 토큰 발급과 갱신(구매 권한과 사람 식별 해시 바인딩. 해시는 원래 값으로 되돌릴 수 없게 바꾼 고정 길이 값), 기기 바인딩, 휴대폰 본인확인 연계정보(CI: 본인확인 기관이 주는, 사람마다 하나인 연계 식별값) 관리, 관리 계정 인증(비밀번호 대조, 인증 앱이 시간에 따라 새로 만드는 일회용 코드인 TOTP 검증). 소셜 OAuth(다른 서비스 계정으로 로그인하게 하는 표준) 흐름 자체는 웹 앱 서버의 얇은 OIDC 클라이언트가 맡고(ADR-0119), 제공자 토큰은 identity에 도달하지 않는다 | PostgreSQL (identity·core가 Aurora 인스턴스 하나를 DB 스키마와 역할로 나눠 씀. ops는 2026-10-28 전용 클러스터로 옮겼다, ADR-0102), Redis (세션 클러스터 공유) | 기본 | 리프레시 토큰 회전과 재사용 탐지, 키 버전별 HMAC 조회(연계정보) | REST (`gw-fan`, `gw-partner`, `gw-ops`, `gw-scanner`(스캐너 기기 승인·토큰) 경유), gRPC (`purchase-svc`의 본인확인 상태 조회, 웹 화면을 만드는 프레임워크인 Next.js의 소비자 웹 앱 서버가 부르는 세션 생성·로그아웃 `SessionService`. 부르는 쪽은 메시 mTLS(양쪽이 서로 인증서를 확인하는 암호화 통신) 신원으로 확인한다, 추천 적용 2026-10-28, 기술 검토 중간-083), Kafka (세션 종료를 모두에게 알림) | 가장 높은 보안 경계: 연계정보(CI) HMAC(비밀 키로 만든 위조 확인용 값) 키, 토큰 서명 개인키, TOTP 암호화 키 격리, 오픈 직전 로그인 트래픽 집중 |
-| trust-svc | 접속 위험 점수 산출, 매크로 봇 판정, 악성 IP/기기 차단 목록 관리(차단 기기는 기기 가명마다 키 하나 `tr:block:{deviceRef}`, TTL 90일 [가정]. 이의가 인정되면 지운다, 추천 적용 2026-10-28, 기술 검토 중간-014), 추가 검증 큐 격리 | Redis (실시간 피처 저장소), ClickHouse (대량 이벤트 집계에 강한 분석용 데이터베이스, 원시 텔레메트리 신호) | 기본 | 점수기 목록 파이프라인(점수기(HumanCheck·DeviceTrust·BehaviorScore 등)를 모두 돌려 가중합으로 점수를 매기고, 확정 신호인 허니팟 적중·차단 기기 목록만 앞에서 판정을 끝낸다. 점수가 높으면 추가 검증 큐로 보낸다. 앞 단계가 처리하면 뒤로 넘기지 않는 '책임 연쇄'와 다르므로 그 이름은 쓰지 않는다, 추천 적용 2026-10-28, 기술 검토 낮음-063), 그림자 실행 규칙 | gRPC (`queue-svc`, `identity-svc`가 호출. 대기 중 격리는 `queue-svc` `IsolateWaiting`을 호출, ADR-0071), Kafka(대기 중 재평가 작업자 `trust-reassess`가 행동 신호를 읽어 Redis로 세고 후보를 낸다, ADR-0099) | OWASP(웹 보안 기준을 만드는 비영리 단체) A10 원칙을 따른다: 장애 때 무조건 통과가 아니라 캐시 규칙 기반 축소 운영을 강제하고, 탐지 규칙은 따로 자주 배포한다 |
-| ops-svc | 운영 명령 전달과 유효성 검증, 불변 감사 로그 기록, 관제 지표 집계 API, 승인 업무·CS 처리함(고객 문의 답변·진행 경과, 게시물 신고 처리 포함, ADR-0066)·회차 취소 판정·판매 승인(ADR-0045·0046) | PostgreSQL (ops 전용 Aurora 클러스터: 명령 이벤트 스토어, 감사 로그, SSE 알림 표 `ops_push_event`, ADR-0102), ClickHouse (시계열 관측 읽기 모델) | 기본. 예외: 운영 명령 기록만 Event Sourcing이다(명령의 상태는 덧붙이기만 하는 사건으로 정하고 감사 체인이 묶는다. 화면용 지금 상태는 같은 트랜잭션의 상태 표). 감사 기록이 곧 명령의 원본이어야 고치거나 지운 흔적을 체인으로 찾을 수 있기 때문이다. 따로 떨어진 읽기 저장소(CQRS)는 없다(추천 적용 2026-10-28, ADR-0113) | 2인 승인 상태 기계, 키를 건 해시 체인 감사 기록(ADR-0053) | REST(운영 명령·조회)·SSE(늘 여는 흐름·위젯 흐름) (`gw-ops` 경유, ADR-0100), 제어 gRPC (직접 제어 채널로 명령 송신, ADR-0102) | 제어 평면: 관제 전용 노드 풀과 전용 DB로 핫패스 노드·공유 저장소의 부하에서 떨어진다. 같은 클러스터·노드 프록시는 함께 쓰므로, 데이터 평면과 ops-svc가 함께 멈추면 긴급 명령은 비상 런북이 같은 제어 채널로 전한다(ADR-0102) |
-| core-svc | catalog 모듈(공연 정보, 공연장 맵(배치·좌석 두 층과 좌석맵 파일 게시, 좌석맵 템플릿 10종 읽기와 템플릿에서 만들기, 템플릿은 배포 때 넣는 읽기 전용 자료, ADR-0066), 가격 등급, 공연(회차 묶음)·공연장·아티스트·다른 이름(ADR-0093), 검색·자동완성(서버 메모리 사전)·관련 공연(검색 포트 `SearchIndex` 뒤, ADR-0094), 홈 피드와 홈 구성(배너·테마), 판매자 신원정보와 판매 승인 상태, 공연예술통합전산망 1일 전송), notify 모듈(이메일, 알림톡, Web Push, 파트너 웹훅 발송 워커. 웹훅 발송은 나가는 통신을 '공인 주소 443만'으로 연 전용 배포 `core-webhook-dispatcher`에서만 돈다, 기술 검토 중간-061), shop 모듈(굿즈, 티켓 연동 부가 상품, 장바구니, MD 주문, 한정 재고), review 모듈(관람 후기와 작성 자격 확인(ticket-svc 조회), 후기 사진(받기·결과 반영·파생본 게시), 게시물 신고 접수와 신고기관 바로가기, 신고 처리 조치(임시조치·노출 차단·불법 촬영물 신고 가림) 반영, 법정 통보 게시물 노출 차단. 기대평은 없앴다, ADR-0063·0066), support 모듈(고객 문의 접수·내 문의 목록·상세·추가 문의, 답변·진행 경과 기록, 문의 닫기와 3년 보존 뒤 파기, ADR-0066). 이미지 처리 작업 `image-worker`: 같은 이미지의 다른 진입점으로 띄운 별도 배포다. 공연 이미지·홈 배너·후기 사진의 디코딩·화소 검사·다시 인코딩을 여기서만 한다(QR·바코드 자동 거르기는 두지 않는다, 기술 검토 낮음-158, POL-042). DB·Kafka·Redis 자격 증명이 없고 격리 버킷 읽기·파생본 쓰기 권한만 있다(꾸민 이미지가 네이티브 디코더 취약점을 터뜨려도 core-svc의 DB 자격 증명에 닿지 않게 한다, docs/security/asvs/catalog-review.md 5.4.3, 추천 적용 2026-10-28, 기술 검토 중간-068) | PostgreSQL(굿즈·부가 상품 정의 `product`의 유형별 속성은 JSONB 칸, ADR-0101. 알림·파트너 웹훅 발송 작업과 원장, 워커가 `FOR UPDATE SKIP LOCKED`로 가져감, ADR-0109), Redis (읽기 모델 캐시, 재고 차감) | 기본(다섯 모듈 모두) | catalog: 읽기 캐시(Redis의 카탈로그 값은 캐시이고, 검색 읽기 모델은 같은 트랜잭션에서 고친다)와 검색 포트(`SearchIndex`, ADR-0094·0113), notify: DB 발송 원장을 `FOR UPDATE SKIP LOCKED`로 가져가는 워커(ADR-0109), shop: MD 주문 애그리거트 | REST (미리 그려 두고 정해진 주기로 다시 그리는 ISR의 소스, `gw-fan`, `gw-partner` 경유), gRPC (shop → `ticket-svc`, `payment-svc`, review → `ticket-svc`, 작업 워커 → `image-worker`. `ops-svc`의 판매 승인 결과·게시물 조치·CS 처리함·홈 구성 반영 호출을 받는다), Kafka | 트래픽 부하가 비교적 낮고 가용성 요구가 보통이라, 운영 복잡도를 줄이려고 한 서비스로 합쳤다 |
+| identity-svc | 소셜 계정 식별자 관리, 활성 세션 제어, 액세스/리프레시 토큰 발급과 갱신(구매 권한과 사람 식별 해시 바인딩. 해시는 원래 값으로 되돌릴 수 없게 바꾼 고정 길이 값), 기기 바인딩, 휴대폰 본인확인 연계정보(CI: 본인확인 기관이 주는, 사람마다 하나인 연계 식별값) 관리, 관리 계정 인증(비밀번호 대조, 인증 앱이 시간에 따라 새로 만드는 일회용 코드인 TOTP 검증). 소셜 OAuth(다른 서비스 계정으로 로그인하게 하는 표준) 흐름 자체는 웹 앱 서버의 얇은 OIDC 클라이언트가 맡고(ADR-0119), 제공자 토큰은 identity에 도달하지 않는다 | PostgreSQL (identity·core가 Aurora 인스턴스 하나를 DB 스키마와 역할로 나눠 씀. ops는 2026-10-28 전용 클러스터로 옮겼다, ADR-0102), Redis (세션 클러스터 공유) | 기본 | 리프레시 토큰 회전과 재사용 탐지, 키 버전별 HMAC 조회(연계정보) | REST (`gw-fan`, `gw-partner`, `gw-ops`, `gw-scanner`(스캐너 기기 승인·토큰) 경유), gRPC (`purchase-svc`의 본인확인 상태 조회, `ticket-svc`의 스캐너 세션 확인(추천 적용 2026-10-30, §3.3 ticket-svc), `queue-svc`의 본인확인 재통과 확인, `core-svc` 팬 알림 발송 워커의 받는 사람 묶음 조회, `ops-svc`의 관리 계정 세션 강제 종료·지정 조회(넷은 추천 적용 2026-10-30, §3.2). identity-svc는 기기 승인 로그인 때 `ticket-svc`에 기기를 찾는다, 웹 화면을 만드는 프레임워크인 Next.js의 소비자 웹 앱 서버가 부르는 세션 생성·로그아웃 `SessionService`. 부르는 쪽은 메시 mTLS(양쪽이 서로 인증서를 확인하는 암호화 통신) 신원으로 확인한다, 추천 적용 2026-10-28, 기술 검토 중간-083), Kafka (세션 종료를 모두에게 알림) | 가장 높은 보안 경계: 연계정보(CI) HMAC(비밀 키로 만든 위조 확인용 값) 키, 토큰 서명 개인키, TOTP 암호화 키 격리, 오픈 직전 로그인 트래픽 집중 |
+| trust-svc | 접속 위험 점수 산출, 매크로 봇 판정, 악성 IP/기기 차단 목록 관리(차단 기기는 기기 가명마다 키 하나 `tr:block:{deviceRef}`, TTL 90일 [가정]. 이의가 인정되면 지운다, 추천 적용 2026-10-28, 기술 검토 중간-014), 추가 검증 큐 격리 | Redis (실시간 피처 저장소), ClickHouse (대량 이벤트 집계에 강한 분석용 데이터베이스, 원시 텔레메트리 신호) | 기본 | 점수기 목록 파이프라인(점수기(HumanCheck·DeviceTrust·BehaviorScore 등)를 모두 돌려 가중합으로 점수를 매기고, 허니팟 적중·차단 기기 목록 같은 확정 신호만 앞에서 판정을 끝낸다. 확정 신호는 판정을 일찍 끝내는 신호이고 '봇 확정' 라벨이 아니다. 그때도 판정은 추가 검증이고 점수기는 모두 돈다(FR-049, ADR-0039, 추천 적용 2026-10-30, docs/features/bot-defense.md §4.3, ADR-0156 결정 2). 점수가 높으면 추가 검증 큐로 보낸다. 앞 단계가 처리하면 뒤로 넘기지 않는 '책임 연쇄'와 다르므로 그 이름은 쓰지 않는다, 추천 적용 2026-10-28, 기술 검토 낮음-063), 그림자 실행 규칙 | gRPC (`queue-svc`, `identity-svc`가 호출. 대기 중 격리는 `queue-svc` `IsolateWaiting`을 호출, ADR-0071. `ops-svc`가 표본 검토·부정구매 확인·이의 결과를 라벨 반영으로 보내고, 이의 심사 화면의 판정 근거를 읽는다(판정 근거 읽기는 추천 적용 2026-10-30)), REST (`gw-fan`이 허니팟 경로 `/_t/*`를 허니팟 기록 처리기로 넘긴다. 이 둘은 추천 적용 2026-10-30, docs/features/bot-defense.md §7·§9·§12), Kafka(대기 중 재평가 작업자 `trust-reassess`가 행동 신호를 읽어 Redis로 세고 후보를 낸다, ADR-0099) | OWASP(웹 보안 기준을 만드는 비영리 단체) A10 원칙을 따른다: 장애 때 무조건 통과가 아니라 캐시 규칙 기반 축소 운영을 강제하고, 탐지 규칙은 따로 자주 배포한다 |
+| ops-svc | 운영 명령 전달과 유효성 검증, 불변 감사 로그 기록, 관제 지표 집계 API, 승인 업무·CS 처리함(고객 문의 답변·진행 경과, 게시물 신고 처리 포함, ADR-0066)·회차 취소 판정·판매 승인(ADR-0045·0046) | PostgreSQL (ops 전용 Aurora 클러스터: 명령 이벤트 스토어, 감사 로그, SSE(서버가 브라우저로 한 방향으로 계속 보내는 통신 방식) 알림 표 `ops_push_event`, ADR-0102), ClickHouse (시계열 관측 읽기 모델) | 기본. 예외: 운영 명령 기록만 Event Sourcing이다(명령의 상태는 덧붙이기만 하는 사건으로 정하고 감사 체인이 묶는다. 화면용 지금 상태는 같은 트랜잭션의 상태 표). 감사 기록이 곧 명령의 원본이어야 고치거나 지운 흔적을 체인으로 찾을 수 있기 때문이다. 따로 떨어진 읽기 저장소(CQRS)는 없다(추천 적용 2026-10-28, ADR-0113) | 2인 승인 상태 기계, 키를 건 해시 체인 감사 기록(ADR-0053) | REST(운영 명령·조회)·SSE(늘 여는 흐름·위젯 흐름) (`gw-ops` 경유, ADR-0100), 제어 gRPC (직접 제어 채널로 명령 송신, ADR-0102) | 제어 평면: 관제 전용 노드 풀과 전용 DB로 핫패스 노드·공유 저장소의 부하에서 떨어진다. 같은 클러스터·노드 프록시는 함께 쓰므로, 데이터 평면과 ops-svc가 함께 멈추면 긴급 명령은 비상 런북이 같은 제어 채널로 전한다(ADR-0102) |
+| core-svc | catalog 모듈(공연 정보, 공연장 맵(배치·좌석 두 층과 좌석맵 파일 게시, 좌석맵 템플릿 10종 읽기와 템플릿에서 만들기, 템플릿은 배포 때 넣는 읽기 전용 자료, ADR-0066), 가격 등급, 공연(회차 묶음)·공연장·아티스트·다른 이름(ADR-0093), 검색·자동완성(서버 메모리 사전)·관련 공연(검색 포트 `SearchIndex` 뒤, ADR-0094), 홈 피드와 홈 구성(배너·테마), 판매자 신원정보와 판매 승인 상태, 공연예술통합전산망 1일 전송), notify 모듈(이메일, 알림톡, Web Push, 파트너 웹훅 발송 워커. 웹훅 발송은 나가는 통신을 '공인 주소 443만'으로 연 전용 배포 `core-webhook-dispatcher`에서만 돈다, 기술 검토 중간-061), shop 모듈(굿즈, 티켓 연동 부가 상품, 장바구니, MD 주문, 한정 재고), review 모듈(관람 후기와 작성 자격 확인(ticket-svc 조회), 후기 사진(받기·결과 반영·파생본 게시), 게시물 신고 접수와 신고기관 바로가기, 신고 처리 조치(임시조치·노출 차단·불법 촬영물 신고 가림) 반영, 법정 통보 게시물 노출 차단. 기대평은 없앴다, ADR-0063·0066), support 모듈(고객 문의 접수·내 문의 목록·상세·추가 문의, 답변·진행 경과 기록, 문의 닫기와 3년 보존 뒤 파기, ADR-0066). 이미지 처리 작업 `image-worker`: 같은 이미지의 다른 진입점으로 띄운 별도 배포다. 공연 이미지·홈 배너·후기 사진의 디코딩·화소 검사·다시 인코딩을 여기서만 한다(QR·바코드 자동 거르기는 두지 않는다, 기술 검토 낮음-158, POL-042). DB·Kafka·Redis 자격 증명이 없고 격리 버킷 읽기·파생본 쓰기 권한만 있다(꾸민 이미지가 네이티브 디코더 취약점을 터뜨려도 core-svc의 DB 자격 증명에 닿지 않게 한다, docs/security/asvs/catalog-review.md 5.4.3, 추천 적용 2026-10-28, 기술 검토 중간-068) | PostgreSQL(굿즈·부가 상품 정의 `product`의 유형별 속성은 JSONB 칸, ADR-0101. 알림·파트너 웹훅 발송 작업과 원장, 워커가 `FOR UPDATE SKIP LOCKED`로 가져감, ADR-0109), Redis (읽기 모델 캐시, 재고 차감) | 기본(다섯 모듈 모두) | catalog: 읽기 캐시(Redis의 카탈로그 값은 캐시이고, 검색 읽기 모델은 같은 트랜잭션에서 고친다)와 검색 포트(`SearchIndex`, ADR-0094·0113), notify: DB 발송 원장을 `FOR UPDATE SKIP LOCKED`로 가져가는 워커(ADR-0109), shop: MD 주문 애그리거트 | REST (미리 그려 두고 정해진 주기로 다시 그리는 ISR의 소스, `gw-fan`, `gw-partner` 경유), gRPC (shop → `ticket-svc`, `payment-svc`, review → `ticket-svc`, 작업 워커 → `image-worker`, 팬 알림 발송 워커 `core-notify-sender` → `identity-svc`(받는 사람 묶음 조회, 추천 적용 2026-10-30). `ops-svc`의 판매 승인 결과·게시물 조치·CS 처리함·홈 구성 반영 호출을 받는다), Kafka | 트래픽 부하가 비교적 낮고 가용성 요구가 보통이라, 운영 복잡도를 줄이려고 한 서비스로 합쳤다 |
 
 - **고객 문의·게시물 신고와 CS 처리함의 연결(추천 적용 2026-10-19, ADR-0066)**:
   - **설계 원칙 (부하·보안 격리)**: 팬의 대량 트래픽이 비상 킬스위치와 모니터링을 맡는 `ops-svc`(제어 평면)에 직접 닿지 않도록 게이트웨이와 노드 풀을 나눕니다. `ops-svc`는 관제 전용 노드 풀에서 돌고, 같은 클러스터 네트워크와 노드 프록시는 함께 씁니다(2026-10-28 ADR-0102에 맞춤).
@@ -271,17 +277,17 @@ flowchart LR
 
 | 통신 방식 | 적용 경로 및 구간 | 통신 규칙 및 아키텍처 제약 |
 | --- | --- | --- |
-| gRPC (동기 RPC) | `purchase-svc` → `payment-svc`(결제창 준비·승인·취소·새 결제 일시 정지 조회, 결과 사건이 5초 [가정] 안에 오지 않을 때의 결과 당기기 `BatchGetPayments`, ADR-0140)·`ticket-svc` (단, inventory와 booking은 한 서비스 안이므로 함수를 직접 호출), `core-svc` shop → `ticket-svc`·`payment-svc`, `core-svc` review → `ticket-svc`(후기 작성 자격 `CheckReviewEligibility`), `queue-svc`·`identity-svc` → `trust-svc` (로비·사전 검증·로그인 때 위험 판정), `trust-svc` → `queue-svc` (대기 중 재평가로 건 격리 `IsolateWaiting`, ADR-0071), `purchase-svc` → `identity-svc` (결제 직전 본인확인 검증), 소비자 웹 앱 서버(OIDC 클라이언트) → `identity-svc` `SessionService`(소셜 로그인 뒤 세션 생성 `CreateSession`과 로그아웃 `EndSession`. 같은 로그인 시도는 멱등 키로 세션을 하나만 만든다. 이전의 '메시 mTLS 내부 호출' 행을 합쳤다, 추천 적용 2026-10-28, 기술 검토 중간-083. 파트너 로그인은 `gw-partner` → `identity-svc` 관리 계정 로그인으로 옮겼다, ADR-0119), `ops-svc` → `payment-svc`(지급 묶음 승인 뒤 지급 요청)·`purchase-svc`(회차 취소 일괄 환불)·`core-svc`(판매 승인 결과, 게시물 조치, support 모듈의 CS 건 상세 읽기·답변·진행 경과·문의 닫기, catalog 모듈의 홈 구성·아티스트·공연장·다른 이름 반영)·`ticket-svc`(스캐너 기기 등록·폐기·등록 코드 새로 만들기. 기기 원장의 주인은 ticket-svc이고 ops-svc는 권한 확인과 감사 기록 뒤 부른다, 추천 적용 2026-10-29)·`identity-svc`(이의 제기·소명 건이 열리고 닫힐 때 계정 병합을 막는 건 알림 `SetAccountHold`, 스캐너 기기 목록에 합칠 기기별 지금 세션 별명 읽기 `ListActiveScannerSessions`, 추천 적용 2026-10-29, ADR-0148), `identity-svc` → `purchase-svc`·`ticket-svc`·`core-svc`(계정 병합 제안을 만들 때와 확정 바로 앞에 막는 사유 확인 `CheckAccountMerge`, 추천 적용 2026-10-29, ADR-0148), `core-svc` → `payment-svc`(판매 승인 때 지급대행 판매자 등록), `core-svc` 작업 워커 → `image-worker`(이미지 처리 맡기기. 원본 키와 종류만 보내고 상태·파생본 키·폭·높이·거절 사유를 받는다, 추천 적용 2026-10-28, 기술 검토 중간-068). 호출마다의 요청·응답 모양과 멱등 키는 docs/api/proto/README.md의 초안에 있다(추천 적용 2026-10-22) | Protocol Buffers 기반의 엄격한 스키마 계약을 따른다(`peaket-contracts`, `buf breaking` CI 검증). HTTP/2 다중화 연결, 데드라인(Deadline) 전파. 연결 하나에 요청이 쏠리는 것을 막으려고 서비스 메시 기반 L7 로드밸런싱을 적용한다(`ADR-0010`). 받는 쪽은 메시 신원 허용 목록으로 부르는 쪽을 확인한다. identity-svc의 `SessionService`는 소비자 웹 앱 서버 신원만 받는다(`ADR-0011`, I-T15·I-T50) |
-| Kafka (비동기 이벤트) | 거래 이벤트: 주문·결제·좌석 확정·발권은 PostgreSQL Transactional Outbox 패턴, 좌석 홀드와 세션 이벤트는 Redis Stream 릴레이, `acks=all`, 파티션(토픽을 나눈 칸. 순서는 칸 안에서만 지켜진다) 키는 회차 ID `eventId`(공연은 회차 묶음이라 키가 아니다, docs/streaming.md §7). 대량 텔레메트리: 진입 로그, 사용자 행동 신호(브라우저 RUM은 Kafka를 거치지 않는다. `telemetry.rum`은 예약, ADR-0076), 토픽(메시지를 종류별로 모아 두는 통로)마다 키는 docs/streaming.md §7(ADR-0026·0071). 제어·보안 이벤트: 운영 파라미터 변경(압축 토픽 `control.settings`, ops-svc Outbox), 세션 강제 종료(모두에게 보냄, identity-svc Outbox, ADR-0143). 이 둘은 서비스 단위 소비자 그룹이 아니라 파드마다 따로 모든 파티션을 읽고, 새로 뜬 파드는 시작할 때 다시 읽는다(추천 적용 2026-10-28, ADR-0103). 고객 문의·게시물 신고 접수: core-svc Outbox → ops-svc CS 처리함 건 등록(§3.1 아래, ADR-0066) | Apache Avro + Confluent Schema Registry (BACKWARD_TRANSITIVE 호환성 보장, ADR-0054), 멱등 컨슈머(메시지를 읽는 쪽) 구현. 서비스 소비자는 파티션 안에서 업무 키(주문 ID 등) 단위로 동시에 처리하고, 앞 사건이 모두 끝난 위치까지만 커밋한다(ADR-0142). 처리 못 하는 사건은 Kafka 데드 레터 토픽이 아니라 그 서비스 DB의 보류 표 `held_event`로 옮기고, 같은 업무 키의 뒤 사건도 함께 보류한다(ADR-0142). 클라이언트 필수 설정은 docs/streaming.md §2.6이다. 세부 명세는 `docs/api/asyncapi.yaml`을, Avro 스키마 초안과 등록 규칙은 docs/api/avro/README.md를 본다(추천 적용 2026-10-22) |
+| gRPC (동기 RPC) | `purchase-svc` → `payment-svc`(결제창 준비·승인·취소·새 결제 일시 정지 조회, 결과 사건이 5초 [가정] 안에 오지 않을 때의 결과 당기기 `BatchGetPayments`, ADR-0140)·`ticket-svc` (단, inventory와 booking은 한 서비스 안이므로 함수를 직접 호출), `core-svc` shop → `ticket-svc`·`payment-svc`, `core-svc` review → `ticket-svc`(후기 작성 자격 `CheckReviewEligibility`), `queue-svc`·`identity-svc` → `trust-svc` (로비·사전 검증·로그인 때 위험 판정), `trust-svc` → `queue-svc` (대기 중 재평가로 건 격리 `IsolateWaiting`, ADR-0071), `purchase-svc` → `identity-svc` (결제 직전 본인확인 검증), 소비자 웹 앱 서버(OIDC 클라이언트) → `identity-svc` `SessionService`(소셜 로그인 뒤 세션 생성 `CreateSession`과 로그아웃 `EndSession`. 같은 로그인 시도는 멱등 키로 세션을 하나만 만든다. 이전의 '메시 mTLS 내부 호출' 행을 합쳤다, 추천 적용 2026-10-28, 기술 검토 중간-083. 파트너 로그인은 `gw-partner` → `identity-svc` 관리 계정 로그인으로 옮겼다, ADR-0119), `ops-svc` → `payment-svc`(지급 묶음 승인 뒤 지급 요청)·`purchase-svc`(회차 취소 일괄 환불)·`core-svc`(판매 승인 결과, 게시물 조치, support 모듈의 CS 건 상세 읽기·답변·진행 경과·문의 닫기, catalog 모듈의 홈 구성·아티스트·공연장·다른 이름 반영)·`ticket-svc`(스캐너 기기 등록·폐기·등록 코드 새로 만들기. 기기 원장의 주인은 ticket-svc이고 ops-svc는 권한 확인과 감사 기록 뒤 부른다, 추천 적용 2026-10-29. 승인 업무가 승인된 양도 회수의 실행 `ReclaimTicket`, docs/features/transfer-refund.md §4, 추천 적용 2026-10-30)·`identity-svc`(이의 제기·소명 건이 열리고 닫힐 때 계정 병합을 막는 건 알림 `SetAccountHold`, 스캐너 기기 목록에 합칠 기기별 지금 세션 별명 읽기 `ListActiveScannerSessions`, 추천 적용 2026-10-29, ADR-0148. 관리 계정 세션 강제 종료 `TerminateAdminSessions`, 감사 기록 ID로 멱등, docs/features/control-tower.md §12. 지정된 사람만 하는 작업 앞의 지정 조회 `GetAdminDesignations`, 5초 [가정] 캐시, docs/security/authz-matrix.md §3.1. 둘은 추천 적용 2026-10-30)·`trust-svc`(봇 판정 표본 검토·CS 부정구매 확인·이의 인정의 라벨 반영 `ApplyLabel`. trust-svc가 차단 기기 키를 올리거나 지운다. 건 ID와 판 번호로 멱등이다, docs/features/bot-defense.md §9·§12. 이의 심사 화면의 판정 근거 읽기 `GetVerdictEvidence`, 점수 원값 없음, 추천 적용 2026-10-30)·`queue-svc`(봇 판정 이의 내용 읽기 `GetVerificationAppeal`과 결과 반영 `ResolveVerificationAppeal`(인정 `PASSED`, 기각이면 대기 참여를 끝냄), bot-defense §12)(trust-svc·queue-svc 호출은 추천 적용 2026-10-30, ADR-0156 결정 14), `ticket-svc` → `identity-svc`(스캐너 경로 가드가 스태프 토큰 요청마다 하는 스캐너 세션 확인 `CheckScannerSession`, 5초 [가정] 캐시, docs/features/offline-gate.md §6 흐름도, 추천 적용 2026-10-30), `queue-svc` → `identity-svc`(추가 검증 제출의 본인확인 재통과 확인 `CheckReverification`, docs/features/bot-defense.md §5.2, 추천 적용 2026-10-30), `core-svc` 팬 알림 발송 워커(`core-notify-sender`) → `identity-svc`(대량 발송 조각의 받는 사람 묶음 조회 `BatchGetRecipients`, 계정 500개 [가정], 읽기 전용 복제본, docs/features/notify.md §2.1 E6·§4.2, 추천 적용 2026-10-30), `identity-svc` → `ticket-svc`(스캐너 기기 승인 로그인 때 기기 키 지문으로 등록 기기와 상태를 찾는 `GetScannerDeviceByCredential`, docs/features/identity.md §6.1, 추천 적용 2026-10-30), `identity-svc` → `purchase-svc`·`ticket-svc`·`core-svc`(계정 병합 제안을 만들 때와 확정 바로 앞에 막는 사유 확인 `CheckAccountMerge`, 추천 적용 2026-10-29, ADR-0148), `core-svc` → `payment-svc`(판매 승인 때 지급대행 판매자 등록), `core-svc` 작업 워커 → `image-worker`(이미지 처리 맡기기. 원본 키와 종류만 보내고 상태·파생본 키·폭·높이·거절 사유를 받는다, 추천 적용 2026-10-28, 기술 검토 중간-068). 호출마다의 요청·응답 모양과 멱등 키는 docs/api/proto/README.md의 초안에 있다(추천 적용 2026-10-22) | Protocol Buffers 기반의 엄격한 스키마 계약을 따른다(`peaket-contracts`, `buf breaking` CI 검증). HTTP/2 다중화 연결, 데드라인(Deadline) 전파. 연결 하나에 요청이 쏠리는 것을 막으려고 서비스 메시(서비스끼리 주고받는 통신을 앱 대신 처리하는 층) 기반 L7 로드밸런싱을 적용한다(`ADR-0010`). 받는 쪽은 메시 신원 허용 목록으로 부르는 쪽을 확인한다. identity-svc의 `SessionService`는 소비자 웹 앱 서버 신원만 받는다(`ADR-0011`, I-T15·I-T50) |
+| Kafka (비동기 이벤트) | 거래 이벤트: 주문·결제·좌석 확정·발권은 PostgreSQL Transactional Outbox 패턴, 좌석 홀드와 세션 이벤트는 Redis Stream 릴레이, `acks=all`, 파티션(토픽을 나눈 칸. 순서는 칸 안에서만 지켜진다) 키는 회차 ID `eventId`(공연은 회차 묶음이라 키가 아니다, docs/streaming.md §7). 대량 텔레메트리: 진입 로그, 사용자 행동 신호(브라우저 RUM은 Kafka를 거치지 않는다. `telemetry.rum`은 예약, ADR-0076), 토픽(메시지를 종류별로 모아 두는 통로)마다 키는 docs/streaming.md §7(ADR-0026·0071). 제어·보안 이벤트: 운영 파라미터 변경(압축 토픽 `control.settings`, ops-svc Outbox), 세션 강제 종료(모두에게 보냄, identity-svc Outbox, ADR-0143). 이 둘은 서비스 단위 소비자 그룹이 아니라 파드마다 따로 모든 파티션을 읽고, 새로 뜬 파드는 시작할 때 다시 읽는다(추천 적용 2026-10-28, ADR-0103). 고객 문의·게시물 신고 접수: core-svc Outbox → ops-svc CS 처리함 건 등록(§3.1 아래, ADR-0066). 봇 판정 이의 제기: queue-svc → 같은 토픽(`support.cases-requested`)의 `VERIFICATION_APPEAL` 건 요청. queue-svc는 DB가 없어 Outbox 없이 보내고, 보내지 못하면 화면에 503으로 답해 다시 보내게 한다(추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14) | Apache Avro + Confluent Schema Registry (BACKWARD_TRANSITIVE 호환성 보장, ADR-0054), 멱등 컨슈머(메시지를 읽는 쪽) 구현. 서비스 소비자는 파티션 안에서 업무 키(주문 ID 등) 단위로 동시에 처리하고, 앞 사건이 모두 끝난 위치까지만 커밋한다(ADR-0142). 처리 못 하는 사건은 Kafka 데드 레터 토픽이 아니라 그 서비스 DB의 보류 표 `held_event`로 옮기고, 같은 업무 키의 뒤 사건도 함께 보류한다(ADR-0142). 클라이언트 필수 설정은 docs/streaming.md §2.6이다. 세부 명세는 `docs/api/asyncapi.yaml`을, Avro 스키마 초안과 등록 규칙은 docs/api/avro/README.md를 본다(추천 적용 2026-10-22) |
 | Redis 샤드 Pub/Sub | `purchase-svc` → `realtime-gw` 좌석 변경분 델타 전송 (회차와 구역별 전용 샤드 채널 `s:{event:E}:sec:{section}`) | 같은 좌석 바운디드 컨텍스트 안에서 빠르게 모두에게 보내는 데만 쓴다 (`SPUBLISH`) |
 | 제어 gRPC(직접 제어 채널, 제어 평면) | `ops-svc`·비상 런북 Job → `admission-ctrl` (동시 입장 목표 조절, 입장 일시정지, 판매 일시정지의 범위 안 serving 전진 멈춤, 자동화 정지(명령 11, 제어 이벤트와 함께), K8s 리더 전용 제어 Service), `purchase-svc` (비상 킬스위치를 쿠버네티스에서 앱이 실행되는 가장 작은 단위인 파드마다 보냄, 헤드리스 제어 Service), `queue-svc` (대기실 긴급 공지, 판매 일시정지 때 대기 상태 파일의 판매 상태), `payment-svc` (명령 6의 대체 결제사 전환을 준비된 모든 파드에 보냄, payment DB `pg_switch`에 판 번호와 함께 둔다. admission-ctrl 리더도 같은 명령으로 동시 입장 목표 상한을 다시 계산한다, ADR-0143). 받는 쪽은 판 번호가 붙은 제어 상태를 자기 저장소에 먼저 두고, 판매 일시정지(명령 3)는 세 곳에서 집행하는 모든 곳이 그 판을 적용해야 ACKED다(docs/features/control-tower.md §5, ADR-0062·0103). 그 밖의 일반 명령은 Kafka 이벤트나 서비스 API를 쓴다 | 계약은 `peaket.control.v1.ControlReceiver/ApplyControl`(protobuf, `buf breaking`)이고, 업무 포트와 다른 제어 포트를 웨이포인트 없는 제어 전용 Service로 받는다. 데드라인 1초 [가정], 명령 ID·판 번호로 멱등. Kafka·게이트웨이·웨이포인트를 거치지 않아 그 적체와 L7 프록시 대기열에 막히지 않는다. 같은 클러스터 네트워크·노드 프록시와 받는 프로세스의 이벤트 루프는 데이터 요청과 함께 쓰므로 '대역 외'는 아니다(소유자 승인 2026-10-28 '추천안 동의', ADR-0102. NestJS TCP 트랜스포터는 쓰지 않는다) |
-| REST (HTTP/JSON) | 외부 클라이언트 ↔ API 게이트웨이 사이의 통신에만 쓴다. 내부 서비스끼리의 통신에는 REST를 절대 쓰지 않는다. 관측 도구와의 연결(Prometheus 지표 긁기, 상태 확인, Alertmanager가 ops-svc로 보내는 경보 웹훅)은 서비스 사이 업무 통신이 아니라 이 규칙 밖이다. 경보 웹훅 포트는 메시 신원 alertmanager만 받는다(추천 적용 2026-10-29, ADR-0145 결정 9) | OpenAPI 3.1 스펙을 따르고(`docs/api/openapi.yaml`), RFC 9457 Problem Details 표준 에러 응답 형식을 쓴다 |
+| REST (HTTP/JSON) | 외부 클라이언트 ↔ API 게이트웨이 사이의 통신에만 쓴다. 내부 서비스끼리의 통신에는 REST를 절대 쓰지 않는다. 게이트웨이가 요청을 넘기는 서비스는 §3 ② 그림과 §4 표에 있다. `gw-fan` → `trust-svc`(허니팟 경로 `/_t/*`)도 브라우저 요청을 그대로 넘기는 게이트웨이 경로이고, 서비스 사이 호출이 아니다(추천 적용 2026-10-30, docs/features/bot-defense.md §7, ADR-0156 결정 9). 관측 도구와의 연결(Prometheus 지표 긁기, 상태 확인, Alertmanager가 ops-svc로 보내는 경보 웹훅)은 서비스 사이 업무 통신이 아니라 이 규칙 밖이다. 경보 웹훅 포트는 메시 신원 alertmanager만 받는다(추천 적용 2026-10-29, ADR-0145 결정 9) | OpenAPI 3.1 스펙을 따르고(`docs/api/openapi.yaml`), RFC 9457 Problem Details 표준 에러 응답 형식을 쓴다 |
 
 REST(JSON/HTTP 1.1)·gRPC·Nest TCP를 같은 페이로드로 견주는 프로토콜 비교 시험은 하지 않는다. 제어 명령까지 gRPC 하나로 모아 비교할 Nest TCP가 없어졌고, REST는 외부 클라이언트 구간에만 쓰는 규칙이라 내부 호출과 견줄 일이 없다(추천 적용 2026-10-28, ADR-0102).
 
 ### 3.3 서비스 안 구성 요소(C4 3단계)
 
-서비스 하나의 안쪽을 모듈 단위로 확대한 그림이다. §1의 1단계(시스템 맥락)와 §3의 2단계(컨테이너)에 이어지며, §3.1 서비스 맵의 모듈과 책임을 그대로 그렸고 새 결정은 없다. 그림의 구성 요소 이름은 추천 적용(2026-10-22, ADR-0084)이다. 서비스 사이 호출의 모양은 docs/api/proto/README.md에 있다. 지금은 예매 핵심 경로의 세 묶음만 그렸고, 나머지 서비스는 상세 설계를 쓸 때 함께 그린다(review/open-items.md 29번, ADR-0090).
+서비스 하나의 안쪽을 모듈 단위로 확대한 그림이다. §1의 1단계(시스템 맥락)와 §3의 2단계(컨테이너)에 이어지며, §3.1 서비스 맵의 모듈과 책임, §3.2 통신 표, 기능 설계서의 흐름을 그대로 그렸고 새 결정은 없다. 그림의 구성 요소 이름은 추천 적용이다(예매 핵심 경로의 세 묶음은 2026-10-22, ADR-0084. ops-svc·identity-svc·ticket-svc·trust-svc는 추천 적용 2026-10-30). 서비스 사이 호출의 모양은 docs/api/proto/README.md에 있다. 예매 핵심 경로의 세 묶음(purchase-svc, payment-svc, queue-svc와 admission-ctrl)에 이어, 상세 설계가 있는 ops-svc(docs/features/control-tower.md), identity-svc(docs/features/identity.md), ticket-svc(docs/features/offline-gate.md, docs/features/transfer-refund.md), trust-svc(docs/features/bot-defense.md)를 그렸다. core-svc는 굿즈·후기·문의 기능 설계를 쓸 때 그린다(review/open-items.md 29번, ADR-0090).
 
 **purchase-svc**
 
@@ -401,15 +407,274 @@ flowchart LR
 
 - 셔플 결과 파일은 admission-ctrl의 리더가 만들어 게시한다(docs/features/queue-admission.md §2, 이 문서 §9.4).
 
+**trust-svc**
+
+판정 요청은 점수기 목록 파이프라인 하나로 모이고, 대기 중 재평가는 따로 도는 작업자 `trust-reassess`가 Kafka와 Redis로 센다. 구성 요소 이름과 라벨 반영·허니팟 기록의 두 입구는 상세 설계(docs/features/bot-defense.md)의 추천 적용(2026-10-30)이다. 라벨 반영은 `TrustLabelService/ApplyLabel`이고, 허니팟 기록은 gRPC가 아니라 gw-fan이 넘기는 HTTP 경로다. 둘 다 docs/api/proto/README.md §3·§4에 있다(2026-10-30 확인, 추천 적용 2026-10-30). 같은 날 CS 이의 심사의 판정 근거 읽기 `TrustEvidenceService/GetVerdictEvidence`를 라벨 반영 구성 요소에 더했다(ops-svc만 부른다, docs/features/bot-defense.md §12). 관리 로그인의 사람 확인 토큰은 이 서비스가 아니라 identity-svc가 검증한다(bot-defense §6).
+
+```mermaid
+flowchart LR
+    %% trust-svc 구성 요소(C4 3단계). 상자 종류는 라벨의 [Component]·[Container]·[Container DB]·[Container Queue]·[External System]이다(planning/03 §5.5, ADR-0138)
+    q4["queue-svc<br/>[Container: gRPC]"]:::container
+    idn4["identity-svc<br/>[Container: gRPC]"]:::container
+    gwf4["gw-fan<br/>[Container: Envoy]<br/>허니팟 경로 입구"]:::container
+    ops4["ops-svc<br/>[Container: gRPC]"]:::container
+    subgraph ts["trust-svc"]
+        api["판정 수신<br/>[Component: NestJS gRPC]<br/>ScoreRisk, 데드라인"]:::component
+        pipe["판정 파이프라인<br/>[Component: 점수기 목록]<br/>확정 신호 → 점수기 여섯 → 가중합, 그림자 판"]:::component
+        hc["사람 확인 검증<br/>[Component: HumanCheck 어댑터]<br/>siteverify, 다시 시도 키, 서킷"]:::component
+        feat["피처 저장<br/>[Component: Redis 어댑터]<br/>기기 공유, 대역 진입, 차단 기기, 판정 근거"]:::component
+        hp["허니팟 기록<br/>[Component: NestJS HTTP]<br/>같은 출처·미리 가져오기 아님만"]:::component
+        lab["라벨 반영<br/>[Component: NestJS gRPC]<br/>표본 검토·이의 결과, 차단 기기 올리기·지우기, 판정 근거 읽기"]:::component
+        cand["재평가 후보 처리<br/>[Component: Kafka 소비자]<br/>중복 제거, 모드, 대기 중 격리"]:::component
+        cfg["설정 수신<br/>[Component: NestJS]<br/>명령 5 강도, 규칙 매개변수 판, ASN 분류표"]:::component
+        pub["판정 기록 발행<br/>[Component: Kafka 생산자]<br/>판정·라벨, 행동 신호"]:::component
+    end
+    ra["trust-reassess<br/>[Container: TypeScript 스트림 작업자]"]:::container
+    rc[("Redis 세션·캐시<br/>[Container DB: ElastiCache]<br/>tr: 키")]:::db
+    kt[["MSK 텔레메트리<br/>[Container Queue: Kafka]"]]:::db
+    kc[["MSK 거래·제어<br/>[Container Queue: Kafka]<br/>control.settings"]]:::db
+    ch[("ClickHouse<br/>[Container DB]<br/>행동 신호 원시 30일")]:::db
+    sm[("비공개 설정<br/>[Container DB: Secrets Manager]<br/>규칙 매개변수")]:::db
+    s3[("ASN 분류표<br/>[Container DB: S3]")]:::db
+    cf["Cloudflare Turnstile<br/>[External System]"]:::ext
+    q4 -->|"위험 판정"| api
+    idn4 -->|"로그인 위험 판정"| api
+    api --> pipe
+    pipe -->|"토큰 검증"| hc
+    hc -->|"siteverify(HTTPS)"| cf
+    pipe -->|"피처 읽기·쓰기"| feat
+    feat -->|"Lua, EXISTS"| rc
+    pipe -->|"판정·행동 신호"| pub
+    pub -->|"trust-verdicts, behavior"| kt
+    kt -->|"behavior"| ra
+    ra -->|"tr:ra: 셈"| rc
+    ra -->|"원시 적재"| ch
+    ra -->|"trust-candidates"| kt
+    kt -->|"후보"| cand
+    cand -->|"대기 중 격리"| q4
+    gwf4 -->|"허니팟 적중"| hp
+    hp -->|"적중 표시"| feat
+    ops4 -->|"라벨 반영·판정 근거 읽기"| lab
+    lab -->|"차단 기기 키"| feat
+    kc -->|"명령 5"| cfg
+    sm -->|"규칙 매개변수"| cfg
+    s3 -->|"분류표 판"| cfg
+    cfg -->|"프로필·판"| pipe
+    classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
+    classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
+    classDef db fill:#2e6295,stroke:#1f4368,color:#ffffff
+    classDef ext fill:#8a8a8a,stroke:#6b6b6b,color:#ffffff
+    style ts fill:none,stroke-dasharray:5 5
+```
+
+**ops-svc**
+
+```mermaid
+flowchart LR
+    %% ops-svc 구성 요소(C4 3단계). 상자 종류는 라벨의 [Component]·[Container]·[Container DB]·[Container Queue]·[External System]이다(planning/03 §5.5, ADR-0138)
+    gwo4["gw-ops<br/>[Container: Envoy]<br/>관제 콘솔 입구(허용 IP)"]:::container
+    gwp4["gw-partner<br/>[Container: Envoy]<br/>파트너 콘솔 입구"]:::container
+    am4["Alertmanager<br/>[Container: 관측 스택]"]:::container
+    subgraph os4["ops-svc(관제 전용 노드 풀)"]
+        cmd4["명령 접수<br/>[Component: NestJS]<br/>권한·안전 한계 검증, 사전 모의, 2인 승인 상태 기계, 명령 사건 덧붙이기(이벤트 소싱)"]:::component
+        dsp4["명령 전달<br/>[Component: NestJS]<br/>제어 gRPC 송신과 판 번호 ack 모으기, 설정 사건, WAF·CDN 설정, 명령 10 게시물 조치"]:::component
+        biz4["운영 업무<br/>[Component: NestJS]<br/>승인 업무, CS 처리함, 회차 취소 판정, 판매 승인, 지급 묶음 승인, 법정 조치, 홈 구성, 스캐너 기기 관리"]:::component
+        live4["관제 콘솔 읽기와 흐름<br/>[Component: NestJS]<br/>위젯 조회, SSE 흐름 둘, 접속자 표시, 파트너 판매 현황"]:::component
+        alr4["경보 수신<br/>[Component: NestJS]<br/>웹훅을 OpsAlert로 바꿈, 억제 상태 읽기"]:::component
+        chn4["감사 체인 작업자<br/>[Component: 작업 하나]<br/>seq 순서로 mac 채우기(서울 KMS가 멈추면 도쿄 복제 키)"]:::component
+        anc4["감사 앵커 잡<br/>[Component: CronJob audit-anchor(ops-svc 이미지)]<br/>감사 체크포인트 만들기·서명·게시"]:::component
+    end
+    ctl4["제어 받는 쪽<br/>[Container: gRPC 제어 포트]<br/>admission-ctrl 리더, purchase·queue·payment-svc 준비된 파드 모두"]:::container
+    svc4["업무 서비스<br/>[Container: gRPC]<br/>purchase·payment·ticket·identity·core-svc"]:::container
+    aws4["WAF·CloudFront 설정 API<br/>[External System: AWS]"]:::ext
+    obs4[("관측 저장소<br/>[Container DB: Prometheus·ClickHouse]<br/>지표, 관제 실시간 표 rt")]:::db
+    odb4[("Aurora ops<br/>[Container DB: PostgreSQL 전용 클러스터]<br/>명령 사건·상태 표, 감사 로그·체인, 승인 업무·CS 건, 알림 표, 경보 기록, Outbox")]:::db
+    kf4[["MSK 거래·제어<br/>[Container Queue: Kafka]"]]:::db
+    kms4["KMS·감사 버킷<br/>[External System: AWS KMS·S3 Object Lock]<br/>감사 체인 키, 체크포인트 서명 키, 공개 게시 버킷"]:::ext
+    gwo4 -->|"운영 명령·승인(REST)"| cmd4
+    cmd4 -->|"승인 끝난 명령"| dsp4
+    dsp4 -->|"제어 gRPC, 판 번호 ack"| ctl4
+    dsp4 -->|"명령 10 게시물 조치(gRPC)"| svc4
+    dsp4 -->|"차단 규칙·엣지 전환"| aws4
+    dsp4 -->|"설정 적용 판 번호 확인"| obs4
+    gwo4 -->|"승인 업무·CS·법정 조치(REST)"| biz4
+    biz4 -->|"권한·감사 뒤 반영(gRPC)"| svc4
+    biz4 -->|"CS 건 요청 구독"| kf4
+    gwo4 -->|"위젯 조회·SSE 흐름"| live4
+    gwp4 -->|"판매 현황(1분 조회)"| live4
+    live4 -->|"지표·실시간 표 읽기"| obs4
+    am4 -->|"경보 웹훅"| alr4
+    chn4 -->|"mac 계산(KMS)"| kms4
+    anc4 -->|"체크포인트 서명·게시"| kms4
+    os4 -->|"원장·감사·알림 표, Outbox(아래 표)"| odb4
+    odb4 -->|"Outbox 릴레이(ops-outbox-relay)"| kf4
+    classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
+    classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
+    classDef db fill:#2e6295,stroke:#1f4368,color:#ffffff
+    classDef ext fill:#8a8a8a,stroke:#6b6b6b,color:#ffffff
+    style os4 fill:none,stroke-dasharray:5 5
+```
+
+- 구성 요소마다 ops DB로 가는 선을 그리면 선이 엇갈려, 그림에는 묶음 단위 선 하나만 그렸다(planning/03 §5.5). 구성 요소가 ops DB에 쓰고 읽는 것은 아래 표와 같다.
+
+| 구성 요소 | ops DB에 쓰고 읽는 것 | 근거 |
+| --- | --- | --- |
+| 명령 접수 | 명령 사건 `command_event`(덧붙이기만 한다), 2인 승인 `command_approval`, 명령 상태 표, 감사 체인 행 `audit_chain`(mac은 비운다)을 한 트랜잭션에 쓴다 | docs/features/control-tower.md §4·§7, ADR-0102·0113 |
+| 명령 전달 | 받는 쪽이 돌려준 적용 판 번호(ack), 설정 사건 `control.settings`의 Outbox 행 | control-tower §5, ADR-0103·0143 |
+| 운영 업무 | 승인 업무 `approval_request`·`approval_vote`, CS 처리함 건 `cs_case`, 법정 조치 기록(`takedown_notice`·`data_request`·`security_incident`·`access_review`)과 그 감사 기록 | docs/features/transfer-refund.md §7, control-tower §9·§13 |
+| 관제 콘솔 읽기와 흐름 | SSE 알림 표 `ops_push_event`를 파드마다 읽고, 접속자 표 `ops_presence`에 쓴다 | control-tower §12, ADR-0100 |
+| 경보 수신 | 경보 기록 표 `ops_alert_record` | control-tower §8, ADR-0146 |
+| 감사 체인 작업자 | `audit_chain`의 빈 mac을 `seq` 순서로 채운다. 가장 오래된 빈 행이 1분 [가정]을 넘으면 SEV2다 | control-tower §7, ADR-0102 |
+| 감사 앵커 잡 | 감사 체크포인트 `audit_checkpoint`를 만들어 서명하고 공개 게시 버킷에 쓴다 | control-tower §7, docs/infra-handover.md, ADR-0075 |
+
+- 동시 입장 목표 조정, 입장 일시정지, 판매 일시정지 같은 핵심 명령은 Kafka와 게이트웨이를 거치지 않고 제어 gRPC로 바로 보낸다. 명령의 효력은 메시지가 아니라 받는 쪽이 자기 저장소에 둔 제어 상태와 판 번호(그 범위·종류에서 늘어나기만 하는 수)로 정한다. ops-svc는 ack(받는 쪽이 그 판을 적용했다는 응답)를 모아 명령 상태로 보인다(docs/features/control-tower.md §4·§5, ADR-0102·0103). ops-svc가 모두 멈추면 비상 런북 Job이 같은 제어 포트로 보낸다(같은 문서 §5).
+- 감사 체인 작업자는 명령을 쓰는 트랜잭션이 비워 둔 mac을 커밋 뒤에 채운다. 그래서 KMS(암호 키를 안전하게 보관하고 대신 써 주는 클라우드 서비스)가 느리거나 멈춰도 명령은 커밋된다. 다만 mac이 빈 동안의 행은 아직 변조 탐지를 받지 않는다(control-tower §7, ADR-0102).
+
+**identity-svc**
+
+```mermaid
+flowchart LR
+    %% identity-svc 구성 요소(C4 3단계). 상자 종류는 라벨의 [Component]·[Container]·[Container DB]·[Container Queue]·[External System]이다(planning/03 §5.5, ADR-0138)
+    web5["소비자 웹 앱 서버<br/>[Container: Next.js OIDC 클라이언트]"]:::container
+    gwf5["gw-fan<br/>[Container: Envoy]"]:::container
+    pur5["purchase-svc<br/>[Container: gRPC]"]:::container
+    gwp5["gw-partner<br/>[Container: Envoy]"]:::container
+    gwo5["gw-ops<br/>[Container: Envoy]"]:::container
+    gws5["gw-scanner<br/>[Container: Envoy]"]:::container
+    ops5["ops-svc<br/>[Container: gRPC]"]:::container
+    que5["queue-svc<br/>[Container: gRPC]"]:::container
+    nsd5["core-notify-sender<br/>[Container: NestJS 발송 워커]"]:::container
+    subgraph is5["identity-svc"]
+        ses5["계정·세션·토큰<br/>[Component: NestJS gRPC·REST]<br/>SessionService(처음이면 계정 만들기), 토큰 발급(대상마다 서명 키), 리프레시 회전·재사용 탐지, 기기 5대 한도, 탈퇴"]:::component
+        lnk5["계정 연결·병합<br/>[Component: NestJS]<br/>연결 제안, 병합 확인, 병합 막기(account_hold), 병합 사건"]:::component
+        ver5["휴대폰 본인확인<br/>[Component: NestJS]<br/>업체 연동, 연계정보 HMAC과 pid, 결제 직전 재확인, 부스 대조"]:::component
+        adm5["관리 계정 인증<br/>[Component: NestJS]<br/>파트너·운영자 로그인(비밀번호·TOTP), 사람 확인 검증, 패스키 단계 인증, 잠금, 재인증 토큰, 세션 강제 종료, 지정 조회"]:::component
+        stf5["현장 스태프·스캐너 로그인<br/>[Component: NestJS]<br/>초대·수락, 기기 승인(RFC 8628), 스캐너 세션, 세션 별명 읽기"]:::component
+    end
+    tr5["trust-svc<br/>[Container: gRPC]"]:::container
+    mc5["purchase·core-svc<br/>[Container: gRPC]"]:::container
+    tkt5["ticket-svc<br/>[Container: gRPC]"]:::container
+    kyc5["본인확인 업체<br/>[External System]"]:::ext
+    kms5["KMS<br/>[External System: AWS]<br/>연계정보 HMAC 키, 페퍼 키, TOTP 시드 키"]:::ext
+    cf5["Cloudflare Turnstile<br/>[External System]<br/>사람 확인 서버 검증"]:::ext
+    idb5[("Aurora 공유(identity 스키마)<br/>[Container DB: PostgreSQL]<br/>계정·제공자 연결·병합, 본인확인, 세션, 관리 계정, 현장 스태프 배정·스캐너 세션, Outbox")]:::db
+    rc5[("Redis 세션·캐시<br/>[Container DB: ElastiCache]<br/>세션 캐시, 로그인 실패 수, 기기 승인 코드, 제안 캐시")]:::db
+    kf5[["MSK 거래·제어<br/>[Container Queue: Kafka]"]]:::db
+    web5 -->|"세션 생성·로그아웃(gRPC)"| ses5
+    gwf5 -->|"팬 API(REST, 아래 표)"| is5
+    ses5 -->|"로그인 위험 판정"| tr5
+    nsd5 -->|"받는 사람 묶음 조회(gRPC)"| ses5
+    ops5 -->|"병합 막기 알림"| lnk5
+    lnk5 -->|"병합 사전 확인"| mc5 & tkt5
+    pur5 -->|"결제 직전 재확인(gRPC)"| ver5
+    que5 -->|"본인확인 재통과 확인(gRPC)"| ver5
+    ver5 -->|"확인 요청·결과 조회"| kyc5
+    ver5 -->|"연계정보 HMAC"| kms5
+    gwp5 -->|"파트너 로그인(REST)"| adm5
+    gwo5 -->|"운영자 로그인·재인증(REST)"| adm5
+    adm5 -->|"페퍼 확인·TOTP 복호"| kms5
+    adm5 -->|"관리 로그인 토큰 검증"| cf5
+    ops5 -->|"세션 강제 종료·지정 조회"| adm5
+    gwp5 -->|"현장 스태프 초대(REST)"| stf5
+    gws5 -->|"기기 승인 요청·토큰(REST)"| stf5
+    ops5 -->|"스캐너 세션 별명 읽기"| stf5
+    tkt5 -->|"스캐너 세션 확인"| stf5
+    stf5 -->|"기기 찾기(키 지문)"| tkt5
+    is5 -->|"원장과 Outbox(아래 표)"| idb5
+    is5 -->|"캐시·카운터·코드"| rc5
+    idb5 -->|"Outbox 릴레이(identity-outbox-relay)"| kf5
+    classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
+    classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
+    classDef db fill:#2e6295,stroke:#1f4368,color:#ffffff
+    classDef ext fill:#8a8a8a,stroke:#6b6b6b,color:#ffffff
+    style is5 fill:none,stroke-dasharray:5 5
+```
+
+- gw-fan이 넘기는 팬 API는 구성 요소 넷으로 갈라지고, 저장소도 구성 요소 다섯이 함께 쓴다. 선이 엇갈리지 않게 그림에는 묶음 단위 선만 그렸다(planning/03 §5.5). 갈래와 저장소는 아래 표와 같다.
+
+| 구성 요소 | gw-fan이 넘기는 팬 API | identity 스키마와 Redis 세션·캐시 |
+| --- | --- | --- |
+| 계정·세션·토큰 | 토큰 갱신 `/v1/identity/access-tokens`, 로그인된 기기 `/v1/identity/sessions`, 로그인 수단 `/v1/identity/providers`, 탈퇴 `/v1/identity/account` | `account`·`account_provider`·`session`·`device`·`consent`, 세션 종료 사건 `control.sessions-terminated`의 Outbox, Redis 참조 세션 캐시 |
+| 계정 연결·병합 | `/v1/identity/link-proposals/{proposalId}`, `/v1/identity/merge-proposals/{proposalId}`와 그 하위 경로 | `account_merge`·`account_hold`, 병합 사건 `identity.accounts-merged`의 Outbox, Redis 제안 캐시(`id:link:*`·`id:merge:*`) |
+| 휴대폰 본인확인 | `/v1/identity/verifications`와 결과 경로, 부스 대조 `/v1/identity/booth-reverifications`, 미성년자 계약 취소 확인 `/v1/identity/minor-contract-checks` | `identity_verification`·`booth_reverification`(연계정보 원문은 두지 않는다) |
+| 관리 계정 인증 | 없음(gw-partner·gw-ops로 받는다) | `admin_account`·`admin_passkey`·`admin_recovery_code`, Redis 로그인 실패 수 |
+| 현장 스태프·스캐너 로그인 | 초대 수락 `/v1/staff-invitation-lookups`·`/v1/staff-invitation-acceptances`, 스캐너 승인 `/v1/device-approval-lookups`·`/v1/device-approvals` | `staff_assignment`·`scanner_session`, Redis 기기 승인 코드(`id:devauth:*`) |
+
+- 2026-10-30에 이 그림에 선 다섯을 더했다: 알림 발송 워커의 받는 사람 묶음 조회, queue-svc의 본인확인 재통과 확인, ops-svc의 관리 계정 세션 강제 종료·지정 조회, 기기 승인 때 ticket-svc에 기기 찾기, 관리 로그인의 사람 확인 서버 검증(identity-svc가 직접 한다, docs/features/bot-defense.md §6). 호출 계약은 docs/api/proto/README.md §3에 있다(추천 적용 2026-10-30).
+- 소셜 로그인의 인가 코드 교환은 소비자 웹 앱 서버가 하고, 제공자 토큰은 identity-svc에 오지 않는다(ADR-0119). 로그인 뒤의 요청은 게이트웨이가 공개키로 토큰을 확인하므로 identity-svc를 거치지 않는다(§3 '인증 담당과 요청 경로'). 근거는 docs/features/identity.md §2·§3이다.
+- 패스키(기기 안의 키로 서명해 인증하는 표준 방식)는 TOTP를 대신하지 않고, 위험 명령·2인 승인·정산 계좌 변경 같은 작업의 단계 인증으로 쓴다. 서울 KMS가 응답하지 않으면 페퍼 확인과 TOTP 시드 복호는 도쿄 복제 키로 넘긴다(docs/features/identity.md §6·§10).
+
+**ticket-svc**
+
+```mermaid
+flowchart LR
+    %% ticket-svc 구성 요소(C4 3단계). 상자 종류는 라벨의 [Component]·[Container]·[Container DB]·[Container Queue]다(planning/03 §5.5, ADR-0138)
+    pur6["purchase-svc<br/>[Container: gRPC]"]:::container
+    core6["core-svc<br/>[Container: gRPC]"]:::container
+    gwf6["gw-fan<br/>[Container: Envoy]"]:::container
+    ops6["ops-svc<br/>[Container: gRPC]"]:::container
+    gws6["gw-scanner<br/>[Container: Envoy]<br/>NLB TCP 통과, 현장 스태프 토큰 서명 확인"]:::container
+    gwp6["gw-partner<br/>[Container: Envoy]"]:::container
+    subgraph ts6["ticket-svc"]
+        iss6["발권과 티켓 조회<br/>[Component: NestJS gRPC]<br/>발권(주문 ID로 멱등), 예매 취소 키 폐기, 후기 작성 자격, 보유 티켓, 병합 사전 확인"]:::component
+        wal6["월렛·기기 키·양도<br/>[Component: NestJS]<br/>티켓 애그리거트(행 잠금), 입장용 휴대폰 키 등록·폐기, 양도·돌려주기·회수, 입장 중 소유권 동결, 부스 요청"]:::component
+        dev6["스캐너 기기 관리<br/>[Component: NestJS gRPC]<br/>기기 원장, 등록 코드, 기기 키 묶기, 즉시 폐기"]:::component
+        grd6["스캐너 경로 가드<br/>[Component: peaket-platform]<br/>DPoP 증명·cnf.jkt·기기 ACTIVE 확인, jti 한 번만"]:::component
+        syn6["근무 준비와 동기화<br/>[Component: NestJS]<br/>근무 준비, 전체 목록(한 스냅샷), 변경분(회차별 일련번호), 기기 배치"]:::component
+        scn6["스캔 수신과 현장 판정<br/>[Component: NestJS]<br/>스캔 멱등 적재, 서버 판정 표, 이상 표시, 부스 허용, 입장 기록 마감"]:::component
+    end
+    idn6["identity-svc<br/>[Container: gRPC]"]:::container
+    rc6[("Redis 세션·캐시<br/>[Container DB: ElastiCache]<br/>기기 등록 코드, DPoP jti")]:::db
+    tdb6[("Aurora ticket<br/>[Container DB: PostgreSQL + 도쿄 보조 클러스터]<br/>티켓, 기기 키, 양도, 스캔(달마다 파티션), 스캐너 기기·배치·변경 기록, Outbox")]:::db
+    kf6[["MSK 거래·제어<br/>[Container Queue: Kafka]"]]:::db
+    pur6 -->|"발권·예매 취소(gRPC)"| iss6
+    core6 -->|"후기 자격·보유 티켓(gRPC)"| iss6
+    idn6 -->|"병합 사전 확인(gRPC)"| iss6
+    gwf6 -->|"월렛·기기 키·양도(REST)"| wal6
+    ops6 -->|"승인된 양도 회수"| wal6
+    ops6 -->|"기기 목록·등록·폐기(gRPC)"| dev6
+    idn6 -->|"기기 승인 때 기기 찾기(gRPC)"| dev6
+    gws6 -->|"스캐너 API(REST)"| grd6
+    grd6 -->|"기기 등록"| dev6
+    grd6 -->|"근무 준비·목록·변경분"| syn6
+    grd6 -->|"스캔 업로드·현장 관리"| scn6
+    grd6 -->|"스캐너 세션 확인(5초 캐시)"| idn6
+    gwp6 -->|"기기 배치·현장 현황(REST)"| syn6
+    ts6 -->|"등록 코드, DPoP jti"| rc6
+    ts6 -->|"원장·변경 기록, Outbox(아래 표)"| tdb6
+    tdb6 -->|"Outbox 릴레이(ticket-outbox-relay)"| kf6
+    classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
+    classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
+    classDef db fill:#2e6295,stroke:#1f4368,color:#ffffff
+    style ts6 fill:none,stroke-dasharray:5 5
+```
+
+- 구성 요소마다 저장소로 가는 선을 그리면 선이 엇갈려, 그림에는 묶음 단위 선만 그렸다(planning/03 §5.5). 구성 요소가 쓰고 읽는 것은 아래 표와 같다.
+
+| 구성 요소 | 쓰고 읽는 것 | 근거 |
+| --- | --- | --- |
+| 발권과 티켓 조회 | `ticket`을 주문 ID로 한 번만 만들고, 같은 트랜잭션에 Outbox(`trade.tickets` ISSUED)를 쓴다. 예매 취소면 `device_key`를 폐기하고 `scanner_change`에 적는다 | docs/features/offline-gate.md §2·§5, ADR-0106 |
+| 월렛·기기 키·양도 | `ticket` 행 잠금 안에서 양도·돌려주기·회수·취소·스캔 수신 가운데 하나만 성공시킨다. `device_key`, `transfer_offer`, `scanner_change`(키 등록·폐기) | offline-gate §2·§5, docs/features/transfer-refund.md §3·§4 |
+| 스캐너 기기 관리 | 기기 원장 `scanner_device`, Redis 등록 코드 `scanner:enroll:{코드 SHA-256}` | offline-gate §6.1, ADR-0148 |
+| 스캐너 경로 가드 | DPoP 증명의 `jti`를 Redis `scanner:dpop:{jti}`에 한 번만 넣고(`SET NX`), 기기 상태를 `scanner_device`에서 본다 | offline-gate §6.1, docs/data.md §3 |
+| 근무 준비와 동기화 | 기기 배치 `scanner_placement`를 쓴다. 전체 목록은 `scanner_seq.last_seq`와 내용을 한 스냅샷(REPEATABLE READ)으로 읽고, 변경분은 `scanner_change`를 일련번호로 읽는다 | offline-gate §6.2·§6.3, ADR-0086 |
+| 스캔 수신과 현장 판정 | `scan_event`(클라이언트 ID로 멱등), `gate_flag`·`gate_flag_scan`, `booth_authorization`, `scanner_change`(입장 상태·이상 표시) | offline-gate §6.5·§7·§9.1, ADR-0051·0086 |
+
+- 스캐너 경로 가드는 peaket-platform의 공통 가드다. 요청마다 DPoP(요청마다 기기 안의 키로 서명한 짧은 증명을 붙이는 표준, RFC 9449) 증명, 토큰에 묶인 기기 키 지문(`cnf.jkt`), 기기 상태를 확인한다(docs/features/offline-gate.md §6.1). 스캔 업로드는 현장 스태프 토큰 없이 기기 인증만으로도 받는다(같은 문서 §6.5).
+- 공연 당일 ticket-svc가 멈춰도 스캐너는 내려받은 목록으로 오프라인 판정을 이어 가고, 기록은 복구 뒤 올린다. 도쿄 보조 클러스터는 티켓 원장의 보존과 복구 기준점이고 당일 조회에는 쓰지 않는다(docs/features/offline-gate.md §9).
+- 그림을 처음 그릴 때 호출 계약이 정본에 없던 선이 둘 있었다. ticket-svc → identity-svc 스캐너 세션 확인(docs/features/offline-gate.md §6 흐름도)과 ops-svc → ticket-svc 승인된 양도 회수(docs/features/transfer-refund.md §4)다. 2026-10-30에 호출 계약 초안(`ScannerSessionCheckService/CheckScannerSession`, `TicketReclaimService/ReclaimTicket`)이 docs/api/proto/README.md §3에 생겼고, §3.2 통신 표에도 더했다(추천 적용 2026-10-30).
+- 2026-10-30에 identity-svc가 기기 승인 로그인 때 기기 키 지문으로 등록 기기와 상태를 찾는 선(`ScannerDeviceLookupService/GetScannerDeviceByCredential`, docs/features/identity.md §6.1)을 더했다. 기기 원장의 주인이 ticket-svc라 identity-svc가 직접 읽지 않는다(추천 적용 2026-10-30).
+- ticket-svc의 Redis 사용(등록 코드, DPoP `jti`)은 세션·캐시 클러스터의 `scanner:enroll:*`·`scanner:dpop:*` 키다(docs/data.md §3). §3.1 서비스 맵의 저장소 칸에도 적었다(추천 적용 2026-10-30).
+
 ## 4. API 게이트웨이: 클라이언트 유형별 분리 및 씬 게이트웨이 (ADR-0008)
 
-외부 요청은 **CloudFront(+AWS WAF: 악성 요청을 걸러 내는 웹 방화벽) → NLB(네트워크 부하 분산기) → Envoy Gateway → 백엔드 서비스** 경로로 들어온다. CloudFront(AWS의 CDN) 배포는 일곱이다(www·queue·queue-files·api·partner·console·scanner). 그 가운데 피크가 큰 소비자 트래픽을 받는 셋(공연 페이지 www, 대기열 파일 queue-files, 대기열 API queue)은 배포마다 한도를 따로 두어 미리 올린다(docs/infra.md §4.1, ADR-0058·0144). Envoy Gateway(Envoy는 요청을 받아 안쪽 서비스로 넘기는 프록시 서버)가 L7 리버스 프록시를 혼자 맡으므로, 불필요한 ALB(Application Load Balancer)를 겹쳐 두지 않아 HTTP 프록시를 2중으로 거치는 비용을 없앴다. 유일한 예외로 현장 게이트 스캐너 트래픽은 CloudFront를 거치지 않고 따로 둔 공개 스캐너 NLB(TCP 패스스루)로 `gw-scanner`에 바로 들어온다. CloudFront가 부르는 원본 NLB는 둘이고, 둘 다 사설 서브넷의 VPC 원본이다(docs/infra.md §9, 기술 검토 낮음-009). 팬·파트너 원본 NLB는 gw-queue·gw-fan·gw-partner를, 관제 원본 NLB는 gw-ops만 받는다. 팬 쪽 NLB의 설정 실수나 포화가 관제 입구를 같이 막지 않게 하려고 관제 입구를 따로 뺐다(추천 적용 2026-10-29, ADR-0144 결정 1). 그래서 NLB는 스캐너 NLB까지 셋이다. 게이트웨이가 TLS(통신을 암호화하는 표준) 종단을 직접 하고, 단말기는 기기 키로 요청마다 서명한 DPoP 증명으로 확인한다(하드웨어 키가 필요한 운영 환경은 mTLS 클라이언트 인증서를 선택지로 직접 검증한다, 기술 검토 중간-057). CloudFront 엣지 계층에는 가벼운 엣지 함수(CloudFront Functions 또는 Lambda@Edge)를 두어, 완전 매진 응답과 진입 Degraded Mode의 도착 시각 쿠키 발급을 대신 맡긴다.
+외부 요청은 **CloudFront(+AWS WAF: 악성 요청을 걸러 내는 웹 방화벽) → NLB(네트워크 부하 분산기) → Envoy Gateway → 백엔드 서비스** 경로로 들어온다. CloudFront(AWS의 CDN) 배포는 일곱이다(www·queue·queue-files·api·partner·console·scanner). 그 가운데 피크가 큰 소비자 트래픽을 받는 셋(공연 페이지 www, 대기열 파일 queue-files, 대기열 API queue)은 배포마다 한도를 따로 두어 미리 올린다(docs/infra.md §4.1, ADR-0058·0144). Envoy Gateway(Envoy는 요청을 받아 안쪽 서비스로 넘기는 프록시 서버)가 L7 리버스 프록시를 혼자 맡으므로, 불필요한 ALB(Application Load Balancer)를 겹쳐 두지 않아 HTTP 프록시를 2중으로 거치는 비용을 없앴다. 유일한 예외로 현장 게이트 스캐너 트래픽은 CloudFront를 거치지 않고 따로 둔 공개 스캐너 NLB(TCP 패스스루)로 `gw-scanner`에 바로 들어온다. CloudFront가 부르는 원본 NLB는 둘이고, 둘 다 사설 서브넷의 VPC 원본이다(docs/infra.md §9, 기술 검토 낮음-009). 팬·파트너 원본 NLB는 gw-queue·gw-fan·gw-partner를, 관제 원본 NLB는 gw-ops만 받는다. 팬 쪽 NLB의 설정 실수나 포화가 관제 입구를 같이 막지 않게 하려고 관제 입구를 따로 뺐다(추천 적용 2026-10-29, ADR-0144 결정 1). 그래서 NLB는 스캐너 NLB까지 셋이다. 게이트웨이가 TLS(통신을 암호화하는 표준) 종단을 직접 하고, 단말기는 기기 키로 요청마다 서명한 DPoP 증명으로 확인한다(하드웨어 키가 필요한 운영 환경은 mTLS 클라이언트 인증서를 선택지로 직접 검증한다, 기술 검토 중간-057). CloudFront 엣지 계층에는 가벼운 엣지 함수(CloudFront Functions 또는 Lambda@Edge)를 두어, 완전 매진 응답과 진입 Degraded Mode(큰 장애 때 핵심을 지키려고 부가 기능을 줄여 버티는 운영 모드)의 도착 시각 쿠키 발급을 대신 맡긴다.
 
 | 게이트웨이 | 담당 클라이언트 및 전담 라우트 | 인증 검증 방식 | 물리적 분리 이유 |
 | --- | --- | --- | --- |
 | gw-queue | 소비자 웹: 로비 입장(참가 토큰), 사전 검증 토큰 발급, 대기열 진입, 입장 확정, 대기 상태 파일과 셔플 결과 파일의 Origin(CDN 뒤에서 원본 파일을 주는 서버) | 팬 액세스 토큰 (httpOnly 쿠키) + 구매 권한 검증. 단, 정적 대기 상태 파일 경로는 인증 없이 열어 두고 쿠키를 넘기지 않아, CDN이 모든 사용자에게 같은 캐시로 응답한다 | 티켓 오픈 때 초당 20만 건(200,000 RPS)으로 몰리는 요청을 받는다. 대기열 인프라를 따로 늘리고 줄여 구매 계층을 보호한다 |
-| gw-fan | 소비자 웹: 좌석 예매(스냅샷 조회, 홀드, 주문 생성, 결제 접수), 좌석 델타 WebSocket, 티켓 월렛과 양도, 굿즈 스토어, 관람 후기(사진 올리기·신고 포함), 고객 문의(ADR-0066), 본인확인(시작·결과), 홈 피드·검색·자동완성(인증 없음, CDN 캐시, ADR-0063·0094), 토큰 갱신, Next.js 앱 서버 프록시 호출 | 팬 액세스 토큰 (httpOnly 쿠키). 구매와 좌석 델타 라우트는 입장 토큰(admission_token)을 필수로 검증한다. 토큰 갱신은 리프레시 토큰 쿠키 전용이다 | 구매 경로는 입장이 허용된 5,000명 규모의 걸러진 트래픽이고, 그 밖의 경로는 평시 트래픽이므로 진입 폭주에서 물리적으로 떼어 놓는다 |
-| gw-partner | 파트너 콘솔 UI 호출, 외부 PG사 웹훅 수신 (토스페이먼츠·포트원 웹훅 → `payment-svc`) | 파트너 관리 계정 세션 (MFA 다중 인증 필수). 웹훅 경로는 인증 없이 받되, `payment-svc`가 PG 결제 조회 API로 무결성을 다시 확인한다 | 멀티 테넌트 격리와 보수적인 레이트 리밋(일정 시간에 받는 요청 수의 상한) 정책 적용 |
+| gw-fan | 소비자 웹: 좌석 예매(스냅샷 조회, 홀드, 주문 생성, 결제 접수), 좌석 델타 WebSocket, 티켓 월렛과 양도, 굿즈 스토어, 관람 후기(사진 올리기·신고 포함), 고객 문의(ADR-0066), 본인확인(시작·결과), 홈 피드·검색·자동완성(인증 없음, CDN 캐시, ADR-0063·0094), 토큰 갱신, Next.js 앱 서버 프록시 호출, 허니팟 경로 `/_t/*` → `trust-svc`(소비자 웹 배포의 같은 출처 경로, 응답은 늘 204, 추천 적용 2026-10-30, docs/features/bot-defense.md §7) | 팬 액세스 토큰 (httpOnly 쿠키). 구매와 좌석 델타 라우트는 입장 토큰(admission_token)을 필수로 검증한다. 토큰 갱신은 리프레시 토큰 쿠키 전용이다 | 구매 경로는 입장이 허용된 5,000명 규모의 걸러진 트래픽이고, 그 밖의 경로는 평시 트래픽이므로 진입 폭주에서 물리적으로 떼어 놓는다 |
+| gw-partner | 파트너 콘솔 UI 호출(공연 등록 같은 파트너 콘솔 API → `core-svc`, 파트너 로그인과 현장 스태프 초대 → `identity-svc`, 기기 배치·현장 현황(`device-placements`·`gate-status`) → `ticket-svc`, 실시간 판매 현황 → `ops-svc`. 경로별 서비스는 §3 ② 그림, identity·ticket 경로는 추천 적용 2026-10-30), 외부 PG사 웹훅 수신 (토스페이먼츠·포트원 웹훅 → `payment-svc`) | 파트너 관리 계정 세션 (MFA 다중 인증 필수). 웹훅 경로는 인증 없이 받되, `payment-svc`가 PG 결제 조회 API로 무결성을 다시 확인한다 | 멀티 테넌트 격리와 보수적인 레이트 리밋(일정 시간에 받는 요청 수의 상한) 정책 적용 |
 | gw-ops | 중앙 관제 콘솔 (운영 명령·조회 REST, SSE 흐름 둘(`/v1/ops/live`, `/v1/ops/events/{eventId}/live`. 시간 초과를 끄고 응답을 모으지 않는다), 운영자 로그인 → `identity-svc`, ADR-0100) | 운영자 세션 (MFA 다중 인증) + 사내 허용 IP 대역. 경로는 CloudFront 관제 배포 → 관제 원본 NLB → gw-ops이고, 관제 배포에 연결한 웹 ACL의 맨 앞 규칙이 시청자 IP로 허용 목록을 거른 뒤 gw-ops가 원본 확인 머리와 `CloudFront-Viewer-Address`로 허용 IP를 한 번 더 본다(ADR-0144 결정 2). VPN으로만 닿는 내부 로드 밸런서는 관리 도구(Grafana·ArgoCD·Alertmanager)용이다 | 관제 입구를 사용자 경로와 나눈다. 원본 NLB도 팬 쪽과 따로 둔다(ADR-0144). 프록시 파드는 관제 전용 노드 풀에서 돌아 핫패스 노드의 포화와 떨어진다(ADR-0102) |
 | gw-scanner | 현장 게이트 스캐너 PWA 기기 승인 로그인, 근무 준비, 회차 목록·변경분, 스캔 업로드, 현장 관리(CloudFront를 거치지 않는 직접 연결) | 기기 키 DPoP(운영자가 등록한 기기 키로 요청마다 서명한 증명, RFC 9449. 하드웨어 키가 필요한 운영 환경의 선택지는 기기 인증서 mTLS). 게이트웨이에서 TLS를 종단하고 현장 스태프 토큰(현장 스태프 토큰 키만 신뢰)의 서명·`aud`를 확인한다. DPoP 증명·`cnf.jkt`(기기 키 지문)와 세션·기기 상태는 스캐너 경로 공통 가드와 서비스가 요청마다 확인한다(ADR-0051, 추천 적용 2026-10-28, 기술 검토 중간-057) | 공연 당일 현장 입장 트래픽의 안정적 처리 |
 
@@ -458,12 +723,12 @@ flowchart LR
 - **서비스 디스커버리 (`ADR-0010`)**: Netflix Eureka 같은 불필요한 별도 디스커버리 서버는 빼고, 쿠버네티스(컨테이너로 만든 앱을 여러 서버에서 실행하고 관리하는 플랫폼) 표준 Service DNS와 EndpointSlice를 쓴다. 내부 gRPC 통신의 L7 부하 분산은 서비스 메시(Istio 앰비언트 모드, ADR-0082)에서 gRPC를 받는 서비스의 웨이포인트가 HTTP/2 스트림 단위로 맡는다. 모든 파드는 `readinessProbe`와 `preStop` 라이프사이클 훅을 갖춘다(프로브 규칙은 아래, ADR-0070). 판매가 열리는 시각 앞뒤의 변경 동결 창(대형·중형은 T-90분~T+60분의 모든 운영 변경, 소형은 T-50분~T+60분의 핫패스 묶음)에는 새 배포를 시작하지 않는다. 진행 중인 카나리 중단, 이전 다이제스트로 되돌리기, 릴리스 플래그(배포한 코드의 공개 여부를 코드 변경 없이 켜고 끄는 설정) 끄기 같은 긴급 변경과 관제 명령은 허용한다(`POL-028`, ADR-0054 결정 13). `admission-ctrl` 리더 노드는 Kubernetes Lease로 선출된다. 리더는 제어 명령을 실행하기 직전 Lease 소유권을 다시 확인하고, 대기열 Redis 쓰기는 리더 세대로 펜싱한다(`ADR-0056`).
 - **메시와 앱의 책임 경계(2026-10-22, ADR-0082)**: 운영 설계의 메시는 Istio 앰비언트 모드다. 노드 프록시(ztunnel)가 모든 서비스 사이 연결을 L4 mTLS로 감싼다. 서비스 사이 gRPC를 받는 서비스(§3.2 서비스 간 통신 매트릭스의 gRPC 행에서 받는 쪽)만 서비스 단위 웨이포인트를 둔다. 웨이포인트에는 요청 단위 분산, 재시도, 시간 초과, 연결 상한, 이상 파드 퇴출을 맡긴다. 그 서비스의 L4 정책은 포트마다 따로 둔다(아래 '포트별 허용 표'). 업무 gRPC 포트만 웨이포인트 신원을 받고, 게이트웨이가 바로 보내는 REST 포트와 다른 내부 포트는 각자의 신원을 받는다. 웨이포인트 경로의 p99 증가가 §9.4 기준을 넘는 서비스만 사이드카로 둔다. 게이트웨이는 파드 주소로 바로 보낸다(Envoy Gateway 기본 `routingType: Endpoint`). 그래서 게이트웨이에서 서비스로 가는 구간은 웨이포인트를 지나지 않고, 노드 프록시가 암호화만 더한다. 관제 제어 gRPC 포트의 제어 전용 Service(ADR-0102. 업무 gRPC를 받는 서비스라도 이 Service에는 웨이포인트를 붙이지 않는다)와 스트림 작업자 파드(gRPC를 받지 않는다, ADR-0099)에는 웨이포인트를 두지 않는다. 나누는 기준은 하나다. 메시는 연결과 전송을 맡고, 앱은 업무의 뜻이 담긴 판단을 맡는다.
 
-  포트별 허용 표(추천 적용 2026-10-28, 기술 검토 중간-071): 한 서비스가 업무 gRPC와 게이트웨이 REST를 함께 받으므로(purchase-svc·payment-svc·identity-svc·queue-svc·core-svc), '웨이포인트 신원만'을 서비스 전체에 걸면 게이트웨이 요청이 받는 쪽 노드 프록시에서 거절된다. 그래서 받는 쪽 노드 프록시의 L4 인가 정책은 포트(받는 쪽 포트 번호)마다 허용 신원을 둔다. Istio 문서는 웨이포인트를 지난 연결은 받는 쪽에서 웨이포인트의 신원으로 보이므로, 부르는 쪽 신원으로 거르는 정책은 웨이포인트에 붙이라고 한다(2026-10-28 확인). 포트폴리오의 로컬·CI·데모는 메시가 없어 같은 표로 NetworkPolicy를 만든다(신원 대신 파드 라벨). 표와 실제 정책이 같은지는 D-T36이 본다.
+  포트별 허용 표(추천 적용 2026-10-28, 기술 검토 중간-071): 한 서비스가 업무 gRPC와 게이트웨이 REST를 함께 받으므로(purchase-svc·payment-svc·identity-svc·queue-svc·core-svc·ticket-svc, 그리고 허니팟 경로를 받는 trust-svc. 뒤의 둘은 추천 적용 2026-10-30), '웨이포인트 신원만'을 서비스 전체에 걸면 게이트웨이 요청이 받는 쪽 노드 프록시에서 거절된다. 그래서 받는 쪽 노드 프록시의 L4 인가 정책은 포트(받는 쪽 포트 번호)마다 허용 신원을 둔다. Istio 문서는 웨이포인트를 지난 연결은 받는 쪽에서 웨이포인트의 신원으로 보이므로, 부르는 쪽 신원으로 거르는 정책은 웨이포인트에 붙이라고 한다(2026-10-28 확인). 포트폴리오의 로컬·CI·데모는 메시가 없어 같은 표로 NetworkPolicy를 만든다(신원 대신 파드 라벨). 표와 실제 정책이 같은지는 D-T36이 본다.
 
   | 받는 포트 | 받는 서비스 | 받는 쪽 노드 프록시가 허용하는 신원 | 웨이포인트가 허용하는 신원 |
   | --- | --- | --- | --- |
-  | 업무 gRPC 포트 | §3.2 gRPC 행의 받는 쪽(payment-svc·ticket-svc·trust-svc·queue-svc·identity-svc·core-svc·purchase-svc·image-worker) | 그 서비스의 웨이포인트 하나 | §3.2 gRPC 행에서 그 서비스를 부르는 서비스만(예: payment-svc는 purchase-svc·core-svc·ops-svc, image-worker는 core-svc만, identity-svc는 `SessionService`에 소비자 웹 앱 서버만·`IdentityService`에 purchase-svc만(기술 검토 중간-083)·`AccountHoldService`·`ScannerSessionQueryService`에 ops-svc만, purchase-svc·ticket-svc·core-svc는 `AccountMergeCheckService`에 identity-svc만, ticket-svc는 `ScannerDeviceService`에 ops-svc만, core-svc는 `SupportCaseService`·`CatalogAdminService`에 ops-svc만(추천 적용 2026-10-29, ADR-0148)) |
-  | REST 포트 | 게이트웨이 뒤의 서비스 | 그 서비스로 경로를 보내는 게이트웨이(HTTPRoute가 그 서비스를 가리키는 `gw-*`, §4)만 | 지나지 않는다 |
+  | 업무 gRPC 포트 | §3.2 gRPC 행의 받는 쪽(payment-svc·ticket-svc·trust-svc·queue-svc·identity-svc·core-svc·purchase-svc·image-worker) | 그 서비스의 웨이포인트 하나 | §3.2 gRPC 행에서 그 서비스를 부르는 서비스만(예: payment-svc는 purchase-svc·core-svc·ops-svc, image-worker는 core-svc만, identity-svc는 `SessionService`에 소비자 웹 앱 서버만·`IdentityService`에 purchase-svc만(기술 검토 중간-083)·`AccountHoldService`·`ScannerSessionQueryService`에 ops-svc만, purchase-svc·ticket-svc·core-svc는 `AccountMergeCheckService`에 identity-svc만, ticket-svc는 `ScannerDeviceService`에 ops-svc만, core-svc는 `SupportCaseService`·`CatalogAdminService`에 ops-svc만(추천 적용 2026-10-29, ADR-0148). identity-svc는 `ScannerSessionCheckService`에 ticket-svc만·`RecipientQueryService`에 `core-notify-sender`만·`AdminSessionService`·`AdminDesignationService`에 ops-svc만·`ReverificationCheckService`에 queue-svc만, trust-svc는 `TrustService`에 queue-svc·identity-svc만·`TrustLabelService`·`TrustEvidenceService`에 ops-svc만, queue-svc는 `QueueService`에 trust-svc만·`VerificationAppealService`에 ops-svc만, ticket-svc는 `TicketReclaimService`에 ops-svc만·`ScannerDeviceLookupService`에 identity-svc만(추천 적용 2026-10-30, docs/api/proto/README.md §2 '부르는 쪽 확인')) |
+  | REST 포트 | 게이트웨이 뒤의 서비스 | 그 서비스로 경로를 보내는 게이트웨이(HTTPRoute가 그 서비스를 가리키는 `gw-*`, §4)만. trust-svc의 REST 포트는 gw-fan만 받는다(허니팟 기록 경로 하나, docs/features/bot-defense.md §7, 추천 적용 2026-10-30) | 지나지 않는다 |
   | 제어 gRPC 포트 | admission-ctrl·purchase-svc·queue-svc·payment-svc(명령 6 대체 결제사 전환, ADR-0143) | ops-svc와 비상 런북 Job(`ops-breakglass`)(ADR-0053 결정 11, ADR-0102) | 지나지 않는다(웨이포인트 없는 제어 전용 Service) |
   | 지표 포트(`/metrics`) | 모든 서비스와 작업자 | 클러스터 Prometheus | 지나지 않는다 |
 
@@ -710,7 +975,7 @@ Degraded Mode(감내 모드)의 완화 한계와 업무 정책(무엇을 포기�
 | NFR-019 지원 플랫폼 호환성 | 웹 표준 Baseline 'Widely available' 기능을 기본으로 쓴다. 주요 5대 모바일/데스크톱 브라우저의 최신 2개 버전과 iOS/iPadOS 16.4 이상을 지원한다. 인앱 브라우저는 로비 진입 전 외부 브라우저로 바꾸도록 안내한다. 파트너·관제 콘솔은 데스크톱(1280×800 이상 기본 밀도)·태블릿·휴대폰(360px부터, 휴대폰은 보기·승인·안전 쪽 조치 범위)을 지원한다 (추천 적용 2026-10-09, 휴대폰·태블릿은 2026-10-14 소유자 결정 `ADR-0061`) | Playwright 기반 3대 브라우저 엔진(Chromium, WebKit, Firefox) 크로스 브라우징 매트릭스 테스트와 콘솔 휴대폰·태블릿 뷰포트 프로젝트, 점진적 향상(Progressive Enhancement) 기법을 적용한다. 인앱 브라우저를 감지하면 Android는 기본 브라우저로 바로 열고, iOS와 PC 메신저 안 브라우저는 기기의 기본 브라우저(iPhone·iPad는 Safari, Windows는 Edge나 Chrome, Mac은 Safari나 Chrome)로 여는 방법 안내와 [주소 복사](SCR-058, ADR-0063)를 보인다 | — | PR 단위 Playwright E2E 매트릭스 테스트, 정식 릴리스 단위 실기기 3종(iOS Safari, Samsung Internet, 카카오톡 인앱) 수동 검증 |
 | NFR-020 웹 접근성 | 웹 접근성 국제 기준인 WCAG 2.2 AA 등급 완전 준수, 자동·수동 검사 위반 0건 | Canvas 좌석맵을 대신하는 화면 낭독기(화면의 글자를 소리로 읽어 주는 프로그램)용 대안 컴포넌트 SeatList를 제공한다. `getSeatProps()`로 접근성 속성을 연결한다. 동적 라이브 영역 알림은 빈도를 스로틀링한다. 색각이상용 패턴을 함께 쓰고, 움직임 축소 설정에 대응한다 | — | axe-core 자동화 접근성 CI 파이프라인, 시각장애인 화면 낭독기(NVDA, VoiceOver) 수동 시나리오 검증 |
 | NFR-021 아키텍처 확장성 | 동시 대기 200만 명으로 늘릴 확장 지점 문서화, 1~3년 사업 성장 전망 수용 | §9.2 확장 설계, §9.5 티켓 오픈 간격 제어 규칙, 합산 동시 입장 상한 관리, 셀(Cell) 단위 인프라 확장 구조 마련 | — | 분기별 용량 산정 검토, 연 1회 시스템 아키텍처 한계 분석 |
-| NFR-022 봇 탐지 정확도 | 1·2단계 등급별 봇 탐지율 95% 이상, 사람을 봇으로 잘못 잡는 일반 사용자 오탐률 단측 95% 상한 0.5% 이하(판정용 사람 947명의 판정 세션, 1인 1세션, 판정 세션끼리 독립 가정, ADR-0112) | `trust-svc` 점수기 목록 파이프라인(HumanCheck·DeviceTrust·BehaviorScore를 모두 돌려 가중합, 허니팟·차단 기기 목록 같은 확정 신호만 앞에서 끝냄, 높으면 추가 검증 큐로, 기술 검토 낮음-063), 허니팟 트랩 신호, 요청 때 Redis에서 바로 세는 회차별 기기 공유·호스팅 대역 진입 수, 재평가 작업자의 대기 중 재평가(그림자부터, ADR-0071·0099), 차단 기기 목록(기기 가명마다 키 하나, 틀린 '있다'가 없고 이의 인정 때 지운다, 기술 검토 중간-014), 신규 규칙 그림자 실행 | `trust-svc`에 장애가 나면 → 미리 캐시한 규칙과 보수적 레이트 리밋 모드로 바꿔, 모두 그냥 통과시키는 일을 막는다 | 등급별 오차 행렬(Confusion Matrix)과 3회 적응 라운드 검증(`ADR-0039`·`ADR-0048`, docs/perf-ledger.md §10), 실서비스는 하한 지표(FR-049)로 추적 |
+| NFR-022 봇 탐지 정확도 | 1·2단계 등급별 봇 탐지율 95% 이상, 사람을 봇으로 잘못 잡는 일반 사용자 오탐률 단측 95% 상한 0.5% 이하(판정용 사람 947명의 판정 세션, 1인 1세션, 판정 세션끼리 독립 가정, ADR-0112) | `trust-svc` 점수기 목록 파이프라인(HumanCheck·DeviceTrust·BehaviorScore를 모두 돌려 가중합, 허니팟·차단 기기 목록 같은 확정 신호만 앞에서 끝냄. 확정 신호는 판정을 일찍 끝내는 신호이고 봇 확정 라벨이 아니다(FR-049, ADR-0039, 추천 적용 2026-10-30, docs/features/bot-defense.md §4.3). 높으면 추가 검증 큐로, 기술 검토 낮음-063), 허니팟 트랩 신호, 요청 때 Redis에서 바로 세는 회차별 기기 공유·호스팅 대역 진입 수, 재평가 작업자의 대기 중 재평가(그림자부터, ADR-0071·0099), 차단 기기 목록(기기 가명마다 키 하나, 틀린 '있다'가 없고 이의 인정 때 지운다, 기술 검토 중간-014), 신규 규칙 그림자 실행 | `trust-svc`에 장애가 나면 → 미리 캐시한 규칙과 보수적 레이트 리밋 모드로 바꿔, 모두 그냥 통과시키는 일을 막는다. 축소 운영은 두 층이다: 의존성 일부가 멈추면 trust-svc가 `degraded`로 답하고, trust-svc 전체가 멈추면 queue-svc가 서킷 브레이커를 열고 캐시한 규칙을 쓴다(추천 적용 2026-10-30, docs/features/bot-defense.md §11, ADR-0156 결정 13) | 등급별 오차 행렬(Confusion Matrix)과 3회 적응 라운드 검증(`ADR-0039`·`ADR-0048`, docs/perf-ledger.md §10), 실서비스는 하한 지표(FR-049)로 추적 |
 | NFR-023 운영 민첩성 | DORA 5대 핵심 지표 지속 추적과 조직 성숙도 개선, 주입한 장애마다 탐지 시간 60초 이내(최댓값 기준), 긴급 오토스케일링 60초 이내, 보안 사고 모의훈련 연 1회 | 다중 윈도우 번 레이트(에러 버짓을 쓰는 속도) 실시간 알림, KEDA(Redis 대기열 길이, Kafka Lag, Prometheus 지표) + cron 사전 프로비저닝 + Karpenter(필요한 만큼 서버를 붙이고 떼는 도구) 고속 노드 확장 | — | Game Day(로컬 실행·대체 장애·모의 진행, docs/verification.md §5.2), 파드 확장 시간선 로컬 실측과 노드 기동 문서 인용 |
 | NFR-024 다국어 국제화 | 한국어(ko), 영어(en), 일본어(ja), 중국어 간체(zh) 4개 국어 완전 지원 | i18next 네임스페이스 분리와 필요할 때 불러오는 동적 import, ICU MessageFormat 표준 복수형 처리, 로케일별 정적 페이지 미리 빌드, 해시 파일명 기반 CDN 무제한 캐싱, 번역 키 누락 CI 검사 | — | 다국어 번들 크기 영향도 측정 |
 | NFR-025 데이터 정합성 | 분산 시스템 전체의 업무 불변식(Invariant) 위반 0건 | 대기표 순번과 앞선 대기 인원의 일치, 차례 전 입장 0건(입장 확정 때 순번 ≤ serving 검사, ADR-0049), Lua 스크립트 홀드 한도와 DB 한도 행 일치, 만료 인덱스 정리, 좌석 델타의 구역별 일련번호·회차 세대 동기화(기술 검토 중간-040), Redis 재고 차감과 PostgreSQL 판매 확정의 일치 보장 | — | 백그라운드 데이터 불변식 무결성 검사기, PR 단위 데이터베이스 마이그레이션 diff 검증 |
@@ -807,7 +1072,7 @@ PEAKET의 모든 소프트웨어 산출물은 아래 국제 표준과 법률 규
 
 | 트래픽 항목 | 정량적 부하 산정 | 아키텍처 해결 결론 및 최적화 효과 |
 | --- | --- | --- |
-| 대기열 진입 트래픽 | 오픈 전 사전 로비(T-10분 개방)에서 10분에 걸쳐 인증과 사람 확인을 나눠 받아, 초당 약 1,700명이 들어온다. T=0 오픈 정각 직후에 한꺼번에 몰리는 진입은 새로고침 증폭을 고려해 피크 200,000 RPS를 받도록 설계한다. 이 값은 로비 셔플을 끈 공연의 상한이다(표 아래 'T=0 도착 모델') | 진입 경로는 토큰 서명 검증, Redis 원자 연산(`SET NX`, `INCR`), 대기표 HMAC 서명만 해서 지연시간을 아주 작게 줄인다 |
+| 대기열 진입 트래픽 | 오픈 전 사전 로비(T-10분 개방)에서 10분에 걸쳐 인증과 사람 확인을 나눠 받아, 초당 약 1,700명이 들어온다(고르게 온다는 가정이다. 개방 순간 몰림은 표 아래 '로비 참가가 고르게 온다는 가정의 한계'). T=0 오픈 정각 직후에 한꺼번에 몰리는 진입은 새로고침 증폭을 고려해 피크 200,000 RPS를 받도록 설계한다. 이 값은 로비 셔플을 끈 공연의 상한이다(표 아래 'T=0 도착 모델') | 진입 경로는 토큰 서명 검증, Redis 원자 연산(`SET NX`, `INCR`), 대기표 HMAC 서명만 해서 지연시간을 아주 작게 줄인다 |
 | 대기열 순번 발급 | 공연별 `INCR` 키 하나에 초당 최대 20만 건의 증가 연산이 몰린다 | Redis 단일 스레드 병목이 실측되면 파드별 1~2ms 마이크로 배치 `INCRBY`로 바꿔 부하를 '파드 수 × 초당 500~1,000회'로 나눈다. 파드 사이 순번 편차는 1~2ms 이내라 공정성에 미치는 영향은 0에 가깝다 |
 | 무작위 셔플 결과 전달 | 로비에 머물던 100만 명이 결과 공개 예정 시각 뒤 0~8초 [가정]에 나눠 본인 순번을 1회 확인한다(초당 약 12.5만 건, 약 36 Gbps, 대기열 파일 배포, ADR-0058) | 해시 앞자리 기준으로 여러 파일에 나눠 담은(샤딩) 파일 약 1,000개(각 파일 크기 약 36KB)를 만들어 엣지 CDN에 한꺼번에 게시한다. 백엔드 Origin 쓰기는 단 1회만 일어나고, 개별 DB 조회 트래픽은 0건이다 |
 | 대기열 상태 실시간 조회 | 예상 대기 1분 이내 대기자 1,700명(0.5초 주기, ADR-0110), 1~5분 대기자 6,700명(5초 주기), 5분 초과 대기자 99만 명(20초 주기) 폴링 → CDN 유입 요청량 초당 약 54,000건(입장 임박 구간이 1초 주기이던 때는 약 53,000건) | 약 1,000개의 구간 정적 파일을 1초마다 갱신 게시해 백엔드 Origin 요청을 초당 약 1,000건으로 고정한다. 파일 크기는 125바이트 비트맵을 포함해 수백 바이트에 불과하고, 지속적인 WebSocket 연결을 맺지 않는다. CDN 내부 갱신은 엣지 수 × 활성 파일 수 ÷ 1초가 상한(요청 병합·리전 엣지 캐시·Origin Shield)이고, 거리별 TTL을 채택하면 1초 갱신 파일을 수십 개로 줄인다(채택 여부와 매진 감지에 주는 영향은 Phase 2에서 정한다) [보완, queue-admission §4] |
@@ -833,6 +1098,7 @@ PEAKET의 모든 소프트웨어 산출물은 아래 국제 표준과 법률 규
 - 로비 참가자는 T=0에 진입 요청을 보내지 않는다. 대신 셔플 결과 파일을 공개 예정 시각 뒤 0~8초 [가정]에 나눠 받는다(위 '무작위 셔플 결과 전달' 행, CDN이 받는다).
 - 그래서 NFR-001의 20만 RPS는 로비 셔플을 끈 공연에서 100만 명이 모두 오픈 뒤 10초 안에 오는 경우의 설계 상한이다. 기본 설정은 이보다 작다. 설계는 상한으로 하고, 진입 서버 대수도 상한으로 셈한다.
 - 합성 부하 시험(k6 오픈 모델)은 이 모델을 도착 속도 입력으로 쓴다. 사람이 실제로 언제 오는지는 합성 시험으로 알 수 없다. 실제 공연이 생기면 대기 기록(`QueueEntryRecord`의 진입 방식·진입 시각)으로 세 값을 다시 맞추고, 바뀌면 ADR로 남긴다(출시 뒤).
+- **로비 참가가 고르게 온다는 가정의 한계**(추천 적용 2026-10-30, docs/features/notify.md §5.4, ADR-0155): 위 표의 '초당 약 1,700명'은 로비 참가가 로비가 열린 10분 동안 고르게 온다고 본 값이다. 그렇게 퍼뜨리는 장치는 오픈 알림의 로비 열림 푸시를 로비가 열린 동안 흩어 보내는 것뿐이다(notify §5.2). 공연 상세를 열어 둔 채 로비 개방을 기다리는 사람은 개방 순간 함께 누른다. 개방 첫 1분에 로비 참가의 30% [가정]가 오면 초당 약 3,500명(100만 × 70% × 30% ÷ 60초)으로 설계값의 두 배쯤이다. 로비 안에서는 언제 들어와도 순번이 같아(POL-004) 공정성은 그대로다. 그러나 로비 입장의 로그인과 사람 확인 서버 검증(§9.4 'Cloudflare Turnstile 검증 병목')이 그 1분에 설계값보다 많은 요청을 받는다. §9.4의 대응(로비를 15분 전에 열기)은 평균을 낮출 뿐 개방 순간의 몰림은 줄이지 못한다. 그래서 이것은 막는 장치가 아직 없는 남는 한계다. 로비 사람 확인 부하 시험(Q-T57)에 이 경우를 더할지는 queue-admission에서 정하고, 시험에서 진입 용량을 넘으면 로비 참가를 퍼뜨리는 장치를 설계한다(ADR-0155 '되돌릴 조건', planning/01 §5.2 '로비 개방 순간 몰림').
 
 토스페이먼츠 전자결제 승인 API의 가맹점당 운영 상한은 공식 문서에서 비공개다. 그래서 사전 협의를 전제로 피크 300 TPS로 추정했다(`ADR-0036`). 부하 시험은 PG 시뮬레이터 어댑터로 한다. 추정치가 낮아지는 비상 상황(100 TPS)에서도 결제 큐가 10분 데드라인 안에 비워지는지 Phase 2에 시험한다(`payment P-T22`). 결제사 상한은 두 갈래로 건다(§9.5, 추천 적용 2026-10-28, 기술 검토 중간-027). 첫 물결은 serving 전진 속도를 '승인 상한 ÷ 결제 비율(처음 1.0 [가정])'로 묶어 결제가 들어오는 속도를 직접 제한한다. 정상 상태는 동시 입장을 '승인 상한 × 평균 체류 180초 ÷ 결제 비율 × 안전 계수 0.5 [가정]'으로 묶는다(리틀의 법칙: 안에 머무는 수 = 들어오는 속도 × 머무는 시간). 위 표의 '판매 확정 초당 약 28건'이 정상 상태의 결제 속도이고, 결제 접수 피크 300 TPS는 첫 물결의 상한이다. 추정 300 TPS면 토스 공연은 초당 300번호·2.7만 명이라, 합산 동시 입장 5,000명은 결제사가 아니라 좌석·결제 계층 용량으로 정한 값이다. 포트원이 결제사인 공연은 채널 상한(추정 초당 50건)에 맞춰 초당 50번호·4,500명이다(`ADR-0044`).
 
@@ -886,7 +1152,7 @@ v0는 일부러 망가뜨린 설계가 아니라 '유능한 팀이 처음 만들
 | 서비스 메시 프록시 지연 오버헤드(선택, ADR-0082) | 같은 시나리오에서 Istio 앰비언트(gRPC를 받는 서비스만 웨이포인트) vs Istio 사이드카의 성능을 비교 측정한다. 하지 않으면 Istio 공식 측정(1.24)을 인용한다 | 웨이포인트 경로의 p99 지연 시간 증가폭이 2ms 이하이면 앰비언트를 쓰고, 넘는 서비스만 사이드카를 쓴다 [가정, PoC에서 확정]. 시험은 docs/verification.md V-T44다(ADR-0147 결정 8) |
 | API 게이트웨이 장애 차단 임계값 | Envoy Gateway 연결 상한과 서킷 브레이커 설정값 스윕(Sweep) 시험 | 정상 부하(NFR-001~006) 구간에서 503 에러 0건을 유지한다. 과부하를 주입하면 3ms 이내에 바로 빠른 실패(Fail-fast)를 돌려준다. 시험은 docs/verification.md V-T43이다(ADR-0147 결정 8) |
 | 전자결제 승인 상한 및 큐 적체 | PG사 운영 한도는 실측이 불가하므로 가맹점 추정치 300 TPS를 가정한다(`ADR-0036`). Phase 2에서 PG 시뮬레이터로 300 TPS와 100 TPS 부하를 넣어 검증한다 (`wbs 2.12.2`) | 결제 승인 상한이 100 TPS로 묶인 나쁜 조건에서도 대기 큐가 10분 데드라인 안에 안전하게 비워진다. 이중 결제는 0건이고, 기한 초과 건은 무과금으로 자동 만료된다 (`payment P-T22`) |
-| Cloudflare Turnstile 검증 병목 | 로비를 열 때 초당 1,700건의 서버 측 검증 요청을 흉내 내 시험한다 | 검증 p99 지연 시간이 로비에 머무는 사용자에게 나쁜 영향을 주지 않는다. 지연이 감지되면 로비를 미리 여는 시간을 10분에서 15분으로 늘린다. 시험은 docs/features/queue-admission.md Q-T57이다(ADR-0147 결정 8) |
+| Cloudflare Turnstile 검증 병목 | 로비를 열 때 초당 1,700건의 서버 측 검증 요청을 흉내 내 시험한다(고르게 온다는 가정의 값이다. 개방 순간 몰림은 §9.1 '로비 참가가 고르게 온다는 가정의 한계') | 검증 p99 지연 시간이 로비에 머무는 사용자에게 나쁜 영향을 주지 않는다. 지연이 감지되면 로비를 미리 여는 시간을 10분에서 15분으로 늘린다. 시험은 docs/features/queue-admission.md Q-T57이다(ADR-0147 결정 8) |
 | Redis 클라이언트 런타임 성능과 유지 상태(추천 적용 2026-10-28, 기술 검토 중간-026) | node-redis(기본안) vs ioredis vs Valkey GLIDE(`@valkey/valkey-glide`)를 같은 시나리오로 비교한다(V-T33, `wbs 0.5.1`). 보는 것: ① 유지 상태(README의 유지 방침, 최근 12개월 릴리스) ② 클러스터(토폴로지 갱신, `MOVED`·`ASK` 다시 보내기, 장애 조치 중 동작) ③ Lua(`EVALSHA`가 `NOSCRIPT`일 때 다시 싣기, 해시 태그 키) ④ 샤드 Pub/Sub(`SSUBSCRIBE`, 슬롯이 옮겨질 때) ⑤ 시간 초과와 오프라인 큐(연결이 끊기면 핫패스 명령이 100ms [가정] 안에 실패) ⑥ 자동 파이프라이닝의 `queue-svc` 처리량·p99·Redis CPU ⑦ OpenTelemetry 자동 계측 | ②~⑤의 동작이 ioredis와 같고 ⑥이 ±10% [가정] 안이면 node-redis로 확정한다. 다르면 다른 쪽이나 Valkey GLIDE를 새 ADR로 정한다. 결과를 지어내지 않고, PoC 전까지 문서의 옵션 이름은 클라이언트 중립으로 쓴다(§5) |
 | Kafka 클라이언트 런타임 | 기본 클라이언트는 Confluent 공식 클라이언트 `@confluentinc/kafka-javascript`(KafkaJS 호환 API, librdkafka 기반 네이티브 모듈)다. kafkajs는 마지막 릴리스가 2023-02-27인 위험 구성 요소라 대체안으로만 둔다(추천 적용 2026-10-28, 기술 검토 낮음-152). PoC는 기본 클라이언트가 처리량, 협력적 재조정(cooperativeSticky), OTel 계측(공식 계측 패키지가 없어 `peaket-platform`이 스팬을 다는 방식), MSK IAM 인증, 네이티브 모듈 설치(`allowBuilds`·이미지 빌드 단계, docs/devops.md §4.4)를 채우는지 확인한다. MSK IAM은 토큰 함수가 MSK 전용 역할을 고정 세션 이름으로 맡아(docs/devops.md §9.4) 자격 갱신 주기를 넘겨 계속 소비·생산하는지를 본다(docs/streaming.md ST-T14, 기술 검토 높음-26)(`wbs 0.5.1`, ADR-0054 결정 19, docs/devops.md §4.4). 클라이언트 필수 설정(멱등 생산, 동시 요청 5 이하, 파티셔너 `murmur2_random`, 자동 커밋 끔, 협력적 재조정 `cooperative-sticky`, 전달 상한, docs/streaming.md §2.6)이 공용 모듈에서 그대로 걸리는지와 묶음 크기 `js.consumer.max.batch.size`를 정한다(ADR-0142 결정 3). 브로커는 Kafka 3.9.x로 시작하므로(ADR-0141 결정 3), 문서가 Kafka 4.1 문서로 인용한 동작은 3.9 문서에서도 같음을 2026-10-29에 확인했다(docs/devops.md §9.4 'Kafka 판' 행). 같은 시험은 librdkafka 클라이언트가 3.9.x 브로커에서 그 동작을 내는지 본다. 소비자는 이전 방식 그룹 프로토콜(`classic`)을 명시해 쓴다. 새 방식(KIP-848)은 3.9에서 조기 접근이라 운영에 쓰지 않는다(https://kafka.apache.org/39/configuration/broker-configs/) | 기본 클라이언트가 텔레메트리 피크와 거래 토픽 `acks=all` p99를 함께 만족하고 재인증이 끊기지 않으면 확정한다. 못 채우면 kafkajs와 견줘 새 ADR로 정한다 [가정, PoC에서 확정]. 재인증이 끊기는 클라이언트는 고르지 않는다. 4.1.x로 올리는 것은 같은 시험을 4.1.x에서 통과한 뒤에 한다(ADR-0141 결정 3) |
 | 스트림 작업자와 조회 시점 집계 | `ops-rt` 작업자와 `rt` 매개변수 뷰를 로컬에서 돌려, 쓰기 성공 뒤에만 커밋하기·다시 시도 중 파티션 멈춤·롤링 판 올리기·원시 표 다시 채우기(docs/streaming.md §4.7)를 해 본다. MSK IAM 토큰 함수(MSK 전용 역할·고정 세션 이름)가 자격 갱신 주기를 넘겨 이어지는지(ST-T14, 기술 검토 높음-26)와 읽기 전용 루트 파일 시스템도 확인한다(`wbs 4.3.1`, ADR-0099) | 누적이 정답과 같고(ST-T1·T7·T11), 회차당 조회 p95가 0.25초 [가정] 안이다. 넘으면 중복에 안전한 숫자를 미리 합산(docs/streaming.md §4.8)하고, 그래도 넘으면 바꿀 조건 1(§16)로 엔진을 다시 비교한다 |
@@ -1127,6 +1393,13 @@ ADR 본문의 단정 표현을 읽는 규칙(추천 적용 2026-10-28, 기술 �
 | 0151 | 품질 목표 다섯의 순서(정확성 > 가용성 > 운영 제어 > 봇 방어 > 반응 속도)와 NFR마다의 품질 시나리오, 대응 뒤 위험 등급, 기술 부채 목록 | 채택(2026-10-29, 소유자 결정 "추천대로", 줄마다의 판정은 추천 적용) |
 | 0152 | 2인 승인 대기를 온콜 앱 푸시로도 알리고, 도쿄 파일럿 라이트는 두지 않으며, 원장 RPO는 대사 처리량을 잰 뒤 정하고, Slack은 운영 전환 때 서울 데이터 레지던시로 시작한다(이미 정한 open-items 3·8번은 닫음) | 채택(2026-10-29, 소유자 결정 "추천대로", 보내는 길과 기준 표현은 추천 적용) |
 | 0153 | 설계 문서는 실제 값 없이 공개하고(점검 도구 `public` 검사), 클릭 시연은 만들지 않으며, 회차 상세는 저마다 정규 주소를 두고, 아티스트·공연장 둘러보기 페이지는 출시 뒤 정한다 | 채택(2026-10-29, 소유자 결정 "추천대로 가겠습니다", 검사 규칙과 판단 기준 표현은 추천 적용) |
+| 0154 | 미룬 문서 가운데 100만 명 시나리오에 닿거나 다른 정본이 기대는 것은 지금 쓰고, 카프카 재인증은 선택 보정에서 확인하며, 네트워크 큐는 튜닝하지 않고 측정 무효 규칙만 두고, 사라진 용어 풀이를 되살린다 | 채택(2026-10-30, 소유자 결정 "추천대로"·"추천대로 가겠습니다", 문서 목록과 규모는 추천 적용) |
+| 0155 | 오픈 알림을 세 단계로 나눠 로비가 열린 동안 흩어 보내고, 대량 발송은 조각 원장으로 하며, 웹 푸시 구독·수신 거부·파트너 웹훅의 규칙을 정한다 | 채택(2026-10-30, 추천 적용, ADR-0154 결정 3) |
+| 0156 | 봇 탐지는 대기열 경로에서 막지 않고 통과·추가 확인만 내며, 점수기 여섯을 모두 돌리고, 장애 때 두 층으로 축소 운영하고, 이의 제기 경로를 정한다 | 채택(2026-10-30, 추천 적용, ADR-0154 결정 3) |
+| 0157 | 관리 계정 로그인에 줄지 않는 실패 누계와 출발지 단위 계수를 두고, 금칙어는 비밀번호 전체로 대조하며, 권한은 데이터·칸 단위 규칙과 토큰 역할로 검사한다 | 채택(2026-10-30, 추천 적용, ADR-0154 결정 3) |
+| 0158 | 내부 관리계획은 설계본으로 쓰고 사람 칸을 채워 승인한 날부터 시행하며, 접속기록 점검은 바뀐 고시에 따라 계획이 정한 주기(월 1회)로 한다 | 채택(2026-10-30, 추천 적용, 법 해석 6건은 확인 필요, ADR-0154 결정 3) |
+| 0159 | 좌석·관제 보안 추적 표를 판정하며 찾은 빈틈을 막는다(입장 토큰의 회차 묶기, 자기 홀드만, 서버의 좌석 확인, 구독 상한, 가져오기 파일과 관제 링크·원본 파일 규칙) | 채택(2026-10-30, 추천 적용, 큰 판단 일곱은 open-items, ADR-0154 결정 3) |
+| 0160 | 굿즈 주문 요청 본문은 수령 방식으로 갈리고 판매자 제공 동의를 고지 문안 판과 함께 받으며, 서비스 넷의 C4 3단계 구성 요소를 정한다 | 채택(2026-10-30, 추천 적용, ADR-0154 결정 3) |
 
 이 목록 끝에 두던 '작성 예정 과제'는 없앴다. 발송 대행사 선정과 휴대폰 본인확인 대행업체 비교는 결정할 때가 구현 직전이라 review/open-items.md 57·58번으로 옮겼다(추천 적용 2026-10-28, 기술 검토 낮음-007). Datadog 등 상용 관측 SaaS 평가는 ADR-0067의 Phase 4 비교 측정(wbs 4.8.2)으로 옮겼다.
 

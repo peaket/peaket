@@ -1,7 +1,7 @@
 # DevOps 상세 설계: 저장소·CI·공급망·승격·배포·변경 관리
 
 - **독자와 용도**: 플랫폼 엔지니어와 각 서비스 담당이 코드가 저장소에서 운영 환경까지 가는 길(저장소, 코드를 올릴 때마다 자동으로 검사하고 빌드하는 CI, 공급망 증명, 환경 승격, 워크로드별 배포와 되돌리기, 데이터 변경, 변경 동결과 정비 시간, 인프라 코드, 사람의 운영 접근, 비용 상한 장치, 전달 지표)을 구현하고 운영할 때 읽는 기준 문서다. 배포 구성도·환경 정의·가용성(서비스를 멈춤 없이 쓸 수 있는 정도)·백업은 [infra.md](infra.md), SLO(팀이 정한 서비스 품질 목표)·경보·Game Day(일부러 장애를 내고 대응을 연습하는 날)는 [observability.md](observability.md), 운영 명령은 [features/control-tower.md](features/control-tower.md), 비밀과 키 목록은 [security/secrets-and-keys.md](security/secrets-and-keys.md)가 정본이다. 보안 요구사항 추적은 [security/asvs/delivery.md](security/asvs/delivery.md)다.
-- **원문 출처**: 설계서 §15 <리포지토리와 가상 팀 구조>, 설계서 19장 <MSA, Kubernetes와 CNCF 생태계>, 설계서 23장 <AWS DevOps>, [ADR-0054](adr/0054-delivery-pipeline-change-freeze-and-safe-deploys.md), [ADR-0074](adr/0074-git-flow-branching-release-and-hotfix.md).
+- **원문 출처**: 설계서 §15 <리포지토리와 가상 팀 구조>, 설계서 19장 <MSA, Kubernetes와 CNCF 생태계>, 설계서 23장 <AWS DevOps>, [ADR-0054](adr/0054-delivery-pipeline-change-freeze-and-safe-deploys.md), [ADR-0074](adr/0074-git-flow-branching-release-and-hotfix.md). 원문에는 절차가 없어 이 문서의 규칙은 대부분 [보완]이다.
 - **기준 기획 버전**: v1.0.
 - **표시 규칙**: 2026-10-13 DevOps 검토(소유자 요청 '상세설계까지')에서 정한 규칙은 추천 적용(2026-10-13)이다. 측정으로 정할 값만 [가정, Phase N …에서 확정]으로 적는다. 외부 제품·표준 사실은 2026-10-13에 원문으로 확인했고, 출처는 §16에 있다. 가지 규칙(§2.2)의 git flow는 소유자 결정(2026-10-20, ADR-0074)이고, 이 프로젝트에 맞춘 세부 규칙은 추천 적용(2026-10-20)이다. git flow 원문과 GitHub 규칙 세트 등은 2026-10-20에 확인했다(§16). 늘 켜 두는 데모 환경은 두지 않는다(질문 24 결론, ADR-0057).
 
@@ -10,7 +10,7 @@
 DevOps 파이프라인은 신뢰할 수 있는 코드 변경이 운영 환경까지 무중단으로 안전하게 전달되도록 엔지니어링 규율을 표준화한다:
 - **코드 및 브랜치 거버넌스 (Git Flow)**: `main`(운영 정본), `develop`(통합 개발), 릴리스 브랜치 격리를 통한 출시 안정성 확보([ADR-0074](adr/0074-git-flow-branching-release-and-hotfix.md))
 - **공급망 무결성 (Build Once, Deploy Anywhere)**: 한 번 빌드한 불변 컨테이너 이미지 다이제스트를 모든 환경에 동일하게 승격
-- **선언형 GitOps와 무중단 배포**: ArgoCD 기반 지속적 일치, 온세일 변경 동결(Change Freeze) 창 엄수([ADR-0054](adr/0054-delivery-pipeline-change-freeze-and-safe-deploys.md))
+- **선언형 GitOps와 무중단 배포**: ArgoCD 기반 지속적 일치(GitOps: 저장소에 적어 둔 배포 상태대로 클러스터를 맞추는 운영 방식), 온세일 변경 동결(Change Freeze) 창 엄수([ADR-0054](adr/0054-delivery-pipeline-change-freeze-and-safe-deploys.md))
 
 ### 1.1 이 문서가 정하는 것
 
@@ -488,7 +488,7 @@ flowchart LR
 - **여러 파드의 캐시**: ISR(미리 그려 두고 정해진 주기로 다시 그리는 방식)·데이터 캐시는 파드마다 따로 있다. 그래서 공유 저장소(세션·캐시 Redis)를 쓰는 `cacheHandler`와 `'use cache'`용 `cacheHandlers`를 두고, 메모리 캐시 크기는 0으로 둔다. `revalidateTag()`는 부른 파드의 캐시만 무효화한다. 처리기가 `refreshTags()`로 공유 저장소의 태그 상태를 읽어야 다른 파드에도 닿는다. 모든 파드는 같은 빌드와 같은 `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`(Secrets Manager)를 쓴다(Next.js 자체 호스팅 문서).
 - **관제 콘솔 MF 원격**: 원격은 저마다 관제 콘솔 호스트와 같은 출처의 `/remotes/<원격>/<SHA>/remoteEntry.js`에 올린다. 그래서 CSP(페이지가 실행할 수 있는 스크립트의 출처를 정하는 브라우저 규칙)의 `script-src 'self'` 안에 든다(`console.peaket.example`, 추천 적용 2026-10-15, ADR-0065 결정 1). 호스트는 GitOps 설정의 버전 목록(`remotes.json`)을 읽는다. 되돌리기는 이 목록을 되돌리는 것이다. 공유 의존성(화면 라이브러리인 React)은 싱글턴과 버전 범위를 E2E로 검사한다. 원격은 소유 서비스 저장소(peaket-queue·peaket-purchase)가 공용 재사용 워크플로 `build-remote.yml`로 빌드해 관제 콘솔 버킷에 올린다. `remotes.json`에는 `integrity`(sha384)와 계약 주판(`contractMajor`)을 함께 적는다. 호스트는 무결성과 계약 판을 확인하고, 실패하면 그 칸만 대체 카드로 바꾼다. 원격 위젯은 규모와 상관없이 온세일 윈도우(T-10분~T+60분) 동안 바꾸지 않는다 [가정](추천 적용 2026-10-21, ADR-0079 결정 16·26, docs/frontend.md §4.5). Module Federation은 가상 팀의 따로 배포를 보이는 쇼케이스다. `build-remote.yml`은 같은 위젯 소스를 위젯 패키지 `@peaket/widget-<원격 이름>`(GitHub Packages)로도 게시하고, 호스트 저장소는 그 패키지로 한 앱 기준선을 빌드해 FE-T29로 견준다. 패키지는 운영에 내지 않는다(추천 적용 2026-10-28, ADR-0100 결정 6).
 - **포렌식 리플레이 2단계 페이지(console, 출시 뒤 선택)**: `apps/forensics`를 운영 모드로 빌드해 console 배포 S3 `/forensics/`에 올린다. 콘솔이 모든 경로를 'index.html'로 보내는 규칙에서 `/forensics*`를 빼고, 그 캐시 동작의 응답 헤더 정책이 COEP `require-corp`를 더한다. 되돌리기는 관제 호스트와 같다(추천 적용 2026-10-21, ADR-0080 상태 줄, docs/features/forensic-replay.md §6.8).
-- **지갑 PWA(web)**: 새 서비스 워커는 대기 상태로 둔다. 대기실·좌석·결제·티켓 화면에 있는 동안에는 활성화하지 않고, 다음 방문 때 적용한다. 오프라인 티켓 표시는 옛 워커로도 동작해야 한다. 서비스 워커 범위는 `/my/tickets/`만이라 대기실·좌석·결제 화면을 가로채지 않는다(추천 적용 2026-10-21, ADR-0079 결정 18).
+- **지갑 PWA(web)**: 새 서비스 워커는 대기 상태로 둔다. 대기실·좌석·결제·티켓 화면에 있는 동안에는 활성화하지 않고, 다음 방문 때 적용한다. 오프라인 티켓 표시는 옛 워커로도 동작해야 한다. 서비스 워커 범위는 `/my/tickets/`만이라 대기실·좌석·결제 화면을 가로채지 않는다(추천 적용 2026-10-21, ADR-0079 결정 18). 웹 푸시를 받는 워커는 따로 등록한 `/push/sw.js`(범위 `/push/` [가정])이고 화면을 제어하지 않으므로 바로 활성화한다(추천 적용 2026-10-30, docs/frontend.md §5.4).
 - **대기실 경량 페이지(web)**: `apps/web/queue-room`은 Next.js와 따로 빌드해 www 배포 S3 `/_q/`에 올린다. CloudFront(AWS의 CDN) Function이 대기실 경로를 로케일 셸로 바꿔 읽는다. 배포 때는 셸만 무효화하고, 해시 이름 자산은 위 보존 규칙을 따른다(추천 적용 2026-10-21, ADR-0079 결정 2).
 - **스캐너 PWA**: 새 버전은 근무 준비(docs/features/offline-gate.md §6.2) 때만 적용하고, 입장 시간에는 미룬다. gw-scanner는 최소 지원 버전을 알리지만, 입장 시간 중에는 옛 버전을 거부하지 않는다. 스캐너 API는 최근 2개 앱 버전과 호환되게 하고, 호환을 깨는 변경은 API 폐기 절차(api/guidelines.md §1)를 따른다.
 - **응답 보안 헤더 정책(추천 적용 2026-10-15, ADR-0065 결정 3)**: 값은 docs/infra.md §9 '응답 보안 헤더'에 있고, 세 저장소가 나눠 둔다. `peaket-infra`는 CloudFront 배포·캐시 동작별 응답 헤더 정책을 둔다(HSTS·`nosniff`는 원본 값 재정의를 켜고, 기본 Referrer-Policy·API 기본 CSP는 재정의를 끈다). `peaket-gitops`는 Envoy Gateway 공통 정책을 둔다(같은 값을 게이트웨이 응답에 붙이고, CloudFront를 거치지 않는 `gw-scanner`도 포함한다). `peaket-frontend`는 앱이 보내는 CSP·Referrer-Policy·COOP(docs/architecture.md §6.3)를 둔다. 앱 서버가 없는 정적 앱(관제 콘솔, 스캐너 PWA)은 그 화면 배포의 응답 헤더 정책이 앱의 CSP를 붙인다. 그래서 이 값이 바뀌는 변경은 `peaket-frontend`와 `peaket-infra`를 함께 고친다. 응답 헤더 정책의 CSP 값은 1,783자 이하다(CloudFront 할당량). 배포 뒤 점검에서는 화면 호스트마다 HSTS·`nosniff`와, CSP의 `object-src 'none'`·`base-uri 'none'`·`frame-ancestors 'none'`이 실렸는지 본다.
@@ -575,7 +575,7 @@ flowchart LR
 | 규모 | 막는 변경 | 새 변경 시작 금지 | 진행 중 변경 처리 | 연 횟수(1년차 → 3년차) |
 | --- | --- | --- | --- | --- |
 | 대형·중형 | 모든 운영 변경: 앱, 게이트웨이, 엣지 함수, 설정, 릴리스 플래그, DB, 인프라, 클러스터 애드온, 노드 자발 교체, 키 정기 교체 | T-90분부터 T+60분까지 | T-45분에 끝나지 않은 롤아웃은 자동 중단, T-30분 점검에서 0건 확인 | 144회 → 288회 |
-| 소형 | 핫패스 묶음(gw-queue, gw-fan, queue-svc, admission-ctrl, purchase-svc, payment-svc, realtime-gw, identity-svc, 소비자 웹 앱 서버, 대기실 경량 셸·웹 정적 자산 목록·월렛 서비스 워커, 엣지 함수)의 배포와 설정, 핫패스 노드 풀의 자발 교체 | T-50분부터 T+60분까지 | T-15분에 끝나지 않은 롤아웃은 자동 중단 | 2,000회 → 4,500회 |
+| 소형 | 핫패스 묶음(gw-queue, gw-fan, queue-svc, admission-ctrl, purchase-svc, payment-svc, realtime-gw, identity-svc, 소비자 웹 앱 서버, 대기실 경량 셸·웹 정적 자산 목록·월렛 서비스 워커·웹 푸시 서비스 워커(추천 적용 2026-10-30, docs/frontend.md §5.4), 엣지 함수)의 배포와 설정, 핫패스 노드 풀의 자발 교체 | T-50분부터 T+60분까지 | T-15분에 끝나지 않은 롤아웃은 자동 중단 | 2,000회 → 4,500회 |
 
 - **시각의 근거**: 대형·중형은 T-30분 점검 때 진행 중인 변경이 0건이어야 한다. 그래서 '카나리 상한 40분 + 자동 중단과 확인 여유 20분'을 더 앞당겨 T-90분이다. 소형은 온세일 윈도우 시작 T-10분에서 카나리 상한 40분을 빼 T-50분이다.
 - POL-028의 온세일 윈도우(T-10~T+60, 회차별 SLO 평가 구간)는 그대로 두고, 동결 창은 그보다 앞쪽으로 넓힌다.
@@ -626,7 +626,7 @@ flowchart LR
 
 ### 8.4 동결 중 긴급 변경
 
-- **허용**: ① 진행 중인 카나리 중단(자동), ② 이전 다이제스트로 되돌리기, ③ 릴리스 플래그 끄기, ④ 관제 명령(평소대로), ⑤ 오토스케일 정지(KEDA ScaledObject에 미리 만든 `autoscaling.keda.sh/paused-replicas` 패치만, RB-30, ADR-0069).
+- **허용**: ① 진행 중인 카나리 중단(자동), ② 이전 다이제스트로 되돌리기, ③ 릴리스 플래그 끄기, ④ 관제 명령(평소대로), ⑤ 오토스케일(부하에 따라 서버 수를 자동으로 늘리고 줄이는 것) 정지(KEDA ScaledObject에 미리 만든 `autoscaling.keda.sh/paused-replicas` 패치만, RB-30, ADR-0069).
 - **허용하지 않음**: 새 코드(핫픽스), 스키마 변경, 인프라 변경. 이들은 온세일이 끝난 뒤에 한다. 핫픽스 가지는 만들고 데모 검증까지 할 수 있으며, 운영 승격만 창이 끝난 뒤에 한다(§2.2.3).
 - **절차(RB-23)**: 인시던트(대응이 필요한 장애나 보안 사건) 등록(SEV1·SEV2) → commander 결정 → Git 되돌리기 PR에 `emergency-change` 라벨과 인시던트 번호를 붙인다 → `gitops-check`가 라벨, 인시던트, 변경 모양(이전 다이제스트로 바꾸거나 플래그를 끄거나 오토스케일 정지 주석을 붙이는 변경만)을 확인해 동결 게이트를 통과시킨다 → commander가 수동 동기화한다 → 감사 기록과 포스트모템(필수).
 - **1인 기간의 한계**: commander와 실행자와 검토자가 같은 사람이다(§15).
@@ -684,7 +684,7 @@ peaket-infra/
 | 기본 이미지 | 주 1회 다시 빌드한다(§4.2). 운영에 30일 넘은 이미지가 있으면 SEV3 [가정] | — |
 | Node.js | 짝수 LTS만 쓰고, LTS 종료 6개월 전에 올린다 [가정] | — |
 | 서비스 권한 | EKS Pod Identity로 주고, IRSA는 Pod Identity를 지원하지 않는 곳에만 쓴다. MSK 권한만은 Pod Identity 역할에 주지 않고 아래 행의 MSK 전용 역할에 준다 | AWS는 가능하면 Pod Identity를 권한다(리눅스 EC2 노드, Fargate 미지원) |
-| MSK IAM 클라이언트(추천 적용 2026-10-28, 기술 검토 높음-26) | MSK(AWS가 운영해 주는 Kafka)에 IAM으로 붙는 워크로드마다 MSK 전용 IAM 역할을 둔다. 토픽·소비자 그룹 권한은 그 역할에만 주고, 그 역할의 신뢰 정책은 그 워크로드의 Pod Identity 역할만 믿는다(`sts:AssumeRole`). 클라이언트는 그 역할을 고정 세션 이름 `<워크로드>-<환경>`으로 맡아 토큰을 만든다. 역할을 맡지 못하면 기본 자격으로 넘어가지 않고 연결을 실패시킨다. Pod Identity 역할에는 MSK 권한이 없으므로, 설정이 틀려 Pod Identity 자격 그대로 붙으면 권한이 없어 바로 드러난다. 클라이언트별 설정: JavaScript(서비스·스트림 작업자·서비스별 Outbox 릴레이)는 [streaming.md](streaming.md) §2.6, 자바(직접 띄운 Schema Registry. Debezium이 돌던 Kafka Connect는 2026-10-28에 빠졌다, ADR-0116)는 [data.md](data.md) §4의 7번, Go(관측 전용 MSK의 수집기·Tempo)는 [observability.md](observability.md) §1. 정적 검사는 D-T30. 실제 MSK에서 재인증(연결을 유지한 채 새 토큰으로 다시 인증하는 것)이 그래도 끊기면(streaming.md ST-T14 ②) 그 워크로드만 IRSA(웹 ID 토큰으로 역할을 맡는 방식. 세션 이름을 고정할 수 있다)로 바꾼다 | aws-msk-iam-auth README 문제 해결 절: EKS Pod Identity처럼 STS(임시 자격을 내주는 AWS 서비스) 세션 이름이 바뀌는 자격은 재인증 때 'Cannot change principals during re-authentication'으로 연결이 끊기고, 전용 역할과 고정 세션 이름이 우회 방법이다. 같은 README와 2.3.9 릴리스 노트(2026-09-24): 역할을 못 맡으면 기본 자격으로 넘어가고(2.3.9부터 경고만 남긴다), `awsAddDefaultProviders="false"`가 그 대신 실패하게 한다(2026-10-28 확인) |
+| MSK IAM 클라이언트(추천 적용 2026-10-28, 기술 검토 높음-26) | MSK(AWS가 운영해 주는 Kafka)에 IAM으로 붙는 워크로드마다 MSK 전용 IAM 역할을 둔다. 토픽·소비자 그룹 권한은 그 역할에만 주고, 그 역할의 신뢰 정책은 그 워크로드의 Pod Identity 역할만 믿는다(`sts:AssumeRole`). 클라이언트는 그 역할을 고정 세션 이름 `<워크로드>-<환경>`으로 맡아 토큰을 만든다. 역할을 맡지 못하면 기본 자격으로 넘어가지 않고 연결을 실패시킨다. Pod Identity 역할에는 MSK 권한이 없으므로, 설정이 틀려 Pod Identity 자격 그대로 붙으면 권한이 없어 바로 드러난다. 클라이언트별 설정: JavaScript(서비스·스트림 작업자·서비스별 Outbox 릴레이)는 [streaming.md](streaming.md) §2.6, 자바(직접 띄운 Schema Registry. Debezium이 돌던 Kafka Connect는 2026-10-28에 빠졌다, ADR-0116)는 [data.md](data.md) §4의 7번, Go(관측 전용 MSK의 수집기·Tempo)는 [observability.md](observability.md) §1. 정적 검사는 D-T30. 실제 MSK에서 재인증(연결을 유지한 채 새 토큰으로 다시 인증하는 것)이 그래도 끊기면(streaming.md ST-T14 ②. 선택 클라우드 보정에서 확인한다, docs/verification.md §6, ADR-0154) 그 워크로드만 IRSA(웹 ID 토큰으로 역할을 맡는 방식. 세션 이름을 고정할 수 있다)로 바꾼다 | aws-msk-iam-auth README 문제 해결 절: EKS Pod Identity처럼 STS(임시 자격을 내주는 AWS 서비스) 세션 이름이 바뀌는 자격은 재인증 때 'Cannot change principals during re-authentication'으로 연결이 끊기고, 전용 역할과 고정 세션 이름이 우회 방법이다. 같은 README와 2.3.9 릴리스 노트(2026-09-24): 역할을 못 맡으면 기본 자격으로 넘어가고(2.3.9부터 경고만 남긴다), `awsAddDefaultProviders="false"`가 그 대신 실패하게 한다(2026-10-28 확인) |
 
 ## 10. 사람의 접근과 감사
 

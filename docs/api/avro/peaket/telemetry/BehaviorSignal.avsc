@@ -2,7 +2,7 @@
   "type": "record",
   "name": "BehaviorSignal",
   "namespace": "peaket.telemetry",
-  "doc": "행동 신호 요약. 토픽 telemetry.behavior, 키 pid. trust-svc가 사전 검증 때 기기 식별값을 탐지 가명으로 바꿔 낸다(ADR-0053·0071).",
+  "doc": "행동 신호 요약. 토픽 telemetry.behavior, 키 pid. trust-svc가 로비 입장·사전 검증 때 기기 식별값을 탐지 가명으로 바꿔 낸다(ADR-0053·0071). 로비 입장에는 행동 요약이 없어 features가 비고, 재평가의 기기 공유 소급(R1)에만 쓰인다(로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1).",
   "fields": [
     {
       "name": "pid",
@@ -20,7 +20,7 @@
     },
     {
       "name": "eventId",
-      "doc": "사전 검증한 회차(ADR-0071)",
+      "doc": "로비 입장·사전 검증을 판정한 회차(ADR-0071. 로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1)",
       "type": "string"
     },
     {
@@ -57,7 +57,7 @@
     },
     {
       "name": "features",
-      "doc": "브라우저가 낸 행동 신호 요약값(openapi BehaviorSummary와 같은 필드: 포인터 이동 수·엔트로피, 입력 간격 평균·표준편차, 스크롤, ADR-0065 결정 9). 헤더 순서 같은 서버 쪽 특징은 싣지 않는다(재평가 패턴이 쓰지 않음, docs/streaming.md §5.3, 추천 적용 2026-10-22)",
+      "doc": "브라우저가 낸 행동 신호 요약값(openapi BehaviorSummary와 같은 필드: 포인터 이동 수·엔트로피, 입력 간격 평균·표준편차, 스크롤, ADR-0065 결정 9). 헤더 순서 같은 서버 쪽 특징은 싣지 않는다(재평가 패턴이 쓰지 않음, docs/streaming.md §5.3, 추천 적용 2026-10-22). 로비 입장에는 행동 요약이 없어 비운다(추천 적용 2026-10-30, docs/features/bot-defense.md §4.1)",
       "type": [
         "null",
         {
