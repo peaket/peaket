@@ -2,7 +2,7 @@
 # GitHub는 맞는 줄 가운데 마지막 줄을 쓴다. 그래서 넓은 것에서 좁은 것 순서로 적는다.
 # 1인 기간에는 코드 주인 검토를 요구하지 않는다(docs/devops.md §2.3). 검사: node tools/ci/check-codeowners.mjs
 
-# 기본값: 문서 폴더, tools/, openspec/, 계약 원본(docs/api/)
+# 기본값: 문서 폴더, tools/(tools/ci/ 밖), openspec/, 계약 원본(docs/api/)
 *                                   @peaket/architecture
 
 # 화면 앱과 화면용 공용 패키지
@@ -32,14 +32,17 @@
 # 데이터 모델
 /data/                              @peaket/data
 
-# 인프라, 배포 상태, 부하 시험, CI, 성능 장부 실행 기록
+# 인프라, 배포 상태, 부하 시험, CI(워크플로와 그것이 부르는 점검 스크립트), 성능 장부 실행 기록
 /infra/                             @peaket/platform
 /deploy/                            @peaket/platform
 /loadtest/                          @peaket/platform
 /.github/                           @peaket/platform
+/tools/ci/                          @peaket/platform
 /docs/perf-ledger/                  @peaket/platform
 
 # 뿌리의 작업 공간 설정(공급망 설정, docs/devops.md §4.4)
 /package.json                       @peaket/platform
 /pnpm-workspace.yaml                @peaket/platform
 /pnpm-lock.yaml                     @peaket/platform
+/renovate.json                      @peaket/platform
+/.nvmrc                             @peaket/platform

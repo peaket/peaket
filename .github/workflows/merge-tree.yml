@@ -1,0 +1,31 @@
+# 병합 결과 트리 검사(필수 검사 merge-tree, docs/devops.md §2.2.4). main으로 가는 PR에서만 돈다.
+# 대상은 실행하는 때의 origin/main이다. PR이 열린 뒤 main이 움직이면 릴리스 마무리(release.yml)가 병합 직전에 다시 검사한다.
+name: merge-tree
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-tree-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  merge-tree:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node tools/ci/check-merge-tree.mjs --target origin/main --candidate "$HEAD_SHA"

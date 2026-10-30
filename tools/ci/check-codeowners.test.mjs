@@ -2,10 +2,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tempDir } from './git-fixture.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const script = join(here, 'check-codeowners.mjs');
@@ -14,7 +14,7 @@ const repoRoot = join(here, '..', '..');
 const teams = JSON.stringify({ teams: [{ slug: 'platform' }, { slug: 'architecture' }] });
 
 function run(codeowners) {
-  const dir = mkdtempSync(join(tmpdir(), 'codeowners-'));
+  const dir = tempDir('codeowners-');
   writeFileSync(join(dir, 'CODEOWNERS'), codeowners);
   writeFileSync(join(dir, 'teams.json'), teams);
   return spawnSync(process.execPath, [script, '--codeowners', join(dir, 'CODEOWNERS'), '--teams', join(dir, 'teams.json')], {

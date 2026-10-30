@@ -10,7 +10,7 @@
 
 - **적용 여부**: 적용, 부분 적용, 미적용 중 하나로 적는다.
 - **구현 위치**: 예정 위치를 적는다.
-  - `.github/workflows/`: `peaket` 안의 재사용 워크플로(ADR-0169), (`ci-node`, `security-scan`, `build-image`, `migration-check`, `contract-check`, `iac-check`, `gitops-check`, `promote`, `branch-policy`, `release`, `docs-check`, `build-remote`). 모노레포(코드 전부를 저장소 하나에 폴더로 나눠 담는 방식) `peaket`의 `.github/` 폴더에 있는 `ci.yml`이 모든 PR에서 돌며 이것들을 커밋 SHA로 고정해 부르고, 바뀐 범위의 잡만 돌린다(ADR-0165 결정 3)
+  - `.github/workflows/`: `peaket` 안의 재사용 워크플로(ADR-0169), (`ci-node`, `security-scan`, `build-image`, `migration-check`, `contract-check`, `iac-check`, `gitops-check`, `promote`, `branch-policy`, `merge-tree`, `release`, `docs-check`, `tools-check`, `build-remote`). 모노레포(코드 전부를 저장소 하나에 폴더로 나눠 담는 방식) `peaket`의 `ci.yml`이 모든 PR에서 돌며 이것들을 같은 저장소 안 경로(`./.github/workflows/…`)로 부르고, 바뀐 범위의 잡만 돌린다(ADR-0165 결정 3, ADR-0169). 판단은 CI가 부르는 점검 스크립트 `tools/ci/`가 하고 시험이 함께 있다. 지금 있는 것은 `ci.yml`, `docs-check`, `tools-check`, `iac-check`(형식·정적 검증만), `branch-policy`, `merge-tree`다(2026-10-31, R-202)
   - `deploy/`(`peaket` 안의 배포 상태, ADR-0169): Kyverno(쿠버네티스에 들어오는 설정을 규칙으로 검사하는 도구) 정책, ArgoCD AppProject·ApplicationSet, 공용 Helm 차트, 변경 동결 달력 파일, Envoy Gateway(요청을 받아 안쪽 서비스로 넘기는 프록시 서버를 바탕으로 한 게이트웨이) 공통 정책(보안 응답 헤더, 다른 주소에서 온 요청을 브라우저가 허용할지 정하는 CORS 규칙, 출처 검사)과 라우트
   - `infra/`: `peaket`의 Terraform 폴더. AWS 계정·조직 정책·IAM(OIDC 로그인 표준으로 받는 역할, Identity Center 권한 세트), GitHub 조직 설정, CloudFront(AWS의 CDN) 배포와 응답 헤더 정책
   - `apps/`·`packages/config`: `peaket`의 화면 쪽 폴더. 공용 ESLint 설정(`packages/config`), 앱(web·partner·관제 콘솔·스캐너 PWA)의 화면 보안 헤더 값(`apps/`)

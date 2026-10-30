@@ -2,10 +2,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tempDir } from './git-fixture.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const script = join(here, 'check-workspace-protocol.mjs');
@@ -22,7 +22,7 @@ function write(root, files) {
 // files: { '상대 경로/package.json': { ...manifest } }. git으로 추적하는 저장소를 만들고 돌린다.
 // untracked: 추적하지 않은 채 두는 파일(검사가 보지 않아야 한다)
 function run(files, untracked = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'workspace-protocol-'));
+  const root = tempDir('workspace-protocol-');
   write(root, files);
   spawnSync('git', ['init', '-q'], { cwd: root });
   spawnSync('git', ['add', '-A'], { cwd: root });

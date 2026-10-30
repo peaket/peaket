@@ -1,0 +1,75 @@
+# 공용 CI(docs/devops.md §3.1). 모든 PR에서 돈다. 경로 필터로 워크플로를 건너뛰면 필수 검사가 '대기'로 남기 때문이다.
+# 판단은 tools/ci/*.mjs가 하고 여기서는 부르기만 한다. 필수 검사는 마지막 잡 ci-summary다.
+name: ci
+
+on:
+  # edited: 대상 가지를 바꾸면 새 대상과 견줘 범위를 다시 고른다(제목·본문만 고쳐도 다시 돈다)
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [develop, main, 'release/**', 'hotfix/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      docs: ${{ steps.scope.outputs.docs }}
+      tools: ${{ steps.scope.outputs.tools }}
+      infra: ${{ steps.scope.outputs.infra }}
+      js: ${{ steps.scope.outputs.js }}
+      ci: ${{ steps.scope.outputs.ci }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # PR은 대상 가지와의 병합 기준, 푸시는 직전 커밋과 견준다. 기준이 없으면 스크립트가 전체를 고른다
+      - id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node tools/ci/changes.mjs --base "$BASE_SHA" --head "$HEAD_SHA"
+
+  # 범위 잡은 changes가 실패해도 돈다(범위를 고르지 못하면 전체를 돈다, D-T47 ④)
+  docs-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs == 'true') }}
+    uses: ./.github/workflows/docs-check.yml
+
+  tools-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.tools == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.infra == 'true' || needs.changes.outputs.js == 'true') }}
+    uses: ./.github/workflows/tools-check.yml
+
+  iac-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.infra == 'true') }}
+    uses: ./.github/workflows/iac-check.yml
+
+  ci-summary:
+    needs: [changes, docs-check, tools-check, iac-check]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/ci
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node tools/ci/ci-summary.mjs

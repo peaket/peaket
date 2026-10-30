@@ -44,7 +44,7 @@ variable "require_code_owner_review" {
 }
 
 variable "actions_patterns_allowed" {
-  description = "허용할 제3자 액션 패턴. 비워 두고 wbs 0.1.2에서 쓰는 것만 더한다(docs/devops.md §4.5)"
+  description = "허용할 제3자 액션 패턴. 워크플로가 쓰는 것만 더한다(docs/devops.md §4.5). 판은 조직 정책의 SHA 고정 요구가 따로 막는다"
   type        = list(string)
-  default     = []
+  default     = ["hashicorp/setup-terraform@*"]
 }
