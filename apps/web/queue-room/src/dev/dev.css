@@ -1,0 +1,10 @@
+/* 개발용 상태 고르기 패널(개발 서버에서만 실린다). ds StateSwitcher와 같은 자리·모양 */
+@layer utilities {
+  .q-dev{position:fixed;right:12px;bottom:12px;z-index:2147483000;max-width:260px}
+  .q-dev-card{padding:8px;box-shadow:var(--shadow-lg);background:var(--surface-raised)}
+  .q-dev-toggle{width:100%;justify-content:space-between}
+  .q-dev-list{gap:6px;margin-top:4px;max-height:40vh;overflow:auto}
+  .q-dev-list ul{gap:2px}
+  .q-dev-h{margin-top:4px}
+  .q-dev-theme{margin-top:4px}
+}

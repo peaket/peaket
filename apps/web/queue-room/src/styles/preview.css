@@ -1,0 +1,13 @@
+/* 화면 목록(/preview) 전용(개발 서버에서만). 표·작은 칩은 키트 13·8절 규칙을 그대로 옮겼다 */
+@layer components {
+.table{width:100%;border-collapse:collapse;font-size:14px;line-height:19px}
+.table th{text-align:left;font-size:12px;line-height:16px;font-weight:700;color:var(--text-muted);background:var(--surface-muted);padding:10px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+.table td{padding:12px;border-bottom:1px solid var(--border);vertical-align:middle}
+.chip-sm{min-height:30px;padding:0 10px;font-size:13px}
+}
+@layer utilities {
+  .q-catalog{max-width:1040px;margin:0 auto;padding:24px 16px 56px;gap:24px;width:100%}
+  .q-table-wrap{overflow-x:auto}
+  .q-catalog code{font-family:var(--mono);font-size:12px}
+  .q-catalog td ul{gap:4px}
+}

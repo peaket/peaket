@@ -1,0 +1,118 @@
+/*
+ * 이 파일은 손으로 고치지 않는다. docs/design/tokens.json에서 만든다.
+ * 다시 만들기: pnpm --filter @peaket/ds tokens (차이 검사: tokens:check)
+ */
+/*
+ * 캔버스 키트(src/styles/kit.css)의 변수 블록. 대응표는 scripts/build-tokens.mjs의 KIT_VARS다.
+ * styles/index.css가 kit.css보다 먼저 싣는다. 변수 아닌 루트 속성(글꼴·줄 높이 등)은 kit.css 1절에 있다.
+ * 키트 이름과 tokens.json 이름이 다른 것: --seat-held = seat.held-by-others, --r-* = radius.*
+ */
+@layer components {
+  .pk {
+    --surface: #ffffff; /* color.semantic.light.surface */
+    --surface-muted: #f7f8f9; /* color.semantic.light.surface-muted */
+    --surface-basement: #f3f4f5; /* color.semantic.light.surface-basement */
+    --surface-raised: #ffffff; /* color.semantic.light.surface-raised */
+    --surface-disabled: #f3f4f5; /* color.semantic.light.surface-disabled */
+    --fill-weak: #f3f4f5; /* color.primitive.gray.200 */
+    --fill-weak-strong: #eeeff1; /* color.primitive.gray.300 */
+    --border: #dcdee3; /* color.semantic.light.border */
+    --border-input: #555d6d; /* color.semantic.light.border-input */
+    --border-primary: #4338CA; /* color.semantic.light.border-primary */
+    --text: #1a1c20; /* color.semantic.light.text */
+    --text-muted: #555d6d; /* color.semantic.light.text-muted */
+    --text-disabled: #d1d3d8; /* color.semantic.light.text-disabled */
+    --text-on-primary: #ffffff; /* color.semantic.light.text-on-primary */
+    --primary: #4338CA; /* color.semantic.light.primary */
+    --primary-hover: #332B9E; /* color.semantic.light.primary-hover */
+    --primary-subtle: #DFE2FF; /* color.semantic.light.primary-subtle */
+    --link: #4338CA; /* color.semantic.light.link */
+    --success: #00745f; /* color.semantic.light.success */
+    --success-subtle: #edfaf6; /* color.semantic.light.success-subtle */
+    --warning: #755b22; /* color.semantic.light.warning */
+    --warning-subtle: #fff7de; /* color.semantic.light.warning-subtle */
+    --danger: #ca1d13; /* color.semantic.light.danger */
+    --danger-subtle: #fdf0f0; /* color.semantic.light.danger-subtle */
+    --on-danger: #ffffff; /* color.primitive.gray.0 */
+    --info-subtle: #eff6ff; /* color.semantic.light.info-subtle */
+    --focus-ring: #5B5BE8; /* color.semantic.light.focus-ring */
+    --seat-available: #079171; /* color.semantic.light.seat.available */
+    --seat-held: #d1d3d8; /* color.semantic.light.seat.held-by-others */
+    --seat-mine: #4338CA; /* color.semantic.light.seat.mine */
+    --seat-sold: #555d6d; /* color.semantic.light.seat.sold */
+    --seat-unavailable: #eeeff1; /* color.semantic.light.seat.unavailable */
+    --seat-wheelchair: #A3207E; /* color.semantic.light.seat.wheelchair */
+    --seat-glyph: #ffffff; /* color.semantic.light.seat.glyph */
+    --slo-ok: #079171; /* color.semantic.light.slo.ok */
+    --slo-burning: #9b7821; /* color.semantic.light.slo.burning */
+    --slo-breached: #fa342c; /* color.semantic.light.slo.breached */
+    --inverse: #2a3038; /* color.primitive.gray.900 */
+    --on-inverse: #ffffff; /* color.primitive.gray.0 */
+    --switch-off: #868b94; /* color.primitive.gray.700 */
+    --heat-1: #E0F1FF; /* color.semantic.light.heat.1 */
+    --heat-2: #A9D2FE; /* color.semantic.light.heat.2 */
+    --heat-3: #6DB0F4; /* color.semantic.light.heat.3 */
+    --heat-ink: var(--text); /* tokens.json에 없음, 키트 값 */
+    --shadow-sm: 0px 1px 4px 0px #00000014; /* shadow.light.sm */
+    --shadow-md: 0px 2px 10px 0px #0000001a; /* shadow.light.md */
+    --shadow-lg: 0px 4px 16px 0px #0000001f; /* shadow.light.lg */
+    --scrim: rgba(0,0,0,.48); /* tokens.json에 없음, 키트 값 */
+    --r-sm: 4px; /* radius.sm */
+    --r-md: 8px; /* radius.md */
+    --r-lg: 12px; /* radius.lg */
+    --r-xl: 16px; /* radius.xl */
+    --r-2xl: 24px; /* radius.2xl */
+    --font: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'; /* typography.font-family.sans */
+    --mono: 'JetBrains Mono', ui-monospace, monospace; /* typography.font-family.mono */
+  }
+
+  .pk.dark {
+    --surface: #16171b; /* color.semantic.dark.surface */
+    --surface-muted: #1d2025; /* color.semantic.dark.surface-muted */
+    --surface-basement: #000000; /* color.semantic.dark.surface-basement */
+    --surface-raised: #1d2025; /* color.semantic.dark.surface-raised */
+    --surface-disabled: #2b2e35; /* color.semantic.dark.surface-disabled */
+    --fill-weak: #2b2e35; /* color.primitive-dark.gray.300 */
+    --fill-weak-strong: #393d46; /* color.primitive-dark.gray.400 */
+    --border: #393d46; /* color.semantic.dark.border */
+    --border-input: #dcdee3; /* color.semantic.dark.border-input */
+    --border-primary: #5B5BE8; /* color.semantic.dark.border-primary */
+    --text: #f3f4f5; /* color.semantic.dark.text */
+    --text-muted: #dcdee3; /* color.semantic.dark.text-muted */
+    --text-disabled: #5b606a; /* color.semantic.dark.text-disabled */
+    --text-on-primary: #ffffff; /* color.semantic.dark.text-on-primary */
+    --primary: #5B5BE8; /* color.semantic.dark.primary */
+    --primary-hover: #4338CA; /* color.semantic.dark.primary-hover */
+    --primary-subtle: #1C1A55; /* color.semantic.dark.primary-subtle */
+    --link: #A9B0FF; /* color.semantic.dark.link */
+    --success: #22b27f; /* color.semantic.dark.success */
+    --success-subtle: #202926; /* color.semantic.dark.success-subtle */
+    --warning: #ca901c; /* color.semantic.dark.warning */
+    --warning-subtle: #302819; /* color.semantic.dark.warning-subtle */
+    --danger: #ff6e60; /* color.semantic.dark.danger */
+    --danger-subtle: #322323; /* color.semantic.dark.danger-subtle */
+    --on-danger: #16171b; /* color.primitive-dark.gray.100 */
+    --info-subtle: #202742; /* color.semantic.dark.info-subtle */
+    --focus-ring: #A9B0FF; /* color.semantic.dark.focus-ring */
+    --seat-available: #22b27f; /* color.semantic.dark.seat.available */
+    --seat-held: #5b606a; /* color.semantic.dark.seat.held-by-others */
+    --seat-mine: #A9B0FF; /* color.semantic.dark.seat.mine */
+    --seat-sold: #393d46; /* color.semantic.dark.seat.sold */
+    --seat-unavailable: #1d2025; /* color.semantic.dark.seat.unavailable */
+    --seat-wheelchair: #F08FD0; /* color.semantic.dark.seat.wheelchair */
+    --seat-glyph: #16171b; /* color.semantic.dark.seat.glyph */
+    --slo-ok: #22b27f; /* color.semantic.dark.slo.ok */
+    --slo-burning: #ca901c; /* color.semantic.dark.slo.burning */
+    --slo-breached: #ff6e60; /* color.semantic.dark.slo.breached */
+    --inverse: #e9eaec; /* color.primitive-dark.gray.900 */
+    --on-inverse: #16171b; /* color.primitive-dark.gray.100 */
+    --heat-1: #192D41; /* color.semantic.dark.heat.1 */
+    --heat-2: #1A4268; /* color.semantic.dark.heat.2 */
+    --heat-3: #1D5B92; /* color.semantic.dark.heat.3 */
+    --heat-ink: var(--text); /* tokens.json에 없음, 키트 값 */
+    --shadow-sm: 0px 1px 4px 0px #00000080; /* shadow.dark.sm */
+    --shadow-md: 0px 2px 10px 0px #000000ad; /* shadow.dark.md */
+    --shadow-lg: 0px 4px 16px 0px #000000cc; /* shadow.dark.lg */
+    --scrim: rgba(0,0,0,.64); /* tokens.json에 없음, 키트 값 */
+  }
+}

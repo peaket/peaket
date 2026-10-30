@@ -1,0 +1,5 @@
+/* 포렌식 데모 첫 CSS(packages/ds/README 'CSS 싣기'). 층 순서 선언이 맨 앞이다(d2 §1). */
+@layer theme, base, seed-base, seed-components, components, utilities;
+@import "tailwindcss";
+@import "@peaket/ds/styles.css";
+@source "../../../packages/ds/src";

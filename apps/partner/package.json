@@ -1,0 +1,28 @@
+{
+  "name": "@peaket/partner",
+  "private": true,
+  "version": "0.0.0",
+  "description": "파트너 콘솔(Next.js 16, docs/frontend.md §2.3)",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "^16.4.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "@peaket/ds": "workspace:*",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/node": "^24.0.0",
+    "tailwindcss": "^4.3.3",
+    "@tailwindcss/postcss": "^4.3.3",
+    "typescript": "^7.0.2"
+  }
+}

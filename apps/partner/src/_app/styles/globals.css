@@ -1,0 +1,26 @@
+/* 파트너 콘솔이 가장 먼저 싣는 CSS(packages/ds/README.md 'CSS 싣기' 순서 그대로) */
+@layer theme, base, seed-base, seed-components, components, utilities;
+@import "tailwindcss";
+@import "@peaket/ds/styles.css";
+@source "../../../../../packages/ds/src";
+
+/* 화면 높이: 셸·가운데 카드가 창 높이를 채운다 */
+@layer base {
+  html,
+  body {
+    min-height: 100%;
+  }
+  body {
+    margin: 0;
+  }
+}
+
+/* 인증 앱 코드 칸(키트 .otp-input)은 316px 고정 그림이다. 폭 360 미만(최소 320)에서 화면이 가로로 넘치지 않게 통째로 줄인다.
+   키트(kit.css)는 고치지 않는다 — ds 담당에게 넘길 일: 좁은 화면 축소를 키트에 둘지 */
+@layer components {
+  @media (width < 360px) {
+    .pk .otp-input {
+      zoom: 0.86;
+    }
+  }
+}

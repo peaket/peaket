@@ -256,6 +256,8 @@ peaket/
 
 Turborepo 작업은 `lint`·`typecheck`·`test`·`build`·`size`·`e2e`이고, PR에서는 `peaket`의 `ci.yml`이 Turborepo `--affected`로 고른 범위(바뀐 앱·패키지와 그것에 기대는 것)의 작업만 돈다(devops §3, ADR-0165 결정 3).
 
+**지금 있는 것(2026-10-31, ADR-0170)**: 위 구조 가운데 `apps/web`(+`queue-room`), `apps/partner`, `apps/console-host`, `apps/widgets/queue`·`purchase`, `apps/scanner`, `apps/forensics`, `packages/ds`, `packages/config`가 있다. 69개 화면을 디자인 캔버스 보드대로 목업 데이터로 그린 퍼블리싱 단계라, 데이터 접근 층(`api-client`)·`telemetry`·`validation`·`console-contract`·`seatmap` 패키지와 Steiger·ESLint·size-limit은 아직 없다. 화면마다 `?state=`로 캔버스 보드의 상태를 고르고, 앱마다 `/preview`(개발 서버에서만)에 화면·상태 목록이 있다. `@peaket/ds`의 겉모양은 캔버스 키트(`src/styles/kit.css`)이고, 부품 속을 `@seed-design/react`로 바꾸는 일은 wbs 0.6.2에서 같은 API를 지키며 한다. Cache Components·nonce(FE-T35), Module Federation 원격 적재(FE-T29), PWA, 다국어 주소는 각자의 단계에서 켠다.
+
 ### 2.3 앱별 구조
 
 | 앱 | 프레임워크와 판(2026-10-21 레지스트리) | 서버 쪽 | 브라우저 쪽 핵심 구성 요소 |
@@ -310,6 +312,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | `/help` | 056 FAQ | ISR(1일) | ISR과 같다 | 정적 문서 | A | |
 | `/help/inquiries*` | 056 | 요청마다 셸 + CSR | `private, no-store` | 문의 API | B | 입력은 화면에만(ADR-0066) |
 | `/policy/[slug]` | 057 | ISR(1일, 시행일이 바뀌면 무효화) | ISR과 같다 | 정적 문서 | A | |
+| `/open-in-browser?next=` | 058 | 정적 셸 + CSR(인앱 브라우저를 알아낸 화면이 보낸다) | `s-maxage=300` / `max-age=0` | 없다(`next`는 대기실·티켓 경로 모양만 받아 다른 사이트로 넘기지 않는다) | A | 공연 상세의 로비·대기열 진입과 마이 티켓의 입장용 휴대폰 등록 직전에 끼어든다(d5 §5.32). 경로 이름은 퍼블리싱 때 정했다(추천 적용 2026-10-31, ADR-0170) |
 | 매진 엣지 응답 | 018 | S3 정적 410 페이지 | 엣지 함수 | 없다 | A′와 같은 정적 규칙 | `queue` 배포 엣지 함수가 낸다 |
 | 판매 일시 중단 대체 | 059 | S3 정적 페이지 | 원본 장애 때 | 없다 | 정적 | 공개 상태 페이지 링크 |
 | `/_next/static/*`, `/_q/assets/*` | — | 빌드 산출물(내용 해시로 지은 이름) | `public, max-age=31536000, immutable` | — | `nosniff` | 30일 또는 최근 5빌드를 보존한다(devops §6.6) |

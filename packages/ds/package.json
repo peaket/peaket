@@ -1,0 +1,40 @@
+{
+  "name": "@peaket/ds",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "디자인 토큰 빌드와 공용 부품(docs/design/d2, ADR-0040)",
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    "./styles.css": "./src/styles/index.css",
+    "./queue-room.css": "./src/styles/queue-room.css",
+    "./tokens": "./src/gen/tokens.ts",
+    "./icons": "./src/icons/index.tsx",
+    "./*": "./src/components/*/index.ts"
+  },
+  "scripts": {
+    "tokens": "node scripts/build-tokens.mjs",
+    "tokens:check": "node scripts/build-tokens.mjs --check",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tanstack/react-table": "^9.3.1",
+    "chart.js": "^4.6.1",
+    "clsx": "^2.1.1"
+  },
+  "peerDependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "style-dictionary": "^5.7.1",
+    "typescript": "^7.0.2"
+  }
+}

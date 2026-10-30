@@ -1,0 +1,9 @@
+{
+  "name": "@peaket/config",
+  "private": true,
+  "version": "0.0.0",
+  "description": "화면 앱·패키지가 함께 쓰는 TypeScript 설정(docs/frontend.md §2.2)",
+  "exports": {
+    "./tsconfig/*": "./tsconfig/*"
+  }
+}
