@@ -1,7 +1,7 @@
 # ADR-0151: 품질 목표 다섯의 순서를 정하고, NFR마다 품질 시나리오를 두며, 위험에 대응 뒤 등급을 매기고 기술 부채를 따로 적는다(소유자 결정, 2026-10-29)
 
 - **상태**: 채택 (2026-10-29. 소유자가 review/open-items.md의 남은 결정을 하나씩 정하면서, 26번(품질 목표의 순서와 품질 시나리오)과 27번(위험 등급과 기술 부채 목록)의 네 선택(순서 안 1, 시나리오 A, 등급 A, 기술 부채 A)을 "추천대로"라고 정했다. 네 선택은 소유자 결정이다. 위험 114줄마다의 등급, 시나리오 문장, 기술 부채 묶음은 추천 적용이다.) 2026-10-29(ADR-0152): 2인 승인 요청을 온콜 앱 푸시로도 보내기로 해 위험 '숨긴 관제 탭의 남는 한계'를 중간에서 낮음으로 다시 매겼다. 위험 114줄은 높음 12, 중간 75, 낮음 27이다.
-- **관련**: ADR-0090(arc42 칸의 빈 곳을 open-items로 옮김), POL-029(장애 때 끝까지 지키는 것), ADR-0055(identity-svc 장애 때 토큰 판정), ADR-0057(100만 판정 방식), FR-039, [planning/02-requirements.md](../../planning/02-requirements.md) §3.4, [docs/quality/quality-requirements.md](../quality/quality-requirements.md) '품질 시나리오', [planning/01-overview.md](../../planning/01-overview.md) §5.2·§5.3, [docs/features/queue-admission.md](../features/queue-admission.md) Q-T58
+- **관련**: ADR-0090(arc42 칸의 빈 곳을 open-items로 옮김), POL-029(장애 때 끝까지 지키는 것), ADR-0055(identity-svc 장애 때 토큰 판정), ADR-0057(100만 판정 방식), FR-039, [planning/02-requirements.md](../planning/02-requirements.md) §3.4, [docs/quality/quality-requirements.md](../quality/quality-requirements.md) '품질 시나리오', [planning/01-overview.md](../planning/01-overview.md) §5.2·§5.3, [docs/features/queue-admission.md](../features/queue-admission.md) Q-T58
 
 ## 맥락
 

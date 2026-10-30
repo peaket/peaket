@@ -25,7 +25,7 @@
     },
     {
       "name": "type",
-      "doc": "HELD·RELEASED·EXPIRED는 홀드(좌석 Redis Stream 릴레이), PENDING·SOLD·AVAILABLE·RETURNED는 판매 행 seat_sale의 Outbox다. AVAILABLE은 판매 예약(PENDING) 행을 지워 좌석을 다시 팔 수 있게 됨(승인 실패·승인 기한 만료, 가상계좌 입금 기한 경과·입금 전 회차 취소), RETURNED는 SOLD 좌석이 예매 취소·회차 취소로 반환됨(seat_sale RETURNED. 취소표로 다시 팔 수 있고, 판매 종료 뒤 반환은 다시 팔지 않는다, ADR-0064). seat-hold §4·§6, planning/03 §2.4",
+      "doc": "HELD·RELEASED·EXPIRED는 홀드(좌석 Redis Stream 릴레이), PENDING·SOLD·AVAILABLE·RETURNED는 판매 행 seat_sale의 Outbox다. AVAILABLE은 판매 예약(PENDING) 행을 지워 좌석을 다시 팔 수 있게 됨(승인 실패·승인 기한 만료, 가상계좌 입금 기한 경과·입금 전 회차 취소), RETURNED는 SOLD 좌석이 예매 취소·회차 취소로 반환됨(seat_sale RETURNED. 취소표로 다시 팔 수 있고, 판매 종료 뒤 반환은 다시 팔지 않는다, ADR-0064). seat-hold §4·§6, docs/planning/03 §2.4",
       "type": {
         "type": "enum",
         "name": "SeatEventType",

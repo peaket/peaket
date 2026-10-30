@@ -1,7 +1,7 @@
 # ADR-0124: 구매 세션 소지 증명은 막는 피해를 표로 따지고, 남길지는 탈취 재현 시험(S-T16)으로 정한다(2026-10-28)
 
 - **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 중간-056 '구매 세션 소지 증명의 목적과 되돌릴 조건이 어긋난다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향은 소유자 결정(추천안 승인)이고, 기준값과 시험 순서 같은 세부는 추천 적용이다)
-- **관련**: ADR-0050(결정 8 구매 세션 소지 증명과 되돌릴 조건), ADR-0011(결정 6), ADR-0079(결정 6 키 저장·일련번호 직렬화), ADR-0039·0048(K6 봇 평가), NFR-003(좌석 홀드 p99 50ms), NFR-016, POL-009·017, [docs/features/seat-hold.md](../features/seat-hold.md) §2·§8·S-T16, [docs/frontend.md](../frontend.md) §5.3, [docs/features/identity.md](../features/identity.md) §3, wbs 3.4.1, [review/tech-review.md](../../review/tech-review.md)(중간-056)
+- **관련**: ADR-0050(결정 8 구매 세션 소지 증명과 되돌릴 조건), ADR-0011(결정 6), ADR-0079(결정 6 키 저장·일련번호 직렬화), ADR-0039·0048(K6 봇 평가), NFR-003(좌석 홀드 p99 50ms), NFR-016, POL-009·017, [docs/features/seat-hold.md](../features/seat-hold.md) §2·§8·S-T16, [docs/frontend.md](../frontend.md) §5.3, [docs/features/identity.md](../features/identity.md) §3, wbs 3.4.1, [review/tech-review.md](../review/tech-review.md)(중간-056)
 
 ## 맥락
 

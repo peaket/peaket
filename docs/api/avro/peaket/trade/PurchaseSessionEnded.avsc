@@ -20,7 +20,7 @@
     },
     {
       "name": "reason",
-      "doc": "과금 없는 결제 실패는 구매 세션을 끝내지 않고 좌석맵으로 돌아간다(planning/03 §2.2 Paying → Active, POL-009, 2026-10-13 전수 점검)",
+      "doc": "과금 없는 결제 실패는 구매 세션을 끝내지 않고 좌석맵으로 돌아간다(docs/planning/03 §2.2 Paying → Active, POL-009, 2026-10-13 전수 점검)",
       "type": {
         "type": "enum",
         "name": "PurchaseSessionEndedReason",

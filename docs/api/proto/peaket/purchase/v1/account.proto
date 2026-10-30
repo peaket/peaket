@@ -1,5 +1,5 @@
 // purchase-svc가 제공하는 계정 병합 사전 확인 계약. 초안(추천 적용 2026-10-29, ADR-0148), 안내는 docs/api/proto/README.md.
-// 정본: docs/features/identity.md §2.1(병합 차단 사유와 확정 흐름), planning/03-policies-glossary.md POL-034·계정 연결 전이 표 T9,
+// 정본: docs/features/identity.md §2.1(병합 차단 사유와 확정 흐름), docs/planning/03-policies-glossary.md POL-034·계정 연결 전이 표 T9,
 // docs/data.md §4 경계 9(계정 병합 오케스트레이션), ADR-0038·0148(결정 3·4·6).
 // 2026-10-30에 예매 제한 반영 계약(BookingRestrictionService)을 더했다(초안, 소유자 결정 2026-10-30 open-items 75번).
 syntax = "proto3";

@@ -12,8 +12,8 @@ schema: spec-driven
 
 context: |
   PEAKET(피켓)은 100만 동시접속 티케팅과 관제 시스템이다. 코드와 문서는 모노레포 `peaket` 하나에 있다(ADR-0165).
-  - 정본은 planning/, design/, docs/(계약 원본 docs/api/ 포함)다. openspec/specs/는 구현해 확인한 행동의 목록일 뿐이다. 둘이 다르면 정본이 이긴다.
-  - 문서는 한국어로, 도메인을 모르는 사람도 읽을 수 있는 쉬운 말로 쓴다. 전문 용어는 처음 나올 때 푼다(planning/03-policies-glossary.md §5).
+  - 정본은 docs/ 아래 문서다(기획 docs/planning/, 디자인 docs/design/, 설계와 계약 원본 docs/api/). openspec/specs/는 구현해 확인한 행동의 목록일 뿐이다. 둘이 다르면 정본이 이긴다.
+  - 문서는 한국어로, 도메인을 모르는 사람도 읽을 수 있는 쉬운 말로 쓴다. 전문 용어는 처음 나올 때 푼다(docs/planning/03-policies-glossary.md §5).
   - 기능을 만들기 전에 docs/security/asvs/<기능>.md(ASVS 추적 표)와 기능 설계서의 '운영 확인' 표가 있어야 한다(docs/architecture.md §8.2·§8.4).
   - 기술을 고른 이유는 ADR(docs/adr/)로만 댄다. 정본에 없는 결정이 필요하면 구현 전에 정본과 ADR을 먼저 고친다.
   - 계약을 바꾸면 계약 원본(docs/api/의 openapi·asyncapi·proto·avro)을 먼저 고친다(계약 우선).

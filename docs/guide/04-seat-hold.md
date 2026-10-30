@@ -30,7 +30,7 @@
 
 ### ① 2단계 아키텍처: 고속 메모리 홀드 + 엄격한 DB 최종 확정
 
-피켓은 성능과 무결성을 모두 잡기 위해 좌석 처리를 두 단계로 나눴다 ([ADR-0014](../docs/adr/0014-soft-hold-hard-sale.md)). 이것이 피켓 데이터 설계의 가장 중요한 원칙이다.
+피켓은 성능과 무결성을 모두 잡기 위해 좌석 처리를 두 단계로 나눴다 ([ADR-0014](../adr/0014-soft-hold-hard-sale.md)). 이것이 피켓 데이터 설계의 가장 중요한 원칙이다.
 
 ```mermaid
 flowchart TD
@@ -95,7 +95,7 @@ flowchart TD
 
 * 기존 예매자가 티켓을 취소하면([7편](07-transfer-cancel-refund.md)), 시스템은 해당 좌석에 즉시 '취소 반환' 플래그를 달고 좌석 지도에 다시 빈 좌석으로 노출합니다.
 * 데이터베이스의 고유 제약조건은 현재 유효한 판매 레코드에만 적용되는 **'부분 유니크 인덱스(Partial Unique Index)'** 구조를 취하고 있어, 동일한 좌석이 취소된 후 새 구매자에게 안전하게 재판매될 수 있습니다.
-* 다만 판매는 **공연 시작 24시간 전**에 끝납니다(2026-10-14 소유자 결정, [ADR-0064](../docs/adr/0064-sales-end-24h-before-start.md)). 그 뒤에는 새로 좌석을 잡을 수 없으므로(410 `sale-ended`), 그때 취소되거나 홀드가 풀린 좌석은 다시 팔리지 않고 빈 좌석으로 남습니다. 판매 종료 직전에 좌석을 잡아 둔 사람은 위 표의 홀드·결제 시간 안에 결제를 마칠 수 있습니다.
+* 다만 판매는 **공연 시작 24시간 전**에 끝납니다(2026-10-14 소유자 결정, [ADR-0064](../adr/0064-sales-end-24h-before-start.md)). 그 뒤에는 새로 좌석을 잡을 수 없으므로(410 `sale-ended`), 그때 취소되거나 홀드가 풀린 좌석은 다시 팔리지 않고 빈 좌석으로 남습니다. 판매 종료 직전에 좌석을 잡아 둔 사람은 위 표의 홀드·결제 시간 안에 결제를 마칠 수 있습니다.
 
 ---
 
@@ -112,7 +112,7 @@ flowchart TD
 
 ## 4. 좌석 직접 선택(PICK) vs 자동 배정(AUTO) 비교
 
-기획사는 공연 등록 시 좌석 배정 방식을 선택할 수 있습니다 ([FR-050](../planning/02-requirements.md), [POL-035](../planning/03-policies-glossary.md), [ADR-0043](../docs/adr/0043-auto-seat-preferences-before-turn.md)).
+기획사는 공연 등록 시 좌석 배정 방식을 선택할 수 있습니다 ([FR-050](../planning/02-requirements.md), [POL-035](../planning/03-policies-glossary.md), [ADR-0043](../adr/0043-auto-seat-preferences-before-turn.md)).
 
 ```mermaid
 flowchart TD
@@ -144,7 +144,7 @@ flowchart TD
 | **홀드 실패는 정상 비즈니스 응답** | 1,000명 중 999명이 받는 "이 좌석은 방금 다른 분이 선택했습니다" 메시지는 시스템 에러가 아니라 정상적인 비즈니스 응답으로 분류한다. 관건은 0.05초 이내에 지연 없이 응답하는 것이다. |
 | **홀드 요청의 멱등성 보장** | 네트워크 불안정으로 클라이언트가 중복 클릭하더라도, 고유 멱등키(Idempotency Key)를 통해 중복 홀드가 발생하지 않도록 1회만 처리한다. 키 확인은 좌석을 잡는 같은 한 번의 원자 처리 안에서 해서, 같은 키의 요청 두 개가 동시에 와도 좌석은 한 번만 잡힌다. 같은 키로 다른 좌석을 보내면 실수로 보고 거절한다(422, 2026-10-28 기술 검토 중간-046). |
 | **비상 킬스위치 (Kill-Switch)** | 중대한 가격 오류나 시스템 장애 발견 시, commander 한 명이 다시 로그인해 확인(재인증)한 뒤 바로 그 회차의 신규 홀드와 결제 시작·접수를 즉시 중단하고 입장도 멈춘다. 다시 여는 판매 재개만 두 사람이 확인한다(한 명이 요청하고 다른 한 명이 승인, ADR-0095). 이미 접수된 결제는 끝까지 처리된다. 결제창에서 인증을 마쳤어도 접수 전이면 승인을 요청하지 않으므로 돈이 빠져나가지 않는다. 고른 좌석은 홀드 시간이 지나면 풀린다. |
-| **Degraded Mode(감내 모드)** | 좌석이 몰려 느려지면 홀드 응답은 0.3초까지 늦어도 되고 동시 입장 정원은 자동으로 절반으로 줄인다. 좌석 Redis의 주 노드가 고장 나 예비 노드로 넘어가는 동안(30초 안이 목표)은 그 회차의 새 좌석 잡기·주문·결제 접수를 '잠시 뒤 다시'(503 `seat-store-unavailable`, `Retry-After`)로 미루고 정원을 절반으로 줄인다. 이미 잡은 홀드와 접수된 결제는 그대로 이어진다. DB로 좌석을 대신 잡는 비상 경로는 2026-10-28에 없앴다. 좌석을 주는 곳을 Redis 하나로 두어 장애 조치 중에 두 곳이 같은 좌석을 주는 일을 막으려는 것이다([ADR-0121](../docs/adr/0121-seat-redis-failover-defer-purchase-drop-db-hold-path.md)). 복제되기 전에 사라진 홀드는 잃을 수 있고, 같은 좌석의 두 번째 판매는 DB의 유일 규칙이 한 번 더 막는다. |
+| **Degraded Mode(감내 모드)** | 좌석이 몰려 느려지면 홀드 응답은 0.3초까지 늦어도 되고 동시 입장 정원은 자동으로 절반으로 줄인다. 좌석 Redis의 주 노드가 고장 나 예비 노드로 넘어가는 동안(30초 안이 목표)은 그 회차의 새 좌석 잡기·주문·결제 접수를 '잠시 뒤 다시'(503 `seat-store-unavailable`, `Retry-After`)로 미루고 정원을 절반으로 줄인다. 이미 잡은 홀드와 접수된 결제는 그대로 이어진다. DB로 좌석을 대신 잡는 비상 경로는 2026-10-28에 없앴다. 좌석을 주는 곳을 Redis 하나로 두어 장애 조치 중에 두 곳이 같은 좌석을 주는 일을 막으려는 것이다([ADR-0121](../adr/0121-seat-redis-failover-defer-purchase-drop-db-hold-path.md)). 복제되기 전에 사라진 홀드는 잃을 수 있고, 같은 좌석의 두 번째 판매는 DB의 유일 규칙이 한 번 더 막는다. |
 
 ---
 
@@ -156,10 +156,10 @@ flowchart TD
 
 ## 더 알아보기
 
-* [docs/features/seat-hold.md §1, §3](../docs/features/seat-hold.md): 2단계 일관성 모델 및 좌석 홀드 상세 시퀀스
-* [docs/features/seat-hold.md §4](../docs/features/seat-hold.md), [POL-011](../planning/03-policies-glossary.md): 1인당 구매 매수 제한 및 취소 좌석 재판매 정책
-* [docs/features/seat-hold.md §5](../docs/features/seat-hold.md), [POL-012](../planning/03-policies-glossary.md): 홀드 타임아웃과 3분 연장 접근성 명세
-* [docs/features/seat-hold.md §6](../docs/features/seat-hold.md): PostgreSQL 최종 확정(Hard Sale) 트랜잭션 격리
-* [docs/features/seat-hold.md §7, §10](../docs/features/seat-hold.md): 캔버스 기반 5만 석 렌더링 성능 최적화
+* [docs/features/seat-hold.md §1, §3](../features/seat-hold.md): 2단계 일관성 모델 및 좌석 홀드 상세 시퀀스
+* [docs/features/seat-hold.md §4](../features/seat-hold.md), [POL-011](../planning/03-policies-glossary.md): 1인당 구매 매수 제한 및 취소 좌석 재판매 정책
+* [docs/features/seat-hold.md §5](../features/seat-hold.md), [POL-012](../planning/03-policies-glossary.md): 홀드 타임아웃과 3분 연장 접근성 명세
+* [docs/features/seat-hold.md §6](../features/seat-hold.md): PostgreSQL 최종 확정(Hard Sale) 트랜잭션 격리
+* [docs/features/seat-hold.md §7, §10](../features/seat-hold.md): 캔버스 기반 5만 석 렌더링 성능 최적화
 * [FR-050, POL-035](../planning/02-requirements.md): 좌석 자동 배정 기능 요구사항 및 운영 정책
-* [ADR-0043](../docs/adr/0043-auto-seat-preferences-before-turn.md): 희망 조건 사전 입력과 차례 도래 자동 배정, 남는 한계
+* [ADR-0043](../adr/0043-auto-seat-preferences-before-turn.md): 희망 조건 사전 입력과 차례 도래 자동 배정, 남는 한계

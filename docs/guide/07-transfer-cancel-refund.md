@@ -15,7 +15,7 @@
 
 같은 날, 수아 씨가 예매한 다른 공연은 주최 측 사정으로 취소됐다. 수아 씨는 아무것도 하지 않아도 결제한 카드로 전액이 돌아오고, 주최 측 잘못이라면 결제 금액의 10%를 배상금으로 더 받는다.
 
-여기서 알아 둘 것이 하나 있다. 공연을 파는 판매자는 공연을 올린 파트너(기획사)이고, 피켓은 그 판매를 중개하는 플랫폼이다. 다만 예매 취소와 환불은 피켓이 직접 처리한다([ADR-0045](../docs/adr/0045-intermediary-legal-status.md)).
+여기서 알아 둘 것이 하나 있다. 공연을 파는 판매자는 공연을 올린 파트너(기획사)이고, 피켓은 그 판매를 중개하는 플랫폼이다. 다만 예매 취소와 환불은 피켓이 직접 처리한다([ADR-0045](../adr/0045-intermediary-legal-status.md)).
 
 ---
 
@@ -63,9 +63,9 @@ sequenceDiagram
 * **철회**: 서연 씨가 받기 전이면 지민 씨가 요청을 거둘 수 있다.
 * **받는 사람 자격**: 휴대폰 본인확인을 마친 피켓 회원만 받을 수 있다.
 * **받은 티켓은 다시 넘길 수 없다**: 서연 씨는 결제한 지민 씨에게 '돌려주기'만 할 수 있다. 돌려주기는 지민 씨가 받기를 누르지 않아도 바로 돌아간다.
-* **입장 중에는 멈춘다**: 입장이 시작되면 입장 기록 마감 때까지 양도 받기, 돌려주기, 되찾기를 하지 않는다. 인터넷이 끊긴 스캐너의 입장 기록은 늦게 올라와서 그사이 피켓은 누가 들어갔는지 모른다. 서연 씨가 들어간 뒤 지민 씨에게 돌려주면 지민 씨도 새 키로 들어갈 수 있어 한 장에 두 명이 되기 때문이다([ADR-0051](../docs/adr/0051-gate-process-end-to-end.md)).
-* **다시 확인하는 방법**: 양도 전에는 소셜 로그인을 한 번 더 한다. 휴대폰 본인확인은 '실제 주인이 누구인가'를 확인하는 절차라 로그인을 대신하지 않는다([ADR-0001](../docs/adr/0001-fan-social-login-single-factor.md)).
-* **알림 링크를 눌렀을 때**: 서연 씨가 메일이나 문자 속 링크를 누르면, 로그인 쿠키(출입증)가 다른 사이트에서 넘어온 첫 이동에는 따라가지 않도록 막아 두었다(`SameSite=Strict`). 그래서 화면은 먼저 빈 틀만 나오고, 그 안의 스크립트가 서연 씨 계정을 확인한 뒤 양도 내용을 보여 준다. 양도 거절과 철회도 받기처럼 눌러도 한 번만 처리된다([ADR-0065](../docs/adr/0065-web-frontend-security-after-asvs-v3.md)).
+* **입장 중에는 멈춘다**: 입장이 시작되면 입장 기록 마감 때까지 양도 받기, 돌려주기, 되찾기를 하지 않는다. 인터넷이 끊긴 스캐너의 입장 기록은 늦게 올라와서 그사이 피켓은 누가 들어갔는지 모른다. 서연 씨가 들어간 뒤 지민 씨에게 돌려주면 지민 씨도 새 키로 들어갈 수 있어 한 장에 두 명이 되기 때문이다([ADR-0051](../adr/0051-gate-process-end-to-end.md)).
+* **다시 확인하는 방법**: 양도 전에는 소셜 로그인을 한 번 더 한다. 휴대폰 본인확인은 '실제 주인이 누구인가'를 확인하는 절차라 로그인을 대신하지 않는다([ADR-0001](../adr/0001-fan-social-login-single-factor.md)).
+* **알림 링크를 눌렀을 때**: 서연 씨가 메일이나 문자 속 링크를 누르면, 로그인 쿠키(출입증)가 다른 사이트에서 넘어온 첫 이동에는 따라가지 않도록 막아 두었다(`SameSite=Strict`). 그래서 화면은 먼저 빈 틀만 나오고, 그 안의 스크립트가 서연 씨 계정을 확인한 뒤 양도 내용을 보여 준다. 양도 거절과 철회도 받기처럼 눌러도 한 번만 처리된다([ADR-0065](../adr/0065-web-frontend-security-after-asvs-v3.md)).
 
 > [!WARNING]
 > **양도에 돈이 오갔다면**
@@ -113,7 +113,7 @@ flowchart TD
 
 * 인터넷이 끊긴 스캐너에는 연결될 때 폐기가 전해진다. 그사이 그 스캐너에서 옛 QR로 들어오면 '취소 뒤 입장' 기록이 남는다.
 * **입장 기록 마감**은 공연 종료 2시간 뒤에 모든 스캐너의 기록이 모였으면 바로 하고, 아니면 늦어도 하루 안에 한다. 하루는 운영해 보며 정할 잠정값이다.
-* 취소 뒤 입장 기록이 있으면 CS가 기록을 확인한다. 기록이 맞으면 취소가 무효가 되고, 기록이 잘못된 것으로 확인되면 환급한다([ADR-0051](../docs/adr/0051-gate-process-end-to-end.md)).
+* 취소 뒤 입장 기록이 있으면 CS가 기록을 확인한다. 기록이 맞으면 취소가 무효가 되고, 기록이 잘못된 것으로 확인되면 환급한다([ADR-0051](../adr/0051-gate-process-end-to-end.md)).
 
 ---
 
@@ -185,9 +185,9 @@ flowchart TD
 
 ## 더 알아보기
 
-* [docs/features/transfer-refund.md](../docs/features/transfer-refund.md): 양도 수락·돌려주기·회수, 회차 취소 판정과 일괄 환불, 배상 지급, 승인 업무와 CS 처리함 상세 설계
-* [ADR-0045](../docs/adr/0045-intermediary-legal-status.md), [ADR-0046](../docs/adr/0046-cancel-transfer-refund-approvals.md): 판매 구조 판단과 취소·양도·환불 승인 체계 결정
-* [docs/features/offline-gate.md §5](../docs/features/offline-gate.md), [POL-017](../planning/03-policies-glossary.md), [ADR-0051](../docs/adr/0051-gate-process-end-to-end.md): 양도 때의 열쇠 교체(Key Rotation)와 입장 중 소유권 동결
-* [docs/features/payment.md §4](../docs/features/payment.md), [POL-032](../planning/03-policies-glossary.md): 취소·환불 처리 흐름과 공제율 계산
-* [planning/04-ia-flows-screens.md §3 (SCR-038, SCR-041~047)](../planning/04-ia-flows-screens.md): 예매 취소, 양도 받기, CS 처리함·승인 업무 화면
-* [docs/security/data-classification.md (항목 16)](../docs/security/data-classification.md): 전자상거래법 및 소비자분쟁해결기준 법률 해석 원문 검토 결과
+* [docs/features/transfer-refund.md](../features/transfer-refund.md): 양도 수락·돌려주기·회수, 회차 취소 판정과 일괄 환불, 배상 지급, 승인 업무와 CS 처리함 상세 설계
+* [ADR-0045](../adr/0045-intermediary-legal-status.md), [ADR-0046](../adr/0046-cancel-transfer-refund-approvals.md): 판매 구조 판단과 취소·양도·환불 승인 체계 결정
+* [docs/features/offline-gate.md §5](../features/offline-gate.md), [POL-017](../planning/03-policies-glossary.md), [ADR-0051](../adr/0051-gate-process-end-to-end.md): 양도 때의 열쇠 교체(Key Rotation)와 입장 중 소유권 동결
+* [docs/features/payment.md §4](../features/payment.md), [POL-032](../planning/03-policies-glossary.md): 취소·환불 처리 흐름과 공제율 계산
+* [docs/planning/04-ia-flows-screens.md §3 (SCR-038, SCR-041~047)](../planning/04-ia-flows-screens.md): 예매 취소, 양도 받기, CS 처리함·승인 업무 화면
+* [docs/security/data-classification.md (항목 16)](../security/data-classification.md): 전자상거래법 및 소비자분쟁해결기준 법률 해석 원문 검토 결과

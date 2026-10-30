@@ -1,6 +1,6 @@
 // ticket-svc가 제공하는 내부 티켓·스캐너 기기·계정 병합 확인 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
 // 정본: docs/features/payment.md §2(발권)·§4.1(예매 취소), docs/features/offline-gate.md §2(발권과 기기 키),
-// docs/features/transfer-refund.md §3.1(예매 취소 조건), planning/03-policies-glossary.md §2.5(티켓 상태),
+// docs/features/transfer-refund.md §3.1(예매 취소 조건), docs/planning/03-policies-glossary.md §2.5(티켓 상태),
 // docs/data.md(관람 후기 작성 자격), docs/architecture.md §3.1·§3.2.
 // ScannerDeviceService·AccountMergeCheckService는 2026-10-29에 더했다(초안, 추천 적용 2026-10-29, ADR-0148).
 // 그 정본: docs/api/openapi.yaml `/v1/ops/scanner-devices*`·`ScannerDevice`, docs/features/offline-gate.md §6.1(기기 등록·폐기),
@@ -43,7 +43,7 @@ message IssueTicketsRequest {
   repeated string seat_ids = 4;
 }
 
-// 티켓 상태(planning/03-policies-glossary.md §2.5). 이 계약이 돌려주는 값만 둔다.
+// 티켓 상태(docs/planning/03-policies-glossary.md §2.5). 이 계약이 돌려주는 값만 둔다.
 enum TicketStatus {
   TICKET_STATUS_UNSPECIFIED = 0;
   TICKET_STATUS_ISSUED = 1;

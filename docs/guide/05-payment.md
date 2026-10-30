@@ -39,7 +39,7 @@ flowchart LR
 
 ### ① 국내 PG사의 '인증-승인 2단계 분리 구조'를 역이용한다
 
-토스페이먼츠나 포트원 같은 국내 결제 대행사는 결제 프로세스를 명확히 두 단계로 구분한다 ([ADR-0029](../docs/adr/0029-pg-adapter-toss-default-portone-compatible.md)).
+토스페이먼츠나 포트원 같은 국내 결제 대행사는 결제 프로세스를 명확히 두 단계로 구분한다 ([ADR-0029](../adr/0029-pg-adapter-toss-default-portone-compatible.md)).
 
 ```mermaid
 sequenceDiagram
@@ -123,7 +123,7 @@ flowchart TD
 
 ### ⑥ 결제사 두 곳을 함께 쓰고, 결제창을 열 때마다 고른다
 
-피켓은 **토스페이먼츠와 포트원 두 결제사를 함께 운영**합니다 ([ADR-0044](../docs/adr/0044-dual-pg-selection-and-switchover.md)). 결제사마다 API 모양이 달라서, 결제사별 '어댑터'가 각자의 API를 피켓 공통 규격으로 바꿔 줍니다 ([ADR-0029](../docs/adr/0029-pg-adapter-toss-default-portone-compatible.md)). 어느 결제사를 쓸지는 '결제사 선택기'가 정합니다. 어댑터가 통역사라면, 선택기는 이번 손님에게 어느 통역사를 붙일지 정하는 배정 담당자입니다.
+피켓은 **토스페이먼츠와 포트원 두 결제사를 함께 운영**합니다 ([ADR-0044](../adr/0044-dual-pg-selection-and-switchover.md)). 결제사마다 API 모양이 달라서, 결제사별 '어댑터'가 각자의 API를 피켓 공통 규격으로 바꿔 줍니다 ([ADR-0029](../adr/0029-pg-adapter-toss-default-portone-compatible.md)). 어느 결제사를 쓸지는 '결제사 선택기'가 정합니다. 어댑터가 통역사라면, 선택기는 이번 손님에게 어느 통역사를 붙일지 정하는 배정 담당자입니다.
 
 지민 씨가 결제 버튼을 누르면 결제창이 열리기 직전에 결제사가 정해집니다. 평소에는 공연마다 운영자가 정해 둔 기본 결제사(보통 토스페이먼츠)의 결제창이 열립니다. 토스페이먼츠에 장애가 나면 운영자 두 명이 승인해 '결제사 전환'을 켜고, 그 뒤로 결제창을 여는 사람은 포트원 결제창을 받습니다.
 
@@ -146,7 +146,7 @@ flowchart TD
 
 ### ⑦ 결제 회사의 TPS 한계와 대기 큐 안전 마진
 
-토스페이먼츠가 실제 운영에서 초당 몇 건을 받아 주는지는 비공개이므로, 피켓은 **초당 300건으로 보수적 추정**하고 100건밖에 못 받는 극한 상황도 시험합니다 ([ADR-0036](../docs/adr/0036-external-limits-estimates.md)). 포트원은 채널 하나에 초당 50건으로 잡고, 포트원으로 결제하는 공연은 그만큼 한 번에 입장하는 인원을 줄입니다.  
+토스페이먼츠가 실제 운영에서 초당 몇 건을 받아 주는지는 비공개이므로, 피켓은 **초당 300건으로 보수적 추정**하고 100건밖에 못 받는 극한 상황도 시험합니다 ([ADR-0036](../adr/0036-external-limits-estimates.md)). 포트원은 채널 하나에 초당 50건으로 잡고, 포트원으로 결제하는 공연은 그만큼 한 번에 입장하는 인원을 줄입니다.  
 초과된 승인 요청은 10분 기한 내에서 안전하게 큐에 대기하며, 기한을 넘기면 결제를 승인하지 않고 안전 종료되므로 금전 사고는 0건으로 통제됩니다.
 
 ---
@@ -158,7 +158,7 @@ flowchart TD
 | **결제 금액 서버 단독 검증** | 클라이언트가 전달한 결제 금액을 일절 신뢰하지 않는다. 서버가 좌석 정가와 할인 정책으로 금액을 직접 계산하여 1원이라도 다르면 즉시 결제를 거부한다(별도 예매 수수료는 받지 않는다). |
 | **카드 정보 무저장 원칙 (PCI-DSS)** | 카드 번호, CVC, 비밀번호 등 민감 금융 정보는 PG사의 보안 결제창에서만 입력된다. 피켓 서버에는 카드 정보가 절대 전송되거나 저장되지 않는다. |
 | **피크 타임 무통장(가상계좌) 차단** | 접속이 크게 몰리는 고수요 공연은 무통장 입금(가상계좌)을 아예 끄고, 일반 공연에서만 허용한다(공연 등록 때 '가상계좌 허용'으로 정한다). 입금 대기 시간 동안 좌석이 잠겨 전체 회전율이 떨어지는 문제를 방지하기 위함이다. |
-| **환불 계좌 정보 미보관** | 가상계좌(무통장 입금) 결제를 취소할 때 받는 환불 계좌 정보는 DB에 저장하지 않고 PG사 취소 API 파라미터로 즉시 넘겨 처리한다. 환급을 바로 할 수 없을 때(입장 시작 뒤 취소라 입장 기록 마감 뒤 환급, 결제사 장애로 다시 시도)는 계좌를 미리 받아 두지 않고 환급할 때 알림으로 다시 받는다. 계좌번호를 잠시라도 보관하면 암호화해 지켜야 할 정보가 하나 더 생기기 때문이다([ADR-0050](../docs/adr/0050-crypto-corrections-and-key-management.md)). |
+| **환불 계좌 정보 미보관** | 가상계좌(무통장 입금) 결제를 취소할 때 받는 환불 계좌 정보는 DB에 저장하지 않고 PG사 취소 API 파라미터로 즉시 넘겨 처리한다. 환급을 바로 할 수 없을 때(입장 시작 뒤 취소라 입장 기록 마감 뒤 환급, 결제사 장애로 다시 시도)는 계좌를 미리 받아 두지 않고 환급할 때 알림으로 다시 받는다. 계좌번호를 잠시라도 보관하면 암호화해 지켜야 할 정보가 하나 더 생기기 때문이다([ADR-0050](../adr/0050-crypto-corrections-and-key-management.md)). |
 | **PG사 전면 장애 비상 절차** | 결제사 장애 발생 시 동일 멱등키로 대기 큐에 보류하고, 좌석 홀드 시간을 그 결제의 승인 기한(결제창 인증 뒤 10분)까지 자동으로 늘린다(2026-10-20 추천 적용, ADR-0073). 승인 기한 10분을 넘긴 건은 승인하지 않고 안전 종료한다. 그동안 새 결제 진입은 잠시 멈추고, 주문을 만들었지만 아직 결제 접수 전인 홀드는 남은 시간을 세지 않다가 다시 열리면 이어 센다(그 구매 세션의 최대 체류 시각까지, 2026-10-22 소유자 결정, ADR-0085). 시스템이 지연될지언정 금전 사고는 0건을 엄수한다. 장애가 이어지면 운영자 두 명이 승인해 새 결제를 다른 결제사로 돌린다. 이미 접수된 결제는 원래 결제사에서 끝낸다. |
 
 ---
@@ -171,10 +171,10 @@ flowchart TD
 
 ## 더 알아보기
 
-* [docs/features/payment.md §2, §3](../docs/features/payment.md): 결제 트랜잭션 시퀀스 및 상태 머신 전이도
-* [docs/features/payment.md §4](../docs/features/payment.md), [POL-013](../planning/03-policies-glossary.md): 20가지 결제 실패 시나리오별 보상 및 과금 처리 정책
-* [docs/features/payment.md §5](../docs/features/payment.md): PG사 웹훅 수신 및 멱등 검증 절차
-* [docs/features/payment.md §8](../docs/features/payment.md): 일일 정산 및 결제 원장 대사(Reconciliation) 배치 설계
-* [ADR-0029](../docs/adr/0029-pg-adapter-toss-default-portone-compatible.md): 토스페이먼츠 및 포트원 결제 어댑터 표준화 결정
-* [docs/features/payment.md §2.2](../docs/features/payment.md), [ADR-0044](../docs/adr/0044-dual-pg-selection-and-switchover.md): 결제사 선택·고정·전환 규칙과 솔직한 한계
-* [ADR-0036](../docs/adr/0036-external-limits-estimates.md): 결제 대행사 TPS 한계 추정과 안전 마진 설계
+* [docs/features/payment.md §2, §3](../features/payment.md): 결제 트랜잭션 시퀀스 및 상태 머신 전이도
+* [docs/features/payment.md §4](../features/payment.md), [POL-013](../planning/03-policies-glossary.md): 20가지 결제 실패 시나리오별 보상 및 과금 처리 정책
+* [docs/features/payment.md §5](../features/payment.md): PG사 웹훅 수신 및 멱등 검증 절차
+* [docs/features/payment.md §8](../features/payment.md): 일일 정산 및 결제 원장 대사(Reconciliation) 배치 설계
+* [ADR-0029](../adr/0029-pg-adapter-toss-default-portone-compatible.md): 토스페이먼츠 및 포트원 결제 어댑터 표준화 결정
+* [docs/features/payment.md §2.2](../features/payment.md), [ADR-0044](../adr/0044-dual-pg-selection-and-switchover.md): 결제사 선택·고정·전환 규칙과 솔직한 한계
+* [ADR-0036](../adr/0036-external-limits-estimates.md): 결제 대행사 TPS 한계 추정과 안전 마진 설계

@@ -6,7 +6,7 @@
 
 ## 2. 팀 목록과 CODEOWNERS
 
-- [x] 2.1 `infra/stacks/global/github/teams.json`에 가상 팀 아홉(이름표 `queue`, `purchase`, `ticketing`, `commerce`, `frontend-platform`, `platform`, `data`, `bot-detection`, `architecture`와 표시 이름, 팀 유형)을 둔다. 확인: JSON으로 읽히고 planning/01 §3.3의 아홉과 같다.
+- [x] 2.1 `infra/stacks/global/github/teams.json`에 가상 팀 아홉(이름표 `queue`, `purchase`, `ticketing`, `commerce`, `frontend-platform`, `platform`, `data`, `bot-detection`, `architecture`와 표시 이름, 팀 유형)을 둔다. 확인: JSON으로 읽히고 docs/planning/01 §3.3의 아홉과 같다.
 - [x] 2.2 `.github/CODEOWNERS`를 design.md 결정 3의 순서로 쓴다(조직 이름은 계획 리뷰에서 정한 것, 추천 `peaket`). 확인: 2.3의 검사가 통과한다.
 - [x] 2.3 `tools/ci/check-codeowners.mjs`(CODEOWNERS의 팀이 모두 `teams.json`에 있는지, 줄마다 주인이 있는지, `*` 줄이 맨 앞인지 본다)와 그 시험을 만든다. 시험은 임시 폴더에 맞는 예와 틀린 예를 두고 스크립트를 바깥에서 돌린다. 확인: `node --test "tools/ci/*.test.mjs"`가 통과하고, 저장소의 CODEOWNERS로 돌리면 종료 코드 0이다.
 - [x] 2.4 정본에 반영한다: docs/devops.md §2.3에 '팀 목록은 `teams.json` 한 곳'을, docs/architecture.md §10에 뿌리 작업 공간 파일(`package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`)의 주인(플랫폼 팀)을 적는다. 확인: 문서 점검 오류 0이다.
@@ -27,7 +27,7 @@
 ## 5. 통합 확인과 기록
 
 - [x] 5.1 전체를 한 번에 확인한다: `node --test "tools/ci/*.test.mjs"`, `terraform fmt -check -recursive infra`, `terraform validate`, `python tools/doc-check/check_all.py`(오류 0), 새 파일의 줄바꿈 LF. 확인: 모두 통과한다.
-- [x] 5.2 기록한다: review/consistency-review.md에 R 행, wbs 0.1.1에 '로컬 부분 끝, 적용은 조직 뒤'(CSV 포함), 00-summary.md §4. 확인: 문서 점검 오류 0이다.
+- [x] 5.2 기록한다: docs/review/consistency-review.md에 R 행, wbs 0.1.1에 '로컬 부분 끝, 적용은 조직 뒤'(CSV 포함), docs/00-summary.md §4. 확인: 문서 점검 오류 0이다.
 
 ## Workflow follow-up
 

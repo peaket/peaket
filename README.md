@@ -6,13 +6,13 @@
 
 ## 지금 상태
 
-- 기획(v1.0)과 설계를 마쳤습니다. **코드는 아직 없고**, 구현은 작업 목록(WBS: 할 일을 잘게 나눈 작업 목록)의 Phase 0부터 시작합니다([wbs/wbs.md](wbs/wbs.md)).
+- 기획(v1.0)과 설계를 마쳤습니다. **코드는 아직 없고**, 구현은 작업 목록(WBS: 할 일을 잘게 나눈 작업 목록)의 Phase 0부터 시작합니다([docs/wbs/wbs.md](docs/wbs/wbs.md)).
 - 아래 목표 숫자는 모두 **재기 전의 가설**입니다. 잰 결과는 좋든 나쁘든 성능 장부([docs/perf-ledger.md](docs/perf-ledger.md))에 그대로 적습니다.
 - 운영 환경은 설계로만 두고, 측정은 PC에서 합니다. 100만 명 규모는 1천~10만 명을 잰 결과를 설계 식으로 늘려 추정합니다(ADR-0057, [docs/verification.md](docs/verification.md)).
 
 ## 무엇을 약속하나
 
-정본은 [경영진용 요약](planning/00-executive-summary.md) §3입니다. 숫자가 다르면 정본을 따릅니다.
+정본은 [경영진용 요약](docs/planning/00-executive-summary.md) §3입니다. 숫자가 다르면 정본을 따릅니다.
 
 - **몰려도 멈추지 않는다**: 100만 명 대기, 진입 최고 초당 20만 건에서 p99(요청 100건 가운데 99건이 끝나는 시간) 0.2초 이하
 - **좌석을 두 번 팔지 않는다**: 한 좌석에 1,000명이 몰려도 오버셀(같은 좌석이 두 사람에게 팔리는 일) 0건
@@ -24,10 +24,10 @@
 
 | 시간 | 읽을 것 |
 | --- | --- |
-| 5분 | [경영진용 요약](planning/00-executive-summary.md)(2쪽): 무엇을 약속하고, 어떻게 풀고, 무엇이 위험한가 |
-| 30분 | [쉬운 설명서](guide/README.md) → [큰 그림](guide/01-big-picture.md) → 관심 있는 주제 편 |
+| 5분 | [경영진용 요약](docs/planning/00-executive-summary.md)(2쪽): 무엇을 약속하고, 어떻게 풀고, 무엇이 위험한가 |
+| 30분 | [쉬운 설명서](docs/guide/README.md) → [큰 그림](docs/guide/01-big-picture.md) → 관심 있는 주제 편 |
 | 설계를 깊게 | [아키텍처](docs/architecture.md) → 같은 문서 §11의 면접용 핵심 결정 후보 10건 → [검증 계획](docs/verification.md) |
-| 역할별 순서 | [00-summary.md](00-summary.md) §2(백엔드·프론트엔드·인프라·보안·디자인 등 독자마다 읽는 순서) |
+| 역할별 순서 | [docs/00-summary.md](docs/00-summary.md) §2(백엔드·프론트엔드·인프라·보안·디자인 등 독자마다 읽는 순서) |
 
 결정과 그 이유는 [docs/adr/](docs/adr/)에 번호순으로 남깁니다. ADR은 '무엇을 왜 그렇게 정했나'를 적은 기록이고, 한번 쓴 본문은 고치지 않고 새 ADR로 바꿉니다.
 
@@ -42,19 +42,28 @@
 | `.github` | 공개 | 빌드·서명 절차(공용 재사용 워크플로)와 조직 첫 화면 소개 |
 | `peaket-loadtest` | 비공개 | 부하 시험과 합성 봇 시뮬레이터(봇 코드는 공개하지 않는다, POL-026) |
 
-이 저장소의 폴더는 다음과 같습니다. 코드 폴더는 구현을 시작하면 생깁니다.
+이 저장소의 폴더는 다음과 같습니다. 코드 폴더는 지금 자리만 있고 구현하며 채웁니다.
 
 | 폴더 | 내용 |
 | --- | --- |
+| `apps/`, `services/`, `packages/`, `data/` | 화면 앱, 서버와 작업자, 공용 패키지, 데이터 모델 |
+| `infra/` | 인프라 코드(Terraform). 지금은 GitHub 조직 설정 스택이 있습니다 |
+| `tools/` | 문서 점검 도구, 성능 장부 도구, CI 검사 스크립트 |
+| `openspec/` | 코드를 쓰기 전에 변경마다 쓰는 제안·명세·작업 목록(스펙 주도 개발, OpenSpec). 절차는 [docs/architecture.md](docs/architecture.md) §8.6, 결정은 ADR-0167입니다 |
+| `docs/` | 문서 전부(아래 표). 2026-10-30에 한 폴더로 모았습니다(ADR-0168) |
+
+`docs/` 안은 다음과 같습니다.
+
+| 자리 | 내용 |
+| --- | --- |
+| `00-summary.md` | 문서 지도와 읽는 순서, 결정과 질문의 기록 |
 | `planning/` | 기획: 문제·목표, 요구사항, 정책·용어, 화면 흐름 |
 | `design/` | 디자인: 브랜드, 디자인 시스템, 화면 명세 |
-| `docs/` | 설계: 아키텍처, 데이터, 인프라, 배포, 관측, 보안, 기능별 설계. 계약 원본(`docs/api/`: openapi·asyncapi·proto·avro)도 여기 있습니다 |
+| 바로 아래 파일, `adr/`, `api/`, `features/`, `security/`, `quality/` | 설계: 아키텍처, 데이터, 인프라, 배포, 관측, 보안, 기능별 설계, 결정 기록. 계약 원본(`api/`: openapi·asyncapi·proto·avro)도 여기 있습니다 |
 | `review/` | 검토: 정합성 점검 기록, 나중에 정할 것 |
 | `wbs/` | 작업 목록과 일정 어림 |
 | `guide/` | 명세를 쉬운 말로 푼 설명서(규범은 아님) |
-| `tools/` | 문서 점검 도구, 성능 장부 도구 |
-| `apps/`, `services/`, `packages/`, `data/`, `infra/` | (구현 뒤) 화면 앱, 서버와 작업자, 공용 패키지, 데이터 모델, 인프라 코드 |
-| `openspec/` | 코드를 쓰기 전에 변경마다 쓰는 제안·명세·작업 목록(스펙 주도 개발, OpenSpec). 설치와 설정을 마쳤고 아직 변경은 없습니다. 절차는 [docs/architecture.md](docs/architecture.md) §8.6, 결정은 ADR-0167입니다 |
+| `perf-ledger/` | 측정 실행 기록(성능 장부의 원본) |
 
 ## 받아서 확인하기
 
@@ -68,6 +77,6 @@ python tools/doc-check/check_all.py
 
 ## 문서 규칙
 
-- 문서는 한국어로, 도메인을 모르는 사람도 읽을 수 있는 쉬운 말로 씁니다. 전문 용어는 처음 나올 때 풉니다([planning/03-policies-glossary.md](planning/03-policies-glossary.md) §5).
+- 문서는 한국어로, 도메인을 모르는 사람도 읽을 수 있는 쉬운 말로 씁니다. 전문 용어는 처음 나올 때 풉니다([docs/planning/03-policies-glossary.md](docs/planning/03-policies-glossary.md) §5).
 - `[가정]`은 재기 전에 정해 둔 값이라는 표시입니다. 재면 결과로 바꿉니다.
 - 법률 판단에는 확인됨·확인 필요·해석·간주를 붙입니다(POL-027). 출시 전에 변호사 검토를 받습니다.

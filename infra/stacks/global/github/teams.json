@@ -1,5 +1,5 @@
 {
-  "_comment": "가상 팀 아홉(planning/01 §3.3, docs/architecture.md §10). Terraform 팀과 .github/CODEOWNERS 검사가 모두 이 목록을 읽는다(ADR-0165, ADR-0167). slug는 GitHub 팀 이름이다",
+  "_comment": "가상 팀 아홉(docs/planning/01 §3.3, docs/architecture.md §10). Terraform 팀과 .github/CODEOWNERS 검사가 모두 이 목록을 읽는다(ADR-0165, ADR-0167). slug는 GitHub 팀 이름이다",
   "teams": [
     { "slug": "queue", "description": "대기열 팀", "type": "stream-aligned" },
     { "slug": "purchase", "description": "구매 팀(예매·결제)", "type": "stream-aligned" },

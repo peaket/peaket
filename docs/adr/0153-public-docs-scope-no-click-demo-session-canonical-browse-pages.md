@@ -1,7 +1,7 @@
 # ADR-0153: 설계 문서는 실제 값 없이 공개하고, 클릭 시연은 만들지 않으며, 회차 상세는 저마다 정규 주소를 두고, 둘러보기 페이지는 출시 뒤 정한다(소유자 결정, 2026-10-29)
 
 - **상태**: 채택 (2026-10-29. 소유자가 review/open-items.md의 남은 결정을 하나씩 정하면서, 공개·화면·검색 묶음(1·4·35·37번)의 추천(넷 모두 안 A)을 "추천대로 가겠습니다"라고 정했다. 네 방향은 소유자 결정이다. 점검 도구 `public` 검사의 규칙, 회차 상세의 제목·첫 화면 규칙, 둘러보기 페이지를 만드는 판단 기준의 표현은 추천 적용이다.)
-- **관련**: ADR-0057(상시 데모 없음, 녹화와 재현 스크립트), ADR-0084(받는 사람별 문서, 질문 44), ADR-0093 결정 8(카드와 대표 회차), ADR-0094 결정 11(검색 결과 화면은 색인에서 뺌), POL-026(3단계 봇 코드 비공개), [docs/devops.md](../devops.md) §2.1, [docs/infra-handover.md](../infra-handover.md), [design/d5-screen-blueprint.md](../../design/d5-screen-blueprint.md) §10, [docs/frontend.md](../frontend.md) §5.15, [docs/features/search.md](../features/search.md) §7.3, [tools/doc-check/README.md](../../tools/doc-check/README.md)
+- **관련**: ADR-0057(상시 데모 없음, 녹화와 재현 스크립트), ADR-0084(받는 사람별 문서, 질문 44), ADR-0093 결정 8(카드와 대표 회차), ADR-0094 결정 11(검색 결과 화면은 색인에서 뺌), POL-026(3단계 봇 코드 비공개), [docs/devops.md](../devops.md) §2.1, [docs/infra-handover.md](../infra-handover.md), [design/d5-screen-blueprint.md](../design/d5-screen-blueprint.md) §10, [docs/frontend.md](../frontend.md) §5.15, [docs/features/search.md](../features/search.md) §7.3, [tools/doc-check/README.md](../../tools/doc-check/README.md)
 
 ## 맥락
 

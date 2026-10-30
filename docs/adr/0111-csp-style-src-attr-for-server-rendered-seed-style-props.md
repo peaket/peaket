@@ -1,7 +1,7 @@
 # ADR-0111: 서버가 그린 화면의 SEED 스타일 속성을 화면 CSP에서 받는다 — `style-src-attr 'unsafe-inline'`만 더하고 요소·스크립트 규칙은 그대로 두며, PoC로 확정한다(2026-10-28)
 
 - **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 높음-27 '화면 CSP의 `style-src`가 SEED Design React의 인라인 스타일 속성과 부딪쳐, 서버가 그린 화면에서 스타일이 빠진다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향은 소유자 결정(추천안 승인: PoC로 확인해 (가)·(나) 가운데 하나를 고른다)이고, (가)를 기본안으로 고른 것과 시험·기준값 같은 세부는 추천 적용이다. PoC FE-T30(wbs 2.10.1)의 결과는 아직 없다. 결과가 나오면 이 줄에 덧붙인다)
-- **관련**: ADR-0040(SEED Design 채택, 소유자 결정. 바꾸지 않는다), ADR-0065(결정 4 소비자 웹 CSP), ADR-0079(결정 14 화면 묶음별 헤더, 결정 25 시험 ID), ADR-0091(Chart.js와 CSP를 확인함), NFR-012, NFR-019, NFR-020, [docs/frontend.md](../frontend.md) §5.14.1·§5.17·§6.1·§6.3·§6.4, [docs/security/asvs/frontend.md](../security/asvs/frontend.md) 3.4.3, [docs/architecture.md](../architecture.md) §6.3, [design/d2-design-system.md](../../design/d2-design-system.md) §1, planning/01 §5.2, guide/17 §3.10, wbs 2.10.1, [review/tech-review.md](../../review/tech-review.md)(높음-27)
+- **관련**: ADR-0040(SEED Design 채택, 소유자 결정. 바꾸지 않는다), ADR-0065(결정 4 소비자 웹 CSP), ADR-0079(결정 14 화면 묶음별 헤더, 결정 25 시험 ID), ADR-0091(Chart.js와 CSP를 확인함), NFR-012, NFR-019, NFR-020, [docs/frontend.md](../frontend.md) §5.14.1·§5.17·§6.1·§6.3·§6.4, [docs/security/asvs/frontend.md](../security/asvs/frontend.md) 3.4.3, [docs/architecture.md](../architecture.md) §6.3, [design/d2-design-system.md](../design/d2-design-system.md) §1, planning/01 §5.2, guide/17 §3.10, wbs 2.10.1, [review/tech-review.md](../review/tech-review.md)(높음-27)
 
 ## 맥락
 

@@ -93,18 +93,18 @@ sequenceDiagram
 
 > [!NOTE]
 > **명령은 어떤 길로 가고, 새로 뜬 서버는 어떻게 아나**
-> 판매 일시정지 같은 긴급 명령은 메시지 시스템(Kafka)이나 입구 서버(게이트웨이)를 거치지 않고, 받는 서비스가 따로 연 '제어 전용 문'으로 바로 갑니다(직접 제어 채널). 다만 같은 클러스터의 네트워크는 함께 쓰므로 '완전히 따로 떨어진 통로'는 아닙니다. 그래서 명령을 받은 서비스는 '지금 판매 정지, 판 번호 7'처럼 상태를 자기 저장소에 먼저 적어 두고, 실제로 막는 일은 그 상태를 보고 합니다. 명령 뒤에 서버가 늘어나거나 다시 시작해도, 새 서버는 이 상태를 읽은 뒤에야 손님을 받으므로 정지가 풀리지 않습니다. 관제 쪽 서버와 데이터베이스는 손님 요청이 몰리는 서버들과 따로 두었습니다(2026-10-28 추천 적용, [ADR-0102](../docs/adr/0102-control-plane-direct-grpc-dedicated-pool-ops-db-audit-chain-worker-break-glass.md)·[ADR-0103](../docs/adr/0103-control-as-state-startup-sync-broadcast-topics-compacted-settings.md)).
-> 관제 콘솔 화면은 서버가 보내는 알림 흐름(SSE) 둘과 일반 조회(REST)로만 서버와 이야기합니다(2026-10-28 추천 적용, [ADR-0100](../docs/adr/0100-console-rest-sse-drop-trpc-module-federation-showcase-baseline.md)).
+> 판매 일시정지 같은 긴급 명령은 메시지 시스템(Kafka)이나 입구 서버(게이트웨이)를 거치지 않고, 받는 서비스가 따로 연 '제어 전용 문'으로 바로 갑니다(직접 제어 채널). 다만 같은 클러스터의 네트워크는 함께 쓰므로 '완전히 따로 떨어진 통로'는 아닙니다. 그래서 명령을 받은 서비스는 '지금 판매 정지, 판 번호 7'처럼 상태를 자기 저장소에 먼저 적어 두고, 실제로 막는 일은 그 상태를 보고 합니다. 명령 뒤에 서버가 늘어나거나 다시 시작해도, 새 서버는 이 상태를 읽은 뒤에야 손님을 받으므로 정지가 풀리지 않습니다. 관제 쪽 서버와 데이터베이스는 손님 요청이 몰리는 서버들과 따로 두었습니다(2026-10-28 추천 적용, [ADR-0102](../adr/0102-control-plane-direct-grpc-dedicated-pool-ops-db-audit-chain-worker-break-glass.md)·[ADR-0103](../adr/0103-control-as-state-startup-sync-broadcast-topics-compacted-settings.md)).
+> 관제 콘솔 화면은 서버가 보내는 알림 흐름(SSE) 둘과 일반 조회(REST)로만 서버와 이야기합니다(2026-10-28 추천 적용, [ADR-0100](../adr/0100-console-rest-sse-drop-trpc-module-federation-showcase-baseline.md)).
 
 > [!NOTE]
 > **감사 로그를 나중에 고치면 드러나는 이유**
-> 기록을 하나 남기면, 곧이어 정해진 작업자 하나가 '직전 기록의 확인값과 이번 기록 내용'을 비밀 키로 섞은 확인값을 순서대로 적습니다(키를 건 해시 체인). 확인값을 기록하는 순간에 바로 계산하지 않는 것은, 키 관리 서비스가 느려지거나 멈춰도 운영 명령 자체는 바로 남고 전해지게 하려는 것입니다. 확인값이 1분 넘게 비어 있으면 경보가 울립니다(2026-10-28 추천 적용, [ADR-0102](../docs/adr/0102-control-plane-direct-grpc-dedicated-pool-ops-db-audit-chain-worker-break-glass.md)). 비밀 키는 클라우드 키 관리 서비스(KMS) 밖으로 나오지 않아, DB만 고칠 수 있는 사람은 맞는 확인값을 만들 수 없습니다. 그리고 5분마다 마지막 확인값을 지울 수 없는 저장소에 따로 적어 두고, 1시간마다 지난번 검증 지점부터 다시 계산해 맞춰 봅니다. 그래서 지난 기록을 고치면 다음 검증에서 드러납니다.
-> 다만 마지막으로 적어 둔 뒤 5분 안의 맨 끝 기록을 지우는 것은 알아채지 못합니다. 확인값이 아직 비어 있는 기록도 채워질 때까지는 같은 처지입니다. 5분과 1시간은 운영해 보기 전의 잠정값입니다 ([ADR-0053](../docs/adr/0053-crypto-hardening-pseudonyms-webhooks-stores-runbook-audit.md)).
+> 기록을 하나 남기면, 곧이어 정해진 작업자 하나가 '직전 기록의 확인값과 이번 기록 내용'을 비밀 키로 섞은 확인값을 순서대로 적습니다(키를 건 해시 체인). 확인값을 기록하는 순간에 바로 계산하지 않는 것은, 키 관리 서비스가 느려지거나 멈춰도 운영 명령 자체는 바로 남고 전해지게 하려는 것입니다. 확인값이 1분 넘게 비어 있으면 경보가 울립니다(2026-10-28 추천 적용, [ADR-0102](../adr/0102-control-plane-direct-grpc-dedicated-pool-ops-db-audit-chain-worker-break-glass.md)). 비밀 키는 클라우드 키 관리 서비스(KMS) 밖으로 나오지 않아, DB만 고칠 수 있는 사람은 맞는 확인값을 만들 수 없습니다. 그리고 5분마다 마지막 확인값을 지울 수 없는 저장소에 따로 적어 두고, 1시간마다 지난번 검증 지점부터 다시 계산해 맞춰 봅니다. 그래서 지난 기록을 고치면 다음 검증에서 드러납니다.
+> 다만 마지막으로 적어 둔 뒤 5분 안의 맨 끝 기록을 지우는 것은 알아채지 못합니다. 확인값이 아직 비어 있는 기록도 채워질 때까지는 같은 처지입니다. 5분과 1시간은 운영해 보기 전의 잠정값입니다 ([ADR-0053](../adr/0053-crypto-hardening-pseudonyms-webhooks-stores-runbook-audit.md)).
 >
 > **피켓 밖에서도 확인할 수 있게(공개 앵커)**
 > 위의 확인은 피켓만 할 수 있어서, 파트너나 규제기관은 '피켓이 확인했다'를 믿어야 합니다. 그래서 하루에 한 번과 온세일이 끝날 때마다 그때까지의 기록을 요약값 하나로 묶어 피켓의 서명을 붙이고, 그 요약값을 비트코인에 시각을 새겨 주는 무료 공개 서비스(OpenTimestamps)에 찍은 뒤 누구나 볼 수 있는 곳에 올립니다. 기록 원문과 개인정보는 나가지 않고 요약값만 나갑니다.
 > 그러면 누구든 공개된 검증 도구로 '그 시각에 그 기록 묶음이 있었고 그 뒤로 바뀌지 않았다'를 피켓을 믿지 않고 확인할 수 있습니다. 다툼이 생기면 문제의 기록 하나와 '이 기록이 그 요약값에 들어 있다'는 증명만 당사자에게 건넵니다.
-> 블록체인을 직접 운영하지는 않습니다. 노드를 피켓 혼자 돌리면 블록체인의 장점(서로 믿지 않는 여럿이 같은 장부를 나눠 가짐)이 사라지기 때문입니다. 또 처음부터 적지 않거나 거짓으로 적은 기록은 어떤 장부도 막지 못합니다([ADR-0075](../docs/adr/0075-public-audit-anchor-signed-merkle-checkpoints.md)).
+> 블록체인을 직접 운영하지는 않습니다. 노드를 피켓 혼자 돌리면 블록체인의 장점(서로 믿지 않는 여럿이 같은 장부를 나눠 가짐)이 사라지기 때문입니다. 또 처음부터 적지 않거나 거짓으로 적은 기록은 어떤 장부도 막지 못합니다([ADR-0075](../adr/0075-public-audit-anchor-signed-merkle-checkpoints.md)).
 
 ---
 
@@ -124,7 +124,7 @@ sequenceDiagram
 
 이 기준값들은 측정 뒤 확정한다.
 
-공연 당일에는 관제 화면의 **입장 탭**에서 준비된 스캐너 수, 2분 넘게 바뀐 것을 받지 못한 스캐너, 올리지 못한 기록 수, 이상 표시, 부스 재발급과 예외 통과 건수를 본다. 관제는 지켜보기만 하고, 이상 표시 하나하나는 그 구역 현장 책임자가 좌석에서 확인한다([ADR-0051](../docs/adr/0051-gate-process-end-to-end.md)).
+공연 당일에는 관제 화면의 **입장 탭**에서 준비된 스캐너 수, 2분 넘게 바뀐 것을 받지 못한 스캐너, 올리지 못한 기록 수, 이상 표시, 부스 재발급과 예외 통과 건수를 본다. 관제는 지켜보기만 하고, 이상 표시 하나하나는 그 구역 현장 책임자가 좌석에서 확인한다([ADR-0051](../adr/0051-gate-process-end-to-end.md)).
 
 ### ⑤ 법이 시간을 정한 일: 보안 사고와 접속기록 점검
 
@@ -139,7 +139,7 @@ sequenceDiagram
 
 ### ⑥ 자동 제어와 경보도 스스로를 지킨다
 
-8시 4분, 결제 서버의 숫자를 모으는 수집이 잠깐 끊겼다고 하자. 입장 정원을 자동으로 조절하는 장치는 그 숫자를 보고 정원을 늘리거나 줄인다. 숫자가 없는 것을 '오류 0건'으로 읽으면, 장애가 났는데도 아주 건강하다고 보고 정원을 늘린다. 구글도 비슷한 사고를 겪었다. 지울 대상이 없다는 빈 목록을 '전부'로 읽은 자동화가 CDN 서버의 디스크를 거의 다 지웠다(구글 SRE 책 7장). 그래서 자동 장치와 경보에도 스스로를 지키는 규칙을 둔다(2026-10-20 소유자 승인, [ADR-0069](../docs/adr/0069-ops-control-principles-audit-self-safety-alert-hygiene-wide-events.md)).
+8시 4분, 결제 서버의 숫자를 모으는 수집이 잠깐 끊겼다고 하자. 입장 정원을 자동으로 조절하는 장치는 그 숫자를 보고 정원을 늘리거나 줄인다. 숫자가 없는 것을 '오류 0건'으로 읽으면, 장애가 났는데도 아주 건강하다고 보고 정원을 늘린다. 구글도 비슷한 사고를 겪었다. 지울 대상이 없다는 빈 목록을 '전부'로 읽은 자동화가 CDN 서버의 디스크를 거의 다 지웠다(구글 SRE 책 7장). 그래서 자동 장치와 경보에도 스스로를 지키는 규칙을 둔다(2026-10-20 소유자 승인, [ADR-0069](../adr/0069-ops-control-principles-audit-self-safety-alert-hygiene-wide-events.md)).
 
 | 규칙 | 무엇을 막나 | 기준 |
 | :--- | :--- | :--- |
@@ -153,7 +153,7 @@ sequenceDiagram
 
 ### ⑦ 장애가 난 순간 손으로 다루는 일
 
-8시 10분, 결제 서버 한 대가 점점 느려지고 메모리가 한도에 가까워졌다고 하자. 다시 띄우면 빨라지지만, 왜 느려졌는지 알려 줄 단서(메모리 안의 상태)도 함께 사라진다. 소유자가 붙여 준 Release It!의 장애 대응 지침에 지금 설계를 대 보니, 이렇게 장애 순간 사람이 손으로 다루는 부분이 비어 있었다(2026-10-20 소유자 승인, [ADR-0070](../docs/adr/0070-incident-response-evidence-probes-timeouts-throughput-soak.md)).
+8시 10분, 결제 서버 한 대가 점점 느려지고 메모리가 한도에 가까워졌다고 하자. 다시 띄우면 빨라지지만, 왜 느려졌는지 알려 줄 단서(메모리 안의 상태)도 함께 사라진다. 소유자가 붙여 준 Release It!의 장애 대응 지침에 지금 설계를 대 보니, 이렇게 장애 순간 사람이 손으로 다루는 부분이 비어 있었다(2026-10-20 소유자 승인, [ADR-0070](../adr/0070-incident-response-evidence-probes-timeouts-throughput-soak.md)).
 
 | 규칙 | 무엇을 막나 | 기준 |
 | :--- | :--- | :--- |
@@ -183,7 +183,7 @@ sequenceDiagram
 | **9. 비핵심 보조 기능 비활성화** | 1인 | 관람 후기, 찜, 인접 좌석 추천 등 부가 기능만 즉시 OFF(기대평은 2026-10-14에 없앴다, ADR-0063). 일괄 환불의 새 묶음, 파트너 알림 재시도 같은 뒤에서 도는 일을 멈추는 스위치도 여기에 있다 |
 | **10. 부정거래 게시물 노출 차단** | 1인 | 신고기관·수사기관 공문으로 통보된 게시물에 한하여 24시간(문화체육관광부 고시 사항은 10시간) 안에 차단. 같은 내용의 게시물은 이후 명령 없이 자동으로 숨김 |
 | **11. 긴급 자동화 정지 스위치** | 1인 (비상용, 다시 켤 때는 2인) | 입장 제어의 자동 조절(AIMD 조정, 오류 예산 연동 감축, Degraded 후보 추천)을 일제히 정지 (사후 검토 필수: 실행한 사람이 48시간 안에 보고서를 쓰고 다른 commander가 7일 안에 검토). 서버 자동 증설은 멈추지 않음. 자동 증설이 잘못 움직이면 따로 멈춘다(⑥) |
-| **12. 결제사 지정** | 1인 | 온세일 시간 밖에서만 실행. 회차마다 기본 결제사와 대체 결제사를 정함 ([ADR-0044](../docs/adr/0044-dual-pg-selection-and-switchover.md). 결제사 지정은 회차 단위다, [ADR-0093](../docs/adr/0093-production-entity-place-artist-units.md)). 지정하지 않은 회차는 판매 승인 때 그때의 기본값이 그 회차의 지정으로 고정되어, 나중에 기본값을 바꿔도 이미 승인한 회차의 결제사는 바뀌지 않음 |
+| **12. 결제사 지정** | 1인 | 온세일 시간 밖에서만 실행. 회차마다 기본 결제사와 대체 결제사를 정함 ([ADR-0044](../adr/0044-dual-pg-selection-and-switchover.md). 결제사 지정은 회차 단위다, [ADR-0093](../adr/0093-production-entity-place-artist-units.md)). 지정하지 않은 회차는 판매 승인 때 그때의 기본값이 그 회차의 지정으로 고정되어, 나중에 기본값을 바꿔도 이미 승인한 회차의 결제사는 바뀌지 않음 |
 
 > [!NOTE]
 > **홈 화면 꾸미기는 명령이 아니다**: 홈의 큰 배너와 테마 추천은 운영자가 관제 콘솔의 [홈 구성](공지 관리 화면의 탭)에서 정한다(2026-10-14 추천 적용, ADR-0063). 이 자리는 돈을 받고 팔지 않는다. 판매 승인된 공연만 고를 수 있고, 운영자 한 명이 사유를 적어 저장하면 감사 기록에 무엇이 바뀌었는지 남는다. 시스템을 멈추거나 되돌리는 비상 명령이 아니라 화면 내용 설정이라 2인 승인이 없고, 되돌리려면 이전 구성을 다시 저장한다.
@@ -204,7 +204,7 @@ sequenceDiagram
 
 > [!NOTE]
 > **온세일 종료 후 자동 리포트 (ClickHouse)**  
-> 70분 온세일 윈도우가 끝나고 30분 뒤, 마감 실행기(close-runner, dbt 잡)가 ClickHouse에 모인 원본 이벤트로 유입 인원, 등급별 매진 소요 시간, 좌석 경합도, 결제 실패 원인, 봇 공격 추정치, 운영 명령 이력을 계산해 **'잠정 공연 리포트(R0)'**의 숫자를 자동으로 만듭니다. ops-svc는 그 지표 뷰를 읽어 리포트로 보여 줄 뿐 직접 계산하지 않습니다 ([ADR-0042](../docs/adr/0042-analytics-store-and-decision-rules.md), [ADR-0052](../docs/adr/0052-analytics-medallion-star-schema-close-stages.md)). 결제·봇 숫자는 다음 영업일(R1)과 오픈 7일 뒤(R2) 같은 단계별 마감에서 확정되며, 읽는 법과 결정하는 법은 [15편](15-analytics-and-decisions.md)에 있습니다.
+> 70분 온세일 윈도우가 끝나고 30분 뒤, 마감 실행기(close-runner, dbt 잡)가 ClickHouse에 모인 원본 이벤트로 유입 인원, 등급별 매진 소요 시간, 좌석 경합도, 결제 실패 원인, 봇 공격 추정치, 운영 명령 이력을 계산해 **'잠정 공연 리포트(R0)'**의 숫자를 자동으로 만듭니다. ops-svc는 그 지표 뷰를 읽어 리포트로 보여 줄 뿐 직접 계산하지 않습니다 ([ADR-0042](../adr/0042-analytics-store-and-decision-rules.md), [ADR-0052](../adr/0052-analytics-medallion-star-schema-close-stages.md)). 결제·봇 숫자는 다음 영업일(R1)과 오픈 7일 뒤(R2) 같은 단계별 마감에서 확정되며, 읽는 법과 결정하는 법은 [15편](15-analytics-and-decisions.md)에 있습니다.
 
 ---
 
@@ -276,7 +276,7 @@ sequenceDiagram
 2. **가운데 분류 담당(게이트웨이 수집기)**: 셋이 나눠 일한다. 요청 기록을 다 남기면 창고가 넘치므로, 오류가 났거나 느렸던 요청은 모두 남기고 정상 요청은 일부만 남긴다. 그래서 8시 3분의 느린 결제 요청은 하나도 빠짐없이 남아 있었다. 이 판단을 하려면 한 요청의 조각이 한곳에 모여야 해서, 수거 담당은 요청 번호를 보고 늘 같은 분류 담당에게 보낸다. 개인정보를 한 번 더 지우는 일도 여기서 한다.
 3. **숫자는 창고가 직접 가져간다**: 입장 속도, 오류율 같은 숫자는 수거 담당을 거치지 않고 Prometheus가 프로그램마다 와서 읽어 간다. 그래서 수거·분류 담당이 멈춰도 정원 조절과 경보는 그대로다. 잃는 것은 원인을 찾을 때 보는 요청 기록과 로그이고, 수거·분류 담당이 멈추면 그것도 경보로 알린다.
 4. **손님 화면의 기록은 같은 주소로**: 화면 반응 속도와 보안 정책 위반 보고는 피켓 주소 안의 `/_t/rum`·`/_t/csp`로 보낸다. 다른 주소로 보내면 브라우저가 확인 요청을 하나 더 보내야 하기 때문이다. 같은 주소라 브라우저가 쿠키를 붙여 보낼 수 있어서, 입구 서버(API 게이트웨이)가 쿠키를 지우고 넘긴다. 누구나 보낼 수 있는 주소라 가짜 숫자가 섞일 수 있으므로, 이 숫자로는 사람을 부르거나 자동으로 손잡이를 돌리지 않는다.
-5. **법이 정한 접속기록은 처음부터 따로**: 출입 기록은 수거 담당이 두 벌로 나눈다. 원본은 접속기록 전용 창고로 가고, IP 뒷부분을 지운 사본만 일반 로그 창고로 간다. 원본 IP가 서버 밖 일반 길로 나가지 않는다. 원본 쪽 길은 '잃지 않는 길'이다. 수거 담당은 어디까지 읽었는지를 디스크에 적어 두고, 창고가 잠시 문을 닫으면 보낼 것을 디스크에 쌓아 두었다가 다시 연 뒤 이어 보낸다. 입구에서 센 출입 수와 창고에 들어온 수를 5분마다 맞춰 보고, 모자라면 바로 사람을 부른다. 하루치는 지울 수 없는 금고(S3 Object Lock)에 한 벌 더 넣어, 석 달 안의 어느 날이 망가져도 되살린다([docs/observability.md §7](../docs/observability.md), 2026-10-28).
+5. **법이 정한 접속기록은 처음부터 따로**: 출입 기록은 수거 담당이 두 벌로 나눈다. 원본은 접속기록 전용 창고로 가고, IP 뒷부분을 지운 사본만 일반 로그 창고로 간다. 원본 IP가 서버 밖 일반 길로 나가지 않는다. 원본 쪽 길은 '잃지 않는 길'이다. 수거 담당은 어디까지 읽었는지를 디스크에 적어 두고, 창고가 잠시 문을 닫으면 보낼 것을 디스크에 쌓아 두었다가 다시 연 뒤 이어 보낸다. 입구에서 센 출입 수와 창고에 들어온 수를 5분마다 맞춰 보고, 모자라면 바로 사람을 부른다. 하루치는 지울 수 없는 금고(S3 Object Lock)에 한 벌 더 넣어, 석 달 안의 어느 날이 망가져도 되살린다([docs/observability.md §7](../observability.md), 2026-10-28).
 
 **기계가 이상을 알아서 찾아 주면 안 되나?** 지금은 쓰지 않는다. 이상을 찾는 기계는 보통 "이번 화요일 저녁 8시는 지난 화요일 저녁 8시와 비슷하다"는 식으로 몇 주치 기록에서 평소 모습을 배운다. 그런데 화요일 저녁 8시에 대형 콘서트가 열리면 지난주 같은 시각에는 없던 100만 명이 몰린다. 기계는 이 정상적인 오픈을 '이상'으로 울리거나, 오픈이 자주 있으면 그 폭주를 평소로 배워 오픈 중 결제가 조용히 반으로 줄어도 들쭉날쭉한 값 속에 묻어 버릴 수 있다. 게다가 포트폴리오에는 진짜 손님이 없어 기계가 배울 것은 우리 시험 스크립트뿐이다. 판매 오픈 때 이유를 설명할 수 없는 경보나 자동 조치가 나면 손해도 크다. 구글 SRE 책도 기준을 스스로 배우거나 원인을 자동으로 찾는 시스템을 피하라고 한다. 그래서 사람을 부르거나 자동으로 줄이는 일은 "오류 예산이 이 속도로 줄고 있다", "메모리가 24시간 안에 찬다"처럼 이유를 말할 수 있는 규칙으로만 한다. 원인 찾기는 사람이 하고, 시스템은 단서와 미리 채운 조회 링크를 준다. 규칙에 없는 장애를 사람이 먼저 찾은 일이 분기에 두 번 넘게 생기면, 사람을 부르지 않는 '힌트'로 기계 학습을 써 볼지 다시 정한다. 이 판단은 한 번 재 보기로 했다. Phase 4에서 Datadog을 14일 무료로 써 볼 때 그 회사의 이상 탐지를 사람을 부르지 않는 힌트로 켜 두고, 장애 훈련에서 넣은 장애를 우리 규칙보다 먼저 잡는지와 엉뚱하게 울린 횟수를 센다. 다만 그 기계는 숫자 쪽 이상을 찾으려면 기록을 2주는 봐야 해서, 14일 안에서는 오류 로그 쪽과 짧은 기록으로 도는 방식으로 견준다. 우리 규칙이 놓친 장애를 잡고 엉뚱한 경보가 드물면 그때 힌트 화면을 다시 정한다. 봇을 가려내는 일은 다르다. 정답을 아는 시험용 봇으로 성적을 잴 수 있고, 걸린 사람도 추가 확인으로 돌아올 길이 있어서, 그쪽은 새 모델을 그림자로 먼저 돌려 본 뒤 쓴다. 기계 학습이 나중에 제값을 할 곳은 경보보다 "이번 공연에 몇 명이 올까" 같은 수요 예측이다.
 
@@ -343,18 +343,18 @@ sequenceDiagram
 
 ## 더 알아보기
 
-* [docs/features/control-tower.md §2, §3](../docs/features/control-tower.md), [POL-021](../planning/03-policies-glossary.md): 관제 콘솔 화면 레이아웃 및 12대 비상 제어 명령 명세
-* [docs/features/control-tower.md §6](../docs/features/control-tower.md): 사람의 통제권과 자동화 제어 사이의 우선순위 규칙
-* [docs/observability.md §4, §5](../docs/observability.md), [POL-022](../planning/03-policies-glossary.md): SLO 정의, 오류 예산(Error Budget), 알림 단계 설계
-* [POL-029](../planning/03-policies-glossary.md), [docs/architecture.md §7](../docs/architecture.md): 단계별 Degraded Mode와 불변식
-* [docs/observability.md §12](../docs/observability.md): 33가지 장애 대응 훈련(Game Day) 시나리오(장애 주입 10, 관제 자체 감시 4, 장애 격리 7, 보안 사고 1, 변경 안전 4, 자동 제어 안전 2, 장애 대응 3, 제어 경로 의존 장애 2)
-* [docs/observability.md §14](../docs/observability.md), [ADR-0049](../docs/adr/0049-onsale-alert-windows-and-ops-metrics.md): 지표마다의 근거와 출처, 경보 창을 정한 이유
-* [docs/features/control-tower.md §2, §9](../docs/features/control-tower.md): 오픈 전 점검 판정, 보안 사고 신고·통지와 접속기록 점검 화면
-* [docs/observability.md §13](../docs/observability.md), [ADR-0042](../docs/adr/0042-analytics-store-and-decision-rules.md): ClickHouse 기반 사후 분석 저장소 및 공연 리포트 자동 생성 구조
-* [ADR-0067](../docs/adr/0067-console-vs-observability-tools-and-measured-backend-choice.md), [docs/observability.md §1](../docs/observability.md): 관제 콘솔·Grafana·Sentry의 역할 경계와 관측 창고를 재 보고 고르는 규칙
-* [ADR-0068](../docs/adr/0068-observability-stack-rationale-and-managed-alternatives.md): 관측 스택을 고른 기준과 대안(AWS 관리형, Grafana Cloud, Datadog, OpenSearch, ClickHouse 기반) 비교
-* [ADR-0076](../docs/adr/0076-observability-reference-alignment-collector-tiers.md), [docs/observability.md §1, §11, §13](../docs/observability.md): 관측 레퍼런스 구조와 대조한 결과, 기록이 모이는 길(수거·분류 담당), 손님 화면 기록의 주소, 기계 학습 이상 탐지를 쓰지 않는 이유
-* [ADR-0077](../docs/adr/0077-observability-book-review-buckets-storage-retention.md), [docs/observability.md §8, §9, §12](../docs/observability.md): 응답 시간 칸을 목표 기준값에 맞추기, 관측 전용 대기 줄과 AZ 장애 훈련(G-26), 원본 90일·5분 요약 13개월, 정원을 줄이는 자동 조치 알림
-* [ADR-0078](../docs/adr/0078-aiops-review-demand-forecast-action-exits-correlation.md), [docs/architecture.md §5, §9.5](../docs/architecture.md), [docs/observability.md §5, §7, §9](../docs/observability.md): 예상 인원 어림과 규모 올리기, 자동 조치의 끝내는 조건 표, 운영 명령 그래프 표시와 서비스 지도, 원인 아홉 가지와 런북 색인, 월간 경보 점검, Grafana 조직 나누기, 클러스터 규모 기준과 네임스페이스 지도
-* [ADR-0069](../docs/adr/0069-ops-control-principles-audit-self-safety-alert-hygiene-wide-events.md), [docs/architecture.md §5](../docs/architecture.md): 구글 SRE·Release It!·Observability Engineering 원칙 대조, 자동 제어와 경보를 지키는 규칙, 부하를 다루는 자동 장치의 순서
-* [ADR-0070](../docs/adr/0070-incident-response-evidence-probes-timeouts-throughput-soak.md), [docs/architecture.md §5](../docs/architecture.md), [docs/infra.md §10](../docs/infra.md): Release It! 장애 대응 지침 대조, 재시작 전 단서 남기기(RB-31), 프로브 규칙, 기다림의 상한과 느린 쿼리 끊기(RB-32), 오류 없는 장애 경보(RB-33), 6시간 시험
+* [docs/features/control-tower.md §2, §3](../features/control-tower.md), [POL-021](../planning/03-policies-glossary.md): 관제 콘솔 화면 레이아웃 및 12대 비상 제어 명령 명세
+* [docs/features/control-tower.md §6](../features/control-tower.md): 사람의 통제권과 자동화 제어 사이의 우선순위 규칙
+* [docs/observability.md §4, §5](../observability.md), [POL-022](../planning/03-policies-glossary.md): SLO 정의, 오류 예산(Error Budget), 알림 단계 설계
+* [POL-029](../planning/03-policies-glossary.md), [docs/architecture.md §7](../architecture.md): 단계별 Degraded Mode와 불변식
+* [docs/observability.md §12](../observability.md): 33가지 장애 대응 훈련(Game Day) 시나리오(장애 주입 10, 관제 자체 감시 4, 장애 격리 7, 보안 사고 1, 변경 안전 4, 자동 제어 안전 2, 장애 대응 3, 제어 경로 의존 장애 2)
+* [docs/observability.md §14](../observability.md), [ADR-0049](../adr/0049-onsale-alert-windows-and-ops-metrics.md): 지표마다의 근거와 출처, 경보 창을 정한 이유
+* [docs/features/control-tower.md §2, §9](../features/control-tower.md): 오픈 전 점검 판정, 보안 사고 신고·통지와 접속기록 점검 화면
+* [docs/observability.md §13](../observability.md), [ADR-0042](../adr/0042-analytics-store-and-decision-rules.md): ClickHouse 기반 사후 분석 저장소 및 공연 리포트 자동 생성 구조
+* [ADR-0067](../adr/0067-console-vs-observability-tools-and-measured-backend-choice.md), [docs/observability.md §1](../observability.md): 관제 콘솔·Grafana·Sentry의 역할 경계와 관측 창고를 재 보고 고르는 규칙
+* [ADR-0068](../adr/0068-observability-stack-rationale-and-managed-alternatives.md): 관측 스택을 고른 기준과 대안(AWS 관리형, Grafana Cloud, Datadog, OpenSearch, ClickHouse 기반) 비교
+* [ADR-0076](../adr/0076-observability-reference-alignment-collector-tiers.md), [docs/observability.md §1, §11, §13](../observability.md): 관측 레퍼런스 구조와 대조한 결과, 기록이 모이는 길(수거·분류 담당), 손님 화면 기록의 주소, 기계 학습 이상 탐지를 쓰지 않는 이유
+* [ADR-0077](../adr/0077-observability-book-review-buckets-storage-retention.md), [docs/observability.md §8, §9, §12](../observability.md): 응답 시간 칸을 목표 기준값에 맞추기, 관측 전용 대기 줄과 AZ 장애 훈련(G-26), 원본 90일·5분 요약 13개월, 정원을 줄이는 자동 조치 알림
+* [ADR-0078](../adr/0078-aiops-review-demand-forecast-action-exits-correlation.md), [docs/architecture.md §5, §9.5](../architecture.md), [docs/observability.md §5, §7, §9](../observability.md): 예상 인원 어림과 규모 올리기, 자동 조치의 끝내는 조건 표, 운영 명령 그래프 표시와 서비스 지도, 원인 아홉 가지와 런북 색인, 월간 경보 점검, Grafana 조직 나누기, 클러스터 규모 기준과 네임스페이스 지도
+* [ADR-0069](../adr/0069-ops-control-principles-audit-self-safety-alert-hygiene-wide-events.md), [docs/architecture.md §5](../architecture.md): 구글 SRE·Release It!·Observability Engineering 원칙 대조, 자동 제어와 경보를 지키는 규칙, 부하를 다루는 자동 장치의 순서
+* [ADR-0070](../adr/0070-incident-response-evidence-probes-timeouts-throughput-soak.md), [docs/architecture.md §5](../architecture.md), [docs/infra.md §10](../infra.md): Release It! 장애 대응 지침 대조, 재시작 전 단서 남기기(RB-31), 프로브 규칙, 기다림의 상한과 느린 쿼리 끊기(RB-32), 오류 없는 장애 경보(RB-33), 6시간 시험

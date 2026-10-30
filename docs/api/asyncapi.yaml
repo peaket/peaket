@@ -172,7 +172,7 @@ operations:
   publishEventSaleChanged: { action: send, channel: { $ref: '#/channels/trade.seats' }, summary: "purchase-svc(회차 판매 상태 판정, event_sale Outbox, ADR-0122)", messages: [{ $ref: '#/channels/trade.seats/messages/EventSaleChanged' }] }
   consumeEventSaleChanged: { action: receive, channel: { $ref: '#/channels/trade.seats' }, summary: "queue-svc(대기 상태 파일의 판매 상태, 일시 매진·매진 동안 입장 멈춤, 원본 410, 엣지 매진 응답 켜고 끄기), core-svc(홈·검색의 공연 판매 상태, 공연 상세 캐시, 매진 풀림의 취소표 알림), analytics-ingest(매진 시각). SeatEvent는 건너뛴다", messages: [{ $ref: '#/channels/trade.seats/messages/EventSaleChanged' }] }
   publishTicketEvent: { action: send, channel: { $ref: '#/channels/trade.tickets' }, summary: "ticket-svc Outbox" }
-  consumeTicketEvent: { action: receive, channel: { $ref: '#/channels/trade.tickets' }, summary: "core-svc notify(양도 요청·수락·거절·철회·만료·돌려주기·회수 알림, design/d5 §9.1, 추천 적용 2026-10-30), ops-rt(발권 수)·analytics-ingest" }
+  consumeTicketEvent: { action: receive, channel: { $ref: '#/channels/trade.tickets' }, summary: "core-svc notify(양도 요청·수락·거절·철회·만료·돌려주기·회수 알림, docs/design/d5 §9.1, 추천 적용 2026-10-30), ops-rt(발권 수)·analytics-ingest" }
   publishSettlementEvent: { action: send, channel: { $ref: '#/channels/trade.settlements' }, summary: "payment-svc Outbox(정산서·지급·미수금, ADR-0047)" }
   consumeSettlementEvent: { action: receive, channel: { $ref: '#/channels/trade.settlements' }, summary: "core-svc notify(파트너 웹훅 statement.notified·payout.completed·payout.failed, openapi webhooks partnerEvent), analytics-ingest(정산서 대조·수수료, analytics §3.1)" }
   publishSettingChanged: { action: send, channel: { $ref: '#/channels/control.settings' }, summary: "ops-svc Outbox → Outbox 릴레이(ops-outbox-relay, 폴링, ADR-0116·0143). 운영 명령의 설정 이벤트(POL-021)" }
@@ -211,7 +211,7 @@ components:
           eventId: { type: string }
           orderId: { type: string }
           accountId: { type: string }
-          type: { type: string, enum: [CREATED, ACCEPTED, RESERVED, AWAITING_DEPOSIT, APPROVED, CONFIRMED, DEPOSIT_REVERSED, FAILED, COMPENSATED, PARTIALLY_REFUNDED, REFUNDED, EVENT_CANCELLATION_CONFIRMED, COMPENSATION_PAID, EXPIRED, ISSUE_DELAYED], description: "EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID는 회차 취소 확정과 배상 지급(ADR-0046). AWAITING_DEPOSIT은 가상계좌 발급(입금 대기), DEPOSIT_REVERSED는 입금 오류로 결제사가 입금을 되돌려 확정된 주문이 입금 대기로 돌아감(planning/03 §2.4, 추천 적용 2026-10-14, ADR-0062). EXPIRED는 결제를 접수하지 않고 끝난 주문(과금 없음, ADR-0107). ISSUE_DELAYED는 승인 뒤 발권이 60초 [가정] 넘게 끝나지 않아 다시 발권하는 중인 주문으로, core-svc 알림이 '결제 완료, 티켓 발급 중'을 보낸다(ADR-0106). 두 값은 2026-10-28에 더했고 소비자를 먼저 배포한다(BACKWARD_TRANSITIVE)" }
+          type: { type: string, enum: [CREATED, ACCEPTED, RESERVED, AWAITING_DEPOSIT, APPROVED, CONFIRMED, DEPOSIT_REVERSED, FAILED, COMPENSATED, PARTIALLY_REFUNDED, REFUNDED, EVENT_CANCELLATION_CONFIRMED, COMPENSATION_PAID, EXPIRED, ISSUE_DELAYED], description: "EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID는 회차 취소 확정과 배상 지급(ADR-0046). AWAITING_DEPOSIT은 가상계좌 발급(입금 대기), DEPOSIT_REVERSED는 입금 오류로 결제사가 입금을 되돌려 확정된 주문이 입금 대기로 돌아감(docs/planning/03 §2.4, 추천 적용 2026-10-14, ADR-0062). EXPIRED는 결제를 접수하지 않고 끝난 주문(과금 없음, ADR-0107). ISSUE_DELAYED는 승인 뒤 발권이 60초 [가정] 넘게 끝나지 않아 다시 발권하는 중인 주문으로, core-svc 알림이 '결제 완료, 티켓 발급 중'을 보낸다(ADR-0106). 두 값은 2026-10-28에 더했고 소비자를 먼저 배포한다(BACKWARD_TRANSITIVE)" }
           amount: { type: integer, description: "주문 금액(원). 서버가 계산한 purchase_order.amount이고 사건 종류와 상관없이 같은 값이다. 환급액은 이 칸이 아니다(ADR-0150)" }
           seatIds: { type: array, items: { type: string } }
           purchaseSessionId: { x-present-when: [{ type: [CREATED] }], type: string, description: "구매 세션 ID(분석 연결 키, ADR-0052). CREATED에만 싣는다. 주문 표에 저장하지 않는 값이라 뒤의 사건은 주문 ID로 잇는다(ADR-0150)" }
@@ -247,7 +247,7 @@ components:
           seatId: { type: string }
           tierId: { type: string, description: "좌석 등급. 관제 실시간 표의 등급별 판매 좌석(ADR-0072)" }
           sectionId: { type: string, description: "좌석 구역. 관제 실시간 표의 구역별 판매 좌석(ADR-0072)" }
-          type: { type: string, enum: [HELD, RELEASED, EXPIRED, PENDING, SOLD, AVAILABLE, RETURNED], description: "HELD·RELEASED·EXPIRED는 홀드(좌석 Redis Stream 릴레이), PENDING·SOLD·AVAILABLE·RETURNED는 판매 행 seat_sale의 Outbox다. AVAILABLE은 판매 예약(PENDING) 행을 지워 좌석을 다시 팔 수 있게 됨(승인 실패·승인 기한 만료, 가상계좌 입금 기한 경과·입금 전 회차 취소), RETURNED는 SOLD 좌석이 예매 취소·회차 취소로 반환됨(seat_sale RETURNED. 취소표로 다시 팔 수 있고, 판매 종료 뒤 반환은 다시 팔지 않는다, ADR-0064). seat-hold §4·§6, planning/03 §2.4" }
+          type: { type: string, enum: [HELD, RELEASED, EXPIRED, PENDING, SOLD, AVAILABLE, RETURNED], description: "HELD·RELEASED·EXPIRED는 홀드(좌석 Redis Stream 릴레이), PENDING·SOLD·AVAILABLE·RETURNED는 판매 행 seat_sale의 Outbox다. AVAILABLE은 판매 예약(PENDING) 행을 지워 좌석을 다시 팔 수 있게 됨(승인 실패·승인 기한 만료, 가상계좌 입금 기한 경과·입금 전 회차 취소), RETURNED는 SOLD 좌석이 예매 취소·회차 취소로 반환됨(seat_sale RETURNED. 취소표로 다시 팔 수 있고, 판매 종료 뒤 반환은 다시 팔지 않는다, ADR-0064). seat-hold §4·§6, docs/planning/03 §2.4" }
           fencingToken: { x-present-when: [{ type: [HELD, RELEASED, EXPIRED] }], type: integer }
           sectionVersion: { x-present-when: [{ type: [HELD, RELEASED, EXPIRED] }], type: integer, description: "구역별 일련번호. 같은 seatEpoch 안에서만 비교한다(기술 검토 중간-040)" }
           seatEpoch: { x-present-when: [{ type: [HELD, RELEASED, EXPIRED] }], type: integer, description: "회차 세대. 좌석 Redis 장애 조치·다시 만들기 때 오른다(ADR-0121, 기술 검토 중간-040)" }
@@ -258,7 +258,7 @@ components:
     EventSaleChanged:
       payload:
         type: object
-        description: "회차 판매 상태가 바뀜(planning/03 §2.15, 추천 적용 2026-10-28, ADR-0122). purchase-svc가 event_sale을 바꾸는 트랜잭션의 Outbox로 trade.seats에 낸다(키 eventId라 그 회차의 SeatEvent와 같은 파티션에 온다. 판매 사건(seat_sale Outbox)과는 같은 릴레이의 seq 순서로 오지만, 홀드 사건(Redis Stream 릴레이)과의 순서는 보장하지 않으므로 받는 쪽은 version으로 거른다, 기술 검토 낮음-025). 판정: 가용 0이 5초 [가정] 이어지면 ALL_HELD, 가용·홀드·결제 중이 0인 판정이 두 번 이어지면 SOLD_OUT, 매진 뒤 판매 종료 전에 좌석이 돌아오면 ON_SALE(매진 풀림). 입금 대기·결과 모름의 판매 예약은 팔린 쪽으로 센다"
+        description: "회차 판매 상태가 바뀜(docs/planning/03 §2.15, 추천 적용 2026-10-28, ADR-0122). purchase-svc가 event_sale을 바꾸는 트랜잭션의 Outbox로 trade.seats에 낸다(키 eventId라 그 회차의 SeatEvent와 같은 파티션에 온다. 판매 사건(seat_sale Outbox)과는 같은 릴레이의 seq 순서로 오지만, 홀드 사건(Redis Stream 릴레이)과의 순서는 보장하지 않으므로 받는 쪽은 version으로 거른다, 기술 검토 낮음-025). 판정: 가용 0이 5초 [가정] 이어지면 ALL_HELD, 가용·홀드·결제 중이 0인 판정이 두 번 이어지면 SOLD_OUT, 매진 뒤 판매 종료 전에 좌석이 돌아오면 ON_SALE(매진 풀림). 입금 대기·결과 모름의 판매 예약은 팔린 쪽으로 센다"
         required: [eventId, status, available, held, paying, version, changedAt, eventKey]
         properties:
           eventId: { type: string }
@@ -289,7 +289,7 @@ components:
           eventId: { type: string }
           purchaseSessionId: { type: string, description: "구매 세션 ID(OrderEvent·SeatEvent·HoldAttempt의 purchaseSessionId와 같은 값)" }
           admissionJti: { type: string }
-          reason: { type: string, enum: [COMPLETED, LEFT, IDLE, MAX_STAY], description: "과금 없는 결제 실패는 구매 세션을 끝내지 않고 좌석맵으로 돌아간다(planning/03 §2.2 Paying → Active, POL-009, 2026-10-13 전수 점검)" }
+          reason: { type: string, enum: [COMPLETED, LEFT, IDLE, MAX_STAY], description: "과금 없는 결제 실패는 구매 세션을 끝내지 않고 좌석맵으로 돌아간다(docs/planning/03 §2.2 Paying → Active, POL-009, 2026-10-13 전수 점검)" }
           endedAt: { type: string, format: date-time }
           eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
     TicketEvent:
@@ -529,7 +529,7 @@ components:
           commandId: { type: string }
           target: { type: string }
           ackedAt: { type: string, format: date-time }
-          state: { type: string, description: "명령 상태(planning/03 §2.6의 상태 이름). SSE command 사건은 상태가 바뀔 때마다 온다(ADR-0100)" }
+          state: { type: string, description: "명령 상태(docs/planning/03 §2.6의 상태 이름). SSE command 사건은 상태가 바뀔 때마다 온다(ADR-0100)" }
           appliedVersion: { type: integer, description: "받는 쪽이 적용한 제어 상태의 판 번호. ACKED는 집행하는 모든 곳이 이 판 이상을 적용했다는 뜻이다(ADR-0103)" }
     OpsApproval:
       contentType: application/json

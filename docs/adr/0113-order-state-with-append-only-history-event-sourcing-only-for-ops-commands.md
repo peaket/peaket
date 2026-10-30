@@ -1,7 +1,7 @@
 # ADR-0113: 주문은 '상태 + 덧붙이기 이력 + Outbox'로 두고, 이벤트 소싱은 운영 명령 기록에만 쓰며, CQRS라는 이름은 쓰지 않는다(2026-10-28)
 
 - **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 중간-010 '주문 이벤트 소싱과 CQRS 세 곳은 이름과 실제 구조가 다르다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 검토는 (가) 주문을 진짜 이벤트 소싱으로 만들기와 (나) 이름을 실제 구조에 맞추기 가운데 하나를 고르라고 했고, (나)를 골랐다(추천 적용, 고른 이유는 결정 1). 방향은 소유자 결정(추천안 승인)이고, 칸 이름·검사 주기·경보·시험 같은 세부는 추천 적용이다)
-- **관련**: ADR-0026(멱등 소비자), ADR-0053·0075·0102(감사 체인·공개 앵커·체인 작업자), ADR-0086(일련번호 규칙, `order_event` 기본 키), ADR-0094(검색 읽기 모델은 카탈로그와 같은 트랜잭션), ADR-0097(학습 목록을 근거로 쓰지 않는다), ADR-0099(퍼널 '처음' 표시, 관제 실시간 표), ADR-0116(Outbox 릴레이), FR-031, NFR-017, [docs/architecture.md](../architecture.md) §3.1·§3.3·§6.1·§7, [docs/data.md](../data.md) §1·§2·§4, [docs/features/payment.md](../features/payment.md) §2·§10·§11(P-T13), [docs/features/control-tower.md](../features/control-tower.md) §7, planning/02 FR-031, [review/tech-review.md](../../review/tech-review.md)(중간-010)
+- **관련**: ADR-0026(멱등 소비자), ADR-0053·0075·0102(감사 체인·공개 앵커·체인 작업자), ADR-0086(일련번호 규칙, `order_event` 기본 키), ADR-0094(검색 읽기 모델은 카탈로그와 같은 트랜잭션), ADR-0097(학습 목록을 근거로 쓰지 않는다), ADR-0099(퍼널 '처음' 표시, 관제 실시간 표), ADR-0116(Outbox 릴레이), FR-031, NFR-017, [docs/architecture.md](../architecture.md) §3.1·§3.3·§6.1·§7, [docs/data.md](../data.md) §1·§2·§4, [docs/features/payment.md](../features/payment.md) §2·§10·§11(P-T13), [docs/features/control-tower.md](../features/control-tower.md) §7, planning/02 FR-031, [review/tech-review.md](../review/tech-review.md)(중간-010)
 
 ## 맥락
 

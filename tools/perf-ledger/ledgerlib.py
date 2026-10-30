@@ -14,8 +14,8 @@ try:  # Windows cp949 콘솔에서 기호 때문에 죽지 않도록
 except (AttributeError, ValueError):
     pass
 
-RUNS = os.path.join('perf-ledger', 'runs')
-TIMESTAMPS = os.path.join('perf-ledger', 'timestamps')  # 하루 해시 묶음과 OpenTimestamps 증명(docs/perf-ledger.md §9)
+RUNS = os.path.join('docs', 'perf-ledger', 'runs')
+TIMESTAMPS = os.path.join('docs', 'perf-ledger', 'timestamps')  # 하루 해시 묶음과 OpenTimestamps 증명(docs/perf-ledger.md §9)
 LEDGER_DOC = os.path.join('docs', 'perf-ledger.md')
 # Git이 아니라 S3 원본 버킷에 두는 큰 원본(docs/perf-ledger.md §2.1·§9, 기술 검토 낮음-056)
 RAW_DIRS = ('metrics/', 'traces/', 'grafana/')
@@ -494,7 +494,7 @@ def k6_human_units(path, ev, plan):
 
 
 BOT_OUTCOME_COLUMNS = ('tier', 'round', 'solve_rate', 'sessions', 'detected', 'blocked', 'verify_passed', 'admitted')
-K6_SCENARIO_BOTS = 500000     # planning/01 §3.2 표준 시나리오: 진입 시도 100만 건 중 봇 50만
+K6_SCENARIO_BOTS = 500000     # docs/planning/01 §3.2 표준 시나리오: 진입 시도 100만 건 중 봇 50만
 K6_SCENARIO_HUMANS = 500000   # 정상 이용자 50만. 오탐 0.5%를 빼면 49.75만이 통과한다
 
 
@@ -506,7 +506,7 @@ def k6_bot_outcomes(path, ev):
     blocked + verify_passed ≤ detected, admitted ≤ sessions. 같은 등급·라운드·풀이 성공률 행이 여럿이면 더한다.
     verify_pass = verify_passed ÷ detected, e2e_success = admitted ÷ sessions(둘 다 Wilson 95% 구간).
     bot_share_est: 마지막 라운드 1·2단계 등급을 합친 탐지율 d와, 같은 등급을 합친 풀이 성공률별 통과율 r로
-      통과 봇 = 50만 × (1 − d) + 50만 × d × r, 봇 점유율 = 통과 봇 ÷ (통과 봇 + 49.75만)(planning/01 §3.2).
+      통과 봇 = 50만 × (1 − d) + 50만 × d × r, 봇 점유율 = 통과 봇 ÷ (통과 봇 + 49.75만)(docs/planning/01 §3.2).
     """
     rows = _read_rows(path, BOT_OUTCOME_COLUMNS, 'bot_outcomes.csv')
     agg, problems = {}, []
@@ -576,7 +576,7 @@ def bot_share_note(est):
     if not est or not est.get('by_solve_rate'):
         return None
     parts = ', '.join('풀이 %g%% %.2f%%' % (x['solve_rate'] * 100, x['bot_share'] * 100) for x in est['by_solve_rate'])
-    return '봇 점유율 추정(planning/01 §3.2, 라운드 %d 1·2단계 탐지율 %.1f%%): %s' % (est['round'], est['detection_rate'] * 100, parts)
+    return '봇 점유율 추정(docs/planning/01 §3.2, 라운드 %d 1·2단계 탐지율 %.1f%%): %s' % (est['round'], est['detection_rate'] * 100, parts)
 
 
 def k6_cost(path, prices, usd_krw=None):

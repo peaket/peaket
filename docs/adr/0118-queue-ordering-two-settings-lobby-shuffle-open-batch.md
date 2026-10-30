@@ -1,7 +1,7 @@
 # ADR-0118: 대기열 정렬은 두 설정(로비 셔플·오픈 직후 묶음)으로 정한다 — 세 이름은 고지와 화면에만 남긴다(2026-10-28)
 
 - **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 중간-018 '정렬 방식 셋이 사실상 켜고 끄는 설정 두 개가 됐다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향은 소유자 결정(추천안 승인)이고, 설정 이름·조합 규칙·시험 같은 세부는 추천 적용이다. 검토는 '두 설정으로 다시 적는다'와 'PREQUEUE_SHUFFLE을 없애고 HYBRID의 묶음 끄기로 흡수한다'를 함께 냈고 하나를 고르지 않았다. 두 설정 안을 고른 것은 추천 적용이다. ADR-0012 결정 1의 '3종 지원'을 이 ADR이 바꾼다)
-- **관련**: ADR-0006, ADR-0012(결정 1·2·6), ADR-0041(결정 1·4·5와 되돌릴 조건), ADR-0050, ADR-0057, ADR-0058, ADR-0064(결정 2), ADR-0097, FR-005, FR-006, FR-022, FR-038, POL-003, POL-004, POL-005, K6, [docs/features/queue-admission.md](../features/queue-admission.md) §1·§2·§3·§11(Q-T1·Q-T23), [docs/data.md](../data.md)(`event`), docs/api/openapi.yaml(공연 등록·회차 더하기·`badges`·대기열 진입), [docs/features/analytics.md](../features/analytics.md)(`dim_event`), design/d5 §6.4, planning/03 POL-003·POL-004, planning/04 SCR-021, guide/02, wbs 3.7.1·6.2·6.2.1, [review/tech-review.md](../../review/tech-review.md)(중간-018)
+- **관련**: ADR-0006, ADR-0012(결정 1·2·6), ADR-0041(결정 1·4·5와 되돌릴 조건), ADR-0050, ADR-0057, ADR-0058, ADR-0064(결정 2), ADR-0097, FR-005, FR-006, FR-022, FR-038, POL-003, POL-004, POL-005, K6, [docs/features/queue-admission.md](../features/queue-admission.md) §1·§2·§3·§11(Q-T1·Q-T23), [docs/data.md](../data.md)(`event`), docs/api/openapi.yaml(공연 등록·회차 더하기·`badges`·대기열 진입), [docs/features/analytics.md](../features/analytics.md)(`dim_event`), design/d5 §6.4, planning/03 POL-003·POL-004, planning/04 SCR-021, guide/02, wbs 3.7.1·6.2·6.2.1, [review/tech-review.md](../review/tech-review.md)(중간-018)
 
 ## 맥락
 

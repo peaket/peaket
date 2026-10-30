@@ -35,7 +35,7 @@
 # 인프라, CI, 성능 장부 실행 기록
 /infra/                             @peaket/platform
 /.github/                           @peaket/platform
-/perf-ledger/                       @peaket/platform
+/docs/perf-ledger/                  @peaket/platform
 
 # 뿌리의 작업 공간 설정(공급망 설정, docs/devops.md §4.4)
 /package.json                       @peaket/platform

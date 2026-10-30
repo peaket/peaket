@@ -1,7 +1,7 @@
 # ADR-0125: 진입 경로는 머리 표본으로 줄이고, 꼬리 표본 수집기의 크기를 피크로 정하며, 로그와 추적이 같은 문턱으로 표본을 고른다(2026-10-28)
 
 - **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 중간-072 'T=0 피크의 관측 신호 양을 계산하지 않았고 진입 경로를 테일 샘플링에서 빼는 규칙이 없다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향은 소유자 결정(추천안 승인)이고, 비율·크기·한도 같은 세부는 추천 적용이다. 수치는 [가정]이고 wbs 4.1.4에서 확정한다. ADR-0076 결정 1·4·7을 보완하며, ADR-0076 본문은 고치지 않는다)
-- **관련**: ADR-0026, ADR-0049, ADR-0065, ADR-0069(결정 11·12), ADR-0076(결정 1·4·6·7), ADR-0077, NFR-001, [docs/observability.md](../observability.md) §1·§5·§6·§7·§14, docs/verification.md(V-T30), wbs 4.1.4, [review/tech-review.md](../../review/tech-review.md)(중간-072)
+- **관련**: ADR-0026, ADR-0049, ADR-0065, ADR-0069(결정 11·12), ADR-0076(결정 1·4·6·7), ADR-0077, NFR-001, [docs/observability.md](../observability.md) §1·§5·§6·§7·§14, docs/verification.md(V-T30), wbs 4.1.4, [review/tech-review.md](../review/tech-review.md)(중간-072)
 
 ## 맥락
 

@@ -164,7 +164,7 @@ flowchart TD
 
 이 셈은 따로 계산 엔진(Flink) 없이, 영수증을 상자로 옮기는 작은 프로그램(스트림 작업자)과 분석용 데이터베이스(ClickHouse)만으로 합니다. 이 규모(초당 약 1만 건)에서는 그쪽이 더 단순하고, 셈법을 공식 장부와 한 언어로 둘 수 있기 때문입니다(ADR-0099).
 
-칠판이 제때 바뀌는지는 '심장 박동'으로 봅니다. 1초마다 시계 표시를 하나씩 흘려보내 관제 서버가 칠판을 읽을 때까지 몇 초 걸렸는지 잽니다(화면에 그리는 약 0.3초는 지연 예산에만 넣습니다). 5초를 넘는 상태가 3분 이어지면 관제 화면은 다른 칠판(Prometheus)으로 바꿔 봅니다. 입장 속도처럼 자동 제어가 쓰는 숫자는 처음부터 그 다른 칠판에서 읽습니다([docs/streaming.md](../docs/streaming.md), ADR-0071·0099).
+칠판이 제때 바뀌는지는 '심장 박동'으로 봅니다. 1초마다 시계 표시를 하나씩 흘려보내 관제 서버가 칠판을 읽을 때까지 몇 초 걸렸는지 잽니다(화면에 그리는 약 0.3초는 지연 예산에만 넣습니다). 5초를 넘는 상태가 3분 이어지면 관제 화면은 다른 칠판(Prometheus)으로 바꿔 봅니다. 입장 속도처럼 자동 제어가 쓰는 숫자는 처음부터 그 다른 칠판에서 읽습니다([docs/streaming.md](../streaming.md), ADR-0071·0099).
 
 ---
 
@@ -342,10 +342,10 @@ flowchart LR
 
 ## 더 알아보기
 
-* [docs/features/analytics.md](../docs/features/analytics.md): 분석 저장소 전체 기능 설계서, 메달리온 파이프라인 명세
-* [docs/adr/0052-analytics-medallion-star-schema-close-stages.md](../docs/adr/0052-analytics-medallion-star-schema-close-stages.md): 메달리온 계층 구조와 5단계 마감 파이프라인 아키텍처 결정
-* [docs/features/analytics.md §5, §6](../docs/features/analytics.md): 킴볼 스타 스키마 사실 표와 차원 매트릭스, 31개 지표 사전 정의
-* [docs/features/analytics.md §9, §10](../docs/features/analytics.md): 9단계 사후 분석 절차, 결정 권한 매트릭스와 결정 기록 스키마
-* [planning/01-overview.md §3.2](../planning/01-overview.md): 비즈니스 성공 지표와 18개 결정 규칙 상세
-* [docs/security/data-classification.md](../docs/security/data-classification.md): 회차별 가명화 및 데이터 생명주기 규정
-* [docs/adr/0042-analytics-store-and-decision-rules.md](../docs/adr/0042-analytics-store-and-decision-rules.md): ClickHouse 분석 저장소 최초 채택 결정
+* [docs/features/analytics.md](../features/analytics.md): 분석 저장소 전체 기능 설계서, 메달리온 파이프라인 명세
+* [docs/adr/0052-analytics-medallion-star-schema-close-stages.md](../adr/0052-analytics-medallion-star-schema-close-stages.md): 메달리온 계층 구조와 5단계 마감 파이프라인 아키텍처 결정
+* [docs/features/analytics.md §5, §6](../features/analytics.md): 킴볼 스타 스키마 사실 표와 차원 매트릭스, 31개 지표 사전 정의
+* [docs/features/analytics.md §9, §10](../features/analytics.md): 9단계 사후 분석 절차, 결정 권한 매트릭스와 결정 기록 스키마
+* [docs/planning/01-overview.md §3.2](../planning/01-overview.md): 비즈니스 성공 지표와 18개 결정 규칙 상세
+* [docs/security/data-classification.md](../security/data-classification.md): 회차별 가명화 및 데이터 생명주기 규정
+* [docs/adr/0042-analytics-store-and-decision-rules.md](../adr/0042-analytics-store-and-decision-rules.md): ClickHouse 분석 저장소 최초 채택 결정

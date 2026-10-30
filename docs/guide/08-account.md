@@ -32,13 +32,13 @@
 
 ### ① 일반 팬은 간편한 소셜 로그인, 관리자는 강력한 다중 인증 (MFA)
 
-사용자의 역할과 권한에 따라 로그인 보안 수준을 차등화했다 ([ADR-0001](../docs/adr/0001-fan-social-login-single-factor.md), [POL-020](../planning/03-policies-glossary.md)).
+사용자의 역할과 권한에 따라 로그인 보안 수준을 차등화했다 ([ADR-0001](../adr/0001-fan-social-login-single-factor.md), [POL-020](../planning/03-policies-glossary.md)).
 
 | 사용자 역할 | 인증 방식 | 적용 이유 |
 | :--- | :--- | :--- |
 | **일반 팬** | **카카오·네이버·구글 소셜 간편 로그인**<br>*(비밀번호 없음)* | 피켓은 팬 비밀번호를 보관하지 않아 비밀번호가 피켓에서 새어 나갈 일은 없다. 대신 카카오·네이버·구글 계정이 털리면 피켓 계정도 위험해지므로 새 기기 로그인 알림과 '로그인한 기기' 화면으로 보완한다. 티켓 예매 때는 휴대폰 본인확인(CI)을 따로 한다 ([9편](09-identity-and-bots.md)). |
 | **파트너 (기획사)** | **업무용 이메일 + 15자 이상 비밀번호 + 인증 앱 코드(TOTP)** | 외부에서 예매자 개인정보가 담긴 시스템에 들어오는 권한자라서 안전한 인증수단(2차 인증)이 법적 의무다(개인정보의 안전성 확보조치 기준 §6②, POL-020). |
-| **시스템 운영자** | **위 조건 + 허용 IP(화이트리스트)** | 시스템 전체를 통제하는 명령 권한을 가지므로 최상위 접근 제어를 적용한다. 관제 화면은 허용 IP에서만 열리고, Grafana(지표 그래프 도구) 같은 관리 도구는 사내 보안 VPN으로만 닿는다(2026-10-29 추천 적용, [ADR-0144](../docs/adr/0144-edge-load-balancer-shared-fate-separation-and-failure-response.md)). |
+| **시스템 운영자** | **위 조건 + 허용 IP(화이트리스트)** | 시스템 전체를 통제하는 명령 권한을 가지므로 최상위 접근 제어를 적용한다. 관제 화면은 허용 IP에서만 열리고, Grafana(지표 그래프 도구) 같은 관리 도구는 사내 보안 VPN으로만 닿는다(2026-10-29 추천 적용, [ADR-0144](../adr/0144-edge-load-balancer-shared-fate-separation-and-failure-response.md)). |
 
 > [!NOTE]
 > **큰 예매처는 비밀번호 로그인을 지원하는데, 그럼 보안이 약한 걸까?**
@@ -84,7 +84,7 @@ sequenceDiagram
 
 ### ④ 이미 두 개로 쪼개진 계정의 통합 (계정 병합)
 
-과거에 카카오 계정과 구글 계정을 따로따로 만들어 둔 경우, 설정 메뉴에서 두 계정을 하나로 합치는 **'계정 병합(Account Merge)'**을 지원한다 ([ADR-0038](../docs/adr/0038-account-linking-and-merge.md)).
+과거에 카카오 계정과 구글 계정을 따로따로 만들어 둔 경우, 설정 메뉴에서 두 계정을 하나로 합치는 **'계정 병합(Account Merge)'**을 지원한다 ([ADR-0038](../adr/0038-account-linking-and-merge.md)).
 
 ```mermaid
 flowchart TD
@@ -124,7 +124,7 @@ flowchart TD
 
 > [!IMPORTANT]
 > **온세일 순번 세탁 차단 원리**  
-> 진행 중인 공연의 중복 참여 기록은 그 대기가 끝나거나 그 회차의 판매가 끝날 때(공연 시작 24시간 전, [ADR-0064](../docs/adr/0064-sales-end-24h-before-start.md))까지 **사람 식별값(pid, 비밀 키를 건 HMAC 지문)**으로 메모리에 남습니다. 탈퇴 후 다시 가입해 본인확인을 하면 같은 사람 식별값이 다시 계산됩니다(이 키는 정기적으로 바꾸지 않습니다. 판매 기간이 온세일보다 길어서, 판매 중에 값이 바뀌면 남은 기록과 어긋나기 때문입니다. 키가 새어 나간 것으로 의심돼 바꿀 때는, 판매 중인 회차가 끝날 때까지 옛 값과 새 값을 함께 확인합니다. [ADR-0050](../docs/adr/0050-crypto-corrections-and-key-management.md) 상태 줄, 2026-10-28).  
+> 진행 중인 공연의 중복 참여 기록은 그 대기가 끝나거나 그 회차의 판매가 끝날 때(공연 시작 24시간 전, [ADR-0064](../adr/0064-sales-end-24h-before-start.md))까지 **사람 식별값(pid, 비밀 키를 건 HMAC 지문)**으로 메모리에 남습니다. 탈퇴 후 다시 가입해 본인확인을 하면 같은 사람 식별값이 다시 계산됩니다(이 키는 정기적으로 바꾸지 않습니다. 판매 기간이 온세일보다 길어서, 판매 중에 값이 바뀌면 남은 기록과 어긋나기 때문입니다. 키가 새어 나간 것으로 의심돼 바꿀 때는, 판매 중인 회차가 끝날 때까지 옛 값과 새 값을 함께 확인합니다. [ADR-0050](../adr/0050-crypto-corrections-and-key-management.md) 상태 줄, 2026-10-28).  
 > 탈퇴 뒤 5일 안에 다시 가입하는 꼼수로는 같은 공연에서 순번을 중복으로 받을 수 없습니다. 다만 탈퇴 계정의 중복 참여 기록은 법정 파기 기한(5일) 안에 지우므로, 그 뒤에는 판매가 남은 회차에 다시 줄을 설 수 있습니다(남는 한계. 탈퇴 때 쓰지 않은 티켓은 모두 취소·환급됩니다).
 
 ---
@@ -137,9 +137,9 @@ flowchart TD
 
 ## 더 알아보기
 
-* [docs/features/identity.md §2](../docs/features/identity.md): 소셜 간편 로그인 OIDC 시퀀스 다이어그램
-* [docs/features/identity.md §2.1](../docs/features/identity.md), [POL-034](../planning/03-policies-glossary.md), [ADR-0038](../docs/adr/0038-account-linking-and-merge.md): 계정 연결 및 계정 병합 상세 아키텍처
-* [docs/features/identity.md §3, §4](../docs/features/identity.md), [POL-019](../planning/03-policies-glossary.md): 토큰과 쿠키(JWT 수명 주기), 세션 정책과 다중 기기 세션 제어
-* [docs/features/identity.md §8](../docs/features/identity.md), [POL-033](../planning/03-policies-glossary.md): 회원 탈퇴 및 재가입 시 개인정보 파기 정책
-* [docs/features/identity.md §6](../docs/features/identity.md), [POL-020](../planning/03-policies-glossary.md): 관리자 MFA 및 사내 IP 접근 제어 규정
-* [ADR-0001](../docs/adr/0001-fan-social-login-single-factor.md): 팬 계정 단일 요소 인증 채택 및 위험 수용 결정
+* [docs/features/identity.md §2](../features/identity.md): 소셜 간편 로그인 OIDC 시퀀스 다이어그램
+* [docs/features/identity.md §2.1](../features/identity.md), [POL-034](../planning/03-policies-glossary.md), [ADR-0038](../adr/0038-account-linking-and-merge.md): 계정 연결 및 계정 병합 상세 아키텍처
+* [docs/features/identity.md §3, §4](../features/identity.md), [POL-019](../planning/03-policies-glossary.md): 토큰과 쿠키(JWT 수명 주기), 세션 정책과 다중 기기 세션 제어
+* [docs/features/identity.md §8](../features/identity.md), [POL-033](../planning/03-policies-glossary.md): 회원 탈퇴 및 재가입 시 개인정보 파기 정책
+* [docs/features/identity.md §6](../features/identity.md), [POL-020](../planning/03-policies-glossary.md): 관리자 MFA 및 사내 IP 접근 제어 규정
+* [ADR-0001](../adr/0001-fan-social-login-single-factor.md): 팬 계정 단일 요소 인증 채택 및 위험 수용 결정

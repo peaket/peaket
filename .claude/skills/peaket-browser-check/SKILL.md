@@ -32,7 +32,7 @@ description: PEAKET의 OpenSpec 변경 하나를 대조(/opsx:verify) 뒤에 Cla
 
 ## 절차
 
-1. **시나리오 모으기**: `openspec/changes/<이름>/specs/**/spec.md`에서 시나리오(WHEN, THEN)를 모은다. `proposal.md`의 Impact(영향)에서 화면 번호(SCR)와 근거 ID를 찾는다. 화면 문구는 `design/d5-screen-blueprint.md`의 그 화면 절을 기준으로 본다.
+1. **시나리오 모으기**: `openspec/changes/<이름>/specs/**/spec.md`에서 시나리오(WHEN, THEN)를 모은다. `proposal.md`의 Impact(영향)에서 화면 번호(SCR)와 근거 ID를 찾는다. 화면 문구는 `docs/design/d5-screen-blueprint.md`의 그 화면 절을 기준으로 본다.
 2. **브라우저 연결 확인**: `list_connected_browsers`로 시험용 프로필이 연결되어 있는지 본다. 없으면 멈추고 소유자에게 연결을 부탁한다.
 3. **탭 열기**: `tabs_context_mcp`로 탭 묶음을 확인하고 `tabs_create_mcp`로 새 탭을 연다.
 4. **시나리오마다 확인**:

@@ -1,7 +1,7 @@
 # ADR-0098: 원문 설계서(archive/)를 지우고 git 태그 `archive-original`로만 남긴다 — 원문은 판단 근거로 쓰지 않는다(2026-10-27)
 
 - **상태**: 채택 (2026-10-27. 소유자가 "전체 문서들이 계속 원문 학습 지도를 토대로 판단을 하려고 하는 경향이 있는데 archive로 보낸 문서는 이제 필요없지 않나요? 다른 문서들이 이미 내용을 대체하고 있잖아요. … archive를 이제 삭제해도 되지 않을까요?"라고 물었다. 검토 의견(review/tech-review.md §12.2)을 본 뒤 "archive/는 git 태그를 달고 지워 주세요. 원문 링크 68개는 글자로 바꾸고, CLAUDE.md에서 고칠 문장은 먼저 보여 주세요."라고 정했다. 지우는 것, 태그, 링크를 글자로 바꾸는 것은 소유자 결정이고, 태그 이름과 점검 도구 처리 같은 세부는 추천 적용이다. CLAUDE.md는 소유자가 문장을 확인한 뒤 고친다). 2026-10-27: 소유자가 제안 문장을 확인하고 "CLAUDE.md 3번째 줄의 원문 설계서 문장을 제안한 문장(학습 목록 문장 포함)으로 고쳐 주세요."라고 해, CLAUDE.md의 원문 문장을 '원문 설계서는 2026-10-27에 지웠고 git 태그 `archive-original`에만 남아 있다. 원문과 학습 목록(1~33장)은 판단 근거로 쓰지 않고, 기술을 고른 이유는 ADR과 정본 문서로만 댄다'로 고쳤다(결정 6 끝남).
-- **관련**: ADR-0074, ADR-0084, ADR-0090, ADR-0097, 00-summary §2·§7 질문 59, [review/open-items.md](../../review/open-items.md) 38번, [review/tech-review.md](../../review/tech-review.md) §12.2, tools/doc-check
+- **관련**: ADR-0074, ADR-0084, ADR-0090, ADR-0097, 00-summary §2·§7 질문 59, [review/open-items.md](../review/open-items.md) 38번, [review/tech-review.md](../review/tech-review.md) §12.2, tools/doc-check
 
 ## 맥락
 

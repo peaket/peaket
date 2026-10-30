@@ -30,7 +30,7 @@
 
 ### ① 비밀 서명키는 휴대폰 브라우저 안에서 만들고 밖으로 보내지 않는다
 
-지민 씨가 휴대폰에서 '이 휴대폰을 입장용으로 등록'을 누르는 순간, 브라우저 안에서 서명용 열쇠 한 쌍(비밀키와 공개키)이 생긴다 ([ADR-0025](../docs/adr/0025-rotating-qr-device-key-signature.md), [ADR-0051](../docs/adr/0051-gate-process-end-to-end.md)).
+지민 씨가 휴대폰에서 '이 휴대폰을 입장용으로 등록'을 누르는 순간, 브라우저 안에서 서명용 열쇠 한 쌍(비밀키와 공개키)이 생긴다 ([ADR-0025](../adr/0025-rotating-qr-device-key-signature.md), [ADR-0051](../adr/0051-gate-process-end-to-end.md)).
 
 ```mermaid
 flowchart TD
@@ -59,7 +59,7 @@ flowchart TD
 > 2. **화면을 실시간으로 보여 주면 통과합니다**: 영상통화나 화면 공유로 QR을 중계하면 늘 새 QR이 보이기 때문입니다.
 > 3. **계정째 넘기면 막지 못합니다**: 계정을 넘겨받은 사람이 입장 시작 전에 티켓을 다시 받으면 새 키가 그 사람 기기에 생깁니다. 판매자가 입장용 휴대폰을 한 번도 등록하지 않은 채 계정을 넘기면, 산 사람의 첫 등록은 다시 받기 제한이나 부스를 거치지 않습니다. 다시 받는 횟수 제한과 알림(⑤)으로 줄일 뿐입니다.
 >
-> 이런 경우는 다른 스캐너의 입장 기록 공유, 서버의 이상 표시와 현장 확인(④)으로 대응합니다 ([ADR-0050](../docs/adr/0050-crypto-corrections-and-key-management.md), [ADR-0051](../docs/adr/0051-gate-process-end-to-end.md)).
+> 이런 경우는 다른 스캐너의 입장 기록 공유, 서버의 이상 표시와 현장 확인(④)으로 대응합니다 ([ADR-0050](../adr/0050-crypto-corrections-and-key-management.md), [ADR-0051](../adr/0051-gate-process-end-to-end.md)).
 
 ---
 
@@ -118,7 +118,7 @@ sequenceDiagram
 애플 사파리는 7일 동안 방문하지 않은 사이트의 저장소를 비울 수 있습니다(ITP). 공연 당일 티켓 키가 지워지는 일을 줄이려고 다음을 합니다:
 * **홈 화면에 추가(PWA)**: 예매 직후 홈 화면에 피켓을 추가하라고 권합니다. 애플은 홈 화면에 추가한 웹앱의 데이터는 지워질 것으로 보지 않는다고 밝혔습니다.
 * **공연 전 안내**: 공연 전날과 당일 아침에 알림톡을 보내 입장 시작 전에 티켓을 열어 보게 합니다. 열어 보는 것만으로 키를 새로 만들지는 않습니다. 입장 시작 24시간 전까지 입장용 휴대폰을 등록하지 않았다면 등록하라는 안내도 보냅니다.
-* **다시 받는 규칙** ([ADR-0050](../docs/adr/0050-crypto-corrections-and-key-management.md)):
+* **다시 받는 규칙** ([ADR-0050](../adr/0050-crypto-corrections-and-key-management.md)):
   * 입장 시작 전에는 가입할 때 쓴 소셜 계정으로 다시 로그인한 뒤 받습니다. 티켓 한 장에 24시간에 한 번까지이고, 다시 받으면 계정 이메일과 이전 기기로 알림이 갑니다.
   * 입장이 시작된 뒤에는 지갑에서 다시 받을 수 없고 **현장 부스**로 갑니다(⑧).
   * '24시간에 한 번'과 '부스 재발급이 관람객의 0.5%를 넘으면 기준을 다시 본다'는 운영해 보기 전에 정한 잠정값입니다.
@@ -130,7 +130,7 @@ sequenceDiagram
 
 **장면**: 공연 당일 오후 1시 30분, 도윤 씨가 동문 입구의 스캐너 '동문-03' 앞에 섭니다. 화면 맨 위에는 '현장 스태프 로그인'이라고 쓰여 있지만 아이디나 비밀번호를 넣는 칸은 없습니다. 대신 큰 QR 하나와 'WDJB-MJHT' 같은 확인 코드, 그리고 세 줄짜리 안내가 보입니다. 도윤 씨는 자기 휴대폰 카메라로 QR을 찍습니다. 휴대폰 브라우저에 피켓의 '스캐너 승인' 화면이 열리고, 거기에도 같은 확인 코드와 '동문-03'이라는 기기 이름이 보입니다. 두 코드가 같은 것을 확인하고 [동문-03에 로그인 승인]을 누르자, 5초 안에 스캐너 화면이 '로그인했습니다'로 바뀌고 근무 준비가 시작됩니다.
 
-**왜 비밀번호가 없나요?** 스캐너는 하루에도 여러 사람이 돌려 쓰는 공용 기기입니다. 비밀번호를 쓰면 옆 사람이 입력하는 손을 엿볼 수 있고, 바쁜 현장에서는 비밀번호를 서로 알려 주게 되며, 기기에 비밀번호가 남을 수도 있습니다. 그래서 스캐너에는 아무것도 입력하지 않고, 이미 본인확인을 마친 '내 휴대폰의 피켓 계정'으로 승인합니다. 스마트 TV처럼 글자를 넣기 불편한 기기를 휴대폰으로 로그인시킬 때 쓰는 인터넷 표준(RFC 8628)의 방식입니다. 승인으로 받은 로그인 증표는 그 스캐너의 기기 키에 묶여 있어, 증표만 빼내 다른 기기에서 쓰면 서버가 받지 않습니다. 기기 키는 스캐너를 처음 등록할 때 스캐너 안에서 만들고, 스캐너는 요청을 보낼 때마다 이 키로 서명한 짧은 증명(DPoP라는 인터넷 표준)을 함께 보냅니다. 처음에는 기기 인증서(mTLS)를 쓰려 했지만, 스캐너 화면과 서버 주소가 달라 브라우저가 먼저 보내는 허락 요청(사전 요청)에 인증서를 싣지 않는 웹 표준 규칙 때문에 기본안을 바꿨습니다(기술 검토 중간-057) ([ADR-0030](../docs/adr/0030-gate-staff-event-scoped-role-device-approval.md), [ADR-0051](../docs/adr/0051-gate-process-end-to-end.md)).
+**왜 비밀번호가 없나요?** 스캐너는 하루에도 여러 사람이 돌려 쓰는 공용 기기입니다. 비밀번호를 쓰면 옆 사람이 입력하는 손을 엿볼 수 있고, 바쁜 현장에서는 비밀번호를 서로 알려 주게 되며, 기기에 비밀번호가 남을 수도 있습니다. 그래서 스캐너에는 아무것도 입력하지 않고, 이미 본인확인을 마친 '내 휴대폰의 피켓 계정'으로 승인합니다. 스마트 TV처럼 글자를 넣기 불편한 기기를 휴대폰으로 로그인시킬 때 쓰는 인터넷 표준(RFC 8628)의 방식입니다. 승인으로 받은 로그인 증표는 그 스캐너의 기기 키에 묶여 있어, 증표만 빼내 다른 기기에서 쓰면 서버가 받지 않습니다. 기기 키는 스캐너를 처음 등록할 때 스캐너 안에서 만들고, 스캐너는 요청을 보낼 때마다 이 키로 서명한 짧은 증명(DPoP라는 인터넷 표준)을 함께 보냅니다. 처음에는 기기 인증서(mTLS)를 쓰려 했지만, 스캐너 화면과 서버 주소가 달라 브라우저가 먼저 보내는 허락 요청(사전 요청)에 인증서를 싣지 않는 웹 표준 규칙 때문에 기본안을 바꿨습니다(기술 검토 중간-057) ([ADR-0030](../adr/0030-gate-staff-event-scoped-role-device-approval.md), [ADR-0051](../adr/0051-gate-process-end-to-end.md)).
 
 로그인까지는 여덟 단계입니다. 앞의 셋은 공연 며칠 전에, 나머지는 공연 당일에 합니다.
 
@@ -235,13 +235,13 @@ flowchart TD
 
 ## 더 알아보기
 
-* [docs/features/offline-gate.md §0](../docs/features/offline-gate.md), [ADR-0051](../docs/adr/0051-gate-process-end-to-end.md): 공연 당일 타임라인과 스캐너 대수 산정
-* [docs/features/offline-gate.md §2](../docs/features/offline-gate.md), [ADR-0025](../docs/adr/0025-rotating-qr-device-key-signature.md): 입장용 휴대폰 등록과 기기 키
-* [docs/features/offline-gate.md §2, §4](../docs/features/offline-gate.md), [ADR-0050](../docs/adr/0050-crypto-corrections-and-key-management.md) 결정 1·2: 기기 키 보관의 한계와 티켓 재발급 규칙
-* [docs/features/offline-gate.md §3](../docs/features/offline-gate.md), [POL-018](../planning/03-policies-glossary.md): 회전 QR 규격과 타임스탬프 허용 오차
-* [docs/features/offline-gate.md §6](../docs/features/offline-gate.md): 스캐너 기기 등록, 근무 준비, 목록과 변경분, 판정 순서, 업로드
-* [docs/features/offline-gate.md §7](../docs/features/offline-gate.md): 서버 판정 표, 이상 표시와 현장 확인, 입장 기록 마감
-* [docs/features/offline-gate.md §9](../docs/features/offline-gate.md): 부스 재발급, 예외 통과, 확인 스캔
-* [docs/features/identity.md §6.1](../docs/features/identity.md), [POL-031](../planning/03-policies-glossary.md), [ADR-0030](../docs/adr/0030-gate-staff-event-scoped-role-device-approval.md): 현장 스태프 초대 수락과 기기 승인 로그인
-* [planning/04-ia-flows-screens.md](../planning/04-ia-flows-screens.md) F-09, [design/d5-screen-blueprint.md](../design/d5-screen-blueprint.md) §8.1·§5.27, [ADR-0066](../docs/adr/0066-screen-feedback-12-items.md): 현장 스태프 로그인 화면(SCR-036·051)과 여덟 단계 흐름
-* [docs/security/asvs/offline-gate.md](../docs/security/asvs/offline-gate.md): 현장 입장 보안 요구사항 판정
+* [docs/features/offline-gate.md §0](../features/offline-gate.md), [ADR-0051](../adr/0051-gate-process-end-to-end.md): 공연 당일 타임라인과 스캐너 대수 산정
+* [docs/features/offline-gate.md §2](../features/offline-gate.md), [ADR-0025](../adr/0025-rotating-qr-device-key-signature.md): 입장용 휴대폰 등록과 기기 키
+* [docs/features/offline-gate.md §2, §4](../features/offline-gate.md), [ADR-0050](../adr/0050-crypto-corrections-and-key-management.md) 결정 1·2: 기기 키 보관의 한계와 티켓 재발급 규칙
+* [docs/features/offline-gate.md §3](../features/offline-gate.md), [POL-018](../planning/03-policies-glossary.md): 회전 QR 규격과 타임스탬프 허용 오차
+* [docs/features/offline-gate.md §6](../features/offline-gate.md): 스캐너 기기 등록, 근무 준비, 목록과 변경분, 판정 순서, 업로드
+* [docs/features/offline-gate.md §7](../features/offline-gate.md): 서버 판정 표, 이상 표시와 현장 확인, 입장 기록 마감
+* [docs/features/offline-gate.md §9](../features/offline-gate.md): 부스 재발급, 예외 통과, 확인 스캔
+* [docs/features/identity.md §6.1](../features/identity.md), [POL-031](../planning/03-policies-glossary.md), [ADR-0030](../adr/0030-gate-staff-event-scoped-role-device-approval.md): 현장 스태프 초대 수락과 기기 승인 로그인
+* [docs/planning/04-ia-flows-screens.md](../planning/04-ia-flows-screens.md) F-09, [docs/design/d5-screen-blueprint.md](../design/d5-screen-blueprint.md) §8.1·§5.27, [ADR-0066](../adr/0066-screen-feedback-12-items.md): 현장 스태프 로그인 화면(SCR-036·051)과 여덟 단계 흐름
+* [docs/security/asvs/offline-gate.md](../security/asvs/offline-gate.md): 현장 입장 보안 요구사항 판정

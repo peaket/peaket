@@ -77,13 +77,13 @@
 `모음/{ID}` 한 쌍이 1단계다. `/users/{userId}/orders/{orderId}`가 2단계이고, 그보다 깊게 가지 않는다.
 
 - 깊어지면 하위 항목을 위로 올린다. 스태프 명단은 회차 아래에서 보지만(`/partner/events/{eventId}/staff`), 한 사람의 해제와 초대 재발송은 배정 ID만으로 부른다(`/partner/staff/{assignmentId}`). 서버는 그 배정이 이 파트너의 것인지 확인한다.
-- 공연(회차 묶음)에 딸린 것(이미지·좌석맵·판매 승인·찜)은 공연 주소(`/productions/{productionId}/…`)에, 회차에 딸린 것(대기열·좌석·스태프·정산서·판매 현황)은 회차 ID가 든 주소(`/queues/{eventId}`, `/partner/events/{eventId}/staff` 등)에 둔다. 같은 것이 회차 수만큼 다른 주소를 갖지 않게 하려는 것이다(2026-10-27, [ADR-0093](../docs/adr/0093-production-entity-place-artist-units.md) 결정 9).
+- 공연(회차 묶음)에 딸린 것(이미지·좌석맵·판매 승인·찜)은 공연 주소(`/productions/{productionId}/…`)에, 회차에 딸린 것(대기열·좌석·스태프·정산서·판매 현황)은 회차 ID가 든 주소(`/queues/{eventId}`, `/partner/events/{eventId}/staff` 등)에 둔다. 같은 것이 회차 수만큼 다른 주소를 갖지 않게 하려는 것이다(2026-10-27, [ADR-0093](../adr/0093-production-entity-place-artist-units.md) 결정 9).
 - 두 단어를 하이픈으로 이어 한 단계로 만든다(`/seatmap/snapshot` → `/seatmap-snapshot`).
 - 주소는 소문자이고 단어는 하이픈으로 잇는다(`/order-items`). 끝에 `/`를 붙인 주소는 없는 주소로 본다(404). 주소가 둘이면 캐시도 둘로 갈리기 때문이다.
 
 ### 3.5 큰 목록은 책갈피로 나눈다
 
-목록은 한 번에 `limit`개씩 준다. 다음 쪽은 서버가 준 책갈피(`nextCursor`)를 돌려주며 요청한다. '100번째부터 25개'처럼 위치로 나누는 방식(offset)은 뒤쪽으로 갈수록 앞의 것을 다 세고 건너뛰어야 해서 느리고, 그사이 새 항목이 끼면 같은 것이 두 번 나오거나 빠진다. 다만 화면이 '1 2 3 … 다음' 쪽 번호를 보여 주는 공연 검색과 내 문의 내역은 쪽 번호(`page`)를 쓴다. 어느 방식이든 한 번에 받을 개수의 이름은 `limit` 하나다. 공연 검색은 한 쪽을 20개(잠정값)로 고정해 `limit`은 20만 받고(다른 값은 400), 1,000번째 결과(잠정값)까지만 보인다. 같은 검색이 개수만 달라 캐시에서 갈리지 않게 하려는 것이다(2026-10-27, [ADR-0094](../docs/adr/0094-search-redesign-autocomplete-read-model-search-port.md)).
+목록은 한 번에 `limit`개씩 준다. 다음 쪽은 서버가 준 책갈피(`nextCursor`)를 돌려주며 요청한다. '100번째부터 25개'처럼 위치로 나누는 방식(offset)은 뒤쪽으로 갈수록 앞의 것을 다 세고 건너뛰어야 해서 느리고, 그사이 새 항목이 끼면 같은 것이 두 번 나오거나 빠진다. 다만 화면이 '1 2 3 … 다음' 쪽 번호를 보여 주는 공연 검색과 내 문의 내역은 쪽 번호(`page`)를 쓴다. 어느 방식이든 한 번에 받을 개수의 이름은 `limit` 하나다. 공연 검색은 한 쪽을 20개(잠정값)로 고정해 `limit`은 20만 받고(다른 값은 400), 1,000번째 결과(잠정값)까지만 보인다. 같은 검색이 개수만 달라 캐시에서 갈리지 않게 하려는 것이다(2026-10-27, [ADR-0094](../adr/0094-search-redesign-autocomplete-read-model-search-port.md)).
 
 ### 3.6 검색, 필요한 칸만 받기, 다음 할 일 알려 주기
 
@@ -161,8 +161,8 @@
 
 ## 더 알아보기
 
-* [docs/api/guidelines.md](../docs/api/guidelines.md) §10~§12: 이 편의 정본. 주소 규칙, 검색·부분 응답·하이퍼미디어, 메서드와 상태 코드. §2는 오류 쪽지, §3은 목록 나누기
-* [ADR-0081](../docs/adr/0081-rest-api-design-criteria-audit.md): 소유자 기준 점검 결과, 기준과 다르게 정한 이유, 옛 주소와 새 주소 대응표
-* [docs/api/openapi.yaml](../docs/api/openapi.yaml): 경로 176개·작업 194개의 실제 명세
+* [docs/api/guidelines.md](../api/guidelines.md) §10~§12: 이 편의 정본. 주소 규칙, 검색·부분 응답·하이퍼미디어, 메서드와 상태 코드. §2는 오류 쪽지, §3은 목록 나누기
+* [ADR-0081](../adr/0081-rest-api-design-criteria-audit.md): 소유자 기준 점검 결과, 기준과 다르게 정한 이유, 옛 주소와 새 주소 대응표
+* [docs/api/openapi.yaml](../api/openapi.yaml): 경로 176개·작업 194개의 실제 명세
 * [16편: 바꾸고 내보내는 법](16-change-and-deploy.md): 계약을 바꿀 때의 검사와 배포
 * [17편: 화면 만들기](17-frontend.md): 화면이 오류 종류 이름으로 문구를 고르는 방법

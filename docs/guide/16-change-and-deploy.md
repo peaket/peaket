@@ -164,11 +164,11 @@ flowchart LR
 
 ## 더 알아보기
 
-* [docs/devops.md §2, §3](../docs/devops.md): 저장소 4개와 공개 범위, 가지 규칙(git flow), 공용 검사와 시험 배치
-* [docs/devops.md §4](../docs/devops.md), [ASVS 추적 표](../docs/security/asvs/delivery.md): 재료 목록, 서명, 증명서, 취약점 기한
-* [docs/devops.md §5, §6](../docs/devops.md): 승격 흐름, 설정 세 가지, 서버 종류별 배포 방법과 되돌리기
-* [docs/devops.md §7](../docs/devops.md): DB 구조를 여러 번에 나눠 바꾸는 방법
-* [docs/devops.md §8](../docs/devops.md), [POL-028·POL-041](../planning/03-policies-glossary.md): 변경 동결 창, 동결 달력, 정비 시간, 긴급 변경
-* [ADR-0054](../docs/adr/0054-delivery-pipeline-change-freeze-and-safe-deploys.md): 이 설계를 정한 결정과 검토한 대안
-* [ADR-0074](../docs/adr/0074-git-flow-branching-release-and-hotfix.md): 가지 규칙을 git flow로 바꾼 결정과 그 대가
+* [docs/devops.md §2, §3](../devops.md): 저장소 4개와 공개 범위, 가지 규칙(git flow), 공용 검사와 시험 배치
+* [docs/devops.md §4](../devops.md), [ASVS 추적 표](../security/asvs/delivery.md): 재료 목록, 서명, 증명서, 취약점 기한
+* [docs/devops.md §5, §6](../devops.md): 승격 흐름, 설정 세 가지, 서버 종류별 배포 방법과 되돌리기
+* [docs/devops.md §7](../devops.md): DB 구조를 여러 번에 나눠 바꾸는 방법
+* [docs/devops.md §8](../devops.md), [POL-028·POL-041](../planning/03-policies-glossary.md): 변경 동결 창, 동결 달력, 정비 시간, 긴급 변경
+* [ADR-0054](../adr/0054-delivery-pipeline-change-freeze-and-safe-deploys.md): 이 설계를 정한 결정과 검토한 대안
+* [ADR-0074](../adr/0074-git-flow-branching-release-and-hotfix.md): 가지 규칙을 git flow로 바꾼 결정과 그 대가
 * [14편: 서버 구조와 운영](14-architecture-and-ops.md): 서버를 왜 이렇게 나눴나

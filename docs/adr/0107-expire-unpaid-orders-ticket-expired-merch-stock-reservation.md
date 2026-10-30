@@ -1,7 +1,7 @@
 # ADR-0107: 결제하지 않은 주문을 만료로 끝낸다 — 티켓 주문 EXPIRED와 굿즈 재고 예약 유효 시간(2026-10-28)
 
 - **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 높음-17 '결제하지 않고 떠난 주문이 끝나지 않는다(굿즈는 한정 재고까지 묶인다)'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향은 소유자 결정(추천안 승인)이고, 만료 조건·시간·키 이름·시험 같은 세부는 추천 적용이다. 수치는 [가정]이다. ADR-0062 결정 12·31이 정한 상태도(planning/03 §2.4·§2.13)를 보완한다)
-- **관련**: FR-011, FR-015, POL-009, POL-012, POL-013, POL-016, NFR-025, ADR-0044, ADR-0062, ADR-0085, ADR-0086, ADR-0106, planning/03 §2.2·§2.4·§2.13, [docs/features/payment.md](../features/payment.md) §3·§4.2·§10·§11, [docs/data.md](../data.md) §2·§3·§4·§5.1, docs/api/asyncapi.yaml·docs/api/avro(`OrderEvent`), docs/api/openapi.yaml(`Order.status`, `/v1/shop/orders`), planning/04 F-03·SCR-015, design/d5 §5.15, [docs/features/README.md](../features/README.md)(shop 행), wbs 2.7.1·7.1.1, [review/tech-review.md](../../review/tech-review.md)(높음-17)
+- **관련**: FR-011, FR-015, POL-009, POL-012, POL-013, POL-016, NFR-025, ADR-0044, ADR-0062, ADR-0085, ADR-0086, ADR-0106, planning/03 §2.2·§2.4·§2.13, [docs/features/payment.md](../features/payment.md) §3·§4.2·§10·§11, [docs/data.md](../data.md) §2·§3·§4·§5.1, docs/api/asyncapi.yaml·docs/api/avro(`OrderEvent`), docs/api/openapi.yaml(`Order.status`, `/v1/shop/orders`), planning/04 F-03·SCR-015, design/d5 §5.15, [docs/features/README.md](../features/README.md)(shop 행), wbs 2.7.1·7.1.1, [review/tech-review.md](../review/tech-review.md)(높음-17)
 
 ## 맥락
 

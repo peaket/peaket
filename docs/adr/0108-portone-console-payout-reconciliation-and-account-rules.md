@@ -1,7 +1,7 @@
 # ADR-0108: 포트원 콘솔로 한 사람이 돈을 내보내는 길은 사후 대사로 잡는다 — 출금 대사, 파트너 계좌 대조, 잔액 대조, 콘솔 계정 규칙(2026-10-28)
 
 - **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 높음-19 '포트원 콘솔로 2인 승인을 우회할 수 있는데 출금 대사가 없다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향은 소유자 결정(추천안 승인)이고, 기준값과 같은 세부는 추천 적용이다. 수치는 [가정]이다. ADR-0047(정산 지급은 결제사 지급대행)과 ADR-0062 결정 24(포트원 잔액은 운영자 입력)를 보완한다)
-- **관련**: FR-062, POL-038, POL-039, ADR-0044, ADR-0047(결정 5·6·9), ADR-0053(결정 5), ADR-0062(결정 24), [docs/features/settlement.md](../features/settlement.md) §4.4·§5.1·§5.3·§6·§8·§9·§10·§11·§12·§13·§14, [docs/security/asvs/settlement.md](../security/asvs/settlement.md) 2.2.3·13.2.2·16.3.3, [docs/data.md](../data.md)(`payout`·`payout_batch`·`settlement_statement`·`cs_case`), docs/api/openapi.yaml(`PayoutBatch`·`SettlementStatement`·`CsCase`), [docs/api/guidelines.md](../api/guidelines.md) §8, planning/03 §2.12, planning/01 §5.2, design/d5 §7.10과 CS 처리함 건 표, review/open-items.md 40, [review/tech-review.md](../../review/tech-review.md)(높음-19)
+- **관련**: FR-062, POL-038, POL-039, ADR-0044, ADR-0047(결정 5·6·9), ADR-0053(결정 5), ADR-0062(결정 24), [docs/features/settlement.md](../features/settlement.md) §4.4·§5.1·§5.3·§6·§8·§9·§10·§11·§12·§13·§14, [docs/security/asvs/settlement.md](../security/asvs/settlement.md) 2.2.3·13.2.2·16.3.3, [docs/data.md](../data.md)(`payout`·`payout_batch`·`settlement_statement`·`cs_case`), docs/api/openapi.yaml(`PayoutBatch`·`SettlementStatement`·`CsCase`), [docs/api/guidelines.md](../api/guidelines.md) §8, planning/03 §2.12, planning/01 §5.2, design/d5 §7.10과 CS 처리함 건 표, review/open-items.md 40, [review/tech-review.md](../review/tech-review.md)(높음-19)
 
 ## 맥락
 

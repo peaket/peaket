@@ -1,7 +1,7 @@
 # ADR-0120: 장기 지표 저장소는 Mimir 고전 구조를 그대로 둔다 — Thanos와 저장량·부품·고가용성으로 견주고, 긴 창 계산과 5분 집계의 자리를 정한다(2026-10-28)
 
 - **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 중간-022 'Mimir 선택 근거가 약하고 다운샘플링이 없어 우회 구성이 생겼다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향(4.1.1 착수 전에 Mimir와 Thanos를 견줘 새 ADR로 정하기)은 소유자 결정(추천안 승인)이고, 고른 결과와 측정 항목·바꿀 조건은 추천 적용이다. 보존 기간(원본 90일·5분 집계 13개월)은 2026-10-21 소유자 결정(ADR-0077)이라 바꾸지 않는다. 28일 에러 버짓은 Mimir `raw`(90일)의 규칙 값을 읽는다는 2026-10-28 규칙(기술 검토 높음-13)을 그대로 지킨다. 외부 사실은 2026-10-28에 각 GitHub 원문과 AWS 가격 목록으로 확인했다)
-- **관련**: ADR-0067(결정 5), ADR-0068(결정 3·6), ADR-0077(결정 2·3), ADR-0057, NFR-014, [docs/observability.md](../observability.md) §1·§4·§8·§9·§12(G-26), [docs/architecture.md](../architecture.md) §5(28일 예산 배포 잠금), docs/devops.md §5.3, docs/perf-ledger.md §11, wbs 4.1.1·4.1.2·4.8.2, [review/tech-review.md](../../review/tech-review.md)(중간-022, 높음-13)
+- **관련**: ADR-0067(결정 5), ADR-0068(결정 3·6), ADR-0077(결정 2·3), ADR-0057, NFR-014, [docs/observability.md](../observability.md) §1·§4·§8·§9·§12(G-26), [docs/architecture.md](../architecture.md) §5(28일 예산 배포 잠금), docs/devops.md §5.3, docs/perf-ledger.md §11, wbs 4.1.1·4.1.2·4.8.2, [review/tech-review.md](../review/tech-review.md)(중간-022, 높음-13)
 
 ## 맥락
 

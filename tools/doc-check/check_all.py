@@ -462,7 +462,7 @@ def check_yaml(texts, rep):
 # ---------- 1. ID 정의와 참조 ----------
 def check_ids(texts, rep):
     t = texts
-    need = ['planning/02-requirements.md', 'planning/03-policies-glossary.md', 'planning/04-ia-flows-screens.md', 'design/d2-design-system.md']
+    need = ['docs/planning/02-requirements.md', 'docs/planning/03-policies-glossary.md', 'docs/planning/04-ia-flows-screens.md', 'docs/design/d2-design-system.md']
     for n in need:
         if n not in t:
             rep.err('ids', n, '정의 파일 없음')
@@ -493,12 +493,12 @@ def check_ids(texts, rep):
     return sets
 
 
-# ---------- 1의2. FR → 시험 연결(planning/02 §2, 기술 검토 중간-005) ----------
+# ---------- 1의2. FR → 시험 연결(docs/planning/02 §2, 기술 검토 중간-005) ----------
 # 시험 행: 첫 칸이 시험 ID(예: Q-T12, FE-T3, **SR-T1**)인 표 행. 그 행 안의 FR 참조를 센다.
 TEST_ROW_RE = re.compile(r'^\| (?:\*\*)?([A-Z]{1,3}-T\d+)(?:\*\*)? \|(.*)$')
 # FR 참조와 그 뒤에 붙은 묶음(FR-005~008, FR-005~FR-008, FR-026·028~034, FR-001, 002). NFR-은 앞 글자 때문에 빠진다.
 FR_TOKEN_RE = re.compile(r'(?<![A-Za-z])FR-(\d{3})((?:\s*(?:~|·|,)\s*(?:FR-)?\d{3}(?!\d))*)')
-FR_TRACE_SKIP = ('review/', 'docs/adr/')  # 검토 기록과 ADR 본문은 시험 표가 아니다(tools/는 처음부터 읽지 않는다)
+FR_TRACE_SKIP = ('docs/review/', 'docs/adr/')  # 검토 기록과 ADR 본문은 시험 표가 아니다(tools/는 처음부터 읽지 않는다)
 
 
 def expand_fr(m):
@@ -516,9 +516,9 @@ def expand_fr(m):
 
 
 def check_frtrace(texts, rep):
-    req = texts.get('planning/02-requirements.md')
+    req = texts.get('docs/planning/02-requirements.md')
     if req is None:
-        rep.err('frtrace', 'planning/02-requirements.md', '정의 파일 없음')
+        rep.err('frtrace', 'docs/planning/02-requirements.md', '정의 파일 없음')
         return
     frs = collections.OrderedDict()  # FR ID → 정의 줄 번호
     for n, line in enumerate(req.split('\n'), 1):
@@ -541,7 +541,7 @@ def check_frtrace(texts, rep):
                         linked[fr] += 1
     for fr, n in frs.items():
         if not linked[fr]:
-            rep.err('frtrace', 'planning/02-requirements.md:%d' % n, '%s를 가리키는 시험 표 행이 없음' % fr)
+            rep.err('frtrace', 'docs/planning/02-requirements.md:%d' % n, '%s를 가리키는 시험 표 행이 없음' % fr)
     rep.info['frtrace'] = {'fr': len(frs), 'linked': sum(1 for v in linked.values() if v), 'test_rows': rows}
 
 
@@ -574,9 +574,15 @@ def check_paths(texts, rep):
     path_re = re.compile(r'(?<![\w/.-])((?:docs|planning|design|review|wbs|runbooks|tools)/[\w\-/.]+\.(?:md|yaml|json|csv|py))')
     for f, text in texts.items():
         for n, line in enumerate(text.split('\n'), 1):
+            # 링크 대상은 링크 검사(4의1)가 링크가 있는 파일 기준으로 본다. 여기서 저장소 기준으로 읽으면 틀린다
+            if f.endswith('.md'):
+                line = LINK_RE.sub(lambda m: m.group(0)[:m.start(2) - m.start()] + m.group(0)[m.end(2) - m.start():], line)
             for m in path_re.finditer(line):
                 p = m.group(1)
                 if os.path.exists(os.path.join(ROOT, p)) or p in ALLOW_PATHS:
+                    continue
+                # 2026-10-30 전 ADR 본문의 옛 경로(planning/… 등)는 docs/ 아래를 뜻한다. 본문은 고치지 않는다(ADR-0168)
+                if f.startswith('docs/adr/') and os.path.exists(os.path.join(ROOT, 'docs', p)):
                     continue
                 if '예정' in line:
                     rep.warn('paths', '%s:%d' % (f, n), '예정 문서 %s' % p)
@@ -584,7 +590,7 @@ def check_paths(texts, rep):
                     rep.err('paths', '%s:%d' % (f, n), '없는 경로 %s' % p)
 
 
-# ---------- 4의1. 링크: 절대 경로, 대상 파일, 위치 표시(review/open-items.md 32번, 소유자 결정 2026-10-30) ----------
+# ---------- 4의1. 링크: 절대 경로, 대상 파일, 위치 표시(docs/review/open-items.md 32번, 소유자 결정 2026-10-30) ----------
 # 위 경로 검사는 저장소 기준 경로 글자만 보므로 `file:///d:/…` 안의 경로와 상대 링크(`../planning/…`), `#제목`을 보지 않았다.
 CODE_SPAN_RE = re.compile(r'(`+)(.+?)\1')
 # 마크다운 인라인 링크 [글](대상 "제목")와 참조 정의 [이름]: 대상. 그림 ![글](대상)도 같은 꼴이다
@@ -793,7 +799,7 @@ def check_api(texts, rep):
     spec = {norm(q) for q in paths}
     ref_re = re.compile(r'\b(?:GET|POST|PUT|PATCH|DELETE)(?:·(?:GET|POST|PUT|PATCH|DELETE))*\s+`?(?:https://[a-z.-]+…)?(/v1/[A-Za-z0-9{}_.\-/]+)')
     for f, text in texts.items():
-        if f.startswith(('docs/adr/', 'review/')) or f == 'docs/api/openapi.yaml':
+        if f.startswith(('docs/adr/', 'docs/review/')) or f == 'docs/api/openapi.yaml':
             continue  # ADR 본문·검토 기록은 이력이라 옛 경로를 둔다(ADR-0081 대응표)
         for n, line in enumerate(text.split('\n'), 1):
             if '예전' in line or '옛 경로' in line:
@@ -1005,16 +1011,16 @@ def check_roles(texts, spec, rep):
 
 # ---------- 5. 절 번호 참조 ----------
 ALIAS = {
-    '01-overview': 'planning/01-overview.md', '02-requirements': 'planning/02-requirements.md',
-    '03-policies': 'planning/03-policies-glossary.md', '04-ia': 'planning/04-ia-flows-screens.md',
-    '04-ia-flows-screens': 'planning/04-ia-flows-screens.md',
-    'planning/01': 'planning/01-overview.md', 'planning/02': 'planning/02-requirements.md',
-    'planning/03': 'planning/03-policies-glossary.md', 'planning/04': 'planning/04-ia-flows-screens.md',
-    'design/d1': 'design/d1-brief.md', 'design/d2': 'design/d2-design-system.md', 'design/d5': 'design/d5-screen-blueprint.md', 'd5': 'design/d5-screen-blueprint.md',
-    'design/d3': 'design/d3-screens.md', 'design/d4': 'design/d4-handoff-checklist.md',
-    'd1': 'design/d1-brief.md', 'd2': 'design/d2-design-system.md', 'd3': 'design/d3-screens.md', 'd4': 'design/d4-handoff-checklist.md',
-    'review': 'review/consistency-review.md', 'wbs': 'wbs/wbs.md',
-    '00-summary': '00-summary.md', '00-diagnosis': '00-diagnosis.md',
+    '01-overview': 'docs/planning/01-overview.md', '02-requirements': 'docs/planning/02-requirements.md',
+    '03-policies': 'docs/planning/03-policies-glossary.md', '04-ia': 'docs/planning/04-ia-flows-screens.md',
+    '04-ia-flows-screens': 'docs/planning/04-ia-flows-screens.md',
+    'planning/01': 'docs/planning/01-overview.md', 'planning/02': 'docs/planning/02-requirements.md',
+    'planning/03': 'docs/planning/03-policies-glossary.md', 'planning/04': 'docs/planning/04-ia-flows-screens.md',
+    'design/d1': 'docs/design/d1-brief.md', 'design/d2': 'docs/design/d2-design-system.md', 'design/d5': 'docs/design/d5-screen-blueprint.md', 'd5': 'docs/design/d5-screen-blueprint.md',
+    'design/d3': 'docs/design/d3-screens.md', 'design/d4': 'docs/design/d4-handoff-checklist.md',
+    'd1': 'docs/design/d1-brief.md', 'd2': 'docs/design/d2-design-system.md', 'd3': 'docs/design/d3-screens.md', 'd4': 'docs/design/d4-handoff-checklist.md',
+    'review': 'docs/review/consistency-review.md', 'wbs': 'docs/wbs/wbs.md',
+    '00-summary': 'docs/00-summary.md', '00-diagnosis': 'docs/00-diagnosis.md',
 }
 
 
@@ -1022,6 +1028,9 @@ def resolve(name):
     n = name.strip('`').rstrip('.')
     if n in ALIAS:
         return ALIAS[n]
+    # 2026-10-30부터 문서는 docs/ 아래에 있다(ADR-0168). 'docs/planning/03'도 'planning/03'과 같게 푼다
+    if n.startswith('docs/') and n[5:] in ALIAS:
+        return ALIAS[n[5:]]
     cands = [n, n + '.md', 'docs/' + n, 'docs/' + n + '.md', 'docs/features/' + n, 'docs/features/' + n + '.md',
              'docs/api/' + n, 'docs/api/' + n + '.md', 'docs/security/' + n, 'docs/security/' + n + '.md']
     for c in cands:
@@ -1069,7 +1078,9 @@ def check_artifacts(texts, rep):
                 rep.err('artifacts', '%s:%d' % (f, n), "작업용 '다음:' 줄")
             if re.search(r'\bTODO\b|\bTBD\b', line):
                 rep.warn('artifacts', '%s:%d' % (f, n), 'TODO·TBD')
-            if re.search(r'\[충돌 C-\d+', line) and f.startswith(('planning/', 'design/', 'docs/')):
+            # 기획·디자인·설계 문서만 본다. 2026-10-30에 docs/ 아래로 옮긴 검토·WBS·쉬운 설명·요약은 예전처럼 빼고 본다(ADR-0168)
+            if re.search(r'\[충돌 C-\d+', line) and f.startswith('docs/') and not f.startswith(
+                    ('docs/review/', 'docs/wbs/', 'docs/guide/', 'docs/perf-ledger/', 'docs/00-summary.md', 'docs/00-diagnosis.md')):
                 rep.err('artifacts', '%s:%d' % (f, n), '해소되지 않은 [충돌] 표시(기획 v1.0은 0건)')
 
 
@@ -1133,8 +1144,8 @@ def check_asvs(texts, rep):
     rep.info['asvs_ids'] = len(seen)
 
 
-# ---------- 6의2의2. 차단 조건 목록 대조(review/open-items.md 51번, 소유자 결정 2026-10-30) ----------
-# 같은 차단 조건 목록이 정책(planning/03 §1)·상태도(planning/03 §2)·화면(planning/04 F-·SCR-)·API(openapi)에 흩어져 있다.
+# ---------- 6의2의2. 차단 조건 목록 대조(docs/review/open-items.md 51번, 소유자 결정 2026-10-30) ----------
+# 같은 차단 조건 목록이 정책(docs/planning/03 §1)·상태도(docs/planning/03 §2)·화면(docs/planning/04 F-·SCR-)·API(openapi)에 흩어져 있다.
 # API에 적힌 차단 사유 코드(대문자와 밑줄, 예: ENTRY_STARTED)를 기준으로, 각 자리에 적힌 코드 묶음이 같은지 본다.
 # 자리는 (파일, 절, 줄 머리)다. 절은 제목의 첫 낱말(예: '2.8', 'F-11')이고 그 제목 아래 다음 같은·높은 단계 제목 전까지를 본다.
 # 줄 머리가 있으면 그 절에서 이 글자로 시작하는 첫 줄만, 없으면 절 전체(그림 포함)를 본다.
@@ -1142,19 +1153,19 @@ def check_asvs(texts, rep):
 BLOCKER_LISTS = (
     {'name': '계정 병합 차단 사유',
      'api': ('schema', 'MergeProposal', 'blockers'),
-     'places': (('planning/03-policies-glossary.md', '1.', '| POL-034 |'),
-                ('planning/03-policies-glossary.md', '2.8', '| T9 |'),
-                ('planning/04-ia-flows-screens.md', 'F-11', None),
-                ('planning/04-ia-flows-screens.md', '3.1', '| SCR-040 |'),
+     'places': (('docs/planning/03-policies-glossary.md', '1.', '| POL-034 |'),
+                ('docs/planning/03-policies-glossary.md', '2.8', '| T9 |'),
+                ('docs/planning/04-ia-flows-screens.md', 'F-11', None),
+                ('docs/planning/04-ia-flows-screens.md', '3.1', '| SCR-040 |'),
                 ('docs/features/identity.md', '2.1', '- 계정 병합 차단 사유'),
-                ('design/d5-screen-blueprint.md', '5.22', '| blocked |'))},
+                ('docs/design/d5-screen-blueprint.md', '5.22', '| blocked |'))},
     {'name': '입장 중 소유권 동결(양도 수락·돌려주기)',
      'api': ('409', (('POST', '/v1/transfers/{offerId}/acceptance'), ('POST', '/v1/tickets/{ticketId}/returns'))),
-     'places': (('planning/03-policies-glossary.md', '1.', '| POL-017 |'),
-                ('planning/03-policies-glossary.md', '2.5', '| T8 |'),
-                ('planning/03-policies-glossary.md', '2.5', '| T9 |'),
-                ('planning/04-ia-flows-screens.md', '3.1', '| SCR-013 |'),
-                ('planning/04-ia-flows-screens.md', '3.1', '| SCR-041 |'))},
+     'places': (('docs/planning/03-policies-glossary.md', '1.', '| POL-017 |'),
+                ('docs/planning/03-policies-glossary.md', '2.5', '| T8 |'),
+                ('docs/planning/03-policies-glossary.md', '2.5', '| T9 |'),
+                ('docs/planning/04-ia-flows-screens.md', '3.1', '| SCR-013 |'),
+                ('docs/planning/04-ia-flows-screens.md', '3.1', '| SCR-041 |'))},
 )
 BLOCKER_CODE_RE = re.compile(r'(?<![A-Za-z0-9_])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![A-Za-z0-9_])')
 
@@ -1255,7 +1266,7 @@ def count_markers(texts, rep, out_path=None):
     for f, text in texts.items():
         c = collections.Counter({k: text.count(k) for k in MARKERS})
         tot_all.update(c)
-        if f not in ('00-summary.md', 'review/consistency-review.md', 'review/tech-review.md'):
+        if f not in ('docs/00-summary.md', 'docs/review/consistency-review.md', 'docs/review/tech-review.md'):
             tot_core.update(c)
         if out_path:
             for n, line in enumerate(text.split('\n'), 1):
@@ -1272,11 +1283,11 @@ def count_markers(texts, rep, out_path=None):
 
 # ---------- 8. WBS ----------
 def check_wbs(texts, rep):
-    md = texts.get('wbs/wbs.md')
-    if md is None or not os.path.exists(os.path.join(ROOT, 'wbs', 'wbs.csv')):
-        rep.err('wbs', 'wbs/', 'wbs.md 또는 wbs.csv 없음')
+    md = texts.get('docs/wbs/wbs.md')
+    if md is None or not os.path.exists(os.path.join(ROOT, 'docs', 'wbs', 'wbs.csv')):
+        rep.err('wbs', 'docs/wbs/', 'wbs.md 또는 wbs.csv 없음')
         return
-    with io.open(os.path.join(ROOT, 'wbs', 'wbs.csv'), encoding='utf-8', newline='') as fh:
+    with io.open(os.path.join(ROOT, 'docs', 'wbs', 'wbs.csv'), encoding='utf-8', newline='') as fh:
         rows = list(csv.DictReader(fh))
     est = {r['WBS ID']: (r['레벨'], float(r['추정(일)'])) for r in rows}
     for r in rows:
@@ -1302,9 +1313,9 @@ def check_wbs(texts, rep):
 
 # ---------- 9. 기획 버전 ----------
 def check_versions(texts, rep):
-    plan = re.search(r'\*\*기획 버전\*\*: (v\d+\.\d+)', texts.get('planning/01-overview.md', ''))
+    plan = re.search(r'\*\*기획 버전\*\*: (v\d+\.\d+)', texts.get('docs/planning/01-overview.md', ''))
     if not plan:
-        rep.err('versions', 'planning/01-overview.md', '기획 버전 줄 없음')
+        rep.err('versions', 'docs/planning/01-overview.md', '기획 버전 줄 없음')
         return
     v = plan.group(1)
     for f, text in texts.items():
@@ -1315,7 +1326,7 @@ def check_versions(texts, rep):
 
 
 # ---------- 10. mermaid 그림 ----------
-# 그림 쓰기 규칙은 planning/03 §5.5(ADR-0138). 문법은 리더기와 같은 mermaid 버전(tools/doc-check/mermaid/package.json)으로 읽는다.
+# 그림 쓰기 규칙은 docs/planning/03 §5.5(ADR-0138). 문법은 리더기와 같은 mermaid 버전(tools/doc-check/mermaid/package.json)으로 읽는다.
 MERMAID_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mermaid')
 MERMAID_LINE_KINDS = ('flowchart', 'graph', 'stateDiagram')  # 선 수·라벨 길이를 보는 그림
 MERMAID_MAX_EDGES = 25
@@ -1365,25 +1376,25 @@ def check_mermaid(texts, rep):
         r = results[b['id']]
         where = '%s:%d' % (b['file'], b['line'])
         if len(b['code']) > MERMAID_MAX_TEXT:
-            rep.err('mermaid', where, '그림 글자 수 %d자(mermaid 기본 한도 %d자를 넘어 그려지지 않는다. 나눠 그린다, planning/03 §5.5)'
+            rep.err('mermaid', where, '그림 글자 수 %d자(mermaid 기본 한도 %d자를 넘어 그려지지 않는다. 나눠 그린다, docs/planning/03 §5.5)'
                     % (len(b['code']), MERMAID_MAX_TEXT))
         if not r['ok']:
             rep.err('mermaid', where, '문법 오류: %s' % r['error'])
             continue
         if r['type'].startswith('c4'):
             # C4 문법은 자동 배치 없이 곧은 선으로 그려 상자를 가로지른다. C4 표기를 라벨에 남긴 흐름도로 그린다
-            rep.warn('mermaid', where, 'C4 문법(%s)은 자동 배치가 없어 선이 상자를 가로지른다. 흐름도로 그린다(planning/03 §5.5)' % r['type'])
+            rep.warn('mermaid', where, 'C4 문법(%s)은 자동 배치가 없어 선이 상자를 가로지른다. 흐름도로 그린다(docs/planning/03 §5.5)' % r['type'])
         if r['edges'] is None or not r['type'].startswith(MERMAID_LINE_KINDS):
             continue
         edges = r['edges']
         if len(edges) > MERMAID_MAX_EDGES:
             over += 1
             if not MERMAID_EDGE_EXCEPTION_RE.search(b['code']):
-                rep.warn('mermaid', where, '선 %d개(그림 하나에 %d개 이하, 넘으면 나누거나 `%%%% 선 수 예외:`에 이유, planning/03 §5.5)'
+                rep.warn('mermaid', where, '선 %d개(그림 하나에 %d개 이하, 넘으면 나누거나 `%%%% 선 수 예외:`에 이유, docs/planning/03 §5.5)'
                          % (len(edges), MERMAID_MAX_EDGES))
         long_labels = [e for e in edges if len(e) > MERMAID_MAX_LABEL]
         if long_labels:
-            rep.warn('mermaid', where, '%d자를 넘는 선 라벨 %d개(조건은 그림 아래 표로, planning/03 §5.5): %s'
+            rep.warn('mermaid', where, '%d자를 넘는 선 라벨 %d개(조건은 그림 아래 표로, docs/planning/03 §5.5): %s'
                      % (MERMAID_MAX_LABEL, len(long_labels), long_labels[0][:40]))
         codes = {m.group(1) for e in edges for m in [MERMAID_CODE_RE.match(e)] if m}
         if codes:
@@ -1395,7 +1406,7 @@ def check_mermaid(texts, rep):
                 after.append(line)
             rows = {m.group(1) for line in after for m in [re.match(r'^\| (?:\*\*)?([A-Z]\d{1,2})(?:\*\*)? \|', line)] if m}
             for c in sorted(codes - rows, key=lambda x: (x[0], int(x[1:]))):
-                rep.err('mermaid', where, '선 라벨의 번호 %s가 그림 아래 표에 없음(planning/03 §5.5)' % c)
+                rep.err('mermaid', where, '선 라벨의 번호 %s가 그림 아래 표에 없음(docs/planning/03 §5.5)' % c)
     rep.info['mermaid'] = {'blocks': len(blocks), 'checked': len(results), 'over_edges': over}
 
 

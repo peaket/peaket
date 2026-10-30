@@ -1,7 +1,7 @@
 # ADR-0114: 주문·결제·티켓과 그 자식 표는 파티션하지 않고, 보존 기한이 지난 행은 정비 잡이 나눠 지운다 — ADR-0028 결정 3 다시 보기(2026-10-28)
 
 - **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 중간-011 '주문·결제·티켓의 월 파티션은 지금 크기에서 이득을 보인 근거가 없다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 검토가 낸 안 A(나누지 않고 나눠 지우기)와 안 B(나누고 pg_partman에 맡기기) 가운데 안 A를 골랐다(추천 적용, 고른 이유는 결정 1). 방향은 소유자 결정(추천안 승인)이고, 묶음 크기·정비 시간·지키는 선·경보·시험 같은 세부는 추천 적용이다. 수치는 [가정]이다)
-- **관련**: ADR-0028(결정 3을 대신한다), ADR-0083(결정 1의 이유 ⑤, 결정 2 ①~③), ADR-0086(결정 4 ①), ADR-0087(scan_event 보존 기준), ADR-0037(Drizzle), ADR-0054(마이그레이션 규칙), ADR-0107(주문 만료 안전망 쿼리), ADR-0109(`notification_delivery`), ADR-0116(Outbox 일 파티션), FR-044, [docs/data.md](../data.md) §2·§5.1·§5.2·§6, [docs/devops.md](../devops.md) §7.2, [docs/features/payment.md](../features/payment.md) §10, [docs/features/offline-gate.md](../features/offline-gate.md) §10, [docs/infra-handover.md](../infra-handover.md) §3.2, [docs/verification.md](../verification.md) §9(V-T29), planning/01 §5.2, wbs 0.3.2·2.12.1, [review/tech-review.md](../../review/tech-review.md)(중간-011)
+- **관련**: ADR-0028(결정 3을 대신한다), ADR-0083(결정 1의 이유 ⑤, 결정 2 ①~③), ADR-0086(결정 4 ①), ADR-0087(scan_event 보존 기준), ADR-0037(Drizzle), ADR-0054(마이그레이션 규칙), ADR-0107(주문 만료 안전망 쿼리), ADR-0109(`notification_delivery`), ADR-0116(Outbox 일 파티션), FR-044, [docs/data.md](../data.md) §2·§5.1·§5.2·§6, [docs/devops.md](../devops.md) §7.2, [docs/features/payment.md](../features/payment.md) §10, [docs/features/offline-gate.md](../features/offline-gate.md) §10, [docs/infra-handover.md](../infra-handover.md) §3.2, [docs/verification.md](../verification.md) §9(V-T29), planning/01 §5.2, wbs 0.3.2·2.12.1, [review/tech-review.md](../review/tech-review.md)(중간-011)
 
 ## 맥락
 

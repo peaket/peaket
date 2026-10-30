@@ -38,7 +38,7 @@ enum ControlKind {
   CONTROL_KIND_LOBBY_BANNER = 5;
   // 명령 11 입장 제어 자동화 긴급 정지(admission-ctrl)
   CONTROL_KIND_AUTOMATION_STOP = 6;
-  // 판매 승인의 판매 중지(planning/03 §2.14, ADR-0123). 명령 3과 같은 효과를 회차 범위로 따로 건다(admission-ctrl·purchase-svc·queue-svc).
+  // 판매 승인의 판매 중지(docs/planning/03 §2.14, ADR-0123). 명령 3과 같은 효과를 회차 범위로 따로 건다(admission-ctrl·purchase-svc·queue-svc).
   // 명령 3의 재개로는 풀리지 않고 판매 재개로만 풀린다. command_id는 승인 업무 ID, 바라는 상태는 {"suspended": true}다.
   CONTROL_KIND_SALE_SUSPENSION = 7;
   // 명령 6 가운데 대체 결제사 전환(payment-svc 준비된 모든 파드·admission-ctrl 리더, 추천 적용 2026-10-29, ADR-0143 결정 1).

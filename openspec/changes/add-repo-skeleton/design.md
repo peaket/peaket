@@ -28,7 +28,7 @@
 1. **폴더 자리는 짧은 안내 파일로 만든다.** `apps/`, `services/`, `packages/`, `data/`, `infra/`에 `README.md`를 두고, 무엇을 담는지 한두 줄과 정본 링크(architecture §10, 해당 WBS)만 적는다. 내용을 정본에서 옮겨 적지 않는다(문서는 한 흐름).
    - 대안: `.gitkeep`. 저장소를 처음 보는 사람이 폴더의 뜻을 모른다. 기각.
 2. **팀 목록은 파일 하나가 정본이다.** `infra/stacks/global/github/teams.json`에 가상 팀 아홉(이름표, 표시 이름, 팀 유형)을 둔다. Terraform은 `jsondecode(file(...))`로 읽어 팀을 만들고, CODEOWNERS 시험은 같은 파일을 읽어 CODEOWNERS의 팀이 모두 그 목록에 있는지 본다.
-   - 팀 이름표: `queue`, `purchase`, `ticketing`, `commerce`, `frontend-platform`, `platform`, `data`, `bot-detection`, `architecture`(planning/01 §3.3의 아홉).
+   - 팀 이름표: `queue`, `purchase`, `ticketing`, `commerce`, `frontend-platform`, `platform`, `data`, `bot-detection`, `architecture`(docs/planning/01 §3.3의 아홉).
    - 대안: Terraform이 CODEOWNERS 파일을 저장소에 직접 쓰기(`github_repository_file`). 봇 커밋이 PR 없이 `develop`에 들어가 규칙 세트와 부딪힌다. 기각.
 3. **CODEOWNERS는 마지막에 맞는 줄이 이긴다는 규칙을 따라, 넓은 것에서 좁은 것 순서로 쓴다.**
    - `*` → 아키텍처 팀. 문서 폴더·`tools/`·`openspec/`·계약 원본(`docs/api/`)이 이 팀이다.
@@ -44,7 +44,7 @@
 5. **판 고정**: `required_version = "~> 1.16"`, 제공자 `integrations/github` `~> 6.13`(정본의 하한 6.10.0 이상). 제공자 잠금 파일(`.terraform.lock.hcl`)은 Windows·Linux·macOS(arm64) 해시를 담아 커밋한다(`terraform providers lock -platform=…`). CI 러너는 Linux라서다.
 6. **상태는 지금은 로컬, wbs 0.4.2에서 S3로 옮긴다.**
    - 지금 코드에는 백엔드 블록을 두지 않는다(기본은 로컬). 0.4.2에서 `backend.tf`(S3, `use_lockfile`)를 더하고 `terraform init -migrate-state`로 옮긴다.
-   - 조직 설정은 CI보다 먼저 서야 하고(0.1.1 → 0.1.2), 상태 버킷은 기반 작업 순서상 뒤에 온다(planning/01 '증명 순서'). 그래서 처음 적용은 로컬 상태로 한다. 상태 파일(`*.tfstate*`)은 `.gitignore`에 넣는다.
+   - 조직 설정은 CI보다 먼저 서야 하고(0.1.1 → 0.1.2), 상태 버킷은 기반 작업 순서상 뒤에 온다(docs/planning/01 '증명 순서'). 그래서 처음 적용은 로컬 상태로 한다. 상태 파일(`*.tfstate*`)은 `.gitignore`에 넣는다.
    - 대안: 부분 백엔드 설정(`backend "s3" {}`)을 지금 두기. 버킷이 없어 적용할 수 없다. 기각.
 7. **규칙 세트의 값**(devops §2.2.6)
    - 필수 검사 이름을 여기서 정한다: `ci-summary`, `branch-policy`(ADR-0165), `main`에는 `merge-tree`도 둔다(병합 결과 트리 검사, §2.2.4). wbs 0.1.2의 잡 이름은 이것과 같아야 한다.

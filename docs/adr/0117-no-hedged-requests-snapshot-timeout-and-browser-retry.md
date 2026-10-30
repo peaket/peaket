@@ -1,7 +1,7 @@
 # ADR-0117: 헤지 요청을 쓰지 않는다 — 좌석 스냅샷 재요청은 시간 초과와 브라우저의 `Retry-After` 재요청으로 처리한다(2026-10-28)
 
 - **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 중간-017 '헤지 요청은 학습 지도에서 왔고 보내는 주체와 전제가 맞지 않는다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향은 소유자 결정(추천안 승인)이고, 재요청 규칙과 시험 같은 세부는 추천 적용이다. ADR-0009 결정 3의 '헤지 요청은 순수 멱등적 읽기(좌석 스냅샷)에만 국한한다'와 ADR-0087 결정 21의 '구매 세션이 열린 뒤의 재요청만 헤지한다'를 이 ADR로 대신한다)
-- **관련**: ADR-0009(결정 1·3), ADR-0079, ADR-0082, ADR-0087(결정 21), ADR-0097, FR-009, NFR-004, NFR-012, [docs/features/seat-hold.md](../features/seat-hold.md) §2·§8·§12, [docs/frontend.md](../frontend.md) §3.5·§4.1·§4.4.2·§5.17, docs/api/openapi.yaml(`/v1/events/{eventId}/seatmap-snapshot`), [docs/architecture.md](../architecture.md) §5, [docs/observability.md](../observability.md) §6, planning/01 §3.1, [review/tech-review.md](../../review/tech-review.md)(중간-017)
+- **관련**: ADR-0009(결정 1·3), ADR-0079, ADR-0082, ADR-0087(결정 21), ADR-0097, FR-009, NFR-004, NFR-012, [docs/features/seat-hold.md](../features/seat-hold.md) §2·§8·§12, [docs/frontend.md](../frontend.md) §3.5·§4.1·§4.4.2·§5.17, docs/api/openapi.yaml(`/v1/events/{eventId}/seatmap-snapshot`), [docs/architecture.md](../architecture.md) §5, [docs/observability.md](../observability.md) §6, planning/01 §3.1, [review/tech-review.md](../review/tech-review.md)(중간-017)
 
 ## 맥락
 

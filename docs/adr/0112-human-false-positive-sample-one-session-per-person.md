@@ -1,7 +1,7 @@
 # ADR-0112: 사람 오탐 판정의 단위를 사람으로 한다 — 판정 세션은 1인 1세션이고, 나머지 세션은 층별 참고와 사람 안 상관에만 쓴다(2026-10-28)
 
 - **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 높음-29 '사람 오탐 판정 표본 947개가 한 사람 5세션이라, 오탐 상한 0.5%의 독립 전제가 깨진다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향은 소유자 결정(추천안 승인)이고, 기준값과 같은 세부는 추천 적용이다. 검토는 안 A(1인 1세션)와 안 B(1인 2세션과 사람 단위 상한)를 함께 냈고 하나를 고르지 않았다. 안 A를 고른 것은 추천 적용이다(결정 1, '검토한 대안'). [ADR-0048](0048-bot-evaluation-sample-tiers-cost.md)의 결정 1·2를 보완한다) 2026-10-28(기술 검토 낮음-033, 소유자 승인 '추천안 동의'): 맥락 '배정의 빈틈'의 회차별 기기 공유 신호 키 `tr:{event:E}:devshare`는 `tr:devshare:{deviceRef}:E`로 이름이 바뀌었다. 해시 태그를 회차가 아니라 기기 가명에 두고, 자료형은 Set으로 정확히 센다(docs/data.md §3). 신호의 뜻과 배정 규칙은 그대로다.
-- **관련**: FR-039, NFR-022, POL-026, K6, ADR-0039, ADR-0048, [docs/perf-ledger.md](../perf-ledger.md) §10.1·§10.5, [docs/features/queue-admission.md](../features/queue-admission.md) Q-T20, [docs/security/asvs/bot-defense.md](../security/asvs/bot-defense.md), [docs/verification.md](../verification.md) V-T25, [docs/security/data-classification.md](../security/data-classification.md), planning/01 §3.1 K6·§5.2, planning/02 NFR-022, wbs 1.2.2, tools/perf-ledger, [review/tech-review.md](../../review/tech-review.md)(높음-29)
+- **관련**: FR-039, NFR-022, POL-026, K6, ADR-0039, ADR-0048, [docs/perf-ledger.md](../perf-ledger.md) §10.1·§10.5, [docs/features/queue-admission.md](../features/queue-admission.md) Q-T20, [docs/security/asvs/bot-defense.md](../security/asvs/bot-defense.md), [docs/verification.md](../verification.md) V-T25, [docs/security/data-classification.md](../security/data-classification.md), planning/01 §3.1 K6·§5.2, planning/02 NFR-022, wbs 1.2.2, tools/perf-ledger, [review/tech-review.md](../review/tech-review.md)(높음-29)
 
 ## 맥락
 

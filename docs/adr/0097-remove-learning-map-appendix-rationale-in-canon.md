@@ -1,7 +1,7 @@
 # ADR-0097: 학습 지도 부록을 설계 근거로 쓰지 않고 없앤다 — 기술을 고른 이유와 일부러 쓰지 않은 기술은 정본에 두고, OWASP Top 10 대응 표는 architecture §8.1로 옮긴다(2026-10-27)
 
 - **상태**: 채택 (2026-10-27. 기술 검토(review/tech-review.md)의 높음-03 '학습 지도(부록)가 설계 근거처럼 쓰이고, 오버엔지니어링 비판 대응 문장이 사실과 다르다'에 소유자가 "'학습 지도(부록)'를 대안 기각 근거로 내세우는 역효과에 대해 동의합니다. 이거는 처음에 프로젝트를 기획할때 요구했던 부분이긴 한데 어느정도만 활용되었으면 끼워맞출 필요 없습니다. 색인에 맞춰 끼워맞추고 기술을 억지로 욱여넣는거보다 중요한건 합리적으로 이 기술을 선택한 이유를 면접관에게 설명할수 있어야 하는것입니다. 그래서 색인 문서도 최종적으로는 없애는게 맞습니다. 동의안대로 가겠습니다."라고 정했다. 부록을 없애고 학습 목록에 끼워 맞추지 않는다는 방향은 소유자 결정이고, 옮길 곳, 표의 칸, 약속했던 확인 실험의 처리는 추천 적용이다). 2026-10-27(ADR-0098): 같은 날 원문 설계서도 archive/에서 지워 git 태그 `archive-original`에만 남겼다. 본문이 말하는 'archive/의 원문'과 '원문 §11~13'은 그 태그에서 읽는다.
-- **관련**: 원 요구 조건 1(review/consistency-review.md §8), planning/01 §5.2, [docs/architecture.md](../architecture.md) §6.1·§8.1·§11, ADR-0004, ADR-0018, ADR-0019, ADR-0021, ADR-0067, ADR-0068, ADR-0090, ADR-0096, review/open-items.md 5번, 00-summary §7 질문 48, [review/tech-review.md](../../review/tech-review.md)(높음-03, 중간-065)
+- **관련**: 원 요구 조건 1(review/consistency-review.md §8), planning/01 §5.2, [docs/architecture.md](../architecture.md) §6.1·§8.1·§11, ADR-0004, ADR-0018, ADR-0019, ADR-0021, ADR-0067, ADR-0068, ADR-0090, ADR-0096, review/open-items.md 5번, 00-summary §7 질문 48, [review/tech-review.md](../review/tech-review.md)(높음-03, 중간-065)
 
 ## 맥락
 

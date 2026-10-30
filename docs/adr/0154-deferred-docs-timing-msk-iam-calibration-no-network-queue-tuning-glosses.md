@@ -1,7 +1,7 @@
 # ADR-0154: 미룬 문서 가운데 지금 쓸 것을 가르고, 카프카 재인증은 선택 보정에서 확인하며, 네트워크 큐는 튜닝하지 않고 측정 무효 규칙만 두고, 사라진 용어 풀이를 되살린다(소유자 결정, 2026-10-30)
 
 - **상태**: 채택 (2026-10-30. 소유자가 review/open-items.md의 남은 결정 묶음(17~20·24·29·30·42번)을 정했다. 42·30·17~20·29번은 추천을 "추천대로"라고 정했다. 24번은 "네트워크 큐는 실제로 필요할까요?"라고 물었고, 정본을 다시 보고 낸 새 추천을 "추천대로 가겠습니다"라고 정했다. 네 방향은 소유자 결정이다. 측정 규칙의 카운터와 문구, 보정의 규모와 시간, 지금 쓸 문서와 나중에 쓸 문서를 가른 구체 목록은 추천 적용이다.)
-- **관련**: ADR-0057(검증 전략, 선택 보정), ADR-0084·0090(C4 3단계 그림), ADR-0089('남는 한계'의 굿즈 주문 본문), ADR-0097·0098(원문은 판단 근거가 아님), ADR-0144 결정 7(엣지에서 끝난 실패를 SLO에 더함), ADR-0151(품질 목표 순서), [docs/verification.md](../verification.md) §3.5·§6, [docs/streaming.md](../streaming.md) ST-T14, [docs/features/README.md](../features/README.md), [00-summary.md](../../00-summary.md) §9, [docs/architecture.md](../architecture.md) §3.3, [planning/03-policies-glossary.md](../../planning/03-policies-glossary.md) §5
+- **관련**: ADR-0057(검증 전략, 선택 보정), ADR-0084·0090(C4 3단계 그림), ADR-0089('남는 한계'의 굿즈 주문 본문), ADR-0097·0098(원문은 판단 근거가 아님), ADR-0144 결정 7(엣지에서 끝난 실패를 SLO에 더함), ADR-0151(품질 목표 순서), [docs/verification.md](../verification.md) §3.5·§6, [docs/streaming.md](../streaming.md) ST-T14, [docs/features/README.md](../features/README.md), [00-summary.md](../00-summary.md) §9, [docs/architecture.md](../architecture.md) §3.3, [planning/03-policies-glossary.md](../planning/03-policies-glossary.md) §5
 
 ## 맥락
 

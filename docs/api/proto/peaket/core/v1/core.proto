@@ -6,7 +6,7 @@
 // 그 정본: docs/features/identity.md §2.1·POL-034(계정 병합 막는 사유), docs/api/openapi.yaml `/v1/ops/cases*`·`CsCaseDetail`·`CaseReply`·`InquiryMessage`,
 // `/v1/ops/home-layout*`·`HomeLayout`, `/v1/ops/artists*`·`/v1/ops/places*`·`/v1/ops/productions/{productionId}/aliases`,
 // docs/data.md 고객 문의(`inquiry`·`inquiry_message`)·홈 구성·`review_image`·`content_report`, POL-044·POL-045, ADR-0063·0066·0093·0094.
-// BookingRestrictionViewService는 2026-10-30에 더했다(예매 제한의 화면용 사본, 추천 적용 2026-10-30, design/d5 §1.6 21번).
+// BookingRestrictionViewService는 2026-10-30에 더했다(예매 제한의 화면용 사본, 추천 적용 2026-10-30, docs/design/d5 §1.6 21번).
 syntax = "proto3";
 
 package peaket.core.v1;
@@ -23,7 +23,7 @@ enum SaleReviewResult {
   SALE_REVIEW_RESULT_UNSPECIFIED = 0;
   SALE_REVIEW_RESULT_APPROVED = 1;
   SALE_REVIEW_RESULT_REJECTED = 2;
-  // 판매 중지(planning/03 §2.14, ADR-0123). 승인 업무 SALE_SUSPENSION(2인)을 실행할 때 부른다. reason을 꼭 채운다.
+  // 판매 중지(docs/planning/03 §2.14, ADR-0123). 승인 업무 SALE_SUSPENSION(2인)을 실행할 때 부른다. reason을 꼭 채운다.
   // 한 트랜잭션으로 비공개·검색 읽기 모델과 홈에서 빼기·오픈 예약 멈춤·기다리던 변경분 거두기를 쓴다. 판매를 막는 제어 상태는 ops-svc가 따로 건다.
   SALE_REVIEW_RESULT_SUSPENDED = 3;
   // 판매 재개(승인 업무 SALE_RESUMPTION). 마지막 승인 내용으로 다시 공개한다. 5~8은 채우지 않는다.
@@ -228,7 +228,7 @@ message CheckAccountMergeResponse {
 }
 
 // 부르는 쪽: ops-svc만(CS 처리함 상세 SCR-045의 문의 건, ADR-0148 결정 7).
-// ops-svc가 권한(planning/03 §3 'CS 처리함' 행)과 감사 기록을 처리한 뒤 관리 계정 ID(acted_by)를 실어 부른다.
+// ops-svc가 권한(docs/planning/03 §3 'CS 처리함' 행)과 감사 기록을 처리한 뒤 관리 계정 ID(acted_by)를 실어 부른다.
 // core-svc support 모듈은 관리 권한을 다시 판정하지 않고, 웨이포인트 허용 목록으로 ops-svc만 받는다.
 // 대상은 문의가 이어진 건(INQUIRY와 문의로 접수한 DISPUTE·MINOR_CONTRACT_CANCEL)이고, inquiry_id는 그 CS 건의 target_ref다.
 // 바꾸는 호출은 request_id(ops-svc 감사 기록 ID)로 멱등하다. 같은 request_id에 다른 내용이 오면 ALREADY_EXISTS다.
@@ -768,7 +768,7 @@ message SetProductionAliasesResponse {
 
 // 부르는 쪽: ops-svc만(승인 업무 '예매 제한'의 실행 T14 뒤, 소명 인정·끝 시각으로 풀릴 때, 작업 워커의 다시 보내기).
 // 초안(소유자 결정 2026-10-30 open-items 75번의 화면 쪽, 계약 모양은 추천 적용 2026-10-30), 정본은 docs/features/queue-admission.md §6 '예매 제한 확인'.
-// core-svc support 모듈은 세션·캐시 Redis sup:rst:{account}에 화면용 사본을 두고 팬의 GET /v1/booking-restrictions/me에 답한다(design/d5 §1.6 21번).
+// core-svc support 모듈은 세션·캐시 Redis sup:rst:{account}에 화면용 사본을 두고 팬의 GET /v1/booking-restrictions/me에 답한다(docs/design/d5 §1.6 21번).
 // 집행 사본이 아니다. 입장 확정(queue-svc)과 주문 생성(purchase-svc)은 각자의 BookingRestrictionService 사본으로 막고,
 // ops-svc는 그 두 곳의 반영으로 실행(T14)을 끝낸다. 이 호출이 실패해도 실행은 끝나고, 작업 워커가 실패한 호출과 10분 [가정]마다의 ACTIVE를 다시 보낸다.
 // 판 번호가 저장한 판보다 클 때만 반영한다(queue.proto BookingRestrictionService와 같은 규칙). 데드라인은 1초 [가정]이다.
