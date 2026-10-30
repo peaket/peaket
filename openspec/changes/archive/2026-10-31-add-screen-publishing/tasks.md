@@ -21,8 +21,10 @@
 
 ## 4. 정본 반영과 통합 확인
 
-- [ ] 4.1 ADR-0170을 쓰고 정본에 반영한다: BUILD_ORDER(새 단계 줄과 겹치는 단계의 설명), PROGRESS 진행 로그, wbs(해당 행 비고·CSV), docs/frontend.md(구현 위치), asvs/frontend.md(구현 위치), apps·packages README, 00-summary §4, consistency-review R 행. 확인: 문서 점검 오류 0.
-- [ ] 4.2 전체를 한 번에 확인한다: `pnpm turbo run typecheck build`, `node --test "tools/ci/*.test.mjs"`, 저장소 규칙 검사 셋, OpenSpec 검증, 새 파일의 줄바꿈 LF. 확인: 모두 통과한다.
+- [x] 4.1 ADR-0170을 쓰고 정본에 반영한다: BUILD_ORDER(새 단계 줄과 겹치는 단계의 설명), PROGRESS 진행 로그, wbs(해당 행 비고·CSV), docs/frontend.md(구현 위치), asvs/frontend.md(구현 위치), apps·packages README, 00-summary §4, consistency-review R 행. 확인: 문서 점검 오류 0.
+- [x] 4.2 전체를 한 번에 확인한다: `pnpm turbo run typecheck build`, `node --test "tools/ci/*.test.mjs"`, 저장소 규칙 검사 셋, OpenSpec 검증, 새 파일의 줄바꿈 LF. 확인: 모두 통과한다.
+
+> 4.1의 BUILD_ORDER·PROGRESS·00-summary §4·consistency-review 행은 감독 루프가 같은 파일을 동시에 고치므로, 이 가지를 `develop`에 병합한 직후 `develop`에서 그 줄만 따로 커밋한다(design.md 결정 2).
 
 ## Workflow follow-up
 
