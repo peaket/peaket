@@ -1,0 +1,18 @@
+/* 스캐너가 가장 먼저 싣는 CSS(packages/ds/README.md 'CSS 싣기' 순서 그대로). 층 순서 선언이 맨 앞이어야 한다(d2 §1). */
+@layer theme, base, seed-base, seed-components, components, utilities;
+@import "tailwindcss";
+@import "@peaket/ds/styles.css";
+@source "../../../../packages/ds/src";
+
+/* 스캐너 셸(.ss)이 화면 높이를 다 쓰게 한다. 스캐너는 라이트 고정이라 .dark를 두지 않는다(d1 §4). */
+@layer base {
+  html,
+  body {
+    min-height: 100%;
+  }
+  #root {
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+}

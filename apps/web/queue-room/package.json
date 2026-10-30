@@ -1,0 +1,18 @@
+{
+  "name": "@peaket/queue-room",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "대기실 경량 페이지(프레임워크 없음, Vite 8 빌드, docs/frontend.md §5.1)",
+  "scripts": {
+    "dev": "vite --port 3004",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@peaket/ds": "workspace:*",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  }
+}

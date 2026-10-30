@@ -1,0 +1,230 @@
+/*
+ * 이 파일은 손으로 고치지 않는다. docs/design/tokens.json에서 만든다.
+ * 다시 만들기: pnpm --filter @peaket/ds tokens (차이 검사: tokens:check)
+ */
+/*
+ * 피켓 CSS는 모두 components 층에 둔다(d2 §1 'CSS 층 순서'). SEED base(seed-base 층)보다 뒤 층이라
+ * 같은 이름의 --seed-* 변수를 덮어쓴다. 다크 선택자는 SEED와 같다(색 모드 스크립트가 html에 단 속성).
+ */
+@layer components {
+  :root {
+    --peaket-font-family-sans: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --peaket-font-family-mono: 'JetBrains Mono', ui-monospace, monospace;
+    --peaket-font-size-xs: 0.75rem;
+    --peaket-font-size-sm: 0.875rem;
+    --peaket-font-size-md: 1rem;
+    --peaket-font-size-lg: 1.25rem;
+    --peaket-font-size-xl: 1.5rem;
+    --peaket-font-size-2xl: 2rem;
+    --peaket-font-size-display: 3rem;
+    --peaket-line-height-xs: 1rem;
+    --peaket-line-height-sm: 1.1875rem;
+    --peaket-line-height-md: 1.375rem;
+    --peaket-line-height-lg: 1.6875rem;
+    --peaket-line-height-xl: 2rem;
+    --peaket-line-height-2xl: 2.625rem;
+    --peaket-line-height-display: 3.75rem;
+    --peaket-font-weight-regular: 400;
+    --peaket-font-weight-medium: 500;
+    --peaket-font-weight-bold: 700;
+    --peaket-space-0_5: 2px;
+    --peaket-space-1: 4px;
+    --peaket-space-1_5: 6px;
+    --peaket-space-2: 8px;
+    --peaket-space-3: 12px;
+    --peaket-space-4: 16px;
+    --peaket-space-5: 20px;
+    --peaket-space-6: 24px;
+    --peaket-space-8: 32px;
+    --peaket-space-10: 40px;
+    --peaket-space-12: 48px;
+    --peaket-space-14: 56px;
+    --peaket-space-16: 64px;
+    --peaket-space-global-gutter: 16px;
+    --peaket-space-component-default: 12px;
+    --peaket-space-nav-to-title: 20px;
+    --peaket-space-screen-bottom: 56px;
+    --peaket-space-between-chips: 8px;
+    --peaket-space-between-text: 6px;
+    --peaket-size-touch-target-min: 24px;
+    --peaket-size-touch-target-mobile-primary: 44px;
+    --peaket-radius-sm: 4px;
+    --peaket-radius-md: 8px;
+    --peaket-radius-lg: 12px;
+    --peaket-radius-xl: 16px;
+    --peaket-radius-2xl: 24px;
+    --peaket-radius-banner: 20px;
+    --peaket-radius-full: 9999px;
+    --peaket-duration-fast: 150ms;
+    --peaket-duration-base: 200ms;
+    --peaket-duration-slow: 300ms;
+    --peaket-easing-enter: cubic-bezier(0, 0, 0.15, 1);
+    --peaket-easing-exit: cubic-bezier(0.35, 0, 1, 1);
+    --peaket-easing-standard: cubic-bezier(0.35, 0, 0.35, 1);
+    --peaket-easing-enter-expressive: cubic-bezier(0.03, 0.4, 0.1, 1);
+    --peaket-easing-exit-expressive: cubic-bezier(0.35, 0, 0.95, 0.55);
+    --peaket-motion-seat-shake: 300ms;
+    --peaket-motion-qr-rotate: 15000ms;
+    --peaket-breakpoint-sm: 480px;
+    --peaket-breakpoint-md: 768px;
+    --peaket-breakpoint-lg: 1280px;
+    --peaket-breakpoint-xl: 1440px;
+    --peaket-layout-content-max-width: 1040px;
+    --peaket-layout-content-max-width-wide: 1280px;
+    --peaket-layout-home-content-max-width: 1240px;
+    --peaket-layout-dashboard-max-width: 1040px;
+    --peaket-layout-desktop-gutter: 24px;
+    --peaket-layout-desktop-margin: 32px;
+    --peaket-z-banner: 10;
+    --peaket-z-modal: 100;
+    --peaket-z-toast: 200;
+  }
+
+  :root,
+  :root[data-seed-color-mode="system"][data-seed-user-color-scheme="light"],
+  :root[data-seed-color-mode="light-only"],
+  :root [data-seed-color-mode="light-only"] {
+    --peaket-color-surface: #ffffff;
+    --peaket-color-surface-muted: #f7f8f9;
+    --peaket-color-surface-basement: #f3f4f5;
+    --peaket-color-surface-raised: #ffffff;
+    --peaket-color-surface-disabled: #f3f4f5;
+    --peaket-color-border: #dcdee3;
+    --peaket-color-border-input: #555d6d;
+    --peaket-color-border-primary: #4338CA;
+    --peaket-color-text: #1a1c20;
+    --peaket-color-text-muted: #555d6d;
+    --peaket-color-text-disabled: #d1d3d8;
+    --peaket-color-text-on-primary: #ffffff;
+    --peaket-color-primary: #4338CA;
+    --peaket-color-primary-hover: #332B9E;
+    --peaket-color-primary-subtle: #DFE2FF;
+    --peaket-color-link: #4338CA;
+    --peaket-color-success: #00745f;
+    --peaket-color-success-subtle: #edfaf6;
+    --peaket-color-warning: #755b22;
+    --peaket-color-warning-subtle: #fff7de;
+    --peaket-color-danger: #ca1d13;
+    --peaket-color-danger-subtle: #fdf0f0;
+    --peaket-color-info-subtle: #eff6ff;
+    --peaket-color-focus-ring: #5B5BE8;
+    --peaket-color-seat-available: #079171;
+    --peaket-color-seat-held-by-others: #d1d3d8;
+    --peaket-color-seat-mine: #4338CA;
+    --peaket-color-seat-sold: #555d6d;
+    --peaket-color-seat-unavailable: #eeeff1;
+    --peaket-color-seat-wheelchair: #A3207E;
+    --peaket-color-seat-glyph: #ffffff;
+    --peaket-color-slo-ok: #079171;
+    --peaket-color-slo-burning: #9b7821;
+    --peaket-color-slo-breached: #fa342c;
+    --peaket-color-heat-1: #E0F1FF;
+    --peaket-color-heat-2: #A9D2FE;
+    --peaket-color-heat-3: #6DB0F4;
+    --peaket-shadow-sm: 0px 1px 4px 0px #00000014;
+    --peaket-shadow-md: 0px 2px 10px 0px #0000001a;
+    --peaket-shadow-lg: 0px 4px 16px 0px #0000001f;
+    --seed-color-bg-layer-default: #ffffff;
+    --seed-color-bg-neutral-muted: #f7f8f9;
+    --seed-color-bg-layer-basement: #f3f4f5;
+    --seed-color-bg-layer-floating: #ffffff;
+    --seed-color-bg-disabled: #f3f4f5;
+    --seed-color-stroke-neutral-weak: #dcdee3;
+    --seed-color-stroke-neutral-solid: #555d6d;
+    --seed-color-stroke-brand-solid: #4338CA;
+    --seed-color-fg-neutral: #1a1c20;
+    --seed-color-fg-neutral-muted: #555d6d;
+    --seed-color-fg-disabled: #d1d3d8;
+    --seed-color-fg-on-brand-solid: #ffffff;
+    --seed-color-bg-brand-solid: #4338CA;
+    --seed-color-bg-brand-solid-pressed: #332B9E;
+    --seed-color-bg-brand-weak: #DFE2FF;
+    --seed-color-fg-brand: #4338CA;
+    --seed-color-fg-positive: #00745f;
+    --seed-color-bg-positive-weak: #edfaf6;
+    --seed-color-fg-warning: #755b22;
+    --seed-color-bg-warning-weak: #fff7de;
+    --seed-color-fg-critical: #ca1d13;
+    --seed-color-bg-critical-weak: #fdf0f0;
+    --seed-color-bg-informative-weak: #eff6ff;
+    --seed-color-stroke-focus-ring: #5B5BE8;
+    --seed-color-bg-brand-weak-pressed: #DFE2FF;
+    --seed-color-fg-brand-contrast: #4338CA;
+    --seed-color-stroke-brand-weak: #DFE2FF;
+    --seed-color-palette-carrot-200: #DFE2FF;
+  }
+
+  .pk.dark,
+  :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"],
+  :root[data-seed-color-mode="dark-only"],
+  :root [data-seed-color-mode="dark-only"] {
+    --peaket-color-surface: #16171b;
+    --peaket-color-surface-muted: #1d2025;
+    --peaket-color-surface-basement: #000000;
+    --peaket-color-surface-raised: #1d2025;
+    --peaket-color-surface-disabled: #2b2e35;
+    --peaket-color-border: #393d46;
+    --peaket-color-border-input: #dcdee3;
+    --peaket-color-border-primary: #5B5BE8;
+    --peaket-color-text: #f3f4f5;
+    --peaket-color-text-muted: #dcdee3;
+    --peaket-color-text-disabled: #5b606a;
+    --peaket-color-text-on-primary: #ffffff;
+    --peaket-color-primary: #5B5BE8;
+    --peaket-color-primary-hover: #4338CA;
+    --peaket-color-primary-subtle: #1C1A55;
+    --peaket-color-link: #A9B0FF;
+    --peaket-color-success: #22b27f;
+    --peaket-color-success-subtle: #202926;
+    --peaket-color-warning: #ca901c;
+    --peaket-color-warning-subtle: #302819;
+    --peaket-color-danger: #ff6e60;
+    --peaket-color-danger-subtle: #322323;
+    --peaket-color-info-subtle: #202742;
+    --peaket-color-focus-ring: #A9B0FF;
+    --peaket-color-seat-available: #22b27f;
+    --peaket-color-seat-held-by-others: #5b606a;
+    --peaket-color-seat-mine: #A9B0FF;
+    --peaket-color-seat-sold: #393d46;
+    --peaket-color-seat-unavailable: #1d2025;
+    --peaket-color-seat-wheelchair: #F08FD0;
+    --peaket-color-seat-glyph: #16171b;
+    --peaket-color-slo-ok: #22b27f;
+    --peaket-color-slo-burning: #ca901c;
+    --peaket-color-slo-breached: #ff6e60;
+    --peaket-color-heat-1: #192D41;
+    --peaket-color-heat-2: #1A4268;
+    --peaket-color-heat-3: #1D5B92;
+    --peaket-shadow-sm: 0px 1px 4px 0px #00000080;
+    --peaket-shadow-md: 0px 2px 10px 0px #000000ad;
+    --peaket-shadow-lg: 0px 4px 16px 0px #000000cc;
+    --seed-color-bg-layer-default: #16171b;
+    --seed-color-bg-neutral-muted: #1d2025;
+    --seed-color-bg-layer-basement: #000000;
+    --seed-color-bg-layer-floating: #1d2025;
+    --seed-color-bg-disabled: #2b2e35;
+    --seed-color-stroke-neutral-weak: #393d46;
+    --seed-color-stroke-neutral-solid: #dcdee3;
+    --seed-color-stroke-brand-solid: #5B5BE8;
+    --seed-color-fg-neutral: #f3f4f5;
+    --seed-color-fg-neutral-muted: #dcdee3;
+    --seed-color-fg-disabled: #5b606a;
+    --seed-color-fg-on-brand-solid: #ffffff;
+    --seed-color-bg-brand-solid: #5B5BE8;
+    --seed-color-bg-brand-solid-pressed: #4338CA;
+    --seed-color-bg-brand-weak: #1C1A55;
+    --seed-color-fg-brand: #A9B0FF;
+    --seed-color-fg-positive: #22b27f;
+    --seed-color-bg-positive-weak: #202926;
+    --seed-color-fg-warning: #ca901c;
+    --seed-color-bg-warning-weak: #302819;
+    --seed-color-fg-critical: #ff6e60;
+    --seed-color-bg-critical-weak: #322323;
+    --seed-color-bg-informative-weak: #202742;
+    --seed-color-stroke-focus-ring: #A9B0FF;
+    --seed-color-bg-brand-weak-pressed: #1C1A55;
+    --seed-color-fg-brand-contrast: #A9B0FF;
+    --seed-color-stroke-brand-weak: #1C1A55;
+    --seed-color-palette-carrot-200: #1C1A55;
+  }
+}

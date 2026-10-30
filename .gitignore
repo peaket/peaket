@@ -14,3 +14,11 @@ crash.log
 
 # Claude Code의 개인 설정(공유 설정인 .claude/launch.json 등은 기록한다)
 .claude/settings.local.json
+
+# 화면 앱 빌드 산출물(Next.js·Vite·webpack·Turborepo, docs/frontend.md §2.2)
+.next/
+.next-*/
+dist/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts

@@ -1,4 +1,11 @@
 {
   "version": "0.0.1",
-  "configurations": []
+  "configurations": [
+    { "name": "web", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@peaket/web", "dev"], "port": 3000 },
+    { "name": "partner", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@peaket/partner", "dev"], "port": 3001 },
+    { "name": "console", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@peaket/console-host", "dev"], "port": 3002 },
+    { "name": "scanner", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@peaket/scanner", "dev"], "port": 3003 },
+    { "name": "queue-room", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@peaket/queue-room", "dev"], "port": 3004 },
+    { "name": "forensics", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@peaket/forensics", "dev"], "port": 3005 }
+  ]
 }

@@ -1,9 +1,15 @@
 {
   "name": "peaket",
   "private": true,
-  "description": "PEAKET 모노레포 뿌리. 지금은 스펙 주도 개발 도구(OpenSpec)만 둔다(ADR-0167). 화면 앱·공용 패키지는 wbs 0.6.4에서 더한다",
+  "description": "PEAKET 모노레포 뿌리. 화면 앱·공용 패키지는 pnpm 작업 공간과 Turborepo로 묶는다(docs/frontend.md §2.2, ADR-0165)",
   "packageManager": "pnpm@12.16.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck"
+  },
   "devDependencies": {
-    "@fission-ai/openspec": "1.15.0"
+    "@fission-ai/openspec": "1.15.0",
+    "turbo": "^2.11.10"
   }
 }

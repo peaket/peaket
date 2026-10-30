@@ -1,0 +1,26 @@
+{
+  "name": "@peaket/widget-queue",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "관제 원격 위젯(대기열 팀 주인, docs/frontend.md §4.5). 지금은 호스트가 workspace:로 이어 한 앱으로 빌드한다",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@peaket/ds": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.3.1"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "typescript": "^7.0.2"
+  }
+}
