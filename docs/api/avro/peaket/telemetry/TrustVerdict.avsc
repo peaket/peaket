@@ -47,7 +47,8 @@
           "BLOCKED",
           "HONEYPOT",
           "LABELED_BOT",
-          "LABELED_HUMAN"
+          "LABELED_HUMAN",
+          "CHALLENGED"
         ]
       }
     },

@@ -49,7 +49,8 @@
           "HELD",
           "CONFLICT",
           "LIMIT",
-          "ERROR"
+          "ERROR",
+          "RECENTLY_RELEASED"
         ]
       }
     },

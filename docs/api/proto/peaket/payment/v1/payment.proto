@@ -86,7 +86,7 @@ message PrepareCheckoutResponse {
   // 결제사 전환(감내 모드)으로 대체 결제사가 골라졌으면 true. 화면이 안내 문구를 띄운다.
   bool switched = 2;
   // 결제사 SDK에 넘길 값. 결제사마다 메시지를 따로 두어 키 이름 실수를 컴파일과 buf가 잡게 한다(openapi `PaymentAttempt.checkout`과 같은 칸).
-  // 2026-10-28에 map<string, string>에서 바꿨다. 계약 저장소로 옮기기 전 초안이라 번호 3을 다시 썼다(README §2 '버전', 기술 검토 낮음-028).
+  // 2026-10-28에 map<string, string>에서 바꿨다. 계약 검사(wbs 0.2.2)를 붙이기 전 초안이라 번호 3을 다시 썼다(README §2 '버전', 기술 검토 낮음-028).
   oneof checkout {
     TossCheckout toss = 3;
     PortoneCheckout portone = 4;

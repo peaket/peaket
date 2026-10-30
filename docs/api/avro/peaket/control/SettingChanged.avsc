@@ -10,7 +10,7 @@
     },
     {
       "name": "key",
-      "doc": "FEATURE_FLAG는 비핵심 기능 끄기(명령 9), AUTOMATION_STOP은 입장 제어 자동화 긴급 정지(명령 11, admission-ctrl은 제어 gRPC로도 받음, ADR-0102). PG_ASSIGNMENT는 회차 결제사 지정(명령 12). 결제사 전환은 DEGRADED_MODE의 PAYMENT_PG_FALLBACK 값(ADR-0044)",
+      "doc": "FEATURE_FLAG는 비핵심 기능 끄기(명령 9), AUTOMATION_STOP은 쓰지 않는다(명령 11은 제어 gRPC로만 admission-ctrl에 보내고 이 토픽으로는 보내지 않는다, docs/features/control-tower.md §3·§5, ADR-0103 결정 1, 2026-10-29 바로잡음. 지난 판과 맞추려고 기호만 남긴다). PG_ASSIGNMENT는 회차 결제사 지정(명령 12). 결제사 전환은 DEGRADED_MODE의 PAYMENT_PG_FALLBACK 값(ADR-0044)",
       "type": {
         "type": "enum",
         "name": "SettingChangedKey",

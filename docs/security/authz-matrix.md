@@ -69,7 +69,7 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 
 - 소유 계정은 요청 본문의 계정 값이 아니라 세션으로 정한다(support.md·catalog-review.md 8.2.2와 같다).
 - 흡수된 계정의 세션은 병합 때 모두 끝나므로(identity §2.1) 흡수 계정으로는 조회하지 못한다. 대표 계정은 계정 묶음으로 흡수 계정의 주문을 함께 본다.
-- 관제 역할과 CS 담당자는 팬 데이터를 본인 조건 없이 볼 수 있는 기능(팬 조회, CS 처리함)이 planning/03 §3에 따로 있다. 그때는 §4의 칸 규칙과 열람 사유 기록이 걸린다.
+- operator·commander와 CS 담당자는 팬 데이터를 본인 조건 없이 볼 수 있는 기능(팬 조회, CS 처리함)이 planning/03 §3에 따로 있다(viewer는 둘 다 없다. CS 처리함은 소유자 결정 2026-10-30, open-items 82번 ①). 그때는 §4의 칸 규칙과 열람 사유 기록이 걸린다.
 
 ### 3.3 파트너 테넌트
 
@@ -77,8 +77,8 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 
 - **테넌트 값의 출처**: 파트너 토큰의 `tid`를 게이트웨이가 `X-Tenant-Id`로 옮긴 값만 쓴다(§3.1). 경로·쿼리·본문의 `promoterId`는 무시하거나 400으로 거절한다(catalog-review.md 8.2.3의 '템플릿에서 만들기의 `promoter_id`'와 같다).
 - **하위 자원**: 회차·공연 이미지·좌석맵 배치본·현장 스태프 배정·예매자 명단·판매 요약처럼 부모를 거치는 자원은 부모의 `promoter_id`로 판정한다. 회차 행에는 검사용 사본이 있다(docs/data.md `event.promoter_id` '테넌트 검사용 사본').
-- **테넌트 표**: docs/data.md에서 `promoter_id`를 가진 표는 `production`, `event`, `venue`(배치본), `promoter_contract`, `seller_profile_change`, `event_cancellation_request`, `product`, `merch_order`, `webhook_endpoint`, `scanner_device`, `settlement_statement`, `partner_receivable`이다. 분석 저장소에서는 골드의 회차 행이 `promoter_id`를 가진다(analytics.md 8.4.1).
-- **파트너 관리자만 하는 일**: planning/03 §3에서 '관리자'가 붙은 칸은 `role = partner_admin`일 때만 통과한다. 파트너사마다 활성 관리자가 1명 이상 남아야 한다(identity §6, I-T44). 소속 계정 목록(팀 계정, `GET /v1/partner/team-accounts`)도 관리자만 보고, 파트너 계정의 초대·역할 변경·삭제는 관제 역할이 한다(§6.1, 2026-10-30).
+- **테넌트 표**: docs/data.md에서 `promoter_id`를 가진 표는 `production`, `event`, `venue`(배치본), `promoter_contract`, `seller_profile_change`, `event_cancellation_request`, `product`, `merch_order`, `webhook_endpoint`, `scanner_device`, `settlement_statement`, `partner_receivable`, `admin_account`(identity DB. 파트너 계정에만 값이 있고 팀 계정 목록 `GET /v1/partner/team-accounts`가 읽는다, 2026-10-30 맞춤)이다. 분석 저장소에서는 골드의 회차 행이 `promoter_id`를 가진다(analytics.md 8.4.1).
+- **파트너 관리자만 하는 일**: planning/03 §3에서 '관리자'가 붙은 칸은 `role = partner_admin`일 때만 통과한다. 파트너사마다 활성 관리자가 1명 이상 남아야 한다(identity §6, I-T44). 소속 계정 목록(팀 계정, `GET /v1/partner/team-accounts`)도 관리자만 보고, 파트너 계정의 초대·역할 변경·삭제는 operator·commander가 한다(§6.1, 2026-10-30).
 - **모든 파트너가 읽는 공용 자료**: 좌석맵 템플릿은 공용 읽기 전용 자료라 테넌트 조건이 없다. 쓰는 경로는 없다(catalog-review.md 8.4.1, ADR-0066).
 - **관제 역할**: 관제 역할은 테넌트를 가리지 않고 본다(전체 운영). 대신 §4의 칸 규칙이 걸리고, 바꾸는 작업은 §6의 재인증·승인과 감사 기록이 걸린다.
 
@@ -138,7 +138,7 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 | 양도 요청 | 받는 사람은 보낸 사람 닉네임·공연·좌석·기한만(결제 금액·결제자 연락처 없음) | — | 조회(결제자 이름·전화는 가려서) | — | — | transfer-refund §7.3, planning/03 §3 티켓·월렛·양도 행 |
 | 배상 | 결제자는 자기 금액 | 대상 수와 금액 합계만(개인 명단 없음) | 조회 | viewer는 집계, commander는 조회 | — | transfer-refund §7.3, planning/03 §3 배상 지급 행 |
 | 관람 후기·신고 | 작성자 표시는 닉네임 첫 글자와 '**'. 신고 상세는 보이지 않는다 | 후기 읽기만 | 신고 상세는 CS 담당자만(신고한 계정은 CS 처리함 상세에서도 가린다) | 후기 읽기, 조치 기록 | — | catalog-review.md 8.1.2 |
-| 문의 | 담당자 개인 식별자 없이 '피켓 고객센터'로 | — | 팬 연락처는 가려서 | 조회만 | — | support.md 8.1.2 |
+| 문의 | 담당자 개인 식별자 없이 '피켓 고객센터'로 | — | 팬 연락처는 가려서 | operator·commander는 조회만(viewer는 문의를 보지 않는다, planning/03 §3 고객 문의 행) | — | support.md 8.1.2 |
 | 운영 명령 감사 기록의 사람 | — | — | 관제 역할과 같다 | 3년 안에는 관리 계정, 그 뒤에는 역할만 | — | ADR-0149, planning/03 §3 불변 감사 로그 행 |
 | 기관 요청(수사기관·신고기관의 자료 요청과 통보) | — | — | 건 요약(기관, 종류, 기한, 상태)만. 요청 대상자 식별값과 제출 파일은 보이지 않는다 | viewer는 조회 기능이 없다(목록·상세 403). operator·commander는 원문을 보고 집행한다(열람·내려받기는 접속기록에 남는다). 제출 파일은 요청자가 아닌 commander가 추출을 승인한 뒤에만 생긴다(open-items 68번) | — | docs/features/control-tower.md §9 '접근 권한 통제'·'목록·상세 조회', asvs/control-tower.md 8.1.2(추천 적용 2026-10-30, 시험 C-T57·C-T62) |
 | 보안 사고와 이용자 통지 | — | — | 건 요약만. 통지 대상 목록과 대상자 식별값은 보이지 않는다 | viewer는 건 요약만. operator는 등록·통지 실행, 해당 여부 판단은 commander(원문을 본다) | — | 같다 |
@@ -202,7 +202,7 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 
 ### 5.4 권한 변경의 반영(추천 적용 2026-10-30)
 
-- 관리 계정의 역할을 바꾸거나 거두거나, 파트너 계정의 테넌트가 바뀌거나, 계정을 지우면 identity가 그 계정의 모든 세션을 끝낸다. 세션 종료 이벤트(`control.sessions-terminated`)로 모든 파드가 수 초 안에 그 세션을 거절한다(identity §3, ADR-0103). 종료 사유 값 `ROLE_CHANGED`는 2026-10-30 docs/api/asyncapi.yaml `SessionTerminated.reason`에 더했다.
+- 관리 계정의 역할을 바꾸거나 거두거나, 파트너 계정의 테넌트가 바뀌거나, 계정을 지우거나 재초대(`PROTECT_LOCK`·`CREDENTIAL_LOST`)하면 identity가 그 계정의 모든 세션을 끝낸다. 종료 사유는 역할·테넌트 변경이 `ROLE_CHANGED`, 삭제가 `DELETE`, 재초대가 `ADMIN_FORCE`다(재초대 값은 추천 적용 2026-10-30). 세션 종료 이벤트(`control.sessions-terminated`)로 모든 파드가 수 초 안에 그 세션을 거절한다(identity §3, ADR-0103). 종료 사유 값 `ROLE_CHANGED`는 2026-10-30 docs/api/asyncapi.yaml `SessionTerminated.reason`에 더했다.
 - 그래서 옛 역할이 든 액세스 토큰(15분)이 남아도 세션 종료 목록이 막는다. 이벤트가 늦으면 최대 15분 통할 수 있는 것은 identity §3·§10의 남는 한계와 같다. 위험 작업은 재인증 토큰을 받을 때 DB의 지금 역할을 다시 보므로 이 틈에도 막힌다(§6).
 - 자기 역할은 바꾸지 못한다. commander 역할의 부여·회수는 2인이다(planning/03 §3, POL-038 ⑨).
 
@@ -241,7 +241,7 @@ docs/api/openapi.yaml의 모든 작업은 허용 역할 칸 `x-peaket-roles`를 
 | 작업 | 기능 권한의 정본 | 재인증 요소 | 승인 | 서버가 보는 것 |
 | --- | --- | --- | --- | --- |
 | 위험 운영 명령(2인 명령, 명령 3 판매 일시정지, 명령 11 자동화 정지와 그 재개) | POL-021 B, planning/03 §1.1 | 비밀번호·TOTP·패스키 | 명령마다 1인·2인(멈춤은 1인, 재개는 2인, ADR-0095) | ops-svc: 지금 역할, 요청자 ≠ 승인자, 재인증 요소 |
-| 승인 업무(환불·면제·양도 회수·지급 묶음·수기 조정·판매 중지와 재개 등) | POL-038, transfer-refund §3.2 | 실행 직전 관리 계정 재인증. 요소는 identity §6 '위험 운영 명령 재인증'과 design/d5 '관리 계정 재인증'(CMP-064) 행을 따른다 | 1인·2인(금액·횟수·종류로 서버가 판정) | ops-svc: 필요한 승인자 역할, 요청자 ≠ 승인자, 만료 다시 판정 |
+| 승인 업무(환불·면제·양도 회수·지급 묶음·수기 조정·판매 중지와 재개 등) | POL-038, transfer-refund §3.2 | 실행 직전 관리 계정 재인증. commander가 하는 승인·실행은 비밀번호·TOTP·패스키, cs_lead가 하는 승인·실행은 비밀번호·TOTP다(cs_lead는 패스키 등록 의무가 없다, POL-020. 추천 적용 2026-10-30, design/d5 SCR-046 '패스키 확인' 행도 commander 승인에만 둔다) | 1인·2인(금액·횟수·종류로 서버가 판정) | ops-svc: 필요한 승인자 역할, 요청자 ≠ 승인자, 만료 다시 판정 |
 | 권한·역할 변경, 관리 계정 초대·삭제·지정 | planning/03 §3 | 비밀번호·TOTP·패스키 | commander 역할의 부여·회수는 2인 | identity: 요청자 역할, 대상 역할, 자기 자신이 아님, 파트너사의 마지막 관리자를 지킨다(I-T44). 경로와 경로별 규칙은 아래 '관리 계정 관리 경로' 표다 |
 | 정산 계좌 변경 | planning/03 §3 정산 계좌 변경 행 | 비밀번호·TOTP·패스키 | 1인. 예금주가 판매자와 같아야 하고, 바꾼 뒤 3영업일 지급 보류 | 그 요청을 받는 서비스: `partner_admin`, 테넌트, 재인증 요소 |
 | 수사기관 제공 자료의 추출·제출(소유자 결정 2026-10-30, open-items 68번) | planning/03 §3 신고기관·수사기관 요청 처리 행 | 요청·승인 모두 비밀번호·TOTP·패스키(위험 운영 명령과 같다). 작업 묶음 `act`는 따로 둔 '수사기관 자료'다. 처음에는 '승인 업무'를 함께 쓰는 임시 값이었으나, 환불 승인용 토큰을 자료 추출 승인에 쓰지 못하게 나눴다(추천 적용 2026-10-30, identity §3 '재인증 토큰의 묶음') | 2인: operator 이상이 요청하고 요청자가 아닌 commander가 승인한다. 승인 대기 24시간 [가정](제출 기한이 더 이르면 그때) | ops-svc: 지금 역할, 요청자 ≠ 승인자(`data_request_approval` 검사 제약), 재인증 요소, 고른 범위가 요청서 범위 안인지, 제출 기록의 SHA-256이 승인 때 만든 파일과 같은지 |

@@ -29,12 +29,12 @@
 | 통제 구분 | 항목 수 |
 | --- | --- |
 | 판정 대상 L1·L2 통제 항목 | 157 |
-| 적용 확정 항목 | 132 |
+| 적용 확정 항목 | 133 |
 | 부분 적용 항목 | 0 |
-| 미적용 항목(해당 없음) | 25 |
+| 미적용 항목(해당 없음) | 24 |
 | 선별 채택 L3 항목 | 4 |
 | 법률 요구사항 매핑 | 6 |
-| 운영 설계로만 있는 행(결과는 '설계 검사') | 2 |
+| 운영 설계로만 있는 행(결과는 '설계 검사') | 3 |
 
 장별 L1·L2 항목 수: V1 27, V2 11, V3 19, V4 10, V5 9, V8 7, V11 14, V12 9, V13 13, V14 9, V15 13, V16 16.
 
@@ -76,7 +76,7 @@
 
 | ASVS ID | 레벨 | 요구사항 요약 | 적용 여부 | 구현 위치 | 테스트 결과 | 미적용 사유 |
 | --- | --- | --- | --- | --- | --- | --- |
-| v5.0.0-2.1.1 | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | 적용 | openapi `Command`·`CommandState`, 되돌리기·연장·사후 검토 본문, 제어 gRPC의 protobuf(docs/api/proto/), 법정 조치·보안 사고 경로의 본문 `ComplianceNoticeCreate`·`DataRequestCreate`·`SecurityIncidentCreate`·`IncidentFilingCreate`(필수 칸, 열거 값, 길이 상한 [가정], `additionalProperties: false`)와 원본 올리기 `ComplianceDocumentUpload`(PDF만, 400·403·415). 2026-10-30에 본문 스키마가 openapi에 들어가 '부분 적용'에서 바꿨다. 같은 날 자료 추출 요청·거부·제출 기록 본문 `DataRequestExtractionCreate`·`DataRequestRejectionCreate`·`DataRequestSubmissionCreate`가 더해졌다(open-items 68번, 추천 적용 2026-10-30) | 미실행 | — |
+| v5.0.0-2.1.1 | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | 적용 | openapi `Command`·`CommandState`, 되돌리기·연장·사후 검토 본문, 제어 gRPC의 protobuf(docs/api/proto/), 법정 조치·보안 사고 경로의 본문 `ComplianceNoticeCreate`·`DataRequestCreate`·`SecurityIncidentCreate`·`IncidentFilingCreate`(필수 칸, 열거 값, 길이 상한 [가정], `additionalProperties: false`)와 원본 올리기 `ComplianceDocumentUpload`(PDF만, 403·404·413·415). 2026-10-30에 본문 스키마가 openapi에 들어가 '부분 적용'에서 바꿨다. 같은 날 자료 추출 요청·거부·제출 기록 본문 `DataRequestExtractionCreate`·`DataRequestRejectionCreate`·`DataRequestSubmissionCreate`가 더해졌다(open-items 68번, 추천 적용 2026-10-30) | 미실행 | — |
 | v5.0.0-2.1.2 | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | 적용 | 명령 종류마다 정한 매개변수·범위·전달 경로(control-tower §3·§5), 승인자 ≠ 요청자(planning/03 §2.6), 명령 12는 온세일 윈도우 밖에서만, 명령 4의 2인 조건(대역 크기·보호 대역), 통신사실확인자료 요청은 법원 허가서가 있어야 한다, 보안 사고 기한은 입력한 인지 시각부터 계산한다(§9) | 미실행 | — |
 | v5.0.0-2.1.3 | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | 적용 | POL-021 B의 안전 허용 범위(목표 상·하한, 차단 최대 24시간, 로그 레벨 30분, 입장 일시정지 10분), 승인 대기 10분, 재인증 토큰 5분, 서명 묶음 유효 5분, 법정 기한(24시간·10시간·72시간·14일), `gw-ops` 경로 한도(docs/api/guidelines.md §6) | 미실행 | — |
 | v5.0.0-2.2.1 | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에 집중해도 되지만 L2부터는 모든 입력에 적용한다. | 적용 | `ops-svc`: 명령 종류·봇 판정 강도(완화·기본·강화)·Degraded 모드(POL-029 표)·기능 플래그 목록·공지 템플릿 ID는 열거값으로, 대역은 IP 주소 해석기와 보호 대역 목록으로, 목표는 결제사 상한을 반영한 범위로 검사한다(C-T3). 보안 사고 종류·의무 종류·통지 방법도 열거값이다 | 미실행 | — |
@@ -106,7 +106,7 @@
 | v5.0.0-3.4.4 | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | 적용 | 공통: delivery.md 판정 | 미실행 | — |
 | v5.0.0-3.4.5 | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | 적용 | 관제 콘솔은 사내 전용이라 `no-referrer`다(auth.md 같은 행). 위젯 링크로 연 Grafana·Sentry에 콘솔 주소가 가지 않는다 | 미실행 | — |
 | v5.0.0-3.4.6 | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를 허용한다(`X-Frame-Options`에 기대지 않는다). | 적용 | `frame-ancestors 'none'`. 다른 사이트가 콘솔을 틀에 넣어 [승인]·[판매 일시정지] 같은 버튼을 누르게 하지 못한다 | 미실행 | — |
-| v5.0.0-3.5.1 | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 적용 | `gw-ops`: 쿠키로 인증하는 쓰기 요청은 `Origin`을 관제 콘솔 출처와 대조하고, 없거나 다르면 403이다(ADR-0065 결정 5, 기술 검토 낮음-139). 명령·승인·법정 업무의 쓰기는 safelisted가 아닌 헤더(`Idempotency-Key`, 위험 명령의 `X-Reauth-Token`)가 있어야 받아, 다른 출처에서는 사전 요청(브라우저가 먼저 보내는 확인 요청)이 생긴다 | 미실행 | — |
+| v5.0.0-3.5.1 | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 적용 | `gw-ops`: 쿠키로 인증하는 쓰기 요청은 `Origin`을 관제 콘솔 출처와 대조하고, 없거나 다르면 403이다(ADR-0065 결정 5, 기술 검토 낮음-139). 명령 쓰기는 safelisted가 아닌 헤더(`Idempotency-Key`, 위험 명령의 `X-Reauth-Token`)가, 법정 업무의 JSON 쓰기는 `application/json` 본문이 있어야 받아, 다른 출처에서는 사전 요청(브라우저가 먼저 보내는 확인 요청)이 생긴다. 원본 올리기(`multipart/form-data`)와 본문 없는 쓰기(점검 완료 `…/completion` 등)는 사전 요청이 생기지 않으므로 위 `Origin` 검사가 막는다 | 미실행 | — |
 | v5.0.0-3.5.2 | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 적용 | `ops-svc`: 쓰기는 `application/json`만 받고(그 밖은 415), 파일 올리기는 `multipart/form-data`와 3.5.1의 `Origin` 검사를 함께 쓴다 | 미실행 | — |
 | v5.0.0-3.5.3 | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*` 헤더를 엄격히 검사해 뜻하지 않은 교차 출처 호출·탐색 요청·자원 불러오기를 거른다. | 적용 | 명령·승인·거부·되돌리기·연장·사후 검토와 법정 업무는 POST다(openapi). GET은 조회와 SSE 흐름뿐이고 상태를 바꾸지 않는다 | 미실행 | — |
 | v5.0.0-3.5.4 | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 적용 | 관제 콘솔(`console`), 관제 API(`ops-api`), 소비자 웹(`www`), 파트너 콘솔(`partner`)은 호스트가 다르다(ADR-0065 결정 1). Grafana·ArgoCD·Alertmanager는 VPN으로만 닿는 내부 로드 밸런서 뒤에 따로 있다(control-tower §10) | 미실행 | — |
@@ -184,10 +184,10 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | v5.0.0-12.1.1 | L1 | TLS 1.2와 1.3처럼 권장되는 최신 버전만 켜고 가장 최신 버전을 우선한다. | 적용 | 관제 배포의 CloudFront는 TLSv1.2_2021 이상, `gw-ops`의 Envoy는 TLS(통신을 암호화하는 표준) 1.2 이상을 받고 1.3을 우선한다(ADR-0050 결정 6) | 미실행 | — |
 | v5.0.0-12.1.2 | L2 | 권장 암호 스위트만 켜고 가장 강한 스위트를 우선하며, L3는 순방향 비밀성을 주는 스위트만 지원한다. | 적용 | ECDHE와 AEAD 스위트만 켠다(ADR-0050 결정 6) | 미실행 | — |
-| v5.0.0-12.1.3 | L2 | mTLS 클라이언트 인증서가 신뢰된 것인지 확인한 뒤에만 그 신원으로 인증·인가한다. | 미적용 | — | — | 해당 없음(관제 콘솔 경로는 클라이언트 인증서를 쓰지 않는다. 서비스 사이 신원은 메시가 맡는다) |
+| v5.0.0-12.1.3 | L2 | mTLS 클라이언트 인증서가 신뢰된 것인지 확인한 뒤에만 그 신원으로 인증·인가한다. | 적용 | 서비스 메시가 `gw-ops` → `ops-svc`, `ops-svc`·런북 Job → 받는 쪽 제어 포트, Alertmanager → `ops-svc` 웹훅 연결의 mTLS 인증서를 메시 CA로 확인한 뒤 서비스 신원으로 인가한다(AuthorizationPolicy, 13.2.2, asvs/auth.md 12.1.3과 같다). 관제 콘솔의 바깥 경로는 클라이언트 인증서를 쓰지 않는다 (운영 설계만) | 미실행 | — |
 | v5.0.0-12.2.1 | L1 | 클라이언트와 외부에 노출된 HTTP 서비스 사이의 모든 연결에 TLS를 쓰고, 안전하지 않거나 암호화되지 않은 통신으로 돌아가지 않는다. | 적용 | `console`·`ops-api`와 SSE 흐름은 HTTPS와 HSTS다 | 미실행 | — |
 | v5.0.0-12.2.2 | L1 | 외부에 노출된 서비스는 공인 TLS 인증서를 쓴다. | 적용 | 관제 배포에 ACM 공인 인증서를 쓴다(secrets-and-keys의 대외 서비스 TLS 인증서 행) | 미실행 | — |
-| v5.0.0-12.3.1 | L2 | 애플리케이션에 들어오고 나가는 모든 연결(모니터링·관리 도구, 원격 접속, 미들웨어, DB, 파트너 시스템, 외부 API 등)에 TLS 같은 암호화 프로토콜을 쓰고, 안전하지 않거나 암호화되지 않은 프로토콜로 돌아가지 않는다. | 적용 | ops Aurora는 `verify-full`과 `rds.force_ssl=1`, ClickHouse는 TLS 포트만, Kafka는 TLS다(ADR-0053 결정 9). AWS API(WAF·CloudFront·KMS·S3), OpenTimestamps 캘린더, 온콜·메신저 서비스는 HTTPS다 | 미실행 | — |
+| v5.0.0-12.3.1 | L2 | 애플리케이션에 들어오고 나가는 모든 연결(모니터링·관리 도구, 원격 접속, 미들웨어, DB, 파트너 시스템, 외부 API 등)에 TLS 같은 암호화 프로토콜을 쓰고, 안전하지 않거나 암호화되지 않은 프로토콜로 돌아가지 않는다. | 적용 | ops Aurora는 `verify-full`과 `rds.force_ssl=1`, ClickHouse는 TLS 포트만, Kafka는 TLS다(ADR-0053 결정 9). AWS API(WAF·CloudFront·KMS·S3)와 OpenTimestamps 캘린더는 HTTPS다 | 미실행 | — |
 | v5.0.0-12.3.2 | L2 | TLS 클라이언트가 서버 인증서를 검증한 뒤 통신한다. | 적용 | `ops-svc`는 Aurora·ClickHouse·외부 API 인증서를 검증한다. 서비스 사이는 메시가 검증한다 | 미실행 | — |
 | v5.0.0-12.3.3 | L2 | 애플리케이션 안 내부 HTTP 서비스 사이의 모든 연결에 TLS 같은 전송 암호화를 쓰고, 안전하지 않거나 암호화되지 않은 통신으로 돌아가지 않는다. | 적용 | `gw-ops` → `ops-svc`, `ops-svc`·런북 Job → 받는 쪽 제어 포트, Alertmanager → `ops-svc` 웹훅(일이 생기면 상대 서버가 우리 주소를 불러 알려 주는 방식), `ops-svc` → core-svc review는 서비스 메시(서비스끼리 주고받는 통신을 앱 대신 처리하는 층)의 mTLS(양쪽이 서로 인증서를 확인하는 TLS)다. 제어 포트는 웨이포인트 없이 노드 프록시의 L4 암호화만 지난다(ADR-0102). 포트폴리오 로컬·CI·데모는 메시 없이 클러스터 안이 평문이고, 제어 포트의 신원 제한도 없다(docs/verification.md §8) (운영 설계만) | 미실행 | — |
 | v5.0.0-12.3.4 | L2 | 내부 서비스 사이 TLS는 신뢰한 인증서를 쓰고, 내부 발급·자체 서명 인증서를 쓰면 받는 서비스가 지정한 내부 CA와 지정한 자체 서명 인증서만 신뢰하게 한다. | 적용 | 메시는 메시 CA만 신뢰한다. Aurora는 AWS 공인 인증서를 쓴다 (운영 설계만) | 미실행 | — |
@@ -196,13 +196,13 @@
 
 | ASVS ID | 레벨 | 요구사항 요약 | 적용 여부 | 구현 위치 | 테스트 결과 | 미적용 사유 |
 | --- | --- | --- | --- | --- | --- | --- |
-| v5.0.0-13.1.1 | L2 | 애플리케이션의 통신 필요(의존하는 외부 서비스, 사용자가 외부 위치를 줄 수 있는 경우 포함)를 모두 문서화한다. | 적용 | control-tower §1 그림과 §5·§7·§8: ops DB, ClickHouse 실시간 표, Prometheus, Alertmanager, Kafka(`control.settings` Outbox), 받는 쪽 제어 포트, AWS WAF·CloudFront·KMS·S3, core-svc review, notify, OpenTimestamps 캘린더, 온콜 서비스(ADR-0032). 사용자가 외부 위치를 줄 수 있는 곳은 없다(경보의 주소는 부르지 않는다) | 미실행 | — |
-| v5.0.0-13.2.1 | L2 | 표준 사용자 세션을 쓰지 않는 백엔드 구성 요소 사이 통신을 개별 서비스 계정·단기 토큰·인증서로 인증하고, 바뀌지 않는 비밀번호·API 키를 쓰지 않는다. | 적용 | 서비스 사이는 메시 신원, AWS는 EKS Pod Identity의 단기 자격, ops Aurora는 자동 교체 비밀번호다. 바깥 SaaS 토큰(온콜·메신저)은 secrets-and-keys의 외부 연동 비밀 규칙(1년 교체)을 따른다 | 미실행 | — |
+| v5.0.0-13.1.1 | L2 | 애플리케이션의 통신 필요(의존하는 외부 서비스, 사용자가 외부 위치를 줄 수 있는 경우 포함)를 모두 문서화한다. | 적용 | control-tower §1 그림과 §5·§7·§8: ops DB, ClickHouse 실시간 표, Prometheus, Alertmanager, Kafka(`control.settings` Outbox), 받는 쪽 제어 포트, AWS WAF·CloudFront·KMS·S3, core-svc review, notify, OpenTimestamps 캘린더. 온콜 호출은 ops-svc가 아니라 Alertmanager가 한다(ADR-0152). 사용자가 외부 위치를 줄 수 있는 곳은 없다(경보의 주소는 부르지 않는다) | 미실행 | — |
+| v5.0.0-13.2.1 | L2 | 표준 사용자 세션을 쓰지 않는 백엔드 구성 요소 사이 통신을 개별 서비스 계정·단기 토큰·인증서로 인증하고, 바뀌지 않는 비밀번호·API 키를 쓰지 않는다. | 적용 | 서비스 사이는 메시 신원, AWS는 EKS Pod Identity의 단기 자격, ops Aurora는 자동 교체 비밀번호다. `ops-svc`는 바깥 SaaS 토큰(온콜·메신저·GitHub)을 갖지 않는다. 승인 대기 알림은 ops-svc가 낸 지표를 Alertmanager가 온콜로 보내고(ADR-0152), Slack 웹훅·Grafana Cloud 토큰은 Alertmanager가, GitHub 앱 키는 CronJob `alert-hygiene-report`가 쥔다(secrets-and-keys) | 미실행 | — |
 | v5.0.0-13.2.2 | L2 | 백엔드 통신을 최소 권한 계정으로 한다. | 적용 | 받는 쪽 제어 포트는 `ops-svc`와 런북 Job 신원만 받는다(메시 정책과 NetworkPolicy, docs/infra.md §9). Alertmanager 웹훅은 메시 신원 alertmanager만, 경보 위생 보고의 읽기 전용 경로는 CronJob `alert-hygiene-report`의 서비스 계정만 받는다(control-tower §8). `ops-svc`의 AWS 권한은 명령 4가 쓰는 관제용 IP 집합 갱신과 명령 6이 바꾸는 대기열 배포의 전환 설정으로 좁힌다(control-tower §5, 추천 적용 2026-10-30). 만료한 차단을 거두는 CronJob `waf-block-expirer`는 ops-svc와 다른 서비스 계정을 쓰고, 그 IP 집합 하나의 읽기·갱신(`wafv2:GetIPSet`·`wafv2:UpdateIPSet`)과 ops DB의 명령 4 읽기 전용 보기 하나만 받는다(open-items 70번 ①, 추천 적용 2026-10-30, C-T61). KMS `GenerateMac`은 체인 작업자, `Sign`은 체크포인트 게시 잡만 쓴다 | 미실행 | — |
 | v5.0.0-13.2.3 | L2 | 서비스 인증에 기본 자격 증명을 쓰지 않는다. | 적용 | DB 마스터 계정을 서비스가 쓰지 않는다. 데모 승인자 계정은 데모 시드에만 있고 운영·스테이징에는 만들지 않는다(C-T47, control-tower §4) | 미실행 | — |
 | v5.0.0-13.2.4 | L2 | 애플리케이션이 통신할 수 있는 외부 자원의 허용 목록을 정의한다. | 적용 | 공통: delivery.md 판정(나가는 통신 허용 목록). `ops-svc`가 바깥으로 부르는 곳은 13.1.1의 목록뿐이다 | 미실행 | — |
 | v5.0.0-13.2.5 | L2 | 서버가 요청을 보내거나 자원을 불러올 수 있는 대상의 허용 목록을 설정한다. | 적용 | 1.3.6과 같다. 경보·요청에 실린 주소를 서버가 부르지 않는다 | 미실행 | — |
-| v5.0.0-13.3.1 | L2 | 키 보관소 같은 비밀 관리 도구로 백엔드 비밀을 안전하게 만들고 저장·접근 통제·폐기하며, 소스 코드와 빌드 산출물에 비밀을 넣지 않고, L3는 HSM 같은 하드웨어 기반 도구를 쓴다. | 적용 | 감사·서명 키는 KMS, ops DB 비밀번호와 바깥 SaaS 토큰은 Secrets Manager에 두고 External Secrets Operator로 넣는다(docs/architecture.md §8.3). 비상 접근 계정 자격은 봉인 보관한다(secrets-and-keys) | 미실행 | — |
+| v5.0.0-13.3.1 | L2 | 키 보관소 같은 비밀 관리 도구로 백엔드 비밀을 안전하게 만들고 저장·접근 통제·폐기하며, 소스 코드와 빌드 산출물에 비밀을 넣지 않고, L3는 HSM 같은 하드웨어 기반 도구를 쓴다. | 적용 | 감사·서명 키는 KMS, ops DB 비밀번호는 Secrets Manager에 두고 External Secrets Operator로 넣는다(docs/architecture.md §8.3). 비상 접근 계정 자격은 봉인 보관한다(secrets-and-keys) | 미실행 | — |
 | v5.0.0-13.3.2 | L2 | 비밀 자산 접근은 최소 권한 원칙을 따른다. | 적용 | 운영자 서명 키의 `kms:Sign`은 그 운영자의 IAM Identity Center 역할(MFA)에만 준다(ADR-0053 결정 11). 감사 체인 키는 체인 작업자·검증 잡, 체크포인트 키는 게시 잡만 쓴다 | 미실행 | — |
 | v5.0.0-13.4.1 | L1 | 배포물에 `.git`·`.svn` 같은 소스 관리 메타데이터가 없거나, 있어도 외부와 애플리케이션 모두 접근할 수 없다. | 적용 | 공통: delivery.md 판정 | 미실행 | — |
 | v5.0.0-13.4.2 | L2 | 운영 환경의 모든 구성요소에서 디버그 모드를 끈다. | 적용 | 공통: delivery.md 판정. 운영 콘솔 묶음에 데모 막대가 없고(FE-T21), 데모 도우미 이미지는 Kyverno(쿠버네티스 정책 검사 도구)가 운영·스테이징에서 막는다(C-T47). 로그 레벨 DEBUG는 명령 8로만, 30분 뒤 자동으로 돌아간다 | 미실행 | — |

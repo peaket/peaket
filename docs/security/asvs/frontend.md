@@ -1,7 +1,7 @@
 # ASVS 추적 표: 웹 클라이언트 공통(프론트엔드 플랫폼)
 
 - **독자와 용도**: 웹 클라이언트 공통(프론트엔드 플랫폼) 기능을 구현하거나 검토하는 엔지니어와 보안 검토자가, ASVS 5.0.0 항목마다 적용 여부·구현 위치·시험 결과·미적용 사유를 확인할 때 참조한다. 구현 전에 이 표를 먼저 쓴다(docs/architecture.md §8.2).
-- **대상 기능 범위**: 모노레포(코드 전부를 저장소 하나에 폴더로 나눠 담는 방식) `peaket`의 화면 쪽 앱 넷(소비자 웹 `apps/web`. 대기실 경량 페이지 `queue-room`과 월렛 PWA 포함, 파트너 콘솔 `apps/partner`, 관제 콘솔 `apps/console-host`와 서비스를 맡은 가상 팀이 `apps/widgets/*`에서 만드는 원격 위젯, 스캐너 PWA `apps/scanner`), 포렌식 리플레이 데모 `apps/forensics`(V11·V13·V15만 이 표, 나머지는 [asvs/forensic-replay.md](forensic-replay.md), ADR-0080), 공용 패키지(`@peaket/ds`·`@peaket/telemetry`·`@peaket/validation`·`@peaket/api-client`·`@peaket/console-contract`·`@peaket/seatmap`)가 브라우저에서 공통으로 하는 일이다. 화면 그리기와 출력 인코딩, 화면 묶음별 보안 헤더 값, 서드파티 스크립트 불러오기, 창 메시지와 탭 사이 통신, 브라우저 저장소와 로그아웃 정리, 서비스 워커, 원격 모듈 불러오기와 무결성, 실시간 채널 연결, 브라우저 지표·오류 전송, 프론트엔드 의존성과 빌드 산출물(소스 맵 포함), 두 앱 서버(소비자 웹·파트너 콘솔 Next.js)의 BFF 경계를 판정한다. 화면·기능 단위 판정은 기능별 추적 표(auth, payment, settlement, transfer-refund, offline-gate, bot-defense, analytics, queue-admission, catalog-review, support)가 맡는다. 이 표는 그 표들이 화면 단위로만 판정했거나 어느 표도 맡지 않은 공통 항목을 판정한다. 응답 헤더를 붙이는 위치(사용자 가까운 곳에 파일을 복사해 두고 대신 응답하는 전송망인 CloudFront의 응답 헤더 정책, 클라이언트 앞에 둔 입구 서버인 게이트웨이의 공통 정책)와 공용 린트는 [전달 파이프라인 추적 표](delivery.md)가 판정한다. 쿠키(브라우저가 사이트별로 저장했다가 요청마다 함께 보내는 작은 값) 이름과 속성은 [계정·인증 추적 표](auth.md)가 판정한다.
+- **대상 기능 범위**: 모노레포(코드 전부를 저장소 하나에 폴더로 나눠 담는 방식) `peaket`의 화면 쪽 앱 넷(소비자 웹 `apps/web`. 대기실 경량 페이지 `queue-room`과 월렛 PWA 포함, 파트너 콘솔 `apps/partner`, 관제 콘솔 `apps/console-host`와 서비스를 맡은 가상 팀이 `apps/widgets/*`에서 만드는 원격 위젯, 스캐너 PWA `apps/scanner`), 포렌식 리플레이 데모 `apps/forensics`(V11·V13·V15만 이 표, 나머지는 [asvs/forensic-replay.md](forensic-replay.md), ADR-0080), 공용 패키지(`@peaket/ds`·`@peaket/telemetry`·`@peaket/validation`·`@peaket/api-client`·`@peaket/console-contract`·`@peaket/seatmap`)가 브라우저에서 공통으로 하는 일이다. 화면 그리기와 출력 인코딩, 화면 묶음별 보안 헤더 값, 서드파티 스크립트 불러오기, 창 메시지와 탭 사이 통신, 브라우저 저장소와 로그아웃 정리, 서비스 워커, 원격 모듈 불러오기와 무결성, 실시간 채널 연결, 브라우저 지표·오류 전송, 프론트엔드 의존성과 빌드 산출물(소스 맵 포함), 두 앱 서버(소비자 웹·파트너 콘솔 Next.js)의 BFF 경계를 판정한다. 화면·기능 단위 판정은 기능별 추적 표(auth, payment, settlement, transfer-refund, offline-gate, bot-defense, analytics, queue-admission, catalog-review, support, notify, seat-hold, control-tower)가 맡는다. 이 표는 그 표들이 화면 단위로만 판정했거나 어느 표도 맡지 않은 공통 항목을 판정한다. 응답 헤더를 붙이는 위치(사용자 가까운 곳에 파일을 복사해 두고 대신 응답하는 전송망인 CloudFront의 응답 헤더 정책, 클라이언트 앞에 둔 입구 서버인 게이트웨이의 공통 정책)와 공용 린트는 [전달 파이프라인 추적 표](delivery.md)가 판정한다. 쿠키(브라우저가 사이트별로 저장했다가 요청마다 함께 보내는 작은 값) 이름과 속성은 [계정·인증 추적 표](auth.md)가 판정한다.
 - **보안 검증 기준**: OWASP ASVS 5.0.0(웹 보안 기준을 만드는 비영리 단체가 낸 웹 앱 보안 검증 항목 목록), 목표 레벨 Level 2다. 출력 인코딩(V1), 클라이언트 검증의 위치(V2.2.2), 웹 프런트엔드 보안(V3), HTTP 메시지와 웹소켓(V4.1·V4.2.1·V4.3·V4.4), 브라우저 암호(V11), 의도하지 않은 정보 노출(V13.4), 데이터 보호(V14.2·V14.3), 안전한 코딩과 구조(V15), 보안 로그와 오류 처리(V16)의 L1·L2 항목을 모두 판정한다. V2의 나머지 절은 업무 규칙이라 기능 표가 판정한다. Level 3는 11개 항목을 골라 채택한다. 요구사항 원문은 OWASP ASVS 저장소 `v5.0.0` 태그의 `0x12-V3-Web-Frontend-Security.md`, `0x13-V4-API-and-Web-Service.md`, `0x20-V11-Cryptography.md`, `0x22-V13-Configuration.md`, `0x23-V14-Data-Protection.md`와 대조했다(2026-10-21). V1·V15·V16의 요약은 같은 장을 원문과 대조한 [후기·카탈로그 추적 표](catalog-review.md)·[전달 파이프라인 추적 표](delivery.md)의 문장을 그대로 쓴다.
 - **아키텍처 설계 근거**: [docs/frontend.md](../../frontend.md), [ADR-0079](../../adr/0079-frontend-radio-detailed-design.md), [ADR-0065](../../adr/0065-web-frontend-security-after-asvs-v3.md), [ADR-0076](../../adr/0076-observability-reference-alignment-collector-tiers.md), [docs/architecture.md](../../architecture.md) §6.3, [docs/observability.md](../../observability.md) §11, [docs/devops.md](../../devops.md) §6.6, [docs/security/data-classification.md](../data-classification.md), [docs/security/secrets-and-keys.md](../secrets-and-keys.md)
 - **문서 상태 및 일정**: 항목을 골랐고, 구현 직전 단계다(2026-10-21 수립, ADR-0079). 테스트 결과는 화면 쪽 폴더 골격과 공용 패키지(wbs 0.6.4), 화면이 쓰는 API(프로그램끼리 요청과 응답을 주고받는 창구) 계약 보강(0.2.3), 대기실 경량 페이지(2.10.6), 구매 세션 서명기와 결제 복귀(2.10.7), 좌석 이진 형식과 연결 상태 기계(2.6.4), 관제 원격 위젯 계약(4.5.5), 월렛 서비스 워커(5.1.4), 스캐너 저장소·디코더(5.4.7), 프론트엔드 측정 캠페인(7.5.2)을 구현할 때 채운다. Next.js에서 해시(원래 값으로 되돌릴 수 없게 바꾼 고정 길이 값) 방식 CSP(페이지가 실행할 수 있는 스크립트의 출처를 정하는 브라우저 규칙)를 본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험(PoC, wbs 2.10.1)이 실패하면 3.4.3 행을 다시 판정한다.
@@ -23,9 +23,9 @@
 | 통제 구분 | 항목 수 |
 | --- | --- |
 | 판정 대상 L1·L2 통제 항목 | 112 |
-| 적용 확정 항목 | 89 |
+| 적용 확정 항목 | 87 |
 | 부분 적용 항목 | 3 |
-| 미적용 항목(해당 없음) | 20 |
+| 미적용 항목(해당 없음) | 22 |
 | 선별 채택 L3 항목 | 11 |
 | 법률 요구사항 매핑 | 1 |
 
@@ -34,7 +34,7 @@
 - 14.2.1: 결제사가 결제창 복귀 주소의 쿼리에 결제 값을 싣는다. 받는 즉시 지우지만 주소에 잠깐 남는다(payment.md 같은 행, ADR-0065 결정 8).
 - 14.3.1·14.3.3: 월렛의 입장 키와 오프라인 티켓 표시 값은 로그아웃해도 기본으로 남긴다(위험 수용, ADR-0051 결정 10, ADR-0079 결정 17).
 
-미적용(해당 없음) 20건은 브라우저 코드에 해당 기능이 없는 항목이다(데이터베이스 질의, 운영체제 명령, 메일 전송, 브라우저 안의 대칭 암호화와 비밀번호 해시 등). 서버 쪽 판정은 기능 표가 한다.
+미적용(해당 없음) 22건은 브라우저 코드에 해당 기능이 없는 항목이다(데이터베이스 질의, 운영체제 명령, 메일 전송, 브라우저 안의 대칭 암호화와 비밀번호 해시 등). 서버 쪽 판정은 기능 표가 한다.
 
 ## V1 인코딩과 정화(V1.1 인코딩·정화 구조, V1.2 삽입 방지, V1.3 정화, V1.4 메모리·문자열·관리 코드, V1.5 안전한 역직렬화)
 

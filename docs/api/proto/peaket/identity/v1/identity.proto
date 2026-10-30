@@ -135,7 +135,7 @@ enum AccountHoldKind {
   ACCOUNT_HOLD_KIND_VERIFICATION_APPEAL = 1;
   // 분쟁(CS 처리함 DISPUTE)
   ACCOUNT_HOLD_KIND_DISPUTE = 2;
-  // 예매 제한·양도 회수 대상이 된 팬의 소명(ops appeal, POL-038)
+  // 예매 제한·양도 회수 대상이 된 팬의 소명(CS 처리함 APPEAL 건. 소명 글은 core DB appeal, POL-038)
   ACCOUNT_HOLD_KIND_APPEAL = 3;
 }
 
@@ -151,7 +151,7 @@ message SetAccountHoldRequest {
   // 건이 걸린 계정
   string account_id = 1;
   AccountHoldKind kind = 2;
-  // 출처 건 ID(CS 처리함 건 ID 또는 소명 ID). 멱등 키이고 account_hold.source_ref(UNIQUE)에 들어간다.
+  // 출처 건 ID(CS 처리함 건 ID. 소명이면 그 APPEAL 건 ID이고 core DB appeal.id가 아니다). 멱등 키이고 account_hold.source_ref(UNIQUE)에 들어간다.
   // 문의로 접수한 분쟁 건의 계정 ID는 ops-svc가 core-svc SupportCaseService.GetInquiryRecord로 읽는다(ADR-0148 결정 5).
   string source_ref = 3;
   AccountHoldState state = 4;
@@ -453,6 +453,8 @@ message AdminAccount {
   int64 invite_expires_at_ms = 13;
   int64 last_login_at_ms = 14;
   int64 removed_at_ms = 15;
+  // 표시 이름(openapi AdminAccount.displayName, docs/data.md admin_account.display_name). 삭제한 계정은 비운다(ADR-0163 결정 7, 추천 적용 2026-10-30)
+  string display_name = 17;
   // 판(docs/data.md admin_account.version). REST의 ETag·If-Match 값이다.
   int64 version = 16;
 }
@@ -500,6 +502,8 @@ message InviteAdminAccountRequest {
   string email = 3;
   // commander는 받지 않는다(ROLE_NOT_ALLOWED). commander는 역할 변경의 2인 승인으로만 준다.
   AdminRole role = 4;
+  // 표시 이름(openapi AdminInvitationCreate.displayName, 필수, NFC 정규화 뒤 1~30자 [가정]). identity DB admin_account.display_name에 두고 삭제하면 바로 파기한다(ADR-0163 결정 7, 추천 적용 2026-10-30)
+  string display_name = 6;
   // 파트너 역할이면 필수, 관제 역할이면 비운다(PROMOTER_MISMATCH)
   string promoter_id = 5;
 }

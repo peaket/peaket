@@ -15,9 +15,9 @@
 
 | 저장소 | 담는 것 | 소유 | 결정 |
 | --- | --- | --- | --- |
-| Redis 대기열 클러스터 | 순번 카운터, 1인 1순번 중복 확인 키(pid, 그 대기가 끝날 때나 그 회차의 판매 종료(공연 시작 24시간 전) 때 파기, ADR-0063·ADR-0064), 로비 참가자 목록(참가 토큰을 원래 값으로 되돌릴 수 없게 바꾼 해시, `q:{event:E}:lobby_members`), 셔플 결과(순번을 무작위로 섞은 결과. 해시 → 순번 매핑), 동시 도착 묶음 모으기(`q:{event:E}:batch_members:{batchNo}`), 도착 시각 쿠키(브라우저가 사이트별로 저장했다가 요청마다 함께 보내는 작은 값) 요청 ID(`q:arr:{reqId}:E`, 10분 [가정]), 빠진 번호 비트맵, 입장 자리(Sorted Set), 실시간 입장 인원 카운터, 추가 검증 격리 기록(`q:{event:E}:verify`), 판매 자격 명단 사본(`q:{event:E}:elig:{listKey}`, 판매 기간 끝 + 1일 파기, ADR-0062), 대기실 공지·판매 상태의 제어 상태(`q:{event:E}:notice`, 판 번호 포함, queue-svc, 추천 적용 2026-10-28, ADR-0103), 봇 판정 이의 제기 임시 보관(`q:appeal:{pid}:E`, 판매 종료 + 7일 [가정], 추천 적용 2026-10-30, docs/features/bot-defense.md §12) | queue-svc, admission-ctrl (같은 장애 격리 단위) | 대기열 트래픽 폭주가 좌석 예매 같은 다른 핵심 기능의 응답 지연으로 번지지 않도록 물리 인스턴스를 격리한다. 회차 해시 태그(`{event:E}`)는 회차 단위 키(같은 Lua에서 함께 쓰는 순번 카운터·serving·리더 상태·빠진 번호 등)에 붙여 한 샤드에 둔다. 사람·토큰 단위 키(`q:dup`·`q:adm`·`q:lobby:{hash}`·`q:arr`)에는 붙이지 않아 샤드 전체에 고르게 흩는다(§3). |
-| Redis 좌석 클러스터 | 좌석마다 한 비트로 줄인 좌석 상태 비트맵, 홀드(결제하는 동안 다른 사람이 가져가지 못하게 좌석을 잠시 잡아 두는 것) 세부 정보(Hash), 펜싱 토큰(홀드 순서대로 커지는 번호. 늦게 도착한 옛 요청이 최신 값을 덮어쓰지 못하게 막는다), 홀드 만료 인덱스(Sorted Set), 사용자별 예매 보유 수, 홀드 요청 멱등키, 입장을 증명하는 서명된 문자열인 입장 토큰의 jti 거부 목록, 구매 세션(클라이언트 임시 ECDH 공개키와 마지막 요청 일련번호, 묶인 회차와 그 세션의 holdId 목록 포함. 회차·holdId 목록은 추천 적용 2026-10-30, docs/features/seat-hold.md §2·§3), 홀드·세션 이벤트 Stream, 바뀐 좌석만 담은 작은 메시지인 좌석 델타를 모두에게 보내는 채널(샤드 Pub/Sub), 판매 일시정지 제어 상태의 사본(`s:{event:E}:ctl`, 원본은 purchase DB `sale_control`)과 좌석 비트맵이 있는 회차 목록(`s:ctl:events`, 추천 적용 2026-10-28, ADR-0103) | purchase-svc (혼자 쓰기), realtime-gw (델타 채널을 구독해 받기만) | 좌석 예매 트랜잭션 장애가 대기열로 번지지 않도록 독립 클러스터로 나눈다. `{event:id}` 해시 태그를 붙여 한 공연의 비트맵, 홀드 정보, 쿼터 카운터를 같은 샤드에 두고, 이로써 Lua 스크립트의 원자성을 보장한다. |
-| Redis 세션·캐시 클러스터 | identity 사용자 세션, 전역 레이트 리밋(일정 시간에 받는 요청 수의 상한) 카운터(Envoy Gateway가 배포한 전역 레이트 리밋 서비스 전용, docs/architecture.md §4, 기술 검토 중간-084), catalog 읽기 모델 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것), 웹 앱 서버의 ISR·데이터 캐시(docs/devops.md §6), shop 굿즈 재고 차감 카운터, trust-svc 실시간 행동 피처와 기기 신뢰 이력·허니팟 적중 표시·판정 근거 키(`tr:devacct`·`tr:devhist`·`tr:hp`·`tr:vb`, 추천 적용 2026-10-30, docs/features/bot-defense.md §3.2), 스캐너 로그인 기기 승인 코드(identity), 스캐너 기기 등록 코드(코드의 SHA-256만, ADR-0062)와 스캐너 DPoP 증명 `jti`(10분, 기술 검토 중간-057). 알림·웹훅 발송 작업(BullMQ)은 2026-10-28에 core DB 원장으로 옮겼고(ADR-0109), ops-svc Socket.IO 어댑터 상태는 ADR-0100·0102가 이 클러스터에서 뺐다 | 여러 서비스가 함께 쓴다 | 네임스페이스 키 접두사와 Redis(메모리에 데이터를 두는 빠른 저장소) ACL 기반 사용자 격리를 적용한다. 다른 영역에 속한 키를 허가 없이 서로 읽고 쓰는 것은 금지한다. '데이터 유실 허용' 하나로 묶지 않고, 키마다 유실 등급(A 다시 만든다·B 사람이 다시 한다·C 다른 층이 마지막을 지킨다)을 정한다. 메모리 규칙은 `maxmemory-policy noeviction`과 모든 키 TTL이다(§3 끝 표, 추천 적용 2026-10-28, ADR-0109). |
+| Redis 대기열 클러스터 | 순번 카운터, 1인 1순번 중복 확인 키(pid, 그 대기가 끝날 때나 그 회차의 판매 종료(공연 시작 24시간 전) 때 파기, ADR-0063·ADR-0064), 로비 참가자 목록(참가 토큰을 원래 값으로 되돌릴 수 없게 바꾼 해시, `q:{event:E}:lobby_members`), 셔플 결과(순번을 무작위로 섞은 결과. 해시 → 순번 매핑), 동시 도착 묶음 모으기(`q:{event:E}:batch_members:{batchNo}`), 도착 시각 쿠키(브라우저가 사이트별로 저장했다가 요청마다 함께 보내는 작은 값) 요청 ID(`q:arr:{reqId}:E`, 10분 [가정]), 빠진 번호 비트맵, 입장 자리(Sorted Set), 실시간 입장 인원 카운터, 추가 검증 격리 기록(`q:{event:E}:verify`), 판매 자격 명단 사본(`q:{event:E}:elig:{listKey}`, 판매 기간 끝 + 1일 파기, ADR-0062), 대기실 공지·판매 상태의 제어 상태(`q:{event:E}:notice`, 판 번호 포함, queue-svc, 추천 적용 2026-10-28, ADR-0103), 봇 판정 이의 제기 임시 보관(`q:appeal:{pid}:E`, 판매 종료 + 7일 [가정], 추천 적용 2026-10-30, docs/features/bot-defense.md §12), 예매 제한의 대기열 사본(`q:rst:{account}`, 원본은 ops DB `booking_restriction`, 소유자 결정 2026-10-30, open-items 75번) | queue-svc, admission-ctrl (같은 장애 격리 단위) | 대기열 트래픽 폭주가 좌석 예매 같은 다른 핵심 기능의 응답 지연으로 번지지 않도록 물리 인스턴스를 격리한다. 회차 해시 태그(`{event:E}`)는 회차 단위 키(같은 Lua에서 함께 쓰는 순번 카운터·serving·리더 상태·빠진 번호 등)에 붙여 한 샤드에 둔다. 사람·토큰 단위 키(`q:dup`·`q:adm`·`q:lobby:{hash}`·`q:arr`)에는 붙이지 않아 샤드 전체에 고르게 흩는다(§3). |
+| Redis 좌석 클러스터 | 좌석마다 한 비트로 줄인 좌석 상태 비트맵, 홀드(결제하는 동안 다른 사람이 가져가지 못하게 좌석을 잠시 잡아 두는 것) 세부 정보(Hash), 펜싱 토큰(홀드 순서대로 커지는 번호. 늦게 도착한 옛 요청이 최신 값을 덮어쓰지 못하게 막는다), 홀드 만료 인덱스(Sorted Set), 사용자별 예매 보유 수, 홀드 요청 멱등키, 입장을 증명하는 서명된 문자열인 입장 토큰의 jti 거부 목록, 구매 세션(클라이언트 임시 ECDH 공개키와 마지막 요청 일련번호, 묶인 회차와 그 세션의 holdId 목록 포함. 회차·holdId 목록은 추천 적용 2026-10-30, docs/features/seat-hold.md §2·§3), 홀드·세션 이벤트 Stream, 바뀐 좌석만 담은 작은 메시지인 좌석 델타를 모두에게 보내는 채널(샤드 Pub/Sub), 판매 일시정지 제어 상태의 사본(`s:{event:E}:ctl`, 원본은 purchase DB `sale_control`)과 좌석 비트맵이 있는 회차 목록(`s:ctl:events`, 추천 적용 2026-10-28, ADR-0103), 계정이 방금 놓은 좌석(`s:{event:E}:rel:{account}`, 30초 [가정], open-items 67번)과 예매 제한의 구매 사본(`s:rst:{account}`, open-items 75번)(소유자 결정 2026-10-30) | purchase-svc (혼자 쓰기), realtime-gw (델타 채널을 구독해 받기만) | 좌석 예매 트랜잭션 장애가 대기열로 번지지 않도록 독립 클러스터로 나눈다. `{event:id}` 해시 태그를 붙여 한 공연의 비트맵, 홀드 정보, 쿼터 카운터를 같은 샤드에 두고, 이로써 Lua 스크립트의 원자성을 보장한다. |
+| Redis 세션·캐시 클러스터 | identity 사용자 세션, 전역 레이트 리밋(일정 시간에 받는 요청 수의 상한) 카운터(Envoy Gateway가 배포한 전역 레이트 리밋 서비스 전용, docs/architecture.md §4, 기술 검토 중간-084), catalog 읽기 모델 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것), 웹 앱 서버의 ISR·데이터 캐시(docs/devops.md §6), shop 굿즈 재고 차감 카운터, trust-svc 실시간 행동 피처와 기기 신뢰 이력·허니팟 적중 표시·판정 근거 키(`tr:devacct`·`tr:devhist`·`tr:hp`·`tr:vb`, 추천 적용 2026-10-30, docs/features/bot-defense.md §3.2), 스캐너 로그인 기기 승인 코드(identity), 스캐너 기기 등록 코드(코드의 SHA-256만, ADR-0062)와 스캐너 DPoP 증명 `jti`(10분, 기술 검토 중간-057), core-svc support의 예매 제한 화면용 사본(`sup:rst:{account}`, 집행에는 쓰지 않는다, 추천 적용 2026-10-30). 알림·웹훅 발송 작업(BullMQ)은 2026-10-28에 core DB 원장으로 옮겼고(ADR-0109), ops-svc Socket.IO 어댑터 상태는 ADR-0100·0102가 이 클러스터에서 뺐다 | 여러 서비스가 함께 쓴다 | 네임스페이스 키 접두사와 Redis(메모리에 데이터를 두는 빠른 저장소) ACL 기반 사용자 격리를 적용한다. 다른 영역에 속한 키를 허가 없이 서로 읽고 쓰는 것은 금지한다. '데이터 유실 허용' 하나로 묶지 않고, 키마다 유실 등급(A 다시 만든다·B 사람이 다시 한다·C 다른 층이 마지막을 지킨다)을 정한다. 메모리 규칙은 `maxmemory-policy noeviction`과 모든 키 TTL이다(§3 끝 표, 추천 적용 2026-10-28, ADR-0109). |
 | Aurora PostgreSQL (purchase) | 주문(지금 상태와 예매자 성명·휴대폰 번호, 반영한 결제 사건 순번), 결제 시도(결제사·결제창 참조), 주문 상태 이력(`order_event`, 상태를 바꾸는 트랜잭션에서 덧붙인다. 이벤트 소싱은 아니다, ADR-0113), 좌석 판매 행(PENDING/SOLD/RETURNED), 1인 예매 한도 원장, 홀드 감사 원장, 예매 취소와 환불 기록, 회차 취소 요청과 일괄 환불 작업 진행, 배상 지급 기록, 판매 일시정지 제어 상태(`sale_control`, 범위마다 한 행과 판 번호, 추천 적용 2026-10-28, ADR-0103), 회차 판매 상태(`event_sale`, 일시 매진·매진 판정과 판 번호, ADR-0122), 처리 못 한 Kafka 사건의 보류 표(`held_event`, §4의 15번, 추천 적용 2026-10-29, ADR-0142), 주문 세 작업 밖의 멱등 기록 표(`idempotency_record`, §2, ADR-0146 결정 1), Outbox(데이터베이스를 바꿀 때 보낼 이벤트를 같은 트랜잭션으로 표에 먼저 적어 두고 나중에 보내는 방식) 테이블 | purchase-svc | 판매 확정(Hard Sale: 판매 행 PENDING 예약), 쿼터 차감, 주문 상태 전이를 하나의 ACID 트랜잭션으로 원자 처리한다(주문 생성과 결제 접수는 그 앞의 따로 된 트랜잭션이다, §4). 샤딩(데이터를 여러 저장소에 나눠 담는 것)은 빼고, 큰 인스턴스 하나를 키우는 스케일업과 수평 읽기 복제로 대응한다(ADR-0028). |
 | Aurora PostgreSQL (payment) | PG사(온라인 결제를 대신 처리해 주는 결제사)별 결제 원장(가상계좌 입금 기한·번호는 입금 확정·만료 때 삭제, ADR-0062), 결제 취소 원장, 결제 상태 전이 이벤트, 웹훅(일이 생기면 상대 서버가 우리 주소를 불러 알려 주는 방식) 수신 멱등 기록, 결제사 정산 대사 결과, 정산서·지급 묶음·지급 건·미수금(파트너에게서 돌려받을 돈, ADR-0047), 결제사별 새 결제 진입 정지 상태와 시험 재개 기록(ADR-0105), 대체 결제사 전환 상태(`pg_switch`, 범위(회차 또는 플랫폼, 결제사 지정은 회차 칸이다, ADR-0093)마다 한 행과 판 번호. 제어 gRPC로 받은 명령 6을 판 번호가 지금보다 클 때만 쓰고, 모든 파드가 2초 [가정]마다 다시 읽는다, §4의 3번, 추천 적용 2026-10-29, ADR-0143), 멱등 기록 표(`idempotency_record`, ADR-0146 결정 1), Outbox 테이블 | payment-svc | 결제 비밀 키와 외부 결제 대행사(PG) 통신 장애의 영향을 다른 도메인으로부터 물리적으로 격리한다. |
 | Aurora PostgreSQL (ticket, 교차 리전 읽기 복제본 포함) | 티켓 발행 원장(결제자·보유자), 기기 바인딩 공개키와 폐기 목록, 양도 요청과 소유권 양도 이력, 게이트 스캔 이벤트 로그, 스캐너 기기 등록·배치, 회차별 변경 일련번호 기록, 이상 표시, 부스 재발급 허용(ADR-0051), 멱등 기록 표(`idempotency_record`, ADR-0146 결정 1) | ticket-svc | 공연 당일 현장 입장의 가용성(서비스를 멈춤 없이 쓸 수 있는 정도)을 최대한 높이려고, 재해 복구용으로 다른 리전(클라우드 데이터센터가 모인 지역)에 둔 읽기 복제본(아마존이 운영해 주는 관계형 데이터베이스인 Aurora의 Global Database 도쿄 보조 클러스터, 읽기 인스턴스 1대. 관리형 전환으로 쓰기를 옮기지 않는다, 추천 적용 2026-10-22, ADR-0083)을 늘 동기화한다. 복제본은 원본을 복사해 두고 읽기를 나눠 받거나 장애 때 대신하는 저장소다. 티켓 양도와 상태 변경은 행 잠금과 낙관적 락 버전 컬럼을 함께 써서 이중 처리를 막는다. |
@@ -1248,7 +1248,7 @@ erDiagram
         bytea p256dh "구독의 암호화 공개키"
         bytea auth_secret "구독의 인증 비밀값"
         timestamptz expires_at "브라우저가 준 expirationTime. 없으면 NULL"
-        timestamptz created_at "푸시 수신 해제·로그아웃·404·410 응답·회원 탈퇴 때 행을 지운다(data-classification 'Web Push 구독 정보')"
+        timestamptz created_at "푸시 수신 해제·로그아웃·404·410 응답·VAPID 키 불일치 403·계정당 10개 [가정] 초과(가장 오래 쓰지 않은 것)·회원 탈퇴 때 행을 지운다(data-classification 'Web Push 구독 정보', docs/features/notify.md §3.4·§12)"
         timestamptz bound_at "마지막으로 이 계정에 묶은 시각(로그인마다 다시 묶음). 계정당 10개 [가정]를 넘으면 가장 오래된 행부터 지움"
     }
     notification_broadcast {
@@ -1296,6 +1296,28 @@ erDiagram
     cs_case |o--o{ takedown_action : "신고 처리 조치(외래키 없음)"
     admin_account ||--o{ command_actor : "사람 대응(3년, ADR-0149)"
     data_request ||--o{ provision_ledger : ""
+    takedown_notice {
+        uuid id PK "칸은 openapi ComplianceNotice와 같다(추천 적용 2026-10-30)"
+        text requester "AGENCY|POLICE"
+        text agency_name
+        timestamptz received_at "공문 접수 시각. 처리 기한은 여기서 센다"
+        text deadline "H24|H10"
+        timestamptz due_at
+        jsonb review_ids "통보에 적힌 후기 ID 목록"
+        text summary
+        text status "OPEN|TAKEN_DOWN|WITHDRAWN"
+        timestamptz taken_down_at
+        timestamptz withdrawn_at
+    }
+    provision_ledger {
+        uuid id PK "칸은 openapi DataRequestSubmissionCreate와 같다(추천 적용 2026-10-30)"
+        uuid request_id FK
+        timestamptz submitted_at "기관에 낸 시각"
+        text recipient "받은 기관과 부서"
+        text channel "낸 방법"
+        bytea file_sha256 "data_request.submission_sha256과 같아야 한다"
+        timestamptz retain_until "제공한 날부터 7y(통신사실확인자료) or 1y(통신이용자정보)"
+    }
     data_request ||--o{ data_request_approval : "추출·제출 승인(추천 적용 2026-10-30)"
     security_incident ||--o{ incident_filing : "의무별 신고·통지"
     access_review ||--o{ access_finding : ""
@@ -1359,8 +1381,8 @@ erDiagram
     }
     data_request {
         uuid id PK
-        text requester "agency|police"
-        text kind "report|cdr|subscriber"
+        text requester "AGENCY|POLICE"
+        text kind "REPORT|CDR|SUBSCRIBER"
         bool legal_basis_checked
         text status "RECEIVED|REFUSED|PENDING_APPROVAL|APPROVED|EXTRACTED|SUBMITTED. 전이는 docs/features/control-tower.md §9 '자료 요청의 상태' P1~P8(open-items 68번, 추천 적용 2026-10-30)"
         jsonb extraction_scope "추출 요청의 항목·기간·사유와 항목별 행 수. 대상자는 요청서 그대로"
@@ -1389,6 +1411,8 @@ erDiagram
         timestamptz outage_started_at "공격으로 생긴 장애 시작, 관제 지표가 채움"
         timestamptz outage_ended_at
         uuid decided_by "해당 판단 commander"
+        text decision "APPLICABLE|UNDECIDED|NOT_APPLICABLE. 해당함·판단이 서지 않음이면 신고·통지로 간다(control-tower §9.1 보내는 규칙 6, 추천 적용 2026-10-30)"
+        timestamptz decided_at
         text status "OPEN|CLOSED"
     }
     incident_filing {
@@ -1465,6 +1489,7 @@ erDiagram
         text status "OPEN|IN_PROGRESS|RESOLVED. CONTENT_REPORT·RIGHTS_REQUEST·PORTONE_LEDGER_MISMATCH는 열린 건에서 (kind, target_ref) 유일(ADR-0086, ADR-0108)"
         timestamptz next_due_at "진행 경과 기한과 결과 기한 중 이른 것, STORED 생성 열. 처리함 목록 순서(ADR-0086)"
         uuid assignee
+        bigint version "건 상태의 판 번호. 상태·결과가 바뀔 때마다 1 오른다. identity.proto SetAccountHold의 source_version, queue.proto ResolveVerificationAppeal의 case_version, trust.proto ApplyLabel의 source_version(CS 처리함 건일 때)이 이 값이다(추천 적용 2026-10-30)"
     }
     booking_restriction {
         uuid id PK
@@ -1475,6 +1500,7 @@ erDiagram
         timestamptz ends_at
         timestamptz appeal_due_at "1일 이상"
         text status "ACTIVE|LIFTED|EXPIRED"
+        bigint version "판 번호. 계정마다 늘어나기만 한다(새 제한의 판은 그 계정의 앞선 제한보다 크다). SetBookingRestriction·SetBookingRestrictionView가 싣고, 계정 단위 사본(q:rst·s:rst·sup:rst)이 이 값으로 늦게 온 것을 거른다(추천 적용 2026-10-30)"
     }
     decision_record {
         uuid id PK
@@ -1695,8 +1721,8 @@ erDiagram
 | `q:adm:{pid}:E` | 문자열 (Lua 확인·기록) | 입장 확정 때 1인 1순번을 다시 확인 | 값은 입장한 대기표(로비 진입자는 참가 토큰)의 해시다. 키가 비어 있으면 지금 입장 확정하는 대기표의 해시를 넣고 통과시킨다. 같은 대기표면 통과시키고, 다른 대기표면 409 `DUPLICATE_ADMISSION`으로 거절한 뒤 거절한 대기표의 번호를 빠진 번호(1인 1순번 위반 무효화, POL-002)로 기록한다. `q:dup`과 같은 분산 규칙(사람 식별자 기준)을 따른다. 수명은 그 회차의 판매 종료(공연 시작 24시간 전 = `starts_at` - 24시간)에 맞춘 TTL이다(입장 뒤 판매가 끝날 때까지 다시 줄 서기를 막는다. 판매 종료 뒤에는 진입과 입장 확정을 410 `sale-ended`로 받지 않으므로 이 키가 더 필요 없다. 탈퇴 계정은 5일 이내 삭제, ADR-0056, 판매가 윈도우로 끝나지 않는 것은 ADR-0063 결정 11, 판매 종료 시각은 ADR-0064). pid 키 전환 기간에는 `q:dup`처럼 옛 pid 쪽부터 두 키를 확인하고 기록한다(docs/features/queue-admission.md §6, 추천 적용 2026-10-28, 기술 검토 높음-18). |
 | `q:arr:{reqId}:E` | 문자열 (`SET NX`) | 도착 시각 쿠키(`__Host-peaket_arr`)에 담긴 CloudFront(AWS의 CDN) 요청 ID를 한 번만 받기 | 진입이 Degraded일 때 queue-svc가 쿠키의 MAC·회차·시각·sid를 확인한 뒤, 요청 ID로 이 키를 먼저 차지한다. 키가 이미 있으면 쿠키를 무시하고 일반 진입으로 처리한다(ADR-0053 결정 2). 키는 요청 ID를 기준으로 샤드 전체에 흩는다. 수명은 쿠키 수명과 같은 10분 [가정, Phase 2 2.2.3에서 확정](추천 적용 2026-10-20, ADR-0073). |
 | `q:{event:E}:arr_slots` | Hash | 진입 Degraded의 도착 시각 칸(100ms [가정])마다 미리 뗀 번호 구간: `next`(아직 떼지 않은 첫 칸), 칸마다 `{k}:base`·`{k}:size`·`{k}:used`, `closed_upto`(이 칸까지 닫음) | 쿠키를 확인한 진입 Lua가 같은 회차 슬롯에서 칸 k까지 아직 떼지 않은 칸을 차례로 떼고(카운터를 칸 크기만큼 전진), 칸 k의 `used`를 1 올려 구간 안 번호를 준다. 구간이 찼거나 칸이 닫혔으면 카운터 끝의 `INCR`로 준다. 리더가 1초마다 칸 끝 + 10초 [가정]가 지난 칸을 닫고, 쓰지 않은 번호를 빠진 번호 비트맵에 켠다. Degraded가 끝나면 더 떼지 않는다. 수명은 `q:dup`과 같다(추천 적용 2026-10-28, 기술 검토 중간-031, docs/features/queue-admission.md §9) |
-| `q:{event:E}:verify` | Hash | 추가 검증으로 격리한 기록 | 필드는 대기표(로비 진입자는 참가 토큰)의 해시이고, 값은 `VERIFYING`·`PASSED`·`BLOCKED`와 시각이다. 격리할 때 쓰고, 통과하거나 이의가 인정되면 `PASSED`로, 기각되면 `BLOCKED`로 바꾼다. 기각 값은 대기 참여의 빠진 사유(asyncapi `removeReason` `BLOCKED`)·검증 경로(`verifyRoute`)·queue.proto와 같은 이름으로 맞췄다(이전 이름 `REJECTED`, 추천 적용 2026-10-30, docs/features/bot-defense.md §12). `VERIFYING`의 시각은 추가 검증을 시작한 때라, 본인확인 재통과 확인(identity.proto `CheckReverification`의 `not_before`)에 쓴다. 복귀한 대기표가 대기를 취소하거나 1인 1순번을 어기면 지운다. 입장 확정은 빠진 번호라도 `PASSED`면 받는다. 수명은 `q:dup`과 같다(추천 적용 2026-10-14, ADR-0062) |
-| `q:appeal:{pid}:E` | Hash | 봇 판정 이의 제기의 임시 보관: 대기표(로비 진입자는 참가 토큰)의 해시, 이의 글(NFC 정규화 뒤 0~1,000자, 비우면 설명 요구), 처리함 건 요청의 `eventKey`, 접수 시각 | queue-svc는 DB가 없어 이의 글을 여기에 두고 `support.cases-requested`에 `VERIFICATION_APPEAL` 건 요청을 보낸 뒤 202로 답한다. 보내기에 실패하면 503과 `Retry-After`다. ops-svc가 건을 만든 뒤 queue-svc 내부 호출로 내용을 읽어 ops DB `verification_case`로 옮긴다. 한 대기 참여에 한 번이라 `HSETNX`로 처음 것만 둔다. 수명은 그 회차 판매 종료 + 7일 [가정]이다. 사람 식별값을 기준으로 샤드 전체에 흩는다(`q:dup`과 같은 규칙). ops-svc가 옮기기 전에 키를 잃으면 건만 남고 이의 글은 없어진다(남는 한계). 계약(건 종류, 내용 읽기 호출)은 아직 asyncapi·queue.proto에 없다(추천 적용 2026-10-30, docs/features/bot-defense.md §12) |
+| `q:{event:E}:verify` | Hash | 추가 검증으로 격리한 기록 | 필드는 대기표(로비 진입자는 참가 토큰)의 해시이고, 값은 `VERIFYING`·`PASSED`·`BLOCKED`와 시각, 격리 때 이용자에게 보인 사유 범주(trust.proto `ReasonCategory`. 실시간 판정은 `ScoreRiskResponse.reason`, 재평가 격리는 패턴에서 정한 값)다(사유 범주는 추천 적용 2026-10-30). 격리할 때 쓰고, 통과하거나 이의가 인정되면 `PASSED`로, 기각되면 `BLOCKED`로 바꾼다. 기각 값은 대기 참여의 빠진 사유(asyncapi `removeReason` `BLOCKED`)·검증 경로(`verifyRoute`)·queue.proto와 같은 이름으로 맞췄다(이전 이름 `REJECTED`, 추천 적용 2026-10-30, docs/features/bot-defense.md §12). `VERIFYING`의 시각은 추가 검증을 시작한 때라, 본인확인 재통과 확인(identity.proto `CheckReverification`의 `not_before`)에 쓴다. 복귀한 대기표가 대기를 취소하거나 1인 1순번을 어기면 지운다. 입장 확정은 빠진 번호라도 `PASSED`면 받는다. 수명은 `q:dup`과 같다(추천 적용 2026-10-14, ADR-0062) |
+| `q:appeal:{pid}:E` | Hash | 봇 판정 이의 제기의 임시 보관: 이의 ID(queue-svc가 접수 때 만드는 UUID, `CaseRequested.sourceId`), 계정 ID, 대기표(로비 진입자는 참가 토큰)의 해시, 격리 때 이용자에게 보인 사유 범주(trust.proto `ReasonCategory` 이름, `CaseRequested.category`), 이의 글(NFC 정규화 뒤 0~1,000자, 비우면 설명 요구), 처리함 건 요청의 `eventKey`, 접수 시각, 결과를 반영한 건 ID·판 번호. queue.proto 두 호출은 이의 ID만 받으므로 이의 ID로 찾는 색인 `q:appealid:{appealId}`(문자열, 값 = 회차 ID와 pid, 같은 수명)를 같은 처리에서 함께 쓴다(추천 적용 2026-10-30) | queue-svc는 DB가 없어 이의 글을 여기에 두고 `support.cases-requested`에 `VERIFICATION_APPEAL` 건 요청을 보낸 뒤 202로 답한다. 보내기에 실패하면 503과 `Retry-After`다. ops-svc가 건을 만든 뒤 queue-svc 내부 호출로 내용을 읽어 ops DB `verification_case`로 옮긴다. 한 대기 참여에 한 번이라 `HSETNX`로 처음 것만 둔다. 수명은 그 회차 판매 종료 + 7일 [가정]이다. 사람 식별값을 기준으로 샤드 전체에 흩는다(`q:dup`과 같은 규칙). ops-svc가 옮기기 전에 키를 잃으면 건만 남고 이의 글은 없어진다(남는 한계). 건 종류는 asyncapi `CaseRequested.kind`의 `VERIFICATION_APPEAL`, 내용 읽기·결과 반영은 queue.proto `VerificationAppealService`다(추천 적용 2026-10-30, docs/features/bot-defense.md §12) |
 | `q:rst:{account}` | Hash | 예매 제한의 대기열 사본: 상태(ACTIVE·LIFTED), 끝 시각(없으면 비움), 제한 ID, 판 번호 | 원본은 ops DB `booking_restriction`이다. ops-svc의 `SetBookingRestriction`을 받은 queue-svc가 판 번호가 지금 값보다 클 때만 쓴다. 입장 확정이 Lua 전에 따로 읽어, ACTIVE이고 끝 시각 전이면 403 `booking-restricted`로 거절한다. 키가 없으면 제한이 없는 것으로 본다. 계정 단위라 회차 태그를 붙이지 않고 샤드 전체에 흩는다(`q:dup`과 같은 규칙). 수명은 ACTIVE면 끝 시각 + 1일(끝이 없으면 30일 [가정]), LIFTED면 30일 [가정]이다(늦게 온 작은 판을 무시하려고 남긴다). 잃어도 ops-svc 작업 워커가 10분 [가정]마다 ACTIVE인 제한을 다시 보내 다시 선다(소유자 결정 2026-10-30, open-items 75번, 세부는 추천 적용 2026-10-30, docs/features/queue-admission.md §6) |
 | `q:{event:E}:elig:{listKey}` | Set | 판매 자격 명단의 대기열 사본(사람 식별자) | 로비·진입 때 자격을 확인한다. 수명은 판매 기간 끝 + 1일 TTL이다(추천 적용 2026-10-14, ADR-0062) |
 | `s:{event:E}:bitmap` | 비트맵 (6.25KB) | 공연장 좌석의 홀드 상태 비트맵 | Lua 스크립트로 여러 좌석의 홀드 여부를 1회 왕복 안에 원자적으로(중간 상태 없이 한 번에) 검사하고 설정한다. |

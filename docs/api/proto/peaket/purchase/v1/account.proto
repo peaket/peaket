@@ -74,7 +74,7 @@ message SetBookingRestrictionRequest {
   BookingRestrictionState state = 3;
   // 제한이 끝나는 시각(booking_restriction.ends_at). 끝이 정해지지 않았으면 비운다.
   google.protobuf.Timestamp ends_at = 4;
-  // ops 제한 기록의 판 번호. 같은 제한에서 늘어나기만 한다.
+  // ops 제한 기록의 판 번호(booking_restriction.version). 사본이 계정마다 하나라 판도 계정마다 늘어나기만 한다. 새 제한의 판은 그 계정의 앞선 제한보다 크다(추천 적용 2026-10-30).
   int64 version = 5;
 }
 

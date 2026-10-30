@@ -8,7 +8,7 @@
   - 대기열 쪽 동작(번호, 빠진 번호, `VERIFYING`·`PASSED` 기록)은 [queue-admission.md](queue-admission.md) §7이, 재평가 작업자의 패턴·키·스크립트는 [docs/streaming.md](../streaming.md) §5가 정본이다. 이 문서는 그 둘을 다시 쓰지 않고 가리킨다.
 - **원문 출처**: 원문에 없다. 전체가 [보완]이다.
 - **기준 기획 버전**: v1.0.
-- **관련 ID**: FR-020 · FR-039 · FR-049 · NFR-001, 020, 022 · POL-001, 002, 006, 021, 026 · SCR-007, 009, 029, 045, 057, 067 · CMP-047 · API(프로그램끼리 요청과 응답을 주고받는 창구) `POST /v1/queues/{eventId}/lobby-participants`, `POST /v1/queues/{eventId}/pre-verifications`, `POST /v1/queues/{eventId}/verification` · 내부 호출 `ScoreRisk`(trust.proto), `IsolateWaiting`(queue.proto) · 이벤트 `telemetry.behavior`, `telemetry.trust-candidates`, `telemetry.trust-verdicts`, `control.settings` · ADR-0039, 0048, 0053, 0065, 0071, 0099, 0112, 0128, 0134, 0136, 0147, 0151 · 보안 추적 표 [docs/security/asvs/bot-defense.md](../security/asvs/bot-defense.md)
+- **관련 ID**: FR-020 · FR-039 · FR-049 · NFR-001, 020, 022 · POL-001, 002, 006, 021, 026 · SCR-007, 009, 029, 045, 057, 067 · CMP-047 · API(프로그램끼리 요청과 응답을 주고받는 창구) `POST /v1/queues/{eventId}/lobby-participants`, `POST /v1/queues/{eventId}/pre-verifications`, `POST /v1/queues/{eventId}/verification` · 내부 호출 `ScoreRisk`(trust.proto), `IsolateWaiting`(queue.proto) · 이벤트 `telemetry.behavior`, `telemetry.trust-candidates`, `telemetry.trust-verdicts`, `control.settings` · ADR-0039, 0048, 0053, 0065, 0071, 0099, 0112, 0128, 0134, 0136, 0147, 0151, 0156(이 문서의 결정 기록) · 보안 추적 표 [docs/security/asvs/bot-defense.md](../security/asvs/bot-defense.md)
 - **표시**: 이 문서가 새로 정한 설계 판단에는 '(추천 적용 2026-10-30)'을 붙였다. 판정 기준값, 점수기 가중치, 3단계 봇 코드는 이 문서에 쓰지 않는다. 기준값과 가중치는 trust-svc만 읽는 비공개 설정(봇 탐지 규칙 매개변수, AWS Secrets Manager. 비밀 값을 보관하는 AWS 서비스)에 두고, 3단계 봇 코드는 비공개 저장소 `peaket-loadtest`에만 둔다(POL-026, docs/devops.md §2.1, docs/security/secrets-and-keys.md, ADR-0147 결정 3). 공개 저장소 `peaket`에 있는 trust-svc 코드(`services/trust-svc`)는 그 설정의 이름과 판 번호(바뀔 때마다 하나씩 늘어나는 번호)만 안다.
 
 ## 1. 범위와 이름
@@ -146,7 +146,7 @@ flowchart LR
 ### 4.6 데드라인과 용량
 
 - queue-svc가 `ScoreRisk`에 거는 데드라인(호출이 끝나야 하는 마감 시각)은 로비 입장·사전 검증·추가 검증 제출 800ms [가정]이다. 그 안에서 사람 확인 서버 검증은 500ms [가정]에 끊는다(§6). Redis 읽기와 점수 계산은 수 ms [추정]이다. 값은 로비 개방 부하 시험(Q-T57)에서 재어 정한다(추천 적용 2026-10-30).
-- 판정 수의 피크는 로비 개방 때 초당 약 1,700건이다(docs/architecture.md §9.4, docs/streaming.md §11). 그림자 판은 같은 입력으로 점수만 다시 계산하므로 외부 호출과 Redis 명령이 늘지 않는다. 판정 기록은 그림자 판이 있는 동안 두 배(초당 약 3,400건 [추정])가 된다.
+- 판정 수의 피크는 로비 참가가 고르게 오면 초당 약 1,700건이고(docs/architecture.md §9.4, docs/streaming.md §11), 로비 개방 첫 1분에 참가의 30% [가정]가 몰리면 그 1분 평균이 초당 약 3,500건 [추정]이다(queue-admission §2 '로비 참가 퍼뜨리기', Q-T57 ②, ADR-0161). 그 1분에 그림자 판이 있으면 판정 기록은 초당 약 7,000건 [추정]이다. 그림자 판은 같은 입력으로 점수만 다시 계산하므로 외부 호출과 Redis 명령이 늘지 않는다. 판정 기록은 그림자 판이 있는 동안 두 배(초당 약 3,400건 [추정])가 된다.
 - T=0 핵심 경로(오픈 순간의 진입·입장 확정)는 trust-svc를 부르지 않는다. 판정은 로비(T-10분)와 공연 상세의 사전 검증에서 미리 끝난다(queue-admission §2·§3).
 
 ## 5. 판정 결과가 이어지는 곳
@@ -161,7 +161,7 @@ flowchart LR
 | 로그인 | identity-svc가 정한다 | docs/features/identity.md §7 |
 
 - `ALLOW`면 queue-svc는 지금처럼 토큰과 번호를 준다. `degraded`가 참인 `ALLOW`는 사전 검증 토큰에 '검증 보류'를 서명해 넣고, 토큰을 갱신할 때(15분 안) 다시 판정받는다. 로비 참가 토큰은 다시 판정하지 않는다(queue-admission §9 '사람 확인 검증 API 장애·지연' 행과 같은 규칙).
-- 격리는 번호 표시를 되돌리지 않는다. 그래서 다른 대기자의 앞 인원은 바뀌지 않는다(POL-006).
+- 격리는 번호 표시를 되돌리지 않는다. 그래서 다른 대기자의 앞 인원은 바뀌지 않는다(POL-006). queue-svc는 `CHALLENGE` 응답의 사유 범주를 격리 기록 `q:{event:E}:verify`의 값(상태·시각·사유 범주)에 함께 적고, 재평가 격리는 패턴에서 정한다(R1 `RAPID_REQUESTS`, R2 `SHARED_PATTERN`, queue.proto). 추가 검증 화면(SCR-009)은 참가 토큰·대기표·입장 확정 `VERIFYING` 응답의 `verificationReason`으로 그 범주를 받고, 이의 건 요청의 `category`와 `GetVerificationAppeal.reason_category`도 이 값을 쓴다. docs/data.md §3 `q:{event:E}:verify`와 openapi `LobbyToken`·`QueueTicket`·`AdmissionResult`에 같은 칸을 더한다(추천 적용 2026-10-30).
 
 ### 5.2 추가 검증 제출
 

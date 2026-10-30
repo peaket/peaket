@@ -132,7 +132,7 @@ flowchart LR
 | core-svc + notify 워커 | 씀 | 씀 | 씀 | — |
 | 좌석맵 해석 작업 `seatmap-worker`(core-svc와 같은 이미지의 별도 배포) | — | — | — | 저장소·AWS 권한이 없다. core-svc의 gRPC만 받고(메시 허용 목록), 나가는 통신은 NetworkPolicy로 모두 막는다. 일반 노드 풀 [가정], 파드마다 동시 처리 1, 메모리 512MiB [가정]. 이미지 처리 작업 `image-worker`(격리 버킷 읽기·파생본 쓰기)와 같은 방식이다(소유자 결정 2026-10-30, open-items 70번 ②, 세부는 추천 적용 2026-10-30, docs/features/seat-hold.md §10) |
 | ops-svc | — | 씀(ops 전용 클러스터) | 씀 | ClickHouse를 읽는다(스트림 작업자가 채운 표) |
-| 만료 차단 정리 작업 `waf-block-expirer`(ops-svc와 같은 이미지의 따로 도는 CronJob, 관제 노드 풀, 1분 [가정]마다) | — | 읽음(ops 전용 클러스터의 명령 4 읽기 전용 보기 `waf_block_expiry_v` 하나만, docs/data.md §6) | — | ops-svc를 부르지 않는다. 나가는 통신은 §9 '네트워크 격리 계층'의 넷뿐이다. AWS 권한은 관제용 IP 집합 하나의 `wafv2:GetIPSet`·`wafv2:UpdateIPSet`뿐이고 서비스 계정은 ops-svc와 따로다. 마지막 성공이 5분 [가정]보다 오래되면 SEV2(소유자 결정 2026-10-30, open-items 70번 ①, 세부는 추천 적용, docs/features/control-tower.md §5) |
+| 만료 차단 정리 작업 `waf-block-expirer`(ops-svc와 같은 이미지의 따로 도는 CronJob, 관제 노드 풀, 1분 [가정]마다) | — | 읽음(ops 전용 클러스터의 명령 4 읽기 전용 보기 `waf_block_expiry_v` 하나만, docs/data.md §4 6번) | — | ops-svc를 부르지 않는다. 나가는 통신은 §9 '네트워크 격리 계층'의 넷뿐이다. AWS 권한은 관제용 IP 집합 하나의 `wafv2:GetIPSet`·`wafv2:UpdateIPSet`뿐이고 서비스 계정은 ops-svc와 따로다. 마지막 성공이 5분 [가정]보다 오래되면 SEV2(소유자 결정 2026-10-30, open-items 70번 ①, 세부는 추천 적용, docs/features/control-tower.md §5) |
 
 **③ 외부 연동과 바깥 감시**
 

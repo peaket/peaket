@@ -62,7 +62,7 @@
 | `trade.payments` | `PaymentEvent` | `eventId` | payment-svc(Outbox) | purchase-svc 주문 Saga, ops-rt |
 | `trade.seats` | `SeatEvent`, `EventSaleChanged`(회차 판매 상태, ADR-0122) | `eventId` | purchase-svc(좌석 Redis Stream 릴레이, `seat_sale`·`event_sale` Outbox) | purchase-svc 홀드 원장 적재, ops-rt(`SeatEvent`), queue-svc·core-svc(`EventSaleChanged`), analytics-ingest |
 | `trade.purchase-sessions` | `PurchaseSessionStarted`, `PurchaseSessionEnded` | `eventId` | purchase-svc(Redis Stream 릴레이) | queue-svc |
-| `trade.tickets` | `TicketEvent` | `eventId` | ticket-svc(Outbox) | ops-rt |
+| `trade.tickets` | `TicketEvent` | `eventId` | ticket-svc(Outbox) | core-svc 알림(양도 알림, 추천 적용 2026-10-30), ops-rt |
 | `trade.settlements` | `SettlementEvent` | 파트너 ID | payment-svc(Outbox) | analytics-ingest |
 | `control.settings` | `SettingChanged` | `<범위>:<종류>:<대상>`(압축 토픽, §5) | ops-svc | 모든 서비스의 모든 파드(파드마다 따로) |
 | `control.sessions-terminated` | `SessionTerminated` | `accountId` | identity-svc | 모든 서비스의 모든 파드(파드마다 따로, 뜰 때 15분 되감기) |

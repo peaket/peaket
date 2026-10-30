@@ -167,7 +167,7 @@
 | 퍼널 단계 누적(`funnel_admitted`, `funnel_first_hold`, `funnel_payment_accepted`, `funnel_approved`, `funnel_issued`) | 누적 | `QueueAggregate.admissions`, `HoldAttempt` HELD 가운데 `firstHeldInSession`이 true인 것, `OrderEvent` ACCEPTED·APPROVED·CONFIRMED 가운데 `firstInStage`가 true인 것. 입금 되돌림 뒤 다시 확정되어도 다시 세지 않는다. 콘솔 판매 중 탭의 다섯 단계 퍼널 위젯은 같은 단계의 Prometheus 카운터를 보여 준다(observability §8, ADR-0071 결정 4). 이 누적은 등급별 상세·파트너 화면·마감 대조에 쓴다 | 전체, 등급(첫 홀드만) |
 | 대기열 진입·입장·빠진 번호 누적(`queue_entries`, `queue_admissions`, `queue_removed`), 지금 대기 인원(조회 때 진입 − 입장 − 빠진 번호) | 누적 | `QueueAggregate` | 전체 |
 | 진입·입장·빠진 번호의 초당 수 | 1초 칸 | `QueueAggregate`(`second`) | 전체 |
-| 홀드 결과별 수(`hold_result`: HELD·CONFLICT·LIMIT·ERROR), 홀드 경합 패배율(조회 때) | 1초 칸 | `HoldAttempt` | 결과, 등급 |
+| 홀드 결과별 수(`hold_result`: HELD·CONFLICT·LIMIT·ERROR·RECENTLY_RELEASED), 홀드 경합 패배율(조회 때) | 1초 칸 | `HoldAttempt` | 결과, 등급 |
 | 판정 종류별 수(`verdict`), 추가 검증 격리율(조회 때, 잠정) | 1초 칸 | `TrustVerdict`(`shadow` false만) | 판정 종류 |
 | 심장 박동(`pulse`) | 신선도, 1초 칸(받은 수) | `PipelinePulse` | 토픽, 파티션 |
 

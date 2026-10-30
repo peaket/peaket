@@ -173,7 +173,7 @@ enum ScannerCredentialType {
 
 // 기기 하나. openapi `ScannerDevice`와 같은 칸이다. 다만 '지금 로그인한 세션'(activeSessionNickname)은 identity 데이터(scanner_session)라
 // 여기 없고, ops-svc가 identity-svc ScannerSessionQueryService.ListActiveScannerSessions로 따로 읽어 목록에 합친다(ADR-0148 결정 1).
-// 그 칸이던 8번은 계약 저장소로 옮기기 전 초안이라 reserved로 막지 않았다(README §3의 번호 다시 쓰기 관례).
+// 그 칸이던 8번은 계약 검사(wbs 0.2.2)를 붙이기 전 초안이라 reserved로 막지 않았다(README §3의 번호 다시 쓰기 관례).
 message ScannerDevice {
   string device_id = 1;
   // 예: 동문-03
