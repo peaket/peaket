@@ -1,6 +1,6 @@
 # 기능 설계: 분석 저장소와 공연 리포트
 
-- **독자와 용도**: peaket-data의 원본 적재·변환 잡과 공연 리포트를 구현하는 데이터·백엔드·프론트엔드 엔지니어, 그리고 리포트의 결정 규칙으로 다음 회차를 정하는 운영 담당자가 참조한다.
+- **독자와 용도**: 원본 적재·변환 잡(`peaket` 저장소의 `services/`·`data/`)과 공연 리포트를 구현하는 데이터·백엔드·프론트엔드 엔지니어, 그리고 리포트의 결정 규칙으로 다음 회차를 정하는 운영 담당자가 참조한다.
 - **범위**: 회차가 끝난 뒤 '다음 회차를 어떻게 열지' 정하는 데 쓰는 분석 저장소(대량 이벤트 집계에 강한 분석 DB인 ClickHouse와 S3의 회차별 Parquet 아카이브), 원본 적재와 가명 처리, 브론즈·실버·골드 변환과 마감 단계, 스타 스키마(스키마는 데이터의 구조 정의), 지표 사전과 결정 규칙 판정, 공연 리포트와 파트너 판매 요약, 결정 기록과 결정 절차를 다룬다. 온세일(판매가 열리는 시각 앞뒤로 접속이 몰리는 기간) 중 관제 화면과 운영 명령은 [control-tower.md](control-tower.md)가, 메트릭·SLO(팀이 정한 서비스 품질 목표)·경보는 [observability.md](../observability.md)가 정한다.
 - **원문 출처**: 설계서 §8 <용량 산정 (Back-of-the-envelope)>, 설계서 27장 <데이터 엔지니어링>, [ADR-0042](../adr/0042-analytics-store-and-decision-rules.md)(소유자 제안 2026-10-11, 승인 2026-10-12), [ADR-0052](../adr/0052-analytics-medallion-star-schema-close-stages.md)(소유자 승인 2026-10-13, '추천대로 승인').
 - **관련 ID**: FR-026, FR-029, FR-031, FR-068 · NFR-009, NFR-018, NFR-026 · POL-022, 023, 027, 028, 030, 037, 039, 040 · SCR-027, SCR-029 · API(프로그램끼리 요청과 응답을 주고받는 창구) `/v1/ops/events/{eventId}/reports`, `/v1/ops/decisions`, `/v1/partner/events/{eventId}/report` · 이벤트 `trade.*`, `telemetry.queue`, `telemetry.purchase`, `telemetry.trust-verdicts`, `control.settings` · 데이터 docs/data.md §1·§2·§6(`decision_record`, `pseudonymization_log`) · K9 · ADR-0026·0042·0047·0052·0071.
@@ -86,7 +86,7 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 
 ### 3.1 이벤트
 
-`peaket-data`의 원본 적재 작업자(`analytics-ingest`, TypeScript 스트림 작업자, docs/streaming.md §6)가 아래 토픽(메시지를 종류별로 모아 두는 통로)을 읽어 브론즈 표(`brz_<원천>`)에 쓴다. 집계하지 않고 원본을 쓴다(ADR-0042 결정 2, ADR-0099).
+원본 적재 작업자(`services/analytics-ingest`, TypeScript 스트림 작업자, docs/streaming.md §6)가 아래 토픽(메시지를 종류별로 모아 두는 통로)을 읽어 브론즈 표(`brz_<원천>`)에 쓴다. 집계하지 않고 원본을 쓴다(ADR-0042 결정 2, ADR-0099).
 
 | 토픽 | 메시지 | 쓰는 곳 |
 | --- | --- | --- |
@@ -309,7 +309,7 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 
 ### 6.2 지표 사전 형식
 
-지표마다 아래 항목을 `metrics.yml`(peaket-data `analytics` 프로젝트)에 적고, dbt가 지표 뷰(`mtr_*`)를 만든다. 관제 콘솔의 실시간 계산, 공연 리포트, 파트너 판매 요약이 모두 이 정의를 쓴다.
+지표마다 아래 항목을 `metrics.yml`(`data/`의 dbt 프로젝트 `analytics`)에 적고, dbt가 지표 뷰(`mtr_*`)를 만든다. 관제 콘솔의 실시간 계산, 공연 리포트, 파트너 판매 요약이 모두 이 정의를 쓴다.
 
 ```yaml
 - name: admission_to_purchase_rate      # 입장 → 구매 전환율
@@ -459,7 +459,7 @@ ops-svc는 마감 상태가 '완료'가 된 단계를 1분마다 [가정] 확인
 | 동률 | 공연명 가나다순, 그다음 회차 ID 순(추천 적용 2026-10-14, ADR-0063) |
 | 시각 | 매일 09:30 [가정]에 계산하고 10:00 [가정]에 게시한다. 어제 결제 상태가 불명인 건은 1시간 안에 정리되므로(R1과 같은 이유) 다음 날 아침이면 숫자가 확정된다 |
 | 계산 | 마감 실행기(`an_transform`)가 다른 골드 표와 같은 dbt 흐름으로 매일 공연·날짜별 판매 매수 집계 표 `mtr_genre_ranking_daily`를 만든다. 같은 매일 실행에서 날짜별 판매 사실 F15(`fct_sales_daily`)도 넣는다(§4.3, 추천 적용 2026-10-28, 기술 검토 높음-23). 이 표는 날짜 × 회차의 판매 좌석 수이고 사람 단위 행이 없다. 게시 잡은 이를 공연마다 더하고, 회차 기준 자료의 공연 ID·장르·판매 승인·판매 상태를 붙인다(ADR-0093). 랭킹 게시 잡은 이 골드 집계만 읽고, 실버·브론즈의 가명 사건은 읽지 않는다(추천 적용 2026-10-14, ADR-0063). 같은 일별 집계로 공연별 최근 7일 확정 판매 매수 [가정] 순위(비공개)를 만들어 검색 읽기 모델(`search_document`의 관심도, ADR-0094)에 넘기고 검색의 인기순과 자동완성 순서에 쓴다(POL-043) |
-| 게시 | 랭킹 게시 잡(쿠버네티스 CronJob, `peaket-data`, ClickHouse 사용자 `an_ranking_reader`는 이 표만 읽는다)이 파일을 S3 공개 정적 객체로 쓴다. 그다음 공연 페이지 배포의 `/v1/home/rankings.json` 경로를 무효화하고, 홈 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것) 태그를 무효화한다 |
+| 게시 | 랭킹 게시 잡(쿠버네티스 CronJob, `services/ranking-publisher`, ClickHouse 사용자 `an_ranking_reader`는 이 표만 읽는다)이 파일을 S3 공개 정적 객체로 쓴다. 그다음 공연 페이지 배포의 `/v1/home/rankings.json` 경로를 무효화하고, 홈 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것) 태그를 무효화한다 |
 | 실패 | 계산이나 게시가 실패하면 직전 파일을 그대로 둔다(파일의 `basisDate`로 보인다). 10:30 [가정]까지 성공하지 않으면 SEV3로 알린다(docs/observability.md §5). 파일이 2일 [가정] 넘게 묵으면 홈이 그 섹션을 숨긴다 |
 | 온세일 윈도우(추천 적용 2026-10-20, ADR-0069 결정 10) | 대형·중형 온세일 윈도우(T-10분~T+60분)에는 랭킹 게시를 새로 시작하지 않고 미룬다. 이미 시작한 게시는 끝낸다. 소형 온세일은 미루지 않는다 [가정]. 창은 변경 동결 달력과 같은 온세일 일정으로 계산하고, 일정을 읽지 못하면 마지막으로 읽은 일정을 쓰고 SEV3를 낸다 [가정]. 미루는 시간은 최대 70분이다(docs/devops.md §8.2, POL-028). 10:00 게시는 10:00에 여는 회차의 윈도우와 겹칠 수 있어, 그런 날은 게시가 그 윈도우 뒤로 밀린다. 그런 날은 위 경보의 기준을 '10:30 [가정]과 미룬 게시 시작 시각 + 30분 [가정] 가운데 늦은 때'로 옮긴다. 랭킹 게시 잡이 미룬 시작 시각을 `ranking_publish_deferred_until`로 낸다(추천 적용 2026-10-29) |
 | 담지 않는 것 | 판매 매수 값(순위만 담는다), 파트너별 수치, 개인정보. 순위는 공개되므로, 파트너 판매 요약(§8.4)의 비공개 원칙과 겹치는 값(매수)은 내지 않는다(추천 적용 2026-10-14, ADR-0063) |
@@ -579,7 +579,7 @@ R1·R2 리포트를 받으면 아래 순서로 본다.
 | 분석 DB | ClickHouse `bronze`·`silver`·`gold`·`rt`(§2, §5.5) |
 | 보존 | docs/data.md §6, docs/observability.md §9 |
 | 키 | docs/security/secrets-and-keys.md '분석 가명 키' |
-| 코드 | `peaket-data`: 스트림 작업자 `analytics-ingest`·`ops-rt`와 `rt` 표·뷰(docs/streaming.md), 심장 박동 발행기 `rt-pulse`, dbt 프로젝트 `analytics`(`metrics.yml`, `rules.yml`), `close-runner`(실시간 원시 표 다시 채우기 명령 포함), 랭킹 게시 잡 `ranking-publisher`(§8.5) |
+| 코드 | `peaket` 저장소의 `services/`: 스트림 작업자 `analytics-ingest`·`ops-rt`(docs/streaming.md), 심장 박동 발행기 `rt-pulse`, `close-runner`(실시간 원시 표 다시 채우기 명령 포함), 랭킹 게시 잡 `ranking-publisher`(§8.5). `data/`: dbt 프로젝트 `analytics`(`metrics.yml`, `rules.yml`)와 `rt` 표·뷰의 이전 파일 |
 
 ## 13. 테스트 포인트
 

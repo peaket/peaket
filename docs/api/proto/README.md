@@ -1,9 +1,9 @@
 # 내부 gRPC 계약 초안(.proto)
 
-- **독자와 용도**: 서비스 개발자가 서비스끼리 부르는 gRPC(서비스끼리 함수를 부르듯 빠르게 호출하는 통신 방식) 호출의 모양, 즉 요청·응답·결과 값을 확인할 때 읽는다. 계약 저장소(`peaket-contracts`)로 옮길 때의 출발점이기도 하다. 외부 API는 docs/api/openapi.yaml, 이벤트는 docs/api/asyncapi.yaml이 정본이다.
+- **독자와 용도**: 서비스 개발자가 서비스끼리 부르는 gRPC(서비스끼리 함수를 부르듯 빠르게 호출하는 통신 방식) 호출의 모양, 즉 요청·응답·결과 값을 확인할 때 읽는다. 계약 원본은 이 폴더(`peaket` 저장소의 docs/api/proto/)에 그대로 두고, 여기서 만든 코드는 `packages/contracts`에 생긴다(ADR-0165). 외부 API는 docs/api/openapi.yaml, 이벤트는 docs/api/asyncapi.yaml이 정본이다.
 - **원본 출처**: 2026-10-22 소유자 요청으로 만든 초안이다. 소유자가 멘토의 기준("API 명세는 OpenAPI나 protobuf 같은 표준 형식 파일로 둔다")으로 문서 구성을 점검하게 했고, 점검에서 서비스 사이 gRPC 계약이 글과 표로만 있고 `.proto` 파일이 없음을 찾았다. 호출 목록과 필드는 docs/architecture.md §3.2(통신 표)와 기능 설계서의 흐름도에서 옮겼다.
 - **기준 기획 버전**: v1.0. 작성 2026-10-22.
-- **표시 규칙**: 이 폴더 전체가 추천 적용(2026-10-22) 초안이다. 파일마다 머리의 '정본' 줄이 근거 문서다. wbs 0.2.2(proto·Avro·Schema Registry CI)에서 `peaket-contracts`로 옮기며 확정하고, 그 뒤에는 그쪽이 정본이다.
+- **표시 규칙**: 이 폴더 전체가 추천 적용(2026-10-22) 초안이다. 파일마다 머리의 '정본' 줄이 근거 문서다. wbs 0.2.2(proto·Avro·Schema Registry CI)에서 계약 검사(`buf breaking` 등)를 붙이며 확정하고, 그 뒤에는 이 폴더의 파일이 정본이다(ADR-0165).
 
 ## 1. 파일
 
@@ -57,9 +57,9 @@ docs/api/proto/
 
 '통신 표'는 docs/architecture.md §3.2에 그 호출이 적혀 있는지다. 흐름도에만 있던 호출은 이 초안에서 처음 계약으로 적었고, 2026-10-22에 통신 표에 더했다(ADR-0084).
 
-2026-10-28에 결제창 값과 시각의 형을 맞췄다(추천 적용 2026-10-28, 기술 검토 낮음-028). `PrepareCheckoutResponse.checkout`은 `map<string, string>`에서 결제사별 메시지의 `oneof`(`TossCheckout toss`, `PortoneCheckout portone`, 시뮬레이터는 토스와 같은 `TossCheckout simulator`)로 바꿔, 키 이름 실수를 컴파일과 `buf`가 잡게 했다. 같은 파일의 `ConfirmPaymentRequest`가 이미 결제사별 `oneof`다. 문자열이던 시각 둘(`ApplyModerationRequest.ends_at`, `ApplyControlResponse.applied_at`)은 다른 계약처럼 `google.protobuf.Timestamp`로 바꿨다. 셋 다 계약 저장소로 옮기기 전 초안이라 번호를 다시 썼고, 이 변경도 protoc로 컴파일해 보지 않았다. openapi `PaymentAttempt.checkout`도 같은 칸의 `TossCheckout`·`PortoneCheckout` 스키마로 맞췄다.
+2026-10-28에 결제창 값과 시각의 형을 맞췄다(추천 적용 2026-10-28, 기술 검토 낮음-028). `PrepareCheckoutResponse.checkout`은 `map<string, string>`에서 결제사별 메시지의 `oneof`(`TossCheckout toss`, `PortoneCheckout portone`, 시뮬레이터는 토스와 같은 `TossCheckout simulator`)로 바꿔, 키 이름 실수를 컴파일과 `buf`가 잡게 했다. 같은 파일의 `ConfirmPaymentRequest`가 이미 결제사별 `oneof`다. 문자열이던 시각 둘(`ApplyModerationRequest.ends_at`, `ApplyControlResponse.applied_at`)은 다른 계약처럼 `google.protobuf.Timestamp`로 바꿨다. 셋 다 계약 검사를 붙이기 전(wbs 0.2.2) 초안이라 번호를 다시 썼고, 이 변경도 protoc로 컴파일해 보지 않았다. openapi `PaymentAttempt.checkout`도 같은 칸의 `TossCheckout`·`PortoneCheckout` 스키마로 맞췄다.
 
-2026-10-28에 판매 승인 단위(공연, ADR-0093)를 초안에 맞췄다. `RecordSaleReviewResultRequest`의 1번 필드를 `event_id`에서 `production_id`로 바꾸고, 승인 본문의 회차별 규모(`EventScale`·`ScaleLevel`)·공연장·아티스트·다른 이름을 5~8번으로 더했다. 아직 계약 저장소로 옮기기 전이라 번호 1을 다시 썼다. 옮긴 뒤라면 §2 '버전' 규칙대로 새 번호와 `reserved`로 한다. 같은 때 proto·Avro의 다른 회차 칸을 훑었다. 결제사 지정·전환과 새 결제 일시 정지는 회차 칸이라(ADR-0093 결정 2) `PrepareCheckoutRequest.event_id`와 `GetNewPaymentPause`는 그대로다. 정산(`trade.settlements`)도 회차 단위라 그대로다. 이 변경도 작업 환경에 protoc가 없어 아직 컴파일해 보지 않았다(추천 적용 2026-10-28, 기술 검토 중간-086).
+2026-10-28에 판매 승인 단위(공연, ADR-0093)를 초안에 맞췄다. `RecordSaleReviewResultRequest`의 1번 필드를 `event_id`에서 `production_id`로 바꾸고, 승인 본문의 회차별 규모(`EventScale`·`ScaleLevel`)·공연장·아티스트·다른 이름을 5~8번으로 더했다. 아직 계약 검사를 붙이기 전(wbs 0.2.2)이라 번호 1을 다시 썼다. 확정한 뒤라면 §2 '버전' 규칙대로 새 번호와 `reserved`로 한다. 같은 때 proto·Avro의 다른 회차 칸을 훑었다. 결제사 지정·전환과 새 결제 일시 정지는 회차 칸이라(ADR-0093 결정 2) `PrepareCheckoutRequest.event_id`와 `GetNewPaymentPause`는 그대로다. 정산(`trade.settlements`)도 회차 단위라 그대로다. 이 변경도 작업 환경에 protoc가 없어 아직 컴파일해 보지 않았다(추천 적용 2026-10-28, 기술 검토 중간-086).
 
 | 부르는 쪽 → 받는 쪽 | 호출 | 하는 일 | 멱등 키 | 정본 흐름 | 통신 표 |
 | --- | --- | --- | --- | --- | --- |
@@ -111,7 +111,7 @@ docs/api/proto/
 
 | 통신 | 이유 | 다음 |
 | --- | --- | --- |
-| Kafka 이벤트 스키마(Avro `.avsc`) | 정본은 asyncapi.yaml이고, Avro 원본은 `peaket-contracts`에 둔다고만 적혀 있다 | 초안은 docs/api/avro/에 있다(2026-10-22). 등록과 CI 연결은 wbs 0.2.2다 |
+| Kafka 이벤트 스키마(Avro `.avsc`) | 정본은 asyncapi.yaml이고, Avro 원본은 같은 계약 폴더(docs/api/)에 둔다(ADR-0165) | 초안은 docs/api/avro/에 있다(2026-10-22). 등록과 CI 연결은 wbs 0.2.2다 |
 | 관제 지표 서버 스트리밍(ops-svc) | 2026-10-28 ADR-0100이 지웠다. 콘솔의 실시간 값은 SSE 흐름(asyncapi `sse.ops-live`·`sse.ops-event-live`)으로 받는다 | 더하지 않는다 |
 | 주최 측 귀책 배상금 송금(purchase-svc → payment-svc) | 송금 포트는 정본에 있지만(ADR-0046) 결제사 송금 계약 전이다 | 결제사 계약 뒤 더한다 |
 | 정산 계좌 변경 뒤 지급대행 등록 갱신 | 정본(docs/features/settlement.md)에 절차가 있지만 호출이 없다 | `RegisterPayoutSeller`를 다시 쓸지 정한 뒤 더한다 |

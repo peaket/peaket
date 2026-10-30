@@ -1,6 +1,6 @@
 # 프론트엔드 상세 설계 (RADIO)
 
-- **독자와 용도**: 프론트엔드 엔지니어가 `peaket-frontend` 저장소(앱 넷과 포렌식 리플레이 데모, 공용 패키지)를 만들 때, 그리고 리뷰어가 화면 쪽 설계가 요구사항·API(프로그램끼리 요청과 응답을 주고받는 창구) 계약·보안 판정과 맞는지 검증할 때 기준으로 읽는 정본이다. 화면을 무엇으로 그리는지, 어디에 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)하는지, 상태를 어느 층에 두는지, 서버·실시간 채널·다른 앱 조각과 어떤 계약으로 말하는지를 RADIO 순서로 적는다. 성능·접근성·보안·오프라인·관측(지표·로그·요청 기록으로 시스템 안을 들여다보는 일)·시험·배포를 어떻게 지키는지도 같은 순서로 적는다.
+- **독자와 용도**: 프론트엔드 엔지니어가 모노레포(코드 전부를 저장소 하나에 폴더로 나눠 담는 방식) `peaket`의 화면 쪽(`apps/`의 앱 넷과 포렌식 리플레이 데모·관제 원격 위젯, `packages/`의 화면용 공용 패키지)을 만들 때, 그리고 리뷰어가 화면 쪽 설계가 요구사항·API(프로그램끼리 요청과 응답을 주고받는 창구) 계약·보안 판정과 맞는지 검증할 때 기준으로 읽는 정본이다. 화면을 무엇으로 그리는지, 어디에 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)하는지, 상태를 어느 층에 두는지, 서버·실시간 채널·다른 앱 조각과 어떤 계약으로 말하는지를 RADIO 순서로 적는다. 성능·접근성·보안·오프라인·관측(지표·로그·요청 기록으로 시스템 안을 들여다보는 일)·시험·배포를 어떻게 지키는지도 같은 순서로 적는다.
 - **원문 출처**: 틀은 GreatFrontEnd 'Front End System Design Playbook'의 The RADIO Framework(2026-10-21 열람)를 따른다. 내용은 docs/architecture.md §6·§10(원문 설계서 3·4·5·6장의 프론트엔드 부분), planning/02·04, design/d1~d5, docs/api/*, docs/features/*, docs/security/asvs/*, docs/observability.md §11, docs/devops.md, docs/infra.md, prototype/을 모아 자세히 정했다. 결정은 [ADR-0079](adr/0079-frontend-radio-detailed-design.md)에 있다. 전역 상태 도구를 Zustand 하나로 줄인 결정은 [ADR-0092](adr/0092-single-client-state-library-zustand.md)에 있다.
 - **기준 기획 버전**: v1.0.
 - **표시 규칙**: 잴 값은 [가정]으로, 이 문서에서 처음 정한 세부는 '추천 적용, 2026-10-21'(ADR-0079 결정 번호)로 적는다. 2026-10-27에 더한 콘솔의 켜 둔 동안 성능 규칙(화면별 늦게 싣기, 안 보이는 위젯의 구독 멈춤, Canvas 그래프와 들고 있는 양의 상한, 장시간 시험)은 '추천 적용 2026-10-27'(ADR-0091)로 적는다. 같은 날 정한 상태 도구의 세부(에디터 문서 모양, 관제 상태 통로, 동작 이름 규칙)는 '추천 적용 2026-10-27'(ADR-0092)로 적는다. 숫자에는 증명 수준을 붙인다(planning/02 §3.1 원칙 5). 증명 수준은 실측(PC), 외삽(잰 범위의 결과를 식으로 늘려 더 큰 규모의 값을 구한 것), 문서 인용, 설계 목표다. 외부 사실(라이브러리 판·브라우저 지원·표준 문장)은 2026-10-21에(ADR-0091의 것은 2026-10-27에) 원문으로 확인했고, 확인한 곳은 §6.4에 모았다.
@@ -43,7 +43,7 @@ RADIO는 서버를 검은 상자로 두라고 한다. 이 문서도 게이트웨
 
 - **앱**: 소비자 웹(`apps/web`, `www.peaket.example`), 파트너 콘솔(`apps/partner`, `partner.peaket.example`), 관제 콘솔(`apps/console-host`, `console.peaket.example`), 게이트 스캐너 PWA(설치형 앱처럼 쓰는 웹 앱. `apps/scanner`, `scanner.peaket.example`). 소비자 웹 안의 **대기실 경량 페이지**(`apps/web/queue-room`)와 **월렛**(`/my/tickets`)은 따로 부른다.
 - **API 호스트**: `api`(gw-fan), `queue`(gw-queue), `queue-files`(대기열 파일 배포), `partner-api`(gw-partner, partner 배포), `ops-api`(gw-ops, console 배포), `scanner-api`(gw-scanner). 모두 화면 호스트와 다른 출처이고 같은 사이트(`peaket.example`)다.
-- **원격 위젯**: 관제 콘솔에 Module Federation으로 끼우는 서비스 저장소의 화면 조각이다.
+- **원격 위젯**: 관제 콘솔에 Module Federation으로 끼우는 화면 조각이다. 그 서비스를 맡은 가상 팀이 `apps/widgets/<원격 이름>`(대기열 `queue`, 구매 `purchase`)에서 만들고, 관제 호스트와 따로 배포한다(ADR-0165).
 - **흐름 표시값**: 브라우저가 재서 보내는 업무 지연(대기 반영 시간, 좌석 델타 종단 지연, 좌석맵 준비 시간, 결제 확정 시간, 스캔 판정 시간).
 
 ## 1. 요구사항(R)
@@ -213,10 +213,10 @@ flowchart LR
 
 ### 2.2 저장소와 패키지 구조
 
-`peaket-frontend`는 Turborepo 2.11 + pnpm 12 모노레포다(architecture §10). 아래 구조는 이 문서가 정한 것이다(ADR-0079 결정 21).
+화면 코드는 모노레포 `peaket`의 `apps/`와 `packages/`에 있다. 빌드 도구는 Turborepo 2.11 + pnpm 12이고, 서버·작업자 코드와 같은 pnpm 작업 공간(한 저장소 안의 여러 패키지를 함께 설치하고 서로 잇게 묶은 것) 하나에 든다(architecture §10, ADR-0165). 아래는 그 가운데 화면 쪽 폴더이고, 구조는 이 문서가 정한 것이다(ADR-0079 결정 21). 문서·서버·데이터·인프라 폴더는 devops §2.1에 있다.
 
 ```text
-peaket-frontend/
+peaket/
   apps/
     web/                 소비자 웹(Next.js 16 App Router)
       app/               Next.js 경로(App Router). src/_app·src/_pages의 것을 다시 내보내기만 한다. 루트 레이아웃이 다른 경로 묶음 둘: (cached) 묶음 A, (request) 묶음 B·E·F(§2.5)
@@ -229,6 +229,8 @@ peaket-frontend/
     console-host/        관제 콘솔 호스트(webpack 5 + Module Federation)
     scanner/             스캐너 PWA(Vite 8 + vite-plugin-pwa)
     forensics/           포렌식 리플레이 1단계 데모(Vite 8, 정적, ADR-0080)
+    widgets/queue/       관제 원격 위젯(대기열 팀 주인, §4.5)
+    widgets/purchase/    관제 원격 위젯(구매 팀 주인, §4.5)
   packages/
     api-client/          orval 생성물 + 실행 정책(§4.1)
     telemetry/           lite(대기실)·full 두 판(§5.16)
@@ -247,12 +249,12 @@ peaket-frontend/
 | 대기실 경량 페이지 | `queue-room/`은 `packages/api-client`의 대기열 부분, `packages/telemetry`의 lite 판, `packages/ds`의 토큰 부분집합 CSS만 가져온다. React(화면 라이브러리)·Next.js를 가져오면 린트가 막는다 |
 | 소비자 웹 경로 묶음 | `app/(cached)/`에는 CDN이 캐시하는 화면(헤더 묶음 A)만, `app/(request)/`에는 요청마다 nonce로 그리는 화면(B·E·F)만 둔다. 두 묶음은 루트 레이아웃(모든 화면을 감싸는 맨 바깥 레이아웃)을 따로 갖는다. `(request)`의 루트 레이아웃은 요청의 nonce를 읽어 정적 셸 없이 그린다(§2.5). 어느 묶음에 둘지는 §2.5 표의 헤더 묶음 열을 따르고, 맞지 않으면 린트가 막는다(추천 적용 2026-10-28, 기술 검토 중간-094) |
 | SEED CSS | SEED 전체 CSS(`all*.css`)는 가져오지 않는다(린트가 막는다). 부품 CSS는 `@seed-design/react` 부품이 가져오는 자기 recipe만 실리고, base·recipe 모두 층 판(`*.layered.css`)이다. 층 순서 선언 `@layer theme, base, seed-base, seed-components, components, utilities;`는 앱이 가장 먼저 싣는 CSS 파일 맨 앞에 둔다. 층 판은 내보내기 조건 `seed-layered`로 고르는데(Vite `resolve.conditions`, webpack `resolve.conditionNames`), Next.js 앱의 Turbopack이 이것을 고를 수 있는지는 PoC FE-T36(wbs 0.6.1)으로 본다(design/d2 §1, 추천 적용 2026-10-28, 기술 검토 중간-097) |
-| 원격 위젯 | 서비스 저장소의 원격 모듈은 `@peaket/console-contract`와 공유 싱글턴만 가져온다(§4.5). 같은 소스를 위젯 패키지 `@peaket/widget-<원격 이름>`로도 게시해, 호스트가 한 앱 기준선을 빌드한다(FE-T29, 추천 적용 2026-10-28, ADR-0100) |
+| 원격 위젯 | `apps/widgets/<원격 이름>`의 원격 모듈은 `@peaket/console-contract`와 공유 싱글턴만 가져온다(§4.5). 같은 소스를 작업 공간 패키지 `@peaket/widget-<원격 이름>`로도 내보내고, 호스트가 그것을 `workspace:`로 이어 한 앱 기준선을 빌드한다(FE-T29, 추천 적용 2026-10-28, ADR-0100). 이 패키지는 게시하지 않는다(ADR-0165) |
 | 좌석맵 패키지 | `packages/seatmap`은 화면 상태를 모르고 열 배열·격자 색인·그리기만 한다. 소비자 웹은 실시간 델타를, 포렌식 앱은 재생 사건을 넣는다(ADR-0080 결정 5) |
 | 생성물 | `packages/api-client/src/gen/`과 `packages/validation/src/gen/`(orval이 계약에서 만든 요청·응답 Zod 스키마)은 손으로 고치지 않는다. 계약(openapi·asyncapi)이 바뀌면 다시 만들고, CI가 다시 만든 결과와 차이가 없는지 본다(`contract-check`). 손으로 쓰는 Zod는 생성 스키마를 넓히지 않고 규칙만 덧붙인다(계약에 적을 수 없는 grapheme 단위 길이, 금칙어, 판매 정책 DSL. 이름은 그 필드의 openapi 설명에 적는다, docs/api/guidelines.md §1, 추천 적용 2026-10-28, 기술 검토 중간-085) |
-| 게시 | `packages/*`는 Changesets로 SemVer 판을 매겨 GitHub Packages의 `@peaket` 범위에 게시한다(devops §2.2). 대상은 `ds`·`telemetry`·`validation`·`api-client`·`console-contract`다(원격 위젯 저장소는 `console-contract`·`ds`·`telemetry`를, 서버는 `validation`을 쓴다, devops §3.2) |
+| 게시 | `packages/*`는 레지스트리에 게시하지 않고 판 번호도 매기지 않는다. 앱·원격 위젯·서버는 `@peaket/*` 의존성을 `workspace:` 프로토콜(같은 작업 공간 안의 패키지만 가리키는 의존성 표기)로만 적어 같은 커밋의 소스를 쓴다. 이 표기는 작업 공간 밖의 패키지로 풀리지 않아, 공개 레지스트리에 같은 이름이 올라와도 설치되지 않는다. 린트가 이 표기를 검사한다(devops §2.1, ADR-0165). 함께 쓰는 곳은 원격 위젯이 `console-contract`·`ds`·`telemetry`, 서버가 `validation`이다(devops §3.2) |
 
-Turborepo 작업은 `lint`·`typecheck`·`test`·`build`·`size`·`e2e`이고, PR에서는 바뀐 앱·패키지의 작업만 돈다(devops §3.2).
+Turborepo 작업은 `lint`·`typecheck`·`test`·`build`·`size`·`e2e`이고, PR에서는 `peaket`의 `ci.yml`이 Turborepo `--affected`로 고른 범위(바뀐 앱·패키지와 그것에 기대는 것)의 작업만 돈다(devops §3, ADR-0165 결정 3).
 
 ### 2.3 앱별 구조
 
@@ -891,10 +893,10 @@ export type HostView = Readonly<Pick<HostState, "scope" | "control" | "autoActio
 - **`remotes.json`**(저장소에 적어 둔 대로 배포를 맞추는 GitOps로 관리하고, 호스트가 읽는다): `[{name, sha, entry: "/remotes/<name>/<sha>/remoteEntry.js", integrity: "sha384-…", contractMajor}]`.
 - **싣는 순서**: 목록 읽기 → 계약 판 확인 → 런타임 플러그인 `createScript`가 `integrity`·`crossorigin="anonymous"`를 붙인 스크립트 요소를 만든다(시간 초과 5초 [가정]) → 실패하면 `loadEntryError`로 한 번 다시 → 또 실패하면 `errorLoadRemote`가 대체 위젯을 돌려준다. 대체 위젯은 그 칸만 design/d5 §7.2 '위젯 오류'와 같은 카드('이 위젯만 불러오지 못했습니다', [다시 시도], 지표와 로그를 그래프로 보여 주는 도구인 Grafana 링크)로 바꾼다. 위젯 안의 그리기 오류는 CMP-035 오류 경계가 그 칸만 바꾼다.
 - **공유 싱글턴**: `react`, `react-dom`, `zustand`, `chart.js`(처음 그래프를 그릴 때 한 번 받는다, ADR-0091 결정 4), `@peaket/ds`, `@peaket/telemetry`, `@peaket/console-contract`(이것만 `strictVersion`). 버전 범위는 E2E로 검사한다(devops §6.6).
-- **금지**: 원격 위젯이 `fetch`·WebSocket·`localStorage`를 직접 쓰거나 토큰을 갖는 것, 전역(`window`)에 값을 두는 것(ASVS 3.2.3 채택), 호스트 상태를 바꾸는 것(바꿀 일은 `WidgetProps`의 콜백으로 호스트에 알린다, ADR-0092). 공용 ESLint 설정과 원격 저장소 CI가 막는다.
+- **금지**: 원격 위젯이 `fetch`·WebSocket·`localStorage`를 직접 쓰거나 토큰을 갖는 것, 전역(`window`)에 값을 두는 것(ASVS 3.2.3 채택), 호스트 상태를 바꾸는 것(바꿀 일은 `WidgetProps`의 콜백으로 호스트에 알린다, ADR-0092). 공용 ESLint 설정과 원격 위젯 폴더를 검사하는 CI 잡이 막는다.
 - **원격 위젯의 상태**: 원격 안의 Zustand 저장소에 둔다. 위젯 자리마다 하나를 만들고 자리가 없어지면 버리며, 호스트 저장소에 끼워 넣지 않는다(§3.10, ADR-0092 결정 3).
 - **구독 수명과 보이기**(추천 적용 2026-10-27, ADR-0091 결정 3. 통로 이름은 ADR-0100): 위젯은 `data.subscribe`를 효과(`useEffect`) 안에서 열고 정리 함수에서 닫는다. 그리는 중에는 구독하지 않는다. 호스트는 위젯 자리마다 따로 만든 `ConsoleServices`를 넘기고, 그 자리가 안 보이면(고르지 않은 탭, 숨긴 브라우저 탭) 그 안에서 구독을 멈췄다가 다시 연다. 화면 밖으로 스크롤된 자리에는 값을 넘기지 않고 마지막 값만 들고 있다가, 보이면 넘긴다. 위젯은 자기가 보이는지 따지지 않는다. 다만 `collapsed`가 참이면 머리(제목·상태 점·핵심 숫자 한 줄)만 그린다(§5.7, FE-T26).
-- **한 앱 기준선(추천 적용 2026-10-28, ADR-0100 결정 6)**: 원격을 가진 서비스 저장소는 같은 위젯 소스를 위젯 패키지(`@peaket/widget-<원격 이름>`)로도 게시한다. 호스트 저장소는 같은 판의 패키지를 한 앱(경로별 `lazy` + 위젯 자리 오류 경계 + 위젯마다 Zustand 저장소)으로도 빌드해, 같은 화면에서 첫 그림 시간·첫 JS·원격 실패 때 격리·위젯 하나를 내보내는 시간을 Module Federation 빌드와 견준다(FE-T29). 두 빌드는 같은 계약을 쓰므로 위젯 코드는 하나다.
+- **한 앱 기준선(추천 적용 2026-10-28, ADR-0100 결정 6)**: 원격 위젯 폴더(`apps/widgets/<원격 이름>`)는 같은 위젯 소스를 작업 공간 패키지(`@peaket/widget-<원격 이름>`)로도 내보낸다. 게시하지 않는다(ADR-0165). 호스트는 같은 커밋의 그 패키지를 `workspace:`로 이어 한 앱(경로별 `lazy` + 위젯 자리 오류 경계 + 위젯마다 Zustand 저장소)으로도 빌드해, 같은 화면에서 첫 그림 시간·첫 JS·원격 실패 때 격리·위젯 하나를 내보내는 시간을 Module Federation 빌드와 견준다(FE-T29). 두 빌드는 같은 계약을 쓰므로 위젯 코드는 하나다.
 
 ### 4.6 관제 REST·SSE와 파트너 REST(ADR-0100)
 
@@ -1191,7 +1193,7 @@ sequenceDiagram
 | 월렛 | 120KB [가정] | 15KB [가정] | 오프라인 첫 그림 1초 [가정] | QR 회전 그리기 50ms [가정] | size-limit, Playwright 오프라인 |
 | 그 밖 소비자 화면 | 200KB [가정] | 25KB [가정] | INP 200ms, LCP 2.5초 | | size-limit |
 | 파트너 콘솔 | 경로마다 250KB [가정]. 늦게 싣는 덩어리: 에디터 300KB [가정], 시뮬레이터 30KB [가정], 그래프 60KB [가정], 서식 글 편집기 80KB [가정](§5.6. 끌어 놓기 덩어리는 기술 검토 낮음-098로 없앴다) | 30KB [가정] | INP 200ms(전 화면, NFR-012) | 10MB 파일 가져오기의 진행률 표시, 판매 현황을 8시간 [가정] 켜 둔 뒤의 힙·DOM 기준(FE-T27) | size-limit, FE-T25, Lighthouse CI(판매 현황 데모), Playwright, memlab(FE-T27) |
-| 관제 콘솔 | 호스트 250KB [가정], 화면으로 처음 이동할 때 더 받는 덩어리마다 80KB [가정], 원격마다 80KB [가정], 그래프 공유 덩어리 60KB [가정] | 30KB [가정] | INP 200ms, 지표 반영 p95 5초(NFR-009) | 위젯 그리기 묶음 250ms [가정], 4시간 [가정] 켜 둔 뒤의 힙 증가 시간당 5% [가정] 이하·긴 작업 0(FE-T27) | size-limit(원격 저장소 CI에도), FE-T25·FE-T26, Lighthouse CI(대시보드 데모), Playwright 성능 추적·memlab(FE-T27), 한 앱 기준선 비교(FE-T29, ADR-0100) |
+| 관제 콘솔 | 호스트 250KB [가정], 화면으로 처음 이동할 때 더 받는 덩어리마다 80KB [가정], 원격마다 80KB [가정], 그래프 공유 덩어리 60KB [가정] | 30KB [가정] | INP 200ms, 지표 반영 p95 5초(NFR-009) | 위젯 그리기 묶음 250ms [가정], 4시간 [가정] 켜 둔 뒤의 힙 증가 시간당 5% [가정] 이하·긴 작업 0(FE-T27) | size-limit(원격 위젯 폴더의 CI 잡에도), FE-T25·FE-T26, Lighthouse CI(대시보드 데모), Playwright 성능 추적·memlab(FE-T27), 한 앱 기준선 비교(FE-T29, ADR-0100) |
 | 스캐너 | 150KB [가정] + 디코더 WebAssembly(서비스 워커가 미리 저장해 둔다) | 15KB [가정] | 판정 p95 150ms(NFR-010) | 첫 실행은 근무 준비 때 | 기기 벤치, size-limit |
 | 포렌식 리플레이(1단계 데모, 2단계 페이지) | 200KB [가정](`apache-arrow` 포함) + Worker 80KB [가정] | 20KB [가정] | 필터 반영 p95 50ms [가정], 재생 p95 프레임 20ms [가정], INP 200ms | 사건 300만·파일 200MB [가정] 상한(docs/features/forensic-replay.md §4.3) | size-limit, Playwright 성능 추적, memlab |
 
@@ -1410,10 +1412,10 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 
 #### 5.14.5 공급망과 위험 구성 요소(ADR-0079 결정 22)
 
-pnpm 공급망 설정(`minimumReleaseAge`·`trustPolicy`·`blockExoticSubdeps`·`strictDepBuilds`·`trustLockfile`·`allowBuilds`)과 판(pnpm 12)은 docs/devops.md §4.4가 모든 Node 저장소의 정본이다. 이 저장소는 그 공통 설정을 그대로 쓰고, 설치 스크립트 허용 목록만 더한다(추천 적용 2026-10-28, 기술 검토 낮음-014).
+pnpm 공급망 설정(`minimumReleaseAge`·`trustPolicy`·`blockExoticSubdeps`·`strictDepBuilds`·`trustLockfile`·`allowBuilds`)과 판(pnpm 12)은 docs/devops.md §4.4가 정본이다. `peaket`의 pnpm 작업 공간은 하나라 화면과 서버가 같은 설정 파일을 쓴다. 화면 쪽은 그 공통 설정을 그대로 쓰고, 설치 스크립트 허용 목록에 화면이 쓰는 것만 더한다(추천 적용 2026-10-28, 기술 검토 낮음-014, ADR-0165).
 
 ```yaml
-# pnpm-workspace.yaml(peaket-frontend). 공통 설정은 devops §4.4 그대로이고 이 저장소에만 더하는 것
+# peaket 뿌리의 pnpm-workspace.yaml 가운데 화면 쪽 때문에 더하는 것(공통 설정은 devops §4.4 그대로)
 allowBuilds:
   esbuild: true
 ```
@@ -1556,26 +1558,26 @@ allowBuilds:
 | FE-T43 | 웹 푸시 구독이 로그아웃과 월렛 정리를 넘어 남는지(추천 적용 2026-10-30, §5.4·§5.14.4) | Playwright로 웹 푸시 권한을 준 브라우저에서 구독한 뒤 로그아웃(3번 입장 키 지우기 포함)과 월렛 킬 스위치를 차례로 실행 | PR | 서버 쪽 구독 해제 `DELETE`가 로그아웃 요청보다 먼저 나간다. `/push/` 범위의 서비스 워커 등록과 브라우저의 푸시 구독은 남고, 월렛 워커(`/my/tickets/`)만 풀린다. 다시 로그인하면 `pending` 표시에 따라 다시 묶는다 |
 
 - 기능 설계서의 시험(Q-T·S-T·P-T·I-T·O-T·C-T)은 서버와 흐름 전체를 본다. FE-T는 브라우저 쪽만 본다. 검색의 브라우저 쪽 시험은 docs/features/search.md의 SR-T1(정규화)·SR-T10(한글 조합 중 키)·SR-T11(캐시 키)·SR-T14(noindex)다. 겹치는 시험(Q-T41 사전 요청, P-T38 복귀 화면, S-T15 좌석맵 성능)에서는 FE-T가 그 시험의 브라우저 부분이다.
-- Pact 소비자 계약은 `@peaket/api-client`가 만든다(devops §3.3).
+- Pact 소비자 계약은 `@peaket/api-client`가 만든다(devops §3.3). Pact 파일은 따로 모아 두는 서버(브로커) 없이 `packages/contracts/pacts/`에 두고, 제공자는 지금 소비자의 Pact와 마지막 출시 태그의 소비자 Pact를 모두 검증한다(ADR-0165 결정 4).
 
 ### 5.18 빌드·배포·동결
 
 | 산출물 | 만드는 곳 | 올리는 곳 | 바꾸는 법 | 되돌리기 |
 | --- | --- | --- | --- | --- |
-| 웹 앱 서버 이미지 | `peaket-frontend` 릴리스 가지 | ECR(서명, SBOM, 어느 커밋에서 어떤 빌드 절차로 만들었는지 서명해 남긴 출처 증명) | 카나리(devops §6.2) | 카나리 중단·GitOps 되돌리기 |
+| 웹 앱 서버 이미지 | `peaket` 릴리스 가지의 `apps/web`(마지막 출시 태그 뒤 바뀌었을 때만 새로 빌드, ADR-0165 결정 5) | ECR(서명, SBOM, 어느 커밋에서 어떤 빌드 절차로 만들었는지 서명해 남긴 출처 증명) | 카나리(devops §6.2) | 카나리 중단·GitOps 되돌리기 |
 | 웹 정적 자산(`/_next/static`) | 같은 빌드 | www 배포 S3(더하기만 한다) | 앱 서버보다 먼저 올린다 | 옛 자산이 남아 있다 |
 | 대기실 경량 페이지 셸·자산 | 같은 저장소의 별도 빌드 | www 배포 S3 `/_q/` | 셸 무효화 | 옛 셸을 다시 올린다 |
 | 월렛 서비스 워커 | 같은 빌드 | www 배포 S3 `/my/tickets/sw.js` | 다음 방문 때 활성화 | 킬 스위치 워커 |
 | 웹 푸시 서비스 워커(추천 적용 2026-10-30, §5.4) | 같은 빌드 | www 배포 S3 `/push/sw.js` [가정] | 다음 방문 때 바로 활성화(`skipWaiting`) | 처리기를 고친 새 판. 등록을 푸는 킬 스위치는 모든 구독을 잃으므로 마지막 수단 |
-| 파트너 앱 서버 이미지 | 같은 저장소 | ECR | 카나리 | 위와 같다 |
-| 관제 호스트 | 같은 저장소 | console 배포 S3 | 목록과 함께 | 목록 되돌리기 |
-| 관제 원격 위젯 | 서비스 저장소(공용 워크플로 `build-remote.yml`) | console 배포 S3 `/remotes/<원격>/<SHA>/` | GitOps로 `remotes.json`을 바꾼다 | 목록 되돌리기 |
-| 관제 위젯 패키지(한 앱 기준선) | 서비스 저장소(같은 워크플로가 원격과 함께 게시) | GitHub Packages `@peaket/widget-<원격 이름>` | 운영에는 내지 않는다. FE-T29 비교 빌드에만 쓴다(ADR-0100) | — |
-| 포렌식 리플레이 2단계 페이지(출시 뒤 선택) | `peaket-frontend` `apps/forensics` 운영 빌드 | console 배포 S3 `/forensics/` | 관제 호스트와 같다 | 목록 되돌리기 |
-| 스캐너 PWA | `peaket-frontend` | scanner 배포 S3 | 근무 준비 때 적용 | 목록 되돌리기 |
-| 경로를 바꿔 읽는 엣지 함수 | `peaket-infra` | CloudFront Functions(개발 단계 시험 뒤 게시) | 정본 절차(devops §6.6) | 이전 코드를 다시 게시 |
+| 파트너 앱 서버 이미지 | 같은 저장소의 `apps/partner` | ECR | 카나리 | 위와 같다 |
+| 관제 호스트 | 같은 저장소의 `apps/console-host` | console 배포 S3 | 목록과 함께 | 목록 되돌리기 |
+| 관제 원격 위젯 | `apps/widgets/<원격>`(조직 공용 워크플로 `build-remote.yml`) | console 배포 S3 `/remotes/<원격>/<SHA>/` | GitOps로 `remotes.json`을 바꾼다 | 목록 되돌리기 |
+| 관제 위젯 패키지(한 앱 기준선) | `apps/widgets/<원격>`(작업 공간 패키지 `@peaket/widget-<원격 이름>`) | 올리지 않는다. 비교 빌드가 `workspace:`로 같은 커밋의 소스를 쓴다(ADR-0165) | 운영에는 내지 않는다. FE-T29 비교 빌드에만 쓴다(ADR-0100) | — |
+| 포렌식 리플레이 2단계 페이지(출시 뒤 선택) | `apps/forensics` 운영 빌드 | console 배포 S3 `/forensics/` | 관제 호스트와 같다 | 목록 되돌리기 |
+| 스캐너 PWA | `apps/scanner` | scanner 배포 S3 | 근무 준비 때 적용 | 목록 되돌리기 |
+| 경로를 바꿔 읽는 엣지 함수 | `infra/` | CloudFront Functions(개발 단계 시험 뒤 게시) | 정본 절차(devops §6.6) | 이전 코드를 다시 게시 |
 
-- **CI**(devops §3.2의 '프론트엔드' 유형에 더한다): size-limit, Lighthouse CI, Playwright 3엔진, axe, 번역 키 검사, 운영 묶음 검사(FE-T21), 앱별 SBOM, 숨김 소스 맵을 오류 도구에 올리기(공개 버킷에는 올리지 않는다, ADR-0079 결정 23).
+- **CI**(devops §3.2의 '프론트엔드' 유형, 곧 `ci.yml`의 화면 잡에 더한다, ADR-0165 결정 3): size-limit, Lighthouse CI, Playwright 3엔진, axe, 번역 키 검사, 운영 묶음 검사(FE-T21), 앱별 SBOM, 숨김 소스 맵을 오류 도구에 올리기(공개 버킷에는 올리지 않는다, ADR-0079 결정 23).
 - **정적 업로드 허용 확장자**: `js`·`mjs`·`css`·`woff2`·`avif`·`webp`·`png`·`svg`·`ico`·`json`·`webmanifest`·`wasm`·`html`. `.map`·`.env`·`.git`은 올리지 않는다(ASVS 13.4.7).
 - **동결**(ADR-0079 결정 26, devops §8.1): 대기실 경량 셸, 웹 정적 자산 목록, 월렛 서비스 워커, 웹 푸시 서비스 워커(오픈 알림을 받으므로, 추천 적용 2026-10-30), 경로를 바꿔 읽는 엣지 함수는 소형 온세일 동결 묶음에 든다(대형·중형은 모든 변경을 동결한다). 관제 원격 위젯은 규모와 상관없이 온세일 윈도우(T-10분~T+60분)에 바꾸지 않는다 [가정].
 - **원격 위젯 계약 판**: 호스트와 계약 주판이 다른 원격 위젯은 싣지 않는다. 계약을 깨는 변경은 새 주판으로 내고, 호스트가 두 판을 함께 읽는 기간을 둔다.

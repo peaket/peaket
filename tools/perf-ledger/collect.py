@@ -294,6 +294,7 @@ def collect(a, root):
         'profile': a.profile,
         'scale': {'users': a.users, 'arrival_rps': a.rps, 'duration_s': a.duration, 'warmup_s': a.warmup},
         'scenario': {'path': a.scenario, 'args': a.scenario_args, 'open_model': not a.closed_model},
+        # 코드와 문서가 peaket 한 저장소라 커밋 하나가 둘 다 가리킨다. docs 칸은 비워 둔다(ADR-0165).
         'commit': {'code': a.commit or git_commit(root), 'docs': None},
         'raw_uri': raw_uri,
         'redis_tls': redis_tls,

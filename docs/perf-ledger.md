@@ -56,7 +56,7 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | `profile` | 표준 인프라 환경 프로파일 (§4, docs/infra.md §3) | `local-10k`, `cloud-calib` |
 | `scale` | 부하 규모 객체 (`users`: 가상 대기자 수, `arrival_rps`: 도착률, `duration_s`, `warmup_s`) | 동시 10,000명, 20,000 RPS(초당 요청 수), 유지 600초, 예열 120초 |
 | `scenario` | k6 실행 스크립트의 상대 경로, 실행 인자, 오픈 모델(응답 속도와 상관없이 사용자가 정해진 속도로 계속 도착하게 하는 부하 시험 방식) 여부 | `peaket-loadtest/k1-entry.js`, `open_model: true` |
-| `commit` | 벤치마크 대상 소스 코드 저장소의 커밋 해시와 문서 커밋 해시 | `git rev-parse HEAD` 해시값 |
+| `commit` | 벤치마크 대상 `peaket` 저장소의 커밋 해시. 코드와 문서가 한 저장소에 있어 커밋 하나가 둘 다 가리킨다. `commit.code`에 적고, `commit.docs` 칸은 비워 둔다(ADR-0165) | `git rev-parse HEAD` 해시값 |
 | `raw_uri` | 큰 원본(`metrics/`·`traces/`·`grafana/`·`stdout.log`)을 둔 S3 원본 버킷 주소. 파일마다 해시는 `SHA256SUMS`에 있다(§2.1·§9, 추천 적용 2026-10-28, 기술 검토 낮음-056) | `s3://<원본 버킷>/runs/2026-11-02-k1-v0-local-10k/` |
 | `generator` | 부하 발생기 대수, 인스턴스 사양, k6 버전, 발생기 병목을 보여 주는 지표 `dropped_iterations` | 1대(PC, 코어 8개 배정), k6 v0.50.0, `dropped_iterations: 0` |
 | `host` | 같은 PC에서 잴 때 점마다 남기는 호스트 지표: 호스트 전체 CPU 사용률, 실행을 기다리는 프로세스 수(`procs_running`), 파드별 CPU 스로틀 비율, 코어 배치, 표시('호스트 포화'·'코어 혼합'. 기준은 docs/verification.md §3.5 6번, ADR-0096). 수집 도구 반영은 wbs 6.1.1 | `cpu_pct: 72`, `procs_running: 18`, `flags: []` |

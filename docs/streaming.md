@@ -7,13 +7,13 @@
 
 ## 1. 작업자 목록
 
-| 작업자 | 저장소 | 하는 일 | 입력 | 상태 | 출력 | 전달 보장 | 자원 |
+| 작업자 | 폴더(`peaket`) | 하는 일 | 입력 | 상태 | 출력 | 전달 보장 | 자원 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `analytics-ingest` | peaket-data | 원본 적재, 회차별 가명, 금지 필드 제거(analytics §3) | analytics §3.1의 토픽(메시지를 종류별로 모아 두는 통로) 10개. 거래·제어 클러스터 7개와, 시스템이 내보내는 운영 신호인 텔레메트리 클러스터 3개다 | 없다(회차 키 캐시는 메모리) | 브론즈, 적재 거절 기록 | 적어도 한 번. 중복은 실버가 지우고, 빠짐은 커버리지 대조(§6)가 잡는다 | Spot(싸지만 회수될 수 있는 클라우드 서버) 허용 |
-| `ops-rt` | peaket-data | 관제 실시간 표의 원시 사건 적재(§4). 집계하지 않는다 | 거래·제어 클러스터의 `trade.orders`·`trade.payments`·`trade.seats`(`SeatEvent`만. 같은 토픽의 회차 판매 상태 `EventSaleChanged`는 건너뛴다, ADR-0122)·`trade.tickets`, 텔레메트리 클러스터의 `telemetry.queue`(`QueueAggregate`·`PipelinePulse`)·`telemetry.purchase`·`telemetry.trust-verdicts` | 없다 | `rt` 원시 표 다섯(§4.3) | 적어도 한 번. 중복은 조회 시점 집계가 `eventKey`로 지운다 | 온디맨드(정가로 계속 쓰는 서버) |
-| `trust-reassess` | peaket-trust | 봇 대기 중 재평가와 행동 신호 원시 적재(§5) | 텔레메트리 클러스터의 `telemetry.behavior` | 세션·캐시 Redis의 정렬 집합(10분) | `telemetry.trust-candidates`, 행동 신호 원시 표(30일) | 적어도 한 번. 후보는 `eventKey`로 중복 제거 | 온디맨드 |
+| `analytics-ingest` | `services/analytics-ingest` | 원본 적재, 회차별 가명, 금지 필드 제거(analytics §3) | analytics §3.1의 토픽(메시지를 종류별로 모아 두는 통로) 10개. 거래·제어 클러스터 7개와, 시스템이 내보내는 운영 신호인 텔레메트리 클러스터 3개다 | 없다(회차 키 캐시는 메모리) | 브론즈, 적재 거절 기록 | 적어도 한 번. 중복은 실버가 지우고, 빠짐은 커버리지 대조(§6)가 잡는다 | Spot(싸지만 회수될 수 있는 클라우드 서버) 허용 |
+| `ops-rt` | `services/ops-rt` | 관제 실시간 표의 원시 사건 적재(§4). 집계하지 않는다 | 거래·제어 클러스터의 `trade.orders`·`trade.payments`·`trade.seats`(`SeatEvent`만. 같은 토픽의 회차 판매 상태 `EventSaleChanged`는 건너뛴다, ADR-0122)·`trade.tickets`, 텔레메트리 클러스터의 `telemetry.queue`(`QueueAggregate`·`PipelinePulse`)·`telemetry.purchase`·`telemetry.trust-verdicts` | 없다 | `rt` 원시 표 다섯(§4.3) | 적어도 한 번. 중복은 조회 시점 집계가 `eventKey`로 지운다 | 온디맨드(정가로 계속 쓰는 서버) |
+| `trust-reassess` | `services/trust-reassess` | 봇 대기 중 재평가와 행동 신호 원시 적재(§5) | 텔레메트리 클러스터의 `telemetry.behavior` | 세션·캐시 Redis의 정렬 집합(10분) | `telemetry.trust-candidates`, 행동 신호 원시 표(30일) | 적어도 한 번. 후보는 `eventKey`로 중복 제거 | 온디맨드 |
 
-- `rt-pulse`(peaket-data)는 1초마다 §3의 토픽 셋의 모든 파티션(토픽을 나눈 칸)에 `PipelinePulse`를 쓰는 작은 Deployment(복제 1개 [가정])다. 이것이 멈추면 신선도가 나빠진 것으로 보이므로 따로 감시하지 않는다.
+- `rt-pulse`(`services/rt-pulse`)는 1초마다 §3의 토픽 셋의 모든 파티션(토픽을 나눈 칸)에 `PipelinePulse`를 쓰는 작은 Deployment(복제 1개 [가정])다. 이것이 멈추면 신선도가 나빠진 것으로 보이므로 따로 감시하지 않는다.
 - 작업자는 서비스와 같은 Node.js·NestJS 판의 독립 실행 앱이다. HTTP는 상태 확인과 지표에만 연다.
 - 세 작업자는 상태를 서로 나눠 쓰지 않는다. 한 작업자가 멈춰도 다른 작업자와 거래 경로(Outbox, Saga)는 영향을 받지 않는다. Outbox는 보낼 이벤트를 같은 트랜잭션으로 표에 적어 두었다가 나중에 보내는 방식이다. Saga는 여러 서비스에 걸친 일을 단계별로 처리하고, 중간에 실패하면 앞 단계를 되돌리는 방식이다.
 - Kafka(이벤트를 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템)는 MSK(클라우드 업체가 운영해 주는 관리형 서비스) 클러스터 두 개(거래·제어, 텔레메트리)다. 관측 전용 세 번째 MSK 클러스터(Tempo 쓰기 경로, ADR-0077)는 작업자가 쓰지 않는다(infra §1).
@@ -25,7 +25,7 @@
 
 | 구성요소 | 판·산출물 | 이유 |
 | --- | --- | --- |
-| 공용 소비 모듈 | peaket-platform `@peaket/stream-worker` | 커밋 순서, 묶음, 중복 거르기 표시, 다시 시도, 거절 기록, 지표를 한 곳에 둔다. 서비스의 Kafka 소비자도 같은 모듈을 쓴다 |
+| 공용 소비 모듈 | 공용 서버 패키지 `packages/platform`의 `@peaket/stream-worker` | 커밋 순서, 묶음, 중복 거르기 표시, 다시 시도, 거절 기록, 지표를 한 곳에 둔다. 서비스의 Kafka 소비자도 같은 모듈을 쓴다 |
 | Kafka 클라이언트 | Confluent 공식 JavaScript 클라이언트 `@confluentinc/kafka-javascript`(1.11.0, librdkafka 기반, KafkaJS 호환 API)가 기본이다. kafkajs는 대체안이다(추천 적용 2026-10-28, 기술 검토 낮음-152) | 서비스와 같은 클라이언트를 쓴다. 기본 클라이언트가 처리량·협력적 재조정·OTel 계측·MSK IAM을 채우는지는 wbs 0.5.1 PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험)에서 확인하고, 못 채우면 kafkajs와 견준다(docs/architecture.md §9.4) |
 | Schema Registry와 Avro | `@confluentinc/schemaregistry`(1.11.0) | Schema Registry는 Confluent다(api/guidelines) |
 | MSK IAM 인증 | `aws-msk-iam-sasl-signer-js`(1.0.3)의 `generateAuthTokenFromRole`로 OAUTHBEARER 토큰을 만든다. 작업자별 MSK 전용 역할을 고정 세션 이름으로 맡는다(§2.3·§2.6) | MSK IAM 인증(wbs 2.11.2). EKS Pod Identity(쿠버네티스 파드에 AWS 권한을 주는 기능) 자격을 그대로 쓰면 자격이 갱신될 때 세션 이름이 바뀌어 재인증(연결을 유지한 채 새 토큰으로 다시 인증하는 것)이 끊긴다(자바 aws-msk-iam-auth README의 문제 해결 절). 그래서 기본 자격 사슬(환경 변수·파드 권한 같은 자격을 정해진 순서로 찾는 방식)로 토큰을 만드는 `generateAuthToken`은 운영 환경에서 쓰지 않는다(추천 적용 2026-10-28, 기술 검토 높음-26). JavaScript 서명 도구 저장소에도 같은 실패가 보고됐다(기본 자격 사슬에서 세션 이름이 바뀌어 'Cannot change principals during re-authentication', 이슈 #19·#27). 1.0.1부터 기본 자격 사슬도 세션 이름을 고정하지만(PR #29), 그 설정은 웹 ID 토큰 방식(IRSA, AWS SDK `fromTokenFile`)만 쓰고 Pod Identity가 쓰는 컨테이너 자격(`fromHttp`)은 세션 이름을 받지 않는다(AWS SDK 소스). `generateAuthTokenFromRole`은 준 세션 이름(안 주면 `MSKSASLDefaultSession`)으로 역할을 맡으므로 재인증 때 주체가 같다(서명 도구 1.0.3 소스, 2026-10-29 확인, https://github.com/aws/aws-msk-iam-sasl-signer-js/issues/27 ). 실제 MSK에서 자격 갱신 주기를 넘겨 계속 소비되는지는 확인 필요다(wbs 0.5.1 PoC, ST-T14. 실제 MSK·EKS 확인은 선택 클라우드 보정에서 한다, docs/verification.md §6, ADR-0154) |
@@ -498,7 +498,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 - 같은 좌석·주문의 사건이 커밋 순서대로 Kafka에 들어가는 것은 Outbox 릴레이의 보내는 규칙이 지킨다(Outbox 행의 `seq` 순서, 트랜잭션 마지막에 넣기, 리더 하나, `SKIP LOCKED` 없이 잠금을 기다리기, docs/data.md §4의 7번, ADR-0116). 서로 다른 좌석 사이의 순서는 커밋 순서와 다를 수 있고, 판매 좌석 규칙은 그 순서를 쓰지 않는다. 확인은 V-T28이다. `trade.seats`에는 생산자가 둘이다(홀드 사건은 좌석 Redis Stream 릴레이, 판매 사건과 `EventSaleChanged`는 purchase-svc Outbox 릴레이). 두 생산자 사이의 순서는 보장하지 않으므로, 받는 쪽은 펜싱 토큰·판 번호·상태 기계로 늦게 온 사건을 거른다(asyncapi info '키와 순서', 추천 적용 2026-10-28, 기술 검토 낮음-025).
 - 인기 회차 쏠림: 키가 회차라 인기 회차 하나의 거래 사건은 토픽마다 파티션 하나, 곧 소비자 파드 하나에 몰린다(메시가 공연 ID 해시 분산을 기각한 것과 같은 쏠림, docs/architecture.md §5). 대형 온세일 피크의 한 회차 몫(`SeatEvent` 약 3,000/초, `OrderEvent` 약 1,500/초, §11)을 한 파티션에 넣어, 그 파티션을 맡은 `ops-rt`·`analytics-ingest` 파드가 따라잡는지를 ST-T17(wbs 4.3.3)에서 잰다. 생산자는 운영과 같은 폴링 Outbox 릴레이다(ADR-0116이라 측정 길과 운영 길이 같다).
 - 같은 쏠림은 서비스 소비자에게도 온다. purchase-svc 주문 Saga는 `trade.payments` 사건마다 DB 트랜잭션을 하고 발권을 부르므로, 차례대로 처리하면 인기 회차의 결제 확정이 소비자 하나의 처리 속도에 묶인다. 그래서 회차 키는 그대로 두고, 서비스 소비자는 키 단위 동시 처리(§2.4)로 한 파티션 안의 다른 주문을 함께 처리한다(ADR-0142). 인기 회차 결제 결과를 한 파티션에 승인 초당 300건으로 넣어도 결제 확정 p99가 3초 안인지는 P-T48(docs/features/payment.md)이, 같은 키의 순서·커밋 위치·재조정 중 빠짐과 중복 반영이 없는지는 ST-T18이 본다. 키 단위 동시 처리로도 P-T48을 통과하지 못하면 결제 토픽을 주문 키의 새 토픽으로 옮긴다(ADR-0142 되돌릴 조건).
-- 파티션 수는 계약 저장소에서 정하고, 줄이지 않는다(devops §7.5). 이 문서의 계산은 토픽마다 파티션 12개 [가정, 4.3.3에서 확정]로 잡았다.
+- 파티션 수는 계약(docs/api/asyncapi.yaml)에서 정하고, 줄이지 않는다(devops §7.5). 이 문서의 계산은 토픽마다 파티션 12개 [가정, 4.3.3에서 확정]로 잡았다.
 
 ## 8. 복구와 판 올리기
 
@@ -595,15 +595,15 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 
 ## 13. 이미지·배포·시험 도구
 
-- **저장소**: peaket-data에 `workers/analytics-ingest`·`workers/ops-rt`와 `rt` 표·뷰의 이전 파일(`clickhouse/rt/`)을 둔다. peaket-trust에 `workers/trust-reassess`를 둔다. 공용 소비 모듈은 peaket-platform의 `@peaket/stream-worker`(GitHub Packages npm)다. 빌드는 서비스와 같은 pnpm·TypeScript로 한다(추천 적용 2026-10-27).
+- **코드 위치**: 모노레포(코드 전부를 저장소 하나에 폴더로 나눠 담는 방식) `peaket`의 `services/analytics-ingest`·`services/ops-rt`·`services/rt-pulse`·`services/trust-reassess`에 작업자를 두고, `rt` 표·뷰의 이전 파일은 `data/`(예: `data/clickhouse/rt/`)에 둔다. 공용 소비 모듈은 `packages/platform`의 `@peaket/stream-worker`이고, 패키지로 게시하지 않고 `workspace:` 프로토콜로 가져다 쓴다(ADR-0165). 빌드는 서비스와 같은 pnpm·TypeScript로 한다(추천 적용 2026-10-27).
 - **이미지**: 서비스와 같은 Node.js 기본 이미지(다이제스트 고정)를 쓴다. 공용 빌드 워크플로가 SBOM(소프트웨어에 들어간 부품 목록)·서명·출처 증명(어느 커밋에서 어떤 빌드 절차로 만들었는지 서명해 남긴 기록)을 붙인다(devops §4). 클러스터 입장 정책이 그 서명을 확인한다.
 - **차트**: 서비스와 같은 공용 차트가 Deployment, 서비스 계정, 네트워크 정책, ExternalSecret, PodMonitor, PodDisruptionBudget을 만든다. 환경 값은 `envs/<환경>/<작업자>.yaml`(이미지 다이제스트, 복제 수, 자원)이고, AppProject는 `data`·`trust`다(devops §5.2).
-- **배포 흐름**: 작업자 저장소 PR(코드 변경을 합쳐 달라는 요청) → CI(코드를 올릴 때마다 자동으로 하는 검사·빌드. 단위·통합·계약 시험) → 이미지 다이제스트 갱신 PR → ArgoCD 동기화(동결 창에는 막힌다) → 롤링 → 확인(준비 상태, 첫 묶음 성공, 신선도, 누락률).
+- **배포 흐름**: 작업자 코드를 바꾸는 `peaket` PR(코드 변경을 합쳐 달라는 요청) → CI(코드를 올릴 때마다 자동으로 하는 검사·빌드. 바뀐 범위의 단위·통합·계약 시험, ADR-0165) → 이미지 다이제스트 갱신 PR → ArgoCD 동기화(동결 창에는 막힌다) → 롤링 → 확인(준비 상태, 첫 묶음 성공, 신선도, 누락률).
 - **시험**:
   1. 단위: 소비 모듈의 커밋 순서(쓰기 성공 전에는 커밋하지 않는다), 다시 시도와 멈춤, 거절, 재조정 중 처리를 본다. 재평가 Lua 스크립트(문턱, 넘음 표시, 다시 읽을 때 다시 내기)는 컨테이너(앱과 실행 환경을 한 묶음으로 만든 실행 단위)로 띄운 실제 Redis로 본다.
   2. 뷰: 고정 사건으로 매개변수 뷰의 결과를 정답과 맞춘다(ST-T9·T10, ClickHouse 컨테이너).
   3. 통합: 컨테이너로 띄운 Kafka, Schema Registry, ClickHouse, Redis로 ST-T1~T4·T7·T11~T13을 돌린다.
-  4. 계약: Avro 호환은 `contract-check.yml`(BACKWARD_TRANSITIVE)이 계약 저장소의 지난 판을 모두 올린 로컬 레지스트리 컨테이너로 본다. 열거 규칙(맨 앞 `UNRECOGNIZED`와 기본값, 기호 지우기 금지)도 같은 검사가 본다(추천 적용 2026-10-28, 기술 검토 중간-087·088). `PipelinePulse` 건너뛰기와 새 필드(`firstInStage`·`firstHeldInSession`)는 소비자 계약 시험으로 본다.
+  4. 계약: Avro 호환은 `contract-check`(BACKWARD_TRANSITIVE)가 지난 출시 태그의 스키마를 모두 올린 로컬 레지스트리 컨테이너로 본다(ADR-0165). 열거 규칙(맨 앞 `UNRECOGNIZED`와 기본값, 기호 지우기 금지)도 같은 검사가 본다(추천 적용 2026-10-28, 기술 검토 중간-087·088). `PipelinePulse` 건너뛰기와 새 필드(`firstInStage`·`firstHeldInSession`)는 소비자 계약 시험으로 본다.
   5. 성능: docs/verification.md §3.7(V-T12~V-T15, V-T19).
 
 ## 14. 대시보드·경보·런북

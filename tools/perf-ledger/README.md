@@ -28,7 +28,7 @@ python tools/perf-ledger/collect.py --run-id 2026-11-02-k1-v0-local-10k --kpi K1
 - `--redis-tls true|false`와 `--paired-run <run-id>`는 대기열·좌석 Redis 연결의 TLS 켬·끔과, 같은 조건으로 반대 설정을 잰 짝 실행이다(manifest `redis_tls`·`paired_run`, docs/perf-ledger.md §2.2, docs/verification.md §3.5 7번, 기술 검토 낮음-072). 짝이 없거나, TLS를 끈 실행에 `--verdict pass|fail`을 주면 '판정은 TLS를 켠 실행으로 한다'는 안내를 `stdout.log`에 남긴다.
 - `--prom-url`이 없으면 시계열 내보내기를 건너뛴다. `--queries` 파일은 한 줄에 `이름=PromQL`이다.
 - k6 요약의 `dropped_iterations`가 0보다 크면 `valid: false`로 적는다(발생기 병목).
-- `--commit`을 주지 않으면 현재 폴더의 `git rev-parse HEAD`를 시도하고, 저장소가 아니면 비워 둔다.
+- `--commit`을 주지 않으면 현재 폴더의 `git rev-parse HEAD`를 시도하고, 저장소가 아니면 비워 둔다. 값은 manifest `commit.code`에 들어간다. 코드와 문서가 `peaket` 한 저장소에 있어 커밋 하나가 둘 다 가리키므로 `commit.docs`는 비워 둔다(docs/perf-ledger.md §2.2, ADR-0165).
 - `--extra 경로`를 여러 번 주면 파일이나 폴더를 그대로 복사한다(트레이스, Grafana PNG).
 - `--timeline ./timeline.csv`는 Game Day 시간선(docs/perf-ledger.md §8), `--invalid-reason "스팟 회수"`는 사람이 판단한 무효 사유, `--verdict pass|fail|baseline`은 판정이다.
 - `--step`은 시계열 간격(초, 기본 1). 같은 run-id 폴더가 있으면 멈추며 `--force`로만 덮어쓴다.
