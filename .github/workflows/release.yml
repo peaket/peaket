@@ -1,0 +1,188 @@
+# 릴리스·핫픽스(docs/devops.md §2.2.2~§2.2.4, openspec 변경 add-release-workflows). 판단은 tools/ci/release-plan.mjs가 하고
+# 여기서는 부르기만 한다. 가지·커밋·태그·PR은 릴리스 봇(GitHub 앱)의 설치 토큰으로 GitHub API를 불러 만든다.
+# 체크아웃에 자격 증명을 남기지 않고 git push도 하지 않는다. 앱 키는 release 환경 비밀이다(secrets-and-keys '릴리스 봇').
+# 운영 승격 PR은 배포 상태(deploy/)와 promote.yml이 생기면(wbs 0.4.4) 마무리 잡에 더한다.
+name: release
+
+on:
+  # 월요일 10:00 KST(UTC 01:00)에 릴리스를 자른다. 주 1회 [가정](§2.2.2). 출시할 변경이 없으면 아무것도 만들지 않는다
+  schedule:
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 할 일
+        type: choice
+        options: [start-release, start-hotfix, finish]
+        default: start-release
+      branch:
+        description: finish에서 마무리할 가지(release/X.Y.Z 또는 hotfix/X.Y.Z)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# 릴리스 작업은 하나씩 한다. 진행 중인 실행은 취소하지 않는다
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  start:
+    if: ${{ github.event_name == 'schedule' || inputs.action == 'start-release' || inputs.action == 'start-hotfix' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    steps:
+      # 태그와 원격 가지 목록, 마지막 출시 태그 뒤 이력을 읽으려고 모두 받는다
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - id: plan
+        env:
+          KIND: ${{ inputs.action == 'start-hotfix' && 'hotfix' || 'release' }}
+        run: node tools/ci/release-plan.mjs start --kind "$KIND" --notes "$RUNNER_TEMP/notes.md" --package-json "$RUNNER_TEMP/package.json"
+      # workflows: 워크플로가 바뀐 커밋에 가지·태그를 만들 때 GitHub가 요구한다(앱에도 같은 권한을 준다)
+      - id: token
+        if: ${{ steps.plan.outputs.release == 'true' }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+      # 가지를 만들고, 첫 커밋(버전 올림)을 내용 API로 넣고, main으로 가는 PR을 연다. 변경 기록은 PR 본문이다(§2.2.2 1번)
+      - if: ${{ steps.plan.outputs.release == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          BRANCH: ${{ steps.plan.outputs.branch }}
+          BASE_SHA: ${{ steps.plan.outputs.base_sha }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          PACKAGE_BLOB: ${{ steps.plan.outputs.package_blob }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$BASE_SHA" > /dev/null
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/package.json" \
+            -f message="chore(release): $VERSION" -f branch="$BRANCH" -f sha="$PACKAGE_BLOB" \
+            -f content="$(base64 -w0 "$RUNNER_TEMP/package.json")" > /dev/null
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+            --title "chore(release): $VERSION" --body-file "$RUNNER_TEMP/notes.md"
+
+  # 단계마다 이미 한 일은 건너뛴다. main 병합 뒤 어느 단계에서 멈춰도 같은 입력으로 다시 돌리면 이어 간다
+  finish:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'finish' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+      # main으로 가는 PR: 열려 있으면 이번에 병합하고, 이미 병합됐으면(앞선 실행이 병합 뒤 멈춤) 그 병합 커밋에서 잇는다.
+      # 수동 입력은 식으로 셸에 넣지 않고 환경 변수로 넘긴다. 꼴 검사는 다음 단계의 스크립트가 한다
+      - id: pr
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')
+          merged=""
+          if [ -z "$open" ]; then
+            merged=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state merged --json mergeCommit --jq '.[0].mergeCommit.oid // empty')
+            if [ -z "$merged" ]; then echo "::error::main으로 가는 열린 PR도 병합된 PR도 없다"; exit 1; fi
+          fi
+          { echo "number=$open"; echo "merged=$merged"; } >> "$GITHUB_OUTPUT"
+      - id: plan
+        env:
+          BRANCH: ${{ inputs.branch }}
+          MERGED: ${{ steps.pr.outputs.merged }}
+        run: >-
+          node tools/ci/release-plan.mjs finish --branch "$BRANCH" ${MERGED:+--merged "$MERGED"}
+          --notes "$RUNNER_TEMP/notes.md" --backmerge-package-json "$RUNNER_TEMP/backmerge-package.json"
+      # PR이 열린 뒤 main이 움직였을 수 있어 병합 직전에 다시 검사한다(§2.2.4, D-T22)
+      - if: ${{ steps.pr.outputs.number != '' }}
+        env:
+          CANDIDATE: ${{ steps.plan.outputs.candidate }}
+        run: node tools/ci/check-merge-tree.mjs --target origin/main --candidate "$CANDIDATE"
+      # 병합 커밋으로 넣는다. 머리가 후보에서 움직였으면 GitHub가 거부한다. 규칙 세트의 필수 검사와 데모 배포 성공도 여기서 걸린다
+      - id: merge
+        if: ${{ steps.pr.outputs.number != '' }}
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR: ${{ steps.pr.outputs.number }}
+          CANDIDATE: ${{ steps.plan.outputs.candidate }}
+        run: |
+          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --merge --match-head-commit "$CANDIDATE"
+          echo "sha=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json mergeCommit --jq .mergeCommit.oid)" >> "$GITHUB_OUTPUT"
+      # 병합 커밋의 두 번째 부모가 후보이고 트리가 같아야 태그를 단다. 다르면 여기서 멈춘다(§2.2.4 병합 뒤)
+      - id: merged
+        env:
+          MERGED: ${{ steps.merge.outputs.sha || steps.pr.outputs.merged }}
+          CANDIDATE: ${{ steps.plan.outputs.candidate }}
+        run: |
+          git fetch --no-tags origin main
+          node tools/ci/release-plan.mjs verify --merged "$MERGED" --candidate "$CANDIDATE" --notes "$RUNNER_TEMP/notes.md"
+          echo "sha=$MERGED" >> "$GITHUB_OUTPUT"
+      - env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          TAG_EXISTS: ${{ steps.plan.outputs.tag_exists }}
+          MERGED: ${{ steps.merged.outputs.sha }}
+        run: |
+          if [ "$TAG_EXISTS" != "true" ]; then
+            tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/tags" -f tag="$TAG" -f message="$TAG" -f object="$MERGED" -f type=commit --jq .sha)
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$tag_sha" > /dev/null
+          fi
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+      # 역병합은 후보 커밋에 merge/* 가지를 따로 만들어 연다. 저장소가 병합한 PR의 머리 가지를 지우므로
+      # 릴리스 가지를 머리로 쓰면 그 PR이 닫힐 수 있다. 충돌이 나면 이 가지에서 사람이 푼다(§2.2.1).
+      # 핫픽스를 열린 릴리스로 보낼 때는 판 줄이 충돌하지 않게 대상의 판으로 맞춘 커밋을 얹는다
+      - env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          MERGE_BRANCH: ${{ steps.plan.outputs.backmerge_branch }}
+          TARGET: ${{ steps.plan.outputs.backmerge_target }}
+          CANDIDATE: ${{ steps.plan.outputs.candidate }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          ALIGN_VERSION: ${{ steps.plan.outputs.backmerge_version }}
+          ALIGN_BLOB: ${{ steps.plan.outputs.backmerge_package_blob }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$MERGE_BRANCH" > /dev/null 2>&1; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$MERGE_BRANCH" -f sha="$CANDIDATE" > /dev/null
+            if [ -n "$ALIGN_VERSION" ]; then
+              gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/package.json" \
+                -f message="chore(release): 역병합 판을 $ALIGN_VERSION에 맞춤" -f branch="$MERGE_BRANCH" -f sha="$ALIGN_BLOB" \
+                -f content="$(base64 -w0 "$RUNNER_TEMP/backmerge-package.json")" > /dev/null
+            fi
+          fi
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$MERGE_BRANCH" --base "$TARGET" --state all --json number --jq '.[0].number // empty')
+          if [ -z "$existing" ]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" --base "$TARGET" --head "$MERGE_BRANCH" \
+              --title "chore(release): $VERSION 역병합" --body "$VERSION 출시본을 $TARGET에 병합 커밋으로 넣는다(§2.2.2 5번)."
+          fi
+      # 저장소 설정이 이미 지웠으면 그대로 둔다
+      - env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          BRANCH: ${{ steps.plan.outputs.branch }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" > /dev/null 2>&1; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH"
+          fi
