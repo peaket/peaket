@@ -6,12 +6,13 @@
 - **단계 줄**: `영문 세 글자-번호` 뒤에 WBS ID를 적는다. ①②는 3일이 넘는 WBS 작업을 하루~사흘로 나눈 안이다(wbs §3 규칙). 착수할 때 이 나눔을 wbs.md에 적고, 맞지 않으면 고친다. 괄호 안 일수는 WBS의 어림(실측 전)이다. '0.1.2 남은 것'이라 적은 CI 잡은 그 코드가 처음 생기는 단계에서 함께 더한다.
 - **체크**: 단계를 끝내면(OpenSpec 보관과 `develop` 커밋까지) 그 줄의 빈 칸을 x로 바꾼다. 이 파일의 체크가 진행 표시의 단일 기준이다.
 - **대기 표시**: 소유자 결정을 기다리는 부분에는 '대기: OPEN[번호]'를 붙였다. 번호는 `docs/PROGRESS.md` '미해결'의 줄이다. 단계 전체가 막혔으면 건너뛰고, 일부만 막혔으면 막힌 부분만 남기고 한다.
-- **여기 넣지 않은 것(이미 끝남)**: wbs 0.7.1·0.8.2·0.10.1~0.10.4(완료), 0.1.1의 로컬 부분(OpenSpec 변경 `add-repo-skeleton`, R-197·R-200), 0.1.2의 첫 묶음과 0.1.3의 CI 연결(`add-ci-foundation`, R-202).
+- **여기 넣지 않은 것(이미 끝남)**: wbs 0.7.1·0.8.2·0.10.1~0.10.4(완료), 0.1.1의 로컬 부분(OpenSpec 변경 `add-repo-skeleton`, R-197·R-200), 0.1.2의 첫 묶음과 0.1.3의 CI 연결(`add-ci-foundation`, R-202), 화면 앱 골격과 69개 화면 퍼블리싱(아래 PUB-010, `add-screen-publishing`, ADR-0170·R-204).
 
 ## Phase 1 — 최소 기반 (WBS Phase 0 일부)
+- [x] PUB-010 화면 앱 골격과 69개 화면 퍼블리싱(소유자 요청 2026-10-31, ADR-0170): pnpm 작업 공간 칸·Turborepo·TypeScript 기본 설정, `@peaket/ds`(tokens.json 토큰 빌드, 디자인 캔버스 키트 CSS, 키트 마크업을 내는 부품과 셸 넷), 앱 여섯(웹·대기실·파트너·관제+위젯 둘·스캐너·포렌식), SCR-001~069를 캔버스 보드대로 목업 데이터로 그림(`?state=`, `/preview`). 화면이 있는 뒤 단계는 그 화면의 데이터 연결·시험만 하고, 목업과 상태 고르기를 걷어 낸다 (OpenSpec `add-screen-publishing`, R-204)
 - [x] FND-010 wbs 0.1.2 남은 것 ①: 릴리스·핫픽스 워크플로(`release/X.Y.Z` 자르기, 출시 태그, 마지막 출시 태그 뒤 바뀐 배포 단위 고르기, ADR-0074·0165). 작업 가지 수 경고와 병합 방식 주간 점검은 정본대로 원격을 만든 뒤 FND-160에서 한다(devops §3.1, R-202)
 - [ ] FND-020 wbs 0.1.3 남은 것: doc-check `api`의 호스트·security 검사와 명세 숫자 보고가 `check_api_contract`에 이미 있는지 대조하고, 빠진 것만 더한 뒤 wbs 0.1.3 상태를 고친다 (0.75일)
-- [ ] FND-030 wbs 0.2.1 ①: 작업 공간 최소 골격(pnpm 작업 공간 칸, Turborepo, TypeScript 기본 설정, 시험 도구. 0.6.4에서 앞당기는 부분)과 `packages/contracts`(OpenAPI·AsyncAPI에서 코드 생성, orval Zod, 생성물 차이 검사, 게시하지 않음) (1.25일)
+- [ ] FND-030 wbs 0.2.1 ①: 작업 공간 최소 골격(pnpm 작업 공간 칸, Turborepo, TypeScript 기본 설정, 시험 도구. 0.6.4에서 앞당기는 부분)과 `packages/contracts`(OpenAPI·AsyncAPI에서 코드 생성, orval Zod, 생성물 차이 검사, 게시하지 않음) 작업 공간 칸·Turborepo·TypeScript 기본 설정은 PUB-010에서 끝났다(남은 것: 시험 도구, `packages/contracts`). (1.25일)
 - [ ] FND-040 wbs 0.2.1 ②: 계약 깨짐 검사(`oasdiff`·`asyncapi diff`, PR 대상 가지와 마지막 출시 태그 둘 다와 견줌, D-T48), 깨짐 예외 목록, 서비스 OpenAPI 차이 검사(D-T38), CI 계약 잡(0.1.2 남은 것) (1일)
 - [ ] FND-050 wbs 0.3.1 ①: `packages/platform` 서비스 템플릿 뼈대, 네 신호 계측·지연 히스토그램 표준 칸(SLO 기준값)·처리 중 요청 게이지(ADR-0077), RFC 9457 Problem, deadline 전파, CI 서비스 잡(0.1.2 남은 것) (1.75일)
 - [ ] FND-060 wbs 0.3.1 ②: 로그 가명(HMAC 키, IP 앞부분만), 정규 로그 줄(요청 1건 1줄 필드와 표본 비율, ADR-0069), 신뢰 경계의 추적 문맥 규칙과 V-T31 CI 검사 (1.75일)
@@ -79,11 +80,11 @@
 - [ ] BAS-140 wbs 0.4.4 ①: 배포 상태 `deploy/`(ApplicationSet·AppProject·환경 값·공용 차트, ArgoCD는 `develop`에서 읽음), 승격 PR 자동화, 출시 후보 데모 승격과 출시 태그 뒤 운영 승격, 네임스페이스 지도와 자원 할당량(ADR-0078) (2.5일)
 - [ ] BAS-150 wbs 0.4.4 ②: Kyverno CEL 정책(서명·출처 검증, 오프라인 검증 PoC, 메시 필수 정책 D-T28), `gitops-check`의 ref·실행기 확인(D-T32), 오버레이별 레지스트리 정책·GHCR(D-T33), 사람 접근(Identity Center·비상 접근·SSM 중계, 코드만), 노드 풀·우선순위 클래스 (2.25일)
 - [ ] BAS-160 wbs 0.4.3: 데모 재현 스크립트(로컬 kind 전체 기동·합성 데이터·시연 S1~S9 재생), 임시 클라우드 데모 절차, 운영 판 호환 검사 시연(`contract-check`가 막는 과정) (1.25일)
-- [ ] BAS-170 wbs 0.6.1: SEED 토큰 + tokens.json → Style Dictionary·Tailwind 4 테마·TS 상수, 대비 계산 CI, SEED CSS 층, DTCG 이름 규칙·중단점 검사, 시각 회귀 CI (2.25일)
-- [ ] BAS-180 wbs 0.6.2: `packages/ds` 뼈대(@seed-design/react), Storybook·addon-a11y, Apache-2.0 NOTICE, 이유 있는 비활성 버튼 공용 부품, 첫 브라우저 확인(ADR-0167, 연결 조건은 대기: OPEN[06]) (1.25일)
+- [ ] BAS-170 wbs 0.6.1: SEED 토큰 + tokens.json → Style Dictionary·Tailwind 4 테마·TS 상수, 대비 계산 CI, SEED CSS 층, DTCG 이름 규칙·중단점 검사, 시각 회귀 CI tokens.json → CSS 변수·Tailwind 4 테마·TS 상수 빌드와 차이 검사(`tokens:check`)는 PUB-010에서 끝났다(남은 것: SEED 토큰·CSS 층은 SEED를 붙일 때, 대비 CI, DTCG 검사, 시각 회귀). (2.25일)
+- [ ] BAS-180 wbs 0.6.2: `packages/ds` 뼈대(@seed-design/react), Storybook·addon-a11y, Apache-2.0 NOTICE, 이유 있는 비활성 버튼 공용 부품, 첫 브라우저 확인(ADR-0167, 연결 조건은 대기: OPEN[06]) `packages/ds`는 PUB-010에서 캔버스 키트 마크업을 내는 부품으로 만들었다(남은 것: 같은 API로 속을 @seed-design/react로 바꾸기, Storybook, NOTICE, 브라우저 확인). (1.25일)
 - [ ] BAS-190 wbs 0.5.4: PoC — 5만석 Canvas (1일)
 - [ ] BAS-200 wbs 0.6.3: 로고 워드마크·심벌, 파비콘·PWA 아이콘, KIPRIS 상표 검색 (1.5일)
-- [ ] BAS-210 wbs 0.6.4 ①: 화면 앱·공용 패키지 골격 — api-client·telemetry·validation·console-contract·config 패키지, 대기실 경량 페이지 별도 빌드 자리, `anySignal`과 eslint-plugin-compat + browserslist (1.75일)
+- [ ] BAS-210 wbs 0.6.4 ①: 화면 앱·공용 패키지 골격 — api-client·telemetry·validation·console-contract·config 패키지, 대기실 경량 페이지 별도 빌드 자리, `anySignal`과 eslint-plugin-compat + browserslist 앱 여섯·위젯 둘·`config`·`ds` 골격과 대기실 경량 페이지 별도 빌드는 PUB-010에서 끝났다(남은 것: api-client·telemetry·validation·console-contract, `anySignal`, eslint-plugin-compat). (1.75일)
 - [ ] BAS-220 wbs 0.6.4 ②: size-limit·Lighthouse CI 예산, 화면 묶음별 보안 헤더, 정적 자산 허용 확장자·숨김 소스 맵·SBOM, 서버 액션 암호화 키 형식 확인, Turborepo 원격 캐시, CI 화면 잡(0.1.2 남은 것) (1.5일)
 - [ ] BAS-230 wbs 0.8.1: RFC 3건 초안(온세일 핫패스, 봇 방어, 관제) (2일)
 - [ ] BAS-240 wbs 0.9.4: 기술 블로그 1편(M0) 초안 — 규칙 모델 검사로 찾은 순서 버그와 검사한 범위(게시는 대기: OPEN[01]) (1일)
