@@ -1571,7 +1571,7 @@ allowBuilds:
 | 웹 푸시 서비스 워커(추천 적용 2026-10-30, §5.4) | 같은 빌드 | www 배포 S3 `/push/sw.js` [가정] | 다음 방문 때 바로 활성화(`skipWaiting`) | 처리기를 고친 새 판. 등록을 푸는 킬 스위치는 모든 구독을 잃으므로 마지막 수단 |
 | 파트너 앱 서버 이미지 | 같은 저장소의 `apps/partner` | ECR | 카나리 | 위와 같다 |
 | 관제 호스트 | 같은 저장소의 `apps/console-host` | console 배포 S3 | 목록과 함께 | 목록 되돌리기 |
-| 관제 원격 위젯 | `apps/widgets/<원격>`(조직 공용 워크플로 `build-remote.yml`) | console 배포 S3 `/remotes/<원격>/<SHA>/` | GitOps로 `remotes.json`을 바꾼다 | 목록 되돌리기 |
+| 관제 원격 위젯 | `apps/widgets/<원격>`(재사용 워크플로 `build-remote.yml`) | console 배포 S3 `/remotes/<원격>/<SHA>/` | GitOps로 `remotes.json`을 바꾼다 | 목록 되돌리기 |
 | 관제 위젯 패키지(한 앱 기준선) | `apps/widgets/<원격>`(작업 공간 패키지 `@peaket/widget-<원격 이름>`) | 올리지 않는다. 비교 빌드가 `workspace:`로 같은 커밋의 소스를 쓴다(ADR-0165) | 운영에는 내지 않는다. FE-T29 비교 빌드에만 쓴다(ADR-0100) | — |
 | 포렌식 리플레이 2단계 페이지(출시 뒤 선택) | `apps/forensics` 운영 빌드 | console 배포 S3 `/forensics/` | 관제 호스트와 같다 | 목록 되돌리기 |
 | 스캐너 PWA | `apps/scanner` | scanner 배포 S3 | 근무 준비 때 적용 | 목록 되돌리기 |

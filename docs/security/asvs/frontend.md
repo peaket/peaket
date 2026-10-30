@@ -14,7 +14,7 @@
   - `partner`: 파트너 콘솔 Next.js 앱(묶는 화면의 서버 컴포넌트 포함. tRPC는 2026-10-28 ADR-0100으로 뺐다), `console`: 관제 콘솔 정적 호스트, `remote`: 서비스를 맡은 가상 팀이 `apps/widgets/*`에서 만드는 관제 원격 위젯, `scanner`: 스캐너 PWA(설치형 앱처럼 쓰는 웹 앱)
   - `pkg/ds`, `pkg/telemetry`, `pkg/api-client`, `pkg/validation`, `pkg/console-contract`, `pkg/seatmap`: 공용 패키지
   - `forensics`: 포렌식 리플레이 1단계 데모(V11·V13·V15 판정만 이 표에서 한다)
-  - `fe-ci`: `peaket`의 CI(코드를 올릴 때마다 자동으로 검사하고 빌드하는 과정) 워크플로 `ci.yml` 가운데, 화면 쪽(`apps/`·화면용 `packages/`)이 바뀌었을 때 도는 화면 잡(조직 공용 재사용 워크플로를 부르는 쪽, ADR-0165 결정 3)
+  - `fe-ci`: `peaket`의 CI(코드를 올릴 때마다 자동으로 검사하고 빌드하는 과정) 워크플로 `ci.yml` 가운데, 화면 쪽(`apps/`·화면용 `packages/`)이 바뀌었을 때 도는 화면 잡(같은 저장소의 재사용 워크플로를 부르는 쪽, ADR-0165 결정 3, ADR-0169)
 - **테스트 결과**: 손으로 적지 않는다. CI 테스트의 `[ASVS v5.0.0-x.y.z]` 태그를 읽어 만든 리포트로 갱신한다. 시험 ID는 docs/frontend.md §5.17의 FE-T 번호다. 태그를 붙일 수 있는 검사는 자동 시험, 정적 정책 검사(conftest·Kyverno 정책 시험 등), doc-check 규칙, 설정 검사다. 운영 설계로만 있는 행은 결과를 '설계 검사'로 적고, 운영을 띄우지 않는 동안은 통과로 세지 않는다(docs/architecture.md §8.2 4, 추천 적용 2026-10-28, 기술 검토 낮음-089).
 - **미적용 사유 분류**: 해당 없음, 나중 Phase로 미룸, 위험 수용(아키텍처 결정과 이유를 남기는 기록인 ADR 작성 필수)으로 나눈다.
 

@@ -9,6 +9,6 @@ output "teams" {
 }
 
 output "git_flow_rulesets" {
-  description = "저장소별 git flow 규칙 세트 ID"
-  value       = { for repo, m in module.git_flow : repo => m.ruleset_ids }
+  description = "peaket의 git flow 규칙 세트 ID"
+  value       = module.git_flow.ruleset_ids
 }

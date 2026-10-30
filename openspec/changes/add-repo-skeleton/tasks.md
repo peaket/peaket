@@ -29,6 +29,11 @@
 - [x] 5.1 전체를 한 번에 확인한다: `node --test "tools/ci/*.test.mjs"`, `terraform fmt -check -recursive infra`, `terraform validate`, `python tools/doc-check/check_all.py`(오류 0), 새 파일의 줄바꿈 LF. 확인: 모두 통과한다.
 - [x] 5.2 기록한다: docs/review/consistency-review.md에 R 행, wbs 0.1.1에 '로컬 부분 끝, 적용은 조직 뒤'(CSV 포함), docs/00-summary.md §4. 확인: 문서 점검 오류 0이다.
 
+## 6. 저장소 둘로 바꾸기(ADR-0169, 소유자 결정 2026-10-30)
+
+- [x] 6.1 `infra/stacks/global/github`를 저장소 둘(`peaket` 공개·`develop`, `peaket-bots` 비공개·`main`)로 고친다. 규칙 세트는 `peaket`에만, 팀은 모두 `peaket`에 쓰기, 플랫폼 팀은 `peaket-bots`에도 쓰기. `peaket-gitops`의 `main` 규칙 세트를 없앤다. 안내서의 적용 순서도 고친다. 확인: `terraform fmt -check -recursive infra`와 `terraform validate`가 통과한다.
+- [x] 6.2 `deploy/`·`loadtest/`에 안내 파일을 두고, CODEOWNERS에 `/deploy/`·`/loadtest/`(플랫폼 팀)를 더한다. 확인: `node --test "tools/ci/*.test.mjs"`와 CODEOWNERS 검사가 통과하고 문서 점검 오류 0이다.
+
 ## Workflow follow-up
 
 - 대조: `/opsx:verify`(OpenSpec 명령은 `pnpm exec openspec`으로 부른다).

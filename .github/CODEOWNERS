@@ -32,8 +32,10 @@
 # 데이터 모델
 /data/                              @peaket/data
 
-# 인프라, CI, 성능 장부 실행 기록
+# 인프라, 배포 상태, 부하 시험, CI, 성능 장부 실행 기록
 /infra/                             @peaket/platform
+/deploy/                            @peaket/platform
+/loadtest/                          @peaket/platform
 /.github/                           @peaket/platform
 /docs/perf-ledger/                  @peaket/platform
 

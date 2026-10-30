@@ -9,7 +9,7 @@
 - **원문 출처**: 원문에 없다. 전체가 [보완]이다.
 - **기준 기획 버전**: v1.0.
 - **관련 ID**: FR-020 · FR-039 · FR-049 · NFR-001, 020, 022 · POL-001, 002, 006, 021, 026 · SCR-007, 009, 029, 045, 057, 067 · CMP-047 · API(프로그램끼리 요청과 응답을 주고받는 창구) `POST /v1/queues/{eventId}/lobby-participants`, `POST /v1/queues/{eventId}/pre-verifications`, `POST /v1/queues/{eventId}/verification` · 내부 호출 `ScoreRisk`(trust.proto), `IsolateWaiting`(queue.proto) · 이벤트 `telemetry.behavior`, `telemetry.trust-candidates`, `telemetry.trust-verdicts`, `control.settings` · ADR-0039, 0048, 0053, 0065, 0071, 0099, 0112, 0128, 0134, 0136, 0147, 0151, 0156(이 문서의 결정 기록) · 보안 추적 표 [docs/security/asvs/bot-defense.md](../security/asvs/bot-defense.md)
-- **표시**: 이 문서가 새로 정한 설계 판단에는 '(추천 적용 2026-10-30)'을 붙였다. 판정 기준값, 점수기 가중치, 3단계 봇 코드는 이 문서에 쓰지 않는다. 기준값과 가중치는 trust-svc만 읽는 비공개 설정(봇 탐지 규칙 매개변수, AWS Secrets Manager. 비밀 값을 보관하는 AWS 서비스)에 두고, 3단계 봇 코드는 비공개 저장소 `peaket-loadtest`에만 둔다(POL-026, docs/devops.md §2.1, docs/security/secrets-and-keys.md, ADR-0147 결정 3). 공개 저장소 `peaket`에 있는 trust-svc 코드(`services/trust-svc`)는 그 설정의 이름과 판 번호(바뀔 때마다 하나씩 늘어나는 번호)만 안다.
+- **표시**: 이 문서가 새로 정한 설계 판단에는 '(추천 적용 2026-10-30)'을 붙였다. 판정 기준값, 점수기 가중치, 3단계 봇 코드는 이 문서에 쓰지 않는다. 기준값과 가중치는 trust-svc만 읽는 비공개 설정(봇 탐지 규칙 매개변수, AWS Secrets Manager. 비밀 값을 보관하는 AWS 서비스)에 두고, 3단계 봇 코드는 비공개 저장소 `peaket-bots`에만 둔다(ADR-0169, POL-026, docs/devops.md §2.1, docs/security/secrets-and-keys.md, ADR-0147 결정 3). 공개 저장소 `peaket`에 있는 trust-svc 코드(`services/trust-svc`)는 그 설정의 이름과 판 번호(바뀔 때마다 하나씩 늘어나는 번호)만 안다.
 
 ## 1. 범위와 이름
 

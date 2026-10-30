@@ -75,5 +75,5 @@ description: PEAKET의 OpenSpec 변경 하나를 대조(/opsx:verify) 뒤에 Cla
 
 - 패스키 창: 브라우저·운영체제가 띄우는 창이라 확장이 다룰 수 없다. I-T53 같은 시험 코드로 본다.
 - 브라우저 엔진별 차이: E2E(Playwright 3엔진)가 본다.
-- 부하: `peaket-loadtest`가 본다.
+- 부하: `loadtest/`의 k6 시나리오가 본다.
 - 접근성 판정: CI의 axe와 Storybook이 본다.

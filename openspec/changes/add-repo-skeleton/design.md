@@ -20,7 +20,7 @@
 - GitHub 조직·저장소를 실제로 만들거나 설정을 적용하는 일(조직이 생긴 뒤 별도 변경).
 - CI 워크플로(`ci.yml`, `branch-policy`, 병합 결과 트리 검사)는 wbs 0.1.2다. 여기서는 필수 검사 이름만 정한다.
 - 릴리스 봇 GitHub 앱 만들기(앱은 웹에서 소유자가 만든다. 여기서는 앱 ID를 받는 변수만 둔다).
-- `peaket-gitops`·`.github`·`peaket-loadtest`의 첫 내용.
+- 비공개 `peaket-bots`의 첫 내용(wbs 1.2.2), `deploy/`·`loadtest/`의 실제 내용(wbs 0.4.4, 1.2.1).
 - Terraform 원격 상태(S3 백엔드)는 wbs 0.4.2에서 붙인다.
 
 ## Decisions
@@ -38,8 +38,8 @@
    - 뿌리의 작업 공간 설정(`/package.json`, `/pnpm-workspace.yaml`, `/pnpm-lock.yaml`) → 플랫폼. 공급망 설정(devops §4.4)의 주인이라서다(추정, architecture §10에 행이 없음).
    - 커머스 팀의 `core-svc` shop 모듈 줄은 그 폴더가 생기는 변경에서 더한다. 새 서비스도 주인이 플랫폼이 아니면 그 서비스를 만드는 변경이 줄을 더한다.
 4. **Terraform 구성은 스택 하나와 모듈 하나다**(devops §9.1의 `modules/github`, `stacks/global/github`).
-   - 모듈 `infra/modules/github`: 저장소 하나에 git flow 규칙 세트 넷(`main`, `develop`, `release/*`·`hotfix/*`, 태그 `v*`)을 건다. `peaket`과 `.github`가 같은 규칙을 쓰므로(devops §2.2.5) 두 번 부른다.
-   - 스택: 저장소 4개, 기본 가지, 팀과 저장소 권한, 환경, 조직 Actions·워크플로 권한·OIDC 주체 키. `peaket-gitops`의 `main`에는 PR 필수·강제 푸시 금지·삭제 금지만 건다. 비공개 `peaket-loadtest`에는 규칙 세트를 걸지 않는다(무료 등급, devops §2.2.5).
+   - 모듈 `infra/modules/github`: 저장소 하나에 git flow 규칙 세트 넷(`main`, `develop`, `release/*`·`hotfix/*`, 태그 `v*`)을 건다. 처음에는 `peaket`과 `.github`에 두 번 불렀고, ADR-0169 뒤에는 `peaket`에만 부른다. 다른 저장소가 생기면 다시 쓸 수 있게 모듈로 둔다.
+   - 스택: 저장소 둘(ADR-0169), 기본 가지, 팀과 저장소 권한, 환경, 조직 Actions·워크플로 권한·OIDC 주체 키. 비공개 `peaket-bots`에는 규칙 세트를 걸지 않는다(무료 등급, devops §2.2.5). 처음 계획의 `peaket-gitops` `main` 규칙 세트는 저장소와 함께 없앴다.
    - 대안: 스택 하나에 모두 풀어 쓰기. 같은 규칙 세트를 두 번 베껴 쓰게 된다. 기각.
 5. **판 고정**: `required_version = "~> 1.16"`, 제공자 `integrations/github` `~> 6.13`(정본의 하한 6.10.0 이상). 제공자 잠금 파일(`.terraform.lock.hcl`)은 Windows·Linux·macOS(arm64) 해시를 담아 커밋한다(`terraform providers lock -platform=…`). CI 러너는 Linux라서다.
 6. **상태는 지금은 로컬, wbs 0.4.2에서 S3로 옮긴다.**
@@ -64,7 +64,7 @@
 - [조직 이름이 정해지지 않음] → CODEOWNERS는 추천 이름 `peaket`으로 쓴다(2026-10-30 조회 때 비어 있음). 다른 이름으로 정하면 CODEOWNERS의 `@peaket/`만 바꾸면 된다. Terraform은 변수(`github_owner`)라 바꿀 곳이 없다.
 - [필수 검사 이름이 0.1.2의 잡 이름과 어긋남] → 규칙 세트가 오지 않는 검사를 기다려 모든 PR이 막힌다. 이름을 여기 정하고, 규칙 세트는 0.1.2의 CI가 한 번 돈 뒤에 적용한다(아래 적용 순서).
 - [로컬 상태 파일 분실] → 이 스택의 자원은 모두 `terraform import`로 되살릴 수 있다. 0.4.2에서 S3로 옮긴다.
-- [무료 등급 한계] → 비공개 `peaket-loadtest`에는 규칙 세트가 없다. 운영 경로에 들지 않는 저장소라 정본이 받아들였다(devops §2.1).
+- [무료 등급 한계] → 비공개 `peaket-bots`에는 규칙 세트가 없다. 봇 시뮬레이터만 담고 운영 경로에 들지 않는 저장소라 정본이 받아들였다(devops §2.1, ADR-0169).
 - [조직 Actions 정책이 너무 좁음] → 0.1.2에서 쓰는 액션을 허용 목록에 더하기 전에는 그 워크플로가 실패한다. 0.1.2의 작업에 넣는다.
 - [CODEOWNERS 줄이 실제 폴더보다 앞섬] → 아직 없는 폴더를 가리켜도 GitHub는 오류로 보지 않는다. 팀이 없으면 오류이므로, 팀은 시험으로 맞춘다.
 

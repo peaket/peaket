@@ -19,7 +19,7 @@ k6 run --out experimental-prometheus-rw scenario.js
 ## 2. 수집
 
 ```bash
-python tools/perf-ledger/collect.py --run-id 2026-11-02-k1-v0-local-10k --kpi K1 --version v0 --profile local-10k --users 10000 --rps 20000 --duration 600 --warmup 120 --scenario peaket-loadtest/k1-entry.js --k6-summary ./summary.json --prom-url http://localhost:9090 --start 2026-11-02T10:00:00Z --end 2026-11-02T10:10:00Z --queries tools/perf-ledger/queries.example.txt --infra-file ./infra.txt --invariants ./invariants.csv --cost-file ./cost.csv --notes "예열 2분 제외"
+python tools/perf-ledger/collect.py --run-id 2026-11-02-k1-v0-local-10k --kpi K1 --version v0 --profile local-10k --users 10000 --rps 20000 --duration 600 --warmup 120 --scenario loadtest/k1-entry.js --k6-summary ./summary.json --prom-url http://localhost:9090 --start 2026-11-02T10:00:00Z --end 2026-11-02T10:10:00Z --queries tools/perf-ledger/queries.example.txt --infra-file ./infra.txt --invariants ./invariants.csv --cost-file ./cost.csv --notes "예열 2분 제외"
 ```
 
 - 폴더 `docs/perf-ledger/runs/<run-id>/`를 만들고 `manifest.json`, `k6-summary.json`, `metrics/*.csv`, `metrics-summary.json`, 첨부 파일, `SHA256SUMS`를 쓴다.
