@@ -38,10 +38,12 @@ export function queueScreen(c: EventCtx): HTMLElement[] {
   const terminal = expired || other || admitted || loginExp || ended || invalid || restricted;
   const showCount = !batching && !soon && !verify && !rolling && !terminal && !loading && !grace;
 
-  // 대기 상태 파일(목업 고정 값)에서 브라우저가 계산한다(§2.6·§3.4)
-  const ahead = aheadCount(ev.myNumber, ev.status);
+  // 대기 상태 파일(목업 고정 값)에서 브라우저가 계산한다(§2.6·§3.4). 일시정지 상태는 판매 중 파일을 PAUSED로 바꿔 읽는다
+  const paused = st === '일시정지';
+  const status = paused ? { ...ev.status, saleStatus: 'PAUSED' as const } : ev.status;
+  const ahead = aheadCount(ev.myNumber, status);
   const pct = Math.round(progressPercent(ev.initialAhead, ahead));
-  const eta = etaText(ahead, ev.status);
+  const eta = etaText(ahead, status);
   const sentence = queueSentence(ahead, eta, allHeld);
 
   const main = h('main', { class: 'page-main q-main q-queue', id: 'main' });
@@ -88,7 +90,7 @@ export function queueScreen(c: EventCtx): HTMLElement[] {
 
     if (stale) region.append(h('p', { class: 'row t-sm fw-b q-jc', role: 'status' }, h('span', { class: 'spinner muted', 'aria-hidden': 'true' }), '연결 확인 중'));
     if (loading) region.append(spinnerBlock('muted', h('p', { class: 't-lg', role: 'status' }, '순번 확인 중')));
-    if (showCount) region.append(countBlock(c, { ahead, pct, eta, sentence, stale, allHeld }));
+    if (showCount) region.append(countBlock(c, { ahead, pct, eta, sentence, stale, allHeld, paused }));
     if (rolling) region.append(rollingBlock(ahead, eta, sentence));
     if (batching) region.append(spinnerBlock('tx-link', h('p', { class: 't-lg', role: 'status' }, '순서를 정하는 중입니다. 이 동안에는 순번이 보이지 않습니다')));
     if (soon) region.append(soonBlock(c));
@@ -179,15 +181,17 @@ function bar(pct: number, valueText: string, opts: { flow: boolean; dim: boolean
   }, fill, opts.extra);
 }
 
-function countBlock(c: EventCtx, v: { ahead: number; pct: number; eta: string | null; sentence: string; stale: boolean; allHeld: boolean }): HTMLElement {
+function countBlock(c: EventCtx, v: { ahead: number; pct: number; eta: string | null; sentence: string; stale: boolean; allHeld: boolean; paused: boolean }): HTMLElement {
   const tone = v.stale ? 'muted' : '';
+  // 속도가 0이거나 일시정지면 숫자 대신 '잠시 멈춤'(frontend §3.4). 멈춘 동안 막대도 흐르지 않는다
+  const etaValue = v.eta ?? '잠시 멈춤';
   // 낭독은 live 영역 하나가 1분에 한 번 같은 문장을 읽는다. 앞 인원 숫자 자체에는 live를 두지 않는다(ADR-0063)
   const live = h('p', { class: 'sr-only', 'aria-live': 'polite' });
   c.onCleanup(announceEveryMinute(live, () => v.sentence));
   return h('div', { class: 'col q-count' },
     h('p', { class: 'row q-ahead' }, h('span', { class: cx('t-lg fw-b q-ahead-l', tone) }, '앞에'), h('span', { class: cx('t-display num', tone) }, `${fmt(v.ahead)}명`)),
-    h('div', { class: 'q-barwrap' }, meMarker(v.pct), bar(v.pct, v.sentence, { flow: !v.stale, dim: v.stale })),
-    !v.allHeld && v.eta && h('div', { class: 'col q-eta' }, h('span', { class: 't-sm muted' }, '예상 대기 시간'), h('strong', { class: cx('t-xl num', tone) }, v.eta)),
+    h('div', { class: 'q-barwrap' }, meMarker(v.pct), bar(v.pct, v.sentence, { flow: !v.stale && !v.paused, dim: v.stale })),
+    !v.allHeld && h('div', { class: 'col q-eta' }, h('span', { class: 't-sm muted' }, '예상 대기 시간'), h('strong', { class: cx('t-xl', v.eta && 'num', tone) }, etaValue)),
     v.allHeld && h('p', { class: 'row t-md fw-b q-jc' }, h('span', { class: 'spinner muted', 'aria-hidden': 'true' }), '좌석이 풀리길 기다리는 중'),
     live,
   );
@@ -214,7 +218,7 @@ function rollingBlock(ahead: number, eta: string | null, sentence: string): HTML
       h('span', { class: 't-display num q-roll', 'aria-hidden': 'true' }, digits, '명'),
     ),
     h('div', { class: 'q-barwrap' }, meMarker(prevPct, true), meMarker(nowPct), bar(prevPct, sentence, { flow: true, dim: false, extra: next, valueNow: nowPct })),
-    eta && h('div', { class: 'col q-eta' }, h('span', { class: 't-sm muted' }, '예상 대기 시간'), h('strong', { class: 't-xl num' }, eta)),
+    h('div', { class: 'col q-eta' }, h('span', { class: 't-sm muted' }, '예상 대기 시간'), h('strong', { class: cx('t-xl', eta && 'num') }, eta ?? '잠시 멈춤')),
     h('p', { class: 'sr-only', 'aria-live': 'polite' }, sentence),
   );
 }

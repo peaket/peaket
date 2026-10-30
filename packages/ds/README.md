@@ -41,7 +41,7 @@ const theme = resolvePreviewTheme(searchParams); // ?theme=dark
 
 - 의미 색(surface·border·text·primary·link·success·warning·danger·info-subtle·focus-ring·seat·slo·heat)·그림자·모서리: 라이트·다크 모두 캔버스 값과 tokens.json 값이 같았다. 이름만 다른 것: `--seat-held` = `seat.held-by-others`, `--r-*` = `radius.*`.
 - 의미 토큰이 없어 원시 팔레트 경로에 이은 것(값은 같음): `--fill-weak`·`--fill-weak-strong`·`--on-danger`·`--inverse`·`--on-inverse`·`--switch-off`.
-- tokens.json에 없어 키트 값 그대로 둔 것: `--scrim`(라이트 rgba(0,0,0,.48) · 다크 .64), `--heat-ink`(var(--text)).
+- 처음에 tokens.json에 없던 `--scrim`(라이트 rgba(0,0,0,.48) · 다크 .64)과 `--heat-ink`(var(--text))는 소유자 결정(2026-10-31 '추천대로 진행')으로 의미 토큰 `scrim`(`#0000007a`·`#000000a3`, 8자리 16진수라 투명도가 0.2%p 안쪽으로 다름. SEED `bg.overlay`도 이 값으로 덮는다)과 `heat.ink`(`text`의 별칭)로 넣었다. 이제 키트 변수는 모두 tokens.json에서 나온다.
 - 글꼴: 정본 순서 그대로이고 캔버스 전용 'Noto Sans KR'을 뺐다. 앱이 Pretendard를 자체 호스팅해야 Windows에서 캔버스와 비슷하게 보인다(d2 §1). 고정폭은 정본(`'JetBrains Mono', ui-monospace, monospace`)대로 SFMono-Regular·Menlo·Consolas 대체 글꼴이 빠졌다.
 
 ## 부품

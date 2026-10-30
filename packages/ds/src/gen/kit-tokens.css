@@ -52,11 +52,11 @@
     --heat-1: #E0F1FF; /* color.semantic.light.heat.1 */
     --heat-2: #A9D2FE; /* color.semantic.light.heat.2 */
     --heat-3: #6DB0F4; /* color.semantic.light.heat.3 */
-    --heat-ink: var(--text); /* tokens.json에 없음, 키트 값 */
+    --heat-ink: #1a1c20; /* color.semantic.light.heat.ink */
     --shadow-sm: 0px 1px 4px 0px #00000014; /* shadow.light.sm */
     --shadow-md: 0px 2px 10px 0px #0000001a; /* shadow.light.md */
     --shadow-lg: 0px 4px 16px 0px #0000001f; /* shadow.light.lg */
-    --scrim: rgba(0,0,0,.48); /* tokens.json에 없음, 키트 값 */
+    --scrim: #0000007a; /* color.semantic.light.scrim */
     --r-sm: 4px; /* radius.sm */
     --r-md: 8px; /* radius.md */
     --r-lg: 12px; /* radius.lg */
@@ -109,10 +109,10 @@
     --heat-1: #192D41; /* color.semantic.dark.heat.1 */
     --heat-2: #1A4268; /* color.semantic.dark.heat.2 */
     --heat-3: #1D5B92; /* color.semantic.dark.heat.3 */
-    --heat-ink: var(--text); /* tokens.json에 없음, 키트 값 */
+    --heat-ink: #f3f4f5; /* color.semantic.dark.heat.ink */
     --shadow-sm: 0px 1px 4px 0px #00000080; /* shadow.dark.sm */
     --shadow-md: 0px 2px 10px 0px #000000ad; /* shadow.dark.md */
     --shadow-lg: 0px 4px 16px 0px #000000cc; /* shadow.dark.lg */
-    --scrim: rgba(0,0,0,.64); /* tokens.json에 없음, 키트 값 */
+    --scrim: #000000a3; /* color.semantic.dark.scrim */
   }
 }

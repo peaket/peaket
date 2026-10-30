@@ -122,7 +122,7 @@ function TimeStrip({ now }: { now: string | null }) {
           </span>
         ) : (
           <span>
-            <span className="muted">입장 기록 마감 예정</span> <span className="fw-b num">23:00</span>
+            <span className="muted">입장 기록 마감 예정</span> <span className="fw-b num">22:00</span>
           </span>
         )}
       </p>
@@ -156,7 +156,7 @@ function TimeStrip({ now }: { now: string | null }) {
         ) : (
           <span className="col" style={{ gap: 2 }}>
             <span className="t-xs muted">입장 기록 마감 예정</span>
-            <span className="t-sm fw-b num">23:00</span>
+            <span className="t-sm fw-b num">22:00</span>
           </span>
         )}
       </div>

@@ -207,6 +207,14 @@ function ReviewCard({ review }: { review: ReviewSituation }) {
 export function MobileSummary({ review, eventId, doneUpTo }: { review: ReviewSituation; eventId: string; doneUpTo: number }) {
   const rejected = review === 'rejected';
   const revising = review === 'reReq' || review === 'reRej';
+  // 토스페이먼츠 셀러: 처음 판매 승인 전(초안·반려)은 데스크톱 5단계와 같은 공용 목업 값('승인 필요'), 승인을 받은 뒤는
+  // '부분 승인'이다. 셀러가 부분 승인 전이면 판매 승인을 할 수 없기 때문이다(d5 판매 승인의 '승인 불가' 조건).
+  const tossSeller =
+    review === 'draft' || rejected ? (
+      <span key="t" className="badge badge-warning">{stellaOrg.tossSellerStatus}</span>
+    ) : (
+      <span key="t" className="badge badge-success">부분 승인</span>
+    );
   const isDone = (n: number) => (rejected && n === 5 ? false : n <= doneUpTo);
   return (
     <div className="col md:hidden" style={{ gap: 16 }}>
@@ -361,7 +369,7 @@ export function MobileSummary({ review, eventId, doneUpTo }: { review: ReviewSit
             rows={[
               ['정산 계좌', `${stellaOrg.payout.bank} ${stellaOrg.payout.accountMasked}`],
               ['중개수수료율', stellaOrg.commissionRate],
-              ['토스페이먼츠 셀러', <span key="t" className="badge badge-success">부분 승인</span>],
+              ['토스페이먼츠 셀러', tossSeller],
             ]}
           />
           <p className="hint">PEAKET에는 은행과 끝 4자리만 남깁니다. 주 1천만 원 이상 첫 지급에서 결제사 KYC 때문에 지급이 늦어질 수 있습니다</p>

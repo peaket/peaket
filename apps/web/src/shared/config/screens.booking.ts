@@ -198,7 +198,7 @@ export const BOOKING_SCREENS: readonly WebScreen[] = [
   { id: 'SCR-013', name: '마이 티켓(월렛)', path: '/my/tickets', group: 'cached', owner: 'booking', states: SCR013_LIST_STATES },
   { id: 'SCR-013', name: '티켓 상세', path: '/my/tickets/tkt-lumen-r1-0312', group: 'cached', owner: 'booking', states: SCR013_DETAIL_STATES },
   { id: 'SCR-014', name: '티켓 양도', path: '/my/tickets/tkt-lumen-r1-0312/transfer', group: 'request', owner: 'booking', states: SCR014_STATES },
-  { id: 'SCR-038', name: '예매 취소', path: '/my/tickets/tkt-lumen-r1-0312/cancel', group: 'request', owner: 'booking', states: SCR038_STATES },
+  { id: 'SCR-038', name: '예매 취소', path: '/my/tickets/tkt-lumen-r1-0313/cancel', group: 'request', owner: 'booking', states: SCR038_STATES },
   {
     id: 'SCR-015',
     name: '티켓 연동 부가 상품',
