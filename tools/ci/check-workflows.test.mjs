@@ -82,7 +82,8 @@ test('사용자가 고칠 수 있는 값을 식에 쓰면 실패한다', () => {
 });
 
 test('SHA·번호와 github.ref는 식에 써도 된다', () => {
-  for (const expr of ['github.event.pull_request.base.sha', 'github.event.pull_request.number', 'github.event.before', 'github.ref', 'github.sha', 'toJSON(needs)']) {
+  // github.event_name은 사건 종류(push·schedule 등)라 사용자가 고칠 수 없다(release.yml에서 찾은 오탐, add-release-workflows)
+  for (const expr of ['github.event.pull_request.base.sha', 'github.event.pull_request.number', 'github.event.before', 'github.ref', 'github.sha', 'toJSON(needs)', "github.event_name == 'schedule'"]) {
     assert.equal(run(GOOD.replace('github.event.pull_request.head.sha', expr)).code, 0, expr);
   }
 });

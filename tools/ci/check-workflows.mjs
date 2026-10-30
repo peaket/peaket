@@ -20,7 +20,9 @@ const UNTRUSTED_ENDINGS = ['body', 'default_branch', 'email', 'head_ref', 'label
 const untrusted = (expr) =>
   (expr.match(/\bgithub\.[\w.*[\]'"-]+/g) ?? []).some((path) => {
     const last = path.split(/[.[\]'"]+/).filter(Boolean).pop();
-    return path === 'github.head_ref' || (path.startsWith('github.event') && UNTRUSTED_ENDINGS.some((e) => last.endsWith(e)));
+    // github.event_name(사건 종류)은 사건 본문이 아니다. github.event와 그 아래 경로만 본다
+    const inEvent = path === 'github.event' || /^github\.event[.[]/.test(path);
+    return path === 'github.head_ref' || (inEvent && UNTRUSTED_ENDINGS.some((e) => last.endsWith(e)));
   });
 
 function check(file, text) {
