@@ -1,8 +1,13 @@
-# OpenSpec 프로젝트 설정 초안(ADR-0167, 2026-10-30)
+# OpenSpec 프로젝트 설정(ADR-0167, 2026-10-30)
 # - 규칙의 정본은 docs/architecture.md §8.6이다. 이 파일과 다르면 §8.6이 이긴다.
-# - wbs 0.1.1에서 OpenSpec CLI를 뿌리 개발 의존성(판 고정)으로 설치하고 `pnpm exec openspec init --tools claude`로
-#   초기화한다. 초기화가 이 파일을 그대로 두는지 그때 확인한다.
-# - 대조(/opsx:verify)는 기본 묶음에 없어 `openspec config profile`로 확장 묶음을 켠다.
+# - 2026-10-30에 OpenSpec 1.15.0을 뿌리 개발 의존성으로 설치하고 `pnpm exec openspec init --tools claude`로 초기화했다.
+#   초기화는 이 파일을 그대로 두었다.
+# - OpenSpec 명령은 PATH에 없다. `pnpm exec openspec …`으로 부른다.
+# - 새 개발 PC에서 한 번 하는 전역 설정(대조 /opsx:verify 켜기, 사용 통계 끄기):
+#     pnpm exec openspec config set profile custom
+#     pnpm exec openspec config set workflows '["propose","explore","apply","update","sync","archive","verify"]'
+#     pnpm exec openspec config set telemetry.enabled false
+#     pnpm exec openspec update
 schema: spec-driven
 
 context: |

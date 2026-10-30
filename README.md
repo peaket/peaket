@@ -54,7 +54,7 @@
 | `guide/` | 명세를 쉬운 말로 푼 설명서(규범은 아님) |
 | `tools/` | 문서 점검 도구, 성능 장부 도구 |
 | `apps/`, `services/`, `packages/`, `data/`, `infra/` | (구현 뒤) 화면 앱, 서버와 작업자, 공용 패키지, 데이터 모델, 인프라 코드 |
-| `openspec/` | 코드를 쓰기 전에 변경마다 쓰는 제안·명세·작업 목록(스펙 주도 개발, OpenSpec). 지금은 설정 초안만 있습니다. 절차는 [docs/architecture.md](docs/architecture.md) §8.6, 결정은 ADR-0167입니다 |
+| `openspec/` | 코드를 쓰기 전에 변경마다 쓰는 제안·명세·작업 목록(스펙 주도 개발, OpenSpec). 설치와 설정을 마쳤고 아직 변경은 없습니다. 절차는 [docs/architecture.md](docs/architecture.md) §8.6, 결정은 ADR-0167입니다 |
 
 ## 받아서 확인하기
 
@@ -64,7 +64,7 @@
 python tools/doc-check/check_all.py
 ```
 
-구현을 시작하면 이 저장소 하나를 받아 토큰 없이 설치하고 빌드합니다. 내부 패키지를 게시하지 않고 저장소 안에서 잇기 때문입니다([docs/devops.md](docs/devops.md) §2.1).
+구현을 시작하면 이 저장소 하나를 받아 토큰 없이 설치하고 빌드합니다. 내부 패키지를 게시하지 않고 저장소 안에서 잇기 때문입니다([docs/devops.md](docs/devops.md) §2.1). 지금 설치되는 것은 스펙 주도 개발 도구(OpenSpec)뿐입니다. Node 20.19 이상에서 `corepack pnpm install --frozen-lockfile`로 설치하고 `pnpm exec openspec --version`으로 확인합니다. pnpm 판은 `package.json`에 고정되어 있습니다.
 
 ## 문서 규칙
 

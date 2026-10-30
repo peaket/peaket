@@ -1,0 +1,8 @@
+# pnpm-workspace.yaml 공통 설정(pnpm 12). 정본은 docs/devops.md §4.4다. 이 파일과 다르면 §4.4가 이긴다.
+# 작업 공간 폴더(apps/*, packages/*, services/*)는 wbs 0.6.4에서 packages 칸으로 더한다. 지금은 뿌리만 있다(ADR-0167).
+minimumReleaseAge: 4320     # 새 판은 게시 뒤 3일(분 단위)이 지나야 설치한다. 전이 의존성에도 걸린다
+trustPolicy: no-downgrade   # 앞서 나온 판보다 신뢰 증거(신뢰 게시·출처 증명)가 약해진 판은 설치 실패. packageManager로 고정한 pnpm 판에도 걸린다
+blockExoticSubdeps: true    # 전이 의존성이 git 저장소·tarball 주소에서 오는 것을 막는다
+strictDepBuilds: true       # 허용 목록에 없는 설치 스크립트가 있으면 설치가 실패한다
+trustLockfile: false        # 잠금 파일의 항목도 위 검사를 다시 받는다. 외부 기여자가 잠금 파일을 고칠 수 있는 공개 저장소라서다
+allowBuilds: {}             # 설치 스크립트를 허용할 패키지. 빈 목록에서 시작해 PR 검토로만 더한다

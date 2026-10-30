@@ -5,7 +5,7 @@ description: PEAKET의 OpenSpec 변경 하나를 대조(/opsx:verify) 뒤에 Cla
 
 # 브라우저 확인(초안, ADR-0167)
 
-규칙의 정본은 `docs/architecture.md` §8.6이다. 이 절차가 그와 다르면 §8.6이 이긴다. wbs 0.1.1에서 확정하고, 첫 실제 사용은 wbs 0.6.2다.
+규칙의 정본은 `docs/architecture.md` §8.6이다. 이 절차가 그와 다르면 §8.6이 이긴다. OpenSpec 설치·초기화는 2026-10-30에 했다. 이 절차는 첫 실제 사용(wbs 0.6.2)까지 초안이다. OpenSpec 명령은 `pnpm exec openspec …`으로 부른다.
 
 브라우저 확인은 관문이 아니라 참고 증거다. 같은 화면도 누를 때마다 결과가 다를 수 있다. 그래서 실패는 고치기 전에 재현 시험으로 확인한다.
 

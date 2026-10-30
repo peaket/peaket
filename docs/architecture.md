@@ -1104,7 +1104,12 @@ PEAKET의 모든 소프트웨어 산출물은 아래 국제 표준과 법률 규
    - 개인 계정으로 로그인하지 않은 시험용 Chrome 프로필에서, 시드 파일의 시험 계정으로 한다. 실제 계정·결제·키는 쓰지 않고 캡차를 풀지 않는다.
    - 패스키 창, 브라우저 엔진별 차이, 부하, 접근성 판정은 다루지 않는다.
    - 화면이 없는 변경은 '해당 없음'과 까닭만 적는다. tasks.md에서는 체크 칸이 아니라 끝의 `## Workflow follow-up` 칸에 적는다. 체크 칸으로 두면 대조가 '끝나지 않은 작업'으로 세기 때문이다.
-7. **설정 자리**: 단계별 규칙은 `openspec/config.yaml`, 브라우저 확인 절차는 `.claude/skills/peaket-browser-check/SKILL.md`에 둔다. 둘 다 2026-10-30 초안이다. wbs 0.1.1에서 OpenSpec을 설치·초기화하며 확정하고, 첫 브라우저 확인은 wbs 0.6.2에서 한다. 이 절과 설정이 다르면 이 절이 이긴다.
+7. **설정 자리와 설치**: 단계별 규칙은 `openspec/config.yaml`, 브라우저 확인 절차는 `.claude/skills/peaket-browser-check/SKILL.md`에 둔다. 이 절과 설정이 다르면 이 절이 이긴다.
+   - 2026-10-30에 설치·초기화했다(wbs 0.1.1의 이 부분). OpenSpec 1.15.0은 뿌리 `package.json`의 개발 의존성으로 판을 고정했고, pnpm은 `packageManager` 칸으로 12.16.0에 고정했다. 설치는 [devops.md](devops.md) §4.4의 공급망 설정(`pnpm-workspace.yaml`)을 거쳤다.
+   - 초기화(`openspec init --tools claude`)는 OpenSpec의 스킬 7개(`.claude/skills/openspec-*`), 명령 7개(`.claude/commands/opsx/`), `openspec/specs/`, `openspec/changes/`를 만들었다. 미리 쓴 `config.yaml`은 그대로 두었다(초기화 전후 같은 내용). OpenSpec 판을 올리면 `pnpm exec openspec update`로 이 파일들을 다시 만든다.
+   - OpenSpec 스킬은 `openspec` 명령을 부르지만, 전역 설치를 하지 않아 그 명령이 PATH에 없다. `pnpm exec openspec …`으로 부른다.
+   - 대조(`/opsx:verify`)를 켜려고 개발 PC의 OpenSpec 전역 설정을 '기본 묶음 + verify'(`profile custom`)로 두었다. 사용 통계 전송(기본으로 켜져 있고 명령 이름과 판을 보낸다)은 껐다. 새 PC에서는 같은 설정을 다시 한다(명령은 `openspec/config.yaml` 머리 주석). CI에서는 사용 통계가 저절로 꺼진다.
+   - 브라우저 확인 스킬은 첫 사용(wbs 0.6.2)까지 초안이다.
 
 ## 9. 용량 산정과 검증 계획
 
