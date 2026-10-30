@@ -1,0 +1,14 @@
+{
+  "_comment": "가상 팀 아홉(planning/01 §3.3, docs/architecture.md §10). Terraform 팀과 .github/CODEOWNERS 검사가 모두 이 목록을 읽는다(ADR-0165, ADR-0167). slug는 GitHub 팀 이름이다",
+  "teams": [
+    { "slug": "queue", "description": "대기열 팀", "type": "stream-aligned" },
+    { "slug": "purchase", "description": "구매 팀(예매·결제)", "type": "stream-aligned" },
+    { "slug": "ticketing", "description": "발권 팀", "type": "stream-aligned" },
+    { "slug": "commerce", "description": "커머스 팀", "type": "stream-aligned" },
+    { "slug": "frontend-platform", "description": "프론트엔드 플랫폼 팀", "type": "platform" },
+    { "slug": "platform", "description": "플랫폼 팀", "type": "platform" },
+    { "slug": "data", "description": "데이터 팀", "type": "platform" },
+    { "slug": "bot-detection", "description": "봇 탐지 팀", "type": "complicated-subsystem" },
+    { "slug": "architecture", "description": "아키텍처 팀", "type": "enabling" }
+  ]
+}

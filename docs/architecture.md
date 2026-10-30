@@ -1268,6 +1268,7 @@ v0는 일부러 망가뜨린 설계가 아니라 '유능한 팀이 처음 만들
 | `peaket`의 `services/analytics-ingest`, `services/ops-rt`, `services/rt-pulse`, `services/close-runner`, `data/` | 스트림 작업자(관제 실시간 원시 적재 `ops-rt`, 분석 원본 적재 `analytics-ingest`, TypeScript, docs/streaming.md)와 `rt` 표·뷰, 심장 박동 발행기 `rt-pulse`, dbt 변환 모델(dbt-clickhouse, 브론즈 → 실버 → 골드, 지표 사전·결정 규칙), 마감 실행기(`close-runner`, 쿠버네티스 CronJob. Airflow는 쓰지 않는다, ADR-0052) | 데이터 팀(플랫폼) |
 | 저장소 `peaket-loadtest`(비공개) | k6 분산 부하 테스트 시나리오, 매크로 봇 시뮬레이터, 카오스 엔지니어링 실험 스크립트(성능 원장 문서 [perf-ledger.md](perf-ledger.md), 도구 `tools/perf-ledger`, 실행 폴더 `perf-ledger/runs/`는 공개 `peaket`에 둔다, ADR-0165) | 플랫폼 팀(플랫폼, 시험 도구 몫) |
 | `peaket`의 문서 폴더(`planning/`, `design/`, `docs/`, `review/`, `wbs/`, `guide/`)와 `tools/` | 기획·디자인·설계·검토·WBS(할 일을 잘게 나눈 작업 목록)·쉬운 설명서 문서와 문서 점검 도구(`tools/doc-check`) | 아키텍처 팀(지원) |
+| `peaket` 뿌리의 작업 공간 설정(`package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`)과 `.github/`(이 저장소의 워크플로와 CODEOWNERS) | pnpm 판과 공급망 설정([devops.md](devops.md) §4.4), CI(같은 문서 §3). 폴더별 주인은 `.github/CODEOWNERS`에 적는다(추천 적용 2026-10-30, ADR-0167의 첫 OpenSpec 변경) | 플랫폼 팀(플랫폼) |
 | `peaket`의 `openspec/`과 `.claude/skills/peaket-browser-check` | 스펙 주도 개발 기록(`openspec/config.yaml`, 변경 폴더 `openspec/changes/`, 확인한 행동 목록 `openspec/specs/`)과 브라우저 확인 절차(§8.6, ADR-0167). 변경 폴더는 그 코드의 주인 팀이 쓴다 | 아키텍처 팀(지원) |
 | 저장소 `.github`(조직 공용) | 재사용 워크플로(검사·시험·빌드·SBOM·서명·출처 증명·승격), 이슈·PR 양식, 조직 첫 화면 소개(`profile/README.md`) | 플랫폼 팀(플랫폼) |
 

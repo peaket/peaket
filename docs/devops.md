@@ -152,6 +152,7 @@ flowchart LR
   - `release/*`·`hotfix/*`: 릴리스 봇만 만든다. PR 필수, 강제 푸시 금지.
   - 태그 `v*`: 만들기·바꾸기·지우기는 릴리스 봇만 한다.
   - 1인 기간의 필수 승인 수는 0이다(§2.3).
+  - 필수 검사의 이름(추천 적용 2026-10-30, ADR-0167의 첫 OpenSpec 변경): 공용 CI는 `ci-summary`, 가지 규칙 검사는 `branch-policy`, 병합 결과 트리 검사(§2.2.4)는 `merge-tree`다. `develop`은 앞의 둘을, `main`은 셋을 요구한다. 규칙 세트는 이 이름으로 검사를 기다리므로 wbs 0.1.2의 잡 이름은 이것과 같아야 한다. 코드는 `infra/modules/github`다.
   - Terraform GitHub 제공자는 v6.10.0부터 규칙 세트의 허용 병합 방식(`allowed_merge_methods`)을 다룬다. 그래서 그 이상 판으로 고정한다(2026-10-20 릴리스 노트 확인).
 - **가지 규칙 검사**(`branch-policy`, 필수 검사): PR이 보내는 가지(머리 가지)의 종류와 대상 가지가 허용된 쌍인지 본다. 허용하는 쌍: 작업 가지와 `renovate/*` → `develop`, `bugfix/*` → 열린 `release/*`·`hotfix/*`, `release/*` → `main`·`develop`, `hotfix/*` → `main`·`develop`·열린 `release/*`, `merge/*` → `develop`·`release/*`. 그 밖의 쌍이면 검사가 실패한다. 작업 가지가 3일 [가정]을 넘기거나 한 가상 팀의 열린 작업 가지가 3개를 넘으면 경고한다(팀은 PR이 바꾼 파일의 CODEOWNERS 주인으로 센다, ADR-0165).
 - **PR 제목 형식 검사**(`branch-policy`의 한 단계, 필수 검사, 추천 적용 2026-10-28, 기술 검토 낮음-017): 스쿼시 커밋 메시지가 PR 제목이고, 버전 계산과 변경 기록이 그 제목을 읽는다(§2.2.1·§2.2.5). 그래서 제목 형식이 틀리면 판 계산이 조용히 틀린다. 검사는 셋을 본다. ① 형식: Conventional Commits 1.0.0의 `<종류>[(범위)][!]: <설명>`이다. ② 허용 종류: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `style`, `revert`다(명세는 `feat`·`fix` 밖의 종류도 허용하고 `@commitlint/config-conventional`의 목록을 예로 든다, 2026-10-28 확인). ③ 호환을 깨는 변경 표시: PR 본문에 `BREAKING CHANGE:` 꼬리말이 있으면 제목에도 `!`가 있어야 한다. 버전 계산이 제목만 읽어도 MAJOR(운영 출시 전에는 y)를 놓치지 않게 하려는 것이다. 제목을 고치면 검사가 다시 돈다(`pull_request`의 `edited` 사건). 릴리스 봇의 PR은 `chore(release): X.Y.Z`처럼 같은 형식의 제목을 쓰고, Renovate는 `semanticCommits: "enabled"`로 `chore(deps): …` 제목을 만든다(Renovate 문서). 시험은 D-T41이다.
@@ -165,6 +166,7 @@ flowchart LR
 `infra/stacks/global/github`(`peaket`의 Terraform GitHub 제공자 스택)가 다음을 관리한다: 저장소 4개(§2.1)의 생성과 공개 범위, 기본 가지(`develop`. `peaket-gitops`는 `main`), 규칙 세트(§2.2.6: `main`·`develop`·릴리스·핫픽스 가지와 `v*` 태그), CODEOWNERS 검토 요구, 환경(`demo`, `staging`, `prod`, 릴리스 봇의 `release`)과 보호 규칙, 릴리스 봇 GitHub 앱의 설치 범위, Actions 허용 목록과 SHA 고정 요구, 워크플로 토큰(워크플로가 권한을 증명할 때 쓰는 문자열)의 기본 권한(읽기 전용), 조직의 OIDC 주체 사용자화(`include_claim_keys`: `repo`, `context`, `job_workflow_ref`. §4.5, ADR-0165). 손으로 바꾼 설정은 매일 하는 드리프트 점검(§9.3)이 잡아낸다.
 
 - 1인 기간에는 필수 승인 수를 0으로 둔다. GitHub에서는 PR 작성자가 자기 PR을 승인할 수 없다. 대신 필수 검사가 병합을 막는다. 가상 팀이 실제 팀이 되면 CODEOWNERS 승인을 1명 이상으로 올린다(ADR-0054 되돌릴 조건).
+- **팀 목록은 한 곳에 둔다(추천 적용 2026-10-30, ADR-0167의 첫 OpenSpec 변경)**: 가상 팀 아홉의 목록은 `infra/stacks/global/github/teams.json`이다. Terraform이 이 목록으로 GitHub 팀을 만들고, `tools/ci/check-codeowners.mjs`가 `.github/CODEOWNERS`의 팀이 모두 이 목록에 있는지, 첫 규칙 줄이 기본값 `*`인지, 같은 경로가 두 번 없는지 본다. 조직 이름은 `peaket`이다(소유자 결정 2026-10-30, 조직은 아직 만들지 않음).
 
 ## 3. CI
 
@@ -661,7 +663,8 @@ infra/
 ```
 
 - **상태**: 상태는 S3 백엔드에 두고, 계정·환경·구성 요소마다 키를 나눈다. 버킷은 버전 관리와 KMS(암호 키를 안전하게 보관하고 대신 써 주는 클라우드 서비스) 암호화를 켠다. 잠금은 S3 잠금 파일(`use_lockfile`)을 쓴다. 이 기능은 Terraform 1.10에 생겨 1.11에 정식이 됐고, DynamoDB 잠금은 폐기 예정이다(HashiCorp 문서).
-- **버전 고정**: `required_version`과 제공자 잠금 파일(`.terraform.lock.hcl`)을 커밋한다.
+- **GitHub 설정 스택의 처음 상태(추천 적용 2026-10-30, ADR-0167의 첫 OpenSpec 변경)**: `stacks/global/github`는 CI(wbs 0.1.2)보다 먼저 서야 하는데, 상태 버킷은 기반 작업 순서상 뒤(wbs 0.4.2)에 생긴다. 그래서 이 스택만 처음에는 로컬 상태로 적용하고(상태 파일은 커밋하지 않는다), 0.4.2에서 `backend.tf`를 더해 `terraform init -migrate-state`로 S3에 옮긴다. 상태를 잃어도 이 스택의 자원은 `terraform import`로 되살릴 수 있다.
+- **버전 고정**: `required_version`과 제공자 잠금 파일(`.terraform.lock.hcl`)을 커밋한다. 잠금 파일에는 CI 러너(Linux)와 개발 PC(Windows, macOS arm64)의 해시를 함께 담는다(`terraform providers lock -platform=…`).
 - **이름과 태그**: `project=peaket`, `env`, `component`, `owner`(가상 팀), `cost_scope`(onsale, base, measure), `ttl`(측정 자원, §11).
 
 ### 9.2 계정 구조

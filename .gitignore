@@ -5,5 +5,12 @@ __pycache__/
 # doc-check의 mermaid 문법 검사 의존성(tools/doc-check/mermaid에서 npm ci --ignore-scripts로 받는다, ADR-0138)
 node_modules/
 
+# Terraform 작업 폴더·상태·변수 값(제공자 잠금 파일 .terraform.lock.hcl과 예시 *.tfvars.example은 기록한다, docs/devops.md §9.1)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
+
 # Claude Code의 개인 설정(공유 설정인 .claude/launch.json 등은 기록한다)
 .claude/settings.local.json
