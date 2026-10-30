@@ -67,3 +67,16 @@ test('사람 계정 표기는 실패한다', () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /팀 표기/);
 });
+
+// 코드 리뷰 반영(2026-10-30): 뜻이 같은 경로를 다른 꼴로 적어도 중복이다
+test('뜻이 같은 경로(/x, /x/, /x/**)를 중복으로 잡는다', () => {
+  const r = run('* @peaket/architecture\n/infra/ @peaket/platform\n/infra @peaket/architecture\n/infra/** @peaket/platform\n');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /\/infra'가 2줄/);
+  assert.match(r.stderr, /\/infra\/\*\*'가 2줄/);
+});
+
+test('앞 슬래시가 다른 경로는 뜻이 달라 중복이 아니다', () => {
+  const r = run('* @peaket/architecture\n/infra/ @peaket/platform\ninfra/ @peaket/architecture\n');
+  assert.equal(r.status, 0, r.stderr);
+});

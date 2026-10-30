@@ -29,8 +29,10 @@ lines.forEach((raw, i) => {
   const [pattern, ...owners] = line.split(/\s+/);
   rules += 1;
   if (rules === 1 && pattern !== '*') errors.push(`${where}: 첫 규칙 줄은 기본값 '*'이어야 한다(지금 '${pattern}')`);
-  if (seen.has(pattern)) errors.push(`${where}: 경로 '${pattern}'가 ${seen.get(pattern)}줄에도 있다`);
-  seen.set(pattern, i + 1);
+  // 뜻이 같은 꼴(/x, /x/, /x/**)은 하나로 본다. 앞 슬래시가 있고 없음은 뜻이 달라(뿌리 기준, 어디서나) 그대로 둔다
+  const key = pattern.replace(/\/\*\*$/, '').replace(/\/$/, '') || pattern;
+  if (seen.has(key)) errors.push(`${where}: 경로 '${pattern}'가 ${seen.get(key)}줄에도 있다(같은 뜻의 경로)`);
+  else seen.set(key, i + 1);
   if (owners.length === 0) errors.push(`${where}: '${pattern}'에 주인이 없다`);
   for (const owner of owners) {
     const m = /^@([A-Za-z0-9-]+)\/([a-z0-9-]+)$/.exec(owner);

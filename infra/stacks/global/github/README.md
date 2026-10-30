@@ -25,7 +25,7 @@ terraform -chdir=infra/stacks/global/github validate
 
 1. 소유자가 GitHub 조직 `peaket`을 만든다. 조직 관리 권한이 있는 토큰을 `GITHUB_TOKEN` 환경 변수로 둔다. 토큰은 파일에 적지 않는다.
 2. `terraform.tfvars.example`을 `terraform.tfvars`로 복사해 `owner_login`과 `prod_reviewer_user_ids`(prod 배포 승인자, 1인 기간에는 소유자)를 채운다(`terraform.tfvars`는 커밋하지 않는다).
-3. 저장소만 먼저 만든다: `terraform apply -target=github_repository.this`. 비공개 `peaket-bots`는 봇 시뮬레이터를 처음 만들 때(wbs 1.2.2)까지 미뤄도 된다
+3. 저장소만 먼저 만든다: `terraform apply -target=github_repository.this`. 비공개 `peaket-bots`는 스위치 `bots_repository_enabled`(기본 꺼짐)를 켤 때만 만들어진다. 봇 시뮬레이터를 처음 만드는 wbs 1.2.2에서 켠다
 4. 이 저장소의 `main`과 `develop`을 원격 `peaket`에 밀어 넣는다. 공개 게시라 소유자가 다시 확인한다.
 5. wbs 0.1.2의 CI(`ci-summary`, `branch-policy`, `merge-tree` 잡)가 한 번 돈 뒤 전체를 적용한다: `terraform apply`. 필수 검사가 한 번도 돌지 않은 채로 규칙 세트를 걸면 모든 PR이 그 검사를 기다리며 막힌다.
 6. 릴리스 봇 GitHub 앱을 만들면 `release_bot_app_id`를 넣고 다시 적용한다. 그때 `release/*`·`hotfix/*`·`v*` 규칙 세트에 봇 우회가 생긴다.

@@ -6,7 +6,7 @@ locals {
 
   team_repositories = merge(
     { for slug, t in local.teams : "${slug}/peaket" => { team = slug, repository = "peaket" } },
-    { for repo in ["peaket-bots"] : "platform/${repo}" => { team = "platform", repository = repo } },
+    { for repo in keys(local.bots_repository) : "platform/${repo}" => { team = "platform", repository = repo } if var.bots_repository_enabled },
   )
 }
 

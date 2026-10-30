@@ -9,6 +9,12 @@ variable "owner_login" {
   type        = string
 }
 
+variable "bots_repository_enabled" {
+  description = "비공개 봇 저장소 peaket-bots를 만들지. 봇 시뮬레이터를 처음 만드는 wbs 1.2.2에서 true로 바꾼다(ADR-0169)"
+  type        = bool
+  default     = false
+}
+
 variable "release_bot_app_id" {
   description = "릴리스 봇 GitHub 앱 ID. 앱을 만들기 전에는 null이다"
   type        = number

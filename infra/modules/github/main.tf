@@ -34,7 +34,8 @@ resource "github_repository_ruleset" "main" {
       dynamic "required_check" {
         for_each = var.required_checks_main
         content {
-          context = required_check.value
+          context        = required_check.value
+          integration_id = var.status_check_integration_id
         }
       }
     }
@@ -74,7 +75,8 @@ resource "github_repository_ruleset" "develop" {
       dynamic "required_check" {
         for_each = var.required_checks_develop
         content {
-          context = required_check.value
+          context        = required_check.value
+          integration_id = var.status_check_integration_id
         }
       }
     }

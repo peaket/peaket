@@ -3,13 +3,19 @@
 # peaket-bots는 봇 시뮬레이터만 담는 비공개 저장소다(POL-026). main 하나를 쓴다.
 
 locals {
-  repositories = {
+  # peaket-bots는 스위치(bots_repository_enabled)를 켤 때만 만든다
+  repositories = merge(local.monorepo, var.bots_repository_enabled ? local.bots_repository : {})
+
+  monorepo = {
     "peaket" = {
       description    = "PEAKET(피켓) 모노레포: 문서, 계약, 화면 앱, 서버, 공용 패키지, 데이터 모델, 인프라 코드, 배포 상태, 부하 시험"
       visibility     = "public"
       auto_init      = false
       default_branch = "develop"
     }
+  }
+
+  bots_repository = {
     "peaket-bots" = {
       description    = "PEAKET 합성 봇 시뮬레이터(비공개, POL-026)"
       visibility     = "private"

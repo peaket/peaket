@@ -34,6 +34,14 @@
 - [x] 6.1 `infra/stacks/global/github`를 저장소 둘(`peaket` 공개·`develop`, `peaket-bots` 비공개·`main`)로 고친다. 규칙 세트는 `peaket`에만, 팀은 모두 `peaket`에 쓰기, 플랫폼 팀은 `peaket-bots`에도 쓰기. `peaket-gitops`의 `main` 규칙 세트를 없앤다. 안내서의 적용 순서도 고친다. 확인: `terraform fmt -check -recursive infra`와 `terraform validate`가 통과한다.
 - [x] 6.2 `deploy/`·`loadtest/`에 안내 파일을 두고, CODEOWNERS에 `/deploy/`·`/loadtest/`(플랫폼 팀)를 더한다. 확인: `node --test "tools/ci/*.test.mjs"`와 CODEOWNERS 검사가 통과하고 문서 점검 오류 0이다.
 
+## 7. 코드 리뷰 반영(2026-10-30)
+
+- [x] 7.1 `workspace:` 검사가 `overrides`·`resolutions`·`pnpm.overrides`, `npm:@peaket/…` 별칭, `pnpm-workspace.yaml`의 `@peaket/` 이름도 막는다. 재현 시험을 먼저 만들어 실패를 본 뒤 고친다. 확인: `node --test "tools/ci/*.test.mjs"`가 통과한다.
+- [x] 7.2 `workspace:` 검사가 git이 추적하는 파일만 본다(git 밖에서는 폴더를 훑는다). 확인: 같은 시험이 통과하고, 추적하지 않는 폴더의 `package.json`은 보지 않는다.
+- [x] 7.3 CODEOWNERS 검사가 뜻이 같은 경로(`/x`, `/x/`, `/x/**`)를 중복으로 잡는다. 재현 시험을 먼저 만든다. 확인: 같은 시험이 통과한다.
+- [x] 7.4 Terraform: 규칙 세트 모듈이 환경을 먼저 만들게 기다린다. 필수 검사는 GitHub Actions(앱 ID 15368)에서 온 것만 받는다. 봇 저장소는 스위치(`bots_repository_enabled`, 기본 꺼짐)로 만든다. 확인: `terraform fmt -check -recursive infra`와 `terraform validate`가 통과한다.
+- [x] 7.5 정본과 안내서에 반영한다(devops §2.2.6·§4.4, 스택 README). 확인: 문서 점검 오류 0이다.
+
 ## Workflow follow-up
 
 - 대조: `/opsx:verify`(OpenSpec 명령은 `pnpm exec openspec`으로 부른다).

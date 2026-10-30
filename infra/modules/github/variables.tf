@@ -15,6 +15,12 @@ variable "required_checks_main" {
   default     = ["ci-summary", "branch-policy", "merge-tree"]
 }
 
+variable "status_check_integration_id" {
+  description = "필수 검사를 받아 줄 출처 GitHub 앱 ID. 기본은 GitHub Actions(15368, gh api apps/github-actions로 2026-10-30 확인). 다른 앱이 같은 이름의 검사를 '통과'로 찍지 못하게 한다"
+  type        = number
+  default     = 15368
+}
+
 variable "main_required_deployments" {
   description = "main에 병합하기 전에 배포가 성공해야 하는 환경"
   type        = list(string)

@@ -56,7 +56,7 @@
    - 스쿼시 커밋의 제목·본문은 PR 제목·본문으로 둔다(§2.2.5 '스쿼시 커밋 메시지는 PR 제목').
 8. **환경과 배포 가지**(devops §5.1, §2.2.6 릴리스 봇): `demo`는 `release/*`·`hotfix/*`, `staging`은 `release/*`·`hotfix/*`(측정 캠페인 수동), `prod`는 `main`만, `release`는 `develop`·`release/*`·`hotfix/*`·`main`. `prod`의 검토자는 소유자이고, 1인 기간이라 자기 승인을 막지 않는다.
 9. **Actions 조직 정책**(devops §4.5): `allowed_actions = "selected"`, GitHub 소유 액션 허용, 마켓플레이스 인증 액션 일괄 허용은 끔, 제3자 액션 허용 목록은 비워 두고 0.1.2에서 쓰는 것만 더한다. `sha_pinning_required = true`. 워크플로 토큰 기본 권한은 읽기, PR 승인 권한 없음. OIDC 주체 키는 `repo`, `context`, `job_workflow_ref`.
-10. **`workspace:` 표기 검사는 의존성 없는 Node 스크립트다.** `tools/ci/check-workspace-protocol.mjs`가 뿌리부터 `package.json`을 찾아(`node_modules`·`.git` 제외) `dependencies`·`devDependencies`·`peerDependencies`·`optionalDependencies`의 `@peaket/*` 판이 `workspace:`로 시작하지 않으면 파일과 이름을 적고 실패한다. 시험은 Node 내장 시험 실행기(`node --test`)로, 임시 폴더에 맞는 예와 틀린 예를 만들어 바깥에서 돌린다(내부 함수를 공개하지 않는다).
+10. **`workspace:` 표기 검사는 의존성 없는 Node 스크립트다.** `tools/ci/check-workspace-protocol.mjs`가 뿌리부터 `package.json`을 찾아(`node_modules`·`.git` 제외) `dependencies`·`devDependencies`·`peerDependencies`·`optionalDependencies`의 `@peaket/*` 판이 `workspace:`로 시작하지 않으면 파일과 이름을 적고 실패한다. 코드 리뷰(R-200) 뒤에는 git이 추적하는 `package.json`·`pnpm-workspace.yaml`만 보고, `npm:@peaket/…` 별칭과 덮어쓰기 칸(`overrides`, `resolutions`, `pnpm.overrides`), `pnpm-workspace.yaml`의 `@peaket/` 이름도 막는다. 필수 검사는 GitHub Actions 앱에서 온 것만 받고(모듈 변수 `status_check_integration_id`), 봇 저장소는 스위치(`bots_repository_enabled`)로 만든다. 시험은 Node 내장 시험 실행기(`node --test`)로, 임시 폴더에 맞는 예와 틀린 예를 만들어 바깥에서 돌린다(내부 함수를 공개하지 않는다).
     - 대안: ESLint 규칙. 아직 ESLint 설정이 없다(wbs 0.6.4). 기각.
 
 ## Risks / Trade-offs

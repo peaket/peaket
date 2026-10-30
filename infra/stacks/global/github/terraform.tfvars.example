@@ -6,5 +6,8 @@ owner_login  = "your-github-login"
 # prod 배포 승인자(GitHub 사용자 ID, 숫자). 1인 기간에는 소유자 한 사람이다. ID는 gh api user --jq .id로 본다
 prod_reviewer_user_ids = [1234567]
 
+# 비공개 봇 저장소 peaket-bots는 wbs 1.2.2에서 켠다(기본 꺼짐)
+# bots_repository_enabled = true
+
 # 릴리스 봇 GitHub 앱을 만든 뒤 그 앱 ID를 넣는다
 # release_bot_app_id = 123456
