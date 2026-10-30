@@ -52,7 +52,7 @@ const SEED_EXTRA_OVERRIDES = {
 
 // 캔버스 키트 변수 → tokens.json 경로 대응표(kit-tokens.css를 만든다).
 // - light는 .pk, dark는 .pk.dark에 쓴다. dark가 null이면 다크 블록에 쓰지 않는다(라이트 값을 물려받는다. 캔버스 키트와 같다).
-// - 경로 대신 { raw }는 tokens.json에 없는 키트 전용 값이다. 키트 값을 그대로 두고 소유자 결정을 기다린다(보고 목록).
+// - 경로 대신 { raw }를 쓰면 tokens.json에 없는 키트 전용 값이다. 지금은 없다(2026-10-31 --scrim·--heat-ink를 토큰으로 옮겼다, 소유자 '추천대로 진행').
 // - 의미 토큰이 없어 원시 팔레트 경로에 이은 것(fill-weak 등)은 note에 적었다. 값은 캔버스 키트와 같다.
 // 2026-10-31 대조: 의미 토큰과 이은 변수는 라이트·다크 모두 캔버스 키트 값과 같았다.
 const KIT_VARS = [
@@ -99,11 +99,11 @@ const KIT_VARS = [
   ["--heat-1", "color.semantic.light.heat.1", "color.semantic.dark.heat.1"],
   ["--heat-2", "color.semantic.light.heat.2", "color.semantic.dark.heat.2"],
   ["--heat-3", "color.semantic.light.heat.3", "color.semantic.dark.heat.3"],
-  ["--heat-ink", { raw: "var(--text)" }, { raw: "var(--text)" }, "tokens.json에 없음(키트 값)"],
+  ["--heat-ink", "color.semantic.light.heat.ink", "color.semantic.dark.heat.ink"],
   ["--shadow-sm", "shadow.light.sm", "shadow.dark.sm"],
   ["--shadow-md", "shadow.light.md", "shadow.dark.md"],
   ["--shadow-lg", "shadow.light.lg", "shadow.dark.lg"],
-  ["--scrim", { raw: "rgba(0,0,0,.48)" }, { raw: "rgba(0,0,0,.64)" }, "tokens.json에 없음(키트 값)"],
+  ["--scrim", "color.semantic.light.scrim", "color.semantic.dark.scrim"],
   ["--r-sm", "radius.sm", null],
   ["--r-md", "radius.md", null],
   ["--r-lg", "radius.lg", null],

@@ -6,7 +6,7 @@ export interface TicketSummary {
   performanceId: string;
   productionId: string;
   orderId: string;
-  /** 'R석 · R1구역 3열 12번' */
+  /** 'R석 · R구역 12열 7번'(보드 표기) */
   seatLabel: string;
   grade: string;
   price: number;
@@ -16,8 +16,8 @@ export interface TicketSummary {
 }
 
 export const TICKETS: readonly TicketSummary[] = [
-  { id: 'tkt-lumen-r1-0312', performanceId: 'evt-lumen-1025', productionId: 'prd-lumen', orderId: 'ord-20261014-0001', seatLabel: 'R석 · R1구역 3열 12번', grade: 'R석', price: 154000, status: '사용 가능', holderName: '지민' },
-  { id: 'tkt-lumen-r1-0313', performanceId: 'evt-lumen-1025', productionId: 'prd-lumen', orderId: 'ord-20261014-0001', seatLabel: 'R석 · R1구역 3열 13번', grade: 'R석', price: 154000, status: '양도 요청 중', holderName: '지민' },
+  { id: 'tkt-lumen-r1-0312', performanceId: 'evt-lumen-1025', productionId: 'prd-lumen', orderId: 'ord-20261014-0001', seatLabel: 'R석 · R구역 12열 7번', grade: 'R석', price: 154000, status: '사용 가능', holderName: '지민' },
+  { id: 'tkt-lumen-r1-0313', performanceId: 'evt-lumen-1025', productionId: 'prd-lumen', orderId: 'ord-20261014-0001', seatLabel: 'R석 · R구역 12열 8번', grade: 'R석', price: 154000, status: '양도 요청 중', holderName: '지민' },
   { id: 'tkt-lumen-a1-1001', performanceId: 'evt-lumen-1026', productionId: 'prd-lumen', orderId: 'ord-20261014-0002', seatLabel: 'A석 · A1구역 10열 1번', grade: 'A석', price: 110000, status: '키 없음', holderName: '지민' },
   { id: 'tkt-fest-std-0042', performanceId: 'evt-fest-1107', productionId: 'prd-fest', orderId: 'ord-20261016-0003', seatLabel: '스탠딩 · 입장 순번 42', grade: '스탠딩', price: 99000, status: '받은 티켓', holderName: '지민' },
   { id: 'tkt-musical-0207', performanceId: 'evt-musical-1101', productionId: 'prd-musical', orderId: 'ord-20261012-0004', seatLabel: '전석 · 2열 7번', grade: '전석', price: 66000, status: '취소 접수', holderName: '지민' },

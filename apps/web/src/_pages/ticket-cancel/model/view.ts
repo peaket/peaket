@@ -64,8 +64,8 @@ export interface CancelSeat {
 }
 
 export const CANCEL_SEATS: readonly CancelSeat[] = [
-  { ticketId: 'tkt-lumen-r1-0313', seat: 'R구역 12열 7번', grade: 'R석', price: 154000, gate: '게이트 동문' },
-  { ticketId: 'tkt-lumen-r1-0312', seat: 'R구역 12열 8번', grade: 'R석', price: 154000, gate: '게이트 동문' },
+  { ticketId: 'tkt-lumen-r1-0312', seat: 'R구역 12열 7번', grade: 'R석', price: 154000, gate: '게이트 동문' },
+  { ticketId: 'tkt-lumen-r1-0313', seat: 'R구역 12열 8번', grade: 'R석', price: 154000, gate: '게이트 동문' },
 ];
 
 /** 예매번호(보드 값) */

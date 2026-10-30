@@ -1,6 +1,6 @@
 // 양도 요청(transfer offer) 목업(티켓 양도 SCR-014·양도 받기 SCR-041이 읽는다). 값은 캔버스 보드 SCR-014·041 그대로다.
 // 받는 분에게는 결제 금액·결제자 연락처를 주지 않는다(d2 CMP-059). 받는 분 이름은 닉네임 일부('하*')만 보낸 분에게 보인다.
-// 좌석 글은 보드 값('R구역 12열 8번')이다. entities/ticket의 seatLabel(표본 상태용)과 다르다 — 보드를 따른다.
+// 좌석 글은 보드 값('R구역 12열 8번')이다. 표기는 entities/ticket과 같지만, 이 요청이 가리키는 티켓(DEMO_TICKET_ID, 7번)과 좌석 번호는 다르다 — 보드를 따른다.
 export type TransferOfferStatus = 'offered' | 'accepted' | 'rejected' | 'withdrawn' | 'expired' | 'reclaimed';
 
 export interface TransferOffer {

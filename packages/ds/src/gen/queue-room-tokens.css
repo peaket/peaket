@@ -39,7 +39,7 @@
     --shadow-sm: 0px 1px 4px 0px #00000014;
     --shadow-md: 0px 2px 10px 0px #0000001a;
     --shadow-lg: 0px 4px 16px 0px #0000001f;
-    --scrim: rgba(0,0,0,.48);
+    --scrim: #0000007a;
     --r-sm: 4px;
     --r-md: 8px;
     --r-lg: 12px;
@@ -82,6 +82,6 @@
     --shadow-sm: 0px 1px 4px 0px #00000080;
     --shadow-md: 0px 2px 10px 0px #000000ad;
     --shadow-lg: 0px 4px 16px 0px #000000cc;
-    --scrim: rgba(0,0,0,.64);
+    --scrim: #000000a3;
   }
 }

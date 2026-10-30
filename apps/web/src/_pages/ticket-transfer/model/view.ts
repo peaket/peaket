@@ -64,7 +64,7 @@ export function transferView(st: Scr014State): TransferView {
   };
 }
 
-/** 양도할 티켓의 좌석·게이트(보드 값. entities/ticket의 seatLabel과 다르다 — 보드를 따른다) */
+/** 양도할 티켓의 좌석·게이트(보드 값. 예시 경로 티켓의 seatLabel(7번)과 좌석 번호가 다르다 — 보드를 따른다) */
 export const TRANSFER_SEAT = { seat: 'R구역 12열 8번', gate: '게이트 동문' } as const;
 
 /** '양도 불가 · 받은 티켓' 상태의 받은 티켓(보드 값: 10/26 회차 · 보낸 분 '하늘') */

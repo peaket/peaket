@@ -48,7 +48,7 @@ export interface WithdrawQuote {
   /** 관람일 10일 전까지는 0(공정거래위원회 소비자분쟁해결기준) */
   fee: number;
   refund: number;
-  /** 'LUMEN 콘서트 2026 서울 · 10/25(일) 18:00 · R1구역 3열 12번·13번' */
+  /** 'LUMEN 콘서트 2026 서울 · 10/25(일) 18:00 · R구역 12열 7번·8번' */
   summary: string;
   /** 받은 티켓 장수(결제한 분에게 돌아간다) */
   receivedCount: number;
@@ -58,7 +58,7 @@ export interface WithdrawQuote {
   transferPendingHref: string;
 }
 
-/** 'R석 · R1구역 3열 12번'들 → 'R1구역 3열 12번·13번' */
+/** 'R석 · R구역 12열 7번'들 → 'R구역 12열 7번·8번' */
 function seatsText(labels: readonly string[]): string {
   const parts = labels.map((l) => l.split(' · ').pop() ?? l);
   const first = parts[0] ?? '';

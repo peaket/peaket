@@ -75,7 +75,7 @@ export async function TicketCancelPage({ params, searchParams }: Props) {
   const orderHref = `/my/orders/${ticket.orderId}`;
   const transferHref = `/my/tickets/${ticketId}/transfer`;
   const refundAccountHref = '/my/refunds/rfd-0001/account';
-  // 이 주소의 티켓을 미리 고른다(보드: 8번). 양도 요청 중 상태에서는 그 티켓이 막히고 아무것도 고르지 않은 채다
+  // 이 주소의 티켓을 미리 고른다(보드는 8번이라 화면 목록의 예시 주소는 8번 티켓 0313이다). 양도 요청 중 상태에서는 그 티켓이 막히고 아무것도 고르지 않은 채다
   const blockedId = v.xfer ? ticketId : null;
   const initialSelected = v.xfer ? [] : [ticketId];
   const mine = CANCEL_SEATS.find((s) => s.ticketId === ticketId) ?? CANCEL_SEATS[1]!;

@@ -108,6 +108,7 @@
     --peaket-color-danger-subtle: #fdf0f0;
     --peaket-color-info-subtle: #eff6ff;
     --peaket-color-focus-ring: #5B5BE8;
+    --peaket-color-scrim: #0000007a;
     --peaket-color-seat-available: #079171;
     --peaket-color-seat-held-by-others: #d1d3d8;
     --peaket-color-seat-mine: #4338CA;
@@ -121,6 +122,7 @@
     --peaket-color-heat-1: #E0F1FF;
     --peaket-color-heat-2: #A9D2FE;
     --peaket-color-heat-3: #6DB0F4;
+    --peaket-color-heat-ink: #1a1c20;
     --peaket-shadow-sm: 0px 1px 4px 0px #00000014;
     --peaket-shadow-md: 0px 2px 10px 0px #0000001a;
     --peaket-shadow-lg: 0px 4px 16px 0px #0000001f;
@@ -148,6 +150,7 @@
     --seed-color-bg-critical-weak: #fdf0f0;
     --seed-color-bg-informative-weak: #eff6ff;
     --seed-color-stroke-focus-ring: #5B5BE8;
+    --seed-color-bg-overlay: #0000007a;
     --seed-color-bg-brand-weak-pressed: #DFE2FF;
     --seed-color-fg-brand-contrast: #4338CA;
     --seed-color-stroke-brand-weak: #DFE2FF;
@@ -182,6 +185,7 @@
     --peaket-color-danger-subtle: #322323;
     --peaket-color-info-subtle: #202742;
     --peaket-color-focus-ring: #A9B0FF;
+    --peaket-color-scrim: #000000a3;
     --peaket-color-seat-available: #22b27f;
     --peaket-color-seat-held-by-others: #5b606a;
     --peaket-color-seat-mine: #A9B0FF;
@@ -195,6 +199,7 @@
     --peaket-color-heat-1: #192D41;
     --peaket-color-heat-2: #1A4268;
     --peaket-color-heat-3: #1D5B92;
+    --peaket-color-heat-ink: #f3f4f5;
     --peaket-shadow-sm: 0px 1px 4px 0px #00000080;
     --peaket-shadow-md: 0px 2px 10px 0px #000000ad;
     --peaket-shadow-lg: 0px 4px 16px 0px #000000cc;
@@ -222,6 +227,7 @@
     --seed-color-bg-critical-weak: #322323;
     --seed-color-bg-informative-weak: #202742;
     --seed-color-stroke-focus-ring: #A9B0FF;
+    --seed-color-bg-overlay: #000000a3;
     --seed-color-bg-brand-weak-pressed: #1C1A55;
     --seed-color-fg-brand-contrast: #A9B0FF;
     --seed-color-stroke-brand-weak: #1C1A55;

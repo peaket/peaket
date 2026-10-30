@@ -28,6 +28,7 @@ export const color = {
     "danger-subtle": "#fdf0f0",
     "info-subtle": "#eff6ff",
     "focus-ring": "#5B5BE8",
+    "scrim": "#0000007a",
     "seat-available": "#079171",
     "seat-held-by-others": "#d1d3d8",
     "seat-mine": "#4338CA",
@@ -41,6 +42,7 @@ export const color = {
     "heat-1": "#E0F1FF",
     "heat-2": "#A9D2FE",
     "heat-3": "#6DB0F4",
+    "heat-ink": "#1a1c20",
   },
   dark: {
     "surface": "#16171b",
@@ -67,6 +69,7 @@ export const color = {
     "danger-subtle": "#322323",
     "info-subtle": "#202742",
     "focus-ring": "#A9B0FF",
+    "scrim": "#000000a3",
     "seat-available": "#22b27f",
     "seat-held-by-others": "#5b606a",
     "seat-mine": "#A9B0FF",
@@ -80,6 +83,7 @@ export const color = {
     "heat-1": "#192D41",
     "heat-2": "#1A4268",
     "heat-3": "#1D5B92",
+    "heat-ink": "#f3f4f5",
   },
 } as const;
 
