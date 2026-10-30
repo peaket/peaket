@@ -1,0 +1,42 @@
+# OpenSpec 프로젝트 설정 초안(ADR-0167, 2026-10-30)
+# - 규칙의 정본은 docs/architecture.md §8.6이다. 이 파일과 다르면 §8.6이 이긴다.
+# - wbs 0.1.1에서 OpenSpec CLI를 뿌리 개발 의존성(판 고정)으로 설치하고 `pnpm exec openspec init --tools claude`로
+#   초기화한다. 초기화가 이 파일을 그대로 두는지 그때 확인한다.
+# - 대조(/opsx:verify)는 기본 묶음에 없어 `openspec config profile`로 확장 묶음을 켠다.
+schema: spec-driven
+
+context: |
+  PEAKET(피켓)은 100만 동시접속 티케팅과 관제 시스템이다. 코드와 문서는 모노레포 `peaket` 하나에 있다(ADR-0165).
+  - 정본은 planning/, design/, docs/(계약 원본 docs/api/ 포함)다. openspec/specs/는 구현해 확인한 행동의 목록일 뿐이다. 둘이 다르면 정본이 이긴다.
+  - 문서는 한국어로, 도메인을 모르는 사람도 읽을 수 있는 쉬운 말로 쓴다. 전문 용어는 처음 나올 때 푼다(planning/03-policies-glossary.md §5).
+  - 기능을 만들기 전에 docs/security/asvs/<기능>.md(ASVS 추적 표)와 기능 설계서의 '운영 확인' 표가 있어야 한다(docs/architecture.md §8.2·§8.4).
+  - 기술을 고른 이유는 ADR(docs/adr/)로만 댄다. 정본에 없는 결정이 필요하면 구현 전에 정본과 ADR을 먼저 고친다.
+  - 계약을 바꾸면 계약 원본(docs/api/의 openapi·asyncapi·proto·avro)을 먼저 고친다(계약 우선).
+  - 시험 데이터는 합성 데이터와 고정 시드만 쓴다. 결제·본인확인·사람 확인은 정본의 시뮬레이터를 쓴다.
+
+rules:
+  proposal:
+    - Impact(영향)에 이 변경이 기대거나 고치는 정본 문서와 ID(FR·NFR·POL·SCR 번호, openapi operationId, ASVS 항목, 시험 ID, WBS ID)를 적는다.
+    - 동작이 바뀌지 않는 변경(구조 정리, 도구, 의존성)은 명세 없이 쓴다(skip_specs true).
+  specs:
+    - 요구사항 글에 정본의 규칙을 옮겨 적지 않는다. 바깥에서 보이는 행동만 쓰고 근거 ID를 괄호로 단다.
+    - 시나리오의 WHEN과 THEN은 정본의 통과 기준과 같은 숫자와 상태 값을 쓴다.
+    - 내부 클래스와 함수 이름은 쓰지 않는다.
+  design:
+    - 정본(docs/architecture.md, 기능 설계서)이 정한 구조를 따른다. 구조를 바꿔야 하면 구현 전에 ADR을 먼저 쓴다.
+  tasks:
+    - 작업마다 확인 방법(시험, 명령, 보이는 결과)을 적는다. 정본에 그 시험 ID가 있으면 그 ID를 쓴다.
+    - 시험을 먼저 쓰라고 요구하지 않는다. 입력과 출력이 분명한 계산은 먼저 써도 된다.
+    - 시험하려고 내부 함수를 공개하거나 인터페이스로 바꾸지 않는다. API, 화면, 이벤트 같은 바깥 경계에서 시험한다.
+    - E2E 시험은 이 변경에서 쓰지 않는다(ADR-0167 결정 6). 브라우저에서만 재현되는 버그의 재현 시험 한 건은 예외다.
+    - 화면이 바뀌는 변경은 tasks.md 끝의 Workflow follow-up 칸에 브라우저 확인(대조 뒤, peaket-browser-check 스킬)을 적는다. 체크 칸으로 만들지 않는다.
+
+operations:
+  apply:
+    guidance:
+      - 버그를 고칠 때는 그 버그를 재현하는 시험을 먼저 만들어 실패를 보고, 고친 뒤 통과를 보고, 그 시험을 남긴다. 재현되는 가장 낮은 단계(단위, 통합)에 쓴다.
+      - 정본과 다른 것을 찾으면 코드로 정하지 말고 멈춰서 사람에게 묻는다.
+  archive:
+    guidance:
+      - browser-check.md에 고치지 않은 실패가 남아 있으면 보관하지 않는다. 화면이 없는 변경은 해당 없음과 그 까닭이 적혀 있어야 한다.
+      - PR 검토와 CI가 끝난 뒤 같은 작업 가지에서 보관하고, 그 커밋까지 함께 병합한다.

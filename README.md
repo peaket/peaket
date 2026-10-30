@@ -54,6 +54,7 @@
 | `guide/` | 명세를 쉬운 말로 푼 설명서(규범은 아님) |
 | `tools/` | 문서 점검 도구, 성능 장부 도구 |
 | `apps/`, `services/`, `packages/`, `data/`, `infra/` | (구현 뒤) 화면 앱, 서버와 작업자, 공용 패키지, 데이터 모델, 인프라 코드 |
+| `openspec/` | 코드를 쓰기 전에 변경마다 쓰는 제안·명세·작업 목록(스펙 주도 개발, OpenSpec). 지금은 설정 초안만 있습니다. 절차는 [docs/architecture.md](docs/architecture.md) §8.6, 결정은 ADR-0167입니다 |
 
 ## 받아서 확인하기
 
