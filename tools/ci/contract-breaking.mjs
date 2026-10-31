@@ -4,7 +4,7 @@
 //
 // 쓰는 법:
 //   node tools/ci/contract-breaking.mjs --target origin/develop [--pull-request] [--labels <JSON 배열>]   (CI의 PR은 라벨을 GITHUB_EVENT_PATH에서 읽는다)
-//   node tools/ci/contract-breaking.mjs services        서비스 OpenAPI 차이(D-T38)의 자리
+//   node tools/ci/contract-breaking.mjs services        서비스 OpenAPI 차이(D-T38, 비교 본체는 service-openapi.mjs)
 // 도구는 판·다이제스트를 고정한 공식 이미지로 네트워크를 끊고 돈다(design.md 결정 1). Docker가 있어야 한다.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { sortReleaseTags } from './release-tags.mjs';
+import { checkServices, serviceTargets } from './service-openapi.mjs';
 
 // oasdiff 1.34.1(2026-10-21 게시), AsyncAPI CLI 6.2.2(2026-10-26 게시). 판은 guidelines §1이 정한 판이다
 export const IMAGES = {
@@ -244,22 +245,8 @@ export function labelsFromEvent(file) {
   return (event?.pull_request?.labels ?? []).map((l) => l?.name).filter((n) => typeof n === 'string');
 }
 
-/** 서비스 OpenAPI 차이(D-T38)의 대상: services/<이름>/package.json에 openapi:emit 스크립트가 있는 서비스 */
-export function serviceTargets(root) {
-  const dir = join(root, 'services');
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory())
-    .filter((e) => {
-      const p = join(dir, e.name, 'package.json');
-      if (!existsSync(p)) return false;
-      try {
-        return !!JSON.parse(readFileSync(p, 'utf8')).scripts?.['openapi:emit'];
-      } catch {
-        return false;
-      }
-    })
-    .map((e) => `services/${e.name}`).sort();
-}
+// 서비스 OpenAPI 차이(D-T38)의 대상 찾기는 비교 본체(service-openapi.mjs)에 있다. 이 파일의 시험이 그대로 쓰게 다시 내보낸다
+export { serviceTargets };
 
 if (import.meta.main) {
   const { values, positionals } = parseArgs({
@@ -268,13 +255,12 @@ if (import.meta.main) {
   });
   const cwd = process.cwd();
   if (positionals[0] === 'services') {
-    const found = serviceTargets(cwd);
-    if (!found.length) {
-      console.log('서비스 OpenAPI 차이(D-T38): openapi:emit을 가진 서비스가 없어 견줄 것이 없다');
-    } else {
-      console.log(`실패: 서비스 OpenAPI 차이(D-T38)의 비교가 아직 없다. 서비스 템플릿(BUILD_ORDER FND-050)에서 만든다: ${found.join(', ')}`);
-      process.exitCode = 1;
-    }
+    // 서비스마다 openapi:emit으로 문서를 뽑아, 맡는 계약 작업만 모양으로 견준다(service-openapi.mjs)
+    const r = await checkServices({ cwd });
+    if (!r.targets.length) console.log('서비스 OpenAPI 차이(D-T38): openapi:emit을 가진 서비스가 없어 견줄 것이 없다');
+    for (const svc of r.checked) console.log(`서비스 OpenAPI 차이(D-T38) 통과: ${svc}`);
+    for (const f of r.failures) console.log(`실패: 서비스 OpenAPI 차이(D-T38) ${f}`);
+    if (r.failures.length) process.exitCode = 1;
   } else {
     if (!values.target) {
       console.error('사용: node tools/ci/contract-breaking.mjs --target <대상 가지> [--pull-request] [--labels <JSON 배열>]');

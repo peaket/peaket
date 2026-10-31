@@ -17,8 +17,11 @@ const RULES = [
   // 문서 점검(tools/doc-check)이 읽는 파일: tools/와 점으로 시작하는 폴더 밖의 .md·.yaml·.json·.csv
   [/^(?!tools\/)(?!(?:.*\/)?\.).*\.(md|yaml|json|csv)$/, ['docs']],
   [/^packages\/contracts\//, ['contracts', 'js']],
-  // 서비스는 계약을 지키는 쪽이고(서비스 OpenAPI 차이 D-T38), 계약 깨짐 검사 도구와 그 워크플로가 바뀌면 실제 도구로 다시 돌린다
-  [/^(services\/|tools\/ci\/(contract-breaking|release-tags)\.mjs$|\.github\/workflows\/contract-check\.yml$)/, ['contracts']],
+  // 서비스는 계약을 지키는 쪽이고(서비스 OpenAPI 차이 D-T38), 계약 깨짐 검사 도구와 그 워크플로가 바뀌면 실제 도구로 다시 돌린다.
+  // 서비스 문서를 뽑는 서비스 템플릿(packages/platform)과 비교 본체(service-openapi.mjs)가 바뀌어도 다시 돌린다(add-service-template)
+  [/^(services\/|packages\/platform\/|tools\/ci\/(contract-breaking|release-tags|service-openapi)\.mjs$|\.github\/workflows\/contract-check\.yml$)/, ['contracts']],
+  // 서비스 템플릿 시험이 지연 칸 목록을 이 문서와 견주고(metrics.test.ts), 계약 전체 대조 시험이 비교 본체를 쓴다(contract-sweep.test.ts)
+  [/^(docs\/observability\.md|tools\/ci\/service-openapi\.mjs)$/, ['js']],
   [/^(apps|services|packages)\//, ['js']],
   [/^data\//, ['data']],
   [/^infra\//, ['infra']],
@@ -28,7 +31,11 @@ const RULES = [
   [/^\.github\//, ['ci']],
 ];
 // 넓게 쓰이는 것: 기대는 배포 단위 전부를 돌린다(§3.1 2번)
-const WIDEN_JS = [/^packages\/platform\//, /^packages\/contracts\//, /^docs\/api\//, /^package\.json$/, /^pnpm-lock\.yaml$/, /^pnpm-workspace\.yaml$/];
+// 자바스크립트 검사가 도는 방식(ci-node.yml, turbo.json, Node 판 .nvmrc)이 바뀌어도 전부를 돌린다(add-service-template)
+const WIDEN_JS = [
+  /^packages\/platform\//, /^packages\/contracts\//, /^docs\/api\//, /^package\.json$/, /^pnpm-lock\.yaml$/, /^pnpm-workspace\.yaml$/,
+  /^turbo\.json$/, /^\.nvmrc$/, /^\.github\/workflows\/ci-node\.yml$/,
+];
 // 검사 절차 자체가 바뀌면 모든 범위를 돌린다
 const WIDEN_ALL = [/^\.github\/workflows\/ci\.yml$/, /^tools\/ci\/changes\.mjs$/];
 

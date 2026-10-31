@@ -28,8 +28,8 @@ test('D-T47 ① 문서만 바꾸면 docs만 고른다', () => {
   assert.deepEqual(scopes({ 'docs/a.md': '글\n' }), ['docs']);
 });
 
-test('D-T47 ② packages/platform을 바꾸면 화면·서비스 전부(js_all)를 고른다', () => {
-  assert.deepEqual(scopes({ 'packages/platform/x.ts': '바꿈\n' }), ['js', 'js_all']);
+test('D-T47 ② packages/platform을 바꾸면 화면·서비스 전부(js_all)와, 서비스 문서를 뽑는 곳이라 계약 잡을 고른다', () => {
+  assert.deepEqual(scopes({ 'packages/platform/x.ts': '바꿈\n' }), ['contracts', 'js', 'js_all']);
 });
 
 test('D-T47 ③ infra/만 바꾸면 infra만 고른다', () => {
@@ -59,7 +59,7 @@ test('배포 상태·부하 시험·도구·워크플로 밖 .github은 각 범�
 
 test('파일을 옮기면 옛 경로의 범위와, 링크가 깨질 수 있어 docs도 고른다', () => {
   const s = scopes({}, undefined, (dir) => git(dir, 'mv', 'packages/platform/x.ts', 'infra/x.ts'));
-  assert.deepEqual(s, ['docs', 'js', 'js_all', 'infra']);
+  assert.deepEqual(s, ['docs', 'contracts', 'js', 'js_all', 'infra']);
 });
 
 test('문서 점검이 읽는 파일(.md·.yaml·.json·.csv)은 어디에 있든 docs를 고른다', () => {
@@ -90,4 +90,19 @@ test('DT38_서비스와_계약깨짐검사도구를바꾸면_contracts를고른�
   assert.deepEqual(scopes({ 'tools/ci/contract-breaking.mjs': 'x\n' }), ['contracts', 'tools']);
   assert.deepEqual(scopes({ 'tools/ci/release-tags.mjs': 'x\n' }), ['contracts', 'tools']);
   assert.deepEqual(scopes({ '.github/workflows/contract-check.yml': 'x\n' }), ['contracts', 'ci']);
+});
+
+test('DT38_서비스템플릿과_서비스문서비교본체를바꾸면_contracts를고른다', () => {
+  // emitOpenApi·contractSchema(packages/platform)나 비교 본체를 고치면 서비스 OpenAPI 차이를 다시 돌린다(코드 리뷰, add-service-template)
+  assert.deepEqual(scopes({ 'packages/platform/src/openapi.ts': 'x\n' }), ['contracts', 'js', 'js_all']);
+  // 비교 본체는 서비스 템플릿의 계약 전체 대조 시험(contract-sweep.test.ts, node 잡)도 쓰므로 js도 켠다(다시 본 리뷰)
+  assert.deepEqual(scopes({ 'tools/ci/service-openapi.mjs': 'x\n' }), ['contracts', 'js', 'tools']);
+});
+
+test('자바스크립트검사방식을바꾸면_전체js를고르고_서비스템플릿이읽는정본문서를바꾸면_js를고른다', () => {
+  // ci-node.yml·turbo.json·.nvmrc는 모든 자바스크립트 검사가 도는 방식이다. observability.md는 서비스 템플릿 시험이 칸 목록을 견준다
+  assert.deepEqual(scopes({ '.github/workflows/ci-node.yml': 'x\n' }), ['js', 'js_all', 'ci']);
+  assert.deepEqual(scopes({ 'turbo.json': '{}\n' }), ['docs', 'js', 'js_all']);
+  assert.deepEqual(scopes({ '.nvmrc': '24\n' }), ['js', 'js_all']);
+  assert.deepEqual(scopes({ 'docs/observability.md': '글\n' }), ['docs', 'js']);
 });

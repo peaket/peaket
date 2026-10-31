@@ -46,5 +46,8 @@ jobs:
             [ -n "$target" ] || target="HEAD~1"
             node tools/ci/contract-breaking.mjs --target "$target"
           fi
-      # 서비스 OpenAPI 차이(D-T38)의 자리. openapi:emit을 가진 서비스가 생기면 비교가 생길 때까지 실패한다
-      - run: node tools/ci/contract-breaking.mjs services
+      # 서비스 OpenAPI 차이(D-T38): openapi:emit을 가진 서비스마다 문서를 뽑아 맡는 계약 작업만 견준다(tools/ci/service-openapi.mjs).
+      # 문서 뽑기는 빌드한 서비스(dist)를 돌리므로 서비스와 그것이 기대는 패키지를 먼저 빌드한다
+      - run: |
+          if ls services/*/package.json >/dev/null 2>&1; then pnpm exec turbo run build --filter="./services/*"; fi
+          node tools/ci/contract-breaking.mjs services

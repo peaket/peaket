@@ -150,6 +150,30 @@ flowchart LR
 
 모든 서비스는 서비스 템플릿으로 처리 중 요청 수 게이지 `http_server_active_requests`(OpenTelemetry `http.server.active_requests`와 같은 뜻, 라벨은 지연 히스토그램과 같다)를 낸다(추천 적용 2026-10-21, ADR-0077). 처리 중 요청 수 ÷ (초당 처리량 × 평균 처리 시간)이 1에서 크게 벗어나면 그 앞에 줄이 생긴 것으로 보고 원인 패널에서 살핀다(리틀의 법칙). 경보에는 쓰지 않는다.
 
+**서비스 템플릿이 내는 HTTP 지표(추천 적용 2026-11-01, openspec 변경 add-service-template, BUILD_ORDER FND-050)**: 공용 서버 패키지 `packages/platform`의 시작 코드가 모든 HTTP 요청에 대해 아래 지표를 낸다. 지표는 앱 요청을 받는 포트가 아닌 관리 포트(기본 9464)의 `/metrics`로만 낸다(docs/security/asvs/delivery.md 13.4.5).
+
+| 지표 | 종류 | 라벨 | 뜻 |
+| --- | --- | --- | --- |
+| `http_server_request_duration_seconds` | 히스토그램(§8 표준 칸) | `service`·`route`·`method`·`status_class` | 처리 시간(OpenTelemetry `http.server.request.duration`). `status_class`로 성공과 실패의 지연을 나눠 본다 |
+| `http_server_active_requests` | 게이지 | `service`·`route`·`method` | 처리 중 요청 수. 처리 중에는 응답 코드를 모르므로 `status_class`는 없다. 위 문단의 '라벨은 지연 히스토그램과 같다'는 '처리 중에 알 수 있는 라벨은 같다'로 읽는다(해석) |
+| `http_server_errors_total` | 카운터 | 히스토그램과 같다 | 5xx로 답한 요청(명시적 오류, 위 규칙 3) |
+| `http_server_business_rejections_total` | 카운터 | 히스토그램과 같다 | 업무상 정상 분기로 표시한 오류 응답(예: 좌석 경합 409). 오류 카운터에 넣지 않고 따로 센다(docs/api/guidelines.md §2, NFR-003). 정상 분기 표시는 오류를 내는 코드가 Problem에 단다. 같은 409라도 처리 중 재요청(`idempotency-request-in-progress`)은 정상 분기가 아니어서 상태 코드만으로는 가를 수 없기 때문이다 |
+| Node 기본 지표(`nodejs_eventloop_lag_seconds` 등) | 여럿 | 없음 | 포화도(이벤트 루프 지연, 힙, GC). `@prometheus-io/client`의 기본 지표 모음이다 |
+
+- `route`는 경로 틀을 계약 표기로 쓴 값이다(`/v1/events/{eventId}`). 맞는 경로가 없는 요청과 처리기를 찾기 전에 거절한 요청(잘못된 URL 등)은 `unmatched` 하나로 묶는다. 실제 자원 ID는 들어가지 않는다(§8).
+- 처리 중 요청 게이지는 응답을 보냈을 때와 연결이 끊겼을 때(본문을 다 받은 뒤 끊긴 경우 포함) 한 번만 내린다. 끊긴 요청은 지연 히스토그램에 들지 않는다.
+- 지연은 서비스에 주입한 시계(단조 시계)로 잰다. 시험은 `packages/platform/test/metrics.test.ts`(5xx는 오류 카운터, 409 경합 패배는 정상 분기 카운터, docs/verification.md §2.7의 지표 내보내기 층)다.
+
+**서비스 템플릿의 운영 확인(docs/architecture.md §8.4, 추천 적용 2026-11-01)**: 기능 설계서 9편의 표는 wbs 0.3.5에서 채운다. 아래는 템플릿 자체의 표다.
+
+| 확인할 동작 | 사건·필드 | SLI | 대시보드 패널 | 경보 | 배포 뒤 확인 방법 |
+| --- | --- | --- | --- | --- | --- |
+| 새 서비스가 네 신호를 같은 모양으로 낸다 | 위 표의 지표 | NFR-011(REST p95 500ms, 99.9%) | 서비스 대시보드 첫 줄 네 신호(규칙 1, wbs 1.3.1) | 템플릿 자체 경보 없음. 서비스 SLO 경보가 이 지표를 쓴다 | 카나리 분석이 같은 지표로 새 판과 안정판을 견준다(docs/devops.md §6.2) |
+| 정상 분기 거절이 오류율을 올리지 않는다 | `http_server_business_rejections_total`, `http_server_errors_total` | 기능 SLO(예: NFR-003 좌석 홀드는 409를 정상으로 본다) | 오류율 패널 옆 정상 분기 패널 | 없음 | 경합 부하 시험에서 409가 정상 분기 카운터에만 드는지 본다 |
+| 예상하지 못한 오류가 내부 정보 없이 끝나고 원인을 찾을 수 있다 | 500 Problem의 `traceId`, 서버 기록 줄(`msg` unexpected error, 같은 `traceId`, 예외 이름·스택) | 없음 | 오류 패널, 로그 조회 | 5xx 비율은 서비스 SLO 경보 | 오류 응답의 `traceId`로 로그를 찾아본다(정규 로그 줄은 FND-060에서 Pino로 바꾼다) |
+| 남은 시간이 모자라면 일찍 끝낸다 | 504 Problem `deadline-exceeded`, `http_server_errors_total{status_class="5xx"}` | 없음 | 오류 패널 | 서비스 SLO 경보에 든다(5xx) | 짧은 `x-peaket-deadline-ms`로 부른 시험(docs/api/guidelines.md §5) |
+| 처리 중 요청이 쌓이지 않는다 | `http_server_active_requests` | 없음 | 포화도 패널(리틀의 법칙) | 없음(위 문단) | 부하 시험에서 처리량 × 평균 처리 시간과 견준다 |
+
 시스템 관측성을 위한 핵심 운영 규칙은 다음과 같다(원문 6대 규칙에 ADR-0069의 7번을 더했다):
 1. 모든 마이크로서비스 모니터링 대시보드의 맨 위 첫 번째 행에는 반드시 Four Golden Signals를 두어, 장애 징후를 바로 알아보게 표준화한다.
 2. 시스템 지연시간은 산술 평균이 아니라 백분위 분포(p50, p99, p99.9)로 정밀하게 계측한다. 실패한 요청의 지연시간은 반드시 따로 나눠 분석한다(느린 실패는 빠른 실패보다 시스템 자원을 더 심하게 바닥낸다).

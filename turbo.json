@@ -18,6 +18,7 @@
     },
     "typecheck": {
       "dependsOn": [
+        "^build",
         "^typecheck"
       ]
     },
@@ -28,9 +29,14 @@
     "test": {
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/docs/api/**"
+        "$TURBO_ROOT$/docs/api/**",
+        "$TURBO_ROOT$/docs/observability.md",
+        "$TURBO_ROOT$/tools/ci/service-openapi.mjs"
       ],
-      "outputs": []
+      "outputs": [],
+      "dependsOn": [
+        "^build"
+      ]
     }
   }
 }

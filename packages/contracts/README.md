@@ -22,7 +22,7 @@
 | `@peaket/contracts/openapi/<태그>` | 태그(`queue`, `seats`, `orders`, `ops` …)마다 작업별 경로·쿼리·머리·본문·응답 Zod 스키마. 계약에 `operationId`가 아직 없어 이름은 메서드와 경로에서 나온다(`PostV1QueuesEventIdLobbyParticipantsBody`). wbs 0.2.3에서 `operationId`를 붙이면 이름이 바뀐다 |
 | `@peaket/contracts/asyncapi` | asyncapi 메시지 본문마다 Zod 스키마와 타입(메시지 이름 그대로, 예: `OrderEvent`) |
 
-내보내기는 원본 `.ts`를 가리키고, 생성된 모음 파일은 확장자 없이 다시 내보낸다(`@peaket/ds`와 같은 관례). 그래서 번들러·Vitest·Next.js로는 읽히지만 Node만으로는 읽히지 않는다. 서버에서 쓰는 빌드 방식은 서비스 템플릿(`packages/platform`, BUILD_ORDER FND-050)에서 정한다.
+내보내기는 원본 `.ts`를 가리키고, 생성된 모음 파일은 확장자 없이 다시 내보낸다(`@peaket/ds`와 같은 관례). 그래서 번들러·Vitest·Next.js로는 읽히지만 Node만으로는 읽히지 않는다. 서버에서 쓰는 빌드 방식은 서버가 이 생성물을 실행 중에 처음 쓰는 단계(요청 검사, BUILD_ORDER FND-070)에서 정한다. 서비스 템플릿(`packages/platform`, FND-050)은 실행 중에 이 패키지를 읽지 않는다(문서 뽑기의 `contractSchema`는 서비스가 넘긴 Zod를 받는다). 2026-11-01 확인: esbuild로 묶으면 NestJS 생성자 주입에 필요한 데코레이터 메타데이터가 빠지므로, 확장자 없는 다시 내보내기를 Node가 읽게 하는 방법(생성 뒤 확장자 붙이기 등)과 함께 그 단계에서 견준다.
 
 ## 생성 규칙
 

@@ -1,0 +1,55 @@
+# 자바스크립트 작업 공간 검사(docs/devops.md §3.1 ci-node, wbs 0.1.2·0.3.1 ①). ci.yml이 바뀐 범위에 js가 있을 때 부른다.
+# 잠금 파일대로 설치하고 Turborepo로 타입 검사·단위 시험·빌드를 돈다. 넓게 쓰이는 것(packages/platform·packages/contracts,
+# docs/api, 잠금 파일·작업 공간 설정)이 바뀌었거나 범위를 고르지 못했으면 전체, 아니면 바뀐 패키지와 그것에 기대는 패키지만 돈다.
+# 린트(층 의존 방향)·ASVS 태그 보고·컨테이너 통합 시험은 그 도구가 생기는 단계에서 더한다(openspec 변경 add-service-template).
+name: ci-node
+
+on:
+  workflow_call:
+    inputs:
+      all:
+        description: 전체를 돈다(넓게 쓰이는 것이 바뀌었거나 범위를 고르지 못함)
+        type: boolean
+        required: true
+      base:
+        description: 견줄 기준 커밋(PR은 대상 가지의 기준, 푸시는 앞 커밋). 비었거나 0이면 전체
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # --affected는 기준과 머리 사이 이력이 모두 있어야 한다(얕으면 모두 바뀐 것으로 본다, Turborepo 문서 2026-11-01 확인)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # pnpm은 package.json의 packageManager 판으로 받는다(contract-check.yml과 같다). 의존성 설치는 잠금 파일대로만 한다(§4.4)
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile
+      - env:
+          ALL: ${{ inputs.all }}
+          BASE: ${{ inputs.base }}
+        run: |
+          if [ "$ALL" != "true" ] && [ -n "$BASE" ] && printf '%s' "$BASE" | grep -q '[^0]' && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "기준 $BASE 뒤 바뀐 패키지와 그것에 기대는 패키지만 돈다"
+            TURBO_SCM_BASE="$BASE" TURBO_SCM_HEAD=HEAD pnpm exec turbo run typecheck test build --affected
+            # 서비스 템플릿 시험은 늘 돈다. 패키지 밖 정본(docs/observability.md 지연 칸 목록, docs/api 계약)과 견주는 시험이 있어
+            # 문서만 바뀐 경우를 --affected가 패키지 변경으로 보지 않는다(코드 리뷰, add-service-template)
+            pnpm exec turbo run test --filter=@peaket/platform
+          else
+            echo "전체를 돈다(넓게 쓰이는 것이 바뀌었거나 기준이 없다)"
+            pnpm exec turbo run typecheck test build
+          fi

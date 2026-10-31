@@ -1,0 +1,36 @@
+{
+  "name": "@peaket/platform",
+  "private": true,
+  "version": "0.0.0",
+  "description": "서비스(NestJS·Fastify)가 함께 쓰는 서버 공용 패키지. 게시하지 않고 workspace:로만 잇는다(docs/architecture.md §10, ADR-0165)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.3.2",
+    "@nestjs/core": "^12.3.2",
+    "@nestjs/platform-fastify": "^12.3.2",
+    "@nestjs/swagger": "^12.0.5",
+    "@opentelemetry/api": "^1.10.0",
+    "@prometheus-io/client": "^0.16.1",
+    "fastify": "^5.12.7",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
