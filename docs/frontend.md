@@ -234,7 +234,8 @@ peaket/
   packages/
     api-client/          orval 생성물 + 실행 정책(§4.1)
     telemetry/           lite(대기실)·full 두 판(§5.16)
-    validation/          Zod 4 스키마(요청·응답은 openapi에서 orval이 만든 src/gen/, 손으로는 계약에 적을 수 없는 규칙만) + 판매 정책 DSL AST 평가기(서버와 같이 씀)
+    validation/          Zod 4 스키마(요청·응답은 @peaket/contracts의 생성 스키마를 다시 내보내고, 손으로는 계약에 적을 수 없는 규칙만) + 판매 정책 DSL AST 평가기(서버와 같이 씀)
+    contracts/           계약(openapi·asyncapi)에서 orval이 만든 Zod 스키마·타입과 Pact 파일(서버와 같이 씀, ADR-0165)
     ds/                  디자인 토큰 빌드(Style Dictionary 5) + 컴포넌트(@seed-design/react 3)
     console-contract/    관제 원격 위젯 계약(§4.5)
     seatmap/             좌석맵 열 배열·격자 색인·그리기 Worker(web·forensics, ADR-0080 결정 5)
@@ -251,12 +252,12 @@ peaket/
 | SEED CSS | SEED 전체 CSS(`all*.css`)는 가져오지 않는다(린트가 막는다). 부품 CSS는 `@seed-design/react` 부품이 가져오는 자기 recipe만 실리고, base·recipe 모두 층 판(`*.layered.css`)이다. 층 순서 선언 `@layer theme, base, seed-base, seed-components, components, utilities;`는 앱이 가장 먼저 싣는 CSS 파일 맨 앞에 둔다. 층 판은 내보내기 조건 `seed-layered`로 고르는데(Vite `resolve.conditions`, webpack `resolve.conditionNames`), Next.js 앱의 Turbopack이 이것을 고를 수 있는지는 PoC FE-T36(wbs 0.6.1)으로 본다(docs/design/d2 §1, 추천 적용 2026-10-28, 기술 검토 중간-097) |
 | 원격 위젯 | `apps/widgets/<원격 이름>`의 원격 모듈은 `@peaket/console-contract`와 공유 싱글턴만 가져온다(§4.5). 같은 소스를 작업 공간 패키지 `@peaket/widget-<원격 이름>`로도 내보내고, 호스트가 그것을 `workspace:`로 이어 한 앱 기준선을 빌드한다(FE-T29, 추천 적용 2026-10-28, ADR-0100). 이 패키지는 게시하지 않는다(ADR-0165) |
 | 좌석맵 패키지 | `packages/seatmap`은 화면 상태를 모르고 열 배열·격자 색인·그리기만 한다. 소비자 웹은 실시간 델타를, 포렌식 앱은 재생 사건을 넣는다(ADR-0080 결정 5) |
-| 생성물 | `packages/api-client/src/gen/`과 `packages/validation/src/gen/`(orval이 계약에서 만든 요청·응답 Zod 스키마)은 손으로 고치지 않는다. 계약(openapi·asyncapi)이 바뀌면 다시 만들고, CI가 다시 만든 결과와 차이가 없는지 본다(`contract-check`). 손으로 쓰는 Zod는 생성 스키마를 넓히지 않고 규칙만 덧붙인다(계약에 적을 수 없는 grapheme 단위 길이, 금칙어, 판매 정책 DSL. 이름은 그 필드의 openapi 설명에 적는다, docs/api/guidelines.md §1, 추천 적용 2026-10-28, 기술 검토 중간-085) |
+| 생성물 | `packages/contracts/src/gen/`(orval이 계약에서 만든 요청·응답 Zod 스키마와 타입)과 `packages/api-client/src/gen/`(orval이 만든 호출 함수·훅·MSW 핸들러)은 손으로 고치지 않는다. 요청·응답 Zod는 `contracts` 한 곳에만 만들고 `validation`은 그것을 다시 내보낸다. ADR-0165(2026-10-30)와 devops §2.1이 계약에서 만든 코드를 `packages/contracts`에 두므로 같은 Zod를 두 곳에 만들지 않는다(추천 적용 2026-11-01, openspec 변경 `add-contracts-package`). 계약(openapi·asyncapi)이 바뀌면 다시 만들고, CI가 다시 만든 결과와 차이가 없는지 본다(`contract-check`). 손으로 쓰는 Zod는 생성 스키마를 넓히지 않고 규칙만 덧붙인다(계약에 적을 수 없는 grapheme 단위 길이, 금칙어, 판매 정책 DSL. 이름은 그 필드의 openapi 설명에 적는다, docs/api/guidelines.md §1, 추천 적용 2026-10-28, 기술 검토 중간-085) |
 | 게시 | `packages/*`는 레지스트리에 게시하지 않고 판 번호도 매기지 않는다. 앱·원격 위젯·서버는 `@peaket/*` 의존성을 `workspace:` 프로토콜(같은 작업 공간 안의 패키지만 가리키는 의존성 표기)로만 적어 같은 커밋의 소스를 쓴다. 이 표기는 작업 공간 밖의 패키지로 풀리지 않아, 공개 레지스트리에 같은 이름이 올라와도 설치되지 않는다. 린트가 이 표기를 검사한다(devops §2.1, ADR-0165). 함께 쓰는 곳은 원격 위젯이 `console-contract`·`ds`·`telemetry`, 서버가 `validation`이다(devops §3.2) |
 
 Turborepo 작업은 `lint`·`typecheck`·`test`·`build`·`size`·`e2e`이고, PR에서는 `peaket`의 `ci.yml`이 Turborepo `--affected`로 고른 범위(바뀐 앱·패키지와 그것에 기대는 것)의 작업만 돈다(devops §3, ADR-0165 결정 3).
 
-**지금 있는 것(2026-10-31, ADR-0170)**: 위 구조 가운데 `apps/web`(+`queue-room`), `apps/partner`, `apps/console-host`, `apps/widgets/queue`·`purchase`, `apps/scanner`, `apps/forensics`, `packages/ds`, `packages/config`가 있다. 69개 화면을 디자인 캔버스 보드대로 목업 데이터로 그린 퍼블리싱 단계라, 데이터 접근 층(`api-client`)·`telemetry`·`validation`·`console-contract`·`seatmap` 패키지와 Steiger·ESLint·size-limit은 아직 없다. 화면마다 `?state=`로 캔버스 보드의 상태를 고르고, 앱마다 `/preview`(개발 서버에서만)에 화면·상태 목록이 있다. `@peaket/ds`의 겉모양은 캔버스 키트(`src/styles/kit.css`)이고, 부품 속을 `@seed-design/react`로 바꾸는 일은 wbs 0.6.2에서 같은 API를 지키며 한다. Cache Components·nonce(FE-T35), Module Federation 원격 적재(FE-T29), PWA, 다국어 주소는 각자의 단계에서 켠다.
+**지금 있는 것(2026-10-31, ADR-0170)**: 위 구조 가운데 `apps/web`(+`queue-room`), `apps/partner`, `apps/console-host`, `apps/widgets/queue`·`purchase`, `apps/scanner`, `apps/forensics`, `packages/ds`, `packages/config`가 있다. 69개 화면을 디자인 캔버스 보드대로 목업 데이터로 그린 퍼블리싱 단계라, 데이터 접근 층(`api-client`)·`telemetry`·`validation`·`console-contract`·`seatmap` 패키지와 Steiger·ESLint·size-limit은 아직 없다. 화면마다 `?state=`로 캔버스 보드의 상태를 고르고, 앱마다 `/preview`(개발 서버에서만)에 화면·상태 목록이 있다. `@peaket/ds`의 겉모양은 캔버스 키트(`src/styles/kit.css`)이고, 부품 속을 `@seed-design/react`로 바꾸는 일은 wbs 0.6.2에서 같은 API를 지키며 한다. Cache Components·nonce(FE-T35), Module Federation 원격 적재(FE-T29), PWA, 다국어 주소는 각자의 단계에서 켠다. 2026-11-01에 `packages/contracts`(계약에서 만든 Zod 스키마·타입, packages/contracts/README.md)와 작업 공간 시험 작업(`pnpm test` = Turborepo `test`)을 더했다(openspec 변경 `add-contracts-package`, BUILD_ORDER FND-030).
 
 ### 2.3 앱별 구조
 
@@ -1512,6 +1513,7 @@ allowBuilds:
 | 시각 회귀 | Playwright `toHaveScreenshot`(판을 고정한 같은 컨테이너 이미지), Storybook 정적 빌드. 유료 서비스는 쓰지 않는다(docs/design/d2 §1, 기술 검토 낮음-100) | FE-T40 |
 
 - 단언과 가짜 함수는 Vitest 하나(`expect`, `vi.fn`, `vi.useFakeTimers`)로 쓴다. 원문 ADR-0018의 `@web/test-runner` + mocha + chai + sinon은 쓰지 않는다. 같은 시험 파일을 jsdom과 실제 브라우저에서 같은 러너로 돌리기 때문이다.
+- 지금 있는 것(2026-11-01, openspec 변경 `add-contracts-package`): Vitest 5.0.5를 `packages/contracts`가 처음 쓴다(설정도 그 패키지에 있고, 함께 쓸 패키지가 생기면 `@peaket/config`로 올린다). 뿌리 `pnpm test`가 Turborepo `test` 작업으로 모든 패키지의 시험을 돌린다. 퍼블리싱 화면(ADR-0170)의 목업 시험은 Node 내장 시험 실행기(`node --test`)로 돌고, 그 화면에 데이터를 잇는 단계에서 Vitest로 옮긴다(추천 적용 2026-11-01).
 - Vitest 브라우저 모드는 Vitest 4.0(2025-10-22)부터 안정판이다. 공급자는 따로 받는 패키지다. 2026-10-28 레지스트리 판은 vitest 5.0.5, `@vitest/browser-playwright` 5.0.5, `@playwright/test` 1.64.1, axe-core 4.14.0이다.
 
 | ID | 무엇 | 어떻게 | 언제 | 통과 기준 |

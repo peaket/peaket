@@ -180,7 +180,7 @@ flowchart LR
 2. 넓게 쓰이는 것이 바뀌면 범위를 넓힌다. `packages/platform`·`packages/contracts`·`docs/api/`·잠금 파일·`ci.yml`이 바뀌면 그것에 기대는 배포 단위를 모두 돌린다. 범위를 고르지 못하면(스크립트 오류) 전체를 돈다.
 3. 고른 범위에 따라 아래 공용 워크플로를 부르는 유형별 잡(§3.2)이 돈다. 마지막 잡 `ci-summary`(`if: always()`)는 앞의 잡이 하나라도 실패하거나 취소되면 실패한다. 규칙 세트의 필수 검사는 `ci-summary`와 `branch-policy` 둘이다.
 4. 시험: D-T47.
-5. 지금 있는 것(추천 적용 2026-10-31, openspec 변경 `add-ci-foundation`, R-202): `ci.yml`의 잡은 `changes`, `docs-check`, `tools-check`, `iac-check`, `ci-summary`다. 판단은 모두 `tools/ci/*.mjs`가 하고 시험이 함께 있다(tools/ci/README.md). 범위 잡은 `changes` 잡이 실패해도 돈다(범위를 고르지 못하면 전체를 돈다). 옮긴 파일은 옛 경로와 새 경로를 함께 세고, 지운 파일이 있으면 링크가 깨질 수 있어 문서 범위도 켠다. 대상 가지를 바꾸면(`edited`) 범위를 다시 고른다. 문서 점검이 읽는 파일(`tools/`와 점으로 시작하는 폴더 밖의 `.md`·`.yaml`·`.json`·`.csv`)은 어디에 있든 문서 범위에 든다. 화면·서비스·계약·데이터 잡은 그 코드가 생기는 변경에서 더한다.
+5. 지금 있는 것(추천 적용 2026-10-31, openspec 변경 `add-ci-foundation`, R-202): `ci.yml`의 잡은 `changes`, `docs-check`, `tools-check`, `iac-check`, `ci-summary`다. 판단은 모두 `tools/ci/*.mjs`가 하고 시험이 함께 있다(tools/ci/README.md). 범위 잡은 `changes` 잡이 실패해도 돈다(범위를 고르지 못하면 전체를 돈다). 옮긴 파일은 옛 경로와 새 경로를 함께 세고, 지운 파일이 있으면 링크가 깨질 수 있어 문서 범위도 켠다. 대상 가지를 바꾸면(`edited`) 범위를 다시 고른다. 문서 점검이 읽는 파일(`tools/`와 점으로 시작하는 폴더 밖의 `.md`·`.yaml`·`.json`·`.csv`)은 어디에 있든 문서 범위에 든다. 화면·서비스·계약·데이터 잡은 그 코드가 생기는 변경에서 더한다. 계약에서 만든 코드(`packages/contracts`)와 그 생성물 차이 검사(`pnpm --filter @peaket/contracts gen:check`, 같은 검사가 그 패키지의 시험에도 있다)는 2026-11-01에 생겼고(openspec 변경 `add-contracts-package`), CI의 계약 잡(`contract-check.yml`)에서 부르는 일은 wbs 0.2.1 ②(BUILD_ORDER FND-040)에서 한다.
 
 | 워크플로 | 하는 일 | 쓰는 곳 |
 | --- | --- | --- |

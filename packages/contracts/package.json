@@ -1,0 +1,29 @@
+{
+  "name": "@peaket/contracts",
+  "private": true,
+  "version": "0.0.0",
+  "description": "계약 원본(docs/api/openapi.yaml·asyncapi.yaml)에서 만든 Zod 스키마와 TypeScript 타입. 게시하지 않고 workspace:로만 잇는다(ADR-0165, docs/api/guidelines.md §1)",
+  "type": "module",
+  "exports": {
+    "./openapi/model": "./src/gen/openapi/model/index.ts",
+    "./openapi/*": "./src/gen/openapi/*.ts",
+    "./asyncapi": "./src/gen/asyncapi/model/index.ts"
+  },
+  "scripts": {
+    "gen": "node scripts/generate.mjs",
+    "gen:check": "node scripts/check-generated.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "orval": "^8.45.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
+    "yaml": "^2.9.1"
+  }
+}
