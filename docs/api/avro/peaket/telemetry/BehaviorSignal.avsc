@@ -2,7 +2,7 @@
   "type": "record",
   "name": "BehaviorSignal",
   "namespace": "peaket.telemetry",
-  "doc": "행동 신호 요약. 토픽 telemetry.behavior, 키 pid. trust-svc가 로비 입장·사전 검증 때 기기 식별값을 탐지 가명으로 바꿔 낸다(ADR-0053·0071). 로비 입장에는 행동 요약이 없어 features가 비고, 재평가의 기기 공유 소급(R1)에만 쓰인다(로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1).",
+  "doc": "행동 신호 요약. 토픽 telemetry.behavior, 키 pid. trust-svc가 로비 입장·사전 검증 때 기기 식별값을 기기 가명으로 바꿔 내고(ADR-0053·0071, 기기 키는 2026-10-31 ADR-0171로 바꿈), purchase-svc가 좌석·결제 화면의 요약을 낸다(screen SEAT·PAYMENT, 추천 적용 2026-10-31, ADR-0171 결정 4). 로비 입장에는 행동 요약이 없어 features가 비고, 재평가의 기기 공유 소급(R1)에만 쓰인다(로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1). 재평가 작업자는 SEAT·PAYMENT를 건너뛰고 조사 적재(inv-ingest)만 쓴다.",
   "fields": [
     {
       "name": "pid",
@@ -11,7 +11,7 @@
     },
     {
       "name": "deviceRef",
-      "doc": "HMAC-SHA256(탐지 가명 키, 기기 식별값). trust-svc가 Kafka에 넣기 전에 바꾼다(ADR-0053)",
+      "doc": "기기 가명 HMAC-SHA256(inv-ref-key, device| + 기기 식별값). 본문에 기기 식별값이 있을 때 trust-svc가 Kafka에 넣기 전에 바꾼다. 2026-10-30까지는 탐지 가명 키였다(기기 키 통일, ADR-0171 결정 4, 추천 적용 2026-10-31)",
       "type": [
         "null",
         "string"
@@ -20,23 +20,59 @@
     },
     {
       "name": "eventId",
-      "doc": "로비 입장·사전 검증을 판정한 회차(ADR-0071. 로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1)",
+      "doc": "로비 입장·사전 검증을 판정한 회차, 또는 좌석·결제 화면의 회차(ADR-0071. 로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1)",
       "type": "string"
     },
     {
-      "name": "netClass",
-      "doc": "요청 IP의 네트워크 유형(ADR-0071)",
+      "name": "journeyId",
+      "doc": "여정 ID(조사용 추적 ID, UUIDv7). 분석 저장소에는 이 메시지를 싣지 않는다(ADR-0171, 추천 적용 2026-10-31)",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "screen",
+      "doc": "요약을 잰 화면. LOBBY·EVENT_DETAIL은 trust-svc, SEAT·PAYMENT는 purchase-svc가 낸다. SEAT·PAYMENT는 실시간 판정과 재평가가 쓰지 않는다(ADR-0171 결정 4, 추천 적용 2026-10-31)",
       "type": {
         "type": "enum",
-        "name": "BehaviorSignalNetClass",
+        "name": "BehaviorSignalScreen",
         "default": "UNRECOGNIZED",
         "symbols": [
           "UNRECOGNIZED",
-          "HOSTING",
-          "PROXY",
-          "OTHER"
+          "LOBBY",
+          "EVENT_DETAIL",
+          "SEAT",
+          "PAYMENT"
         ]
       }
+    },
+    {
+      "name": "netClass",
+      "doc": "요청 IP의 네트워크 유형(ADR-0071). trust-svc가 낸 사건(LOBBY·EVENT_DETAIL)에만 있다(2026-10-31에 필수에서 조건부로 바꿨다, 첫 등록 전)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "BehaviorSignalNetClass",
+          "default": "UNRECOGNIZED",
+          "symbols": [
+            "UNRECOGNIZED",
+            "HOSTING",
+            "PROXY",
+            "OTHER"
+          ]
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "screen": [
+            "LOBBY",
+            "EVENT_DETAIL"
+          ]
+        }
+      ]
     },
     {
       "name": "asn",
@@ -48,6 +84,10 @@
       "default": null,
       "x-present-when": [
         {
+          "screen": [
+            "LOBBY",
+            "EVENT_DETAIL"
+          ],
           "netClass": [
             "HOSTING",
             "PROXY"
@@ -57,7 +97,7 @@
     },
     {
       "name": "features",
-      "doc": "브라우저가 낸 행동 신호 요약값(openapi BehaviorSummary와 같은 필드: 포인터 이동 수·엔트로피, 입력 간격 평균·표준편차, 스크롤, ADR-0065 결정 9). 헤더 순서 같은 서버 쪽 특징은 싣지 않는다(재평가 패턴이 쓰지 않음, docs/streaming.md §5.3, 추천 적용 2026-10-22). 로비 입장에는 행동 요약이 없어 비운다(추천 적용 2026-10-30, docs/features/bot-defense.md §4.1)",
+      "doc": "브라우저가 낸 행동 신호 요약값(openapi BehaviorSummary와 같은 필드: 포인터 이동 수·엔트로피, 입력 간격 평균·표준편차, 스크롤, ADR-0065 결정 9). 헤더 순서 같은 서버 쪽 특징은 싣지 않는다(재평가 패턴이 쓰지 않음, docs/streaming.md §5.3, 추천 적용 2026-10-22). 로비 입장에는 행동 요약이 없어 비운다(추천 적용 2026-10-30, docs/features/bot-defense.md §4.1) 좌석·결제 화면도 본문에 요약이 있을 때만 싣는다(추천 적용 2026-10-31).",
       "type": [
         "null",
         {

@@ -806,3 +806,67 @@ message SetBookingRestrictionViewResponse {
   // 이번 호출로 반영했으면 true, 판이 같거나 작아 바꾸지 않았으면 false.
   bool changed = 1;
 }
+
+// 부르는 쪽: ops-svc만(부정 예매 소명 요청을 보낼 때, 소명 판단·이의 결과·우선 구매 권리가 바뀔 때, 작업 워커의 다시 보내기).
+// 초안(추천 적용 2026-10-31, ADR-0171), 정본은 docs/features/transfer-refund.md §4.1·§7.4와 docs/features/forensic-replay.md §6.7.5.
+// core-svc support 모듈은 세션·캐시 Redis sup:far:{account}(필드 = 사건 ID)에 화면용 사본을 두고 팬의 GET /v1/fraud-appeal-requests에 답하며,
+// 소명 제출(POST /v1/appeals, kind FRAUD_CASE)이 기한 전인지 먼저 본다. 예매 제한의 화면용 사본(BookingRestrictionViewService)과 같은 규칙이다:
+// (account_id, case_id)마다 판 번호가 저장한 판보다 클 때만 반영하고, 실패하면 작업 워커가 다시 보내며, 10분 [가정]마다 열린 요청을 같은 판으로 다시 보낸다.
+// 집행에는 쓰지 않는다(양도 잠금의 집행은 ticket-svc, 우선 구매의 집행은 queue-svc·purchase-svc). 사건의 다른 계정·점수·근거 신호는 싣지 않는다. 데드라인은 1초 [가정]이다.
+service FraudAppealViewService {
+  rpc SetFraudAppealView(SetFraudAppealViewRequest) returns (SetFraudAppealViewResponse);
+}
+
+// 팬에게 보이는 소명 요청 상태. EXPIRED는 '기한까지 제출하지 않음' 하나의 뜻이다. 제출했고 판단 전이면 SUBMITTED다.
+enum FraudAppealViewState {
+  FRAUD_APPEAL_VIEW_STATE_UNSPECIFIED = 0;
+  // 소명 전
+  FRAUD_APPEAL_VIEW_STATE_OPEN = 1;
+  // 소명을 냈고 판단 전
+  FRAUD_APPEAL_VIEW_STATE_SUBMITTED = 2;
+  // 인정
+  FRAUD_APPEAL_VIEW_STATE_ACCEPTED = 3;
+  // 불인정
+  FRAUD_APPEAL_VIEW_STATE_REJECTED = 4;
+  // 기한까지 내지 않음
+  FRAUD_APPEAL_VIEW_STATE_EXPIRED = 5;
+}
+
+// 우선 구매 권리(이의가 인정된 부정 예매 표 취소의 되돌림, POL-046 ⑦). 없으면 비운다.
+message PriorityPurchaseView {
+  // purchase DB priority_grant.id. 입장 확정 본문의 priorityGrantId다.
+  string grant_id = 1;
+  // 화면 표시용 좌석 이름(구역·열·번호)
+  string seat_label = 2;
+  // 원래 표의 가격(원)
+  int64 price = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  // OFFERED|USED|EXPIRED|WITHDRAWN(priority_grant.status)
+  string status = 5;
+}
+
+message SetFraudAppealViewRequest {
+  string account_id = 1;
+  // ops DB fraud_case.id. 소명 제출의 targetId다.
+  string case_id = 2;
+  string event_id = 3;
+  // FraudReasonCategory 이름(MACRO_BOT 등). 팬에게는 사유 범주만 알린다.
+  repeated string reason_categories = 4;
+  google.protobuf.Timestamp due_at = 5;
+  // 이 요청으로 양도가 잠긴 이 계정의 티켓
+  repeated string locked_ticket_ids = 6;
+  FraudAppealViewState state = 7;
+  // 우선 구매 권리가 있을 때만(이의 인정 뒤, 이용 제한 풀기 Done 뒤에 연다)
+  repeated PriorityPurchaseView priority_purchases = 8;
+  // (account_id, case_id)마다 늘어나기만 하는 판 번호(사건 판 fraud_case.version을 쓴다)
+  int64 version = 9;
+  // 조치 결과를 알린 뒤의 이의 창 끝(통지 + 30일 [가정]). 조치 전이면 비운다. support 모듈은 이 안이면 소명 제출(FRAUD_CASE)을 이의로 받는다(추천 적용 2026-10-31, ADR-0171).
+  google.protobuf.Timestamp objection_due_at = 10;
+  // 이의 상태. NONE·SUBMITTED·ACCEPTED·REJECTED
+  string objection_state = 11;
+}
+
+message SetFraudAppealViewResponse {
+  // 이번 호출로 반영했으면 true, 판이 같거나 작아 바꾸지 않았으면 false.
+  bool changed = 1;
+}

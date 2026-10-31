@@ -73,6 +73,24 @@
       "default": null
     },
     {
+      "name": "paymentMethodRef",
+      "doc": "결제 수단 연결값(조사용 가명, 약한 값). 결제사 응답의 카드 정보에 BIN이 있을 때만 cardBin과 함께. HMAC-SHA256(inv-ref-key, 'pay|' + BIN 6자리 + '|' + 보이는 끝자리 + '|' + 발급사 코드 + '|' + 카드 종류). 카드 지문이 없어 서로 다른 카드가 같은 값일 수 있다. 분석 적재는 버린다(docs/features/payment.md, ADR-0171 결정 4, 추천 적용 2026-10-31)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "cardBin",
+      "doc": "카드 번호 앞 6자리(BIN). paymentMethodRef와 늘 함께 있거나 함께 빈다. 가상카드 여부 칸은 결제사가 주지 않아 두지 않는다. 분석 적재는 버린다(추천 적용 2026-10-31)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
       "name": "result",
       "doc": "payment §2.1 정규화 결과. WAITING_FOR_DEPOSIT은 가상계좌 발급(RESOLVED의 결과로도 온다, ADR-0073)",
       "type": [

@@ -3,7 +3,7 @@
 - **독자와 용도**: 원본 적재·변환 잡(`peaket` 저장소의 `services/`·`data/`)과 공연 리포트를 구현하는 데이터·백엔드·프론트엔드 엔지니어, 그리고 리포트의 결정 규칙으로 다음 회차를 정하는 운영 담당자가 참조한다.
 - **범위**: 회차가 끝난 뒤 '다음 회차를 어떻게 열지' 정하는 데 쓰는 분석 저장소(대량 이벤트 집계에 강한 분석 DB인 ClickHouse와 S3의 회차별 Parquet 아카이브), 원본 적재와 가명 처리, 브론즈·실버·골드 변환과 마감 단계, 스타 스키마(스키마는 데이터의 구조 정의), 지표 사전과 결정 규칙 판정, 공연 리포트와 파트너 판매 요약, 결정 기록과 결정 절차를 다룬다. 온세일(판매가 열리는 시각 앞뒤로 접속이 몰리는 기간) 중 관제 화면과 운영 명령은 [control-tower.md](control-tower.md)가, 메트릭·SLO(팀이 정한 서비스 품질 목표)·경보는 [observability.md](../observability.md)가 정한다.
 - **원문 출처**: 설계서 §8 <용량 산정 (Back-of-the-envelope)>, 설계서 27장 <데이터 엔지니어링>, [ADR-0042](../adr/0042-analytics-store-and-decision-rules.md)(소유자 제안 2026-10-11, 승인 2026-10-12), [ADR-0052](../adr/0052-analytics-medallion-star-schema-close-stages.md)(소유자 승인 2026-10-13, '추천대로 승인').
-- **관련 ID**: FR-026, FR-029, FR-031, FR-068 · NFR-009, NFR-018, NFR-026 · POL-022, 023, 027, 028, 030, 037, 039, 040 · SCR-027, SCR-029 · API(프로그램끼리 요청과 응답을 주고받는 창구) `/v1/ops/events/{eventId}/reports`, `/v1/ops/decisions`, `/v1/partner/events/{eventId}/report` · 이벤트 `trade.*`, `telemetry.queue`, `telemetry.purchase`, `telemetry.trust-verdicts`, `control.settings` · 데이터 docs/data.md §1·§2·§6(`decision_record`, `pseudonymization_log`) · K9 · ADR-0026·0042·0047·0052·0071.
+- **관련 ID**: FR-026, FR-029, FR-031, FR-068, FR-071(연구 갈래)·FR-072·FR-073(조사 갈래와의 경계, ADR-0171) · NFR-009, NFR-018, NFR-026 · POL-022, 023, 027, 028, 030, 037, 039, 040 · SCR-027, SCR-029 · API(프로그램끼리 요청과 응답을 주고받는 창구) `/v1/ops/events/{eventId}/reports`, `/v1/ops/decisions`, `/v1/partner/events/{eventId}/report` · 이벤트 `trade.*`, `telemetry.queue`, `telemetry.purchase`, `telemetry.trust-verdicts`, `control.settings` · 데이터 docs/data.md §1·§2·§6(`decision_record`, `pseudonymization_log`) · K9 · ADR-0026·0042·0047·0052·0071.
 - **기준 기획 버전**: v1.0.
 - **표시 규칙**: 원칙과 구조는 ADR-0052의 소유자 결정이고, 필드·표 이름·시각·기준값은 추천 적용(2026-10-13)이다. 측정으로 정할 값은 [가정, Phase N …에서 확정]으로 적는다. 예시 숫자는 측정 전 가상 숫자라고 밝힌다.
 
@@ -101,9 +101,11 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 | `telemetry.trust-verdicts` | `TrustVerdict` | 봇 점유율 하한, 정렬 방식별 봇 성공률 |
 | `control.settings` | `SettingChanged` | 봇 판정 강도·Degraded Mode(큰 장애 때 핵심을 지키려고 부가 기능이나 화면의 새로움을 미리 정한 범위에서 줄여 버티는 운영 모드)·결제사 전환 시각. `actor`는 싣지 않는다 |
 
-`telemetry.behavior`(행동 신호)와 `telemetry.rum`은 싣지 않는다. 행동 신호는 trust-svc 표(30일, 적재는 재평가 작업자 `trust-reassess`)에만 둔다. 포렌식 리플레이 2단계도 이 원칙을 따라 행동 요약·기기 묶음을 내보내지 않는다(docs/features/forensic-replay.md §6.3, 추천 적용 2026-10-28, 기술 검토 중간-093). 체감 성능은 SLO 스냅샷의 요약만 쓴다. 관제 심장 박동(`PipelinePulse`)은 건너뛴다(docs/streaming.md §3, ADR-0071).
+`telemetry.behavior`(행동 신호)와 `telemetry.rum`은 싣지 않는다. 행동 신호는 trust-svc 표(30일, 적재는 재평가 작업자 `trust-reassess`)에만 둔다. 포렌식 리플레이 연구 갈래(분석 저장소의 회차 가명 사건으로 다음 회차 판정 규칙을 고치는 길. 2026-10-28에는 '2단계'라 불렀다, ADR-0171 결정 2)도 이 원칙을 따라 행동 요약·기기 묶음을 내보내지 않는다(docs/features/forensic-replay.md, 추천 적용 2026-10-28, 기술 검토 중간-093). 2026-10-31에 행동 신호에 여정 ID `journeyId`, 화면 칸 `screen`(좌석·결제 화면이 더해졌다), 기기 가명이 들어갔어도 그대로 싣지 않는다. 그래서 `screen`도 분석 저장소에 없다(추천 적용 2026-10-31, ADR-0171). 체감 성능은 SLO 스냅샷의 요약만 쓴다. 관제 심장 박동(`PipelinePulse`)은 건너뛴다(docs/streaming.md §3, ADR-0071).
 
 **외부 합성 점검용 회차는 싣지 않는다(추천 적용 2026-10-28, 기술 검토 중간-075)**: 배포 설정의 점검 회차 목록(밖에서 1분마다 도는 점검용으로 숨긴 회차, docs/features/queue-admission.md §6)에 든 회차의 사건은 `analytics-ingest`와 `ops-rt`가 싣지 않는다. 그래서 브론즈·실버·골드, 관제 실시간 표, 공연 리포트, 장르별 랭킹, 같은 규모 기준선에 들어가지 않는다(docs/observability.md §10). 시험은 queue-admission Q-T50(점검 트래픽이 관제 실시간 표·분석 골드에 들어가지 않음)이다.
+
+**조사용 요청 신호는 읽지 않는다(추천 적용 2026-10-31, ADR-0171 결정 2)**: 조사 갈래(실명 운영 기록으로 부정 예매를 조사하고 사람이 결정해 조치하는 길. 부정 예매는 매크로·대기열 우회처럼 PEAKET 약관이 정한 사유로 산 예매다, POL-046)를 위해 게이트웨이 접근 로그에서 만든 토픽 `investigation.requests`(원문 IP, TLS 지문 JA4(암호화 연결을 시작할 때 보내는 인사말의 모양), 끝단 봇 판정 라벨이 든 요청 기록)는 `analytics-ingest`가 구독하지 않는다. 토픽 읽기 권한은 조사 적재 작업자 `inv-ingest`에만 있다(docs/streaming.md). 위 표의 토픽은 `inv-ingest`도 따로 읽지만 소비자 그룹과 저장소(조사 저장소 `inv`)가 다르고, 두 저장소 사이에 행을 옮기는 길은 없다(§11).
 
 ### 3.2 기준 자료·운영 기록·비용·SLO
 
@@ -118,6 +120,7 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 | --- | --- | --- | --- |
 | 회차 기준 자료(회차, 공연 ID·공연명·장르(ADR-0093), 공연장, 구역, 좌석 수, 등급·가격, 좌석-등급 대응, 판매 정책 요약, 파트너 상호, 공연 규모 등급) | core-svc, 오픈 30분 전(Go/No-Go 점검 시각)과 판매 승인·회차 취소 같은 상태 변화 때 | JSON, 50MB [가정] | `brz_ref_event`, `brz_ref_seat_map` |
 | 운영 기록 코드(명령 종류·시각·결과, 경보 종류, CS 처리함 유형·결과, 이의 제기 결과, 수요 예측(계산 시각·계기, 구독 수, 비율, 비율에 쓴 지난 회차 수, 예상 진입 인원, 제안 등급)과 규모 올리기 기록, ADR-0078) | ops-svc, 온세일 윈도우 종료 때(명령·경보·수요 예측), 하루 1회와 R2 때(CS·이의 제기). 자유 텍스트와 계정 ID는 쓰지 않는다 | JSON | `brz_ops_command`, `brz_ops_case`, `brz_ops_forecast` |
+| 부정 예매 사건 집계(회차 × 사유 범주마다 사건 수, 소명(의심받은 사람이 정상 구매라고 해명하는 절차) 요청·인정 계정 수, 이의 인정 계정 수, 조치한 계정 수·표 수. 계정 수가 5 [가정] 미만인 사유 범주 칸은 '기타'로 합친다. 계정 ID·사건 ID·묶음 근거·시각은 쓰지 않는다. 연구 갈래가 받는 정답 라벨은 이 집계뿐이다(§3.3), 추천 적용 2026-10-31, ADR-0171 결정 6) | ops-svc 조사 모듈, 하루 1회와 R3 때 | JSON | `brz_ops_fraud_summary` |
 | 비용(네임스페이스·라벨별 할당 비용, 비용 할당 태그별 일 비용) | 비용 내보내기 잡, 하루 1회 | CSV·Parquet(gzip 가능), 200MB [가정] | `brz_cost` |
 | SLO 결과(여정별 좋은·전체 이벤트 수, 에러 버짓 사용, 결제사 한도 응답 수, CloudFront 배포별 한도 사용률 최대값(ADR-0058), 예상 대기 오차 히스토그램, 경보 발생 수, 체감 성능 p75, 텔레메트리 생산자가 레코드별로 버린 수(`telemetry_dropped_total{record}`, §7 커버리지, 추천 적용 2026-10-29, ADR-0141 결정 6)) | 마감 실행기, R0에 Prometheus(지표 장기 저장소인 Mimir)에서 회차 단위로 | JSON | `brz_slo_snapshot` |
 
@@ -129,6 +132,9 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 - **회차를 넘는 연결 없음**: 같은 사람이라도 회차가 다르면 가명이 다르다. 분석 저장소 안에서 한 사람의 여러 회차 행동을 잇지 못하게 하려는 선택이다. 여러 회차에 걸친 봇 판별은 trust-svc가 한다.
 - **연결 키는 구매 세션**: 대기 → 입장 → 홀드 → 주문 → 결제는 구매 세션(`admissionJti`·`purchaseSessionId`)과 주문으로 잇는다. 사람 가명은 진입 인원 중복 제거, 1인 한도 소진, 봇 판정 연결에만 쓴다.
 - **금지 필드**: 이름, 연락처, 이메일, 연계정보(본인확인 기관이 주는, 사람마다 하나인 연계 식별값), IP, User-Agent 원문, 결제 토큰(권한이나 상태를 증명하려고 주고받는 문자열인 `paymentKey`·`paymentToken`), 계좌 정보가 메시지에 있으면 버리고 스키마 위반 경보를 낸다. 또 스키마별 허용 목록(적재 작업자가 빌드된 계약 판의 필드) 밖의 필드도 지운다. 그래서 생산자가 새 필드를 먼저 내도 원본 적재 작업자를 새 판으로 올리기 전에는 브론즈에 싣지 않는다(docs/streaming.md §6.1). 모르는 열거 기호는 필드가 아니라 값이라 원래 기호 그대로 싣는다(docs/streaming.md §2.6).
+- **조사 칸은 싣지 않는다(추천 적용 2026-10-31, ADR-0171 결정 2)**: 부정 예매 조사를 위해 계약에 더한 칸을 금지 필드에 더한다. `journeyId`(여정 ID: 한 사람이 한 회차에 들어와 나갈 때까지의 조사용 추적 ID. `QueueEntryRecord`·`PurchaseSessionStarted`·`HoldAttempt`·`OrderEvent`·`TrustVerdict`), `contactRef`(연락처의 조사용 가명, `OrderEvent`), `paymentMethodRef`(결제 수단의 조사용 가명)와 `cardBin`(카드 번호 앞 6자리, 둘 다 `PaymentEvent`), `deviceRef`(기기 가명, `TrustVerdict`), 그리고 `investigation.requests`에만 있는 `edgeBotLabels`(끝단 봇 판정 라벨)·`ja4`·원문 `ip`다. 같은 날 더한 `SeatEvent`의 우선 구매 보류 칸 `holdKind`·`priorityGrantId`(이의가 인정된 부정 예매 표 취소의 되돌림)도 조사 갈래 결과를 가리키므로 버린다(추천 적용 2026-10-31, ADR-0171). `analytics-ingest`는 허용 목록을 '계약 판의 필드에서 이 조사 칸을 뺀 것'으로 만들어 브론즈에 싣기 전에 버린다. 계약에 있는 정상 칸이라 스키마 위반 경보는 내지 않는다. 브론즈·실버 표 정의에 이 이름의 열이 생기면 빌드가 실패한다(§7과 같은 dbt 사용자 정의 테스트). 회차 가명으로 바꿔 싣지 않고 버리는 까닭은 둘이다. ① 이 값들은 회차가 달라도 같은 사람·기기·카드면 같아서, 실어 두면 위 '회차를 넘는 연결 없음'이 깨진다. ② 같은 값이 조사 저장소 `inv`에 그대로 있어 두 갈래(조사·연구)를 잇는 키가 된다. 가명 기록을 실명 주문과 맞춰 보면 개인정보 보호법 §28의5(재식별 금지) 위반이다. 분석은 지금처럼 구매 세션과 주문으로 사건을 잇는다.
+- **남기는 새 칸(추천 적용 2026-10-31, ADR-0171 결정 4)**: `HoldAttempt`의 `seatIds`(좌석 번호)와 `heldAt`(좌석을 잡은 시각)은 싣는다. 좌석 번호와 시각은 사람 식별값이 아니고, 주문의 좌석(`OrderEvent.items`)은 이미 싣고 있어 새로 알아볼 길이 생기지 않는다. 좌석 단위 경합(같은 좌석을 누가 먼저 잡았는지)을 연구 갈래와 공연 리포트에서 보는 데 쓴다(§3.4). 남는 위험은 §14다. 행동 신호의 `screen`은 행동 신호 자체를 싣지 않으므로(§3.1) 분석에 없다.
+- **조사 갈래의 라벨은 집계로만 받는다(추천 적용 2026-10-31, ADR-0171 결정 6)**: 부정 예매 조치·소명 인정으로 trust-svc에 건 라벨(trust.proto `LABEL_SOURCE_FRAUD_ACTIONED`·`LABEL_SOURCE_FRAUD_APPEAL_ACCEPTED`. 외부 게시물 대조는 근거 신호일 뿐 라벨이 아니다)은 사람 단위라 실버 `slv_trust_label`에 싣지 않는다. 연구 갈래에는 사람 단위로 이을 수 없는 집계 라벨(§3.2 '부정 예매 사건 집계')만 넘긴다. `TrustVerdict.source`는 이 라벨과 다른 사후 라벨을 함께 `POST_LABEL`로 내서 적재가 가리지 못하므로, 계약에서 trust-svc가 이 두 출처의 라벨을 `telemetry.trust-verdicts`에 아예 내지 않게 했다(trust.proto `LabelSource` 주석, 2026-10-31). 그래서 이 라벨이 세션 단위로 실버에 가는 길은 없다(A-T24). 2026-10-30부터 있던 `LABEL_SOURCE_FRAUD_CONFIRMED`(CS가 부정구매로 확인한 신고 건, ADR-0156 결정 11)는 조사 갈래가 아니라 CS 처리함 신고 확인에서 나오는 라벨이라 지금처럼 `POST_LABEL`로 실버에 간다. 같은 신고를 부정 예매 사건으로 처리하면 그 결과는 조사 갈래 라벨(위 둘)로만 건다.
 - **실패 시 멈춤**: KMS 호출이 실패하면 적재를 멈추고, 식별값을 원문 그대로 싣지 않는다. 밀린 메시지는 Kafka 보관 기간(§3.5) 안에서 다시 읽는다.
 - **키 교체**: 분석 가명 키는 1년마다 [가정] 온세일 윈도우 밖에서 바꾼다. 한 회차는 첫 적재 때의 키 버전을 끝까지 쓴다. 이전 키는 그 키로 처리한 마지막 회차의 브론즈·실버가 지워진 뒤 파기한다(docs/security/secrets-and-keys.md).
 - **pid 키 전환(추천 적용 2026-10-28, 기술 검토 높음-18)**: pid 키는 정기 교체하지 않고, 노출이 의심될 때만 전환 기간을 두고 바꾼다(docs/features/identity.md §5). 전환 기간에는 원천(queue-svc·trust-svc)이 사람별 대기 기록과 판정 기록의 `pid`에 옛 pid를 싣고(옛 값이 없는 계정은 새 pid), 적재는 그 값을 그대로 가명 입력으로 쓴다. 그래서 교체 전부터 판매 중이던 회차에서 한 사람의 가명이 둘로 갈리지 않는다. 남는 한계: 전환 기간에 판매를 열어 전환이 끝난 뒤까지 파는 회차는, 전환이 끝나는 때 입력이 새 pid로 바뀌어 한 사람이 가명 둘로 나뉜다. 그 회차의 진입 인원 중복 제거는 그만큼 크게 셀 수 있다.
@@ -146,7 +152,7 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 | `TicketEvent` | `eventId`, `orderId`, `accountId`, 스캔 결과 종류 `ENTRY_SCANNED`의 `scanResult`·`reason`·`gateZone`·`direction`·`scannedAt`(스캔 ID로 중복 제거) | 현장 입장률, 거부 사유, 양도·환불 |
 | `SettlementEvent` | `salesAmount`, `refundAmount`, `feeAmount`(정산서 통지 때) | 정산서 대조, 1,000장당 수수료 |
 | `QueueEntryRecord`(`telemetry.queue`, 신설 메시지) | `eventId`, `queueEntryId`, `pid`, `number`, `entryMode`(로비·오픈 뒤), `enteredAt`, `firstEtaSec`, `turnAt`, `admittedAt`·`admissionJti` 또는 `removedAt`·`removeReason`, `verifyRoute`(바로 통과·추가 검증 통과·추가 검증 실패·차단) | 진입 인원, 대기 오차, 차례 뒤 미입장, 봇 연결 |
-| `HoldAttempt`(`telemetry.purchase`, 신설) | `eventId`, `purchaseSessionId`, `mode`(PICK·AUTO), `tierId`, `sectionId`, `result`(HELD·CONFLICT·LIMIT·ERROR), `autoResult`, `retryNo`, `latencyMs`, `occurredAt` | 홀드 경합 패배율, 자동 배정 결과 |
+| `HoldAttempt`(`telemetry.purchase`, 신설) | `eventId`, `purchaseSessionId`, `mode`(PICK·AUTO), `tierId`, `sectionId`, `result`(HELD·CONFLICT·LIMIT·ERROR), `autoResult`, `retryNo`, `latencyMs`, `occurredAt`. `seatIds`(PICK은 요청한 좌석, AUTO는 잡은 좌석)·`heldAt`(HELD만. 같은 홀드의 `SeatEvent` HELD 시각과 같다)은 2026-10-31에 더했다(추천 적용 2026-10-31, ADR-0171 결정 4. 같은 날 더한 `journeyId`는 싣지 않는다, §3.3) | 홀드 경합 패배율, 자동 배정 결과, 좌석 단위 경합 |
 | `TrustVerdict`(`telemetry.trust-verdicts`, 신설) | `eventId`, `queueEntryId`, `pid`(대기 중 재평가 판정만, 가명), `category`, `action`, `source`(실시간·허니팟·표본 검토·사후 라벨·대기 중 재평가 `REASSESS`), `shadow`, `occurredAt` | 봇 점유율 하한, 정렬 방식별 봇 성공률. 봇 지표는 `shadow` false만 센다(ADR-0071) |
 
 `failureCategory`는 결제 어댑터가 정한다(payment §2.1): `CARD_DECLINED`(카드 한도·잔액·정지), `USER_ABORTED`(결제창 이탈·취소), `VALIDATION`(금액·토큰 불일치), `EXPIRED`(승인 기한 만료), `PG_ERROR`(오류·시간 초과 뒤 실패로 확정), `THROTTLED`(결제사 한도 초과).
@@ -237,7 +243,7 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 | F8 | `fct_refund_daily` | 거래 집계 | 날짜 × 회차 × 등급 × 경로(셀프·회차 취소·예외) | 건수, 금액 |
 | F9 | `fct_transfer_daily` | 거래 집계 | 날짜 × 회차 × 상태 × 공연까지 남은 일수 구간 | 건수 |
 | F10 | `fct_entry_10min` | 주기 스냅샷 | 회차 × 게이트 구역 × 10분 | 입장, 거부(사유별), 오거부 후보, 이상 표시 수 |
-| F11 | `fct_event_summary` | 누적 스냅샷 | 회차 1행(마감 단계마다 갱신) | 매진 시각, 판매 좌석·금액, 여정별 SLO 좋은·전체 수, 에러 버짓 사용, 불변식 위반 수, 결제사 한도 응답 수, CloudFront 배포별 한도 사용률 최대값, 체감 성능 p75(페이지별 INP·LCP), 비용, 수수료, 단계별 마감 상태·시각, 실시간 대비 차이 |
+| F11 | `fct_event_summary` | 누적 스냅샷 | 회차 1행(마감 단계마다 갱신) | 매진 시각, 판매 좌석·금액, 여정별 SLO 좋은·전체 수, 에러 버짓 사용, 불변식 위반 수, 결제사 한도 응답 수, CloudFront 배포별 한도 사용률 최대값, 체감 성능 p75(페이지별 INP·LCP), 비용, 수수료, 단계별 마감 상태·시각, 실시간 대비 차이, 부정 예매 사건 집계(사건 수, 소명 요청·인정 계정 수, 이의 인정 계정 수, 조치한 계정·표 수의 회차 합계. 원천은 `brz_ops_fraud_summary`, 추천 적용 2026-10-31, ADR-0171 결정 6) |
 | F12 | `fct_rule_check` | 판정 기록 | 회차 × 규칙 × 마감 단계 | 값, 비율 규칙의 95% 구간, 기준, 판정(걸림·경계·안 걸림·판정 보류와 사유, 기술 검토 낮음-045), 비교 기준선(모양: 없음·범위·중앙값과 사분위, 근거 강도, 기술 검토 낮음-044), 표본 수, 연결된 결정 기록 ID |
 | F13 | `fct_cs_daily` | 거래 집계 | 날짜 × 회차 × 유형 × 결과 | 건수, 처리 시간 합 |
 | F14 | `fct_cost_daily` | 거래 집계 | 날짜 × 회차 배분 × 비용 항목 | 금액(원) |
@@ -301,7 +307,7 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 
 | 목표 | 질문 | 대표 지표 |
 | --- | --- | --- |
-| G1 공정: 표가 사람에게 공정하게 간다 | 봇이 얼마나 샀나? 정렬 방식에 따라 다른가? 사람을 잘못 막았나? 한도를 꽉 채워 사는 계정이 많나? | 봇 점유율 하한, 정렬 방식별 속도형 봇 성공률, 이의 제기 인용률, 1인 한도 소진 비율 |
+| G1 공정: 표가 사람에게 공정하게 간다 | 봇이 얼마나 샀나? 정렬 방식에 따라 다른가? 사람을 잘못 막았나? 한도를 꽉 채워 사는 계정이 많나? | 봇 점유율 하한, 정렬 방식별 속도형 봇 성공률, 이의 제기 인용률, 1인 한도 소진 비율, 부정 예매 소명 인정 비율 |
 | G2 판매: 파트너의 표가 빨리, 남김없이 팔린다 | 얼마나 빨리 팔렸나? 어디서 막혔나? | 매진 소요 시간, 등급별 매진 시각, 비매진 회차 판매율, 입장 → 구매 전환율과 단계별 전환, 홀드 경합 패배율, 홀드 만료율, 결제 실패 사유 |
 | G3 경험: 기다림을 예측할 수 있고 실패가 적다 | 예상 대기가 맞았나? 차례가 와도 들어오지 않은 사람은? 문의는? | 예상 대기 오차, 차례 뒤 미입장 비율, CS 건수, 체감 성능 |
 | G4 비용과 수익 | 1장 파는 데 얼마 드나? 수수료로 남나? | 1회·1,000장당 비용(K9), 1,000장당 비용 대비 수수료, 판매·환불 금액 |
@@ -360,10 +366,11 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 | 29 | 1,000장당 비용 대비 수수료 | 1,000장당 수수료 ÷ 1,000장당 비용(1보다 작으면 비용이 수수료보다 크다) | F14·F11 | R3 | 규칙(수수료 구조가 정해진 뒤) |
 | 30 | 현장 입장률·현장 거부 | 입장한 티켓 ÷ 발권한 티켓, 거부는 사유별로 | F10 | R3 | 관측 |
 | 31 | 수요 예측 오차 | 진입 인원(1번) ÷ T-30분 예측 중앙값, 진입 인원 ÷ 예측 상단, 상단을 넘었는지 여부 | F1, `dim_event` | R1 | 관측(상단을 넘은 회차가 한 분기에 2회를 넘으면 예측 식을 다시 본다, ADR-0078) |
+| 32 | 부정 예매 소명 인정 비율(오탐률) | 소명이 인정된 계정 ÷ 소명을 요청한 계정(POL-046 ③). 이의 인정 수를 함께 보인다(추천 적용 2026-10-31, ADR-0171 결정 6) | F11 | R3 | 관측(첫 세 회차가 20% [가정]를 넘으면 후보 규칙과 조치 기준을 다시 본다, ADR-0171 '되돌릴 조건') |
 
 '규칙'은 docs/planning/01 §3.2 결정 규칙 표의 행을 가리킨다. 기준값과 적용 조건은 그 표가 정본이다.
 
-**실시간 표와 같은 이름으로 쓰는 기본 누적(추천 적용 2026-10-29, 지표 번호 없음)**: 관제 실시간 표는 아래 코드 이름의 정의를 이 사전에서 가져다 쓰고, 같은 사건 묶음을 넣으면 골드와 같은 값이 나오는지 시험한다(docs/streaming.md §4.1, ST-T9). 위 31개 지표의 분자·분모나 대조 대상이라 번호를 따로 매기지 않는다.
+**실시간 표와 같은 이름으로 쓰는 기본 누적(추천 적용 2026-10-29, 지표 번호 없음)**: 관제 실시간 표는 아래 코드 이름의 정의를 이 사전에서 가져다 쓰고, 같은 사건 묶음을 넣으면 골드와 같은 값이 나오는지 시험한다(docs/streaming.md §4.1, ST-T9). 위 32개 지표(2026-10-31에 32번을 더했다)의 분자·분모나 대조 대상이라 번호를 따로 매기지 않는다.
 
 | 코드 이름 | 정의 | 원천 사실 | 차원 |
 | --- | --- | --- | --- |
@@ -427,7 +434,7 @@ ops-svc는 마감 상태가 '완료'가 된 단계를 1분마다 [가정] 확인
 4. 퍼널: 단계별 막대(분자·분모 표기)와 단계 사이 소요 시간의 분포
 5. 좌석 경합: 등급 × 분별 경합 패배율, 자동 배정 결과
 6. 결제: 실패 범주별 막대, 결제사별 승인율·응답 p99
-7. 공정: 봇 점유율 하한과 95% 구간, 정렬 방식별 비교, 이의 제기
+7. 공정: 봇 점유율 하한과 95% 구간, 정렬 방식별 비교, 이의 제기, 부정 예매 사후 조치 집계와 소명 인정 비율(32번, 추천 적용 2026-10-31, ADR-0171 결정 6)
 8. 신뢰: 여정별 SLO·에러 버짓, 불변식, 명령·경보의 시간순 기록(ops-svc 감사 로그에서 직접 그린다)
 9. 돈: 판매 금액, 환불, 비용, 1,000장당 비용
 10. 데이터 품질: 마감 상태, 검사 결과, 실시간 숫자와의 차이
@@ -549,6 +556,7 @@ R1·R2 리포트를 받으면 아래 순서로 본다.
 - **추가 정보 분리**: 분석 가명 키는 KMS에 두고, 원본 적재 잡만 이 키를 쓴다. 분석 담당은 키와 운영 DB에 접근하지 못한다(§28의4①, 시행령 §29의5①).
 - **처리 기간과 기록**: 처리 기간은 적재 뒤 90일이다(§28의4②). ops-svc가 회차마다 가명정보 처리 기록(`pseudonymization_log`: 목적, 항목, 회차, 키 버전, 이용 내역, 처리 기간, 파기 시각)을 남기고, 이 기록은 파기 뒤 3년 이상 보관한다(§28의4③, 시행령 §29의5②).
 - **재식별 금지**: 분석 계정에는 운영 DB 읽기 권한이 없다. 실버를 대량으로 조회하거나 금지된 필드가 들어오면 보안 이벤트로 기록하고 경보를 낸다. 특정 개인을 알아볼 수 있는 정보가 생기면 그 처리를 멈추고 지운다(§28의5).
+- **두 갈래를 잇지 않는다(추천 적용 2026-10-31, ADR-0171 결정 2·7)**: 분석 저장소는 연구 갈래의 원천이고, 조사 저장소 `inv`는 조사 갈래의 원천이다. 둘을 잇는 키(§3.3 조사 칸), 한 사용자가 두 DB를 함께 읽는 권한, 한 갈래에서 내보낸 파일을 다른 갈래에 넣는 길을 두지 않는다. 그래서 아래 표의 분석 사용자는 모두 `inv` 권한이 없고, 조사 저장소 사용자는 분석 DB 권한이 없다. ops-svc는 조사 모듈(`inv_reader`)과 연구 갈래 내보내기(`an_forensic_reader`)를 함께 가지므로, 한 요청이 두 사용자를 함께 쓰지 못하게 모듈과 연결 설정을 나눈다. 사람 쪽에서는 한 계정에 가명정보 취급자와 부정 거래 조사관(조사 갈래를 쓰도록 commander나 `cs_lead`에게 붙이는 지정) 지정을 함께 두지 않는다(409 `designation-conflict`, docs/features/control-tower.md §9.2).
 
 | 주체 | ClickHouse 사용자 | 읽기 | 쓰기 |
 | --- | --- | --- | --- |
@@ -562,8 +570,9 @@ R1·R2 리포트를 받으면 아래 순서로 본다.
 | 파트너 판매 요약 API | `an_partner_reader` | `gold`의 파트너 뷰(테넌트 필터는 서버가 강제한다) | 없다 |
 | 랭킹 게시 잡(§8.5) | `an_ranking_reader` | `gold`의 `mtr_genre_ranking_daily`만 | 없다 |
 | 비교 대시보드(Grafana 'PEAKET 관측' 조직, ADR-0078) | `an_grafana_reader` | `gold`의 지표 뷰·F11·F12, `archive.<표>` 뷰(사람 단위 행이 없다) | 없다 |
-| 포렌식 리플레이 내보내기(2단계, 출시 뒤 선택, docs/features/forensic-replay.md §6) | `an_forensic_reader` | `silver`의 `slv_queue_entry`·`slv_purchase_session`·`slv_hold_attempt`·`slv_seat_change`·`slv_payment_attempt`·`slv_ticket`·`slv_trust_label`만. `trust.behavior_raw`는 읽지 않는다(회차 가명과 이을 키가 없고, 분석 저장소는 행동 신호를 싣지 않는다, 추천 적용 2026-10-28, 기술 검토 중간-093). 가명정보 취급자가 요청할 때만 부르고, 2단계를 시작할 때 만든다(ADR-0080) | 없다 |
-| 가명정보 취급자(개인정보 보호책임자가 지정한 commander) | 개인 계정 | `silver`(조회는 접속기록 점검 FR-064 대상) | 없다 |
+| 포렌식 리플레이 연구 갈래 내보내기(docs/features/forensic-replay.md. 2026-10-21 ADR-0080의 '2단계, 출시 뒤 선택'을 2026-10-31 출시 범위로 바꿨다, ADR-0171 결정 1·2) | `an_forensic_reader` | `silver`의 `slv_queue_entry`·`slv_purchase_session`·`slv_hold_attempt`·`slv_seat_change`·`slv_payment_attempt`·`slv_ticket`·`slv_trust_label`만. `trust.behavior_raw`는 읽지 않는다(회차 가명과 이을 키가 없고, 분석 저장소는 행동 신호를 싣지 않는다, 추천 적용 2026-10-28, 기술 검토 중간-093). 조사 저장소 `inv` 권한은 없다(추천 적용 2026-10-31, ADR-0171 결정 2). 가명정보 취급자가 `POST /v1/ops/research-exports`로 요청할 때만 부른다. 처음에는 '2단계를 시작할 때 만든다(ADR-0080)'였고, 2026-10-31부터 연구 갈래 내보내기와 함께 만든다 | 없다 |
+| 가명정보 취급자(개인정보 보호책임자가 지정한 commander) | 개인 계정 | `silver`(조회는 접속기록 점검 FR-064 대상). `inv`는 읽지 못하고, 부정 거래 조사관 지정을 함께 받지 못한다(추천 적용 2026-10-31, ADR-0171 결정 7) | 없다 |
+| 조사 저장소(분석 저장소가 아니다. 정본은 docs/data.md, 추천 적용 2026-10-31, ADR-0171) | `inv_ingest`(조사 적재 작업자 `inv-ingest`), `inv_reader`(ops-svc 조사 모듈) | `inv_reader`만 `inv`를 읽는다. 둘 다 `bronze`·`silver`·`gold`·`rt` 권한이 없다 | `inv_ingest`만 `inv`에 넣는다(지우기·표 바꾸기는 마이그레이션 역할만) |
 
 - **읽기 사용자의 상한(추천 적용 2026-10-26, ADR-0089)**: 화면이 부르는 읽기 사용자(`an_ops_reader`·`an_partner_reader`·`an_grafana_reader`)는 읽기 전용 설정 프로필(사용자에게 묶는 설정 묶음, `readonly=1`)로 쿼리마다 실행 시간 10초·메모리 2GiB를 넘지 못하게 한다. `readonly=1`이면 쿼리가 설정을 바꿀 수 없으므로, 더 짧게 끊고 싶은 쿼리를 위해 `max_execution_time`에만 `CHANGEABLE_IN_READONLY` 제약을 걸어 10초 안에서 낮출 수 있게 한다. 쿼터(사용자마다 정한 시간 안의 쿼리 수 등을 세는 상한)로 1분에 쿼리 300개(`an_grafana_reader`는 120개)를 넘으면 거절한다 [가정, Phase 4 4.3.6에서 확정]. 쿼터는 요청을 받은 서버마다 따로 세고 서버를 다시 켜면 처음부터 센다. 그래서 클러스터 전체 상한은 서버 수만큼 넉넉해진다. ops-svc는 이 거절을 503과 `Retry-After`로 돌려준다. 게이트웨이의 계정당 한도(docs/api/guidelines.md §6)가 잘못 풀려도 관제 실시간 표(`an_rt_reader`)의 조회를 막지 않게 하려는 것이다.
 
@@ -574,9 +583,9 @@ R1·R2 리포트를 받으면 아래 순서로 본다.
 | 종류 | 위치 |
 | --- | --- |
 | 이벤트 계약 | `docs/api/asyncapi.yaml`: `trade.*` 보강 필드, `telemetry.queue`의 `QueueEntryRecord`, `telemetry.purchase`의 `HoldAttempt`, `telemetry.trust-verdicts`의 `TrustVerdict` |
-| REST API | `GET /v1/ops/events/{eventId}/reports`(마감 단계별 판 목록과 상태), `GET /v1/ops/events/{eventId}/reports/{stage}`(JSON 또는 Markdown), `GET`·`POST /v1/ops/decisions`, `PATCH /v1/ops/decisions/{decisionId}`(확인 결과, 파트너 응답), `GET /v1/partner/events/{eventId}/report`(파트너 판매 요약, R3 뒤), 장르별 랭킹 파일 `GET /v1/home/rankings.json`(공연 페이지 배포의 정적 파일, §8.5, ADR-0063) |
+| REST API | `GET /v1/ops/events/{eventId}/reports`(마감 단계별 판 목록과 상태), `GET /v1/ops/events/{eventId}/reports/{stage}`(JSON 또는 Markdown), `GET`·`POST /v1/ops/decisions`, `PATCH /v1/ops/decisions/{decisionId}`(확인 결과, 파트너 응답), `GET /v1/partner/events/{eventId}/report`(파트너 판매 요약, R3 뒤), 장르별 랭킹 파일 `GET /v1/home/rankings.json`(공연 페이지 배포의 정적 파일, §8.5, ADR-0063), 연구 갈래 내보내기 `POST /v1/ops/research-exports`·`GET /v1/ops/research-exports/{exportId}`(commander 가운데 가명정보 취급자 지정이 있는 계정만, §11, 추천 적용 2026-10-31, ADR-0171) |
 | 운영 DB | docs/data.md §2 `decision_record`, `pseudonymization_log`(ops-svc) |
-| 분석 DB | ClickHouse `bronze`·`silver`·`gold`·`rt`(§2, §5.5) |
+| 분석 DB | ClickHouse `bronze`·`silver`·`gold`·`rt`(§2, §5.5). 조사 저장소 `inv`는 분석 DB가 아니다(§11, docs/data.md) |
 | 보존 | docs/data.md §6, docs/observability.md §9 |
 | 키 | docs/security/secrets-and-keys.md '분석 가명 키' |
 | 코드 | `peaket` 저장소의 `services/`: 스트림 작업자 `analytics-ingest`·`ops-rt`(docs/streaming.md), 심장 박동 발행기 `rt-pulse`, `close-runner`(실시간 원시 표 다시 채우기 명령 포함), 랭킹 게시 잡 `ranking-publisher`(§8.5). `data/`: dbt 프로젝트 `analytics`(`metrics.yml`, `rules.yml`)와 `rt` 표·뷰의 이전 파일 |
@@ -605,6 +614,11 @@ R1·R2 리포트를 받으면 아래 순서로 본다.
 | A-T18 | 데모 시계로 판매 기간 120일인 비매진 회차: 오픈 첫날과 R2(오픈 + 7일) 뒤 여러 날에 판매·입금 되돌림·예매 취소가 있고, 오픈에서 R3까지가 97일을 넘는다 | F15가 날마다 쌓여 R3의 판매 대금이 회차 정산서와 0원 차이이고, 지표 7의 공연 전날 판매율이 정답(합성 데이터의 SOLD 좌석 수)과 같다. 동결된 F2와 그 판매 곡선은 바뀌지 않는다. 실시간 표와의 R3 대조도 차이 0이다 | §4.3·§6.3·§7, 기술 검토 높음-23 |
 | A-T19 | 로컬 S3(LocalStack)에서 회차 셋을 동결해 아카이브를 쓰고 읽는다. 같은 회차 동결을 한 번 더 돌린다. manifest에 없는 Parquet 파일 하나를 같은 경로에 둔다. 골드 표에 칸을 하나 더한 뒤 옛 파일을 읽는다(추천 적용 2026-10-28, ADR-0115) | 파일의 행 수와 SHA-256이 manifest와 같고, 뷰 `archive.<표>`로 읽은 값이 동결 전 골드 값과 같다. 다시 돌린 동결은 파일을 다시 쓰지 않는다. manifest에 없는 파일은 뷰에 나오지 않는다. 더한 칸은 옛 파일에서 기본값이다 | §5.5·§6.4 |
 | A-T20 | 데모 시계로 ① 온세일 윈도우가 끝나고 30분 [가정]이 지난다 ② 다음 영업일 10시 [가정]가 된다 ③ R1 뒤 지표 하나의 품질 검사를 실패시킨다(추천 적용 2026-10-28, 기술 검토 중간-005) | ① R0 잠정 리포트가 생기고 결제·봇 지표에 '잠정'이 붙는다. ② R1 리포트의 판매 좌석·판매 금액이 실시간 집계와 차이 0이고 결정 규칙 판정이 보인다. ③ 그 지표의 규칙은 '판정 보류'이고, 그 지표를 계기로 한 결정 기록은 저장되지 않는다 | FR-068, §4.3 |
+| A-T21 | 조사 칸이 모두 채워진 `QueueEntryRecord`·`PurchaseSessionStarted`·`HoldAttempt`·`OrderEvent`(CREATED)·`PaymentEvent`(승인)·`TrustVerdict`를 보낸다. 같은 계정으로 두 회차에 같은 `deviceRef`·`contactRef`·`paymentMethodRef`를 싣는다(추천 적용 2026-10-31, ADR-0171) | 브론즈·실버에 `journeyId`·`deviceRef`·`contactRef`·`paymentMethodRef`·`cardBin` 값이 0건이고 스키마 위반 경보는 나지 않는다. 두 회차를 잇는 값이 분석 DB에 없다. `HoldAttempt`의 `seatIds`·`heldAt`은 실버에 실리고, `heldAt`은 같은 홀드의 `SeatEvent` HELD 시각과 같다. 브론즈 표 정의에 `journey_id` 열을 더한 마이그레이션은 dbt 테스트에서 빌드가 실패한다 | §3.3·§3.4, 연결: FR-071, FR-072 |
+| A-T22 | `analytics-ingest`의 소비자 그룹으로 `investigation.requests`를 읽으려 한다. 분석 사용자(`bronze_writer`·`an_transform`·`an_forensic_reader`·가명정보 취급자 계정)로 `inv.inv_request`를 조회하고, `inv_reader`로 `silver.slv_hold_attempt`를 조회한다 | 토픽 읽기는 ACL로 거절된다. `inv` 조회와 실버 조회는 모두 권한 거절이고 보안 이벤트로 기록된다. 적재 설정에 그 토픽이 없다 | §3.1·§11, 연결: FR-071, FR-072 |
+| A-T23 | 가명정보 취급자 지정이 있는 commander가 `POST /v1/ops/research-exports`로 내보내기를 만들고 `GET /v1/ops/research-exports/{exportId}`로 받는다. 지정이 없는 commander, 부정 거래 조사관 지정만 있는 commander가 같은 요청을 한다 | 지정이 있는 계정만 받고, 파일에 조사 칸과 원문 IP가 없다. 다른 둘은 403 `pseudonym-handler-required`이고 감사 기록과 가명정보 이용 내역(`pseudonymization_log`)에 거절이 남는다 | §11, 연결: FR-071 |
+| A-T24 | 한 회차에서 부정 예매 사건 셋을 만들어 하나는 조치(취소), 하나는 소명 인정, 하나는 외부 게시물 대조 라벨로 끝낸다. 사유 범주 하나는 계정 3개, 다른 하나는 계정 8개다. ops-svc가 trust-svc에 조사 갈래 라벨을 건다 | 실버 `slv_trust_label`에 그 세 출처의 라벨 행이 0건이다. `brz_ops_fraud_summary`에는 회차 × 사유 범주의 수만 있고 계정 3개짜리 칸은 '기타'로 합쳐진다. 계정·사건 ID·시각 열이 없다. R3 리포트에 32번 소명 인정 비율이 분자·분모와 함께 보인다 | §3.2·§3.3·§6.3, 연결: FR-073, FR-071 |
+| A-T25 | 같은 좌석을 두 세션이 거의 같은 때 직접 선택으로 잡게 한다(하나는 HELD, 하나는 CONFLICT) | 실버에서 두 시도의 `seatIds`가 같고, 진 시도에도 좌석 번호가 남는다. F4 경합 패배율은 바뀌지 않고, 좌석 단위 경합을 좌석 번호로 셀 수 있다 | §3.4, 연결: FR-071 |
 
 ## 14. 알려진 한계
 
@@ -620,6 +634,8 @@ R1·R2 리포트를 받으면 아래 순서로 본다.
 | 회차 안에서 사람을 나눠 시험하지 않는다 | 회차끼리 비교해서는 원인을 단정하기 어렵다 | 짝 비교와 합성 통제 실험 |
 | 파트너의 가격·등급·오픈 시각은 PEAKET이 바꾸지 못한다 | 리포트는 권고에 그친다 | 파트너가 권고를 받아들였는지 결정 기록에 남겨 효과를 본다 |
 | 분석 저장소 안에서는 회차를 넘어 같은 사람을 잇지 않는다 | 재구매·충성도 같은 사람 단위 지표는 없다 | 의도한 범위다(§1.4) |
+| 조사 칸을 싣지 않는다(추천 적용 2026-10-31, ADR-0171 결정 2) | 연구 갈래는 기기·결제 수단·연락처·네트워크를 함께 쓰는 계정 묶음 규칙을 시험하지 못한다. 그런 규칙은 조사 갈래(사람이 보고 결정)와 trust-svc의 그림자 실행(ADR-0039)에서만 잰다 | 두 갈래를 잇지 않으려고 고른 대가다. 연구 갈래는 사건 시각 패턴과 집계 라벨로 규칙을 고친다 |
+| 좌석 번호와 잡은 시각은 실명 주문과 맞춰 볼 수 있다(추천 적용 2026-10-31) | 운영 DB의 주문·홀드 원장을 볼 수 있는 사람이 실버의 `seatIds`·`heldAt`과 견주면 가명 세션이 누구인지 알 수 있다. 주문 좌석(`OrderEvent.items`)에도 같은 위험이 이미 있다 | 분석 계정에는 운영 DB 읽기 권한이 없고(§11), 가명정보 취급자는 부정 거래 조사관 지정을 함께 받지 못한다. 실버 대량 조회 경보와 접속기록 점검(FR-064)으로 사후에 찾는다 |
 | 매진 순간의 사람별 대기 기록은 늦거나 빠질 수 있다(추천 적용 2026-10-29, ADR-0141 결정 6) | `QueueEntryRecord`는 대기가 끝날 때 사람마다 한 건이라 매진 순간에 한꺼번에 생긴다. queue-svc가 파드마다 초당 2,000건 [가정]으로 나눠 보내므로 그만큼 적재가 늦고, 버퍼가 차서 버린 몫은 다시 적재할 원본이 없다 | 버린 수를 커버리지 검사(§7)가 '빈 곳 있음'으로 표시하고, 진입 인원·대기 오차는 그 표시와 함께 본다 |
 | 판매 기간이 400일을 넘는 회차는 실시간 대비 대조를 하지 못한다(추천 적용 2026-10-29, ADR-0146 결정 7) | 실시간 원시 표의 보존이 400일 [가정]이라 앞부분이 지워진다. 그 회차의 R3 실시간 대비 대조는 '판정 보류(원시 표 보존 초과)'다 | 판매 승인 때 경고한다. 정산서 대조(§7 정확성)는 골드 F15로 그대로 한다 |
 | R2 뒤의 판매는 날짜 단위로만 남는다(추천 적용 2026-10-28, 기술 검토 높음-23) | F15는 날짜 × 회차 × 등급 × 결제사라, R2 뒤 판매는 구역별·시간대별로 나눠 보지 못한다. 전날 판매분을 다음 날 넣으므로 당일 판매는 하루 늦게 확정 숫자에 들어간다 | 정산서 대조와 공연 전날 판매율에는 충분하다. 더 잘게 볼 질문이 생기면 차원을 더하고, 그 뒤 회차부터 쌓는다 |
@@ -634,3 +650,4 @@ R1·R2 리포트를 받으면 아래 순서로 본다.
 - 아카이브 방식은 2026-10-28에 회차별 Parquet 파일로 정했다(ADR-0115). Phase 4 4.3.6에서 쓰기·manifest·읽기 뷰를 만들고 A-T19로 확인한다. 뷰의 정의자 권한(`SQL SECURITY DEFINER`)으로 S3 원천 권한을 읽는 사용자에게서 뗄 수 있는지와, 비교 조회 10초 [가정] 상한은 그때 정한다.
 - 상업 목적 통계가 개인정보 보호법 §28의2①의 '통계작성'에 드는지: 확인 필요(POL-027, wbs 7.4.1).
 - 장르별 랭킹의 계산 09:30·게시 10:00, 장르마다 10위, 묵은 파일을 숨기는 2일: [가정](§8.5, ADR-0063).
+- 2026-10-31 ADR-0171 반영(추천 적용 2026-10-31): 부정 예매 사건 집계의 작은 칸 5계정과 소명 인정 비율을 다시 볼 기준 20%는 [가정]이다. 조사 갈래 라벨은 trust-svc가 `TrustVerdict`로 내지 않기로 계약에서 정했다(trust.proto `LabelSource` 주석, §3.3).

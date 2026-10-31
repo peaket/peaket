@@ -59,7 +59,8 @@ message ScoreRiskRequest {
   // 사람 확인 토큰. trust-svc가 서버 검증한다. 300초 1회용이라 저장하지 않는다.
   // 허용 hostname은 www이고 action은 맥락마다 정해져 있다(docs/features/bot-defense.md §6 표). 팬 로그인 판정이면 비운다.
   string human_check_token = 5;
-  // 브라우저가 보낸 기기 식별값. trust-svc가 탐지 가명으로 바꾼 뒤에만 저장한다(ADR-0053).
+  // 브라우저가 보낸 기기 식별값. trust-svc가 기기 가명 deviceRef = HMAC-SHA256(inv-ref-key, "device|" + device_id)로 바꾼 뒤에만 저장한다(ADR-0053).
+  // 2026-10-30까지는 탐지 가명 키였고, 2026-10-31에 identity-svc의 device.device_ref와 같은 조사용 키로 바꿨다(기기 키 통일, 추천 적용 2026-10-31, ADR-0171 결정 4).
   string device_id = 6;
   // 공연 상세에서 잰 행동 요약값(사전 검증 때). 로비 입장에는 없다. 원시 좌표·키 값·입력한 글자는 받지 않는다.
   BehaviorSummary behavior = 7;
@@ -70,6 +71,10 @@ message ScoreRiskRequest {
   // 회차의 정렬 설정. queue-svc가 회차 설정에서 읽어 로비 입장·사전 검증 판정에 싣는다.
   // 두 판정에서 UNSPECIFIED면 INVALID_ARGUMENT다(추천 적용 2026-10-30, docs/features/bot-defense.md §4.4).
   LobbyShuffle lobby_shuffle = 11;
+  // 여정 ID(조사용 추적 ID, UUIDv7). queue-svc가 그 회차에서 그 사람의 첫 요청(로비 입장이나 사전 검증) 때 만들어 토큰 클레임 jny로 싣고,
+  // 로비 입장·사전 검증 판정에 넘긴다. trust-svc는 판정에 쓰지 않고 TrustVerdict·BehaviorSignal의 journeyId로만 싣는다.
+  // 추가 검증 제출은 본문에 토큰이 없어 queue-svc가 여정을 몰라 비우고, 로그인 판정도 비운다(추천 적용 2026-10-31, ADR-0171 결정 4).
+  string journey_id = 12;
 }
 
 // openapi `BehaviorSummary`와 같은 필드다. 필드 구성과 범위는 가정이고 wbs 3.2.1에서 확정한다.
@@ -152,7 +157,8 @@ service TrustLabelService {
   //     처리자 관리 계정 ID는 판정 기록(TrustVerdict)에 싣지 않는다. ops-svc는 응답의 block_list를 처리함 건에 처리자·시각과 함께 적는다
   //     (추천 적용 2026-10-30, docs/features/bot-defense.md §12).
   // 라벨은 telemetry.trust-verdicts(TrustVerdict category LABELED_BOT·LABELED_HUMAN)로 낸다. source는 표본 검토가 SAMPLE_REVIEW,
-  // 부정구매 확인과 이의 제기 인정이 POST_LABEL이다(추천 적용 2026-10-30).
+  // 부정구매 확인과 이의 제기 인정이 POST_LABEL이다(추천 적용 2026-10-30). 부정 예매 출처 둘(LABEL_SOURCE_FRAUD_ACTIONED·
+  // FRAUD_APPEAL_ACCEPTED)은 내지 않는다. 조사 갈래의 사람 단위 결과가 분석 실버(연구 갈래)로 가지 않게 하려는 것이다(ADR-0171 결정 2·6, 추천 적용 2026-10-31).
   // 이의 제기 기각은 부르지 않는다. 기각은 '봇으로 확정'이 아니라 '판정을 유지함'이다(docs/features/bot-defense.md §12).
   // 추가 검증 실패, 허니팟 적중, 재평가 후보 같은 자동 신호로는 차단 기기 목록에 올리지 않는다(§9). 이 호출 말고는 목록에 올리는 길이 없다.
   rpc ApplyLabel(ApplyLabelRequest) returns (ApplyLabelResponse);
@@ -167,6 +173,20 @@ enum LabelSource {
   LABEL_SOURCE_FRAUD_CONFIRMED = 2;
   // 추가 검증 이의 제기 인정(CS 처리함 VERIFICATION_APPEAL). label은 HUMAN만 받는다(BOT이면 INVALID_ARGUMENT).
   LABEL_SOURCE_APPEAL_ACCEPTED = 3;
+  // 아래 둘은 부정 예매 사후 조사(ADR-0171 결정 6 '정답 라벨', POL-046)에서 온다. 외부 되팔이 게시물 대조는 후보 묶음의 근거 신호(POST_MATCH)일 뿐이라
+  // 라벨 출처로 두지 않고 차단 기기 목록에도 올리지 않는다. 차단 기기 등재는 표 취소·이용 제한 조치가 승인되어 실행된 뒤(FRAUD_ACTIONED)뿐이다
+  // (2026-10-31 정함. 같은 날 잠깐 두었던 LABEL_SOURCE_EXTERNAL_POST_MATCH는 첫 출시 전이라 번호째 뺐다). source_ref는 사건 ID(ops DB fraud_case)이고,
+  // 계정마다 한 번씩 부른다(pid는 그 계정의 사람 식별값, event_id는 사건 회차). 판정 근거 키·행동 신호 원시 표에서 기기 가명을 찾지 못하면
+  // ops-svc가 조사 저장소에서 읽은 기기 가명을 device_ref로 싣는다(추천 적용 2026-10-31).
+  // 멱등: 이 둘은 한 사건에서 계정마다 부르고, 조치 뒤 이의 인정은 같은 사건·계정에 다른 출처로 온다. 그래서 멱등 키는 source_ref 하나가 아니라
+  // (source_ref, pid, source)이고 source_version은 그 묶음 안에서 견준다. '같은 source_ref에 다른 source면 ALREADY_EXISTS' 규칙은 이 둘에는 쓰지 않는다
+  // (docs/features/bot-defense.md §9, 추천 적용 2026-10-31).
+  // 이 둘은 차단 기기 목록만 바꾸고 telemetry.trust-verdicts(TrustVerdict LABELED_BOT·LABELED_HUMAN)로 내지 않는다. 사람 단위 라벨이
+  // 분석 실버(연구 갈래)로 가면 조사 갈래와 이어지기 때문이다. 연구 갈래에는 회차 집계 라벨만 간다(ADR-0171 결정 2·6).
+  // 승인된 부정 예매 조치(표 취소·이용 제한)가 실행됨. label은 BOT만 받는다. 차단 기기 목록에 올리고 확정 출처를 적는다.
+  LABEL_SOURCE_FRAUD_ACTIONED = 4;
+  // 부정 예매 소명 인정, 또는 조치 뒤 이의 인정(되돌림). label은 HUMAN만 받는다. 판정 근거에 차단 기기 목록이 있었으면 그 키를 지운다.
+  LABEL_SOURCE_FRAUD_APPEAL_ACCEPTED = 5;
 }
 
 enum Label {
@@ -189,6 +209,9 @@ message ApplyLabelRequest {
   string queue_entry_id = 7;
   // 처리한 관리 계정 ID. 차단 기기 키를 바꾼 보안 로그 줄에만 남긴다(텔레메트리에는 싣지 않는다). ops-svc가 권한과 감사 기록을 처리한 뒤 싣는다.
   string acted_by = 8;
+  // 부정 예매 출처(FRAUD_ACTIONED·FRAUD_APPEAL_ACCEPTED)에서 ops-svc가 조사 저장소에서 읽은 기기 가명(deviceRef). 그 밖의 출처는 비운다.
+  // trust-svc는 판정 근거 키에서 찾은 값이 있으면 그 값을 먼저 쓴다(추천 적용 2026-10-31, ADR-0171).
+  string device_ref = 9;
 }
 
 // 차단 기기 목록에 생긴 일

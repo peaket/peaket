@@ -18,12 +18,12 @@
 | Redis 대기열 클러스터 | 순번 카운터, 1인 1순번 중복 확인 키(pid, 그 대기가 끝날 때나 그 회차의 판매 종료(공연 시작 24시간 전) 때 파기, ADR-0063·ADR-0064), 로비 참가자 목록(참가 토큰을 원래 값으로 되돌릴 수 없게 바꾼 해시, `q:{event:E}:lobby_members`), 셔플 결과(순번을 무작위로 섞은 결과. 해시 → 순번 매핑), 동시 도착 묶음 모으기(`q:{event:E}:batch_members:{batchNo}`), 도착 시각 쿠키(브라우저가 사이트별로 저장했다가 요청마다 함께 보내는 작은 값) 요청 ID(`q:arr:{reqId}:E`, 10분 [가정]), 빠진 번호 비트맵, 입장 자리(Sorted Set), 실시간 입장 인원 카운터, 추가 검증 격리 기록(`q:{event:E}:verify`), 판매 자격 명단 사본(`q:{event:E}:elig:{listKey}`, 판매 기간 끝 + 1일 파기, ADR-0062), 대기실 공지·판매 상태의 제어 상태(`q:{event:E}:notice`, 판 번호 포함, queue-svc, 추천 적용 2026-10-28, ADR-0103), 봇 판정 이의 제기 임시 보관(`q:appeal:{pid}:E`, 판매 종료 + 7일 [가정], 추천 적용 2026-10-30, docs/features/bot-defense.md §12), 예매 제한의 대기열 사본(`q:rst:{account}`, 원본은 ops DB `booking_restriction`, 소유자 결정 2026-10-30, open-items 75번) | queue-svc, admission-ctrl (같은 장애 격리 단위) | 대기열 트래픽 폭주가 좌석 예매 같은 다른 핵심 기능의 응답 지연으로 번지지 않도록 물리 인스턴스를 격리한다. 회차 해시 태그(`{event:E}`)는 회차 단위 키(같은 Lua에서 함께 쓰는 순번 카운터·serving·리더 상태·빠진 번호 등)에 붙여 한 샤드에 둔다. 사람·토큰 단위 키(`q:dup`·`q:adm`·`q:lobby:{hash}`·`q:arr`)에는 붙이지 않아 샤드 전체에 고르게 흩는다(§3). |
 | Redis 좌석 클러스터 | 좌석마다 한 비트로 줄인 좌석 상태 비트맵, 홀드(결제하는 동안 다른 사람이 가져가지 못하게 좌석을 잠시 잡아 두는 것) 세부 정보(Hash), 펜싱 토큰(홀드 순서대로 커지는 번호. 늦게 도착한 옛 요청이 최신 값을 덮어쓰지 못하게 막는다), 홀드 만료 인덱스(Sorted Set), 사용자별 예매 보유 수, 홀드 요청 멱등키, 입장을 증명하는 서명된 문자열인 입장 토큰의 jti 거부 목록, 구매 세션(클라이언트 임시 ECDH 공개키와 마지막 요청 일련번호, 묶인 회차와 그 세션의 holdId 목록 포함. 회차·holdId 목록은 추천 적용 2026-10-30, docs/features/seat-hold.md §2·§3), 홀드·세션 이벤트 Stream, 바뀐 좌석만 담은 작은 메시지인 좌석 델타를 모두에게 보내는 채널(샤드 Pub/Sub), 판매 일시정지 제어 상태의 사본(`s:{event:E}:ctl`, 원본은 purchase DB `sale_control`)과 좌석 비트맵이 있는 회차 목록(`s:ctl:events`, 추천 적용 2026-10-28, ADR-0103), 계정이 방금 놓은 좌석(`s:{event:E}:rel:{account}`, 30초 [가정], open-items 67번)과 예매 제한의 구매 사본(`s:rst:{account}`, open-items 75번)(소유자 결정 2026-10-30) | purchase-svc (혼자 쓰기), realtime-gw (델타 채널을 구독해 받기만) | 좌석 예매 트랜잭션 장애가 대기열로 번지지 않도록 독립 클러스터로 나눈다. `{event:id}` 해시 태그를 붙여 한 공연의 비트맵, 홀드 정보, 쿼터 카운터를 같은 샤드에 두고, 이로써 Lua 스크립트의 원자성을 보장한다. |
 | Redis 세션·캐시 클러스터 | identity 사용자 세션, 전역 레이트 리밋(일정 시간에 받는 요청 수의 상한) 카운터(Envoy Gateway가 배포한 전역 레이트 리밋 서비스 전용, docs/architecture.md §4, 기술 검토 중간-084), catalog 읽기 모델 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것), 웹 앱 서버의 ISR·데이터 캐시(docs/devops.md §6), shop 굿즈 재고 차감 카운터, trust-svc 실시간 행동 피처와 기기 신뢰 이력·허니팟 적중 표시·판정 근거 키(`tr:devacct`·`tr:devhist`·`tr:hp`·`tr:vb`, 추천 적용 2026-10-30, docs/features/bot-defense.md §3.2), 스캐너 로그인 기기 승인 코드(identity), 스캐너 기기 등록 코드(코드의 SHA-256만, ADR-0062)와 스캐너 DPoP 증명 `jti`(10분, 기술 검토 중간-057), core-svc support의 예매 제한 화면용 사본(`sup:rst:{account}`, 집행에는 쓰지 않는다, 추천 적용 2026-10-30). 알림·웹훅 발송 작업(BullMQ)은 2026-10-28에 core DB 원장으로 옮겼고(ADR-0109), ops-svc Socket.IO 어댑터 상태는 ADR-0100·0102가 이 클러스터에서 뺐다 | 여러 서비스가 함께 쓴다 | 네임스페이스 키 접두사와 Redis(메모리에 데이터를 두는 빠른 저장소) ACL 기반 사용자 격리를 적용한다. 다른 영역에 속한 키를 허가 없이 서로 읽고 쓰는 것은 금지한다. '데이터 유실 허용' 하나로 묶지 않고, 키마다 유실 등급(A 다시 만든다·B 사람이 다시 한다·C 다른 층이 마지막을 지킨다)을 정한다. 메모리 규칙은 `maxmemory-policy noeviction`과 모든 키 TTL이다(§3 끝 표, 추천 적용 2026-10-28, ADR-0109). |
-| Aurora PostgreSQL (purchase) | 주문(지금 상태와 예매자 성명·휴대폰 번호, 반영한 결제 사건 순번), 결제 시도(결제사·결제창 참조), 주문 상태 이력(`order_event`, 상태를 바꾸는 트랜잭션에서 덧붙인다. 이벤트 소싱은 아니다, ADR-0113), 좌석 판매 행(PENDING/SOLD/RETURNED), 1인 예매 한도 원장, 홀드 감사 원장, 예매 취소와 환불 기록, 회차 취소 요청과 일괄 환불 작업 진행, 배상 지급 기록, 판매 일시정지 제어 상태(`sale_control`, 범위마다 한 행과 판 번호, 추천 적용 2026-10-28, ADR-0103), 회차 판매 상태(`event_sale`, 일시 매진·매진 판정과 판 번호, ADR-0122), 처리 못 한 Kafka 사건의 보류 표(`held_event`, §4의 15번, 추천 적용 2026-10-29, ADR-0142), 주문 세 작업 밖의 멱등 기록 표(`idempotency_record`, §2, ADR-0146 결정 1), Outbox(데이터베이스를 바꿀 때 보낼 이벤트를 같은 트랜잭션으로 표에 먼저 적어 두고 나중에 보내는 방식) 테이블 | purchase-svc | 판매 확정(Hard Sale: 판매 행 PENDING 예약), 쿼터 차감, 주문 상태 전이를 하나의 ACID 트랜잭션으로 원자 처리한다(주문 생성과 결제 접수는 그 앞의 따로 된 트랜잭션이다, §4). 샤딩(데이터를 여러 저장소에 나눠 담는 것)은 빼고, 큰 인스턴스 하나를 키우는 스케일업과 수평 읽기 복제로 대응한다(ADR-0028). |
+| Aurora PostgreSQL (purchase) | 주문(지금 상태와 예매자 성명·휴대폰 번호, 반영한 결제 사건 순번), 결제 시도(결제사·결제창 참조), 주문 상태 이력(`order_event`, 상태를 바꾸는 트랜잭션에서 덧붙인다. 이벤트 소싱은 아니다, ADR-0113), 좌석 판매 행(PENDING/SOLD/RETURNED), 1인 예매 한도 원장, 홀드 감사 원장, 예매 취소와 환불 기록, 회차 취소 요청과 일괄 환불 작업 진행, 배상 지급 기록, 판매 일시정지 제어 상태(`sale_control`, 범위마다 한 행과 판 번호, 추천 적용 2026-10-28, ADR-0103), 회차 판매 상태(`event_sale`, 일시 매진·매진 판정과 판 번호, ADR-0122), 부정 예매 이의 인정 뒤의 우선 구매 권리(`priority_grant`, 추천 적용 2026-10-31, ADR-0171), 처리 못 한 Kafka 사건의 보류 표(`held_event`, §4의 15번, 추천 적용 2026-10-29, ADR-0142), 주문 세 작업 밖의 멱등 기록 표(`idempotency_record`, §2, ADR-0146 결정 1), Outbox(데이터베이스를 바꿀 때 보낼 이벤트를 같은 트랜잭션으로 표에 먼저 적어 두고 나중에 보내는 방식) 테이블 | purchase-svc | 판매 확정(Hard Sale: 판매 행 PENDING 예약), 쿼터 차감, 주문 상태 전이를 하나의 ACID 트랜잭션으로 원자 처리한다(주문 생성과 결제 접수는 그 앞의 따로 된 트랜잭션이다, §4). 샤딩(데이터를 여러 저장소에 나눠 담는 것)은 빼고, 큰 인스턴스 하나를 키우는 스케일업과 수평 읽기 복제로 대응한다(ADR-0028). |
 | Aurora PostgreSQL (payment) | PG사(온라인 결제를 대신 처리해 주는 결제사)별 결제 원장(가상계좌 입금 기한·번호는 입금 확정·만료 때 삭제, ADR-0062), 결제 취소 원장, 결제 상태 전이 이벤트, 웹훅(일이 생기면 상대 서버가 우리 주소를 불러 알려 주는 방식) 수신 멱등 기록, 결제사 정산 대사 결과, 정산서·지급 묶음·지급 건·미수금(파트너에게서 돌려받을 돈, ADR-0047), 결제사별 새 결제 진입 정지 상태와 시험 재개 기록(ADR-0105), 대체 결제사 전환 상태(`pg_switch`, 범위(회차 또는 플랫폼, 결제사 지정은 회차 칸이다, ADR-0093)마다 한 행과 판 번호. 제어 gRPC로 받은 명령 6을 판 번호가 지금보다 클 때만 쓰고, 모든 파드가 2초 [가정]마다 다시 읽는다, §4의 3번, 추천 적용 2026-10-29, ADR-0143), 멱등 기록 표(`idempotency_record`, ADR-0146 결정 1), Outbox 테이블 | payment-svc | 결제 비밀 키와 외부 결제 대행사(PG) 통신 장애의 영향을 다른 도메인으로부터 물리적으로 격리한다. |
 | Aurora PostgreSQL (ticket, 교차 리전 읽기 복제본 포함) | 티켓 발행 원장(결제자·보유자), 기기 바인딩 공개키와 폐기 목록, 양도 요청과 소유권 양도 이력, 게이트 스캔 이벤트 로그, 스캐너 기기 등록·배치, 회차별 변경 일련번호 기록, 이상 표시, 부스 재발급 허용(ADR-0051), 멱등 기록 표(`idempotency_record`, ADR-0146 결정 1) | ticket-svc | 공연 당일 현장 입장의 가용성(서비스를 멈춤 없이 쓸 수 있는 정도)을 최대한 높이려고, 재해 복구용으로 다른 리전(클라우드 데이터센터가 모인 지역)에 둔 읽기 복제본(아마존이 운영해 주는 관계형 데이터베이스인 Aurora의 Global Database 도쿄 보조 클러스터, 읽기 인스턴스 1대. 관리형 전환으로 쓰기를 옮기지 않는다, 추천 적용 2026-10-22, ADR-0083)을 늘 동기화한다. 복제본은 원본을 복사해 두고 읽기를 나눠 받거나 장애 때 대신하는 저장소다. 티켓 양도와 상태 변경은 행 잠금과 낙관적 락 버전 컬럼을 함께 써서 이중 처리를 막는다. |
-| Aurora PostgreSQL (ops 전용 클러스터, 추천 적용 2026-10-28, ADR-0102) | 운영 명령 감사 로그, 이벤트 스토어, 법적 요청 대장, 승인 업무, CS 처리함 건(고객 문의·게시물 신고 건 포함, ADR-0066), 예매 제한과 소명(예매 제한이나 양도 회수 대상이 된 팬이 사정을 설명하는 절차), 결정 기록·가명정보(추가 정보 없이는 누구인지 알 수 없게 바꾼 정보) 처리 기록(ADR-0052), 수요 예측(`demand_forecast`, ADR-0078), 관제 콘솔 SSE 알림 표(`ops_push_event`)와 접속 중 운영자 표(`ops_presence`, ADR-0100), 경보 기록 표(`ops_alert_record`, 13개월 [가정], ADR-0145 결정 9·ADR-0146 결정 5), 멱등 기록 표(`idempotency_record`, ADR-0146 결정 1) | ops-svc | 제어 평면(관제 명령을 받아 전하는 쪽)이 다른 서비스와 쓰기 인스턴스를 함께 쓰지 않게, 쓰기 1 + 읽기 1(다른 AZ), db.r7g.large [가정]의 전용 클러스터로 둔다. 오픈 직전 로그인·토큰 갱신이 공유 클러스터에 몰리는 때에도 명령 접수 p95 500ms(NFR-008)가 그 포화에 묶이지 않게 하려는 것이다. 2026-10-28까지는 아래 공유 클러스터의 논리 DB였다 |
-| Aurora PostgreSQL (공유 클러스터: identity·core 개별 논리 DB 및 역할) | 계정, 세션 참조, 기기 바인딩(`device`, 기기 식별자 해시), 법적 동의, 관리자 계정과 그 패스키·비상 복구 코드 해시(`admin_passkey`·`admin_recovery_code`), 관리 계정 지정 기록(`admin_designation`: 접속기록 점검자·가명정보 취급자, 추천 적용 2026-10-30, docs/security/authz-matrix.md §3.1·§3.7), 부스 본인확인 대조 기록(`booth_reverification`), 현장 스태프 권한 배정, 스캐너 세션; 판매자 신원정보, 판매 승인 상태(공연 단위), 공연예술통합전산망 전송 기록, 공연(회차 묶음)·회차·공연장(실제 장소)·아티스트·다른 이름(ADR-0093)·좌석 배치(공연장 캔버스·무대·구역 도형과 좌석 좌표)·좌석맵 템플릿 10종(`venue` TEMPLATE 행, 배포 때 넣는다, ADR-0066)·가격 티어·판매 정책, 판매 자격 명단(판매 기간 끝 + 1일 파기, ADR-0062), 굿즈·부가 상품 정의(`product`·`product_type`, 유형마다 다른 속성은 `attributes jsonb`, ADR-0101), 굿즈 주문과 재고 확정(택배 주문의 수령인 성명·연락처·배송 주소 포함), 현장 수령 시간대(`pickup_slot` [가정], 추천 적용 2026-10-30, docs/api/openapi.yaml `MerchOrderCreatePickup`), 찜(`wish`, 공연 단위)과 Web Push 구독(`push_subscription`), 관람 후기(`review`)와 후기 사진 기록(`review_image`, 파생본 키만)·게시물 신고(`content_report`), 후기 조치 기록(`takedown_action`, 후기 모듈), 고객 문의(`inquiry`·`inquiry_message`, support 모듈, ADR-0066), 소명(`appeal`, support 모듈, 추천 적용 2026-10-30), 홈 구성(배너·테마, ADR-0063), 검색 읽기 모델(`search_document`·`search_term`·`search_version`, ADR-0094), 알림 구독과 웹훅 엔드포인트(`webhook_endpoint`), 알림 발송 작업(`notification_job`, 보낼 때까지만)과 발송 기록(`notification_delivery`, 90일 [가정], ADR-0062), 파트너 웹훅 발송 원장(`webhook_delivery`, 끝난 뒤 30일 [가정], ADR-0109), 알림 대량 발송과 조각(`notification_broadcast`·`notification_broadcast_chunk`, 끝난 뒤 30일 [가정], 추천 적용 2026-10-30, docs/features/notify.md §4.2), core 멱등 기록 표(`idempotency_record`, ADR-0146 결정 1) | identity-svc, core-svc | 운영 비용을 아끼려고 물리 클러스터는 함께 쓰되, 서비스별로 독립된 논리 데이터베이스와 전용 DB 계정을 따로 둔다. 논리 DB끼리의 교차 참조와 외래키 조인은 금지한다. ops 논리 DB는 2026-10-28에 ops 전용 클러스터로 옮겼다(ADR-0102). 다른 논리 DB를 가리키는 ops의 칸은 지금처럼 외래키 없이 ID만 둔다. |
-| ClickHouse | 대규모 분석 전용 저장소(분석 저장소, ADR-0042·0052): 브론즈(이벤트·스냅샷 원본, 가명 처리만, 적재 뒤 90일), 실버(중복 제거·정리된 가명 사건과 구매 세션 누적 스냅샷, 90일), 골드(스타 스키마 집계·지표 뷰, 사람 단위 행 없음, 2년), 실시간 표 `rt`(스트림 작업자 `ops-rt`가 싣는 원시 사건. 누적과 1초 칸은 읽을 때 센다. 관제·파트너 판매 현황의 잠정 숫자, 판매류·대기열·홀드 400일·판정 90일·심장 박동 7일 [가정], docs/streaming.md §4.3), trust-svc 원시 탐지 신호(보관 기간 TTL 30일, 적재는 재평가 작업자 `trust-reassess`), 접속기록 저장소(별도 논리 DB, 보존 3개월. 원문 미기재 저장소를 분석용 데이터베이스 ClickHouse 안의 독립 DB로 확정, 추천 적용 2026-10-09) | 데이터 작업(적재 작업자 `analytics-ingest`·`ops-rt`, 마감 실행기 `close-runner`), ops-svc(골드 지표 뷰·rt 읽기), trust-svc, identity와 API 게이트웨이(프로그램 요청이 들어오는 입구 서버)의 로그 파이프라인 | 런타임 하트비트(살아 있음을 알리려고 주기적으로 보내는 신호) 부하를 제거하고, 비동기 마이크로 배치로 모아 한꺼번에 넣는다. 잠정 숫자(rt)와 확정 숫자(골드)는 다른 표에 두고, 확정 숫자의 중복 제거는 dbt SQL로 한다(docs/features/analytics.md §2·§5.5). |
+| Aurora PostgreSQL (ops 전용 클러스터, 추천 적용 2026-10-28, ADR-0102) | 운영 명령 감사 로그, 이벤트 스토어, 법적 요청 대장, 승인 업무, CS 처리함 건(고객 문의·게시물 신고 건 포함, ADR-0066), 예매 제한과 소명(예매 제한이나 양도 회수 대상이 된 팬이 사정을 설명하는 절차), 부정 예매 사후 조사(기록 고정 `fraud_snapshot`, 후보 묶음 `fraud_cluster`·`fraud_cluster_member`, 사건 `fraud_case`·`fraud_case_event`, 외부 게시물 `external_post`, 증거 묶음 `evidence_bundle`·`evidence_custody_log`, 추천 적용 2026-10-31, ADR-0171), 결정 기록·가명정보(추가 정보 없이는 누구인지 알 수 없게 바꾼 정보) 처리 기록(ADR-0052), 수요 예측(`demand_forecast`, ADR-0078), 관제 콘솔 SSE 알림 표(`ops_push_event`)와 접속 중 운영자 표(`ops_presence`, ADR-0100), 경보 기록 표(`ops_alert_record`, 13개월 [가정], ADR-0145 결정 9·ADR-0146 결정 5), 멱등 기록 표(`idempotency_record`, ADR-0146 결정 1) | ops-svc | 제어 평면(관제 명령을 받아 전하는 쪽)이 다른 서비스와 쓰기 인스턴스를 함께 쓰지 않게, 쓰기 1 + 읽기 1(다른 AZ), db.r7g.large [가정]의 전용 클러스터로 둔다. 오픈 직전 로그인·토큰 갱신이 공유 클러스터에 몰리는 때에도 명령 접수 p95 500ms(NFR-008)가 그 포화에 묶이지 않게 하려는 것이다. 2026-10-28까지는 아래 공유 클러스터의 논리 DB였다 |
+| Aurora PostgreSQL (공유 클러스터: identity·core 개별 논리 DB 및 역할) | 계정, 세션 참조, 기기 바인딩(`device`, 기기 가명 `device_ref`. 2026-10-31에 SHA-256 해시에서 조사용 가명으로 바꿨다, 추천 적용 2026-10-31, ADR-0171), 조사용 연락처 가명(`account_contact_ref`)과 같은 본인확인 시도 기록(`identity_conflict_attempt`, 추천 적용 2026-10-31, ADR-0171), 법적 동의, 관리자 계정과 그 패스키·비상 복구 코드 해시(`admin_passkey`·`admin_recovery_code`), 관리 계정 지정 기록(`admin_designation`: 접속기록 점검자·가명정보 취급자, 추천 적용 2026-10-30, docs/security/authz-matrix.md §3.1·§3.7. 부정 거래 조사관은 추천 적용 2026-10-31, ADR-0171), 부스 본인확인 대조 기록(`booth_reverification`), 현장 스태프 권한 배정, 스캐너 세션; 판매자 신원정보, 판매 승인 상태(공연 단위), 공연예술통합전산망 전송 기록, 공연(회차 묶음)·회차·공연장(실제 장소)·아티스트·다른 이름(ADR-0093)·좌석 배치(공연장 캔버스·무대·구역 도형과 좌석 좌표)·좌석맵 템플릿 10종(`venue` TEMPLATE 행, 배포 때 넣는다, ADR-0066)·가격 티어·판매 정책, 판매 자격 명단(판매 기간 끝 + 1일 파기, ADR-0062), 굿즈·부가 상품 정의(`product`·`product_type`, 유형마다 다른 속성은 `attributes jsonb`, ADR-0101), 굿즈 주문과 재고 확정(택배 주문의 수령인 성명·연락처·배송 주소 포함), 현장 수령 시간대(`pickup_slot` [가정], 추천 적용 2026-10-30, docs/api/openapi.yaml `MerchOrderCreatePickup`), 찜(`wish`, 공연 단위)과 Web Push 구독(`push_subscription`), 관람 후기(`review`)와 후기 사진 기록(`review_image`, 파생본 키만)·게시물 신고(`content_report`), 후기 조치 기록(`takedown_action`, 후기 모듈), 고객 문의(`inquiry`·`inquiry_message`, support 모듈, ADR-0066), 소명(`appeal`, support 모듈, 추천 적용 2026-10-30), 홈 구성(배너·테마, ADR-0063), 검색 읽기 모델(`search_document`·`search_term`·`search_version`, ADR-0094), 알림 구독과 웹훅 엔드포인트(`webhook_endpoint`), 알림 발송 작업(`notification_job`, 보낼 때까지만)과 발송 기록(`notification_delivery`, 90일 [가정], ADR-0062), 파트너 웹훅 발송 원장(`webhook_delivery`, 끝난 뒤 30일 [가정], ADR-0109), 알림 대량 발송과 조각(`notification_broadcast`·`notification_broadcast_chunk`, 끝난 뒤 30일 [가정], 추천 적용 2026-10-30, docs/features/notify.md §4.2), core 멱등 기록 표(`idempotency_record`, ADR-0146 결정 1) | identity-svc, core-svc | 운영 비용을 아끼려고 물리 클러스터는 함께 쓰되, 서비스별로 독립된 논리 데이터베이스와 전용 DB 계정을 따로 둔다. 논리 DB끼리의 교차 참조와 외래키 조인은 금지한다. ops 논리 DB는 2026-10-28에 ops 전용 클러스터로 옮겼다(ADR-0102). 다른 논리 DB를 가리키는 ops의 칸은 지금처럼 외래키 없이 ID만 둔다. |
+| ClickHouse | 대규모 분석 전용 저장소(분석 저장소, ADR-0042·0052): 브론즈(이벤트·스냅샷 원본, 가명 처리만, 적재 뒤 90일), 실버(중복 제거·정리된 가명 사건과 구매 세션 누적 스냅샷, 90일), 골드(스타 스키마 집계·지표 뷰, 사람 단위 행 없음, 2년), 실시간 표 `rt`(스트림 작업자 `ops-rt`가 싣는 원시 사건. 누적과 1초 칸은 읽을 때 센다. 관제·파트너 판매 현황의 잠정 숫자, 판매류·대기열·홀드 400일·판정 90일·심장 박동 7일 [가정], docs/streaming.md §4.3), trust-svc 원시 탐지 신호(보관 기간 TTL 30일, 적재는 재평가 작업자 `trust-reassess`), 부정 예매 조사 저장소(별도 DB `inv`, 실명 계정·원문 IP를 담는 조사 갈래, 공연 종료 + 30일 [가정], 적재는 `inv-ingest`. 분석 저장소와 법정 접속기록과 따로 둔다, 아래 '부정 예매 사후 조사의 표', 추천 적용 2026-10-31, ADR-0171), 접속기록 저장소(별도 논리 DB, 보존 3개월. 원문 미기재 저장소를 분석용 데이터베이스 ClickHouse 안의 독립 DB로 확정, 추천 적용 2026-10-09) | 데이터 작업(적재 작업자 `analytics-ingest`·`ops-rt`, 마감 실행기 `close-runner`), ops-svc(골드 지표 뷰·rt 읽기), trust-svc, identity와 API 게이트웨이(프로그램 요청이 들어오는 입구 서버)의 로그 파이프라인 | 런타임 하트비트(살아 있음을 알리려고 주기적으로 보내는 신호) 부하를 제거하고, 비동기 마이크로 배치로 모아 한꺼번에 넣는다. 잠정 숫자(rt)와 확정 숫자(골드)는 다른 표에 두고, 확정 숫자의 중복 제거는 dbt SQL로 한다(docs/features/analytics.md §2·§5.5). |
 | Kafka | 토픽(메시지를 종류별로 모아 두는 통로): 핵심 거래 이벤트, 분산 텔레메트리(시스템이 내보내는 지표·로그·요청 기록 같은 운영 신호), 설정형 제어 사건(`control.settings`)과 세션 종료 사건(`control.sessions-terminated`). 판매 일시정지·입장 제어 같은 핵심 제어 명령과 대체 결제사 전환은 Kafka를 거치지 않고 제어 gRPC로 간다(ADR-0102·0143) | 발행 서비스별 독립 파티셔닝 | 도메인별로 토픽을 나누고, 전송 신뢰성 수준(at-least-once)을 차등 적용한다(ADR-0026). 데이터 토픽을 두는 클러스터는 둘이다. 거래·제어 클러스터와 텔레메트리 클러스터는 물리적으로 다른 MSK(아마존이 대신 운영해 주는 이 메시지 시스템) 클러스터다(ADR-0026 결정 2). 요청 기록(Tempo 쓰기 경로)만 싣는 관측 전용 셋째 클러스터도 있지만(ADR-0077) 이 문서의 데이터를 두지 않으므로 docs/observability.md §1에서 다룬다. 운영 MSK는 모두 셋이다(docs/infra.md §1, 추천 적용 2026-10-28, 기술 검토 낮음-034). |
 | S3 (분석 아카이브·수집·리포트·백업 버킷) | 개인을 식별할 수 없는 집계 지표(원시 행동 신호 표본은 두지 않는다, ADR-0004 상태 줄), 동결된 회차 골드의 영구 아카이브(회차·표마다 Parquet 파일 하나와 manifest. Iceberg 표·Glue 카탈로그는 2026-10-28에 뺐다, ClickHouse `s3()`로 읽는다, ADR-0042·0052·0115), 분석 수집 버킷(기준 자료·운영 기록 코드·비용 파일, 개인정보 없음)과 공연 리포트 파일 버킷, 정기 백업 스냅샷(어느 시점의 전체 상태를 찍어 둔 것) | 데이터 엔지니어링 팀 | 분석 레이크와 리포트 버킷에는 원시 개인정보 저장을 금지하고, 장기 분석과 감사 추적을 위한 데이터 레이크로 쓴다. 저장소 백업은 별도 백업 버킷(SSE-KMS, 백업 역할만 읽는다)에 두고, 원시 IP가 든 ClickHouse 백업은 7일 [가정]만 둔다(ADR-0053). 법정 접속기록만 하루 파티션 사본을 따로 접속기록 사본 버킷(S3 Object Lock 준수 모드)에 그 날짜의 3개월 보존 + 7일 [가정] 둔다(추천 적용 2026-10-28, 기술 검토 높음-21, §6). |
 | S3 공개 정적 객체(CDN 원본) | 회차별 좌석맵 파일(공연장 캔버스·무대 도형, 구역 도형·라벨 위치·등급, 좌석 좌표, 배치 버전이 이름에 든다), 장르별 랭킹 파일(매일 1개), 공연 포스터·상세 이미지와 홈 배너 이미지 파생본(폭 320·640·960·1,280px [가정] × AVIF·WebP), 후기 사진 파생본(목록 240px·보기 긴 변 1,280px [가정] × WebP, ADR-0066), 매진 페이지와 대기 상태 파일의 대체 경로 | core-svc catalog(좌석맵 파일 게시, 공연 이미지·배너 파생본 게시), core-svc review(후기 사진 파생본 게시·삭제), 랭킹 파일 게시 잡 `ranking-publisher`, queue-svc(대체 경로). 파생본을 만드는 것은 이미지 처리 작업 `image-worker`다. 비공개 준비 위치에 쓰고, core-svc가 결과를 확인한 뒤 여기로 게시한다 | 개인정보를 담지 않는 공개 파일만 둔다. 이미지 파생본은 올릴 때 한 번 만들고, 화면은 `srcset`으로 폭을 고르며 AVIF를 먼저, WebP로 대체한다. 화면 앱 서버의 이미지 최적화는 쓰지 않는다(docs/frontend.md §5.14.1, 추천 적용 2026-10-28, 기술 검토 중간-068). 좌석맵 파일은 배치를 바꾸면 새 이름으로 내고 옛 이름의 파일은 바꾸지 않으므로, CDN(사용자 가까운 곳에 파일을 복사해 두고 대신 응답하는 전송망)에 오래 캐시한다(추천 적용 2026-10-14, ADR-0063). 후기 사진은 원본을 비공개 격리 위치에 받아 검사하고 다시 인코딩해, 메타데이터(촬영 위치 포함)를 지운 파생본만 여기에 둔다. 원본은 바로 지운다. 후기를 지우면 파생본을 지운다. 후기를 가리면 파생본을 공개 위치에서 내려 비공개로 두고(다시 보이게 하면 되돌린다), 두 경우 모두 CDN을 무효화한다(추천 적용 2026-10-19, ADR-0066). |
@@ -43,6 +43,8 @@ ERD는 한 그림에 담으면 mermaid의 그림 글자 수 한도(그림 하나
 erDiagram
     account ||--o{ session : has
     account ||--o{ device : binds
+    account ||--o{ account_contact_ref : "조사용 연락처 가명(추천 적용 2026-10-31, ADR-0171)"
+    account ||--o{ identity_conflict_attempt : "같은 본인확인 시도(추천 적용 2026-10-31, ADR-0171)"
     account ||--o{ consent : gives
     account ||--o| identity_verification : "verified_by (ci_hmac)"
     account ||--|{ account_provider : "로그인 수단 1개 이상"
@@ -51,7 +53,7 @@ erDiagram
     admin_account }o--|| promoter : "belongs_to (partner only)"
     admin_account ||--o{ admin_passkey : "단계 인증 패스키(기술 검토 중간-051)"
     admin_account ||--o{ admin_recovery_code : "비상 복구 코드"
-    admin_account ||--o{ admin_designation : "지정(접속기록 점검자·가명정보 취급자, 추천 적용 2026-10-30)"
+    admin_account ||--o{ admin_designation : "지정(접속기록 점검자·가명정보 취급자, 추천 적용 2026-10-30. 부정 거래 조사관, 추천 적용 2026-10-31)"
     account ||--o{ booth_reverification : "부스 본인확인 대조"
     account ||--o{ staff_assignment : "회차 역할"
     event ||--o{ staff_assignment : ""
@@ -133,8 +135,20 @@ erDiagram
     device {
         uuid id PK
         uuid account_id FK
-        bytea device_hash "기기 식별자의 단방향 SHA-256. 기기 연결 해제·회원 탈퇴 때 행을 지운다(docs/security/data-classification.md)"
+        bytea device_ref "기기 가명 HMAC-SHA256(inv-ref-key, 'device|' + deviceId). trust-svc의 deviceRef와 같은 값이다(기기 키 통일). 2026-10-30까지는 단방향 SHA-256 device_hash였다. 원문 deviceId는 두지 않는다. 기기 연결 해제·회원 탈퇴 때 행을 지운다(docs/security/data-classification.md, 추천 적용 2026-10-31, ADR-0171 결정 4)"
         timestamptz bound_at
+    }
+    account_contact_ref {
+        uuid account_id PK
+        text kind PK "PHONE|EMAIL. 기본 키 (account_id, kind)"
+        bytea ref "HMAC-SHA256(inv-ref-key, 'contact|' + 정규화한 값). 휴대폰은 본인확인 번호를 E.164로, 이메일은 로그인 이메일을 소문자·앞뒤 빈칸 제거로 맞춘다. 원문은 이 표에 두지 않는다. 부정 예매 후보 묶음의 연락처 신호(FR-072)에만 쓰고 조사 적재가 BatchGetInvestigationRefs로 읽는다(추천 적용 2026-10-31, ADR-0171)"
+        timestamptz updated_at "번호·이메일이 바뀌면 다시 계산한다. 탈퇴 때 지운다"
+    }
+    identity_conflict_attempt {
+        uuid id PK
+        uuid attempted_account_id "본인확인을 시도한 계정"
+        uuid existing_account_id "그 연계정보로 이미 본인확인한 계정"
+        timestamptz attempted_at "본인확인 409(이미 다른 계정에서 본인확인) 때 남긴다. 1년 [가정] 뒤 지운다. 명의 대여·사들인 계정 후보의 연결 신호이고 사람이 확인한 라벨이 아니다(추천 적용 2026-10-31, ADR-0171)"
     }
     admin_account {
         uuid id PK
@@ -176,8 +190,8 @@ erDiagram
     }
     admin_designation {
         uuid id PK "지정 기록(추천 적용 2026-10-30, docs/security/authz-matrix.md §3.1·§3.7)"
-        uuid admin_account_id FK "commander 계정만. 역할이 commander가 아니게 되면 같은 트랜잭션에서 revoked_at을 채운다"
-        text kind "ACCESS_REVIEWER|PSEUDONYM_HANDLER(접속기록 점검자·가명정보 취급자). 살아 있는 행은 (admin_account_id, kind)마다 하나"
+        uuid admin_account_id FK "commander 계정만. 예외로 FRAUD_INVESTIGATOR는 commander와 cs_lead 계정에 줄 수 있다(추천 적용 2026-10-31, ADR-0171 결정 7). 역할이 그 지정을 받을 수 있는 역할이 아니게 되면 같은 트랜잭션에서 revoked_at을 채운다"
+        text kind "ACCESS_REVIEWER|PSEUDONYM_HANDLER|FRAUD_INVESTIGATOR(접속기록 점검자·가명정보 취급자·부정 거래 조사관). 살아 있는 행은 (admin_account_id, kind)마다 하나. 한 계정에 FRAUD_INVESTIGATOR와 PSEUDONYM_HANDLER가 함께 살아 있지 않게 identity-svc가 지정할 때 막는다(designation-conflict, 조사·연구 두 갈래를 잇지 않는다)"
         text basis "지정 근거(개인정보 보호책임자의 지정 문서 번호 등, SCR-064 ⑤). 개인정보 원문은 넣지 않는다"
         uuid designated_by "지정한 관리 계정"
         timestamptz designated_at
@@ -498,6 +512,7 @@ erDiagram
     purchase_order ||--o{ order_idempotency : "멱등키(주문 생성·결제 시도·결제 접수, 멱등 기록 표, 기술 검토 중간-046)"
     event ||--o{ seat_sale : "부분 UNIQUE(event_id, seat_id), 활성 PENDING·SOLD만"
     event ||--o{ seat_hold : "홀드 원장(릴레이가 비동기 적재, 전체 장애 뒤 다시 만들기의 입력, ADR-0121)"
+    event ||--o{ priority_grant : "우선 구매 권리(추천 적용 2026-10-31, ADR-0171)"
     purchase_order ||--o{ seat_sale : reserves
     account ||--o{ purchase_quota : "per event"
     purchase_order ||--o{ payment_attempt : "결제 시도(활성 1건)"
@@ -555,7 +570,26 @@ erDiagram
         uuid account_id
         bigint fencing_token PK "기본 키 (event_id, seat_id, fencing_token)(ADR-0086)"
         text status "HELD|RELEASED|EXPIRED, HELD는 (event_id, seat_id) 유일 부분 인덱스"
+        text kind "FAN|PRIORITY. PRIORITY는 우선 구매 보류(부정 예매 이의가 인정된 팬 몫으로 좌석을 48시간 [가정] 잡아 둠, docs/features/seat-hold.md §5 '우선 구매 보류', 추천 적용 2026-10-31, ADR-0171). 구매 세션이 없고 7분 만료 인덱스에 넣지 않는다"
+        uuid priority_grant_id "kind PRIORITY일 때 priority_grant.id"
+        timestamptz held_at "좌석을 잡은 시각(SeatEvent HELD의 occurredAt = 홀드 Lua의 Redis TIME). 홀드 원장 적재가 채운다. 부정 예매 사후 조사의 동시 홀드 판정과 리플레이에 쓴다(추천 적용 2026-10-31, ADR-0171 결정 4)"
         timestamptz expires_at
+    }
+    priority_grant {
+        uuid id PK "우선 구매 권리 하나(POL-046 ⑦, 추천 적용 2026-10-31, ADR-0171). 부정 예매 표 취소의 이의가 인정된 계정에 ops-svc가 GrantPriorityPurchase로 만든다. 그 사건에 그 계정의 이용 제한이 있었으면 풀기(LIFT_RESTRICTION)가 끝난(Done) 뒤에 연다. 표를 무상으로 되살리지 않고, 원래 가격·취소 수수료 없이 다시 살 기회를 준다"
+        uuid event_id
+        uuid account_id "원래 결제자"
+        uuid fraud_case_id "되돌림을 정한 사건(ops 논리 DB라 외래키 없음)"
+        uuid cancelled_ticket_id "되돌리는 취소한 표(ticket 논리 DB라 외래키 없음). UNIQUE: 표마다 권리 하나"
+        text grant_kind "SAME_SEAT|SAME_TIER(같은 좌석이 아직 팔리지 않았으면 그 좌석, 팔렸으면 같은 등급의 남은 좌석)"
+        uuid seat_id "잡아 둔 좌석(seat_hold kind PRIORITY)"
+        uuid tier_id
+        int price "원래 표의 가격(원). 이 값으로 주문을 만든다"
+        text status "OFFERED|USED|EXPIRED|WITHDRAWN. USED는 결제 완료 때다. 결제가 실패하면 OFFERED 그대로이고 기한 안에서 다시 시도한다"
+        timestamptz expires_at "연 때(created_at)부터 48시간 [가정]과 입장 시작 가운데 이른 때"
+        uuid active_order_id "진행 중인 주문(결제 전·결제 중). 한 권리에 하나만이고 있으면 새 주문은 409. 결제 실패·만료로 끝나면 비운다"
+        uuid used_order_id "USED일 때 결제를 마친 주문"
+        timestamptz created_at
     }
     purchase_quota {
         uuid account_id PK
@@ -606,7 +640,8 @@ erDiagram
         uuid order_id FK "기본 키는 id. 주문 표를 나누지 않아 부모 ID를 기본 키에 담지 않는다(ADR-0114)"
         uuid ticket_id "(order_id, ticket_id) 진행 중 취소 1건 유일(VOIDED 제외, ADR-0086)"
         uuid event_cancellation_request_id "회차 취소 일괄 환불이면 그 요청, 아니면 NULL(ADR-0086)"
-        text reason "USER|EVENT_CANCELLED|EVENT_POSTPONED|ACCOUNT_WITHDRAWAL|EXCEPTION|MINOR_CONTRACT_CANCEL(공제 없이 전액, POL-038 ⑧)"
+        uuid fraud_case_id "reason FRAUD일 때 그 부정 예매 사건(ops 논리 DB라 외래키 없음, 추천 적용 2026-10-31, ADR-0171)"
+        text reason "USER|EVENT_CANCELLED|EVENT_POSTPONED|ACCOUNT_WITHDRAWAL|EXCEPTION|MINOR_CONTRACT_CANCEL(공제 없이 전액, POL-038 ⑧)|FRAUD(승인된 부정 예매 취소, 운영자 취소. 취소 수수료 공제는 법률 확인 33번이 정할 때까지 하지 않는다, POL-046 ⑤, 추천 적용 2026-10-31, ADR-0171)"
         uuid approval_id "예외 환불 승인 업무(있을 때)"
         int days_before "공연일까지 남은 날"
         bool within_24h "비영업일 제외"
@@ -699,6 +734,8 @@ erDiagram
         text virtual_account_no "결제사가 발급한 가상계좌 번호, 필드 암호화(P1 기준), 입금 확정·만료 때 삭제"
         text virtual_account_bank "가상계좌 은행, 입금 확정·만료 때 삭제"
         text idempotency_key "confirm-{orderId}"
+        text payment_method_ref "결제 수단 연결값(조사용 가명, 약한 값). 승인 응답의 카드 정보에 BIN이 있을 때 payment-svc가 HMAC-SHA256(inv-ref-key, 'pay|' + BIN 6자리 + '|' + 보이는 끝자리 + '|' + 발급사 코드 + '|' + 카드 종류)로 계산해 PaymentEvent에 싣는다. 가린 카드 번호 원문은 두지 않는다(docs/features/payment.md, 추천 적용 2026-10-31, ADR-0171 결정 4)"
+        text card_bin "카드 번호 앞 6자리. payment_method_ref와 함께 있거나 함께 빈다"
         timestamptz authenticated_at "10분 deadline 기준"
         timestamptz created_at
         timestamptz approved_at "승인(가상계좌는 입금 확인) 시각, 정산 기간 판정(ADR-0086)"
@@ -855,6 +892,7 @@ erDiagram
     order_item ||--o| ticket : issues
     ticket ||--o{ device_key : "public keys, revoked_at"
     ticket ||--o{ transfer_offer : "양도 요청"
+    event ||--o{ fraud_transfer_lock : "부정 예매 양도 잠금의 계정 단위 기록(추천 적용 2026-10-31, ADR-0171)"
     ticket ||--o{ scan_event : ""
     scanner_device ||--o{ scan_event : ""
     promoter ||--o{ scanner_device : "배정 파트너"
@@ -874,6 +912,8 @@ erDiagram
         uuid seat_id
         text gate_zone
         text status "ISSUED|ACTIVE|TRANSFER_PENDING|CANCEL_REQUESTED|REFUNDED|FLAGGED|VOIDED(가상계좌 입금 오류). docs/planning/03 §2.5의 Reissued·Transferred는 상태가 아니라 사건이고, ScannedIn·ScannedOut은 이 칸이 아니라 판정 표가 갱신하는 입장 상태다(§4 14)"
+        uuid fraud_lock_case_id "부정 예매 양도 잠금(POL-046 ③). 빈 값이면 잠금 없음. 소명을 요청한 사건 ID(ops 논리 DB라 외래키 없음)이고, 있으면 양도 요청·돌려주기를 409 transfer-locked로 막는다. 입장은 막지 않는다. 잠금은 사건 계정이 그 회차에서 결제한 표 전부에 걸리고(fraud_transfer_lock), 잠금 뒤에 산 표도 발권 때 잠긴다. 풀리는 때는 그 계정에 대해 소명 인정, 사건 CLEARED, 조치 실행 끝(취소된 표 말고 남은 표), 조사관이 계정을 뺌, 입장 시작 가운데 먼저 오는 때다(입장 시작은 ticket-svc가 스스로 푼다, 추천 적용 2026-10-31, ADR-0171 결정 3)"
+        bigint fraud_lock_version "잠금을 바꾼 사건 상태의 판(SetTransferLock.version). 같은 case_id 안에서만 견주고, 그 사건의 저장한 판보다 클 때만 바꾼다. 다른 사건의 잠금이 걸린 표는 판을 견주지 않고 그대로 둔다"
         int version "바꿀 때마다 1 올림. 사람이 화면에서 읽고 나중에 저장하는 흐름(CS·관리 화면)의 본 판 비교용. 한 요청 안의 경합(양도·취소·회수·스캔)은 행 잠금이 맡는다(기술 검토 낮음-071)"
     }
     transfer_offer {
@@ -882,9 +922,17 @@ erDiagram
         uuid from_account_id "보낸 사람(결제자)"
         uuid to_account_id "받는 사람(본인확인 회원)"
         text status "OFFERED|ACCEPTED|REJECTED|WITHDRAWN|EXPIRED|RECLAIMED"
-        text withdraw_reason "SENDER|ACCOUNT_DELETED|DEPOSIT_ERROR|EVENT_CANCELLED|EVENT_POSTPONED. 뒤의 셋은 시스템 철회(기술 검토 중간-044)"
+        text withdraw_reason "SENDER|ACCOUNT_DELETED|DEPOSIT_ERROR|EVENT_CANCELLED|EVENT_POSTPONED|FRAUD_LOCK. 뒤의 넷은 시스템 철회(기술 검토 중간-044). FRAUD_LOCK은 부정 예매 양도 잠금을 걸 때의 철회(추천 적용 2026-10-31, ADR-0171)"
         timestamptz expires_at "48시간과 양도 마감 중 이른 때"
         timestamptz decided_at
+    }
+    fraud_transfer_lock {
+        uuid case_id PK "부정 예매 사건(ops 논리 DB라 외래키 없음)"
+        uuid event_id PK
+        uuid account_id PK "기본 키 (case_id, event_id, account_id). 잠긴 계정. 이 계정이 이 회차에서 결제한 표는 지금 표와 앞으로 발권할 표 모두 잠긴다"
+        bool locked "false면 풀림(행은 지우지 않는다)"
+        bigint version "SetTransferLock.version. 같은 case_id 안에서만 견준다"
+        timestamptz changed_at
     }
     device_key {
         uuid id PK
@@ -1087,11 +1135,11 @@ erDiagram
     appeal {
         uuid id PK
         uuid account_id "소명한 계정. 본인만 본다"
-        text kind "RESTRICTION|RECLAIM(예매 제한·양도 회수)"
-        uuid target_id "예매 제한 ID(ops DB booking_restriction.id) 또는 양도 회수 승인 업무 ID. 다른 논리 DB라 외래키 없음"
+        text kind "RESTRICTION|RECLAIM|FRAUD_CASE(예매 제한·양도 회수·부정 예매 소명. FRAUD_CASE는 추천 적용 2026-10-31, ADR-0171)"
+        uuid target_id "예매 제한 ID(ops DB booking_restriction.id), 양도 회수 승인 업무 ID, 또는 부정 예매 사건 ID(ops DB fraud_case.id). 다른 논리 DB라 외래키 없음"
         text body "2,000자까지. 보존 기한 뒤 파기"
         text status "SUBMITTED|DECIDED|INVALID(대상 아님·기한 경과로 닫힘)"
-        text result "LIFTED|KEPT|NOT_RECLAIMED|RECLAIMED. ops-svc가 support 내부 API로 적는다"
+        text result "LIFTED|KEPT|NOT_RECLAIMED|RECLAIMED|ACCEPTED|REJECTED. 뒤의 둘은 부정 예매 소명의 인정·불인정(추천 적용 2026-10-31, ADR-0171). ops-svc가 support 내부 API로 적는다"
         uuid case_id "CS 처리함 건(ops 논리 DB라 외래키 없음)"
         timestamptz submitted_at
         timestamptz decided_at
@@ -1332,6 +1380,17 @@ erDiagram
     event ||--o{ pseudonymization_log : "가명정보 처리 기록"
     event ||--o{ demand_forecast : "수요 예측(ADR-0078)"
     approval_request ||--o{ approval_vote : "승인(ADR-0086)"
+    event ||--o{ fraud_snapshot : "기록 고정(추천 적용 2026-10-31, ADR-0171)"
+    event ||--o{ fraud_cluster_run : "후보 계산 실행"
+    fraud_cluster_run ||--o{ fraud_cluster : "그 실행의 묶음"
+    fraud_cluster ||--|{ fraud_cluster_member : ""
+    fraud_cluster ||--o| fraud_case : "사건(묶음마다 하나)"
+    fraud_case ||--o{ fraud_case_event : "사건 기록"
+    fraud_case |o--o{ approval_request : "FRAUD_ACTION(target_ref)"
+    event ||--o{ external_post : "외부 게시물"
+    fraud_case ||--o{ evidence_bundle : "증거 묶음"
+    evidence_bundle ||--o{ evidence_custody_log : "관리 연속성"
+    admin_account ||--o{ fraud_case : "담당 조사관"
     command_event ||--o{ command_approval : "명령 승인(ADR-0086)"
     takedown_action {
         uuid id PK
@@ -1467,8 +1526,9 @@ erDiagram
     }
     approval_request {
         uuid id PK
-        text kind "SYSTEM_FAULT_REFUND|DISCRETIONARY_WAIVER|TRANSFER_RECLAIM|BOOKING_RESTRICTION|PAYOUT_BATCH|SETTLEMENT_ADJUSTMENT|COMMANDER_ROLE_CHANGE|CONTRACT_TERMS_CHANGE|MINOR_CONTRACT_CANCEL|SALE_SUSPENSION|SALE_RESUMPTION. 뒤의 둘은 공연 판매 중지·재개(대상 공연 ID, ADR-0123)"
+        text kind "SYSTEM_FAULT_REFUND|DISCRETIONARY_WAIVER|TRANSFER_RECLAIM|BOOKING_RESTRICTION|PAYOUT_BATCH|SETTLEMENT_ADJUSTMENT|COMMANDER_ROLE_CHANGE|CONTRACT_TERMS_CHANGE|MINOR_CONTRACT_CANCEL|SALE_SUSPENSION|SALE_RESUMPTION|FRAUD_ACTION. FRAUD_ACTION은 부정 예매 조치이고 target_ref는 fraud_case ID, 만료(due_at)는 표 취소가 취소 마감 시각, 이용 제한 걸기·풀기가 POL-038 공통의 요청 뒤 5영업일 [가정]이다(POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171). 뒤의 둘은 공연 판매 중지·재개(대상 공연 ID, ADR-0123)"
         text target_ref
+        text fraud_action "FRAUD_ACTION만. CANCEL_TICKETS|RESTRICT|LIFT_RESTRICTION(표 취소와 환급, 이용 제한 걸기, 풀기). 그 밖의 종류는 NULL(openapi ApprovalRequest.fraudAction, 추천 적용 2026-10-31, ADR-0171)"
         text requested_role "COMMANDER_ROLE_CHANGE만. 승인되면 대상 관리 계정(target_ref)에 줄 역할(commander, 또는 commander에서 내릴 때의 viewer|operator|cs_agent|cs_lead). 그 밖의 종류는 NULL(openapi ApprovalRequest.requestedRole, open-items 73번, 추천 적용 2026-10-30)"
         bigint amount "원 단위. 지급 묶음 합계를 담으므로 bigint(추천 적용 2026-10-28, 기술 검토 높음-20)"
         text reason_code
@@ -1482,7 +1542,7 @@ erDiagram
     }
     cs_case {
         uuid id PK
-        text kind "UNKNOWN_PAYMENT|REFUND_FAILED|FLAGGED|REFUND_ACCOUNT_PENDING|COMPENSATION_PENDING|ABUSE_FLAG|DISPUTE|JUDGEMENT_PENDING|STATEMENT_DISPUTE|SELLER_KYC_REQUIRED|PAYOUT_ERROR|PAYOUT_FAILED|PAYOUT_DELAYED|PORTONE_PAYOUT_EXECUTION|SCANNER_UNREPORTED|KOPIS_REPORT_FAILED|VERIFICATION_APPEAL|APPROVAL_EXECUTION_FAILED|RETURN_DELAYED|MINOR_CONTRACT_CANCEL|INQUIRY|CONTENT_REPORT|RIGHTS_REQUEST|TICKET_NOT_ISSUED|PORTONE_LEDGER_MISMATCH|PG_BALANCE_MISMATCH|APPEAL. APPEAL은 소명(예매 제한·양도 회수 대상 팬의 사정 설명. core-svc support 모듈이 받아 건을 요청한다, 추천 적용 2026-10-30). INQUIRY는 고객 문의, CONTENT_REPORT는 게시물 신고, RIGHTS_REQUEST는 권리 침해 삭제 요청(ADR-0066). TICKET_NOT_ISSUED는 결제 뒤 미발권(발권 기한 초과 또는 다시 보내도 같은 오류, ADR-0106). PORTONE_LEDGER_MISMATCH는 포트원 원장 불일치(지급과 이어지지 않거나 다른 출금, 콘솔에서 바뀐 파트너 정산 계좌, 이체 원장과 다른 잔액 입력, ADR-0108). PG_BALANCE_MISMATCH는 결제사·상점별 지급대행 잔액 대사 차이(docs/features/settlement.md §5.5, 기술 검토 중간-043)"
+        text kind "UNKNOWN_PAYMENT|REFUND_FAILED|FLAGGED|REFUND_ACCOUNT_PENDING|COMPENSATION_PENDING|ABUSE_FLAG|DISPUTE|JUDGEMENT_PENDING|STATEMENT_DISPUTE|SELLER_KYC_REQUIRED|PAYOUT_ERROR|PAYOUT_FAILED|PAYOUT_DELAYED|PORTONE_PAYOUT_EXECUTION|SCANNER_UNREPORTED|KOPIS_REPORT_FAILED|VERIFICATION_APPEAL|APPROVAL_EXECUTION_FAILED|RETURN_DELAYED|MINOR_CONTRACT_CANCEL|INQUIRY|CONTENT_REPORT|RIGHTS_REQUEST|TICKET_NOT_ISSUED|PORTONE_LEDGER_MISMATCH|PG_BALANCE_MISMATCH|APPEAL|FRAUD_OBJECTION_COMPENSATION. FRAUD_OBJECTION_COMPENSATION은 부정 예매 이의 보상(이의가 인정된 표 취소에서 같은 좌석도 같은 등급 남은 좌석도 없어 우선 구매를 줄 수 없을 때 ops-svc가 만든다. 처리는 cs_lead, 3영업일 [가정], POL-046 ⑦, 추천 적용 2026-10-31, ADR-0171). APPEAL은 소명(예매 제한·양도 회수 대상 팬의 사정 설명. core-svc support 모듈이 받아 건을 요청한다, 추천 적용 2026-10-30). INQUIRY는 고객 문의, CONTENT_REPORT는 게시물 신고, RIGHTS_REQUEST는 권리 침해 삭제 요청(ADR-0066). TICKET_NOT_ISSUED는 결제 뒤 미발권(발권 기한 초과 또는 다시 보내도 같은 오류, ADR-0106). PORTONE_LEDGER_MISMATCH는 포트원 원장 불일치(지급과 이어지지 않거나 다른 출금, 콘솔에서 바뀐 파트너 정산 계좌, 이체 원장과 다른 잔액 입력, ADR-0108). PG_BALANCE_MISMATCH는 결제사·상점별 지급대행 잔액 대사 차이(docs/features/settlement.md §5.5, 기술 검토 중간-043)"
         text target_ref "문의 건은 inquiry ID, 신고 건은 신고된 후기 ID, 소명 건은 appeal ID(core 논리 DB), 포트원 원장 불일치는 포트원 이체 ID·파트너 ID·지급 묶음 ID"
         timestamptz progress_due_at "분쟁 진행 경과 3영업일, 미보고 스캐너 파트너 확인 요청 1영업일"
         timestamptz result_due_at "분쟁 결과 10영업일, 환급 3영업일, 추가 검증 이의 결과 10영업일, 현장 건 3영업일, 배상 대기 10영업일(docs/design/d5 §7.6, 수치 [가정], ADR-0062). 문의 답변 3영업일, 게시물 신고 결과 3영업일, 권리 침해 삭제 요청과 불법 촬영물 사유 신고의 판단 1영업일(수치 [가정], ADR-0066)"
@@ -1494,8 +1554,9 @@ erDiagram
     booking_restriction {
         uuid id PK
         uuid account_id
-        text reason_code
-        uuid confirmed_by "cs_lead"
+        text reason_code "사유 코드. FRAUD는 부정 예매 이용 제한이고 걸기·풀기가 모두 POL-038 ⑪의 2인 승인이다(POL-046 ⑥, 추천 적용 2026-10-31, ADR-0171)"
+        uuid fraud_case_id "reason_code FRAUD일 때 그 사건"
+        uuid confirmed_by "cs_lead. FRAUD면 승인한 commander"
         timestamptz starts_at
         timestamptz ends_at
         timestamptz appeal_due_at "1일 이상"
@@ -1592,6 +1653,130 @@ erDiagram
         text approver_role
         uuid requester_ref "가명 참조"
         timestamptz approved_at
+    }
+    fraud_snapshot {
+        uuid event_id PK "기록 고정(추천 적용 2026-10-31, ADR-0171 결정 6). 온세일 윈도우가 끝나면(T+60분) ops-svc 조사 모듈이 그 회차 조사 저장소 inv의 행을 정해진 순서로 읽어 해시를 남긴다"
+        int version PK "기본 키 (event_id, version). 판매 종료까지 다시 고정할 때마다 오른다(새 구매·양도를 더한 판). 지난 판은 지우지 않는다"
+        timestamptz frozen_at
+        bytea inv_hash "판 해시 SHA-256(판 문자열 ‖ 회차 ‖ 판 ‖ 직전 판 해시 ‖ 표 넷의 해시). 계산법은 docs/features/forensic-replay.md §6.7.2"
+        jsonb table_hashes "표마다의 해시(inv_request·inv_step·inv_behavior·inv_link → 16진수 SHA-256). 다시 계산이 어긋나면 어느 표인지 바로 안다"
+        bytea prev_hash "직전 판의 inv_hash. 판 1은 NULL"
+        jsonb row_counts "표마다 행 수"
+        timestamptz range_from "이 판에 든 행의 적재 시각(ingested_at) 하한(초과). 판 1은 NULL, 판 N은 직전 판의 frozen_at"
+        bool late "'늦은 적재' 표시. 조사 적재가 따라오지 못해 30분 [가정] 기다린 뒤 고정했으면 true(늦게 들어온 행은 다음 판)"
+    }
+    fraud_cluster {
+        uuid id PK "부정 예매 후보 묶음(FR-072). 후보는 조치가 아니다"
+        uuid event_id
+        int generation "후보 계산 판. 첫 계산이 1"
+        text rule_version "후보 규칙과 점수의 판(docs/features/forensic-replay.md)"
+        text score_band "HIGH|MEDIUM|LOW. 점수 원값은 두지 않는다"
+        int account_count
+        int purchase_count "묶음 계정이 산 표 수(취소 제외)"
+        int limit_per_person "그 회차 1인 매수 한도(계산 때 복사)"
+        jsonb shared_attributes "공유 속성 종류 목록(openapi FraudLinkKind)"
+        jsonb signals "근거 신호 목록(openapi FraudSignal)"
+        int snapshot_version "계산에 쓴 fraud_snapshot 판(fraud_cluster_run과 같다)"
+        timestamptz created_at
+    }
+    fraud_cluster_run {
+        uuid event_id PK
+        int generation PK "기본 키 (event_id, generation). 후보 계산 한 번"
+        int snapshot_version "입력: 기록 고정 판"
+        text rule_version "입력: 후보 규칙과 점수의 판"
+        bytea result_fingerprint "결과 지문 SHA-256: 묶음을 가장 작은 계정 ID 순으로, 묶음 안 계정과 신호를 정렬해 적은 RFC 8785 JSON의 해시. 같은 입력으로 다시 돌리면 같아야 한다(FX-T11, docs/features/forensic-replay.md §6.7.3)"
+        int cluster_count "후보로 올린 묶음 수"
+        text status "RUNNING|DONE|FAILED"
+        timestamptz started_at
+        timestamptz finished_at
+    }
+    fraud_cluster_member {
+        uuid cluster_id PK
+        uuid account_id PK "기본 키 (cluster_id, account_id). identity 논리 DB라 외래키 없음"
+        jsonb signals "그 계정의 근거 신호"
+        int ticket_count
+        text added_by "SYSTEM|INVESTIGATOR"
+        timestamptz removed_at "조사관이 묶음에서 뺀 시각. 행은 지우지 않는다. 이유는 fraud_case_event"
+        jsonb appeal_reason_categories "이 계정에 보낸 소명 요청의 사유 범주"
+        timestamptz appeal_requested_at
+        timestamptz appeal_due_at
+        text appeal_result "NOT_REQUESTED|PENDING|SUBMITTED|ACCEPTED|REJECTED|EXPIRED. 계정별 소명 결과. PENDING 요청했고 제출 전, SUBMITTED 제출했고 판단 전(판단 전까지 조치 대상이 아니다), EXPIRED 기한까지 제출하지 않음(그 하나의 뜻). 사건의 appealOutcome은 이 칸으로 센다"
+        timestamptz action_notified_at "조치 결과를 이 계정에 알린 시각. 이의 창은 이때부터 30일 [가정]이다"
+        text objection_result "NONE|SUBMITTED|ACCEPTED|REJECTED. 계정별 이의(추천 적용 2026-10-31, ADR-0171). openapi `objectionStatus`·core.proto `objection_state`와 같은 이름이다. 사건이 OBJECTED인 것은 SUBMITTED인 계정이 하나라도 있다는 뜻이다"
+        timestamptz objection_received_at
+        text objection_decision_reason
+        uuid objection_decided_by
+        timestamptz objection_decided_at
+        uuid objection_appeal_id "이의로 접수된 소명(core DB appeal.id)"
+        text appeal_decision_reason "판단 이유(조사관이 적음)"
+        uuid appeal_decided_by
+        timestamptz appeal_decided_at
+        uuid appeal_id "팬이 낸 소명(core DB appeal.id, 다른 논리 DB라 외래키 없음)"
+    }
+    fraud_case {
+        uuid id PK "부정 예매 사건(FR-073, POL-046)"
+        uuid event_id
+        uuid cluster_id "UNIQUE. 묶음마다 사건 하나"
+        text status "INVESTIGATING|APPEAL_PENDING|DECISION_PENDING|ACTIONED|CLEARED|OBJECTED|REVERSED(상태 모형은 docs/features/forensic-replay.md)"
+        text reason_category "MACRO_BOT|QUEUE_BYPASS|CAPTCHA_BYPASS|ACCOUNT_LENDING|LIMIT_EVASION(POL-046 ①)"
+        uuid assignee_id "담당 조사관(FRAUD_INVESTIGATOR 지정 계정)"
+        timestamptz appeal_due_at "소명 기한(3일 [가정], 24시간 [가정] 아래로 내리지 않음)"
+        timestamptz cancel_deadline_at "취소 마감 = 판매 종료 − 재판매 준비 2시간 [가정](POL-046 ⑤). 만들 때 계산하고, 회차 시각이 바뀌면 다시 계산한다"
+        uuid approval_id "진행 중이거나 마지막 FRAUD_ACTION 승인 업무"
+        text investigator_opinion "승인자가 사건 요약에서 읽는 조사관 의견"
+        text outcome_label "BOT|HUMAN|NONE. 닫을 때 정한 정답 라벨(ADR-0171 결정 6). 연구 갈래에는 회차 집계만 넘긴다"
+        bigint version "판. PATCH의 If-Match와 SetTransferLock.version"
+        timestamptz created_at
+        timestamptz closed_at
+    }
+    fraud_case_event {
+        uuid case_id PK
+        int seq PK "기본 키 (case_id, seq). 고치거나 지우지 않는다"
+        text kind "CREATED|MEMBER_ADDED|MEMBER_REMOVED|NOTE|APPEAL_REQUESTED|LOCK_APPLIED|LOCK_RELEASED|APPEAL_RECEIVED|APPEAL_DECIDED|ACTION_REQUESTED|ACTION_APPROVED|ACTION_REJECTED|ACTION_EXPIRED|ACTIONED|OBJECTED|OBJECTION_DECIDED|PRIORITY_GRANTED|COMPENSATION_CASE_CREATED|REVERSED|CLEARED|EVIDENCE_CREATED. OBJECTED는 계정 하나의 이의 접수, OBJECTION_DECIDED는 계정 하나의 이의 결정(인정·기각과 이유), PRIORITY_GRANTED는 취소한 표 하나의 우선 구매 부여(권리 ID), COMPENSATION_CASE_CREATED는 보상 건 생성(CS 처리함 건 ID)이다(추천 적용 2026-10-31, ADR-0171)"
+        uuid actor_id "관리 계정. 시스템이면 NULL"
+        jsonb detail "대상 계정·티켓, 이유. 연락처·IP 원문은 넣지 않는다"
+        timestamptz occurred_at
+    }
+    external_post {
+        uuid id PK "외부 되팔이 게시물 수집본의 메타데이터(FR-072). 자동 수집은 하지 않는다"
+        uuid event_id
+        text url
+        text site "주소의 호스트"
+        timestamptz captured_at
+        text source "REPORT|MANUAL"
+        uuid report_case_id "REPORT일 때 CS 처리함 건"
+        text claimed_seats "게시물이 말하는 좌석(적힌 그대로)"
+        text capture_key "증거 버킷의 객체 키(원본은 S3, 격리 버킷에서 악성 코드 검사 뒤 옮김)"
+        bytea capture_sha256
+        text scan_status "PENDING|CLEAN|THREAT"
+        jsonb matched_ticket_ids "좌석 대조로 맞은 티켓"
+        uuid registered_by
+        timestamptz created_at
+    }
+    evidence_bundle {
+        uuid id PK "증거 묶음(FR-074). 조사 저장소와 따로 두고 분쟁·수사가 끝날 때까지 보존한다"
+        uuid case_id
+        text status "BUILDING|SEALED|DISPOSED"
+        bytea snapshot_hash "fraud_snapshot.inv_hash"
+        bytea manifest_sha256 "목록 파일(파일 이름·SHA-256·크기)의 해시. SEALED부터"
+        jsonb queries "쓴 질의와 그 판"
+        text s3_prefix "증거 버킷(S3 Object Lock 준수 모드 [가정, FRN-040])"
+        text hold_reason "DISPUTE|INVESTIGATION|OBJECTION"
+        timestamptz hold_ended_at "분쟁·수사가 끝났다고 기록한 시각. 정비 잡이 그 뒤 파기하고 DISPOSED로 바꾼다"
+        uuid created_by
+        timestamptz created_at
+    }
+    evidence_custody_log {
+        uuid bundle_id PK
+        int seq PK "기본 키 (bundle_id, seq). 고치거나 지우지 않는다"
+        text action "CREATED|SEALED|VIEWED|EXPORTED|HOLD_CHANGED|HOLD_ENDED|DISPOSED. HOLD_CHANGED는 보존 이유 바꾸기(이의 기간 → 분쟁·수사, 새 이유는 reason에), HOLD_ENDED는 보존 끝 기록(hold_ended_at을 채운 일)이다"
+        uuid actor_id
+        text reason "내보내기는 필수"
+        text export_kind "AUTHORITY|PROMOTER(EXPORTED만)"
+        uuid data_request_id "AUTHORITY일 때 접수된 기관 요청(data_request)"
+        bytea prev_hash "앞 행의 row_hash"
+        bytea row_hash "SHA-256(prev_hash ‖ 이 행). 끊기거나 바뀌면 검증에서 드러난다(관리 연속성)"
+        timestamptz occurred_at
     }
     command_actor {
         uuid actor_ref PK
@@ -1695,6 +1880,24 @@ erDiagram
 - **쓰기와 전파**: 상품을 만들거나 고치거나 게시 상태를 바꿀 때 상품 행, 처음 만들 때의 한정 수량 재고 행(`product_stock`), Outbox 행을 한 트랜잭션으로 쓴다. 수정은 `version`으로 낙관적 잠금을 걸고, 속성을 통째로 다시 검사해 쓴다. Outbox 사건으로 웹 앱 서버가 `product:{id}` 태그를 무효화해 상품 화면을 다시 그린다(공연 정보의 태그 무효화와 같은 길). 사건이 늦어도 ISR 300초(docs/frontend.md §3)가 안전망이다.
 - **주문과 정산**: 주문 항목(`merch_order_item`)은 `product.id`를 외래 키로 가리키고, 주문 때 가격·수수료율·고른 옵션을 복사한다. 상품 정산은 다른 논리 DB를 읽지 않고 이 복사한 칸으로 계산한다(docs/features/settlement.md §4.5).
 
+**부정 예매 사후 조사의 표(추천 적용 2026-10-31, ADR-0171 결정 2·4·5)**: 판매가 끝난 뒤 실제 기록으로 부정 예매(약관이 정하는 매크로·대기열 우회·보안문자 우회·명의 대여·매수 제한 회피, POL-046)를 묶어 찾고 사람이 소명·2인 승인을 거쳐 조치하는 데 쓰는 표다. 조사 갈래(실명 계정·주문·결제·접속)와 연구 갈래(분석 저장소의 회차 가명 사건)를 잇는 키, 한 화면에서 같이 보는 동선, 서로 옮기는 파일을 두지 않는다(결정 2).
+
+- **ops DB(PostgreSQL)의 조사 모듈 표**: `fraud_snapshot`·`fraud_cluster`·`fraud_cluster_member`·`fraud_case`·`fraud_case_event`·`external_post`·`evidence_bundle`·`evidence_custody_log`(칸은 위 ⑦ 그림). 사건 상태 모형·후보 규칙·해시 계산법은 docs/features/forensic-replay.md가, 조사 API는 openapi `/v1/ops/fraud-*`·`/v1/ops/external-posts`·`/v1/ops/evidence-bundles`가 정본이다. 외부 게시물 캡처와 증거 묶음 파일은 S3 증거 버킷에 둔다(버킷 설정은 docs/security/secrets-and-keys.md·data-classification.md에서 정한다, FRN-040).
+- **다른 서비스 DB에 더한 칸**: identity `device.device_ref`(기기 키 통일)·`account_contact_ref`·`identity_conflict_attempt`, ticket `ticket.fraud_lock_case_id`·`fraud_lock_version`·`fraud_transfer_lock`, purchase `seat_hold.held_at`·`order_cancellation.reason` FRAUD, payment `payment.payment_method_ref`·`card_bin`, ops `admin_designation.kind` FRAUD_INVESTIGATOR·`approval_request.kind` FRAUD_ACTION·`booking_restriction.reason_code` FRAUD, core `appeal.kind` FRAUD_CASE.
+- **조사 저장소(ClickHouse DB `inv`)**: 분석 저장소(`bronze`·`silver`·`gold`)·관제 실시간 표(`rt`)·법정 접속기록 DB와 따로 둔 데이터베이스다. 적재는 `inv-ingest`(docs/streaming.md §6.4)만 한다. 모든 표는 회차로 나누고(`PARTITION BY event_id`), 행마다 `retain_until`(공연 종료일 + 30일 [가정], 법률 확인 36번)을 싣고 `TTL retain_until DELETE`로 지운다. 판매일과 공연일이 멀어도 판매 때 행동과 공연 날 양도·입장을 잇게 하려는 기간이다(결정 5). 공연 날짜가 바뀌면 정비 잡이 그 파티션의 `retain_until`을 고친다. 한 번에 남는 파티션은 판매 중이거나 종료 30일 안인 회차뿐이라 수백 개 [추정]다.
+
+| 표 | 한 행 | 칸(중복을 지우는 정렬 키는 굵게) |
+| --- | --- | --- |
+| `inv_request` | 조사 경로를 지난 요청 하나(asyncapi `InvestigationRequest`) | `ts`, `ingested_at`, **`request_id`**, `event_id`, `journey_id`(요청에 `jny`가 있을 때만), `gateway`, `route_kind`, `status`, `account_id`, `pid`, `ip`(원문, `IPv6` 형에 IPv4는 매핑 주소로), `asn`, `net_class`(HOSTING·PROXY·OTHER, ASN 분류표로 적재 때 채움), `ja4`, `edge_bot_labels`(`Array(String)`), `device_ref`(요청에 기기 정보가 없어 적재 때는 비고 읽을 때 `inv_link`로 잇는다), `retain_until` |
+| `inv_step` | 여정의 단계 사건 하나 | `ts`, `ingested_at`, `event_id`, `journey_id`, `step`(QUEUE_ENTER·ADMIT·HOLD_TRY·HOLD_END·PAY_TRY·ORDER·SALE·TRANSFER·ENTRY_SCAN·CANCEL), **`source_key`**(원천의 `eventKey`와 단계), `pid`, `account_id`, `queue_entry_id`, `purchase_session_id`, `order_id`, `ticket_id`, `seat_ids`(`Array(String)`), `held_at`, `result`(원천의 결과·종류 코드), `verify_route`(QUEUE_ENTER만), `payment_method_ref`·`card_bin`(PAY_TRY만), `retain_until` |
+| `inv_behavior` | 화면별 행동 요약 하나(asyncapi `BehaviorSignal`) | `ts`, `ingested_at`, `event_id`, `journey_id`, **`event_key`**, `pid`, `screen`(LOBBY·EVENT_DETAIL·SEAT·PAYMENT), `device_ref`, `net_class`, `asn`, 요약 칸(openapi `BehaviorSummary`와 같은 이름, 원시 좌표 없음), `retain_until` |
+| `inv_link` | 여정·사람·계정과 연결 값 하나의 짝 | `event_id`, **`kind`**(PID·ACCOUNT·DEVICE·CONTACT·PAYMENT_METHOD·IDENTITY_CONFLICT)·**`value`**(가명이나 ID), **`account_id`**·**`pid`**·**`journey_id`**(정렬 키에 넣어, 다른 계정이 같은 기기 가명을 써도 행이 합쳐지지 않는다. 모르는 칸은 빈 값으로 둔다, 추천 적용 2026-10-31, ADR-0171), `source`(원천 토픽이나 `identity`), `first_seen_at`·`last_seen_at`, `ingested_at`, `retain_until` |
+
+- 표 엔진은 `ReplicatedReplacingMergeTree`이고 정렬 키는 `(event_id, 굵은 칸)`이다. 적어도 한 번 전달로 다시 들어온 행을 키로 지운다.
+- **적재 시각과 고정 해시(추천 적용 2026-10-31, ADR-0171)**: 행마다 `ingested_at`(`inv-ingest`가 그 행을 넣은 시각, `DateTime64(3)`)을 둔다. `ts`는 사건 시각이라, 고정 뒤에 늦게 들어온 옛 시각의 행을 `ts`로 거르면 지난 판의 해시가 바뀐다. 그래서 판의 범위는 적재 시각으로 정한다. 판 1은 `ingested_at` ≤ 고정 시각인 행, 판 N은 직전 판 고정 시각 < `ingested_at` ≤ 이번 고정 시각인 행이다(`fraud_snapshot.range_from`). 같은 키의 중복은 적재 시각이 가장 이른 행 하나만 그 키의 행으로 본다. 표 엔진의 판 칸은 적재 시각을 거꾸로 센 값(`ingest_rank` = UInt64 최댓값 − 적재 시각 밀리초)이라 합칠 때도 가장 이른 행이 남고, 해시는 합쳐지기 전에도 같은 답을 내도록 키마다 `argMin(…, ingested_at)`으로 읽는다. 그래서 고정 뒤에 다시 들어온 중복 행이나 늦은 행은 지난 판의 해시를 바꾸지 않고, 늦은 새 행은 다음 판에 들어간다. 해시 계산법(RFC 8785 직렬화, 판 사슬)은 docs/features/forensic-replay.md §6.7.2가 정본이다.
+- **DB 사용자(추천 적용 2026-10-31)**: `inv_ingest`(적재 작업자, `inv` 표에 `INSERT`만), `inv_reader`(ops-svc 조사 모듈, `inv`에 `SELECT`만), 마이그레이션 역할(표 만들기·바꾸기·TTL. 보존 기간을 늘리는 변경은 법률 확인 36번의 결과로만 한다). 분석 사용자(`bronze_writer`·`an_forensic_reader` 등)와 `rt_writer`·`trust_raw_writer`·접속기록 사용자는 `inv`에 아무 권한이 없고, `inv_ingest`·`inv_reader`도 다른 데이터베이스에 권한이 없다. ops-svc는 조사 모듈(`inv_reader`)과 연구 갈래 내보내기(`an_forensic_reader`)의 접속 정보를 모듈마다 따로 받고(Secrets Manager 항목 둘), 한 요청에서 두 연결을 함께 쓰지 않는다. 같은 사람이 두 지정을 함께 갖지 않는 규칙(`admin_designation`)과 함께 두 갈래를 나눈다. 읽기는 모두 관리 계정 접속기록(2년)과 대량 조회 점검(FR-064)에 남는다(docs/observability.md §7).
+- **원문 IP의 자리**: 원문 IP는 법정 접속기록 DB(수사·신고기관 대응 목적, 3개월)와 `inv_request`(부정 예매 조사 목적, 공연 종료 + 30일 [가정]) 두 곳에만 있다. 둘 사이에 복사하지 않고 같은 요청은 `request_id`로 대조만 한다. ADR-0053 결정 1의 '원문 IP는 법정 접속기록에만'을 ADR-0171 결정 1이 대신한다.
+
 ## 3. Redis 키 설계 (원문 §6 'Redis 구성')
 
 | 키 (예시) | 자료구조 | 용도 | 비고 |
@@ -1723,6 +1926,7 @@ erDiagram
 | `q:{event:E}:arr_slots` | Hash | 진입 Degraded의 도착 시각 칸(100ms [가정])마다 미리 뗀 번호 구간: `next`(아직 떼지 않은 첫 칸), 칸마다 `{k}:base`·`{k}:size`·`{k}:used`, `closed_upto`(이 칸까지 닫음) | 쿠키를 확인한 진입 Lua가 같은 회차 슬롯에서 칸 k까지 아직 떼지 않은 칸을 차례로 떼고(카운터를 칸 크기만큼 전진), 칸 k의 `used`를 1 올려 구간 안 번호를 준다. 구간이 찼거나 칸이 닫혔으면 카운터 끝의 `INCR`로 준다. 리더가 1초마다 칸 끝 + 10초 [가정]가 지난 칸을 닫고, 쓰지 않은 번호를 빠진 번호 비트맵에 켠다. Degraded가 끝나면 더 떼지 않는다. 수명은 `q:dup`과 같다(추천 적용 2026-10-28, 기술 검토 중간-031, docs/features/queue-admission.md §9) |
 | `q:{event:E}:verify` | Hash | 추가 검증으로 격리한 기록 | 필드는 대기표(로비 진입자는 참가 토큰)의 해시이고, 값은 `VERIFYING`·`PASSED`·`BLOCKED`와 시각, 격리 때 이용자에게 보인 사유 범주(trust.proto `ReasonCategory`. 실시간 판정은 `ScoreRiskResponse.reason`, 재평가 격리는 패턴에서 정한 값)다(사유 범주는 추천 적용 2026-10-30). 격리할 때 쓰고, 통과하거나 이의가 인정되면 `PASSED`로, 기각되면 `BLOCKED`로 바꾼다. 기각 값은 대기 참여의 빠진 사유(asyncapi `removeReason` `BLOCKED`)·검증 경로(`verifyRoute`)·queue.proto와 같은 이름으로 맞췄다(이전 이름 `REJECTED`, 추천 적용 2026-10-30, docs/features/bot-defense.md §12). `VERIFYING`의 시각은 추가 검증을 시작한 때라, 본인확인 재통과 확인(identity.proto `CheckReverification`의 `not_before`)에 쓴다. 복귀한 대기표가 대기를 취소하거나 1인 1순번을 어기면 지운다. 입장 확정은 빠진 번호라도 `PASSED`면 받는다. 수명은 `q:dup`과 같다(추천 적용 2026-10-14, ADR-0062) |
 | `q:appeal:{pid}:E` | Hash | 봇 판정 이의 제기의 임시 보관: 이의 ID(queue-svc가 접수 때 만드는 UUID, `CaseRequested.sourceId`), 계정 ID, 대기표(로비 진입자는 참가 토큰)의 해시, 격리 때 이용자에게 보인 사유 범주(trust.proto `ReasonCategory` 이름, `CaseRequested.category`), 이의 글(NFC 정규화 뒤 0~1,000자, 비우면 설명 요구), 처리함 건 요청의 `eventKey`, 접수 시각, 결과를 반영한 건 ID·판 번호. queue.proto 두 호출은 이의 ID만 받으므로 이의 ID로 찾는 색인 `q:appealid:{appealId}`(문자열, 값 = 회차 ID와 pid, 같은 수명)를 같은 처리에서 함께 쓴다(추천 적용 2026-10-30) | queue-svc는 DB가 없어 이의 글을 여기에 두고 `support.cases-requested`에 `VERIFICATION_APPEAL` 건 요청을 보낸 뒤 202로 답한다. 보내기에 실패하면 503과 `Retry-After`다. ops-svc가 건을 만든 뒤 queue-svc 내부 호출로 내용을 읽어 ops DB `verification_case`로 옮긴다. 한 대기 참여에 한 번이라 `HSETNX`로 처음 것만 둔다. 수명은 그 회차 판매 종료 + 7일 [가정]이다. 사람 식별값을 기준으로 샤드 전체에 흩는다(`q:dup`과 같은 규칙). ops-svc가 옮기기 전에 키를 잃으면 건만 남고 이의 글은 없어진다(남는 한계). 건 종류는 asyncapi `CaseRequested.kind`의 `VERIFICATION_APPEAL`, 내용 읽기·결과 반영은 queue.proto `VerificationAppealService`다(추천 적용 2026-10-30, docs/features/bot-defense.md §12) |
+| `q:prio:{account}:E` | Hash | 우선 구매 권리의 대기열 사본: 권리 ID, 만료 시각, 상태(OFFERED·WITHDRAWN. queue.proto `PriorityGrantState`와 같다. WITHDRAWN은 ops-svc가 만료 전에 거둔 권리다. 결제를 마친 권리(priority_grant USED)는 사본이 OFFERED여도 purchase-svc가 그 권리의 홀드·주문을 409로 막는다), 판 번호 | 대기열 클러스터. ops-svc의 `SetPriorityGrant`(queue.proto)를 받아 판 번호가 클 때만 쓴다. 입장 확정이 `priorityGrantId`로 오면 이 사본을 읽어, 그 계정의 OFFERED 권리이고 만료 전이면 대기 번호 없이 새 여정 ID(`jny`)와 입장 토큰(클레임 `prio`)을 준다. 입장 자리 수에는 세지 않는다. 결제가 실패하면 같은 권리로 다시 입장할 수 있고, 한 번만 사게 하는 것은 purchase-svc의 `priority_grant.status`가 지킨다. 수명은 권리 만료와 같다(추천 적용 2026-10-31, ADR-0171) |
 | `q:rst:{account}` | Hash | 예매 제한의 대기열 사본: 상태(ACTIVE·LIFTED), 끝 시각(없으면 비움), 제한 ID, 판 번호 | 원본은 ops DB `booking_restriction`이다. ops-svc의 `SetBookingRestriction`을 받은 queue-svc가 판 번호가 지금 값보다 클 때만 쓴다. 입장 확정이 Lua 전에 따로 읽어, ACTIVE이고 끝 시각 전이면 403 `booking-restricted`로 거절한다. 키가 없으면 제한이 없는 것으로 본다. 계정 단위라 회차 태그를 붙이지 않고 샤드 전체에 흩는다(`q:dup`과 같은 규칙). 수명은 ACTIVE면 끝 시각 + 1일(끝이 없으면 30일 [가정]), LIFTED면 30일 [가정]이다(늦게 온 작은 판을 무시하려고 남긴다). 잃어도 ops-svc 작업 워커가 10분 [가정]마다 ACTIVE인 제한을 다시 보내 다시 선다(소유자 결정 2026-10-30, open-items 75번, 세부는 추천 적용 2026-10-30, docs/features/queue-admission.md §6) |
 | `q:{event:E}:elig:{listKey}` | Set | 판매 자격 명단의 대기열 사본(사람 식별자) | 로비·진입 때 자격을 확인한다. 수명은 판매 기간 끝 + 1일 TTL이다(추천 적용 2026-10-14, ADR-0062) |
 | `s:{event:E}:bitmap` | 비트맵 (6.25KB) | 공연장 좌석의 홀드 상태 비트맵 | Lua 스크립트로 여러 좌석의 홀드 여부를 1회 왕복 안에 원자적으로(중간 상태 없이 한 번에) 검사하고 설정한다. |
@@ -1735,11 +1939,13 @@ erDiagram
 | `s:ctl:events` | Set | 좌석 비트맵이 있는 회차 목록 | 전체 범위 정지를 그 회차들의 `s:{event:E}:ctl`에 쓰려고 둔다. 회차의 좌석 비트맵을 처음 만들 때는 이 목록에 먼저 넣고, 그다음 `sale_control`의 전체 범위 상태를 읽어 사본을 쓴다. 전체 정지는 `sale_control`의 전체 범위 행을 먼저 쓰고, 그다음 목록을 돌며 사본을 쓴다. 그래서 둘이 함께 일어나도 어느 한쪽이 정지를 본다. 판매 종료 정비 잡이 그 회차를 뺀다(추천 적용 2026-10-28, ADR-0103) |
 | `shop:{product:P}:resv`, `shop:{product:P}:resv_qty` | Sorted Set(점수 = 예약 만료 시각), Hash(주문 ID → 수량) | 굿즈 한정 재고 예약과 만료 인덱스 | 굿즈 재고 차감 카운터와 같은 해시 슬롯(상품 해시 태그)에 둔다. 주문 생성 Lua가 재고를 깎으면서 둘에 예약을 넣는다. core-svc shop의 만료 작업이 1초 [가정]마다 `ZRANGE … BYSCORE … LIMIT 0 n`으로 지난 예약을 찾는다. 먼저 PostgreSQL에서 주문을 조건부로 EXPIRED로 바꾸고(상태 CREATED이고 `stock_reserved_until`이 지났을 때만), 바뀐 주문만 Lua 하나로 예약을 지우며 재고를 돌린다. 예약이 이미 없으면 돌리지 않아 두 번 돌리지 않는다. 결제 접수 때 점수를 승인 기한으로 늘리고, 승인되면 예약만 지운다(docs/planning/03 §2.13, 추천 적용 2026-10-28, ADR-0107) |
 | `s:{event:E}:quota:{account}` | 문자열 | 계정별 실시간 좌석 보유 수 | 쿼터를 원자적으로 차감하려고 좌석 비트맵과 같은 샤드에서 같은 Lua 스크립트로 처리한다. |
+| `s:{event:E}:prio` | Sorted Set(멤버 = 좌석 색인, 점수 = 만료 시각(ms)) | 우선 구매 보류의 만료 인덱스. 우선 구매 보류는 7분 만료 인덱스(`s:{event:E}:expiry`)가 아니라 여기에 둔다. 홀드 Hash는 일반 홀드와 같은 키이고 `kind` PRIORITY·권리 ID·소유 계정을 적는다 | 좌석 클러스터의 회차 슬롯. purchase-svc의 우선 구매 Lua(비트 설정·Hash·이 집합을 한 번에)가 쓰고, 만료 작업이 1분 [가정]마다 지난 것을 푼다(해제 Lua와 같다. 방금 놓은 좌석 키에는 넣지 않는다). 수명은 권리 만료(48시간 [가정]과 입장 시작 가운데 이른 때)다(docs/features/seat-hold.md §5 '우선 구매 보류', 추천 적용 2026-10-31, ADR-0171) |
 | `s:{event:E}:rel:{account}` | Sorted Set(멤버 = 좌석 색인, 점수 = 다시 잡을 수 있는 시각(밀리초)) | 그 계정이 방금 놓은 좌석(직접 해제·만료·자동 배정 반납) | 해제·만료 Lua가 비트를 끄는 같은 원자 연산에서 넣고, 점수는 Lua 안의 Redis `TIME` + 30초 [가정]다. 넣을 때 점수가 지난 멤버를 지우고, 키 수명은 마지막으로 넣은 때부터 30초다. 홀드 Lua는 요청 좌석의 점수가 지금보다 크면 아무것도 잡지 않고 409 `seat-recently-released`다. 자동 배정 Lua는 이 좌석이 든 후보를 그 계정에게만 건너뛴다. 비트맵과 같은 회차 슬롯이다. 멤버는 1인 한도(4매)와 30초 안의 해제 수만큼이라 작다(소유자 결정 2026-10-30, open-items 67번, 세부는 추천 적용 2026-10-30, docs/features/seat-hold.md §5) |
 | `s:{event:E}:idem:{account}:{key}` | Hash | 홀드 요청의 멱등성(같은 요청이 여러 번 와도 한 번 처리한 것과 결과가 같은 성질)을 지키는 키. 값은 요청 지문(좌석·희망 조건 본문의 SHA-256)과 처음 응답(holdId·만료 시각·펜싱 토큰·연장 가능 여부) | 좌석 비트맵과 같은 회차 샤드에 둬서, 홀드 Lua가 좌석을 잡는 같은 원자 연산에서 확인하고 적는다. 같은 키·같은 지문이면 처음 응답을 돌려주고, 지문이 다르면 아무 좌석도 잡지 않고 422 `idempotency-key-reused`다. 홀드를 잡을 때만 적고(경합·한도 실패는 적지 않는다), 수명은 홀드 TTL(7분)이다. 영구 보관하는 주문·결제 멱등키는 PostgreSQL `order_idempotency`에 기록한다(추천 적용 2026-10-28, 기술 검토 중간-046. 이전 키 `s:idem:{key}`는 해시 태그가 멱등키라 Lua 밖에서 확인했다) |
 | `s:jti:{jti}` | 문자열 (`SET NX`) | 대기열 입장 토큰의 재사용을 막고 세션에 묶기 | 토큰이 1회만 쓰였는지 확인한 뒤 구매 세션 ID와 서로 묶는다. |
 | `s:session:{sid}` | Hash | 구매 세션 메타데이터(유휴 만료 시한, 단말 임시 ECDH 공개키, 마지막 요청 일련번호, 기기 식별값 `deviceId`, 회차 ID, 이 세션이 잡은 홀드 목록(holdId마다 그 회차·좌석 목록)). 요청 서명 확인과 일련번호 갱신은 한 번의 원자 연산으로 한다(ADR-0050 결정 8) | 결제 완료 때까지 유지되는 런타임 세션 상태를 저장한다. 구매 세션은 회차 하나에 묶인다. purchase-svc는 세션을 열 때 입장 토큰의 회차를 적고, 주소에 회차가 있는 요청마다 주소의 회차와 다시 대조한다(다르면 403). 주소에 회차가 없는 주문·결제는 본문의 holdId와 주소의 주문이 이 세션의 것인지 보고, 아니면 404다(추천 적용 2026-10-30). 홀드를 만들면 holdId와 좌석 목록을 더하고, 해제·연장은 이 목록에 있는 holdId만 찾는다(추천 적용 2026-10-30, docs/features/seat-hold.md §2·§3, docs/security/asvs/seat-hold.md 8.2.2) |
 | `s:rst:{account}` | Hash | 예매 제한의 구매 사본(상태·끝 시각·제한 ID·판 번호, `q:rst:{account}`와 같은 모양) | ops-svc의 `SetBookingRestriction`을 받은 purchase-svc가 판 번호가 클 때만 쓴다. 주문 생성이 Lua 전에 따로 읽어, ACTIVE이고 끝 시각 전이면 403 `booking-restricted`로 주문을 만들지 않고 그 구매 세션의 홀드를 푼다. 계정 단위라 회차 태그 없이 흩는다. 수명과 다시 보내기는 `q:rst:{account}`와 같다(소유자 결정 2026-10-30, open-items 75번, 세부는 추천 적용 2026-10-30, docs/features/queue-admission.md §6, docs/features/payment.md §2) |
+| `sup:far:{account}` | Hash(필드 = 사건 ID) | 부정 예매 소명 요청의 화면용 사본: 회차, 사유 범주, 소명 기한, 이의 창 끝(조치 결과 통지 + 30일 [가정])과 이의 상태, 잠긴 티켓 ID, 소명 상태(OPEN·SUBMITTED·ACCEPTED·REJECTED·EXPIRED. EXPIRED는 기한까지 제출하지 않음), 우선 구매 권리(권리 ID·좌석 표시·가격·기한·상태), 판 번호 | 세션·캐시 클러스터에 두고 core-svc support 모듈이 쓴다. ops-svc의 `SetFraudAppealView`(core.proto)를 받아 필드마다 판 번호가 클 때만 쓰고, 팬의 `GET /v1/fraud-appeal-requests`와 소명 제출(`POST /v1/appeals` kind FRAUD_CASE)의 기한 확인에 쓴다. 조치 전의 소명은 소명 기한으로, 조치 뒤의 이의는 이의 창으로 본다. 필드 수명은 결정된 뒤 30일 [가정]이고, ops-svc 작업 워커가 10분 [가정]마다 열린 요청을 같은 판으로 다시 보낸다(`sup:rst`와 같은 규칙, 추천 적용 2026-10-31, ADR-0171) |
 | `sup:rst:{account}` | Hash | 예매 제한의 화면용 사본(상태·사유 코드·시작·끝 시각·소명 기한·제한 ID·판 번호) | 세션·캐시 클러스터에 두고 core-svc support 모듈이 쓴다. ops-svc의 `SetBookingRestrictionView`(core.proto)를 받아 판 번호가 클 때만 쓰고, 팬의 `GET /v1/booking-restrictions/me`에 답한다. 집행에는 쓰지 않는다(집행은 `q:rst`·`s:rst`). 키가 없으면 제한 없음으로 답한다. 수명과 다시 보내기는 `q:rst:{account}`와 같다(추천 적용 2026-10-30, docs/design/d5 §1.6 21번) |
 | `s:{event:E}:stream` | Stream | 홀드 획득·해제·만료(HELD·RELEASED·EXPIRED), 구매 세션 시작·종료 이벤트(Redis 메모리 안의 Outbox) | 릴레이 워커가 비동기로 읽어 Kafka 토픽으로 보낸다. Kafka 전송 확인을 받은 항목까지 `XACK`한 뒤 `XTRIM … MINID`(Redis 6.2·Valkey부터)로 지운다. 키는 회차 판매 종료 + 1일 [가정] TTL로 지운다(추천 적용 2026-10-20, ADR-0070). |
 | `s:{event:E}:sec:{section}` | 샤드 Pub/Sub 채널 | 구역별 좌석 홀드 상태의 바뀐 부분(델타)을 구독자 모두에게 보내기 | 그 구역을 보고 있는 클라이언트가 접속한 realtime-gw 파드(쿠버네티스에서 앱이 실행되는 가장 작은 단위)만 골라서 구독한다. 메시지마다 회차 세대와 구역별 일련번호를 싣는다(기술 검토 중간-040). |
@@ -1752,7 +1958,7 @@ erDiagram
 | `tr:ra:dev:{deviceRef}:E`·`tr:ra:fp:{지문}:E` | 정렬 집합(점수로 정렬되는 집합) | 대기 중 재평가의 R1(기기 공유 소급)·R2(행동 요약값 복제): pid → 받은 시각(ms) | 세션·캐시 클러스터에 두고 재평가 작업자 `trust-reassess`가 쓴다. Lua 스크립트 하나로 넣기·10분보다 오래된 것 지우기·세기·문턱 판단을 한다. 수명은 10분 [가정]이다. 문턱을 넘은 뒤에는 더 넣지 않아, 키 하나가 문턱(5·20)보다 크게 자라지 않는다(추천 적용 2026-10-27, ADR-0099, docs/streaming.md §5.8). 해시 태그는 기기 가명·지문이라 아래 넘음 표시 키와 같은 슬롯이고, 한 회차의 키가 한 샤드에 몰리지 않는다(추천 적용 2026-10-28, 기술 검토 낮음-033) |
 | 위 두 키 뒤에 `:over`를 붙인 키 | 문자열 | 넘음 표시. 값은 표시를 켠 메시지의 (파티션, 오프셋)이다 | 수명 10분이다. 표시를 켠 메시지를 다시 읽으면(후보를 내기 전에 작업자가 죽은 경우) 후보 전체를 다시 낸다(docs/streaming.md §5.8) |
 | `tr:asnhost:{asn}:E:{10초 칸}` | 문자열 (`INCR`) | 호스팅·프록시 대역 ASN의 10초 진입 수 | 두는 곳과 쓰는 곳은 위와 같다. 해시 태그는 ASN이다(위와 같은 이유, 기술 검토 낮음-033). 만료는 30초 [가정]이다. 통신사 대역은 세지 않는다(신호가 약하고 한 키에 요청이 몰린다, ADR-0071) |
-| `tr:block:{deviceRef}` | 문자열 | 차단 기기 목록: 사람이 확인해 악성 봇으로 확정한 기기 가명(탐지 가명). 값은 등재 사유 코드·확정 출처·등재 시각이다. 확정 출처는 사람이 확정한 것만이다: 봇 판정 표본 검토(SCR-067)의 '봇' 판정과 CS가 확인한 부정구매 신고. 추가 검증 실패·허니팟(사람에게 보이지 않게 화면에서 숨긴 링크) 적중·재평가 후보 같은 자동 신호만으로는 올리지 않는다. 지금까지 적었던 '운영 명령'은 운영 명령 12종에 맞는 명령이 없어, 그 명령이 생길 때까지 출처로 쓰지 않는다(추천 적용 2026-10-30, docs/features/bot-defense.md §9) | 세션·캐시 클러스터에 두고 trust-svc만 쓴다. ops-svc의 라벨 반영 호출을 받아 trust-svc가 쓴다(bot-defense §9·§12). TTL은 등재 뒤 90일 [가정]이다(data-classification). 회차를 넘어 쓰므로 해시 태그를 붙이지 않고 샤드 전체에 흩는다. 로비 입장·사전 검증 때 `EXISTS`로 본다. CS가 이의를 인정하면 trust-svc가 `DEL`로 바로 지운다(docs/features/queue-admission.md §7). 표본 검토에서 '사람'으로 다시 판정된 기기도 지운다(bot-defense §9). 확정된 기기는 많아야 수만 개 [추정]라 수 MB다. 2026-10-20의 Bloom filter와 30일 단위 필터 묶음 회전은 쓰지 않는다(추천 적용 2026-10-28, 기술 검토 중간-014) |
+| `tr:block:{deviceRef}` | 문자열 | 차단 기기 목록: 사람이 확인해 악성 봇으로 확정한 기기 가명(deviceRef. 2026-10-31부터 탐지 가명 키 대신 조사용 가명 키로 만든다, ADR-0171). 값은 등재 사유 코드·확정 출처·등재 시각이다. 확정 출처는 사람이 확정한 것만이다: 봇 판정 표본 검토(SCR-067)의 '봇' 판정, CS가 확인한 부정구매 신고, 승인되어 실행된 부정 예매 조치(표 취소·이용 제한, trust.proto `LABEL_SOURCE_FRAUD_ACTIONED`). 외부 게시물 대조는 근거 신호일 뿐이라 올리지 않는다(추천 적용 2026-10-31, ADR-0171). 추가 검증 실패·허니팟(사람에게 보이지 않게 화면에서 숨긴 링크) 적중·재평가 후보 같은 자동 신호만으로는 올리지 않는다. 지금까지 적었던 '운영 명령'은 운영 명령 12종에 맞는 명령이 없어, 그 명령이 생길 때까지 출처로 쓰지 않는다(추천 적용 2026-10-30, docs/features/bot-defense.md §9) | 세션·캐시 클러스터에 두고 trust-svc만 쓴다. ops-svc의 라벨 반영 호출을 받아 trust-svc가 쓴다(bot-defense §9·§12). TTL은 등재 뒤 90일 [가정]이다(data-classification). 회차를 넘어 쓰므로 해시 태그를 붙이지 않고 샤드 전체에 흩는다. 로비 입장·사전 검증 때 `EXISTS`로 본다. CS가 이의를 인정하면 trust-svc가 `DEL`로 바로 지운다(docs/features/queue-admission.md §7). 표본 검토에서 '사람'으로 다시 판정된 기기도 지운다(bot-defense §9). 확정된 기기는 많아야 수만 개 [추정]라 수 MB다. 2026-10-20의 Bloom filter와 30일 단위 필터 묶음 회전은 쓰지 않는다(추천 적용 2026-10-28, 기술 검토 중간-014) |
 | `tr:devacct:{deviceRef}` | Set | 기기 신뢰 이력 ①: 그 기기 가명으로 판정받은 본인확인 계정(pid). '한 기기의 여러 계정' 신호다 | 세션·캐시 클러스터에 두고 trust-svc가 쓴다. 원소 상한 20개 [가정], 수명 30일이다. 해시 태그는 기기 가명이고 회차를 넘어 쓴다. queue-admission §7 '기기 신뢰도'(그 기기에서 인증된 계정 수, 보존 30일)를 담는 키다(추천 적용 2026-10-30, docs/features/bot-defense.md §3.2) |
 | `tr:devhist:{deviceRef}` | Hash | 기기 신뢰 이력 ②: 그 기기의 지난 30일 추가 검증 보냄·통과·실패 수 | 위와 같은 클러스터·해시 태그, 수명 30일이다. 기기 100만 개면 `tr:devacct`와 합쳐 약 200MB [추정]다(추천 적용 2026-10-30, bot-defense §3.2) |
 | `tr:hp:{pid}` | 문자열 | 허니팟 적중 표시. 값은 적중 시각과 회차다 | 세션·캐시 클러스터에 두고 trust-svc의 허니팟 기록 처리기가 로그인한 요청의 적중에만 쓴다. 수명 24시간 [가정]이다. 그 사람의 다음 로비 입장·사전 검증에서 `EXISTS`로 보고 확정 신호로 쓴다. 이미 판정을 통과해 기다리는 사람은 이것만으로 격리하지 않는다. 해시 태그는 pid다(추천 적용 2026-10-30, bot-defense §7) |
@@ -1962,6 +2168,12 @@ erDiagram
 | 홈 구성 (`home_banner`·`home_theme`, 배너 이미지) | 스토리지 레벨 암호화. 이용자 개인정보는 없고, 작성한 운영자의 관리 계정 ID만 남는다. 출연자 사진이 든 배너는 docs/security/data-classification.md의 '홈 배너 이미지와 대체 텍스트, 공연 포스터·상세 이미지' 행과 법률 질문 23번을 따른다 | 노출 기간이 끝나고 30일 [가정] 뒤 이미지 파생본을 지운다. 구성 변경 이력은 감사 로그(관리 계정 작업, 2년 이상)에 남는다(추천 적용 2026-10-14, ADR-0063) |
 | 승인 업무·CS 처리함 기록(요청자, 승인자, 사유 코드, 확인한 증빙 종류) | 감사 로그 전용 저장소 | 분쟁 처리 기록으로 3년 보존한다(전자상거래법 시행령 §6①4호. 중개자는 자기 시스템으로 처리한 기록을 보존한다, 같은 항 단서). 증빙 내용과 진단서는 저장하지 않는다 |
 | 예매 제한 기록 (`booking_restriction`: 계정 ID, 사유 코드, 확인한 CS 책임자, 시작·끝, 소명 기한, 상태) | 스토리지 레벨 암호화(P2). 사유는 코드만 두고, 연계정보·pid는 넣지 않는다(탈퇴 뒤 다시 가입한 계정에는 제한이 이어지지 않는다) | 제한이 끝나거나(해제·만료) 회원이 탈퇴한 날부터 3년 뒤 파기한다(승인 업무·CS 처리함 기록, 소명 본문과 같은 분쟁 처리 기록 기준, 전자상거래법 시행령 §6①4호, 추천 적용 2026-10-26, ADR-0089) |
+| 부정 예매 조사 저장소 (ClickHouse `inv`: 요청 기록의 원문 IP·ASN·JA4·끝단 봇 라벨, 여정 단계, 화면별 행동 요약, 계정·기기·연락처·결제 수단 연결) | 스토리지 레벨 암호화, `inv_ingest`·`inv_reader`만 접근(위 '부정 예매 사후 조사의 표') | 공연 종료 뒤 30일 [가정](법률 확인 36번)에 TTL로 지운다. 조치한 건은 증거 묶음으로 따로 떼어 둔다(추천 적용 2026-10-31, ADR-0171 결정 5) |
+| 부정 예매 사건 기록 (`fraud_cluster`·`fraud_cluster_member`·`fraud_case`·`fraud_case_event`·`fraud_snapshot`) | ops-svc 논리 DB, 스토리지 레벨 암호화. 사건 기록에는 연락처·IP 원문을 넣지 않는다 | 후보 묶음과 사건이 없는 회차의 고정 기록은 조사 저장소와 같이 공연 종료 뒤 30일 [가정]. 사건은 닫힌 뒤 3년 [가정](분쟁 처리 기록과 같은 기준, 법률 확인 36번) |
+| 외부 되팔이 게시물 수집본 (`external_post`, S3 캡처) | 격리 버킷에서 악성 코드 검사 뒤 증거 버킷(스토리지 암호화) | 사건에 쓰이지 않은 게시물은 공연 종료 뒤 30일 [가정]. 사건에 쓰인 것은 그 증거 묶음과 같다 |
+| 증거 묶음 (`evidence_bundle`·`evidence_custody_log`, S3 파일) | 증거 버킷(S3 Object Lock 준수 모드 [가정, FRN-040])과 관리 연속성 해시 체인 | 분쟁·수사·이의가 끝났다고 기록한 뒤 파기한다(추천 적용 2026-10-31, ADR-0171 결정 5·8) |
+| 조사용 연락처 가명·같은 본인확인 시도 (`account_contact_ref`, `identity_conflict_attempt`) | 원문 없이 HMAC 값만(`inv-ref-key`) | 연락처 가명은 번호·이메일이 바뀌면 다시 계산하고 탈퇴 때 지운다. 시도 기록은 1년 [가정] 뒤 지운다 |
+| 이용 제한(부정 예매) 중 탈퇴한 사람의 CI HMAC | 연계정보 HMAC 값만 | 제한 기간 동안만 남겨 다시 가입한 계정에 제한을 잇는다(POL-046 ⑥, POL-033의 예외, 법률 확인 36번, 추천 적용 2026-10-31, ADR-0171 결정 5). 그 밖의 쓰임은 없다 |
 | 소명 본문 | 스토리지 레벨 암호화(P2)를 쓴다 | 처리를 마치고 3년(분쟁 처리 기록과 같은 기준)이 지나면 자동 파기한다(웹 보안 단체가 만든 웹 앱 보안 검증 항목 목록인 ASVS의 14.2.7) |
 | 판매자 신원정보(파트너 사업자) | 스토리지 레벨 암호화(P2). 개인사업자 대표자 성명은 개인정보로 다룬다 | 파트너 계약 종료 뒤 5년(계약 기록) |
 | 계정 연동 및 계정 병합 기록 (대표·흡수 계정 ID, 연동 제공자 유형, 이관 항목 통계, 승인 일시) | 스토리지 레벨 암호화(P2)를 쓴다 | 대표 계정이 남아 있는 동안 유지한다. 대표 계정이 탈퇴하면 계정 원장과 함께 파기한다(자체 기준). 흡수된 계정의 원본 이메일과 닉네임은 병합이 끝나는 즉시 영구 파기한다(POL-034) |

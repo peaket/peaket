@@ -6,7 +6,7 @@
 
 ## 1. 파일과 검사
 
-- **범위**: asyncapi의 Kafka 메시지 가운데 Avro로 보내는 19개 전부다(trade 8, control 2, identity 1, support 1, telemetry 7. 2026-10-28 회차 판매 상태 `EventSaleChanged`를 더했다, ADR-0122). 파일 19개 안의 이름 붙은 타입은 66개(레코드 28개, 열거 38개)다(2026-10-28 파일로 센 값). 브라우저 지표 `RumSample`은 JSON이고 Kafka로 내는 곳이 없어 뺐다. 실시간 채널(WebSocket·SSE. 관제 Socket.IO는 2026-10-28 ADR-0100으로 SSE로 바꿨다)은 Avro를 쓰지 않는다.
+- **범위**: asyncapi의 Kafka 메시지 가운데 Avro로 보내는 19개 전부다(trade 8, control 2, identity 1, support 1, telemetry 7. 2026-10-28 회차 판매 상태 `EventSaleChanged`를 더했다, ADR-0122). 파일 19개 안의 이름 붙은 타입은 66개(레코드 28개, 열거 38개)다(2026-10-28 파일로 센 값). 브라우저 지표 `RumSample`은 JSON이고 Kafka로 내는 곳이 없어 뺐다. 2026-10-31에 더한 조사용 요청 기록 `InvestigationRequest`(토픽 `investigation.requests`)도 JSON이라 뺐다. 노드 에이전트의 OTel 수집기가 Envoy 접근 로그에서 바로 내는데, 수집기의 Kafka 내보내기는 레지스트리 형식의 Avro를 만들지 못하기 때문이다(asyncapi 그 채널 설명, ADR-0171). 2026-10-31 기준 이름 붙은 타입은 68개(레코드 28개, 열거 40개)다. 실시간 채널(WebSocket·SSE. 관제 Socket.IO는 2026-10-28 ADR-0100으로 SSE로 바꿨다)은 Avro를 쓰지 않는다.
 - **경로**: `peaket/<묶음>/<레코드>.avsc`이고 네임스페이스는 `peaket.<묶음>`이다(예: `peaket/trade/OrderEvent.avsc` = `peaket.trade.OrderEvent`). 레코드 이름은 asyncapi 메시지 이름과 같다.
 - **만든 방법**: asyncapi.yaml을 §2 규칙대로 기계적으로 옮겼다. 필드 이름·순서·열거 값·설명은 asyncapi 그대로다. 다만 열거마다 asyncapi 값 앞에 읽는 쪽 전용 기호 `UNRECOGNIZED`를 하나 더 두고 그 기호를 기본값으로 한다(§2, 2026-10-28). 지금은 asyncapi를 고치면 이 파일도 함께 고친다. asyncapi가 적은 대로 wbs 0.2.2에서 계약 검사를 붙인 뒤에는 Avro가 원본이다(ADR-0165).
 - **검사(2026-10-22)**:
@@ -18,6 +18,17 @@
 - **검사(2026-10-28)**: 열거 31개 모두에 `UNRECOGNIZED`(맨 앞 기호)와 `"default": "UNRECOGNIZED"`를 더한 뒤, 18개 파일이 JSON으로 읽히고, 이름 붙은 타입 51개가 겹치지 않고, 열거마다 기본값이 기호 목록 안에 있으며, 파일 경로·네임스페이스가 맞는 것을 직접 쓴 검사로 확인했다. 작업 환경에 Avro 라이브러리가 없어 라이브러리로 다시 읽는 검사는 하지 않았다(wbs 0.2.2의 CI가 한다). 같은 날 `trade/EventSaleChanged.avsc`(레코드 하나, 열거 둘, ADR-0122)를 더한 뒤 같은 검사를 다시 돌려 19개 파일, 이름 붙은 타입 53개, 열거 33개에서 겹침과 기본값 오류가 없음을 확인했다. 같은 날 `schemaVersion`·`OrderEvent.idempotencyKey`를 빼고 `SettingChanged.value`를 레코드 유니온으로 바꾼 뒤(기술 검토 낮음-026) 다시 돌려, 19개 파일이 JSON으로 읽히고 이름 붙은 타입 66개·열거 38개에서 겹침이 없으며 열거마다 맨 앞 `UNRECOGNIZED`와 기본값이 있음을 확인했다(다른 묶음이 같은 날 더한 타입 포함).
 - **검사(2026-10-29, ADR-0150)**: 필수 여부를 §6대로 바꾼 뒤 직접 쓴 검사로 다시 확인했다. 19개 파일이 JSON으로 읽히고, 이름 붙은 타입 66개가 겹치지 않으며, 열거마다 맨 앞 `UNRECOGNIZED`와 기본값이 있다. asyncapi와 견준 필드 이름·순서, 필수 목록, 기본값, `x-present-when`, 열거 기호, uuid 형식도 어긋남이 0건이었다. 조건(`x-present-when`)이 같은 메시지의 필수 열거 칸을 가리키는지, 조건부 칸을 가리키면 그 칸이 있어야 하는 조건이 이 조건 안에 들어 있는지, 조건 값이 그 열거의 기호인지도 본다. 일부러 틀리게 고친 세 곳(필수 칸 하나를 null 허용으로, 조건 하나를 다른 기호로, 기본값 false 하나를 지움)을 모두 잡았고, 고치기 전 판에 돌려도 어긋남은 0건이었다. Avro 라이브러리 검사는 이번에도 하지 못했다(wbs 0.2.2의 CI가 한다).
 - **바꿈(2026-10-30)**: 열거 기호를 셋 더했다. `CaseRequestedKind`에 봇 판정 이의 제기 `VERIFICATION_APPEAL`(queue-svc가 냄, docs/features/bot-defense.md §12), `SessionTerminatedReason`에 역할 변경 `ROLE_CHANGED`(docs/security/authz-matrix.md §5.4)와 비밀번호 바꾸기 `PASSWORD_CHANGED`(docs/security/auth-controls.md §3.5)다. 열거 끝에 더해 기존 기호의 순서는 그대로이고, 새 기호를 모르는 옛 읽는 쪽은 기본값 `UNRECOGNIZED`로 읽는다(§2). `BehaviorSignal`은 로비 입장 때도 낸다는 설명만 바꿨다(칸 변화 없음). 칸 수와 이름 붙은 타입 수(66개)는 그대로다. 세 파일이 JSON으로 읽히고 열거마다 맨 앞 `UNRECOGNIZED`와 기본값이 있으며, asyncapi 열거와 기호가 같음을 직접 쓴 검사로 확인했다(추천 적용 2026-10-30). 같은 날 `CaseRequestedKind` 끝에 소명 `APPEAL`(core-svc support 모듈이 냄, openapi `POST /v1/appeals`, docs/features/transfer-refund.md §7.1)을 하나 더 더했다. 같은 방식으로 열거 끝에 더했다(추천 적용 2026-10-30).
+- **바꿈(2026-10-31, ADR-0171 결정 4, BUILD_ORDER FRN-030)**: 부정 예매 사후 조사가 끝단 요청·대기·구매 세션·홀드·주문·결제를 한 사람의 여정으로 잇도록 칸을 더했다. 모두 첫 등록 전이라 §6의 규칙대로(늘 있으면 필수, 사건 종류에 따라 있는 칸만 null 허용) 넣었다(추천 적용 2026-10-31).
+  - 여정 ID `journeyId`(UUIDv7, 토큰 클레임 `jny`): `QueueEntryRecord`·`PurchaseSessionStarted`·`HoldAttempt`·`BehaviorSignal`은 필수, `OrderEvent`는 CREATED에만, `TrustVerdict`는 로비 입장·사전 검증의 실시간 판정(category PASS·CHALLENGED)에만 있다(추가 검증 제출은 본문에 토큰이 없고, 재평가 후보에는 여정이 없어 비운다). `PaymentEvent`에는 없다(payment-svc는 여정을 모르고 주문 ID로 잇는다).
+  - 기기 가명 `deviceRef`: `TrustVerdict`에 더했고, `BehaviorSignal.deviceRef`는 탐지 가명 키에서 조사용 가명 키 `inv-ref-key`로 바꿨다(identity-svc `device.device_ref`와 같은 값, 기기 키 통일). 칸 모양은 그대로다.
+  - `HoldAttempt`: 좌석 `seatIds`(직접 선택이거나 잡았을 때)와 잡은 시각 `heldAt`(잡았을 때).
+  - `OrderEvent`: 예매자 휴대폰 번호의 조사용 가명 `contactRef`(CREATED).
+  - `PaymentEvent`: 결제 수단 연결값 `paymentMethodRef`와 카드 BIN `cardBin`(결제사 응답에 카드 정보가 있을 때). 두 결제사 모두 카드 지문과 가상카드 여부를 주지 않아(2026-10-31 공식 문서 확인, docs/features/payment.md) 연결값은 약한 값이고 가상카드 칸은 두지 않았다.
+  - `BehaviorSignal`: 화면 `screen`(LOBBY·EVENT_DETAIL·SEAT·PAYMENT, 새 열거 `BehaviorSignalScreen`)을 필수로 더하고, purchase-svc도 내게 되어(좌석·결제 화면) `netClass`를 필수에서 조건부(screen LOBBY·EVENT_DETAIL)로 풀었다. `asn`의 조건에 screen을 더했다.
+  - `CaseRequested.category`의 소명 대상 종류에 `FRAUD_CASE`를 더했다(문자열 칸이라 설명만 바뀜).
+  - `SeatEvent`: 우선 구매 보류(이의가 인정된 부정 예매 표 취소의 되돌림, 구매 세션 없음)를 위해 홀드 종류 `holdKind`(새 열거 `SeatEventHoldKind`)와 권리 ID `priorityGrantId`를 더하고, `purchaseSessionId`의 조건을 holdKind FAN으로 좁혔다. 첫 등록 전이라 조건을 좁혀도 된다.
+  - 분석 원본 적재(analytics-ingest)는 새 조사 칸을 브론즈에 싣기 전에 버린다(docs/features/analytics.md). 조사 적재 작업자 `inv-ingest`가 같은 토픽을 함께 읽는다(§4, docs/streaming.md §6.4).
+  - 직접 쓴 검사(asyncapi를 YAML로 읽어 avsc와 견줌)로 19개 파일이 JSON으로 읽히고, 이름 붙은 타입 68개가 겹치지 않으며, 열거 40개마다 맨 앞 `UNRECOGNIZED`와 기본값이 있고, 필드 이름·순서, 필수 목록, null 첫 갈래와 기본값 null, 기본값 false, `x-present-when`(값이 그 열거의 기호인지, 조건부 칸을 가리키면 그 칸의 조건을 품는지), 열거 기호, uuid·시각 형식이 asyncapi와 어긋남 0건임을 확인했다. Avro 라이브러리 검사는 하지 못했다(wbs 0.2.2의 CI가 한다).
 
 ## 2. 옮긴 규칙(추천 적용 2026-10-22)
 
@@ -58,24 +69,25 @@
 
 | 토픽 | 레코드 | 키 | 내는 곳 | 주로 받는 곳 |
 | --- | --- | --- | --- | --- |
-| `trade.orders` | `OrderEvent` | `eventId` | purchase-svc(Outbox) | core-svc 알림, ops-rt |
-| `trade.payments` | `PaymentEvent` | `eventId` | payment-svc(Outbox) | purchase-svc 주문 Saga, ops-rt |
-| `trade.seats` | `SeatEvent`, `EventSaleChanged`(회차 판매 상태, ADR-0122) | `eventId` | purchase-svc(좌석 Redis Stream 릴레이, `seat_sale`·`event_sale` Outbox) | purchase-svc 홀드 원장 적재, ops-rt(`SeatEvent`), queue-svc·core-svc(`EventSaleChanged`), analytics-ingest |
-| `trade.purchase-sessions` | `PurchaseSessionStarted`, `PurchaseSessionEnded` | `eventId` | purchase-svc(Redis Stream 릴레이) | queue-svc |
-| `trade.tickets` | `TicketEvent` | `eventId` | ticket-svc(Outbox) | core-svc 알림(양도 알림, 추천 적용 2026-10-30), ops-rt |
+| `trade.orders` | `OrderEvent` | `eventId` | purchase-svc(Outbox) | core-svc 알림, ops-rt, inv-ingest |
+| `trade.payments` | `PaymentEvent` | `eventId` | payment-svc(Outbox) | purchase-svc 주문 Saga, ops-rt, inv-ingest |
+| `trade.seats` | `SeatEvent`, `EventSaleChanged`(회차 판매 상태, ADR-0122) | `eventId` | purchase-svc(좌석 Redis Stream 릴레이, `seat_sale`·`event_sale` Outbox) | purchase-svc 홀드 원장 적재, ops-rt(`SeatEvent`), queue-svc·core-svc(`EventSaleChanged`), analytics-ingest, inv-ingest(`SeatEvent`) |
+| `trade.purchase-sessions` | `PurchaseSessionStarted`, `PurchaseSessionEnded` | `eventId` | purchase-svc(Redis Stream 릴레이) | queue-svc, inv-ingest(`PurchaseSessionStarted`) |
+| `trade.tickets` | `TicketEvent` | `eventId` | ticket-svc(Outbox) | core-svc 알림(양도 알림, 추천 적용 2026-10-30), ops-rt, inv-ingest |
 | `trade.settlements` | `SettlementEvent` | 파트너 ID | payment-svc(Outbox) | analytics-ingest |
 | `control.settings` | `SettingChanged` | `<범위>:<종류>:<대상>`(압축 토픽, §5) | ops-svc | 모든 서비스의 모든 파드(파드마다 따로) |
 | `control.sessions-terminated` | `SessionTerminated` | `accountId` | identity-svc | 모든 서비스의 모든 파드(파드마다 따로, 뜰 때 15분 되감기) |
 | `identity.accounts-merged` | `AccountMerged` | `mergedAccountId` | identity-svc | 각 도메인 서비스 |
 | `support.cases-requested` | `CaseRequested` | `sourceId` | core-svc(Outbox), queue-svc(봇 판정 이의 제기, Outbox 없이 바로 냄. 추천 적용 2026-10-30, docs/features/bot-defense.md §12) | ops-svc |
-| `telemetry.queue` | `QueueAggregate`, `QueueEntryRecord`, `PipelinePulse` | '회차:파드', `pid`, 없음 | queue-svc, rt-pulse | ops-rt(`QueueAggregate`·`PipelinePulse`), analytics-ingest(`QueueEntryRecord`) |
-| `telemetry.purchase` | `HoldAttempt`, `PipelinePulse` | `purchaseSessionId`, 없음 | purchase-svc, rt-pulse | ops-rt, analytics-ingest |
-| `telemetry.trust-verdicts` | `TrustVerdict`, `PipelinePulse` | `queueEntryId`(없으면 없음), 없음 | trust-svc, rt-pulse | ops-rt, analytics-ingest |
-| `telemetry.behavior` | `BehaviorSignal` | `pid` | trust-svc | trust-reassess |
+| `telemetry.queue` | `QueueAggregate`, `QueueEntryRecord`, `PipelinePulse` | '회차:파드', `pid`, 없음 | queue-svc, rt-pulse | ops-rt(`QueueAggregate`·`PipelinePulse`), analytics-ingest·inv-ingest(`QueueEntryRecord`) |
+| `telemetry.purchase` | `HoldAttempt`, `PipelinePulse` | `purchaseSessionId`, 없음 | purchase-svc, rt-pulse | ops-rt, analytics-ingest, inv-ingest |
+| `telemetry.trust-verdicts` | `TrustVerdict`, `PipelinePulse` | `queueEntryId`(없으면 없음), 없음 | trust-svc, rt-pulse | ops-rt, analytics-ingest, inv-ingest |
+| `telemetry.behavior` | `BehaviorSignal` | `pid` | trust-svc(LOBBY·EVENT_DETAIL), purchase-svc(SEAT·PAYMENT, 2026-10-31) | trust-reassess(LOBBY·EVENT_DETAIL만), inv-ingest |
 | `telemetry.trust-candidates` | `TrustCandidate` | `pid` | trust-reassess | trust-svc |
 
 - 분석 원본 적재 작업자(analytics-ingest)는 `trade.*`, `control.settings`, `telemetry.queue`(`QueueEntryRecord`), `telemetry.purchase`, `telemetry.trust-verdicts`를 모두 읽고 심장 박동 사건(`PipelinePulse`)은 건너뛴다(asyncapi `consumeAnalyticsIngest`).
 - `PipelinePulse`는 한 레코드를 세 토픽에 쓰므로 주제가 셋이다(`telemetry.queue-peaket.telemetry.PipelinePulse` 등).
+- 조사 적재 작업자(inv-ingest, docs/streaming.md §6.4)는 표의 inv-ingest 행과 JSON 토픽 `investigation.requests`(Avro 아님, §1)를 읽어 ClickHouse 조사 저장소 `inv`에 싣고 `PipelinePulse`는 건너뛴다(asyncapi `consumeInvestigationIngest`, 추천 적용 2026-10-31, ADR-0171).
 
 ## 5. asyncapi와 다른 점과 정할 일
 
@@ -97,28 +109,28 @@ Outbox 열(docs/data.md §4)과 스트림 소비(docs/streaming.md §2.6)는 정
 
 - **원칙**: 늘 값이 있는 칸은 필수, 사건 종류·결과에 따라 없을 수 있는 칸만 null 허용(조건부), 참·거짓은 기본값 false다(§2). 판정은 정본 문서(docs/data.md의 표, 기능 문서, asyncapi 설명)를 근거로 했고, 칸의 뜻을 새로 정한 곳은 ADR-0150 결정 6에 있다(추천 적용).
 - **조건부 칸의 조건**: `x-present-when`이 있는 칸은 그 조건이 맞으면 값이 있어야 한다. 값은 조건 목록이고 하나라도 맞으면 된다. 조건 하나 안의 칸은 모두 맞아야 한다('이고'). 조건이 맞지 않을 때 비워야 한다는 뜻은 아니다. `x-present-when`이 없는 조건부 칸은 아래 글 조건을 따른다. 생산자 단위 시험이 사건 종류마다 예시 메시지를 만들어 두 가지를 모두 확인하고, 계약 검사가 asyncapi와 avsc의 필수 목록·기본값·조건이 같은지 본다(docs/devops.md §3.1).
-- **세기**: 19종 172칸 = 필수 125, 기본값 false 5, 조건부 42(그 가운데 `x-present-when` 26).
+- **세기**: 19종 187칸 = 필수 129, 기본값 false 5, 조건부 53(그 가운데 `x-present-when` 34). 2026-10-29의 172칸(필수 125, 기본값 false 5, 조건부 42, `x-present-when` 26)에 2026-10-31 조사 칸 13개를 더하고 `BehaviorSignal.netClass`를 필수에서 조건부로 옮겼고(185칸), 같은 날 우선 구매 보류 때문에 `SeatEvent`에 `holdKind`·`priorityGrantId`를 더했다(ADR-0171, 추천 적용 2026-10-31).
 
 | 메시지 | 칸 | 필수 | 기본값 false | 조건부(이 조건이면 값이 있다) |
 | --- | --- | --- | --- | --- |
 | `EventSaleChanged` | 9 | `eventId`·`status`·`available`·`held`·`paying`·`version`·`changedAt`·`eventKey` | — | `previousStatus`: 회차의 첫 상태를 낼 때는 없다 |
-| `OrderEvent` | 12 | `eventId`·`orderId`·`accountId`·`type`·`amount`·`seatIds`·`items`·`seatAssignment`·`occurredAt`·`eventKey` (안쪽 `OrderEventItem`의 `seatId`·`tierId`·`sectionId`·`price`도 필수) | `firstInStage` | `purchaseSessionId`: `x-present-when` type CREATED |
-| `PaymentEvent` | 13 | `eventId`·`orderId`·`pg`·`type`·`amount`·`attemptNo`·`occurredAt`·`eventSeq`·`eventKey` | — | `payMethodCategory`: 결제 수단이 정해진 뒤의 사건(결제창 이탈처럼 수단을 고르기 전에 끝난 실패는 없다); `result`: 승인 흐름의 정규화 결과가 있는 사건(payment §2.1). 입금 되돌림·취소에는 없을 수 있다; `failureCategory`: `x-present-when` type FAILED; `latencyMs`: 결제사 승인 호출의 응답을 받은 사건만 |
+| `OrderEvent` | 14 | `eventId`·`orderId`·`accountId`·`type`·`amount`·`seatIds`·`items`·`seatAssignment`·`occurredAt`·`eventKey` (안쪽 `OrderEventItem`의 `seatId`·`tierId`·`sectionId`·`price`도 필수) | `firstInStage` | `purchaseSessionId`: `x-present-when` type CREATED; `journeyId`: `x-present-when` type CREATED(2026-10-31); `contactRef`: `x-present-when` type CREATED(2026-10-31) |
+| `PaymentEvent` | 15 | `eventId`·`orderId`·`pg`·`type`·`amount`·`attemptNo`·`occurredAt`·`eventSeq`·`eventKey` | — | `payMethodCategory`: 결제 수단이 정해진 뒤의 사건(결제창 이탈처럼 수단을 고르기 전에 끝난 실패는 없다); `paymentMethodRef`·`cardBin`: 결제사 응답의 카드 정보에 BIN이 있는 사건(둘은 함께 있거나 함께 빈다, 2026-10-31); `result`: 승인 흐름의 정규화 결과가 있는 사건(payment §2.1). 입금 되돌림·취소에는 없을 수 있다; `failureCategory`: `x-present-when` type FAILED; `latencyMs`: 결제사 승인 호출의 응답을 받은 사건만 |
 | `PurchaseSessionEnded` | 6 | `eventId`·`purchaseSessionId`·`admissionJti`·`reason`·`endedAt`·`eventKey` | — | — |
-| `PurchaseSessionStarted` | 6 | `eventId`·`purchaseSessionId`·`admissionJti`·`startedAt`·`maxStayUntil`·`eventKey` | — | — |
-| `SeatEvent` | 12 | `eventId`·`seatId`·`tierId`·`sectionId`·`type`·`occurredAt`·`eventKey` | — | `fencingToken`: `x-present-when` type HELD·RELEASED·EXPIRED; `sectionVersion`: `x-present-when` type HELD·RELEASED·EXPIRED; `seatEpoch`: `x-present-when` type HELD·RELEASED·EXPIRED; `holdId`: `x-present-when` type HELD·RELEASED·EXPIRED; `purchaseSessionId`: `x-present-when` type HELD·RELEASED·EXPIRED |
+| `PurchaseSessionStarted` | 7 | `eventId`·`purchaseSessionId`·`admissionJti`·`journeyId`(2026-10-31)·`startedAt`·`maxStayUntil`·`eventKey` | — | — |
+| `SeatEvent` | 14 | `eventId`·`seatId`·`tierId`·`sectionId`·`type`·`occurredAt`·`eventKey` | — | `fencingToken`: `x-present-when` type HELD·RELEASED·EXPIRED; `sectionVersion`: `x-present-when` type HELD·RELEASED·EXPIRED; `seatEpoch`: `x-present-when` type HELD·RELEASED·EXPIRED; `holdId`: `x-present-when` type HELD·RELEASED·EXPIRED; `holdKind`: `x-present-when` type HELD·RELEASED·EXPIRED(2026-10-31); `purchaseSessionId`: `x-present-when` type HELD·RELEASED·EXPIRED 이고 holdKind FAN(2026-10-31에 조건을 좁힘); `priorityGrantId`: `x-present-when` type HELD·RELEASED·EXPIRED 이고 holdKind PRIORITY(2026-10-31) |
 | `SettlementEvent` | 17 | `promoterId`·`statementId`·`kind`·`pg`·`type`·`occurredAt`·`eventKey` | — | `eventId`: `x-present-when` kind EVENT; `pgStore`: `x-present-when` pg TOSS; `periodStart`: `x-present-when` kind PRODUCT; `periodEnd`: `x-present-when` kind PRODUCT; `amount`: `x-present-when` type PAYOUT_SCHEDULED·PAYOUT_COMPLETED·PAYOUT_FAILED·PAYOUT_HELD·RECEIVABLE_OPENED·RECEIVABLE_CLOSED; `salesAmount`: `x-present-when` type STATEMENT_NOTIFIED; `refundAmount`: `x-present-when` type STATEMENT_NOTIFIED; `feeAmount`: `x-present-when` type STATEMENT_NOTIFIED; `revision`: `x-present-when` type STATEMENT_NOTIFIED; `supersedesId`: STATEMENT_NOTIFIED의 두 번째 판부터(첫 판은 null) |
 | `TicketEvent` | 13 | `ticketId`·`eventId`·`orderId`·`accountId`·`type`·`occurredAt`·`eventKey` | — | `scanId`: `x-present-when` type ENTRY_SCANNED; `scanResult`: `x-present-when` type ENTRY_SCANNED; `reason`: `x-present-when` type ENTRY_SCANNED 이고 scanResult REJECT; `gateZone`: `x-present-when` type ENTRY_SCANNED; `direction`: `x-present-when` type ENTRY_SCANNED; `scannedAt`: `x-present-when` type ENTRY_SCANNED |
 | `SessionTerminated` | 4 | `accountId`·`sessionId`·`reason`·`terminatedAt` | — | — |
 | `SettingChanged` | 8 | `commandId`·`key`·`scope`·`value`·`actor`·`occurredAt`·`eventKey` | — | `expiresAt`: `x-present-when` key LOG_LEVEL |
 | `AccountMerged` | 4 | `mergeId`·`primaryAccountId`·`mergedAccountId`·`confirmedAt` | — | — |
 | `CaseRequested` | 7 | `eventKey`·`kind`·`sourceId`·`category`·`createdAt` | `followUp`·`hold` | — |
-| `BehaviorSignal` | 8 | `pid`·`eventId`·`netClass`·`ts`·`eventKey` | — | `deviceRef`: 로비 입장·사전 검증 본문에 기기 ID가 있을 때; `asn`: `x-present-when` netClass HOSTING·PROXY; `features`: 사전 검증 본문에 행동 요약이 있을 때(로비 입장에는 없다. 로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1) |
-| `HoldAttempt` | 12 | `eventId`·`purchaseSessionId`·`mode`·`tierId`·`result`·`retryNo`·`latencyMs`·`occurredAt`·`eventKey` | `firstHeldInSession` | `sectionId`: PICK이거나, AUTO에서 좌석을 잡았을 때; `autoResult`: `x-present-when` mode AUTO |
+| `BehaviorSignal` | 10 | `pid`·`eventId`·`journeyId`(2026-10-31)·`screen`(2026-10-31)·`ts`·`eventKey` | — | `deviceRef`: 로비 입장·사전 검증 본문에 기기 ID가 있을 때; `netClass`: `x-present-when` screen LOBBY·EVENT_DETAIL(2026-10-31에 필수에서 옮김); `asn`: `x-present-when` screen LOBBY·EVENT_DETAIL 이고 netClass HOSTING·PROXY; `features`: 사전 검증 본문에 행동 요약이 있을 때(로비 입장에는 없다. 로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1) |
+| `HoldAttempt` | 15 | `eventId`·`purchaseSessionId`·`journeyId`(2026-10-31)·`mode`·`tierId`·`result`·`retryNo`·`latencyMs`·`occurredAt`·`eventKey` | `firstHeldInSession` | `sectionId`: PICK이거나, AUTO에서 좌석을 잡았을 때; `seatIds`: `x-present-when` mode PICK, 또는 result HELD(2026-10-31); `autoResult`: `x-present-when` mode AUTO; `heldAt`: `x-present-when` result HELD(2026-10-31) |
 | `PipelinePulse` | 4 | `kind`·`topic`·`partition`·`producedAt` | — | — |
 | `QueueAggregate` | 7 | `eventId`·`second`·`entries`·`removed`·`admissions`·`soonResponses`·`eventKey` | — | — |
-| `QueueEntryRecord` | 14 | `eventId`·`queueEntryId`·`pid`·`entryMode`·`enteredAt`·`verifyRoute`·`eventKey` | — | `number`: 순번을 받은 뒤 끝났을 때(로비 참가 취소처럼 셔플 전에 끝나면 없다); `firstEtaSec`: number와 같다; `turnAt`: 차례가 왔을 때; `admittedAt`: 입장 확정으로 끝났을 때; `admissionJti`: 입장 확정으로 끝났을 때; `removedAt`: 입장 확정 없이 빠졌을 때; `removeReason`: 입장 확정 없이 빠졌을 때 |
+| `QueueEntryRecord` | 15 | `eventId`·`queueEntryId`·`journeyId`(2026-10-31)·`pid`·`entryMode`·`enteredAt`·`verifyRoute`·`eventKey` | — | `number`: 순번을 받은 뒤 끝났을 때(로비 참가 취소처럼 셔플 전에 끝나면 없다); `firstEtaSec`: number와 같다; `turnAt`: 차례가 왔을 때; `admittedAt`: 입장 확정으로 끝났을 때; `admissionJti`: 입장 확정으로 끝났을 때; `removedAt`: 입장 확정 없이 빠졌을 때; `removeReason`: 입장 확정 없이 빠졌을 때 |
 | `TrustCandidate` | 7 | `eventId`·`pid`·`pattern`·`evidenceCount`·`windowStart`·`detectedAt`·`eventKey` | — | — |
-| `TrustVerdict` | 9 | `eventId`·`category`·`action`·`source`·`occurredAt`·`eventKey` | `shadow` | `queueEntryId`: 대기 번호가 생긴 뒤의 판정; `pid`: `x-present-when` source REASSESS |
+| `TrustVerdict` | 11 | `eventId`·`category`·`action`·`source`·`occurredAt`·`eventKey` | `shadow` | `queueEntryId`: 대기 번호가 생긴 뒤의 판정; `pid`: `x-present-when` source REASSESS; `journeyId`: `x-present-when` source REALTIME 이고 category PASS·CHALLENGED(2026-10-31); `deviceRef`: 판정 입력에 기기 식별값이 있었을 때(2026-10-31) |
 
-- **구현 때 생산자 시험으로 확인할 판정**(ADR-0150 '남는 한계'): `HoldAttempt.tierId`(좌석 선택 방식의 오류 응답에서도 등급을 아는지), `PaymentEvent`의 `result`·`payMethodCategory`·`latencyMs` 조건, `QueueEntryRecord`의 순번·결과 칸 조건, `EventSaleChanged.previousStatus`(회차의 첫 상태도 사건으로 내는지), `BehaviorSignal`의 `deviceRef`·`features`(로비 입장·사전 검증 본문의 선택 칸). 필수 칸이 실제로 빌 수 있으면 소비자를 먼저 고친 뒤 그 칸만 null 허용으로 푼다(§3).
+- **구현 때 생산자 시험으로 확인할 판정**(ADR-0150 '남는 한계'): `HoldAttempt.tierId`(좌석 선택 방식의 오류 응답에서도 등급을 아는지), `PaymentEvent`의 `result`·`payMethodCategory`·`latencyMs` 조건, `QueueEntryRecord`의 순번·결과 칸 조건, `EventSaleChanged.previousStatus`(회차의 첫 상태도 사건으로 내는지), `BehaviorSignal`의 `deviceRef`·`features`(로비 입장·사전 검증 본문의 선택 칸). 2026-10-31에 더한 조사 칸도 같다: `HoldAttempt.seatIds`·`heldAt`(자동 배정 실패와 경합 패배에서 비는지), `TrustVerdict.journeyId`(실시간 판정에 늘 있는지), `PaymentEvent.paymentMethodRef`·`cardBin`(결제사가 카드 정보를 실제로 채우는지, 포트원은 결제대행사마다 다를 수 있다). 필수 칸이 실제로 빌 수 있으면 소비자를 먼저 고친 뒤 그 칸만 null 허용으로 푼다(§3).

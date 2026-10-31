@@ -12,10 +12,11 @@
 | `analytics-ingest` | `services/analytics-ingest` | 원본 적재, 회차별 가명, 금지 필드 제거(analytics §3) | analytics §3.1의 토픽(메시지를 종류별로 모아 두는 통로) 10개. 거래·제어 클러스터 7개와, 시스템이 내보내는 운영 신호인 텔레메트리 클러스터 3개다 | 없다(회차 키 캐시는 메모리) | 브론즈, 적재 거절 기록 | 적어도 한 번. 중복은 실버가 지우고, 빠짐은 커버리지 대조(§6)가 잡는다 | Spot(싸지만 회수될 수 있는 클라우드 서버) 허용 |
 | `ops-rt` | `services/ops-rt` | 관제 실시간 표의 원시 사건 적재(§4). 집계하지 않는다 | 거래·제어 클러스터의 `trade.orders`·`trade.payments`·`trade.seats`(`SeatEvent`만. 같은 토픽의 회차 판매 상태 `EventSaleChanged`는 건너뛴다, ADR-0122)·`trade.tickets`, 텔레메트리 클러스터의 `telemetry.queue`(`QueueAggregate`·`PipelinePulse`)·`telemetry.purchase`·`telemetry.trust-verdicts` | 없다 | `rt` 원시 표 다섯(§4.3) | 적어도 한 번. 중복은 조회 시점 집계가 `eventKey`로 지운다 | 온디맨드(정가로 계속 쓰는 서버) |
 | `trust-reassess` | `services/trust-reassess` | 봇 대기 중 재평가와 행동 신호 원시 적재(§5) | 텔레메트리 클러스터의 `telemetry.behavior` | 세션·캐시 Redis의 정렬 집합(10분) | `telemetry.trust-candidates`, 행동 신호 원시 표(30일) | 적어도 한 번. 후보는 `eventKey`로 중복 제거 | 온디맨드 |
+| `inv-ingest` | `services/inv-ingest` | 부정 예매 사후 조사의 원천 적재(조사 갈래, §6.4, 추천 적용 2026-10-31, ADR-0171). 가명 처리를 하지 않고 실명 계정·원문 IP를 그대로 싣는다 | 텔레메트리 클러스터의 `investigation.requests`(JSON)·`telemetry.queue`(`QueueEntryRecord`)·`telemetry.purchase`·`telemetry.trust-verdicts`·`telemetry.behavior`, 거래·제어 클러스터의 `trade.purchase-sessions`·`trade.orders`·`trade.payments`·`trade.seats`(`SeatEvent`)·`trade.tickets` | 없다(계정 연결 값 묻기의 짧은 중복 캐시만 메모리) | ClickHouse 조사 저장소 `inv` 표 넷(docs/data.md '부정 예매 사후 조사의 표') | 적어도 한 번. 중복은 표 엔진이 키로 지운다 | 온디맨드 |
 
 - `rt-pulse`(`services/rt-pulse`)는 1초마다 §3의 토픽 셋의 모든 파티션(토픽을 나눈 칸)에 `PipelinePulse`를 쓰는 작은 Deployment(복제 1개 [가정])다. 이것이 멈추면 신선도가 나빠진 것으로 보이므로 따로 감시하지 않는다.
 - 작업자는 서비스와 같은 Node.js·NestJS 판의 독립 실행 앱이다. HTTP는 상태 확인과 지표에만 연다.
-- 세 작업자는 상태를 서로 나눠 쓰지 않는다. 한 작업자가 멈춰도 다른 작업자와 거래 경로(Outbox, Saga)는 영향을 받지 않는다. Outbox는 보낼 이벤트를 같은 트랜잭션으로 표에 적어 두었다가 나중에 보내는 방식이다. Saga는 여러 서비스에 걸친 일을 단계별로 처리하고, 중간에 실패하면 앞 단계를 되돌리는 방식이다.
+- 네 작업자는 상태를 서로 나눠 쓰지 않는다(2026-10-31에 `inv-ingest`를 더했다). 한 작업자가 멈춰도 다른 작업자와 거래 경로(Outbox, Saga)는 영향을 받지 않는다. Outbox는 보낼 이벤트를 같은 트랜잭션으로 표에 적어 두었다가 나중에 보내는 방식이다. Saga는 여러 서비스에 걸친 일을 단계별로 처리하고, 중간에 실패하면 앞 단계를 되돌리는 방식이다.
 - Kafka(이벤트를 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템)는 MSK(클라우드 업체가 운영해 주는 관리형 서비스) 클러스터 두 개(거래·제어, 텔레메트리)다. 관측 전용 세 번째 MSK 클러스터(Tempo 쓰기 경로, ADR-0077)는 작업자가 쓰지 않는다(infra §1).
 - Flink(흘러드는 이벤트를 실시간으로 계산하는 스트림 처리 엔진)는 쓰지 않는다. 고른 이유와 대안, 다시 볼 조건은 §16에 있다.
 
@@ -52,6 +53,7 @@
 | `ops-rt` | 없다 | 거래·제어 4개 토픽과 텔레메트리 3개 토픽 읽기, 자기 소비자 그룹 | ClickHouse `rt_writer`(`rt` 원시 표 쓰기만) |
 | `analytics-ingest` | 분석 가명 키 `kms:GenerateMac`(S3 권한은 없다. 수집 버킷 파일은 마감 실행기가 싣는다, §6.1) | 10개 토픽 읽기 | ClickHouse `bronze_writer` |
 | `trust-reassess` | 없다 | `telemetry.behavior` 읽기, `telemetry.trust-candidates` 쓰기 | ClickHouse `trust_raw_writer`, 세션·캐시 Redis 사용자(재평가 키 접두사 `tr:ra:`만, RBAC) |
+| `inv-ingest` | ASN 분류표 S3 읽기(trust-svc가 만드는 판, docs/features/bot-defense.md §3.1) | 거래·제어 5개 토픽과 텔레메트리 5개 토픽(`investigation.requests` 포함) 읽기, 자기 소비자 그룹. `investigation.requests`의 읽기 권한은 이 작업자만 가진다 | ClickHouse `inv_ingest`(`inv` 표에 넣기만), identity-svc `BatchGetInvestigationRefs` 호출(메시 신원 허용 목록, docs/api/proto/README.md §2) |
 
 - 작업자 파드도 서비스 메시(서비스끼리 주고받는 통신을 앱 대신 처리하는 층)의 앰비언트 L4 경로에 넣어 전송을 암호화한다(docs/architecture.md 보안 기본 규칙의 '전송 구간 암호화 강제', ADR-0082). 포트폴리오의 로컬 실행은 메시 없이 돈다.
 - 비밀 값(ClickHouse 사용자, Schema Registry 자격, Redis 사용자)은 Secrets Manager에 두고, External Secrets Operator가 파드에 넣는다(ADR-0053). 파드는 시작할 때 읽은 값을 끝까지 쓰므로, 30일 자동 교체는 다른 서비스 파드와 같은 규칙을 따른다: ClickHouse·Schema Registry는 교대 사용자 전략이라 옛 판도 다음 교체까지 유효하고, 교체 사이에 작업자 파드가 한 번 이상 다시 뜨게 한다(docs/devops.md §8.3 '저장소 비밀 교체', 추천 적용 2026-10-28, 기술 검토 중간-064). Redis 사용자는 비밀번호 두 개를 겹쳐 둔다.
@@ -66,6 +68,7 @@
 | 나감 | ClickHouse(HTTPS) | 삽입 |
 | 나감 | 세션·캐시 Redis(TLS, `trust-reassess`만) | 재평가 |
 | 나감 | KMS·STS(내부망에서 이 서비스들을 부르는 주소인 VPC 엔드포인트, KMS는 `analytics-ingest`만), DNS | 가명 키, 자격 증명 |
+| 나감 | identity-svc gRPC(`inv-ingest`만), S3 VPC 엔드포인트(`inv-ingest`의 ASN 분류표만) | 계정 연결 값, 망 유형 분류(추천 적용 2026-10-31, ADR-0171) |
 
 ### 2.4 커밋·묶음·다시 시도
 
@@ -380,7 +383,7 @@ FROM sale WHERE source = 'PAYMENT'
 
 ### 5.2 입력
 
-입력은 `telemetry.behavior`의 `BehaviorSignal`이다. trust-svc가 로비 입장·사전 검증 때 기기 식별값을 탐지 가명으로 바꾼 뒤 낸다(ADR-0053). 로비 입장에는 행동 요약이 없어 `features`가 비므로 R1만 쓰인다(추천 적용 2026-10-30, docs/features/bot-defense.md §4.1). 필드는 `pid`, `deviceRef`, `eventId`, `netClass`(HOSTING·PROXY·OTHER), `asn`(HOSTING·PROXY일 때만), `features`(브라우저가 낸 요약값, ADR-0065 결정 9), `ts`, `eventKey`다(`schemaVersion`은 2026-10-28에 뺐다, 기술 검토 낮음-026).
+입력은 `telemetry.behavior`의 `BehaviorSignal`이다. trust-svc가 로비 입장·사전 검증 때 기기 식별값을 기기 가명(`deviceRef`. 2026-10-31부터 identity-svc와 같은 조사용 가명 키, ADR-0171)으로 바꾼 뒤 낸다(ADR-0053). 로비 입장에는 행동 요약이 없어 `features`가 비므로 R1만 쓰인다(추천 적용 2026-10-30, docs/features/bot-defense.md §4.1). 필드는 `pid`, `deviceRef`, `eventId`, `netClass`(HOSTING·PROXY·OTHER), `asn`(HOSTING·PROXY일 때만), `features`(브라우저가 낸 요약값, ADR-0065 결정 9), `ts`, `eventKey`다(`schemaVersion`은 2026-10-28에 뺐다, 기술 검토 낮음-026).
 
 ### 5.3 패턴
 
@@ -447,7 +450,7 @@ ADR-0039 평가 절차의 그림자 실행 단계를 거친다. 그림자 기간
 | 소비 | 클러스터별로 읽는다(토픽·파티션·오프셋·Kafka 시각 포함) | 레코드 |
 | 역직렬화 | Avro를 읽고 스키마 버전을 기록한다. 읽지 못하면 거절 기록으로 보낸다 | 사건 또는 거절 |
 | 가명 처리 | 식별값을 회차별 가명으로 바꾼다(§6.2) | 가명 사건 |
-| 금지 필드 제거 | 스키마별 허용 목록 밖의 필드와 금지 필드를 지운다(analytics §3.3) | 브론즈 행 |
+| 금지 필드 제거 | 스키마별 허용 목록 밖의 필드와 금지 필드를 지운다(analytics §3.3). 2026-10-31에 더한 조사 칸(`journeyId`·`deviceRef`·`contactRef`·`paymentMethodRef`·`cardBin`)과 우선 구매 보류 칸(`SeatEvent`의 `holdKind`·`priorityGrantId`)은 허용 목록에 넣지 않아 여기서 버린다. 조사 갈래와 연구 갈래를 잇는 키가 분석 저장소에 생기지 않게 하려는 것이다(추천 적용 2026-10-31, ADR-0171 결정 2). 조사 요청 기록 `investigation.requests`는 읽지 않는다 | 브론즈 행 |
 | 나누기 | 원천별 브론즈 표로 나눈다 | 표별 행 |
 | 삽입 | 브론즈 표마다 묶어 넣는다(§4.4 설정) | ClickHouse |
 | 거절 기록 | 위치만 넣는다 | `bronze.brz_rejected` |
@@ -480,6 +483,33 @@ ENGINE = ReplicatedMergeTree
 ORDER BY (topic, partition, offset)
 TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 ```
+
+### 6.4 조사 적재(`inv-ingest`, 추천 적용 2026-10-31, ADR-0171)
+
+부정 예매 사후 조사(판매가 끝난 뒤 실제 기록으로 한 사람이나 한 조직이 여러 계정으로 산 표를 묶어 찾는 일, docs/features/forensic-replay.md)의 원천을 싣는 작업자다. 원본 적재(`analytics-ingest`)와 같은 소비 모듈을 쓰지만 작업자·소비자 그룹·저장소 사용자가 따로이고, 서로의 표를 읽지 않는다. 이 작업자는 가명 처리를 하지 않는다. 조사 갈래는 실명 계정·주문·결제·접속 기록으로 부정 예매를 조치하는 갈래이기 때문이다(ADR-0171 결정 2). 그래서 분석 저장소에는 어떤 행도 쓰지 않는다.
+
+**원천과 싣는 곳**: 표의 칸은 docs/data.md '부정 예매 사후 조사의 표'가 정본이다. 단계(`inv_step.step`)는 한 사람이 회차에 들어와 나갈 때까지 밟은 일이다.
+
+| 원천 | 거르는 것 | `inv_request` | `inv_step` | `inv_behavior` | `inv_link` |
+| --- | --- | --- | --- | --- | --- |
+| `investigation.requests` `InvestigationRequest`(JSON) | 없음 | 한 줄. `net_class`는 ASN 분류표로 채운다 | — | — | (회차, pid, 계정) |
+| `telemetry.queue` `QueueEntryRecord` | `QueueAggregate`·`PipelinePulse` 건너뜀 | — | `QUEUE_ENTER`(enteredAt, 검증 경로), 입장 확정이면 `ADMIT`(admittedAt) | — | (여정, pid) |
+| `trade.purchase-sessions` `PurchaseSessionStarted` | `PurchaseSessionEnded` 건너뜀 | — | — | — | (여정, 구매 세션) |
+| `telemetry.purchase` `HoldAttempt` | `PipelinePulse` 건너뜀 | — | `HOLD_TRY`(좌석, 잡은 시각, 결과) | — | — |
+| `trade.seats` `SeatEvent` | `RELEASED`·`EXPIRED`만, `EventSaleChanged` 건너뜀 | — | `HOLD_END`(구매 세션으로 여정에 잇는다) | — | — |
+| `trade.orders` `OrderEvent` | — | — | `CREATED`는 `ORDER`, `CONFIRMED`는 `SALE`, `REFUNDED`·`PARTIALLY_REFUNDED`는 `CANCEL` | — | `CREATED`의 (여정, 계정, 연락처 가명) |
+| `trade.payments` `PaymentEvent` | — | — | `PAY_TRY`(결제 수단 연결값·BIN, 주문 ID로 여정에 잇는다) | — | (주문의 여정, 결제 수단 연결값) |
+| `trade.tickets` `TicketEvent` | 양도·돌려주기·회수·입장·환급 사건만 | — | `TRANSFER`, `ENTRY_SCAN`, `CANCEL` | — | — |
+| `telemetry.behavior` `BehaviorSignal` | 없음(SEAT·PAYMENT도 싣는다) | — | — | 화면별 요약 | (여정, pid, 기기 가명) |
+| `telemetry.trust-verdicts` `TrustVerdict` | `PipelinePulse` 건너뜀 | — | — | — | (여정, pid, 기기 가명) |
+
+- **계정의 연결 값**: 회차에서 처음 본 계정은 identity-svc `BatchGetInvestigationRefs`로 묶어(500개 [가정]씩) 연락처 가명·연결 기기 가명·같은 본인확인 시도 기록을 받아 `inv_link`에 싣는다. 파드 메모리의 짧은 캐시(10분 [가정])로 같은 계정을 거듭 묻지 않을 뿐이고, 캐시를 잃어도 다시 물어 같은 행을 다시 넣을 뿐이다(표가 중복을 지운다). identity-svc가 답하지 않으면 그 묶음만 뒤로 미뤄 다시 묻고(1분 [가정] 간격), 사건 적재는 멈추지 않는다.
+- **여정 잇기**: 대기열 경로 요청에는 여정 ID가 없고(게이트웨이가 대기열 토큰을 풀지 않는다), `QueueEntryRecord`는 대기가 끝날 때 와서 적재 때 여정을 채울 수 없다. 그래서 작업자는 상태를 두지 않고, 요청에 있는 값만 싣는다. 여정·기기 가명이 빈 행은 읽는 쪽(ops-svc 조사 모듈, `inv_reader`)이 `inv_link`와 (회차, pid)로 잇는다.
+- **원문 IP**: 원문 IP는 `inv_request`에만 있다. 법정 접속기록 저장소와 서로 복사하지 않고, 같은 요청은 `requestId`로 대조만 한다(docs/observability.md §7 '원문 IP를 두는 곳').
+- **중복과 순서**: 적어도 한 번 전달이라 같은 사건이 다시 올 수 있다. 표마다 `ReplacingMergeTree`의 정렬 키(요청은 `requestId`, 단계·행동은 원천의 `eventKey`)로 지운다. 도착 순서에 기대지 않는다. 시각은 원천의 사건 시각이다.
+- **기록 고정과 적재 지연**: 온세일 윈도우가 끝나면(T+60분) ops-svc 조사 모듈이 그 회차를 고정하고 해시를 남긴다(docs/data.md `fraud_snapshot`). 고정하기 전에 이 작업자의 모든 파티션 커밋 위치가 T+60분 + 5분 [가정] 뒤의 사건까지 갔는지 본다. 아직이면 기다리고, 30분 [가정] 넘게 못 따라오면 그 판에 '늦은 적재'를 표시해 고정하고(`fraud_snapshot.late`) SEV3를 낸다. 고정 뒤에 늦게 온 사건은 다음 판(판매 종료까지 다시 고정하는 판)에 들어간다. 판의 범위는 사건 시각이 아니라 이 작업자가 행을 넣은 시각(`ingested_at`)으로 정하고, 같은 키의 중복은 가장 이른 적재 행만 센다. 그래서 늦게 온 옛 시각의 행이나 다시 들어온 중복이 지난 판의 해시를 바꾸지 않는다(docs/data.md '부정 예매 사후 조사의 표', 추천 적용 2026-10-31).
+- **보존**: 행마다 `retain_until`(공연 종료일 + 30일 [가정])을 싣고 표의 TTL이 지운다. 공연 날짜가 바뀌면 정비 잡이 그 회차 파티션의 `retain_until`을 고친다. 조치한 사건의 증거는 증거 묶음(`evidence_bundle`)으로 따로 떼어 분쟁·수사가 끝날 때까지 둔다(ADR-0171 결정 5).
+- **용량 [추정]**: 대형 온세일(100만 명) 한 회차에 요청 기록은 사람당 10건 안팎이라 약 1,000만 행, 단계 약 200만 행이다(docs/features/forensic-replay.md §7.2와 같은 추정). T=0 진입 순간의 요청 기록은 초당 약 20만 건 × 약 350바이트(압축 전)로, 노드 에이전트의 Kafka 내보내기를 압축(zstd)하면 텔레메트리 클러스터에 초당 수십 MB가 더 들어간다. 텔레메트리 클러스터의 여유와 파티션 수는 docs/infra.md §4에서 V-T19 부하 시험으로 확인한다(확인 필요). 넘치면 진입(`QUEUE_ENTRY`) 요청 기록만 노드 에이전트에서 묶음 압축을 키우거나, 그 몫을 법정 접속기록 저장소와 같은 디스크 큐로 늦게 보내는 쪽을 먼저 본다.
 
 ## 7. 키 규칙(ADR-0026 결정 1)
 
@@ -521,6 +551,8 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 | 조회 시점 집계가 가벼움 | `rt_query_seconds{view}` | 회차당 조회 p95 0.25초 미만 [가정] | '실시간 표' | 10분 넘게 0.25초 초과 SEV3 | 카나리 동안 비교 |
 | 재평가가 사람을 한꺼번에 격리하지 않음 | `trust_reassess_candidates_total{pattern}`, `trust_reassess_isolations_total{mode}` | — | 봇 패널 '재평가' | 격리 상한 도달 SEV3 | 그림자 기간 표본 검토 |
 | 원본 적재가 빠짐없음 | 마감 커버리지 대조, 적재 거절 기록 | — | 리포트 '데이터 품질' | 마감 보류(analytics §7), 거절 > 0 SEV3 | 마감 리포트 |
+| 조사 적재가 기록 고정 전에 따라옴(추천 적용 2026-10-31, ADR-0171) | `stream_consumer_lag_records{worker="inv-ingest"}`, 고정 판의 '늦은 적재' 표시(`fraud_snapshot.late`), `inv_ingest_ref_lookup_failures_total` | — | '스트림 작업자' 화면 '조사 적재' | 고정 대기 30분 [가정] 초과 SEV3, 계정 연결 값 묻기 실패가 10분 [가정] 이어지면 SEV3 | 온세일 뒤 첫 고정 판에 '늦은 적재' 표시가 없는지 |
+| 분석 저장소에 조사 칸이 없음(추천 적용 2026-10-31, ADR-0171) | 브론즈 표의 열 목록, `investigation.requests` 소비자 그룹 목록 | — | — | 계약 검사·마이그레이션 검사가 막는다(ST-T22) | 배포 전 CI |
 
 ## 10. 시험 포인트
 
@@ -546,6 +578,10 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 | ST-T18 | 키 단위 동시 처리(추천 적용 2026-10-29, ADR-0142): 로컬에서 한 회차의 `trade.payments` 사건을 한 파티션에 넣는다. 주문 수백 개의 사건을 섞고, 같은 주문의 사건 몇 개는 잇달아 넣는다. 처리 중에 소비자 파드를 하나 더 띄워 재조정을 일으키고, 다른 실행에서는 처리 중인 파드를 강제로 종료한다 | 같은 주문의 사건은 넣은 순서대로 반영된다(순서가 뒤집힌 수 0). 커밋 위치는 늘 '그 앞의 사건이 모두 끝난 위치' 이하다. 재조정과 강제 종료 뒤에도 빠진 사건 0건, 두 번 반영한 사건 0건이다(다시 받은 사건은 `eventKey`로 거른다). 파티션마다 동시에 처리한 키 수가 32개 [가정]를 넘지 않는다 | P-T48, wbs 0.5.1 |
 | ST-T20 | 소비자 설정 기본값과 직접 넣은 값(로컬, 2026-10-30 실행): Kafka 3.9.2 브로커(공식 컨테이너 한 대, KRaft)에 파티션 6개 토픽을 두고, `@confluentinc/kafka-javascript` 1.11.0의 KafkaJS 호환 소비자 둘을 같은 그룹에 붙인다. ① 값을 주지 않은 그룹 ② 공용 모듈 값(`group.protocol=classic`, 세션 45초, cooperative-sticky)을 넣은 그룹. 소비자 하나가 붙은 뒤 둘째를 붙이고, 둘째를 강제로 죽인다 | ①은 배정 방식 `roundrobin`, 둘째가 들어올 때 첫째가 6개를 모두 내놓음, 죽인 뒤 회복 28.9초. ②는 `cooperative-sticky`, 첫째가 3개만 내놓음, 회복 44.7초. 둘 다 그룹 종류 Classic. 통과 기준: ②에서 첫째가 옮길 파티션만 내놓고, 회복이 세션 45초 ±5초 [가정]이며, 그룹 종류가 Classic이다(2026-10-30 통과) | wbs 0.5.1, ADR-0142 |
 | ST-T19 | 보류 사건(추천 적용 2026-10-29, ADR-0142): 한 파티션에 주문 A의 사건 셋과 다른 주문들의 사건을 섞어 넣는다. 주문 A의 첫 사건은 처리기가 늘 예외를 내는 독 사건(계속 실패하는 사건)이다. 다른 실행에서는 저장소 연결을 끊는다 | 독 사건은 5회 [가정] 실패한 뒤 `held_event`로 옮겨지고, 주문 A의 뒤 사건 둘도 함께 보류된다. 다른 주문의 처리는 멈추지 않는다. 결제 토픽 보류 SEV2가 뜬다. 처리기를 고친 뒤 RB-11로 다시 넣으면 주문 A의 사건이 순서대로 반영되고 중복 반영은 없다. 저장소 연결을 끊은 실행에서는 아무것도 보류되지 않고 그 파티션이 멈춰 기다렸다가, 되살리면 이어 처리한다 | RB-11, wbs 0.5.1 |
+| ST-T21 | 조사 적재 대응(추천 적용 2026-10-31, ADR-0171): 한 사람의 여정(로비 입장 → 진입 → 입장 확정 → 홀드 경합 패배·홀드 → 주문 → 결제 승인 → 양도 → 입장 스캔)의 사건과 그 요청 기록을 보내고, 같은 묶음을 한 번 더 보낸다 | `inv_step`에 단계 열이 순서대로 하나씩 남고(다시 보낸 묶음은 늘지 않는다), 홀드 시도 행에 좌석과 잡은 시각이, 결제 행에 결제 수단 연결값·BIN이 있다. 대기열 경로 요청 행은 여정이 비어 있어도 (회차, pid)로 그 여정에 이어 읽힌다. `inv_link`에 계정·연락처·기기 가명이 남는다 | FR-072 |
+| ST-T22 | 두 갈래 나눔(추천 적용 2026-10-31, ADR-0171 결정 2): 조사 칸이 든 사건을 원본 적재로 싣고, `analytics-ingest` 자격으로 `investigation.requests`를 읽으려 하고, `an_forensic_reader`로 `inv` 표를 읽으려 하고, `inv_ingest`로 분석 표에 쓰려 한다 | 브론즈·실버에 `journeyId`·`deviceRef`·`contactRef`·`paymentMethodRef`·`cardBin` 열이 없다. 토픽 읽기는 MSK 권한 거부, 두 ClickHouse 접근은 권한 오류다 | FR-071 |
+| ST-T23 | 기록 고정(추천 적용 2026-10-31, ADR-0171 결정 6): T+60분 고정 직전에 `inv-ingest` 한 파티션을 10분 멈추고, 다른 실행에서는 40분 멈춘다. 같은 입력으로 고정을 두 번 한다 | 10분: 고정이 기다렸다가 빠짐없이 고정한다. 40분: 30분 뒤 '늦은 적재'로 고정되고 SEV3가 뜨며, 늦은 사건은 다음 판에 들어간다. 같은 입력의 두 해시가 같다 | FR-072 |
+| ST-T24 | 조사 저장소 보존(추천 적용 2026-10-31, ADR-0171 결정 5): 공연 종료 + 30일 [가정]이 지난 회차와 공연 날짜가 바뀐 회차를 만든다 | 지난 회차의 행이 TTL로 사라지고 그 회차 사건은 증거 묶음만 남는다(리플레이·그래프는 410). 날짜가 바뀐 회차는 새 `retain_until`을 따른다 | FR-074 |
 
 ## 11. 용량 산정
 
@@ -625,6 +661,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 - R1은 공용 기기(PC방, 가족 태블릿)를 잡을 수 있다. 격리는 추가 검증이라서 사람은 통과한다. 상한과 그림자 모드 시작으로 피해 규모를 묶어 둔다.
 - R2는 녹화한 움직임을 재생하면서 잡음을 섞는 봇을 놓친다. CEP를 쓰지 않으므로 순서 패턴은 브라우저 요약값(입력 간격 분산)과 서버 쪽 신호에만 기댄다.
 - 수치(묶음, 조회 주기, 복제·자원, 보존, 패턴 숫자, 격리 상한, 지연 예산, 파티션 수)는 [가정]이고, 4.3.8·4.3.9·V-T19와 그림자 기간의 표본 검토에서 정한다.
+- 조사 적재(§6.4)는 대기 상태 파일 조회처럼 게이트웨이를 지나지 않는 요청을 보지 못하고, 노드가 갑자기 사라지면 그 노드에서 아직 보내지 못한 요청 기록을 잃는다(법정 사본 갈래와 같은 한계, docs/observability.md §7). 진입 피크의 텔레메트리 클러스터 부담은 확인 필요다(추천 적용 2026-10-31, ADR-0171).
 
 ## 16. 대안과 바꿀 조건(ADR-0099)
 

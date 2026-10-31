@@ -20,6 +20,14 @@
       "type": "string"
     },
     {
+      "name": "journeyId",
+      "doc": "입장 토큰 클레임 jny의 여정 ID(조사용 추적 ID, UUIDv7). 조사 적재가 구매 세션을 여정에 잇고 분석 적재는 버린다(ADR-0171 결정 4, 추천 적용 2026-10-31)",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
       "name": "startedAt",
       "type": {
         "type": "long",

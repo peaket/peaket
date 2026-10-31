@@ -73,6 +73,41 @@
       ]
     },
     {
+      "name": "journeyId",
+      "doc": "구매 세션의 여정 ID(조사용 추적 ID, UUIDv7). CREATED에만 싣고 뒤의 사건은 주문 ID로 잇는다. 분석 적재는 버린다(ADR-0171, 추천 적용 2026-10-31)",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "CREATED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "contactRef",
+      "doc": "예매자 휴대폰 번호(E.164)의 조사용 가명 HMAC-SHA256(inv-ref-key, contact| + 번호). CREATED에만. 분석 적재는 버린다(ADR-0171 결정 4, 추천 적용 2026-10-31)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "CREATED"
+          ]
+        }
+      ]
+    },
+    {
       "name": "items",
       "doc": "좌석별 등급·구역·가격(ADR-0052)",
       "type": {

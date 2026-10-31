@@ -8,8 +8,8 @@
   - 대기열 쪽 동작(번호, 빠진 번호, `VERIFYING`·`PASSED` 기록)은 [queue-admission.md](queue-admission.md) §7이, 재평가 작업자의 패턴·키·스크립트는 [docs/streaming.md](../streaming.md) §5가 정본이다. 이 문서는 그 둘을 다시 쓰지 않고 가리킨다.
 - **원문 출처**: 원문에 없다. 전체가 [보완]이다.
 - **기준 기획 버전**: v1.0.
-- **관련 ID**: FR-020 · FR-039 · FR-049 · NFR-001, 020, 022 · POL-001, 002, 006, 021, 026 · SCR-007, 009, 029, 045, 057, 067 · CMP-047 · API(프로그램끼리 요청과 응답을 주고받는 창구) `POST /v1/queues/{eventId}/lobby-participants`, `POST /v1/queues/{eventId}/pre-verifications`, `POST /v1/queues/{eventId}/verification` · 내부 호출 `ScoreRisk`(trust.proto), `IsolateWaiting`(queue.proto) · 이벤트 `telemetry.behavior`, `telemetry.trust-candidates`, `telemetry.trust-verdicts`, `control.settings` · ADR-0039, 0048, 0053, 0065, 0071, 0099, 0112, 0128, 0134, 0136, 0147, 0151, 0156(이 문서의 결정 기록) · 보안 추적 표 [docs/security/asvs/bot-defense.md](../security/asvs/bot-defense.md)
-- **표시**: 이 문서가 새로 정한 설계 판단에는 '(추천 적용 2026-10-30)'을 붙였다. 판정 기준값, 점수기 가중치, 3단계 봇 코드는 이 문서에 쓰지 않는다. 기준값과 가중치는 trust-svc만 읽는 비공개 설정(봇 탐지 규칙 매개변수, AWS Secrets Manager. 비밀 값을 보관하는 AWS 서비스)에 두고, 3단계 봇 코드는 비공개 저장소 `peaket-bots`에만 둔다(ADR-0169, POL-026, docs/devops.md §2.1, docs/security/secrets-and-keys.md, ADR-0147 결정 3). 공개 저장소 `peaket`에 있는 trust-svc 코드(`services/trust-svc`)는 그 설정의 이름과 판 번호(바뀔 때마다 하나씩 늘어나는 번호)만 안다.
+- **관련 ID**: FR-020 · FR-039 · FR-049 · FR-072·073(사후 포렌식 수집, 2026-10-31 더함) · NFR-001, 020, 022 · POL-001, 002, 006, 021, 026, 046 · SCR-007, 009, 029, 045, 057, 067 · CMP-047 · API(프로그램끼리 요청과 응답을 주고받는 창구) `POST /v1/queues/{eventId}/lobby-participants`, `POST /v1/queues/{eventId}/pre-verifications`, `POST /v1/queues/{eventId}/verification` · 내부 호출 `ScoreRisk`(trust.proto), `IsolateWaiting`(queue.proto) · 이벤트 `telemetry.behavior`, `telemetry.trust-candidates`, `telemetry.trust-verdicts`, `control.settings`, `investigation.requests`(조사용 요청 기록, §3.3) · ADR-0039, 0048, 0053, 0065, 0071, 0099, 0112, 0128, 0134, 0136, 0147, 0151, 0156(이 문서의 결정 기록), 0171(사후 포렌식 수집 보강) · 보안 추적 표 [docs/security/asvs/bot-defense.md](../security/asvs/bot-defense.md)
+- **표시**: 이 문서가 새로 정한 설계 판단에는 '(추천 적용 2026-10-30)'을 붙였다. 2026-10-31 사후 포렌식 수집 보강(부정 예매를 판매 뒤에 묶어 찾으려고 기기 키를 하나로 맞추고 여정 ID·끝단 신호·화면별 행동 요약을 더한 일, ADR-0171 결정 4)에서 정한 것은 '(추천 적용 2026-10-31, ADR-0171)'이다. 판정 기준값, 점수기 가중치, 3단계 봇 코드는 이 문서에 쓰지 않는다. 기준값과 가중치는 trust-svc만 읽는 비공개 설정(봇 탐지 규칙 매개변수, AWS Secrets Manager. 비밀 값을 보관하는 AWS 서비스)에 두고, 3단계 봇 코드는 비공개 저장소 `peaket-bots`에만 둔다(ADR-0169, POL-026, docs/devops.md §2.1, docs/security/secrets-and-keys.md, ADR-0147 결정 3). 공개 저장소 `peaket`에 있는 trust-svc 코드(`services/trust-svc`)는 그 설정의 이름과 판 번호(바뀔 때마다 하나씩 늘어나는 번호)만 안다.
 
 ## 1. 범위와 이름
 
@@ -64,6 +64,7 @@ flowchart LR
 - trust-svc는 IP로 ASN을 찾지 않고 CloudFront(AWS의 CDN)가 붙인 `CloudFront-Viewer-ASN` 헤더를 게이트웨이를 거쳐 받는다. 이 헤더는 원본 요청 정책에만 넣을 수 있고 캐시 정책에는 넣을 수 없다(AWS CloudFront 개발자 안내서, 2026-10-30 확인). 대기열 API 배포의 원본 요청 정책에 넣는다(추천 적용 2026-10-30). 로그인 판정은 대기열 API 배포를 지나지 않으므로, 공연 페이지 배포의 앱 서버 로그인 경로(소셜 로그인 시작·콜백)의 원본 요청 정책에도 넣고, 앱 서버가 `CreateSession`의 `asn`으로 identity-svc에 넘긴다(docs/infra.md §4.1 'ASN 헤더와 분류표', identity.proto, 추천 적용 2026-10-30).
 - ASN을 호스팅·프록시·그 밖으로 나누는 것은 ASN 분류표다. 분류표는 trust-svc 작업이 하루 한 번 [가정] 새 판을 만들어 S3(AWS의 파일 저장소)에 두고, trust-svc와 queue-svc 파드(쿠버네티스에서 앱이 실행되는 가장 작은 단위)가 시작할 때와 1시간 [가정]마다 읽는다. 읽지 못하면 마지막으로 읽은 판을 쓴다. queue-svc도 읽는 까닭은 축소 운영(§11.2) 때문이다(추천 적용 2026-10-30). 분류표를 만들 원천 자료(공개 목록인지 상용 자료인지)는 [가정, wbs 3.2.1에서 확정]이다. 분류표에는 판정 기준값이 없어 공개되어도 되는 값이다.
 - 추가 검증 제출의 맥락은 `trust.proto`의 `SCORE_CONTEXT_VERIFICATION`이다(2026-10-30 더함). 추가 검증은 "사람임을 다시 보이면 원래 순번으로 돌아간다"(FR-020)가 규칙이라, 다시 가중합을 하면 차단 기기 목록 같은 같은 근거로 또 걸려 규칙이 깨진다. 그래서 사람 확인만 본다(추천 적용 2026-10-30). 휴대폰 본인확인 재통과는 queue-svc가 identity-svc `CheckReverification`으로 확인한다(§5.2).
+- **여정 ID(추천 적용 2026-10-31, ADR-0171)**: 여정 ID(`journeyId`)는 한 사람이 한 회차에 들어와 나갈 때까지를 잇는 조사용 추적 ID다. queue-svc가 만들어 토큰 클레임 `jny`에 싣는다(queue-admission §2 '여정 ID와 조사용 요청 기록'). queue-svc는 로비 입장·사전 검증 판정에 그 값을 `ScoreRiskRequest.journey_id`로 넘긴다. trust-svc는 이 값으로 점수를 매기지 않고, 판정 기록과 행동 신호에 옮겨 싣기만 한다(§4.1 ⑤). 로그인 판정에는 회차가 없어 비운다. 추가 검증 제출은 요청 본문에 토큰이 없어 queue-svc가 여정 ID를 모르므로 비우고, 조사 적재가 (회차, pid)로 잇는다(queue-admission §2).
 
 ### 3.2 판정 피처와 키
 
@@ -77,11 +78,27 @@ flowchart LR
 | `tr:hp:{pid}` | 문자열 | 허니팟 적중 표시. 값은 적중 시각과 회차다 | 24시간 [가정] | docs/data.md §3, §7(추천 적용 2026-10-30) |
 | `tr:vb:{pid}:E` | 문자열 | 판정 근거 키. `CHALLENGE` 판정과 재평가 격리에만 쓴다. 값은 판정 키(`TrustVerdict.eventKey`), 기기 가명, 확정 신호 근거(차단 목록·허니팟), 사유 범주, 프로필 판, 판정 시각이다 | 30일 [가정] | docs/data.md §3, §12(추천 적용 2026-10-30) |
 
-- 기기 가명(`deviceRef`)은 브라우저가 처음 쓸 때 만든 128비트 무작위 값 `deviceId`를 `HMAC-SHA256(탐지 가명 키, deviceId)`로 바꾼 값이다. HMAC은 비밀 키로 만든 위조 확인용 값이라, 키가 없으면 같은 값을 만들 수 없다. 원래 값은 브라우저에만 있고 trust-svc는 저장하지 않는다(ADR-0053 결정 1, docs/security/data-classification.md).
+- 기기 가명(`deviceRef`)은 브라우저가 처음 쓸 때 만든 128비트 무작위 값 `deviceId`를 `HMAC(inv-ref-key, "device|" + deviceId)`로 바꾼 값이다. HMAC은 비밀 키로 만든 위조 확인용 값이라, 키가 없으면 같은 값을 만들 수 없다. 원래 값은 브라우저에만 있고 trust-svc는 저장하지 않는다(ADR-0053 결정 1, docs/security/data-classification.md).
+  - **기기 키 통일(2026-10-31에 바꿨다, ADR-0171 결정 4 '기기 키 하나')**: 전에는 trust-svc 전용 탐지 가명 키로 `HMAC-SHA256(탐지 가명 키, deviceId)`를 썼다. 지금 키 `inv-ref-key`는 부정 예매 조사 갈래 전용 KMS(암호 키를 보관하고 대신 계산해 주는 AWS 서비스) HMAC 키이고, 값 앞에 종류 라벨(`device|`)을 붙여 같은 키로 만드는 다른 조사용 가명과 섞이지 않게 한다. identity-svc가 기기 연결 표에 두는 `device.device_ref`도 같은 식이라 두 값이 같다(docs/features/identity.md §9.1). 그래서 조사에서 판정 기록의 기기와 계정에 연결된 기기를 같은 값으로 잇는다. 위 표의 Redis 키 이름(`tr:devshare`·`tr:devacct`·`tr:devhist`·`tr:block`, 재평가의 `tr:ra:dev`)은 그대로이고 그 안의 기기 가명 값만 바뀐다. 탐지 가명 키는 기기에 더 쓰지 않는다. 키 회전과 접근 범위는 docs/security/secrets-and-keys.md가 정한다(추천 적용 2026-10-31, ADR-0171).
 - `tr:devacct`·`tr:devhist`는 queue-admission §7 '기기 신뢰도' 신호(그 기기에서 인증된 계정 수, 과거 온세일(판매가 열리는 시각 앞뒤로 접속이 몰리는 기간) 검증 이력, 보존 30일)를 담을 키가 정본에 없어 더했다. 해시 태그(Redis 클러스터에서 키를 같은 칸에 모으는 표시)는 기기 가명이고 회차를 넘어 쓴다. 기기 100만 개면 두 키를 합쳐 약 200MB [추정]다.
 - `tr:hp`·`tr:vb`의 해시 태그는 pid다. 판정 근거 키는 추가 검증으로 보낸 판정만 남기므로(대형 온세일에서 많아야 수만 건 [추정]) 메모리가 작다.
 - 판정 피처 Redis 명령은 핫패스(요청이 가장 많이 지나는 경로) 시간 초과 100ms를 따른다(docs/architecture.md §5 '시간 초과 기본값'). 시간 초과나 오류가 나면 그 피처는 '값 없음'이다(§4.4).
 - 새 키 넷은 2026-10-30 docs/data.md §3에 더해졌다. docs/security/data-classification.md의 '기기 신뢰 이력과 차단 기기 목록' 행에 `tr:devacct`·`tr:devhist`·`tr:block`이, '이상 징후 위험 점수 및 이의 제기 심사 기록' 행에 판정 근거 키와 허니팟 적중 표시가 2026-10-30 들어갔다.
+
+### 3.3 끝단 신호(TLS 지문·봇 라벨)
+
+ADR-0171 결정 4는 끝단(CDN과 웹 방화벽처럼 사용자 가까이에서 요청을 먼저 받는 층)이 주는 TLS 지문과 봇 점수도 받으라고 하면서 '어느 요금제에서 나오는지는 확인 필요'로 두었다. 2026-10-31에 공식 문서로 확인하고(§21) 다음처럼 정했다(추천 적용 2026-10-31, ADR-0171).
+
+| 신호 | 어디서 나오나 | 받는 법 | 없을 때 |
+| --- | --- | --- | --- |
+| TLS 지문 JA4(암호화 연결을 시작할 때 보내는 인사말의 모양을 줄인 36자 값) | CloudFront 헤더 `CloudFront-Viewer-JA4-Fingerprint`(HTTPS 요청에만, 원본 요청 정책에만 넣을 수 있다). AWS WAF 로그의 `ja4Fingerprint`도 같은 값이다 | 대기열 API 배포(`queue`)와 `api` 배포의 원본 요청 정책에 넣는다. AWS 관리형 정책에는 없어 ASN 헤더처럼 직접 만든 정책에 넣는다(정액제 요금제면 Business·Premium 등급만 된다, §21). 게이트웨이가 조사용 요청 기록(`investigation.requests`)의 `ja4`에 싣는다 | 칸을 비운다(HTTP 요청, 헤더가 빠진 요청) |
+| 끝단 봇 라벨(`edgeBotLabels`) | 숫자 봇 점수를 주는 공급자가 없다. AWS WAF Bot Control(봇으로 보이는 요청에 라벨을 붙이는 AWS 관리 규칙)은 라벨(`awswaf:managed:aws:bot-control:bot:category:…` 등)과 신뢰 단계 셋만 붙인다. Cloudflare Turnstile 서버 검증 응답에는 점수가 없다 | WAF 규칙의 헤더 더하기로 라벨을 `x-amzn-waf-bot-labels`에 끼워 넣어 원본이 받는다. 게이트웨이가 `edgeBotLabels`(문자열 목록)에 싣는다 | 칸을 비운다. 지금 Bot Control은 소비자 웹 로그인 경로에만 있어(docs/infra.md §9 '배포·경로별 WAF 규칙표') 대기열·구매 경로에서는 늘 빈다 |
+
+- **이름**: 칸 이름은 점수가 아니라 `edgeBotLabels`다. 숫자 점수(Cloudflare 봇 점수 1~99)는 Enterprise Bot Management를 사고 트래픽이 Cloudflare를 지나야 나오는데, PEAKET은 CloudFront가 앞단이라 받지 못한다(추론).
+- **대기열 경로에 Bot Control을 걸지**: 대기열 API 배포의 네 경로(로비 입장·사전 검증·진입·입장 확정)에 Bot Control Common을 세기(Count, 막지 않고 라벨만 붙이는) 모드로 걸어 라벨만 받을지는 docs/infra.md §9 WAF 규칙표에서 정한다. 이 문서는 정하지 않는다. 걸지 않으면 이 칸은 대기열 경로에서 늘 비고, 조사는 JA4·IP·ASN·시간창으로 한다.
+- **쓰지 않는 것**: WAF 토큰 지문 라벨(`awswaf:managed:token:fingerprint:…`)은 브라우저 지문이라 모으지 않는다(ADR-0079 결정 5, ADR-0171 결정 4 '모으지 않는 것').
+- **판정에 쓰지 않는다**: trust-svc 실시간 판정은 JA4와 끝단 봇 라벨을 피처로 쓰지 않는다. `ScoreRiskRequest`에도 싣지 않고 조사 기록에만 남긴다. JA4는 브라우저 기기 지문이 아니라 TLS 라이브러리 인사말의 모양이라, 같은 브라우저 판을 쓰는 많은 사람이 같은 값을 갖는다. 그래서 혼자서는 사람을 가르지 못하고, 조사에서 IP·시간창과 함께 묶음 근거로만 쓴다. 판정 피처로 넣으려면 §10의 그림자 실행을 먼저 거친다.
+- **위조 헤더 지우기**: 게이트웨이는 바깥에서 온 `CloudFront-Viewer-*`·`x-amzn-waf-*` 헤더를 원본 확인 헤더가 맞는 요청에서만 믿고, 아니면 지운다. ASN 헤더(§3.1)와 같은 규칙이다.
 
 ## 4. 점수기 목록 파이프라인
 
@@ -91,9 +108,13 @@ flowchart LR
 2. **확정 신호 검사**: 차단 기기 목록이나 허니팟 적중이 있으면 그 자리에서 `CHALLENGE`로 정한다(§4.3). 그래도 ③을 건너뛰지 않는다. 사람 확인 결과와 그림자 판(§10) 판정을 남겨야 하기 때문이다. 앞에서 끝난다는 것은 ④의 가중합 결과와 상관없이 판정이 정해진다는 뜻이다.
 3. **점수기 모두 돌리기**: §4.2의 여섯을 모두 돌린다. 하나가 높다고 나머지를 건너뛰지 않는다.
 4. **가중합과 기준값**: 프로필(§4.4)의 가중치로 더하고 기준값과 견준다.
-5. **기록 발행**: 판정을 `telemetry.trust-verdicts`(`TrustVerdict`, source `REALTIME`)로, 판정 입력을 `telemetry.behavior`(`BehaviorSignal`)로 낸다. 점수 원값과 가중치는 어디에도 싣지 않는다(POL-006, queue-admission §7). `CHALLENGE`면 판정 근거 키를 쓰고 `tr:devhist`의 보냄 수를 올린다. Kafka(이벤트를 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템) 발행은 응답을 보낸 뒤 비동기로 한다. 생산자 버퍼가 차면 버리고 `telemetry_dropped_total{record}`로 센다(docs/architecture.md §5).
+5. **기록 발행**: 판정을 `telemetry.trust-verdicts`(`TrustVerdict`, source `REALTIME`)로, 판정 입력을 `telemetry.behavior`(`BehaviorSignal`)로 낸다. 점수 원값과 가중치는 어디에도 싣지 않는다(POL-006, queue-admission §7). 판정 기록에는 여정 ID(`journeyId`)와 기기 가명(`deviceRef`, 판정 입력에 기기 식별값이 있었을 때)을, 행동 신호에는 `journeyId`와 화면(`screen`: 로비 입장은 `LOBBY`, 사전 검증은 `EVENT_DETAIL`)을 싣는다. 조사 적재 작업자 `inv-ingest`가 두 토픽을 함께 읽어 조사 저장소에 넣는다(docs/streaming.md, 추천 적용 2026-10-31, ADR-0171). `CHALLENGE`면 판정 근거 키를 쓰고 `tr:devhist`의 보냄 수를 올린다. Kafka(이벤트를 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템) 발행은 응답을 보낸 뒤 비동기로 한다. 생산자 버퍼가 차면 버리고 `telemetry_dropped_total{record}`로 센다(docs/architecture.md §5).
 
 - `BehaviorSignal`은 사전 검증과 로비 입장 둘 다에서 낸다. 로비는 행동 요약이 없어 `features`가 비지만, 재평가의 기기 공유 소급(R1)은 기기 가명만 보므로 로비 참가자에게도 쓰인다. 재평가 격리가 로비 참가자의 참가 토큰을 찾게 되어 있고(queue-admission §7, `IsolateWaiting`), 재평가 용량(10분 피크 신호 약 100만 개, docs/streaming.md §5.8)도 로비 규모로 잡혀 있어서다(추천 적용 2026-10-30). docs/streaming.md §5.1·§5.2·§5.5를 이에 맞춰 고쳤다.
+- **좌석·결제 화면의 행동 요약(추천 적용 2026-10-31, ADR-0171 결정 4)**: 행동 요약을 공연 상세(사전 검증 본문)만이 아니라 좌석 화면과 결제 화면에서도 같은 `BehaviorSummary` 형식으로 잰다. 좌석 화면 요약은 구매 세션의 첫 직접 선택 홀드 요청 본문(`HoldRequest.behavior`, `POST /v1/events/{eventId}/holds`)에, 결제 화면 요약은 결제 시도를 시작하는 본문(`POST /v1/orders/{orderId}/payments`의 `behavior`)에 싣는다. 좌석 자동 배정 공연은 좌석을 직접 고르지 않아 좌석 요약이 없다.
+  - 이 둘은 trust-svc를 거치지 않는다. purchase-svc가 `BehaviorSignal`(screen `SEAT`·`PAYMENT`)로 `telemetry.behavior`에 내고, 조사 적재만 쓴다. purchase-svc는 ASN을 모르므로 `netClass`·`asn`이 없다.
+  - trust-svc 실시간 판정은 이 둘을 쓰지 않는다. 구매 경로에는 판정이 없다(§4.6 'T=0 핵심 경로'). 재평가 작업자 `trust-reassess`는 screen `LOBBY`·`EVENT_DETAIL`만 읽고, `SEAT`·`PAYMENT`는 행동 신호 원시 표에도 넣지 않고 건너뛴다. 좌석·결제 화면에 있는 사람은 이미 입장해 대기 중 격리의 대상이 아니라서, 넣어도 쓸 곳 없이 재평가 용량(docs/streaming.md §5.8)만 쓰기 때문이다.
+  - 원시 좌표·마우스 궤적·좌석 '보고 있음'은 모으지 않는다(ADR-0065 결정 9, ADR-0171 결정 4 '모으지 않는 것'). 요약값이 브라우저가 만든 값이라 꾸밀 수 있다는 한계(§4.2 `BehaviorScore`)도 같다.
 
 ### 4.2 점수기
 
@@ -208,6 +229,7 @@ flowchart LR
   - 처리한 후보 `eventKey`를 10분 [가정] 기억해 두 번 처리하지 않는다.
   - 재평가 모드(끔·그림자·적용, 기본 그림자)를 따른다. 그림자면 `TrustVerdict`(source `REASSESS`, action `NONE`, `shadow` true)만 낸다. 적용이면 `IsolateWaiting`을 부르고, 격리하면 판정 근거 키(§3.2)를 쓴다. 사유 범주는 R1이 `RAPID_REQUESTS`, R2가 `SHARED_PATTERN`이다.
   - 이미 입장했거나 대기가 끝난 사람은 라벨만 남긴다.
+  - 재평가 판정 기록(`TrustVerdict` source `REASSESS`)에는 여정 ID(`journeyId`)를 싣지 않는다. trust-svc는 후보(`TrustCandidate`)만 받고 후보에는 여정이 없기 때문이다. 판정 기록에 pid가 있으므로 조사 적재가 (회차, pid)로 여정에 잇는다(docs/streaming.md §6.4). 후보에 칸을 더하지 않은 까닭은 재평가 키(`tr:ra:dev`)가 pid와 시각만 담아, 여정을 옮기려면 키 모양을 바꿔야 하기 때문이다(추천 적용 2026-10-31, ADR-0171).
 - **격리 상한의 분모**: 상한은 회차의 지금 대기 인원의 0.5% [가정]/10분이다. 그런데 trust-svc가 회차의 지금 대기 인원을 알 길이 정본에 없다(`QueueAggregate`에 대기 인원 칸이 없다). 그래서 queue-svc가 격리를 쓰는 Lua에서 10분 칸의 재평가 격리 수와 대기 인원(발급 번호 − serving − 빠진 번호)을 함께 보고, 넘으면 격리하지 않고 '상한 도달'로 답하는 안을 추천한다. trust-svc는 그 답을 받으면 그림자로 남기고 SEV3(장애 심각도 등급. 숫자가 작을수록 심각하다)를 낸다. queue-admission §7에 반영했고(2026-10-30), 계약은 queue.proto 초안의 `ISOLATE_RESULT_CAP_REACHED`다(추천 적용 2026-10-30).
 - 그림자에서 적용으로 바꾸는 일은 §10.3을 따른다.
 - 재평가 키를 잃으면(Redis 장애, 메모리 정리) 최대 10분의 문맥을 잃는다(docs/data.md §3 유실 등급 B).
@@ -218,12 +240,24 @@ flowchart LR
 - **올리는 조건**: 사람이 확인한 확정만 올린다(추천 적용 2026-10-30).
   - 봇 판정 표본 검토(SCR-067)에서 '봇'으로 판정한 세션의 기기
   - CS가 부정구매로 확인한 신고 건의 기기
-  - 자동 신호(추가 검증 실패, 허니팟 적중, 재평가 후보)만으로는 올리지 않는다. 사람이 보지 않은 신호로 올리면 오탐 하나가 90일 동안 이어지기 때문이다.
+  - 부정 예매 사건에서 사람이 확인한 계정의 기기(추천 적용 2026-10-31, ADR-0171): 표 취소나 이용 제한이 2인 승인을 거쳐 실행된 사건의 대상 계정이다(POL-046 ④, 아래 '부정 예매 조사에서 오는 라벨'). 외부 되팔이 게시물 대조는 후보 묶음의 근거 신호(`POST_MATCH`)일 뿐이라 그것만으로는 올리지 않는다(2026-10-31 정함).
+  - 자동 신호(추가 검증 실패, 허니팟 적중, 재평가 후보)만으로는 올리지 않는다. 사람이 보지 않은 신호로 올리면 오탐 하나가 90일 동안 이어지기 때문이다. 부정 예매 후보 묶음(FR-072)에 든 것만으로도 올리지 않는다. 후보는 조치가 아니기 때문이다(POL-046 ②).
   - 지난 판의 정본(queue-admission §7, docs/data.md §3)에 있던 확정 출처 '운영 명령의 차단'은 운영 명령 카탈로그 12종(docs/features/control-tower.md §3)에 맞는 명령이 없다. 그 명령이 생길 때까지 이 출처로는 올리지 않는다. 두 정본은 2026-10-30에 '사람이 확정한 것만'으로 고쳤다.
 - **올리는 길**: 표본 검토와 신고 확인은 관제 콘솔(ops-svc)에서 한다. ops-svc가 그 결과를 trust-svc에 알리는 호출(라벨 반영, §12와 같은 호출)로 보내고, trust-svc가 판정 근거 키나 행동 신호 원시 표(`trust.behavior_raw`, 30일)에서 그 세션의 기기 가명을 찾아 키를 쓴다. 호출은 trust.proto `TrustLabelService.ApplyLabel`이다(2026-10-30 더함).
+- **부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, ADR-0171)**: `ApplyLabel`의 라벨 출처(`LabelSource`)에 둘이 더해진다. 둘 다 ops-svc의 부정 거래 조사 모듈이 부른다. 같은 날 잠깐 두었던 게시물 대조 출처(`LABEL_SOURCE_EXTERNAL_POST_MATCH`)는 근거 신호일 뿐이라 뺐다.
+
+  | 라벨 출처 | 언제 부르나 | 라벨 | 차단 기기 목록 |
+  | --- | --- | --- | --- |
+  | `LABEL_SOURCE_FRAUD_ACTIONED` | 승인 업무 `FRAUD_ACTION`(표 취소·이용 제한)이 실행되어 사건이 조치됨(`ACTIONED`)이 될 때, 대상 계정마다 | BOT만 | 올리고 값의 확정 출처에 이 출처와 건 ID를 적는다 |
+  | `LABEL_SOURCE_FRAUD_APPEAL_ACCEPTED` | 부정 예매 소명이 인정되어 그 계정을 사건에서 뺄 때, 또는 조치 뒤 이의가 인정되어 되돌릴 때(`REVERSED`) | HUMAN만 | 그 사람의 판정 근거에 차단 기기 목록이 있었으면 지운다. 확정 출처가 위 출처(`FRAUD_ACTIONED`)인 키도 지운다. 이의가 인정되면 원래대로 되돌리기 때문이다(POL-046 ⑦) |
+
+  - 라벨이 맞지 않으면(`FRAUD_ACTIONED`에 HUMAN, `FRAUD_APPEAL_ACCEPTED`에 BOT) `INVALID_ARGUMENT`다(`LABEL_SOURCE_APPEAL_ACCEPTED`와 같은 규칙).
+  - 건 ID(`source_ref`)는 사건 ID이고, 한 사건에 계정이 여럿이면 계정마다 부른다(`pid`는 그 계정의 사람 식별값, `event_id`는 사건 회차). 지금 멱등 규칙은 '같은 건 ID·판이면 바꾸지 않음, 같은 건 ID에 다른 출처면 `ALREADY_EXISTS`'라서, 계정마다 반영되고 조치 뒤 소명·이의 인정(다른 출처)도 받으려면 멱등 키를 (건 ID, pid, 출처)로 보아야 한다. 계약 반영 때 맞춘다(§20).
+  - 기기 가명은 지금처럼 판정 근거 키나 행동 신호 원시 표(30일)에서 먼저 찾는다. 찾지 못하면 ops-svc가 조사 저장소에서 읽어 요청의 `device_ref`에 실은 기기 가명을 쓴다. 기기 키가 하나라(§3.2) 조사 저장소의 값이 trust-svc 키와 같기 때문이다. 둘 다 없으면 `BLOCK_LIST_CHANGE_DEVICE_NOT_FOUND`이고 키가 바뀌지 않는다.
+  - 이 셋은 판정 기록(`TrustVerdict`)으로 내지 않는다. 판정 기록은 분석 저장소(연구 갈래의 원천)로 가는데, 조사 갈래에서 나온 사람 단위 라벨을 연구 갈래에 넘기면 두 갈래가 이어지기 때문이다. 연구 갈래에는 사람 단위로 이을 수 없는 집계 라벨만 넘긴다(ADR-0171 결정 2·6). trust-svc는 차단 키를 바꾼 보안 로그 줄(기기 가명, 건 ID, 처리자, 시각)만 남기고, ops-svc가 응답의 차단 목록 변화를 사건 기록(`fraud_case_event`)에 적는다.
 - **보는 때**: 로비 입장·사전 검증의 ①에서 `EXISTS`로 본다(§4.1). 있으면 확정 신호다.
 - **지우기**: CS가 이의를 인정했고 그 판정의 근거에 차단 기기 목록이 있었으면 trust-svc가 바로 `DEL`한다. 대기표 복귀(`PASSED`)와 같은 처리에서 한다(queue-admission §7, Q-T48). 표본 검토에서 '사람'으로 다시 판정된 기기도 지운다.
-- **잃었을 때**: 키를 잃으면 그 기기들의 차단 신호 없이 판정한다. 사람 확인·휴대폰 본인확인·1인 1순번·대기 중 재평가가 남는다(유실 등급 C, docs/data.md §3). 탐지 가명 키를 바꾸면 기기 가명이 모두 바뀌어 목록과 기기 이력을 새로 쌓는다(docs/security/secrets-and-keys.md).
+- **잃었을 때**: 키를 잃으면 그 기기들의 차단 신호 없이 판정한다. 사람 확인·휴대폰 본인확인·1인 1순번·대기 중 재평가가 남는다(유실 등급 C, docs/data.md §3). 기기 가명 키를 바꾸면 기기 가명이 모두 바뀌어 목록과 기기 이력을 새로 쌓는다(docs/security/secrets-and-keys.md). 2026-10-31부터 그 키는 탐지 가명 키가 아니라 조사용 가명 키 `inv-ref-key`이고(§3.2), identity의 `device.device_ref`도 함께 바뀐다. identity-svc는 기기 식별값 원문이 없어 그 기기가 다시 로그인할 때에야 새 값을 쓸 수 있으므로, 회전 방법은 docs/security/secrets-and-keys.md에서 함께 정한다.
 
 ## 10. 그림자 실행
 
@@ -305,19 +339,21 @@ flowchart LR
 - 집계와 마감은 분석 저장소가 한다. 사실 표 `fct_bot_outcome`(F6), 지표 13~15(봇 점유율 하한, 봇 트래픽 비율, 정렬 방식별 속도형 봇 성공률), 마감 단계 R2가 정본이다(docs/features/analytics.md §4.2·§5.2·§6.3). 관제 '종료 후' 탭(SCR-029)에 '하한 추정치'로 보인다.
 - 표본 검토는 행동 신호 원시 보존 30일 안, R2 전에 끝낸다. 끝나지 않으면 봇 지표는 '판정 보류'다(docs/features/analytics.md §4.2).
 - trust-svc가 하는 일은 라벨을 내는 것까지다. 표본 검토 결과는 ops-svc의 라벨 반영 호출(§12)로 받아 `SAMPLE_REVIEW` 라벨로 낸다.
+- 부정 예매 조사에서 오는 라벨 셋(§9)은 판정 기록으로 내지 않으므로 이 표의 재료가 아니다. 연구 갈래에는 사람 단위로 이을 수 없는 집계 라벨만 간다(ADR-0171 결정 6, 추천 적용 2026-10-31).
 
 ## 14. 개인정보와 보존
 
 | 자료 | 어디에 | 보존 | 정본 |
 | --- | --- | --- | --- |
 | 기기 식별값 원문(`deviceId`) | 브라우저 localStorage만 | 사용자가 지울 때까지 | docs/security/data-classification.md |
-| 기기 가명(탐지 가명) | 피처 Redis, Kafka, 행동 신호 원시 표 | 각 자료의 보존을 따른다 | 같다, ADR-0053 |
+| 기기 가명(`deviceRef`, 조사용 가명 키 `inv-ref-key`. 2026-10-30까지는 탐지 가명, §3.2) | 피처 Redis, Kafka, 행동 신호 원시 표, 조사 저장소 `inv`, identity `device.device_ref` | 각 자료의 보존을 따른다 | 같다, ADR-0053, ADR-0171 |
 | 판정 피처(`tr:devshare`·`tr:asnhost`) | 세션·캐시 Redis | 10분·30초 [가정] | docs/data.md §3 |
 | 기기 신뢰 이력(`tr:devacct`·`tr:devhist`) | 세션·캐시 Redis | 30일 | data-classification '기기 신뢰 이력', 이 문서 §3.2 |
 | 차단 기기 목록(`tr:block`) | 세션·캐시 Redis | 90일 [가정], 이의 인정 때 바로 지움 | 같다 |
 | 허니팟 적중 표시(`tr:hp`) | 세션·캐시 Redis | 24시간 [가정] | 이 문서 §7 |
 | 판정 근거 키(`tr:vb`) | 세션·캐시 Redis | 30일 [가정] | 이 문서 §12 |
-| 행동 신호 원시(`trust.behavior_raw`) | ClickHouse(대량 이벤트 집계에 강한 분석용 데이터베이스) | 30일 | docs/streaming.md §5.4 |
+| 행동 신호 원시(`trust.behavior_raw`) | ClickHouse(대량 이벤트 집계에 강한 분석용 데이터베이스) | 30일. screen `LOBBY`·`EVENT_DETAIL`만 넣는다(§4.1) | docs/streaming.md §5.4 |
+| 조사용 사본(판정 기록·행동 요약·요청 기록의 `journeyId`·`deviceRef`·IP·JA4·끝단 봇 라벨) | ClickHouse 조사 DB `inv`(분석 저장소와 따로) | 공연 종료 뒤 30일 [가정](법률 확인 36번) | docs/data.md, ADR-0171 결정 5 |
 | 재평가 상태·후보 | 세션·캐시 Redis·Kafka | 10분·7일 | docs/streaming.md §5.8, data-classification |
 | 실시간 판정 라벨 | Kafka → 관제 실시간 표·분석 저장소 | 세션 ID는 30일 뒤 지우고 등급별 집계만 남긴다 | data-classification '실시간 봇 판정 라벨' |
 | 위험 점수·이의 제기 심사 기록 | ops DB(`verification_case`) | 공연이 끝난 뒤 1년 | data-classification '이상 징후 위험 점수 및 이의 제기 심사 기록' |
@@ -326,6 +362,7 @@ flowchart LR
 - 봇 판정은 사람의 개입 없이 개인정보와 행동 신호로 내리는 결정이라 개인정보 보호법 §37의2의 자동화된 결정으로 다룬다. 개인정보 처리방침(SCR-057)에 판정 사실·목적·주요 유형·처리 절차·권리 행사 방법을 공개한다(시행령 §44의4). 대기 중 재평가도 주요 유형에 넣는다(POL-006, ADR-0071).
 - 새로 더한 키 넷(`tr:devacct`·`tr:devhist`·`tr:hp`·`tr:vb`)은 data-classification의 '기기 신뢰 이력'·'이상 징후 위험 점수' 행의 목적과 보존 안에 든다. 두 행에 키 이름이 2026-10-30 들어갔다. 허니팟 적중 표시는 pid와 잇는 새 처리라, 그 행에 목적을 적을지 법률 검토 때 함께 본다 [확인 필요].
 - 운영 로그와 요청 기록에는 원래 pid·기기 식별값 대신 로그 가명(`pidRef`)만 남긴다(docs/observability.md §7).
+- 판정 기록·행동 신호에 더한 `journeyId`·`deviceRef`는 조사 갈래의 값이다. 분석 저장소 적재(`analytics-ingest`)는 이 칸을 버리고(분석 금지 필드, docs/data.md), `investigation.requests`는 읽지 않는다. 조사·연구 두 갈래를 잇는 키를 두지 않기 위해서다(ADR-0171 결정 2, 추천 적용 2026-10-31).
 
 ## 15. 운영 확인(architecture §8.4)
 
@@ -343,7 +380,7 @@ flowchart LR
 ## 16. 관측 지표
 
 - 서비스 기본 지표(경로·호출별 지연 히스토그램, 오류)는 서비스 템플릿이 만든다(docs/observability.md §3). trust-svc 줄의 지연·트래픽·오류·포화도가 정본이다.
-- 위 §15 지표의 라벨은 가짓수가 적은 것만 쓴다(카디널리티: 지표에 붙는 이름표 값의 가짓수, docs/observability.md §8). `context`(4), `verdict`(2), `result`(3), `pattern`(2), `mode`(3), `direction`(2), `op`(2), `source`(3), `reason`(4)다. 회차 라벨 `event_id`는 동시 회차 몫 안에서만 붙인다. 사유 범주는 라벨로 쓰지 않고 정규 로그 줄에만 남긴다(봇이 범주 분포를 보고 기준을 거꾸로 알아내는 길을 관측 화면 권한 밖으로 넓히지 않으려는 것이다).
+- 위 §15 지표의 라벨은 가짓수가 적은 것만 쓴다(카디널리티: 지표에 붙는 이름표 값의 가짓수, docs/observability.md §8). `context`(4), `verdict`(2), `result`(3), `pattern`(2), `mode`(3), `direction`(2), `op`(2), `source`(6. 라벨 출처 셋에 부정 예매 조사의 셋을 2026-10-31 더했다, §9), `reason`(4)다. 회차 라벨 `event_id`는 동시 회차 몫 안에서만 붙인다. 사유 범주는 라벨로 쓰지 않고 정규 로그 줄에만 남긴다(봇이 범주 분포를 보고 기준을 거꾸로 알아내는 길을 관측 화면 권한 밖으로 넓히지 않으려는 것이다).
 - 판정 결과의 잠정 숫자(판정 종류, 추가 검증 격리율)는 관제 실시간 표가 `telemetry.trust-verdicts`로 센다(docs/streaming.md §4). 확정 숫자는 R2다(§13).
 - 피처 Redis(세션·캐시) CPU와 판정 피처 명령 수를 본다. 포화 경보가 나면 기기 공유 수를 재평가로만 돌리는 안을 다시 본다(ADR-0071 되돌릴 조건).
 
@@ -368,6 +405,11 @@ flowchart LR
 | B-T13 | 로비 입장의 행동 신호: 로비 입장 판정도 `BehaviorSignal`(`features` 비움)을 내고, 한 기기 가명으로 로비 참가자 pid 6명이 10분 안에 들어오면 재평가 R1 후보가 6건 나온다. R2 지문은 만들지 않는다 | 통합 시험(ST-T5와 같은 작업자) |
 | B-T14 | 판정 근거 키: `CHALLENGE` 판정과 재평가 격리에만 `tr:vb`가 생기고 `ALLOW`에는 생기지 않는다. 30일 [가정] 뒤 사라지고, 사라진 뒤의 이의 인정은 행동 신호 원시 표로 기기 가명을 찾는다 | 통합 시험(시계 옮기기) |
 | B-T15 | 판정 근거 조회(`GetVerdictEvidence`, 추천 적용 2026-10-30, §12): 이의 심사 화면이 판정 근거를 읽는다. ops-svc 밖의 신원으로도 불러 본다. 응답에 사유 범주, 확정 신호 종류, 판정 출처, 시각, 프로필 판, 그 기기의 30일 추가 검증 수만 있고 점수·가중치·기기 가명은 없다. ops-svc 밖의 신원은 거부된다 | 계약 시험 |
+| B-T16 | 기기 키 통일(추천 적용 2026-10-31, ADR-0171, §3.2): 같은 `deviceId`로 ① 로그인(identity-svc `CreateSession`) ② 로비 입장 ③ 사전 검증을 한다. identity `device.device_ref`, `BehaviorSignal.deviceRef`, `TrustVerdict.deviceRef`, `tr:devshare`·`tr:devacct` 키 안의 기기 가명이 모두 같고, 시험 키로 §3.2의 식대로 계산한 값과 같다. 탐지 가명 키로 계산한 값은 어디에도 없다. Redis 키 이름은 바뀌지 않는다. 기기 식별값 원문은 어느 저장소에도 없다. 연결: FR-072, NFR-022 | 통합 시험(시험 KMS 키) |
+| B-T17 | 여정 ID(추천 적용 2026-10-31, §3.1·§4.1): ① 로비 입장과 사전 검증 판정의 `TrustVerdict.journeyId`·`BehaviorSignal.journeyId`가 그 토큰의 `jny`와 같다 ② `journey_id`만 다르고 나머지가 같은 요청 둘의 판정·사유 범주가 같다(점수에 쓰지 않음) ③ 로그인·추가 검증 제출 판정은 `journey_id`가 비어도 판정한다 ④ 로비 입장의 `BehaviorSignal`은 screen `LOBBY`, 사전 검증은 `EVENT_DETAIL`이다. 연결: FR-072 | 통합 시험, 계약 시험(Avro 필드) |
+| B-T18 | 끝단 신호(추천 적용 2026-10-31, §3.3): ① HTTPS로 대기열 API 배포를 지난 요청은 조사용 요청 기록에 `ja4`(36자)가 있다 ② 헤더가 빠진 요청은 `ja4`가 비고 나머지 칸은 그대로다 ③ 대기열 경로 요청은 `edgeBotLabels`가 빈다(Bot Control 없음) ④ 원본 확인 헤더 없이 위조 `CloudFront-Viewer-JA4-Fingerprint`·`CloudFront-Viewer-ASN`·`x-amzn-waf-bot-labels`를 보내면 게이트웨이가 지워 기록·내부 헤더에 실리지 않는다 ⑤ `ScoreRiskRequest`에 JA4·끝단 라벨 칸이 없고, WAF 토큰 지문 라벨은 어디에도 남지 않는다. 연결: FR-072 | 로컬 통합 시험(CloudFront 대신 헤더를 붙이는 앞단), 계약 시험 |
+| B-T19 | 좌석·결제 행동 요약(추천 적용 2026-10-31, §4.1): ① 직접 선택 공연에서 구매 세션의 첫 홀드에 `behavior`를 실으면 purchase-svc가 screen `SEAT`인 `BehaviorSignal`(`journeyId` 있음, `netClass`·`asn` 없음)을 한 건 낸다 ② 결제 시도 시작의 `behavior`는 screen `PAYMENT` 한 건이다 ③ 좌석 자동 배정 공연의 홀드에는 `SEAT` 신호가 없다 ④ `SEAT`·`PAYMENT` 신호 1만 건을 넣어도 `trust.behavior_raw` 행 수와 재평가 후보 수가 늘지 않는다 ⑤ 홀드·결제 경로에서 trust-svc `ScoreRisk` 호출이 0건이다 ⑥ 요약 본문에 정해지지 않은 칸(좌표 배열 등)을 넣으면 400이다. 연결: FR-072, NFR-020 | 통합 시험(purchase-svc·trust-reassess), 계약 시험 |
+| B-T20 | 부정 예매 조사에서 오는 라벨(추천 적용 2026-10-31, §9): ① `FRAUD_ACTIONED` BOT이면 `tr:block` 키가 생기고 값에 확정 출처와 건 ID가 있다 ② 외부 게시물 대조만 있는 계정은 `tr:block` 키가 생기지 않는다(라벨 출처가 아니다) ③ ①의 기기에 `FRAUD_APPEAL_ACCEPTED` HUMAN을 보내면 키가 지워진다(`REMOVED`) ④ 판정 근거에 차단 목록이 있던 사람의 `FRAUD_APPEAL_ACCEPTED`도 키를 지운다 ⑤ `FRAUD_ACTIONED`에 HUMAN, `FRAUD_APPEAL_ACCEPTED`에 BOT이면 `INVALID_ARGUMENT`다 ⑥ 같은 건 ID·판을 다시 보내면 `changed` false다 ⑦ 두 출처 모두 `telemetry.trust-verdicts`에 사건이 0건이다 ⑧ 판정이 30일 지난 사람이면 요청의 `device_ref`로 키를 올리고, `device_ref`도 없으면 `DEVICE_NOT_FOUND`다 ⑨ 한 사건 ID로 계정 둘을 차례로 보내면 둘 다 반영된다 ⑩ ops-svc 밖의 신원은 거부된다. 연결: FR-072·FR-073, POL-046 | 통합 시험(라벨 반영 호출, 시계 옮기기) |
 
 ## 18. 예외 상황 대응
 
@@ -392,7 +434,8 @@ flowchart LR
 - 축소 운영 동안 통과한 봇과 로비 참가자는 다시 판정하지 않는다(§11.4).
 - 공용 기기(PC방, 가족 태블릿)는 기기 공유·여러 계정 신호에 걸릴 수 있다. 격리는 차단이 아니라 추가 검증이고, 재평가는 그림자로 시작해 상한을 둔다(docs/planning/01 §5.2 '봇 대기 중 재평가의 오탐').
 - 실서비스 탐지율은 하한만 말할 수 있다(§13). 3단계 봇에는 탐지율 목표가 없고 1장당 획득 비용 목표만 있다(NFR-022, ADR-0048).
-- 판정 근거 키(30일)와 행동 신호 원시(30일)가 모두 지난 뒤의 이의 인정은 차단 기기 키를 지우지 못한다(§12).
+- 판정 근거 키(30일)와 행동 신호 원시(30일)가 모두 지난 뒤의 이의 인정은 차단 기기 키를 지우지 못한다(§12). 부정 예매 조사에서 오는 라벨은 ops-svc가 조사 저장소의 기기 가명을 `ApplyLabel`의 `device_ref`로 실어 이 틈을 메운다(§9). 그래도 조사 저장소의 보존(공연 종료 뒤 30일 [가정])이 지난 뒤의 이의 인정은 키를 지우지 못하고, 그 키도 90일 [가정] 뒤 없어진다(추천 적용 2026-10-31).
+- 끝단 봇 라벨은 대기열·구매 경로에 Bot Control이 없는 동안 늘 빈다. JA4는 많은 사람이 같은 값을 가져 혼자서는 묶음 근거가 되지 않는다(§3.3). 끝단 신호를 공급자가 주지 않게 되면 그 칸을 빼고 남은 연결 신호로 묶는다(ADR-0171 '되돌릴 조건').
 - 수치(데드라인, 검증 시간 한도, 서킷 값, 축소 운영 한도, 키 수명, 사유 범주 코드, ASN 분류표 주기)는 아직 재지 않은 가정이다(wbs 3.2.1·3.2.2·3.2.3·3.7.1).
 - 이 문서의 새 계약(§20)은 2026-10-30에 모두 정본에 반영됐다(아래 §20 표 밑 줄). 계약은 모두 초안이라 계약 검사를 CI에 붙일 때(wbs 0.2.2) 컴파일과 하위 호환 검사를 다시 거친다. 계약 원본은 지금 자리(`docs/api/`)에 그대로 두고 따로 옮기지 않는다(ADR-0165).
 
@@ -411,7 +454,26 @@ flowchart LR
 
 - 2026-10-30 2차 반영: trust.proto 초안(`SCORE_CONTEXT_VERIFICATION`, `LobbyShuffle`, `ReasonCategory`, `TrustLabelService.ApplyLabel`, gRPC 밖 허니팟 기록 처리기의 설명), queue.proto 초안(`ISOLATE_RESULT_CAP_REACHED`, `VerificationAppealService`), docs/data.md §3(새 키 넷, `q:appeal:{pid}:E`), docs/features/queue-admission.md §7·§9·§10, docs/frontend.md §2.5·§5.14.2·§5.15(Turnstile `action`, 허니팟 경로), docs/features/identity.md §7.1(판정 맥락), docs/architecture.md §3.2 gRPC 행(라벨 반영, 이의 결과·내용 읽기)이 이 표를 따라 고쳐졌다. 같은 날 3차 반영으로 남은 것도 옮겼다: asyncapi·Avro(`VERIFICATION_APPEAL`, `BehaviorSignal` 설명), data-classification 행의 키 이름, docs/architecture.md §3.2·§5(허니팟 경로의 REST 포트 허용과 새 호출의 허용 신원), docs/infra.md §9(queue-svc의 `support.cases-requested` 쓰기 권한). 이 문서가 남겨 둔 빈칸 셋(§5.2 본인확인 재통과 확인, §6 관리 로그인 토큰의 검증 주체, §12 판정 근거 읽기와 지운 기록의 자리)도 같은 날 정했다: identity.proto `ReverificationCheckService`, 이 문서 §6의 맥락별 표, trust.proto `TrustEvidenceService`(추천 적용 2026-10-30).
 
-## 21. 확인한 외부 사실(2026-10-30)
+**2026-10-31 사후 포렌식 수집 보강(ADR-0171, BUILD_ORDER FRN-030)**: 이 문서가 기대는 계약 변경은 아래와 같다. 정본은 같은 FRN-030 계약 반영에서 함께 고친다(추천 적용 2026-10-31, ADR-0171).
+
+| 정본 | 더할 것 | 이 문서 |
+| --- | --- | --- |
+| `docs/api/proto/peaket/trust/v1/trust.proto` | `ScoreRiskRequest.journey_id`, `device_id` 주석(조사용 가명 키로 바꿈), `LabelSource`에 `LABEL_SOURCE_FRAUD_ACTIONED`·`LABEL_SOURCE_FRAUD_APPEAL_ACCEPTED`와 그 둘을 판정 기록으로 내지 않는다는 규칙(게시물 대조는 라벨 출처가 아니다), `ApplyLabelRequest.device_ref`(조사 저장소의 기기 가명) | §3.1·§3.2·§9 |
+| `docs/api/asyncapi.yaml`·Avro | `TrustVerdict`의 `journeyId`·`deviceRef`, `BehaviorSignal`의 `journeyId`·`screen`(`LOBBY`·`EVENT_DETAIL`·`SEAT`·`PAYMENT`)과 `netClass`를 조건부로, `deviceRef` 설명, 새 토픽 `investigation.requests`(`ja4`·`edgeBotLabels`) | §3.3·§4.1 |
+| `docs/api/openapi.yaml` | `HoldRequest.behavior`, `POST /v1/orders/{orderId}/payments` 본문 `behavior`, `BehaviorSummary` 설명을 공연 상세·좌석·결제 화면으로 넓히기 | §4.1 |
+| docs/data.md §3·docs/streaming.md §5 | `tr:*` 키 안의 기기 가명이 조사용 가명이라는 설명, `trust-reassess`가 screen `SEAT`·`PAYMENT`를 건너뛴다는 것, 조사 적재 `inv-ingest` | §3.2·§4.1 |
+| docs/infra.md §4.1·§9 | 대기열 API 배포·`api` 배포의 원본 요청 정책에 JA4 헤더, 대기열 경로에 Bot Control을 걸지와 라벨 헤더 더하기 | §3.3 |
+| docs/security/secrets-and-keys.md·data-classification.md(FRN-040) | `inv-ref-key`, 탐지 가명 키의 기기 용도 끝, 키 회전 때 identity `device_ref`를 다시 쓰는 법 | §3.2·§9·§14 |
+
+- 이 문서가 계약에 더 필요하다고 본 것과 계약에 반영한 결과(2026-10-31): ① 재평가 후보 `TrustCandidate`의 `journeyId`는 더하지 않았다. 재평가 판정 기록은 여정 ID를 비우고 조사 적재가 (회차, pid)로 잇는다(§8) ② 추가 검증 제출 판정은 `TrustVerdict.journeyId`가 늘 있어야 하는 조건에서 뺐다. 그 칸의 조건은 source `REALTIME`이고 category `PASS`·`CHALLENGED`(로비 입장·사전 검증)다(§3.1) ③ 부정 예매 출처의 멱등 키를 (건 ID, pid, 출처)로 보는 규칙은 trust.proto `LabelSource` 주석에 넣었다(§9).
+
+## 21. 확인한 외부 사실(2026-10-30·31)
 
 - Cloudflare Turnstile 서버 검증 문서(https://developers.cloudflare.com/turnstile/get-started/server-side-validation/ , 2026-10-30 확인): 토큰은 만든 뒤 300초 동안 유효하고 한 번만 검증된다. 다시 쓴 토큰은 `timeout-or-duplicate`로 거절된다. 요청의 `idempotency_key`(직접 만든 UUID)로 검증 요청을 안전하게 다시 보낼 수 있다. 응답에는 `success`·`challenge_ts`·`hostname`·`error-codes`·`action`·`cdata`가 있고, 문서는 `action`과 `hostname`을 기대값과 견주는 예를 든다.
-- AWS CloudFront 개발자 안내서 'Add CloudFront request headers'(https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/adding-cloudfront-headers.html , 2026-10-30 확인): `CloudFront-Viewer-ASN`은 보는 사람의 ASN을 담는다. `CloudFront-Viewer-Address`와 함께 원본 요청 정책에는 넣을 수 있지만 캐시 정책에는 넣을 수 없다. AWS 네트워크에서 온 요청에 붙이지 않는 것은 나라 이름·지역·위경도 같은 위치 헤더이고 ASN은 그 목록에 없다. 같은 문서에 TLS 지문 헤더(`CloudFront-Viewer-JA4-Fingerprint`)도 있다. 이 문서는 쓰지 않는다. 기기 지문을 모으지 않는다는 원칙(ADR-0079 결정 5)과 함께 따로 판단할 일이다.
+- AWS CloudFront 개발자 안내서 'Add CloudFront request headers'(https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/adding-cloudfront-headers.html , 2026-10-30 확인): `CloudFront-Viewer-ASN`은 보는 사람의 ASN을 담는다. `CloudFront-Viewer-Address`와 함께 원본 요청 정책에는 넣을 수 있지만 캐시 정책에는 넣을 수 없다. AWS 네트워크에서 온 요청에 붙이지 않는 것은 나라 이름·지역·위경도 같은 위치 헤더이고 ASN은 그 목록에 없다. 같은 문서에 TLS 지문 헤더(`CloudFront-Viewer-JA4-Fingerprint`)도 있다. 2026-10-30 판에는 '이 문서는 쓰지 않는다. 기기 지문을 모으지 않는다는 원칙(ADR-0079 결정 5)과 함께 따로 판단할 일이다'로 두었다. 2026-10-31에 판정 피처로는 쓰지 않고 조사용 요청 기록에만 받기로 정했다(§3.3, ADR-0171 결정 4). JA4는 브라우저 기기 지문이 아니라 TLS 라이브러리 인사말의 모양이다.
+
+2026-10-31에 더 확인한 것(사후 포렌식 수집 보강, ADR-0171):
+
+- AWS CloudFront 개발자 안내서(2026-10-31 확인): 'Add CloudFront request headers'(위 주소)에 따르면 `CloudFront-Viewer-JA4-Fingerprint`(JA3은 `CloudFront-Viewer-JA3-Fingerprint`)는 HTTPS 요청에만 붙고, 원본 요청 정책에만 넣을 수 있다(캐시 정책에는 넣을 수 없다). 관리형 원본 요청 정책 문서(https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-origin-request-policies.html )에 따르면 AWS 관리형 정책 `AllViewerAndCloudFrontHeaders-2022-06`에는 이 헤더가 없어 직접 만든 정책에 넣어야 한다. 정액제 요금제 문서(https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/flat-rate-pricing-plan.html )에 따르면 정액제 요금제에서는 직접 만든 원본 요청 정책을 Business·Premium 등급에서만 쓸 수 있고, 종량제에는 그런 제한이 없다. 헤더 자체에 따로 붙는 요금은 문서에서 찾지 못했다(확인 못 함).
+- AWS WAF 개발자 안내서와 요금 페이지(2026-10-31 확인): 로그 필드 문서(https://docs.aws.amazon.com/waf/latest/developerguide/logging-fields.html )에 `ja4Fingerprint`(36자, CloudFront·ALB에서만)가 있고, 규칙에서 JA4를 검사할 수 있다. Bot Control 규칙 묶음 문서(https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-bot.html )에 따르면 숫자 봇 점수는 없고, 라벨(`awswaf:managed:aws:bot-control:bot:category:…`, `…:signal:…`, Targeted 단계의 `…:targeted:…`)만 붙인다. 기계학습 규칙도 신뢰 단계 셋(Low·Medium·High)뿐이다. 요청 꾸미기 문서(https://docs.aws.amazon.com/waf/latest/developerguide/customizing-the-incoming-request.html )에 따르면 차단하지 않는 동작(Allow·Count·CAPTCHA·Challenge)에서 원본으로 가는 요청에 헤더를 더할 수 있고, 이름 앞에 `x-amzn-waf-`가 붙는다. 라벨 끼워 넣기 문서(https://docs.aws.amazon.com/waf/latest/developerguide/waf-dynamic-label-interpolation.html )에 따르면 그 헤더 값에 라벨을 끼워 넣을 수 있다(`${awswaf:managed:aws:bot-control:bot:category:}`, `${awswaf:ja4:}`, `${awswaf:request_id:}`, 값 하나에 10개까지). 요금(https://aws.amazon.com/waf/pricing/ ): Bot Control은 구독 웹 ACL당 월 10달러, Common 단계는 월 1천만 건 무료 뒤 100만 건당 1달러, Targeted 단계는 월 100만 건 무료 뒤 100만 건당 10달러이고, 정액제에서는 Targeted를 쓸 수 없다. 토큰 지문 라벨 `awswaf:managed:token:fingerprint:…`도 있지만 브라우저 지문이라 쓰지 않는다(§3.3).
+- Cloudflare 개발자 문서(2026-10-31 확인): Turnstile 서버 검증 응답(위 주소)은 `success`·`challenge_ts`·`hostname`·`error-codes`·`action`·`cdata`·`metadata.ephemeral_id`뿐이고 점수가 없다. `ephemeral_id`는 Enterprise 전용이다(https://developers.cloudflare.com/turnstile/concepts/ephemeral-id/ ). 봇 점수(1~99)와 JA3·JA4는 Enterprise Bot Management를 산 고객만 받고, 트래픽이 Cloudflare를 지나야 한다(https://developers.cloudflare.com/bots/concepts/bot-score/ , https://developers.cloudflare.com/bots/additional-configurations/ja3-ja4-fingerprint/ ). CloudFront가 앞단인 PEAKET은 받지 못한다고 본다(추론).

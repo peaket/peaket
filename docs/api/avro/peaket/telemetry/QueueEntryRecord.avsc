@@ -14,6 +14,14 @@
       "type": "string"
     },
     {
+      "name": "journeyId",
+      "doc": "여정 ID(조사용 추적 ID, UUIDv7). 로비 입장이나 사전 검증 때 queue-svc가 만들고 토큰 클레임 jny로 싣는다. 조사 적재(inv-ingest)의 연결 키이고 분석 적재는 버린다(ADR-0171 결정 2·4, 추천 적용 2026-10-31)",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
       "name": "pid",
       "doc": "분석 저장소는 적재 때 회차별 가명으로 바꾼다",
       "type": "string"

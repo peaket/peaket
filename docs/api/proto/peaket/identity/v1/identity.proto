@@ -16,6 +16,9 @@ syntax = "proto3";
 
 package peaket.identity.v1;
 
+// InvestigationRefService의 시각 칸에 쓴다(추천 적용 2026-10-31).
+import "google/protobuf/timestamp.proto";
+
 // 부르는 쪽: purchase-svc(주문 생성, 결제 직전).
 service IdentityService {
   // 본인확인 유효 상태를 다시 확인한다.
@@ -327,8 +330,8 @@ message CheckReverificationResponse {
   int64 verified_at_ms = 2;
 }
 
-// 부르는 쪽: ops-svc만. 지정된 사람만 하는 작업(분석 실버 조회·포렌식 리플레이 2단계 내보내기의 가명정보 취급자,
-// 접속기록 정기 점검의 점검자) 앞에서 그 관리 계정의 살아 있는 지정을 묻는다(docs/security/authz-matrix.md §3.1·§3.7).
+// 부르는 쪽: ops-svc만. 지정된 사람만 하는 작업(분석 실버 조회·연구 갈래 리플레이 내보내기의 가명정보 취급자,
+// 접속기록 정기 점검의 점검자, 부정 거래 조사 화면·API의 부정 거래 조사관(2026-10-31, ADR-0171)) 앞에서 그 관리 계정의 살아 있는 지정을 묻는다(docs/security/authz-matrix.md §3.1·§3.7).
 // 지정은 토큰에 싣지 않으므로(지정을 거두면 다음 요청부터 막히게) ops-svc가 요청마다 묻고 5초 [가정] 캐시한다.
 // 지정 기록은 identity DB admin_designation이다(revoked_at이 빈 행만 센다). 읽기라 멱등 키가 없다.
 // 답이 없으면 ops-svc는 지정이 없는 것으로 보고 403으로 답한다(지정이 필요한 작업만, 초안, 추천 적용 2026-10-30).
@@ -347,10 +350,13 @@ enum DesignationKind {
   DESIGNATION_KIND_ACCESS_REVIEWER = 1;
   // 가명정보 취급자
   DESIGNATION_KIND_PSEUDONYM_HANDLER = 2;
+  // 부정 거래 조사관. 이 지정만 commander와 cs_lead에게 붙는다. 한 계정에 PSEUDONYM_HANDLER와 함께 두지 않는다
+  // (조사·연구 두 갈래를 잇지 않는다, 추천 적용 2026-10-31, ADR-0171 결정 7).
+  DESIGNATION_KIND_FRAUD_INVESTIGATOR = 3;
 }
 
 message GetAdminDesignationsResponse {
-  // 살아 있는 지정. 없으면 비운다. commander가 아닌 계정은 늘 비어 있다.
+  // 살아 있는 지정. 없으면 비운다. commander·cs_lead가 아닌 계정은 늘 비어 있고, cs_lead에는 FRAUD_INVESTIGATOR만 있을 수 있다.
   repeated DesignationKind kinds = 1;
 }
 
@@ -589,6 +595,10 @@ enum AdminAccountResult {
   ADMIN_ACCOUNT_RESULT_DESIGNATION_TARGET_NOT_COMMANDER = 13;
   // 같은 종류의 살아 있는 지정이 있다(designation-exists)
   ADMIN_ACCOUNT_RESULT_DESIGNATION_EXISTS = 14;
+  // FRAUD_INVESTIGATOR를 활성 commander·cs_lead가 아닌 계정에 지정(designation-target-not-eligible, 추천 적용 2026-10-31)
+  ADMIN_ACCOUNT_RESULT_DESIGNATION_TARGET_NOT_ELIGIBLE = 15;
+  // 한 계정에 FRAUD_INVESTIGATOR와 PSEUDONYM_HANDLER를 함께 두려 함(designation-conflict, 추천 적용 2026-10-31, ADR-0171 결정 7)
+  ADMIN_ACCOUNT_RESULT_DESIGNATION_CONFLICT = 16;
 }
 
 message AdminAccountChangeResponse {
@@ -597,4 +607,53 @@ message AdminAccountChangeResponse {
   AdminAccount account = 2;
   // 같은 request_id로 이미 처리했으면 true
   bool already_done = 3;
+}
+
+// 부르는 쪽: 조사 적재 작업자 inv-ingest만(부정 예매 사후 조사, docs/streaming.md §6.4, ADR-0171 결정 4).
+// 여정에서 처음 본 계정의 조사용 연결 값을 묶어 묻는다. 결과는 조사 저장소 inv의 inv_link에만 싣고, 분석 저장소로는 보내지 않는다.
+// 가명은 모두 조사용 가명 키 inv-ref-key의 HMAC-SHA256이고(키 회전·접근은 docs/security/secrets-and-keys.md), 원문 번호·이메일·기기 식별값은 돌려주지 않는다.
+// 읽기라 멱등 키가 없다. 없는 계정은 그 항목을 빼고 돌려준다. 한 번에 계정 500개 [가정]까지다(넘으면 INVALID_ARGUMENT).
+// 탈퇴한 계정은 연결 값을 지웠으므로 빈 항목이다(초안, 추천 적용 2026-10-31).
+service InvestigationRefService {
+  rpc BatchGetInvestigationRefs(BatchGetInvestigationRefsRequest) returns (BatchGetInvestigationRefsResponse);
+}
+
+message BatchGetInvestigationRefsRequest {
+  repeated string account_ids = 1;
+}
+
+// 연락처 가명의 종류(docs/data.md account_contact_ref.kind)
+enum ContactRefKind {
+  CONTACT_REF_KIND_UNSPECIFIED = 0;
+  // 본인확인 휴대폰 번호(E.164로 맞춘 값)
+  CONTACT_REF_KIND_PHONE = 1;
+  // 로그인 이메일(소문자, 앞뒤 빈칸 제거)
+  CONTACT_REF_KIND_EMAIL = 2;
+}
+
+message ContactRef {
+  ContactRefKind kind = 1;
+  // HMAC-SHA256(inv-ref-key, "contact|" + 정규화한 값)의 16진수
+  string ref = 2;
+}
+
+// 같은 본인확인(연계정보 CI)으로 다른 계정에서 본인확인을 시도해 409(이미 다른 계정에서 본인확인)를 받은 기록 하나(docs/data.md identity_conflict_attempt).
+// 사람이 확인한 라벨이 아니라 '명의 대여·사들인 계정' 후보의 연결 신호다.
+message IdentityConflict {
+  // 이 계정과 같은 본인확인을 쓰려 한 다른 계정(이 계정이 시도했으면 원래 계정, 원래 계정이면 시도한 계정)
+  string other_account_id = 1;
+  google.protobuf.Timestamp attempted_at = 2;
+}
+
+message InvestigationRefs {
+  string account_id = 1;
+  repeated ContactRef contact_refs = 2;
+  // 그 계정에 연결된 기기(device)의 기기 가명 device_ref(HMAC-SHA256(inv-ref-key, "device|" + deviceId)의 16진수). trust-svc의 deviceRef와 같은 값이다.
+  repeated string device_refs = 3;
+  // 지난 1년 [가정]의 기록
+  repeated IdentityConflict identity_conflicts = 4;
+}
+
+message BatchGetInvestigationRefsResponse {
+  repeated InvestigationRefs items = 1;
 }

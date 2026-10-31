@@ -38,7 +38,7 @@
     },
     {
       "name": "category",
-      "doc": "문의 유형 코드, 신고 사유 코드(SCALPING·MACRO·ABUSE·RIGHTS·ILLEGAL_FILMING·SPAM·OFF_TOPIC·OTHER), 이의 제기면 격리 때 이용자에게 보인 사유 범주(trust.proto ReasonCategory 이름, 예 REASON_CATEGORY_DEVICE_HISTORY), 또는 소명이면 대상 종류(RESTRICTION·RECLAIM). 소명의 대상 ID·계정·본문은 싣지 않고 ops-svc가 support 모듈 내부 API로 읽는다(문의와 같다)",
+      "doc": "문의 유형 코드, 신고 사유 코드(SCALPING·MACRO·ABUSE·RIGHTS·ILLEGAL_FILMING·SPAM·OFF_TOPIC·OTHER), 이의 제기면 격리 때 이용자에게 보인 사유 범주(trust.proto ReasonCategory 이름, 예 REASON_CATEGORY_DEVICE_HISTORY), 또는 소명이면 대상 종류(RESTRICTION·RECLAIM·FRAUD_CASE(부정 예매 소명, 추천 적용 2026-10-31, ADR-0171)). 소명의 대상 ID·계정·본문은 싣지 않고 ops-svc가 support 모듈 내부 API로 읽는다(문의와 같다)",
       "type": "string"
     },
     {

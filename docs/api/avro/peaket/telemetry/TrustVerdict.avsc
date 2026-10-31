@@ -34,6 +34,38 @@
       ]
     },
     {
+      "name": "journeyId",
+      "doc": "판정한 요청의 여정 ID(조사용 추적 ID, UUIDv7). 로비 입장·사전 검증의 실시간 판정(PASS·CHALLENGED)에 늘 있고, 추가 검증 제출과 재평가는 비운다(조사 적재가 회차·pid로 잇는다). 분석 적재는 버린다(ADR-0171 결정 4, 추천 적용 2026-10-31)",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "source": [
+            "REALTIME"
+          ],
+          "category": [
+            "PASS",
+            "CHALLENGED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "deviceRef",
+      "doc": "판정 입력의 기기 가명 HMAC-SHA256(inv-ref-key, device| + deviceId). 입력에 기기 식별값이 있었을 때만. identity-svc device.device_ref와 같은 값. 분석 적재는 버린다(ADR-0171 결정 4, 추천 적용 2026-10-31)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
       "name": "category",
       "type": {
         "type": "enum",

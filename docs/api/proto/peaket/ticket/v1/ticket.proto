@@ -357,3 +357,59 @@ message GetScannerDeviceByCredentialResponse {
   // 배정 파트너 ID. 승인 때 스태프 배정의 파트너와 같은지 대조한다. 이름은 싣지 않는다(위 주석).
   string promoter_id = 5;
 }
+
+// 부르는 쪽: ops-svc만(부정 예매 사건, POL-046 ③, docs/features/transfer-refund.md, ADR-0171 결정 3).
+// 조사관이 소명을 요청할 때 그 사건 계정의 그 회차 표에 양도 잠금을 걸고(ticket.fraud_lock_case_id), 그 계정에 대해 소명 인정, 사건 CLEARED, 조치 실행 끝(취소된 표 말고 남은 표), 조사관이 계정을 뺌, 입장 시작 가운데 먼저 오는 때에 푼다.
+// 잠긴 티켓의 양도 요청과 돌려주기는 409 transfer-locked다. 잠글 때 진행 중인 양도 요청(TRANSFER_PENDING)은 같은 트랜잭션에서 시스템이 철회하고
+// 받는 사람·보낸 사람에게 알린다(trade.tickets TRANSFER_WITHDRAWN). 입장은 막지 않는다. 입장 시작에는 ticket-svc가 그 회차의 잠금을 스스로 푼다
+// (ops-svc 호출을 기다리지 않는다). 시스템이 거는 조치는 이 잠금뿐이다.
+// (case_id, version)으로 멱등하다. 판은 같은 case_id 안에서만 견준다. 저장한 그 사건의 판보다 클 때만 반영하고, 같거나 작으면 아무것도 바꾸지 않고 지금 상태를 돌려준다.
+// 다른 사건의 잠금이 이미 걸린 티켓은 판을 견주지 않고 그 티켓만 OTHER_CASE로 돌려주며, 나머지는 처리한다(초안, 추천 적용 2026-10-31).
+// 잠금은 사건 계정이 그 회차에서 결제한 표 전부에 걸린다. ticket-svc는 (case_id, event_id, account_id) 잠금을 기록해 두고(docs/data.md fraud_transfer_lock),
+// 잠금 뒤에 그 계정이 산 그 회차 표도 발권(IssueTickets) 때 잠근다. 풀리는 때는 그 계정에 대해 소명 인정, 사건 CLEARED, 조치 실행 끝(취소된 표 말고 남은 표),
+// 조사관이 계정을 뺌, 입장 시작 가운데 먼저 오는 때다(입장 시작은 ticket-svc가 스스로 푼다).
+service TransferLockService {
+  rpc SetTransferLock(SetTransferLockRequest) returns (SetTransferLockResponse);
+}
+
+message SetTransferLockRequest {
+  // 부정 예매 사건 ID(ops DB fraud_case.id)
+  string case_id = 1;
+  // 사건 상태의 판 번호. 같은 사건에서 늘어나기만 한다.
+  int64 version = 2;
+  // 쓰지 않는다(아래 account_ids로 바꿨다).
+  repeated string ticket_ids = 3 [deprecated = true];
+  // true면 잠그고 false면 푼다.
+  bool locked = 4;
+  // 처리한 관리 계정 ID(감사 기록용). ops-svc가 권한과 감사 기록을 처리한 뒤 싣는다.
+  string acted_by = 5;
+  // 사건 회차
+  string event_id = 6;
+  // 잠그거나 풀 계정(사건 계정). 그 계정이 event_id 회차에서 결제한 표 전부가 대상이다. 풀 때 비우면 그 사건으로 잠긴 계정 모두다.
+  // 2026-10-31 같은 날 표 목록(ticket_ids)을 계정 목록으로 바꿨다. 잠금 뒤에 산 표도 잠그려면 계정 단위여야 하기 때문이다.
+  // ticket_ids는 첫 출시 전이라 쓰지 않음으로 남긴다(추천 적용 2026-10-31).
+  repeated string account_ids = 7;
+}
+
+enum TransferLockResult {
+  TRANSFER_LOCK_RESULT_UNSPECIFIED = 0;
+  TRANSFER_LOCK_RESULT_LOCKED = 1;
+  TRANSFER_LOCK_RESULT_UNLOCKED = 2;
+  // 다른 사건의 잠금이 걸려 있다(바꾸지 않음)
+  TRANSFER_LOCK_RESULT_OTHER_CASE = 3;
+  // 입장 시작 뒤라 잠그지 않음
+  TRANSFER_LOCK_RESULT_ENTRY_STARTED = 4;
+  // 이미 환급·무효 등으로 끝난 티켓
+  TRANSFER_LOCK_RESULT_TICKET_CLOSED = 5;
+}
+
+message TransferLockOutcome {
+  string ticket_id = 1;
+  TransferLockResult result = 2;
+  // 잠그면서 철회한 양도 요청 ID(없으면 비운다)
+  string withdrawn_offer_id = 3;
+}
+
+message SetTransferLockResponse {
+  repeated TransferLockOutcome outcomes = 1;
+}
