@@ -16,7 +16,18 @@ export interface PlatformConfig {
   managementPort: number;
   /** 받은 남은 시간의 상한(밀리초, guidelines §5) */
   maxDeadlineMs: number;
+  /** 배포한 판(PEAKET_VERSION, 없으면 unknown). 정규 로그 줄의 version */
+  version: string;
+  /** 서비스 로거 수준(PEAKET_LOG_LEVEL). 정규 로그 줄은 이 값과 관계없이 info부터 낸다 */
+  logLevel: LogLevelName;
+  /** 정상 줄 표본 비율 'N건에 1건'의 처음 값(PEAKET_LOG_SAMPLE_ONE_IN, 기본 10 = 평시 10%) */
+  sampleOneIn: number;
+  /** 경로에 SLO 지연을 적지 않았을 때의 기준(PEAKET_LOG_SLO_LATENCY_MS, 기본 NFR-011의 500ms). 넘은 요청은 전수로 남긴다 */
+  defaultSloLatencyMs: number;
 }
+
+export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
+export type LogLevelName = (typeof LOG_LEVELS)[number];
 
 export class PlatformConfigError extends Error {
   constructor(message: string) {
@@ -62,5 +73,20 @@ export function loadPlatformConfig(env: Env): PlatformConfig {
     if (!/^[1-9]\d{0,8}$/.test(rawMax)) throw new PlatformConfigError(`PEAKET_MAX_DEADLINE_MS는 양의 정수(밀리초)여야 한다: ${rawMax}`);
     maxDeadlineMs = Number(rawMax);
   }
-  return { env: peaketEnv, debugErrors, port: appPort, managementPort, maxDeadlineMs };
+  const version = env.PEAKET_VERSION || 'unknown';
+  const rawLevel = env.PEAKET_LOG_LEVEL;
+  if (rawLevel !== undefined && rawLevel !== '' && !(LOG_LEVELS as readonly string[]).includes(rawLevel)) {
+    throw new PlatformConfigError(`PEAKET_LOG_LEVEL은 ${LOG_LEVELS.join('·')} 가운데 하나여야 한다: ${rawLevel}`);
+  }
+  const logLevel = (rawLevel || 'info') as LogLevelName;
+  const sampleOneIn = positiveInt(env, 'PEAKET_LOG_SAMPLE_ONE_IN', 10);
+  const defaultSloLatencyMs = positiveInt(env, 'PEAKET_LOG_SLO_LATENCY_MS', 500);
+  return { env: peaketEnv, debugErrors, port: appPort, managementPort, maxDeadlineMs, version, logLevel, sampleOneIn, defaultSloLatencyMs };
+}
+
+function positiveInt(env: Env, name: string, fallback: number): number {
+  const v = env[name];
+  if (v === undefined || v === '') return fallback;
+  if (!/^[1-9]\d{0,8}$/.test(v)) throw new PlatformConfigError(`${name}은(는) 양의 정수여야 한다: ${v}`);
+  return Number(v);
 }

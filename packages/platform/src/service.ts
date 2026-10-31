@@ -1,21 +1,32 @@
-// 서비스 시작 코드(docs/architecture.md §10 packages/platform, openspec 변경 add-service-template).
+// 서비스 시작 코드(docs/architecture.md §10 packages/platform, openspec 변경 add-service-template·add-service-logging).
 // 앱 포트는 NestJS + Fastify, 관리 포트는 지표(/metrics)만 내는 작은 Fastify 서버다(ASVS v5.0.0-13.4.5).
+// OTel SDK는 여기서 시작하지 않는다. 실행 명령의 --import @peaket/platform/telemetry/register가 먼저 시작한다(telemetry.ts).
 import 'reflect-metadata';
+import type { Writable } from 'node:stream';
 import { type DynamicModule, Global, type LogLevel, Module, type Type } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { CLOCK, type Clock, systemClock } from './clock.js';
 import { type PlatformConfig, loadPlatformConfig } from './config.js';
-import { installHttpHooks } from './http-hooks.js';
+import { activeTrace } from './context.js';
+import { installHttpHooks, markServerSpan, requestSideFields } from './http-hooks.js';
+import { NestPinoLogger, PLATFORM_LOGGER, type PlatformLogger, createPlatformLogger } from './log.js';
 import { PlatformMetrics, statusClass } from './metrics.js';
 import { PROBLEM_CONTENT_TYPE } from './problem.js';
-import { ProblemFilter, type UnexpectedError, frameworkErrorProblem, reportToStderr } from './problem-filter.js';
+import { ProblemFilter, frameworkErrorProblem } from './problem-filter.js';
+import { loadLogPseudonymizer } from './pseudonym.js';
+import { CanonicalLog, errorInfoOf } from './request-log.js';
+import { sampleKeep } from './sampling.js';
 
-/** 사용자 모듈 위에 공용 제공자(시계)를 전역으로 얹은 뿌리 모듈 */
-export function platformRoot(module: Type<unknown> | DynamicModule, clock: Clock): Type<unknown> {
+/** 사용자 모듈 위에 공용 제공자(시계·서비스 로거)를 전역으로 얹은 뿌리 모듈 */
+export function platformRoot(module: Type<unknown> | DynamicModule, clock: Clock, logger: PlatformLogger): Type<unknown> {
+  const providers = [
+    { provide: CLOCK, useValue: clock },
+    { provide: PLATFORM_LOGGER, useValue: logger },
+  ];
   @Global()
-  @Module({ providers: [{ provide: CLOCK, useValue: clock }], exports: [CLOCK] })
+  @Module({ providers, exports: providers.map((p) => p.provide) })
   class PlatformCoreModule {}
 
   @Module({ imports: [PlatformCoreModule, module] })
@@ -24,22 +35,26 @@ export function platformRoot(module: Type<unknown> | DynamicModule, clock: Clock
 }
 
 export interface CreateServiceOptions {
-  /** 지표의 service 라벨(예: purchase-svc) */
+  /** 지표의 service 라벨과 로그의 service(예: purchase-svc) */
   name: string;
   module: Type<unknown> | DynamicModule;
   /** 기본 process.env */
   env?: Record<string, string | undefined>;
   /** 기본 시스템 시계 */
   clock?: Clock;
-  /** 예상하지 못한 오류의 기록. 기본은 표준 오류 출력의 JSON 한 줄 */
-  reportError?: (entry: UnexpectedError) => void;
-  /** NestJS 자체 기록 수준. 기본 error·warn */
+  /** 로그 목적지. 기본 표준 출력(시험에서 바꿔 끼운다) */
+  logDestination?: Writable;
+  /** NestJS 자체 기록 수준. 기본 error·warn(서비스 로거로 간다) */
   nestLogLevels?: LogLevel[] | false;
 }
 
 export interface PlatformService {
   config: PlatformConfig;
   metrics: PlatformMetrics;
+  /** 서비스 로거(Pino). 처리기는 @Inject(PLATFORM_LOGGER)로도 받는다 */
+  logger: PlatformLogger;
+  /** 정규 로그 줄 표본 비율 바꾸기(온세일 구간 등, FND-090의 제어 상태 소비가 부른다) */
+  logs: { setSampleOneIn(oneIn: number): void; readonly sampleOneIn: number };
   app: NestFastifyApplication;
   /** 앱 포트의 Fastify(시험에서는 inject로 부른다) */
   http: FastifyInstance;
@@ -55,30 +70,64 @@ const portOf = (f: FastifyInstance): number => {
 };
 
 export async function createService(o: CreateServiceOptions): Promise<PlatformService> {
-  const config = loadPlatformConfig(o.env ?? process.env);
+  const env = o.env ?? process.env;
+  const config = loadPlatformConfig(env);
+  const { pseudonymizer, warning } = loadLogPseudonymizer(env);
   const clock = o.clock ?? systemClock;
   const metrics = new PlatformMetrics(o.name);
-  const report = o.reportError ?? reportToStderr;
+  const logger = createPlatformLogger({
+    service: o.name,
+    env: config.env,
+    version: config.version,
+    az: env.PEAKET_AZ,
+    pod: env.PEAKET_POD,
+    clock,
+    level: config.logLevel,
+    destination: o.logDestination,
+  });
+  if (warning) logger.warn(warning);
+  // 정규 로그 줄은 서비스 로거 수준과 관계없이 info부터 낸다(수준을 올려도 표본 집계가 깨지지 않게)
+  const canonical = new CanonicalLog(logger.child({}, { level: 'info' }), {
+    sampleOneIn: config.sampleOneIn,
+    defaultSloLatencyMs: config.defaultSloLatencyMs,
+    pseudonymizer,
+  });
 
   const adapter = new FastifyAdapter({
     frameworkErrors: (error: Error, request: FastifyRequest, reply: FastifyReply) => {
       const { status, body } = frameworkErrorProblem(error, config.debugErrors);
-      metrics.requestDuration.observe({ service: o.name, route: 'unmatched', method: request.method, status_class: statusClass(status) }, 0);
-      if (status >= 500) {
-        metrics.errors.inc({ service: o.name, route: 'unmatched', method: request.method, status_class: statusClass(status) });
-        // 라우터 앞의 5xx(비동기 경로 조건 실패 등)도 같은 traceId로 서버 기록에 남긴다(ASVS v5.0.0-16.3.4, 다시 본 리뷰)
-        report({ traceId: String(body.traceId), route: 'unmatched', method: request.method, status, error });
-      }
+      const labels = { service: o.name, route: 'unmatched', method: request.method, status_class: statusClass(status) };
+      metrics.requestDuration.observe(labels, 0);
+      if (status >= 500) metrics.errors.inc(labels);
+      // 라우터 앞에서 끝난 요청(잘못된 URL 등)도 정규 로그 줄 하나를 같은 traceId로 남긴다(ASVS v5.0.0-16.3.4).
+      // 서버 span은 경로 틀 대신 unmatched로 두고 표본 속성을 단다. 라우팅 전에 끝나 지연은 0으로 본다(지표와 같다, 코드 리뷰 2026-11-01)
+      const traceId = String(body.traceId);
+      const at = activeTrace();
+      const sample = { oneIn: canonical.sampleOneIn, thresholdKeep: sampleKeep(traceId, canonical.sampleOneIn), headSampled: false };
+      markServerSpan(request.method, 'unmatched', sample);
+      canonical.write({
+        traceId,
+        spanId: at.traceId === traceId ? at.spanId : undefined,
+        route: 'unmatched',
+        method: request.method,
+        status,
+        durationMs: 0,
+        ...requestSideFields(request),
+        error: errorInfoOf(error, status),
+        policy: {},
+        sample,
+      });
       void reply.status(status).header('content-type', PROBLEM_CONTENT_TYPE).send(JSON.stringify(body));
     },
   });
-  const app = await NestFactory.create<NestFastifyApplication>(platformRoot(o.module, clock), adapter, {
+  const nestLevels = o.nestLogLevels ?? ['error', 'warn'];
+  const app = await NestFactory.create<NestFastifyApplication>(platformRoot(o.module, clock, logger), adapter, {
     abortOnError: false,
-    logger: o.nestLogLevels ?? ['error', 'warn'],
+    logger: nestLevels === false ? false : new NestPinoLogger(logger, nestLevels),
   });
   const http = app.getHttpAdapter().getInstance() as unknown as FastifyInstance;
-  installHttpHooks(http, { metrics, clock, maxDeadlineMs: config.maxDeadlineMs });
-  app.useGlobalFilters(new ProblemFilter({ debugErrors: config.debugErrors, report }));
+  installHttpHooks(http, { metrics, clock, maxDeadlineMs: config.maxDeadlineMs, canonical });
+  app.useGlobalFilters(new ProblemFilter({ debugErrors: config.debugErrors }));
   await app.init();
 
   const management = Fastify({ logger: false });
@@ -91,6 +140,13 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   return {
     config,
     metrics,
+    logger,
+    logs: {
+      setSampleOneIn: (n: number) => canonical.setSampleOneIn(n),
+      get sampleOneIn() {
+        return canonical.sampleOneIn;
+      },
+    },
     app,
     http,
     management,

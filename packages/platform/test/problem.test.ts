@@ -1,6 +1,6 @@
 // RFC 9457 Problem(docs/api/guidelines.md §2, ADR-0081, openspec 변경 add-service-template 결정 3).
 import { afterEach, describe, expect, test } from 'vitest';
-import { PlatformConfigError, ProblemError, createService, loadPlatformConfig } from '../src/index.js';
+import { ProblemError, createService, loadPlatformConfig } from '../src/index.js';
 import { DemoModule, start, type Started } from './fixture.js';
 
 let s: Started | undefined;
@@ -38,12 +38,13 @@ describe('오류 응답 본문', () => {
     expect(Object.keys(body).sort()).toEqual(['status', 'title', 'traceId', 'type']);
     expect(body).toMatchObject({ type: 'about:blank', title: 'Internal Server Error', status: 500 });
     expect(res.payload).not.toMatch(/secret_table|SELECT|at DemoController/);
-    // [ASVS v5.0.0-16.3.4] 같은 traceId로 원본 예외를 남긴다
-    expect(s.errors).toHaveLength(1);
-    const entry = s.errors[0] as { traceId: string; error: Error; route: string; method: string };
+    // [ASVS v5.0.0-16.3.4] 같은 traceId로 원본 예외를 그 요청의 정규 로그 줄에 남긴다
+    const lines = s.requests();
+    expect(lines).toHaveLength(1);
+    const entry = lines[0] as { traceId: string; err: { type: string; message: string }; route: string; method: string };
     expect(entry.traceId).toBe(body.traceId);
-    expect(entry.error.message).toMatch(/secret_table/);
-    expect(entry).toMatchObject({ route: '/v1/demo/boom', method: 'GET' });
+    expect(entry.err.message).toMatch(/secret_table/);
+    expect(entry).toMatchObject({ route: '/v1/demo/boom', method: 'GET', status: 500, level: 'error' });
   });
 
   test('GL2_없는경로는_404_about_blank', async () => {
@@ -70,7 +71,7 @@ describe('오류 응답 본문', () => {
     expect(res.statusCode).toBe(500);
     expect(res.json()).toMatchObject({ type: 'about:blank', status: 500 });
     expect(res.payload).not.toMatch(/token=abc|identity-svc/);
-    expect(s.errors).toHaveLength(1);
+    expect(s.requests()).toMatchObject([{ status: 500, err: { type: 'Error' } }]);
   });
 
   test('GL2_HTTP예외의상태가4xx·5xx가아니면_500으로답하고_기록한다', async () => {
@@ -78,7 +79,7 @@ describe('오류 응답 본문', () => {
     const res = await s.inject({ method: 'GET', url: '/v1/demo/redirect' });
     expect(res.statusCode).toBe(500);
     expect(res.json()).toMatchObject({ type: 'about:blank', status: 500 });
-    expect(s.errors).toHaveLength(1);
+    expect(s.requests()).toMatchObject([{ status: 500, err: { type: 'HttpException' } }]);
   });
 
   test('GL2_잘못된URL은_400Problem이고_요청경로를되돌려주지않으며_지표에든다', async () => {
@@ -127,7 +128,7 @@ describe('[ASVS v5.0.0-13.4.2] 시작 설정 검사', () => {
     ['스테이징', { PEAKET_ENV: 'staging', PEAKET_DEBUG_ERRORS: 'true' }],
     ['환경 없음(운영으로 본다)', { PEAKET_DEBUG_ERRORS: 'true' }],
   ])('ADR0081_%s에서_디버그를켜면_시작하지않는다', async (_name, env) => {
-    await expect(createService({ name: 'demo-svc', module: DemoModule, env })).rejects.toThrow(PlatformConfigError);
+    await expect(createService({ name: 'demo-svc', module: DemoModule, env })).rejects.toThrow(/PEAKET_DEBUG_ERRORS/);
   });
 
   test('ADR0081_잘못된값은_시작하지않는다', () => {
@@ -139,6 +140,16 @@ describe('[ASVS v5.0.0-13.4.2] 시작 설정 검사', () => {
   });
 
   test('ADR0081_기본값', () => {
-    expect(loadPlatformConfig({})).toEqual({ env: 'prod', debugErrors: false, port: 8080, managementPort: 9464, maxDeadlineMs: 15_000 });
+    expect(loadPlatformConfig({})).toEqual({
+      env: 'prod',
+      debugErrors: false,
+      port: 8080,
+      managementPort: 9464,
+      maxDeadlineMs: 15_000,
+      version: 'unknown',
+      logLevel: 'info',
+      sampleOneIn: 10,
+      defaultSloLatencyMs: 500,
+    });
   });
 });

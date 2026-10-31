@@ -1,10 +1,24 @@
 // 시험용 모듈: 서비스 템플릿으로 띄운 서비스를 바깥(HTTP)에서 시험한다(docs/architecture.md §8.6의 5).
 import 'reflect-metadata';
-import { Body, Controller, Get, HttpException, Inject, Module, Param, Post } from '@nestjs/common';
+import { Writable } from 'node:stream';
+import { Body, Controller, Get, HttpException, Inject, Module, Param, Post, Query } from '@nestjs/common';
 import { ApiOkResponse } from '@nestjs/swagger';
 import type { LightMyRequestResponse } from 'fastify';
 import { z } from 'zod';
-import { CLOCK, ProblemError, contractSchema, createService, currentDeadline, fakeClock, type FakeClock } from '../src/index.js';
+import {
+  CLOCK,
+  LogPolicy,
+  PLATFORM_LOGGER,
+  ProblemError,
+  contractSchema,
+  createExternalHttpClient,
+  createService,
+  currentDeadline,
+  fakeClock,
+  requestLog,
+  type FakeClock,
+  type PlatformLogger,
+} from '../src/index.js';
 
 export const Item = z.object({ id: z.string(), count: z.number().int(), note: z.string().nullable() });
 
@@ -18,9 +32,15 @@ export function gate() {
 }
 export const slowGate = { current: gate() };
 
+/** 바깥 호출 시험(telemetry.test.ts)이 정하는 모의 외부 서버 주소 */
+export const outbound = { baseUrl: 'http://127.0.0.1:9' };
+
 @Controller('v1/demo')
 export class DemoController {
-  constructor(@Inject(CLOCK) private readonly clock: FakeClock) {}
+  constructor(
+    @Inject(CLOCK) private readonly clock: FakeClock,
+    @Inject(PLATFORM_LOGGER) private readonly logger: PlatformLogger,
+  ) {}
 
   @Get('items/:itemId')
   @ApiOkResponse({ schema: contractSchema(Item) })
@@ -29,6 +49,7 @@ export class DemoController {
   }
 
   @Get('slow-120')
+  @LogPolicy({ sloLatencyMs: 100 })
   slow120() {
     this.clock.advance(120);
     return { ok: true };
@@ -104,6 +125,78 @@ export class DemoController {
     return { ok: true };
   }
 
+  @Get('events/:eventId/rich')
+  rich(@Param('eventId') eventId: string) {
+    const log = requestLog();
+    log.set({ pg: 'toss', queuePhase: 'purchase', flags: ['seat-map-v2', 'degraded-payment'], orderId: '0b7e7c52-1111-4c2a-9e55-1d2a3b4c5d6e' });
+    log.identify({ pid: 'p-123', sessionId: 's-456', accountId: 'a-789' });
+    log.dependency('redis', 4);
+    log.dependency('redis', 3);
+    log.dependency('pg', 1.5);
+    this.clock.advance(12);
+    return { eventId };
+  }
+
+  @Get('soon')
+  soon() {
+    requestLog().keep();
+    return { soon: true };
+  }
+
+  @Get('newline')
+  newline() {
+    requestLog().set({ flags: ['a\n{"level":"fatal","msg":"forged"}'] });
+    return { ok: true };
+  }
+
+  @Get('log-inside')
+  logInside() {
+    this.logger.info({ email: 'fan@example.com', card: { paymentKey: 'tgen_20261101abcd', authorization: 'Bearer secret' } }, 'inside');
+    return { ok: true };
+  }
+
+  @Post('wait-boom')
+  async waitBoom(@Body() _body: unknown) {
+    slowGate.current.entered();
+    await slowGate.current.opened;
+    throw new Error('db exploded');
+  }
+
+  @Get('wait-boom')
+  async waitBoomGet() {
+    slowGate.current.entered();
+    await slowGate.current.opened;
+    throw new Error('db exploded on get');
+  }
+
+  @Get('hang')
+  async hang() {
+    slowGate.current.entered();
+    // 끝나지 않는 처리기(끊긴 뒤 응답을 보내지 않는 경우)
+    await new Promise(() => {});
+  }
+
+  @Get('call-out')
+  async callOut(@Query('spend') spend?: string) {
+    // 남은 시간을 spend ms만큼 쓴 뒤 외부 제공자를 부른다
+    this.clock.advance(Number(spend ?? 0));
+    const client = createExternalHttpClient({ provider: 'toss-payments', baseUrl: outbound.baseUrl, timeoutCapMs: 3_000, clock: this.clock });
+    const res = await client.request({ method: 'POST', path: '/v1/payments/{paymentKey}/confirm', params: { paymentKey: 'tgen_abc' }, body: '{}' });
+    return { status: res.status };
+  }
+
+  @Post('entry')
+  @LogPolicy({ entry: true })
+  entry() {
+    return { ok: true };
+  }
+
+  @Get('entry-busy')
+  @LogPolicy({ entry: true })
+  entryBusy() {
+    throw new ProblemError({ type: 'server-busy', status: 429, title: '잠시 뒤에 다시 시도해 주세요', retryAfterSeconds: 2 });
+  }
+
   @Post('echo')
   echo(@Body() body: unknown) {
     return body;
@@ -113,22 +206,46 @@ export class DemoController {
 @Module({ controllers: [DemoController] })
 export class DemoModule {}
 
+export type LogLine = Record<string, unknown>;
+
 export interface Started {
   svc: Awaited<ReturnType<typeof createService>>;
   clock: FakeClock;
-  errors: unknown[];
+  /** 표준 출력 대신 모은 로그 줄(JSON으로 읽은 것) */
+  lines: LogLine[];
+  /** 모은 날것의 글(줄바꿈 검사용) */
+  raw: string[];
+  /** 정규 로그 줄만 */
+  requests: () => LogLine[];
   inject: (opts: { method: string; url: string; headers?: Record<string, string>; payload?: string }) => Promise<LightMyRequestResponse>;
   metrics: () => Promise<string>;
 }
 
-export async function start(env: Record<string, string> = { PEAKET_ENV: 'ci' }): Promise<Started> {
-  const clock = fakeClock();
-  const errors: unknown[] = [];
-  const svc = await createService({ name: 'demo-svc', module: DemoModule, env, clock, reportError: (e) => errors.push(e) });
+/** 쓴 글을 모으는 로그 목적지 */
+export function collector() {
+  const raw: string[] = [];
+  const lines: LogLine[] = [];
+  const stream = new Writable({
+    write(chunk, _enc, cb) {
+      const text = String(chunk);
+      raw.push(text);
+      for (const l of text.split('\n')) if (l) lines.push(JSON.parse(l) as LogLine);
+      cb();
+    },
+  });
+  return { raw, lines, stream };
+}
+
+export async function start(env: Record<string, string> = { PEAKET_ENV: 'ci', PEAKET_LOG_SAMPLE_ONE_IN: '1' }, o: { now?: number } = {}): Promise<Started> {
+  const clock = fakeClock({ now: o.now });
+  const { raw, lines, stream } = collector();
+  const svc = await createService({ name: 'demo-svc', module: DemoModule, env, clock, logDestination: stream });
   return {
     svc,
     clock,
-    errors,
+    lines,
+    raw,
+    requests: () => lines.filter((l) => typeof l.msg === 'string' && l.msg.startsWith('request')),
     inject: (opts) => svc.http.inject(opts as never),
     metrics: async () => (await svc.management.inject({ method: 'GET', url: '/metrics' })).payload,
   };
