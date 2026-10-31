@@ -3,12 +3,15 @@
 // 위 상태 바: 단계 T=0 · 자동 제어 일시정지 13:12 · 20:04:12 · 내 승인 대기(준 2 · 수진 1). 요청 목록의 카드를 누르면 그 요청 상태로 옮긴다.
 // 증빙 파일은 받거나 저장하지 않는다(d5 §3.7).
 // 역할(d5 §3.3): viewer는 메뉴에 없음, operator·cs_agent는 요청만(승인 버튼 비활성), commander는 2인 승인, cs_lead는 1인 승인.
+// 부정 예매 조치 넷(보드에 없는 변형, d5 §7.7)의 사람: 승인자 수진(commander, 지정 없음) · 요청자 본인은 조사관 도윤(cs_lead) ·
+// 열 수 없음은 가명정보 취급자 태오(commander). ?designation=으로 고른 지정이 이 사람의 지정보다 이긴다(features/preview-host).
 import type { ConsoleRole } from '@peaket/ds/ConsoleShell';
+import { DESIGNATED, OPERATORS, type Operator } from '@/entities/operator';
 import { useBoardPage, type BoardGaps } from '@/shared/lib/board';
 import { usePreviewHost, useChosenRole } from '@/features/preview-host';
 import { BOARD_PEOPLE, NoAccess, ReadOnlyScope, type Access } from '@/features/screen-access';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
-import { DEFAULT, STATES, type State } from '../states';
+import { DEFAULT, STATES, fraudVariant, type FraudVariant, type State } from '../states';
 import { MainD, OverlaysD, valsD } from './board-d';
 import { MainM, OverlaysM, valsM } from './board-m';
 import { MainT, OverlaysT, valsT } from './board-t';
@@ -25,17 +28,26 @@ const GAPS: BoardGaps<State> = {
   },
 };
 
+/** 부정 예매 조치 상태의 사람(역할을 고르지 않았을 때) */
+const FRAUD_PEOPLE: Record<FraudVariant, Operator> = {
+  approve: { ...OPERATORS.commander, designations: [] },
+  own: DESIGNATED.investigator,
+  closed: DESIGNATED.pseudonym,
+  expired: { ...OPERATORS.commander, designations: [] },
+};
+
 export function Page() {
   const chosen = useChosenRole();
   const { state, boardStates, layout, close, go } = useBoardPage(TITLE, STATES, DEFAULT, GAPS);
   const vd = valsD(state);
+  const fv = fraudVariant(state);
   usePreviewHost(
     {
       scope: { stage: 'T=0' },
       control: { kind: 'paused', remaining: '13:12' },
       clock: '20:04:12 KST',
       commands: { myApprovals: Number(vd.nMine) },
-      ...(chosen ? {} : { session: BOARD_PEOPLE[vd.asCmd ? 'commander' : 'cs_lead'] }),
+      ...(chosen ? {} : { session: fv ? FRAUD_PEOPLE[fv] : BOARD_PEOPLE[vd.asCmd ? 'commander' : 'cs_lead'] }),
     },
     [state, chosen],
   );

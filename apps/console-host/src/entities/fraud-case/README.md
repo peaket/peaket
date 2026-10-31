@@ -1,0 +1,1 @@
+부정 거래 조사 목업(후보 묶음 `CLUSTERS`, 사건 `CASES`, 연결 그래프 `graphFor`, 외부 게시물, 증거 묶음)과 계산(`model.ts`: 취소 마감·소명 기한 기본값·남은 시간·구매 대 한도·이름표). 시험은 `model.test.mjs`(`pnpm --filter @peaket/console-host test`). IP는 가린 값만 두고, 원문은 'IP 원문 열림' 상태의 문서용 대역 하나다(docs/security/authz-matrix.md §4.3).

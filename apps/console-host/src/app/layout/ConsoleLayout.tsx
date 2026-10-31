@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate, useNavigation, useSearchParams } from 'react-router';
 import { ConsoleShell } from '@peaket/ds/ConsoleShell';
 import { MY_APPROVALS_HREF } from '@/entities/command';
-import { isRole } from '@/entities/operator';
+import { isDesignationChoice, isRole } from '@/entities/operator';
 import { navFor, navKeyFor, tabKeyFor, tabsFor } from '@/shared/config/nav';
 import { useLayout } from '@/shared/lib/layout';
 import { useBodyTheme, useResolvedTheme, useUiPrefs } from '@/shared/lib/theme';
@@ -28,6 +28,12 @@ export function ConsoleLayout() {
   useEffect(() => {
     if (isRole(roleParam)) setRole(roleParam);
   }, [roleParam, setRole]);
+  // ?designation=으로 지정을 바꿔 본다(이동해도 남는다, add-fraud-investigation-screens design.md 결정 3)
+  const setDesignation = useHostStore((s) => s.setDesignation);
+  const designationParam = params.get('designation');
+  useEffect(() => {
+    if (isDesignationChoice(designationParam)) setDesignation(designationParam);
+  }, [designationParam, setDesignation]);
 
   const host = useHost();
   const mainStyle = useShellUi((s) => s.mainStyle);
@@ -93,7 +99,7 @@ export function ConsoleLayout() {
         operators={host.presence.operators}
         clock={host.clock}
         user={{ name: host.session.name, initial: host.session.initial, role }}
-        nav={navFor(role)}
+        nav={navFor(role, host.session.designations)}
         currentKey={navKeyFor(location.pathname)}
         tabs={tabsFor(role, role === 'viewer' ? 0 : host.commands.myApprovals)}
         currentTabKey={tabKeyFor(location.pathname, location.hash)}

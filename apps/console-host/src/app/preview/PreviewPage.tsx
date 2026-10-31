@@ -17,7 +17,7 @@ export function Page() {
         <h2 className="t-md fw-b" id="pv-role">
           역할 바꿔 보기
         </h2>
-        <p className="t-sm muted">주소에 ?role=을 붙이면 위 상태 바·왼쪽 내비가 그 역할로 바뀌고, 다른 화면으로 옮겨도 남습니다(d5 §3.3 역할별 메뉴 표).</p>
+        <p className="t-sm muted">주소에 ?role=을 붙이면 위 상태 바·왼쪽 내비가 그 역할로 바뀌고, 다른 화면으로 옮겨도 남습니다(d5 §3.3 역할별 메뉴 표). 지정은 ?designation=investigator·pseudonym·none으로 바꿔 봅니다. '부정 거래 조사' 메뉴는 commander·cs_lead에게 부정 거래 조사관 지정이 있을 때만 나옵니다(d5 §3.3 '지정 메뉴').</p>
         <ul className="row wrap" style={{ gap: 6 }}>
           {ROLES.map((r) => (
             <li key={r}>
@@ -26,6 +26,21 @@ export function Page() {
               </a>
             </li>
           ))}
+          <li>
+            <a className="chip chip-sm" href="/dashboard?role=cs_lead&designation=investigator">
+              cs_lead + 부정 거래 조사관 지정
+            </a>
+          </li>
+          <li>
+            <a className="chip chip-sm" href="/dashboard?role=commander&designation=pseudonym">
+              commander + 가명정보 취급자 지정
+            </a>
+          </li>
+          <li>
+            <a className="chip chip-sm" href="/dashboard?designation=none">
+              지정 없음
+            </a>
+          </li>
           <li>
             <a className="chip chip-sm" href="/dashboard?theme=light">
               라이트로 보기

@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite --port 3005",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test"
   },
   "dependencies": {
     "react": "^19.3.1",

@@ -1,6 +1,8 @@
 // 관제 메뉴(d5 §3.3 '역할별 메뉴 표', docs/planning/03 §3 권한 매트릭스를 화면 메뉴로 옮긴 것).
 // 표의 '—'인 화면은 그 역할의 메뉴에서 뺀다. 순서와 묶음·아이콘은 디자인 캔버스 보드의 왼쪽 내비 그대로다.
 // 봇 표본 검토(SCR-067)는 commander 보드에 없어(표에서 cs_agent·cs_lead만 검토) 'CS·승인' 묶음 끝에 둔다(추천안).
+// '부정 거래 조사'(SCR-070·071)는 역할이 아니라 지정으로 그린다: commander·cs_lead이면서 부정 거래 조사관 지정(FRAUD_INVESTIGATOR)이 있을 때만,
+// 법정 조치 바로 아래(control-tower §9.2, d5 §3.3 '지정 메뉴'). 캔버스 보드가 없는 항목이다(add-fraud-investigation-screens).
 import type { ConsoleNavGroup, ConsoleRole, ConsoleTabItem } from '@peaket/ds/ConsoleShell';
 
 type Key =
@@ -8,6 +10,7 @@ type Key =
   | 'commands'
   | 'audit'
   | 'compliance'
+  | 'investigations'
   | 'cs-inbox'
   | 'customers'
   | 'cs-approvals'
@@ -34,6 +37,7 @@ const ITEMS: Record<Key, { label: string; href: string; icon: string; badge?: { 
   commands: { label: '운영 명령', href: '/commands', icon: 'bolt' },
   audit: { label: '감사·리플레이', href: '/audit', icon: 'history' },
   compliance: { label: '법정 조치', href: '/compliance', icon: 'scale' },
+  investigations: { label: '부정 거래 조사', href: '/investigations', icon: 'shield' },
   'cs-inbox': { label: 'CS 처리함', href: '/cs/inbox', icon: 'inbox', badge: { text: '7', tone: 'warning' } },
   customers: { label: '팬 조회', href: '/customers', icon: 'search' },
   'cs-approvals': { label: '승인 업무', href: '/cs/approvals', icon: 'stamp', badge: { text: '1' } },
@@ -48,14 +52,22 @@ const ITEMS: Record<Key, { label: string; href: string; icon: string; badge?: { 
 };
 
 const GROUPS: { title?: string; keys: Key[] }[] = [
-  { keys: ['dashboard', 'commands', 'audit', 'compliance'] },
+  { keys: ['dashboard', 'commands', 'audit', 'compliance', 'investigations'] },
   { title: 'CS·승인', keys: ['cs-inbox', 'customers', 'cs-approvals', 'cancellations', 'bot-review'] },
   { title: '판매·정산', keys: ['sale-reviews', 'settlements', 'partners'] },
   { title: '현장·계정', keys: ['scanner-devices', 'accounts', 'notices'] },
 ];
 
-export function navFor(role: ConsoleRole): ConsoleNavGroup[] {
-  const allowed = new Set(ALL[role]);
+/** 지정이 있어야 보이는 메뉴(역할 표 ALL과 따로 본다) */
+const DESIGNATED: Partial<Record<Key, { roles: readonly ConsoleRole[]; designation: string }>> = {
+  investigations: { roles: ['commander', 'cs_lead'], designation: 'FRAUD_INVESTIGATOR' },
+};
+
+export function navFor(role: ConsoleRole, designations: readonly string[] = []): ConsoleNavGroup[] {
+  const allowed = new Set<Key>(ALL[role]);
+  for (const [k, rule] of Object.entries(DESIGNATED) as [Key, { roles: readonly ConsoleRole[]; designation: string }][]) {
+    if (rule.roles.includes(role) && designations.includes(rule.designation)) allowed.add(k);
+  }
   return GROUPS.map((g) => ({
     title: g.title,
     items: g.keys.filter((k) => allowed.has(k)).map((k) => ({ key: k, ...ITEMS[k] })),

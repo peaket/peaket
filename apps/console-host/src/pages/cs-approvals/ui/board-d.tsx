@@ -4,6 +4,9 @@ import { Fragment, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { Overlay } from '@/shared/ui/Overlay';
 import { useRo } from '@/features/screen-access';
+import { fraudVariant } from '../states';
+import { fraudListVals } from '../model/fraud-approval';
+import { FraudActionPanel, FraudAllCount, FraudListItem } from './FraudActionPanel';
 
 const prevent = (e: FormEvent) => e.preventDefault();
 void Fragment;
@@ -26,13 +29,18 @@ export function valsD(state: string) {
     let f409 = st === '수기 조정 · 지급 요청 뒤(409)';
     let form = st === '정산서 수기 조정(이의 없음)' || f409;
     let showB = own || cmd;
-    let offA = own || fail || deny || cmd || form;
+    // 부정 예매 조치(보드에 없는 변형): 공용 패널 하나가 그리고, 요청 목록 머리는 그 상태의 사람 글이다
+    let fv = fraudVariant(st);
+    let fl = fv ? fraudListVals(fv) : null;
+    let offA = own || fail || deny || cmd || form || !!fv;
     return {
       showA: !offA,
       showB: showB,
       showD: fail,
       showE: deny,
       showF: form,
+      showFraud: fv,
+      fraudKinds: fl ? fl.kinds : '',
       is409: f409,
       notF409: !f409,
       fIdCls: f409 ? 'is-error' : '',
@@ -45,12 +53,12 @@ export function valsD(state: string) {
       showReauth: st === '실행 직전 재인증' || cmdRa,
       showPk: pk,
       pkFail: st === '재인증 · 패스키 확인 실패',
-      asLead: !cmd,
+      asLead: !cmd && !fl,
       asCmd: cmd,
-      nMine: cmd ? '1' : '2',
-      nReq: cmd ? '0' : '1',
-      reqB: cmd ? '준' : '준(나)',
-      reqBLong: cmd ? '준(cs_lead)' : '준(cs_lead, 나)',
+      nMine: fl ? fl.nMine : cmd ? '1' : '2',
+      nReq: fl ? fl.nReq : cmd ? '0' : '1',
+      reqB: cmd || fl ? '준' : '준(나)',
+      reqBLong: cmd || fl ? '준(cs_lead)' : '준(cs_lead, 나)',
       selA: offA ? '' : 'is-selected',
       selB: showB ? 'is-selected' : '',
       curA: offA ? 'false' : 'true',
@@ -101,10 +109,11 @@ export function MainD({ v, close, go }: { v: V; close?: () => void; go?: (state:
               <p className="t-xs muted" id="rq-kinds">수진(commander)이 요청할 수 있는 종류: commander 역할 부여·회수</p>
             </>
           ) : null}
+          {v.fraudKinds ? <p className="t-xs muted" id="rq-kinds">{v.fraudKinds}</p> : null}
           <div className="tabs tabs-sm" role="tablist" aria-label="요청 보기">
             <button className="tab is-active" type="button" role="tab" aria-selected="true">
               전체{' '}
-              <span className="badge">4</span>
+              <FraudAllCount variant={v.showFraud} />
             </button>
             {' '}
             <button className="tab" type="button" role="tab" aria-selected="false">
@@ -218,11 +227,13 @@ export function MainD({ v, close, go }: { v: V; close?: () => void; go?: (state:
                 ) : null}
               </Link>
             </li>
+            <FraudListItem variant={v.showFraud} go={go} />
           </ul>
           <p className="t-xs muted">1영업일 동안 응답이 없으면 상위 승인자에게 알립니다. 실패한 실행은 CS 처리함 건으로 넘어갑니다.</p>
         </div>
       </section>
       <section className="widget span-8" aria-label="승인 패널">
+        {v.showFraud ? <FraudActionPanel variant={v.showFraud} go={go} /> : null}
         {v.showA ? (
           <>
             <div className="col">

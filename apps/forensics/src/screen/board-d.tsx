@@ -2,9 +2,10 @@
 /* eslint-disable */
 import { Fragment, type FormEvent } from 'react';
 
-import { CONSOLE_ORIGIN } from '../lib/origins';
 import { Overlay } from '../shared/Overlay';
 import { useReplay } from './controls';
+import type { Source } from '../lib/source';
+import { CandidatePanel, DenyMain, ExpiredMain, GroupCountStat, GroupFilter, ReceivingMain, ReplaySourceBadge, SeatMarkLegend, SeatMarks, SourceHead, sourceVals } from './sources';
 
 const prevent = (e: FormEvent) => e.preventDefault();
 void Fragment;
@@ -14,10 +15,9 @@ type AriaBool = boolean | 'true' | 'false';
 type AriaCurrent = boolean | 'true' | 'false' | 'page' | 'step' | 'location' | 'date' | 'time';
 
 
-export const STATES_D = ["재생", "후보 고름", "만드는 중", "파일 거절", "복사 방식", "그래픽 대체", "돌릴 수 없음", "사건 일부 버림", "일시정지", "시나리오 고르기", "스포츠 플레이오프 오픈", "사람 흉내 봇 · 후보 고름", "권한 없음(2단계)"] as const;
-export const DEFAULT_D = "재생";
+// 상태 목록은 원천(합성·조사·연구)마다 다르다: lib/source.ts statesFor(d5 §7.17 상태 표). 보드 SCR-069-d의 state 열거값은 합성 원천 목록이다
 
-export function valsD(state: string) {
+export function valsD(state: string, source: Source = 'synthetic') {
     let st = state || '재생';
     let cand = st === '후보 고름';
     let gen = st === '만드는 중';
@@ -30,13 +30,13 @@ export function valsD(state: string) {
     let pick = st === '시나리오 고르기';
     let sport = st === '스포츠 플레이오프 오픈';
     let mimic = st === '사람 흉내 봇 · 후보 고름';
-    let deny = st === '권한 없음(2단계)';
+    const sv = sourceVals(st, source);
     let conc = !sport && !mimic;
     return {
       isCand: cand,
       notCand: !cand,
-      mapConc: !cand && conc,
-      statBase: !cand && conc,
+      mapConc: (!cand || sv.isInv) && conc,
+      statBase: (!cand || sv.isInv) && conc,
       scatConc: !cand && conc,
       tlBase: !cand && !mimic,
       tlCand: cand || mimic,
@@ -47,8 +47,6 @@ export function valsD(state: string) {
       isStad: sport || mimic,
       isPick: pick,
       pickExp: pick ? 'true' : 'false',
-      isDeny: deny,
-      stage1: !deny,
       isGen: gen,
       isReject: reject,
       isCopy: copy,
@@ -57,11 +55,13 @@ export function valsD(state: string) {
       fullScatter: !fallback,
       isCant: cant,
       isDrop: drop,
-      showMain: !cant && !deny,
+      showMain: !cant && sv.hasData,
+      showFoot: sv.hasData,
       showMap: !reject,
       showStats: !reject,
       playing: st === '재생' || copy || fallback || gen || drop || pick || sport,
-      paused: cand || reject || pause || mimic
+      paused: cand || reject || pause || mimic,
+      ...sv
     };
   }
 
@@ -81,13 +81,9 @@ export function BarD({ v, close }: { v: V; close?: () => void }) {
       PEAKET
     </span>
     <span className="badge badge-inverse">포렌식 리플레이</span>
-    {v.stage1 ? (
-      <>
-        <span className="badge badge-warning">합성 데이터</span>
-      </>
-    ) : null}
+    <ReplaySourceBadge source={v.src} />
     {' '}
-    {v.stage1 ? (
+    {v.isSyn ? (
       <>
         <span className="sep" aria-hidden="true" />
         {' '}
@@ -169,14 +165,7 @@ export function BarD({ v, close }: { v: V; close?: () => void }) {
       </>
     ) : null}
     {' '}
-    {v.isDeny ? (
-      <>
-        <a href={`${CONSOLE_ORIGIN}/dashboard`} className="link-more" style={{ marginLeft: "auto" }}>
-          관제 콘솔
-          <i className="ic ic-chevron-right" aria-hidden="true" />
-        </a>
-      </>
-    ) : null}
+    {v.notSyn ? <SourceHead source={v.src} deny={v.isDeny} /> : null}
     </>
   );
 }
@@ -193,7 +182,7 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
           <i className="ic ic-alert-circle" aria-hidden="true" />
           <div className="banner-body">
             <span className="banner-title">이 파일은 열 수 없습니다(형식이 다릅니다)</span>
-            앞뒤 매직 ARROW1이 없습니다. 아무것도 그리지 않았습니다
+            {v.spec.rejectReason}
           </div>
         </div>
       </>
@@ -202,7 +191,7 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
       <>
         <div className="banner banner-info" role="status" style={{ margin: "16px 20px 0" }}>
           <i className="ic ic-info" aria-hidden="true" />
-          <div className="banner-body">이 공개 위치는 교차 출처 격리를 켜지 않아 복사 방식으로 동작합니다. 결과는 같고 반응이 조금 늦을 수 있습니다</div>
+          <div className="banner-body">{v.spec.copyNote}</div>
         </div>
       </>
     ) : null}
@@ -217,7 +206,7 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
     {v.showMain ? (
       <>
         <main id="main" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) var(--fx-panel, 460px)", gap: "16px", padding: "16px 20px 12px", alignItems: "start" }}>
-          <h1 className="sr-only">포렌식 리플레이 · 합성 데이터 데모</h1>
+          <h1 className="sr-only">{v.spec.title}</h1>
           <div className="col" style={{ gap: "16px", minWidth: "0" }}>
             <section className="widget" aria-labelledby="fx-map-h">
               <div className="widget-head wrap">
@@ -239,7 +228,7 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                   <>
                     {v.mapConc ? (
                       <>
-                        <svg viewBox="0 0 880 520" role="img" aria-label="좌석 리플레이. 오픈 뒤 2분 14초의 좌석 상태입니다. 무대 앞 플로어와 아래층 가운데 구역이 거의 다 팔렸고 위층 끝 구역에 빈 좌석이 남았습니다." style={{ display: "block", width: "100%", height: "auto" }}>
+                        <svg viewBox="0 0 880 520" role="img" aria-label={"좌석 리플레이. 오픈 뒤 2분 14초의 좌석 상태입니다. 무대 앞 플로어와 아래층 가운데 구역이 거의 다 팔렸고 위층 끝 구역에 빈 좌석이 남았습니다." + v.mapNote} style={{ display: "block", width: "100%", height: "auto" }}>
                           <rect x="330" y="18" width="220" height="36" rx="6" style={{ fill: "var(--fill-weak-strong)" }} />
                           <text x="440" y="41" textAnchor="middle" style={{ fill: "var(--text-muted)", fontSize: "13px", fontWeight: "700" }}>무대</text>
                           <rect x="312" y="82" width="58" height="54" rx="4" style={{ fill: "var(--heat-2)" }} />
@@ -302,11 +291,12 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                           <text x="128.8" y="228.9" textAnchor="middle" style={{ fill: "var(--text)", fontSize: "11px", fontWeight: "700" }}>B10</text>
                           <polygon points="100.1,162.9 100.9,145.5 102.6,128.2 105.2,111 108.6,93.9 113,77 118.1,60.4 163.6,75.9 159.1,90.2 155.4,104.6 152.4,119.3 150.2,134.1 148.8,149 148.1,163.9" style={{ fill: "var(--heat-1)", stroke: "var(--surface)", strokeWidth: "1" }} />
                           <text x="128.8" y="119.1" textAnchor="middle" style={{ fill: "var(--text)", fontSize: "11px", fontWeight: "700" }}>B11</text>
+                          {v.isInv ? <SeatMarks picked={v.isCand} /> : null}
                         </svg>
                       </>
                     ) : null}
                     {' '}
-                    {v.isCand ? (
+                    {v.candMap ? (
                       <>
                         <svg viewBox="0 0 880 520" role="img" aria-label="좌석 리플레이. 오픈 뒤 2분 14초의 좌석 상태입니다. 무대 앞 플로어와 아래층 가운데 구역이 거의 다 팔렸고 위층 끝 구역에 빈 좌석이 남았습니다. 후보 세션이 잡은 좌석은 플로어 F2와 아래층 A5·A6에 몰려 있습니다." style={{ display: "block", width: "100%", height: "auto" }}>
                           <rect x="330" y="18" width="220" height="36" rx="6" style={{ fill: "var(--fill-weak-strong)" }} />
@@ -634,7 +624,7 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                     <div className="card-flat col" style={{ minHeight: "360px", alignItems: "center", justifyContent: "center", gap: "8px", textAlign: "center" }}>
                       <i className="ic ic-map ic-32 muted" aria-hidden="true" />
                       <p className="t-md fw-b">그릴 사건이 없습니다</p>
-                      <p className="t-sm muted">프리셋을 고르거나 다른 파일을 불러오세요</p>
+                      <p className="t-sm muted">{v.spec.rejectHint}</p>
                     </div>
                   </>
                 ) : null}
@@ -652,11 +642,12 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                       <span aria-hidden="true" style={{ display: "inline-block", width: "16px", height: "12px", borderRadius: "3px", background: "var(--heat-3)" }} />
                       90% 이상
                     </li>
+                    {v.isInv ? <SeatMarkLegend /> : null}
                     {v.anyCand ? (
                       <>
                         <li className="legend-item">
                           <span aria-hidden="true" style={{ display: "inline-block", width: "12px", height: "12px", borderRadius: "50%", border: "2px solid var(--danger)" }} />
-                          후보 세션이 잡은 좌석
+                          {v.isInv ? '고른 칸의 묶음 계정이 잡은 좌석' : '후보 세션이 잡은 좌석'}
                         </li>
                       </>
                     ) : null}
@@ -676,7 +667,7 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                         <span className="stat-meta">전체 범위</span>
                       </>
                     ) : null}
-                    {v.isCand ? (
+                    {v.statCand ? (
                       <>
                         <span className="stat-value">42,118</span>
                         <span className="stat-meta">고른 세션 9,412</span>
@@ -703,7 +694,7 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                         <span className="stat-meta">전체 범위</span>
                       </>
                     ) : null}
-                    {v.isCand ? (
+                    {v.statCand ? (
                       <>
                         <span className="stat-value">61.5%</span>
                         <span className="stat-meta">고른 세션 9,412</span>
@@ -730,7 +721,7 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                         <span className="stat-meta">전체 범위</span>
                       </>
                     ) : null}
-                    {v.isCand ? (
+                    {v.statCand ? (
                       <>
                         <span className="stat-value">22.0%</span>
                         <span className="stat-meta">고른 세션 9,412</span>
@@ -749,6 +740,9 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                       </>
                     ) : null}
                   </div>
+                  {v.isInv ? (
+                    <GroupCountStat />
+                  ) : (
                   <div className="stat">
                     <span className="stat-label">후보 비율</span>
                     {v.statBase ? (
@@ -757,7 +751,7 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                         <span className="stat-meta">전체 범위</span>
                       </>
                     ) : null}
-                    {v.isCand ? (
+                    {v.statCand ? (
                       <>
                         <span className="stat-value">96.3%</span>
                         <span className="stat-meta">고른 세션 9,412</span>
@@ -776,6 +770,7 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                       </>
                     ) : null}
                   </div>
+                  )}
                 </div>
               </>
             ) : null}
@@ -797,7 +792,7 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                   <>
                     <p className="t-xs">
                       <span className="fw-b">고른 범위</span>
-                      {' '}· 시간 T+02:00~T+02:30 · 산점도 영역(100ms 안, 엔트로피 0.24 아래)
+                      {' '}· 시간 T+02:00~T+02:30 · {v.spec.pickedArea}
                     </p>
                   </>
                 ) : null}
@@ -853,6 +848,8 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                     </label>
                   </div>
                 </fieldset>
+                {v.isSyn ? (
+                  <>
                 <div className="col" style={{ gap: "6px" }}>
                   <span className="label">봇 등급(합성 정답)</span>
                   <div className="seg" role="group" aria-label="봇 등급">
@@ -872,8 +869,12 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                     <button className="chip chip-sm" type="button" aria-pressed="false">그 밖</button>
                   </div>
                 </div>
+                  </>
+                ) : null}
+                {v.isInv ? <GroupFilter /> : null}
               </div>
             </section>
+            {v.isSyn ? (
             <section className="widget" aria-labelledby="fx-bot-h">
               <div className="widget-head">
                 <h2 className="t-sm fw-b" id="fx-bot-h">봇 후보</h2>
@@ -1954,6 +1955,9 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
                 ) : null}
               </div>
             </section>
+            ) : (
+              <CandidatePanel source={v.src} picked={v.isCand} fallback={v.isFallback} />
+            )}
           </div>
           <div style={{ gridColumn: "1/-1", minWidth: "0" }}>
             <section className="widget" aria-labelledby="fx-tl-h">
@@ -2286,20 +2290,10 @@ export function OverlaysD({ v, close }: { v: V; close?: () => void }) {
         </main>
       </>
     ) : null}
-    {v.isDeny ? (
-      <>
-        <main id="main" className="col" style={{ flex: "1", alignItems: "center", justifyContent: "center", gap: "10px", padding: "80px 20px", textAlign: "center" }}>
-          <span className="state-icon is-danger" style={{ width: "56px", height: "56px" }}><i className="ic ic-lock" aria-hidden="true" /></span>
-          <h1 className="t-xl">이 작업을 할 권한이 없습니다</h1>
-          <p className="t-md muted">운영 연결 포렌식 리플레이는 개인정보 보호책임자가 가명정보 취급자로 지정한 commander만 엽니다</p>
-          <a href={`${CONSOLE_ORIGIN}/dashboard`} className="link-more">
-            관제 콘솔
-            <i className="ic ic-chevron-right" aria-hidden="true" />
-          </a>
-        </main>
-      </>
-    ) : null}
-    {v.stage1 ? (
+    {v.isDeny ? <DenyMain /> : null}
+    {v.isRecv ? <ReceivingMain source={v.src} /> : null}
+    {v.isExpired ? <ExpiredMain source={v.src} /> : null}
+    {v.showFoot ? (
       <>
         <footer className="row wrap" style={{ gap: "8px 16px", padding: "10px 20px 16px", marginTop: "auto", fontSize: "12px", color: "var(--text-muted)" }} aria-label="이 기기에서 잰 값(예시)">
           <span>이 기기에서 잰 값(예시)</span>

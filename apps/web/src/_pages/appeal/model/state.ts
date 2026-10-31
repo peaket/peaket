@@ -1,11 +1,13 @@
 // SCR-042 소명 제출 상태별로 무엇을 보일지(캔버스 보드 SCR-042-m의 renderVals를 옮겼다. '제출됨 · 양도 회수'는 d5 §5.24 submitted 줄에서 더했다).
+// 부정 예매 소명 넷('부정 예매 소명' ~ '결과 · 부정 예매 소명 불인정')은 보드가 없어 d5 §5.24 '부정 예매 소명' 상태 표에서 옮겼다.
 import type { AppealKind } from '@/entities/appeal';
 import type { Scr042State } from '@/shared/config/screens.account';
 
-export type AppealResult = 'lift' | 'keep' | 'not-reclaimed' | 'reclaimed';
+/** lift·keep(예매 제한) · not-reclaimed·reclaimed(양도 회수) · accepted·rejected(부정 예매 소명 인정·불인정) */
+export type AppealResult = 'lift' | 'keep' | 'not-reclaimed' | 'reclaimed' | 'accepted' | 'rejected';
 
 export interface AppealView {
-  /** 이 상태가 보이는 소명 종류(보드는 예매 제한과 양도 회수를 한 화면 상태로 둔다) */
+  /** 이 상태가 보이는 소명 종류(보드는 예매 제한과 양도 회수를 한 화면 상태로 둔다. 부정 예매 소명도 같은 목록에 붙였다) */
   kind: AppealKind;
   /** form(작성·제출됨·기한 지남, CMP-063) · result(검토 결과) · closed(소명 닫힘) · empty(빈 화면) */
   mode: 'form' | 'result' | 'closed' | 'empty';
@@ -40,5 +42,13 @@ export function appealView(st: Scr042State): AppealView {
       return { ...base, mode: 'empty' };
     case '소명 닫힘(대상 아님·기한 경과)':
       return { ...base, mode: 'closed' };
+    case '부정 예매 소명':
+      return { ...base, kind: 'fraud' };
+    case '제출됨 · 부정 예매':
+      return { ...base, kind: 'fraud', formState: 'submitted' };
+    case '결과 · 부정 예매 소명 인정':
+      return { ...base, kind: 'fraud', mode: 'result', result: 'accepted' };
+    case '결과 · 부정 예매 소명 불인정':
+      return { ...base, kind: 'fraud', mode: 'result', result: 'rejected' };
   }
 }

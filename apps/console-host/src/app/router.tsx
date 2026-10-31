@@ -27,6 +27,10 @@ const shellScreens: RouteObject[] = [
   { path: 'settlements', lazy: () => import(/* webpackChunkName: "scr-049" */ '@/pages/settlements').then((m) => ({ Component: m.Page })) },
   // SCR-053 스캐너 기기 관리
   { path: 'scanner-devices', lazy: () => import(/* webpackChunkName: "scr-053" */ '@/pages/scanner-devices').then((m) => ({ Component: m.Page })) },
+  // SCR-070 부정 거래 조사 사건 목록(지정 부정 거래 조사관만, ADR-0171)
+  { path: 'investigations', lazy: () => import(/* webpackChunkName: "scr-070" */ '@/pages/investigations').then((m) => ({ Component: m.Page })) },
+  // SCR-071 사건 작업대
+  { path: 'investigations/:caseId', lazy: () => import(/* webpackChunkName: "scr-071" */ '@/pages/investigation-case').then((m) => ({ Component: m.Page })) },
   // SCR-064 관리 계정·세션 관리
   { path: 'accounts', lazy: () => import(/* webpackChunkName: "scr-064" */ '@/pages/accounts').then((m) => ({ Component: m.Page })) },
   // SCR-065 파트너사·계약 관리

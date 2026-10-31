@@ -83,8 +83,15 @@ export const SCR042_STATES = [
   '소명 닫힘(대상 아님·기한 경과)',
   /** 보드에 없고 d5 §5.24 submitted 줄에 있는 양도 회수 소명의 처리 일정('입장이 시작되기 전에') */
   '제출됨 · 양도 회수',
+  /** 보드에 없고 d5 §5.24 '부정 예매 소명' 상태 표에서 더했다(apl-0003, add-fraud-investigation-screens 결정 9) */
+  '부정 예매 소명',
+  '제출됨 · 부정 예매',
+  '결과 · 부정 예매 소명 인정',
+  '결과 · 부정 예매 소명 불인정',
 ] as const;
 export type Scr042State = (typeof SCR042_STATES)[number];
+/** 부정 예매 소명(apl-0003) 미리 보기 목록에 올리는 상태(SCR042_STATES의 마지막 넷) */
+export const SCR042_FRAUD_STATES = ['부정 예매 소명', '제출됨 · 부정 예매', '결과 · 부정 예매 소명 인정', '결과 · 부정 예매 소명 불인정'] as const satisfies readonly Scr042State[];
 
 // ── SCR-043 배상금 계좌 입력 ──
 export const SCR043_STATES = ['입력', '재인증 시트', '재인증 만료', '송금 요청 중', '계좌 오류', '3회 실패', '이미 지급', '완료'] as const;
@@ -190,8 +197,17 @@ export const ACCOUNT_SCREENS: readonly WebScreen[] = [
     path: '/my/appeals/apl-0001',
     group: 'request',
     owner: 'account',
-    states: SCR042_STATES,
-    note: '예매 제한(apl-0001)과 양도 회수(apl-0002) 두 건을 한 경로의 상태로 본다. 마지막 상태는 d5에서 더했다',
+    states: SCR042_STATES.filter((st) => !(SCR042_FRAUD_STATES as readonly string[]).includes(st)),
+    note: "예매 제한(apl-0001)과 양도 회수(apl-0002) 두 건을 한 경로의 상태로 본다. '제출됨 · 양도 회수'는 d5에서 더했다. 부정 예매 소명 상태는 아래 apl-0003 줄",
+  },
+  {
+    id: 'SCR-042',
+    name: '소명 제출(부정 예매 소명)',
+    path: '/my/appeals/apl-0003',
+    group: 'request',
+    owner: 'account',
+    states: SCR042_FRAUD_STATES,
+    note: "부정 예매 소명 요청 건(apl-0003, 보드 없음 → d5 §5.24 그림). 기한이 지난 뒤와 소명 닫힘은 위 줄의 '기한 지남'·'소명 닫힘'과 같은 화면이다",
   },
   { id: 'SCR-043', name: '배상금 계좌 입력', path: '/my/compensations/cmp-0001', group: 'request', owner: 'account', states: SCR043_STATES },
   {

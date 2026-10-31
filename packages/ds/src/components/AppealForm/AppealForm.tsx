@@ -1,5 +1,5 @@
 'use client';
-// CMP-063 AppealForm(소명 제출). 정본: d2 CMP-063(변형 restriction·reclaim, 상태 default·submitted·overdue), d5 §5.24, 캔버스 보드 SCR-042.
+// CMP-063 AppealForm(소명 제출). 정본: d2 CMP-063(변형 restriction·reclaim·fraud, 상태 default·submitted·overdue), d5 §5.24, 캔버스 보드 SCR-042.
 // 보드 마크업(위에서 아래로):
 //   default   — 사안 카드(AppealCaseCard, 처리 일정 포함) → <form class="col" aria-label="소명 작성">
 //               .field(라벨 '소명 내용 (필수)' → 힌트(민감정보 안내) → .textarea(min-height 168) → .counter '남은 글자 N자 / 2,000자'(aria-live))
@@ -7,6 +7,8 @@
 //   submitted — 사안 카드(처리 일정 없음) → .card(role="status"): 성공 아이콘 + '소명을 제출했습니다' + 제출 시각,
 //               kv(상태 <제출됨> · 검토 결과), '처리 일정' 한 줄, 이동 버튼
 //   overdue   — 사안 카드(기한 줄에 '기한 지남' 위험 배지) → 경고 띠(role="alert") → 문의하기 버튼
+// fraud(부정 예매 소명, d5 §5.24 '부정 예매 소명' 그림): 사안 카드에 사유 범주 여럿·잠긴 티켓 묶음을 싣고(AppealCaseCard),
+//   default에서만 카드와 폼 사이에 정보 띠(notice, 가족·지인 대리 예매 안내)를 둔다. 결과(인정·불인정)는 앱이 사안 카드 + 결과 카드로 그린다.
 // - 글자 수는 grapheme(사람이 보는 한 글자) 단위로 세고 천 단위 쉼표를 붙인다. 넘치면 'N자 넘었습니다'를 오류 색으로 보인다(입력을 자르지 않는다).
 // - 화면 문구(제목·사유·기한·처리 일정·힌트·결과 안내)는 앱이 props로 준다. 클라이언트 부품이다(서버 페이지는 onSubmit 없이 직렬화되는 값만 넘긴다).
 import { useState, type FormEvent, type ReactNode } from 'react';
@@ -15,7 +17,7 @@ import { cx } from '../../lib/cx';
 import { countGraphemes, formatNumber } from '../../lib/format';
 import { Icon } from '../../icons';
 import { FieldLabelText } from '../Field/Field';
-import { AppealCaseCard, type AppealVariant } from './AppealCaseCard';
+import { AppealCaseCard, type AppealLockedTickets, type AppealVariant } from './AppealCaseCard';
 
 export type AppealFormState = 'default' | 'submitted' | 'overdue';
 
@@ -48,13 +50,22 @@ export interface AppealFormProps {
   idPrefix: string;
   variant?: AppealVariant;
   state?: AppealFormState;
-  /** 사안 카드 제목('예매 제한' · '양도 회수 예고') */
+  /** 사안 카드 제목('예매 제한' · '양도 회수 예고' · '부정 예매 소명 요청') */
   title: ReactNode;
-  /** 제목 오른쪽 경고 배지 글('제한 중') */
+  /** 제목 오른쪽 경고 배지 글('제한 중' · '답변 기다림') */
   statusLabel?: ReactNode;
-  reasonCategory: ReactNode;
-  /** 대상 티켓(양도 회수) */
+  /** 사유 범주 하나(restriction·reclaim) */
+  reasonCategory?: ReactNode;
+  /** 사유 범주 여럿(fraud: 알린 범주 모두). 있으면 reasonCategory 대신 쓴다 */
+  reasonCategories?: readonly ReactNode[];
+  /** 대상 티켓(양도 회수) · 공연과 회차(fraud) */
   target?: ReactNode;
+  /** 대상 칸 이름(기본 '대상 티켓') */
+  targetLabel?: ReactNode;
+  /** 잠긴 티켓 묶음(fraud) */
+  lockedTickets?: AppealLockedTickets;
+  /** 작성 중 카드와 폼 사이 정보 띠(fraud: 가족·지인 대리 예매 안내) */
+  notice?: ReactNode;
   /** '10/27(화) 18:00' */
   deadlineText: ReactNode;
   /** '남은 시간 51시간' */
@@ -85,7 +96,11 @@ export function AppealForm({
   title,
   statusLabel,
   reasonCategory,
+  reasonCategories,
   target,
+  targetLabel,
+  lockedTickets,
+  notice,
   deadlineText,
   remainingText,
   scheduleText,
@@ -122,15 +137,25 @@ export function AppealForm({
       title={title}
       statusLabel={statusLabel}
       reasonCategory={reasonCategory}
+      reasonCategories={reasonCategories}
       target={target}
+      targetLabel={targetLabel}
       deadline={{ text: deadlineText, remainingText, overdue: isOverdue, overdueLabel: overdue?.badgeLabel }}
       schedule={state === 'default' ? scheduleText : undefined}
+      lockedTickets={lockedTickets}
     />
   );
 
   return (
     <div className={cx('col gap-5', className)} data-variant={variant} data-state={state}>
       {card}
+
+      {state === 'default' && notice ? (
+        <div className="banner banner-info">
+          <Icon name="info" />
+          <div className="banner-body">{notice}</div>
+        </div>
+      ) : null}
 
       {state === 'default' ? (
         <form

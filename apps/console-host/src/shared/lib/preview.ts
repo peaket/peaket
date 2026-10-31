@@ -9,11 +9,11 @@ export function usePreviewState<S extends string>(states: readonly S[], fallback
   return resolvePreviewState(params, states, fallback);
 }
 
-/** 상태 고르기 패널이 남길 다른 검색 값(theme·role·event·tab) */
+/** 상태 고르기 패널이 남길 다른 검색 값(theme·role·designation·event·tab) */
 export function usePreviewKeep(): Record<string, string | undefined> {
   const [params] = useSearchParams();
   const keep: Record<string, string | undefined> = {};
-  for (const k of ['theme', 'role', 'event', 'tab']) {
+  for (const k of ['theme', 'role', 'designation', 'event', 'tab']) {
     const v = params.get(k);
     if (v) keep[k] = v;
   }
