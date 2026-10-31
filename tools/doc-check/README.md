@@ -24,6 +24,18 @@ python tools/doc-check/check_all.py
 
 종료 코드: 0 = 오류 없음, 1 = 오류 있음, 2 = 실행 실패.
 
+도구 자체의 시험(표준 라이브러리 `unittest`, 2026-11-01)은 이렇게 돌린다. CI는 문서 점검 앞에 이 시험을 먼저 돌린다(`.github/workflows/docs-check.yml`). `-X utf8`은 윈도우에서 실패 메시지의 한국어가 깨지지 않게 한다.
+
+```bash
+python -I -X utf8 -m unittest discover -s tools/doc-check -p "test_*.py"
+```
+
+| 시험 파일 | 지키는 것 |
+| --- | --- |
+| `test_api_contract.py` | `api` 검사의 openapi 계약 부분(기술 검토 낮음-031·032): 처음 맞는 접두사 규칙과 경로·작업 `servers`로 정한 호스트, 호스트가 하나로 정해지지 않는 작업, `securitySchemes`에 없는 인증 방식 이름(작업·전역), `security`도 전역 `security`도 없는 작업(전역이 빈 목록일 때 포함), `security: []` 공개 작업, 보고 숫자(`api`·`api_hosts`·`api_problem_exempt`. Problem 선언은 `application/problem+json`, `components/responses` 참조, `Problem` 스키마 참조 셋 다), Problem 예외와 예외가 아닌 오류 응답, 줄 규칙과 YAML 읽기의 작업 수 대조, 읽지 못한 명세. openapi 글을 넣어 `main()`과 같은 순서(`check_yaml` → `check_api` → `check_api_contract`)로 돌린다 |
+
+새 검사를 더하거나 고칠 때는 같은 방식으로 시험을 먼저 쓴다(docs/architecture.md §8.6의 5).
+
 ## 검사 항목
 
 | 검사 | 오류로 보는 것 | 경고로 보는 것 |
@@ -61,4 +73,4 @@ python tools/doc-check/check_all.py
 ## 유지보수 규칙
 
 - 새 ID 종류나 새 문서 폴더를 만들면 이 스크립트의 정의 위치·`ALIAS`를 함께 고친다.
-- CI 연결은 wbs 0.1.3 작업이다. 문서 리포의 PR마다 `python tools/doc-check/check_all.py`를 돌리고 실패하면 병합을 막는다.
+- CI 연결(wbs 0.1.3)은 `.github/workflows/docs-check.yml`이 한다(2026-10-31 `add-ci-foundation`, R-202). 문서나 이 도구가 바뀐 PR마다 도구의 시험과 `python tools/doc-check/check_all.py`를 돌리고, 실패하면 병합을 막는다.

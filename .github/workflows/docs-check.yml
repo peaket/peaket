@@ -27,6 +27,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # 그림 문법 검사의 의존성(리더기와 같은 mermaid 판, ADR-0138)
       - run: npm ci --ignore-scripts --prefix tools/doc-check/mermaid
+      # 문서 점검 도구 자체의 시험(openapi 계약 검사, 기술 검토 낮음-031·032). 도구가 틀리면 아래 점검을 믿을 수 없으므로 먼저 돈다
+      - run: python3 -I -X utf8 -m unittest discover -s tools/doc-check -p "test_*.py"
       - run: python3 tools/doc-check/check_all.py
       - run: pnpm exec openspec validate --all --no-interactive
         env:
