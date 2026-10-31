@@ -47,6 +47,7 @@ erDiagram
     account ||--o{ identity_conflict_attempt : "같은 본인확인 시도(추천 적용 2026-10-31, ADR-0171)"
     account ||--o{ consent : gives
     account ||--o| identity_verification : "verified_by (ci_hmac)"
+    account |o--o{ restricted_ci_hold : "부정 예매 이용 제한의 연계정보 HMAC 보관(추천 적용 2026-10-31, ADR-0171 결정 5)"
     account ||--|{ account_provider : "로그인 수단 1개 이상"
     account ||--o{ account_merge : "대표 계정"
     account ||--o{ account_hold : "병합 막는 건(ADR-0148)"
@@ -135,13 +136,14 @@ erDiagram
     device {
         uuid id PK
         uuid account_id FK
-        bytea device_ref "기기 가명 HMAC-SHA256(inv-ref-key, 'device|' + deviceId). trust-svc의 deviceRef와 같은 값이다(기기 키 통일). 2026-10-30까지는 단방향 SHA-256 device_hash였다. 원문 deviceId는 두지 않는다. 기기 연결 해제·회원 탈퇴 때 행을 지운다(docs/security/data-classification.md, 추천 적용 2026-10-31, ADR-0171 결정 4)"
+        text device_ref "기기 가명 invRef(device, deviceId): 키 판 접두어(k1. 등) + base64url(HMAC-SHA256(device 라벨 키, deviceId)), docs/security/secrets-and-keys.md. 로그인 때 라벨 키를 받지 못하면 그 로그인의 기기 행을 쓰지 않고 세션은 만든다(새 기기 알림은 보낸다, docs/features/identity.md §10). trust-svc의 deviceRef와 같은 값이다(기기 키 통일). 2026-10-30까지는 단방향 SHA-256 device_hash였다. 원문 deviceId는 두지 않는다. 기기 연결 해제·회원 탈퇴 때 행을 지운다(docs/security/data-classification.md, 추천 적용 2026-10-31, ADR-0171 결정 4)"
+        text device_ref_prev "키 회전의 이음 기간에만: 로그인 때 옛 판으로 구한 같은 기기의 값. 이음 기간이 끝날 때 옛 판 → 새 판 대응을 조사 저장소에 한 번 넘긴 뒤 지운다(docs/security/secrets-and-keys.md 회전 절차, 추천 적용 2026-10-31, ADR-0171)"
         timestamptz bound_at
     }
     account_contact_ref {
         uuid account_id PK
         text kind PK "PHONE|EMAIL. 기본 키 (account_id, kind)"
-        bytea ref "HMAC-SHA256(inv-ref-key, 'contact|' + 정규화한 값). 휴대폰은 본인확인 번호를 E.164로, 이메일은 로그인 이메일을 소문자·앞뒤 빈칸 제거로 맞춘다. 원문은 이 표에 두지 않는다. 부정 예매 후보 묶음의 연락처 신호(FR-072)에만 쓰고 조사 적재가 BatchGetInvestigationRefs로 읽는다(추천 적용 2026-10-31, ADR-0171)"
+        text ref "invRef(contact, 정규화한 값), 키 판 접두어 포함(docs/security/secrets-and-keys.md). 계산하지 못하면 행을 쓰지 않고 identity-svc 작업이 원문으로 다시 계산한다. 휴대폰은 본인확인 번호를 E.164로, 이메일은 로그인 이메일을 소문자·앞뒤 빈칸 제거로 맞춘다. 원문은 이 표에 두지 않는다. 부정 예매 후보 묶음의 연락처 신호(FR-072)에만 쓰고 조사 적재가 BatchGetInvestigationRefs로 읽는다(추천 적용 2026-10-31, ADR-0171)"
         timestamptz updated_at "번호·이메일이 바뀌면 다시 계산한다. 탈퇴 때 지운다"
     }
     identity_conflict_attempt {
@@ -149,6 +151,16 @@ erDiagram
         uuid attempted_account_id "본인확인을 시도한 계정"
         uuid existing_account_id "그 연계정보로 이미 본인확인한 계정"
         timestamptz attempted_at "본인확인 409(이미 다른 계정에서 본인확인) 때 남긴다. 1년 [가정] 뒤 지운다. 명의 대여·사들인 계정 후보의 연결 신호이고 사람이 확인한 라벨이 아니다(추천 적용 2026-10-31, ADR-0171)"
+    }
+    restricted_ci_hold {
+        bytea ci_hmac PK "부정 예매 이용 제한(booking_restriction 사유 FRAUD)을 받거나 그 사건의 소명 요청을 받은 사람의 연계정보 HMAC(identity_verification.ci_hmac과 같은 값). 기본 키 (ci_hmac, fraud_case_id). ops-svc의 SetRestrictedCiHold(identity.proto)로 소명 요청 때(CASE_OPEN)와 제한을 걸기 전에(RESTRICTED) 만든다(추천 적용 2026-10-31, ADR-0171 결정 5, POL-046 ⑥)"
+        int ci_hmac_key_version "연계정보 HMAC 키 판. 다시 가입한 계정의 본인확인 때 보존 중인 모든 판으로 견준다"
+        uuid fraud_case_id PK "제한을 정한 부정 예매 사건(ops 논리 DB라 외래키 없음)"
+        text state "CASE_OPEN|RESTRICTED. CASE_OPEN은 소명 요청 뒤 결정 전(탈퇴해도 보관만 하고 다시 가입한 계정을 막지 않는다), RESTRICTED는 이용 제한 중. 제한 없이 끝나거나 풀리면(RELEASED) 행을 지운다(추천 적용 2026-10-31, ADR-0171)"
+        timestamptz until "제한 끝 시각(RESTRICTED만). 이 시각이 지나면 정비 작업이 행을 지운다"
+        uuid source_account_id "제한을 받은 계정. 탈퇴해도 이 행은 until까지 남는다(POL-033의 예외, 법률 확인 36번)"
+        uuid carried_account_id "같은 연계정보로 다시 가입해 제한을 이은 계정. 그 계정의 토큰에는 until까지 ticket:buy를 싣지 않는다"
+        bigint version "SetRestrictedCiHold.version. 더 클 때만 반영. RELEASED가 오면 행을 지운다"
     }
     admin_account {
         uuid id PK
@@ -191,7 +203,7 @@ erDiagram
     admin_designation {
         uuid id PK "지정 기록(추천 적용 2026-10-30, docs/security/authz-matrix.md §3.1·§3.7)"
         uuid admin_account_id FK "commander 계정만. 예외로 FRAUD_INVESTIGATOR는 commander와 cs_lead 계정에 줄 수 있다(추천 적용 2026-10-31, ADR-0171 결정 7). 역할이 그 지정을 받을 수 있는 역할이 아니게 되면 같은 트랜잭션에서 revoked_at을 채운다"
-        text kind "ACCESS_REVIEWER|PSEUDONYM_HANDLER|FRAUD_INVESTIGATOR(접속기록 점검자·가명정보 취급자·부정 거래 조사관). 살아 있는 행은 (admin_account_id, kind)마다 하나. 한 계정에 FRAUD_INVESTIGATOR와 PSEUDONYM_HANDLER가 함께 살아 있지 않게 identity-svc가 지정할 때 막는다(designation-conflict, 조사·연구 두 갈래를 잇지 않는다)"
+        text kind "ACCESS_REVIEWER|PSEUDONYM_HANDLER|FRAUD_INVESTIGATOR(접속기록 점검자·가명정보 취급자·부정 거래 조사관). 살아 있는 행은 (admin_account_id, kind)마다 하나. 한 계정에 FRAUD_INVESTIGATOR와 PSEUDONYM_HANDLER가 함께 살아 있지 않게 identity-svc가 지정할 때 막는다(designation-conflict, 조사·연구 두 갈래를 잇지 않는다). 그 검사와 넣기는 대상 admin_account 행을 SELECT ... FOR UPDATE로 잠근 트랜잭션 안에서 해, 같은 순간의 두 요청 가운데 하나만 성공한다. 같은 잠금 안에서 함께 둘 수 없는 다른 종류를 지난 90일 [가정] 안에 거둔 행(revoked_at)이 있어도 막는다(냉각 기간, 추천 적용 2026-10-31, ADR-0171)"
         text basis "지정 근거(개인정보 보호책임자의 지정 문서 번호 등, SCR-064 ⑤). 개인정보 원문은 넣지 않는다"
         uuid designated_by "지정한 관리 계정"
         timestamptz designated_at
@@ -734,8 +746,8 @@ erDiagram
         text virtual_account_no "결제사가 발급한 가상계좌 번호, 필드 암호화(P1 기준), 입금 확정·만료 때 삭제"
         text virtual_account_bank "가상계좌 은행, 입금 확정·만료 때 삭제"
         text idempotency_key "confirm-{orderId}"
-        text payment_method_ref "결제 수단 연결값(조사용 가명, 약한 값). 승인 응답의 카드 정보에 BIN이 있을 때 payment-svc가 HMAC-SHA256(inv-ref-key, 'pay|' + BIN 6자리 + '|' + 보이는 끝자리 + '|' + 발급사 코드 + '|' + 카드 종류)로 계산해 PaymentEvent에 싣는다. 가린 카드 번호 원문은 두지 않는다(docs/features/payment.md, 추천 적용 2026-10-31, ADR-0171 결정 4)"
-        text card_bin "카드 번호 앞 6자리. payment_method_ref와 함께 있거나 함께 빈다"
+        text payment_method_ref "결제 수단 연결값(조사용 가명, 약한 값). 승인 응답의 카드 정보에 BIN이 있을 때 payment-svc가 invRef(pay, BIN 6자리·보이는 끝자리·발급사 코드·카드 종류를 이은 값)(키 판 접두어 포함)로 계산해 PaymentEvent에 싣는다. 가린 카드 번호 원문은 두지 않는다(docs/features/payment.md, 추천 적용 2026-10-31, ADR-0171 결정 4)"
+        text card_bin "카드 번호 앞 6자리. payment_method_ref와 함께 있거나 함께 빈다(라벨 키를 받지 못해 연결값을 계산하지 못하면 둘 다 비우고 PaymentEvent.refMissing이 true다, 추천 적용 2026-10-31, ADR-0171)"
         timestamptz authenticated_at "10분 deadline 기준"
         timestamptz created_at
         timestamptz approved_at "승인(가상계좌는 입금 확인) 시각, 정산 기간 판정(ADR-0086)"
@@ -932,7 +944,7 @@ erDiagram
         uuid account_id PK "기본 키 (case_id, event_id, account_id). 잠긴 계정. 이 계정이 이 회차에서 결제한 표는 지금 표와 앞으로 발권할 표 모두 잠긴다"
         bool locked "false면 풀림(행은 지우지 않는다)"
         bigint version "SetTransferLock.version. 같은 case_id 안에서만 견준다"
-        timestamptz changed_at
+        timestamptz changed_at "행은 풀려도 지우지 않는다. 보존은 그 사건이 끝난 때(closed_at)와 공연 종료 + 30일 [가정] 가운데 늦은 때까지이고, 그 뒤 정비 작업이 지운다(§6, 추천 적용 2026-10-31, ADR-0171)"
     }
     device_key {
         uuid id PK
@@ -1386,6 +1398,7 @@ erDiagram
     fraud_cluster ||--|{ fraud_cluster_member : ""
     fraud_cluster ||--o| fraud_case : "사건(묶음마다 하나)"
     fraud_case ||--o{ fraud_case_event : "사건 기록"
+    fraud_case ||--o{ fraud_graph_node : "연결 그래프 점의 무작위 ID 대응표(추천 적용 2026-10-31, ADR-0171)"
     fraud_case |o--o{ approval_request : "FRAUD_ACTION(target_ref)"
     event ||--o{ external_post : "외부 게시물"
     fraud_case ||--o{ evidence_bundle : "증거 묶음"
@@ -1495,7 +1508,7 @@ erDiagram
     access_finding {
         uuid id PK
         uuid review_id FK
-        text rule "REPEAT_DOWNLOAD|BULK_DOWNLOAD|OFF_HOURS|OUTSIDE_IP|OUT_OF_SCOPE|MANUAL_REVIEW. MANUAL_REVIEW는 정기 점검에서 사람이 찾은 이상 건(예: 사유·인시던트 번호가 없는 운영 접근, 계획 §4.3 4, 추천 적용 2026-10-30)"
+        text rule "REPEAT_DOWNLOAD|BULK_DOWNLOAD|OFF_HOURS|OUTSIDE_IP|OUT_OF_SCOPE|INV_CASE_VOLUME|INV_EXPORT_VOLUME|MANUAL_REVIEW. MANUAL_REVIEW는 정기 점검에서 사람이 찾은 이상 건(예: 사유·인시던트 번호가 없는 운영 접근, 계획 §4.3 4, 추천 적용 2026-10-30). INV_*는 부정 거래 조사 화면의 대량 조회·내보내기(계획 §4.2, 추천 적용 2026-10-31, ADR-0171)"
         uuid subject_account_id "점검 대상 관리 계정, 점검자 본인이면 다른 commander만 종결"
         timestamptz detected_at
         text reason "확인한 사유(소명)"
@@ -1737,6 +1750,14 @@ erDiagram
         jsonb detail "대상 계정·티켓, 이유. 연락처·IP 원문은 넣지 않는다"
         timestamptz occurred_at
     }
+    fraud_graph_node {
+        uuid case_id PK
+        uuid node_id PK "기본 키 (case_id, node_id). 사건마다 서버가 만든 무작위 값(UUIDv4). 계정 ID·가명·IP·ASN에서 계산하지 않는다(키 없는 해시 금지). openapi FraudCaseGraph의 nodeId와 선의 from·to가 이 값이다"
+        text kind "ACCOUNT|DEVICE|PAYMENT_METHOD|CONTACT|IP|ASN"
+        text ref_value "점의 실제 값: 계정 ID, 조사용 가명(키 판 접두어 포함), ASN 번호. IP 점은 비운다"
+        text source_request_id "IP 점만: 그 IP가 든 inv_request 한 줄의 request_id. 원문 IP는 이 표에 두지 않고, 원문 열기(ip-reveals) 때 inv_reader로 그 행에서 읽는다"
+        timestamptz created_at "그래프를 처음 만들 때. 같은 사건의 같은 값은 같은 node_id를 다시 쓴다. 사건 기록과 같이 지운다"
+    }
     external_post {
         uuid id PK "외부 되팔이 게시물 수집본의 메타데이터(FR-072). 자동 수집은 하지 않는다"
         uuid event_id
@@ -1760,16 +1781,20 @@ erDiagram
         bytea snapshot_hash "fraud_snapshot.inv_hash"
         bytea manifest_sha256 "목록 파일(파일 이름·SHA-256·크기)의 해시. SEALED부터"
         jsonb queries "쓴 질의와 그 판"
-        text s3_prefix "증거 버킷(S3 Object Lock 준수 모드 [가정, FRN-040])"
+        text s3_prefix "증거 버킷(S3 Object Lock: 객체마다 법적 보존, 버킷 기본 보존 준수 모드 30일 [가정], docs/infra.md §9, 추천 적용 2026-10-31)"
         text hold_reason "DISPUTE|INVESTIGATION|OBJECTION"
-        timestamptz hold_ended_at "분쟁·수사가 끝났다고 기록한 시각. 정비 잡이 그 뒤 파기하고 DISPOSED로 바꾼다"
+        uuid hold_end_requested_by "분쟁·수사 보존의 끝을 요청한 조사관(추천 적용 2026-10-31, ADR-0171)"
+        timestamptz hold_end_requested_at
+        text hold_end_basis "끝의 근거(문서 번호 등, 개인정보 없음)"
+        uuid hold_end_confirmed_by "확인한 commander. 요청자와 달라야 한다(검사 제약)"
+        timestamptz hold_ended_at "보존 끝을 확인한 시각. DISPUTE·INVESTIGATION은 요청자가 아닌 commander가 확인해야 채워지고, OBJECTION은 이의 창이 끝나면 시스템이 채운다. 이 시각 + 30일 [가정] 뒤 정비 잡이 파기하고 DISPOSED로 바꾼다"
         uuid created_by
         timestamptz created_at
     }
     evidence_custody_log {
         uuid bundle_id PK
         int seq PK "기본 키 (bundle_id, seq). 고치거나 지우지 않는다"
-        text action "CREATED|SEALED|VIEWED|EXPORTED|HOLD_CHANGED|HOLD_ENDED|DISPOSED. HOLD_CHANGED는 보존 이유 바꾸기(이의 기간 → 분쟁·수사, 새 이유는 reason에), HOLD_ENDED는 보존 끝 기록(hold_ended_at을 채운 일)이다"
+        text action "CREATED|SEALED|VIEWED|EXPORTED|HOLD_CHANGED|HOLD_END_REQUESTED|HOLD_ENDED|DISPOSED. HOLD_CHANGED는 보존 이유 바꾸기(이의 기간 → 분쟁·수사, 새 이유는 reason에), HOLD_END_REQUESTED는 조사관의 보존 끝 요청, HOLD_ENDED는 다른 commander의 확인으로 hold_ended_at을 채운 일이다(추천 적용 2026-10-31, ADR-0171)"
         uuid actor_id
         text reason "내보내기는 필수"
         text export_kind "AUTHORITY|PROMOTER(EXPORTED만)"
@@ -1882,20 +1907,22 @@ erDiagram
 
 **부정 예매 사후 조사의 표(추천 적용 2026-10-31, ADR-0171 결정 2·4·5)**: 판매가 끝난 뒤 실제 기록으로 부정 예매(약관이 정하는 매크로·대기열 우회·보안문자 우회·명의 대여·매수 제한 회피, POL-046)를 묶어 찾고 사람이 소명·2인 승인을 거쳐 조치하는 데 쓰는 표다. 조사 갈래(실명 계정·주문·결제·접속)와 연구 갈래(분석 저장소의 회차 가명 사건)를 잇는 키, 한 화면에서 같이 보는 동선, 서로 옮기는 파일을 두지 않는다(결정 2).
 
-- **ops DB(PostgreSQL)의 조사 모듈 표**: `fraud_snapshot`·`fraud_cluster`·`fraud_cluster_member`·`fraud_case`·`fraud_case_event`·`external_post`·`evidence_bundle`·`evidence_custody_log`(칸은 위 ⑦ 그림). 사건 상태 모형·후보 규칙·해시 계산법은 docs/features/forensic-replay.md가, 조사 API는 openapi `/v1/ops/fraud-*`·`/v1/ops/external-posts`·`/v1/ops/evidence-bundles`가 정본이다. 외부 게시물 캡처와 증거 묶음 파일은 S3 증거 버킷에 둔다(버킷 설정은 docs/security/secrets-and-keys.md·data-classification.md에서 정한다, FRN-040).
+- **ops DB(PostgreSQL)의 조사 모듈 표**: `fraud_snapshot`·`fraud_cluster_run`·`fraud_cluster`·`fraud_cluster_member`·`fraud_case`·`fraud_case_event`·`fraud_graph_node`·`external_post`·`evidence_bundle`·`evidence_custody_log`(칸은 위 ⑦ 그림). 사건 상태 모형·후보 규칙·해시 계산법은 docs/features/forensic-replay.md가, 조사 API는 openapi `/v1/ops/fraud-*`·`/v1/ops/external-posts`·`/v1/ops/evidence-bundles`가 정본이다. 외부 게시물 캡처와 증거 묶음 파일은 S3 증거 버킷에 둔다(버킷 설정은 docs/infra.md §9 '증거 버킷', 키는 docs/security/secrets-and-keys.md '증거 저장소 KMS 키', 항목별 보호는 docs/security/data-classification.md가 정본이다, 2026-10-31 FRN-040).
 - **다른 서비스 DB에 더한 칸**: identity `device.device_ref`(기기 키 통일)·`account_contact_ref`·`identity_conflict_attempt`, ticket `ticket.fraud_lock_case_id`·`fraud_lock_version`·`fraud_transfer_lock`, purchase `seat_hold.held_at`·`order_cancellation.reason` FRAUD, payment `payment.payment_method_ref`·`card_bin`, ops `admin_designation.kind` FRAUD_INVESTIGATOR·`approval_request.kind` FRAUD_ACTION·`booking_restriction.reason_code` FRAUD, core `appeal.kind` FRAUD_CASE.
 - **조사 저장소(ClickHouse DB `inv`)**: 분석 저장소(`bronze`·`silver`·`gold`)·관제 실시간 표(`rt`)·법정 접속기록 DB와 따로 둔 데이터베이스다. 적재는 `inv-ingest`(docs/streaming.md §6.4)만 한다. 모든 표는 회차로 나누고(`PARTITION BY event_id`), 행마다 `retain_until`(공연 종료일 + 30일 [가정], 법률 확인 36번)을 싣고 `TTL retain_until DELETE`로 지운다. 판매일과 공연일이 멀어도 판매 때 행동과 공연 날 양도·입장을 잇게 하려는 기간이다(결정 5). 공연 날짜가 바뀌면 정비 잡이 그 파티션의 `retain_until`을 고친다. 한 번에 남는 파티션은 판매 중이거나 종료 30일 안인 회차뿐이라 수백 개 [추정]다.
 
 | 표 | 한 행 | 칸(중복을 지우는 정렬 키는 굵게) |
 | --- | --- | --- |
 | `inv_request` | 조사 경로를 지난 요청 하나(asyncapi `InvestigationRequest`) | `ts`, `ingested_at`, **`request_id`**, `event_id`, `journey_id`(요청에 `jny`가 있을 때만), `gateway`, `route_kind`, `status`, `account_id`, `pid`, `ip`(원문, `IPv6` 형에 IPv4는 매핑 주소로), `asn`, `net_class`(HOSTING·PROXY·OTHER, ASN 분류표로 적재 때 채움), `ja4`, `edge_bot_labels`(`Array(String)`), `device_ref`(요청에 기기 정보가 없어 적재 때는 비고 읽을 때 `inv_link`로 잇는다), `retain_until` |
-| `inv_step` | 여정의 단계 사건 하나 | `ts`, `ingested_at`, `event_id`, `journey_id`, `step`(QUEUE_ENTER·ADMIT·HOLD_TRY·HOLD_END·PAY_TRY·ORDER·SALE·TRANSFER·ENTRY_SCAN·CANCEL), **`source_key`**(원천의 `eventKey`와 단계), `pid`, `account_id`, `queue_entry_id`, `purchase_session_id`, `order_id`, `ticket_id`, `seat_ids`(`Array(String)`), `held_at`, `result`(원천의 결과·종류 코드), `verify_route`(QUEUE_ENTER만), `payment_method_ref`·`card_bin`(PAY_TRY만), `retain_until` |
-| `inv_behavior` | 화면별 행동 요약 하나(asyncapi `BehaviorSignal`) | `ts`, `ingested_at`, `event_id`, `journey_id`, **`event_key`**, `pid`, `screen`(LOBBY·EVENT_DETAIL·SEAT·PAYMENT), `device_ref`, `net_class`, `asn`, 요약 칸(openapi `BehaviorSummary`와 같은 이름, 원시 좌표 없음), `retain_until` |
+| `inv_step` | 여정의 단계 사건 하나 | `ts`, `ingested_at`, `event_id`, `journey_id`, `step`(QUEUE_ENTER·ADMIT·HOLD_TRY·HOLD_END·PAY_TRY·ORDER·SALE·TRANSFER·ENTRY_SCAN·CANCEL), **`source_key`**(원천의 `eventKey`와 단계), `pid`, `account_id`, `queue_entry_id`, `purchase_session_id`, `order_id`, `ticket_id`, `seat_ids`(`Array(String)`), `held_at`, `result`(원천의 결과·종류 코드), `verify_route`(QUEUE_ENTER만), `payment_method_ref`·`card_bin`(PAY_TRY만), `ref_missing`(원천 사건의 `refMissing`, 2026-10-31), `retain_until` |
+| `inv_behavior` | 화면별 행동 요약 하나(asyncapi `BehaviorSignal`) | `ts`, `ingested_at`, `event_id`, `journey_id`, **`event_key`**, `pid`, `screen`(LOBBY·EVENT_DETAIL·SEAT·PAYMENT), `device_ref`, `ref_missing`(원천 사건의 `refMissing`, 2026-10-31), `net_class`, `asn`, 요약 칸(openapi `BehaviorSummary`와 같은 이름, 원시 좌표 없음), `retain_until` |
 | `inv_link` | 여정·사람·계정과 연결 값 하나의 짝 | `event_id`, **`kind`**(PID·ACCOUNT·DEVICE·CONTACT·PAYMENT_METHOD·IDENTITY_CONFLICT)·**`value`**(가명이나 ID), **`account_id`**·**`pid`**·**`journey_id`**(정렬 키에 넣어, 다른 계정이 같은 기기 가명을 써도 행이 합쳐지지 않는다. 모르는 칸은 빈 값으로 둔다, 추천 적용 2026-10-31, ADR-0171), `source`(원천 토픽이나 `identity`), `first_seen_at`·`last_seen_at`, `ingested_at`, `retain_until` |
 
 - 표 엔진은 `ReplicatedReplacingMergeTree`이고 정렬 키는 `(event_id, 굵은 칸)`이다. 적어도 한 번 전달로 다시 들어온 행을 키로 지운다.
+- **조사용 가명 값의 모양과 키 판(추천 적용 2026-10-31, ADR-0171)**: `device_ref`·`contactRef`·`payment_method_ref` 같은 조사용 가명은 모두 `invRef(라벨, 값)` 문자열이다. 앞에 키 판 접두어(`k1.`처럼 `k` + 판 번호 + `.`)가 붙고 뒤는 base64url(패딩 없음) HMAC 값이다. 계산법과 라벨별 KMS 키(`inv-ref-key-device`·`inv-ref-key-contact`·`inv-ref-key-pay`)는 docs/security/secrets-and-keys.md '조사용 가명 키'가 정본이다. 키 판 칸을 따로 두지 않고 이 접두어로 판을 가린다. 같은 대상인지 견줄 때는 같은 판끼리 견준다. 회전 전 기록과의 연결은 identity-svc가 기기·연락처의 옛 판 → 새 판 대응을 이음 기간이 끝날 때 한 번 넘기고, 조사 적재가 그 대응으로 `inv_link`에 새 판 행을 더해 잇는다(원문은 넘기지 않는다). 결제 수단 연결값은 이을 길이 없어 회전 시각 앞뒤로 끊긴다(같은 문서 '회전 절차', 추천 적용 2026-10-31, ADR-0171).
+- **계산하지 못한 칸(추천 적용 2026-10-31, ADR-0171)**: 생산자가 라벨 키를 받지 못해 조사용 가명을 비운 사건은 `refMissing`이 참이다. 조사 적재는 그 표시를 `ref_missing`으로 옮기고 값을 나중에 채우지 않는다(원문을 들고 기다리지 않는다). 판정 기록·주문 사건의 빈 값은 `inv_link` 행을 만들지 않는다. 그 수는 생산자의 `inv_ref_missing_total`로 본다(docs/observability.md §5).
 - **적재 시각과 고정 해시(추천 적용 2026-10-31, ADR-0171)**: 행마다 `ingested_at`(`inv-ingest`가 그 행을 넣은 시각, `DateTime64(3)`)을 둔다. `ts`는 사건 시각이라, 고정 뒤에 늦게 들어온 옛 시각의 행을 `ts`로 거르면 지난 판의 해시가 바뀐다. 그래서 판의 범위는 적재 시각으로 정한다. 판 1은 `ingested_at` ≤ 고정 시각인 행, 판 N은 직전 판 고정 시각 < `ingested_at` ≤ 이번 고정 시각인 행이다(`fraud_snapshot.range_from`). 같은 키의 중복은 적재 시각이 가장 이른 행 하나만 그 키의 행으로 본다. 표 엔진의 판 칸은 적재 시각을 거꾸로 센 값(`ingest_rank` = UInt64 최댓값 − 적재 시각 밀리초)이라 합칠 때도 가장 이른 행이 남고, 해시는 합쳐지기 전에도 같은 답을 내도록 키마다 `argMin(…, ingested_at)`으로 읽는다. 그래서 고정 뒤에 다시 들어온 중복 행이나 늦은 행은 지난 판의 해시를 바꾸지 않고, 늦은 새 행은 다음 판에 들어간다. 해시 계산법(RFC 8785 직렬화, 판 사슬)은 docs/features/forensic-replay.md §6.7.2가 정본이다.
-- **DB 사용자(추천 적용 2026-10-31)**: `inv_ingest`(적재 작업자, `inv` 표에 `INSERT`만), `inv_reader`(ops-svc 조사 모듈, `inv`에 `SELECT`만), 마이그레이션 역할(표 만들기·바꾸기·TTL. 보존 기간을 늘리는 변경은 법률 확인 36번의 결과로만 한다). 분석 사용자(`bronze_writer`·`an_forensic_reader` 등)와 `rt_writer`·`trust_raw_writer`·접속기록 사용자는 `inv`에 아무 권한이 없고, `inv_ingest`·`inv_reader`도 다른 데이터베이스에 권한이 없다. ops-svc는 조사 모듈(`inv_reader`)과 연구 갈래 내보내기(`an_forensic_reader`)의 접속 정보를 모듈마다 따로 받고(Secrets Manager 항목 둘), 한 요청에서 두 연결을 함께 쓰지 않는다. 같은 사람이 두 지정을 함께 갖지 않는 규칙(`admin_designation`)과 함께 두 갈래를 나눈다. 읽기는 모두 관리 계정 접속기록(2년)과 대량 조회 점검(FR-064)에 남는다(docs/observability.md §7).
+- **DB 사용자(추천 적용 2026-10-31)**: `inv_ingest`(적재 작업자, `inv` 표에 `INSERT`만), `inv_reader`(ops-svc 조사 모듈, `inv`에 `SELECT`만), 마이그레이션 역할(표 만들기·바꾸기·TTL. 보존 기간을 늘리는 변경은 법률 확인 36번의 결과로만 한다). 분석 사용자(`bronze_writer`·`an_forensic_reader` 등)와 `rt_writer`·`trust_raw_writer`·접속기록 사용자는 `inv`에 아무 권한이 없고, `inv_ingest`·`inv_reader`도 다른 데이터베이스에 권한이 없다. 연구 갈래 내보내기는 ops-svc의 다른 배포(`ops-research`, 따로 둔 IAM 역할)가 맡고 `an_forensic_reader`의 비밀만 받는다. 조사 모듈이 도는 ops-svc 배포는 `inv_reader`의 비밀만 받는다. 그래서 한 파드가 두 저장소의 자격을 함께 갖지 않는다(docs/infra.md §9, 추천 적용 2026-10-31, ADR-0171). 같은 사람이 두 지정을 함께 갖지 않는 규칙(`admin_designation`)과 함께 두 갈래를 나눈다. 읽기는 모두 관리 계정 접속기록(2년)과 대량 조회 점검(FR-064)에 남는다(docs/observability.md §7).
 - **원문 IP의 자리**: 원문 IP는 법정 접속기록 DB(수사·신고기관 대응 목적, 3개월)와 `inv_request`(부정 예매 조사 목적, 공연 종료 + 30일 [가정]) 두 곳에만 있다. 둘 사이에 복사하지 않고 같은 요청은 `request_id`로 대조만 한다. ADR-0053 결정 1의 '원문 IP는 법정 접속기록에만'을 ADR-0171 결정 1이 대신한다.
 
 ## 3. Redis 키 설계 (원문 §6 'Redis 구성')
@@ -1943,7 +1970,7 @@ erDiagram
 | `s:{event:E}:rel:{account}` | Sorted Set(멤버 = 좌석 색인, 점수 = 다시 잡을 수 있는 시각(밀리초)) | 그 계정이 방금 놓은 좌석(직접 해제·만료·자동 배정 반납) | 해제·만료 Lua가 비트를 끄는 같은 원자 연산에서 넣고, 점수는 Lua 안의 Redis `TIME` + 30초 [가정]다. 넣을 때 점수가 지난 멤버를 지우고, 키 수명은 마지막으로 넣은 때부터 30초다. 홀드 Lua는 요청 좌석의 점수가 지금보다 크면 아무것도 잡지 않고 409 `seat-recently-released`다. 자동 배정 Lua는 이 좌석이 든 후보를 그 계정에게만 건너뛴다. 비트맵과 같은 회차 슬롯이다. 멤버는 1인 한도(4매)와 30초 안의 해제 수만큼이라 작다(소유자 결정 2026-10-30, open-items 67번, 세부는 추천 적용 2026-10-30, docs/features/seat-hold.md §5) |
 | `s:{event:E}:idem:{account}:{key}` | Hash | 홀드 요청의 멱등성(같은 요청이 여러 번 와도 한 번 처리한 것과 결과가 같은 성질)을 지키는 키. 값은 요청 지문(좌석·희망 조건 본문의 SHA-256)과 처음 응답(holdId·만료 시각·펜싱 토큰·연장 가능 여부) | 좌석 비트맵과 같은 회차 샤드에 둬서, 홀드 Lua가 좌석을 잡는 같은 원자 연산에서 확인하고 적는다. 같은 키·같은 지문이면 처음 응답을 돌려주고, 지문이 다르면 아무 좌석도 잡지 않고 422 `idempotency-key-reused`다. 홀드를 잡을 때만 적고(경합·한도 실패는 적지 않는다), 수명은 홀드 TTL(7분)이다. 영구 보관하는 주문·결제 멱등키는 PostgreSQL `order_idempotency`에 기록한다(추천 적용 2026-10-28, 기술 검토 중간-046. 이전 키 `s:idem:{key}`는 해시 태그가 멱등키라 Lua 밖에서 확인했다) |
 | `s:jti:{jti}` | 문자열 (`SET NX`) | 대기열 입장 토큰의 재사용을 막고 세션에 묶기 | 토큰이 1회만 쓰였는지 확인한 뒤 구매 세션 ID와 서로 묶는다. |
-| `s:session:{sid}` | Hash | 구매 세션 메타데이터(유휴 만료 시한, 단말 임시 ECDH 공개키, 마지막 요청 일련번호, 기기 식별값 `deviceId`, 회차 ID, 이 세션이 잡은 홀드 목록(holdId마다 그 회차·좌석 목록)). 요청 서명 확인과 일련번호 갱신은 한 번의 원자 연산으로 한다(ADR-0050 결정 8) | 결제 완료 때까지 유지되는 런타임 세션 상태를 저장한다. 구매 세션은 회차 하나에 묶인다. purchase-svc는 세션을 열 때 입장 토큰의 회차를 적고, 주소에 회차가 있는 요청마다 주소의 회차와 다시 대조한다(다르면 403). 주소에 회차가 없는 주문·결제는 본문의 holdId와 주소의 주문이 이 세션의 것인지 보고, 아니면 404다(추천 적용 2026-10-30). 홀드를 만들면 holdId와 좌석 목록을 더하고, 해제·연장은 이 목록에 있는 holdId만 찾는다(추천 적용 2026-10-30, docs/features/seat-hold.md §2·§3, docs/security/asvs/seat-hold.md 8.2.2) |
+| `s:session:{sid}` | Hash | 구매 세션 메타데이터(유휴 만료 시한, 단말 임시 ECDH 공개키, 마지막 요청 일련번호, 기기 식별값 `deviceId`, 회차 ID, 여정 ID `journeyId`(입장 토큰의 `jny`, 2026-10-31), 이 세션이 잡은 홀드 목록(holdId마다 그 회차·좌석 목록)). 요청 서명 확인과 일련번호 갱신은 한 번의 원자 연산으로 한다(ADR-0050 결정 8) | 결제 완료 때까지 유지되는 런타임 세션 상태를 저장한다. 구매 세션은 회차 하나에 묶인다. purchase-svc는 세션을 열 때 입장 토큰의 회차를 적고, 주소에 회차가 있는 요청마다 주소의 회차와 다시 대조한다(다르면 403). 주소에 회차가 없는 주문·결제는 본문의 holdId와 주소의 주문이 이 세션의 것인지 보고, 아니면 404다(추천 적용 2026-10-30). 홀드를 만들면 holdId와 좌석 목록을 더하고, 해제·연장은 이 목록에 있는 holdId만 찾는다(추천 적용 2026-10-30, docs/features/seat-hold.md §2·§3, docs/security/asvs/seat-hold.md 8.2.2) |
 | `s:rst:{account}` | Hash | 예매 제한의 구매 사본(상태·끝 시각·제한 ID·판 번호, `q:rst:{account}`와 같은 모양) | ops-svc의 `SetBookingRestriction`을 받은 purchase-svc가 판 번호가 클 때만 쓴다. 주문 생성이 Lua 전에 따로 읽어, ACTIVE이고 끝 시각 전이면 403 `booking-restricted`로 주문을 만들지 않고 그 구매 세션의 홀드를 푼다. 계정 단위라 회차 태그 없이 흩는다. 수명과 다시 보내기는 `q:rst:{account}`와 같다(소유자 결정 2026-10-30, open-items 75번, 세부는 추천 적용 2026-10-30, docs/features/queue-admission.md §6, docs/features/payment.md §2) |
 | `sup:far:{account}` | Hash(필드 = 사건 ID) | 부정 예매 소명 요청의 화면용 사본: 회차, 사유 범주, 소명 기한, 이의 창 끝(조치 결과 통지 + 30일 [가정])과 이의 상태, 잠긴 티켓 ID, 소명 상태(OPEN·SUBMITTED·ACCEPTED·REJECTED·EXPIRED. EXPIRED는 기한까지 제출하지 않음), 우선 구매 권리(권리 ID·좌석 표시·가격·기한·상태), 판 번호 | 세션·캐시 클러스터에 두고 core-svc support 모듈이 쓴다. ops-svc의 `SetFraudAppealView`(core.proto)를 받아 필드마다 판 번호가 클 때만 쓰고, 팬의 `GET /v1/fraud-appeal-requests`와 소명 제출(`POST /v1/appeals` kind FRAUD_CASE)의 기한 확인에 쓴다. 조치 전의 소명은 소명 기한으로, 조치 뒤의 이의는 이의 창으로 본다. 필드 수명은 결정된 뒤 30일 [가정]이고, ops-svc 작업 워커가 10분 [가정]마다 열린 요청을 같은 판으로 다시 보낸다(`sup:rst`와 같은 규칙, 추천 적용 2026-10-31, ADR-0171) |
 | `sup:rst:{account}` | Hash | 예매 제한의 화면용 사본(상태·사유 코드·시작·끝 시각·소명 기한·제한 ID·판 번호) | 세션·캐시 클러스터에 두고 core-svc support 모듈이 쓴다. ops-svc의 `SetBookingRestrictionView`(core.proto)를 받아 판 번호가 클 때만 쓰고, 팬의 `GET /v1/booking-restrictions/me`에 답한다. 집행에는 쓰지 않는다(집행은 `q:rst`·`s:rst`). 키가 없으면 제한 없음으로 답한다. 수명과 다시 보내기는 `q:rst:{account}`와 같다(추천 적용 2026-10-30, docs/design/d5 §1.6 21번) |
@@ -2170,10 +2197,12 @@ erDiagram
 | 예매 제한 기록 (`booking_restriction`: 계정 ID, 사유 코드, 확인한 CS 책임자, 시작·끝, 소명 기한, 상태) | 스토리지 레벨 암호화(P2). 사유는 코드만 두고, 연계정보·pid는 넣지 않는다(탈퇴 뒤 다시 가입한 계정에는 제한이 이어지지 않는다) | 제한이 끝나거나(해제·만료) 회원이 탈퇴한 날부터 3년 뒤 파기한다(승인 업무·CS 처리함 기록, 소명 본문과 같은 분쟁 처리 기록 기준, 전자상거래법 시행령 §6①4호, 추천 적용 2026-10-26, ADR-0089) |
 | 부정 예매 조사 저장소 (ClickHouse `inv`: 요청 기록의 원문 IP·ASN·JA4·끝단 봇 라벨, 여정 단계, 화면별 행동 요약, 계정·기기·연락처·결제 수단 연결) | 스토리지 레벨 암호화, `inv_ingest`·`inv_reader`만 접근(위 '부정 예매 사후 조사의 표') | 공연 종료 뒤 30일 [가정](법률 확인 36번)에 TTL로 지운다. 조치한 건은 증거 묶음으로 따로 떼어 둔다(추천 적용 2026-10-31, ADR-0171 결정 5) |
 | 부정 예매 사건 기록 (`fraud_cluster`·`fraud_cluster_member`·`fraud_case`·`fraud_case_event`·`fraud_snapshot`) | ops-svc 논리 DB, 스토리지 레벨 암호화. 사건 기록에는 연락처·IP 원문을 넣지 않는다 | 후보 묶음과 사건이 없는 회차의 고정 기록은 조사 저장소와 같이 공연 종료 뒤 30일 [가정]. 사건은 닫힌 뒤 3년 [가정](분쟁 처리 기록과 같은 기준, 법률 확인 36번) |
-| 외부 되팔이 게시물 수집본 (`external_post`, S3 캡처) | 격리 버킷에서 악성 코드 검사 뒤 증거 버킷(스토리지 암호화) | 사건에 쓰이지 않은 게시물은 공연 종료 뒤 30일 [가정]. 사건에 쓰인 것은 그 증거 묶음과 같다 |
-| 증거 묶음 (`evidence_bundle`·`evidence_custody_log`, S3 파일) | 증거 버킷(S3 Object Lock 준수 모드 [가정, FRN-040])과 관리 연속성 해시 체인 | 분쟁·수사·이의가 끝났다고 기록한 뒤 파기한다(추천 적용 2026-10-31, ADR-0171 결정 5·8) |
+| 외부 되팔이 게시물 수집본 (`external_post`, S3 캡처) | 격리 버킷에서 악성 코드 검사 뒤 증거 버킷(스토리지 암호화, 객체마다 법적 보존) | 사건에 쓰이지 않은 게시물은 공연 종료 뒤 30일 [가정]에 파기 작업이 법적 보존을 풀고 캡처와 메타데이터를 지운다. 사건에 쓰인 것은 그 증거 묶음과 같다(추천 적용 2026-10-31, ADR-0171) |
+| 우선 구매 권리 (`priority_grant`, 대기열 사본 `q:prio`) | 스토리지 레벨 암호화, 계정 ID·사건 ID·좌석·가격 | 쓰인 권리(USED)는 그 주문과 함께 5년(전자상거래법 시행령 제6조 제1항 제3호). 쓰이지 않고 끝난 권리(EXPIRED·WITHDRAWN)는 그 사건이 끝난 뒤 3년 [가정](분쟁 처리 기록과 같은 기준). 대기열 사본은 기한이 지나면 TTL로 지운다(추천 적용 2026-10-31, ADR-0171) |
+| 증거 묶음 (`evidence_bundle`·`evidence_custody_log`, S3 파일) | 증거 버킷(S3 Object Lock: 객체마다 법적 보존, 버킷 기본 보존 준수 모드 30일 [가정], 증거 저장소 KMS 키, docs/infra.md §9·docs/security/secrets-and-keys.md, 추천 적용 2026-10-31)과 관리 연속성 해시 체인 | 분쟁·수사·이의가 끝났다고 기록한 뒤 30일 [가정]에 파기한다. 분쟁·수사의 끝은 조사관이 요청하고 요청자가 아닌 commander가 확인해야 기록된다(추천 적용 2026-10-31, ADR-0171 결정 5·8) |
 | 조사용 연락처 가명·같은 본인확인 시도 (`account_contact_ref`, `identity_conflict_attempt`) | 원문 없이 HMAC 값만(`inv-ref-key`) | 연락처 가명은 번호·이메일이 바뀌면 다시 계산하고 탈퇴 때 지운다. 시도 기록은 1년 [가정] 뒤 지운다 |
-| 이용 제한(부정 예매) 중 탈퇴한 사람의 CI HMAC | 연계정보 HMAC 값만 | 제한 기간 동안만 남겨 다시 가입한 계정에 제한을 잇는다(POL-046 ⑥, POL-033의 예외, 법률 확인 36번, 추천 적용 2026-10-31, ADR-0171 결정 5). 그 밖의 쓰임은 없다 |
+| 이용 제한(부정 예매) 중 탈퇴한 사람의 CI HMAC (`restricted_ci_hold`) | 연계정보 HMAC 값만(identity DB, P1 칸과 같은 접근 통제) | ops-svc가 `SetRestrictedCiHold`로 소명 요청 때 CASE_OPEN, 제한을 걸기 전에 RESTRICTED로 만들고, 탈퇴해도 제한 끝(`until`)까지 남겨 같은 연계정보로 다시 가입한 계정에 제한을 잇는다(그 계정에 `ticket:buy`를 싣지 않는다). 제한 없이 그 계정의 사건 몫이 끝나거나(RELEASED), 제한이 끝나거나 풀리면 지운다(identity.proto `RestrictedCiHoldService`, POL-046 ⑥, POL-033의 예외, 법률 확인 36번, 추천 적용 2026-10-31, ADR-0171 결정 5). 그 밖의 쓰임은 없다 |
+| 부정 예매 양도 잠금 기록 (`fraud_transfer_lock`) | 계정 ID와 사건 ID뿐, 스토리지 레벨 암호화 | 사건이 끝난 때(`closed_at`)와 공연 종료 + 30일 [가정] 가운데 늦은 때까지 두고 지운다(추천 적용 2026-10-31, ADR-0171) |
 | 소명 본문 | 스토리지 레벨 암호화(P2)를 쓴다 | 처리를 마치고 3년(분쟁 처리 기록과 같은 기준)이 지나면 자동 파기한다(웹 보안 단체가 만든 웹 앱 보안 검증 항목 목록인 ASVS의 14.2.7) |
 | 판매자 신원정보(파트너 사업자) | 스토리지 레벨 암호화(P2). 개인사업자 대표자 성명은 개인정보로 다룬다 | 파트너 계약 종료 뒤 5년(계약 기록) |
 | 계정 연동 및 계정 병합 기록 (대표·흡수 계정 ID, 연동 제공자 유형, 이관 항목 통계, 승인 일시) | 스토리지 레벨 암호화(P2)를 쓴다 | 대표 계정이 남아 있는 동안 유지한다. 대표 계정이 탈퇴하면 계정 원장과 함께 파기한다(자체 기준). 흡수된 계정의 원본 이메일과 닉네임은 병합이 끝나는 즉시 영구 파기한다(POL-034) |

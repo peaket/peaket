@@ -810,7 +810,8 @@ message SetBookingRestrictionViewResponse {
 // 부르는 쪽: ops-svc만(부정 예매 소명 요청을 보낼 때, 소명 판단·이의 결과·우선 구매 권리가 바뀔 때, 작업 워커의 다시 보내기).
 // 초안(추천 적용 2026-10-31, ADR-0171), 정본은 docs/features/transfer-refund.md §4.1·§7.4와 docs/features/forensic-replay.md §6.7.5.
 // core-svc support 모듈은 세션·캐시 Redis sup:far:{account}(필드 = 사건 ID)에 화면용 사본을 두고 팬의 GET /v1/fraud-appeal-requests에 답하며,
-// 소명 제출(POST /v1/appeals, kind FRAUD_CASE)이 기한 전인지 먼저 본다. 예매 제한의 화면용 사본(BookingRestrictionViewService)과 같은 규칙이다:
+// 화면에 보이는 값일 뿐이고, 소명 제출(POST /v1/appeals, kind FRAUD_CASE)을 기한으로 미리 막는 데 쓰지 않는다. 기한·이의 창은 ops-svc가 건을 사건에 이을 때 보고,
+// 맞지 않으면 '대상 아님·기한 경과'로 닫는다(정본 docs/features/transfer-refund.md §7.1 '부정 예매 사건의 소명', 추천 적용 2026-10-31). 다시 보내기는 예매 제한의 화면용 사본(BookingRestrictionViewService)과 같은 규칙이다:
 // (account_id, case_id)마다 판 번호가 저장한 판보다 클 때만 반영하고, 실패하면 작업 워커가 다시 보내며, 10분 [가정]마다 열린 요청을 같은 판으로 다시 보낸다.
 // 집행에는 쓰지 않는다(양도 잠금의 집행은 ticket-svc, 우선 구매의 집행은 queue-svc·purchase-svc). 사건의 다른 계정·점수·근거 신호는 싣지 않는다. 데드라인은 1초 [가정]이다.
 service FraudAppealViewService {

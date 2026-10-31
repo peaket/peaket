@@ -59,7 +59,8 @@ message ScoreRiskRequest {
   // 사람 확인 토큰. trust-svc가 서버 검증한다. 300초 1회용이라 저장하지 않는다.
   // 허용 hostname은 www이고 action은 맥락마다 정해져 있다(docs/features/bot-defense.md §6 표). 팬 로그인 판정이면 비운다.
   string human_check_token = 5;
-  // 브라우저가 보낸 기기 식별값. trust-svc가 기기 가명 deviceRef = HMAC-SHA256(inv-ref-key, "device|" + device_id)로 바꾼 뒤에만 저장한다(ADR-0053).
+  // 브라우저가 보낸 기기 식별값. trust-svc가 기기 가명 deviceRef = invRef("device", device_id)(키 판 접두어 + base64url, docs/security/secrets-and-keys.md)로 바꾼 뒤에만 저장한다(ADR-0053).
+  // 라벨 키를 받지 못해 계산하지 못하면 판정을 막지 않고 기기 신호를 '값 없음'으로 두며, TrustVerdict의 deviceRef를 비우고 refMissing을 참으로 낸다(추천 적용 2026-10-31, ADR-0171).
   // 2026-10-30까지는 탐지 가명 키였고, 2026-10-31에 identity-svc의 device.device_ref와 같은 조사용 키로 바꿨다(기기 키 통일, 추천 적용 2026-10-31, ADR-0171 결정 4).
   string device_id = 6;
   // 공연 상세에서 잰 행동 요약값(사전 검증 때). 로비 입장에는 없다. 원시 좌표·키 값·입력한 글자는 받지 않는다.

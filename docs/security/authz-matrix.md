@@ -3,8 +3,8 @@
 - **독자와 용도**: 게이트웨이(클라이언트 종류별로 앞에 둔 입구 서버로, 인증·공통 정책·안쪽 서비스로 넘기기를 맡는다) 정책, 서비스 공통 인가 가드(서버 공용 패키지 `packages/platform`), 각 서비스의 데이터 조회 계층을 만드는 엔지니어와 보안 검토자가 읽는다. 어떤 역할이 어떤 데이터에, 어떤 칸까지, 어떤 상태와 시간에 닿는지와, 그 검사를 어느 층에서 하는지 확인할 때 참조한다.
 - **원문 출처**: 원문에 없다. 전체가 [보완]이다.
 - **기준 기획 버전**: v1.0.
-- **정본 관계**: 역할 × 기능 권한(누가 어떤 기능을 조회·생성·수정·삭제·최종 승인하는가)의 정본은 docs/planning/03 §3 '권한 매트릭스'다. 이 문서는 그 표를 옮겨 적지 않는다. 이 문서는 그 표의 칸에 붙는 조건(어느 데이터, 어느 칸, 어떤 상태와 시간), 검사 위치, 기본 거부, 재인증·2인 승인과의 묶음, 테넌트를 넘는 접근 시험, openapi 허용 역할 칸 `x-peaket-roles`에 쓰는 값 목록(§5.5)의 정본이다(ASVS v5.0.0-8.1.1·8.1.2). 운영 명령의 역할과 승인 요건은 POL-021 B(docs/planning/03 §1.1), 승인 업무는 POL-038과 docs/features/transfer-refund.md §3.2·§7, 결제자·보유자 조건은 transfer-refund §3.1, 관리 계정 로그인과 잠금은 docs/security/auth-controls.md가 정본이다. 기능마다 어느 응답 칸을 빼는지는 각 기능의 ASVS 추적 표 8.x 행이 정본이고, 이 문서 §4가 묶어 가리킨다. 이 문서에서 새로 정한 판단에는 '(추천 적용 2026-10-30)'을 붙였다.
-- **관련 ID**: FR-021, FR-026, FR-027, FR-028, FR-046, FR-057, FR-058, FR-064 · POL-019, POL-020, POL-021, POL-023, POL-031, POL-038, POL-039, POL-045 · SCR-045, SCR-046, SCR-064, SCR-066 · ADR-0008, ADR-0011, ADR-0046, ADR-0050, ADR-0051, ADR-0062, ADR-0082, ADR-0083, ADR-0095, ADR-0102, ADR-0123, ADR-0149 · ASVS v5.0.0-8.1.1·8.1.2·8.2.1·8.2.2·8.2.3·8.3.1·8.4.1 · 시험 AZ-T1~AZ-T14, I-T19, I-T25, I-T44, I-T59~I-T61, J-T10, A-T13.
+- **정본 관계**: 역할 × 기능 권한(누가 어떤 기능을 조회·생성·수정·삭제·최종 승인하는가)의 정본은 docs/planning/03 §3 '권한 매트릭스'다. 이 문서는 그 표를 옮겨 적지 않는다. 이 문서는 그 표의 칸에 붙는 조건(어느 데이터, 어느 칸, 어떤 상태와 시간), 검사 위치, 기본 거부, 재인증·2인 승인과의 묶음, 테넌트를 넘는 접근 시험, openapi 허용 역할 칸 `x-peaket-roles`에 쓰는 값 목록(§5.5)의 정본이다(ASVS v5.0.0-8.1.1·8.1.2). 운영 명령의 역할과 승인 요건은 POL-021 B(docs/planning/03 §1.1), 승인 업무는 POL-038과 docs/features/transfer-refund.md §3.2·§7, 결제자·보유자 조건은 transfer-refund §3.1, 관리 계정 로그인과 잠금은 docs/security/auth-controls.md가 정본이다. 기능마다 어느 응답 칸을 빼는지는 각 기능의 ASVS 추적 표 8.x 행이 정본이고, 이 문서 §4가 묶어 가리킨다. 이 문서에서 새로 정한 판단에는 '(추천 적용 2026-10-30)'을 붙였다. 2026-10-31에 사후 포렌식의 부정 거래 조사(조사관 지정, 조치 승인자, 조사 화면의 칸, 소명·우선 구매·양도 잠금)를 더했고(BUILD_ORDER FRN-040), 그 판단에는 '(추천 적용 2026-10-31, ADR-0171)'을 붙였다.
+- **관련 ID**: FR-021, FR-026, FR-027, FR-028, FR-046, FR-057, FR-058, FR-064 · POL-019, POL-020, POL-021, POL-023, POL-031, POL-038, POL-039, POL-045 · SCR-045, SCR-046, SCR-064, SCR-066 · ADR-0008, ADR-0011, ADR-0046, ADR-0050, ADR-0051, ADR-0062, ADR-0082, ADR-0083, ADR-0095, ADR-0102, ADR-0123, ADR-0149 · ASVS v5.0.0-8.1.1·8.1.2·8.2.1·8.2.2·8.2.3·8.3.1·8.4.1 · 시험 AZ-T1~AZ-T15, I-T19, I-T25, I-T44, I-T59~I-T61, J-T10, A-T13. 부정 거래 조사(2026-10-31): FR-071~074, POL-046, POL-038 ⑪, SCR-042·046·069~071, ADR-0171, 시험 C-T63·C-T66·R-T32·R-T33·Q-T62·I-T66.
 - **원문으로 확인한 외부 문서(2026-10-30)**: OWASP ASVS 5.0.0 V8(저장소 `v5.0.0` 태그의 `0x17-V8-Authorization.md`), Envoy Gateway의 JWT 클레임 인가 안내(https://gateway.envoyproxy.io/docs/tasks/security/jwt-claim-authorization/ )와 API 문서(https://gateway.envoyproxy.io/docs/api/extension_types/ ), PostgreSQL 18 문서의 행 보안 정책(https://www.postgresql.org/docs/18/ddl-rowsecurity.html )과 설정 함수(https://www.postgresql.org/docs/18/functions-admin.html ).
 
 ## 1. 이 문서가 맡는 것
@@ -47,7 +47,7 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 | 시스템 | 서비스 계정 | 서비스 메시(서비스끼리 주고받는 통신을 앱 대신 처리하는 층)의 신원(서비스 이름, ADR-0082) | 내부 gRPC(서비스끼리 함수를 부르듯 빠르게 호출하는 통신 방식) |
 
 - **관리 토큰에 역할과 테넌트를 싣는다(추천 적용 2026-10-30)**: 관리 계정 액세스 토큰에 `role`(문자열 하나)과, 파트너 토큰에는 `tid`를 싣는다. identity §3의 클레임 목록과 내부 헤더 목록에 2026-10-30 더했다. 게이트웨이가 경로마다 역할을 보려면(ADR-0008 결정 3 '인가') 토큰에 역할이 있어야 하기 때문이다. 게이트웨이 제품 Envoy Gateway(Envoy 프록시를 쿠버네티스, 곧 컨테이너로 만든 앱을 여러 서버에서 실행하고 관리하는 플랫폼의 게이트웨이로 쓰게 하는 제품)의 클레임 → 헤더 변환은 문자열·정수·실수·참거짓 클레임만 받고 배열은 받지 않으므로(Envoy Gateway API(프로그램끼리 요청과 응답을 주고받는 창구) 문서, 2026-10-30 확인), 역할은 배열이 아니라 하나다. 관리 계정의 역할도 하나다(docs/data.md `admin_account.role`).
-- **지정은 토큰에 싣지 않는다(추천 적용 2026-10-30)**: 가명정보 취급자와 접속기록 점검자는 commander에게 붙는 지정이다(docs/planning/03 §3 관리 계정 행). 토큰에 싣지 않고, ops-svc가 요청마다 identity의 지정 기록을 본다(캐시 5초 [가정]). 그래서 지정을 거두면 다음 요청부터 막힌다.
+- **지정은 토큰에 싣지 않는다(추천 적용 2026-10-30)**: 가명정보 취급자와 접속기록 점검자는 commander에게 붙는 지정이다(docs/planning/03 §3 관리 계정 행). 부정 거래 조사관(`FRAUD_INVESTIGATOR`)은 commander와 `cs_lead`에게 붙는 지정이다(§3.7, 2026-10-31, ADR-0171 결정 7). 토큰에 싣지 않고, ops-svc가 요청마다 identity의 지정 기록을 본다(캐시 5초 [가정]). 그래서 지정을 거두면 다음 요청부터 막힌다. **닫히는 쪽으로 판정한다(추천 적용 2026-10-31, ADR-0171)**: '지정이 있어야 통과'하는 검사(조사 경로, 연구 내보내기)는 identity-svc가 답하지 않으면 지정이 없는 것으로 보고 403이다. '지정이 없어야 통과'하는 검사(`FRAUD_ACTION` 승인 자격, 그 승인 업무 상세)는 답이 없으면 자격이 없는 것으로 보고 승인 403·상세 404다. 승인을 실행하는 때는 캐시를 쓰지 않고 바로 묻는다. 거둔 지 5초 안의 옛 지정이 승인 자격을 열지 못하게 하려는 것이다.
 - 게이트웨이는 바깥 요청에 붙은 같은 이름의 내부 헤더를 먼저 지우고 검증 결과로 다시 쓴다(identity §3 '게이트웨이 무상태 고속 검증', ASVS 4.1.3). 내부 헤더는 `X-User-Id`, `X-Session-Id`, `X-User-Pid`, `X-User-Pid-Prev`에 `X-User-Role`, `X-Tenant-Id`를 더한다(추천 적용 2026-10-30).
 
 ### 3.2 본인 데이터
@@ -64,7 +64,9 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 | 본인확인 결과 | 시작한 계정(남은 404) | catalog-review.md 8.2.2 |
 | 대기 참여·참가 취소 | 호출자의 pid. 경로에 참여 ID가 없다 | asvs/auth.md 8.2.2, ADR-0060 |
 | 예매 제한 상태와 소명 기한 | 세션 계정. 경로에 계정·제한 ID가 없고(`GET /v1/booking-restrictions/me`), 사유는 코드만 준다. 확인한 CS 책임자·증빙은 싣지 않는다(추천 적용 2026-10-30) | docs/features/queue-admission.md §6 '화면용 사본' |
-| 소명 제출 | 세션 계정. 소명은 core-svc support 모듈이 받아 두고, 대상(예매 제한, 양도 회수 승인 업무)이 그 계정의 것인지와 기한은 원본을 가진 ops-svc가 건을 만들 때 본다. 맞지 않으면 그 소명을 닫고 팬에게 알린다(추천 적용 2026-10-30) | docs/features/transfer-refund.md §7.1 '소명이 들어오는 길' |
+| 소명 제출 | 세션 계정. 소명은 core-svc support 모듈이 받아 두고, 대상(예매 제한, 양도 회수 승인 업무, 부정 예매 사건 `FRAUD_CASE`)이 그 계정의 것인지와 기한은 원본을 가진 ops-svc가 건을 만들 때 본다. 맞지 않으면 그 소명을 닫고 팬에게 알린다(추천 적용 2026-10-30). `FRAUD_CASE`는 대상 ID가 사건 ID이고, 그 계정이 그 사건에서 소명 요청을 받은 계정이며 소명 기한 안일 때만 소명으로, 조치를 받은 계정이며 그 계정의 이의 창(결과를 알린 날부터 30일 [가정]) 안일 때만 이의로 잇는다. 사건 ID를 알아도 사건의 다른 계정 몫은 낼 수 없다. 그 건은 조사관 지정이 있는 사람에게만 보인다(§4.1) (추천 적용 2026-10-31, ADR-0171) | docs/features/transfer-refund.md §7.1 '소명이 들어오는 길'·'부정 예매 사건의 소명', docs/features/forensic-replay.md §6.7.5 |
+| 부정 예매 소명 요청과 우선 구매 권리 읽기 | 세션 계정. 경로·쿼리에 계정·사건 ID가 없다(`GET /v1/fraud-appeal-requests`). 사유 범주·기한·잠긴 티켓·소명 상태·우선 구매 권리만 주고, 사건의 다른 계정·점수·근거 신호는 싣지 않는다 (추천 적용 2026-10-31, ADR-0171) | docs/features/forensic-replay.md §6.7.5, openapi `FraudAppealViewPage` |
+| 우선 구매 입장(입장 확정 본문의 `priorityGrantId`) | 권리 ID는 그 계정에 묶인 1회용 열쇠 구실을 한다. 대기 번호 없이, 판매 종료·매진 뒤에도 입장 토큰(클레임 `prio`)을 받기 때문이다. 그래서 queue-svc는 세션 계정의 사본(`q:prio:{account}:E`)에서만 권리를 찾는다. 남의 권리 ID, 만료·거둔 권리는 모두 같은 404 `priority-grant-not-found`다. 받은 토큰으로는 그 권리가 잡아 둔 좌석만 홀드한다(홀드 Lua가 같은 계정·같은 권리의 우선 구매 보류만 바꾼다). 결제를 마친 권리(USED)는 사본이 남아 있어도 purchase-svc가 홀드·주문을 409로 막아 한 번만 쓰인다. 권리 ID는 요청 본문으로만 보내고 주소·로그에 싣지 않는다 (추천 적용 2026-10-31, ADR-0171) | docs/features/queue-admission.md §6 '우선 구매 입장', docs/features/seat-hold.md §5, 시험 Q-T62·S-T37 |
 | 좌석 홀드 해제·연장 | 홀드를 만든 그 구매 세션의 holdId 목록에 있고, 좌석 홀드 Hash의 holdId·소유 계정이 요청과 같다. 남의 holdId와 없는 holdId는 같은 404 | docs/features/seat-hold.md §3, asvs/seat-hold.md 8.2.2(추천 적용 2026-10-30, 시험 S-T29) |
 
 - 소유 계정은 요청 본문의 계정 값이 아니라 세션으로 정한다(support.md·catalog-review.md 8.2.2와 같다).
@@ -103,6 +105,8 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 | 팬 계정 | `WITHDRAWAL_PENDING`이면 새 예매·주문·양도 요청은 409이고 로그인·환불 계좌 입력·알림만 된다 | identity §8 |
 | 관리 계정 | 시간 잠금·보호 잠금이면 로그인하지 못하고, 보호 잠금이면 재인증 토큰도 받지 못한다. 초대됨·초대 만료·삭제(REMOVED) 계정은 로그인하지 못한다. 관리 경로는 계정 상태에 맞는 작업만 받고 나머지는 409다(§6.1, 2026-10-30) | auth-controls.md §3.2, docs/planning/03 §2.7 |
 | 현장 스태프 배정 | 배정됨(`ASSIGNED`)이고 유효 시간 안일 때만 스캐너 로그인과 판정 | docs/planning/03 §2.7 |
+| 티켓(부정 예매 양도 잠금) | `ticket.fraud_lock_case_id`가 있으면 양도 요청(`POST /v1/tickets/{ticketId}/transfers`)과 돌려주기(`…/returns`)는 409 `transfer-locked`(별칭 `TRANSFER_LOCKED`)다. 결제자의 예매 취소, 승인된 양도 회수, 입장은 막지 않는다. 잠금은 ops-svc 신원만 거는 `SetTransferLock`으로만 바뀐다. 잠금 걸기와 양도 상태 바꾸기는 같은 티켓 행을 잠그고 하므로 먼저 커밋된 쪽이 이긴다(진행 중 양도 요청은 잠그는 트랜잭션에서 철회한다). 판(`fraud_lock_version`)은 같은 사건 안에서 더 클 때만 반영해, 늦게 온 풀기가 새 잠금을 지우지 못한다. 잠금 뒤에 산 표도 발권 때 잠긴다. 입장 시작에는 ticket-svc가 스스로 풀지만, 그때는 수락·돌려주기가 이미 닫혀 있어 양도 창이 다시 열리지 않는다 (추천 적용 2026-10-31, ADR-0171) | docs/features/transfer-refund.md §4, docs/planning/03 §2.5, POL-046 ③ |
+| 부정 예매 사건 | 사건 상태가 받는 작업만 한다(docs/features/forensic-replay.md §6.7.4 전이 표). 맞지 않으면 409 `fraud-case-state`, 같은 묶음의 두 번째 사건은 409 `fraud-case-exists`, 취소 마감 시각 뒤의 표 취소는 409 `cancel-deadline-passed`, 조치하지 않은 사건의 증거 묶음은 409 `case-not-actioned`, 조사용 기록 보존이 지난 그래프·리플레이 파일은 410 `investigation-source-expired`다. 상태는 PATCH로 바꾸지 못하고 서버가 전이로만 바꾼다 (추천 적용 2026-10-31, ADR-0171) | docs/features/forensic-replay.md §6.7.4·§6.7.8, openapi 태그 `investigations` |
 | 정산서 | 이의는 통지 뒤 2영업일 안, 정산 계좌를 바꾼 뒤 3영업일은 지급 보류 | POL-039 ②·④ |
 | 구매 경로 | 구매 권한 `ticket:buy`와 한 구매 세션에 묶인 입장 토큰이 모두 있어야 한다. 구매 세션은 회차 하나에 묶인다: 주소의 회차 ID가 입장 토큰의 `event`와 같아야 하고(gw-fan), 구매 세션 상태에 적힌 회차와도 같아야 한다(purchase-svc가 요청마다). 다르면 403이고, 좌석 델타 WebSocket은 닫힘 코드 4403이다. 회차 ID는 공개 값이라 404로 숨기지 않는다(추천 적용 2026-10-30, 시험 S-T28). 주소에 회차가 없는 주문·결제 경로는 자기 것만 규칙이다: 주문 본문의 `holdId`가 그 구매 세션의 홀드가 아니거나 주소의 주문이 그 구매 세션의 주문이 아니면 404다(추천 적용 2026-10-30, 시험 S-T29) | identity §3, ADR-0050 결정 8, docs/features/seat-hold.md §2, asvs/seat-hold.md 8.2.2 |
 
@@ -116,8 +120,13 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 
 | 지정 | 닿는 것 | 판정 | 정본 |
 | --- | --- | --- | --- |
-| 가명정보 취급자(개인정보 보호책임자가 지정한 commander) | 분석 실버 조회, 포렌식 리플레이 2단계 내보내기 | ops-svc가 요청마다 지정 기록을 본다(§3.1). 지정 없는 operator·commander는 403 | analytics §11, A-T13, forensic-replay.md 8.1.1 |
+| 가명정보 취급자(개인정보 보호책임자가 지정한 commander) | 분석 실버 조회, 포렌식 리플레이 연구 갈래 내보내기(`/v1/ops/research-exports`. 법률 확인 31번을 확인받기 전에는 경로가 403) | ops-svc가 요청마다 지정 기록을 본다(§3.1). 지정 없는 operator·commander는 403(연구 내보내기는 `pseudonym-handler-required`). 부정 거래 조사 경로는 403이고 `FRAUD_ACTION`을 승인하지 못한다(아래 두 행) | analytics §11, A-T13, forensic-replay.md 8.1.1 |
+| 부정 거래 조사관(`FRAUD_INVESTIGATOR`, 개인정보 보호책임자가 정한 사람을 commander가 commander나 `cs_lead`에게 지정) | 조사 경로 전부(openapi 태그 `investigations`): 후보 묶음, 사건 만들기·고치기, 연결 그래프, 조사 원천 리플레이 파일, 소명 요청(양도 잠금), 조치 요청, 외부 게시물 등록, 증거 묶음 만들기·열람·내보내기. CS 처리함의 `FRAUD_CASE` 소명 건 | 게이트웨이가 역할(commander·`cs_lead`)로 먼저 거르고, ops-svc가 요청마다 identity-svc `GetAdminDesignations`로 살아 있는 지정을 본다(캐시 5초 [가정]). 지정이 없거나 identity-svc가 답하지 않으면 403 `investigator-required`이고, 권한 밖 시도로 감사 기록과 관리 계정 접속기록에 남는다. ops-svc는 이 확인을 마친 뒤에만 조사 저장소를 `inv_reader`로 읽는다(원래 요청자의 권한, §2 5). 사건은 지정 조사관 누구나 보고 고친다(담당은 표시이고 범위가 아니다). 대신 모든 변경이 누가·언제·무엇을·왜로 사건 기록에 남고, 조회는 대량 조회 점검(internal-management-plan.md §4.2) 대상이다. 자기가 낸 조치 요청은 승인하지 못하고, 연구 갈래 경로는 403이다 (추천 적용 2026-10-31, ADR-0171) | docs/features/forensic-replay.md §6.2, docs/features/control-tower.md §9.2, C-T63 |
+| 부정 예매 조치 승인자(요청자가 아니고, 가명정보 취급자 지정이 없으며 지난 90일 [가정] 안에 그 지정을 거둔 적도 없는 commander. 지정이 아니라 승인하는 때 서버가 보는 조건) | 승인 업무 `FRAUD_ACTION`(표 취소, 이용 제한 걸기·풀기)의 상세와 그 사건 요약 `fraudCaseSummary`(읽기 전용), 승인·반려 | ops-svc가 승인하는 때 DB의 지금 역할이 commander인지, 요청자가 아닌지 보고, `GetAdminDesignations`를 캐시 없이 바로 불러 가명정보 취급자 지정과 지난 90일 안에 거둔 기록(`recently_revoked`)이 없는지 본다. 있거나 identity-svc가 답하지 않으면 403 `fraud-approver-ineligible`, 요청자 본인이면 403이다. `cs_lead`는 다른 승인 업무를 승인할 수 있어도 `FRAUD_ACTION`은 승인하지 못한다. 상세(`GET /v1/ops/approval-requests/{approvalId}`)는 그 업무의 요청자와 승인 자격자만 200이고(사건 요약이 늘 실린다), 그 밖(그 사건의 다른 조사관, 가명정보 취급자인 commander, `cs_lead` 등)은 없는 업무와 같은 404다. 자격을 볼 때 identity-svc가 답하지 않으면 404로 닫는다. 조사관 지정이 따로 없으면 조사 경로는 403이다. 사건 요약 열람도 접속기록에 남는다 (추천 적용 2026-10-31, ADR-0171) | POL-038 ⑪, docs/features/control-tower.md §9.2, C-T66, R-T33 |
 | 접속기록 점검자 | 접속기록 정기 점검(FR-064) | 위와 같다. 자기 기록은 점검하지 못한다. 예외는 시연 데이터(데모 환경의 점검 기록)뿐이고, 본인 종결을 '자기 점검(시연)'으로 남긴다. 운영·스테이징은 403이다(소유자 결정 2026-10-30, open-items 69번, control-tower §9, C-T60) | docs/planning/03 §3 접속기록 정기 점검 행 |
+
+- **조사관 지정의 규칙(추천 적용 2026-10-31, ADR-0171 결정 7)**: 지정은 commander만 하고 자기 자신에게는 하지 못한다(403 `self-target-forbidden`). 대상이 commander·`cs_lead`가 아니면 422 `designation-target-not-eligible`이다. 한 계정에 부정 거래 조사관과 가명정보 취급자를 함께 두지 않는다(어느 쪽이 먼저 있든 409 `designation-conflict`). 조사 갈래(실명 기록)와 연구 갈래(가명 기록)를 한 사람이 머릿속에서 잇지 않게 하려는 것이다. 두 지정 요청이 같은 순간에 오면 각자 '다른 지정 없음'을 보고 둘 다 통과할 수 있으므로, identity-svc는 지정할 때 그 관리 계정 행을 잠그고(`SELECT … FOR UPDATE`) 다시 확인한 뒤 넣는다. 그래서 두 요청 가운데 하나만 성공하고 다른 하나는 409 `designation-conflict`다(docs/features/identity.md §6, identity.proto `SetAdminDesignation`). **냉각 기간**: 같은 잠금 안에서, 줄 지정과 함께 둘 수 없는 다른 종류의 지정을 지난 90일 [가정](분석 실버 보존) 안에 거둔 기록이 있어도 409 `designation-conflict`다. 시스템이 바꿔 갖기를 막고, 개인정보 보호책임자의 확인(internal-management-plan.md §2.2)은 보조다. 대상의 역할이 지정을 받을 수 없는 역할로 바뀌면 그 변경과 같은 트랜잭션에서 지정을 거둔다(`cs_lead` → `cs_agent`면 조사관 지정이 함께 사라진다, docs/features/identity.md §6).
+- **1인 기간**: 조치에는 요청한 조사관과 다른 commander가 필요하다. 사람이 하나뿐인 포트폴리오 기간에는 이 견제가 성립하지 않으므로 운영에서 조사 갈래를 켜지 않는다(internal-management-plan.md §10과 같다).
 
 ## 4. 칸 단위 규칙
 
@@ -143,10 +152,14 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 | 기관 요청(수사기관·신고기관의 자료 요청과 통보) | — | — | 건 요약(기관, 종류, 기한, 상태)만. 요청 대상자 식별값과 제출 파일은 보이지 않는다 | viewer는 조회 기능이 없다(목록·상세 403). operator·commander는 원문을 보고 집행한다(열람·내려받기는 접속기록에 남는다). 제출 파일은 요청자가 아닌 commander가 추출을 승인한 뒤에만 생긴다(open-items 68번) | — | docs/features/control-tower.md §9 '접근 권한 통제'·'목록·상세 조회', asvs/control-tower.md 8.1.2(추천 적용 2026-10-30, 시험 C-T57·C-T62) |
 | 보안 사고와 이용자 통지 | — | — | 건 요약만. 통지 대상 목록과 대상자 식별값은 보이지 않는다 | viewer는 건 요약만. operator는 등록·통지 실행, 해당 여부 판단은 commander(원문을 본다) | — | 같다 |
 | 결제 상태 | 가상계좌 안내(은행·계좌번호·입금 기한)는 입금 대기일 때만 | — | — | — | — | payment.md 8.2.3 |
+| 부정 예매 조사 기록(후보 묶음, 사건, 연결 그래프, 조사 원천 리플레이 파일, 외부 게시물, 증거 묶음) | 자기 소명 요청만(아래 행) | 기획사 보고의 회차 집계만(사건 수, 조치 건수, 취소 매수, 재판매로 돌린 매수, 사유 범주별 건수, 소명 인정 비율. 5건 [가정] 미만 칸은 합친다. 사람 단위 행·좌석·계정 ID 없음) | 조사관 지정이 있는 `cs_lead`만 관제 역할 칸과 같다. `cs_agent`와 지정 없는 `cs_lead`는 403이고, CS 처리함의 `FRAUD_CASE` 소명 건도 없는 건과 같은 404다 | 조사관 지정이 있는 commander만: 계정 ID, 계정별 근거 신호, 구매 수 대 한도, 공유 속성 종류, 점수 범주, 기기·결제 수단·연락처 가명은 앞 8글자, ASN, IP는 앞부분(IPv4 /24, IPv6 /48)을 먼저 보이고 원문은 사유를 넣고 열 때만(§4.3 5). 점수 원값·가중치, 연락처·카드 원문은 누구에게도 없다. 리플레이 파일은 세션·기기를 파일 안 번호로 바꾸고 IP·계정 ID·가명 값을 싣지 않으며, 묶음 밖 여정은 행동·망·기기 칸을 비운다. 외부 게시물 캡처는 메타데이터를 지운 보기용 사본만 보이고 원본은 기관 제출 때만 담는다. 기관 제출은 승인된 자료 요청의 항목·기간·대상자와 겹치는 부분만이다. viewer·operator와 지정 없는 commander는 403이다 | — | docs/features/forensic-replay.md §6.2·§6.7, asvs/forensic-replay.md 8.1.2 (추천 적용 2026-10-31, ADR-0171) |
+| 부정 예매 사건 요약(승인 업무 `FRAUD_ACTION`의 `fraudCaseSummary`) | — | — | 보이지 않는다(`cs_lead`는 `FRAUD_ACTION` 상세가 404다, §3.7) | 요청한 조사관과, 요청자가 아니고 가명정보 취급자 지정이 없으며 90일 안에 거둔 적도 없는 commander만 상세를 받고 그 상세에 늘 실린다(그 밖은 상세가 404): 사유 범주, 계정 수, 대상 표 수, 구매 수 대 한도, 공유 속성 종류, 근거 신호 범주, 계정별 소명 결과의 수, 조사관 의견, 취소 마감 시각, 고정 판 해시. 계정 ID·가명 값·IP·연락처·결제 수단 값·그래프·리플레이 파일은 없다. 읽기 전용이다 | — | openapi `FraudCaseSummary`, docs/features/control-tower.md §9.2 (추천 적용 2026-10-31, ADR-0171) |
+| 부정 예매 소명 요청(팬 화면 SCR-042, `GET /v1/fraud-appeal-requests`) | 자기 요청의 사건 ID(소명 제출의 대상 ID), 회차, 사유 범주, 기한, 잠긴 티켓, 소명·이의 상태, 우선 구매 권리. 사건의 다른 계정, 점수·가중치, 근거 신호, 연결 값, 조사관은 없다(POL-046 ⑦) | — | — | 조사관만 원본(사건)을 본다(위 행) | — | docs/features/forensic-replay.md §6.7.5, openapi `FraudAppealViewPage` (추천 적용 2026-10-31, ADR-0171) |
 
 ### 4.2 쓰는 칸
 
 - 서버가 정하는 칸(상태, 소유 계정, 테넌트, 작성자, 시각, 계산한 금액, 판)은 요청 본문에서 받지 않는다. 요청 스키마(데이터의 구조 정의)는 허용한 칸만 두고(`additionalProperties: false`), 그 밖의 칸이 오면 400으로 거절한다(support.md·catalog-review.md 8.2.3과 같다).
+- **부정 거래 조사의 쓰는 칸(추천 적용 2026-10-31, ADR-0171)**: 사건 고치기(`PATCH /v1/ops/fraud-cases/{caseId}`, `If-Match` 필수)는 계정 빼기·더하기(이유 필수), 메모, 사유 범주, 조사관 의견, 계정별 소명 판단·이의 판단만 받는다. 상태, 담당 조사관, 판, 기록 고정 판, 점수·근거 신호, 정답 라벨은 서버 칸이다. 사건 요약은 `readOnly`라 승인자는 사건 칸을 쓰지 못한다. 팬의 소명 본문은 대상 종류·대상 ID·글만 받고, 낸 계정은 세션으로 정한다.
 - 역할에 따라 쓸 수 있는 칸이 다른 곳은 그 기능의 ASVS 추적 표 8.2.3 행이 정본이다. 예: 후기는 별점·본문·사진만, 홈 구성의 `updatedBy`·`updatedAt`은 읽기 전용, 판매 승인 뒤 재승인 대상 항목은 `partner_admin`만.
 
 ### 4.3 가린 값을 여는 절차
@@ -155,6 +168,7 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 2. 원문이 필요하면 열람 사유를 넣는다. 서버는 사유가 없는 원문 요청을 거절한다.
 3. 원문 열람과 사유, 대량 내려받기의 건수는 관리 계정 접속기록으로 남고(POL-023, NFR-017), 접속기록 정기 점검(FR-064)의 대상이 된다.
 4. 예매자 명단 내려받기는 여기에 패스키 재인증이 더해진다(§6).
+5. **조사 화면의 원문 IP(추천 적용 2026-10-31, ADR-0171)**: 연결 그래프의 IP는 서버가 기본으로 앞부분(IPv4 /24, IPv6 /48)만 돌려주고, 조사관이 사유를 넣어 원문을 요청할 때만 원문을 준다. 그 열기는 사유와 함께 관리 계정 접속기록(`admin_data_access`, `invAccess`)에 남는다. 계약은 openapi `FraudCaseGraph`(IP 점의 표시는 가린 값, 원문 없음)와 `POST /v1/ops/fraud-cases/{caseId}/ip-reveals`(점 50개 [가정]까지, 사유 필수, 계정당 하루 200개 [가정], 응답 `no-store`)다. 열기는 `invAccess` `GRAPH_IP_REVEAL`로 남고 원문 IP는 기록에 넣지 않는다. 화면에서 가리는 것은 통제로 세지 않으므로(§2 3) 서버가 가린다(추천 적용 2026-10-31, ADR-0171).
 
 ## 5. 검사 위치
 
@@ -169,10 +183,10 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 | 끝난 세션 | — | — | 메모리의 종료 세션 목록(identity §3) | — | — |
 | 본인·테넌트·배정 회차 | — | — | 조회 조건(§5.2) | 테넌트 표의 행 보안 정책(§5.3) | — |
 | 상태·시간 | — | — | 행 잠금 안에서 다시 확인 | 행 잠금, 검사 제약 | 안내만 |
-| 요청자 ≠ 승인자 | — | — | ops-svc | `command_actor`의 `UNIQUE (command_id, admin_account_id)`(ADR-0149) | — |
+| 요청자 ≠ 승인자 | — | — | ops-svc(`FRAUD_ACTION`은 승인자의 가명정보 취급자 지정도 본다, §3.7) | `command_actor`의 `UNIQUE (command_id, admin_account_id)`(ADR-0149) | — |
 | 재인증 요소와 작업 묶음 | — | — | 받는 서비스(§6) | — | — |
 | 칸(응답·요청) | — | — | 응답·요청 허용 목록 | P1 칸은 그 서비스 파드의 권한으로만(data-classification 보호 등급 표) | 가린 값 먼저 |
-| 지정 | — | — | ops-svc가 요청마다 | ClickHouse 사용자 분리(analytics §11) | — |
+| 지정 | — | — | ops-svc가 요청마다 | ClickHouse 사용자 분리(analytics §11, 조사 저장소는 `inv_reader`만 읽는다, docs/data.md '부정 예매 사후 조사의 표') | 메뉴는 지정이 있을 때만 그린다(안내만) |
 
 ### 5.1 게이트웨이(ADR-0008)
 
@@ -235,6 +249,18 @@ docs/api/openapi.yaml의 모든 작업은 허용 역할 칸 `x-peaket-roles`를 
 - **값을 고르는 기준**: 작업의 security와 게이트웨이(guidelines §10의 경로 접두사), docs/planning/03 §3의 기능 행, 기능 문서의 권한 문장에서 읽는다. 정본이 그 일을 누가 하는지 말하지 않는 작업은 가장 좁은 역할로 두고, 작업 설명에 '허용 역할 [가정]'과 그렇게 둔 까닭을 적는다.
 - **세는 값**: 작업 수와 값마다 단 작업 수는 doc-check `roles` 정보 줄이 낸다. 이 문서에 손으로 적지 않는다(guidelines §12 '자기 서술성 점검'과 같다).
 - 게이트웨이 정책 파일(Envoy Gateway `SecurityPolicy`)과 서비스 가드 시험을 이 칸에서 만드는 생성기는 권한 표 구현(wbs 3.6.1)에서 만든다. 그 전에는 사람이 이 칸과 정책 파일을 맞춘다.
+- **부정 거래 조사 경로(2026-10-31 대조, ADR-0171)**: openapi 태그 `investigations`의 작업은 모두 `[commander, cs_lead]`이고, 연구 갈래 내보내기(`/v1/ops/research-exports`, `…/{exportId}`)는 `[commander]`, 팬의 `GET /v1/fraud-appeal-requests`는 `[fan]`, 승인 업무 상세는 기존대로 `[operator, commander, cs_agent, cs_lead]`다. 조사관·가명정보 취급자 지정과 '요청자가 아니고 가명정보 취급자가 아닌 commander'는 칸에 적지 않고 ops-svc가 본다(위 '칸은 거친 검사다'). 그래서 지정 없는 commander·`cs_lead`는 게이트웨이를 지나 ops-svc에서 403을 받는다. 2026-10-31 doc-check `roles` 검사는 이 작업들을 포함해 오류 0이다.
+- **인가에 걸린 새 오류 type(2026-10-31, ADR-0171)**: `type` URI의 마지막 경로다(docs/api/guidelines.md §2). 상태 조건의 409·410은 §3.5 '부정 예매 사건' 행에 있다.
+
+| type | 상태 | 뜻 | 남기는 곳 |
+| --- | --- | --- | --- |
+| `investigator-required` | 403 | 조사 경로를 부른 계정에 살아 있는 `FRAUD_INVESTIGATOR` 지정이 없다(identity-svc가 답하지 않아도 같다) | 감사 기록, 관리 계정 접속기록(권한 밖 시도, 점검 규칙 `OUT_OF_SCOPE`) |
+| `pseudonym-handler-required` | 403 | 연구 갈래 내보내기를 부른 commander에게 `PSEUDONYM_HANDLER` 지정이 없다 | 감사 기록(SCR-031 '명단 다운로드 기록'과 같은 표) |
+| `fraud-approver-ineligible` | 403 | `FRAUD_ACTION`을 가명정보 취급자 지정이 있는 commander가 승인·반려하려 했다 | 감사 기록, 승인 업무 기록 |
+| `designation-target-not-eligible` | 422 | 조사관 지정 대상이 commander·`cs_lead`가 아니다 | 권한 부여 내역(거절) |
+| `designation-conflict` | 409 | 조사관과 가명정보 취급자를 한 계정에 함께 두려 했다 | 권한 부여 내역(거절) |
+| `transfer-locked` | 409 | 부정 예매 양도 잠금이 걸린 티켓의 양도 요청·돌려주기 | 티켓 사건 기록 |
+| `priority-grant-not-found` | 404 | 세션 계정의 살아 있는 우선 구매 권리가 아니다(남의 권리, 만료, 거둔 권리를 가리지 않는다) | 보안 이벤트(거절, §2 7) |
 
 ## 6. 재인증·2인 승인과의 묶음
 
@@ -246,10 +272,14 @@ docs/api/openapi.yaml의 모든 작업은 허용 역할 칸 `x-peaket-roles`를 
 | 정산 계좌 변경 | docs/planning/03 §3 정산 계좌 변경 행 | 비밀번호·TOTP·패스키 | 1인. 예금주가 판매자와 같아야 하고, 바꾼 뒤 3영업일 지급 보류 | 그 요청을 받는 서비스: `partner_admin`, 테넌트, 재인증 요소 |
 | 수사기관 제공 자료의 추출·제출(소유자 결정 2026-10-30, open-items 68번) | docs/planning/03 §3 신고기관·수사기관 요청 처리 행 | 요청·승인 모두 비밀번호·TOTP·패스키(위험 운영 명령과 같다). 작업 묶음 `act`는 따로 둔 '수사기관 자료'다. 처음에는 '승인 업무'를 함께 쓰는 임시 값이었으나, 환불 승인용 토큰을 자료 추출 승인에 쓰지 못하게 나눴다(추천 적용 2026-10-30, identity §3 '재인증 토큰의 묶음') | 2인: operator 이상이 요청하고 요청자가 아닌 commander가 승인한다. 승인 대기 24시간 [가정](제출 기한이 더 이르면 그때) | ops-svc: 지금 역할, 요청자 ≠ 승인자(`data_request_approval` 검사 제약), 재인증 요소, 고른 범위가 요청서 범위 안인지, 제출 기록의 SHA-256이 승인 때 만든 파일과 같은지 |
 | 예매자 명단 내려받기 | docs/planning/03 §3, FR-027 | 비밀번호·TOTP·패스키 | 1인. 사유 필수 | `partner_admin`, 테넌트, 재인증 요소, 사유·건수 기록 |
+| 부정 예매 조치 승인(`FRAUD_ACTION`: 표 취소, 이용 제한 걸기·풀기, 2026-10-31) | POL-038 ⑪, docs/planning/03 §3 '부정 예매 조치' 행 | 승인 직전 비밀번호·TOTP·패스키(작업 묶음 '승인 업무'). 승인자는 commander만이라 패스키가 늘 붙는다 | 2인: 지정 조사관이 요청하고, 요청자가 아니고 가명정보 취급자 지정이 없으며 90일 안에 거둔 적도 없는 commander가 승인한다 | ops-svc: 승인하는 때의 DB 역할, 요청자 ≠ 승인자, 캐시 없이 바로 본 승인자의 지정과 거둔 기록(답이 없으면 403, §3.7), 사건 상태, 만료 다시 판정(표 취소는 취소 마감 시각) |
+| 부정 거래 조사의 조회·소명 요청·조치 요청·외부 게시물 등록·증거 묶음 만들기·내보내기(2026-10-31) | docs/planning/03 §3 '부정 거래 조사'·'증거 묶음 보존·내보내기' 행 | 없음(아래 '증거 내보내기에 재인증을 두지 않는 까닭') | 1인. 내보내기는 사유 필수. 개인에게 불이익을 주는 조치는 위 행의 2인 승인을 거친다 | ops-svc: 조사관 지정, 사건 상태, 사유, 기관 제출이면 자료 요청의 상태(APPROVED)·회차·범위 |
+| 분쟁·수사로 건 증거 보존의 끝(2026-10-31) | docs/features/forensic-replay.md §6.7.6 | 요청은 없음, 확인은 비밀번호·TOTP·패스키(작업 묶음 '승인 업무') | 2인: 조사관이 근거를 적어 요청하고(`POST /v1/ops/evidence-bundles/{bundleId}/hold-end-requests`), 요청자가 아닌 commander가 확인한다(`…/hold-end-confirmations`). 확인해야 `hold_ended_at`이 기록되고 파기 시계가 돈다 | ops-svc: 요청자 ≠ 확인자, 확인자의 DB 역할 commander, 기다리는 요청이 있는지, 보존 이유가 DISPUTE·INVESTIGATION인지(추천 적용 2026-10-31, ADR-0171) |
 | 팬 민감 작업(POL-019 목록) | 본인 | 소셜 제공자 재인증(강도는 '확인됨'·'요청만 함', identity §7.1) | — | 받는 서비스: 재인증 토큰. 양도 요청과 환급·배상 계좌 입력은 '확인됨'을 낼 수 있는 제공자로 먼저 |
 
 - 재인증 토큰은 5분 동안 한 번 쓴다(`typ` reauth+jwt, `X-Reauth-Token`, docs/api/guidelines.md §7). 패스키가 필요한 작업에 `factors`에 passkey가 없으면 403 `reauth-required`다(identity §6, I-T53).
 - **재인증 토큰을 세션과 작업 묶음에 묶는다(추천 적용 2026-10-30)**: 토큰에 그 세션(`sid`)과 작업 묶음 `act`(운영 명령, 승인 업무, 권한 변경, 정산 계좌, 명단 내려받기, 수사기관 자료, 팬 민감 작업. '수사기관 자료'는 2026-10-30에 더했다)을 싣는다. 받는 서비스는 요청의 세션·작업 묶음과 같은지 본다. 정산 계좌를 바꾸려고 받은 토큰을 5분 안에 명단 내려받기에 쓰지 못하게 하려는 것이다. identity §3('재인증 토큰의 묶음')·§6('위험 운영 명령 재인증')에 2026-10-30 더했다.
+- **증거 내보내기에 재인증을 두지 않는 까닭(추천 적용 2026-10-31, ADR-0171)**: 기관 제출(`AUTHORITY`)의 결과는 밖으로 나가는 파일이 아니라 접수된 자료 요청에 붙는 제출 파일이다. 그 요청은 요청자가 아닌 commander가 패스키까지 재인증해 추출을 승인한 상태(APPROVED)여야 받고, 담는 범위는 그 승인 범위와 겹치는 부분뿐이다. 파일을 실제로 밖으로 꺼내는 내려받기와 제출 기록은 지금의 FR-034 경로와 권한이 지킨다(§6 '수사기관 제공 자료의 추출·제출' 행). 기획사 보고(`PROMOTER`)는 5건 [가정] 미만 칸을 합친 회차 집계라 사람 단위 정보가 없다. 둘 다 사유를 받고 관리 연속성 기록·관리 계정 접속기록에 남으며, 하루 20회 [가정]를 넘으면 막고 하루 5건 [가정]을 넘으면 점검 목록에 오른다(internal-management-plan.md §4.2). 원문 IP가 든 증거 묶음 파일(`records/*.arrow`)을 사람이 직접 내려받는 경로를 새로 만들면, 그 경로에는 작업 묶음 '수사기관 자료'의 패스키 재인증을 붙이고 패스키 등록 의무가 있는 commander만 부르게 한다.
 - identity는 재인증 토큰을 줄 때 DB의 지금 역할과 잠금 상태를 다시 본다. 역할을 거둔 직후나 보호 잠금 중에는 토큰을 주지 않는다(auth-controls.md §3.2).
 - 2인 승인의 두 사람은 서로 다른 관리 계정이고 둘 다 재인증한다. 승인자의 역할은 승인하는 때의 DB 역할로 본다.
 
@@ -264,7 +294,7 @@ SCR-064의 일을 docs/api/openapi.yaml 경로에 이은 표다. 경로를 둔 �
 | `PUT /v1/ops/admin-accounts/{adminAccountId}/role` | operator, commander | operator는 partner_admin·partner_member 사이만, commander는 관제 역할 사이도. 자기 자신이 아님, 마지막 활성 partner_admin을 낮추지 않음, 파트너 역할과 관제 역할 사이는 바꾸지 않음. `If-Match` 필수(guidelines §12) | 패스키까지 | commander가 되거나 commander에서 바뀌면 2인(승인 업무 `COMMANDER_ROLE_CHANGE`, POL-038 ⑨). 그 밖은 1인 | 권한 변경 내역(3년) |
 | `POST /v1/ops/admin-accounts/{adminAccountId}/invitation`(재초대) | operator, commander | 파트너 계정은 operator 이상, 운영자·CS 계정은 commander(auth-controls.md §3.2). 자기 자신이 아님. 까닭(재발송·보호 잠금·분실)이 지금 상태와 맞아야 함 | 패스키까지 | — | 권한 부여 내역(3년) |
 | `POST /v1/ops/admin-accounts/{adminAccountId}/removal`(삭제) | operator, commander | operator는 파트너 계정만, commander는 commander 계정 밖 모두. 자기 자신이 아님, 마지막 활성 partner_admin이 아님. 대상 상태는 지우지 않은 계정 모두다(초대 중·초대 만료·시간 잠금·보호 잠금 포함, docs/planning/03 §2.7 A9·A13~A16, 추천 적용 2026-10-30) | 패스키까지 | commander 계정은 먼저 역할 변경(2인)으로 commander가 아니게 한 뒤 지운다 | 권한 말소 내역(3년) |
-| `POST /v1/ops/admin-accounts/{adminAccountId}/designations`, `DELETE /v1/ops/admin-accounts/{adminAccountId}/designations/{kind}` | commander | 대상은 활성 commander(§3.7). 지정은 자기 자신에게 하지 못하고, 거두기는 자기 지정도 된다(권한을 줄이는 쪽) | 패스키까지 | — | 권한 부여·말소 내역(3년) |
+| `POST /v1/ops/admin-accounts/{adminAccountId}/designations`, `DELETE /v1/ops/admin-accounts/{adminAccountId}/designations/{kind}` | commander | 대상은 활성 commander(§3.7). 부정 거래 조사관(`FRAUD_INVESTIGATOR`)만 활성 `cs_lead`에게도 준다(그 밖의 역할은 422 `designation-target-not-eligible`). 조사관과 가명정보 취급자는 한 계정에 함께 두지 않는다(409 `designation-conflict`, 2026-10-31). 지정은 자기 자신에게 하지 못하고, 거두기는 자기 지정도 된다(권한을 줄이는 쪽) | 패스키까지 | — | 권한 부여·말소 내역(3년) |
 | `DELETE /v1/ops/admin-accounts/{adminAccountId}/sessions`, `DELETE /v1/ops/admin-accounts/{adminAccountId}/sessions/{sessionId}` | operator, commander | 모든 관리 계정 | 없음(끊는 쪽의 안전 조치, 휴대폰에서도 한다) | — | 운영 감사 기록 |
 | `GET /v1/partner/team-accounts` | partner_admin | 자기 테넌트(`X-Tenant-Id`)의 계정만(§3.3) | 없음 | — | 접속기록 |
 
@@ -293,6 +323,7 @@ ASVS 태그(`[ASVS v5.0.0-8.x.y]`)를 붙여 CI(코드를 올릴 때마다 자�
 | AZ-T12 | 지정: 지정 없는 commander가 분석 실버와 포렌식 2단계 내보내기를 부른다. 접속기록 점검자가 자기 기록을 점검한다. 가명정보 취급자 지정을 거둔 직후 다시 부른다 | 모두 403이다. 지정을 거둔 뒤에는 캐시 시간(5초 [가정]) 안에 막힌다 | FR-064, ASVS 8.2.1 |
 | AZ-T13 | 현장 스태프: A 회차 토큰으로 B 회차 목록을, 다른 파트너 기기로 승인을, 유효 시간 밖에 판정을 부른다 | 403이고 판정이 기록되지 않는다(I-T22·I-T23·I-T25와 같은 결과) | FR-046, ASVS 8.2.2·8.4.1 |
 | AZ-T14 | 관리 계정 관리(§6.1, 추천 적용 2026-10-30, open-items 73번): ① viewer·cs_agent·cs_lead로 §6.1의 관제 경로를 모두 부른다 ② operator로 운영자·CS 계정의 초대·역할 변경·재초대·삭제와 지정을 부른다 ③ commander가 자기에게 지정하고, 지정 없는 일반 operator 계정에 지정한다 ④ 지정을 거둔 직후 그 계정으로 분석 실버를 부른다 ⑤ 역할을 operator에서 viewer로 바꾸기 직전에 받은 액세스 토큰으로 그 계정이 초대를 부른다 ⑥ A 파트너의 partner_admin 토큰으로 팀 계정 목록을 부르고, partner_member 토큰으로도 부른다 ⑦ 공개가 아닌 새 작업에서 `x-peaket-roles`를 지운다 | ①②는 모두 403이고 대상 계정과 권한 내역에 변화가 0건이다. ③은 403 self-target-forbidden과 422 designation-target-not-commander다. ④는 캐시 시간(5초 [가정]) 안에 403이다(AZ-T12와 같다). ⑤는 세션이 이미 끝나 401이거나, 세션 종료 이벤트가 늦어도 identity-svc가 DB 역할로 다시 봐 거절한다. ⑥은 A의 계정만 나오고 B의 계정이 0건이며 이메일은 가린 값이다. partner_member는 403이다. ⑦은 doc-check `roles` 오류다(§5.5) | FR-021, FR-028, FR-064, ASVS 8.2.1·8.2.2·8.3.1 |
+| AZ-T15 | 부정 거래 조사(§3.2·§3.5·§3.7·§4.1, 추천 적용 2026-10-31, ADR-0171): ① 조사관 지정이 있는 `cs_lead` A가 사건을 만들고 조치를 요청한다 ② 지정 없는 `cs_lead` B, 가명정보 취급자 지정이 있는 commander C, 지정이 없는 commander D가 그 승인 업무 상세를 읽고 승인한다 ③ A가 자기 요청을 승인한다 ④ 한 commander E에게 조사관 지정과 가명정보 취급자 지정을 같은 순간에 두 요청으로 주고, 가명정보 취급자 지정을 거둔 지 90일이 안 된 commander에게 조사관 지정을 준다 ⑤ A의 역할을 `cs_agent`로 바꾼 뒤 조사 경로를 부른다 ⑥ 팬 F가 사건 ID를 알고, 소명 요청을 받지 않은 채 그 사건에 소명을 낸다. 팬 G가 F의 우선 구매 권리 ID로 입장 확정을 부른다 ⑦ 잠금이 걸린 티켓의 양도 요청과, 잠금 걸기와 같은 순간의 양도 수락을 보낸다 ⑧ 연결 그래프를 두 사건에서 부르고, 한 사건의 IP 점 ID를 다른 사건의 `ip-reveals`에 넣는다 | ② B·C는 상세가 404이고, 승인은 B 403·C 403 `fraud-approver-ineligible`이다. D는 요약이 든 상세를 읽고 재인증 뒤 승인된다(조사 경로는 403). D의 승인 직전에 identity-svc를 멈추면 403으로 닫히고, 90일 안에 가명정보 취급자 지정을 거둔 commander E2도 403이다 ③ 403 ④ 둘 가운데 하나만 생기고 다른 하나는 409 `designation-conflict`다. 냉각 기간 안의 지정도 409다 ⑤ 같은 트랜잭션에서 지정이 사라져 게이트웨이 403이고, 세션도 끝난다 ⑥ F는 '대상 아님'으로 닫히고, G는 404 `priority-grant-not-found`다 ⑦ 양도 요청은 409 `transfer-locked`, 동시 요청은 하나만 이긴다 ⑧ 그래프 응답의 IP 점은 가린 값이고 원문이 0건이다. 같은 IP·계정·가명이어도 두 사건의 `nodeId`가 다르고, `nodeId`가 그 값의 해시(키 없는 SHA-256)와 같지 않다. 다른 사건의 점 ID는 422다. 사유 없는 `ip-reveals`는 422, 사유를 넣은 요청만 원문을 주며 접속기록에 사유가 남고 원문은 남지 않는다 | FR-072, FR-073, POL-046, ASVS 8.2.1·8.2.2·8.3.3·15.4.2 |
 
 ## 8. 남는 위험
 
@@ -301,6 +332,8 @@ ASVS 태그(`[ASVS v5.0.0-8.x.y]`)를 붙여 CI(코드를 올릴 때마다 자�
 - 일괄 작업 사용자는 행 보안 정책을 건너뛴다. 이 사용자는 파트너 요청 경로에서 쓰지 않고, 쓰는 모듈을 코드 검토로 묶는다.
 - 칸 규칙은 응답 허용 목록이 지킨다. 허용 목록에 칸을 잘못 더하면 그대로 나간다. AZ-T8과 응답 스키마 검토로 줄인다.
 - 파트너 관리자가 정당하게 내려받은 예매자 명단을 밖에서 잘못 쓰는 것은 막지 못한다. 사유·건수 기록과 월 점검(FR-064)으로 사후에 찾는다.
+- 부정 거래 조사관은 지정된 동안 모든 회차의 사건과 연결 그래프를 본다(담당이 범위가 아니다). 사건과 무관한 계정을 찾는 경로는 없지만, 조사관이 정당한 화면에서 본 실명 기록을 밖에서 잘못 쓰는 것은 막지 못한다. 접속기록과 대량 조회 점검(internal-management-plan.md §4.2)으로 사후에 찾는다(2026-10-31).
+- 지정 기록 자체를 고칠 수 있는 identity DB 관리자는 냉각 기간 검사를 건너뛸 수 있다. 지정·해제는 권한 부여·말소 내역(3년)과 관제 감사 기록에 남으므로 사후에 찾는다(2026-10-31).
 
 ## 9. 미결정·[가정]
 
@@ -309,3 +342,4 @@ ASVS 태그(`[ASVS v5.0.0-8.x.y]`)를 붙여 CI(코드를 올릴 때마다 자�
 - 행 보안 정책의 비용과 쿼리 계획은 wbs 3.6.1에서 잰다. 쿼리 계획이 나빠지거나 `SET LOCAL` 비용이 파트너 요청 p95(요청 백 건 중 아흔다섯 건이 이 시간 안에 끝난다는 뜻)를 10% [가정] 넘게 늘리면 조회 계층만 두는 안으로 돌아가고, 그 결정을 ADR(아키텍처 결정과 그 이유를 남긴 기록)로 남긴다.
 - 지정 기록은 identity DB의 표 `admin_designation`(지정 종류, 지정한 사람, 해제 시각)에 둔다(docs/data.md §2 ①, 2026-10-30 더함). ops-svc가 요청마다 묻는 호출은 identity.proto 초안 `AdminDesignationService.GetAdminDesignations`다(ops-svc 신원만, 캐시 5초 [가정]. 답이 없으면 지정이 없는 것으로 보고 403, 추천 적용 2026-10-30, docs/api/proto/README.md §3).
 - 인가 거절 경보 기준(10분에 20건)과 지정 확인 캐시(5초)는 [가정, wbs 3.6.1에서 확정]이다.
+- **부정 거래 조사에서 남은 것(2026-10-31)**: FRN-040과 그 뒤 보안 검토에서 찾은 것(그래프 IP 원문과 점 ID, 승인 업무 상세의 범위, 지정의 동시 요청과 냉각 기간, 지정이 없어야 통과하는 검사의 닫힌 판정)은 같은 날 계약·기능 문서에 반영했다(§3.1·§3.7·§4.3 5, openapi·identity.proto·docs/features/identity.md §6). 남은 [가정]은 냉각 기간 90일과 지정 확인 캐시 5초다.

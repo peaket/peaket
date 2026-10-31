@@ -74,7 +74,7 @@
     },
     {
       "name": "paymentMethodRef",
-      "doc": "결제 수단 연결값(조사용 가명, 약한 값). 결제사 응답의 카드 정보에 BIN이 있을 때만 cardBin과 함께. HMAC-SHA256(inv-ref-key, 'pay|' + BIN 6자리 + '|' + 보이는 끝자리 + '|' + 발급사 코드 + '|' + 카드 종류). 카드 지문이 없어 서로 다른 카드가 같은 값일 수 있다. 분석 적재는 버린다(docs/features/payment.md, ADR-0171 결정 4, 추천 적용 2026-10-31)",
+      "doc": "결제 수단 연결값(조사용 가명, 약한 값). 결제사 응답의 카드 정보에 BIN이 있을 때만 cardBin과 함께. invRef(pay, BIN 6자리 + '|' + 보이는 끝자리 + '|' + 발급사 코드 + '|' + 카드 종류)(키 판 접두어 포함, docs/security/secrets-and-keys.md). 계산하지 못하면 cardBin과 함께 비우고 refMissing이 true다. 카드 지문이 없어 서로 다른 카드가 같은 값일 수 있다. 분석 적재는 버린다(docs/features/payment.md, ADR-0171 결정 4, 추천 적용 2026-10-31)",
       "type": [
         "null",
         "string"
@@ -89,6 +89,12 @@
         "string"
       ],
       "default": null
+    },
+    {
+      "name": "refMissing",
+      "doc": "조사용 가명 칸을 계산하지 못해 비웠으면 true(조사용 가명 라벨 키를 KMS에서 받지 못함·한도 초과). 업무 처리는 막지 않았고, 조사 적재는 이 값을 나중에 채우지 않는다. 생산자는 inv_ref_missing_total로 센다(docs/security/secrets-and-keys.md 'inv-ref-key', 추천 적용 2026-10-31, ADR-0171)",
+      "type": "boolean",
+      "default": false
     },
     {
       "name": "result",

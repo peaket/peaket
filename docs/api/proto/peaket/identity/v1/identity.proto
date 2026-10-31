@@ -358,6 +358,14 @@ enum DesignationKind {
 message GetAdminDesignationsResponse {
   // 살아 있는 지정. 없으면 비운다. commander·cs_lead가 아닌 계정은 늘 비어 있고, cs_lead에는 FRAUD_INVESTIGATOR만 있을 수 있다.
   repeated DesignationKind kinds = 1;
+  // 지난 90일 [가정] 안에 거둔 지정(종류와 거둔 시각). ops-svc는 FRAUD_ACTION 승인 자격을 볼 때 이 목록에 PSEUDONYM_HANDLER가 있으면 승인을 거절한다.
+  // 승인 실행 때 ops-svc는 이 호출을 캐시 없이 바로 하고, 답이 없으면 '지정이 없다'로 보지 않고 거절한다(추천 적용 2026-10-31, ADR-0171).
+  repeated RevokedDesignation recently_revoked = 2;
+}
+
+message RevokedDesignation {
+  DesignationKind kind = 1;
+  google.protobuf.Timestamp revoked_at = 2;
 }
 
 // 부르는 쪽: ops-svc만(관제 콘솔 '관리 계정·세션 관리' SCR-064). 관리 계정 목록·상세 읽기, 초대, 역할 변경, 재초대, 삭제, 지정과 지정 거두기.
@@ -386,7 +394,10 @@ service AdminAccountService {
   rpc ReinviteAdminAccount(ReinviteAdminAccountRequest) returns (AdminAccountChangeResponse);
   // 삭제(A9·A13~A16: 지우지 않은 계정이면 초대 중·초대 만료·잠김 상태여도 지운다). 상태를 REMOVED로 바꾸고 모든 세션을 끝내며(reason DELETE), 업무 이메일과 인증 수단을 바로 파기한다. 행에는 ID·역할·삭제 시각만 남긴다.
   rpc RemoveAdminAccount(RemoveAdminAccountRequest) returns (AdminAccountChangeResponse);
-  // 지정(commander 계정에만)과 지정 거두기. 거두기는 이미 거둔 지정이면 OK다.
+  // 지정(commander 계정에만. FRAUD_INVESTIGATOR는 commander와 cs_lead)과 지정 거두기. 거두기는 이미 거둔 지정이면 OK다.
+  // 지정은 대상 관리 계정 행을 잠근 트랜잭션(SELECT ... FOR UPDATE) 안에서 함께 둘 수 없는 지정과 같은 종류의 살아 있는 지정을 다시 보고 넣는다.
+  // 그래서 FRAUD_INVESTIGATOR와 PSEUDONYM_HANDLER를 같은 계정에 주는 두 요청이 같은 순간에 와도 하나만 OK이고 다른 하나는 DESIGNATION_CONFLICT다(추천 적용 2026-10-31, ADR-0171).
+  // 같은 잠금 안에서, 줄 지정과 함께 둘 수 없는 다른 종류의 지정을 지난 90일 [가정] 안에 거둔 기록이 있어도 DESIGNATION_CONFLICT다(냉각 기간, 추천 적용 2026-10-31).
   rpc SetAdminDesignation(SetAdminDesignationRequest) returns (AdminAccountChangeResponse);
   rpc RevokeAdminDesignation(RevokeAdminDesignationRequest) returns (AdminAccountChangeResponse);
 }
@@ -611,7 +622,8 @@ message AdminAccountChangeResponse {
 
 // 부르는 쪽: 조사 적재 작업자 inv-ingest만(부정 예매 사후 조사, docs/streaming.md §6.4, ADR-0171 결정 4).
 // 여정에서 처음 본 계정의 조사용 연결 값을 묶어 묻는다. 결과는 조사 저장소 inv의 inv_link에만 싣고, 분석 저장소로는 보내지 않는다.
-// 가명은 모두 조사용 가명 키 inv-ref-key의 HMAC-SHA256이고(키 회전·접근은 docs/security/secrets-and-keys.md), 원문 번호·이메일·기기 식별값은 돌려주지 않는다.
+// 가명은 모두 조사용 가명 invRef(라벨, 값) 문자열이고(키 판 접두어 k{판}. + base64url, 계산·회전·접근은 docs/security/secrets-and-keys.md), 원문 번호·이메일·기기 식별값은 돌려주지 않는다.
+// 계산하지 못해 비운 값(refMissing)은 항목에서 빠진다. 조사 적재는 그 값을 나중에 다시 채우지 않는다.
 // 읽기라 멱등 키가 없다. 없는 계정은 그 항목을 빼고 돌려준다. 한 번에 계정 500개 [가정]까지다(넘으면 INVALID_ARGUMENT).
 // 탈퇴한 계정은 연결 값을 지웠으므로 빈 항목이다(초안, 추천 적용 2026-10-31).
 service InvestigationRefService {
@@ -633,7 +645,7 @@ enum ContactRefKind {
 
 message ContactRef {
   ContactRefKind kind = 1;
-  // HMAC-SHA256(inv-ref-key, "contact|" + 정규화한 값)의 16진수
+  // invRef("contact", 정규화한 값): 키 판 접두어(k1. 등)와 base64url(HMAC-SHA256(contact 라벨 키, 값))(docs/security/secrets-and-keys.md)
   string ref = 2;
 }
 
@@ -648,7 +660,8 @@ message IdentityConflict {
 message InvestigationRefs {
   string account_id = 1;
   repeated ContactRef contact_refs = 2;
-  // 그 계정에 연결된 기기(device)의 기기 가명 device_ref(HMAC-SHA256(inv-ref-key, "device|" + deviceId)의 16진수). trust-svc의 deviceRef와 같은 값이다.
+  // 그 계정에 연결된 기기(device)의 기기 가명 device_ref(invRef("device", deviceId), 키 판 접두어 포함). trust-svc의 deviceRef와 같은 값이다.
+  // 키 회전의 이음 기간이 끝날 때 한 번은 옛 판과 새 판 값을 함께 싣는다(옛 판 → 새 판 대응. 원문은 싣지 않는다, docs/security/secrets-and-keys.md '회전 절차'). contact_refs도 같다.
   repeated string device_refs = 3;
   // 지난 1년 [가정]의 기록
   repeated IdentityConflict identity_conflicts = 4;
@@ -656,4 +669,67 @@ message InvestigationRefs {
 
 message BatchGetInvestigationRefsResponse {
   repeated InvestigationRefs items = 1;
+}
+
+// 부르는 쪽: purchase-svc만(주문 생성 때 예매자 휴대폰 번호의 연락처 가명, docs/features/payment.md, 추천 적용 2026-10-31, ADR-0171).
+// contact 라벨 키는 identity-svc만 받는다(KMS 키 정책). 그래서 purchase-svc는 번호를 직접 가명으로 바꾸지 않고 이 호출로 받는다.
+// identity-svc는 번호를 저장하거나 로그에 쓰지 않고 invRef(contact, 번호)만 돌려준다. 데드라인은 50ms [가정]이고, 실패·시간 초과면 purchase-svc는 주문을 막지 않고
+// contactRef를 비우며 refMissing을 참으로 낸다. 부르는 신원마다 초당 요청 상한(주문 설계 피크의 2배 [가정])을 두고 넘으면 RESOURCE_EXHAUSTED다(번호를 하나씩 넣어 보는 대입을 막으려는 것이다).
+service ContactRefService {
+  rpc ComputeContactRef(ComputeContactRefRequest) returns (ComputeContactRefResponse);
+}
+
+message ComputeContactRefRequest {
+  // E.164로 맞춘 휴대폰 번호
+  string phone_e164 = 1;
+}
+
+message ComputeContactRefResponse {
+  // invRef("contact", 번호): 키 판 접두어(k1. 등) + base64url
+  string contact_ref = 1;
+}
+
+// 부르는 쪽: ops-svc만(부정 예매 이용 제한, POL-046 ⑥, docs/features/identity.md §8, 추천 적용 2026-10-31, ADR-0171 결정 5).
+// 상태 셋으로 부른다. CASE_OPEN: 그 계정에 소명 요청을 보낼 때(사건이 소명 대기 이후). RESTRICTED: 이용 제한(RESTRICT)을 실행할 때, 제한을 걸기 전에.
+// RELEASED: 제한 없이 그 계정의 사건 몫이 끝났을 때(정상 종료, 소명 인정, 계정 빼기, 이의 인정) 또는 제한이 풀리거나(LIFT_RESTRICTION Done) 끝났을 때.
+// identity-svc는 그 계정의 연계정보 HMAC(identity_verification.ci_hmac과 키 판)을 restricted_ci_hold에 옮겨 둔다. 그 계정이 CASE_OPEN이나 RESTRICTED 동안 탈퇴하면
+// identity_verification은 지우지만 이 행은 남긴다(POL-033의 예외, 법률 확인 36번). RELEASED가 오거나 RESTRICTED의 until이 지나면 행을 지운다.
+// 같은 연계정보로 다시 가입한 계정은 carried_account_id에 적고, 상태가 RESTRICTED인 동안 토큰에 구매 권한 ticket:buy를 싣지 않는다(CASE_OPEN이면 적어만 둔다).
+// RESTRICTED 호출의 OK(또는 NO_VERIFICATION)가 이용 제한 실행 Done의 조건이다. ops-svc는 이 호출이 성공한 뒤에 queue-svc·purchase-svc에 제한을 걸고 팬에게 알린다.
+// 멱등 키는 (fraud_case_id, account_id, version)이고 판이 저장한 판보다 클 때만 반영한다. 그 계정에 본인확인 기록이 없으면 NO_VERIFICATION이고 아무것도 두지 않는다.
+// 데드라인은 1초 [가정]이고 실패하면 ops-svc 작업 워커가 다시 보낸다(그동안 제한 실행은 Done이 아니다).
+service RestrictedCiHoldService {
+  rpc SetRestrictedCiHold(SetRestrictedCiHoldRequest) returns (SetRestrictedCiHoldResponse);
+}
+
+enum RestrictedCiHoldState {
+  RESTRICTED_CI_HOLD_STATE_UNSPECIFIED = 0;
+  // 소명 요청 뒤 결정 전(사건이 소명 대기 이후). 탈퇴해도 보관하지만 다시 가입한 계정을 막지는 않는다
+  RESTRICTED_CI_HOLD_STATE_CASE_OPEN = 1;
+  // 부정 예매 이용 제한 중. until까지 다시 가입한 계정에 ticket:buy를 싣지 않는다
+  RESTRICTED_CI_HOLD_STATE_RESTRICTED = 2;
+  // 그 계정의 사건 몫이 제한 없이 끝났거나 제한이 풀렸다. 행을 지운다
+  RESTRICTED_CI_HOLD_STATE_RELEASED = 3;
+}
+
+message SetRestrictedCiHoldRequest {
+  string account_id = 1;
+  string fraud_case_id = 2;
+  // 이용 제한의 끝 시각. RESTRICTED에만 있다.
+  google.protobuf.Timestamp until = 3;
+  RestrictedCiHoldState state = 4;
+  int64 version = 5;
+}
+
+enum RestrictedCiHoldResult {
+  RESTRICTED_CI_HOLD_RESULT_UNSPECIFIED = 0;
+  RESTRICTED_CI_HOLD_RESULT_OK = 1;
+  // 그 계정에 본인확인 기록이 없다(본인확인 전 계정은 예매를 못 하므로 둘 것이 없다)
+  RESTRICTED_CI_HOLD_RESULT_NO_VERIFICATION = 2;
+  // 저장한 판보다 작거나 같아 반영하지 않았다
+  RESTRICTED_CI_HOLD_RESULT_STALE = 3;
+}
+
+message SetRestrictedCiHoldResponse {
+  RestrictedCiHoldResult result = 1;
 }
