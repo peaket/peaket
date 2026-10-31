@@ -718,7 +718,7 @@ message ComputeContactRefResponse {
 // 상태 셋으로 부른다. CASE_OPEN: 그 계정에 소명 요청을 보낼 때(사건이 소명 대기 이후). RESTRICTED: 이용 제한(RESTRICT)을 실행할 때, 제한을 걸기 전에.
 // RELEASED: 제한 없이 그 계정의 사건 몫이 끝났을 때(정상 종료, 소명 인정, 계정 빼기, 이의 인정) 또는 제한이 풀리거나(LIFT_RESTRICTION Done) 끝났을 때.
 // identity-svc는 그 계정의 연계정보 HMAC(identity_verification.ci_hmac과 키 판)을 restricted_ci_hold에 옮겨 둔다. 그 계정이 CASE_OPEN이나 RESTRICTED 동안 탈퇴하면
-// identity_verification은 지우지만 이 행은 남긴다(POL-033의 예외, 법률 확인 36번). RELEASED가 오거나 RESTRICTED의 until이 지나면 행을 지운다.
+// identity_verification은 지우지만 이 행은 남긴다(POL-033의 예외, 법률 확인 36번). RELEASED가 오거나 until이 지나면 행을 지운다(CASE_OPEN·RESTRICTED 모두, 추천 적용 2026-10-31, ADR-0173 결정 7).
 // 같은 연계정보로 다시 가입한 계정은 carried_account_id에 적고, 상태가 RESTRICTED인 동안 토큰에 구매 권한 ticket:buy를 싣지 않는다(CASE_OPEN이면 적어만 둔다).
 // RESTRICTED 호출의 OK(또는 NO_VERIFICATION)가 이용 제한 실행 Done의 조건이다. ops-svc는 이 호출이 성공한 뒤에 queue-svc·purchase-svc에 제한을 걸고 팬에게 알린다.
 // 멱등 키는 (fraud_case_id, account_id, version)이고 판이 저장한 판보다 클 때만 반영한다. 그 계정에 본인확인 기록이 없으면 NO_VERIFICATION이고 아무것도 두지 않는다.
@@ -729,7 +729,7 @@ service RestrictedCiHoldService {
 
 enum RestrictedCiHoldState {
   RESTRICTED_CI_HOLD_STATE_UNSPECIFIED = 0;
-  // 소명 요청 뒤 결정 전(사건이 소명 대기 이후). 탈퇴해도 보관하지만 다시 가입한 계정을 막지는 않는다
+  // 소명 요청 뒤 결정 전(사건이 소명 대기 이후). 탈퇴해도 보관하지만 다시 가입한 계정을 막지는 않는다. until(그 회차 공연일 + 30일 [가정])이 지나면 지운다
   RESTRICTED_CI_HOLD_STATE_CASE_OPEN = 1;
   // 부정 예매 이용 제한 중. until까지 다시 가입한 계정에 ticket:buy를 싣지 않는다
   RESTRICTED_CI_HOLD_STATE_RESTRICTED = 2;
@@ -740,7 +740,10 @@ enum RestrictedCiHoldState {
 message SetRestrictedCiHoldRequest {
   string account_id = 1;
   string fraud_case_id = 2;
-  // 이용 제한의 끝 시각. RESTRICTED에만 있다.
+  // 행을 지울 끝 시각. 두 상태 모두 싣는다(RELEASED에는 비운다).
+  // CASE_OPEN: 그 회차 공연일 + 30일 [가정]. 그때까지 제한이 걸리지 않으면 지운다.
+  // RESTRICTED: 이용 제한의 끝 시각. 부정 예매(사유 FRAUD) 이용 제한은 건 날 + 1년 [가정]을 넘지 못하므로(넘으면 ops-svc가 조치 요청을 422 restriction-too-long으로 거절) 보관도 1년을 넘지 않는다.
+  // 더 늘리려면 새 RESTRICT 요청(2인 승인)이 더 큰 판으로 다시 부른다(추천 적용 2026-10-31, ADR-0173 결정 7).
   google.protobuf.Timestamp until = 3;
   RestrictedCiHoldState state = 4;
   int64 version = 5;

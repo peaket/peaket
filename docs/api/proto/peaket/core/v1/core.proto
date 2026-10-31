@@ -814,6 +814,9 @@ message SetBookingRestrictionViewResponse {
 // 맞지 않으면 '대상 아님·기한 경과'로 닫는다(정본 docs/features/transfer-refund.md §7.1 '부정 예매 사건의 소명', 추천 적용 2026-10-31). 다시 보내기는 예매 제한의 화면용 사본(BookingRestrictionViewService)과 같은 규칙이다:
 // (account_id, case_id)마다 판 번호가 저장한 판보다 클 때만 반영하고, 실패하면 작업 워커가 다시 보내며, 10분 [가정]마다 열린 요청을 같은 판으로 다시 보낸다.
 // 집행에는 쓰지 않는다(양도 잠금의 집행은 ticket-svc, 우선 구매의 집행은 queue-svc·purchase-svc). 사건의 다른 계정·점수·근거 신호는 싣지 않는다. 데드라인은 1초 [가정]이다.
+// 사본은 두 갈래다(party). PAYER는 사건 계정(결제자)의 사본이다. HOLDER는 사건 계정이 결제한 표를 양도로 받아 가진 사건 밖 계정(받은 사람)의 사본으로,
+// 결제자와 같은 기한의 소명 기회를 준다. HOLDER 사본에는 사유 범주를 싣지 않고(결제자의 사유라서) 그 사람이 가진 사건 표(held_ticket_ids)만 싣는다.
+// 받은 사람의 소명도 POST /v1/appeals(kind FRAUD_CASE, targetId 사건 ID)로 받고, ops-svc가 보유자 진술로 사건에 잇는다(추천 적용 2026-10-31, ADR-0173 결정 4).
 service FraudAppealViewService {
   rpc SetFraudAppealView(SetFraudAppealViewRequest) returns (SetFraudAppealViewResponse);
 }
@@ -854,7 +857,8 @@ message SetFraudAppealViewRequest {
   // FraudReasonCategory 이름(MACRO_BOT 등). 팬에게는 사유 범주만 알린다.
   repeated string reason_categories = 4;
   google.protobuf.Timestamp due_at = 5;
-  // 이 요청으로 양도가 잠긴 이 계정의 티켓
+  // 이 요청으로 양도가 잠긴 이 계정의 티켓. 잠금이 풀려도 목록은 그대로 둔다(풀렸는지는 lock_active로만 알린다).
+  // 그래서 알림 워커가 '잠긴 표가 모두 취소됨'(이 목록이 모두 cancelled_ticket_ids에 듦)을 가릴 수 있다. HOLDER 사본은 비운다(추천 적용 2026-10-31, ADR-0173).
   repeated string locked_ticket_ids = 6;
   FraudAppealViewState state = 7;
   // 우선 구매 권리가 있을 때만(이의 인정 뒤, 이용 제한 풀기 Done 뒤에 연다)
@@ -871,6 +875,24 @@ message SetFraudAppealViewRequest {
   google.protobuf.Timestamp restricted_until = 13;
   // 이의 결과의 이유(조사관이 이의 판단에 적은 글, 팬에게 그대로 보인다). 이의가 결정되기 전이면 비운다(추천 적용 2026-10-31, FRN-070).
   string objection_note = 14;
+  // 양도 잠금의 최대 기한(그 계정의 첫 소명 요청 + 14일 [가정], 연장 없음, ticket.proto SetTransferLockRequest.expires_at과 같은 값). 잠금이 없으면 비운다.
+  // 화면은 '늦어도 이때 풀립니다'로 보인다. HOLDER 사본은 늘 비운다(추천 적용 2026-10-31, ADR-0173 결정 3).
+  google.protobuf.Timestamp lock_expires_at = 15;
+  // 양도 잠금이 지금 걸려 있으면 true. 일곱 때 가운데 하나로 풀리면 false로 바꿔 다시 보낸다(locked_ticket_ids는 그대로 둔다).
+  // core-svc 알림 워커는 PAYER 사본에서 true에서 false로 바뀔 때 FRAUD_TRANSFER_LOCK_RELEASED를 보낸다(fraud_appeal_notice.notified_lock_active).
+  // HOLDER 사본은 늘 false다(추천 적용 2026-10-31, ADR-0173).
+  bool lock_active = 16;
+  // 사본의 갈래. PAYER(사건 계정, 결제자)|HOLDER(사건 계정이 결제한 표를 받아 가진 사건 밖 계정). 비우면 PAYER로 본다.
+  // HOLDER 사본은 reason_categories·locked_ticket_ids·restricted_until·priority_purchases·lock_expires_at·objection_due_at을 비우고 lock_active를 false로 두며 held_ticket_ids를 쓴다.
+  // 받은 사람은 기한(due_at)과 가진 사건 표만 본다. 받은 사람은 원래 다시 양도할 수 없고 돌려주기는 되므로 잠금이 쓰임을 바꾸지 않아 잠금 줄을 보이지 않는다.
+  // 결과 뒤에도 이의 창이 없다. 이의는 결제자의 조치에 대한 것이라서 받은 사람은 고객 문의로 묻는다
+  // (docs/features/transfer-refund.md §4.1, 추천 적용 2026-10-31, ADR-0173 결정 4).
+  string party = 17;
+  // HOLDER일 때 그 사람이 가진 이 사건의 표(사건 계정이 결제한 표). 조치 결과 뒤에는 cancelled_ticket_ids에 그 가운데 취소된 표가 온다. PAYER면 비운다(추천 적용 2026-10-31, ADR-0173).
+  repeated string held_ticket_ids = 18;
+  // HOLDER일 때 held_ticket_ids 가운데 이 사건에서 더는 취소하지 않게 된 표(취소 대상에서 빠짐: 그 표 없이 표 취소가 Done, 승인자가 뺌,
+  // 결제자의 소명 인정·계정 빼기·사건 정상 종료, 취소 마감 지남). 늘면 FRAUD_HOLDER_RESULT를 보낸다(fraud_appeal_notice.notified_excluded_count). PAYER면 비운다(추천 적용 2026-10-31, ADR-0173 결정 4).
+  repeated string excluded_ticket_ids = 19;
 }
 
 message SetFraudAppealViewResponse {
