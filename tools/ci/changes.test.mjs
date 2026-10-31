@@ -83,3 +83,11 @@ test('GITHUB_OUTPUT이 있으면 범위마다 한 줄씩 쓴다', () => {
   assert.match(text, /^data=true$/m);
   assert.match(text, /^docs=false$/m);
 });
+
+test('DT38_서비스와_계약깨짐검사도구를바꾸면_contracts를고른다', () => {
+  // 서비스가 openapi:emit을 갖추는 PR에서 계약 잡(서비스 OpenAPI 차이의 자리)이 돌아야 한다(openspec 변경 add-contract-breaking-check)
+  assert.deepEqual(scopes({ 'services/queue-svc/src/main.ts': 'x\n' }), ['contracts', 'js']);
+  assert.deepEqual(scopes({ 'tools/ci/contract-breaking.mjs': 'x\n' }), ['contracts', 'tools']);
+  assert.deepEqual(scopes({ 'tools/ci/release-tags.mjs': 'x\n' }), ['contracts', 'tools']);
+  assert.deepEqual(scopes({ '.github/workflows/contract-check.yml': 'x\n' }), ['contracts', 'ci']);
+});

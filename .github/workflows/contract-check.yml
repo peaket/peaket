@@ -1,0 +1,50 @@
+# 계약 검사(docs/devops.md §3.1 contract-check, wbs 0.2.1 ②). ci.yml이 바뀐 범위에 계약(contracts)이 있을 때 부른다.
+# 판단은 tools/ci/contract-breaking.mjs와 packages/contracts의 스크립트가 하고 여기서는 부르기만 한다.
+# buf·Avro·Pact 검사는 그 계약을 쓰는 코드가 생기는 단계에서 더한다(openspec 변경 add-contract-breaking-check).
+name: contract-check
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # 대상 가지와 마지막 출시 태그의 계약과 견주므로 이력과 태그를 모두 받는다
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # pnpm은 package.json의 packageManager 판으로 받는다(docs-check.yml과 같다). 의존성 설치는 잠금 파일대로만 한다(§4.4)
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile
+      # 생성물이 계약과 같은지, 생성 스키마가 계약대로 거르는지(packages/contracts/README.md)
+      - run: pnpm --filter @peaket/contracts gen:check
+      - run: pnpm --filter @peaket/contracts test
+      # 깨짐 검사: 도구는 다이제스트를 고정한 이미지로 네트워크를 끊고 돈다(tools/ci/README.md).
+      # PR 라벨(breaking-approved)은 사용자가 고칠 수 있는 값이라 스크립트가 사건 파일에서 읽는다(워크플로 규칙 4)
+      - env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            node tools/ci/contract-breaking.mjs --target "origin/$BASE_REF" --pull-request
+          else
+            # 새 가지를 처음 푸시하면 앞 커밋이 0으로 온다. 그때는 바로 앞 커밋과 견준다
+            case "$BEFORE" in ''|*[!0]*) target="$BEFORE" ;; *) target="HEAD~1" ;; esac
+            [ -n "$target" ] || target="HEAD~1"
+            node tools/ci/contract-breaking.mjs --target "$target"
+          fi
+      # 서비스 OpenAPI 차이(D-T38)의 자리. openapi:emit을 가진 서비스가 생기면 비교가 생길 때까지 실패한다
+      - run: node tools/ci/contract-breaking.mjs services

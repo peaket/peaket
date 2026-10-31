@@ -1,0 +1,9 @@
+# AsyncAPI JSON 메시지(application/json) 본문 판정의 oasdiff 수준 바꾸기(openspec 변경 add-contract-breaking-check, design.md 결정 4).
+# 메시지마다 GET /messages/<이름>의 200 응답으로 본문을 가리킨 문서를 견주므로 응답 쪽 검사 ID를 쓴다.
+# 열거 기호 더하기는 oasdiff 기본(ERR) 그대로다. 관제 화면이 생성 Zod(zod.enum)로 읽어 새 값을 거절하기 때문이다.
+
+# 이벤트 메시지의 필드 지우기(docs/api/guidelines.md §1)
+response-optional-property-removed ERR
+# 이벤트 메시지의 열거 기호 지우기(docs/api/guidelines.md §1)
+response-property-enum-value-removed ERR
+response-mediatype-enum-value-removed ERR

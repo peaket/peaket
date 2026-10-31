@@ -1,0 +1,9 @@
+# AsyncAPI Avro 메시지(application/avro, 기본 형식) 본문 판정의 oasdiff 수준 바꾸기. asyncapi-levels.txt에 한 줄을 더한 것이다.
+
+# 이벤트 메시지의 필드 지우기(docs/api/guidelines.md §1)
+response-optional-property-removed ERR
+# 이벤트 메시지의 열거 기호 지우기(docs/api/guidelines.md §1)
+response-property-enum-value-removed ERR
+response-mediatype-enum-value-removed ERR
+# 열거 기호 더하기는 깨짐이 아니다. Avro 열거는 맨 앞 UNRECOGNIZED와 기본값으로 새 기호를 받는다(docs/devops.md §3.1 열거 규칙)
+response-property-enum-value-added WARN

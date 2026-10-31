@@ -9,6 +9,8 @@
 | `branch-policy.mjs` | 가지 쌍, PR 제목 형식, 빌드 절차 변경 PR에 다른 경로가 섞였는지를 봅니다. 같은 저장소의 릴리스·핫픽스·역병합 PR은 보호 가지에 아직 없는 새 커밋이 바꾼 파일만 섞임 검사를 합니다(이미 병합된 변경을 옮길 뿐입니다). 포크 PR은 바뀐 파일 전부를 봅니다. 작업 가지가 3일을 넘기면 경고합니다(§2.2.6, D-T41) | `branch-policy.yml`(필수 검사) |
 | `conventional.mjs` | Conventional Commits 제목 규칙(허용 종류, 형식, 호환을 깨는 표시). PR 제목 검사와 버전 계산이 함께 씁니다 | `branch-policy.mjs`, `release-plan.mjs` |
 | `release-plan.mjs` | 릴리스·핫픽스 계획. `start`는 다음 판(SemVer, 0.y.z 규칙)·변경 기록·바뀐 배포 단위·버전을 올린 `package.json`을, `finish`는 태그·후보·역병합 대상과 `merge/*` 가지 이름을, `verify`는 `main` 병합 커밋의 두 번째 부모와 트리를 봅니다(§2.2.2~§2.2.5, D-T22·D-T23·D-T25·D-T41 ④) | `release.yml` |
+| `contract-breaking.mjs` | 계약 깨짐 검사(docs/api/guidelines.md §1, D-T48). PR의 openapi·asyncapi를 대상 가지와 마지막 출시 태그(`vX.Y.Z` 최대)의 것과 견줍니다. OpenAPI는 `oasdiff breaking --fail-on ERR`, AsyncAPI는 채널·작업을 `asyncapi diff -t breaking`이, 메시지 본문을 oasdiff가 봅니다(본문은 `packages/contracts/scripts/asyncapi-messages.mjs`가 메시지마다 읽기 작업을 붙인 OpenAPI로 바꿉니다. AsyncAPI CLI 6.2.2는 3.0 본문 변경을 분류하지 않습니다). 수준·예외 파일은 `docs/api/breaking/`이고, 예외에는 이유가 있어야 하며 늘어나면 PR에 `breaking-approved` 라벨이 있어야 합니다(라벨은 사건 파일에서 읽습니다). `services`는 서비스 OpenAPI 차이(D-T38)의 자리입니다 | `contract-check.yml` |
+| `release-tags.mjs` | 출시 태그 규칙(`vX.Y.Z`)과 SemVer 정렬. `release-plan.mjs`와 `contract-breaking.mjs`가 함께 씁니다 | 스크립트 |
 | `check-merge-tree.mjs` | 후보를 대상에 병합한 결과 트리가 후보의 트리와 같은지 봅니다(§2.2.4, D-T22) | `merge-tree.yml`(`main` 필수 검사) |
 | `check-workflows.mjs` | 워크플로 규칙: 액션 SHA 고정, `pull_request_target` 금지, 맨 위 `permissions:`, 사용자 입력을 식에 쓰지 않기, 체크아웃의 `persist-credentials: false`, 잡마다 `timeout-minutes`(§4.5) | `tools-check.yml` |
 | `check-codeowners.mjs` | `.github/CODEOWNERS`의 팀이 `teams.json`에 있는지, 첫 줄이 `*`인지, 같은 경로가 두 번 없는지 봅니다(§2.3) | `tools-check.yml` |
@@ -53,3 +55,14 @@ node tools/ci/release-plan.mjs start --kind release --from develop
 
 - `node --test`에는 폴더가 아니라 따옴표로 감싼 글롭을 줍니다. Node 24는 폴더 이름을 파일로 읽습니다.
 - 시험은 운영체제의 임시 폴더에 git 저장소를 만들고, 시험 프로세스가 끝날 때 지웁니다. 시험 시간은 1분 안팎입니다.
+
+### 계약 깨짐 검사(`contract-breaking.mjs`)
+
+도구는 판과 다이제스트를 고정한 공식 이미지(`tufin/oasdiff` v1.34.1, `asyncapi/cli` 6.2.2)를 `docker run --rm --network none`으로 부릅니다. 그래서 Docker가 있어야 하고(개발 PC는 Docker Desktop), 메시지 본문 변환이 `packages/contracts`의 `yaml`을 쓰므로 `pnpm install` 뒤에 돌립니다. 네트워크를 끊는 까닭은 AsyncAPI CLI가 실행 기록을 밖으로 보내려 하기 때문입니다. 이미지 판을 올릴 때는 `IMAGES`의 다이제스트를 Docker Hub에서 확인한 값으로 바꾸고 게시 뒤 3일을 기다립니다(docs/devops.md §4.4).
+
+```bash
+node tools/ci/contract-breaking.mjs --target develop --pull-request --labels '[]'
+node tools/ci/contract-breaking.mjs services
+```
+
+알림(건너뛴 기준), `::warning`(oasdiff WARN), 실패를 차례로 찍고, 실패가 있으면 1로 끝납니다.

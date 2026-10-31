@@ -17,6 +17,8 @@ const RULES = [
   // 문서 점검(tools/doc-check)이 읽는 파일: tools/와 점으로 시작하는 폴더 밖의 .md·.yaml·.json·.csv
   [/^(?!tools\/)(?!(?:.*\/)?\.).*\.(md|yaml|json|csv)$/, ['docs']],
   [/^packages\/contracts\//, ['contracts', 'js']],
+  // 서비스는 계약을 지키는 쪽이고(서비스 OpenAPI 차이 D-T38), 계약 깨짐 검사 도구와 그 워크플로가 바뀌면 실제 도구로 다시 돌린다
+  [/^(services\/|tools\/ci\/(contract-breaking|release-tags)\.mjs$|\.github\/workflows\/contract-check\.yml$)/, ['contracts']],
   [/^(apps|services|packages)\//, ['js']],
   [/^data\//, ['data']],
   [/^infra\//, ['infra']],

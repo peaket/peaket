@@ -4,8 +4,9 @@ name: ci
 
 on:
   # edited: 대상 가지를 바꾸면 새 대상과 견줘 범위를 다시 고른다(제목·본문만 고쳐도 다시 돈다)
+  # labeled·unlabeled: 계약 깨짐 예외의 breaking-approved 라벨을 붙이거나 떼면 다시 판정한다(contract-check)
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   push:
     branches: [develop, main, 'release/**', 'hotfix/**']
 
@@ -22,6 +23,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       docs: ${{ steps.scope.outputs.docs }}
+      contracts: ${{ steps.scope.outputs.contracts }}
       tools: ${{ steps.scope.outputs.tools }}
       infra: ${{ steps.scope.outputs.infra }}
       js: ${{ steps.scope.outputs.js }}
@@ -52,13 +54,18 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.tools == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.infra == 'true' || needs.changes.outputs.js == 'true') }}
     uses: ./.github/workflows/tools-check.yml
 
+  contract-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.contracts == 'true') }}
+    uses: ./.github/workflows/contract-check.yml
+
   iac-check:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.infra == 'true') }}
     uses: ./.github/workflows/iac-check.yml
 
   ci-summary:
-    needs: [changes, docs-check, tools-check, iac-check]
+    needs: [changes, docs-check, tools-check, contract-check, iac-check]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

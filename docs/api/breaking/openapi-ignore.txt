@@ -1,0 +1,3 @@
+# OpenAPI 깨짐 예외(oasdiff --err-ignore). 의도해서 깨는 변경만 적는다(docs/api/guidelines.md §1).
+# 한 줄에 oasdiff가 낸 변경 문장 하나를 적고, 줄 끝에 '# 이유: …'를 단다. 예외가 늘어난 PR에는 breaking-approved 라벨이 있어야 한다.
+# 예: GET /v1/example removed the success response with the status `200`  # 이유: 초안 판 안의 정리(ADR-0000)

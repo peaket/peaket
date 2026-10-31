@@ -10,8 +10,8 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { parseTitle } from './conventional.mjs';
+import { compare, semver, sortReleaseTags } from './release-tags.mjs';
 
-const TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const CARRY_BRANCH = /^(release|hotfix)\/((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*))$/;
 const RELEASE_COMMIT = /^chore\(release\): /;
 // 바뀌면 자바스크립트 배포 단위를 모두 새로 만든다(공용 패키지·계약·작업 공간·Node 판·이미지 빌드 절차, 설계 결정 5)
@@ -34,14 +34,9 @@ const gitOk = (...args) => {
 };
 const note = (msg) => console.error(msg);
 
-const semver = (s) => s.split('.').map(Number);
-const compare = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
-
 // vX.Y.Z 꼴의 태그를 SemVer 차례로(가장 큰 것이 앞)
 function releaseTags() {
-  return git('tag', '--list', 'v*').split('\n').filter((t) => TAG.test(t))
-    .map((t) => ({ name: t, v: semver(t.slice(1)) }))
-    .sort((a, b) => compare(b.v, a.v));
+  return sortReleaseTags(git('tag', '--list', 'v*').split('\n'));
 }
 
 // origin의 그 종류 가지 이름들(예: 'release/0.2.0')

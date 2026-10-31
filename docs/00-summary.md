@@ -270,6 +270,7 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - 사람 오탐 판정 방식(ADR-0174·R-217, 2026-10-31 소유자 결정, BUILD_ORDER FND-016): 판정용 사람 947명을 모으지 않는다. 사람 오탐은 꼬리표 셋으로 나눠 적는다. 출시 전 '공개 자료 기준'은 다른 연구팀이 공개한 실제 사람 기록(Aalto 136M Keystrokes, 연구·비상업·출처 표시 조건. 포인터 자료는 이용 허락 전까지 측정 못 함)으로 `BehaviorScore` 혼자의 오탐을 잰다. 출시 뒤 '실제 사람 기준'은 첫 온세일에 `BehaviorScore`를 그림자로 두고 R2 표본 검토 두 묶음(가린 검토, 본페로니 보정)으로 확인한 뒤 적용한다. '모의 사람(리허설)'은 절차 확인에만 쓴다. wbs 1.2.2는 4.75 → 4.5일, 합계 564.25일이 되었고, POL-027 해석이 39건이 되었다.
 - 문서 점검 도구 openapi 계약 검사의 시험(R-218, 2026-11-01, BUILD_ORDER FND-020): wbs 0.1.3에 남았다고 적힌 호스트·security 검사와 명세 숫자 보고(기술 검토 낮음-031·032)는 2026-10-28에 이미 들어가 있었다. 빠진 것은 그 검사를 지키는 시험이라, 시험 14개를 더해 CI의 문서 점검 앞에서 돌게 하고 wbs 0.1.3을 완료로 고쳤다. 검사 동작은 바뀌지 않았다.
 - 계약에서 만든 코드 패키지와 작업 공간 시험 도구(R-219, 2026-11-01, BUILD_ORDER FND-030): `packages/contracts`가 orval 8.45로 openapi와 asyncapi(JSON 꼴 메시지 본문)에서 Zod 스키마·타입을 만들고, 생성물이 계약과 다르면 `gen:check`와 시험이 실패한다. 생성 Zod는 계약의 `additionalProperties: false`대로 정의 밖 칸을 거절하고 `uniqueItems` 같은 제약도 검사한다. 뿌리 `pnpm test`(Turborepo `test`)와 Vitest를 들였다. 생성 코드 위치는 ADR-0165를 따라 frontend §2.2를 고쳤고(추천 적용), 계약의 OpenAPI 3.1 위반 셋을 고쳤다.
+- 계약 깨짐 검사와 CI 계약 잡(R-220, 2026-11-01, BUILD_ORDER FND-040): PR의 openapi·asyncapi를 대상 가지(갈라진 점)와 마지막 출시 태그의 것과 견준다. oasdiff 1.34.1과 AsyncAPI CLI 6.2.2를 다이제스트 고정 이미지로 네트워크 없이 돌리고, 정본의 깨짐인데 oasdiff가 INFO로 두는 넷을 ERR로 올렸다. AsyncAPI 메시지 본문은 CLI가 분류하지 않아 oasdiff로 본다. 예외에는 이유와 `breaking-approved` 라벨이 있어야 한다. `contract-check.yml`이 생성물 차이·계약 패키지 시험·깨짐 검사를 돌린다. 서비스 OpenAPI 차이(D-T38)의 비교 본체는 첫 서비스 단계(FND-050)로 넘겼다.
 
 ## 5. [충돌] 결정 결과
 
