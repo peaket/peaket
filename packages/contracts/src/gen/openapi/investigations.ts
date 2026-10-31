@@ -501,8 +501,8 @@ export const postV1OpsFraudCasesCaseIdIpRevealsBodyReasonMax = 500;
 
 export const PostV1OpsFraudCasesCaseIdIpRevealsBody = zod.object({
   "nodeIds": zod.array(zod.string()).min(1).max(postV1OpsFraudCasesCaseIdIpRevealsBodyNodeIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).describe('그 사건 그래프의 IP 점(kind IP)만. 한 번에 50개 [가정]까지'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('그 사건 그래프의 IP 점(kind IP)만. 한 번에 50개 [가정]까지'),
   "reason": zod.string().min(postV1OpsFraudCasesCaseIdIpRevealsBodyReasonMin).max(postV1OpsFraudCasesCaseIdIpRevealsBodyReasonMax).describe('열람 사유(접속기록에 남는다). 개인정보를 적지 않는다')
 }).strict().describe('연결 그래프 IP 점의 원문 열기(authz-matrix §4.3 \'가린 값을 여는 절차\'와 같은 방식, 추천 적용 2026-10-31, ADR-0171). 사유가 없으면 422다')
 
@@ -549,8 +549,8 @@ export const postV1OpsFraudCasesCaseIdAppealRequestsBodyReasonCategoriesMax = 5;
 export const PostV1OpsFraudCasesCaseIdAppealRequestsBody = zod.object({
   "accountIds": zod.array(zod.string()).min(1).max(postV1OpsFraudCasesCaseIdAppealRequestsBodyAccountIdsMax).describe('묶음 안의 계정만'),
   "reasonCategories": zod.array(zod.enum(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION']).describe('부정 예매 사유 범주 다섯(POL-046 ①): 자동화 프로그램(매크로·봇), 대기열 우회 링크, 보안문자 우회, 명의 대여·사들인 계정, 1인 매수 제한 회피. 팬에게 알리는 것은 이 범주뿐이고 점수와 가중치는 알리지 않는다(추천 적용 2026-10-31, ADR-0171)')).min(1).max(postV1OpsFraudCasesCaseIdAppealRequestsBodyReasonCategoriesMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).describe('알릴 사유 범주(하나 이상, POL-046 ①)'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('알릴 사유 범주(하나 이상, POL-046 ①)'),
   "dueAt": zod.iso.datetime({"offset":true}).describe('소명 기한. 기본 3일 [가정], 공연이 가까우면 줄이되 24시간 [가정] 아래로 내리지 않는다')
 }).strict().describe('소명 요청(SCR-071 ④, POL-046 ③). 서버는 기한이 지금부터 24시간 [가정] 이상이고 입장 시작 전인지 본다. 보내면 그 계정들의 이 회차 티켓에 양도 잠금을 건다(ticket-svc SetTransferLock, 진행 중 양도 요청은 시스템이 철회). 잠금의 최대 기한은 그 계정에 처음 소명을 요청한 때 + 14일 [가정]이고 연장하지 않는다(같은 계정에 다시 요청해도 늘지 않는다). 그 계정들이 결제한 표를 양도로 받아 가진 사람(사건 밖 계정)에게도 같은 기한의 소명 기회를 알린다(FraudAppealView party HOLDER, 알림 FRAUD_HOLDER_NOTICE)(추천 적용 2026-10-31, ADR-0173)')
 

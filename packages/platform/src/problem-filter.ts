@@ -5,11 +5,12 @@
 //   (ASVS v5.0.0-16.5.1·16.3.4, openspec 변경 add-service-logging 결정 2).
 import { STATUS_CODES } from 'node:http';
 import { type ArgumentsHost, Catch, type ExceptionFilter, HttpException } from '@nestjs/common';
+import { DrizzleQueryError } from 'drizzle-orm';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { newTraceId } from './context.js';
 import { requestState } from './http-hooks.js';
 import { PROBLEM_CONTENT_TYPE, ProblemError } from './problem.js';
-import { errorInfoOf } from './request-log.js';
+import { errorInfoOf, queryErrorInfo } from './request-log.js';
 
 export interface ProblemFilterOptions {
   debugErrors: boolean;
@@ -30,10 +31,17 @@ export const statusOf = (exception: unknown): number | undefined => {
   return typeof e?.code === 'string' && e.code.startsWith('FST_') && isErrorStatus(e.statusCode) ? e.statusCode : undefined;
 };
 
-const debugOf = (exception: unknown) =>
-  exception instanceof Error
-    ? { name: exception.name, message: exception.message, stack: (exception.stack ?? '').split('\n').slice(1, 11).map((l) => l.trim()) }
+const stackLines = (stack: string | undefined) => (stack ?? '').split('\n').slice(1, 11).map((l) => l.trim());
+// 쿼리 오류는 매개변수 값을 빼고 싣는다(로컬·CI 디버그에서도 값을 되비추지 않는다)
+const debugOf = (exception: unknown) => {
+  if (exception instanceof DrizzleQueryError) {
+    const q = queryErrorInfo(exception);
+    return { name: q.type, message: q.message, stack: stackLines(q.stack) };
+  }
+  return exception instanceof Error
+    ? { name: exception.name, message: exception.message, stack: stackLines(exception.stack) }
     : { name: typeof exception, message: String(exception), stack: [] as string[] };
+};
 
 /**
  * Fastify 라우터가 처리기를 찾기 전에 낸 오류(FST_ERR_BAD_URL 등, frameworkErrors). Nest 필터와 onRequest 훅을 지나지 않는다.
@@ -50,7 +58,9 @@ export function frameworkErrorProblem(error: unknown, debugErrors: boolean): { s
 export class ProblemFilter implements ExceptionFilter {
   constructor(private readonly options: ProblemFilterOptions) {}
 
-  catch(exception: unknown, host: ArgumentsHost): void {
+  catch(thrown: unknown, host: ArgumentsHost): void {
+    // Drizzle은 드라이버 오류를 쿼리 오류로 감싼다. 풀 대기 초과(429 server-busy)처럼 안에 든 Problem은 그것으로 답한다
+    const exception = thrown instanceof DrizzleQueryError && thrown.cause instanceof ProblemError ? thrown.cause : thrown;
     const http = host.switchToHttp();
     const request = http.getRequest<FastifyRequest>();
     const reply = http.getResponse<FastifyReply>();

@@ -64,3 +64,11 @@ export class ProblemError extends Error {
 export function deadlineExceeded(): ProblemError {
   return new ProblemError({ type: 'deadline-exceeded', status: 504, title: '남은 처리 시간이 모자라 요청을 끝내지 못했습니다' });
 }
+
+/**
+ * 자기 과부하(연결 풀 대기 초과, 벌크헤드 가득)로 기다리지 않고 거절한다. 429와 Retry-After 1초 [가정].
+ * 이상 파드 퇴출에 세어지지 않게 503을 쓰지 않는다(guidelines §2, architecture §5, 기술 검토 낮음-140)
+ */
+export function serverBusy(cause?: unknown): ProblemError {
+  return new ProblemError({ type: 'server-busy', status: 429, title: '요청이 많아 잠시 처리하지 못했습니다', retryAfterSeconds: 1, cause });
+}

@@ -2,12 +2,26 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "@peaket/config/tsconfig/base.json",
   "compilerOptions": {
-    "lib": ["ES2023"],
-    "types": ["node"],
+    "lib": [
+      "ES2023"
+    ],
+    "types": [
+      "node"
+    ],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    "emitDecoratorMetadata": true,
+    "paths": {
+      "@peaket/platform": [
+        "./src/index.ts"
+      ]
+    }
   },
-  "include": ["src", "test"]
+  "include": [
+    "src",
+    "test",
+    "test-int",
+    "template"
+  ]
 }

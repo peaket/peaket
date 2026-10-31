@@ -106,3 +106,9 @@ test('자바스크립트검사방식을바꾸면_전체js를고르고_서비스�
   assert.deepEqual(scopes({ '.nvmrc': '24\n' }), ['js', 'js_all']);
   assert.deepEqual(scopes({ 'docs/observability.md': '글\n' }), ['docs', 'js']);
 });
+
+test('낮음008_뿌리ESLint설정과_공용설정패키지를바꾸면_전체js를고른다', () => {
+  // 뿌리 eslint.config.mjs와 @peaket/config(ESLint·TypeScript 설정)는 모든 서비스·패키지의 린트와 형 검사 방식이다(add-service-structure-and-request-checks)
+  assert.deepEqual(scopes({ 'eslint.config.mjs': 'export default [];\n' }), ['js', 'js_all']);
+  assert.deepEqual(scopes({ 'packages/config/eslint/service-layers.mjs': 'x\n' }), ['js', 'js_all']);
+});

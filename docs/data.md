@@ -2167,6 +2167,7 @@ erDiagram
 
 추천 적용 2026-10-22, ADR-0086.
 
+- **서비스 템플릿의 DB 설정(추천 적용 2026-11-01, openspec 변경 `add-service-structure-and-request-checks`)**: `packages/platform`의 `createDatabase({ url, profile, max, applicationName })`가 node-postgres 풀과 Drizzle(SQL형 빌더, 스키마를 넘기지 않아 Relational Queries를 쓰지 않는다)을 묶는다. 풀 대기 한도는 핫패스 100ms·일반 1초, 쉬는 연결 10초, 연결 수명 30분이고, 풀 대기 초과는 429 `server-busy`다(docs/architecture.md §5). 연결 시작 매개변수로 `statement_timeout`을 보내지 않는다. 트랜잭션 도우미 `transaction(fn, { isolationLevel, accessMode, tenantId, statementTimeoutMs })`는 첫 문장에서 `set_config(…, true)`로 테넌트·문장 시간 초과를 건다. Drizzle 쿼리 오류는 메시지에 매개변수 값을 싣지만, 정규 로그 줄과 디버그 정보에는 쿼리 틀과 DB 오류 코드만 남긴다(ASVS v5.0.0-16.2.5). 서비스 뼈대(`packages/platform/template/`)는 표 정의를 `adapters/db/schema.ts`, 마이그레이션 SQL을 `migrations/`에 둔다.
 - **부분 인덱스 조건은 상수로**: 부분 인덱스는 계획을 세울 때 쿼리 조건과 맞춰 보므로, `$1` 같은 매개변수로 쓴 조건은 부분 인덱스를 쓰지 못한다(18 문서). Drizzle은 값을 자리표시자로 바꾸므로 상태 값(`'HELD'` 등)은 `sql` 상수 조각으로 쓴다. PR 검토 때 `EXPLAIN (GENERIC_PLAN)`으로 일반 계획에서도 쓰이는지 본다.
 - **식 인덱스**: 함수가 모두 IMMUTABLE이어야 한다. `timestamptz - interval`은 STABLE이라 판매 종료(`starts_at - 24시간`, ADR-0064)는 식 인덱스로 만들 수 없다. `starts_at > now() + interval '24 hours'`처럼 열을 그대로 두고 비교한다. 생성 열에 인덱스가 필요하면 STORED로 만든다(18의 기본인 가상 생성 열은 인덱스를 만들 수 없다).
 - **커서 목록**: `(<등호 열>, 정렬값, id)` 인덱스와 `(정렬값, id) < ($1, $2)` 행 값 비교로 읽는다. 행 값 비교는 왼쪽부터 처음 다른 칸에서 결과가 정해지고 NULL이 섞이면 NULL이므로, 커서 정렬 칸은 NOT NULL이다. 방향이 섞인 정렬은 정렬을 받아들인다. 파티션 표를 파티션 키 순서로 읽으면 따로 정렬하지 않는다(12부터).

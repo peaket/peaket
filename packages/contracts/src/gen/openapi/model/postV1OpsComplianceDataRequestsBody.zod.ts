@@ -38,8 +38,8 @@ export const PostV1OpsComplianceDataRequestsBody = zod.object({
   "value": zod.string().min(1).max(postV1OpsComplianceDataRequestsBodySubjectsItemValueMax)
 }).strict()).min(1).max(postV1OpsComplianceDataRequestsBodySubjectsMax).describe('요청 대상자. 이 값으로 범위 안의 자료만 골라 뽑는다'),
   "dataItems": zod.array(zod.enum(['BOOKINGS', 'BUYER_INFO', 'ACCESS_LOGS', 'POSTS', 'SUBSCRIBER_INFO'])).min(1).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).describe('요청 범위의 자료 항목(POL-025: 예매 내역, 구매자 정보(카드 번호는 저장하지 않는다), 통신 접속기록, 관련 게시물, 통신이용자정보(성명·전화번호·ID·가입일))'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('요청 범위의 자료 항목(POL-025: 예매 내역, 구매자 정보(카드 번호는 저장하지 않는다), 통신 접속기록, 관련 게시물, 통신이용자정보(성명·전화번호·ID·가입일))'),
   "periodFrom": zod.iso.datetime({"offset":true}).optional().describe('대상 기간 시작. 요청서에 기간이 없으면 뺀다'),
   "periodTo": zod.iso.datetime({"offset":true}).optional(),
   "checklist": zod.object({

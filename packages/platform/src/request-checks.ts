@@ -1,0 +1,209 @@
+// 요청 검사(openspec 변경 add-service-structure-and-request-checks 결정 2~6, docs/api/guidelines.md §1·§2, ADR-0023).
+// - 일반 경로: 계약 생성 Zod를 받는 매개변수 장식자(Zod 파이프). nestjs-zod 5.5.0은 peer가 NestJS 11까지라 같은 일을 여기서 한다
+// - 핫패스: 같은 Zod를 z.toJSONSchema()로 바꾼 Fastify 경로 스키마와 플랫폼 검사기(Ajv, 형 바꾸기·칸 지우기 없음)
+// - 두 길 모두 쿼리·경로·머리의 문자열을 같은 함수로 바꾸고(http-values.ts), 실패는 같은 Problem 400이다
+// - 본문은 application/json만, @AcceptTextPlain()을 단 경로만 text/plain도 JSON으로 읽는다(그 밖은 415, asvs/delivery.md 3.5.2)
+import { BadRequestException, Body, createParamDecorator, type ExecutionContext, Param, type PipeTransform, Query } from '@nestjs/common';
+import { FASTIFY_ROUTE_CONFIG_METADATA, FASTIFY_ROUTE_SCHEMA_METADATA } from '@nestjs/platform-fastify/constants.js';
+import { Ajv, type ValidateFunction } from 'ajv';
+import addFormatsModule from 'ajv-formats';
+import type { FastifyInstance, FastifyRequest, FastifySchema } from 'fastify';
+import { z } from 'zod';
+import { type HttpPart, type JsonSchema, httpValueCoercer } from './http-values.js';
+
+/** 검사 실패. 전역 필터가 about:blank 400으로 바꾼다(결정 5: 두 길의 본문이 같도록 설명을 싣지 않는다) */
+export class RequestValidationError extends BadRequestException {
+  constructor(readonly reason: string) {
+    super();
+    this.name = 'RequestValidationError';
+  }
+}
+
+type ZodSchema = z.ZodType;
+type Io = 'input' | 'output';
+
+/**
+ * 계약 Zod → JSON Schema(draft-07, $schema 뺌). 같은 스키마는 한 번만 바꾼다.
+ * 경로 스키마는 JSON Schema로 못 옮기는 형(파일 등)이 있으면 시작 때 던진다(조용히 아무 값이나 받지 않게). 문자열 바꾸기용은 그 칸을 {}로 둔다
+ */
+const converted = new WeakMap<ZodSchema, Map<string, JsonSchema>>();
+export function toJsonSchema(schema: ZodSchema, io: Io, unrepresentable: 'throw' | 'any' = 'throw'): JsonSchema {
+  let byMode = converted.get(schema);
+  if (!byMode) converted.set(schema, (byMode = new Map()));
+  const key = `${io}:${unrepresentable}`;
+  let out = byMode.get(key);
+  if (!out) {
+    const { $schema: _drop, ...rest } = z.toJSONSchema(schema, { io, target: 'draft-07', unrepresentable }) as JsonSchema;
+    out = rest;
+    byMode.set(key, out);
+  }
+  return out;
+}
+
+type PipePart = HttpPart | 'body';
+
+/** 계약 Zod 파이프(결정 3). 쿼리·경로·머리는 문자열 값을 바꾼 뒤 검사하고, 성공하면 Zod 결과(기본값을 채운 값)를 넘긴다 */
+export class ContractPipe implements PipeTransform {
+  private readonly coerce?: ReturnType<typeof httpValueCoercer>;
+
+  constructor(
+    private readonly schema: ZodSchema,
+    private readonly part: PipePart,
+  ) {
+    // 머리만 스키마의 칸만 골라 넘긴다(들어온 머리에는 host 등 계약 밖 머리가 늘 있다). 쿼리·경로는 모르는 키도 넘겨,
+    // 닫은 스키마(.strict())면 경로 스키마처럼 거절하게 한다(코드 리뷰 2026-11-01)
+    if (part !== 'body') this.coerce = httpValueCoercer(toJsonSchema(schema, 'input', 'any'), part, { pickSchemaKeys: part === 'headers' });
+  }
+
+  transform(value: unknown): unknown {
+    let input = value;
+    if (this.coerce) {
+      const c = this.coerce(value);
+      if (!c.ok) throw new RequestValidationError(c.reason);
+      input = c.value;
+    }
+    const r = this.schema.safeParse(input);
+    if (!r.success) throw new RequestValidationError(`${this.part} 검사 실패`);
+    return r.data;
+  }
+}
+
+/** 본문을 계약 Zod로 검사한다 */
+export const ContractBody = (schema: ZodSchema): ParameterDecorator => Body(new ContractPipe(schema, 'body'));
+/** 쿼리 전체를 계약 Zod로 검사한다(같은 이름이 겹치면 400) */
+export const ContractQuery = (schema: ZodSchema): ParameterDecorator => Query(new ContractPipe(schema, 'querystring'));
+/** 경로 매개변수 전체를 계약 Zod로 검사한다 */
+export const ContractParams = (schema: ZodSchema): ParameterDecorator => Param(new ContractPipe(schema, 'params'));
+const RawHeaders = createParamDecorator((_data: unknown, ctx: ExecutionContext) => ctx.switchToHttp().getRequest<FastifyRequest>().headers);
+/** 머리를 계약 Zod로 검사한다. 처리기는 계약의 칸 이름(Idempotency-Key 등)으로 받는다 */
+export const ContractHeaders = (schema: ZodSchema): ParameterDecorator => RawHeaders(undefined, new ContractPipe(schema, 'headers'));
+
+export interface ContractRouteSchemaInput {
+  params?: ZodSchema;
+  query?: ZodSchema;
+  headers?: ZodSchema;
+  /** 본문 스키마 하나. text/plain으로도 받는 경로는 @AcceptTextPlain()을 단다(해석기가 같은 JSON을 내므로 형식별 스키마를 두지 않는다) */
+  body?: ZodSchema;
+  /** 상태 코드 → 응답 Zod(직렬화 스키마. 스키마에 없는 칸은 내보내지 않는다) */
+  responses?: Record<number, ZodSchema>;
+}
+
+/**
+ * 머리 스키마의 칸 이름을 소문자로 바꾼다. Node는 들어온 머리 이름을 소문자로 주는데, Fastify는 사용자 검사기 생성기에
+ * 스키마를 그대로 넘겨 계약의 `Idempotency-Key`가 필수 칸 없음이 됐다(2026-11-01 확인)
+ */
+function lowerCaseHeaderNames(schema: JsonSchema): JsonSchema {
+  const props = schema.properties as Record<string, unknown> | undefined;
+  const out: JsonSchema = { ...schema };
+  if (props) out.properties = Object.fromEntries(Object.entries(props).map(([k, v]) => [k.toLowerCase(), v]));
+  if (Array.isArray(schema.required)) out.required = (schema.required as string[]).map((k) => k.toLowerCase());
+  return out;
+}
+
+/**
+ * 검사를 인증 가드 뒤로 미루는 경로 설정 칸. Nest 처리기 장식자 @ContractRouteSchema만 단다. 인증 가드를 지나지 않는 경로
+ * (서비스가 Fastify에 바로 붙인 경로)는 같은 스키마를 써도 이 칸이 없어 Fastify 기본대로 바로 거절한다(다시 본 리뷰·세 번째 리뷰 2026-11-01)
+ */
+export const DEFER_VALIDATION_KEY = 'peaketDeferValidation';
+
+/** 계약 Zod에서 Fastify 경로 스키마를 만든다(결정 4). 처리기에는 @ContractRouteSchema로 단다 */
+export function contractRouteSchema(i: ContractRouteSchemaInput): FastifySchema {
+  const out: Record<string, unknown> = {};
+  if (i.params) out.params = toJsonSchema(i.params, 'input');
+  if (i.query) out.querystring = toJsonSchema(i.query, 'input');
+  if (i.headers) out.headers = lowerCaseHeaderNames(toJsonSchema(i.headers, 'input'));
+  // 형식별(content) 본문 스키마는 들어온 형식과 맞는 것이 없으면 Fastify가 검사를 건너뛰어 본문 없는 POST가 통과했다(코드 리뷰 2026-11-01).
+  // 본문 스키마 하나는 해석기가 낸 값을 형식과 관계없이 검사하고, 본문이 없으면 거절한다
+  if (i.body) out.body = toJsonSchema(i.body, 'input');
+  if (i.responses) {
+    out.response = Object.fromEntries(Object.entries(i.responses).map(([code, s]) => [code, toJsonSchema(s, 'output')]));
+  }
+  return out as FastifySchema;
+}
+
+/**
+ * 핫패스 처리기의 경로 스키마(@RouteSchema 대신 단다). 검사 실패는 인증 가드가 신원·역할을 판정한 뒤 400으로 낸다(익명 요청은 401이 먼저).
+ * 같은 처리기에 @ContractQuery 등 Zod 파이프를 함께 달지 않는다(경로 스키마가 바꾼 배열을 파이프가 겹친 쿼리로 본다)
+ */
+export function ContractRouteSchema(i: ContractRouteSchemaInput): MethodDecorator {
+  const schema = contractRouteSchema(i);
+  return (_target, _key, descriptor) => {
+    const fn = descriptor.value as object;
+    Reflect.defineMetadata(FASTIFY_ROUTE_SCHEMA_METADATA, schema, fn);
+    const prev = (Reflect.getMetadata(FASTIFY_ROUTE_CONFIG_METADATA, fn) as Record<string, unknown> | undefined) ?? {};
+    Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [DEFER_VALIDATION_KEY]: true }, fn);
+    return descriptor;
+  };
+}
+
+// ajv-formats는 CJS 기본 내보내기다(ESM에서 default 아래에 있다)
+const addFormats = ((addFormatsModule as unknown as { default?: typeof addFormatsModule }).default ?? addFormatsModule) as unknown as (ajv: Ajv) => Ajv;
+
+/**
+ * 플랫폼 검사기 생성기(결정 4). Fastify 기본(coerceTypes 'array', removeAdditional true)은 본문의 "1"을 숫자로 바꾸고
+ * additionalProperties: false의 정의 밖 칸을 지운 뒤 통과시켜 Zod와 달랐다. 쿼리·경로·머리는 Zod 파이프와 같은 바꾸기를 한다
+ */
+export function platformValidatorCompiler() {
+  // strict: false는 모르는 낱말(설명용 메타데이터)을 받으려는 것이다. 그것이 끄는 strictNumbers는 다시 켠다: 꺼지면 JSON의 1e400(무한대)이
+  // 숫자 칸을 통과했다(Zod는 거절한다, 코드 리뷰 2026-11-01)
+  const ajv = new Ajv({ coerceTypes: false, removeAdditional: false, useDefaults: true, allErrors: false, strict: false, strictNumbers: true });
+  addFormats(ajv);
+  return ({ schema, httpPart }: { schema: unknown; httpPart?: string }) => {
+    const validate: ValidateFunction = ajv.compile(schema as object);
+    if (httpPart !== 'querystring' && httpPart !== 'params' && httpPart !== 'headers') return validate;
+    const coerce = httpValueCoercer(schema as JsonSchema, httpPart);
+    return (data: unknown) => {
+      const c = coerce(data);
+      if (!c.ok) return { error: new RequestValidationError(c.reason) };
+      return validate(c.value) ? { value: c.value } : { error: new RequestValidationError(`${httpPart} 검사 실패`) };
+    };
+  };
+}
+
+/** 경로 스키마 검사가 붙여 둔 실패를 400으로 낸다(인증 가드가 신원을 판정한 뒤 부른다) */
+export function throwAttachedValidationError(request: FastifyRequest): void {
+  const e = (request as FastifyRequest & { validationError?: Error }).validationError;
+  if (e) throw new RequestValidationError(e.message);
+}
+
+export const TEXT_PLAIN_KEY = 'peaketTextPlain';
+
+/** 본문을 text/plain으로도 받는 경로에 단다(대기열 진입·입장 확정, ADR-0065 결정 6). Fastify 경로 설정에 들어간다 */
+export function AcceptTextPlain(): MethodDecorator {
+  return (_target, _key, descriptor) => {
+    const fn = descriptor.value as object;
+    const prev = (Reflect.getMetadata(FASTIFY_ROUTE_CONFIG_METADATA, fn) as Record<string, unknown> | undefined) ?? {};
+    Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [TEXT_PLAIN_KEY]: true }, fn);
+    return descriptor;
+  };
+}
+
+function unsupportedMediaType(): Error {
+  return Object.assign(new Error('Unsupported Media Type'), { statusCode: 415, code: 'FST_ERR_CTP_INVALID_MEDIA_TYPE' });
+}
+
+/**
+ * 요청 검사 설치(결정 4·6). 경로를 붙이기(app.init) 전에 부른다.
+ * - 플랫폼 검사기 생성기
+ * - @ContractRouteSchema를 단 경로는 검사 결과를 요청에 붙이기만 하고(attachValidation), 인증 가드가 신원을 판정한 뒤 400을 낸다.
+ *   Fastify 검사는 Nest 가드보다 먼저 돌아 익명 요청이 401 대신 400을 받았다(검사 규칙을 떠볼 수 있다, 코드 리뷰 2026-11-01)
+ * - 본문 해석기: Fastify 기본 text/plain 해석기(문자열을 그대로 넘김)를 지우고, 표시한 경로만 기본 JSON 해석기(원형 오염 키 거부)로
+ *   읽는다. application/json 밖의 형식은 해석기가 없어 Fastify가 415로 답한다
+ */
+export function installRequestChecks(http: FastifyInstance): void {
+  http.setValidatorCompiler(platformValidatorCompiler());
+  http.addHook('onRoute', (route) => {
+    const config = route.config as Record<string, unknown> | undefined;
+    if (config?.[DEFER_VALIDATION_KEY] === true && route.schema) route.attachValidation = true;
+  });
+  const json = http.getDefaultJsonParser('error', 'error');
+  http.removeContentTypeParser('text/plain');
+  http.addContentTypeParser('text/plain', { parseAs: 'string' }, (request, body, done) => {
+    const config = request.routeOptions?.config as unknown as Record<string, unknown> | undefined;
+    if (config?.[TEXT_PLAIN_KEY] !== true) {
+      done(unsupportedMediaType(), undefined);
+      return;
+    }
+    json(request, body as string, done);
+  });
+}

@@ -9,7 +9,7 @@ import { generate } from 'orval';
 import { parse } from 'yaml';
 import { toOpenApi } from './asyncapi-to-openapi.mjs';
 import { closeAdditionalProperties } from './close-additional-properties.mjs';
-import { schemaExtension } from './schema-extensions.mjs';
+import { addJsExtensions, annotateRefines, schemaExtension } from './schema-extensions.mjs';
 
 const API = fileURLToPath(new URL('../../../docs/api/', import.meta.url));
 export const OPENAPI = join(API, 'openapi.yaml');
@@ -63,7 +63,8 @@ export async function generateAll(out, { openapi = OPENAPI, asyncapi = ASYNCAPI 
     rmSync(join(out, 'asyncapi', 'operations.ts'), { force: true });
     eachFile(out, (p) => {
       const text = readFileSync(p, 'utf8');
-      const fixed = strictifyClosedObjects(text);
+      // 정의 밖 칸 거절(결정 9), 검사 규칙의 메타데이터와 모음 파일의 .js(add-service-structure-and-request-checks 결정 4·10)
+      const fixed = addJsExtensions(annotateRefines(strictifyClosedObjects(text)));
       if (fixed !== text) writeFileSync(p, fixed);
     });
   } finally {

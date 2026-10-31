@@ -19,8 +19,8 @@ export const postV1OpsFraudCasesCaseIdIpRevealsBodyReasonMax = 500;
 
 export const PostV1OpsFraudCasesCaseIdIpRevealsBody = zod.object({
   "nodeIds": zod.array(zod.string()).min(1).max(postV1OpsFraudCasesCaseIdIpRevealsBodyNodeIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).describe('그 사건 그래프의 IP 점(kind IP)만. 한 번에 50개 [가정]까지'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('그 사건 그래프의 IP 점(kind IP)만. 한 번에 50개 [가정]까지'),
   "reason": zod.string().min(postV1OpsFraudCasesCaseIdIpRevealsBodyReasonMin).max(postV1OpsFraudCasesCaseIdIpRevealsBodyReasonMax).describe('열람 사유(접속기록에 남는다). 개인정보를 적지 않는다')
 }).strict().describe('연결 그래프 IP 점의 원문 열기(authz-matrix §4.3 \'가린 값을 여는 절차\'와 같은 방식, 추천 적용 2026-10-31, ADR-0171). 사유가 없으면 422다')
 

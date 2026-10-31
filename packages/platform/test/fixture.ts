@@ -10,6 +10,7 @@ import {
   LogPolicy,
   PLATFORM_LOGGER,
   ProblemError,
+  Roles,
   contractSchema,
   createExternalHttpClient,
   createService,
@@ -35,7 +36,9 @@ export const slowGate = { current: gate() };
 /** 바깥 호출 시험(telemetry.test.ts)이 정하는 모의 외부 서버 주소 */
 export const outbound = { baseUrl: 'http://127.0.0.1:9' };
 
+// 시험 경로는 모두 공개 작업이다(허용 역할이 없으면 서비스가 시작하지 않는다, AZ-T1)
 @Controller('v1/demo')
+@Roles(['public'])
 export class DemoController {
   constructor(
     @Inject(CLOCK) private readonly clock: FakeClock,

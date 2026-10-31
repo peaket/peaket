@@ -7,10 +7,12 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "test": "turbo run test",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "lint": "eslint --no-error-on-unmatched-pattern services packages/platform/template"
   },
   "devDependencies": {
     "@fission-ai/openspec": "1.15.0",
+    "eslint": "^10.13.0",
     "turbo": "^2.11.10"
   }
 }

@@ -31,10 +31,11 @@ const RULES = [
   [/^\.github\//, ['ci']],
 ];
 // 넓게 쓰이는 것: 기대는 배포 단위 전부를 돌린다(§3.1 2번)
-// 자바스크립트 검사가 도는 방식(ci-node.yml, turbo.json, Node 판 .nvmrc)이 바뀌어도 전부를 돌린다(add-service-template)
+// 자바스크립트 검사가 도는 방식(ci-node.yml, turbo.json, Node 판 .nvmrc)이 바뀌어도 전부를 돌린다(add-service-template).
+// 뿌리 ESLint 설정과 공용 설정 패키지(@peaket/config)도 같다(add-service-structure-and-request-checks)
 const WIDEN_JS = [
   /^packages\/platform\//, /^packages\/contracts\//, /^docs\/api\//, /^package\.json$/, /^pnpm-lock\.yaml$/, /^pnpm-workspace\.yaml$/,
-  /^turbo\.json$/, /^\.nvmrc$/, /^\.github\/workflows\/ci-node\.yml$/,
+  /^turbo\.json$/, /^\.nvmrc$/, /^\.github\/workflows\/ci-node\.yml$/, /^eslint\.config\.mjs$/, /^packages\/config\//,
 ];
 // 검사 절차 자체가 바뀌면 모든 범위를 돌린다
 const WIDEN_ALL = [/^\.github\/workflows\/ci\.yml$/, /^tools\/ci\/changes\.mjs$/];

@@ -14,7 +14,7 @@ import * as zod from 'zod';
 export const PostV1ScannerDeviceAuthorizationsBody = zod.record(zod.string(), zod.never()).refine((() => {
   const maxProperties = 0;
   return ((v) => Object.keys(v).length <= maxProperties);
-})()).describe('지금은 빈 객체 {}. 사전 요청 없는 양식 POST로 확인 코드를 발급시키지 못하게 JSON 본문을 요구한다')
+})()).meta({ "maxProperties": 0 }).describe('지금은 빈 객체 {}. 사전 요청 없는 양식 POST로 확인 코드를 발급시키지 못하게 JSON 본문을 요구한다')
 
 export type PostV1ScannerDeviceAuthorizationsBody = zod.input<typeof PostV1ScannerDeviceAuthorizationsBody>;
 export type PostV1ScannerDeviceAuthorizationsBodyOutput = zod.output<typeof PostV1ScannerDeviceAuthorizationsBody>;

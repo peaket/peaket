@@ -5,11 +5,24 @@
   "description": "계약 원본(docs/api/openapi.yaml·asyncapi.yaml)에서 만든 Zod 스키마와 TypeScript 타입. 게시하지 않고 workspace:로만 잇는다(ADR-0165, docs/api/guidelines.md §1)",
   "type": "module",
   "exports": {
-    "./openapi/model": "./src/gen/openapi/model/index.ts",
-    "./openapi/*": "./src/gen/openapi/*.ts",
-    "./asyncapi": "./src/gen/asyncapi/model/index.ts"
+    "./openapi/model": {
+      "types": "./src/gen/openapi/model/index.ts",
+      "development": "./src/gen/openapi/model/index.ts",
+      "default": "./dist/openapi/model/index.js"
+    },
+    "./openapi/*": {
+      "types": "./src/gen/openapi/*.ts",
+      "development": "./src/gen/openapi/*.ts",
+      "default": "./dist/openapi/*.js"
+    },
+    "./asyncapi": {
+      "types": "./src/gen/asyncapi/model/index.ts",
+      "development": "./src/gen/asyncapi/model/index.ts",
+      "default": "./dist/asyncapi/model/index.js"
+    }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "gen": "node scripts/generate.mjs",
     "gen:check": "node scripts/check-generated.mjs",
     "test": "vitest run",

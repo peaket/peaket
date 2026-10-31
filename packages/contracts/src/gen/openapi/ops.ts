@@ -828,8 +828,8 @@ export const PostV1OpsComplianceNoticesBody = zod.object({
   "receivedAt": zod.iso.datetime({"offset":true}).describe('공문 접수 시각. 처리 기한은 이 시각부터 센다'),
   "deadline": zod.enum(['H24', 'H10']).describe('처리 기한. 기본 H24(24시간)이고, 문화체육관광부 고시 사항이면 H10(10시간, 공연법 시행령 §3의3 2호 바목. 고시는 확인 필요, POL-024). 기한 2시간 전까지 미조치면 SEV2다'),
   "reviewIds": zod.array(zod.uuid()).min(1).max(postV1OpsComplianceNoticesBodyReviewIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).describe('통보에 적힌 불법 거래 게시물(관람 후기) ID. 노출 차단(…/takedown)이 이 목록에 명령 10을 건다(docs/data.md takedown_action.review_id)'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('통보에 적힌 불법 거래 게시물(관람 후기) ID. 노출 차단(…/takedown)이 이 목록에 명령 10을 건다(docs/data.md takedown_action.review_id)'),
   "summary": zod.string().max(postV1OpsComplianceNoticesBodySummaryMax).optional().describe('통보 요약. 제어 문자와 양방향 제어 문자는 지운다(asvs/control-tower.md 1.3.3)')
 }).strict().describe('신고기관·수사기관 통보 문서 등록 본문(POST /v1/ops/compliance/notices, SCR-032). 등록하는 즉시 법정 처리 기한 타이머가 시작되고, 공문 원본은 등록 뒤 …/notices/{noticeId}/documents로 올린다(원본 올리기와 악성 코드 검사 때문에 타이머 시작이 늦어지지 않게 하려는 것이다). 칸은 docs/features/control-tower.md §9 \'신고기관·수사기관 통보 문서 등록\' 행이다. 길이·개수 상한은 [가정](추천 적용 2026-10-30, docs/security/asvs/control-tower.md 2.1.1, ADR-0159)')
 
@@ -1054,8 +1054,8 @@ export const PostV1OpsComplianceDataRequestsBody = zod.object({
   "value": zod.string().min(1).max(postV1OpsComplianceDataRequestsBodySubjectsItemValueMax)
 }).strict()).min(1).max(postV1OpsComplianceDataRequestsBodySubjectsMax).describe('요청 대상자. 이 값으로 범위 안의 자료만 골라 뽑는다'),
   "dataItems": zod.array(zod.enum(['BOOKINGS', 'BUYER_INFO', 'ACCESS_LOGS', 'POSTS', 'SUBSCRIBER_INFO'])).min(1).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).describe('요청 범위의 자료 항목(POL-025: 예매 내역, 구매자 정보(카드 번호는 저장하지 않는다), 통신 접속기록, 관련 게시물, 통신이용자정보(성명·전화번호·ID·가입일))'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('요청 범위의 자료 항목(POL-025: 예매 내역, 구매자 정보(카드 번호는 저장하지 않는다), 통신 접속기록, 관련 게시물, 통신이용자정보(성명·전화번호·ID·가입일))'),
   "periodFrom": zod.iso.datetime({"offset":true}).optional().describe('대상 기간 시작. 요청서에 기간이 없으면 뺀다'),
   "periodTo": zod.iso.datetime({"offset":true}).optional(),
   "checklist": zod.object({
@@ -1157,8 +1157,8 @@ export const postV1OpsComplianceDataRequestsRequestIdExtractionRequestsBodyReaso
 
 export const PostV1OpsComplianceDataRequestsRequestIdExtractionRequestsBody = zod.object({
   "dataItems": zod.array(zod.enum(['BOOKINGS', 'BUYER_INFO', 'ACCESS_LOGS', 'POSTS', 'SUBSCRIBER_INFO'])).min(1).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).describe('뽑을 자료 항목. 요청서의 dataItems 안이어야 한다(밖이면 422)'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('뽑을 자료 항목. 요청서의 dataItems 안이어야 한다(밖이면 422)'),
   "periodFrom": zod.iso.datetime({"offset":true}).optional().describe('뽑을 기간의 시작. 요청서에 기간이 있으면 그 안이어야 한다(밖이면 422)'),
   "periodTo": zod.iso.datetime({"offset":true}).optional(),
   "reason": zod.string().min(1).max(postV1OpsComplianceDataRequestsRequestIdExtractionRequestsBodyReasonMax).describe('이 범위가 꼭 필요한 이유. 제어 문자와 양방향 제어 문자는 지운다(docs/security/asvs/control-tower.md 1.3.3)')
@@ -2116,11 +2116,11 @@ export const postV1OpsApprovalRequestsApprovalIdApprovalsBodyExcludeTicketIdsMax
 export const PostV1OpsApprovalRequestsApprovalIdApprovalsBody = zod.object({
   "reason": zod.string().min(1).max(postV1OpsApprovalRequestsApprovalIdApprovalsBodyReasonMax).optional().describe('승인자의 판단 이유(1~1000자). kind FRAUD_ACTION이면 필수이고 없으면 422 approval-reason-required다. 요청자의 사유를 그대로 옮기지 말고 자기 판단을 적는다(화면 안내)'),
   "excludeAccountIds": zod.array(zod.string()).max(postV1OpsApprovalRequestsApprovalIdApprovalsBodyExcludeAccountIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).optional().describe('FRAUD_ACTION만. 요청 범위에서 빼고 승인할 계정. 요청 범위 밖이면 422 approval-scope-invalid'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('FRAUD_ACTION만. 요청 범위에서 빼고 승인할 계정. 요청 범위 밖이면 422 approval-scope-invalid'),
   "excludeTicketIds": zod.array(zod.string()).max(postV1OpsApprovalRequestsApprovalIdApprovalsBodyExcludeTicketIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).optional().describe('FRAUD_ACTION의 CANCEL_TICKETS만. 요청 범위에서 빼고 승인할 표. 요청 범위 밖이면 422 approval-scope-invalid, 계정·표를 다 빼면 같은 422(그때는 반려한다)')
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('FRAUD_ACTION의 CANCEL_TICKETS만. 요청 범위에서 빼고 승인할 표. 요청 범위 밖이면 422 approval-scope-invalid, 계정·표를 다 빼면 같은 422(그때는 반려한다)')
 }).strict().describe('승인 본문(POST /v1/ops/approval-requests/{approvalId}/approvals, POL-038 ⑪). FRAUD_ACTION에서 승인자가 실질적으로 결정했음을 남기는 칸이다. 승인자가 직접 적은 판단 이유와 뺀 계정·표는 승인 기록(docs/data.md approval_vote)과 사건 기록에 남는다(추천 적용 2026-10-31, ADR-0173)')
 
 export const postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAccountCountMin = 0;

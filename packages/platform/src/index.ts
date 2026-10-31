@@ -2,10 +2,13 @@
 export { CLOCK, fakeClock, systemClock, type Clock, type FakeClock } from './clock.js';
 export { DEBUG_ERRORS_ALLOWED, LOG_LEVELS, PEAKET_ENVS, PlatformConfigError, loadPlatformConfig, type LogLevelName, type PeaketEnv, type PlatformConfig } from './config.js';
 export { currentDeadline, requestContext, type RequestContext } from './context.js';
+export { ADMIN_AUTHZ_CACHE_MS, COOKIE_CHALLENGE, CurrentPrincipal, ROLE_VALUES, Roles, TERMINATED_SESSION_TTL_MS, currentPrincipal, type AdminAuthz, type AdminAuthzPort, type Audience, type Principal, type RoleValue, type RolesOptions } from './auth.js';
+export { AcceptTextPlain, ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, RequestValidationError, contractRouteSchema, type ContractRouteSchemaInput } from './request-checks.js';
 export { DEADLINE_HEADER, DEFAULT_MAX_DEADLINE_MS, Deadline } from './deadline.js';
 export { LATENCY_BUCKETS_SECONDS, PlatformMetrics } from './metrics.js';
 export { contractSchema, emitOpenApi, type EmitOpenApiOptions } from './openapi.js';
-export { PROBLEM_CONTENT_TYPE, PROBLEM_TYPE_BASE, ProblemError, deadlineExceeded, type ProblemInit } from './problem.js';
+export { PROBLEM_CONTENT_TYPE, PROBLEM_TYPE_BASE, ProblemError, deadlineExceeded, serverBusy, type ProblemInit } from './problem.js';
+export { DATABASE, POOL_DEFAULTS, createDatabase, databaseModule, type Database, type DatabaseOptions, type DatabaseProfile, type DbTransaction, type TransactionOptions } from './database.js';
 export { ProblemFilter } from './problem-filter.js';
 export { createService, type CreateServiceOptions, type PlatformService } from './service.js';
 export { clientFamily } from './client-family.js';

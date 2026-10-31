@@ -2,6 +2,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import { isSpanContextValid, trace } from '@opentelemetry/api';
+import type { Principal } from './auth.js';
 import type { Deadline } from './deadline.js';
 import type { RequestLogState } from './request-log.js';
 
@@ -17,6 +18,8 @@ export interface RequestContext {
   readonly method: string;
   /** 정규 로그 줄에 더할 값(requestLog()) */
   readonly log: RequestLogState;
+  /** 인증 가드가 판정한 요청자(공개 경로는 없다, auth.ts) */
+  principal?: Principal;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();

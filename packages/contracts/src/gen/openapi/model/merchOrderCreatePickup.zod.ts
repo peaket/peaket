@@ -28,13 +28,13 @@ export const MerchOrderCreatePickup = zod.object({
   "options": zod.record(zod.string(), zod.string().min(1).max(merchOrderCreatePickupItemsItemOptionsMaxOne)).refine((() => {
   const maxProperties = 10;
   return ((v) => Object.keys(v).length <= maxProperties);
-})()).refine((() => {
+})()).meta({ "maxProperties": 10 }).refine((() => {
   const maxNameLength = 30;
-  return ((v) => Object.keys(v).every((k) => k.length <= maxNameLength));
-})()).optional().describe('고른 옵션(옵션 이름 → 고른 값). 그 상품의 유형 스키마 판(product.schema_version, @peaket/validation)으로 검사하고 맞지 않으면 422. 옵션이 없는 상품은 빼거나 빈 객체로 보낸다. 10개·이름 30자·값 50자 상한은 [가정](ADR-0101)')
+  return ((v) => Object.keys(v).every((k) => [...k].length <= maxNameLength));
+})()).meta({ "propertyNames": { "maxLength": 30 } }).optional().describe('고른 옵션(옵션 이름 → 고른 값). 그 상품의 유형 스키마 판(product.schema_version, @peaket/validation)으로 검사하고 맞지 않으면 422. 옵션이 없는 상품은 빼거나 빈 객체로 보낸다. 10개·이름 30자·값 50자 상한은 [가정](ADR-0101)')
 }).strict()).min(1).max(merchOrderCreatePickupItemsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).describe('주문 항목. 한 판매자·한 수령 방식의 상품만 담는다(다르면 422). 20개 상한은 [가정]이다. 금액은 받지 않는다. 서버가 주문 때 가격·수수료율·고른 옵션을 merch_order_item에 복사한다(ADR-0101)'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('주문 항목. 한 판매자·한 수령 방식의 상품만 담는다(다르면 422). 20개 상한은 [가정]이다. 금액은 받지 않는다. 서버가 주문 때 가격·수수료율·고른 옵션을 merch_order_item에 복사한다(ADR-0101)'),
   "pickupSlotId": zod.string().min(1).max(merchOrderCreatePickupPickupSlotIdMax).describe('고른 현장 수령 시간대. 티켓 소지자 전용 시간대는 그 공연 티켓을 가진 계정만 고른다(구매 자격이 아니라 혜택, FR-015·POL-016). 그 상품의 시간대가 아니거나 끝났거나, 티켓 없이 전용 시간대를 고르면 422 pickup-slot-unavailable이다. 수령 시간대는 docs/data.md `pickup_slot`(상품 단위, 회차·시작·끝·티켓 소지자 전용 여부 [가정])이고 주문의 칸은 `merch_order.pickup_slot_id`다(2026-10-30 더함). 화면이 시간대 목록을 읽는 경로는 아직 없다(wbs 0.2.3)')
 }).strict().describe('현장 수령 주문. PEAKET 교환권으로 확인하므로 판매자에게 개인정보를 주지 않고, 배송지와 동의를 받지 않는다(POL-016, docs/design/d5 §5.15)')
 

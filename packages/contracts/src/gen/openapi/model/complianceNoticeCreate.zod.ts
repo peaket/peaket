@@ -24,8 +24,8 @@ export const ComplianceNoticeCreate = zod.object({
   "receivedAt": zod.iso.datetime({"offset":true}).describe('공문 접수 시각. 처리 기한은 이 시각부터 센다'),
   "deadline": zod.enum(['H24', 'H10']).describe('처리 기한. 기본 H24(24시간)이고, 문화체육관광부 고시 사항이면 H10(10시간, 공연법 시행령 §3의3 2호 바목. 고시는 확인 필요, POL-024). 기한 2시간 전까지 미조치면 SEV2다'),
   "reviewIds": zod.array(zod.uuid()).min(1).max(complianceNoticeCreateReviewIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).describe('통보에 적힌 불법 거래 게시물(관람 후기) ID. 노출 차단(…/takedown)이 이 목록에 명령 10을 건다(docs/data.md takedown_action.review_id)'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('통보에 적힌 불법 거래 게시물(관람 후기) ID. 노출 차단(…/takedown)이 이 목록에 명령 10을 건다(docs/data.md takedown_action.review_id)'),
   "summary": zod.string().max(complianceNoticeCreateSummaryMax).optional().describe('통보 요약. 제어 문자와 양방향 제어 문자는 지운다(asvs/control-tower.md 1.3.3)')
 }).strict().describe('신고기관·수사기관 통보 문서 등록 본문(POST /v1/ops/compliance/notices, SCR-032). 등록하는 즉시 법정 처리 기한 타이머가 시작되고, 공문 원본은 등록 뒤 …/notices/{noticeId}/documents로 올린다(원본 올리기와 악성 코드 검사 때문에 타이머 시작이 늦어지지 않게 하려는 것이다). 칸은 docs/features/control-tower.md §9 \'신고기관·수사기관 통보 문서 등록\' 행이다. 길이·개수 상한은 [가정](추천 적용 2026-10-30, docs/security/asvs/control-tower.md 2.1.1, ADR-0159)')
 

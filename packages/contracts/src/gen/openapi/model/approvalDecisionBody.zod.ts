@@ -21,11 +21,11 @@ export const approvalDecisionBodyExcludeTicketIdsMax = 500;
 export const ApprovalDecisionBody = zod.object({
   "reason": zod.string().min(1).max(approvalDecisionBodyReasonMax).optional().describe('승인자의 판단 이유(1~1000자). kind FRAUD_ACTION이면 필수이고 없으면 422 approval-reason-required다. 요청자의 사유를 그대로 옮기지 말고 자기 판단을 적는다(화면 안내)'),
   "excludeAccountIds": zod.array(zod.string()).max(approvalDecisionBodyExcludeAccountIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).optional().describe('FRAUD_ACTION만. 요청 범위에서 빼고 승인할 계정. 요청 범위 밖이면 422 approval-scope-invalid'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('FRAUD_ACTION만. 요청 범위에서 빼고 승인할 계정. 요청 범위 밖이면 422 approval-scope-invalid'),
   "excludeTicketIds": zod.array(zod.string()).max(approvalDecisionBodyExcludeTicketIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).optional().describe('FRAUD_ACTION의 CANCEL_TICKETS만. 요청 범위에서 빼고 승인할 표. 요청 범위 밖이면 422 approval-scope-invalid, 계정·표를 다 빼면 같은 422(그때는 반려한다)')
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('FRAUD_ACTION의 CANCEL_TICKETS만. 요청 범위에서 빼고 승인할 표. 요청 범위 밖이면 422 approval-scope-invalid, 계정·표를 다 빼면 같은 422(그때는 반려한다)')
 }).strict().describe('승인 본문(POST /v1/ops/approval-requests/{approvalId}/approvals, POL-038 ⑪). FRAUD_ACTION에서 승인자가 실질적으로 결정했음을 남기는 칸이다. 승인자가 직접 적은 판단 이유와 뺀 계정·표는 승인 기록(docs/data.md approval_vote)과 사건 기록에 남는다(추천 적용 2026-10-31, ADR-0173)')
 
 export type ApprovalDecisionBody = zod.input<typeof ApprovalDecisionBody>;

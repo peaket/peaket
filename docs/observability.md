@@ -175,6 +175,9 @@ flowchart LR
 | 외부 제공자로 추적 문맥이 나가지 않는다(V-T31 ③) | 외부 호출 클라이언트 span(`peaket.provider`·`url.template`), 정규 로그 줄의 `dep` | 없음 | 의존성 패널(`dep`별 소요) | 없음 | 어댑터마다 둔 탐침 시험이 CI에서 돈다(`@peaket/platform/testing`) |
 | 남은 시간이 모자라면 일찍 끝낸다 | 504 Problem `deadline-exceeded`, `http_server_errors_total{status_class="5xx"}` | 없음 | 오류 패널 | 서비스 SLO 경보에 든다(5xx) | 짧은 `x-peaket-deadline-ms`로 부른 시험(docs/api/guidelines.md §5) |
 | 처리 중 요청이 쌓이지 않는다 | `http_server_active_requests` | 없음 | 포화도 패널(리틀의 법칙) | 없음(위 문단) | 부하 시험에서 처리량 × 평균 처리 시간과 견준다 |
+| 요청 검사 실패가 400·415로 끝나고 서버 오류로 세지 않는다(추천 적용 2026-11-01, openspec 변경 add-service-structure-and-request-checks) | 정규 로그 줄의 `status` 400·415와 `err.type`(`RequestValidationError`·`FST_ERR_CTP_INVALID_JSON_BODY`·`FST_ERR_CTP_INVALID_MEDIA_TYPE`), `http_server_request_duration_seconds{status_class="4xx"}` | 없음 | 오류율 패널의 4xx 줄 | 없음. 새 판 뒤 4xx가 갑자기 늘면 카나리 분석이 잡는다 | 배포 뒤 화면 하나를 지나 정규 로그 줄에 400이 늘지 않았는지 본다(화면은 같은 생성 Zod로 먼저 검사한다) |
+| 끝난 세션과 역할 판정이 닫힌 쪽으로 동작한다(추천 적용 2026-11-01) | 401·403과 503 `authz-unavailable`의 정규 로그 줄(`err.type`, `sidRef`), `http_server_errors_total{status_class="5xx"}` | 없음 | 오류 패널(503 `authz-unavailable`이 늘면 identity 조회 장애) | 503은 서비스 SLO 경보에 든다(5xx) | 관리 계정 하나의 역할을 바꾼 뒤 5초 안에 그 세션의 관리 요청이 새 역할로 판정되는지, 로그아웃한 세션의 요청이 401인지 본다(AZ-T16, I-T48) |
+| DB 풀이 꽉 차도 기다리지 않는다(추천 적용 2026-11-01) | 429 `server-busy`의 정규 로그 줄, `http_server_request_duration_seconds{status_class="4xx"}` | 없음 | 포화도 패널 | 없음(BAS-080에서 정한다) | 부하 시험에서 풀 대기 초과가 429로 빨리 끝나고 5xx가 오르지 않는지 본다 |
 
 시스템 관측성을 위한 핵심 운영 규칙은 다음과 같다(원문 6대 규칙에 ADR-0069의 7번을 더했다):
 1. 모든 마이크로서비스 모니터링 대시보드의 맨 위 첫 번째 행에는 반드시 Four Golden Signals를 두어, 장애 징후를 바로 알아보게 표준화한다.

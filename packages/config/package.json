@@ -2,8 +2,20 @@
   "name": "@peaket/config",
   "private": true,
   "version": "0.0.0",
-  "description": "화면 앱·패키지가 함께 쓰는 TypeScript 설정(docs/frontend.md §2.2)",
+  "description": "화면 앱·패키지·서비스가 함께 쓰는 TypeScript·ESLint 설정(docs/frontend.md §2.2, docs/architecture.md §3.1)",
+  "type": "module",
   "exports": {
-    "./tsconfig/*": "./tsconfig/*"
+    "./tsconfig/*": "./tsconfig/*",
+    "./eslint/*": "./eslint/*"
+  },
+  "scripts": {
+    "test": "node --test \"eslint/*.test.mjs\""
+  },
+  "dependencies": {
+    "@typescript-eslint/parser": "8.72.1",
+    "typescript": "6.0.3"
+  },
+  "devDependencies": {
+    "eslint": "^10.13.0"
   }
 }

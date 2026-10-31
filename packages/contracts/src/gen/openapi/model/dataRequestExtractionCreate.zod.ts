@@ -17,8 +17,8 @@ export const dataRequestExtractionCreateReasonMax = 2000;
 
 export const DataRequestExtractionCreate = zod.object({
   "dataItems": zod.array(zod.enum(['BOOKINGS', 'BUYER_INFO', 'ACCESS_LOGS', 'POSTS', 'SUBSCRIBER_INFO'])).min(1).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
-          ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-          : val)))).size === v.length)).describe('뽑을 자료 항목. 요청서의 dataItems 안이어야 한다(밖이면 422)'),
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('뽑을 자료 항목. 요청서의 dataItems 안이어야 한다(밖이면 422)'),
   "periodFrom": zod.iso.datetime({"offset":true}).optional().describe('뽑을 기간의 시작. 요청서에 기간이 있으면 그 안이어야 한다(밖이면 422)'),
   "periodTo": zod.iso.datetime({"offset":true}).optional(),
   "reason": zod.string().min(1).max(dataRequestExtractionCreateReasonMax).describe('이 범위가 꼭 필요한 이유. 제어 문자와 양방향 제어 문자는 지운다(docs/security/asvs/control-tower.md 1.3.3)')

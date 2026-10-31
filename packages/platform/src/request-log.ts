@@ -2,6 +2,7 @@
 import 'reflect-metadata';
 import { STATUS_CODES } from 'node:http';
 import { FASTIFY_ROUTE_CONFIG_METADATA } from '@nestjs/platform-fastify/constants.js';
+import { DrizzleQueryError } from 'drizzle-orm';
 import { requestContext } from './context.js';
 import type { PlatformLogger } from './log.js';
 import { ProblemError } from './problem.js';
@@ -118,8 +119,22 @@ export interface ErrorInfo {
  * 오류를 err로 바꾼다. 스택은 5xx에만 남긴다.
  * 이름 없는 4xx는 원래 메시지를 쓰지 않는다(JSON 해석 오류에는 본문 일부, Nest 404에는 쿼리가 들어간다)
  */
+/**
+ * Drizzle 쿼리 오류는 메시지에 매개변수 값(params: …)을 싣는다. 값은 개인정보일 수 있어 쿼리 틀과 DB 오류 코드만 남긴다
+ * (ASVS v5.0.0-16.2.5, add-service-structure-and-request-checks)
+ */
+export function queryErrorInfo(e: DrizzleQueryError): ErrorInfo {
+  const code = (e.cause as { code?: unknown } | undefined)?.code;
+  const message = `Failed query: ${e.query}${typeof code === 'string' ? ` (${code})` : ''}`;
+  const info: ErrorInfo = { type: 'DrizzleQueryError', message };
+  // 바꿀 글을 함수로 넘긴다. 문자열이면 쿼리 글 속 '  if (e.stack) info.stack = e.stack.replace(e.message, message);' 같은 치환 패턴이 원래 메시지(params 포함)를 되살린다(코드 리뷰 2026-11-01)
+  if (e.stack) info.stack = e.stack.replace(e.message, () => message);
+  return info;
+}
+
 export function errorInfoOf(exception: unknown, status: number): ErrorInfo {
   const e = exception instanceof Error ? exception : undefined;
+  if (exception instanceof DrizzleQueryError && status >= 500) return queryErrorInfo(exception);
   if (exception instanceof ProblemError) {
     return status >= 500 && e?.stack ? { type: exception.slug, message: exception.title, stack: e.stack } : { type: exception.slug, message: exception.title };
   }
