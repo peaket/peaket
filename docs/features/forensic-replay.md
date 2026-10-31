@@ -470,7 +470,7 @@ Apache Arrow IPC 파일 형식(`.arrow`, 앞뒤 매직 `ARROW1`. Arrow는 열 �
 - **같은 입력이면 같은 결과(결정적)**: 입력은 고정한 판(§6.7.2), 운영 DB의 그 회차 주문 사본(고정 시각 기준), 등록된 외부 게시물, 규칙 판이다. 규칙은 이 입력만 보는 순수 함수다. 입력을 계정 ID 순으로 정렬해 쓰고, 같은 값이면 계정 ID로 순서를 정하며, 난수와 실행 시각을 쓰지 않는다(지금 시각 대신 고정 시각을 쓴다). 생성 판마다 후보 계산 실행 한 번(`fraud_cluster_run`)에 입력(기록 고정 판 `snapshot_version`, 규칙 판 `rule_version`)과 결과 지문(`result_fingerprint`: 묶음을 가장 작은 계정 ID 순으로, 묶음 안 계정과 신호를 정렬해 적은 RFC 8785 JSON의 SHA-256)을 남긴다. 같은 판·같은 규칙 판으로 다시 돌리면 결과 지문이 같아야 한다(FX-T11).
 - **더하기**: 새 판이 생길 때마다 후보 만들기를 다시 돌려 생성 판을 하나 늘린다(`fraud_cluster`의 생성 판). 이전 판의 묶음과 계정이 겹치면 '이어진 묶음'으로 표시한다. 사건이 있는 묶음에 새 계정이 이어지면 사건 작업대에 '새로 이어진 계정'으로 알리고, 조사관이 고쳐서 더한다. 사건은 그 사건을 만든 묶음(한 생성 판의 묶음)에 묶이고, 계정 목록은 그 묶음의 `fraud_cluster_member` 행이다(조사관이 더한 행은 `added_by` INVESTIGATOR, 뺀 행은 `removed_at`). 새 생성 판이 계정을 더 찾아도 사건의 목록은 저절로 바뀌지 않는다.
 - **후보만으로는 아무것도 바뀌지 않는다**: 팬 계정·티켓 상태는 그대로다(FX-T11).
-- **실패**: 후보 만들기가 실패하면 SCR-070이 [다시 돌리기]를 보인다. 자동으로 세 번 [가정] 다시 해도 실패하면 SEV3다.
+- **실패**: 후보 만들기가 실패하면 시스템이 같은 판으로 자동으로 세 번 [가정] 다시 한다(시도마다 `fraud_cluster_run` 행이 하나씩 남는다). 그동안 SCR-070은 '자동 다시 시도 중'을 보이고 [다시 돌리기]를 보이지 않는다(409 `fraud-run-retrying`). 세 번 다 실패하면 SEV3이고, 그때부터 SCR-070이 [다시 돌리기]를 보인다(`FraudEventOverview.rerunAllowed`(추천 적용 2026-10-31, ADR-0171, FRN-070)).
 
 #### 6.7.4 사건 상태
 
@@ -603,7 +603,7 @@ stateDiagram-v2
 
 - **기관 제출의 흐름**: 내보내기 결과는 그 자료 요청에 붙는 제출 파일(`ComplianceDocument` 종류 `SUBMISSION_FILE`)이 되고, SHA-256과 함께 요청을 EXTRACTED로 옮긴다(control-tower §9 P7). 기관에 낸 뒤 제출 기록(P8)은 지금의 FR-034 절차로 남긴다. 관리 연속성 기록에는 내보낼 때 `EXPORTED`(양식 `AUTHORITY`, 자료 요청 ID)가 더해진다. 파일 형식은 FR-034 제출 파일 형식을 따른다.
 - **기관 신고와 고소장**: 되팔 목적의 증거(외부 게시물 대조 등)가 있을 때만 신고한다(POL-046 ①). 신고서와 고소장은 이 양식이 아니라, 필요한 최소 정보만 담은 문서로 따로 쓴다. 넣을 항목은 법률 확인 35번이 정한다. 그 밖의 자료는 영장이나 공연법 §4의3 요청을 받은 뒤 위 기관 제출로 낸다(대법원 2022도9510).
-- **기획사 보고의 칸 합치기**: 1~4건인 칸은 '5건 미만'으로 합쳐 보인다. 사유 범주별 칸이 5건 미만이면 '그 밖'으로 합치고, 그래도 5건 미만이면 '5건 미만'만 보인다. 소명 인정 비율은 분모가 5건 이상일 때만 보인다 [가정]. 응답은 바로 CSV(UTF-8, `no-store`) 본문이고, 칸 값이 `=`·`+`·`-`·`@`·탭으로 시작하면 앞에 작은따옴표를 붙인다(ASVS 1.2.10). 묶음 하나에서 불러도 그 회차 전체를 센다. 파트너가 같은 집계를 읽는 화면·경로는 FRN-050에서 정한다.
+- **기획사 보고의 칸 합치기**: 1~4건인 칸은 '5건 미만'으로 합쳐 보인다. 사유 범주별 칸이 5건 미만이면 '그 밖'으로 합치고, 그래도 5건 미만이면 '5건 미만'만 보인다. 사건마다 사유 범주가 하나라 '끝난 사건' 합계에서 보이는 칸을 빼면 가린 칸이 되살아나므로, 그럴 수 있으면 그다음으로 작은 칸도 함께 가린다(2차 가림, 추천 적용 2026-10-31, FRN-070). 소명 인정 비율은 분모가 5건 이상일 때만 보인다 [가정]. 응답은 바로 CSV(UTF-8, `no-store`) 본문이고, 칸 값이 `=`·`+`·`-`·`@`·탭으로 시작하면 앞에 작은따옴표를 붙인다(ASVS 1.2.10). 묶음 하나에서 불러도 그 회차 전체를 센다. **파트너가 읽는 길**: 기획사는 같은 계산·같은 칸 합치기의 집계를 파트너 콘솔 SCR-027의 [부정 예매 조치] 탭에서 `GET /v1/partner/events/{eventId}/fraud-report`(`PromoterFraudReport`)로 본다. ops-svc가 gw-partner로 답하고(실시간 판매 현황과 같은 길), 소속 테넌트 회차만이며, 온세일 윈도우가 끝나기 전이면 404 `fraud-report-not-ready`다. 집계는 사건이 끝날 때마다가 아니라 하루 한 번 06:00 KST [가정]에 다시 센다. 사건 하나가 끝난 때를 집계 변화로 짚어 예매자 명단과 견주지 못하게 하려는 것이다. 조사관이 내보내는 `PROMOTER` CSV는 같은 값을 파일로 전하는 길이다(추천 적용 2026-10-31, ADR-0171, FRN-070).
 - **공통**: 내보낼 때마다 사유를 적는다. 해시 다시 계산이 맞지 않는 묶음은 내보내지 못한다. 계정당 하루 20회 [가정]이다. 모든 내보내기는 관리 연속성 기록과 접속기록에 남는다.
 
 **외부 게시물 등록**(SCR-070 ④): 외부 되팔이 게시물은 신고와 조사관의 수동 등록으로만 받는다. 신고는 게시물 신고(FR-070)의 암표 신고 건이고, 조사관이 확인해 그 CS 처리함 건 ID와 함께 같은 경로로 등록한다(출처 `REPORT`). 조사관이 직접 찾은 것은 출처 `MANUAL`이다.
@@ -624,9 +624,11 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | GET | `/v1/ops/fraud-clusters?eventId=` | 회차의 최신 생성 판 후보 묶음 목록(SCR-070 ②) | 계정 수, 구매 수 대 한도, 공유 속성 종류, 근거 신호, 점수 범주. 점수 원값·가중치는 싣지 않는다. 정렬은 `sort`, 커서로 나눈다. 아직 없으면 빈 목록 |
 | GET | `/v1/ops/fraud-clusters/{clusterId}` | 묶음 상세 | 계정 ID 목록과 계정마다의 근거 신호 |
+| GET | `/v1/ops/events/{eventId}/fraud-overview` | 회차 머리(SCR-070 머리·①): 마지막 기록 고정 판(판·고정 시각·해시·늦은 적재), 마지막 후보 계산(판·상태·시작과 끝·묶음 수·자동 다시 시도 횟수), 요약 집계(묶음 수·사건 수·상태별 수·취소한 표 수·제한한 계정 수·소명 인정 비율), 취소 마감, 원천 보존 끝 | 조사관만 보므로 칸을 합치지 않는다. 온세일 윈도우 전이면 판과 계산이 null인 200이다(추천 적용 2026-10-31, ADR-0171, FRN-070) |
+| POST | `/v1/ops/events/{eventId}/fraud-cluster-runs` | 실패한 후보 계산 다시 돌리기(SCR-070 ① [ 다시 돌리기 ]) | 마지막 시도가 FAILED이고 자동 다시 시도(셋 [가정])가 다 끝났을 때만, 같은 판의 새 시도 행으로 다시 돌린다(실패 이력이 남는다, docs/data.md `fraud_cluster_run` 기본 키 (event_id, generation, attempt)). 실행 중이면 409 `fraud-run-in-progress`, 자동 다시 시도가 남았으면 409 `fraud-run-retrying`, 마지막이 DONE이면 409 `fraud-run-not-failed`, 원천이 만료됐으면 410 `investigation-source-expired`. 202로 받고 `ops_event` FRAUD_CLUSTER_RUN(trigger MANUAL)을 남긴다(추천 적용 2026-10-31, ADR-0171, FRN-070) |
 | POST | `/v1/ops/fraud-cases` | 사건 만들기(본문 `clusterId`, 사유 범주) | C1. 부른 조사관이 담당. 같은 묶음에 사건이 있으면 409 `fraud-case-exists` |
 | GET | `/v1/ops/fraud-cases?eventId=&status=` | 사건 목록(SCR-070 ③) | 상태(여럿), 담당 조사관, 취소 마감 시각 |
-| GET | `/v1/ops/fraud-cases/{caseId}` | 사건 상세(SCR-071) | 계정, 기록 고정 판, 소명 결과, 조사관 의견, 사건 기록. ETag는 사건 판 |
+| GET | `/v1/ops/fraud-cases/{caseId}` | 사건 상세(SCR-071) | 계정, 기록 고정 판, 소명 결과, 조사관 의견, 증거 묶음 ID(`evidenceBundleIds`, 만든 순서(추천 적용 2026-10-31, ADR-0171, FRN-070)), 사건 기록. ETag는 사건 판 |
 | PATCH | `/v1/ops/fraud-cases/{caseId}` | 계정 빼기·더하기와 이유, 메모, 사유 범주, 조사관 의견, 계정별 소명 판단(`appealDecisions`), 계정별 이의 판단(`objectionDecisions`: 인정·기각과 이유) | If-Match 필수(판이 같을 때만 고친다). 지정 조사관 누구나. 상태는 이 경로로 직접 바꾸지 못한다. 소명 판단으로 모든 계정이 인정되면 C4, 이의 판단으로 모든 이의가 결정되면 C11·C12로 간다. 묶음 바꾸기는 C14의 상태에서만(그 밖은 409 `fraud-case-state`) |
 | GET | `/v1/ops/fraud-cases/{caseId}/graph` | 연결 그래프(SCR-071 ②) | 점은 계정(ID)과 기기·결제 수단·연락처 가명(앞 8글자), IP, ASN이다. IP 점의 표시는 가린 값(IPv4 /24, IPv6 /48)이고 응답에 원문이 없다. 점 ID는 사건마다 서버가 만든 무작위 값이고 대응표는 ops DB `fraud_graph_node`에 둔다(값에서 계산한 ID와 원문 금지, 추천 적용 2026-10-31, ADR-0171). 원문은 조사관이 점을 골라 사유를 적는 `POST …/ip-reveals`로만 받고, 그 열기는 접속기록에 남는다(docs/security/authz-matrix.md §4.3, 추천 적용 2026-10-31, ADR-0171). 점이 2,000개 [가정]를 넘으면 앞부분만 주고 `truncated`가 참이며 화면은 '묶음을 나눠 보세요'를 보인다. 보존 기간이 지나면 410 |
 | POST | `/v1/ops/fraud-cases/{caseId}/ip-reveals` | 그래프 IP 점의 원문 열기(SCR-071 ②, 추천 적용 2026-10-31, ADR-0171) | 본문은 점 ID 목록(50개 [가정]까지)과 사유(필수). 응답은 `no-store`이고 화면은 메모리에만 둔다. 열기는 접속기록과 `invAccess` `GRAPH_IP_REVEAL`에 사유와 함께 남고 원문은 남지 않는다. 계정당 하루 200개 [가정]를 넘으면 429, 사유가 없거나 그 사건의 IP 점이 아니면 422, 보존이 지나면 410 |
@@ -638,12 +640,14 @@ stateDiagram-v2
 | POST | `/v1/ops/fraud-cases/{caseId}/evidence-bundles` | 증거 묶음 만들기(사유) | ACTIONED·OBJECTED·REVERSED만(그 밖은 409 `case-not-actioned`). 만드는 중으로 답한다 |
 | POST | `/v1/ops/evidence-bundles/{bundleId}/hold-end-requests` | 분쟁·수사 보존의 끝 요청(근거) | 조사관. 확인 전에는 파기 시계가 돌지 않는다. 기다리는 요청이 있으면 409, OBJECTION이면 422 |
 | POST | `/v1/ops/evidence-bundles/{bundleId}/hold-end-confirmations` | 보존 끝 확인 | `x-peaket-roles: [commander]`, 요청자가 아닌 사람, 재인증. 조사관 지정은 필요 없고 묶음 파일은 보이지 않는다. 확인하면 `hold_ended_at`과 `HOLD_ENDED`가 남는다(추천 적용 2026-10-31, ADR-0171) |
+| GET | `/v1/ops/evidence-bundles?eventId=` | 회차의 증거 묶음 목록(원천이 만료된 회차에서도 남는다) | 줄마다 요약(`EvidenceBundleSummary`: ID·사건·상태·묶음 해시·보존 이유·만든 시각)만 주고 파일 목록·해시·관리 연속성 기록은 주지 않아, 목록을 보는 것은 열람(`VIEWED`)이 아니다. 파기된 묶음은 DISPOSED다(추천 적용 2026-10-31, ADR-0171, FRN-070) |
 | GET | `/v1/ops/evidence-bundles/{bundleId}` | 증거 묶음 보기(파일 목록·해시·관리 연속성 기록) | 열람마다 `VIEWED`. 파기된 묶음은 410 |
 | POST | `/v1/ops/evidence-bundles/{bundleId}/exports` | 내보내기(양식 `AUTHORITY`·`PROMOTER`, 사유) | `AUTHORITY`는 자료 요청 번호 필수(없으면 422), 결과는 그 요청의 제출 파일. `PROMOTER`는 회차 집계 CSV를 바로 준다. 봉인 전 409, 파기 410 |
 
 - **승인 업무**: 승인·반려·철회는 기존 경로(`POST /v1/ops/approval-requests/{approvalId}/approvals`·`…/rejections`·`…/withdrawals`)를 쓴다. 승인 업무 상세 응답에 `fraudCaseSummary`(읽기 전용)를 붙이고, 승인자는 조사 경로를 부르지 않는다.
 - **팬 쪽**: 소명·이의는 `POST /v1/appeals`(대상 종류 `FRAUD_CASE`), 양도 잠금은 기존 양도 경로의 409 `transfer-locked`(별칭 `TRANSFER_LOCKED`)이고, 티켓 응답의 `transferLocked`로 보인다(transfer-refund §4). 팬은 소명 요청과 우선 구매 권리를 `GET /v1/fraud-appeal-requests`로 읽는다(§6.7.5).
 - **연구 갈래**: §6.3의 두 경로다(`x-peaket-roles: [commander]`, `PSEUDONYM_HANDLER` 지정 확인).
+- **파트너 쪽**: `GET /v1/partner/events/{eventId}/fraud-report`(`x-peaket-roles: [partner_admin, partner_member]`, 호스트 `partner-api`)는 회차 집계만 준다(§6.7.7 '파트너가 읽는 길'). 조사 경로와 달리 조사관 지정을 보지 않고 테넌트만 본다(추천 적용 2026-10-31, ADR-0171, FRN-070).
 
 ### 6.8 화면 위치와 배포(추천 적용 2026-10-21)
 

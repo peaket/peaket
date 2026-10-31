@@ -34,6 +34,7 @@ flowchart LR
     GF --> NM["core-svc notify 모듈"]
     KF["Kafka trade·identity 토픽"] -->|"E2 사건"| NM
     CT["core-svc catalog 모듈"] -->|"E3 오픈 시각·판매 상태"| NM
+    SP["core-svc support 모듈"] -->|"E13 부정 예매 소명 사본 바뀜"| NM
     NM -->|"E4 작업·조각 적기"| DB[("core DB 발송 원장")]
     SD["core-notify-sender"] -->|"E5 임대로 가져감"| DB
     SD -->|"E6 받는 사람 조회"| ID["identity-svc"]
@@ -61,6 +62,7 @@ flowchart LR
 | E10 | Standard Webhooks 서명(`webhook-id`·`webhook-timestamp`·`webhook-signature`) | ADR-0053 결정 4, §9 |
 | E11 | 반송·스팸 신고·전달 결과 | 대행사를 정하면 수신 경로와 서명 검증을 더한다(§4.4) |
 | E12 | 엔드포인트 조회·고치기, 비밀 재발급, 발송 이력, 다시 보내기 | 조회와 발송 이력은 파트너 사용자(관리자·실무자), 고치기·비밀 재발급·다시 보내기는 파트너 관리자만(§9 표, openapi `x-peaket-roles`, docs/design/d5 §6.8 '실무자 보기', ADR-0062) |
+| E13 | 부정 예매 소명 화면용 사본이 새 판으로 바뀜 | ops-svc의 `SetFraudAppealView`를 받으면 core 논리 DB의 `fraud_appeal_notice`(마지막으로 알린 상태)와 견주어 알림 작업을 적고, 그다음 Redis 사본을 쓴다. §4.5(추천 적용 2026-10-31, ADR-0171, FRN-070) |
 
 - 발송 워커는 core-svc와 같은 코드의 전용 배포 둘이다. `core-notify-sender`는 팬에게 가는 웹 푸시·이메일(대행 계약 뒤 알림톡·문자)을, `core-webhook-dispatcher`는 파트너 웹훅만 보낸다(docs/api/guidelines.md §8). 둘을 나눈 것은 실패가 번지는 범위와 늘리는 단위가 달라서다. 대량 발송은 몇 분 동안 팬 쪽 워커만 늘리고, 파트너 서버가 느려도 팬 알림이 밀리지 않는다(추천 적용 2026-10-30).
 - 두 배포 모두 바깥 주소로 나가므로 나가는 통신을 '공인 주소의 TCP 443만'으로 둔다(docs/infra.md §9의 웹훅 발송 파드 규칙과 같다). 웹 푸시 구독 주소는 브라우저가 준 값이라 바깥에서 들어온 주소와 같게 다룬다(§3.4).
@@ -75,6 +77,7 @@ flowchart LR
 | `push_subscription` | 웹 푸시 구독 정보. 이번에 구독 주소 해시·푸시 서비스 종류·만료 칸을 더했다 | docs/data.md §2 ⑥ |
 | `notification_job` | 낱건 발송 작업(보낼 때까지만) | ADR-0109 |
 | `notification_dedup` | 중복 키 유일 확인(7일 [가정]) | ADR-0086 |
+| `fraud_appeal_notice` | 부정 예매 소명 알림을 마지막으로 보낸 상태(계정·사건, 판, 소명·이의 상태, 알린 취소 티켓 수, 알린 이용 제한 끝, 알린 우선 구매 권리 ID). Redis 사본이 지워져도 알림을 다시 보내지 않게 한다(추천 적용 2026-10-31, ADR-0171, FRN-070) | docs/data.md §2 ⑥, §4.5 |
 | `notification_delivery` | 낱건 발송 기록(월 파티션, 90일 [가정]) | ADR-0062·0086 |
 | `notification_broadcast` | 대량 발송 한 번(회차·단계·판, 창, 쓸모 기한, 합계)(추천 적용 2026-10-30) | §4.2 |
 | `notification_broadcast_chunk` | 대량 발송의 조각(신청 ID 범위, 보낼 시각, 임대, 체크포인트, 조각 합계)(추천 적용 2026-10-30) | §4.2 |
@@ -214,6 +217,32 @@ stateDiagram-v2
 - 참고로 같은 AWS 안의 Amazon SES는 샌드박스에서 하루 200통·초당 1통이고, 운영으로 옮기면 쓰임새에 따라 한도가 정해지며 요청해 올릴 수 있다. 또 갑작스러운 몰림이 받는 쪽의 차단을 부르지 않게 한도를 단계적으로 올린다고 적는다(AWS 문서 2026-10-30 확인). 대행사를 고를 때의 비교 자료이고, SES로 정한 것은 아니다.
 
 **알림톡·문자**: 발송 대행 계약 뒤에 켜고, 그 전에는 이메일과 웹 푸시로만 보낸다(ADR-0060 결정 13). 신청 알림에는 쓰지 않는다(docs/design/d5 §9.1.1). 쓰는 곳은 §8이다.
+
+### 4.5 부정 예매 소명·조치 알림(추천 적용 2026-10-31, ADR-0171, FRN-070)
+
+부정 예매 사후 조사(POL-046, docs/features/forensic-replay.md §6.7.5)에서 팬에게 가는 알림이다. 결정은 ops-svc가 하지만 ops-svc는 팬에게 직접 보내지 않는다. 받는 길은 소명 화면용 사본이다.
+
+- **길(E13)**: ops-svc가 core-svc support 모듈에 `SetFraudAppealView`(core.proto, 판 번호)를 보낸다. 화면용 사본(`sup:far:{account}`)은 세션·캐시 Redis에 있어 DB 트랜잭션에 묶을 수 없다. 그래서 알림 판단은 Redis가 아니라 core 논리 DB의 `fraud_appeal_notice`(계정·사건마다 마지막으로 알린 상태)와 견주어 한다.
+  1. support 모듈은 받은 판이 `fraud_appeal_notice`의 판보다 클 때만, 한 core DB 트랜잭션에서 아래 표의 바뀜을 찾아 알림 작업(`notification_job`·`notification_dedup`)을 적고 `fraud_appeal_notice`를 그 판으로 고친다.
+  2. 그다음 Redis 사본을 쓴다. Redis 쓰기 전에 죽어도 ops-svc가 같은 판을 다시 보내면 Redis만 채워지고, 알림은 이미 적혀 있어 다시 적지 않는다. Redis 값이 지워져도 `fraud_appeal_notice`가 남아 '첫 반영'으로 잘못 보지 않는다.
+  3. 같은 판의 다시 보내기(작업 워커, 10분마다의 열린 요청 다시 보내기)는 판이 같아 알림을 적지 않는다.
+- **순서**: ops-svc는 소명 요청의 첫 판(소명 상태 OPEN)을 ticket-svc `SetTransferLock`이 대상 표 모두에 성공한 뒤에만 보낸다. 알림을 먼저 받은 사람이 표를 넘기는 틈을 막으려는 순서다(forensic-replay §6.7.5, transfer-refund §4.1, d5 §9.1).
+- **받는 사람**: 소명을 요청받은 계정(결제자)이다. 표를 넘겨받은 사람(보유자)에게 가는 알림은 ADR-0173 결정 4로 BUILD_ORDER FRN-080에서 더한다.
+- **종류와 채널**: 여섯 모두 거래·안전 알림이고 이메일로 보낸다(docs/design/d5 §9.1). 밤 시간 제한 없이 바로 보낸다(§7).
+
+| 알림 종류 | 보내는 때(`fraud_appeal_notice`와 견주어 바뀐 것) | 문안 변수(허용 목록) | 여는 화면 |
+| --- | --- | --- | --- |
+| `FRAUD_APPEAL_REQUESTED` 소명 요청 | 그 (계정, 사건)의 첫 판(소명 상태 OPEN) | 공연명, 회차 일시(KST), 사유 범주 이름, 소명 기한, 잠긴 표 수, 고정 문구 '돈이 오가지 않은 가족·지인 대리 예매는 부정 예매가 아닙니다' | SCR-042 |
+| `FRAUD_APPEAL_DECIDED` 소명 판단 | 소명 상태가 ACCEPTED·REJECTED·EXPIRED로 바뀜 | 공연명, 결과(인정·불인정·기한까지 내지 않음) | SCR-042 |
+| `FRAUD_ACTION_NOTICE` 조치 결과와 이의 방법 | 조치 결과가 새로 생기거나 늘어남: 취소한 티켓이 늘거나, 이용 제한 끝이 새로 생기거나 늦춰짐. 표 취소 뒤 이용 제한을 더한 경우(C9)도 다시 보낸다 | 공연명, 사유 범주 이름, 이번에 취소한 표 수와 '전액 환급합니다', 이용 제한 끝(있을 때), 이의 기한 | SCR-042 |
+| `FRAUD_OBJECTION_DECIDED` 이의 결과 | 이의 상태가 ACCEPTED·REJECTED로 바뀜 | 공연명, 결과, 고정 문구 '이유는 소명 화면에서 볼 수 있습니다'. 조사관이 적은 이유(`objection_note`)는 자유 글이라 변수에 넣지 않고 SCR-042에만 보인다(§12). 인정이고 이용 제한이 있었으면 '이용 제한 풀기를 진행합니다', 취소한 표가 있었으면 '우선 구매나 보상을 따로 알려 드립니다' | SCR-042 |
+| `FRAUD_RESTRICTION_LIFTED` 이용 제한 풀림 | 이용 제한 끝이 있다가 비워짐(풀기 `LIFT_RESTRICTION`이 Done) | 공연명 | SCR-042 |
+| `FRAUD_PRIORITY_PURCHASE` 우선 구매 | 우선 구매 권리에 OFFERED가 새로 생김(권리 ID마다) | 공연명, 원래 가격, 기한(48시간 [가정]). 좌석 번호는 싣지 않는다(§12 '알림 문구 변수 규칙') | SCR-042 → 입장 확정(`priorityGrantId`) |
+
+- **중복 키**: `{알림 종류}:{사건 ID}:{판 번호}:{받는 계정 ID}:email`이다(d5 §9.1.1). 우선 구매는 판 번호 자리에 권리 ID를 쓴다. 한 판에서 둘 이상이 바뀌면(예: 소명 불인정과 조치 결과) 종류마다 하나씩 보낸다.
+- **싣지 않는 것**: 사건의 다른 계정, 점수·가중치, 근거 신호, 조사관 이름, 예매번호 전체(끝 4자리만), 좌석 번호. 사유 범주는 이름만 싣는다(POL-046 ⑦). 문안 변수는 위 허용 목록에 있는 것만 `notification_job.vars`에 넣는다(§12).
+- **예매 제한 알림과 겹치지 않게**: 사유 `FRAUD`인 예매 제한의 걸림과 풀림은 위 `FRAUD_ACTION_NOTICE`와 `FRAUD_RESTRICTION_LIFTED`가 알린다. 예매 제한 화면용 사본(`SetBookingRestrictionView`)이 바뀌어도 사유가 `FRAUD`면 '예매 제한과 소명 기한' 알림을 따로 보내지 않는다.
+- **ADR-0173으로 더할 것**: 양도 잠금이 풀릴 때의 알림, 잠금 알림에 최대 기간 넣기, 받은 사람 알림은 FRN-080에서 이 표에 더한다.
 
 ## 5. 대기실 오픈 안내 대량 발송(추천 적용 2026-10-30)
 

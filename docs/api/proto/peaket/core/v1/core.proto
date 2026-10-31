@@ -865,6 +865,12 @@ message SetFraudAppealViewRequest {
   google.protobuf.Timestamp objection_due_at = 10;
   // 이의 상태. NONE·SUBMITTED·ACCEPTED·REJECTED
   string objection_state = 11;
+  // 조치 결과(조치를 알린 뒤에만 채운다). 부정 예매로 취소한 이 계정의 티켓(전액 환급). 조치 결과 알림과 SCR-042가 쓴다(추천 적용 2026-10-31, ADR-0171, FRN-070).
+  repeated string cancelled_ticket_ids = 12;
+  // 조치 결과의 이용 제한 끝. 제한이 없으면 비운다.
+  google.protobuf.Timestamp restricted_until = 13;
+  // 이의 결과의 이유(조사관이 이의 판단에 적은 글, 팬에게 그대로 보인다). 이의가 결정되기 전이면 비운다(추천 적용 2026-10-31, FRN-070).
+  string objection_note = 14;
 }
 
 message SetFraudAppealViewResponse {

@@ -1294,6 +1294,17 @@ erDiagram
         text dedup_key PK "종류:대상:사건·버전:계정:채널"
         timestamptz created_at "7일 [가정] 뒤 지움(ADR-0086)"
     }
+    fraud_appeal_notice {
+        uuid account_id PK "부정 예매 소명 알림을 마지막으로 보낸 상태(추천 적용 2026-10-31, ADR-0171, FRN-070, docs/features/notify.md §4.5). identity 논리 DB라 외래키 없음"
+        uuid case_id PK "기본 키 (account_id, case_id). ops DB fraud_case.id"
+        bigint version "반영한 SetFraudAppealView 판. 더 큰 판만 알림 판단을 한다"
+        text appeal_state "마지막으로 알린 소명 상태"
+        text objection_state "마지막으로 알린 이의 상태"
+        int notified_cancelled_count "알린 취소 티켓 수"
+        timestamptz notified_restricted_until "알린 이용 제한 끝"
+        jsonb notified_grant_ids "알린 우선 구매 권리 ID"
+        timestamptz updated_at "사건이 끝나고 이의 창이 닫힌 뒤 30일 [가정]에 지운다. 탈퇴하면 바로 지운다"
+    }
     wish {
         uuid account_id PK "identity 논리 DB라 외래키 없음. 병합 때 대표 계정으로 옮긴다(§4의 9번)"
         uuid production_id PK "공연. 기본 키 (account_id, production_id)"
@@ -1694,7 +1705,10 @@ erDiagram
     }
     fraud_cluster_run {
         uuid event_id PK
-        int generation PK "기본 키 (event_id, generation). 후보 계산 한 번"
+        int generation PK "후보 계산 판. 같은 입력(고정 판·규칙 판)의 시도는 같은 판이다"
+        int attempt PK "기본 키 (event_id, generation, attempt). 판마다 1부터. 자동 다시 시도와 조사관의 다시 돌리기가 새 시도 행이라 실패 이력이 남는다(추천 적용 2026-10-31, FRN-070)"
+        text trigger "SCHEDULED(온세일 윈도우 끝)|SNAPSHOT(새 기록 고정 판)|AUTO_RETRY|MANUAL(다시 돌리기)"
+        text failure_reason "FAILED일 때 오류 범주(조사 원천 읽기 실패, 시간 초과, 그 밖). 원문 오류는 로그에만"
         int snapshot_version "입력: 기록 고정 판"
         text rule_version "입력: 후보 규칙과 점수의 판"
         bytea result_fingerprint "결과 지문 SHA-256: 묶음을 가장 작은 계정 ID 순으로, 묶음 안 계정과 신호를 정렬해 적은 RFC 8785 JSON의 해시. 같은 입력으로 다시 돌리면 같아야 한다(FX-T11, docs/features/forensic-replay.md §6.7.3)"
@@ -1972,7 +1986,7 @@ erDiagram
 | `s:jti:{jti}` | 문자열 (`SET NX`) | 대기열 입장 토큰의 재사용을 막고 세션에 묶기 | 토큰이 1회만 쓰였는지 확인한 뒤 구매 세션 ID와 서로 묶는다. |
 | `s:session:{sid}` | Hash | 구매 세션 메타데이터(유휴 만료 시한, 단말 임시 ECDH 공개키, 마지막 요청 일련번호, 기기 식별값 `deviceId`, 회차 ID, 여정 ID `journeyId`(입장 토큰의 `jny`, 2026-10-31), 이 세션이 잡은 홀드 목록(holdId마다 그 회차·좌석 목록)). 요청 서명 확인과 일련번호 갱신은 한 번의 원자 연산으로 한다(ADR-0050 결정 8) | 결제 완료 때까지 유지되는 런타임 세션 상태를 저장한다. 구매 세션은 회차 하나에 묶인다. purchase-svc는 세션을 열 때 입장 토큰의 회차를 적고, 주소에 회차가 있는 요청마다 주소의 회차와 다시 대조한다(다르면 403). 주소에 회차가 없는 주문·결제는 본문의 holdId와 주소의 주문이 이 세션의 것인지 보고, 아니면 404다(추천 적용 2026-10-30). 홀드를 만들면 holdId와 좌석 목록을 더하고, 해제·연장은 이 목록에 있는 holdId만 찾는다(추천 적용 2026-10-30, docs/features/seat-hold.md §2·§3, docs/security/asvs/seat-hold.md 8.2.2) |
 | `s:rst:{account}` | Hash | 예매 제한의 구매 사본(상태·끝 시각·제한 ID·판 번호, `q:rst:{account}`와 같은 모양) | ops-svc의 `SetBookingRestriction`을 받은 purchase-svc가 판 번호가 클 때만 쓴다. 주문 생성이 Lua 전에 따로 읽어, ACTIVE이고 끝 시각 전이면 403 `booking-restricted`로 주문을 만들지 않고 그 구매 세션의 홀드를 푼다. 계정 단위라 회차 태그 없이 흩는다. 수명과 다시 보내기는 `q:rst:{account}`와 같다(소유자 결정 2026-10-30, open-items 75번, 세부는 추천 적용 2026-10-30, docs/features/queue-admission.md §6, docs/features/payment.md §2) |
-| `sup:far:{account}` | Hash(필드 = 사건 ID) | 부정 예매 소명 요청의 화면용 사본: 회차, 사유 범주, 소명 기한, 이의 창 끝(조치 결과 통지 + 30일 [가정])과 이의 상태, 잠긴 티켓 ID, 소명 상태(OPEN·SUBMITTED·ACCEPTED·REJECTED·EXPIRED. EXPIRED는 기한까지 제출하지 않음), 우선 구매 권리(권리 ID·좌석 표시·가격·기한·상태), 판 번호 | 세션·캐시 클러스터에 두고 core-svc support 모듈이 쓴다. ops-svc의 `SetFraudAppealView`(core.proto)를 받아 필드마다 판 번호가 클 때만 쓰고, 팬의 `GET /v1/fraud-appeal-requests`와 소명 제출(`POST /v1/appeals` kind FRAUD_CASE)의 기한 확인에 쓴다. 조치 전의 소명은 소명 기한으로, 조치 뒤의 이의는 이의 창으로 본다. 필드 수명은 결정된 뒤 30일 [가정]이고, ops-svc 작업 워커가 10분 [가정]마다 열린 요청을 같은 판으로 다시 보낸다(`sup:rst`와 같은 규칙, 추천 적용 2026-10-31, ADR-0171) |
+| `sup:far:{account}` | Hash(필드 = 사건 ID) | 부정 예매 소명 요청의 화면용 사본: 회차, 사유 범주, 소명 기한, 이의 창 끝(조치 결과 통지 + 30일 [가정])과 이의 상태, 잠긴 티켓 ID, 소명 상태(OPEN·SUBMITTED·ACCEPTED·REJECTED·EXPIRED. EXPIRED는 기한까지 제출하지 않음), 우선 구매 권리(권리 ID·좌석 표시·가격·기한·상태), 조치 결과(취소한 티켓 ID, 이용 제한 끝)와 이의 결과의 이유(2026-10-31 FRN-070), 판 번호. 알림 판단은 이 키가 아니라 core DB `fraud_appeal_notice`와 견준다(docs/features/notify.md §4.5) | 세션·캐시 클러스터에 두고 core-svc support 모듈이 쓴다. ops-svc의 `SetFraudAppealView`(core.proto)를 받아 필드마다 판 번호가 클 때만 쓰고, 팬의 `GET /v1/fraud-appeal-requests`와 소명 제출(`POST /v1/appeals` kind FRAUD_CASE)의 기한 확인에 쓴다. 조치 전의 소명은 소명 기한으로, 조치 뒤의 이의는 이의 창으로 본다. 필드 수명은 결정된 뒤 30일 [가정]이고, ops-svc 작업 워커가 10분 [가정]마다 열린 요청을 같은 판으로 다시 보낸다(`sup:rst`와 같은 규칙, 추천 적용 2026-10-31, ADR-0171) |
 | `sup:rst:{account}` | Hash | 예매 제한의 화면용 사본(상태·사유 코드·시작·끝 시각·소명 기한·제한 ID·판 번호) | 세션·캐시 클러스터에 두고 core-svc support 모듈이 쓴다. ops-svc의 `SetBookingRestrictionView`(core.proto)를 받아 판 번호가 클 때만 쓰고, 팬의 `GET /v1/booking-restrictions/me`에 답한다. 집행에는 쓰지 않는다(집행은 `q:rst`·`s:rst`). 키가 없으면 제한 없음으로 답한다. 수명과 다시 보내기는 `q:rst:{account}`와 같다(추천 적용 2026-10-30, docs/design/d5 §1.6 21번) |
 | `s:{event:E}:stream` | Stream | 홀드 획득·해제·만료(HELD·RELEASED·EXPIRED), 구매 세션 시작·종료 이벤트(Redis 메모리 안의 Outbox) | 릴레이 워커가 비동기로 읽어 Kafka 토픽으로 보낸다. Kafka 전송 확인을 받은 항목까지 `XACK`한 뒤 `XTRIM … MINID`(Redis 6.2·Valkey부터)로 지운다. 키는 회차 판매 종료 + 1일 [가정] TTL로 지운다(추천 적용 2026-10-20, ADR-0070). |
 | `s:{event:E}:sec:{section}` | 샤드 Pub/Sub 채널 | 구역별 좌석 홀드 상태의 바뀐 부분(델타)을 구독자 모두에게 보내기 | 그 구역을 보고 있는 클라이언트가 접속한 realtime-gw 파드(쿠버네티스에서 앱이 실행되는 가장 작은 단위)만 골라서 구독한다. 메시지마다 회차 세대와 구역별 일련번호를 싣는다(기술 검토 중간-040). |
