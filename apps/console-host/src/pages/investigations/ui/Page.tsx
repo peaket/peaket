@@ -3,11 +3,18 @@
 // 데스크톱 12열(왼쪽 8열 후보 묶음·사건 | 오른쪽 4열 외부 게시물), 태블릿 한 단(표는 가로 스크롤), 휴대폰 한 단 카드 목록(사건 만들기·게시물 등록은 안내 카드).
 // 지정 부정 거래 조사관만 연다(메뉴 숨김은 화면 장치, 서버가 요청마다 지정을 본다, control-tower §9.2). 점수 원값·가중치는 어디에도 보이지 않는다(범주만).
 // 게시물 주소는 누르는 링크로 만들지 않고 글자와 복사 단추로 보인다(forensic-replay §6.7.7). 데이터는 목업(entities/fraud-case)이다.
+// 외부 게시물 등록은 최소한만 받는다(ADR-0173 결정 9, apply-legal-review-to-screens): 확인 칸 셋을 모두 체크해야 등록 단추가 켜지고, 캡처 위에서 가릴 자리를 고르며
+// (글자 읽기 없음), 신고 출처는 문의 유형 '외부 되팔이 게시물 신고' 건만 받는다. 원천 만료는 그 회차 공연일 + 30일 [가정]이다(결정 7).
 import { useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { previewHref } from '@peaket/ds/Preview';
 import { CaseStatusBadge } from '@peaket/ds/CaseStatusBadge';
 import {
+  ERR_REPORT_SOURCE,
+  MASK_NONE_HINT,
+  POST_CHECKS,
+  candidateRetryText,
+  postRegisterEnabled,
   CancelDeadlineBadge,
   CASES,
   CLUSTERS,
@@ -39,7 +46,10 @@ import { DEFAULT, STATES, type State } from '../states';
 const TITLE = '부정 거래 조사';
 
 /** 휴대폰 배치에 없는 상태(사건 만들기는 태블릿·데스크톱에서만, d5 §3.9) */
-const GAPS: BoardGaps<State> = { phone: { '사건 만들기': null, '게시물 파일 거절': null } };
+const GAPS: BoardGaps<State> = { phone: { '사건 만들기': null, '게시물 파일 거절': null, '오류 · 신고 출처 아님': null } };
+
+/** '후보 만들기 다시 시도 중' 그림의 남은 자동 다시 시도(openapi FraudClusterRun.autoRetriesLeft, 처음 셋 [가정]) */
+const RETRIES_LEFT = 2;
 
 /** 상태마다의 '지금'(취소 마감 단계 그림은 그 시각으로 본다) */
 const NOW_OF: Partial<Record<State, string>> = {
@@ -98,7 +108,8 @@ export function Page() {
       <CaseSection state={state} phone={phone} now={now} />
     </>
   );
-  const side = <PostSection state={state} phone={phone} />;
+  // 상태를 바꾸면(화면 안 이동) 확인 칸·신고 건 칸을 그 상태의 처음 값으로 다시 그린다(FRN-090 리뷰 결함 4)
+  const side = <PostSection key={state} state={state} phone={phone} />;
 
   return (
     <>
@@ -252,6 +263,7 @@ function signals(cl: Cluster): string {
 function ClusterSection({ state, phone, go, openCreate }: { state: State; phone: boolean; go: (s: string) => void; openCreate: (clusterId: string) => void }) {
   const empty = state === '후보 아직 없음';
   const failed = state === '후보 만들기 실패';
+  const retrying = state === '후보 만들기 다시 시도 중';
   const expired = state === '원천 만료';
   const loading = state === '불러오는 중';
   return (
@@ -260,7 +272,7 @@ function ClusterSection({ state, phone, go, openCreate }: { state: State; phone:
         <h2 className="t-sm fw-b" id="cl-h">
           후보 묶음
         </h2>
-        {!phone && !empty && !failed && !expired ? (
+        {!phone && !empty && !failed && !retrying && !expired ? (
           <div className="actions">
             <label className="row" style={{ gap: 6 }} htmlFor="cl-sort">
               <span className="t-xs muted">정렬</span>
@@ -282,13 +294,19 @@ function ClusterSection({ state, phone, go, openCreate }: { state: State; phone:
             <p className="t-md fw-b">아직 후보 묶음이 없습니다</p>
             <p className="t-sm muted">이 회차의 후보 묶음은 온세일 윈도우가 끝난 뒤 2시간 안에 나옵니다</p>
           </div>
+        ) : retrying ? (
+          // 자동 다시 시도가 남았다(autoRetriesLeft > 0). [ 다시 돌리기 ]는 보이지 않는다(rerunAllowed 거짓, d5 §7.18)
+          <div className="banner banner-info" role="status">
+            <i className="ic ic-refresh" aria-hidden="true" />
+            <div className="banner-body">{candidateRetryText(RETRIES_LEFT)}</div>
+          </div>
         ) : failed ? (
           <div className="state" style={{ padding: '32px 12px' }} role="alert">
             <span className="state-icon">
               <i className="ic ic-alert-circle" aria-hidden="true" />
             </span>
             <p className="t-md fw-b">후보 묶음을 만들지 못했습니다</p>
-            <p className="t-sm muted">세 번 다시 해도 실패하면 운영 경보로 알립니다</p>
+            <p className="t-sm muted">자동으로 세 번 다시 했지만 실패해 운영 경보로 알렸습니다</p>
             {phone ? (
               <BigScreenNote what="다시 돌리기는 태블릿이나 데스크톱에서 합니다" />
             ) : (
@@ -372,7 +390,7 @@ function ClusterSection({ state, phone, go, openCreate }: { state: State; phone:
             </table>
           </div>
         )}
-        {!empty && !failed && !expired ? <p className="t-xs muted">점수 원값과 가중치는 보이지 않습니다. 범주는 묶음에 나타난 근거 신호와 구매 수 대 한도로 정합니다.</p> : null}
+        {!empty && !failed && !retrying && !expired ? <p className="t-xs muted">점수 원값과 가중치는 보이지 않습니다. 범주는 묶음에 나타난 근거 신호와 구매 수 대 한도로 정합니다.</p> : null}
       </div>
     </section>
   );
@@ -502,7 +520,11 @@ function caseLabel(c: FraudCaseFixture): string {
 /** ④ 외부 게시물 등록·목록 */
 function PostSection({ state, phone }: { state: State; phone: boolean }) {
   const reject = state === '게시물 파일 거절';
+  const badSource = state === '오류 · 신고 출처 아님';
   const expired = state === '원천 만료';
+  // 확인 칸 셋(ADR-0173 결정 9). 모두 체크해야 [게시물 등록]이 켜진다. 거절 그림 둘은 보낸 뒤라 체크한 채로 그린다
+  const [checks, setChecks] = useState<boolean[]>(() => POST_CHECKS.map(() => reject || badSource));
+  const ready = postRegisterEnabled(checks);
   return (
     <section className="widget" aria-labelledby="po-h">
       <div className="widget-head">
@@ -530,6 +552,16 @@ function PostSection({ state, phone }: { state: State; phone: boolean }) {
               </label>
               <input className="input" id="po-at" type="datetime-local" defaultValue="2026-10-19T14:10" />
             </div>
+            {/* 게시 시각은 게시물 화면에 보일 때만 적는다(openapi ExternalPostCreate.postedAt, d5 §7.18 ④, ADR-0173 결정 9, FRN-090 리뷰 결함 3) */}
+            <div className="field">
+              <label className="label" htmlFor="po-posted">
+                게시 시각
+              </label>
+              <input className="input" id="po-posted" type="datetime-local" aria-describedby="po-posted-h" />
+              <span className="hint" id="po-posted-h">
+                게시물에 보일 때만 적습니다
+              </span>
+            </div>
             <fieldset className="col" style={{ gap: 6, border: 0, padding: 0, margin: 0 }}>
               <legend className="label" style={{ marginBottom: 6 }}>
                 출처
@@ -538,7 +570,24 @@ function PostSection({ state, phone }: { state: State; phone: boolean }) {
                 <input className="rd" type="radio" name="po-src" id="po-src-r" defaultChecked />
                 신고(CS 처리함 건)
               </label>
-              <input className="input input-sm" aria-label="신고 CS 처리함 건 ID" placeholder="CS-2610-0000" />
+              <div className={`field ${badSource ? 'is-error' : ''}`.trim()}>
+                <input
+                  className="input input-sm"
+                  aria-label="신고 CS 처리함 건 ID"
+                  placeholder="CS-2610-0000"
+                  defaultValue={badSource ? 'CS-2610-0377' : undefined}
+                  aria-invalid={badSource}
+                  aria-describedby={badSource ? 'po-src-e po-src-h' : 'po-src-h'}
+                />
+                {badSource ? (
+                  <span className="error-msg" id="po-src-e" role="alert">
+                    {ERR_REPORT_SOURCE}
+                  </span>
+                ) : null}
+                <span className="hint" id="po-src-h">
+                  문의 유형이 '외부 되팔이 게시물 신고'인 건만 받습니다. 신고한 분의 정보는 수집본에 넣지 않습니다
+                </span>
+              </div>
               <label className="check-row" htmlFor="po-src-m">
                 <input className="rd" type="radio" name="po-src" id="po-src-m" />
                 직접 찾음
@@ -564,9 +613,42 @@ function PostSection({ state, phone }: { state: State; phone: boolean }) {
                 </span>
               ) : null}
             </div>
-            <button className="btn btn-primary" type="submit">
+            {/* 가릴 자리(maskRegions): 캡처 미리보기 위에 상자를 그린다. 글자 읽기(OCR)는 없고 서버가 칠한 보기용 사본을 만든다(원본은 그대로) */}
+            <div className="col" style={{ gap: 6 }}>
+              <button className="btn btn-outline btn-sm" type="button" aria-disabled="true" aria-describedby="po-mask-h" style={{ alignSelf: 'flex-start' }}>
+                <i className="ic ic-edit" aria-hidden="true" />
+                가릴 자리 고르기
+              </button>
+              <span className="hint" id="po-mask-h">
+                캡처를 고르면 미리보기 위에서 연락처·계좌·채팅 링크에 상자를 그립니다(여러 개, 키보드로는 좌표를 넣습니다). 화면 글자는 읽지 않습니다
+              </span>
+              <p className="t-xs muted">{MASK_NONE_HINT}</p>
+            </div>
+            <fieldset className="col" style={{ gap: 6, border: 0, padding: 0, margin: 0 }}>
+              <legend className="label" style={{ marginBottom: 6 }}>
+                등록 전 확인(모두 체크)
+              </legend>
+              {POST_CHECKS.map((text, i) => (
+                <label className="check-row t-sm" key={text} htmlFor={`po-chk-${i}`} style={{ alignItems: 'flex-start' }}>
+                  <input
+                    className="cb"
+                    type="checkbox"
+                    id={`po-chk-${i}`}
+                    checked={checks[i] ?? false}
+                    onChange={(e) => setChecks((xs) => xs.map((x, j) => (j === i ? e.target.checked : x)))}
+                  />
+                  {text}
+                </label>
+              ))}
+            </fieldset>
+            <button className="btn btn-primary" type="submit" {...(ready ? {} : { 'aria-disabled': 'true' as const, 'aria-describedby': 'po-reg-why', onClick: (e: { preventDefault(): void }) => e.preventDefault() })}>
               게시물 등록
             </button>
+            {!ready ? (
+              <span className="t-xs muted" id="po-reg-why">
+                확인 칸 셋을 모두 체크하면 등록할 수 있습니다
+              </span>
+            ) : null}
             <p className="t-xs muted">게시물 주소는 누르는 링크로 만들지 않습니다. 실수로 열어 상대 사이트에 조사관의 접속 흔적이 남지 않게 하려는 것입니다</p>
           </form>
         )}

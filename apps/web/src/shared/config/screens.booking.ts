@@ -62,6 +62,8 @@ export const SCR011_STATES = [
   '금액 불일치',
   '이미 진행 중',
   '예매 제한(주문 생성 403)',
+  /** d5 §5.11 상태 표에서 더했다(결제 전 양도 잠금 안내, 결제 버튼은 그대로, apply-legal-review-to-screens, ADR-0173 결정 3) */
+  '부정 예매 조사로 양도가 잠기는 회차',
 ] as const;
 export type Scr011State = (typeof SCR011_STATES)[number];
 
@@ -125,6 +127,10 @@ export const SCR014_STATES = [
   '양도 불가 · 받은 티켓',
   '양도 불가 상품',
   '재인증 만료',
+  /** d5 §5.14 상태 표에서 더했다(티켓의 transferLocked 참, 양도 요청 409 transfer-locked, apply-legal-review-to-screens, ADR-0173 결정 3) */
+  '부정 예매 조사로 잠김',
+  /** d5 §9.2 양도 요청 409 transfer-locked(요청 사이에 잠김. 잠김 구성에 §9.2 오류 띠, FRN-090 리뷰 결함 8, 추천 적용 2026-10-31) */
+  '오류 · transfer-locked',
 ] as const;
 export type Scr014State = (typeof SCR014_STATES)[number];
 

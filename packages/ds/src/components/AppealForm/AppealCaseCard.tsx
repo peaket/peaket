@@ -5,11 +5,13 @@
 // fraud(부정 예매 소명, 보드 없음 → d5 §5.24 '부정 예매 소명' 그림): 알린 사유 범주를 모두 테두리 배지로(ul), 대상 칸 이름은 '공연',
 //   kv 아래 구분선 + 잠긴 티켓 묶음(h3 머리 글 '양도가 잠긴 티켓 N장' → 좌석 ul(자물쇠 아이콘) → 잠김 안내 한 줄). 잠김은 글자로도 적는다(d3 SCR-042).
 //   점수·가중치·근거 신호·사건의 다른 계정 칸은 두지 않는다(d2 CMP-063 fraud). 문구는 모두 앱이 props로 준다.
+// fraud-holder(받은 사람, d5 §5.24 '받은 사람의 변형', 추천 적용 2026-10-31, ADR-0173): 사유 범주 줄이 없고(결제자의 사유라서),
+//   티켓 묶음은 '내가 가진 표 N장'(표 아이콘, 잠기지 않음)과 안내 두 줄이다. 사유 범주를 주지 않으면 그 줄을 그리지 않는다.
 import type { ReactNode } from 'react';
 import { cx } from '../../lib/cx';
 import { Icon } from '../../icons';
 
-export type AppealVariant = 'restriction' | 'reclaim' | 'fraud';
+export type AppealVariant = 'restriction' | 'reclaim' | 'fraud' | 'fraud-holder';
 
 export interface AppealDeadline {
   /** '10/27(화) 18:00' */
@@ -22,14 +24,16 @@ export interface AppealDeadline {
   overdueLabel?: ReactNode;
 }
 
-/** 부정 예매 소명: 이 요청으로 양도가 잠긴 티켓 묶음 */
+/** 부정 예매 소명: 이 요청으로 양도가 잠긴 티켓 묶음(받은 사람은 가진 표, 결과는 취소한 표·잠금을 푼 표) */
 export interface AppealLockedTickets {
-  /** 머리 글(h3) '양도가 잠긴 티켓 2장' */
+  /** 머리 글(h3) '양도가 잠긴 티켓 2장' · '내가 가진 표 1장' */
   heading: ReactNode;
   /** 좌석 글(목록 ul) 'A구역 3열 14번' */
   items: readonly ReactNode[];
-  /** 목록 아래 안내 '결정될 때까지 이 표들의 양도가 잠깁니다. 입장은 그대로 할 수 있습니다' */
-  notice?: ReactNode;
+  /** 줄 머리 아이콘(기본 lock: 잠긴 표. 받은 사람·취소한 표는 ticket) */
+  icon?: 'lock' | 'ticket';
+  /** 목록 아래 안내(한 줄 또는 여러 줄). 예: 잠금 최대 기한 문장 */
+  notice?: ReactNode | readonly ReactNode[];
 }
 
 export interface AppealCaseCardProps {
@@ -56,6 +60,8 @@ export interface AppealCaseCardProps {
   schedule?: ReactNode;
   /** 구분선 아래 잠긴 티켓 묶음(fraud) */
   lockedTickets?: AppealLockedTickets;
+  /** 기한 줄과 티켓 묶음 사이의 정보 띠(fraud-holder: d5 §5.24 받은 사람 그림 ①의 순서, 추천 적용 2026-10-31) */
+  banner?: ReactNode;
   className?: string;
 }
 
@@ -72,9 +78,13 @@ export function AppealCaseCard({
   submittedAtText,
   schedule,
   lockedTickets,
+  banner,
   className,
 }: AppealCaseCardProps) {
   const lockedHeadingId = `${headingId}-locked`;
+  // 사유 범주를 주지 않으면(받은 사람) 그 줄을 그리지 않는다
+  const hasReason = (reasonCategories && reasonCategories.length > 0) || (reasonCategory !== undefined && reasonCategory !== null && reasonCategory !== '');
+  const lockedNotices = lockedTickets?.notice === undefined || lockedTickets.notice === null ? [] : Array.isArray(lockedTickets.notice) ? lockedTickets.notice : [lockedTickets.notice];
   const heading = (
     <h2 id={headingId} className="t-lg">
       {title}
@@ -91,20 +101,24 @@ export function AppealCaseCard({
         heading
       )}
       <dl className="kv">
-        <dt>사유 범주</dt>
-        <dd>
-          {reasonCategories && reasonCategories.length > 0 ? (
-            <ul className="row wrap" style={{ gap: 6, justifyContent: 'flex-end' }}>
-              {reasonCategories.map((c, i) => (
-                <li key={i}>
-                  <span className="badge badge-outline">{c}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <span className="badge badge-outline">{reasonCategory}</span>
-          )}
-        </dd>
+        {hasReason ? (
+          <>
+            <dt>사유 범주</dt>
+            <dd>
+              {reasonCategories && reasonCategories.length > 0 ? (
+                <ul className="row wrap" style={{ gap: 6, justifyContent: 'flex-end' }}>
+                  {reasonCategories.map((c, i) => (
+                    <li key={i}>
+                      <span className="badge badge-outline">{c}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="badge badge-outline">{reasonCategory}</span>
+              )}
+            </dd>
+          </>
+        ) : null}
         {target ? (
           <>
             <dt>{targetLabel}</dt>
@@ -137,6 +151,12 @@ export function AppealCaseCard({
           </>
         ) : null}
       </dl>
+      {banner ? (
+        <div className="banner banner-info">
+          <Icon name="info" />
+          <div className="banner-body">{banner}</div>
+        </div>
+      ) : null}
       {lockedTickets ? (
         <>
           <hr className="divider" />
@@ -147,12 +167,16 @@ export function AppealCaseCard({
             <ul className="col" style={{ gap: 6 }} aria-labelledby={lockedHeadingId}>
               {lockedTickets.items.map((item, i) => (
                 <li key={i} className="row t-sm" style={{ gap: 8 }}>
-                  <Icon name="lock" size={16} className="muted" />
+                  <Icon name={lockedTickets.icon ?? 'lock'} size={16} className="muted" />
                   <span>{item}</span>
                 </li>
               ))}
             </ul>
-            {lockedTickets.notice ? <p className="t-sm muted">{lockedTickets.notice}</p> : null}
+            {lockedNotices.map((n, i) => (
+              <p key={i} className="t-sm muted">
+                {n}
+              </p>
+            ))}
           </div>
         </>
       ) : null}

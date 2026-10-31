@@ -10,6 +10,8 @@ import {
   DENY_TITLE,
   parseOpened,
   parseSource,
+  REVIEW_PENDING_BODY,
+  REVIEW_PENDING_STATE,
   SOURCES,
   sourceSearch,
   sourceSpec,
@@ -160,7 +162,7 @@ test('조사 원천 상태(데스크톱·태블릿): 그래픽 대체·만드는
 test('연구 원천 상태(데스크톱·태블릿): 한 축 분포가 있어 그래픽 대체가 있다', () => {
   assert.deepEqual(
     [...statesFor('research', 'desktop')],
-    ['재생', '후보 고름', '받는 중', '파일 거절', '사건 일부 버림', '복사 방식', '그래픽 대체', '돌릴 수 없음', '일시정지', '원천 만료', DENY_STATE],
+    ['재생', '후보 고름', '받는 중', '파일 거절', '사건 일부 버림', '복사 방식', '그래픽 대체', '돌릴 수 없음', '일시정지', '원천 만료', REVIEW_PENDING_STATE, DENY_STATE],
   );
   assert.deepEqual([...statesFor('research', 'tablet')], [...statesFor('research', 'desktop')]);
 });
@@ -172,7 +174,7 @@ test('휴대폰 상태: 교차 필터·후보 패널·파일 불러오기 자리
   );
   const op = ['재생', '받는 중', '파일 거절', '사건 일부 버림', '돌릴 수 없음', '일시정지', '원천 만료', DENY_STATE];
   assert.deepEqual([...statesFor('investigation', 'phone')], op);
-  assert.deepEqual([...statesFor('research', 'phone')], op);
+  assert.deepEqual([...statesFor('research', 'phone')], [...op.slice(0, -1), REVIEW_PENDING_STATE, DENY_STATE]);
 });
 
 test('어느 원천·배치든 첫 상태는 재생이고, 휴대폰 상태는 넓은 배치 상태 안에 든다', () => {
@@ -237,4 +239,28 @@ test('연구 원천은 사건을 보이지 않고 관제 링크는 대시보드�
   const s = sourceSpec('research', parseOpened('?source=연구&case=CASE-2610-0005'));
   assert.equal(s.caseLabel, undefined);
   assert.equal(s.consolePath, '/dashboard');
+});
+
+// ── 사후 포렌식 자체 법률 검토 반영(OpenSpec apply-legal-review-to-screens tasks 3.7, ADR-0173) ──
+
+test('ADR0173_8 연구 원천의 가명처리 적정성 검토 전 403은 그 문구를 보이는 상태다(d5 §9.2, 연구에만)', () => {
+  assert.equal(REVIEW_PENDING_STATE, '오류 · pseudonymization-review-pending');
+  assert.equal(REVIEW_PENDING_BODY, '가명처리 적정성 검토 결과서가 승인되기 전이라 내보낼 수 없습니다. 개인정보 보호책임자에게 검토를 요청해 주세요');
+  for (const layout of ['desktop', 'tablet', 'phone']) {
+    assert.ok(statesFor('research', layout).includes(REVIEW_PENDING_STATE), layout);
+    assert.ok(!statesFor('investigation', layout).includes(REVIEW_PENDING_STATE), layout);
+    assert.ok(!statesFor('synthetic', layout).includes(REVIEW_PENDING_STATE), layout);
+  }
+});
+
+test('ADR0173_5 조사 원천 후보 패널은 단계 시각이고, 묶음 계정의 행동 값을 나란히 견주는 보기가 없다', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  assert.equal(sourceSpec('investigation').candidate, 'baseline');
+  const dir = fileURLToPath(new URL('../screen/', import.meta.url));
+  const files = readdirSync(dir).filter((f) => /\.tsx?$/.test(f));
+  assert.ok(files.length > 0);
+  const forbidden = /행동 값 (표|비교)|행동 비교|유사도|비슷한 순|겹친 그래프|similarity/i;
+  for (const f of files) assert.doesNotMatch(readFileSync(join(dir, f), 'utf8'), forbidden, f);
 });

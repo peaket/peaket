@@ -13,6 +13,7 @@ import { Select } from '@peaket/ds/Select';
 import { TextField } from '@peaket/ds/TextField';
 import { WebShellModal } from '@peaket/ds/WebShell';
 import { BANKS } from '@/entities/account';
+import { withdrawFraudHoldText } from '@/entities/appeal';
 import { formatWon } from '@/entities/production';
 import { useToast } from '@/shared/ui/toast';
 import type { WithdrawQuote } from '../model/account';
@@ -41,11 +42,24 @@ export interface SettingsFlowsProps {
   toastOnMount?: string;
   provider: { label: string; btn: string; prov: string };
   quote: WithdrawQuote;
+  /** 탈퇴 409 fraudHold.until 글(state마다, 목업) */
+  fraudHoldUntil: Readonly<Record<'RESTRICTED' | 'CASE_OPEN', string>>;
   dark: boolean;
   children: ReactNode;
 }
 
-export function SettingsFlows({ initial, devices, removedIds = [], devicesLoading = false, toastOnMount, provider, quote, dark, children }: SettingsFlowsProps) {
+export function SettingsFlows({
+  initial,
+  devices,
+  removedIds = [],
+  devicesLoading = false,
+  toastOnMount,
+  provider,
+  quote,
+  fraudHoldUntil,
+  dark,
+  children,
+}: SettingsFlowsProps) {
   const toast = useToast();
   const router = useRouter();
   const ids = useId();
@@ -136,6 +150,7 @@ export function SettingsFlows({ initial, devices, removedIds = [], devicesLoadin
       {overlay?.kind === 'withdraw' ? (
         <WithdrawSheet
           refund={overlay.refund}
+          fraudHold={overlay.fraudHold ? { state: overlay.fraudHold, untilText: fraudHoldUntil[overlay.fraudHold] } : undefined}
           provider={provider.label}
           quote={quote}
           descId={`${ids}-wd`}
@@ -191,6 +206,7 @@ const DESTRUCTIVE_BUTTON_STYLE = { height: 'auto', minHeight: 52, padding: '12px
 
 function WithdrawSheet({
   refund,
+  fraudHold,
   provider,
   quote,
   descId,
@@ -198,6 +214,8 @@ function WithdrawSheet({
   onConfirm,
 }: {
   refund: 'none' | 'vb-now' | 'vb-later';
+  /** 탈퇴 409 fraudHold(있으면 대조값 보관 안내를 보이고 '바로 다시 가입' 줄을 숨긴다, d5 §5.17, ADR-0173 결정 7) */
+  fraudHold?: { state: 'RESTRICTED' | 'CASE_OPEN'; untilText: string };
   provider: string;
   quote: WithdrawQuote;
   descId: string;
@@ -290,8 +308,15 @@ function WithdrawSheet({
           먼저 양도하기
           <i className="ic ic-chevron-right" aria-hidden="true" />
         </Link>
-        <span className="t-xs muted">탈퇴 뒤 바로 다시 가입할 수 있습니다</span>
+        {fraudHold ? null : <span className="t-xs muted">탈퇴 뒤 바로 다시 가입할 수 있습니다</span>}
       </div>
+      {/* 이 줄이 보였으면 다시 보낼 때 acknowledgeFraudHold: true를 싣는다(퍼블리싱은 서버로 보내지 않는다) */}
+      {fraudHold ? (
+        <div className="banner banner-warning" role="note">
+          <i className="ic ic-shield" aria-hidden="true" />
+          <div className="banner-body">{withdrawFraudHoldText(fraudHold)}</div>
+        </div>
+      ) : null}
       <div className="col" style={{ gap: 8 }}>
         <button className="btn btn-danger btn-lg btn-block" type="button" style={DESTRUCTIVE_BUTTON_STYLE} onClick={onConfirm}>
           <span>탈퇴합니다.</span> <span className="t-sm fw-m">주문·결제 기록은 법에 따라 분리 보관 후 파기됩니다</span>

@@ -5,7 +5,7 @@ import { Fragment, type FormEvent } from 'react';
 import { Overlay } from '../shared/Overlay';
 import { useReplay } from './controls';
 import type { Source } from '../lib/source';
-import { DenyMain, ExpiredMain, GroupCountStat, ReceivingMain, ReplaySourceBadge, SeatMarkLegend, SeatMarks, SourceHeadCompact, sourceVals } from './sources';
+import { DenyMain, ExpiredMain, ReviewPendingMain, GroupCountStat, ReceivingMain, ReplaySourceBadge, SeatMarkLegend, SeatMarks, SourceHeadCompact, sourceVals } from './sources';
 
 const prevent = (e: FormEvent) => e.preventDefault();
 void Fragment;
@@ -933,6 +933,7 @@ export function OverlaysM({ v, close }: { v: V; close?: () => void }) {
     {v.isDeny ? <DenyMain /> : null}
     {v.isRecv ? <ReceivingMain source={v.src} /> : null}
     {v.isExpired ? <ExpiredMain source={v.src} /> : null}
+    {v.isReviewPending ? <ReviewPendingMain /> : null}
     {v.showFoot ? (
       <>
         <footer className="row wrap" style={{ gap: "8px 16px", padding: "10px 20px 16px", marginTop: "auto", fontSize: "12px", color: "var(--text-muted)" }} aria-label="이 기기에서 잰 값(예시)">

@@ -1,5 +1,5 @@
 'use client';
-// 문의하기 입력(보드 SCR-056 '문의하기'~'하루 한도', d5 §5.30 상태 표).
+// 문의하기 입력(보드 SCR-056 '문의하기'~'하루 한도', d5 §5.30 상태 표). 유형 12개, '외부 되팔이 게시물 신고'를 고르면 내용 칸 위에 안내(ADR-0173 결정 9).
 // - 접수를 누르면 화면에서 먼저 검사하고, 틀리면 위쪽 오류 요약(CMP-012) + 첫 오류 칸으로 초점.
 // - 내용에 계좌번호처럼 보이는 숫자열이 있으면 확인 창 "계좌번호는 적지 않아도 됩니다. 지우고 보낼까요?"
 // - 접수 중에는 버튼을 바로 막고 aria-busy(중복 제출 방지). 접수되면 따로 완료 화면 없이 막 접수된 문의 상세로 간다(토스트는 상세가 띄운다).
@@ -12,7 +12,7 @@ import { Select } from '@peaket/ds/Select';
 import { TextArea } from '@peaket/ds/TextArea';
 import { TextField } from '@peaket/ds/TextField';
 import { WebShellModal, webModalButtonClass } from '@peaket/ds/WebShell';
-import { DEMO_INQUIRY_ID, INQUIRY_ORDER_OPTIONS, INQUIRY_TYPES, inquiryHref } from '@/entities/inquiry';
+import { DEMO_INQUIRY_ID, INQUIRY_ORDER_OPTIONS, INQUIRY_TYPES, inquiryHref, inquiryTypeNotice, type InquiryType } from '@/entities/inquiry';
 import type { Scr056NewState } from '@/shared/config/screens.discovery';
 import { findAccountNumbers, maskAccountNumbers } from '../model/account';
 import { BODY_MAX, initialDraft, validateDraft, type InquiryDraft, type InquiryErrors } from '../model/form';
@@ -58,6 +58,7 @@ export function InquiryForm({ state }: { state: Scr056NewState }) {
     send(draft.body);
   };
 
+  const typeNotice = inquiryTypeNotice(draft.type as InquiryType | '');
   const summary = (['type', 'title', 'body'] as const)
     .filter((k) => errors[k])
     .map((k) => ({ fieldId: FIELD_IDS[k], message: errors[k] }));
@@ -115,6 +116,13 @@ export function InquiryForm({ state }: { state: Scr056NewState }) {
           onChange={(e) => set('title')(e.target.value)}
           error={errors.title}
         />
+        {/* 고른 유형의 안내(외부 되팔이 게시물 신고: 공개 게시물만, 접수만 확인, d5 §5.30, ADR-0173 결정 9). 내용 칸 위 */}
+        {typeNotice ? (
+          <div className="banner banner-info" role="note" id="q-type-note">
+            <i className="ic ic-info" aria-hidden="true" />
+            <div className="banner-body">{typeNotice}</div>
+          </div>
+        ) : null}
         <TextArea
           id={FIELD_IDS.body}
           label="내용"

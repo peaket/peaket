@@ -9,6 +9,8 @@
 //   overdue   — 사안 카드(기한 줄에 '기한 지남' 위험 배지) → 경고 띠(role="alert") → 문의하기 버튼
 // fraud(부정 예매 소명, d5 §5.24 '부정 예매 소명' 그림): 사안 카드에 사유 범주 여럿·잠긴 티켓 묶음을 싣고(AppealCaseCard),
 //   default에서만 카드와 폼 사이에 정보 띠(notice, 가족·지인 대리 예매 안내)를 둔다. 결과(인정·불인정)는 앱이 사안 카드 + 결과 카드로 그린다.
+// fraud-holder(받은 사람, 추천 적용 2026-10-31, ADR-0173): 사유 범주 없이 가진 표 묶음과 안내 띠(카드 안, 기한 줄 아래·가진 표 위). 문구는 앱이 준다.
+// caseCard={false}: 사안 카드 없이 작성 칸만 그린다(부정 예매 조치 결과 아래 [이의 내기]로 같은 입력 칸 ②를 다시 열 때, d5 §5.24).
 // - 글자 수는 grapheme(사람이 보는 한 글자) 단위로 세고 천 단위 쉼표를 붙인다. 넘치면 'N자 넘었습니다'를 오류 색으로 보인다(입력을 자르지 않는다).
 // - 화면 문구(제목·사유·기한·처리 일정·힌트·결과 안내)는 앱이 props로 준다. 클라이언트 부품이다(서버 페이지는 onSubmit 없이 직렬화되는 값만 넘긴다).
 import { useState, type FormEvent, type ReactNode } from 'react';
@@ -50,7 +52,9 @@ export interface AppealFormProps {
   idPrefix: string;
   variant?: AppealVariant;
   state?: AppealFormState;
-  /** 사안 카드 제목('예매 제한' · '양도 회수 예고' · '부정 예매 소명 요청') */
+  /** false면 사안 카드를 그리지 않는다(이의 입력처럼 카드가 이미 위에 있을 때, 기본 true) */
+  caseCard?: boolean;
+  /** 사안 카드 제목('예매 제한' · '양도 회수 예고' · '부정 예매 소명 요청' · '받은 표 확인 요청') */
   title: ReactNode;
   /** 제목 오른쪽 경고 배지 글('제한 중' · '답변 기다림') */
   statusLabel?: ReactNode;
@@ -93,6 +97,7 @@ export function AppealForm({
   idPrefix,
   variant = 'restriction',
   state = 'default',
+  caseCard = true,
   title,
   statusLabel,
   reasonCategory,
@@ -130,6 +135,8 @@ export function AppealForm({
     : `남은 글자 ${formatNumber(maxLength - count)}자 / ${formatNumber(maxLength)}자`;
 
   const isOverdue = state === 'overdue';
+  // 받은 사람은 d5 그림처럼 안내 띠가 카드 안(기한 줄 아래, 가진 표 위)에 온다. 다른 변형은 카드와 폼 사이다
+  const noticeInCard = variant === 'fraud-holder';
   const card = (
     <AppealCaseCard
       headingId={ids.heading}
@@ -143,14 +150,15 @@ export function AppealForm({
       deadline={{ text: deadlineText, remainingText, overdue: isOverdue, overdueLabel: overdue?.badgeLabel }}
       schedule={state === 'default' ? scheduleText : undefined}
       lockedTickets={lockedTickets}
+      banner={noticeInCard && state === 'default' ? notice : undefined}
     />
   );
 
   return (
     <div className={cx('col gap-5', className)} data-variant={variant} data-state={state}>
-      {card}
+      {caseCard ? card : null}
 
-      {state === 'default' && notice ? (
+      {state === 'default' && notice && !noticeInCard ? (
         <div className="banner banner-info">
           <Icon name="info" />
           <div className="banner-body">{notice}</div>

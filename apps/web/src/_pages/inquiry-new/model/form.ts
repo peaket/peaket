@@ -21,6 +21,14 @@ const EXAMPLE_BODY =
 
 export function initialDraft(state: Scr056NewState): InquiryDraft {
   if (state === '문의 입력 오류') return { type: '', orderId: '', title: '환불', body: '수수료 문의' };
+  // 외부 되팔이 게시물 신고(FR-069, ADR-0173 결정 9): 공개 게시물 주소와 설명만. 주소는 문서용 예시 도메인이다(추천 적용 2026-10-31)
+  if (state === '외부 되팔이 게시물 신고')
+    return {
+      type: '외부 되팔이 게시물 신고',
+      orderId: '',
+      title: '다른 사이트에서 웃돈 판매 글을 봤습니다',
+      body: 'https://example.com/market/12345 에 LUMEN 콘서트 2026 서울 10/25(일) R석 2매를 정가의 세 배에 판다는 공개 게시물이 있습니다.',
+    };
   return {
     type: '취소·환불(사정이 있어 공제 면제를 요청)',
     orderId: 'ord-20261014-0001',

@@ -7,7 +7,7 @@ export const ANSWER_DUE_TEXT = '답변은 보통 3영업일 안에 드립니다.
 /** 문의 상태 배지(d5 §5.30 내 문의 내역) */
 export type InquiryStatus = '접수됨' | '처리 중' | '답변 완료' | '닫힘';
 
-/** 문의 유형 11개(planning/04 SCR-056 ③, d5 §5.30) */
+/** 문의 유형 12개(planning/04 SCR-056 ③, d5 §5.30). '외부 되팔이 게시물 신고'는 2026-10-31에 더했다(FR-069, ADR-0173 결정 9) */
 export const INQUIRY_TYPES = [
   '예매·결제',
   '취소·환불(사정이 있어 공제 면제를 요청)',
@@ -19,9 +19,38 @@ export const INQUIRY_TYPES = [
   '미성년자 계약 취소',
   '굿즈·상품',
   '게시물 조치 이의',
+  '외부 되팔이 게시물 신고',
   '기타',
 ] as const;
 export type InquiryType = (typeof INQUIRY_TYPES)[number];
+
+/** 유형 → openapi InquiryCategory 값(접수 본문 category에 싣는 값) */
+export const INQUIRY_CATEGORY_OF: Readonly<Record<InquiryType, string>> = {
+  '예매·결제': 'BOOKING_PAYMENT',
+  '취소·환불(사정이 있어 공제 면제를 요청)': 'CANCEL_REFUND',
+  양도: 'TRANSFER',
+  '입장·현장': 'ENTRY',
+  계정: 'ACCOUNT',
+  '자동화된 결정(추가 검증) 설명·재검토': 'AUTOMATED_DECISION',
+  '공연(판매자) 관련 분쟁': 'SELLER_DISPUTE',
+  '미성년자 계약 취소': 'MINOR_CONTRACT_CANCEL',
+  '굿즈·상품': 'MERCH',
+  '게시물 조치 이의': 'MODERATION_APPEAL',
+  '외부 되팔이 게시물 신고': 'RESALE_POST_REPORT',
+  기타: 'OTHER',
+};
+
+/**
+ * '외부 되팔이 게시물 신고'를 고르면 내용 칸 위에 보이는 안내(d5 §5.30, 추천 적용 2026-10-31, ADR-0173 결정 9).
+ * 공개 게시물만 받고, 접수만 확인하며 다른 사람의 조사 결과는 알리지 않는다.
+ */
+export const RESALE_POST_NOTICE =
+  'PEAKET 밖 사이트에서 이 공연 표를 웃돈으로 파는 공개 게시물의 주소와 설명을 적어 주세요. 로그인해야 보이는 비공개 모임의 글이나 받은 메시지는 받지 않습니다. 접수만 확인해 드리고, 조사 결과는 알려 드리지 않습니다';
+
+/** 고른 유형의 내용 칸 위 안내(없으면 undefined). 빈 값은 아직 고르지 않음 */
+export function inquiryTypeNotice(type: InquiryType | ''): string | undefined {
+  return type === '외부 되팔이 게시물 신고' ? RESALE_POST_NOTICE : undefined;
+}
 
 /** 목록에 보이는 짧은 유형 이름(괄호 설명을 뺀다) */
 export function inquiryTypeShort(t: InquiryType): string {

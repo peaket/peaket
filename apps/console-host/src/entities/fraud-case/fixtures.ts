@@ -341,3 +341,46 @@ export const EVIDENCE_BUNDLE = {
     { at: '2026-10-23T13:20:00+09:00', who: '도윤', what: '열람(VIEWED)' },
   ],
 };
+
+// ── 사후 포렌식 자체 법률 검토 반영(ADR-0173, OpenSpec apply-legal-review-to-screens) ──
+
+/** 승인 대상 한 줄(openapi FraudCaseSummary.targets). 계정 ID·표 ID는 본문(excludeAccountIds·excludeTicketIds)에만 쓰고 화면에는 '계정 1·2…'로 보인다 */
+export interface ApprovalTarget {
+  accountId: string;
+  ticketIds: string[];
+  ticketCount: number;
+  /** 그 가운데 받은 사람(사건 밖 계정)이 가진 표 수 */
+  holderTicketCount: number;
+  appealOutcome: AppealResult;
+}
+
+/** SCR-046 부정 예매 조치(사건 CASE-2610-0005, 6계정 18장)의 대상 줄. 소명 결과는 사건 요약의 수(불인정 4 · 기한까지 안 냄 2)와 같다 */
+export const APPROVAL_TARGETS: readonly ApprovalTarget[] = Array.from({ length: 6 }, (_, j) => ({
+  accountId: accountLabel(2, j),
+  ticketIds: [1, 2, 3].map((k) => `tk-0005-${j + 1}${k}`),
+  ticketCount: 3,
+  holderTicketCount: j === 0 ? 1 : 0,
+  appealOutcome: j < 4 ? ('REJECTED' as const) : ('EXPIRED' as const),
+}));
+
+/** 승인자 수진이 이 요청의 사건 요약을 처음 연 시각(ops DB approval_summary_view, 상세 응답의 summaryViewedAt) */
+export const APPROVAL_SUMMARY_VIEWED_AT = '2026-10-19T09:12:00+09:00';
+
+/** 사건 계정이 결제해 양도한 표를 지금 가진 사람(사건 밖 계정)의 진술. 좌석 글만 두고 받은 사람의 계정은 두지 않는다 */
+export interface HolderStatement {
+  seatLabel: string;
+  /** SUBMITTED 냄 · PENDING 기다림 */
+  statement: 'SUBMITTED' | 'PENDING';
+}
+
+const HOLDERS: Partial<Record<string, readonly HolderStatement[]>> = {
+  'CASE-2610-0007': [
+    { seatLabel: 'A구역 3열 16번', statement: 'SUBMITTED' },
+    { seatLabel: 'B구역 7열 2번', statement: 'PENDING' },
+  ],
+};
+
+/** 사건의 받은 사람 진술(없으면 빈 목록) */
+export function holdersFor(caseId: string): readonly HolderStatement[] {
+  return HOLDERS[caseId] ?? [];
+}

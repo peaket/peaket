@@ -107,7 +107,8 @@ export type Scr019State = (typeof SCR019_STATES)[number];
 /** SCR-056 고객센터·문의: 보드 상태 15를 페이지 넷으로 나눴다(보드 renderVals의 분기대로) */
 export const SCR056_HELP_STATES = ['FAQ', '비로그인'] as const;
 export type Scr056HelpState = (typeof SCR056_HELP_STATES)[number];
-export const SCR056_NEW_STATES = ['문의하기', '계좌번호 확인 창', '문의 입력 오류', '접수 중', '접수 실패', '하루 한도'] as const;
+/** 보드 여섯 + '외부 되팔이 게시물 신고'(그 유형을 고른 모양, d5 §5.30 안내, ADR-0173 결정 9. 상태 이름은 추천 적용 2026-10-31) */
+export const SCR056_NEW_STATES = ['문의하기', '계좌번호 확인 창', '문의 입력 오류', '접수 중', '접수 실패', '하루 한도', '외부 되팔이 게시물 신고'] as const;
 export type Scr056NewState = (typeof SCR056_NEW_STATES)[number];
 export const SCR056_LIST_STATES = ['내 문의 내역', '문의 없음'] as const;
 export type Scr056ListState = (typeof SCR056_LIST_STATES)[number];

@@ -13,6 +13,7 @@ import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import {
   DEVICE_SESSIONS,
+  FRAUD_HOLD_UNTIL,
   LINKED_PROVIDERS,
   PROFILE,
   PROVIDER_INFO,
@@ -53,6 +54,7 @@ export async function SettingsPage({ searchParams }: PageProps) {
         toastOnMount={v.remoteLoggedOut ? 'Safari · iPhone에서 로그아웃했습니다' : undefined}
         provider={provider}
         quote={quote}
+        fraudHoldUntil={FRAUD_HOLD_UNTIL}
         dark={dark}
       >
         <main className="page-main" id="main" tabIndex={-1}>

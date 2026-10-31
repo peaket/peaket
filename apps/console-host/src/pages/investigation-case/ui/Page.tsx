@@ -4,11 +4,25 @@
 // - IP는 가린 값만 보인다. 원문은 점을 골라 사유를 적고 연 뒤(IP 원문 열림) 이 화면 메모리에만 두고, 화면을 떠나면 지운다(authz-matrix §4.3 5, ASVS 14.3.1).
 // - 점수 원값·가중치, 연락처·카드 원문은 어디에도 없다. 승인은 다른 사람이 승인 업무(SCR-046)에서 한다(POL-038 ⑪).
 // - 상태는 사건의 단계 그림이다. 사건마다 기본 상태는 그 사건의 상태이고, 단계마다 그 단계의 시각을 '지금'으로 본다(목업).
+// - 자체 법률 검토(ADR-0173, apply-legal-review-to-screens): 잠금에 최대 기한(소명 요청 + 14일), 받은 사람 안내와 진술, 이용 제한 끝은 요청 + 1년까지,
+//   받은 사람이 가진 표는 조치 대상에서 기본으로 빠짐, 의견 칸의 행동 요약 규칙, 고소·고발용 요약(COMPLAINT). 묶음 계정의 행동 값을 나란히 견주는 보기는 두지 않는다(결정 5).
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { CaseStatusBadge } from '@peaket/ds/CaseStatusBadge';
 import {
+  APPEAL_LOCK_NOTICE,
+  COMPLAINT_NOTE,
+  EXPORT_KINDS,
+  EXPORT_KIND_LABEL,
+  HOLDER_NOTICE,
+  OPINION_HINT,
   appealDueLeavesCancel,
+  complaintFileName,
+  holdersFor,
+  lockReleasedNotice,
+  restrictionEndError,
+  restrictionEndMax,
+  transferLockExpiresAt,
   CancelDeadlineBadge,
   CASE_EVENTS,
   CASES,
@@ -52,8 +66,11 @@ const TITLE = '사건 작업대';
 
 /** 휴대폰 배치에 없는 상태(그래프·원문 열기·계정 바꾸기·소명 요청은 태블릿·데스크톱에서만, d5 §3.9) */
 const GAPS: BoardGaps<State> = {
-  phone: { '점 고름(IP)': null, 'IP 원문 열기': null, 'IP 원문 열림': null, '계정 빼기': null, '소명 요청 확인': null },
+  phone: { '점 고름(IP)': null, 'IP 원문 열기': null, 'IP 원문 열림': null, '계정 빼기': null, '소명 요청 확인': null, '이용 제한이 너무 김': null, '고소·고발용 요약 받음': null },
 };
+
+/** '양도 잠금 최대 기한 지남' 그림에서 잠금이 풀린 계정 수(일부만 지난 그림, d5 §7.19) */
+const LOCK_RELEASED_ACCOUNTS = 3;
 
 type Phase = 'investigating' | 'appeal' | 'decision' | 'actioned' | 'objected' | 'cleared' | 'deadline-passed';
 
@@ -64,6 +81,10 @@ const PHASE: Partial<Record<State, Phase>> = {
   '이의 접수': 'objected',
   '정상 종료': 'cleared',
   '취소 마감 지남': 'deadline-passed',
+  // 이용 제한이 너무 김: 취소 마감 뒤 이용 제한을 요청하는 그림 · 잠금 최대 기한 지남: 소명 대기 중 · 고소·고발용 요약 받음: 조치됨의 내보내기 뒤
+  '이용 제한이 너무 김': 'deadline-passed',
+  '양도 잠금 최대 기한 지남': 'appeal',
+  '고소·고발용 요약 받음': 'actioned',
 };
 
 const STATUS_OF: Record<Phase, FraudCaseStatus> = {
@@ -191,12 +212,21 @@ export function Page() {
     </>
   );
 
+  const lockNotice = state === '양도 잠금 최대 기한 지남' ? lockReleasedNotice(LOCK_RELEASED_ACCOUNTS, c.accountCount) : null;
+
   return (
     <>
       <Header v={v} />
+      {lockNotice ? (
+        <div className="banner banner-info" role="status">
+          <i className="ic ic-info" aria-hidden="true" />
+          <div className="banner-body">{lockNotice}</div>
+        </div>
+      ) : null}
       {desktop ? (
         // 데스크톱: 왼쪽 8열 ① ② ③ ⑧ | 오른쪽 4열 ④ ⑤ ⑥ ⑦
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12,minmax(0,1fr))', gap: 16, alignItems: 'start' }}>
+        // key: 상태를 바꾸면(화면 안 이동) 칸의 처음 값(이용 제한 끝·내보내기 종류 등)을 그 상태로 다시 정한다(FRN-090 리뷰 결함 2)
+        <div key={state} style={{ display: 'grid', gridTemplateColumns: 'repeat(12,minmax(0,1fr))', gap: 16, alignItems: 'start' }}>
           <div className="col" style={{ gridColumn: 'span 8', gap: 16, minWidth: 0 }}>
             <SummaryTiles v={v} />
             <GraphSection v={v} />
@@ -210,7 +240,7 @@ export function Page() {
         </div>
       ) : (
         // 태블릿·휴대폰: 한 단 ① ② ④ ⑤ ⑥ ③ ⑦ ⑧(d5 §7.19, d3 SCR-071). 휴대폰은 ②가 연결 표이고 숨긴 단추 자리는 안내 카드다
-        <div className="col" style={{ gap: phone ? 12 : 16, minWidth: 0 }}>
+        <div key={state} className="col" style={{ gap: phone ? 12 : 16, minWidth: 0 }}>
           <SummaryTiles v={v} />
           <GraphSection v={v} />
           {decision}
@@ -604,6 +634,17 @@ function AppealRequestSection({ v }: { v: View }) {
           <dd>
             {c.accountCount}계정 · 양도 잠금 {c.ticketCount}장
           </dd>
+          {/* 계정마다 그 계정의 첫 소명 요청 + 14일(연장 없음, ADR-0173 결정 3). 입장이 먼저 시작되면 그때 풀린다(추천 적용 2026-10-31) */}
+          <dt>잠금 최대 기한</dt>
+          <dd>
+            {/* '양도 잠금 최대 기한 지남'은 그림 상태다. 목업 회차는 입장 시작(10/25)이 첫 후보 묶음(10/14) + 14일보다 먼저 와서
+                이 회차의 날짜로는 14일 상한이 먼저 올 수 없다. 그래서 이 상태에서는 날짜 대신 규칙(계정마다 이 사건의 첫 소명 요청 + 14일,
+                늘지 않음)과 지난 계정 수만 적어, 아직 오지 않은 날짜와 '지남'이 한 화면에 함께 보이지 않게 한다
+                (ADR-0173 결정 3, docs/data.md 잠금 행, FRN-090 리뷰 결함 5, 추천 적용 2026-10-31) */}
+            {v.state === '양도 잠금 최대 기한 지남'
+              ? `계정마다 첫 소명 요청 + 14일 · 계정 ${LOCK_RELEASED_ACCOUNTS}개 지남`
+              : formatKst(transferLockExpiresAt(c.timeline.appealRequestedAt))}
+          </dd>
         </dl>
         {phase === 'appeal' ? (
           <span className="badge badge-warning" style={{ alignSelf: 'flex-start' }}>
@@ -671,12 +712,13 @@ function AppealRequestSection({ v }: { v: View }) {
         ) : null}
         <div className="banner banner-warning">
           <i className="ic ic-lock" aria-hidden="true" />
-          <div className="banner-body">소명을 요청하면 결정될 때까지 이 표들의 양도가 잠깁니다</div>
+          <div className="banner-body">{APPEAL_LOCK_NOTICE}</div>
         </div>
         <div className="banner banner-info">
           <i className="ic ic-users" aria-hidden="true" />
           <div className="banner-body">돈이 오가지 않은 가족 대리 예매는 부정 예매가 아닙니다</div>
         </div>
+        <p className="t-xs muted">{HOLDER_NOTICE}</p>
         <button className="btn btn-primary" type="button" onClick={() => v.go('소명 요청 확인')}>
           소명 요청 보내기
         </button>
@@ -719,15 +761,20 @@ function AppealResultSection({ v }: { v: View }) {
       </Widget>
     );
   }
+  // 양도 잠금 최대 기한 지남(일부): 앞 계정 셋의 잠금이 풀린 그림(d5 §7.19, ADR-0173 결정 3)
+  const released = v.state === '양도 잠금 최대 기한 지남' ? LOCK_RELEASED_ACCOUNTS : 0;
+  // 받은 사람의 진술은 소명을 요청한 뒤에 생긴다(같은 기한, ADR-0173 결정 4)
+  const holders = phase === 'investigating' ? [] : holdersFor(c.caseId);
   return (
     <Widget id="ar-h" title="소명 결과와 판단">
       <ul className="col" style={{ gap: 6 }} aria-label="계정별 소명 결과">
-        {members.map((m) => (
+        {members.map((m, i) => (
           <li key={m.accountId} className="row between" style={{ gap: 8, alignItems: 'center' }}>
             <span className="mono t-xs">
               {m.accountId} · {m.ticketCount}장
             </span>
             <span className="row" style={{ gap: 6, alignItems: 'center' }}>
+              {i < released ? <span className="badge badge-outline">잠금 풀림</span> : null}
               <CaseStatusBadge variant="appeal" value={m.appealResult} />
               {m.appealResult === 'SUBMITTED' && !v.phone ? (
                 <>
@@ -745,6 +792,27 @@ function AppealResultSection({ v }: { v: View }) {
       </ul>
       {members.some((m) => m.appealResult === 'SUBMITTED') ? <p className="t-xs muted">판단에는 이유가 필요합니다. 인정한 계정의 양도 잠금은 바로 풀립니다</p> : null}
       {v.phone && members.some((m) => m.appealResult === 'SUBMITTED') ? <BigScreenNote what="소명 판단은 태블릿이나 데스크톱에서 합니다" /> : null}
+      {holders.length > 0 ? (
+        <div className="col" style={{ gap: 6 }}>
+          <h3 className="eyebrow">받은 사람의 진술</h3>
+          <ul className="col" style={{ gap: 6 }} aria-label="받은 사람의 진술">
+            {holders.map((h) => (
+              <li key={h.seatLabel} className="row between" style={{ gap: 8, alignItems: 'center' }}>
+                <span className="t-xs">{h.seatLabel} · 보유자 진술</span>
+                <span className="row" style={{ gap: 6, alignItems: 'center' }}>
+                  {h.statement === 'SUBMITTED' ? <span className="badge badge-primary">냄</span> : <span className="badge">기다림</span>}
+                  {h.statement === 'SUBMITTED' && !v.phone ? (
+                    <button className="btn btn-text btn-sm" type="button" aria-label={`${h.seatLabel} 보유자 진술 본문 보기`}>
+                      본문 보기
+                    </button>
+                  ) : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="t-xs muted">판단은 조치 요청에서 그 표를 대상에 넣을지로 합니다</p>
+        </div>
+      ) : null}
     </Widget>
   );
 }
@@ -818,6 +886,8 @@ function ActionSection({ v }: { v: View }) {
   const ready = phase === 'deadline-passed';
   const passed = cancelDeadlineNotice(now, c.cancelDeadlineAt).tone === 'passed';
   const reason = phase === 'investigating' ? '소명을 요청하고 기한이 지난 뒤에 요청할 수 있습니다' : '소명 기한이 지난 뒤에 요청할 수 있습니다';
+  // 받은 사람이 가진 표는 진술을 받은 뒤(소명 요청 뒤)에 알 수 있다(ADR-0173 결정 4)
+  const holders = phase === 'investigating' ? [] : holdersFor(c.caseId);
   return (
     <Widget id="ac-h" title="조치 요청">
       <form className="col" style={{ gap: 10 }} aria-label="조치 요청" onSubmit={(e) => e.preventDefault()}>
@@ -836,8 +906,30 @@ function ActionSection({ v }: { v: View }) {
           ) : null}
           <label className="check-row" htmlFor="act-restrict">
             <input className="rd" type="radio" name="act" id="act-restrict" defaultChecked={passed} />
-            이용 제한(끝 1년 뒤)
+            이용 제한
           </label>
+        </fieldset>
+        <RestrictionEnd now={now} tooLong={v.state === '이용 제한이 너무 김'} />
+        <fieldset className="col" style={{ gap: 6, border: 0, padding: 0, margin: 0 }}>
+          <legend className="label" style={{ marginBottom: 6 }}>
+            대상 계정·표
+          </legend>
+          <p className="t-sm">
+            {c.accountCount}계정 · 결제 표 {c.ticketCount}장
+          </p>
+          {holders.length > 0 ? (
+            <>
+              {holders.map((h, i) => (
+                <label className="check-row t-sm" key={h.seatLabel} htmlFor={`act-h-${i}`}>
+                  <input className="cb" type="checkbox" id={`act-h-${i}`} aria-describedby="act-h-hint" />
+                  받은 사람이 가진 표 {h.seatLabel}(진술 {h.statement === 'SUBMITTED' ? '냄' : '기다림'})
+                </label>
+              ))}
+              <span className="hint" id="act-h-hint">
+                받은 사람이 가진 표는 기본으로 빠져 있습니다. 진술을 본 뒤 표마다 넣습니다
+              </span>
+            </>
+          ) : null}
         </fieldset>
         <div className="field">
           <label className="label" htmlFor="act-basis">
@@ -849,9 +941,12 @@ function ActionSection({ v }: { v: View }) {
           <label className="label" htmlFor="act-op">
             조사관 의견
           </label>
-          <textarea className="textarea" id="act-op" style={{ minHeight: 56 }} defaultValue={c.investigatorOpinion} aria-describedby="act-op-h" />
+          <textarea className="textarea" id="act-op" style={{ minHeight: 56 }} defaultValue={c.investigatorOpinion} aria-describedby="act-op-h act-op-rule" />
           <span className="hint" id="act-op-h">
             승인자가 승인 업무의 사건 요약에서 읽습니다
+          </span>
+          <span className="hint" id="act-op-rule">
+            {OPINION_HINT}
           </span>
         </div>
         <p className="t-xs muted">조치는 다른 승인자가 확인해야 실행됩니다</p>
@@ -874,6 +969,42 @@ function ActionSection({ v }: { v: View }) {
   );
 }
 
+/** KST 'YYYY-MM-DDTHH:mm'(datetime-local 칸 값) */
+const kstInput = (iso: string) => new Date(Date.parse(iso) + 9 * HOUR).toISOString().slice(0, 16);
+
+/** 이용 제한 끝(요청 + 1년 [가정]까지, ADR-0173 결정 7). 너무 길면 칸 오류(서버 422 restriction-too-long) */
+function RestrictionEnd({ now, tooLong }: { now: string; tooLong: boolean }) {
+  const max = restrictionEndMax(now);
+  // '이용 제한이 너무 김' 그림: 1년을 두 달 넘긴 끝을 고른 칸(추천 적용 2026-10-31)
+  const [value, setValue] = useState(kstInput(tooLong ? new Date(Date.parse(max) + 68 * 24 * HOUR).toISOString() : max));
+  const err = restrictionEndError(now, `${value}:00+09:00`);
+  return (
+    <div className={`field ${err ? 'is-error' : ''}`.trim()}>
+      <label className="label" htmlFor="act-end">
+        이용 제한 끝
+      </label>
+      <input
+        className="input"
+        id="act-end"
+        type="datetime-local"
+        value={value}
+        max={kstInput(max)}
+        onChange={(e) => setValue(e.target.value)}
+        aria-invalid={err ? 'true' : undefined}
+        aria-describedby={err ? 'act-end-e act-end-h' : 'act-end-h'}
+      />
+      {err ? (
+        <span className="error-msg" id="act-end-e" role="alert">
+          {err}
+        </span>
+      ) : null}
+      <span className="hint" id="act-end-h">
+        요청한 날부터 1년({new Date(Date.parse(max) + 9 * HOUR).getUTCFullYear()}년 {formatKst(max)} KST)까지 고를 수 있습니다
+      </span>
+    </div>
+  );
+}
+
 /** ⑦ 증거 묶음 */
 function BundleSection({ v }: { v: View }) {
   const { phase } = v;
@@ -887,6 +1018,7 @@ function BundleSection({ v }: { v: View }) {
     );
   }
   const b = EVIDENCE_BUNDLE;
+  const complaint = v.state === '고소·고발용 요약 받음';
   return (
     <Widget id="bd-h" title="증거 묶음">
       <span className="row wrap" style={{ gap: 6, alignItems: 'center' }}>
@@ -947,9 +1079,13 @@ function BundleSection({ v }: { v: View }) {
           <label className="label" htmlFor="ex-kind">
             내보내기
           </label>
-          <select className="input input-sm" id="ex-kind" defaultValue="PROMOTER">
-            <option value="AUTHORITY">기관 제출(접수된 자료 요청 번호 필수)</option>
-            <option value="PROMOTER">기획사 보고(회차 집계만)</option>
+          {/* 종류 셋(openapi EvidenceExport.kind). 고소·고발용 요약은 개인정보 없이 사유를 적고 받는다(ADR-0173 결정 6) */}
+          <select className="input input-sm" id="ex-kind" defaultValue={complaint ? 'COMPLAINT' : 'PROMOTER'}>
+            {EXPORT_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {EXPORT_KIND_LABEL[k]}
+              </option>
+            ))}
           </select>
           <input className="input input-sm" aria-label="자료 요청 번호(기관 제출일 때)" placeholder="자료 요청 번호(기관 제출일 때)" />
           <input className="input input-sm" aria-label="내보내기 사유(필수)" placeholder="내보내기 사유(필수)" />
@@ -957,6 +1093,18 @@ function BundleSection({ v }: { v: View }) {
             <i className="ic ic-download" aria-hidden="true" />
             내보내기
           </button>
+          {complaint ? (
+            // 고소·고발용 요약 받음(내보내기 COMPLAINT 200, d5 §7.19)
+            <div className="card-flat pad col" style={{ gap: 4 }} role="status">
+              <span className="row" style={{ gap: 6, alignItems: 'center' }}>
+                <i className="ic ic-check" aria-hidden="true" />
+                <span className="t-sm">
+                  내려받음 <span className="mono">{complaintFileName(v.c.caseId)}</span>
+                </span>
+              </span>
+              <span className="t-xs muted">{COMPLAINT_NOTE}</span>
+            </div>
+          ) : null}
         </form>
       )}
     </Widget>
@@ -1030,6 +1178,9 @@ function RemoveAccountDialog({ close, account }: { close: () => void; account: G
 function AppealConfirmDialog({ close, go, c }: { close: () => void; go: (s: string) => void; c: FraudCaseFixture }) {
   const due = defaultAppealDue(NOW, c.cancelDeadlineAt);
   const keepCancel = appealDueLeavesCancel(due, c.cancelDeadlineAt);
+  // 잠금 최대 기한은 이 요청으로 처음 잠기는 계정의 기한(지금 + 14일)이고, 받은 사람에게도 같은 기한으로 알린다(ADR-0173 결정 3·4)
+  const lockUntil = transferLockExpiresAt(NOW);
+  const holders = holdersFor(c.caseId);
   return (
     <Overlay onClose={close}>
       <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="apc-t" aria-describedby="apc-d" style={{ maxWidth: 480 }}>
@@ -1040,9 +1191,17 @@ function AppealConfirmDialog({ close, go, c }: { close: () => void; go: (s: stri
           <dt>보낼 계정</dt>
           <dd>{c.accountCount}</dd>
           <dt>잠기는 표</dt>
-          <dd>{c.ticketCount}장</dd>
+          <dd>
+            {c.ticketCount}장(늦어도 14일 뒤 {formatKst(lockUntil)}에 풀림)
+          </dd>
           <dt>진행 중인 양도 요청</dt>
           <dd>1건은 시스템이 철회합니다</dd>
+          {holders.length > 0 ? (
+            <>
+              <dt>받은 사람</dt>
+              <dd>표를 받아 가진 분 {holders.length}명에게도 알립니다</dd>
+            </>
+          ) : null}
           <dt>사유 범주</dt>
           <dd>{REASON_LABEL[c.reasonCategory]}</dd>
           <dt>기한</dt>
@@ -1051,7 +1210,7 @@ function AppealConfirmDialog({ close, go, c }: { close: () => void; go: (s: stri
         {!keepCancel ? (
           <p className="t-xs tx-warning">기한이 취소 마감 6시간 전({formatKst(new Date(Date.parse(c.cancelDeadlineAt) - 6 * HOUR).toISOString())} KST)보다 늦어, 이 사건은 표 취소를 고를 수 없고 이용 제한만 남을 수 있습니다</p>
         ) : null}
-        <p className="t-sm">소명을 요청하면 결정될 때까지 이 표들의 양도가 잠깁니다. 입장은 막지 않습니다.</p>
+        <p className="t-sm">{APPEAL_LOCK_NOTICE}. 입장은 막지 않습니다.</p>
         <div className="dialog-actions">
           <button className="btn btn-ghost" type="button" onClick={close}>
             닫기

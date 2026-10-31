@@ -2,6 +2,7 @@
 // 한 열: 양도할 티켓 → 양도 마감 → 양도 정책 → 받는 분 확인 → 법정 고지(부정구매·부정판매, POL-024 라목) → 보내기 전 확인 → 진행 중인 요청.
 // 휴대폰은 가득, 태블릿(md)은 가운데 600, 데스크톱(lg)은 가운데 640에 [양도 요청 보내기]를 오른쪽 정렬(보드 d).
 // 상태는 보드 SCR-014-m의 11가지(t·d 보드는 기본 모양만 있어 m의 상태를 같은 배치에 얹었다). 시트 상태는 열린 채로 그린다.
+// '부정 예매 조사로 잠김'(d5 §5.14, ADR-0173 결정 3)은 그 소명 요청으로 잠긴 표(apl-0003의 첫 좌석)를 보이고 ( 소명 보기 › )로 SCR-042에 보낸다(좌석은 추천 적용 2026-10-31).
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -9,6 +10,7 @@ import { Badge } from '@peaket/ds/Badge';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { TransferOfferCard } from '@peaket/ds/TransferOfferCard';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
+import { DEMO_FRAUD_APPEAL_ID, getAppeal, transferLocked409Text, transferLockedText } from '@/entities/appeal';
 import { ME } from '@/entities/me';
 import { getPerformance } from '@/entities/performance';
 import { getProduction, ProductionPoster, type Production } from '@/entities/production';
@@ -56,6 +58,10 @@ export async function TicketTransferPage({ params, searchParams }: Props) {
   const ticketHref = `/my/tickets/${ticketId}`;
   const when = `${perf.label} · ${venue.name}`;
   const recvPerf = getPerformance(RECEIVED_TICKET.performanceId);
+  // 부정 예매 조사로 잠긴 표: 소명 요청(apl-0003)으로 잠긴 첫 좌석과 잠금 최대 기한(transferLockExpiresAt)
+  const fraudAppeal = v.fraudLocked ? getAppeal(DEMO_FRAUD_APPEAL_ID) : undefined;
+  const lockedSeat = fraudAppeal?.lockedSeatLabels?.[0];
+  const appealHref = `/my/appeals/${DEMO_FRAUD_APPEAL_ID}`;
   const backToTickets = (
     <Link className="link-more self-center" href="/my/tickets">
       마이 티켓으로 돌아가기
@@ -87,11 +93,23 @@ export async function TicketTransferPage({ params, searchParams }: Props) {
               label="양도할 티켓"
               when={when}
               seat={
-                <>
-                  <strong>{TRANSFER_SEAT.seat}</strong> · {TRANSFER_SEAT.gate}
-                </>
+                v.fraudLocked && lockedSeat ? (
+                  <strong>{lockedSeat}</strong>
+                ) : (
+                  <>
+                    <strong>{TRANSFER_SEAT.seat}</strong> · {TRANSFER_SEAT.gate}
+                  </>
+                )
               }
-              badge={v.badgeOk ? <Badge tone="success">사용 가능</Badge> : v.sentSec ? <Badge tone="warning">양도 요청 중</Badge> : null}
+              badge={
+                v.fraudLocked ? (
+                  <Badge tone="warning">양도 잠김</Badge>
+                ) : v.badgeOk ? (
+                  <Badge tone="success">사용 가능</Badge>
+                ) : v.sentSec ? (
+                  <Badge tone="warning">양도 요청 중</Badge>
+                ) : null
+              }
             />
           ) : null}
 
@@ -156,29 +174,54 @@ export async function TicketTransferPage({ params, searchParams }: Props) {
             </>
           ) : null}
 
+          {v.policy ? (
+            <section className="col gap-2.5" aria-labelledby="h-pol">
+              <div className="row between gap-2">
+                <h2 className={H2} id="h-pol">
+                  이 티켓의 양도 정책
+                </h2>
+                {/* 잠긴 표(409 뒤 포함)에는 <양도 가능> 대신 <양도 잠김>(아래 잠김 안내와 어긋나지 않게, FRN-090 리뷰 결함 7) */}
+                {v.fraudLocked ? <Badge tone="warning">양도 잠김</Badge> : <Badge tone="success">양도 가능</Badge>}
+              </div>
+              <ul className="col t-sm gap-2">
+                {[
+                  '회원에게만 양도할 수 있습니다. 본인확인을 마친 피켓 회원만 받을 수 있습니다',
+                  '받은 분은 다시 양도할 수 없고 결제한 분에게 돌려주기만 할 수 있습니다',
+                  `예매 취소와 환불은 결제한 분(${ME.name} 님)만 할 수 있습니다`,
+                ].map((t) => (
+                  <li key={t} className="row items-start gap-2.5">
+                    <span className="dot muted mt-1.5" aria-hidden="true" />
+                    <span>{t}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {v.fraudLocked && fraudAppeal?.lockExpiresAtText ? (
+            <>
+              {v.transferLockedError ? (
+                // d5 §9.2 양도 요청 409 transfer-locked: 요청 사이에 잠겼다. 글은 §9.2 그대로(§5.14 상태 글과 다르다)
+                <NoticeBanner tone="danger" role="alert" title="양도 요청을 보내지 못했습니다">
+                  {transferLocked409Text(fraudAppeal.lockExpiresAtText)}
+                </NoticeBanner>
+              ) : (
+                <NoticeBanner tone="warning" role="alert" title="이 티켓은 지금 양도할 수 없습니다">
+                  {transferLockedText(fraudAppeal.lockExpiresAtText)}
+                </NoticeBanner>
+              )}
+              <div className="col items-center gap-3.5">
+                <Link className="link-more" href={appealHref}>
+                  소명 보기
+                  <i className="ic ic-chevron-right" aria-hidden="true" />
+                </Link>
+                {backToTickets}
+              </div>
+            </>
+          ) : null}
+
           {v.form ? (
             <>
-              <section className="col gap-2.5" aria-labelledby="h-pol">
-                <div className="row between gap-2">
-                  <h2 className={H2} id="h-pol">
-                    이 티켓의 양도 정책
-                  </h2>
-                  <Badge tone="success">양도 가능</Badge>
-                </div>
-                <ul className="col t-sm gap-2">
-                  {[
-                    '회원에게만 양도할 수 있습니다. 본인확인을 마친 피켓 회원만 받을 수 있습니다',
-                    '받은 분은 다시 양도할 수 없고 결제한 분에게 돌려주기만 할 수 있습니다',
-                    `예매 취소와 환불은 결제한 분(${ME.name} 님)만 할 수 있습니다`,
-                  ].map((t) => (
-                    <li key={t} className="row items-start gap-2.5">
-                      <span className="dot muted mt-1.5" aria-hidden="true" />
-                      <span>{t}</span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-
               <section className="col gap-3" aria-labelledby="h-rc">
                 <h2 className={H2} id="h-rc">
                   받는 분 확인

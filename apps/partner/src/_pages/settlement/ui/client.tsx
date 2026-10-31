@@ -3,15 +3,17 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Tabs } from '@peaket/ds/Tabs';
 
-/* ---------- 하위 탭(정산서 · 판매 요약 · 예매자 명단 · 다운로드 이력) ---------- */
+/* ---------- 하위 탭(정산서 · 판매 요약 · 예매자 명단 · 다운로드 이력 · 부정 예매 조치) ---------- */
 
-export type SubTab = 'settle' | 'summary' | 'roster' | 'log';
+export type SubTab = 'settle' | 'summary' | 'roster' | 'log' | 'fraud';
 
 const SUB_TABS: readonly { value: SubTab; label: string }[] = [
   { value: 'settle', label: '정산서' },
   { value: 'summary', label: '판매 요약' },
   { value: 'roster', label: '예매자 명단' },
   { value: 'log', label: '다운로드 이력' },
+  // 기획사 보고(FR-074, POL-046 ⑧, d5 §6.10. FRN-070에서 정본에 넣고 FRN-090에서 그렸다)
+  { value: 'fraud', label: '부정 예매 조치' },
 ];
 
 export function SubTabs({ initial, panels }: { initial: SubTab; panels: Record<SubTab, ReactNode> }) {

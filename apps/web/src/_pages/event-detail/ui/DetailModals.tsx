@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { createContext, useContext, useId, useState, type CSSProperties, type ReactNode } from 'react';
 import { WebShellModal, webModalButtonClass } from '@peaket/ds/WebShell';
 import type { Seller } from '@/entities/seller';
-import { CANCEL_FEES, LEGAL_RESALE_NOTICE, brokerNotice } from '../model/content';
+import { CANCEL_FEES, FRAUD_INVESTIGATION_NOTICE, LEGAL_RESALE_NOTICE, brokerNotice } from '../model/content';
 import type { DetailModal } from '../model/view';
 
 const OpenContext = createContext<(m: DetailModal) => void>(() => {});
@@ -110,6 +110,8 @@ export function DetailModalsProvider({ initial, seller, sortText, perPerson, log
               a: '양도는 결제한 분만 할 수 있고, 받는 분이 수락해야 끝납니다. 양도 마감은 공연 시작 2시간 전과 입장 시작 중 이른 때입니다.',
             },
             { q: '부정구매·부정판매 처벌·과징금', a: LEGAL_RESALE_NOTICE },
+            // POL-046 사전 고지(d5 §5.2 ⑯, 추천 적용 2026-10-31, ADR-0173)
+            { q: FRAUD_INVESTIGATION_NOTICE.title, a: FRAUD_INVESTIGATION_NOTICE.body },
           ]}
         />
       </WebShellModal>

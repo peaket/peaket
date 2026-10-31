@@ -4,7 +4,7 @@
 import type { CSSProperties } from 'react';
 import { ReplaySourceBadge } from '@peaket/ds/ReplaySourceBadge';
 import { CONSOLE_ORIGIN } from '../lib/origins';
-import { DENY_BODY, DENY_STATE, DENY_TITLE, parseOpened, sourceSpec, type Source } from '../lib/source';
+import { DENY_BODY, DENY_STATE, DENY_TITLE, REVIEW_PENDING_BODY, REVIEW_PENDING_STATE, parseOpened, sourceSpec, type Source } from '../lib/source';
 import { useSearch } from '../lib/url';
 
 export { ReplaySourceBadge };
@@ -16,6 +16,8 @@ export function sourceVals(st: string, source: Source) {
   const deny = st === DENY_STATE;
   const recv = st === '받는 중';
   const expired = st === '원천 만료';
+  // 연구 내보내기 403 pseudonymization-review-pending(연구 원천만, ADR-0173 결정 8, apply-legal-review-to-screens)
+  const reviewPending = source === 'research' && st === REVIEW_PENDING_STATE;
   return {
     src: source,
     spec: sourceSpec(source),
@@ -26,14 +28,15 @@ export function sourceVals(st: string, source: Source) {
     isDeny: deny,
     isRecv: recv,
     isExpired: expired,
+    isReviewPending: reviewPending,
     /** 조사는 고른 칸의 계정 좌석을 기본 좌석맵 위에 점등한다(합성·연구는 후보 좌석맵으로 바꾼다) */
     candMap: cand && !inv,
     /** 요약 칸의 '고른 세션' 값은 합성·연구만(조사의 고르기는 계정 하나라 전체 범위 값을 둔다) */
     statCand: cand && !inv,
     /** 좌석맵 그림 설명에 붙이는 점등 설명(조사) */
     mapNote: inv ? SEAT_MARK_NOTE + (cand ? SEAT_PICK_NOTE : '') : '',
-    /** 그릴 사건이 있는 상태(받는 중·원천 만료·권한 없음은 아무것도 그리지 않는다) */
-    hasData: !deny && !recv && !expired,
+    /** 그릴 사건이 있는 상태(받는 중·원천 만료·검토 전·권한 없음은 아무것도 그리지 않는다) */
+    hasData: !deny && !recv && !expired && !reviewPending,
   };
 }
 
@@ -461,6 +464,17 @@ export function ExpiredMain({ source }: { source: Source }) {
       <span className="state-icon" style={{ width: 56, height: 56 }}><i className="ic ic-history" aria-hidden="true" /></span>
       <h1 className="t-lg">{s.expired}</h1>
       <ConsoleLink path={s.consolePath ?? '/dashboard'} />
+    </main>
+  );
+}
+
+/** 가명처리 적정성 검토 전(연구 내보내기 403 pseudonymization-review-pending, d5 §9.2): 받을 기록이 없어 아무것도 그리지 않는다 */
+export function ReviewPendingMain() {
+  return (
+    <main id="main" className="col" style={centerMain}>
+      <span className="state-icon is-warning" style={{ width: 56, height: 56 }}><i className="ic ic-lock" aria-hidden="true" /></span>
+      <h1 className="t-lg" style={{ maxWidth: 560 }}>{REVIEW_PENDING_BODY}</h1>
+      <ConsoleLink path="/dashboard" />
     </main>
   );
 }

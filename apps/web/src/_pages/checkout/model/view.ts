@@ -23,6 +23,11 @@ export interface CheckoutView {
   pay: PayMode;
   /** 홀드 만료(결제창 열기 전) 대화상자 */
   expiredDialog: boolean;
+  /**
+   * ④ 위 warning 상자 '부정 예매 조사로 양도가 잠기는 회차'(d5 §5.11, ADR-0173 결정 3). 이 계정에 이 회차의 PAYER 소명 요청이 있고 lockActive가 참일 때.
+   * 결제 버튼은 그대로 쓸 수 있다(주문·결제 API에는 칸을 더하지 않는다)
+   */
+  fraudLock: boolean;
 }
 
 const RETURN_KIND: Partial<Record<Scr011State, PaymentReturnKind>> = {
@@ -60,6 +65,7 @@ export function checkoutView(state: Scr011State): CheckoutView {
     frame: switched ? 'portone' : state === '위젯 준비' ? 'toss-loading' : 'toss-ready',
     pay,
     expiredDialog: pay === 'expired',
+    fraudLock: state === '부정 예매 조사로 양도가 잠기는 회차',
   };
 }
 

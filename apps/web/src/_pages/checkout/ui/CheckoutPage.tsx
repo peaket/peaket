@@ -9,6 +9,7 @@ import { notFound } from 'next/navigation';
 import type { WebShellHold } from '@peaket/ds/WebShell';
 import { PaymentWidgetFrame } from '@peaket/ds/PaymentWidgetFrame';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
+import { APPEALS, checkoutLockWarning } from '@/entities/appeal';
 import { CANCEL_FEE_ROWS, CHECKOUT_DEMO, PaymentReturnCard, PORTONE_METHODS, holdTimeText, thirdPartyRows } from '@/entities/payment';
 import { getPerformance } from '@/entities/performance';
 import { formatWon, getProduction } from '@/entities/production';
@@ -59,6 +60,11 @@ export async function CheckoutPage({ params, searchParams }: Props) {
     event: `/events/${perf.id}`,
     appeal: '/my/appeals/apl-0001',
   };
+  // 이 회차에 양도가 잠긴 결제자 소명 요청(GET /v1/fraud-appeal-requests의 PAYER·lockActive 항목)의 잠금 기한. 받은 사람 항목으로는 보이지 않는다
+  const lockAppeal = v.fraudLock
+    ? APPEALS.find((a) => a.kind === 'fraud' && a.party === 'PAYER' && a.target?.performanceId === perf.id && a.lockExpiresAtText)
+    : undefined;
+  const fraudLockText = lockAppeal?.lockExpiresAtText ? checkoutLockWarning(lockAppeal.lockExpiresAtText) : undefined;
   const totalText = formatWon(CHECKOUT_DEMO.total);
   const hold = holdTimeText(CHECKOUT_DEMO.holdRemainingSeconds);
   const payProps = { mode: v.pay, amountText: totalText, holdText: hold.text, holdAria: hold.aria, returnHref: hrefs.returnPath };
@@ -92,7 +98,7 @@ export async function CheckoutPage({ params, searchParams }: Props) {
               </div>
             </div>
           ) : (
-            <CheckoutForm v={v} d={d} totalText={totalText} payProps={payProps} />
+            <CheckoutForm v={v} d={d} totalText={totalText} payProps={payProps} fraudLockText={fraudLockText} />
           )}
         </main>
         {v.expiredDialog ? <HoldExpiredDialog seatsHref={hrefs.seats} /> : null}
@@ -107,9 +113,11 @@ interface FormProps {
   d: Loaded;
   totalText: string;
   payProps: Omit<Parameters<typeof PayAction>[0], 'layout'>;
+  /** 부정 예매 조사로 이 회차 양도가 잠겼을 때 ④ 위 안내 글 */
+  fraudLockText?: string;
 }
 
-function CheckoutForm({ v, d, totalText, payProps }: FormProps) {
+function CheckoutForm({ v, d, totalText, payProps, fraudLockText }: FormProps) {
   const { perf, production, seller } = d;
   const sort = SORT_NOTICE[production.sortMode];
   const phone = v.inputError ? CHECKOUT_DEMO.invalidPhone : CHECKOUT_DEMO.buyer.phone;
@@ -224,6 +232,15 @@ function CheckoutForm({ v, d, totalText, payProps }: FormProps) {
               위 내용에 동의합니다 (필수)
             </ConsentCheck>
           </section>
+
+          {/* ④ 위: 부정 예매 조사로 이 회차 양도가 잠긴 계정에 결제 전 안내(d5 §5.11, 약관법 제3조 제3항 설명의무, 추천 적용 2026-10-31, ADR-0173 결정 3).
+              잠긴 동안 새로 산 표도 발권 때 잠긴다. 결제 버튼은 그대로다 */}
+          {v.fraudLock && fraudLockText ? (
+            <div className="banner banner-warning" role="note">
+              <i className="ic ic-lock" aria-hidden="true" />
+              <div className="banner-body">{fraudLockText}</div>
+            </div>
+          ) : null}
 
           {/* ④ 판매 조건과 취소 규정(정렬 방식 세 번째 고지 자리, 취소 수수료 재고지) */}
           <section className="col" style={{ gap: 12 }} aria-labelledby="co-terms-h">

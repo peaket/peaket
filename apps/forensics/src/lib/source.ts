@@ -182,6 +182,12 @@ export const DEFAULT_STATE = '재생';
 export const DENY_STATE = '권한 없음(지정 없음)';
 export const DENY_TITLE = '이 화면을 볼 권한이 없습니다';
 export const DENY_BODY = '조사 원천은 부정 거래 조사관, 연구 원천은 가명정보 취급자 지정이 있어야 엽니다';
+/**
+ * 연구 내보내기 403 pseudonymization-review-pending(연구 원천만, d5 §9.2, ADR-0173 결정 8). 가명처리 적정성 검토 결과서가 승인되기 전이라
+ * 받을 기록이 없다. 상태 이름은 오류 응답 꼴(OpenSpec apply-legal-review-to-screens design.md 결정 3)
+ */
+export const REVIEW_PENDING_STATE = '오류 · pseudonymization-review-pending';
+export const REVIEW_PENDING_BODY = '가명처리 적정성 검토 결과서가 승인되기 전이라 내보낼 수 없습니다. 개인정보 보호책임자에게 검토를 요청해 주세요';
 
 /** 합성은 공개 데모라 권한 없음이 없다. 만드는 중·시나리오 상태는 합성에만 있다 */
 const WIDE: Record<Source, readonly string[]> = {
@@ -201,7 +207,7 @@ const WIDE: Record<Source, readonly string[]> = {
   ],
   // 조사는 산점도 대신 기준선 그림(CMP-083)이라 그래픽 대체가 없다
   investigation: ['재생', '후보 고름', '받는 중', '파일 거절', '사건 일부 버림', '복사 방식', '돌릴 수 없음', '일시정지', '원천 만료', DENY_STATE],
-  research: ['재생', '후보 고름', '받는 중', '파일 거절', '사건 일부 버림', '복사 방식', '그래픽 대체', '돌릴 수 없음', '일시정지', '원천 만료', DENY_STATE],
+  research: ['재생', '후보 고름', '받는 중', '파일 거절', '사건 일부 버림', '복사 방식', '그래픽 대체', '돌릴 수 없음', '일시정지', '원천 만료', REVIEW_PENDING_STATE, DENY_STATE],
 };
 
 /**

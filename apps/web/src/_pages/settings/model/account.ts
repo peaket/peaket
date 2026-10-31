@@ -29,6 +29,15 @@ export const LINKED_PROVIDERS: readonly MeSummary['provider'][] = ['kakao', 'goo
 /** 예매 제한 중 표본(소명 기한, SCR-042로 간다) */
 export const RESTRICTION = { appealDeadlineText: '10/27', appealHref: '/my/appeals/apl-0001' } as const;
 
+/**
+ * 탈퇴 409 '탈퇴 전 확인'의 fraudHold.until 표본(openapi fraudHold, ADR-0173 결정 7). RESTRICTED는 부정 예매 이용 제한 끝(apl-0003 조치 결과와 같은 날),
+ * CASE_OPEN은 그 회차 공연일(10/25) + 30일 [가정]이다. 합성 값이다
+ */
+export const FRAUD_HOLD_UNTIL: Readonly<Record<'RESTRICTED' | 'CASE_OPEN', string>> = {
+  RESTRICTED: '2027년 10월 22일(금)',
+  CASE_OPEN: '11/24(화)',
+};
+
 /** 로그인한 기기(최대 5대). 스태프 세션은 현장 스캐너다(ADR-0051) */
 export const DEVICE_SESSIONS: readonly DeviceSession[] = [
   { id: 'ses-chrome-win', name: 'Chrome · Windows', icon: 'globe', current: true },

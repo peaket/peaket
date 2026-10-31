@@ -8,6 +8,7 @@ import { notFound } from 'next/navigation';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
 import { TransferOfferCard } from '@peaket/ds/TransferOfferCard';
+import { TRANSFER_OFFER_FRAUD_NOTICE } from '@/entities/appeal';
 import { ME_HANEUL } from '@/entities/me';
 import { getPerformance } from '@/entities/performance';
 import { getProduction, ProductionPoster } from '@/entities/production';
@@ -112,6 +113,8 @@ export async function TransferOfferPage({ params, searchParams }: Props) {
                   이 티켓은 결제한 사람만 취소할 수 있고, 공연이 취소되면 환불도 결제한 분에게 갑니다. 티켓값을 주고받았다면 두 분이 직접 정산해야 합니다
                 </p>
                 <p style={{ marginTop: 6 }}>받으면 이 티켓은 다시 양도할 수 없고 결제한 분에게 돌려주기만 할 수 있습니다</p>
+                {/* d5 §5.23 ② 셋째 줄(POL-017, 약관법 제3조 제4항, 추천 적용 2026-10-31, ADR-0173 결정 4) */}
+                <p style={{ marginTop: 6 }}>{TRANSFER_OFFER_FRAUD_NOTICE}</p>
               </NoticeBanner>
               <AcceptButtons seat={offer.seatText} path={path} keep={keep} />
             </>

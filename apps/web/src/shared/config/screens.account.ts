@@ -57,6 +57,9 @@ export const SCR017_STATES = [
   '예매 제한 중',
   /** d5 §5.17 상태 표에서 더함(보드에 없음) */
   '기기 목록 로딩',
+  /** d5 §5.17 탈퇴 단계의 대조값 보관 안내 두 줄(탈퇴 409 fraudHold, ADR-0173 결정 7). 상태 이름은 추천 적용 2026-10-31 */
+  '탈퇴 확인 · 부정 예매 이용 제한 중',
+  '탈퇴 확인 · 부정 예매 소명 요청 받음',
 ] as const;
 export type Scr017State = (typeof SCR017_STATES)[number];
 
@@ -88,10 +91,31 @@ export const SCR042_STATES = [
   '제출됨 · 부정 예매',
   '결과 · 부정 예매 소명 인정',
   '결과 · 부정 예매 소명 불인정',
+  /** d5 §5.24 상태 표에서 더했다(apply-legal-review-to-screens, ADR-0173). '이의 결과 · 부정 예매'는 배지 둘(인정·기각)로 나눴다(추천 적용 2026-10-31) */
+  '양도 잠금 풀림 · 부정 예매',
+  '조치 결과 · 부정 예매',
+  '이의 결과 · 부정 예매 · 인정',
+  '이의 결과 · 부정 예매 · 기각',
+  /** d5 §5.24 '받은 사람의 변형' 상태 표(party HOLDER, apl-0004, ADR-0173 결정 4) */
+  '받은 표 확인 요청',
+  '제출됨 · 받은 표',
+  '결과 · 취소 대상에서 빠짐',
+  '결과 · 취소됨',
 ] as const;
 export type Scr042State = (typeof SCR042_STATES)[number];
-/** 부정 예매 소명(apl-0003) 미리 보기 목록에 올리는 상태(SCR042_STATES의 마지막 넷) */
-export const SCR042_FRAUD_STATES = ['부정 예매 소명', '제출됨 · 부정 예매', '결과 · 부정 예매 소명 인정', '결과 · 부정 예매 소명 불인정'] as const satisfies readonly Scr042State[];
+/** 부정 예매 소명 결제자(apl-0003) 미리 보기 목록에 올리는 상태 */
+export const SCR042_FRAUD_STATES = [
+  '부정 예매 소명',
+  '제출됨 · 부정 예매',
+  '결과 · 부정 예매 소명 인정',
+  '결과 · 부정 예매 소명 불인정',
+  '양도 잠금 풀림 · 부정 예매',
+  '조치 결과 · 부정 예매',
+  '이의 결과 · 부정 예매 · 인정',
+  '이의 결과 · 부정 예매 · 기각',
+] as const satisfies readonly Scr042State[];
+/** 부정 예매 소명 받은 사람(apl-0004) 미리 보기 목록에 올리는 상태 */
+export const SCR042_HOLDER_STATES = ['받은 표 확인 요청', '제출됨 · 받은 표', '결과 · 취소 대상에서 빠짐', '결과 · 취소됨'] as const satisfies readonly Scr042State[];
 
 // ── SCR-043 배상금 계좌 입력 ──
 export const SCR043_STATES = ['입력', '재인증 시트', '재인증 만료', '송금 요청 중', '계좌 오류', '3회 실패', '이미 지급', '완료'] as const;
@@ -179,7 +203,7 @@ export const ACCOUNT_SCREENS: readonly WebScreen[] = [
     group: 'request',
     owner: 'account',
     states: SCR017_STATES,
-    note: '로그아웃 확인은 셸의 대화상자. 기기 목록 로딩은 d5 상태 표에서 더함',
+    note: '로그아웃 확인은 셸의 대화상자. 기기 목록 로딩과 탈퇴 확인의 부정 예매 대조값 보관 안내 둘(ADR-0173)은 d5에서 더함',
   },
   { id: 'SCR-039', name: '계정 연결 제안', path: '/login/link', group: 'request', owner: 'account', states: SCR039_STATES },
   {
@@ -197,7 +221,7 @@ export const ACCOUNT_SCREENS: readonly WebScreen[] = [
     path: '/my/appeals/apl-0001',
     group: 'request',
     owner: 'account',
-    states: SCR042_STATES.filter((st) => !(SCR042_FRAUD_STATES as readonly string[]).includes(st)),
+    states: SCR042_STATES.filter((st) => !([...SCR042_FRAUD_STATES, ...SCR042_HOLDER_STATES] as readonly string[]).includes(st)),
     note: "예매 제한(apl-0001)과 양도 회수(apl-0002) 두 건을 한 경로의 상태로 본다. '제출됨 · 양도 회수'는 d5에서 더했다. 부정 예매 소명 상태는 아래 apl-0003 줄",
   },
   {
@@ -207,7 +231,16 @@ export const ACCOUNT_SCREENS: readonly WebScreen[] = [
     group: 'request',
     owner: 'account',
     states: SCR042_FRAUD_STATES,
-    note: "부정 예매 소명 요청 건(apl-0003, 보드 없음 → d5 §5.24 그림). 기한이 지난 뒤와 소명 닫힘은 위 줄의 '기한 지남'·'소명 닫힘'과 같은 화면이다",
+    note: "부정 예매 소명 요청 건(apl-0003, 보드 없음 → d5 §5.24 그림). 기한이 지난 뒤와 소명 닫힘은 위 줄의 '기한 지남'·'소명 닫힘'과 같은 화면이다. 잠금 풀림·조치 결과·이의 결과는 ADR-0173(2026-10-31)",
+  },
+  {
+    id: 'SCR-042',
+    name: '소명 제출(부정 예매 · 받은 사람)',
+    path: '/my/appeals/apl-0004',
+    group: 'request',
+    owner: 'account',
+    states: SCR042_HOLDER_STATES,
+    note: '사건 계정이 결제한 표를 양도로 받아 가진 분(party HOLDER, apl-0004, d5 §5.24 받은 사람의 변형, ADR-0173 결정 4). 사유 범주·이의는 없다',
   },
   { id: 'SCR-043', name: '배상금 계좌 입력', path: '/my/compensations/cmp-0001', group: 'request', owner: 'account', states: SCR043_STATES },
   {

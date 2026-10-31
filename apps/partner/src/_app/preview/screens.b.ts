@@ -21,7 +21,7 @@ export const screensB: readonly PreviewScreen[] = [
     name: '정산 리포트·명단',
     path: routes.eventTab(EVT, 'settlement'),
     states: SETTLEMENT_STATES,
-    note: '상태가 하위 탭(정산서·판매 요약·예매자 명단·다운로드 이력)도 고른다',
+    note: '상태가 하위 탭(정산서·판매 요약·예매자 명단·다운로드 이력·부정 예매 조치)도 고른다',
   },
   { id: 'SCR-037', name: '현장 스태프·현장 운영', path: routes.eventTab(EVT, 'staff'), states: STAFF_STATES, note: '상태가 하위 탭(스태프·현장 운영)도 고른다' },
   { id: 'SCR-044', name: '회차 취소·연기 요청', path: routes.eventTab(EVT, 'cancellation'), states: CANCELLATION_STATES },
