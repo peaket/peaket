@@ -22,7 +22,8 @@ import type { Clock } from './clock.js';
 import { requestContext } from './context.js';
 import { ProblemError } from './problem.js';
 import { IDEMPOTENT_METADATA, type IdempotentOptions, prepareIdempotency } from './idempotency.js';
-import { IDEMPOTENCY_KEY_BY_MODULE, throwAttachedValidationError } from './request-checks.js';
+import { PURCHASE_SIGNED_METADATA, type PurchaseRejection, type PurchaseSessionPort, verifyPurchaseRequest } from './purchase-auth.js';
+import { IDEMPOTENCY_KEY_BY_MODULE, PURCHASE_SIGNATURE_BY_MODULE, throwAttachedValidationError } from './request-checks.js';
 
 /** 허용 역할 값(docs/security/authz-matrix.md §5.5 표, openapi x-peaket-roles) */
 export const ROLE_VALUES = [
@@ -199,8 +200,10 @@ export class AuthState {
   constructor(
     clock: Clock,
     readonly adminAuthz?: AdminAuthzPort,
-    /** 관리 역할 처리기가 있는데 adminAuthz가 없으면 시작을 막는다(문서 뽑기에서는 끈다) */
+    /** 관리 역할 처리기가 있는데 adminAuthz가 없으면 시작을 막는다(문서 뽑기에서는 끈다). 구매 세션 포트도 같다 */
     readonly requireAdminAuthz = true,
+    /** 구매 요청 인증 훅(@PurchaseSigned)의 구매 세션 포트와 거절을 세는 곳 */
+    readonly purchase: { sessions?: PurchaseSessionPort; onRejected?: (reason: PurchaseRejection) => void } = {},
   ) {
     this.terminated = new TerminatedSessions(clock);
     this.#cache = new AdminAuthzCache(clock);
@@ -265,7 +268,7 @@ function identityOf(headers: FastifyRequest['headers']): Principal | undefined {
 /** 쿠키 경로의 challenge(docs/api/guidelines.md §12) */
 export const COOKIE_CHALLENGE = 'Cookie realm="peaket"';
 
-/** 모든 요청에 거는 가드(전역). 순서: 공개 → 신원 → 종료 세션 → 대상 → 스코프 → 관리 역할 → 멱등 키 → 경로 스키마 검사 실패 */
+/** 모든 요청에 거는 가드(전역). 순서: 공개 → 신원 → 종료 세션 → 대상 → 스코프 → 관리 역할 → 멱등 키 → 구매 세션 요청 서명 → 경로 스키마 검사 실패 */
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
@@ -315,6 +318,18 @@ export class AuthGuard implements CanActivate {
     // 멱등 키는 신원 판정 뒤, 모양 검사 실패보다 먼저 본다(두 검사 길의 순서가 같다, add-idempotency-and-outbox 결정 1)
     const idempotent = this.reflector.get<IdempotentOptions | undefined>(IDEMPOTENT_METADATA, ctx.getHandler());
     if (idempotent) prepareIdempotency(request, idempotent, principal.accountId);
+    // 구매 세션 요청 서명은 형식만 보는 멱등 키 뒤, 모양 검사보다 먼저 본다. 틀리면 401이고 일련번호를 올리지 않는다
+    // (openspec 변경 add-breakers-purchase-auth-and-grpc-channel 결정 6·7)
+    if (this.reflector.get<boolean | undefined>(PURCHASE_SIGNED_METADATA, ctx.getHandler()) === true) {
+      const port = this.state.purchase.sessions;
+      // 시작 확인이 막으므로 오지 않는다. 와도 닫는다
+      if (!port) throw unauthorized();
+      const rejected = await verifyPurchaseRequest(request, principal, port);
+      if (rejected) {
+        this.state.purchase.onRejected?.(rejected);
+        throw unauthorized();
+      }
+    }
     throwAttachedValidationError(request);
     return true;
   }
@@ -352,6 +367,16 @@ export class RolesCheck implements OnApplicationBootstrap {
         }
         if (Reflect.getMetadata(IDEMPOTENCY_KEY_BY_MODULE, fn) === true && Reflect.getMetadata(IDEMPOTENT_METADATA, fn) === undefined) {
           problems.push(`${where}: 계약이 Idempotency-Key를 요구하는데 @Idempotent가 없다(머리 스키마는 이 키를 보지 않는다, guidelines §4)`);
+        }
+        const purchaseSigned = Reflect.getMetadata(PURCHASE_SIGNED_METADATA, fn) === true;
+        if (Reflect.getMetadata(PURCHASE_SIGNATURE_BY_MODULE, fn) === true && !purchaseSigned) {
+          problems.push(`${where}: 계약이 X-Purchase-Seq·X-Purchase-Mac을 요구하는데 @PurchaseSigned()가 없다(머리 스키마는 이 둘을 보지 않는다, ADR-0050 결정 8)`);
+        }
+        if (purchaseSigned && policy.roles.includes('public')) {
+          problems.push(`${where}: 공개 역할을 허용한 처리기에는 @PurchaseSigned()를 달 수 없다(구매 세션은 팬 신원에 묶인다)`);
+        }
+        if (purchaseSigned && !this.state.purchase.sessions && this.state.requireAdminAuthz) {
+          problems.push(`${where}: @PurchaseSigned()의 구매 세션 포트(createService의 purchaseSessions)가 없다`);
         }
         if (Reflect.getMetadata(IDEMPOTENT_METADATA, fn) !== undefined && policy.roles.includes('public')) {
           problems.push(`${where}: 공개 역할을 허용한 처리기에는 @Idempotent를 달 수 없다(멱등 범위에 계정이 필요하다, guidelines §4)`);

@@ -22,16 +22,19 @@ import {
   ContractRouteSchema,
   IdempotencyRequest,
   Idempotent,
+  PurchaseSigned,
   Roles,
   contractRouteSchema,
   createService,
   fakeClock,
 } from '../src/index.js';
-import { collector } from './fixture.js';
+import { SIGN, collector, signPurchaseHeaders, testPurchaseSessions } from './fixture.js';
 
 const ListQuery = z.object({ ids: z.array(z.string()).max(3).optional(), flag: z.boolean().optional(), n: z.number().optional() });
 const StrictQuery = z.object({ a: z.string().optional() }).strict();
 const FanBody = z.object({ seat: z.string() });
+// 정수 머리 바꾸기 표본. 계약의 정수 머리였던 X-Purchase-Seq는 FND-100부터 구매 요청 인증 훅만 본다
+const PageHeaders = z.object({ 'X-Page-Size': z.int().min(1) });
 
 @Controller('v1/t')
 class PipeController {
@@ -49,13 +52,20 @@ class PipeController {
   @Post('events/:eventId/holds')
   @Roles(['fan'])
   @Idempotent({ operation: 'CREATE_HOLD' })
+  @PurchaseSigned()
   hold(
     @ContractParams(PostV1EventsEventIdHoldsParams) _params: unknown,
     @ContractHeaders(PostV1EventsEventIdHoldsHeader) headers: Record<string, unknown>,
     @ContractBody(PostV1EventsEventIdHoldsBody) body: unknown,
     @IdempotencyRequest() idem: IdempotencyRequest,
   ) {
-    return { seq: headers['X-Purchase-Seq'], key: idem.key, body };
+    return { headers, key: idem.key, body };
+  }
+
+  @Get('page')
+  @Roles(['public'])
+  page(@ContractHeaders(PageHeaders) headers: Record<string, unknown>) {
+    return { headers };
   }
 
   @HttpCode(200)
@@ -99,6 +109,7 @@ class RouteSchemaController {
   @Post('events/:eventId/holds')
   @Roles(['fan'])
   @Idempotent({ operation: 'CREATE_HOLD' })
+  @PurchaseSigned()
   @ContractRouteSchema({ params: PostV1EventsEventIdHoldsParams, headers: PostV1EventsEventIdHoldsHeader, body: PostV1EventsEventIdHoldsBody })
   hold(@Body() body: unknown) {
     return { body };
@@ -156,16 +167,18 @@ class ChecksModule {}
 
 let svc: Awaited<ReturnType<typeof createService>>;
 const KEY = '0190f3a1-7c2e-4a00-8000-000000000001';
-const holdHeaders = { 'x-user-id': 'acc-1', 'x-session-id': 's-1', 'x-user-aud': 'fan', 'content-type': 'application/json', 'idempotency-key': KEY, 'x-purchase-seq': '5', 'x-purchase-mac': 'm' };
+const holdHeaders = { 'x-user-id': 'acc-1', 'x-session-id': 's-1', 'x-user-aud': 'fan', 'content-type': 'application/json', 'idempotency-key': KEY, 'x-purchase-seq': 'next', 'x-purchase-mac': SIGN };
 
 beforeAll(async () => {
-  svc = await createService({ name: 'checks-svc', module: ChecksModule, env: { PEAKET_ENV: 'ci' }, clock: fakeClock(), logDestination: collector().stream });
+  svc = await createService({ name: 'checks-svc', module: ChecksModule, env: { PEAKET_ENV: 'ci' }, clock: fakeClock(), logDestination: collector().stream, purchaseSessions: testPurchaseSessions() });
 });
 afterAll(async () => {
   await svc.close();
 });
 
-const call = (o: { method: string; url: string; headers?: Record<string, string>; payload?: string }) => svc.http.inject(o as never);
+// 홀드 경로는 구매 세션 요청 서명을 요구한다(FND-100). x-purchase-mac이 SIGN이면 요청마다 새 번호로 서명한다
+const call = (o: { method: string; url: string; headers?: Record<string, string>; payload?: string }) =>
+  svc.http.inject({ ...o, headers: signPurchaseHeaders(o.method, o.url, o.headers ?? {}, o.payload ?? '') } as never);
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 const without = (b: Record<string, unknown>) => {
   const { traceId: _t, instance: _i, ...rest } = b;
@@ -178,9 +191,12 @@ describe('문자열 값 바꾸기(Zod 파이프)', () => {
     const r = await call({ method: 'GET', url: '/v1/t/events/e1/seatmap/snapshot?section=3' });
     expect(r.statusCode).toBe(200);
     expect(json(r)).toEqual({ params: { eventId: 'e1' }, query: { section: 3 } });
-    const h = await call({ method: 'POST', url: '/v1/t/events/e1/holds', headers: holdHeaders, payload: '{"seatIds":["A-1"]}' });
+    const h = await call({ method: 'GET', url: '/v1/t/page', headers: { 'x-page-size': '5' } });
     expect(h.statusCode).toBe(200);
-    expect(json(h)).toMatchObject({ seq: 5, key: KEY });
+    expect(json(h)).toEqual({ headers: { 'X-Page-Size': 5 } });
+    const hold = await call({ method: 'POST', url: '/v1/t/events/e1/holds', headers: holdHeaders, payload: '{"seatIds":["A-1"]}' });
+    expect(hold.statusCode).toBe(200);
+    expect(json(hold)).toMatchObject({ key: KEY, headers: {} });
   });
 
   test('FND070_쉼표로이은배열과_불리언을_바꾼다', async () => {
@@ -237,8 +253,9 @@ describe('두 길의 표본 일치(V-T41 표본 묶음)', () => {
       { name: '깨진 JSON', headers: holdHeaders, payload: '{"seatIds":', expect: 400 },
       { name: '멱등 키 없음', headers: { ...holdHeaders, 'idempotency-key': '' }, payload: '{}', expect: 400 },
       { name: '멱등 키가 UUID 아님', headers: { ...holdHeaders, 'idempotency-key': 'k-1' }, payload: '{}', expect: 400 },
-      { name: '일련번호 글자', headers: { ...holdHeaders, 'x-purchase-seq': 'abc' }, payload: '{}', expect: 400 },
-      { name: '일련번호 0', headers: { ...holdHeaders, 'x-purchase-seq': '0' }, payload: '{}', expect: 400 },
+      // 일련번호 형식은 FND-100부터 머리 스키마가 아니라 구매 요청 인증 훅이 본다(두 길 모두 401, purchase-auth.test.ts)
+      { name: '일련번호 글자', headers: { ...holdHeaders, 'x-purchase-seq': 'abc' }, payload: '{}', expect: 401 },
+      { name: '일련번호 0', headers: { ...holdHeaders, 'x-purchase-seq': '0' }, payload: '{}', expect: 401 },
       // 코드 리뷰 2026-11-01: Ajv strict: false가 strictNumbers까지 꺼 경로 스키마가 무한대를 받았다
       { name: '무한대 숫자', headers: holdHeaders, payload: '{"behavior":{"v":1,"windowMs":10,"pointerEntropy":1e400}}', expect: 400 },
     ]);
@@ -311,7 +328,7 @@ describe('두 길의 표본 일치(V-T41 표본 묶음)', () => {
   test('FND070_Nest밖에서붙인경로의스키마는_Fastify기본대로바로거절한다', async () => {
     // 다시 본 코드 리뷰 2026-11-01: 검사 결과를 붙여 두기만 하는 설정(attachValidation)이 모든 경로에 걸려, 인증 가드를 지나지 않는
     // 경로(서비스가 http에 바로 붙인 경로)는 검사 실패가 그대로 통과했다. Fastify 별칭 query도 놓쳤다
-    const own = await createService({ name: 'raw-svc', module: ChecksModule, env: { PEAKET_ENV: 'ci' }, clock: fakeClock(), logDestination: collector().stream });
+    const own = await createService({ name: 'raw-svc', module: ChecksModule, env: { PEAKET_ENV: 'ci' }, clock: fakeClock(), logDestination: collector().stream, purchaseSessions: testPurchaseSessions() });
     try {
       const sc = { type: 'object', properties: { n: { type: 'integer' } }, required: ['n'] };
       own.http.get('/raw-qs', { schema: { querystring: sc } }, async (req) => ({ q: req.query }));

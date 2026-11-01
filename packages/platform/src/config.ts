@@ -24,7 +24,15 @@ export interface PlatformConfig {
   sampleOneIn: number;
   /** 경로에 SLO 지연을 적지 않았을 때의 기준(PEAKET_LOG_SLO_LATENCY_MS, 기본 NFR-011의 500ms). 넘은 요청은 전수로 남긴다 */
   defaultSloLatencyMs: number;
+  /** 서비스 사이 gRPC 부하 분산 프로필(PEAKET_GRPC_LB_PROFILE, 기본 service. headless-round-robin은 local·ci만, guidelines §5) */
+  grpcLbProfile: GrpcLbProfile;
 }
+
+/** gRPC 부하 분산 프로필(ADR-0082 결정 4). headless-round-robin은 메시 없는 로컬 측정 전용이다 */
+export const GRPC_LB_PROFILES = ['service', 'headless-round-robin'] as const;
+export type GrpcLbProfile = (typeof GRPC_LB_PROFILES)[number];
+/** headless-round-robin을 받는 환경(운영 오버레이 검사 D-T28보다 앞의 막이) */
+export const HEADLESS_ROUND_ROBIN_ALLOWED: readonly PeaketEnv[] = ['local', 'ci'];
 
 export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
 export type LogLevelName = (typeof LOG_LEVELS)[number];
@@ -81,7 +89,17 @@ export function loadPlatformConfig(env: Env): PlatformConfig {
   const logLevel = (rawLevel || 'info') as LogLevelName;
   const sampleOneIn = positiveInt(env, 'PEAKET_LOG_SAMPLE_ONE_IN', 10);
   const defaultSloLatencyMs = positiveInt(env, 'PEAKET_LOG_SLO_LATENCY_MS', 500);
-  return { env: peaketEnv, debugErrors, port: appPort, managementPort, maxDeadlineMs, version, logLevel, sampleOneIn, defaultSloLatencyMs };
+  const rawLb = env.PEAKET_GRPC_LB_PROFILE;
+  if (rawLb !== undefined && rawLb !== '' && !(GRPC_LB_PROFILES as readonly string[]).includes(rawLb)) {
+    throw new PlatformConfigError(`PEAKET_GRPC_LB_PROFILE는 ${GRPC_LB_PROFILES.join('·')} 가운데 하나여야 한다: ${rawLb}`);
+  }
+  const grpcLbProfile = (rawLb || 'service') as GrpcLbProfile;
+  if (grpcLbProfile === 'headless-round-robin' && !HEADLESS_ROUND_ROBIN_ALLOWED.includes(peaketEnv)) {
+    throw new PlatformConfigError(
+      `PEAKET_GRPC_LB_PROFILE=headless-round-robin은 ${HEADLESS_ROUND_ROBIN_ALLOWED.join('·')}에서만 쓴다(지금 ${rawEnv ? peaketEnv : '환경 없음(운영으로 봄)'}, 메시 웨이포인트를 건너뛴다, ADR-0082)`,
+    );
+  }
+  return { env: peaketEnv, debugErrors, port: appPort, managementPort, maxDeadlineMs, version, logLevel, sampleOneIn, defaultSloLatencyMs, grpcLbProfile };
 }
 
 function positiveInt(env: Env, name: string, fallback: number): number {

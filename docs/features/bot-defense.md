@@ -307,7 +307,7 @@ ADR-0171 결정 4는 끝단(CDN과 웹 방화벽처럼 사용자 가까이에서
 ### 11.3 들어가고 나오는 조건
 
 - queue-svc의 `ScoreRisk` 호출에 서킷 브레이커(opossum, docs/architecture.md §5)를 둔다. 10초 창에서 호출이 20건 [가정] 이상이고 실패(오류·데드라인 넘김)가 50% [가정] 이상이면 열린다. 열린 동안 5초 [가정]마다 시험 호출을 하나 보내고, 성공하면 닫는다. 값은 Q-T58에서 잰다(추천 적용 2026-10-30).
-- 열리고 닫힐 때 queue-svc가 서킷 상태 지표(`trust_breaker_state`)와 보안 로그(asvs/bot-defense.md 16.3.4)를 남기고, ops-svc가 그 경보로 운영 사건 줄(`ops_event`, docs/observability.md §7)을 남긴다. 경보는 온세일 윈도우 안이면 SEV2, 밖이면 SEV3다(`kind` cause, `dependency` trust-svc, 추천 적용 2026-10-30). 축소 운영은 탐지 정밀도를 떨어뜨리므로 온세일 중에는 사람이 바로 알아야 한다.
+- 열리고 닫힐 때 queue-svc가 서킷 상태 지표(`circuit_breaker_state{dependency="trust-svc"}`, 서비스 템플릿 차단기의 공용 지표. 지난 이름 `trust_breaker_state`를 이것으로 읽는다, 추천 적용 2026-11-01, openspec 변경 add-breakers-purchase-auth-and-grpc-channel)와 보안 로그(asvs/bot-defense.md 16.3.4)를 남기고, ops-svc가 그 경보로 운영 사건 줄(`ops_event`, docs/observability.md §7)을 남긴다. 경보는 온세일 윈도우 안이면 SEV2, 밖이면 SEV3다(`kind` cause, `dependency` trust-svc, 추천 적용 2026-10-30). 축소 운영은 탐지 정밀도를 떨어뜨리므로 온세일 중에는 사람이 바로 알아야 한다.
 - ①은 점수기별 값 없음 비율이 5분 [가정] 동안 10% [가정]를 넘으면 SEV3다.
 
 ### 11.4 대가
@@ -386,7 +386,7 @@ ADR-0171 결정 4는 끝단(CDN과 웹 방화벽처럼 사용자 가까이에서
 | 판정이 빨리 끝난다 | 정규 로그 줄(요청 하나가 끝날 때 핵심 값을 한 줄에 모아 남기는 로그) `trust_score`(판정하는 때, 판정, 사유 범주, 값 없음 점수기, 소요 시간, `degraded`, 설정 판) | 판정 지연 p99(요청 백 건 중 아흔아홉 건이 이 시간 안에 끝난다는 뜻) 300ms [가정] | 봇 패널 '판정' | p99가 데드라인(800ms [가정])의 절반을 5분 [가정] 넘게 넘으면 SEV3 | 카나리 분석이 p99와 `CHALLENGE` 비율을 안정판과 비교한다(docs/devops.md §6.2) |
 | 추가 검증 비율이 갑자기 바뀌지 않는다 | `trust_verdicts_total{context, verdict}` | 없다 | 같은 패널 | 비율이 직전 1시간의 3배 [가정]를 10분 넘으면 SEV3 | 같다. 배포 전후 비율 비교 |
 | 사람 확인 검증이 돈다 | `trust_human_check_total{result}`(성공·실패·보류) | 없다 | 같은 패널 | 보류가 5분 [가정] 동안 5% [가정]를 넘으면 SEV3(추천 적용 2026-10-30). 길어지면 운영자가 명령 5를 검토한다(queue-admission §9) | 확인 불가: 운영 위젯은 사람이 풀어야 해 배포 뒤 자동 확인이 없다. 성공·실패·보류 비율을 배포 전후로 견준다 |
-| 축소 운영으로 바뀌면 알린다 | queue-svc `trust_breaker_state`, `trust_score_fallback_total{reason}`, 운영 사건 줄 | 없다 | 같은 패널, 대기열 패널 | 온세일 윈도우 안 SEV2, 밖 SEV3(§11.3) | Q-T58·B-T6 |
+| 축소 운영으로 바뀌면 알린다 | queue-svc `circuit_breaker_state{dependency="trust-svc"}`, `trust_score_fallback_total{reason}`, 운영 사건 줄 | 없다 | 같은 패널, 대기열 패널 | 온세일 윈도우 안 SEV2, 밖 SEV3(§11.3) | Q-T58·B-T6 |
 | 그림자 판이 운영에 영향을 주지 않는다 | `trust_shadow_disagreements_total{direction}`, 그림자 판 번호 | 없다 | 봇 패널 '그림자' | 경보 없음. 주간 보고 | 그림자 판을 켠 뒤 적용 판정 비율이 그대로인지 본다(B-T4) |
 | 재평가가 사람을 한꺼번에 격리하지 않는다 | `trust_reassess_candidates_total{pattern}`, `trust_reassess_isolations_total{mode}` | 없다 | 봇 패널 '재평가' | 상한 도달 SEV3 | docs/streaming.md §9 |
 | 차단 기기 목록이 맞다 | `trust_block_list_changes_total{op, source}`, `trust_block_list_hits_total` | 없다 | 봇 패널 '목록' | 하루 등재 수가 직전 7일 평균의 5배 [가정]를 넘으면 SEV3 | Q-T48 |

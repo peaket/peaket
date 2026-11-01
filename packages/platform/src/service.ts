@@ -8,6 +8,7 @@ import { APP_GUARD, DiscoveryModule, NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { AUTH_STATE, AuthGuard, AuthState, RolesCheck, type AdminAuthzPort } from './auth.js';
+import { type PurchaseSessionPort, purchaseRejections } from './purchase-auth.js';
 import { CLOCK, type Clock, systemClock } from './clock.js';
 import { type PlatformConfig, loadPlatformConfig } from './config.js';
 import { activeTrace } from './context.js';
@@ -59,6 +60,8 @@ export interface CreateServiceOptions {
   nestLogLevels?: LogLevel[] | false;
   /** identity-svc GetAdminAuthz 포트. 관리 역할(partner_*·관제 다섯)을 단 처리기가 있으면 꼭 있어야 한다(ADR-0172) */
   adminAuthz?: AdminAuthzPort;
+  /** 구매 세션 포트(purchase-svc). @PurchaseSigned()를 단 처리기가 있으면 꼭 있어야 한다(ADR-0050 결정 8) */
+  purchaseSessions?: PurchaseSessionPort;
 }
 
 export interface PlatformService {
@@ -98,7 +101,11 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   const { pseudonymizer, warning } = loadLogPseudonymizer(env);
   const clock = o.clock ?? systemClock;
   const metrics = new PlatformMetrics(o.name);
-  const auth = new AuthState(clock, o.adminAuthz);
+  const rejections = purchaseRejections(metrics.registry);
+  const auth = new AuthState(clock, o.adminAuthz, true, {
+    sessions: o.purchaseSessions,
+    onRejected: (reason) => rejections.inc({ service: o.name, reason }),
+  });
   const logger = createPlatformLogger({
     service: o.name,
     env: config.env,

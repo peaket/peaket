@@ -1,7 +1,7 @@
 // @peaket/platform: 서비스(NestJS·Fastify) 공용 시작 코드(docs/architecture.md §10, openspec 변경 add-service-template).
 export { CLOCK, fakeClock, systemClock, type Clock, type FakeClock } from './clock.js';
-export { DEBUG_ERRORS_ALLOWED, LOG_LEVELS, PEAKET_ENVS, PlatformConfigError, loadPlatformConfig, type LogLevelName, type PeaketEnv, type PlatformConfig } from './config.js';
-export { currentDeadline, requestContext, type RequestContext } from './context.js';
+export { DEBUG_ERRORS_ALLOWED, HEADLESS_ROUND_ROBIN_ALLOWED, LOG_LEVELS, PEAKET_ENVS, PlatformConfigError, loadPlatformConfig, type LogLevelName, type PeaketEnv, type PlatformConfig } from './config.js';
+export { currentDeadline, requestContext, runInRequestContext, type RequestContext } from './context.js';
 export { ADMIN_AUTHZ_CACHE_MS, COOKIE_CHALLENGE, CurrentPrincipal, ROLE_VALUES, Roles, TERMINATED_SESSION_TTL_MS, currentPrincipal, type AdminAuthz, type AdminAuthzPort, type Audience, type Principal, type RoleValue, type RolesOptions } from './auth.js';
 export { AcceptTextPlain, ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, RequestValidationError, contractRouteSchema, type ContractRouteSchemaInput } from './request-checks.js';
 export { DEADLINE_HEADER, DEFAULT_MAX_DEADLINE_MS, Deadline } from './deadline.js';
@@ -119,3 +119,42 @@ export {
   type MaintenanceRunnerOptions,
   type MaintenanceTask,
 } from './maintenance.js';
+export {
+  CIRCUIT_BREAKER_DEFAULTS,
+  CircuitBreaker,
+  CircuitBreakerMetrics,
+  createCircuitBreaker,
+  dependencyUnavailable,
+  isBreakerFailure,
+  type CircuitBreakerOptions,
+  type CircuitState,
+} from './circuit-breaker.js';
+export {
+  CurrentPurchaseSession,
+  PURCHASE_KEY_BYTES,
+  PURCHASE_KEY_INFO,
+  PURCHASE_MAC_HEADER,
+  PURCHASE_SEQ_HEADER,
+  PurchaseSigned,
+  parsePurchaseMac,
+  parsePurchaseSeq,
+  purchaseMac,
+  purchaseMacInput,
+  purchaseRequestKey,
+  type PurchaseRejection,
+  type PurchaseSession,
+  type PurchaseSessionPort,
+} from './purchase-auth.js';
+export {
+  GRPC_CHANNEL_LOCKED,
+  GRPC_HEADLESS_MAX_CONNECTION_AGE_MS,
+  GRPC_LB_PROFILES,
+  createGrpcClient,
+  grpcChannelOptions,
+  grpcServerOptions,
+  grpcTarget,
+  peaketGrpcInterceptor,
+  type GrpcClientOptions,
+  type GrpcInterceptorOptions,
+  type GrpcLbProfile,
+} from './grpc-channel.js';

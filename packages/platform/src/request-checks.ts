@@ -11,6 +11,7 @@ import type { FastifyInstance, FastifyRequest, FastifySchema } from 'fastify';
 import { z } from 'zod';
 import { type HttpPart, type JsonSchema, httpValueCoercer } from './http-values.js';
 import { keepRawBody } from './raw-body.js';
+import { PURCHASE_MAC_HEADER, PURCHASE_SEQ_HEADER } from './purchase-auth.js';
 
 /** 검사 실패. 전역 필터가 about:blank 400으로 바꾼다(결정 5: 두 길의 본문이 같도록 설명을 싣지 않는다) */
 export class RequestValidationError extends BadRequestException {
@@ -78,11 +79,10 @@ export const ContractParams = (schema: ZodSchema): ParameterDecorator => Param(n
 const RawHeaders = createParamDecorator((_data: unknown, ctx: ExecutionContext) => ctx.switchToHttp().getRequest<FastifyRequest>().headers);
 /** 머리를 계약 Zod로 검사한다. 처리기는 계약의 칸 이름(Idempotency-Key 등)으로 받는다 */
 export const ContractHeaders = (schema: ZodSchema): ParameterDecorator => {
-  const inner = RawHeaders(undefined, new ContractPipe(withoutIdempotencyKey(schema), 'headers'));
-  const hasKey = idempotencyKeyName(schema) !== undefined;
+  const inner = RawHeaders(undefined, new ContractPipe(withoutModuleHeaders(schema), 'headers'));
   return (target, key, index) => {
     inner(target, key, index);
-    if (hasKey && key !== undefined) markIdempotencyKeyByModule((target as Record<string | symbol, object>)[key]!);
+    if (key !== undefined) markModuleHeaders((target as Record<string | symbol, object>)[key]!, schema);
   };
 };
 
@@ -95,19 +95,30 @@ const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
  */
 export const IDEMPOTENCY_KEY_BY_MODULE = 'peaket:idempotency-key-by-module';
 
-function markIdempotencyKeyByModule(handler: object): void {
-  Reflect.defineMetadata(IDEMPOTENCY_KEY_BY_MODULE, true, handler);
+/**
+ * 처리기 메타데이터: 계약 머리 스키마의 X-Purchase-Seq·X-Purchase-Mac을 빼고 구매 요청 인증 훅에 맡겼다. 시작 확인이 그 처리기에
+ * @PurchaseSigned()를 요구한다(빠뜨리면 서명 없는 구매 쓰기 요청이 통과한다, openspec 변경 add-breakers-purchase-auth-and-grpc-channel 결정 6)
+ */
+export const PURCHASE_SIGNATURE_BY_MODULE = 'peaket:purchase-signature-by-module';
+const PURCHASE_HEADERS: readonly string[] = [PURCHASE_SEQ_HEADER, PURCHASE_MAC_HEADER];
+/** 두 검사 길이 보지 않고 모듈이 보는 머리(소문자) */
+const MODULE_HEADERS: readonly string[] = [IDEMPOTENCY_KEY_HEADER, ...PURCHASE_HEADERS];
+
+function headerNames(schema: ZodSchema): string[] {
+  return schema instanceof z.ZodObject ? Object.keys(schema.shape) : [];
 }
 
-function idempotencyKeyName(schema: ZodSchema): string | undefined {
-  if (!(schema instanceof z.ZodObject)) return undefined;
-  return Object.keys(schema.shape).find((n) => n.toLowerCase() === IDEMPOTENCY_KEY_HEADER);
+function markModuleHeaders(handler: object, schema: ZodSchema): void {
+  const names = headerNames(schema).map((n) => n.toLowerCase());
+  if (names.includes(IDEMPOTENCY_KEY_HEADER)) Reflect.defineMetadata(IDEMPOTENCY_KEY_BY_MODULE, true, handler);
+  if (names.some((n) => PURCHASE_HEADERS.includes(n))) Reflect.defineMetadata(PURCHASE_SIGNATURE_BY_MODULE, true, handler);
 }
 
-/** 머리 Zod 스키마에서 Idempotency-Key 칸을 뺀다(이름은 대소문자를 가리지 않는다) */
-function withoutIdempotencyKey(schema: ZodSchema): ZodSchema {
-  const k = idempotencyKeyName(schema);
-  return k === undefined ? schema : ((schema as z.ZodObject).omit({ [k]: true } as never) as unknown as ZodSchema);
+/** 머리 Zod 스키마에서 모듈이 보는 칸을 뺀다(이름은 대소문자를 가리지 않는다) */
+function withoutModuleHeaders(schema: ZodSchema): ZodSchema {
+  const drop = headerNames(schema).filter((n) => MODULE_HEADERS.includes(n.toLowerCase()));
+  if (drop.length === 0) return schema;
+  return (schema as z.ZodObject).omit(Object.fromEntries(drop.map((k) => [k, true])) as never) as unknown as ZodSchema;
 }
 
 export interface ContractRouteSchemaInput {
@@ -149,17 +160,17 @@ export const DEFER_VALIDATION_KEY = 'peaketDeferValidation';
 
 /**
  * 계약 Zod에서 Fastify 경로 스키마를 만든다(결정 4). 처리기에는 @ContractRouteSchema로 단다.
- * idempotencyKeyByModule이면 머리 스키마에서 Idempotency-Key를 뺀다(@ContractRouteSchema만 쓴다). Fastify에 바로 붙이는 경로는
- * 인증 가드와 멱등 모듈을 지나지 않으므로 키를 스키마에 남긴다(코드 리뷰 2026-11-01)
+ * byModule이면 머리 스키마에서 모듈이 보는 머리(Idempotency-Key, X-Purchase-Seq·X-Purchase-Mac)를 뺀다(@ContractRouteSchema만 쓴다).
+ * Fastify에 바로 붙이는 경로는 인증 가드와 그 모듈을 지나지 않으므로 스키마에 남긴다(코드 리뷰 2026-11-01)
  */
-export function contractRouteSchema(i: ContractRouteSchemaInput, o: { idempotencyKeyByModule?: boolean } = {}): FastifySchema {
+export function contractRouteSchema(i: ContractRouteSchemaInput, o: { byModule?: boolean } = {}): FastifySchema {
   const out: Record<string, unknown> = {};
   if (i.params) out.params = toJsonSchema(i.params, 'input');
   if (i.query) out.querystring = toJsonSchema(i.query, 'input');
   // 멱등 키는 멱등 모듈이 신원 판정 뒤에 본다(머리 스키마가 먼저 about:blank 400을 내지 않게, add-idempotency-and-outbox 결정 1)
   if (i.headers) {
     const h = lowerCaseHeaderNames(toJsonSchema(i.headers, 'input'));
-    out.headers = o.idempotencyKeyByModule ? withoutHeader(h, IDEMPOTENCY_KEY_HEADER) : h;
+    out.headers = o.byModule ? MODULE_HEADERS.reduce((acc, name) => withoutHeader(acc, name), h) : h;
   }
   // 형식별(content) 본문 스키마는 들어온 형식과 맞는 것이 없으면 Fastify가 검사를 건너뛰어 본문 없는 POST가 통과했다(코드 리뷰 2026-11-01).
   // 본문 스키마 하나는 해석기가 낸 값을 형식과 관계없이 검사하고, 본문이 없으면 거절한다
@@ -175,12 +186,11 @@ export function contractRouteSchema(i: ContractRouteSchemaInput, o: { idempotenc
  * 같은 처리기에 @ContractQuery 등 Zod 파이프를 함께 달지 않는다(경로 스키마가 바꾼 배열을 파이프가 겹친 쿼리로 본다)
  */
 export function ContractRouteSchema(i: ContractRouteSchemaInput): MethodDecorator {
-  const schema = contractRouteSchema(i, { idempotencyKeyByModule: true });
-  const hasKey = i.headers !== undefined && idempotencyKeyName(i.headers) !== undefined;
+  const schema = contractRouteSchema(i, { byModule: true });
   return (_target, _key, descriptor) => {
     const fn = descriptor.value as object;
     Reflect.defineMetadata(FASTIFY_ROUTE_SCHEMA_METADATA, schema, fn);
-    if (hasKey) markIdempotencyKeyByModule(fn);
+    if (i.headers) markModuleHeaders(fn, i.headers);
     const prev = (Reflect.getMetadata(FASTIFY_ROUTE_CONFIG_METADATA, fn) as Record<string, unknown> | undefined) ?? {};
     Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [DEFER_VALIDATION_KEY]: true }, fn);
     return descriptor;

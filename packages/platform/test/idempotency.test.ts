@@ -14,6 +14,7 @@ import {
   IdempotencyRequest,
   Idempotent,
   PROBLEM_TYPE_BASE,
+  PurchaseSigned,
   Roles,
   contractRouteSchema,
   createService,
@@ -25,7 +26,7 @@ import {
   rawBodyOf,
   requestFingerprint,
 } from '../src/index.js';
-import { collector } from './fixture.js';
+import { SIGN, collector, signPurchaseHeaders, testPurchaseSessions } from './fixture.js';
 
 const KEY = '0190f3a1-7c2e-4a00-8000-000000000001';
 const FAN = { 'x-user-id': 'acc-1', 'x-session-id': 's-1', 'x-user-aud': 'fan' };
@@ -39,6 +40,7 @@ class IdemController {
   @Post('pipe/holds')
   @Roles(['fan'])
   @Idempotent({ operation: 'CREATE_HOLD' })
+  @PurchaseSigned()
   pipe(
     @ContractHeaders(PostV1EventsEventIdHoldsHeader) headers: Record<string, unknown>,
     @ContractBody(PostV1EventsEventIdHoldsBody) _body: unknown,
@@ -51,6 +53,7 @@ class IdemController {
   @Post('rs/holds')
   @Roles(['fan'])
   @Idempotent({ operation: 'CREATE_HOLD' })
+  @PurchaseSigned()
   @ContractRouteSchema({ headers: PostV1EventsEventIdHoldsHeader, body: PostV1EventsEventIdHoldsBody })
   route(@IdempotencyRequest() idem: IdempotencyRequest) {
     return { idem: idemView(idem) };
@@ -85,15 +88,17 @@ class IdemModule {}
 
 let svc: Awaited<ReturnType<typeof createService>>;
 beforeAll(async () => {
-  svc = await createService({ name: 'idem-svc', module: IdemModule, env: { PEAKET_ENV: 'ci' }, clock: fakeClock(), logDestination: collector().stream });
+  svc = await createService({ name: 'idem-svc', module: IdemModule, env: { PEAKET_ENV: 'ci' }, clock: fakeClock(), logDestination: collector().stream, purchaseSessions: testPurchaseSessions() });
 });
 afterAll(async () => {
   await svc.close();
 });
 
-const call = (o: { method: string; url: string; headers?: Record<string, string>; payload?: string }) => svc.http.inject(o as never);
+// 홀드 경로는 구매 세션 요청 서명을 요구한다(FND-100). x-purchase-mac이 SIGN이면 요청마다 새 번호로 서명한다
+const call = (o: { method: string; url: string; headers?: Record<string, string>; payload?: string }) =>
+  svc.http.inject({ ...o, headers: signPurchaseHeaders(o.method, o.url, o.headers ?? {}, o.payload ?? '') } as never);
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
-const holdHeaders = { ...FAN, 'content-type': 'application/json', 'idempotency-key': KEY, 'x-purchase-seq': '5', 'x-purchase-mac': 'm' };
+const holdHeaders = { ...FAN, 'content-type': 'application/json', 'idempotency-key': KEY, 'x-purchase-seq': 'next', 'x-purchase-mac': SIGN };
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 
 describe('키 형식(결정 2)', () => {
@@ -150,7 +155,8 @@ describe('검사 순서(결정 1)', () => {
     for (const url of paths) {
       for (const [headers, payload] of [
         [holdHeaders, '{"seatIds":1}'],
-        [{ ...holdHeaders, 'x-purchase-seq': '0' }, '{}'],
+        // 일련번호 0은 FND-100부터 머리 스키마가 아니라 구매 요청 인증 훅이 401로 막는다(purchase-auth.test.ts). 본문 모양 표본으로 바꿨다
+        [holdHeaders, '{"seatIds":"A-1"}'],
       ] as const) {
         const r = await call({ method: 'POST', url, headers, payload });
         expect({ url, status: r.statusCode, type: json(r).type }).toEqual({ url, status: 400, type: 'about:blank' });
@@ -173,7 +179,8 @@ describe('검사 순서(결정 1)', () => {
       const b = json(r) as { idem: Record<string, unknown>; headers?: Record<string, unknown> };
       expect(b.idem).toEqual({ accountRef: 'acc-1', operation: 'CREATE_HOLD', key: KEY, requestHash: sha(`POST\n${url}?via=t\n${payload}`) });
       if (b.headers) {
-        expect(b.headers).toEqual({ 'X-Purchase-Seq': 5, 'X-Purchase-Mac': 'm' });
+        // 두 서명 머리도 FND-100부터 구매 요청 인증 훅만 본다(머리 스키마에 남는 칸이 없다)
+        expect(b.headers).toEqual({});
       }
     }
   });

@@ -150,6 +150,7 @@ describe('[ASVS v5.0.0-13.4.2] 시작 설정 검사', () => {
       logLevel: 'info',
       sampleOneIn: 10,
       defaultSloLatencyMs: 500,
+      grpcLbProfile: 'service',
     });
   });
 });

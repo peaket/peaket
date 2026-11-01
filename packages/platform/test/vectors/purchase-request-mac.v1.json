@@ -1,0 +1,45 @@
+{
+  "description": "구매 세션 요청 서명 시험 벡터 v1(ADR-0050 결정 8, docs/frontend.md §5.3, FE-T7). 공유 비밀은 ECDH P-256 합의 결과(x 좌표 32바이트)이고, 요청 인증 키는 HKDF-SHA256 32바이트다. 시험용 값이다. 만든 법: 구현과 따로 파이썬 표준 라이브러리로 계산했다(openspec 변경 add-breakers-purchase-auth-and-grpc-channel)",
+  "sharedSecretHex": "8f1c4a2be05d97316ac4e2b7d0938f5a1e6b2c7d40f9a3851be7c62d04a9f315",
+  "jti": "01934b2e-7c1a-7d3e-9f40-6b2a8c1d5e70",
+  "info": "PEAKET-purchase-v1",
+  "keyHex": "d6cf5919ecfe1b09365da263e1ae21bb4ff4def01b33cea3be0749216f861372",
+  "cases": [
+    {
+      "method": "POST",
+      "pathAndQuery": "/v1/events/evt-01/holds",
+      "seq": 1,
+      "body": "{\"seatIds\":[\"A-1\",\"A-2\"]}",
+      "bodySha256B64u": "FYgfAlD9jrZfN65W5vOvQJszClC2djcwvOMObu2sulM",
+      "macInput": "POST\n/v1/events/evt-01/holds\n1\nFYgfAlD9jrZfN65W5vOvQJszClC2djcwvOMObu2sulM",
+      "mac": "p94wdXm8YTtp3aIa8l064umgh9B0DKESaEhsDfduf9w"
+    },
+    {
+      "method": "DELETE",
+      "pathAndQuery": "/v1/holds/h-01",
+      "seq": 2,
+      "body": "",
+      "bodySha256B64u": "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
+      "macInput": "DELETE\n/v1/holds/h-01\n2\n47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
+      "mac": "5GPTwPMBgsO7JzyhzCFldY3qdcanRO7PHzHxusXMcPs"
+    },
+    {
+      "method": "POST",
+      "pathAndQuery": "/v1/orders/ord-01/payments?attempt=2&pg=toss",
+      "seq": 3,
+      "body": "{\"method\":\"CARD\"}",
+      "bodySha256B64u": "p5I6kXa3ARkK9oxGDNNmxXtR6Lq7MMT9_NpziX6IS4o",
+      "macInput": "POST\n/v1/orders/ord-01/payments?attempt=2&pg=toss\n3\np5I6kXa3ARkK9oxGDNNmxXtR6Lq7MMT9_NpziX6IS4o",
+      "mac": "HYZXMgW3ymVuzIblITlHDgNBPV-kCNTiy23a8yya7Uw"
+    },
+    {
+      "method": "POST",
+      "pathAndQuery": "/v1/events/evt-01/holds",
+      "seq": 9007199254740991,
+      "body": "{\"auto\":{\"count\":2}}",
+      "bodySha256B64u": "1nZxLWR-EG7f0MAfa4RXtiPlQTTHG1RHyZSKf2eijMg",
+      "macInput": "POST\n/v1/events/evt-01/holds\n9007199254740991\n1nZxLWR-EG7f0MAfa4RXtiPlQTTHG1RHyZSKf2eijMg",
+      "mac": "8OlG-UVnazMj1DM4kdQFLDOfEXoVVC_ekm9F0g6k79E"
+    }
+  ]
+}

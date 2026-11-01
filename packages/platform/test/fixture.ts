@@ -17,8 +17,11 @@ import {
   currentDeadline,
   fakeClock,
   requestLog,
+  purchaseMac,
+  purchaseMacInput,
   type FakeClock,
   type PlatformLogger,
+  type PurchaseSessionPort,
 } from '../src/index.js';
 
 export const Item = z.object({ id: z.string(), count: z.number().int(), note: z.string().nullable() });
@@ -264,4 +267,38 @@ export function sample(text: string, name: string, labels: Record<string, string
     if (Object.entries(labels).every(([k, v]) => got[k] === v)) return Number(m[3]);
   }
   return undefined;
+}
+
+// ---- 구매 세션 요청 서명(FND-100). 홀드 경로 계약은 X-Purchase-Seq·X-Purchase-Mac을 요구해 그 처리기에 @PurchaseSigned()가 붙는다 ----
+
+/** 시험용 요청 인증 키(32바이트) */
+export const PURCHASE_TEST_KEY = Buffer.alloc(32, 7);
+/** 머리 x-purchase-mac에 이 값을 두면 signPurchaseHeaders가 그 요청에 맞게 서명한다 */
+export const SIGN = 'sign';
+
+/** 구매 세션 포트 대역: 신원의 세션마다 구매 세션 하나, 일련번호는 메모리 */
+export function testPurchaseSessions(key: Buffer = PURCHASE_TEST_KEY): PurchaseSessionPort & { last: Map<string, number> } {
+  const last = new Map<string, number>();
+  return {
+    last,
+    async resolve(_request, principal) {
+      return { ref: `ps-${principal.sessionId}`, key };
+    },
+    async advance(ref, seq) {
+      if (seq <= (last.get(ref) ?? 0)) return false;
+      last.set(ref, seq);
+      return true;
+    },
+  };
+}
+
+let purchaseSeq = 0;
+/** x-purchase-mac이 SIGN이면 서명을 붙인다. x-purchase-seq가 'next'거나 없으면 늘 새 번호, 숫자가 아니면 그대로 둔다(형식 거절 시험) */
+export function signPurchaseHeaders(method: string, url: string, headers: Record<string, string>, payload = '', key: Buffer = PURCHASE_TEST_KEY): Record<string, string> {
+  if (headers['x-purchase-mac'] !== SIGN) return headers;
+  const raw = headers['x-purchase-seq'];
+  const seq = raw === undefined || raw === 'next' ? String((purchaseSeq += 1)) : raw;
+  const n = Number(seq);
+  const mac = /^[1-9]\d*$/.test(seq) && Number.isSafeInteger(n) ? purchaseMac(key, purchaseMacInput(method, url, n, Buffer.from(payload, 'utf8'))) : 'm';
+  return { ...headers, 'x-purchase-seq': seq, 'x-purchase-mac': mac };
 }

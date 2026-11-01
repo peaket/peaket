@@ -122,6 +122,9 @@ relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
 | `deleteExpiredRows`·`retentionOverdueSeconds`·`reindexBloatedIndexes` | 보존 기한 나눠 지우기(1만 건 [가정]씩 자식 먼저, 0.5초 쉬기, 지키는 선·정비 시간 끝), 기한 넘김 시간, 부푼 B-tree 인덱스 `REINDEX CONCURRENTLY`(`pgstattuple`) | ADR-0114 결정 3 |
 | `ackAndTrimStream`·`expireStreamAfterSale` | Redis Stream 확인 뒤 `XTRIM MINID`(확인하지 않은 항목은 남김), 키 수명 판매 종료 + 1일 [가정]. 명령 보내기 포트(`sendCommand`)만 받는다 | ADR-0070, docs/data.md §3 |
 | `MaintenanceRunner`·`platformMaintenanceTasks`·`monthlyPartitionTasks`·`retentionTask`·`reindexTask` | 정비 반복(릴레이 프로세스의 Lease 리더, 10분 [가정]마다, 매일 일과 정비 시간 일, 지표) | docs/data.md §2 |
+| `createCircuitBreaker`·`isBreakerFailure`·`dependencyUnavailable` | 의존성마다 차단기(opossum 10은 상태만, 판정은 감싸개). 10초 창에 끝난 호출 20건 이상·실패 50% 이상이면 열림·5초 뒤 시험 호출 하나 [가정], 열리면 503 `dependency-unavailable`과 `Retry-After`. 시험 호출이 5초 [가정](`trialTimeoutMs`) 안에 끝나지 않으면 다시 열고, 열릴 때 진행 중이던 호출은 판정에 넣지 않는다. 동시 호출 상한(`maxConcurrent`)을 넘으면 429 `server-busy`, 남은 시간이 없으면 504. 업무 거절(4xx·gRPC 업무 코드)은 실패로 세지 않는다. 지표 `circuit_breaker_state`·`circuit_breaker_rejected_total` | ADR-0009 결정 2·5, guidelines §2 |
+| `@PurchaseSigned`·`@CurrentPurchaseSession`·`PurchaseSessionPort`·`purchaseRequestKey`·`purchaseMac`·`purchaseMacInput` | 구매 세션 쓰기 요청의 `X-Purchase-Seq`·`X-Purchase-Mac` 확인(멱등 키 형식 뒤·모양 검사 전, 틀리면 401, 서명이 틀리면 일련번호를 올리지 않음). 두 검사 길의 Nest 장식자는 머리 스키마에서 두 머리를 빼고, 계약이 요구하는데 빠뜨리거나 공개 역할 처리기에 달거나 포트(`createService`의 `purchaseSessions`)가 없으면 시작 실패. 요청 인증 키는 HKDF-SHA256 32바이트. 시험 벡터 `test/vectors/purchase-request-mac.v1.json`. 거절 지표 `purchase_request_rejections_total{reason}` | ADR-0050 결정 8, frontend §5.3 |
+| `createGrpcClient`·`grpcChannelOptions`·`grpcServerOptions`·`grpcTarget`·`peaketGrpcInterceptor` | 서비스 사이 gRPC 클라이언트를 만드는 유일한 함수. 서비스 설정에 부하 분산 방식만(`service` pick_first·`headless-round-robin` round_robin), DNS 서비스 설정 끔, 의존성마다 따로 연결, `grpc.enable_retries` 없음(투명 재시도만), 잠긴 이름 덮어쓰기 예외. 가로채기가 데드라인(남은 시간·호출 상한)·호출 span·추적 머리·`dep` 소요를 맡는다. 자격 증명은 평문(파드 사이 mTLS는 메시) | ADR-0082 결정 4, guidelines §5 |
 
 하위 경로:
 
@@ -145,6 +148,7 @@ relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
 | `PEAKET_LOG_SAMPLE_ONE_IN` | 10 | 정상 줄 표본 'N건에 1건'(평시 10%) |
 | `PEAKET_LOG_SLO_LATENCY_MS` | 500 | 경로에 SLO 지연을 적지 않았을 때 전수로 남기는 지연(NFR-011) |
 | `PEAKET_LOG_LEVEL` | `info` | 서비스 로거 수준. 정규 로그 줄은 이 값과 관계없이 `info`부터 낸다 |
+| `PEAKET_GRPC_LB_PROFILE` | `service` | 서비스 사이 gRPC 부하 분산 프로필. `headless-round-robin`은 메시 없는 로컬 측정 전용이라 `local`·`ci`가 아니면 시작하지 않는다 |
 | `PEAKET_VERSION`·`PEAKET_AZ`·`PEAKET_POD` | `unknown`·없음·호스트 이름 | 로그의 `version`·`az`·`pod`(배포 차트가 넣는다) |
 | `OTEL_SERVICE_NAME` | 없음 | 등록 파일이 쓰는 서비스 이름(필수) |
 | `PEAKET_TRACE_INBOUND` | `mesh` | 들어온 추적 문맥을 잇는가. 앱 서버는 `untrusted`(링크로만) |
@@ -183,11 +187,11 @@ relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
 
 | 명령 | 하는 일 |
 | --- | --- |
-| `pnpm --filter @peaket/platform test` | Vitest 시험(남은 시간, Problem, 지표, 문서 뽑기, 정규 로그 줄, 가명, SDK를 띄운 추적 문맥과 V-T31 ③, 요청 검사와 두 길의 표본 일치, 본문 형식, 인증 가드, 멱등 키·원시 본문, UUIDv7·파티션 경계, Lease, 릴레이 반복, Kafka 필수 설정, 키 단위 처리와 보류, 제어 동기화와 준비 표시, 정비 반복, 서비스 뼈대) |
+| `pnpm --filter @peaket/platform test` | Vitest 시험(남은 시간, Problem, 지표, 문서 뽑기, 정규 로그 줄, 가명, SDK를 띄운 추적 문맥과 V-T31 ③, 요청 검사와 두 길의 표본 일치, 본문 형식, 인증 가드, 멱등 키·원시 본문, UUIDv7·파티션 경계, Lease, 릴레이 반복, Kafka 필수 설정, 키 단위 처리와 보류, 제어 동기화와 준비 표시, 정비 반복, 차단기, 구매 요청 서명과 시험 벡터, gRPC 채널(로컬 grpc-js 서버), 서비스 뼈대) |
 | `pnpm --filter @peaket/platform test:integration` | 실제 PostgreSQL 18·Kafka 3.9.2·Valkey 8.1 컨테이너(`docker run`) 시험: Drizzle 설정, 풀 대기 429, 행 보안과 `SET LOCAL`, 멱등 기록(처리 중·다른 본문·보관), Outbox 쓰기·릴레이 순서·실패 뒤 다시·두 릴레이, 일 파티션 만들기·지우기, Kafka로 보내기와 브로커 정지(V-T28 ②)·키 단위 소비·방송형 읽기, 보류 표, 월 파티션·통계 스냅샷·보존 지우기·인덱스 다시 만들기·정비 반복, Stream 정리, 뼈대의 Drizzle 어댑터. Docker 엔진이 있어야 한다 |
 | `pnpm --filter @peaket/platform typecheck` | 타입 검사 |
 | `pnpm --filter @peaket/platform build` | `dist/` 빌드 |
 
 ## 아직 없는 것
 
-릴레이·정비 Deployment·실제 Lease 확인(FND-110), MSK IAM 토큰 함수(FND-120), Avro 인코더·디코더(BAS-030), 마이그레이션 직후 파티션 만들기와 `pgstattuple`·정비 역할(BAS-060), 온세일 구간 로그 표본 비율 연결(미해결 OPEN[09]), 현장 스태프 역할 판정(GAT-170), 프로브와 시간 초과 기본값(0.3.6), gRPC 채널 생성 함수(0.3.3), 엣지 게이트웨이의 추적 헤더 지우기와 앱 서버 연결(2.11.1), 동적 로그 수준 명령(관제 명령 8), exemplar·Pyroscope(4.1.1).
+릴레이·정비 Deployment·실제 Lease 확인(FND-110), MSK IAM 토큰 함수(FND-120), Avro 인코더·디코더(BAS-030), 마이그레이션 직후 파티션 만들기와 `pgstattuple`·정비 역할(BAS-060), 온세일 구간 로그 표본 비율 연결(미해결 OPEN[09]), 현장 스태프 역할 판정(GAT-170), 프로브와 시간 초과 기본값(0.3.6), gRPC 서버 쪽 시작과 우아한 종료(BAS-080, D-T27), 구매 세션 저장소 어댑터와 서버 ECDH 키(BOT-100), 엣지 게이트웨이의 추적 헤더 지우기와 앱 서버 연결(2.11.1), 동적 로그 수준 명령(관제 명령 8), exemplar·Pyroscope(4.1.1).

@@ -34,6 +34,7 @@
   },
   "dependencies": {
     "@confluentinc/kafka-javascript": "1.11.0",
+    "@grpc/grpc-js": "1.14.6",
     "@nestjs/common": "^12.3.2",
     "@nestjs/core": "^12.3.2",
     "@nestjs/platform-fastify": "^12.3.2",
@@ -51,6 +52,7 @@
     "ajv-formats": "^3.0.1",
     "drizzle-orm": "0.45.4",
     "fastify": "^5.12.7",
+    "opossum": "10.0.0",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "reflect-metadata": "^0.2.2",
@@ -61,6 +63,7 @@
     "@peaket/config": "workspace:*",
     "@peaket/contracts": "workspace:*",
     "@types/node": "^24.19.2",
+    "@types/opossum": "8.1.9",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "0.31.11",
     "redis": "6.3.0",
