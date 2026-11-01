@@ -15,6 +15,9 @@
     "paths": {
       "@peaket/platform": [
         "./src/index.ts"
+      ],
+      "@peaket/platform/stream-worker": [
+        "./src/stream-worker.ts"
       ]
     }
   },

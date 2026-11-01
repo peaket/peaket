@@ -22,3 +22,6 @@ dist/
 .turbo/
 *.tsbuildinfo
 next-env.d.ts
+
+# 로컬 클러스터 도구(kind·kubectl·helm)를 고정 판으로 받아 두는 곳(tools/local/tools.mjs)
+.cache/

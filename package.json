@@ -13,6 +13,7 @@
   "devDependencies": {
     "@fission-ai/openspec": "1.15.0",
     "eslint": "^10.13.0",
-    "turbo": "^2.11.10"
+    "turbo": "^2.11.10",
+    "yaml": "^2.9.1"
   }
 }

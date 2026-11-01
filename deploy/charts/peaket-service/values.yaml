@@ -1,0 +1,48 @@
+# 차트 기본값. 배포 단위 값은 deploy/workloads/<배포 단위>/values.yaml, 환경 값은 deploy/envs/<환경>/<서비스>.yaml에 둔다(docs/devops.md §5.2).
+# 비밀 값은 여기에 두지 않는다. secretEnvFrom으로 Secret 이름만 가리킨다(운영은 ExternalSecret이 만든다, wbs 0.4.4).
+
+# 서비스 이름(필수, 예: purchase-svc). Deployment·Lease·로그의 service 이름이 된다
+name: ""
+
+image:
+  repository: ""
+  # 운영·데모·스테이징은 digest(sha256:…)로만 고정한다. tag는 로컬 kind 시험(PEAKET_ENV local·ci)에만 쓴다
+  digest: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# 두 Deployment가 함께 받는 환경 변수(이름: 값). PEAKET_ENV는 필수다
+env: {}
+# 두 Deployment가 함께 받는 Secret 이름(envFrom). 비우면 쓰지 않는다
+secretEnvFrom: ""
+
+# 관리 포트(/metrics·/ready·/livez). 앱 트래픽과 다른 포트다(docs/architecture.md §5 '프로브 규칙')
+managementPort: 9464
+
+service:
+  enabled: true
+  replicas: 2
+  port: 8080
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "template/dist/main.js"]
+  # 서비스 Deployment만 받는 환경 변수
+  env: {}
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  # 종료: preStop 5초 → SIGTERM → 진행 중 요청 마감(docs/devops.md §6.4 '일반 서비스')
+  preStopSleepSeconds: 5
+  terminationGracePeriodSeconds: 30
+
+# 서비스별 Outbox 릴레이(ADR-0116 결정 1·2). 서비스와 같은 이미지를 다른 시작 명령으로 띄운다. Lease 리더만 보내고 정비를 돈다
+outboxRelay:
+  enabled: false
+  replicas: 2
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "template/dist/relay.js"]
+  # 릴레이만 받는 환경 변수: PEAKET_OUTBOX_DATABASE_URL(릴레이 역할)·PEAKET_MAINTENANCE_DATABASE_URL(정비 역할, PgBouncer를 거치지 않는다)·
+  # PEAKET_KAFKA_BROKERS. 운영의 DB 주소는 secretEnvFrom/relaySecretEnvFrom으로 받는다
+  env: {}
+  secretEnvFrom: ""
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { memory: 384Mi }
+  terminationGracePeriodSeconds: 30

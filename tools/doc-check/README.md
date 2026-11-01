@@ -33,6 +33,7 @@ python -I -X utf8 -m unittest discover -s tools/doc-check -p "test_*.py"
 | 시험 파일 | 지키는 것 |
 | --- | --- |
 | `test_api_contract.py` | `api` 검사의 openapi 계약 부분(기술 검토 낮음-031·032): 처음 맞는 접두사 규칙과 경로·작업 `servers`로 정한 호스트, 호스트가 하나로 정해지지 않는 작업, `securitySchemes`에 없는 인증 방식 이름(작업·전역), `security`도 전역 `security`도 없는 작업(전역이 빈 목록일 때 포함), `security: []` 공개 작업, 보고 숫자(`api`·`api_hosts`·`api_problem_exempt`. Problem 선언은 `application/problem+json`, `components/responses` 참조, `Problem` 스키마 참조 셋 다), Problem 예외와 예외가 아닌 오류 응답, 줄 규칙과 YAML 읽기의 작업 수 대조, 읽지 못한 명세. openapi 글을 넣어 `main()`과 같은 순서(`check_yaml` → `check_api` → `check_api_contract`)로 돌린다 |
+| `test_yaml_docs.py` | `yaml` 검사의 여러 문서와 Helm 틀(BUILD_ORDER FND-110): `---`로 이은 쿠버네티스 매니페스트는 문서마다 따로 읽고(같은 키가 두 번인지는 문서 안에서만, 줄 번호는 파일 기준), Helm 차트(`Chart.yaml`이 있는 폴더)의 `templates/`는 건너뛴다 |
 
 새 검사를 더하거나 고칠 때는 같은 방식으로 시험을 먼저 쓴다(docs/architecture.md §8.6의 5).
 
@@ -40,7 +41,7 @@ python -I -X utf8 -m unittest discover -s tools/doc-check -p "test_*.py"
 
 | 검사 | 오류로 보는 것 | 경고로 보는 것 |
 | --- | --- | --- |
-| yaml | 저장소의 .yaml(openapi·asyncapi·docs/api/proto/buf.yaml)에서 같은 매핑에 같은 키가 두 번 있음(블록·흐름 매핑 모두), 읽을 수 없는 줄(들여쓰기 어긋남, 일반 글자 안의 `: `, 닫히지 않은 따옴표·괄호). 읽기는 표준 라이브러리로 만든 작은 읽개(`YamlReader`)이고 이 저장소 파일이 쓰는 부분만 읽는다(앵커·별칭·태그는 오류). 기술 검토 낮음-027. pnpm이 만드는 `pnpm-lock.yaml`은 어느 검사에서도 읽지 않는다(문서가 아니고 YAML 문서 여럿을 이어 붙인 형식이다. 검사는 pnpm의 공급망 검사가 한다, ADR-0167) | — |
+| yaml | 저장소의 .yaml(openapi·asyncapi·docs/api/proto/buf.yaml)에서 같은 매핑에 같은 키가 두 번 있음(블록·흐름 매핑 모두), 읽을 수 없는 줄(들여쓰기 어긋남, 일반 글자 안의 `: `, 닫히지 않은 따옴표·괄호). 읽기는 표준 라이브러리로 만든 작은 읽개(`YamlReader`)이고 이 저장소 파일이 쓰는 부분만 읽는다(앵커·별칭·태그는 오류). `---` 줄로 이은 여러 문서(쿠버네티스 매니페스트)는 문서마다 따로 읽는다. Helm 차트(`Chart.yaml`이 있는 폴더)의 `templates/`는 렌더하기 전에는 YAML이 아니라 읽지 않는다(렌더 결과는 tools/local/chart.test.mjs, 2026-11-01). 기술 검토 낮음-027. pnpm이 만드는 `pnpm-lock.yaml`은 어느 검사에서도 읽지 않는다(문서가 아니고 YAML 문서 여럿을 이어 붙인 형식이다. 검사는 pnpm의 공급망 검사가 한다, ADR-0167) | — |
 | ids | FR·NFR·POL·SCR·CMP·ADR 참조가 정의에 없음, 같은 ID를 두 번 정의 | — |
 | frtrace | docs/planning/02의 FR 가운데, 시험 표 행(첫 칸이 `Q-T12`·`**SR-T1**` 같은 시험 ID인 표 행) 어디에서도 가리키지 않는 FR이 있음. 행 안의 `FR-005~008`(범위), `FR-026·028~034`, `FR-001, 002` 같은 묶음은 펼쳐서 센다. docs/review/·docs/adr/·tools/와 코드 펜스 안은 보지 않는다(docs/planning/02 §2 '인수 조건마다 자동화 시험 하나 이상', 기술 검토 중간-005). 연결된 FR 수는 `frtrace` 정보 줄에 나온다 | — |
 | tables | 한 표 안에서 행마다 열 수가 다름(코드 스팬·`\|` 제외) | — |

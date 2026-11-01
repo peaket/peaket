@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
-const SCOPES = ['docs', 'contracts', 'js', 'js_all', 'data', 'infra', 'deploy', 'loadtest', 'tools', 'ci'];
+const SCOPES = ['docs', 'contracts', 'js', 'js_all', 'data', 'infra', 'deploy', 'loadtest', 'tools', 'ci', 'kind'];
 
 // 경로 앞머리 → 범위. 한 파일이 여러 범위에 들 수 있다
 const RULES = [
@@ -26,6 +26,13 @@ const RULES = [
   [/^data\//, ['data']],
   [/^infra\//, ['infra']],
   [/^deploy\//, ['deploy']],
+  // 로컬 kind 클러스터 시험(ci-kind.yml): 클러스터 정의·공용 차트·클러스터 도구, 서비스 이미지에 드는 것 전부(플랫폼 패키지와 서비스 뼈대,
+  // 공용 설정 패키지, 작업 공간 파일)(openspec 변경 add-local-cluster-and-relay-deployment). 무거운 잡이라 화면·문서 변경에는 돌지 않고,
+  // develop 푸시에서는 늘 돈다
+  [
+    /^(deploy\/(local|charts)\/|tools\/local\/|\.dockerignore$|\.github\/workflows\/ci-kind\.yml$|packages\/(platform|config)\/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$)/,
+    ['kind'],
+  ],
   [/^loadtest\//, ['loadtest']],
   [/^tools\//, ['tools']],
   [/^\.github\//, ['ci']],

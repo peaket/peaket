@@ -28,8 +28,8 @@ test('D-T47 ① 문서만 바꾸면 docs만 고른다', () => {
   assert.deepEqual(scopes({ 'docs/a.md': '글\n' }), ['docs']);
 });
 
-test('D-T47 ② packages/platform을 바꾸면 화면·서비스 전부(js_all)와, 서비스 문서를 뽑는 곳이라 계약 잡을 고른다', () => {
-  assert.deepEqual(scopes({ 'packages/platform/x.ts': '바꿈\n' }), ['contracts', 'js', 'js_all']);
+test('D-T47 ② packages/platform을 바꾸면 화면·서비스 전부(js_all)와, 서비스 문서를 뽑는 곳이라 계약 잡을, 서비스 이미지에 드는 곳이라 kind를 고른다', () => {
+  assert.deepEqual(scopes({ 'packages/platform/x.ts': '바꿈\n' }), ['contracts', 'js', 'js_all', 'kind']);
 });
 
 test('D-T47 ③ infra/만 바꾸면 infra만 고른다', () => {
@@ -59,7 +59,7 @@ test('배포 상태·부하 시험·도구·워크플로 밖 .github은 각 범�
 
 test('파일을 옮기면 옛 경로의 범위와, 링크가 깨질 수 있어 docs도 고른다', () => {
   const s = scopes({}, undefined, (dir) => git(dir, 'mv', 'packages/platform/x.ts', 'infra/x.ts'));
-  assert.deepEqual(s, ['docs', 'contracts', 'js', 'js_all', 'infra']);
+  assert.deepEqual(s, ['docs', 'contracts', 'js', 'js_all', 'infra', 'kind']);
 });
 
 test('문서 점검이 읽는 파일(.md·.yaml·.json·.csv)은 어디에 있든 docs를 고른다', () => {
@@ -94,7 +94,7 @@ test('DT38_서비스와_계약깨짐검사도구를바꾸면_contracts를고른�
 
 test('DT38_서비스템플릿과_서비스문서비교본체를바꾸면_contracts를고른다', () => {
   // emitOpenApi·contractSchema(packages/platform)나 비교 본체를 고치면 서비스 OpenAPI 차이를 다시 돌린다(코드 리뷰, add-service-template)
-  assert.deepEqual(scopes({ 'packages/platform/src/openapi.ts': 'x\n' }), ['contracts', 'js', 'js_all']);
+  assert.deepEqual(scopes({ 'packages/platform/src/openapi.ts': 'x\n' }), ['contracts', 'js', 'js_all', 'kind']);
   // 비교 본체는 서비스 템플릿의 계약 전체 대조 시험(contract-sweep.test.ts, node 잡)도 쓰므로 js도 켠다(다시 본 리뷰)
   assert.deepEqual(scopes({ 'tools/ci/service-openapi.mjs': 'x\n' }), ['contracts', 'js', 'tools']);
 });
@@ -110,5 +110,39 @@ test('자바스크립트검사방식을바꾸면_전체js를고르고_서비스�
 test('낮음008_뿌리ESLint설정과_공용설정패키지를바꾸면_전체js를고른다', () => {
   // 뿌리 eslint.config.mjs와 @peaket/config(ESLint·TypeScript 설정)는 모든 서비스·패키지의 린트와 형 검사 방식이다(add-service-structure-and-request-checks)
   assert.deepEqual(scopes({ 'eslint.config.mjs': 'export default [];\n' }), ['js', 'js_all']);
-  assert.deepEqual(scopes({ 'packages/config/eslint/service-layers.mjs': 'x\n' }), ['js', 'js_all']);
+  assert.deepEqual(scopes({ 'packages/config/eslint/service-layers.mjs': 'x\n' }), ['js', 'js_all', 'kind']);
+});
+
+test('FND110_로컬클러스터·공용차트·릴레이·Lease코드·이미지파일을바꾸면_kind를고른다', () => {
+  for (const f of [
+    'deploy/local/kind.yaml',
+    'deploy/charts/peaket-service/values.yaml',
+    'tools/local/cluster.mjs',
+    'packages/platform/template/Dockerfile',
+    'packages/platform/template/src/relay.ts',
+    'packages/platform/src/lease.ts',
+    'packages/platform/src/outbox-relay.ts',
+    'packages/platform/src/relay-process.ts',
+    'packages/platform/src/maintenance.ts',
+    '.github/workflows/ci-kind.yml',
+    '.dockerignore',
+    // 코드 리뷰 2026-11-01: kind 시험이 직접 쓰는 마이그레이션·서비스 시작·준비 프로브와 이미지에 드는 잠금 파일
+    'packages/platform/template/migrations/0002_outbox.sql',
+    'packages/platform/template/src/main.ts',
+    'packages/platform/src/service.ts',
+    'package.json',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
+    // 확인 리뷰 2026-11-01: 이미지와 시작 명령이 기대는 플랫폼 패키지 전부(내보내기·설정·로그·OTel 등록)와 공용 설정
+    'packages/platform/package.json',
+    'packages/platform/src/telemetry-register.ts',
+    'packages/platform/src/config.ts',
+    'packages/platform/tsconfig.build.json',
+    'packages/config/tsconfig/base.json',
+  ]) {
+    assert.ok(scopes({ [f]: '바꿈\n' }).includes('kind'), f);
+  }
+  // 플랫폼 밖 화면과 문서만 바꾸면 kind를 고르지 않는다(무거운 잡)
+  assert.equal(scopes({ 'apps/web/src/a.ts': '바꿈\n' }).includes('kind'), false);
+  assert.equal(scopes({ 'docs/infra.md': '글\n' }).includes('kind'), false);
 });

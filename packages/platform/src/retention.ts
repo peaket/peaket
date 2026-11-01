@@ -30,7 +30,8 @@ export interface RetentionResult {
   deleted: number;
   batches: number;
   /** done: 기한이 지난 행이 없다. guard: 지키는 선이 멈춤. window: 정비 시간이 끝남 */
-  stopped: 'done' | 'guard' | 'window';
+  /** aborted: 멈춤 신호(프로세스 종료)를 받아 다음 묶음을 시작하지 않았다 */
+  stopped: 'done' | 'guard' | 'window' | 'aborted';
   reason?: string;
 }
 
@@ -56,6 +57,8 @@ export async function deleteExpiredRows(
     /** 정비 시간 밖에서도 돈다(시험·손으로 돌릴 때) */
     ignoreWindow?: boolean;
     sleep?: (ms: number) => Promise<void>;
+    /** 끊기면 다음 묶음을 시작하지 않는다(정비 반복을 멈출 때) */
+    signal?: AbortSignal;
   } = {},
 ): Promise<RetentionResult> {
   check(spec);
@@ -65,11 +68,12 @@ export async function deleteExpiredRows(
   const boundary = retentionBoundary(clock, spec);
   const result: RetentionResult = { deleted: 0, batches: 0, stopped: 'done' };
   for (;;) {
+    if (o.signal?.aborted) return { ...result, stopped: 'aborted' };
     if (!o.ignoreWindow && !inMaintenanceWindow(clock.now())) return { ...result, stopped: 'window' };
     const reason = await o.guard?.();
     if (reason) return { ...result, stopped: 'guard', reason };
     const n = await database.transaction(async (tx) => {
-      const ids = ((await tx.execute(sql`select id::text as id from ${sql.identifier(spec.table)} where id < ${boundary}::uuid order by id limit ${batchSize} for update`)).rows as { id: string }[]).map((r) => r.id);
+      const ids = ((await tx.execute(sql`select id::text as id from ${sql.identifier(spec.table)} where id < ${boundary}::uuid order by ${sql.identifier(spec.table)}.id limit ${batchSize} for update`)).rows as { id: string }[]).map((r) => r.id);
       if (ids.length === 0) return 0;
       for (const c of spec.children ?? []) await tx.execute(sql`delete from ${sql.identifier(c.table)} where ${sql.identifier(c.column)} = any(${arr(ids)}::uuid[])`);
       await tx.execute(sql`delete from ${sql.identifier(spec.table)} where id = any(${arr(ids)}::uuid[])`);
@@ -86,7 +90,7 @@ export async function deleteExpiredRows(
 /** 남은 가장 오래된 지울 행이 기한을 넘긴 시간(초). 없으면 0(maintenance_retention_overdue_seconds) */
 export async function retentionOverdueSeconds(database: Database, clock: Clock, spec: RetentionSpec): Promise<number> {
   check(spec);
-  const rows = (await database.db.execute(sql`select id::text as id from ${sql.identifier(spec.table)} where id < ${retentionBoundary(clock, spec)}::uuid order by id limit 1`)).rows as { id: string }[];
+  const rows = (await database.db.execute(sql`select id::text as id from ${sql.identifier(spec.table)} where id < ${retentionBoundary(clock, spec)}::uuid order by ${sql.identifier(spec.table)}.id limit 1`)).rows as { id: string }[];
   if (!rows[0]) return 0;
   return Math.max(0, clock.now() - (uuidv7Time(rows[0].id) + spec.retentionMs)) / 1000;
 }

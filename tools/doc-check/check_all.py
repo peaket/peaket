@@ -444,19 +444,42 @@ def check_yaml(texts, rep):
     읽은 값을 {파일: 값}으로 돌려준다(읽지 못한 파일은 None). api 검사가 openapi 값을 쓴다.
     """
     docs = {}
+    charts = {f.rsplit('/', 1)[0] for f in texts if f.endswith('/Chart.yaml')}
     for f, text in texts.items():
         if not f.endswith('.yaml'):
             continue
-        try:
-            docs[f], dups = yaml_load(text)
-        except YamlError as e:
-            rep.err('yaml', '%s:%d' % (f, e.line), '읽을 수 없는 YAML: %s' % e)
-            docs[f] = None
+        # Helm 차트의 templates/는 렌더하기 전에는 YAML이 아니다(Go 틀). 렌더 결과는 tools/local/chart.test.mjs가 본다
+        if '/templates/' in f and f.split('/templates/', 1)[0] in charts:
             continue
-        for line, key, first in dups:
-            rep.err('yaml', '%s:%d' % (f, line), "같은 매핑에 키 '%s'가 두 번 있음(처음은 %d줄)" % (key, first))
+        values = []
+        for offset, part in split_yaml_docs(text):
+            try:
+                value, dups = yaml_load(part)
+            except YamlError as e:
+                rep.err('yaml', '%s:%d' % (f, e.line + offset), '읽을 수 없는 YAML: %s' % e)
+                values = None
+                break
+            for line, key, first in dups:
+                rep.err('yaml', '%s:%d' % (f, line + offset), "같은 매핑에 키 '%s'가 두 번 있음(처음은 %d줄)" % (key, first + offset))
+            values.append(value)
+        # 문서가 하나면 예전처럼 그 값, 여럿(쿠버네티스 매니페스트)이면 목록
+        docs[f] = None if values is None else (values[0] if len(values) == 1 else values)
     rep.info['yaml_files'] = len(docs)
     return docs
+
+
+def split_yaml_docs(text):
+    """`---` 줄로 나눈 (앞선 줄 수, 글) 목록. 주석·빈 줄만 있는 조각은 뺀다(한 문서 파일은 조각 하나)."""
+    parts, buf, start = [], [], 0
+    for n, line in enumerate(text.split('\n')):
+        if line.rstrip() == '---' or line.startswith('--- '):
+            parts.append((start, '\n'.join(buf)))
+            buf, start = [], n + 1
+        else:
+            buf.append(line)
+    parts.append((start, '\n'.join(buf)))
+    real = [p for p in parts if any(l.strip() and not l.strip().startswith('#') for l in p[1].split('\n'))]
+    return real or [(0, text)]
 
 
 # ---------- 1. ID 정의와 참조 ----------

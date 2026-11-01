@@ -1,0 +1,76 @@
+{{- if .Values.service.enabled }}
+{{- $name := include "peaket.name" . }}
+# 서비스 파드. 쿠버네티스 API를 부르지 않으므로 서비스 계정 토큰을 붙이지 않는다(ASVS v5.0.0-13.2.2)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "peaket.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "peaket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: service
+spec:
+  replicas: {{ .Values.service.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/component: service
+  template:
+    metadata:
+      labels:
+        {{- include "peaket.labels" . | nindent 8 }}
+        app.kubernetes.io/component: service
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.service.terminationGracePeriodSeconds }}
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: app
+          image: {{ include "peaket.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: {{- toYaml .Values.service.command | nindent 12 }}
+          ports:
+            - { name: http, containerPort: {{ .Values.service.port }} }
+            - { name: management, containerPort: {{ .Values.managementPort }} }
+          env:
+            {{- include "peaket.commonEnv" . | nindent 12 }}
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            {{- range $k, $v := .Values.service.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          {{- if .Values.secretEnvFrom }}
+          envFrom:
+            - secretRef: { name: {{ .Values.secretEnvFrom }} }
+          {{- end }}
+          {{- include "peaket.probes" . | nindent 10 }}
+          lifecycle:
+            preStop:
+              sleep: { seconds: {{ .Values.service.preStopSleepSeconds }} }
+          resources: {{- toYaml .Values.service.resources | nindent 12 }}
+          securityContext: {{- include "peaket.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "peaket.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/component: service
+  ports:
+    - { name: http, port: {{ .Values.service.port }}, targetPort: http }
+{{- end }}

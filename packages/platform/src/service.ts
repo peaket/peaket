@@ -171,6 +171,8 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     void reply.header('content-type', metrics.registry.contentType);
     return metrics.registry.metrics();
   });
+  // 생존 프로브: 이벤트 루프가 답하는지만 본다. 준비 상태·의존성과 상관없다(architecture §5 '프로브 규칙', ADR-0070)
+  management.get('/livez', async () => ({ status: 'live' }));
   // 준비 프로브: 메모리의 표시만 본다(ADR-0070·0103, D-T29)
   management.get('/ready', async (_request, reply) => {
     const pending = readiness.pending();

@@ -4,8 +4,9 @@
 
 | 스크립트 | 하는 일 | 부르는 곳 |
 | --- | --- | --- |
-| `changes.mjs` | 바뀐 파일로 검사 범위(`docs`, `contracts`, `js`, `js_all`, `data`, `infra`, `deploy`, `loadtest`, `tools`, `ci`)를 고릅니다. 비교 기준이 없거나 git이 실패하면 전체를 고릅니다(D-T47) | `ci.yml`의 `changes` |
+| `changes.mjs` | 바뀐 파일로 검사 범위(`docs`, `contracts`, `js`, `js_all`, `data`, `infra`, `deploy`, `loadtest`, `tools`, `ci`, `kind`)를 고릅니다. `kind`는 로컬 클러스터 정의·공용 차트·`tools/local`과, 서비스 이미지에 드는 것 전부(`packages/platform`·`packages/config`·작업 공간 파일 `package.json`·잠금 파일)가 바뀌었을 때입니다(무거운 잡이라 화면·문서 변경에는 고르지 않습니다). 비교 기준이 없거나 git이 실패하면 전체를 고릅니다(D-T47) | `ci.yml`의 `changes` |
 | `ci-summary.mjs` | 앞선 잡이 하나라도 실패하거나 취소되면 실패합니다. 건너뛴 잡은 실패가 아닙니다 | `ci.yml`의 `ci-summary`(필수 검사) |
+| `fork-guard.mjs` | 비밀이 필요한 단계의 포크 PR 건너뛰기 표시(§4.5, 기술 검토 낮음-010). 포크에서 온 PR이면 출력 `run=false`와 '포크 PR 건너뜀' 알림·잡 요약 줄을 남기고 실패하지 않습니다. 조직 안 PR·푸시에서 비밀이 빠졌으면 실패합니다. 비밀 값은 읽지 않고 있는지만 봅니다. 지금 PR에서 비밀을 쓰는 단계는 없습니다(로컬·CI의 AWS 흉내는 계정이 없습니다) | 비밀이 필요한 단계(앞으로) |
 | `branch-policy.mjs` | 가지 쌍, PR 제목 형식, 빌드 절차 변경 PR에 다른 경로가 섞였는지를 봅니다. 같은 저장소의 릴리스·핫픽스·역병합 PR은 보호 가지에 아직 없는 새 커밋이 바꾼 파일만 섞임 검사를 합니다(이미 병합된 변경을 옮길 뿐입니다). 포크 PR은 바뀐 파일 전부를 봅니다. 작업 가지가 3일을 넘기면 경고합니다(§2.2.6, D-T41) | `branch-policy.yml`(필수 검사) |
 | `conventional.mjs` | Conventional Commits 제목 규칙(허용 종류, 형식, 호환을 깨는 표시). PR 제목 검사와 버전 계산이 함께 씁니다 | `branch-policy.mjs`, `release-plan.mjs` |
 | `release-plan.mjs` | 릴리스·핫픽스 계획. `start`는 다음 판(SemVer, 0.y.z 규칙)·변경 기록·바뀐 배포 단위·버전을 올린 `package.json`을, `finish`는 태그·후보·역병합 대상과 `merge/*` 가지 이름을, `verify`는 `main` 병합 커밋의 두 번째 부모와 트리를 봅니다(§2.2.2~§2.2.5, D-T22·D-T23·D-T25·D-T41 ④) | `release.yml` |

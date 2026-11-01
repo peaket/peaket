@@ -1,0 +1,38 @@
+# 계정 없이 도는 AWS 흉내 서버(moto 5.2.5, Apache-2.0). LocalStack은 계정·인증 토큰이 있어야 떠서(docs/infra.md §3) 대신 쓴다
+# (소유자 결정 2026-10-31 '외부 서비스 계정은 만들지 않고 계정 없이 되는 대역', 추천 적용 2026-11-01).
+# 쓰는 기능(S3 Object Lock·KMS 비대칭 서명·Secrets Manager 판)은 tools/local/e2e/aws-emulator.e2e.mjs가 본다. 자격 증명은 아무 값이나 받는다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: aws
+  namespace: peaket-local
+spec:
+  selector: { app: aws }
+  ports:
+    - { name: http, port: 5000, targetPort: 5000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aws
+  namespace: peaket-local
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: aws }
+  template:
+    metadata:
+      labels: { app: aws }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: moto
+          image: motoserver/moto@sha256:59a1965d845249b04def37a0e2565f9cc6c44543cb89b68e90f28f344b3b0d1a
+          ports:
+            - { containerPort: 5000 }
+          readinessProbe:
+            httpGet: { path: /moto-api/, port: 5000 }
+            periodSeconds: 2
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }

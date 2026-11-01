@@ -76,13 +76,13 @@ await database.transaction((tx) =>
 );
 ```
 
-Outbox 릴레이 Deployment(`<서비스>-outbox-relay`, 복제 2)의 시작 명령:
+Outbox 릴레이 Deployment(`<서비스>-outbox-relay`, 복제 2)는 서비스와 같은 이미지를 다른 시작 명령(`node --import @peaket/platform/telemetry/register template/dist/relay.js`)으로 띄운다. 전체 모양은 서비스 뼈대의 `template/src/relay.ts`이고, 배포는 공용 차트 `deploy/charts/peaket-service`의 `outboxRelay`다(BUILD_ORDER FND-110):
 
 ```ts
-const elector = new LeaseElector({ api: inClusterLeaseApi('purchase-outbox-relay'), identity: process.env.PEAKET_POD!, clock });
-const relay = new OutboxRelay({ database, publisher, leader: elector, clock, metrics: new OutboxRelayMetrics(registry, 'purchase-svc') });
-elector.start();
-relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
+const config = loadOutboxRelayProcessConfig('purchase-svc', process.env); // PEAKET_POD·두 DB 주소·브로커가 없으면 던진다
+const relay = await startOutboxRelayProcess({ service: 'purchase-svc', database, maintenanceDatabase, publisher, leaseApi: inClusterLeaseApi(config.leaseName) });
+await relay.listen(); // 관리 포트 /metrics·/ready·/livez
+process.once('SIGTERM', async () => { await relay.stop(); /* 그 뒤 생산자·DB를 닫는다 */ });
 ```
 
 | 내보내는 것 | 하는 일 | 정본 |
@@ -111,6 +111,7 @@ relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
 | `writeOutbox`·`CONTROL_TOPICS` | Outbox 행(UUIDv7 ID, 추적 머리)을 같은 트랜잭션의 마지막 문장으로 넣는다. 제어 사건도 같은 길이다 | ADR-0116 결정 3, ADR-0143 결정 3 |
 | `OutboxRelay`·`OutboxRelayMetrics`·`OutboxPublisher` | 폴링 릴레이(리더만, `FOR UPDATE` `seq` 순서 500행, 보내기 10초 상한, 실패하면 0.1~5초 늘려 쉬기)와 지표 일곱. 보내기 포트의 Kafka 어댑터는 `@peaket/platform/stream-worker`의 `kafkaOutboxPublisher` | ADR-0116 결정 3·5 |
 | `LeaseElector`·`kubernetesLeaseApi`·`inClusterLeaseApi` | 쿠버네티스 Lease로 리더 하나(12초·갱신 한도 8초·다시 시도 2초 [가정]) | ADR-0116 결정 2 |
+| `startOutboxRelayProcess`·`loadOutboxRelayProcessConfig` | 서비스별 Outbox 릴레이 프로세스. Lease `<서비스>-outbox-relay`의 리더만 릴레이와 정비 반복을 돌고(리더가 되면 정비를 바로 깨운다), 관리 포트로 `/metrics`·`/ready`·`/livez`를 낸다. 끝낼 때 보내던 묶음을 마치고 정비를 멈춘 뒤(정비 일에 멈춤 신호, 10초 [가정] 한도 `RELAY_PROCESS_DEFAULTS.stopTimeoutMs`) Lease를 놓는다. 설정 넷(`PEAKET_POD`·`PEAKET_OUTBOX_DATABASE_URL`·`PEAKET_MAINTENANCE_DATABASE_URL`·`PEAKET_KAFKA_BROKERS`)이 없으면 이름을 모두 대며 시작하지 않는다 | ADR-0116 결정 1·2, V-T28 |
 | `ensureOutboxPartitions`·`dropExpiredOutboxPartitions`·`outboxHealth` | Outbox 일 파티션(KST 하루 ID 범위) 7일 앞까지 만들기, 정비 시간에 3일 지난 것 지우기(보내지 않은 행이 있으면 남김), 지연·파티션 지표 값 | docs/data.md §2·§4의 7번 |
 | `uuidv7`·`uuidLowerBound` | 주입한 시계의 UUIDv7과 ID 범위 경계 | docs/data.md §2 |
 | `kafkaProducerConfig`·`kafkaConsumerConfig`·`KAFKA_REQUIRED` | Kafka 필수 설정(생산자 `acks=all`·멱등·동시 5·`murmur2_random`·전달 상한 Outbox 릴레이 10초·그 밖 5초, 소비자 자동 커밋 끔·`cooperative-sticky`·세션 45초·`classic`). 덧붙일 설정에 필수 이름이 있으면 예외. 정적 검사는 `tools/ci/check-kafka-settings.mjs`(D-T45) | ADR-0142 결정 3, docs/streaming.md §2.6 |
@@ -142,7 +143,7 @@ relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
 | `PEAKET_ENV` | 없음(운영으로 본다) | `local`·`ci`·`demo`·`staging`·`prod` |
 | `PEAKET_DEBUG_ERRORS` | `false` | `true`면 Problem에 `debug`(예외 이름·스택 요약)를 싣는다. `local`·`ci`가 아니면 시작하지 않는다 |
 | `PORT` | 8080 | 앱 포트 |
-| `PEAKET_MANAGEMENT_PORT` | 9464 | 관리 포트(`/metrics`). 앱 포트와 달라야 한다 |
+| `PEAKET_MANAGEMENT_PORT` | 9464 | 관리 포트(`/metrics`·`/ready`·생존 프로브 `/livez`). 앱 포트와 달라야 한다 |
 | `PEAKET_MAX_DEADLINE_MS` | 15000 | 받은 남은 시간(`x-peaket-deadline-ms`)의 상한 |
 | `PEAKET_LOG_PSEUDONYM_KEY` | 없음 | 로그 가명 키(base64로 32바이트, External Secrets Operator가 넣는다). `demo`·`staging`·`prod`에서 없으면 시작하지 않는다 |
 | `PEAKET_LOG_SAMPLE_ONE_IN` | 10 | 정상 줄 표본 'N건에 1건'(평시 10%) |
@@ -156,11 +157,11 @@ relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
 
 ## 서비스 뼈대
 
-`template/`는 서비스 하나의 최소 모양이다(docs/architecture.md §3.1). 새 서비스는 이 폴더를 `services/<이름>/`로 복사하고 예시 컨텍스트(`example`)를 바꾼다.
+`template/`는 서비스 하나의 최소 모양이다(docs/architecture.md §3.1). 새 서비스는 이 폴더를 `services/<이름>/`로 복사하고 예시 컨텍스트(`example`)를 바꾼다. 이미지는 `template/Dockerfile`(빌드 맥락은 저장소 뿌리, 실행 이미지에는 빌드 산출물·운영 의존성·마이그레이션만)로 만들고, 같은 이미지가 서비스(`dist/main.js`)와 Outbox 릴레이(`dist/relay.js`)를 띄운다. 로컬 kind 클러스터에서 띄워 보는 법은 tools/local/README.md다.
 
 | 자리 | 층 | 가져올 수 있는 것 |
 | --- | --- | --- |
-| `src/main.ts`·`src/app.module.ts` | 시작·뿌리 | 모두 |
+| `src/main.ts`·`src/relay.ts`·`src/app.module.ts` | 시작(서비스·Outbox 릴레이)·뿌리 | 모두 |
 | `src/modules/<컨텍스트>/<컨텍스트>.module.ts` | 조립(포트에 어댑터를 묶는다) | 모두 |
 | `…/inbound/` | 받는 층(REST·gRPC 처리기, Kafka 소비자) | 유스케이스·도메인, 계약 생성물, 플랫폼 |
 | `…/application/` | 유스케이스 | 도메인, `@nestjs/common`의 주입 장식자, 플랫폼의 Problem·요청 맥락 |
@@ -188,10 +189,10 @@ relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
 | 명령 | 하는 일 |
 | --- | --- |
 | `pnpm --filter @peaket/platform test` | Vitest 시험(남은 시간, Problem, 지표, 문서 뽑기, 정규 로그 줄, 가명, SDK를 띄운 추적 문맥과 V-T31 ③, 요청 검사와 두 길의 표본 일치, 본문 형식, 인증 가드, 멱등 키·원시 본문, UUIDv7·파티션 경계, Lease, 릴레이 반복, Kafka 필수 설정, 키 단위 처리와 보류, 제어 동기화와 준비 표시, 정비 반복, 차단기, 구매 요청 서명과 시험 벡터, gRPC 채널(로컬 grpc-js 서버), 서비스 뼈대) |
-| `pnpm --filter @peaket/platform test:integration` | 실제 PostgreSQL 18·Kafka 3.9.2·Valkey 8.1 컨테이너(`docker run`) 시험: Drizzle 설정, 풀 대기 429, 행 보안과 `SET LOCAL`, 멱등 기록(처리 중·다른 본문·보관), Outbox 쓰기·릴레이 순서·실패 뒤 다시·두 릴레이, 일 파티션 만들기·지우기, Kafka로 보내기와 브로커 정지(V-T28 ②)·키 단위 소비·방송형 읽기, 보류 표, 월 파티션·통계 스냅샷·보존 지우기·인덱스 다시 만들기·정비 반복, Stream 정리, 뼈대의 Drizzle 어댑터. Docker 엔진이 있어야 한다 |
+| `pnpm --filter @peaket/platform test:integration` | 실제 PostgreSQL 18·Kafka 3.9.2·Valkey 8.1 컨테이너(`docker run`) 시험: Drizzle 설정, 풀 대기 429, 행 보안과 `SET LOCAL`, 멱등 기록(처리 중·다른 본문·보관), Outbox 쓰기·릴레이 순서·실패 뒤 다시·두 릴레이, 릴레이 프로세스 두 복제의 리더 넘기기, 일 파티션 만들기·지우기, Kafka로 보내기와 브로커 정지(V-T28 ②)·키 단위 소비·방송형 읽기, 보류 표, 월 파티션·통계 스냅샷·보존 지우기·인덱스 다시 만들기·정비 반복, Stream 정리, 뼈대의 Drizzle 어댑터. Docker 엔진이 있어야 한다 |
 | `pnpm --filter @peaket/platform typecheck` | 타입 검사 |
 | `pnpm --filter @peaket/platform build` | `dist/` 빌드 |
 
 ## 아직 없는 것
 
-릴레이·정비 Deployment·실제 Lease 확인(FND-110), MSK IAM 토큰 함수(FND-120), Avro 인코더·디코더(BAS-030), 마이그레이션 직후 파티션 만들기와 `pgstattuple`·정비 역할(BAS-060), 온세일 구간 로그 표본 비율 연결(미해결 OPEN[09]), 현장 스태프 역할 판정(GAT-170), 프로브와 시간 초과 기본값(0.3.6), gRPC 서버 쪽 시작과 우아한 종료(BAS-080, D-T27), 구매 세션 저장소 어댑터와 서버 ECDH 키(BOT-100), 엣지 게이트웨이의 추적 헤더 지우기와 앱 서버 연결(2.11.1), 동적 로그 수준 명령(관제 명령 8), exemplar·Pyroscope(4.1.1).
+MSK IAM 토큰 함수(FND-120), Avro 인코더·디코더(BAS-030), 마이그레이션 직후 파티션 만들기와 `pgstattuple`·정비 역할(BAS-060), 온세일 구간 로그 표본 비율 연결(미해결 OPEN[09]), 현장 스태프 역할 판정(GAT-170), 프로브와 시간 초과 기본값(0.3.6), gRPC 서버 쪽 시작과 우아한 종료(BAS-080, D-T27), 구매 세션 저장소 어댑터와 서버 ECDH 키(BOT-100), 엣지 게이트웨이의 추적 헤더 지우기와 앱 서버 연결(2.11.1), 동적 로그 수준 명령(관제 명령 8), exemplar·Pyroscope(4.1.1).

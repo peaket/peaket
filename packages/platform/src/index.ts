@@ -57,6 +57,7 @@ export {
 } from './outbox.js';
 export { OUTBOX_RELAY_DEFAULTS, OutboxRelay, OutboxRelayMetrics, type LeaderState, type OutboxPublisher, type OutboxRecord, type OutboxRelayOptions } from './outbox-relay.js';
 export { LEASE_DEFAULTS, LeaseElector, inClusterLeaseApi, kubernetesLeaseApi, type KubernetesLeaseApiOptions, type LeaseApi, type LeaseElectorOptions, type LeaseRecord, type LeaseSpec } from './lease.js';
+export { RELAY_PROCESS_DEFAULTS, loadOutboxRelayProcessConfig, startOutboxRelayProcess, type OutboxRelayProcess, type OutboxRelayProcessConfig, type OutboxRelayProcessOptions } from './relay-process.js';
 export { KAFKA_CONSUMER_LOCKED, KAFKA_PRODUCER_LOCKED, KAFKA_REQUIRED, kafkaConsumerConfig, kafkaProducerConfig, type KafkaClientBase, type KafkaClientConfig, type KafkaProducerKind } from './kafka-config.js';
 export {
   KEYED_CONSUMER_DEFAULTS,

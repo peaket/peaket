@@ -216,6 +216,28 @@ describe('쿠버네티스 Lease API 모양', () => {
     expect(seen[1]!.body).toMatchObject({ apiVersion: 'coordination.k8s.io/v1', kind: 'Lease', metadata: { name: 'purchase-outbox-relay', namespace: 'purchase' }, spec });
   });
 
+  test('FND110_리뷰_차트가만든Lease를고칠때_라벨·주석·소유자참조를지우지않는다', async () => {
+    // 재현(코드 리뷰 2026-11-01): 고치기는 PUT(전체 바꾸기)인데 본문 메타데이터에 이름·판만 담아, 차트·ArgoCD가 붙인 라벨과 주석이 2초마다 지워졌다
+    const labels = { 'app.kubernetes.io/name': 'example-svc', 'app.kubernetes.io/managed-by': 'Helm' };
+    const annotations = { 'meta.helm.sh/release-name': 'example', 'meta.helm.sh/release-namespace': 'example' };
+    const ownerReferences = [{ apiVersion: 'v1', kind: 'ConfigMap', name: 'owner', uid: 'u-1' }];
+    stored = { apiVersion: 'coordination.k8s.io/v1', kind: 'Lease', metadata: { name: 'example-svc-outbox-relay', namespace: 'example', resourceVersion: String(++rv), labels, annotations, ownerReferences }, spec: {} };
+    seen.length = 0;
+    const api = kubernetesLeaseApi({ baseUrl: base, namespace: 'example', name: 'example-svc-outbox-relay', token: () => 't' });
+    const got = await api.get();
+    expect(got).toMatchObject({ holderIdentity: null, leaseDurationSeconds: 0 });
+    const spec: LeaseSpec = { holderIdentity: 'relay-a', leaseDurationSeconds: 12, acquireTime: '2026-11-01T00:00:00.000000Z', renewTime: '2026-11-01T00:00:00.000000Z', leaseTransitions: 1 };
+    const r1 = await api.update(spec, got!.resourceVersion);
+    expect(r1).not.toBe('conflict');
+    const put1 = seen.find((x) => x.method === 'PUT')!.body as { metadata: Record<string, unknown> };
+    expect(put1.metadata).toMatchObject({ labels, annotations, ownerReferences });
+    // 고친 뒤의 응답에서 다시 이어 간다(다음 갱신도 지우지 않는다)
+    await api.update({ ...spec, renewTime: '2026-11-01T00:00:02.000000Z' }, (r1 as LeaseRecord).resourceVersion);
+    expect((stored!.metadata as Record<string, unknown>).labels).toEqual(labels);
+    expect((stored!.metadata as Record<string, unknown>).annotations).toEqual(annotations);
+    stored = undefined;
+  });
+
   test('FND080_리뷰_응답도중연결이끊기면_Lease부르기가멈추지않고실패한다', async () => {
     // 확인 리뷰 2026-11-01: 머리를 받은 뒤 연결이 끊기면 'end'도 요청 오류도 오지 않아 step()이 영원히 멈췄다(리더가 없어지고 stop()도 멈춤)
     const cut = createServer((_req, res) => {

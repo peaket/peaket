@@ -1,0 +1,42 @@
+# 로컬 kind 클러스터 시험(docs/devops.md §3.1 ci-kind, docs/infra.md §3 'CI 시험 환경도 같은 구성', openspec 변경
+# add-local-cluster-and-relay-deployment). ci.yml이 바뀐 범위에 kind가 있거나 develop에 푸시했을 때 부른다.
+# 로컬과 같은 스크립트(tools/local)로 kind 클러스터(Strimzi Kafka 3.9.1, PostgreSQL 18, 계정 없는 AWS 흉내 서버)를 띄운다.
+# 도구와 이미지는 판·해시·다이제스트로 고정했다. 비밀이 필요 없어 포크 PR에서도 돈다(비밀이 필요한 단계는 tools/ci/fork-guard.mjs를 거친다).
+name: ci-kind
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  kind:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # 차트 렌더 시험이 YAML 해석기(뿌리 개발 의존성 yaml)를 쓴다. 잠금 파일대로만 설치한다(§4.4)
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile
+      # 도구 받기(판·해시)·Strimzi 설치 파일 고치기·공용 차트 렌더 시험
+      - run: node --test "tools/local/*.test.mjs"
+      - run: node tools/local/cluster.mjs up
+      - run: node tools/local/cluster.mjs image
+      # 계정 없는 AWS 흉내 서버의 기능 확인과 V-T28 ①의 kind 부분(실제 Lease API로 리더 이어받기)
+      - run: node --test tools/local/e2e/aws-emulator.e2e.mjs tools/local/e2e/relay-takeover.e2e.mjs
+      - if: ${{ failure() }}
+        run: |
+          node tools/local/cluster.mjs status || true
+          k=$(node tools/local/tools.mjs kubectl | cut -d' ' -f2)
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n example logs -l app.kubernetes.io/component=outbox-relay --tail=200 --prefix || true
+      - if: ${{ always() }}
+        run: node tools/local/cluster.mjs down || true

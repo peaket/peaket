@@ -73,7 +73,7 @@ function relayWith(clock: FakeClock, publisher: OutboxPublisher, registry = new 
 }
 
 const rows = async (db: Database) =>
-  (await db.db.execute(sql`select id::text, seq::text, topic, msg_key, sent_at from outbox order by seq`)).rows as { id: string; seq: string; topic: string; msg_key: string; sent_at: string | null }[];
+  (await db.db.execute(sql`select id::text, seq::text, topic, msg_key, sent_at from outbox order by outbox.seq`)).rows as { id: string; seq: string; topic: string; msg_key: string; sent_at: string | null }[];
 const msg = (key: string, topic = 'trade.orders') => ({ topic, key, payload: Buffer.from(`p-${key}`), headers: { traceparent: `00-${'1'.repeat(32)}-${'2'.repeat(16)}-01` } });
 
 describe('쓰기와 릴레이', () => {
@@ -92,6 +92,18 @@ describe('쓰기와 릴레이', () => {
     const r = recorder();
     expect(await relayWith(clock, r.publisher).relay.relayOnce()).toBe(0);
     expect(r.batches).toEqual([]);
+  });
+
+  test('FND110_V-T28_자릿수가다른seq가한묶음에섞여도_글자순이아니라숫자순으로보낸다', async () => {
+    // 재현: 질의가 seq를 글자로 바꾼 이름으로 정렬해 '10'이 '2'보다 먼저 나갔다(BUILD_ORDER FND-110에서 찾음)
+    // 앞 시험의 실행 순서에 기대지 않게 번호가 9에서 시작해 한 자리에서 두 자리로 넘어가게 한다(코드 리뷰 2026-11-01)
+    await relayDb.db.execute(sql`select setval('outbox_seq', 8)`);
+    for (let i = 0; i < 12; i++) await relayDb.transaction((tx) => writeOutbox(tx, clock, [msg(`k-${i}`)]));
+    const r = recorder();
+    expect(await relayWith(clock, r.publisher).relay.relayOnce()).toBe(12);
+    const seqs = r.batches[0]!.map((x) => BigInt(x.seq));
+    expect(seqs).toEqual([...seqs].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+    expect(r.keys()).toEqual(Array.from({ length: 12 }, (_, i) => `k-${i}`));
   });
 
   test('FND080_커밋한사건을_seq순서로키값머리그대로보내고_보낸시각을적는다', async () => {

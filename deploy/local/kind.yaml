@@ -1,0 +1,9 @@
+# 로컬·CI kind 클러스터(docs/infra.md §3, openspec 변경 add-local-cluster-and-relay-deployment).
+# 노드 이미지는 kind v0.33.0이 이 판용으로 만든 것을 다이제스트로 고정한다(kind 릴리스 노트: 다이제스트로 고정해야 그 판용 이미지가 보장된다).
+# 쿠버네티스 1.35: kubectl 1.35.8과 같은 판이고, Kafka 3.9를 지원하는 마지막 Strimzi(0.47.0)와 함께 돈다(tools/local/README.md).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: peaket
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0

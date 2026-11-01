@@ -224,13 +224,15 @@ export class IdempotencyStore {
  */
 export async function deleteExpiredIdempotencyRecords(
   database: { db: { execute(q: SQL): Promise<{ rowCount?: number | null }> } },
-  o: { clock: Clock; table?: string; retentionMs?: number; batchSize?: number; pause?: () => Promise<void> },
+  o: { clock: Clock; table?: string; retentionMs?: number; batchSize?: number; pause?: () => Promise<void>; signal?: AbortSignal },
 ): Promise<number> {
   const t = sql.identifier(o.table ?? IDEMPOTENCY_RECORD_TABLE);
   const before = new Date(o.clock.now() - (o.retentionMs ?? IDEMPOTENCY_RETENTION_MS));
   const batch = o.batchSize ?? 10_000;
   let total = 0;
   for (;;) {
+    // 멈춤 신호(프로세스 종료)를 받으면 다음 묶음을 시작하지 않는다. 남은 행은 다음 정비가 이어 지운다
+    if (o.signal?.aborted) return total;
     // 바깥에도 기한 조건을 둔다: 지우려던 행을 새 요청이 다시 잡아 커밋하면, 기다린 DELETE가 그 새 판을 다시 보고 남긴다
     // (안쪽 질의에만 두면 새로 커밋된 기록을 지워 같은 키가 다시 처리됐다, 코드 리뷰 2026-11-01)
     const r = await database.db.execute(sql`

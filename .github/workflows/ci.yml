@@ -29,6 +29,7 @@ jobs:
       js: ${{ steps.scope.outputs.js }}
       js_all: ${{ steps.scope.outputs.js_all }}
       ci: ${{ steps.scope.outputs.ci }}
+      kind: ${{ steps.scope.outputs.kind }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -69,13 +70,19 @@ jobs:
       all: ${{ needs.changes.result != 'success' || needs.changes.outputs.js_all == 'true' }}
       base: ${{ github.event.pull_request.base.sha || github.event.before }}
 
+  # 로컬 kind 클러스터 시험(무겁다): 클러스터 정의·공용 차트·릴레이 코드가 바뀌었거나 develop 푸시(§3.3 E2E는 CI의 kind)
+  kind:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.kind == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/develop')) }}
+    uses: ./.github/workflows/ci-kind.yml
+
   iac-check:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.infra == 'true') }}
     uses: ./.github/workflows/iac-check.yml
 
   ci-summary:
-    needs: [changes, docs-check, tools-check, contract-check, node, iac-check]
+    needs: [changes, docs-check, tools-check, contract-check, node, iac-check, kind]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

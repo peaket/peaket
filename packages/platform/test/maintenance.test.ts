@@ -13,6 +13,9 @@ import {
   monthlyPartitionOf,
   nextStreamId,
   uuidLowerBound,
+  deleteExpiredIdempotencyRecords,
+  deleteExpiredRows,
+  type Database,
   type MaintenanceTask,
 } from '../src/index.js';
 
@@ -112,5 +115,107 @@ describe('결정16 정비 반복', () => {
     );
     const t = await h.runner.tick();
     expect(t).toEqual({ ran: ['b'], failed: ['a'] });
+  });
+});
+
+describe('FND110 리더가 되면 정비를 바로 깨운다', () => {
+  test('FND110_wake는_쉬는반복을바로깨우고_도는중이면_끝난뒤한번더돈다', async () => {
+    let leader = false;
+    const order: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let first = true;
+    const h = harness(
+      [
+        {
+          name: 'snapshot',
+          when: 'daily',
+          run: async () => {
+            order.push('run');
+            if (first) {
+              first = false;
+              await held;
+            }
+          },
+        },
+        { name: 'other', when: 'daily', run: async () => void order.push('other') },
+      ],
+      { leader: () => leader },
+    );
+    h.runner.start();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual([]); // 시작 때는 리더가 아니었다. 10분을 쉰다
+    leader = true;
+    h.runner.wake();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual(['run']); // 쉬던 반복이 바로 깨어났다
+    h.runner.wake(); // 도는 중에 깨우면 끝난 뒤 한 번 더 돈다(겹쳐 돌지 않는다)
+    release();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual(['run', 'other']);
+    await h.runner.stop();
+  });
+});
+
+describe('FND110 끝낼 때 정비 일을 멈춘다', () => {
+  test('FND110_stop은_도는일에멈춤신호를주고_남은일은돌지않으며_성공으로적지않는다', async () => {
+    const order: string[] = [];
+    let seen: AbortSignal | undefined;
+    const h = harness([
+      {
+        name: 'long',
+        when: 'daily',
+        run: (signal) =>
+          new Promise<void>((resolve) => {
+            seen = signal;
+            order.push('long');
+            signal?.addEventListener('abort', () => resolve());
+          }),
+      },
+      { name: 'next', when: 'daily', run: async () => void order.push('next') },
+    ]);
+    h.runner.start();
+    await new Promise((r) => setTimeout(r, 20));
+    await h.runner.stop();
+    expect(seen?.aborted).toBe(true);
+    expect(order).toEqual(['long']);
+    expect(await h.metrics()).not.toMatch(/maintenance_task_last_success_timestamp_seconds\{[^}]*task="long"/);
+  });
+
+  test('FND110_stop의한도를넘기면_일이끝나지않아도돌아온다', async () => {
+    const h = harness([{ name: 'stuck', when: 'daily', run: () => new Promise<void>(() => {}) }]);
+    h.runner.start();
+    await new Promise((r) => setTimeout(r, 20));
+    const t0 = Date.now();
+    await h.runner.stop({ timeoutMs: 100 });
+    expect(Date.now() - t0).toBeLessThan(1_000);
+  });
+
+  test('FND110_멱등기록지우기는_멈춤신호를받으면_다음묶음을시작하지않는다', async () => {
+    const ctl = new AbortController();
+    let batches = 0;
+    const db = { db: { execute: async () => { batches += 1; if (batches === 2) ctl.abort(); return { rowCount: 10 }; } } };
+    const n = await deleteExpiredIdempotencyRecords(db, { clock: fakeClock(), batchSize: 10, signal: ctl.signal });
+    expect(batches).toBe(2);
+    expect(n).toBe(20);
+  });
+
+  test('FND110_보존지우기는_멈춤신호를받으면_aborted로멈춘다', async () => {
+    const ctl = new AbortController();
+    let batches = 0;
+    const ids = Array.from({ length: 5 }, (_, i) => ({ id: `00000000-0000-7000-8000-00000000000${i}` }));
+    const database = {
+      // 트랜잭션마다 첫 질의가 지울 ID 고르기다(그다음은 지우기)
+      transaction: async (fn: (tx: unknown) => Promise<number>) => {
+        let calls = 0;
+        return fn({ execute: async () => (calls++ === 0 ? { rows: ids } : { rows: [] }) }).then((n) => {
+          batches += 1;
+          if (batches === 1) ctl.abort();
+          return n;
+        });
+      },
+    } as unknown as Database;
+    const r = await deleteExpiredRows(database, fakeClock({ now: KST('2026-11-02T04:30:00') }), { table: 'audit_log', retentionMs: 1 }, { batchSize: 5, pauseMs: 0, signal: ctl.signal });
+    expect(r).toMatchObject({ stopped: 'aborted', batches: 1, deleted: 5 });
   });
 });

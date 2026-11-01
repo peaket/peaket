@@ -127,11 +127,12 @@ export class OutboxRelay {
     return database.transaction(async (tx) => {
       await tx.execute(sql`select set_config('statement_timeout', ${String(OUTBOX_RELAY_DEFAULTS.statementTimeoutMs)}, true),
         set_config('idle_in_transaction_session_timeout', ${String(OUTBOX_RELAY_DEFAULTS.idleInTransactionTimeoutMs)}, true)`);
-      // SKIP LOCKED 없이: 다른 릴레이가 잡은 앞 행은 그 트랜잭션이 끝날 때까지 기다렸다가 조건(sent_at IS NULL)을 다시 본다
+      // SKIP LOCKED 없이: 다른 릴레이가 잡은 앞 행은 그 트랜잭션이 끝날 때까지 기다렸다가 조건(sent_at IS NULL)을 다시 본다.
+      // 정렬은 표의 seq(숫자) 열로 콕 집는다. 맨 이름 `seq`는 글자로 바꾼 출력 열을 가리켜 '10'이 '2'보다 먼저 나갔다(FND-110에서 찾음)
       const rows = (
         await tx.execute(sql`
           select id::text as id, seq::text as seq, topic, msg_key, payload, headers
-          from ${sql.identifier(OUTBOX_TABLE)} where sent_at is null order by seq limit ${batchSize} for update`)
+          from ${sql.identifier(OUTBOX_TABLE)} where sent_at is null order by ${sql.identifier(OUTBOX_TABLE)}.seq limit ${batchSize} for update`)
       ).rows as { id: string; seq: string; topic: string; msg_key: string; payload: Buffer; headers: Record<string, string> | null }[];
       if (rows.length === 0) return 0;
       const records: OutboxRecord[] = rows.map((r) => ({ id: r.id, seq: r.seq, topic: r.topic, key: r.msg_key, payload: r.payload, headers: r.headers ?? {} }));

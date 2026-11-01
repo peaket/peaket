@@ -19,7 +19,8 @@ export interface MaintenanceTask {
   name: string;
   /** daily: 하루 한 번(시간 무관), window: 정비 시간(04:00~06:00 KST) 안에서 하루 한 번 */
   when: 'daily' | 'window';
-  run(): Promise<unknown>;
+  /** signal: 반복을 멈출 때(프로세스 종료) 끊긴다. 나눠 지우는 일은 묶음 사이에 보고 멈춘다 */
+  run(signal?: AbortSignal): Promise<unknown>;
 }
 
 export interface MaintenanceMetrics {
@@ -64,22 +65,25 @@ export class MaintenanceRunner {
     this.metrics = o.metrics ?? (o.registry ? maintenanceMetrics(o.registry, o.service) : undefined);
   }
 
-  /** 한 번 깨어난다. 리더가 아니면 아무것도 하지 않는다 */
-  async tick(): Promise<{ ran: string[]; failed: string[] }> {
+  /** 한 번 깨어난다. 리더가 아니면 아무것도 하지 않는다. signal이 끊기면 남은 일을 하지 않고, 끊긴 뒤 끝난 일은 성공으로 적지 않는다 */
+  async tick(signal?: AbortSignal): Promise<{ ran: string[]; failed: string[] }> {
     const out = { ran: [] as string[], failed: [] as string[] };
     if (!this.o.leader.isLeader()) return out;
     for (const task of this.o.tasks) {
+      if (signal?.aborted) break;
       const now = this.o.clock.now();
       const day = kstDayStart(now);
       if (this.#done.get(task.name) === day) continue;
       if (task.when === 'window' && !inMaintenanceWindow(now)) continue;
       try {
-        const report = await task.run();
+        const report = await task.run(signal);
+        if (signal?.aborted) break;
         this.#done.set(task.name, day);
         this.metrics?.lastSuccess.set({ service: this.o.service, task: task.name }, Math.floor(this.o.clock.now() / 1000));
         this.o.logger?.info?.({ kind: 'maintenance', task: task.name, report }, '정비 일 끝');
         out.ran.push(task.name);
       } catch (err) {
+        if (signal?.aborted) break;
         this.metrics?.failures.inc({ service: this.o.service, task: task.name });
         this.o.logger?.warn({ kind: 'maintenance', task: task.name, err: err instanceof Error ? { type: err.name, message: err.message } : String(err) }, '정비 일 실패(다음에 다시 한다)');
         out.failed.push(task.name);
@@ -94,15 +98,42 @@ export class MaintenanceRunner {
     this.#stop = stop;
     this.#loop = (async () => {
       while (!stop.signal.aborted) {
-        await this.tick();
-        await realSleep(this.o.everyMs ?? MAINTENANCE_DEFAULTS.everyMs, stop.signal);
+        this.#again = false;
+        await this.tick(stop.signal);
+        if (this.#again) continue;
+        const wake = new AbortController();
+        this.#wake = wake;
+        await realSleep(this.o.everyMs ?? MAINTENANCE_DEFAULTS.everyMs, AbortSignal.any([stop.signal, wake.signal]));
+        this.#wake = undefined;
       }
     })();
   }
 
-  async stop(): Promise<void> {
+  /**
+   * 쉬는 반복을 바로 깨운다. 리더가 된 복제가 10분 [가정]을 기다리지 않고 정비를 하게 릴레이 프로세스가 부른다(BUILD_ORDER FND-110).
+   * 도는 중이면 끝난 뒤 한 번 더 돈다(겹쳐 돌지 않는다)
+   */
+  wake(): void {
+    if (this.#wake) this.#wake.abort();
+    else this.#again = true;
+  }
+
+  #wake: AbortController | undefined;
+  #again = false;
+
+  /**
+   * 반복을 멈춘다. 도는 일에 멈춤 신호를 주고 끝나기를 기다린다. timeoutMs를 주면 그만큼만 기다리고 돌아온다
+   * (끝나지 않은 일은 프로세스가 끝나며 DB 연결과 함께 끊긴다. 릴레이 프로세스가 Lease를 붙잡지 않게, 코드 리뷰 2026-11-01)
+   */
+  async stop(o: { timeoutMs?: number } = {}): Promise<void> {
     this.#stop?.abort();
-    await this.#loop;
+    const loop = this.#loop;
+    if (loop && o.timeoutMs !== undefined) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const limit = new Promise<void>((r) => (timer = setTimeout(r, o.timeoutMs)));
+      await Promise.race([loop, limit]);
+      clearTimeout(timer);
+    } else await loop;
     this.#loop = undefined;
   }
 }
@@ -133,7 +164,7 @@ export function platformMaintenanceTasks(database: Database, clock: Clock, o: { 
     {
       name: 'idempotency-records-delete',
       when: 'window',
-      run: () => deleteExpiredIdempotencyRecords(database, { clock, table: o.idempotencyTable }),
+      run: (signal) => deleteExpiredIdempotencyRecords(database, { clock, table: o.idempotencyTable, signal }),
     },
     { name: 'held-events-delete', when: 'window', run: () => deleteReprocessedHeldEvents(database, clock) },
     { name: 'stat-snapshot', when: 'daily', run: () => takeStatSnapshot(database, clock) },
@@ -170,8 +201,9 @@ export function retentionTask(database: Database, clock: Clock, spec: RetentionS
   return {
     name: `${spec.table}-retention`,
     when: 'window',
-    run: async () => {
-      const r = await deleteExpiredRows(database, clock, spec, { guard: o.guard, batchSize: o.batchSize });
+    run: async (signal) => {
+      const r = await deleteExpiredRows(database, clock, spec, { guard: o.guard, batchSize: o.batchSize, signal });
+      if (r.stopped === 'aborted') return r;
       const labels = { service: o.metrics?.service ?? '', table: spec.table };
       o.metrics?.retentionIncomplete.set(labels, r.stopped === 'done' ? 0 : 1);
       o.metrics?.retentionOverdue.set(labels, await retentionOverdueSeconds(database, clock, spec));

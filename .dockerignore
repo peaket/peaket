@@ -1,0 +1,22 @@
+# 이미지 빌드 맥락에서 뺄 것(ASVS v5.0.0-13.4.1: 배포물에 소스 관리 메타데이터를 넣지 않는다). 빌드 맥락은 저장소 뿌리다
+.git
+.github
+**/.cache
+**/.claude
+**/.turbo
+**/node_modules
+**/coverage
+**/dist
+**/.next
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+docs
+apps
+openspec
+tools
+infra
+deploy
+loadtest
+data
+services

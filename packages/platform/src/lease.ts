@@ -131,7 +131,9 @@ export class LeaseElector implements LeaderState {
     this.setLeader(false);
     if (!was || !this.current || this.current.holderIdentity !== this.o.identity) return;
     try {
-      await this.o.api.update({ ...this.current, holderIdentity: null, leaseDurationSeconds: 1, renewTime: microTime(this.o.clock.now()) }, this.current.resourceVersion);
+      // 본문 spec에는 Lease 칸만 싣는다(판 번호는 메타데이터로 따로 간다)
+      const { resourceVersion, ...spec } = this.current;
+      await this.o.api.update({ ...spec, holderIdentity: null, leaseDurationSeconds: 1, renewTime: microTime(this.o.clock.now()) }, resourceVersion);
     } catch {
       // 놓지 못하면 Lease 기간이 지나 저절로 풀린다
     }
@@ -171,10 +173,20 @@ export interface KubernetesLeaseApiOptions {
   timeoutMs?: number;
 }
 
+interface KubeMeta {
+  resourceVersion?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  ownerReferences?: unknown[];
+  finalizers?: string[];
+}
 interface KubeLease {
-  metadata?: { resourceVersion?: string };
+  metadata?: KubeMeta;
   spec?: Partial<LeaseSpec>;
 }
+
+/** 고치기(PUT, 전체 바꾸기)에 그대로 실어 보낼 메타데이터. 빼면 API 서버가 차트·ArgoCD가 붙인 라벨·주석을 지운다(코드 리뷰 2026-11-01) */
+const KEPT_META = ['labels', 'annotations', 'ownerReferences', 'finalizers'] as const;
 
 const toRecord = (l: KubeLease): LeaseRecord => ({
   holderIdentity: l.spec?.holderIdentity ?? null,
@@ -233,10 +245,24 @@ export function kubernetesLeaseApi(o: KubernetesLeaseApiOptions): LeaseApi {
         req.end();
       }),
     );
+  // 마지막으로 받은 객체의 메타데이터(판별로). 고칠 때 그 판의 라벨·주석·소유자 참조를 그대로 싣는다(client-go LeaseLock과 같다)
+  let kept: { resourceVersion: string; meta: Partial<KubeMeta> } | undefined;
+  const remember = (l: KubeLease | undefined) => {
+    const m = l?.metadata;
+    if (!m?.resourceVersion) return;
+    const meta: Partial<KubeMeta> = {};
+    for (const k of KEPT_META) if (m[k] !== undefined) (meta as Record<string, unknown>)[k] = m[k];
+    kept = { resourceVersion: m.resourceVersion, meta };
+  };
   const lease = (spec: LeaseSpec, resourceVersion?: string) => ({
     apiVersion: 'coordination.k8s.io/v1',
     kind: 'Lease',
-    metadata: { name: o.name, namespace: o.namespace, ...(resourceVersion ? { resourceVersion } : {}) },
+    metadata: {
+      ...(resourceVersion && kept?.resourceVersion === resourceVersion ? kept.meta : {}),
+      name: o.name,
+      namespace: o.namespace,
+      ...(resourceVersion ? { resourceVersion } : {}),
+    },
     spec,
   });
   const fail = (what: string, status: number) => new Error(`Lease ${what} 실패: HTTP ${status}`);
@@ -245,18 +271,21 @@ export function kubernetesLeaseApi(o: KubernetesLeaseApiOptions): LeaseApi {
       const r = await call('GET', item);
       if (r.status === 404) return undefined;
       if (r.status !== 200 || !r.json) throw fail('읽기', r.status);
+      remember(r.json);
       return toRecord(r.json);
     },
     async create(spec) {
       const r = await call('POST', collection, lease(spec));
       if (r.status === 409) return 'conflict';
       if ((r.status !== 201 && r.status !== 200) || !r.json) throw fail('만들기', r.status);
+      remember(r.json);
       return toRecord(r.json);
     },
     async update(spec, resourceVersion) {
       const r = await call('PUT', item, lease(spec, resourceVersion));
       if (r.status === 409) return 'conflict';
       if (r.status !== 200 || !r.json) throw fail('고치기', r.status);
+      remember(r.json);
       return toRecord(r.json);
     },
   };

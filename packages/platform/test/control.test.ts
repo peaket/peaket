@@ -225,3 +225,15 @@ describe('ADR0103 설정·종료 세션·다시 맞춤', () => {
     expect(sync.control!.apply({ key: 'PLATFORM:SALE_PAUSE', version: 7, value: true })).toBe(false);
   });
 });
+
+describe('FND110 생존 프로브', () => {
+  test('FND110_livez는_시작작업이남아준비가아니어도200이다(이벤트루프응답만본다)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { s, ready } = await boot({ broker: new FakeBroker(), control: async () => (await gate, []) });
+    expect((await ready()).statusCode).toBe(503);
+    const live = await s.svc.management.inject({ method: 'GET', url: '/livez' });
+    expect(live.statusCode).toBe(200);
+    release();
+  });
+});
