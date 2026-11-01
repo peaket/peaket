@@ -1,0 +1,141 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ payment_no_pin_payment_att = (<<1, 1>> :> [st |-> "NONE", pg |-> 0])
+/\ payment_no_pin_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_no_pin_payment_late = <<FALSE>>
+/\ payment_no_pin_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_no_pin_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_no_pin_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
+/\ payment_no_pin_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_pin_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_no_pin_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+
+State 2: <payment_no_pin_payment_newAttempt(1) line 1115, col 3 to line 1140, col 68 of module payment_no_pin>
+/\ payment_no_pin_payment_att = (<<1, 1>> :> [st |-> "READY", pg |-> 1])
+/\ payment_no_pin_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_no_pin_payment_late = <<FALSE>>
+/\ payment_no_pin_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_no_pin_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_no_pin_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
+/\ payment_no_pin_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_pin_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_no_pin_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+
+State 3: <payment_no_pin_payment_auth(1,1) line 366, col 3 to line 385, col 68 of module payment_no_pin>
+/\ payment_no_pin_payment_att = (<<1, 1>> :> [st |-> "READY", pg |-> 1])
+/\ payment_no_pin_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_no_pin_payment_late = <<FALSE>>
+/\ payment_no_pin_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_no_pin_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_no_pin_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+/\ payment_no_pin_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_pin_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_no_pin_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+
+State 4: <payment_no_pin_payment_accept(1,1) line 399, col 3 to line 429, col 68 of module payment_no_pin>
+/\ payment_no_pin_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_no_pin_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_no_pin_payment_late = <<FALSE>>
+/\ payment_no_pin_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_no_pin_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_no_pin_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+/\ payment_no_pin_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_pin_payment_ord = <<[st |-> "ACCEPTED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_no_pin_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+
+State 5: <payment_no_pin_payment_reserve(1) line 465, col 3 to line 491, col 68 of module payment_no_pin>
+/\ payment_no_pin_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_no_pin_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_no_pin_payment_late = <<FALSE>>
+/\ payment_no_pin_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_no_pin_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_no_pin_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+/\ payment_no_pin_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_pin_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_no_pin_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+
+State 6: <payment_no_pin_payment_toggleSwitch line 324, col 3 to line 340, col 68 of module payment_no_pin>
+/\ payment_no_pin_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_no_pin_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_no_pin_payment_late = <<FALSE>>
+/\ payment_no_pin_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_no_pin_payment_env = [ sw |-> TRUE,
+  switches |-> 1,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_no_pin_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+/\ payment_no_pin_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_no_pin_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_no_pin_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+
+State 7: <payment_no_pin_payment_command(1) line 1154, col 3 to line 1174, col 43 of module payment_no_pin>
+/\ payment_no_pin_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_no_pin_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "ACCEPTED")
+/\ payment_no_pin_payment_late = <<FALSE>>
+/\ payment_no_pin_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_no_pin_payment_env = [ sw |-> TRUE,
+  switches |-> 1,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_no_pin_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+/\ payment_no_pin_payment_ghost = [offPg |-> TRUE, badRefund |-> FALSE]
+/\ payment_no_pin_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_no_pin_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>

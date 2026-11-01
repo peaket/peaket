@@ -1,0 +1,315 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_double_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = (<<1, 1>> :> [st |-> "NONE", pg |-> 0] @@ <<1, 2>> :> [st |-> "NONE", pg |-> 0])
+/\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+
+State 2: <payment_double_payment_newAttempt(1) line 1123, col 3 to line 1148, col 68 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_double_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "READY", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+
+State 3: <payment_double_payment_auth(1,1) line 374, col 3 to line 393, col 68 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_double_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "READY", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+
+State 4: <payment_double_payment_toggleSwitch line 324, col 3 to line 340, col 68 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_double_payment_env = [ sw |-> TRUE,
+  switches |-> 1,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "READY", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+
+State 5: <payment_double_payment_newAttempt(1) line 1123, col 3 to line 1148, col 68 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_double_payment_env = [ sw |-> TRUE,
+  switches |-> 1,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "SUPERSEDED", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "READY", pg |-> 2] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+
+State 6: <payment_double_payment_auth(1,2) line 374, col 3 to line 393, col 68 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_double_payment_env = [ sw |-> TRUE,
+  switches |-> 1,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "AUTH")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "SUPERSEDED", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "READY", pg |-> 2] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+
+State 7: <payment_double_payment_accept(1,2) line 407, col 3 to line 437, col 68 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_double_payment_env = [ sw |-> TRUE,
+  switches |-> 1,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "AUTH")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "ACCEPTED", apg |-> 2, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "SUPERSEDED", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "ACCEPTED", pg |-> 2] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+
+State 8: <payment_double_payment_reserve(1) line 473, col 3 to line 499, col 68 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_double_payment_env = [ sw |-> TRUE,
+  switches |-> 1,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "AUTH")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "RESERVED", apg |-> 2, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "SUPERSEDED", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "ACCEPTED", pg |-> 2] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+
+State 9: <payment_double_payment_command(1) line 1162, col 3 to line 1182, col 43 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_double_payment_env = [ sw |-> TRUE,
+  switches |-> 1,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "AUTH")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "RESERVED", apg |-> 2, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "SUPERSEDED", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "ACCEPTED", pg |-> 2] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "ACCEPTED")
+
+State 10: <payment_double_payment_toggleSwitch line 324, col 3 to line 340, col 68 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_double_payment_env = [ sw |-> FALSE,
+  switches |-> 2,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "AUTH")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "RESERVED", apg |-> 2, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "SUPERSEDED", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "ACCEPTED", pg |-> 2] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "ACCEPTED")
+
+State 11: <payment_double_payment_send(1,2) line 513, col 3 to line 533, col 43 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> TRUE)
+/\ payment_double_payment_env = [ sw |-> FALSE,
+  switches |-> 2,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "AUTH")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "RESERVED", apg |-> 2, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "SUPERSEDED", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "ACCEPTED", pg |-> 2] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "SENT")
+
+State 12: <payment_double_payment_command(1) line 1162, col 3 to line 1182, col 43 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> TRUE)
+/\ payment_double_payment_env = [ sw |-> FALSE,
+  switches |-> 2,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "AUTH")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> TRUE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "RESERVED", apg |-> 2, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "SUPERSEDED", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "ACCEPTED", pg |-> 2] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "ACCEPTED" @@ <<1, 2>> :> "SENT")
+
+State 13: <payment_double_payment_send(1,1) line 513, col 3 to line 533, col 43 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> TRUE)
+/\ payment_double_payment_env = [ sw |-> FALSE,
+  switches |-> 2,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "AUTH")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> TRUE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "RESERVED", apg |-> 2, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "SUPERSEDED", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "ACCEPTED", pg |-> 2] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "SENT")
+
+State 14: <payment_double_payment_pgProcess(1,1) line 560, col 3 to line 589, col 43 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> TRUE)
+/\ payment_double_payment_env = [ sw |-> FALSE,
+  switches |-> 2,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "AUTH")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> TRUE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "RESERVED", apg |-> 2, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "SUPERSEDED", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "ACCEPTED", pg |-> 2] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "SENT")
+
+State 15: <payment_double_payment_pgProcess(1,2) line 560, col 3 to line 589, col 43 of module payment_double>
+/\ payment_double_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_double_payment_env = [ sw |-> FALSE,
+  switches |-> 2,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_double_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "APPROVED")
+/\ payment_double_payment_late = <<FALSE>>
+/\ payment_double_payment_ghost = [offPg |-> TRUE, badRefund |-> FALSE]
+/\ payment_double_payment_ord = <<[st |-> "RESERVED", apg |-> 2, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_double_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_double_payment_att = ( <<1, 1>> :> [st |-> "SUPERSEDED", pg |-> 1] @@
+  <<1, 2>> :> [st |-> "ACCEPTED", pg |-> 2] )
+/\ payment_double_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "SENT")

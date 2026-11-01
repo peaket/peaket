@@ -45,6 +45,12 @@ export function loadManifest(text, readFile) {
     const vals = new Set([...src.matchAll(/^\s*val\s+([A-Za-z_][A-Za-z0-9_]*)\s*=/gm)].map((x) => x[1]));
     if (!Array.isArray(s.invariants) || s.invariants.length === 0) fail(`${s.name}: invariants가 비었다`);
     for (const i of s.invariants) if (!NAME.test(i) || !vals.has(i)) fail(`${s.name}: 불변식 ${i}가 ${s.file}에 없다`);
+    // temporal은 진행성(결국 일어남)을 보는 시간 논리 속성 이름 목록이다(wbs 0.9.3). 명세 파일에 `temporal 이름 =`으로 있어야 한다
+    const temporals = new Set([...src.matchAll(/^\s*temporal\s+([A-Za-z_][A-Za-z0-9_]*)\s*=/gm)].map((x) => x[1]));
+    if ('temporal' in s) {
+      if (!Array.isArray(s.temporal) || s.temporal.length === 0 || s.temporal.some((t) => !NAME.test(t))) fail(`${s.name}: temporal은 시간 논리 속성 이름(식별자) 목록이다`);
+      for (const t of s.temporal) if (!temporals.has(t)) fail(`${s.name}: 진행성 속성 ${t}가 ${s.file}에 없다`);
+    }
     if (!Array.isArray(s.checks) || s.checks.length === 0) fail(`${s.name}: checks가 비었다`);
     const seen = new Set();
     for (const c of s.checks) {
@@ -54,10 +60,25 @@ export function loadManifest(text, readFile) {
       seen.add(c.main.toLowerCase());
       if (c.expect !== 'hold' && c.expect !== 'violate') fail(`${s.name}/${c.main}: expect는 hold 또는 violate다`);
       if (typeof c.why !== 'string' || !c.why) fail(`${s.name}/${c.main}: why(까닭)가 없다`);
+      // 진행성 검사는 그 속성 하나만 TLC로 본다. 시뮬레이션(quint run)은 시간 논리를 보지 않아 tlc: false·samples가 뜻이 없고,
+      // 불변식과 섞으면 어느 쪽 반례인지 갈리지 않는다(wbs 0.9.3)
+      if ('temporal' in c) {
+        if (!Array.isArray(s.temporal) || !s.temporal.includes(c.temporal)) fail(`${s.name}/${c.main}: 진행성 속성 ${c.temporal}는 이 명세의 temporal에 없다`);
+        for (const k of ['tlc', 'samples', 'simulate', 'invariant', 'invariants']) {
+          if (k in c && !(k === 'tlc' && c.tlc === true)) fail(`${s.name}/${c.main}: 진행성(temporal) 검사에는 ${k}를 적지 않는다(TLC로 그 속성 하나만 본다)`);
+        }
+        continue;
+      }
       // tlc: false는 전수 검사가 너무 큰 범위(정본 범위 전체 등)라 시뮬레이션으로만 보는 검사다
       if ('tlc' in c && typeof c.tlc !== 'boolean') fail(`${s.name}/${c.main}: tlc는 true 또는 false다`);
       // samples는 반례가 드문 변형의 시뮬레이션 횟수를 늘릴 때만 적는다(wbs 0.9.2)
       if ('samples' in c && (!Number.isInteger(c.samples) || c.samples <= 0)) fail(`${s.name}/${c.main}: samples는 양의 정수다`);
+      // simulate: false는 반례 경로가 길어 PR 시뮬레이션이 닿지 않는 검사를 전수 검사(주 1회·관련 ADR 변경)에서만 보게 한다(wbs 0.9.3).
+      // tlc: false와 함께면 아무 검사도 돌지 않고, samples와 함께면 뜻이 없다
+      if ('simulate' in c) {
+        if (c.simulate !== false) fail(`${s.name}/${c.main}: simulate는 false만 적는다(적지 않으면 시뮬레이션도 돈다)`);
+        if (c.tlc === false || 'samples' in c) fail(`${s.name}/${c.main}: simulate false는 tlc false·samples와 함께 쓰지 않는다`);
+      }
       // invariants는 지켜짐 검사가 일부만 볼 때 적는다(모형에 전제로 넣어 늘 참인 불변식을 '검사해서 지켜짐'으로 남기지 않게, 코드 리뷰 2026-11-02)
       if ('invariants' in c) {
         if (c.expect !== 'hold') fail(`${s.name}/${c.main}: invariants는 지켜짐 검사에만 적는다(반례 검사는 invariant 하나)`);
@@ -71,7 +92,8 @@ export function loadManifest(text, readFile) {
       }
     }
     if (!s.checks.some((c) => c.expect === 'hold')) fail(`${s.name}: expect hold인 검사가 하나는 있어야 한다`);
-    if (!s.checks.some((c) => c.expect === 'hold' && c.tlc !== false)) fail(`${s.name}: 지켜짐을 기대하는 전수 검사(tlc가 false가 아닌 hold)가 하나는 있어야 한다`);
+    // 진행성 검사는 불변식을 보지 않으므로 세지 않는다(코드 리뷰 2026-11-02)
+    if (!s.checks.some((c) => c.expect === 'hold' && c.tlc !== false && !c.temporal)) fail(`${s.name}: 지켜짐을 기대하는 불변식 전수 검사(tlc가 false가 아니고 진행성이 아닌 hold)가 하나는 있어야 한다`);
   }
   return m;
 }
@@ -84,7 +106,8 @@ const num = (re, text) => {
 
 /** TLC 출력(Quint verbosity 3이 그대로 찍는 것)에서 판·상태 수·깊이·지문 충돌 확률·위반 여부를 읽는다 */
 export function parseTlc(text) {
-  const states = text.match(/(\d+) states generated, (\d+) distinct states found, (\d+) states left on queue\./);
+  // 맨 끝 요약 줄만 본다. 'Progress(17) …: 1,341 states generated, 180 distinct …' 같은 진행 줄의 쉼표 숫자 뒤쪽을 읽지 않게(코드 리뷰 2026-11-02)
+  const states = [...text.matchAll(/^(\d+) states generated, (\d+) distinct states found, (\d+) states left on queue\./gm)].at(-1);
   return {
     tlc: text.match(/^(TLC2 Version .*)$/m)?.[1].trim() ?? null,
     statesGenerated: states ? Number(states[1]) : null,
@@ -93,16 +116,18 @@ export function parseTlc(text) {
     depth: num(/The depth of the complete state graph search is (\d+)\./, text),
     fingerprintCollision: text.match(/calculated \(optimistic\):\s+val = (\S+)/)?.[1] ?? null,
     completed: /Model checking completed\. No error has been found\./.test(text),
-    violated: /Error: Invariant \S+ is violated/.test(text),
+    // 진행성 위반은 'Error: Temporal property … was violated.'로 찍힌다(wbs 0.9.3, 2026-11-02 실행에서 확인)
+    violated: /Error: Invariant \S+ is violated/.test(text) || /Error: Temporal propert(y|ies) .*(was|were) violated/.test(text),
   };
 }
 
 /** TLC 출력에서 반례 경로(위반 알림과 상태 목록)만 잘라 낸다. 반례가 없으면 null */
 export function extractTlcTrace(text) {
-  const start = text.indexOf('Error: Invariant ');
+  const start = text.search(/Error: (Invariant |Temporal propert)/);
   if (start < 0) return null;
   const rest = text.slice(start);
-  const end = rest.search(/^\d+ states generated, /m);
+  // 진행성 반례는 상태 목록 뒤에 'Finished checking temporal properties'가 먼저 온다
+  const end = rest.search(/^(\d+ states generated, |Finished checking temporal properties)/m);
   return `${(end < 0 ? rest : rest.slice(0, end)).trimEnd()}\n`;
 }
 
@@ -115,16 +140,18 @@ export function parseSimulation(text) {
 
 /** 검사 하나의 판정. mode가 'verify'면 지켜짐은 TLC가 끝까지 돌았어야 한다 */
 export function judge(check, outcome, mode = 'verify') {
+  // 노린 것: 불변식 검사는 invariant, 진행성 검사는 temporal(시간 논리 속성 이름)
+  const target = check.temporal ?? check.invariant;
   if (check.expect === 'hold') {
     if (outcome.violated) return { ok: false, message: `${check.main}: 지켜져야 하는데 반례가 나왔다(${outcome.failing.join(', ') || '불변식'})` };
     if (mode === 'verify' && !outcome.completed) return { ok: false, message: `${check.main}: TLC가 끝까지 돌지 않았다(전수 검사 아님)` };
     return { ok: true, message: `${check.main}: 위반 없음` };
   }
-  if (!outcome.violated) return { ok: false, message: `${check.main}: ${check.invariant}의 반례가 나와야 하는데 없다(검사가 살아 있지 않다)` };
-  if (outcome.failing.length > 0 && !outcome.failing.includes(check.invariant)) {
-    return { ok: false, message: `${check.main}: 노린 ${check.invariant}가 아니라 ${outcome.failing.join(', ')}가 깨졌다` };
+  if (!outcome.violated) return { ok: false, message: `${check.main}: ${target}의 반례가 나와야 하는데 없다(검사가 살아 있지 않다)` };
+  if (outcome.failing.length > 0 && !outcome.failing.includes(target)) {
+    return { ok: false, message: `${check.main}: 노린 ${target}가 아니라 ${outcome.failing.join(', ')}가 깨졌다` };
   }
-  return { ok: true, message: `${check.main}: 기대한 반례(${check.invariant})` };
+  return { ok: true, message: `${check.main}: 기대한 반례(${target})` };
 }
 
 /** 시뮬레이션으로 다시 찾은 동작 기록이 반례인지: 반례 변형은 노린 불변식이, 지켜져야 할 검사는 어느 불변식이든 깨져야 한다 */
@@ -158,6 +185,7 @@ export function resultRecord({ spec, specSha256, commit, tools, now, checks }) {
       main: c.check.main,
       expect: c.check.expect,
       ...(c.check.invariant ? { targetInvariant: c.check.invariant } : {}),
+      ...(c.check.temporal ? { temporal: c.check.temporal } : {}),
       why: c.check.why,
       invariants: c.invariants,
       method: c.sim ? 'simulate' : 'tlc',
@@ -206,7 +234,13 @@ function javaVersion() {
 
 /** 검사 하나가 보는 불변식: 반례 검사는 노린 것 하나, 지켜짐 검사는 검사의 invariants(없으면 명세의 전부) */
 export function invariantsFor(s, c) {
+  if (c.temporal) return [];
   return c.expect === 'violate' ? [c.invariant] : (c.invariants ?? s.invariants);
+}
+
+/** PR 시뮬레이션이 도는 검사인지: 진행성 검사는 TLC로만 본다(quint run은 시간 논리를 보지 않는다), simulate false도 전수 검사에서만(wbs 0.9.3) */
+export function runsInSimulation(c) {
+  return !c.temporal && c.simulate !== false;
 }
 const invariantsOf = invariantsFor;
 
@@ -233,12 +267,13 @@ function simulateOne(m, s, c) {
 function tlcOne(m, s, c, { staging }) {
   const invs = invariantsOf(s, c);
   const t0 = Date.now();
-  const { out } = quint(['verify', s.file, '--backend=tlc', `--main=${c.main}`, '--invariants', ...invs, '--verbosity=3'], { allowFail: true });
+  const what = c.temporal ? [`--temporal=${c.temporal}`] : ['--invariants', ...invs];
+  const { out } = quint(['verify', s.file, '--backend=tlc', `--main=${c.main}`, ...what, '--verbosity=3'], { allowFail: true });
   const seconds = (Date.now() - t0) / 1000;
   const tlc = parseTlc(out);
   if (!tlc.completed && !tlc.violated) throw new Error(`${s.name}/${c.main}: TLC가 끝나지 않았다:
 ${out.slice(-4000)}`);
-  const failing = !tlc.violated ? [] : invs.length === 1 ? invs : invs.filter((i) => out.includes(`❌ ${i}`));
+  const failing = !tlc.violated ? [] : c.temporal ? [c.temporal] : invs.length === 1 ? invs : invs.filter((i) => out.includes(`❌ ${i}`));
   const verdict = judge(c, { violated: tlc.violated, failing, completed: tlc.completed });
   let counterexample;
   let tlcTrace;
@@ -252,6 +287,11 @@ ${out.slice(-4000)}`);
     if (trace) {
       tlcTrace = `${dir}/${c.main}.tlc.txt`;
       writeFileSync(join(staging, `${c.main}.tlc.txt`), trace);
+    }
+    // 진행성 반례는 시뮬레이션이 다시 찾지 못한다(시간 논리를 보지 않는다). TLC 경로만 남긴다
+    if (c.temporal) {
+      console.log(`${verdict.ok ? 'ok  ' : 'FAIL'} ${s.name} TLC ${verdict.message} (진행성, 상태 ${tlc.distinctStates ?? '?'}개, ${seconds.toFixed(1)}초)`);
+      return { check: c, invariants: invs, tlc, seconds, verdict, tlcTrace };
     }
     const itfStage = relative(REPO, join(staging, `${c.main}.itf.json`)).split(sep).join('/');
     // --out-itf는 위반이 없어도 기록을 쓴다. 출력으로 실제 반례인지 보고 아니면 지운다(코드 리뷰 2026-11-02)
@@ -329,7 +369,12 @@ async function main() {
   for (const s of specs) {
     quint(['typecheck', s.file]);
     console.log(`ok   ${s.name} 형식 검사`);
-    if (cmd === 'pr') ok = s.checks.map((c) => simulateOne(m, s, c)).every((r) => r.verdict.ok) && ok;
+    if (cmd === 'pr') {
+      for (const c of s.checks.filter((x) => !runsInSimulation(x))) {
+        console.log(`건너뜀 ${s.name} ${c.main}: ${c.temporal ? `진행성(${c.temporal})은` : '시뮬레이션이 닿지 않는 반례(simulate false)는'} 전수 검사(full)에서만 본다`);
+      }
+      ok = s.checks.filter(runsInSimulation).map((c) => simulateOne(m, s, c)).every((r) => r.verdict.ok) && ok;
+    }
     if (cmd === 'full') ok = verify(m, s, { write: values.write }).ok && ok;
   }
   if (!ok) process.exit(1);

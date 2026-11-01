@@ -1,0 +1,201 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ payment_assume_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_assume_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_assume_payment_att = (<<1, 1>> :> [st |-> "NONE", pg |-> 0])
+/\ payment_assume_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_assume_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_assume_payment_late = <<FALSE>>
+/\ payment_assume_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_assume_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_assume_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
+
+State 2: <payment_assume_payment_newAttempt(1) line 1117, col 3 to line 1142, col 68 of module payment_assume>
+/\ payment_assume_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_assume_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_assume_payment_att = (<<1, 1>> :> [st |-> "READY", pg |-> 1])
+/\ payment_assume_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_assume_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_assume_payment_late = <<FALSE>>
+/\ payment_assume_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_assume_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_assume_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
+
+State 3: <payment_assume_payment_auth(1,1) line 360, col 3 to line 379, col 68 of module payment_assume>
+/\ payment_assume_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_assume_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_assume_payment_att = (<<1, 1>> :> [st |-> "READY", pg |-> 1])
+/\ payment_assume_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_assume_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_assume_payment_late = <<FALSE>>
+/\ payment_assume_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_assume_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_assume_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 4: <payment_assume_payment_accept(1,1) line 393, col 3 to line 423, col 68 of module payment_assume>
+/\ payment_assume_payment_ord = <<[st |-> "ACCEPTED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_assume_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_assume_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_assume_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_assume_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_assume_payment_late = <<FALSE>>
+/\ payment_assume_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_assume_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_assume_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 5: <payment_assume_payment_reserve(1) line 459, col 3 to line 485, col 68 of module payment_assume>
+/\ payment_assume_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_assume_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_assume_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_assume_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_assume_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_assume_payment_late = <<FALSE>>
+/\ payment_assume_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_assume_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_assume_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 6: <payment_assume_payment_command(1) line 1156, col 3 to line 1176, col 43 of module payment_assume>
+/\ payment_assume_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_assume_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_assume_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_assume_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_assume_payment_pay = (<<1, 1>> :> "ACCEPTED" @@ <<1, 2>> :> "NONE")
+/\ payment_assume_payment_late = <<FALSE>>
+/\ payment_assume_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_assume_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_assume_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 7: <payment_assume_payment_send(1,1) line 499, col 3 to line 519, col 43 of module payment_assume>
+/\ payment_assume_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_assume_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_assume_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_assume_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_assume_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "NONE")
+/\ payment_assume_payment_late = <<FALSE>>
+/\ payment_assume_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> FALSE)
+/\ payment_assume_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_assume_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 8: <payment_assume_payment_timeout(1,1) line 633, col 3 to line 653, col 43 of module payment_assume>
+/\ payment_assume_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_assume_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_assume_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_assume_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_assume_payment_pay = (<<1, 1>> :> "FAILED" @@ <<1, 2>> :> "NONE")
+/\ payment_assume_payment_late = <<FALSE>>
+/\ payment_assume_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> FALSE)
+/\ payment_assume_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 1,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_assume_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 9: <payment_assume_payment_pgProcess(1,1) line 546, col 3 to line 575, col 43 of module payment_assume>
+/\ payment_assume_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_assume_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_assume_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_assume_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_assume_payment_pay = (<<1, 1>> :> "FAILED" @@ <<1, 2>> :> "NONE")
+/\ payment_assume_payment_late = <<FALSE>>
+/\ payment_assume_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_assume_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 1,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_assume_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
+
+State 10: <payment_assume_payment_applyResult(1,1) line 712, col 3 to line 744, col 68 of module payment_assume>
+/\ payment_assume_payment_ord = <<[st |-> "FAILED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_assume_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_assume_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_assume_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_assume_payment_pay = (<<1, 1>> :> "FAILED" @@ <<1, 2>> :> "NONE")
+/\ payment_assume_payment_late = <<FALSE>>
+/\ payment_assume_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_assume_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 1,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_assume_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")

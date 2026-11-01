@@ -1,0 +1,548 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "NONE" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = (<<1, 1>> :> [st |-> "NONE", pg |-> 0] @@ <<2, 1>> :> [st |-> "NONE", pg |-> 0])
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "NONE" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 2: <payment_canon_payment_newAttempt(1) line 1114, col 3 to line 1138, col 66 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "NONE" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "READY", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "NONE" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 3: <payment_canon_payment_auth(1,1) line 360, col 3 to line 379, col 66 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "AUTH" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "READY", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "NONE" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 4: <payment_canon_payment_accept(1,1) line 393, col 3 to line 423, col 66 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "AUTH" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "ACCEPTED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "NONE" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 5: <payment_canon_payment_reserve(1) line 459, col 3 to line 485, col 66 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "AUTH" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "NONE" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 6: <payment_canon_payment_command(1) line 1152, col 3 to line 1172, col 42 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "AUTH" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "ACCEPTED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 7: <payment_canon_payment_send(1,1) line 499, col 3 to line 518, col 42 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> TRUE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "AUTH" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "SENT" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 8: <payment_canon_payment_pgProcess(1,1) line 545, col 3 to line 574, col 42 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "SENT" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 9: <payment_canon_payment_respond(1,1) line 604, col 3 to line 626, col 42 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 10: <payment_canon_payment_applyResult(1,1) line 711, col 3 to line 743, col 66 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 11: <payment_canon_payment_issue(1) line 749, col 3 to line 771, col 66 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> TRUE,
+     wait |-> "WAIT",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 12: <payment_canon_payment_ticketSvc(1) line 799, col 3 to line 842, col 66 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "ISSUED",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "OK",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 13: <payment_canon_payment_eventCancel line 307, col 3 to line 318, col 66 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> TRUE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "ISSUED",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "OK",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 14: <payment_canon_payment_compStart(1) line 950, col 3 to line 972, col 66 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> TRUE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [ st |-> "COMPENSATING",
+     apg |-> 1,
+     job |-> FALSE,
+     over |-> FALSE,
+     cs |-> FALSE ],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "ISSUED",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "OK",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "APPROVED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+
+State 15: <payment_canon_payment_compCancel(1) line 1271, col 3 to line 1295, col 62 of module payment_canon>
+/\ payment_canon_payment_req = ( <<1, 1>> :> FALSE @@
+  <<1, 2>> :> FALSE @@
+  <<2, 1>> :> FALSE @@
+  <<2, 2>> :> FALSE )
+/\ payment_canon_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> TRUE ]
+/\ payment_canon_payment_pgs = ( <<1, 1>> :> "CANCELED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )
+/\ payment_canon_payment_late = <<FALSE, FALSE>>
+/\ payment_canon_payment_ord = << [ st |-> "COMPENSATED",
+     apg |-> 1,
+     job |-> FALSE,
+     over |-> FALSE,
+     cs |-> FALSE ],
+   [st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE] >>
+/\ payment_canon_payment_tks = << [ tk |-> "ISSUED",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "OK",
+     broken |-> FALSE ],
+   [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_canon_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_canon_payment_att = ( <<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1] @@
+  <<2, 1>> :> [st |-> "NONE", pg |-> 0] )
+/\ payment_canon_payment_pay = ( <<1, 1>> :> "CANCELED" @@
+  <<1, 2>> :> "NONE" @@
+  <<2, 1>> :> "NONE" @@
+  <<2, 2>> :> "NONE" )

@@ -1,7 +1,7 @@
 // 규칙 모델 검사 실행기 시험(wbs 0.9.1, docs/verification.md §2.2·§2.6, V-T1). Quint·Java 없이 돈다.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { extractTlcTrace, judge, kstTimestamp, loadManifest, parseSimulation, parseTlc, refoundIsCounterexample, resultRecord, simulationFor, invariantsFor } from './spec-check.mjs';
+import { extractTlcTrace, judge, kstTimestamp, loadManifest, parseSimulation, parseTlc, refoundIsCounterexample, resultRecord, runsInSimulation, simulationFor, invariantsFor } from './spec-check.mjs';
 
 const SPEC = `module queue {
   val inv_a = true
@@ -318,4 +318,152 @@ test('V-T1 기록_시뮬레이션으로 다시 찾은 동작 기록은 노린 �
   const h = { main: 'queue_ok', expect: 'hold' };
   assert.equal(refoundIsCounterexample(h, { violated: true, failing: ['inv_a'] }, ['inv_a', 'inv_b']), true);
   assert.equal(refoundIsCounterexample(h, { violated: false, failing: [] }, ['inv_a', 'inv_b']), false);
+});
+
+// ---- 진행성 검사(wbs 0.9.3: '승인된 주문은 발권 또는 환불로 끝남'. 공정성을 단 시간 논리 속성을 TLC로 본다) ----
+const LIVE_SPEC = `${SPEC}module queue_live { import queue.* }
+module queue_stuck { import queue.* }
+`;
+const liveFiles = { 'specs/queue.qnt': LIVE_SPEC.replace('val inv_b = true', 'val inv_b = true\n  temporal live_ok = true\n  temporal  live_b= true') };
+const liveManifest = () => {
+  const m = manifest({ temporal: ['live_ok', 'live_b'] });
+  m.specs[0].checks.push({ main: 'queue_live', expect: 'hold', temporal: 'live_ok', why: '진행성' });
+  m.specs[0].checks.push({ main: 'queue_stuck', expect: 'violate', temporal: 'live_b', why: '진행성 변형' });
+  return m;
+};
+
+test('V-T1 목록_진행성 검사는 명세의 temporal 이름 하나를 TLC로만 보고, 불변식은 보지 않는다(wbs 0.9.3)', () => {
+  const loaded = load(liveManifest(), liveFiles);
+  const [, , live, stuck] = loaded.specs[0].checks;
+  assert.equal(live.temporal, 'live_ok');
+  assert.deepEqual(invariantsFor(loaded.specs[0], live), []);
+  assert.deepEqual(invariantsFor(loaded.specs[0], stuck), []);
+  // 반례를 기대하는 진행성 변형은 invariant 없이 temporal이 노린 속성이다
+  assert.equal(stuck.invariant, undefined);
+  assert.equal(runsInSimulation(live), false);
+  assert.equal(runsInSimulation(loaded.specs[0].checks[0]), true);
+});
+
+test('V-T1 목록_진행성 이름이 명세 파일에 없거나 목록 밖이면 거절한다', () => {
+  const m = liveManifest();
+  m.specs[0].temporal = ['live_ok', 'live_zzz'];
+  assert.throws(() => load(m, liveFiles), /live_zzz/);
+  for (const bad of ['live_ok', [], ['a b']]) {
+    m.specs[0].temporal = bad;
+    assert.throws(() => load(m, liveFiles), /temporal/);
+  }
+  const n = liveManifest();
+  n.specs[0].checks[2].temporal = 'live_zzz';
+  assert.throws(() => load(n, liveFiles), /live_zzz/);
+  // 명세에 temporal 목록이 없으면 검사도 진행성을 적을 수 없다
+  const o = liveManifest();
+  delete o.specs[0].temporal;
+  assert.throws(() => load(o, liveFiles), /temporal/);
+});
+
+test('V-T1 목록_진행성 검사는 시뮬레이션만(tlc false)·불변식·시뮬레이션 횟수와 함께 쓰지 않는다(시뮬레이션은 시간 논리를 보지 않는다)', () => {
+  for (const extra of [{ tlc: false }, { invariants: ['inv_a'] }, { invariant: 'inv_a' }, { samples: 100 }]) {
+    const m = liveManifest();
+    Object.assign(m.specs[0].checks[2], extra);
+    assert.throws(() => load(m, liveFiles), /temporal|진행성/, JSON.stringify(extra));
+  }
+});
+
+const TLC_LIVE_BAD = `TLC2 Version 2026.11.01.195612
+Checking 2 branches of temporal properties for the complete state space with 18 total distinct states at (2026-11-01 19:56:12)
+Error: Temporal property q_temporalProps was violated.
+Error: The following behavior constitutes a counter-example:
+State 1: <Initial predicate>
+live2_live_x = <<0, 0>>
+State 2: <live2_live_inc(1) line 25, col 3 to line 30, col 7 of module live2>
+live2_live_x = <<1, 0>>
+State 3: Stuttering
+Finished checking temporal properties in 00s at 2026-11-01 19:56:12
+13 states generated, 9 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 5.`;
+
+test('V-T1 결과_TLC의 진행성 위반 출력은 위반으로 읽고 반례 경로(멈춘 걸음까지)만 잘라 낸다', () => {
+  const r = parseTlc(TLC_LIVE_BAD);
+  assert.equal(r.violated, true);
+  assert.equal(r.completed, false);
+  assert.equal(r.distinctStates, 9);
+  const t = extractTlcTrace(TLC_LIVE_BAD);
+  assert.match(t, /^Error: Temporal property q_temporalProps was violated\.\nError: The following behavior constitutes a counter-example:\nState 1:/);
+  assert.match(t, /State 3: Stuttering\n$/);
+  assert.doesNotMatch(t, /Finished checking|states generated|Checking 2 branches/);
+});
+
+test('V-T1 판정_진행성 검사는 노린 시간 논리 속성 이름으로 판정한다', () => {
+  const hold = { main: 'queue_live', expect: 'hold', temporal: 'live_ok' };
+  assert.equal(judge(hold, { violated: false, failing: [], completed: true }).ok, true);
+  assert.match(judge(hold, { violated: true, failing: ['live_ok'], completed: false }).message, /live_ok/);
+  const stuck = { main: 'queue_stuck', expect: 'violate', temporal: 'live_b' };
+  assert.equal(judge(stuck, { violated: true, failing: ['live_b'] }).ok, true);
+  const none = judge(stuck, { violated: false, failing: [], completed: true });
+  assert.equal(none.ok, false);
+  assert.match(none.message, /live_b/);
+});
+
+test('V-T1 기록_진행성 검사는 속성 이름과 TLC 경로를 남기고 불변식 목록은 비운다', () => {
+  const r = resultRecord({
+    spec: { name: 'queue', file: 'specs/queue.qnt', scope: 's', adrs: [] },
+    specSha256: 'a',
+    commit: { sha: 'b', dirty: false },
+    tools: {},
+    now: new Date(0),
+    checks: [
+      { check: { main: 'queue_live', expect: 'hold', temporal: 'live_ok', why: 'w' }, invariants: [], tlc: parseTlc(TLC_OK), seconds: 1, verdict: { ok: true, message: '' } },
+      { check: { main: 'queue_stuck', expect: 'violate', temporal: 'live_b', why: 'w' }, invariants: [], tlc: parseTlc(TLC_LIVE_BAD), seconds: 1, verdict: { ok: true, message: '' },
+        tlcTrace: 'specs/results/queue/queue_stuck.tlc.txt' },
+    ],
+  });
+  assert.equal(r.checks[0].temporal, 'live_ok');
+  assert.deepEqual(r.checks[0].invariants, []);
+  assert.equal(r.checks[0].result, 'hold');
+  assert.equal(r.checks[1].temporal, 'live_b');
+  assert.equal(r.checks[1].result, 'violate');
+  assert.equal('targetInvariant' in r.checks[1], false);
+  assert.equal(r.checks[1].tlcTrace, 'specs/results/queue/queue_stuck.tlc.txt');
+  assert.equal('counterexample' in r.checks[1], false);
+});
+
+test('V-T1 목록_반례 경로가 길어 시뮬레이션이 닿지 않는 변형은 simulate false로 전수 검사에서만 본다(wbs 0.9.3)', () => {
+  const m = manifest();
+  m.specs[0].checks[1].simulate = false;
+  const loaded = load(m);
+  assert.equal(runsInSimulation(loaded.specs[0].checks[1]), false);
+  assert.equal(runsInSimulation(loaded.specs[0].checks[0]), true);
+  // 시뮬레이션만 하는 검사(tlc false)와 함께 쓰면 아무 검사도 돌지 않는다
+  m.specs[0].checks[1].tlc = false;
+  assert.throws(() => load(m), /simulate/);
+  delete m.specs[0].checks[1].tlc;
+  for (const bad of [true, 'no', 0]) {
+    m.specs[0].checks[1].simulate = bad;
+    assert.throws(() => load(m), /simulate/);
+  }
+  // 시뮬레이션 횟수와 함께 쓰면 뜻이 없다
+  m.specs[0].checks[1].simulate = false;
+  m.specs[0].checks[1].samples = 100;
+  assert.throws(() => load(m), /simulate/);
+});
+
+test('V-T1 결과_진행 줄(Progress, 쉼표 숫자)이 아니라 맨 끝 요약 줄의 상태 수를 읽는다(코드 리뷰 2026-11-02)', () => {
+  const out = `TLC2 Version 2026.11.01
+Progress(17) at 2026-11-01 20:08:22: 1,341 states generated, 180 distinct states found, 0 states left on queue.
+Model checking completed. No error has been found.
+1341 states generated, 180 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 17.`;
+  const r = parseTlc(out);
+  assert.equal(r.statesGenerated, 1341);
+  assert.equal(r.distinctStates, 180);
+});
+
+test('V-T1 목록_지켜짐 전수 검사 하나는 불변식을 보는 검사여야 하고, 진행성 검사에 simulate를 적으면 거절한다(코드 리뷰 2026-11-02)', () => {
+  // 불변식 지켜짐 검사가 모두 시뮬레이션만이고 진행성 검사만 TLC면, 불변식을 전수로 보는 검사가 없다
+  const m = liveManifest();
+  m.specs[0].checks[0].tlc = false;
+  assert.throws(() => load(m, liveFiles), /전수/);
+  const n = liveManifest();
+  n.specs[0].checks[2].simulate = false;
+  assert.throws(() => load(n, liveFiles), /simulate/);
 });

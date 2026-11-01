@@ -4,7 +4,7 @@
 
 | 파일 | 하는 일 |
 | --- | --- |
-| `spec-check.mjs` | `typecheck`(형식 검사), `pr`(형식 검사 + 검사마다 시뮬레이션, 고정 시드), `full`(형식 검사 + 검사마다 TLC 전수 검사, `--write`면 `specs/results/`에 결과와 반례 경로). 지켜짐을 기대한 검사는 위반이 없고 TLC가 끝까지 돌아야, 반례를 기대한 변형은 노린 불변식의 반례가 나와야 통과합니다 |
+| `spec-check.mjs` | `typecheck`(형식 검사), `pr`(형식 검사 + 검사마다 시뮬레이션, 고정 시드), `full`(형식 검사 + 검사마다 TLC 전수 검사, `--write`면 `specs/results/`에 결과와 반례 경로). 지켜짐을 기대한 검사는 위반이 없고 TLC가 끝까지 돌아야, 반례를 기대한 변형은 노린 불변식의 반례가 나와야 통과합니다. 진행성 검사(검사 목록의 `temporal`, `quint verify --temporal`)와 `simulate: false`인 검사는 `full`에서만 돌고 `pr`은 건너뛰었다고 찍습니다(wbs 0.9.3) |
 | `fetch-tools.mjs` | Apalache 묶음(안에 TLC가 있습니다)과 Quint Rust 평가기를 고정 판·고정 해시로 받아 Quint가 찾는 자리(`QUINT_HOME`, 기본 `~/.quint`)에 둡니다. Quint는 처음 쓸 때 이 둘을 해시 확인 없이 받기 때문에 먼저 채워 둡니다. `spec-check.mjs`도 검사 전에 매번 불러 해시를 다시 봅니다 |
 | `run-local.mjs` | 이 PC(Windows)에서 컨테이너(`peaket/spec-check:local`)로 `spec-check.mjs`를 같은 인자로 부릅니다 |
 | `Dockerfile` | 로컬 실행 이미지. Temurin 21 JRE + Node 24(서비스 뼈대와 같은 다이제스트) + 잠금 파일대로 설치한 Quint + 고정 해시로 받은 도구 |
