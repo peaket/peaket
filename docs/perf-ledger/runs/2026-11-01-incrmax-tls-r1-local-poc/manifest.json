@@ -1,0 +1,53 @@
+{
+  "run_id": "2026-11-01-incrmax-tls-r1-local-poc",
+  "kpi": "NFR-001",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": 20,
+    "warmup_s": 5
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/rate.mjs",
+    "args": "--op incr --model closed --conc 512 --procs 6",
+    "open_model": false
+  },
+  "commit": {
+    "code": "8abe9fdd7e3a5f37d8eab3152e976f35a3b6bbf5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": "2026-11-01-incrmax-notls-r1-local-poc",
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 10",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-01T12:35:57Z",
+  "ended_at": "2026-11-01T12:36:23Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": null,
+    "error_rate": 0,
+    "requests": 9815487,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "verdict": null,
+  "notes": "한 키 INCR 최대 처리량 R(닫힌 모델, 진입 서버 여섯을 프로세스 여섯으로, 컨테이너 CPU 10, 코어 혼합: 주 노드 6 + 복제 3 + 발생기 10 > 16). 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-01T13:40:17Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

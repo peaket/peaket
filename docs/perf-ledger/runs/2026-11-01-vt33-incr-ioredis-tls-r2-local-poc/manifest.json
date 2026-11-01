@@ -1,0 +1,53 @@
+{
+  "run_id": "2026-11-01-vt33-incr-ioredis-tls-r2-local-poc",
+  "kpi": "V-T33",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": 40000.0,
+    "duration_s": 45,
+    "warmup_s": 15
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/rate.mjs",
+    "args": "--client ioredis --op incr --rate 40000",
+    "open_model": true
+  },
+  "commit": {
+    "code": "8abe9fdd7e3a5f37d8eab3152e976f35a3b6bbf5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": "2026-11-01-vt33-incr-ioredis-notls-r1-local-poc",
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 1",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-01T08:52:46Z",
+  "ended_at": "2026-11-01T08:53:48Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 3.293,
+    "error_rate": 0,
+    "requests": 1800000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "verdict": null,
+  "notes": "V-T33 ① ioredis queue-svc 진입 INCR 4만/s(오픈 모델), 프로세스 하나 CPU 1. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-01T13:39:52Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

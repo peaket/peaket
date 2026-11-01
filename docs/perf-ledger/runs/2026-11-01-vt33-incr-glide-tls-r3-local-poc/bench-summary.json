@@ -1,0 +1,71 @@
+{
+  "test": "INCR-single-key",
+  "client": "glide",
+  "tls": true,
+  "op": "incr",
+  "model": "open",
+  "procs": 1,
+  "offered_rate": 40000,
+  "batch_ms": null,
+  "duration_s": 45,
+  "warmup_s": 15,
+  "key_owner": "valkey-1:6379",
+  "latency": {
+    "count": 1789332,
+    "p50_ms": 1.413,
+    "p90_ms": 2.348,
+    "p99_ms": 46.46,
+    "p999_ms": 90.493,
+    "max_ms": 111.523
+  },
+  "throughput_per_s": null,
+  "issued": 2400000,
+  "errors": 10668,
+  "dropped": 0,
+  "error_kinds": {
+    "RequestError: Reached maximum inflight requests- ClientError": 10668
+  },
+  "per_proc": [
+    {
+      "cpu_pct": 69.5,
+      "issued": 2400000,
+      "errors": 10668,
+      "dropped": 0,
+      "max_inflight": 3976,
+      "batches": 0,
+      "latency": {
+        "count": 1789332,
+        "p50_ms": 1.407,
+        "p90_ms": 2.327,
+        "p99_ms": 46.269,
+        "p999_ms": 89.842,
+        "max_ms": 110.589,
+        "mean_ms": 2.464
+      }
+    }
+  ],
+  "engine": {
+    "incr": {
+      "p50_us": 0.001,
+      "p99_us": 2.007,
+      "p999_us": 3.007
+    },
+    "incrby": null,
+    "evalsha": null,
+    "main_thread_cpu_pct": 12.8
+  },
+  "final_counter": 2389332,
+  "host": {
+    "cpu_pct": 2.6,
+    "procs_running_end": 3,
+    "vm_cpus": 32
+  },
+  "bench": {
+    "p99_ms": 46.46,
+    "error_rate": 0.005926666666666667,
+    "requests": 1800000,
+    "dropped": 0,
+    "throughput_per_s": null,
+    "requests_note": "예열 뒤 요청 수로 고쳐 적음(record.mjs fixRequests)"
+  }
+}

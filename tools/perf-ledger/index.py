@@ -22,7 +22,9 @@ HEADER = ('| 날짜 | 측정 ID | KPI | 버전 | 프로파일 | 규모 | p99(ms)
 def row_for(root, manifest_path):
     m = L.load_json(manifest_path)
     run_id = m.get('run_id') or os.path.basename(os.path.dirname(manifest_path))
-    k6 = m.get('k6') or {}
+    # k6 요약이 없으면 측정 도구 요약(loadtest/poc)을 쓴다. 1ms 아래 값이 많아 10ms 미만은 소수 둘째 자리까지 적는다
+    k6 = m.get('k6') or m.get('bench') or {}
+    p99 = k6.get('p99_ms')
     sc = m.get('scale') or {}
     scale = []
     if sc.get('users'):
@@ -37,7 +39,7 @@ def row_for(root, manifest_path):
         verdict = f"무효({(m.get('invalid_reason') or '')[:30]})"
     cost = m.get('cost_krw')
     return (run_id, f"| {run_id[:10]} | {run_id} | {m.get('kpi','')} | {m.get('version','')} | {m.get('profile','')} | "
-            f"{', '.join(scale) or '-'} | {L.fmt_num(k6.get('p99_ms'))} | {L.fmt_pct(k6.get('error_rate'))} | {verdict} | "
+            f"{', '.join(scale) or '-'} | {L.fmt_num(p99, 2 if p99 is not None and p99 < 10 else 0)} | {L.fmt_pct(k6.get('error_rate'))} | {verdict} | "
             f"{L.fmt_num(cost) if cost is not None else '-'} | perf-ledger/runs/{run_id}/ |")
 
 

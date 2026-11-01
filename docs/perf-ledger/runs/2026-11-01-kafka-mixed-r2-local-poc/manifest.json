@@ -1,0 +1,53 @@
+{
+  "run_id": "2026-11-01-kafka-mixed-r2-local-poc",
+  "kpi": "ST-T18",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": 5900.0,
+    "duration_s": 60,
+    "warmup_s": 15
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/kafka-perf.mjs",
+    "args": "--case mixed --tel-rate 5600 --trade-rate 300",
+    "open_model": true
+  },
+  "commit": {
+    "code": "8abe9fdd7e3a5f37d8eab3152e976f35a3b6bbf5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 4",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-01T09:55:37Z",
+  "ended_at": "2026-11-01T09:56:53Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 7.909,
+    "error_rate": 0,
+    "requests": 354000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "verdict": null,
+  "notes": "Kafka 3.9.2 셋(복제 3, min.insync 2), @confluentinc/kafka-javascript 1.11.0, 텔레메트리 5,600/s + 거래 300/s 함께, p99는 거래 토픽 acks=all 보내기 지연. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-01T13:40:08Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

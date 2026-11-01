@@ -9,7 +9,8 @@ import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context, propagation, trace, ty
 import type { Registry } from '@prometheus-io/client';
 import type { KafkaJS } from '@confluentinc/kafka-javascript';
 import type { BroadcastRecord, BroadcastSource } from './control.js';
-import { kafkaConsumerConfig, kafkaProducerConfig, type KafkaClientBase, type KafkaProducerKind } from './kafka-config.js';
+import { kafkaAdminConfig, kafkaConsumerConfig, kafkaProducerConfig, type KafkaClientBase, type KafkaProducerKind } from './kafka-config.js';
+import type { KafkaAuth } from './msk-iam.js';
 import { KEYED_CONSUMER_DEFAULTS, KeyedConsumerMetrics, KeyedPartition, PauseGate, errorSummary, type ConsumedMessage, type HeldEventStore, type KeyedHandler } from './keyed-consumer.js';
 
 /** 받기 처리기 안에서 보류 키 읽기를 기다리는 한도 [가정](max.poll.interval 300초보다 훨씬 짧게) */
@@ -46,8 +47,25 @@ export function createKafkaConsumer(o: KafkaClientBase & { groupId: string }): K
   return new K.Kafka({}).consumer(quiet(kafkaConsumerConfig(o)) as never);
 }
 
-export function createKafkaAdmin(o: { brokers: string[]; clientId: string }): KafkaAdmin {
-  return new K.Kafka({}).admin({ kafkaJS: { brokers: o.brokers, clientId: o.clientId, logLevel: K.logLevel.WARN } } as never);
+export function createKafkaAdmin(o: Pick<KafkaClientBase, 'brokers' | 'clientId' | 'auth'> & { warmupTimeoutMs?: number }): KafkaAdmin {
+  const admin: KafkaAdmin = new K.Kafka({}).admin(quiet(kafkaAdminConfig(o)) as never);
+  if (!o.auth) return admin;
+  // OAUTHBEARER 관리 연결은 연결 직후 첫 관리 요청(위치 읽기·토픽 만들기)이 한도와 상관없이 끝나지 않고 시간 초과로 실패했다. 메타데이터
+  // 요청(listTopics)을 먼저 하면 그 뒤 요청은 바로 끝난다(@confluentinc/kafka-javascript 1.11.0, 로컬 SASL_SSL 브로커, 2026-11-01
+  // openspec 변경 add-foundation-poc). 실패하면 관리 연결을 새로 만드는 방송형 읽기가 영영 시작하지 못하므로 연결에서 데운다
+  const connect = admin.connect.bind(admin);
+  admin.connect = async () => {
+    await connect();
+    try {
+      // 부르는 쪽 한도보다 짧게 둔다: 끊을 때 진행 중인 요청이 연결 잠금을 쥐어 이벤트 루프가 그만큼 멈춘다(코드 리뷰 2026-11-01)
+      await admin.listTopics({ timeout: o.warmupTimeoutMs ?? 5_000 } as never);
+    } catch (err) {
+      // 관리 클라이언트는 연결 실패에 스스로 끊지 않는다. 닫지 않으면 스레드·소켓·토큰 갱신이 남는다(코드 리뷰 2026-11-01)
+      await admin.disconnect().catch(() => {});
+      throw err;
+    }
+  };
+  return admin;
 }
 
 // ---- 추적(결정 3) ----
@@ -282,6 +300,8 @@ export function runKeyedConsumer<T>(o: KeyedConsumerRunOptions<T>): KeyedConsume
     brokers: o.brokers,
     clientId: o.clientId,
     groupId: o.groupId,
+    // 인증 묶음을 그대로 넘긴다(코드 리뷰 2026-11-01: 빠져 있어 MSK IAM을 골라도 평문으로 붙었다)
+    auth: o.auth,
     extra: {
       ...o.extra,
       'auto.offset.reset': o.startAt ?? 'earliest',
@@ -391,18 +411,33 @@ export interface KafkaBroadcastOptions {
   env?: string;
   /** 관리 API 시간 한도 [가정] */
   adminTimeoutMs?: number;
+  /** 운영은 MSK IAM(kafkaAuthFromEnv). 관리 연결과 소비자 모두에 싣는다 */
+  auth?: KafkaAuth;
 }
 
 export function kafkaBroadcastSource(o: KafkaBroadcastOptions): BroadcastSource & { close(): Promise<void> } {
   const clientId = `${o.service}-${o.env ?? 'local'}-${o.pod}`;
   const timeout = o.adminTimeoutMs ?? 5_000;
   let admin: KafkaAdmin | undefined;
-  const connected = async (): Promise<KafkaAdmin> => {
-    if (admin) return admin;
-    const a = createKafkaAdmin({ brokers: o.brokers, clientId });
-    await withTimeout(a.connect(), timeout, 'Kafka 관리 연결');
-    admin = a;
-    return a;
+  let pending: Promise<KafkaAdmin> | undefined;
+  // 연결은 하나만 만들고 동시에 부른 쪽이 함께 기다린다. 시간 초과·실패면 만든 연결을 닫는다(데우기가 네트워크 왕복이라 실패할 수 있다,
+  // 코드 리뷰 2026-11-01: 닫지 않으면 다시 시도할 때마다 클라이언트가 샜다)
+  const connected = (): Promise<KafkaAdmin> => {
+    if (admin) return Promise.resolve(admin);
+    pending ??= (async () => {
+      const a = createKafkaAdmin({ brokers: o.brokers, clientId, auth: o.auth, warmupTimeoutMs: Math.max(200, timeout - 200) });
+      try {
+        await withTimeout(a.connect(), timeout, 'Kafka 관리 연결');
+      } catch (err) {
+        await a.disconnect().catch(() => {});
+        throw err;
+      }
+      admin = a;
+      return a;
+    })().finally(() => {
+      pending = undefined;
+    });
+    return pending;
   };
   const reset = async () => {
     const a = admin;
@@ -433,6 +468,7 @@ export function kafkaBroadcastSource(o: KafkaBroadcastOptions): BroadcastSource 
       const consumer = createKafkaConsumer({
         brokers: o.brokers,
         clientId,
+        auth: o.auth,
         groupId: `${o.service}-${o.pod}.${topic}`,
         extra: {
           'auto.offset.reset': 'earliest',
@@ -466,7 +502,11 @@ export function kafkaBroadcastSource(o: KafkaBroadcastOptions): BroadcastSource 
         await consumer.disconnect().catch(() => {});
       }
     },
-    close: reset,
+    // 연결 중이면 끝나기를 기다린 뒤 닫는다(닫은 뒤에 연결이 채워져 남지 않게)
+    async close() {
+      await pending?.catch(() => {});
+      await reset();
+    },
   };
 }
 

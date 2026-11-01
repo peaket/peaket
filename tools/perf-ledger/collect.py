@@ -211,6 +211,15 @@ def collect(a, root):
             k6 = L.k6_metrics(L.load_json(os.path.join(run_dir, 'k6-summary.json')))
             log(lines, f'k6: p99={k6["p99_ms"]} ms, 오류율={k6["error_rate"]}, 요청={k6["requests"]}, 못 보낸 반복={k6["dropped_iterations"]}')
 
+    # k6가 아닌 측정 도구(loadtest/poc)의 요약: 그 안의 bench 칸(p99_ms·error_rate·requests·dropped)을 장부 칸으로 쓴다
+    bench = None
+    if getattr(a, 'bench_summary', None):
+        rel = copy_into(a.bench_summary, run_dir, 'bench-summary.json', lines)
+        if rel:
+            b = (L.load_json(os.path.join(run_dir, 'bench-summary.json')) or {}).get('bench') or {}
+            bench = {k: b.get(k) for k in ('p99_ms', 'error_rate', 'requests', 'dropped')}
+            log(lines, f'측정 도구: p99={bench["p99_ms"]} ms, 오류율={bench["error_rate"]}, 요청={bench["requests"]}, 못 보낸 요청={bench["dropped"]}')
+
     start = L.parse_time(a.start) if a.start else None
     end = L.parse_time(a.end) if a.end else None
     if a.prom_url and a.queries and start and end:
@@ -219,6 +228,8 @@ def collect(a, root):
         log(lines, 'prometheus: --queries, --start, --end가 모두 있어야 내보냅니다. 건너뜀')
 
     attachments = {}
+    if bench is not None:
+        attachments['bench'] = 'bench-summary.json'
     for key, src, name in [('infra', a.infra_file, 'infra.txt'), ('invariants', a.invariants, 'invariants.csv'),
                            ('cost', a.cost_file, 'cost.csv'), ('timeline', a.timeline, 'timeline.csv')]:
         rel = copy_into(src, run_dir, name, lines)
@@ -284,6 +295,8 @@ def collect(a, root):
     valid, reason = True, None
     if k6 and (k6['dropped_iterations'] or 0) > 0:
         valid, reason = False, f'발생기 병목: dropped_iterations={k6["dropped_iterations"]}'
+    if bench and (bench['dropped'] or 0) > 0:
+        valid, reason = False, f'발생기 병목: 못 보낸 요청={bench["dropped"]}'
     if a.invalid_reason:
         valid, reason = False, a.invalid_reason
 
@@ -299,13 +312,14 @@ def collect(a, root):
         'raw_uri': raw_uri,
         'redis_tls': redis_tls,
         'paired_run': paired_run,
-        'generator': {'description': a.generator, 'dropped_iterations': (k6 or {}).get('dropped_iterations')},
+        'generator': {'description': a.generator, 'dropped_iterations': (k6 or {}).get('dropped_iterations', (bench or {}).get('dropped'))},
         'started_at': L.iso_utc(start) if start else None,
         'ended_at': L.iso_utc(end) if end else None,
         'region': a.region,
         'cost_krw': a.cost_krw,
         'exchange_rate': a.exchange_rate,
         'k6': k6,
+        'bench': bench,
         'k6_eval': k6_eval,
         'k6_plan': k6_plan,
         'k6_cost': k6_cost,
@@ -666,8 +680,28 @@ def selftest():
     cs = {(x['premium_krw'], x['catch_prob']): x for x in kr[('replay-L3', 3)]['cases']}
     assert cs[(200000, 0.01)]['bot_profitable'] is False and cs[(900000, 0.01)]['bot_profitable'] is True, ('손익 오류', cs)
     selftest_raw_and_stamp(tmp, IDX, CH)
+    # k6가 아닌 측정 도구의 요약(wbs 0.5.1 PoC): p99·오류율·요청 수를 장부 칸에, 못 보낸 요청이 있으면 무효
+    def bench_args(run_id, path):
+        return argparse.Namespace(run_id=run_id, kpi='NFR-001', version='v1', profile='local-poc', users=None, rps=200000,
+                                  duration=60, warmup=15, scenario='loadtest/poc/bench/src/rate.mjs', scenario_args='--op incr',
+                                  closed_model=False, k6_summary=None, bench_summary=path, prom_url=None, start=None, end=None,
+                                  step=1, queries=None, infra_file=None, invariants=None, cost_file=None, timeline=None, extra=None,
+                                  confusion=None, commit='selftest', generator='selftest', region='local', cost_krw=0,
+                                  exchange_rate=1400, verdict='pass', notes='selftest', invalid_reason=None, force=False,
+                                  redis_tls='true', paired_run='2026-11-02-incr-v1-local-poc-notls')
+    for rid, dropped in [('2026-11-02-incr-v1-local-poc', 0), ('2026-11-02-incr-v1-local-poc-dropped', 3)]:
+        bp = os.path.join(tmp, f'bench-{dropped}.json')
+        with io.open(bp, 'w', encoding='utf-8') as f:
+            json.dump({'test': 'INCR-single-key', 'bench': {'p99_ms': 4.25, 'error_rate': 0.0, 'requests': 15000000, 'dropped': dropped}}, f)
+        bm = collect(bench_args(rid, bp), tmp)
+        assert bm['bench'] == {'p99_ms': 4.25, 'error_rate': 0.0, 'requests': 15000000, 'dropped': dropped}, ('측정 도구 요약 오류', bm['bench'])
+        assert bm['attachments'].get('bench') == 'bench-summary.json', ('측정 도구 요약 첨부 오류', bm['attachments'])
+        assert bm['generator']['dropped_iterations'] == dropped, ('못 보낸 요청 오류', bm['generator'])
+        assert bm['valid'] is (dropped == 0), ('못 보낸 요청이 있는데 유효로 적었다', bm['valid'])
     IDX.rebuild(tmp)
     doc = io.open(os.path.join(tmp, L.LEDGER_DOC), encoding='utf-8').read()
+    row = [ln for ln in doc.splitlines() if '| 2026-11-02-incr-v1-local-poc |' in ln]
+    assert row and '| 4.25 |' in row[0] and '| 0.0% |' in row[0], ('측정 도구 요약 색인 실패', row)
     assert '2026-11-02-k1-v1-local-10k' in doc and '(old)' not in doc, '색인 실패'
     assert '오탐 1/947' in doc and '계획 통과' in doc and '1장당 최저 56,556원' in doc, 'K6 요약 색인 실패'
     out = os.path.join(tmp, 'scale.svg')
@@ -685,7 +719,7 @@ def main():
     p.add_argument('--run-id'); p.add_argument('--kpi'); p.add_argument('--version', dest='version'); p.add_argument('--profile')
     p.add_argument('--users', type=int); p.add_argument('--rps', type=float); p.add_argument('--duration', type=int); p.add_argument('--warmup', type=int, default=0)
     p.add_argument('--scenario'); p.add_argument('--scenario-args'); p.add_argument('--closed-model', action='store_true', help='열린 모델이 아니면 표시')
-    p.add_argument('--k6-summary'); p.add_argument('--prom-url'); p.add_argument('--start'); p.add_argument('--end'); p.add_argument('--step', type=int, default=1); p.add_argument('--queries')
+    p.add_argument('--k6-summary'); p.add_argument('--bench-summary', help='k6가 아닌 측정 도구의 결과 JSON(bench 칸: p99_ms·error_rate·requests·dropped)'); p.add_argument('--prom-url'); p.add_argument('--start'); p.add_argument('--end'); p.add_argument('--step', type=int, default=1); p.add_argument('--queries')
     p.add_argument('--infra-file'); p.add_argument('--invariants'); p.add_argument('--cost-file'); p.add_argument('--timeline'); p.add_argument('--extra', action='append')
     p.add_argument('--confusion', help='K6: tier,round,label,predicted,count[,stratum] 형식의 혼동 행렬 CSV(ADR-0039·0048)')
     p.add_argument('--k6-plan', help='K6: 사전 등록 계획 N:C. N은 판정 세션을 낸 사람 수, C는 합격 오탐 수(예: 947:1, ADR-0048·0112)')

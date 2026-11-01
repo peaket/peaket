@@ -1,0 +1,40 @@
+{
+  "test": "V-T41",
+  "config": "express-zod",
+  "route": "entry",
+  "mode": "open",
+  "offered_rate": 10400,
+  "app": {
+    "config": "express-zod",
+    "handled": 605719,
+    "cpu_us": 52267858,
+    "wall_us": 58994939,
+    "cpu_pct": 88.6,
+    "eld_ms": {
+      "p50": 0.005,
+      "p99": 1.869,
+      "max": 49.463,
+      "mean": 0.071,
+      "resolution_ms": 1,
+      "raw_p99": 2.869
+    },
+    "rss_mb": 269,
+    "node": "v24.18.0"
+  },
+  "k6": {
+    "p50_ms": 0.278029,
+    "p99_ms": 9.596702300000025,
+    "requests": 622635,
+    "rps": 8302.108232925837,
+    "failed_rate": 0,
+    "dropped": 1369
+  },
+  "cpu_us_per_request": 86.3,
+  "throughput_per_s": 10267,
+  "bench": {
+    "p99_ms": 9.596702300000025,
+    "error_rate": 0,
+    "requests": 622635,
+    "dropped": 1369
+  }
+}

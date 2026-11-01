@@ -1,0 +1,69 @@
+{
+  "test": "INCR-single-key",
+  "client": "node-redis",
+  "tls": false,
+  "op": "incr",
+  "model": "open",
+  "procs": 1,
+  "offered_rate": 40000,
+  "batch_ms": null,
+  "duration_s": 45,
+  "warmup_s": 15,
+  "key_owner": "valkey-1:6379",
+  "latency": {
+    "count": 1800000,
+    "p50_ms": 1.113,
+    "p90_ms": 1.924,
+    "p99_ms": 11.769,
+    "p999_ms": 28.25,
+    "max_ms": 59.582
+  },
+  "throughput_per_s": null,
+  "issued": 2400000,
+  "errors": 0,
+  "dropped": 0,
+  "error_kinds": {},
+  "per_proc": [
+    {
+      "cpu_pct": 40.2,
+      "issued": 2400000,
+      "errors": 0,
+      "dropped": 0,
+      "max_inflight": 2323,
+      "batches": 0,
+      "latency": {
+        "count": 1800000,
+        "p50_ms": 1.103,
+        "p90_ms": 1.916,
+        "p99_ms": 11.686,
+        "p999_ms": 28.153,
+        "max_ms": 59.354,
+        "mean_ms": 1.407
+      }
+    }
+  ],
+  "engine": {
+    "incr": {
+      "p50_us": 0.001,
+      "p99_us": 1.003,
+      "p999_us": 3.007
+    },
+    "incrby": null,
+    "evalsha": null,
+    "main_thread_cpu_pct": 6.4
+  },
+  "final_counter": 2400000,
+  "host": {
+    "cpu_pct": 1.6,
+    "procs_running_end": 2,
+    "vm_cpus": 32
+  },
+  "bench": {
+    "p99_ms": 11.769,
+    "error_rate": 0,
+    "requests": 1800000,
+    "dropped": 0,
+    "throughput_per_s": null,
+    "requests_note": "예열 뒤 요청 수로 고쳐 적음(record.mjs fixRequests)"
+  }
+}

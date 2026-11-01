@@ -1,0 +1,53 @@
+{
+  "run_id": "2026-11-01-kafka-max-local-poc",
+  "kpi": "ST-T18",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": 30,
+    "warmup_s": 5
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/kafka-perf.mjs",
+    "args": "--case max --conc 64",
+    "open_model": false
+  },
+  "commit": {
+    "code": "8abe9fdd7e3a5f37d8eab3152e976f35a3b6bbf5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 4",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-01T09:58:09Z",
+  "ended_at": "2026-11-01T09:58:47Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 45.099,
+    "error_rate": 0,
+    "requests": 5704900,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "verdict": null,
+  "notes": "텔레메트리 생산자 하나의 최대 처리량(묶음 100건, 닫힌 모델). 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-01T13:40:08Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

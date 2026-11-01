@@ -1,0 +1,98 @@
+{
+  "test": "V-T33-behaviors",
+  "client": "ioredis",
+  "tls": true,
+  "timeout_ms": 100,
+  "steps": {
+    "migrate": {
+      "action": {
+        "slot": 13513,
+        "from": "valkey-3:6379",
+        "to": "valkey-1:6379"
+      },
+      "issued": 40000,
+      "errors": 150,
+      "error_kinds": {
+        "ReplyError: ASK 13513 valkey-1:6379": 150
+      },
+      "latency": {
+        "count": 39850,
+        "p50_ms": 0.968,
+        "p90_ms": 1.595,
+        "p99_ms": 12.69,
+        "p999_ms": 32.1,
+        "max_ms": 37.895,
+        "mean_ms": 1.238
+      }
+    },
+    "failover": {
+      "action": {
+        "from": "valkey-3:6379",
+        "to": "valkey-4:6379",
+        "promoted_ms": 117
+      },
+      "issued": 50000,
+      "errors": 0,
+      "error_kinds": {},
+      "latency": {
+        "count": 50000,
+        "p50_ms": 0.92,
+        "p90_ms": 1.499,
+        "p99_ms": 5.072,
+        "p999_ms": 80.909,
+        "max_ms": 108.892,
+        "mean_ms": 1.376
+      }
+    },
+    "script_flush": {
+      "before": "OK",
+      "after_flush": "OK",
+      "error": null,
+      "pass": true
+    },
+    "sharded_pubsub": {
+      "moved": {
+        "slot": 250,
+        "from": "valkey-1:6379",
+        "to": "valkey-2:6379"
+      },
+      "sent_total": 594,
+      "received_total": 592,
+      "sent_before_move": 98,
+      "sent_after_move_settled": 472,
+      "received_after_move_settled": 472,
+      "publish_errors": 2,
+      "pass": true
+    },
+    "offline_blackhole": {
+      "kind": "blackhole",
+      "node": "valkey-1:6379",
+      "window_ms": 5232,
+      "succeeded": 458,
+      "failed": 29,
+      "fail_ms": {
+        "p50": 100,
+        "p99": 101.4,
+        "max": 101.4
+      },
+      "counter_after": 487,
+      "queued_then_applied": 29,
+      "pass": true
+    },
+    "offline_kill": {
+      "kind": "kill",
+      "node": "valkey-2:6379",
+      "window_ms": 22522,
+      "succeeded": 93,
+      "failed": 2,
+      "fail_ms": {
+        "p50": 11245.6,
+        "p99": 11248.2,
+        "max": 11248.2
+      },
+      "counter_after": 93,
+      "queued_then_applied": 0,
+      "pass": false
+    }
+  }
+}

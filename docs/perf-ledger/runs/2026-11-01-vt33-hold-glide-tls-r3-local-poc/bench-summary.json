@@ -1,0 +1,77 @@
+{
+  "test": "V-T33-hold",
+  "client": "glide",
+  "tls": true,
+  "op": "hold",
+  "model": "open",
+  "procs": 1,
+  "offered_rate": 5000,
+  "batch_ms": null,
+  "duration_s": 45,
+  "warmup_s": 15,
+  "key_owner": "valkey-1:6379",
+  "latency": {
+    "count": 225000,
+    "p50_ms": 1.254,
+    "p90_ms": 2.022,
+    "p99_ms": 2.593,
+    "p999_ms": 3.228,
+    "max_ms": 10.444
+  },
+  "throughput_per_s": null,
+  "issued": 300000,
+  "errors": 0,
+  "dropped": 0,
+  "error_kinds": {},
+  "per_proc": [
+    {
+      "cpu_pct": 33.2,
+      "issued": 300000,
+      "errors": 0,
+      "dropped": 0,
+      "max_inflight": 46,
+      "batches": 0,
+      "latency": {
+        "count": 225000,
+        "p50_ms": 1.251,
+        "p90_ms": 2.02,
+        "p99_ms": 2.573,
+        "p999_ms": 3.208,
+        "max_ms": 10.418,
+        "mean_ms": 1.299
+      }
+    }
+  ],
+  "engine": {
+    "incr": {
+      "p50_us": 0.001,
+      "p99_us": 2.007,
+      "p999_us": 3.007
+    },
+    "incrby": {
+      "p50_us": 0.001,
+      "p99_us": 4.015,
+      "p999_us": 9.023
+    },
+    "evalsha": {
+      "p50_us": 25.087,
+      "p99_us": 95.231,
+      "p999_us": 183.295
+    },
+    "main_thread_cpu_pct": 26.1
+  },
+  "final_counter": null,
+  "host": {
+    "cpu_pct": 2.4,
+    "procs_running_end": 2,
+    "vm_cpus": 32
+  },
+  "bench": {
+    "p99_ms": 2.593,
+    "error_rate": 0,
+    "requests": 225000,
+    "dropped": 0,
+    "throughput_per_s": null,
+    "requests_note": "예열 뒤 요청 수로 고쳐 적음(record.mjs fixRequests)"
+  }
+}

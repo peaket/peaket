@@ -1,0 +1,53 @@
+{
+  "run_id": "2026-11-01-st27-five-same-tls-r1-local-poc",
+  "kpi": "NFR-003",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": 6000.0,
+    "duration_s": 600,
+    "warmup_s": 60
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/seat-shard.mjs",
+    "args": "--mode five --layout same",
+    "open_model": true
+  },
+  "commit": {
+    "code": "8abe9fdd7e3a5f37d8eab3152e976f35a3b6bbf5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 2",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-01T10:35:00Z",
+  "ended_at": "2026-11-01T10:46:02Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 31.976,
+    "error_rate": 0.009598611111111112,
+    "requests": 3600000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": false,
+  "invalid_reason": "측정 도구 멈춤: 오버셀 검사 기록을 좌석마다 자바스크립트 배열로 쌓아 GC가 길게 멈췄고 모든 요청이 2.1~2.3초까지 늦어 홀드 0.96%가 100ms 마감에 걸렸다(엔진 지연·SLOWLOG는 정상). 정수 배열로 고쳐 다시 잼",
+  "verdict": null,
+  "notes": "S-T27 다섯 회차 합 6,000/s, 한 샤드, 만료 작업 Lua 한 번에 500석(첫 판 측정 도구). 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표. 오버셀 판정 불가(홀드 오류 34555건이 기록에 빠짐)",
+  "collected_at": "2026-11-01T13:40:10Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

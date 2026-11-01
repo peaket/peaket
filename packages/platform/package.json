@@ -50,6 +50,7 @@
     "@prometheus-io/client": "^0.16.1",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
+    "aws-msk-iam-sasl-signer-js": "1.0.3",
     "drizzle-orm": "0.45.4",
     "fastify": "^5.12.7",
     "opossum": "10.0.0",
@@ -60,6 +61,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@nestjs/platform-express": "12.3.2",
     "@peaket/config": "workspace:*",
     "@peaket/contracts": "workspace:*",
     "@types/node": "^24.19.2",

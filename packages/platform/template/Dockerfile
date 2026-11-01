@@ -24,6 +24,11 @@ RUN pnpm --filter @peaket/platform build \
 
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
 ENV NODE_ENV=production
+# Kafka 클라이언트(librdkafka)는 TLS 인증서 검증에 시스템 CA 묶음을 쓰는데 기본 이미지에는 없다. 없으면 MSK(TLS)에 붙지 못한다
+# (2026-11-01 코드 리뷰, openspec 변경 add-foundation-poc). Node 자체는 내장 CA를 써서 이것과 상관없다
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build --chown=node:node /out /app
 USER node

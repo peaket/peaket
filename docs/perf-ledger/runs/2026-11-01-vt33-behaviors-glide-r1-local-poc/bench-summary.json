@@ -1,0 +1,98 @@
+{
+  "test": "V-T33-behaviors",
+  "client": "glide",
+  "tls": true,
+  "timeout_ms": 100,
+  "steps": {
+    "migrate": {
+      "action": {
+        "slot": 13513,
+        "from": "valkey-3:6379",
+        "to": "valkey-1:6379"
+      },
+      "issued": 40000,
+      "errors": 167,
+      "error_kinds": {
+        "RequestError: An error was signalled by the server: - Moved: 13513 valkey-3:6379": 167
+      },
+      "latency": {
+        "count": 39833,
+        "p50_ms": 1.001,
+        "p90_ms": 1.636,
+        "p99_ms": 8.195,
+        "p999_ms": 35.18,
+        "max_ms": 42.516,
+        "mean_ms": 1.235
+      }
+    },
+    "failover": {
+      "action": {
+        "from": "valkey-3:6379",
+        "to": "valkey-4:6379",
+        "promoted_ms": 82
+      },
+      "issued": 50000,
+      "errors": 0,
+      "error_kinds": {},
+      "latency": {
+        "count": 50000,
+        "p50_ms": 0.969,
+        "p90_ms": 1.586,
+        "p99_ms": 2.055,
+        "p999_ms": 25.714,
+        "max_ms": 35.679,
+        "mean_ms": 1.066
+      }
+    },
+    "script_flush": {
+      "before": "OK",
+      "after_flush": "OK",
+      "error": null,
+      "pass": true
+    },
+    "sharded_pubsub": {
+      "moved": {
+        "slot": 250,
+        "from": "valkey-1:6379",
+        "to": "valkey-2:6379"
+      },
+      "sent_total": 592,
+      "received_total": 446,
+      "sent_before_move": 97,
+      "sent_after_move_settled": 470,
+      "received_after_move_settled": 348,
+      "publish_errors": 4,
+      "pass": false
+    },
+    "offline_blackhole": {
+      "kind": "blackhole",
+      "node": "valkey-1:6379",
+      "window_ms": 5152,
+      "succeeded": 435,
+      "failed": 29,
+      "fail_ms": {
+        "p50": 100.9,
+        "p99": 101.2,
+        "max": 101.2
+      },
+      "counter_after": 464,
+      "queued_then_applied": 29,
+      "pass": true
+    },
+    "offline_kill": {
+      "kind": "kill",
+      "node": "valkey-2:6379",
+      "window_ms": 12193,
+      "succeeded": 858,
+      "failed": 75,
+      "fail_ms": {
+        "p50": 100.8,
+        "p99": 101.5,
+        "max": 101.5
+      },
+      "counter_after": 858,
+      "queued_then_applied": 0,
+      "pass": true
+    }
+  }
+}

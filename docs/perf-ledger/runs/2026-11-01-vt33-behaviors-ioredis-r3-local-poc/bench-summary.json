@@ -1,0 +1,98 @@
+{
+  "test": "V-T33-behaviors",
+  "client": "ioredis",
+  "tls": true,
+  "timeout_ms": 100,
+  "steps": {
+    "migrate": {
+      "action": {
+        "slot": 13513,
+        "from": "valkey-3:6379",
+        "to": "valkey-1:6379"
+      },
+      "issued": 40000,
+      "errors": 150,
+      "error_kinds": {
+        "ReplyError: ASK 13513 valkey-1:6379": 150
+      },
+      "latency": {
+        "count": 39850,
+        "p50_ms": 0.93,
+        "p90_ms": 1.523,
+        "p99_ms": 8.741,
+        "p999_ms": 28.83,
+        "max_ms": 33.227,
+        "mean_ms": 1.137
+      }
+    },
+    "failover": {
+      "action": {
+        "from": "valkey-3:6379",
+        "to": "valkey-4:6379",
+        "promoted_ms": 104
+      },
+      "issued": 50000,
+      "errors": 0,
+      "error_kinds": {},
+      "latency": {
+        "count": 50000,
+        "p50_ms": 0.928,
+        "p90_ms": 1.517,
+        "p99_ms": 1.996,
+        "p999_ms": 27.758,
+        "max_ms": 107.809,
+        "mean_ms": 1.076
+      }
+    },
+    "script_flush": {
+      "before": "OK",
+      "after_flush": "OK",
+      "error": null,
+      "pass": true
+    },
+    "sharded_pubsub": {
+      "moved": {
+        "slot": 250,
+        "from": "valkey-1:6379",
+        "to": "valkey-2:6379"
+      },
+      "sent_total": 593,
+      "received_total": 590,
+      "sent_before_move": 98,
+      "sent_after_move_settled": 472,
+      "received_after_move_settled": 472,
+      "publish_errors": 3,
+      "pass": true
+    },
+    "offline_blackhole": {
+      "kind": "blackhole",
+      "node": "valkey-1:6379",
+      "window_ms": 5169,
+      "succeeded": 441,
+      "failed": 29,
+      "fail_ms": {
+        "p50": 100.3,
+        "p99": 101.3,
+        "max": 101.3
+      },
+      "counter_after": 470,
+      "queued_then_applied": 29,
+      "pass": true
+    },
+    "offline_kill": {
+      "kind": "kill",
+      "node": "valkey-2:6379",
+      "window_ms": 22628,
+      "succeeded": 91,
+      "failed": 3,
+      "fail_ms": {
+        "p50": 11242.1,
+        "p99": 11252.9,
+        "max": 11252.9
+      },
+      "counter_after": 91,
+      "queued_then_applied": 0,
+      "pass": false
+    }
+  }
+}

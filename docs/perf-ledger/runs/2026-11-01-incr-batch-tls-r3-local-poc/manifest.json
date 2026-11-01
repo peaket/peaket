@@ -1,0 +1,53 @@
+{
+  "run_id": "2026-11-01-incr-batch-tls-r3-local-poc",
+  "kpi": "NFR-001",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": 200000.0,
+    "duration_s": 60,
+    "warmup_s": 15
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/rate.mjs",
+    "args": "--op batch --rate 200000 --procs 4",
+    "open_model": true
+  },
+  "commit": {
+    "code": "8abe9fdd7e3a5f37d8eab3152e976f35a3b6bbf5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": "2026-11-01-incr-batch-notls-r1-local-poc",
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 6",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-01T08:37:26Z",
+  "ended_at": "2026-11-01T08:38:43Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 4.14,
+    "error_rate": 0,
+    "requests": 12000000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "verdict": null,
+  "notes": "한 키 INCR(파드별 INCRBY 2ms 묶음), node-redis 6.3.0, 진입 서버 4대를 프로세스 4개로 흉내(컨테이너 CPU 6). 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-01T13:39:48Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

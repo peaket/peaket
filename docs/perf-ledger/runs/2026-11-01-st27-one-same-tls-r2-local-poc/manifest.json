@@ -1,0 +1,53 @@
+{
+  "run_id": "2026-11-01-st27-one-same-tls-r2-local-poc",
+  "kpi": "NFR-003",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": 2000.0,
+    "duration_s": 600,
+    "warmup_s": 60
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/seat-shard.mjs",
+    "args": "--mode one --layout same",
+    "open_model": true
+  },
+  "commit": {
+    "code": "8abe9fdd7e3a5f37d8eab3152e976f35a3b6bbf5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 2",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-01T10:12:54Z",
+  "ended_at": "2026-11-01T10:23:56Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 3.27,
+    "error_rate": 0,
+    "requests": 1200000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "verdict": null,
+  "notes": "S-T27 한 회차 2,000/s, 배치 한 샤드, 스냅샷·1초 만료·샤드 발행 함께, p99는 클라이언트가 잰 홀드 Lua 왕복. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표. 오버셀 0(좌석마다 잡기·놓기 순서 확인, 켜진 비트 수 = 만료 인덱스 수)",
+  "collected_at": "2026-11-01T13:40:09Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

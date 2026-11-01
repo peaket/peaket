@@ -1,0 +1,49 @@
+{
+  "test": "kafka-client",
+  "case": "batch",
+  "client": "@confluentinc/kafka-javascript 1.11.0",
+  "brokers": [
+    "kafka-1:9092",
+    "kafka-2:9092",
+    "kafka-3:9092"
+  ],
+  "batch": [
+    {
+      "size": 32,
+      "consumed": 30000,
+      "seconds": 20.3,
+      "messages_per_s": 1480
+    },
+    {
+      "size": 1,
+      "consumed": 30000,
+      "seconds": 35,
+      "messages_per_s": 858
+    },
+    {
+      "size": 128,
+      "consumed": 30000,
+      "seconds": 35,
+      "messages_per_s": 858
+    },
+    {
+      "size": -1,
+      "consumed": 30000,
+      "seconds": 8.8,
+      "messages_per_s": 3422
+    }
+  ],
+  "mode": "serial",
+  "bench": {
+    "p99_ms": null,
+    "error_rate": 0,
+    "requests": 120000,
+    "dropped": 0
+  },
+  "generator_cpu_pct": 6.4,
+  "host": {
+    "cpu_pct": 0.5,
+    "procs_running_end": 3,
+    "vm_cpus": 32
+  }
+}
