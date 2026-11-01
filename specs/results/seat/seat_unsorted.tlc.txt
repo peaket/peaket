@@ -1,0 +1,341 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 0,
+        seats |-> <<>>,
+        phase |-> "IDLE",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_unsorted_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<0, 0>>]
+
+State 2: <seat_unsorted_seat_hold(11,<<1, 2>>) line 415, col 3 to line 455, col 56 of module seat_unsorted>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> FALSE], [hid |-> 11, pinned |-> FALSE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 0,
+        seats |-> <<1, 2>>,
+        phase |-> "HELD",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_unsorted_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+
+State 3: <seat_unsorted_seat_ttlPasses(11) line 476, col 3 to line 497, col 60 of module seat_unsorted>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> FALSE], [hid |-> 11, pinned |-> FALSE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 0,
+        seats |-> <<1, 2>>,
+        phase |-> "HELD",
+        late |-> TRUE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_unsorted_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+
+State 4: <seat_unsorted_seat_accept(11) line 563, col 3 to line 581, col 60 of module seat_unsorted>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> FALSE], [hid |-> 11, pinned |-> FALSE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "ACCEPTED",
+        late |-> TRUE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_unsorted_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+
+State 5: <seat_unsorted_seat_expire(11) line 522, col 3 to line 541, col 31 of module seat_unsorted>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> FALSE], [hid |-> 11, pinned |-> FALSE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "ACCEPTED",
+        late |-> TRUE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_unsorted_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<0, 0>>]
+
+State 6: <seat_unsorted_seat_pin(11) line 637, col 3 to line 682, col 56 of module seat_unsorted>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> TRUE], [hid |-> 11, pinned |-> TRUE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_unsorted_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+
+State 7: <seat_unsorted_seat_saleStep(11) line 1031, col 3 to line 1137, col 56 of module seat_unsorted>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<11, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 11, pinned |-> TRUE], [hid |-> 11, pinned |-> TRUE]>>,
+  quota |-> <<2, 0>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 1 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_unsorted_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+
+State 8: <seat_unsorted_seat_promote line 340, col 3 to line 353, col 60 of module seat_unsorted>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<11, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 1 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_unsorted_seat_env = [partials |-> 1, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 11>>]
+
+State 9: <seat_unsorted_seat_hold(21,<<2, 1>>) line 415, col 3 to line 455, col 56 of module seat_unsorted>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<11, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 21, pinned |-> FALSE], [hid |-> 21, pinned |-> FALSE]>>,
+  quota |-> <<0, 2>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 1 ] @@
+  21 :>
+      [ gen |-> 0,
+        seats |-> <<2, 1>>,
+        phase |-> "HELD",
+        late |-> FALSE,
+        ins |-> 0 ] )
+/\ seat_unsorted_seat_env = [partials |-> 1, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<21, 21>>]
+
+State 10: <seat_unsorted_seat_accept(21) line 563, col 3 to line 581, col 60 of module seat_unsorted>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 0, pinned |-> FALSE], [hid |-> 0, pinned |-> FALSE]>>,
+  quota |-> <<0, 0>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<11, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 21, pinned |-> FALSE], [hid |-> 21, pinned |-> FALSE]>>,
+  quota |-> <<0, 2>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 1 ] @@
+  21 :>
+      [ gen |-> 1,
+        seats |-> <<2, 1>>,
+        phase |-> "ACCEPTED",
+        late |-> FALSE,
+        ins |-> 0 ] )
+/\ seat_unsorted_seat_env = [partials |-> 1, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<21, 21>>]
+
+State 11: <seat_unsorted_seat_pin(21) line 637, col 3 to line 682, col 56 of module seat_unsorted>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 21, pinned |-> FALSE], [hid |-> 21, pinned |-> FALSE]>>,
+  quota |-> <<0, 2>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<11, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 21, pinned |-> TRUE], [hid |-> 21, pinned |-> TRUE]>>,
+  quota |-> <<0, 2>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 1 ] @@
+  21 :>
+      [ gen |-> 1,
+        seats |-> <<2, 1>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 0 ] )
+/\ seat_unsorted_seat_env = [partials |-> 1, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<21, 21>>]
+
+State 12: <seat_unsorted_seat_saleStep(21) line 1031, col 3 to line 1137, col 56 of module seat_unsorted>
+/\ seat_unsorted_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 21, pinned |-> FALSE], [hid |-> 21, pinned |-> FALSE]>>,
+  quota |-> <<0, 2>> ]
+/\ seat_unsorted_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}>>,
+  unc |-> <<11, 21>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_unsorted_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |-> <<[hid |-> 21, pinned |-> TRUE], [hid |-> 21, pinned |-> TRUE]>>,
+  quota |-> <<0, 2>> ]
+/\ seat_unsorted_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1, 2>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 1 ] @@
+  21 :>
+      [ gen |-> 1,
+        seats |-> <<2, 1>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 1 ] )
+/\ seat_unsorted_seat_env = [partials |-> 1, fulls |-> 0]
+/\ seat_unsorted_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<21, 21>>]

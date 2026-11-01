@@ -1,7 +1,7 @@
 // 규칙 모델 검사 실행기 시험(wbs 0.9.1, docs/verification.md §2.2·§2.6, V-T1). Quint·Java 없이 돈다.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { extractTlcTrace, judge, kstTimestamp, loadManifest, parseSimulation, parseTlc, refoundIsCounterexample, resultRecord } from './spec-check.mjs';
+import { extractTlcTrace, judge, kstTimestamp, loadManifest, parseSimulation, parseTlc, refoundIsCounterexample, resultRecord, simulationFor, invariantsFor } from './spec-check.mjs';
 
 const SPEC = `module queue {
   val inv_a = true
@@ -37,6 +37,47 @@ test('V-T1 목록_검사마다 모듈·불변식이 명세 파일에 있으면 �
   const m = load(manifest());
   assert.equal(m.specs[0].checks.length, 2);
   assert.equal(m.simulation.samples, 10000);
+});
+
+test('V-T1 목록_명세가 여럿이면 이름이 겹치지 않아야 한다(결과 파일 specs/results/<이름>.json이 겹친다, wbs 0.9.2)', () => {
+  const m = manifest();
+  m.specs.push({ ...m.specs[0] });
+  assert.throws(() => load(m), /queue.*두 번/);
+  m.specs[1] = { ...m.specs[0], name: 'seat' };
+  assert.equal(load(m).specs.length, 2);
+});
+
+test('V-T1 목록_명세 이름 겹침은 대소문자를 가리지 않는다(NTFS·바인드 마운트에서 결과 폴더가 같아진다, 코드 리뷰 2026-11-02)', () => {
+  const m = manifest();
+  m.specs.push({ ...m.specs[0], name: 'Queue' });
+  assert.throws(() => load(m), /두 번/);
+});
+
+test('V-T1 목록_같은 명세 안 모듈 이름 겹침도 대소문자를 가리지 않는다(반례 파일 <모듈>.tlc.txt가 겹친다, 코드 리뷰 2026-11-02)', () => {
+  const m = manifest();
+  m.specs[0].checks.push({ main: 'Queue_ok', expect: 'hold', why: '대소문자만 다름' });
+  const files = { 'specs/queue.qnt': `${SPEC}module Queue_ok { import queue.* }
+` };
+  assert.throws(() => load(m, files), /두 번/);
+});
+
+test('V-T1 목록_지켜짐 검사는 불변식 일부만 고를 수 있다(모형에 전제로 넣은 불변식은 검사로 세지 않게, 코드 리뷰 2026-11-02)', () => {
+  const m = manifest();
+  m.specs[0].checks[0].invariants = ['inv_a'];
+  const loaded = load(m);
+  assert.deepEqual(invariantsFor(loaded.specs[0], loaded.specs[0].checks[0]), ['inv_a']);
+  assert.deepEqual(invariantsFor(loaded.specs[0], loaded.specs[0].checks[1]), ['inv_b']);
+  for (const bad of [[], ['inv_zzz'], 'inv_a']) {
+    m.specs[0].checks[0].invariants = bad;
+    assert.throws(() => load(m), /invariants/);
+  }
+  m.specs[0].checks[0].invariants = ['inv_a'];
+  m.specs[0].checks[1].invariants = ['inv_a'];
+  assert.throws(() => load(m), /invariants/);
+});
+
+test('V-T1 목록_명세 이름은 결과 폴더 이름이 되므로 식별자 모양만 받는다(경로 밖으로 쓰지 않게)', () => {
+  for (const name of ['../queue', 'a/b', 'queue seat', '']) assert.throws(() => load(manifest({ name })), /name/);
 });
 
 test('V-T1 목록_명세 파일에 없는 모듈을 고르면 거절한다', () => {
@@ -194,6 +235,18 @@ test('V-T1 목록_지켜짐을 기대하는 검사가 모두 tlc false면 거절
   const m = manifest();
   m.specs[0].checks[0].tlc = false;
   assert.throws(() => load(m), /전수/);
+});
+
+test('V-T1 목록_반례가 드문 변형은 검사마다 시뮬레이션 횟수(samples)를 늘려 적을 수 있고, 양의 정수가 아니면 거절한다(wbs 0.9.2)', () => {
+  const m = manifest();
+  m.specs[0].checks[1].samples = 50000;
+  const loaded = load(m);
+  assert.deepEqual(simulationFor(loaded, loaded.specs[0].checks[1]), { samples: 50000, maxSteps: 40, seed: '0x5eed' });
+  assert.deepEqual(simulationFor(loaded, loaded.specs[0].checks[0]), { samples: 10000, maxSteps: 40, seed: '0x5eed' });
+  for (const bad of [0, -1, 1.5, '50000']) {
+    m.specs[0].checks[1].samples = bad;
+    assert.throws(() => load(m), /samples/);
+  }
 });
 
 test('V-T1 기록_시뮬레이션으로만 본 검사는 방법·횟수를 남기고 상태 수는 비운다', () => {

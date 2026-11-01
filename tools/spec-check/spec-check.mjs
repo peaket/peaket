@@ -31,8 +31,14 @@ export function loadManifest(text, readFile) {
   for (const k of ['samples', 'maxSteps']) if (!Number.isInteger(sim[k]) || sim[k] <= 0) fail(`simulation.${k}는 양의 정수다`);
   if (typeof sim.seed !== 'string' || !sim.seed) fail('simulation.seed가 없다');
   if (!Array.isArray(m.specs) || m.specs.length === 0) fail('specs가 비었다');
+  const names = new Set();
   for (const s of m.specs) {
     for (const k of ['name', 'file', 'title', 'scope']) if (typeof s[k] !== 'string' || !s[k]) fail(`${s.name ?? '?'}: ${k}가 없다`);
+    // 이름은 결과 파일·반례 폴더 이름(specs/results/<이름>)이 된다: 식별자 모양만 받고, 겹치면 결과가 서로 덮인다(wbs 0.9.2)
+    if (!NAME.test(s.name)) fail(`${s.name}: name은 영문자·숫자·밑줄로 된 식별자다`);
+    // 대소문자만 다른 이름도 겹친다(NTFS와 그 위의 바인드 마운트는 대소문자를 가리지 않는다, 코드 리뷰 2026-11-02)
+    if (names.has(s.name.toLowerCase())) fail(`명세 이름 ${s.name}를 두 번 적었다(대소문자는 가리지 않는다)`);
+    names.add(s.name.toLowerCase());
     if (!Array.isArray(s.adrs) || s.adrs.some((a) => !/^\d{4}$/.test(a))) fail(`${s.name}: adrs는 네 자리 ADR 번호 목록이다`);
     const src = readFile(s.file);
     const modules = new Set([...src.matchAll(/^\s*module\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{/gm)].map((x) => x[1]));
@@ -43,12 +49,22 @@ export function loadManifest(text, readFile) {
     const seen = new Set();
     for (const c of s.checks) {
       if (!NAME.test(c.main ?? '') || !modules.has(c.main)) fail(`${s.name}: 모듈 ${c.main}가 ${s.file}에 없다`);
-      if (seen.has(c.main)) fail(`${s.name}: 모듈 ${c.main}를 두 번 적었다`);
-      seen.add(c.main);
+      // 반례 파일(specs/results/<명세>/<모듈>.tlc.txt)도 대소문자를 가리지 않는 곳에 쓰이므로 소문자로 견준다(코드 리뷰 2026-11-02)
+      if (seen.has(c.main.toLowerCase())) fail(`${s.name}: 모듈 ${c.main}를 두 번 적었다(대소문자는 가리지 않는다)`);
+      seen.add(c.main.toLowerCase());
       if (c.expect !== 'hold' && c.expect !== 'violate') fail(`${s.name}/${c.main}: expect는 hold 또는 violate다`);
       if (typeof c.why !== 'string' || !c.why) fail(`${s.name}/${c.main}: why(까닭)가 없다`);
       // tlc: false는 전수 검사가 너무 큰 범위(정본 범위 전체 등)라 시뮬레이션으로만 보는 검사다
       if ('tlc' in c && typeof c.tlc !== 'boolean') fail(`${s.name}/${c.main}: tlc는 true 또는 false다`);
+      // samples는 반례가 드문 변형의 시뮬레이션 횟수를 늘릴 때만 적는다(wbs 0.9.2)
+      if ('samples' in c && (!Number.isInteger(c.samples) || c.samples <= 0)) fail(`${s.name}/${c.main}: samples는 양의 정수다`);
+      // invariants는 지켜짐 검사가 일부만 볼 때 적는다(모형에 전제로 넣어 늘 참인 불변식을 '검사해서 지켜짐'으로 남기지 않게, 코드 리뷰 2026-11-02)
+      if ('invariants' in c) {
+        if (c.expect !== 'hold') fail(`${s.name}/${c.main}: invariants는 지켜짐 검사에만 적는다(반례 검사는 invariant 하나)`);
+        if (!Array.isArray(c.invariants) || c.invariants.length === 0 || c.invariants.some((i) => !s.invariants.includes(i))) {
+          fail(`${s.name}/${c.main}: invariants는 이 명세의 invariants 가운데 하나 이상이다`);
+        }
+      }
       if (c.expect === 'violate') {
         if (!c.invariant) fail(`${s.name}/${c.main}: 반례를 기대하면 invariant(깨질 불변식)를 적는다`);
         if (!s.invariants.includes(c.invariant)) fail(`${s.name}/${c.main}: ${c.invariant}는 이 명세의 invariants에 없다`);
@@ -188,18 +204,28 @@ function javaVersion() {
   return (r.stderr || r.stdout || '').match(/version "([^"]+)"/)?.[1] ?? null;
 }
 
-const invariantsOf = (s, c) => (c.expect === 'violate' ? [c.invariant] : s.invariants);
+/** 검사 하나가 보는 불변식: 반례 검사는 노린 것 하나, 지켜짐 검사는 검사의 invariants(없으면 명세의 전부) */
+export function invariantsFor(s, c) {
+  return c.expect === 'violate' ? [c.invariant] : (c.invariants ?? s.invariants);
+}
+const invariantsOf = invariantsFor;
+
+/** 검사 하나의 시뮬레이션 설정: 목록의 simulation에 검사별 samples를 덮어쓴다 */
+export function simulationFor(m, c) {
+  return { samples: c.samples ?? m.simulation.samples, maxSteps: m.simulation.maxSteps, seed: m.simulation.seed };
+}
 
 // 검사 하나를 시뮬레이션으로(고정 시드, 스레드 하나라 같은 커밋은 같은 결과)
 function simulateOne(m, s, c) {
   const invs = invariantsOf(s, c);
+  const cfg = simulationFor(m, c);
   const t0 = Date.now();
-  const { out } = quint(['run', s.file, `--main=${c.main}`, '--invariants', ...invs, `--max-samples=${m.simulation.samples}`,
-    `--max-steps=${m.simulation.maxSteps}`, `--seed=${m.simulation.seed}`, '--n-threads=1', '--verbosity=2'], { allowFail: true });
+  const { out } = quint(['run', s.file, `--main=${c.main}`, '--invariants', ...invs, `--max-samples=${cfg.samples}`,
+    `--max-steps=${cfg.maxSteps}`, `--seed=${cfg.seed}`, '--n-threads=1', '--verbosity=2'], { allowFail: true });
   const seconds = (Date.now() - t0) / 1000;
-  const sim = { ...parseSimulation(out), samples: m.simulation.samples, maxSteps: m.simulation.maxSteps, seed: m.simulation.seed };
+  const sim = { ...parseSimulation(out), ...cfg };
   const verdict = judge(c, sim, 'simulate');
-  console.log(`${verdict.ok ? 'ok  ' : 'FAIL'} ${s.name} 시뮬레이션 ${m.simulation.samples}회 ${verdict.message} (${seconds.toFixed(1)}초)`);
+  console.log(`${verdict.ok ? 'ok  ' : 'FAIL'} ${s.name} 시뮬레이션 ${cfg.samples}회 ${verdict.message} (${seconds.toFixed(1)}초)`);
   return { check: c, invariants: invs, sim, seconds, verdict };
 }
 
@@ -229,8 +255,9 @@ ${out.slice(-4000)}`);
     }
     const itfStage = relative(REPO, join(staging, `${c.main}.itf.json`)).split(sep).join('/');
     // --out-itf는 위반이 없어도 기록을 쓴다. 출력으로 실제 반례인지 보고 아니면 지운다(코드 리뷰 2026-11-02)
-    const re = quint(['run', s.file, `--main=${c.main}`, '--invariants', ...invs, `--max-samples=${m.simulation.samples}`, `--max-steps=${m.simulation.maxSteps}`,
-      `--seed=${m.simulation.seed}`, '--n-threads=1', '--mbt', `--out-itf=${itfStage}`, '--verbosity=2'], { allowFail: true });
+    const cfg = simulationFor(m, c);
+    const re = quint(['run', s.file, `--main=${c.main}`, '--invariants', ...invs, `--max-samples=${cfg.samples}`, `--max-steps=${cfg.maxSteps}`,
+      `--seed=${cfg.seed}`, '--n-threads=1', '--mbt', `--out-itf=${itfStage}`, '--verbosity=2'], { allowFail: true });
     let refound = false;
     try {
       refound = refoundIsCounterexample(c, parseSimulation(re.out), invs);
