@@ -1,0 +1,408 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ queue_canon_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
+/\ queue_canon_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
+  maxNumber |-> 0 ]
+/\ queue_canon_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_canon_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+
+State 2: <queue_canon_queue_enterPreempt(1,1) line 306, col 3 to line 344, col 58 of module queue_canon>
+/\ queue_canon_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
+/\ queue_canon_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
+  maxNumber |-> 0 ]
+/\ queue_canon_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_canon_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+
+State 3: <queue_canon_queue_enterPreempt(2,1) line 306, col 3 to line 344, col 58 of module queue_canon>
+/\ queue_canon_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+/\ queue_canon_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
+  maxNumber |-> 0 ]
+/\ queue_canon_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_canon_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+
+State 4: <queue_canon_queue_windowEnds line 866, col 3 to line 873, col 58 of module queue_canon>
+/\ queue_canon_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+/\ queue_canon_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
+  maxNumber |-> 0 ]
+/\ queue_canon_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_canon_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+
+State 5: <queue_canon_queue_enterNumber(1,1) line 980, col 3 to line 1041, col 54 of module queue_canon>
+/\ queue_canon_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> TRUE,
+  first |-> 1,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "NUMBERED"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+/\ queue_canon_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 0],
+  maxNumber |-> 1 ]
+/\ queue_canon_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_canon_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+
+State 6: <queue_canon_queue_enterRecord(1,1) line 377, col 3 to line 423, col 54 of module queue_canon>
+/\ queue_canon_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> TRUE,
+  first |-> 1,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+/\ queue_canon_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 0],
+  maxNumber |-> 1 ]
+/\ queue_canon_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_canon_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+
+State 7: <queue_canon_queue_failoverEv line 892, col 3 to line 908, col 58 of module queue_canon>
+/\ queue_canon_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+/\ queue_canon_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 0],
+  maxNumber |-> 1 ]
+/\ queue_canon_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_env = [windowOpen |-> FALSE, rb05Due |-> TRUE, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_canon_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+
+State 8: <queue_canon_queue_enterNumber(2,1) line 980, col 3 to line 1041, col 54 of module queue_canon>
+/\ queue_canon_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> TRUE,
+  first |-> 1,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "NUMBERED"] )
+/\ queue_canon_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 0],
+  maxNumber |-> 1 ]
+/\ queue_canon_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_env = [windowOpen |-> FALSE, rb05Due |-> TRUE, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_canon_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+
+State 9: <queue_canon_queue_enterRecord(2,1) line 377, col 3 to line 423, col 54 of module queue_canon>
+/\ queue_canon_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> TRUE,
+  first |-> 1,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] )
+/\ queue_canon_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_ghost = [ issued |->
+      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
+        [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 2] },
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 0],
+  maxNumber |-> 1 ]
+/\ queue_canon_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_canon_queue_env = [windowOpen |-> FALSE, rb05Due |-> TRUE, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_canon_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_canon_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]

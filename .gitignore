@@ -25,3 +25,9 @@ next-env.d.ts
 
 # 로컬 클러스터 도구(kind·kubectl·helm)를 고정 판으로 받아 두는 곳(tools/local/tools.mjs)
 .cache/
+
+# 규칙 모델 검사(tools/spec-check)가 명세를 TLA+로 옮길 때 남기는 Apalache 작업 폴더
+_apalache-out/
+
+# 규칙 모델 검사가 결과를 옮기기 전에 쓰는 준비 폴더(tools/spec-check/spec-check.mjs)
+specs/results/.staging-*/

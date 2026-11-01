@@ -1,0 +1,12 @@
+# 규칙 모델 검사 도구 전용 작업 공간(뿌리 작업 공간과 따로). 보안 설정은 뿌리 pnpm-workspace.yaml과 같다(docs/devops.md §4.4)
+minimumReleaseAge: 4320
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
+strictDepBuilds: true
+trustLockfile: false
+allowBuilds:
+  protobufjs: false  # 거부(돌리지 않음): Quint가 끌고 오는 판 표기 경고 스크립트. 뿌리와 같은 판단(docs/devops.md §4.4)
+overrides:
+  # 뺌(추천 적용 2026-11-02): Quint 0.33.1이 선언만 하고 쓰지 않는 의존성이다(dist에서는 주석 한 줄뿐). 그 아래 @octokit/endpoint 9.0.6이
+  # 신뢰 증거가 약해진 판이라 trustPolicy에 걸린다. 예외를 두지 않고 설치에서 뺀다(검사를 느슨하게 하지 않는다)
+  '@octokit/request': '-'

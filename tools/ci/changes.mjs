@@ -5,10 +5,10 @@
 // 쓰는 법: node tools/ci/changes.mjs --base <기준 커밋|가지> [--head HEAD]
 //   GITHUB_OUTPUT이 있으면 범위마다 'name=true|false'를 쓰고, 없으면 JSON을 찍는다.
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
-const SCOPES = ['docs', 'contracts', 'js', 'js_all', 'data', 'infra', 'deploy', 'loadtest', 'tools', 'ci', 'kind'];
+const SCOPES = ['docs', 'contracts', 'js', 'js_all', 'data', 'infra', 'deploy', 'loadtest', 'tools', 'ci', 'kind', 'specs', 'specs_full'];
 
 // 경로 앞머리 → 범위. 한 파일이 여러 범위에 들 수 있다
 const RULES = [
@@ -34,6 +34,8 @@ const RULES = [
     ['kind'],
   ],
   [/^loadtest\//, ['loadtest']],
+  // 규칙 모델 검사(spec-check.yml, wbs 0.9.1): 명세·검사 도구·그 워크플로가 바뀌면 형식 검사와 시뮬레이션(docs/verification.md §2.2)
+  [/^(specs\/|tools\/spec-check\/|\.github\/workflows\/spec-check\.yml$)/, ['specs']],
   [/^tools\//, ['tools']],
   [/^\.github\//, ['ci']],
 ];
@@ -49,8 +51,18 @@ const WIDEN_ALL = [/^\.github\/workflows\/ci\.yml$/, /^tools\/ci\/changes\.mjs$/
 
 const all = () => Object.fromEntries(SCOPES.map((s) => [s, true]));
 
+// 명세 목록(specs/specs.json)이 적은 관련 ADR. 이 ADR이 바뀌면 전수 검사를 돌린다(docs/verification.md §2.2). 목록이 없으면 빈 목록
+function specAdrs() {
+  try {
+    return new Set(JSON.parse(readFileSync('specs/specs.json', 'utf8')).specs.flatMap((s) => s.adrs ?? []));
+  } catch {
+    return new Set();
+  }
+}
+
 function scopesFor(files) {
   const out = Object.fromEntries(SCOPES.map((s) => [s, false]));
+  const adrs = specAdrs();
   for (const { status, path: f } of files) {
     if (WIDEN_ALL.some((r) => r.test(f))) return all();
     // 지운 파일은 문서의 링크 대상이었을 수 있다. 링크 검사를 돌린다
@@ -58,6 +70,8 @@ function scopesFor(files) {
     for (const [re, scopes] of RULES) {
       if (re.test(f)) for (const s of scopes) out[s] = true;
     }
+    const adr = f.match(/^docs\/adr\/(\d{4})-/);
+    if (adr && adrs.has(adr[1])) out.specs_full = true;
     if (WIDEN_JS.some((r) => r.test(f))) {
       out.js = true;
       out.js_all = true;

@@ -30,6 +30,8 @@ jobs:
       js_all: ${{ steps.scope.outputs.js_all }}
       ci: ${{ steps.scope.outputs.ci }}
       kind: ${{ steps.scope.outputs.kind }}
+      specs: ${{ steps.scope.outputs.specs }}
+      specs_full: ${{ steps.scope.outputs.specs_full }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,13 +78,21 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.kind == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/develop')) }}
     uses: ./.github/workflows/ci-kind.yml
 
+  # 규칙 모델 검사(docs/verification.md §2.2): 명세·검사 도구가 바뀌면 시뮬레이션, 명세 목록이 적은 관련 ADR이 바뀌면 TLC 전수 검사
+  spec-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.specs == 'true' || needs.changes.outputs.specs_full == 'true') }}
+    uses: ./.github/workflows/spec-check.yml
+    with:
+      mode: ${{ (needs.changes.result != 'success' || needs.changes.outputs.specs_full == 'true') && 'full' || 'pr' }}
+
   iac-check:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.infra == 'true') }}
     uses: ./.github/workflows/iac-check.yml
 
   ci-summary:
-    needs: [changes, docs-check, tools-check, contract-check, node, iac-check, kind]
+    needs: [changes, docs-check, tools-check, contract-check, node, iac-check, kind, spec-check]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

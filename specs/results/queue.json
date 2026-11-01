@@ -1,0 +1,184 @@
+{
+  "spec": "queue",
+  "file": "specs/queue.qnt",
+  "specSha256": "99faa76ecaa9ccbcb447ad42934c1e319d0c3140e2fababc427b21145ad9c2ae",
+  "commit": {
+    "sha": "c573a3baf2880a42da2fee6935e2ab618614e554",
+    "dirty": true
+  },
+  "date": "2026-11-02T02:34:32+09:00",
+  "scope": "정본 범위(docs/verification.md §2.1): 사람 2명(탭 2개씩, 대기표 4장), admission-ctrl 2대, 대기열 Redis 장애 전환 2회(회차 슬롯·사람 슬롯 합), 리더 교체 2회, 묶음 구간 1개. 전수 검사는 두 범위로 나눈다: 진입 범위(사람 2명, 한 사람은 탭 2개라 대기표 3장, admission-ctrl 1대 교체 없음, 장애 전환 2회)와 리더 범위(대기표 1장, admission-ctrl 2대, 리더 교체 2회, 회차 슬롯 장애 전환 2회). 정본 범위 전체는 시뮬레이션으로 본다. 복제 지연은 장애 전환마다 쓰기 하나",
+  "adrs": [
+    "0002",
+    "0041",
+    "0056",
+    "0057"
+  ],
+  "tools": {
+    "quint": "0.33.1",
+    "apalache": "0.62.4",
+    "tlc": "Apalache 0.62.4 묶음(apalache.jar)",
+    "java": "21.0.13"
+  },
+  "ok": true,
+  "checks": [
+    {
+      "main": "queue_proposed",
+      "expect": "hold",
+      "why": "진입 범위: PROGRESS OPEN[13]·OPEN[14]의 추천안(장애 전환 뒤 RB-05가 끝날 때까지 번호를 내지 않음, 묶음 참가자의 선점 값을 묶음 기록으로 바꿈)으로 다섯 불변식이 모두 지켜지는지",
+      "invariants": [
+        "inv_noAdmissionBeforeTurn",
+        "inv_noDuplicateNumberInGeneration",
+        "inv_staleLeaderWritesBounded",
+        "inv_onePersonOneAdmission",
+        "inv_onePersonOneTicket"
+      ],
+      "method": "tlc",
+      "result": "hold",
+      "ok": true,
+      "statesGenerated": 324170524,
+      "distinctStates": 60493883,
+      "depth": 41,
+      "fingerprintCollision": "8.6E-4",
+      "seconds": 485.702
+    },
+    {
+      "main": "queue_leader",
+      "expect": "hold",
+      "why": "리더 범위: 리더 교체 2회와 멈췄다 깨어난 옛 리더의 쓰기가 세대 확인으로 막히고, 장애 전환이 겹쳐도 옛 리더 쓰기가 장애 전환마다 1회 이하인지",
+      "invariants": [
+        "inv_noAdmissionBeforeTurn",
+        "inv_noDuplicateNumberInGeneration",
+        "inv_staleLeaderWritesBounded",
+        "inv_onePersonOneAdmission",
+        "inv_onePersonOneTicket"
+      ],
+      "method": "tlc",
+      "result": "hold",
+      "ok": true,
+      "statesGenerated": 3041961,
+      "distinctStates": 711520,
+      "depth": 28,
+      "fingerprintCollision": "9.0E-8",
+      "seconds": 13.887
+    },
+    {
+      "main": "queue_proposed_full",
+      "expect": "hold",
+      "why": "정본 범위 전체(진입·리더를 함께). 전수 검사는 상태가 너무 많아(4천만 개를 넘어도 끝나지 않음) 시뮬레이션으로만 본다",
+      "invariants": [
+        "inv_noAdmissionBeforeTurn",
+        "inv_noDuplicateNumberInGeneration",
+        "inv_staleLeaderWritesBounded",
+        "inv_onePersonOneAdmission",
+        "inv_onePersonOneTicket"
+      ],
+      "method": "simulate",
+      "result": "hold",
+      "ok": true,
+      "samples": 10000,
+      "maxSteps": 40,
+      "seed": "0x5eed",
+      "statesGenerated": null,
+      "distinctStates": null,
+      "depth": null,
+      "fingerprintCollision": null,
+      "seconds": 8.879
+    },
+    {
+      "main": "queue_canon",
+      "expect": "violate",
+      "targetInvariant": "inv_noDuplicateNumberInGeneration",
+      "why": "정본에 적힌 그대로(RB-05 전에도 번호를 냄, 묶음 참가자의 선점 값을 정하지 않음)는 같은 세대 안에서 번호가 겹친다. 소유자 결정 전까지 남는 반례(PROGRESS OPEN[13])",
+      "invariants": [
+        "inv_noDuplicateNumberInGeneration"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 85067,
+      "distinctStates": 28264,
+      "depth": 10,
+      "fingerprintCollision": null,
+      "seconds": 11.096,
+      "tlcTrace": "specs/results/queue/queue_canon.tlc.txt",
+      "counterexample": "specs/results/queue/queue_canon.itf.json"
+    },
+    {
+      "main": "queue_canon_batch_dup",
+      "expect": "violate",
+      "targetInvariant": "inv_onePersonOneTicket",
+      "why": "OPEN[13]의 추천안만 더하고 묶음 참가자의 선점 값은 정본대로(PENDING 수명 10초) 두면, 장애 전환 없이도 결과 게시 전에 선점이 만료돼 같은 사람이 대기표를 하나 더 받는다. 소유자 결정 전까지 남는 반례(PROGRESS OPEN[14])",
+      "invariants": [
+        "inv_onePersonOneTicket"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 2074,
+      "distinctStates": 1000,
+      "depth": 7,
+      "fingerprintCollision": null,
+      "seconds": 9.302,
+      "tlcTrace": "specs/results/queue/queue_canon_batch_dup.tlc.txt",
+      "counterexample": "specs/results/queue/queue_canon_batch_dup.itf.json"
+    },
+    {
+      "main": "queue_no_fencing",
+      "expect": "violate",
+      "targetInvariant": "inv_staleLeaderWritesBounded",
+      "why": "V-T1: 세대 확인을 빼면 장애 전환 없이도 옛 리더의 쓰기가 반영된다",
+      "invariants": [
+        "inv_staleLeaderWritesBounded"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 1131,
+      "distinctStates": 521,
+      "depth": 7,
+      "fingerprintCollision": null,
+      "seconds": 9.4,
+      "tlcTrace": "specs/results/queue/queue_no_fencing.tlc.txt",
+      "counterexample": "specs/results/queue/queue_no_fencing.itf.json"
+    },
+    {
+      "main": "queue_no_serving_check",
+      "expect": "violate",
+      "targetInvariant": "inv_noAdmissionBeforeTurn",
+      "why": "검사가 살아 있는지: 입장 확정의 serving 확인을 빼면 차례 전 입장이 나온다. ①은 이 확인 장치가 있는지를 보고, serving 값 자체가 옛 리더 쓰기로 앞서 나가는 몫은 ③이 센다",
+      "invariants": [
+        "inv_noAdmissionBeforeTurn"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 8377,
+      "distinctStates": 3539,
+      "depth": 9,
+      "fingerprintCollision": null,
+      "seconds": 9.389,
+      "tlcTrace": "specs/results/queue/queue_no_serving_check.tlc.txt",
+      "counterexample": "specs/results/queue/queue_no_serving_check.itf.json"
+    },
+    {
+      "main": "queue_no_admission_recheck",
+      "expect": "violate",
+      "targetInvariant": "inv_onePersonOneAdmission",
+      "why": "검사가 살아 있는지: 입장 확정의 1인 1순번 재확인을 빼면 장애 전환으로 대기표를 두 장 받은 사람이 두 번 입장한다",
+      "invariants": [
+        "inv_onePersonOneAdmission"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 39190817,
+      "distinctStates": 8928383,
+      "depth": 20,
+      "fingerprintCollision": null,
+      "seconds": 59.821,
+      "tlcTrace": "specs/results/queue/queue_no_admission_recheck.tlc.txt",
+      "counterexample": "specs/results/queue/queue_no_admission_recheck.itf.json"
+    }
+  ]
+}

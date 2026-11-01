@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { repo, commit, git } from './git-fixture.mjs';
@@ -145,4 +145,24 @@ test('FND110_로컬클러스터·공용차트·릴레이·Lease코드·이미지
   // 플랫폼 밖 화면과 문서만 바꾸면 kind를 고르지 않는다(무거운 잡)
   assert.equal(scopes({ 'apps/web/src/a.ts': '바꿈\n' }).includes('kind'), false);
   assert.equal(scopes({ 'docs/infra.md': '글\n' }).includes('kind'), false);
+});
+
+// 규칙 모델 검사(wbs 0.9.1, docs/verification.md §2.2): 명세·검사 도구가 바뀌면 PR 검사(시뮬레이션), 명세 목록이 적은 관련 ADR이 바뀌면 전수 검사
+test('V-T1 명세와_검사도구를바꾸면_specs를고르고_전수검사는고르지않는다', () => {
+  assert.deepEqual(scopes({ 'specs/queue.qnt': 'module queue {}\n' }), ['specs']);
+  assert.deepEqual(scopes({ 'tools/spec-check/spec-check.mjs': '\n' }), ['tools', 'specs']);
+  assert.ok(scopes({ '.github/workflows/spec-check.yml': 'name: spec-check\n' }).includes('specs'));
+  assert.equal(scopes({ 'specs/queue.qnt': 'module queue {}\n' }).includes('specs_full'), false);
+});
+
+test('V-T1 명세목록이적은_관련ADR을바꾸면_전수검사(specs_full)를고르고_다른ADR은고르지않는다', () => {
+  const manifest = JSON.stringify({ specs: [{ name: 'queue', adrs: ['0056', '0002'] }] });
+  const withManifest = (dir) => {
+    mkdirSync(join(dir, 'specs'), { recursive: true });
+    writeFileSync(join(dir, 'specs', 'specs.json'), manifest);
+  };
+  assert.ok(scopes({ 'docs/adr/0056-admission-leader-fencing.md': '바꿈\n' }, undefined, withManifest).includes('specs_full'));
+  assert.ok(!scopes({ 'docs/adr/0099-other.md': '바꿈\n' }, undefined, withManifest).includes('specs_full'));
+  // 명세 목록이 없으면 ADR로 전수 검사를 고르지 않는다(주 1회 검사가 남는다)
+  assert.ok(!scopes({ 'docs/adr/0056-admission-leader-fencing.md': '바꿈\n' }).includes('specs_full'));
 });
