@@ -19,3 +19,41 @@ export { NestPinoLogger, PLATFORM_LOGGER, REDACTED_KEYS, createPlatformLogger, k
 export { LogPolicy, requestLog, type QueuePhase, type RequestLog, type RequestLogFields, type RouteLogPolicy } from './request-log.js';
 export { TRACE_PROPAGATION_HEADERS, createExternalHttpClient, type ExternalHttpClient, type ExternalHttpClientOptions, type ExternalRequest } from './http-client.js';
 export { BoundaryPropagator, BoundarySpanProcessor, withoutTracePropagation, type InboundTrust } from './trace-boundary.js';
+export { rawBodyOf } from './raw-body.js';
+export {
+  IDEMPOTENCY_RECORD_TABLE,
+  IDEMPOTENCY_RETENTION_MS,
+  IDEMPOTENCY_WAIT_MS,
+  IdempotencyRequest,
+  IdempotencyStore,
+  Idempotent,
+  deleteExpiredIdempotencyRecords,
+  idempotencyKeyInvalid,
+  idempotencyKeyReused,
+  idempotencyRecordTable,
+  idempotencyRequestInProgress,
+  parseIdempotencyKey,
+  requestFingerprint,
+  type IdempotencyStoreOptions,
+  type IdempotentOptions,
+  type IdempotentSteps,
+} from './idempotency.js';
+export { uuidLowerBound, uuidv7, uuidv7Time } from './uuid.js';
+export {
+  CONTROL_TOPICS,
+  MAINTENANCE_WINDOW_KST,
+  OUTBOX_PARTITION_DEFAULTS,
+  OUTBOX_TABLE,
+  dropExpiredOutboxPartitions,
+  ensureOutboxPartitions,
+  inMaintenanceWindow,
+  kstDayStart,
+  outboxHealth,
+  outboxPartitionOf,
+  writeOutbox,
+  type DropResult,
+  type OutboxHealth,
+  type OutboxMessage,
+} from './outbox.js';
+export { OUTBOX_RELAY_DEFAULTS, OutboxRelay, OutboxRelayMetrics, type LeaderState, type OutboxPublisher, type OutboxRecord, type OutboxRelayOptions } from './outbox-relay.js';
+export { LEASE_DEFAULTS, LeaseElector, inClusterLeaseApi, kubernetesLeaseApi, type KubernetesLeaseApiOptions, type LeaseApi, type LeaseElectorOptions, type LeaseRecord, type LeaseSpec } from './lease.js';

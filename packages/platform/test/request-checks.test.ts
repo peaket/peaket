@@ -20,6 +20,8 @@ import {
   ContractParams,
   ContractQuery,
   ContractRouteSchema,
+  IdempotencyRequest,
+  Idempotent,
   Roles,
   contractRouteSchema,
   createService,
@@ -42,15 +44,18 @@ class PipeController {
     return { params, query };
   }
 
+  // 멱등 키는 머리 스키마가 아니라 멱등 모듈이 본다(FND-080 결정 1). 그래서 홀드 표본 경로는 팬 신원과 @Idempotent를 단다
   @HttpCode(200)
   @Post('events/:eventId/holds')
-  @Roles(['public'])
+  @Roles(['fan'])
+  @Idempotent({ operation: 'CREATE_HOLD' })
   hold(
     @ContractParams(PostV1EventsEventIdHoldsParams) _params: unknown,
     @ContractHeaders(PostV1EventsEventIdHoldsHeader) headers: Record<string, unknown>,
     @ContractBody(PostV1EventsEventIdHoldsBody) body: unknown,
+    @IdempotencyRequest() idem: IdempotencyRequest,
   ) {
-    return { seq: headers['X-Purchase-Seq'], key: headers['Idempotency-Key'], body };
+    return { seq: headers['X-Purchase-Seq'], key: idem.key, body };
   }
 
   @HttpCode(200)
@@ -92,7 +97,8 @@ class PipeController {
 class RouteSchemaController {
   @HttpCode(200)
   @Post('events/:eventId/holds')
-  @Roles(['public'])
+  @Roles(['fan'])
+  @Idempotent({ operation: 'CREATE_HOLD' })
   @ContractRouteSchema({ params: PostV1EventsEventIdHoldsParams, headers: PostV1EventsEventIdHoldsHeader, body: PostV1EventsEventIdHoldsBody })
   hold(@Body() body: unknown) {
     return { body };
@@ -150,7 +156,7 @@ class ChecksModule {}
 
 let svc: Awaited<ReturnType<typeof createService>>;
 const KEY = '0190f3a1-7c2e-4a00-8000-000000000001';
-const holdHeaders = { 'content-type': 'application/json', 'idempotency-key': KEY, 'x-purchase-seq': '5', 'x-purchase-mac': 'm' };
+const holdHeaders = { 'x-user-id': 'acc-1', 'x-session-id': 's-1', 'x-user-aud': 'fan', 'content-type': 'application/json', 'idempotency-key': KEY, 'x-purchase-seq': '5', 'x-purchase-mac': 'm' };
 
 beforeAll(async () => {
   svc = await createService({ name: 'checks-svc', module: ChecksModule, env: { PEAKET_ENV: 'ci' }, clock: fakeClock(), logDestination: collector().stream });

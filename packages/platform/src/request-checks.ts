@@ -10,6 +10,7 @@ import addFormatsModule from 'ajv-formats';
 import type { FastifyInstance, FastifyRequest, FastifySchema } from 'fastify';
 import { z } from 'zod';
 import { type HttpPart, type JsonSchema, httpValueCoercer } from './http-values.js';
+import { keepRawBody } from './raw-body.js';
 
 /** 검사 실패. 전역 필터가 about:blank 400으로 바꾼다(결정 5: 두 길의 본문이 같도록 설명을 싣지 않는다) */
 export class RequestValidationError extends BadRequestException {
@@ -76,7 +77,38 @@ export const ContractQuery = (schema: ZodSchema): ParameterDecorator => Query(ne
 export const ContractParams = (schema: ZodSchema): ParameterDecorator => Param(new ContractPipe(schema, 'params'));
 const RawHeaders = createParamDecorator((_data: unknown, ctx: ExecutionContext) => ctx.switchToHttp().getRequest<FastifyRequest>().headers);
 /** 머리를 계약 Zod로 검사한다. 처리기는 계약의 칸 이름(Idempotency-Key 등)으로 받는다 */
-export const ContractHeaders = (schema: ZodSchema): ParameterDecorator => RawHeaders(undefined, new ContractPipe(schema, 'headers'));
+export const ContractHeaders = (schema: ZodSchema): ParameterDecorator => {
+  const inner = RawHeaders(undefined, new ContractPipe(withoutIdempotencyKey(schema), 'headers'));
+  const hasKey = idempotencyKeyName(schema) !== undefined;
+  return (target, key, index) => {
+    inner(target, key, index);
+    if (hasKey && key !== undefined) markIdempotencyKeyByModule((target as Record<string | symbol, object>)[key]!);
+  };
+};
+
+/** 멱등 키 머리 이름(소문자). 이 머리는 멱등 모듈만 본다(add-idempotency-and-outbox 결정 1) */
+const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
+
+/**
+ * 처리기 메타데이터: 계약 머리 스키마의 Idempotency-Key를 빼고 멱등 모듈에 맡겼다. 시작 확인이 그 처리기에 @Idempotent를 요구한다
+ * (빠뜨리면 키 없는 요청이 통과해 다시 보낸 요청을 두 번 처리한다, 코드 리뷰 2026-11-01)
+ */
+export const IDEMPOTENCY_KEY_BY_MODULE = 'peaket:idempotency-key-by-module';
+
+function markIdempotencyKeyByModule(handler: object): void {
+  Reflect.defineMetadata(IDEMPOTENCY_KEY_BY_MODULE, true, handler);
+}
+
+function idempotencyKeyName(schema: ZodSchema): string | undefined {
+  if (!(schema instanceof z.ZodObject)) return undefined;
+  return Object.keys(schema.shape).find((n) => n.toLowerCase() === IDEMPOTENCY_KEY_HEADER);
+}
+
+/** 머리 Zod 스키마에서 Idempotency-Key 칸을 뺀다(이름은 대소문자를 가리지 않는다) */
+function withoutIdempotencyKey(schema: ZodSchema): ZodSchema {
+  const k = idempotencyKeyName(schema);
+  return k === undefined ? schema : ((schema as z.ZodObject).omit({ [k]: true } as never) as unknown as ZodSchema);
+}
 
 export interface ContractRouteSchemaInput {
   params?: ZodSchema;
@@ -92,6 +124,15 @@ export interface ContractRouteSchemaInput {
  * 머리 스키마의 칸 이름을 소문자로 바꾼다. Node는 들어온 머리 이름을 소문자로 주는데, Fastify는 사용자 검사기 생성기에
  * 스키마를 그대로 넘겨 계약의 `Idempotency-Key`가 필수 칸 없음이 됐다(2026-11-01 확인)
  */
+function withoutHeader(schema: JsonSchema, name: string): JsonSchema {
+  const props = schema.properties as Record<string, unknown> | undefined;
+  if (!props || !(name in props)) return schema;
+  const { [name]: _drop, ...rest } = props;
+  const out: JsonSchema = { ...schema, properties: rest };
+  if (Array.isArray(schema.required)) out.required = (schema.required as string[]).filter((k) => k !== name);
+  return out;
+}
+
 function lowerCaseHeaderNames(schema: JsonSchema): JsonSchema {
   const props = schema.properties as Record<string, unknown> | undefined;
   const out: JsonSchema = { ...schema };
@@ -106,12 +147,20 @@ function lowerCaseHeaderNames(schema: JsonSchema): JsonSchema {
  */
 export const DEFER_VALIDATION_KEY = 'peaketDeferValidation';
 
-/** 계약 Zod에서 Fastify 경로 스키마를 만든다(결정 4). 처리기에는 @ContractRouteSchema로 단다 */
-export function contractRouteSchema(i: ContractRouteSchemaInput): FastifySchema {
+/**
+ * 계약 Zod에서 Fastify 경로 스키마를 만든다(결정 4). 처리기에는 @ContractRouteSchema로 단다.
+ * idempotencyKeyByModule이면 머리 스키마에서 Idempotency-Key를 뺀다(@ContractRouteSchema만 쓴다). Fastify에 바로 붙이는 경로는
+ * 인증 가드와 멱등 모듈을 지나지 않으므로 키를 스키마에 남긴다(코드 리뷰 2026-11-01)
+ */
+export function contractRouteSchema(i: ContractRouteSchemaInput, o: { idempotencyKeyByModule?: boolean } = {}): FastifySchema {
   const out: Record<string, unknown> = {};
   if (i.params) out.params = toJsonSchema(i.params, 'input');
   if (i.query) out.querystring = toJsonSchema(i.query, 'input');
-  if (i.headers) out.headers = lowerCaseHeaderNames(toJsonSchema(i.headers, 'input'));
+  // 멱등 키는 멱등 모듈이 신원 판정 뒤에 본다(머리 스키마가 먼저 about:blank 400을 내지 않게, add-idempotency-and-outbox 결정 1)
+  if (i.headers) {
+    const h = lowerCaseHeaderNames(toJsonSchema(i.headers, 'input'));
+    out.headers = o.idempotencyKeyByModule ? withoutHeader(h, IDEMPOTENCY_KEY_HEADER) : h;
+  }
   // 형식별(content) 본문 스키마는 들어온 형식과 맞는 것이 없으면 Fastify가 검사를 건너뛰어 본문 없는 POST가 통과했다(코드 리뷰 2026-11-01).
   // 본문 스키마 하나는 해석기가 낸 값을 형식과 관계없이 검사하고, 본문이 없으면 거절한다
   if (i.body) out.body = toJsonSchema(i.body, 'input');
@@ -126,10 +175,12 @@ export function contractRouteSchema(i: ContractRouteSchemaInput): FastifySchema 
  * 같은 처리기에 @ContractQuery 등 Zod 파이프를 함께 달지 않는다(경로 스키마가 바꾼 배열을 파이프가 겹친 쿼리로 본다)
  */
 export function ContractRouteSchema(i: ContractRouteSchemaInput): MethodDecorator {
-  const schema = contractRouteSchema(i);
+  const schema = contractRouteSchema(i, { idempotencyKeyByModule: true });
+  const hasKey = i.headers !== undefined && idempotencyKeyName(i.headers) !== undefined;
   return (_target, _key, descriptor) => {
     const fn = descriptor.value as object;
     Reflect.defineMetadata(FASTIFY_ROUTE_SCHEMA_METADATA, schema, fn);
+    if (hasKey) markIdempotencyKeyByModule(fn);
     const prev = (Reflect.getMetadata(FASTIFY_ROUTE_CONFIG_METADATA, fn) as Record<string, unknown> | undefined) ?? {};
     Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [DEFER_VALIDATION_KEY]: true }, fn);
     return descriptor;
@@ -197,13 +248,19 @@ export function installRequestChecks(http: FastifyInstance): void {
     if (config?.[DEFER_VALIDATION_KEY] === true && route.schema) route.attachValidation = true;
   });
   const json = http.getDefaultJsonParser('error', 'error');
-  http.removeContentTypeParser('text/plain');
-  http.addContentTypeParser('text/plain', { parseAs: 'string' }, (request, body, done) => {
+  // 해석기는 바이트로 받아 해석 전 바이트를 남기고(요청 지문·요청 서명, add-idempotency-and-outbox 결정 4), 해석은 기본 JSON 해석기에 맡긴다
+  http.removeContentTypeParser(['application/json', 'text/plain']);
+  http.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
+    keepRawBody(request, body as Buffer);
+    json(request, (body as Buffer).toString('utf8'), done);
+  });
+  http.addContentTypeParser('text/plain', { parseAs: 'buffer' }, (request, body, done) => {
     const config = request.routeOptions?.config as unknown as Record<string, unknown> | undefined;
     if (config?.[TEXT_PLAIN_KEY] !== true) {
       done(unsupportedMediaType(), undefined);
       return;
     }
-    json(request, body as string, done);
+    keepRawBody(request, body as Buffer);
+    json(request, (body as Buffer).toString('utf8'), done);
   });
 }

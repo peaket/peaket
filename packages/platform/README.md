@@ -51,6 +51,40 @@ hold(@ContractHeaders(PostV1EventsEventIdHoldsHeader) h: Headers, @ContractBody(
 enter() {}
 ```
 
+한 번만 처리할 쓰기(멱등 키, docs/api/guidelines.md §4)와 같은 트랜잭션의 Outbox 사건:
+
+```ts
+import { IdempotencyRequest, IdempotencyStore, Idempotent, writeOutbox } from '@peaket/platform';
+
+// 받는 층: 키가 없거나 틀리면 인증 가드 바로 뒤에 400 idempotency-key-invalid
+@Post('orders')
+@Roles(['fan'], { scopes: ['ticket:buy'] })
+@Idempotent({ operation: 'CREATE_ORDER' })
+create(@ContractBody(Body) body: Body, @IdempotencyRequest() once: IdempotencyRequest) {}
+
+// 어댑터: 키 행(첫 쓰기) → 업무 → Outbox(마지막 문장)를 한 트랜잭션에
+const store = new IdempotencyStore({ clock });
+await database.transaction((tx) =>
+  store.run(tx, once, {
+    execute: async () => {
+      /* 업무 쓰기 */
+      await writeOutbox(tx, clock, [{ topic: 'trade.orders', key: eventId, payload }]);
+      return { resultRef: orderId, value: order };
+    },
+    replay: async (orderId) => loadOrder(tx, orderId), // 같은 키·같은 지문: 처음 결과
+  }),
+);
+```
+
+Outbox 릴레이 Deployment(`<서비스>-outbox-relay`, 복제 2)의 시작 명령:
+
+```ts
+const elector = new LeaseElector({ api: inClusterLeaseApi('purchase-outbox-relay'), identity: process.env.PEAKET_POD!, clock });
+const relay = new OutboxRelay({ database, publisher, leader: elector, clock, metrics: new OutboxRelayMetrics(registry, 'purchase-svc') });
+elector.start();
+relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
+```
+
 | 내보내는 것 | 하는 일 | 정본 |
 | --- | --- | --- |
 | `createService` | 시작 설정을 검사하고, 앱 포트(NestJS·Fastify)와 관리 포트(`/metrics`)를 만든다. 요청마다 네 신호를 재고 요청 맥락(trace-id, 남은 시간)을 열며, 요청이 끝나면 정규 로그 줄 하나를 쓴다. `logger`(서비스 로거)와 `logs.setSampleOneIn`(정상 줄 표본 비율)을 돌려준다 | docs/observability.md §3·§7 |
@@ -71,6 +105,14 @@ enter() {}
 | `service.auth.terminateSession` | 세션 종료 사건을 받아 종료 세션 목록(종료 시각 + 15분)에 넣고 역할 캐시를 지운다 | identity §3, ASVS 7.4.1 |
 | `createDatabase`·`databaseModule`·`DATABASE` | node-postgres 풀과 Drizzle. 풀 대기 한도(핫패스 100ms·일반 1초)를 넘으면 429 `server-busy`. `transaction(fn, { tenantId, statementTimeoutMs, isolationLevel })`은 첫 문장에서 `SET LOCAL`로 건다 | architecture §5, ADR-0037·0070·0083, authz-matrix §5.3 |
 | `serverBusy` | 자기 과부하 거절 Problem(429, `Retry-After` 1초) | docs/api/guidelines.md §2 |
+| `@Idempotent`·`@IdempotencyRequest` | 멱등 키(따옴표 없는 UUID v4)를 신원 판정 뒤·모양 검사 전에 보고(400 `idempotency-key-invalid`), 계정 × 작업 범위와 요청 지문(SHA-256(메서드 LF 경로와 쿼리 LF 본문 바이트))을 처리기에 준다. 두 검사 길의 Nest 장식자는 머리 스키마에서 이 머리를 뺀다. 계약이 키를 요구하는 처리기에 빠뜨리거나 공개 역할 처리기에 달면 시작 실패 | guidelines §4 |
+| `IdempotencyStore`·`idempotencyRecordTable`·`deleteExpiredIdempotencyRecords` | 멱등 기록(`idempotency_record`)을 업무와 같은 트랜잭션에. 다른 지문 422 `idempotency-key-reused`, 처리 중 1초 [가정] 뒤 409 `idempotency-request-in-progress`, 24시간 [가정] 보관과 나눠 지우기 | ADR-0146 결정 1 |
+| `rawBodyOf` | 플랫폼 본문 해석기가 남긴 해석 전 본문 바이트(지문·구매 세션 요청 서명) | guidelines §4 |
+| `writeOutbox`·`CONTROL_TOPICS` | Outbox 행(UUIDv7 ID, 추적 머리)을 같은 트랜잭션의 마지막 문장으로 넣는다. 제어 사건도 같은 길이다 | ADR-0116 결정 3, ADR-0143 결정 3 |
+| `OutboxRelay`·`OutboxRelayMetrics`·`OutboxPublisher` | 폴링 릴레이(리더만, `FOR UPDATE` `seq` 순서 500행, 보내기 10초 상한, 실패하면 0.1~5초 늘려 쉬기)와 지표 일곱. 보내기 포트의 Kafka 어댑터는 FND-090 | ADR-0116 결정 3·5 |
+| `LeaseElector`·`kubernetesLeaseApi`·`inClusterLeaseApi` | 쿠버네티스 Lease로 리더 하나(12초·갱신 한도 8초·다시 시도 2초 [가정]) | ADR-0116 결정 2 |
+| `ensureOutboxPartitions`·`dropExpiredOutboxPartitions`·`outboxHealth` | Outbox 일 파티션(KST 하루 ID 범위) 7일 앞까지 만들기, 정비 시간에 3일 지난 것 지우기(보내지 않은 행이 있으면 남김), 지연·파티션 지표 값 | docs/data.md §2·§4의 7번 |
+| `uuidv7`·`uuidLowerBound` | 주입한 시계의 UUIDv7과 ID 범위 경계 | docs/data.md §2 |
 
 하위 경로:
 
@@ -110,7 +152,7 @@ enter() {}
 | `…/application/` | 유스케이스 | 도메인, `@nestjs/common`의 주입 장식자, 플랫폼의 Problem·요청 맥락 |
 | `…/domain/` | 업무 규칙·상태와 포트 | 도메인 안의 파일만 |
 | `…/adapters/` | 포트 구현(저장소·다른 서비스·외부 제공자) | 도메인, Drizzle·pg·플랫폼 |
-| `…/adapters/db/schema.ts`·`migrations/`·`drizzle.config.ts` | Drizzle 표 정의와 마이그레이션 SQL(`drizzle-kit generate`) | — |
+| `…/adapters/db/schema.ts`·`migrations/`·`drizzle.config.ts` | Drizzle 표 정의와 마이그레이션 SQL(`drizzle-kit generate`). 멱등 기록 표(`0001`)와 Outbox 부모 표(`0002`, 손으로 쓴 SQL, 파티션은 `ensureOutboxPartitions`가 만든다)를 함께 둔다 | — |
 
 다른 컨텍스트는 그 모듈의 공개 파일(`index.ts`)로만 가져온다. 규칙은 `@peaket/config/eslint/service-layers`이고 뿌리 `pnpm lint`가 `services/*`와 이 뼈대를 본다. 서비스의 의존성은 `@peaket/platform`·`@nestjs/common`·`drizzle-orm`·`zod`, 개발 의존성은 `drizzle-kit`이다.
 
@@ -131,11 +173,11 @@ enter() {}
 
 | 명령 | 하는 일 |
 | --- | --- |
-| `pnpm --filter @peaket/platform test` | Vitest 시험(남은 시간, Problem, 지표, 문서 뽑기, 정규 로그 줄, 가명, SDK를 띄운 추적 문맥과 V-T31 ③, 요청 검사와 두 길의 표본 일치, 본문 형식, 인증 가드, 서비스 뼈대) |
-| `pnpm --filter @peaket/platform test:integration` | 실제 PostgreSQL 18 컨테이너(`docker run`) 시험: Drizzle 설정, 풀 대기 429, 행 보안과 `SET LOCAL`, 뼈대의 Drizzle 어댑터. Docker 엔진이 있어야 한다 |
+| `pnpm --filter @peaket/platform test` | Vitest 시험(남은 시간, Problem, 지표, 문서 뽑기, 정규 로그 줄, 가명, SDK를 띄운 추적 문맥과 V-T31 ③, 요청 검사와 두 길의 표본 일치, 본문 형식, 인증 가드, 멱등 키·원시 본문, UUIDv7·파티션 경계, Lease, 릴레이 반복, 서비스 뼈대) |
+| `pnpm --filter @peaket/platform test:integration` | 실제 PostgreSQL 18 컨테이너(`docker run`) 시험: Drizzle 설정, 풀 대기 429, 행 보안과 `SET LOCAL`, 멱등 기록(처리 중·다른 본문·보관), Outbox 쓰기·릴레이 순서·실패 뒤 다시·두 릴레이, 일 파티션 만들기·지우기, 뼈대의 Drizzle 어댑터. Docker 엔진이 있어야 한다 |
 | `pnpm --filter @peaket/platform typecheck` | 타입 검사 |
 | `pnpm --filter @peaket/platform build` | `dist/` 빌드 |
 
 ## 아직 없는 것
 
-멱등 모듈·Outbox(0.3.2 ②, FND-080), 종료 세션 사건 소비와 제어 상태(0.3.2 ③, FND-090), 현장 스태프 역할 판정(GAT-170), 프로브와 시간 초과 기본값(0.3.6), gRPC 채널 생성 함수(0.3.3), Kafka 감싸기의 추적 헤더(0.3.2 ③), 엣지 게이트웨이의 추적 헤더 지우기와 앱 서버 연결(2.11.1), 동적 로그 수준 명령(관제 명령 8), exemplar·Pyroscope(4.1.1).
+종료 세션 사건 소비와 제어 상태, Outbox 보내기의 Kafka 어댑터, 정비 잡 일정(0.3.2 ③, FND-090), 릴레이 Deployment·실제 Lease 확인(FND-110), 마이그레이션 직후 파티션 만들기(BAS-060), 현장 스태프 역할 판정(GAT-170), 프로브와 시간 초과 기본값(0.3.6), gRPC 채널 생성 함수(0.3.3), Kafka 감싸기의 추적 헤더(0.3.2 ③), 엣지 게이트웨이의 추적 헤더 지우기와 앱 서버 연결(2.11.1), 동적 로그 수준 명령(관제 명령 8), exemplar·Pyroscope(4.1.1).
