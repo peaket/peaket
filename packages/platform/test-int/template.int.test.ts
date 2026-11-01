@@ -7,6 +7,8 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { AppModule } from '../template/src/app.module.js';
 import { sql } from 'drizzle-orm';
 import { createDatabase, createService, ensureOutboxPartitions, fakeClock, type Database } from '../src/index.js';
+import { getTableConfig } from 'drizzle-orm/pg-core';
+import { heldEvent, statSnapshot } from '../template/src/modules/example/adapters/db/schema.js';
 import { collector } from '../test/fixture.js';
 import { startPostgres, type PostgresContainer } from './postgres.js';
 
@@ -18,7 +20,7 @@ beforeAll(async () => {
   pgc = await startPostgres();
   const admin = new pg.Client({ connectionString: pgc.url });
   await admin.connect();
-  for (const f of ['0000_example_note.sql', '0001_idempotency_record.sql', '0002_outbox.sql']) {
+  for (const f of ['0000_example_note.sql', '0001_idempotency_record.sql', '0002_outbox.sql', '0003_held_event_and_stat_snapshot.sql']) {
     await admin.query(readFileSync(new URL(`../template/migrations/${f}`, import.meta.url), 'utf8'));
   }
   await admin.end();
@@ -62,4 +64,15 @@ test('ASVS_2_3_4_FND080_뼈대의쓰기는_멱등기록과메모와Outbox를한�
   expect(await count(sql`select count(*)::int as n from idempotency_record where account_ref = 'acc-7' and result_ref = ${id}`)).toBe(1);
   const other = await svc.http.inject({ method: 'POST', url: '/v1/example/notes', headers: me, payload: JSON.stringify({ title: '다른 본문' }) });
   expect(other.statusCode).toBe(422);
+});
+
+test('ADR0142_ADR0086_뼈대마이그레이션0003의보류표와통계스냅샷표가_플랫폼표정의와같은칸과인덱스다', async () => {
+  for (const table of [heldEvent, statSnapshot]) {
+    const cfg = getTableConfig(table);
+    const cols = (await database.db.execute(sql`select column_name as c, data_type as t, is_nullable as n from information_schema.columns where table_name = ${cfg.name} order by ordinal_position`)).rows as { c: string; t: string; n: string }[];
+    expect(cols.map((r) => r.c)).toEqual(cfg.columns.map((c) => c.name));
+    for (const c of cfg.columns) expect(cols.find((r) => r.c === c.name)!.n, `${cfg.name}.${c.name}`).toBe(c.notNull ? 'NO' : 'YES');
+    const idx = (await database.db.execute(sql`select indexname as i from pg_indexes where tablename = ${cfg.name}`)).rows.map((r) => (r as { i: string }).i);
+    for (const i of cfg.indexes) expect(idx).toContain(i.config.name);
+  }
 });

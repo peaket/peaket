@@ -12,5 +12,6 @@ strictDepBuilds: true       # 허용 목록에 없는 설치 스크립트가 있
 trustLockfile: false        # 잠금 파일의 항목도 위 검사를 다시 받는다. 외부 기여자가 잠금 파일을 고칠 수 있는 공개 저장소라서다
 allowBuilds:                # 설치 스크립트를 허용할 패키지. 빈 목록에서 시작해 PR 검토로만 더한다
   esbuild: true             # 관제 호스트 webpack의 esbuild-loader. 화면 쪽 허용 목록(docs/frontend.md §5.14.5)
+  '@confluentinc/kafka-javascript': true  # Kafka 기본 클라이언트(docs/streaming.md §2.1). 네이티브 모듈이라 설치 스크립트가 미리 빌드한 librdkafka 바인딩을 받는다(docs/devops.md §4.4)
   '@scarf/scarf': false     # 거부(돌리지 않음): @nestjs/swagger → swagger-ui-dist가 끌고 오는 설치 때 사용 통계 전송. 서비스 OpenAPI 문서 뽑기(D-T38)에는 필요 없다(docs/devops.md §4.4, 추천 적용 2026-11-01)
   protobufjs: false         # 거부(돌리지 않음): OTel 내보내기(@opentelemetry/otlp-transformer)가 끌고 오는 판 표기 경고 스크립트. 동작에 필요 없다(docs/devops.md §4.4, 추천 적용 2026-11-01)

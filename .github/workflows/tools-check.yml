@@ -23,3 +23,5 @@ jobs:
       - run: node tools/ci/check-workflows.mjs
       - run: node tools/ci/check-codeowners.mjs
       - run: node tools/ci/check-workspace-protocol.mjs
+      # Kafka 클라이언트 필수 설정 정적 검사(D-T45, ADR-0142 결정 3)
+      - run: node tools/ci/check-kafka-settings.mjs

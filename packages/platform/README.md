@@ -109,10 +109,19 @@ relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
 | `IdempotencyStore`·`idempotencyRecordTable`·`deleteExpiredIdempotencyRecords` | 멱등 기록(`idempotency_record`)을 업무와 같은 트랜잭션에. 다른 지문 422 `idempotency-key-reused`, 처리 중 1초 [가정] 뒤 409 `idempotency-request-in-progress`, 24시간 [가정] 보관과 나눠 지우기 | ADR-0146 결정 1 |
 | `rawBodyOf` | 플랫폼 본문 해석기가 남긴 해석 전 본문 바이트(지문·구매 세션 요청 서명) | guidelines §4 |
 | `writeOutbox`·`CONTROL_TOPICS` | Outbox 행(UUIDv7 ID, 추적 머리)을 같은 트랜잭션의 마지막 문장으로 넣는다. 제어 사건도 같은 길이다 | ADR-0116 결정 3, ADR-0143 결정 3 |
-| `OutboxRelay`·`OutboxRelayMetrics`·`OutboxPublisher` | 폴링 릴레이(리더만, `FOR UPDATE` `seq` 순서 500행, 보내기 10초 상한, 실패하면 0.1~5초 늘려 쉬기)와 지표 일곱. 보내기 포트의 Kafka 어댑터는 FND-090 | ADR-0116 결정 3·5 |
+| `OutboxRelay`·`OutboxRelayMetrics`·`OutboxPublisher` | 폴링 릴레이(리더만, `FOR UPDATE` `seq` 순서 500행, 보내기 10초 상한, 실패하면 0.1~5초 늘려 쉬기)와 지표 일곱. 보내기 포트의 Kafka 어댑터는 `@peaket/platform/stream-worker`의 `kafkaOutboxPublisher` | ADR-0116 결정 3·5 |
 | `LeaseElector`·`kubernetesLeaseApi`·`inClusterLeaseApi` | 쿠버네티스 Lease로 리더 하나(12초·갱신 한도 8초·다시 시도 2초 [가정]) | ADR-0116 결정 2 |
 | `ensureOutboxPartitions`·`dropExpiredOutboxPartitions`·`outboxHealth` | Outbox 일 파티션(KST 하루 ID 범위) 7일 앞까지 만들기, 정비 시간에 3일 지난 것 지우기(보내지 않은 행이 있으면 남김), 지연·파티션 지표 값 | docs/data.md §2·§4의 7번 |
 | `uuidv7`·`uuidLowerBound` | 주입한 시계의 UUIDv7과 ID 범위 경계 | docs/data.md §2 |
+| `kafkaProducerConfig`·`kafkaConsumerConfig`·`KAFKA_REQUIRED` | Kafka 필수 설정(생산자 `acks=all`·멱등·동시 5·`murmur2_random`·전달 상한 Outbox 릴레이 10초·그 밖 5초, 소비자 자동 커밋 끔·`cooperative-sticky`·세션 45초·`classic`). 덧붙일 설정에 필수 이름이 있으면 예외. 정적 검사는 `tools/ci/check-kafka-settings.mjs`(D-T45) | ADR-0142 결정 3, docs/streaming.md §2.6 |
+| `KeyedPartition`·`TransientError`·`isTransientError` | 파티션 하나의 키 단위 처리(같은 키 차례대로, 다른 키 32개 [가정]까지 동시에, 커밋 위치는 끝나지 않은 가장 작은 오프셋), 같은 결과일 실패 5회 [가정] 뒤 보류와 같은 키 뒤 사건 보류, 일시 실패는 파티션 멈춤 | ADR-0142 결정 1·2 |
+| `heldEventTable`·`drizzleHeldEventStore`·`reprocessHeldEvents`·`heldEventCounts`·`deleteReprocessedHeldEvents` | 보류 표 `held_event`, 다시 처리(RB-11, 업무 키마다 들어온 순서), 보류 수, 다시 처리한 지 7일 [가정] 지난 행 지우기 | docs/data.md §4의 15번 |
+| `startControlSync`·`SettingsStore`·`ControlState`·`Readiness` | 시작 작업 셋(제어 상태·설정 끝까지·종료 세션 15분 되감기)과 준비 표시(관리 포트 `/ready`), Kafka 없으면 30초 [가정] 뒤 준비와 `control_sync_lagging`, 2초 [가정] 다시 맞춤, 설정 판(occurredAt)·지우는 표시·만료, 이 서비스의 로그 수준 설정 적용, 종료 세션 → `service.auth.terminateSession` | ADR-0103 결정 2·3·4, D-T29 |
+| `ensureMonthlyPartitions`·`dropMonthlyPartitions`·`monthlyPartitionsAhead`·`analyzeTable` | 회차 ID(UUIDv7)·발송 시각 범위 월 파티션(KST 그달 1일, 3개월 [가정] 앞, 첫 파티션 포함), 조건부 지우기, 부모 표 ANALYZE | ADR-0086 결정 4 |
+| `takeStatSnapshot`·`statSnapshotTable` | 매일 `pg_stat_user_tables`·`pg_stat_user_indexes` 스냅샷(하루 한 벌, 90일 [가정]) | ADR-0086 결정 7 |
+| `deleteExpiredRows`·`retentionOverdueSeconds`·`reindexBloatedIndexes` | 보존 기한 나눠 지우기(1만 건 [가정]씩 자식 먼저, 0.5초 쉬기, 지키는 선·정비 시간 끝), 기한 넘김 시간, 부푼 B-tree 인덱스 `REINDEX CONCURRENTLY`(`pgstattuple`) | ADR-0114 결정 3 |
+| `ackAndTrimStream`·`expireStreamAfterSale` | Redis Stream 확인 뒤 `XTRIM MINID`(확인하지 않은 항목은 남김), 키 수명 판매 종료 + 1일 [가정]. 명령 보내기 포트(`sendCommand`)만 받는다 | ADR-0070, docs/data.md §3 |
+| `MaintenanceRunner`·`platformMaintenanceTasks`·`monthlyPartitionTasks`·`retentionTask`·`reindexTask` | 정비 반복(릴레이 프로세스의 Lease 리더, 10분 [가정]마다, 매일 일과 정비 시간 일, 지표) | docs/data.md §2 |
 
 하위 경로:
 
@@ -120,7 +129,8 @@ relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
 | --- | --- |
 | `@peaket/platform/telemetry` | `startTelemetry`·`shutdownTelemetry`. OTel Node SDK를 시작하는 유일한 곳(docs/devops.md §4.4). NestJS를 읽지 않아 앱 서버도 쓸 수 있다 |
 | `@peaket/platform/telemetry/register` | `--import`로 읽는 등록 파일. 환경 변수로 `startTelemetry`를 부른다 |
-| `@peaket/platform/testing` | V-T31 ③ 탐침 `probeTraceHeaders`. 외부 어댑터의 시험이 모의 서버가 받은 헤더에 추적 헤더가 없는지 본다. 텔레메트리를 시작하지 않은 채 부르면 실패한다 |
+| `@peaket/platform/stream-worker` | Kafka 클라이언트(`@confluentinc/kafka-javascript`)를 쓰는 유일한 곳: `createKafkaProducer`·`createKafkaConsumer`·`createKafkaAdmin`(필수 설정으로만), Outbox 보내기 어댑터 `kafkaOutboxPublisher`(생산 span이 쓴 요청에 링크), 키 단위 소비자 실행기 `runKeyedConsumer`(소비 span, 1초 커밋, 넘기기 전 마치기), 방송형 읽기 `kafkaBroadcastSource`, `withTraceHeaders`·`withConsumerSpan` |
+| `@peaket/platform/testing` | V-T31 ③ 탐침 `probeTraceHeaders`. 외부 어댑터의 시험이 모의 서버가 받은 헤더에 추적 헤더가 없는지 본다. 텔레메트리를 시작하지 않은 채 부르면 실패한다. 제어 사건 JSON 대역 `jsonControlCodec`(Avro 디코더는 BAS-030) |
 
 ## 설정(환경 변수)
 
@@ -173,11 +183,11 @@ relay.start(); // 끝낼 때: await relay.stop(); await elector.stop();
 
 | 명령 | 하는 일 |
 | --- | --- |
-| `pnpm --filter @peaket/platform test` | Vitest 시험(남은 시간, Problem, 지표, 문서 뽑기, 정규 로그 줄, 가명, SDK를 띄운 추적 문맥과 V-T31 ③, 요청 검사와 두 길의 표본 일치, 본문 형식, 인증 가드, 멱등 키·원시 본문, UUIDv7·파티션 경계, Lease, 릴레이 반복, 서비스 뼈대) |
-| `pnpm --filter @peaket/platform test:integration` | 실제 PostgreSQL 18 컨테이너(`docker run`) 시험: Drizzle 설정, 풀 대기 429, 행 보안과 `SET LOCAL`, 멱등 기록(처리 중·다른 본문·보관), Outbox 쓰기·릴레이 순서·실패 뒤 다시·두 릴레이, 일 파티션 만들기·지우기, 뼈대의 Drizzle 어댑터. Docker 엔진이 있어야 한다 |
+| `pnpm --filter @peaket/platform test` | Vitest 시험(남은 시간, Problem, 지표, 문서 뽑기, 정규 로그 줄, 가명, SDK를 띄운 추적 문맥과 V-T31 ③, 요청 검사와 두 길의 표본 일치, 본문 형식, 인증 가드, 멱등 키·원시 본문, UUIDv7·파티션 경계, Lease, 릴레이 반복, Kafka 필수 설정, 키 단위 처리와 보류, 제어 동기화와 준비 표시, 정비 반복, 서비스 뼈대) |
+| `pnpm --filter @peaket/platform test:integration` | 실제 PostgreSQL 18·Kafka 3.9.2·Valkey 8.1 컨테이너(`docker run`) 시험: Drizzle 설정, 풀 대기 429, 행 보안과 `SET LOCAL`, 멱등 기록(처리 중·다른 본문·보관), Outbox 쓰기·릴레이 순서·실패 뒤 다시·두 릴레이, 일 파티션 만들기·지우기, Kafka로 보내기와 브로커 정지(V-T28 ②)·키 단위 소비·방송형 읽기, 보류 표, 월 파티션·통계 스냅샷·보존 지우기·인덱스 다시 만들기·정비 반복, Stream 정리, 뼈대의 Drizzle 어댑터. Docker 엔진이 있어야 한다 |
 | `pnpm --filter @peaket/platform typecheck` | 타입 검사 |
 | `pnpm --filter @peaket/platform build` | `dist/` 빌드 |
 
 ## 아직 없는 것
 
-종료 세션 사건 소비와 제어 상태, Outbox 보내기의 Kafka 어댑터, 정비 잡 일정(0.3.2 ③, FND-090), 릴레이 Deployment·실제 Lease 확인(FND-110), 마이그레이션 직후 파티션 만들기(BAS-060), 현장 스태프 역할 판정(GAT-170), 프로브와 시간 초과 기본값(0.3.6), gRPC 채널 생성 함수(0.3.3), Kafka 감싸기의 추적 헤더(0.3.2 ③), 엣지 게이트웨이의 추적 헤더 지우기와 앱 서버 연결(2.11.1), 동적 로그 수준 명령(관제 명령 8), exemplar·Pyroscope(4.1.1).
+릴레이·정비 Deployment·실제 Lease 확인(FND-110), MSK IAM 토큰 함수(FND-120), Avro 인코더·디코더(BAS-030), 마이그레이션 직후 파티션 만들기와 `pgstattuple`·정비 역할(BAS-060), 온세일 구간 로그 표본 비율 연결(미해결 OPEN[09]), 현장 스태프 역할 판정(GAT-170), 프로브와 시간 초과 기본값(0.3.6), gRPC 채널 생성 함수(0.3.3), 엣지 게이트웨이의 추적 헤더 지우기와 앱 서버 연결(2.11.1), 동적 로그 수준 명령(관제 명령 8), exemplar·Pyroscope(4.1.1).

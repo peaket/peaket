@@ -3,6 +3,13 @@
 // call(baseUrl)을 돌린 뒤 받은 요청의 헤더를 돌려준다. 어댑터가 기본 HTTP 클라이언트로 바뀌면 추적 헤더가 실려 시험이 실패한다.
 import { type IncomingHttpHeaders, createServer } from 'node:http';
 import { context, propagation, trace } from '@opentelemetry/api';
+import type { ControlCodec, SessionTerminated, SettingChanged } from './control.js';
+
+/** 제어 사건 값을 JSON으로 읽는 대역(Avro 디코더는 BAS-030). 시험과 로컬 실행에서만 쓴다 */
+export const jsonControlCodec: ControlCodec = {
+  setting: (value) => JSON.parse(value.toString('utf8')) as SettingChanged,
+  sessionTerminated: (value) => JSON.parse(value.toString('utf8')) as SessionTerminated,
+};
 
 export { TRACE_PROPAGATION_HEADERS } from './http-client.js';
 

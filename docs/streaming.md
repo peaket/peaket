@@ -26,7 +26,7 @@
 
 | 구성요소 | 판·산출물 | 이유 |
 | --- | --- | --- |
-| 공용 소비 모듈 | 공용 서버 패키지 `packages/platform`의 `@peaket/stream-worker` | 커밋 순서, 묶음, 중복 거르기 표시, 다시 시도, 거절 기록, 지표를 한 곳에 둔다. 서비스의 Kafka 소비자도 같은 모듈을 쓴다 |
+| 공용 소비 모듈 | 공용 서버 패키지 `packages/platform`의 `@peaket/stream-worker`(하위 내보내기 `@peaket/platform/stream-worker`. Kafka 클라이언트를 쓰는 부분만 두어 네이티브 모듈을 Kafka를 쓰는 코드만 싣는다. 키 단위 처리·보류 표·제어 동기화·정비 함수는 `@peaket/platform`에 있다, 추천 적용 2026-11-01, openspec 변경 add-maintenance-control-and-consumers) | 커밋 순서, 묶음, 중복 거르기 표시, 다시 시도, 거절 기록, 지표를 한 곳에 둔다. 서비스의 Kafka 소비자도 같은 모듈을 쓴다. 스트림 작업자의 묶음 규칙(쓰기 뒤 커밋·파티션별 묶음·중복 토큰)은 OPS-150(wbs 4.3.1)에서 더한다 |
 | Kafka 클라이언트 | Confluent 공식 JavaScript 클라이언트 `@confluentinc/kafka-javascript`(1.11.0, librdkafka 기반, KafkaJS 호환 API)가 기본이다. kafkajs는 대체안이다(추천 적용 2026-10-28, 기술 검토 낮음-152) | 서비스와 같은 클라이언트를 쓴다. 기본 클라이언트가 처리량·협력적 재조정·OTel 계측·MSK IAM을 채우는지는 wbs 0.5.1 PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험)에서 확인하고, 못 채우면 kafkajs와 견준다(docs/architecture.md §9.4) |
 | Schema Registry와 Avro | `@confluentinc/schemaregistry`(1.11.0) | Schema Registry는 Confluent다(api/guidelines) |
 | MSK IAM 인증 | `aws-msk-iam-sasl-signer-js`(1.0.3)의 `generateAuthTokenFromRole`로 OAUTHBEARER 토큰을 만든다. 작업자별 MSK 전용 역할을 고정 세션 이름으로 맡는다(§2.3·§2.6) | MSK IAM 인증(wbs 2.11.2). EKS Pod Identity(쿠버네티스 파드에 AWS 권한을 주는 기능) 자격을 그대로 쓰면 자격이 갱신될 때 세션 이름이 바뀌어 재인증(연결을 유지한 채 새 토큰으로 다시 인증하는 것)이 끊긴다(자바 aws-msk-iam-auth README의 문제 해결 절). 그래서 기본 자격 사슬(환경 변수·파드 권한 같은 자격을 정해진 순서로 찾는 방식)로 토큰을 만드는 `generateAuthToken`은 운영 환경에서 쓰지 않는다(추천 적용 2026-10-28, 기술 검토 높음-26). JavaScript 서명 도구 저장소에도 같은 실패가 보고됐다(기본 자격 사슬에서 세션 이름이 바뀌어 'Cannot change principals during re-authentication', 이슈 #19·#27). 1.0.1부터 기본 자격 사슬도 세션 이름을 고정하지만(PR #29), 그 설정은 웹 ID 토큰 방식(IRSA, AWS SDK `fromTokenFile`)만 쓰고 Pod Identity가 쓰는 컨테이너 자격(`fromHttp`)은 세션 이름을 받지 않는다(AWS SDK 소스). `generateAuthTokenFromRole`은 준 세션 이름(안 주면 `MSKSASLDefaultSession`)으로 역할을 맡으므로 재인증 때 주체가 같다(서명 도구 1.0.3 소스, 2026-10-29 확인, https://github.com/aws/aws-msk-iam-sasl-signer-js/issues/27 ). 실제 MSK에서 자격 갱신 주기를 넘겨 계속 소비되는지는 확인 필요다(wbs 0.5.1 PoC, ST-T14. 실제 MSK·EKS 확인은 선택 클라우드 보정에서 한다, docs/verification.md §6, ADR-0154) |
@@ -94,6 +94,7 @@
   - 보류가 1건 이상이면 결제·주문 토픽은 SEV2, 그 밖은 SEV3이다(docs/observability.md §5). 원인을 고친 뒤 RB-11 '보류 사건 다시 처리'로 다시 넣는다. 보류 행은 다시 처리한 뒤 7일 [가정]에 지운다(Kafka 보존과 같다).
   - 스트림 작업자 셋은 묶음으로 쓰므로 지금 규칙(파티션마다 묶음 하나, 읽지 못한 레코드는 위치만 남김)을 그대로 쓴다.
   - 시험은 ST-T18(키 단위 동시 처리)과 ST-T19(보류 사건)이다(§10).
+  - 구현(추천 적용 2026-11-01, openspec 변경 add-maintenance-control-and-consumers): 실행기는 파티션 넷 [가정]을 함께 받아 업무 키 줄에 넘기고, 1초 [가정]마다와 재조정·종료 때 앞 사건이 모두 끝난 위치를 커밋한다. 같은 결과일 실패는 0.2·0.4·0.8·1.6초 [가정] 쉬며 모두 5회 해 보고, 일시 실패(연결 오류 코드, PostgreSQL 08xxx·57P01~03·57014·55P03·53300·40001·40P01, node-postgres가 코드 없이 던지는 연결 끊김·시간 초과 글, 풀 대기 초과 429·503 Problem, 공용 일시 오류 표시)는 0.2~30초 [가정] 늘려 쉬며 그 파티션 가져오기를 멈춘다. 받기 처리기 안에서는 오래 기다리지 않는다: 파티션을 받은 뒤 보류 키 읽기(5초 [가정] 한도)나 값 읽기가 일시 실패면 그 파티션을 멈추고 그 사건부터 다시 받으며, 이미 받은 오프셋이 다시 오면 버린다. 보류 행과 로그의 오류 요약에는 쿼리 매개변수 값을 남기지 않는다. 가져오기 멈춤은 파티션마다 멈춤 이유를 세어 모두 풀릴 때만 연다(클라이언트의 resume 한 번이 앞선 멈춤을 모두 풀기 때문이다). 넘기기·종료 때 처리 중인 키를 마치기는 30초 [가정]까지만 기다리고, 넘으면 끝난 위치까지만 커밋한다. librdkafka는 파티션을 내놓을 때 앱이 건 멈춤을 지우지 않으므로 배정받을 때마다 멈춤을 푼다. 받고 끝나지 않은 사건은 파티션마다 1,000건 [가정]까지다. 값을 읽지 못한 사건은 업무 키를 몰라 Kafka 키 그대로 보류한다. 일시 실패로 멈춘 동안에는 키 자리를 기다리지 않고 받고(쓰는 클라이언트는 받기 처리기가 모두 돌아와야 가져오기 멈춤을 적용한다), 다시 시작할 때 받은 가장 큰 오프셋 + 1로 맞춘다(멈춘 동안 버린 캐시를 건너뛰지 않게, 코드 리뷰 2026-11-01). 다시 받은 사건 거르기(`eventKey`)는 처리기가 자기 트랜잭션에서 한다. 처리기는 사건 머리의 추적을 잇는 소비 span(`process <토픽>`) 안에서 돈다(docs/observability.md §2).
 
 ### 2.5 자원
 
@@ -125,7 +126,7 @@
 - `client.id`는 `<작업자>-<환경>-<파드>`다. 소비 밀림(아직 읽지 않은 메시지 수)은 파티션마다 `stream_consumer_lag_records`로 본다(§14).
 - `trust-reassess`의 Kafka 생산은 `acks=all`과 멱등 생산자(같은 메시지를 두 번 보내도 한 번만 남기는 생산자 설정)로 한다. 트랜잭션 생산자는 쓰지 않는다(ADR-0026 결정 3). 발행 확인을 받은 뒤에 입력 오프셋을 커밋한다.
 
-**Kafka 클라이언트 필수 설정(추천 적용 2026-10-29, ADR-0142 결정 3)**: 공용 모듈이 아래 값으로 클라이언트를 만든다. 작업자·서비스·Outbox 릴레이가 이 값을 덮어쓰면 정적 검사 D-T45가 CI를 실패시킨다(docs/devops.md). 쓰는 클라이언트 `@confluentinc/kafka-javascript`(KafkaJS 호환 API)의 기본값은 멱등 생산 꺼짐, 동시에 보내는 요청 수 사실상 무제한, 모두 멈추는 재조정, 자동 커밋 켬이라 문서가 기대는 동작과 다르기 때문이다(저장소의 MIGRATION.md와 librdkafka CONFIGURATION.md, 2026-10-29 확인).
+**Kafka 클라이언트 필수 설정(추천 적용 2026-10-29, ADR-0142 결정 3)**: 공용 모듈이 아래 값으로 클라이언트를 만든다. 작업자·서비스·Outbox 릴레이가 이 값을 덮어쓰면 정적 검사 D-T45가 CI를 실패시킨다(docs/devops.md). 쓰는 클라이언트 `@confluentinc/kafka-javascript`(KafkaJS 호환 API)의 기본값은 멱등 생산 꺼짐, 동시에 보내는 요청 수 사실상 무제한, 모두 멈추는 재조정, 자동 커밋 켬이라 문서가 기대는 동작과 다르기 때문이다(저장소의 MIGRATION.md와 librdkafka CONFIGURATION.md, 2026-10-29 확인). 설정 함수(`kafkaProducerConfig`·`kafkaConsumerConfig`)는 필수 값을 librdkafka 이름으로 KafkaJS 호환 묶음 밖에 두고(겉의 값이 이긴다), 덧붙일 설정에 필수 이름이나 호환 별칭이 있으면 예외를 낸다. 정적 검사는 `tools/ci/check-kafka-settings.mjs`이고 `tools-check` 잡이 돈다(추천 적용 2026-11-01).
 
 | 쪽 | 설정 | 값 | 이유 |
 | --- | --- | --- | --- |
@@ -633,7 +634,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 
 ## 13. 이미지·배포·시험 도구
 
-- **코드 위치**: 모노레포(코드 전부를 저장소 하나에 폴더로 나눠 담는 방식) `peaket`의 `services/analytics-ingest`·`services/ops-rt`·`services/rt-pulse`·`services/trust-reassess`에 작업자를 두고, `rt` 표·뷰의 이전 파일은 `data/`(예: `data/clickhouse/rt/`)에 둔다. 공용 소비 모듈은 `packages/platform`의 `@peaket/stream-worker`이고, 패키지로 게시하지 않고 `workspace:` 프로토콜로 가져다 쓴다(ADR-0165). 빌드는 서비스와 같은 pnpm·TypeScript로 한다(추천 적용 2026-10-27).
+- **코드 위치**: 모노레포(코드 전부를 저장소 하나에 폴더로 나눠 담는 방식) `peaket`의 `services/analytics-ingest`·`services/ops-rt`·`services/rt-pulse`·`services/trust-reassess`에 작업자를 두고, `rt` 표·뷰의 이전 파일은 `data/`(예: `data/clickhouse/rt/`)에 둔다. 공용 소비 모듈은 `packages/platform`의 `@peaket/stream-worker`(하위 내보내기 `@peaket/platform/stream-worker`)이고, 패키지로 게시하지 않고 `workspace:` 프로토콜로 가져다 쓴다(ADR-0165). 빌드는 서비스와 같은 pnpm·TypeScript로 한다(추천 적용 2026-10-27).
 - **이미지**: 서비스와 같은 Node.js 기본 이미지(다이제스트 고정)를 쓴다. 공용 빌드 워크플로가 SBOM(소프트웨어에 들어간 부품 목록)·서명·출처 증명(어느 커밋에서 어떤 빌드 절차로 만들었는지 서명해 남긴 기록)을 붙인다(devops §4). 클러스터 입장 정책이 그 서명을 확인한다.
 - **차트**: 서비스와 같은 공용 차트가 Deployment, 서비스 계정, 네트워크 정책, ExternalSecret, PodMonitor, PodDisruptionBudget을 만든다. 환경 값은 `envs/<환경>/<작업자>.yaml`(이미지 다이제스트, 복제 수, 자원)이고, AppProject는 `data`·`trust`다(devops §5.2).
 - **배포 흐름**: 작업자 코드를 바꾸는 `peaket` PR(코드 변경을 합쳐 달라는 요청) → CI(코드를 올릴 때마다 자동으로 하는 검사·빌드. 바뀐 범위의 단위·통합·계약 시험, ADR-0165) → 이미지 다이제스트 갱신 PR → ArgoCD 동기화(동결 창에는 막힌다) → 롤링 → 확인(준비 상태, 첫 묶음 성공, 신선도, 누락률).

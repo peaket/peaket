@@ -19,6 +19,7 @@ import { ProblemFilter, frameworkErrorProblem } from './problem-filter.js';
 import { loadLogPseudonymizer } from './pseudonym.js';
 import { CanonicalLog, errorInfoOf } from './request-log.js';
 import { installRequestChecks } from './request-checks.js';
+import { Readiness } from './readiness.js';
 import { sampleKeep } from './sampling.js';
 
 /**
@@ -61,6 +62,9 @@ export interface CreateServiceOptions {
 }
 
 export interface PlatformService {
+  /** 서비스 이름(지표의 service 라벨) */
+  name: string;
+  clock: Clock;
   config: PlatformConfig;
   metrics: PlatformMetrics;
   /** 서비스 로거(Pino). 처리기는 @Inject(PLATFORM_LOGGER)로도 받는다 */
@@ -70,8 +74,13 @@ export interface PlatformService {
   app: NestFastifyApplication;
   /** 앱 포트의 Fastify(시험에서는 inject로 부른다) */
   http: FastifyInstance;
-  /** 관리 포트의 Fastify(/metrics) */
+  /** 관리 포트의 Fastify(/metrics, /ready) */
   management: FastifyInstance;
+  /**
+   * 준비 표시. 시작 작업(제어 상태·설정·종료 세션, startControlSync)은 listen 전에 등록하고, 모두 끝나야 /ready가 200이다.
+   * /ready는 이 표시만 읽는다(공유 의존성을 부르지 않는다, D-T19·D-T29)
+   */
+  readiness: Readiness;
   /** 인증 상태. 세션 종료 사건(control.sessions-terminated)의 소비(FND-090)가 terminateSession을 부른다 */
   auth: { terminateSession(e: { sessionId: string; terminatedAt?: string }): void; isTerminated(sessionId: string): boolean };
   listen(host?: string): Promise<{ port: number; managementPort: number }>;
@@ -149,14 +158,23 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   app.useGlobalFilters(new ProblemFilter({ debugErrors: config.debugErrors }));
   await app.init();
 
+  const readiness = new Readiness();
   const management = Fastify({ logger: false });
   management.get('/metrics', async (_request, reply) => {
     void reply.header('content-type', metrics.registry.contentType);
     return metrics.registry.metrics();
   });
+  // 준비 프로브: 메모리의 표시만 본다(ADR-0070·0103, D-T29)
+  management.get('/ready', async (_request, reply) => {
+    const pending = readiness.pending();
+    if (pending.length === 0) return { status: 'ready' };
+    return reply.status(503).send({ status: 'starting', pending });
+  });
   await management.ready();
 
   return {
+    name: o.name,
+    clock,
     config,
     metrics,
     logger,
@@ -169,6 +187,7 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     app,
     http,
     management,
+    readiness,
     auth: {
       terminateSession: (e) => auth.terminateSession(e),
       isTerminated: (sessionId) => auth.terminated.has(sessionId),

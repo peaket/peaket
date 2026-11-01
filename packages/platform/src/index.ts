@@ -57,3 +57,65 @@ export {
 } from './outbox.js';
 export { OUTBOX_RELAY_DEFAULTS, OutboxRelay, OutboxRelayMetrics, type LeaderState, type OutboxPublisher, type OutboxRecord, type OutboxRelayOptions } from './outbox-relay.js';
 export { LEASE_DEFAULTS, LeaseElector, inClusterLeaseApi, kubernetesLeaseApi, type KubernetesLeaseApiOptions, type LeaseApi, type LeaseElectorOptions, type LeaseRecord, type LeaseSpec } from './lease.js';
+export { KAFKA_CONSUMER_LOCKED, KAFKA_PRODUCER_LOCKED, KAFKA_REQUIRED, kafkaConsumerConfig, kafkaProducerConfig, type KafkaClientBase, type KafkaClientConfig, type KafkaProducerKind } from './kafka-config.js';
+export {
+  KEYED_CONSUMER_DEFAULTS,
+  KeyedConsumerMetrics,
+  KeyedPartition,
+  PauseGate,
+  TransientError,
+  errorSummary,
+  isTransientError,
+  type ConsumedMessage,
+  type HeldEventInput,
+  type HeldEventStore,
+  type KeyedHandler,
+  type KeyedPartitionOptions,
+} from './keyed-consumer.js';
+export { HELD_EVENT_KEEP_DAYS, HELD_EVENT_TABLE, deleteReprocessedHeldEvents, drizzleHeldEventStore, heldEventCounts, heldEventTable, reprocessHeldEvents, type ReprocessResult } from './held-events.js';
+export { Readiness } from './readiness.js';
+export {
+  CONTROL_SYNC_DEFAULTS,
+  ControlState,
+  ControlSyncMetrics,
+  SettingsStore,
+  startControlSync,
+  type BroadcastRecord,
+  type BroadcastSource,
+  type ControlCodec,
+  type ControlEntry,
+  type ControlStateSource,
+  type ControlSync,
+  type ControlSyncHost,
+  type ControlSyncOptions,
+  type SessionTerminated,
+  type SettingChanged,
+  type SettingEntry,
+} from './control.js';
+export {
+  MONTHLY_PARTITION_DEFAULTS,
+  addKstMonths,
+  analyzeTable,
+  dropMonthlyPartitions,
+  ensureMonthlyPartitions,
+  kstMonthStart,
+  monthlyPartitionOf,
+  monthlyPartitionsAhead,
+  type MonthlyPartition,
+  type MonthlyPartitionSpec,
+} from './partitions.js';
+export { STAT_SNAPSHOT_KEEP_DAYS, STAT_SNAPSHOT_TABLE, statSnapshotTable, takeStatSnapshot } from './stat-snapshot.js';
+export { REINDEX_DEFAULTS, RETENTION_DEFAULTS, deleteExpiredRows, reindexBloatedIndexes, retentionBoundary, retentionOverdueSeconds, type ReindexResult, type RetentionResult, type RetentionSpec } from './retention.js';
+export { STREAM_KEY_TTL_AFTER_SALE_MS, ackAndTrimStream, compareStreamIds, expireStreamAfterSale, nextStreamId, type RedisCommander } from './redis-stream.js';
+export {
+  MAINTENANCE_DEFAULTS,
+  MaintenanceRunner,
+  maintenanceMetrics,
+  monthlyPartitionTasks,
+  platformMaintenanceTasks,
+  reindexTask,
+  retentionTask,
+  type MaintenanceMetrics,
+  type MaintenanceRunnerOptions,
+  type MaintenanceTask,
+} from './maintenance.js';
