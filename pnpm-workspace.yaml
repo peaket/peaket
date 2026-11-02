@@ -1,10 +1,11 @@
 # pnpm-workspace.yaml 공통 설정(pnpm 12). 정본은 docs/devops.md §4.4다. 이 파일과 다르면 §4.4가 이긴다.
-# 작업 공간 폴더: 화면 앱·공용 패키지는 화면 퍼블리싱(ADR-0170)에서 더했다. services/*는 처음 서비스가 생기는 단계에서 더한다.
+# 작업 공간 폴더: 화면 앱·공용 패키지는 화면 퍼블리싱(ADR-0170)에서 더했다. services/*는 첫 서비스가 생긴 wbs 1.2.3(불변식 검사기·PG 시뮬레이터)에서 더했다.
 packages:
   - apps/*
   - apps/widgets/*
   - apps/web/queue-room
   - packages/*
+  - services/*
 minimumReleaseAge: 4320     # 새 판은 게시 뒤 3일(분 단위)이 지나야 설치한다. 전이 의존성에도 걸린다
 trustPolicy: no-downgrade   # 앞서 나온 판보다 신뢰 증거(신뢰 게시·출처 증명)가 약해진 판은 설치 실패. packageManager로 고정한 pnpm 판에도 걸린다
 blockExoticSubdeps: true    # 전이 의존성이 git 저장소·tarball 주소에서 오는 것을 막는다

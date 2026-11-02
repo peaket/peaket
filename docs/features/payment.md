@@ -158,6 +158,12 @@ sequenceDiagram
 
 **PG 시뮬레이터의 기본 승인 지연(추천 적용 2026-10-28, 기술 검토 낮음-120)**: 시뮬레이터는 시험이 따로 지연을 넣지 않으면 승인 응답을 로그정규 분포(오른쪽 꼬리가 긴 분포)로 늦춘다. 중앙값 300ms, p99 1.5초 [가정]이다. 이 값은 근거가 없다. 결제사가 승인 지연 분포를 공개하는지는 확인 필요다. 그래서 NFR-006의 '결제 확정 p99 3초'를 시뮬레이터로 잰 결과는 둘로 나눠 성능 장부에 남긴다. 하나는 우리 몫(요청마다 종단 지연에서 추적의 결제사 승인 호출 구간을 뺀 값)의 p99이고, 다른 하나는 이 가정 분포를 더한 종단 p99다. 실제 결제사의 지연은 우리 몫으로 판정하지 않는다. 장부의 `manifest.json`에는 쓴 분포와 매개변수를 적는다(docs/perf-ledger.md §2.2). 시험별로 넣는 지연(P-T11·P-T34·P-T40)은 이 기본값을 바꿔 쓴다.
 
+**PG 시뮬레이터 구성(추천 적용 2026-11-02, wbs 1.2.3, openspec 변경 add-invariant-checker-and-pg-simulator)**: 시뮬레이터는 따로 도는 흉내 서버 `services/pg-simulator`이고, 어댑터는 payment-svc 결제 모듈의 시뮬레이터 어댑터다. 시험이 Toxiproxy를 사이에 두고 v0의 동기 결제 체인을 끊어 볼 수 있게 네트워크 너머에 둔다(docs/verification.md §2.5). 상태는 메모리에만 둔다.
+- **결제사 모양**: 토스페이먼츠와 같은 경로·본문·오류 코드를 쓴다(승인 `POST /v1/payments/confirm`, 조회 `GET /v1/payments/{paymentKey}`·`GET /v1/payments/orders/{orderId}`, 취소 `POST /v1/payments/{paymentKey}/cancel`). 위 표의 토스 규칙을 지킨다: 인증 뒤 10분 승인 기한, 승인된 주문 ID 재사용 금지(`DUPLICATED_ORDER_ID`), 멱등키 15일 보관과 처리 중 409, 같은 결제의 동시 승인 400 `ALREADY_PROCESSING_REQUEST`, 이미 승인 400 `ALREADY_PROCESSED_PAYMENT`, 남은 금액 안의 부분 취소. 다른 본문에 같은 멱등키를 쓰면 토스 문서에 없어 422 `IDEMPOTENCY_KEY_REUSED`로 정했다(실제 결제사 계약 시험에서 확인). 상태가 바뀔 때마다 서명 없이 전송 ID 머리를 단 웹훅 사건을 남긴다(보내기는 wbs 2.12.3).
+- **시험용 제어 API**(`/sim/*`): 결제창 인증 흉내(성공 주소가 받을 `paymentKey`), 장애 넣기(작업·주문 ID·횟수로 고른다. 거절 코드, 처리 중 409, 결제사 오류 500(반영 여부), 응답 유실(반영 여부, 연결을 끊는다), 한도 초과 429, 그 호출만의 지연), 지연 분포 바꾸기, 원장 내보내기(불변식 검사기 기록 `pg_charge`), 웹훅 사건 목록, 초기화.
+- **키와 실행 환경**: `sim_sk_`로 시작하는 시험 키의 기본 인증만 받는다(토스 `test_sk_`·`live_`와 이름부터 달라 섞이지 않는다). `PEAKET_ENV`가 local·ci·demo·staging일 때만 시작하고(없으면 운영으로 본다), 기본 주소는 루프백이다.
+- **어댑터 대응표에 더한 것**: 429 → `DECLINED`(`THROTTLED`), 401·403 → `DECLINED`(`PG_ERROR`, 처리되지 않은 것이 확실하다), `PAY_PROCESS_CANCELED`·`PAY_PROCESS_ABORTED` → `USER_ABORTED`, 인증 만료 `NOT_FOUND_PAYMENT_SESSION` → `EXPIRED`, 금액·주문 ID 불일치·`DUPLICATED_ORDER_ID`·`IDEMPOTENCY_KEY_REUSED` → `VALIDATION`, 이미 전액 취소된 결제를 전액 취소 → `CANCELLED`, 취소 처리 중 409 → `CANCEL_PENDING`. `ALREADY_APPROVED`는 조회한 결제가 승인(부분 취소 포함) 상태이고 금액·주문 ID가 같을 때만 돌려준다. 공통 계약 시험 묶음은 payment-svc의 `test/pg-contract.ts`이고, 토스·포트원 어댑터도 같은 묶음을 돈다(wbs 2.7.2).
+
 ### 2.2 결제사 선택·고정·전환(POL-036, ADR-0044)
 
 토스페이먼츠와 포트원을 함께 운영한다. 결제사별 구현은 외부 API를 포트로 바꾸는 어댑터다(§2.1). 결제 시도마다 어댑터를 고르는 일은 payment-svc의 결제사 선택기(`PaymentGatewaySelector`)가 맡는다. 고른 어댑터가 같은 포트로 쓰이므로 이 구조는 전략 패턴이고, 주문 Saga는 어느 결제사인지 모른다. 접수 뒤의 호출은 결제 기록의 결제사 값으로 어댑터 등록부에서 어댑터를 찾는다(추천 적용, 2026-10-13).

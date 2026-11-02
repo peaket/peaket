@@ -1,0 +1,21 @@
+{
+  "name": "@peaket/payment-svc",
+  "private": true,
+  "version": "0.0.0",
+  "description": "payment-svc. 지금은 결제 모듈의 결제 포트·시뮬레이터 어댑터·공통 계약 시험만 있다(wbs 1.2.3). 서비스 나머지는 v0·v1 결제 단계에서 서비스 뼈대(packages/platform/template)로 채운다",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@peaket/platform": "workspace:*"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@peaket/pg-simulator": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

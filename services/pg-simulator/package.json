@@ -1,0 +1,28 @@
+{
+  "name": "@peaket/pg-simulator",
+  "private": true,
+  "version": "0.0.0",
+  "description": "결제사(PG) 흉내 서버. 토스페이먼츠 모양의 승인·조회·취소 API를 메모리 상태로 흉내 내고 시험이 장애를 넣는다. 로컬·CI·데모·스테이징 전용(ADR-0029 결정 6, docs/features/payment.md §2.1)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastify": "^5.12.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

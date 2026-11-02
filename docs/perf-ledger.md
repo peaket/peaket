@@ -27,6 +27,7 @@ docs/perf-ledger/
     metrics-summary.json    쿼리 식별자별 요약(예열을 뺀 구간의 p50·p99·최대·평균). collect.py가 원본에서 만든다
     metrics/<name>.csv      Prometheus 시계열 메트릭 원본 (쿼리 식별자별 분리. 큰 원본이라 Git이 아니라 S3 원본 버킷에 둔다, §9)
     invariants.csv          비즈니스 불변식 검증 결과 (docs/verification.md §2.5의 불변식 SQL: 차례 전 입장, 같은 세대 순번 중복, 오버셀, 1인 한도 초과, 이중 결제, 결제-발권 불일치, 정산 돈 불변식)
+    invariants-detail.ndjson 불변식 위반 행(불변식마다 1,000줄까지). 합성 데이터라도 ID 목록이라 Git이 아니라 S3 원본 버킷에 둔다(services/invariant-checker, 추천 적용 2026-11-02)
     traces/                 p99 이상치 요청의 OpenTelemetry 분산 트레이스 JSON (선택 사항)
     grafana/                측정 구간 Grafana 대시보드 렌더링 이미지 및 스냅샷 URL (보조 자료)
     infra.txt               실행 당시 측정 환경 사양(로컬은 CPU·메모리·WSL 설정과 CPU 배치, 클라우드는 인스턴스 타입), 커널 및 소프트웨어 버전 원본
@@ -44,7 +45,7 @@ docs/perf-ledger/
   timestamps/<날짜>.txt     그날 끝난 실행들의 `SHA256SUMS` 해시 목록과, 그 파일의 OpenTimestamps 증명 `<날짜>.txt.ots`(§9)
 ```
 
-Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2026-10-28, 기술 검토 낮음-056). Git에는 `manifest.json`, `k6-summary.json`, `metrics-summary.json`, `invariants.csv`, `infra.txt`, 작은 CSV(`cost.csv`·`timeline.csv`·`hint_compare.csv`·`backend_cost.csv`·`confusion.csv`·`bot_cost.csv`·`bot_outcomes.csv`), `bot_prices.json`, `SHA256SUMS`, `charts/`, `timestamps/`를 둔다. 큰 원본(`metrics/*.csv`, `traces/`, `grafana/`, `stdout.log`)은 S3 원본 버킷의 `runs/<run-id>/`에 두고, Git에는 해시만 남는다. 원본 위치는 manifest의 `raw_uri`에 적는다. 그래서 측정이 쌓여도 저장소가 GitHub 권장 크기(1GB 미만이 이상적, 5GB 미만을 강하게 권함, GitHub 문서 2026-10-27 확인)를 넘지 않는다.
+Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2026-10-28, 기술 검토 낮음-056). Git에는 `manifest.json`, `k6-summary.json`, `metrics-summary.json`, `invariants.csv`, `infra.txt`, 작은 CSV(`cost.csv`·`timeline.csv`·`hint_compare.csv`·`backend_cost.csv`·`confusion.csv`·`bot_cost.csv`·`bot_outcomes.csv`), `bot_prices.json`, `SHA256SUMS`, `charts/`, `timestamps/`를 둔다. 큰 원본(`metrics/*.csv`, `traces/`, `grafana/`, `stdout.log`)과 불변식 위반 행 `invariants-detail.ndjson`은 S3 원본 버킷의 `runs/<run-id>/`에 두고, Git에는 해시만 남는다. 원본 위치는 manifest의 `raw_uri`에 적는다. 그래서 측정이 쌓여도 저장소가 GitHub 권장 크기(1GB 미만이 이상적, 5GB 미만을 강하게 권함, GitHub 문서 2026-10-27 확인)를 넘지 않는다.
 
 ### 2.2 manifest.json 필수 메타데이터 필드
 
