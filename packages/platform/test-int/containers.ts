@@ -1,7 +1,7 @@
 // 통합 시험용 Kafka·Valkey 컨테이너(postgres.ts와 같은 방식: 라이브러리 없이 docker 명령). Docker 엔진이 떠 있어야 한다.
 // Kafka는 공식 이미지 한 대(KRaft, docs/streaming.md ST-T20과 같은 3.9.2), Valkey는 운영과 같은 8.1(docs/infra.md).
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -55,6 +55,10 @@ function brokerCerts(): { dir: string; caFile: string } {
   execFileSync('openssl', ['x509', '-req', '-in', 'broker.csr', '-CA', 'ca.crt', '-CAkey', 'ca.key', '-CAcreateserial', '-days', '2', '-extfile', 'ext.cnf', '-out', 'broker.crt'], o);
   execFileSync('openssl', ['pkcs8', '-topk8', '-nocrypt', '-in', 'broker.key', '-out', 'broker.pk8'], o);
   writeFileSync(join(dir, 'broker.pem'), readFileSync(join(dir, 'broker.pk8'), 'utf8') + readFileSync(join(dir, 'broker.crt'), 'utf8'));
+  // Kafka 이미지는 루트가 아닌 사용자(appuser)로 돈다. mkdtemp의 0700 폴더면 리눅스에서 브로커가 키 저장소를 못 읽어 뜨지 못한다
+  // (2026-11-03 첫 원격 CI의 'Broker transport failure'. Windows의 Docker Desktop은 권한을 보지 않아 로컬에서는 안 보였다). 시험용 임시 인증서다
+  chmodSync(dir, 0o755);
+  chmodSync(join(dir, 'broker.pem'), 0o644);
   return { dir, caFile: join(dir, 'ca.crt') };
 }
 
