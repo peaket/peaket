@@ -2,7 +2,7 @@
   "name": "@peaket/contracts",
   "private": true,
   "version": "0.0.0",
-  "description": "계약 원본(docs/api/openapi.yaml·asyncapi.yaml)에서 만든 Zod 스키마와 TypeScript 타입. 게시하지 않고 workspace:로만 잇는다(ADR-0165, docs/api/guidelines.md §1)",
+  "description": "계약 원본(docs/api/openapi.yaml·asyncapi.yaml)에서 만든 Zod 스키마와 TypeScript 타입, proto 계약(docs/api/proto)의 JSON 설명자. 게시하지 않고 workspace:로만 잇는다(ADR-0165, docs/api/guidelines.md §1)",
   "type": "module",
   "exports": {
     "./openapi/model": {
@@ -19,6 +19,11 @@
       "types": "./src/gen/asyncapi/model/index.ts",
       "development": "./src/gen/asyncapi/model/index.ts",
       "default": "./dist/asyncapi/model/index.js"
+    },
+    "./proto": {
+      "types": "./src/gen/proto/index.ts",
+      "development": "./src/gen/proto/index.ts",
+      "default": "./dist/proto/index.js"
     }
   },
   "scripts": {
@@ -35,6 +40,7 @@
     "@peaket/config": "workspace:*",
     "@types/node": "^24.0.0",
     "orval": "^8.45.0",
+    "protobufjs": "7.6.6",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5",
     "yaml": "^2.9.1"

@@ -2,13 +2,15 @@
 // 휴대폰은 바탕 위에 바로 쌓고, md 768부터 옅은 바탕(surface-basement) 가운데 카드(최대 400)로 바뀐다. 셸은 로그인 전 모양.
 // 세 제공자 버튼은 가이드 색·문구(키트 btn-kakao·btn-naver·btn-google)로 같은 크기·같은 비중으로 쌓는다(ADR-0062).
 // 상태는 ?state=(보드 state 값 + d5 §3.5 세션 종료 사유), 다크는 ?theme=dark.
+// 기본 상태의 버튼은 로그인 시작 폼(POST /login/{provider})이다. 로그인 뒤 돌아갈 주소는 ?next=(docs/features/identity.md §2, BUILD_ORDER PRF-020).
 import Link from 'next/link';
 import { LogoWordmark } from '@peaket/ds/LogoWordmark';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
 import { LOGIN_PROVIDERS, PROVIDER_LOGIN_LABEL, PROVIDER_NAME, SESSION_END_TEXT, type ProviderId } from '@/entities/provider';
+import { LoginStartForm } from '@/features/social-login';
 import { SCR004_STATES } from '@/shared/config/screens.account';
-import type { PageProps } from '@/shared/lib/page-props';
+import { firstParam, type PageProps } from '@/shared/lib/page-props';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { loginView, type LoginView } from '../model/state';
@@ -30,6 +32,7 @@ export async function LoginPage({ searchParams }: PageProps) {
   const state = resolvePreviewState(sp, SCR004_STATES, '기본');
   const dark = resolvePreviewTheme(sp) === 'dark';
   const v = loginView(state);
+  const next = firstParam(sp, 'next') ?? '/';
 
   return (
     <AppShell dark={dark} guest>
@@ -57,7 +60,7 @@ export async function LoginPage({ searchParams }: PageProps) {
 
           <div className="col" style={{ gap: 10 }} role="group" aria-label="소셜 계정으로 로그인">
             {LOGIN_PROVIDERS.map((p) => (
-              <ProviderButton key={p} provider={p} view={v} />
+              <ProviderButton key={p} provider={p} view={v} next={next} />
             ))}
           </div>
 
@@ -92,7 +95,7 @@ export async function LoginPage({ searchParams }: PageProps) {
 }
 
 /** 제공자 가이드 버튼 하나. 진행 중이면 누른 버튼만 스피너(aria-busy), 나머지는 비활성. 장애면 그 버튼만 이유 있는 비활성 + 이유 글 */
-function ProviderButton({ provider, view }: { provider: ProviderId; view: LoginView }) {
+function ProviderButton({ provider, view, next }: { provider: ProviderId; view: LoginView; next: string }) {
   const cls = `btn btn-${provider} btn-lg btn-block`;
   const label = PROVIDER_LOGIN_LABEL[provider];
   const mark = <i className={`prov prov-${provider}`} aria-hidden="true" />;
@@ -128,9 +131,11 @@ function ProviderButton({ provider, view }: { provider: ProviderId; view: LoginV
   }
 
   return (
-    <button className={cls} type="button">
-      {mark}
-      {label}
-    </button>
+    <LoginStartForm provider={provider} returnTo={next}>
+      <button className={cls} type="submit">
+        {mark}
+        {label}
+      </button>
+    </LoginStartForm>
   );
 }

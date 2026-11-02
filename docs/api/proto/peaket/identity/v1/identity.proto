@@ -2,6 +2,7 @@
 // 정본: docs/features/identity.md(주문 생성 때 본인확인 재확인, §2 소셜 로그인 흐름), docs/features/payment.md §2·§9(identity-svc 장애),
 // ADR-0055(응답이 없을 때 토큰 값으로 판정), ADR-0011·0119(세션 생성은 소비자 웹 앱 서버만), docs/architecture.md §3.2.
 // SessionService는 2026-10-28에 더했다(추천 적용 2026-10-28, 기술 검토 중간-083).
+// SessionService.IssueReauthToken은 2026-11-03에 더했다(팬 재인증, 추천 적용 2026-11-03, BUILD_ORDER PRF-020).
 // AccountHoldService·ScannerSessionQueryService는 2026-10-29에 더했다(초안, 추천 적용 2026-10-29, ADR-0148). 그 정본: docs/features/identity.md §2.1·POL-034(병합 차단 사유),
 // docs/data.md `account_hold`·`scanner_session`·§4 경계 9, docs/planning/03-policies-glossary.md '소명'(appeal), docs/api/openapi.yaml `ScannerDevice`,
 // ADR-0082·0102(ops-svc는 업무 gRPC를 받지 않는다).
@@ -52,6 +53,10 @@ service SessionService {
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
   // 로그아웃. 세션을 끝내고 세션 종료 이벤트를 낸다. 이미 끝난 세션이면 그대로 성공이다(멱등).
   rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
+  // 팬 민감 작업 전 재인증(docs/features/identity.md §7.1). 앱 서버가 제공자 재인증과 강도 판정을 마친 뒤 부른다.
+  // 세션이 살아 있고 account_id의 세션이며 (provider, provider_user_id)가 그 계정에 연결돼 있을 때만 토큰을 준다.
+  // 세션이 없거나 끝났거나 계정이 다르면 FAILED_PRECONDITION이다(추천 적용 2026-11-03, BUILD_ORDER PRF-020).
+  rpc IssueReauthToken(IssueReauthTokenRequest) returns (IssueReauthTokenResponse);
 }
 
 enum Provider {
@@ -116,6 +121,56 @@ message EndSessionRequest {
 message EndSessionResponse {
   // 이번 호출로 끝냈으면 true, 이미 끝나 있었으면 false.
   bool ended = 1;
+}
+
+// 재인증 강도(docs/features/identity.md §7.1 표의 '재인증 강도').
+enum ReauthStrength {
+  REAUTH_STRENGTH_UNSPECIFIED = 0;
+  // 확인됨: 제공자가 준 auth_time으로 방금 다시 인증했음을 확인했다(카카오, auth_time을 준 구글)
+  REAUTH_STRENGTH_VERIFIED = 1;
+  // 요청만 함: 다시 묻도록 요청했으나 확인하지 못했다(네이버, auth_time이 없는 구글)
+  REAUTH_STRENGTH_REQUESTED = 2;
+}
+
+message IssueReauthTokenRequest {
+  // 앱 서버가 팬 액세스 토큰에서 확인한 sid와 sub
+  string session_id = 1;
+  string account_id = 2;
+  // 재인증한 제공자와 그 ID 토큰의 sub
+  Provider provider = 3;
+  string provider_user_id = 4;
+  ReauthStrength strength = 5;
+  // 법정 접속기록 줄에만 싣는 원문 IP와 단말 정보(CreateSession과 같다)
+  string client_ip = 6;
+  string user_agent = 7;
+  // 목적. 고위험(양도 요청·환급·배상 계좌 입력)이면 토큰의 act가 FAN_HIGH_RISK이고, 요청만 함 + 로그인 판정 CHALLENGE·UNKNOWN이면
+  // 본인확인 재통과를 확인한 뒤에만 준다(docs/features/identity.md §7.1 ③, 추천 적용 2026-11-03)
+  ReauthPurpose purpose = 8;
+}
+
+enum ReauthPurpose {
+  REAUTH_PURPOSE_UNSPECIFIED = 0;
+  // 그 밖의 팬 민감 작업(POL-019 목록). act FAN_SENSITIVE
+  REAUTH_PURPOSE_SENSITIVE = 1;
+  // 양도 요청, 환급·배상 계좌 입력. act FAN_HIGH_RISK
+  REAUTH_PURPOSE_HIGH_RISK = 2;
+}
+
+enum ReauthResult {
+  REAUTH_RESULT_UNSPECIFIED = 0;
+  // 재인증 토큰을 줬다
+  REAUTH_RESULT_ISSUED = 1;
+  // 다시 로그인한 제공자 계정이 이 계정에 연결돼 있지 않다. 토큰을 주지 않는다
+  REAUTH_RESULT_ACCOUNT_MISMATCH = 2;
+  // 고위험 목적인데 요청만 함이고 로그인 판정이 CHALLENGE·UNKNOWN이며 본인확인 재통과를 확인하지 못했다. 토큰을 주지 않는다
+  REAUTH_RESULT_REVERIFY_REQUIRED = 3;
+}
+
+message IssueReauthTokenResponse {
+  ReauthResult result = 1;
+  // ISSUED일 때만 채운다. typ reauth+jwt, 5분. 앱 서버는 봉인한 쿠키로만 넘기고 로그에 남기지 않는다
+  string reauth_token = 2;
+  int64 reauth_token_expires_at_ms = 3;
 }
 
 // 부르는 쪽: ops-svc만. 계정에 걸린 이의 제기(CS 처리함 VERIFICATION_APPEAL·DISPUTE 건)나 소명(appeal)이 열리고 닫힐 때 부른다.

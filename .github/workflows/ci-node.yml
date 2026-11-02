@@ -58,3 +58,5 @@ jobs:
       - run: pnpm lint
       # 서비스 템플릿의 통합 시험: 실제 PostgreSQL 18 컨테이너를 docker로 띄운다(러너에 Docker가 있다). Drizzle 설정·풀 대기 429·행 보안
       - run: pnpm --filter @peaket/platform test:integration
+      # identity-svc의 PostgreSQL 저장소 시험: 같은 멱등 키의 세션 생성이 겹쳐 와도 세션이 하나인지(I-T50 ①, BUILD_ORDER PRF-020)
+      - run: pnpm --filter @peaket/identity-svc test:integration

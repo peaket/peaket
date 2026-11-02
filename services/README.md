@@ -4,7 +4,8 @@
 
 - 무엇을 어느 팀이 맡는지: [docs/architecture.md](../docs/architecture.md) §10, 서비스를 나눈 근거: 같은 문서 §3
 - 처음 채우는 작업: wbs 0.3(서비스 템플릿)과 Phase 1(v0).
-- 지금 있는 것(2026-11-02, wbs 1.2.3·1.1.1·1.1.2·1.1.3):
+- 지금 있는 것(2026-11-03, wbs 1.2.3·1.1.1·1.1.2·1.1.3·2.1.1):
+  - `identity-svc`: 소셜 로그인 뒤 세션 생성·로그아웃·팬 재인증 토큰(gRPC `SessionService`, [docs/features/identity.md](../docs/features/identity.md) §2·§7.1, BUILD_ORDER PRF-020). 계정·로그인 수단·기기·세션 표, 같은 멱등 키 기억(10분), 기기 5대 한도, 팬 토큰 키 서명(ES256). 실행은 `PEAKET_DATABASE_URL`·`PEAKET_FAN_TOKEN_KEY`(개인 JWK)·`PEAKET_TOKEN_ISSUER`와 `pnpm migrate`, 업무 gRPC 포트 `PEAKET_GRPC_PORT`(기본 50051 [가정]), 기기 가명 키 `PEAKET_INV_REF_DEVICE_KEY`(없으면 기기 행을 쓰지 않는다). 토큰 회전·종료 사건·서명 키 셋은 PRF-030, 본인확인은 PRF-040
   - `invariant-checker`: 불변식 검사기. 시험이 끝난 뒤 서비스 DB와 시험 기록을 대조해 차례 전 입장·순번 중복·오버셀·1인 한도 초과·이중 결제·결제-발권 불일치·정산 돈 불변식을 센다([docs/verification.md](../docs/verification.md) §2.5). 명령 `peaket-invariants`
   - `pg-simulator`: 결제사(PG) 흉내 서버. 토스페이먼츠 모양 API와 시험용 장애 넣기. 로컬·CI·데모·스테이징 전용([docs/features/payment.md](../docs/features/payment.md) §2.1)
   - `payment-svc`: 결제 모듈의 결제 포트·시뮬레이터 어댑터·공통 계약 시험만 있다. 결제 모듈의 공개 파일을 패키지 경로 `@peaket/payment-svc/payment`로 내보내 v0 모놀리스의 결제 모듈이 그대로 쓴다([docs/features/payment.md](../docs/features/payment.md) §13). 서비스 나머지는 v1 결제 단계에서 서비스 뼈대(`packages/platform/template`)로 채운다

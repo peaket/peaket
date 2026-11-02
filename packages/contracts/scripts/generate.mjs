@@ -9,6 +9,7 @@ import { generate } from 'orval';
 import { parse } from 'yaml';
 import { toOpenApi } from './asyncapi-to-openapi.mjs';
 import { closeAdditionalProperties } from './close-additional-properties.mjs';
+import { PROTO, writeProtoModules } from './proto-descriptors.mjs';
 import { addJsExtensions, annotateRefines, schemaExtension } from './schema-extensions.mjs';
 
 const API = fileURLToPath(new URL('../../../docs/api/', import.meta.url));
@@ -40,9 +41,9 @@ function eachFile(dir, fn) {
 
 /**
  * @param {string} out 만들 폴더(없으면 만든다)
- * @param {{ openapi?: string, asyncapi?: string }} [from] 계약 원본(기본은 docs/api/의 둘)
+ * @param {{ openapi?: string, asyncapi?: string, proto?: string }} [from] 계약 원본(기본은 docs/api/의 둘과 proto 폴더)
  */
-export async function generateAll(out, { openapi = OPENAPI, asyncapi = ASYNCAPI } = {}) {
+export async function generateAll(out, { openapi = OPENAPI, asyncapi = ASYNCAPI, proto = PROTO } = {}) {
   const work = mkdtempSync(join(tmpdir(), 'contracts-input-'));
   try {
     // 생성기에 넣는 계약 사본: additionalProperties: false를 같은 뜻의 { not: {} }로 바꾼다(결정 9)
@@ -67,6 +68,8 @@ export async function generateAll(out, { openapi = OPENAPI, asyncapi = ASYNCAPI 
       const fixed = addJsExtensions(annotateRefines(strictifyClosedObjects(text)));
       if (fixed !== text) writeFileSync(p, fixed);
     });
+    // 내부 gRPC 계약의 JSON 설명자(추천 적용 2026-11-03, BUILD_ORDER PRF-020)
+    writeProtoModules(join(out, 'proto'), proto);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

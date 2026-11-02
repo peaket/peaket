@@ -22,6 +22,7 @@
 | `@peaket/contracts/openapi/model` | openapi `components.schemas`(190개)마다 Zod 스키마와 타입 둘(`X`는 `zod.input`, `XOutput`은 `zod.output`). orval이 작업별 매개변수·본문을 따로 꺼낸 스키마(`GetV1WishesParams` 등)도 함께 있다. 작업별 검사에는 태그 파일의 것을 쓴다 |
 | `@peaket/contracts/openapi/<태그>` | 태그(`queue`, `seats`, `orders`, `ops` …)마다 작업별 경로·쿼리·머리·본문·응답 Zod 스키마. 계약에 `operationId`가 아직 없어 이름은 메서드와 경로에서 나온다(`PostV1QueuesEventIdLobbyParticipantsBody`). wbs 0.2.3에서 `operationId`를 붙이면 이름이 바뀐다 |
 | `@peaket/contracts/asyncapi` | asyncapi 메시지 본문마다 Zod 스키마와 타입(메시지 이름 그대로, 예: `OrderEvent`) |
+| `@peaket/contracts/proto` | 내부 gRPC 계약(`docs/api/proto`)의 파일마다 protobufjs JSON 설명자(앞의 `peaket`을 뺀 경로 이름, 예: `identityV1Identity`). 서버는 `.proto` 파일을 읽지 않고 이것을 `@grpc/proto-loader`의 `fromJSON`에 넣는다(Next.js 앱 서버처럼 묶어도 경로가 깨지지 않는다, 2026-11-03 BUILD_ORDER PRF-020). 코드 생성 방식은 BUILD_ORDER BAS-030(proto CI)이 다시 본다 |
 
 내보내기 조건은 셋이다. `types`와 `development`는 원본 `.ts`, `default`는 `tsc`로 만든 `dist/`의 `.js`다. 그래서 Node(서비스 실행)는 `dist/`를 읽고, Vitest와 번들러의 개발 조건은 원본을 읽는다(빌드 없이 시험). 생성된 모음 파일은 상대 다시 내보내기에 `.js`를 붙인다(`export * from './adminAccount.zod.js'`). TypeScript(NodeNext·Bundler)와 Vite는 `.js`를 원본 `.ts`로 찾는다. 서비스는 묶지 않고 `tsc`로만 빌드한다. esbuild로 묶으면 NestJS 생성자 주입에 필요한 데코레이터 메타데이터가 빠지기 때문이다(2026-11-01 확인, openspec 변경 `add-service-structure-and-request-checks` 결정 10, BUILD_ORDER FND-070).
 
@@ -31,5 +32,6 @@
 - 생성기에 넣기 전에 계약 사본의 `additionalProperties: false`를 같은 뜻의 `{ not: {} }`로 바꾼다. orval 8.45는 앞의 것을 무시해 정의 밖 칸을 조용히 버리는 스키마를 만들고, 뒤의 것은 거절하는 스키마(`.catchall(zod.never())`)로 만든다. 그 표기는 입력 타입이 never가 되어 쓸 수 없으므로 생성 뒤 같은 거절을 하는 `.strict()`로 바꾼다. 권한 표는 요청 스키마의 정의 밖 칸을 400으로 거절하라고 한다(docs/security/authz-matrix.md, ASVS 8.2.3).
 - orval이 옮기지 않는 제약 가운데 `uniqueItems`·`maxProperties`·`propertyNames.maxLength`는 `scripts/schema-extensions.mjs`가 검사 규칙(`.refine`)으로 붙이고, 같은 JSON Schema 낱말을 Zod 메타데이터(`.meta()`)로도 단다. `z.toJSONSchema()`는 `.refine`을 옮기지 못하지만 메타데이터는 싣기 때문에, Fastify 경로 스키마와 서비스 문서 비교(D-T38)도 그 제약을 본다(2026-11-01, FND-070). 모르는 모양의 `.refine`이 생기면 생성이 실패한다. 못 옮기는 것(지금은 파트너 웹훅 본문의 조건부 필수 하나)은 `test/untranslated-constraints.test.ts`에 위치를 적어 두고, 계약에 새로 생기면 그 시험이 실패한다.
 - 쿼리·경로·머리 스키마는 계약의 값 형식(숫자 등)을 그대로 적는다. HTTP의 문자열 값을 바꾸는 일은 서비스 템플릿이 검사 전에 한다(BUILD_ORDER FND-070).
+- proto 설명자는 protobufjs 7로 파일마다 읽어 모든 이름을 푼 뒤(없는 형을 가리키면 생성이 실패한다) JSON으로 쓴다. import한 `google/protobuf` 공용 형은 protobufjs 내장 정의로 채운다(`scripts/proto-descriptors.mjs`).
 - asyncapi는 메시지 본문을 OpenAPI 구성 요소로 옮긴 임시 문서를 거쳐 같은 생성기로 만든다. 바이너리 메시지(`application/octet-stream`, 좌석 델타 등)는 뺀다. Avro 메시지의 스키마·타입은 디코드한 뒤의 값 모양이고, 보낼 때의 바이트 호환은 `docs/api/avro/`와 스키마 레지스트리 검사가 맡는다.
 - 응답 스키마는 정의 밖 칸을 버리기만 하고 거절하지 않는다(계약에 `additionalProperties: false`가 없는 한). 응답에 칸을 더하는 것은 깨짐이 아니기 때문이다(docs/api/guidelines.md §1).

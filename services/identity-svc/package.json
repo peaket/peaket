@@ -1,0 +1,38 @@
+{
+  "name": "@peaket/identity-svc",
+  "private": true,
+  "version": "0.0.0",
+  "description": "identity-svc. 지금은 소셜 로그인 뒤 세션 생성·로그아웃·팬 재인증 토큰(gRPC SessionService, docs/features/identity.md §2·§7.1, BUILD_ORDER PRF-020)만 있다. 토큰 회전·종료 사건·서명 키 셋은 PRF-030, 본인확인은 PRF-040이 더한다",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "migrate": "node scripts/migrate.mjs",
+    "db:generate": "drizzle-kit generate",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "1.14.6",
+    "@grpc/proto-loader": "0.8.1",
+    "@nestjs/common": "^12.3.2",
+    "@nestjs/core": "^12.3.2",
+    "@peaket/contracts": "workspace:*",
+    "@peaket/platform": "workspace:*",
+    "@prometheus-io/client": "^0.16.1",
+    "drizzle-orm": "0.45.4",
+    "jose": "6.2.14",
+    "pg": "^8.23.1",
+    "reflect-metadata": "^0.2.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "0.31.11",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
