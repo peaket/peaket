@@ -15,8 +15,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ledgerlib as L  # noqa: E402
 
-HEADER = ('| 날짜 | 측정 ID | KPI | 버전 | 프로파일 | 규모 | p99(ms) | 오류율 | 판정 | 비용(원) | 폴더 |\n'
-          '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n')
+# 증거 수준 칸: manifest evidence(측정함·구현함·설계만·계산만), 없으면 측정함(docs/perf-ledger.md §2.2·§7, 기술 검토 중간-111)
+HEADER = ('| 날짜 | 측정 ID | KPI | 버전 | 프로파일 | 규모 | p99(ms) | 오류율 | 판정 | 증거 수준 | 비용(원) | 폴더 |\n'
+          '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n')
 
 
 def row_for(root, manifest_path):
@@ -40,13 +41,13 @@ def row_for(root, manifest_path):
     cost = m.get('cost_krw')
     return (run_id, f"| {run_id[:10]} | {run_id} | {m.get('kpi','')} | {m.get('version','')} | {m.get('profile','')} | "
             f"{', '.join(scale) or '-'} | {L.fmt_num(p99, 2 if p99 is not None and p99 < 10 else 0)} | {L.fmt_pct(k6.get('error_rate'))} | {verdict} | "
-            f"{L.fmt_num(cost) if cost is not None else '-'} | perf-ledger/runs/{run_id}/ |")
+            f"{m.get('evidence') or '측정함'} | {L.fmt_num(cost) if cost is not None else '-'} | perf-ledger/runs/{run_id}/ |")
 
 
 def rebuild(root):
     paths = glob.glob(os.path.join(root, L.RUNS, '*', 'manifest.json'))
     rows = sorted(row_for(root, p) for p in paths)
-    table = HEADER + ('\n'.join(r for _, r in rows) if rows else '| (아직 없음) | | | | | | | | | | |') + '\n'
+    table = HEADER + ('\n'.join(r for _, r in rows) if rows else '| (아직 없음) | | | | | | | | | | | |') + '\n'
     doc_path = os.path.join(root, L.LEDGER_DOC)
     doc = io.open(doc_path, encoding='utf-8', newline='').read()
     b, e = '<!-- ledger:begin -->', '<!-- ledger:end -->'

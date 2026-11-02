@@ -74,6 +74,16 @@ def load_json(path):
         return json.load(f)
 
 
+def _no_constant(name):
+    raise ValueError(f'JSON 바깥 값 {name}은 받지 않는다')
+
+
+def load_json_strict(path):
+    """사람이 쓰는 입력 파일용: 파이썬 json이 기본으로 받는 NaN·Infinity를 거부한다(범위 검사를 빠져나가지 않게)."""
+    with io.open(path, encoding='utf-8') as f:
+        return json.load(f, parse_constant=_no_constant)
+
+
 def load_manifest(root, run_id):
     return load_json(os.path.join(root, RUNS, run_id, 'manifest.json'))
 
@@ -204,6 +214,9 @@ def _binom_cdf(k, n, p):
         return 1.0
     if p >= 1:
         return 1.0 if k >= n else 0.0
+    if k > 200:
+        # 어긴 수가 많으면 항을 다 더하지 않고 불완전 베타로 계산한다: P(X ≤ k) = I_{1-p}(n-k, k+1)
+        return betainc(n - k, k + 1, 1 - p)
     lp, lq, lg = math.log(p), math.log1p(-p), math.lgamma
     s = 0.0
     for i in range(k + 1):
@@ -227,6 +240,205 @@ def cp_upper(k, n, alpha=0.05):
         else:
             hi = mid
     return hi
+
+
+# --- 비율·백분위 목표의 판정(docs/planning/02 §3.1 원칙 6, docs/perf-ledger.md §2.2 `checks`·§7, 기술 검토 중간-002) ---
+
+class CheckInputError(ValueError):
+    """`--checks` 파일이 형식에 맞지 않는다. 측정 폴더를 만들기 전에 거부한다."""
+
+
+CHECK_NAME = re.compile(r'^[A-Za-z0-9_.-]{1,64}$')
+METRIC_NAME = re.compile(r'^[a-zA-Z_:][a-zA-Z0-9_:]*$')
+# 라벨 선택자는 중괄호 안의 `이름="값"`을 쉼표로 이은 것만 받는다(조회 식을 끝내거나 다른 식을 잇지 못하게).
+# 값 안의 중괄호는 경로 틀(`/v1/queues/{eventId}/entries`)이라 받고, 따옴표·역빗금·줄바꿈은 받지 않는다
+LABEL_MATCH = re.compile(r'^\s*[a-zA-Z_][a-zA-Z0-9_]*\s*(=|!=|=~|!~)\s*"[^"\\\n]*"\s*(,\s*[a-zA-Z_][a-zA-Z0-9_]*\s*(=|!=|=~|!~)\s*"[^"\\\n]*"\s*)*$')
+
+
+def min_trials(allowed, alpha=0.05):
+    """어긴 수가 0일 때 상한이 허용 비율 이하가 되는 최소 시행 수(99.9%면 2,995, p99면 299, p95면 59)."""
+    return math.ceil(math.log(alpha) / math.log1p(-allowed) - 1e-9)
+
+
+def judge_check(name, allowed, trials, violations, target=None):
+    """점검 한 줄의 판정. 최소 시행 수 미달은 observed, 상한이 허용 비율 이하면 pass, 아니면 fail."""
+    up = cp_upper(violations, trials)
+    need = min_trials(allowed)
+    result = 'observed' if trials < need else ('pass' if up <= allowed else 'fail')
+    out = {'name': name, 'allowed': allowed, 'trials': trials, 'violations': violations,
+           'cp_upper': round(up, 6) if up is not None else None, 'min_trials': need, 'result': result}
+    if target:
+        out['target'] = target
+    return out
+
+
+def _finite_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _is_count(v):
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+def parse_checks(doc):
+    """`--checks` JSON → (점검 정의 목록, 대조 정의). 모르는 키·범위 밖 값은 CheckInputError."""
+    if not isinstance(doc, dict) or set(doc) - {'checks', 'crosscheck'} or not isinstance(doc.get('checks'), list):
+        raise CheckInputError('맨 위는 checks(목록)와 crosscheck만 둔다')
+    if not doc['checks']:
+        raise CheckInputError('checks가 비었다(점검이 없으면 --checks를 주지 않는다)')
+    seen, out = set(), []
+    for i, c in enumerate(doc['checks']):
+        where = f'checks[{i}]'
+        if not isinstance(c, dict):
+            raise CheckInputError(f'{where}: 객체가 아니다')
+        extra = set(c) - {'name', 'target', 'allowed', 'trials', 'violations', 'histogram'}
+        if extra:
+            raise CheckInputError(f'{where}: 모르는 키 {sorted(extra)}')
+        name = c.get('name')
+        if not isinstance(name, str) or not CHECK_NAME.match(name) or name in seen:
+            raise CheckInputError(f'{where}: 이름은 영문·숫자·_.- 64자 이하이고 겹치지 않는다')
+        seen.add(name)
+        allowed = c.get('allowed')
+        if not _finite_number(allowed) or not 0 < allowed < 1:
+            raise CheckInputError(f'{name}: allowed는 0과 1 사이다')
+        if c.get('target') is not None and not isinstance(c['target'], str):
+            raise CheckInputError(f'{name}: target은 글이다')
+        has_counts = 'trials' in c or 'violations' in c
+        if has_counts == ('histogram' in c):
+            raise CheckInputError(f'{name}: trials·violations와 histogram 가운데 하나만 준다')
+        if has_counts:
+            n, k = c.get('trials'), c.get('violations')
+            if not _is_count(n) or not _is_count(k) or n == 0 or k > n:
+                raise CheckInputError(f'{name}: trials는 1 이상 정수, violations는 0 이상이고 trials 이하인 정수다')
+        else:
+            h = c['histogram']
+            if not isinstance(h, dict) or set(h) - {'metric', 'match', 'le'}:
+                raise CheckInputError(f'{name}: histogram은 metric·match·le만 둔다')
+            if not isinstance(h.get('metric'), str) or not METRIC_NAME.match(h['metric']):
+                raise CheckInputError(f'{name}: histogram.metric이 지표 이름이 아니다')
+            if not isinstance(h.get('match'), str) or not LABEL_MATCH.match(h['match']):
+                raise CheckInputError(f'{name}: histogram.match는 이름="값"을 쉼표로 이은 라벨 선택자다')
+            le = h.get('le')
+            if not _finite_number(le) or le <= 0:
+                raise CheckInputError(f'{name}: histogram.le는 양수(초)다')
+        out.append(c)
+    cross = doc.get('crosscheck')
+    if cross is not None:
+        if not isinstance(cross, dict) or set(cross) - {'check', 'target_ms', 'k6_metric'}:
+            raise CheckInputError('crosscheck는 check·target_ms·k6_metric만 둔다')
+        ref = next((c for c in out if c['name'] == cross.get('check')), None)
+        if ref is None or 'histogram' not in ref:
+            raise CheckInputError('crosscheck.check는 histogram 점검의 이름이다')
+        # 목표는 그 점검의 기준값 칸이다. 따로 적으면 같은 값이어야 한다(두 기준을 섞어 '측정 지점 의심'을 판단하지 않게)
+        target = ref['histogram']['le'] * 1000
+        t = cross.get('target_ms', target)
+        if not _finite_number(t) or abs(t - target) > 1e-6 * max(1.0, target):
+            raise CheckInputError(f'crosscheck.target_ms({t})가 점검 {ref["name"]}의 기준값 칸({target}ms)과 다르다')
+        # 같은 창·같은 경로가 되게 시나리오가 측정 구간·경로 요청에 단 태그의 하위 지표를 적는다(기본값을 두지 않는다)
+        if not isinstance(cross.get('k6_metric'), str) or not cross['k6_metric']:
+            raise CheckInputError('crosscheck.k6_metric(측정 구간·경로의 k6 하위 지표 이름)이 필요하다')
+        cross = {**cross, 'target_ms': target}
+    return out, cross
+
+
+# 측정 창의 칸 개수는 창 끝과 창 시작의 카운터 합의 차이로 센다. increase()는 창 안에서 처음 나타난 시계열(측정 중에
+# 뜬 파드)의 첫 표본을 세지 않고 외삽으로 소수를 만들어, 느린 요청이 몰리는 막 뜬 파드 몫을 빠뜨린다(새 맥락 리뷰).
+# 창 시작에 없던 시계열은 0부터 센다. 창 안에서 사라진 시계열과 카운터 되돌아감은 셀 수 없어 거부한다.
+def _sel(h):
+    return f'{h["metric"]}_bucket{{{h["match"]}}}'
+
+
+def hist_sum_query(h):
+    return f'sum by (le) ({_sel(h)})'
+
+
+LOOKBACK_S = 300  # Prometheus 조회 유예(기본 5분). 창 시작의 합은 이만큼 앞의 표본까지 쓴다
+
+
+def hist_lost_query(h, window_s):
+    """창 끝에서 부른다: 창 안에 표본이 있었는데 끝에 없는 시계열 수(창 시작에 있다 사라진 것과 창 안에서 생겼다 사라진 것 모두)."""
+    return f'count(last_over_time({_sel(h)}[{int(window_s)}s]) unless {_sel(h)})'
+
+
+def hist_resets_query(h, window_s):
+    """창 끝에서 부른다: 카운터 되돌아감(프로세스 재시작) 수. 창 시작의 합이 쓰는 앞 표본과 창 안 첫 표본 사이의
+    재시작도 보도록 조회 유예만큼 앞에서부터 본다(예열 중의 재시작도 잡혀 거부되지만 안전한 쪽이다)."""
+    return f'sum(resets({_sel(h)}[{int(window_s) + LOOKBACK_S}s]))'
+
+
+def scalar_of(result):
+    """sum·count 즉시 조회 결과 → 수(결과가 없으면 0)."""
+    return sum(float(s['value'][1]) for s in result or [])
+
+
+def hist_buckets(result, need_inf=True):
+    """sum by (le) 즉시 조회 결과 → [(le, 개수)] le 오름차순. 같은 경계를 다르게 적은 칸('1'·'1.0')은 합친다."""
+    acc = {}
+    for s in result or []:
+        le = (s.get('metric') or {}).get('le')
+        if le is None:
+            continue
+        b = math.inf if le in ('+Inf', 'Inf') else float(le)
+        acc[b] = acc.get(b, 0.0) + float(s['value'][1])
+    out = sorted((b, round(v)) for b, v in acc.items())
+    if need_inf and (not out or out[-1][0] != math.inf):
+        raise CheckInputError('히스토그램에 +Inf 칸이 없다(지표 이름·선택자를 확인한다)')
+    return out
+
+
+def hist_window(start, end):
+    """창 끝 칸 − 창 시작 칸(시작에 없는 칸은 0). 줄어든 칸이 있으면 셀 수 없다. 누적 개수가 거꾸로 가면 앞 칸 값으로 맞춘다
+    (Prometheus histogram_quantile과 같은 처리)."""
+    s = dict(start)
+    out, prev = [], 0
+    for b, c in end:
+        d = c - s.pop(b, 0)
+        if d < 0:
+            raise CheckInputError(f'칸 {b}의 카운터가 창 안에서 되돌아갔다(재시작). 셀 수 없다')
+        prev = max(prev, d)
+        out.append((b, prev))
+    if s:
+        raise CheckInputError(f'창 시작에만 있는 칸 {sorted(s)}이 있다(사라진 시계열). 셀 수 없다')
+    return out
+
+
+def hist_counts(buckets, le):
+    """(시행 수, 기준값을 넘은 수). 기준값과 같은 칸 경계가 없으면 CheckInputError(ADR-0077: 칸 경계를 기준값에 맞춘다)."""
+    n = buckets[-1][1]
+    at = next((c for b, c in buckets if abs(b - le) <= 1e-9 * max(1.0, le)), None)
+    if at is None:
+        raise CheckInputError(f'기준값 {le}초와 같은 칸 경계가 없다(있는 칸: {[b for b, _ in buckets[:-1]]})')
+    return n, max(0, n - at)
+
+
+def hist_quantile(q, buckets):
+    """Prometheus histogram_quantile과 같은 선형 보간(초). 개수가 없으면 None."""
+    n = buckets[-1][1]
+    if n <= 0:
+        return None
+    rank = q * n
+    prev_le, prev_c = 0.0, 0
+    for le, c in buckets:
+        if c >= rank:
+            if le == math.inf:
+                return prev_le
+            if c == prev_c:
+                return le
+            return prev_le + (le - prev_le) * (rank - prev_c) / (c - prev_c)
+        prev_le, prev_c = le, c
+    return prev_le
+
+
+def verdict_from_checks(checks):
+    """점검 결과 → 판정. 하나라도 fail이면 fail, observed가 있으면 None(미판정), 모두 pass면 pass."""
+    results = [c['result'] for c in checks]
+    if 'fail' in results:
+        return 'fail'
+    return None if 'observed' in results else 'pass'
+
+
+def observed_notes(checks):
+    return [f'{c["name"]}: 관측값(시행 {c["trials"]}번, 최소 시행 수 미달)' for c in checks if c['result'] == 'observed']
 
 
 def betainc(a, b, x):

@@ -67,12 +67,13 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | `region` | 클라우드에서 실행할 때 배포한 리전(클라우드 데이터센터가 모인 지역), 또는 `local` 표기 | `local`, `ap-northeast-2` |
 | `cost_krw`, `exchange_rate` | 부하 시험에 든 실측 AWS 인프라 비용(원)과 적용 환율 | 0 (로컬) 또는 실측 비용 |
 | `valid` | 벤치마크가 유효한지 판정한 플래그(`true`/`false`)와 무효 사유 `invalid_reason` | 부하 발생기 CPU가 포화되면 `false`로 표시 |
-| `verdict` | 최종 검증 판정 결과 (`pass`, `fail`, `baseline`) | `pass` |
+| `verdict` | 최종 검증 판정 결과 (`pass`, `fail`, `baseline`). 아래 `checks`가 있으면 `collect.py`가 정한다: 모두 `pass`면 `pass`, 하나라도 `fail`이면 `fail`, 최소 시행 수 미달(`observed`)이 있으면 비우고 `notes`에 '관측값(시행 n번, 최소 시행 수 미달)'을 더한다. `--verdict pass`가 점검과 어긋나면(`fail`·`observed`가 있음) 측정 폴더를 만들지 않고 거부한다. `fail`은 점검 밖의 까닭(불변식 위반 등)이 있을 수 있어 그대로 두고, `baseline`도 그대로 두고 점검 결과만 남긴다(§7, 추천 적용 2026-11-02) | `pass` |
 | `notes` | 스팟 인스턴스 회수, 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)를 데우는 구간의 예외 처리 같은 특이 사항 | 자유롭게 적는다 |
 | `k6_eval`, `k6_plan`, `k6_cost` | K6 봇 탐지에만 쓴다. 등급·라운드별 탐지율과 Wilson 95% 구간(3단계는 목표가 없다), 등급별 하락폭, 사람 오탐(사람을 봇으로 잘못 잡는 것)과 Clopper-Pearson 단측 95% 상한(판정 기록끼리 독립 가정, 1인 1판정 기록), 사람 쪽 원천(`public` 공개 자료 기준·`mock` 모의 사람(리허설)·`live` 실제 사람 기준(출시 뒤))과 자료 이름·판·해시·출처 표시·조정용과 판정용을 나눈 씨앗값(추천 적용 2026-10-31, ADR-0174), 사람 단위 확인(ADR-0112), 사전 등록 계획 판정, 1장당 획득 비용과 웃돈별 손익(`collect.py --confusion --k6-plan --k6-source --bot-cost --bot-prices`, §10) | 1단계 물량형 봇 탐지 96.2%(94.8~97.2%), 사람 오탐 1/947명(공개 자료 기준, 상한 0.50%, 계획 통과) |
-| `latency_crosscheck` | 같은 시간 창의 k6 p99(요청 백 건 중 아흔아홉 건이 이 시간 안에 끝난다는 뜻)와, 서버가 실제로 잰 품질 값인 서버 SLI(같은 경로에서 값을 구간별로 나눠 센 서버 히스토그램의 p99와 기준값 안 비율), 둘의 차이, '측정 지점 의심' 표시(서버 SLI는 목표 안인데 k6 값이 목표 밖일 때, ADR-0077) | 진입 k6 p99 182ms, 서버 p99 151ms·200ms 안 99.6%, 차이 31ms, 의심 아님 |
+| `latency_crosscheck` | 같은 시간 창의 k6 p99(요청 백 건 중 아흔아홉 건이 이 시간 안에 끝난다는 뜻)와, 서버가 실제로 잰 품질 값인 서버 SLI(같은 경로에서 값을 구간별로 나눠 센 서버 히스토그램의 p99와 기준값 안 비율), 둘의 차이, '측정 지점 의심' 표시(서버 SLI는 목표 안인데 k6 값이 목표 밖일 때, ADR-0077). 수집은 `collect.py --checks` 파일의 `crosscheck`(서버 히스토그램 점검 이름 `check`, k6 하위 지표 이름 `k6_metric`)로 한다. 목표는 그 점검의 기준값 칸(`le`)이고, `target_ms`를 따로 적으면 같은 값이어야 한다. 같은 창·같은 경로를 견주도록 시나리오가 측정 구간·경로 요청에 태그를 달고(예: `http_req_duration{phase:measure,route:entry}`) 그 이름을 `k6_metric`에 적는다(기본값을 두지 않는다). k6는 기준(threshold)을 건 하위 지표만 요약에 남기므로 시나리오의 `thresholds`에 그 이름을 둔다(예: `max>=0`). 서버 p99는 그 점검의 측정 창 칸 개수에서 Prometheus `histogram_quantile`과 같은 선형 보간(누적 개수가 거꾸로 가면 앞 칸 값으로 맞춤)으로 구하고, 서버 SLI가 목표 안이라는 것은 서버 p99가 목표 이하이고 그 점검이 `pass`라는 뜻이다(추천 적용 2026-11-02) | 진입 k6 p99 182ms, 서버 p99 151ms·200ms 안 99.6%, 차이 31ms, 의심 아님 |
 | `pg_sim` | 결제 시뮬레이터의 기본 승인 지연 분포와 매개변수, 시험이 넣은 지연, 결제 확정 p99를 우리 몫(결제사 승인 호출 구간을 뺀 값)과 가정 분포를 더한 종단 둘로 나눈 값(docs/features/payment.md §2.1, NFR-006, 기술 검토 낮음-120) | `dist: lognormal`, `p50_ms: 300`, `p99_ms: 1500`, `own_p99_ms`, `e2e_p99_ms` |
-| `trials`, `violations`, `cp_upper` | 비율·백분위 목표마다 시행 수 n, 목표를 어긴 수 k, 정확 이항 단측 95% 상한(§7, 기술 검토 중간-002). 수집 도구 반영은 wbs 1.4.1 | `n: 3000`, `k: 0`, `cp_upper: 0.000998` |
+| `checks` | 비율·백분위 목표마다 한 줄: 이름 `name`, 허용 비율 `allowed`(1 − 목표. p99면 0.01), 시행 수 `trials`(n), 목표를 어긴 수 `violations`(k. 백분위는 기준값을 넘은 수), 정확 이항 단측 95% 상한 `cp_upper`, 최소 시행 수 `min_trials`, 결과 `result`(`pass`·`fail`·`observed`. `observed`는 최소 시행 수 미달)(§7, 기술 검토 중간-002). 입력은 `collect.py --checks <JSON>`이다. 점검마다 시행 수·어긴 수를 직접 적거나(`trials`·`violations`), 서버 히스토그램(`histogram`: 지표 이름, 라벨 선택자, 기준값 칸 경계 `le`(초))을 주면 측정 창(시작 + 예열 ~ 끝)의 끝과 시작에서 칸 카운터 합을 Prometheus로 읽어 그 차이로 센다. 창 시작에 없던 시계열(측정 중에 뜬 파드)은 0부터 다 세고, 같은 경계를 다르게 적은 칸(`1`·`1.0`)은 합친다. `increase()`는 막 뜬 시계열의 첫 표본을 세지 않고 외삽 소수를 만들어 쓰지 않는다. 창 안에서 사라진 시계열(창 시작에 있다 사라진 것과 창 안에서 생겼다 사라진 것)이나 카운터 되돌아감(파드 종료·재시작, 창 시작의 합이 쓰는 조회 유예 5분 앞부터 봄)이 있으면 셀 수 없어 거부한다. 점검이 하나도 없거나, 기준값과 같은 칸 경계가 없거나, 모르는 키나 `NaN`·`Infinity`가 있으면 측정 폴더를 만들지 않고 거부한다(ADR-0077, 추천 적용 2026-11-02) | `{"name": "entry_p99_200ms", "allowed": 0.01, "trials": 3000, "violations": 0, "cp_upper": 0.000998, "min_trials": 299, "result": "pass"}` |
+| `evidence` | 증거 수준(측정함·구현함·설계만·계산만, docs/planning/02 §2 '증거 수준'). 실행 폴더가 있는 측정은 기본이 측정함이다. 외삽이나 문서 인용 값을 장부에 남길 때만 `collect.py --evidence 계산만`으로 적는다. 장부 요약 표(§5)의 '증거 수준' 칸이 이 값이다(추천 적용 2026-11-02) | `측정함` |
 
 ### 2.3 서버 시계열 메트릭 규약 (Prometheus Query Alias)
 
@@ -127,159 +128,159 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 측정은 1회 실행당 1개의 레코드로 관리한다. 아래 마커 블록 안은 `index.py` 도구가 자동으로 맞춘다.
 
 <!-- ledger:begin -->
-| 날짜 | 측정 ID | KPI | 버전 | 프로파일 | 규모 | p99(ms) | 오류율 | 판정 | 비용(원) | 폴더 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-11-01 | 2026-11-01-incr-batch-notls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.39 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incr-batch-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-incr-batch-tls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.22 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incr-batch-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-incr-batch-tls-r2-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.06 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incr-batch-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-incr-batch-tls-r3-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.14 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incr-batch-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-incr-incr-notls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 22 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incr-incr-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-incr-incr-tls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 20 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incr-incr-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-incr-incr-tls-r2-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 50 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incr-incr-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-incr-incr-tls-r3-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 43 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incr-incr-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-incrmax-notls-r1-local-poc | NFR-001 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incrmax-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-incrmax-tls-r1-local-poc | NFR-001 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incrmax-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-incrmax-tls-r2-local-poc | NFR-001 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incrmax-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-incrmax-tls-r3-local-poc | NFR-001 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-incrmax-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-kafka-batch-keyed-local-poc | ST-T18 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-kafka-batch-keyed-local-poc/ |
-| 2026-11-01 | 2026-11-01-kafka-batch-serial-local-poc | ST-T18 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-kafka-batch-serial-local-poc/ |
-| 2026-11-01 | 2026-11-01-kafka-max-local-poc | ST-T18 | v1 | local-poc | - | 45 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-kafka-max-local-poc/ |
-| 2026-11-01 | 2026-11-01-kafka-mixed-r1-local-poc | ST-T18 | v1 | local-poc | 5,900 RPS | 7.79 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-kafka-mixed-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-kafka-mixed-r2-local-poc | ST-T18 | v1 | local-poc | 5,900 RPS | 7.91 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-kafka-mixed-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-kafka-mixed-r3-local-poc | ST-T18 | v1 | local-poc | 5,900 RPS | 7.79 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-kafka-mixed-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-st27-five-same-rb100-notls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 5.57 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-st27-five-same-rb100-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-st27-five-same-rb100-tls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 5.66 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-st27-five-same-rb100-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-st27-five-same-rb100-tls-r2-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 5.75 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-st27-five-same-rb100-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-st27-five-same-rb100-tls-r3-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 5.68 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-st27-five-same-rb100-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-st27-five-same-tls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 32 | 1.0% | 무효(측정 도구 멈춤: 오버셀 검사 기록을 좌석마다 자바스크) | 0 | perf-ledger/runs/2026-11-01-st27-five-same-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-st27-five-spread-rb100-tls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 6.23 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-st27-five-spread-rb100-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-st27-one-same-rb100-notls-r1-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 2.42 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-st27-one-same-rb100-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-st27-one-same-rb100-tls-r1-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 2.67 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-st27-one-same-rb100-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-st27-one-same-tls-r1-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 3.94 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-st27-one-same-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-st27-one-same-tls-r2-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 3.27 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-st27-one-same-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-st27-one-same-tls-r3-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 3.76 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-st27-one-same-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-glide-r1-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-glide-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-glide-r2-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-glide-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-glide-r3-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-glide-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-ioredis-r1-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-ioredis-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-ioredis-r2-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-ioredis-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-ioredis-r3-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-ioredis-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-deadline-r1-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-deadline-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-deadline-r2-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-deadline-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-deadline-r3-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-deadline-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-r1-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-r2-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-r3-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-glide-notls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.67 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-glide-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-glide-tls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.73 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-glide-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-glide-tls-r2-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.78 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-glide-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-glide-tls-r3-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.59 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-glide-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-ioredis-notls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.84 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-ioredis-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-ioredis-tls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.78 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-ioredis-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-ioredis-tls-r2-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.78 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-ioredis-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-ioredis-tls-r3-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.59 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-ioredis-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-node-redis-notls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 3.07 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-node-redis-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-node-redis-tls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 3.43 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-node-redis-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-node-redis-tls-r2-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 3.17 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-node-redis-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-hold-node-redis-tls-r3-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 4.71 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-node-redis-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-glide-notls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 22 | 0.3% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-glide-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-glide-tls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 10 | 0.3% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-glide-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-glide-tls-r2-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 2.67 | 0.1% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-glide-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-glide-tls-r3-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 46 | 0.6% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-glide-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-ioredis-notls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 3.39 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-ioredis-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-ioredis-tls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 3.10 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-ioredis-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-ioredis-tls-r2-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 3.29 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-ioredis-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-ioredis-tls-r3-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 3.07 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-ioredis-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-node-redis-notls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 12 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-node-redis-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-node-redis-tls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 38 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-node-redis-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-node-redis-tls-r2-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 25 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-node-redis-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-incr-node-redis-tls-r3-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 20 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-node-redis-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-glide-notls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-glide-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-glide-tls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-glide-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-glide-tls-r2-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-glide-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-glide-tls-r3-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-glide-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-ioredis-notls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-ioredis-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-ioredis-tls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-ioredis-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-ioredis-tls-r2-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-ioredis-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-ioredis-tls-r3-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-ioredis-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-node-redis-notls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-node-redis-notls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-node-redis-tls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-node-redis-tls-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-node-redis-tls-r2-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-node-redis-tls-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt33-max-node-redis-tls-r3-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt33-max-node-redis-tls-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-b-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 97 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-b-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-b-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 98 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-b-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-b-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 102 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-b-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-c-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 2.54 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-c-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-c-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 2.74 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-c-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-c-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 3.59 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-c-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-r1-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 4.17 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-r2-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 9.60 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-r3-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 3.40 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-b-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 138 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-b-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-b-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 100 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-b-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-b-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 42 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-b-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-c-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.78 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-c-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-c-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 2.39 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-c-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-c-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 2.34 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-c-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-r1-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 10 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-r2-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 8.76 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-r3-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 5.91 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-b-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 93 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-b-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-b-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 106 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-b-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-b-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 97 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-b-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-c-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 1.16 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-c-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-c-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 1.57 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-c-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-c-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 1.93 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-c-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-r1-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 4.35 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-r2-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 3.88 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-r3-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 94 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-b-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 104 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-b-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-b-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 90 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-b-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-b-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 99 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-b-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-c-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.01 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-c-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-c-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.09 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-c-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-c-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.34 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-c-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-r1-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 4.29 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-r2-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 2.79 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-r3-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 3.35 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-b-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 97 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-b-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-b-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 89 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-b-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-b-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 98 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-b-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-c-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 1.66 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-c-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-c-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 1.54 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-c-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-c-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 2.58 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-c-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-r1-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 2.24 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-r2-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 4.24 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-r3-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 99 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-b-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 99 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-b-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-b-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 95 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-b-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-b-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 93 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-b-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-c-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.69 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-c-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-c-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.48 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-c-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-c-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.48 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-c-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-r1-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 4.94 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-r1-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-r2-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 5.08 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-r2-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-r3-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 2.76 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-r3-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max-express-zod-entry-local-poc | V-T41 | v1 | local-poc | - | 7.29 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-max-express-zod-entry-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max-express-zod-hold-local-poc | V-T41 | v1 | local-poc | - | 8.00 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-max-express-zod-hold-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max-fastify-schema-entry-local-poc | V-T41 | v1 | local-poc | - | 5.25 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-max-fastify-schema-entry-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max-fastify-schema-hold-local-poc | V-T41 | v1 | local-poc | - | 5.91 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-max-fastify-schema-hold-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max-fastify-zod-entry-local-poc | V-T41 | v1 | local-poc | - | 5.62 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-max-fastify-zod-entry-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max-fastify-zod-hold-local-poc | V-T41 | v1 | local-poc | - | 6.54 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 0 | perf-ledger/runs/2026-11-01-vt41-max-fastify-zod-hold-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max2-express-zod-entry-local-poc | V-T41 | v1 | local-poc | - | 8.78 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-express-zod-entry-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max2-express-zod-hold-local-poc | V-T41 | v1 | local-poc | - | 8.63 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-express-zod-hold-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max2-fastify-schema-entry-local-poc | V-T41 | v1 | local-poc | - | 5.86 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-schema-entry-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max2-fastify-schema-hold-local-poc | V-T41 | v1 | local-poc | - | 8.11 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-schema-hold-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max2-fastify-zod-entry-local-poc | V-T41 | v1 | local-poc | - | 5.93 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-zod-entry-local-poc/ |
-| 2026-11-01 | 2026-11-01-vt41-max2-fastify-zod-hold-local-poc | V-T41 | v1 | local-poc | - | 8.15 | 0.0% | 미판정 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-zod-hold-local-poc/ |
+| 날짜 | 측정 ID | KPI | 버전 | 프로파일 | 규모 | p99(ms) | 오류율 | 판정 | 증거 수준 | 비용(원) | 폴더 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-01 | 2026-11-01-incr-batch-notls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.39 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incr-batch-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-incr-batch-tls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.22 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incr-batch-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-incr-batch-tls-r2-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.06 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incr-batch-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-incr-batch-tls-r3-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 4.14 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incr-batch-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-incr-incr-notls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 22 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incr-incr-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-incr-incr-tls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 20 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incr-incr-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-incr-incr-tls-r2-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 50 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incr-incr-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-incr-incr-tls-r3-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 43 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incr-incr-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-incrmax-notls-r1-local-poc | NFR-001 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incrmax-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-incrmax-tls-r1-local-poc | NFR-001 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incrmax-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-incrmax-tls-r2-local-poc | NFR-001 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incrmax-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-incrmax-tls-r3-local-poc | NFR-001 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-incrmax-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-kafka-batch-keyed-local-poc | ST-T18 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-kafka-batch-keyed-local-poc/ |
+| 2026-11-01 | 2026-11-01-kafka-batch-serial-local-poc | ST-T18 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-kafka-batch-serial-local-poc/ |
+| 2026-11-01 | 2026-11-01-kafka-max-local-poc | ST-T18 | v1 | local-poc | - | 45 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-kafka-max-local-poc/ |
+| 2026-11-01 | 2026-11-01-kafka-mixed-r1-local-poc | ST-T18 | v1 | local-poc | 5,900 RPS | 7.79 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-kafka-mixed-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-kafka-mixed-r2-local-poc | ST-T18 | v1 | local-poc | 5,900 RPS | 7.91 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-kafka-mixed-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-kafka-mixed-r3-local-poc | ST-T18 | v1 | local-poc | 5,900 RPS | 7.79 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-kafka-mixed-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-st27-five-same-rb100-notls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 5.57 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-st27-five-same-rb100-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-st27-five-same-rb100-tls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 5.66 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-st27-five-same-rb100-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-st27-five-same-rb100-tls-r2-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 5.75 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-st27-five-same-rb100-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-st27-five-same-rb100-tls-r3-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 5.68 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-st27-five-same-rb100-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-st27-five-same-tls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 32 | 1.0% | 무효(측정 도구 멈춤: 오버셀 검사 기록을 좌석마다 자바스크) | 측정함 | 0 | perf-ledger/runs/2026-11-01-st27-five-same-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-st27-five-spread-rb100-tls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 6.23 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-st27-five-spread-rb100-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-st27-one-same-rb100-notls-r1-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 2.42 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-st27-one-same-rb100-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-st27-one-same-rb100-tls-r1-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 2.67 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-st27-one-same-rb100-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-st27-one-same-tls-r1-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 3.94 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-st27-one-same-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-st27-one-same-tls-r2-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 3.27 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-st27-one-same-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-st27-one-same-tls-r3-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 3.76 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-st27-one-same-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-glide-r1-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-glide-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-glide-r2-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-glide-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-glide-r3-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-glide-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-ioredis-r1-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-ioredis-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-ioredis-r2-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-ioredis-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-ioredis-r3-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-ioredis-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-deadline-r1-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-deadline-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-deadline-r2-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-deadline-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-deadline-r3-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-deadline-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-r1-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-r2-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-behaviors-node-redis-r3-local-poc | V-T33 | v1 | local-poc | - | - | - | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-behaviors-node-redis-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-glide-notls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.67 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-glide-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-glide-tls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.73 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-glide-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-glide-tls-r2-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.78 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-glide-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-glide-tls-r3-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.59 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-glide-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-ioredis-notls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.84 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-ioredis-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-ioredis-tls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.78 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-ioredis-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-ioredis-tls-r2-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.78 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-ioredis-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-ioredis-tls-r3-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 2.59 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-ioredis-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-node-redis-notls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 3.07 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-node-redis-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-node-redis-tls-r1-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 3.43 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-node-redis-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-node-redis-tls-r2-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 3.17 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-node-redis-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-hold-node-redis-tls-r3-local-poc | V-T33 | v1 | local-poc | 5,000 RPS | 4.71 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-hold-node-redis-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-glide-notls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 22 | 0.3% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-glide-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-glide-tls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 10 | 0.3% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-glide-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-glide-tls-r2-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 2.67 | 0.1% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-glide-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-glide-tls-r3-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 46 | 0.6% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-glide-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-ioredis-notls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 3.39 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-ioredis-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-ioredis-tls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 3.10 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-ioredis-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-ioredis-tls-r2-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 3.29 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-ioredis-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-ioredis-tls-r3-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 3.07 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-ioredis-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-node-redis-notls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 12 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-node-redis-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-node-redis-tls-r1-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 38 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-node-redis-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-node-redis-tls-r2-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 25 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-node-redis-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-incr-node-redis-tls-r3-local-poc | V-T33 | v1 | local-poc | 40,000 RPS | 20 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-incr-node-redis-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-glide-notls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-glide-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-glide-tls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-glide-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-glide-tls-r2-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-glide-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-glide-tls-r3-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-glide-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-ioredis-notls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-ioredis-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-ioredis-tls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-ioredis-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-ioredis-tls-r2-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-ioredis-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-ioredis-tls-r3-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-ioredis-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-node-redis-notls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-node-redis-notls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-node-redis-tls-r1-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-node-redis-tls-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-node-redis-tls-r2-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-node-redis-tls-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt33-max-node-redis-tls-r3-local-poc | V-T33 | v1 | local-poc | - | - | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt33-max-node-redis-tls-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-b-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 97 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-b-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-b-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 98 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-b-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-b-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 102 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-b-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-c-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 2.54 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-c-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-c-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 2.74 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-c-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-c-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 3.59 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-c-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-r1-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 4.17 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-r2-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 9.60 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-entry-r3-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 3.40 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-entry-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-b-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 138 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-b-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-b-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 100 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-b-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-b-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 42 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-b-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-c-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.78 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-c-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-c-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 2.39 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-c-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-c-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 2.34 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-c-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-r1-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 10 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-r2-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 8.76 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-express-zod-hold-r3-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 5.91 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-express-zod-hold-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-b-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 93 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-b-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-b-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 106 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-b-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-b-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 97 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-b-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-c-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 1.16 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-c-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-c-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 1.57 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-c-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-c-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 1.93 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-c-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-r1-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 4.35 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-r2-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 3.88 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-entry-r3-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 94 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-entry-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-b-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 104 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-b-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-b-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 90 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-b-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-b-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 99 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-b-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-c-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.01 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-c-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-c-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.09 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-c-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-c-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.34 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-c-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-r1-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 4.29 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-r2-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 2.79 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-schema-hold-r3-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 3.35 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-schema-hold-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-b-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 97 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-b-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-b-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 89 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-b-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-b-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 98 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-b-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-c-r1-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 1.66 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-c-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-c-r2-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 1.54 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-c-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-c-r3-local-poc | V-T41 | v1 | local-poc | 8,000 RPS | 2.58 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-c-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-r1-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 2.24 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-r2-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 4.24 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-entry-r3-local-poc | V-T41 | v1 | local-poc | 10,400 RPS | 99 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-entry-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-b-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 99 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-b-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-b-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 95 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-b-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-b-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 93 | 0.0% | 무효(두 번째 회차: k6 가상 사용자 4,009명을 CPU) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-b-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-c-r1-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.69 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-c-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-c-r2-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.48 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-c-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-c-r3-local-poc | V-T41 | v1 | local-poc | 7,600 RPS | 1.48 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-c-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-r1-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 4.94 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-r1-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-r2-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 5.08 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-r2-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-fastify-zod-hold-r3-local-poc | V-T41 | v1 | local-poc | 10,100 RPS | 2.76 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-fastify-zod-hold-r3-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max-express-zod-entry-local-poc | V-T41 | v1 | local-poc | - | 7.29 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max-express-zod-entry-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max-express-zod-hold-local-poc | V-T41 | v1 | local-poc | - | 8.00 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max-express-zod-hold-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max-fastify-schema-entry-local-poc | V-T41 | v1 | local-poc | - | 5.25 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max-fastify-schema-entry-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max-fastify-schema-hold-local-poc | V-T41 | v1 | local-poc | - | 5.91 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max-fastify-schema-hold-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max-fastify-zod-entry-local-poc | V-T41 | v1 | local-poc | - | 5.62 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max-fastify-zod-entry-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max-fastify-zod-hold-local-poc | V-T41 | v1 | local-poc | - | 6.54 | 0.0% | 무효(첫 회차: k6 가상 사용자를 200명만 미리 만들어 ) | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max-fastify-zod-hold-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max2-express-zod-entry-local-poc | V-T41 | v1 | local-poc | - | 8.78 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-express-zod-entry-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max2-express-zod-hold-local-poc | V-T41 | v1 | local-poc | - | 8.63 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-express-zod-hold-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max2-fastify-schema-entry-local-poc | V-T41 | v1 | local-poc | - | 5.86 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-schema-entry-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max2-fastify-schema-hold-local-poc | V-T41 | v1 | local-poc | - | 8.11 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-schema-hold-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max2-fastify-zod-entry-local-poc | V-T41 | v1 | local-poc | - | 5.93 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-zod-entry-local-poc/ |
+| 2026-11-01 | 2026-11-01-vt41-max2-fastify-zod-hold-local-poc | V-T41 | v1 | local-poc | - | 8.15 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-zod-hold-local-poc/ |
 <!-- ledger:end -->
 
 표준 서식 예시 (참고용 Mock 데이터):
 
-| 날짜 | 측정 ID | KPI | 버전 | 프로파일 | 규모 | p99(ms) | 오류율 | 판정 | 비용(원) | 폴더 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 예시 | 2026-11-02-k1-v0-local-10k | K1 | v0 | local-10k | 10,000명, 20,000 RPS | 2,300 | 4.0% | baseline | 0 | runs/… |
-| 예시 | 2026-11-09-k1-v1-local-10k | K1 | v1 | local-10k | 10,000명, 20,000 RPS | 80 | 0.0% | pass | 0 | runs/… |
+| 날짜 | 측정 ID | KPI | 버전 | 프로파일 | 규모 | p99(ms) | 오류율 | 판정 | 증거 수준 | 비용(원) | 폴더 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 예시 | 2026-11-02-k1-v0-local-10k | K1 | v0 | local-10k | 10,000명, 20,000 RPS | 2,300 | 4.0% | baseline | 측정함 | 0 | runs/… |
+| 예시 | 2026-11-09-k1-v1-local-10k | K1 | v1 | local-10k | 10,000명, 20,000 RPS | 80 | 0.0% | pass | 측정함 | 0 | runs/… |
 
 K8(Game Day) 실행 행은 p99 칸에 장애별 탐지 시간($T_1 - T_0$)의 최댓값(ms)과 그 시나리오를, 규모 칸에 주입 세기를 적는다. 번 레이트 경보로 잡는 시나리오는 주입 세기를 소진 배수로 적는다(§8, 추천 적용 2026-10-28, 기술 검토 높음-12).
 
@@ -307,9 +308,9 @@ K8(Game Day) 실행 행은 p99 칸에 장애별 탐지 시간($T_1 - T_0$)의 �
 
 기술 문서를 쓰거나 면접에서 답할 때는 위 5가지 표기 범주를 엄격히 구분해 쓰고, 서로 섞어 쓰지 않는다.
 
-**비율·백분위의 판정(추천 적용 2026-10-28, 기술 검토 중간-002)**: 비율 목표(성공률 99.9%, 오거부 0.1% 미만)와 백분위 목표(p99 3초)는 docs/planning/02 §3.1 원칙 6의 식으로 판정한다. 시행 수 n과 목표를 어긴 수 k(백분위는 기준값을 넘은 수)를 장부에 함께 남기고, 어긴 비율의 정확 이항 단측 95% 상한(`ledgerlib.cp_upper(k, n)`, Clopper-Pearson)이 허용 비율 이하일 때만 `verdict: pass`로 적는다. 기준 이하 비율은 기준값에 맞춘 히스토그램 칸(ADR-0077)에서 센다. 최소 시행 수(k = 0)는 99.9%·0.1% 미만이 2,995번, p99가 299번, p95가 59번이다. 이보다 적으면 `verdict`를 `pass`로 두지 않고 `notes`에 '관측값(시행 n번, 최소 시행 수 미달)'으로 적는다. 수십 번 하는 Game Day의 명령 반영(K8)은 최댓값으로 판정한다(§8). 장부 도구(`collect.py`)에 시행 수·어긴 수 칸과 이 판정을 더하는 일은 성능 장부 v0(wbs 1.4.1)에서 한다. 이 식을 처음 쓰는 시험은 C-T2·S-T13·O-T1·O-T2다.
+**비율·백분위의 판정(추천 적용 2026-10-28, 기술 검토 중간-002)**: 비율 목표(성공률 99.9%, 오거부 0.1% 미만)와 백분위 목표(p99 3초)는 docs/planning/02 §3.1 원칙 6의 식으로 판정한다. 시행 수 n과 목표를 어긴 수 k(백분위는 기준값을 넘은 수)를 장부에 함께 남기고, 어긴 비율의 정확 이항 단측 95% 상한(`ledgerlib.cp_upper(k, n)`, Clopper-Pearson)이 허용 비율 이하일 때만 `verdict: pass`로 적는다. 기준 이하 비율은 기준값에 맞춘 히스토그램 칸(ADR-0077)에서 센다. 최소 시행 수(k = 0)는 99.9%·0.1% 미만이 2,995번, p99가 299번, p95가 59번이다. 이보다 적으면 `verdict`를 `pass`로 두지 않고 `notes`에 '관측값(시행 n번, 최소 시행 수 미달)'으로 적는다. 수십 번 하는 Game Day의 명령 반영(K8)은 최댓값으로 판정한다(§8). 장부 도구는 `collect.py --checks`로 시행 수·어긴 수를 받아 이 판정을 한다(§2.2 `checks`·`verdict`, wbs 1.4.1, 2026-11-02). 이 식을 처음 쓰는 시험은 C-T2·S-T13·O-T1·O-T2다.
 
-**KPI별 증거 수준(추천 적용 2026-10-28, 기술 검토 중간-111)**: 숫자의 표기 범주(위 표)와 별도로, KPI마다 무엇을 실제로 만들어 쟀는지를 측정함·구현함·설계만·계산만으로 적는다(정의는 docs/planning/02 §2 '증거 수준'). 실측은 측정함, 외삽과 문서 인용은 계산만에 해당한다. 아래는 포트폴리오에서 목표로 하는 수준이고, 지금(2026-10-28)은 구현 전이라 모두 '설계만'이다. 장부 요약 표(§5)의 행마다 이 수준을 함께 보이는 일은 `index.py`에 칸을 더할 때(wbs 1.4.1) 한다.
+**KPI별 증거 수준(추천 적용 2026-10-28, 기술 검토 중간-111)**: 숫자의 표기 범주(위 표)와 별도로, KPI마다 무엇을 실제로 만들어 쟀는지를 측정함·구현함·설계만·계산만으로 적는다(정의는 docs/planning/02 §2 '증거 수준'). 실측은 측정함, 외삽과 문서 인용은 계산만에 해당한다. 아래는 포트폴리오에서 목표로 하는 수준이고, 지금(2026-10-28)은 구현 전이라 모두 '설계만'이다. 장부 요약 표(§5)의 '증거 수준' 칸이 행마다 이 수준을 보인다(manifest `evidence`, `index.py`, wbs 1.4.1, 2026-11-02).
 
 | KPI | 측정함 | 계산만·설계만으로 남는 것 |
 | --- | --- | --- |

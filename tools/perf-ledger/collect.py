@@ -195,12 +195,97 @@ def k6_inputs(a):
     return k6_plan, k6_eval, units, outcomes
 
 
+def prom_instant(prom_url, query, t):
+    """Prometheus 즉시 조회(vector 결과)."""
+    params = urllib.parse.urlencode({'query': query, 'time': f'{t:.3f}'.rstrip('0').rstrip('.')})
+    with urllib.request.urlopen(prom_url.rstrip('/') + '/api/v1/query?' + params, timeout=120) as r:
+        data = json.load(r)
+    if data.get('status') != 'success':
+        raise L.CheckInputError(f'Prometheus 조회 실패: {data.get("error")}')
+    return (data.get('data') or {}).get('result') or []
+
+
+def k6_p99(summary_path, metric):
+    """k6 요약에서 지표 하나의 p(99)(ms). 둘 다 형식(handleSummary·--summary-export)을 읽는다."""
+    metrics = (L.load_json(summary_path) or {}).get('metrics', {})
+    if metric not in metrics:
+        raise L.CheckInputError(f'k6 요약에 {metric}이 없다. k6는 기준(threshold)을 건 하위 지표만 요약에 남기므로 '
+                                f'시나리오의 thresholds에 그 이름을 둔다(예: "{metric}": ["max>=0"])')
+    m = metrics.get(metric) or {}
+    v = (m.get('values', m) if isinstance(m, dict) else {}).get('p(99)')
+    if v is None:
+        raise L.CheckInputError(f'k6 요약에 {metric}의 p(99)가 없다(k6 --summary-trend-stats에 p(99)를 넣는다)')
+    return v
+
+
+def evaluate_checks(a):
+    """`--checks` 파일을 읽어 점검마다 판정하고 판정·대조를 정한다(docs/perf-ledger.md §2.2 `checks`·`verdict`·`latency_crosscheck`, §7).
+
+    측정 폴더를 만들기 전에 부른다. 형식 오류·칸 경계 없음·--verdict와 어긋남은 SystemExit(거부)로 끝낸다.
+    돌려주는 값: (점검 결과 목록, 대조 결과, 판정, notes에 더할 글 목록). --checks가 없으면 (None, None, a.verdict, []).
+    """
+    if not getattr(a, 'checks', None):
+        return None, None, a.verdict, []
+    try:
+        defs, cross = L.parse_checks(L.load_json_strict(a.checks))
+        results, hist = [], {}
+        for c in defs:
+            if 'histogram' in c:
+                if not (a.prom_url and a.start and a.end):
+                    raise L.CheckInputError(f'{c["name"]}: histogram 점검은 --prom-url·--start·--end가 있어야 센다')
+                h = c['histogram']
+                start, end = L.parse_time(a.start) + (a.warmup or 0), L.parse_time(a.end)
+                if end <= start:
+                    raise L.CheckInputError('측정 창(시작 + 예열 ~ 끝)이 비었다')
+                w = end - start
+                lost = L.scalar_of(prom_instant(a.prom_url, L.hist_lost_query(h, w), end))
+                if lost:
+                    raise L.CheckInputError(f'{c["name"]}: 창 안에서 사라진 시계열 {int(lost)}개(파드 종료·재시작). 셀 수 없다')
+                resets = L.scalar_of(prom_instant(a.prom_url, L.hist_resets_query(h, w), end))
+                if resets:
+                    raise L.CheckInputError(f'{c["name"]}: 창 안에서 카운터가 {int(resets)}번 되돌아갔다(재시작). 셀 수 없다')
+                buckets = L.hist_window(L.hist_buckets(prom_instant(a.prom_url, L.hist_sum_query(h), start), need_inf=False),
+                                        L.hist_buckets(prom_instant(a.prom_url, L.hist_sum_query(h), end)))
+                n, k = L.hist_counts(buckets, h['le'])
+                if n == 0:
+                    raise L.CheckInputError(f'{c["name"]}: 측정 창에 요청이 없다')
+                hist[c['name']] = buckets
+            else:
+                n, k = c['trials'], c['violations']
+            results.append(L.judge_check(c['name'], c['allowed'], n, k, c.get('target')))
+        crosscheck = None
+        if cross:
+            if not a.k6_summary:
+                raise L.CheckInputError('crosscheck는 --k6-summary가 있어야 한다')
+            metric = cross['k6_metric']
+            ref = next(r for r in results if r['name'] == cross['check'])
+            server_s = L.hist_quantile(0.99, hist[cross['check']])
+            k6_ms, server_ms, target = k6_p99(a.k6_summary, metric), server_s * 1000, cross['target_ms']
+            crosscheck = {
+                'k6_metric': metric, 'k6_p99_ms': k6_ms, 'check': ref['name'], 'server_p99_ms': round(server_ms, 3),
+                'server_within_ratio': round(1 - ref['violations'] / ref['trials'], 6), 'diff_ms': round(k6_ms - server_ms, 3),
+                'target_ms': target,
+                # 서버 SLI가 목표 안(서버 p99 ≤ 목표이고 그 점검이 pass)인데 k6 값이 목표 밖이면 측정 지점 의심(ADR-0077)
+                'suspect': server_ms <= target and ref['result'] == 'pass' and k6_ms > target,
+            }
+    except (L.CheckInputError, OSError, ValueError) as e:
+        raise SystemExit(f'실행 거부(점검 파일, docs/perf-ledger.md §2.2): {e}')
+    derived = L.verdict_from_checks(results)
+    # fail은 점검 밖의 까닭(불변식 위반 등)이 있을 수 있어 받는다. 점검과 어긋난 pass만 거부한다
+    if a.verdict == 'pass' and derived != 'pass':
+        raise SystemExit(f'실행 거부: --verdict {a.verdict}가 점검 결과와 어긋난다'
+                         f'({", ".join(r["name"] + "=" + r["result"] for r in results)}, docs/perf-ledger.md §7)')
+    verdict = a.verdict if a.verdict in ('baseline', 'fail') else derived
+    return results, crosscheck, verdict, L.observed_notes(results)
+
+
 def collect(a, root):
     lines = []
     run_dir = os.path.join(root, L.RUNS, a.run_id)
     if os.path.exists(run_dir) and not a.force:
         raise SystemExit(f'이미 있는 측정 폴더입니다: {run_dir} (--force로 덮어쓰기)')
     k6_plan, k6_eval_pre, k6_units, k6_outcomes = k6_inputs(a)
+    checks, crosscheck, verdict, check_notes = evaluate_checks(a)
     os.makedirs(run_dir, exist_ok=True)
     log(lines, f'측정 폴더: {run_dir}')
 
@@ -292,6 +377,13 @@ def collect(a, root):
     if redis_tls is False and a.verdict in ('pass', 'fail'):
         log(lines, 'TLS를 끈 실행이다. 판정은 TLS를 켠 짝 실행으로 한다(docs/perf-ledger.md §2.2)')
 
+    if checks:
+        log(lines, '점검: ' + ', '.join(f'{c["name"]} n={c["trials"]} k={c["violations"]} 상한={c["cp_upper"]} → {c["result"]}' for c in checks))
+        notes = '; '.join(x for x in [notes, *check_notes] if x) or None
+    if crosscheck:
+        log(lines, f'지연 대조: k6 p99 {crosscheck["k6_p99_ms"]}ms, 서버 p99 {crosscheck["server_p99_ms"]}ms, 차이 {crosscheck["diff_ms"]}ms'
+                   + (', 측정 지점 의심' if crosscheck['suspect'] else ''))
+
     valid, reason = True, None
     if k6 and (k6['dropped_iterations'] or 0) > 0:
         valid, reason = False, f'발생기 병목: dropped_iterations={k6["dropped_iterations"]}'
@@ -326,7 +418,10 @@ def collect(a, root):
         'attachments': attachments,
         'valid': valid,
         'invalid_reason': reason,
-        'verdict': a.verdict,
+        'checks': checks,
+        'latency_crosscheck': crosscheck,
+        'evidence': getattr(a, 'evidence', None) or '측정함',
+        'verdict': verdict,
         'notes': notes,
         'collected_at': L.iso_utc(time.time()),
         'tool': 'tools/perf-ledger/collect.py',
@@ -579,7 +674,9 @@ def selftest():
     def k6_args(run_id, **kw):
         base = dict(run_id=run_id, kpi='K6', version='v1', profile='local-bot', users=None, rps=None,
                     duration=None, warmup=0, scenario='k6-bot-tiers.js', scenario_args=None, closed_model=False,
-                    k6_summary=None, prom_url=None, start=None, end=None, step=1, queries=None, infra_file=None,
+                    # 실행 날을 ID의 날로 둔다. 비우면 collected_at(오늘)이 실행 날이 되어, 오늘이 다른 고정 날과 같을 때
+                    # 하루 해시 묶음 시험에 섞인다(2026-11-02에 실제로 깨짐)
+                    k6_summary=None, prom_url=None, start='2026-12-01T00:00:00Z', end='2026-12-01T00:10:00Z', step=1, queries=None, infra_file=None,
                     invariants=None, cost_file=None, timeline=None, extra=None, confusion=conf, commit='selftest',
                     generator='selftest', region='local', cost_krw=0, exchange_rate=1400, verdict='pass',
                     notes='selftest', invalid_reason=None, force=False, k6_plan='947:1', bot_cost=bot_cost,
@@ -734,6 +831,8 @@ def main():
     p.add_argument('--redis-tls', choices=['true', 'false'], help='대기열·좌석 Redis 연결의 TLS 켬·끔(docs/perf-ledger.md §2.2)')
     p.add_argument('--paired-run', help='같은 조건으로 TLS를 반대로 잰 짝 실행의 run_id')
     p.add_argument('--commit'); p.add_argument('--generator'); p.add_argument('--region', default='local'); p.add_argument('--cost-krw', type=float); p.add_argument('--exchange-rate', type=float)
+    p.add_argument('--checks', help='비율·백분위 점검 JSON(checks·crosscheck, docs/perf-ledger.md §2.2). 있으면 판정을 이 도구가 정한다')
+    p.add_argument('--evidence', choices=['측정함', '구현함', '설계만', '계산만'], help='증거 수준(기본 측정함, docs/perf-ledger.md §2.2)')
     p.add_argument('--verdict', choices=['pass', 'fail', 'baseline']); p.add_argument('--notes'); p.add_argument('--invalid-reason'); p.add_argument('--force', action='store_true')
     a = p.parse_args()
     if a.selftest:

@@ -20,6 +20,9 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: node --test "tools/ci/*.test.mjs"
+      # 성능 장부 도구: 명령줄 시험(점검 판정·지연 대조·증거 수준·야간 비교 D-T40)과 자체 시험(docs/perf-ledger.md)
+      - run: node --test "tools/perf-ledger/*.test.mjs"
+      - run: python3 -I -X utf8 tools/perf-ledger/collect.py --selftest
       - run: node tools/ci/check-workflows.mjs
       - run: node tools/ci/check-codeowners.mjs
       - run: node tools/ci/check-workspace-protocol.mjs

@@ -106,7 +106,7 @@
 | **1.3** | **관측 최소** | | 플랫폼 | **1** | | | |
 | 1.3.1 | 템플릿 대시보드, Grafana, web-vitals | 최소 대시보드 | 플랫폼 | 1 | 0.3.1 | NFR-012 | 예정 |
 | **1.4** | **Before 측정** | | 플랫폼 | **4.75** | | | |
-| 1.4.1 | Before 측정과 성능 장부 v0(인프라 스펙·스크립트·커밋 해시, 클라이언트·서버 지연 대조 `latency_crosscheck`, ADR-0077), collect.py의 시행 수·어긴 수·허용 비율 칸과 `cp_upper` 판정(기술 검토 중간-002), index.py의 증거 수준 칸(기술 검토 중간-111), A/A 잡음 폭 측정 10번과 야간 비교 기준값(기술 검토 낮음-016), 측정 원본 S3 올리기·`metrics-summary.json`·`raw_uri`와 하루 해시 묶음의 `ots stamp`·`ots upgrade`(기술 검토 낮음-056) | 성능 장부 Before | 플랫폼 | 3.75 | 1.1.4 | K1~K10, ADR-0077, ADR-0128, ADR-0133, ADR-0134 | 예정 |
+| 1.4.1 | Before 측정과 성능 장부 v0(인프라 스펙·스크립트·커밋 해시, 클라이언트·서버 지연 대조 `latency_crosscheck`, ADR-0077), collect.py의 시행 수·어긴 수·허용 비율 칸과 `cp_upper` 판정(기술 검토 중간-002), index.py의 증거 수준 칸(기술 검토 중간-111), A/A 잡음 폭 측정 10번과 야간 비교 기준값(기술 검토 낮음-016), 측정 원본 S3 올리기·`metrics-summary.json`·`raw_uri`와 하루 해시 묶음의 `ots stamp`·`ots upgrade`(기술 검토 낮음-056) 3일이 넘어 둘로 나눈다(BUILD_ORDER BSL-080·090): ① 성능 장부 v0 도구 — collect.py의 점검(시행 수·어긴 수·허용 비율·`cp_upper` 판정)과 `latency_crosscheck`, index.py의 증거 수준 칸, 야간 축소 성능 잡과 비율 판정(1.75일) ② Before 측정(K1~K10), A/A 잡음 폭 측정 10번과 야간 비교 기준값, 측정 원본 보관·`metrics-summary.json`·`raw_uri`·하루 해시 묶음(2일) | 성능 장부 Before | 플랫폼 | 3.75 | 1.1.4 | K1~K10, ADR-0077, ADR-0128, ADR-0133, ADR-0134 | 진행 |
 | 1.4.2 | 기술 블로그 1편(M1): v0가 무너지는 지점과 그 원인 | 기술 블로그 1편 | 소유자 | 1 | 1.4.1 | 원문 §14, docs/planning/01 §3.3, ADR-0128 | 예정 |
 
 ### Phase 2 온세일 핫패스 v1 (144.75일, 28.9주)

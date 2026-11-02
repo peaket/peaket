@@ -83,3 +83,23 @@ python tools/perf-ledger/collect.py --selftest
 ```
 
 임시 폴더에 가짜 요약으로 전체 흐름을 돌려 도구가 정상인지 확인한다. 클라우드 측정 전에 한 번 돌린다. S3와 OpenTimestamps는 부르지 않고 가짜 버킷(임시 폴더)과 가짜 `ots`로 바꿔 끼워, `metrics-summary.json` 값, 원본 올리기와 폴더 정리, 버킷 원본과 `SHA256SUMS`의 해시 일치, 올리기 실패 뒤 `--upload-raw`, `redis_tls`·`paired_run`, 하루 해시 묶음과 고정 뒤 변경의 거부를 확인한다. K6 쪽은 docs/verification.md V-T25의 세 경우(참가자 947명이 판정 세션 하나씩이면 판정하고 사람 단위 집계를 남김, 한 참가자가 판정 세션 둘이면 거부, 판정 세션 946개면 거부)와 판정 세션이 없는 참가자, 봇 끝 결과의 세 확인(detected 합, blocked + verify_passed, admitted)의 거부, ICC(1)·F 분위수의 알려진 값(Shrout·Fleiss 1979 예제, F 분포표)도 확인한다.
+
+명령줄 시험은 `node --test "tools/perf-ledger/*.test.mjs"`다. 도구를 명령줄로 부르고(Prometheus는 시험이 띄운 흉내 서버, k6는 가짜 명령) manifest·장부 표·종료 코드를 본다. CI의 `tools-check.yml`이 이 시험과 `--selftest`를 함께 돌린다.
+
+## 6. 비율·백분위 점검과 지연 대조(`--checks`)
+
+```bash
+python tools/perf-ledger/collect.py --run-id … --checks ./checks.json --k6-summary ./summary.json --prom-url http://localhost:9090 --start … --end … --warmup 120
+```
+
+`checks.json`의 `checks`는 비율·백분위 목표마다 한 줄이다. 시행 수·어긴 수를 직접 적거나(`"trials": 3000, "violations": 0`), 서버 히스토그램(`"histogram": {"metric": "http_server_request_duration_seconds", "match": "route=\"/v1/queues/{eventId}/entries\"", "le": 0.2}`)을 주면 측정 창(시작 + 예열 ~ 끝)의 끝과 시작의 칸 카운터 합을 Prometheus에서 읽어 그 차이로 센다(창 시작에 없던 시계열은 0부터, 창 안에서 사라진 시계열(생겼다 사라진 것 포함)·카운터 되돌아감이 있으면 거부). 도구가 점검마다 `cp_upper`·`min_trials`·`result`(`pass`·`fail`·`observed`)를 적고 판정(`verdict`)을 정한다. `--verdict pass`가 점검과 어긋나거나, 기준값과 같은 칸 경계가 없거나, 모르는 키·`NaN`·`Infinity`가 있으면 측정 폴더를 만들지 않고 거부한다. `crosscheck`(`{"check": "<히스토그램 점검 이름>", "k6_metric": "http_req_duration{phase:measure}"}`, 목표는 그 점검의 기준값 칸. k6는 기준(threshold)을 건 하위 지표만 요약에 남기므로 시나리오에 그 이름의 기준을 둔다)를 주면 k6 p99와 서버 p99·기준값 안 비율을 `latency_crosscheck`에 남기고 '측정 지점 의심'을 표시한다(docs/perf-ledger.md §2.2·§7, ADR-0077). 외삽·문서 인용을 장부에 남길 때는 `--evidence 계산만`을 준다(장부 표의 '증거 수준' 칸).
+
+## 7. 야간 축소 성능 상대 비교(`nightly.py`)
+
+```bash
+python tools/perf-ledger/nightly.py run --config loadtest/nightly/config.json --out results.json
+python tools/perf-ledger/nightly.py compare --results results.json --threshold loadtest/nightly/threshold.json --alert-out alert.md
+python tools/perf-ledger/nightly.py aa-threshold --results aa-01.json … aa-10.json --out loadtest/nightly/threshold.json
+```
+
+`run`은 설정의 준비 명령(인자 목록, 셸을 거치지 않음)으로 두 판의 주소를 받고 k6를 기준·새 순으로 판마다 `rounds`번 돌려 p99 중앙값의 비율을 남긴다. k6가 시나리오 기준을 넘어 종료 코드 99로 끝나도 요약이 있으면 쓰고, 회차마다 지난 요약을 먼저 지운다. `--deadline-s`(기본 7000초)를 넘기면 멈춘 명령을 끊고 종료 2로 끝낸다. `compare`는 그 비율을 `max_ratio`와 견준다: 비어 있으면 경고만(종료 0), 넘으면 종료 1과 SEV3 이슈 본문이다. 입력이 틀리거나 준비 명령·k6가 실패하면 모든 명령이 종료 2다. `aa-threshold`는 같은 판끼리 잰 A/A 결과 10개 이상에서 `max_ratio` = 1 + 가장 큰 벗어남을 쓴다(docs/devops.md §3.3, D-T40).
