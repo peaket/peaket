@@ -151,3 +151,30 @@ test('httpsDownload_curl도실패하면_둘의까닭을함께적는다', async (
 test('httpsDownload_https주소만받는다', async () => {
   await assert.rejects(httpsDownload('http://example.test/a', { ...quiet, fetchImpl: async () => assert.fail('받지 않아야 한다') }), /https/);
 });
+
+// 2026-11-03 원격 CI: node --test가 시험 파일을 동시에 돌려 chart·observability 시험이 함께 helm을 받다가
+// 같은 임시 파일(helm.part)을 서로 옮겨 버려 한쪽이 ENOENT로 실패했다. 여러 프로세스가 같은 도구를 동시에 받아도 모두 성공해야 한다
+test('FND110_여러프로세스가같은도구를동시에받아도_모두성공하고_임시파일이남지않는다', async () => {
+  const { spawn } = await import('node:child_process');
+  const { readdirSync } = await import('node:fs');
+  const root = dir();
+  const body = Buffer.alloc(4 * 1024 * 1024, 7);
+  const script = `
+    import { ensureTool } from ${JSON.stringify(new URL('./tools.mjs', import.meta.url).href)};
+    const body = Buffer.alloc(4 * 1024 * 1024, 7);
+    const sha = ${JSON.stringify(sha(body))};
+    const tools = { kind: { version: 'v0', bin: 'kind', assets: { [process.platform + '-' + process.arch]: { url: 'https://example.invalid/kind', sha256: sha } } } };
+    await ensureTool('kind', { root: ${JSON.stringify(root)}, tools, download: async () => { await new Promise((r) => setTimeout(r, Math.random() * 20)); return body; } });
+  `;
+  const runs = Array.from({ length: 8 }, () => new Promise((resolve) => {
+    const c = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '';
+    c.stderr.on('data', (d) => (err += d));
+    c.on('close', (code) => resolve({ code, err }));
+  }));
+  const results = await Promise.all(runs);
+  assert.deepEqual(results.filter((r) => r.code !== 0).map((r) => r.err.split('\n').find((l) => l.includes('Error')) ?? r.err.slice(0, 200)), []);
+  const dirName = join(root, 'kind-v0');
+  assert.deepEqual(readdirSync(dirName).filter((f) => f.endsWith('.part')), []);
+  assert.equal(sha(readFileSync(join(dirName, process.platform === 'win32' ? 'kind.exe' : 'kind'))), sha(body));
+});

@@ -5,7 +5,7 @@
 // - 받은 도구는 저장소 안 .cache/peaket-tools(커밋하지 않는다)나 PEAKET_TOOLS_DIR에 둔다
 // 쓰는 법: node tools/local/tools.mjs [kind|kubectl|helm ...]  → 받은 실행 파일 경로를 찍는다
 import { execFileSync, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -141,10 +141,19 @@ export async function ensureTool(name, o = {}) {
     }
     if (sha256(body) !== want) throw new Error(`푼 실행 파일 해시가 맞지 않는다: ${a.url} ${a.inner}`);
   }
-  const tmp = `${exe}.part`;
-  writeFileSync(tmp, body);
-  if (platform !== 'win32') chmodSync(tmp, 0o755);
-  renameSync(tmp, exe);
+  // 임시 파일 이름은 프로세스·호출마다 다르게 둔다. node --test가 시험 파일을 동시에 돌려 여러 프로세스가 같은 도구를 함께 받으면,
+  // 같은 이름(helm.part)을 서로 옮겨 버려 한쪽이 ENOENT로 실패했다(2026-11-03 원격 CI)
+  const tmp = `${exe}.${process.pid}.${randomBytes(4).toString('hex')}.part`;
+  try {
+    writeFileSync(tmp, body);
+    if (platform !== 'win32') chmodSync(tmp, 0o755);
+    renameSync(tmp, exe);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    // 다른 프로세스가 먼저 같은 파일을 두었으면(Windows는 쓰는 중인 실행 파일 위로 옮기지 못한다) 그 파일의 해시를 보고 쓴다
+    if (existsSync(exe) && sha256(readFileSync(exe)) === want) return exe;
+    throw err;
+  }
   return exe;
 }
 

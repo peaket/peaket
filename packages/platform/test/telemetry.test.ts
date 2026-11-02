@@ -17,13 +17,15 @@ let platform: Platform;
 let s: Awaited<ReturnType<Fixture['start']>>;
 let base: string;
 
+// 준비는 서비스 전체(src/index.js)를 불러와 띄운다. CI의 node 잡은 모든 패키지를 한꺼번에 돌려, 붐빌 때 불러오기만으로
+// 기본 제한 10초를 넘었다(2026-11-03 원격 CI, 그 실행의 시간 69%가 불러오기). 준비 단계만 60초로 둔다
 beforeAll(async () => {
   fx = await import('./fixture.js');
   platform = await import('../src/index.js');
   s = await fx.start({ PEAKET_ENV: 'ci', PEAKET_LOG_SAMPLE_ONE_IN: '10', PORT: '0', PEAKET_MANAGEMENT_PORT: '0' });
   const { port } = await s.svc.listen('127.0.0.1');
   base = `http://127.0.0.1:${port}`;
-});
+}, 60_000);
 afterAll(async () => {
   await s.svc.close();
   await telemetry.shutdown();
