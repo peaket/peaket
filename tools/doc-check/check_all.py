@@ -29,6 +29,8 @@ SKIP_DIRS = {'archive', 'tools', '.git', 'node_modules'}
 # pnpm이 만드는 잠금 파일은 문서가 아니다. pnpm 12의 잠금 파일은 YAML 문서 두 개를 `---`로 이어 붙여
 # 이 도구의 YAML 읽개가 한 매핑으로 읽고, 검사는 pnpm의 공급망 검사가 한다(ADR-0167, R-196)
 SKIP_FILES = {'pnpm-lock.yaml'}
+# drizzle-kit이 만드는 마이그레이션 메타(migrations/meta/*.json)도 문서가 아니다. 첫 스냅숏의 prevId가 0 UUID라 '12자리 숫자' 규칙에 걸린다(R-235)
+SKIP_PATH_PARTS = ('/migrations/meta/',)
 ID_KINDS = ('FR', 'NFR', 'POL', 'SCR', 'CMP', 'ADR')
 MARKERS = ('[가정', '[충돌', '[보완')
 # 존재하지 않아도 되는 경로: 외부 URL 안의 경로 문자열이라 오탐(review R-10),
@@ -60,6 +62,8 @@ def load_files():
         for f in sorted(fn):
             if f.endswith(SCAN_EXT) and f not in SKIP_FILES:
                 p = os.path.join(dp, f)
+                if any(part in '/' + rel(p) for part in SKIP_PATH_PARTS):
+                    continue
                 with io.open(p, encoding='utf-8') as fh:
                     texts[rel(p)] = fh.read()
     return texts

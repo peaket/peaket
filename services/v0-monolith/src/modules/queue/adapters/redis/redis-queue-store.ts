@@ -237,6 +237,11 @@ export class RedisQueueStore implements QueueStore {
     return { eventId, ticked: int(r[0]) === 1, called: int(r[1]), serving: int(r[2]) };
   }
 
+  async isAdmitted(eventId: string, pid: string): Promise<boolean> {
+    const k = keys(eventId);
+    return int(await this.command(['HEXISTS', k.admitted, pid])) === 1;
+  }
+
   async servingLog(eventId: string): Promise<ServingLogEntry[]> {
     const k = keys(eventId);
     const rows = await this.command(['XRANGE', k.servingLog, '-', '+'], this.tickTimeoutMs);

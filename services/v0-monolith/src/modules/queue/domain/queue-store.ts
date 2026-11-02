@@ -13,4 +13,6 @@ export interface QueueStore {
   admit(eventId: string, pid: string, nowMs: number, graceMs: number): Promise<AdmitResult>;
   tick(eventId: string, nowMs: number): Promise<TickResult>;
   servingLog(eventId: string): Promise<ServingLogEntry[]>;
+  /** 그 회차에 입장한 사람인지(좌석 v0가 묻는다, §13 동작 5) */
+  isAdmitted(eventId: string, pid: string): Promise<boolean>;
 }

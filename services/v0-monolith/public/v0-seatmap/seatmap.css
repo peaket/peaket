@@ -1,0 +1,19 @@
+/* v0 좌석맵 화면(docs/features/seat-hold.md §14 동작 7). 비교용 화면이라 꾸밈을 줄였다 */
+body { margin: 0; font-family: system-ui, sans-serif; color: #111827; background: #f9fafb; }
+main { max-width: 1000px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 20px; margin: 0 0 8px; }
+.muted { color: #6b7280; margin: 0 0 8px; }
+canvas { display: block; width: 100%; max-width: 960px; height: auto; background: #ffffff; border: 1px solid #d1d5db; border-radius: 8px; touch-action: none; cursor: pointer; }
+.panel { margin-top: 12px; }
+.actions { display: flex; gap: 8px; }
+button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid #111827; background: #111827; color: #ffffff; cursor: pointer; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button#release, button#extend { background: #ffffff; color: #111827; }
+#status { min-height: 1.5em; font-weight: 600; }
+.legend { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 12px; font-size: 14px; }
+.dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+.dot.available { background: #dc2626; }
+.dot.held { background: #9ca3af; }
+.dot.sold { background: #374151; border-radius: 2px; }
+.dot.selected { background: #dc2626; box-shadow: 0 0 0 3px #111827; }
+.dot.mine { background: #dc2626; box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #111827; }
