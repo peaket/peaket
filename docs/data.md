@@ -49,6 +49,7 @@ erDiagram
     account ||--o{ identity_conflict_attempt : "같은 본인확인 시도(추천 적용 2026-10-31, ADR-0171)"
     account ||--o{ consent : gives
     account ||--o| identity_verification : "verified_by (ci_hmac)"
+    account ||--o{ verification_attempt : "본인확인 건(추천 적용 2026-11-03)"
     account |o--o{ restricted_ci_hold : "부정 예매 이용 제한의 연계정보 HMAC 보관(추천 적용 2026-10-31, ADR-0171 결정 5)"
     account ||--|{ account_provider : "로그인 수단 1개 이상"
     account ||--o{ account_merge : "대표 계정"
@@ -86,6 +87,16 @@ erDiagram
         bytea pid_prev "optional, pid 키 전환 기간에만 두는 옛 pid. 전환이 끝나면 지운다(docs/features/identity.md §5)"
         timestamptz verified_at
         text source_record "출처·시기·목적·대상, 1년 이상"
+    }
+    verification_attempt {
+        uuid id PK "본인확인 건(verificationId). 시작 응답이 준다(openapi VerificationStart, docs/features/identity.md §5 '본인확인 시험 어댑터와 첫 구현', 추천 적용 2026-11-03)"
+        uuid account_id FK "시작한 계정. 다른 계정의 결과 확정·조회는 404"
+        text purpose "FIRST|REVERIFY|MINOR_CONTRACT"
+        text next "결과를 보인 뒤 돌아갈 같은 출처 경로(safeNext 규칙)"
+        text status "PENDING|VERIFIED|CANCELLED|FAILED|DUPLICATE_ACCOUNT"
+        timestamptz expires_at "시작 + 10분 [가정]. 지나면 결과를 받지 않는다"
+        timestamptz created_at
+        timestamptz completed_at "확정 시각. 결과는 1일 [가정] 조회하고 지운다"
     }
     account_provider {
         uuid account_id FK

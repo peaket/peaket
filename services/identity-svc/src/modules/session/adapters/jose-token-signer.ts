@@ -28,11 +28,15 @@ export class JoseTokenSigner implements TokenSigner {
     this.#issuer = issuer;
   }
 
-  async access(c: { accountId: string; sessionId: string }, now: number): Promise<SignedToken> {
+  async access(c: { accountId: string; sessionId: string; scopes?: string[]; pid?: string; pidPrev?: string }, now: number): Promise<SignedToken> {
     const { kid, key } = this.#keys.signingKey('fan');
     const exp = seconds(now + ACCESS_TOKEN_TTL_MS);
-    // 역할·테넌트·지정은 싣지 않는다(ADR-0172). scope·pid는 본인확인 단계(PRF-040)가 싣는다
-    const token = await new SignJWT({ sid: c.sessionId })
+    // 역할·테넌트·지정은 싣지 않는다(ADR-0172). scope(ticket:buy)·pid·pid_prev는 본인확인을 마친 계정만(identity §3·§5)
+    const claims: Record<string, string> = { sid: c.sessionId };
+    if (c.scopes?.length) claims.scope = c.scopes.join(' ');
+    if (c.pid) claims.pid = c.pid;
+    if (c.pidPrev) claims.pid_prev = c.pidPrev;
+    const token = await new SignJWT(claims)
       .setProtectedHeader({ alg: 'ES256', typ: 'at+jwt', kid })
       .setIssuer(this.#issuer)
       .setSubject(c.accountId)

@@ -2,7 +2,7 @@
 // 리프레시 토큰은 해시로만 찾고 저장한다. 판정은 도메인 decideRefresh가 한다(회전·재시도·탈취·무효).
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
-import { SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore, TOKEN_SIGNER, type TokenSigner } from '../domain/ports.js';
+import { ACCOUNT_CLAIMS, type AccountClaims, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore, TOKEN_SIGNER, type TokenSigner } from '../domain/ports.js';
 import { decideRefresh, SESSION_IDLE_MS, sessionAlive } from '../domain/session.js';
 import { newRefreshToken, refreshHash } from './create-session.js';
 
@@ -20,6 +20,7 @@ export class RefreshSession {
     @Inject(SESSION_STORE) private readonly store: SessionStore,
     @Inject(TOKEN_SIGNER) private readonly signer: TokenSigner,
     @Inject(SESSION_SIGNALS) private readonly signals: SessionSignals,
+    @Inject(ACCOUNT_CLAIMS) private readonly claims: AccountClaims,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -56,7 +57,8 @@ export class RefreshSession {
       return { result: 'REUSED' };
     }
     this.signals.refreshed('fan', r.kind === 'rotate' ? 'rotated' : 'retried');
-    const access = await this.signer.access({ accountId: r.accountId, sessionId: r.sessionId }, now);
+    // 본인확인 뒤 첫 갱신부터 ticket:buy·pid가 실린다(identity §5 '즉시 갱신')
+    const access = await this.signer.access({ accountId: r.accountId, sessionId: r.sessionId, ...(await this.claims.of(r.accountId)) }, now);
     return {
       result: 'OK',
       accountId: r.accountId,

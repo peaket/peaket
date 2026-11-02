@@ -8,7 +8,7 @@ import { IssueReauthToken } from '../src/modules/session/application/issue-reaut
 import { RefreshSession } from '../src/modules/session/application/refresh-session.js';
 import { JoseTokenSigner } from '../src/modules/session/adapters/jose-token-signer.js';
 import { TokenKeyRing } from '../src/modules/session/adapters/token-keys.js';
-import type { DeviceRefs, SessionSignals, SessionStore } from '../src/modules/session/domain/ports.js';
+import type { AccountClaims, DeviceRefs, SessionSignals, SessionStore } from '../src/modules/session/domain/ports.js';
 
 export const ISSUER = 'https://identity.peaket.test';
 
@@ -49,7 +49,10 @@ export interface Kit {
   refresh: RefreshSession;
 }
 
-export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: FakeClock } = {}): Promise<Kit> {
+/** 본인확인 전 계정처럼 아무 값도 싣지 않는다 */
+export const noClaims: AccountClaims = { of: async () => ({ scopes: [] }) };
+
+export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: FakeClock; claims?: AccountClaims } = {}): Promise<Kit> {
   const clock = o.clock ?? fakeClock({ now: Date.parse('2026-11-03T03:00:00.000Z') });
   const signals = recordingSignals();
   const { privateJwk, publicJwk } = await fanKey();
@@ -59,10 +62,10 @@ export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: F
     clock,
     signals,
     publicJwk,
-    create: new CreateSession(store, signer, devices, signals, clock),
+    create: new CreateSession(store, signer, devices, signals, o.claims ?? noClaims, clock),
     end: new EndSession(store, signals, clock),
     reauth: new IssueReauthToken(store, signer, signals, clock),
-    refresh: new RefreshSession(store, signer, signals, clock),
+    refresh: new RefreshSession(store, signer, signals, o.claims ?? noClaims, clock),
   };
 }
 

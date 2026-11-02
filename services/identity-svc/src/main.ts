@@ -18,6 +18,7 @@ import {
   TokenKeyRing,
   tokenIssuerFromEnv,
 } from './modules/session/index.js';
+import { HmacIdentityHashers, TestVerificationProvider, unavailableHashers, unavailableProvider, VERIFICATION_PROVIDER_ENV } from './modules/verification/index.js';
 
 const SERVICE = 'identity-svc';
 /** 업무 gRPC 포트 [가정](정본에 값이 없다. BUILD_ORDER BAS-080이 공용 설정으로 옮긴다) */
@@ -31,9 +32,13 @@ if (!(Number.isInteger(grpcPort) && grpcPort > 0 && grpcPort <= 65535)) throw ne
 const keys = await TokenKeyRing.fromEnv(process.env);
 const signer = new JoseTokenSigner(keys, tokenIssuerFromEnv(process.env));
 const devices = HmacDeviceRefs.fromEnv(process.env);
+// 본인확인기관: 계약 전에는 시험 어댑터만 있다(local·ci·demo). 켜지 않으면 본인확인 시작이 503 PROVIDER_DOWN이다(identity §5)
+const verification = process.env[VERIFICATION_PROVIDER_ENV]
+  ? { provider: TestVerificationProvider.fromEnv(process.env), hashers: HmacIdentityHashers.fromEnv(process.env) }
+  : { provider: unavailableProvider, hashers: unavailableHashers };
 const signals = new PromSessionSignals();
 const database = createDatabase({ url, applicationName: SERVICE });
-const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices.refs, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined } }) });
+const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices.refs, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined }, verification }) });
 signals.register(service.metrics.registry);
 if (devices.warning) service.logger.warn(devices.warning);
 

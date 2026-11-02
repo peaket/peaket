@@ -6,6 +6,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import {
+  ACCOUNT_CLAIMS,
+  type AccountClaims,
   DEVICE_REFS,
   type DeviceRefs,
   SESSION_SIGNALS,
@@ -65,6 +67,7 @@ export class CreateSession {
     @Inject(TOKEN_SIGNER) private readonly signer: TokenSigner,
     @Inject(DEVICE_REFS) private readonly devices: DeviceRefs,
     @Inject(SESSION_SIGNALS) private readonly signals: SessionSignals,
+    @Inject(ACCOUNT_CLAIMS) private readonly claims: AccountClaims,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -133,7 +136,7 @@ export class CreateSession {
     if (r.replayed) this.signals.replayed(i.provider);
     else this.signals.created(i.provider, r.newAccount);
     if (r.ended.length) this.signals.terminated('DEVICE_LIMIT', r.ended.length);
-    const access = await this.signer.access({ accountId: r.accountId, sessionId: r.sessionId }, now);
+    const access = await this.signer.access({ accountId: r.accountId, sessionId: r.sessionId, ...(await this.claims.of(r.accountId)) }, now);
     return {
       accountId: r.accountId,
       sessionId: r.sessionId,

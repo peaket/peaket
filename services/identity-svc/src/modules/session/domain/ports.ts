@@ -97,7 +97,7 @@ export interface SignedToken {
 export const TOKEN_SIGNER = Symbol('identity.TokenSigner');
 /** 팬 토큰 키 서명(identity §3). 키 셋·회전·공개키 배포는 BUILD_ORDER PRF-030 */
 export interface TokenSigner {
-  access(c: { accountId: string; sessionId: string }, now: number): Promise<SignedToken>;
+  access(c: { accountId: string; sessionId: string; scopes?: string[]; pid?: string; pidPrev?: string }, now: number): Promise<SignedToken>;
   reauth(c: { accountId: string; sessionId: string; provider: Provider; strength: ReauthStrength; purpose: ReauthPurpose }, now: number): Promise<SignedToken>;
 }
 
@@ -123,4 +123,10 @@ export const PUBLIC_KEYS = Symbol('identity.PublicKeys');
 /** 공개키 묶음(JWKS)을 내는 쪽(identity §3 '토큰 수명주기 구현' 공개키 배포). 키 셋은 fan·admin·staff */
 export interface PublicKeys {
   jwks(set: 'fan' | 'admin' | 'staff', now: number): { keys: object[] };
+}
+
+export const ACCOUNT_CLAIMS = Symbol('identity.AccountClaims');
+/** 액세스 토큰에 실을 계정 값(identity §3): 본인확인을 마친 계정의 scope(ticket:buy)·pid·pid_prev. 본인확인 컨텍스트가 채운다 */
+export interface AccountClaims {
+  of(accountId: string): Promise<{ scopes: string[]; pid?: string; pidPrev?: string }>;
 }

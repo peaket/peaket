@@ -28,7 +28,7 @@ const one = async <T>(q: ReturnType<typeof sql>): Promise<T | undefined> => (awa
 
 sessionCases('PostgreSQL', async () => {
   // 시험마다 빈 표에서 시작한다(메모리 저장소처럼)
-  await database.db.execute(sql`truncate session_create_key, refresh_token_hash, session, device, account_provider, account, outbox`);
+  await database.db.execute(sql`truncate session_create_key, refresh_token_hash, session, device, account_provider, identity_verification, verification_attempt, account, outbox`);
   return {
   store: new DrizzleSessionStore(database, systemClock),
   refreshHashOf: async (id) => (await one<{ h: Buffer }>(sql`select refresh_hash as h from session where id = ${id}`))?.h ?? null,

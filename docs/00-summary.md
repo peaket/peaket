@@ -292,6 +292,7 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - 관측 최소(템플릿 대시보드·Grafana·web-vitals)(R-239, 2026-11-03, BUILD_ORDER BSL-070, wbs 1.3.1, 병렬 세션): 로컬 kind에 Prometheus·Grafana를 두고(`cluster.mjs observability`), 서비스 템플릿 지표로 첫 행이 네 신호인 대시보드를 코드로 만들며(`tools/local/dashboards.mjs`), v0 좌석맵이 web-vitals·LoAF 값을 `window.__peaketVitals`에 모아 K5 랩 판정이 읽게 했다.
 - 소셜 로그인(얇은 OIDC 클라이언트)과 팬 재인증(R-240, 2026-11-03, BUILD_ORDER PRF-020, wbs 2.1.1, 병렬 세션): 소비자 웹 앱 서버에 openid-client 6 로그인 경로 다섯(시작·콜백·로그아웃·재인증 시작·재인증 결과)을 두고, 새 identity-svc가 gRPC `SessionService`로 세션 생성(멱등 키 10분·기기 5대 한도)·로그아웃·팬 재인증 토큰을 맡는다. 재인증 강도는 제공자별 `prompt`·`auth_time`으로 정하고(I-T54), 재인증 토큰은 주소가 아니라 1분 봉인 쿠키와 같은 출처 POST로 화면에 넘긴다(I-T72).
 - 토큰 수명주기(R-241, 2026-11-03, BUILD_ORDER PRF-030, wbs 2.1.2, 병렬 세션): identity-svc가 팬 토큰 갱신(회전, 응답을 잃은 재시도의 30초 유예, 예전 토큰 재사용이면 패밀리 종료)과 세션 종료 사건 Outbox, 서명 키 셋 셋(지금·옛 키)과 공개키 묶음 경로를 맡고, 받는 쪽 토큰 확인(키 셋·ES256·typ·iss·aud)을 `packages/platform`에 공용으로 두었다.
+- 본인확인 시험 어댑터와 구매 권한(R-242, 2026-11-03, BUILD_ORDER PRF-040, wbs 2.1.3, 병렬 세션): identity-svc에 휴대폰 본인확인 시작·결과 확정·조회 경로를 기관 포트와 시험 어댑터로 두고(1인 1계정, 다시 본인확인해도 pid 그대로), 본인확인을 마친 계정의 액세스 토큰에 `ticket:buy`와 pid를 싣는다.
 
 ## 5. [충돌] 결정 결과
 
