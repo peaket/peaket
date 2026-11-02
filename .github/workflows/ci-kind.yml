@@ -40,6 +40,11 @@ jobs:
       - run: node --test tools/local/e2e/aws-emulator.e2e.mjs tools/local/e2e/relay-takeover.e2e.mjs
       # 로컬 관측 최소(Prometheus·Grafana·템플릿 대시보드). relay-takeover가 올린 example-svc를 긁으므로 그 뒤에 따로 돈다
       - run: node --test tools/local/e2e/observability.e2e.mjs
+      # v0 앞에서 앞 시험의 작업 부하(예제 서비스·Kafka)를 내린다. v0는 둘을 쓰지 않는다. 비공개 저장소의 표준 실행기는 CPU 2개라
+      # 다 남겨 두면 v0의 Valkey가 노드에 배치되지 못하고 Pending으로 남았다(2026-11-03). 관측 도구는 v0 시험이 쓰므로 남긴다
+      - run: |
+          k=$(node tools/local/tools.mjs kubectl | cut -d' ' -f2)
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket delete namespace example kafka --ignore-not-found --wait=false
       # v0 배포(docs/infra.md §3 'v0 배포'): 이미지 둘·입구·CPU HPA를 올리고, 입구를 거친 v0 흐름·막기·레이트 리밋·확장을 본다
       - run: node tools/local/cluster.mjs v0
       - run: node --test tools/local/e2e/v0-deploy.e2e.mjs
@@ -50,5 +55,8 @@ jobs:
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n example logs -l app.kubernetes.io/component=outbox-relay --tail=200 --prefix || true
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n v0 get pods,hpa,jobs,events -o wide || true
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n v0 logs -l app.kubernetes.io/part-of=peaket --tail=200 --prefix || true
+          # 배치되지 못한 파드의 까닭과 노드의 자원 배정(요청 합계)
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket get events -A --field-selector reason=FailedScheduling || true
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket describe nodes | sed -n '/Allocatable/,/Events/p' || true
       - if: ${{ always() }}
         run: node tools/local/cluster.mjs down || true
