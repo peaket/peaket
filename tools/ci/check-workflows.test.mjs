@@ -9,7 +9,7 @@ import { tempDir } from './git-fixture.mjs';
 
 const script = join(dirname(fileURLToPath(import.meta.url)), 'check-workflows.mjs');
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-// 실제 build-image.yml의 행렬을 읽는 데 쓴다. tools-check 잡처럼 pnpm install 없이 돌면 없다(그 시험만 건너뛴다)
+// 실제 build-image.yml·ci.yml을 읽는 데 쓴다. 로컬에서 pnpm install 전이면 없다(그 시험만 건너뛴다). CI의 tools-check는 설치한 뒤 돈다(맨 아래 시험)
 const YAML = await import('yaml').catch(() => null);
 const SHA = 'a'.repeat(40);
 const GOOD = `name: ci
@@ -410,4 +410,16 @@ test('DT32_빌드잡이_비밀값을받거나_다른푸시도구를쓰면_실패
     assert.equal(r.code, 1, `${what}: ${r.out}`);
     assert.match(r.out, /D-T32/, what);
   }
+});
+
+// 2026-11-03 첫 원격 CI에서 찾음: tools-check가 설치 없이 돌아 yaml을 읽는 시험이 실패하거나(D-T40) 건너뛰었다(D-T32·BSL-050)
+test('tools-check는_잠금파일대로_의존성을설치한뒤에_시험을돈다', () => {
+  const text = readFileSync(join(REPO, '.github', 'workflows', 'tools-check.yml'), 'utf8');
+  const install = text.indexOf('pnpm install --frozen-lockfile');
+  assert.ok(install > 0, 'pnpm install --frozen-lockfile 단계가 없다');
+  assert.ok(install < text.indexOf('node --test'), '설치가 시험보다 뒤에 있다');
+});
+
+test('CI에서는_yaml패키지가있어_YAML시험을건너뛰지않는다', { skip: !process.env.CI && 'CI 밖(로컬은 pnpm install 전이면 건너뛴다)' }, () => {
+  assert.ok(YAML, 'CI에서 yaml 패키지를 읽지 못했다');
 });

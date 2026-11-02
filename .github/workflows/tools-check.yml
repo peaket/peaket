@@ -19,6 +19,13 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+      # 실제 워크플로를 YAML로 읽는 시험(D-T32·D-T40·BSL-050)이 뿌리 개발 의존성 yaml을 쓴다. 설치는 잠금 파일대로만 한다(§4.4)
+      # pnpm은 package.json의 packageManager 판으로 받는다(ci-node.yml과 같다)
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile
       - run: node --test "tools/ci/*.test.mjs"
       # 성능 장부 도구: 명령줄 시험(점검 판정·지연 대조·증거 수준·야간 비교 D-T40)과 자체 시험(docs/perf-ledger.md)
       - run: node --test "tools/perf-ledger/*.test.mjs"
