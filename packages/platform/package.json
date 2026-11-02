@@ -61,6 +61,7 @@
     "opossum": "10.0.0",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
+    "redis": "6.3.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "zod": "^4.6.7"
@@ -73,7 +74,6 @@
     "@types/opossum": "8.1.9",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "0.31.11",
-    "redis": "6.3.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }
