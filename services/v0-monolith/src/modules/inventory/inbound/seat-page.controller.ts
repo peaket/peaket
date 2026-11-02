@@ -1,6 +1,8 @@
 // 받는 층: v0 좌석맵 화면(docs/features/seat-hold.md §14 동작 7). 같은 출처 파일(HTML·CSS·JS)만 쓰고 CSP로 묶는다.
 // 화면 파일은 패키지의 public/v0-seatmap/에서 시작할 때 한 번 읽는다(정한 이름만 내준다).
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { Controller, Get, Header, NotFoundException, Res } from '@nestjs/common';
 import { ContractParams, Roles } from '@peaket/platform';
 import { z } from 'zod';
@@ -13,8 +15,15 @@ const ASSETS: Record<string, string> = {
   'seatmap-page.js': 'text/javascript; charset=utf-8',
   'seatmap-model.js': 'text/javascript; charset=utf-8',
   'seatmap.css': 'text/css; charset=utf-8',
+  // 랩 판정 계측(§14 동작 7, K5·NFR-012): 계측 파일과 고정 판 web-vitals 속성 정보 빌드(ESM)
+  'vitals.js': 'text/javascript; charset=utf-8',
+  'web-vitals.js': 'text/javascript; charset=utf-8',
 };
-const assetText = new Map(Object.keys(ASSETS).map((name) => [name, readFileSync(new URL(name, PUBLIC_DIR), 'utf8')]));
+/** web-vitals 6.2.3 속성 정보 빌드의 ESM 파일. 패키지가 내보내는 require 조건(UMD) 옆에 있다 */
+const WEB_VITALS = join(dirname(createRequire(import.meta.url).resolve('web-vitals/attribution')), 'web-vitals.attribution.js');
+const assetText = new Map(
+  Object.keys(ASSETS).map((name) => [name, readFileSync(name === 'web-vitals.js' ? WEB_VITALS : new URL(name, PUBLIC_DIR), 'utf8')]),
+);
 
 /** 화면 보안 머리(asvs/v0-baseline.md 3.4.3·3.4.4·3.4.6) */
 export const PAGE_CSP =
@@ -51,6 +60,7 @@ const PAGE_HTML = `<!doctype html>
 <li><span class="dot mine"></span>내 홀드</li>
 </ul>
 </main>
+<script type="module" src="/v0/seatmap/assets/vitals.js"></script>
 <script type="module" src="/v0/seatmap/assets/seatmap-page.js"></script>
 </body>
 </html>

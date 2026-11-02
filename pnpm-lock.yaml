@@ -741,6 +741,9 @@ importers:
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
+      web-vitals:
+        specifier: 6.2.3
+        version: 6.2.3
       ws:
         specifier: 8.22.0
         version: 8.22.0
@@ -5506,6 +5509,9 @@ packages:
     resolution: {integrity: sha512-s3NZy0QpTY9qGqzc0wtz4qI28z3+5qKbbAec4MV4G9N3CfgZ9wgvQRr0cl2jh/tqkWG1NWHkmVMHZpCamev5Wg==}
     engines: {node: '>=10.13.0'}
 
+  web-vitals@6.2.3:
+    resolution: {integrity: sha512-Dmy+vdO1UPMqXiAtZSNayhl4f794Bxfd94W4HIj2HlYtczEQfEOon969memlcpcHrTuOKLa5baFjX7WbgmOq+A==}
+
   webidl-conversions@3.0.1:
     resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
 
@@ -10226,6 +10232,8 @@ snapshots:
   watchpack@2.6.3:
     dependencies:
       graceful-fs: 4.2.11
+
+  web-vitals@6.2.3: {}
 
   webidl-conversions@3.0.1: {}
 

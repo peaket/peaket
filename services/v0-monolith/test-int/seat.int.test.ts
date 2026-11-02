@@ -4,6 +4,9 @@
 // 시험마다 회차 ID를 새로 만들어 서로 섞이지 않는다. 만료는 모든 회차를 보므로, 푼 수를 세는 시험은 남은 홀드를 먼저 푼다.
 // 단언은 상태 코드만이 아니라 본문 칸과 표(v0_seat·v0_hold·v0_quota)의 결과까지 본다.
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import { DELTA_CHANNEL, type SeatDefinition, type SeatEventConfig } from '../src/modules/inventory/index.js';
 import { JSON_CONTENT_TYPE, PROBLEM_CONTENT_TYPE, expectProblem, fanHeaders, type Headers } from './queue-harness.js';
@@ -1103,6 +1106,9 @@ describe('좌석맵 화면 GET /v0/seatmap/{eventId}', () => {
     ['seatmap-page.js', /^text\/javascript(;\s*charset=utf-8)?$/i],
     ['seatmap-model.js', /^text\/javascript(;\s*charset=utf-8)?$/i],
     ['seatmap.css', /^text\/css(;\s*charset=utf-8)?$/i],
+    // 랩 판정 계측(§14 동작 7, BSL-070 ②): 같은 출처의 정한 이름으로만 낸다
+    ['vitals.js', /^text\/javascript(;\s*charset=utf-8)?$/i],
+    ['web-vitals.js', /^text\/javascript(;\s*charset=utf-8)?$/i],
   ];
   /** CSP 머리를 지시어 → 값 목록으로 편다 */
   function parseCsp(v: unknown): Record<string, string[]> {
@@ -1216,6 +1222,26 @@ describe('좌석맵 화면 GET /v0/seatmap/{eventId}', () => {
       expect(r.raw, url).not.toContain('@peaket/v0-monolith');
       expect(r.raw, url).not.toContain('PEAKET_V0_DATABASE_URL');
     }
+  });
+
+  test('K5 NFR012_좌석맵화면은랩판정계측을화면스크립트보다먼저싣고_고정판web-vitals를같은출처로낸다 [ASVS v5.0.0-3.4.3]', async () => {
+    const page = (await h.http('GET', `/v0/seatmap/${h.newEventId()}`, {})).raw;
+    const vitalsAt = page.indexOf('src="/v0/seatmap/assets/vitals.js"');
+    expect(vitalsAt, '계측 스크립트').toBeGreaterThan(0);
+    expect(vitalsAt).toBeLessThan(page.indexOf('src="/v0/seatmap/assets/seatmap-page.js"'));
+    const lib = await h.http('GET', '/v0/seatmap/assets/web-vitals.js', {});
+    expect(lib.status).toBe(200);
+    for (const fn of ['onINP', 'onLCP', 'onCLS']) expect(lib.raw, fn).toContain(fn);
+    // 속성 정보 빌드여야 원인 칸이 있다(표준 빌드도 onINP는 같다): 고정 판 패키지의 ESM 파일과 같은 바이트인지 본다
+    const require = createRequire(import.meta.url);
+    const attributionEsm = join(dirname(require.resolve('web-vitals/attribution')), 'web-vitals.attribution.js');
+    expect(lib.raw).toBe(readFileSync(attributionEsm, 'utf8'));
+    for (const field of ['interactionTarget', 'largestShiftTarget', 'elementRenderDelay']) expect(lib.raw, field).toContain(field);
+    const vitals = (await h.http('GET', '/v0/seatmap/assets/vitals.js', {})).raw;
+    expect(vitals).toContain('./web-vitals.js');
+    expect(vitals).toContain('__peaketVitals');
+    // 화면은 밖으로 보내지 않는다(v0에는 텔레메트리 입구가 없다)
+    for (const send of ['fetch(', 'sendBeacon', 'XMLHttpRequest', 'WebSocket']) expect(vitals, send).not.toContain(send);
   });
 
   test('FR009_화면스크립트는서버값과오류문구를textContent로넣고_HTML로해석하는길을쓰지않는다 [ASVS v5.0.0-3.2.2]', async () => {
