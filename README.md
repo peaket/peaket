@@ -49,7 +49,6 @@
 | `loadtest/` | 부하 시험: k6 시나리오와 카오스 실험(봇 시뮬레이터는 비공개 저장소) |
 | `infra/` | 인프라 코드(Terraform). 지금은 GitHub 조직 설정 스택이 있습니다 |
 | `tools/` | 문서 점검 도구, 성능 장부 도구, CI 검사 스크립트 |
-| `openspec/` | 코드를 쓰기 전에 변경마다 쓰는 제안·명세·작업 목록(스펙 주도 개발, OpenSpec). 절차는 [docs/architecture.md](docs/architecture.md) §8.6, 결정은 ADR-0167입니다 |
 | `docs/` | 문서 전부(아래 표). 2026-10-30에 한 폴더로 모았습니다(ADR-0168) |
 
 `docs/` 안은 다음과 같습니다.
@@ -73,7 +72,7 @@
 python tools/doc-check/check_all.py
 ```
 
-구현을 시작하면 이 저장소 하나를 받아 토큰 없이 설치하고 빌드합니다. 내부 패키지를 게시하지 않고 저장소 안에서 잇기 때문입니다([docs/devops.md](docs/devops.md) §2.1). 지금 설치되는 것은 스펙 주도 개발 도구(OpenSpec)뿐입니다. Node 20.19 이상에서 `corepack pnpm install --frozen-lockfile`로 설치하고 `pnpm exec openspec --version`으로 확인합니다. pnpm 판은 `package.json`에 고정되어 있습니다.
+구현을 시작하면 이 저장소 하나를 받아 토큰 없이 설치하고 빌드합니다. 내부 패키지를 게시하지 않고 저장소 안에서 잇기 때문입니다([docs/devops.md](docs/devops.md) §2.1). Node 24(판은 `.nvmrc`)에서 `corepack pnpm install --frozen-lockfile`로 설치하고 `pnpm test`로 시험을 돌립니다. 코드는 정본을 명세로 읽고 시험을 먼저 써서 만듭니다([docs/architecture.md](docs/architecture.md) §8.6, ADR-0178). pnpm 판은 `package.json`에 고정되어 있습니다.
 
 ## 문서 규칙
 

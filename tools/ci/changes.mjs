@@ -13,7 +13,7 @@ const SCOPES = ['docs', 'contracts', 'js', 'js_all', 'data', 'infra', 'deploy', 
 // 경로 앞머리 → 범위. 한 파일이 여러 범위에 들 수 있다
 const RULES = [
   [/^docs\/api\//, ['contracts', 'docs']],
-  [/^(docs|openspec|\.claude|tools\/doc-check)\//, ['docs']],
+  [/^(docs|\.claude|tools\/doc-check)\//, ['docs']],
   // 문서 점검(tools/doc-check)이 읽는 파일: tools/와 점으로 시작하는 폴더 밖의 .md·.yaml·.json·.csv
   [/^(?!tools\/)(?!(?:.*\/)?\.).*\.(md|yaml|json|csv)$/, ['docs']],
   [/^packages\/contracts\//, ['contracts', 'js']],

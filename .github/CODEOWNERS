@@ -2,7 +2,7 @@
 # GitHub는 맞는 줄 가운데 마지막 줄을 쓴다. 그래서 넓은 것에서 좁은 것 순서로 적는다.
 # 1인 기간에는 코드 주인 검토를 요구하지 않는다(docs/devops.md §2.3). 검사: node tools/ci/check-codeowners.mjs
 
-# 기본값: 문서 폴더, tools/(tools/ci/ 밖), openspec/, 계약 원본(docs/api/)
+# 기본값: 문서 폴더, tools/(tools/ci/ 밖), 계약 원본(docs/api/)
 *                                   @peaket/architecture
 
 # 화면 앱과 화면용 공용 패키지

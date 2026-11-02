@@ -18,18 +18,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
-      # pnpm은 package.json의 packageManager 판을 읽어 그 판으로 받는다(판을 한곳에만 둔다. pnpm 문서의 npm 설치, 2026-10-31 확인).
-      # 이 패키지의 설치 스크립트가 실행 파일을 놓으므로 여기만 --ignore-scripts를 붙이지 않는다. 의존성 설치는 잠금 파일대로만 한다(§4.4)
-      - run: |
-          pm=$(node -p "require('./package.json').packageManager")
-          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
-          npm install --global "$pm"
-      - run: pnpm install --frozen-lockfile
       # 그림 문법 검사의 의존성(리더기와 같은 mermaid 판, ADR-0138)
       - run: npm ci --ignore-scripts --prefix tools/doc-check/mermaid
       # 문서 점검 도구 자체의 시험(openapi 계약 검사, 기술 검토 낮음-031·032). 도구가 틀리면 아래 점검을 믿을 수 없으므로 먼저 돈다
       - run: python3 -I -X utf8 -m unittest discover -s tools/doc-check -p "test_*.py"
       - run: python3 tools/doc-check/check_all.py
-      - run: pnpm exec openspec validate --all --no-interactive
-        env:
-          OPENSPEC_TELEMETRY: '0'

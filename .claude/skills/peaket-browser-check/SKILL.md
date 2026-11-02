@@ -1,19 +1,19 @@
 ---
 name: peaket-browser-check
-description: PEAKET의 OpenSpec 변경 하나를 대조(/opsx:verify) 뒤에 Claude in Chrome으로 눌러 보고 openspec/changes/<이름>/browser-check.md에 결과를 남긴다. 사용자가 '브라우저 확인'을 하라고 하거나, OpenSpec 사이클에서 대조가 끝난 그 단계일 때만 쓴다. 일반 웹 탐색이나 E2E 시험 작성에는 쓰지 않는다.
+description: PEAKET의 화면이 바뀌는 단계 하나를 대조(docs/architecture.md §8.6의 5단계) 뒤에 Claude in Chrome으로 눌러 보고 docs/review/browser-check/<단계 ID>.md에 결과를 남긴다. 사용자가 '브라우저 확인'을 하라고 하거나, 정본 기준 절차에서 대조가 끝난 그 단계일 때만 쓴다. 일반 웹 탐색이나 E2E 시험 작성에는 쓰지 않는다.
 ---
 
-# 브라우저 확인(초안, ADR-0167)
+# 브라우저 확인(ADR-0178, 조건은 ADR-0167 결정 5)
 
-규칙의 정본은 `docs/architecture.md` §8.6이다. 이 절차가 그와 다르면 §8.6이 이긴다. OpenSpec 설치·초기화는 2026-10-30에 했다. 이 절차는 첫 실제 사용(wbs 0.6.2)까지 초안이다. OpenSpec 명령은 `pnpm exec openspec …`으로 부른다.
+규칙의 정본은 `docs/architecture.md` §8.6이다. 이 절차가 그와 다르면 §8.6이 이긴다.
 
 브라우저 확인은 관문이 아니라 참고 증거다. 같은 화면도 누를 때마다 결과가 다를 수 있다. 그래서 실패는 고치기 전에 재현 시험으로 확인한다.
 
 ## 언제 하나
 
-- 화면이 바뀌는 변경에서, `/opsx:verify`가 치명 0으로 끝난 뒤에 한다.
-- 화면이 없는 변경(서버만, 도구만)은 누르지 않는다. `browser-check.md`에 '해당 없음'과 까닭만 적는다.
-- E2E 시험을 쓰는 변경도 '해당 없음'이다(ADR-0167 결정 6).
+- 화면이 바뀌는 단계에서, 대조(`node tools/ci/trace-check.mjs`)가 통과한 뒤에 한다.
+- 화면이 없는 단계(서버만, 도구만)는 누르지 않고 기록도 만들지 않는다.
+- E2E 시험을 쓰는 단계는 하지 않는다(E2E가 본다).
 
 ## 소유자가 한 번 해 두는 일
 
@@ -32,44 +32,45 @@ description: PEAKET의 OpenSpec 변경 하나를 대조(/opsx:verify) 뒤에 Cla
 
 ## 절차
 
-1. **시나리오 모으기**: `openspec/changes/<이름>/specs/**/spec.md`에서 시나리오(WHEN, THEN)를 모은다. `proposal.md`의 Impact(영향)에서 화면 번호(SCR)와 근거 ID를 찾는다. 화면 문구는 `docs/design/d5-screen-blueprint.md`의 그 화면 절을 기준으로 본다.
-2. **브라우저 연결 확인**: `list_connected_browsers`로 시험용 프로필이 연결되어 있는지 본다. 없으면 멈추고 소유자에게 연결을 부탁한다.
+1. **대본 만들기**: 그 단계의 범위 목록(`docs/PROGRESS.md` '다음 할 일'의 ID)에서 화면 번호(SCR)와 시험 ID를 고른다. 화면마다 `docs/design/d5-screen-blueprint.md`의 그 화면 절(상태·동작·문구)을, 시험 ID마다 정본 시험 표의 통과 기준을 읽어 '이렇게 하면 → 이렇게 보인다'로 시나리오를 세운다. 대본에는 ID와 시나리오 이름만 적고 정본의 문구를 옮겨 적지 않는다(누를 때 정본을 보고 견준다).
+2. **브라우저 연결 확인**: `list_connected_browsers`로 시험용 프로필이 연결되어 있는지 본다. 없으면 결과 파일에 '못 함(연결 없음)'과 까닭을 적고 Playwright로 대신 본 뒤, 다음에 연결된 턴에 다시 누른다(docs/PROGRESS.md 턴 규칙).
 3. **탭 열기**: `tabs_context_mcp`로 탭 묶음을 확인하고 `tabs_create_mcp`로 새 탭을 연다.
 4. **시나리오마다 확인**:
-   - WHEN의 조건을 화면에서 만든다(`navigate`, `find`, `computer`, `form_input`).
-   - THEN을 화면의 글과 상태로 확인한다(`get_page_text`, `read_page`). 모양을 봐야 할 때만 화면 캡처를 한다(`computer`의 screenshot, `save_to_disk`).
+   - 조건을 화면에서 만든다(`navigate`, `find`, `computer`, `form_input`).
+   - 기대한 결과를 화면의 글과 상태로 확인한다(`get_page_text`, `read_page`). 모양을 봐야 할 때만 화면 캡처를 한다(`computer`의 screenshot, `save_to_disk`).
    - 콘솔 오류(`read_console_messages`, 오류만)와 실패한 API 요청(`read_network_requests`, 주소에 `/v1/`)을 본다.
-   - 명세에 화면 크기가 적힌 시나리오만 `resize_window`로 그 크기를 본다.
-5. **결과 남기기**: `openspec/changes/<이름>/browser-check.md`를 아래 형식으로 쓴다.
+   - 화면 정본이 화면 크기를 정한 시나리오만 `resize_window`로 그 크기를 본다.
+5. **결과 남기기**: `docs/review/browser-check/<단계 ID>.md`를 아래 형식으로 쓴다.
 6. **정리**: 연 탭을 닫는다(`tabs_close_mcp`).
 
-## browser-check.md 형식
+## 결과 파일 형식
 
 ```markdown
-# 브라우저 확인: <변경 이름>
+# 브라우저 확인: <단계 ID> <단계 이름>
 
 - 날짜: YYYY-MM-DD
 - 커밋: <짧은 해시>
 - 브라우저: Chrome <판>, 시험용 프로필
 - 환경: 로컬 실행, 합성 데이터 시드 <이름>
+- 범위: <SCR·시험 ID>
 
-| 시나리오 | 결과 | 본 것 | 콘솔·요청 오류 | 캡처 |
+| 시나리오(근거 ID) | 결과 | 본 것 | 콘솔·요청 오류 | 캡처 |
 | --- | --- | --- | --- | --- |
-| <명세의 시나리오 이름> | 통과 / 실패 / 확인 못 함 | <화면에서 본 글과 상태> | <없음 또는 오류 요약> | <개발 PC의 파일 이름 또는 없음> |
+| <시나리오 이름>(SCR-011, FE-T7) | 통과 / 실패 / 확인 못 함 | <화면에서 본 글과 상태> | <없음 또는 오류 요약> | <개발 PC의 파일 이름 또는 없음> |
 
 ## 실패와 확인 못 함
-- <시나리오>: <무엇이 기대와 달랐나, 재현 단계>
+- <시나리오>: <무엇이 정본과 달랐나, 재현 단계>
 ```
 
 - 캡처 파일은 저장소에 넣지 않는다. 실패 캡처만 PR 설명에 붙인다.
 - '확인 못 함'에는 까닭을 적는다. 예: 패스키 창, 시뮬레이터가 없는 외부 화면.
 
-## 실패가 나오면(Apply 쪽 규칙)
+## 실패가 나오면
 
 1. 그 버그를 재현하는 시험을 가장 낮은 단계(단위, 통합)에 먼저 만들어 실패를 본다. 브라우저에서만 재현되면 그 한 건만 Playwright 시험으로 쓴다.
 2. 고친 뒤 시험 통과를 본다.
-3. `/opsx:verify`를 다시 돌린다.
-4. 실패했던 시나리오만 다시 눌러 보고 `browser-check.md`를 고친다.
+3. 대조(`node tools/ci/trace-check.mjs`)를 다시 돌린다.
+4. 실패했던 시나리오만 다시 눌러 보고 결과 파일을 고친다.
 
 ## 다루지 않는 것
 

@@ -13,7 +13,6 @@
 **/.env.*
 docs
 apps
-openspec
 tools
 infra
 deploy
