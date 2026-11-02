@@ -28,6 +28,7 @@
 /services/ops-rt/                   @peaket/data
 /services/rt-pulse/                 @peaket/data
 /services/close-runner/             @peaket/data
+/services/v0-monolith/              @peaket/queue @peaket/purchase
 
 # 데이터 모델
 /data/                              @peaket/data

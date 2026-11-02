@@ -1,0 +1,28 @@
+{
+  "name": "@peaket/v0-monolith",
+  "private": true,
+  "version": "0.0.0",
+  "description": "v0 모놀리스. K1~K10을 v1과 견주는 '처음 만들 법한 단순한 설계'의 비교 기준선이다. 모듈 경계는 v1 서비스와 같다(docs/architecture.md §9.3, ADR-0096). 지금은 대기열 v0(queue 모듈, wbs 1.1.1)만 있다",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.3.2",
+    "@nestjs/core": "^12.3.2",
+    "@peaket/platform": "workspace:*",
+    "redis": "6.3.0",
+    "reflect-metadata": "^0.2.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
