@@ -16,7 +16,10 @@ metadata:
     {{- include "peaket.labels" . | nindent 4 }}
     app.kubernetes.io/component: service
 spec:
+  {{- /* HPA를 켜면 복제 수를 적지 않는다(HPA가 정한 수를 다시 올릴 때 되돌리지 않게, docs/infra.md §3 'v0 배포') */}}
+  {{- if not .Values.service.autoscaling.enabled }}
   replicas: {{ .Values.service.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}

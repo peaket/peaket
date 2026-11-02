@@ -32,6 +32,21 @@ service:
   # 종료: preStop 5초 → SIGTERM → 진행 중 요청 마감(docs/devops.md §6.4 '일반 서비스')
   preStopSleepSeconds: 5
   terminationGracePeriodSeconds: 30
+  # CPU 사용률 HPA(autoscaling/v2). v0 배포의 K9 비교 기준이다(docs/infra.md §3 'v0 배포'). v1은 KEDA로 확장한다(wbs 0.4.4).
+  # 켜면 Deployment에 replicas를 적지 않는다(HPA가 정한 수를 다시 올릴 때 되돌리지 않게). resources.requests.cpu가 있어야 한다
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 4
+    # 요청 CPU 대비 평균 사용률(1~100). 확장 동작(behavior)은 쿠버네티스 기본값 그대로 둔다
+    targetCPUUtilizationPercentage: 70
+  # 앱 포트·관리 포트에 닿을 수 있는 곳을 좁히는 NetworkPolicy(로컬은 kindnet이 지킨다). 운영 정책은 wbs 0.4.4에서 정한다
+  networkPolicy:
+    enabled: false
+    # 앱 포트에 닿을 수 있는 같은 네임스페이스 파드의 라벨(예: { app.kubernetes.io/name: v0-gateway }). 비면 아무도 닿지 못한다
+    appFromPodLabels: {}
+    # 관리 포트에 닿을 수 있는 네임스페이스 이름(로컬 관측 최소의 Prometheus)
+    managementFromNamespaces: [observability]
 
 # 서비스별 Outbox 릴레이(ADR-0116 결정 1·2). 서비스와 같은 이미지를 다른 시작 명령으로 띄운다. Lease 리더만 보내고 정비를 돈다
 outboxRelay:

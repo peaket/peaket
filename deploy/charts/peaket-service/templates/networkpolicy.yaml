@@ -1,0 +1,41 @@
+{{- if and .Values.service.enabled .Values.service.networkPolicy.enabled }}
+{{- $name := include "peaket.name" . }}
+{{- $np := .Values.service.networkPolicy }}
+# 서비스 파드에 닿을 수 있는 곳(docs/infra.md §3 'v0 배포' '앱 포트 막기'). 앱 포트는 정한 라벨의 파드만, 관리 포트는 정한 네임스페이스만.
+# 정하지 않은 들어오는 연결은 모두 막는다. 운영 정책은 wbs 0.4.4에서 정한다
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "peaket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: service
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/component: service
+  policyTypes: [Ingress]
+  {{- if not (or $np.appFromPodLabels $np.managementFromNamespaces) }}
+  ingress: []
+  {{- else }}
+  ingress:
+    {{- if $np.appFromPodLabels }}
+    - from:
+        - podSelector:
+            matchLabels: {{- toYaml $np.appFromPodLabels | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: {{ int .Values.service.port }} }
+    {{- end }}
+    {{- if $np.managementFromNamespaces }}
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: {{- toYaml $np.managementFromNamespaces | nindent 18 }}
+      ports:
+        - { protocol: TCP, port: {{ int .Values.managementPort }} }
+    {{- end }}
+  {{- end }}
+{{- end }}

@@ -7,6 +7,7 @@
 //   4. ${{ }} 안에 사용자가 고칠 수 있는 값(PR 제목·본문, 가지 이름, 커밋 메시지 등)을 쓰지 않는다
 //   5. actions/checkout 단계마다 persist-credentials: false를 둔다
 //   6. 잡마다 timeout-minutes를 둔다(재사용 워크플로를 부르는 잡은 그 워크플로가 정한다)
+//   7. build-image.yml의 잡 build는 잡 권한이 contents: read 하나뿐이고 레지스트리 로그인·푸시·서명·출처 증명 단계가 없다(D-T32 ①)
 // 쓰는 법: node tools/ci/check-workflows.mjs [파일...]  (파일이 없으면 .github/workflows/*.yml|yaml)
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -77,6 +78,78 @@ function check(file, text) {
     }
     close();
   }
+  if (/(^|[\\/])build-image\.ya?ml$/.test(file)) errors.push(...checkBuildJob(file, code, start));
+  return errors;
+}
+
+// 7. build-image.yml의 빌드 잡(D-T32 ①, docs/devops.md §3.1·§4.2): 저장소 코드를 돌리는 잡은 서명 신원·레지스트리 쓰기·출처 증명 권한이 없다.
+//    잡 권한은 contents: read 하나뿐이고, 레지스트리 로그인·푸시·서명·출처 증명 단계가 없어야 한다(게시 잡은 따로, wbs 0.1.5)
+const BUILD_JOB_FORBIDDEN = [
+  [/\bid-token\s*:/, 'id-token 권한'],
+  [/\bpackages\s*:\s*write\b/, 'packages: write 권한'],
+  [/\battestations\s*:\s*write\b/, 'attestations: write 권한'],
+  [/\bdocker\s+login\b/, 'docker login'],
+  [/\bdocker\s+push\b/, 'docker push'],
+  [/--push\b/, '--push'],
+  [/\bcosign\b/, 'cosign'],
+  [/\buses:\s*['"]?docker\/login-action@/, 'docker/login-action'],
+  [/\buses:\s*['"]?actions\/attest/, 'actions/attest'],
+  [/^\s*push:\s*['"]?true\b/, 'push: true'],
+  [/\btype=registry\b/, 'type=registry 출력'],
+  [/\bpush=true\b/, 'push=true 출력'],
+  // 레지스트리 자격 증명 같은 비밀 값은 빌드 잡에 들이지 않는다(2026-11-03 코드 리뷰)
+  [/\$\{\{\s*secrets\./, '비밀 값(secrets.)'],
+  [/^\s*secrets:\s*inherit\b/, 'secrets: inherit'],
+  [/\bdocker\s+image\s+push\b/, 'docker image push'],
+  [/\bcrane\s+(push|copy|cp|append|mutate)\b/, 'crane 푸시'],
+  [/\bskopeo\s+copy\b/, 'skopeo copy'],
+  [/\boras\s+push\b/, 'oras push'],
+];
+
+function checkBuildJob(file, code, jobsStart) {
+  const errors = [];
+  const where = (i) => `${file}:${i + 1}`;
+  if (jobsStart < 0) return [`${file}: 잡 build가 없다(D-T32 ①: 빌드 잡과 게시 잡을 나눈다)`];
+  let from = -1;
+  let to = code.length;
+  for (let i = jobsStart + 1; i < code.length; i++) {
+    const l = code[i];
+    if (/^\S/.test(l)) {
+      to = Math.min(to, i);
+      break;
+    }
+    const key = /^ {2}([A-Za-z_][\w-]*):\s*(#.*)?$/.exec(l);
+    if (!key) continue;
+    if (from >= 0) {
+      to = i;
+      break;
+    }
+    if (key[1] === 'build') from = i;
+  }
+  if (from < 0) return [`${file}: 잡 build가 없다(D-T32 ①: 빌드 잡과 게시 잡을 나눈다)`];
+  const block = code.slice(from + 1, to);
+  // 잡 권한: 4칸 들여쓴 permissions:(그 잡 바로 아래)
+  const p = block.findIndex((l) => /^ {4}permissions:/.test(l));
+  if (p < 0) {
+    errors.push(`${where(from)}: 잡 build에 잡 권한(permissions: contents: read)이 없다(D-T32 ①)`);
+  } else {
+    const inline = /^ {4}permissions:\s*(.*?)\s*(#.*)?$/.exec(block[p])[1];
+    let entries;
+    if (inline) {
+      const m = /^\{\s*(.*?)\s*\}$/.exec(inline);
+      entries = m ? m[1].split(',').map((s) => s.trim()).filter(Boolean) : [inline];
+    } else {
+      entries = [];
+      for (let j = p + 1; j < block.length && (block[j].trim() === '' || /^ {6,}/.test(block[j])); j++) if (block[j].trim()) entries.push(block[j].trim());
+    }
+    const norm = entries.map((e) => e.replace(/\s*:\s*/, ': '));
+    if (!(norm.length === 1 && norm[0] === 'contents: read')) {
+      errors.push(`${where(from + 1 + p)}: 잡 build의 권한은 contents: read 하나뿐이어야 한다(D-T32 ①): ${entries.join(', ') || '(비었음)'}`);
+    }
+  }
+  block.forEach((l, k) => {
+    for (const [re, what] of BUILD_JOB_FORBIDDEN) if (re.test(l)) errors.push(`${where(from + 1 + k)}: 잡 build에 ${what}이 있다(D-T32 ①: 빌드 잡은 레지스트리·서명·출처 증명 권한이 없다)`);
+  });
   return errors;
 }
 

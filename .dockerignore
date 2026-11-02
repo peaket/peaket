@@ -1,6 +1,23 @@
-# 이미지 빌드 맥락에서 뺄 것(ASVS v5.0.0-13.4.1: 배포물에 소스 관리 메타데이터를 넣지 않는다). 빌드 맥락은 저장소 뿌리다
+# 이미지 빌드 맥락에서 뺄 것(ASVS v5.0.0-13.4.1: 배포물에 소스 관리 메타데이터를 넣지 않는다). 빌드 맥락은 저장소 뿌리다.
+# 나중 줄이 앞 줄을 이긴다: 폴더째 빼고 이미지가 쓰는 것만 다시 넣은 뒤(!), 어디서든 뺄 것(**/…)을 맨 끝에 둔다.
 .git
 .github
+docs
+apps
+infra
+deploy
+loadtest
+data
+tools
+# 이미지 빌드 단계의 네이티브 바인딩 대조(docs/devops.md §4.4)
+!tools/ci/verify-native-binding.mjs
+services
+# 이미지가 있는 배포 단위와 그것이 담는 작업 공간 패키지(docs/infra.md §3 'v0 배포')
+!services/payment-svc
+!services/pg-simulator
+!services/v0-monolith
+# v0 모놀리스의 개발 의존성(작업 공간 연결에 package.json만 있으면 된다)
+!services/invariant-checker/package.json
 **/.cache
 **/.claude
 **/.turbo
@@ -11,11 +28,3 @@
 **/*.tsbuildinfo
 **/.env
 **/.env.*
-docs
-apps
-tools
-infra
-deploy
-loadtest
-data
-services

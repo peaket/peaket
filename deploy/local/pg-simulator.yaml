@@ -1,0 +1,51 @@
+# v0 배포의 결제사 대역 PG 시뮬레이터(services/pg-simulator, docs/infra.md §3 'v0 배포'). 데모 전용 이미지라 로컬·CI에만 둔다
+# (스테이징·운영 네임스페이스는 Kyverno 정책이 거부한다, docs/devops.md §4.3). 시험 키는 Secret pg-simulator에만 있다.
+# 이미지 peaket/pg-simulator:local은 node tools/local/cluster.mjs v0가 만들어 클러스터에 싣는다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg-simulator
+  namespace: v0
+spec:
+  selector: { app.kubernetes.io/name: pg-simulator }
+  ports:
+    - { name: http, port: 8790, targetPort: 8790 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pg-simulator
+  namespace: v0
+  labels: { app.kubernetes.io/name: pg-simulator, app.kubernetes.io/part-of: peaket }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: pg-simulator }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: pg-simulator, app.kubernetes.io/part-of: peaket }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: simulator
+          image: peaket/pg-simulator:local
+          imagePullPolicy: Never
+          env:
+            - { name: PEAKET_ENV, value: local }
+            - { name: PG_SIMULATOR_HOST, value: 0.0.0.0 }
+            - { name: PG_SIMULATOR_PORT, value: "8790" }
+          envFrom:
+            - secretRef: { name: pg-simulator }
+          ports:
+            - { name: http, containerPort: 8790 }
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 2
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }

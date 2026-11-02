@@ -13,7 +13,7 @@ permissions:
 jobs:
   kind:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,10 +35,15 @@ jobs:
       - run: node --test tools/local/e2e/aws-emulator.e2e.mjs tools/local/e2e/relay-takeover.e2e.mjs
       # 로컬 관측 최소(Prometheus·Grafana·템플릿 대시보드). relay-takeover가 올린 example-svc를 긁으므로 그 뒤에 따로 돈다
       - run: node --test tools/local/e2e/observability.e2e.mjs
+      # v0 배포(docs/infra.md §3 'v0 배포'): 이미지 둘·입구·CPU HPA를 올리고, 입구를 거친 v0 흐름·막기·레이트 리밋·확장을 본다
+      - run: node tools/local/cluster.mjs v0
+      - run: node --test tools/local/e2e/v0-deploy.e2e.mjs
       - if: ${{ failure() }}
         run: |
           node tools/local/cluster.mjs status || true
           k=$(node tools/local/tools.mjs kubectl | cut -d' ' -f2)
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n example logs -l app.kubernetes.io/component=outbox-relay --tail=200 --prefix || true
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n v0 get pods,hpa,jobs,events -o wide || true
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n v0 logs -l app.kubernetes.io/part-of=peaket --tail=200 --prefix || true
       - if: ${{ always() }}
         run: node tools/local/cluster.mjs down || true

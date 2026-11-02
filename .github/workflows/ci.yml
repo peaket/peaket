@@ -32,6 +32,7 @@ jobs:
       kind: ${{ steps.scope.outputs.kind }}
       specs: ${{ steps.scope.outputs.specs }}
       specs_full: ${{ steps.scope.outputs.specs_full }}
+      image: ${{ steps.scope.outputs.image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,6 +79,26 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.kind == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/develop')) }}
     uses: ./.github/workflows/ci-kind.yml
 
+  # 이미지 빌드 시험(푸시 없이, docs/devops.md §3.2): 이미지가 있는 배포 단위와 그 Dockerfile이 담는 것이 바뀌었을 때.
+  # 플랫폼마다(amd64·arm64) 그 러너에서 빌드하고 스모크한다(build-image.yml ①, 게시는 wbs 0.1.5)
+  image:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.image == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: services/v0-monolith/Dockerfile
+            image: v0-monolith
+          - dockerfile: services/pg-simulator/Dockerfile
+            image: pg-simulator
+          - dockerfile: packages/platform/template/Dockerfile
+            image: example-svc
+    uses: ./.github/workflows/build-image.yml
+    with:
+      dockerfile: ${{ matrix.dockerfile }}
+      image: ${{ matrix.image }}
+
   # 규칙 모델 검사(docs/verification.md §2.2): 명세·검사 도구가 바뀌면 시뮬레이션, 명세 목록이 적은 관련 ADR이 바뀌면 TLC 전수 검사
   spec-check:
     needs: changes
@@ -92,7 +113,7 @@ jobs:
     uses: ./.github/workflows/iac-check.yml
 
   ci-summary:
-    needs: [changes, docs-check, tools-check, contract-check, node, iac-check, kind, spec-check]
+    needs: [changes, docs-check, tools-check, contract-check, node, iac-check, kind, spec-check, image]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

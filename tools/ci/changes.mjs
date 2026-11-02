@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
-const SCOPES = ['docs', 'contracts', 'js', 'js_all', 'data', 'infra', 'deploy', 'loadtest', 'tools', 'ci', 'kind', 'specs', 'specs_full'];
+const SCOPES = ['docs', 'contracts', 'js', 'js_all', 'data', 'infra', 'deploy', 'loadtest', 'tools', 'ci', 'kind', 'image', 'specs', 'specs_full'];
 
 // 경로 앞머리 → 범위. 한 파일이 여러 범위에 들 수 있다
 const RULES = [
@@ -32,6 +32,14 @@ const RULES = [
   [
     /^(deploy\/(local|charts)\/|tools\/local\/|\.dockerignore$|\.github\/workflows\/ci-kind\.yml$|packages\/(platform|config)\/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$)/,
     ['kind'],
+  ],
+  // v0 배포(docs/infra.md §3 'v0 배포', BUILD_ORDER BSL-050): v0 이미지에 드는 배포 단위와 로컬 환경 값, 이미지 빌드 단계의 바인딩 대조
+  [/^(services\/(v0-monolith|pg-simulator|payment-svc)\/|deploy\/envs\/local\/|tools\/ci\/verify-native-binding\.mjs$)/, ['kind']],
+  // 이미지 빌드 시험(build-image.yml, docs/devops.md §3.2 '이미지 빌드 시험(푸시 없이)'): 이미지가 있는 배포 단위와 그 Dockerfile이 담는
+  // 작업 공간 패키지, 작업 공간 파일, 빌드 맥락 규칙(.dockerignore)·Node 판, 이 워크플로와 그 스크립트(BSL-050)
+  [
+    /^(services\/(v0-monolith|pg-simulator|payment-svc)\/|services\/invariant-checker\/package\.json$|packages\/(platform|config|contracts)\/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.dockerignore$|\.nvmrc$|\.github\/workflows\/build-image\.yml$|tools\/ci\/(image-build|image-smoke|verify-native-binding)\.mjs$)/,
+    ['image'],
   ],
   [/^loadtest\//, ['loadtest']],
   // 규칙 모델 검사(spec-check.yml, wbs 0.9.1): 명세·검사 도구·그 워크플로가 바뀌면 형식 검사와 시뮬레이션(docs/verification.md §2.2)

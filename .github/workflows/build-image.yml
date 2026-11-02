@@ -1,0 +1,58 @@
+# 이미지 빌드(docs/devops.md §3.1 build-image.yml, 추천 적용 2026-11-03, BUILD_ORDER BSL-050). ci.yml의 잡 image가 부른다.
+# 지금은 ① 빌드 잡만 있다: 플랫폼마다 그 아키텍처의 GitHub 호스트 러너에서(에뮬레이션 없이) OCI 묶음과 다이제스트를 만들고,
+# 같은 러너에서 네트워크 없이 스모크한다(tools/ci/image-build.mjs). 운영 노드는 Graviton(arm64), 로컬 kind·데모는 amd64라 둘 다 만든다.
+# 빌드 잡은 레지스트리·서명·출처 증명 권한이 없다(잡 권한은 contents: read뿐, D-T32 ①, tools/ci/check-workflows.mjs가 지킨다).
+# ② 게시 잡(이미지 인덱스, SBOM·취약점 검사, 푸시, cosign 서명, SLSA 출처 증명)은 wbs 0.1.5에서 더한다.
+name: build-image
+
+on:
+  workflow_call:
+    inputs:
+      dockerfile:
+        description: Dockerfile 경로(빌드 맥락은 저장소 뿌리)
+        type: string
+        required: true
+      image:
+        description: 이미지 이름(소문자·숫자·.·_·-, 산출물 이름에 쓴다)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # 빌더(BuildKit, 다이제스트 고정)를 만들고 OCI 묶음·다이제스트를 낸 뒤 그 이미지를 스모크한다. 입력은 환경 변수로 넘긴다(식 삽입을 피한다)
+      - env:
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          IMAGE: ${{ inputs.image }}
+          PLATFORM: ${{ matrix.platform }}
+        run: node tools/ci/image-build.mjs --dockerfile "$DOCKERFILE" --image "$IMAGE" --platform "$PLATFORM" --out image-out
+      # OCI 묶음과 다이제스트는 게시 잡(wbs 0.1.5)이 다이제스트를 다시 계산해 맞춘 뒤 쓴다
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-${{ inputs.image }}-${{ matrix.arch }}
+          path: image-out/
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,31 @@
+{{- if and .Values.service.enabled .Values.service.autoscaling.enabled }}
+{{- $name := include "peaket.name" . }}
+{{- $a := .Values.service.autoscaling }}
+{{- if lt (int $a.minReplicas) 1 }}{{- fail "service.autoscaling.minReplicas는 1 이상이어야 한다" }}{{- end }}
+{{- if lt (int $a.maxReplicas) (int $a.minReplicas) }}{{- fail "service.autoscaling.maxReplicas는 minReplicas 이상이어야 한다" }}{{- end }}
+{{- if or (lt (int $a.targetCPUUtilizationPercentage) 1) (gt (int $a.targetCPUUtilizationPercentage) 100) }}{{- fail "service.autoscaling.targetCPUUtilizationPercentage는 1~100이어야 한다" }}{{- end }}
+{{- $requests := (.Values.service.resources | default dict).requests | default dict }}
+{{- if not $requests.cpu }}{{- fail "service.autoscaling은 service.resources.requests.cpu가 있어야 한다(CPU 사용률의 분모)" }}{{- end }}
+# CPU 사용률 HPA(K9의 v0, docs/infra.md §3 'v0 배포'). 확장 동작(behavior)은 쿠버네티스 기본값 그대로 둔다
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "peaket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}
+  minReplicas: {{ int $a.minReplicas }}
+  maxReplicas: {{ int $a.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ int $a.targetCPUUtilizationPercentage }}
+{{- end }}

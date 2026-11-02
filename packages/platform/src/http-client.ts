@@ -82,7 +82,9 @@ export function createExternalHttpClient(o: ExternalHttpClientOptions): External
 
       const ctx = requestContext();
       const cap = r.timeoutCapMs ?? o.timeoutCapMs;
-      const timeoutMs = ctx ? ctx.deadline.budgetFor(cap) : cap;
+      // 실제 단조 시계는 소수 밀리초라 남은 시간도 소수다. AbortSignal.timeout은 정수만 받으므로 내림한다(남은 시간을 넘지 않게).
+      // 1ms가 안 남았으면 보내지 않는다(2026-11-03 kind e2e에서 드러난 결함, BUILD_ORDER BSL-050)
+      const timeoutMs = Math.floor(ctx ? ctx.deadline.budgetFor(cap) : cap);
       if (timeoutMs <= 0) throw deadlineExceeded();
 
       const headers = new Headers(r.headers);
