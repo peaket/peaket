@@ -1313,11 +1313,19 @@ describe('저장', () => {
     const tables: Record<string, string[]> = {};
     for (const c of cols.rows) (tables[c.table_name] ??= []).push(c.column_name);
     for (const t of Object.keys(tables)) tables[t]!.sort();
+    // 같은 DB·같은 마이그레이션의 v0_ 표 전부(좌석: seat-hold §14 표, 주문·결제: payment §13 표, 발권·검표: offline-gate §13 표)
     expect(tables).toEqual({
       v0_hold: sorted(['hold_id', 'event_id', 'account_id', 'seat_ids', 'status', 'extended', 'held_at', 'expires_at']),
-      v0_quota: sorted(['event_id', 'account_id', 'held']),
-      v0_seat: sorted(['event_id', 'seat_id', 'section', 'row_label', 'seat_number', 'x', 'y', 'grade', 'status', 'hold_id']),
+      v0_quota: sorted(['event_id', 'account_id', 'held', 'sold']),
+      v0_seat: sorted(['event_id', 'seat_id', 'section', 'row_label', 'seat_number', 'x', 'y', 'grade', 'status', 'hold_id', 'order_id']),
       v0_seat_event: sorted(['event_id', 'per_person_limit', 'hold_ttl_ms', 'extend_ms']),
+      v0_price: sorted(['event_id', 'grade', 'price']),
+      v0_order: sorted(['order_id', 'event_id', 'account_id', 'hold_id', 'seat_ids', 'amount', 'order_name', 'status', 'created_at']),
+      v0_order_item: sorted(['order_id', 'line_no', 'seat_id', 'grade', 'price', 'ticket_id']),
+      v0_order_event: sorted(['order_id', 'seq', 'to_status', 'reason', 'occurred_at']),
+      v0_payment: sorted(['payment_id', 'order_id', 'event_id', 'pg', 'payment_key', 'amount', 'status', 'failure', 'approved_at', 'created_at']),
+      v0_ticket: sorted(['ticket_id', 'order_id', 'event_id', 'seat_id', 'account_id', 'code', 'status', 'issued_at', 'entered_at', 'entered_by']),
+      v0_gate_staff: sorted(['event_id', 'account_id']),
     });
 
     const pid = 'pidonly7f3a';

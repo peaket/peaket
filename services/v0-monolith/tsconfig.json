@@ -15,6 +15,12 @@
     "paths": {
       "@peaket/platform": [
         "../../packages/platform/src/index.ts"
+      ],
+      "@peaket/payment-svc/payment": [
+        "../payment-svc/src/modules/payment/index.ts"
+      ],
+      "@peaket/pg-simulator": [
+        "../pg-simulator/src/index.ts"
       ]
     },
     "allowJs": true,

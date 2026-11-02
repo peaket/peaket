@@ -1,6 +1,7 @@
 // 좌석 저장 포트의 PostgreSQL 어댑터(docs/features/seat-hold.md §14). 좌석 행을 요청 순서대로 SELECT … FOR UPDATE로 잠근다(K2·K3의 v0).
 // SQL은 Drizzle 빌더와 sql 템플릿의 매개변수로만 쓴다(asvs/v0-baseline.md 1.2.4). 목록 값은 JSON 매개변수 하나로 넘긴다
 // (sql 템플릿은 배열을 값 여러 개로 펼치므로). 변경분은 같은 트랜잭션의 pg_notify로 내므로 커밋될 때만 나간다.
+// 1인 한도는 잡은 수와 판 수를 함께 센다(held + sold, 동작 2). 판매(동작 9)는 drizzle-seat-sales.ts가 이 파일의 도우미를 쓴다.
 import { randomUUID } from 'node:crypto';
 import { type Database, type DbTransaction } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
@@ -21,13 +22,13 @@ import { DELTA_CHANNEL } from './pg-delta-feed.js';
 import { v0Seat, v0SeatEvent } from './schema.js';
 
 /** 잠금 경합으로 PostgreSQL이 끊은 오류: 교착 상태, 문장 시간 초과, 잠금 대기 실패(§14 동작 2) */
-const BUSY_CODES = new Set(['40P01', '57014', '55P03']);
+export const BUSY_CODES = new Set(['40P01', '57014', '55P03']);
 /** pg_notify 한 번에 싣는 좌석 수(64자 ID 50개도 알림 본문 상한 8000바이트 안, 새 맥락 리뷰) */
 const NOTIFY_CHUNK = 50;
 /** 좌석을 넣을 때 한 문장의 행 수 */
 const INSERT_CHUNK = 1_000;
 
-function pgCode(err: unknown): string | undefined {
+export function pgCode(err: unknown): string | undefined {
   for (let e: unknown = err, i = 0; e && i < 5; e = (e as { cause?: unknown }).cause, i += 1) {
     const code = (e as { code?: unknown }).code;
     if (typeof code === 'string') return code;
@@ -36,14 +37,14 @@ function pgCode(err: unknown): string | undefined {
 }
 
 /** 바꾸지 않고 끝낼 결과. 던져서 트랜잭션을 되돌린다(앞에서 넣은 보유 수 행 같은 쓰기가 남지 않게, 새 맥락 리뷰) */
-class Rollback<T> extends Error {
+export class Rollback<T> extends Error {
   constructor(readonly result: T) {
     super('되돌림');
   }
 }
 
 const ts = (ms: number) => sql`to_timestamp(${ms}::double precision / 1000)`;
-const msOf = (v: unknown): number => Math.round(Number(v));
+export const msOf = (v: unknown): number => Math.round(Number(v));
 
 interface HoldRow {
   hold_id: string;
@@ -55,11 +56,11 @@ interface HoldRow {
   expires_ms: string | number;
 }
 
-async function rows<T>(tx: DbTransaction, q: ReturnType<typeof sql>): Promise<T[]> {
+export async function rows<T>(tx: DbTransaction, q: ReturnType<typeof sql>): Promise<T[]> {
   return (await tx.execute(q)).rows as T[];
 }
 
-async function notify(tx: DbTransaction, eventId: string, seatIds: string[], status: SeatStatus, atMs: number): Promise<void> {
+export async function notify(tx: DbTransaction, eventId: string, seatIds: string[], status: SeatStatus, atMs: number): Promise<void> {
   for (let i = 0; i < seatIds.length; i += NOTIFY_CHUNK) {
     const delta: SeatDelta = { eventId, changes: seatIds.slice(i, i + NOTIFY_CHUNK).map((seatId) => ({ seatId, status })), atMs };
     await tx.execute(sql`select pg_notify(${DELTA_CHANNEL}, ${JSON.stringify(delta)})`);
@@ -165,7 +166,7 @@ export class DrizzleSeatStore implements SeatStore {
       const n = seatIds.length;
       const quota = await rows(
         tx,
-        sql`update v0_quota set held = held + ${n}::int where event_id = ${eventId} and account_id = ${accountId} and held + ${n}::int <= ${ev.per_person_limit}::int returning held`,
+        sql`update v0_quota set held = held + ${n}::int where event_id = ${eventId} and account_id = ${accountId} and held + sold + ${n}::int <= ${ev.per_person_limit}::int returning held`,
       );
       if (quota.length === 0) throw new Rollback<HoldResult>({ kind: 'purchase-limit-exceeded' });
       const holdId = randomUUID();

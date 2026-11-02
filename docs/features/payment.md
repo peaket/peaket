@@ -512,3 +512,44 @@ sequenceDiagram
 - 2026-10-28에 정한 값은 모두 [가정]이다(추천 적용). 결제사 읽기 시간 초과 60초는 결제사 계약 때 확인하고, 연결 시간 초과 3초·승인 명령 접수 데드라인 200ms·채널별 동시 승인 호출 상한(채널 상한 × 2초)은 wbs 2.7.2 부하 시험에서 정한다(기술 검토 높음-16). 발권 기한 30분·발권 재시도 간격(1초~60초)·발권 지연 SEV2와 알림 60초는 P-T1·P-T39로 정한다(ADR-0106). 결제 시도 만료 40분·주문 만료 안전망 90분·굿즈 재고 예약 15분은 P-T41·P-T42와 운영 데이터로 정한다(ADR-0107).
 - 2026-10-29에 정한 값도 모두 [가정]이다(추천 적용 2026-10-29). 결과 당기기의 점검 주기 1초·결과 늦음 기준 5초·한 번에 최대 100건·같은 주문 5초에 한 번·`BatchGetPayments` 데드라인 500ms·파드마다 동시 요청 4개는 P-T47로 정한다(ADR-0140). 확정 지연 증가 5~10초와 당기기 간격 때문의 최대 약 6초 늦음은 [추정]이다. 당기기가 payment DB 쓰기 인스턴스 CPU를 5%p [가정] 넘게 올리면 읽기 복제본 + 순번 확인(복제본의 순번이 모자라면 쓰기 인스턴스로 다시 읽기)으로 바꾼다(ADR-0140 되돌릴 조건). 주문 Saga 소비자의 파티션마다 동시 처리 키 32개·보류로 옮기기 전 재시도 5회·보류 행 7일 보존은 P-T48·ST-T18·ST-T19로 정한다(ADR-0142). 대체 결제사 전환의 제어 gRPC 데드라인 1초와 `pg_switch` 다시 읽기 2초는 C-T53으로 정한다(ADR-0143).
 - 결제 수단 연결값(추천 적용 2026-10-31, ADR-0171): 토스페이먼츠가 카드 번호를 가리는 규칙과, 포트원 하위 결제사가 `card`의 어느 칸을 채우는지는 확인 필요다(§2.1 표). 확인되면 계산식의 보이는 끝자리 자리 수를 정한다. 결제사가 카드 지문이나 가상카드 표시를 주게 되면 그 값으로 바꾸고, ADR-0171 '되돌릴 조건'으로 뺀 가상카드 여부 칸을 다시 본다.
+
+## 13. v0 베이스라인(wbs 1.1.3, K7, 추천 적용 2026-11-02)
+
+K7의 비교 기준인 v0 결제다. v0는 '유능한 팀이 처음 만들 법한 단순한 설계'다(ADR-0096 결정 6, docs/architecture.md §9.3). v1과 다른 점은 하나다. 결제 확정 요청 하나가 결제사 승인 호출의 응답을 기다리고(동기 호출), 그 앞뒤의 좌석 판매·결제 기록·발권을 차례로 부른다(동기 결제 체인). Saga·Outbox·결과 모름 조회·발권 재시도 큐·대사 배치가 없다. 그래서 결제사 응답을 잃으면 결제사에서는 승인됐는데 v0는 실패로 끝내고 좌석을 돌려준다. 처리 도중 프로세스가 멈추면 주문과 좌석이 중간 상태에 남는다(좌석 누수). 이것이 v0가 보여 줄 한계다. 결제사 승인과 어긋난 결제는 불변식 검사기(docs/verification.md §2.5)의 P6이 센다. 좌석 누수(좌석이 `SOLD`인데 그 주문이 `APPROVED`·`CONFIRMED`가 아님)는 검사기의 불변식에 없어 v0 표에서 따로 센다.
+
+- **배포 단위**: `services/v0-monolith`의 `booking`(주문, purchase-svc booking의 몫)·`payment`(결제, payment-svc의 몫)·`ticket`(발권·검표, ticket-svc의 몫, docs/features/offline-gate.md §13) 모듈이다. 좌석 판매는 `inventory` 모듈의 공개 함수로 부른다(docs/features/seat-hold.md §14 동작 9).
+- **결제 포트**: payment-svc 결제 모듈의 결제 포트와 시뮬레이터 어댑터(§2.1)를 그대로 쓴다. payment-svc가 결제 모듈의 공개 파일을 패키지 경로 `@peaket/payment-svc/payment`로 내보내고 v0 `payment` 모듈이 가져온다. v0와 v1은 결제사 경계가 같고, 다른 것은 그 앞의 흐름뿐이다. 결제사는 PG 시뮬레이터 하나다(`services/pg-simulator`, 실제 결제사 호출 0건). 승인 멱등키는 v1과 같은 `confirm-{orderId}`다. 결제사 응답은 요청의 남은 시간 안에서만 기다린다. 어댑터 읽기 시간 초과 60초 [가정]와 플랫폼 요청 상한(`PEAKET_MAX_DEADLINE_MS`, 기본 15초, docs/api/guidelines.md §5) 가운데 짧은 쪽이라 v0는 기본 15초이고, 넘으면 결과 모름이다. 시뮬레이터 주소와 시험 키는 환경 값 `PEAKET_V0_PG_URL`·`PG_SIMULATOR_SECRET_KEY`로만 받는다.
+- **v0에 없는 것**: 주문·결제 멱등키, 결제 시도(주문 하나에 결제 하나), 결제사 선택·전환, 결제창 값과 결제창 화면(부하 시험 시나리오가 시뮬레이터의 시험용 인증 `POST /sim/authenticate`로 결제창 인증을 대신한다), 결과 모름 조회와 당기기, 발권 재시도 큐, 웹훅, 취소·환불, 가상계좌, 판매 종료·판매 일시정지·예매 제한 확인, 구매 세션 요청 서명, 주문 만료, 주문 화면.
+- **표**: 좌석 v0와 같은 DB, 같은 Drizzle 마이그레이션이다.
+
+| 표 | 칸 | 뜻 |
+| --- | --- | --- |
+| `v0_price` | (`event_id`, `grade`) 기본 키, `price`(원) | 회차의 좌석 등급별 가격 |
+| `v0_order` | `order_id` 기본 키(UUID, 결제사 주문 ID로도 쓴다), `event_id`, `account_id`, `hold_id`(유일), `seat_ids`, `amount`, `order_name`, `status`(`CREATED`·`PAYING`·`APPROVED`·`CONFIRMED`·`FAILED`), `created_at` | 주문 하나. 홀드 하나에 주문 하나 |
+| `v0_order_item` | (`order_id`, `line_no`) 기본 키, `seat_id`, `grade`, `price`, `ticket_id` | 주문의 좌석 |
+| `v0_order_event` | (`order_id`, `seq`) 기본 키, `to_status`, `reason`, `occurred_at` | 주문 상태가 바뀐 이력(1부터 빈틈 없는 번호) |
+| `v0_payment` | `payment_id` 기본 키(UUID), `order_id`(유일), `event_id`, `pg`(`SIMULATOR`), `payment_key`, `amount`, `status`(`CONFIRMING`·`APPROVED`·`FAILED`), `failure`, `approved_at`, `created_at` | 결제 하나. 주문 하나에 결제 하나 |
+
+- **동작**: 모든 경로는 팬·`ticket:buy`이고 pid가 있어야 한다(없으면 403). 응답은 `Cache-Control: no-store`다(docs/api/guidelines.md §9, 주문 보기·확정 응답에는 티켓 코드가 실린다). 계정은 게이트웨이가 넘긴 계정 ID다. 경로는 openapi `/v1` 계약에 없으므로 `/v0/` 아래에 둔다. 시각은 서비스에 주입한 시계의 값이고 응답 시각은 KST(`+09:00`)다. 판정마다 트랜잭션은 문장 시간 상한 1초이고, 잠금 경합으로 끊기면 429 `server-busy`다.
+  1. **주문 만들기** `POST /v0/orders` 본문 `{holdId}`(UUID): 자기 홀드가 아니거나 없으면 404 `hold-not-found`, `HELD`가 아니거나 만료 시각이 지났으면 409 `hold-expired`, 그 홀드로 만든 주문이 이미 있으면 409 `order-already-exists`, 좌석 등급의 가격이 없으면 409 `prices-not-set`이다. 금액은 서버가 좌석 등급 가격을 더해 계산한다. 주문 행·주문 좌석 행·이력 첫 행(`CREATED`)을 트랜잭션 하나로 넣고 201 `{orderId, eventId, holdId, status, amount, orderName, seatIds, createdAt, tickets: []}`로 답한다. 좌석은 아직 홀드 그대로다.
+  2. **결제 확정** `POST /v0/orders/{orderId}/payment` 본문 `{paymentKey, amount}`(결제 참조는 출력 가능한 ASCII 1~200자, 금액은 양의 정수): 요청 하나가 아래를 차례로 한다(동기 결제 체인). 단계마다 트랜잭션이 따로다.
+     - ① 주문 행을 잠그고, 자기 주문이 아니면 404 `order-not-found`, `CREATED`가 아니면 409 `order-not-payable`(같은 주문을 두 탭에서 함께 확정하면 하나만 지나간다), `amount`가 주문 금액과 다르면 아무것도 바꾸지 않고 400 `amount-mismatch`다. 맞으면 `PAYING`으로 바꾼다.
+     - ② 홀드를 판매로 바꾼다(seat-hold §14 동작 9 ①). 홀드가 끝났으면 주문을 `FAILED`로 끝내고 409 `hold-expired`다(결제사를 부르지 않으므로 과금 없음). 잠금 경합으로 끊기면 주문을 `CREATED`로 되돌리고 429 `server-busy`다(다시 확정할 수 있다). 판매가 오류를 던지면 판매가 커밋된 뒤 응답만 잃었을 수 있으므로 판매 되돌리기를 먼저 부른다. 판 좌석이 있었으면 되돌리고 주문을 `FAILED`로 끝내 500이고, 없었으면 주문을 `CREATED`로 되돌리고 그 오류(연결 대기 초과면 429)를 낸다. 주문을 되돌리지 못하면 500이다.
+     - ③ 결제 행(`CONFIRMING`)을 넣고 결제사 승인을 부른 뒤 응답을 기다린다. 승인(`APPROVED`·`ALREADY_APPROVED`이고 승인 금액이 주문 금액과 같음)이면 결제 행을 `APPROVED`(결제사가 준 승인 시각)로, 그 밖(거절, 결과 모름, 처리 중, 입금 대기, 금액 다름)이면 `FAILED`(`failure`에 결과·실패 범주·결제사 코드)로 바꾼다. 결제 행을 넣지 못하는 등 결제사를 부르기 전이나 승인이 아닌 결과를 적다 오류가 나면 승인은 없으므로 ④처럼 판매를 되돌리고 주문을 `FAILED`로 끝내 502 `payment-failed`다. 승인을 결제 행에 적다 끊기면 모두 세 번 [가정] 시도한다. 끝내 못 적으면 결과를 아는 승인이므로 좌석을 되돌리지 않고, 주문 `PAYING`·좌석 `SOLD`·결제 행 `CONFIRMING`으로 둔 채 500이다(P6이 센다). 그 주문의 결제 행이 이미 있으면(지금 흐름에서는 닿지 않는다) 결제사를 부르지 않고 좌석도 되돌리지 않은 채 500이다.
+     - ④ 승인이 아니면 판 좌석을 빈 좌석으로 되돌리고(seat-hold §14 동작 9 ②) 주문을 `FAILED`로 끝낸다. 거절(카드 거절·사용자 중단·검증·기한)이면 422 `payment-declined`, 그 밖이면 502 `payment-failed`다. 결제사 한도 초과(429)와 결제사 인증 오류는 결제사 쪽 실패라 502다. 판매 되돌리기(다시 불러도 한 번만 되돌린다)와 주문 `FAILED` 바꾸기는 끊기면 각각 모두 세 번 [가정] 시도하고, 끝내 못 하면 500이고 주문은 `PAYING`에 남는다(되돌리기를 못 했으면 좌석도 `SOLD`). 다시 보내라는 429가 아니다. **결과 모름(응답 유실·시간 초과·5xx)도 실패로 끝내고 결제사에 다시 묻지 않는다.** 결제사에서는 승인됐을 수 있다(K7의 v0 한계).
+     - ⑤ 승인이면 주문을 `APPROVED`로 바꾸고 발권을 부른다(offline-gate §13 동작 1). 티켓을 받으면 주문 좌석에 티켓 ID를 적고 `CONFIRMED`로 바꿔 200(동작 3의 모양)으로 답한다. 발권이 실패하면 주문은 `APPROVED`에 남고 500이다(다시 발권하는 장치가 없다).
+     - 그래서 ②~④ 사이에 프로세스가 멈추면 주문은 `PAYING`, 좌석은 `SOLD`에 남고, ⑤ 도중에 멈추면 `APPROVED`에 남는다. 손으로 고치기 전까지 그대로다.
+  3. **주문 보기** `GET /v0/orders/{orderId}`: 자기 주문만 준다(남의 주문과 없는 주문은 똑같이 404 `order-not-found`). 1의 모양이고 `tickets`에 발권한 티켓(`ticketId`·`seatId`·`code`)을 싣는다.
+  4. **가격 넣기**: HTTP로 하지 않는다. 시험·부하 시험 준비 스크립트가 모듈 공개 함수로 회차의 등급별 가격(1원~1억 원 정수)을 넣는다.
+- **불변식 검사(docs/verification.md §2.5)**: v0 DB에 검사기가 읽는 표 이름·칸·형(`services/invariant-checker/src/tables.ts`)대로 읽기 전용 뷰 묶음(스키마 `v0_check`)을 둔다. 검사기는 원본 DB 주소에 `options=-c search_path=v0_check`를 붙여 그 뷰를 읽는다.
+  - `purchase_order`·`order_event`·`order_item`·`payment`·`ticket`은 v0 표를 그대로 옮긴다. `seat_sale`은 주문 좌석에서 만든다. `APPROVED`·`CONFIRMED` 주문의 좌석은 `SOLD`, `PAYING`은 그 좌석이 그 주문으로 팔렸을 때만 `PENDING`(판매로 바꾸기 전에 멈춘 `PAYING`은 좌석이 팔리지 않았으므로 `RETURNED`), `FAILED`는 `RETURNED`이고 `CREATED`는 넣지 않는다. `order_item`의 티켓 ID는 주문 좌석 칸이 비어 있으면(발권 뒤 주문 확정이 실패) 그 주문·좌석의 티켓에서 가져온다. `purchase_quota`는 `v0_quota`의 판 좌석 수와 그 회차의 1인 한도, `event_sale`은 회차의 좌석 수다. v0에 없는 `ticket_issue_job`·`payment_cancel`·`order_cancellation`은 빈 뷰다.
+  - v0의 회차·좌석·계정 ID는 UUID가 아니므로 `md5(값)::uuid`로 바꿔 싣는다. 같은 값은 같은 UUID가 되므로 묶어 세는 결과는 같다. 좌석은 `회차:좌석`으로 바꾼다.
+  - v0 시험 뒤 `peaket-invariants`로 S1·S4·P1~P6을 돌린다(결제사 원장은 시뮬레이터 `GET /sim/ledger`). 승인 응답을 잃은 결제는 P6(결제사에는 승인이 있는데 결제 원장에 없음)으로 잡힌다.
+- **오류 이름**: `server-busy`는 공통이고 나머지는 v0의 이름이다. 아직 이름이 없는 v1 주문·결제 오류에 wbs 0.2.3이 이름을 붙이면 뜻이 같은 v0 오류도 따른다.
+- **시험**: P-T2(승인 거절이면 좌석 해제·과금 0·안내), P-T7(금액 변조 400), P-T23(같은 주문을 두 탭에서 함께 확정하면 두 번째는 409)의 v0 쪽 동작은 v0 시험 이름에 그 ID를 단다. P-T1·P-T3처럼 v0가 넘지 못하는 시험은 v0 한계로 재고(wbs 1.4.1 ②), 승인 응답 유실은 시험이 P6 위반으로 보인다.
+- **운영 확인(docs/architecture.md §8.4)**: v0는 로컬과 부하 시험의 비교 기준선이라 운영에 배포하지 않는다.
+
+| 확인할 동작 | 사건·필드 | SLI | 대시보드 패널 | 경보 | 배포 뒤 확인 방법 |
+| --- | --- | --- | --- | --- | --- |
+| 동기 결제 체인의 지연과 실패 | 정규 로그 줄(`route`, `status`, `dep` postgres·pg-simulator), `http_server_request_duration_seconds{route}`, 422·502·409 수 | 결제 확정 p99(NFR-006과 같은 식, 비교용) | 템플릿 대시보드(wbs 1.3.1) | 없음(비교 기준선) | 확인 불가: 운영에 배포하지 않는다. 성능 장부 실행(K7)으로 본다 |
+| 결제-발권 불일치·이중 결제 | 불변식 검사기 결과(`invariants.csv`의 S1·S4·P1~P6) | 위반 0건 | — | 없음 | 확인 불가: 같은 까닭. v0 시험·부하 시험 뒤 `peaket-invariants`로 본다 |

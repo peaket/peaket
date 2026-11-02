@@ -723,6 +723,9 @@ importers:
       '@nestjs/core':
         specifier: ^12.3.2
         version: 12.3.2(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/platform-express@12.3.2)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@peaket/payment-svc':
+        specifier: workspace:*
+        version: link:../payment-svc
       '@peaket/platform':
         specifier: workspace:*
         version: link:../../packages/platform
@@ -748,6 +751,12 @@ importers:
       '@peaket/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@peaket/invariant-checker':
+        specifier: workspace:*
+        version: link:../invariant-checker
+      '@peaket/pg-simulator':
+        specifier: workspace:*
+        version: link:../pg-simulator
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2

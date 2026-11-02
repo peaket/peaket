@@ -1168,7 +1168,7 @@ T=0 진입 20만 RPS에는 CORS 사전 요청(OPTIONS)이 더해지지 않는다
 
 v0는 일부러 망가뜨린 설계가 아니라 '유능한 팀이 처음 만들 법한 단순한 설계'다. v1 합격은 NFR과 K의 절대값으로만 판정하고, v0 대비 비율은 보조 숫자로 적는다(소유자 결정 2026-10-27, K별 v0는 추천 적용, ADR-0096).
 
-v0의 배포 단위는 `services/v0-monolith` 하나다(모듈러 모놀리스, ADR-0007 결정 6). 안의 모듈은 v1 서비스 경계와 같게 나눈다: `queue`(queue-svc·admission-ctrl의 몫, wbs 1.1.1), `inventory`·`booking`(purchase-svc의 몫, wbs 1.1.2), `payment`·`ticket`(wbs 1.1.3). 모듈끼리는 그 모듈의 공개 파일로만 부르고(§3.1 층 규칙), 같은 프로세스 안 함수 호출이다(v1의 합본 비교 (가)와 다르다, ADR-0096 결정 4). 대기열 v0의 동작은 [features/queue-admission.md](features/queue-admission.md) §13이다(추천 적용 2026-11-02, BUILD_ORDER BSL-020).
+v0의 배포 단위는 `services/v0-monolith` 하나다(모듈러 모놀리스, ADR-0007 결정 6). 안의 모듈은 v1 서비스 경계와 같게 나눈다: `queue`(queue-svc·admission-ctrl의 몫, wbs 1.1.1), `inventory`·`booking`(purchase-svc의 몫, wbs 1.1.2), `payment`·`ticket`(wbs 1.1.3). 모듈끼리는 그 모듈의 공개 파일로만 부르고(§3.1 층 규칙), 같은 프로세스 안 함수 호출이다(v1의 합본 비교 (가)와 다르다, ADR-0096 결정 4). 대기열 v0의 동작은 [features/queue-admission.md](features/queue-admission.md) §13이다(추천 적용 2026-11-02, BUILD_ORDER BSL-020). 좌석 v0는 [features/seat-hold.md](features/seat-hold.md) §14, 결제 v0(동기 결제 체인)는 [features/payment.md](features/payment.md) §13, 발권·검표 v0(온라인 전용 검표)는 [features/offline-gate.md](features/offline-gate.md) §13이다(추천 적용 2026-11-02, BUILD_ORDER BSL-030·BSL-040). 결제 v0는 payment-svc 결제 모듈의 결제 포트와 시뮬레이터 어댑터를 그대로 가져다 쓴다.
 
 | 검증 KPI | v0 모놀리스(처음 만들 법한 단순한 설계)와 드러날 한계 | v1 마이크로서비스에서 입증할 아키텍처 해결책 |
 | --- | --- | --- |

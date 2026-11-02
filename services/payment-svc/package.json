@@ -2,9 +2,16 @@
   "name": "@peaket/payment-svc",
   "private": true,
   "version": "0.0.0",
-  "description": "payment-svc. 지금은 결제 모듈의 결제 포트·시뮬레이터 어댑터·공통 계약 시험만 있다(wbs 1.2.3). 서비스 나머지는 v0·v1 결제 단계에서 서비스 뼈대(packages/platform/template)로 채운다",
+  "description": "payment-svc. 지금은 결제 모듈의 결제 포트·시뮬레이터 어댑터·공통 계약 시험만 있고, 결제 모듈의 공개 파일을 v0 모놀리스가 가져다 쓴다(@peaket/payment-svc/payment, docs/features/payment.md §13). 서비스 나머지는 v1 결제 단계에서 서비스 뼈대(packages/platform/template)로 채운다",
   "type": "module",
+  "exports": {
+    "./payment": {
+      "types": "./dist/modules/payment/index.d.ts",
+      "default": "./dist/modules/payment/index.js"
+    }
+  },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

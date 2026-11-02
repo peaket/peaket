@@ -24,11 +24,14 @@ export const v0Seat = pgTable(
     grade: text('grade').notNull(),
     status: text('status').notNull(),
     holdId: uuid('hold_id'),
+    /** SOLD일 때만: 판 주문(docs/features/seat-hold.md §14 동작 9) */
+    orderId: uuid('order_id'),
   },
   (t) => [
     primaryKey({ columns: [t.eventId, t.seatId] }),
     check('v0_seat_status_check', sql`${t.status} in ('AVAILABLE', 'HELD', 'SOLD')`),
     check('v0_seat_hold_check', sql`(${t.status} = 'HELD') = (${t.holdId} is not null)`),
+    check('v0_seat_order_check', sql`(${t.status} = 'SOLD') = (${t.orderId} is not null)`),
   ],
 );
 
@@ -46,18 +49,23 @@ export const v0Hold = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
   },
   (t) => [
-    check('v0_hold_status_check', sql`${t.status} in ('HELD', 'RELEASED', 'EXPIRED')`),
+    check('v0_hold_status_check', sql`${t.status} in ('HELD', 'RELEASED', 'EXPIRED', 'SOLD')`),
     index('v0_hold_due_idx').on(t.expiresAt).where(sql`${t.status} = 'HELD'`),
   ],
 );
 
-/** 계정이 그 회차에서 잡고 있는 좌석 수(POL-011) */
+/** 계정이 그 회차에서 잡고 있는 좌석 수와 판 좌석 수(POL-011). 한도는 둘을 함께 센다 */
 export const v0Quota = pgTable(
   'v0_quota',
   {
     eventId: text('event_id').notNull(),
     accountId: text('account_id').notNull(),
     held: integer('held').notNull(),
+    sold: integer('sold').notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.eventId, t.accountId] }), check('v0_quota_held_check', sql`${t.held} >= 0`)],
+  (t) => [
+    primaryKey({ columns: [t.eventId, t.accountId] }),
+    check('v0_quota_held_check', sql`${t.held} >= 0`),
+    check('v0_quota_sold_check', sql`${t.sold} >= 0`),
+  ],
 );

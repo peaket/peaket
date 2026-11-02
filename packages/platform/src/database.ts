@@ -18,10 +18,13 @@ export const POOL_DEFAULTS = {
   maxLifetimeSeconds: 30 * 60,
 } as const;
 
-/** node-postgres 풀이 꽉 차 연결을 기다리다 한도를 넘었을 때의 메시지(pg-pool 3.x) */
-const POOL_WAIT_TIMEOUT = 'timeout exceeded when trying to connect';
+/**
+ * 연결을 대기 한도 안에 받지 못했을 때의 pg-pool 3.x 메시지 둘. 풀이 꽉 차 기다리다 넘긴 것과, 쉬는 연결이 없어 새 연결을 맺다
+ * 넘긴 것이다. 둘 다 '대기 한도 안에 연결을 못 받음'이라 429 server-busy다(BSL-040 v0 시험에서 뒤엣것이 500으로 새는 것을 찾음)
+ */
+const CONNECT_TIMEOUTS: ReadonlySet<string> = new Set(['timeout exceeded when trying to connect', 'Connection terminated due to connection timeout']);
 
-const toBusy = (err: unknown): unknown => (err instanceof Error && err.message === POOL_WAIT_TIMEOUT ? serverBusy(err) : err);
+const toBusy = (err: unknown): unknown => (err instanceof Error && CONNECT_TIMEOUTS.has(err.message) ? serverBusy(err) : err);
 
 type ConnectCallback = (err: Error | undefined, client: pg.PoolClient | undefined, done: (release?: unknown) => void) => void;
 

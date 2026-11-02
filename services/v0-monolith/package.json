@@ -2,7 +2,7 @@
   "name": "@peaket/v0-monolith",
   "private": true,
   "version": "0.0.0",
-  "description": "v0 모놀리스. K1~K10을 v1과 견주는 '처음 만들 법한 단순한 설계'의 비교 기준선이다. 모듈 경계는 v1 서비스와 같다(docs/architecture.md §9.3, ADR-0096). 대기열 v0(queue, wbs 1.1.1)와 좌석 v0(inventory와 좌석맵 화면, wbs 1.1.2)가 있다",
+  "description": "v0 모놀리스. K1~K10을 v1과 견주는 '처음 만들 법한 단순한 설계'의 비교 기준선이다. 모듈 경계는 v1 서비스와 같다(docs/architecture.md §9.3, ADR-0096). 대기열 v0(queue, wbs 1.1.1), 좌석 v0(inventory와 좌석맵 화면, wbs 1.1.2), 주문·결제·발권 v0(booking·payment·ticket, 동기 결제 체인과 온라인 전용 검표, wbs 1.1.3)가 있다",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -16,6 +16,7 @@
   "dependencies": {
     "@nestjs/common": "^12.3.2",
     "@nestjs/core": "^12.3.2",
+    "@peaket/payment-svc": "workspace:*",
     "@peaket/platform": "workspace:*",
     "drizzle-orm": "0.45.4",
     "pg": "^8.23.1",
@@ -26,6 +27,8 @@
   },
   "devDependencies": {
     "@peaket/config": "workspace:*",
+    "@peaket/invariant-checker": "workspace:*",
+    "@peaket/pg-simulator": "workspace:*",
     "@types/node": "^24.19.2",
     "@types/pg": "^8.23.1",
     "@types/ws": "8.18.2",

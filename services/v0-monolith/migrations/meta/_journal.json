@@ -8,6 +8,20 @@
       "when": 1793620854127,
       "tag": "0000_v0_inventory",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793629432893,
+      "tag": "0001_v0_sale",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793629437387,
+      "tag": "0002_v0_check_views",
+      "breakpoints": true
     }
   ]
 }

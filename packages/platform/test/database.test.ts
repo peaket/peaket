@@ -1,12 +1,38 @@
 // DB 설정의 단위 시험(컨테이너 없이). 실제 PostgreSQL 시험은 test-int/database.int.test.ts다.
 import 'reflect-metadata';
+import net from 'node:net';
 import { Controller, Get, Module } from '@nestjs/common';
 import { DrizzleQueryError } from 'drizzle-orm';
 import { describe, expect, test } from 'vitest';
-import { Roles, createDatabase, createService, fakeClock } from '../src/index.js';
+import { ProblemError, Roles, createDatabase, createService, fakeClock } from '../src/index.js';
 import { collector } from './fixture.js';
 
 describe('DB 설정', () => {
+  test('FND070_새연결을맺는데핫패스대기한도를넘겨도_기다리지않고429_server_busy다 [ASVS v5.0.0-13.1.2]', async () => {
+    // BSL-040 v0 시험에서 찾음: 풀에 쉬는 연결이 없어 새 연결을 맺는 동안 한도(핫패스 100ms)를 넘기면 pg-pool이
+    // 'Connection terminated due to connection timeout'을 내는데, 풀 대기 초과('timeout exceeded when trying to connect')만 429로 바꿔 500이 났다
+    const held: net.Socket[] = [];
+    const server = net.createServer((sock) => void held.push(sock)); // 받기만 하고 답하지 않는 PostgreSQL 자리
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', () => ok()));
+    const { port } = server.address() as net.AddressInfo;
+    const d = createDatabase({ url: `postgres://nobody:x@127.0.0.1:${port}/none`, profile: 'hot' });
+    try {
+      const t0 = performance.now();
+      const err = await d.transaction(async () => 1).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(ProblemError);
+      const problem = err as ProblemError;
+      expect({ slug: problem.slug, status: problem.status, retry: problem.retryAfterSeconds }).toEqual({ slug: 'server-busy', status: 429, retry: 1 });
+      expect(performance.now() - t0).toBeLessThan(2_000);
+    } finally {
+      await d.close();
+      for (const sock of held) sock.destroy();
+      await new Promise<void>((ok) => server.close(() => ok()));
+    }
+  });
+
   test('FND070_트랜잭션선택지가틀리면_던지지않고_거절된Promise를돌려준다', async () => {
     // 코드 리뷰 2026-11-01: 바로 던져 .catch()로 이은 호출이 오류를 못 잡았다
     const d = createDatabase({ url: 'postgres://nobody:x@127.0.0.1:1/none' });

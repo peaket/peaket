@@ -4,6 +4,7 @@ import 'reflect-metadata';
 import { createDatabase, createService } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { createPgDeltaFeed } from './modules/inventory/index.js';
+import { createV0PaymentGateway } from './modules/payment/index.js';
 import { createAdmissionReader } from './modules/queue/index.js';
 import { createV0Redis } from './redis.js';
 
@@ -25,6 +26,9 @@ const allowedOrigins = need('PEAKET_V0_ALLOWED_ORIGINS', '변경분 WebSocket의
   .map((s) => s.trim())
   .filter(Boolean);
 if (allowedOrigins.length === 0) throw new Error('PEAKET_V0_ALLOWED_ORIGINS에 허용 출처가 하나도 없다');
+// 결제 v0의 결제사는 PG 시뮬레이터다(docs/features/payment.md §13 '결제 포트')
+const pgUrl = need('PEAKET_V0_PG_URL', '결제사(PG 시뮬레이터) 주소');
+const pgSecretKey = need('PG_SIMULATOR_SECRET_KEY', 'PG 시뮬레이터 시험 키, 비밀 관리에서 넣는다');
 
 const redis = await createV0Redis(redisUrl);
 const database = createDatabase({ url: databaseUrl, applicationName: SERVICE, profile: 'hot' });
@@ -35,6 +39,7 @@ const service = await createService({
   module: AppModule.register({
     queue: { redis, tickIntervalMs: TICK_INTERVAL_MS },
     inventory: { database, admission: createAdmissionReader(redis), deltaFeed, allowedOrigins, expiryIntervalMs: EXPIRY_INTERVAL_MS },
+    sale: { gateway: createV0PaymentGateway({ baseUrl: pgUrl, secretKey: pgSecretKey }) },
   }),
 });
 await service.listen();
