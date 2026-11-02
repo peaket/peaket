@@ -26,6 +26,12 @@ spec:
       labels:
         {{- include "peaket.labels" . | nindent 8 }}
         app.kubernetes.io/component: service
+      # 로컬 관측 최소의 Prometheus가 관리 포트 /metrics를 긁는다(docs/observability.md §3 '로컬 관측 최소와 템플릿 대시보드').
+      # 운영은 PodMonitor로 수집하므로(ADR-0076) 이 주석은 쓰지 않을 뿐 해가 없다
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.managementPort }}"
+        prometheus.io/path: /metrics
     spec:
       serviceAccountName: {{ $name }}
       automountServiceAccountToken: false

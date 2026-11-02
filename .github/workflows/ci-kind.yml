@@ -33,6 +33,8 @@ jobs:
       - run: node tools/local/cluster.mjs image
       # 계정 없는 AWS 흉내 서버의 기능 확인과 V-T28 ①의 kind 부분(실제 Lease API로 리더 이어받기)
       - run: node --test tools/local/e2e/aws-emulator.e2e.mjs tools/local/e2e/relay-takeover.e2e.mjs
+      # 로컬 관측 최소(Prometheus·Grafana·템플릿 대시보드). relay-takeover가 올린 example-svc를 긁으므로 그 뒤에 따로 돈다
+      - run: node --test tools/local/e2e/observability.e2e.mjs
       - if: ${{ failure() }}
         run: |
           node tools/local/cluster.mjs status || true

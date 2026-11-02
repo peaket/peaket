@@ -66,6 +66,10 @@ spec:
       labels:
         {{- include "peaket.labels" . | nindent 8 }}
         app.kubernetes.io/component: outbox-relay
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.managementPort }}"
+        prometheus.io/path: /metrics
     spec:
       serviceAccountName: {{ $relay }}
       # Lease API를 부르는 이 파드에만 토큰을 붙인다(돌려 바뀌는 투영 토큰)
