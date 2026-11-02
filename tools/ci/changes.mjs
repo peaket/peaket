@@ -41,7 +41,12 @@ const RULES = [
     /^(services\/(v0-monolith|pg-simulator|payment-svc)\/|services\/invariant-checker\/package\.json$|packages\/(platform|config|contracts)\/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.dockerignore$|\.nvmrc$|\.github\/workflows\/build-image\.yml$|tools\/ci\/(image-build|image-smoke|verify-native-binding)\.mjs$)/,
     ['image'],
   ],
-  [/^loadtest\//, ['loadtest']],
+  // 부하 시험 점검(loadtest-check.yml, docs/verification.md §3.9, BSL-060): 시나리오와 실행 도구, 그리고 그 시험이 견주는 것
+  // (서버의 조회 간격·좌석 ID, 검사기 기록 형식, 장부 요약 파일, 토큰 서명·클러스터 도구)과 이 워크플로
+  [
+    /^(loadtest\/|services\/v0-monolith\/src\/modules\/queue\/domain\/polling\.ts$|services\/v0-monolith\/src\/modules\/inventory\/domain\/inventory\.ts$|services\/invariant-checker\/src\/records\.ts$|services\/v0-monolith\/src\/gateway\/token\.ts$|deploy\/envs\/local\/v0-gateway\.yaml$|tools\/perf-ledger\/(k6-summary\.js|collect\.py|ledgerlib\.py)$|tools\/local\/(cluster|tools|v0-token)\.mjs$|\.github\/workflows\/loadtest-check\.yml$)/,
+    ['loadtest'],
+  ],
   // 규칙 모델 검사(spec-check.yml, wbs 0.9.1): 명세·검사 도구·그 워크플로가 바뀌면 형식 검사와 시뮬레이션(docs/verification.md §2.2)
   [/^(specs\/|tools\/spec-check\/|\.github\/workflows\/spec-check\.yml$)/, ['specs']],
   [/^tools\//, ['tools']],

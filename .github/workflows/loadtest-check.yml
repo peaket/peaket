@@ -1,0 +1,24 @@
+# 부하 시험 점검(docs/devops.md §3.1, docs/verification.md §3.9). ci.yml이 바뀐 범위에 loadtest가 있을 때 부른다.
+# 시나리오가 함께 쓰는 계산과 실행 도구의 시험, 고정한 k6 이미지로 시나리오를 읽어 보는 형식 검사(k6 inspect)를 돈다.
+# 클러스터를 띄우는 리허설(loadtest/e2e)은 이 PC에서만 한다.
+name: loadtest-check
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  loadtest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # 서버의 조회 간격·좌석 ID·검사기 기록 형식과 대조하는 시험과 시나리오 형식 검사(Docker로 k6 이미지를 돌린다)
+      - run: node --test "loadtest/test/*.test.mjs"

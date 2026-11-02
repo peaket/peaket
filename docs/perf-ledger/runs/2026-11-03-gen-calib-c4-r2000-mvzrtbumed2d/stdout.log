@@ -1,0 +1,6 @@
+2026-11-02T21:31:53Z 측정 폴더: D:\ticketpass\docs\perf-ledger\runs\2026-11-03-gen-calib-c4-r2000-mvzrtbumed2d
+2026-11-02T21:31:53Z 첨부: D:\ticketpass\.cache\peaket-loadtest\calib060-c4-2\step-2000\summary.json → k6-summary.json
+2026-11-02T21:31:53Z k6: p99=0.4191890899999997 ms, 오류율=0, 요청=59998, 못 보낸 반복=3
+2026-11-02T21:31:53Z 첨부: D:\ticketpass\.cache\peaket-loadtest\calib060-c4-2\infra.txt → infra.txt
+2026-11-02T21:31:53Z 원본 버킷(--raw-bucket)이 없어 큰 원본(metrics/·traces/·grafana/·stdout.log)이 폴더에 남는다. Git에는 작은 파일만 넣는다(docs/perf-ledger.md §2.1)
+2026-11-02T21:31:53Z manifest.json 작성

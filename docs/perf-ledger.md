@@ -95,7 +95,7 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 ## 3. 표준 부하 측정 절차
 
 1. **로컬 사전 리허설**: 본 측정과 선택 보정(클라우드) 전에 같은 k6 부하 스크립트를 작은 규모로 끝까지 돌려 스크립트에 문제가 없는지 확인한다.
-2. **부하 발생기 용량 보정 (Calibration)**: 부하 발생기 1대가 왜곡 없이 보낼 수 있는 최대 초당 요청 수를 미리 재서 장부에 기록한다. 실제 측정 중 k6의 `dropped_iterations`가 1건이라도 생기면 부하 발생기 자체의 병목으로 보고 그 측정을 바로 무효로 한다.
+2. **부하 발생기 용량 보정 (Calibration)**: 부하 발생기 1대가 왜곡 없이 보낼 수 있는 최대 초당 요청 수를 미리 재서 장부에 기록한다. 실제 측정 중 k6의 `dropped_iterations`가 1건이라도 생기면 부하 발생기 자체의 병목으로 보고 그 측정을 바로 무효로 한다. 보정 방법(빈 응답 대역, 도착률 단계, 통과 기준)과 발생기 CPU·메모리의 무효 판정, 결과는 docs/verification.md §3.9다(`node loadtest/run.mjs calibrate`, 추천 적용 2026-11-03, wbs 1.2.1).
 3. **분산 시계 동기화 검증**: 측정을 시작하기 직전에 부하 발생기와 대상 서버 클러스터의 NTP 시계가 맞는지 반드시 점검하고, 오차 범위를 `stdout.log`에 기록한다.
 4. **개방형 부하 모델 강제 (Open Workload Model)**: k6의 arrival-rate(open model) 방식으로 가상 사용자가 도착하는 속도를 강제로 고정한다. 대상 서버가 느려져도 들어오는 트래픽이 줄지 않는 실제 환경의 파괴적인 특성을 그대로 재현한다.
 5. **초기 웜업 구간 분리**: 벤치마크를 시작한 뒤 처음 `warmup_s` 동안의 데이터는 JIT 컴파일과 캐시 적재 단계로 보고 최종 집계에서 반드시 뺀다. 실제 분석 구간은 manifest에 적는다.
@@ -114,6 +114,7 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | `local-1k`, `local-10k`, `local-100k` | 개발용 컴퓨터에서 로컬로 돌리는 kind/k3d 클러스터다. 사용자 가까운 곳에서 파일을 대신 응답하는 CDN의 엣지 계층은 로컬 Nginx 캐시 컨테이너(앱과 실행 환경을 한 묶음으로 만든 실행 단위)로 대신한다. 비례 불변 곡선, 예매 계층의 실제 크기 측정, 진입 서버 1대 처리량과 비례 확인(USL: 서버를 늘릴 때 처리량이 덜 늘어나는 모양을 나타낸 식, 보조), 서비스 분리 세 구성 비교, 장애 기록 검사에 쓴다. 포트폴리오 기간의 기본 측정 환경이다(ADR-0057) | 0원 (로컬 자원) |
 | `local-bot` | 로컬 kind/k3d 클러스터에 봇 등급 분류표(ADR-0039)에 따른 합성 봇과 정상 사용자 세션을 넣어 판정 정확도를 잰다(K6 검증, 절차 §10). 다른 상용 사이트를 공격하는 것은 엄격히 금지한다(POL-026) | 0원 (로컬 자원) |
 | `local-poc` | 구성 요소 하나를 따로 재는 PoC다(wbs 0.5.1, 추천 적용 2026-11-01, openspec 변경 `add-foundation-poc`). kind 클러스터 대신 PC의 Docker 엔진에 측정용 망 하나를 만들고, 그 안에 측정 대상(Valkey 클러스터 주 노드 셋·복제 셋, Kafka 브로커 셋, HTTP 비교 앱)과 측정 도구(Node 측정 도구, k6)를 컨테이너로 띄워 CPU 한도를 둔다. kind에는 Strimzi·PostgreSQL·흉내 서버가 함께 돌아 잡음이 되고, Docker Desktop 포트 전달을 거치면 그 비용이 측정에 섞이기 때문이다. 동시 대기자가 없는 측정이라 `scale.users`는 비운다. 무대와 규칙은 `loadtest/poc/README.md`다 | 0원 (로컬 자원) |
+| `local-gen` | 부하 발생기 보정이다(wbs 1.2.1, 추천 적용 2026-11-03). kind 클러스터 안의 발생기 파드 하나(CPU 몫 고정)가 빈 응답 대역(nginx)에 왜곡 없이 보낼 수 있는 최대 도착률과 가상 사용자당 메모리를 잰다. 대상이 아니라 발생기를 재므로 `scale.users`는 비우고, `kpi`는 NFR-013, `version`은 그 보정을 쓸 측정의 판(지금은 v0)으로 적는다. 절차와 판정은 docs/verification.md §3.9다 | 0원 (로컬 자원) |
 | `cloud-calib` | 선택 보정이다. 서울 리전 c7g.xlarge 8대를 3시간 [가정] 띄워 진입 서버 1·2·4대의 처리량을 재고, PC와 비교한 환산 계수를 얻는다(docs/verification.md §6) | 약 4달러(정가로 계속 쓰는 온디맨드 서버의 가격표, 2026-10-13 조회) |
 | `cloud-cdn` | 선택 보정이다. PC에서 CloudFront 배포 1개에 무료 범위(월 요청 1,000만 건, 전송 1 TB) 안의 요청을 보내 같은 파일 요청을 묶는지 확인한다. 엣지 1곳 몫만 확인된다(docs/verification.md §6) | 무료 범위 안(넘으면 요청 건수만큼 요금이 붙는다) |
 | `cloud-msk-iam` | 선택 보정이다. 서울 리전에 EKS 클러스터 1개(노드 c7g.xlarge 1대)와 MSK kafka.t3.small 2대를 9시간 [가정] 띄워, Pod Identity 자격과 MSK 토큰이 바뀌는 동안 재인증이 이어지는지 본다(ST-T14 ②, docs/verification.md §6, ADR-0154). 재는 것은 성능이 아니라 재인증 실패·연결 끊김 건수다 | 약 3.5달러(EKS·MSK·노드·공인 IPv4의 시간 요금, 2026-10-30 가격표) |
@@ -273,6 +274,25 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-01 | 2026-11-01-vt41-max2-fastify-schema-hold-local-poc | V-T41 | v1 | local-poc | - | 8.11 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-schema-hold-local-poc/ |
 | 2026-11-01 | 2026-11-01-vt41-max2-fastify-zod-entry-local-poc | V-T41 | v1 | local-poc | - | 5.93 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-zod-entry-local-poc/ |
 | 2026-11-01 | 2026-11-01-vt41-max2-fastify-zod-hold-local-poc | V-T41 | v1 | local-poc | - | 8.15 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-zod-hold-local-poc/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r1000-mvzroid4a231 | NFR-013 | v0 | local-gen | 1,000 RPS | 0.45 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r1000-mvzroid4a231/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r1000-mvzrtbumed2d | NFR-013 | v0 | local-gen | 1,000 RPS | 0.44 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r1000-mvzrtbumed2d/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r1000-mvzry4zl666c | NFR-013 | v0 | local-gen | 1,000 RPS | 0.42 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r1000-mvzry4zl666c/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r2000-mvzroid4a231 | NFR-013 | v0 | local-gen | 2,000 RPS | 0.46 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r2000-mvzroid4a231/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r2000-mvzrtbumed2d | NFR-013 | v0 | local-gen | 2,000 RPS | 0.42 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r2000-mvzrtbumed2d/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r2000-mvzry4zl666c | NFR-013 | v0 | local-gen | 2,000 RPS | 0.41 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r2000-mvzry4zl666c/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r4000-mvzroid4a231 | NFR-013 | v0 | local-gen | 4,000 RPS | 0.61 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r4000-mvzroid4a231/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r4000-mvzrtbumed2d | NFR-013 | v0 | local-gen | 4,000 RPS | 0.67 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r4000-mvzrtbumed2d/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r4000-mvzry4zl666c | NFR-013 | v0 | local-gen | 4,000 RPS | 0.56 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r4000-mvzry4zl666c/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r6000-mvzroid4a231 | NFR-013 | v0 | local-gen | 6,000 RPS | 2.47 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r6000-mvzroid4a231/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r6000-mvzrtbumed2d | NFR-013 | v0 | local-gen | 6,000 RPS | 2.59 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r6000-mvzrtbumed2d/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r6000-mvzry4zl666c | NFR-013 | v0 | local-gen | 6,000 RPS | 2.39 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r6000-mvzry4zl666c/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r8000-mvzroid4a231 | NFR-013 | v0 | local-gen | 8,000 RPS | 2.55 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r8000-mvzroid4a231/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r8000-mvzrtbumed2d | NFR-013 | v0 | local-gen | 8,000 RPS | 2.24 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r8000-mvzrtbumed2d/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c4-r8000-mvzry4zl666c | NFR-013 | v0 | local-gen | 8,000 RPS | 2.24 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r8000-mvzry4zl666c/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c8-r12000-mvzs2y231816 | NFR-013 | v0 | local-gen | 12,000 RPS | 1.31 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c8-r12000-mvzs2y231816/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c8-r16000-mvzs2y231816 | NFR-013 | v0 | local-gen | 16,000 RPS | 6.66 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c8-r16000-mvzs2y231816/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c8-r4000-mvzs2y231816 | NFR-013 | v0 | local-gen | 4,000 RPS | 0.57 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c8-r4000-mvzs2y231816/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c8-r8000-mvzs2y231816 | NFR-013 | v0 | local-gen | 8,000 RPS | 0.38 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c8-r8000-mvzs2y231816/ |
 <!-- ledger:end -->
 
 표준 서식 예시 (참고용 Mock 데이터):

@@ -269,3 +269,70 @@ test('BSL050_비교기준을읽지못하면_image도고른다', () => {
   assert.ok(scopes({ 'docs/a.md': '글\n' }, 'no-such-ref').includes('image'));
   assert.ok(scopes({ 'docs/a.md': '글\n' }, '0000000000000000000000000000000000000000').includes('image'));
 });
+
+// 부하 시험 점검(loadtest-check.yml, docs/verification.md §3.9, BUILD_ORDER BSL-060): 시나리오·실행 도구와, 그 시험이 견주는 것
+// (서버의 조회 간격·좌석 ID, 검사기 기록 형식, 장부 요약 파일, 토큰 서명·클러스터 도구), 이 워크플로가 바뀌면 loadtest를 고른다
+test('BSL060_부하시험·그시험이견주는서버·검사기·장부·로컬도구·워크플로를바꾸면_loadtest를고른다', () => {
+  for (const f of [
+    'loadtest/scenarios/v0-queue.js',
+    'loadtest/scenarios/common.js',
+    'loadtest/lib/model.mjs',
+    'loadtest/runner/args.mjs',
+    'loadtest/run.mjs',
+    'loadtest/test/scenarios.test.mjs',
+    'loadtest/README.md',
+    'services/v0-monolith/src/modules/queue/domain/polling.ts',
+    'services/v0-monolith/src/modules/inventory/domain/inventory.ts',
+    'services/invariant-checker/src/records.ts',
+    'tools/perf-ledger/k6-summary.js',
+    'tools/perf-ledger/collect.py',
+    // 쿠키 이름을 견주는 입구 토큰 코드와 collect.py가 쓰는 장부 라이브러리(새 맥락 리뷰 2026-11-03)
+    'services/v0-monolith/src/gateway/token.ts',
+    'tools/perf-ledger/ledgerlib.py',
+    // IP당 한도를 견주는 입구 설정(2차 새 맥락 리뷰 2026-11-03)
+    'deploy/envs/local/v0-gateway.yaml',
+    'tools/local/cluster.mjs',
+    'tools/local/tools.mjs',
+    'tools/local/v0-token.mjs',
+    '.github/workflows/loadtest-check.yml',
+  ]) {
+    assert.ok(scopes({ [f]: '바꿈\n' }).includes('loadtest'), f);
+  }
+});
+
+test('BSL060_loadtest가함께고르는범위는_그파일의다른규칙그대로다', () => {
+  // 범위 순서는 changes.mjs의 SCOPES 순서다(loadtest는 deploy 뒤, tools 앞)
+  assert.deepEqual(scopes({ 'loadtest/runner/args.mjs': 'x\n' }), ['loadtest']);
+  assert.deepEqual(scopes({ 'services/v0-monolith/src/modules/queue/domain/polling.ts': 'x\n' }), ['contracts', 'js', 'loadtest', 'kind', 'image']);
+  assert.deepEqual(scopes({ 'services/invariant-checker/src/records.ts': 'x\n' }), ['contracts', 'js', 'loadtest']);
+  assert.deepEqual(scopes({ 'tools/perf-ledger/collect.py': 'x\n' }), ['loadtest', 'tools']);
+  assert.deepEqual(scopes({ 'tools/local/v0-token.mjs': 'x\n' }), ['loadtest', 'tools', 'kind']);
+  assert.deepEqual(scopes({ '.github/workflows/loadtest-check.yml': 'x\n' }), ['loadtest', 'ci']);
+});
+
+test('BSL060_부하시험이견주지않는서비스·도구·이름만비슷한파일은_loadtest를고르지않는다', () => {
+  for (const f of [
+    'services/v0-monolith/src/main.ts',
+    // 견주는 파일과 이름 앞머리만 같은 파일(경로 끝까지 맞아야 한다)
+    'services/v0-monolith/src/modules/queue/domain/polling.test.ts',
+    'services/v0-monolith/src/modules/queue/domain/admission.ts',
+    'services/v0-monolith/src/modules/inventory/domain/inventory.test.ts',
+    'services/invariant-checker/src/main.ts',
+    'services/invariant-checker/src/records.test.ts',
+    'tools/perf-ledger/index.py',
+    'tools/perf-ledger/collect_test.py',
+    'tools/local/v0-token.test.mjs',
+    'tools/local/README.md',
+    '.github/workflows/perf-nightly.yml',
+    // 뿌리의 loadtest/만 부하 시험 폴더다
+    'apps/loadtest/x.js',
+    'docs/loadtest/a.md',
+  ]) {
+    assert.equal(scopeMap({ [f]: '바꿈\n' }).loadtest, false, f);
+  }
+});
+
+test('BSL060_범위loadtest가_출력에있고_비교기준을읽지못하면_고른다', () => {
+  assert.equal(scopeMap({ 'docs/a.md': '글\n' }).loadtest, false);
+  assert.ok(scopes({ 'docs/a.md': '글\n' }, 'no-such-ref').includes('loadtest'));
+});
