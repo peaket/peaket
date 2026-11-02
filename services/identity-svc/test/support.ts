@@ -5,7 +5,9 @@ import { exportJWK, generateKeyPair, type JWK } from 'jose';
 import { CreateSession } from '../src/modules/session/application/create-session.js';
 import { EndSession } from '../src/modules/session/application/end-session.js';
 import { IssueReauthToken } from '../src/modules/session/application/issue-reauth-token.js';
+import { RefreshSession } from '../src/modules/session/application/refresh-session.js';
 import { JoseTokenSigner } from '../src/modules/session/adapters/jose-token-signer.js';
+import { TokenKeyRing } from '../src/modules/session/adapters/token-keys.js';
 import type { DeviceRefs, SessionSignals, SessionStore } from '../src/modules/session/domain/ports.js';
 
 export const ISSUER = 'https://identity.peaket.test';
@@ -27,6 +29,7 @@ export function recordingSignals(): SessionSignals & { seen: string[] } {
     reauthIssued: (p, s) => seen.push(`reauth:${p}:${s}`),
     reauthMismatch: (p) => seen.push(`mismatch:${p}`),
     reverifyRequired: (p) => seen.push(`reverify:${p}`),
+    refreshed: (aud, result) => seen.push(`refresh:${aud}:${result}`),
   };
 }
 
@@ -43,13 +46,14 @@ export interface Kit {
   create: CreateSession;
   end: EndSession;
   reauth: IssueReauthToken;
+  refresh: RefreshSession;
 }
 
 export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: FakeClock } = {}): Promise<Kit> {
   const clock = o.clock ?? fakeClock({ now: Date.parse('2026-11-03T03:00:00.000Z') });
   const signals = recordingSignals();
   const { privateJwk, publicJwk } = await fanKey();
-  const signer = await JoseTokenSigner.fromJwk(privateJwk, ISSUER);
+  const signer = new JoseTokenSigner(await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(privateJwk) }), ISSUER);
   const devices = testDeviceRefs(o.keyless);
   return {
     clock,
@@ -58,6 +62,7 @@ export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: F
     create: new CreateSession(store, signer, devices, signals, clock),
     end: new EndSession(store, signals, clock),
     reauth: new IssueReauthToken(store, signer, signals, clock),
+    refresh: new RefreshSession(store, signer, signals, clock),
   };
 }
 

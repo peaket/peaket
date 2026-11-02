@@ -82,6 +82,7 @@ export class CreateSession {
         if (!s || !sessionAlive(s, now)) throw new SessionError('FAILED_PRECONDITION', '그 멱등 키의 세션이 이미 끝났다');
         // identity에는 해시만 있어 앞서 준 값을 다시 줄 수 없다. 새 값으로 바꿔 앞서 준 리프레시 토큰은 쓸 수 없게 한다
         await tx.setRefreshHash(s.id, refresh.hash);
+        await tx.recordRefreshHash({ hash: refresh.hash, sessionId: s.id, refreshFamily: s.refreshFamily, issuedAt: now, expiresAt: s.absoluteExpiresAt });
         return { accountId: s.accountId, sessionId: s.id, idleExpiresAt: s.idleExpiresAt, absoluteExpiresAt: s.absoluteExpiresAt, newAccount: seen.newAccount, replayed: true, ended: [] as string[] };
       }
 
@@ -106,9 +107,9 @@ export class CreateSession {
       const ref = i.deviceId === null ? undefined : this.devices.ref(i.deviceId);
       const deviceId = ref === undefined ? null : await tx.bindDevice(accountId, ref, now);
       const ended = sessionsOverDeviceLimit(await tx.activeSessions(accountId, now), deviceId);
-      if (ended.length) await tx.terminateSessions(ended, now);
 
       const sessionId = uuidv7(this.clock);
+      const refreshFamily = uuidv7(this.clock);
       const absoluteExpiresAt = now + SESSION_ABSOLUTE_MS;
       const idleExpiresAt = now + SESSION_IDLE_MS;
       await tx.insertSession({
@@ -116,13 +117,16 @@ export class CreateSession {
         accountId,
         deviceId,
         refreshHash: refresh.hash,
-        refreshFamily: uuidv7(this.clock),
+        refreshFamily,
         absoluteExpiresAt,
         idleExpiresAt,
         loginVerdict: 'UNKNOWN',
         createdAt: now,
       });
+      await tx.recordRefreshHash({ hash: refresh.hash, sessionId, refreshFamily, issuedAt: now, expiresAt: absoluteExpiresAt });
       await tx.saveCreateKey(i.idempotencyKey, { provider: i.provider, providerUserId: i.providerUserId, sessionId, newAccount }, now);
+      // 기기 한도 정리는 세션 종료 사건(Outbox)을 적으므로 트랜잭션의 마지막 쓰기로 둔다(ADR-0116 결정 3)
+      if (ended.length) await tx.terminateSessions(ended, 'DEVICE_LIMIT', now);
       return { accountId, sessionId, idleExpiresAt, absoluteExpiresAt, newAccount, replayed: false, ended };
     });
 

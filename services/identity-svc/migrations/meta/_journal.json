@@ -8,6 +8,20 @@
       "when": 1793641019540,
       "tag": "0000_identity_session",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793646816220,
+      "tag": "0001_refresh_token_hash",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793646817672,
+      "tag": "0002_outbox",
+      "breakpoints": true
     }
   ]
 }

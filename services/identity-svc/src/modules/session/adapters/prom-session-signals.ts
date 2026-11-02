@@ -8,11 +8,15 @@ export class PromSessionSignals implements SessionSignals {
   readonly #deviceLimit = new Counter({ name: 'identity_session_device_limit_total', help: '기기 한도(5대)를 넘어 끝낸 세션 수', registers: [] });
   readonly #reauth = new Counter({ name: 'identity_reauth_issued_total', help: '준 팬 재인증 토큰 수', labelNames: ['provider', 'strength'] as const, registers: [] });
   readonly #mismatch = new Counter({ name: 'identity_reauth_mismatch_total', help: '다른 제공자 계정으로 다시 로그인해 주지 않은 재인증', labelNames: ['provider'] as const, registers: [] });
+  readonly #refresh = new Counter({ name: 'identity_refresh_total', help: '토큰 갱신 결과(rotated·retried·reused·invalid)', labelNames: ['aud', 'result'] as const, registers: [] });
+  readonly #retry = new Counter({ name: 'identity_refresh_retry_reuse_total', help: '응답을 잃은 재시도로 받아 준 바로 앞 리프레시 토큰', labelNames: ['aud'] as const, registers: [] });
+  readonly #reuse = new Counter({ name: 'identity_refresh_reuse_detected_total', help: '탈취로 본 리프레시 토큰 재사용', labelNames: ['aud'] as const, registers: [] });
   readonly #reverify = new Counter({ name: 'identity_reauth_reverify_required_total', help: '본인확인 재통과가 필요해 주지 않은 고위험 재인증', labelNames: ['provider'] as const, registers: [] });
 
   /** 서비스의 지표 모음(/metrics)에 단다 */
   register(registry: Registry): this {
-    for (const m of [this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify]) registry.registerMetric(m);
+    const all: Array<Parameters<Registry['registerMetric']>[0]> = [this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify, this.#refresh, this.#retry, this.#reuse];
+    for (const m of all) registry.registerMetric(m);
     return this;
   }
 
@@ -38,5 +42,11 @@ export class PromSessionSignals implements SessionSignals {
 
   reverifyRequired(provider: string): void {
     this.#reverify.inc({ provider });
+  }
+
+  refreshed(aud: string, result: string): void {
+    this.#refresh.inc({ aud, result });
+    if (result === 'retried') this.#retry.inc({ aud });
+    if (result === 'reused') this.#reuse.inc({ aud });
   }
 }

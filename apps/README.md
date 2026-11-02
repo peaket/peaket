@@ -23,7 +23,7 @@
 실제 제공자 앱 등록 없이 모의 OIDC 제공자로 한다(docs/features/identity.md §2 '웹 앱 서버 경로', §12.1 '대역').
 
 1. identity DB(PostgreSQL 18)를 띄우고 `PEAKET_DATABASE_URL=… pnpm --filter @peaket/identity-svc migrate`.
-2. 팬 토큰 키(ES256 JWK, `kid` 포함)를 하나 만들어 identity-svc에는 개인 JWK를 `PEAKET_FAN_TOKEN_KEY`로, 웹에는 공개 JWKS를 `PEAKET_FAN_TOKEN_JWKS`로 준다. 두 쪽의 `PEAKET_TOKEN_ISSUER`는 같은 값이다.
+2. 팬 토큰 키(ES256 JWK, `kid` 포함)를 하나 만들어 identity-svc에 개인 JWK를 `PEAKET_FAN_TOKEN_KEY`로 준다. 웹은 identity-svc의 공개키 묶음 주소를 읽는다(아래 표). 두 쪽의 `PEAKET_TOKEN_ISSUER`는 같은 값이다.
 3. identity-svc: `PEAKET_ENV=local PEAKET_DATABASE_URL=… PEAKET_FAN_TOKEN_KEY=… PEAKET_TOKEN_ISSUER=… pnpm --filter @peaket/identity-svc start`(업무 gRPC 포트 `PEAKET_GRPC_PORT`, 기본 50051).
 4. 모의 제공자: `node apps/web/scripts/mock-oidc.mjs 18900` → 제공자마다 발급자 주소와 시험 클라이언트 ID·시크릿을 출력한다.
 5. 소비자 웹(`next build` 뒤 `next start`, 또는 `dev`)에 넣는 값:
@@ -36,7 +36,7 @@
 | `PEAKET_WEB_AUTH_SECRET_PREVIOUS` | 비밀을 바꾼 직후에만: 옛 비밀(쿠키 수명 10분 동안 옛 쿠키를 여는 데만 쓴다) |
 | `PEAKET_OIDC_KAKAO_CLIENT_ID`·`_CLIENT_SECRET`·`_ISSUER` | 모의 제공자가 출력한 값. 네이버·구글은 `NAVER`·`GOOGLE`. 설정한 제공자만 로그인할 수 있다 |
 | `PEAKET_IDENTITY_GRPC` | identity-svc 업무 gRPC 주소(예: `127.0.0.1:50051`) |
-| `PEAKET_FAN_TOKEN_JWKS`·`PEAKET_TOKEN_ISSUER` | 2번의 공개 JWKS와 발급자 |
+| `PEAKET_FAN_TOKEN_JWKS_URL`·`PEAKET_TOKEN_ISSUER` | identity-svc 공개키 묶음 주소(`http://<identity 앱 포트>/internal/jwks/fan.json`)와 발급자. 주소 대신 2번의 공개 JWKS를 `PEAKET_FAN_TOKEN_JWKS`로 줄 수도 있다 |
 | `PEAKET_COOKIE_DOMAIN` | 비운다(운영은 `peaket.example`) |
 
 로그인 화면은 `/login`(SCR-004)이다. 기본 상태(`?state=` 없음)에서 버튼이 로그인 시작 폼이다.

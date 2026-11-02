@@ -1,6 +1,6 @@
 // 팬 액세스 토큰 쿠키 확인(docs/features/identity.md §2 '웹 앱 서버 경로'): 로그아웃과 재인증 시작이 sid·sub를 얻는다.
 // 서명(팬 토큰 공개키)·typ at+jwt·aud fan·iss를 본다. 로그아웃만 만료된 토큰을 받는다(자기 세션을 끝내는 일).
-import { createLocalJWKSet, errors, type JSONWebKeySet, type JWTPayload, jwtVerify } from 'jose';
+import { createLocalJWKSet, createRemoteJWKSet, errors, type JSONWebKeySet, type JWTPayload, jwtVerify } from 'jose';
 
 export interface FanSession {
   accountId: string;
@@ -8,11 +8,12 @@ export interface FanSession {
 }
 
 export class FanTokenVerifier {
-  readonly #keys: ReturnType<typeof createLocalJWKSet>;
+  readonly #keys: ReturnType<typeof createLocalJWKSet> | ReturnType<typeof createRemoteJWKSet>;
   readonly #issuer: string;
 
-  constructor(jwks: JSONWebKeySet, issuer: string) {
-    this.#keys = createLocalJWKSet(jwks);
+  /** jwks: 설정값의 공개키 묶음, 또는 identity-svc 공개키 묶음 주소(5분 캐시, 모르는 kid면 다시 읽음, identity §3 '공개키 배포') */
+  constructor(jwks: JSONWebKeySet | URL, issuer: string) {
+    this.#keys = jwks instanceof URL ? createRemoteJWKSet(jwks, { cacheMaxAge: 5 * 60_000, cooldownDuration: 30_000 }) : createLocalJWKSet(jwks);
     this.#issuer = issuer;
   }
 

@@ -27,5 +27,14 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.exit(2);
   }
   await migrateIdentity(url);
+  // 마이그레이션 직후 Outbox 일 파티션을 만든다(첫 쓰기가 파티션 없이 실패하지 않게). 운영 실행기의 같은 일은 BUILD_ORDER BAS-060이다
+  const { createDatabase, ensureOutboxPartitions, systemClock } = await import('@peaket/platform');
+  const database = createDatabase({ url, applicationName: 'identity-svc-migrate', max: 1 });
+  try {
+    const { created } = await ensureOutboxPartitions(database, systemClock);
+    console.log(`Outbox 파티션 ${created.length}개를 만들었다`);
+  } finally {
+    await database.close();
+  }
   console.log('identity 마이그레이션 끝');
 }

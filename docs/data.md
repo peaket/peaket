@@ -43,6 +43,7 @@ ERD는 한 그림에 담으면 mermaid의 그림 글자 수 한도(그림 하나
 erDiagram
     account ||--o{ session : has
     session ||--o{ session_create_key : "세션 생성 멱등 키(10분, 추천 적용 2026-11-03)"
+    session ||--o{ refresh_token_hash : "발급한 리프레시 토큰 해시(재사용 탐지, 추천 적용 2026-11-03)"
     account ||--o{ device : binds
     account ||--o{ account_contact_ref : "조사용 연락처 가명(추천 적용 2026-10-31, ADR-0171)"
     account ||--o{ identity_conflict_attempt : "같은 본인확인 시도(추천 적용 2026-10-31, ADR-0171)"
@@ -133,6 +134,13 @@ erDiagram
         text login_verdict "ALLOW|CHALLENGE|UNKNOWN, 로그인 때 trust-svc ScoreRisk(LOGIN) 판정. UNKNOWN은 trust-svc가 답하지 않음(서킷 열림·데드라인). 양도·환급·배상 계좌 입력에서 재인증이 '요청만 함'일 때 쓴다(docs/features/identity.md §7, 추천 적용 2026-10-30)"
         text login_verdict_reason "optional, CHALLENGE일 때의 사유 범주 코드(trust.proto ReasonCategory, 점수 원값 없음)"
         timestamptz login_verdict_at
+    }
+    refresh_token_hash {
+        bytea hash PK "발급한 리프레시 토큰의 SHA-256. 예전 토큰이 다시 오면 그 패밀리를 찾아 재사용 탐지를 한다(docs/features/identity.md §3 '토큰 수명주기 구현', 추천 적용 2026-11-03)"
+        uuid session_id FK
+        uuid refresh_family
+        timestamptz issued_at
+        timestamptz expires_at "그 세션의 절대 만료. 지나면 지운다"
     }
     session_create_key {
         text key PK "웹 앱 서버가 보낸 CreateSession 멱등 키(로그인 진행 쿠키 state를 앱 서버 키로 HMAC한 값). 10분 [가정] 기억한다(docs/features/identity.md §2, 추천 적용 2026-11-03)"

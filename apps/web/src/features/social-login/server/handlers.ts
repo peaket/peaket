@@ -99,7 +99,8 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
   const reauthKeys = [keys.reauthResult, ...(previous ? [previous.reauthResult] : [])];
   const oidc = new OidcProviders(config.providers, allowsMockProviders(config.env));
   const identity = deps.identity ?? new IdentityClient(config.identityAddress);
-  const fanTokens = new FanTokenVerifier(config.fanJwks, config.tokenIssuer);
+  if (!config.fanJwksUrl && !config.fanJwks) throw new Error('팬 토큰 공개키 묶음 주소나 값이 있어야 한다');
+  const fanTokens = new FanTokenVerifier(config.fanJwksUrl ? new URL(config.fanJwksUrl) : (config.fanJwks as NonNullable<SocialLoginConfig['fanJwks']>), config.tokenIssuer);
   const callbackUrl = (p: Provider) => `${config.origin}/login/callback/${p}`;
   // no-referrer 화면의 양식 전송은 Origin: null이다. 그때만 브라우저가 붙이는 Sec-Fetch-Site: same-origin을 본다(architecture §5 'CSRF 확인 규칙')
   const sameOrigin = (req: Request) => {

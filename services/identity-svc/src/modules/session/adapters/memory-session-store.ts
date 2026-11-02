@@ -1,26 +1,44 @@
 // 메모리 저장소(시험·로컬 시제품용). PostgreSQL 저장소와 같은 규칙을 지킨다: 트랜잭션은 한 번에 하나씩 돌고(직렬),
-// 실패하면 그 트랜잭션의 변경을 모두 되돌린다.
+// 실패하면 그 트랜잭션의 변경을 모두 되돌린다. 세션 종료 사건은 Outbox 대신 목록에 모은다.
 import { uuidv7 } from '@peaket/platform';
-import type { AccountRow, CreateKeyRecord, NewSession, SessionRow, SessionStore, SessionTx } from '../domain/ports.js';
-import { type ActiveSession, CREATE_KEY_TTL_MS, type Provider, sessionAlive } from '../domain/session.js';
+import type { AccountRow, CreateKeyRecord, NewSession, RefreshRow, SessionRow, SessionStore, SessionTx } from '../domain/ports.js';
+import { type ActiveSession, CREATE_KEY_TTL_MS, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
+
+type StoredSession = NewSession & { terminatedAt: number | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean };
 
 interface State {
   accounts: Map<string, AccountRow & { email: string | null; createdAt: number }>;
   providers: Map<string, { accountId: string; linkedAt: number }>;
   devices: Map<string, { id: string; accountId: string; ref: string; boundAt: number }>;
-  sessions: Map<string, NewSession & { terminatedAt: number | null }>;
+  sessions: Map<string, StoredSession>;
   keys: Map<string, CreateKeyRecord & { createdAt: number }>;
+  hashes: Map<string, { sessionId: string; refreshFamily: string; expiresAt: number }>;
+  events: Array<{ sessionId: string; accountId: string; reason: TerminationReason; at: number }>;
 }
 
-const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map() });
+const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [] });
+const copy = <K, V extends object>(m: Map<K, V>) => new Map([...m].map(([k, v]) => [k, { ...v }]));
 const clone = (s: State): State => ({
-  accounts: new Map([...s.accounts].map(([k, v]) => [k, { ...v }])),
-  providers: new Map([...s.providers].map(([k, v]) => [k, { ...v }])),
-  devices: new Map([...s.devices].map(([k, v]) => [k, { ...v }])),
-  sessions: new Map([...s.sessions].map(([k, v]) => [k, { ...v }])),
-  keys: new Map([...s.keys].map(([k, v]) => [k, { ...v }])),
+  accounts: copy(s.accounts),
+  providers: copy(s.providers),
+  devices: copy(s.devices),
+  sessions: copy(s.sessions),
+  keys: copy(s.keys),
+  hashes: copy(s.hashes),
+  events: [...s.events],
 });
 const providerKey = (p: Provider, id: string) => `${p}\u0000${id}`;
+const hex = (h: Uint8Array) => Buffer.from(h).toString('hex');
+const row = (x: StoredSession): SessionRow => ({
+  id: x.id,
+  accountId: x.accountId,
+  deviceId: x.deviceId,
+  absoluteExpiresAt: x.absoluteExpiresAt,
+  idleExpiresAt: x.idleExpiresAt,
+  terminatedAt: x.terminatedAt,
+  loginVerdict: x.loginVerdict,
+  refreshFamily: x.refreshFamily,
+});
 
 export class MemorySessionStore implements SessionStore {
   #state = empty();
@@ -39,7 +57,7 @@ export class MemorySessionStore implements SessionStore {
   }
 
   /** 시험이 저장된 세션을 들여다본다 */
-  peekSession(id: string): (NewSession & { terminatedAt: number | null }) | undefined {
+  peekSession(id: string): StoredSession | undefined {
     return this.#state.sessions.get(id);
   }
 
@@ -50,6 +68,11 @@ export class MemorySessionStore implements SessionStore {
 
   deviceCount(accountId: string): number {
     return [...this.#state.devices.values()].filter((d) => d.accountId === accountId).length;
+  }
+
+  /** 그 계정의 세션 종료 사건(적힌 순서): [세션 ID, 사유] */
+  terminations(accountId: string): Array<[string, string]> {
+    return this.#state.events.filter((e) => e.accountId === accountId).map((e) => [e.sessionId, e.reason]);
   }
 
   #tx(s: State): SessionTx {
@@ -94,25 +117,49 @@ export class MemorySessionStore implements SessionStore {
         [...s.sessions.values()]
           .filter((x) => x.accountId === accountId && sessionAlive(x, now))
           .map((x): ActiveSession => ({ sessionId: x.id, deviceId: x.deviceId, idleExpiresAt: x.idleExpiresAt })),
-      terminateSessions: async (ids, now) => {
+      terminateSessions: async (ids, reason, now) => {
         for (const id of ids) {
           const x = s.sessions.get(id);
-          if (x && x.terminatedAt === null) x.terminatedAt = now;
+          if (x && x.terminatedAt === null) {
+            x.terminatedAt = now;
+            s.events.push({ sessionId: x.id, accountId: x.accountId, reason, at: now });
+          }
         }
       },
-      insertSession: async (row) => {
-        s.sessions.set(row.id, { ...row, terminatedAt: null });
+      insertSession: async (r) => {
+        s.sessions.set(r.id, { ...r, terminatedAt: null, prevRefreshHash: null, rotatedAt: null, refreshUsed: false });
       },
-      getSessionForUpdate: async (id): Promise<SessionRow | null> => {
+      getSessionForUpdate: async (id) => {
         const x = s.sessions.get(id.toLowerCase());
-        return x
-          ? { id: x.id, accountId: x.accountId, deviceId: x.deviceId, absoluteExpiresAt: x.absoluteExpiresAt, idleExpiresAt: x.idleExpiresAt, terminatedAt: x.terminatedAt, loginVerdict: x.loginVerdict }
-          : null;
+        return x ? row(x) : null;
       },
       setRefreshHash: async (sessionId, hash) => {
         const x = s.sessions.get(sessionId);
         if (x) x.refreshHash = hash;
       },
+      rotateRefresh: async (sessionId, hash, now, idleExpiresAt) => {
+        const x = s.sessions.get(sessionId);
+        if (!x) return;
+        x.prevRefreshHash = x.refreshHash;
+        x.refreshHash = hash;
+        x.rotatedAt = now;
+        x.refreshUsed = false;
+        x.idleExpiresAt = idleExpiresAt;
+      },
+      recordRefreshHash: async (r) => {
+        s.hashes.set(hex(r.hash), { sessionId: r.sessionId, refreshFamily: r.refreshFamily, expiresAt: r.expiresAt });
+      },
+      findByRefreshHash: async (hash): Promise<RefreshRow | null> => {
+        const h = hex(hash);
+        for (const x of s.sessions.values()) {
+          if (hex(x.refreshHash) === h) return { ...row(x), match: 'current', rotatedAt: x.rotatedAt, refreshUsed: x.refreshUsed };
+          if (x.prevRefreshHash && hex(x.prevRefreshHash) === h) return { ...row(x), match: 'previous', rotatedAt: x.rotatedAt, refreshUsed: x.refreshUsed };
+        }
+        const past = s.hashes.get(h);
+        const x = past && s.sessions.get(past.sessionId);
+        return x ? { ...row(x), match: 'history', rotatedAt: x.rotatedAt, refreshUsed: x.refreshUsed } : null;
+      },
+      familySessions: async (refreshFamily) => [...s.sessions.values()].filter((x) => x.refreshFamily === refreshFamily && x.terminatedAt === null).map((x) => x.id),
     };
   }
 }

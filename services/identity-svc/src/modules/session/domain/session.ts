@@ -35,7 +35,7 @@ export function needsReverification(purpose: ReauthPurpose, strength: ReauthStre
 }
 
 /** 세션이 끝나는 까닭(asyncapi SessionTerminated.reason 가운데 이 단계가 쓰는 것) */
-export type TerminationReason = 'LOGOUT' | 'DEVICE_LIMIT';
+export type TerminationReason = 'LOGOUT' | 'DEVICE_LIMIT' | 'REFRESH_REUSE';
 
 export interface ActiveSession {
   sessionId: string;
@@ -70,4 +70,25 @@ export function sessionsOverDeviceLimit(active: readonly ActiveSession[], newDev
 /** 세션이 지금 살아 있는가(끝나지 않았고 절대·유휴 만료 전) */
 export function sessionAlive(s: { terminatedAt: number | null; absoluteExpiresAt: number; idleExpiresAt: number }, now: number): boolean {
   return s.terminatedAt === null && now < s.absoluteExpiresAt && now < s.idleExpiresAt;
+}
+
+/** 응답을 잃은 갱신의 재시도를 받아 주는 유예 30초 [가정](identity §3) */
+export const REFRESH_RETRY_GRACE_MS = 30_000;
+
+/** 갱신 판정(identity §3 '토큰 수명주기 구현' ①~④) */
+export type RefreshDecision = 'rotate' | 'retry' | 'reuse' | 'invalid';
+
+export interface RefreshState {
+  /** 그 토큰이 세션의 무엇과 맞았나: 지금 토큰, 바로 앞 토큰, 그 패밀리가 예전에 받았던 토큰 */
+  match: 'current' | 'previous' | 'history';
+  rotatedAt: number | null;
+  refreshUsed: boolean;
+  alive: boolean;
+}
+
+export function decideRefresh(s: RefreshState, now: number): RefreshDecision {
+  if (!s.alive) return 'invalid';
+  if (s.match === 'current') return 'rotate';
+  if (s.match === 'previous' && s.rotatedAt !== null && now - s.rotatedAt <= REFRESH_RETRY_GRACE_MS && !s.refreshUsed) return 'retry';
+  return 'reuse';
 }

@@ -24,6 +24,10 @@
     "./testing": {
       "types": "./dist/testing.d.ts",
       "default": "./dist/testing.js"
+    },
+    "./token-verify": {
+      "types": "./dist/token-verify.d.ts",
+      "default": "./dist/token-verify.js"
     }
   },
   "scripts": {
@@ -53,6 +57,7 @@
     "aws-msk-iam-sasl-signer-js": "1.0.3",
     "drizzle-orm": "0.45.4",
     "fastify": "^5.12.7",
+    "jose": "6.2.14",
     "opossum": "10.0.0",
     "pg": "^8.23.1",
     "pino": "^10.4.0",

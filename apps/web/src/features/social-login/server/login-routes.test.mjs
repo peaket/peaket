@@ -511,3 +511,19 @@ test('secrets-and-keys_앱 서버 비밀을 바꾸면 옛 비밀로 봉인한 �
     forgot.close();
   }
 });
+
+test('I-T20_웹앱서버는_공개키묶음주소(identity GET /internal/jwks/fan.json)에서팬공개키를읽는다', async () => {
+  const jwks = await serve(() => new Response(JSON.stringify(identity.jwks), { headers: { 'content-type': 'application/jwk-set+json' } }));
+  const { fanJwks: _drop, ...rest } = config(web.url);
+  const remote = createSocialLogin({ ...rest, fanJwksUrl: `${jwks.url}/internal/jwks/fan.json` }, { log: (event, fields) => logs.push({ event, ...fields }) });
+  try {
+    const b = new Browser();
+    await login(b);
+    const r = await remote.dispatch(new Request(`${web.url}/logout`, { method: 'POST', headers: { origin: web.url, cookie: b.cookieHeader(web.url) } }));
+    assert.equal(r.status, 303);
+    assert.ok(identity.sessions.get(lastCall('EndSession').session_id).ended);
+  } finally {
+    remote.close();
+    await jwks.close();
+  }
+});

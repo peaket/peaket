@@ -620,6 +620,9 @@ importers:
       fastify:
         specifier: ^5.12.7
         version: 5.12.7
+      jose:
+        specifier: 6.2.14
+        version: 6.2.14
       opossum:
         specifier: 10.0.0
         version: 10.0.0
@@ -696,6 +699,9 @@ importers:
       drizzle-orm:
         specifier: 0.45.4
         version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(pg@8.23.1)
+      fastify:
+        specifier: ^5.12.7
+        version: 5.12.7
       jose:
         specifier: 6.2.14
         version: 6.2.14

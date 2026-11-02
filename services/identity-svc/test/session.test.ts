@@ -2,6 +2,7 @@
 import { describe, expect, test } from 'vitest';
 import { MemorySessionStore } from '../src/modules/session/adapters/memory-session-store.js';
 import { type ActiveSession, sessionsOverDeviceLimit } from '../src/modules/session/domain/session.js';
+import { refreshCases } from './refresh-cases.js';
 import { sessionCases } from './session-cases.js';
 
 sessionCases('메모리', async () => {
@@ -13,6 +14,11 @@ sessionCases('메모리', async () => {
     deviceRows: async (a) => m.deviceCount(a),
     loginVerdictOf: async (id) => m.peekSession(id)?.loginVerdict ?? null,
   };
+});
+
+refreshCases('메모리', async () => {
+  const m = new MemorySessionStore();
+  return { store: m, terminations: async (a) => m.terminations(a), isTerminated: async (id) => m.peekSession(id)?.terminatedAt != null };
 });
 
 describe('기기 한도 규칙(POL-019, identity §2)', () => {

@@ -24,6 +24,7 @@ export interface SessionRow {
   idleExpiresAt: number;
   terminatedAt: number | null;
   loginVerdict: LoginVerdict;
+  refreshFamily: string;
 }
 
 export interface NewSession {
@@ -37,6 +38,13 @@ export interface NewSession {
   /** 로그인 판정(identity §7). trust-svc가 생기기 전에는 UNKNOWN(판정을 받지 못함, identity §2 '첫 구현') */
   loginVerdict: LoginVerdict;
   createdAt: number;
+}
+
+/** 갱신에 쓰려고 리프레시 토큰 해시로 찾은 세션(쓰기 잠금) */
+export interface RefreshRow extends SessionRow {
+  match: 'current' | 'previous' | 'history';
+  rotatedAt: number | null;
+  refreshUsed: boolean;
 }
 
 /** 트랜잭션 하나 안에서 하는 일. 저장소 어댑터가 트랜잭션·잠금을 맡는다 */
@@ -59,11 +67,21 @@ export interface SessionTx {
   bindDevice(accountId: string, deviceRef: string, now: number): Promise<string>;
   /** 끝나지 않았고 만료 전인 그 계정의 세션 */
   activeSessions(accountId: string, now: number): Promise<ActiveSession[]>;
-  terminateSessions(ids: readonly string[], now: number): Promise<void>;
+  /** 세션을 끝내고, 같은 트랜잭션에 세션 종료 사건(control.sessions-terminated)을 적는다(ADR-0143 결정 3) */
+  terminateSessions(ids: readonly string[], reason: TerminationReason, now: number): Promise<void>;
   insertSession(row: NewSession): Promise<void>;
   /** 세션 행(쓰기 잠금). 없으면 null */
   getSessionForUpdate(id: string): Promise<SessionRow | null>;
+  /** 지금 리프레시 토큰만 바꾼다(CreateSession 다시 보내기, 갱신 재시도). 앞 토큰·회전 시각은 그대로 */
   setRefreshHash(sessionId: string, hash: Uint8Array): Promise<void>;
+  /** 회전: 지금 토큰을 앞 토큰으로 옮기고 새 토큰을 둔다. rotated_at = now, refresh_used = false, 유휴 만료를 고친다 */
+  rotateRefresh(sessionId: string, hash: Uint8Array, now: number, idleExpiresAt: number): Promise<void>;
+  /** 발급한 리프레시 토큰 해시를 그 세션의 절대 만료까지 남긴다(재사용 탐지) */
+  recordRefreshHash(r: { hash: Uint8Array; sessionId: string; refreshFamily: string; issuedAt: number; expiresAt: number }): Promise<void>;
+  /** 리프레시 토큰 해시로 세션을 찾는다(지금·바로 앞·예전 발급). 없으면 null */
+  findByRefreshHash(hash: Uint8Array): Promise<RefreshRow | null>;
+  /** 그 패밀리의 끝나지 않은 세션 ID */
+  familySessions(refreshFamily: string): Promise<string[]>;
 }
 
 export const SESSION_STORE = Symbol('identity.SessionStore');
@@ -98,4 +116,11 @@ export interface SessionSignals {
   reauthIssued(provider: Provider, strength: ReauthStrength): void;
   reauthMismatch(provider: Provider): void;
   reverifyRequired(provider: Provider): void;
+  refreshed(aud: 'fan', result: 'rotated' | 'retried' | 'reused' | 'invalid'): void;
+}
+
+export const PUBLIC_KEYS = Symbol('identity.PublicKeys');
+/** 공개키 묶음(JWKS)을 내는 쪽(identity §3 '토큰 수명주기 구현' 공개키 배포). 키 셋은 fan·admin·staff */
+export interface PublicKeys {
+  jwks(set: 'fan' | 'admin' | 'staff', now: number): { keys: object[] };
 }

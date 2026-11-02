@@ -155,6 +155,10 @@ process.once('SIGTERM', async () => { await relay.stop(); /* 그 뒤 생산자·
 | `PEAKET_TRACE_INBOUND` | `mesh` | 들어온 추적 문맥을 잇는가. 앱 서버는 `untrusted`(링크로만) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`·`OTEL_TRACES_EXPORTER`·`OTEL_SDK_DISABLED` | OTel 기본값 | 추적 내보내기(OTLP HTTP/protobuf). `none`이면 보내지 않는다 |
 
+## 토큰 확인(`@peaket/platform/token-verify`)
+
+받는 쪽이 identity 토큰을 확인하는 공용 구현이다(docs/features/identity.md §3 '토큰 수명주기 구현' 발급자와 검증 규칙, BUILD_ORDER PRF-030). 키 셋(팬·관리·현장 스태프)마다 자기 공개키 묶음만 믿고, ES256·`typ`(액세스 at+jwt, 재인증 reauth+jwt)·`iss`·`aud`·`exp`를 함께 본다. 키 셋이 받는 대상은 팬 fan, 관리 partner·ops, 현장 스태프 scanner뿐이다. 공개키 묶음은 5분 [가정] 캐시하고 모르는 `kid`면 한 번 다시 읽는다. 재인증 토큰은 요청의 세션·작업 묶음(`act`)과 같아야 하고, 한 번 쓰기(`jti`)는 부르는 쪽이 본다. Nest에 기대지 않아 게이트웨이·앱 서버도 쓸 수 있다.
+
 ## 서비스 뼈대
 
 `template/`는 서비스 하나의 최소 모양이다(docs/architecture.md §3.1). 새 서비스는 이 폴더를 `services/<이름>/`로 복사하고 예시 컨텍스트(`example`)를 바꾼다. 이미지는 `template/Dockerfile`(빌드 맥락은 저장소 뿌리, 실행 이미지에는 빌드 산출물·운영 의존성·마이그레이션만)로 만들고, 같은 이미지가 서비스(`dist/main.js`)와 Outbox 릴레이(`dist/relay.js`)를 띄운다. 로컬 kind 클러스터에서 띄워 보는 법은 tools/local/README.md다.

@@ -28,7 +28,7 @@ export class EndSession {
       if (!s) throw new SessionError('NOT_FOUND', '세션이 없다');
       if (s.accountId !== i.accountId.toLowerCase()) throw new SessionError('FAILED_PRECONDITION', '그 계정의 세션이 아니다');
       if (s.terminatedAt !== null) return false;
-      await tx.terminateSessions([s.id], now);
+      await tx.terminateSessions([s.id], 'LOGOUT', now);
       return true;
     });
     if (ended) this.signals.terminated('LOGOUT', 1);

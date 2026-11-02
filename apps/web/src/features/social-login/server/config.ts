@@ -25,8 +25,10 @@ export interface SocialLoginConfig {
   providers: Partial<Record<Provider, ProviderSettings>>;
   /** identity-svc 업무 gRPC 주소(host:port) */
   identityAddress: string;
-  /** 팬 토큰 공개키(JWKS). 배포 방법은 BUILD_ORDER PRF-030이 정하고 그 전에는 설정값이다 */
-  fanJwks: JSONWebKeySet;
+  /** 팬 토큰 공개키 묶음 주소(identity-svc GET /internal/jwks/fan.json, identity §3 '공개키 배포'). 시험·로컬은 fanJwks 값으로 대신할 수 있다 */
+  fanJwksUrl?: string;
+  /** 팬 토큰 공개키 묶음 값(fanJwksUrl이 없을 때) */
+  fanJwks?: JSONWebKeySet;
   /** 팬 토큰 발급자(iss) */
   tokenIssuer: string;
 }
@@ -57,13 +59,16 @@ export function loadSocialLoginConfig(env: Record<string, string | undefined>): 
     if (override && !testing) throw new Error(`PEAKET_OIDC_${p.toUpperCase()}_ISSUER는 local·ci에서만 바꿀 수 있다(제공자 issuer는 고정값, asvs 10.5.3)`);
     providers[p] = { issuer: override || PROVIDER_ISSUER[p], clientId: id, clientSecret: need(env, `PEAKET_OIDC_${p.toUpperCase()}_CLIENT_SECRET`) };
   }
-  let fanJwks: JSONWebKeySet;
-  try {
-    fanJwks = JSON.parse(need(env, 'PEAKET_FAN_TOKEN_JWKS')) as JSONWebKeySet;
-  } catch (e) {
-    throw new Error(`PEAKET_FAN_TOKEN_JWKS는 JWKS JSON이어야 한다: ${(e as Error).message}`);
+  const fanJwksUrl = env.PEAKET_FAN_TOKEN_JWKS_URL || undefined;
+  let fanJwks: JSONWebKeySet | undefined;
+  if (!fanJwksUrl) {
+    try {
+      fanJwks = JSON.parse(need(env, 'PEAKET_FAN_TOKEN_JWKS')) as JSONWebKeySet;
+    } catch (e) {
+      throw new Error(`PEAKET_FAN_TOKEN_JWKS_URL이나 PEAKET_FAN_TOKEN_JWKS(JWKS JSON)가 있어야 한다: ${(e as Error).message}`);
+    }
+    if (!Array.isArray(fanJwks.keys) || fanJwks.keys.length === 0) throw new Error('PEAKET_FAN_TOKEN_JWKS에 키가 없다');
   }
-  if (!Array.isArray(fanJwks.keys) || fanJwks.keys.length === 0) throw new Error('PEAKET_FAN_TOKEN_JWKS에 키가 없다');
   return {
     env: peaketEnv,
     origin,
@@ -72,6 +77,7 @@ export function loadSocialLoginConfig(env: Record<string, string | undefined>): 
     cookieDomain: env.PEAKET_COOKIE_DOMAIN || undefined,
     providers,
     identityAddress: need(env, 'PEAKET_IDENTITY_GRPC'),
+    fanJwksUrl,
     fanJwks,
     tokenIssuer: need(env, 'PEAKET_TOKEN_ISSUER'),
   };

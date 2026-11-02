@@ -291,6 +291,7 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - 로그인 구현 비교 PoC(R-238, 2026-11-03, BUILD_ORDER PRF-010, wbs 2.1.4, 병렬 세션): 모의 OIDC 제공자로 Auth.js(기본 사용·문서 기능으로 고친 판)와 얇은 OIDC 클라이언트(`openid-client`·`oauth4webapi`)를 I-T51로 견주어, ADR-0119 결정 3대로 얇은 클라이언트를 확정하고 `openid-client` 6을 골랐다. 세 라이브러리 모두 TLS로 받은 ID 토큰의 서명을 기본으로 보지 않아 따로 켠다(`tools/poc/login-compare/RESULT.md`).
 - 관측 최소(템플릿 대시보드·Grafana·web-vitals)(R-239, 2026-11-03, BUILD_ORDER BSL-070, wbs 1.3.1, 병렬 세션): 로컬 kind에 Prometheus·Grafana를 두고(`cluster.mjs observability`), 서비스 템플릿 지표로 첫 행이 네 신호인 대시보드를 코드로 만들며(`tools/local/dashboards.mjs`), v0 좌석맵이 web-vitals·LoAF 값을 `window.__peaketVitals`에 모아 K5 랩 판정이 읽게 했다.
 - 소셜 로그인(얇은 OIDC 클라이언트)과 팬 재인증(R-240, 2026-11-03, BUILD_ORDER PRF-020, wbs 2.1.1, 병렬 세션): 소비자 웹 앱 서버에 openid-client 6 로그인 경로 다섯(시작·콜백·로그아웃·재인증 시작·재인증 결과)을 두고, 새 identity-svc가 gRPC `SessionService`로 세션 생성(멱등 키 10분·기기 5대 한도)·로그아웃·팬 재인증 토큰을 맡는다. 재인증 강도는 제공자별 `prompt`·`auth_time`으로 정하고(I-T54), 재인증 토큰은 주소가 아니라 1분 봉인 쿠키와 같은 출처 POST로 화면에 넘긴다(I-T72).
+- 토큰 수명주기(R-241, 2026-11-03, BUILD_ORDER PRF-030, wbs 2.1.2, 병렬 세션): identity-svc가 팬 토큰 갱신(회전, 응답을 잃은 재시도의 30초 유예, 예전 토큰 재사용이면 패밀리 종료)과 세션 종료 사건 Outbox, 서명 키 셋 셋(지금·옛 키)과 공개키 묶음 경로를 맡고, 받는 쪽 토큰 확인(키 셋·ES256·typ·iss·aud)을 `packages/platform`에 공용으로 두었다.
 
 ## 5. [충돌] 결정 결과
 
