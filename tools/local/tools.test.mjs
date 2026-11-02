@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ensureTool, pickAsset, TOOLS } from './tools.mjs';
+import { ensureTool, httpsDownload, pickAsset, TOOLS } from './tools.mjs';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const dir = () => mkdtempSync(join(tmpdir(), 'peaket-tools-'));
@@ -99,4 +99,55 @@ test('FND110_압축으로받는도구는_받아둔실행파일을_옆파일이�
   assert.equal(calls, 1);
   writeFileSync(exe, good);
   assert.equal(await ensureTool('helm', { root, tools, platform: 'linux', arch: 'x64', download: async () => assert.fail('받지 않아야 한다') }), exe);
+});
+
+// 2026-11-03 첫 원격 CI에서 찾음: GitHub 실행기에서 kind 클러스터를 만든 뒤 Strimzi 설치 파일 받기가 세 번 연속
+// 0.03초 만에 'fetch failed'(UND_ERR_SOCKET, other side closed)로 끊겼다. 로컬에서는 재현되지 않았다
+const socketError = () => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) });
+const okResponse = (text) => ({ ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode(text).buffer });
+const quiet = { log: () => {} };
+
+test('httpsDownload_연결이끊기면_잠깐쉬었다가_다시받는다', async () => {
+  const waits = [];
+  let calls = 0;
+  const fetchImpl = async () => (++calls === 1 ? Promise.reject(socketError()) : okResponse('abc'));
+  const curl = () => assert.fail('curl까지 가지 않아야 한다');
+  const bytes = await httpsDownload('https://example.test/a', { ...quiet, fetchImpl, curl, wait: async (ms) => waits.push(ms) });
+  assert.equal(bytes.toString(), 'abc');
+  assert.equal(calls, 2);
+  assert.deepEqual(waits, [1000]);
+});
+
+test('httpsDownload_fetch가모두끊기면_curl로받는다', async () => {
+  const waits = [];
+  const logs = [];
+  const fetchImpl = async () => Promise.reject(socketError());
+  const bytes = await httpsDownload('https://example.test/a', { fetchImpl, curl: () => Buffer.from('xyz'), wait: async (ms) => waits.push(ms), log: (m) => logs.push(m) });
+  assert.equal(bytes.toString(), 'xyz');
+  assert.deepEqual(waits, [1000, 2000]);
+  assert.equal(logs.length, 3);
+  assert.match(logs[0], /UND_ERR_SOCKET/);
+});
+
+test('httpsDownload_서버오류(5xx)도_다시받는다', async () => {
+  let calls = 0;
+  const fetchImpl = async () => (++calls === 1 ? { ok: false, status: 503 } : okResponse('ok'));
+  assert.equal((await httpsDownload('https://example.test/a', { ...quiet, fetchImpl, wait: async () => {} })).toString(), 'ok');
+});
+
+test('httpsDownload_4xx는_다시받지않고_curl도부르지않는다', async () => {
+  let calls = 0;
+  const fetchImpl = async () => (calls++, { ok: false, status: 404 });
+  await assert.rejects(httpsDownload('https://example.test/a', { ...quiet, fetchImpl, curl: () => assert.fail('curl을 부르지 않아야 한다'), wait: async () => {} }), /HTTP 404/);
+  assert.equal(calls, 1);
+});
+
+test('httpsDownload_curl도실패하면_둘의까닭을함께적는다', async () => {
+  const fetchImpl = async () => Promise.reject(socketError());
+  const curl = () => { throw new Error('curl 종료 56'); };
+  await assert.rejects(httpsDownload('https://example.test/a', { ...quiet, fetchImpl, curl, wait: async () => {} }), /UND_ERR_SOCKET.*curl 종료 56/s);
+});
+
+test('httpsDownload_https주소만받는다', async () => {
+  await assert.rejects(httpsDownload('http://example.test/a', { ...quiet, fetchImpl: async () => assert.fail('받지 않아야 한다') }), /https/);
 });

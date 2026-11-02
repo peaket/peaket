@@ -7,7 +7,7 @@
 //   node tools/ci/contract-breaking.mjs services        서비스 OpenAPI 차이(D-T38, 비교 본체는 service-openapi.mjs)
 // 도구는 판·다이제스트를 고정한 공식 이미지로 네트워크를 끊고 돈다(design.md 결정 1). Docker가 있어야 한다.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -179,6 +179,8 @@ export async function checkContracts({ cwd, target, labels, pullRequest, run = d
 
   for (const b of bases) {
     const dir = mkdtempSync(join(tmpdir(), 'contract-breaking-'));
+    // 도구 이미지가 루트가 아닌 사용자로 돌 수 있다(AsyncAPI CLI는 myuser). mkdtemp의 0700을 풀어 읽게 한다(파일은 umask 기본값 0644)
+    chmodSync(dir, 0o755);
     try {
       const put = (name, text) => writeFileSync(join(dir, name), text);
       // 수준 파일은 oasdiff가 주석을 받지 않으므로(1.34.1) 주석과 빈 줄을 지운 사본을, 예외 파일은 oasdiff가 # 줄도 예외로

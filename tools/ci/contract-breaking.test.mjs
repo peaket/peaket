@@ -1,7 +1,7 @@
 // 계약 깨짐 검사(docs/api/guidelines.md §1, docs/devops.md §3.1 contract-check, D-T48·D-T38, openspec 변경 add-contract-breaking-check)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { commit, git, repo, tempDir } from './git-fixture.mjs';
 import { checkContracts, chooseBases, IMAGES, parseIgnore, parseOverrides, serviceTargets } from './contract-breaking.mjs';
@@ -254,4 +254,23 @@ test('DT48_대상가지가앞서가도_갈라진점과견준다', async () => {
   const f = fake();
   await check(dir, f);
   assert.equal(f.calls.find((c) => '/w/base.openapi.yaml' in c.files).files['/w/base.openapi.yaml'], OPENAPI);
+});
+
+// 2026-11-03 첫 원격 CI에서 찾음: AsyncAPI CLI 이미지는 루트가 아닌 사용자(myuser)로 돌아, mkdtemp가 만든 0700 폴더를 읽지 못했다
+// ('error locating AsyncAPI document'). oasdiff 이미지는 루트로 돌아 통과했다. Windows의 Docker Desktop은 권한을 보지 않아 로컬에서는 안 보였다
+test('DT48_도구에넘기는폴더와파일은_루트가아닌도구사용자도읽는다', { skip: process.platform === 'win32' && 'Windows에는 POSIX 권한이 없다(리눅스 CI에서 돈다)' }, async () => {
+  const dir = project();
+  const f = fake();
+  const seen = [];
+  const run = async (tool, args, d) => {
+    const files = args.filter((a) => a.startsWith('/w/')).map((a) => statSync(join(d, a.slice(3))).mode & 0o777);
+    seen.push({ tool, dir: statSync(d).mode & 0o777, files });
+    return f.run(tool, args, d);
+  };
+  await check(dir, { ...f, run });
+  assert.ok(seen.some((s) => s.tool === 'asyncapi'), 'AsyncAPI 도구를 부르지 않았다');
+  for (const s of seen) {
+    assert.equal(s.dir & 0o005, 0o005, `${s.tool}에 넘긴 폴더 권한 ${s.dir.toString(8)}`);
+    for (const m of s.files) assert.equal(m & 0o004, 0o004, `${s.tool}에 넘긴 파일 권한 ${m.toString(8)}`);
+  }
 });

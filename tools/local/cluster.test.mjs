@@ -342,3 +342,11 @@ test('BSL050_v0로컬매니페스트_Valkey는peaket-local에서_다이제스트
   assert.deepEqual(sc.envFrom, [{ secretRef: { name: 'pg-simulator' } }]);
   assert.equal((sc.env ?? []).some((e) => e.name === 'PG_SIMULATOR_SECRET_KEY'), false, '시험 키를 값으로 싣지 않는다');
 });
+
+// 2026-11-03: 받기는 다시 받기·curl 대체가 있는 httpsDownload(tools.mjs) 하나로만 한다(첫 원격 CI의 Strimzi 받기 끊김)
+test('cluster.mjs는_파일을_httpsDownload로만받는다', () => {
+  const text = readFileSync(new URL('./cluster.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(text, /\bfetch\(/);
+  assert.match(text, /httpsDownload\(PINNED\.strimziInstallUrl\)/);
+  assert.match(text, /httpsDownload\(METRICS_SERVER\.installUrl\)/);
+});

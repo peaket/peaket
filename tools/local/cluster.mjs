@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_ROOT, ensureTool } from './tools.mjs';
+import { DEFAULT_ROOT, ensureTool, httpsDownload } from './tools.mjs';
 import { loadOrCreateV0TokenKey } from './v0-token.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -65,9 +65,7 @@ async function kind(args, o = {}) {
 async function strimziFile() {
   const file = join(DEFAULT_ROOT, `strimzi-cluster-operator-${PINNED.strimziVersion}.yaml`);
   if (existsSync(file) && createHash('sha256').update(readFileSync(file)).digest('hex') === PINNED.strimziInstallSha256) return readFileSync(file, 'utf8');
-  const r = await fetch(PINNED.strimziInstallUrl, { redirect: 'follow' });
-  if (!r.ok) throw new Error(`Strimzi 설치 파일 받기 실패: HTTP ${r.status}`);
-  const bytes = Buffer.from(await r.arrayBuffer());
+  const bytes = await httpsDownload(PINNED.strimziInstallUrl);
   if (createHash('sha256').update(bytes).digest('hex') !== PINNED.strimziInstallSha256) throw new Error('Strimzi 설치 파일 해시가 맞지 않는다');
   mkdirSync(DEFAULT_ROOT, { recursive: true });
   writeFileSync(file, bytes);
@@ -287,9 +285,7 @@ export const V0_TOKEN_KEY_FILE = join(DEFAULT_ROOT, 'v0-token-key.json');
 async function metricsServerFile() {
   const file = join(DEFAULT_ROOT, `metrics-server-${METRICS_SERVER.version}.yaml`);
   if (existsSync(file) && createHash('sha256').update(readFileSync(file)).digest('hex') === METRICS_SERVER.installSha256) return readFileSync(file, 'utf8');
-  const r = await fetch(METRICS_SERVER.installUrl, { redirect: 'follow' });
-  if (!r.ok) throw new Error(`metrics-server 설치 파일 받기 실패: HTTP ${r.status}`);
-  const bytes = Buffer.from(await r.arrayBuffer());
+  const bytes = await httpsDownload(METRICS_SERVER.installUrl);
   if (createHash('sha256').update(bytes).digest('hex') !== METRICS_SERVER.installSha256) throw new Error('metrics-server 설치 파일 해시가 맞지 않는다');
   mkdirSync(DEFAULT_ROOT, { recursive: true });
   writeFileSync(file, bytes);

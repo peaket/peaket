@@ -4,7 +4,7 @@
 // - 받는 곳은 각 프로젝트의 공식 배포 주소(https)뿐이다. 받아 둔 파일은 쓸 때마다 해시를 다시 본다
 // - 받은 도구는 저장소 안 .cache/peaket-tools(커밋하지 않는다)나 PEAKET_TOOLS_DIR에 둔다
 // 쓰는 법: node tools/local/tools.mjs [kind|kubectl|helm ...]  → 받은 실행 파일 경로를 찍는다
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -66,10 +66,45 @@ export function pickAsset(name, platform = process.platform, arch = process.arch
   return a;
 }
 
-async function httpsDownload(url) {
-  const r = await fetch(url, { redirect: 'follow' });
-  if (!r.ok) throw new Error(`받기 실패: ${url} HTTP ${r.status}`);
-  return Buffer.from(await r.arrayBuffer());
+/** curl로 받는다(httpsDownload의 마지막 길). https만, 넘겨받는 주소도 https만 따른다 */
+function curlDownload(url) {
+  const r = spawnSync('curl', ['-fsSL', '--proto', '=https', '--proto-redir', '=https', '--retry', '3', '--retry-all-errors', '--max-time', '600', url], {
+    maxBuffer: 1024 * 1024 * 1024,
+  });
+  if (r.error) throw new Error(`curl을 부르지 못했다: ${r.error.message}`);
+  if (r.status !== 0) throw new Error(`curl 종료 ${r.status}: ${String(r.stderr ?? '').trim()}`);
+  return r.stdout;
+}
+
+/**
+ * https로 받는다. 연결이 끊기거나 서버 오류(5xx)면 1초·2초 쉬고 모두 세 번 받아 보고, 그래도 안 되면 curl로 받는다.
+ * 4xx는 다시 받지 않는다. 받은 바이트의 해시는 부르는 쪽이 본다(어느 길로 받아도 고정 해시와 같아야 쓴다).
+ * 2026-11-03 첫 원격 CI: GitHub 실행기에서 kind 클러스터를 만든 뒤 Strimzi 설치 파일 받기가 세 번 연속
+ * 0.03초 만에 'fetch failed'(UND_ERR_SOCKET, other side closed)로 끊겼다. 로컬에서는 재현되지 않았다.
+ */
+export async function httpsDownload(url, o = {}) {
+  const { attempts = 3, fetchImpl = fetch, curl = curlDownload, wait = (ms) => new Promise((r) => setTimeout(r, ms)), log = (m) => console.error(m) } = o;
+  if (!url.startsWith('https://')) throw new Error(`https 주소만 받는다: ${url}`);
+  const errors = [];
+  for (let i = 1; i <= attempts; i++) {
+    let r;
+    try {
+      r = await fetchImpl(url, { redirect: 'follow' });
+      if (r.ok) return Buffer.from(await r.arrayBuffer());
+    } catch (e) {
+      errors.push(e.cause?.code ?? e.message);
+      r = null;
+    }
+    if (r && r.status < 500) throw new Error(`받기 실패: ${url} HTTP ${r.status}`);
+    if (r) errors.push(`HTTP ${r.status}`);
+    log(`받기 ${i}/${attempts}번째 실패(${errors.at(-1)}): ${url}`);
+    if (i < attempts) await wait(1000 * 2 ** (i - 1));
+  }
+  try {
+    return curl(url);
+  } catch (e) {
+    throw new Error(`받기 실패: ${url} (fetch ${errors.join(', ')}; ${e.message})`);
+  }
 }
 
 /**
