@@ -1,0 +1,18 @@
+{
+  "name": "peaket-poc-login-compare",
+  "private": true,
+  "version": "0.0.0",
+  "description": "로그인 구현 비교 PoC(I-T51, ADR-0119 결정 3, docs/features/identity.md §12.1). 뿌리 작업 공간과 따로 둔다",
+  "type": "module",
+  "packageManager": "pnpm@12.16.0",
+  "scripts": {
+    "test": "node --test",
+    "report": "node report.mjs"
+  },
+  "dependencies": {
+    "@auth/core": "0.41.3",
+    "jose": "6.2.14",
+    "oauth4webapi": "3.8.8",
+    "openid-client": "6.8.8"
+  }
+}

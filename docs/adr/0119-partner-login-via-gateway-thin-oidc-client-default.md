@@ -1,6 +1,6 @@
 # ADR-0119: 로그인 구현을 다시 정한다 — 파트너 로그인은 게이트웨이를 거쳐 identity로, 소셜 로그인은 얇은 OIDC 클라이언트를 기본안으로 두고 Auth.js와 PoC로 견준다(2026-10-28)
 
-- **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 중간-019 'Auth.js가 맡는 일(코드 교환·ID 토큰 검증)에 비해 무겁고, 파트너 Credentials를 쓸 이유가 약하다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향(파트너 로그인을 게이트웨이 경로로, 얇은 OIDC 클라이언트를 PoC 비교에 넣고 결정을 ADR로 남기기)은 소유자 결정(추천안 승인)이고, 쿠키 모양·판정 기준·일정 같은 세부는 추천 적용이다. ADR-0011 결정 5를 보완한다. 외부 사실은 2026-10-28에 npm 레지스트리, GitHub 원문, 제공자 발견 문서로 확인했다)
+- **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 중간-019 'Auth.js가 맡는 일(코드 교환·ID 토큰 검증)에 비해 무겁고, 파트너 Credentials를 쓸 이유가 약하다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향(파트너 로그인을 게이트웨이 경로로, 얇은 OIDC 클라이언트를 PoC 비교에 넣고 결정을 ADR로 남기기)은 소유자 결정(추천안 승인)이고, 쿠키 모양·판정 기준·일정 같은 세부는 추천 적용이다. ADR-0011 결정 5를 보완한다. 외부 사실은 2026-10-28에 npm 레지스트리, GitHub 원문, 제공자 발견 문서로 확인했다) I-T51 결과(2026-11-03, BUILD_ORDER PRF-010): 결정 3대로 C로 확정하고, C 안에서는 결정 2대로 코드가 적은 `openid-client` 6을 골랐다(165줄, `oauth4webapi` 직접은 170줄. 차이는 작다). Auth.js는 둘로 쟀다. 기본 사용법(A1)은 ①(Auth.js 세션 쿠키)·④(ID 토큰 서명을 보지 않음)가 미달이고, 문서 기능만으로 고친 판(A2: signIn 콜백이 주소를 돌려줘 세션을 만들지 않고, `skipCSRFCheck`와 Origin 대조, profile 콜백에서 jose로 서명 확인)은 ①·④·⑤를 통과하며 코드가 가장 적다(133줄, 모의 제공자 모양에 맞춘 주소 기준). A를 가른 것은 ②(next-auth v5 베타, @auth/core 0.x)다. 세 라이브러리 모두 TLS로 받은 ID 토큰의 서명을 기본으로 보지 않아 C는 `enableNonRepudiationChecks`를 켠다(ASVS v5.0.0-6.8.2). ⑤는 모의 제공자 기준이다. 표는 `tools/poc/login-compare/RESULT.md`.
 - **관련**: ADR-0001, ADR-0011(결정 4·5), ADR-0038, ADR-0053(결정 8), ADR-0065(결정 2·5·11), ADR-0079(결정 22), FR-001, FR-021, FR-048, POL-019, POL-020, SCR-004, SCR-005, SCR-020, SCR-039, I-T51, I-T52, [docs/features/identity.md](../features/identity.md) §2·§3·§6·§12, [docs/frontend.md](../frontend.md) §2·§5.14.5·§5.14.6·§6.3·§6.4, [docs/security/asvs/auth.md](../security/asvs/auth.md) V3·V6.8·V7.1.3·V10·V13.3.1, [docs/security/secrets-and-keys.md](../security/secrets-and-keys.md), docs/api/openapi.yaml(`/v1/partner/auth/sessions`), docs/api/guidelines.md §7·§8, docs/architecture.md §1·§3, wbs 2.1, [review/tech-review.md](../review/tech-review.md)(중간-019)
 
 ## 맥락
@@ -33,7 +33,7 @@
    - 소비자 웹 앱 서버(BFF, 화면 쪽 앱 서버)가 `oauth4webapi` 3으로 인가 코드 흐름을 직접 한다. 같은 저자의 `openid-client` 6이 코드를 더 줄이면 그쪽을 쓴다. 둘 가운데 무엇을 쓸지는 결정 3의 PoC에서 고른다.
    - 카카오·네이버·구글을 모두 발견 문서의 issuer로 둔 OIDC 제공자로 설정한다. PKCE(`S256`)·state·nonce를 모두 검사하고, ID 토큰의 서명(제공자 JWKS의 RS256)·`iss`·`aud`·`exp`·`nonce`를 확인한다.
    - 네이버 ID 토큰에는 이메일이 없다. 그래서 이메일은 네이버 사용자 정보 API로 받는다. 이메일 검증 여부를 주지 않으므로 가입 때 연결 제안 대상에서 빼는 지금 규칙(docs/features/identity.md §2.1)은 그대로다.
-   - 계정 키 `(provider, provider_user_id)`의 `provider_user_id`는 ID 토큰의 `sub`로 정하고 처음부터 바꾸지 않는다. 사용자 정보 API의 `id`와 같은 값인지는 I-T51에서 확인한다 [확인 필요].
+   - 계정 키 `(provider, provider_user_id)`의 `provider_user_id`는 ID 토큰의 `sub`로 정하고 처음부터 바꾸지 않는다. 사용자 정보 API의 `id`와 같은 값인지는 I-T51에서 확인한다 [확인 필요]. I-T51(2026-11-03)은 모의 제공자로 우리 코드가 둘을 대조하고 다르면 막는지까지만 확인했다. 실제 제공자의 관계는 제공자 앱을 등록해야 볼 수 있어 소유자 몫으로 남는다.
    - 로그인 진행 상태는 쿠키 하나 `__Host-peaket_oidc`에 둔다. 제공자, state, nonce, PKCE 코드 베리파이어, 돌아갈 주소를 앱 서버 전용 키로 암호화(AES-256-GCM)해 담는다. `HttpOnly`·`Secure`·`SameSite=Lax`(제공자에서 돌아오는 최상위 이동에 실려야 한다)이고 수명은 10분 [가정]이다. 콜백에서 한 번 쓰고 바로 지운다.
    - 콜백이 성공하면 앱 서버는 지금과 같은 메시 mTLS 내부 경로로 identity의 세션 생성을 부르고, PEAKET 액세스·리프레시 쿠키만 준다. 앱 서버 자체의 세션 쿠키는 두지 않는다. 그래서 세션은 identity 한 층이다.
    - 로그인 시작과 로그아웃은 앱 서버의 POST 경로다. `Origin`을 소비자 웹 출처와 대조한다(ADR-0065 결정 5와 같은 규칙). 로그아웃은 identity 세션을 끝내고(세션 종료 이벤트) 쿠키를 지운다.
@@ -51,7 +51,7 @@
      | ⑤ 제공자 설정 | 세 제공자가 OIDC로 되는지, 네이버 이메일, `sub`와 사용자 정보 `id`의 관계 | 모두 됨 |
 
    - 판정: ①이 0이고 ④·⑤를 통과한 안 가운데 ②가 안정판인 안을 고른다. 둘 다 그렇다면 ③이 작은 안을 고른다. C가 ④·⑤를 통과하면 C로 확정한다. C가 실패하면 고칠 수 있는지 먼저 보고, 고칠 수 없으면 A(고정 판)로 간다. 그때 A의 Auth.js 쿠키 규칙(`__Host-authjs.*`)과 앱별 비밀(ADR-0053 결정 8)을 되살린다.
-   - 시험: I-T51(로그인 구현 비교)과 I-T52(파트너 로그인 경로). 결과는 이 ADR 상태 줄과 성능 장부에 남긴다.
+   - 시험: I-T51(로그인 구현 비교)과 I-T52(파트너 로그인 경로). 결과는 이 ADR 상태 줄과 `tools/poc/login-compare/RESULT.md`에 남긴다(성능 숫자가 없어 성능 장부에는 남기지 않는다, 추천 적용 2026-11-03, docs/features/identity.md §12.1).
 4. **문서 반영(추천 적용)**
    - docs/features/identity.md §2(순서도, OIDC 설정)·§3(쿠키 표와 이름 규칙)·§6(콘솔별 로그인)·§12(I-T51·I-T52)
    - docs/frontend.md(스택 표, 경로 표의 로그인, 위험 구성 요소 표, 서버 비밀, PoC 표, 확인한 사실), docs/security/asvs/auth.md(V3 쿠키·CSRF 행, 6.8.2·6.8.4, 7.1.3, V10 행, 13.3.1), docs/security/secrets-and-keys.md(제공자 비밀 행, Auth.js 비밀 행을 로그인 진행 쿠키 키로)

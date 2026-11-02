@@ -1,0 +1,7 @@
+# 로그인 구현 비교 PoC 전용 작업 공간(뿌리 작업 공간과 따로). 보안 설정은 뿌리 pnpm-workspace.yaml과 같다(docs/devops.md §4.4)
+minimumReleaseAge: 4320
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
+strictDepBuilds: true
+trustLockfile: false
+allowBuilds: {}

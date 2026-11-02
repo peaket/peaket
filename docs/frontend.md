@@ -263,7 +263,7 @@ Turborepo 작업은 `lint`·`typecheck`·`test`·`build`·`size`·`e2e`이고, P
 
 | 앱 | 프레임워크와 판(2026-10-21 레지스트리) | 서버 쪽 | 브라우저 쪽 핵심 구성 요소 |
 | --- | --- | --- | --- |
-| 소비자 웹 | Next.js 16.4(App Router, Cache Components, `proxy.ts`), React 19.3, TanStack Query 5, Zustand 5, XState 5, React Hook Form 7 + Zod 4, Serwist 9(월렛), `oauth4webapi` 3(소셜 로그인의 얇은 OIDC 클라이언트, ADR-0119) | 웹 앱 서버: ISR·동적 화면, 소셜 로그인(인가 코드 교환과 ID 토큰 확인, 로그인 진행 쿠키), 연결 제안 쿠키를 읽는 경로 | 좌석맵 Worker, 구매 세션 서명기, 결제사 SDK 적재기, 월렛 QR Worker, 본인확인 창 관리자 |
+| 소비자 웹 | Next.js 16.4(App Router, Cache Components, `proxy.ts`), React 19.3, TanStack Query 5, Zustand 5, XState 5, React Hook Form 7 + Zod 4, Serwist 9(월렛), `openid-client` 6(`oauth4webapi` 3 위, 소셜 로그인의 얇은 OIDC 클라이언트, ADR-0119, I-T51에서 고름 2026-11-03) | 웹 앱 서버: ISR·동적 화면, 소셜 로그인(인가 코드 교환과 ID 토큰 확인, 로그인 진행 쿠키), 연결 제안 쿠키를 읽는 경로 | 좌석맵 Worker, 구매 세션 서명기, 결제사 SDK 적재기, 월렛 QR Worker, 본인확인 창 관리자 |
 | 대기실 경량 페이지 | TypeScript + rolldown(Vite 8) 빌드, 프레임워크는 쓰지 않는다 | 없다(AWS 파일 저장소인 S3의 정적 파일) | 상태표(§3.4), 폴러, 시계, 저장소, 탭 조정, 텔레메트리 lite |
 | 파트너 콘솔 | Next.js 16.4, React 19.3, TanStack Query 5(`@peaket/api-client` 훅), Zustand 5, RHF + Zod, TanStack Table 9(CMP-031 표 논리, 기술 검토 낮음-100), Chart.js 4.6, Konva 10.9(좌석맵 에디터 편집 캔버스, 명령형으로 쓴다, §5.6) | 파트너 앱 서버: 요청마다 셸(nonce), 여러 호출을 묶는 화면의 서버 컴포넌트. 로그인은 화면이 gw-partner를 바로 부르고 앱 서버에는 로그인 상태가 없다(ADR-0119). tRPC는 쓰지 않는다(ADR-0100) | 좌석맵 에디터 캔버스와 계산 Worker, DSL 시뮬레이터, SSE 클라이언트. 무거운 부분은 `next/dynamic`으로 쓸 때 싣는다(§5.6) |
 | 관제 콘솔 | webpack 5.112 + `@module-federation/enhanced` 2.9, React 19.3, React Router 8.5(데이터 라우터), Zustand 5, TanStack Query 5(`@peaket/api-client` 훅), TanStack Table 9(CMP-031 표 논리), EventSource(브라우저 내장 SSE), Chart.js 4.6 | 없다(S3 정적 파일, 원격은 같은 출처 `/remotes/`) | 원격 적재기(무결성·대체·미리 받기), 화면별로 늦게 싣는 경로, 호스트 Zustand 저장소와 원격에 넘기는 읽기 전용 `host` 통로, 스트림 어댑터, SSE 흐름 관리(늘 여는 흐름, 보이는 위젯 목록이 바뀌면 위젯 흐름 다시 열기, §5.7, ADR-0100) |
@@ -1429,7 +1429,7 @@ allowBuilds:
 | 구성 요소 | 걱정(2026-10-21 레지스트리) | 결정 |
 | --- | --- | --- |
 | redux-observable | `latest`가 3.0.0-rc.3(2025-12-09)이고, 안정판 3.0은 없다 | 쓰지 않는다. 스트림은 호스트 스트림 어댑터(작은 유틸 둘, §3.1)가 묶어 Zustand 저장소의 동작으로 쓴다(ADR-0092. RxJS도 2026-10-28 기술 검토 낮음-097로 뺐다) |
-| next-auth(Auth.js) v5 | 베타(5.0.0-beta.32, 2026-07-20)이고, 저장소 README가 Better Auth의 일부가 됐다며 새 프로젝트에 Better Auth를 권한다. 자기 세션 쿠키를 두어 identity와 세션이 두 층이 된다 | 기본으로 쓰지 않는다. 소셜 로그인은 얇은 OIDC 클라이언트(`oauth4webapi` 3, 의존성 없음, MIT. Auth.js core도 이것 위에서 돈다)를 기본안으로 두고, 인증 구현 전 PoC(I-T51)에서 C가 실패하면 v5 고정 판으로 간다. Better Auth는 무상태 모드도 자기 세션 쿠키를 둬 문서로 뺐다. 파트너 콘솔의 Credentials는 뺐다(추천 적용 2026-10-28, ADR-0119) |
+| next-auth(Auth.js) v5 | 베타(5.0.0-beta.32, 2026-07-20)이고, 저장소 README가 Better Auth의 일부가 됐다며 새 프로젝트에 Better Auth를 권한다. 자기 세션 쿠키를 두어 identity와 세션이 두 층이 된다 | 기본으로 쓰지 않는다. 소셜 로그인은 얇은 OIDC 클라이언트(`openid-client` 6, I-T51에서 고름 2026-11-03. 의존성 없는 `oauth4webapi` 3 위에 만들었고 Auth.js core도 `oauth4webapi` 위에서 돈다)를 기본안으로 두고, 인증 구현 전 PoC(I-T51)에서 C가 실패하면 v5 고정 판으로 간다. Better Auth는 무상태 모드도 자기 세션 쿠키를 둬 문서로 뺐다. 파트너 콘솔의 Credentials는 뺐다(추천 적용 2026-10-28, ADR-0119) |
 | `@lhci/cli` | 0.15.1(2025-06-25) 뒤로 새로 게시된 판이 없다 | 쓰되, 멈추면 `lighthouse` CLI와 자체 예산 검사로 바꿀 수 있게 설정을 단순하게 둔다 |
 | `@hello-pangea/dnd` | 18.0.1(2025-02-09) 뒤로 새로 게시된 판이 없다 | 쓰지 않는다. 순서 바꾸기는 위로·아래로 버튼으로만 한다(§5.6, 추천 적용 2026-10-28, 기술 검토 낮음-098. 그 전에는 키보드 대안을 필수로 두고 썼다) |
 | Konva | npm 게시 권한이 한 사람에게만 있다. 판은 자주 나온다(2026-09-08~10-15에 6판, 2026-10-28 레지스트리) | 쓴다(§5.6). 판을 잠금 파일로 고정하고 새 판 3일 대기를 지킨다. CMP-051 밖에서는 부르지 않아, 바꿀 때 고칠 곳을 한 곳에 모은다(기술 검토 중간-016) |
@@ -1734,7 +1734,7 @@ ADR-0111의 결정은 서버가 그린 화면의 SEED 스타일 속성과 CSP를
 | Module Federation `createScript` 훅으로 원격 무결성, 그리고 `preloadRemote`로 미리 받을 때도 같은 확인을 거치는지(ADR-0091) | 호스트가 받아 해시를 확인한 뒤 실행하는 적재기. 미리 받기가 확인을 거치지 않으면 원격은 미리 받지 않는다 | 4.5.5 |
 | 스캐너 Worker 안 `BarcodeDetector`, zxing-wasm 판정 시간(관리형 기기) | 디코딩을 메인 스레드 `BarcodeDetector`로 옮긴다 | 5.4.7 |
 | 결제사 npm 적재기가 부르는 주소와 결제창 하위 출처 | CSP 보고 모드 기간을 늘린다 | 2.10.2 |
-| 소셜 로그인 구현 비교(I-T51, ADR-0119): A next-auth v5 고정 판 대 C 앱 서버의 얇은 OIDC 클라이언트(`oauth4webapi`·`openid-client`), B Better Auth 무상태 모드는 문서로 판정. 기준은 세션 층 수·판 유지 상태·코드 양·ASVS 10.x·제공자 설정(네이버 이메일, `sub`) | C가 ASVS 10.x나 제공자 설정을 통과하지 못하고 고칠 수 없으면 A(Auth.js v5 고정 판)로 간다 | 인증 구현 시작 전(wbs 2.1) |
+| 소셜 로그인 구현 비교(I-T51, ADR-0119): A next-auth v5 고정 판 대 C 앱 서버의 얇은 OIDC 클라이언트(`oauth4webapi`·`openid-client`), B Better Auth 무상태 모드는 문서로 판정. 기준은 세션 층 수·판 유지 상태·코드 양·ASVS 10.x·제공자 설정(네이버 이메일, `sub`) | C가 ASVS 10.x나 제공자 설정을 통과하지 못하고 고칠 수 없으면 A(Auth.js v5 고정 판)로 간다. 결과(2026-11-03): C를 `openid-client` 6으로 확정(`tools/poc/login-compare/RESULT.md`) | 인증 구현 시작 전(wbs 2.1) |
 | 인앱 브라우저 사용자 에이전트 표지 | 표지를 늘린다(안내용이라 판정에는 쓰지 않는다) | 2.10.6 |
 
 **남는 한계**(docs/planning/01 §5.2와 docs/guide/17에도 적었다)

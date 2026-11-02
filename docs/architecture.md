@@ -109,7 +109,7 @@ flowchart LR
         nlbs["스캐너 NLB<br/>[Container: L4]<br/>공개, TCP 통과"]:::container
     end
     subgraph app["앱 서버"]
-        web["소비자 웹 앱 서버<br/>[Container: Next.js + OIDC 클라이언트(oauth4webapi)]<br/>화면 렌더링, 소셜 로그인(카카오·네이버·구글 인가 코드 교환)"]:::container
+        web["소비자 웹 앱 서버<br/>[Container: Next.js + OIDC 클라이언트(openid-client)]<br/>화면 렌더링, 소셜 로그인(카카오·네이버·구글 인가 코드 교환)"]:::container
     end
     subgraph gw["게이트웨이(Envoy Gateway)"]
         gwq["gw-queue<br/>[Container: Envoy]<br/>로비·진입·입장 확정·대기 상태 파일 origin"]:::container
@@ -903,7 +903,7 @@ flowchart LR
 
 | 클라이언트 앱 | 핵심 프레임워크 및 라이브러리 | 상태 관리 도구 체계 |
 | --- | --- | --- |
-| 소비자 웹 (`apps/web`) | Next.js 16+ App Router, React 19(화면 라이브러리), TanStack Query, Zustand, XState, React Hook Form + Zod, Serwist 9(월렛 PWA의 서비스 워커), `oauth4webapi`(소셜 로그인의 얇은 OIDC 클라이언트, ADR-0119), 브라우저 내장 IndexedDB·WebCrypto. 움직임은 CSS의 `transform`·`opacity`로만 해서 애니메이션 라이브러리(Motion)를 쓰지 않고, IndexedDB는 감싸는 라이브러리(Dexie) 없이 쓴다(Dexie는 스캐너만). 정본은 docs/frontend.md §2.3이다(추천 적용 2026-10-28, 기술 검토 낮음-006). 대기실은 프레임워크 없는 경량 페이지다(`apps/web/queue-room`, ADR-0079) | 서버 캐시: TanStack Query, 대기실 폴링: 손으로 쓴 상태표(대기실 경량 페이지), 전역 UI: Zustand, 복잡한 예매 흐름: XState |
+| 소비자 웹 (`apps/web`) | Next.js 16+ App Router, React 19(화면 라이브러리), TanStack Query, Zustand, XState, React Hook Form + Zod, Serwist 9(월렛 PWA의 서비스 워커), `openid-client` 6(`oauth4webapi` 위, I-T51에서 고름)(소셜 로그인의 얇은 OIDC 클라이언트, ADR-0119), 브라우저 내장 IndexedDB·WebCrypto. 움직임은 CSS의 `transform`·`opacity`로만 해서 애니메이션 라이브러리(Motion)를 쓰지 않고, IndexedDB는 감싸는 라이브러리(Dexie) 없이 쓴다(Dexie는 스캐너만). 정본은 docs/frontend.md §2.3이다(추천 적용 2026-10-28, 기술 검토 낮음-006). 대기실은 프레임워크 없는 경량 페이지다(`apps/web/queue-room`, ADR-0079) | 서버 캐시: TanStack Query, 대기실 폴링: 손으로 쓴 상태표(대기실 경량 페이지), 전역 UI: Zustand, 복잡한 예매 흐름: XState |
 | 파트너 콘솔 (`apps/partner`) | Next.js, TanStack Query + `@peaket/api-client`(orval이 만든 훅으로 `partner-api`를 직접 부른다, ADR-0100), Zustand, React Hook Form + Zod, Chart.js(Canvas 그래프), Konva(좌석맵 에디터 편집 캔버스, docs/frontend.md §2.3·§5.6, 기술 검토 중간-016). 에디터·시뮬레이터·그래프는 쓸 때 싣는다(ADR-0091). 순서 바꾸기는 위로·아래로 버튼만 쓰고 끌어 놓기 라이브러리는 쓰지 않는다(추천 적용 2026-10-28, 기술 검토 낮음-098) | 폼/검증: RHF + Zod, 전역 UI와 좌석맵 에디터 문서: Zustand(정규화한 문서와 바뀐 ID 묶음, ADR-0092), 서버 통신: api-client 훅(여러 호출을 묶는 화면만 서버 컴포넌트가 REST를 묶어 읽는다. 내려받기·올리기·토큰 갱신도 `partner-api` 직접, ADR-0100. 판매 현황은 SSE(서버가 브라우저로 한 방향으로 계속 보내는 통신)가 아니라 1분 주기 조회다, 기술 검토 낮음-024) |
 | 관제 콘솔 (`apps/console-host`) | Webpack 5 Module Federation 호스트 + 리모트 위젯(계약 `@peaket/console-contract`. 가상 팀의 따로 배포를 보이는 쇼케이스이고, 같은 위젯을 한 앱으로도 빌드해 FE-T29로 견준다, ADR-0100), Zustand + 호스트 스트림 어댑터(작은 유틸 둘), REST(`@peaket/api-client`)와 SSE(EventSource) 흐름 둘, React Router(화면마다 따로 싣는 경로), Chart.js(Canvas 그래프, ADR-0091) | 호스트 상태: Zustand 저장소 하나(원격에는 읽기 전용), 원격 위젯 상태: 원격마다 Zustand 저장소(ADR-0092), 실시간 지표 스트림 결합: 호스트 스트림 어댑터(`latestEvery`·`shareByKey`), 제어 명령: REST(명령 상태·ack·경보·접속자는 늘 여는 SSE 흐름, 위젯 값은 위젯 SSE 흐름, ADR-0100) |
 | 게이트 스캐너 (`apps/scanner`) | Vite PWA, mediaDevices, Web Worker(BarcodeDetector, 없으면 zxing-wasm), Dexie (IndexedDB, 브라우저 안에 데이터를 저장하는 곳), Screen Wake Lock, 일회성 Background Sync | 화면 상태: Zustand, 오프라인 검증 큐: Dexie, 변경분 수신: 화면이 켜진 동안 앱 타이머 60초, 업로드: 판정 뒤 바로 보내고 일회성 Background Sync는 재시도용 예비(주기적 백그라운드 동기화는 크롬에서 최소 12시간 간격이라 쓰지 않는다, ADR-0051), 바코드 디코딩: Web Worker |

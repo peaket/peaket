@@ -1,0 +1,220 @@
+{
+  "A1": {
+    "blockedReasons": {
+      "②": [
+        "callback: state value could not be parsed. Read more at https://errors.authjs.dev#invalidcheck / state cookie was missing. Read more at https://errors.authjs.dev#invalidcheck"
+      ],
+      "③ state": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / unexpected \"state\" response parameter value / OAUTH_INVALID_RESPONSE"
+      ],
+      "③ nonce": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / unexpected ID Token \"nonce\" claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "③ 코드 주입": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / invalid_grant / PKCE / server responded with an error in the response body / OAUTH_RESPONSE_BODY_ERROR"
+      ],
+      "③ 쿠키 authjs.state": [
+        "callback: state value could not be parsed. Read more at https://errors.authjs.dev#invalidcheck / decryption operation failed / ERR_JWE_DECRYPTION_FAILED"
+      ],
+      "③ 쿠키 authjs.pkce.code_verifier": [
+        "callback: pkceCodeVerifier value could not be parsed. Read more at https://errors.authjs.dev#invalidcheck / decryption operation failed / ERR_JWE_DECRYPTION_FAILED"
+      ],
+      "③ 쿠키 authjs.nonce": [
+        "callback: nonce value could not be parsed. Read more at https://errors.authjs.dev#invalidcheck / decryption operation failed / ERR_JWE_DECRYPTION_FAILED"
+      ],
+      "③ 재사용": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / invalid_grant / server responded with an error in the response body / OAUTH_RESPONSE_BODY_ERROR"
+      ],
+      "③ 만료": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / unexpected JWT \"exp\" (expiration time) claim value, expiration is past current timestamp / OAUTH_JWT_TIMESTAMP_CHECK_FAILED"
+      ],
+      "④ wrongIss": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / unexpected JWT \"iss\" (issuer) claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "④ wrongAud": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / unexpected JWT \"aud\" (audience) claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "④ 발견 문서 issuer": [
+        "callback: \"response\" body \"issuer\" property does not match the expected value / OAUTH_JSON_ATTRIBUTE_COMPARISON_FAILED"
+      ],
+      "④ 서명": [],
+      "⑥ id 불일치": [
+        "callback: Read more at https://errors.authjs.dev#oauthprofileparseerror / 네이버 사용자 정보 id가 ID 토큰 sub와 다르다",
+        "callback: state value could not be parsed. Read more at https://errors.authjs.dev#invalidcheck / state cookie was missing. Read more at https://errors.authjs.dev#invalidcheck"
+      ]
+    },
+    "afterLogin": [
+      "authjs.callback-url",
+      "authjs.csrf-token",
+      "authjs.session-token"
+    ],
+    "sessionCookies": [
+      "authjs.session-token"
+    ],
+    "progressCookies": [
+      "authjs.state",
+      "authjs.pkce.code_verifier",
+      "authjs.nonce"
+    ],
+    "badSignatureRejected": false,
+    "afterLogout": [
+      "authjs.callback-url",
+      "authjs.csrf-token"
+    ]
+  },
+  "A2": {
+    "blockedReasons": {
+      "②": [
+        "callback: state value could not be parsed. Read more at https://errors.authjs.dev#invalidcheck / state cookie was missing. Read more at https://errors.authjs.dev#invalidcheck"
+      ],
+      "③ state": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / unexpected \"state\" response parameter value / OAUTH_INVALID_RESPONSE"
+      ],
+      "③ nonce": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / unexpected ID Token \"nonce\" claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "③ 코드 주입": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / invalid_grant / PKCE / server responded with an error in the response body / OAUTH_RESPONSE_BODY_ERROR"
+      ],
+      "③ 쿠키 authjs.state": [
+        "callback: state value could not be parsed. Read more at https://errors.authjs.dev#invalidcheck / decryption operation failed / ERR_JWE_DECRYPTION_FAILED"
+      ],
+      "③ 쿠키 authjs.pkce.code_verifier": [
+        "callback: pkceCodeVerifier value could not be parsed. Read more at https://errors.authjs.dev#invalidcheck / decryption operation failed / ERR_JWE_DECRYPTION_FAILED"
+      ],
+      "③ 쿠키 authjs.nonce": [
+        "callback: nonce value could not be parsed. Read more at https://errors.authjs.dev#invalidcheck / decryption operation failed / ERR_JWE_DECRYPTION_FAILED"
+      ],
+      "③ 재사용": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / invalid_grant / server responded with an error in the response body / OAUTH_RESPONSE_BODY_ERROR"
+      ],
+      "③ 만료": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / unexpected JWT \"exp\" (expiration time) claim value, expiration is past current timestamp / OAUTH_JWT_TIMESTAMP_CHECK_FAILED"
+      ],
+      "④ wrongIss": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / unexpected JWT \"iss\" (issuer) claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "④ wrongAud": [
+        "callback: Read more at https://errors.authjs.dev#callbackrouteerror / unexpected JWT \"aud\" (audience) claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "④ 발견 문서 issuer": [
+        "callback: \"response\" body \"issuer\" property does not match the expected value / OAUTH_JSON_ATTRIBUTE_COMPARISON_FAILED"
+      ],
+      "④ 서명": [
+        "callback: Read more at https://errors.authjs.dev#oauthprofileparseerror / signature verification failed / ERR_JWS_SIGNATURE_VERIFICATION_FAILED",
+        "callback: state value could not be parsed. Read more at https://errors.authjs.dev#invalidcheck / state cookie was missing. Read more at https://errors.authjs.dev#invalidcheck"
+      ],
+      "⑥ id 불일치": [
+        "callback: Read more at https://errors.authjs.dev#oauthprofileparseerror / 네이버 사용자 정보 id가 ID 토큰 sub와 다르다",
+        "callback: state value could not be parsed. Read more at https://errors.authjs.dev#invalidcheck / state cookie was missing. Read more at https://errors.authjs.dev#invalidcheck"
+      ]
+    },
+    "afterLogin": [
+      "authjs.callback-url"
+    ],
+    "sessionCookies": [],
+    "progressCookies": [
+      "authjs.state",
+      "authjs.pkce.code_verifier",
+      "authjs.nonce"
+    ],
+    "badSignatureRejected": true,
+    "afterLogout": [
+      "authjs.callback-url"
+    ]
+  },
+  "C1": {
+    "blockedReasons": {
+      "②": [
+        "callback: 로그인 진행 상태가 없다"
+      ],
+      "③ state": [
+        "callback: invalid response encountered / OAUTH_INVALID_RESPONSE / unexpected \"state\" response parameter value / OAUTH_INVALID_RESPONSE"
+      ],
+      "③ nonce": [
+        "callback: unexpected JWT claim value encountered / OAUTH_JWT_CLAIM_COMPARISON_FAILED / unexpected ID Token \"nonce\" claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "③ 코드 주입": [
+        "callback: server responded with an error in the response body / OAUTH_RESPONSE_BODY_ERROR / invalid_grant / PKCE / invalid_grant / PKCE"
+      ],
+      "③ 쿠키 __Host-peaket_oidc": [
+        "callback: 로그인 진행 상태가 없다"
+      ],
+      "③ 재사용": [
+        "callback: server responded with an error in the response body / OAUTH_RESPONSE_BODY_ERROR / invalid_grant / invalid_grant"
+      ],
+      "③ 만료": [
+        "callback: JWT timestamp claim value failed validation / OAUTH_JWT_TIMESTAMP_CHECK_FAILED / unexpected JWT \"exp\" (expiration time) claim value, expiration is past current timestamp / OAUTH_JWT_TIMESTAMP_CHECK_FAILED"
+      ],
+      "④ wrongIss": [
+        "callback: unexpected JWT claim value encountered / OAUTH_JWT_CLAIM_COMPARISON_FAILED / unexpected JWT \"iss\" (issuer) claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "④ wrongAud": [
+        "callback: unexpected JWT claim value encountered / OAUTH_JWT_CLAIM_COMPARISON_FAILED / unexpected JWT \"aud\" (audience) claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "④ 발견 문서 issuer": [
+        "discovery: discovered metadata issuer does not match the expected issuer / OAUTH_JSON_ATTRIBUTE_COMPARISON_FAILED"
+      ],
+      "④ 서명": [
+        "callback: invalid response encountered / OAUTH_INVALID_RESPONSE / JWT signature verification failed / OAUTH_INVALID_RESPONSE"
+      ],
+      "⑥ id 불일치": [
+        "callback: 네이버 사용자 정보 id가 ID 토큰 sub와 다르다"
+      ]
+    },
+    "afterLogin": [],
+    "sessionCookies": [],
+    "progressCookies": [
+      "__Host-peaket_oidc"
+    ],
+    "badSignatureRejected": true,
+    "afterLogout": []
+  },
+  "C2": {
+    "blockedReasons": {
+      "②": [
+        "callback: 로그인 진행 상태가 없다"
+      ],
+      "③ state": [
+        "callback: unexpected \"state\" response parameter value / OAUTH_INVALID_RESPONSE"
+      ],
+      "③ nonce": [
+        "callback: unexpected ID Token \"nonce\" claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "③ 코드 주입": [
+        "callback: server responded with an error in the response body / OAUTH_RESPONSE_BODY_ERROR / invalid_grant / PKCE / invalid_grant / PKCE"
+      ],
+      "③ 쿠키 __Host-peaket_oidc": [
+        "callback: 로그인 진행 상태가 없다"
+      ],
+      "③ 재사용": [
+        "callback: server responded with an error in the response body / OAUTH_RESPONSE_BODY_ERROR / invalid_grant / invalid_grant"
+      ],
+      "③ 만료": [
+        "callback: unexpected JWT \"exp\" (expiration time) claim value, expiration is past current timestamp / OAUTH_JWT_TIMESTAMP_CHECK_FAILED"
+      ],
+      "④ wrongIss": [
+        "callback: unexpected JWT \"iss\" (issuer) claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "④ wrongAud": [
+        "callback: unexpected JWT \"aud\" (audience) claim value / OAUTH_JWT_CLAIM_COMPARISON_FAILED"
+      ],
+      "④ 발견 문서 issuer": [
+        "discovery: \"response\" body \"issuer\" property does not match the expected value / OAUTH_JSON_ATTRIBUTE_COMPARISON_FAILED"
+      ],
+      "④ 서명": [
+        "callback: JWT signature verification failed / OAUTH_INVALID_RESPONSE"
+      ],
+      "⑥ id 불일치": [
+        "callback: 네이버 사용자 정보 id가 ID 토큰 sub와 다르다"
+      ]
+    },
+    "afterLogin": [],
+    "sessionCookies": [],
+    "progressCookies": [
+      "__Host-peaket_oidc"
+    ],
+    "badSignatureRejected": true,
+    "afterLogout": []
+  }
+}
