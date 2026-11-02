@@ -177,7 +177,7 @@ ADR-0171 결정 4는 끝단(CDN과 웹 방화벽처럼 사용자 가까이에서
 | 판정한 때 | `CHALLENGE`일 때 queue-svc가 하는 일 | 정본 |
 | --- | --- | --- |
 | 로비 입장 | 참가 토큰(1인 1장)을 주고 `q:{event:E}:verify`에 `VERIFYING`을 쓰며, 201 응답에 `verification: REQUIRED`를 싣는다. 셔플 뒤 정규화 작업이 그 번호를 빠진 번호로 돌린다 | queue-admission §2·§7 |
-| 사전 검증 | 사전 검증 토큰에 '추가 검증 필요'를 서명해 넣는다. 진입 때 번호를 정상으로 주고, 같은 Lua에서 빠진 번호와 `VERIFYING`을 쓴다 | queue-admission §3 |
+| 사전 검증 | 사전 검증 토큰에 '추가 검증 필요'를 서명해 넣는다. 진입 때 번호를 정상으로 주고, 번호를 기록한 뒤 같은 회차 슬롯의 Lua 하나로 빠진 번호와 `VERIFYING`을 쓴다(필드가 대기표 해시라서) | queue-admission §3 |
 | 대기 중(재평가 적용) | trust-svc가 `IsolateWaiting`을 부르면 같은 기록을 쓴다 | queue-admission §7, 이 문서 §8 |
 | 로그인 | identity-svc가 정한다 | docs/features/identity.md §7 |
 

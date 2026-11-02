@@ -109,6 +109,7 @@ export {
 export { STAT_SNAPSHOT_KEEP_DAYS, STAT_SNAPSHOT_TABLE, statSnapshotTable, takeStatSnapshot } from './stat-snapshot.js';
 export { REINDEX_DEFAULTS, RETENTION_DEFAULTS, deleteExpiredRows, reindexBloatedIndexes, retentionBoundary, retentionOverdueSeconds, type ReindexResult, type RetentionResult, type RetentionSpec } from './retention.js';
 export { STREAM_KEY_TTL_AFTER_SALE_MS, ackAndTrimStream, compareStreamIds, expireStreamAfterSale, nextStreamId, type RedisCommander } from './redis-stream.js';
+export { REDIS_CALL_DEADLINE_MS, REDIS_COMMAND_TIMEOUT_MS, RedisConnectError, RedisDeadlineError, createHotRedis, hotRedisOver, isRedisUnavailable, redisClusterOptions, redisScript, type CallOptions, type HotRedis, type HotRedisOptions, type RawRedis, type RedisScript } from './redis.js';
 export {
   MAINTENANCE_DEFAULTS,
   MaintenanceRunner,

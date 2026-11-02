@@ -78,6 +78,7 @@ export const postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryScrollDistanc
 export const PostV1QueuesEventIdPreVerificationsBody = zod.object({
   "humanCheckToken": zod.string().optional().describe('Cloudflare Turnstile 응답 토큰(300초 1회용, trust-svc가 서버 검증)'),
   "deviceId": zod.string().optional(),
+  "preverifyToken": zod.string().optional().describe('갱신할 때 지금 가진 사전 검증 토큰. 서명이 맞고 회차·계정·기기가 같고 만료 전이면 최초 발급 시각과 여정 ID(jny)를 그대로 옮긴다. 없거나 맞지 않으면 새 여정(추천 적용 2026-11-03, queue-admission §3 \'첫 구현의 세부\')'),
   "behaviorSummary": zod.object({
   "v": zod.literal(1).describe('형식 버전'),
   "windowMs": zod.int().min(postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryWindowMsMin).max(postV1QueuesEventIdPreVerificationsBodyBehaviorSummaryWindowMsMax).describe('요약한 구간 길이(밀리초)'),
@@ -90,7 +91,11 @@ export const PostV1QueuesEventIdPreVerificationsBody = zod.object({
 }).strict().optional().describe('행동 신호 요약(사전 검증 본문, 추천 적용 2026-10-15, ADR-0065 결정 9). 화면에서 잰 요약값만 보내고 원시 좌표·키 값·입력한 글자는 보내지 않는다. 재는 화면은 공연 상세(사전 검증 본문)와, 2026-10-31에 더한 좌석 화면(구매 세션의 첫 직접 선택 홀드 요청 HoldRequest.behavior)·결제 화면(결제 시도 시작 본문 behavior)이다. 좌석·결제 화면의 요약은 실시간 봇 판정에 쓰지 않고 부정 예매 사후 조사의 기록(asyncapi BehaviorSignal screen SEAT·PAYMENT)에만 쓴다(추천 적용 2026-10-31, ADR-0171 결정 4). 필드 구성과 범위는 [가정, wbs 3.2.1에서 확정]. 보조기기 사용자는 고유 패턴이 있어 단독 판정 근거로 쓰지 않는다(queue-admission §7)')
 })
 
-export const PostV1QueuesEventIdPreVerificationsResponse = zod.void()
+export const PostV1QueuesEventIdPreVerificationsResponse = zod.object({
+  "preverifyToken": zod.string().describe('사전 검증 토큰(15분). 진입 본문에 그대로 싣는다'),
+  "expiresAt": zod.iso.datetime({"offset":true}).describe('만료 시각. 화면은 그 전에 조용히 갱신한다'),
+  "serverTimeMs": zod.int().describe('서버 시각(유닉스 밀리초). 시계 보정 표본(ADR-0110)')
+}).describe('사전 검증 토큰 발급 결과(추천 적용 2026-11-03, queue-admission §3 \'첫 구현의 세부\')')
 
 /**
  * FR-006. 사전 검증 토큰 + 구매 권한 + pid 중복 확인 → INCR 순번. 오픈 직후 동시 도착 구간(2초 [가정])에 오픈 전 발급 토큰으로 도착하면 202 BATCHING + 결과 파일 경로(묶음 무작위, ADR-0041). T=0 피크 20만 RPS(NFR-001). PREQUEUE_SHUFFLE 공연(로비 셔플 켬·오픈 직후 묶음 끔, ADR-0118)도 오픈 뒤 진입을 받고 동시 도착 묶음 없이 로비 참가자 전원 뒤에 도착 순으로 번호를 준다(오픈 뒤 410 거절을 없앰, 소유자 결정 2026-10-14, ADR-0064). 202 BATCHING은 openBatch를 켠 회차에서만 나온다. 그 회차의 판매 종료(공연 시작 24시간 전) 뒤에는 모든 정렬 방식에서 410 sale-ended

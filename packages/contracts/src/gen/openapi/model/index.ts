@@ -409,6 +409,7 @@ export * from './postV1TransfersOfferIdRejectionHeaders.zod.js';
 export * from './postV1TransfersOfferIdWithdrawalHeaders.zod.js';
 export * from './postV1WebhooksPortoneHeaders.zod.js';
 export * from './postV1WebhooksTossHeaders.zod.js';
+export * from './preverifyResult.zod.js';
 export * from './problem.zod.js';
 export * from './problemResponse.zod.js';
 export * from './productionCard.zod.js';

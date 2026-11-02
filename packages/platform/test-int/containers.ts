@@ -181,3 +181,46 @@ export async function startValkey(): Promise<ValkeyContainer> {
     },
   };
 }
+
+export interface PasswordCluster {
+  port: number;
+  stop(): void;
+}
+
+/**
+ * 비밀번호를 건 1노드 Valkey 클러스터(모든 슬롯을 한 노드에). 클라이언트가 찾아낸 노드 주소로 다시 붙으므로
+ * 컨테이너 안팎을 같은 포트로 열고 127.0.0.1로 알린다(핫패스 Redis 연결의 클러스터 인증 시험).
+ * 클러스터 통신 포트는 따로 정한다(기본값 '포트 + 10000'이면 55535보다 큰 포트를 받지 않는데, Windows의 빈 포트는 대개 그보다 크다)
+ */
+export async function startPasswordCluster(password: string): Promise<PasswordCluster> {
+  const port = await freePort();
+  const id = docker(['run', '-d', '--rm', '-p', `127.0.0.1:${port}:${port}`, VALKEY_IMAGE, 'valkey-server', '--port', String(port), '--cluster-enabled', 'yes', '--cluster-port', '16379', '--cluster-announce-ip', '127.0.0.1', '--requirepass', password, '--masterauth', password, '--save', '', '--appendonly', 'no']);
+  const stop = () => {
+    try {
+      docker(['rm', '-f', id]);
+    } catch {
+      // 이미 없다
+    }
+  };
+  const cli = (...args: string[]) => docker(['exec', id, 'valkey-cli', '-p', String(port), '-a', password, '--no-auth-warning', ...args]);
+  const until = async (ok: () => boolean, what: string) => {
+    for (let i = 0; i < 100; i++) {
+      try {
+        if (ok()) return;
+      } catch {
+        // 아직 뜨는 중
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    throw new Error(`${what}이(가) 20초 안에 되지 않았다`);
+  };
+  try {
+    await until(() => cli('PING') === 'PONG', '클러스터 노드 시작');
+    cli('CLUSTER', 'ADDSLOTSRANGE', '0', '16383');
+    await until(() => cli('CLUSTER', 'INFO').includes('cluster_state:ok'), '클러스터 준비');
+    return { port, stop };
+  } catch (err) {
+    stop();
+    throw err;
+  }
+}
