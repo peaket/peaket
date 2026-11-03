@@ -32,8 +32,13 @@ export interface BatchStore {
   writeResults(entries: readonly BatchEntry[], gen: number, expireAtMs: number): Promise<void>;
   /** 아무도 갖지 않는 번호(잃은 SADD의 자리)를 빠진 번호 비트맵에 켠다 */
   markRemoved(eventId: string, seqs: readonly number[], expireAtMs: number): Promise<void>;
-  /** 게시 시각과 머클 루트를 한 번에 쓴다 */
+  /** 게시 시각과 머클 루트를 비어 있을 때만 쓴다(두 번째 게시가 게시 시각을 늦춰 분산 창을 다시 닫지 않게) */
   markPublished(eventId: string, batchNo: number, atMs: number, root: string): Promise<void>;
+  /**
+   * 게시 전 복제 확인(ADR-0181 결정 5, ADR-0182 결정 7): 묶음 표시가 읽은 값(marker)과 같은 노드에서만 한 번 쓰고(wait:{n}) WAIT로 최소 복제본 수가 받았는지 본다.
+   * 복제는 순서대로라 그 쓰기가 복제됐으면 묶음 표시까지 복제됐다. 표시가 다르거나(장애 전환 중 다른 노드) 모자라면 false(그 주기는 게시하지 않는다)
+   */
+  confirmReplicated(eventId: string, batchNo: number, marker: string): Promise<boolean>;
   /** 다시 쓰기 표시를 본 값일 때만 지운다 */
   clearRepair(eventId: string, batchNo: number, repairAtMs: number): Promise<void>;
 }

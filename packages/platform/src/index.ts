@@ -6,6 +6,8 @@ export { ADMIN_AUTHZ_CACHE_MS, COOKIE_CHALLENGE, CurrentPrincipal, ROLE_VALUES, 
 export { AcceptTextPlain, ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, RequestValidationError, contractRouteSchema, type ContractRouteSchemaInput } from './request-checks.js';
 export { DEADLINE_HEADER, DEFAULT_MAX_DEADLINE_MS, Deadline } from './deadline.js';
 export { LATENCY_BUCKETS_SECONDS, PlatformMetrics } from './metrics.js';
+// 서비스가 자기 지표를 만들 때 쓰는 클래스(서비스마다 지표 라이브러리를 따로 들이지 않게 플랫폼이 다시 내보낸다, ADR-0182)
+export { Counter, Gauge, Histogram, type Registry } from '@prometheus-io/client';
 export { contractSchema, emitOpenApi, type EmitOpenApiOptions } from './openapi.js';
 export { PROBLEM_CONTENT_TYPE, PROBLEM_TYPE_BASE, ProblemError, deadlineExceeded, serverBusy, type ProblemInit } from './problem.js';
 export { DATABASE, POOL_DEFAULTS, createDatabase, databaseModule, type Database, type DatabaseOptions, type DatabaseProfile, type DbTransaction, type TransactionOptions } from './database.js';
@@ -56,7 +58,7 @@ export {
   type OutboxMessage,
 } from './outbox.js';
 export { OUTBOX_RELAY_DEFAULTS, OutboxRelay, OutboxRelayMetrics, type LeaderState, type OutboxPublisher, type OutboxRecord, type OutboxRelayOptions } from './outbox-relay.js';
-export { LEASE_DEFAULTS, LeaseElector, inClusterLeaseApi, kubernetesLeaseApi, type KubernetesLeaseApiOptions, type LeaseApi, type LeaseElectorOptions, type LeaseRecord, type LeaseSpec } from './lease.js';
+export { LEASE_DEFAULTS, LeaseElector, inClusterLeaseApi, kubernetesLeaseApi, memoryLeaseApi, type KubernetesLeaseApiOptions, type LeaseApi, type LeaseElectorOptions, type LeaseRecord, type LeaseSpec } from './lease.js';
 export { RELAY_PROCESS_DEFAULTS, loadOutboxRelayProcessConfig, startOutboxRelayProcess, type OutboxRelayProcess, type OutboxRelayProcessConfig, type OutboxRelayProcessOptions } from './relay-process.js';
 export { KAFKA_AUTH_LOCKED, KAFKA_CONSUMER_LOCKED, KAFKA_PRODUCER_LOCKED, KAFKA_REQUIRED, kafkaAdminConfig, kafkaConsumerConfig, kafkaProducerConfig, type KafkaClientBase, type KafkaClientConfig, type KafkaProducerKind } from './kafka-config.js';
 export { kafkaAuthFromEnv, mskIamTokenProvider, mskSessionName, type KafkaAuth, type KafkaMskIamAuth, type MskIamOptions, type OAuthBearerProvider, type OAuthBearerToken } from './msk-iam.js';

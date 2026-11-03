@@ -14,6 +14,7 @@ interface EventState {
 export class MemoryBatchStore implements BatchStore {
   readonly #events = new Map<string, EventState>();
   readonly #results = new Map<string, { value: string; expireAtMs: number }>();
+  #replicated = true;
 
   async startsAtOf(eventId: string): Promise<number | null> {
     return this.#events.get(eventId)?.startsAtMs ?? null;
@@ -34,9 +35,16 @@ export class MemoryBatchStore implements BatchStore {
   async markRemoved(eventId: string, seqs: readonly number[]): Promise<void> {
     this.#events.get(eventId)?.removed.push(...seqs);
   }
+  async confirmReplicated(): Promise<boolean> {
+    return this.#replicated;
+  }
+  /** 복제본이 받았는지(시험이 바꾼다) */
+  replicatedForTest(v: boolean): void {
+    this.#replicated = v;
+  }
   async markPublished(eventId: string, _batchNo: number, atMs: number, root: string): Promise<void> {
     const e = this.#events.get(eventId);
-    if (e) Object.assign(e, { publishedAt: atMs, root });
+    if (e && e.publishedAt === null) Object.assign(e, { publishedAt: atMs, root });
   }
   async clearRepair(eventId: string, _batchNo: number, repairAtMs: number): Promise<void> {
     const e = this.#events.get(eventId);

@@ -3,11 +3,24 @@
 // 사람별 결과 {번호}:{세대}.
 // 회차 ID는 부르는 쪽(리더)이 [A-Za-z0-9_-] 1~64자만 넘긴다(해시 태그를 깨지 않게).
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type HotRedis, isRedisUnavailable, redisScript } from '@peaket/platform';
 import type { BatchEntry, BatchStore, ClosedBatch, PublishedBatch } from '../domain/ports.js';
 
 export const ADMISSION_REDIS = Symbol('admission.QueueRedis');
+/** 게시 전 복제 확인의 최소 복제본 수(운영 1, 로컬·CI 0 [가정], PEAKET_QUEUE_REDIS_MIN_REPLICAS) */
+export const MIN_REPLICAS = Symbol('admission.MinReplicas');
+/** WAIT 전용 연결: WAIT는 그 연결을 막으므로, 노드마다 하나뿐인 공유 연결로 보내면 같은 노드의 다른 회차 명령이 기다린다(2026-11-03 새 맥락 리뷰) */
+export const WAIT_REDIS = Symbol('admission.WaitRedis');
+
+/** PEAKET_QUEUE_REDIS_MIN_REPLICAS: 0 이상의 정수. 없으면 클러스터 1, 단일 노드 0 [가정] */
+export function minReplicasOf(raw: string | undefined, cluster: boolean): number {
+  if (raw === undefined) return cluster ? 1 : 0;
+  if (!/^\d{1,2}$/.test(raw)) throw new Error(`PEAKET_QUEUE_REDIS_MIN_REPLICAS는 0 이상의 정수다: ${raw}`);
+  return Number(raw);
+}
+/** WAIT 시간 한도 [가정] */
+const WAIT_MS = 200;
 
 export const keys = {
   cfg: (e: string) => `q:{event:${e}}:cfg`,
@@ -25,6 +38,18 @@ const SCAN_COUNT = 1_000;
 const WRITE_ATTEMPTS = 3;
 const WRITE_RETRY_MS = 200;
 
+// 게시 전 복제 확인: 묶음 표시가 읽은 값과 같을 때만 확인 시각을 쓴다(장애 전환 중 표시가 없는 다른 노드를 '복제됨'으로 보지 않게)
+const MARK_WAIT = redisScript(`
+if redis.call('HGET', KEYS[1], ARGV[2]) ~= ARGV[1] then return 0 end
+redis.call('HSET', KEYS[1], 'wait:' .. ARGV[2], ARGV[3])
+return 1
+`);
+// 게시 표시는 비어 있을 때만 쓴다
+const MARK_PUBLISHED = redisScript(`
+redis.call('HSETNX', KEYS[1], 'pub:' .. ARGV[1], ARGV[2])
+redis.call('HSETNX', KEYS[1], 'root:' .. ARGV[1], ARGV[3])
+return 1
+`);
 // 본 값일 때만 지운다(그 사이 새로 청한 표시를 지우지 않게)
 const CLEAR_REPAIR = redisScript(`
 if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then redis.call('HDEL', KEYS[1], ARGV[1]) return 1 end
@@ -34,7 +59,24 @@ const str = (v: unknown): string | null => (v === null || v === undefined ? null
 
 @Injectable()
 export class RedisBatchStore implements BatchStore {
-  constructor(@Inject(ADMISSION_REDIS) private readonly redis: HotRedis) {}
+  constructor(
+    @Inject(ADMISSION_REDIS) private readonly redis: HotRedis,
+    @Optional() @Inject(MIN_REPLICAS) private readonly minReplicas: number = 0,
+    @Optional() @Inject(WAIT_REDIS) private readonly waitRedis?: HotRedis,
+  ) {}
+
+  async confirmReplicated(eventId: string, batchNo: number, marker: string): Promise<boolean> {
+    const k = keys.batchDone(eventId);
+    // 쓰기와 WAIT를 같은 연결로 보내야 그 쓰기까지의 복제를 센다. 복제는 순서대로라 이 쓰기가 복제됐으면 묶음 표시까지 복제됐다.
+    // 같은 노드의 다른 회차 WAIT 뒤에 줄을 설 수 있어 쓰기에도 WAIT만큼의 마감을 준다
+    const r = this.waitRedis ?? this.redis;
+    const deadlineMs = WAIT_MS + 300;
+    const ok = Number(await r.evalScript(MARK_WAIT, [k], [marker, String(batchNo), String(Date.now())], { deadlineMs })) === 1;
+    if (!ok) return false;
+    if (this.minReplicas <= 0) return true;
+    const acked = Number(await r.command(['WAIT', String(this.minReplicas), String(WAIT_MS)], { key: k, deadlineMs }));
+    return acked >= this.minReplicas;
+  }
 
   async startsAtOf(eventId: string): Promise<number | null> {
     const k = keys.cfg(eventId);
@@ -99,7 +141,7 @@ export class RedisBatchStore implements BatchStore {
 
   async markPublished(eventId: string, batchNo: number, atMs: number, root: string): Promise<void> {
     const k = keys.batchDone(eventId);
-    await this.redis.command(['HSET', k, `pub:${batchNo}`, String(atMs), `root:${batchNo}`, root], { key: k });
+    await this.redis.evalScript(MARK_PUBLISHED, [k], [String(batchNo), String(atMs), root]);
   }
 
   async clearRepair(eventId: string, batchNo: number, repairAtMs: number): Promise<void> {

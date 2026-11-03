@@ -61,6 +61,14 @@ export class LeaseElector implements LeaderState {
     if (!(this.o.renewDeadlineMs < this.o.leaseDurationMs)) throw new RangeError('갱신 한도는 Lease 기간보다 짧아야 한다');
   }
 
+  /**
+   * 리더 세대(펜싱 토큰, ADR-0056 결정 1): 보유자가 바뀔 때 1 오르는 leaseTransitions + 1. 처음 만든 Lease의 첫 리더가 1이다(명세 queue.qnt `acquire`).
+   * 갱신하는 동안 그대로이고, 리더가 아니면(갱신 한도를 넘겼으면) 없다
+   */
+  generation(): number | undefined {
+    return this.isLeader() && this.current ? this.current.leaseTransitions + 1 : undefined;
+  }
+
   /** 리더이고 갱신 한도 안에 갱신했으면 true(반복이 멈춰도 한도를 넘기면 false) */
   isLeader(): boolean {
     return this.leader && this.o.clock.monotonicMs() - this.lastRenewAt < this.o.renewDeadlineMs;
@@ -157,6 +165,27 @@ export class LeaseElector implements LeaderState {
     this.stopper = undefined;
     await this.release();
   }
+}
+
+/** 한 프로세스 안의 Lease(로컬 실행·시험). resourceVersion으로 겨루는 것은 API 서버와 같다 */
+export function memoryLeaseApi(): LeaseApi {
+  let rec: LeaseRecord | undefined;
+  let version = 0;
+  return {
+    async get() {
+      return rec ? { ...rec } : undefined;
+    },
+    async create(spec) {
+      if (rec) return 'conflict';
+      rec = { ...spec, resourceVersion: String(++version) };
+      return { ...rec };
+    },
+    async update(spec, resourceVersion) {
+      if (!rec || rec.resourceVersion !== resourceVersion) return 'conflict';
+      rec = { ...spec, resourceVersion: String(++version) };
+      return { ...rec };
+    },
+  };
 }
 
 export interface KubernetesLeaseApiOptions {

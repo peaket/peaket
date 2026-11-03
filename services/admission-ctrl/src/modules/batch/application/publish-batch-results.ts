@@ -19,6 +19,7 @@ export type PublishResult =
   | { status: 'ALREADY' }
   | { status: 'NOT_CLOSED' }
   | { status: 'WAITING_BEACON' }
+  | { status: 'WAITING_REPLICA' }
   | { status: 'NO_SCHEDULE' };
 
 /** 게시 뒤 참가자가 바뀌어 같은 결과를 다시 만들 수 없다. 리더는 멈추고 알린다(사람이 결과 파일로 되살린다) */
@@ -50,6 +51,8 @@ export class PublishBatchResults {
     if (startsAt === null) return { status: 'NO_SCHEDULE' };
     const beacon = await this.beacons.value(i.eventId, n);
     if (!beacon) return { status: 'WAITING_BEACON' };
+    // 장애 전환으로 묶음 표시를 잃은 뒤 이미 공개한 결과를 새 번호로 덮어쓰지 않게, 표시까지의 쓰기가 복제됐는지 먼저 본다(ADR-0181 결정 5)
+    if (!(await this.store.confirmReplicated(i.eventId, n, `${closed.first}:${closed.size}:${closed.gen}`))) return { status: 'WAITING_REPLICA' };
 
     const members = sortHashes(await this.store.members(i.eventId, n));
     if (members.length > closed.size) throw new Error(`묶음 참가자(${members.length})가 닫힌 크기(${closed.size})보다 많다(닫힘 뒤 SADD는 없어야 한다)`);

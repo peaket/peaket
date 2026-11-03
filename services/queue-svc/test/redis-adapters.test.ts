@@ -67,3 +67,22 @@ describe('회차 일정 캐시', () => {
     expect(s.cachedForTest()).toBeLessThanOrEqual(SCHEDULE_CACHE_MAX);
   });
 });
+
+describe('진행 중인 회차 목록', () => {
+  test('목록넣기(ZADD)가실패해도_일정읽기는된다_리더를위한최선노력이다', async () => {
+    const cfg = ['opensAtMs', '1', 'startsAtMs', '2', 'lobbyShuffle', '1', 'openBatch', '1', 'rev', '1'];
+    const redis: HotRedis = {
+      command: async () => Promise.reject(new RedisDeadlineError(100)),
+      evalScript: async () => cfg,
+      sendCommand: async () => null,
+      close: async () => {},
+    };
+    expect(await new RedisEventSchedules(redis, fakeClock()).get('e')).not.toBeNull();
+  });
+});
+
+test('목록넣기가끝나지않아도_일정읽기는기다리지않는다', async () => {
+  const cfg = ['opensAtMs', '1', 'startsAtMs', '2', 'lobbyShuffle', '1', 'openBatch', '1', 'rev', '1'];
+  const redis: HotRedis = { command: () => new Promise(() => {}), evalScript: async () => cfg, sendCommand: async () => null, close: async () => {} };
+  expect(await new RedisEventSchedules(redis, fakeClock()).get('e')).not.toBeNull();
+});

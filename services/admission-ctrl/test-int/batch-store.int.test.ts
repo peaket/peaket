@@ -74,3 +74,40 @@ test('publishBatch_닫힘표시와참가자를읽어_사람별결과·결과파�
   expect(await cmd(keys.batchDone(E), ['HGET', keys.batchDone(E), 'repair:1'])).toBeNull();
   expect(await publish.run({ eventId: E })).toEqual({ status: 'ALREADY' });
 });
+
+test('게시전복제확인은같은슬롯에한번쓰고WAIT로본다_최소복제본0이면바로되고_복제본이없는데1이면시간한도뒤에안된다', async () => {
+  const E = `evt-wait-${Date.now()}`;
+  await cmd(keys.batchDone(E), ['HSET', keys.batchDone(E), '1', '1:3:1']);
+  expect(await new RedisBatchStore(redis, 0).confirmReplicated(E, 1, '1:3:1')).toBe(true);
+  const started = Date.now();
+  expect(await new RedisBatchStore(redis, 1).confirmReplicated(E, 1, '1:3:1')).toBe(false);
+  expect(Date.now() - started).toBeGreaterThanOrEqual(150);
+  // 확인을 위해 쓴 값은 그 묶음의 표시 옆에 남는다(게시 표시와 헷갈리지 않는 이름)
+  expect(await cmd(keys.batchDone(E), ['HEXISTS', keys.batchDone(E), 'wait:1'])).toBe(1);
+});
+
+test('복제확인은따로받은연결로쓰고기다린다_그연결이막혀도다른명령의연결은막히지않는다', async () => {
+  const E = `evt-wait2-${Date.now()}`;
+  const waitRedis = await createHotRedis({ url: valkey.url });
+  try {
+    const store = new RedisBatchStore(redis, 1, waitRedis);
+    await cmd(keys.batchDone(E), ['HSET', keys.batchDone(E), '1', '1:3:1']);
+    const waiting = store.confirmReplicated(E, 1, '1:3:1');
+    // 확인 쓰기(HSET)의 응답 뒤에 WAIT가 나가므로 조금 기다린 뒤 잰다. 복제본이 없어 WAIT가 시간 한도까지 막는 동안에도 기본 연결은 바로 답한다
+    await new Promise((r) => setTimeout(r, 30));
+    const started = Date.now();
+    await cmd(keys.batchDone(E), ['HGET', keys.batchDone(E), 'x']);
+    expect(Date.now() - started).toBeLessThan(100);
+    expect(await waiting).toBe(false);
+  } finally {
+    await waitRedis.close();
+  }
+});
+
+test('게시표시는비어있을때만쓴다_두번째게시가게시시각을늦춰분산창을다시닫지않는다', async () => {
+  const E = `evt-pub-${Date.now()}`;
+  const store = new RedisBatchStore(redis);
+  await store.markPublished(E, 1, 1_000, 'aa');
+  await store.markPublished(E, 1, 2_000, 'aa');
+  expect(await cmd(keys.batchDone(E), ['HGET', keys.batchDone(E), 'pub:1'])).toBe('1000');
+});

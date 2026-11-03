@@ -135,6 +135,14 @@ test('노드ID를읽다가클러스터꺼짐이아닌오류(권한)가나면_sta
   }
 });
 
+test('일정사본을읽으면_리더가볼진행중인회차목록에회차키수명(공연시작)을점수로넣는다', async () => {
+  const eventId = newEvent();
+  const s = openSchedule(Date.now());
+  await writeSchedule(eventId, s);
+  expect(await new RedisEventSchedules(redis, systemClock).get(eventId)).not.toBeNull();
+  expect(Number(await cmd('q:{admission}:events', ['ZSCORE', 'q:{admission}:events', eventId]))).toBe(s.startsAtMs);
+});
+
 test('오픈뒤에는일정사본읽기가다른노드ID를바꾸지않는다_진입②와RB05가맡는다', async () => {
   const eventId = newEvent();
   await writeSchedule(eventId, openSchedule(Date.now()));

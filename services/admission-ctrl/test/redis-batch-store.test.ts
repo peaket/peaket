@@ -63,3 +63,34 @@ describe('결과 쓰기', () => {
     expect(calls).toBe(10);
   });
 });
+
+describe('최소 복제본 수', () => {
+  test('설정값은0이상의정수만받고_없으면클러스터는1_단일노드는0이다', async () => {
+    const { minReplicasOf } = await import('../src/modules/batch/adapters/redis-batch-store.js');
+    expect(minReplicasOf(undefined, true)).toBe(1);
+    expect(minReplicasOf(undefined, false)).toBe(0);
+    expect(minReplicasOf('2', true)).toBe(2);
+    for (const bad of ['', 'x', '-1', '1.5']) expect(() => minReplicasOf(bad, true)).toThrow(/PEAKET_QUEUE_REDIS_MIN_REPLICAS/);
+  });
+});
+
+describe('게시 전 복제 확인', () => {
+  test('표시확인쓰기와WAIT는둘다전용연결로간다_읽은표시와다르면확인하지않는다', async () => {
+    const { RedisBatchStore } = await import('../src/modules/batch/adapters/redis-batch-store.js');
+    const seen: string[] = [];
+    const shared = { command: async (a: string[]) => (seen.push(`shared:${a[0]}`), null), evalScript: async () => (seen.push('shared:eval'), [1]), sendCommand: async () => null, close: async () => {} };
+    let marker = '11:5:1';
+    const own = {
+      command: async (a: string[]) => (seen.push(`wait:${a[0]}`), 1),
+      // Lua가 정수 1·0을 돌려주는 것과 같게
+      evalScript: async (_s: unknown, _k: string[], args: string[]) => (seen.push('wait:eval'), args[0] === marker ? 1 : 0),
+      sendCommand: async () => null,
+      close: async () => {},
+    };
+    const store = new RedisBatchStore(shared as never, 1, own as never);
+    expect(await store.confirmReplicated('e', 1, '11:5:1')).toBe(true);
+    expect(seen).toEqual(['wait:eval', 'wait:WAIT']);
+    marker = '99:1:2';
+    expect(await store.confirmReplicated('e', 1, '11:5:1')).toBe(false);
+  });
+});

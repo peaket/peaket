@@ -8,6 +8,8 @@ import { QUEUE_REDIS, guard, keys } from './redis-entry-store.js';
 import { SCHEDULE_LUA } from './entry-lua.js';
 
 export const SCHEDULE_CACHE_MS = 1_000;
+/** 진행 중인 회차 목록(admission-ctrl 리더가 읽는다, docs/data.md §3) */
+export const EVENTS_KEY = 'q:{admission}:events';
 const SCHEDULE = redisScript(SCHEDULE_LUA);
 /** 캐시에 두는 회차 수의 상한 [가정]. 넘으면 가장 오래 둔 것부터 지운다(동시에 판매하는 회차는 이보다 훨씬 적다) */
 export const SCHEDULE_CACHE_MAX = 1_000;
@@ -59,6 +61,9 @@ export class RedisEventSchedules implements EventSchedules {
     const value = parseSchedule(await guard(this.redis.evalScript(SCHEDULE, [keys.cfg(eventId), keys.epoch(eventId), keys.seq(eventId)], [])));
     this.#cache.delete(eventId);
     if (value === null) return null;
+    // 리더(admission-ctrl)가 볼 진행 중인 회차 목록에 넣는다. 점수는 회차 키 수명(판매 종료 + 1일 = 공연 시작)이다(ADR-0182 결정 2).
+    // 최선 노력: 목록 슬롯의 노드가 아파도 진입을 막지 않게 기다리지 않는다(다음 캐시 만료 때 다시 넣는다)
+    void this.redis.command(['ZADD', EVENTS_KEY, 'GT', String(value.startsAtMs), eventId], { key: EVENTS_KEY }).catch(() => undefined);
     this.#cache.set(eventId, { at: now, value });
     while (this.#cache.size > SCHEDULE_CACHE_MAX) this.#cache.delete(this.#cache.keys().next().value!);
     return value;

@@ -56,6 +56,17 @@ describe('publishBatch', () => {
     expect(await a.publish.run({ eventId: E })).toEqual({ status: 'ALREADY' });
   });
 
+  test('묶음표시까지의쓰기가복제됐는지확인되지않으면_WAITING_REPLICA이고아무것도쓰지않는다_확인되면게시한다', async () => {
+    const w = world();
+    w.store.replicatedForTest(false);
+    expect(await w.publish.run({ eventId: E })).toEqual({ status: 'WAITING_REPLICA' });
+    expect(w.store.publishedForTest(E)).toBeNull();
+    expect(w.members.map((h) => w.store.resultOf(h))).toEqual(w.members.map(() => null));
+    expect(w.files.written(E).size).toBe(0);
+    w.store.replicatedForTest(true);
+    expect(await w.publish.run({ eventId: E })).toMatchObject({ status: 'PUBLISHED' });
+  });
+
   test('닫히지않았으면NOT_CLOSED_비콘이아직없으면WAITING_BEACON이고_아무것도쓰지않는다', async () => {
     const open = world({ closed: null });
     expect(await open.publish.run({ eventId: E })).toEqual({ status: 'NOT_CLOSED' });

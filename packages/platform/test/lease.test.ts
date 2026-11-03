@@ -2,7 +2,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { LEASE_DEFAULTS, LeaseElector, fakeClock, kubernetesLeaseApi, type FakeClock, type LeaseApi, type LeaseRecord, type LeaseSpec } from '../src/index.js';
+import { LEASE_DEFAULTS, LeaseElector, fakeClock, kubernetesLeaseApi, memoryLeaseApi, type FakeClock, type LeaseApi, type LeaseRecord, type LeaseSpec } from '../src/index.js';
 
 /** resourceVersion으로 겨루는 메모리 Lease(API 서버와 같은 낙관적 동시성) */
 function memoryLease() {
@@ -280,5 +280,39 @@ describe('쿠버네티스 Lease API 모양', () => {
     const a = new LeaseElector({ api: m.api, identity: 'relay-a', clock });
     await a.step();
     expect(m.record()?.renewTime).toBe('2026-11-01T00:00:00.123000Z');
+  });
+});
+
+describe('리더 세대(admission-ctrl 펜싱, ADR-0056 결정 1·ADR-0182 결정 1)', () => {
+  test('세대는_보유자가바뀔때1오르는leaseTransitions+1이고_처음만든Lease의첫리더가1이다_리더가아니면없다', async () => {
+    const clock = fakeClock();
+    const api = memoryLeaseApi();
+    const a = new LeaseElector({ api, identity: 'a', clock });
+    const b = new LeaseElector({ api, identity: 'b', clock });
+    expect(a.generation()).toBeUndefined();
+    await a.step();
+    expect(a.generation()).toBe(1);
+    // 갱신하는 동안 세대는 그대로다
+    clock.advance(2_000);
+    await a.step();
+    expect(a.generation()).toBe(1);
+    await b.step();
+    expect(b.generation()).toBeUndefined();
+    // a가 멈춰 Lease가 끝나면 b가 잡고 세대가 오른다
+    clock.advance(LEASE_DEFAULTS.leaseDurationMs + 1);
+    await b.step();
+    expect(b.generation()).toBe(2);
+    // 갱신 한도가 지난 a는 리더가 아니므로 세대도 없다
+    expect(a.generation()).toBeUndefined();
+  });
+
+  test('놓은Lease를다시잡아도_세대는오른다', async () => {
+    const clock = fakeClock();
+    const api = memoryLeaseApi();
+    const a = new LeaseElector({ api, identity: 'a', clock });
+    await a.step();
+    await a.release();
+    await a.step();
+    expect(a.generation()).toBe(2);
   });
 });
