@@ -123,10 +123,10 @@ components:
       type: object
       description: "직접 선택 공연은 seatIds, 좌석 자동 배정 공연은 auto 중 하나를 보낸다(POL-035, ADR-0043)"
       properties:
-        seatIds: { type: array, items: { type: string }, maxItems: 10 }
+        seatIds: { type: array, items: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }, minItems: 1, maxItems: 10, description: "직접 선택 좌석 ID. 1~10개, 좌석 ID 모양이 틀리면 400이다. 같은 좌석이 두 번 들었거나 좌석맵 판에 없는 좌석·판매 제외석이면 422 invalid-seat다(docs/features/seat-hold.md §3 '좌석 ID 확인', 추천 적용 2026-11-04, BUILD_ORDER PRF-130)" }
         auto:
           type: object
-          description: "희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043)"
+          description: "희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정을 여는 wbs 2.5.4 전에는 보내면 400 auto-assign-not-supported다(지금은 좌석 지정만 받는다, 추천 적용 2026-11-04)"
           required: [firstTierId, count]
           properties:
             firstTierId: { type: string }
@@ -136,7 +136,7 @@ components:
             allowSplit: { type: boolean, default: false, description: "연석이 없을 때 같은 등급의 분리 좌석 허용" }
         clientEphemeralPublicKey: { type: string, description: "좌석 자동 배정 공연의 첫 요청에만(직접 선택 공연은 스냅샷 요청 헤더). 구매 세션에 저장" }
         behavior: { $ref: '#/components/schemas/BehaviorSummary', description: "좌석 화면에서 잰 행동 요약. 직접 선택 공연에서 그 구매 세션의 첫 홀드 요청에만 싣는다(다시 보내도 첫 요청의 것만 쓴다). 없어도 홀드는 그대로 처리한다. purchase-svc가 홀드 응답과 따로 BehaviorSignal(screen SEAT)로 낸다(추천 적용 2026-10-31, ADR-0171 결정 4, docs/features/seat-hold.md)" }
-    Hold: { type: object, properties: { holdId: { type: string }, seatIds: { type: array, items: { type: string } }, expiresAt: { type: string, format: date-time }, extendable: { type: boolean }, fencingToken: { type: integer }, assignResult: { type: string, enum: [FIRST, FIRST_SPLIT, SECOND, SECOND_SPLIT], description: "좌석 자동 배정 결과 유형(ADR-0043). 직접 선택 공연은 없음" } } }
+    Hold: { type: object, required: [holdId, seatIds, expiresAt, extendable, fencingToken], properties: { holdId: { type: string }, seatIds: { type: array, items: { type: string } }, expiresAt: { type: string, format: date-time }, extendable: { type: boolean }, fencingToken: { type: integer, minimum: 1 }, assignResult: { type: string, enum: [FIRST, FIRST_SPLIT, SECOND, SECOND_SPLIT], description: "좌석 자동 배정 결과 유형(ADR-0043). 직접 선택 공연은 없음" } } }
     Order: { type: object, properties: { orderId: { type: string }, amount: { type: integer }, status: { type: string, enum: [CREATED, AUTHENTICATED, ACCEPTED, RESERVED, AWAITING_DEPOSIT, APPROVED, UNKNOWN, CONFIRMED, FAILED, COMPENSATED, PARTIALLY_REFUNDED, REFUNDED, EXPIRED], description: "주문 상태(docs/planning/03 §2.4). 결제 시도 상태와 결제 원장 상태는 따로다(payment §3). EXPIRED는 결제를 접수하지 않고 끝난 주문이다(과금 없음, 추천 적용 2026-10-28, ADR-0107)" }, items: { type: array, items: { type: object } } } }
     PaymentStatus: { type: object, properties: { status: { type: string, enum: [ACCEPTED, RESERVED, AWAITING_DEPOSIT, APPROVED, CONFIRMED, FAILED, UNKNOWN, COMPENSATED] }, issueDelayed: { type: boolean, description: "APPROVED에서 승인 뒤 첫 발권 시도가 실패해 같은 주문 ID로 다시 발권하는 중. 화면은 '결제 완료, 티켓 발급 중'(payment §3, 추천 적용 2026-10-28, ADR-0106)" }, virtualAccount: { type: object, description: "가상계좌 안내(입금 대기일 때만, docs/planning/03 §2.4, ADR-0062)", properties: { bank: { type: string }, accountNumber: { type: string }, dueAt: { type: string, format: date-time } } }, reason: { type: string }, pg: { type: string, enum: [TOSS, PORTONE, SIMULATOR], description: 결제 접수에서 고정된 결제사(ADR-0044) } } }
     LiveSnapshot:
@@ -1366,13 +1366,13 @@ paths:
       responses:
         '201': { description: 홀드, content: { application/json: { schema: { $ref: '#/components/schemas/Hold' } } } }
         '409': { $ref: '#/components/responses/Problem', description: "경합 패배 seat-already-held(suggestedSeats, 정상 분기로 집계), 자동 배정 실패 manual-selection-required, 우선 구매 좌석 밖 priority-seat-only(입장 토큰에 prio가 있는데 그 권리의 좌석 밖을 잡으려 함, 판매 종료 전, 추천 적용 2026-10-31, ADR-0171), 방금 놓은 좌석 seat-recently-released: 같은 계정이 그 회차에서 방금 놓은(해제·만료·자동 배정 반납) 좌석을 30초 [가정] 안에 다시 잡으려 했다. 아무 좌석도 잡지 않고 recentlyReleasedSeats·reholdAvailableAt을 싣는다. 다른 사람은 그 좌석을 바로 잡을 수 있다. 다른 사람이 잡은 좌석이 섞이면 seat-already-held가 먼저다(소유자 결정 2026-10-30, open-items 67번, 세부는 추천 적용 2026-10-30, docs/features/seat-hold.md §5)" }
-        '422': { $ref: '#/components/responses/Problem', description: "1인당 매수 한도 초과, 희망 조건 조합 규칙 위반(같은 등급 중복·휠체어석 없는 등급). 직접 선택 공연의 seatIds는 purchase-svc가 Lua를 부르기 전에 그 회차의 지금 좌석맵 판에서 좌석 색인으로 바꾸고, 없는 좌석·다른 회차의 좌석·판매 제외석·같은 좌석의 중복이 하나라도 있으면 아무 좌석도 잡지 않고 422로 거절한다(화면이 고르지 못하게 하는 것만으로는 API를 직접 부르는 요청을 막지 못한다, 추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 2)" }
-        '400': { $ref: '#/components/responses/Problem', description: 희망 조건 형식 오류(그 공연에 없는 등급) }
+        '422': { $ref: '#/components/responses/Problem', description: "1인당 매수 한도 초과(purchase-limit-exceeded), 희망 조건 조합 규칙 위반(같은 등급 중복·휠체어석 없는 등급), 같은 멱등 키에 다른 좌석 선택(idempotency-key-reused, 지문은 정렬한 seatIds만으로 만든다, guidelines §4). 직접 선택 공연의 seatIds는 purchase-svc가 Lua를 부르기 전에 그 회차의 지금 좌석맵 판에서 좌석 색인으로 바꾸고, 없는 좌석·다른 회차의 좌석·판매 제외석·같은 좌석의 중복이 하나라도 있으면 아무 좌석도 잡지 않고 422 invalid-seat로 거절한다(화면이 고르지 못하게 하는 것만으로는 API를 직접 부르는 요청을 막지 못한다, 추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 2)" }
+        '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류(seatIds 0개·11개 이상·좌석 ID 모양, about:blank), 희망 조건 형식 오류(그 공연에 없는 등급). 자동 배정을 여는 wbs 2.5.4 전에는 auto를 보내면 auto-assign-not-supported다(추천 적용 2026-11-04)" }
         '403': { $ref: '#/components/responses/Problem', description: "주소의 회차 ID가 입장 토큰의 event와 다르거나, 구매 세션에 적힌 회차와 다르다. 한가한 회차에서 받은 입장 토큰으로 다른 회차의 좌석을 잡지 못하게 한다(추천 적용 2026-10-30, docs/features/seat-hold.md §2, ADR-0159 결정 1)" }
         '410': { description: "그 회차의 판매 종료(공연 시작 24시간 전) 뒤의 새 홀드(Problem type sale-ended). 판매 종료 전에 만든 홀드는 그대로 두고 지금 홀드 시간·1회 연장 안에서 결제를 마칠 수 있다(소유자 결정 2026-10-14, 진행 중 세션 허용은 추천 적용 2026-10-14, ADR-0064). 예외: 입장 토큰에 클레임 prio(우선 구매(이의가 인정된 부정 예매 표 취소의 되돌림, POL-046 ⑦))가 있으면 판매 종료 뒤에도 그 권리의 우선 구매 보류 좌석 하나만 일반 홀드로 바꿔 잡는다. prio 토큰은 판매 종료 전후와 상관없이 언제나 그 좌석 하나만 잡고, 다른 좌석이면 판매 종료 전에는 409 priority-seat-only, 뒤에는 410이다(docs/features/seat-hold.md §5 '우선 구매 보류', 추천 적용 2026-10-31, ADR-0171)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '423': { $ref: '#/components/responses/Problem', description: 판매 일시정지(킬스위치) }
+        '423': { $ref: '#/components/responses/Problem', description: "판매 일시정지(킬스위치, 명령 3)나 판매 중지(ADR-0123). Problem type sale-paused(추천 적용 2026-11-04)" }
         '429': { $ref: '#/components/responses/TooManyRequests', description: "게이트웨이 로컬 한도 초과, 또는 purchase-svc 파드의 자기 과부하(server-busy, docs/architecture.md §5)" }
-        '503': { $ref: '#/components/responses/ServiceUnavailable', description: "좌석 Redis 장애 조치 중이거나 그 회차 좌석 저장소가 준비되지 않음(Problem type seat-store-unavailable, Retry-After 2초 [가정]). 좌석을 잡지 않는다. 이미 잡은 홀드는 그대로다. 해제·연장·스냅샷·주문 생성·결제 시도 시작·결제 접수도 그 회차 좌석 샤드를 쓰지 못하면 같은 503이다(추천 적용 2026-10-28, ADR-0121)" }
+        '503': { $ref: '#/components/responses/ServiceUnavailable', description: "좌석 Redis 장애 조치 중이거나 그 회차 좌석 저장소가 준비되지 않음(세대 키 s:{event:E}:epoch 없음, Problem type seat-store-unavailable, Retry-After 2초 [가정]). 좌석을 잡지 않는다. 이미 잡은 홀드는 그대로다. 해제·연장·스냅샷·주문 생성·결제 시도 시작·결제 접수도 그 회차 좌석 샤드를 쓰지 못하면 같은 503이다(추천 적용 2026-10-28, ADR-0121)" }
         '401': { $ref: '#/components/responses/Unauthorized', description: "입장 토큰 없음·만료, 구매 세션 요청 서명 불일치·일련번호 재사용" }
   /v1/holds/{holdId}:
     delete:

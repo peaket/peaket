@@ -1,0 +1,29 @@
+{
+  "name": "@peaket/purchase-svc",
+  "private": true,
+  "version": "0.0.0",
+  "description": "purchase-svc. inventory 모듈의 좌석 홀드 POST /v1/events/{eventId}/holds(docs/features/seat-hold.md §3~§5, BUILD_ORDER PRF-130 ①)가 있다. 좌석 Redis만 쓰고 DB는 아직 없다",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.3.2",
+    "@nestjs/core": "^12.3.2",
+    "@peaket/platform": "workspace:*",
+    "fastify": "^5.12.7",
+    "reflect-metadata": "^0.2.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@peaket/contracts": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

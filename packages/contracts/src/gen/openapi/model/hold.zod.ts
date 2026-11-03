@@ -11,12 +11,14 @@
  */
 import * as zod from 'zod';
 
+
+
 export const Hold = zod.object({
-  "holdId": zod.string().optional(),
-  "seatIds": zod.array(zod.string()).optional(),
-  "expiresAt": zod.iso.datetime({"offset":true}).optional(),
-  "extendable": zod.boolean().optional(),
-  "fencingToken": zod.int().optional(),
+  "holdId": zod.string(),
+  "seatIds": zod.array(zod.string()),
+  "expiresAt": zod.iso.datetime({"offset":true}),
+  "extendable": zod.boolean(),
+  "fencingToken": zod.int().min(1),
   "assignResult": zod.enum(['FIRST', 'FIRST_SPLIT', 'SECOND', 'SECOND_SPLIT']).optional().describe('좌석 자동 배정 결과 유형(ADR-0043). 직접 선택 공연은 없음')
 })
 
