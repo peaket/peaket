@@ -60,7 +60,29 @@ export type RecordResult = { kind: 'RECORDED' } | ({ kind: 'SAME' } & RecordedEn
 /** 묶음 결과: 번호, 게시 전, 참가자인데 결과 키가 없음(다시 쓰기를 청했다), 참가자 목록에 없음(batchMissing) */
 export type BatchOutcome = { kind: 'RESULT'; seq: number; gen: number } | { kind: 'PENDING' } | { kind: 'REPAIRING' } | { kind: 'MISSING' };
 /** ② 회차 슬롯의 결과: 번호, 묶음에 넣음(202), 묶음 구간이라 기다림(503), 서버 시각으로 아직 오픈 전 */
-export type NumberResult = { kind: 'NUMBERED'; seq: number; gen: number } | { kind: 'BATCHING' } | { kind: 'WAIT'; retryAfterSeconds: number } | { kind: 'EARLY' };
+export type NumberResult =
+  | { kind: 'NUMBERED'; seq: number; gen: number }
+  | { kind: 'BATCHING' }
+  | { kind: 'WAIT'; retryAfterSeconds: number }
+  | { kind: 'EARLY' }
+  /** 세대 키의 주 노드 ID가 지금 노드 ID와 다르다: 장애 전환 뒤 RB-05 전이라 번호를 내지 않았다(ADR-0181) */
+  | { kind: 'RECOVERING' };
+
+/** RB-05(ADR-0181): 세대 키가 지금 노드 ID와 다를 때만 건너뛰고 skipped에 한 줄을 더한 뒤 세대 키를 바꾼다 */
+export interface Rb05Input {
+  eventId: string;
+  /** 회차 키의 만료 시각(판매 종료 + 1일) */
+  expireAtMs: number;
+  /** 건너뛴 구간 목록의 만료 시각(q:dup과 같은 판매 종료) */
+  skippedExpireAtMs: number;
+  /** 건너뛰는 양의 바탕 값. 로비·묶음 표시가 없으면 그 인원을 더한다 */
+  skipBase: number;
+  opensAtMs: number;
+  closeAtMs?: number;
+  lobbyShuffle: boolean;
+  openBatch: boolean;
+}
+export type Rb05Result = { kind: 'SKIPPED'; start: number; end: number; gen: number } | { kind: 'DONE' };
 
 export interface NumberInput {
   eventId: string;
@@ -103,6 +125,8 @@ export interface EntryStore {
   numberBatch(i: NumberBatchInput): Promise<NumberResult[]>;
   /** 요청 하나짜리 ②(numberBatch를 1건으로 부른다) */
   number(i: NumberInput): Promise<NumberResult>;
+  /** RB-05: 진입 ②가 RECOVERING을 받은 파드가 부른다. 다른 파드가 먼저 했거나 장애 전환이 아니면 DONE */
+  rb05(i: Rb05Input): Promise<Rb05Result>;
   /** ③ enterRecord: q:adm이 있으면 ADMITTED. 값이 내 PENDING이거나 비었으면 {번호}:{세대}:{요청 ID}:{jny}:{vr}로 기록(수명 = 판매 종료). 같은 요청의 다른 기록이면 SAME(먼저 기록된 값),
    * 같은 요청의 묶음 기록이면 BATCH(그 토큰 해시), 그 밖은 TAKEN */
   record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number }): Promise<RecordResult>;

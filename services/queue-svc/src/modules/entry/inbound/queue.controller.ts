@@ -34,6 +34,7 @@ const PROBLEM: Record<EntryError['code'], { status: number; type: string; title:
   NOT_OPEN: { status: 409, type: 'queue-not-open', title: '아직 예매가 열리지 않았습니다' },
   SALE_ENDED: { status: 410, type: 'sale-ended', title: '판매 시간이 끝났습니다' },
   BATCHING: { status: 503, type: 'batching', title: '순서를 정하는 중입니다. 잠시 뒤 다시 시도해 주세요' },
+  QUEUE_RECOVERING: { status: 503, type: 'queue-recovering', title: '대기열을 다시 맞추는 중입니다. 잠시 뒤 다시 시도해 주세요' },
   PREVERIFY_INVALID: { status: 403, type: 'preverify-invalid', title: '사람 확인을 다시 해 주세요' },
   ALREADY_ADMITTED: { status: 409, type: 'already-admitted', title: '이 회차에 이미 입장했습니다' },
   ALREADY_WAITING: { status: 409, type: 'already-waiting', title: '이미 다른 곳에서 대기 중입니다' },

@@ -11,6 +11,12 @@ export const OPEN_BATCH_MS = 2_000;
 /** 진입 ② 파드별 묶음: 첫 요청부터 모으는 시간과 한 묶음의 최대 건수 [가정](ADR-0179) */
 export const NUMBER_BATCH_WINDOW_MS = 2;
 export const NUMBER_BATCH_MAX = 500;
+/** 장애 전환 뒤 RB-05가 건너뛰는 양의 바탕 값(ADR-0181 결정 4): ⌈회차 하나의 진입 상한 초당 20만 건 [가정, NFR-001] × 복제 지연 p99.9 0.3초 [가정] × 2⌉ */
+export const RB05_RATE_MAX_PER_SEC = 200_000;
+export const REPLICATION_LAG_P999_MS = 300;
+export const RB05_SKIP_BASE = Math.ceil((RB05_RATE_MAX_PER_SEC * REPLICATION_LAG_P999_MS * 2) / 1000);
+/** RB-05 전 진입의 503 queue-recovering Retry-After(초) [가정] */
+export const RECOVERING_RETRY_SEC = 1;
 /** 한 회차의 묶음 번호(오픈 직후 하나) */
 export const BATCH_NO = 1;
 /** 묶음 결과 공개 예정: 구간 끝 + 11초 [가정](비콘 대기 최대 6초 + 게시 5초. drand 일정은 BUILD_ORDER HOT-040) */

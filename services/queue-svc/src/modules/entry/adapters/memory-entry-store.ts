@@ -1,7 +1,7 @@
 // 시험용 진입 저장소와 회차 일정 사본. Valkey의 Lua(redis-entry-store.ts)와 같은 규칙을 메모리로 둔다(같은 사례를 test/entry-cases.ts·batch-cases.ts가 둘 다에 돈다).
 // 서버 시각은 주입한 시계다(Lua는 Redis TIME을 쓴다).
 import type { Clock } from '@peaket/platform';
-import type { BatchedEntry, BatchOutcome, EntryStore, EventSchedules, NumberBatchInput, NumberInput, NumberResult, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
+import type { BatchedEntry, BatchOutcome, EntryStore, EventSchedules, NumberBatchInput, NumberInput, NumberResult, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
 import { BATCH_NO, type EventSchedule, type ReasonCategory, REASONS } from '../domain/queue.js';
 
 const RECORDED = /^(\d+):(\d+):([^:]+):([^:]*):([^:]*)$/;
@@ -35,6 +35,9 @@ export class MemoryEntryStore implements EntryStore {
   readonly #members = new Map<string, Set<string>>();
   readonly #lobby = new Map<string, Set<string>>();
   readonly #results = new Map<string, string>();
+  /** 세대 키(회차 → 노드 표지 '{ID}:{설정 세대}')와 지금 노드 표지. 시험이 failoverForTest로 지금 노드를 바꾼다(ADR-0181) */
+  readonly #epoch = new Map<string, string>();
+  #node = 'node-1:1';
 
   constructor(private readonly clock: Clock) {}
 
@@ -78,6 +81,9 @@ export class MemoryEntryStore implements EntryStore {
   }
 
   async numberBatch(i: NumberBatchInput): Promise<NumberResult[]> {
+    const held = this.#epoch.get(i.eventId);
+    if (held === undefined) this.#epoch.set(i.eventId, this.#node);
+    else if (held !== this.#node) return i.items.map(() => ({ kind: 'RECOVERING' }));
     const now = this.clock.now();
     if (i.opensAtMs !== undefined && now < i.opensAtMs) return i.items.map(() => ({ kind: 'EARLY' }));
     const gen = (this.#skipped.get(i.eventId)?.length ?? 0) + 1;
@@ -86,7 +92,8 @@ export class MemoryEntryStore implements EntryStore {
     if (i.lobbyShuffle && !done.has('lobby')) {
       const n = this.#lobby.get(i.eventId)?.size ?? 0;
       done.set('lobby', `${seqOf() + 1}:${n}:${gen}`);
-      this.#seq.set(i.eventId, seqOf() + n);
+      // Lua처럼 인원이 0이면 카운터 키를 만들지 않는다(RB-05·일정 읽기의 '카운터가 없으면'과 맞춘다)
+      if (n > 0) this.#seq.set(i.eventId, seqOf() + n);
     }
     if (i.openBatch) {
       const closed = done.has(String(BATCH_NO));
@@ -101,12 +108,35 @@ export class MemoryEntryStore implements EntryStore {
       }
       if (!closed) {
         done.set(String(BATCH_NO), `${seqOf() + 1}:${members.size}:${gen}`);
-        this.#seq.set(i.eventId, seqOf() + members.size);
+        if (members.size > 0) this.#seq.set(i.eventId, seqOf() + members.size);
       }
     }
     const first = seqOf() + 1;
     this.#seq.set(i.eventId, seqOf() + i.items.length);
     return i.items.map((_, k) => ({ kind: 'NUMBERED', seq: first + k, gen }));
+  }
+
+  async rb05(i: Rb05Input): Promise<Rb05Result> {
+    const held = this.#epoch.get(i.eventId);
+    if (held === this.#node) return { kind: 'DONE' };
+    const now = this.clock.now();
+    if (now < i.opensAtMs && !this.#seq.has(i.eventId)) {
+      this.#epoch.set(i.eventId, this.#node);
+      return { kind: 'DONE' };
+    }
+    const done = this.#doneOf(i.eventId);
+    const was = held === undefined ? NaN : Number(held.split(':')[1]);
+    const cur = Number(this.#node.split(':')[1]);
+    let k = i.skipBase * (cur - was > 1 ? Math.min(cur - was, 3) : 1);
+    if (i.lobbyShuffle && !done.has('lobby')) k += this.#lobby.get(i.eventId)?.size ?? 0;
+    if (i.openBatch && now >= (i.closeAtMs ?? 0) && !done.has(String(BATCH_NO))) k += this.#members.get(i.eventId)?.size ?? 0;
+    const seq = this.#seq.get(i.eventId) ?? 0;
+    const lines = this.#skipped.get(i.eventId) ?? [];
+    const gen = lines.length + 1;
+    this.#skipped.set(i.eventId, [...lines, `${seq + 1}:${seq + k}:${gen}`]);
+    this.#seq.set(i.eventId, seq + k);
+    this.#epoch.set(i.eventId, this.#node);
+    return { kind: 'SKIPPED', start: seq + 1, end: seq + k, gen: gen + 1 };
   }
 
   async number(i: NumberInput): Promise<NumberResult> {
@@ -199,6 +229,24 @@ export class MemoryEntryStore implements EntryStore {
   // 시험 도구
   admitForTest(pid: string, eventId: string, ticketHash: string): void {
     this.#adm.set(`${pid}|${eventId}`, ticketHash);
+  }
+  /** 주 노드가 바뀐 것을 흉내 낸다: 그 회차의 세대 키가 이미 서 있게 한 뒤(일정 사본 읽기가 쓰듯) 새 노드가 더 큰 설정 세대로 올라선다 */
+  failoverForTest(eventId?: string): void {
+    if (eventId !== undefined && !this.#epoch.has(eventId)) this.#epoch.set(eventId, this.#node);
+    const [id, e] = this.#node.split(':');
+    this.#node = `node-${Number(id!.slice(5)) + 1}:${Number(e) + 1}`;
+  }
+  /** 장애 전환으로 잃은 쓰기를 흉내 낸다: 카운터·건너뛴 구간·세대 키를 그 값으로 되돌린다 */
+  rollbackForTest(eventId: string, to: { seq: number; skipped: string[]; epoch: string }): void {
+    this.#seq.set(eventId, to.seq);
+    this.#skipped.set(eventId, [...to.skipped]);
+    this.#epoch.set(eventId, to.epoch);
+  }
+  epochOf(eventId: string): string | undefined {
+    return this.#epoch.get(eventId);
+  }
+  skippedOf(eventId: string): string[] {
+    return [...(this.#skipped.get(eventId) ?? [])];
   }
   addSkippedForTest(eventId: string, line: string): void {
     this.#skipped.set(eventId, [...(this.#skipped.get(eventId) ?? []), line]);

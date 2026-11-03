@@ -91,6 +91,53 @@ export function batchCases(label: string, make: () => Promise<BatchWorld>) {
       expect(await w.counter(eventId)).toBe(0);
     });
 
+    test('묶음표시가없는데구간이지난뒤장애전환을알아채면_묶음인원만큼더건너뛰고_다음진입이새카운터위에서묶음을닫는다', async () => {
+      const { w, eventId, early, run } = await setup();
+      const SKIP = 50;
+      // 구간 안에 묶음 대상 셋이 들어간다
+      for (let i = 0; i < 3; i++) batching(await run({ preverifyToken: early({ iat: w.clock.now() - i }) }, { pid: `pid-mk-${i}-${eventId}`.slice(0, 64) }));
+      await w.passWindow();
+      // 구간이 지났지만 닫는 진입이 오기 전에 주 노드가 바뀌었다(닫았더라도 표시를 잃었을 수 있다)
+      await w.failover(eventId);
+      const pod = new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, rb05SkipBase: SKIP });
+      const go = () => pod.run({ accountId: ACCOUNT, pid: PID, eventId, body: { preverifyToken: preverifyToken(w.clock, eventId), deviceId: DEVICE, entryRequestId: newRequest() } });
+      expect((await failure(go())).code).toBe('QUEUE_RECOVERING');
+      expect(await w.skipped(eventId)).toEqual([`1:${SKIP + 3}:1`]);
+      const t = ticket(await go());
+      // 다음 진입이 묶음을 닫는다: 묶음 몫 3을 뗀 뒤 번호
+      expect(await w.marker(eventId, '1')).toBe(`${SKIP + 4}:3:2`);
+      expect([t.seq, t.generation]).toEqual([SKIP + 3 + 3 + 1, 2]);
+    });
+
+    test('묶음표시가이미서있으면_RB05는묶음인원을더건너뛰지않는다', async () => {
+      const { w, eventId, early, run } = await setup();
+      const SKIP = 50;
+      for (let i = 0; i < 3; i++) batching(await run({ preverifyToken: early({ iat: w.clock.now() - i }) }, { pid: `pid-mk-${i}-${eventId}`.slice(0, 64) }));
+      await w.passWindow();
+      // 구간 뒤 첫 진입이 묶음을 닫는다(표시 1:3:1, 그 진입은 4번)
+      expect(ticket(await run({ preverifyToken: preverifyToken(w.clock, eventId) })).seq).toBe(4);
+      await w.failover(eventId);
+      const pod = new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, rb05SkipBase: SKIP });
+      const go = () => pod.run({ accountId: ACCOUNT2, pid: PID2, eventId, body: { preverifyToken: preverifyToken(w.clock, eventId, { a: ACCOUNT2 }), deviceId: DEVICE, entryRequestId: newRequest() } });
+      expect((await failure(go())).code).toBe('QUEUE_RECOVERING');
+      expect(await w.skipped(eventId)).toEqual([`5:${4 + SKIP}:1`]);
+    });
+
+    test('로비셔플회차에로비표시가없는데오픈뒤장애전환을알아채면_로비인원만큼더건너뛰고_다음진입이새카운터위에서로비표시를쓴다', async () => {
+      const { w, eventId } = await setup({ lobbyShuffle: true, openBatch: false });
+      const SKIP = 50;
+      await w.addLobby(eventId, 4);
+      // 오픈 뒤 첫 진입 전에 주 노드가 바뀌었다(로비 표시를 썼더라도 잃었을 수 있다)
+      await w.failover(eventId);
+      const pod = new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, rb05SkipBase: SKIP });
+      const go = () => pod.run({ accountId: ACCOUNT, pid: PID, eventId, body: { preverifyToken: preverifyToken(w.clock, eventId), deviceId: DEVICE, entryRequestId: newRequest() } });
+      expect((await failure(go())).code).toBe('QUEUE_RECOVERING');
+      expect(await w.skipped(eventId)).toEqual([`1:${SKIP + 4}:1`]);
+      const t = ticket(await go());
+      expect(await w.marker(eventId, 'lobby')).toBe(`${SKIP + 5}:4:2`);
+      expect([t.seq, t.generation]).toEqual([SKIP + 4 + 4 + 1, 2]);
+    });
+
     test('한묶음Lua에묶음대상과오픈뒤토큰이섞여도_요청마다가른다_대상만202BATCHING으로참가자가되고_나머지는503BATCHING이다', async () => {
       const { w, eventId, early } = await setup();
       const sent: Sent[] = [];

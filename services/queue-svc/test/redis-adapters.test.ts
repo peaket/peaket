@@ -33,11 +33,12 @@ describe('회차 일정 캐시', () => {
   function counting(found: (key: string) => boolean): HotRedis & { calls: number } {
     const r = {
       calls: 0,
-      command: async (args: string[]) => {
+      command: async () => null,
+      // 일정 사본은 세대 키를 함께 맞추는 Lua 하나로 읽는다(ADR-0181)
+      evalScript: async (_script: unknown, keys: string[]) => {
         r.calls++;
-        return found(args[1]!) ? cfg : [];
+        return found(keys[0]!) ? cfg : [];
       },
-      evalScript: async () => null,
       sendCommand: async () => null,
       close: async () => {},
     };

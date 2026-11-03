@@ -21,6 +21,11 @@ export interface EntryWorld {
   removed(eventId: string, seq: number): Promise<boolean>;
   verifying(eventId: string, ticketHash: string): Promise<string | null>;
   counter(eventId: string): Promise<number>;
+  /** 그 회차 슬롯의 주 노드가 바뀐 것을 흉내 낸다(세대 키의 노드 ID와 지금 노드 ID가 달라진다, ADR-0181) */
+  failover(eventId: string): Promise<void>;
+  /** 장애 전환으로 복제되지 못한 쓰기를 잃은 것을 흉내 낸다: 카운터를 그 값으로 되돌린다 */
+  lose(eventId: string, seq: number): Promise<void>;
+  skipped(eventId: string): Promise<string[]>;
 }
 
 type Body = { preverifyToken: string; deviceId?: string; entryRequestId?: string };
@@ -63,6 +68,7 @@ function pausing(store: EntryStore, hooks: { beforeNumber?: () => Promise<void>;
     },
     markRemoved: (i) => store.markRemoved(i),
     markVerifying: (i) => store.markVerifying(i),
+    rb05: (i) => store.rb05(i),
   };
 }
 
@@ -264,6 +270,95 @@ export function entryCases(label: string, make: () => Promise<EntryWorld>) {
       const e = new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs });
       const eventId = newEvent();
       expect(await code(e.run({ accountId: ACCOUNT, pid: PID, eventId, body: { preverifyToken: preverifyToken(w.clock, eventId), deviceId: DEVICE } }))).toBe('NOT_FOUND');
+    });
+  });
+
+  describe(`장애 전환과 RB-05(${label})`, () => {
+    // 건너뛰는 양의 바탕 값을 작게 두어 구간을 확인한다(운영은 12만 [가정], ADR-0181 결정 4)
+    const SKIP = 50;
+    const setup = async () => {
+      const w = await make();
+      const eventId = newEvent();
+      await w.schedules.set(eventId, openSchedule(w.clock.now()));
+      /** 진입 파드 하나 */
+      const pod = () => new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, rb05SkipBase: SKIP });
+      const person = (i: number) => ({ accountId: ACCOUNT, pid: `pid-rb05-${i}-${eventId}`.slice(0, 64) });
+      const body = (): Body => ({ preverifyToken: preverifyToken(w.clock, eventId), deviceId: DEVICE, entryRequestId: newRequest() });
+      return { w, eventId, pod, person, body };
+    };
+    const failed = (p: Promise<unknown>) =>
+      p.then(
+        () => null,
+        (e: unknown) => {
+          if (!(e instanceof EntryError)) throw e;
+          return e;
+        },
+      );
+
+    test('[Q-T13] 장애전환으로주노드가바뀌면_RB05전진입은503QUEUE_RECOVERING이고번호를내지않으며_RB05가K만큼건너뛰어한줄을적고세대를올린다', async () => {
+      const { w, eventId, pod, person, body } = await setup();
+      const enter = pod();
+      for (let i = 0; i < 3; i++) expect(ticketOf(await enter.run({ ...person(i), eventId, body: body() })).seq).toBe(i + 1);
+      await w.failover(eventId);
+      const b = body();
+      const e = await failed(enter.run({ ...person(3), eventId, body: b }));
+      expect([e?.code, e?.retryAfterSeconds]).toEqual(['QUEUE_RECOVERING', 1]);
+      expect(await w.skipped(eventId)).toEqual([`4:${3 + SKIP}:1`]);
+      expect(await w.counter(eventId)).toBe(3 + SKIP);
+      // 같은 요청 ID로 다시 오면 건너뛴 구간 뒤 번호와 올라간 세대를 받는다
+      const t = ticketOf(await enter.run({ ...person(3), eventId, body: b }));
+      expect([t.seq, t.generation]).toEqual([3 + SKIP + 1, 2]);
+    });
+
+    test('[Q-T13] 장애전환이복제되지못한번호를잃어카운터가되돌아가도_RB05가그위를건너뛰어_잃은번호를같은세대로다시내지않는다', async () => {
+      const { w, eventId, pod, person, body } = await setup();
+      const enter = pod();
+      for (let i = 0; i < 5; i++) expect(ticketOf(await enter.run({ ...person(i), eventId, body: body() })).seq).toBe(i + 1);
+      // 4·5번(세대 1)을 받은 사람이 있는데 그 쓰기를 잃었다
+      await w.lose(eventId, 3);
+      await w.failover(eventId);
+      const b = body();
+      expect((await failed(enter.run({ ...person(5), eventId, body: b })))?.code).toBe('QUEUE_RECOVERING');
+      expect(await w.skipped(eventId)).toEqual([`4:${3 + SKIP}:1`]);
+      const t = ticketOf(await enter.run({ ...person(5), eventId, body: b }));
+      expect([t.seq, t.generation]).toEqual([3 + SKIP + 1, 2]);
+    });
+
+    test('장애전환을알아챈진입은번호를받지않았으니선점을풀어_새요청ID로다시와도409가아니고번호를받는다', async () => {
+      const { w, eventId, pod, person, body } = await setup();
+      const enter = pod();
+      expect(ticketOf(await enter.run({ ...person(0), eventId, body: body() })).seq).toBe(1);
+      await w.failover(eventId);
+      expect((await failed(enter.run({ ...person(1), eventId, body: body() })))?.code).toBe('QUEUE_RECOVERING');
+      expect(ticketOf(await enter.run({ ...person(1), eventId, body: body() })).seq).toBe(1 + SKIP + 1);
+    });
+
+    test('여러파드가거의함께알아채도_RB05는한번만건너뛰고_받은번호는건너뛴구간뒤에서겹치지않는다', async () => {
+      const { w, eventId, pod, person, body } = await setup();
+      const [a, b] = [pod(), pod()];
+      expect(ticketOf(await a.run({ ...person(0), eventId, body: body() })).seq).toBe(1);
+      await w.failover(eventId);
+      const rs = await Promise.all(
+        Array.from({ length: 8 }, (_, i) =>
+          (i % 2 ? a : b).run({ ...person(10 + i), eventId, body: body() }).then(
+            (r) => ticketOf(r).seq,
+            (e: unknown) => (e instanceof EntryError ? e.code : String(e)),
+          ),
+        ),
+      );
+      expect(rs.filter((r) => typeof r === 'string').every((r) => r === 'QUEUE_RECOVERING')).toBe(true);
+      expect(await w.skipped(eventId)).toEqual([`2:${1 + SKIP}:1`]);
+      const seqs = rs.filter((r): r is number => typeof r === 'number');
+      expect(seqs.every((n) => n > 1 + SKIP)).toBe(true);
+      expect(new Set(seqs).size).toBe(seqs.length);
+    });
+
+    test('장애전환이없으면_세대키는처음진입이쓰고그대로라_건너뛰지않는다', async () => {
+      const { w, eventId, pod, person, body } = await setup();
+      const [a, b] = [pod(), pod()];
+      const seqs = await Promise.all(Array.from({ length: 6 }, (_, i) => (i % 2 ? a : b).run({ ...person(i), eventId, body: body() }).then((r) => ticketOf(r).seq)));
+      expect(seqs.sort((x, y) => x - y)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(await w.skipped(eventId)).toEqual([]);
     });
   });
 

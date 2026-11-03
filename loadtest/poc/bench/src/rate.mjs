@@ -21,7 +21,7 @@ const EVENT = 'poc-hold';
 const hk = (s) => `s:{event:${EVENT}}:${s}`;
 // 진입 ② 묶음 Lua의 회차 키(KEY와 같은 슬롯). 공통 인자: 회차 키 수명, 오픈(1분 전), 묶음 구간 끝(지남), 로비 셔플 켬, 묶음 켬, 참가자 목록 수명. 그 뒤 요청 수와 요청마다(묶음 대상 아님, 토큰 해시 없음)
 const ek = (s) => `q:{event:poc-entry}:${s}`;
-const NUMBER_KEYS = [KEY, ek('skipped'), ek('batch_done'), ek('batch_members:1'), ek('lobby_members')];
+const NUMBER_KEYS = [KEY, ek('skipped'), ek('batch_done'), ek('batch_members:1'), ek('lobby_members'), ek('epoch')];
 const HOLD_SEATS = 10_000_000;
 
 if (a.worker === 'true') {

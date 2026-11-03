@@ -1,12 +1,14 @@
 // 회차 일정·정렬 설정 사본(q:{event:E}:cfg, docs/data.md §3)을 읽는다. 진입 경로가 공연 DB에 기대지 않게 대기열 Redis에 두고,
 // 파드 메모리에 1초 [가정] 둔다. 쓰는 쪽은 판매 승인(BUILD_ORDER LCH-080)이다.
 import { Inject, Injectable } from '@nestjs/common';
-import { CLOCK, type Clock, type HotRedis } from '@peaket/platform';
+import { CLOCK, type Clock, type HotRedis, redisScript } from '@peaket/platform';
 import type { EventSchedules } from '../domain/ports.js';
 import type { EventSchedule } from '../domain/queue.js';
 import { QUEUE_REDIS, guard, keys } from './redis-entry-store.js';
+import { SCHEDULE_LUA } from './entry-lua.js';
 
 export const SCHEDULE_CACHE_MS = 1_000;
+const SCHEDULE = redisScript(SCHEDULE_LUA);
 /** 캐시에 두는 회차 수의 상한 [가정]. 넘으면 가장 오래 둔 것부터 지운다(동시에 판매하는 회차는 이보다 훨씬 적다) */
 export const SCHEDULE_CACHE_MAX = 1_000;
 
@@ -53,8 +55,8 @@ export class RedisEventSchedules implements EventSchedules {
     const now = this.clock.monotonicMs();
     const hit = this.#cache.get(eventId);
     if (hit && now - hit.at < SCHEDULE_CACHE_MS) return hit.value;
-    const key = keys.cfg(eventId);
-    const value = parseSchedule(await guard(this.redis.command(['HGETALL', key], { key })));
+    // 읽으면서 세대 키를 맞춘다(없으면 쓰고, 오픈 전에 주 노드가 바뀌었으면 바꾼다, ADR-0181)
+    const value = parseSchedule(await guard(this.redis.evalScript(SCHEDULE, [keys.cfg(eventId), keys.epoch(eventId), keys.seq(eventId)], [])));
     this.#cache.delete(eventId);
     if (value === null) return null;
     this.#cache.set(eventId, { at: now, value });

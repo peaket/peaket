@@ -4,6 +4,7 @@ export type EntryErrorCode =
   | 'NOT_OPEN'
   | 'SALE_ENDED'
   | 'BATCHING'
+  | 'QUEUE_RECOVERING'
   | 'PREVERIFY_INVALID'
   | 'ALREADY_ADMITTED'
   | 'ALREADY_WAITING'

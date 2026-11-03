@@ -177,12 +177,13 @@ export function redisClusterOptions(urls: readonly string[], state = { started: 
   };
 }
 
-/** 핫패스가 503과 Retry-After로 답할 일시 장애인가(마감 초과, 연결 실패·끊김, 클러스터 재구성·장애 전환 중). 스크립트 오류 같은 버그는 아니다 */
+/** 핫패스가 503과 Retry-After로 답할 일시 장애인가(마감 초과, 연결 실패·끊김, 클러스터 재구성·장애 전환 중, 늦은 복제본으로 쓰기 거절). 스크립트 오류 같은 버그는 아니다 */
 export function isRedisUnavailable(err: unknown): boolean {
   if (err instanceof RedisDeadlineError || err instanceof RedisConnectError || err instanceof ClientOfflineError) return true;
   if (!(err instanceof Error)) return false;
   if (['ClientClosedError', 'SocketClosedUnexpectedlyError', 'ConnectionTimeoutError', 'SocketTimeoutError', 'ReconnectStrategyError'].includes(err.name)) return true;
-  return /^(CLUSTERDOWN|TRYAGAIN|LOADING|MASTERDOWN|READONLY)\b/.test(err.message);
+  // NOREPLICAS: 복제본이 늦어 주 노드가 쓰기를 거절했다(min-replicas-to-write, ADR-0181 '전제')
+  return /^(CLUSTERDOWN|TRYAGAIN|LOADING|MASTERDOWN|READONLY|NOREPLICAS)\b/.test(err.message);
 }
 
 export interface HotRedisOptions {

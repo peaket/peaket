@@ -158,7 +158,7 @@ describe('호출 규칙', () => {
 
 describe('일시 장애 가르기', () => {
   test('마감초과·연결끊김·클러스터재구성·장애전환중오류는_일시장애다_스크립트오류같은버그는아니다', () => {
-    for (const e of [new RedisDeadlineError(100), new RedisConnectError(), new ClientOfflineError(), new Error('CLUSTERDOWN The cluster is down'), new Error('TRYAGAIN Multiple keys request during rehashing of slot'), new Error('LOADING Redis is loading the dataset in memory'), new Error('MASTERDOWN Link with MASTER is down'), new Error("READONLY You can't write against a read only replica.")]) {
+    for (const e of [new RedisDeadlineError(100), new RedisConnectError(), new ClientOfflineError(), new Error('CLUSTERDOWN The cluster is down'), new Error('TRYAGAIN Multiple keys request during rehashing of slot'), new Error('LOADING Redis is loading the dataset in memory'), new Error('MASTERDOWN Link with MASTER is down'), new Error("READONLY You can't write against a read only replica."), new Error('NOREPLICAS Not enough good replicas to write.')]) {
       expect(isRedisUnavailable(e)).toBe(true);
     }
     for (const e of [new Error('ERR Error running script'), new Error('WRONGTYPE Operation against a key holding the wrong kind of value'), 'x', undefined]) {

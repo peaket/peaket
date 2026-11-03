@@ -3,7 +3,7 @@
 // 키에 넣는 값(회차 ID·pid)은 받는 층이 [A-Za-z0-9_-] 1~64자만 넘긴다(해시 태그를 깨지 않게). 이름은 명세 specs/queue.qnt의 동작 이름이다.
 import { Inject, Injectable } from '@nestjs/common';
 import { type HotRedis, isRedisUnavailable, redisScript } from '@peaket/platform';
-import type { BatchedEntry, BatchOutcome, EntryStore, NumberBatchInput, NumberInput, NumberResult, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
+import type { BatchedEntry, BatchOutcome, EntryStore, NumberBatchInput, NumberInput, NumberResult, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
 import { BATCH_NO, QueueStoreUnavailable, type ReasonCategory, REASONS } from '../domain/queue.js';
 import {
   BATCH_RECORD_LUA,
@@ -14,6 +14,7 @@ import {
   MARK_VERIFYING_LUA,
   NUMBER_BATCH_LUA,
   PREEMPT_LUA,
+  RB05_LUA,
   RECORD_LUA,
   RELEASE_LUA,
   REQUEST_REPAIR_LUA,
@@ -29,6 +30,8 @@ export const keys = {
   removed: (e: string) => `q:{event:${e}}:removed`,
   verify: (e: string) => `q:{event:${e}}:verify`,
   cfg: (e: string) => `q:{event:${e}}:cfg`,
+  /** 세대 키: 이 회차 키를 쓴 주 노드 ID(ADR-0181) */
+  epoch: (e: string) => `q:{event:${e}}:epoch`,
   batchDone: (e: string) => `q:{event:${e}}:batch_done`,
   batchMembers: (e: string, n: number = BATCH_NO) => `q:{event:${e}}:batch_members:${n}`,
   lobbyMembers: (e: string) => `q:{event:${e}}:lobby_members`,
@@ -44,6 +47,7 @@ export const keys = {
 const PREEMPT = redisScript(PREEMPT_LUA);
 const RELEASE = redisScript(RELEASE_LUA);
 const NUMBER_BATCH = redisScript(NUMBER_BATCH_LUA);
+const RB05 = redisScript(RB05_LUA);
 const RECORD = redisScript(RECORD_LUA);
 const BATCH_RECORD = redisScript(BATCH_RECORD_LUA);
 const BATCH_STATE = redisScript(BATCH_STATE_LUA);
@@ -109,8 +113,9 @@ export class RedisEntryStore implements EntryStore {
       String(i.items.length),
       ...i.items.flatMap((it) => [it.eligible ? '1' : '0', it.tokenHash ?? '']),
     ];
-    const r = (await guard(this.redis.evalScript(NUMBER_BATCH, [keys.seq(e), keys.skipped(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e)], args))) as unknown[];
+    const r = (await guard(this.redis.evalScript(NUMBER_BATCH, [keys.seq(e), keys.skipped(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e), keys.epoch(e)], args))) as unknown[];
     const head = str(r[0]);
+    if (head === 'RB05') return i.items.map(() => ({ kind: 'RECOVERING' }));
     if (head === 'EARLY') return i.items.map(() => ({ kind: 'EARLY' }));
     if (head !== 'OK') throw new Error(`번호 Lua가 모르는 값을 돌려줬다: ${head}`);
     const gen = Number(r[1]);
@@ -122,6 +127,15 @@ export class RedisEntryStore implements EntryStore {
       if (kind === 'W') return { kind: 'WAIT', retryAfterSeconds: v };
       throw new Error(`번호 Lua가 모르는 값을 돌려줬다: ${kind}`);
     });
+  }
+
+  async rb05(i: Rb05Input): Promise<Rb05Result> {
+    const e = i.eventId;
+    const args = [i.expireAtMs, i.skippedExpireAtMs, i.skipBase, i.opensAtMs, i.closeAtMs ?? 0, i.lobbyShuffle ? 1 : 0, i.openBatch ? 1 : 0].map(String);
+    const r = (await guard(this.redis.evalScript(RB05, [keys.seq(e), keys.skipped(e), keys.epoch(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e)], args))) as unknown[];
+    if (str(r[0]) === 'DONE') return { kind: 'DONE' };
+    if (str(r[0]) !== 'SKIPPED') throw new Error(`RB-05 Lua가 모르는 값을 돌려줬다: ${str(r[0])}`);
+    return { kind: 'SKIPPED', start: Number(r[1]), end: Number(r[2]), gen: Number(r[3]) };
   }
 
   async number(i: NumberInput): Promise<NumberResult> {

@@ -2,8 +2,8 @@
 // ① 사람 슬롯 선점 → ② 회차 슬롯 번호(구간 안의 묶음 대상은 묶음에 넣음) → ③ 사람 슬롯 기록(묶음이면 묶음 기록, OPEN[14]).
 // 세 단계는 원자적이지 않아 선점 값 PENDING:{요청 ID}로 같은 사람이 갇히지 않게 한다(중간-035). 이름은 명세 specs/queue.qnt의 동작 이름이다.
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
-import { CLOCK, type Clock } from '@peaket/platform';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { type BatchedEntry, ENTRY_STORE, EVENT_SCHEDULES, type EntryStore, type EventSchedules, QUEUE_TOKENS, type QueueTokens } from '../domain/ports.js';
 import {
   BATCH_REPAIR_RETRY_SEC,
@@ -13,6 +13,8 @@ import {
   type EventSchedule,
   keepUntilOf,
   NUMBER_BATCH_MAX,
+  RB05_SKIP_BASE,
+  RECOVERING_RETRY_SEC,
   NUMBER_BATCH_WINDOW_MS,
   PENDING_TTL_MS,
   QueueStoreUnavailable,
@@ -31,6 +33,8 @@ export interface EntryOptions {
   /** 진입 ② 파드별 묶음의 모으는 시간과 최대 건수(ADR-0179, 없으면 2ms·500건) */
   batchWindowMs?: number;
   batchMax?: number;
+  /** RB-05가 건너뛰는 양의 바탕 값(ADR-0181, 없으면 12만 [가정]. 시험이 줄인다) */
+  rb05SkipBase?: number;
 }
 export const DEFAULT_ENTRY_OPTIONS: EntryOptions = { pendingTtlMs: PENDING_TTL_MS, batchWindowMs: NUMBER_BATCH_WINDOW_MS, batchMax: NUMBER_BATCH_MAX };
 
@@ -77,6 +81,8 @@ interface Ctx {
 @Injectable()
 export class EnterQueue {
   readonly #numbers: NumberBatcher;
+  /** 회차마다 동시에 하나만 도는 RB-05(파드 안) */
+  readonly #recovering = new Map<string, Promise<unknown>>();
 
   constructor(
     @Inject(ENTRY_STORE) private readonly store: EntryStore,
@@ -84,6 +90,7 @@ export class EnterQueue {
     @Inject(QUEUE_TOKENS) private readonly tokens: QueueTokens,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(ENTRY_OPTIONS) private readonly options: EntryOptions,
+    @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
   ) {
     this.#numbers = new NumberBatcher(store, options.batchWindowMs ?? NUMBER_BATCH_WINDOW_MS, options.batchMax ?? NUMBER_BATCH_MAX);
   }
@@ -126,6 +133,12 @@ export class EnterQueue {
       },
       { eligible, tokenHash },
     );
+    if (num.kind === 'RECOVERING') {
+      // 장애 전환 뒤 RB-05 전이라 번호를 받지 않았다(OPEN[13], ADR-0181). 선점을 풀고 RB-05를 돈 뒤 다시 오게 한다
+      await this.#release(c);
+      await this.#rb05(c);
+      throw new EntryError('QUEUE_RECOVERING', '대기열 장애 전환 뒤 건너뛸 번호를 적는 중이다', RECOVERING_RETRY_SEC);
+    }
     if (num.kind === 'EARLY' || num.kind === 'WAIT') {
       // 번호를 받지 않았으니 선점을 푼다. 남기면 새 요청 ID로 다시 온 같은 사람이 선점 수명(10초) 동안 409를 받는다
       await this.#release(c);
@@ -174,6 +187,33 @@ export class EnterQueue {
     if (!firstTry) throw new EntryError('ALREADY_WAITING', '묶음 기록을 지운 뒤에도 다시 묶음 기록이 보인다');
     // 결과가 이미 게시돼 묶음 구간은 닫혔다. 같은 요청 ID로 일반 진입(맨 뒤 번호)을 한다
     return this.#enter(c, jny, vr, eligible, tokenHash, false);
+  }
+
+  /** RB-05를 회차마다 한 번만 동시에 부른다. 다른 파드가 먼저 했으면 Lua가 아무것도 하지 않는다 */
+  async #rb05(c: Ctx): Promise<void> {
+    const e = c.i.eventId;
+    let p = this.#recovering.get(e);
+    if (!p) {
+      const s = c.schedule;
+      p = this.store
+        .rb05({
+          eventId: e,
+          expireAtMs: c.keepUntil,
+          skippedExpireAtMs: c.saleEnd,
+          skipBase: this.options.rb05SkipBase ?? RB05_SKIP_BASE,
+          opensAtMs: s.opensAtMs,
+          closeAtMs: batchCloseAtOf(s),
+          lobbyShuffle: s.lobbyShuffle,
+          openBatch: s.openBatch,
+        })
+        .then((r) => {
+          // 운영자는 건너뛴 줄과 진입 재개를 확인한다(docs/infra.md RB-05)
+          if (r.kind === 'SKIPPED') this.logger?.warn({ eventId: e, start: r.start, end: r.end, gen: r.gen }, 'RB-05: 장애 전환 뒤 번호 구간을 건너뛰었다');
+        })
+        .finally(() => this.#recovering.delete(e));
+      this.#recovering.set(e, p);
+    }
+    await p;
   }
 
   /** 선점 풀기는 덤이다: 대기열 Redis가 잠시 안 되면 선점 수명이 지나 풀린다 */

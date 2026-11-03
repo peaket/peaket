@@ -3,10 +3,10 @@ import { createHotRedis, type HotRedis, systemClock } from '@peaket/platform';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { RedisEntryStore, keys } from '../src/modules/entry/adapters/redis-entry-store.js';
 import { RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-schedules.js';
-import type { EventSchedule } from '../src/modules/entry/domain/queue.js';
+import { type EventSchedule, QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
 import { batchCases } from '../test/batch-cases.js';
 import { entryCases } from '../test/entry-cases.js';
-import { newEvent } from '../test/support.js';
+import { newEvent, openSchedule } from '../test/support.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
 const PENDING_TTL_MS = 300;
@@ -51,6 +51,9 @@ entryCases('Valkey Lua', async () => {
       return v === null ? null : String(v);
     },
     counter: async (eventId) => Number((await cmd(keys.seq(eventId), ['GET', keys.seq(eventId)])) ?? 0),
+    failover: async (eventId) => void (await cmd(keys.epoch(eventId), ['HSET', keys.epoch(eventId), 'node', 'old-primary'])),
+    skipped: async (eventId) => ((await cmd(keys.skipped(eventId), ['LRANGE', keys.skipped(eventId), '0', '-1'])) as unknown[]).map(String),
+    lose: async (eventId, seq) => void (await cmd(keys.seq(eventId), ['SET', keys.seq(eventId), String(seq), 'KEEPTTL'])),
   };
 });
 
@@ -72,6 +75,9 @@ batchCases('Valkey Lua', async () => {
       return v === null ? null : String(v);
     },
     counter: async (eventId) => Number((await cmd(keys.seq(eventId), ['GET', keys.seq(eventId)])) ?? 0),
+    failover: async (eventId) => void (await cmd(keys.epoch(eventId), ['HSET', keys.epoch(eventId), 'node', 'old-primary'])),
+    skipped: async (eventId) => ((await cmd(keys.skipped(eventId), ['LRANGE', keys.skipped(eventId), '0', '-1'])) as unknown[]).map(String),
+    lose: async (eventId, seq) => void (await cmd(keys.seq(eventId), ['SET', keys.seq(eventId), String(seq), 'KEEPTTL'])),
     publishResult: async (eventId, hash, seq, gen) => {
       await cmd(keys.batchResult(hash), ['SET', keys.batchResult(hash), `${seq}:${gen}`]);
       await cmd(keys.batchDone(eventId), ['HSET', keys.batchDone(eventId), 'pub:1', String(Date.now())]);
@@ -91,6 +97,96 @@ batchCases('Valkey Lua', async () => {
     },
     dropMember: async (eventId, hash) => void (await cmd(keys.batchMembers(eventId), ['SREM', keys.batchMembers(eventId), hash])),
   };
+});
+
+test('일정사본을읽으면_세대키가없을때지금노드ID를쓰고_오픈전에다르면그자리에서바꾸며건너뛰지않는다', async () => {
+  const eventId = newEvent();
+  const now = Date.now();
+  await writeSchedule(eventId, openSchedule(now, { opensAtMs: now + 60_000 }));
+  const ek = keys.epoch(eventId);
+  expect(await new RedisEventSchedules(redis, systemClock).get(eventId)).not.toBeNull();
+  expect(String(await cmd(ek, ['HGET', ek, 'node']))).toBe('standalone');
+  // 오픈 전에 주 노드가 바뀌었다: 번호가 나간 적이 없으니 세대 키만 바꾼다
+  await cmd(ek, ['HSET', ek, 'node', 'old-primary']);
+  expect(await new RedisEventSchedules(redis, systemClock).get(eventId)).not.toBeNull();
+  expect(String(await cmd(ek, ['HGET', ek, 'node']))).toBe('standalone');
+  expect(Number(await cmd(keys.skipped(eventId), ['LLEN', keys.skipped(eventId)]))).toBe(0);
+  expect(await cmd(keys.seq(eventId), ['GET', keys.seq(eventId)])).toBeNull();
+  // 세대 키 수명은 순번 카운터와 같다(판매 종료 + 1일)
+  const s = openSchedule(now, { opensAtMs: now + 60_000 });
+  expect(Number(await cmd(ek, ['PEXPIRETIME', ek]))).toBe(s.startsAtMs - 24 * 3600_000 + 24 * 3600_000);
+});
+
+test('노드ID를읽다가클러스터꺼짐이아닌오류(권한)가나면_standalone으로넘기지않고실패한다', async () => {
+  const eventId = newEvent();
+  await writeSchedule(eventId, openSchedule(Date.now()));
+  await cmd('x', ['ACL', 'SETUSER', 'nocluster', 'on', '>pw-test-only', '~*', '&*', '+@all', '-cluster']);
+  const limited = await createHotRedis({ url: valkey.url.replace('redis://', 'redis://nocluster:pw-test-only@') });
+  try {
+    const e = await new RedisEventSchedules(limited, systemClock).get(eventId).then(
+      () => null,
+      (x: unknown) => x,
+    );
+    expect(e).toBeInstanceOf(Error);
+    expect(e).not.toBeInstanceOf(QueueStoreUnavailable);
+    expect(String((e as Error).message)).toContain('PEAKET_NODE_ID');
+  } finally {
+    await limited.close();
+  }
+});
+
+test('오픈뒤에는일정사본읽기가다른노드ID를바꾸지않는다_진입②와RB05가맡는다', async () => {
+  const eventId = newEvent();
+  await writeSchedule(eventId, openSchedule(Date.now()));
+  const ek = keys.epoch(eventId);
+  await cmd(ek, ['HSET', ek, 'node', 'old-primary']);
+  expect(await new RedisEventSchedules(redis, systemClock).get(eventId)).not.toBeNull();
+  expect(String(await cmd(ek, ['HGET', ek, 'node']))).toBe('old-primary');
+});
+
+test('RB05는서버시각으로오픈전이고카운터가없으면_건너뛰지않고세대키만바꾸며_카운터가있으면오픈전이라도건너뛴다', async () => {
+  const store = new RedisEntryStore(redis);
+  const now = Date.now();
+  const base = { expireAtMs: now + 86_400_000, skippedExpireAtMs: now + 86_400_000, skipBase: 10, opensAtMs: now + 60_000, lobbyShuffle: true, openBatch: false };
+  const a = newEvent();
+  await cmd(keys.epoch(a), ['HSET', keys.epoch(a), 'node', 'old-primary']);
+  expect(await store.rb05({ eventId: a, ...base })).toEqual({ kind: 'DONE' });
+  expect(String(await cmd(keys.epoch(a), ['HGET', keys.epoch(a), 'node']))).toBe('standalone');
+  expect(await cmd(keys.seq(a), ['GET', keys.seq(a)])).toBeNull();
+  // 오픈 시각이 오픈 뒤에 늦춰진 회차: 카운터가 있으니 번호가 나갔을 수 있다
+  const b = newEvent();
+  await cmd(keys.epoch(b), ['HSET', keys.epoch(b), 'node', 'old-primary']);
+  await cmd(keys.seq(b), ['SET', keys.seq(b), '7']);
+  expect(await store.rb05({ eventId: b, ...base })).toEqual({ kind: 'SKIPPED', start: 8, end: 17, gen: 2 });
+  // 이미 바뀌었으면(다른 파드가 먼저 했다) 아무것도 하지 않는다
+  expect(await store.rb05({ eventId: b, ...base })).toEqual({ kind: 'DONE' });
+  expect(Number(await cmd(keys.seq(b), ['GET', keys.seq(b)]))).toBe(17);
+});
+
+test('일정사본읽기는오픈시각이늦춰져오픈전이돼도_카운터가있으면다른노드표지를바꾸지않는다', async () => {
+  const eventId = newEvent();
+  await writeSchedule(eventId, openSchedule(Date.now(), { opensAtMs: Date.now() + 60_000 }));
+  await cmd(keys.epoch(eventId), ['HSET', keys.epoch(eventId), 'node', 'old-primary']);
+  await cmd(keys.seq(eventId), ['SET', keys.seq(eventId), '5']);
+  expect(await new RedisEventSchedules(redis, systemClock).get(eventId)).not.toBeNull();
+  expect(String(await cmd(keys.epoch(eventId), ['HGET', keys.epoch(eventId), 'node']))).toBe('old-primary');
+});
+
+test('RB05가적은건너뛴구간은판매종료까지_세대키는판매종료+1일까지둔다', async () => {
+  const { EnterQueue } = await import('../src/modules/entry/application/enter-queue.js');
+  const { ACCOUNT, DEVICE, PID, preverifyToken, tokens } = await import('../test/support.js');
+  const eventId = newEvent();
+  const s = openSchedule(Date.now());
+  await writeSchedule(eventId, s);
+  const enter = new EnterQueue(new RedisEntryStore(redis), new RedisEventSchedules(redis, systemClock), tokens, systemClock, { pendingTtlMs: PENDING_TTL_MS, rb05SkipBase: 10 });
+  const go = () => enter.run({ accountId: ACCOUNT, pid: PID, eventId, body: { preverifyToken: preverifyToken(systemClock, eventId), deviceId: DEVICE } });
+  await go();
+  await cmd(keys.epoch(eventId), ['HSET', keys.epoch(eventId), 'node', 'old-primary']);
+  await cmd(keys.dup(PID, eventId), ['DEL', keys.dup(PID, eventId)]);
+  await expect(go()).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
+  const saleEnd = s.startsAtMs - 24 * 3600_000;
+  expect(Number(await cmd(keys.skipped(eventId), ['PEXPIRETIME', keys.skipped(eventId)]))).toBe(saleEnd);
+  expect(Number(await cmd(keys.epoch(eventId), ['PEXPIRETIME', keys.epoch(eventId)]))).toBe(saleEnd + 24 * 3600_000);
 });
 
 test('키수명_사람키는판매종료에_회차키는판매종료+1일에맞춘다', async () => {
