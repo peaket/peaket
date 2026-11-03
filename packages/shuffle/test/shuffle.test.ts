@@ -79,12 +79,13 @@ describe('성질', () => {
     expect(sortHashes(['ff', '0a', 'b1'])).toEqual(['0a', 'b1', 'ff']);
   });
 
+  // 순열인지만 본다(시간 기준은 아래 Q-T6). CI 실행기는 다른 작업과 CPU를 나눠 이 PC에서 1초 안인 것이 8초를 넘기도 해 기본 5초 대신 넉넉히 준다
   test('10만건도_같은원소의순열이다', () => {
     const leaves = Array.from({ length: 100_000 }, (_, i) => createHash('sha256').update(String(i)).digest());
     const out = shuffle(leaves, combinedKey(key, key, merkleRoot(leaves), 'evt-100k'));
     expect(out).toHaveLength(100_000);
     expect(new Set(out).size).toBe(100_000);
-  });
+  }, 120_000);
 
   // 시간 기준(Q-T6, 비콘 뒤 5초 안 게시)은 PoC 0.5.3(BUILD_ORDER BAS-100)에서 조용한 기계로 정한다. 공용 시험 게이트에서는
   // 다른 작업과 CPU를 나눠 시간이 크게 흔들려(CI 실행기에서 71초, 이 PC 혼자서 5초대) 켤 때만 잰다: PEAKET_BENCH=1 pnpm --filter @peaket/shuffle test
