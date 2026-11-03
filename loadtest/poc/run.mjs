@@ -2,11 +2,11 @@
 // wbs 0.5.1 PoC 측정을 차례로 돈다(loadtest/poc/README.md). 측정마다 결과 JSON과 장부 수집 인자를 .cache/peaket-poc/out/에 남기고,
 // 끝나면 record.mjs가 성능 장부(docs/perf-ledger/runs/)로 옮긴다. 실패한 측정은 기록하고 다음으로 넘어간다.
 // 규칙(docs/perf-ledger.md §3, docs/verification.md §3.5): 오픈 모델, 예열 제외, Redis는 TLS 켬 3회·끔 1회(판정은 켬), 호스트 지표.
-// 쓰는 법: node loadtest/poc/run.mjs [묶음 이름...]   묶음: incr clients behaviors vt41 kafka seat (기본: 모두, 이 순서)
+// 쓰는 법: node loadtest/poc/run.mjs [묶음 이름...]   묶음: incr clients behaviors vt41 kafka seat number (기본: number 빼고 모두, 이 순서)
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { IMAGES, NET, bench, build, ensureNet, kafkaDown, kafkaUp, nodesArg, valkeyDown, valkeyUp } from './stack.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -28,6 +28,13 @@ const tryDocker = (...args) => {
     return null;
   }
 };
+
+/** 진입 ② Lua 원문을 queue-svc에서 가져와 측정 이미지의 lua/에 쓴다. 운영 원문과 같게 하려고 사본은 커밋하지 않는다(.gitignore) */
+async function syncEntryLua() {
+  const m = await import(pathToFileURL(join(ROOT, 'services', 'queue-svc', 'src', 'modules', 'entry', 'adapters', 'entry-lua.ts')).href);
+  const head = '-- 생성물: services/queue-svc/src/modules/entry/adapters/entry-lua.ts의 NUMBER_LUA. loadtest/poc/run.mjs가 측정 전에 쓴다(고치지 않는다)\n';
+  writeFileSync(join(ROOT, 'loadtest', 'poc', 'bench', 'lua', 'entry-number.lua'), head + m.NUMBER_LUA);
+}
 
 /** 측정 하나를 돌리고 장부 수집 인자를 남긴다 */
 function record(entry) {
@@ -59,6 +66,21 @@ const groups = {
             ledger: { kpi: 'NFR-001', rps: 200000, duration: 60, warmup: 15, scenario: 'loadtest/poc/bench/src/rate.mjs', scenarioArgs: `--op ${op} --rate 200000 --procs 4`, redisTls: tls, pairOf: `${DAY}-incr-${op}-${tls ? 'notls' : 'tls'}-r1`, notes: `한 키 INCR(${op === 'incr' ? '직접' : '파드별 INCRBY 2ms 묶음'}), node-redis 6.3.0, 진입 서버 4대를 프로세스 4개로 흉내(컨테이너 CPU 6)` },
           });
         }
+      }
+    }
+  },
+  // NFR-001 다시 재기(BUILD_ORDER PRF-060이 넘긴 것): 한 키에 진입 ② Lua(queue-svc NUMBER)를 20만/s. 로비·묶음 표시가 선 뒤의 평시 경로
+  // (서버 시각 → 세대 → 표시 확인 둘 → INCR → 수명 늘리기)라 INCR 하나보다 엔진 일이 많다
+  async number() {
+    for (const tls of [true, false]) {
+      await valkeyUp({ tls });
+      for (let r = 1; r <= (tls ? 3 : 1); r += 1) {
+        const id = `${DAY}-number-${tls ? 'tls' : 'notls'}-r${r}`;
+        runBench(id, {
+          cpus: '6',
+          args: ['src/rate.mjs', '--nodes', N, '--tls', String(tls), '--client', 'node-redis', '--op', 'number', '--rate', '200000', '--procs', '4', '--duration', '60', '--warmup', '15'],
+          ledger: { kpi: 'NFR-001', rps: 200000, duration: 60, warmup: 15, scenario: 'loadtest/poc/bench/src/rate.mjs', scenarioArgs: '--op number --rate 200000 --procs 4', redisTls: tls, pairOf: `${DAY}-number-${tls ? 'notls' : 'tls'}-r1`, notes: '한 키 진입 ② Lua(queue-svc NUMBER: 서버 시각·세대·로비와 묶음 표시 확인·INCR·수명 늘리기, 표시가 선 뒤의 평시 경로), node-redis 6.3.0, 진입 서버 4대를 프로세스 4개로 흉내(컨테이너 CPU 6)' },
+        });
       }
     }
   },
@@ -327,6 +349,7 @@ if (want === null) {
 } else {
 const order = want.length ? want : ['incr', 'clients', 'behaviors', 'vt41', 'kafka', 'seat'];
 log(`시작: ${order.join(', ')}`);
+await syncEntryLua();
 build();
 execFileSync('docker', ['build', '-q', '-f', 'packages/platform/bench/vt41/Dockerfile', '-t', 'peaket/poc-vt41:local', '.'], { cwd: ROOT, stdio: 'ignore' });
 for (const g of order) {

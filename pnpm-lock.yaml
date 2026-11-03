@@ -864,6 +864,9 @@ importers:
       '@peaket/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@peaket/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2

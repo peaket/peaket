@@ -293,6 +293,10 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-03 | 2026-11-03-gen-calib-c8-r16000-mvzs2y231816 | NFR-013 | v0 | local-gen | 16,000 RPS | 6.66 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c8-r16000-mvzs2y231816/ |
 | 2026-11-03 | 2026-11-03-gen-calib-c8-r4000-mvzs2y231816 | NFR-013 | v0 | local-gen | 4,000 RPS | 0.57 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c8-r4000-mvzs2y231816/ |
 | 2026-11-03 | 2026-11-03-gen-calib-c8-r8000-mvzs2y231816 | NFR-013 | v0 | local-gen | 8,000 RPS | 0.38 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c8-r8000-mvzs2y231816/ |
+| 2026-11-03 | 2026-11-03-number-notls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 792 | 63.0% | 무효(발생기 병목: 못 보낸 요청=34699) | 측정함 | 0 | perf-ledger/runs/2026-11-03-number-notls-r1-local-poc/ |
+| 2026-11-03 | 2026-11-03-number-tls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 395 | 55.1% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-03-number-tls-r1-local-poc/ |
+| 2026-11-03 | 2026-11-03-number-tls-r2-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 559 | 60.6% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-03-number-tls-r2-local-poc/ |
+| 2026-11-03 | 2026-11-03-number-tls-r3-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 875 | 57.6% | 무효(발생기 병목: 못 보낸 요청=358980) | 측정함 | 0 | perf-ledger/runs/2026-11-03-number-tls-r3-local-poc/ |
 <!-- ledger:end -->
 
 표준 서식 예시 (참고용 Mock 데이터):

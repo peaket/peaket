@@ -19,11 +19,16 @@ const warmupS = Number(a.warmup ?? 15);
 const KEY = 'q:{event:poc-entry}:seq';
 const EVENT = 'poc-hold';
 const hk = (s) => `s:{event:${EVENT}}:${s}`;
+// 진입 ② Lua의 회차 키(KEY와 같은 슬롯). 인자: 회차 키 수명, 오픈(1분 전), 묶음 구간 끝(지남), 로비 셔플 켬, 묶음 켬, 묶음 대상 아님, 토큰 해시 없음, 참가자 목록 수명
+const ek = (s) => `q:{event:poc-entry}:${s}`;
+const NUMBER_KEYS = [KEY, ek('skipped'), ek('batch_done'), ek('batch_members:1'), ek('lobby_members')];
 const HOLD_SEATS = 10_000_000;
 
 if (a.worker === 'true') {
   // ---- 진입 서버 하나 ----
-  const c = await connect(client, { nodes, tls, scripts: op === 'hold' ? ['hold'] : [], timeoutMs: Number(a.timeout ?? 100) });
+  const c = await connect(client, { nodes, tls, scripts: op === 'hold' ? ['hold'] : op === 'number' ? ['entry-number'] : [], timeoutMs: Number(a.timeout ?? 100) });
+  const t0 = Date.now();
+  const NUMBER_ARGV = [t0 + 2 * 86_400_000, t0 - 60_000, t0 - 58_000, '1', '1', '0', '', t0 + 86_400_000];
   const batchMs = Number(a['batch-ms'] ?? 2);
   let pending = [];
   let timer;
@@ -42,6 +47,8 @@ if (a.worker === 'true') {
   };
   const ops = {
     incr: () => c.incr(KEY),
+    // queue-svc 진입 ② Lua(원문은 run.mjs가 lua/entry-number.lua로 옮긴다)
+    number: () => c.run('entry-number', NUMBER_KEYS, NUMBER_ARGV),
     batch: () =>
       new Promise((resolve, reject) => {
         pending.push({ resolve, reject });
@@ -80,6 +87,10 @@ const s = cluster.slots[keySlot];
 const owner = cluster.masters.find((m) => m.host === s.master.host && m.port === s.master.port);
 const onOwner = async (args) => (await cluster.nodeClient(owner)).sendCommand(args);
 await onOwner(['FLUSHALL']);
+if (op === 'number') {
+  // 로비·묶음 표시가 이미 선 회차(오픈 뒤 평시): Lua는 표시를 보기만 하고 INCR한다
+  await cluster.hSet(ek('batch_done'), { lobby: '1:0:1', 1: '1:0:1' });
+}
 if (op === 'hold') {
   await cluster.set(hk('epoch'), '1:poc');
   await cluster.hSet(hk('ctl'), { paused: '0', suspended: '0' });

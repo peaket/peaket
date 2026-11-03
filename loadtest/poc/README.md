@@ -9,7 +9,9 @@ PC의 Docker 엔진에 측정용 망 `peaket-poc` 하나를 만들고, 그 안�
 저장소 뿌리에서 실행합니다. Node 24와 Docker 엔진, `openssl`이 있어야 합니다.
 
 ```bash
-node loadtest/poc/run.mjs                 # 모든 측정을 차례로(약 3시간 반). 묶음 이름을 주면 그것만: incr clients behaviors vt41 kafka seat
+node loadtest/poc/run.mjs                 # 모든 측정을 차례로(약 3시간 반). 묶음 이름을 주면 그것만: incr clients behaviors vt41 kafka seat number
+                                          # number(2026-11-03 더함)는 기본 묶음에 들지 않는다: queue-svc 진입 ② Lua 원문(services/queue-svc/.../entry-lua.ts)을
+                                          # 측정 전에 bench/lua/entry-number.lua로 옮겨(커밋하지 않음) 한 키 20만/s로 잰다(BUILD_ORDER PRF-070)
 node loadtest/poc/record.mjs              # 결과를 성능 장부로 옮기고 장부 표를 다시 만든다
 node loadtest/poc/stack.mjs down          # 컨테이너와 망을 지운다
 ```

@@ -98,12 +98,12 @@ components:
       description: "구간별 대기 상태 파일(CDN 1초 캐시. 입장 임박 구간 파일은 다음 생성 시각까지만 캐시한다(Expires, 낡은 값 허용 없음, ADR-0110). 차례에서 먼 구간의 수명을 늘리는 방식은 Phase 2에서 정함, queue-admission §4). 사용자별 값 없음. 대기 화면 진행 막대의 '처음 받은 앞 인원'은 브라우저가 처음 계산한 앞 인원을 세션 저장소에 두고 쓰므로 이 파일에 새 값이 없다(추천 적용 2026-10-14, ADR-0063)"
       properties:
         serving: { type: integer }
-        servingRate: { type: number, description: 차례 진행 속도(번호/초) }
+        servingRate: { type: number, description: "차례 진행 속도(번호/초). 다 지난 최근 10칸 [가정](1초 칸, 지금 칸 제외) 동안 지난 유효 번호 수 ÷ 칸 수(창 앞 기록이 있으면 10, 없으면 창 안 첫 기록 칸부터 지난 칸 끝까지), 소수점 셋째 자리(추천 적용 2026-11-03, queue-admission §4)" }
         saleStatus: { type: string, enum: [ON_SALE, PAUSED, ALL_HELD, TIER_SOLD_OUT, SOLD_OUT, ENDED], description: "회차 판매 상태(docs/planning/03 §2.15, purchase-svc 판정)에 판매 일시정지·판매 중지(PAUSED)와 등급 매진(TIER_SOLD_OUT)을 덧씌운 값이고, ENDED > SOLD_OUT > PAUSED > ALL_HELD > TIER_SOLD_OUT > ON_SALE 순으로 앞의 것을 쓴다. ALL_HELD는 일시 매진(가용 좌석 0이지만 홀드나 결제 중인 판매 예약이 남음)이라 대기는 이어지고 입장만 멈춘다. SOLD_OUT은 가용·홀드·결제 중이 모두 0인 매진이고, 판매 종료 전에 좌석이 돌아오면 ON_SALE로 돌아온다(매진 풀림, 추천 적용 2026-10-28, ADR-0122). ENDED는 그 회차의 판매 종료(공연 시작 24시간 전, event.starts_at − 24시간)가 지남. 차례 전 대기는 끝나고(대기 기록 SALE_END) 대기 화면은 ended로 바뀌며 폴링을 멈춘다(ADR-0063 결정 11, 소유자 결정 2026-10-14, ADR-0064)" }
         soldOutTiers: { type: array, items: { type: string }, description: "매진된 등급. 대기 화면 기본 영역에는 등급별 현황을 보이지 않고 좌석 자동 배정 공연의 희망 조건 줄 경고에만 쓴다(소유자 결정 2026-10-14, ADR-0063)" }
         removedUpToServing: { type: integer }
         removedBeforeSegment: { type: integer }
-        removedBitmap: { type: string, description: base64 125바이트 }
+        removedBitmap: { type: string, description: "base64 125바이트. k번째 비트(0부터, 바이트 안에서는 높은 비트부터)가 이 구간의 번호 s×1,000+1+k이고, 켜져 있으면 빠진 번호(장애 전환 때 건너뛴 구간 포함, 추천 적용 2026-11-03)" }
         banner: { type: string }
         generatedAtMs: { type: integer, format: int64, description: "파일을 만든 서버 시각(유닉스 밀리초). 생성은 매초 경계에 한다(추천 적용 2026-10-28, ADR-0110)" }
         servingSteps: { type: array, description: "입장 임박 구간 파일에만. 최근 5초 [가정]의 serving 전진 기록([전진 시각(유닉스 밀리초), 그때의 serving]). 브라우저는 serving이 내 번호를 넘은 전진의 시각으로 차례 반영 지연(queue_reflect_ms, NFR-002)을 잰다(ADR-0110)", items: { type: array, minItems: 2, maxItems: 2, items: { type: integer, format: int64 } } }
@@ -1277,7 +1277,7 @@ paths:
       summary: 구간별 대기 상태 파일(인증 없음, 쿠키 없음, CDN 1초 캐시. 입장 임박 구간은 다음 생성 시각까지)
       description: "FR-007, POL-007. NFR-002. 같은 구간 1,000명이 같은 파일. 매진 시 saleStatus=SOLD_OUT으로 폴링 중단(POL-015). 입장 임박 구간(그 구간의 첫 번호까지 예상 대기 60초 이내) 파일은 Expires = 생성 시각 + 1초, Cache-Control: public(max-age·stale-while-revalidate 없음)으로 내고, 그 밖 구간은 max-age=1, stale-while-revalidate=2다. 브라우저는 cache: no-store로 묻는다. 캐시 응답의 Date는 노출하지 않는다(Access-Control-Expose-Headers: Retry-After, 추천 적용 2026-10-28, ADR-0110)"
       parameters: [{ $ref: '#/components/parameters/EventId' }, { name: segment, in: path, required: true, schema: { type: integer } }]
-      responses: { '200': { description: "상태. 폴링을 늦추라는 힌트는 본문 pollHintMs로 준다(200 응답에는 Retry-After를 싣지 않고, 있어도 브라우저가 읽지 않는다, 추천 적용 2026-10-28, 기술 검토 중간-032)", content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "원본 과부하. Retry-After(초)는 다시 묻기의 하한이고 브라우저는 그 위로만 0~20% 지터를 더한다(기술 검토 중간-032·038)" } }
+      responses: { '200': { description: "상태. 폴링을 늦추라는 힌트는 본문 pollHintMs로 준다(200 응답에는 Retry-After를 싣지 않고, 있어도 브라우저가 읽지 않는다, 추천 적용 2026-10-28, 기술 검토 중간-032)", content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }, '404': { $ref: '#/components/responses/Problem', description: "queue-not-found: 없는 회차(일정 사본 없음)·마지막 구간(seq가 든 구간) 뒤 100구간 [가정]보다 뒤 구간·틀린 파일 이름. Cache-Control: public, max-age=1(추천 적용 2026-11-03)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "원본 과부하. Retry-After(초)는 다시 묻기의 하한이고 브라우저는 그 위로만 0~20% 지터를 더한다(기술 검토 중간-032·038). 처음 켤 때 대기열 Redis가 잠시 안 되면 dependency-unavailable, Retry-After 1초, Cache-Control: no-store다(추천 적용 2026-11-03)" } }
   /v1/queues/{eventId}/shuffle-results/{hashPrefix}.json:
     servers: [{ url: 'https://queue-files.peaket.example', description: "대기열 파일 배포(ADR-0058)" }]
     get:

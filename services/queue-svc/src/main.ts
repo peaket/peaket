@@ -1,6 +1,7 @@
 // queue-svc 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
-// 앱 포트(REST: 사전 검증 POST /v1/queues/{eventId}/pre-verifications, 진입 POST …/entries)·관리 포트(/metrics, /ready)는 서비스 뼈대가 연다.
+// 앱 포트(REST: 사전 검증 POST /v1/queues/{eventId}/pre-verifications, 진입 POST …/entries, 대기 상태 파일 GET …/segment-states/{segment}.json)
+// ·관리 포트(/metrics, /ready)는 서비스 뼈대가 연다.
 import 'reflect-metadata';
 import { createHotRedis, createService } from '@peaket/platform';
 import { AppModule } from './app.module.js';
@@ -19,7 +20,9 @@ if (!url && clusterUrls.length === 0) throw new Error('PEAKET_QUEUE_REDIS_URL이
 const tokens = HmacQueueTokens.fromEnv(process.env);
 const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url });
 // 위험 판정: trust-svc가 생기기 전(BUILD_ORDER BOT-050)에는 늘 축소 운영(사람 확인 보류)이다
-const service = await createService({ name: SERVICE, module: AppModule.register({ redis, tokens, risk: unavailableRisk }) });
+// 대기열 파일의 교차 출처 허용: 소비자 웹 하나(환경마다 주소가 다르다, 없으면 운영 주소)
+const webOrigin = process.env.PEAKET_WEB_ORIGIN;
+const service = await createService({ name: SERVICE, module: AppModule.register({ redis, tokens, risk: unavailableRisk, state: { ...(webOrigin ? { webOrigin } : {}) } }) });
 await service.listen();
 
 process.once('SIGTERM', () => {

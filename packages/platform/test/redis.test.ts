@@ -4,13 +4,13 @@ import { ClientOfflineError } from 'redis';
 import { describe, expect, test } from 'vitest';
 import { REDIS_CALL_DEADLINE_MS, REDIS_COMMAND_TIMEOUT_MS, RedisConnectError, RedisDeadlineError, hotRedisOver, isRedisUnavailable, redisClusterOptions, redisScript, type RawRedis } from '../src/redis.js';
 
-function raw(send: RawRedis['send']): RawRedis & { calls: { key: string | undefined; args: string[] }[] } {
-  const calls: { key: string | undefined; args: string[] }[] = [];
+function raw(send: RawRedis['send']): RawRedis & { calls: { key: string | undefined; args: string[]; binary?: boolean }[] } {
+  const calls: { key: string | undefined; args: string[]; binary?: boolean }[] = [];
   return {
     calls,
-    send: async (key, args) => {
-      calls.push({ key, args });
-      return send(key, args);
+    send: async (key, args, binary) => {
+      calls.push({ key, args, ...(binary ? { binary } : {}) });
+      return send(key, args, binary);
     },
     close: async () => {},
     destroy: () => {},
@@ -120,6 +120,24 @@ describe('호출 규칙', () => {
       ['EVAL', 'return KEYS[1]', '1', 'k1', 'a'],
     ]);
     expect(r.calls.every((c) => c.key === 'k1')).toBe(true);
+  });
+
+  test('binary를주면_응답을바이트로받으라고연결에넘긴다_스크립트의EVAL로다시보내기도같다', async () => {
+    const s = redisScript('return KEYS[1]');
+    const r = raw(async (_key, args) => {
+      if (args[0] === 'EVALSHA') throw new Error('NOSCRIPT No matching script. Please use EVAL.');
+      return Buffer.from([0x80]);
+    });
+    const redis = hotRedisOver(r, noSleep);
+    await redis.command(['GETRANGE', 'k', '0', '-1'], { key: 'k', binary: true });
+    await redis.evalScript(s, ['k'], [], { binary: true });
+    await redis.command(['GET', 'k'], { key: 'k' });
+    expect(r.calls.map((c) => [c.args[0], c.binary ?? false])).toEqual([
+      ['GETRANGE', true],
+      ['EVALSHA', true],
+      ['EVAL', true],
+      ['GET', false],
+    ]);
   });
 
   test('마감이지난뒤에는_EVAL을새로보내지않는다', async () => {

@@ -10,7 +10,7 @@
 // - 클러스터는 찾아낸 노드에 defaults와 주소만으로 붙는다. 그래서 시작 주소의 사용자·비밀번호·TLS(rediss)를 defaults에 넣는다
 //   (ElastiCache는 RBAC 사용자와 전송 암호화가 필수, docs/infra.md. 2026-11-03 새 맥락 리뷰)
 import { createHash } from 'node:crypto';
-import { ClientOfflineError, createClient, createCluster, type RedisClusterOptions } from 'redis';
+import { ClientOfflineError, createClient, createCluster, RESP_TYPES, type RedisClusterOptions } from 'redis';
 import type { RedisCommander } from './redis-stream.js';
 
 /** 핫패스 명령 시간 초과(밀리초, 소켓에 쓰기 전까지) */
@@ -53,9 +53,9 @@ export function redisScript(source: string): RedisScript {
   return { source, sha: createHash('sha1').update(source).digest('hex') };
 }
 
-/** 클라이언트 하나(단일 노드나 클러스터)를 감싼 최소 면. key는 클러스터가 노드를 고르는 데 쓴다 */
+/** 클라이언트 하나(단일 노드나 클러스터)를 감싼 최소 면. key는 클러스터가 노드를 고르는 데 쓴다. binary면 문자열 응답을 Buffer로 받는다 */
 export interface RawRedis {
-  send(key: string | undefined, args: string[]): Promise<unknown>;
+  send(key: string | undefined, args: string[], binary?: boolean): Promise<unknown>;
   close(): Promise<void>;
   destroy(): void;
 }
@@ -65,6 +65,8 @@ export interface CallOptions {
   key?: string;
   /** 호출 쪽 마감(밀리초, 기본 100) */
   deadlineMs?: number;
+  /** 문자열 응답을 글자로 풀지 않고 Buffer로 받는다(비트맵처럼 바이트 값을 읽을 때. 글자로 풀면 0x80 같은 바이트가 깨진다) */
+  binary?: boolean;
 }
 
 export interface HotRedis extends RedisCommander {
@@ -75,20 +77,22 @@ export interface HotRedis extends RedisCommander {
 }
 
 const sleepFor = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** 문자열 응답을 Buffer로 받는 명령 옵션(node-redis typeMapping) */
+const BINARY = { typeMapping: { [RESP_TYPES.BLOB_STRING]: Buffer } };
 
 /** 호출 규칙(다시 보내기·마감·스크립트)을 RawRedis 위에 얹는다. 시험은 RawRedis를 바꿔 끼운다 */
 export function hotRedisOver(raw: RawRedis, o: { sleep?: (ms: number) => Promise<void> } = {}): HotRedis {
   const sleep = o.sleep ?? sleepFor;
 
   /** 한 번 보내고, 연결이 끊겨 소켓에 쓰지 못했으면 잠깐 뒤 한 번 더. 마감이 지났으면 다시 보내지 않는다(부른 쪽은 이미 실패를 받았다) */
-  const once = async (key: string | undefined, args: string[], expired: () => boolean): Promise<unknown> => {
+  const once = async (key: string | undefined, args: string[], expired: () => boolean, binary?: boolean): Promise<unknown> => {
     try {
-      return await raw.send(key, args);
+      return await raw.send(key, args, binary);
     } catch (err) {
       if (!(err instanceof ClientOfflineError) || expired()) throw err;
       await sleep(RESEND_DELAY_MS);
       if (expired()) throw err;
-      return raw.send(key, args);
+      return raw.send(key, args, binary);
     }
   };
 
@@ -110,7 +114,7 @@ export function hotRedisOver(raw: RawRedis, o: { sleep?: (ms: number) => Promise
     }
   };
 
-  const command = (args: string[], c: CallOptions = {}) => withDeadline(c.deadlineMs ?? REDIS_CALL_DEADLINE_MS, (expired) => once(c.key, args, expired));
+  const command = (args: string[], c: CallOptions = {}) => withDeadline(c.deadlineMs ?? REDIS_CALL_DEADLINE_MS, (expired) => once(c.key, args, expired, c.binary));
 
   return {
     command,
@@ -120,11 +124,11 @@ export function hotRedisOver(raw: RawRedis, o: { sleep?: (ms: number) => Promise
       withDeadline(c.deadlineMs ?? REDIS_CALL_DEADLINE_MS, async (expired) => {
         const tail = [String(keys.length), ...keys, ...args];
         try {
-          return await once(keys[0], ['EVALSHA', s.sha, ...tail], expired);
+          return await once(keys[0], ['EVALSHA', s.sha, ...tail], expired, c.binary);
         } catch (err) {
           // 마감이 지난 뒤에는 EVAL을 새로 보내지 않는다(부른 쪽은 이미 실패를 받았다)
           if (!(err instanceof Error) || !err.message.startsWith('NOSCRIPT') || expired()) throw err;
-          return once(keys[0], ['EVAL', s.source, ...tail], expired);
+          return once(keys[0], ['EVAL', s.source, ...tail], expired, c.binary);
         }
       }),
     async close() {
@@ -198,7 +202,7 @@ export async function createHotRedis(o: HotRedisOptions): Promise<HotRedis> {
     const cluster = createCluster(redisClusterOptions(o.clusterUrls, state));
     cluster.on('error', () => {});
     raw = {
-      send: (key, args) => cluster.sendCommand(key, false, args),
+      send: (key, args, binary) => cluster.sendCommand(key, false, args, binary ? BINARY : undefined),
       close: () => cluster.close(),
       destroy: () => cluster.destroy(),
     };
@@ -214,7 +218,7 @@ export async function createHotRedis(o: HotRedisOptions): Promise<HotRedis> {
     // 연결 오류는 명령 실패로 드러난다. 주소가 든 오류 문구를 따로 찍지 않는다
     client.on('error', () => {});
     raw = {
-      send: (_key, args) => client.sendCommand(args),
+      send: (_key, args, binary) => client.sendCommand(args, binary ? BINARY : undefined),
       close: () => client.close(),
       destroy: () => client.destroy(),
     };

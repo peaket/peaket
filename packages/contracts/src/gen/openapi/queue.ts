@@ -149,12 +149,12 @@ export const getV1QueuesEventIdSegmentStatesSegmentJsonResponsePollHintMsMin = 0
 
 export const GetV1QueuesEventIdSegmentStatesSegmentJsonResponse = zod.object({
   "serving": zod.int().optional(),
-  "servingRate": zod.number().optional().describe('차례 진행 속도(번호/초)'),
+  "servingRate": zod.number().optional().describe('차례 진행 속도(번호/초). 다 지난 최근 10칸 [가정](1초 칸, 지금 칸 제외) 동안 지난 유효 번호 수 ÷ 칸 수(창 앞 기록이 있으면 10, 없으면 창 안 첫 기록 칸부터 지난 칸 끝까지), 소수점 셋째 자리(추천 적용 2026-11-03, queue-admission §4)'),
   "saleStatus": zod.enum(['ON_SALE', 'PAUSED', 'ALL_HELD', 'TIER_SOLD_OUT', 'SOLD_OUT', 'ENDED']).optional().describe('회차 판매 상태(docs/planning/03 §2.15, purchase-svc 판정)에 판매 일시정지·판매 중지(PAUSED)와 등급 매진(TIER_SOLD_OUT)을 덧씌운 값이고, ENDED > SOLD_OUT > PAUSED > ALL_HELD > TIER_SOLD_OUT > ON_SALE 순으로 앞의 것을 쓴다. ALL_HELD는 일시 매진(가용 좌석 0이지만 홀드나 결제 중인 판매 예약이 남음)이라 대기는 이어지고 입장만 멈춘다. SOLD_OUT은 가용·홀드·결제 중이 모두 0인 매진이고, 판매 종료 전에 좌석이 돌아오면 ON_SALE로 돌아온다(매진 풀림, 추천 적용 2026-10-28, ADR-0122). ENDED는 그 회차의 판매 종료(공연 시작 24시간 전, event.starts_at − 24시간)가 지남. 차례 전 대기는 끝나고(대기 기록 SALE_END) 대기 화면은 ended로 바뀌며 폴링을 멈춘다(ADR-0063 결정 11, 소유자 결정 2026-10-14, ADR-0064)'),
   "soldOutTiers": zod.array(zod.string()).optional().describe('매진된 등급. 대기 화면 기본 영역에는 등급별 현황을 보이지 않고 좌석 자동 배정 공연의 희망 조건 줄 경고에만 쓴다(소유자 결정 2026-10-14, ADR-0063)'),
   "removedUpToServing": zod.int().optional(),
   "removedBeforeSegment": zod.int().optional(),
-  "removedBitmap": zod.string().optional().describe('base64 125바이트'),
+  "removedBitmap": zod.string().optional().describe('base64 125바이트. k번째 비트(0부터, 바이트 안에서는 높은 비트부터)가 이 구간의 번호 s×1,000+1+k이고, 켜져 있으면 빠진 번호(장애 전환 때 건너뛴 구간 포함, 추천 적용 2026-11-03)'),
   "banner": zod.string().optional(),
   "generatedAtMs": zod.int().optional().describe('파일을 만든 서버 시각(유닉스 밀리초). 생성은 매초 경계에 한다(추천 적용 2026-10-28, ADR-0110)'),
   "servingSteps": zod.array(zod.array(zod.int()).min(getV1QueuesEventIdSegmentStatesSegmentJsonResponseServingStepsItemMin).max(getV1QueuesEventIdSegmentStatesSegmentJsonResponseServingStepsItemMax)).optional().describe('입장 임박 구간 파일에만. 최근 5초 [가정]의 serving 전진 기록([전진 시각(유닉스 밀리초), 그때의 serving]). 브라우저는 serving이 내 번호를 넘은 전진의 시각으로 차례 반영 지연(queue_reflect_ms, NFR-002)을 잰다(ADR-0110)'),
