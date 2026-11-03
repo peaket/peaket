@@ -32,7 +32,8 @@ terraform -chdir=infra/stacks/global/github validate
 
 ## 적용 기록
 
-- **2026-11-03(FND-160)**: 소유자가 조직 `peaket`을 만들고 웹에서 저장소를 옮긴 뒤라(위 3·4번을 웹에서 대신 함), `imports.tf`로 `peaket` 저장소와 기본 가지를 가져오고 전체를 적용했다. 결과: 가져오기 2, 새로 만들기 47(팀 아홉과 팀 권한, 규칙 세트 넷, 환경 넷과 배포 가지, 조직 Actions 정책 둘, OIDC 주체 키), 바꾸기 1(저장소 병합 설정), 지우기 0. 소유자 결정으로 `develop` 규칙 세트에 조직 관리자 우회를 두고(`develop_admin_bypass`), 데모 환경이 생길 때까지 `main`의 데모 배포 요구를 뺐다(`main_required_deployments = []`, docs/devops.md §2.2.6). 릴리스 봇 앱(6번)과 비공개 `peaket-bots`(`bots_repository_enabled`, 가져오기가 필요하다)는 아직이다.
+- **2026-11-03(FND-160)**: 소유자가 조직 `peaket`을 만들고 웹에서 저장소를 옮긴 뒤라(위 3·4번을 웹에서 대신 함), `imports.tf`로 `peaket` 저장소와 기본 가지를 가져오고 전체를 적용했다. 결과: 가져오기 2, 새로 만들기 47(팀 아홉과 팀 권한, 규칙 세트 넷, 환경 넷과 배포 가지, 조직 Actions 정책 둘, OIDC 주체 키), 바꾸기 1(저장소 병합 설정), 지우기 0. 소유자 결정으로 `develop` 규칙 세트에 조직 관리자 우회를 두고(`develop_admin_bypass`), 데모 환경이 생길 때까지 `main`의 데모 배포 요구를 뺐다(`main_required_deployments = []`, docs/devops.md §2.2.6). 비공개 `peaket-bots`(`bots_repository_enabled`, 가져오기가 필요하다)는 아직이다.
+- **2026-11-03(FND-160, 6번)**: 소유자가 릴리스 봇 GitHub 앱 `peaket-release-bot`(App ID 5595394, 저장소 권한 contents·pull-requests·workflows 쓰기, 웹훅 없음, `peaket`에만 설치)을 만들고 개인키를 `release` 환경 비밀 `RELEASE_BOT_PRIVATE_KEY`에 넣었다. Client ID는 `release` 환경 변수 `RELEASE_BOT_CLIENT_ID`다. `release_bot_app_id`를 넣어 다시 적용했다(바꾸기 2: `release-hotfix`·`release-tags` 규칙 세트에 봇 우회). 적용 뒤 plan은 바뀔 것 없음이다.
 
 ## 상태
 
