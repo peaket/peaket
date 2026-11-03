@@ -1,18 +1,21 @@
 {
   "spec": "queue",
   "file": "specs/queue.qnt",
-  "specSha256": "e2c2842712e817271391d1ec6b87cf3f874e61b334c9a482bbe6c82c2b969ade",
+  "specSha256": "87344d912bd8425e1efb6402419aefe20860d03e8e2e402f0c9f8bfca847f353",
   "commit": {
-    "sha": "cffc124df6d16b100267fb12e34922bb2428be6b",
-    "dirty": false
+    "sha": "a3d7ffa2e77a30ea611919b953ba90a1d319996f",
+    "dirty": true
   },
-  "date": "2026-11-03T20:21:02+09:00",
-  "scope": "정본 범위(docs/verification.md §2.1): 사람 2명(탭 2개씩, 대기표 4장), admission-ctrl 2대, 대기열 Redis 장애 전환 2회(회차 슬롯·사람 슬롯 합), 리더 교체 2회, 묶음 구간 1개. 전수 검사는 두 범위로 나눈다: 진입 범위(사람 2명, 한 사람은 탭 2개라 대기표 3장, admission-ctrl 1대 교체 없음, 장애 전환 2회)와 리더 범위(대기표 1장, admission-ctrl 2대, 리더 교체 2회, 회차 슬롯 장애 전환 2회). 정본 범위 전체는 시뮬레이션으로 본다. 복제 지연은 장애 전환마다 쓰기 하나",
+  "date": "2026-11-04T01:56:46+09:00",
+  "scope": "정본 범위(docs/verification.md §2.1): 사람 2명(탭 2개씩, 대기표 4장), admission-ctrl 2대, 대기열 Redis 장애 전환 2회(회차 슬롯·사람 슬롯 합), 리더 교체 2회, 묶음 구간 1개. 전수 검사는 범위를 나눈다: 진입 범위(사람 2명, 한 사람은 탭 2개라 대기표 3장, admission-ctrl 1대 교체 없음, 장애 전환 2회, 입장 확정 한 걸음), 리더 범위(대기표 1장, admission-ctrl 2대, 리더 교체 2회, 회차 슬롯 장애 전환 2회), 입장 확정 범위(사람 1명 탭 2개, 묶음 없음, 장애 전환 2회, 입장 확정 네 호출), 복제 지연 두 쓰기 범위(사람 2명, 회차 슬롯 장애 전환 2회, 복제되지 않은 쓰기 2개까지), 진행성 범위(사람 2명, 회차 슬롯 장애 전환 1회, 공정성 가정). 정본 범위 전체(입장 확정 네 호출, 설정 세대가 한 번에 3까지 오름)는 시뮬레이션으로 본다. 복제 지연은 따로 적지 않으면 쓰기 하나",
   "adrs": [
     "0002",
     "0041",
     "0056",
-    "0057"
+    "0057",
+    "0181",
+    "0182",
+    "0183"
   ],
   "tools": {
     "quint": "0.33.1",
@@ -25,7 +28,7 @@
     {
       "main": "queue_proposed",
       "expect": "hold",
-      "why": "진입 범위: PROGRESS OPEN[13]·OPEN[14]의 추천안(장애 전환 뒤 RB-05가 끝날 때까지 번호를 내지 않음, 묶음 참가자의 선점 값을 묶음 기록으로 바꿈)으로 다섯 불변식이 모두 지켜지는지",
+      "why": "진입 범위: RB-05가 끝날 때까지 번호를 내지 않고(ADR-0181), 묶음 참가자의 선점 값을 묶음 기록으로 바꾼(PRF-060) 지금 구현으로 다섯 불변식이 모두 지켜지는지. RB-05는 구현처럼 세대 키로 장애 전환을 알아채고 잃은 묶음 표시를 다시 닫는다(PRF-120)",
       "invariants": [
         "inv_noAdmissionBeforeTurn",
         "inv_noDuplicateNumberInGeneration",
@@ -36,11 +39,11 @@
       "method": "tlc",
       "result": "hold",
       "ok": true,
-      "statesGenerated": 324170524,
-      "distinctStates": 60493883,
+      "statesGenerated": 677036243,
+      "distinctStates": 94031471,
       "depth": 42,
-      "fingerprintCollision": "8.6E-4",
-      "seconds": 602.717
+      "fingerprintCollision": ".0030",
+      "seconds": 1353.881
     },
     {
       "main": "queue_leader",
@@ -56,16 +59,71 @@
       "method": "tlc",
       "result": "hold",
       "ok": true,
-      "statesGenerated": 3041961,
-      "distinctStates": 711520,
-      "depth": 28,
-      "fingerprintCollision": "9.0E-8",
-      "seconds": 15.129
+      "statesGenerated": 5252309,
+      "distinctStates": 1038690,
+      "depth": 31,
+      "fingerprintCollision": "2.4E-7",
+      "seconds": 21.969
+    },
+    {
+      "main": "queue_admit",
+      "expect": "hold",
+      "why": "입장 확정 범위(PRF-120): 입장 확정을 확인·q:adm·입장·마무리 네 호출로 나누고(ADR-0183 결정 1) 곧 입장(SOON) 뒤의 q:adm 되돌리기와 장애 전환을 섞어도, 장애 전환으로 대기표를 두 장 받은 사람이 두 번 입장하지 않고 차례 전 입장이 없는지",
+      "invariants": [
+        "inv_noAdmissionBeforeTurn",
+        "inv_noDuplicateNumberInGeneration",
+        "inv_staleLeaderWritesBounded",
+        "inv_onePersonOneAdmission",
+        "inv_onePersonOneTicket"
+      ],
+      "method": "tlc",
+      "result": "hold",
+      "ok": true,
+      "statesGenerated": 1877328,
+      "distinctStates": 395263,
+      "depth": 31,
+      "fingerprintCollision": "3.2E-8",
+      "seconds": 17.07
+    },
+    {
+      "main": "queue_lag2",
+      "expect": "hold",
+      "why": "복제 지연 두 쓰기 범위(PRF-120): RB-05의 쓰기와 그 뒤 번호를 함께 잃는 연속 장애 전환에서도, 설정 세대가 오른 수만큼 곱한 건너뛰기와 잃은 묶음 표시 인원(ADR-0181 결정 4·5)이 같은 세대 안 번호 중복을 막는지",
+      "invariants": [
+        "inv_noAdmissionBeforeTurn",
+        "inv_noDuplicateNumberInGeneration",
+        "inv_staleLeaderWritesBounded",
+        "inv_onePersonOneAdmission",
+        "inv_onePersonOneTicket"
+      ],
+      "method": "tlc",
+      "result": "hold",
+      "ok": true,
+      "statesGenerated": 23686906,
+      "distinctStates": 3808315,
+      "depth": 37,
+      "fingerprintCollision": "4.1E-6",
+      "seconds": 58.281
+    },
+    {
+      "main": "queue_live",
+      "expect": "hold",
+      "temporal": "fairLiveness",
+      "why": "진행성(PRF-120, 사람 2명·장애 전환 1회): 공정성 가정 아래에서 진입한 탭은 결국 대기표를 받거나 끝나고(묶음에서 빠진 참가는 다시 진입), 대기표를 든 탭은 결국 차례가 오는지(장애 전환으로 잃은 번호도 RB-05의 건너뛰기를 지나 serving이 닿는지. RB-05는 리더가 회차마다 1초에 한 번 부른다)",
+      "invariants": [],
+      "method": "tlc",
+      "result": "hold",
+      "ok": true,
+      "statesGenerated": 1556938,
+      "distinctStates": 242378,
+      "depth": 30,
+      "fingerprintCollision": "1.7E-8",
+      "seconds": 61.026
     },
     {
       "main": "queue_proposed_full",
       "expect": "hold",
-      "why": "정본 범위 전체(진입·리더를 함께). 전수 검사는 상태가 너무 많아(4천만 개를 넘어도 끝나지 않음) 시뮬레이션으로만 본다",
+      "why": "정본 범위 전체(진입·리더·입장 확정 네 호출, 장애 전환 한 번에 설정 세대가 3까지 오름). 전수 검사는 상태가 너무 많아(4천만 개를 넘어도 끝나지 않음) 시뮬레이션으로만 본다",
       "invariants": [
         "inv_noAdmissionBeforeTurn",
         "inv_noDuplicateNumberInGeneration",
@@ -83,12 +141,12 @@
       "distinctStates": null,
       "depth": null,
       "fingerprintCollision": null,
-      "seconds": 9.872
+      "seconds": 12.612
     },
     {
       "main": "queue_canon",
       "expect": "hold",
-      "why": "정본에 적힌 그대로(RB-05가 끝날 때까지 번호를 내지 않음, OPEN[13]을 PRF-080이 2026-11-03 정본에 넣음, ADR-0181. 묶음 기록은 PRF-060)면 다섯 불변식이 지켜진다. queue_proposed와 같은 모듈이라 전수 검사는 그쪽이 하고 여기서는 시뮬레이션만 본다. 2026-11-02 정본(RB-05 전에도 번호를 냄)은 같은 세대 안에서 번호가 겹치는 반례였다",
+      "why": "정본·구현 그대로(입장 확정 네 호출, PRF-120)면 다섯 불변식이 지켜진다. 진입 범위에 입장 확정 네 호출을 더하면 전수 검사가 너무 커서(진입 범위가 이미 6천만 상태) 시뮬레이션만 보고, 네 호출의 전수 검사는 queue_admit이 한다. 2026-11-02 정본(RB-05 전에도 번호를 냄)은 같은 세대 안에서 번호가 겹치는 반례였다",
       "invariants": [
         "inv_noAdmissionBeforeTurn",
         "inv_noDuplicateNumberInGeneration",
@@ -106,12 +164,12 @@
       "distinctStates": null,
       "depth": null,
       "fingerprintCollision": null,
-      "seconds": 8.391
+      "seconds": 11.194
     },
     {
       "main": "queue_canon_batch_dup",
       "expect": "hold",
-      "why": "OPEN[13]의 추천안 + 지금 정본(묶음 참가자의 선점 값을 판매 종료까지 남는 묶음 기록으로 바꿈, OPEN[14]를 PRF-060이 2026-11-03 정본에 넣음)이면 1인 1순번이 지켜진다. queue_proposed와 같은 모듈이라 전수 검사는 그쪽이 하고 여기서는 시뮬레이션만 본다",
+      "why": "묶음 참가자의 선점 값을 판매 종료까지 남는 묶음 기록으로 바꾸면(OPEN[14]를 PRF-060이 2026-11-03 정본에 넣음) 1인 1순번이 지켜진다. 정본이 그 장치를 정하기 전(2026-11-02)에는 결과 게시 전에 선점이 만료돼 같은 사람이 대기표를 하나 더 받는 ⑤ 반례였다. queue_proposed와 같은 모듈이라 전수 검사는 그쪽이 하고 여기서는 시뮬레이션만 본다",
       "invariants": [
         "inv_noAdmissionBeforeTurn",
         "inv_noDuplicateNumberInGeneration",
@@ -129,7 +187,7 @@
       "distinctStates": null,
       "depth": null,
       "fingerprintCollision": null,
-      "seconds": 8.529
+      "seconds": 11.719
     },
     {
       "main": "queue_no_rb05_wait",
@@ -142,11 +200,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 136452,
-      "distinctStates": 44323,
-      "depth": 10,
+      "statesGenerated": 165559,
+      "distinctStates": 38861,
+      "depth": 11,
       "fingerprintCollision": null,
-      "seconds": 10.621,
+      "seconds": 14.217,
       "tlcTrace": "specs/results/queue/queue_no_rb05_wait.tlc.txt",
       "counterexample": "specs/results/queue/queue_no_rb05_wait.itf.json"
     },
@@ -161,11 +219,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 1156,
-      "distinctStates": 540,
+      "statesGenerated": 1243,
+      "distinctStates": 502,
       "depth": 8,
       "fingerprintCollision": null,
-      "seconds": 10.388,
+      "seconds": 11.702,
       "tlcTrace": "specs/results/queue/queue_no_fencing.tlc.txt",
       "counterexample": "specs/results/queue/queue_no_fencing.itf.json"
     },
@@ -180,11 +238,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 7644,
-      "distinctStates": 3202,
+      "statesGenerated": 9825,
+      "distinctStates": 3169,
       "depth": 8,
       "fingerprintCollision": null,
-      "seconds": 10.785,
+      "seconds": 11.831,
       "tlcTrace": "specs/results/queue/queue_no_serving_check.tlc.txt",
       "counterexample": "specs/results/queue/queue_no_serving_check.itf.json"
     },
@@ -199,13 +257,67 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 35382857,
-      "distinctStates": 8150814,
-      "depth": 19,
+      "statesGenerated": 151435060,
+      "distinctStates": 25566413,
+      "depth": 21,
       "fingerprintCollision": null,
-      "seconds": 57.796,
+      "seconds": 262.322,
       "tlcTrace": "specs/results/queue/queue_no_admission_recheck.tlc.txt",
       "counterexample": "specs/results/queue/queue_no_admission_recheck.itf.json"
+    },
+    {
+      "main": "queue_lag2_no_multiplier",
+      "expect": "violate",
+      "targetInvariant": "inv_noDuplicateNumberInGeneration",
+      "why": "V-T1: RB-05의 설정 세대 곱하기를 빼면 RB-05의 쓰기와 그 뒤 번호를 함께 잃은 다음 RB-05가 같은 구간을 건너뛰어 같은 번호·세대를 다시 낸다(ADR-0181 결정 4, TLC 깊이 14)",
+      "invariants": [
+        "inv_noDuplicateNumberInGeneration"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 285090,
+      "distinctStates": 65970,
+      "depth": 15,
+      "fingerprintCollision": null,
+      "seconds": 13.259,
+      "tlcTrace": "specs/results/queue/queue_lag2_no_multiplier.tlc.txt",
+      "counterexample": "specs/results/queue/queue_lag2_no_multiplier.itf.json"
+    },
+    {
+      "main": "queue_lag2_jump",
+      "expect": "violate",
+      "targetInvariant": "inv_noDuplicateNumberInGeneration",
+      "why": "남은 결함(PRF-120 새 맥락 리뷰, docs/review/open-items.md 105번): 첫 장애 전환에서 설정 세대가 3 이상 오르면 곱하기 상한 3을 이미 다 써서, RB-05의 쓰기와 그 뒤 번호를 함께 잃은 다음 RB-05가 같은 구간을 건너뛰어 같은 번호·세대를 다시 낸다(구현도 같다). 소유자 결정 뒤 고치면 지켜짐 기대로 바꾼다",
+      "invariants": [
+        "inv_noDuplicateNumberInGeneration"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 611250,
+      "distinctStates": 147249,
+      "depth": 15,
+      "fingerprintCollision": null,
+      "seconds": 13.497,
+      "tlcTrace": "specs/results/queue/queue_lag2_jump.tlc.txt",
+      "counterexample": "specs/results/queue/queue_lag2_jump.itf.json"
+    },
+    {
+      "main": "queue_live_no_missing_check",
+      "expect": "violate",
+      "temporal": "fairLiveness",
+      "why": "V-T1(진행성): 게시된 묶음의 참가자 목록에 없는 참가의 묶음 기록을 지우고 다시 진입하게 하는 장치(batchMissing)를 빼면 장애 전환으로 SADD를 잃은 참가자가 번호도 다시 진입도 없이 남는다",
+      "invariants": [],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 1536428,
+      "distinctStates": 240190,
+      "depth": 30,
+      "fingerprintCollision": null,
+      "seconds": 56.366,
+      "tlcTrace": "specs/results/queue/queue_live_no_missing_check.tlc.txt"
     }
   ]
 }

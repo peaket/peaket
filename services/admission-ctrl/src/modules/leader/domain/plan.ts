@@ -33,6 +33,8 @@ export const BATCH_WINDOW_DEFAULT_MS = 2_000;
 export const SCAN_BUDGET = 20_000;
 /** RB-05 바탕 값(queue-svc RB05_SKIP_BASE와 같다, ADR-0181 결정 4) */
 export const RB05_SKIP_BASE = 120_000;
+/** 리더가 회차마다 RB-05가 필요한지 보는 간격 [가정]. 세대 키가 지금 노드 표지와 같으면 Lua가 바로 끝난다(진입 ②가 설정 세대를 1초에 한 번 견주는 것과 같다, ADR-0184) */
+export const RB05_CHECK_MS = 1_000;
 
 const DAY_MS = 24 * 3600_000;
 export const saleEndOf = (p: EventPlan): number => p.startsAtMs - DAY_MS;

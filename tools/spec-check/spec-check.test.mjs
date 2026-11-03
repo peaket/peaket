@@ -1,7 +1,9 @@
 // 규칙 모델 검사 실행기 시험(wbs 0.9.1, docs/verification.md §2.2·§2.6, V-T1). Quint·Java 없이 돈다.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { extractTlcTrace, judge, kstTimestamp, loadManifest, parseSimulation, parseTlc, refoundIsCounterexample, resultRecord, runsInSimulation, simulationFor, invariantsFor } from './spec-check.mjs';
+import { createHash } from 'node:crypto';
+import { PINS } from './fetch-tools.mjs';
+import { extractTlcTrace, judge, kstTimestamp, loadManifest, mbtActions, parseSimulation, parseTlc, refoundIsCounterexample, resultRecord, runsInSimulation, simulationFor, invariantsFor, stepActions } from './spec-check.mjs';
 
 const SPEC = `module queue {
   val inv_a = true
@@ -466,4 +468,79 @@ test('V-T1 목록_지켜짐 전수 검사 하나는 불변식을 보는 검사�
   const n = liveManifest();
   n.specs[0].checks[2].simulate = false;
   assert.throws(() => load(n, liveFiles), /simulate/);
+});
+
+// ---- 모델 기반 시험과 잇기(wbs 2.3.4, V-T40) ----
+const MBT_SPEC = `module queue {
+  val inv_a = true
+  val inv_b = true
+  action evKeep: bool = all { x' = x }
+  action enterNumber(p: int): bool = evKeep
+  action admit(p: int, ok: bool): bool = evKeep
+  action rb05: bool = evKeep
+  action unused: bool = evKeep
+  action step = {
+    nondet p = Set(1).oneOf()
+    // leave(p)는 주석이라 세지 않는다
+    any { enterNumber(p), admit(p, true), rb05 }
+  }
+}
+module queue_ok { import queue.* }
+module queue_bad { import queue.* }
+`;
+const ACTIONS = (names) => `export const SPEC_ACTIONS = [\n  ${names.map((n) => `'${n}'`).join(',\n  ')},\n] as const;\n`;
+const MBT_MODULES = [{ main: 'queue_ok', traces: 2 }];
+const mbtFiles = (names, specText = MBT_SPEC, hash = createHash('sha256').update(specText).digest('hex'), over = {}) => ({
+  'specs/queue.qnt': specText,
+  'test/actions.ts': ACTIONS(names),
+  'test/traces/manifest.json': JSON.stringify({ specSha256: hash, quint: PINS.quint, modules: MBT_MODULES, ...over }),
+});
+const MBT = { actions: 'test/actions.ts', traces: 'test/traces', modules: MBT_MODULES };
+
+test('V-T40 이름목록_명세 step이 고르는 동작은 선언된 action 가운데 step 본문에 나오는 것이다(도우미·주석·쓰지 않는 동작은 빼고 이름순)', () => {
+  assert.deepEqual(stepActions(MBT_SPEC), ['admit', 'enterNumber', 'rb05']);
+});
+
+test('V-T40 이름목록_step 본문 주석 안의 중괄호는 세지 않는다', () => {
+  const src = MBT_SPEC.replace('    // leave(p)는 주석이라 세지 않는다', '    // 주석의 } 닫는 괄호와 leave(p)');
+  assert.deepEqual(stepActions(src), ['admit', 'enterNumber', 'rb05']);
+});
+
+test('V-T40 재생_기록을 만든 Quint 판이나 기록을 낼 모듈 목록이 바뀌면 다시 만들라고 거절한다', () => {
+  const ok = ['enterNumber', 'admit', 'rb05'];
+  const hash = createHash('sha256').update(MBT_SPEC).digest('hex');
+  assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(ok, MBT_SPEC, hash, { quint: '0.0.1' })), /Quint 0\.0\.1로 만들었다/);
+  assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(ok, MBT_SPEC, hash, { modules: [{ main: 'queue_ok', traces: 4 }] })), /모듈 목록이/);
+});
+
+test('V-T40 이름목록_시험 파일의 SPEC_ACTIONS 목록을 적힌 순서대로 읽는다', () => {
+  assert.deepEqual(mbtActions(ACTIONS(['rb05', 'admit'])), ['rb05', 'admit']);
+  assert.throws(() => mbtActions('export const X = []'), /SPEC_ACTIONS/);
+});
+
+test('V-T40 이름목록_명세와 시험 명령 이름이 같고 기록이 지금 명세로 만든 것이면 받는다', () => {
+  const m = load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit', 'rb05']));
+  assert.equal(m.specs[0].mbt.actions, 'test/actions.ts');
+});
+
+test('V-T40 이름목록_명세에만 있거나 시험에만 있거나 두 번 적힌 이름이 있으면 병합을 막는다', () => {
+  assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit'])), /명세에만: rb05/);
+  assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit', 'rb05', 'leave'])), /시험에만: leave/);
+  assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit', 'rb05', 'admit'])), /두 번: admit/);
+});
+
+test('V-T40 재생_동작 기록이 다른 명세(해시)로 만든 것이거나 목록이 없으면 다시 만들라고 거절하고, traces 명령은 해시를 보지 않는다', () => {
+  const stale = mbtFiles(['enterNumber', 'admit', 'rb05'], MBT_SPEC, 'ab'.repeat(32));
+  assert.throws(() => load(manifest({ mbt: MBT }), stale), /지금 명세로 만든 것이 아니다.*traces --spec queue/);
+  const none = mbtFiles(['enterNumber', 'admit', 'rb05']);
+  delete none['test/traces/manifest.json'];
+  assert.throws(() => load(manifest({ mbt: MBT }), none), /manifest\.json\)이 없다/);
+  assert.equal(loadManifest(JSON.stringify(manifest({ mbt: MBT })), (f) => stale[f], { traceHash: false }).specs.length, 1);
+});
+
+test('V-T40 목록_mbt는 시험 파일·기록 폴더·기록을 낼 모듈(명세에 있는 것)과 기록 수를 적어야 한다', () => {
+  const files = mbtFiles(['enterNumber', 'admit', 'rb05']);
+  assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [] } }), files), /mbt는/);
+  assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [{ main: 'queue_none', traces: 2 }] } }), files), /queue_none가/);
+  assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [{ main: 'queue_ok', traces: 0 }] } }), files), /양의 정수/);
 });

@@ -47,8 +47,9 @@ const RULES = [
     /^(loadtest\/|services\/v0-monolith\/src\/modules\/queue\/domain\/polling\.ts$|services\/v0-monolith\/src\/modules\/inventory\/domain\/inventory\.ts$|services\/invariant-checker\/src\/records\.ts$|services\/v0-monolith\/src\/gateway\/token\.ts$|deploy\/envs\/local\/v0-gateway\.yaml$|tools\/perf-ledger\/(k6-summary\.js|collect\.py|ledgerlib\.py)$|tools\/local\/(cluster|tools|v0-token)\.mjs$|\.github\/workflows\/loadtest-check\.yml$)/,
     ['loadtest'],
   ],
-  // 규칙 모델 검사(spec-check.yml, wbs 0.9.1): 명세·검사 도구·그 워크플로가 바뀌면 형식 검사와 시뮬레이션(docs/verification.md §2.2)
-  [/^(specs\/|tools\/spec-check\/|\.github\/workflows\/spec-check\.yml$)/, ['specs']],
+  // 규칙 모델 검사(spec-check.yml, wbs 0.9.1): 명세·검사 도구·그 워크플로가 바뀌면 형식 검사와 시뮬레이션(docs/verification.md §2.2).
+  // 모델 기반 시험의 명령 이름 목록·재생 기록(services/*/test-int/*-model/, specs.json의 mbt)이 바뀌어도 이름 목록 검사를 돌린다(wbs 2.3.4, V-T40)
+  [/^(specs\/|tools\/spec-check\/|\.github\/workflows\/spec-check\.yml$|services\/[^/]+\/test-int\/[a-z0-9-]+-model\/)/, ['specs']],
   [/^tools\//, ['tools']],
   [/^\.github\//, ['ci']],
 ];

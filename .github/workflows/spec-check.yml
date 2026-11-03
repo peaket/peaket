@@ -3,6 +3,8 @@
 # - full: TLC 전수 검사. 주 1회(월요일 03:00 KST)와, 명세 목록(specs/specs.json)이 적은 관련 ADR이 바뀔 때(ci.yml의 specs_full)
 #   결과 파일(specs/results/)은 내려받을 묶음으로 남긴다. 저장소의 결과 파일은 사람이 로컬에서 `full --write`로 고쳐 커밋한다
 # 검사 도구(Quint, Apalache 묶음 안의 TLC, Quint 평가기)는 고정 판·고정 해시로 받는다(tools/spec-check/fetch-tools.mjs). 외부 계정은 필요 없다
+# 명세마다 잡 하나다(목록은 specs/specs.json에서 읽는다). 대기열 명세의 전수 검사가 길어져(2026-11-04 PRF-120, 로컬 8코어 30분 남짓) 세 명세를 한 잡에 넣으면
+# 러너(4코어)에서 90분을 넘을 수 있다
 # GitHub는 워크플로 파일이 바뀐 푸시에서 그 워크플로를 등록한다. 첫 푸시(2026-11-03)에 함께 올라간 이 파일은 등록되지 않아 수동·예약 실행이 돌지 않았다(FND-160에서 찾음).
 name: spec-check
 
@@ -21,9 +23,26 @@ permissions:
   contents: read
 
 jobs:
+  list:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      specs: ${{ steps.list.outputs.specs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: list
+        run: echo "specs=$(node -p "JSON.stringify(require('./specs/specs.json').specs.map((s) => s.name))")" >> "$GITHUB_OUTPUT"
+
   spec:
+    needs: list
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        spec: ${{ fromJSON(needs.list.outputs.specs) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,16 +70,17 @@ jobs:
       - run: node --test "tools/spec-check/*.test.mjs"
       - env:
           MODE: ${{ inputs.mode || 'full' }}
+          SPEC: ${{ matrix.spec }}
         run: |
           case "$MODE" in pr|full) ;; *) echo "::error::mode는 pr 또는 full이다: $MODE"; exit 1 ;; esac
           if [ "$MODE" = full ]; then
-            node tools/spec-check/spec-check.mjs full --write
+            node tools/spec-check/spec-check.mjs full --spec "$SPEC" --write
           else
-            node tools/spec-check/spec-check.mjs pr
+            node tools/spec-check/spec-check.mjs pr --spec "$SPEC"
           fi
       - if: ${{ always() && (inputs.mode || 'full') == 'full' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: spec-results
+          name: spec-results-${{ matrix.spec }}
           path: specs/results/
           if-no-files-found: ignore

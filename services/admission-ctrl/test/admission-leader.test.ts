@@ -70,7 +70,8 @@ describe('교체 순서', () => {
     w.state.gen = 3;
     await w.leader.tick();
     await w.leader.tick();
-    expect(w.calls.filter((c) => c !== 'events')).toEqual(['bump:e1:3', 'control', 'tick:e1:3', 'control', 'tick:e1:3']);
+    // RB-05 확인은 회차마다 1초에 한 번이라 두 번째 주기에는 없다
+    expect(w.calls.filter((c) => c !== 'events')).toEqual(['bump:e1:3', 'control', 'tick:e1:3', 'rb05:e1', 'control', 'tick:e1:3']);
   });
 
   test('[Q-T30] FENCED를받으면_그세대로는더쓰지않고_새세대가오면세대부터다시올린다', async () => {
@@ -135,6 +136,22 @@ describe('닫기와 게시', () => {
     done.state.gen = 1;
     await done.leader.tick();
     expect(done.calls.some((c) => c.startsWith('close'))).toBe(false);
+  });
+
+  test('장애전환뒤_진입이오지않아도_리더가회차마다1초에한번RB-05를부른다(조용한회차에서잃은번호의대기자가멈추지않게, ADR-0184)', async () => {
+    const w = world();
+    w.state.gen = 1;
+    await w.leader.tick();
+    await w.leader.tick();
+    expect(w.calls.filter((c) => c.startsWith('rb05'))).toEqual(['rb05:e1']);
+    w.clock.advance(1_000);
+    await w.leader.tick();
+    expect(w.calls.filter((c) => c.startsWith('rb05'))).toEqual(['rb05:e1', 'rb05:e1']);
+    // 닫기가 RB05를 돌려줘 이번 주기에 이미 불렀으면 다시 부르지 않는다
+    const c = world({ tick: { batchMarked: 0 }, close: 'RB05' });
+    c.state.gen = 1;
+    await c.leader.tick();
+    expect(c.calls.filter((x) => x.startsWith('rb05'))).toEqual(['rb05:e1']);
   });
 
   test('구간끝전에는묶음을닫지않는다', async () => {
