@@ -1,6 +1,6 @@
 # ADR-0180: 실패 목록 셋(경합·외부 호출·자원 한도)을 정본 표로 두고, 기능을 더할 때 데이터 구조보다 먼저 줄을 쓴다(추천 적용, 2026-11-03)
 
-- **상태**: 채택(2026-11-03, 소유자 지시 "빈틈 채워줘". 바깥 강의와 설계를 항목별로 대조해 찾은 빈틈을 채운다. 표의 자리·칸·줄 늘리기 규칙과 [가정] 값은 추천 적용)
+- **상태**: 채택(2026-11-03, 소유자 지시 "빈틈 채워줘". 바깥 강의와 설계를 항목별로 대조해 찾은 빈틈을 채운다. 표의 자리·칸·줄 늘리기 규칙과 [가정] 값은 추천 적용). 2026-11-03(진행 파일 반영 때 대조): 결정 7의 한 문장 목표는 docs/planning/01-overview.md §3.2에 넣을 때 검토로 세 목표(① 팔 수 있는 좌석은 막힘 없이 판다 ② 사지 못하는 사람은 덜 기다리게 하고 빨리·정확하게 매진을 알린다 ③ 돈만 빠지고 좌석이 없는 손님을 남기지 않는다)로 풀었으니 그 셋으로 읽는다
 - **관련**: ADR-0036(외부 한도 추정), ADR-0070(시간 초과 기본값), ADR-0109(발송 원장), ADR-0116(PgBouncer 배치), ADR-0119(얇은 OIDC 클라이언트), ADR-0127(결제사 읽기 시간 초과 60초), ADR-0168, ADR-0178, [docs/architecture.md](../architecture.md) §5·§8.7·§9.1, [docs/data.md](../data.md) §1.1·§5, [docs/api/guidelines.md](../api/guidelines.md) §8, [docs/verification.md](../verification.md) §4, [docs/features/identity.md](../features/identity.md) §10, [docs/features/notify.md](../features/notify.md) §10, [docs/planning/01-overview.md](../planning/01-overview.md) §3.2
 - **관련 ID**: NFR-002, NFR-006, NFR-007, wbs 0.5.5(외부 한도 확정), wbs 2.11.2(풀 크기), wbs 2.12.1(성능 장부), V-T43
 
