@@ -93,8 +93,9 @@ const groups = {
         const id = `${DAY}-numberbatch-${tls ? 'tls' : 'notls'}-r${r}`;
         runBench(id, {
           cpus: '6',
-          args: ['src/rate.mjs', '--nodes', N, '--tls', String(tls), '--client', 'node-redis', '--op', 'number-batch', '--rate', '200000', '--procs', '4', '--duration', '60', '--warmup', '15', '--batch-ms', '2'],
-          ledger: { kpi: 'NFR-001', rps: 200000, duration: 60, warmup: 15, scenario: 'loadtest/poc/bench/src/rate.mjs', scenarioArgs: '--op number-batch --rate 200000 --procs 4 --batch-ms 2', redisTls: tls, pairOf: `${DAY}-numberbatch-${tls ? 'notls' : 'tls'}-r1`, notes: '한 키 진입 ② 묶음 Lua(queue-svc NUMBER_BATCH, 진입 서버마다 2ms 묶음, Q-T5 배치 모드, ADR-0179), node-redis 6.3.0, 진입 서버 4대를 프로세스 4개로 흉내(컨테이너 CPU 6)' },
+          // PRF-085 ③: 같은 실행에서 키 주인 주 노드의 복제 지연을 WAIT 탐침(10ms마다)으로 함께 잰다(ADR-0181 복제 지연 p99.9 [가정] 0.3초)
+          args: ['src/rate.mjs', '--nodes', N, '--tls', String(tls), '--client', 'node-redis', '--op', 'number-batch', '--rate', '200000', '--procs', '4', '--duration', '60', '--warmup', '15', '--batch-ms', '2', '--wait-probe-ms', '10'],
+          ledger: { kpi: 'NFR-001', rps: 200000, duration: 60, warmup: 15, scenario: 'loadtest/poc/bench/src/rate.mjs', scenarioArgs: '--op number-batch --rate 200000 --procs 4 --batch-ms 2 --wait-probe-ms 10', redisTls: tls, pairOf: `${DAY}-numberbatch-${tls ? 'notls' : 'tls'}-r1`, notes: '한 키 진입 ② 묶음 Lua(queue-svc NUMBER_BATCH, 진입 서버마다 2ms 묶음, Q-T5 배치 모드, ADR-0179), node-redis 6.3.0, 진입 서버 4대를 프로세스 4개로 흉내(컨테이너 CPU 6). 같은 실행에서 키 주인 주 노드에 10ms마다 같은 슬롯 SET + WAIT 1 1000으로 복제 지연의 위쪽 값을 잼(bench-summary.json wait_probe, PRF-085 ③)' },
         });
       }
     }

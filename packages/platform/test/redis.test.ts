@@ -1,6 +1,6 @@
 // 핫패스 Redis 연결의 규칙(ADR-0176 결정 2, OPEN[11] node-redis 확정, BUILD_ORDER FND-120이 넘긴 것). 실제 Valkey로 보는 시험은 test-int/redis.int.test.ts
 import { createHash } from 'node:crypto';
-import { ClientOfflineError } from 'redis';
+import { ClientOfflineError, ClientClosedError, ConnectionTimeoutError, DisconnectsClientError, MaxCommandRedirectionsError, ReconnectStrategyError, RootNodesUnavailableError, SocketClosedUnexpectedlyError, SocketTimeoutError } from 'redis';
 import { describe, expect, test } from 'vitest';
 import { REDIS_CALL_DEADLINE_MS, REDIS_COMMAND_TIMEOUT_MS, RedisConnectError, RedisDeadlineError, hotRedisOver, isRedisUnavailable, redisClusterOptions, redisScript, type RawRedis } from '../src/redis.js';
 
@@ -164,5 +164,20 @@ describe('일시 장애 가르기', () => {
     for (const e of [new Error('ERR Error running script'), new Error('WRONGTYPE Operation against a key holding the wrong kind of value'), 'x', undefined]) {
       expect(isRedisUnavailable(e)).toBe(false);
     }
+  });
+
+  test('node-redis 연결 오류는 클래스로 가른다(name이 모두 Error라 이름으로는 맞지 않는다, PRF-085 Q-T13에서 찾음)', () => {
+    for (const e of [new SocketClosedUnexpectedlyError(), new ClientClosedError(), new ConnectionTimeoutError(), new SocketTimeoutError(100), new DisconnectsClientError(), new RootNodesUnavailableError(), new ReconnectStrategyError(new Error('x'), new Error('y'))]) {
+      expect(e.name).toBe('Error');
+      expect(isRedisUnavailable(e)).toBe(true);
+    }
+  });
+
+  test('연결이 오류로 끊기면 node-redis는 처리 중이던 명령을 소켓 오류 그대로 거부한다: errno 코드로 일시 장애로 본다. 클러스터 넘겨주기 상한도 일시 장애다', () => {
+    const sys = (code: string) => Object.assign(new Error(`read ${code}`), { code, errno: -1, syscall: 'read' });
+    for (const code of ['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN']) expect(isRedisUnavailable(sys(code))).toBe(true);
+    expect(isRedisUnavailable(new MaxCommandRedirectionsError())).toBe(true);
+    // 그 밖의 시스템 오류 코드(버그일 수 있다)는 아니다
+    expect(isRedisUnavailable(sys('EACCES'))).toBe(false);
   });
 });

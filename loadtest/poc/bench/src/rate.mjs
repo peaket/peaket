@@ -3,9 +3,13 @@
 // --op incr: 요청마다 INCR 하나. --op batch: 프로세스마다 --batch-ms 동안 모은 요청을 INCRBY 하나로 보내고 받은 범위를 나눠 준다
 // (파드별 INCRBY 마이크로 배치). --op hold: 좌석 홀드 Lua(클라이언트 셋 비교용, 큰 비트맵 하나).
 // --model closed --conc N: 최대 처리량(닫힌 모델, 지연은 참고값).
+// --wait-probe-ms N: 잰 구간 동안 N ms마다 키 주인 주 노드에 같은 슬롯 키를 쓰고 WAIT 1 1000으로 복제본이 받을 때까지의 시간을 잰다
+// (복제 지연의 위쪽 값: 쓰기 왕복 + 복제 + 확인 응답. ADR-0181의 복제 지연 p99.9 [가정] 0.3초와 견준다, BUILD_ORDER PRF-085 ③).
 // 쓰는 법(컨테이너 안): node src/rate.mjs --nodes valkey-1:6379,... --tls true --client node-redis --op incr --rate 200000 --procs 4 --duration 60 --warmup 15 --out /out/x.json
 import { fork } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createClient } from 'redis';
 import { connect } from './clients.mjs';
 import { closedLoop, hostDelta, hostSample, mergeHistograms, now, openLoop, parseArgs, procCpu, slotOf, writeResult } from './lib.mjs';
 
@@ -145,6 +149,38 @@ for (const ch of children) ch.send({ startAt });
 let cpu0;
 let t0;
 let host0;
+// 복제 지연 탐침(따로 받은 연결: WAIT은 그 연결을 막는다)
+const probeMs = Number(a['wait-probe-ms'] ?? 0);
+const probe = { samples: [], timeouts: 0, errors: 0 };
+let probeStop = false;
+let probeDone = Promise.resolve();
+if (probeMs > 0) {
+  const pc = createClient({
+    url: `${tls ? 'rediss' : 'redis'}://${owner.host}:${owner.port}`,
+    socket: tls ? { tls: true, ca: readFileSync(process.env.PEAKET_POC_CA ?? '/tls/ca.crt', 'utf8') } : {},
+  });
+  pc.on('error', () => {});
+  await pc.connect();
+  probeDone = (async () => {
+    await new Promise((res) => setTimeout(res, Math.max(0, startAt - Date.now() + warmupS * 1000 + 100)));
+    // 잰 구간(예열 뒤 본구간)이 끝나면 멈춘다(작업 프로세스의 정리 시간은 넣지 않는다)
+    const probeEnd = startAt + (warmupS + durationS) * 1000;
+    for (let i = 0; !probeStop && Date.now() < probeEnd; i += 1) {
+      const t = now();
+      try {
+        await pc.set('q:{event:poc-entry}:probe', String(i));
+        const acked = Number(await pc.sendCommand(['WAIT', '1', '1000']));
+        if (acked >= 1) probe.samples.push((now() - t) / 1e6);
+        else probe.timeouts += 1;
+      } catch {
+        probe.errors += 1;
+      }
+      const left = probeMs - (now() - t) / 1e6;
+      if (left > 0) await new Promise((res) => setTimeout(res, left));
+    }
+    await pc.quit();
+  })();
+}
 setTimeout(async () => {
   await onOwner(['CONFIG', 'RESETSTAT']);
   await onOwner(['SLOWLOG', 'RESET']);
@@ -153,6 +189,8 @@ setTimeout(async () => {
   host0 = hostSample();
 }, startAt - Date.now() + warmupS * 1000 + 50);
 const results = await resultsP;
+probeStop = true;
+await probeDone;
 const t1 = now();
 const host1 = hostSample();
 const cpu1 = await cpuOf();
@@ -201,6 +239,11 @@ const out = {
   final_counter: finalValue,
   host: hostDelta(host0, host1),
 };
+if (probeMs > 0) {
+  const xs = [...probe.samples].sort((x, y) => x - y);
+  const q = (p) => (xs.length ? Math.round(xs[Math.min(xs.length - 1, Math.ceil(p * xs.length) - 1)] * 1000) / 1000 : null);
+  out.wait_probe = { interval_ms: probeMs, count: xs.length, timeouts: probe.timeouts, errors: probe.errors, p50_ms: q(0.5), p99_ms: q(0.99), p999_ms: q(0.999), max_ms: q(1) };
+}
 out.bench = { p99_ms: merged ? merged.p99_ms : null, error_rate: measured ? errors / measured : 0, requests: measured, dropped, throughput_per_s: out.throughput_per_s };
 writeResult(a.out, out);
 await admin.close();

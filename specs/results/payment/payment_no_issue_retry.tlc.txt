@@ -142,14 +142,14 @@ State 7: <payment_no_issue_retry_payment_send(1,1) line 594, col 3 to line 623, 
 /\ payment_no_issue_retry_payment_late = <<FALSE>>
 /\ payment_no_issue_retry_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> FALSE)
 
-State 8: <payment_no_issue_retry_payment_pgProcess(1,1) line 656, col 3 to line 697, col 51 of module payment_no_issue_retry>
+State 8: <payment_no_issue_retry_payment_deadlinePasses(1) line 837, col 3 to line 864, col 45 of module payment_no_issue_retry>
 /\ payment_no_issue_retry_payment_env = [ sw |-> FALSE,
   switches |-> 0,
   timeouts |-> 0,
   restarts |-> 0,
   hooks |-> 0,
   canceled |-> FALSE ]
-/\ payment_no_issue_retry_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
+/\ payment_no_issue_retry_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
 /\ payment_no_issue_retry_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_issue_retry_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
@@ -159,10 +159,10 @@ State 8: <payment_no_issue_retry_payment_pgProcess(1,1) line 656, col 3 to line 
 /\ payment_no_issue_retry_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_issue_retry_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
 /\ payment_no_issue_retry_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "NONE")
-/\ payment_no_issue_retry_payment_late = <<FALSE>>
-/\ payment_no_issue_retry_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_no_issue_retry_payment_late = <<TRUE>>
+/\ payment_no_issue_retry_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> FALSE)
 
-State 9: <payment_no_issue_retry_payment_deadlinePasses(1) line 837, col 3 to line 864, col 45 of module payment_no_issue_retry>
+State 9: <payment_no_issue_retry_payment_pgProcess(1,1) line 656, col 3 to line 697, col 51 of module payment_no_issue_retry>
 /\ payment_no_issue_retry_payment_env = [ sw |-> FALSE,
   switches |-> 0,
   timeouts |-> 0,
@@ -242,7 +242,7 @@ State 12: <payment_no_issue_retry_payment_issue(1) line 920, col 3 to line 953, 
 /\ payment_no_issue_retry_payment_late = <<TRUE>>
 /\ payment_no_issue_retry_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 
-State 13: <payment_no_issue_retry_payment_ticketSvc(1) line 981, col 3 to line 1027, col 45 of module payment_no_issue_retry>
+State 13: <payment_no_issue_retry_payment_issueAck(1) line 1701, col 3 to line 1770, col 80 of module payment_no_issue_retry>
 /\ payment_no_issue_retry_payment_env = [ sw |-> FALSE,
   switches |-> 0,
   timeouts |-> 0,
@@ -250,11 +250,11 @@ State 13: <payment_no_issue_retry_payment_ticketSvc(1) line 981, col 3 to line 1
   hooks |-> 0,
   canceled |-> FALSE ]
 /\ payment_no_issue_retry_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
-/\ payment_no_issue_retry_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_no_issue_retry_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_issue_retry_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
-     req |-> FALSE,
-     wait |-> "ERR",
+     req |-> TRUE,
+     wait |-> "NONE",
      broken |-> FALSE ] >>
 /\ payment_no_issue_retry_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_issue_retry_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
@@ -262,7 +262,7 @@ State 13: <payment_no_issue_retry_payment_ticketSvc(1) line 981, col 3 to line 1
 /\ payment_no_issue_retry_payment_late = <<TRUE>>
 /\ payment_no_issue_retry_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
 
-State 14: <payment_no_issue_retry_payment_issueAck(1) line 1701, col 3 to line 1770, col 80 of module payment_no_issue_retry>
+State 14: <payment_no_issue_retry_payment_ticketSvc(1) line 981, col 3 to line 1027, col 45 of module payment_no_issue_retry>
 /\ payment_no_issue_retry_payment_env = [ sw |-> FALSE,
   switches |-> 0,
   timeouts |-> 0,

@@ -180,52 +180,7 @@ State 4: <queue_no_admission_recheck_queue_enterBatchRecord(1,1) line 485, col 3
   <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
   <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
-State 5: <queue_no_admission_recheck_queue_enterPreempt(2,1) line 328, col 3 to line 374, col 47 of module queue_no_admission_recheck>
-/\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
-  serving |-> 0,
-  leader |-> 0,
-  skips |-> {},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  members |-> {} ]
-/\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_admission_recheck_queue_ctl = [ holder |-> 0,
-  transitions |-> 0,
-  acquisitions |-> 0,
-  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
-/\ queue_no_admission_recheck_queue_ev = [ seq |-> 0,
-  serving |-> 0,
-  leader |-> 0,
-  skips |-> {},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  members |-> {<<1, 1>>} ]
-/\ queue_no_admission_recheck_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 0,
-  admLost |-> {},
-  dupLost |-> {},
-  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
-  maxNumber |-> 0 ]
-/\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_admission_recheck_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
-/\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "BATCHED"] @@
-  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
-
-State 6: <queue_no_admission_recheck_queue_failoverPerson(1) line 911, col 3 to line 983, col 45 of module queue_no_admission_recheck>
+State 5: <queue_no_admission_recheck_queue_failoverPerson(1) line 911, col 3 to line 983, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -263,14 +218,14 @@ State 6: <queue_no_admission_recheck_queue_failoverPerson(1) line 911, col 3 to 
   maxNumber |-> 0 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "BATCHED"] @@
   <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
-State 7: <queue_no_admission_recheck_queue_pendingExpires(1) line 854, col 3 to line 875, col 47 of module queue_no_admission_recheck>
+State 6: <queue_no_admission_recheck_queue_pendingExpires(1) line 854, col 3 to line 875, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -308,14 +263,14 @@ State 7: <queue_no_admission_recheck_queue_pendingExpires(1) line 854, col 3 to 
   maxNumber |-> 0 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "BATCHED"] @@
   <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
-State 8: <queue_no_admission_recheck_queue_enterPreempt(1,2) line 328, col 3 to line 374, col 47 of module queue_no_admission_recheck>
+State 7: <queue_no_admission_recheck_queue_enterPreempt(1,2) line 328, col 3 to line 374, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -353,14 +308,14 @@ State 8: <queue_no_admission_recheck_queue_enterPreempt(1,2) line 328, col 3 to 
   maxNumber |-> 0 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "BATCHED"] @@
   <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
-State 9: <queue_no_admission_recheck_queue_acquire(1) line 989, col 3 to line 1018, col 47 of module queue_no_admission_recheck>
+State 8: <queue_no_admission_recheck_queue_acquire(1) line 989, col 3 to line 1018, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -398,12 +353,57 @@ State 9: <queue_no_admission_recheck_queue_acquire(1) line 989, col 3 to line 10
   maxNumber |-> 0 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "BATCHED"] @@
   <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
+
+State 9: <queue_no_admission_recheck_queue_applyWrite(1) line 1333, col 3 to line 1372, col 45 of module queue_no_admission_recheck>
+/\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {<<1, 1>>} ]
+/\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_admission_recheck_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
+/\ queue_no_admission_recheck_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {<<1, 1>>} ]
+/\ queue_no_admission_recheck_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 1,
+  admLost |-> {},
+  dupLost |-> {1},
+  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
+  maxNumber |-> 0 ]
+/\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_admission_recheck_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
+/\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "BATCHED"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
 State 10: <queue_no_admission_recheck_queue_windowEnds line 1065, col 3 to line 1075, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
@@ -414,7 +414,7 @@ State 10: <queue_no_admission_recheck_queue_windowEnds line 1065, col 3 to line 
   closed |-> FALSE,
   first |-> 0,
   size |-> 0,
-  members |-> {} ]
+  members |-> {<<1, 1>>} ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -422,10 +422,10 @@ State 10: <queue_no_admission_recheck_queue_windowEnds line 1065, col 3 to line 
 /\ queue_no_admission_recheck_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
 /\ queue_no_admission_recheck_queue_ev = [ seq |-> 0,
   serving |-> 0,
-  leader |-> 0,
+  leader |-> 1,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
@@ -436,24 +436,24 @@ State 10: <queue_no_admission_recheck_queue_windowEnds line 1065, col 3 to line 
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
   staleApplied |-> 0,
-  maxGenSeen |-> 0,
+  maxGenSeen |-> 1,
   admLost |-> {},
   dupLost |-> {1},
   batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
   maxNumber |-> 0 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "BATCHED"] @@
   <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
 State 11: <queue_no_admission_recheck_queue_enterNumber(1,2) line 1212, col 3 to line 1286, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
-  leader |-> 0,
+  leader |-> 1,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
@@ -467,10 +467,10 @@ State 11: <queue_no_admission_recheck_queue_enterNumber(1,2) line 1212, col 3 to
 /\ queue_no_admission_recheck_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
 /\ queue_no_admission_recheck_queue_ev = [ seq |-> 2,
   serving |-> 0,
-  leader |-> 0,
+  leader |-> 1,
   skips |-> {},
   removed |-> {},
   closed |-> TRUE,
@@ -481,24 +481,24 @@ State 11: <queue_no_admission_recheck_queue_enterNumber(1,2) line 1212, col 3 to
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
   staleApplied |-> 0,
-  maxGenSeen |-> 0,
+  maxGenSeen |-> 1,
   admLost |-> {},
   dupLost |-> {1},
   batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 1],
   maxNumber |-> 2 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "BATCHED"] @@
   <<1, 2>> :> [seq |-> 2, gen |-> 1, phase |-> "NUMBERED"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
 State 12: <queue_no_admission_recheck_queue_publishBatch(1,1) line 805, col 3 to line 848, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
-  leader |-> 0,
+  leader |-> 1,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
@@ -512,10 +512,10 @@ State 12: <queue_no_admission_recheck_queue_publishBatch(1,1) line 805, col 3 to
 /\ queue_no_admission_recheck_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
 /\ queue_no_admission_recheck_queue_ev = [ seq |-> 2,
   serving |-> 0,
-  leader |-> 0,
+  leader |-> 1,
   skips |-> {},
   removed |-> {},
   closed |-> TRUE,
@@ -526,24 +526,24 @@ State 12: <queue_no_admission_recheck_queue_publishBatch(1,1) line 805, col 3 to
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
   staleApplied |-> 0,
-  maxGenSeen |-> 0,
+  maxGenSeen |-> 1,
   admLost |-> {},
   dupLost |-> {1},
   batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 1],
   maxNumber |-> 2 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
   <<1, 2>> :> [seq |-> 2, gen |-> 1, phase |-> "NUMBERED"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
 State 13: <queue_no_admission_recheck_queue_enterRecord(1,2) line 411, col 3 to line 472, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
-  leader |-> 0,
+  leader |-> 1,
   skips |-> {},
   removed |-> {},
   closed |-> FALSE,
@@ -557,53 +557,6 @@ State 13: <queue_no_admission_recheck_queue_enterRecord(1,2) line 411, col 3 to 
 /\ queue_no_admission_recheck_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
-/\ queue_no_admission_recheck_queue_ev = [ seq |-> 2,
-  serving |-> 0,
-  leader |-> 0,
-  skips |-> {},
-  removed |-> {},
-  closed |-> TRUE,
-  first |-> 1,
-  size |-> 1,
-  members |-> {<<1, 1>>} ]
-/\ queue_no_admission_recheck_queue_ghost = [ issued |->
-      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
-        [tab |-> 2, seq |-> 2, gen |-> 1, pid |-> 1] },
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 0,
-  admLost |-> {},
-  dupLost |-> {1},
-  batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 1],
-  maxNumber |-> 2 ]
-/\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 2, gen |-> 1],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_admission_recheck_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
-/\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
-  <<1, 2>> :> [seq |-> 2, gen |-> 1, phase |-> "HELD"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
-
-State 14: <queue_no_admission_recheck_queue_applyWrite(1) line 1333, col 3 to line 1372, col 45 of module queue_no_admission_recheck>
-/\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
-  serving |-> 0,
-  leader |-> 0,
-  skips |-> {},
-  removed |-> {},
-  closed |-> TRUE,
-  first |-> 1,
-  size |-> 1,
-  members |-> {<<1, 1>>} ]
-/\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_admission_recheck_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
   c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
 /\ queue_no_admission_recheck_queue_ev = [ seq |-> 2,
   serving |-> 0,
@@ -627,22 +580,22 @@ State 14: <queue_no_admission_recheck_queue_applyWrite(1) line 1333, col 3 to li
   maxNumber |-> 2 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 2, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
   <<1, 2>> :> [seq |-> 2, gen |-> 1, phase |-> "HELD"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
-State 15: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1024, col 3 to line 1059, col 47 of module queue_no_admission_recheck>
-/\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
+State 14: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1024, col 3 to line 1059, col 47 of module queue_no_admission_recheck>
+/\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
-  leader |-> 0,
+  leader |-> 1,
   skips |-> {},
   removed |-> {},
-  closed |-> TRUE,
-  first |-> 1,
-  size |-> 1,
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
   members |-> {<<1, 1>>} ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
@@ -674,14 +627,14 @@ State 15: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1024, col 3 t
   maxNumber |-> 2 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 2, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
   <<1, 2>> :> [seq |-> 2, gen |-> 1, phase |-> "HELD"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
-State 16: <queue_no_admission_recheck_queue_applyWrite(1) line 1333, col 3 to line 1372, col 45 of module queue_no_admission_recheck>
+State 15: <queue_no_admission_recheck_queue_applyWrite(1) line 1333, col 3 to line 1372, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 0,
   leader |-> 1,
@@ -721,14 +674,14 @@ State 16: <queue_no_admission_recheck_queue_applyWrite(1) line 1333, col 3 to li
   maxNumber |-> 2 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 2, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
   <<1, 2>> :> [seq |-> 2, gen |-> 1, phase |-> "HELD"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
-State 17: <queue_no_admission_recheck_queue_admit(1,1) line 705, col 3 to line 781, col 45 of module queue_no_admission_recheck>
+State 16: <queue_no_admission_recheck_queue_admit(1,1) line 705, col 3 to line 781, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 0,
   leader |-> 1,
@@ -768,14 +721,14 @@ State 17: <queue_no_admission_recheck_queue_admit(1,1) line 705, col 3 to line 7
   maxNumber |-> 2 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "ADM", tab |-> 1, seq |-> 1, gen |-> 1] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "ADMITTED"] @@
   <<1, 2>> :> [seq |-> 2, gen |-> 1, phase |-> "HELD"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
-State 18: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1024, col 3 to line 1059, col 47 of module queue_no_admission_recheck>
+State 17: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1024, col 3 to line 1059, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 0,
   leader |-> 1,
@@ -815,14 +768,14 @@ State 18: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1024, col 3 t
   maxNumber |-> 2 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "ADM", tab |-> 1, seq |-> 1, gen |-> 1] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "ADMITTED"] @@
   <<1, 2>> :> [seq |-> 2, gen |-> 1, phase |-> "HELD"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
-State 19: <queue_no_admission_recheck_queue_applyWrite(1) line 1333, col 3 to line 1372, col 45 of module queue_no_admission_recheck>
+State 18: <queue_no_admission_recheck_queue_applyWrite(1) line 1333, col 3 to line 1372, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 1,
   leader |-> 1,
@@ -862,14 +815,14 @@ State 19: <queue_no_admission_recheck_queue_applyWrite(1) line 1333, col 3 to li
   maxNumber |-> 2 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "ADM", tab |-> 1, seq |-> 1, gen |-> 1] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "ADMITTED"] @@
   <<1, 2>> :> [seq |-> 2, gen |-> 1, phase |-> "HELD"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
 
-State 20: <queue_no_admission_recheck_queue_admit(1,2) line 705, col 3 to line 781, col 45 of module queue_no_admission_recheck>
+State 19: <queue_no_admission_recheck_queue_admit(1,2) line 705, col 3 to line 781, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 1,
   leader |-> 1,
@@ -909,9 +862,9 @@ State 20: <queue_no_admission_recheck_queue_admit(1,2) line 705, col 3 to line 7
   maxNumber |-> 2 ]
 /\ queue_no_admission_recheck_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "ADM", tab |-> 2, seq |-> 2, gen |-> 1] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_no_admission_recheck_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 1]
 /\ queue_no_admission_recheck_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "ADMITTED"] @@
   <<1, 2>> :> [seq |-> 2, gen |-> 1, phase |-> "ADMITTED"] @@
-  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )

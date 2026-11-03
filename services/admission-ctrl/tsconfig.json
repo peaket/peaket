@@ -15,5 +15,5 @@
     "allowJs": true,
     "checkJs": true
   },
-  "include": ["src", "test", "test-int"]
+  "include": ["src", "test", "test-int", "test-sim"]
 }

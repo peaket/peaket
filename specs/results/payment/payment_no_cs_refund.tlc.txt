@@ -222,13 +222,13 @@ State 11: <payment_no_cs_refund_payment_applyResult(1,1) line 816, col 3 to line
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 12: <payment_no_cs_refund_payment_overdue(1) line 1026, col 3 to line 1051, col 80 of module payment_no_cs_refund>
-/\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> TRUE, cs |-> FALSE]>>
+State 12: <payment_no_cs_refund_payment_ticketBreaks(1) line 995, col 3 to line 1020, col 80 of module payment_no_cs_refund>
+/\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,
      req |-> FALSE,
      wait |-> "NONE",
-     broken |-> FALSE ] >>
+     broken |-> TRUE ] >>
 /\ payment_no_cs_refund_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
 /\ payment_no_cs_refund_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
 /\ payment_no_cs_refund_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
@@ -242,7 +242,7 @@ State 12: <payment_no_cs_refund_payment_overdue(1) line 1026, col 3 to line 1051
   canceled |-> FALSE ]
 /\ payment_no_cs_refund_payment_pgs = (<<1, 1>> :> "APPROVED" @@ <<2, 1>> :> "NONE")
 
-State 13: <payment_no_cs_refund_payment_ticketBreaks(1) line 995, col 3 to line 1020, col 80 of module payment_no_cs_refund>
+State 13: <payment_no_cs_refund_payment_overdue(1) line 1026, col 3 to line 1051, col 80 of module payment_no_cs_refund>
 /\ payment_no_cs_refund_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> TRUE, cs |-> FALSE]>>
 /\ payment_no_cs_refund_payment_tks = << [ tk |-> "NONE",
      closed |-> FALSE,

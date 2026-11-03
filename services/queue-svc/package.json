@@ -9,6 +9,7 @@
     "start": "node --import @peaket/platform/telemetry/register dist/main.js",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "sim": "vitest run --config vitest.sim.config.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

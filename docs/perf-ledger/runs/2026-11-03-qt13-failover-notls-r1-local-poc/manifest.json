@@ -1,0 +1,56 @@
+{
+  "run_id": "2026-11-03-qt13-failover-notls-r1-local-poc",
+  "kpi": "NFR-015",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": 2000.0,
+    "duration_s": 50,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "services/queue-svc/test-sim/failover.sim.test.ts",
+    "args": "진입 2000/s, 10초 뒤 회차 키 주 노드 docker kill(그 1.5초 전부터 복제를 멈췄다가 죽인 뒤 풂), 그 뒤 40초",
+    "open_model": true
+  },
+  "commit": {
+    "code": "1c8086366bd73b3d70296c56716d2e56b312be04",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": false,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 host(측정 프로세스)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-03T12:38:24Z",
+  "ended_at": "2026-11-03T12:39:32Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": null,
+    "error_rate": 0,
+    "requests": 100000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "Q-T13 판정 통과: 잃은 번호 2000(복제를 멈춰 일부러 만듦), 같은 세대 안 번호 중복 0, 건너뛴 구간 18161:378160:1, 죽인 뒤 장애 전 세대 대기표 0, 회복 10.8초(죽인 때 → 새 세대 첫 대기표), 장애 동안 503 21340건(오류율에 넣지 않음), 그 밖 오류 0. 운영 코드(EnterQueue·RedisEntryStore·RB-05·HotRedis 클러스터, node-redis 6.3.0 기본 토폴로지 다시 읽기), 주 노드 셋·복제 셋 Valkey 8.1(cluster-node-timeout 5초), TLS 끔(기능 확인이라), 발생기는 이 PC의 측정 프로세스 하나. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-03T13:16:43Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

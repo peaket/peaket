@@ -3,10 +3,10 @@
   "file": "specs/seat.qnt",
   "specSha256": "f12ca58e8e77567eb2b0bd50cf2cf6ff46662e7aec9853232dfc8fad65cdb3a3",
   "commit": {
-    "sha": "79b242c86843e7e29f515d24988e2fb4f79ba3d8",
-    "dirty": true
+    "sha": "cffc124df6d16b100267fb12e34922bb2428be6b",
+    "dirty": false
   },
-  "date": "2026-11-02T04:36:33+09:00",
+  "date": "2026-11-03T20:35:01+09:00",
   "scope": "정본 범위(docs/verification.md §2.1): 좌석 3석, 사람 3명(홀드 시도 2번씩, 요청은 좌석 1~2석의 모든 목록), 1인 한도 2매, 좌석 Redis 장애 전환 1회(주 노드 승격 또는 클러스터 전체 유실). 전수 검사는 범위를 줄인다: 사람 2명(한 사람은 홀드 시도 2번이라 시도 3개), 요청 4가지([1]·[1,2]·[2,1]·[2,3]). 정본 범위 전체는 시뮬레이션으로 본다. 변형은 반례가 나오는 작은 범위로 줄였다. 복제 지연은 장애 전환마다 쓰기 하나",
   "adrs": [
     "0014",
@@ -38,7 +38,7 @@
       "distinctStates": 26782397,
       "depth": 30,
       "fingerprintCollision": "4.6E-4",
-      "seconds": 694.556
+      "seconds": 728.05
     },
     {
       "main": "seat_proposed_full",
@@ -60,7 +60,7 @@
       "distinctStates": null,
       "depth": null,
       "fingerprintCollision": null,
-      "seconds": 33.212
+      "seconds": 34.741
     },
     {
       "main": "seat_canon",
@@ -73,11 +73,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 13799,
-      "distinctStates": 3061,
+      "statesGenerated": 21810,
+      "distinctStates": 4552,
       "depth": 8,
       "fingerprintCollision": null,
-      "seconds": 9.611,
+      "seconds": 9.948,
       "tlcTrace": "specs/results/seat/seat_canon.tlc.txt",
       "counterexample": "specs/results/seat/seat_canon.itf.json"
     },
@@ -92,11 +92,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 1507,
-      "distinctStates": 409,
-      "depth": 7,
+      "statesGenerated": 1595,
+      "distinctStates": 424,
+      "depth": 6,
       "fingerprintCollision": null,
-      "seconds": 9.189,
+      "seconds": 9.474,
       "tlcTrace": "specs/results/seat/seat_canon_fencing.tlc.txt",
       "counterexample": "specs/results/seat/seat_canon_fencing.itf.json"
     },
@@ -111,11 +111,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 2885,
-      "distinctStates": 1329,
+      "statesGenerated": 2733,
+      "distinctStates": 1269,
       "depth": 13,
       "fingerprintCollision": null,
-      "seconds": 9.283,
+      "seconds": 10.676,
       "tlcTrace": "specs/results/seat/seat_no_unique.tlc.txt",
       "counterexample": "specs/results/seat/seat_no_unique.itf.json"
     },
@@ -130,11 +130,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 18393,
-      "distinctStates": 4574,
+      "statesGenerated": 17032,
+      "distinctStates": 4273,
       "depth": 14,
       "fingerprintCollision": null,
-      "seconds": 9.355,
+      "seconds": 9.611,
       "tlcTrace": "specs/results/seat/seat_no_db_quota.tlc.txt",
       "counterexample": "specs/results/seat/seat_no_db_quota.itf.json"
     },
@@ -149,11 +149,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 17985,
-      "distinctStates": 4497,
+      "statesGenerated": 15260,
+      "distinctStates": 3862,
       "depth": 13,
       "fingerprintCollision": null,
-      "seconds": 10.473,
+      "seconds": 9.65,
       "tlcTrace": "specs/results/seat/seat_unsorted.tlc.txt",
       "counterexample": "specs/results/seat/seat_unsorted.itf.json"
     },
@@ -168,11 +168,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 5674,
-      "distinctStates": 2653,
+      "statesGenerated": 6588,
+      "distinctStates": 3043,
       "depth": 9,
       "fingerprintCollision": null,
-      "seconds": 10.186,
+      "seconds": 10.496,
       "tlcTrace": "specs/results/seat/seat_no_ready_check.tlc.txt",
       "counterexample": "specs/results/seat/seat_no_ready_check.itf.json"
     }

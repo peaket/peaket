@@ -1,0 +1,56 @@
+{
+  "run_id": "2026-11-03-qt46-new-r1-local-poc",
+  "kpi": "FR-037",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": 600,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "services/admission-ctrl/test-sim/admission-loop.sim.test.ts",
+    "args": "목표 5000, 안 오는 사람 20%, 도착 1~3초, 머무는 시간 평균 180초(지수), SOON 뒤 2~3초, 공통 난수 씨앗 46001, 오는 중 창 W 5초(지금 식)",
+    "open_model": true
+  },
+  "commit": {
+    "code": "1c8086366bd73b3d70296c56716d2e56b312be04",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 host(측정 프로세스)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-03T12:45:51Z",
+  "ended_at": "2026-11-03T12:55:54Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": null,
+    "error_rate": 0,
+    "requests": 21093,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "Q-T46 판정 통과(모두 통과, 입장 수 감소 0.83%): 입장 21091, 입장 확정 요청 21093, 곧 입장 0(0%), 곧 입장 대기 p99 -초, 목표 초과 표본 0(최대 자리 4965), 처음 6초 serving 5190, Lua가 잰 도착 지연 p50 2.059초·p95 2.965초, 오는 중 추정 p50 57·최대 2556, 503 뒤 다시 보냄 2. 운영 코드(AdmissionLeader·RedisLeaderStore·ConfirmAdmission·RedisAdmissionStore), Valkey 8.1 단일 노드(변형마다 하나), 발생기는 이 PC의 측정 프로세스 하나(두 변형을 동시에). 15분 만료는 10분 실행이라 판정하지 않는다. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-03T13:16:44Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

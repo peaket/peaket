@@ -10,7 +10,21 @@
 // - 클러스터는 찾아낸 노드에 defaults와 주소만으로 붙는다. 그래서 시작 주소의 사용자·비밀번호·TLS(rediss)를 defaults에 넣는다
 //   (ElastiCache는 RBAC 사용자와 전송 암호화가 필수, docs/infra.md. 2026-11-03 새 맥락 리뷰)
 import { createHash } from 'node:crypto';
-import { ClientOfflineError, createClient, createCluster, RESP_TYPES, type RedisClusterOptions } from 'redis';
+import {
+  ClientClosedError,
+  ClientOfflineError,
+  ConnectionTimeoutError,
+  createClient,
+  createCluster,
+  DisconnectsClientError,
+  MaxCommandRedirectionsError,
+  ReconnectStrategyError,
+  RESP_TYPES,
+  RootNodesUnavailableError,
+  SocketClosedUnexpectedlyError,
+  SocketTimeoutError,
+  type RedisClusterOptions,
+} from 'redis';
 import type { RedisCommander } from './redis-stream.js';
 
 /** 핫패스 명령 시간 초과(밀리초, 소켓에 쓰기 전까지) */
@@ -162,12 +176,16 @@ function clusterAuth(urls: readonly string[]): { username?: string; password?: s
   return { ...(first.username ? { username: first.username } : {}), ...(first.password ? { password: first.password } : {}), tls: first.tls };
 }
 
-/** 클러스터 연결 설정(시험이 명령 시간 초과·인증·TLS의 자리를 본다) */
-export function redisClusterOptions(urls: readonly string[], state = { started: false, gaveUp: false }): RedisClusterOptions {
+/**
+ * 클러스터 연결 설정(시험이 명령 시간 초과·인증·TLS의 자리를 본다).
+ * nodeAddressMap: 클러스터가 알려 주는 노드 주소('호스트:포트')를 붙을 주소로 바꾼다. 이 PC의 측정처럼 노드가 컨테이너 망 이름을 알려 줄 때만 쓴다(운영은 쓰지 않는다)
+ */
+export function redisClusterOptions(urls: readonly string[], state = { started: false, gaveUp: false }, nodeAddressMap?: Readonly<Record<string, { host: string; port: number }>>): RedisClusterOptions {
   const { tls, ...auth } = clusterAuth(urls);
   const socket = { connectTimeout: CONNECT_TIMEOUT_MS, reconnectStrategy: reconnect(state) };
   return {
     rootNodes: urls.map((url) => ({ url })),
+    ...(nodeAddressMap ? { nodeAddressMap: { ...nodeAddressMap } } : {}),
     defaults: {
       ...auth,
       disableOfflineQueue: true,
@@ -177,11 +195,19 @@ export function redisClusterOptions(urls: readonly string[], state = { started: 
   };
 }
 
+/** node-redis가 연결이 끊기거나 다시 붙는 동안 던지는 오류(명령이 서버에 닿지 않았거나 결과를 모름). 클러스터 넘겨주기 상한(장애 전환 중 MOVED가 이어짐)도 넣는다 */
+const NODE_REDIS_CONNECTION_ERRORS = [ClientClosedError, SocketClosedUnexpectedlyError, ConnectionTimeoutError, SocketTimeoutError, ReconnectStrategyError, DisconnectsClientError, RootNodesUnavailableError, MaxCommandRedirectionsError];
+/** 연결이 오류로 끊기면 node-redis는 처리 중이던 명령을 그 소켓 오류 그대로 거부한다(ECONNRESET 등). 망·이름 찾기 오류만 일시 장애로 본다 */
+const NETWORK_ERROR_CODES = new Set(['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN']);
+
 /** 핫패스가 503과 Retry-After로 답할 일시 장애인가(마감 초과, 연결 실패·끊김, 클러스터 재구성·장애 전환 중, 늦은 복제본으로 쓰기 거절). 스크립트 오류 같은 버그는 아니다 */
 export function isRedisUnavailable(err: unknown): boolean {
   if (err instanceof RedisDeadlineError || err instanceof RedisConnectError || err instanceof ClientOfflineError) return true;
   if (!(err instanceof Error)) return false;
-  if (['ClientClosedError', 'SocketClosedUnexpectedlyError', 'ConnectionTimeoutError', 'SocketTimeoutError', 'ReconnectStrategyError'].includes(err.name)) return true;
+  // node-redis 6.3 연결 오류는 name을 정하지 않아 모두 'Error'다. 이름이 아니라 클래스로 가른다(장애 전환 중 'Socket closed unexpectedly'가 500으로 나가던 것, PRF-085 Q-T13에서 찾음)
+  if (NODE_REDIS_CONNECTION_ERRORS.some((C) => err instanceof C)) return true;
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === 'string' && NETWORK_ERROR_CODES.has(code)) return true;
   // NOREPLICAS: 복제본이 늦어 주 노드가 쓰기를 거절했다(min-replicas-to-write, ADR-0181 '전제')
   return /^(CLUSTERDOWN|TRYAGAIN|LOADING|MASTERDOWN|READONLY|NOREPLICAS)\b/.test(err.message);
 }
@@ -191,6 +217,8 @@ export interface HotRedisOptions {
   url?: string;
   /** 클러스터 시작 노드 주소들. 주면 클러스터로 붙는다 */
   clusterUrls?: readonly string[];
+  /** 클러스터가 알려 주는 노드 주소('호스트:포트') → 붙을 주소. 측정·시험에서 컨테이너 망 이름을 이 PC 포트로 바꿀 때만 쓴다 */
+  nodeAddressMap?: Readonly<Record<string, { host: string; port: number }>>;
   startupTimeoutMs?: number;
 }
 
@@ -200,7 +228,7 @@ export async function createHotRedis(o: HotRedisOptions): Promise<HotRedis> {
   let raw: RawRedis;
   let connect: () => Promise<unknown>;
   if (o.clusterUrls?.length) {
-    const cluster = createCluster(redisClusterOptions(o.clusterUrls, state));
+    const cluster = createCluster(redisClusterOptions(o.clusterUrls, state, o.nodeAddressMap));
     cluster.on('error', () => {});
     raw = {
       send: (key, args, binary) => cluster.sendCommand(key, false, args, binary ? BINARY : undefined),
