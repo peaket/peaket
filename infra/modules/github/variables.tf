@@ -22,7 +22,7 @@ variable "status_check_integration_id" {
 }
 
 variable "main_required_deployments" {
-  description = "main에 병합하기 전에 배포가 성공해야 하는 환경"
+  description = "main에 병합하기 전에 배포가 성공해야 하는 환경. 비우면 배포 요구를 걸지 않는다"
   type        = list(string)
   default     = ["demo"]
 }
@@ -41,6 +41,12 @@ variable "required_approvals" {
 
 variable "require_code_owner_review" {
   description = "코드 주인 검토 요구. 1인 기간에는 끈다(작성자는 자기 PR을 승인할 수 없다)"
+  type        = bool
+  default     = false
+}
+
+variable "develop_admin_bypass" {
+  description = "develop 규칙 세트에서 조직 관리자가 우회해 바로 푸시할 수 있게 할지. 1인 기간의 소유자 결정(2026-11-03, docs/devops.md §2.2.6)"
   type        = bool
   default     = false
 }

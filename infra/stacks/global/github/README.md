@@ -30,6 +30,10 @@ terraform -chdir=infra/stacks/global/github validate
 5. wbs 0.1.2의 CI(`ci-summary`, `branch-policy`, `merge-tree` 잡)가 한 번 돈 뒤 전체를 적용한다: `terraform apply`. 필수 검사가 한 번도 돌지 않은 채로 규칙 세트를 걸면 모든 PR이 그 검사를 기다리며 막힌다.
 6. 릴리스 봇 GitHub 앱을 만들면 `release_bot_app_id`를 넣고 다시 적용한다. 그때 `release/*`·`hotfix/*`·`v*` 규칙 세트에 봇 우회가 생긴다.
 
+## 적용 기록
+
+- **2026-11-03(FND-160)**: 소유자가 조직 `peaket`을 만들고 웹에서 저장소를 옮긴 뒤라(위 3·4번을 웹에서 대신 함), `imports.tf`로 `peaket` 저장소와 기본 가지를 가져오고 전체를 적용했다. 결과: 가져오기 2, 새로 만들기 47(팀 아홉과 팀 권한, 규칙 세트 넷, 환경 넷과 배포 가지, 조직 Actions 정책 둘, OIDC 주체 키), 바꾸기 1(저장소 병합 설정), 지우기 0. 소유자 결정으로 `develop` 규칙 세트에 조직 관리자 우회를 두고(`develop_admin_bypass`), 데모 환경이 생길 때까지 `main`의 데모 배포 요구를 뺐다(`main_required_deployments = []`, docs/devops.md §2.2.6). 릴리스 봇 앱(6번)과 비공개 `peaket-bots`(`bots_repository_enabled`, 가져오기가 필요하다)는 아직이다.
+
 ## 상태
 
-처음에는 로컬 상태(`terraform.tfstate`, 커밋하지 않음)로 적용한다. wbs 0.4.2에서 상태 버킷을 만들면 `backend.tf`(S3, `use_lockfile`)를 더하고 `terraform init -migrate-state`로 옮긴다([docs/devops.md](../../../../docs/devops.md) §9.1). 상태를 잃으면 이 스택의 자원은 `terraform import`로 되살린다.
+처음에는 로컬 상태(`terraform.tfstate`, 커밋하지 않음)로 적용한다. 2026-11-03부터 상태는 소유자 PC의 이 폴더에만 있으니 지우지 않는다. wbs 0.4.2에서 상태 버킷을 만들면 `backend.tf`(S3, `use_lockfile`)를 더하고 `terraform init -migrate-state`로 옮긴다([docs/devops.md](../../../../docs/devops.md) §9.1). 상태를 잃으면 이 스택의 자원은 `terraform import`로 되살린다.

@@ -1,6 +1,6 @@
 # 저장소 하나의 git flow 규칙 세트 넷(docs/devops.md §2.2.6, ADR-0074).
 # 릴리스 봇 우회는 봇만 하는 일(release/*·hotfix/* 만들기, v* 태그)에만 둔다.
-# main·develop은 봇도 PR과 필수 검사를 거친다.
+# main·develop은 봇도 PR과 필수 검사를 거친다. develop만 1인 기간에 조직 관리자 우회를 켤 수 있다(develop_admin_bypass).
 
 locals {
   bot_bypass = var.release_bot_app_id == null ? [] : [var.release_bot_app_id]
@@ -40,8 +40,12 @@ resource "github_repository_ruleset" "main" {
       }
     }
 
-    required_deployments {
-      required_deployment_environments = var.main_required_deployments
+    # 비어 있으면 배포 요구를 걸지 않는다(데모 환경이 없는 기간, 소유자 결정 2026-11-03, docs/devops.md §2.2.6)
+    dynamic "required_deployments" {
+      for_each = length(var.main_required_deployments) > 0 ? [1] : []
+      content {
+        required_deployment_environments = var.main_required_deployments
+      }
     }
   }
 }
@@ -56,6 +60,16 @@ resource "github_repository_ruleset" "develop" {
     ref_name {
       include = ["refs/heads/develop"]
       exclude = []
+    }
+  }
+
+  # 1인 기간에는 조직 관리자(소유자)만 우회해 바로 푸시한다(소유자 결정 2026-11-03, docs/devops.md §2.2.6)
+  dynamic "bypass_actors" {
+    for_each = var.develop_admin_bypass ? [1] : []
+    content {
+      actor_id    = 1
+      actor_type  = "OrganizationAdmin"
+      bypass_mode = "always"
     }
   }
 

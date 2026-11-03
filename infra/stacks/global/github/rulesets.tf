@@ -9,6 +9,10 @@ module "git_flow" {
   release_bot_app_id        = var.release_bot_app_id
   required_approvals        = var.required_approvals
   require_code_owner_review = var.require_code_owner_review
+  # 1인 기간: develop은 조직 관리자(소유자)만 우회해 바로 푸시한다(소유자 결정 2026-11-03, FND-160)
+  develop_admin_bypass = true
+  # 데모 환경(클라우드)이 없는 기간에는 main 병합 전 데모 배포 성공을 요구하지 않는다. 데모가 생기면 ["demo"]로 되돌린다(소유자 결정 2026-11-03)
+  main_required_deployments = []
 
   depends_on = [
     github_branch_default.this,
