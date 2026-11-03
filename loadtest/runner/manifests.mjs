@@ -200,7 +200,9 @@ export function generatorPod(o) {
 
 /**
  * 준비되지 않은 파드의 까닭 한 줄(`kubectl get pod -o json`의 객체): 단계, 참이 아닌 조건의 이유·글(예: 스케줄러의 'Insufficient cpu'),
- * 기다리거나 끝난 컨테이너의 이유·글(예: 이미지 받기 실패)을 '; '로 잇는다. 1,000자를 넘으면 자르고, 아무것도 없으면 '까닭을 알 수 없다'다
+ * 기다리거나 끝난 컨테이너의 이유·글(예: 이미지 받기 실패), 다시 시작한 컨테이너의 횟수와 직전 종료(이유·종료 코드·시각, 예: OOMKilled)를
+ * '; '로 잇는다. 준비된 파드도 다시 시작을 보려고 쓴다(앱 파드 안 스크립트가 실패할 때 대기열 Redis 파드). 1,000자를 넘으면 자르고,
+ * 아무것도 없으면 '까닭을 알 수 없다'다
  * @param {Record<string, any> | null | undefined} pod
  * @returns {string}
  */
@@ -212,6 +214,11 @@ export function podNotReadyReason(pod) {
   for (const cs of [...(st.initContainerStatuses ?? []), ...(st.containerStatuses ?? [])]) {
     const s = cs.state?.waiting ?? cs.state?.terminated;
     if (s && said(s)) parts.push(`컨테이너 ${cs.name}: ${said(s)}`);
+    if (cs.restartCount > 0) {
+      const t = cs.lastState?.terminated;
+      const last = t ? [t.reason, t.exitCode !== undefined && `종료 코드 ${t.exitCode}`, t.finishedAt].filter(Boolean).join(' ') : '';
+      parts.push(`컨테이너 ${cs.name}: 다시 시작 ${cs.restartCount}번${last ? `(직전 종료 ${last})` : ''}`);
+    }
   }
   const text = parts.join('; ') || '까닭을 알 수 없다';
   return text.length > 1000 ? `${text.slice(0, 999)}…` : text;

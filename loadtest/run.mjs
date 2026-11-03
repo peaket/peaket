@@ -275,10 +275,37 @@ async function ensureNamespace() {
   await applyObject({ apiVersion: 'v1', kind: 'Namespace', metadata: { name: NS, labels: { 'app.kubernetes.io/part-of': 'peaket-loadtest' } } });
 }
 
-/** 앱 파드 안에서 Node 스크립트를 돌리고 '@@RESULT <JSON>' 줄을 읽는다 */
+/**
+ * 앱 파드 안 관리 스크립트가 대기열 Redis에 붙기까지 기다리는 시간(밀리초). 앱 시작 마감(5초, services/v0-monolith/src/redis.ts)은 핫패스용이라
+ * 관리 스크립트에는 길게 준다. 2026-11-03 러너 A/A 4회째에 측정 뒤 기록 읽기가 5초 안에 붙지 못해 몇 시간짜리 실행이 멈췄다
+ */
+const ADMIN_REDIS_STARTUP_MS = 30_000;
+/** 대기열 Redis(Valkey) 파드 [네임스페이스, 꼬리표](deploy/local/valkey.yaml) */
+const VALKEY_SELECTOR = ['peaket-local', 'app=valkey'];
+
+/** [네임스페이스, 꼬리표]로 고른 파드마다 상태 한 줄(다시 시작·직전 종료 까닭 포함). 읽지 못하면 그 까닭을 적는다 */
+async function podsNote(targets) {
+  const lines = [];
+  for (const [ns, selector] of targets) {
+    try {
+      for (const p of JSON.parse(await kc(['-n', ns, 'get', 'pods', '-l', selector, '-o', 'json'])).items) lines.push(`${ns}/${p.metadata?.name}: ${podNotReadyReason(p)}`);
+    } catch (e) {
+      lines.push(`${ns} ${selector}: 읽지 못했다(${String(e.message ?? e).slice(0, 200)})`);
+    }
+  }
+  return lines.join('\n') || '파드가 없다';
+}
+
+/** 앱 파드 안에서 Node 스크립트를 돌리고 '@@RESULT <JSON>' 줄을 읽는다. 실패하면 앱·대기열 Redis 파드의 상태를 오류 끝에 붙인다 */
 export async function inAppPod(script, timeout = 300_000, namespace = V0_NAMESPACE) {
   // 스크립트는 인자 하나로 넘긴다(표준 입력은 이 PC에서 잘릴 수 있다). 몇 KB라 명령줄 한도(32K) 안이다
-  const out = await kc(['-n', namespace, 'exec', 'deploy/v0-monolith', '--', 'node', '--input-type=module', '-e', script], { timeout });
+  let out;
+  try {
+    out = await kc(['-n', namespace, 'exec', 'deploy/v0-monolith', '--', 'node', '--input-type=module', '-e', script], { timeout });
+  } catch (e) {
+    e.message = `${e.message}\n파드 상태:\n${await podsNote([[namespace, APP_SELECTOR], VALKEY_SELECTOR])}`;
+    throw e;
+  }
   const m = /^@@RESULT (.*)$/m.exec(out);
   if (!m) throw new Error(`앱 파드 안 스크립트에 결과 줄이 없다:\n${out.slice(-1500)}`);
   return JSON.parse(m[1]);
@@ -296,7 +323,7 @@ import { createTicketAdmin, createTicketIssuer } from './dist/modules/ticket/ind
 import { createV0Redis } from './dist/redis.js';
 import { randomUUID } from 'node:crypto';
 const p = JSON.parse(Buffer.from('${b64json(p)}', 'base64').toString('utf8'));
-const redis = await createV0Redis(process.env.PEAKET_V0_REDIS_URL);
+const redis = await createV0Redis(process.env.PEAKET_V0_REDIS_URL, { startupTimeoutMs: ${ADMIN_REDIS_STARTUP_MS} });
 const database = createDatabase({ url: process.env.PEAKET_V0_DATABASE_URL, applicationName: 'v0-loadtest-seed' });
 try {
   await createQueueAdmin(redis).open(p.eventId, { admitPerSecond: p.admitPerSecond, saleEndsAtMs: p.saleEndsAtMs });
@@ -329,7 +356,7 @@ setTimeout(() => process.exit(0), 2000).unref();
 function servingLogScript(eventId) {
   return `import { createQueueAdmin } from './dist/modules/queue/index.js';
 import { createV0Redis } from './dist/redis.js';
-const redis = await createV0Redis(process.env.PEAKET_V0_REDIS_URL);
+const redis = await createV0Redis(process.env.PEAKET_V0_REDIS_URL, { startupTimeoutMs: ${ADMIN_REDIS_STARTUP_MS} });
 try {
   const log = await createQueueAdmin(redis).servingLog(${JSON.stringify(eventId)});
   process.stdout.write('@@RESULT ' + JSON.stringify(log) + '\\n');
