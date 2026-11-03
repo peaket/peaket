@@ -21,6 +21,8 @@ export const keys = {
   slots: (e: string) => `q:{event:${e}}:slots`,
   soon: (e: string) => `q:{event:${e}}:soon`,
   soonAt: (e: string) => `q:{event:${e}}:soon_at`,
+  /** 곧 입장 처음 시각(입장 확정이 쓴다, ADR-0183) */
+  soonFirst: (e: string) => `q:{event:${e}}:soon_first`,
   batchDone: (e: string) => `q:{event:${e}}:batch_done`,
   batchMembers: (e: string) => `q:{event:${e}}:batch_members:1`,
   lobbyMembers: (e: string) => `q:{event:${e}}:lobby_members`,
@@ -94,7 +96,7 @@ export class RedisLeaderStore implements LeaderStore {
 
   async tick(i: TickInput): Promise<TickResult> {
     const e = i.eventId;
-    const ks = [keys.leader(e), keys.serving(e), keys.seq(e), keys.removed(e), keys.skipped(e), keys.servingLog(e), keys.calls(e), keys.callReq(e), keys.slots(e), keys.soon(e), keys.soonAt(e), keys.batchDone(e), keys.notice(e)];
+    const ks = [keys.leader(e), keys.serving(e), keys.seq(e), keys.removed(e), keys.skipped(e), keys.servingLog(e), keys.calls(e), keys.callReq(e), keys.slots(e), keys.soon(e), keys.soonAt(e), keys.batchDone(e), keys.notice(e), keys.ctl(e), keys.soonFirst(e)];
     const args = [
       i.gen,
       i.target,

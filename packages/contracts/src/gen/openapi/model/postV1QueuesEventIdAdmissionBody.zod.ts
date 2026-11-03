@@ -14,7 +14,9 @@ import * as zod from 'zod';
 export const PostV1QueuesEventIdAdmissionBody = zod.object({
   "queueTicket": zod.string().optional(),
   "lobbyToken": zod.string().optional(),
-  "priorityGrantId": zod.uuid().optional().describe('우선 구매(이의가 인정된 부정 예매 표 취소의 되돌림, POL-046 ⑦)의 권리 ID(GET /v1/fraud-appeal-requests의 priorityPurchases). 대기표·참가 토큰 대신 보낸다. 그 계정의 OFFERED 권리이고 만료 전이면 대기 번호·15분 만료 없이 입장 토큰(클레임 prio)을 주고 입장 자리 수에 세지 않는다. 이때 queue-svc가 새 여정 ID(jny)를 만든다. 판매 종료 뒤에도 받는다(판매 종료 규칙의 예외, 추천 적용 2026-10-31, ADR-0171)')
+  "priorityGrantId": zod.uuid().optional().describe('우선 구매(이의가 인정된 부정 예매 표 취소의 되돌림, POL-046 ⑦)의 권리 ID(GET /v1/fraud-appeal-requests의 priorityPurchases). 대기표·참가 토큰 대신 보낸다. 그 계정의 OFFERED 권리이고 만료 전이면 대기 번호·15분 만료 없이 입장 토큰(클레임 prio)을 주고 입장 자리 수에 세지 않는다. 이때 queue-svc가 새 여정 ID(jny)를 만든다. 판매 종료 뒤에도 받는다(판매 종료 규칙의 예외, 추천 적용 2026-10-31, ADR-0171)'),
+  "firstEtaSec": zod.number().optional().describe('선택. 대기 화면이 이 대기에서 처음 보인 예상 대기(초, 1~86,400). firstEtaAtMs와 함께 오면 queue-svc가 그 대기표가 처음 자리를 잡을 때 (차례 시각 − firstEtaAtMs) ÷ firstEtaSec을 예상 대기 오차 지표(queue_eta_error_ratio)에 넣는다. 관측용이라 서버는 모양을 묻지 않고(입장을 400으로 막지 않는다) 숫자가 아니거나 범위 밖이면 버리며, 판정에 쓰지 않는다(추천 적용 2026-11-03, ADR-0183)'),
+  "firstEtaAtMs": zod.number().optional().describe('선택. firstEtaSec을 처음 보인 때의 보정된 서버 시각(유닉스 밀리초, ADR-0110). 미래이거나 이틀보다 앞이면 버린다')
 })
 
 export type PostV1QueuesEventIdAdmissionBody = zod.input<typeof PostV1QueuesEventIdAdmissionBody>;

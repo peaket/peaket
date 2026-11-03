@@ -102,6 +102,24 @@ test('빈자리는목표에서입장자리·곧입장·오는중을뺀만큼이�
   expect(await cmd(keys.callReq(e), ['HGET', keys.callReq(e), `${now - 61_000}:5`])).toBeNull();
 });
 
+test('리더는주기마다쓴목표를ctl의targetNow에남기고_낡은곧입장항목의처음SOON시각(soon_first)도함께지운다(ADR-0183)', async () => {
+  const e = newEvent();
+  const now = Date.now();
+  await seqTo(e, 100);
+  await cmd(keys.soon(e), ['ZADD', keys.soon(e), '10', 'x', '12', 'z']);
+  await cmd(keys.soonAt(e), ['ZADD', keys.soonAt(e), String(now - 1_000), 'x', String(now - 9_000), 'z']);
+  await cmd(keys.soonFirst(e), ['HSET', keys.soonFirst(e), 'x', String(now - 1_000), 'z', String(now - 20_000)]);
+  await store.bump(e, 1, now + DAY);
+  await store.tick(tickOf(e, 1, { target: 321 }));
+  expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'targetNow'])).toBe('321');
+  expect(await cmd(keys.soonFirst(e), ['HGET', keys.soonFirst(e), 'z'])).toBeNull();
+  expect(await cmd(keys.soonFirst(e), ['HGET', keys.soonFirst(e), 'x'])).toBe(String(now - 1_000));
+  // 옛 세대의 전진은 목표도 쓰지 않는다
+  await store.bump(e, 2, now + DAY);
+  expect((await store.tick(tickOf(e, 1, { target: 7 }))).kind).toBe('FENCED');
+  expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'targetNow'])).toBe('321');
+});
+
 test('[Q-T33] 묶음표시가있으면_게시뒤분산창8초가지나기전에는serving이묶음첫번호를넘지않는다_게시가늦었으면21초다', async () => {
   const e = newEvent();
   const now = Date.now();

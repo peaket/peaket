@@ -60,7 +60,7 @@ jobs:
       - run: pnpm --filter @peaket/platform test:integration
       # identity-svc의 PostgreSQL 저장소 시험: 같은 멱등 키의 세션 생성이 겹쳐 와도 세션이 하나인지(I-T50 ①, BUILD_ORDER PRF-020)
       - run: pnpm --filter @peaket/identity-svc test:integration
-      # queue-svc의 진입 Lua를 실제 Valkey로: 1인 1순번(Q-T4), 선점 뒤 멈춤과 재시도(Q-T53), 입장 키 확인(FND-130) (BUILD_ORDER PRF-050), 동시 도착 묶음(Q-T24·Q-T52, PRF-060)
+      # queue-svc의 진입 Lua를 실제 Valkey로: 1인 1순번(Q-T4), 선점 뒤 멈춤과 재시도(Q-T53), 입장 키 확인(FND-130) (BUILD_ORDER PRF-050), 동시 도착 묶음(Q-T24·Q-T52, PRF-060), 입장 확정 Lua(Q-T9·Q-T10·Q-T31, PRF-110)
       - run: pnpm --filter @peaket/queue-svc test:integration
       # admission-ctrl의 묶음 결과 게시를 실제 Valkey로: 닫힘 표시·참가자를 읽고 사람별 결과·결과 파일·게시 표시를 쓰며, 잃은 결과 키를 같은 값으로 다시 쓴다(BUILD_ORDER PRF-060)
       - run: pnpm --filter @peaket/admission-ctrl test:integration

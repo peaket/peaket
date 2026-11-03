@@ -78,7 +78,8 @@ return {'OK'}
 // serving을 유효 번호(빠진 번호 비트 0, 건너뛴 구간 밖) 기준으로 올린다. 발급된 번호와 첫 전진 문을 넘지 않는다. 같은 Lua에서 차례 시각 기록과 전진 기록을 남기고 오래된 전진 기록을 지운다.
 // 입장 비율(PRF-100, ADR-0104 결정 3): 불린 지 창(ARGV 17~18) 안인 전진의 처음 요청 수(전진마다 유효 수에서 자름) ÷ 유효 수, 표본이 없으면 1, p = max(비율, 하한).
 // 판매 상태(ADR-0122): notice의 saleState(없으면 ARGV 19)가 ON_SALE이 아니면 전진 0. ON_SALE인데 soldOutLastSeq가 serving보다 크면 먼저 그리로 옮긴다(전진 기록에는 남기지 않는다).
-// KEYS: 1 leader, 2 serving, 3 seq, 4 removed, 5 skipped, 6 serving_log, 7 calls, 8 call_req, 9 slots, 10 soon, 11 soon_at, 12 batch_done, 13 notice
+// 지금 목표(ARGV 2)는 ctl의 targetNow에 남겨 입장 확정이 빈자리를 셀 때 읽는다(PRF-110, ADR-0183 결정 4). 낡은 곧 입장 항목은 soon_first에서도 지운다(결정 9).
+// KEYS: 1 leader, 2 serving, 3 seq, 4 removed, 5 skipped, 6 serving_log, 7 calls, 8 call_req, 9 slots, 10 soon, 11 soon_at, 12 batch_done, 13 notice, 14 ctl, 15 soon_first
 // ARGV: 1 세대, 2 목표, 3 비율 하한, 4 오는 중 창 W(ms), 5 최대 전진, 6 회차 키 수명, 7 로비 셔플, 8 묶음, 9 묶음 구간 끝(ms), 10 곧 입장 낡음(ms), 11 전진 기록 보관(ms),
 //       12 분산 창(ms), 13 늦은 게시의 분산 창(ms), 14 공개 예정 = 구간 끝 + 이 값(ms), 15 한 번에 훑는 번호 상한, 16 전진 기록 수명(판매 종료),
 //       17·18 입장 비율 창의 처음·끝(불린 뒤 ms), 19 판매 상태를 모를 때의 값
@@ -97,8 +98,11 @@ for i = 1, #stale, 500 do
   for j = i, math.min(i + 499, #stale) do part[#part + 1] = stale[j] end
   redis.call('ZREM', KEYS[11], unpack(part))
   redis.call('ZREM', KEYS[10], unpack(part))
+  redis.call('HDEL', KEYS[15], unpack(part))
 end
 local soon = redis.call('ZCARD', KEYS[10])
+redis.call('HSET', KEYS[14], 'targetNow', ARGV[2])
+extend(KEYS[14], keep)
 -- 전진 기록을 한 번 훑어: 보관 시간이 지난 기록은 지우고, 입장 비율 창 안 기록으로 비율을, 최근 W초 기록으로 오는 중을 센다
 local W = tonumber(ARGV[4])
 local wmin = tonumber(ARGV[17])

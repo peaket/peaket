@@ -204,13 +204,15 @@ export const PostV1QueuesEventIdAdmissionParams = zod.object({
 export const PostV1QueuesEventIdAdmissionBody = zod.object({
   "queueTicket": zod.string().optional(),
   "lobbyToken": zod.string().optional(),
-  "priorityGrantId": zod.uuid().optional().describe('우선 구매(이의가 인정된 부정 예매 표 취소의 되돌림, POL-046 ⑦)의 권리 ID(GET /v1/fraud-appeal-requests의 priorityPurchases). 대기표·참가 토큰 대신 보낸다. 그 계정의 OFFERED 권리이고 만료 전이면 대기 번호·15분 만료 없이 입장 토큰(클레임 prio)을 주고 입장 자리 수에 세지 않는다. 이때 queue-svc가 새 여정 ID(jny)를 만든다. 판매 종료 뒤에도 받는다(판매 종료 규칙의 예외, 추천 적용 2026-10-31, ADR-0171)')
+  "priorityGrantId": zod.uuid().optional().describe('우선 구매(이의가 인정된 부정 예매 표 취소의 되돌림, POL-046 ⑦)의 권리 ID(GET /v1/fraud-appeal-requests의 priorityPurchases). 대기표·참가 토큰 대신 보낸다. 그 계정의 OFFERED 권리이고 만료 전이면 대기 번호·15분 만료 없이 입장 토큰(클레임 prio)을 주고 입장 자리 수에 세지 않는다. 이때 queue-svc가 새 여정 ID(jny)를 만든다. 판매 종료 뒤에도 받는다(판매 종료 규칙의 예외, 추천 적용 2026-10-31, ADR-0171)'),
+  "firstEtaSec": zod.number().optional().describe('선택. 대기 화면이 이 대기에서 처음 보인 예상 대기(초, 1~86,400). firstEtaAtMs와 함께 오면 queue-svc가 그 대기표가 처음 자리를 잡을 때 (차례 시각 − firstEtaAtMs) ÷ firstEtaSec을 예상 대기 오차 지표(queue_eta_error_ratio)에 넣는다. 관측용이라 서버는 모양을 묻지 않고(입장을 400으로 막지 않는다) 숫자가 아니거나 범위 밖이면 버리며, 판정에 쓰지 않는다(추천 적용 2026-11-03, ADR-0183)'),
+  "firstEtaAtMs": zod.number().optional().describe('선택. firstEtaSec을 처음 보인 때의 보정된 서버 시각(유닉스 밀리초, ADR-0110). 미래이거나 이틀보다 앞이면 버린다')
 })
 
 export const PostV1QueuesEventIdAdmissionResponse = zod.object({
   "verificationReason": zod.union([zod.literal('RAPID_REQUESTS'),zod.literal('DEVICE_HISTORY'),zod.literal('NETWORK'),zod.literal('INTERACTION'),zod.literal('HUMAN_CHECK'),zod.literal('SHARED_PATTERN'),zod.literal(null)]).nullish().describe('추가 검증(VERIFYING)일 때 이용자에게 보이는 사유 범주(trust.proto ReasonCategory 이름에서 접두사를 뺀 값). 그 밖에는 null(FR-020, docs/features/bot-defense.md §5, 추천 적용 2026-10-30)'),
   "status": zod.enum(['NOT_YET', 'ADMITTED', 'SOON', 'VERIFYING']).optional().describe('만료와 판매 종료는 410 응답으로 알린다. NOT_YET은 좌석 자동 배정 공연의 차례 직전 직접 확인에서 아직 차례 전(ADR-0043). VERIFYING은 빠진 번호이고 추가 검증 중이라 화면이 SCR-009로 간다(303 대신, ADR-0079 결정 4). SOON은 자리가 없어 곧 입장 대기열에 번호로 넣었다는 뜻이고, 빈자리는 그 대기열의 낮은 번호부터 간다(ADR-0104)'),
-  "admissionToken": zod.string().optional().describe('ES256, 첫 사용 기한 5분, 만료는 최대 체류 시각'),
+  "admissionToken": zod.string().optional().describe('ES256, 첫 사용 기한 5분, 만료는 최대 체류 시각. 머리 typ admission+jwt·kid, 클레임 iss·sub(계정)·aud purchase·jti·sid·event·jny·iat·exp(= iat + 최대 체류 45분). 첫 사용 기한은 따로 싣지 않고 purchase-svc가 iat + 5분으로 본다(추천 적용 2026-11-03, ADR-0183)'),
   "retryAfterSeconds": zod.int().optional().describe('SOON일 때 다시 시도까지의 초(1~5 [가정]. 곧 입장 대기열에서 내 앞 수와 최근 자리가 비는 속도로 계산, ADR-0104). 브라우저는 이 값을 하한으로 지키고 위쪽으로만 0~20% 지터를 더한다(추천 적용 2026-10-28, 기술 검토 중간-038)'),
   "serverTimeMs": zod.int().optional().describe('서버 시각(유닉스 밀리초). 시계 보정 표본(ADR-0110)'),
   "retryAfterMs": zod.int().optional().describe('NOT_YET일 때 예상 도래까지 남은 시간(밀리초)'),
