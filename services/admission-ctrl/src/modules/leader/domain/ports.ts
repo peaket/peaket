@@ -22,8 +22,10 @@ export interface TickInput {
   gen: number;
   /** 동시 입장 목표 */
   target: number;
-  /** max(입장 비율, 0.2) */
-  p: number;
+  /** 입장 비율 하한(0.2). 비율은 Lua가 전진 기록으로 센다(PRF-100) */
+  ratioFloor: number;
+  /** 판매 상태 칸이 없을 때 쓸 값: 리더가 그 회차에서 마지막으로 본 상태(처음은 ON_SALE, ADR-0122) */
+  saleStateFallback: string;
   /** 오는 중 창 W(ms) */
   windowMs: number;
   /** 이번 주기의 최대 전진 번호 수(초당 상한 × 0.2초, 일시정지면 0) */
@@ -54,6 +56,10 @@ export type TickResult =
       batchMarked: 0 | 1;
       batchPublished: 0 | 1;
       repair: 0 | 1;
+      /** 이번 주기의 입장 비율(0~1, 표본이 없으면 1) */
+      ratio: number;
+      /** 이번 주기에 쓴 판매 상태 */
+      saleState: string;
     };
 
 export interface CloseInput {

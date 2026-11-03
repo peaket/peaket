@@ -3,7 +3,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type HotRedis, redisScript } from '@peaket/platform';
 import { ADMISSION_REDIS } from '../../batch/index.js';
-import { BATCH_RESULT_DELAY_MS, CALLS_KEEP_MS, DISPERSAL_MS, LATE_DISPERSAL_MS, SCAN_BUDGET, SOON_STALE_MS } from '../domain/plan.js';
+import { BATCH_RESULT_DELAY_MS, CALLS_KEEP_MS, DISPERSAL_MS, LATE_DISPERSAL_MS, RATIO_WINDOW_MAX_MS, RATIO_WINDOW_MIN_MS, SCAN_BUDGET, SOON_STALE_MS } from '../domain/plan.js';
 import type { CloseInput, CloseResult, Control, EventPlan, LeaderStore, Rb05Input, Rb05Result, TickInput, TickResult } from '../domain/ports.js';
 import { BUMP_LUA, CLOSE_LUA, RB05_LUA, TICK_LUA } from './leader-lua.js';
 
@@ -25,6 +25,8 @@ export const keys = {
   batchMembers: (e: string) => `q:{event:${e}}:batch_members:1`,
   lobbyMembers: (e: string) => `q:{event:${e}}:lobby_members`,
   epoch: (e: string) => `q:{event:${e}}:epoch`,
+  /** 대기 화면에 싣는 제어 상태(queue-svc가 쓴다): 판매 상태 saleState, soldOutLastSeq(ADR-0122) */
+  notice: (e: string) => `q:{event:${e}}:notice`,
   /** 진행 중인 회차 목록(queue-svc가 일정 사본을 읽을 때 넣는다, ADR-0182 결정 2) */
   events: () => 'q:{admission}:events',
 };
@@ -92,11 +94,11 @@ export class RedisLeaderStore implements LeaderStore {
 
   async tick(i: TickInput): Promise<TickResult> {
     const e = i.eventId;
-    const ks = [keys.leader(e), keys.serving(e), keys.seq(e), keys.removed(e), keys.skipped(e), keys.servingLog(e), keys.calls(e), keys.callReq(e), keys.slots(e), keys.soon(e), keys.soonAt(e), keys.batchDone(e)];
+    const ks = [keys.leader(e), keys.serving(e), keys.seq(e), keys.removed(e), keys.skipped(e), keys.servingLog(e), keys.calls(e), keys.callReq(e), keys.slots(e), keys.soon(e), keys.soonAt(e), keys.batchDone(e), keys.notice(e)];
     const args = [
       i.gen,
       i.target,
-      i.p,
+      i.ratioFloor,
       i.windowMs,
       i.maxAdvance,
       i.keepUntilMs,
@@ -110,11 +112,14 @@ export class RedisLeaderStore implements LeaderStore {
       BATCH_RESULT_DELAY_MS,
       SCAN_BUDGET,
       i.saleEndMs,
+      RATIO_WINDOW_MIN_MS,
+      RATIO_WINDOW_MAX_MS,
+      i.saleStateFallback,
     ].map(String);
     const r = (await this.redis.evalScript(TICK, ks, args)) as unknown[];
     if (str(r[0]) === 'FENCED') return { kind: 'FENCED' };
     const n = (k: number) => Number(r[k]);
-    return { kind: 'OK', serving: n(1), advanced: n(2), slots: n(3), soon: n(4), inFlight: n(5), dropped: n(6), lobbyMarked: bit(r[7]), batchMarked: bit(r[8]), batchPublished: bit(r[9]), repair: bit(r[10]) };
+    return { kind: 'OK', serving: n(1), advanced: n(2), slots: n(3), soon: n(4), inFlight: n(5), dropped: n(6), lobbyMarked: bit(r[7]), batchMarked: bit(r[8]), batchPublished: bit(r[9]), repair: bit(r[10]), ratio: n(11) / 1000, saleState: str(r[12])! };
   }
 
   async close(i: CloseInput): Promise<CloseResult> {

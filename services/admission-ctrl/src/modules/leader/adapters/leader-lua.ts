@@ -76,10 +76,13 @@ return {'OK'}
 
 // 명세 plan·applyWrite의 ADVANCE(정본 §5 식, ADR-0104·0182 결정 4·5): 지난 자리와 낡은 곧 입장 항목을 정리하고, 빈자리로 전진 폭을 정해
 // serving을 유효 번호(빠진 번호 비트 0, 건너뛴 구간 밖) 기준으로 올린다. 발급된 번호와 첫 전진 문을 넘지 않는다. 같은 Lua에서 차례 시각 기록과 전진 기록을 남기고 오래된 전진 기록을 지운다.
-// KEYS: 1 leader, 2 serving, 3 seq, 4 removed, 5 skipped, 6 serving_log, 7 calls, 8 call_req, 9 slots, 10 soon, 11 soon_at, 12 batch_done
-// ARGV: 1 세대, 2 목표, 3 p, 4 오는 중 창 W(ms), 5 최대 전진, 6 회차 키 수명, 7 로비 셔플, 8 묶음, 9 묶음 구간 끝(ms), 10 곧 입장 낡음(ms), 11 전진 기록 보관(ms),
-//       12 분산 창(ms), 13 늦은 게시의 분산 창(ms), 14 공개 예정 = 구간 끝 + 이 값(ms), 15 한 번에 훑는 번호 상한, 16 전진 기록 수명(판매 종료)
-// 돌려주는 값: {'FENCED'} 또는 {'OK', serving, 유효 전진 수, 쓰는 자리, 곧 입장, 오는 중, 뺀 곧 입장, 로비 표시, 묶음 표시, 묶음 게시, 다시 쓰기 표시}
+// 입장 비율(PRF-100, ADR-0104 결정 3): 불린 지 창(ARGV 17~18) 안인 전진의 처음 요청 수(전진마다 유효 수에서 자름) ÷ 유효 수, 표본이 없으면 1, p = max(비율, 하한).
+// 판매 상태(ADR-0122): notice의 saleState(없으면 ARGV 19)가 ON_SALE이 아니면 전진 0. ON_SALE인데 soldOutLastSeq가 serving보다 크면 먼저 그리로 옮긴다(전진 기록에는 남기지 않는다).
+// KEYS: 1 leader, 2 serving, 3 seq, 4 removed, 5 skipped, 6 serving_log, 7 calls, 8 call_req, 9 slots, 10 soon, 11 soon_at, 12 batch_done, 13 notice
+// ARGV: 1 세대, 2 목표, 3 비율 하한, 4 오는 중 창 W(ms), 5 최대 전진, 6 회차 키 수명, 7 로비 셔플, 8 묶음, 9 묶음 구간 끝(ms), 10 곧 입장 낡음(ms), 11 전진 기록 보관(ms),
+//       12 분산 창(ms), 13 늦은 게시의 분산 창(ms), 14 공개 예정 = 구간 끝 + 이 값(ms), 15 한 번에 훑는 번호 상한, 16 전진 기록 수명(판매 종료),
+//       17·18 입장 비율 창의 처음·끝(불린 뒤 ms), 19 판매 상태를 모를 때의 값
+// 돌려주는 값: {'FENCED'} 또는 {'OK', serving, 유효 전진 수, 쓰는 자리, 곧 입장, 오는 중, 뺀 곧 입장, 로비 표시, 묶음 표시, 묶음 게시, 다시 쓰기 표시, 비율(천분율), 판매 상태}
 export const TICK_LUA = `${EXTEND}${FENCE}
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
@@ -96,26 +99,49 @@ for i = 1, #stale, 500 do
   redis.call('ZREM', KEYS[10], unpack(part))
 end
 local soon = redis.call('ZCARD', KEYS[10])
--- 오는 중: 최근 W초 전진의 max(0, 유효 번호 수 × p - 요청 수). 보관 시간이 지난 기록은 지운다
-local p = tonumber(ARGV[3])
+-- 전진 기록을 한 번 훑어: 보관 시간이 지난 기록은 지우고, 입장 비율 창 안 기록으로 비율을, 최근 W초 기록으로 오는 중을 센다
 local W = tonumber(ARGV[4])
-local inflight = 0
+local wmin = tonumber(ARGV[17])
+local wmax = tonumber(ARGV[18])
+local recent = {}
+local sumValid, sumReq = 0, 0
+-- 처음 요청 수는 한 번에 읽는다(전진 기록은 60초 분량, 많아야 약 300개)
+local reqs = {}
+local rq = redis.call('HGETALL', KEYS[8])
+for i = 1, #rq, 2 do reqs[rq[i]] = tonumber(rq[i + 1]) end
 for _, m in ipairs(redis.call('ZRANGE', KEYS[7], 0, -1)) do
   local at, valid = string.match(m, '^(%d+):(%d+)$')
   at = tonumber(at)
+  valid = tonumber(valid)
   if at and now - at > tonumber(ARGV[11]) then
     redis.call('ZREM', KEYS[7], m)
     redis.call('HDEL', KEYS[8], m)
-  elseif at and now - at <= W then
-    local req = tonumber(redis.call('HGET', KEYS[8], m) or '0')
-    inflight = inflight + math.max(0, tonumber(valid) * p - req)
+  elseif at then
+    local req = reqs[m] or 0
+    local age = now - at
+    if age <= W then recent[#recent + 1] = {valid, req} end
+    if age >= wmin and age <= wmax then
+      sumValid = sumValid + valid
+      sumReq = sumReq + math.min(req, valid)
+    end
   end
 end
-inflight = math.floor(inflight)
+local ratio = 1
+if sumValid > 0 then ratio = sumReq / sumValid end
+local p = math.max(ratio, tonumber(ARGV[3]))
+-- 오는 중: 최근 W초 전진의 max(0, 유효 번호 수 × p - 요청 수)
+local inflight = 0
+for _, r in ipairs(recent) do inflight = inflight + math.max(0, r[1] * p - r[2]) end
+inflight = math.floor(inflight + 1e-9)
 local free = tonumber(ARGV[2]) - slots - soon - inflight
-local adv = math.floor(free / p)
+-- 나눗셈의 부동소수 오차(80 ÷ 0.8 = 99.99…)로 하나 덜 부르지 않게 아주 작은 값을 더한다
+local adv = math.floor(free / p + 1e-9)
 if adv < 0 then adv = 0 end
 if adv > tonumber(ARGV[5]) then adv = tonumber(ARGV[5]) end
+-- 판매 상태: ON_SALE이 아니면(일시 매진·매진·판매 종료) 부르지 않는다
+local ns = redis.call('HMGET', KEYS[13], 'saleState', 'soldOutLastSeq')
+local state = ns[1] or ARGV[19]
+if state ~= 'ON_SALE' then adv = 0 end
 -- 첫 전진 문(ADR-0058 결정 4): 표시가 있는데 게시 + 분산 창이 지나지 않았으면 그 구간의 첫 번호 - 1을 넘지 않는다
 local cap = tonumber(redis.call('GET', KEYS[3]) or '0')
 local bd = redis.call('HMGET', KEYS[12], 'lobby', 'pub:lobby', '1', 'pub:1', 'repair:1')
@@ -139,6 +165,13 @@ for _, line in ipairs(redis.call('LRANGE', KEYS[5], 0, -1)) do
 end
 local s = tonumber(redis.call('GET', KEYS[2]) or '0')
 local n = s
+-- 매진이 풀렸으면 serving을 매진 때의 마지막 발급 번호로 옮긴다(그 번호까지의 대기는 매진으로 끝났다). 부른 것이 아니라 유효 수에 넣지 않는다.
+-- 입장 일시정지(최대 전진 0) 중에는 순번을 그대로 두고, 숫자가 아닌 값은 없는 것으로 본다
+local sold = tonumber(ns[2])
+if state == 'ON_SALE' and sold and tonumber(ARGV[5]) > 0 then
+  sold = math.min(sold, cap)
+  if sold > n then n = sold end
+end
 local valid = 0
 local budget = tonumber(ARGV[15])
 while valid < adv and n < cap and budget > 0 do
@@ -164,7 +197,7 @@ if n > s then
 end
 extend(KEYS[1], keep)
 local function has(v) if v then return 1 end return 0 end
-return {'OK', n, valid, slots, soon, inflight, #stale, has(bd[1]), has(bd[3]), has(bd[4]), has(bd[5])}
+return {'OK', n, valid, slots, soon, inflight, #stale, has(bd[1]), has(bd[3]), has(bd[4]), has(bd[5]), math.floor(ratio * 1000 + 0.5), state}
 `;
 
 // 명세 plan·applyWrite의 CLOSE(ADR-0182 결정 6): 서버 시각으로 오픈이 지나면 로비 표시를, 구간 끝이 지나면 묶음 표시를 진입 Lua와 같은 뜻으로 쓴다

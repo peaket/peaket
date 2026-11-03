@@ -1,7 +1,7 @@
 // 리더의 대기열 Redis Lua를 실제 Valkey 8.1로 돈다(docs/features/queue-admission.md §5, ADR-0056·0058·0104·0182).
 // 이름은 명세 specs/queue.qnt의 동작 이름(acquire의 BUMP, plan·applyWrite의 ADVANCE·CLOSE)이다. Lua는 서버 시각을 쓰므로 시각은 Date.now() 기준으로 둔다.
 import { createHotRedis, type HotRedis } from '@peaket/platform';
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { RedisLeaderStore, keys } from '../src/modules/leader/adapters/redis-leader-store.js';
 import type { TickInput } from '../src/modules/leader/domain/ports.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
@@ -27,7 +27,7 @@ const cmd = (key: string, args: string[]) => redis.command(args, { key });
 const DAY = 86_400_000;
 
 function tickOf(eventId: string, gen: number, o: Partial<TickInput> = {}): TickInput {
-  return { eventId, gen, target: 5_000, p: 1, windowMs: 5_000, maxAdvance: 200, keepUntilMs: Date.now() + 2 * DAY, saleEndMs: Date.now() + DAY, lobbyShuffle: false, openBatch: false, closeAtMs: 0, ...o };
+  return { eventId, gen, target: 5_000, ratioFloor: 0.2, saleStateFallback: 'ON_SALE', windowMs: 5_000, maxAdvance: 200, keepUntilMs: Date.now() + 2 * DAY, saleEndMs: Date.now() + DAY, lobbyShuffle: false, openBatch: false, closeAtMs: 0, ...o };
 }
 const serving = async (e: string) => Number((await cmd(keys.serving(e), ['GET', keys.serving(e)])) ?? 0);
 const seqTo = (e: string, s: number) => cmd(keys.seq(e), ['SET', keys.seq(e), String(s)]);
@@ -251,4 +251,131 @@ test('입장일시정지는만료시각이지나면풀린다', async () => {
   expect(await store.control(e, now)).toEqual({ paused: true });
   await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'admitPausedUntil', String(now - 1)]);
   expect(await store.control(e, now)).toEqual({ paused: false });
+});
+
+describe('입장 비율(ADR-0104 결정 3)', () => {
+  /** at초 전 전진(유효 valid, 처음 요청 req) */
+  const call = async (e: string, agoMs: number, valid: number, req: number, last: number) => {
+    const m = `${Date.now() - agoMs}:${valid}`;
+    await cmd(keys.calls(e), ['ZADD', keys.calls(e), String(last), m]);
+    if (req > 0) await cmd(keys.callReq(e), ['HSET', keys.callReq(e), m, String(req)]);
+  };
+
+  test('[Q-T8] 빈자리80_입장비율80%면serving이정확히100오르고_도착전다음주기에는오는중80을빼서더올리지않는다', async () => {
+    const e = newEvent();
+    await seqTo(e, 10_000);
+    // 30초 전 전진: 유효 100 가운데 80이 입장 확정을 요청했다(비율 80%). 오는 중 창(5초) 밖이다
+    await call(e, 30_000, 100, 80, 100);
+    await cmd(keys.serving(e), ['SET', keys.serving(e), '100']);
+    await store.bump(e, 1, Date.now() + DAY);
+    const r1 = await store.tick(tickOf(e, 1, { target: 80 }));
+    expect(r1).toMatchObject({ kind: 'OK', serving: 200, advanced: 100, ratio: 0.8 });
+    const r2 = await store.tick(tickOf(e, 1, { target: 80 }));
+    expect(r2).toMatchObject({ kind: 'OK', serving: 200, advanced: 0, inFlight: 80 });
+  });
+
+  test('[Q-T8] 불린지10초미만이거나60초를넘은전진은비율의모수에서빠지고_처음요청수(call_req,SOON포함)가분자다', async () => {
+    const e = newEvent();
+    await seqTo(e, 10_000);
+    // 1초 전(오는 중 창 5초 안, 비율 창 밖), 30초 전(비율 창 안, 요청 25 = 입장 20 + SOON 5), 70초 전(창 밖, 지운다)
+    await call(e, 1_000, 100, 0, 300);
+    await call(e, 30_000, 50, 25, 200);
+    await call(e, 70_000, 100, 100, 100);
+    await cmd(keys.serving(e), ['SET', keys.serving(e), '300']);
+    await store.bump(e, 1, Date.now() + DAY);
+    const r = await store.tick(tickOf(e, 1, { target: 100 }));
+    // 비율 0.5, 오는 중 = 100 × 0.5 - 0 = 50, 빈자리 50 ÷ 0.5 = 100
+    expect(r).toMatchObject({ kind: 'OK', ratio: 0.5, inFlight: 50, advanced: 100 });
+  });
+
+  test('p는하한0.2를쓰고_비율은전진마다100%를넘지않으며_표본이없으면100%다', async () => {
+    const low = newEvent();
+    await seqTo(low, 10_000);
+    await call(low, 30_000, 100, 5, 100);
+    await store.bump(low, 1, Date.now() + DAY);
+    expect(await store.tick(tickOf(low, 1, { target: 10 }))).toMatchObject({ ratio: 0.05, advanced: 50 });
+    const high = newEvent();
+    await seqTo(high, 10_000);
+    // 건너뛴 구간의 옛 세대 번호까지 요청해 요청이 유효 수보다 많아도 그 전진은 100%로 자른다
+    await call(high, 30_000, 10, 15, 10);
+    await store.bump(high, 1, Date.now() + DAY);
+    expect(await store.tick(tickOf(high, 1, { target: 10 }))).toMatchObject({ ratio: 1, advanced: 10 });
+    const none = newEvent();
+    await seqTo(none, 10_000);
+    await store.bump(none, 1, Date.now() + DAY);
+    expect(await store.tick(tickOf(none, 1, { target: 10 }))).toMatchObject({ ratio: 1, advanced: 10 });
+  });
+});
+
+describe('판매 상태(ADR-0122)', () => {
+  const notice = (e: string, ...kv: string[]) => cmd(`q:{event:${e}}:notice`, ['HSET', `q:{event:${e}}:notice`, ...kv]);
+
+  test('[Q-T51] 일시매진·매진이면serving을올리지않고_매진이풀리면serving을매진때의마지막발급번호로옮긴뒤새로들어온사람부터부른다', async () => {
+    const e = newEvent();
+    await seqTo(e, 1_000);
+    await cmd(keys.serving(e), ['SET', keys.serving(e), '100']);
+    await store.bump(e, 1, Date.now() + DAY);
+    for (const state of ['ALL_HELD', 'SOLD_OUT']) {
+      await notice(e, 'saleState', state);
+      expect(await store.tick(tickOf(e, 1))).toMatchObject({ kind: 'OK', serving: 100, advanced: 0, saleState: state });
+    }
+    // 매진 때의 마지막 발급 번호 500. 매진이 풀렸다
+    await notice(e, 'saleState', 'ON_SALE', 'soldOutLastSeq', '500');
+    const r = await store.tick(tickOf(e, 1, { maxAdvance: 50 }));
+    expect(r).toMatchObject({ kind: 'OK', serving: 550, advanced: 50, saleState: 'ON_SALE' });
+    // 옮긴 몫(101~500)은 부른 것이 아니라 전진 기록에는 이번 50만 남는다
+    const calls = ((await cmd(keys.calls(e), ['ZRANGE', keys.calls(e), '0', '-1'])) as unknown[]).map(String);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/:50$/);
+    // 이미 옮겼으면 다시 옮기지 않는다
+    expect(await store.tick(tickOf(e, 1, { maxAdvance: 50 }))).toMatchObject({ serving: 600 });
+  });
+
+  test('옮기기는발급된번호와첫전진문을넘지않고_입장일시정지(전진0)중에는옮기지않으며_soldOutLastSeq가숫자가아니면옮기지않는다', async () => {
+    const e = newEvent();
+    await seqTo(e, 300);
+    await store.bump(e, 1, Date.now() + DAY);
+    await notice(e, 'saleState', 'ON_SALE', 'soldOutLastSeq', '500');
+    // 일시정지(최대 전진 0): 순번은 그대로 둔다
+    expect(await store.tick(tickOf(e, 1, { maxAdvance: 0 }))).toMatchObject({ serving: 0 });
+    // 묶음 표시가 있고 게시 전이면 첫 번호 − 1(100)까지만
+    await cmd(keys.batchDone(e), ['HSET', keys.batchDone(e), '1', '101:100:1']);
+    expect(await store.tick(tickOf(e, 1, { openBatch: true, closeAtMs: Date.now() - 60_000 }))).toMatchObject({ serving: 100 });
+    // 게시 뒤에는 발급된 번호(300)까지
+    await cmd(keys.batchDone(e), ['HSET', keys.batchDone(e), 'pub:1', String(Date.now() - 60_000)]);
+    expect(await store.tick(tickOf(e, 1, { openBatch: true, closeAtMs: Date.now() - 120_000, maxAdvance: 0 }))).toMatchObject({ serving: 100 });
+    expect(await store.tick(tickOf(e, 1, { openBatch: true, closeAtMs: Date.now() - 120_000, maxAdvance: 1 }))).toMatchObject({ serving: 300 });
+    const f = newEvent();
+    await seqTo(f, 300);
+    await store.bump(f, 1, Date.now() + DAY);
+    await notice(f, 'saleState', 'ON_SALE', 'soldOutLastSeq', 'x');
+    expect(await store.tick(tickOf(f, 1, { maxAdvance: 10 }))).toMatchObject({ kind: 'OK', serving: 10 });
+  });
+
+  test('판매상태를모르는동안(키나칸이없음)에는_리더가마지막으로본상태를쓴다', async () => {
+    const e = newEvent();
+    await seqTo(e, 1_000);
+    await store.bump(e, 1, Date.now() + DAY);
+    expect(await store.tick(tickOf(e, 1, { saleStateFallback: 'ALL_HELD' }))).toMatchObject({ serving: 0, advanced: 0, saleState: 'ALL_HELD' });
+    expect(await store.tick(tickOf(e, 1))).toMatchObject({ serving: 200, saleState: 'ON_SALE' });
+    // 키는 있는데 판매 상태 칸이 없다
+    await notice(e, 'suspended', '0');
+    expect(await store.tick(tickOf(e, 1, { saleStateFallback: 'SOLD_OUT' }))).toMatchObject({ serving: 200, saleState: 'SOLD_OUT' });
+  });
+});
+
+test('[Q-T10] 한1초칸에여러번전진하고리더가바뀌어도_차례시각기록(serving_log)이칸마다마지막serving으로이어진다', async () => {
+  const e = newEvent();
+  await seqTo(e, 10_000);
+  await store.bump(e, 1, Date.now() + DAY);
+  // 한 1초 칸에 여러 번 전진한다(그 칸의 마지막 serving이 남는다)
+  await store.tick(tickOf(e, 1, { maxAdvance: 10 }));
+  await store.tick(tickOf(e, 1, { maxAdvance: 20 }));
+  await store.bump(e, 2, Date.now() + DAY);
+  await new Promise((r) => setTimeout(r, 1_100));
+  await store.tick(tickOf(e, 2, { maxAdvance: 30 }));
+  const log = ((await cmd(keys.servingLog(e), ['ZRANGE', keys.servingLog(e), '0', '-1', 'WITHSCORES'])) as unknown[]).flat().map(Number);
+  // 1초 칸 둘: 앞 리더의 30, 새 리더의 60
+  expect(log.filter((_, i) => i % 2 === 1)).toEqual([30, 60]);
+  expect(log[2]! - log[0]!).toBeGreaterThanOrEqual(1);
 });

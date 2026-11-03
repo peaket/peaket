@@ -8,7 +8,7 @@ import {
   ARRIVAL_WINDOW_MS,
   closeAtOf,
   DEFAULT_TARGET,
-  INITIAL_RATIO,
+  INITIAL_SALE_STATE,
   keepUntilOf,
   MAX_ADVANCE_PER_TICK,
   PRE_OPEN_MS,
@@ -26,6 +26,8 @@ const CACHE_MS = 1_000;
 const ERROR_LOG_EVERY_MS = 10_000;
 /** 멈출 때 뒤에서 도는 게시를 기다리는 한도 10초 [가정](Lease를 놓기 전에 쓰기를 멈춘다, ADR-0056 결정 3) */
 const STOP_WAIT_MS = 10_000;
+/** 회차 판매 상태(ADR-0122). ON_SALE만 전진한다 */
+const KNOWN_SALE_STATES = new Set(['UPCOMING', 'ON_SALE', 'ALL_HELD', 'SOLD_OUT', 'ENDED']);
 
 @Injectable()
 export class AdmissionLeader {
@@ -40,6 +42,8 @@ export class AdmissionLeader {
   readonly #plans = new Map<string, { at: number; plan: EventPlan | null }>();
   /** 게시 뒤 참가자가 바뀌어 게시를 멈춘 회차(사람이 결과 파일로 되살린다) */
   readonly #stopped = new Set<string>();
+  /** 회차마다 마지막으로 본 판매 상태(판매 상태 칸이 없을 때 쓴다, ADR-0122) */
+  readonly #saleStates = new Map<string, string>();
   readonly #loggedAt = new Map<string, number>();
   /** 뒤에서 도는 게시(회차마다 하나) */
   readonly #publishing = new Map<string, Promise<void>>();
@@ -78,7 +82,11 @@ export class AdmissionLeader {
       const gen = this.elector.generation();
       this.metrics?.leader(gen !== undefined);
       if (gen === undefined || this.#fencedGen === gen) return;
-      if (this.#bumped.gen !== gen) this.#bumped = { gen, events: new Set() };
+      if (this.#bumped.gen !== gen) {
+        this.#bumped = { gen, events: new Set() };
+        // 앞 세대에서 본 판매 상태는 그사이 바뀌었을 수 있다(다른 리더가 있었다). 처음 값으로 시작한다
+        this.#saleStates.clear();
+      }
       const now = this.clock.now();
       const ids = await this.#activeEvents(now);
       this.#forgetEnded(ids);
@@ -109,8 +117,8 @@ export class AdmissionLeader {
         eventId,
         gen,
         target: ctl.target ?? DEFAULT_TARGET,
-        // 입장 비율은 PRF-100이 센다. 그전에는 표본이 없을 때의 처음 값이다
-        p: Math.max(INITIAL_RATIO, RATIO_FLOOR),
+        ratioFloor: RATIO_FLOOR,
+        saleStateFallback: this.#saleStates.get(eventId) ?? INITIAL_SALE_STATE,
         windowMs: ARRIVAL_WINDOW_MS,
         maxAdvance: ctl.paused ? 0 : MAX_ADVANCE_PER_TICK,
         keepUntilMs,
@@ -120,6 +128,9 @@ export class AdmissionLeader {
         closeAtMs,
       });
       if (r.kind === 'FENCED') return this.#fence(gen, eventId);
+      this.#saleStates.set(eventId, r.saleState);
+      // 모르는 판매 상태는 전진 0이 된다. 조용히 멈추지 않게 남긴다
+      if (!KNOWN_SALE_STATES.has(r.saleState)) this.#logError(`${eventId}:state`, now, undefined, `모르는 판매 상태(${r.saleState})라 전진하지 않는다`);
       this.metrics?.event(eventId, r);
       // 오픈이 지났는데 로비 표시가 없거나, 구간 끝이 지났는데 묶음 표시가 없으면 닫는다
       if ((plan.lobbyShuffle && r.lobbyMarked === 0) || (plan.openBatch && r.batchMarked === 0 && now >= closeAtMs)) {
@@ -175,6 +186,7 @@ export class AdmissionLeader {
       if (live.has(e)) continue;
       this.#plans.delete(e);
       this.#stopped.delete(e);
+      this.#saleStates.delete(e);
       // 다시 오면 세대부터 다시 올린다
       this.#bumped.events.delete(e);
       this.metrics?.forget(e);

@@ -9,7 +9,7 @@ import { BatchMembersChanged } from '../src/modules/batch/application/publish-ba
 
 const T0 = Date.UTC(2026, 10, 3, 3, 0, 0);
 const DAY = 86_400_000;
-const OK: TickResult = { kind: 'OK', serving: 0, advanced: 0, slots: 0, soon: 0, inFlight: 0, dropped: 0, lobbyMarked: 1, batchMarked: 1, batchPublished: 1, repair: 0 };
+const OK: TickResult = { kind: 'OK', serving: 0, advanced: 0, slots: 0, soon: 0, inFlight: 0, dropped: 0, lobbyMarked: 1, batchMarked: 1, batchPublished: 1, repair: 0, ratio: 1, saleState: 'ON_SALE' };
 
 function world(o: { plan?: Partial<EventPlan>; tick?: Partial<TickResult> | TickResult; bump?: 'OK' | 'FENCED'; close?: 'OK' | 'NONE' | 'FENCED' | 'RB05' | 'EARLY'; ctl?: { target?: number; paused: boolean } } = {}) {
   const clock = fakeClock({ now: T0 });
@@ -115,7 +115,7 @@ describe('전진 입력', () => {
     const a = world({ ctl: { target: 800, paused: false } });
     a.state.gen = 1;
     await a.leader.tick();
-    expect(a.ticks[0]).toMatchObject({ target: 800, maxAdvance: 200, p: 1, windowMs: 5_000, openBatch: true, closeAtMs: T0 - 10_000 + 2_000 });
+    expect(a.ticks[0]).toMatchObject({ target: 800, maxAdvance: 200, ratioFloor: 0.2, saleStateFallback: 'ON_SALE', windowMs: 5_000, openBatch: true, closeAtMs: T0 - 10_000 + 2_000 });
     const b = world({ ctl: { paused: true } });
     b.state.gen = 1;
     await b.leader.tick();
@@ -272,5 +272,26 @@ describe('종료와 게시 실패', () => {
     w.clock.advance(1_001);
     await w.leader.tick();
     expect(w.calls.filter((c) => c.startsWith('bump'))).toEqual(['bump:e1:1', 'bump:e1:1']);
+  });
+});
+
+describe('판매 상태', () => {
+  test('판매상태를모르는주기에는_그회차에서마지막으로본상태를넘긴다', async () => {
+    const w = world({ tick: { saleState: 'ALL_HELD' } });
+    w.state.gen = 1;
+    await w.leader.tick();
+    w.clock.advance(250);
+    await w.leader.tick();
+    expect(w.ticks.map((t) => t.saleStateFallback)).toEqual(['ON_SALE', 'ALL_HELD']);
+  });
+
+  test('리더세대가바뀌면_앞세대에서본판매상태를버리고처음값으로시작한다', async () => {
+    const w = world({ tick: { saleState: 'ALL_HELD' } });
+    w.state.gen = 1;
+    await w.leader.tick();
+    w.state.gen = 2;
+    w.clock.advance(250);
+    await w.leader.tick();
+    expect(w.ticks.map((t) => t.saleStateFallback)).toEqual(['ON_SALE', 'ON_SALE']);
   });
 });

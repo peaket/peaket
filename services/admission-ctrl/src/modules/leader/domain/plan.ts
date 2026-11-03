@@ -9,9 +9,13 @@ export const DEFAULT_TARGET = 5_000;
 export const MAX_ADVANCE_PER_TICK = 200;
 /** 오는 중 창 W의 처음 값 5초 [가정, Phase 2 2.3.1에서 확정] */
 export const ARRIVAL_WINDOW_MS = 5_000;
-/** 입장 비율 하한 0.2 [가정]. 비율 계산은 PRF-100이라 이 단계는 표본이 없을 때의 처음 값 100%다 */
+/** 입장 비율 하한 0.2 [가정] */
 export const RATIO_FLOOR = 0.2;
-export const INITIAL_RATIO = 1;
+/** 입장 비율의 창: 불린 지 10~60초 [가정, Phase 2 2.3.1에서 확정]인 전진(ADR-0104 결정 3). 표본이 없으면 100% */
+export const RATIO_WINDOW_MIN_MS = 10_000;
+export const RATIO_WINDOW_MAX_MS = 60_000;
+/** 판매 상태를 처음 모를 때(ADR-0122) */
+export const INITIAL_SALE_STATE = 'ON_SALE';
 /** 곧 입장 항목의 낡음: 안내하는 다시 시도 최대 5초 + 3초 [가정, ADR-0182 결정 4] */
 export const SOON_STALE_MS = 8_000;
 /** 전진 기록 보관 60초(정본) */
