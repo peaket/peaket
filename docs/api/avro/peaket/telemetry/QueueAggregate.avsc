@@ -1,0 +1,44 @@
+{
+  "type": "record",
+  "name": "QueueAggregate",
+  "namespace": "peaket.telemetry",
+  "doc": "대기열 1초 집계(진입 수, 빠진 번호, 입장 확정 수). 토픽 telemetry.queue, 키 '회차:파드'. queue-svc가 낸다.",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": "string"
+    },
+    {
+      "name": "second",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "entries",
+      "type": "long"
+    },
+    {
+      "name": "removed",
+      "type": "long"
+    },
+    {
+      "name": "admissions",
+      "type": "long"
+    },
+    {
+      "name": "soonResponses",
+      "type": "long"
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    }
+  ]
+}

@@ -1,0 +1,422 @@
+// ticket-svc가 제공하는 내부 티켓·스캐너 기기·계정 병합 확인 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
+// 정본: docs/features/payment.md §2(발권)·§4.1(예매 취소), docs/features/offline-gate.md §2(발권과 기기 키),
+// docs/features/transfer-refund.md §3.1(예매 취소 조건), docs/planning/03-policies-glossary.md §2.5(티켓 상태),
+// docs/data.md(관람 후기 작성 자격), docs/architecture.md §3.1·§3.2.
+// ScannerDeviceService·AccountMergeCheckService는 2026-10-29에 더했다(초안, 추천 적용 2026-10-29, ADR-0148).
+// 그 정본: docs/api/openapi.yaml `/v1/ops/scanner-devices*`·`ScannerDevice`, docs/features/offline-gate.md §6.1(기기 등록·폐기),
+// docs/data.md `scanner_device`·§4 경계 9, docs/features/identity.md §2.1·POL-034(계정 병합 막는 사유), ADR-0051·0062.
+// TicketReclaimService는 2026-10-30에 더했다(초안, 추천 적용 2026-10-30). 그 정본: docs/features/transfer-refund.md §3.1·§3.2·§4(양도 회수)·§7.2(T14),
+// docs/architecture.md §3.2(ops-svc → ticket-svc 승인된 양도 회수의 실행).
+// ScannerDeviceLookupService는 2026-10-30에 더했다(초안, 추천 적용 2026-10-30). 그 정본: docs/features/identity.md §6.1(기기 승인 때 기기 상태 확인),
+// docs/data.md `scanner_device`(credential_thumbprint·status).
+syntax = "proto3";
+
+package peaket.ticket.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// 부르는 쪽: purchase-svc(발권·예매 취소), core-svc(review 작성 자격, shop 보유 확인).
+service TicketService {
+  // 발권(결제 승인 뒤 주문 Saga). 주문 ID로 멱등하다. 같은 주문을 다시 보내도 티켓은 한 번만 만든다.
+  // 기기 키는 여기서 만들지 않는다. 팬이 월렛에서 '입장용으로 등록'을 누를 때 등록한다.
+  rpc IssueTickets(IssueTicketsRequest) returns (IssueTicketsResponse);
+
+  // 예매 취소 Saga의 '티켓 키 폐기(즉시)' 단계(docs/features/payment.md §4.1).
+  // 키를 바로 폐기하고(스캐너에는 1분 변경분으로 간다) 티켓 상태를 바꾼다.
+  // 조건(요청자 = 결제자 = 보유자, 진행 중인 양도 요청 없음, 공연 시작 전)은 ticket-svc 데이터라 여기서 확인한다.
+  // 같은 티켓의 취소·양도·스캔이 겹치면 ticket-svc 행 잠금으로 하나만 성공한다. cancellation_id로 멱등하다.
+  rpc CancelTickets(CancelTicketsRequest) returns (CancelTicketsResponse);
+
+  // 관람 후기 작성 자격. core-svc review가 쓸 때마다 부른다(논리 DB 사이 조인을 하지 않는다).
+  rpc CheckReviewEligibility(CheckReviewEligibilityRequest) returns (CheckReviewEligibilityResponse);
+
+  // 계정이 그 회차의 유효한 티켓을 가지고 있는지. core-svc shop이 티켓 연동 부가 상품에 쓴다.
+  rpc ListHeldTickets(ListHeldTicketsRequest) returns (ListHeldTicketsResponse);
+}
+
+message IssueTicketsRequest {
+  string order_id = 1;
+  string event_id = 2;
+  // 결제자 계정. 처음에는 결제자가 보유자다.
+  string payer_account_id = 3;
+  // 판매 확정(SOLD)된 좌석. 게이트 구역은 ticket-svc가 좌석 배치로 정한다.
+  repeated string seat_ids = 4;
+}
+
+// 티켓 상태(docs/planning/03-policies-glossary.md §2.5). 이 계약이 돌려주는 값만 둔다.
+enum TicketStatus {
+  TICKET_STATUS_UNSPECIFIED = 0;
+  TICKET_STATUS_ISSUED = 1;
+  TICKET_STATUS_ACTIVE = 2;
+  TICKET_STATUS_TRANSFER_PENDING = 3;
+  TICKET_STATUS_CANCEL_REQUESTED = 4;
+  TICKET_STATUS_REFUNDED = 5;
+  TICKET_STATUS_VOIDED = 6;
+}
+
+message IssuedTicket {
+  string ticket_id = 1;
+  string seat_id = 2;
+  TicketStatus status = 3;
+}
+
+message IssueTicketsResponse {
+  repeated IssuedTicket tickets = 1;
+}
+
+message CancelTicketsRequest {
+  string order_id = 1;
+  repeated string ticket_ids = 2;
+  string requested_by_account_id = 3;
+  string cancellation_id = 4;
+}
+
+enum CancelTicketResult {
+  CANCEL_TICKET_RESULT_UNSPECIFIED = 0;
+  // 입장 시작 전 취소. 티켓은 환급 상태로 간다.
+  CANCEL_TICKET_RESULT_REFUND_NOW = 1;
+  // 입장 시작 뒤 취소. 티켓은 바로 폐기하고 환급은 입장 기록 마감 뒤 입장 기록이 없을 때 한다.
+  CANCEL_TICKET_RESULT_REFUND_AFTER_CLOSE = 2;
+  // 거부: 요청자가 결제자이자 보유자가 아니다.
+  CANCEL_TICKET_RESULT_NOT_PAYER_HOLDER = 3;
+  // 거부: 진행 중인 양도 요청이 있다.
+  CANCEL_TICKET_RESULT_TRANSFER_PENDING = 4;
+  // 거부: 공연이 시작됐다.
+  CANCEL_TICKET_RESULT_EVENT_STARTED = 5;
+}
+
+message CancelTicketOutcome {
+  string ticket_id = 1;
+  CancelTicketResult result = 2;
+}
+
+message CancelTicketsResponse {
+  repeated CancelTicketOutcome outcomes = 1;
+}
+
+message CheckReviewEligibilityRequest {
+  string account_id = 1;
+  string event_id = 2;
+}
+
+enum ReviewIneligibleReason {
+  REVIEW_INELIGIBLE_REASON_UNSPECIFIED = 0;
+  // 회차의 끝나는 시각(event.ends_at)이 아직 지나지 않았다.
+  REVIEW_INELIGIBLE_REASON_NOT_ENDED = 1;
+  // 그 회차 티켓의 결제자가 아니다(양도받은 보유자는 쓰지 않는다).
+  REVIEW_INELIGIBLE_REASON_NOT_PAYER = 2;
+  // 취소·환불·무효가 아닌 티켓이 남아 있지 않다.
+  REVIEW_INELIGIBLE_REASON_NO_VALID_TICKET = 3;
+  // 회차가 취소됐다.
+  REVIEW_INELIGIBLE_REASON_EVENT_CANCELLED = 4;
+}
+
+message CheckReviewEligibilityResponse {
+  bool eligible = 1;
+  // 자격의 근거가 된 결제자 주문. core-svc가 `review.basis_order_id`로 남긴다.
+  string basis_order_id = 2;
+  ReviewIneligibleReason reason = 3;
+}
+
+message ListHeldTicketsRequest {
+  string account_id = 1;
+  string event_id = 2;
+}
+
+message HeldTicket {
+  string ticket_id = 1;
+  TicketStatus status = 2;
+}
+
+message ListHeldTicketsResponse {
+  repeated HeldTicket tickets = 1;
+}
+
+// 부르는 쪽: ops-svc만(관제 콘솔 '스캐너 기기 관리' SCR-053, ADR-0148 결정 1·2). 기기 원장의 주인은 ticket-svc다.
+// ops-svc가 권한(operator 이상)을 확인하고 감사 기록을 남긴 뒤 부른다. ticket-svc는 운영자 권한을 다시 판정하지 않는다.
+// 바꾸는 호출 셋은 ops-svc 감사 기록 ID(request_id)로 멱등하다. 같은 request_id에 다른 내용이 오면 ALREADY_EXISTS다.
+service ScannerDeviceService {
+  // 기기 목록(커서로 나눈다). openapi GET /v1/ops/scanner-devices와 같다.
+  rpc ListScannerDevices(ListScannerDevicesRequest) returns (ListScannerDevicesResponse);
+
+  // 기기 등록(이름, 배정 파트너). 기본안(기기 키 DPoP)이면 1회용 등록 코드를 만들어 이 응답에만 싣는다.
+  // 같은 request_id로 다시 오면 새 코드를 만들지 않고 already_done만 true로 돌려준다(코드를 다시 보이려면 ReissueEnrollmentCode).
+  rpc RegisterScannerDevice(RegisterScannerDeviceRequest) returns (RegisterScannerDeviceResponse);
+
+  // 즉시 폐기(사유 필수). 기기 상태를 REVOKED로 바꾸고 폐기 시각·사유를 남긴다.
+  // 스캐너 API는 요청마다 기기 상태를 보므로 다음 스캐너 요청부터 403(기기 폐기)이고, 그 기기의 스태프 세션도 끝난다(offline-gate §6.1, RB-22).
+  rpc RevokeScannerDevice(RevokeScannerDeviceRequest) returns (RevokeScannerDeviceResponse);
+
+  // 등록 코드 새로 만들기. 이전 코드는 무효가 된다. 새 코드는 이 응답에만 싣는다.
+  // 같은 request_id로 다시 오면 새 코드를 만들지 않고 already_done만 true로 돌려준다.
+  // 폐기(REVOKED)·퇴역(RETIRED)한 기기면 FAILED_PRECONDITION이다. 그 기기는 새 기기로 등록한다(ADR-0148 결정 1).
+  rpc ReissueEnrollmentCode(ReissueEnrollmentCodeRequest) returns (ReissueEnrollmentCodeResponse);
+}
+
+// 기기 상태(docs/data.md `scanner_device.status`).
+enum ScannerDeviceStatus {
+  SCANNER_DEVICE_STATUS_UNSPECIFIED = 0;
+  SCANNER_DEVICE_STATUS_ACTIVE = 1;
+  SCANNER_DEVICE_STATUS_REVOKED = 2;
+  // 퇴역(더 쓰지 않게 된 기기)
+  SCANNER_DEVICE_STATUS_RETIRED = 3;
+}
+
+// 기기 자격 종류(offline-gate §6.1).
+enum ScannerCredentialType {
+  SCANNER_CREDENTIAL_TYPE_UNSPECIFIED = 0;
+  // 기기 키 + DPoP(기본안, 기술 검토 중간-057)
+  SCANNER_CREDENTIAL_TYPE_DEVICE_KEY = 1;
+  // 관리 앱이 넣은 기기 인증서(운영 선택지)
+  SCANNER_CREDENTIAL_TYPE_MTLS_CERT = 2;
+}
+
+// 기기 하나. openapi `ScannerDevice`와 같은 칸이다. 다만 '지금 로그인한 세션'(activeSessionNickname)은 identity 데이터(scanner_session)라
+// 여기 없고, ops-svc가 identity-svc ScannerSessionQueryService.ListActiveScannerSessions로 따로 읽어 목록에 합친다(ADR-0148 결정 1).
+// 그 칸이던 8번은 계약 검사(wbs 0.2.2)를 붙이기 전 초안이라 reserved로 막지 않았다(README §3의 번호 다시 쓰기 관례).
+message ScannerDevice {
+  string device_id = 1;
+  // 예: 동문-03
+  string name = 2;
+  // 배정 파트너. 그 파트너 공연에 배정된 스태프만 이 기기로 로그인한다.
+  string promoter_id = 3;
+  ScannerDeviceStatus status = 4;
+  ScannerCredentialType credential_type = 5;
+  // MTLS_CERT일 때만 채운다.
+  google.protobuf.Timestamp cert_expires_at = 6;
+  // 마지막 연락 시각
+  google.protobuf.Timestamp last_seen_at = 7;
+}
+
+message ListScannerDevicesRequest {
+  // 이전 응답의 next_cursor(불투명 값). 첫 쪽이면 비운다.
+  string cursor = 1;
+  // 한 번에 받을 건수. 최대 100(docs/api/guidelines.md §3).
+  int32 limit = 2;
+}
+
+message ListScannerDevicesResponse {
+  repeated ScannerDevice devices = 1;
+  // 다음 쪽 커서. 마지막 쪽이면 비운다.
+  string next_cursor = 2;
+}
+
+message RegisterScannerDeviceRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  string name = 2;
+  string promoter_id = 3;
+  // 등록한 운영자의 관리 계정 ID. scanner_device.enrolled_by에 남긴다.
+  string acted_by = 4;
+}
+
+// 1회용 등록 코드. 원문은 RegisterScannerDevice·ReissueEnrollmentCode 응답에만 있다(ADR-0148 결정 2).
+message EnrollmentCode {
+  // RFC 8628 §6.1 문자 집합(BCDFGHJKLMNPQRSTVWXZ) 12자를 4자씩 하이픈으로 나눈 XXXX-XXXX-XXXX.
+  // ticket-svc는 코드의 SHA-256만 Redis에 10분 [가정] 두고, 등록되면 바로 지운다.
+  // ops-svc는 받은 코드를 브라우저 응답으로만 넘기고 DB·로그·추적 속성에 남기지 않는다.
+  string code = 1;
+  // 만든 뒤 10분 [가정]. 한 번만 쓴다.
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message RegisterScannerDeviceResponse {
+  ScannerDevice device = 1;
+  // 기본안(DEVICE_KEY)에서 처음 만들 때만 채운다. mTLS 선택지면 비우고 관리 앱 등록 절차로 간다.
+  EnrollmentCode enrollment_code = 2;
+  // 같은 request_id로 이미 만들었으면 true. 이때 enrollment_code는 비운다.
+  bool already_done = 3;
+}
+
+message RevokeScannerDeviceRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  string device_id = 2;
+  // 폐기 사유(필수). scanner_device.revoke_reason에 남긴다.
+  string reason = 3;
+  // 폐기한 운영자의 관리 계정 ID
+  string acted_by = 4;
+}
+
+message RevokeScannerDeviceResponse {
+  // 폐기한 뒤의 기기(status REVOKED)
+  ScannerDevice device = 1;
+}
+
+message ReissueEnrollmentCodeRequest {
+  // ops-svc 감사 기록 ID. 멱등 키다.
+  string request_id = 1;
+  string device_id = 2;
+  // 새로 만든 운영자의 관리 계정 ID
+  string acted_by = 3;
+}
+
+message ReissueEnrollmentCodeResponse {
+  // 새 코드. 같은 request_id로 다시 왔으면 비운다.
+  EnrollmentCode enrollment_code = 1;
+  // 같은 request_id로 이미 만들었으면 true
+  bool already_done = 2;
+}
+
+// 부르는 쪽: identity-svc만. 계정 병합 제안을 만들 때(막는 사유를 화면에 보이려고)와 확정 트랜잭션 바로 앞에 부른다
+// (docs/features/identity.md §2.1, ADR-0148 결정 3·4). purchase-svc·core-svc의 같은 이름 서비스와 모양이 같다.
+// 읽기라 멱등 키가 없다. 데드라인은 1초 [가정]이다. 답이 없거나 기한을 넘기면 identity-svc는 확정하지 않고 503과 Retry-After로 미룬다.
+service AccountMergeCheckService {
+  // ticket-svc 데이터로 본 막는 사유를 모두 돌려준다. 막는 것이 없으면 빈 목록이다.
+  rpc CheckAccountMerge(CheckAccountMergeRequest) returns (CheckAccountMergeResponse);
+}
+
+message CheckAccountMergeRequest {
+  // 대표 계정(병합 뒤 남는 계정, POL-034)
+  string primary_account_id = 1;
+  // 흡수 계정(병합 뒤 MERGED로 잠기는 계정)
+  string absorbed_account_id = 2;
+}
+
+// 계정 병합을 막는 사유 가운데 ticket-svc 데이터로 보는 것(POL-034).
+enum MergeBlockReason {
+  MERGE_BLOCK_REASON_UNSPECIFIED = 0;
+  // 불변식 위반: 흡수 계정에 티켓이 있다. 흡수 계정은 본인확인 전이라 티켓이 없어야 한다. identity-svc는 409와 SEV3을 낸다.
+  // 티켓을 두 계정에서 더한 1인 한도는 이 사유가 대신한다(흡수 계정 티켓이 0이면 합산이 대표 계정 몫과 같다, ADR-0148 결정 3).
+  MERGE_BLOCK_REASON_ABSORBED_HAS_TICKETS = 1;
+  // 어느 계정이든 입장 시작부터 입장 기록 마감 사이인 회차의 티켓이 있다(입장 중에는 소유권과 키를 바꾸지 않는다, ADR-0051 결정 10).
+  MERGE_BLOCK_REASON_TICKET_IN_ENTRY_WINDOW = 2;
+}
+
+message MergeBlock {
+  MergeBlockReason reason = 1;
+  // 그 사유가 걸린 계정(primary_account_id나 absorbed_account_id)
+  string account_id = 2;
+  // 참조 ID. ABSORBED_HAS_TICKETS면 티켓 ID, TICKET_IN_ENTRY_WINDOW면 회차 ID다.
+  string ref_id = 3;
+}
+
+message CheckAccountMergeResponse {
+  repeated MergeBlock blocks = 1;
+}
+
+// 부르는 쪽: ops-svc만. 승인 업무 '양도 회수(계정 탈취)'가 승인되면(cs_lead 요청 + commander 승인, 실행 직전 재인증) 실행 단계(T14)에서 부른다.
+// ops-svc가 권한과 감사 기록을 처리한 뒤 부르고, ticket-svc는 운영자 권한을 다시 판정하지 않는다.
+// ticket-svc는 티켓 행 잠금 안에서 조건(입장 시작 전, 입장 기록 없음, 양도로 보유자가 결제자와 다름)을 다시 확인하고,
+// 돌려주기와 같은 절차로 결제자에게 되돌린다(보유자의 기기 키 폐기, 보유자 변경, trade.tickets TICKET_RECLAIMED, 받은 사람 알림).
+// 조건이 맞지 않으면 결과 값으로 돌려주고, ops-svc는 승인 업무를 Failed로 두어 CS 처리함 분쟁(DISPUTE)으로 잇는다(transfer-refund §7.1)
+// (초안, 추천 적용 2026-10-30, docs/features/transfer-refund.md §4).
+service TicketReclaimService {
+  // approval_id(승인 업무 ID)로 멱등하다. 같은 approval_id로 다시 오면 처음 결과를 돌려준다. 같은 approval_id에 다른 ticket_id가 오면 ALREADY_EXISTS다.
+  rpc ReclaimTicket(ReclaimTicketRequest) returns (ReclaimTicketResponse);
+}
+
+message ReclaimTicketRequest {
+  // 승인 업무 ID(approval_request.id). 멱등 키다.
+  string approval_id = 1;
+  string ticket_id = 2;
+  // 실행 직전에 재인증한 승인자의 관리 계정 ID
+  string acted_by = 3;
+}
+
+enum ReclaimResult {
+  RECLAIM_RESULT_UNSPECIFIED = 0;
+  // 결제자에게 되돌렸다
+  RECLAIM_RESULT_RECLAIMED = 1;
+  // 입장이 시작됐거나 입장 기록이 있어 회수하지 않았다(R-T17의 ENTRY_STARTED와 같은 조건)
+  RECLAIM_RESULT_ENTRY_STARTED = 2;
+  // 회수할 것이 없다(이미 결제자가 보유자, 환급·무효 티켓)
+  RECLAIM_RESULT_NOT_RECLAIMABLE = 3;
+}
+
+message ReclaimTicketResponse {
+  ReclaimResult result = 1;
+}
+
+// 부르는 쪽: identity-svc만. 스캐너 기기 승인 로그인(RFC 8628)의 승인 요청(POST /v1/scanner/device-authorizations)과
+// 토큰 발급(POST /v1/scanner/token) 때, DPoP 증명의 키 지문(jkt)이나 mTLS 인증서 지문으로 등록 기기를 찾고 상태를 본다
+// (docs/features/identity.md §6.1). 기기 원장(scanner_device)의 주인은 ticket-svc라 identity-svc가 직접 읽지 않는다(ADR-0007).
+// 승인 화면(SCR-051)에 보일 기기 이름과 배정 파트너 ID도 함께 돌려준다. 파트너 이름(상호)은 싣지 않는다. 상호는 공개 정보라
+// 승인 화면이 배정 회차의 회차 공개 요약(openapi GET /v1/events/{eventId}의 sellerName)에서 읽고, 이름을 위한 내부 호출은 두지 않는다
+// (소유자 결정 2026-10-30, open-items 78번, docs/features/identity.md §6.1). identity-svc는 promoter_id를 배정 파트너 대조(I-T22)에만 쓴다. 읽기라 멱등 키가 없다.
+// identity-svc는 결과를 캐시하지 않는다(기기 승인은 근무 시작 때만 드물게 온다). 답이 없으면 승인 요청·토큰 발급을 503으로 미룬다
+// (기기 상태를 모른 채 로그인을 열지 않는다, 초안, 추천 적용 2026-10-30).
+service ScannerDeviceLookupService {
+  rpc GetScannerDeviceByCredential(GetScannerDeviceByCredentialRequest) returns (GetScannerDeviceByCredentialResponse);
+}
+
+message GetScannerDeviceByCredentialRequest {
+  ScannerCredentialType credential_type = 1;
+  // 기기 키 JWK SHA-256 지문(jkt, RFC 7638) 또는 인증서 SHA-256 지문. 게이트웨이·가드가 DPoP 증명이나 인증서를 검증한 뒤의 값이다.
+  bytes credential_thumbprint = 2;
+}
+
+message GetScannerDeviceByCredentialResponse {
+  // 등록된 기기가 없으면 false이고 나머지 칸은 비운다. identity-svc는 403(미등록 기기)으로 답한다.
+  bool found = 1;
+  string device_id = 2;
+  // ACTIVE가 아니면 identity-svc는 403(기기 폐기)으로 답한다.
+  ScannerDeviceStatus status = 3;
+  // 승인 화면에 보일 기기 이름
+  string name = 4;
+  // 배정 파트너 ID. 승인 때 스태프 배정의 파트너와 같은지 대조한다. 이름은 싣지 않는다(위 주석).
+  string promoter_id = 5;
+}
+
+// 부르는 쪽: ops-svc만(부정 예매 사건, POL-046 ③, docs/features/transfer-refund.md, ADR-0171 결정 3).
+// 조사관이 소명을 요청할 때 그 사건 계정의 그 회차 표에 양도 잠금을 걸고(ticket.fraud_lock_case_id), 그 계정에 대해 소명 인정, 사건 CLEARED, 조치 실행 끝(취소된 표 말고 남은 표), 조사관이 계정을 뺌,
+// 입장 시작, 그 계정 대상 조치 요청의 반려·만료(다른 열린 조치 요청이 없을 때), 잠금 최대 기한(expires_at = 소명 요청 + 14일 [가정]) 가운데 먼저 오는 때에 푼다(일곱 때, 추천 적용 2026-10-31, ADR-0173 결정 3).
+// 잠긴 티켓의 양도 요청만 409 transfer-locked다. 돌려주기(받은 사람이 결제자에게 되돌리기)는 막지 않는다. 표가 사건 계정으로 돌아갈 뿐 퍼지지 않고, 돌아온 표는 그 계정이 결제한 표라 잠긴 채로 남는다(추천 적용 2026-10-31, ADR-0173).
+// 잠글 때 진행 중인 양도 요청(TRANSFER_PENDING)은 같은 트랜잭션에서 시스템이 철회하고
+// 받는 사람·보낸 사람에게 알린다(trade.tickets TRANSFER_WITHDRAWN). 입장은 막지 않는다. 입장 시작이나 잠금 최대 기한 가운데 이른 때(min(expires_at, 입장 시작))에는 ticket-svc가 그 잠금을 스스로 푼다
+// (ops-svc 호출을 기다리지 않는다). 시스템이 거는 조치는 이 잠금뿐이다.
+// (case_id, version)으로 멱등하다. 판은 같은 case_id 안에서만 견준다. 저장한 그 사건의 판보다 클 때만 반영하고, 같거나 작으면 아무것도 바꾸지 않고 지금 상태를 돌려준다.
+// 다른 사건의 잠금이 이미 걸린 티켓은 판을 견주지 않고 그 티켓만 OTHER_CASE로 돌려주며, 나머지는 처리한다(초안, 추천 적용 2026-10-31).
+// 잠금은 사건 계정이 그 회차에서 결제한 표 전부에 걸린다. ticket-svc는 (case_id, event_id, account_id) 잠금을 기록해 두고(docs/data.md fraud_transfer_lock),
+// 잠금 뒤에 그 계정이 산 그 회차 표도 발권(IssueTickets) 때 잠근다. 풀리는 때는 위의 일곱 때 가운데 먼저 오는 때다(입장 시작과 최대 기한은 ticket-svc가 스스로 푼다).
+service TransferLockService {
+  rpc SetTransferLock(SetTransferLockRequest) returns (SetTransferLockResponse);
+}
+
+message SetTransferLockRequest {
+  // 부정 예매 사건 ID(ops DB fraud_case.id)
+  string case_id = 1;
+  // 사건 상태의 판 번호. 같은 사건에서 늘어나기만 한다.
+  int64 version = 2;
+  // 쓰지 않는다(아래 account_ids로 바꿨다).
+  repeated string ticket_ids = 3 [deprecated = true];
+  // true면 잠그고 false면 푼다.
+  bool locked = 4;
+  // 처리한 관리 계정 ID(감사 기록용). ops-svc가 권한과 감사 기록을 처리한 뒤 싣는다.
+  string acted_by = 5;
+  // 사건 회차
+  string event_id = 6;
+  // 잠그거나 풀 계정(사건 계정). 그 계정이 event_id 회차에서 결제한 표 전부가 대상이다. 풀 때 비우면 그 사건으로 잠긴 계정 모두다.
+  // 2026-10-31 같은 날 표 목록(ticket_ids)을 계정 목록으로 바꿨다. 잠금 뒤에 산 표도 잠그려면 계정 단위여야 하기 때문이다.
+  // ticket_ids는 첫 출시 전이라 쓰지 않음으로 남긴다(추천 적용 2026-10-31).
+  repeated string account_ids = 7;
+  // 잠금 최대 기한(그 계정의 첫 소명 요청 + 14일 [가정], 연장 없음, 계정마다 따로). 잠글 때(locked true)만 싣고 풀 때는 비운다. ticket-svc는 fraud_transfer_lock.expires_at에 두고
+  // min(expires_at, 입장 시작)에 스스로 푼다. 같은 사건·같은 계정에 더 큰 판으로 다시 잠가도(소명 다시 요청 등) 처음 기한을 늘리지 않는다(추천 적용 2026-10-31, ADR-0173 결정 3).
+  google.protobuf.Timestamp expires_at = 8;
+}
+
+enum TransferLockResult {
+  TRANSFER_LOCK_RESULT_UNSPECIFIED = 0;
+  TRANSFER_LOCK_RESULT_LOCKED = 1;
+  TRANSFER_LOCK_RESULT_UNLOCKED = 2;
+  // 다른 사건의 잠금이 걸려 있다(바꾸지 않음)
+  TRANSFER_LOCK_RESULT_OTHER_CASE = 3;
+  // 입장 시작 뒤라 잠그지 않음
+  TRANSFER_LOCK_RESULT_ENTRY_STARTED = 4;
+  // 이미 환급·무효 등으로 끝난 티켓
+  TRANSFER_LOCK_RESULT_TICKET_CLOSED = 5;
+}
+
+message TransferLockOutcome {
+  string ticket_id = 1;
+  TransferLockResult result = 2;
+  // 잠그면서 철회한 양도 요청 ID(없으면 비운다)
+  string withdrawn_offer_id = 3;
+  // 지금 보유자가 결제자(사건 계정)와 다를 때 그 보유자 계정 ID(양도로 받은 사람). 같으면 비운다.
+  // ops-svc가 이 값으로 받은 사람에게 화면용 사본(party HOLDER)과 FRAUD_HOLDER_NOTICE를 보낸다(추천 적용 2026-10-31, ADR-0173 결정 4).
+  string holder_account_id = 4;
+}
+
+message SetTransferLockResponse {
+  repeated TransferLockOutcome outcomes = 1;
+}

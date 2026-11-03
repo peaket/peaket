@@ -1,0 +1,96 @@
+{
+  "test": "V-T33-behaviors",
+  "client": "node-redis-deadline",
+  "tls": true,
+  "timeout_ms": 100,
+  "steps": {
+    "migrate": {
+      "action": {
+        "slot": 13513,
+        "from": "valkey-3:6379",
+        "to": "valkey-1:6379"
+      },
+      "issued": 40000,
+      "errors": 0,
+      "error_kinds": {},
+      "latency": {
+        "count": 40000,
+        "p50_ms": 0.943,
+        "p90_ms": 1.563,
+        "p99_ms": 6.021,
+        "p999_ms": 41.084,
+        "max_ms": 49.076,
+        "mean_ms": 1.174
+      }
+    },
+    "failover": {
+      "action": {
+        "from": "valkey-3:6379",
+        "to": "valkey-4:6379",
+        "promoted_ms": 84
+      },
+      "issued": 50000,
+      "errors": 0,
+      "error_kinds": {},
+      "latency": {
+        "count": 50000,
+        "p50_ms": 0.911,
+        "p90_ms": 1.496,
+        "p99_ms": 3.262,
+        "p999_ms": 33.768,
+        "max_ms": 43.764,
+        "mean_ms": 1.053
+      }
+    },
+    "script_flush": {
+      "before": "OK",
+      "after_flush": "OK",
+      "error": null,
+      "pass": true
+    },
+    "sharded_pubsub": {
+      "moved": {
+        "slot": 250,
+        "from": "valkey-1:6379",
+        "to": "valkey-2:6379"
+      },
+      "sent_total": 593,
+      "received_total": 0,
+      "sent_before_move": 97,
+      "sent_after_move_settled": 473,
+      "received_after_move_settled": 0,
+      "publish_errors": 2,
+      "pass": false
+    },
+    "offline_blackhole": {
+      "kind": "blackhole",
+      "node": "valkey-1:6379",
+      "window_ms": 5189,
+      "succeeded": 460,
+      "failed": 29,
+      "fail_ms": {
+        "p50": 100.3,
+        "p99": 101.1,
+        "max": 101.1
+      },
+      "counter_after": 489,
+      "queued_then_applied": 29,
+      "pass": true
+    },
+    "offline_kill": {
+      "kind": "kill",
+      "node": "valkey-2:6379",
+      "window_ms": 12192,
+      "succeeded": 769,
+      "failed": 1628,
+      "fail_ms": {
+        "p50": 0.1,
+        "p99": 0.2,
+        "max": 2.7
+      },
+      "counter_after": 769,
+      "queued_then_applied": 0,
+      "pass": true
+    }
+  }
+}

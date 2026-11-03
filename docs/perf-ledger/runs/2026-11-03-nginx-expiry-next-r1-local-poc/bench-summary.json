@@ -1,0 +1,21 @@
+{
+  "test": "nginx-expiry",
+  "seconds": 10,
+  "mode": "next",
+  "samples": 81,
+  "originHitsPerS": 0.6,
+  "ageP50Ms": 985,
+  "ageMaxMs": 1969,
+  "over1s": 40,
+  "cache": {
+    "MISS": 1,
+    "HIT": 75,
+    "EXPIRED": 5
+  },
+  "bench": {
+    "requests": 81,
+    "error_rate": 0,
+    "dropped": 0,
+    "p99_ms": 1969
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "peaket-doc-check-mermaid",
+  "private": true,
+  "type": "module",
+  "description": "doc-check의 mermaid 문법 검사. 리더기(tools/reader)와 같은 mermaid 버전을 쓴다(ADR-0138).",
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "dependencies": {
+    "jsdom": "30.1.2",
+    "mermaid": "12.2.0"
+  }
+}

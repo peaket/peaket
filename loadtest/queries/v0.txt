@@ -1,0 +1,11 @@
+# v0 서버 지표 질의(collect.py --queries, docs/verification.md §3.10 '서버 지표'). 이름은 docs/perf-ledger.md §2.3의 규약을 따른다.
+# 꼬리표 namespace·app은 로컬 Prometheus가 파드에서 붙인다(deploy/local/observability.yaml). 입구는 v0_gateway_requests_total(outcome)을 낸다.
+# 증가율 창은 20초다(로컬 Prometheus는 5초마다 긁는다. 5초 창에는 표본이 하나뿐이라 rate가 비고, 2026-11-03 리허설).
+origin_rps=sum(rate(v0_gateway_requests_total{namespace="v0"}[20s]))
+gateway_rate_limited_rps=sum(rate(v0_gateway_requests_total{namespace="v0",outcome="rate_limited"}[20s]))
+gateway_upstream_errors_rps=sum(rate(v0_gateway_requests_total{namespace="v0",outcome=~"upstream_error|upstream_timeout"}[20s]))
+app_rps=sum(rate(http_server_request_duration_seconds_count{namespace="v0",app="v0-monolith"}[20s]))
+p99_ms=histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{namespace="v0",app="v0-monolith"}[20s])) by (le)) * 1000
+error_rate=sum(rate(http_server_errors_total{namespace="v0",app="v0-monolith"}[20s])) / sum(rate(http_server_request_duration_seconds_count{namespace="v0",app="v0-monolith"}[20s]))
+event_loop_lag_ms=max(nodejs_eventloop_lag_p99_seconds{namespace="v0",app="v0-monolith"}) * 1000
+app_cpu_cores=sum(rate(process_cpu_seconds_total{namespace="v0",app="v0-monolith"}[20s]))

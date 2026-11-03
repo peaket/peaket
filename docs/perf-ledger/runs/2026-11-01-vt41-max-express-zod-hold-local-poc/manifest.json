@@ -1,0 +1,58 @@
+{
+  "run_id": "2026-11-01-vt41-max-express-zod-hold-local-poc",
+  "kpi": "V-T41",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": 30,
+    "warmup_s": 5
+  },
+  "scenario": {
+    "path": "loadtest/poc/http/vt41.js",
+    "args": "MODE=closed ROUTE=hold RATE=- VT41_CONFIG=express-zod k6 --cpus 4",
+    "open_model": false
+  },
+  "commit": {
+    "code": "8abe9fdd7e3a5f37d8eab3152e976f35a3b6bbf5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(k6 1.4.2) 컨테이너, CPU 한도 1(앱)·4(k6)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-01T09:26:57Z",
+  "ended_at": "2026-11-01T09:27:33Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 3.374,
+    "p95_ms": 5.890777699999998,
+    "p99_ms": 8.004653619999997,
+    "error_rate": 0,
+    "requests": 516423,
+    "rps": 14754.149871329835,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "extra": [
+      "2026-11-01-vt41-max-express-zod-hold.json"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "첫 회차: k6 가상 사용자를 200명만 미리 만들어 순간 부족(못 보낸 요청)이 났고, 앱 통계를 k6가 끝난 뒤 읽어 쉬는 시간이 섞였다(코드 리뷰 2026-11-01). 다시 잼",
+  "verdict": null,
+  "notes": "V-T41 express-zod hold, 앱 컨테이너 CPU 1, k6 1.4.2 CPU 4(닫힌 모델, 가상 사용자 64), 요청당 CPU 57.9µs, 이벤트 루프 지연 p99 5.754ms. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-01T13:40:01Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

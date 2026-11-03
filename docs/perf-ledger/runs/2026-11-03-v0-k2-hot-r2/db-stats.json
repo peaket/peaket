@@ -1,0 +1,107 @@
+{
+  "durationS": 125.4,
+  "deadlocks": 0,
+  "commits": 345,
+  "rollbacks": 51872,
+  "tables": {
+    "v0_gate_staff": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    },
+    "v0_hold": {
+      "inserts": 1,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 2,
+      "deadRows": 1
+    },
+    "v0_order": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    },
+    "v0_order_event": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    },
+    "v0_order_item": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    },
+    "v0_payment": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    },
+    "v0_price": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 2,
+      "deadRows": 0
+    },
+    "v0_quota": {
+      "inserts": 1,
+      "updates": 1,
+      "hotUpdates": 1,
+      "deletes": 0,
+      "hotRatio": 1,
+      "liveRows": 2,
+      "deadRows": 3
+    },
+    "v0_seat": {
+      "inserts": 0,
+      "updates": 1,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": 0,
+      "liveRows": 10000,
+      "deadRows": 1
+    },
+    "v0_seat_event": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 2,
+      "deadRows": 0
+    },
+    "v0_ticket": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    }
+  }
+}

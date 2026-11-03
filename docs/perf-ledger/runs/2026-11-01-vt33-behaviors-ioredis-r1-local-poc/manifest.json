@@ -1,0 +1,53 @@
+{
+  "run_id": "2026-11-01-vt33-behaviors-ioredis-r1-local-poc",
+  "kpi": "V-T33",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": null,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/behaviors.mjs",
+    "args": "--client ioredis",
+    "open_model": true
+  },
+  "commit": {
+    "code": "8abe9fdd7e3a5f37d8eab3152e976f35a3b6bbf5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 2",
+    "dropped_iterations": null
+  },
+  "started_at": "2026-11-01T09:19:33Z",
+  "ended_at": "2026-11-01T09:20:33Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": null,
+    "error_rate": null,
+    "requests": null,
+    "dropped": null
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "verdict": null,
+  "notes": "V-T33 ②~⑤ 동작 시험(ioredis, 1회째): 실행 중 슬롯 옮기기·계획된 주 노드 바꾸기·SCRIPT FLUSH 뒤 EVALSHA·샤드 구독 중 슬롯 옮기기·망에서 2초 떼기·주 노드 죽이기. 성능 측정이 아니라 p99 칸은 비운다. 결과는 bench-summary.json의 steps. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-01T13:40:00Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

@@ -1,0 +1,147 @@
+{
+  "type": "record",
+  "name": "TrustVerdict",
+  "namespace": "peaket.telemetry",
+  "doc": "봇 판정과 사후 라벨. 토픽 telemetry.trust-verdicts, 키 queueEntryId(없으면 키 없음). trust-svc가 낸다. 봇 판정과 사후 라벨(ADR-0052). 점수 원값·규칙 가중치는 싣지 않는다",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": "string"
+    },
+    {
+      "name": "queueEntryId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "pid",
+      "doc": "사람 식별값(선택). source REASSESS 판정에만 싣는다. 재평가 후보(TrustCandidate)는 pid만 있고 그림자 모드는 IsolateWaiting을 부르지 않아 queueEntryId로 대기 기록과 이을 수 없으므로, 이 값으로 대기 기록(QueueEntryRecord)과 잇는다. 분석 저장소는 적재 때 회차별 가명으로 바꾼다(추천 적용 2026-10-20, ADR-0073)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "source": [
+            "REASSESS"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "journeyId",
+      "doc": "판정한 요청의 여정 ID(조사용 추적 ID, UUIDv7). 로비 입장·사전 검증의 실시간 판정(PASS·CHALLENGED)에 늘 있고, 추가 검증 제출과 재평가는 비운다(조사 적재가 회차·pid로 잇는다). 분석 적재는 버린다(ADR-0171 결정 4, 추천 적용 2026-10-31)",
+      "type": [
+        "null",
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "source": [
+            "REALTIME"
+          ],
+          "category": [
+            "PASS",
+            "CHALLENGED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "deviceRef",
+      "doc": "판정 입력의 기기 가명 invRef(device, deviceId): 키 판 접두어(k1. 등) + base64url(HMAC-SHA256(device 라벨 키, deviceId)), docs/security/secrets-and-keys.md. 계산하지 못하면 비우고 refMissing이 true다. 입력에 기기 식별값이 있었을 때만. identity-svc device.device_ref와 같은 값. 분석 적재는 버린다(ADR-0171 결정 4, 추천 적용 2026-10-31)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "refMissing",
+      "doc": "조사용 가명 칸을 계산하지 못해 비웠으면 true(조사용 가명 라벨 키를 KMS에서 받지 못함·한도 초과). 업무 처리는 막지 않았고, 조사 적재는 이 값을 나중에 채우지 않는다. 생산자는 inv_ref_missing_total로 센다(docs/security/secrets-and-keys.md 'inv-ref-key', 추천 적용 2026-10-31, ADR-0171)",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "category",
+      "type": {
+        "type": "enum",
+        "name": "TrustVerdictCategory",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "PASS",
+          "CHALLENGE_PASSED",
+          "CHALLENGE_FAILED",
+          "BLOCKED",
+          "HONEYPOT",
+          "LABELED_BOT",
+          "LABELED_HUMAN",
+          "CHALLENGED"
+        ]
+      }
+    },
+    {
+      "name": "action",
+      "type": {
+        "type": "enum",
+        "name": "TrustVerdictAction",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "ALLOW",
+          "CHALLENGE",
+          "BLOCK",
+          "NONE"
+        ]
+      }
+    },
+    {
+      "name": "source",
+      "doc": "REASSESS는 대기 중 재평가(ADR-0071)",
+      "type": {
+        "type": "enum",
+        "name": "TrustVerdictSource",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "REALTIME",
+          "HONEYPOT",
+          "SAMPLE_REVIEW",
+          "POST_LABEL",
+          "REASSESS"
+        ]
+      }
+    },
+    {
+      "name": "shadow",
+      "doc": "그림자 실행 결과면 true(집행 없음, action NONE). 분석의 봇 지표는 false만 센다(ADR-0071)",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    }
+  ]
+}

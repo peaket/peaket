@@ -2,5 +2,34 @@
 __pycache__/
 *.pyc
 
+# doc-check의 mermaid 문법 검사 의존성(tools/doc-check/mermaid에서 npm ci --ignore-scripts로 받는다, ADR-0138)
+node_modules/
+
+# Terraform 작업 폴더·상태·변수 값(제공자 잠금 파일 .terraform.lock.hcl과 예시 *.tfvars.example은 기록한다, docs/devops.md §9.1)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
+
 # Claude Code의 개인 설정(공유 설정인 .claude/launch.json 등은 기록한다)
 .claude/settings.local.json
+
+# 화면 앱 빌드 산출물(Next.js·Vite·webpack·Turborepo, docs/frontend.md §2.2)
+.next/
+.next-*/
+dist/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# 로컬 클러스터 도구(kind·kubectl·helm)를 고정 판으로 받아 두는 곳(tools/local/tools.mjs)
+.cache/
+# 측정 전에 loadtest/poc/run.mjs가 queue-svc의 진입 Lua 원문에서 만드는 파일(사본을 커밋하지 않는다)
+loadtest/poc/bench/lua/entry-*.lua
+
+# 규칙 모델 검사(tools/spec-check)가 명세를 TLA+로 옮길 때 남기는 Apalache 작업 폴더
+_apalache-out/
+
+# 규칙 모델 검사가 결과를 옮기기 전에 쓰는 준비 폴더(tools/spec-check/spec-check.mjs)
+specs/results/.staging-*/

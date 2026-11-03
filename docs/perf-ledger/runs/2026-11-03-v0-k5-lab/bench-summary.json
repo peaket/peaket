@@ -1,0 +1,58 @@
+{
+  "bench": {
+    "p99_ms": null,
+    "error_rate": null,
+    "requests": 20,
+    "dropped": 0
+  },
+  "lab": {
+    "eventId": "cbb2e71c-a388-446a-ada8-ba653fe40dc5",
+    "seats": 50000,
+    "reps": 20,
+    "throttle": 4,
+    "viewport": {
+      "width": 412,
+      "height": 915,
+      "deviceScaleFactor": 2.625,
+      "mobile": true
+    },
+    "chrome": "Chrome/153.0.8010.12",
+    "summary": {
+      "reps": 20,
+      "drawMs": {
+        "p75": 471.1,
+        "max": 1387.6,
+        "missing": 0
+      },
+      "inpMs": {
+        "p75": 88,
+        "max": 168,
+        "missing": 0
+      },
+      "lcpMs": {
+        "p75": 116,
+        "max": 1036,
+        "missing": 0
+      },
+      "cls": {
+        "p75": 0,
+        "max": 0,
+        "missing": 0
+      },
+      "loafCount": {
+        "sum": 42,
+        "max": 5
+      },
+      "longTasks": {
+        "sum": 31,
+        "max": 5
+      },
+      "heapMb": {
+        "median": 4.9,
+        "max": 4.9,
+        "missing": 0
+      }
+    },
+    "notHeld": 0
+  }
+}

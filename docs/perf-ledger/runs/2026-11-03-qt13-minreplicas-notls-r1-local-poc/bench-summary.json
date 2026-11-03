@@ -1,0 +1,24 @@
+{
+  "test": "min-replicas",
+  "steps": {
+    "master": "valkey-s3",
+    "replica": "valkey-s4",
+    "pauseCommandMs": 216,
+    "acceptWindowMs": 1944,
+    "acceptedAfterPause": 125,
+    "direct": "NOREPLICAS Not enough good replicas to write.",
+    "whilePaused": {
+      "error": "QueueStoreUnavailable",
+      "cause": "NOREPLICAS Not enough good replicas to write. script: d69fb6b8f05f2074c013c078ff"
+    },
+    "afterResume": "TICKET"
+  },
+  "pass": true,
+  "bench": {
+    "requests": 3,
+    "error_rate": 0,
+    "dropped": 0,
+    "p99_ms": null,
+    "pass": true
+  }
+}

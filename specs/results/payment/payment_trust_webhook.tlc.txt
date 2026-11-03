@@ -1,0 +1,221 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ payment_trust_webhook_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_trust_webhook_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_trust_webhook_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_trust_webhook_payment_att = (<<1, 1>> :> [st |-> "NONE", pg |-> 0])
+/\ payment_trust_webhook_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_trust_webhook_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_trust_webhook_payment_late = <<FALSE>>
+/\ payment_trust_webhook_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_trust_webhook_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
+
+State 2: <payment_trust_webhook_payment_newAttempt(1) line 1291, col 3 to line 1330, col 44 of module payment_trust_webhook>
+/\ payment_trust_webhook_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_trust_webhook_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_trust_webhook_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_trust_webhook_payment_att = (<<1, 1>> :> [st |-> "READY", pg |-> 1])
+/\ payment_trust_webhook_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_trust_webhook_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_trust_webhook_payment_late = <<FALSE>>
+/\ payment_trust_webhook_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_trust_webhook_payment_pgs = (<<1, 1>> :> "NONE" @@ <<2, 1>> :> "NONE")
+
+State 3: <payment_trust_webhook_payment_auth(1,1) line 379, col 3 to line 404, col 44 of module payment_trust_webhook>
+/\ payment_trust_webhook_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_trust_webhook_payment_ord = <<[st |-> "CREATED", apg |-> 0, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_trust_webhook_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_trust_webhook_payment_att = (<<1, 1>> :> [st |-> "READY", pg |-> 1])
+/\ payment_trust_webhook_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_trust_webhook_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_trust_webhook_payment_late = <<FALSE>>
+/\ payment_trust_webhook_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_trust_webhook_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 4: <payment_trust_webhook_payment_accept(1,1) line 420, col 3 to line 457, col 44 of module payment_trust_webhook>
+/\ payment_trust_webhook_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_trust_webhook_payment_ord = <<[st |-> "ACCEPTED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_trust_webhook_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_trust_webhook_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_trust_webhook_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_trust_webhook_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_trust_webhook_payment_late = <<FALSE>>
+/\ payment_trust_webhook_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_trust_webhook_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 5: <payment_trust_webhook_payment_reserve(1) line 498, col 3 to line 528, col 44 of module payment_trust_webhook>
+/\ payment_trust_webhook_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_trust_webhook_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_trust_webhook_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_trust_webhook_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_trust_webhook_payment_pay = (<<1, 1>> :> "NONE" @@ <<1, 2>> :> "NONE")
+/\ payment_trust_webhook_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_trust_webhook_payment_late = <<FALSE>>
+/\ payment_trust_webhook_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_trust_webhook_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 6: <payment_trust_webhook_payment_command(1) line 1344, col 3 to line 1369, col 50 of module payment_trust_webhook>
+/\ payment_trust_webhook_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_trust_webhook_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_trust_webhook_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_trust_webhook_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_trust_webhook_payment_pay = (<<1, 1>> :> "ACCEPTED" @@ <<1, 2>> :> "NONE")
+/\ payment_trust_webhook_payment_req = (<<1, 1>> :> FALSE @@ <<2, 1>> :> FALSE)
+/\ payment_trust_webhook_payment_late = <<FALSE>>
+/\ payment_trust_webhook_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_trust_webhook_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 7: <payment_trust_webhook_payment_send(1,1) line 542, col 3 to line 569, col 50 of module payment_trust_webhook>
+/\ payment_trust_webhook_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_trust_webhook_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_trust_webhook_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_trust_webhook_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_trust_webhook_payment_pay = (<<1, 1>> :> "SENT" @@ <<1, 2>> :> "NONE")
+/\ payment_trust_webhook_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> FALSE)
+/\ payment_trust_webhook_payment_late = <<FALSE>>
+/\ payment_trust_webhook_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 0,
+  canceled |-> FALSE ]
+/\ payment_trust_webhook_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 8: <payment_trust_webhook_payment_webhook(1,1,"APPROVED") line 748, col 3 to line 774, col 50 of module payment_trust_webhook>
+/\ payment_trust_webhook_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_trust_webhook_payment_ord = <<[st |-> "RESERVED", apg |-> 1, job |-> FALSE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_trust_webhook_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_trust_webhook_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_trust_webhook_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
+/\ payment_trust_webhook_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> FALSE)
+/\ payment_trust_webhook_payment_late = <<FALSE>>
+/\ payment_trust_webhook_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 1,
+  canceled |-> FALSE ]
+/\ payment_trust_webhook_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 9: <payment_trust_webhook_payment_applyResult(1,1) line 811, col 3 to line 851, col 44 of module payment_trust_webhook>
+/\ payment_trust_webhook_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_trust_webhook_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_trust_webhook_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "NONE",
+     broken |-> FALSE ] >>
+/\ payment_trust_webhook_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_trust_webhook_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
+/\ payment_trust_webhook_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> FALSE)
+/\ payment_trust_webhook_payment_late = <<FALSE>>
+/\ payment_trust_webhook_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 1,
+  canceled |-> FALSE ]
+/\ payment_trust_webhook_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 10: <payment_trust_webhook_payment_issue(1) line 857, col 3 to line 887, col 44 of module payment_trust_webhook>
+/\ payment_trust_webhook_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_trust_webhook_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_trust_webhook_payment_tks = << [ tk |-> "NONE",
+     closed |-> FALSE,
+     req |-> TRUE,
+     wait |-> "WAIT",
+     broken |-> FALSE ] >>
+/\ payment_trust_webhook_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_trust_webhook_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
+/\ payment_trust_webhook_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> FALSE)
+/\ payment_trust_webhook_payment_late = <<FALSE>>
+/\ payment_trust_webhook_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 1,
+  canceled |-> FALSE ]
+/\ payment_trust_webhook_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")
+
+State 11: <payment_trust_webhook_payment_ticketSvc(1) line 915, col 3 to line 959, col 44 of module payment_trust_webhook>
+/\ payment_trust_webhook_payment_ghost = [offPg |-> FALSE, badRefund |-> FALSE]
+/\ payment_trust_webhook_payment_ord = <<[st |-> "APPROVED", apg |-> 1, job |-> TRUE, over |-> FALSE, cs |-> FALSE]>>
+/\ payment_trust_webhook_payment_tks = << [ tk |-> "ISSUED",
+     closed |-> FALSE,
+     req |-> FALSE,
+     wait |-> "OK",
+     broken |-> FALSE ] >>
+/\ payment_trust_webhook_payment_att = (<<1, 1>> :> [st |-> "ACCEPTED", pg |-> 1])
+/\ payment_trust_webhook_payment_pay = (<<1, 1>> :> "APPROVED" @@ <<1, 2>> :> "NONE")
+/\ payment_trust_webhook_payment_req = (<<1, 1>> :> TRUE @@ <<2, 1>> :> FALSE)
+/\ payment_trust_webhook_payment_late = <<FALSE>>
+/\ payment_trust_webhook_payment_env = [ sw |-> FALSE,
+  switches |-> 0,
+  timeouts |-> 0,
+  restarts |-> 0,
+  hooks |-> 1,
+  canceled |-> FALSE ]
+/\ payment_trust_webhook_payment_pgs = (<<1, 1>> :> "AUTH" @@ <<2, 1>> :> "NONE")

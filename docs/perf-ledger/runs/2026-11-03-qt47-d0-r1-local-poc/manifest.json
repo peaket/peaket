@@ -1,0 +1,56 @@
+{
+  "run_id": "2026-11-03-qt47-d0-r1-local-poc",
+  "kpi": "NFR-002",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": 180,
+    "warmup_s": 15
+  },
+  "scenario": {
+    "path": "services/queue-svc/test-sim/reflect.sim.test.ts",
+    "args": "serving 초당 28번호(200ms마다, 실제 28), 대기자 1700명(차례 1분 안) 0.5초 ±20% 폴링(프로세스 4개), 원본 생성 제때",
+    "open_model": true
+  },
+  "commit": {
+    "code": "1c8086366bd73b3d70296c56716d2e56b312be04",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 host(측정 프로세스)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-03T12:39:38Z",
+  "ended_at": "2026-11-03T12:45:48Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 2482,
+    "error_rate": 0,
+    "requests": 620014,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "Q-T47 판정 실패: 반영 지연 p50 1.483초·p99 2.482초·최대 3.525초(센 번호 4536/4536), 단계 p99 생성 대기 0.997·캐시 나이 1.022·폴링 대기 1.504·왕복 0.415초, 캐시 {\"HIT\":617198,\"MISS\":7,\"EXPIRED\":2763,\"UPDATING\":46}, Expires보다 50ms 넘게 늦은 요청에 낸 HIT 339024(가장 늦은 것 999ms). queue-svc(운영 코드, 대기 상태 파일 원본) + nginx 1.27 캐시(낡은 값 허용 없음, proxy_cache_lock) + Valkey 8.1 단일 노드, 대기자는 이 PC의 측정 프로세스 4개(같은 시계). 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-03T13:16:44Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

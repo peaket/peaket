@@ -1,0 +1,180 @@
+{
+  "spec": "seat",
+  "file": "specs/seat.qnt",
+  "specSha256": "f12ca58e8e77567eb2b0bd50cf2cf6ff46662e7aec9853232dfc8fad65cdb3a3",
+  "commit": {
+    "sha": "cffc124df6d16b100267fb12e34922bb2428be6b",
+    "dirty": false
+  },
+  "date": "2026-11-03T20:35:01+09:00",
+  "scope": "정본 범위(docs/verification.md §2.1): 좌석 3석, 사람 3명(홀드 시도 2번씩, 요청은 좌석 1~2석의 모든 목록), 1인 한도 2매, 좌석 Redis 장애 전환 1회(주 노드 승격 또는 클러스터 전체 유실). 전수 검사는 범위를 줄인다: 사람 2명(한 사람은 홀드 시도 2번이라 시도 3개), 요청 4가지([1]·[1,2]·[2,1]·[2,3]). 정본 범위 전체는 시뮬레이션으로 본다. 변형은 반례가 나오는 작은 범위로 줄였다. 복제 지연은 장애 전환마다 쓰기 하나",
+  "adrs": [
+    "0014",
+    "0057",
+    "0121"
+  ],
+  "tools": {
+    "quint": "0.33.1",
+    "apalache": "0.62.4",
+    "tlc": "Apalache 0.62.4 묶음(apalache.jar)",
+    "java": "21.0.13"
+  },
+  "ok": true,
+  "checks": [
+    {
+      "main": "seat_proposed",
+      "expect": "hold",
+      "why": "전수 범위: PROGRESS OPEN[15]·OPEN[16]의 추천안(판매 예약 앞에서 좌석을 묶고 다시 만들기 판 번호로 커밋을 확인, 펜싱 토큰에 시계 하한)으로 ①②③⑤가 지켜지는지(③은 주 노드 승격 한 번에 1건 이하). ④는 시계 하한을 모형에 전제로 넣어 늘 참이라 여기서 세지 않는다(④는 seat_canon_fencing이 본다)",
+      "invariants": [
+        "inv_noOversell",
+        "inv_quotaNotExceeded",
+        "inv_staleSalesBounded",
+        "inv_noDeadlock"
+      ],
+      "method": "tlc",
+      "result": "hold",
+      "ok": true,
+      "statesGenerated": 342125441,
+      "distinctStates": 26782397,
+      "depth": 30,
+      "fingerprintCollision": "4.6E-4",
+      "seconds": 728.05
+    },
+    {
+      "main": "seat_proposed_full",
+      "expect": "hold",
+      "why": "정본 범위 전체(사람 3명·홀드 시도 2번씩·요청 9가지). 전수 검사는 상태가 너무 많아 시뮬레이션으로만 본다(장애 전환이 끼는 깊은 순서에는 잘 닿지 않아 약한 근거다). ④는 seat_proposed와 같은 까닭으로 세지 않는다",
+      "invariants": [
+        "inv_noOversell",
+        "inv_quotaNotExceeded",
+        "inv_staleSalesBounded",
+        "inv_noDeadlock"
+      ],
+      "method": "simulate",
+      "result": "hold",
+      "ok": true,
+      "samples": 10000,
+      "maxSteps": 40,
+      "seed": "0x5eed",
+      "statesGenerated": null,
+      "distinctStates": null,
+      "depth": null,
+      "fingerprintCollision": null,
+      "seconds": 34.741
+    },
+    {
+      "main": "seat_canon",
+      "expect": "violate",
+      "targetInvariant": "inv_staleSalesBounded",
+      "why": "정본에 적힌 그대로(결제 접수의 홀드 확인 뒤 판매 예약 전에 좌석을 묶지 않음)는 장애 전환 없이도 낡은 홀드로 판매가 확정된다(PROGRESS OPEN[15])",
+      "invariants": [
+        "inv_staleSalesBounded"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 21810,
+      "distinctStates": 4552,
+      "depth": 8,
+      "fingerprintCollision": null,
+      "seconds": 9.948,
+      "tlcTrace": "specs/results/seat/seat_canon.tlc.txt",
+      "counterexample": "specs/results/seat/seat_canon.itf.json"
+    },
+    {
+      "main": "seat_canon_fencing",
+      "expect": "violate",
+      "targetInvariant": "inv_fencingTokensIncrease",
+      "why": "OPEN[15]의 추천안만 더하고 펜싱 토큰은 정본대로(회차 카운터) 두면, 장애 전환으로 카운터가 되돌아가 토큰이 다시 나온다(PROGRESS OPEN[16])",
+      "invariants": [
+        "inv_fencingTokensIncrease"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 1595,
+      "distinctStates": 424,
+      "depth": 6,
+      "fingerprintCollision": null,
+      "seconds": 9.474,
+      "tlcTrace": "specs/results/seat/seat_canon_fencing.tlc.txt",
+      "counterexample": "specs/results/seat/seat_canon_fencing.itf.json"
+    },
+    {
+      "main": "seat_no_unique",
+      "expect": "violate",
+      "targetInvariant": "inv_noOversell",
+      "why": "V-T1: 활성 판매 부분 유니크를 빼면 장애 전환으로 좌석 Redis가 어긋날 때 같은 좌석이 두 번 팔린다",
+      "invariants": [
+        "inv_noOversell"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 2733,
+      "distinctStates": 1269,
+      "depth": 13,
+      "fingerprintCollision": null,
+      "seconds": 10.676,
+      "tlcTrace": "specs/results/seat/seat_no_unique.tlc.txt",
+      "counterexample": "specs/results/seat/seat_no_unique.itf.json"
+    },
+    {
+      "main": "seat_no_db_quota",
+      "expect": "violate",
+      "targetInvariant": "inv_quotaNotExceeded",
+      "why": "검사가 살아 있는지: 한도 행 조건부 갱신을 빼면 장애 전환으로 좌석 Redis의 보유 수를 잃은 사람이 한도를 넘겨 산다",
+      "invariants": [
+        "inv_quotaNotExceeded"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 17032,
+      "distinctStates": 4273,
+      "depth": 14,
+      "fingerprintCollision": null,
+      "seconds": 9.611,
+      "tlcTrace": "specs/results/seat/seat_no_db_quota.tlc.txt",
+      "counterexample": "specs/results/seat/seat_no_db_quota.itf.json"
+    },
+    {
+      "main": "seat_unsorted",
+      "expect": "violate",
+      "targetInvariant": "inv_noDeadlock",
+      "why": "검사가 살아 있는지: 판매 예약을 좌석 ID 순이 아니라 요청 순으로 넣으면 겹치는 좌석의 두 주문이 서로를 기다린다(K3)",
+      "invariants": [
+        "inv_noDeadlock"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 15260,
+      "distinctStates": 3862,
+      "depth": 13,
+      "fingerprintCollision": null,
+      "seconds": 9.65,
+      "tlcTrace": "specs/results/seat/seat_unsorted.tlc.txt",
+      "counterexample": "specs/results/seat/seat_unsorted.itf.json"
+    },
+    {
+      "main": "seat_no_ready_check",
+      "expect": "violate",
+      "targetInvariant": "inv_staleSalesBounded",
+      "why": "검사가 살아 있는지: 세대 키 확인을 빼면 클러스터 전체 유실 뒤 다시 만들기 전에 준 홀드가 장애 전에 결제가 묶은 좌석과 겹친다(ADR-0121 결정 4). 한 번뿐인 장애 전환이 앞쪽 걸음에서 쓰이기 쉬워 반례가 드물어(2만 회 남짓에 하나) 시뮬레이션을 10만 회 돈다",
+      "invariants": [
+        "inv_staleSalesBounded"
+      ],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 6588,
+      "distinctStates": 3043,
+      "depth": 9,
+      "fingerprintCollision": null,
+      "seconds": 10.496,
+      "tlcTrace": "specs/results/seat/seat_no_ready_check.tlc.txt",
+      "counterexample": "specs/results/seat/seat_no_ready_check.itf.json"
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "run_id": "2026-11-03-v0-k1-10k-r1-k9",
+  "kpi": "K9",
+  "version": "v0",
+  "profile": "local-10k",
+  "scale": {
+    "users": 10000,
+    "arrival_rps": null,
+    "duration_s": 160,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v0-queue.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "ec8cc7a3d8aff848ea2e28dd850276b65a179caa",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-03-v0-k1-10k-r1-k9/",
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 6대(CPU 2·메모리 1024Mi씩, kind 안)",
+    "dropped_iterations": 352538
+  },
+  "started_at": "2026-11-03T02:54:28Z",
+  "ended_at": "2026-11-03T02:57:08Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 213.21742949999998,
+    "p95_ms": 815.53341755,
+    "p99_ms": 1048.0888758199987,
+    "error_rate": 0.042335029323804715,
+    "requests": 283217,
+    "rps": 2360.1416666666664,
+    "dropped_iterations": 352538
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "extra": [
+      "hpa.json"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "발생기 0: 발생기가 반복을 시작하지 못함(dropped_iterations 59177); 발생기 1: 발생기가 반복을 시작하지 못함(dropped_iterations 58091); 발생기 2: 발생기가 반복을 시작하지 못함(dropped_iterations 56450); 발생기 3: 발생기가 반복을 시작하지 못함(dropped_iterations 56515); 발생기 4: 발생기가 반복을 시작하지 못함(dropped_iterations 54067); 발생기 5: 발생기가 반복을 시작하지 못함(dropped_iterations 68238)",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "K1 실행 2026-11-03-v0-k1-10k-r1와 같은 실행의 HPA 시간선(부하 시작 기준): 첫 확장 30.6초, 늘린 파드 첫 준비 33.6초(목표 60초 미만, K9 ①), 최대 복제 4, 새 파드 3개. 앱 CPU HPA 목표 70%·최소 1·최대 4(deploy/envs/local/v0-monolith.yaml), 쿠버네티스 기본 확장 동작",
+  "collected_at": "2026-11-03T02:57:46Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

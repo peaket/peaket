@@ -1,0 +1,50 @@
+{
+  "test": "Q-T46",
+  "seed": 46002,
+  "duration_s": 600,
+  "target": 5000,
+  "no_show": 0.2,
+  "stay_mean_s": 180,
+  "outcome": {
+    "variant": "new",
+    "requests": 21244,
+    "admitted": 21244,
+    "soon": 0,
+    "soonRatio": 0,
+    "soonWaitP99S": null,
+    "soonWaitMaxS": null,
+    "arrivalP50S": 2.005,
+    "arrivalP95S": 2.905,
+    "measuredArrivalP50S": 2.07,
+    "measuredArrivalP95S": 2.97,
+    "inFlightP50": 58,
+    "inFlightMax": 2525,
+    "expired": 0,
+    "unavailable": 0,
+    "errors": {},
+    "overTargetSamples": 0,
+    "maxSlots": 4958,
+    "servingAt6s": 5152,
+    "servingEnd": 26535,
+    "called": 26535,
+    "noShows": 5213
+  },
+  "compare": {
+    "old_admitted": 21427,
+    "admitted_drop": 0.008540626312596257
+  },
+  "checks": {
+    "soonRatioUnder1pct": true,
+    "soonWaitP99Under5s": true,
+    "admittedDropWithin2pct": true,
+    "noOverTarget": true,
+    "first6sWithinCap": true
+  },
+  "pass": true,
+  "bench": {
+    "requests": 21244,
+    "error_rate": 0,
+    "dropped": 0,
+    "p99_ms": null
+  }
+}

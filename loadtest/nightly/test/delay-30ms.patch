@@ -1,0 +1,13 @@
+diff --git a/services/v0-monolith/src/modules/queue/inbound/queue.controller.ts b/services/v0-monolith/src/modules/queue/inbound/queue.controller.ts
+index 58635fd..728d9fa 100644
+--- a/services/v0-monolith/src/modules/queue/inbound/queue.controller.ts
++++ b/services/v0-monolith/src/modules/queue/inbound/queue.controller.ts
+@@ -35,6 +35,8 @@ export class QueueController {
+   @LogPolicy({ sloLatencyMs: ENTRY_SLO_MS })
+   async status(@ContractParams(EventParams) p: EventParams, @CurrentPrincipal() me: Principal) {
+     requestLog().set({ queuePhase: 'waiting' });
++    // D-T40 ②(시험용 패치, loadtest/nightly/test/delay-30ms.patch): 핫패스(대기 상태 조회)에 30ms 지연을 넣은 새 판
++    await new Promise((r) => setTimeout(r, 30));
+     return this.queue.status(p.eventId, pidOf(me));
+   }
+ 

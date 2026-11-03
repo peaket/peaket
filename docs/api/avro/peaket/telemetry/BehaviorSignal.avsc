@@ -1,0 +1,199 @@
+{
+  "type": "record",
+  "name": "BehaviorSignal",
+  "namespace": "peaket.telemetry",
+  "doc": "행동 신호 요약. 토픽 telemetry.behavior, 키 pid. trust-svc가 로비 입장·사전 검증 때 기기 식별값을 기기 가명으로 바꿔 내고(ADR-0053·0071, 기기 키는 2026-10-31 ADR-0171로 바꿈), purchase-svc가 좌석·결제 화면의 요약을 낸다(screen SEAT·PAYMENT, 추천 적용 2026-10-31, ADR-0171 결정 4). 로비 입장에는 행동 요약이 없어 features가 비고, 재평가의 기기 공유 소급(R1)에만 쓰인다(로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1). 재평가 작업자는 SEAT·PAYMENT를 건너뛰고 조사 적재(inv-ingest)만 쓴다.",
+  "fields": [
+    {
+      "name": "pid",
+      "doc": "사람 식별값",
+      "type": "string"
+    },
+    {
+      "name": "deviceRef",
+      "doc": "기기 가명 invRef(device, 기기 식별값)(키 판 접두어 포함, docs/security/secrets-and-keys.md). 계산하지 못하면 비우고 refMissing이 true다. 본문에 기기 식별값이 있을 때 trust-svc가 Kafka에 넣기 전에 바꾼다. 2026-10-30까지는 탐지 가명 키였다(기기 키 통일, ADR-0171 결정 4, 추천 적용 2026-10-31)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "refMissing",
+      "doc": "조사용 가명 칸을 계산하지 못해 비웠으면 true(조사용 가명 라벨 키를 KMS에서 받지 못함·한도 초과). 업무 처리는 막지 않았고, 조사 적재는 이 값을 나중에 채우지 않는다. 생산자는 inv_ref_missing_total로 센다(docs/security/secrets-and-keys.md 'inv-ref-key', 추천 적용 2026-10-31, ADR-0171)",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "eventId",
+      "doc": "로비 입장·사전 검증을 판정한 회차, 또는 좌석·결제 화면의 회차(ADR-0071. 로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1)",
+      "type": "string"
+    },
+    {
+      "name": "journeyId",
+      "doc": "여정 ID(조사용 추적 ID, UUIDv7). 분석 저장소에는 이 메시지를 싣지 않는다(ADR-0171, 추천 적용 2026-10-31)",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "screen",
+      "doc": "요약을 잰 화면. LOBBY·EVENT_DETAIL은 trust-svc, SEAT·PAYMENT는 purchase-svc가 낸다. SEAT·PAYMENT는 실시간 판정과 재평가가 쓰지 않는다(ADR-0171 결정 4, 추천 적용 2026-10-31)",
+      "type": {
+        "type": "enum",
+        "name": "BehaviorSignalScreen",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "LOBBY",
+          "EVENT_DETAIL",
+          "SEAT",
+          "PAYMENT"
+        ]
+      }
+    },
+    {
+      "name": "netClass",
+      "doc": "요청 IP의 네트워크 유형(ADR-0071). trust-svc가 낸 사건(LOBBY·EVENT_DETAIL)에만 있다(2026-10-31에 필수에서 조건부로 바꿨다, 첫 등록 전)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "BehaviorSignalNetClass",
+          "default": "UNRECOGNIZED",
+          "symbols": [
+            "UNRECOGNIZED",
+            "HOSTING",
+            "PROXY",
+            "OTHER"
+          ]
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "screen": [
+            "LOBBY",
+            "EVENT_DETAIL"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "asn",
+      "doc": "netClass가 HOSTING·PROXY일 때만 싣는다(ADR-0071)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "screen": [
+            "LOBBY",
+            "EVENT_DETAIL"
+          ],
+          "netClass": [
+            "HOSTING",
+            "PROXY"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "features",
+      "doc": "브라우저가 낸 행동 신호 요약값(openapi BehaviorSummary와 같은 필드: 포인터 이동 수·엔트로피, 입력 간격 평균·표준편차, 스크롤, ADR-0065 결정 9). 헤더 순서 같은 서버 쪽 특징은 싣지 않는다(재평가 패턴이 쓰지 않음, docs/streaming.md §5.3, 추천 적용 2026-10-22). 로비 입장에는 행동 요약이 없어 비운다(추천 적용 2026-10-30, docs/features/bot-defense.md §4.1) 좌석·결제 화면도 본문에 요약이 있을 때만 싣는다(추천 적용 2026-10-31).",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "BehaviorSignalFeatures",
+          "doc": "브라우저가 낸 행동 신호 요약값. asyncapi는 형식을 정하지 않은 object라 openapi BehaviorSummary와 같은 필드로 맞췄다(추천 적용 2026-10-22, docs/streaming.md §5.2, ADR-0065 결정 9).",
+          "fields": [
+            {
+              "name": "v",
+              "doc": "형식 버전",
+              "type": "long"
+            },
+            {
+              "name": "windowMs",
+              "doc": "요약한 구간 길이(밀리초)",
+              "type": "long"
+            },
+            {
+              "name": "pointerMoves",
+              "doc": "포인터 이동 이벤트 수",
+              "type": [
+                "null",
+                "long"
+              ],
+              "default": null
+            },
+            {
+              "name": "pointerEntropy",
+              "doc": "포인터 이동 방향의 엔트로피(비트)",
+              "type": [
+                "null",
+                "double"
+              ],
+              "default": null
+            },
+            {
+              "name": "inputIntervalMeanMs",
+              "doc": "터치·키 입력 간격 평균(밀리초)",
+              "type": [
+                "null",
+                "double"
+              ],
+              "default": null
+            },
+            {
+              "name": "inputIntervalStdMs",
+              "doc": "터치·키 입력 간격 표준편차(밀리초)",
+              "type": [
+                "null",
+                "double"
+              ],
+              "default": null
+            },
+            {
+              "name": "scrollEvents",
+              "doc": "스크롤 이벤트 수",
+              "type": [
+                "null",
+                "long"
+              ],
+              "default": null
+            },
+            {
+              "name": "scrollDistancePx",
+              "doc": "스크롤 이동 거리 합(CSS 픽셀)",
+              "type": [
+                "null",
+                "long"
+              ],
+              "default": null
+            }
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "ts",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    }
+  ]
+}

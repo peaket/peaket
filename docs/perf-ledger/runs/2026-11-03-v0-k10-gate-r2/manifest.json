@@ -1,0 +1,82 @@
+{
+  "run_id": "2026-11-03-v0-k10-gate-r2",
+  "kpi": "K10",
+  "version": "v0",
+  "profile": "local-1k",
+  "scale": {
+    "users": 10,
+    "arrival_rps": 10.0,
+    "duration_s": 180,
+    "warmup_s": 30
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v0-gate.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "0aadf9400b21f2a9946cd802f18db1b4144ebddd",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-03-v0-k10-gate-r2/",
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 1대(CPU 4·메모리 4096Mi씩, kind 안)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-03T06:05:30Z",
+  "ended_at": "2026-11-03T06:09:00Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 5.110502,
+    "p95_ms": 7.793838,
+    "p99_ms": 10.836552,
+    "error_rate": 0.3187118267629095,
+    "requests": 1801,
+    "rps": 10.005555555555556,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "extra": [
+      "gate.json"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": [
+    {
+      "name": "scan_p95_150ms",
+      "allowed": 0.05,
+      "trials": 600,
+      "violations": 0,
+      "cp_upper": 0.00498,
+      "min_trials": 59,
+      "result": "pass",
+      "target": "scan p95 ≤ 150ms(온라인 구간)"
+    },
+    {
+      "name": "scan_server_p95_150ms",
+      "allowed": 0.05,
+      "trials": 1226,
+      "violations": 0,
+      "cp_upper": 0.002441,
+      "min_trials": 59,
+      "result": "pass",
+      "target": "서버 scan p95 ≤ 150ms"
+    }
+  ],
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 1대 CPU 평균 최고 0.5%·메모리 최대 3.5%, VU 최대 합 201, 시나리오 오류 0건, 계획 최고 도착률 10/s(docs/verification.md §3.9·§3.10); scan: 1801건, p99 10.8ms, 실패 574건; 검표: 온라인 분당 600.9건(p95 9ms), 끊김 분당 48.3건(실패 548), 복구 분당 573.5건, 판정이 멈춘 가장 긴 시간 59.4초, 끊김/온라인 0.08",
+  "collected_at": "2026-11-03T06:09:04Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

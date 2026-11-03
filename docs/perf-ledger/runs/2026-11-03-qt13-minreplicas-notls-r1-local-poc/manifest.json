@@ -1,0 +1,56 @@
+{
+  "run_id": "2026-11-03-qt13-minreplicas-notls-r1-local-poc",
+  "kpi": "NFR-015",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": null,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "services/queue-svc/test-sim/failover.sim.test.ts",
+    "args": "min-replicas-to-write 1, min-replicas-max-lag 1(정본), 복제 멈춤 4.5초, 멈춘 뒤 10ms마다 같은 슬롯 쓰기",
+    "open_model": true
+  },
+  "commit": {
+    "code": "1c8086366bd73b3d70296c56716d2e56b312be04",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": false,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 host(측정 프로세스)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-03T12:38:13Z",
+  "ended_at": "2026-11-03T12:38:23Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": null,
+    "error_rate": 0,
+    "requests": 3,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "늦은 복제본이면 주 노드가 쓰기를 거절하는지(ADR-0181 전제): 회차 슬롯 주 노드에 min-replicas-to-write 1·max-lag 1초를 걸고 그 복제를 docker pause로 4.5초 멈춤. 멈춤 명령이 돌아온 뒤 거절까지 1944ms(멈춤 명령 자체 216ms, 그동안 받은 쓰기 125건. 이 시간은 대부분 설정값(max-lag 1초 + 복제 확인 주기 1초)이 정한다). 판정 통과(직접 SET NOREPLICAS Not enough good replicas to w, 진입 {\"error\":\"QueueStoreUnavailable\",\"cause\":\"NOREPLICAS Not enough good replicas to write. script: d69fb6b8f05f2074c013c078ff\"}, 푼 뒤 TICKET). 운영 코드(EnterQueue·RedisEntryStore·HotRedis 클러스터), 주 노드 셋·복제 셋 Valkey 8.1, TLS 끔(기능 확인이라). 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-03T13:16:43Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

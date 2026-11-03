@@ -1,0 +1,35 @@
+{
+  "cutTimes": {
+    "issuedMs": 1793685785833,
+    "startMs": 1793685786210,
+    "original": 1,
+    "endMs": 1793685845836,
+    "readyMs": 1793685848921
+  },
+  "online": {
+    "attempts": 604,
+    "judged": 604,
+    "failed": 0,
+    "perMinute": 600.8,
+    "p95Ms": 9
+  },
+  "cut": {
+    "attempts": 596,
+    "judged": 48,
+    "failed": 548,
+    "perMinute": 48.3,
+    "p95Ms": 8
+  },
+  "restored": {
+    "attempts": 600,
+    "judged": 587,
+    "failed": 13,
+    "perMinute": 586.6,
+    "p95Ms": 9
+  },
+  "maxGapS": 58,
+  "offlineRatio": 0.08,
+  "results": {
+    "ADMIT": 1239
+  }
+}

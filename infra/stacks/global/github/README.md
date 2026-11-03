@@ -1,0 +1,40 @@
+# GitHub 조직 설정 스택
+
+GitHub 조직 `peaket`의 설정을 Terraform으로 관리한다. 무엇을 왜 이렇게 두는지는 정본에 있다. 규칙 세트는 [docs/devops.md](../../../../docs/devops.md) §2.2.6, 관리 대상 목록은 같은 문서 §2.3, 저장소 둘은 §2.1(ADR-0169), Actions·토큰·OIDC는 §4.5, 환경은 §5.1이다. 이 안내서는 적용하는 방법만 적는다.
+
+## 파일
+
+| 파일 | 담는 것 |
+| --- | --- |
+| `teams.json` | 가상 팀 아홉의 목록. `.github/CODEOWNERS` 검사(`tools/ci/check-codeowners.mjs`)도 이 파일을 읽는다 |
+| `repositories.tf` | 저장소 둘(공개 `peaket`, 비공개 `peaket-bots`)과 기본 가지 |
+| `rulesets.tf` | `peaket`의 git flow 규칙 세트(모듈 `infra/modules/github`) |
+| `teams.tf` | 팀, 팀 관리자, 팀별 저장소 권한 |
+| `environments.tf` | `peaket`의 환경 넷과 배포할 수 있는 가지 |
+| `actions.tf` | 조직 Actions 허용 목록·SHA 고정, 워크플로 토큰 기본 권한, OIDC 주체 키 |
+
+## 검사(조직 없이 할 수 있음)
+
+```bash
+terraform fmt -check -recursive infra
+terraform -chdir=infra/stacks/global/github init -backend=false
+terraform -chdir=infra/stacks/global/github validate
+```
+
+## 적용 순서(조직이 생긴 뒤)
+
+1. 소유자가 GitHub 조직 `peaket`을 만든다. 조직 관리 권한이 있는 토큰을 `GITHUB_TOKEN` 환경 변수로 둔다. 토큰은 파일에 적지 않는다.
+2. `terraform.tfvars.example`을 `terraform.tfvars`로 복사해 `owner_login`과 `prod_reviewer_user_ids`(prod 배포 승인자, 1인 기간에는 소유자)를 채운다(`terraform.tfvars`는 커밋하지 않는다).
+3. 저장소만 먼저 만든다: `terraform apply -target=github_repository.this`. 비공개 `peaket-bots`는 스위치 `bots_repository_enabled`(기본 꺼짐)를 켤 때만 만들어진다. 봇 시뮬레이터를 처음 만드는 wbs 1.2.2에서 켠다
+4. 이 저장소의 `main`과 `develop`을 원격 `peaket`에 밀어 넣는다. 공개 게시라 소유자가 다시 확인한다.
+5. wbs 0.1.2의 CI(`ci-summary`, `branch-policy`, `merge-tree` 잡)가 한 번 돈 뒤 전체를 적용한다: `terraform apply`. 필수 검사가 한 번도 돌지 않은 채로 규칙 세트를 걸면 모든 PR이 그 검사를 기다리며 막힌다.
+6. 릴리스 봇 GitHub 앱을 만들면 `release_bot_app_id`를 넣고 다시 적용한다. 그때 `release/*`·`hotfix/*`·`v*` 규칙 세트에 봇 우회가 생긴다.
+
+## 적용 기록
+
+- **2026-11-03(FND-160)**: 소유자가 조직 `peaket`을 만들고 웹에서 저장소를 옮긴 뒤라(위 3·4번을 웹에서 대신 함), `imports.tf`로 `peaket` 저장소와 기본 가지를 가져오고 전체를 적용했다. 결과: 가져오기 2, 새로 만들기 47(팀 아홉과 팀 권한, 규칙 세트 넷, 환경 넷과 배포 가지, 조직 Actions 정책 둘, OIDC 주체 키), 바꾸기 1(저장소 병합 설정), 지우기 0. 소유자 결정으로 `develop` 규칙 세트에 조직 관리자 우회를 두고(`develop_admin_bypass`), 데모 환경이 생길 때까지 `main`의 데모 배포 요구를 뺐다(`main_required_deployments = []`, docs/devops.md §2.2.6). 비공개 `peaket-bots`(`bots_repository_enabled`, 가져오기가 필요하다)는 아직이다.
+- **2026-11-03(FND-160, 6번)**: 소유자가 릴리스 봇 GitHub 앱 `peaket-release-bot`(App ID 5595394, 저장소 권한 contents·pull-requests·workflows 쓰기, 웹훅 없음, `peaket`에만 설치)을 만들고 개인키를 `release` 환경 비밀 `RELEASE_BOT_PRIVATE_KEY`에 넣었다. Client ID는 `release` 환경 변수 `RELEASE_BOT_CLIENT_ID`다. `release_bot_app_id`를 넣어 다시 적용했다(바꾸기 2: `release-hotfix`·`release-tags` 규칙 세트에 봇 우회). 적용 뒤 plan은 바뀔 것 없음이다.
+
+## 상태
+
+처음에는 로컬 상태(`terraform.tfstate`, 커밋하지 않음)로 적용한다. 2026-11-03부터 상태는 소유자 PC의 이 폴더에만 있으니 지우지 않는다. wbs 0.4.2에서 상태 버킷을 만들면 `backend.tf`(S3, `use_lockfile`)를 더하고 `terraform init -migrate-state`로 옮긴다([docs/devops.md](../../../../docs/devops.md) §9.1). 상태를 잃으면 이 스택의 자원은 `terraform import`로 되살린다.

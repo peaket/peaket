@@ -1,0 +1,23 @@
+{
+  "test": "state-file-with-skipped",
+  "real": 40000,
+  "without": {
+    "seq": 40000,
+    "p50_ms": 1.15,
+    "p95_ms": 1.46,
+    "max_ms": 1.5
+  },
+  "withSkip": {
+    "seq": 400000,
+    "skipped": "20001:380000:1",
+    "p50_ms": 8.49,
+    "p95_ms": 24.53,
+    "max_ms": 26.16
+  },
+  "bench": {
+    "requests": 60,
+    "error_rate": 0,
+    "dropped": 0,
+    "p99_ms": 26.16
+  }
+}

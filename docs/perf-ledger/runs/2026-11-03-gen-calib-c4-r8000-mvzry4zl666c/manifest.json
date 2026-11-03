@@ -1,0 +1,58 @@
+{
+  "run_id": "2026-11-03-gen-calib-c4-r8000-mvzry4zl666c",
+  "kpi": "NFR-013",
+  "version": "v0",
+  "profile": "local-gen",
+  "scale": {
+    "users": null,
+    "arrival_rps": 8000.0,
+    "duration_s": 30,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/calibrate.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "175105ef714d3e75bc3d24c7a1e582cde51eb744",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": null,
+    "dropped_iterations": 389
+  },
+  "started_at": "2026-11-02T21:35:05Z",
+  "ended_at": "2026-11-02T21:35:35Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 0.131119,
+    "p95_ms": 0.8583807999999991,
+    "p99_ms": 2.235765540000001,
+    "error_rate": 0,
+    "requests": 239707,
+    "rps": 5992.466775112804,
+    "dropped_iterations": 389
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": false,
+  "invalid_reason": "발생기가 반복을 시작하지 못함(dropped_iterations 389)",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 보정(local-gen, docs/verification.md §3.9): CPU 4·메모리 4096Mi 발생기 → 빈 응답 대역(CPU 8). 통과 못 함: 발생기가 반복을 시작하지 못함(dropped_iterations 389). 발생기 CPU 평균 65.8%·최고 69.1%, 메모리 최대 5.2%, VU 최대 164, VU당 메모리 1353354 B, 대역 CPU 4.5%. 이 CPU 몫의 용량 1000/s",
+  "collected_at": "2026-11-02T21:35:38Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

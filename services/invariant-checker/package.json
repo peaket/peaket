@@ -1,0 +1,26 @@
+{
+  "name": "@peaket/invariant-checker",
+  "private": true,
+  "version": "0.0.0",
+  "description": "불변식 검사기. 시험이 끝난 뒤 서비스 DB와 시험 기록을 대조해 차례 전 입장·순번 중복·오버셀·1인 한도 초과·이중 결제·결제-발권 불일치·정산 돈 불변식을 센다(docs/verification.md §2.5, wbs 1.2.3)",
+  "type": "module",
+  "bin": {
+    "peaket-invariants": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

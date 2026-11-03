@@ -1,0 +1,6 @@
+2026-11-03T13:16:45Z 측정 폴더: D:\ticketpass-lane2\docs\perf-ledger\runs\2026-11-03-qt46-old-r3-local-poc
+2026-11-03T13:16:45Z 첨부: D:\ticketpass-lane2\.cache\peaket-poc\out\2026-11-03-qt46-old-r3.json → bench-summary.json
+2026-11-03T13:16:45Z 측정 도구: p99=49168 ms, 오류율=0, 요청=68564, 못 보낸 요청=0
+2026-11-03T13:16:45Z 첨부: D:\ticketpass-lane2\.cache\peaket-poc\out\infra.txt → infra.txt
+2026-11-03T13:16:45Z 원본 버킷(--raw-bucket)이 없어 큰 원본(metrics/·traces/·grafana/·stdout.log)이 폴더에 남는다. Git에는 작은 파일만 넣는다(docs/perf-ledger.md §2.1)
+2026-11-03T13:16:46Z manifest.json 작성

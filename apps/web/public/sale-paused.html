@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>지금은 예매를 잠시 멈췄습니다 · PEAKET</title>
+<!--
+  SCR-059 '판매 일시 중단'의 앱 밖 정적 페이지(d5 §5.33, docs/frontend.md §2.5 '판매 일시 중단 대체', docs/infra.md §6).
+  리전 장애 1단계에서 원본(앱 서버)이 멈춰도 S3에서 내보내므로 앱 CSS·글꼴·스크립트를 싣지 않고 이 파일 하나로 그린다.
+  모양은 캔버스 보드 SCR-059-m·t·d '판매 일시 중단'과 같다. 색 값은 tokens.json(gen/kit-tokens.css)의 라이트·다크 의미 색을 옮겼다
+  (토큰이 바뀌면 이 파일도 바꾼다. 빌드 때 tokens.json에서 만들게 바꾸는 일은 배포 단계에 남긴다).
+  스크립트가 없다. CSP는 이 파일의 <style> 해시만 허용하면 된다(배포 단계에서 정한다).
+-->
+<style>
+:root{--surface:#ffffff;--surface-muted:#f7f8f9;--border:#dcdee3;--text:#1a1c20;--text-muted:#555d6d;--link:#4338CA;--warning:#755b22;--warning-subtle:#fff7de;--focus-ring:#5B5BE8;--logo:#4338CA;--r-xl:16px}
+@media (prefers-color-scheme: dark){:root{--surface:#16171b;--surface-muted:#1d2025;--border:#393d46;--text:#f3f4f5;--text-muted:#dcdee3;--link:#A9B0FF;--warning:#ca901c;--warning-subtle:#302819;--focus-ring:#A9B0FF;--logo:#5B5BE8}}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{display:flex;flex-direction:column;min-height:100%;background:var(--surface);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard Variable",Pretendard,"Noto Sans KR","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:16px;line-height:1.375;-webkit-font-smoothing:antialiased;word-break:keep-all;overflow-wrap:break-word}
+h1,p{margin:0}
+.skip{position:absolute;left:-9999px}
+.skip:focus{left:8px;top:8px;z-index:10;padding:8px 12px;border-radius:8px;background:var(--surface);color:var(--text);box-shadow:0 0 0 2px var(--focus-ring)}
+header{display:flex;align-items:center;height:56px;padding:0 16px;border-bottom:1px solid var(--border)}
+.logo{display:inline-flex;align-items:center;gap:6px;font-size:19px;line-height:24px;font-weight:800;letter-spacing:.03em;color:var(--text)}
+.logo svg{width:28px;height:28px;flex:none}
+.logo .m{fill:var(--logo)}
+main{flex:1 0 auto;display:flex;flex-direction:column;justify-content:center;padding:20px 16px}
+.card{display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;width:100%;margin:0 auto;padding:28px 20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xl)}
+.icon{display:grid;place-items:center;width:56px;height:56px;border-radius:50%;background:var(--warning-subtle);color:var(--warning)}
+.icon svg{width:30px;height:30px}
+h1{font-size:20px;line-height:27px;font-weight:700}
+.sub{font-size:14px;line-height:19px;color:var(--text-muted)}
+.more{display:flex;flex-direction:column;align-items:center;gap:2px}
+.more a{display:inline-flex;align-items:center;gap:2px;min-height:44px;color:var(--link);font-weight:700;font-size:14px;line-height:19px;text-decoration:none}
+.more a:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px;border-radius:4px}
+.more svg{width:16px;height:16px}
+.note{font-size:12px;line-height:16px;color:var(--text-muted)}
+@media (min-width:768px){
+  header{padding:0 24px}
+  main{align-items:center;padding:48px 24px}
+  .card{width:480px;max-width:100%;gap:14px;padding:40px 32px}
+  .icon{width:64px;height:64px}
+  h1{font-size:24px;line-height:32px;letter-spacing:-.005em}
+  .sub{font-size:16px;line-height:22px}
+}
+@media (min-width:1280px){
+  header{height:64px;padding:0 32px}
+  main{padding:56px 32px}
+  .card{width:520px;padding:44px 40px}
+  .more a{min-height:32px}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">본문 바로가기</a>
+<header>
+  <span class="logo"><svg viewBox="0 0 32 32" aria-hidden="true"><path class="m" d="M3 15h7.5L16 5.5l5.5 9.5H29v3.5a2.5 2.5 0 0 0 0 5V27H3v-3.5a2.5 2.5 0 0 0 0-5z"/><path d="M7.5 21h3M14.5 21h3M21.5 21h3" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>PEAKET</span>
+</header>
+<main id="main" tabindex="-1">
+  <div class="card" role="alert">
+    <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg></span>
+    <h1>지금은 예매를 잠시 멈췄습니다</h1>
+    <p class="sub">마이 티켓의 입장 QR은 그대로 열립니다</p>
+    <div class="more">
+      <!-- 공개 상태 페이지(클러스터 밖 GitHub Pages, ADR-0032). 주소는 [가정] — 앱의 STATUS_PAGE_URL과 같게 둔다 -->
+      <a href="https://status.peaket.example/" target="_blank" rel="noopener noreferrer" aria-label="복구 소식 보기, 피켓 상태 안내 페이지, 새 창">복구 소식 보기<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg></a>
+      <p class="note">피켓이 멈춰도 열리는 별도 안내 페이지에서 복구 진행 상황을 알려 드립니다(새 창)</p>
+    </div>
+  </div>
+</main>
+</body>
+</html>

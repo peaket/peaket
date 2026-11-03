@@ -1,0 +1,58 @@
+{
+  "run_id": "2026-11-01-vt41-fastify-zod-entry-b-r2-local-poc",
+  "kpi": "V-T41",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": 8000.0,
+    "duration_s": 60,
+    "warmup_s": 15
+  },
+  "scenario": {
+    "path": "loadtest/poc/http/vt41.js",
+    "args": "MODE=open ROUTE=entry RATE=8000 VT41_CONFIG=fastify-zod PREVUS=2000 k6 --cpus 4",
+    "open_model": true
+  },
+  "commit": {
+    "code": "8abe9fdd7e3a5f37d8eab3152e976f35a3b6bbf5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(k6 1.4.2) 컨테이너, CPU 한도 1(앱)·4(k6)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-01T12:29:09Z",
+  "ended_at": "2026-11-01T12:30:27Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 0.229241,
+    "p95_ms": 13.597866,
+    "p99_ms": 88.560623,
+    "error_rate": 0,
+    "requests": 480001,
+    "rps": 6400.113308564643,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "extra": [
+      "2026-11-01-vt41-fastify-zod-entry-b-r2.json"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "두 번째 회차: k6 가상 사용자 4,009명을 CPU 4개로 돌려 k6가 버거웠다(응답 시간이 음수로 찍히고 연결 대기 1.2초, 앱은 정상). 세 번째 회차(-c-)로 다시 잼",
+  "verdict": null,
+  "notes": "V-T41 fastify-zod entry, 앱 컨테이너 CPU 1, k6 1.4.2 CPU 4·미리 만든 가상 사용자 2000, 요청당 CPU 89.5µs, 이벤트 루프 지연 p99 0.901ms. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-01T13:40:16Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

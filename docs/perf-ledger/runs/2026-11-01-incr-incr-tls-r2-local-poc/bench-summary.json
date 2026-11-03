@@ -1,0 +1,120 @@
+{
+  "test": "INCR-single-key",
+  "client": "node-redis",
+  "tls": true,
+  "op": "incr",
+  "model": "open",
+  "procs": 4,
+  "offered_rate": 200000,
+  "batch_ms": null,
+  "duration_s": 60,
+  "warmup_s": 15,
+  "key_owner": "valkey-1:6379",
+  "latency": {
+    "count": 12000000,
+    "p50_ms": 2.104,
+    "p90_ms": 9.742,
+    "p99_ms": 50.31,
+    "p999_ms": 107.171,
+    "max_ms": 179.8
+  },
+  "throughput_per_s": null,
+  "issued": 15000000,
+  "errors": 0,
+  "dropped": 0,
+  "error_kinds": {},
+  "per_proc": [
+    {
+      "cpu_pct": 78.7,
+      "issued": 3750000,
+      "errors": 0,
+      "dropped": 0,
+      "max_inflight": 7052,
+      "batches": 0,
+      "latency": {
+        "count": 3000000,
+        "p50_ms": 2.133,
+        "p90_ms": 10.242,
+        "p99_ms": 55.942,
+        "p999_ms": 119.41,
+        "max_ms": 146.122,
+        "mean_ms": 5.084
+      }
+    },
+    {
+      "cpu_pct": 78,
+      "issued": 3750000,
+      "errors": 0,
+      "dropped": 0,
+      "max_inflight": 5358,
+      "batches": 0,
+      "latency": {
+        "count": 3000000,
+        "p50_ms": 2.068,
+        "p90_ms": 9.364,
+        "p99_ms": 46.236,
+        "p999_ms": 81.261,
+        "max_ms": 127.204,
+        "mean_ms": 4.448
+      }
+    },
+    {
+      "cpu_pct": 77.6,
+      "issued": 3750000,
+      "errors": 0,
+      "dropped": 0,
+      "max_inflight": 4563,
+      "batches": 0,
+      "latency": {
+        "count": 3000000,
+        "p50_ms": 2.051,
+        "p90_ms": 8.679,
+        "p99_ms": 42.953,
+        "p999_ms": 75.836,
+        "max_ms": 100.804,
+        "mean_ms": 4.211
+      }
+    },
+    {
+      "cpu_pct": 79.6,
+      "issued": 3750000,
+      "errors": 0,
+      "dropped": 0,
+      "max_inflight": 8249,
+      "batches": 0,
+      "latency": {
+        "count": 3000000,
+        "p50_ms": 2.16,
+        "p90_ms": 10.615,
+        "p99_ms": 55.72,
+        "p999_ms": 148.025,
+        "max_ms": 178.99,
+        "mean_ms": 5.229
+      }
+    }
+  ],
+  "engine": {
+    "incr": {
+      "p50_us": 0.001,
+      "p99_us": 1.003,
+      "p999_us": 4.015
+    },
+    "incrby": null,
+    "evalsha": null,
+    "main_thread_cpu_pct": 42.2
+  },
+  "final_counter": 15000000,
+  "host": {
+    "cpu_pct": 11.7,
+    "procs_running_end": 3,
+    "vm_cpus": 32
+  },
+  "bench": {
+    "p99_ms": 50.31,
+    "error_rate": 0,
+    "requests": 12000000,
+    "dropped": 0,
+    "throughput_per_s": null,
+    "requests_note": "예열 뒤 요청 수로 고쳐 적음(record.mjs fixRequests)"
+  }
+}

@@ -1,0 +1,450 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<0>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<0, 0, 0>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 0,
+        seats |-> <<>>,
+        phase |-> "IDLE",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  12 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+
+State 2: <seat_no_db_quota_seat_hold(11,<<1>>) line 434, col 3 to line 476, col 62 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<0>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 0, 0>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 11, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<1>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 0,
+        seats |-> <<1>>,
+        phase |-> "HELD",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  12 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+
+State 3: <seat_no_db_quota_seat_ttlPasses(11) line 498, col 3 to line 521, col 66 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<0>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 0, 0>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 11, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<1>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 0,
+        seats |-> <<1>>,
+        phase |-> "HELD",
+        late |-> TRUE,
+        ins |-> 0 ] @@
+  12 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+
+State 4: <seat_no_db_quota_seat_expire(11) line 547, col 3 to line 566, col 34 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<0>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<0, 0, 0>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 11, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<1>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 0,
+        seats |-> <<1>>,
+        phase |-> "HELD",
+        late |-> TRUE,
+        ins |-> 0 ] @@
+  12 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+
+State 5: <seat_no_db_quota_seat_accept(11) line 592, col 3 to line 610, col 66 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<0>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<0, 0, 0>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 11, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<1>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1>>,
+        phase |-> "ACCEPTED",
+        late |-> TRUE,
+        ins |-> 0 ] @@
+  12 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+
+State 6: <seat_no_db_quota_seat_pin(11) line 671, col 3 to line 717, col 62 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<0>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 0, 0>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 11, pinned |-> TRUE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<1>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  12 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+
+State 7: <seat_no_db_quota_seat_saleStep(11) line 1098, col 3 to line 1204, col 62 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{11}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<1>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 0, 0>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 11, pinned |-> TRUE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<1>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1>>,
+        phase |-> "RESERVED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  12 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+
+State 8: <seat_no_db_quota_seat_promote line 354, col 3 to line 368, col 66 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{11}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<1>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 0, 0>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 1, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1>>,
+        phase |-> "RESERVED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  12 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+
+State 9: <seat_no_db_quota_seat_hold(12,<<2, 3>>) line 434, col 3 to line 476, col 62 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{11}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<1>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 12, 12>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> FALSE] >>,
+  quota |-> <<2>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 1, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1>>,
+        phase |-> "RESERVED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  12 :>
+      [ gen |-> 0,
+        seats |-> <<2, 3>>,
+        phase |-> "HELD",
+        late |-> FALSE,
+        ins |-> 0 ] )
+
+State 10: <seat_no_db_quota_seat_accept(12) line 592, col 3 to line 610, col 66 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{11}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<1>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 12, 12>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> FALSE] >>,
+  quota |-> <<2>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 1, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1>>,
+        phase |-> "RESERVED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  12 :>
+      [ gen |-> 1,
+        seats |-> <<2, 3>>,
+        phase |-> "ACCEPTED",
+        late |-> FALSE,
+        ins |-> 0 ] )
+
+State 11: <seat_no_db_quota_seat_pin(12) line 671, col 3 to line 717, col 62 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{11}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<1>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 12, 12>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> TRUE],
+         [hid |-> 12, pinned |-> TRUE] >>,
+  quota |-> <<2>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> FALSE] >>,
+  quota |-> <<2>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 1, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1>>,
+        phase |-> "RESERVED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  12 :>
+      [ gen |-> 1,
+        seats |-> <<2, 3>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 0 ] )
+
+State 12: <seat_no_db_quota_seat_saleStep(12) line 1098, col 3 to line 1204, col 62 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{11}, {}, {}>>,
+  unc |-> <<0, 12, 0>>,
+  used |-> <<1>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 12, 12>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> TRUE],
+         [hid |-> 12, pinned |-> TRUE] >>,
+  quota |-> <<2>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> FALSE] >>,
+  quota |-> <<2>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 1, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1>>,
+        phase |-> "RESERVED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  12 :>
+      [ gen |-> 1,
+        seats |-> <<2, 3>>,
+        phase |-> "PINNED",
+        late |-> FALSE,
+        ins |-> 1 ] )
+
+State 13: <seat_no_db_quota_seat_saleStep(12) line 1098, col 3 to line 1204, col 62 of module seat_no_db_quota>
+/\ seat_no_db_quota_seat_db = [ gen |-> 1,
+  sale |-> <<{11}, {12}, {12}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<3>>,
+  ledger |-> {} ]
+/\ seat_no_db_quota_seat_ghost = [stale |-> 0, maxTok |-> 0, tokBroken |-> FALSE, newest |-> <<11, 12, 12>>]
+/\ seat_no_db_quota_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> TRUE],
+         [hid |-> 12, pinned |-> TRUE] >>,
+  quota |-> <<2>> ]
+/\ seat_no_db_quota_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 0,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> FALSE],
+         [hid |-> 12, pinned |-> FALSE] >>,
+  quota |-> <<2>> ]
+/\ seat_no_db_quota_seat_env = [partials |-> 1, fulls |-> 0]
+/\ seat_no_db_quota_seat_atts = ( 11 :>
+      [ gen |-> 1,
+        seats |-> <<1>>,
+        phase |-> "RESERVED",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  12 :>
+      [ gen |-> 1,
+        seats |-> <<2, 3>>,
+        phase |-> "RESERVED",
+        late |-> FALSE,
+        ins |-> 0 ] )

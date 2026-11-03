@@ -1,0 +1,80 @@
+{
+  "name": "@peaket/platform",
+  "private": true,
+  "version": "0.0.0",
+  "description": "서비스(NestJS·Fastify)가 함께 쓰는 서버 공용 패키지. 게시하지 않고 workspace:로만 잇는다(docs/architecture.md §10, ADR-0165)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry.d.ts",
+      "default": "./dist/telemetry.js"
+    },
+    "./telemetry/register": {
+      "types": "./dist/telemetry-register.d.ts",
+      "default": "./dist/telemetry-register.js"
+    },
+    "./stream-worker": {
+      "types": "./dist/stream-worker.d.ts",
+      "default": "./dist/stream-worker.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
+    "./token-verify": {
+      "types": "./dist/token-verify.d.ts",
+      "default": "./dist/token-verify.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "test:integration": "vitest run --config vitest.integration.config.mjs"
+  },
+  "dependencies": {
+    "@confluentinc/kafka-javascript": "1.11.0",
+    "@grpc/grpc-js": "1.14.6",
+    "@nestjs/common": "^12.3.2",
+    "@nestjs/core": "^12.3.2",
+    "@nestjs/platform-fastify": "^12.3.2",
+    "@nestjs/swagger": "^12.0.5",
+    "@opentelemetry/api": "^1.10.0",
+    "@opentelemetry/core": "3.0.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.300.0",
+    "@opentelemetry/instrumentation-http": "0.300.0",
+    "@opentelemetry/instrumentation-undici": "0.34.0",
+    "@opentelemetry/resources": "3.0.0",
+    "@opentelemetry/sdk-node": "0.300.0",
+    "@opentelemetry/sdk-trace": "3.0.0",
+    "@prometheus-io/client": "^0.16.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "aws-msk-iam-sasl-signer-js": "1.0.3",
+    "drizzle-orm": "0.45.4",
+    "fastify": "^5.12.7",
+    "jose": "6.2.14",
+    "opossum": "10.0.0",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "redis": "6.3.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@nestjs/platform-express": "12.3.2",
+    "@peaket/config": "workspace:*",
+    "@peaket/contracts": "workspace:*",
+    "@types/node": "^24.19.2",
+    "@types/opossum": "8.1.9",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "0.31.11",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

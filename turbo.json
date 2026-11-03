@@ -1,0 +1,42 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        ".next-*/**",
+        "!.next-*/cache/**",
+        "dist/**"
+      ],
+      "env": [
+        "PEAKET_NEXT_DIST"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^build",
+        "^typecheck"
+      ]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/docs/api/**",
+        "$TURBO_ROOT$/docs/observability.md",
+        "$TURBO_ROOT$/tools/ci/service-openapi.mjs"
+      ],
+      "outputs": [],
+      "dependsOn": [
+        "^build"
+      ]
+    }
+  }
+}

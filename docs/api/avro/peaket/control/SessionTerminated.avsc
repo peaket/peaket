@@ -1,0 +1,46 @@
+{
+  "type": "record",
+  "name": "SessionTerminated",
+  "namespace": "peaket.control",
+  "doc": "로그인 세션 종료. 토픽 control.sessions-terminated, 키 accountId. identity-svc가 낸다(ADR-0011).",
+  "fields": [
+    {
+      "name": "accountId",
+      "type": "string"
+    },
+    {
+      "name": "sessionId",
+      "doc": "로그인 세션 ID(액세스 토큰의 sid). 구매 세션이 아니다",
+      "type": "string"
+    },
+    {
+      "name": "reason",
+      "doc": "LOGOUT은 로그아웃이다. DELETE는 계정이 없어져 끝낸 것이다: 팬의 회원 탈퇴(DELETE /v1/identity/account)와 관리 계정 삭제(POST /v1/ops/admin-accounts/{adminAccountId}/removal, 상태 REMOVED)를 함께 뜻한다(docs/features/identity.md §3 '세션 즉시 무효화 전파'의 회원 탈퇴, 관리 계정 삭제는 2026-10-30 추천 적용). REFRESH_REUSE는 리프레시 토큰 재사용 감지다. DEVICE_LIMIT는 동시 세션 한도(팬 기기 5대, 파트너·운영자 2개) 초과로 가장 오래 쓰지 않은 세션 종료(POL-019), ACCOUNT_LOCKED는 지금 내지 않는 예약 값이다. 관리 계정 잠금(시간 잠금·보호 잠금)은 새 로그인만 막고 이미 열린 세션을 끝내지 않는다(docs/security/auth-controls.md §3.2, 2026-10-30 맞춤). ADMIN_FORCE는 관제 콘솔의 관리 계정 세션 강제 종료(identity.proto AdminSessionService)와, 재초대(PROTECT_LOCK·CREDENTIAL_LOST)로 인증 수단을 지우며 끝낸 세션이다(재초대는 추천 적용 2026-10-30, docs/security/authz-matrix.md §5.4). ROLE_CHANGED는 관리 계정의 역할을 바꾸거나 거두거나 파트너 계정의 테넌트가 바뀌어 그 계정의 모든 세션을 끝낸 것이다(docs/security/authz-matrix.md §5.4, ADR-0157 결정 11). PASSWORD_CHANGED는 관리 계정이 비밀번호를 바꿔 그 계정의 다른 세션을 끝낸 것이다(docs/security/auth-controls.md §3.5)(두 값은 추천 적용 2026-10-30)",
+      "type": {
+        "type": "enum",
+        "name": "SessionTerminatedReason",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "LOGOUT",
+          "DELETE",
+          "ADMIN_FORCE",
+          "REFRESH_REUSE",
+          "STAFF_REVOKED",
+          "MERGED",
+          "DEVICE_LIMIT",
+          "ACCOUNT_LOCKED",
+          "ROLE_CHANGED",
+          "PASSWORD_CHANGED"
+        ]
+      }
+    },
+    {
+      "name": "terminatedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

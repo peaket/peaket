@@ -1,0 +1,7 @@
+# 공용 서비스 차트(docs/devops.md §5.2 `charts/peaket-service`). 지금은 서비스 Deployment·Service·Outbox 릴레이 Deployment와 그 Lease 권한만 있다
+# (BUILD_ORDER FND-110, openspec 변경 add-local-cluster-and-relay-deployment). Rollout·PDB·KEDA·NetworkPolicy·ExternalSecret·우선순위는 wbs 0.4.4에서 더한다.
+apiVersion: v2
+name: peaket-service
+description: PEAKET 서비스 공용 차트(서비스 Deployment, Outbox 릴레이 Deployment와 Lease 권한)
+type: application
+version: 0.1.0

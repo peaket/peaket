@@ -1,0 +1,31 @@
+# Terraform 검사(docs/devops.md §3.1). ci.yml이 바뀐 범위에 infra가 있을 때 부른다.
+# 지금은 형식과 정적 검증만 한다. tflint·Trivy 설정 검사·plan·비용 차이는 클라우드 스택이 생기는 변경에서 더한다.
+name: iac-check
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.2
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive infra
+      # 스택마다 원격 상태 없이 받고(제공자 판은 잠금 파일대로만) 정적으로 검증한다
+      - run: |
+          for stack in $(find infra/stacks -name '*.tf' -printf '%h\n' | sort -u); do
+            echo "::group::$stack"
+            terraform -chdir="$stack" init -backend=false -lockfile=readonly -input=false
+            terraform -chdir="$stack" validate
+            echo "::endgroup::"
+          done

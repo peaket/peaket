@@ -1,0 +1,40 @@
+{
+  "test": "V-T41",
+  "config": "fastify-zod",
+  "route": "hold",
+  "mode": "closed",
+  "offered_rate": null,
+  "app": {
+    "config": "fastify-zod",
+    "handled": 596582,
+    "cpu_us": 28476525,
+    "wall_us": 28986097,
+    "cpu_pct": 98.2,
+    "eld_ms": {
+      "p50": 1.775,
+      "p99": 4.317,
+      "max": 19.152,
+      "mean": 1.836,
+      "resolution_ms": 1,
+      "raw_p99": 5.317
+    },
+    "rss_mb": 266,
+    "node": "v24.18.0"
+  },
+  "k6": {
+    "p50_ms": 2.788118,
+    "p99_ms": 6.54212464,
+    "requests": 625185,
+    "rps": 17862.750397457385,
+    "failed_rate": 0,
+    "dropped": 0
+  },
+  "cpu_us_per_request": 47.7,
+  "throughput_per_s": 20582,
+  "bench": {
+    "p99_ms": 6.54212464,
+    "error_rate": 0,
+    "requests": 625185,
+    "dropped": 0
+  }
+}

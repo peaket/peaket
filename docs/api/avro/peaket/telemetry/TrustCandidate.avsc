@@ -1,0 +1,58 @@
+{
+  "type": "record",
+  "name": "TrustCandidate",
+  "namespace": "peaket.telemetry",
+  "doc": "대기 중 재평가 후보. 토픽 telemetry.trust-candidates, 키 pid. 재평가 작업자 trust-reassess가 낸다(ADR-0071·0099). 대기 중 재평가 후보(ADR-0071). 행동 요약값 원문·기기 가명은 싣지 않는다",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": "string"
+    },
+    {
+      "name": "pid",
+      "doc": "사람 식별값",
+      "type": "string"
+    },
+    {
+      "name": "pattern",
+      "type": {
+        "type": "enum",
+        "name": "TrustCandidatePattern",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "DEVICE_SHARE",
+          "BEHAVIOR_REPLAY"
+        ]
+      }
+    },
+    {
+      "name": "evidenceCount",
+      "doc": "10분 안 같은 기기·같은 지문의 서로 다른 pid 수",
+      "type": "long"
+    },
+    {
+      "name": "windowStart",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "detectedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "eventKey",
+      "doc": "SHA-256(\"PEAKET-reassess-v1\" ‖ 회차 ID ‖ pid ‖ 패턴 ‖ 10분 칸 시작)으로 만든 UUIDv8(RFC 9562 §5.8). 같은 후보를 다시 내도 같다(docs/streaming.md §5.4)",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    }
+  ]
+}

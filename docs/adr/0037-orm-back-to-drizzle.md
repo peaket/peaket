@@ -1,6 +1,6 @@
 # ADR-0037: 최종 ORM 기술로 Drizzle 재선정 (조건식 타입 검증 지원 확인 및 미검증 성능 문구 배제)
 
-- **상태**: 채택 (2026-10-09 수립. 임시 채택되었던 TypeORM(ADR-0035)을 대체하고 Drizzle 결정(ADR-0017)을 되살린다. ADR-0034의 확인 결과를 이어받고 이 ADR에서 확인한 사실을 더한다) 2026-10-22(ADR-0083): Drizzle 0.45.4 소스(`pg-core/table.ts`, drizzle-kit PostgreSQL 직렬화기)에는 파티션 선언이 없어, 파티션 표의 부모 표와 첫 파티션은 손으로 쓴 SQL 마이그레이션 파일로 만든다(docs/devops.md §7.2).
+- **상태**: 채택 (2026-10-09 수립. 임시 채택되었던 TypeORM(ADR-0035)을 대체하고 Drizzle 결정(ADR-0017)을 되살린다. ADR-0034의 확인 결과를 이어받고 이 ADR에서 확인한 사실을 더한다) 2026-10-22(ADR-0083): Drizzle 0.45.4 소스(`pg-core/table.ts`, drizzle-kit PostgreSQL 직렬화기)에는 파티션 선언이 없어, 파티션 표의 부모 표와 첫 파티션은 손으로 쓴 SQL 마이그레이션 파일로 만든다(docs/devops.md §7.2). 2026-10-22(ADR-0086): 핫패스 `.prepare()`는 PgBouncer 트랜잭션 풀링에서 `max_prepared_statements`가 0이 아니어야 동작하고, 열 구조를 바꾸는 마이그레이션 뒤에는 `RECONNECT`가 필요하다. Drizzle은 SQL 안의 값을 자리표시자로 바꾸므로, 부분 인덱스 조건 값은 `sql` 상수 조각으로 쓴다(docs/devops.md §7.2, docs/data.md §5.2).
 - **관련 문서**: ADR-0017, ADR-0034, ADR-0035, docs/architecture.md §6.1·§8.3, docs/data.md §2·§4·§5, docs/features/seat-hold.md §6
 - **관련 ID**: NFR-003, NFR-006, NFR-025, FR-010, FR-011, FR-047, K3
 

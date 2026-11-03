@@ -1,0 +1,158 @@
+{
+  "test": "S-T27",
+  "client": "node-redis",
+  "tls": true,
+  "mode": "one",
+  "layout": "same",
+  "duration_s": 600,
+  "warmup_s": 60,
+  "events": [
+    {
+      "tag": "st27e0x0",
+      "slot": 4816,
+      "owner": "valkey-1:6379",
+      "seats": 50000,
+      "hold_rate": 2000,
+      "snapshot_rate": 1000,
+      "ttl_ms": 5000,
+      "outcomes": {
+        "OK": 590415,
+        "CONFLICT": 693542,
+        "QUOTA_EXCEEDED": 36043
+      }
+    }
+  ],
+  "load": [
+    {
+      "event": "st27e0x0",
+      "kind": "hold",
+      "offered_rate": 2000,
+      "measured": 1200000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 1320000,
+      "done": 1320000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 444,
+      "error_kinds": {},
+      "latency": {
+        "count": 1200000,
+        "p50_ms": 1.107,
+        "p90_ms": 1.859,
+        "p99_ms": 3.764,
+        "p999_ms": 67.897,
+        "max_ms": 226.146,
+        "mean_ms": 1.336
+      },
+      "latency_from_send": {
+        "count": 1200000,
+        "p50_ms": 0.345,
+        "p90_ms": 0.541,
+        "p99_ms": 2.683,
+        "p999_ms": 10.165,
+        "max_ms": 216.368,
+        "mean_ms": 0.436
+      }
+    },
+    {
+      "event": "st27e0x0",
+      "kind": "snapshot",
+      "offered_rate": 1000,
+      "measured": 600000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 660000,
+      "done": 660000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 224,
+      "error_kinds": {},
+      "latency": {
+        "count": 600000,
+        "p50_ms": 0.928,
+        "p90_ms": 1.6,
+        "p99_ms": 3.654,
+        "p999_ms": 67.228,
+        "max_ms": 224.897,
+        "mean_ms": 1.158
+      },
+      "latency_from_send": {
+        "count": 600000,
+        "p50_ms": 0.346,
+        "p90_ms": 0.561,
+        "p99_ms": 2.682,
+        "p999_ms": 9.894,
+        "max_ms": 216.253,
+        "mean_ms": 0.437
+      }
+    }
+  ],
+  "engine": {
+    "valkey-1:6379": {
+      "events": [
+        "st27e0x0"
+      ],
+      "evalsha_hold": {
+        "p50_us": 18.047,
+        "p99_us": 83.455,
+        "p999_us": 150.527,
+        "calls": 1200043,
+        "usec_per_call": 22.64
+      },
+      "eval_release": {
+        "p50_us": 2392.063,
+        "p99_us": 4079.615,
+        "p999_us": 5636.095,
+        "calls": 2652,
+        "usec_per_call": 2341.84
+      },
+      "eval_ro_snapshot": {
+        "p50_us": 9.023,
+        "p99_us": 61.183,
+        "p999_us": 108.031,
+        "calls": 600021,
+        "usec_per_call": 12.95
+      },
+      "spublish": {
+        "p50_us": 3.007,
+        "p99_us": 8.031,
+        "p999_us": 24.063,
+        "calls": 536010,
+        "usec_per_call": 3
+      },
+      "main_thread_cpu_pct": 17.8,
+      "process_cpu_pct": 17.8,
+      "slowlog_len": 0,
+      "slowlog_sample": []
+    }
+  },
+  "pubsub_received": 590415,
+  "release_calls": 2909,
+  "invariants": [
+    {
+      "event": "st27e0x0",
+      "oversell": 0,
+      "unknown_release": 0,
+      "bitcount": 10461,
+      "expiry_zcard": 10461,
+      "bit_equals_index": true,
+      "hold_errors": 0,
+      "verifiable": true
+    }
+  ],
+  "generator_cpu_pct": 28.2,
+  "host": {
+    "cpu_pct": 1.7,
+    "procs_running_end": 1,
+    "vm_cpus": 32
+  },
+  "bench": {
+    "p99_ms": 3.764,
+    "error_rate": 0,
+    "requests": 1200000,
+    "dropped": 0
+  }
+}

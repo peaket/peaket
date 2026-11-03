@@ -1,0 +1,59 @@
+{
+  "test": "INCR-single-key",
+  "client": "node-redis",
+  "tls": true,
+  "op": "incr",
+  "model": "closed",
+  "procs": 1,
+  "offered_rate": null,
+  "batch_ms": null,
+  "duration_s": 25,
+  "warmup_s": 5,
+  "key_owner": "valkey-1:6379",
+  "latency": null,
+  "throughput_per_s": 104305,
+  "issued": 2607616,
+  "errors": 0,
+  "dropped": 0,
+  "error_kinds": {},
+  "per_proc": [
+    {
+      "cpu_pct": 99.8,
+      "errors": 0,
+      "batches": 0,
+      "throughput_per_s": 104305,
+      "latency": {
+        "count": 2607616,
+        "p50_ms": 1.47,
+        "p90_ms": 4.208,
+        "p99_ms": 17.636,
+        "p999_ms": 58.446,
+        "max_ms": 65.734,
+        "mean_ms": 2.454
+      }
+    }
+  ],
+  "engine": {
+    "incr": {
+      "p50_us": 0.001,
+      "p99_us": 1.003,
+      "p999_us": 3.007
+    },
+    "incrby": null,
+    "evalsha": null,
+    "main_thread_cpu_pct": 11.2
+  },
+  "final_counter": 3064832,
+  "host": {
+    "cpu_pct": 3.8,
+    "procs_running_end": 2,
+    "vm_cpus": 32
+  },
+  "bench": {
+    "p99_ms": null,
+    "error_rate": 0,
+    "requests": 2607616,
+    "dropped": 0,
+    "throughput_per_s": 104305
+  }
+}

@@ -1,6 +1,6 @@
 # ADR-0020: 폼 검증 라이브러리로 React Hook Form과 Zod 채택 (Formik 및 Yup 배제)
 
-- **상태**: 채택 (2026-10-05 설계서 §13 및 7장에 최초 수립, 2026-10-08 아키텍처 결정 레코드(ADR)로 공식 이관). 2026-10-14 ADR-0060이 쿠폰 기능을 두지 않기로 해, 맥락과 근거의 '할인 쿠폰'·'프로모션 쿠폰'은 폼 부하를 설명하는 예시일 뿐 기능이 아니다.
+- **상태**: 채택 (2026-10-05 설계서 §13 및 7장에 최초 수립, 2026-10-08 아키텍처 결정 레코드(ADR)로 공식 이관). 2026-10-14 ADR-0060이 쿠폰 기능을 두지 않기로 해, 맥락과 근거의 '할인 쿠폰'·'프로모션 쿠폰'은 폼 부하를 설명하는 예시일 뿐 기능이 아니다. 2026-10-26(4차 점검 3부): 결정 3의 공통 패키지 `@ticketpass/contracts`는 `peaket-frontend`의 `packages/validation`(`@peaket/validation`, Zod 4와 판매 정책 DSL AST 평가기)으로 읽는다. GitHub Packages(`@peaket` 범위)에 게시해 NestJS 서비스도 같은 스키마를 쓴다. `peaket-contracts`는 proto·OpenAPI·AsyncAPI·Avro 계약 저장소다(docs/frontend.md §2.2, docs/devops.md §3.2·§4.1, ADR-0079 결정 21). 2026-10-28(기술 검토 중간-085, 소유자 승인 '추천안 동의'): 맥락의 '단일 진실 공급원'은 openapi 계약으로 읽는다. 요청·응답 Zod 스키마는 openapi에서 orval이 만들어 `@peaket/validation`의 `src/gen/`에 두고, 화면과 서버(`nestjs-zod`)가 함께 쓴다. 손으로 쓰는 Zod는 계약에 적을 수 없는 규칙(grapheme 단위 길이, 금칙어, 판매 정책 DSL)만 남기고, 그 이름을 그 필드의 openapi 설명에 적는다. 서비스의 `@nestjs/swagger` 출력은 CI에서 계약과 견주는 데만 쓴다(docs/api/guidelines.md §1, design/d2 §3.1, docs/devops.md §3.1).
 - **관련 문서**: 설계서 7장(폼 상태 관리), §13(기술 스택 선정), design/d2 §3.1
 - **관련 ID**: FR-005, FR-011, FR-021~024, NFR-012, NFR-020
 

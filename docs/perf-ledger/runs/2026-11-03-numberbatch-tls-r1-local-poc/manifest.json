@@ -1,0 +1,56 @@
+{
+  "run_id": "2026-11-03-numberbatch-tls-r1-local-poc",
+  "kpi": "NFR-001",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": 200000.0,
+    "duration_s": 60,
+    "warmup_s": 15
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/rate.mjs",
+    "args": "--op number-batch --rate 200000 --procs 4 --batch-ms 2 --wait-probe-ms 10",
+    "open_model": true
+  },
+  "commit": {
+    "code": "cffc124df6d16b100267fb12e34922bb2428be6b",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": "2026-11-03-numberbatch-notls-r1-local-poc",
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 6",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-03T11:42:25Z",
+  "ended_at": "2026-11-03T11:43:43Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 4.351,
+    "error_rate": 0,
+    "requests": 12000000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "한 키 진입 ② 묶음 Lua(queue-svc NUMBER_BATCH, 진입 서버마다 2ms 묶음, Q-T5 배치 모드, ADR-0179), node-redis 6.3.0, 진입 서버 4대를 프로세스 4개로 흉내(컨테이너 CPU 6). 같은 실행에서 키 주인 주 노드에 10ms마다 같은 슬롯 SET + WAIT 1 1000으로 복제 지연의 위쪽 값을 잼(bench-summary.json wait_probe, PRF-085 ③). 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-03T12:17:06Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

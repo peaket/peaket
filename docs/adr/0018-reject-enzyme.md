@@ -1,6 +1,6 @@
 # ADR-0018: Enzyme은 채택하지 않는다
 
-- **상태**: 채택 (2026-10-05 설계서 §13·8장에 기록, 2026-10-08 ADR로 옮김)
+- **상태**: 채택 (2026-10-05 설계서 §13·8장에 기록, 2026-10-08 ADR로 옮김). 2026-10-27(ADR-0097): 관련의 docs/appendix-learning-map.md는 없앴다. 이 결정은 docs/architecture.md §6.1 '일부러 쓰지 않거나 미룬 기술' 표에 있다. 2026-10-28(기술 검토 중간-020, 소유자 승인 '추천안 동의'): 결정의 실제 브라우저 Web API 시험 도구 `@web/test-runner` + mocha + chai + sinon은 Vitest 브라우저 모드(Playwright 공급자 `@vitest/browser-playwright`, Vitest 4.0부터 안정판)로 대체한다. 러너·단언·가짜 함수는 Vitest 하나로 쓰고, 단위·컴포넌트(Vitest + RTL), E2E·성능(Playwright), 접근성(axe) 배치는 docs/frontend.md §5.17 실행 도구 표를 따른다.
 - **관련**: 설계서 §13 의도적 기각, 8장 테스트, docs/appendix-learning-map.md
 - **관련 ID**: NFR-023(변경 실패율), 테스트 전략
 

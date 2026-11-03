@@ -1,0 +1,84 @@
+{
+  "test": "kafka-client",
+  "case": "mixed",
+  "client": "@confluentinc/kafka-javascript 1.11.0",
+  "brokers": [
+    "kafka-1:9092",
+    "kafka-2:9092",
+    "kafka-3:9092"
+  ],
+  "telemetry": {
+    "offered_rate": 5600,
+    "measured": 336000,
+    "duration_s": 75,
+    "warmup_s": 15,
+    "issued": 420000,
+    "done": 420000,
+    "dropped": 0,
+    "errors": 0,
+    "error_rate": 0,
+    "max_inflight": 2714,
+    "error_kinds": {},
+    "latency": {
+      "count": 336000,
+      "p50_ms": 5.173,
+      "p90_ms": 7.141,
+      "p99_ms": 8.068,
+      "p999_ms": 14.071,
+      "max_ms": 21.197,
+      "mean_ms": 4.886
+    },
+    "latency_from_send": {
+      "count": 336000,
+      "p50_ms": 4.477,
+      "p90_ms": 6.333,
+      "p99_ms": 6.959,
+      "p999_ms": 13.428,
+      "max_ms": 19.827,
+      "mean_ms": 4.232
+    }
+  },
+  "trade": {
+    "offered_rate": 300,
+    "measured": 18000,
+    "duration_s": 75,
+    "warmup_s": 15,
+    "issued": 22500,
+    "done": 22500,
+    "dropped": 0,
+    "errors": 0,
+    "error_rate": 0,
+    "max_inflight": 145,
+    "error_kinds": {},
+    "latency": {
+      "count": 18000,
+      "p50_ms": 6.323,
+      "p90_ms": 7.195,
+      "p99_ms": 7.909,
+      "p999_ms": 14.166,
+      "max_ms": 21.322,
+      "mean_ms": 6.025
+    },
+    "latency_from_send": {
+      "count": 18000,
+      "p50_ms": 5.686,
+      "p90_ms": 6.243,
+      "p99_ms": 6.654,
+      "p999_ms": 13.276,
+      "max_ms": 20.202,
+      "mean_ms": 5.364
+    }
+  },
+  "bench": {
+    "p99_ms": 7.909,
+    "error_rate": 0,
+    "requests": 354000,
+    "dropped": 0
+  },
+  "generator_cpu_pct": 31,
+  "host": {
+    "cpu_pct": 5.1,
+    "procs_running_end": 4,
+    "vm_cpus": 32
+  }
+}

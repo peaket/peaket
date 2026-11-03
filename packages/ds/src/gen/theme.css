@@ -1,0 +1,123 @@
+/*
+ * 이 파일은 손으로 고치지 않는다. docs/design/tokens.json에서 만든다.
+ * 다시 만들기: pnpm --filter @peaket/ds tokens (차이 검사: tokens:check)
+ */
+/*
+ * Tailwind 4 테마. 앱 CSS가 tailwindcss 다음에 @peaket/ds/styles.css를 실으면 함께 들어온다.
+ * 색·그림자는 라이트·다크가 바뀌므로 @theme inline으로 피켓 변수를 그 자리에서 읽는다.
+ * 원시 팔레트(color.primitive*)는 내지 않는다. 화면 코드는 의미 색만 쓴다(d2 §1).
+ */
+@theme {
+  --breakpoint-*: initial;
+  --breakpoint-sm: 480px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1280px;
+  --breakpoint-xl: 1440px;
+  --color-*: initial;
+  --text-*: initial;
+  --font-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --ease-*: initial;
+  --spacing: 4px;
+  --spacing-global-gutter: 16px;
+  --spacing-component-default: 12px;
+  --spacing-nav-to-title: 20px;
+  --spacing-screen-bottom: 56px;
+  --spacing-between-chips: 8px;
+  --spacing-between-text: 6px;
+  --spacing-touch-target-min: 24px;
+  --spacing-touch-target-mobile-primary: 44px;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.1875rem;
+  --text-md: 1rem;
+  --text-md--line-height: 1.375rem;
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.6875rem;
+  --text-xl: 1.5rem;
+  --text-xl--line-height: 2rem;
+  --text-2xl: 2rem;
+  --text-2xl--line-height: 2.625rem;
+  --text-display: 3rem;
+  --text-display--line-height: 3.75rem;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-bold: 700;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-banner: 20px;
+  --radius-full: 9999px;
+  --ease-enter: cubic-bezier(0, 0, 0.15, 1);
+  --ease-exit: cubic-bezier(0.35, 0, 1, 1);
+  --ease-standard: cubic-bezier(0.35, 0, 0.35, 1);
+  --ease-enter-expressive: cubic-bezier(0.03, 0.4, 0.1, 1);
+  --ease-exit-expressive: cubic-bezier(0.35, 0, 0.95, 0.55);
+  --transition-duration-fast: 150ms;
+  --transition-duration-base: 200ms;
+  --transition-duration-slow: 300ms;
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: cubic-bezier(0.35, 0, 0.35, 1);
+  --z-index-banner: 10;
+  --z-index-modal: 100;
+  --z-index-toast: 200;
+  --container-content: 1040px;
+  --container-content-wide: 1280px;
+  --container-home-content: 1240px;
+  --container-dashboard: 1040px;
+  --spacing-desktop-gutter: 24px;
+  --spacing-desktop-margin: 32px;
+}
+
+@theme inline {
+  --color-surface: var(--peaket-color-surface);
+  --color-surface-muted: var(--peaket-color-surface-muted);
+  --color-surface-basement: var(--peaket-color-surface-basement);
+  --color-surface-raised: var(--peaket-color-surface-raised);
+  --color-surface-disabled: var(--peaket-color-surface-disabled);
+  --color-border: var(--peaket-color-border);
+  --color-border-input: var(--peaket-color-border-input);
+  --color-border-primary: var(--peaket-color-border-primary);
+  --color-text: var(--peaket-color-text);
+  --color-text-muted: var(--peaket-color-text-muted);
+  --color-text-disabled: var(--peaket-color-text-disabled);
+  --color-text-on-primary: var(--peaket-color-text-on-primary);
+  --color-primary: var(--peaket-color-primary);
+  --color-primary-hover: var(--peaket-color-primary-hover);
+  --color-primary-subtle: var(--peaket-color-primary-subtle);
+  --color-link: var(--peaket-color-link);
+  --color-success: var(--peaket-color-success);
+  --color-success-subtle: var(--peaket-color-success-subtle);
+  --color-warning: var(--peaket-color-warning);
+  --color-warning-subtle: var(--peaket-color-warning-subtle);
+  --color-danger: var(--peaket-color-danger);
+  --color-danger-subtle: var(--peaket-color-danger-subtle);
+  --color-info-subtle: var(--peaket-color-info-subtle);
+  --color-focus-ring: var(--peaket-color-focus-ring);
+  --color-scrim: var(--peaket-color-scrim);
+  --color-seat-available: var(--peaket-color-seat-available);
+  --color-seat-held-by-others: var(--peaket-color-seat-held-by-others);
+  --color-seat-mine: var(--peaket-color-seat-mine);
+  --color-seat-sold: var(--peaket-color-seat-sold);
+  --color-seat-unavailable: var(--peaket-color-seat-unavailable);
+  --color-seat-wheelchair: var(--peaket-color-seat-wheelchair);
+  --color-seat-glyph: var(--peaket-color-seat-glyph);
+  --color-slo-ok: var(--peaket-color-slo-ok);
+  --color-slo-burning: var(--peaket-color-slo-burning);
+  --color-slo-breached: var(--peaket-color-slo-breached);
+  --color-heat-1: var(--peaket-color-heat-1);
+  --color-heat-2: var(--peaket-color-heat-2);
+  --color-heat-3: var(--peaket-color-heat-3);
+  --color-heat-ink: var(--peaket-color-heat-ink);
+  --shadow-sm: var(--peaket-shadow-sm);
+  --shadow-md: var(--peaket-shadow-md);
+  --shadow-lg: var(--peaket-shadow-lg);
+}

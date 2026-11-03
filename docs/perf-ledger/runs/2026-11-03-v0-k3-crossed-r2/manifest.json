@@ -1,0 +1,101 @@
+{
+  "run_id": "2026-11-03-v0-k3-crossed-r2",
+  "kpi": "K3",
+  "version": "v0",
+  "profile": "local-1k",
+  "scale": {
+    "users": 1000,
+    "arrival_rps": 500.0,
+    "duration_s": 60,
+    "warmup_s": 30
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v0-seat-hold.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "8282a7616ab2a3df3107357919a8a45a6a4e3467",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-03-v0-k3-crossed-r2/",
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 1대(CPU 4·메모리 4096Mi씩, kind 안)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-03T04:42:02Z",
+  "ended_at": "2026-11-03T04:43:32Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 4.799906,
+    "p95_ms": 10.626660899999964,
+    "p99_ms": 46.60116136,
+    "error_rate": 0,
+    "requests": 30567,
+    "rps": 509.45,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "extra": [
+      "db-stats.json"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": [
+    {
+      "name": "hold_p99_50ms",
+      "allowed": 0.01,
+      "trials": 30000,
+      "violations": 267,
+      "cp_upper": 0.009845,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "hold p99 ≤ 50ms"
+    },
+    {
+      "name": "hold_p999_150ms",
+      "allowed": 0.001,
+      "trials": 30000,
+      "violations": 3,
+      "cp_upper": 0.000258,
+      "min_trials": 2995,
+      "result": "pass",
+      "target": "hold p999 ≤ 150ms"
+    },
+    {
+      "name": "hold_server_p99_50ms",
+      "allowed": 0.01,
+      "trials": 29669,
+      "violations": 170,
+      "cp_upper": 0.006505,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "서버 hold p99 ≤ 50ms"
+    }
+  ],
+  "latency_crosscheck": {
+    "k6_metric": "http_req_duration{phase:main,route:hold}",
+    "k6_p99_ms": 46.59718353999998,
+    "check": "hold_server_p99_50ms",
+    "server_p99_ms": 36.57,
+    "server_within_ratio": 0.99427,
+    "diff_ms": 10.027,
+    "target_ms": 50.0,
+    "suspect": false
+  },
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 1대 CPU 평균 최고 12%·메모리 최대 9.2%, VU 최대 합 500, 시나리오 오류 0건, 계획 최고 도착률 1000/s(docs/verification.md §3.9·§3.10); hold: 30000건, p99 46.6ms, 실패 0건; release: 567건, p99 42.1ms, 실패 0건; DB: 교착 0, 롤백 42932, v0_hold 넣음 1056·갱신 1007·HOT 0%·지움 0·죽은 행 1129, v0_quota 넣음 653·갱신 2063·HOT 97.8%·지움 0·죽은 행 348, v0_seat 넣음 0·갱신 4126·HOT 84.3%·지움 0·죽은 행 681",
+  "collected_at": "2026-11-03T04:43:47Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

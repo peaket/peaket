@@ -1,0 +1,18 @@
+# pnpm-workspace.yaml 공통 설정(pnpm 12). 정본은 docs/devops.md §4.4다. 이 파일과 다르면 §4.4가 이긴다.
+# 작업 공간 폴더: 화면 앱·공용 패키지는 화면 퍼블리싱(ADR-0170)에서 더했다. services/*는 첫 서비스가 생긴 wbs 1.2.3(불변식 검사기·PG 시뮬레이터)에서 더했다.
+packages:
+  - apps/*
+  - apps/widgets/*
+  - apps/web/queue-room
+  - packages/*
+  - services/*
+minimumReleaseAge: 4320     # 새 판은 게시 뒤 3일(분 단위)이 지나야 설치한다. 전이 의존성에도 걸린다
+trustPolicy: no-downgrade   # 앞서 나온 판보다 신뢰 증거(신뢰 게시·출처 증명)가 약해진 판은 설치 실패. packageManager로 고정한 pnpm 판에도 걸린다
+blockExoticSubdeps: true    # 전이 의존성이 git 저장소·tarball 주소에서 오는 것을 막는다
+strictDepBuilds: true       # 허용 목록에 없는 설치 스크립트가 있으면 설치가 실패한다
+trustLockfile: false        # 잠금 파일의 항목도 위 검사를 다시 받는다. 외부 기여자가 잠금 파일을 고칠 수 있는 공개 저장소라서다
+allowBuilds:                # 설치 스크립트를 허용할 패키지. 빈 목록에서 시작해 PR 검토로만 더한다
+  esbuild: true             # 관제 호스트 webpack의 esbuild-loader. 화면 쪽 허용 목록(docs/frontend.md §5.14.5)
+  '@confluentinc/kafka-javascript': true  # Kafka 기본 클라이언트(docs/streaming.md §2.1). 네이티브 모듈이라 설치 스크립트가 미리 빌드한 librdkafka 바인딩을 받는다(docs/devops.md §4.4)
+  '@scarf/scarf': false     # 거부(돌리지 않음): @nestjs/swagger → swagger-ui-dist가 끌고 오는 설치 때 사용 통계 전송. 서비스 OpenAPI 문서 뽑기(D-T38)에는 필요 없다(docs/devops.md §4.4, 추천 적용 2026-11-01)
+  protobufjs: false         # 거부(돌리지 않음): OTel 내보내기(@opentelemetry/otlp-transformer)가 끌고 오는 판 표기 경고 스크립트. 동작에 필요 없다(docs/devops.md §4.4, 추천 적용 2026-11-01)

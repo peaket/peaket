@@ -1,6 +1,6 @@
 # ADR-0024: 프론트엔드 상태 관리 도구의 영역별 단일 소유권 원칙 (상태 소유권 매트릭스)
 
-- **상태**: 채택 (2026-10-05 설계서 4장 및 §13에 최초 수립, 2026-10-08 아키텍처 결정 레코드(ADR)로 공식 이관) 2026-10-21(ADR-0079): 대기실 칸의 SWR을 손으로 쓴 상태표(대기실 경량 페이지)로, 관제의 redux-observable을 RTK listener + RxJS 어댑터로, 파트너 에디터를 Jotai 3 + jotai-family로 고쳐 읽는다(docs/frontend.md §3.1).
+- **상태**: 채택 (2026-10-05 설계서 4장 및 §13에 최초 수립, 2026-10-08 아키텍처 결정 레코드(ADR)로 공식 이관) 2026-10-21(ADR-0079): 대기실 칸의 SWR을 손으로 쓴 상태표(대기실 경량 페이지)로, 관제의 redux-observable을 RTK listener + RxJS 어댑터로, 파트너 에디터를 Jotai 3 + jotai-family로 고쳐 읽는다(docs/frontend.md §3.1). 2026-10-26(4차 점검 3부): 결정 3의 '원천 차단한다'는 '가져오기 제한 린트로 막는다'로 읽는다(docs/frontend.md §3.1). 2026-10-27(ADR-0092, 소유자 결정): 전역 UI 상태 도구는 네 앱 모두 Zustand 하나로 읽는다. 결정 2의 좌석맵 에디터 Jotai와 실시간 관제 Redux Toolkit(위 2026-10-21의 Jotai 3와 RTK listener 포함)은 쓰지 않는다. '검토한 대안'의 'Redux 단일화' 기각 이유 가운데 모바일 대기실 번들은 대기실을 라이브러리 없이 만들어 더는 맞지 않고, 상용구 코드 이유는 그대로다(docs/frontend.md §3.1, architecture §6.4). 2026-10-28(ADR-0100, 소유자 승인 '추천안 동의'): 결정 2의 '관제 조회 GraphQL, 파트너 내부 도구 tRPC'를 쓰지 않는다. 관제는 REST(OpenAPI)와 SSE 흐름 둘, 파트너 콘솔은 orval이 만든 TanStack Query 훅으로 `partner-api`를 직접 부르고 여러 호출을 묶는 화면만 서버 컴포넌트가 묶는다(docs/frontend.md §3.1·§4.6, architecture §6.4).
 - **관련 문서**: 설계서 4장(상태 소유권 매트릭스), §13(상태 관리 기술 비교), docs/architecture.md §6.4
 - **관련 ID**: NFR-012, SCR-008, SCR-010, SCR-022, SCR-029
 

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@peaket/config/tsconfig/base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2023"
+    ],
+    "types": [
+      "node"
+    ],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "paths": {
+      "@peaket/platform": [
+        "./src/index.ts"
+      ],
+      "@peaket/platform/stream-worker": [
+        "./src/stream-worker.ts"
+      ]
+    }
+  },
+  "include": [
+    "src",
+    "test",
+    "test-int",
+    "template",
+    "bench"
+  ]
+}

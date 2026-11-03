@@ -1,0 +1,141 @@
+{
+  "run_id": "2026-11-03-v0-k1-100k-r1",
+  "kpi": "K1",
+  "version": "v0",
+  "profile": "local-100k",
+  "scale": {
+    "users": 100000,
+    "arrival_rps": null,
+    "duration_s": 120,
+    "warmup_s": 30
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v0-queue.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "1a3ef1b2d6fed7e11bf98ca29c95bccdad2b6d15",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-03-v0-k1-100k-r1/",
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 10대(CPU 2·메모리 1024Mi씩, kind 안, k6 실행 구간으로 나눔)",
+    "dropped_iterations": 1311571
+  },
+  "started_at": "2026-11-03T03:22:03Z",
+  "ended_at": "2026-11-03T03:24:33Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 0,
+    "p95_ms": 1877.1042475999998,
+    "p99_ms": 2076.75370394,
+    "error_rate": 0.9919101123595505,
+    "requests": 20025,
+    "rps": 166.875,
+    "dropped_iterations": 1311571
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "extra": [
+      "hpa.json"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "발생기 0: 발생기가 반복을 시작하지 못함(dropped_iterations 134817); 발생기 1: 발생기가 반복을 시작하지 못함(dropped_iterations 129738); 발생기 2: 발생기가 반복을 시작하지 못함(dropped_iterations 137553); 발생기 3: 발생기가 반복을 시작하지 못함(dropped_iterations 121173); 발생기 4: 발생기가 반복을 시작하지 못함(dropped_iterations 118655); 발생기 5: 발생기가 반복을 시작하지 못함(dropped_iterations 136958); 발생기 6: 발생기가 반복을 시작하지 못함(dropped_iterations 123316); 발생기 7: 발생기가 반복을 시작하지 못함(dropped_iterations 137485); 발생기 8: 발생기가 반복을 시작하지 못함(dropped_iterations 137526); 발생기 9: 발생기가 반복을 시작하지 못함(dropped_iterations 134350)",
+  "checks": [
+    {
+      "name": "entry_p99_200ms",
+      "allowed": 0.01,
+      "trials": 100000,
+      "violations": 0,
+      "cp_upper": 3e-05,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "entry p99 ≤ 200ms"
+    },
+    {
+      "name": "entry_errors",
+      "allowed": 0.001,
+      "trials": 100000,
+      "violations": 0,
+      "cp_upper": 3e-05,
+      "min_trials": 2995,
+      "result": "pass",
+      "target": "entry 오류율 < 0.1%"
+    },
+    {
+      "name": "status_p99_200ms",
+      "allowed": 0.01,
+      "trials": 20024,
+      "violations": 1161,
+      "cp_upper": 0.06077,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "status p99 ≤ 200ms"
+    },
+    {
+      "name": "status_errors",
+      "allowed": 0.001,
+      "trials": 20024,
+      "violations": 19862,
+      "cp_upper": 0.992923,
+      "min_trials": 2995,
+      "result": "fail",
+      "target": "status 오류율 < 0.1%"
+    },
+    {
+      "name": "admission_p99_200ms",
+      "allowed": 0.01,
+      "trials": 1,
+      "violations": 1,
+      "cp_upper": 1.0,
+      "min_trials": 299,
+      "result": "observed",
+      "target": "admission p99 ≤ 200ms"
+    },
+    {
+      "name": "admission_errors",
+      "allowed": 0.001,
+      "trials": 1,
+      "violations": 1,
+      "cp_upper": 1.0,
+      "min_trials": 2995,
+      "result": "observed",
+      "target": "admission 오류율 < 0.1%"
+    },
+    {
+      "name": "status_server_p99_200ms",
+      "allowed": 0.01,
+      "trials": 4973,
+      "violations": 0,
+      "cp_upper": 0.000602,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "서버 status p99 ≤ 200ms"
+    }
+  ],
+  "latency_crosscheck": {
+    "k6_metric": "http_req_duration{phase:main,route:status}",
+    "k6_p99_ms": 2076.75370394,
+    "check": "status_server_p99_200ms",
+    "server_p99_ms": 5.673,
+    "server_within_ratio": 1.0,
+    "diff_ms": 2071.081,
+    "target_ms": 200.0,
+    "suspect": true
+  },
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 10대 CPU 평균 최고 2.5%·메모리 최대 55.3%, VU 최대 합 6141, 시나리오 오류 0건, 계획 최고 도착률 9426/s(docs/verification.md §3.9·§3.10); status: 20024건, p99 1881.3~2076.8ms, 실패 19862건; admission: 1건, p99 290.5ms, 실패 1건; HPA: 첫 확장 39초, 새 파드 첫 준비 42초, 최대 복제 4(부하 시작 기준); admission_p99_200ms: 관측값(시행 1번, 최소 시행 수 미달); admission_errors: 관측값(시행 1번, 최소 시행 수 미달)",
+  "collected_at": "2026-11-03T03:25:02Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

@@ -1,0 +1,818 @@
+// identity-svc가 제공하는 내부 본인확인·세션·계정 병합 막는 건·스캐너 세션 별명 계약. 초안(추천 적용 2026-10-22), 안내는 docs/api/proto/README.md.
+// 정본: docs/features/identity.md(주문 생성 때 본인확인 재확인, §2 소셜 로그인 흐름), docs/features/payment.md §2·§9(identity-svc 장애),
+// ADR-0055(응답이 없을 때 토큰 값으로 판정), ADR-0011·0119(세션 생성은 소비자 웹 앱 서버만), docs/architecture.md §3.2.
+// SessionService는 2026-10-28에 더했다(추천 적용 2026-10-28, 기술 검토 중간-083).
+// SessionService.IssueReauthToken은 2026-11-03에 더했다(팬 재인증, 추천 적용 2026-11-03, BUILD_ORDER PRF-020).
+// AccountHoldService·ScannerSessionQueryService는 2026-10-29에 더했다(초안, 추천 적용 2026-10-29, ADR-0148). 그 정본: docs/features/identity.md §2.1·POL-034(병합 차단 사유),
+// docs/data.md `account_hold`·`scanner_session`·§4 경계 9, docs/planning/03-policies-glossary.md '소명'(appeal), docs/api/openapi.yaml `ScannerDevice`,
+// ADR-0082·0102(ops-svc는 업무 gRPC를 받지 않는다).
+// ScannerSessionCheckService·RecipientQueryService·AdminSessionService·ReverificationCheckService·AdminDesignationService는 2026-10-30에 더했다(초안, 추천 적용 2026-10-30).
+// 그 정본: docs/features/identity.md §6.1 '스캐너 세션 확인', docs/features/offline-gate.md §6 흐름도(ADR-0051 결정 4),
+// docs/features/notify.md §2.1 E6·§4.2(받는 사람 묶음 조회, ADR-0155), docs/features/control-tower.md §12 '휴대폰·태블릿'·docs/planning/04 SCR-064(관리 계정 세션 강제 종료),
+// docs/features/bot-defense.md §5.2 3단계(추가 검증의 본인확인 재통과 확인), docs/security/authz-matrix.md §3.1·§3.7(지정 조회).
+// AdminAccountService는 2026-10-30에 더했다(관리 계정 관리 API, 소유자 결정 2026-10-30, open-items 73번. 초안, 추천 적용 2026-10-30).
+// 그 정본: docs/api/openapi.yaml /v1/ops/admin-accounts*, docs/features/identity.md §6 '관리 계정 관리 API', docs/security/authz-matrix.md §6,
+// docs/planning/03-policies-glossary.md §2.7(관리 계정 상태)·§3, docs/security/auth-controls.md §3.2(보호 잠금은 재초대로 푼다).
+syntax = "proto3";
+
+package peaket.identity.v1;
+
+// InvestigationRefService의 시각 칸에 쓴다(추천 적용 2026-10-31).
+import "google/protobuf/timestamp.proto";
+
+// 부르는 쪽: purchase-svc(주문 생성, 결제 직전).
+service IdentityService {
+  // 본인확인 유효 상태를 다시 확인한다.
+  // 응답이 없거나 데드라인을 넘기면 부르는 쪽은 게이트웨이가 넘긴 토큰 값(ticket:buy와 pid)으로 판정한다.
+  // '유효하지 않음' 응답은 그대로 거부한다(ADR-0055).
+  rpc GetVerificationStatus(GetVerificationStatusRequest) returns (GetVerificationStatusResponse);
+}
+
+message GetVerificationStatusRequest {
+  string account_id = 1;
+  // 액세스 토큰의 세션 ID(sid). 끝난 세션이면 유효하지 않다.
+  string session_id = 2;
+}
+
+message GetVerificationStatusResponse {
+  // 휴대폰 본인확인을 마쳤고 세션이 살아 있으면 true.
+  bool verified = 1;
+  // 본인확인 때 저장한 사람 식별값. 토큰의 pid가 이 값과도 previous_pid와도 다르면 부르는 쪽이 거부한다.
+  string pid = 2;
+  // pid 키 전환 기간에만 채우는 옛 pid. 교체 직전에 받은 토큰(옛 pid만 실림)이 거부되지 않게 한다.
+  // 전환이 끝나면 비운다(docs/features/identity.md §5, 추천 적용 2026-10-28, 기술 검토 높음-18).
+  string previous_pid = 3;
+}
+
+// 부르는 쪽: 소비자 웹 앱 서버(OIDC 클라이언트)만. 메시 신원 허용 목록 밖이면 PERMISSION_DENIED다.
+// 파트너·운영자 로그인은 게이트웨이를 거쳐 identity의 관리 계정 로그인 API로 가고 이 계약을 쓰지 않는다(ADR-0119).
+service SessionService {
+  // 제공자 ID 토큰을 검증한 뒤 PEAKET 세션을 만든다. 제공자 토큰은 보내지 않는다.
+  // 같은 idempotency_key로 다시 오면 새 세션을 만들지 않고 같은 세션을 가리킨다.
+  // identity에는 리프레시 토큰의 해시만 있어 같은 값을 다시 줄 수 없으므로, 토큰을 다시 발급하고 앞서 발급한 리프레시 토큰은 무효로 한다.
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  // 로그아웃. 세션을 끝내고 세션 종료 이벤트를 낸다. 이미 끝난 세션이면 그대로 성공이다(멱등).
+  rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
+  // 팬 민감 작업 전 재인증(docs/features/identity.md §7.1). 앱 서버가 제공자 재인증과 강도 판정을 마친 뒤 부른다.
+  // 세션이 살아 있고 account_id의 세션이며 (provider, provider_user_id)가 그 계정에 연결돼 있을 때만 토큰을 준다.
+  // 세션이 없거나 끝났거나 계정이 다르면 FAILED_PRECONDITION이다(추천 적용 2026-11-03, BUILD_ORDER PRF-020).
+  rpc IssueReauthToken(IssueReauthTokenRequest) returns (IssueReauthTokenResponse);
+}
+
+enum Provider {
+  PROVIDER_UNSPECIFIED = 0;
+  PROVIDER_KAKAO = 1;
+  PROVIDER_NAVER = 2;
+  PROVIDER_GOOGLE = 3;
+}
+
+message CreateSessionRequest {
+  // 로그인 시도 하나에 하나. 로그인 진행 쿠키의 state를 앱 서버 전용 키로 HMAC한 값이다(state 원문은 보내지 않는다).
+  // identity는 10분 [가정] 동안 기억한다. 같은 키에 다른 provider·provider_user_id가 오면 ALREADY_EXISTS다.
+  string idempotency_key = 1;
+  Provider provider = 2;
+  // ID 토큰의 sub. 처음부터 바꾸지 않는다(ADR-0119).
+  string provider_user_id = 3;
+  // 제공자가 준 이메일과 검증 여부. 연결 제안(docs/features/identity.md §2.1)에만 쓴다. 네이버는 검증 여부가 없어 false다.
+  string email = 4;
+  bool email_verified = 5;
+  // 같은 이메일 계정 연결 제안을 따라 다시 로그인할 때만 채운다(ADR-0038).
+  string link_proposal_id = 6;
+  // 기기 바인딩 값. 저장할 때는 가명으로 바꾼다.
+  string device_id = 7;
+  // 법정 접속기록 줄에만 싣는 원문 IP와 단말 정보. 일반 로그에는 남기지 않는다(docs/observability.md §7).
+  string client_ip = 8;
+  string user_agent = 9;
+  // 제공자가 준 acr·amr. 없으면 단일 요소 인증으로 본다(ASVS 6.8.4, ADR-0001).
+  repeated string auth_methods = 10;
+  // CloudFront가 붙인 CloudFront-Viewer-ASN 값. 앱 서버는 원본 확인 헤더가 맞는 요청에서만 읽고, 없으면 0이다.
+  // identity-svc가 로그인 판정(trust.proto ScoreRisk LOGIN)의 ClientSignals.asn으로 넘긴다
+  // (추천 적용 2026-10-30, docs/infra.md §4.1 'ASN 헤더와 분류표', docs/features/bot-defense.md §3.1).
+  int64 asn = 11;
+}
+
+message CreateSessionResponse {
+  oneof outcome {
+    // 세션을 만들었다.
+    SessionTokens session = 1;
+    // 같은 이메일의 활성 계정이 하나 있어 연결 제안으로 간다. 세션은 만들지 않는다(§2.1).
+    string link_proposal_id = 2;
+  }
+  // 처음 로그인이라 가입·약관 동의 화면(SCR-005)으로 보내야 하면 true.
+  bool new_account = 3;
+}
+
+message SessionTokens {
+  string account_id = 1;
+  string session_id = 2;
+  // ES256 액세스 토큰(15분)과 리프레시 토큰(참조값). 앱 서버는 쿠키로만 넘기고 로그에 남기지 않는다.
+  string access_token = 3;
+  int64 access_token_expires_at_ms = 4;
+  string refresh_token = 5;
+  int64 refresh_token_expires_at_ms = 6;
+}
+
+message EndSessionRequest {
+  string session_id = 1;
+  // 로그아웃을 부른 계정. 세션의 계정과 다르면 FAILED_PRECONDITION이다.
+  string account_id = 2;
+}
+
+message EndSessionResponse {
+  // 이번 호출로 끝냈으면 true, 이미 끝나 있었으면 false.
+  bool ended = 1;
+}
+
+// 재인증 강도(docs/features/identity.md §7.1 표의 '재인증 강도').
+enum ReauthStrength {
+  REAUTH_STRENGTH_UNSPECIFIED = 0;
+  // 확인됨: 제공자가 준 auth_time으로 방금 다시 인증했음을 확인했다(카카오, auth_time을 준 구글)
+  REAUTH_STRENGTH_VERIFIED = 1;
+  // 요청만 함: 다시 묻도록 요청했으나 확인하지 못했다(네이버, auth_time이 없는 구글)
+  REAUTH_STRENGTH_REQUESTED = 2;
+}
+
+message IssueReauthTokenRequest {
+  // 앱 서버가 팬 액세스 토큰에서 확인한 sid와 sub
+  string session_id = 1;
+  string account_id = 2;
+  // 재인증한 제공자와 그 ID 토큰의 sub
+  Provider provider = 3;
+  string provider_user_id = 4;
+  ReauthStrength strength = 5;
+  // 법정 접속기록 줄에만 싣는 원문 IP와 단말 정보(CreateSession과 같다)
+  string client_ip = 6;
+  string user_agent = 7;
+  // 목적. 고위험(양도 요청·환급·배상 계좌 입력)이면 토큰의 act가 FAN_HIGH_RISK이고, 요청만 함 + 로그인 판정 CHALLENGE·UNKNOWN이면
+  // 본인확인 재통과를 확인한 뒤에만 준다(docs/features/identity.md §7.1 ③, 추천 적용 2026-11-03)
+  ReauthPurpose purpose = 8;
+}
+
+enum ReauthPurpose {
+  REAUTH_PURPOSE_UNSPECIFIED = 0;
+  // 그 밖의 팬 민감 작업(POL-019 목록). act FAN_SENSITIVE
+  REAUTH_PURPOSE_SENSITIVE = 1;
+  // 양도 요청, 환급·배상 계좌 입력. act FAN_HIGH_RISK
+  REAUTH_PURPOSE_HIGH_RISK = 2;
+}
+
+enum ReauthResult {
+  REAUTH_RESULT_UNSPECIFIED = 0;
+  // 재인증 토큰을 줬다
+  REAUTH_RESULT_ISSUED = 1;
+  // 다시 로그인한 제공자 계정이 이 계정에 연결돼 있지 않다. 토큰을 주지 않는다
+  REAUTH_RESULT_ACCOUNT_MISMATCH = 2;
+  // 고위험 목적인데 요청만 함이고 로그인 판정이 CHALLENGE·UNKNOWN이며 본인확인 재통과를 확인하지 못했다. 토큰을 주지 않는다
+  REAUTH_RESULT_REVERIFY_REQUIRED = 3;
+}
+
+message IssueReauthTokenResponse {
+  ReauthResult result = 1;
+  // ISSUED일 때만 채운다. typ reauth+jwt, 5분. 앱 서버는 봉인한 쿠키로만 넘기고 로그에 남기지 않는다
+  string reauth_token = 2;
+  int64 reauth_token_expires_at_ms = 3;
+}
+
+// 부르는 쪽: ops-svc만. 계정에 걸린 이의 제기(CS 처리함 VERIFICATION_APPEAL·DISPUTE 건)나 소명(appeal)이 열리고 닫힐 때 부른다.
+// ops-svc는 업무 gRPC를 받지 않으므로 identity-svc가 묻지 않고, ops-svc가 먼저 알린다(ADR-0148 결정 5).
+// ops-svc는 건 상태 변경과 같은 트랜잭션에 보낼 일을 적고, 호출이 실패하면 작업 워커가 성공할 때까지 다시 보낸다.
+// 다시 보내는 동안(작업 워커 주기 1분 [가정] 안팎)에는 병합이 지나갈 수 있다. 남는 한계다(ADR-0148 '결과와 트레이드오프').
+service AccountHoldService {
+  // identity DB account_hold 행(source_ref마다 하나)에 건의 상태(OPEN·CLOSED)와 판 번호를 쓴다. source_ref(건 ID)로 멱등하다.
+  // source_version이 저장한 판보다 클 때만 반영하고, 같거나 작으면 아무것도 바꾸지 않는다.
+  // 닫힌 건도 행을 CLOSED로 30일 [가정] 남겨, 재시도로 늦게 온 '열림'이 닫힌 건을 다시 열지 않게 한다. 30일이 지나면 지운다.
+  // 같은 source_ref에 다른 account_id·kind가 오면 ALREADY_EXISTS다.
+  // identity-svc는 계정 병합 제안·확정 때 OPEN 행을 자기 데이터처럼 보고, 흡수 계정에 있으면 병합을 막는다(POL-034 '이의 제기 계류').
+  rpc SetAccountHold(SetAccountHoldRequest) returns (SetAccountHoldResponse);
+}
+
+// 병합을 막는 ops-svc 건의 종류(docs/data.md `account_hold.kind`).
+enum AccountHoldKind {
+  ACCOUNT_HOLD_KIND_UNSPECIFIED = 0;
+  // 추가 검증 이의 제기(CS 처리함 VERIFICATION_APPEAL)
+  ACCOUNT_HOLD_KIND_VERIFICATION_APPEAL = 1;
+  // 분쟁(CS 처리함 DISPUTE)
+  ACCOUNT_HOLD_KIND_DISPUTE = 2;
+  // 예매 제한·양도 회수 대상이 된 팬의 소명(CS 처리함 APPEAL 건. 소명 글은 core DB appeal, POL-038)
+  ACCOUNT_HOLD_KIND_APPEAL = 3;
+}
+
+enum AccountHoldState {
+  ACCOUNT_HOLD_STATE_UNSPECIFIED = 0;
+  // 건이 열렸다(계류 중)
+  ACCOUNT_HOLD_STATE_OPEN = 1;
+  // 건이 닫혔다
+  ACCOUNT_HOLD_STATE_CLOSED = 2;
+}
+
+message SetAccountHoldRequest {
+  // 건이 걸린 계정
+  string account_id = 1;
+  AccountHoldKind kind = 2;
+  // 출처 건 ID(CS 처리함 건 ID. 소명이면 그 APPEAL 건 ID이고 core DB appeal.id가 아니다). 멱등 키이고 account_hold.source_ref(UNIQUE)에 들어간다.
+  // 문의로 접수한 분쟁 건의 계정 ID는 ops-svc가 core-svc SupportCaseService.GetInquiryRecord로 읽는다(ADR-0148 결정 5).
+  string source_ref = 3;
+  AccountHoldState state = 4;
+  // ops 건 상태의 판 번호. 같은 건에서 늘어나기만 한다. 저장한 판(account_hold.source_version)보다 클 때만 반영한다.
+  int64 source_version = 5;
+}
+
+message SetAccountHoldResponse {
+  // 이번 호출로 반영했으면 true, 판이 같거나 작아 바꾸지 않았으면 false.
+  bool changed = 1;
+}
+
+// 부르는 쪽: ops-svc만(관제 콘솔 '스캐너 기기 관리' SCR-053의 목록). 허용 목록을 서비스 단위로 걸려고 AccountHoldService와 나눴다.
+// 기기 원장은 ticket-svc에 있고 스태프 세션(scanner_session)은 identity 데이터라, ops-svc가 ticket-svc ListScannerDevices로 받은
+// 기기 목록에 이 호출의 별명을 합친다(ADR-0148 결정 1). 읽기라 멱등 키가 없다.
+service ScannerSessionQueryService {
+  // 기기마다 지금 로그인한 스태프 세션의 별명을 돌려준다.
+  rpc ListActiveScannerSessions(ListActiveScannerSessionsRequest) returns (ListActiveScannerSessionsResponse);
+}
+
+message ListActiveScannerSessionsRequest {
+  // 기기 ID 목록. 목록 한 쪽 크기인 100개(docs/api/guidelines.md §3)까지다.
+  repeated string device_ids = 1;
+}
+
+message ActiveScannerSession {
+  string device_id = 1;
+  // 지금 로그인한 스태프 세션의 별명(openapi `ScannerDevice.activeSessionNickname`). 그 기기에 끝나지 않은 세션이 없으면 비운다.
+  string nickname = 2;
+}
+
+message ListActiveScannerSessionsResponse {
+  // 요청한 기기 ID마다 한 줄, 요청 순서대로
+  repeated ActiveScannerSession sessions = 1;
+}
+
+// 부르는 쪽: ticket-svc만(스캐너 경로 가드). 스태프 토큰을 붙인 스캐너 요청마다 그 스캐너 세션이 지금 유효한지 묻는다.
+// 스캐너 세션(scanner_session)과 배정(staff_assignment)은 identity 데이터이고, 기기 상태(scanner_device ACTIVE)는 ticket 데이터라 가드가 직접 보고 여기 넣지 않는다.
+// 가드는 결과를 5초 [가정] 캐시한다(ADR-0051 결정 4). 그래서 배정을 해제하면 늦어도 5초 뒤 요청부터 401(invalid_token)이다(O-T21).
+// 기기 인증만으로 받는 스캔 업로드(POST /v1/scanner/scans)는 이 확인 없이 받고, 서버가 그 기록 시각에 세션이 유효했는지 따로 본다(offline-gate §6.5).
+// 읽기라 멱등 키가 없다(초안, 추천 적용 2026-10-30, docs/features/identity.md §6.1, docs/features/offline-gate.md §6).
+service ScannerSessionCheckService {
+  rpc CheckScannerSession(CheckScannerSessionRequest) returns (CheckScannerSessionResponse);
+}
+
+message CheckScannerSessionRequest {
+  // 스태프 토큰이 가리키는 스캐너 세션 ID
+  string scanner_session_id = 1;
+  // 요청한 기기 ID(DPoP 증명의 키 지문으로 가드가 찾은 등록 기기)
+  string device_id = 2;
+}
+
+// 현장 스태프 역할(docs/data.md staff_assignment, openapi StaffAssignment)
+enum StaffRole {
+  STAFF_ROLE_UNSPECIFIED = 0;
+  STAFF_ROLE_GATE_STAFF = 1;
+  STAFF_ROLE_GATE_LEAD = 2;
+}
+
+message CheckScannerSessionResponse {
+  // 세션이 끝나지 않았고(terminated_at 없음, 만료 시각 전) 그 기기의 지금 활성 세션이며,
+  // 이어진 staff_assignment가 ASSIGNED이고 역할 유효 시간 안이면 true다.
+  bool valid = 1;
+  // valid일 때만 채운다. 그때의 역할과 회차
+  StaffRole role = 2;
+  string event_id = 3;
+}
+
+// 부르는 쪽: core-svc의 팬 알림 발송 워커(core-notify-sender 배포의 서비스 계정)만. 대량 발송 조각 하나의 받는 사람을 한 번에 묻는다.
+// identity-svc는 읽기 전용 복제본으로 답한다. 그래서 복제 지연만큼 늦은 값일 수 있다(notify.md §2.1 E6).
+// 실패하면 웹 푸시 단계는 본인확인 여부와 상관없는 중립 문구로 보내고, 이메일 단계는 조각을 미루고 다시 묻는다(notify.md §10, ADR-0155 결정 14).
+// 읽기라 멱등 키가 없다. 데드라인은 아직 정하지 않았다(초안, 추천 적용 2026-10-30, docs/features/notify.md §4.2).
+service RecipientQueryService {
+  rpc BatchGetRecipients(BatchGetRecipientsRequest) returns (BatchGetRecipientsResponse);
+}
+
+message BatchGetRecipientsRequest {
+  // 계정 ID 목록. 대량 발송 조각 하나의 크기인 500개 [가정]까지다. 넘으면 INVALID_ARGUMENT다.
+  repeated string account_ids = 1;
+  // 이메일 단계만 true. 웹 푸시 단계는 주소를 받지 않는다(받는 값을 줄인다).
+  bool include_email = 2;
+}
+
+// 계정 상태(docs/data.md account.status). 계정이 없으면 NOT_FOUND다.
+enum RecipientStatus {
+  RECIPIENT_STATUS_UNSPECIFIED = 0;
+  RECIPIENT_STATUS_ACTIVE = 1;
+  // 탈퇴 유예. 알림은 받는다(docs/data.md account.status)
+  RECIPIENT_STATUS_WITHDRAWAL_PENDING = 2;
+  // 병합된 흡수 계정. 신청은 대표 계정으로 옮겨졌으므로 보내지 않는다(POL-034)
+  RECIPIENT_STATUS_MERGED = 3;
+  RECIPIENT_STATUS_DELETED = 4;
+  RECIPIENT_STATUS_NOT_FOUND = 5;
+}
+
+message Recipient {
+  string account_id = 1;
+  RecipientStatus status = 2;
+  // 휴대폰 본인확인을 마쳤으면 true(오픈 알림 ② 본인확인 안내 푸시의 대상 고르기, notify.md §5.2)
+  bool verified = 3;
+  // 알림 문구 언어(ko·en·ja·zh, NFR-024). 계정의 언어 칸 docs/data.md account.locale [가정]이고, 값이 없으면 ko다
+  // (2026-10-30 계정 표에 더함, 추천 적용 2026-10-30).
+  string locale = 4;
+  // include_email이 true일 때만 채운다
+  string email = 5;
+}
+
+message BatchGetRecipientsResponse {
+  // 요청한 계정 ID마다 한 줄, 요청 순서대로
+  repeated Recipient recipients = 1;
+}
+
+// 부르는 쪽: ops-svc만(관제 콘솔 '관리 계정·세션 관리' SCR-064의 세션 강제 종료). 운영자·CS·파트너 관리 계정의 세션을 끝낸다.
+// ops-svc가 권한(docs/planning/03 §3)을 확인하고 감사 기록을 남긴 뒤 부른다. identity-svc는 관리 권한을 다시 판정하지 않는다(ScannerDeviceService와 같은 방식).
+// 휴대폰에서도 하는 안전 쪽 조치다(docs/features/control-tower.md §12). 끝낸 세션마다 control.sessions-terminated(reason ADMIN_FORCE)를 낸다.
+// 팬 계정의 세션은 받지 않는다(FAILED_PRECONDITION). REST 경로는 openapi DELETE /v1/ops/admin-accounts/{adminAccountId}/sessions와
+// 그 아래 /{sessionId}다(소유자 결정 2026-10-30, open-items 73번. 초안, 추천 적용 2026-10-30).
+service AdminSessionService {
+  // request_id(ops-svc 감사 기록 ID)로 멱등하다. 같은 request_id로 다시 오면 다시 끝내지 않고 already_done만 true로 돌려준다.
+  rpc TerminateAdminSessions(TerminateAdminSessionsRequest) returns (TerminateAdminSessionsResponse);
+}
+
+message TerminateAdminSessionsRequest {
+  string request_id = 1;
+  // 대상 관리 계정
+  string admin_account_id = 2;
+  // 끝낼 세션 하나. 비우면 그 계정의 모든 세션을 끝낸다.
+  string session_id = 3;
+  // 처리한 관리 계정 ID
+  string acted_by = 4;
+}
+
+message TerminateAdminSessionsResponse {
+  // 이번 호출로 끝낸 세션 수
+  int32 ended_count = 1;
+  // 같은 request_id로 이미 처리했으면 true
+  bool already_done = 2;
+}
+
+// 부르는 쪽: queue-svc만. 추가 검증 제출(POST /v1/queues/{eventId}/verification)에서 휴대폰 본인확인 재통과를 확인한다
+// (docs/features/bot-defense.md §5.2 3단계). 화면은 추가 검증 화면(SCR-009)에서 목적 REVERIFY로 본인확인기관 창을 연다(SCR-006).
+// 결제 직전 재확인(IdentityService.GetVerificationStatus)은 '본인확인을 한 적이 있는가'만 답해 재통과를 가리지 못하고,
+// 그 서비스는 purchase-svc 신원만 받으므로 허용 목록을 서비스 단위로 걸려고 따로 둔다(AccountHoldService와 같은 방식).
+// identity-svc는 그 계정의 REVERIFY 본인확인 가운데 not_before_ms 뒤에 VERIFIED로 확정된 건이 있는지 본다.
+// 결과 경로가 계정에 저장된 ci_hmac과 같은 사람으로 확정한 건만 센다(다른 사람의 재확인은 통과가 아니다).
+// 읽기라 멱등 키가 없다. 데드라인은 추가 검증 제출의 ScoreRisk와 같은 800ms [가정] 안에서 남은 시간을 쓴다.
+// 답이 없으면 queue-svc는 통과로 보지 않고 503으로 답한다(trust-svc가 멈췄을 때와 같은 규칙, 초안, 추천 적용 2026-10-30).
+service ReverificationCheckService {
+  rpc CheckReverification(CheckReverificationRequest) returns (CheckReverificationResponse);
+}
+
+message CheckReverificationRequest {
+  // 게이트웨이 내부 헤더의 계정 ID와 pid(X-User-Id, X-User-Pid)
+  string account_id = 1;
+  string pid = 2;
+  // 추가 검증을 시작한 시각(q:{event:E}:verify의 VERIFYING 시각, epoch 밀리초). 이 시각 앞의 본인확인은 재통과로 세지 않는다.
+  int64 not_before_ms = 3;
+}
+
+enum ReverificationResult {
+  REVERIFICATION_RESULT_UNSPECIFIED = 0;
+  // not_before 뒤에 같은 사람으로 재확인을 마쳤다
+  REVERIFICATION_RESULT_PASSED = 1;
+  // not_before 뒤에 확정된 재확인이 없다(시작하지 않음, 창을 닫음, 실패, 기관 장애)
+  REVERIFICATION_RESULT_NOT_FOUND = 2;
+  // 재확인 결과가 계정의 본인과 다른 사람이었다
+  REVERIFICATION_RESULT_PERSON_MISMATCH = 3;
+}
+
+message CheckReverificationResponse {
+  ReverificationResult result = 1;
+  // PASSED일 때만 채운다(epoch 밀리초)
+  int64 verified_at_ms = 2;
+}
+
+// 부르는 쪽: 관리 경로(대상 partner·ops)를 처리하는 모든 서비스의 공통 가드 RolesGuard(packages/platform).
+// 역할과 테넌트는 토큰에 싣지 않으므로(소유자 결정 2026-10-31, ADR-0172) 요청마다 그 세션의 지금 역할·테넌트·계정 상태를 묻는다.
+// 파드마다 (계정, 세션)으로 5초 [가정] 캐시하고 세션 종료 사건(control.sessions-terminated)에 지운다. 재인증 토큰을 받는 위험 작업은 캐시 없이 묻는다.
+// 답이 없고 캐시에도 없으면 부른 쪽은 503 authz-unavailable로 닫는다(통과시키지 않는다). 읽기라 멱등 키가 없다.
+// 현장 스태프의 역할은 이 호출이 아니라 CheckScannerSession의 role로 본다.
+service AdminAuthzService {
+  rpc GetAdminAuthz(GetAdminAuthzRequest) returns (GetAdminAuthzResponse);
+}
+
+message GetAdminAuthzRequest {
+  string admin_account_id = 1;
+  // 그 세션이 끝났으면 valid=false를 돌려준다
+  string session_id = 2;
+}
+
+message GetAdminAuthzResponse {
+  // 세션이 끝나지 않았고, 그 세션이 admin_account_id 계정의 관리 세션이며, 계정이 로그인할 수 있는 상태면 true.
+  // 다른 계정의 세션 ID를 섞어 보내면 false다. false면 부른 쪽은 401로 답한다. identity는 원본 DB에서 읽는다(읽기 복제본 아님)
+  bool valid = 1;
+  // 관리 계정 역할 하나(docs/data.md admin_account.role): viewer|operator|commander|cs_agent|cs_lead|partner_admin|partner_member
+  string role = 2;
+  // 파트너 계정만. 테넌트(promoter_id). 관제 계정은 비운다
+  string tenant_id = 3;
+}
+
+// 부르는 쪽: ops-svc만. 지정된 사람만 하는 작업(분석 실버 조회·연구 갈래 리플레이 내보내기의 가명정보 취급자,
+// 접속기록 정기 점검의 점검자, 부정 거래 조사 화면·API의 부정 거래 조사관(2026-10-31, ADR-0171)) 앞에서 그 관리 계정의 살아 있는 지정을 묻는다(docs/security/authz-matrix.md §3.1·§3.7).
+// 지정은 토큰에 싣지 않으므로(지정을 거두면 다음 요청부터 막히게) ops-svc가 요청마다 묻고 5초 [가정] 캐시한다.
+// 지정 기록은 identity DB admin_designation이다(revoked_at이 빈 행만 센다). 읽기라 멱등 키가 없다.
+// 답이 없으면 ops-svc는 지정이 없는 것으로 보고 403으로 답한다(지정이 필요한 작업만, 초안, 추천 적용 2026-10-30).
+service AdminDesignationService {
+  rpc GetAdminDesignations(GetAdminDesignationsRequest) returns (GetAdminDesignationsResponse);
+}
+
+message GetAdminDesignationsRequest {
+  string admin_account_id = 1;
+}
+
+// 지정 종류(docs/data.md admin_designation.kind)
+enum DesignationKind {
+  DESIGNATION_KIND_UNSPECIFIED = 0;
+  // 접속기록 점검자
+  DESIGNATION_KIND_ACCESS_REVIEWER = 1;
+  // 가명정보 취급자
+  DESIGNATION_KIND_PSEUDONYM_HANDLER = 2;
+  // 부정 거래 조사관. 이 지정만 commander와 cs_lead에게 붙는다. 한 계정에 PSEUDONYM_HANDLER와 함께 두지 않는다
+  // (조사·연구 두 갈래를 잇지 않는다, 추천 적용 2026-10-31, ADR-0171 결정 7).
+  DESIGNATION_KIND_FRAUD_INVESTIGATOR = 3;
+}
+
+message GetAdminDesignationsResponse {
+  // 살아 있는 지정. 없으면 비운다. commander·cs_lead가 아닌 계정은 늘 비어 있고, cs_lead에는 FRAUD_INVESTIGATOR만 있을 수 있다.
+  repeated DesignationKind kinds = 1;
+  // 지난 90일 [가정] 안에 거둔 지정(종류와 거둔 시각). ops-svc는 FRAUD_ACTION 승인 자격을 볼 때 이 목록에 PSEUDONYM_HANDLER가 있으면 승인을 거절한다.
+  // 승인 실행 때 ops-svc는 이 호출을 캐시 없이 바로 하고, 답이 없으면 '지정이 없다'로 보지 않고 거절한다(추천 적용 2026-10-31, ADR-0171).
+  repeated RevokedDesignation recently_revoked = 2;
+}
+
+message RevokedDesignation {
+  DesignationKind kind = 1;
+  google.protobuf.Timestamp revoked_at = 2;
+}
+
+// 부르는 쪽: ops-svc만(관제 콘솔 '관리 계정·세션 관리' SCR-064). 관리 계정 목록·상세 읽기, 초대, 역할 변경, 재초대, 삭제, 지정과 지정 거두기.
+// REST는 openapi /v1/ops/admin-accounts*다. ops-svc가 부른 사람의 역할과 재인증 토큰(패스키 요소, 작업 묶음 act는 권한 변경)을 보고,
+// 감사 기록(권한 부여·변경·말소 내역 3년, 고시 제5조 제3항)을 남긴 뒤 부른다. 바꾸는 호출의 request_id는 그 감사 기록 ID다.
+// 같은 request_id로 다시 오면 다시 하지 않고 같은 결과에 already_done을 true로 돌려준다.
+// AdminSessionService(끊는 쪽의 안전 조치)와 달리 identity-svc가 권한을 한 번 더 판정한다. 권한을 넓힐 수 있는 변경이라,
+// 캐시나 옛 토큰의 역할이 아니라 identity DB의 지금 역할로 요청자(acted_by)를 보고(ADR-0172), 대상 규칙(자기 자신이 아님,
+// 파트너사의 마지막 활성 partner_admin, 파트너 역할과 관제 역할 사이는 바꾸지 않음)을 지킨다(docs/security/authz-matrix.md §6 '서버가 보는 것').
+// commander가 되거나 commander에서 다른 역할이 되는 변경은 ops-svc가 승인 업무(COMMANDER_ROLE_CHANGE)가 승인된 뒤에만 부르고 approval_id를 싣는다.
+// approval_id가 없으면 APPROVAL_REQUIRED다. 승인 자체는 ops 데이터라 identity-svc가 다시 보지 않는다.
+// promoter_id가 등록된 파트너사인지는 ops-svc가 부르기 전에 본다(그 확인 길은 아직 정본에 없다, docs/api/proto/README.md §4).
+// 업무 규칙에 걸린 거절은 결과 값(AdminAccountResult)으로 돌려주고, ops-svc가 openapi의 Problem type으로 바꾼다(README §2 '업무 결과와 오류').
+// 대상 계정이 없으면 NOT_FOUND다. 초대·재초대 메일은 identity-svc가 보낸다. 읽기 응답의 이메일은 가린 값뿐이다(초안, 추천 적용 2026-10-30).
+service AdminAccountService {
+  // 읽기라 멱등 키가 없다.
+  rpc ListAdminAccounts(ListAdminAccountsRequest) returns (ListAdminAccountsResponse);
+  rpc GetAdminAccount(GetAdminAccountRequest) returns (GetAdminAccountResponse);
+  // 초대(docs/planning/03 §2.7 A1). 32바이트 난수 토큰의 SHA-256만 저장하고, 24시간 1회용 링크를 업무 이메일로 보낸다.
+  rpc InviteAdminAccount(InviteAdminAccountRequest) returns (AdminAccountChangeResponse);
+  // 역할 변경. 바꾸면 그 계정의 모든 세션을 끝내고 control.sessions-terminated(reason ROLE_CHANGED)를 낸다.
+  // commander가 아니게 되면 살아 있는 지정(admin_designation)을 같은 트랜잭션에서 거둔다.
+  rpc ChangeAdminRole(ChangeAdminRoleRequest) returns (AdminAccountChangeResponse);
+  // 재초대(A4·A8, 분실). 옛 초대 토큰을 무효로 한다. PROTECT_LOCK·CREDENTIAL_LOST면 비밀번호 해시·TOTP 시드·패스키·복구 코드를 지우고
+  // 실패 수·비밀번호 연속 실패 누계·잠금을 되돌리며 상태를 INVITED로 바꾸고 모든 세션을 끝낸다(reason ADMIN_FORCE).
+  rpc ReinviteAdminAccount(ReinviteAdminAccountRequest) returns (AdminAccountChangeResponse);
+  // 삭제(A9·A13~A16: 지우지 않은 계정이면 초대 중·초대 만료·잠김 상태여도 지운다). 상태를 REMOVED로 바꾸고 모든 세션을 끝내며(reason DELETE), 업무 이메일과 인증 수단을 바로 파기한다. 행에는 ID·역할·삭제 시각만 남긴다.
+  rpc RemoveAdminAccount(RemoveAdminAccountRequest) returns (AdminAccountChangeResponse);
+  // 지정(commander 계정에만. FRAUD_INVESTIGATOR는 commander와 cs_lead)과 지정 거두기. 거두기는 이미 거둔 지정이면 OK다.
+  // 지정은 대상 관리 계정 행을 잠근 트랜잭션(SELECT ... FOR UPDATE) 안에서 함께 둘 수 없는 지정과 같은 종류의 살아 있는 지정을 다시 보고 넣는다.
+  // 그래서 FRAUD_INVESTIGATOR와 PSEUDONYM_HANDLER를 같은 계정에 주는 두 요청이 같은 순간에 와도 하나만 OK이고 다른 하나는 DESIGNATION_CONFLICT다(추천 적용 2026-10-31, ADR-0171).
+  // 같은 잠금 안에서, 줄 지정과 함께 둘 수 없는 다른 종류의 지정을 지난 90일 [가정] 안에 거둔 기록이 있어도 DESIGNATION_CONFLICT다(냉각 기간, 추천 적용 2026-10-31).
+  rpc SetAdminDesignation(SetAdminDesignationRequest) returns (AdminAccountChangeResponse);
+  rpc RevokeAdminDesignation(RevokeAdminDesignationRequest) returns (AdminAccountChangeResponse);
+}
+
+// 관리 계정 역할(docs/data.md admin_account.role). 앞의 다섯은 관제 역할, 뒤의 둘은 파트너 역할이다.
+enum AdminRole {
+  ADMIN_ROLE_UNSPECIFIED = 0;
+  ADMIN_ROLE_VIEWER = 1;
+  ADMIN_ROLE_OPERATOR = 2;
+  ADMIN_ROLE_COMMANDER = 3;
+  ADMIN_ROLE_CS_AGENT = 4;
+  ADMIN_ROLE_CS_LEAD = 5;
+  ADMIN_ROLE_PARTNER_ADMIN = 6;
+  ADMIN_ROLE_PARTNER_MEMBER = 7;
+}
+
+// SCR-064의 두 탭(운영자·CS, 파트너 계정)
+enum AdminAccountGroup {
+  ADMIN_ACCOUNT_GROUP_UNSPECIFIED = 0;
+  ADMIN_ACCOUNT_GROUP_OPS = 1;
+  ADMIN_ACCOUNT_GROUP_PARTNER = 2;
+}
+
+// 관리 계정 상태(docs/data.md admin_account.status, docs/planning/03 §2.7). 잠금은 AdminLockKind로 따로 둔다.
+enum AdminAccountStatus {
+  ADMIN_ACCOUNT_STATUS_UNSPECIFIED = 0;
+  ADMIN_ACCOUNT_STATUS_INVITED = 1;
+  ADMIN_ACCOUNT_STATUS_ACTIVE = 2;
+  ADMIN_ACCOUNT_STATUS_INVITE_EXPIRED = 3;
+  ADMIN_ACCOUNT_STATUS_REMOVED = 4;
+}
+
+// 잠금 종류(docs/security/auth-controls.md §3.2)
+enum AdminLockKind {
+  ADMIN_LOCK_KIND_UNSPECIFIED = 0;
+  ADMIN_LOCK_KIND_NONE = 1;
+  ADMIN_LOCK_KIND_TIMED = 2;
+  ADMIN_LOCK_KIND_PROTECT = 3;
+}
+
+// 잠긴 까닭(docs/data.md admin_account.lock_reason). 관제 화면의 잠김 상세에만 쓰고 계정 주인에게는 알리지 않는다.
+enum AdminLockReason {
+  ADMIN_LOCK_REASON_UNSPECIFIED = 0;
+  // 계정 실패 수 5(시간 잠금)
+  ADMIN_LOCK_REASON_FAILED_ATTEMPTS = 1;
+  // 2단계 실패 수 5(보호 잠금. 로그인과 해제 링크 모두)
+  ADMIN_LOCK_REASON_SECOND_FACTOR_FAILURES = 2;
+  // 비밀번호 연속 실패 누계 100(보호 잠금)
+  ADMIN_LOCK_REASON_PASSWORD_FAILURE_TOTAL = 3;
+}
+
+message AdminAccount {
+  string admin_account_id = 1;
+  // 가린 업무용 이메일. 삭제한 계정은 비운다.
+  string email_masked = 2;
+  AdminAccountGroup group = 3;
+  AdminRole role = 4;
+  // 파트너 계정만
+  string promoter_id = 5;
+  AdminAccountStatus status = 6;
+  AdminLockKind lock_kind = 7;
+  AdminLockReason lock_reason = 8;
+  // 시간 잠금만(epoch 밀리초)
+  int64 locked_until_ms = 9;
+  bool totp_enrolled = 10;
+  int32 passkey_count = 11;
+  // 살아 있는 지정
+  repeated DesignationKind designations = 12;
+  // 초대됨일 때만(epoch 밀리초)
+  int64 invite_expires_at_ms = 13;
+  int64 last_login_at_ms = 14;
+  int64 removed_at_ms = 15;
+  // 표시 이름(openapi AdminAccount.displayName, docs/data.md admin_account.display_name). 삭제한 계정은 비운다(ADR-0163 결정 7, 추천 적용 2026-10-30)
+  string display_name = 17;
+  // 판(docs/data.md admin_account.version). REST의 ETag·If-Match 값이다.
+  int64 version = 16;
+}
+
+// 상세의 활성 세션. IP 주소는 싣지 않는다.
+message AdminSessionSummary {
+  string session_id = 1;
+  string browser = 2;
+  string os = 3;
+  int64 created_at_ms = 4;
+  int64 last_active_at_ms = 5;
+}
+
+message ListAdminAccountsRequest {
+  AdminAccountGroup group = 1;
+  // PARTNER에서만. 비우면 모든 파트너사
+  string promoter_id = 2;
+  // 비우면(UNSPECIFIED) 모든 상태
+  AdminAccountStatus status = 3;
+  string page_token = 4;
+  // 100까지(guidelines §3)
+  int32 page_size = 5;
+}
+
+message ListAdminAccountsResponse {
+  repeated AdminAccount accounts = 1;
+  // 마지막 쪽이면 비운다
+  string next_page_token = 2;
+}
+
+message GetAdminAccountRequest {
+  string admin_account_id = 1;
+}
+
+message GetAdminAccountResponse {
+  AdminAccount account = 1;
+  repeated AdminSessionSummary sessions = 2;
+}
+
+message InviteAdminAccountRequest {
+  string request_id = 1;
+  // 요청한 관리 계정 ID
+  string acted_by = 2;
+  // 업무용 이메일. 삭제하지 않은 계정 사이에서 하나뿐이어야 한다.
+  string email = 3;
+  // commander는 받지 않는다(ROLE_NOT_ALLOWED). commander는 역할 변경의 2인 승인으로만 준다.
+  AdminRole role = 4;
+  // 표시 이름(openapi AdminInvitationCreate.displayName, 필수, NFC 정규화 뒤 1~30자 [가정]). identity DB admin_account.display_name에 두고 삭제하면 바로 파기한다(ADR-0163 결정 7, 추천 적용 2026-10-30)
+  string display_name = 6;
+  // 파트너 역할이면 필수, 관제 역할이면 비운다(PROMOTER_MISMATCH)
+  string promoter_id = 5;
+}
+
+message ChangeAdminRoleRequest {
+  string request_id = 1;
+  string acted_by = 2;
+  string admin_account_id = 3;
+  AdminRole role = 4;
+  // REST If-Match의 판. 지금 판과 다르면 VERSION_MISMATCH
+  int64 expected_version = 5;
+  // commander가 되거나 commander에서 바뀌는 변경만. 승인된 승인 업무(COMMANDER_ROLE_CHANGE) ID
+  string approval_id = 6;
+}
+
+// 재초대 까닭(openapi AdminReinvitationCreate.reasonCode)
+enum ReinviteReason {
+  REINVITE_REASON_UNSPECIFIED = 0;
+  // 초대됨·초대 만료 계정에 링크 다시 보내기(A4)
+  REINVITE_REASON_RESEND = 1;
+  // 보호 잠금 해제(A8)
+  REINVITE_REASON_PROTECT_LOCK = 2;
+  // 활성 계정 주인의 비밀번호·인증 앱 분실
+  REINVITE_REASON_CREDENTIAL_LOST = 3;
+}
+
+message ReinviteAdminAccountRequest {
+  string request_id = 1;
+  string acted_by = 2;
+  string admin_account_id = 3;
+  ReinviteReason reason = 4;
+}
+
+message RemoveAdminAccountRequest {
+  string request_id = 1;
+  string acted_by = 2;
+  string admin_account_id = 3;
+}
+
+message SetAdminDesignationRequest {
+  string request_id = 1;
+  string acted_by = 2;
+  string admin_account_id = 3;
+  DesignationKind kind = 4;
+  // 지정 근거(개인정보 보호책임자의 지정 문서 번호 등). 개인정보 원문은 넣지 않는다.
+  string basis = 5;
+}
+
+message RevokeAdminDesignationRequest {
+  string request_id = 1;
+  string acted_by = 2;
+  string admin_account_id = 3;
+  DesignationKind kind = 4;
+}
+
+// 관리 계정을 바꾸는 호출의 결과. ops-svc가 괄호 안의 openapi Problem type으로 바꾼다.
+enum AdminAccountResult {
+  ADMIN_ACCOUNT_RESULT_UNSPECIFIED = 0;
+  ADMIN_ACCOUNT_RESULT_OK = 1;
+  // 요청자의 지금 역할로는 그 대상·역할을 다룰 수 없다(admin-role-not-allowed)
+  ADMIN_ACCOUNT_RESULT_ROLE_NOT_ALLOWED = 2;
+  // 자기 계정의 역할 변경·재초대·삭제, 자기에게 지정(self-target-forbidden)
+  ADMIN_ACCOUNT_RESULT_SELF_TARGET = 3;
+  // 그 파트너사의 마지막 활성 partner_admin(last-partner-admin)
+  ADMIN_ACCOUNT_RESULT_LAST_PARTNER_ADMIN = 4;
+  // 지금 상태에서 할 수 없다(admin-account-state-conflict)
+  ADMIN_ACCOUNT_RESULT_STATE_CONFLICT = 5;
+  // 같은 업무 이메일의 계정이 있다(admin-email-in-use)
+  ADMIN_ACCOUNT_RESULT_EMAIL_IN_USE = 6;
+  // 파트너 역할과 관제 역할 사이의 변경(role-group-mismatch)
+  ADMIN_ACCOUNT_RESULT_ROLE_GROUP_MISMATCH = 7;
+  // 파트너 역할에 promoter_id가 없거나 관제 역할에 있다(promoter-mismatch)
+  ADMIN_ACCOUNT_RESULT_PROMOTER_MISMATCH = 8;
+  // 활성이거나 초대 중인 partner_admin이 없는 파트너사에 partner_member 초대(first-partner-account-must-be-admin)
+  ADMIN_ACCOUNT_RESULT_FIRST_PARTNER_ACCOUNT_MUST_BE_ADMIN = 9;
+  // 판 불일치(precondition-failed)
+  ADMIN_ACCOUNT_RESULT_VERSION_MISMATCH = 10;
+  // commander 역할의 부여·회수인데 approval_id가 없다(ops-svc 버그)
+  ADMIN_ACCOUNT_RESULT_APPROVAL_REQUIRED = 11;
+  // commander 계정 삭제. 먼저 역할 변경으로 commander가 아니게 한다(commander-removal-needs-role-change)
+  ADMIN_ACCOUNT_RESULT_COMMANDER_REMOVAL_NEEDS_ROLE_CHANGE = 12;
+  // 활성 commander가 아닌 계정에 지정(designation-target-not-commander)
+  ADMIN_ACCOUNT_RESULT_DESIGNATION_TARGET_NOT_COMMANDER = 13;
+  // 같은 종류의 살아 있는 지정이 있다(designation-exists)
+  ADMIN_ACCOUNT_RESULT_DESIGNATION_EXISTS = 14;
+  // FRAUD_INVESTIGATOR를 활성 commander·cs_lead가 아닌 계정에 지정(designation-target-not-eligible, 추천 적용 2026-10-31)
+  ADMIN_ACCOUNT_RESULT_DESIGNATION_TARGET_NOT_ELIGIBLE = 15;
+  // 한 계정에 FRAUD_INVESTIGATOR와 PSEUDONYM_HANDLER를 함께 두려 함(designation-conflict, 추천 적용 2026-10-31, ADR-0171 결정 7)
+  ADMIN_ACCOUNT_RESULT_DESIGNATION_CONFLICT = 16;
+}
+
+message AdminAccountChangeResponse {
+  AdminAccountResult result = 1;
+  // OK일 때 바뀐 뒤의 계정
+  AdminAccount account = 2;
+  // 같은 request_id로 이미 처리했으면 true
+  bool already_done = 3;
+}
+
+// 부르는 쪽: 조사 적재 작업자 inv-ingest만(부정 예매 사후 조사, docs/streaming.md §6.4, ADR-0171 결정 4).
+// 여정에서 처음 본 계정의 조사용 연결 값을 묶어 묻는다. 결과는 조사 저장소 inv의 inv_link에만 싣고, 분석 저장소로는 보내지 않는다.
+// 가명은 모두 조사용 가명 invRef(라벨, 값) 문자열이고(키 판 접두어 k{판}. + base64url, 계산·회전·접근은 docs/security/secrets-and-keys.md), 원문 번호·이메일·기기 식별값은 돌려주지 않는다.
+// 계산하지 못해 비운 값(refMissing)은 항목에서 빠진다. 조사 적재는 그 값을 나중에 다시 채우지 않는다.
+// 읽기라 멱등 키가 없다. 없는 계정은 그 항목을 빼고 돌려준다. 한 번에 계정 500개 [가정]까지다(넘으면 INVALID_ARGUMENT).
+// 탈퇴한 계정은 연결 값을 지웠으므로 빈 항목이다(초안, 추천 적용 2026-10-31).
+service InvestigationRefService {
+  rpc BatchGetInvestigationRefs(BatchGetInvestigationRefsRequest) returns (BatchGetInvestigationRefsResponse);
+}
+
+message BatchGetInvestigationRefsRequest {
+  repeated string account_ids = 1;
+}
+
+// 연락처 가명의 종류(docs/data.md account_contact_ref.kind)
+enum ContactRefKind {
+  CONTACT_REF_KIND_UNSPECIFIED = 0;
+  // 본인확인 휴대폰 번호(E.164로 맞춘 값)
+  CONTACT_REF_KIND_PHONE = 1;
+  // 로그인 이메일(소문자, 앞뒤 빈칸 제거)
+  CONTACT_REF_KIND_EMAIL = 2;
+}
+
+message ContactRef {
+  ContactRefKind kind = 1;
+  // invRef("contact", 정규화한 값): 키 판 접두어(k1. 등)와 base64url(HMAC-SHA256(contact 라벨 키, 값))(docs/security/secrets-and-keys.md)
+  string ref = 2;
+}
+
+// 같은 본인확인(연계정보 CI)으로 다른 계정에서 본인확인을 시도해 409(이미 다른 계정에서 본인확인)를 받은 기록 하나(docs/data.md identity_conflict_attempt).
+// 사람이 확인한 라벨이 아니라 '명의 대여·사들인 계정' 후보의 연결 신호다.
+message IdentityConflict {
+  // 이 계정과 같은 본인확인을 쓰려 한 다른 계정(이 계정이 시도했으면 원래 계정, 원래 계정이면 시도한 계정)
+  string other_account_id = 1;
+  google.protobuf.Timestamp attempted_at = 2;
+}
+
+message InvestigationRefs {
+  string account_id = 1;
+  repeated ContactRef contact_refs = 2;
+  // 그 계정에 연결된 기기(device)의 기기 가명 device_ref(invRef("device", deviceId), 키 판 접두어 포함). trust-svc의 deviceRef와 같은 값이다.
+  // 키 회전의 이음 기간이 끝날 때 한 번은 옛 판과 새 판 값을 함께 싣는다(옛 판 → 새 판 대응. 원문은 싣지 않는다, docs/security/secrets-and-keys.md '회전 절차'). contact_refs도 같다.
+  repeated string device_refs = 3;
+  // 지난 1년 [가정]의 기록
+  repeated IdentityConflict identity_conflicts = 4;
+}
+
+message BatchGetInvestigationRefsResponse {
+  repeated InvestigationRefs items = 1;
+}
+
+// 부르는 쪽: purchase-svc만(주문 생성 때 예매자 휴대폰 번호의 연락처 가명, docs/features/payment.md, 추천 적용 2026-10-31, ADR-0171).
+// contact 라벨 키는 identity-svc만 받는다(KMS 키 정책). 그래서 purchase-svc는 번호를 직접 가명으로 바꾸지 않고 이 호출로 받는다.
+// identity-svc는 번호를 저장하거나 로그에 쓰지 않고 invRef(contact, 번호)만 돌려준다. 데드라인은 50ms [가정]이고, 실패·시간 초과면 purchase-svc는 주문을 막지 않고
+// contactRef를 비우며 refMissing을 참으로 낸다. 부르는 신원마다 초당 요청 상한(주문 설계 피크의 2배 [가정])을 두고 넘으면 RESOURCE_EXHAUSTED다(번호를 하나씩 넣어 보는 대입을 막으려는 것이다).
+service ContactRefService {
+  rpc ComputeContactRef(ComputeContactRefRequest) returns (ComputeContactRefResponse);
+}
+
+message ComputeContactRefRequest {
+  // E.164로 맞춘 휴대폰 번호
+  string phone_e164 = 1;
+}
+
+message ComputeContactRefResponse {
+  // invRef("contact", 번호): 키 판 접두어(k1. 등) + base64url
+  string contact_ref = 1;
+}
+
+// 부르는 쪽: ops-svc만(부정 예매 이용 제한, POL-046 ⑥, docs/features/identity.md §8, 추천 적용 2026-10-31, ADR-0171 결정 5).
+// 상태 셋으로 부른다. CASE_OPEN: 그 계정에 소명 요청을 보낼 때(사건이 소명 대기 이후). RESTRICTED: 이용 제한(RESTRICT)을 실행할 때, 제한을 걸기 전에.
+// RELEASED: 제한 없이 그 계정의 사건 몫이 끝났을 때(정상 종료, 소명 인정, 계정 빼기, 이의 인정) 또는 제한이 풀리거나(LIFT_RESTRICTION Done) 끝났을 때.
+// identity-svc는 그 계정의 연계정보 HMAC(identity_verification.ci_hmac과 키 판)을 restricted_ci_hold에 옮겨 둔다. 그 계정이 CASE_OPEN이나 RESTRICTED 동안 탈퇴하면
+// identity_verification은 지우지만 이 행은 남긴다(POL-033의 예외, 법률 확인 36번). RELEASED가 오거나 until이 지나면 행을 지운다(CASE_OPEN·RESTRICTED 모두, 추천 적용 2026-10-31, ADR-0173 결정 7).
+// 같은 연계정보로 다시 가입한 계정은 carried_account_id에 적고, 상태가 RESTRICTED인 동안 토큰에 구매 권한 ticket:buy를 싣지 않는다(CASE_OPEN이면 적어만 둔다).
+// RESTRICTED 호출의 OK(또는 NO_VERIFICATION)가 이용 제한 실행 Done의 조건이다. ops-svc는 이 호출이 성공한 뒤에 queue-svc·purchase-svc에 제한을 걸고 팬에게 알린다.
+// 멱등 키는 (fraud_case_id, account_id, version)이고 판이 저장한 판보다 클 때만 반영한다. 그 계정에 본인확인 기록이 없으면 NO_VERIFICATION이고 아무것도 두지 않는다.
+// 데드라인은 1초 [가정]이고 실패하면 ops-svc 작업 워커가 다시 보낸다(그동안 제한 실행은 Done이 아니다).
+service RestrictedCiHoldService {
+  rpc SetRestrictedCiHold(SetRestrictedCiHoldRequest) returns (SetRestrictedCiHoldResponse);
+}
+
+enum RestrictedCiHoldState {
+  RESTRICTED_CI_HOLD_STATE_UNSPECIFIED = 0;
+  // 소명 요청 뒤 결정 전(사건이 소명 대기 이후). 탈퇴해도 보관하지만 다시 가입한 계정을 막지는 않는다. until(그 회차 공연일 + 30일 [가정])이 지나면 지운다
+  RESTRICTED_CI_HOLD_STATE_CASE_OPEN = 1;
+  // 부정 예매 이용 제한 중. until까지 다시 가입한 계정에 ticket:buy를 싣지 않는다
+  RESTRICTED_CI_HOLD_STATE_RESTRICTED = 2;
+  // 그 계정의 사건 몫이 제한 없이 끝났거나 제한이 풀렸다. 행을 지운다
+  RESTRICTED_CI_HOLD_STATE_RELEASED = 3;
+}
+
+message SetRestrictedCiHoldRequest {
+  string account_id = 1;
+  string fraud_case_id = 2;
+  // 행을 지울 끝 시각. 두 상태 모두 싣는다(RELEASED에는 비운다).
+  // CASE_OPEN: 그 회차 공연일 + 30일 [가정]. 그때까지 제한이 걸리지 않으면 지운다.
+  // RESTRICTED: 이용 제한의 끝 시각. 부정 예매(사유 FRAUD) 이용 제한은 건 날 + 1년 [가정]을 넘지 못하므로(넘으면 ops-svc가 조치 요청을 422 restriction-too-long으로 거절) 보관도 1년을 넘지 않는다.
+  // 더 늘리려면 새 RESTRICT 요청(2인 승인)이 더 큰 판으로 다시 부른다(추천 적용 2026-10-31, ADR-0173 결정 7).
+  google.protobuf.Timestamp until = 3;
+  RestrictedCiHoldState state = 4;
+  int64 version = 5;
+}
+
+enum RestrictedCiHoldResult {
+  RESTRICTED_CI_HOLD_RESULT_UNSPECIFIED = 0;
+  RESTRICTED_CI_HOLD_RESULT_OK = 1;
+  // 그 계정에 본인확인 기록이 없다(본인확인 전 계정은 예매를 못 하므로 둘 것이 없다)
+  RESTRICTED_CI_HOLD_RESULT_NO_VERIFICATION = 2;
+  // 저장한 판보다 작거나 같아 반영하지 않았다
+  RESTRICTED_CI_HOLD_RESULT_STALE = 3;
+}
+
+message SetRestrictedCiHoldResponse {
+  RestrictedCiHoldResult result = 1;
+}

@@ -1,0 +1,16 @@
+{
+  "name": "peaket-poc-bench",
+  "private": true,
+  "version": "0.0.0",
+  "description": "wbs 0.5.1 PoC 측정 도구(Redis 클라이언트 셋·한 키 INCR·좌석 샤드·Kafka). 뿌리 작업 공간에 넣지 않고 Linux 컨테이너 안에서만 돈다(loadtest/poc/README.md)",
+  "type": "module",
+  "packageManager": "pnpm@12.16.0",
+  "engines": { "node": ">=24" },
+  "dependencies": {
+    "@confluentinc/kafka-javascript": "1.11.0",
+    "@valkey/valkey-glide": "2.5.3",
+    "aws-msk-iam-sasl-signer-js": "1.0.3",
+    "ioredis": "6.0.0",
+    "redis": "6.3.0"
+  }
+}

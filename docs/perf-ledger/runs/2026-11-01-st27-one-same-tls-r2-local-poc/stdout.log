@@ -1,0 +1,7 @@
+2026-11-01T13:40:09Z 측정 폴더: D:\ticketpass\docs\perf-ledger\runs\2026-11-01-st27-one-same-tls-r2-local-poc
+2026-11-01T13:40:09Z 첨부: D:\ticketpass\.cache\peaket-poc\out\2026-11-01-st27-one-same-tls-r2.json → bench-summary.json
+2026-11-01T13:40:09Z 측정 도구: p99=3.27 ms, 오류율=0, 요청=1200000, 못 보낸 요청=0
+2026-11-01T13:40:09Z 첨부: D:\ticketpass\.cache\peaket-poc\out\infra.txt → infra.txt
+2026-11-01T13:40:09Z 원본 버킷(--raw-bucket)이 없어 큰 원본(metrics/·traces/·grafana/·stdout.log)이 폴더에 남는다. Git에는 작은 파일만 넣는다(docs/perf-ledger.md §2.1)
+2026-11-01T13:40:09Z Redis TLS 짝 실행(--paired-run)이 없다. TLS 켬·끔을 한 번씩 재어 짝을 적는다(docs/verification.md §3.5 7번)
+2026-11-01T13:40:09Z manifest.json 작성

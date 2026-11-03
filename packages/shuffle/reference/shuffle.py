@@ -1,0 +1,88 @@
+# 셔플 재현 규격의 독립 참조 구현(파이썬, 표준 라이브러리만). 시험 기준값 test/vectors.json을 만들고, 누구나 결과 파일을 다시 계산할 때 쓴다(ADR-0050 결정 7, queue-admission §3 '묶음의 첫 구현')
+import hashlib
+import json
+import struct
+
+
+def sha(*parts):
+    h = hashlib.sha256()
+    for p in parts:
+        h.update(p)
+    return h.digest()
+
+
+def commitment(event_id, seed):
+    return sha(b'PEAKET-shuffle-v1', event_id.encode('utf-8'), seed)
+
+
+def mth(leaves):
+    # RFC 6962: 잎 0x00, 노드 0x01, k = n보다 작은 가장 큰 2의 거듭제곱
+    n = len(leaves)
+    if n == 0:
+        return sha(b'')
+    if n == 1:
+        return sha(b'\x00', leaves[0])
+    k = 1
+    while k * 2 < n:
+        k *= 2
+    return sha(b'\x01', mth(leaves[:k]), mth(leaves[k:]))
+
+
+def combined_key(seed, beacon, root, event_id):
+    return sha(seed, beacon, root, event_id.encode('utf-8'))
+
+
+def words(key):
+    i = 0
+    while True:
+        block = sha(key, struct.pack('>Q', i))
+        for w in struct.unpack('>8I', block):
+            yield w
+        i += 1
+
+
+def shuffle(items, key):
+    return shuffle_with(items, words(key))
+
+
+def shuffle_with(items, g):
+    a = list(items)
+    for i in range(len(a) - 1, 0, -1):
+        bound = i + 1
+        limit = (2 ** 32 // bound) * bound
+        while True:
+            r = next(g)
+            if r < limit:
+                break
+        j = r % bound
+        a[i], a[j] = a[j], a[i]
+    return a
+
+
+def h(s):
+    return hashlib.sha256(s.encode()).digest()
+
+
+event = 'evt-ref-1'
+seed = h('seed')
+beacon = h('beacon')
+tokens = sorted([h(f'token-{i}') for i in range(10)])
+root = mth(tokens)
+key = combined_key(seed, beacon, root, event)
+out = shuffle(tokens, key)
+print(json.dumps({
+    'event': event,
+    'seed': seed.hex(),
+    'beacon': beacon.hex(),
+    'tokens': [t.hex() for t in tokens],
+    'commitment': commitment(event, seed).hex(),
+    'merkleRoot': root.hex(),
+    'roots': {str(n): mth(tokens[:n]).hex() for n in [0, 1, 2, 3, 5, 7, 8]},
+    'key': key.hex(),
+    'shuffled': [t.hex() for t in out],
+    'small': shuffle(list(range(5)), key),
+    # 블록 번호는 0부터: 처음 열 단어(두 블록에 걸친다)
+    'firstWords': [w for w, _ in zip(words(key), range(10))],
+    # 거부 표본추출: 셋을 섞을 때 첫 단어 0xFFFFFFFF는 한도 floor(2^32/3)*3 이상이라 버린다
+    'rejection': {'items': [0, 1, 2], 'words': [0xFFFFFFFF, 1, 0], 'out': shuffle_with([0, 1, 2], iter([0xFFFFFFFF, 1, 0]))},
+}, indent=1))

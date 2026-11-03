@@ -1,0 +1,64 @@
+{
+  "type": "record",
+  "name": "CaseRequested",
+  "namespace": "peaket.support",
+  "doc": "CS 처리함 건 요청. 토픽 support.cases-requested, 키 sourceId. core-svc support·review 모듈의 Outbox에서 나간다(ADR-0066). 봇 판정 이의 제기(VERIFICATION_APPEAL)는 DB가 없는 queue-svc가 Outbox 없이 바로 낸다(추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14).",
+  "fields": [
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키. 같은 사건을 다시 보내면 같은 값",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "kind",
+      "doc": "CsCase 종류(data.md cs_case). VERIFICATION_APPEAL은 queue-svc가 내는 봇 판정 이의 제기(설명 요구·재검토 신청)다(추천 적용 2026-10-30, docs/features/bot-defense.md §12). APPEAL은 core-svc support 모듈이 내는 소명(예매 제한·양도 회수 대상 팬의 사정 설명, openapi POST /v1/appeals)이다(추천 적용 2026-10-30, docs/features/transfer-refund.md §7.1)",
+      "type": {
+        "type": "enum",
+        "name": "CaseRequestedKind",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "INQUIRY",
+          "DISPUTE",
+          "MINOR_CONTRACT_CANCEL",
+          "CONTENT_REPORT",
+          "RIGHTS_REQUEST",
+          "VERIFICATION_APPEAL",
+          "APPEAL"
+        ]
+      }
+    },
+    {
+      "name": "sourceId",
+      "doc": "문의 ID(inquiryId), 신고 대상 후기 ID(reviewId), 이의 ID(appealId, queue-svc가 접수 때 만든다), 또는 소명 ID(core DB appeal.id, support 모듈이 만든다)",
+      "type": "string"
+    },
+    {
+      "name": "category",
+      "doc": "문의 유형 코드, 신고 사유 코드(SCALPING·MACRO·ABUSE·RIGHTS·ILLEGAL_FILMING·SPAM·OFF_TOPIC·OTHER), 이의 제기면 격리 때 이용자에게 보인 사유 범주(trust.proto ReasonCategory 이름, 예 REASON_CATEGORY_DEVICE_HISTORY), 또는 소명이면 대상 종류(RESTRICTION·RECLAIM·FRAUD_CASE(부정 예매 소명, 추천 적용 2026-10-31, ADR-0171)). 소명의 대상 ID·계정·본문은 싣지 않고 ops-svc가 support 모듈 내부 API로 읽는다(문의와 같다)",
+      "type": "string"
+    },
+    {
+      "name": "followUp",
+      "doc": "추가 문의면 true(기존 건을 다시 처리 중으로)",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "hold",
+      "doc": "불법 촬영물 신고로 후기를 바로 가렸으면 true(FILMING_HOLD, POL-044)",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "createdAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+# v0 입구의 로컬 kind 값(docs/infra.md §3 'v0 배포', wbs 1.1.4). v0 모놀리스 이미지의 다른 시작 명령이다(배포 단위는 하나).
+# TLS 인증서·키와 공개키 목록(PEAKET_V0_TLS_CERT·PEAKET_V0_TLS_KEY·PEAKET_V0_GATEWAY_JWKS)은 Secret v0-gateway에만 있다.
+# 개인키(토큰 서명 키)는 클러스터에 두지 않는다(tools/local/v0-token.mjs가 이 PC에만 둔다).
+name: v0-gateway
+
+image:
+  repository: peaket/v0-monolith
+  tag: local
+  pullPolicy: Never
+
+env:
+  PEAKET_ENV: local
+  PEAKET_V0_UPSTREAM: http://v0-monolith.v0.svc.cluster.local:8080
+  PEAKET_V0_TOKEN_ISSUER: https://identity.peaket.local
+  PEAKET_V0_ALLOWED_ORIGINS: https://127.0.0.1:8443,https://localhost:8443
+  # 로컬 부하 시험은 부하 발생기가 CDN 몫을 대신해 가상 사용자마다 IP를 붙인다(X-Forwarded-For 한 겹)
+  PEAKET_V0_TRUSTED_PROXY_HOPS: "1"
+  # K6의 v0: 클라이언트 IP마다 초당 10개, 최대 20개 [가정]
+  PEAKET_V0_RATE_PER_SECOND: "10"
+  PEAKET_V0_RATE_BURST: "20"
+  PEAKET_V0_UPSTREAM_TIMEOUT_MS: "20000"
+
+secretEnvFrom: v0-gateway
+
+service:
+  # 입구는 복제 1 [가정]. 레이트 리밋은 파드마다 세므로 실효 상한은 '파드 수 × 한도'다
+  replicas: 1
+  port: 8443
+  command: ["node", "dist/gateway/main.js"]
+  resources:
+    requests: { cpu: 250m, memory: 128Mi }
+    limits: { memory: 256Mi }

@@ -1,0 +1,408 @@
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_rb05_wait_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
+  maxNumber |-> 0 ]
+/\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
+/\ queue_no_rb05_wait_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+
+State 2: <queue_no_rb05_wait_queue_enterPreempt(1,1) line 323, col 3 to line 361, col 72 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_rb05_wait_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
+  maxNumber |-> 0 ]
+/\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] )
+/\ queue_no_rb05_wait_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+
+State 3: <queue_no_rb05_wait_queue_enterPreempt(2,1) line 323, col 3 to line 361, col 72 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_rb05_wait_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
+  maxNumber |-> 0 ]
+/\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+/\ queue_no_rb05_wait_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+
+State 4: <queue_no_rb05_wait_queue_windowEnds line 932, col 3 to line 939, col 72 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_rb05_wait_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
+  maxNumber |-> 0 ]
+/\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_tabs = ( <<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+/\ queue_no_rb05_wait_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+
+State 5: <queue_no_rb05_wait_queue_enterNumber(1,1) line 1051, col 3 to line 1119, col 68 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> TRUE,
+  first |-> 1,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_rb05_wait_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 0],
+  maxNumber |-> 1 ]
+/\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "NUMBERED"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+/\ queue_no_rb05_wait_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+
+State 6: <queue_no_rb05_wait_queue_enterRecord(1,1) line 395, col 3 to line 442, col 68 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> TRUE,
+  first |-> 1,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_env = [windowOpen |-> FALSE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_rb05_wait_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 0],
+  maxNumber |-> 1 ]
+/\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+/\ queue_no_rb05_wait_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+
+State 7: <queue_no_rb05_wait_queue_failoverEv line 958, col 3 to line 975, col 72 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_env = [windowOpen |-> FALSE, rb05Due |-> TRUE, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_no_rb05_wait_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 0],
+  maxNumber |-> 1 ]
+/\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "PREEMPTED"] )
+/\ queue_no_rb05_wait_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+
+State 8: <queue_no_rb05_wait_queue_enterNumber(2,1) line 1051, col 3 to line 1119, col 68 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> TRUE,
+  first |-> 1,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_env = [windowOpen |-> FALSE, rb05Due |-> TRUE, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_no_rb05_wait_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 0],
+  maxNumber |-> 1 ]
+/\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "NUMBERED"] )
+/\ queue_no_rb05_wait_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]
+
+State 9: <queue_no_rb05_wait_queue_enterRecord(2,1) line 395, col 3 to line 442, col 68 of module queue_no_rb05_wait>
+/\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> TRUE,
+  first |-> 1,
+  size |-> 0,
+  members |-> {} ]
+/\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_env = [windowOpen |-> FALSE, rb05Due |-> TRUE, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_no_rb05_wait_queue_ghost = [ issued |->
+      { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
+        [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 2] },
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {},
+  batchTruth |-> [gen |-> 1, closed |-> TRUE, first |-> 1, size |-> 0],
+  maxNumber |-> 1 ]
+/\ queue_no_rb05_wait_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_no_rb05_wait_queue_tabs = ( <<1, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] @@
+  <<1, 2>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"] @@
+  <<2, 1>> :> [seq |-> 1, gen |-> 1, phase |-> "HELD"] )
+/\ queue_no_rb05_wait_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+/\ queue_no_rb05_wait_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  members |-> {} ]

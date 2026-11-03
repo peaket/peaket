@@ -1,0 +1,141 @@
+{
+  "run_id": "2026-11-03-v0-k1-10k-r3",
+  "kpi": "K1",
+  "version": "v0",
+  "profile": "local-10k",
+  "scale": {
+    "users": 10000,
+    "arrival_rps": null,
+    "duration_s": 120,
+    "warmup_s": 30
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v0-queue.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "1a3ef1b2d6fed7e11bf98ca29c95bccdad2b6d15",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-03-v0-k1-10k-r3/",
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 6대(CPU 2·메모리 1024Mi씩, kind 안, k6 실행 구간으로 나눔)",
+    "dropped_iterations": 482731
+  },
+  "started_at": "2026-11-03T03:11:33Z",
+  "ended_at": "2026-11-03T03:14:03Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 244.8715745,
+    "p95_ms": 706.1709588,
+    "p99_ms": 1073.85696302,
+    "error_rate": 0.020230679384854972,
+    "requests": 205480,
+    "rps": 1712.3333333333333,
+    "dropped_iterations": 482731
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "extra": [
+      "hpa.json"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "발생기 0: 발생기가 반복을 시작하지 못함(dropped_iterations 97574); 발생기 1: 발생기가 반복을 시작하지 못함(dropped_iterations 69684); 발생기 2: 발생기가 반복을 시작하지 못함(dropped_iterations 82573); 발생기 3: 발생기가 반복을 시작하지 못함(dropped_iterations 74336); 발생기 4: 발생기가 반복을 시작하지 못함(dropped_iterations 90287); 발생기 5: 발생기가 반복을 시작하지 못함(dropped_iterations 68277)",
+  "checks": [
+    {
+      "name": "entry_p99_200ms",
+      "allowed": 0.01,
+      "trials": 10000,
+      "violations": 0,
+      "cp_upper": 0.0003,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "entry p99 ≤ 200ms"
+    },
+    {
+      "name": "entry_errors",
+      "allowed": 0.001,
+      "trials": 10000,
+      "violations": 0,
+      "cp_upper": 0.0003,
+      "min_trials": 2995,
+      "result": "pass",
+      "target": "entry 오류율 < 0.1%"
+    },
+    {
+      "name": "status_p99_200ms",
+      "allowed": 0.01,
+      "trials": 202440,
+      "violations": 115762,
+      "cp_upper": 0.573644,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "status p99 ≤ 200ms"
+    },
+    {
+      "name": "status_errors",
+      "allowed": 0.001,
+      "trials": 202440,
+      "violations": 4157,
+      "cp_upper": 0.021061,
+      "min_trials": 2995,
+      "result": "fail",
+      "target": "status 오류율 < 0.1%"
+    },
+    {
+      "name": "admission_p99_200ms",
+      "allowed": 0.01,
+      "trials": 3040,
+      "violations": 2132,
+      "cp_upper": 0.714987,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "admission p99 ≤ 200ms"
+    },
+    {
+      "name": "admission_errors",
+      "allowed": 0.001,
+      "trials": 3040,
+      "violations": 0,
+      "cp_upper": 0.000985,
+      "min_trials": 2995,
+      "result": "pass",
+      "target": "admission 오류율 < 0.1%"
+    },
+    {
+      "name": "status_server_p99_200ms",
+      "allowed": 0.01,
+      "trials": 194318,
+      "violations": 0,
+      "cp_upper": 1.5e-05,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "서버 status p99 ≤ 200ms"
+    }
+  ],
+  "latency_crosscheck": {
+    "k6_metric": "http_req_duration{phase:main,route:status}",
+    "k6_p99_ms": 1073.9223910800001,
+    "check": "status_server_p99_200ms",
+    "server_p99_ms": 8.395,
+    "server_within_ratio": 1.0,
+    "diff_ms": 1065.528,
+    "target_ms": 200.0,
+    "suspect": true
+  },
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 6대 CPU 평균 최고 15.4%·메모리 최대 43.6%, VU 최대 합 3685, 시나리오 오류 0건, 계획 최고 도착률 5052/s(docs/verification.md §3.9·§3.10); status: 202440건, p99 929.2~1073.9ms, 실패 4157건; admission: 3040건, p99 919.6~1117.2ms, 실패 0건; HPA: 첫 확장 22초, 새 파드 첫 준비 25초, 최대 복제 4(부하 시작 기준)",
+  "collected_at": "2026-11-03T03:14:39Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

@@ -1,0 +1,12 @@
+{
+  "name": "peaket-spec-check",
+  "private": true,
+  "version": "0.0.0",
+  "description": "규칙 모델 검사 도구(wbs 0.9.1, docs/verification.md §2.2). 뿌리 작업 공간에 넣지 않은 따로 작업 공간이다. Quint 판은 여기서만 고정한다(tools/spec-check/README.md)",
+  "type": "module",
+  "packageManager": "pnpm@12.16.0",
+  "engines": { "node": ">=24" },
+  "dependencies": {
+    "@informalsystems/quint": "0.33.1"
+  }
+}

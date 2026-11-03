@@ -1,0 +1,37 @@
+# v0 모놀리스의 로컬 kind 값(docs/infra.md §3 'v0 배포', wbs 1.1.4). 공용 차트(deploy/charts/peaket-service)의 릴리스 v0-monolith.
+# 올리는 법: node tools/local/cluster.mjs v0 (네임스페이스 v0). 비밀(DB·Redis 주소, 시뮬레이터 시험 키)은 Secret v0-monolith에만 있다.
+name: v0-monolith
+
+image:
+  repository: peaket/v0-monolith
+  tag: local
+  pullPolicy: Never
+
+env:
+  PEAKET_ENV: local
+  # 변경분 WebSocket의 허용 출처(입구 포트 전달 주소). 입구의 쓰기 출처 확인과 같은 목록이다
+  PEAKET_V0_ALLOWED_ORIGINS: https://127.0.0.1:8443,https://localhost:8443
+  PEAKET_V0_PG_URL: http://pg-simulator.v0.svc.cluster.local:8790
+
+# PEAKET_V0_DATABASE_URL·PEAKET_V0_REDIS_URL·PG_SIMULATOR_SECRET_KEY
+secretEnvFrom: v0-monolith
+
+service:
+  port: 8080
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
+  resources:
+    # HPA 사용률의 분모(목표 70%면 파드마다 평균 350m를 넘을 때 늘린다)
+    requests: { cpu: 500m, memory: 384Mi }
+    limits: { memory: 768Mi }
+  # K9의 v0: CPU 사용률만 보는 HPA, 확장 동작은 쿠버네티스 기본값(docs/architecture.md §9.3)
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+  # 앱은 신원 머리를 그대로 믿으므로 앱 포트는 입구 파드만 닿는다
+  networkPolicy:
+    enabled: true
+    appFromPodLabels:
+      app.kubernetes.io/name: v0-gateway
+    managementFromNamespaces: [observability]

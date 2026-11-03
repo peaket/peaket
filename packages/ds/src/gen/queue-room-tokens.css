@@ -1,0 +1,87 @@
+/*
+ * 이 파일은 손으로 고치지 않는다. docs/design/tokens.json에서 만든다.
+ * 다시 만들기: pnpm --filter @peaket/ds tokens (차이 검사: tokens:check)
+ */
+/*
+ * 대기실 경량 페이지의 키트 변수 블록(styles/queue-room.css가 맨 앞에서 싣는다). kit-tokens.css에서 좌석·SLO·heat·스위치 변수를 뺀 것이다.
+ */
+@layer components {
+  .pk {
+    --surface: #ffffff;
+    --surface-muted: #f7f8f9;
+    --surface-basement: #f3f4f5;
+    --surface-raised: #ffffff;
+    --surface-disabled: #f3f4f5;
+    --fill-weak: #f3f4f5;
+    --fill-weak-strong: #eeeff1;
+    --border: #dcdee3;
+    --border-input: #555d6d;
+    --border-primary: #4338CA;
+    --text: #1a1c20;
+    --text-muted: #555d6d;
+    --text-disabled: #d1d3d8;
+    --text-on-primary: #ffffff;
+    --primary: #4338CA;
+    --primary-hover: #332B9E;
+    --primary-subtle: #DFE2FF;
+    --link: #4338CA;
+    --success: #00745f;
+    --success-subtle: #edfaf6;
+    --warning: #755b22;
+    --warning-subtle: #fff7de;
+    --danger: #ca1d13;
+    --danger-subtle: #fdf0f0;
+    --on-danger: #ffffff;
+    --info-subtle: #eff6ff;
+    --focus-ring: #5B5BE8;
+    --inverse: #2a3038;
+    --on-inverse: #ffffff;
+    --shadow-sm: 0px 1px 4px 0px #00000014;
+    --shadow-md: 0px 2px 10px 0px #0000001a;
+    --shadow-lg: 0px 4px 16px 0px #0000001f;
+    --scrim: #0000007a;
+    --r-sm: 4px;
+    --r-md: 8px;
+    --r-lg: 12px;
+    --r-xl: 16px;
+    --r-2xl: 24px;
+    --font: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  .pk.dark {
+    --surface: #16171b;
+    --surface-muted: #1d2025;
+    --surface-basement: #000000;
+    --surface-raised: #1d2025;
+    --surface-disabled: #2b2e35;
+    --fill-weak: #2b2e35;
+    --fill-weak-strong: #393d46;
+    --border: #393d46;
+    --border-input: #dcdee3;
+    --border-primary: #5B5BE8;
+    --text: #f3f4f5;
+    --text-muted: #dcdee3;
+    --text-disabled: #5b606a;
+    --text-on-primary: #ffffff;
+    --primary: #5B5BE8;
+    --primary-hover: #4338CA;
+    --primary-subtle: #1C1A55;
+    --link: #A9B0FF;
+    --success: #22b27f;
+    --success-subtle: #202926;
+    --warning: #ca901c;
+    --warning-subtle: #302819;
+    --danger: #ff6e60;
+    --danger-subtle: #322323;
+    --on-danger: #16171b;
+    --info-subtle: #202742;
+    --focus-ring: #A9B0FF;
+    --inverse: #e9eaec;
+    --on-inverse: #16171b;
+    --shadow-sm: 0px 1px 4px 0px #00000080;
+    --shadow-md: 0px 2px 10px 0px #000000ad;
+    --shadow-lg: 0px 4px 16px 0px #000000cc;
+    --scrim: #000000a3;
+  }
+}

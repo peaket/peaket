@@ -1,0 +1,137 @@
+# 공용 CI(docs/devops.md §3.1). 모든 PR에서 돈다. 경로 필터로 워크플로를 건너뛰면 필수 검사가 '대기'로 남기 때문이다.
+# 판단은 tools/ci/*.mjs가 하고 여기서는 부르기만 한다. 필수 검사는 마지막 잡 ci-summary다.
+name: ci
+
+on:
+  # edited: 대상 가지를 바꾸면 새 대상과 견줘 범위를 다시 고른다(제목·본문만 고쳐도 다시 돈다)
+  # labeled·unlabeled: 계약 깨짐 예외의 breaking-approved 라벨을 붙이거나 떼면 다시 판정한다(contract-check)
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+  push:
+    branches: [develop, main, 'release/**', 'hotfix/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      docs: ${{ steps.scope.outputs.docs }}
+      contracts: ${{ steps.scope.outputs.contracts }}
+      tools: ${{ steps.scope.outputs.tools }}
+      infra: ${{ steps.scope.outputs.infra }}
+      js: ${{ steps.scope.outputs.js }}
+      js_all: ${{ steps.scope.outputs.js_all }}
+      ci: ${{ steps.scope.outputs.ci }}
+      kind: ${{ steps.scope.outputs.kind }}
+      specs: ${{ steps.scope.outputs.specs }}
+      specs_full: ${{ steps.scope.outputs.specs_full }}
+      image: ${{ steps.scope.outputs.image }}
+      loadtest: ${{ steps.scope.outputs.loadtest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # PR은 대상 가지와의 병합 기준, 푸시는 직전 커밋과 견준다. 기준이 없으면 스크립트가 전체를 고른다
+      - id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node tools/ci/changes.mjs --base "$BASE_SHA" --head "$HEAD_SHA"
+
+  # 범위 잡은 changes가 실패해도 돈다(범위를 고르지 못하면 전체를 돈다, D-T47 ④)
+  docs-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs == 'true') }}
+    uses: ./.github/workflows/docs-check.yml
+
+  tools-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.tools == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.infra == 'true' || needs.changes.outputs.js == 'true') }}
+    uses: ./.github/workflows/tools-check.yml
+
+  # 부하 시험 점검(docs/devops.md §3.1): 시나리오 계산·실행 도구 시험과 k6 형식 검사
+  loadtest-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.loadtest == 'true') }}
+    uses: ./.github/workflows/loadtest-check.yml
+
+  contract-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.contracts == 'true') }}
+    uses: ./.github/workflows/contract-check.yml
+
+  # 자바스크립트 작업 공간(apps·services·packages)의 타입 검사·시험·빌드. 넓게 쓰이는 것이 바뀌면 전체(§3.1 2번)
+  node:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.js == 'true') }}
+    uses: ./.github/workflows/ci-node.yml
+    with:
+      all: ${{ needs.changes.result != 'success' || needs.changes.outputs.js_all == 'true' }}
+      base: ${{ github.event.pull_request.base.sha || github.event.before }}
+
+  # 로컬 kind 클러스터 시험(무겁다): 클러스터 정의·공용 차트·릴레이 코드가 바뀌었거나 develop 푸시(§3.3 E2E는 CI의 kind)
+  kind:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.kind == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/develop')) }}
+    uses: ./.github/workflows/ci-kind.yml
+
+  # 이미지 빌드 시험(푸시 없이, docs/devops.md §3.2): 이미지가 있는 배포 단위와 그 Dockerfile이 담는 것이 바뀌었을 때.
+  # 플랫폼마다(amd64·arm64) 그 러너에서 빌드하고 스모크한다(build-image.yml ①, 게시는 wbs 0.1.5)
+  image:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.image == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: services/v0-monolith/Dockerfile
+            image: v0-monolith
+          - dockerfile: services/pg-simulator/Dockerfile
+            image: pg-simulator
+          - dockerfile: packages/platform/template/Dockerfile
+            image: example-svc
+    uses: ./.github/workflows/build-image.yml
+    with:
+      dockerfile: ${{ matrix.dockerfile }}
+      image: ${{ matrix.image }}
+
+  # 규칙 모델 검사(docs/verification.md §2.2): 명세·검사 도구가 바뀌면 시뮬레이션, 명세 목록이 적은 관련 ADR이 바뀌면 TLC 전수 검사
+  spec-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.specs == 'true' || needs.changes.outputs.specs_full == 'true') }}
+    uses: ./.github/workflows/spec-check.yml
+    with:
+      mode: ${{ (needs.changes.result != 'success' || needs.changes.outputs.specs_full == 'true') && 'full' || 'pr' }}
+
+  iac-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.infra == 'true') }}
+    uses: ./.github/workflows/iac-check.yml
+
+  ci-summary:
+    needs: [changes, docs-check, tools-check, loadtest-check, contract-check, node, iac-check, kind, spec-check, image]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/ci
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node tools/ci/ci-summary.mjs

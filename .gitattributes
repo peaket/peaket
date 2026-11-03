@@ -1,2 +1,11 @@
-# 줄바꿈을 바꾸지 않는다. 문서마다 CRLF와 LF가 섞여 있어 바이트 그대로 기록한다.
-* -text
+# 텍스트는 모두 LF로 둔다(기술 검토 낮음-168, 2026-10-28)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.pdf binary
+*.ico binary
+*.woff binary
+*.woff2 binary

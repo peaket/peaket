@@ -1,0 +1,48 @@
+# 로컬 Valkey 8.1(대기열 v0의 Redis, 시험용 임시 저장소, docs/infra.md §3 'v0 배포'). 운영은 ElastiCache다(docs/infra.md §1).
+# 이미지는 통합 시험(services/v0-monolith/test-int)과 같은 valkey/valkey:8.1-alpine을 다이제스트(여러 플랫폼 목록)로 고정한다(2026-11-03 확인).
+# 디스크에 저장하지 않는다(--save "" --appendonly no). 클러스터 안에서만 닿는다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: peaket-local
+spec:
+  selector: { app: valkey }
+  ports:
+    - { name: redis, port: 6379, targetPort: 6379 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: peaket-local
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: valkey }
+  template:
+    metadata:
+      labels: { app: valkey }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 999, runAsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: valkey
+          image: valkey/valkey@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a
+          args: ["valkey-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - { containerPort: 6379 }
+          readinessProbe:
+            exec: { command: ["valkey-cli", "ping"] }
+            periodSeconds: 2
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - { name: data, emptyDir: {} }

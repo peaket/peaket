@@ -1,0 +1,41 @@
+{
+  "test": "kafka-client",
+  "case": "max",
+  "client": "@confluentinc/kafka-javascript 1.11.0",
+  "brokers": [
+    "kafka-1:9092",
+    "kafka-2:9092",
+    "kafka-3:9092"
+  ],
+  "max": {
+    "conc": 64,
+    "duration_s": 30,
+    "warmup_s": 5,
+    "completed": 57049,
+    "errors": 0,
+    "throughput_per_s": 1902,
+    "latency": {
+      "count": 57049,
+      "p50_ms": 33.408,
+      "p90_ms": 37.461,
+      "p99_ms": 45.099,
+      "p999_ms": 77.522,
+      "max_ms": 113.862,
+      "mean_ms": 33.637
+    },
+    "messages_per_s": 190200
+  },
+  "bench": {
+    "p99_ms": 45.099,
+    "error_rate": 0,
+    "requests": 5704900,
+    "dropped": 0,
+    "throughput_per_s": 190200
+  },
+  "generator_cpu_pct": 132.4,
+  "host": {
+    "cpu_pct": 9.8,
+    "procs_running_end": 1,
+    "vm_cpus": 32
+  }
+}

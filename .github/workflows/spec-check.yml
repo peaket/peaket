@@ -1,0 +1,66 @@
+# 규칙 모델 검사(docs/verification.md §2.2, wbs 0.9.1). 판단은 tools/spec-check/spec-check.mjs가 하고 여기서는 부르기만 한다.
+# - pr: 명세(specs/)·검사 도구(tools/spec-check/)·이 워크플로가 바뀌는 PR마다 형식 검사와 검사마다 시뮬레이션 1만 회(고정 시드)
+# - full: TLC 전수 검사. 주 1회(월요일 03:00 KST)와, 명세 목록(specs/specs.json)이 적은 관련 ADR이 바뀔 때(ci.yml의 specs_full)
+#   결과 파일(specs/results/)은 내려받을 묶음으로 남긴다. 저장소의 결과 파일은 사람이 로컬에서 `full --write`로 고쳐 커밋한다
+# 검사 도구(Quint, Apalache 묶음 안의 TLC, Quint 평가기)는 고정 판·고정 해시로 받는다(tools/spec-check/fetch-tools.mjs). 외부 계정은 필요 없다
+# GitHub는 워크플로 파일이 바뀐 푸시에서 그 워크플로를 등록한다. 첫 푸시(2026-11-03)에 함께 올라간 이 파일은 등록되지 않아 수동·예약 실행이 돌지 않았다(FND-160에서 찾음).
+name: spec-check
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: pr(형식 검사·시뮬레이션) 또는 full(TLC 전수 검사)
+        type: string
+        required: true
+  schedule:
+    - cron: '0 18 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  spec:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # Apalache 0.62.x(TLC 포함)는 Java 17 이상. 로컬 컨테이너(tools/spec-check/Dockerfile)와 같은 Temurin 21
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      # pnpm은 검사 도구 작업 공간의 packageManager 판으로 받고, 잠금 파일대로만 설치한다(docs/devops.md §4.4)
+      - run: |
+          pm=$(node -p "require('./tools/spec-check/package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile --dir tools/spec-check
+      # 받은 묶음은 고정표가 같으면 다시 쓴다. 다시 쓸 때도 fetch-tools.mjs가 핵심 파일 해시를 다시 본다
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.quint
+          key: quint-tools-${{ hashFiles('tools/spec-check/fetch-tools.mjs') }}
+      - run: node tools/spec-check/fetch-tools.mjs
+      - run: node --test "tools/spec-check/*.test.mjs"
+      - env:
+          MODE: ${{ inputs.mode || 'full' }}
+        run: |
+          case "$MODE" in pr|full) ;; *) echo "::error::mode는 pr 또는 full이다: $MODE"; exit 1 ;; esac
+          if [ "$MODE" = full ]; then
+            node tools/spec-check/spec-check.mjs full --write
+          else
+            node tools/spec-check/spec-check.mjs pr
+          fi
+      - if: ${{ always() && (inputs.mode || 'full') == 'full' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: spec-results
+          path: specs/results/
+          if-no-files-found: ignore

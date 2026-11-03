@@ -1,0 +1,9 @@
+# 내부 gRPC 계약 초안의 buf 설정(형식 검사와 하위 호환 검사).
+# 정본 위치는 이 폴더(peaket 저장소의 docs/api/proto/)이고, wbs 0.2.2에서 계약 검사를 붙이기 전까지는 초안이다. 만든 코드는 packages/contracts에 생긴다(ADR-0165). 안내는 README.md.
+version: v2
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

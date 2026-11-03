@@ -1,0 +1,6 @@
+{
+  "scenario": "loadtest/scenarios/v0-queue.js",
+  "rounds": 5,
+  "prepare": ["node", "loadtest/nightly/prepare.mjs"],
+  "k6": ["node", "loadtest/nightly/k6-run.mjs", "--users", "1000", "--entry-rate", "100", "--admit-per-second", "2", "--warm", "10", "--main", "30", "--cpus", "1", "--memory-mi", "1024", "--settle"]
+}

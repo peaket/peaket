@@ -1,0 +1,56 @@
+{
+  "run_id": "2026-11-03-nginx-expiry-next-r1-local-poc",
+  "kpi": "NFR-002",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": 10,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "services/queue-svc/test-sim/nginx-expiry.sim.test.ts",
+    "args": "원본 Expires = 다음 초 경계(gen + 1초, 지금 규칙), nginx 1.27 캐시(Q-T47과 같은 설정), 100ms마다 10초",
+    "open_model": true
+  },
+  "commit": {
+    "code": "1c8086366bd73b3d70296c56716d2e56b312be04",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 host(측정 프로세스)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-03T12:37:30Z",
+  "ended_at": "2026-11-03T12:37:56Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 1969,
+    "error_rate": 0,
+    "requests": 81,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "nginx 만료 확인(Q-T47 원인): Expires = gen + 1초이면 받은 내용의 나이 p50 985ms·최대 1969ms, 1초 넘은 응답 40/81, 원본 요청 초당 0.6, 캐시 {\"MISS\":1,\"HIT\":75,\"EXPIRED\":5}. 원본은 이 PC의 작은 HTTP 서버(요청마다 지금 초의 내용). 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-03T13:16:42Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

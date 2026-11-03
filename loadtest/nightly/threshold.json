@@ -1,0 +1,6 @@
+{
+  "max_ratio": null,
+  "aa_ratios": [],
+  "decided_at": null,
+  "basis": "A/A 실행 10번 전이다. BSL-090에서 nightly.py aa-threshold로 정하고, 그 전에는 야간 비교가 경고만 한다(docs/devops.md §3.3, D-T40 ③)"
+}

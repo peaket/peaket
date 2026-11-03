@@ -1,0 +1,494 @@
+[
+  {
+    "rep": 1,
+    "drawMs": 469.4,
+    "inpMs": 88,
+    "lcpMs": 428,
+    "cls": 0,
+    "loafCount": 3,
+    "loafMs": 177.8,
+    "longTasks": 3,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 61.20000000298023,
+      "blockingDuration": 10,
+      "startTime": 3039.5999999940395,
+      "scripts": [
+        {
+          "invoker": "CANVAS#map.onpointermove",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 55.70000000298023
+        }
+      ]
+    }
+  },
+  {
+    "rep": 2,
+    "drawMs": 471.1,
+    "inpMs": 96,
+    "lcpMs": 244,
+    "cls": 0,
+    "loafCount": 3,
+    "loafMs": 229.1,
+    "longTasks": 5,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 82.3999999910593,
+      "blockingDuration": 26.4,
+      "startTime": 4104.800000011921,
+      "scripts": [
+        {
+          "invoker": "DOMWebSocket.onmessage",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 72.79999999701977
+        }
+      ]
+    }
+  },
+  {
+    "rep": 3,
+    "drawMs": 406.6,
+    "inpMs": 72,
+    "lcpMs": 116,
+    "cls": 0,
+    "loafCount": 1,
+    "loafMs": 87.4,
+    "longTasks": 0,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 87.40000000596046,
+      "blockingDuration": 0,
+      "startTime": 3731.8999999910593,
+      "scripts": [
+        {
+          "invoker": "Response.json.then",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 17.30000001192093
+        }
+      ]
+    }
+  },
+  {
+    "rep": 4,
+    "drawMs": 413.9,
+    "inpMs": 56,
+    "lcpMs": 116,
+    "cls": 0,
+    "loafCount": 1,
+    "loafMs": 53.7,
+    "longTasks": 0,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 53.70000000298023,
+      "blockingDuration": 0,
+      "startTime": 3670,
+      "scripts": []
+    }
+  },
+  {
+    "rep": 5,
+    "drawMs": 571.7,
+    "inpMs": 56,
+    "lcpMs": 228,
+    "cls": 0,
+    "loafCount": 1,
+    "loafMs": 107.7,
+    "longTasks": 0,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 107.70000000298023,
+      "blockingDuration": 0,
+      "startTime": 1594.2000000029802,
+      "scripts": [
+        {
+          "invoker": "CANVAS#map.onwheel",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 23.400000005960464
+        }
+      ]
+    }
+  },
+  {
+    "rep": 6,
+    "drawMs": 419.1,
+    "inpMs": 56,
+    "lcpMs": 108,
+    "cls": 0,
+    "loafCount": 1,
+    "loafMs": 93.7,
+    "longTasks": 0,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 93.69999998807907,
+      "blockingDuration": 0,
+      "startTime": 1455.7000000029802,
+      "scripts": [
+        {
+          "invoker": "CANVAS#map.onwheel",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 21.400000005960464
+        }
+      ]
+    }
+  },
+  {
+    "rep": 7,
+    "drawMs": 436.9,
+    "inpMs": 72,
+    "lcpMs": 112,
+    "cls": 0,
+    "loafCount": 2,
+    "loafMs": 152.1,
+    "longTasks": 2,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 84.09999999403954,
+      "blockingDuration": 0,
+      "startTime": 2463.7000000029802,
+      "scripts": [
+        {
+          "invoker": "CANVAS#map.onwheel",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 16.69999998807907
+        }
+      ]
+    }
+  },
+  {
+    "rep": 8,
+    "drawMs": 439.7,
+    "inpMs": 112,
+    "lcpMs": 112,
+    "cls": 0,
+    "loafCount": 2,
+    "loafMs": 193.7,
+    "longTasks": 1,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 110.79999999701977,
+      "blockingDuration": 56.8,
+      "startTime": 3968.2999999970198,
+      "scripts": [
+        {
+          "invoker": "DOMWebSocket.onmessage",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 103.3999999910593
+        }
+      ]
+    }
+  },
+  {
+    "rep": 9,
+    "drawMs": 407,
+    "inpMs": 72,
+    "lcpMs": 108,
+    "cls": 0,
+    "loafCount": 5,
+    "loafMs": 499.4,
+    "longTasks": 1,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 229.29999999701977,
+      "blockingDuration": 0,
+      "startTime": 1946.3999999910593,
+      "scripts": [
+        {
+          "invoker": "CANVAS#map.onwheel",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 17.899999991059303
+        }
+      ]
+    }
+  },
+  {
+    "rep": 10,
+    "drawMs": 453.1,
+    "inpMs": 64,
+    "lcpMs": 104,
+    "cls": 0,
+    "loafCount": 1,
+    "loafMs": 52.9,
+    "longTasks": 3,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 52.8999999910593,
+      "blockingDuration": 0,
+      "startTime": 3955.7000000029802,
+      "scripts": [
+        {
+          "invoker": "DOMWebSocket.onmessage",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 35
+        }
+      ]
+    }
+  },
+  {
+    "rep": 11,
+    "drawMs": 445.1,
+    "inpMs": 64,
+    "lcpMs": 108,
+    "cls": 0,
+    "loafCount": 2,
+    "loafMs": 173.6,
+    "longTasks": 2,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 116,
+      "blockingDuration": 0,
+      "startTime": 2479,
+      "scripts": [
+        {
+          "invoker": "CANVAS#map.onwheel",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 18.600000008940697
+        }
+      ]
+    }
+  },
+  {
+    "rep": 12,
+    "drawMs": 433.1,
+    "inpMs": 56,
+    "lcpMs": 108,
+    "cls": 0,
+    "loafCount": 0,
+    "loafMs": 0,
+    "longTasks": 0,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": null
+  },
+  {
+    "rep": 13,
+    "drawMs": 1387.6,
+    "inpMs": 72,
+    "lcpMs": 1036,
+    "cls": 0,
+    "loafCount": 2,
+    "loafMs": 111.3,
+    "longTasks": 0,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 58.400000005960464,
+      "blockingDuration": 0,
+      "startTime": 2550.5999999940395,
+      "scripts": [
+        {
+          "invoker": "CANVAS#map.onwheel",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 21.399999991059303
+        }
+      ]
+    }
+  },
+  {
+    "rep": 14,
+    "drawMs": 484,
+    "inpMs": 88,
+    "lcpMs": 116,
+    "cls": 0,
+    "loafCount": 4,
+    "loafMs": 357.1,
+    "longTasks": 3,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#hold",
+    "worstLoaf": {
+      "duration": 132.29999999701977,
+      "blockingDuration": 72.1,
+      "startTime": 3085.5,
+      "scripts": [
+        {
+          "invoker": "CANVAS#map.onpointermove",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 112.5
+        }
+      ]
+    }
+  },
+  {
+    "rep": 15,
+    "drawMs": 450.8,
+    "inpMs": 48,
+    "lcpMs": 116,
+    "cls": 0,
+    "loafCount": 2,
+    "loafMs": 151.2,
+    "longTasks": 1,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 94.3999999910593,
+      "blockingDuration": 32.2,
+      "startTime": 3926.1000000089407,
+      "scripts": [
+        {
+          "invoker": "Response.json.then",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 65.29999999701977
+        }
+      ]
+    }
+  },
+  {
+    "rep": 16,
+    "drawMs": 452.7,
+    "inpMs": 152,
+    "lcpMs": 112,
+    "cls": 0,
+    "loafCount": 5,
+    "loafMs": 491.8,
+    "longTasks": 4,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 131.20000000298023,
+      "blockingDuration": 74.4,
+      "startTime": 3750.9000000059605,
+      "scripts": [
+        {
+          "invoker": "CANVAS#map.onpointerup",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 76.30000001192093
+        }
+      ]
+    }
+  },
+  {
+    "rep": 17,
+    "drawMs": 473.5,
+    "inpMs": 168,
+    "lcpMs": 108,
+    "cls": 0,
+    "loafCount": 1,
+    "loafMs": 150.2,
+    "longTasks": 1,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 150.20000000298023,
+      "blockingDuration": 90,
+      "startTime": 3544.7999999970198,
+      "scripts": [
+        {
+          "invoker": "CANVAS#map.onpointerup",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 110.5
+        }
+      ]
+    }
+  },
+  {
+    "rep": 18,
+    "drawMs": 559.4,
+    "inpMs": 64,
+    "lcpMs": 132,
+    "cls": 0,
+    "loafCount": 0,
+    "loafMs": 0,
+    "longTasks": 0,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": null
+  },
+  {
+    "rep": 19,
+    "drawMs": 441.6,
+    "inpMs": 80,
+    "lcpMs": 116,
+    "cls": 0,
+    "loafCount": 4,
+    "loafMs": 328.1,
+    "longTasks": 2,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 119.1000000089407,
+      "blockingDuration": 59.7,
+      "startTime": 3986.8999999910593,
+      "scripts": [
+        {
+          "invoker": "DOMWebSocket.onmessage",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 100.5
+        }
+      ]
+    }
+  },
+  {
+    "rep": 20,
+    "drawMs": 464.9,
+    "inpMs": 56,
+    "lcpMs": 100,
+    "cls": 0,
+    "loafCount": 2,
+    "loafMs": 189.8,
+    "longTasks": 3,
+    "heapMb": 4.9,
+    "picked": true,
+    "held": true,
+    "inpTarget": "#map",
+    "worstLoaf": {
+      "duration": 102.80000001192093,
+      "blockingDuration": 13.1,
+      "startTime": 4004.7999999970198,
+      "scripts": [
+        {
+          "invoker": "Response.json.then",
+          "sourceURL": "https://127.0.0.1:8443/v0/seatmap/assets/seatmap-page.js",
+          "duration": 60.900000005960464
+        }
+      ]
+    }
+  }
+]

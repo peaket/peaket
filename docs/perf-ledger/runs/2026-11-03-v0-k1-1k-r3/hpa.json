@@ -1,0 +1,24 @@
+{
+  "loadStartMs": 1793674097070,
+  "rescales": [
+    {
+      "atS": 26.9,
+      "size": 3
+    }
+  ],
+  "firstRescaleS": 26.9,
+  "newPods": [
+    {
+      "name": "v0-monolith-868d4cccf-gqdww",
+      "createdS": 26.9,
+      "readyS": 29.9
+    },
+    {
+      "name": "v0-monolith-868d4cccf-m28r7",
+      "createdS": 26.9,
+      "readyS": 29.9
+    }
+  ],
+  "firstNewReadyS": 29.9,
+  "maxSize": 3
+}

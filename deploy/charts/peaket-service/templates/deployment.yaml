@@ -1,0 +1,85 @@
+{{- if .Values.service.enabled }}
+{{- $name := include "peaket.name" . }}
+# 서비스 파드. 쿠버네티스 API를 부르지 않으므로 서비스 계정 토큰을 붙이지 않는다(ASVS v5.0.0-13.2.2)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "peaket.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "peaket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: service
+spec:
+  {{- /* HPA를 켜면 복제 수를 적지 않는다(HPA가 정한 수를 다시 올릴 때 되돌리지 않게, docs/infra.md §3 'v0 배포') */}}
+  {{- if not .Values.service.autoscaling.enabled }}
+  replicas: {{ .Values.service.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/component: service
+  template:
+    metadata:
+      labels:
+        {{- include "peaket.labels" . | nindent 8 }}
+        app.kubernetes.io/component: service
+      # 로컬 관측 최소의 Prometheus가 관리 포트 /metrics를 긁는다(docs/observability.md §3 '로컬 관측 최소와 템플릿 대시보드').
+      # 운영은 PodMonitor로 수집하므로(ADR-0076) 이 주석은 쓰지 않을 뿐 해가 없다
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.managementPort }}"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.service.terminationGracePeriodSeconds }}
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: app
+          image: {{ include "peaket.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: {{- toYaml .Values.service.command | nindent 12 }}
+          ports:
+            - { name: http, containerPort: {{ .Values.service.port }} }
+            - { name: management, containerPort: {{ .Values.managementPort }} }
+          env:
+            {{- include "peaket.commonEnv" . | nindent 12 }}
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            {{- range $k, $v := .Values.service.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          {{- if .Values.secretEnvFrom }}
+          envFrom:
+            - secretRef: { name: {{ .Values.secretEnvFrom }} }
+          {{- end }}
+          {{- include "peaket.probes" . | nindent 10 }}
+          lifecycle:
+            preStop:
+              sleep: { seconds: {{ .Values.service.preStopSleepSeconds }} }
+          resources: {{- toYaml .Values.service.resources | nindent 12 }}
+          securityContext: {{- include "peaket.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "peaket.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/component: service
+  ports:
+    - { name: http, port: {{ .Values.service.port }}, targetPort: http }
+{{- end }}

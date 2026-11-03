@@ -1,0 +1,61 @@
+{
+  "run_id": "2026-11-03-v0-k1-1k-r2-k9",
+  "kpi": "K9",
+  "version": "v0",
+  "profile": "local-1k",
+  "scale": {
+    "users": 1000,
+    "arrival_rps": null,
+    "duration_s": 151,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v0-queue.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "960134f81692d6f7a78bcdad395c7abe2f22de47",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-03-v0-k1-1k-r2-k9/",
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 2대(CPU 2·메모리 1024Mi씩, kind 안)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-03T02:42:09Z",
+  "ended_at": "2026-11-03T02:44:41Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 1.0170915,
+    "p95_ms": 1.694844,
+    "p99_ms": 2.5964457999999953,
+    "error_rate": 0,
+    "requests": 2877,
+    "rps": 23.975,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "extra": [
+      "hpa.json"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "K1 실행 2026-11-03-v0-k1-1k-r2와 같은 실행의 HPA 시간선(부하 시작 기준): 첫 확장 19.1초, 늘린 파드 첫 준비 22.1초(목표 60초 미만, K9 ①), 최대 복제 2, 새 파드 1개. 앱 CPU HPA 목표 70%·최소 1·최대 4(deploy/envs/local/v0-monolith.yaml), 쿠버네티스 기본 확장 동작",
+  "collected_at": "2026-11-03T02:44:47Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

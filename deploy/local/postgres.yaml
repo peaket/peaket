@@ -1,0 +1,45 @@
+# 로컬 PostgreSQL 18(시험용, 임시 저장소). 운영은 Aurora PostgreSQL이다(docs/infra.md §1).
+# 비밀번호는 합성 시험 값이다(로컬·CI 클러스터 안에서만 닿는다, 비밀이 아니다). 실제 비밀은 저장소에 두지 않는다(docs/security/secrets-and-keys.md).
+# 이미지는 통합 시험(packages/platform/test-int)과 같은 postgres:18-alpine을 다이제스트로 고정한다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: peaket-local
+spec:
+  selector: { app: postgres }
+  ports:
+    - { name: pg, port: 5432, targetPort: 5432 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: peaket-local
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: postgres
+          image: postgres@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
+          env:
+            - { name: POSTGRES_PASSWORD, value: peaket-local }
+            - { name: POSTGRES_DB, value: peaket }
+          ports:
+            - { containerPort: 5432 }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "postgres"] }
+            periodSeconds: 2
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql }
+      volumes:
+        - { name: data, emptyDir: {} }

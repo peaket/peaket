@@ -1,0 +1,1 @@
+# AsyncAPI 메시지 본문 깨짐 예외(oasdiff --err-ignore). 경로는 GET /messages/<메시지 이름>이다. 형식은 openapi-ignore.txt와 같다.

@@ -1,0 +1,53 @@
+{
+  "run_id": "2026-11-01-vt33-max-node-redis-tls-r3-local-poc",
+  "kpi": "V-T33",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": 25,
+    "warmup_s": 5
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/rate.mjs",
+    "args": "--client node-redis --op incr --model closed --conc 256",
+    "open_model": false
+  },
+  "commit": {
+    "code": "8abe9fdd7e3a5f37d8eab3152e976f35a3b6bbf5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": "2026-11-01-vt33-max-node-redis-notls-r1-local-poc",
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 1",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-01T08:47:04Z",
+  "ended_at": "2026-11-01T08:47:36Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": null,
+    "error_rate": 0,
+    "requests": 2607616,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "verdict": null,
+  "notes": "V-T33 ① node-redis 자동 파이프라이닝 최대 처리량(닫힌 모델, 동시 256, 지연은 참고값), 프로세스 하나 CPU 1. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표",
+  "collected_at": "2026-11-01T13:39:50Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

@@ -1,0 +1,113 @@
+{
+  "run_id": "2026-11-03-v0-k7-peak-r3",
+  "kpi": "K7",
+  "version": "v0",
+  "profile": "local-100k",
+  "scale": {
+    "users": 18002,
+    "arrival_rps": 300.0,
+    "duration_s": 50,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v0-payment.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "0aadf9400b21f2a9946cd802f18db1b4144ebddd",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-03-v0-k7-peak-r3/",
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 1대(CPU 4·메모리 4096Mi씩, kind 안)",
+    "dropped_iterations": 92
+  },
+  "started_at": "2026-11-03T05:54:45Z",
+  "ended_at": "2026-11-03T05:55:45Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 121.729082,
+    "p95_ms": 629.4315504500004,
+    "p99_ms": 1198.0877236800002,
+    "error_rate": 0.4084244953197248,
+    "requests": 35468,
+    "rps": 709.36,
+    "dropped_iterations": 92
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "invariants": "invariants.csv",
+    "extra": [
+      "payment-state.json",
+      "invariants-detail.ndjson"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "발생기가 반복을 시작하지 못함(dropped_iterations 92)",
+  "checks": [
+    {
+      "name": "hold_p99_50ms",
+      "allowed": 0.01,
+      "trials": 14955,
+      "violations": 14645,
+      "cp_upper": 0.981152,
+      "min_trials": 299,
+      "result": "fail",
+      "target": "hold p99 ≤ 50ms"
+    },
+    {
+      "name": "hold_p999_150ms",
+      "allowed": 0.001,
+      "trials": 14955,
+      "violations": 174,
+      "cp_upper": 0.013183,
+      "min_trials": 2995,
+      "result": "fail",
+      "target": "hold p999 ≤ 150ms"
+    },
+    {
+      "name": "payment_p99_3000ms",
+      "allowed": 0.01,
+      "trials": 4319,
+      "violations": 2,
+      "cp_upper": 0.001457,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "payment p99 ≤ 3000ms"
+    },
+    {
+      "name": "payment_server_p99_3000ms",
+      "allowed": 0.01,
+      "trials": 4284,
+      "violations": 4,
+      "cp_upper": 0.002135,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "서버 payment p99 ≤ 3000ms"
+    }
+  ],
+  "latency_crosscheck": {
+    "k6_metric": "http_req_duration{phase:main,route:payment}",
+    "k6_p99_ms": 1855.5591666999983,
+    "check": "payment_server_p99_3000ms",
+    "server_p99_ms": 1917.474,
+    "server_within_ratio": 0.999066,
+    "diff_ms": -61.915,
+    "target_ms": 3000,
+    "suspect": false
+  },
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 1대 CPU 평균 최고 14.2%·메모리 최대 15.4%, VU 최대 합 591, 시나리오 오류 0건, 계획 최고 도착률 300/s(docs/verification.md §3.9·§3.10); hold: 14955건, p99 152.0ms, 실패 3784건; order: 11171건, p99 341.0ms, 실패 6852건; sim_auth: 4319건, p99 0.9ms, 실패 0건; payment: 4319건, p99 1855.6ms, 실패 3615건; order_view: 704건, p99 221.3ms, 실패 235건; v0 표: 좌석 누수 1130, 멈춘 주문 PAYING 616·APPROVED 682, 확정 873, 실패 793, 결제 CONFIRMING 32",
+  "collected_at": "2026-11-03T05:57:58Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

@@ -1,0 +1,68 @@
+{
+  "test": "Q-T47",
+  "seconds": 180,
+  "rate_per_s": 28,
+  "imminent": 1700,
+  "poll_ms": 500,
+  "warmup_s": 15,
+  "tail_s": 3,
+  "delayMs": 0,
+  "waiters": 4995,
+  "measured": 4536,
+  "passedInWindow": 4536,
+  "unseenInWindow": 0,
+  "actualRatePerS": 28,
+  "notImminent": 108,
+  "noStep": 108,
+  "requests": 620014,
+  "errors": 0,
+  "advErrors": 5,
+  "cache": {
+    "HIT": 617198,
+    "MISS": 7,
+    "EXPIRED": 2763,
+    "UPDATING": 46
+  },
+  "staleHits": 339024,
+  "staleMaxMs": 999,
+  "delay": {
+    "p50_s": 1.483,
+    "p95_s": 2.304,
+    "p99_s": 2.482,
+    "max_s": 3.525
+  },
+  "stages": {
+    "genWait": {
+      "p50_s": 0.581,
+      "p95_s": 0.984,
+      "p99_s": 0.997,
+      "max_s": 1.1
+    },
+    "cacheAge": {
+      "p50_s": 0,
+      "p95_s": 1.007,
+      "p99_s": 1.022,
+      "max_s": 1.136
+    },
+    "pollWait": {
+      "p50_s": 0.29,
+      "p95_s": 1.345,
+      "p99_s": 1.504,
+      "max_s": 1.761
+    },
+    "roundTrip": {
+      "p50_s": 0.005,
+      "p95_s": 0.076,
+      "p99_s": 0.415,
+      "max_s": 0.822
+    }
+  },
+  "requestsPerSecond": 3445,
+  "pass": false,
+  "bench": {
+    "requests": 620014,
+    "error_rate": 0,
+    "dropped": 0,
+    "p99_ms": 2482
+  }
+}

@@ -1,0 +1,12 @@
+/*
+ * @peaket/ds 스타일 진입점. 앱의 첫 CSS에서 tailwindcss 다음에 싣는다(README 'CSS 싣기').
+ * gen/tokens.css: tokens.json → --peaket-* 변수(Tailwind 테마가 읽는다)
+ * gen/kit-tokens.css: tokens.json → 캔버스 키트 변수(.pk·.pk.dark의 --surface 등). kit.css보다 먼저 싣는다
+ * kit.css: 캔버스 디자인 키트(.pk 루트와 부품 클래스)
+ * ds.css: 키트에 없는 ds 부품 보조 규칙(본문 바로가기 등, pk- 앞말)
+ */
+@import "../gen/tokens.css";
+@import "../gen/theme.css";
+@import "../gen/kit-tokens.css";
+@import "./kit.css";
+@import "./ds.css";

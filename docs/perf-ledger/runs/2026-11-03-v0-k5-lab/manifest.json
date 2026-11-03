@@ -1,0 +1,80 @@
+{
+  "run_id": "2026-11-03-v0-k5-lab",
+  "kpi": "K5",
+  "version": "v0",
+  "profile": "local-lab",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": 0,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "loadtest/k5/seatmap-lab.mjs",
+    "args": null,
+    "open_model": false
+  },
+  "commit": {
+    "code": "b1581ed5726e7d0fee715ef7baa5f016789fffb0",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-03-v0-k5-lab/",
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "Chrome Chrome/153.0.8010.12 1개(이 PC, 머리 없음)",
+    "dropped_iterations": 0
+  },
+  "started_at": null,
+  "ended_at": null,
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": null,
+    "error_rate": null,
+    "requests": 20,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt",
+    "extra": [
+      "rows.json"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": [
+    {
+      "name": "inp_p75_200ms",
+      "allowed": 0.25,
+      "trials": 20,
+      "violations": 0,
+      "cp_upper": 0.139108,
+      "min_trials": 11,
+      "result": "pass",
+      "target": "INP p75 ≤ 200ms(랩)"
+    },
+    {
+      "name": "draw_p75_1000ms",
+      "allowed": 0.25,
+      "trials": 20,
+      "violations": 1,
+      "cp_upper": 0.216106,
+      "min_trials": 11,
+      "result": "pass",
+      "target": "좌석맵 다 그리기 p75 < 1초"
+    }
+  ],
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "K5 랩 판정(v0 메인 스레드 Canvas, 20회, CPU 4배): 그리기 p75 471.1ms·최대 1387.6ms, INP p75 88ms·최대 168ms(값 없음 0회), LCP p75 116ms, CLS p75 0, 50ms 넘은 긴 프레임 합 42(회 최대 5), 조작 경로 긴 작업 합 31(회 최대 5), GC 뒤 힙 중앙값 4.9MB, 홀드 못 한 회 0",
+  "collected_at": "2026-11-03T06:15:14Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

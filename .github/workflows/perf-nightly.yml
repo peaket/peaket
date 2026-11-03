@@ -1,0 +1,110 @@
+# 야간 축소 성능 상대 비교(docs/devops.md §3.3 '축소 성능 시험의 판정', D-T40, ADR-0133 낮음-016).
+# 같은 러너에서 기준판과 새 판을 번갈아 재고(판마다 5번) p99 중앙값의 비율로 판정한다. 날짜가 다른 실행끼리 견주지 않는다.
+# 기준값(loadtest/nightly/threshold.json의 max_ratio)을 정하기 전에는 경고만 한다. 넘거나 실행이 실패하면 잡이 실패하고 SEV3 이슈를 열거나 댓글을 단다.
+# 설정(loadtest/nightly/config.json: v0 대기열 시나리오·두 판을 kind에 올리는 준비 명령·실행 명령)이 없으면 건너뛴다(BSL-090에서 둠).
+# 수동 실행의 mode: aa는 A/A 실행 10번으로 이 러너의 잡음 폭과 기준값(threshold.json)을 정해 산출물로 올린다(D-T40 ①). 커밋은 소유자가 한다.
+name: perf-nightly
+
+on:
+  schedule:
+    - cron: '0 18 * * *' # 매일 03:00 KST [가정]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'nightly: 기준판과 새 판 비교 / aa: A/A 10번으로 기준값 정하기(D-T40 ①)'
+        type: choice
+        options: [nightly, aa]
+        default: nightly
+
+permissions:
+  contents: read
+
+jobs:
+  nightly:
+    if: github.event_name == 'schedule' || inputs.mode != 'aa'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      issues: write # 실패 알림(SEV3 이슈) 단계만 쓴다
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # 준비 명령이 직전 출시 태그(기준판)를 찾는다
+      - id: plan
+        run: |
+          if [ -f loadtest/nightly/config.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::설정 없음(loadtest/nightly/config.json): 야간 비교를 건너뛴다"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.plan.outputs.ready == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - if: steps.plan.outputs.ready == 'true'
+        run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+          pnpm install --frozen-lockfile
+      - if: steps.plan.outputs.ready == 'true'
+        # 전체 기한(7000초)을 잡 시간 제한(150분)보다 짧게 두어, 멈춘 k6도 취소가 아니라 실패(SEV3 알림)로 끝나게 한다
+        run: python3 -I -X utf8 tools/perf-ledger/nightly.py run --config loadtest/nightly/config.json --out .cache/nightly-results.json --deadline-s 7000
+      - id: compare
+        if: steps.plan.outputs.ready == 'true'
+        run: python3 -I -X utf8 tools/perf-ledger/nightly.py compare --results .cache/nightly-results.json --threshold loadtest/nightly/threshold.json --alert-out .cache/nightly-alert.md
+      # 기준값을 넘었거나 비교 전에 실행이 실패하면(준비 명령·k6·입력) SEV3 이슈를 열거나 댓글을 단다
+      - if: failure() && steps.plan.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          title='[SEV3] 야간 축소 성능 시험 실패'
+          if [ ! -f .cache/nightly-alert.md ]; then
+            mkdir -p .cache
+            printf '# %s\n\n- 심각도: SEV3(docs/devops.md §3.3)\n- 비교 전에 실행이 실패했다(준비 명령·k6·입력·기한). 잡 기록: %s\n' "$title" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > .cache/nightly-alert.md
+          fi
+          num=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body-file .cache/nightly-alert.md
+          else
+            gh label create sev3 --color B60205 --description 'SEV3(docs/devops.md)' --force
+            gh issue create --title "$title" --label sev3 --body-file .cache/nightly-alert.md
+          fi
+      - if: always() && steps.plan.outputs.ready == 'true'
+        run: node tools/local/cluster.mjs down || true
+
+  aa:
+    # A/A 실행 10번(D-T40 ①): 준비 명령을 한 번 부르고 같은 판끼리 번갈아 10번 잰다. 기준값은 야간 비교가 실제로 도는 이 러너의 잡음으로 정한다(docs/devops.md §3.3)
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'aa'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+          pnpm install --frozen-lockfile
+      # 전체 기한(19800초)을 잡 시간 제한(350분)보다 짧게 두어 멈춘 실행도 실패로 끝나게 한다
+      - run: python3 -I -X utf8 tools/perf-ledger/nightly.py aa --config loadtest/nightly/config-aa.json --runs 10 --out-dir .cache/aa --deadline-s 19800
+      # aa-01.json … aa-10.json과 threshold.json. loadtest/nightly/threshold.json에 넣어 커밋하는 일은 소유자가 한다
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: perf-nightly-aa
+          path: .cache/aa/
+          retention-days: 30
+          if-no-files-found: warn
+      - if: always()
+        run: node tools/local/cluster.mjs down || true

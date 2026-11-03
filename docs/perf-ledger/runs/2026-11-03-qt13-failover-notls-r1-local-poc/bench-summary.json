@@ -1,0 +1,56 @@
+{
+  "test": "Q-T13-failover",
+  "offered_rate": 2000,
+  "pre_s": 10,
+  "post_s": 40,
+  "lag_ms": 1500,
+  "skip_base": 120000,
+  "key_owner": "valkey-s3",
+  "replica": "valkey-s4",
+  "sent": 100000,
+  "tickets": 78660,
+  "skipped_ticks": 0,
+  "errors": {
+    "QueueStoreUnavailable": 21240,
+    "EntryError:QUEUE_RECOVERING": 100
+  },
+  "pause_at_ms": 8508,
+  "kill_at_ms": 10004,
+  "recovery_ms": 10791,
+  "gens": [
+    {
+      "gen": 1,
+      "count": 20160,
+      "duplicates": 0,
+      "min": 1,
+      "max": 20160
+    },
+    {
+      "gen": 2,
+      "count": 58500,
+      "duplicates": 0,
+      "min": 378161,
+      "max": 436660
+    }
+  ],
+  "skipped": [
+    "18161:378160:1"
+  ],
+  "lost_numbers": 2000,
+  "checks": {
+    "exercised": true,
+    "sameGenDuplicates": 0,
+    "skippedLines": 1,
+    "oldGenWithinSkipEnd": true,
+    "newGenAboveSkipEnd": true,
+    "oldGenAfterKill": 0
+  },
+  "pass": true,
+  "bench": {
+    "requests": 100000,
+    "error_rate": 0,
+    "dropped": 0,
+    "p99_ms": null,
+    "pass": true
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@peaket/admission-ctrl",
+  "private": true,
+  "version": "0.0.0",
+  "description": "admission-ctrl. 쿠버네티스 Lease 리더 하나가 200ms마다 serving을 올리고(세대 펜싱), 로비·묶음을 닫고 묶음 결과를 게시한다(docs/features/queue-admission.md §3·§5, ADR-0056·0182, BUILD_ORDER PRF-060·PRF-090). 입장 비율·AIMD·제어 명령은 PRF-100·HOT-030·OPS-300",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "sim": "vitest run --config vitest.sim.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.3.2",
+    "@peaket/platform": "workspace:*",
+    "@peaket/shuffle": "workspace:*",
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

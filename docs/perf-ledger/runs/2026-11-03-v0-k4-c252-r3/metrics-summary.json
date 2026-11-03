@@ -1,0 +1,74 @@
+{
+  "app_cpu_cores": {
+    "points": 60,
+    "series": 1,
+    "labels": "{}",
+    "p50": 0.0171324666666654,
+    "p99": 0.019191666666650536,
+    "max": 0.019191666666650536,
+    "mean": 0.01720548768695396
+  },
+  "app_rps": {
+    "points": 60,
+    "series": 1,
+    "labels": "{}",
+    "p50": 0.0,
+    "p99": 0.0,
+    "max": 0.0,
+    "mean": 0.0
+  },
+  "error_rate": {
+    "points": 0,
+    "series": 0,
+    "labels": null,
+    "p50": null,
+    "p99": null,
+    "max": null,
+    "mean": null
+  },
+  "event_loop_lag_ms": {
+    "points": 60,
+    "series": 1,
+    "labels": "{}",
+    "p50": 10.715135,
+    "p99": 10.805247,
+    "max": 10.805247,
+    "mean": 10.697385666666667
+  },
+  "gateway_rate_limited_rps": {
+    "points": 0,
+    "series": 0,
+    "labels": null,
+    "p50": null,
+    "p99": null,
+    "max": null,
+    "mean": null
+  },
+  "gateway_upstream_errors_rps": {
+    "points": 0,
+    "series": 0,
+    "labels": null,
+    "p50": null,
+    "p99": null,
+    "max": null,
+    "mean": null
+  },
+  "origin_rps": {
+    "points": 0,
+    "series": 0,
+    "labels": null,
+    "p50": null,
+    "p99": null,
+    "max": null,
+    "mean": null
+  },
+  "p99_ms": {
+    "points": 0,
+    "series": 1,
+    "labels": "{}",
+    "p50": null,
+    "p99": null,
+    "max": null,
+    "mean": null
+  }
+}

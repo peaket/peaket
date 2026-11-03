@@ -1,0 +1,252 @@
+{
+  "type": "record",
+  "name": "SettlementEvent",
+  "namespace": "peaket.trade",
+  "doc": "정산서·지급·미수금 사건. 토픽 trade.settlements, 키 파트너 ID. payment-svc Outbox에서 나간다(ADR-0047).",
+  "fields": [
+    {
+      "name": "promoterId",
+      "type": "string"
+    },
+    {
+      "name": "statementId",
+      "type": "string"
+    },
+    {
+      "name": "kind",
+      "doc": "EVENT는 티켓 회차 정산서, PRODUCT는 굿즈·티켓 연동 부가 상품 상품 정산서(R3 대조 대상 아님, POL-039 ②, 추천 적용 2026-10-14, ADR-0062)",
+      "type": {
+        "type": "enum",
+        "name": "SettlementEventKind",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "EVENT",
+          "PRODUCT"
+        ]
+      }
+    },
+    {
+      "name": "eventId",
+      "doc": "회차. 상품 정산서는 null",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "kind": [
+            "EVENT"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pg",
+      "type": {
+        "type": "enum",
+        "name": "SettlementEventPg",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "TOSS",
+          "PORTONE"
+        ]
+      }
+    },
+    {
+      "name": "pgStore",
+      "doc": "토스페이먼츠 결제 상점(토스페이먼츠만)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "SettlementEventPgStore",
+          "default": "UNRECOGNIZED",
+          "symbols": [
+            "UNRECOGNIZED",
+            "STANDARD",
+            "ESCROW"
+          ]
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "pg": [
+            "TOSS"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "periodStart",
+      "doc": "상품 정산서의 주 시작(KST)",
+      "type": [
+        "null",
+        {
+          "type": "int",
+          "logicalType": "date"
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "kind": [
+            "PRODUCT"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "periodEnd",
+      "doc": "상품 정산서의 주 끝(KST)",
+      "type": [
+        "null",
+        {
+          "type": "int",
+          "logicalType": "date"
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "kind": [
+            "PRODUCT"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "amount",
+      "doc": "지급액이나 미수금 금액(원)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "PAYOUT_SCHEDULED",
+            "PAYOUT_COMPLETED",
+            "PAYOUT_FAILED",
+            "PAYOUT_HELD",
+            "RECEIVABLE_OPENED",
+            "RECEIVABLE_CLOSED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "salesAmount",
+      "doc": "STATEMENT_NOTIFIED 때 판매 대금(원, ADR-0052)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "STATEMENT_NOTIFIED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "refundAmount",
+      "doc": "STATEMENT_NOTIFIED 때 환급(원)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "STATEMENT_NOTIFIED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "feeAmount",
+      "doc": "STATEMENT_NOTIFIED 때 중개수수료(원)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "STATEMENT_NOTIFIED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "revision",
+      "doc": "STATEMENT_NOTIFIED 때 정산서 판본. 다시 계산해 새로 알린 판이면 2 이상이다(settlement §4.1, 추천 적용 2026-10-29)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "STATEMENT_NOTIFIED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "supersedesId",
+      "doc": "STATEMENT_NOTIFIED 때 이 판이 대신한 옛 판의 statementId(첫 판은 null). 새 판의 통지가 옛 판을 대신한다는 것을 이 값으로 알리므로 옛 판이 SUPERSEDED가 되는 사건 종류는 따로 두지 않는다(추천 적용 2026-10-29)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "type",
+      "type": {
+        "type": "enum",
+        "name": "SettlementEventType",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "STATEMENT_NOTIFIED",
+          "STATEMENT_DISPUTED",
+          "STATEMENT_CONFIRMED",
+          "STATEMENT_CARRIED_OVER",
+          "PAYOUT_SCHEDULED",
+          "PAYOUT_COMPLETED",
+          "PAYOUT_FAILED",
+          "PAYOUT_HELD",
+          "RECEIVABLE_OPENED",
+          "RECEIVABLE_CLOSED"
+        ]
+      }
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    }
+  ]
+}

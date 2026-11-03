@@ -1,0 +1,24 @@
+{
+  "name": "@peaket/shuffle",
+  "private": true,
+  "version": "0.0.0",
+  "description": "로비·동시 도착 묶음 셔플의 재현 규격(커밋, 머클 루트, 결합 키, 편향 없는 Fisher–Yates, ADR-0050 결정 7). admission-ctrl·로비 셔플·검증 화면이 같이 쓴다. 게시하지 않고 workspace:로만 잇는다",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
