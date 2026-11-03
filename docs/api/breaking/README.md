@@ -10,5 +10,6 @@
 | `asyncapi-overrides.json` | `asyncapi diff`의 채널·작업 수준 예외(`--overrides`). `{ "<JSON 포인터>": { "reason": "…", "remove": "non-breaking" } }` 꼴이고 `reason`이 있어야 한다 |
 
 - 예외가 대상 가지(지금 커밋과 갈라진 점)보다 늘어나거나 수준을 낮춘 PR에는 `breaking-approved` 라벨이 있어야 통과한다. 덮어쓰기는 값을 넓혀도 는 것으로 본다.
+- 출시 태그(`vX.Y.Z`)가 하나도 없을 때 `main`으로 가는 PR(첫 출시)은 견주지 않고 통과한다(운영에 나간 계약이 없다, 소유자 결정 2026-11-03).
 - `#`로 시작하는 줄과 줄 끝의 `# 이유: …`는 주석이다. oasdiff는 주석을 받지 않거나(수준 파일) `#` 줄도 예외로 읽으므로(예외 파일), 스크립트가 주석을 지우고 자기가 읽은 예외 문장만 담은 사본을 oasdiff에 넘긴다.
 - 실행법과 설계는 tools/ci/README.md와 openspec 변경 `add-contract-breaking-check`의 design.md에 있다.

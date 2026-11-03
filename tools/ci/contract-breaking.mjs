@@ -25,6 +25,8 @@ const ASYNCAPI = 'docs/api/asyncapi.yaml';
 const BREAKING = 'docs/api/breaking';
 const APPROVED = 'breaking-approved';
 const REASON = /\s#\s*이유:\s*(.*)$/;
+// main 가지를 가리키는 이름(main, origin/main, refs/heads/main 등). mainline 같은 이름은 아니다
+const MAIN_REF = /(^|\/)main$/;
 const CONVERTER = fileURLToPath(new URL('../../packages/contracts/scripts/asyncapi-messages.mjs', import.meta.url));
 
 const gitIn = (cwd, ...args) => {
@@ -34,16 +36,21 @@ const gitIn = (cwd, ...args) => {
 
 /**
  * 견줄 기준: 대상 가지와 마지막 출시 태그(같은 커밋이면 하나). 대상 가지는 지금 커밋과 갈라진 점(merge-base)으로 본다.
- * 대상 가지가 그 뒤 앞서가면 거기 새로 생긴 경로·칸이 '지워졌다'로 보이기 때문이다. 대상 가지가 없으면 던진다
+ * 대상 가지가 그 뒤 앞서가면 거기 새로 생긴 경로·칸이 '지워졌다'로 보이기 때문이다. 대상 가지가 없으면 던진다.
+ * 첫 출시: 출시 태그가 하나도 없는데 대상이 main이면 견줄 기준이 없다(bases 빈 배열). main에는 아직 운영에 나간 계약이 없고,
+ * 저장소 첫 기록(옛 초안)과 견주면 모든 정리가 깨짐으로 보이기 때문이다(소유자 결정 2026-11-03, docs/api/guidelines.md §1)
  */
 export function chooseBases({ cwd, target }) {
   const sha = (ref) => gitIn(cwd, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`)?.trim() || null;
   if (!sha(target)) throw new Error(`대상 가지 ${target}를 찾지 못했다(체크아웃에 대상 가지와 태그가 있어야 한다, fetch-depth: 0)`);
   const targetSha = gitIn(cwd, 'merge-base', 'HEAD', target)?.trim();
   if (!targetSha) throw new Error(`대상 가지 ${target}와 지금 커밋의 갈라진 점을 찾지 못했다`);
+  const [last] = sortReleaseTags((gitIn(cwd, 'tag', '--list', 'v*') ?? '').split('\n'));
+  if (!last && MAIN_REF.test(target)) {
+    return { bases: [], notes: [`첫 출시(출시 태그 없음)라 ${target}과 견주지 않는다. 운영에 나간 계약이 아직 없다(guidelines §1)`] };
+  }
   const bases = [{ label: `대상 가지 ${target}`, ref: targetSha, sha: targetSha }];
   const notes = [];
-  const [last] = sortReleaseTags((gitIn(cwd, 'tag', '--list', 'v*') ?? '').split('\n'));
   if (!last) notes.push('출시 태그가 없어 마지막 출시 태그와는 견주지 않는다(처음 출시 전)');
   else {
     const tagSha = sha(last.name);
@@ -166,6 +173,8 @@ export async function checkContracts({ cwd, target, labels, pullRequest, run = d
     failures.push(e.message);
     return { failures, warnings, notes };
   }
+  // 첫 출시의 main으로 가는 PR: 견줄 운영 계약이 없으니 예외·수준 승인과 도구 비교를 하지 않는다(예외 파일 형식 오류는 위에서 이미 잡았다)
+  if (bases.length === 0) return { failures, warnings, notes };
 
   if (pullRequest && !labels.includes(APPROVED)) {
     const fork = bases[0].ref;

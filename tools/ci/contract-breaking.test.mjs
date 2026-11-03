@@ -274,3 +274,43 @@ test('DT48_도구에넘기는폴더와파일은_루트가아닌도구사용자�
     for (const m of s.files) assert.equal(m & 0o004, 0o004, `${s.tool}에 넘긴 파일 권한 ${m.toString(8)}`);
   }
 });
+
+// 2026-11-03 첫 릴리스(release/0.1.0 → main)에서 재현: main이 저장소 첫 기록(옛 초안 계약)이라 바뀐 계약 약 160건이 모두 깨짐으로 잡혔다.
+// 출시 태그가 하나도 없으면 운영에 나간 계약이 없으므로 main으로 가는 PR은 견주지 않는다(소유자 결정 2026-11-03, guidelines §1)
+test('DT48_FND160_출시태그가없을때_main으로가는PR은_견주지않고까닭을적으며_도구를부르지않는다', async () => {
+  const dir = project(); // 고정물 저장소의 기본 가지가 main이다. 릴리스 가지를 따서 그 위에서 바꾼다
+  git(dir, 'checkout', '-q', '-b', 'release/0.1.0');
+  commit(dir, { 'docs/api/openapi.yaml': OPENAPI.replace('paths: {}', 'paths: { /x: { get: { responses: { "200": { description: ok } } } } }') }, 'feat: 계약 바뀜');
+  for (const target of ['main', 'refs/heads/main']) {
+    const { bases, notes } = chooseBases({ cwd: dir, target });
+    assert.deepEqual(bases, [], `${target}: 첫 출시면 견줄 기준이 없다`);
+    assert.match(notes.join('\n'), /첫 출시/, `${target}: 까닭을 적는다`);
+  }
+  // 깨짐을 내는 도구 결과와 수준 낮춤이 있어도 실패하지 않는다(도구를 부르지 않는다)
+  commit(dir, { 'docs/api/breaking/openapi-levels.txt': '# 수준 낮춤\n' }, 'chore: 수준 낮춤');
+  const f = fake({ 'oasdiff:breaking:1': { code: 1, out: 'error\t[api-path-removed-without-deprecation]' } });
+  const r = await check(dir, f, { target: 'main' });
+  assert.deepEqual(r.failures, []);
+  assert.equal(f.calls.length, 0, '도구를 부르지 않는다');
+  assert.match(r.notes.join('\n'), /첫 출시/);
+});
+
+test('DT48_FND160_출시태그가있거나_대상이main이아니면_지금처럼견준다(첫출시건너뛰기는main과태그없음둘다일때만)', async () => {
+  // 태그가 없어도 develop으로 가는 PR은 대상 가지와 견준다
+  const dev = project();
+  commit(dev, { 'a.txt': '1' }, 'chore: 앞으로');
+  assert.deepEqual(chooseBases({ cwd: dev, target: 'develop' }).bases.map((b) => b.label), ['대상 가지 develop']);
+  // 태그가 있으면 main으로 가는 PR도 main(= 마지막 출시)과 견주고, 깨짐이면 실패한다
+  const rel = project();
+  git(rel, 'tag', 'v0.1.0');
+  git(rel, 'checkout', '-q', '-b', 'release/0.2.0');
+  commit(rel, { 'a.txt': '1' }, 'chore: 앞으로');
+  assert.deepEqual(chooseBases({ cwd: rel, target: 'main' }).bases.map((b) => b.label), ['대상 가지 main']);
+  const f = fake({ 'oasdiff:breaking:1': { code: 1, out: 'error\t[api-path-removed-without-deprecation]' } });
+  const r = await check(rel, f, { target: 'main' });
+  assert.ok(r.failures.some((x) => /대상 가지 main과 견줘 깨진다/.test(x)), r.failures.join('\n'));
+  // 'mainline' 같은 이름은 main이 아니다
+  const ml = project();
+  git(ml, 'branch', 'mainline');
+  assert.equal(chooseBases({ cwd: ml, target: 'mainline' }).bases.length, 1);
+});
