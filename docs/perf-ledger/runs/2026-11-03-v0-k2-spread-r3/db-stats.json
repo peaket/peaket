@@ -1,0 +1,107 @@
+{
+  "durationS": 147.8,
+  "deadlocks": 0,
+  "commits": 3273,
+  "rollbacks": 4203,
+  "tables": {
+    "v0_gate_staff": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    },
+    "v0_hold": {
+      "inserts": 2094,
+      "updates": 1275,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": 0,
+      "liveRows": 9643,
+      "deadRows": 393
+    },
+    "v0_order": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    },
+    "v0_order_event": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    },
+    "v0_order_item": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    },
+    "v0_payment": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    },
+    "v0_price": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 6,
+      "deadRows": 0
+    },
+    "v0_quota": {
+      "inserts": 938,
+      "updates": 3365,
+      "hotUpdates": 3334,
+      "deletes": 0,
+      "hotRatio": 0.9908,
+      "liveRows": 2941,
+      "deadRows": 378
+    },
+    "v0_seat": {
+      "inserts": 0,
+      "updates": 6738,
+      "hotUpdates": 6175,
+      "deletes": 0,
+      "hotRatio": 0.9164,
+      "liveRows": 30000,
+      "deadRows": 213
+    },
+    "v0_seat_event": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 6,
+      "deadRows": 0
+    },
+    "v0_ticket": {
+      "inserts": 0,
+      "updates": 0,
+      "hotUpdates": 0,
+      "deletes": 0,
+      "hotRatio": null,
+      "liveRows": 0,
+      "deadRows": 0
+    }
+  }
+}

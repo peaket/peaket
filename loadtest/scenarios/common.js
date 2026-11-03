@@ -7,11 +7,14 @@ import { Counter } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
 import { handleSummary as ledgerSummary } from '../../tools/perf-ledger/k6-summary.js';
 import { mainPhaseSummary, phaseThresholds } from '../lib/model.mjs';
+import { overTargets, targetThresholds } from '../lib/targets.mjs';
 import { markRecord, queueOpRecord, resultOf, admitResult } from '../lib/records.mjs';
 import { accountRef, fanHeaders, userIp } from '../lib/users.mjs';
 
 /** 시나리오가 잘못 보낸 요청 수(잘못된 좌석 ID, 준비 구간 입장 실패). 하나라도 있으면 실행 도구가 그 실행을 무효로 한다(withScenarioErrors) */
 export const scenarioErrors = new Counter('scenario_errors');
+/** 경로 목표 시간을 넘은 요청 수(꼬리표 route·le, docs/verification.md §3.10 '경로 목표 점검'). 발생기를 나눠도 더할 수 있어 판정이 정확하다 */
+const overTarget = new Counter('over_target');
 
 /** 정수 환경 값(없으면 기본값, 틀리면 시작하지 않는다) */
 export function envInt(name, def) {
@@ -50,15 +53,19 @@ export function user(i) {
 
 /**
  * 입구로 보내는 요청 하나. route 꼬리표를 달고, expected 상태만 실패가 아닌 것으로 센다(http_req_failed).
- * 업무상 기대한 거절(홀드의 409·422)은 expected에 넣는다(docs/verification.md §3.9 '오픈 모델과 요약')
+ * 업무상 기대한 거절(홀드의 409·422)은 expected에 넣는다(docs/verification.md §3.9 '오픈 모델과 요약').
+ * 경로 목표(lib/targets.mjs)가 있으면 요청 시간이 목표를 넘을 때 over_target을 센다. o.timeout(예: '3s')을 주면 그 시간에 끊는다
  */
 export function call(method, path, o) {
   const headers = fanHeaders({ token: o.user.token, ip: o.user.ip, origin: ORIGIN, write: method !== 'GET', json: o.body !== undefined });
-  return http.request(method, `${BASE}${path}`, o.body === undefined ? null : JSON.stringify(o.body), {
+  const r = http.request(method, `${BASE}${path}`, o.body === undefined ? null : JSON.stringify(o.body), {
     headers,
     tags: { route: o.route },
     responseCallback: http.expectedStatuses(...o.expected),
+    ...(o.timeout ? { timeout: o.timeout } : {}),
   });
+  for (const le of overTargets(o.route, r.timings.duration)) overTarget.add(1, { route: o.route, le: String(le) });
+  return r;
 }
 
 /** 응답 본문 JSON(못 읽으면 undefined) */
@@ -144,8 +151,9 @@ export function baseOptions(scenarios, routes) {
   const perScenario = Object.fromEntries(Object.keys(scenarios).map((name) => [`dropped_iterations{scenario:${name}}`, ['count>=0']]));
   return {
     scenarios,
-    summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
-    thresholds: { ...phaseThresholds(routes), ...perScenario },
+    // p(99.9)는 홀드 목표(NFR-003 p99.9 150ms, K2)를 요약에 남기려고 둔다
+    summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)', 'p(99.9)'],
+    thresholds: { ...phaseThresholds(routes), ...targetThresholds(routes), ...perScenario },
   };
 }
 

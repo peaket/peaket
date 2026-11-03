@@ -11,13 +11,17 @@ import { parseAllDocuments } from 'yaml';
 import {
   METRICS_SERVER,
   PINNED,
+  V0_BASE_NAMESPACE,
   V0_DATABASE_URL,
+  V0_NAMESPACE,
+  V0_PG_URL,
   V0_REDIS_URL,
   metricsServerInstall,
   selfSignedCertArgs,
   strimziInstall,
   v0ForwardArgs,
   v0HelmArgs,
+  v0Layout,
   v0MigrationJob,
   v0Secrets,
 } from './cluster.mjs';
@@ -349,4 +353,217 @@ test('cluster.mjs는_파일을_httpsDownload로만받는다', () => {
   assert.doesNotMatch(text, /\bfetch\(/);
   assert.match(text, /httpsDownload\(PINNED\.strimziInstallUrl\)/);
   assert.match(text, /httpsDownload\(METRICS_SERVER\.installUrl\)/);
+});
+
+// --- BSL-090: 야간 비교의 기준판 자리 v0-base(docs/devops.md §3.3 '준비 명령', D-T40). 새 판·Before 측정은 v0 ---
+
+/** o를 주지 않은 지금의 helm 인자(네임스페이스만 바꿔 볼 수 있게) */
+const helmBase = (release, namespace = 'v0') => ['upgrade', '--install', release, join(REPO, 'deploy', 'charts', 'peaket-service'), '--namespace', namespace, '-f', join(REPO, 'deploy', 'envs', 'local', `${release}.yaml`), '--wait', '--timeout', '300s'];
+const BASE_IMAGE = ['--set', 'image.repository=peaket/v0-monolith,image.tag=base'];
+const BASE_UPSTREAM = ['--set', 'env.PEAKET_V0_UPSTREAM=http://v0-monolith.v0-base.svc.cluster.local:8080'];
+/**
+ * selfSignedCertArgs로 openssl이 실제로 만든 인증서의 SAN 이름 목록('IP Address:'는 openssl 인자 꼴 'IP:'로 맞춘다).
+ * JSDoc은 SAN을 openssl에 어떤 인자 꼴로 넘기는지 정하지 않으므로 만든 인증서를 본다
+ */
+function certSan() {
+  const dir = tempDir();
+  const keyFile = join(dir, 'tls.key');
+  const certFile = join(dir, 'tls.crt');
+  const r = spawnSync('openssl', selfSignedCertArgs(keyFile, certFile), { encoding: 'utf8', timeout: 60_000 });
+  assert.equal(r.status, 0, r.stderr);
+  const san = new X509Certificate(readFileSync(certFile)).subjectAltName ?? '';
+  return san.split(/,\s*/).filter(Boolean).map((n) => n.replace(/^IP Address:/, 'IP:'));
+}
+const NO_OPENSSL = !hasOpenssl && 'openssl이 이 PC의 PATH에 없다';
+
+test('BSL090_D-T40_기준판자리_v0Layout_v0는지금의DB·Valkey·시뮬레이터·입구주소다', () => {
+  assert.equal(V0_NAMESPACE, 'v0');
+  assert.equal(V0_BASE_NAMESPACE, 'v0-base');
+  assert.deepEqual(v0Layout('v0'), {
+    namespace: 'v0',
+    database: 'v0',
+    databaseUrl: V0_DATABASE_URL,
+    redisUrl: V0_REDIS_URL,
+    pgUrl: V0_PG_URL,
+    gatewayUrl: 'https://v0-gateway.v0.svc.cluster.local:8443',
+  });
+  assert.deepEqual(v0Layout(V0_NAMESPACE), v0Layout('v0'));
+});
+
+test('BSL090_D-T40_기준판자리_v0-base는DB_v0_base와Valkey_DB1을쓰고_시뮬레이터는v0의하나를함께쓴다', () => {
+  assert.ok(V0_DATABASE_URL.endsWith('/v0'), V0_DATABASE_URL);
+  const base = v0Layout(V0_BASE_NAMESPACE);
+  assert.deepEqual(base, {
+    namespace: 'v0-base',
+    database: 'v0_base',
+    databaseUrl: V0_DATABASE_URL.replace(/\/v0$/, '/v0_base'),
+    redisUrl: `${V0_REDIS_URL}/1`,
+    pgUrl: V0_PG_URL,
+    gatewayUrl: 'https://v0-gateway.v0-base.svc.cluster.local:8443',
+  });
+  // DB 주소는 DB 이름만 다르다(사용자·비밀번호·호스트·포트는 같은 PostgreSQL)
+  const now = new URL(V0_DATABASE_URL);
+  const was = new URL(base.databaseUrl);
+  for (const k of ['protocol', 'username', 'password', 'host', 'search', 'hash']) assert.equal(was[k], now[k], k);
+  assert.equal(was.pathname, '/v0_base');
+  // 두 판의 DB·Valkey DB·입구가 겹치지 않는다(회차 목록 같은 공용 키가 섞이지 않게). 시뮬레이터만 함께 쓴다
+  const v0 = v0Layout('v0');
+  assert.notEqual(base.databaseUrl, v0.databaseUrl);
+  assert.notEqual(base.redisUrl, v0.redisUrl);
+  assert.notEqual(base.gatewayUrl, v0.gatewayUrl);
+  assert.equal(base.pgUrl, v0.pgUrl);
+});
+
+test('BSL090_D-T40_v0Layout_v0·v0-base밖의네임스페이스는RangeError [ASVS v5.0.0-2.2.1]', () => {
+  for (const bad of ['v1', 'V0', 'v0_base', 'v0base', 'v0-Base', 'V0-BASE', 'v0-base ', ' v0', 'v0/', '../v0', '', 'default', 'kube-system', 'loadtest',
+    'peaket-local', 'observability', 'kafka', '__proto__', 'constructor', 'toString', 'hasOwnProperty', undefined, null]) {
+    assert.throws(() => v0Layout(bad), RangeError, String(bad));
+  }
+});
+
+test('BSL090_D-T40_v0-base비밀셋_앱·입구비밀만그네임스페이스에두고_앱은그판의DB·Valkey주소를받는다 [ASVS v5.0.0-13.3.1]', () => {
+  const jwks = v0Jwks();
+  const secrets = v0Secrets({ pgSecretKey: SIM_KEY, ...TLS, jwks }, v0Layout('v0-base'));
+  // 시뮬레이터는 v0 네임스페이스의 하나를 함께 쓰므로 pg-simulator Secret은 만들지 않는다
+  assert.deepEqual(secrets.map((s) => s.metadata.name).sort(), ['v0-gateway', 'v0-monolith']);
+  for (const s of secrets) {
+    for (const [k, v] of Object.entries(s.stringData)) assert.equal(typeof v, 'string', `${s.metadata.name}.${k}`);
+  }
+  // 돌려주는 꼴(JSDoc @returns) 그대로: 메타데이터는 이름과 그 판의 네임스페이스뿐이다
+  const secret = (name, stringData) => ({ apiVersion: 'v1', kind: 'Secret', metadata: { name, namespace: 'v0-base' }, type: 'Opaque', stringData });
+  const by = Object.fromEntries(secrets.map((s) => [s.metadata.name, s]));
+  assert.deepEqual(by['v0-monolith'], secret('v0-monolith', {
+    PEAKET_V0_DATABASE_URL: V0_DATABASE_URL.replace(/\/v0$/, '/v0_base'),
+    PEAKET_V0_REDIS_URL: `${V0_REDIS_URL}/1`,
+    PG_SIMULATOR_SECRET_KEY: SIM_KEY,
+  }));
+  // 입구는 그대로 TLS·공개키 목록만 받는다(DB·Redis 주소와 시뮬레이터 키 없음)
+  assert.deepEqual(by['v0-gateway'], secret('v0-gateway', { PEAKET_V0_TLS_CERT: TLS.tlsCert, PEAKET_V0_TLS_KEY: TLS.tlsKey, PEAKET_V0_GATEWAY_JWKS: JSON.stringify(jwks) }));
+});
+
+test('BSL090_D-T40_v0Secrets_layout을주지않으면v0Layout(v0)와같고_앱Secret의DB·Valkey주소는layout의값이다 [ASVS v5.0.0-13.3.1]', () => {
+  const o = { pgSecretKey: SIM_KEY, ...TLS, jwks: v0Jwks() };
+  const def = v0Secrets(o);
+  assert.equal(def.length, 3);
+  assert.ok(def.every((s) => s.metadata.namespace === 'v0'));
+  assert.deepEqual(v0Secrets(o, v0Layout('v0')), def);
+  // 앱 Secret의 주소는 layout에서 읽는다(네임스페이스 이름으로 다시 정하지 않는다)
+  const custom = { ...v0Layout('v0'), databaseUrl: `${V0_DATABASE_URL}_other`, redisUrl: `${V0_REDIS_URL}/7` };
+  const withCustom = v0Secrets(o, custom);
+  const app = withCustom.find((s) => s.metadata.name === 'v0-monolith');
+  assert.equal(app.stringData.PEAKET_V0_DATABASE_URL, custom.databaseUrl);
+  assert.equal(app.stringData.PEAKET_V0_REDIS_URL, custom.redisUrl);
+  // v0-base 판이 아니면 시뮬레이터 Secret도 그대로 그 네임스페이스에 만든다
+  assert.deepEqual(withCustom.map((s) => [s.metadata.name, s.metadata.namespace]).sort(), [['pg-simulator', 'v0'], ['v0-gateway', 'v0'], ['v0-monolith', 'v0']]);
+  assert.deepEqual(withCustom.find((s) => s.metadata.name === 'pg-simulator').stringData, { PG_SIMULATOR_SECRET_KEY: SIM_KEY });
+});
+
+test('BSL090_D-T40_v0-base비밀도_개인키·틀린시험키·빈공개키목록을거절한다 [ASVS v5.0.0-13.3.1]', () => {
+  const base = v0Layout('v0-base');
+  assert.equal(v0Secrets({ pgSecretKey: SIM_KEY, ...TLS, jwks: v0Jwks() }, base).length, 2);
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const withD = { keys: [{ ...privateKey.export({ format: 'jwk' }), kid: 'kid-0123456789ab', alg: 'ES256', use: 'sig' }] };
+  assert.throws(() => v0Secrets({ pgSecretKey: SIM_KEY, ...TLS, jwks: withD }, base));
+  // 시뮬레이터 Secret을 만들지 않아도 앱 Secret이 시험 키를 실으므로 꼴을 본다
+  assert.throws(() => v0Secrets({ pgSecretKey: `sim_sk_${'a'.repeat(15)}`, ...TLS, jwks: v0Jwks() }, base));
+  assert.throws(() => v0Secrets({ pgSecretKey: `live_sk_${'a'.repeat(20)}`, ...TLS, jwks: v0Jwks() }, base));
+  assert.throws(() => v0Secrets({ pgSecretKey: SIM_KEY, ...TLS, jwks: { keys: [] } }, base));
+});
+
+test('BSL090_D-T40_마이그레이션잡_namespace를주면그네임스페이스에만들고_나머지는같다 [ASVS v5.0.0-13.2.2]', () => {
+  const image = 'peaket/v0-monolith:base';
+  const def = v0MigrationJob(image);
+  assert.equal(def.metadata.namespace, 'v0');
+  assert.equal(v0MigrationJob(image, undefined).metadata.namespace, 'v0');
+  assert.equal(v0MigrationJob(image, 'v0').metadata.namespace, 'v0');
+  const base = v0MigrationJob(image, 'v0-base');
+  assert.equal(base.metadata.namespace, 'v0-base');
+  // 이름·이미지·DB 주소를 받는 Secret(그 네임스페이스의 v0-monolith)·보안 기준은 같다
+  assert.deepEqual({ ...base, metadata: { ...base.metadata, namespace: 'v0' } }, def);
+  assert.deepEqual(base.spec.template.spec.containers[0].envFrom, [{ secretRef: { name: 'v0-monolith' } }]);
+  assert.equal(JSON.stringify(base).includes('v0_base'), false, 'DB 주소를 잡 정의에 싣지 않는다');
+});
+
+test('BSL090_D-T40_helm인자_o가없으면지금과같고_namespace를주면그네임스페이스에올린다', () => {
+  for (const release of ['v0-monolith', 'v0-gateway']) {
+    assert.deepEqual(v0HelmArgs(release), helmBase(release));
+    assert.deepEqual(v0HelmArgs(release, {}), helmBase(release));
+    assert.deepEqual(v0HelmArgs(release, { namespace: 'v0' }), helmBase(release));
+  }
+  // 앱은 네임스페이스만 바뀐다(upstream을 더하지 않는다)
+  assert.deepEqual(v0HelmArgs('v0-monolith', { namespace: 'v0-base' }), helmBase('v0-monolith', 'v0-base'));
+  // 릴리스 검사는 그대로
+  for (const bad of ['pg-simulator', 'v0', '', '../v0-monolith']) assert.throws(() => v0HelmArgs(bad, { namespace: 'v0-base' }), undefined, bad);
+});
+
+test('BSL090_D-T40_helm인자_v0-base의입구는그네임스페이스의앱으로보낸다(PEAKET_V0_UPSTREAM)', () => {
+  assert.deepEqual(v0HelmArgs('v0-gateway', { namespace: 'v0-base' }), [...helmBase('v0-gateway', 'v0-base'), ...BASE_UPSTREAM]);
+  // v0의 입구는 덮지 않는다: 값 파일의 upstream이 v0 앱이다
+  assert.equal(v0HelmArgs('v0-gateway', { namespace: 'v0' }).some((a) => a.includes('PEAKET_V0_UPSTREAM')), false);
+  assert.equal(v0HelmArgs('v0-gateway').some((a) => a.includes('PEAKET_V0_UPSTREAM')), false);
+  const values = parseAllDocuments(readFileSync(join(REPO, 'deploy', 'envs', 'local', 'v0-gateway.yaml'), 'utf8'))[0].toJS();
+  assert.equal(values.env.PEAKET_V0_UPSTREAM, 'http://v0-monolith.v0.svc.cluster.local:8080');
+});
+
+test('BSL090_D-T40_helm인자_image를주면원래인자뒤에image의--set을_그뒤에upstream의--set을더한다', () => {
+  assert.deepEqual(v0HelmArgs('v0-monolith', { image: 'peaket/v0-monolith:base' }), [...helmBase('v0-monolith'), ...BASE_IMAGE]);
+  assert.deepEqual(v0HelmArgs('v0-gateway', { image: 'peaket/v0-monolith:base' }), [...helmBase('v0-gateway'), ...BASE_IMAGE]);
+  assert.deepEqual(v0HelmArgs('v0-monolith', { namespace: 'v0-base', image: 'peaket/v0-monolith:base' }), [...helmBase('v0-monolith', 'v0-base'), ...BASE_IMAGE]);
+  assert.deepEqual(v0HelmArgs('v0-gateway', { namespace: 'v0-base', image: 'peaket/v0-monolith:base' }), [...helmBase('v0-gateway', 'v0-base'), ...BASE_IMAGE, ...BASE_UPSTREAM]);
+  // 허용 글자 안의 이름(소문자·숫자·./_-)과 태그(영문 대소문자·숫자·._-)는 그대로 싣는다
+  assert.deepEqual(v0HelmArgs('v0-monolith', { image: 'registry.local/peaket/v0_monolith.x:V1.2_rc-3' }).slice(-2), ['--set', 'image.repository=registry.local/peaket/v0_monolith.x,image.tag=V1.2_rc-3']);
+  assert.deepEqual(v0HelmArgs('v0-monolith', { image: 'peaket/v0-monolith:local' }).slice(-2), ['--set', 'image.repository=peaket/v0-monolith,image.tag=local']);
+});
+
+test('BSL090_D-T40_helm인자_이미지이름·태그가허용글자밖이면RangeError [ASVS v5.0.0-2.2.1]', () => {
+  assert.deepEqual(v0HelmArgs('v0-monolith', { image: 'peaket/v0-monolith:base' }), [...helmBase('v0-monolith'), ...BASE_IMAGE]);
+  const bad = [
+    'peaket/v0-monolith base', // 공백
+    'peaket/v0-monolith:ba se',
+    'peaket/v0-monolith:base,image.pullPolicy=Always', // --set의 쉼표로 다른 값을 끼워 넣기
+    'peaket/v0-monolith,x=y:base',
+    'peaket/v0-monolith:base=x', // =
+    'peaket/v0-monolith=x:base',
+    'Peaket/v0-monolith:base', // 이름은 소문자만
+    'peaket/V0-monolith:base',
+    'peaket/v0-monolith', // 태그 없음
+    'v0-monolith',
+    'peaket/v0-monolith:', // 빈 태그
+    ':base', // 빈 이름
+    'localhost:5000/peaket/v0-monolith:base', // 콜론 둘(이름에 :는 없다)
+    'peaket/v0-monolith:ba:se',
+    'peaket/v0-monolith:ba/se', // 태그에 /
+    'peaket/v0-monolith:base\n',
+    'peaket/v0-monolith:base;id',
+    'peaket/v0-monolith:$(id)',
+    'peaket/v0-monolith:{a,b}',
+    'peaket/v0-monolith:[0]',
+    'peaket/v0-monolith:base\\',
+    `peaket/v0-monolith@sha256:${'a'.repeat(64)}`, // @
+  ];
+  for (const image of bad) {
+    for (const release of ['v0-monolith', 'v0-gateway']) assert.throws(() => v0HelmArgs(release, { image }), RangeError, `${release} ${JSON.stringify(image)}`);
+    assert.throws(() => v0HelmArgs('v0-gateway', { namespace: 'v0-base', image }), RangeError, `v0-base ${JSON.stringify(image)}`);
+  }
+});
+
+test('BSL090_D-T40_입구TLS_SAN은v0와v0-base두판의입구서비스이름을모두담는다 [ASVS v5.0.0-12.2.1]', { skip: NO_OPENSSL }, () => {
+  const san = certSan();
+  for (const name of ['DNS:localhost', 'IP:127.0.0.1', 'DNS:v0-gateway.v0.svc', 'DNS:v0-gateway.v0.svc.cluster.local', 'DNS:v0-gateway.v0-base.svc',
+    'DNS:v0-gateway.v0-base.svc.cluster.local']) {
+    assert.ok(san.includes(name), `${name} in ${san.join(',')}`);
+  }
+  // SAN은 localhost·127.0.0.1·두 네임스페이스의 입구 서비스 이름뿐이다(와일드카드·다른 이름·다른 IP 없음)
+  const allowed = /^(?:DNS:localhost|IP:127\.0\.0\.1|DNS:v0-gateway(?:\.(?:v0|v0-base)(?:\.svc(?:\.cluster\.local)?)?)?)$/;
+  for (const name of san) assert.match(name, allowed, `SAN에 정하지 않은 이름: ${name} in ${san.join(',')}`);
+});
+
+test('BSL090_D-T40_두판의입구주소는입구인증서SAN에있다 [ASVS v5.0.0-12.2.1]', { skip: NO_OPENSSL }, () => {
+  const san = certSan();
+  for (const ns of [V0_NAMESPACE, V0_BASE_NAMESPACE]) {
+    const u = new URL(v0Layout(ns).gatewayUrl);
+    assert.equal(u.protocol, 'https:');
+    assert.equal(u.port, '8443');
+    assert.ok(san.includes(`DNS:${u.hostname}`), `${u.hostname} in ${san.join(',')}`);
+  }
 });

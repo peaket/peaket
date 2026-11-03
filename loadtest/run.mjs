@@ -4,8 +4,12 @@
 //   node loadtest/run.mjs calibrate [--cpus 4] [--memory-mi 4096] [--target-cpus 8] [--rates 1000,2000,4000,8000] [--warm 10] [--main 30] [--record] [--out <폴더>]
 //   node loadtest/run.mjs v0 queue --users N --entry-rate R --admit-per-second A [공통]
 //   node loadtest/run.mjs v0 seat-hold --users N --rate R [--mode spread|hot|crossed] [--hold-size 2] [--hot-count 1] [--pairs 1] [--release-ms 0] [공통]
-//   node loadtest/run.mjs v0 payment --users N --rate R [--seats-per-order 2] [공통]
-//   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--record --run-id <ID> [--profile <이름>]] [--invariants] [--out <폴더>]
+//   node loadtest/run.mjs v0 payment --users N --rate R [--seats-per-order 2] [--fault-drop-pct P] [--fault-delay-pct P] [--kill-app-at S] [--db-stats] [공통]
+//   node loadtest/run.mjs v0 seat-deltas --users N --rate R --connections C [--listener-pods P] [--hold-size 2] [공통]
+//   node loadtest/run.mjs v0 gate --scanners S --rate R [--cut-at 60] [--cut-s 60] [공통]
+//   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
+//         [--record --run-id <ID> [--profile <이름>] [--prom-url http://127.0.0.1:9090]] [--invariants] [--out <폴더>]
+// - Before 측정(docs/verification.md §3.10): 최고 도착률이 1,000/s를 넘으면 발생기를 나눈다(k6 실행 구간). 장부는 큰 원본을 보낼 폴더로 옮긴다
 // - 먼저 클러스터와 v0를 올린다: node tools/local/cluster.mjs up && node tools/local/cluster.mjs v0
 // - k6(다이제스트 고정)를 kind 안의 발생기 파드(네임스페이스 loadtest, CPU·메모리 요청 = 한도)로 띄워 입구의 클러스터 안 주소로 보낸다.
 //   포트 전달은 쓰지 않는다(Windows에서 끊김). 파드는 실행이 끝나면(실패해도) 지운다
@@ -23,13 +27,16 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { KUBECONFIG, V0_ALLOWED_ORIGINS, V0_NAMESPACE, V0_TOKEN_KEY_FILE, kubectl } from '../tools/local/cluster.mjs';
+import { KUBECONFIG, V0_ALLOWED_ORIGINS, V0_BASE_NAMESPACE, V0_IMAGES, V0_NAMESPACE, V0_TOKEN_KEY_FILE, kubectl, v0Layout } from '../tools/local/cluster.mjs';
 import { ensureTool } from '../tools/local/tools.mjs';
 import { generateV0TokenKey, loadOrCreateV0TokenKey, signV0Token } from '../tools/local/v0-token.mjs';
 import { pollStages } from './lib/model.mjs';
 import { seatCount } from './lib/seats.mjs';
 import { accountRef, pidOf, sidOf } from './lib/users.mjs';
-import { SCENARIOS, UsageError, parseArgs } from './runner/args.mjs';
+import { DEFAULTS, SCENARIOS, UsageError, parseArgs } from './runner/args.mjs';
+import { CHECK_PHASES, checksFromSummary, executionSegments, generatorCount, mergeSummaries, withoutHistogramChecks } from './runner/merge.mjs';
+import { dbStatsDelta, deltaJudge, deltaSummary, gateOnlineCheck, gateSummary, hpaTimeline } from './runner/probes.mjs';
+import { sideTasks } from './runner/side.mjs';
 import {
   K6_IMAGE,
   K6_UID,
@@ -40,8 +47,10 @@ import {
   NULL_TARGET_NAME,
   NULL_TARGET_PORT,
   RUN_SCRIPT,
+  RUN_SCRIPT_SPLIT,
   SIM_KEY_NAME,
   SIM_KEY_SECRET,
+  deltaClientPod,
   generatorPod,
   nullTargetCertArgs,
   nullTargetManifests,
@@ -65,8 +74,9 @@ import {
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_ROOT = join(REPO, '.cache', 'peaket-loadtest');
+/** 성능 장부 실행 폴더(collect.py가 만든다) */
+const LEDGER_RUNS = join(REPO, 'docs', 'perf-ledger', 'runs');
 const NS = LOADGEN_NAMESPACE;
-const GATEWAY_URL = `https://v0-gateway.${V0_NAMESPACE}.svc.cluster.local:8443`;
 const NULL_TARGET_URL = `https://${NULL_TARGET_NAME}.${NS}.svc.cluster.local:${NULL_TARGET_PORT}`;
 const ORIGIN = V0_ALLOWED_ORIGINS.split(',')[0].trim();
 const INVARIANT_CLI = join(REPO, 'services', 'invariant-checker', 'dist', 'cli.js');
@@ -77,6 +87,23 @@ const TOKEN_TTL_MAX_S = 3 * 3600;
 /** 좌석 격자(seat-hold) [가정]: 4구역 × 25열 × 50석 = 5,000석 */
 const SEAT_HOLD_GRID = { sections: ['A', 'B', 'C', 'D'], rows: 25, perRow: 50 };
 const PER_PERSON_LIMIT = 4;
+/** 나눈 발생기 하나의 몫 [가정](docs/verification.md §3.10 '발생기 나누기'). --cpus·--memory-mi를 주면 그 값 */
+const SPLIT_CPUS = 2;
+const SPLIT_MEMORY_MI = 1024;
+/** 장부 원본: 올릴 자리(raw_uri)와 보낼 폴더(docs/perf-ledger.md §2.1·§9). S3로 올리는 일은 소유자 몫 */
+const RAW_BUCKET = 's3://peaket-perf-raw';
+const RAW_OUTBOX = join(REPO, '.cache', 'perf-raw-outbox');
+/** v0 서버 지표 질의(collect.py --queries) */
+const QUERIES_V0 = 'loadtest/queries/v0.txt';
+/** 검표 스캐너의 판정 대기 상한 [가정](K10) */
+const SCAN_TIMEOUT = '3s';
+/** 결제사 지연 장애의 길이: v0의 결제사 대기 상한(요청 상한 15초)을 넘긴다(K7 ②, docs/features/payment.md §13) */
+const FAULT_DELAY_MS = 16000;
+/** 변경분 받는 파드 하나의 몫 [가정](K4) */
+const LISTENER_CPUS = 1;
+const LISTENER_MEMORY_MI = 512;
+/** 준비 구간 뒤 받는 파드가 연결을 맺을 시간(초) [가정](K4) */
+const CONNECT_S = 20;
 
 const log = (m) => console.log(m);
 /** collect.py를 부를 Python(이 PC는 python, Linux는 python3) */
@@ -122,11 +149,11 @@ const onNode = (args, o = {}) => execFileSync('docker', ['exec', KIND_NODE, ...a
 
 // ───────────── 준비 ─────────────
 
-async function preflightV0() {
+async function preflightV0(namespace = V0_NAMESPACE) {
   try {
-    await kc(['-n', V0_NAMESPACE, 'get', 'deploy/v0-gateway', 'deploy/v0-monolith', '-o', 'name']);
+    await kc(['-n', namespace, 'get', 'deploy/v0-gateway', 'deploy/v0-monolith', '-o', 'name']);
   } catch {
-    throw new Error('v0가 올라와 있지 않다. 먼저: node tools/local/cluster.mjs up && node tools/local/cluster.mjs v0');
+    throw new Error(`v0(${namespace})가 올라와 있지 않다. 먼저: node tools/local/cluster.mjs up && node tools/local/cluster.mjs v0(기준판은 node loadtest/nightly/prepare.mjs)`);
   }
   if (!existsSync(V0_TOKEN_KEY_FILE)) throw new Error('토큰 서명 키 파일이 없다(.cache/peaket-tools/v0-token-key.json). node tools/local/cluster.mjs v0를 다시 돌린다');
 }
@@ -140,10 +167,24 @@ async function sweepLeftovers() {
   for (const d of readdirSync(tmpdir())) {
     if (/^loadgen-(env-)?[A-Za-z0-9]{6}$/.test(d)) rmSync(join(tmpdir(), d), { recursive: true, force: true });
   }
-  const pods = (await kc(['-n', NS, 'get', 'pods', '-l', 'app.kubernetes.io/name=loadgen', '-o', 'name'])).trim();
+  const sel = 'app.kubernetes.io/name in (loadgen,loadgen-delta)';
+  const pods = (await kc(['-n', NS, 'get', 'pods', '-l', sel, '-o', 'name'])).trim();
   if (pods) {
-    log(`이전 실행이 남긴 발생기 파드를 지운다: ${pods.split('\n').join(', ')}`);
-    await kc(['-n', NS, 'delete', 'pods', '-l', 'app.kubernetes.io/name=loadgen', '--wait=true'], { timeout: 180_000 });
+    log(`이전 실행이 남긴 발생기·받는 파드를 지운다: ${pods.split('\n').join(', ')}`);
+    await kc(['-n', NS, 'delete', 'pods', '-l', sel, '--wait=true'], { timeout: 180_000 });
+  }
+  // K10 실행이 강제로 끝나 입구를 0개로 둔 채 남았으면 되돌린다(입구 복제는 1, deploy/envs/local/v0-gateway.yaml)
+  for (const ns of [V0_NAMESPACE, V0_BASE_NAMESPACE]) {
+    let replicas;
+    try {
+      replicas = (await kc(['-n', ns, 'get', 'deploy/v0-gateway', '-o', 'jsonpath={.spec.replicas}'])).trim();
+    } catch {
+      continue; // 그 판이 없다
+    }
+    if (replicas === '0') {
+      log(`${ns}의 입구가 0개로 남아 있어 1개로 되돌린다`);
+      await kc(['-n', ns, 'scale', 'deploy/v0-gateway', '--replicas=1']);
+    }
   }
   await kc(['-n', NS, 'delete', 'secret', SIM_KEY_SECRET, '--ignore-not-found']);
   await stopNullTarget();
@@ -217,9 +258,9 @@ async function ensureNamespace() {
 }
 
 /** 앱 파드 안에서 Node 스크립트를 돌리고 '@@RESULT <JSON>' 줄을 읽는다 */
-async function inAppPod(script, timeout = 300_000) {
+export async function inAppPod(script, timeout = 300_000, namespace = V0_NAMESPACE) {
   // 스크립트는 인자 하나로 넘긴다(표준 입력은 이 PC에서 잘릴 수 있다). 몇 KB라 명령줄 한도(32K) 안이다
-  const out = await kc(['-n', V0_NAMESPACE, 'exec', 'deploy/v0-monolith', '--', 'node', '--input-type=module', '-e', script], { timeout });
+  const out = await kc(['-n', namespace, 'exec', 'deploy/v0-monolith', '--', 'node', '--input-type=module', '-e', script], { timeout });
   const m = /^@@RESULT (.*)$/m.exec(out);
   if (!m) throw new Error(`앱 파드 안 스크립트에 결과 줄이 없다:\n${out.slice(-1500)}`);
   return JSON.parse(m[1]);
@@ -228,12 +269,14 @@ async function inAppPod(script, timeout = 300_000) {
 const b64json = (v) => Buffer.from(JSON.stringify(v), 'utf8').toString('base64');
 
 /** 회차 열기(대기열 부르는 속도)·좌석·가격(모듈 공개 함수, docs/features/*.md의 v0 절) */
-function seedScript(p) {
+export function seedScript(p) {
   return `import { createDatabase } from '@peaket/platform';
 import { createBookingAdmin } from './dist/modules/booking/index.js';
 import { createSeatAdmin, seatGrid } from './dist/modules/inventory/index.js';
 import { createQueueAdmin } from './dist/modules/queue/index.js';
+import { createTicketAdmin, createTicketIssuer } from './dist/modules/ticket/index.js';
 import { createV0Redis } from './dist/redis.js';
+import { randomUUID } from 'node:crypto';
 const p = JSON.parse(Buffer.from('${b64json(p)}', 'base64').toString('utf8'));
 const redis = await createV0Redis(process.env.PEAKET_V0_REDIS_URL);
 const database = createDatabase({ url: process.env.PEAKET_V0_DATABASE_URL, applicationName: 'v0-loadtest-seed' });
@@ -246,7 +289,17 @@ try {
     await createBookingAdmin(database).setPrices(p.eventId, p.prices);
     seats = list.length;
   }
-  process.stdout.write('@@RESULT ' + JSON.stringify({ eventId: p.eventId, seats }) + '\\n');
+  // 검표(K10): 그 회차의 합성 티켓(주문마다 한 장)과 검표 스태프(docs/features/offline-gate.md §13 동작 1·3)
+  const codes = [];
+  if (p.gate) {
+    await createTicketAdmin(database).assignStaff(p.eventId, p.gate.staff);
+    const issuer = createTicketIssuer(database);
+    for (let n = 0; n < p.gate.tickets; n++) {
+      const [t] = await issuer.issue({ orderId: randomUUID(), eventId: p.eventId, accountId: 'acc-lt-gate-holder', seatIds: ['G-' + n], nowMs: Date.now() });
+      codes.push(t.code);
+    }
+  }
+  process.stdout.write('@@RESULT ' + JSON.stringify({ eventId: p.eventId, seats, codes }) + '\\n');
 } finally {
   await redis.close();
   await database.close();
@@ -276,7 +329,7 @@ process.stdout.write('@@RESULT ' + JSON.stringify({ status: r.status, body: r.st
 `;
 
 /** 가상 사용자 토큰(번호 → 토큰) JSON. 개인키는 이 PC에서만 쓴다 */
-function tokensJson(privateJwk, runTag, users, ttlS) {
+export function tokensJson(privateJwk, runTag, users, ttlS) {
   const nowMs = Date.now();
   const iat = Math.floor(nowMs / 1000);
   const out = new Array(users);
@@ -288,7 +341,7 @@ function tokensJson(privateJwk, runTag, users, ttlS) {
 
 /** 좌석 격자: payment는 가상 사용자마다 seatsPerOrder석이 겹치지 않게 */
 function gridFor(a) {
-  if (a.scenario === 'seat-hold') return SEAT_HOLD_GRID;
+  if (a.scenario === 'seat-hold' || a.scenario === 'seat-deltas') return SEAT_HOLD_GRID;
   if (a.scenario === 'payment') {
     const need = a.users * a.seatsPerOrder;
     const grid = { sections: ['A', 'B', 'C', 'D'], rows: Math.max(1, Math.ceil(need / 200)), perRow: 50 };
@@ -322,7 +375,7 @@ async function startGenerator(name, a, hostDir, { simKey = false, deadlineS } = 
  * 파드 입력을 이 PC의 임시 폴더에 꾸려 노드의 실행 폴더로 옮긴다(docker cp). 임시 폴더는 바로 지운다(토큰이 든다).
  * 실행 폴더는 k6 사용자만 읽고 쓴다
  */
-function stageInputs(hostDir, { caPem, tokens }) {
+function stageInputs(hostDir, { caPem, tokens, codes }) {
   const stage = mkdtempSync(join(tmpdir(), 'loadgen-'));
   try {
     const put = (rel, content) => {
@@ -333,8 +386,12 @@ function stageInputs(hostDir, { caPem, tokens }) {
     for (const f of readdirSync(join(REPO, 'loadtest', 'scenarios')).filter((x) => x.endsWith('.js'))) put(`loadtest/scenarios/${f}`, readFileSync(join(REPO, 'loadtest', 'scenarios', f)));
     put('tools/perf-ledger/k6-summary.js', readFileSync(join(REPO, 'tools', 'perf-ledger', 'k6-summary.js')));
     put('bin/run.sh', RUN_SCRIPT);
+    put('bin/run-split.sh', RUN_SCRIPT_SPLIT);
+    // 변경분 받는 파드(K4)의 스크립트와 그 계산(probes.mjs). lib는 위에서 이미 옮겼다
+    for (const f of ['delta-client.mjs', 'probes.mjs']) put(`loadtest/runner/${f}`, readFileSync(join(REPO, 'loadtest', 'runner', f)));
     put('ca.pem', caPem);
     put('users.json', tokens);
+    if (codes !== undefined) put('codes.json', codes);
     mkdirSync(join(stage, 'out'), { recursive: true });
     onNode(['mkdir', '-p', NODE_ROOT]);
     onNode(['rm', '-rf', hostDir]);
@@ -366,18 +423,23 @@ const removeNodeDir = (hostDir) => {
   }
 };
 
-/** k6를 한 번 돌리고 끝날 때까지 기다린다. 끝나면 산출물 글을 돌려준다 */
+/** k6를 한 번 돌리고 끝날 때까지 기다린다. 끝나면 산출물 글을 돌려준다(보정) */
 async function runK6(pod, hostDir, env, expectedS) {
   putNodeFile(hostDir, 'run.env', runEnvFile(env));
   // 앞 단계의 종료 코드 파일을 읽지 않게 시작 전에 지운다
   onNode(['rm', '-f', `${hostDir}/out/exit`, `${hostDir}/out/exit.tmp`]);
   await kc(['-n', NS, 'exec', pod, '--', 'sh', '-c', 'nohup sh /work/bin/run.sh >/dev/null 2>&1 &']);
+  return waitK6(pod, hostDir, 'out', expectedS);
+}
+
+/** 시작한 k6가 끝날 때까지(종료 코드 파일 <outRel>/exit) 기다려 산출물 글을 돌려준다 */
+async function waitK6(pod, hostDir, outRel, expectedS) {
   const until = Date.now() + (expectedS * 2 + 300) * 1000;
   let exit;
   while (Date.now() < until) {
     await sleep(3000);
     try {
-      exit = onNode(['cat', `${hostDir}/out/exit`], { timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      exit = onNode(['cat', `${hostDir}/${outRel}/exit`], { timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       break;
     } catch {
       // 아직 끝나지 않았다(파일 없음)
@@ -385,11 +447,11 @@ async function runK6(pod, hostDir, env, expectedS) {
   }
   if (exit === undefined) {
     await kc(['-n', NS, 'exec', pod, '--', 'pkill', 'k6']).catch(() => {});
-    throw new Error(`k6가 ${expectedS * 2 + 300}초 안에 끝나지 않았다`);
+    throw new Error(`k6(${pod})가 ${expectedS * 2 + 300}초 안에 끝나지 않았다`);
   }
   const read = async (f) => {
     try {
-      return onNode(['cat', `${hostDir}/out/${f}`], { stdio: ['ignore', 'pipe', 'ignore'] });
+      return onNode(['cat', `${hostDir}/${outRel}/${f}`], { stdio: ['ignore', 'pipe', 'ignore'] });
     } catch {
       return '';
     }
@@ -400,15 +462,18 @@ async function runK6(pod, hostDir, env, expectedS) {
     console: await read('console.ndjson'),
     k6log: await read('k6.log'),
     cgroup: await read('cgroup.log'),
+    started: Number((await read('started')).trim()),
   };
 }
 
-/** 요약·콘솔·cgroup으로 발생기 지표와 판정 */
-function evaluate(out, a) {
+/** 요약·콘솔·cgroup으로 발생기 지표와 판정. 나눈 발생기는 모두의 구간 표시(marksIn)와 미리 나눈 콘솔(splitIn)을 받는다 */
+function evaluate(out, a, marksIn, splitIn) {
   if (!out.summary) throw new Error(`k6 요약이 없다(종료 코드 ${out.exit}):\n${out.k6log.slice(-1500)}`);
   const summary = JSON.parse(out.summary);
   const m = summary.metrics;
-  const { records, marks } = splitConsole(out.console);
+  const parsed = splitIn ?? splitConsole(out.console);
+  const records = parsed.records;
+  const marks = marksIn ?? parsed.marks;
   if (marks.main_start === undefined || marks.main_end === undefined) throw new Error('본구간 경계 표시가 없다(k6가 본구간까지 가지 못했다)');
   const stats = generatorStats(parseCgroupLog(out.cgroup), { fromMs: marks.main_start, toMs: marks.main_end, cpus: a.cpus, memLimitBytes: a.memoryMi * 1024 * 1024 });
   const dropped = m.dropped_iterations?.values?.count ?? 0;
@@ -432,6 +497,7 @@ function evaluate(out, a) {
       vusMax,
       perVuBytes: vusMax >= 1 ? perVuBytes({ memMaxBytes: stats.memMaxBytes, vusMax }) : null,
       marks,
+      ...(Number.isFinite(out.started) ? { startedS: out.started } : {}),
     },
   };
 }
@@ -459,7 +525,7 @@ function infraText(extra) {
     `Docker 엔진: ${docker}`,
     `WSL 설정(.wslconfig): ${wslconfig}`,
     `클러스터: kind peaket(노드 하나), kubeconfig ${KUBECONFIG}`,
-    `발생기: k6 ${K6_IMAGE}, 파드 CPU ${extra.cpus}·메모리 ${extra.memoryMi}Mi(요청 = 한도), GOMAXPROCS ${extra.cpus}`,
+    `발생기: k6 ${K6_IMAGE}, 파드 ${extra.generators ?? 1}대(CPU ${extra.cpus}·메모리 ${extra.memoryMi}Mi씩, 요청 = 한도), GOMAXPROCS ${extra.cpus}${(extra.generators ?? 1) > 1 ? ', k6 실행 구간으로 나눔(docs/verification.md §3.10)' : ''}`,
     ...(extra.targetCpus ? [`빈 응답 대역: ${NULL_TARGET_IMAGE}, CPU ${extra.targetCpus}·메모리 256Mi(요청 = 한도)`] : []),
     '시계: 발생기와 대상이 같은 PC 커널 시계를 쓴다(시계 차이 0, docs/perf-ledger.md §3 3번)',
     `CPU 배치: WSL 안에서 어느 코어에 놓일지 고르지 않는다(docs/verification.md §3.5 6번 '코어 혼합'은 표시만)`,
@@ -470,7 +536,7 @@ function infraText(extra) {
 
 // ───────────── 불변식 검사(--invariants) ─────────────
 
-async function runInvariants(outDir, recordsFile) {
+async function runInvariants(outDir, recordsFile, database = 'v0') {
   if (!existsSync(INVARIANT_CLI)) throw new Error("불변식 검사기가 빌드되어 있지 않다. 먼저 'pnpm --filter @peaket/invariant-checker build'");
   const k = await ensureTool('kubectl');
   const pf = spawn(k, ['--kubeconfig', KUBECONFIG, '-n', 'peaket-local', 'port-forward', '--address', '127.0.0.1', 'svc/postgres', ':5432'], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -492,7 +558,8 @@ async function runInvariants(outDir, recordsFile) {
       pf.on('exit', () => no(new Error('PostgreSQL 포트 전달이 끝났다')));
     });
     // 검사 연결은 v0 DB 그대로, 원본 셋은 뷰 묶음 v0_check(docs/features/payment.md §13 '불변식 검사')
-    const db = `postgres://postgres:peaket-local@127.0.0.1:${port}/v0`;
+    if (!/^v0(_base)?$/.test(database)) throw new Error(`v0 DB 이름이 틀렸다: ${database}`);
+    const db = `postgres://postgres:peaket-local@127.0.0.1:${port}/${database}`;
     const source = `${db}?options=-c%20search_path%3Dv0_check`;
     const invDir = join(outDir, 'invariants');
     const env = { ...process.env, INVARIANT_CHECK_DB_URL: db, INVARIANT_PURCHASE_DB_URL: source, INVARIANT_PAYMENT_DB_URL: source, INVARIANT_TICKET_DB_URL: source };
@@ -516,20 +583,122 @@ async function runInvariants(outDir, recordsFile) {
 
 // ───────────── v0 시나리오 ─────────────
 
+/** 시나리오 → K(장부 kpi) */
+function kpiOf(a) {
+  if (a.scenario === 'queue') return 'K1';
+  if (a.scenario === 'payment') return 'K7';
+  if (a.scenario === 'seat-deltas') return 'K4';
+  if (a.scenario === 'gate') return 'K10';
+  return a.mode === 'crossed' ? 'K3' : 'K2';
+}
+
+/** 시나리오가 요청에 다는 경로(점검 파일을 만든다) */
+const ROUTES = {
+  queue: ['entry', 'status', 'admission'],
+  'seat-hold': ['hold', 'release'],
+  'seat-deltas': ['hold', 'release'],
+  payment: ['hold', 'order', 'sim_auth', 'sim_fault', 'payment', 'order_view'],
+  gate: ['scan'],
+};
+
+/** 서버 히스토그램 점검(경로의 앱 경로 틀, 기준값 칸(초), 허용 비율). 지연 대조의 서버 쪽이다(ADR-0077) */
+const SERVER_CHECK = {
+  queue: { route: 'status', path: '/v1/queues/{eventId}/entries/me', le: 0.2, allowed: 0.01, label: 'p99', name: 'status_server_p99_200ms' },
+  'seat-hold': { route: 'hold', path: '/v1/events/{eventId}/holds', le: 0.05, allowed: 0.01, label: 'p99', name: 'hold_server_p99_50ms' },
+  'seat-deltas': { route: 'hold', path: '/v1/events/{eventId}/holds', le: 0.05, allowed: 0.01, label: 'p99', name: 'hold_server_p99_50ms' },
+  payment: { route: 'payment', path: '/v0/orders/{orderId}/payment', le: 3, allowed: 0.01, label: 'p99', name: 'payment_server_p99_3000ms' },
+  gate: { route: 'scan', path: '/v0/events/{eventId}/scans', le: 0.15, allowed: 0.05, label: 'p95', name: 'scan_server_p95_150ms' },
+};
+
+/** 앱 파드 고르기(공용 차트의 이름 꼬리표) */
+const APP_SELECTOR = 'app.kubernetes.io/name=v0-monolith';
+
+/** 시작 전 HPA가 앱 복제를 최소로 줄일 때까지 기다린다(--settle, docs/verification.md §3.10 '공통 규칙') */
+async function settleHpa(namespace, timeoutS = 900) {
+  const until = Date.now() + timeoutS * 1000;
+  let lastLog = 0;
+  while (Date.now() < until) {
+    const h = JSON.parse(await kc(['-n', namespace, 'get', 'hpa', 'v0-monolith', '-o', 'json']));
+    const min = h.spec?.minReplicas ?? 1;
+    const pods = JSON.parse(await kc(['-n', namespace, 'get', 'pods', '-l', APP_SELECTOR, '-o', 'json'])).items.filter((p) => !p.metadata?.deletionTimestamp);
+    if (h.status?.currentReplicas === min && pods.length === min) return;
+    if (Date.now() - lastLog > 30_000) {
+      log(`앱 복제가 최소(${min})로 줄기를 기다린다(지금 ${h.status?.currentReplicas ?? '?'}개, 파드 ${pods.length}개)`);
+      lastLog = Date.now();
+    }
+    await sleep(10_000);
+  }
+  throw new Error(`HPA가 ${timeoutS}초 안에 앱 복제를 최소로 줄이지 않았다`);
+}
+
+/** DB 통계 한 번(K3, S-T10): pg_stat_database와 v0 표의 pg_stat_user_tables */
+const DB_STATS_SCRIPT = `import { createDatabase } from '@peaket/platform';
+const database = createDatabase({ url: process.env.PEAKET_V0_DATABASE_URL, applicationName: 'v0-loadtest-stats' });
+try {
+  const d = (await database.pool.query('select deadlocks, xact_commit, xact_rollback from pg_stat_database where datname = current_database()')).rows[0];
+  const t = (await database.pool.query("select relname, n_tup_ins, n_tup_upd, n_tup_hot_upd, n_tup_del, n_live_tup, n_dead_tup from pg_stat_user_tables where relname like 'v0\\\\_%'")).rows;
+  const n = (v) => Number(v);
+  const out = { atMs: Date.now(), database: { deadlocks: n(d.deadlocks), xact_commit: n(d.xact_commit), xact_rollback: n(d.xact_rollback) }, tables: {} };
+  for (const r of t) out.tables[r.relname] = { n_tup_ins: n(r.n_tup_ins), n_tup_upd: n(r.n_tup_upd), n_tup_hot_upd: n(r.n_tup_hot_upd), n_tup_del: n(r.n_tup_del), n_live_tup: n(r.n_live_tup), n_dead_tup: n(r.n_dead_tup) };
+  process.stdout.write('@@RESULT ' + JSON.stringify(out) + '\\n');
+} finally {
+  await database.close();
+}
+setTimeout(() => process.exit(0), 2000).unref();
+`;
+
+/** 결제 실행 뒤 v0 표 상태(K7 ②): 좌석 누수·멈춘 주문(docs/features/payment.md §13). 회차 하나만 센다 */
+function paymentStateScript(eventId) {
+  return `import { createDatabase } from '@peaket/platform';
+const database = createDatabase({ url: process.env.PEAKET_V0_DATABASE_URL, applicationName: 'v0-loadtest-state' });
+const ev = ${JSON.stringify(eventId)};
+try {
+  const q = async (s) => Number((await database.pool.query(s, [ev])).rows[0].n);
+  const out = {
+    seatLeak: await q("select count(*) as n from v0_seat s where s.event_id = $1 and s.status = 'SOLD' and not exists (select 1 from v0_order o where o.order_id = s.order_id and o.status in ('APPROVED', 'CONFIRMED'))"),
+    ordersPaying: await q("select count(*) as n from v0_order where event_id = $1 and status = 'PAYING'"),
+    ordersApproved: await q("select count(*) as n from v0_order where event_id = $1 and status = 'APPROVED'"),
+    ordersConfirmed: await q("select count(*) as n from v0_order where event_id = $1 and status = 'CONFIRMED'"),
+    ordersFailed: await q("select count(*) as n from v0_order where event_id = $1 and status = 'FAILED'"),
+    paymentsConfirming: await q("select count(*) as n from v0_payment where event_id = $1 and status = 'CONFIRMING'"),
+    paymentsApproved: await q("select count(*) as n from v0_payment where event_id = $1 and status = 'APPROVED'"),
+    paymentsFailed: await q("select count(*) as n from v0_payment where event_id = $1 and status = 'FAILED'"),
+  };
+  process.stdout.write('@@RESULT ' + JSON.stringify(out) + '\\n');
+} finally {
+  await database.close();
+}
+setTimeout(() => process.exit(0), 2000).unref();
+`;
+}
+
+/** 입구 Deployment의 복제 수 */
+async function gatewayReplicas(namespace) {
+  return Number((await kc(['-n', namespace, 'get', 'deploy/v0-gateway', '-o', 'jsonpath={.spec.replicas}'])).trim());
+}
+
+/** 실행 하나를 끝까지: 준비 → 발생기(나눔) → 곁에서 할 일 → 판정·기록 */
 async function runV0(a, runTag) {
+  const layout = v0Layout(a.namespace);
   const outDir = resolve(a.out ?? join(OUT_ROOT, `${today()}-${a.scenario}-${runTag}`));
   mkdirSync(outDir, { recursive: true });
-  const pod = `loadgen-${runTag}`;
   const hostDir = `${NODE_ROOT}/${runTag}`;
   const eventId = randomUUID();
   const grid = gridFor(a);
   const startedAt = new Date().toISOString();
   let exitCode = 0;
   let k6Exit = null;
-  // 잠금을 잡기 전에 끝나면(다른 실행이 돌고 있음) 이 실행 이름의 파드·폴더만 지우고 공용 객체(시험 키 Secret)는 건드리지 않는다
   let locked = false;
+  const pods = [];
+  const listeners = [];
+  /** 끊어 둔 입구(K10). 실패·종료 신호에서도 되돌린다 */
+  let cutRestore = null;
+  /** 아직 돌지 않은 곁작업 막기(곁작업 모음을 만든 뒤 채운다) */
+  let cancelSide = () => {};
   const cleanup = async () => {
-    await kc(['-n', NS, 'delete', 'pod', pod, '--ignore-not-found', '--wait=true']).catch(() => {});
+    cancelSide();
+    if (cutRestore) await cutRestore().catch(() => {});
+    for (const p of [...pods, ...listeners]) await kc(['-n', NS, 'delete', 'pod', p, '--ignore-not-found', '--wait=true']).catch(() => {});
     removeNodeDir(hostDir);
     if (!locked) return;
     if (a.scenario === 'payment') await kc(['-n', NS, 'delete', 'secret', SIM_KEY_SECRET, '--ignore-not-found']).catch(() => {});
@@ -537,13 +706,13 @@ async function runV0(a, runTag) {
   };
   cleanups.add(cleanup);
   try {
-    step('v0와 네임스페이스 확인');
-    await preflightV0();
+    step(`v0(${layout.namespace})와 네임스페이스 확인`);
+    await preflightV0(layout.namespace);
     await ensureNamespace();
 
-    // 시나리오 시간과 가상 사용자 수
+    // 시나리오 시간과 도착률
+    const tokenUsers = a.scenario === 'seat-deltas' ? a.connections + a.users : a.users;
     let maxRate;
-    let busyS;
     let prepS;
     if (a.scenario === 'queue') {
       const entryS = Math.ceil(a.users / a.entryRate);
@@ -551,118 +720,290 @@ async function runV0(a, runTag) {
       const plan = [pollStages({ ...q, startS: entryS, durationS: a.warmS }), pollStages({ ...q, startS: entryS + a.warmS, durationS: a.mainS })];
       maxRate = Math.max(a.entryRate, ...plan.flatMap((p) => [p.startRate, ...p.stages.map((s) => s.target)]));
       prepS = entryS;
+    } else if (a.scenario === 'gate') {
+      maxRate = a.rate;
+      prepS = 0;
     } else {
-      const prepRate = Math.min(a.users, 200);
-      prepS = 2 * Math.ceil(a.users / prepRate) + 3;
-      maxRate = Math.max(a.rate, prepRate);
+      const prepRate = Math.min(tokenUsers, 200);
+      prepS = 2 * Math.ceil(tokenUsers / prepRate) + 3 + (a.scenario === 'seat-deltas' ? CONNECT_S : 0);
+      maxRate = Math.max(a.rate * (a.scenario === 'seat-hold' && !a.keep ? 2 : a.scenario === 'seat-deltas' ? 2 : 1), prepRate);
     }
-    busyS = prepS + a.warmS + a.mainS + 60;
-    // 홀드를 잡고 기다리는 동안(--release-ms) 가상 사용자가 묶인다
-    const perReqS = a.scenario === 'payment' ? 0.5 : a.scenario === 'seat-hold' ? 0.05 + a.releaseMs / 1000 : 0.05;
-    const vus = vuPlan(maxRate, a.memoryMi, perReqS);
+    const busyS = prepS + a.warmS + a.mainS + 60;
+    // 발생기 수(docs/verification.md §3.10 '발생기 나누기'): 주지 않으면 최고 도착률 ÷ 1,000
+    const nGen = a.generators ?? generatorCount(maxRate);
+    const split = nGen > 1;
+    const gen = split && a.cpus === DEFAULTS.cpus && a.memoryMi === DEFAULTS.memoryMi ? { ...a, cpus: SPLIT_CPUS, memoryMi: SPLIT_MEMORY_MI } : a;
+    // 홀드를 잡고 기다리는 동안(--release-ms), 결제 체인, 검표 대기 상한 동안 가상 사용자가 묶인다
+    const perReqS = a.scenario === 'payment' ? 0.5 : a.scenario === 'gate' ? 0.1 : a.scenario === 'seat-hold' ? 0.05 + a.releaseMs / 1000 : 0.05;
+    const vus = vuPlan(maxRate / nGen, gen.memoryMi, perReqS);
+    log(`발생기 ${nGen}대(CPU ${gen.cpus}·메모리 ${gen.memoryMi}Mi씩), 최고 도착률 ${Math.round(maxRate)}/s, 발생기마다 미리 ${vus.pre}·최대 ${vus.max} VU`);
 
     step('실행 잠금과 남은 것 쓸어 내기');
-    await acquireLock(runTag, Date.now() + (busyS * 2 + 600) * 1000);
+    await acquireLock(runTag, Date.now() + (busyS * 2 + 600 + (a.settle ? 900 : 0)) * 1000);
     locked = true;
     await sweepLeftovers();
+    if (a.settle) {
+      step('HPA가 앱 복제를 최소로 줄이기를 기다린다(--settle)');
+      await settleHpa(layout.namespace);
+    }
 
     step(`회차 ${eventId} 열기`);
-    // 판매 종료 시각을 실행 뒤로 둔다. 끝난 회차는 입장 루프가 부르지 않아, 실행이 쌓여도 다음 측정의 Redis 부하가 늘지 않는다
+    // 판매 종료 시각을 실행 뒤로 둔다. 끝난 회차는 입장 루프가 불러도 곧바로 돌아와, 실행이 쌓여도 다음 측정의 Redis 부하가 거의 늘지 않는다
     const seeded = await inAppPod(
       seedScript({
         eventId,
         admitPerSecond: a.scenario === 'queue' ? a.admitPerSecond : 100000,
         saleEndsAtMs: Date.now() + (busyS + 600) * 1000,
         ...(grid ? { grid, perPersonLimit: PER_PERSON_LIMIT, prices: { R: 150000 } } : {}),
+        ...(a.scenario === 'gate' ? { gate: { tickets: a.tickets, staff: Array.from({ length: a.scanners }, (_, i) => accountRef(runTag, i)) } } : {}),
       }),
+      600_000,
+      layout.namespace,
     );
-    log(`좌석 ${seeded.seats}석`);
+    log(`좌석 ${seeded.seats}석${a.scenario === 'gate' ? `, 티켓 ${seeded.codes.length}장, 스태프 ${a.scanners}명` : ''}`);
 
-    step(`가상 사용자 ${a.users}명의 토큰 서명(이 PC)`);
+    const dbBefore = a.dbStats ? await inAppPod(DB_STATS_SCRIPT, 120_000, layout.namespace) : null;
+
+    step(`가상 사용자 ${tokenUsers}명의 토큰 서명(이 PC)`);
     const { privateJwk } = loadOrCreateV0TokenKey(V0_TOKEN_KEY_FILE);
-    const tokens = tokensJson(privateJwk, runTag, a.users, Math.min(TOKEN_TTL_MAX_S, busyS + 600));
+    const tokens = tokensJson(privateJwk, runTag, tokenUsers, Math.min(TOKEN_TTL_MAX_S, busyS + 600));
 
-    step(`발생기 파드 ${pod}(CPU ${a.cpus}, 메모리 ${a.memoryMi}Mi)`);
     if (a.scenario === 'payment') {
       const raw = (await kc(['-n', V0_NAMESPACE, 'get', 'secret', 'pg-simulator', '-o', `jsonpath={.data.${SIM_KEY_NAME}}`])).trim();
       await kc(['-n', NS, 'delete', 'secret', SIM_KEY_SECRET, '--ignore-not-found']);
       await createObject(simKeySecret(Buffer.from(raw, 'base64').toString('utf8')));
     }
-    const caPem = Buffer.from((await kc(['-n', V0_NAMESPACE, 'get', 'secret', 'v0-gateway', '-o', 'jsonpath={.data.PEAKET_V0_TLS_CERT}'])).trim(), 'base64').toString('utf8');
-    stageInputs(hostDir, { caPem, tokens });
-    await startGenerator(pod, a, hostDir, { simKey: a.scenario === 'payment', deadlineS: busyS * 2 + 600 });
+    const caPem = Buffer.from((await kc(['-n', layout.namespace, 'get', 'secret', 'v0-gateway', '-o', 'jsonpath={.data.PEAKET_V0_TLS_CERT}'])).trim(), 'base64').toString('utf8');
+    stageInputs(hostDir, { caPem, tokens, ...(a.scenario === 'gate' ? { codes: JSON.stringify(seeded.codes) } : {}) });
 
-    step(`k6 ${SCENARIOS[a.scenario]}(예상 ${busyS}초)`);
+    // 시나리오 환경 값(발생기마다 같고, 나누면 실행 구간만 다르다). PRE_VUS·MAX_VUS는 모든 발생기의 합이다(k6가 구간 몫으로 나눈다)
     const env = {
       SCENARIO: SCENARIOS[a.scenario],
-      BASE: GATEWAY_URL,
+      BASE: layout.gatewayUrl,
       ORIGIN,
       RUN_TAG: runTag,
-      OUT_DIR: '/work/out',
       USERS_FILE: '/work/users.json',
       EVENT_ID: eventId,
-      USERS: a.users,
       WARM_S: a.warmS,
       MAIN_S: a.mainS,
-      PRE_VUS: vus.pre,
-      MAX_VUS: vus.max,
-      ...(a.scenario === 'queue' ? { ENTRY_RATE: a.entryRate, ADMIT_PER_SECOND: a.admitPerSecond } : { RATE: a.rate, PREP_RATE: Math.min(a.users, 200) }),
+      PRE_VUS: vus.pre * nGen,
+      MAX_VUS: vus.max * nGen,
+      ...(a.scenario === 'queue' ? { USERS: a.users, ENTRY_RATE: a.entryRate, ADMIT_PER_SECOND: a.admitPerSecond } : {}),
+      ...(a.scenario === 'seat-hold' || a.scenario === 'payment' ? { USERS: a.users, RATE: a.rate, PREP_RATE: Math.min(a.users, 200) } : {}),
+      ...(a.scenario === 'seat-deltas' ? { USERS: a.users, RATE: a.rate, LISTENERS: a.connections, CONNECT_S, PREP_RATE: Math.min(tokenUsers, 200), MODE: 'spread', HOLD_SIZE: a.holdSize } : {}),
       ...(grid ? { SECTIONS: grid.sections.join(','), ROWS: grid.rows, PER_ROW: grid.perRow } : {}),
-      ...(a.scenario === 'seat-hold' ? { MODE: a.mode, HOLD_SIZE: a.holdSize, HOT_COUNT: a.hotCount, PAIRS: a.pairs, RELEASE_MS: a.releaseMs } : {}),
-      ...(a.scenario === 'payment' ? { SEATS_PER_ORDER: a.seatsPerOrder, SIM_URL: `http://pg-simulator.${V0_NAMESPACE}.svc.cluster.local:8790` } : {}),
+      ...(a.scenario === 'seat-hold' ? { MODE: a.mode, HOLD_SIZE: a.holdSize, HOT_COUNT: a.hotCount, PAIRS: a.pairs, RELEASE_MS: a.releaseMs, KEEP: a.keep ? 1 : 0 } : {}),
+      ...(a.scenario === 'payment' ? { SEATS_PER_ORDER: a.seatsPerOrder, SIM_URL: `http://pg-simulator.${V0_NAMESPACE}.svc.cluster.local:8790`, FAULT_DROP_PCT: a.faultDropPct, FAULT_DELAY_PCT: a.faultDelayPct, FAULT_DELAY_MS } : {}),
+      ...(a.scenario === 'gate' ? { SCANNERS: a.scanners, RATE: a.rate, TICKETS: a.tickets, CODES_FILE: '/work/codes.json', SCAN_TIMEOUT } : {}),
     };
-    const out = await runK6(pod, hostDir, env, busyS);
-    const k6DoneAtMs = Date.now();
-    k6Exit = out.exit;
-    writeFileSync(join(outDir, 'k6.log'), out.k6log);
-    writeFileSync(join(outDir, 'cgroup.log'), out.cgroup);
-    writeFileSync(join(outDir, 'console.ndjson'), out.console);
-    if (out.exit !== 0 && out.exit !== 99) {
-      exitCode = 1;
-      throw new Error(`k6가 종료 코드 ${out.exit}로 끝났다:\n${out.k6log.slice(-1500)}`);
+    const segments = executionSegments(nGen);
+    for (const sg of segments) {
+      const e = split ? { ...env, OUT_DIR: `/work/out/g${sg.index}`, K6_EXECUTION_SEGMENT: sg.segment, K6_EXECUTION_SEGMENT_SEQUENCE: sg.sequence } : { ...env, OUT_DIR: '/work/out' };
+      putNodeFile(hostDir, split ? `run-${sg.index}.env` : 'run.env', runEnvFile(e));
     }
-    const ev = evaluate(out, a);
-    writeFileSync(join(outDir, 'summary.json'), JSON.stringify(ev.summary, null, 2));
-    writeFileSync(join(outDir, 'generator.json'), JSON.stringify(ev.generator, null, 2));
+
+    step(`발생기 파드 ${nGen}대`);
+    for (const sg of segments) {
+      const name = split ? `loadgen-${runTag}-g${sg.index}` : `loadgen-${runTag}`;
+      pods.push(name);
+      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment', deadlineS: Math.max(60, Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
+    }
+    if (a.scenario === 'seat-deltas') {
+      step(`변경분 받는 파드 ${a.listenerPods}대(연결 ${a.connections}개)`);
+      const per = Math.ceil(a.connections / a.listenerPods);
+      for (let i = 0; i < a.listenerPods; i++) {
+        const from = i * per;
+        const to = Math.min(a.connections, from + per);
+        if (from >= to) break;
+        const name = `loadgen-${runTag}-l${i}`;
+        listeners.push(name);
+        await createObject(deltaClientPod({ name, index: i, cpus: LISTENER_CPUS, memoryMi: LISTENER_MEMORY_MI, hostDir, deadlineS: Math.max(60, Math.min(11400, busyS * 2 + 600)), connsFrom: from, connsTo: to, gateway: layout.gatewayUrl.replace(/^https:/, 'wss:'), eventId, origin: ORIGIN, image: V0_IMAGES.app }));
+      }
+    }
+    for (const p of [...pods, ...listeners]) await kc(['-n', NS, 'wait', '--for=condition=Ready', `pod/${p}`, '--timeout=300s'], { timeout: 320_000 });
+
+    step(`k6 ${SCENARIOS[a.scenario]}(예상 ${busyS}초)`);
+    for (const p of pods) await kc(['-n', NS, 'exec', p, '--', 'sh', '-c', `nohup sh /work/bin/${split ? 'run-split.sh' : 'run.sh'} >/dev/null 2>&1 &`]);
+    if (split) {
+      // 모든 발생기가 시작 파일을 기다리는 중이다. 한 번에 놓아 함께 시작한다
+      await sleep(1000);
+      onNode(['sh', '-c', `touch ${hostDir}/go && chown ${K6_UID}:${K6_UID} ${hostDir}/go`]);
+    }
+    const loadStartMs = Date.now();
+
+    // 곁에서 할 일(시각은 k6 시작 기준): 변경분 연결 시작, 앱 파드 강제 종료, 입구 끊기·되돌리기
+    // 곁작업이 실패해도 처리되지 않은 거부로 정리 없이 죽지 않게 모아 두었다가 k6가 끝난 뒤 실패로 끝낸다(정리는 finally가 한다, 2026-11-03 새 맥락 리뷰)
+    const side = sideTasks(loadStartMs);
+    cancelSide = () => side.cancel();
+    const at = (offsetS, fn) => side.at(offsetS, fn);
+    let killed = null;
+    let cut = null;
+    if (a.scenario === 'seat-deltas') at(prepS - CONNECT_S + 1, () => onNode(['sh', '-c', `touch ${hostDir}/connect && chown ${K6_UID}:${K6_UID} ${hostDir}/connect`]));
+    if (a.killAppAtS !== undefined) {
+      at(prepS + a.warmS + a.killAppAtS, async () => {
+        const name = (await kc(['-n', layout.namespace, 'get', 'pods', '-l', APP_SELECTOR, '-o', 'jsonpath={.items[0].metadata.name}'])).trim();
+        killed = { name, atMs: Date.now() };
+        await kc(['-n', layout.namespace, 'delete', 'pod', name, '--grace-period=0', '--force', '--wait=false']);
+        log(`앱 파드 ${name}을 강제로 끝냈다(본구간 ${a.killAppAtS}초)`);
+      });
+    }
+    if (a.scenario === 'gate') {
+      const original = await gatewayReplicas(layout.namespace);
+      const restore = async () => {
+        await kc(['-n', layout.namespace, 'scale', 'deploy/v0-gateway', `--replicas=${original}`]);
+        cutRestore = null;
+      };
+      // 끊기 예약이 정리와 겹쳐도 입구가 0개로 남지 않게, 원래 복제 수를 읽은 직후부터 정리가 되돌리게 한다(2차 리뷰)
+      cutRestore = restore;
+      at(a.warmS + a.cutAtS, async () => {
+        cutRestore = restore;
+        const issuedMs = Date.now();
+        // 0개로 줄이고 남은 입구 파드를 곧바로 강제로 끝낸다. 점잖게 끄면 끄는 몇 초 동안 판정이 이어져 망 끊김이 아니다(2026-11-03 리허설)
+        await kc(['-n', layout.namespace, 'scale', 'deploy/v0-gateway', '--replicas=0']);
+        await kc(['-n', layout.namespace, 'delete', 'pod', '-l', 'app.kubernetes.io/name=v0-gateway', '--grace-period=0', '--force', '--wait=false']);
+        // 끊긴 시각은 강제 종료 명령이 끝난 때다(명령 두 개가 도는 동안은 아직 판정이 난다)
+        cut = { issuedMs, startMs: Date.now(), original };
+        log(`입구를 끊었다(입구 파드를 0개로 줄이고 강제로 끝냄, 본구간 ${a.cutAtS}초)`);
+      });
+      at(a.warmS + a.cutAtS + a.cutS, async () => {
+        const endMs = Date.now();
+        await restore();
+        if (cut) cut.endMs = endMs;
+        await kc(['-n', layout.namespace, 'rollout', 'status', 'deploy/v0-gateway', '--timeout=300s'], { timeout: 320_000 });
+        if (cut) cut.readyMs = Date.now();
+        log('입구를 되돌렸다');
+      });
+    }
+
+    const outs = await Promise.all(segments.map((sg) => waitK6(pods[sg.index], hostDir, split ? `out/g${sg.index}` : 'out', busyS)));
+    const bad = outs.find((o) => o.exit !== 0 && o.exit !== 99);
+    // k6가 일찍 실패했으면 남은 곁작업(입구 끊기·앱 파드 끝내기)을 하지 않는다
+    if (bad) side.cancel();
+    const sideErrors = await side.settle();
+    const k6DoneAtMs = Date.now();
+    k6Exit = Math.max(...outs.map((o) => o.exit));
+    for (const [i, o] of outs.entries()) {
+      const suffix = split ? `-g${i}` : '';
+      writeFileSync(join(outDir, `k6${suffix}.log`), o.k6log);
+      writeFileSync(join(outDir, `cgroup${suffix}.log`), o.cgroup);
+      writeFileSync(join(outDir, `console${suffix}.ndjson`), o.console);
+    }
+    if (sideErrors.length) {
+      exitCode = 1;
+      throw new Error(`곁작업이 실패했다: ${sideErrors.map((e) => e.message).join('; ')}`);
+    }
+    if (bad) {
+      exitCode = 1;
+      throw new Error(`k6가 종료 코드 ${bad.exit}로 끝났다:\n${bad.k6log.slice(-1500)}`);
+    }
+    // 구간 표시는 표시 시나리오(반복 1번)를 맡은 발생기 하나에만 있다. 모두 함께 시작했으므로 그 시각을 모든 발생기의 창으로 쓴다
+    const parts = outs.map((o) => ({ o, split: splitConsole(o.console) }));
+    const marks = Object.assign({}, ...parts.map((p) => p.split.marks));
+    if (marks.main_start === undefined || marks.main_end === undefined) throw new Error('본구간 경계 표시가 없다(k6가 본구간까지 가지 못했다)');
+    const evs = parts.map((p) => evaluate(p.o, gen, marks, p.split));
+    const merged = split ? mergeSummaries(evs.map((e) => e.summary)) : evs[0].summary;
+    writeFileSync(join(outDir, 'summary.json'), JSON.stringify(merged, null, 2));
+    const generator = combineGenerators(evs.map((e) => e.generator), loadStartMs);
+    writeFileSync(join(outDir, 'generator.json'), JSON.stringify(generator, null, 2));
+
+    // 곁에서 잰 것
+    const probesOut = {};
+    let gateCheck = null;
+    if (a.dbStats) {
+      // pg_stat 누적은 백엔드가 쉬는 동안 10초마다 공유 메모리로 옮긴다(PostgreSQL 15+). 그 뒤에 읽는다
+      await sleep(12_000);
+      probesOut.db = dbStatsDelta(dbBefore, await inAppPod(DB_STATS_SCRIPT, 120_000, layout.namespace));
+      writeFileSync(join(outDir, 'db-stats.json'), JSON.stringify(probesOut.db, null, 2));
+    }
+    if (a.hpaTimeline) {
+      const events = JSON.parse(await kc(['-n', layout.namespace, 'get', 'events', '-o', 'json'])).items;
+      const appPods = JSON.parse(await kc(['-n', layout.namespace, 'get', 'pods', '-l', APP_SELECTOR, '-o', 'json'])).items;
+      probesOut.hpa = { loadStartMs, ...hpaTimeline({ events, pods: appPods, loadStartMs }) };
+      writeFileSync(join(outDir, 'hpa.json'), JSON.stringify(probesOut.hpa, null, 2));
+    }
+    if (a.scenario === 'gate') {
+      if (!cut?.endMs) throw new Error('입구를 끊고 되돌린 시각이 없다');
+      const probes = parts.flatMap((p) => p.split.probes);
+      const gw = { mainStartMs: marks.main_start, cutStartMs: cut.startMs, cutEndMs: cut.endMs, mainEndMs: marks.main_end };
+      probesOut.gate = { cutTimes: cut, ...gateSummary(probes, gw) };
+      // 온라인 점검은 끊기 명령을 낸 때(issuedMs)에서 끝낸다. 명령 두 개가 도는 1~2초의 실패를 온라인 시도로 세지 않게(2026-11-03 새 맥락 리뷰)
+      gateCheck = gateOnlineCheck(probes, { ...gw, cutStartMs: cut.issuedMs });
+      writeFileSync(join(outDir, 'gate.json'), JSON.stringify(probesOut.gate, null, 2));
+    }
+    if (a.scenario === 'seat-deltas') {
+      onNode(['sh', '-c', `touch ${hostDir}/stop && chown ${K6_UID}:${K6_UID} ${hostDir}/stop`]);
+      const { lines, done } = await readListenerOutputs(hostDir, listeners.length);
+      writeFileSync(join(outDir, 'deltas.ndjson'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+      probesOut.deltas = { ...deltaSummary(lines, { fromMs: marks.main_start, toMs: marks.main_end }), clientCpu: listenerCpu(lines, marks, LISTENER_CPUS) };
+      writeFileSync(join(outDir, 'deltas.json'), JSON.stringify(probesOut.deltas, null, 2));
+      // 일부 결과로 조용히 요약하지 않는다: 계획한 연결 수의 값이 아니면 무효(2026-11-03 새 맥락 리뷰)
+      const d = probesOut.deltas;
+      const why = deltaJudge({ done, listeners: listeners.length, connected: d.connected, failed: d.failed, closed: d.closed, connections: a.connections, clientCpuPct: d.clientCpu.meanPctMax });
+      if (why.length) {
+        generator.judge = { valid: false, reasons: [...generator.judge.reasons, ...why.map((r) => `변경분: ${r}`)] };
+        writeFileSync(join(outDir, 'generator.json'), JSON.stringify(generator, null, 2));
+      }
+    }
+    if (killed) probesOut.killed = killed;
 
     step('시험 기록');
-    let lines = [...ev.records];
-    if (a.scenario === 'queue') lines = lines.concat(servingRecords(eventId, await inAppPod(servingLogScript(eventId))));
+    let lines = parts.flatMap((p) => p.split.records);
+    if (a.scenario === 'queue') lines = lines.concat(servingRecords(eventId, await inAppPod(servingLogScript(eventId), 300_000, layout.namespace)));
     if (a.scenario === 'payment') {
-      const r = await inAppPod(LEDGER_SCRIPT);
+      const r = await inAppPod(LEDGER_SCRIPT, 300_000, layout.namespace);
       if (r.status !== 200) throw new Error(`시뮬레이터 원장을 받지 못했다(HTTP ${r.status})`);
       lines = lines.concat(pgChargeLines(r.body));
+      probesOut.paymentState = await inAppPod(paymentStateScript(eventId), 120_000, layout.namespace);
+      writeFileSync(join(outDir, 'payment-state.json'), JSON.stringify(probesOut.paymentState, null, 2));
     }
     const recordsFile = join(outDir, 'records.ndjson');
     writeFileSync(recordsFile, lines.length ? `${lines.join('\n')}\n` : '');
     const infraFile = join(outDir, 'infra.txt');
-    writeFileSync(infraFile, infraText({ cpus: a.cpus, memoryMi: a.memoryMi, args: a }));
-    const g = ev.generator;
-    log(`발생기: CPU 평균 ${g.stats.cpuMeanPct}%·최고 ${g.stats.cpuMaxPct}%, 메모리 최대 ${g.stats.memMaxPct}%, dropped ${g.dropped}, VU 최대 ${g.vusMax} → ${g.judge.valid ? '유효' : `무효(${g.judge.reasons.join('; ')})`}`);
+    writeFileSync(infraFile, infraText({ cpus: gen.cpus, memoryMi: gen.memoryMi, generators: nGen, args: a }));
+    const g = generator;
+    log(`발생기 ${nGen}대: CPU 평균 최고 ${g.cpuMeanPctMax}%, 메모리 최대 ${g.memMaxPctMax}%, dropped ${g.dropped}, VU 최대 합 ${g.vusMax}, 시작 차이 ${g.startSkewS ?? 0}초 → ${g.judge.valid ? '유효' : `무효(${g.judge.reasons.join('; ')})`}`);
 
     let invFile;
     if (a.invariants) {
       step('불변식 검사(peaket-invariants)');
       if (a.scenario === 'payment') {
-        // P3(승인 뒤 60초 안에 발권 대기·발권)는 승인 뒤 60초가 지난 결제만 센다. 마지막 승인은 k6가 끝나기 전이므로
-        // k6가 끝난 것을 본 때(이 PC 시계, 검사기의 기준 시각도 이 PC 시계)부터 65초를 기다린다
+        // P3(승인 뒤 60초 안에 발권 대기·발권)는 승인 뒤 60초가 지난 결제만 센다. k6가 끝난 것을 본 때(이 PC 시계)부터 65초를 기다린다
         const waitMs = k6DoneAtMs + 65_000 - Date.now();
         if (waitMs > 0) {
           log(`마지막 결제 승인 뒤 60초를 기다린다(${Math.ceil(waitMs / 1000)}초)`);
           await sleep(waitMs);
         }
       }
-      const code = await runInvariants(outDir, recordsFile);
+      const code = await runInvariants(outDir, recordsFile, layout.database);
       invFile = join(outDir, 'invariants.csv');
-      if (code === 1) exitCode = 1;
+      if (code === 1 && !(a.faultDropPct || a.faultDelayPct || a.killAppAtS !== undefined)) exitCode = 1;
     }
+
+    // 경로 목표 점검 파일(collect.py --checks)
+    let checks = checksFromSummary(merged, ROUTES[a.scenario], CHECK_PHASES[a.scenario] ?? {});
+    if (a.scenario === 'gate') {
+      // 검표 p95는 온라인 구간만 센다(끊긴 동안의 빠른 실패가 목표 안으로 잡히지 않게, §3.10 K10 '온라인 판정 p95')
+      const rest = (checks?.checks ?? []).filter((c) => !c.name.startsWith('scan_p95_'));
+      checks = gateCheck || rest.length ? { checks: [...rest, ...(gateCheck ? [gateCheck] : [])] } : null;
+    }
+    // 서버 쪽: 앱 히스토그램의 같은 경로·같은 기준값 칸(docs/perf-ledger.md §2.2 latency_crosscheck, ADR-0077). Prometheus를 줄 때만
+    const sc = SERVER_CHECK[a.scenario];
+    if (checks && a.promUrl && sc && a.killAppAtS === undefined) {
+      checks.checks.push({ name: sc.name, allowed: sc.allowed, target: `서버 ${sc.route} ${sc.label} ≤ ${sc.le * 1000}ms`, histogram: { metric: 'http_server_request_duration_seconds', match: `namespace="${layout.namespace}",app="v0-monolith",route="${sc.path}"`, le: sc.le } });
+      if (a.scenario !== 'gate') checks.crosscheck = { check: sc.name, k6_metric: `http_req_duration{phase:main,route:${sc.route}}` };
+    }
+    const checksFile = checks ? join(outDir, 'checks.json') : undefined;
+    if (checksFile) writeFileSync(checksFile, JSON.stringify(checks, null, 2));
+    const notes = runNotes(a, { generator: g, merged, probes: probesOut, maxRate, nGen });
+    writeFileSync(join(outDir, 'notes.txt'), `${notes}\n`);
+    log(notes);
 
     if (a.record) {
       step(`성능 장부(${a.runId})`);
-      const kpi = a.scenario === 'queue' ? 'K1' : a.scenario === 'payment' ? 'K7' : a.mode === 'crossed' ? 'K3' : 'K2';
-      const notes = `발생기 CPU 평균 ${g.stats.cpuMeanPct}%·최고 ${g.stats.cpuMaxPct}%, 메모리 최대 ${g.stats.memMaxPct}%, VU 최대 ${g.vusMax}, 시나리오 오류 ${g.scenarioErrors}건(docs/verification.md §3.9)`;
       const rps = a.scenario === 'queue' ? undefined : a.rate;
-      execFileSync(
+      // 불변식 위반 행(invariants/invariants-detail.ndjson)은 장부에서 큰 원본으로 보낼 폴더에 옮겨진다(docs/perf-ledger.md §2.1)
+      const extras = ['db-stats.json', 'hpa.json', 'gate.json', 'deltas.json', 'payment-state.json', join('invariants', 'invariants-detail.ndjson')].map((f) => join(outDir, f)).filter((f) => existsSync(f));
+      const collectMain = (checksFile, notes) => execFileSync(
         PYTHON,
         [
           '-I',
@@ -670,7 +1011,7 @@ async function runV0(a, runTag) {
           'utf8',
           ...collectArgs({
             runId: a.runId,
-            kpi,
+            kpi: kpiOf(a),
             version: 'v0',
             profile: a.profile,
             users: a.users,
@@ -681,30 +1022,181 @@ async function runV0(a, runTag) {
             summaryFile: join(outDir, 'summary.json'),
             infraFile,
             notes,
-            start: new Date(ev.marks.main_start).toISOString(),
-            end: new Date(ev.marks.main_end).toISOString(),
+            // collect.py는 시작 + 예열부터 센다(docs/perf-ledger.md §2.2 checks·metrics-summary). 그래서 시작은 예열 시작이다
+            start: new Date(marks.main_start - a.warmS * 1000).toISOString(),
+            end: new Date(marks.main_end).toISOString(),
             ...(g.judge.valid ? {} : { invalidReason: g.judge.reasons.join('; ') }),
             ...(invFile ? { invariants: invFile } : {}),
-            generator: `k6 1.4.2, 발생기 파드 1대(CPU ${a.cpus}·메모리 ${a.memoryMi}Mi, kind 안)`,
+            ...(extras.length ? { extra: extras } : {}),
+            generator: `k6 1.4.2, 발생기 파드 ${nGen}대(CPU ${gen.cpus}·메모리 ${gen.memoryMi}Mi씩, kind 안${split ? ', k6 실행 구간으로 나눔' : ''})`,
+            ...(checksFile ? { checks: checksFile } : {}),
+            ...(a.promUrl ? { promUrl: a.promUrl, queries: join(REPO, QUERIES_V0) } : {}),
+            rawBucket: RAW_BUCKET,
+            rawOutbox: RAW_OUTBOX,
           }),
         ],
         { cwd: REPO, stdio: 'inherit' },
       );
+      try {
+        collectMain(checksFile, notes);
+      } catch (e) {
+        // 측정 창 안에서 앱 파드가 다시 시작하면 collect.py가 서버 히스토그램을 셀 수 없다고 종료 코드 3으로 실행째 거부한다(측정 폴더를 만들기 전).
+        // 그때만 히스토그램 점검과 지연 대조를 빼고 다시 남긴다(2026-11-03 새 맥락 리뷰·2차 리뷰)
+        // 종료 신호로 끝났거나 다른 까닭의 거부(종료 코드 3이 아님)면 그대로 실패한다
+        const left = withoutHistogramChecks(checks);
+        if (e.signal || e.status !== 3 || !left.dropped.length || existsSync(join(LEDGER_RUNS, a.runId))) throw e;
+        const retryFile = left.checks ? join(outDir, 'checks-no-histogram.json') : undefined;
+        if (retryFile) writeFileSync(retryFile, JSON.stringify(left.checks, null, 2));
+        log(`서버 히스토그램 점검(${left.dropped.join(', ')})을 셀 수 없어 빼고 다시 남긴다`);
+        collectMain(retryFile, `${notes}; 서버 히스토그램 점검 ${left.dropped.join(', ')}은 측정 창 안의 앱 파드 재시작으로 셀 수 없어 뺐다`);
+      }
+      if (probesOut.hpa) {
+        // K9(v0 HPA 확장 시간)는 같은 실행의 HPA 시간선으로 따로 남긴다(docs/verification.md §3.10 K9)
+        const k9Id = `${a.runId}-k9`;
+        step(`성능 장부(${k9Id})`);
+        const h = probesOut.hpa;
+        const k9Notes = `K1 실행 ${a.runId}와 같은 실행의 HPA 시간선(부하 시작 기준): 첫 확장 ${h.firstRescaleS ?? '-'}초, 늘린 파드 첫 준비 ${h.firstNewReadyS ?? '-'}초(목표 60초 미만, K9 ①), 최대 복제 ${h.maxSize ?? '-'}, 새 파드 ${h.newPods.length}개. 앱 CPU HPA 목표 70%·최소 1·최대 4(deploy/envs/local/v0-monolith.yaml), 쿠버네티스 기본 확장 동작`;
+        execFileSync(
+          PYTHON,
+          [
+            '-I',
+            '-X',
+            'utf8',
+            ...collectArgs({
+              runId: k9Id,
+              kpi: 'K9',
+              version: 'v0',
+              profile: a.profile,
+              users: a.users,
+              durationS: Math.round((marks.main_end - loadStartMs) / 1000),
+              warmupS: 0,
+              scenario: `loadtest/scenarios/${SCENARIOS[a.scenario]}`,
+              summaryFile: join(outDir, 'summary.json'),
+              infraFile,
+              notes: k9Notes,
+              start: new Date(loadStartMs).toISOString(),
+              end: new Date(marks.main_end).toISOString(),
+              ...(g.judge.valid ? {} : { invalidReason: g.judge.reasons.join('; ') }),
+              extra: [join(outDir, 'hpa.json')],
+              generator: `k6 1.4.2, 발생기 파드 ${nGen}대(CPU ${gen.cpus}·메모리 ${gen.memoryMi}Mi씩, kind 안)`,
+              rawBucket: RAW_BUCKET,
+              rawOutbox: RAW_OUTBOX,
+            }),
+          ],
+          { cwd: REPO, stdio: 'inherit' },
+        );
+      }
     }
     return { outDir, exitCode, eventId };
   } catch (e) {
     exitCode = 1;
     throw e;
   } finally {
-    // 정리를 먼저 한다(기록 쓰기가 실패해도 파드·폴더·Secret은 지운다)
+    // 정리를 먼저 한다(기록 쓰기가 실패해도 파드·폴더·Secret은 지우고, 끊은 입구는 되돌린다)
     cleanups.delete(cleanup);
     await cleanup();
     try {
-      writeFileSync(join(outDir, 'run.json'), JSON.stringify({ scenario: a.scenario, runTag, eventId, hostDir, args: a, startedAt, endedAt: new Date().toISOString(), k6Exit, exitCode }, null, 2));
+      writeFileSync(join(outDir, 'run.json'), JSON.stringify({ scenario: a.scenario, runTag, eventId, hostDir, namespace: a.namespace, args: a, startedAt, endedAt: new Date().toISOString(), k6Exit, exitCode }, null, 2));
     } catch (e) {
       console.error(`run.json을 쓰지 못했다: ${e.message}`);
     }
   }
+}
+
+/** 받는 파드들이 끝날 때까지 기다려(최대 60초) 출력 줄을 읽는다 */
+async function readListenerOutputs(hostDir, n) {
+  const until = Date.now() + 60_000;
+  while (Date.now() < until) {
+    const done = onNode(['sh', '-c', `ls ${hostDir}/out/ 2>/dev/null | grep -c '^delta-.*\\.done$' || true`]).trim();
+    if (Number(done) >= n) break;
+    await sleep(1000);
+  }
+  const errs = onNode(['sh', '-c', `cat ${hostDir}/out/delta-*.error 2>/dev/null || true`]).trim();
+  if (errs) throw new Error(`변경분 받는 파드가 실패했다: ${errs.slice(0, 500)}`);
+  const text = onNode(['sh', '-c', `cat ${hostDir}/out/delta-*.ndjson 2>/dev/null || true`]);
+  const done = Number(onNode(['sh', '-c', `ls ${hostDir}/out/ 2>/dev/null | grep -c '^delta-.*\\.done$' || true`]).trim()) || 0;
+  return { lines: text.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l)), done };
+}
+
+/** 받는 파드의 본구간 CPU(한도 대비 %): 파드마다 창 양 끝 칸의 cpuUsec 차이 ÷ 창 길이. 가장 높은 파드 */
+function listenerCpu(lines, marks, cpus) {
+  const byPod = new Map();
+  for (const l of lines) {
+    if (l.kind !== 'delta_bucket' || l.sec * 1000 < marks.main_start || (l.sec + 1) * 1000 > marks.main_end) continue;
+    const arr = byPod.get(l.pod) ?? [];
+    arr.push(l);
+    byPod.set(l.pod, arr);
+  }
+  let max = 0;
+  for (const arr of byPod.values()) {
+    arr.sort((x, y) => x.sec - y.sec);
+    const first = arr[0];
+    const last = arr[arr.length - 1];
+    const s = last.sec - first.sec;
+    if (s <= 0) continue;
+    max = Math.max(max, Math.round(((last.cpuUsec - first.cpuUsec) / (s * 1e6 * cpus)) * 1000) / 10);
+  }
+  return { meanPctMax: max };
+}
+
+/** 발생기 여럿의 지표를 하나로: 판정은 하나라도 무효면 무효(사유에 발생기 번호) */
+function combineGenerators(gens, loadStartMs) {
+  const reasons = [];
+  gens.forEach((g, i) => {
+    for (const r of g.judge.reasons) reasons.push(gens.length > 1 ? `발생기 ${i}: ${r}` : r);
+  });
+  const starts = gens.map((g) => g.startedS).filter((x) => Number.isFinite(x));
+  return {
+    // 발생기가 하나면 예전 모양(cpus·stats·judge·marks 등, BSL-060)을 그대로 두고 아래 합친 칸을 더한다(loadtest/e2e/v0-rehearsal.e2e.mjs가 읽는다)
+    ...(gens.length === 1 ? gens[0] : {}),
+    generators: gens.length,
+    loadStartMs,
+    startSkewS: starts.length > 1 ? Math.max(...starts) - Math.min(...starts) : 0,
+    cpuMeanPctMax: Math.max(...gens.map((g) => g.stats.cpuMeanPct)),
+    cpuMaxPctMax: Math.max(...gens.map((g) => g.stats.cpuMaxPct)),
+    memMaxPctMax: Math.max(...gens.map((g) => g.stats.memMaxPct)),
+    dropped: gens.reduce((s, g) => s + g.dropped, 0),
+    scenarioErrors: gens.reduce((s, g) => s + g.scenarioErrors, 0),
+    vusMax: gens.reduce((s, g) => s + g.vusMax, 0),
+    judge: { valid: reasons.length === 0, reasons },
+    each: gens,
+  };
+}
+
+/** 장부 notes: 발생기, 경로 p99(나눴으면 아래·위 한계), 실패, 곁에서 잰 것 */
+function runNotes(a, { generator: g, merged, probes, maxRate, nGen }) {
+  const m = merged.metrics;
+  const parts = [`발생기 ${nGen}대 CPU 평균 최고 ${g.cpuMeanPctMax}%·메모리 최대 ${g.memMaxPctMax}%, VU 최대 합 ${g.vusMax}, 시나리오 오류 ${g.scenarioErrors}건, 계획 최고 도착률 ${Math.round(maxRate)}/s(docs/verification.md §3.9·§3.10)`];
+  for (const r of ROUTES[a.scenario]) {
+    const n = m[`http_reqs{phase:main,route:${r}}`]?.values?.count;
+    if (!n) continue;
+    const d = m[`http_req_duration{phase:main,route:${r}}`]?.values ?? {};
+    const f = m[`http_req_failed{phase:main,route:${r}}`]?.values?.passes ?? 0;
+    const b = merged.merge?.bounds?.[`http_req_duration{phase:main,route:${r}}`]?.['p(99)'];
+    const p99 = b && b[0] !== b[1] ? `${b[0].toFixed(1)}~${b[1].toFixed(1)}ms` : `${(d['p(99)'] ?? NaN).toFixed(1)}ms`;
+    parts.push(`${r}: ${n}건, p99 ${p99}, 실패 ${f}건`);
+  }
+  if (probes.db) {
+    // 바뀐 표만 적는다(넣음·갱신·지움이 있는 표)
+    const t = Object.entries(probes.db.tables).filter(([, v]) => v.inserts + v.updates + v.deletes > 0).map(([k, v]) => `${k} 넣음 ${v.inserts}·갱신 ${v.updates}·HOT ${v.hotRatio === null ? '-' : `${Math.round(v.hotRatio * 1000) / 10}%`}·지움 ${v.deletes}·죽은 행 ${v.deadRows}`).join(', ') || '바뀐 표 없음';
+    parts.push(`DB: 교착 ${probes.db.deadlocks}, 롤백 ${probes.db.rollbacks}, ${t}`);
+  }
+  if (probes.hpa) parts.push(`HPA: 첫 확장 ${probes.hpa.firstRescaleS ?? '-'}초, 새 파드 첫 준비 ${probes.hpa.firstNewReadyS ?? '-'}초, 최대 복제 ${probes.hpa.maxSize ?? '-'}(부하 시작 기준)`);
+  if (probes.gate) {
+    const x = probes.gate;
+    parts.push(`검표: 온라인 분당 ${x.online.perMinute}건(p95 ${x.online.p95Ms ?? '-'}ms), 끊김 분당 ${x.cut.perMinute}건(실패 ${x.cut.failed}), 복구 분당 ${x.restored.perMinute}건, 판정이 멈춘 가장 긴 시간 ${x.maxGapS}초, 끊김/온라인 ${x.offlineRatio ?? '-'}`);
+  }
+  if (probes.deltas) {
+    const x = probes.deltas;
+    parts.push(`변경분: 연결 ${x.connected}(실패 ${x.failed}), 초당 ${x.msgsPerS}건·${x.bytesPerS} B, 종단 p50 ${x.latency.p50Ms ?? '-'}ms·p99 ${x.latency.p99Ms ?? '>30000'}ms(300ms 넘음 ${x.latency.over300}건), 서버가 닫음 ${x.closed}, 받는 파드 CPU 최고 ${x.clientCpu.meanPctMax}%`);
+  }
+  if (probes.paymentState) {
+    const x = probes.paymentState;
+    parts.push(`v0 표: 좌석 누수 ${x.seatLeak}, 멈춘 주문 PAYING ${x.ordersPaying}·APPROVED ${x.ordersApproved}, 확정 ${x.ordersConfirmed}, 실패 ${x.ordersFailed}, 결제 CONFIRMING ${x.paymentsConfirming}`);
+  }
+  if (probes.killed) parts.push(`앱 파드 강제 종료 ${probes.killed.name}`);
+  if (a.faultDropPct || a.faultDelayPct) parts.push(`결제사 장애: 응답 버림 ${a.faultDropPct}%·${FAULT_DELAY_MS}ms 지연 ${a.faultDelayPct}%`);
+  return parts.join('; ');
 }
 
 // ───────────── 발생기 보정 ─────────────
@@ -835,7 +1327,7 @@ async function runCalibrate(a, runTag) {
               summaryFile: join(outDir, `step-${s.rate}`, 'summary.json'),
               infraFile: join(outDir, 'infra.txt'),
               notes,
-              start: new Date(s.marks.main_start).toISOString(),
+              start: new Date(s.marks.main_start - a.warmS * 1000).toISOString(),
               end: new Date(s.marks.main_end).toISOString(),
               ...(s.judge.valid ? {} : { invalidReason: s.judge.reasons.join('; ') }),
               generator: `k6 1.4.2, 발생기 파드 1대(CPU ${a.cpus}·메모리 ${a.memoryMi}Mi, kind 안)`,
@@ -861,7 +1353,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } catch (e) {
     if (e instanceof UsageError) {
       console.error(`loadtest/run.mjs: ${e.message}`);
-      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment [...] | cleanup (loadtest/README.md)');
+      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | cleanup (loadtest/README.md)');
       process.exit(2);
     }
     throw e;
@@ -876,6 +1368,15 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       stopping = true;
       console.error(`\nloadtest/run.mjs: ${sig}를 받아 발생기 파드·실행 폴더·시험 키·실행 잠금을 지우고 끝낸다`);
       runCleanups().finally(() => process.exit(code));
+    });
+  }
+  // 처리하지 못한 오류로 끝날 때도 정리한다(발생기 파드·끊은 입구·실행 잠금이 남지 않게, 2026-11-03 새 맥락 리뷰)
+  for (const ev of ['unhandledRejection', 'uncaughtException']) {
+    process.on(ev, (e) => {
+      if (stopping) return;
+      stopping = true;
+      console.error(`\nloadtest/run.mjs: 처리하지 못한 오류(${ev}): ${e?.message ?? e}. 정리하고 끝낸다`);
+      runCleanups().finally(() => process.exit(1));
     });
   }
   try {

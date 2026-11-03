@@ -8,6 +8,7 @@ import exec from 'k6/execution';
 import { check } from 'k6';
 import { Counter } from 'k6/metrics';
 import { pickPollUser, pollGroups, pollStages, rampingPhases } from '../lib/model.mjs';
+import { ROUTE_TARGETS } from '../lib/targets.mjs';
 import { admitQueue, baseOptions, call, enterQueue, envInt, envStr, jsonOf, markScenarios, user, userCount, writeSummary } from './common.js';
 
 export { markEnd, markStart } from './common.js';
@@ -55,6 +56,12 @@ export const options = baseOptions(
 );
 options.thresholds['poll_empty{phase:main}'] = ['count>=0'];
 options.thresholds['poll_empty{phase:warm}'] = ['count>=0'];
+// K1 진입 점검(docs/verification.md §3.10 '경로 목표 점검'): 진입은 예열 앞의 진입 구간(phase:prep)에서만 나간다. k6는 기준을 건 하위 지표만
+// 요약에 남기므로 그 구간의 요청 수·시간·실패·목표를 넘은 수에 기준을 건다(실행 도구가 checksFromSummary에 { entry: 'prep' }을 준다)
+options.thresholds['http_reqs{phase:prep,route:entry}'] = ['count>=0'];
+options.thresholds['http_req_duration{phase:prep,route:entry}'] = ['max>=0'];
+options.thresholds['http_req_failed{phase:prep,route:entry}'] = ['rate>=0'];
+for (const t of ROUTE_TARGETS.entry) options.thresholds[`over_target{phase:prep,route:entry,le:${t.le}}`] = ['count>=0'];
 
 export function setup() {
   if (userCount() < Q.users) throw new Error(`토큰 파일의 가상 사용자(${userCount()})가 USERS보다 적다`);

@@ -1,0 +1,73 @@
+// 경로 목표와 결제사 장애 배정(docs/verification.md §3.10). k6와 Node 시험이 같은 파일을 읽는다(Node 모듈을 가져오지 않는다).
+import { ROUTE_PATTERN } from './model.mjs';
+
+/**
+ * 경로 목표(§3.10 '경로 목표 점검'): 경로 → [{ le: 목표 시간(ms), allowed: 허용 비율 }].
+ * p99 목표는 0.01, p99.9는 0.001, p95는 0.05다. 같은 경로의 목표는 le 오름차순이다
+ */
+export const ROUTE_TARGETS = Object.freeze({
+  entry: Object.freeze([Object.freeze({ le: 200, allowed: 0.01 })]),
+  status: Object.freeze([Object.freeze({ le: 200, allowed: 0.01 })]),
+  admission: Object.freeze([Object.freeze({ le: 200, allowed: 0.01 })]),
+  hold: Object.freeze([Object.freeze({ le: 50, allowed: 0.01 }), Object.freeze({ le: 150, allowed: 0.001 })]),
+  payment: Object.freeze([Object.freeze({ le: 3000, allowed: 0.01 })]),
+  scan: Object.freeze([Object.freeze({ le: 150, allowed: 0.05 })]),
+});
+
+/** 오류율 목표(§3.10): 경로 → 허용 비율(대기열 경로 0.1% 미만, Q-T2) */
+export const ERROR_TARGETS = Object.freeze({ entry: 0.001, status: 0.001, admission: 0.001 });
+
+
+/**
+ * 요청 하나가 넘은 목표 시간(ms) 목록. 목표 시간보다 '큰' 것만 넘은 것이다(같으면 넘지 않음).
+ * 목표가 없는 경로는 빈 배열이다. durationMs가 유한한 수가 아니면 RangeError(음수는 0으로 본다: VM 시계가 거꾸로 간 k6 값)
+ * @param {string} route
+ * @param {number} durationMs
+ * @returns {number[]}
+ */
+export function overTargets(route, durationMs) {
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs)) throw new RangeError(`요청 시간은 유한한 수다: ${durationMs}`);
+  const d = Math.max(0, durationMs);
+  const targets = Object.hasOwn(ROUTE_TARGETS, route) ? ROUTE_TARGETS[route] : [];
+  return targets.filter((t) => d > t.le).map((t) => t.le);
+}
+
+/**
+ * 경로 목표 지표가 요약에 남도록 거는 k6 기준(thresholds): 목표가 있는 경로마다
+ * 'over_target{phase:main,route:<경로>,le:<ms>}': ['count>=0']. 목표가 없는 경로는 건너뛴다.
+ * 경로 이름은 lib/model.mjs의 ROUTE_PATTERN(영소문자로 시작하고 영소문자·밑줄 32자 이하, phaseThresholds와 같은 규칙)에 맞고 겹치지 않아야 한다(아니면 RangeError).
+ * 그래서 '__proto__'처럼 밑줄로 시작하는 이름은 RangeError이고, 'constructor'처럼 규칙에 맞지만 목표가 없는 이름은 건너뛴다
+ * @param {string[]} routes
+ * @returns {Record<string, string[]>}
+ */
+export function targetThresholds(routes) {
+  if (!Array.isArray(routes) || !routes.every((r) => typeof r === 'string' && ROUTE_PATTERN.test(r)) || new Set(routes).size !== routes.length) {
+    throw new RangeError('경로 이름은 겹치지 않는 영소문자·밑줄 이름이다');
+  }
+  const out = {};
+  for (const r of routes) {
+    if (!Object.hasOwn(ROUTE_TARGETS, r)) continue;
+    for (const t of ROUTE_TARGETS[r]) out[`over_target{phase:main,route:${r},le:${t.le}}`] = ['count>=0'];
+  }
+  return out;
+}
+
+const isInt = (v, lo, hi) => Number.isSafeInteger(v) && v >= lo && v <= hi;
+
+/**
+ * 결제 하나(가상 사용자 번호 i)에 넣을 결제사 장애(§3.10 K7 ②). i % 100을 칸으로 보고
+ * 칸 < dropPct면 'drop'(승인한 뒤 응답을 버림), dropPct ≤ 칸 < dropPct + delayPct면 'delay'(승인을 늦춤), 아니면 null.
+ * 그래서 100명마다 정확히 dropPct명·delayPct명이다. i는 0 이상 정수, dropPct·delayPct는 0~100 정수이고 합이 100 이하(아니면 RangeError)
+ * @param {number} i
+ * @param {number} dropPct
+ * @param {number} delayPct
+ * @returns {'drop' | 'delay' | null}
+ */
+export function faultFor(i, dropPct, delayPct) {
+  if (!isInt(i, 0, Number.MAX_SAFE_INTEGER)) throw new RangeError(`가상 사용자 번호는 0 이상 정수다: ${i}`);
+  if (!isInt(dropPct, 0, 100) || !isInt(delayPct, 0, 100) || dropPct + delayPct > 100) throw new RangeError('장애 비율은 0~100 정수이고 합이 100 이하다');
+  const slot = i % 100;
+  if (slot < dropPct) return 'drop';
+  if (slot < dropPct + delayPct) return 'delay';
+  return null;
+}

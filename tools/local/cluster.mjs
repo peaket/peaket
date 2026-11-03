@@ -163,6 +163,30 @@ export const V0_ALLOWED_ORIGINS = 'https://127.0.0.1:8443,https://localhost:8443
 /** 입구 포트 전달 주소 */
 export const V0_FORWARD_PORT = 8443;
 
+/** 야간 비교의 기준판 네임스페이스(docs/devops.md §3.3, BSL-090). 새 판은 V0_NAMESPACE */
+export const V0_BASE_NAMESPACE = 'v0-base';
+
+/**
+ * v0 판 하나의 자리(docs/devops.md §3.3 '준비 명령'). namespace는 'v0'(새 판·Before 측정) 또는 'v0-base'(야간 비교 기준판)이고 그 밖은 RangeError.
+ * - v0: database 'v0', databaseUrl V0_DATABASE_URL, redisUrl V0_REDIS_URL
+ * - v0-base: database 'v0_base', databaseUrl은 V0_DATABASE_URL의 DB 이름만 v0_base로 바꾼 것, redisUrl은 V0_REDIS_URL + '/1'(Valkey DB 1.
+ *   회차 목록 같은 공용 키가 두 판 사이에 섞이지 않게)
+ * - 둘 다 pgUrl은 V0_PG_URL(시뮬레이터는 v0 네임스페이스의 하나를 함께 쓴다), gatewayUrl은 'https://v0-gateway.<namespace>.svc.cluster.local:8443'
+ * @param {string} namespace
+ * @returns {{ namespace: string, database: string, databaseUrl: string, redisUrl: string, pgUrl: string, gatewayUrl: string }}
+ */
+export function v0Layout(namespace) {
+  if (namespace === V0_NAMESPACE) {
+    return { namespace, database: 'v0', databaseUrl: V0_DATABASE_URL, redisUrl: V0_REDIS_URL, pgUrl: V0_PG_URL, gatewayUrl: `https://v0-gateway.${namespace}.svc.cluster.local:8443` };
+  }
+  if (namespace === V0_BASE_NAMESPACE) {
+    const databaseUrl = V0_DATABASE_URL.replace(/\/v0$/, '/v0_base');
+    if (databaseUrl === V0_DATABASE_URL) throw new Error('v0 DB 주소의 DB 이름 자리를 찾지 못했다');
+    return { namespace, database: 'v0_base', databaseUrl, redisUrl: `${V0_REDIS_URL}/1`, pgUrl: V0_PG_URL, gatewayUrl: `https://v0-gateway.${namespace}.svc.cluster.local:8443` };
+  }
+  throw new RangeError(`v0 판의 네임스페이스는 ${V0_NAMESPACE}·${V0_BASE_NAMESPACE}다: ${namespace}`);
+}
+
 /** metrics-server(CPU HPA의 지표, 2026-11-03 확인). 설치 파일 해시와 이미지 다이제스트(여러 플랫폼 목록)로 고정한다 */
 export const METRICS_SERVER = {
   version: 'v0.9.1',
@@ -190,21 +214,25 @@ export function metricsServerInstall(text) {
 
 /**
  * 입구 TLS용 자체 서명 인증서(EC P-256, 30일)를 만드는 openssl 인자. SAN은 localhost·127.0.0.1·입구 서비스 이름
+ * (v0와 v0-base 두 네임스페이스의 'v0-gateway.<ns>.svc'·'v0-gateway.<ns>.svc.cluster.local'. 야간 비교의 두 판이 같은 인증서를 쓴다)
  * @param {string} keyFile @param {string} certFile
  * @returns {string[]}
  */
 export function selfSignedCertArgs(keyFile, certFile) {
-  const san = ['DNS:localhost', 'IP:127.0.0.1', 'DNS:v0-gateway', `DNS:v0-gateway.${V0_NAMESPACE}.svc`, `DNS:v0-gateway.${V0_NAMESPACE}.svc.cluster.local`];
+  const san = ['DNS:localhost', 'IP:127.0.0.1', 'DNS:v0-gateway'];
+  for (const ns of [V0_NAMESPACE, V0_BASE_NAMESPACE]) san.push(`DNS:v0-gateway.${ns}.svc`, `DNS:v0-gateway.${ns}.svc.cluster.local`);
   return ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-days', '30', '-subj', '/CN=v0-gateway', '-addext', `subjectAltName=${san.join(',')}`, '-keyout', keyFile, '-out', certFile];
 }
 
 /**
  * v0 Secret 셋(네임스페이스 v0): v0-monolith(앱 환경 값), v0-gateway(입구 TLS·공개키 목록), pg-simulator(시험 키).
- * 개인키는 받지 않는다(jwks에 d가 있으면 던진다)
+ * 개인키는 받지 않는다(jwks에 d가 있으면 던진다). layout(기본 v0Layout('v0'))의 네임스페이스에 두고, 앱 Secret의 DB·Redis 주소는 layout의 값이다.
+ * layout이 v0-base면 시뮬레이터 Secret(pg-simulator)은 만들지 않는다(시뮬레이터는 v0 네임스페이스의 하나를 쓴다)
  * @param {{ pgSecretKey: string, tlsCert: string, tlsKey: string, jwks: { keys: Array<Record<string, unknown>> } }} o
+ * @param {ReturnType<typeof v0Layout>} [layout]
  * @returns {Array<{ apiVersion: 'v1', kind: 'Secret', metadata: { name: string, namespace: string }, type: 'Opaque', stringData: Record<string, string> }>}
  */
-export function v0Secrets(o) {
+export function v0Secrets(o, layout = v0Layout(V0_NAMESPACE)) {
   if (!/^sim_sk_[A-Za-z0-9_-]{16,}$/.test(o.pgSecretKey)) throw new Error('시뮬레이터 시험 키는 sim_sk_ 뒤에 16자 이상(영문·숫자·_·-)이어야 한다');
   if (!Array.isArray(o.jwks?.keys) || o.jwks.keys.length === 0) throw new Error('공개키 목록에 키가 없다');
   // 서명 개인키는 클러스터에 두지 않는다(개인키 서버 비저장)
@@ -213,29 +241,33 @@ export function v0Secrets(o) {
   const secret = (name, stringData) => ({
     apiVersion: /** @type {'v1'} */ ('v1'),
     kind: /** @type {'Secret'} */ ('Secret'),
-    metadata: { name, namespace: V0_NAMESPACE },
+    metadata: { name, namespace: layout.namespace },
     type: /** @type {'Opaque'} */ ('Opaque'),
     stringData,
   });
-  return [
-    secret('v0-monolith', { PEAKET_V0_DATABASE_URL: V0_DATABASE_URL, PEAKET_V0_REDIS_URL: V0_REDIS_URL, PG_SIMULATOR_SECRET_KEY: o.pgSecretKey }),
+  const out = [
+    secret('v0-monolith', { PEAKET_V0_DATABASE_URL: layout.databaseUrl, PEAKET_V0_REDIS_URL: layout.redisUrl, PG_SIMULATOR_SECRET_KEY: o.pgSecretKey }),
     secret('v0-gateway', { PEAKET_V0_TLS_CERT: o.tlsCert, PEAKET_V0_TLS_KEY: o.tlsKey, PEAKET_V0_GATEWAY_JWKS: JSON.stringify(o.jwks) }),
-    secret('pg-simulator', { PG_SIMULATOR_SECRET_KEY: o.pgSecretKey }),
   ];
+  // 기준판(v0-base)은 v0 네임스페이스의 시뮬레이터를 함께 쓴다
+  if (layout.namespace === V0_NAMESPACE) out.push(secret('pg-simulator', { PG_SIMULATOR_SECRET_KEY: o.pgSecretKey }));
+  return out;
 }
 
 /**
- * 시작 전 마이그레이션 잡(같은 이미지, node scripts/migrate.mjs, DB 주소는 Secret v0-monolith). 제한 파드 보안 기준에 맞춘다
+ * 시작 전 마이그레이션 잡(같은 이미지, node scripts/migrate.mjs, DB 주소는 Secret v0-monolith). 제한 파드 보안 기준에 맞춘다.
+ * namespace(기본 V0_NAMESPACE)에 만든다
  * @param {string} image
+ * @param {string} [namespace]
  * @returns {Record<string, unknown>}
  */
-export function v0MigrationJob(image) {
+export function v0MigrationJob(image, namespace = V0_NAMESPACE) {
   const restricted = { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: { drop: ['ALL'] }, seccompProfile: { type: 'RuntimeDefault' } };
   const labels = { 'app.kubernetes.io/name': 'v0-migrate', 'app.kubernetes.io/part-of': 'peaket' };
   return {
     apiVersion: 'batch/v1',
     kind: 'Job',
-    metadata: { name: 'v0-migrate', namespace: V0_NAMESPACE, labels },
+    metadata: { name: 'v0-migrate', namespace, labels },
     spec: {
       backoffLimit: 0,
       ttlSecondsAfterFinished: 600,
@@ -265,13 +297,27 @@ export function v0MigrationJob(image) {
 }
 
 /**
- * 공용 차트로 v0 릴리스 하나를 올리는 helm 인자(release는 v0-monolith·v0-gateway, 값은 deploy/envs/local/<release>.yaml)
+ * 공용 차트로 v0 릴리스 하나를 올리는 helm 인자(release는 v0-monolith·v0-gateway, 값은 deploy/envs/local/<release>.yaml).
+ * o.namespace(기본 V0_NAMESPACE)에 올린다. o.image(예: 'peaket/v0-monolith:base')를 주면 '--set image.repository=<이름>,image.tag=<태그>'를
+ * 더한다(이름과 태그는 [a-z0-9./_-]와 [A-Za-z0-9._-]만, 아니면 RangeError). 네임스페이스가 v0가 아니고 release가 v0-gateway면
+ * 입구가 그 네임스페이스의 앱으로 보내도록 '--set env.PEAKET_V0_UPSTREAM=http://v0-monolith.<ns>.svc.cluster.local:8080'을 더한다.
+ * 인자 순서: 원래 인자(네임스페이스만 바뀜) 뒤에 image의 --set, 그 뒤에 upstream의 --set. o를 주지 않으면 지금과 같은 인자다
  * @param {string} release
+ * @param {{ namespace?: string, image?: string }} [o]
  * @returns {string[]}
  */
-export function v0HelmArgs(release) {
+export function v0HelmArgs(release, o = {}) {
   if (release !== 'v0-monolith' && release !== 'v0-gateway') throw new Error(`v0 릴리스는 v0-monolith·v0-gateway뿐이다: ${release}`);
-  return ['upgrade', '--install', release, join(REPO, 'deploy', 'charts', 'peaket-service'), '--namespace', V0_NAMESPACE, '-f', join(REPO, 'deploy', 'envs', 'local', `${release}.yaml`), '--wait', '--timeout', '300s'];
+  const namespace = o.namespace ?? V0_NAMESPACE;
+  if (namespace !== V0_NAMESPACE && namespace !== V0_BASE_NAMESPACE) throw new RangeError(`v0 판의 네임스페이스는 ${V0_NAMESPACE}·${V0_BASE_NAMESPACE}다: ${namespace}`);
+  const args = ['upgrade', '--install', release, join(REPO, 'deploy', 'charts', 'peaket-service'), '--namespace', namespace, '-f', join(REPO, 'deploy', 'envs', 'local', `${release}.yaml`), '--wait', '--timeout', '300s'];
+  if (o.image !== undefined) {
+    const m = typeof o.image === 'string' ? /^([a-z0-9./_-]+):([A-Za-z0-9._-]+)$/.exec(o.image) : null;
+    if (!m) throw new RangeError(`이미지는 <이름>:<태그>(이름 [a-z0-9./_-], 태그 [A-Za-z0-9._-])다: ${String(o.image)}`);
+    args.push('--set', `image.repository=${m[1]},image.tag=${m[2]}`);
+  }
+  if (namespace !== V0_NAMESPACE && release === 'v0-gateway') args.push('--set', `env.PEAKET_V0_UPSTREAM=http://v0-monolith.${namespace}.svc.cluster.local:8080`);
+  return args;
 }
 
 /** 입구를 이 PC에서만 닿게 127.0.0.1에 묶은 포트 전달 인자 */
@@ -330,7 +376,58 @@ function gatewayCertificate() {
   }
 }
 
-async function v0() {
+/**
+ * 기준판(v0-base)을 올린다(야간 비교, docs/devops.md §3.3). v0가 먼저 올라와 있어야 한다(TLS·공개키·시뮬레이터 키를 v0의 Secret에서 옮긴다).
+ * appImage는 kind에 실린 이미지(예: peaket/v0-monolith:base)
+ * @param {string} appImage
+ */
+export async function deployV0Base(appImage) {
+  const layout = v0Layout(V0_BASE_NAMESPACE);
+  const secretOf = async (name) => {
+    const data = JSON.parse(await kubectl(['-n', V0_NAMESPACE, 'get', 'secret', name, '-o', 'json'], { quiet: true })).data ?? {};
+    return Object.fromEntries(Object.entries(data).map(([k, v]) => [k, Buffer.from(String(v), 'base64').toString('utf8')]));
+  };
+  step(`기준판 ${layout.namespace}: DB ${layout.database}·Valkey DB 1·Secret`);
+  const hasDb = await kubectl(['-n', 'peaket-local', 'exec', 'deploy/postgres', '--', 'psql', '-U', 'postgres', '-tAc', `select 1 from pg_database where datname = '${layout.database}'`], { quiet: true });
+  if (hasDb.trim() !== '1') await kubectl(['-n', 'peaket-local', 'exec', 'deploy/postgres', '--', 'psql', '-U', 'postgres', '-c', `create database ${layout.database}`]);
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'Namespace', metadata: { name: layout.namespace } }) });
+  const gw = await secretOf('v0-gateway');
+  const app = await secretOf('v0-monolith');
+  const secrets = v0Secrets({ pgSecretKey: app.PG_SIMULATOR_SECRET_KEY, tlsCert: gw.PEAKET_V0_TLS_CERT, tlsKey: gw.PEAKET_V0_TLS_KEY, jwks: JSON.parse(gw.PEAKET_V0_GATEWAY_JWKS) }, layout);
+  for (const secret of secrets) {
+    await kubectl(['-n', layout.namespace, 'delete', 'secret', secret.metadata.name, '--ignore-not-found']);
+    await kubectl(['create', '-f', '-'], { input: JSON.stringify(secret) });
+  }
+  step('기준판 마이그레이션 잡');
+  await kubectl(['-n', layout.namespace, 'delete', 'job', 'v0-migrate', '--ignore-not-found', '--wait=true']);
+  await kubectl(['create', '-f', '-'], { input: JSON.stringify(v0MigrationJob(appImage, layout.namespace)) });
+  await waitJob(layout.namespace, 'v0-migrate');
+  step('기준판 앱·입구');
+  for (const release of ['v0-monolith', 'v0-gateway']) await helm(v0HelmArgs(release, { namespace: layout.namespace, image: appImage }));
+  await kubectl(['-n', layout.namespace, 'rollout', 'restart', 'deploy/v0-monolith', 'deploy/v0-gateway']);
+  for (const d of ['v0-monolith', 'v0-gateway']) await kubectl(['-n', layout.namespace, 'rollout', 'status', `deploy/${d}`, '--timeout=300s']);
+}
+
+/**
+ * 새 판의 앱 이미지를 바꿔 다시 띄운다(야간 비교의 새 판을 다른 커밋·패치로 만들 때). v0가 먼저 올라와 있어야 한다
+ * @param {string} appImage
+ */
+export async function redeployV0App(appImage) {
+  step(`새 판(${V0_NAMESPACE}) 앱 이미지 ${appImage}`);
+  await kubectl(['-n', V0_NAMESPACE, 'delete', 'job', 'v0-migrate', '--ignore-not-found', '--wait=true']);
+  await kubectl(['create', '-f', '-'], { input: JSON.stringify(v0MigrationJob(appImage)) });
+  await waitJob(V0_NAMESPACE, 'v0-migrate');
+  for (const release of ['v0-monolith', 'v0-gateway']) await helm(v0HelmArgs(release, { image: appImage }));
+  await kubectl(['-n', V0_NAMESPACE, 'rollout', 'restart', 'deploy/v0-monolith', 'deploy/v0-gateway']);
+  for (const d of ['v0-monolith', 'v0-gateway']) await kubectl(['-n', V0_NAMESPACE, 'rollout', 'status', `deploy/${d}`, '--timeout=300s']);
+}
+
+/** kind 노드에 이미지를 싣는다 */
+export async function loadImage(image) {
+  await kind(['load', 'docker-image', image, '--name', CLUSTER]);
+}
+
+export async function v0() {
   step('Docker 엔진과 도구');
   run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
   for (const t of ['kind', 'kubectl', 'helm']) await ensureTool(t);

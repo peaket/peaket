@@ -1,0 +1,74 @@
+{
+  "app_cpu_cores": {
+    "points": 120,
+    "series": 1,
+    "labels": "{}",
+    "p50": 0.03148435917505668,
+    "p99": 0.506543933333333,
+    "max": 0.506543933333333,
+    "mean": 0.0839391304012196
+  },
+  "app_rps": {
+    "points": 120,
+    "series": 1,
+    "labels": "{}",
+    "p50": 0.0,
+    "p99": 1038.6666666666665,
+    "max": 1038.6666666666665,
+    "mean": 106.84264842249058
+  },
+  "error_rate": {
+    "points": 0,
+    "series": 0,
+    "labels": null,
+    "p50": null,
+    "p99": null,
+    "max": null,
+    "mean": null
+  },
+  "event_loop_lag_ms": {
+    "points": 120,
+    "series": 1,
+    "labels": "{}",
+    "p50": 10.788863,
+    "p99": 11.100159,
+    "max": 11.100159,
+    "mean": 10.791252333333334
+  },
+  "gateway_rate_limited_rps": {
+    "points": 120,
+    "series": 1,
+    "labels": "{}",
+    "p50": 0.0,
+    "p99": 0.0,
+    "max": 0.0,
+    "mean": 0.0
+  },
+  "gateway_upstream_errors_rps": {
+    "points": 120,
+    "series": 1,
+    "labels": "{}",
+    "p50": 0.0,
+    "p99": 0.0,
+    "max": 0.0,
+    "mean": 0.0
+  },
+  "origin_rps": {
+    "points": 120,
+    "series": 1,
+    "labels": "{}",
+    "p50": 0.0,
+    "p99": 1211.0,
+    "max": 1211.0,
+    "mean": 108.93179071166335
+  },
+  "p99_ms": {
+    "points": 30,
+    "series": 1,
+    "labels": "{}",
+    "p50": 4.95,
+    "p99": 4.9655172413793105,
+    "max": 4.9655172413793105,
+    "mean": 4.953668771924782
+  }
+}

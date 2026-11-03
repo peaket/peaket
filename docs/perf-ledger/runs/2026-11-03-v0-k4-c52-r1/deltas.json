@@ -1,0 +1,19 @@
+{
+  "seconds": 59,
+  "msgsPerS": 25460.7,
+  "bytesPerS": 4096788.9,
+  "latency": {
+    "count": 1502181,
+    "p50Ms": 20,
+    "p99Ms": 50,
+    "over300": 0
+  },
+  "opened": 0,
+  "closed": 0,
+  "errors": 0,
+  "connected": 2996,
+  "failed": 2004,
+  "clientCpu": {
+    "meanPctMax": 5.9
+  }
+}

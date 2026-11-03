@@ -1,0 +1,33 @@
+{
+  "loadStartMs": 1793676535222,
+  "rescales": [
+    {
+      "atS": 20.8,
+      "size": 2
+    },
+    {
+      "atS": 125.8,
+      "size": 4
+    }
+  ],
+  "firstRescaleS": 20.8,
+  "newPods": [
+    {
+      "name": "v0-monolith-868d4cccf-tcxl9",
+      "createdS": 20.8,
+      "readyS": 23.8
+    },
+    {
+      "name": "v0-monolith-868d4cccf-rp2df",
+      "createdS": 125.8,
+      "readyS": 130.8
+    },
+    {
+      "name": "v0-monolith-868d4cccf-t8hlz",
+      "createdS": 125.8,
+      "readyS": 130.8
+    }
+  ],
+  "firstNewReadyS": 23.8,
+  "maxSize": 4
+}

@@ -120,16 +120,24 @@ export function perVuBytes(o) {
 }
 
 /**
- * 발생기 콘솔 출력(한 줄에 JSON 하나) → { records: 시험 기록 줄 글 목록(입력 순서, 종류는 RECORD_KINDS), marks: { main_start?, main_end? }(ms) }.
+ * 발생기 콘솔 출력(한 줄에 JSON 하나) → { records: 시험 기록 줄 글 목록(입력 순서, 종류는 RECORD_KINDS), marks: { main_start?, main_end? }(ms),
+ *   probes: 검표 시도 객체 목록(입력 순서, BSL-090 K10) }.
+ * 검표 시도 줄은 { kind: 'gate_scan', startedMs, endedMs, ok, result }만 받는다: startedMs·endedMs는 0 이상 안전한 정수이고 endedMs ≥ startedMs,
+ * ok는 참·거짓, result는 'ADMIT'·'ALREADY_ENTERED'·'INVALID'·'WRONG_EVENT' 가운데 하나 또는 null(ok가 거짓이면 null이어야 한다). 다른 키가 있거나 어기면 Error(줄 번호).
+ * 검표 시도는 시험 기록(records)에 넣지 않는다.
  * 빈 줄은 건너뛰고 줄바꿈 없는 마지막 줄도 읽는다. 표시는 하나만 있어도 된다. 줄 번호는 빈 줄을 포함한 1부터다.
  * JSON 객체가 아닌 줄, 모르는 kind, 모르는 표시 이름, at_ms가 0 이상 안전한 정수가 아님, 같은 표시 두 번, main_end의 at_ms가 main_start보다 작으면
  * Error(줄 번호와 함께, 줄 내용은 싣지 않는다)
  * @param {string} text
- * @returns {{ records: string[], marks: { main_start?: number, main_end?: number } }}
+ * @returns {{ records: string[], marks: { main_start?: number, main_end?: number }, probes: Array<{ kind: 'gate_scan', startedMs: number, endedMs: number, ok: boolean, result: string | null }> }}
  */
+const GATE_RESULTS = ['ADMIT', 'ALREADY_ENTERED', 'INVALID', 'WRONG_EVENT'];
+const PROBE_KEYS = ['kind', 'startedMs', 'endedMs', 'ok', 'result'];
+
 export function splitConsole(text) {
   const records = [];
   const marks = {};
+  const probes = [];
   text.split('\n').forEach((raw, idx) => {
     const line = raw.replace(/\r$/, '');
     if (!line.trim()) return;
@@ -146,10 +154,18 @@ export function splitConsole(text) {
       if (!Number.isSafeInteger(o.at_ms) || o.at_ms < 0) throw new Error(`발생기 콘솔 ${idx + 1}번째 줄: 구간 표시 시각이 틀렸다`);
       marks[o.name] = o.at_ms;
       if (marks.main_start !== undefined && marks.main_end !== undefined && marks.main_end < marks.main_start) throw new Error(`발생기 콘솔 ${idx + 1}번째 줄: 구간 표시 main_end가 main_start보다 앞이다`);
+    } else if (o.kind === 'gate_scan') {
+      const where = `발생기 콘솔 ${idx + 1}번째 줄: 검표 시도`;
+      if (Object.keys(o).some((k) => !PROBE_KEYS.includes(k)) || PROBE_KEYS.some((k) => !Object.hasOwn(o, k))) throw new Error(`${where}의 칸이 틀렸다`);
+      if (!Number.isSafeInteger(o.startedMs) || o.startedMs < 0 || !Number.isSafeInteger(o.endedMs) || o.endedMs < o.startedMs) throw new Error(`${where} 시각이 틀렸다`);
+      if (typeof o.ok !== 'boolean') throw new Error(`${where}의 ok가 참·거짓이 아니다`);
+      if (o.result !== null && !GATE_RESULTS.includes(o.result)) throw new Error(`${where}의 결과가 틀렸다`);
+      if (!o.ok && o.result !== null) throw new Error(`${where}: 판정이 없는데 결과가 있다`);
+      probes.push({ kind: 'gate_scan', startedMs: o.startedMs, endedMs: o.endedMs, ok: o.ok, result: o.result });
     } else if (RECORD_KINDS.includes(o.kind)) records.push(line);
     else throw new Error(`발생기 콘솔 ${idx + 1}번째 줄: 모르는 종류`);
   });
-  return { records, marks };
+  return { records, marks, probes };
 }
 
 /**
@@ -190,8 +206,10 @@ export function pgChargeLines(text) {
  * collect.py 인자 목록(셸 없이 부른다). 늘: --run-id --kpi --version --profile --duration --warmup --scenario --k6-summary --infra-file --notes --verdict baseline
  * 그리고 users가 있으면 --users, rps가 있으면 --rps, start·end가 있으면 --start·--end(ISO UTC), invalidReason이 있으면 --invalid-reason,
  * invariants가 있으면 --invariants, extra마다 --extra, generator가 있으면 --generator(발생기 대수·사양·k6 판, 이 순서). start·end는 둘 다 있을 때만 싣는다. 첫 원소는 'tools/perf-ledger/collect.py'이다.
+ * BSL-090(docs/verification.md §3.10)에서 더한 것(--generator 뒤에 이 순서): checks가 있으면 --checks, promUrl과 queries가 있으면 --prom-url·--queries
+ * (둘 중 하나만 있거나, start·end 없이 주면 Error), rawBucket이 있으면 --raw-bucket, rawOutbox가 있으면 --raw-outbox(rawBucket 없이 주면 Error).
  * 문자열 값이 비었거나 '-'로 시작하면(argparse가 인자로 읽는다) Error
- * @param {{ runId: string, kpi: string, version: string, profile: string, users?: number, rps?: number, durationS: number, warmupS: number, scenario: string, summaryFile: string, infraFile: string, notes: string, start?: string, end?: string, invalidReason?: string, invariants?: string, extra?: string[], generator?: string }} o
+ * @param {{ runId: string, kpi: string, version: string, profile: string, users?: number, rps?: number, durationS: number, warmupS: number, scenario: string, summaryFile: string, infraFile: string, notes: string, start?: string, end?: string, invalidReason?: string, invariants?: string, extra?: string[], generator?: string, checks?: string, promUrl?: string, queries?: string, rawBucket?: string, rawOutbox?: string }} o
  * @returns {string[]}
  */
 export function collectArgs(o) {
@@ -203,6 +221,10 @@ export function collectArgs(o) {
   for (const k of ['start', 'end', 'invalidReason', 'invariants']) if (o[k] !== undefined) str(k, o[k]);
   for (const e of o.extra ?? []) str('extra', e);
   if (o.generator !== undefined) str('generator', o.generator);
+  for (const k of ['checks', 'promUrl', 'queries', 'rawBucket', 'rawOutbox']) if (o[k] !== undefined) str(k, o[k]);
+  if ((o.promUrl === undefined) !== (o.queries === undefined)) throw new Error('collect.py 인자 promUrl과 queries는 함께 준다');
+  if (o.promUrl !== undefined && (o.start === undefined || o.end === undefined)) throw new Error('collect.py 인자 promUrl에는 start·end가 있어야 한다');
+  if (o.rawOutbox !== undefined && o.rawBucket === undefined) throw new Error('collect.py 인자 rawOutbox는 rawBucket과 함께 준다');
   const a = ['tools/perf-ledger/collect.py', '--run-id', o.runId, '--kpi', o.kpi, '--version', o.version, '--profile', o.profile];
   a.push('--duration', String(o.durationS), '--warmup', String(o.warmupS), '--scenario', o.scenario, '--k6-summary', o.summaryFile, '--infra-file', o.infraFile, '--notes', o.notes, '--verdict', 'baseline');
   if (o.users !== undefined) a.push('--users', String(o.users));
@@ -212,6 +234,10 @@ export function collectArgs(o) {
   if (o.invariants !== undefined) a.push('--invariants', o.invariants);
   for (const e of o.extra ?? []) a.push('--extra', e);
   if (o.generator !== undefined) a.push('--generator', o.generator);
+  if (o.checks !== undefined) a.push('--checks', o.checks);
+  if (o.promUrl !== undefined) a.push('--prom-url', o.promUrl, '--queries', o.queries);
+  if (o.rawBucket !== undefined) a.push('--raw-bucket', o.rawBucket);
+  if (o.rawOutbox !== undefined) a.push('--raw-outbox', o.rawOutbox);
   return a;
 }
 

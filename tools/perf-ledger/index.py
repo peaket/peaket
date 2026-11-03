@@ -75,7 +75,7 @@ def run_day(m):
     return L.iso_utc(L.parse_time(ts))[:10] if ts else None
 
 
-def stamp(root, day):
+def stamp(root, day, ots=True):
     """그날 끝난 실행들의 SHA256SUMS 해시를 timestamps/<날짜>.txt로 모으고 `ots stamp`로 고정한다(docs/perf-ledger.md §9).
 
     이미 고정한(.ots가 있는) 날의 목록이 달라지면 증명이 깨지므로 거부한다. 같은 내용이면 다시 쓰지 않는다.
@@ -99,6 +99,9 @@ def stamp(root, day):
     if old != body:
         io.open(path, 'w', encoding='utf-8', newline='\n').write(body)
     print(f'하루 해시 묶음: {path} ({len(rows)}개 실행)')
+    if not ots:
+        print('OpenTimestamps 고정(ots stamp)은 공개 달력 서버로 해시를 보내는 외부 전송이라 하지 않았다. 소유자가 index.py --stamp로 고정한다')
+        return path
     if os.path.exists(path + '.ots'):
         print('이미 OpenTimestamps 증명이 있다(확정은 --upgrade)')
         return path
@@ -128,13 +131,16 @@ def main():
     p.add_argument('--stamp', nargs='?', const='', metavar='YYYY-MM-DD',
                    help='그날(기본: 오늘, UTC) 끝난 실행들의 SHA256SUMS 해시를 timestamps/<날짜>.txt로 모아 OpenTimestamps로 고정한다')
     p.add_argument('--upgrade', action='store_true', help='timestamps/*.ots를 확정 증명으로 갱신한다')
+    p.add_argument('--no-ots', action='store_true', help='--stamp에서 묶음 파일만 만들고 ots stamp(외부 전송)는 하지 않는다')
     a = p.parse_args()
     if a.stamp and not re.match(r'^\d{4}-\d{2}-\d{2}$', a.stamp):
         p.error('--stamp 날짜는 YYYY-MM-DD다')
+    if a.no_ots and a.stamp is None:
+        p.error('--no-ots는 --stamp와 함께만 준다')
     root = a.root or L.find_root()
     rebuild(root)
     if a.stamp is not None:
-        stamp(root, a.stamp or L.iso_utc(time.time())[:10])
+        stamp(root, a.stamp or L.iso_utc(time.time())[:10], ots=not a.no_ots)
     if a.upgrade:
         upgrade(root)
 

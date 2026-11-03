@@ -1,0 +1,61 @@
+{
+  "run_id": "2026-11-03-v0-k1-100k-r3-k9",
+  "kpi": "K9",
+  "version": "v0",
+  "profile": "local-100k",
+  "scale": {
+    "users": 100000,
+    "arrival_rps": null,
+    "duration_s": 251,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v0-queue.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "1a3ef1b2d6fed7e11bf98ca29c95bccdad2b6d15",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-03-v0-k1-100k-r3-k9/",
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 10대(CPU 2·메모리 1024Mi씩, kind 안)",
+    "dropped_iterations": 1165023
+  },
+  "started_at": "2026-11-03T03:39:22Z",
+  "ended_at": "2026-11-03T03:43:34Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 250.406158,
+    "p95_ms": 627.9571661,
+    "p99_ms": 853.7059895799995,
+    "error_rate": 0.0878607334594464,
+    "requests": 169689,
+    "rps": 1414.0750000000003,
+    "dropped_iterations": 1165023
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "extra": [
+      "hpa.json"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "발생기 0: 발생기가 반복을 시작하지 못함(dropped_iterations 121124); 발생기 1: 발생기가 반복을 시작하지 못함(dropped_iterations 121336); 발생기 2: 발생기가 반복을 시작하지 못함(dropped_iterations 110214); 발생기 3: 발생기가 반복을 시작하지 못함(dropped_iterations 117411); 발생기 4: 발생기가 반복을 시작하지 못함(dropped_iterations 108563); 발생기 5: 발생기가 반복을 시작하지 못함(dropped_iterations 111658); 발생기 6: 발생기가 반복을 시작하지 못함(dropped_iterations 121889); 발생기 7: 발생기가 반복을 시작하지 못함(dropped_iterations 122173); 발생기 8: 발생기가 반복을 시작하지 못함(dropped_iterations 114165); 발생기 9: 발생기가 반복을 시작하지 못함(dropped_iterations 116490)",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "K1 실행 2026-11-03-v0-k1-100k-r3와 같은 실행의 HPA 시간선(부하 시작 기준): 첫 확장 24초, 늘린 파드 첫 준비 27초(목표 60초 미만, K9 ①), 최대 복제 4, 새 파드 3개. 앱 CPU HPA 목표 70%·최소 1·최대 4(deploy/envs/local/v0-monolith.yaml), 쿠버네티스 기본 확장 동작",
+  "collected_at": "2026-11-03T03:43:55Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

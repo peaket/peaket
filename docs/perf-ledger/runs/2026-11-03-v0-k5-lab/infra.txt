@@ -1,0 +1,5 @@
+측정 환경(2026-11-03T06:15:14.154Z)
+PC: Intel(R) Core(TM) i9-14900HX 논리 프로세서 32개, 메모리 32 GiB
+브라우저: Chrome/153.0.8010.12(머리 없음, Playwright Chromium), CPU 4배 느리게(Emulation.setCPUThrottlingRate), 화면 412×915 배율 2.625 모바일
+대상: v0 좌석맵(kind peaket, 입구 포트 전달 127.0.0.1:8443), 5만 석 회차
+회마다 새 브라우저 맥락, 조작: 휠 확대 3번 → 끌기 → 좌석 고르기 → [선택 좌석 잡기](docs/verification.md §3.10 K5)

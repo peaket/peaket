@@ -5,7 +5,9 @@
 - 측정 규칙과 기록: [docs/perf-ledger.md](../docs/perf-ledger.md), 시나리오·발생기 설계와 보정 결과: [docs/verification.md](../docs/verification.md) §3.9, 저장소 구성: [docs/devops.md](../docs/devops.md) §2.1, 결정: ADR-0169
 - `scenarios/`·`lib/`·`runner/`·`run.mjs`: v0 측정용 k6 시나리오와 실행 도구(wbs 1.2.1, 아래).
 - `poc/`: 기반 PoC 측정 틀(wbs 0.5.1, [poc/README.md](poc/README.md)). Redis 한 키·클라이언트 셋·좌석 샤드, HTTP 어댑터·검사 방식, Kafka 기본 클라이언트를 PC의 Docker 망 안에서 잰다.
-- `nightly/`: 야간 축소 성능 상대 비교의 기준값(`threshold.json`, A/A 실행 10번으로 정하는 `max_ratio`)과 설정(`config.json`: 시나리오·판마다 실행 수·두 판을 올리는 준비 명령). 비교 도구는 `tools/perf-ledger/nightly.py`, 워크플로는 `.github/workflows/perf-nightly.yml`이다(docs/devops.md §3.3, D-T40). `config.json`은 BSL-090에서 둔다. 그 전에는 야간 잡이 건너뛴다.
+- `nightly/`: 야간 축소 성능 상대 비교. 기준값 `threshold.json`(A/A 실행 10번으로 정하는 `max_ratio`, 러너에서 정하기 전까지 비움)과 설정 `config.json`·`config-aa.json`(시나리오·판마다 실행 수·두 판을 kind에 올리는 준비 명령 `prepare.mjs`·실행 명령 `k6-run.mjs`)을 둔다. 비교 도구는 `tools/perf-ledger/nightly.py`, 워크플로는 `.github/workflows/perf-nightly.yml`이다(docs/devops.md §3.3, D-T40). `test/`의 30ms 지연 패치와 설정은 D-T40 ② 시험용이다.
+- `k5/`: K5 랩 판정(`seatmap-lab.mjs`, 머리 없는 Chrome으로 v0 좌석맵을 20회, docs/verification.md §3.10).
+- `queries/v0.txt`: Before 측정의 서버 지표 질의(`collect.py --queries`).
 
 ## 쓰는 법(v0 시나리오와 발생기 보정)
 
@@ -19,6 +21,14 @@ node loadtest/run.mjs calibrate --cpus 4 --rates 1000,2000,4000,8000 --record   
 node loadtest/run.mjs v0 queue --users 10000 --entry-rate 1000 --admit-per-second 28 --warm 30 --main 120 --invariants
 node loadtest/run.mjs v0 seat-hold --users 2000 --rate 2000 --mode hot --hot-count 1
 node loadtest/run.mjs v0 payment --users 20000 --rate 300 --seats-per-order 2 --warm 10 --main 50 --invariants
+
+# Before 측정(docs/verification.md §3.10). 장부에 남길 때는 Prometheus를 연다: node tools/local/cluster.mjs prometheus
+node loadtest/run.mjs v0 queue --users 100000 --entry-rate 1000 --admit-per-second 28 --warm 30 --main 120 --settle --hpa-timeline --record --run-id <ID> --prom-url http://127.0.0.1:9090
+node loadtest/run.mjs v0 seat-hold --users 1000 --rate 2000 --mode hot --hot-count 1 --keep --db-stats
+node loadtest/run.mjs v0 seat-deltas --users 1000 --rate 125 --connections 5000
+node loadtest/run.mjs v0 payment --users 11002 --rate 100 --warm 10 --main 100 --fault-drop-pct 5 --fault-delay-pct 2 --kill-app-at 50 --invariants
+node loadtest/run.mjs v0 gate --scanners 10 --rate 10
+node loadtest/k5/seatmap-lab.mjs --reps 20
 ```
 
 - k6 1.4.2(다이제스트 고정)를 kind 안의 발생기 파드(네임스페이스 `loadtest`, CPU·메모리 요청 = 한도)로 띄우고 입구의 클러스터 안 주소(`https://v0-gateway.v0.svc.cluster.local:8443`)로 보냅니다. 포트 전달은 쓰지 않습니다(Windows에서 끊깁니다). 파드의 입력(시나리오·토큰·인증서·환경 파일)은 kind 노드 컨테이너의 실행 폴더(`/var/local/peaket-loadtest/<실행>`)에 `docker cp`로 넣고 파드가 hostPath로 붙입니다. 이 PC에서 `kubectl exec -i`의 표준 입력이 잘리기 때문입니다(2026-11-03 확인). 파드와 실행 폴더는 실행이 끝나면(실패해도) 지웁니다.
@@ -39,7 +49,10 @@ node loadtest/run.mjs v0 payment --users 20000 --rate 300 --seats-per-order 2 --
 | `v0 queue` | K1(Q-T2의 v0 쪽): 진입 뒤 대기자들이 만드는 조회 도착률 | `--users` `--entry-rate` `--admit-per-second`(필수) |
 | `v0 seat-hold` | K2·K3(S-T1·S-T10의 v0 쪽): 홀드 도착률과 좌석 고르기 | `--users` `--rate`(필수) `--mode spread` `--hold-size 2` `--hot-count 1` `--pairs 1` `--release-ms 0` |
 | `v0 payment` | K7: 홀드 → 주문 → 시뮬레이터 인증 → 결제 확정 → 주문 보기 | `--users` `--rate`(필수) `--seats-per-order 2`, rate × (warm + main) + 2 ≤ users(가상 사용자 하나가 결제 하나, 도착률 실행기는 구간마다 한 번 더 시작할 수 있다) |
-| 공통 | — | `--warm 30` `--main 60` `--cpus 4` `--memory-mi 4096` `--record --run-id` `--profile`(사용자 수로 local-1k·10k·100k) `--invariants` `--out` |
+| `v0 seat-deltas` | K4(S-T12의 v0 쪽): 변경분 연결 C개(받는 파드가 맺는다)와 홀드 도착률. 받은 메시지·바이트·종단 지연 | `--users` `--rate` `--connections`(필수) `--listener-pods`(⌈연결 ÷ 500⌉) `--hold-size 2` |
+| `v0 gate` | K10(O-T1의 v0 한계): 온라인 검표 중 입구를 끊었다 되돌린다. 구간별 분당 판정과 멈춘 시간 | `--scanners` `--rate`(필수) `--cut-at 60` `--cut-s 60`, `--main` 기본 180 |
+| 공통 | — | `--warm 30` `--main 60` `--cpus 4` `--memory-mi 4096` `--generators`(최고 도착률 ÷ 1,000, 나누면 CPU 2·메모리 1GiB씩) `--namespace v0` `--settle` `--hpa-timeline` `--record --run-id` `--profile`(사용자 수로 local-1k·10k·100k) `--prom-url` `--invariants` `--out` |
+| seat-hold·payment만 | — | seat-hold `--keep`(놓지 않기), `--db-stats`(교착·HOT 통계), payment `--fault-drop-pct` `--fault-delay-pct` `--kill-app-at` |
 
 ## 파일
 
@@ -60,4 +73,5 @@ node loadtest/run.mjs v0 payment --users 20000 --rate 300 --seats-per-order 2 --
 
 - 가상 사용자 수 상한은 발생기 메모리 × 0.6 ÷ 가상 사용자당 2MiB [가정]로 잡습니다(`run.mjs`의 `ASSUMED_VU_MI`). 보정이 잰 값은 0.9~1.3MB라 넉넉한 쪽입니다(docs/verification.md §3.9 '보정 결과'). 대상이 느려져 가상 사용자가 모자라면 `dropped_iterations`가 생겨 그 실행은 무효입니다.
 - 이 PC에서 발생기 하나(CPU 4개)가 놓침 없이 보내는 도착률은 1,000/s까지였습니다(2026-11-03 보정). 그보다 높으면 CPU가 남아도 드물게 반복을 놓쳐 무효가 될 수 있습니다(docs/verification.md §3.9 '보정 결과').
-- K4(변경분 연결 5,000개), K5(Playwright), K6(봇), K8(경보), K10(망 끊기)은 이 도착률 시나리오에 넣지 않습니다(docs/verification.md §3.9).
+- K4(변경분 연결 5,000개)는 `v0 seat-deltas`의 받는 파드(가벼운 Node 클라이언트), K5는 `k5/seatmap-lab.mjs`, K10은 `v0 gate`, K9는 `--hpa-timeline`으로 잽니다. K6(봇)·K8(경보)은 그 측정 단계(BOT-170·OPS-500)에서 함께 잽니다(docs/verification.md §3.10).
+- 최고 도착률이 1,000/s를 넘으면 발생기를 나눕니다(k6 실행 구간). 요청 수·실패·놓침·목표를 넘은 수는 더하고, p99는 발생기별 값의 아래·위 한계로 적습니다(장부는 위 한계). `--record`면 경로 목표 점검(`checks.json`)과 서버 지표(`--prom-url`)를 장부에 넣고, 큰 원본은 `.cache/perf-raw-outbox`에 둡니다(S3 올리기는 소유자 몫).

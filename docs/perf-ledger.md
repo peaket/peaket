@@ -45,7 +45,7 @@ docs/perf-ledger/
   timestamps/<날짜>.txt     그날 끝난 실행들의 `SHA256SUMS` 해시 목록과, 그 파일의 OpenTimestamps 증명 `<날짜>.txt.ots`(§9)
 ```
 
-Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2026-10-28, 기술 검토 낮음-056). Git에는 `manifest.json`, `k6-summary.json`, `metrics-summary.json`, `invariants.csv`, `infra.txt`, 작은 CSV(`cost.csv`·`timeline.csv`·`hint_compare.csv`·`backend_cost.csv`·`confusion.csv`·`bot_cost.csv`·`bot_outcomes.csv`), `bot_prices.json`, `SHA256SUMS`, `charts/`, `timestamps/`를 둔다. 큰 원본(`metrics/*.csv`, `traces/`, `grafana/`, `stdout.log`)과 불변식 위반 행 `invariants-detail.ndjson`은 S3 원본 버킷의 `runs/<run-id>/`에 두고, Git에는 해시만 남는다. 원본 위치는 manifest의 `raw_uri`에 적는다. 그래서 측정이 쌓여도 저장소가 GitHub 권장 크기(1GB 미만이 이상적, 5GB 미만을 강하게 권함, GitHub 문서 2026-10-27 확인)를 넘지 않는다.
+Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2026-10-28, 기술 검토 낮음-056). Git에는 `manifest.json`, `k6-summary.json`, `metrics-summary.json`, `invariants.csv`, `infra.txt`, 작은 CSV(`cost.csv`·`timeline.csv`·`hint_compare.csv`·`backend_cost.csv`·`confusion.csv`·`bot_cost.csv`·`bot_outcomes.csv`), `bot_prices.json`, `SHA256SUMS`, `charts/`, `timestamps/`를 둔다. 큰 원본(`metrics/*.csv`, `traces/`, `grafana/`, `stdout.log`)과 불변식 위반 행 `invariants-detail.ndjson`은 S3 원본 버킷의 `runs/<run-id>/`에 두고, Git에는 해시만 남는다. 원본 위치는 manifest의 `raw_uri`에 적는다. 그래서 측정이 쌓여도 저장소가 GitHub 권장 크기(1GB 미만이 이상적, 5GB 미만을 강하게 권함, GitHub 문서 2026-10-27 확인)를 넘지 않는다. AWS 계정이 없는 포트폴리오 기간에는 `collect.py --raw-bucket <버킷> --raw-outbox <보낼 폴더>`로 수집한다(추천 적용 2026-11-03, wbs 1.4.1 ②). 큰 원본은 해시를 `SHA256SUMS`에 남긴 뒤 보낼 폴더(기본 `.cache/perf-raw-outbox`, 커밋하지 않음)의 `runs/<run-id>/<경로>.gz`(버킷과 같은 경로)로 옮기고 실행 폴더에서 지운다. `raw_uri`는 올릴 자리다. 보낼 폴더를 버킷으로 올리는 일(`aws s3 sync <보낼 폴더> <버킷>`)은 외부 전송이라 소유자 몫이고, 올리기 전까지 원본은 측정 PC에만 있다.
 
 ### 2.2 manifest.json 필수 메타데이터 필드
 
@@ -115,6 +115,7 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | `local-bot` | 로컬 kind/k3d 클러스터에 봇 등급 분류표(ADR-0039)에 따른 합성 봇과 정상 사용자 세션을 넣어 판정 정확도를 잰다(K6 검증, 절차 §10). 다른 상용 사이트를 공격하는 것은 엄격히 금지한다(POL-026) | 0원 (로컬 자원) |
 | `local-poc` | 구성 요소 하나를 따로 재는 PoC다(wbs 0.5.1, 추천 적용 2026-11-01, openspec 변경 `add-foundation-poc`). kind 클러스터 대신 PC의 Docker 엔진에 측정용 망 하나를 만들고, 그 안에 측정 대상(Valkey 클러스터 주 노드 셋·복제 셋, Kafka 브로커 셋, HTTP 비교 앱)과 측정 도구(Node 측정 도구, k6)를 컨테이너로 띄워 CPU 한도를 둔다. kind에는 Strimzi·PostgreSQL·흉내 서버가 함께 돌아 잡음이 되고, Docker Desktop 포트 전달을 거치면 그 비용이 측정에 섞이기 때문이다. 동시 대기자가 없는 측정이라 `scale.users`는 비운다. 무대와 규칙은 `loadtest/poc/README.md`다 | 0원 (로컬 자원) |
 | `local-gen` | 부하 발생기 보정이다(wbs 1.2.1, 추천 적용 2026-11-03). kind 클러스터 안의 발생기 파드 하나(CPU 몫 고정)가 빈 응답 대역(nginx)에 왜곡 없이 보낼 수 있는 최대 도착률과 가상 사용자당 메모리를 잰다. 대상이 아니라 발생기를 재므로 `scale.users`는 비우고, `kpi`는 NFR-013, `version`은 그 보정을 쓸 측정의 판(지금은 v0)으로 적는다. 절차와 판정은 docs/verification.md §3.9다 | 0원 (로컬 자원) |
+| `local-lab` | 화면 랩 판정이다(K5, wbs 1.4.1 ②, 추천 적용 2026-11-03). 이 PC의 머리 없는 Chrome(Playwright Chromium)을 개발자 도구 규약으로 움직여, kind 위 v0 좌석맵을 중급 모바일 화면·CPU 4배 느리게로 20회 잰다(`node loadtest/k5/seatmap-lab.mjs`). 요청 부하가 없는 측정이라 `scale.users`는 비우고, 열린 모델이 아니다(`--closed-model`). 절차와 판정은 docs/verification.md §3.10 K5다 | 0원 (로컬 자원) |
 | `cloud-calib` | 선택 보정이다. 서울 리전 c7g.xlarge 8대를 3시간 [가정] 띄워 진입 서버 1·2·4대의 처리량을 재고, PC와 비교한 환산 계수를 얻는다(docs/verification.md §6) | 약 4달러(정가로 계속 쓰는 온디맨드 서버의 가격표, 2026-10-13 조회) |
 | `cloud-cdn` | 선택 보정이다. PC에서 CloudFront 배포 1개에 무료 범위(월 요청 1,000만 건, 전송 1 TB) 안의 요청을 보내 같은 파일 요청을 묶는지 확인한다. 엣지 1곳 몫만 확인된다(docs/verification.md §6) | 무료 범위 안(넘으면 요청 건수만큼 요금이 붙는다) |
 | `cloud-msk-iam` | 선택 보정이다. 서울 리전에 EKS 클러스터 1개(노드 c7g.xlarge 1대)와 MSK kafka.t3.small 2대를 9시간 [가정] 띄워, Pod Identity 자격과 MSK 토큰이 바뀌는 동안 재인증이 이어지는지 본다(ST-T14 ②, docs/verification.md §6, ADR-0154). 재는 것은 성능이 아니라 재인증 실패·연결 끊김 건수다 | 약 3.5달러(EKS·MSK·노드·공인 IPv4의 시간 요금, 2026-10-30 가격표) |
@@ -274,6 +275,30 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-01 | 2026-11-01-vt41-max2-fastify-schema-hold-local-poc | V-T41 | v1 | local-poc | - | 8.11 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-schema-hold-local-poc/ |
 | 2026-11-01 | 2026-11-01-vt41-max2-fastify-zod-entry-local-poc | V-T41 | v1 | local-poc | - | 5.93 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-zod-entry-local-poc/ |
 | 2026-11-01 | 2026-11-01-vt41-max2-fastify-zod-hold-local-poc | V-T41 | v1 | local-poc | - | 8.15 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-01-vt41-max2-fastify-zod-hold-local-poc/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r1000-mw0avbs32d88 | NFR-013 | v0 | local-gen | 1,000 RPS | 6.92 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r1000-mw0avbs32d88/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r1000-mw0azbisc5a4 | NFR-013 | v0 | local-gen | 1,000 RPS | 23 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r1000-mw0azbisc5a4/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r1000-mw0b3e020ab1 | NFR-013 | v0 | local-gen | 1,000 RPS | 9.58 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r1000-mw0b3e020ab1/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r250-mw0avbs32d88 | NFR-013 | v0 | local-gen | 250 RPS | 1.27 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r250-mw0avbs32d88/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r250-mw0azbisc5a4 | NFR-013 | v0 | local-gen | 250 RPS | 1.28 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r250-mw0azbisc5a4/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r250-mw0b3e020ab1 | NFR-013 | v0 | local-gen | 250 RPS | 1.20 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r250-mw0b3e020ab1/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r500-mw0avbs32d88 | NFR-013 | v0 | local-gen | 500 RPS | 2.87 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r500-mw0avbs32d88/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r500-mw0azbisc5a4 | NFR-013 | v0 | local-gen | 500 RPS | 2.49 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r500-mw0azbisc5a4/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r500-mw0b3e020ab1 | NFR-013 | v0 | local-gen | 500 RPS | 4.14 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r500-mw0b3e020ab1/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r750-mw0avbs32d88 | NFR-013 | v0 | local-gen | 750 RPS | 5.07 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r750-mw0avbs32d88/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r750-mw0azbisc5a4 | NFR-013 | v0 | local-gen | 750 RPS | 6.18 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r750-mw0azbisc5a4/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c1-r750-mw0b3e020ab1 | NFR-013 | v0 | local-gen | 750 RPS | 7.11 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c1-r750-mw0b3e020ab1/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r1000-mw02gg0b6a84 | NFR-013 | v0 | local-gen | 1,000 RPS | 1.06 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r1000-mw02gg0b6a84/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r1000-mw02ko0hb1d8 | NFR-013 | v0 | local-gen | 1,000 RPS | 1.09 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r1000-mw02ko0hb1d8/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r1000-mw02on0rc063 | NFR-013 | v0 | local-gen | 1,000 RPS | 1.42 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r1000-mw02on0rc063/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r1500-mw02gg0b6a84 | NFR-013 | v0 | local-gen | 1,500 RPS | 1.53 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r1500-mw02gg0b6a84/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r1500-mw02ko0hb1d8 | NFR-013 | v0 | local-gen | 1,500 RPS | 1.71 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r1500-mw02ko0hb1d8/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r1500-mw02on0rc063 | NFR-013 | v0 | local-gen | 1,500 RPS | 2.10 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r1500-mw02on0rc063/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r2000-mw02gg0b6a84 | NFR-013 | v0 | local-gen | 2,000 RPS | 1.99 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r2000-mw02gg0b6a84/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r2000-mw02ko0hb1d8 | NFR-013 | v0 | local-gen | 2,000 RPS | 2.42 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r2000-mw02ko0hb1d8/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r2000-mw02on0rc063 | NFR-013 | v0 | local-gen | 2,000 RPS | 2.22 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r2000-mw02on0rc063/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r500-mw02gg0b6a84 | NFR-013 | v0 | local-gen | 500 RPS | 0.48 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r500-mw02gg0b6a84/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r500-mw02ko0hb1d8 | NFR-013 | v0 | local-gen | 500 RPS | 0.47 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r500-mw02ko0hb1d8/ |
+| 2026-11-03 | 2026-11-03-gen-calib-c2-r500-mw02on0rc063 | NFR-013 | v0 | local-gen | 500 RPS | 0.55 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c2-r500-mw02on0rc063/ |
 | 2026-11-03 | 2026-11-03-gen-calib-c4-r1000-mvzroid4a231 | NFR-013 | v0 | local-gen | 1,000 RPS | 0.45 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r1000-mvzroid4a231/ |
 | 2026-11-03 | 2026-11-03-gen-calib-c4-r1000-mvzrtbumed2d | NFR-013 | v0 | local-gen | 1,000 RPS | 0.44 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r1000-mvzrtbumed2d/ |
 | 2026-11-03 | 2026-11-03-gen-calib-c4-r1000-mvzry4zl666c | NFR-013 | v0 | local-gen | 1,000 RPS | 0.42 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-gen-calib-c4-r1000-mvzry4zl666c/ |
@@ -297,6 +322,60 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-03 | 2026-11-03-number-tls-r1-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 395 | 55.1% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-03-number-tls-r1-local-poc/ |
 | 2026-11-03 | 2026-11-03-number-tls-r2-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 559 | 60.6% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-03-number-tls-r2-local-poc/ |
 | 2026-11-03 | 2026-11-03-number-tls-r3-local-poc | NFR-001 | v1 | local-poc | 200,000 RPS | 875 | 57.6% | 무효(발생기 병목: 못 보낸 요청=358980) | 측정함 | 0 | perf-ledger/runs/2026-11-03-number-tls-r3-local-poc/ |
+| 2026-11-03 | 2026-11-03-v0-k1-100k-r1 | K1 | v0 | local-100k | 100,000명 | 2,077 | 99.2% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-100k-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k1-100k-r1-k9 | K9 | v0 | local-100k | 100,000명 | 2,077 | 99.2% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-100k-r1-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-100k-r2 | K1 | v0 | local-100k | 100,000명 | 1,309 | 6.8% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-100k-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k1-100k-r2-k9 | K9 | v0 | local-100k | 100,000명 | 1,309 | 6.8% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-100k-r2-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-100k-r3 | K1 | v0 | local-100k | 100,000명 | 854 | 8.8% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-100k-r3/ |
+| 2026-11-03 | 2026-11-03-v0-k1-100k-r3-k9 | K9 | v0 | local-100k | 100,000명 | 854 | 8.8% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-100k-r3-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-10k-r1 | K1 | v0 | local-10k | 10,000명 | 1,048 | 4.2% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-10k-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k1-10k-r1-k9 | K9 | v0 | local-10k | 10,000명 | 1,048 | 4.2% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-10k-r1-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-10k-r2 | K1 | v0 | local-10k | 10,000명 | 783 | 3.5% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-10k-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k1-10k-r2-k9 | K9 | v0 | local-10k | 10,000명 | 783 | 3.5% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-10k-r2-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-10k-r3 | K1 | v0 | local-10k | 10,000명 | 1,074 | 2.0% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-10k-r3/ |
+| 2026-11-03 | 2026-11-03-v0-k1-10k-r3-k9 | K9 | v0 | local-10k | 10,000명 | 1,074 | 2.0% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-10k-r3-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-1k-r1 | K1 | v0 | local-1k | 1,000명 | 2.66 | 0.0% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-1k-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k1-1k-r1-k9 | K9 | v0 | local-1k | 1,000명 | 2.66 | 0.0% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-1k-r1-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-1k-r2 | K1 | v0 | local-1k | 1,000명 | 2.60 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-1k-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k1-1k-r2-k9 | K9 | v0 | local-1k | 1,000명 | 2.60 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-1k-r2-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-1k-r3 | K1 | v0 | local-1k | 1,000명 | 2.92 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-1k-r3/ |
+| 2026-11-03 | 2026-11-03-v0-k1-1k-r3-k9 | K9 | v0 | local-1k | 1,000명 | 2.92 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-1k-r3-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-1k-r4 | K1 | v0 | local-1k | 1,000명 | 2.80 | 0.0% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-1k-r4/ |
+| 2026-11-03 | 2026-11-03-v0-k1-1k-r4-k9 | K9 | v0 | local-1k | 1,000명 | 2.80 | 0.0% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-1k-r4-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-2k-r1 | K1 | v0 | local-10k | 2,000명 | 345 | 3.8% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-2k-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k1-2k-r1-k9 | K9 | v0 | local-10k | 2,000명 | 345 | 3.8% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-2k-r1-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-4k-r1 | K1 | v0 | local-10k | 4,000명 | 371 | 4.4% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-4k-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k1-4k-r1-k9 | K9 | v0 | local-10k | 4,000명 | 371 | 4.4% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-4k-r1-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k1-6k-r1 | K1 | v0 | local-10k | 6,000명 | 451 | 4.2% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-6k-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k1-6k-r1-k9 | K9 | v0 | local-10k | 6,000명 | 451 | 4.2% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k1-6k-r1-k9/ |
+| 2026-11-03 | 2026-11-03-v0-k10-gate-r1 | K10 | v0 | local-1k | 10명, 10 RPS | 9.49 | 31.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k10-gate-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k10-gate-r2 | K10 | v0 | local-1k | 10명, 10 RPS | 11 | 31.9% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k10-gate-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k10-gate-r3 | K10 | v0 | local-1k | 10명, 10 RPS | 12 | 31.2% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k10-gate-r3/ |
+| 2026-11-03 | 2026-11-03-v0-k2-hot-r1 | K2 | v0 | local-1k | 1,000명, 2,000 RPS | 420 | 76.2% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k2-hot-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k2-hot-r2 | K2 | v0 | local-1k | 1,000명, 2,000 RPS | 574 | 46.1% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k2-hot-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k2-hot-r3 | K2 | v0 | local-1k | 1,000명, 2,000 RPS | 445 | 62.8% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k2-hot-r3/ |
+| 2026-11-03 | 2026-11-03-v0-k2-spread-r1 | K2 | v0 | local-1k | 1,000명, 2,000 RPS | 428 | 42.9% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k2-spread-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k2-spread-r2 | K2 | v0 | local-1k | 1,000명, 2,000 RPS | 416 | 53.4% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k2-spread-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k2-spread-r3 | K2 | v0 | local-1k | 1,000명, 2,000 RPS | 350 | 88.4% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k2-spread-r3/ |
+| 2026-11-03 | 2026-11-03-v0-k3-crossed-r1 | K3 | v0 | local-1k | 1,000명, 500 RPS | 9.88 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k3-crossed-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k3-crossed-r2 | K3 | v0 | local-1k | 1,000명, 500 RPS | 47 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k3-crossed-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k3-crossed-r3 | K3 | v0 | local-1k | 1,000명, 500 RPS | 11 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k3-crossed-r3/ |
+| 2026-11-03 | 2026-11-03-v0-k4-c252-r1 | K4 | v0 | local-1k | 1,000명, 63 RPS | 28 | 0.1% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k4-c252-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k4-c252-r2 | K4 | v0 | local-1k | 1,000명, 63 RPS | 63 | 11.5% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k4-c252-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k4-c252-r3 | K4 | v0 | local-1k | 1,000명, 63 RPS | 0.00 | 100.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k4-c252-r3/ |
+| 2026-11-03 | 2026-11-03-v0-k4-c500-r1 | K4 | v0 | local-1k | 1,000명, 125 RPS | 0.00 | 100.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k4-c500-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k4-c500-r2 | K4 | v0 | local-1k | 1,000명, 125 RPS | 0.00 | 100.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k4-c500-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k4-c500-r3 | K4 | v0 | local-1k | 1,000명, 125 RPS | 13 | 100.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k4-c500-r3/ |
+| 2026-11-03 | 2026-11-03-v0-k4-c52-r1 | K4 | v0 | local-1k | 1,000명, 13 RPS | 36 | 0.0% | 무효(변경분: 맺은 연결 2996/5000; 변경분: 맺지 ) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k4-c52-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k4-c52-r2 | K4 | v0 | local-1k | 1,000명, 13 RPS | 11 | 0.0% | 무효(변경분: 맺은 연결 1954/5000; 변경분: 맺지 ) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k4-c52-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k4-c52-r3 | K4 | v0 | local-1k | 1,000명, 13 RPS | 11 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k4-c52-r3/ |
+| 2026-11-03 | 2026-11-03-v0-k5-lab | K5 | v0 | local-lab | - | - | - | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k5-lab/ |
+| 2026-11-03 | 2026-11-03-v0-k7-fault-r1 | K7 | v0 | local-100k | 11,002명, 100 RPS | 1,175 | 1.5% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k7-fault-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k7-fault-r2 | K7 | v0 | local-100k | 11,002명, 100 RPS | 1,130 | 1.5% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k7-fault-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k7-fault-r3 | K7 | v0 | local-100k | 11,002명, 100 RPS | 1,130 | 1.4% | baseline | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k7-fault-r3/ |
+| 2026-11-03 | 2026-11-03-v0-k7-peak-r1 | K7 | v0 | local-100k | 18,002명, 300 RPS | 1,252 | 38.1% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k7-peak-r1/ |
+| 2026-11-03 | 2026-11-03-v0-k7-peak-r2 | K7 | v0 | local-100k | 18,002명, 300 RPS | 1,227 | 38.3% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k7-peak-r2/ |
+| 2026-11-03 | 2026-11-03-v0-k7-peak-r3 | K7 | v0 | local-100k | 18,002명, 300 RPS | 1,198 | 40.8% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k7-peak-r3/ |
 <!-- ledger:end -->
 
 표준 서식 예시 (참고용 Mock 데이터):
@@ -372,7 +451,7 @@ K8(Game Day) 실행 행은 p99 칸에 장애별 탐지 시간($T_1 - T_0$)의 �
 
 - **나눠 두기(추천 적용 2026-10-28, 기술 검토 낮음-056)**: Git에는 manifest·k6 요약·지표 요약·불변식 결과·`SHA256SUMS`처럼 작은 파일만 버전 관리한다(§2.1 목록). 큰 원본(지표 CSV, 분산 트레이스(요청 하나가 여러 서비스를 거친 길과 시간을 남긴 기록), 대시보드 그림, 콘솔 로그)은 gzip으로 묶어 S3(AWS의 파일 저장소) 원본 버킷에 둔다. 버킷은 버전 관리를 켜서 같은 이름으로 덮어써도 옛 판이 남는다. 예전처럼 실행 폴더를 통째로 Git에 넣으면 실행 하나가 50MB까지 커져 측정이 쌓일수록 저장소가 수 GB가 된다.
 - 원본 버킷과 따로, 클라우드 S3 아카이브 버킷에 장기 백업 사본을 동기화한다(docs/observability.md §9). 백업 아카이브에는 `SHA256SUMS` 해시 지문 목록을 반드시 함께 넣는다.
-- **사후 조작의 증거(추천 적용 2026-10-28, 기술 검토 낮음-056)**: `SHA256SUMS`는 같은 폴더 안에서 다시 만들 수 있어 실수로 바뀐 파일만 잡는다. 그래서 `index.py`가 하루 한 번 그날 끝난 실행들의 `SHA256SUMS` 해시를 `timestamps/<날짜>.txt`로 모으고, 그 파일을 OpenTimestamps(공개 블록체인에 해시를 묶어 그 시각에 있었음을 누구나 확인하게 하는 무료 도구, 감사 앵커와 같은 도구, ADR-0075)로 고정한다. 증명 파일 `.ots`는 확정되면(보통 몇 시간 뒤) 갱신해 Git에 넣는다. 그러면 그날 뒤에 숫자나 원본을 바꾼 것이 드러난다. 남는 한계: 고정하기 전(측정이 끝난 날 안)에 바꾼 것과, 측정 자체를 꾸며 낸 것은 이 증거로 드러나지 않는다. 그 몫은 `stdout.log`·`infra.txt`와 다시 돌릴 수 있는 시나리오(§3)가 맡는다.
+- **사후 조작의 증거(추천 적용 2026-10-28, 기술 검토 낮음-056)**: `SHA256SUMS`는 같은 폴더 안에서 다시 만들 수 있어 실수로 바뀐 파일만 잡는다. 그래서 `index.py`가 하루 한 번 그날 끝난 실행들의 `SHA256SUMS` 해시를 `timestamps/<날짜>.txt`로 모으고, 그 파일을 OpenTimestamps(공개 블록체인에 해시를 묶어 그 시각에 있었음을 누구나 확인하게 하는 무료 도구, 감사 앵커와 같은 도구, ADR-0075)로 고정한다. 증명 파일 `.ots`는 확정되면(보통 몇 시간 뒤) 갱신해 Git에 넣는다. `ots stamp`는 공개 달력 서버로 해시를 보내는 외부 전송이라, 루프는 `index.py --stamp --no-ots`로 그날의 묶음 파일만 만들고 고정(`index.py --stamp`)과 갱신(`--upgrade`)은 소유자가 한다(추천 적용 2026-11-03, wbs 1.4.1 ②). 고정하기 전까지는 아래 한계 그대로다. 그러면 그날 뒤에 숫자나 원본을 바꾼 것이 드러난다. 남는 한계: 고정하기 전(측정이 끝난 날 안)에 바꾼 것과, 측정 자체를 꾸며 낸 것은 이 증거로 드러나지 않는다. 그 몫은 `stdout.log`·`infra.txt`와 다시 돌릴 수 있는 시나리오(§3)가 맡는다.
 - 실험 중에 실패했거나 규격을 채우지 못한 무효 측정 결과도 마음대로 버리지 않는다. `valid: false` 플래그와 자세한 무효 사유를 기록해 남기는 것 자체가 투명한 엔지니어링의 핵심 자산이다.
 
 ## 10. K6 봇 탐지 평가 절차(ADR-0039·0048·0112·0174)

@@ -1,0 +1,9 @@
+측정 환경(2026-11-03T06:33:56.294Z)
+PC: Intel(R) Core(TM) i9-14900HX 논리 프로세서 32개, 메모리 32 GiB
+Docker 엔진: Docker 29.8.1, CPU 32, 메모리 16611233792 B, 커널 6.18.33.2-microsoft-standard-WSL2, Docker Desktop
+WSL 설정(.wslconfig): (없음)
+클러스터: kind peaket(노드 하나), kubeconfig D:\ticketpass\.cache\peaket-tools\kubeconfig-peaket
+발생기: k6 grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7, 파드 2대(CPU 2·메모리 1024Mi씩, 요청 = 한도), GOMAXPROCS 2, k6 실행 구간으로 나눔(docs/verification.md §3.10)
+시계: 발생기와 대상이 같은 PC 커널 시계를 쓴다(시계 차이 0, docs/perf-ledger.md §3 3번)
+CPU 배치: WSL 안에서 어느 코어에 놓일지 고르지 않는다(docs/verification.md §3.5 6번 '코어 혼합'은 표시만)
+인자: {"command":"v0","scenario":"queue","users":1000,"warmS":30,"mainS":120,"cpus":4,"memoryMi":4096,"record":true,"invariants":false,"namespace":"v0","settle":true,"hpaTimeline":true,"runId":"2026-11-03-v0-k1-1k-r4","profile":"local-1k","promUrl":"http://127.0.0.1:9090","entryRate":1000,"admitPerSecond":28}

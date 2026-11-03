@@ -1,0 +1,101 @@
+{
+  "run_id": "2026-11-03-v0-k4-c52-r3",
+  "kpi": "K4",
+  "version": "v0",
+  "profile": "local-1k",
+  "scale": {
+    "users": 1000,
+    "arrival_rps": 13.0,
+    "duration_s": 60,
+    "warmup_s": 30
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v0-seat-hold.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "8282a7616ab2a3df3107357919a8a45a6a4e3467",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-03-v0-k4-c52-r3/",
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 1대(CPU 4·메모리 4096Mi씩, kind 안)",
+    "dropped_iterations": 14
+  },
+  "started_at": "2026-11-03T05:04:54Z",
+  "ended_at": "2026-11-03T05:06:24Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 5.7497665,
+    "p95_ms": 8.894314649999997,
+    "p99_ms": 10.512926189999998,
+    "error_rate": 0,
+    "requests": 1562,
+    "rps": 26.033333333333335,
+    "dropped_iterations": 14
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "extra": [
+      "deltas.json"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "발생기가 반복을 시작하지 못함(dropped_iterations 14); 변경분: 맺은 연결 2093/5000; 변경분: 맺지 못한 연결 2907",
+  "checks": [
+    {
+      "name": "hold_p99_50ms",
+      "allowed": 0.01,
+      "trials": 781,
+      "violations": 0,
+      "cp_upper": 0.003828,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "hold p99 ≤ 50ms"
+    },
+    {
+      "name": "hold_p999_150ms",
+      "allowed": 0.001,
+      "trials": 781,
+      "violations": 0,
+      "cp_upper": 0.003828,
+      "min_trials": 2995,
+      "result": "observed",
+      "target": "hold p999 ≤ 150ms"
+    },
+    {
+      "name": "hold_server_p99_50ms",
+      "allowed": 0.01,
+      "trials": 781,
+      "violations": 0,
+      "cp_upper": 0.003828,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "서버 hold p99 ≤ 50ms"
+    }
+  ],
+  "latency_crosscheck": {
+    "k6_metric": "http_req_duration{phase:main,route:hold}",
+    "k6_p99_ms": 11.534049800000021,
+    "check": "hold_server_p99_50ms",
+    "server_p99_ms": 10.237,
+    "server_within_ratio": 1.0,
+    "diff_ms": 1.297,
+    "target_ms": 50.0,
+    "suspect": false
+  },
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 1대 CPU 평균 최고 0.6%·메모리 최대 7.3%, VU 최대 합 414, 시나리오 오류 0건, 계획 최고 도착률 200/s(docs/verification.md §3.9·§3.10); hold: 781건, p99 11.5ms, 실패 0건; release: 781건, p99 6.7ms, 실패 0건; 변경분: 연결 2093(실패 2907), 초당 0건·0 B, 종단 p50 -ms·p99 >30000ms(300ms 넘음 0건), 서버가 닫음 0, 받는 파드 CPU 최고 0.1%; hold_p999_150ms: 관측값(시행 781번, 최소 시행 수 미달)",
+  "collected_at": "2026-11-03T05:06:28Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

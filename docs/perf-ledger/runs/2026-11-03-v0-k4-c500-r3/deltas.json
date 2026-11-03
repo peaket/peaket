@@ -1,0 +1,19 @@
+{
+  "seconds": 59,
+  "msgsPerS": 0,
+  "bytesPerS": 0,
+  "latency": {
+    "count": 0,
+    "p50Ms": null,
+    "p99Ms": null,
+    "over300": 0
+  },
+  "opened": 0,
+  "closed": 0,
+  "errors": 2900,
+  "connected": 0,
+  "failed": 5000,
+  "clientCpu": {
+    "meanPctMax": 0.8
+  }
+}

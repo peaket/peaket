@@ -19,7 +19,7 @@ TIMESTAMPS = os.path.join('docs', 'perf-ledger', 'timestamps')  # 하루 해시 
 LEDGER_DOC = os.path.join('docs', 'perf-ledger.md')
 # Git이 아니라 S3 원본 버킷에 두는 큰 원본(docs/perf-ledger.md §2.1·§9, 기술 검토 낮음-056)
 RAW_DIRS = ('metrics/', 'traces/', 'grafana/')
-RAW_FILES = ('stdout.log',)
+RAW_FILES = ('stdout.log', 'invariants-detail.ndjson')  # 불변식 위반 행도 큰 원본이다(§2.1)
 
 
 def is_raw(rel):
@@ -246,6 +246,11 @@ def cp_upper(k, n, alpha=0.05):
 
 class CheckInputError(ValueError):
     """`--checks` 파일이 형식에 맞지 않는다. 측정 폴더를 만들기 전에 거부한다."""
+
+
+class HistogramUncountable(CheckInputError):
+    """측정 창 안에서 파드가 끝나거나 다시 시작해(사라진 시계열·카운터 되돌아감) 서버 히스토그램을 셀 수 없다.
+    collect.py는 종료 코드 3으로 끝내고, 실행 도구는 그때만 그 점검을 빼고 다시 남긴다(BSL-090 2차 리뷰)."""
 
 
 CHECK_NAME = re.compile(r'^[A-Za-z0-9_.-]{1,64}$')

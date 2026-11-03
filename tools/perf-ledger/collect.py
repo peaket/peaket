@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -109,8 +110,23 @@ def write_sums(run_dir):
     return len(entries)
 
 
+# 보낼 폴더(--raw-outbox). 주면 S3 대신 이 폴더의 버킷과 같은 경로에 둔다(BSL-090, docs/perf-ledger.md §2.1: S3 올리기는 소유자 몫)
+RAW_OUTBOX = None
+
+
 def upload_object(local_path, uri):
-    """파일 하나를 S3에 올린다(AWS CLI `aws s3 cp`). 성공이면 None, 실패면 이유."""
+    """파일 하나를 S3에 올린다(AWS CLI `aws s3 cp`). 보낼 폴더가 있으면 그 폴더의 같은 경로로 옮긴다. 성공이면 None, 실패면 이유."""
+    if RAW_OUTBOX:
+        m = re.match(r'^s3://[^/]+/(.+)$', uri)
+        if not m or '..' in m.group(1).split('/'):
+            return f'보낼 폴더로 옮길 수 없는 주소: {uri}'
+        dest = os.path.join(RAW_OUTBOX, *m.group(1).split('/'))
+        try:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copyfile(local_path, dest)
+        except OSError as e:
+            return f'{type(e).__name__}: {e}'
+        return None
     try:
         out = subprocess.run(['aws', 's3', 'cp', local_path, uri, '--only-show-errors'], capture_output=True, text=True, timeout=600)
     except (OSError, subprocess.SubprocessError) as e:
@@ -240,10 +256,10 @@ def evaluate_checks(a):
                 w = end - start
                 lost = L.scalar_of(prom_instant(a.prom_url, L.hist_lost_query(h, w), end))
                 if lost:
-                    raise L.CheckInputError(f'{c["name"]}: 창 안에서 사라진 시계열 {int(lost)}개(파드 종료·재시작). 셀 수 없다')
+                    raise L.HistogramUncountable(f'{c["name"]}: 창 안에서 사라진 시계열 {int(lost)}개(파드 종료·재시작). 셀 수 없다')
                 resets = L.scalar_of(prom_instant(a.prom_url, L.hist_resets_query(h, w), end))
                 if resets:
-                    raise L.CheckInputError(f'{c["name"]}: 창 안에서 카운터가 {int(resets)}번 되돌아갔다(재시작). 셀 수 없다')
+                    raise L.HistogramUncountable(f'{c["name"]}: 창 안에서 카운터가 {int(resets)}번 되돌아갔다(재시작). 셀 수 없다')
                 buckets = L.hist_window(L.hist_buckets(prom_instant(a.prom_url, L.hist_sum_query(h), start), need_inf=False),
                                         L.hist_buckets(prom_instant(a.prom_url, L.hist_sum_query(h), end)))
                 n, k = L.hist_counts(buckets, h['le'])
@@ -268,6 +284,10 @@ def evaluate_checks(a):
                 # 서버 SLI가 목표 안(서버 p99 ≤ 목표이고 그 점검이 pass)인데 k6 값이 목표 밖이면 측정 지점 의심(ADR-0077)
                 'suspect': server_ms <= target and ref['result'] == 'pass' and k6_ms > target,
             }
+    except L.HistogramUncountable as e:
+        # 종료 코드 3: 파드 재시작으로 서버 히스토그램을 셀 수 없다(실행 도구가 그 점검만 빼고 다시 남긴다, BSL-090)
+        print(f'실행 거부(점검 파일, docs/perf-ledger.md §2.2): {e}', file=sys.stderr)
+        raise SystemExit(3)
     except (L.CheckInputError, OSError, ValueError) as e:
         raise SystemExit(f'실행 거부(점검 파일, docs/perf-ledger.md §2.2): {e}')
     derived = L.verdict_from_checks(results)
@@ -441,8 +461,13 @@ def collect(a, root):
 def finish_raw(run_dir, raw_uri, run_id):
     done, failures = upload_raw(run_dir, raw_uri)
     if failures:
+        again = f'collect.py --upload-raw {run_id}' + (f' --raw-outbox {RAW_OUTBOX}' if RAW_OUTBOX else '')
         raise SystemExit('원본 올리기 실패(폴더의 원본은 지우지 않았다). 고친 뒤 '
-                         f'`collect.py --upload-raw {run_id}`로 다시 올린다:\n  ' + '\n  '.join(failures))
+                         f'`{again}`로 다시 올린다:\n  ' + '\n  '.join(failures))
+    if RAW_OUTBOX:
+        print(f'원본 {done}개를 보낼 폴더 {RAW_OUTBOX}에 gzip으로 옮기고 폴더에서 지웠다(해시는 SHA256SUMS). '
+              f'S3({raw_uri})로 올리는 일은 소유자 몫이다: aws s3 sync <보낼 폴더> <버킷>')
+        return
     print(f'원본 {done}개를 {raw_uri}에 gzip으로 올리고 폴더에서 지웠다(해시는 SHA256SUMS)')
 
 
@@ -828,6 +853,7 @@ def main():
     p.add_argument('--bot-prices', help='K6: 1장당 획득 비용 단가 JSON(docs/perf-ledger.md §10.5)')
     p.add_argument('--raw-bucket', help='큰 원본을 둘 S3 원본 버킷(예: s3://peaket-perf-raw). raw_uri는 <버킷>/runs/<run-id>/ (docs/perf-ledger.md §2.1·§9)')
     p.add_argument('--upload-raw', metavar='RUN_ID', help='올리기에 실패한 실행의 큰 원본을 manifest의 raw_uri로 다시 올린다')
+    p.add_argument('--raw-outbox', metavar='DIR', help='S3 대신 큰 원본을 버킷과 같은 경로로 둘 보낼 폴더(--raw-bucket과 함께, docs/perf-ledger.md §2.1)')
     p.add_argument('--redis-tls', choices=['true', 'false'], help='대기열·좌석 Redis 연결의 TLS 켬·끔(docs/perf-ledger.md §2.2)')
     p.add_argument('--paired-run', help='같은 조건으로 TLS를 반대로 잰 짝 실행의 run_id')
     p.add_argument('--commit'); p.add_argument('--generator'); p.add_argument('--region', default='local'); p.add_argument('--cost-krw', type=float); p.add_argument('--exchange-rate', type=float)
@@ -837,6 +863,13 @@ def main():
     a = p.parse_args()
     if a.selftest:
         selftest(); return
+    global RAW_OUTBOX
+    if a.raw_outbox is not None:
+        if not a.raw_outbox:
+            p.error('--raw-outbox는 비지 않은 폴더다')
+        if not (a.raw_bucket or a.upload_raw):
+            p.error('--raw-outbox는 --raw-bucket(또는 --upload-raw)과 함께 준다')
+        RAW_OUTBOX = os.path.abspath(a.raw_outbox)
     if a.upload_raw:
         upload_raw_again(a.root or L.find_root(), a.upload_raw); return
     if a.raw_bucket and not a.raw_bucket.startswith('s3://'):

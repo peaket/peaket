@@ -5,10 +5,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PY = process.env.PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3');
@@ -502,4 +504,698 @@ test('[ASVS v5.0.0-1.2.5] D-T40: 준비 명령은 셸 문자열이 아니라 인
   assert.equal(r3.code, 2, r3.out);
   const r4 = py(NIGHTLY, ['run', '--config', writeJson(root, 'c10.json', { scenario: 's.js', rounds: 1, prepare: ['no-such-command-peaket'] }), '--out', join(root, 'o.json')]);
   assert.equal(r4.code, 2, r4.out);
+});
+
+// --- BSL-090: 야간 비교 설정의 k6 명령, A/A 실행(aa), 큰 원본을 보낼 폴더, ots 없이 하루 해시 묶음 쓰기
+//     (D-T40, ADR-0133 낮음-016, 기술 검토 낮음-056, docs/devops.md §3.3, docs/perf-ledger.md §2.1·§9) ---
+
+/** 기본 docker 명령으로 잘못 빠져도 이미지를 받지 않고 곧바로 실패하게 docker 데몬 주소를 닫힌 로컬 포트로 둔다 */
+const NO_DOCKER = { DOCKER_HOST: 'tcp://127.0.0.1:9' };
+/** 도구 한 번 부름의 상한. spawnSync는 이벤트 루프를 막아 시험의 시간 제한이 듣지 않으므로, 잘못 만든 도구가 멈춰도 시험이 끝나게 한다 */
+const CALL_LIMIT = { timeout: 120000 };
+const SCENARIO = 'loadtest/nightly/hot.js';
+
+/**
+ * 가짜 k6(인자 기록용). 부를 때마다 받은 인자 목록을 FAKE_K6_ARGS 파일에 JSON 한 줄로 남기고 --summary-export 경로에 p99 요약을 쓴다(폴더는 만들지 않는다).
+ * p99는 FAKE_K6_SEQ(JSON 배열, 몇 번째 부름인지(0부터)로 고름)가 있으면 그 값, 없으면 FAKE_K6_P99(주소 → p99)다.
+ * FAKE_K6_SKIP_AT(JSON 배열)에 든 차례에는 요약을 쓰지 않고 0으로 끝나고, FAKE_K6_FAIL_AT 차례부터는 요약 없이 종료 107로 끝난다.
+ * FAKE_K6_SLEEP_MS가 있으면 요약을 쓰기 전에 그만큼 기다린다(기한 시험).
+ */
+function argsK6(dir) {
+  const p = join(dir, 'fake-k6-args.mjs');
+  writeFileSync(p, `
+import { writeFileSync, appendFileSync, readFileSync, existsSync } from 'node:fs';
+const a = process.argv.slice(2);
+const log = process.env.FAKE_K6_ARGS;
+const n = existsSync(log) ? readFileSync(log, 'utf8').split('\\n').filter(Boolean).length : 0;
+appendFileSync(log, JSON.stringify(a) + '\\n');
+if (process.env.FAKE_K6_FAIL_AT !== undefined && n >= Number(process.env.FAKE_K6_FAIL_AT)) process.exit(107);
+if (process.env.FAKE_K6_SLEEP_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_K6_SLEEP_MS)));
+const out = a[a.indexOf('--summary-export') + 1];
+const url = a.find((x) => x.startsWith('BASE_URL=')).slice(9);
+const p99 = process.env.FAKE_K6_SEQ ? JSON.parse(process.env.FAKE_K6_SEQ)[n] : JSON.parse(process.env.FAKE_K6_P99)[url];
+if (!JSON.parse(process.env.FAKE_K6_SKIP_AT ?? '[]').includes(n)) writeFileSync(out, JSON.stringify({ metrics: { http_req_duration: { 'p(99)': p99 } } }));
+`);
+  return p;
+}
+
+/** JSON 한 줄씩 쌓은 기록 파일(없으면 빈 목록) */
+const jsonLines = (path) => (existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const k6Calls = jsonLines;
+const summaryOf = (args) => args[args.indexOf('--summary-export') + 1];
+const aaName = (i) => `aa-${String(i).padStart(2, '0')}.json`;
+const aaFiles = (dir) => readdirSync(dir).filter((f) => /^aa-\d+\.json$/.test(f)).sort();
+const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const RESULT_KEYS = ['base_p99_ms', 'ended_at', 'new_p99_ms', 'ratio', 'rounds', 'runs', 'scenario', 'started_at'];
+/** 결과 파일의 모양: 맨 위 키와 runs 항목의 키 */
+const shapeOf = (x) => ({ top: Object.keys(x).sort(), run: [...new Set(x.runs.flatMap((y) => Object.keys(y)))].sort() });
+const todayUtc = () => new Date().toISOString().slice(0, 10);
+/** 글 안에 수 n이 따로(다른 숫자에 붙지 않고) 나오는지 */
+const mentions = (text, n) => new RegExp(`(^|\\D)${n}(\\D|$)`).test(text);
+
+/** nightly.py가 k6 명령 뒤에 붙이는 인자(docs/devops.md §3.3). 요약 경로만 부를 때마다 다르다 */
+const k6Tail = (summary, url, scenario) => ['run', '--quiet', '--summary-trend-stats', 'med,p(95),p(99),max', '--summary-export', summary, '-e', `BASE_URL=${url}`, scenario];
+const K6_TAIL = k6Tail('', '', '').length;
+
+/** k6 부름 n번이 기준·새를 번갈아 가고, 저마다 인자가 정확히 [k6 명령의 인자…, k6 인자…]인지 본다(다른 명령의 인자를 앞뒤에 섞지 않는다) */
+function assertK6Calls(calls, n, head, scenario = SCENARIO) {
+  assert.equal(calls.length, n, JSON.stringify(calls));
+  calls.forEach((a, i) => assert.deepEqual(a, [...head, ...k6Tail(summaryOf(a), i % 2 ? 'http://new' : 'http://base', scenario)], `${i}번째 부름: ${JSON.stringify(a)}`));
+}
+
+/** 같은 폴더·파일인지(Windows는 대소문자를 가리지 않는다) */
+function samePath(a, b) {
+  if (!existsSync(a) || !existsSync(b)) return false;
+  const real = (p) => (process.platform === 'win32' ? realpathSync.native(p).toLowerCase() : realpathSync.native(p));
+  return real(a) === real(b);
+}
+
+// 바깥 명령 바꿔 끼우기(fakeTools): 도구 스크립트를 그대로 돌리되, subprocess.Popen(run·call·check_output이 모두 거친다)과 os.system으로 부르는
+// 명령의 이름(경로와 .exe를 뗀 것)이 FAKE_TOOLS에 들면 진짜 명령 대신 기록기를 부른다. PATH 앞에 가짜 실행 파일을 두는 길은 쓰지 않는다
+// (파이썬은 셸 없이 부르므로 Windows에서는 .exe라야 찾는데, node.exe를 그 이름으로 걸 권한이 없어 복사해야 한다)
+const FAKE_TOOLS_WRAPPER = String.raw`"""시험용(ledger.test.mjs fakeTools): 도구를 그대로 돌리되 FAKE_TOOLS에 든 바깥 명령은 기록기로 바꿔 부른다."""
+import json
+import os
+import runpy
+import subprocess
+import sys
+
+FAKES = {x for x in os.environ.get('FAKE_TOOLS', '').split(',') if x}
+CONF = json.dumps({'log': os.environ['FAKE_TOOL_LOG'], 'p99': os.environ.get('FAKE_K6_P99'),
+                   'exit': {k[len('FAKE_EXIT_'):].lower(): int(v) for k, v in os.environ.items() if k.upper().startswith('FAKE_EXIT_')}})
+RECORDER = os.environ['FAKE_TOOL_RECORDER']
+REAL_POPEN = subprocess.Popen
+REAL_SYSTEM = os.system
+
+
+def faked(argv):
+    name = os.path.basename(argv[0]).lower() if argv else ''
+    name = name[:-4] if name.endswith('.exe') else name
+    return name if name in FAKES else None
+
+
+class Popen(REAL_POPEN):
+    def __init__(self, *args, **kwargs):
+        cmd = args[0] if args else kwargs.get('args')
+        argv = [os.fsdecode(x) for x in cmd] if isinstance(cmd, (list, tuple)) else os.fsdecode(cmd).split()
+        name = faked(argv)
+        if name:
+            fake = [sys.executable, '-I', RECORDER, CONF, name, *argv[1:]]
+            kwargs.pop('executable', None)
+            kwargs['shell'] = False
+            if args:
+                args = (fake, *args[1:])
+            else:
+                kwargs['args'] = fake
+        super().__init__(*args, **kwargs)
+
+
+def system(command):
+    argv = os.fsdecode(command).split()
+    return subprocess.call(argv) if faked(argv) else REAL_SYSTEM(command)
+
+
+subprocess.Popen = Popen
+os.system = system
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name='__main__')
+`;
+
+const FAKE_TOOLS_RECORDER = String.raw`"""시험용 바깥 명령 기록기(ledger.test.mjs fakeTools). [이름, 인자…]를 기록 파일에 JSON 한 줄로 남기고 정한 코드(기본 97)로 끝난다."""
+import io
+import json
+import sys
+
+conf, name, args = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3:]
+with io.open(conf['log'], 'a', encoding='utf-8', newline='\n') as f:
+    f.write(json.dumps([name, *args], ensure_ascii=False) + '\n')
+if name == 'docker' and '--summary-export' in args and conf['p99']:
+    # 컨테이너 안 k6처럼 작업 폴더(/w) 기준 경로에 요약을 쓴다. 폴더는 만들지 않는다
+    out = args[args.index('--summary-export') + 1]
+    url = next(x for x in args if x.startswith('BASE_URL='))[len('BASE_URL='):]
+    with io.open(out, 'w', encoding='utf-8') as f:
+        json.dump({'metrics': {'http_req_duration': {'p(99)': json.loads(conf['p99'])[url]}}}, f)
+sys.exit(conf['exit'].get(name, 97))
+`;
+
+/**
+ * 바깥 명령(aws·ots·docker)을 부르는지 보는 실행. run(도구, 인자, { env, cwd, names, exits })는 names에 든 명령을 기록기로 바꿔 끼워 도구를 돌리고,
+ * calls(이름)는 그 명령이 받은 인자 목록들(부른 차례대로)이다. 기록기는 exits[이름](기본 97, 실패)으로 끝나고, docker 기록기는 컨테이너 안 k6처럼
+ * --summary-export 경로(작업 폴더 기준)에 FAKE_K6_P99의 p99 요약을 쓴다. 개발 PC의 진짜 aws·ots·docker는 불리지 않는다
+ * (offlineEnv·NO_DOCKER는 그래도 두는 두 번째 울타리다). 대조 시험(바꿔 끼우지 않으면 부르는 경우)으로 기록기가 부름을 잡는지 먼저 본다.
+ */
+function fakeTools(dir) {
+  const wrapper = join(dir, 'fake-tools-wrap.py');
+  const recorder = join(dir, 'fake-tools-record.py');
+  const log = join(dir, 'fake-tools.log');
+  writeFileSync(wrapper, FAKE_TOOLS_WRAPPER);
+  writeFileSync(recorder, FAKE_TOOLS_RECORDER);
+  return {
+    run: (script, args, { env, cwd, names, exits = {} }) => py(wrapper, [script, ...args], {
+      env: { ...env, FAKE_TOOLS: names.join(','), FAKE_TOOL_RECORDER: recorder, FAKE_TOOL_LOG: log,
+        ...Object.fromEntries(Object.entries(exits).map(([k, v]) => [`FAKE_EXIT_${k}`, String(v)])) },
+      cwd, ...CALL_LIMIT,
+    }),
+    calls: (name) => jsonLines(log).filter(([n]) => n === name).map(([, ...a]) => a),
+  };
+}
+
+/** 준비 명령 흉내: 부를 때마다 prep.log에 한 줄을 남기고 두 주소를 JSON 한 줄로 낸다. FAKE_PREP_EXIT가 있으면 그 종료 코드로 실패한다 */
+function countingPrep(dir) {
+  const log = join(dir, 'prep.log');
+  const p = join(dir, 'prep-count.mjs');
+  writeFileSync(p, `
+import { appendFileSync } from 'node:fs';
+appendFileSync(${JSON.stringify(log)}, 'called\\n');
+if (process.env.FAKE_PREP_EXIT) { console.error('prepare failed on purpose'); process.exit(Number(process.env.FAKE_PREP_EXIT)); }
+process.stdout.write(JSON.stringify({ base_url: 'http://base', new_url: 'http://new' }) + '\\n');
+`);
+  return { cmd: [process.execPath, p], calls: () => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean).length : 0) };
+}
+
+/**
+ * aa 시험 준비. k6InConfig면 k6를 설정의 k6 키로만 주고(명령줄 --k6 없음), 아니면 명령줄 --k6로 준다.
+ * 어느 쪽을 썼는지 보이게 명령 끝에 표시 인자(from-config·from-cli)를 하나 붙인다: 가짜 k6가 받는 첫 인자가 그것이다(prefix).
+ * freshOutDir면 워크플로(perf-nightly.yml의 aa 잡, 새로 받은 저장소)처럼 아직 없는 상대 경로 .cache/aa를 --out-dir로 준다
+ */
+function aaSetup({ rounds = 1, k6InConfig = false, freshOutDir = false } = {}) {
+  const root = newRoot();
+  const k6 = argsK6(root);
+  const prep = countingPrep(root);
+  const cfg = { scenario: SCENARIO, rounds, prepare: prep.cmd };
+  if (k6InConfig) cfg.k6 = [process.execPath, k6, 'from-config'];
+  const config = writeJson(root, 'config.json', cfg);
+  const outDir = freshOutDir ? join(root, '.cache', 'aa') : join(root, 'aa-out');
+  if (!freshOutDir) mkdirSync(outDir);
+  const outDirArg = freshOutDir ? '.cache/aa' : outDir;
+  const argsLog = join(root, 'k6-args.log');
+  const env = { ...process.env, ...NO_DOCKER, FAKE_K6_ARGS: argsLog };
+  const aa = (runs, more = {}, extra = []) => py(NIGHTLY, ['aa', '--config', config, '--runs', String(runs), '--out-dir', outDirArg, ...extra,
+    ...(k6InConfig ? [] : ['--k6', process.execPath, k6, 'from-cli'])], { env: { ...env, ...more }, cwd: root, ...CALL_LIMIT });
+  return { root, k6, config, outDir, env, aa, prepCalls: prep.calls, calls: (log = argsLog) => k6Calls(log), prefix: [k6InConfig ? 'from-config' : 'from-cli'] };
+}
+
+test('D-T40: 설정의 k6 명령(인자 목록)은 --k6 없이도 쓰이고, 그 뒤에 k6 인자(run --quiet --summary-trend-stats … --summary-export <경로> -e BASE_URL=<주소> <시나리오>)를 붙인다', () => {
+  const root = newRoot();
+  const k6 = argsK6(root);
+  const prep = countingPrep(root);
+  // 설정의 k6 명령에 인자가 더 있어도(예: 클러스터 안의 k6를 부르는 명령) 그대로 두고 그 뒤에 k6 인자를 붙인다
+  const config = writeJson(root, 'config.json', { scenario: SCENARIO, rounds: 1, prepare: prep.cmd, k6: [process.execPath, k6, 'prefix-arg'] });
+  const log = join(root, 'k6-args.log');
+  const out = join(root, 'o.json');
+  const env = { ...process.env, ...NO_DOCKER, FAKE_K6_ARGS: log, FAKE_K6_P99: JSON.stringify({ 'http://base': 100, 'http://new': 120 }) };
+  const r = py(NIGHTLY, ['run', '--config', config, '--out', out], { env, cwd: root, ...CALL_LIMIT });
+  assert.equal(r.code, 0, r.out);
+  const calls = k6Calls(log);
+  assertK6Calls(calls, 2, ['prefix-arg']);
+  calls.forEach((a) => assert.ok(summaryOf(a).length > 0, JSON.stringify(a)));
+  const res = JSON.parse(readFileSync(out, 'utf8'));
+  assert.deepEqual([res.base_p99_ms, res.new_p99_ms, res.ratio], [100, 120, 1.2]);
+  assert.equal(prep.calls(), 1);
+});
+
+test('D-T40: 명령줄 --k6가 설정의 k6 명령보다 앞서고, 두 명령을 섞지 않는다(run·aa)', () => {
+  const root = newRoot();
+  const good = argsK6(root);
+  const marker = join(root, 'config-k6-called');
+  const fromConfig = join(root, 'config-k6.mjs');
+  writeFileSync(fromConfig, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'x'); process.exit(107);`);
+  const prep = countingPrep(root);
+  const config = writeJson(root, 'config.json', { scenario: 's.js', rounds: 1, prepare: prep.cmd, k6: [process.execPath, fromConfig, 'from-config'] });
+  const outDir = join(root, 'aa-out');
+  mkdirSync(outDir);
+  const cli = ['--k6', process.execPath, good, 'from-cli'];
+  const env = { ...process.env, ...NO_DOCKER, FAKE_K6_P99: JSON.stringify({ 'http://base': 100, 'http://new': 100 }) };
+  for (const [what, args] of [['run', ['run', '--config', config, '--out', join(root, 'o.json'), ...cli]],
+    ['aa', ['aa', '--config', config, '--runs', '1', '--out-dir', outDir, ...cli]]]) {
+    const log = join(root, `k6-args-${what}.log`);
+    const r = py(NIGHTLY, args, { env: { ...env, FAKE_K6_ARGS: log }, cwd: root, ...CALL_LIMIT });
+    assert.equal(r.code, 0, `${what}: ${r.out}`);
+    assert.equal(existsSync(marker), false, `${what}: 명령줄 --k6가 있는데 설정의 k6를 불렀다`);
+    // 명령줄 명령의 인자 바로 뒤에 k6 인자가 온다(설정의 명령을 앞이나 뒤에 붙이지 않는다)
+    assertK6Calls(k6Calls(log), 2, ['from-cli'], 's.js');
+  }
+  assert.equal(prep.calls(), 2);
+});
+
+test('D-T40: 설정에도 명령줄에도 k6 명령이 없으면 기본 명령(다이제스트 고정 k6 이미지를 docker로, 작업 폴더를 /w로 붙임)을 쓰고, 요약 경로는 작업 폴더 안의 상대 경로다(run·aa)', () => {
+  const root = newRoot();
+  const tools = fakeTools(root);
+  const prep = countingPrep(root);
+  const config = writeJson(root, 'config.json', { scenario: SCENARIO, rounds: 1, prepare: prep.cmd });
+  const outDir = join(root, 'aa-out');
+  mkdirSync(outDir);
+  const opts = { env: { ...process.env, ...NO_DOCKER, FAKE_K6_P99: JSON.stringify({ 'http://base': 100, 'http://new': 125 }) }, cwd: root, names: ['docker'], exits: { docker: 0 } };
+  const run = tools.run(NIGHTLY, ['run', '--config', config, '--out', join(root, 'o.json')], opts);
+  assert.equal(run.code, 0, run.out);
+  const aa = tools.run(NIGHTLY, ['aa', '--config', config, '--runs', '1', '--out-dir', outDir], opts);
+  assert.equal(aa.code, 0, aa.out);
+  // k6를 돌린 docker 부름만 본다(그 밖의 docker 부름, 예: 판 확인은 막지 않는다)
+  const calls = tools.calls('docker').filter((a) => a.includes('--summary-export'));
+  assert.equal(calls.length, 4, JSON.stringify(tools.calls('docker')));
+  calls.forEach((a, i) => {
+    const what = `${i < 2 ? 'run' : 'aa'}: ${JSON.stringify(a)}`;
+    assert.deepEqual(a.slice(-K6_TAIL), k6Tail(summaryOf(a), i % 2 ? 'http://new' : 'http://base', SCENARIO), what);
+    const docker = a.slice(0, -K6_TAIL);
+    assert.equal(docker[0], 'run', what);
+    assert.ok(docker.includes('--rm'), what);
+    // 이미지는 태그와 다이제스트로 고정하고(docs/devops.md §4.4) 그 바로 뒤에 k6 인자가 온다
+    assert.match(docker.at(-1), /^grafana\/k6:[\w.-]+@sha256:[0-9a-f]{64}$/, what);
+    const mount = docker[docker.indexOf('-v') + 1] ?? '';
+    assert.ok(mount.endsWith(':/w') && samePath(mount.slice(0, -':/w'.length), root), `작업 폴더를 /w로 붙이지 않았다: ${what}`);
+    assert.equal(docker[docker.indexOf('-w') + 1], '/w', what);
+    // 공식 이미지(사용자 12345)가 러너의 폴더에 요약을 쓸 수 있게 같은 사용자로 돌린다(사용자 번호가 있는 OS만)
+    if (typeof process.getuid === 'function') assert.equal(docker[docker.indexOf('--user') + 1], `${process.getuid()}:${process.getgid()}`, what);
+    // 컨테이너 안 k6는 /w(= 작업 폴더)만 본다: 요약은 그 안의 상대 경로라야 쓸 수 있다
+    const summary = summaryOf(a);
+    assert.ok(!isAbsolute(summary) && !summary.split(/[\\/]/).includes('..'), `요약 경로가 작업 폴더 밖이다: ${what}`);
+  });
+  // 결과는 docker(컨테이너 안 k6)가 쓴 요약으로 계산한다
+  assert.equal(JSON.parse(readFileSync(join(root, 'o.json'), 'utf8')).ratio, 1.25);
+  assert.equal(JSON.parse(readFileSync(join(outDir, aaName(1)), 'utf8')).ratio, 1.25);
+  assert.equal(prep.calls(), 2);
+});
+
+test('[ASVS v5.0.0-1.2.5] D-T40: 설정의 k6 명령도 빈 글이 없는 인자 목록만 받고(셸 문자열·빈 목록·글 아닌 값은 준비 명령을 부르기 전에 종료 2, 명령줄 --k6가 있어도), 설정 키는 scenario·rounds·prepare·k6뿐이다', () => {
+  const root = newRoot();
+  const k6 = argsK6(root);
+  const prep = countingPrep(root);
+  const log = join(root, 'k6-args.log');
+  const env = { ...process.env, ...NO_DOCKER, FAKE_K6_ARGS: log, FAKE_K6_P99: JSON.stringify({ 'http://base': 100, 'http://new': 100 }) };
+  const base = { scenario: 's.js', rounds: 1, prepare: prep.cmd };
+  const outDir = join(root, 'aa-out');
+  mkdirSync(outDir);
+  const bad = [
+    { k6: 'k6 run; rm -rf /' }, // 셸 문자열
+    { k6: 'k6' }, // 낱말 하나라도 문자열이면 셸 문자열이다
+    { k6: [] },
+    { k6: [''] },
+    { k6: [process.execPath, ''] },
+    { k6: [process.execPath, 1] },
+    { k6: [process.execPath, null] },
+    { k6: [[process.execPath, k6]] },
+    { k6: { cmd: process.execPath } },
+    { k6: true },
+    { k6: null }, // 목록이 아니다(기본 명령을 쓰려면 키를 두지 않는다)
+    { k6: [process.execPath, k6], shell: true },
+    { k6: [process.execPath, k6], k6_args: ['--vus', '1'] },
+  ];
+  bad.forEach((extra, i) => {
+    const config = writeJson(root, `bad${i}.json`, { ...base, ...extra });
+    // 셸 문자열과 null은 명령줄 --k6가 있어 설정의 k6를 쓰지 않을 때도 거부한다(쓸지와 상관없는 설정 파일 검사다)
+    const clis = [[], ...(i === 0 || extra.k6 === null ? [['--k6', process.execPath, k6]] : [])];
+    for (const cmd of [['run', '--config', config, '--out', join(root, 'o.json')], ['aa', '--config', config, '--runs', '1', '--out-dir', outDir]]) {
+      for (const cli of clis) {
+        const r = py(NIGHTLY, [...cmd, ...cli], { env, cwd: root, ...CALL_LIMIT });
+        const what = `${i} ${cmd[0]}${cli.length ? ' --k6' : ''} ${JSON.stringify(extra)}`;
+        assert.equal(r.code, 2, `${what}: ${r.out}`);
+        assert.match(r.out, /::error::/, `${what}: ${r.out}`);
+      }
+    }
+  });
+  assert.equal(prep.calls(), 0, '설정이 틀렸는데 준비 명령을 불렀다');
+  assert.equal(k6Calls(log).length, 0, '설정이 틀렸는데 k6를 불렀다');
+  // 바른 k6 목록은 받는다(위 거부가 k6 키 자체를 모르는 탓이 아님을 본다)
+  const ok = py(NIGHTLY, ['run', '--config', writeJson(root, 'ok.json', { ...base, k6: [process.execPath, k6] }), '--out', join(root, 'o.json')], { env, cwd: root, ...CALL_LIMIT });
+  assert.equal(ok.code, 0, ok.out);
+  assert.equal(prep.calls(), 1);
+});
+
+test('D-T40 ①: aa는 준비 명령을 한 번만 부르고 A/A 측정 N번(판마다 기준·새를 번갈아)을 aa-01.json…(run --out과 같은 모양)로 남기며, 10번이면 threshold.json(aa-threshold와 같은 규칙)까지 쓴다(--out-dir가 없으면 만든다)', () => {
+  // 워크플로처럼 아직 없는 .cache/aa(작업 폴더 기준 상대 경로)를 준다
+  const s = aaSetup({ rounds: 1, freshOutDir: true });
+  // 부름 차례마다 p99: A/A마다 [기준, 새]. 비율은 1, 1.03, 0.98, 1.05, 0.96, 1.01, 0.93, 0.99, 1.04, 1이고 가장 큰 벗어남은 0.93의 0.07이다(1보다 작은 쪽)
+  const seq = [100, 100, 200, 206, 100, 98, 200, 210, 100, 96, 200, 202, 100, 93, 200, 198, 100, 104, 200, 200];
+  const ratios = [1, 1.03, 0.98, 1.05, 0.96, 1.01, 0.93, 0.99, 1.04, 1];
+  const day0 = todayUtc();
+  const r = s.aa(10, { FAKE_K6_SEQ: JSON.stringify(seq) });
+  const day1 = todayUtc();
+  assert.equal(r.code, 0, r.out);
+  assert.equal(s.prepCalls(), 1, '준비 명령은 한 번만 부른다');
+  assertK6Calls(s.calls(), 20, s.prefix);
+  // 같은 설정으로 run --out을 한 번 내어 모양(맨 위 키·runs 항목 키)을 견준다
+  const runOut = join(s.root, 'run.json');
+  const rr = py(NIGHTLY, ['run', '--config', s.config, '--out', runOut, '--k6', process.execPath, s.k6],
+    { env: { ...s.env, FAKE_K6_ARGS: join(s.root, 'k6-run.log'), FAKE_K6_P99: JSON.stringify({ 'http://base': 100, 'http://new': 100 }) }, cwd: s.root, ...CALL_LIMIT });
+  assert.equal(rr.code, 0, rr.out);
+  const runShape = shapeOf(JSON.parse(readFileSync(runOut, 'utf8')));
+  const names = Array.from({ length: 10 }, (_, i) => aaName(i + 1));
+  assert.deepEqual(aaFiles(s.outDir), names);
+  names.forEach((name, i) => {
+    const x = JSON.parse(readFileSync(join(s.outDir, name), 'utf8'));
+    assert.deepEqual(Object.keys(x).sort(), RESULT_KEYS, name);
+    assert.deepEqual(shapeOf(x), runShape, `${name}: run --out과 모양이 다르다`);
+    assert.deepEqual([x.scenario, x.rounds], [SCENARIO, 1], name);
+    assert.deepEqual(x.runs.map((y) => [y.round, y.side, y.p99_ms]), [[1, 'base', seq[2 * i]], [1, 'new', seq[2 * i + 1]]], name);
+    assert.deepEqual([x.base_p99_ms, x.new_p99_ms], [seq[2 * i], seq[2 * i + 1]], name);
+    assert.ok(Math.abs(x.ratio - ratios[i]) < 1e-9, `${name}: ${x.ratio}`);
+    assert.match(x.started_at, ISO_UTC, name);
+    assert.match(x.ended_at, ISO_UTC, name);
+  });
+  const th = join(s.outDir, 'threshold.json');
+  const t = JSON.parse(readFileSync(th, 'utf8'));
+  assert.deepEqual(Object.keys(t).sort(), ['aa_ratios', 'basis', 'decided_at', 'max_ratio']);
+  assert.ok(Math.abs(t.max_ratio - 1.07) < 1e-9, String(t.max_ratio));
+  assert.equal(t.aa_ratios.length, 10);
+  t.aa_ratios.forEach((v, i) => assert.ok(Math.abs(v - ratios[i]) < 1e-9, `aa_ratios[${i}] = ${v}`));
+  assert.ok([day0, day1].includes(t.decided_at), `decided_at ${t.decided_at}이 오늘(UTC)이 아니다`);
+  assert.ok(mentions(t.basis, 10), t.basis);
+  // aa-threshold에 같은 결과 파일 10개를 주면 같은 기준값이 나온다(같은 규칙, 소수 여섯째 자리 반올림까지)
+  const th2 = join(s.root, 'threshold-2.json');
+  const again = py(NIGHTLY, ['aa-threshold', '--results', ...names.map((n) => join(s.outDir, n)), '--out', th2], CALL_LIMIT);
+  assert.equal(again.code, 0, again.out);
+  const t2 = JSON.parse(readFileSync(th2, 'utf8'));
+  assert.deepEqual([t.max_ratio, t.aa_ratios], [t2.max_ratio, t2.aa_ratios]);
+  // compare가 이 기준값 파일을 그대로 받는다(비율 1.05 ≤ 1.07이라 통과)
+  const c = py(NIGHTLY, ['compare', '--results', join(s.outDir, aaName(4)), '--threshold', th], CALL_LIMIT);
+  assert.equal(c.code, 0, c.out);
+});
+
+test('D-T40 ①: aa가 10번보다 많으면(11번) 모든 A/A의 비율을 실행 순서대로 모아 기준값을 정한다(앞 10번만 보지 않는다)', () => {
+  const s = aaSetup({ rounds: 1 });
+  // 11번째 A/A가 가장 크게 벗어난다(1.08). 앞 10번만 보면 1.03이 된다
+  const ratios = [1, 1.01, 0.99, 1.02, 0.98, 1.03, 0.97, 1, 1.01, 0.99, 1.08];
+  const seq = ratios.flatMap((x) => [200, Math.round(200 * x)]);
+  const r = s.aa(11, { FAKE_K6_SEQ: JSON.stringify(seq) });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(s.prepCalls(), 1);
+  assertK6Calls(s.calls(), 22, s.prefix);
+  assert.deepEqual(aaFiles(s.outDir), Array.from({ length: 11 }, (_, i) => aaName(i + 1)));
+  const t = JSON.parse(readFileSync(join(s.outDir, 'threshold.json'), 'utf8'));
+  assert.ok(Math.abs(t.max_ratio - 1.08) < 1e-9, String(t.max_ratio));
+  assert.equal(t.aa_ratios.length, 11);
+  t.aa_ratios.forEach((v, i) => assert.ok(Math.abs(v - ratios[i]) < 1e-9, `aa_ratios[${i}] = ${v}`));
+  assert.ok(mentions(t.basis, 11), t.basis);
+});
+
+test('D-T40 ①: aa가 10번보다 적으면(9번) threshold.json을 쓰지 않고 10번이 있어야 정한다고 알린 뒤 0으로 끝나며, 설정의 k6 명령과 판마다 회차 수(rounds)를 따른다', () => {
+  const s = aaSetup({ rounds: 2, k6InConfig: true });
+  // A/A마다 기준·새·기준·새. i번째(0부터) A/A의 기준 중앙값은 100(i+1), 새 중앙값은 그 ratios[i]배다(A/A마다 제 회차만으로 계산해야 맞는다)
+  const ratios = [1, 1.1, 0.95, 1.2, 0.9, 1.05, 1, 0.8, 1.25];
+  const plan = ratios.map((ratio, i) => {
+    const b = 100 * (i + 1);
+    const n = Math.round(b * ratio);
+    return { b, n, seq: [b - 10, n - 4, b + 10, n + 4] };
+  });
+  const r = s.aa(9, { FAKE_K6_SEQ: JSON.stringify(plan.flatMap((p) => p.seq)) });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(existsSync(join(s.outDir, 'threshold.json')), false, '10번보다 적은데 threshold.json을 썼다');
+  assert.ok(r.out.split(/\r?\n/).some((l) => /기준값|threshold/.test(l) && mentions(l, 10)), `기준값은 A/A 10번이 있어야 정한다는 알림이 없다: ${r.out}`);
+  assert.equal(s.prepCalls(), 1);
+  assertK6Calls(s.calls(), 36, s.prefix);
+  assert.deepEqual(aaFiles(s.outDir), Array.from({ length: 9 }, (_, i) => aaName(i + 1)));
+  plan.forEach(({ b, n, seq }, i) => {
+    const name = aaName(i + 1);
+    const x = JSON.parse(readFileSync(join(s.outDir, name), 'utf8'));
+    assert.deepEqual(Object.keys(x).sort(), RESULT_KEYS, name);
+    assert.equal(x.rounds, 2, name);
+    assert.deepEqual(x.runs.map((y) => [y.round, y.side, y.p99_ms]), [[1, 'base', seq[0]], [1, 'new', seq[1]], [2, 'base', seq[2]], [2, 'new', seq[3]]], name);
+    assert.deepEqual([x.base_p99_ms, x.new_p99_ms], [b, n], name);
+    assert.ok(Math.abs(x.ratio - n / b) < 1e-9, `${name}: ${x.ratio}`);
+  });
+});
+
+test('D-T40 ①: aa의 --runs는 1~50이고, 범위 밖이면 준비 명령을 부르기 전에 종료 2로 거부한다', () => {
+  const s = aaSetup({ rounds: 1 });
+  const p99 = { FAKE_K6_P99: JSON.stringify({ 'http://base': 100, 'http://new': 100 }) };
+  for (const n of ['0', '51', '-1', 'x', '2.5']) {
+    const r = s.aa(n, p99);
+    assert.equal(r.code, 2, `--runs ${n}: ${r.out}`);
+    assert.equal(s.prepCalls(), 0, `--runs ${n}: 준비 명령을 불렀다`);
+    assert.equal(s.calls().length, 0, `--runs ${n}: k6를 불렀다`);
+  }
+  // 경계 50은 받는다: 준비 명령을 부르고 첫 k6까지 가는지만 보고(첫 k6를 일부러 실패시켜) 50번을 다 돌리지는 않는다
+  const r50 = s.aa('50', { ...p99, FAKE_K6_FAIL_AT: '0' });
+  assert.equal(r50.code, 2, r50.out);
+  assert.equal(s.prepCalls(), 1, '--runs 50을 받지 않았다');
+  assert.equal(s.calls().length, 1, '--runs 50으로 측정을 시작하지 않았다');
+  const r1 = s.aa('1', p99);
+  assert.equal(r1.code, 0, r1.out);
+  assert.equal(s.prepCalls(), 2);
+  assert.equal(s.calls().length, 3);
+  assert.equal(JSON.parse(readFileSync(join(s.outDir, aaName(1)), 'utf8')).ratio, 1);
+  assert.equal(existsSync(join(s.outDir, 'threshold.json')), false);
+});
+
+test('D-T40 ①: aa는 준비 명령·k6가 실패하거나 전체 기한(--deadline-s, aa 전체에 하나)을 넘기면 그 자리에서 종료 2로 끝나고 threshold.json을 쓰지 않는다', () => {
+  const p99 = { FAKE_K6_P99: JSON.stringify({ 'http://base': 100, 'http://new': 100 }) };
+  {
+    const s = aaSetup();
+    const r = s.aa(10, { ...p99, FAKE_PREP_EXIT: '1' });
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /준비 명령/);
+    assert.equal(s.prepCalls(), 1);
+    assert.equal(s.calls().length, 0, '준비 명령이 실패했는데 k6를 불렀다');
+    assert.deepEqual(aaFiles(s.outDir), [], '준비 명령이 실패했는데 A/A 결과를 썼다');
+    assert.equal(existsSync(join(s.outDir, 'threshold.json')), false);
+  }
+  {
+    // 6번째 부름(3번째 A/A의 새 판)부터 k6가 종료 107로 끝난다: 거기서 멈추고, 끝내지 못한 3번째 A/A의 결과 파일은 쓰지 않는다
+    const s = aaSetup();
+    const r = s.aa(10, { ...p99, FAKE_K6_FAIL_AT: '5' });
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /k6/);
+    assert.equal(s.calls().length, 6, `k6 ${s.calls().length}번(실패한 뒤에도 불렀다)`);
+    assert.equal(existsSync(join(s.outDir, aaName(3))), false, '끝내지 못한 A/A의 결과를 썼다');
+    assert.equal(existsSync(join(s.outDir, 'threshold.json')), false);
+  }
+  {
+    // k6 한 번은 0.6초라 A/A 하나(기준·새 1.2초)는 기한 2초 안이지만 10번 전체(12초 넘음)는 넘는다: 기한은 A/A마다가 아니라 aa 전체에 하나다
+    const s = aaSetup();
+    const t = Date.now();
+    const r = s.aa(10, { ...p99, FAKE_K6_SLEEP_MS: '600' }, ['--deadline-s', '2']);
+    const ms = Date.now() - t;
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /기한/);
+    assert.ok(ms < 10000, `${ms}ms`);
+    assert.ok(s.calls().length < 20, `k6 ${s.calls().length}번(기한을 넘겼는데 다 돌렸다)`);
+    assert.equal(s.prepCalls(), 1);
+    assert.equal(existsSync(join(s.outDir, 'threshold.json')), false);
+  }
+});
+
+test('D-T40: aa의 A/A 회차들은 서로 다른 요약 파일을 쓰고, 요약을 쓰지 못한 회차는 앞 회차나 지난 실행의 요약을 읽지 않고 종료 2로 끝난다', () => {
+  const p99 = { FAKE_K6_P99: JSON.stringify({ 'http://base': 100, 'http://new': 100 }) };
+  const s = aaSetup({ rounds: 2 });
+  const ok = s.aa(2, p99);
+  assert.equal(ok.code, 0, ok.out);
+  const paths = s.calls().map(summaryOf);
+  assert.equal(paths.length, 8);
+  assert.equal(new Set(paths.map((p) => resolve(s.root, p))).size, 8, `요약 경로가 겹친다: ${paths.join(', ')}`);
+  // 지난 aa 실행의 요약이 남은 같은 작업 폴더에서, 이번 첫 기준판이 요약을 쓰지 못한다
+  const log2 = join(s.root, 'k6-args-2.log');
+  const stale = s.aa(1, { ...p99, FAKE_K6_ARGS: log2, FAKE_K6_SKIP_AT: '[0]' });
+  assert.equal(stale.code, 2, stale.out);
+  assert.match(stale.out, /요약/);
+  // 같은 실행 안: 2번째 A/A의 기준판(3번째 부름)이 요약을 쓰지 못하면 1번째 A/A의 요약을 읽지 않는다
+  const s2 = aaSetup({ rounds: 1 });
+  const mid = s2.aa(2, { ...p99, FAKE_K6_SKIP_AT: '[2]' });
+  assert.equal(mid.code, 2, mid.out);
+  assert.match(mid.out, /요약/);
+});
+
+/** 바깥으로 나가지 않는 환경: 개발 PC의 AWS 자격 증명을 못 찾게 하고 주소도 닫힌 로컬 포트로 돌린다(aws를 잘못 부르면 곧바로 실패). docker도 같다 */
+function offlineEnv(dir) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^AWS_/i.test(k)));
+  return { ...env, ...NO_DOCKER, AWS_SHARED_CREDENTIALS_FILE: join(dir, 'no-aws-credentials'), AWS_CONFIG_FILE: join(dir, 'no-aws-config'),
+    AWS_EC2_METADATA_DISABLED: 'true', AWS_ENDPOINT_URL: 'http://127.0.0.1:9', AWS_MAX_ATTEMPTS: '1' };
+}
+
+const collectArgs = (root, runId) => ['--root', root, '--run-id', runId, '--kpi', 'K1', '--version', 'v0', '--profile', 'local-10k', '--commit', 'abc123'];
+const runDirOf = (root, runId) => join(root, 'docs', 'perf-ledger', 'runs', runId);
+const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
+const sumsOf = (root, runId) => Object.fromEntries(readFileSync(join(runDirOf(root, runId), 'SHA256SUMS'), 'utf8').split('\n').filter(Boolean)
+  .map((l) => [l.slice(l.indexOf('  ') + 2), l.slice(0, l.indexOf('  '))]));
+const filesUnder = (dir) => (existsSync(dir) ? readdirSync(dir, { withFileTypes: true })
+  .flatMap((d) => (d.isDirectory() ? filesUnder(join(dir, d.name)).map((f) => `${d.name}/${f}`) : [d.name])) : []);
+/** S3 원본 버킷에 두는 큰 원본(docs/perf-ledger.md §2.1): stdout.log는 collect.py가 쓰고 나머지는 rawSources가 --extra로 넣는다 */
+const RAWS = ['grafana/k1.png', 'metrics/origin_rps.csv', 'stdout.log', 'traces/slow-1.json'];
+
+function rawSources(root) {
+  const src = join(root, 'src');
+  const files = {
+    'metrics/origin_rps.csv': 'ts,value,labels\n1762128000,1000,{}\n1762128001,1002,{}\n',
+    'traces/slow-1.json': '{"traceId":"4bf92f3577b34da6a3ce929d0e0e4736"}',
+    'grafana/k1.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0x80]),
+  };
+  for (const [rel, body] of Object.entries(files)) {
+    mkdirSync(dirname(join(src, rel)), { recursive: true });
+    writeFileSync(join(src, rel), body);
+  }
+  writeFileSync(join(src, 'infra.txt'), 'cpu 4, memory 16GiB\n');
+  return { files, infra: join(src, 'infra.txt'), extra: ['metrics', 'traces', 'grafana'].flatMap((d) => ['--extra', join(src, d)]) };
+}
+
+test('BSL090 낮음-056: --raw-outbox는 큰 원본을 aws로 올리지 않고(aws를 부르지 않는다) 보낼 폴더의 runs/<run-id>/<경로>.gz로 gzip해 두며, 다 쓴 뒤 측정 폴더의 원본을 지운다(--raw-bucket 없이는 종료 2)', () => {
+  const root = newRoot();
+  const env = offlineEnv(root);
+  const tools = fakeTools(root);
+  const viaFakes = (args) => tools.run(COLLECT, args, { env, names: ['aws'] });
+  const outbox = join(root, 'outbox');
+  mkdirSync(outbox);
+  const { files, infra, extra } = rawSources(root);
+  // 대조: 보낼 폴더 없이 원본 버킷만 주면 지금처럼 aws로 올린다. 가짜 aws(실패로 끝난다)가 그 부름을 잡는지 먼저 본다
+  const ridAws = '2026-11-03-k1-v0-local-10k-aws';
+  viaFakes([...collectArgs(root, ridAws), '--raw-bucket', 's3://selftest-raw', ...extra]);
+  const control = tools.calls('aws');
+  assert.ok(control.some((a) => a.some((x) => x.startsWith(`s3://selftest-raw/runs/${ridAws}/`))), `가짜 aws가 올리기를 잡지 못했다: ${JSON.stringify(control)}`);
+  // 보낼 폴더는 원본 버킷 대신이라 --raw-bucket(raw_uri)과 함께일 때만 받는다
+  const lone = viaFakes([...collectArgs(root, 'lone'), '--raw-outbox', outbox, ...extra]);
+  assert.equal(lone.code, 2, lone.out);
+  assert.equal(runExists(root, 'lone'), false);
+  assert.deepEqual(filesUnder(outbox), []);
+  const rid = '2026-11-03-k1-v0-local-10k-outbox';
+  const r = viaFakes([...collectArgs(root, rid), '--raw-bucket', 's3://selftest-raw', '--raw-outbox', outbox, '--infra-file', infra, ...extra]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(tools.calls('aws'), control, '--raw-outbox인데 aws를 불렀다');
+  assert.equal(manifestOf(root, rid).raw_uri, `s3://selftest-raw/runs/${rid}/`);
+  const sums = sumsOf(root, rid);
+  for (const rel of RAWS) assert.match(sums[rel] ?? '', /^[0-9a-f]{64}$/, `SHA256SUMS에 ${rel}이 없다`);
+  // 버킷 안 객체 이름(runs/<run-id>/<경로>.gz)과 같은 자리에 이 실행의 큰 원본만 둔다. 작은 파일(manifest·infra·SHA256SUMS)은 보내지 않는다
+  assert.deepEqual(filesUnder(outbox).sort(), RAWS.map((x) => `runs/${rid}/${x}.gz`));
+  const box = join(outbox, 'runs', rid);
+  const runDir = runDirOf(root, rid);
+  for (const rel of RAWS) {
+    const body = gunzipSync(readFileSync(join(box, `${rel}.gz`)));
+    assert.equal(sha256(body), sums[rel], `${rel}: 풀어 낸 내용의 해시가 SHA256SUMS와 다르다`);
+    if (files[rel] !== undefined) assert.deepEqual(body, Buffer.from(files[rel]), rel);
+    assert.equal(existsSync(join(runDir, rel)), false, `${rel}: 원본이 측정 폴더에 남았다`);
+  }
+  for (const rel of ['manifest.json', 'SHA256SUMS', 'infra.txt']) assert.ok(existsSync(join(runDir, rel)), `${rel}: 작은 파일은 측정 폴더(Git)에 남는다`);
+});
+
+test('BSL090_낮음-056_불변식위반행invariants-detail.ndjson도_큰원본이라_해시만SHA256SUMS에남기고_보낼폴더의runs/<run-id>/로gzip해옮긴다', () => {
+  // docs/perf-ledger.md §2.1: 큰 원본(metrics/*.csv·traces/·grafana/·stdout.log)과 불변식 위반 행 invariants-detail.ndjson은 S3 원본 버킷의
+  // runs/<run-id>/에 두고 Git에는 해시만 남는다(합성 데이터라도 ID 목록이라서). 결과 건수 invariants.csv는 Git에 남는다.
+  // Before 측정의 K7 ②(결제사 장애·앱 강제 종료)는 위반 행이 나오는 실행이다(docs/verification.md §3.10)
+  const root = newRoot();
+  const env = offlineEnv(root);
+  const tools = fakeTools(root);
+  const { extra } = rawSources(root);
+  const detail = join(root, 'src', 'invariants-detail.ndjson');
+  const detailBody = '{"invariant":"P6","order_id":"7c0e4a52-3f1b-4c8d-9a6e-2b5d8f1e0c93","pg_tx":"sim_tx_0001"}\n';
+  writeFileSync(detail, detailBody);
+  const csv = join(root, 'src', 'invariants.csv');
+  writeFileSync(csv, 'invariant,violations\nP6,1\n');
+  const outbox = join(root, 'outbox');
+  mkdirSync(outbox);
+  const rid = '2026-11-03-k7-v0-local-10k-fault';
+  const r = tools.run(COLLECT, [...collectArgs(root, rid), '--raw-bucket', 's3://selftest-raw', '--raw-outbox', outbox, '--invariants', csv, '--extra', detail, ...extra],
+    { env, names: ['aws'] });
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(tools.calls('aws'), [], '--raw-outbox인데 aws를 불렀다');
+  const runDir = runDirOf(root, rid);
+  const sums = sumsOf(root, rid);
+  assert.match(sums['invariants-detail.ndjson'] ?? '', /^[0-9a-f]{64}$/, 'SHA256SUMS에 위반 행 파일의 해시가 없다');
+  assert.ok(existsSync(join(runDir, 'invariants.csv')), '결과 건수 invariants.csv는 측정 폴더(Git)에 남는다');
+  assert.equal(existsSync(join(runDir, 'invariants-detail.ndjson')), false, '위반 행 파일이 측정 폴더(Git)에 남았다');
+  const gz = join(outbox, 'runs', rid, 'invariants-detail.ndjson.gz');
+  assert.ok(existsSync(gz), `보낼 폴더에 위반 행 파일이 없다: ${JSON.stringify(filesUnder(outbox))}`);
+  const body = gunzipSync(readFileSync(gz));
+  assert.equal(sha256(body), sums['invariants-detail.ndjson'], '풀어 낸 내용의 해시가 SHA256SUMS와 다르다');
+  assert.equal(body.toString('utf8'), detailBody);
+});
+
+test('BSL090 낮음-056: 보낼 폴더에 다 쓰지 못하면 원본을 하나도 지우지 않고, --upload-raw <RUN_ID> --raw-outbox가 남은 원본을 같은 자리에 gzip으로 다시 둔다(aws는 부르지 않는다)', () => {
+  const root = newRoot();
+  const env = offlineEnv(root);
+  const tools = fakeTools(root);
+  const viaFakes = (args) => tools.run(COLLECT, args, { env, names: ['aws'] });
+  const { extra } = rawSources(root);
+  const rid = '2026-11-03-k1-v0-local-10k-retry';
+  // 보낼 폴더의 runs/<run-id>/metrics 자리에 파일이 있어 metrics/….gz는 쓰지 못한다(stdout.log.gz·grafana/….gz는 쓸 수 있다)
+  const blocked = join(root, 'outbox-blocked');
+  mkdirSync(join(blocked, 'runs', rid), { recursive: true });
+  writeFileSync(join(blocked, 'runs', rid, 'metrics'), 'not a folder');
+  const r = viaFakes([...collectArgs(root, rid), '--raw-bucket', 's3://selftest-raw', '--raw-outbox', blocked, ...extra]);
+  assert.notEqual(r.code, 0, r.out);
+  const runDir = runDirOf(root, rid);
+  assert.ok(existsSync(join(runDir, 'manifest.json')), `측정 폴더가 없다: ${r.out}`);
+  for (const rel of RAWS) assert.ok(existsSync(join(runDir, rel)), `${rel}: 다 쓰지 못했는데 원본을 지웠다`);
+  const outbox = join(root, 'outbox');
+  mkdirSync(outbox);
+  const again = viaFakes(['--root', root, '--upload-raw', rid, '--raw-outbox', outbox]);
+  assert.equal(again.code, 0, again.out);
+  assert.deepEqual(tools.calls('aws'), [], '--raw-outbox인데 aws를 불렀다');
+  const sums = sumsOf(root, rid);
+  assert.deepEqual(filesUnder(outbox).sort(), RAWS.map((x) => `runs/${rid}/${x}.gz`));
+  for (const rel of RAWS) {
+    const gz = join(outbox, 'runs', rid, `${rel}.gz`);
+    assert.equal(sha256(gunzipSync(readFileSync(gz))), sums[rel], `${rel}: 풀어 낸 내용의 해시가 SHA256SUMS와 다르다`);
+    assert.equal(existsSync(join(runDir, rel)), false, `${rel}: 다시 둔 뒤에도 원본이 남았다`);
+  }
+  assert.equal(manifestOf(root, rid).raw_uri, `s3://selftest-raw/runs/${rid}/`);
+});
+
+test('BSL090 낮음-056: index.py --stamp --no-ots는 timestamps/<날짜>.txt를 --stamp와 똑같이 쓰되(이미 고정한 날이 바뀌면 거부하는 것도 같다) ots를 부르지 않고, OpenTimestamps 고정은 소유자 몫이라고 알린다(--stamp 없이는 종료 2)', () => {
+  const root = newRoot();
+  const env = offlineEnv(root);
+  const tools = fakeTools(root);
+  const index = (args, exits) => tools.run(INDEX, ['--root', root, ...args], { env, names: ['ots'], exits });
+  const on = (day) => ['--start', `${day}T00:00:00Z`, '--end', `${day}T00:10:00Z`];
+  for (const id of ['2026-10-30-k1-b', '2026-10-30-k1-a']) {
+    const c = py(COLLECT, [...collectArgs(root, id), ...on('2026-10-30')], { env, ...CALL_LIMIT });
+    assert.equal(c.code, 0, c.out);
+  }
+  const other = py(COLLECT, [...collectArgs(root, '2026-10-31-k1-a'), ...on('2026-10-31')], { env, ...CALL_LIMIT });
+  assert.equal(other.code, 0, other.out);
+  for (const args of [['--no-ots'], ['--upgrade', '--no-ots']]) {
+    const lone = index(args);
+    assert.equal(lone.code, 2, `${args.join(' ')}: ${lone.out}`);
+  }
+  const r = index(['--stamp', '2026-10-30', '--no-ots']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /소유자/);
+  assert.match(r.out, /OpenTimestamps|ots stamp/);
+  assert.deepEqual(tools.calls('ots'), [], '--no-ots인데 ots를 불렀다');
+  // --stamp와 같은 내용: 그날 끝난 실행마다 SHA256SUMS의 해시와 경로(실행 ID 순서), 다른 날 실행은 넣지 않는다
+  const expected = ['2026-10-30-k1-a', '2026-10-30-k1-b']
+    .map((id) => `${sha256(readFileSync(join(runDirOf(root, id), 'SHA256SUMS')))}  runs/${id}/SHA256SUMS\n`).join('');
+  const dayFile = join(root, 'docs', 'perf-ledger', 'timestamps', '2026-10-30.txt');
+  assert.equal(readFileSync(dayFile, 'utf8'), expected);
+  assert.equal(existsSync(`${dayFile}.ots`), false, '--no-ots인데 OpenTimestamps 증명이 생겼다');
+  // 대조: --no-ots 없는 --stamp는 지금처럼 `ots stamp <그날 묶음 파일>`을 부른다. 가짜 ots가 그 부름을 잡는지 본다
+  const pinned = index(['--stamp', '2026-10-31'], { ots: 0 });
+  assert.equal(pinned.code, 0, pinned.out);
+  const calls = tools.calls('ots');
+  const stamps = calls.filter((a) => a[0] === 'stamp');
+  assert.equal(stamps.length, 1, JSON.stringify(calls));
+  assert.ok(samePath(stamps[0].at(-1), join(root, 'docs', 'perf-ledger', 'timestamps', '2026-10-31.txt')), JSON.stringify(calls));
+  // 소유자가 이미 고정한 날(.ots가 있음)에 실행이 늘면 --no-ots도 --stamp처럼 거부하고 묶음 파일을 고치지 않는다(증명이 깨진다)
+  writeFileSync(`${dayFile}.ots`, 'pinned by the owner');
+  const late = py(COLLECT, [...collectArgs(root, '2026-10-30-k1-c'), ...on('2026-10-30')], { env, ...CALL_LIMIT });
+  assert.equal(late.code, 0, late.out);
+  const changed = index(['--stamp', '2026-10-30', '--no-ots']);
+  assert.notEqual(changed.code, 0, changed.out);
+  assert.equal(readFileSync(dayFile, 'utf8'), expected, '이미 고정한 날의 묶음을 고쳐 썼다');
+  assert.equal(tools.calls('ots').length, calls.length, '--no-ots인데 ots를 불렀다');
+});
+
+test('BSL090_D-T40: run --out의 폴더가 없으면 만들어 쓴다(측정을 다 하고 결과를 쓰다 잃지 않게, 2026-11-03 30ms 지연 판 실행에서 재현)', () => {
+  const root = newRoot();
+  const k6 = argsK6(root);
+  const prep = countingPrep(root);
+  const config = writeJson(root, 'config.json', { scenario: SCENARIO, rounds: 1, prepare: prep.cmd, k6: [process.execPath, k6] });
+  const out = join(root, 'not', 'yet', 'results.json');
+  const env = { ...process.env, ...NO_DOCKER, FAKE_K6_ARGS: join(root, 'k6-args.log'), FAKE_K6_P99: JSON.stringify({ 'http://base': 100, 'http://new': 130 }) };
+  const r = py(NIGHTLY, ['run', '--config', config, '--out', out], { env, cwd: root, ...CALL_LIMIT });
+  assert.equal(r.code, 0, r.out);
+  const res = JSON.parse(readFileSync(out, 'utf8'));
+  assert.deepEqual([res.base_p99_ms, res.new_p99_ms, res.ratio], [100, 130, 1.3]);
+});
+
+test('BSL090_ADR-0077: 창 안의 파드 재시작으로 히스토그램을 셀 수 없을 때만 종료 코드 3이고(실행 도구가 그 점검만 빼고 다시 남긴다), 다른 거부는 3이 아니다', async () => {
+  for (const [id, extra, want3] of [['x-lost', { lost: 2 }, true], ['x-reset', { resets: 1 }, true], ['x-empty', { start: { '0.2': 10, '+Inf': 10 }, end: { '0.2': 10, '+Inf': 10 } }, false]]) {
+    const prom = await fakeProm({ startTs: T0, start: { '0.2': 10, '+Inf': 10 }, end: { '0.2': 3000, '+Inf': 3000 }, ...extra });
+    try {
+      const root = newRoot();
+      const checks = writeJson(root, 'h.json', { checks: [{ name: 'p', allowed: 0.01, histogram: { metric: M, match: 'route="/x"', le: 0.2 } }] });
+      const r = await pyAsync(COLLECT, histArgs(root, id, checks, ['--prom-url', prom.url]));
+      if (want3) assert.equal(r.code, 3, `${id}: ${r.out}`);
+      else assert.ok(r.code !== 0 && r.code !== 3, `${id}: 재시작이 아닌 거부는 3이 아니다(종료 코드 ${r.code}): ${r.out}`);
+      assert.equal(runExists(root, id), false, id);
+    } finally {
+      await prom.close();
+    }
+  }
 });

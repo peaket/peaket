@@ -1,0 +1,58 @@
+{
+  "run_id": "2026-11-03-gen-calib-c1-r500-mw0avbs32d88",
+  "kpi": "NFR-013",
+  "version": "v0",
+  "profile": "local-gen",
+  "scale": {
+    "users": null,
+    "arrival_rps": 500.0,
+    "duration_s": 30,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/calibrate.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "b1581ed5726e7d0fee715ef7baa5f016789fffb0",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 1대(CPU 1·메모리 1024Mi, kind 안)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-03T06:22:32Z",
+  "ended_at": "2026-11-03T06:23:12Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 0.146333,
+    "p95_ms": 0.317697,
+    "p99_ms": 2.868021,
+    "error_rate": 0,
+    "requests": 15001,
+    "rps": 500.03333333333336,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 보정(local-gen, docs/verification.md §3.9): CPU 1·메모리 1024Mi 발생기 → 빈 응답 대역(CPU 8). 통과. 발생기 CPU 평균 22%·최고 27.2%, 메모리 최대 13.1%, VU 최대 101, VU당 메모리 1388017 B, 대역 CPU 0.4%. 이 CPU 몫의 용량 500/s",
+  "collected_at": "2026-11-03T06:24:40Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

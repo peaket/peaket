@@ -1,0 +1,58 @@
+{
+  "run_id": "2026-11-03-gen-calib-c2-r1500-mw02on0rc063",
+  "kpi": "NFR-013",
+  "version": "v0",
+  "profile": "local-gen",
+  "scale": {
+    "users": null,
+    "arrival_rps": 1500.0,
+    "duration_s": 30,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/calibrate.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "272e0b1bafecd51db0bc71c216a63ef396f8ebef",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 1대(CPU 2·메모리 1024Mi, kind 안)",
+    "dropped_iterations": 15
+  },
+  "started_at": "2026-11-03T02:34:08Z",
+  "ended_at": "2026-11-03T02:34:48Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 0.150907,
+    "p95_ms": 0.52967425,
+    "p99_ms": 2.0978254500000024,
+    "error_rate": 0,
+    "requests": 44986,
+    "rps": 1499.5333333333333,
+    "dropped_iterations": 15
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": false,
+  "invalid_reason": "발생기가 반복을 시작하지 못함(dropped_iterations 15)",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 보정(local-gen, docs/verification.md §3.9): CPU 2·메모리 1024Mi 발생기 → 빈 응답 대역(CPU 8). 통과 못 함: 발생기가 반복을 시작하지 못함(dropped_iterations 15). 발생기 CPU 평균 30.9%·최고 41.6%, 메모리 최대 9.2%, VU 최대 103, VU당 메모리 964191 B, 대역 CPU 1%. 이 CPU 몫의 용량 1000/s",
+  "collected_at": "2026-11-03T02:35:32Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

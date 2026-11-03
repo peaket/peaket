@@ -8,8 +8,11 @@
   python tools/perf-ledger/nightly.py run --config loadtest/nightly/config.json --out results.json [--k6 명령 …]
   python tools/perf-ledger/nightly.py compare --results results.json --threshold loadtest/nightly/threshold.json [--alert-out alert.md]
   python tools/perf-ledger/nightly.py aa-threshold --results a1.json … a10.json --out loadtest/nightly/threshold.json
+  python tools/perf-ledger/nightly.py aa --config loadtest/nightly/config-aa.json --runs 10 --out-dir .cache/aa [--deadline-s 19000]
 
-설정 파일: {"scenario": k6 시나리오 경로, "rounds": 판마다 실행 수, "prepare": 준비 명령(인자 목록)}.
+설정 파일: {"scenario": k6 시나리오 경로, "rounds": 판마다 실행 수, "prepare": 준비 명령(인자 목록), "k6": k6를 부를 명령(인자 목록, 없어도 된다)}.
+k6 명령은 --k6 인자, 설정의 k6, 기본(다이제스트 고정 이미지를 docker로) 순으로 고른다(BSL-090: v0 시나리오는 실행 도구가 kind 안에서 돌린다).
+aa는 준비 명령을 한 번만 부르고 A/A 측정(판마다 rounds번씩 번갈아)을 runs번 해 aa-NN.json을 쓰고, 10번 이상이면 threshold.json도 쓴다.
 준비 명령은 두 판을 올린 뒤 마지막 줄에 {"base_url": …, "new_url": …}를 낸다. 셸을 거치지 않고 부른다.
 종료 코드: compare는 통과·경고 0, 기준값을 넘음 1. 입력이 틀리거나 준비 명령·k6가 실패하면 모든 명령이 2.
 """
@@ -52,8 +55,8 @@ def load(path, what):
 
 
 def check_config(c):
-    if not isinstance(c, dict) or set(c) - {'scenario', 'rounds', 'prepare'}:
-        raise InputError('설정은 scenario·rounds·prepare만 둔다')
+    if not isinstance(c, dict) or set(c) - {'scenario', 'rounds', 'prepare', 'k6'}:
+        raise InputError('설정은 scenario·rounds·prepare·k6만 둔다')
     if not isinstance(c.get('scenario'), str) or not c['scenario']:
         raise InputError('scenario는 k6 시나리오 경로다')
     r = c.get('rounds')
@@ -63,6 +66,9 @@ def check_config(c):
     # 셸 문자열은 받지 않는다: 인자 목록만(ASVS v5.0.0-1.2.5)
     if not isinstance(p, list) or not p or not all(isinstance(x, str) and x for x in p):
         raise InputError('prepare는 빈 글이 없는 인자 목록이다(셸 문자열 아님)')
+    k = c.get('k6')
+    if 'k6' in c and (not isinstance(k, list) or not k or not all(isinstance(x, str) and x for x in k)):
+        raise InputError('k6는 빈 글이 없는 인자 목록이다(셸 문자열 아님)')
     return c
 
 
@@ -120,20 +126,39 @@ def prepare_targets(cmd, deadline):
     return t['base_url'], t['new_url']
 
 
-def run(a):
-    c = check_config(load(a.config, '설정'))
-    # 전체 기한을 잡 시간 제한보다 짧게 두어, 멈춘 k6도 잡 취소가 아니라 실패(SEV3 알림)로 끝나게 한다(새 맥락 리뷰)
-    deadline = time.monotonic() + a.deadline_s
+def k6_command(a, c):
+    """k6를 부를 명령: --k6 인자, 설정의 k6, 기본(다이제스트 고정 이미지를 docker로) 순"""
+    if a.k6:
+        return a.k6
+    if c.get('k6'):
+        return list(c['k6'])
     # 공식 k6 이미지는 사용자 12345로 돈다. 러너 사용자의 폴더에 요약을 쓸 수 있게 같은 사용자로 돌린다(새 맥락 리뷰)
     user = ['--user', f'{os.getuid()}:{os.getgid()}'] if hasattr(os, 'getuid') else []
-    k6 = a.k6 or ['docker', 'run', '--rm', '--network', 'host', *user, '-v', f'{os.getcwd()}:/w', '-w', '/w', K6_IMAGE]
+    return ['docker', 'run', '--rm', '--network', 'host', *user, '-v', f'{os.getcwd()}:/w', '-w', '/w', K6_IMAGE]
+
+
+def run(a):
+    c = check_config(load(a.config, '설정'))
+    # 결과 폴더는 측정 전에 만든다. 측정을 다 하고 쓰다가 폴더가 없어 결과를 잃지 않게(2026-11-03 30ms 지연 판 실행에서 재현)
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    # 전체 기한을 잡 시간 제한보다 짧게 두어, 멈춘 k6도 잡 취소가 아니라 실패(SEV3 알림)로 끝나게 한다(새 맥락 리뷰)
+    deadline = time.monotonic() + a.deadline_s
+    k6 = k6_command(a, c)
     base_url, new_url = prepare_targets(c['prepare'], deadline)
+    result = measure(c, k6, base_url, new_url, deadline, '')
+    with io.open(a.out, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+    print(f'중앙값: 기준 {result["base_p99_ms"]}ms, 새 {result["new_p99_ms"]}ms, 비율 {result["ratio"]}')
+
+
+def measure(c, k6, base_url, new_url, deadline, prefix):
+    """기준·새를 번갈아 rounds번씩 재고 결과(판별 p99 중앙값과 비율)를 돌려준다. 요약 파일 이름은 prefix로 실행마다 나눈다"""
     os.makedirs(SUMMARY_DIR, exist_ok=True)
     started, runs = L.iso_utc(dt.datetime.now(dt.timezone.utc).timestamp()), []
     for i in range(c['rounds']):
         for side, url in (('base', base_url), ('new', new_url)):
             # 요약 파일은 작업 폴더 안의 상대 경로에 둔다(컨테이너 k6도 /w로 같은 자리를 본다)
-            summary = os.path.join(SUMMARY_DIR, f'{i:02d}-{side}.json').replace('\\', '/')
+            summary = os.path.join(SUMMARY_DIR, f'{prefix}{i:02d}-{side}.json').replace('\\', '/')
             # 지난 실행의 요약을 다시 읽지 않게 먼저 지운다(쓰기가 실패한 회차가 옛 p99로 통과하지 않게)
             if os.path.exists(summary):
                 os.remove(summary)
@@ -148,12 +173,33 @@ def run(a):
             print(f'{side} {i + 1}/{c["rounds"]}: p99 {runs[-1]["p99_ms"]}ms')
     base = statistics.median(x['p99_ms'] for x in runs if x['side'] == 'base')
     new = statistics.median(x['p99_ms'] for x in runs if x['side'] == 'new')
-    result = {'scenario': c['scenario'], 'rounds': c['rounds'], 'started_at': started,
-              'ended_at': L.iso_utc(dt.datetime.now(dt.timezone.utc).timestamp()), 'runs': runs,
-              'base_p99_ms': base, 'new_p99_ms': new, 'ratio': round(new / base, 6) if base else None}
-    with io.open(a.out, 'w', encoding='utf-8', newline='\n') as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-    print(f'중앙값: 기준 {base}ms, 새 {new}ms, 비율 {result["ratio"]}')
+    return {'scenario': c['scenario'], 'rounds': c['rounds'], 'started_at': started,
+            'ended_at': L.iso_utc(dt.datetime.now(dt.timezone.utc).timestamp()), 'runs': runs,
+            'base_p99_ms': base, 'new_p99_ms': new, 'ratio': round(new / base, 6) if base else None}
+
+
+def aa(a):
+    """A/A 실행 runs번(D-T40 ①): 준비 명령은 한 번만 부르고, 실행마다 aa-NN.json을 쓰고, 10번 이상이면 threshold.json도 쓴다"""
+    if isinstance(a.runs, bool) or not isinstance(a.runs, int) or not 1 <= a.runs <= 50:
+        raise InputError('--runs는 1~50 정수다')
+    c = check_config(load(a.config, '설정'))
+    deadline = time.monotonic() + a.deadline_s
+    k6 = k6_command(a, c)
+    # 결과 폴더를 준비 명령 전에 만든다(새로 받은 저장소의 .cache/aa처럼 없을 수 있다. 첫 A/A를 다 잰 뒤에 쓰기가 실패하지 않게)
+    os.makedirs(a.out_dir, exist_ok=True)
+    base_url, new_url = prepare_targets(c['prepare'], deadline)
+    ratios = []
+    for n in range(1, a.runs + 1):
+        result = measure(c, k6, base_url, new_url, deadline, f'aa{n:02d}-')
+        with io.open(os.path.join(a.out_dir, f'aa-{n:02d}.json'), 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        check_results(result)
+        ratios.append(result['ratio'])
+        print(f'A/A {n}/{a.runs}: 비율 {result["ratio"]}')
+    if len(ratios) < AA_MIN_RUNS:
+        print(f'A/A 결과가 {len(ratios)}개다. {AA_MIN_RUNS}개 이상이어야 기준값을 정하므로 threshold.json은 쓰지 않는다(docs/devops.md §3.3)')
+        return
+    write_threshold(ratios, os.path.join(a.out_dir, 'threshold.json'))
 
 
 def set_output(**kv):
@@ -192,10 +238,14 @@ def aa_threshold(a):
     ratios = [check_results(load(p, 'A/A 결과'))['ratio'] for p in a.results]
     if len(ratios) < AA_MIN_RUNS:
         raise InputError(f'A/A 결과가 {len(ratios)}개다. {AA_MIN_RUNS}개 이상 있어야 기준값을 정한다(docs/devops.md §3.3)')
+    write_threshold(ratios, a.out)
+
+
+def write_threshold(ratios, out):
     dev = max(abs(x - 1) for x in ratios)
     t = {'max_ratio': round(1 + dev, 6), 'aa_ratios': ratios, 'decided_at': L.iso_utc(dt.datetime.now(dt.timezone.utc).timestamp())[:10],
          'basis': f'A/A 실행 {len(ratios)}번의 가장 큰 벗어남 {round(dev, 6)}'}
-    with io.open(a.out, 'w', encoding='utf-8', newline='\n') as f:
+    with io.open(out, 'w', encoding='utf-8', newline='\n') as f:
         json.dump(t, f, ensure_ascii=False, indent=2)
         f.write('\n')
     print(f'기준값 max_ratio {t["max_ratio"]} ({t["basis"]})')
@@ -216,10 +266,18 @@ def main():
     t = sub.add_parser('aa-threshold')
     t.add_argument('--results', nargs='+', required=True)
     t.add_argument('--out', required=True)
+    x = sub.add_parser('aa', help='A/A 실행 여러 번과 기준값(D-T40 ①)')
+    x.add_argument('--config', required=True)
+    x.add_argument('--runs', type=int, required=True)
+    x.add_argument('--out-dir', required=True)
+    x.add_argument('--k6', nargs='+', help='k6를 부를 명령(기본: 설정의 k6, 없으면 다이제스트 고정 이미지를 docker로)')
+    x.add_argument('--deadline-s', type=int, default=19000, help='준비 명령과 모든 실행의 기한(초)')
     a = p.parse_args()
     try:
         if a.cmd == 'run':
             run(a)
+        elif a.cmd == 'aa':
+            aa(a)
         elif a.cmd == 'compare':
             sys.exit(compare(a))
         else:

@@ -250,3 +250,155 @@ describe('k6 시나리오 형식(k6 inspect --execution-requirements)', { skip: 
     checkCommon(o, env, { executor: 'constant-arrival-rate', routes: ['status'], prep: [] });
   });
 });
+
+// ─────────── BSL-090 Before 측정(docs/verification.md §3.10 '경로 목표 점검'·'K별 실행') ───────────
+
+/** 검표 시나리오가 읽는 티켓 코드 묶음(가짜 글, 발권 코드와 같은 22자 base64url 꼴) */
+const CODES_FIXTURE = 'loadtest/test/fixtures/codes.json';
+
+/**
+ * 검표 형식 검사의 환경. 실행 도구가 주는 꼴(loadtest/runner/args.mjs gate): 티켓 수 = RATE × (WARM_S + MAIN_S) + 2.
+ * 도착률·스캐너 수·구간 길이·가상 사용자 수를 서로 다른 수(1도 아님)로 둬, 시나리오가 다른 값을 도착률·시각으로 써도 알아본다
+ */
+const GATE_ENV = Object.freeze({ ...BASE_ENV, SCANNERS: 2, RATE: 3, WARM_S: 4, MAIN_S: 7, TICKETS: 3 * (4 + 7) + 2, CODES_FILE: `/repo/${CODES_FIXTURE}`, SCAN_TIMEOUT: '3s' });
+
+/** 경로 목표 시간(ms, §3.10 '경로 목표 점검'). lib/targets.mjs ROUTE_TARGETS의 값을 따로 적는다 */
+const ROUTE_TARGET_MS = Object.freeze({ entry: [200], status: [200], admission: [200], hold: [50, 150], payment: [3000], scan: [150] });
+
+/**
+ * options.thresholds의 over_target 기준이 정확히 '그 시나리오 경로 가운데 목표가 있는 경로의 목표마다 하나'인지
+ * ('over_target{phase:main,route:<경로>,le:<ms>}': ['count>=0'], 판정이 아니라 요약에 남기려는 기준. 목표가 없는 경로에는 없다)
+ */
+/** 경로 목표 기준이 본구간 경로마다 꼭 그만큼 있다. prepRoutes는 본구간 밖 진입 구간(phase:prep)에도 목표 기준이 있어야 하는 경로다(K1 진입) */
+function assertOverTargets(o, routes, prepRoutes = []) {
+  const want = {};
+  for (const r of routes) for (const le of ROUTE_TARGET_MS[r] ?? []) want[`over_target{phase:main,route:${r},le:${le}}`] = ['count>=0'];
+  for (const r of prepRoutes) for (const le of ROUTE_TARGET_MS[r] ?? []) want[`over_target{phase:prep,route:${r},le:${le}}`] = ['count>=0'];
+  const got = Object.fromEntries(Object.entries(o.thresholds ?? {}).filter(([k]) => k.startsWith('over_target')));
+  assert.deepEqual(got, want);
+}
+
+test('BSL090_K10_O-T1_형식검사용티켓코드묶음은_22자base64url가짜코드이고_검표시험의TICKETS이상이다', () => {
+  const codes = JSON.parse(readFileSync(join(REPO, CODES_FIXTURE), 'utf8'));
+  assert.ok(Array.isArray(codes) && codes.length >= GATE_ENV.TICKETS, `코드 ${codes.length}개(검표 시험의 TICKETS ${GATE_ENV.TICKETS})`);
+  for (const c of codes) {
+    assert.match(c, /^[A-Za-z0-9_-]{22}$/, '발권 코드와 같은 꼴(16바이트의 base64url 22자)');
+    assert.match(c, /^fixture-code-\d{9}$/, '형식 검사용 가짜 코드다');
+  }
+  assert.equal(new Set(codes).size, codes.length);
+});
+
+describe('BSL-090 Before 측정 시나리오 형식(k6 inspect --execution-requirements)', { skip: SKIP, concurrency: false }, () => {
+  before(() => {
+    // 이미지가 없으면 먼저 받는다(CI 첫 실행). 다이제스트로 고정한 이미지만 쓴다
+    try {
+      docker(['image', 'inspect', '--format', '{{.Id}}', K6_IMAGE], 60_000);
+    } catch {
+      docker(['pull', '--quiet', K6_IMAGE], 600_000);
+    }
+  }, { timeout: 660_000 });
+
+  test('BSL090_K10_O-T1_검표시나리오_v0-gate.js는_0초부터예열·WARM_S초부터본구간을_RATE의constant-arrival-rate로보내고_scan본구간기준과150ms목표를넘은수를둔다', { timeout: 240_000 }, () => {
+    // 실행 도구가 주는 값(loadtest/runner/args.mjs gate): 티켓 수 = RATE × (WARM_S + MAIN_S) + 2, 형식 검사용 코드는 그만큼 있다
+    const env = { ...GATE_ENV };
+    assert.equal(env.TICKETS, env.RATE * (env.WARM_S + env.MAIN_S) + 2);
+    assert.equal(new Set([1, env.SCANNERS, env.RATE, env.WARM_S, env.MAIN_S, env.PRE_VUS, env.MAX_VUS]).size, 7, '시험 값은 서로 다르다');
+    assert.ok(JSON.parse(readFileSync(join(REPO, CODES_FIXTURE), 'utf8')).length >= env.TICKETS);
+    const o = inspect('v0-gate.js', env);
+    const { warm, main, warmStart, mainStart } = checkCommon(o, env, { executor: 'constant-arrival-rate', routes: ['scan'], prep: [] });
+    assert.deepEqual(Object.keys(o.scenarios).sort(), ['main', 'mark_end', 'mark_start', 'warm'], '준비 구간이 없다(스캐너는 줄을 서지 않는다)');
+    assert.equal(warmStart, 0, '예열은 0초에 시작한다');
+    assert.equal(mainStart, env.WARM_S, '본구간은 WARM_S초에 시작한다');
+    assert.equal(seconds(o.scenarios.mark_start.startTime), env.WARM_S);
+    assert.equal(seconds(o.scenarios.mark_end.startTime), env.WARM_S + env.MAIN_S);
+    assert.equal(warm.exec, 'scan');
+    assert.equal(main.exec, 'scan');
+    assertOverTargets(o, ['scan']);
+  });
+
+  test('BSL090_K4_S-T12_좌석홀드시나리오_LISTENERS명을함께준비하고_준비뒤CONNECT_S초를비운뒤_홀드를보낸다(구간표시도그만큼뒤)', { timeout: 300_000 }, () => {
+    const plain = { ...BASE_ENV, USERS: 25, PREP_RATE: 10 };
+    const env = { ...plain, LISTENERS: 10, CONNECT_S: 20 };
+    const prepUsers = env.LISTENERS + env.USERS;
+    const entryS = Math.ceil(prepUsers / env.PREP_RATE);
+    const prepS = 2 * entryS + 3;
+    assert.notEqual(entryS, Math.ceil(env.USERS / env.PREP_RATE), '시험 값: 연결 쪽을 더하면 준비 길이가 달라진다');
+    const o = inspect('v0-seat-hold.js', env);
+    // 준비 구간(진입·입장)은 연결 쪽 LISTENERS명과 홀드 쪽 USERS명을 모두 준비한다
+    const { mainStart, warmStart } = checkCommon(o, { ...env, USERS: prepUsers }, { executor: 'constant-arrival-rate', routes: ['hold', 'release'], prep: ['prep_entry', 'prep_admit'] });
+    const { prep_entry: pe, prep_admit: pa } = o.scenarios;
+    assert.equal(pe.rate, env.PREP_RATE);
+    assert.equal(seconds(pe.startTime ?? '0s'), 0);
+    assert.equal(seconds(pe.duration), entryS, '진입 준비는 ⌈(LISTENERS + USERS) ÷ PREP_RATE⌉초');
+    assert.equal(seconds(pa.startTime), entryS + 2, '입장 준비는 진입 준비가 끝나고 2초 뒤');
+    assert.equal(pa.rate, env.PREP_RATE);
+    assert.equal(seconds(pa.duration), entryS, '입장 준비도 ⌈(LISTENERS + USERS) ÷ PREP_RATE⌉초');
+    assert.equal(warmStart, prepS + env.CONNECT_S, '홀드 예열은 준비(2 × ⌈n ÷ PREP_RATE⌉ + 3초) 뒤 CONNECT_S초를 비우고 시작한다');
+    assert.equal(mainStart, prepS + env.CONNECT_S + env.WARM_S);
+    assert.equal(seconds(o.scenarios.mark_start.startTime), mainStart);
+    assert.equal(seconds(o.scenarios.mark_end.startTime), mainStart + env.MAIN_S);
+    // 비운 CONNECT_S초 동안은 아무 구간도 돌지 않는다(받는 파드가 연결을 맺는 동안 부하가 없다)
+    for (const [name, s] of Object.entries(o.scenarios)) {
+      if (name.startsWith('prep_')) assert.ok(endS(s) <= prepS, `${name}이 준비 시간(${prepS}초) 안에 끝나지 않는다(${endS(s)}초)`);
+      else assert.ok(seconds(s.startTime ?? '0s') >= prepS + env.CONNECT_S, `${name}이 비운 시간 안에 시작한다(${s.startTime})`);
+    }
+    // 연결 쪽이 없으면(기본 LISTENERS 0·CONNECT_S 0) 예전과 같다: 홀드 예열은 2 × ⌈USERS ÷ PREP_RATE⌉ + 3초에 시작한다
+    const before = inspect('v0-seat-hold.js', plain);
+    assert.equal(seconds(before.scenarios.prep_entry.duration), Math.ceil(plain.USERS / plain.PREP_RATE));
+    assert.equal(seconds(before.scenarios.warm.startTime), 2 * Math.ceil(plain.USERS / plain.PREP_RATE) + 3);
+  });
+
+  test('BSL090_S-T1_NFR-003_좌석홀드시나리오_홀드본구간의_50ms·150ms목표를넘은수를요약에남기고_놓기에는목표가없다', { timeout: 240_000 }, () => {
+    // K2 S-T1: 인기 좌석 하나에 몰리고 잡은 홀드를 놓지 않는다(KEEP=1)
+    const env = { ...BASE_ENV, MODE: 'hot', HOT_COUNT: 1, KEEP: 1 };
+    const o = inspect('v0-seat-hold.js', env);
+    checkCommon(o, env, { executor: 'constant-arrival-rate', routes: ['hold', 'release'], prep: ['prep_entry', 'prep_admit'] });
+    assertOverTargets(o, ['hold', 'release']);
+    // KEEP은 잡은 홀드를 놓지 않게 할 뿐이다: 구간·기준(options)은 KEEP이 없을 때와 같다(놓기 경로 기준도 그대로 남는다)
+    const released = { ...env };
+    delete released.KEEP;
+    assert.deepEqual(o, inspect('v0-seat-hold.js', released), 'KEEP=1은 options를 바꾸지 않는다');
+  });
+
+  test('BSL090_S-T1_NFR-003_좌석홀드시나리오_요약통계에p(99.9)가있어_K2의홀드p99.9를재고_발생기를나누면아래·위한계로적는다', { timeout: 240_000 }, () => {
+    // §3.10 K별 실행 K2: 재는 것은 '홀드 p99·p99.9'. '발생기 나누기': 발생기마다 따로 나온 p99·p99.9는 합친 값의 아래·위 한계로 적는다.
+    // k6는 summaryTrendStats에 든 통계만 요약에 남긴다. p(99.9)가 없으면 over_target(le:150)로 목표를 넘었는지는 세도 p99.9 값은 남지 않는다
+    const env = { ...BASE_ENV, MODE: 'hot', HOT_COUNT: 1, KEEP: 1 };
+    const o = inspect('v0-seat-hold.js', env);
+    const stats = o.summaryTrendStats ?? [];
+    assert.ok(stats.includes('p(99)'), `summaryTrendStats에 p(99)가 없다: ${stats}`);
+    assert.ok(stats.includes('p(99.9)'), `summaryTrendStats에 p(99.9)가 없다(K2 홀드 p99.9를 재지 못한다): ${stats}`);
+  });
+
+  test('BSL090_P-T1_NFR-006_결제시나리오_장애걸기(route:sim_fault)본구간기준과_결제확정3초·홀드목표를넘은수를요약에남긴다', { timeout: 240_000 }, () => {
+    // K7 ②: 결제사 장애 비율(100명마다 drop 5명·delay 2명, 늦춤 16초)을 받는다. 그 밖의 값은 K7 형식 검사와 같다
+    const env = { ...BASE_ENV, USERS: 40, RATE: 1, WARM_S: 13, MAIN_S: 25, SEATS_PER_ORDER: 1, SECTIONS: 'A,B', ROWS: 2, PER_ROW: 10, FAULT_DROP_PCT: 5, FAULT_DELAY_PCT: 2, FAULT_DELAY_MS: 16000 };
+    const routes = ['hold', 'order', 'sim_auth', 'sim_fault', 'payment', 'order_view'];
+    const o = inspect('v0-payment.js', env);
+    checkCommon(o, env, { executor: 'constant-arrival-rate', routes, prep: ['prep_entry', 'prep_admit'] });
+    assertOverTargets(o, routes);
+  });
+
+  test('BSL090_Q-T2_NFR-001_대기열시나리오_목표가있는경로마다_그요청이나가는구간에요청수·200ms넘은수·실패기준이있어_K1점검을만든다(진입포함)', { timeout: 240_000 }, () => {
+    // §3.10 K1 목표 점검: 진입·대기 상태·입장 확정 p99 200ms, 오류율 0.1% 미만. 점검 파일(runner/merge.mjs checksFromSummary)은 요약의
+    // http_reqs·over_target·http_req_failed{phase,route} 수로 만들고, 시행 수가 0인 경로는 말없이 건너뛴다. k6는 기준을 건 하위 지표만 요약에 남기므로
+    // 경로 요청이 나가는 구간(phase 꼬리표) 가운데 적어도 하나에 그 경로의 세 기준이 있어야 그 경로의 점검이 장부에 남는다
+    const o = inspect('v0-queue.js', { ...BASE_ENV });
+    const th = o.thresholds ?? {};
+    const sentBy = { entry: 'enter', status: 'poll', admission: 'poll' };
+    for (const [route, fn] of Object.entries(sentBy)) {
+      const phases = [...new Set(Object.values(o.scenarios).filter((s) => s.exec === fn).map((s) => s.tags?.phase))];
+      assert.ok(phases.length > 0, `${route} 요청을 보내는 구간(exec ${fn})이 없다`);
+      const measured = phases.filter((p) => th[`http_reqs{phase:${p},route:${route}}`] && th[`over_target{phase:${p},route:${route},le:200}`] && th[`http_req_failed{phase:${p},route:${route}}`]);
+      assert.ok(measured.length > 0, `${route} 요청은 구간 ${phases.join('·')}에서만 나가는데 그 구간에 ${route}의 요청 수·200ms 넘은 수·실패 기준이 없다(K1 ${route} 점검이 장부에 남지 않는다)`);
+    }
+  });
+
+  test('BSL090_Q-T2_대기열시나리오_진입·대기상태·입장확정의_200ms목표를넘은수를요약에남긴다', { timeout: 240_000 }, () => {
+    const env = { ...BASE_ENV };
+    const o = inspect('v0-queue.js', env);
+    checkCommon(o, env, { executor: 'ramping-arrival-rate', routes: ['entry', 'status', 'admission'], prep: ['entry'] });
+    // 진입은 예열 앞의 진입 구간(phase:prep)에서만 나가 그 구간에도 목표 기준을 둔다(§3.10 K1 진입 점검, 2026-11-03 시험 검토)
+    assertOverTargets(o, ['entry', 'status', 'admission'], ['entry']);
+  });
+});

@@ -124,11 +124,17 @@ const UUID_A = '0b5a3f9e-1c2d-4e5f-8a9b-0c1d2e3f4a5b';
 // args.mjs: parseArgs
 // ---------------------------------------------------------------------------------------------
 
-test('ASVS v5.0.0-2.2.1 UsageError는 Error이고 이름이 UsageError, SCENARIOS는 시나리오 셋의 파일이다', () => {
+test('ASVS v5.0.0-2.2.1 UsageError는 Error이고 이름이 UsageError, SCENARIOS는 시나리오 다섯의 파일이다', () => {
   const e = new UsageError('틀림');
   assert.ok(e instanceof Error);
   assert.equal(e.name, 'UsageError');
-  assert.deepStrictEqual({ ...SCENARIOS }, { queue: 'v0-queue.js', 'seat-hold': 'v0-seat-hold.js', payment: 'v0-payment.js' });
+  assert.deepStrictEqual({ ...SCENARIOS }, {
+    queue: 'v0-queue.js',
+    'seat-hold': 'v0-seat-hold.js',
+    payment: 'v0-payment.js',
+    'seat-deltas': 'v0-seat-hold.js',
+    gate: 'v0-gate.js',
+  });
   assert.ok(Object.isFrozen(SCENARIOS) && Object.isFrozen(DEFAULTS) && Object.isFrozen(DEFAULTS.calibrate));
 });
 
@@ -258,6 +264,9 @@ test('NFR-013 ADR-0057 parseArgs v0 queue 기본값: 예열 30·본 60·CPU 4·�
     memoryMi: 4096,
     record: false,
     invariants: false,
+    namespace: 'v0',
+    settle: false,
+    hpaTimeline: false,
     entryRate: 500,
     admitPerSecond: 28,
   });
@@ -279,6 +288,9 @@ test('NFR-013 ADR-0057 parseArgs v0 queue 공통 인자를 모두 주면 그 값
     profile: 'local-gen',
     invariants: true,
     out: '.cache/x y',
+    namespace: 'v0',
+    settle: false,
+    hpaTimeline: false,
     entryRate: 20000,
     admitPerSecond: 28,
   });
@@ -301,12 +313,17 @@ test('NFR-013 ADR-0057 parseArgs v0 seat-hold 기본값: spread·hold-size 2·ho
     memoryMi: 4096,
     record: false,
     invariants: false,
+    namespace: 'v0',
+    settle: false,
+    hpaTimeline: false,
     rate: 200,
     mode: 'spread',
     holdSize: 2,
     hotCount: 1,
     pairs: 1,
     releaseMs: 0,
+    keep: false,
+    dbStats: false,
   });
 });
 
@@ -321,12 +338,17 @@ test('NFR-013 ADR-0057 parseArgs v0 seat-hold 좌석 고르기 인자를 모두 
     memoryMi: 4096,
     record: false,
     invariants: false,
+    namespace: 'v0',
+    settle: false,
+    hpaTimeline: false,
     rate: 200,
     mode: 'hot',
     holdSize: 4,
     hotCount: 7,
     pairs: 3,
     releaseMs: 1500,
+    keep: false,
+    dbStats: false,
   });
   for (const mode of ['spread', 'hot', 'crossed']) assert.equal(parseArgs(sh({ mode })).mode, mode);
 });
@@ -363,8 +385,14 @@ test('NFR-013 ADR-0057 parseArgs v0 payment 기본값: seats-per-order 2, 결제
     memoryMi: 4096,
     record: false,
     invariants: false,
+    namespace: 'v0',
+    settle: false,
+    hpaTimeline: false,
     rate: 100,
     seatsPerOrder: 2,
+    faultDropPct: 0,
+    faultDelayPct: 0,
+    dbStats: false,
   });
 });
 
