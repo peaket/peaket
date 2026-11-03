@@ -3,6 +3,7 @@
 # - full: TLC 전수 검사. 주 1회(월요일 03:00 KST)와, 명세 목록(specs/specs.json)이 적은 관련 ADR이 바뀔 때(ci.yml의 specs_full)
 #   결과 파일(specs/results/)은 내려받을 묶음으로 남긴다. 저장소의 결과 파일은 사람이 로컬에서 `full --write`로 고쳐 커밋한다
 # 검사 도구(Quint, Apalache 묶음 안의 TLC, Quint 평가기)는 고정 판·고정 해시로 받는다(tools/spec-check/fetch-tools.mjs). 외부 계정은 필요 없다
+# GitHub는 워크플로 파일이 바뀐 푸시에서 그 워크플로를 등록한다. 첫 푸시(2026-11-03)에 함께 올라간 이 파일은 등록되지 않아 수동·예약 실행이 돌지 않았다(FND-160에서 찾음).
 name: spec-check
 
 on:
