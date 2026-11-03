@@ -102,6 +102,17 @@ describe('진입 경로', () => {
     expect(JSON.parse(r410.payload).type).toMatch(/sale-ended$/);
   });
 
+  test('오픈전토큰으로묶음구간에오면_202BATCHING본문을준다', async () => {
+    const id = await event({ opensAtMs: NOW - 100, openBatch: true, lobbyShuffle: false });
+    const r = await enter(id, entryBody(id, { preverifyToken: preverifyToken(svc.clock, id, { i0: NOW - 60_000 }) }));
+    expect(r.statusCode).toBe(202);
+    const body = JSON.parse(r.payload);
+    expect(body).toMatchObject({ spreadSec: 8, serverTimeMs: NOW });
+    expect(body.resultPath).toMatch(new RegExp(`^/v1/queues/${id}/batch-results/[0-9a-f]{3}\\.json$`));
+    expect(body.kind).toBeUndefined();
+    expect(typeof body.entryRequestId).toBe('string');
+  });
+
   test('묶음구간의503은_Retry-After머리를싣는다', async () => {
     const id = await event({ opensAtMs: NOW - 500, openBatch: true });
     const r = await enter(id, entryBody(id));

@@ -1,0 +1,25 @@
+{
+  "name": "@peaket/admission-ctrl",
+  "private": true,
+  "version": "0.0.0",
+  "description": "admission-ctrl. 지금은 동시 도착 구간 묶음의 결과 게시(publishBatch, docs/features/queue-admission.md §3 '묶음의 첫 구현', BUILD_ORDER PRF-060)만 있다. Lease 리더·serving 루프와 시작 파일은 PRF-090이 더한다",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.3.2",
+    "@peaket/platform": "workspace:*",
+    "@peaket/shuffle": "workspace:*",
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

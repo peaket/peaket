@@ -79,6 +79,9 @@ export class QueueController {
   @HttpCode(201)
   async enter(@Param('eventId') eventId: string, @ContractBody(EntryBody) body: z.output<typeof EntryBody>, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply) {
     void reply.header('cache-control', 'no-store');
-    return problem((async () => this.enterQueue.run({ accountId: me.accountId, eventId, body, ...who(eventId, me) }))());
+    const { kind, ...out } = await problem((async () => this.enterQueue.run({ accountId: me.accountId, eventId, body, ...who(eventId, me) }))());
+    // 동시 도착 구간 묶음에 넣었으면 202 BATCHING(결과 파일 경로·공개 예정 시각·분산 창, ADR-0041·0058)
+    if (kind === 'BATCHING') void reply.code(202);
+    return out;
   }
 }

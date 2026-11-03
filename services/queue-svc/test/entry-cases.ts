@@ -2,7 +2,7 @@
 // 실제 Valkey의 Lua(test-int/entry-store.int.test.ts)에 같은 사례를 돌린다.
 import type { Clock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
-import { EnterQueue, type EnterResult } from '../src/modules/entry/application/enter-queue.js';
+import { EnterQueue, type EnterOutcome, type EnterResult } from '../src/modules/entry/application/enter-queue.js';
 import { EntryError } from '../src/modules/entry/application/entry-error.js';
 import type { EntryStore, EventSchedules } from '../src/modules/entry/domain/ports.js';
 import type { EventSchedule } from '../src/modules/entry/domain/queue.js';
@@ -34,10 +34,20 @@ async function code(p: Promise<unknown>): Promise<string> {
   }
 }
 
+function ticketOf(r: EnterOutcome): EnterResult {
+  if (r.kind !== 'TICKET') throw new Error(`대기표가 아니라 ${r.kind}다`);
+  return r;
+}
+
 /** 저장소를 감싸 단계 사이에 일을 끼운다(파드가 멈춘 사이를 흉내 낸다) */
 function pausing(store: EntryStore, hooks: { beforeNumber?: () => Promise<void>; beforeRecord?: () => Promise<void> }): EntryStore {
   return {
     preempt: (i) => store.preempt(i),
+    release: (i) => store.release(i),
+    batchRecord: (i) => store.batchRecord(i),
+    batchResult: (i) => store.batchResult(i),
+    convertBatch: (i) => store.convertBatch(i),
+    dropBatch: (i) => store.dropBatch(i),
     number: async (i) => {
       await hooks.beforeNumber?.();
       return store.number(i);
@@ -59,8 +69,8 @@ export function entryCases(label: string, make: () => Promise<EntryWorld>) {
       await w.schedules.set(eventId, openSchedule(w.clock.now(), o));
       const enter = (store: EntryStore = w.store) => new EnterQueue(store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs });
       const body = (o2: Partial<Body> = {}): Body => ({ preverifyToken: preverifyToken(w.clock, eventId), deviceId: DEVICE, entryRequestId: newRequest(), ...o2 });
-      const run = (b: Body, store?: EntryStore, who: { accountId?: string; pid?: string } = {}): Promise<EnterResult> =>
-        enter(store).run({ accountId: who.accountId ?? ACCOUNT, pid: who.pid ?? PID, eventId, body: b });
+      const run = async (b: Body, store?: EntryStore, who: { accountId?: string; pid?: string } = {}): Promise<EnterResult> =>
+        ticketOf(await enter(store).run({ accountId: who.accountId ?? ACCOUNT, pid: who.pid ?? PID, eventId, body: b }));
       return { w, eventId, enter, body, run };
     };
 
@@ -228,7 +238,7 @@ export function entryCases(label: string, make: () => Promise<EntryWorld>) {
       expect(await code(run(body()))).toBe('NOT_OPEN');
     });
 
-    test('오픈직후묶음구간에서는_PRF-060전까지모두503BATCHING이고_RetryAfter는구간끝까지의초를올린다', async () => {
+    test('Q-T24_오픈뒤발급토큰이오픈직후묶음구간에오면_503BATCHING이고_RetryAfter는구간끝까지의초를올린다', async () => {
       const now = (await make()).clock.now();
       const { body, run } = await setup({ opensAtMs: now - 500, openBatch: true });
       const e = await run(body()).catch((x: unknown) => x);

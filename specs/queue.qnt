@@ -407,16 +407,18 @@ module queue {
 //   리더 범위: 사람 1명(대기표 1장), admission-ctrl 2대, 리더 교체 2회, 회차 슬롯 장애 전환 2회
 // 정본 범위 전체(사람 2명·탭 2개씩, ctrl 2대, 장애 전환 2회, 리더 교체 2회)는 시뮬레이션이 본다(`*_full`)
 
-// 정본에 적힌 그대로: 장애 전환 뒤 RB-05 전에도 번호를 내고, 묶음 참가자의 선점 값은 PENDING(수명 10초) 그대로다
+// 정본에 적힌 그대로: 장애 전환 뒤 RB-05 전에도 번호를 낸다(OPEN[13]은 BUILD_ORDER PRF-080이 정본에 넣는다).
+// 묶음 참가자의 선점 값은 묶음 기록으로 바꾼다(OPEN[14]를 PRF-060이 2026-11-03 정본에 넣어 1인 1순번 장치를 켰다)
 module queue_canon {
   import queue(TICKETS = Set((1, 1), (1, 2), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = true, MAX_LEADER_CHANGES = 0,
-               FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = false, ONE_PERSON_GUARDS = false).*
+               FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = false, ONE_PERSON_GUARDS = true).*
 }
 
-// OPEN[13]의 추천안만 더함: 1인 1순번 장치는 정본 그대로(OPEN[14]의 틈만 남긴다)
+// OPEN[13]의 추천안 + 지금 정본(OPEN[14]를 받음): queue_proposed와 같다. 정본이 묶음 기록을 정하기 전(2026-11-02)에는
+// 1인 1순번 장치가 없어 ⑤ 반례(결과 게시 전에 선점이 만료돼 같은 사람이 대기표를 하나 더 받음)가 나왔다
 module queue_canon_batch_dup {
   import queue(TICKETS = Set((1, 1), (1, 2), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = true, MAX_LEADER_CHANGES = 0,
-               FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = false).*
+               FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true).*
 }
 
 // OPEN[13]·OPEN[14]의 추천안: RB-05가 끝날 때까지 그 회차의 번호를 내지 않고, 1인 1순번 장치를 더한다(진입 범위)

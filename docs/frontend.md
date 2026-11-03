@@ -592,7 +592,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 저장소 | 키 | 값 | 수명 | 지우는 때 | 등급 |
 | --- | --- | --- | --- | --- | --- |
 | localStorage | `peaket.device` | `deviceId`(CSPRNG 128비트, base64url 22자) | 사용자가 지울 때까지 | 사이트 데이터 삭제 | P2(기기 식별값) |
-| localStorage | `peaket.queue.{eventId}` | 참가 토큰, 사전 검증 토큰과 발급 시각, 대기표, 순번·구간, 저장 시각 | 회차 판매 종료까지 | 로그아웃, 대기 취소, 410, 판매 종료, 앱 시작 때 2일 [가정]이 지난 항목 | P2 |
+| localStorage | `peaket.queue.{eventId}` | 참가 토큰, 사전 검증 토큰과 발급 시각, 진행 중인 진입의 요청 ID와 묶음 응답(202 본문, 추천 적용 2026-11-03), 대기표, 순번·구간, 저장 시각 | 회차 판매 종료까지 | 로그아웃, 대기 취소, 410, 판매 종료, 앱 시작 때 2일 [가정]이 지난 항목 | P2 |
 | sessionStorage | `peaket.queue.{eventId}.firstAhead` | 처음 앞 인원 | 탭 | 탭 닫힘 | 등급 밖(숫자) |
 | localStorage | `peaket.clock` | 서버 시각 보정값(밀리초 차), 표본 시각, 왕복(§3.3, ADR-0110) | 30분 [가정] | 앱 시작 때 30분이 지난 값, 로그아웃 | 등급 밖(숫자) |
 | sessionStorage | `peaket.admission.{eventId}` | 입장 토큰, 서버 ECDH 공개키(JWK), 좌석맵 파일 경로, 받은 시각 | 구매 세션 | 세션 끝·로그아웃·만료 | P1(구매 세션 자격) |
@@ -649,7 +649,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 1 | `POST https://queue…/v1/queues/{eventId}/lobby-participants` | JSON `{humanCheckToken, deviceId}`, 쿠키, 사전 요청이 있다(T=0 전) | 201 참가 토큰(`verification`이 `REQUIRED`면 SCR-009) / 403 본인확인 전 / 409 다른 기기 |
 | 2 | 셔플 결과 파일 `GET https://queue-files…/v1/queues/{eventId}/shuffle-results/{hashPrefix}.json` | 쿠키는 없고, 사용자 헤더도 없다 | `shuffleResultAt` + 지연이 지난 뒤 한 번 받는다. 404면 간격을 2초부터 두 배씩 늘리고(최대 20초), 간격 안의 무작위 시각에 다시 받는다 |
 | 3 | 사전 검증(공연 상세에서) `POST …/pre-verifications` | JSON `{humanCheckToken, deviceId, behaviorSummary}` | 201 토큰(만료 2분 [가정] 전, 사람 확인을 보이지 않는 모드로 다시 실행해 갱신한다. 조작이 필요하면 위젯을 보인다) |
-| 4 | 진입 `POST https://queue…/v1/queues/{eventId}/entries` | `text/plain` JSON 문자열 `{preverifyToken, deviceId, entryRequestId}`. `entryRequestId`는 진입 시도 하나에 `crypto.randomUUID()`로 만들고, 응답을 못 받아 다시 보낼 때 같은 값을 쓴다(헤더가 아니라 본문이라 사전 요청이 생기지 않는다, 기술 검토 중간-035) | 201 대기표(같은 `entryRequestId`로 다시 보내면 같은 번호의 대기표) / 202 묶음 / 409 / 410 / 503 `Retry-After` |
+| 4 | 진입 `POST https://queue…/v1/queues/{eventId}/entries` | `text/plain` JSON 문자열 `{preverifyToken, deviceId, entryRequestId}`. `entryRequestId`는 진입 시도 하나에 `crypto.randomUUID()`로 만들고, 응답을 못 받아 다시 보낼 때와 묶음 결과 뒤 다시 보낼 때 같은 값을 쓴다(헤더가 아니라 본문이라 사전 요청이 생기지 않는다, 기술 검토 중간-035). 보내기 전에 localStorage에 두어 새로 고침·탭을 다시 열어도 같은 값으로 잇는다(서버는 진입 시도를 이 값으로만 가른다, 추천 적용 2026-11-03) | 201 대기표(같은 `entryRequestId`로 다시 보내면 같은 번호의 대기표) / 202 묶음(`entryRequestId`를 함께 준다) / 409 / 410 / 503 `Retry-After` |
 | 5 | 대기 상태 파일 `GET https://queue-files…/v1/queues/{eventId}/segment-states/{segment}.json` | 쿠키·사용자 헤더가 없다. `cache: "no-store"`(ADR-0110) | 주기·지터·본문 `pollHintMs`(503이면 `Retry-After`, 기술 검토 중간-032, §5.1). `segment = floor((순번 − 1) ÷ 1000)` [가정, 순번은 1부터]. 입장 임박 구간 파일의 `servingSteps`로 차례 반영 지연을 잰다(§3.3) |
 | 6 | 입장 확정 `POST https://queue…/v1/queues/{eventId}/admission` | `text/plain` JSON 문자열 `{queueTicket}` 또는 `{lobbyToken}` | `ADMITTED`·`SOON`·`NOT_YET`·`VERIFYING` / 409 / 410 |
 | 7 | 대기 취소 `DELETE …/entries/me`, 로비 취소 `DELETE …/lobby-participants/me` | 쿠키 | 204 → 저장소를 지운다 |

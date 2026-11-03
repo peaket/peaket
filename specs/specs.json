@@ -46,13 +46,13 @@
           "main": "queue_canon",
           "expect": "violate",
           "invariant": "inv_noDuplicateNumberInGeneration",
-          "why": "정본에 적힌 그대로(RB-05 전에도 번호를 냄, 묶음 참가자의 선점 값을 정하지 않음)는 같은 세대 안에서 번호가 겹친다. 소유자 결정 전까지 남는 반례(PROGRESS OPEN[13])"
+          "why": "정본에 적힌 그대로(RB-05 전에도 번호를 냄. 묶음 기록은 2026-11-03 정본에 들어감)는 같은 세대 안에서 번호가 겹친다. OPEN[13]을 정본에 넣는 BUILD_ORDER PRF-080 전까지 남는 반례"
         },
         {
           "main": "queue_canon_batch_dup",
-          "expect": "violate",
-          "invariant": "inv_onePersonOneTicket",
-          "why": "OPEN[13]의 추천안만 더하고 묶음 참가자의 선점 값은 정본대로(PENDING 수명 10초) 두면, 장애 전환 없이도 결과 게시 전에 선점이 만료돼 같은 사람이 대기표를 하나 더 받는다. 소유자 결정 전까지 남는 반례(PROGRESS OPEN[14])"
+          "expect": "hold",
+          "tlc": false,
+          "why": "OPEN[13]의 추천안 + 지금 정본(묶음 참가자의 선점 값을 판매 종료까지 남는 묶음 기록으로 바꿈, OPEN[14]를 PRF-060이 2026-11-03 정본에 넣음)이면 1인 1순번이 지켜진다. queue_proposed와 같은 모듈이라 전수 검사는 그쪽이 하고 여기서는 시뮬레이션만 본다"
         },
         {
           "main": "queue_no_fencing",

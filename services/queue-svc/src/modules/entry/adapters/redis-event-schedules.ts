@@ -33,7 +33,10 @@ export function parseSchedule(raw: unknown): EventSchedule | null {
   if (opensAtMs === null || startsAtMs === null || lobbyShuffle === null || openBatch === null) return null;
   // 둘 다 끈 조합은 받지 않는다(ADR-0118, 공연 등록 422·DB CHECK)
   if (!lobbyShuffle && !openBatch) return null;
-  return { opensAtMs, startsAtMs, lobbyShuffle, openBatch };
+  // 묶음 구간 길이는 선택 칸이다(없으면 2초 [가정], 있으면 1~60초만 받는다)
+  const windowMs = f.batchWindowMs === undefined ? undefined : int(f.batchWindowMs);
+  if (windowMs === null || (windowMs !== undefined && (windowMs < 1 || windowMs > 60_000))) return null;
+  return { opensAtMs, startsAtMs, lobbyShuffle, openBatch, ...(windowMs !== undefined ? { batchWindowMs: windowMs } : {}) };
 }
 
 @Injectable()

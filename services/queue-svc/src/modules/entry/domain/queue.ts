@@ -6,8 +6,18 @@ export const PREVERIFY_TTL_MS = 15 * 60_000;
 export const PENDING_TTL_MS = 10_000;
 /** 대기 상태 파일 구간의 크기(§4) */
 export const SEGMENT_SIZE = 1_000;
-/** 오픈 직후 동시 도착 구간 N 2초 [가정](ADR-0041) */
+/** 오픈 직후 동시 도착 구간 N 2초 [가정](ADR-0041). 회차 일정 사본의 batchWindowMs로 바꿀 수 있다 */
 export const OPEN_BATCH_MS = 2_000;
+/** 한 회차의 묶음 번호(오픈 직후 하나) */
+export const BATCH_NO = 1;
+/** 묶음 결과 공개 예정: 구간 끝 + 11초 [가정](비콘 대기 최대 6초 + 게시 5초. drand 일정은 BUILD_ORDER HOT-040) */
+export const BATCH_RESULT_DELAY_MS = 11_000;
+/** 결과 받기 분산 창(초, ADR-0058) */
+export const BATCH_SPREAD_SEC = 8;
+/** 묶음 결과 키를 잃어 다시 쓰기를 청한 진입의 Retry-After [가정] */
+export const BATCH_REPAIR_RETRY_SEC = 2;
+/** 결과 파일을 고르는 토큰 해시 앞자리 수(16진, 파일 4,096개 [가정]) */
+export const RESULT_PREFIX_LEN = 3;
 /** 판매 종료는 공연 시작 24시간 전(ADR-0064) */
 export const SALE_END_BEFORE_START_MS = 24 * 3600_000;
 /** 회차 일정 사본·순번 카운터·빠진 번호 기록이 판매 종료 뒤 남는 시간 1일 [가정](docs/data.md §3 q:{event:E}:cfg) */
@@ -60,6 +70,8 @@ export interface EventSchedule {
   startsAtMs: number;
   lobbyShuffle: boolean;
   openBatch: boolean;
+  /** 오픈 직후 묶음 구간 길이(밀리초, 없으면 OPEN_BATCH_MS) */
+  batchWindowMs?: number;
 }
 
 /** 대기열 Redis를 잠시 쓸 수 없다(마감 초과·연결 끊김·클러스터 재구성·장애 전환 중). 받는 층이 503과 Retry-After로 답한다 */
@@ -73,5 +85,7 @@ export class QueueStoreUnavailable extends Error {
 /** 구간 번호: 구간 0이 1~1,000번(§4) */
 export const segmentOf = (seq: number): number => Math.floor((seq - 1) / SEGMENT_SIZE);
 export const saleEndOf = (s: EventSchedule): number => s.startsAtMs - SALE_END_BEFORE_START_MS;
+/** 묶음 구간 끝 */
+export const batchCloseAtOf = (s: EventSchedule): number => s.opensAtMs + (s.batchWindowMs ?? OPEN_BATCH_MS);
 /** 회차 단위 키의 만료 시각 */
 export const keepUntilOf = (s: EventSchedule): number => saleEndOf(s) + KEEP_AFTER_SALE_END_MS;
