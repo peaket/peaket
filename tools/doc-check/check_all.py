@@ -34,8 +34,9 @@ SKIP_PATH_PARTS = ('/migrations/meta/',)
 ID_KINDS = ('FR', 'NFR', 'POL', 'SCR', 'CMP', 'ADR')
 MARKERS = ('[가정', '[충돌', '[보완')
 # 존재하지 않아도 되는 경로: 외부 URL 안의 경로 문자열이라 오탐(review R-10),
-# 없앤 문서인데 고치지 않는 지난 기록(ADR 본문, review의 지난 행)이 가리키는 경로(ADR-0090, review R-105)
-ALLOW_PATHS = {'docs/software-architecture.md', 'docs/arc42.md', 'docs/appendix-learning-map.md'}
+# 없앤 문서인데 고치지 않는 지난 기록(ADR 본문, review의 지난 행)이 가리키는 경로(ADR-0090, review R-105).
+# docs/guide/README.md는 2026-11-01 소유자가 지운 쉬운 설명서이고, 00-summary §4의 신설 기록이 가리킨다(ADR-0177)
+ALLOW_PATHS = {'docs/software-architecture.md', 'docs/arc42.md', 'docs/appendix-learning-map.md', 'docs/guide/README.md'}
 
 
 class Report:

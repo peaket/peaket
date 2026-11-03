@@ -184,7 +184,7 @@ operations:
   publishSettingChanged: { action: send, channel: { $ref: '#/channels/control.settings' }, summary: "ops-svc Outbox → Outbox 릴레이(ops-outbox-relay, 폴링, ADR-0116·0143). 운영 명령의 설정 이벤트(POL-021)" }
   consumeSettingChanged: { action: receive, channel: { $ref: '#/channels/control.settings' }, summary: "모든 서비스의 모든 파드(파드마다 따로 읽는 방송형, 시작 때 처음부터 읽기, ADR-0103), analytics-ingest(actor는 싣지 않음, analytics §3.1)" }
   publishPurchaseSession: { action: send, channel: { $ref: '#/channels/trade.purchase-sessions' }, summary: purchase-svc Redis Stream 릴레이 }
-  consumePurchaseSession: { action: receive, channel: { $ref: '#/channels/trade.purchase-sessions' }, summary: "queue-svc(입장 자리 갱신·비우기), inv-ingest(PurchaseSessionStarted로 구매 세션을 여정에 잇기, 추천 적용 2026-10-31, ADR-0171)" }
+  consumePurchaseSession: { action: receive, channel: { $ref: '#/channels/trade.purchase-sessions' }, summary: "queue-svc(입장 자리 갱신·비우기), analytics-ingest(브론즈 적재, 실버 구매 세션 누적 스냅샷의 원천, docs/features/analytics.md §3.1, 2026-11-01 정합 점검), inv-ingest(PurchaseSessionStarted로 구매 세션을 여정에 잇기, 추천 적용 2026-10-31, ADR-0171)" }
   publishSessionTerminated: { action: send, channel: { $ref: '#/channels/control.sessions-terminated' }, summary: "identity-svc Outbox → Outbox 릴레이(identity-outbox-relay, 폴링, ADR-0116·0143)" }
   consumeSessionTerminated: { action: receive, channel: { $ref: '#/channels/control.sessions-terminated' }, summary: "모든 서비스의 모든 파드(공용 서버 패키지 packages/platform의 종료 세션 목록. 파드마다 따로 읽고, 뜰 때 지금 − 15분부터 다시 읽는다, ADR-0103)" }
   publishAccountMerged: { action: send, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "identity-svc" }

@@ -4,7 +4,7 @@
 - **원문 출처**: 틀은 GreatFrontEnd 'Front End System Design Playbook'의 The RADIO Framework(2026-10-21 열람)를 따른다. 내용은 docs/architecture.md §6·§10(원문 설계서 3·4·5·6장의 프론트엔드 부분), docs/planning/02·04, docs/design/d1~d5, docs/api/*, docs/features/*, docs/security/asvs/*, docs/observability.md §11, docs/devops.md, docs/infra.md, prototype/을 모아 자세히 정했다. 결정은 [ADR-0079](adr/0079-frontend-radio-detailed-design.md)에 있다. 전역 상태 도구를 Zustand 하나로 줄인 결정은 [ADR-0092](adr/0092-single-client-state-library-zustand.md)에 있다.
 - **기준 기획 버전**: v1.0.
 - **표시 규칙**: 잴 값은 [가정]으로, 이 문서에서 처음 정한 세부는 '추천 적용, 2026-10-21'(ADR-0079 결정 번호)로 적는다. 2026-10-27에 더한 콘솔의 켜 둔 동안 성능 규칙(화면별 늦게 싣기, 안 보이는 위젯의 구독 멈춤, Canvas 그래프와 들고 있는 양의 상한, 장시간 시험)은 '추천 적용 2026-10-27'(ADR-0091)로 적는다. 같은 날 정한 상태 도구의 세부(에디터 문서 모양, 관제 상태 통로, 동작 이름 규칙)는 '추천 적용 2026-10-27'(ADR-0092)로 적는다. 숫자에는 증명 수준을 붙인다(docs/planning/02 §3.1 원칙 5). 증명 수준은 실측(PC), 외삽(잰 범위의 결과를 식으로 늘려 더 큰 규모의 값을 구한 것), 문서 인용, 설계 목표다. 외부 사실(라이브러리 판·브라우저 지원·표준 문장)은 2026-10-21에(ADR-0091의 것은 2026-10-27에) 원문으로 확인했고, 확인한 곳은 §6.4에 모았다.
-- **쉬운 설명**: 이 문서를 처음 읽는다면 [docs/guide/17-frontend.md](guide/17-frontend.md)를 먼저 본다. 그 편은 이 문서의 번역이고 규범이 아니다.
+- **쉬운 설명**: 해설서 [docs/walkthrough/](walkthrough/README.md)(ADR-0177)의 분야 편 [06 프론트엔드](walkthrough/fields/06-frontend.md)가 이 문서를 푼다. 해설서는 규범이 아니다. 쉬운 설명서 docs/guide/는 2026-11-01 소유자가 지웠다.
 
 ## 0. 이 문서를 읽는 법
 
@@ -81,7 +81,7 @@ RADIO는 서버를 검은 상자로 두라고 한다. 이 문서도 게이트웨
 | 좌석·홀드 | FR-009·010·042·050 | SCR-010 | 5만 석 Canvas, 구역 구독과 델타(바뀐 좌석만 담은 작은 메시지) 반영, 스냅샷(어느 시점의 전체 상태를 찍어 둔 것)으로 재동기화, 접근성 목록, 홀드 서명 요청, 카운트다운과 1회 연장, 자동 배정 결과 |
 | 결제 | FR-011·014·015·053 | SCR-011·012·015 | 서버 금액 표시, 결제사별 결제창, 복귀 화면에서 결제 접수, 결과 롱 폴링, 초안 복구(개인정보 제외) |
 | 월렛·현장(팬) | FR-012·013·047·060 | SCR-013·014·038·041·043·060 | 입장용 휴대폰 등록(밖으로 꺼낼 수 없는 키), 15초 회전 QR(완전 오프라인), 오프라인 캐시, 양도·돌려주기·취소, 부스 재발급 |
-| 파트너 | FR-021~027·046·052·055·062·066 | SCR-020~027·037·044·062·063 | 위저드 자동 임시저장, 좌석맵 에디터(브라우저 자동 채우기 계산, Undo·Redo 10단계 정확 복원), DSL 시뮬레이션, SSE 현황, 명단 사유 입력과 스트리밍 내려받기, 현장 운영 10초 [가정] 갱신 |
+| 파트너 | FR-021~027·046·052·055·062·066 | SCR-020~027·037·044·062·063 | 위저드 자동 임시저장, 좌석맵 에디터(브라우저 자동 채우기 계산, Undo·Redo 10단계 정확 복원), DSL 시뮬레이션, 판매 현황 1분 주기 조회(2026-10-28 SSE에서 바꿈, §4.4.3, 기술 검토 낮음-024), 명단 사유 입력과 스트리밍 내려받기, 현장 운영 10초 [가정] 갱신 |
 | 관제 | FR-028~034·051·052·057~059·062~065·068 | SCR-028~032·045~049·053·064~068 | 단계 탭과 위젯, 신선도 표시, 명령 수명주기(dry-run·재인증·2인 승인·ack), 경보 패널, 판매 승인과 수요 예측, 법정 기한 카운트다운 |
 | 스캐너 | FR-035·036·046·065·066·067 | SCR-033~036·052 | 기기 승인 로그인, 목록 받기, 시계 보정, Worker 디코딩·판정, 로컬 큐와 업로드, 60초 변경분, 화면 꺼짐 방지, 책임자 기능 |
 
@@ -257,7 +257,7 @@ peaket/
 
 Turborepo 작업은 `lint`·`typecheck`·`test`·`build`·`size`·`e2e`이고, PR에서는 `peaket`의 `ci.yml`이 Turborepo `--affected`로 고른 범위(바뀐 앱·패키지와 그것에 기대는 것)의 작업만 돈다(devops §3, ADR-0165 결정 3).
 
-**지금 있는 것(2026-10-31, ADR-0170)**: 위 구조 가운데 `apps/web`(+`queue-room`), `apps/partner`, `apps/console-host`, `apps/widgets/queue`·`purchase`, `apps/scanner`, `apps/forensics`, `packages/ds`, `packages/config`가 있다. 69개 화면을 디자인 캔버스 보드대로 목업 데이터로 그린 퍼블리싱 단계라, 데이터 접근 층(`api-client`)·`telemetry`·`validation`·`console-contract`·`seatmap` 패키지와 Steiger·ESLint·size-limit은 아직 없다. 화면마다 `?state=`로 캔버스 보드의 상태를 고르고, 앱마다 `/preview`(개발 서버에서만)에 화면·상태 목록이 있다. `@peaket/ds`의 겉모양은 캔버스 키트(`src/styles/kit.css`)이고, 부품 속을 `@seed-design/react`로 바꾸는 일은 wbs 0.6.2에서 같은 API를 지키며 한다. Cache Components·nonce(FE-T35), Module Federation 원격 적재(FE-T29), PWA, 다국어 주소는 각자의 단계에서 켠다. 2026-11-01에 `packages/contracts`(계약에서 만든 Zod 스키마·타입, packages/contracts/README.md)와 작업 공간 시험 작업(`pnpm test` = Turborepo `test`)을 더했다(openspec 변경 `add-contracts-package`, BUILD_ORDER FND-030).
+**지금 있는 것(2026-10-31, ADR-0170)**: 위 구조 가운데 `apps/web`(+`queue-room`), `apps/partner`, `apps/console-host`, `apps/widgets/queue`·`purchase`, `apps/scanner`, `apps/forensics`, `packages/ds`, `packages/config`가 있다. 69개 화면(출시 당시 개수. 그 뒤 ADR-0171로 SCR-070·071이 더해져 화면 목록은 지금 71개다. docs/design/d5-screen-blueprint.md §2)을 디자인 캔버스 보드대로 목업 데이터로 그린 퍼블리싱 단계라, 데이터 접근 층(`api-client`)·`telemetry`·`validation`·`console-contract`·`seatmap` 패키지와 Steiger·ESLint·size-limit은 아직 없다. 화면마다 `?state=`로 캔버스 보드의 상태를 고르고, 앱마다 `/preview`(개발 서버에서만)에 화면·상태 목록이 있다. `@peaket/ds`의 겉모양은 캔버스 키트(`src/styles/kit.css`)이고, 부품 속을 `@seed-design/react`로 바꾸는 일은 wbs 0.6.2에서 같은 API를 지키며 한다. Cache Components·nonce(FE-T35), Module Federation 원격 적재(FE-T29), PWA, 다국어 주소는 각자의 단계에서 켠다. 2026-11-01에 `packages/contracts`(계약에서 만든 Zod 스키마·타입, packages/contracts/README.md)와 작업 공간 시험 작업(`pnpm test` = Turborepo `test`)을 더했다(openspec 변경 `add-contracts-package`, BUILD_ORDER FND-030).
 
 ### 2.3 앱별 구조
 
@@ -265,7 +265,7 @@ Turborepo 작업은 `lint`·`typecheck`·`test`·`build`·`size`·`e2e`이고, P
 | --- | --- | --- | --- |
 | 소비자 웹 | Next.js 16.4(App Router, Cache Components, `proxy.ts`), React 19.3, TanStack Query 5, Zustand 5, XState 5, React Hook Form 7 + Zod 4, Serwist 9(월렛), `openid-client` 6(`oauth4webapi` 3 위, 소셜 로그인의 얇은 OIDC 클라이언트, ADR-0119, I-T51에서 고름 2026-11-03) | 웹 앱 서버: ISR·동적 화면, 소셜 로그인(인가 코드 교환과 ID 토큰 확인, 로그인 진행 쿠키), 연결 제안 쿠키를 읽는 경로 | 좌석맵 Worker, 구매 세션 서명기, 결제사 SDK 적재기, 월렛 QR Worker, 본인확인 창 관리자 |
 | 대기실 경량 페이지 | TypeScript + rolldown(Vite 8) 빌드, 프레임워크는 쓰지 않는다 | 없다(AWS 파일 저장소인 S3의 정적 파일) | 상태표(§3.4), 폴러, 시계, 저장소, 탭 조정, 텔레메트리 lite |
-| 파트너 콘솔 | Next.js 16.4, React 19.3, TanStack Query 5(`@peaket/api-client` 훅), Zustand 5, RHF + Zod, TanStack Table 9(CMP-031 표 논리, 기술 검토 낮음-100), Chart.js 4.6, Konva 10.9(좌석맵 에디터 편집 캔버스, 명령형으로 쓴다, §5.6) | 파트너 앱 서버: 요청마다 셸(nonce), 여러 호출을 묶는 화면의 서버 컴포넌트. 로그인은 화면이 gw-partner를 바로 부르고 앱 서버에는 로그인 상태가 없다(ADR-0119). tRPC는 쓰지 않는다(ADR-0100) | 좌석맵 에디터 캔버스와 계산 Worker, DSL 시뮬레이터, SSE 클라이언트. 무거운 부분은 `next/dynamic`으로 쓸 때 싣는다(§5.6) |
+| 파트너 콘솔 | Next.js 16.4, React 19.3, TanStack Query 5(`@peaket/api-client` 훅), Zustand 5, RHF + Zod, TanStack Table 9(CMP-031 표 논리, 기술 검토 낮음-100), Chart.js 4.6, Konva 10.9(좌석맵 에디터 편집 캔버스, 명령형으로 쓴다, §5.6) | 파트너 앱 서버: 요청마다 셸(nonce), 여러 호출을 묶는 화면의 서버 컴포넌트. 로그인은 화면이 gw-partner를 바로 부르고 앱 서버에는 로그인 상태가 없다(ADR-0119). tRPC는 쓰지 않는다(ADR-0100) | 좌석맵 에디터 캔버스와 계산 Worker, DSL 시뮬레이터. 판매 현황은 SSE가 아니라 1분 주기 조회다(§4.4.3, 기술 검토 낮음-024, 2026-11-01 정합 점검). 무거운 부분은 `next/dynamic`으로 쓸 때 싣는다(§5.6) |
 | 관제 콘솔 | webpack 5.112 + `@module-federation/enhanced` 2.9, React 19.3, React Router 8.5(데이터 라우터), Zustand 5, TanStack Query 5(`@peaket/api-client` 훅), TanStack Table 9(CMP-031 표 논리), EventSource(브라우저 내장 SSE), Chart.js 4.6 | 없다(S3 정적 파일, 원격은 같은 출처 `/remotes/`) | 원격 적재기(무결성·대체·미리 받기), 화면별로 늦게 싣는 경로, 호스트 Zustand 저장소와 원격에 넘기는 읽기 전용 `host` 통로, 스트림 어댑터, SSE 흐름 관리(늘 여는 흐름, 보이는 위젯 목록이 바뀌면 위젯 흐름 다시 열기, §5.7, ADR-0100) |
 | 스캐너 | Vite 8 + vite-plugin-pwa 2(Workbox 7), Dexie 4, zxing-wasm 3, React 19.3, Zustand 5, XState 5 | 없다(S3 정적 파일) | 카메라·디코딩·판정 Worker, Dexie 저장소, 업로드 큐, 변경분 수신기, 화면 꺼짐 방지 |
 
@@ -281,7 +281,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | --- | --- | --- | --- | --- | --- |
 | 뷰 | React 서버·클라이언트 컴포넌트, `@peaket/ds` | DOM 템플릿 + `textContent` 갱신 | React 클라이언트 컴포넌트 | 호스트 셸 + 원격 위젯(React) | React 화면 + 판정 오버레이 |
 | 저장소(클라이언트 상태) | TanStack Query(서버 캐시), Zustand(UI·좌석 선택), XState(예매·소켓·결제 결과 흐름) | 손으로 쓴 상태표 | TanStack Query(api-client 훅), Zustand(에디터 문서·화면 상태), RHF(폼) | Zustand(호스트 저장소 하나 + 원격마다 저장소) + 호스트 스트림 어댑터(작은 유틸 둘, §3.1) | Dexie(영속) + Zustand(화면 상태) + XState(로그인·동기화) |
-| 데이터 접근 | `@peaket/api-client`(교차 출처 REST·롱 폴링), 좌석 WebSocket 클라이언트(Worker 안) | 대기열 부분 클라이언트(폴러·진입·입장 확정) | `@peaket/api-client`(`partner-api` 직접) + SSE·내려받기 | `@peaket/api-client`(REST: 명령·조회) + SSE 흐름 둘 | `@peaket/api-client` 스캐너 부분(요청마다 기기 키로 DPoP 증명을 붙인다. mTLS 선택지면 인증서는 브라우저가 처리한다) |
+| 데이터 접근 | `@peaket/api-client`(교차 출처 REST·롱 폴링), 좌석 WebSocket 클라이언트(Worker 안) | 대기열 부분 클라이언트(폴러·진입·입장 확정) | `@peaket/api-client`(`partner-api` 직접, 판매 현황은 1분 주기 조회, §4.4.3) + 내려받기 | `@peaket/api-client`(REST: 명령·조회) + SSE 흐름 둘 | `@peaket/api-client` 스캐너 부분(요청마다 기기 키로 DPoP 증명을 붙인다. mTLS 선택지면 인증서는 브라우저가 처리한다) |
 | 서버 쪽 조합 | 웹 앱 서버(ISR, 소셜 로그인 경로) | 없다 | 파트너 앱 서버의 서버 컴포넌트(여러 호출을 묶는 화면만 gw-partner REST를 묶어 읽는다) | 없다 | 없다 |
 
 뷰는 데이터 접근 층을 직접 부르지 않고 저장소 층의 훅(쿼리·액션)만 부른다. 원격 위젯은 데이터 접근 층을 갖지 않고 호스트가 넘긴 `ConsoleServices`만 쓴다(§4.5).
@@ -320,7 +320,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | `/v1/events/*/seatmap-layouts/*.json`, `/v1/home/rankings.json` | 010·001 | S3 정적 JSON | 좌석맵 `immutable`, 랭킹 3,600초·게시 때 무효화(정본) | — | — | |
 | `/_t/rum`, `/_t/csp`, `/_t/err` | — | POST만, gw-fan 텔레메트리 입구 | 캐시하지 않는다 | — | — | 응답은 204, 본문은 없다(§5.16) |
 | 허니팟 링크(`/_t/` 아래 경로 하나, 정확한 경로 [가정, wbs 3.2.3에서 확정]) | 002·007 | GET, `www` 배포만. gw-fan이 trust-svc의 허니팟 기록 처리기로 넘긴다 | 캐시하지 않는다(`/_t/*` 캐시 동작) | — | — | 응답은 늘 204, 본문은 없다. 공연 상세와 로비 화면에 숨긴 일반 `<a>`로만 둔다(§5.15). 같은 출처라 `Sec-Fetch-Site: same-origin`과 팬 로그인 쿠키가 실린다. gw-fan은 그 쿠키의 팬 액세스 토큰을 검증해 pid만 내부 헤더로 넘기고 쿠키 원문은 다른 `/_t/*`처럼 지운다. `/_t/*` 가운데 이 경로 하나만 GET이다(추천 적용 2026-10-30, docs/features/bot-defense.md §7, docs/api/guidelines.md §9) |
-| 파트너 콘솔 전 경로 | 020~027·037·044·062·063 | 요청마다 셸(nonce) + CSR(여러 호출을 묶는 화면은 서버 컴포넌트가 첫 화면을 묶어 읽는다) | `private, no-store` | `partner-api` 직접(api-client 훅), SSE·내려받기도 직접(ADR-0100) | B | |
+| 파트너 콘솔 전 경로 | 020~027·037·044·062·063 | 요청마다 셸(nonce) + CSR(여러 호출을 묶는 화면은 서버 컴포넌트가 첫 화면을 묶어 읽는다) | `private, no-store` | `partner-api` 직접(api-client 훅), 판매 현황 1분 주기 조회(§4.4.3, 기술 검토 낮음-024)·내려받기도 직접(ADR-0100) | B | |
 | 관제 콘솔 전 경로, `/remotes/*` | 028~032·045~049·053·064~068·070·071 | 정적 SPA(S3), 모든 경로를 `index.html`로 | `index.html`은 `no-cache`, 자산은 `immutable` | ops-api | C | 관리자 IP로 제한한 배포 |
 | `/forensics?event=`(포렌식 리플레이 조사·연구 원천, 2026-10-31 출시 범위, ADR-0171) | 069 | 따로 여는 정적 페이지(S3 `/forensics/`, `apps/forensics` 운영 빌드). 콘솔이 모든 경로를 `index.html`로 보내는 규칙에서 이 경로를 뺀다 | `index.html`은 `no-cache`, 자산은 `immutable` | ops-api 조사 원천 리플레이 파일·연구 내보내기(docs/features/forensic-replay.md §6.7.1·§6.3) | C + COEP `require-corp`(이 경로만) | 관리자 IP로 제한한 배포다. 관제 셸·실시간 연결을 싣지 않고 새 탭으로 연다(추천 적용 2026-10-21, ADR-0080 상태 줄) |
 | 스캐너 전 경로, `/enroll` | 033~036·052 | 정적 PWA(S3) | `index.html`·서비스 워커 `no-cache`, 자산 `immutable` | scanner-api | D | 새 판은 근무 준비 때만 적용한다(devops §6.6) |
@@ -608,12 +608,14 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | IndexedDB `peaket-push`(웹 푸시 서비스 워커 `/push/sw.js`와 화면이 함께 쓴다, §5.4) | `pending` | '다시 등록 필요' 표시와 브라우저가 바꾼 새 구독(구독 주소, 암호화 키 `p256dh`·`auth`, `expirationTime`), 적은 시각. 서비스 워커의 `pushsubscriptionchange`가 적는다. 서비스 워커는 액세스 토큰을 새로 받지 못할 수 있어 직접 등록하지 않는다 | 다음에 화면이 열려 등록할 때까지 | 로그인한 화면이 `POST /v1/push-subscriptions`로 등록에 성공했을 때, 로그아웃 | P2(Web Push 구독 정보, data-classification). 추천 적용 2026-10-30, docs/features/notify.md §3.4 |
 | IndexedDB `peaket-wallet` | §3.7 | 오프라인 티켓 표시 값, 기기 키(추출 불가) | 공연 끝 + 7일 [가정] | 기본은 로그아웃해도 남긴다. '이 기기의 입장 키도 지우기'를 고르면 지운다. 키를 폐기·재발급할 때는 그 티켓 | P2 |
 | Cache Storage(월렛 서비스 워커) | `wallet-shell-{판}` | 월렛 셸 HTML·JS·CSS·글꼴 | 다음 판까지 | 새 판 활성화, 킬 스위치, 입장 키 지우기 선택 | 개인정보는 없다 |
-| Dexie `peaket-scanner`(스캐너 출처) | §3.8 | 회차 목록·키·폐기 목록·입장 상태·스캔 큐 | §3.8 | §3.8 | P2(현장 검표 기록) |
+| Dexie `peaket-scanner`(스캐너 출처) | §3.8 | 회차 목록·키·폐기 목록·입장 상태 | §3.8 | §3.8 | P2(현장 검표 기록) |
+| Dexie `peaket-scanner-queue`(스캐너 출처) | §3.8 | 스캔 큐(`scanQueue`. 쓰기 내구성 strict로 여는 따로 둔 DB, 2026-11-02 정합 점검) | §3.8 | §3.8 | P2(현장 검표 기록) |
 | localStorage(관제 출처) | `peaket.console.ui` | 접은 위젯, 표 열 너비, 한 글자 단축키 켬(처음은 끔, 값이 없으면 끔으로 본다, docs/design/d3 §0), 화면 테마(자동·다크·라이트, 값이 없으면 자동, docs/design/d1 §4) | 사용자가 지울 때까지 | 로그아웃 정리 루틴(§5.14.4 2번. 관제 로그아웃 응답은 교차 출처인 `ops-api`에서 와서 `Clear-Site-Data`로는 이 출처를 지우지 못한다, 추천 적용 2026-10-28, 기술 검토 중간-067) | 등급 밖 |
 | IndexedDB `peaket-forensics`(포렌식 데모 출처) | `scenarios/{시드}` | 합성 시나리오 사건(개인정보는 없다) | 사용자가 지울 때까지 | [캐시 지우기], 사이트 데이터 삭제 | 개인정보는 없다(ADR-0080) |
 
 - **저장하지 않는 것**: 이름·전화·이메일·주소·계좌번호·카드 값·결제사 토큰(`paymentKey`·`paymentToken`)·인증 앱 코드·비밀번호·문의·신고·소명(예매 제한이나 양도 회수 대상이 된 팬이 사정을 설명하는 절차) 본문·본인확인 결과 값·서버 오류 원문. 결제창 복귀 주소의 값은 읽자마자 주소에서 지우고, 저장하지 않는다(asvs/payment).
 - **쿠키**: 프론트엔드 코드는 쿠키를 쓰지 않는다(`document.cookie` 쓰기를 금지하는 린트). 쿠키 이름과 속성은 identity §3이 정본이다.
+- **HTTP 캐시에 맡기는 것**: 좌석맵 파일(`SeatMapLayout`, 배치 버전이 이름에 든 `immutable` 파일)은 위 표의 저장소에 넣지 않고 브라우저 HTTP 캐시에 맡긴다. 대기 중에 미리 받아 두는 것도 HTTP 캐시다(§3.2·§5.2, 2026-11-02 정합 점검, docs/data.md §1 클라이언트 로컬 저장소 행).
 - **정리 루틴이 도는 때**: 앱 시작(만료 항목), 로그아웃(§5.14), 세션 만료 통지(`peaket.session` 채널), 구매 세션 끝, 판매 종료(대기실이 `ENDED`를 보면).
 - **용량**: localStorage는 한 출처에 몇 MB 수준이라 위 키만 둔다. 큰 데이터(월렛·스캐너 목록)는 IndexedDB에 둔다. `QuotaExceededError`가 나면 오래된 회차 키부터 지우고 다시 쓴다.
 
@@ -1013,7 +1015,7 @@ function nextDelayMs(s: QueueView, net: NetState, vis: DocumentVisibilityState):
 - **폴링 힌트는 본문으로 온다(추천 적용 2026-10-28, 기술 검토 중간-032)**: 서버가 폴링을 늦추라고 주는 값은 대기 상태 파일 본문의 `pollHintMs`(다음 폴링까지의 최소 간격, 밀리초)다. 상태 조회 Degraded 때 queue-svc의 파일 생성 작업과 S3 사본이 같은 값(그 구간 거리별 주기의 2배)을 싣는다. 그래서 원본이 S3 사본으로 넘어가도 모든 클라이언트의 주기가 두 배가 된다. S3 객체 메타데이터로는 `Retry-After`를 줄 수 없다(queue-admission §4). `Retry-After` 헤더는 503 응답에서만 읽고(`queue-files`가 노출한다, guidelines §9), 200 응답에 헤더가 있어도 읽지 않는다. 본문 값이 늘 앞선다.
 - **하한이 있으면 위쪽으로만 흔든다(추천 적용 2026-10-28, 기술 검토 중간-038)**: `Math.max(지터 값, 하한)`으로 자르면 `Retry-After`가 기본 간격보다 클 때 지터가 사라져, T=0에 같은 1초 안에 503을 받은 사람들이 정확히 N초 뒤 한꺼번에 다시 온다. 그래서 하한이 있으면 하한~1.2배 사이에 고르게 퍼뜨린다. 하한이 없는 보통 폴링은 지금처럼 ±20%라, 입장 임박 구간은 0.4~0.6초 간격이고 ADR-0110의 지연 예산(다음 폴링까지 0~0.6초)이 그대로다.
 - **브라우저 캐시를 건너뛴다(추천 적용 2026-10-28, ADR-0110)**: 폴링은 `fetch(주소, {cache: "no-store"})`로 보낸다. 입장 임박 구간 파일은 `Expires`(다음 생성 시각)로 캐시되는데, 브라우저는 그 수명을 초 단위 `Date`로 계산해 같은 파일을 생성 뒤 최대 1초 더 내줄 수 있기 때문이다. 이때 브라우저가 스스로 붙이는 `Cache-Control: no-cache`·`Pragma: no-cache`는 사전 요청을 만들지 않고(Fetch 표준은 사전 요청 여부를 정한 뒤 이 두 헤더를 붙인다), CloudFront는 시청자 요청의 두 헤더를 무시해 엣지 캐시로 답한다(AWS 개발자 안내서, 2026-10-28 확인). 쿼리 문자열로 캐시를 깨는 방식은 CDN 캐시 키가 갈라져 쓰지 않는다.
-- 매진(`SOLD_OUT`)·판매 종료(`ENDED`)면 폴링을 멈춘다. 먼 구간의 매진 감지는 최대 약 25초 걸린다(정본). 일시 매진(`ALL_HELD`)은 좌석이 돌아올 수 있으므로 폴링을 그대로 이어 간다(ADR-0122).
+- 매진(`SOLD_OUT`)·판매 종료(`ENDED`)면 폴링을 멈춘다. 먼 구간의 매진 감지는 최대 약 28초 걸린다(폴링 24초 + 생성 1초 + 캐시 1초 + 낡은 값 허용 2초, docs/features/queue-admission.md §8, 2026-11-01 정합 점검). 일시 매진(`ALL_HELD`)은 좌석이 돌아올 수 있으므로 폴링을 그대로 이어 간다(ADR-0122).
 - **여러 탭: 보이는 탭이 리더다(추천 적용 2026-10-28, 기술 검토 중간-037)**: 같은 회차를 연 탭이 여럿이면 Web Locks `queue-poll:{eventId}`를 쥔 탭(리더)만 폴링하고, 받은 값을 `BroadcastChannel`로 다른 탭에 나눈다(§4.7·§5.9). 숨긴 탭이 리더면 간격이 최소 5초가 되고, Chrome은 5분 넘게 숨긴 소리 없는 탭의 연쇄 타이머를 1분에 한 번만 깨운다(Chrome 88부터, Chrome 개발자 블로그 'Heavy throttling of chained JS timers', 2026-10-28 확인). 그러면 보고 있는 탭도 1분에 한 번만 값을 받아 차례 판정·'곧 입장' 표시·입장 확정이 늦어진다. 그래서 다음처럼 한다.
   - 잠금은 보이는 탭만 청한다. 리더가 숨겨지면(`visibilitychange`) 잠금을 바로 놓고, 기다리던 보이는 탭이 이어받는다. 숨겨진 탭은 청해 둔 요청도 거둔다(`AbortSignal`).
   - 리더가 아닌 보이는 탭은 리더의 마지막 방송이 자기 간격의 2배보다 오래되면 스스로 한 번 묻고 방송한다(리더가 멈췄거나 잠금 넘김이 늦은 경우).
@@ -1527,7 +1529,7 @@ allowBuilds:
 | FE-T7 | 구매 세션 서명 | 서버와 같은 시험 벡터(MAC 입력·HKDF·키 형식) | PR | 벡터 일치 |
 | FE-T8 | 결제 복귀 | 시뮬레이터로 두 결제사의 성공·실패·새로고침과 쿠키 없는 첫 요청을 본다 | develop | 결제 값이 담긴 주소를 바로 지운다, 접수 202 |
 | FE-T9 | 이진 해독기 경계 | 잘린 프레임, 큰 개수, 모르는 판, 음수 없는 범위를 넣는 퍼징 | PR | 예외 없이 버리고, 경계 밖 읽기 0 |
-| FE-T10 | 좌석맵 성능과 네트워크 | Playwright 성능 추적(CPU 4배), memlab, 사전 요청 수, 접근성 목록을 연 채 다른 세션이 그 구역 좌석을 홀드할 때의 상태 메시지 처리 시간(§5.2, 기술 검토 중간-015) | 측정 캠페인(wbs 7.5.2) | 첫 그림 1초, INP 200ms, 긴 작업 0, 힙 70%, 상태 메시지 처리 p95 2ms [가정] |
+| FE-T10 | 좌석맵 성능과 네트워크 | Playwright 성능 추적(CPU 4배), memlab, 사전 요청 수, 접근성 목록을 연 채 다른 세션이 그 구역 좌석을 홀드할 때의 상태 메시지 처리 시간(§5.2, 기술 검토 중간-015) | 측정 캠페인(wbs 7.5.2) | 첫 그림 1초, INP 200ms, 긴 작업 0, 상태 메시지 처리 p95 2ms [가정]. 힙 감축률(v0 대비 70%)은 보조 숫자로 적는다(ADR-0096, 2026-11-01 정합) |
 | FE-T11 | 좌석 연결 상태 | 가짜 서버로 1012·4401·하트비트 끊김·버전 갭·구독 전환을 만든다. 스냅샷 재요청에 지연과 503을 넣고 같은 구역에 갭을 잇따라 만든다(ADR-0117). 연결 기계에서 `@xstate/graph`로 만든 최단 경로로 모든 전이를 한 번 이상 돈다(§3.1, 기술 검토 낮음-096) | PR | §3.5 전이, 기계의 모든 전이를 경로가 덮는다, 30초 안에 스스로 회복, 같은 구역 스냅샷 재요청은 동시에 하나 |
 | FE-T12 | 돌아갈 주소와 URL 조각 | `//evil`, `/\evil`, `%2F%2F`, 제어 문자, 조각 토큰 | PR | 모두 첫 화면으로 보내고 조각은 바로 지운다 |
 | FE-T13 | 저장소 정리 | 시작할 때 만료된 항목, 로그아웃, 다른 탭에 알리기 | develop | §3.12 표대로 |
@@ -1737,7 +1739,7 @@ ADR-0111의 결정은 서버가 그린 화면의 SEED 스타일 속성과 CSP를
 | 소셜 로그인 구현 비교(I-T51, ADR-0119): A next-auth v5 고정 판 대 C 앱 서버의 얇은 OIDC 클라이언트(`oauth4webapi`·`openid-client`), B Better Auth 무상태 모드는 문서로 판정. 기준은 세션 층 수·판 유지 상태·코드 양·ASVS 10.x·제공자 설정(네이버 이메일, `sub`) | C가 ASVS 10.x나 제공자 설정을 통과하지 못하고 고칠 수 없으면 A(Auth.js v5 고정 판)로 간다. 결과(2026-11-03): C를 `openid-client` 6으로 확정(`tools/poc/login-compare/RESULT.md`) | 인증 구현 시작 전(wbs 2.1) |
 | 인앱 브라우저 사용자 에이전트 표지 | 표지를 늘린다(안내용이라 판정에는 쓰지 않는다) | 2.10.6 |
 
-**남는 한계**(docs/planning/01 §5.2와 docs/guide/17에도 적었다)
+**남는 한계**(docs/planning/01 §5.2에도 적었다. 쉬운 해설은 해설서 docs/walkthrough/fields/06-frontend.md이고 규범이 아니다, 2026-11-01 정합 점검, ADR-0177)
 
 - 대기실 경량 페이지와 소비자 웹 React 화면이 대기 화면 요소를 두 벌로 갖는다. 디자인 토큰·문구 키를 같이 쓰고, 시각 회귀 시험(FE-T40)으로 둘을 맞춘다.
 - 구매 세션 키와 월렛 키는 꺼낼 수 없다. 하지만 같은 출처의 XSS가 서명을 부를 수 있다(ADR-0065와 같은 한계). CSP·Trusted Types(보고 모드)·출력 규칙으로 줄일 뿐이다.

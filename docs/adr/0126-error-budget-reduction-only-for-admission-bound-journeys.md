@@ -1,6 +1,6 @@
 # ADR-0126: 에러 버짓 연동 감축은 입장 목표가 부하를 정하는 여정에만 건다(2026-10-28)
 
-- **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 중간-076 '에러 버짓 연동 감축이 원인 여정과 관계없이 입장 목표를 반으로 줄인다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향은 소유자 결정(추천안 승인)이고, 라벨 이름·콘솔 문구·시험 같은 세부는 추천 적용이다. ADR-0069 결정 2, ADR-0077 결정 4, ADR-0062 결정 43을 보완하며, 그 ADR 본문은 고치지 않는다)
+- **상태**: 채택 (2026-10-28. 기술 검토(review/tech-review.md)의 중간-076 '에러 버짓 연동 감축이 원인 여정과 관계없이 입장 목표를 반으로 줄인다'에 소유자가 "나머지 건수들은 모두 추천안에 동의합니다. 그렇게 모두 수정해주세요."라고 정했다. 방향은 소유자 결정(추천안 승인)이고, 라벨 이름·콘솔 문구·시험 같은 세부는 추천 적용이다. ADR-0069 결정 2, ADR-0077 결정 4, ADR-0062 결정 43을 보완하며, 그 ADR 본문은 고치지 않는다) 2026-11-01(정합 점검, ADR-0175 해설서 검토): 감축 사유 `reason` 값에 `seat_store`(좌석 저장소 장애 감축)를 더해 aimd·budget_alert·budget_50·pg_cap·operator·seat_store로 읽는다(docs/features/queue-admission.md §5, ADR-0145 결정 8, ADR-0121 결정 3).
 - **관련**: ADR-0005, ADR-0044, ADR-0049, ADR-0062(결정 43), ADR-0069(결정 1·2·3), ADR-0077(결정 4), ADR-0104, ADR-0105, NFR-001~007, POL-010, POL-021 C, POL-022, [docs/observability.md](../observability.md) §4·§5·§12(G-01·G-03·G-04·G-05), [docs/features/queue-admission.md](../features/queue-admission.md) §5·§11(Q-T49), [docs/features/control-tower.md](../features/control-tower.md) §6, [docs/architecture.md](../architecture.md) §5 부하 관리 장치 표·자동 조치 표, planning/03 POL-010·POL-021·POL-022·§4, design/d5 SCR-029 배너, guide/03, [review/tech-review.md](../review/tech-review.md)(중간-076)
 
 ## 맥락

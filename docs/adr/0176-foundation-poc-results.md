@@ -1,6 +1,6 @@
 # ADR-0176: 기반 PoC 판정(wbs 0.5.1) — Redis 한 키는 묶음 없이 `INCR`, Redis 클라이언트는 판정 보류(추천 node-redis), 좌석 샤드는 정본대로 큰 회차 배치 규칙을 두고 만료는 한 번에 100석, HTTP는 Fastify에 좌석 홀드는 경로 스키마·대기열 진입은 Zod 파이프, Kafka는 Confluent 클라이언트 확정
 
-- **상태**: 채택(2026-11-01, 추천 적용. 판정 기준은 정본에 있던 것이고, 정본에 숫자가 없던 기준만 아래에 '추천 적용'으로 적었다). 결정 1은 ADR-0179가 바꿨다(2026-11-03, 진입 Lua로 다시 잰 값이 기준을 넘어 파드별 묶음)
+- **상태**: 채택(2026-11-01, 추천 적용. 판정 기준은 정본에 있던 것이고, 정본에 숫자가 없던 기준만 아래에 '추천 적용'으로 적었다). 결정 1은 ADR-0179가 바꿨다(2026-11-03, 진입 Lua로 다시 잰 값이 기준을 넘어 파드별 묶음). 2026-11-03(해설서 대조, R-255): 결정 2의 '판정 보류'는 소유자가 2026-11-02 PROGRESS OPEN[11]을 추천안대로 닫아 node-redis로 확정했으니(핫패스 연결에 호출 쪽 마감 100ms와 연결 오류 재시도 1회를 더함, PRF-050) node-redis로 읽는다
 - **관련**: NFR-001, NFR-003, NFR-005, NFR-021, V-T33, V-T41, S-T27, ST-T14, ST-T18, wbs 0.5.1, BUILD_ORDER FND-120, openspec 변경 `add-foundation-poc`, [docs/architecture.md](../architecture.md) §5·§9.4, [docs/verification.md](../verification.md) §3.3·§3.5, [docs/streaming.md](../streaming.md) §2.1·§2.6, [docs/devops.md](../devops.md) §4.4, [docs/perf-ledger.md](../perf-ledger.md) §4, ADR-0023, ADR-0054 결정 19, ADR-0096, ADR-0127, ADR-0128, ADR-0133, ADR-0134, ADR-0137, ADR-0142, 기술 검토 중간-026·낮음-001·낮음-003·낮음-004·낮음-072·낮음-152·높음-26
 
 ## 맥락

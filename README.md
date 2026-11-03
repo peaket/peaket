@@ -25,7 +25,7 @@
 | 시간 | 읽을 것 |
 | --- | --- |
 | 5분 | [경영진용 요약](docs/planning/00-executive-summary.md)(2쪽): 무엇을 약속하고, 어떻게 풀고, 무엇이 위험한가 |
-| 30분 | [쉬운 설명서](docs/guide/README.md) → [큰 그림](docs/guide/01-big-picture.md) → 관심 있는 주제 편 |
+| 1시간 | [시스템 디자인 한 판](docs/walkthrough/01-system-design.md): 면접 순서로 요구사항에서 완성된 구조까지 한 번에 따라가는 해설서(규범이 아님) → 관심 있는 단계의 '더 깊이' |
 | 설계를 깊게 | [아키텍처](docs/architecture.md) → 같은 문서 §11의 면접용 핵심 결정 후보 10건 → [검증 계획](docs/verification.md) |
 | 역할별 순서 | [docs/00-summary.md](docs/00-summary.md) §2(백엔드·프론트엔드·인프라·보안·디자인 등 독자마다 읽는 순서) |
 
@@ -61,7 +61,7 @@
 | 바로 아래 파일, `adr/`, `api/`, `features/`, `security/`, `quality/` | 설계: 아키텍처, 데이터, 인프라, 배포, 관측, 보안, 기능별 설계, 결정 기록. 계약 원본(`api/`: openapi·asyncapi·proto·avro)도 여기 있습니다 |
 | `review/` | 검토: 정합성 점검 기록, 나중에 정할 것 |
 | `wbs/` | 작업 목록과 일정 어림 |
-| `guide/` | 명세를 쉬운 말로 푼 설명서(규범은 아님) |
+| `walkthrough/` | 해설서: 설계를 면접에서 설명할 수 있게 푼 글(규범은 아님, ADR-0177) |
 | `perf-ledger/` | 측정 실행 기록(성능 장부의 원본) |
 
 ## 받아서 확인하기
