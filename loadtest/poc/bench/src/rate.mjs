@@ -19,20 +19,38 @@ const warmupS = Number(a.warmup ?? 15);
 const KEY = 'q:{event:poc-entry}:seq';
 const EVENT = 'poc-hold';
 const hk = (s) => `s:{event:${EVENT}}:${s}`;
-// 진입 ② Lua의 회차 키(KEY와 같은 슬롯). 인자: 회차 키 수명, 오픈(1분 전), 묶음 구간 끝(지남), 로비 셔플 켬, 묶음 켬, 묶음 대상 아님, 토큰 해시 없음, 참가자 목록 수명
+// 진입 ② 묶음 Lua의 회차 키(KEY와 같은 슬롯). 공통 인자: 회차 키 수명, 오픈(1분 전), 묶음 구간 끝(지남), 로비 셔플 켬, 묶음 켬, 참가자 목록 수명. 그 뒤 요청 수와 요청마다(묶음 대상 아님, 토큰 해시 없음)
 const ek = (s) => `q:{event:poc-entry}:${s}`;
 const NUMBER_KEYS = [KEY, ek('skipped'), ek('batch_done'), ek('batch_members:1'), ek('lobby_members')];
 const HOLD_SEATS = 10_000_000;
 
 if (a.worker === 'true') {
   // ---- 진입 서버 하나 ----
-  const c = await connect(client, { nodes, tls, scripts: op === 'hold' ? ['hold'] : op === 'number' ? ['entry-number'] : [], timeoutMs: Number(a.timeout ?? 100) });
+  const c = await connect(client, { nodes, tls, scripts: op === 'hold' ? ['hold'] : op.startsWith('number') ? ['entry-number-batch'] : [], timeoutMs: Number(a.timeout ?? 100) });
   const t0 = Date.now();
-  const NUMBER_ARGV = [t0 + 2 * 86_400_000, t0 - 60_000, t0 - 58_000, '1', '1', '0', '', t0 + 86_400_000];
+  const NUMBER_COMMON = [t0 + 2 * 86_400_000, t0 - 60_000, t0 - 58_000, '1', '1', t0 + 86_400_000];
+  const numberArgv = (n) => [...NUMBER_COMMON, n, ...Array.from({ length: n }, () => ['0', '']).flat()];
   const batchMs = Number(a['batch-ms'] ?? 2);
+  let batches = 0;
+  // 파드별 묶음: --batch-ms 동안, 또는 --batch-max건이 찰 때까지 모은 요청을 묶음 Lua 한 번으로 보내고 받은 번호를 순서대로 나눠 준다(queue-svc NumberBatcher와 같은 방식)
+  const batchMax = Number(a['batch-max'] ?? 500);
+  let nPending = [];
+  let nTimer;
+  const nFlush = async () => {
+    clearTimeout(nTimer);
+    nTimer = undefined;
+    const take = nPending;
+    nPending = [];
+    batches += 1;
+    try {
+      const r = await c.run('entry-number-batch', NUMBER_KEYS, numberArgv(take.length));
+      take.forEach((w, i) => w.resolve(r[3 + 2 * i]));
+    } catch (err) {
+      for (const w of take) w.reject(err);
+    }
+  };
   let pending = [];
   let timer;
-  let batches = 0;
   const flush = async () => {
     timer = undefined;
     const take = pending;
@@ -47,8 +65,14 @@ if (a.worker === 'true') {
   };
   const ops = {
     incr: () => c.incr(KEY),
-    // queue-svc 진입 ② Lua(원문은 run.mjs가 lua/entry-number.lua로 옮긴다)
-    number: () => c.run('entry-number', NUMBER_KEYS, NUMBER_ARGV),
+    // queue-svc 진입 ② 묶음 Lua를 요청마다 1건으로(원문은 run.mjs가 lua/entry-number-batch.lua로 옮긴다)
+    number: () => c.run('entry-number-batch', NUMBER_KEYS, numberArgv(1)),
+    'number-batch': () =>
+      new Promise((resolve, reject) => {
+        nPending.push({ resolve, reject });
+        if (nPending.length >= batchMax) void nFlush();
+        else if (!nTimer) nTimer = setTimeout(nFlush, batchMs);
+      }),
     batch: () =>
       new Promise((resolve, reject) => {
         pending.push({ resolve, reject });
@@ -87,7 +111,7 @@ const s = cluster.slots[keySlot];
 const owner = cluster.masters.find((m) => m.host === s.master.host && m.port === s.master.port);
 const onOwner = async (args) => (await cluster.nodeClient(owner)).sendCommand(args);
 await onOwner(['FLUSHALL']);
-if (op === 'number') {
+if (op.startsWith('number')) {
   // 로비·묶음 표시가 이미 선 회차(오픈 뒤 평시): Lua는 표시를 보기만 하고 INCR한다
   await cluster.hSet(ek('batch_done'), { lobby: '1:0:1', 1: '1:0:1' });
 }

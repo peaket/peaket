@@ -4,9 +4,10 @@ import type { Clock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { EnterQueue, type EnterOutcome, type EnterResult } from '../src/modules/entry/application/enter-queue.js';
 import { EntryError } from '../src/modules/entry/application/entry-error.js';
+import { QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
 import type { EntryStore, EventSchedules } from '../src/modules/entry/domain/ports.js';
 import type { EventSchedule } from '../src/modules/entry/domain/queue.js';
-import { ACCOUNT, DEVICE, JNY, newEvent, newRequest, openSchedule, OTHER_ACCOUNT, PID, preverifyToken, tokens } from './support.js';
+import { ACCOUNT, counting, DEVICE, JNY, newEvent, newRequest, openSchedule, OTHER_ACCOUNT, PID, preverifyToken, type Sent, tokens, within } from './support.js';
 
 export interface EntryWorld {
   store: EntryStore;
@@ -51,6 +52,10 @@ function pausing(store: EntryStore, hooks: { beforeNumber?: () => Promise<void>;
     number: async (i) => {
       await hooks.beforeNumber?.();
       return store.number(i);
+    },
+    numberBatch: async (i) => {
+      await hooks.beforeNumber?.();
+      return store.numberBatch(i);
     },
     record: async (i) => {
       await hooks.beforeRecord?.();
@@ -259,6 +264,59 @@ export function entryCases(label: string, make: () => Promise<EntryWorld>) {
       const e = new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs });
       const eventId = newEvent();
       expect(await code(e.run({ accountId: ACCOUNT, pid: PID, eventId, body: { preverifyToken: preverifyToken(w.clock, eventId), deviceId: DEVICE } }))).toBe('NOT_FOUND');
+    });
+  });
+
+  describe(`파드별 묶음(${label})`, () => {
+    const setup = async () => {
+      const w = await make();
+      const eventId = newEvent();
+      await w.schedules.set(eventId, openSchedule(w.clock.now()));
+      const person = (i: number, e = eventId) => ({ accountId: ACCOUNT, pid: `pid-batch-${i}-${e}`.slice(0, 64) });
+      const body = (e = eventId) => ({ preverifyToken: preverifyToken(w.clock, e), deviceId: DEVICE, entryRequestId: newRequest() });
+      /** 진입 서비스 하나(운영처럼 파드의 모든 요청이 같은 묶음기를 쓴다) */
+      const queue = (store: EntryStore, o: { batchWindowMs: number; batchMax: number }) => new EnterQueue(store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, ...o });
+      return { w, eventId, person, body, queue };
+    };
+
+    test('[NFR-001] 같은회차진입이몰리면_묶음Lua한번에여러요청을보내고_번호는겹치지않고빈틈없이이어진다', async () => {
+      const { w, eventId, person, body, queue } = await setup();
+      const sent: Sent[] = [];
+      const enter = queue(counting(w.store, sent), { batchWindowMs: 5, batchMax: 500 });
+      const rs = await Promise.all(Array.from({ length: 120 }, (_, i) => enter.run({ ...person(i), eventId, body: body() })));
+      expect(rs.map((r) => ticketOf(r).seq).sort((a, b) => a - b)).toEqual(Array.from({ length: 120 }, (_, i) => i + 1));
+      expect(sent.length).toBeLessThan(120);
+      expect(sent.reduce((a, c) => a + c.n, 0)).toBe(120);
+      expect(Math.max(...sent.map((c) => c.n))).toBeGreaterThan(1);
+    });
+
+    test('묶음은최대건수가차면_구간을기다리지않고바로보내고_회차마다따로모은다', async () => {
+      const { w, eventId, person, body, queue } = await setup();
+      const other = newEvent();
+      await w.schedules.set(other, openSchedule(w.clock.now()));
+      const sent: Sent[] = [];
+      // 구간을 1분으로 두어 최대 건수(7)로만 나가게 한다. 7의 배수만 보내므로 바로 보내지 않으면 끝나지 않는다
+      const enter = queue(counting(w.store, sent), { batchWindowMs: 60_000, batchMax: 7 });
+      const go = (e: string, n: number) => Promise.all(Array.from({ length: n }, (_, i) => enter.run({ ...person(i, e), eventId: e, body: body(e) })));
+      const [x, y] = await within(3_000, Promise.all([go(eventId, 14), go(other, 7)]));
+      expect(x.map((r) => ticketOf(r).seq).sort((a, b) => a - b)).toEqual(Array.from({ length: 14 }, (_, i) => i + 1));
+      expect(y.map((r) => ticketOf(r).seq).sort((a, b) => a - b)).toEqual(Array.from({ length: 7 }, (_, i) => i + 1));
+      expect(sent.map((c) => c.n)).toEqual([7, 7, 7]);
+      expect(sent.filter((c) => c.eventId === other)).toHaveLength(1);
+    });
+
+    test('묶음Lua가일시장애로실패하면_그묶음의모든요청이QueueStoreUnavailable이고_선점은남아_다른요청ID는409이고같은요청ID는번호를받는다', async () => {
+      const { w, eventId, person, body, queue } = await setup();
+      const sent: Sent[] = [];
+      // 다섯이 차면 바로 보내 한 묶음이 되게 한다
+      const enter = queue(counting(w.store, sent, () => true), { batchWindowMs: 60_000, batchMax: 5 });
+      const bodies = Array.from({ length: 5 }, () => body());
+      const errs = await within(3_000, Promise.all(bodies.map((b, i) => enter.run({ ...person(i), eventId, body: b }).then(() => null, (e: unknown) => e))));
+      expect(sent.map((c) => c.n)).toEqual([5]);
+      expect(errs.every((e) => e instanceof QueueStoreUnavailable)).toBe(true);
+      const healthy = queue(w.store, { batchWindowMs: 2, batchMax: 500 });
+      expect(await code(healthy.run({ ...person(1), eventId, body: body() }))).toBe('ALREADY_WAITING');
+      expect(ticketOf(await healthy.run({ ...person(0), eventId, body: bodies[0]! })).seq).toBe(1);
     });
   });
 }

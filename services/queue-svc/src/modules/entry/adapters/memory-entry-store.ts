@@ -1,7 +1,7 @@
 // 시험용 진입 저장소와 회차 일정 사본. Valkey의 Lua(redis-entry-store.ts)와 같은 규칙을 메모리로 둔다(같은 사례를 test/entry-cases.ts·batch-cases.ts가 둘 다에 돈다).
 // 서버 시각은 주입한 시계다(Lua는 Redis TIME을 쓴다).
 import type { Clock } from '@peaket/platform';
-import type { BatchedEntry, BatchOutcome, EntryStore, EventSchedules, NumberInput, NumberResult, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
+import type { BatchedEntry, BatchOutcome, EntryStore, EventSchedules, NumberBatchInput, NumberInput, NumberResult, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
 import { BATCH_NO, type EventSchedule, type ReasonCategory, REASONS } from '../domain/queue.js';
 
 const RECORDED = /^(\d+):(\d+):([^:]+):([^:]*):([^:]*)$/;
@@ -77,9 +77,9 @@ export class MemoryEntryStore implements EntryStore {
     if (this.#dupOf(k) === `PENDING:${i.requestId}`) this.#dup.delete(k);
   }
 
-  async number(i: NumberInput): Promise<NumberResult> {
+  async numberBatch(i: NumberBatchInput): Promise<NumberResult[]> {
     const now = this.clock.now();
-    if (i.opensAtMs !== undefined && now < i.opensAtMs) return { kind: 'EARLY' };
+    if (i.opensAtMs !== undefined && now < i.opensAtMs) return i.items.map(() => ({ kind: 'EARLY' }));
     const gen = (this.#skipped.get(i.eventId)?.length ?? 0) + 1;
     const done = this.#doneOf(i.eventId);
     const seqOf = () => this.#seq.get(i.eventId) ?? 0;
@@ -93,18 +93,25 @@ export class MemoryEntryStore implements EntryStore {
       const members = this.#members.get(i.eventId) ?? new Set<string>();
       this.#members.set(i.eventId, members);
       if (!closed && now < (i.closeAtMs ?? 0)) {
-        if (!i.eligible) return { kind: 'WAIT', retryAfterSeconds: Math.ceil(((i.closeAtMs ?? 0) - now) / 1000) };
-        members.add(i.tokenHash ?? '');
-        return { kind: 'BATCHING' };
+        return i.items.map((it): NumberResult => {
+          if (!it.eligible) return { kind: 'WAIT', retryAfterSeconds: Math.ceil(((i.closeAtMs ?? 0) - now) / 1000) };
+          members.add(it.tokenHash ?? '');
+          return { kind: 'BATCHING' };
+        });
       }
       if (!closed) {
         done.set(String(BATCH_NO), `${seqOf() + 1}:${members.size}:${gen}`);
         this.#seq.set(i.eventId, seqOf() + members.size);
       }
     }
-    const seq = seqOf() + 1;
-    this.#seq.set(i.eventId, seq);
-    return { kind: 'NUMBERED', seq, gen };
+    const first = seqOf() + 1;
+    this.#seq.set(i.eventId, seqOf() + i.items.length);
+    return i.items.map((_, k) => ({ kind: 'NUMBERED', seq: first + k, gen }));
+  }
+
+  async number(i: NumberInput): Promise<NumberResult> {
+    const { eligible, tokenHash, ...common } = i;
+    return (await this.numberBatch({ ...common, items: [{ eligible, tokenHash }] }))[0]!;
   }
 
   async record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number }): Promise<RecordResult> {

@@ -8,7 +8,7 @@ import { EntryError } from '../src/modules/entry/application/entry-error.js';
 import type { EntryStore } from '../src/modules/entry/domain/ports.js';
 import { type EventSchedule, QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
 import type { EntryWorld } from './entry-cases.js';
-import { ACCOUNT, DEVICE, JNY, newEvent, newRequest, openSchedule, PID, preverifyToken, tokens } from './support.js';
+import { ACCOUNT, counting, DEVICE, JNY, newEvent, newRequest, openSchedule, PID, preverifyToken, type Sent, tokens, within } from './support.js';
 
 export interface BatchWorld extends EntryWorld {
   /** 구간 길이(메모리는 시계를 옮기고 Valkey는 실제로 기다린다) */
@@ -88,6 +88,27 @@ export function batchCases(label: string, make: () => Promise<BatchWorld>) {
       expect(r.spreadSec).toBe(8);
       expect(Date.parse(r.resultAt)).toBeGreaterThan(r.serverTimeMs);
       expect(await w.batchMembers(eventId)).toEqual([hash]);
+      expect(await w.counter(eventId)).toBe(0);
+    });
+
+    test('한묶음Lua에묶음대상과오픈뒤토큰이섞여도_요청마다가른다_대상만202BATCHING으로참가자가되고_나머지는503BATCHING이다', async () => {
+      const { w, eventId, early } = await setup();
+      const sent: Sent[] = [];
+      // 일곱이 차면 바로 보내 한 묶음이 되게 한다(ADR-0179). 순서를 섞어 두어 결과를 요청에 거꾸로 나눠 주면 잡힌다
+      const enter = new EnterQueue(counting(w.store, sent), w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, batchWindowMs: 60_000, batchMax: 7 });
+      const kinds = ['E', 'L', 'E', 'E', 'L', 'L', 'E'];
+      const now = w.clock.now();
+      const go = (k: string, i: number) =>
+        enter
+          .run({ accountId: ACCOUNT, pid: `pid-mix-${i}-${eventId}`.slice(0, 64), eventId, body: { preverifyToken: k === 'E' ? early({ iat: now - i }) : preverifyToken(w.clock, eventId, { iat: now - i }), deviceId: DEVICE, entryRequestId: newRequest() } })
+          .then(
+            (r) => `OK:${r.kind}`,
+            (e: unknown) => (e instanceof EntryError ? `ERR:${e.code}` : String(e)),
+          );
+      const rs = await within(3_000, Promise.all(kinds.map(go)));
+      expect(sent.map((c) => c.n)).toEqual([7]);
+      expect(rs).toEqual(kinds.map((k) => (k === 'E' ? 'OK:BATCHING' : 'ERR:BATCHING')));
+      expect(await w.batchMembers(eventId)).toHaveLength(4);
       expect(await w.counter(eventId)).toBe(0);
     });
 

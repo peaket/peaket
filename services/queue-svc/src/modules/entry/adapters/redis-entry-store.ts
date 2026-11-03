@@ -3,7 +3,7 @@
 // 키에 넣는 값(회차 ID·pid)은 받는 층이 [A-Za-z0-9_-] 1~64자만 넘긴다(해시 태그를 깨지 않게). 이름은 명세 specs/queue.qnt의 동작 이름이다.
 import { Inject, Injectable } from '@nestjs/common';
 import { type HotRedis, isRedisUnavailable, redisScript } from '@peaket/platform';
-import type { BatchedEntry, BatchOutcome, EntryStore, NumberInput, NumberResult, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
+import type { BatchedEntry, BatchOutcome, EntryStore, NumberBatchInput, NumberInput, NumberResult, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
 import { BATCH_NO, QueueStoreUnavailable, type ReasonCategory, REASONS } from '../domain/queue.js';
 import {
   BATCH_RECORD_LUA,
@@ -12,7 +12,7 @@ import {
   DROP_BATCH_LUA,
   MARK_REMOVED_LUA,
   MARK_VERIFYING_LUA,
-  NUMBER_LUA,
+  NUMBER_BATCH_LUA,
   PREEMPT_LUA,
   RECORD_LUA,
   RELEASE_LUA,
@@ -43,7 +43,7 @@ export const keys = {
 // Lua 원문은 entry-lua.ts에 있다(측정 도구와 같은 원문)
 const PREEMPT = redisScript(PREEMPT_LUA);
 const RELEASE = redisScript(RELEASE_LUA);
-const NUMBER = redisScript(NUMBER_LUA);
+const NUMBER_BATCH = redisScript(NUMBER_BATCH_LUA);
 const RECORD = redisScript(RECORD_LUA);
 const BATCH_RECORD = redisScript(BATCH_RECORD_LUA);
 const BATCH_STATE = redisScript(BATCH_STATE_LUA);
@@ -97,7 +97,7 @@ export class RedisEntryStore implements EntryStore {
     await guard(this.redis.evalScript(RELEASE, [keys.dup(i.pid, i.eventId)], [i.requestId]));
   }
 
-  async number(i: NumberInput): Promise<NumberResult> {
+  async numberBatch(i: NumberBatchInput): Promise<NumberResult[]> {
     const e = i.eventId;
     const args = [
       String(i.expireAtMs),
@@ -105,16 +105,28 @@ export class RedisEntryStore implements EntryStore {
       String(i.closeAtMs ?? 0),
       i.lobbyShuffle ? '1' : '0',
       i.openBatch ? '1' : '0',
-      i.eligible ? '1' : '0',
-      i.tokenHash ?? '',
       String(i.batchExpireAtMs ?? i.expireAtMs),
+      String(i.items.length),
+      ...i.items.flatMap((it) => [it.eligible ? '1' : '0', it.tokenHash ?? '']),
     ];
-    const r = (await guard(this.redis.evalScript(NUMBER, [keys.seq(e), keys.skipped(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e)], args))) as unknown[];
-    const kind = str(r[0]);
-    if (kind === 'NUMBERED') return { kind, seq: Number(r[1]), gen: Number(r[2]) };
-    if (kind === 'WAIT') return { kind, retryAfterSeconds: Number(r[1]) };
-    if (kind === 'BATCHING' || kind === 'EARLY') return { kind };
-    throw new Error(`번호 Lua가 모르는 값을 돌려줬다: ${kind}`);
+    const r = (await guard(this.redis.evalScript(NUMBER_BATCH, [keys.seq(e), keys.skipped(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e)], args))) as unknown[];
+    const head = str(r[0]);
+    if (head === 'EARLY') return i.items.map(() => ({ kind: 'EARLY' }));
+    if (head !== 'OK') throw new Error(`번호 Lua가 모르는 값을 돌려줬다: ${head}`);
+    const gen = Number(r[1]);
+    return i.items.map((_, k): NumberResult => {
+      const kind = str(r[2 + 2 * k]);
+      const v = Number(r[3 + 2 * k]);
+      if (kind === 'N') return { kind: 'NUMBERED', seq: v, gen };
+      if (kind === 'B') return { kind: 'BATCHING' };
+      if (kind === 'W') return { kind: 'WAIT', retryAfterSeconds: v };
+      throw new Error(`번호 Lua가 모르는 값을 돌려줬다: ${kind}`);
+    });
+  }
+
+  async number(i: NumberInput): Promise<NumberResult> {
+    const { eligible, tokenHash, ...common } = i;
+    return (await this.numberBatch({ ...common, items: [{ eligible, tokenHash }] }))[0]!;
   }
 
   async record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number }): Promise<RecordResult> {

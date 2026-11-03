@@ -8,6 +8,9 @@ export const PENDING_TTL_MS = 10_000;
 export const SEGMENT_SIZE = 1_000;
 /** 오픈 직후 동시 도착 구간 N 2초 [가정](ADR-0041). 회차 일정 사본의 batchWindowMs로 바꿀 수 있다 */
 export const OPEN_BATCH_MS = 2_000;
+/** 진입 ② 파드별 묶음: 첫 요청부터 모으는 시간과 한 묶음의 최대 건수 [가정](ADR-0179) */
+export const NUMBER_BATCH_WINDOW_MS = 2;
+export const NUMBER_BATCH_MAX = 500;
 /** 한 회차의 묶음 번호(오픈 직후 하나) */
 export const BATCH_NO = 1;
 /** 묶음 결과 공개 예정: 구간 끝 + 11초 [가정](비콘 대기 최대 6초 + 게시 5초. drand 일정은 BUILD_ORDER HOT-040) */

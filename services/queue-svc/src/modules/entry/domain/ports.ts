@@ -79,6 +79,14 @@ export interface NumberInput {
   batchExpireAtMs?: number;
 }
 
+/** ② 파드별 묶음의 요청 하나(ADR-0179) */
+export interface NumberItem {
+  eligible?: boolean;
+  tokenHash?: string;
+}
+/** ② 파드별 묶음: 회차 공통 값과 요청들(묶음 안 순서대로 번호를 나눠 준다) */
+export type NumberBatchInput = Omit<NumberInput, 'eligible' | 'tokenHash'> & { items: NumberItem[] };
+
 export const ENTRY_STORE = Symbol('queue.EntryStore');
 /**
  * 진입 3단계(§3): ① 사람 슬롯 선점 → ② 회차 슬롯 번호(또는 묶음) → ③ 사람 슬롯 기록(또는 묶음 기록). 사람 키(q:dup·q:adm)와
@@ -90,7 +98,10 @@ export interface EntryStore {
   preempt(i: { pid: string; eventId: string; requestId: string; pendingTtlMs: number }): Promise<PreemptResult>;
   /** ②가 번호를 주지 않았으면(EARLY·WAIT) 값이 아직 내 PENDING일 때만 지운다 */
   release(i: { pid: string; eventId: string; requestId: string }): Promise<void>;
-  /** ② enterNumber: 서버 시각으로 로비·묶음 표시를 보고(없으면 먼저 쓰고) 구간 안의 묶음 대상은 SADD, 아니면 INCR. 세대 = 건너뛴 구간 줄 수 + 1 */
+  /** ② enterNumber(파드별 묶음, ADR-0179): 서버 시각으로 로비·묶음 표시를 한 번 보고(없으면 먼저 쓰고) 요청마다 구간 안의 묶음 대상은 SADD,
+   * 오픈 뒤 토큰은 WAIT, 그 밖은 번호를 받을 요청 수만큼 INCRBY해 묶음 안 순서대로 나눠 준다. 서버 시각으로 오픈 전이면 모두 EARLY. 세대 = 건너뛴 구간 줄 수 + 1 */
+  numberBatch(i: NumberBatchInput): Promise<NumberResult[]>;
+  /** 요청 하나짜리 ②(numberBatch를 1건으로 부른다) */
   number(i: NumberInput): Promise<NumberResult>;
   /** ③ enterRecord: q:adm이 있으면 ADMITTED. 값이 내 PENDING이거나 비었으면 {번호}:{세대}:{요청 ID}:{jny}:{vr}로 기록(수명 = 판매 종료). 같은 요청의 다른 기록이면 SAME(먼저 기록된 값),
    * 같은 요청의 묶음 기록이면 BATCH(그 토큰 해시), 그 밖은 TAKEN */

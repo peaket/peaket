@@ -12,6 +12,8 @@ import {
   batchCloseAtOf,
   type EventSchedule,
   keepUntilOf,
+  NUMBER_BATCH_MAX,
+  NUMBER_BATCH_WINDOW_MS,
   PENDING_TTL_MS,
   QueueStoreUnavailable,
   type ReasonCategory,
@@ -20,13 +22,17 @@ import {
   segmentOf,
 } from '../domain/queue.js';
 import { EntryError } from './entry-error.js';
+import { NumberBatcher } from './number-batcher.js';
 
 export const ENTRY_OPTIONS = Symbol('queue.EntryOptions');
 export interface EntryOptions {
   /** 선점 값 수명(시험이 줄인다) */
   pendingTtlMs: number;
+  /** 진입 ② 파드별 묶음의 모으는 시간과 최대 건수(ADR-0179, 없으면 2ms·500건) */
+  batchWindowMs?: number;
+  batchMax?: number;
 }
-export const DEFAULT_ENTRY_OPTIONS: EntryOptions = { pendingTtlMs: PENDING_TTL_MS };
+export const DEFAULT_ENTRY_OPTIONS: EntryOptions = { pendingTtlMs: PENDING_TTL_MS, batchWindowMs: NUMBER_BATCH_WINDOW_MS, batchMax: NUMBER_BATCH_MAX };
 
 export interface EnterInput {
   accountId: string;
@@ -70,13 +76,17 @@ interface Ctx {
 
 @Injectable()
 export class EnterQueue {
+  readonly #numbers: NumberBatcher;
+
   constructor(
     @Inject(ENTRY_STORE) private readonly store: EntryStore,
     @Inject(EVENT_SCHEDULES) private readonly schedules: EventSchedules,
     @Inject(QUEUE_TOKENS) private readonly tokens: QueueTokens,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(ENTRY_OPTIONS) private readonly options: EntryOptions,
-  ) {}
+  ) {
+    this.#numbers = new NumberBatcher(store, options.batchWindowMs ?? NUMBER_BATCH_WINDOW_MS, options.batchMax ?? NUMBER_BATCH_MAX);
+  }
 
   async run(i: EnterInput): Promise<EnterOutcome> {
     const schedule = await this.schedules.get(i.eventId);
@@ -103,17 +113,19 @@ export class EnterQueue {
     if (pre1.kind === 'RECORDED') return this.#issue(c, pre1.seq, pre1.gen, pre1.jny, pre1.vr);
     if (pre1.kind === 'BATCH') return this.#batched(c, pre1, jny, vr, eligible, tokenHash, firstTry);
 
-    const num = await this.store.number({
-      eventId: i.eventId,
-      expireAtMs: keepUntil,
-      opensAtMs: schedule.opensAtMs,
-      closeAtMs: batchCloseAtOf(schedule),
-      lobbyShuffle: schedule.lobbyShuffle,
-      openBatch: schedule.openBatch,
-      eligible,
-      tokenHash,
-      batchExpireAtMs: saleEnd,
-    });
+    // ②는 파드별 묶음으로 보낸다(같은 회차의 요청을 2ms 모아 Lua 한 번, ADR-0179)
+    const num = await this.#numbers.take(
+      {
+        eventId: i.eventId,
+        expireAtMs: keepUntil,
+        opensAtMs: schedule.opensAtMs,
+        closeAtMs: batchCloseAtOf(schedule),
+        lobbyShuffle: schedule.lobbyShuffle,
+        openBatch: schedule.openBatch,
+        batchExpireAtMs: saleEnd,
+      },
+      { eligible, tokenHash },
+    );
     if (num.kind === 'EARLY' || num.kind === 'WAIT') {
       // 번호를 받지 않았으니 선점을 푼다. 남기면 새 요청 ID로 다시 온 같은 사람이 선점 수명(10초) 동안 409를 받는다
       await this.#release(c);

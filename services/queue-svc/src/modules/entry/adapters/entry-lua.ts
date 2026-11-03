@@ -38,28 +38,45 @@ if redis.call('GET', KEYS[1]) == 'PENDING:' .. ARGV[1] then redis.call('DEL', KE
 return 0
 `;
 
-// ② enterNumber: 서버 시각(TIME)으로 구간을 보고, 로비 표시 → 묶음(구간 안이면 SADD, 오픈 뒤 발급 토큰은 WAIT) → 닫힘 표시 → INCR.
-// 표시 값은 {첫 번호}:{크기}:{세대}이고 HSETNX라 리더와 겹쳐도 몫마다 한 번만 전진한다(중간-028). 참가자 목록(토큰 해시)은 판매 종료까지만 둔다
-export const NUMBER_LUA = `${EXTEND}
+// ② enterNumber(파드별 묶음, ADR-0179): 서버 시각(TIME)으로 구간을 보고, 로비 표시 → 묶음(구간 안이면 요청마다 묶음 대상은 SADD, 오픈 뒤 발급 토큰은 WAIT)
+// → 닫힘 표시 → 번호를 받을 요청 수만큼 INCRBY해 묶음 안 순서대로 나눠 준다. 표시 값은 {첫 번호}:{크기}:{세대}이고 HSETNX라 리더와 겹쳐도
+// 몫마다 한 번만 전진한다(중간-028). 참가자 목록(토큰 해시)은 판매 종료까지만 둔다.
+// ARGV: 1 회차 키 수명, 2 오픈 시각, 3 묶음 구간 끝, 4 로비 셔플, 5 묶음, 6 참가자 목록 수명, 7 요청 수 n, 그 뒤 요청마다 (묶음 대상 여부, 토큰 해시).
+// 돌려주는 값: 서버 시각으로 오픈 전이면 {'EARLY'}, 아니면 {'OK', 세대, 요청마다 (종류, 값)}. 종류 N = 번호(값), B = 묶음에 넣음, W = 기다림(값 = Retry-After 초)
+export const NUMBER_BATCH_LUA = `${EXTEND}
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 if now < tonumber(ARGV[2]) then return {'EARLY'} end
 local gen = redis.call('LLEN', KEYS[2]) + 1
+local n = tonumber(ARGV[7])
+local out = {'OK', gen}
 if ARGV[4] == '1' and redis.call('HEXISTS', KEYS[3], 'lobby') == 0 then
-  local n = redis.call('SCARD', KEYS[5])
+  local size = redis.call('SCARD', KEYS[5])
   local first = tonumber(redis.call('GET', KEYS[1]) or '0') + 1
-  redis.call('HSETNX', KEYS[3], 'lobby', first .. ':' .. n .. ':' .. gen)
-  if n > 0 then redis.call('INCRBY', KEYS[1], n) end
+  redis.call('HSETNX', KEYS[3], 'lobby', first .. ':' .. size .. ':' .. gen)
+  if size > 0 then redis.call('INCRBY', KEYS[1], size) end
 end
 if ARGV[5] == '1' then
   local closeAt = tonumber(ARGV[3])
   local closed = redis.call('HEXISTS', KEYS[3], '1') == 1
   if not closed and now < closeAt then
-    if ARGV[6] ~= '1' then return {'WAIT', math.ceil((closeAt - now) / 1000)} end
-    redis.call('SADD', KEYS[4], ARGV[7])
-    extend(KEYS[4], ARGV[8])
-    extend(KEYS[3], ARGV[1])
-    return {'BATCHING'}
+    local added = false
+    for i = 1, n do
+      if ARGV[6 + 2 * i] == '1' then
+        redis.call('SADD', KEYS[4], ARGV[7 + 2 * i])
+        added = true
+        out[#out + 1] = 'B'
+        out[#out + 1] = 0
+      else
+        out[#out + 1] = 'W'
+        out[#out + 1] = math.ceil((closeAt - now) / 1000)
+      end
+    end
+    if added then
+      extend(KEYS[4], ARGV[6])
+      extend(KEYS[3], ARGV[1])
+    end
+    return out
   end
   if not closed then
     local size = redis.call('SCARD', KEYS[4])
@@ -68,10 +85,14 @@ if ARGV[5] == '1' then
     if size > 0 then redis.call('INCRBY', KEYS[1], size) end
   end
 end
-local seq = redis.call('INCR', KEYS[1])
+local last = redis.call('INCRBY', KEYS[1], n)
+for i = 1, n do
+  out[#out + 1] = 'N'
+  out[#out + 1] = last - n + i
+end
 extend(KEYS[1], ARGV[1])
 extend(KEYS[3], ARGV[1])
-return {'NUMBERED', seq, gen}
+return out
 `;
 
 // ③ enterRecord: 입장 키가 있으면 거절(FND-130이 넘긴 것). 값이 내 PENDING이거나 비었을 때만 {번호}:{세대}:{요청 ID}:{jny}:{vr}로 기록, 수명은 판매 종료.

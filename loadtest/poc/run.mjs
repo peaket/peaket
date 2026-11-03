@@ -2,7 +2,7 @@
 // wbs 0.5.1 PoC 측정을 차례로 돈다(loadtest/poc/README.md). 측정마다 결과 JSON과 장부 수집 인자를 .cache/peaket-poc/out/에 남기고,
 // 끝나면 record.mjs가 성능 장부(docs/perf-ledger/runs/)로 옮긴다. 실패한 측정은 기록하고 다음으로 넘어간다.
 // 규칙(docs/perf-ledger.md §3, docs/verification.md §3.5): 오픈 모델, 예열 제외, Redis는 TLS 켬 3회·끔 1회(판정은 켬), 호스트 지표.
-// 쓰는 법: node loadtest/poc/run.mjs [묶음 이름...]   묶음: incr clients behaviors vt41 kafka seat number (기본: number 빼고 모두, 이 순서)
+// 쓰는 법: node loadtest/poc/run.mjs [묶음 이름...]   묶음: incr clients behaviors vt41 kafka seat number numberbatch (기본: number·numberbatch 빼고 모두, 이 순서)
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -29,11 +29,11 @@ const tryDocker = (...args) => {
   }
 };
 
-/** 진입 ② Lua 원문을 queue-svc에서 가져와 측정 이미지의 lua/에 쓴다. 운영 원문과 같게 하려고 사본은 커밋하지 않는다(.gitignore) */
+/** 진입 ② 묶음 Lua 원문을 queue-svc에서 가져와 측정 이미지의 lua/에 쓴다. 운영 원문과 같게 하려고 사본은 커밋하지 않는다(.gitignore) */
 async function syncEntryLua() {
   const m = await import(pathToFileURL(join(ROOT, 'services', 'queue-svc', 'src', 'modules', 'entry', 'adapters', 'entry-lua.ts')).href);
-  const head = '-- 생성물: services/queue-svc/src/modules/entry/adapters/entry-lua.ts의 NUMBER_LUA. loadtest/poc/run.mjs가 측정 전에 쓴다(고치지 않는다)\n';
-  writeFileSync(join(ROOT, 'loadtest', 'poc', 'bench', 'lua', 'entry-number.lua'), head + m.NUMBER_LUA);
+  const head = '-- 생성물: services/queue-svc/src/modules/entry/adapters/entry-lua.ts의 NUMBER_BATCH_LUA. loadtest/poc/run.mjs가 측정 전에 쓴다(고치지 않는다)\n';
+  writeFileSync(join(ROOT, 'loadtest', 'poc', 'bench', 'lua', 'entry-number-batch.lua'), head + m.NUMBER_BATCH_LUA);
 }
 
 /** 측정 하나를 돌리고 장부 수집 인자를 남긴다 */
@@ -75,11 +75,26 @@ const groups = {
     for (const tls of [true, false]) {
       await valkeyUp({ tls });
       for (let r = 1; r <= (tls ? 3 : 1); r += 1) {
-        const id = `${DAY}-number-${tls ? 'tls' : 'notls'}-r${r}`;
+        // 2026-11-03 PRF-070의 `number-*`는 옛 단건 Lua(NUMBER)였다. 같은 날 다시 재도 이름이 겹치지 않게 n1을 붙인다
+        const id = `${DAY}-number-n1-${tls ? 'tls' : 'notls'}-r${r}`;
         runBench(id, {
           cpus: '6',
           args: ['src/rate.mjs', '--nodes', N, '--tls', String(tls), '--client', 'node-redis', '--op', 'number', '--rate', '200000', '--procs', '4', '--duration', '60', '--warmup', '15'],
-          ledger: { kpi: 'NFR-001', rps: 200000, duration: 60, warmup: 15, scenario: 'loadtest/poc/bench/src/rate.mjs', scenarioArgs: '--op number --rate 200000 --procs 4', redisTls: tls, pairOf: `${DAY}-number-${tls ? 'notls' : 'tls'}-r1`, notes: '한 키 진입 ② Lua(queue-svc NUMBER: 서버 시각·세대·로비와 묶음 표시 확인·INCR·수명 늘리기, 표시가 선 뒤의 평시 경로), node-redis 6.3.0, 진입 서버 4대를 프로세스 4개로 흉내(컨테이너 CPU 6)' },
+          ledger: { kpi: 'NFR-001', rps: 200000, duration: 60, warmup: 15, scenario: 'loadtest/poc/bench/src/rate.mjs', scenarioArgs: '--op number --rate 200000 --procs 4', redisTls: tls, pairOf: `${DAY}-number-n1-${tls ? 'notls' : 'tls'}-r1`, notes: '한 키 진입 ② 묶음 Lua(queue-svc NUMBER_BATCH: 서버 시각·세대·로비와 묶음 표시 확인·INCRBY·수명 늘리기)를 요청마다 1건으로(묶음 없는 직접 호출, 표시가 선 뒤의 평시 경로), node-redis 6.3.0, 진입 서버 4대를 프로세스 4개로 흉내(컨테이너 CPU 6)' },
+        });
+      }
+    }
+  },
+  // Q-T5 배치 모드(ADR-0179): 파드처럼 진입 서버마다 2ms씩 모아 묶음 Lua 한 번. 직접 호출(number)과 같은 조건으로 잰다
+  async numberbatch() {
+    for (const tls of [true, false]) {
+      await valkeyUp({ tls });
+      for (let r = 1; r <= (tls ? 3 : 1); r += 1) {
+        const id = `${DAY}-numberbatch-${tls ? 'tls' : 'notls'}-r${r}`;
+        runBench(id, {
+          cpus: '6',
+          args: ['src/rate.mjs', '--nodes', N, '--tls', String(tls), '--client', 'node-redis', '--op', 'number-batch', '--rate', '200000', '--procs', '4', '--duration', '60', '--warmup', '15', '--batch-ms', '2'],
+          ledger: { kpi: 'NFR-001', rps: 200000, duration: 60, warmup: 15, scenario: 'loadtest/poc/bench/src/rate.mjs', scenarioArgs: '--op number-batch --rate 200000 --procs 4 --batch-ms 2', redisTls: tls, pairOf: `${DAY}-numberbatch-${tls ? 'notls' : 'tls'}-r1`, notes: '한 키 진입 ② 묶음 Lua(queue-svc NUMBER_BATCH, 진입 서버마다 2ms 묶음, Q-T5 배치 모드, ADR-0179), node-redis 6.3.0, 진입 서버 4대를 프로세스 4개로 흉내(컨테이너 CPU 6)' },
         });
       }
     }
