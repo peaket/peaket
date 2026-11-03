@@ -148,7 +148,7 @@ function parseRates(raw) {
  * - --out은 비지 않은 경로(그대로 둔다)
  * BSL-090(docs/verification.md §3.10)에서 더한 것:
  * - 모든 v0 시나리오: --generators N(1~64, 주면 그 수로 나누고 주지 않으면 실행 도구가 최고 도착률로 정한다. 돌려주는 꼴에는 줬을 때만 generators),
- *   --namespace(v0·v0-base, 기본 v0. 야간 비교의 기준판은 v0-base), --settle(시작 전 HPA가 앱 복제를 최소로 줄일 때까지 기다림),
+ *   --namespace(v0·v0-base, 기본 v0. 야간 비교의 기준판은 v0-base), --settle(시작 전 HPA가 올라와 있는 두 판의 앱 복제를 모두 최소로 줄일 때까지 기다림),
  *   --hpa-timeline(실행 동안의 HPA 사건·앱 파드 시각을 남김). --prom-url은 --record와 함께만 주고 'http://127.0.0.1:<포트>'나
  *   'http://localhost:<포트>' 꼴만 받는다(포트 1~65,535). 돌려주는 꼴: generators?, namespace, settle, hpaTimeline, promUrl?
  * - seat-hold: --keep(잡은 홀드를 놓지 않는다. 그때 IP 몫 규칙은 rate × 1 ≤ 0.6 × 한도 × users, 즉 rate × 10 ≤ 6 × 한도 × users이고

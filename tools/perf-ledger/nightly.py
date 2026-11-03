@@ -36,6 +36,8 @@ SUMMARY_DIR = os.path.join('.cache', 'nightly')
 ALERT_TITLE = '[SEV3] 야간 축소 성능 시험 실패'
 AA_MIN_RUNS = 10  # 기준값을 정하는 A/A 실행 수 [가정](docs/devops.md §3.3)
 K6_THRESHOLDS_FAILED = 99  # k6가 시나리오 기준(thresholds)을 넘었을 때의 종료 코드. 요약은 그대로 남는다
+# 실패한 명령의 출력 가운데 오류에 붙이는 끝부분(글자 수). 300자면 실행 도구의 진행 글에 묻혀 까닭이 잘렸다(2026-11-03 러너 A/A 실행)
+ERR_TAIL = 2000
 
 
 class InputError(ValueError):
@@ -112,7 +114,7 @@ def call(cmd, what, timeout, deadline):
 def prepare_targets(cmd, deadline):
     out = call(cmd, '준비 명령', 1800, deadline)
     if out.returncode != 0:
-        raise InputError(f'준비 명령 실패({out.returncode}): {(out.stderr or out.stdout).strip()[-300:]}')
+        raise InputError(f'준비 명령 실패({out.returncode}): {(out.stderr or out.stdout).strip()[-ERR_TAIL:]}')
     last = next((ln for ln in reversed(out.stdout.splitlines()) if ln.strip()), '')
     try:
         t = json.loads(last)
@@ -168,7 +170,7 @@ def measure(c, k6, base_url, new_url, deadline, prefix):
             # 시나리오 기준을 넘은 종료(99)도 요약이 있으면 견준다. 크게 나빠진 밤일수록 이 경우라 알림을 놓치지 않게 한다
             if r.returncode not in (0, K6_THRESHOLDS_FAILED) or not os.path.exists(summary):
                 raise InputError(f'k6 실패({side} {i + 1}번째, 종료 {r.returncode}, 요약 {"있음" if os.path.exists(summary) else "없음"}): '
-                                 f'{(r.stderr or r.stdout).strip()[-300:]}')
+                                 f'{(r.stderr or r.stdout).strip()[-ERR_TAIL:]}')
             runs.append({'round': i + 1, 'side': side, 'p99_ms': summary_p99(summary)})
             print(f'{side} {i + 1}/{c["rounds"]}: p99 {runs[-1]["p99_ms"]}ms')
     base = statistics.median(x['p99_ms'] for x in runs if x['side'] == 'base')

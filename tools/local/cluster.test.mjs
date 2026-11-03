@@ -19,6 +19,7 @@ import {
   metricsServerInstall,
   selfSignedCertArgs,
   strimziInstall,
+  upPlan,
   v0ForwardArgs,
   v0HelmArgs,
   v0Layout,
@@ -565,5 +566,49 @@ test('BSL090_D-T40_두판의입구주소는입구인증서SAN에있다 [ASVS v5.
     assert.equal(u.protocol, 'https:');
     assert.equal(u.port, '8443');
     assert.ok(san.includes(`DNS:${u.hostname}`), `${u.hostname} in ${san.join(',')}`);
+  }
+});
+
+// ── 야간 비교 클러스터의 CPU 자리(2026-11-03 러너 A/A 실행 실패) ──
+// GitHub 호스트 러너(CPU 4개)의 kind 노드 하나에 시스템 파드·두 판(v0·v0-base)·발생기(요청 = 한도)를 함께 놓는다.
+// 클러스터의 Kafka(Strimzi)·AWS 흉내 서버까지 올리면 요청 합이 4.35 CPU라 발생기가 자리를 잡지 못하고 300초 대기 끝에 실패했다.
+// kind 기본 파드(kind v0.33.0 노드 1.35.8: apiserver 250m·controller-manager 200m·scheduler 100m·etcd 100m·kindnet 100m·coredns 100m × 2,
+// 2026-11-03 노드에서 읽음)와 metrics-server(v0.9.1 설치 파일 100m)는 저장소에 없어 값으로 둔다
+const KIND_SYSTEM_CPU_M = 250 + 200 + 100 + 100 + 100 + 2 * 100;
+const METRICS_SERVER_CPU_M = 100;
+const RUNNER_CPU_M = 4000;
+const cpuM = (q) => (q === undefined ? 0 : String(q).endsWith('m') ? Number(String(q).slice(0, -1)) : Number(q) * 1000);
+/** 파드 하나의 CPU 요청(초기화 컨테이너는 하나씩 먼저 도므로 컨테이너 합과 가장 큰 것 중 큰 쪽) */
+const podCpuM = (spec) => Math.max((spec.containers ?? []).reduce((s, c) => s + cpuM(c.resources?.requests?.cpu), 0), ...(spec.initContainers ?? []).map((c) => cpuM(c.resources?.requests?.cpu)));
+const localDocs = (f) => parseAllDocuments(readFileSync(join(REPO, 'deploy', 'local', f), 'utf8')).map((d) => d.toJS()).filter(Boolean);
+const workloadCpuM = (docs) => docs.filter((d) => ['Deployment', 'StatefulSet'].includes(d.kind)).reduce((s, d) => s + (d.spec.replicas ?? 1) * podCpuM(d.spec.template.spec), 0);
+
+test('BSL090_D-T40_up인자_없으면_Kafka·PostgreSQL·AWS흉내를올리고_--v0-only면_PostgreSQL만올린다', () => {
+  assert.deepEqual(upPlan([]), { v0Only: false, manifests: ['kafka.yaml', 'postgres.yaml', 'aws.yaml'] });
+  assert.deepEqual(upPlan(['--v0-only']), { v0Only: true, manifests: ['postgres.yaml'] });
+  for (const argv of [['--v0'], ['v0-only'], ['--v0-only', '--x'], ['--V0-ONLY'], ['']]) assert.throws(() => upPlan(argv), /up/, JSON.stringify(argv));
+});
+
+test('BSL090_D-T40_v0는_Kafka·AWS흉내를쓰지않는다(up --v0-only로충분하다)', () => {
+  for (const f of ['deploy/envs/local/v0-monolith.yaml', 'deploy/envs/local/v0-gateway.yaml', 'deploy/local/valkey.yaml', 'deploy/local/pg-simulator.yaml']) {
+    assert.doesNotMatch(readFileSync(join(REPO, f), 'utf8'), /kafka|aws\.peaket-local|:9092\b/i, f);
+  }
+});
+
+test('BSL090_D-T40_야간준비명령은_up --v0-only로올리고_발생기를더한CPU요청합이_GitHub호스트러너CPU4개안에든다', () => {
+  const prepare = readFileSync(join(REPO, 'loadtest', 'nightly', 'prepare.mjs'), 'utf8');
+  assert.match(prepare, /'tools\/local\/cluster\.mjs', 'up', '--v0-only'\]/);
+  // up --v0-only가 올리는 것과 v0()가 올리는 Valkey·PG 시뮬레이터
+  const local = [...upPlan(['--v0-only']).manifests, 'valkey.yaml', 'pg-simulator.yaml'].reduce((s, f) => s + workloadCpuM(localDocs(f)), 0);
+  // 두 판(v0·v0-base)의 앱(HPA 최소 복제)·입구
+  const values = (r) => parseAllDocuments(readFileSync(join(REPO, 'deploy', 'envs', 'local', `${r}.yaml`), 'utf8'))[0].toJS().service;
+  const app = values('v0-monolith');
+  const gw = values('v0-gateway');
+  const perVersion = app.autoscaling.minReplicas * cpuM(app.resources.requests.cpu) + gw.replicas * cpuM(gw.resources.requests.cpu);
+  for (const f of ['config.json', 'config-aa.json']) {
+    const k6 = JSON.parse(readFileSync(join(REPO, 'loadtest', 'nightly', f), 'utf8')).k6;
+    const gen = Number(k6[k6.indexOf('--cpus') + 1]) * 1000;
+    const total = KIND_SYSTEM_CPU_M + METRICS_SERVER_CPU_M + local + 2 * perVersion + gen;
+    assert.ok(total <= RUNNER_CPU_M, `${f}: 시스템 ${KIND_SYSTEM_CPU_M + METRICS_SERVER_CPU_M}m + 로컬 ${local}m + 두 판 ${2 * perVersion}m + 발생기 ${gen}m = ${total}m > ${RUNNER_CPU_M}m`);
   }
 });

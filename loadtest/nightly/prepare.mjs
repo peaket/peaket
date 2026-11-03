@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 야간 축소 성능 비교의 준비 명령(docs/devops.md §3.3 '축소 성능 시험의 판정', D-T40). 저장소 뿌리에서 nightly.py가 부른다.
 //   node loadtest/nightly/prepare.mjs [--aa] [--new-patch <패치 파일>]
-// - kind 클러스터를 올리고(node tools/local/cluster.mjs up, 이미 있으면 그대로) 새 판(지금 작업 트리)을 네임스페이스 v0에 올린다(cluster.mjs v0).
+// - kind 클러스터를 올리고(node tools/local/cluster.mjs up --v0-only, 이미 있으면 그대로) 새 판(지금 작업 트리)을 네임스페이스 v0에 올린다(cluster.mjs v0).
 // - 기준판: 가장 최근 출시 태그(v<숫자>…)의 커밋을 따로 빌드해 v0-base에 올린다(DB v0_base, Valkey DB 1, tools/local/cluster.mjs deployV0Base).
 //   출시 태그가 아직 없거나 --aa면 새 판과 같은 이미지를 올린다(A/A: 같은 판끼리 번갈아 재는 잡음 폭 측정, D-T40 ①).
 // - --new-patch(D-T40 ②, 시험용): 지금 커밋에 그 패치를 얹은 이미지를 새 판으로 바꿔 올린다(예: loadtest/nightly/test/delay-30ms.patch).
@@ -68,7 +68,8 @@ function buildAt(ref, image, patch) {
 async function main() {
   const o = parse(process.argv.slice(2));
   say('== 클러스터와 새 판(v0, 지금 작업 트리)');
-  node(['tools/local/cluster.mjs', 'up']);
+  // v0가 쓰는 것만 올린다(Kafka·AWS 흉내 서버 없이). CPU 4개 러너에 시스템 파드·두 판·발생기(CPU 1개)를 함께 놓는다(2026-11-03 러너 A/A 실행에서 발생기가 자리를 잡지 못했다)
+  node(['tools/local/cluster.mjs', 'up', '--v0-only']);
   node(['tools/local/cluster.mjs', 'v0']);
   if (o.patch) {
     say(`== 새 판에 패치를 얹는다(${o.patch})`);

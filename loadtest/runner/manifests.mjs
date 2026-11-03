@@ -199,6 +199,25 @@ export function generatorPod(o) {
 }
 
 /**
+ * 준비되지 않은 파드의 까닭 한 줄(`kubectl get pod -o json`의 객체): 단계, 참이 아닌 조건의 이유·글(예: 스케줄러의 'Insufficient cpu'),
+ * 기다리거나 끝난 컨테이너의 이유·글(예: 이미지 받기 실패)을 '; '로 잇는다. 1,000자를 넘으면 자르고, 아무것도 없으면 '까닭을 알 수 없다'다
+ * @param {Record<string, any> | null | undefined} pod
+ * @returns {string}
+ */
+export function podNotReadyReason(pod) {
+  const st = pod?.status ?? {};
+  const said = (o) => [o.reason, o.message].filter(Boolean).join(' ');
+  const parts = st.phase ? [`단계 ${st.phase}`] : [];
+  for (const c of st.conditions ?? []) if (c.status !== 'True' && said(c)) parts.push(`${c.type}: ${said(c)}`);
+  for (const cs of [...(st.initContainerStatuses ?? []), ...(st.containerStatuses ?? [])]) {
+    const s = cs.state?.waiting ?? cs.state?.terminated;
+    if (s && said(s)) parts.push(`컨테이너 ${cs.name}: ${said(s)}`);
+  }
+  const text = parts.join('; ') || '까닭을 알 수 없다';
+  return text.length > 1000 ? `${text.slice(0, 999)}…` : text;
+}
+
+/**
  * 빈 응답 대역 객체 셋 [ConfigMap, Deployment, Service](네임스페이스 LOADGEN_NAMESPACE, 이름 NULL_TARGET_NAME).
  * - ConfigMap data['nginx.conf']: worker_processes <cpus>, pid /tmp/nginx.pid, 임시 경로는 /tmp 아래, access_log off,
  *   listen NULL_TARGET_PORT ssl, 인증서 /etc/null-target/tls.crt·키 /etc/null-target/tls.key, keepalive_requests 1000000,

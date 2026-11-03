@@ -55,6 +55,7 @@ import {
   nullTargetCertArgs,
   nullTargetManifests,
   nullTargetSecret,
+  podNotReadyReason,
   runEnvFile,
   simKeySecret,
 } from './runner/manifests.mjs';
@@ -146,6 +147,23 @@ const createObject = (obj) => viaStdin('create', obj);
 const applyObject = (obj) => viaStdin('apply', obj);
 /** kind 노드 컨테이너에서 명령(셸 없이) */
 const onNode = (args, o = {}) => execFileSync('docker', ['exec', KIND_NODE, ...args], { encoding: 'utf8', maxBuffer: 1 << 30, timeout: 300_000, ...o });
+/**
+ * 파드가 준비될 때까지(300초) 기다린다. 준비되지 않으면 그 까닭(스케줄러의 자리 없음·이미지 받기 실패 등)을 붙여 던진다.
+ * 2026-11-03 러너의 A/A 실행은 'timed out waiting for the condition'만 남아 CPU 자리가 모자란 줄을 몰랐다
+ */
+async function waitPodReady(pod) {
+  try {
+    await kc(['-n', NS, 'wait', '--for=condition=Ready', `pod/${pod}`, '--timeout=300s'], { timeout: 320_000 });
+  } catch (e) {
+    let why;
+    try {
+      why = podNotReadyReason(JSON.parse(await kc(['-n', NS, 'get', 'pod', pod, '-o', 'json'])));
+    } catch {
+      why = String(e.stderr ?? e.message ?? '').trim().slice(-300);
+    }
+    throw new Error(`파드 ${pod}가 300초 안에 준비되지 않았다: ${why}`);
+  }
+}
 
 // ───────────── 준비 ─────────────
 
@@ -368,7 +386,7 @@ function vuPlan(maxRate, memoryMi, perReqS, floor = 100) {
 async function startGenerator(name, a, hostDir, { simKey = false, deadlineS } = {}) {
   await kc(['-n', NS, 'delete', 'pod', name, '--ignore-not-found', '--wait=true']);
   await createObject(generatorPod({ name, cpus: a.cpus, memoryMi: a.memoryMi, hostDir, simKey, deadlineS: Math.max(60, Math.min(11400, Math.ceil(deadlineS))) }));
-  await kc(['-n', NS, 'wait', '--for=condition=Ready', `pod/${name}`, '--timeout=300s'], { timeout: 320_000 });
+  await waitPodReady(name);
 }
 
 /**
@@ -613,17 +631,31 @@ const SERVER_CHECK = {
 /** 앱 파드 고르기(공용 차트의 이름 꼬리표) */
 const APP_SELECTOR = 'app.kubernetes.io/name=v0-monolith';
 
-/** 시작 전 HPA가 앱 복제를 최소로 줄일 때까지 기다린다(--settle, docs/verification.md §3.10 '공통 규칙') */
+/**
+ * 시작 전 HPA가 앱 복제를 최소로 줄일 때까지 기다린다(--settle, docs/verification.md §3.10 '공통 규칙').
+ * 올라와 있는 두 판(v0·v0-base)을 모두 본다. 야간 비교는 두 판을 번갈아 재서 앞 회차가 다른 판이다. 그 판이 늘린 복제가
+ * CPU 4개 러너의 남은 자리를 차지하면 이번 발생기가 자리를 잡지 못한다(docs/devops.md §3.3)
+ */
 async function settleHpa(namespace, timeoutS = 900) {
   const until = Date.now() + timeoutS * 1000;
   let lastLog = 0;
   while (Date.now() < until) {
-    const h = JSON.parse(await kc(['-n', namespace, 'get', 'hpa', 'v0-monolith', '-o', 'json']));
-    const min = h.spec?.minReplicas ?? 1;
-    const pods = JSON.parse(await kc(['-n', namespace, 'get', 'pods', '-l', APP_SELECTOR, '-o', 'json'])).items.filter((p) => !p.metadata?.deletionTimestamp);
-    if (h.status?.currentReplicas === min && pods.length === min) return;
+    const busy = [];
+    for (const ns of [V0_NAMESPACE, V0_BASE_NAMESPACE]) {
+      const text = (await kc(['-n', ns, 'get', 'hpa', 'v0-monolith', '--ignore-not-found', '-o', 'json'])).trim();
+      if (!text) {
+        // 다른 판은 올리지 않았으면 없다. 재는 판의 HPA는 있어야 한다
+        if (ns !== namespace) continue;
+        throw new Error(`${ns}에 HPA v0-monolith가 없다`);
+      }
+      const h = JSON.parse(text);
+      const min = h.spec?.minReplicas ?? 1;
+      const pods = JSON.parse(await kc(['-n', ns, 'get', 'pods', '-l', APP_SELECTOR, '-o', 'json'])).items.filter((p) => !p.metadata?.deletionTimestamp);
+      if (h.status?.currentReplicas !== min || pods.length !== min) busy.push(`${ns} 최소 ${min}, 지금 ${h.status?.currentReplicas ?? '?'}개, 파드 ${pods.length}개`);
+    }
+    if (!busy.length) return;
     if (Date.now() - lastLog > 30_000) {
-      log(`앱 복제가 최소(${min})로 줄기를 기다린다(지금 ${h.status?.currentReplicas ?? '?'}개, 파드 ${pods.length}개)`);
+      log(`앱 복제가 최소로 줄기를 기다린다(${busy.join('; ')})`);
       lastLog = Date.now();
     }
     await sleep(10_000);
@@ -820,7 +852,7 @@ async function runV0(a, runTag) {
         await createObject(deltaClientPod({ name, index: i, cpus: LISTENER_CPUS, memoryMi: LISTENER_MEMORY_MI, hostDir, deadlineS: Math.max(60, Math.min(11400, busyS * 2 + 600)), connsFrom: from, connsTo: to, gateway: layout.gatewayUrl.replace(/^https:/, 'wss:'), eventId, origin: ORIGIN, image: V0_IMAGES.app }));
       }
     }
-    for (const p of [...pods, ...listeners]) await kc(['-n', NS, 'wait', '--for=condition=Ready', `pod/${p}`, '--timeout=300s'], { timeout: 320_000 });
+    for (const p of [...pods, ...listeners]) await waitPodReady(p);
 
     step(`k6 ${SCENARIOS[a.scenario]}(예상 ${busyS}초)`);
     for (const p of pods) await kc(['-n', NS, 'exec', p, '--', 'sh', '-c', `nohup sh /work/bin/${split ? 'run-split.sh' : 'run.sh'} >/dev/null 2>&1 &`]);

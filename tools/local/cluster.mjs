@@ -74,7 +74,20 @@ async function strimziFile() {
 
 const step = (msg) => console.log(`\n== ${msg}`);
 
-async function up() {
+/**
+ * up의 인자. 없으면 Kafka(Strimzi)·PostgreSQL·AWS 흉내 서버를 올린다. --v0-only면 v0(Before 모놀리스)가 쓰는 PostgreSQL만 올린다.
+ * 야간 비교가 CPU 4개 러너에 시스템 파드·두 판·발생기를 함께 놓으려고 쓴다(docs/devops.md §3.3). 모르는 인자는 Error
+ * @param {string[]} argv
+ * @returns {{ v0Only: boolean, manifests: string[] }} manifests는 deploy/local 아래 파일 이름(올리는 차례)
+ */
+export function upPlan(argv) {
+  for (const x of argv) if (x !== '--v0-only') throw new Error(`up의 모르는 인자: ${x}(쓰는 법: up [--v0-only])`);
+  const v0Only = argv.includes('--v0-only');
+  return { v0Only, manifests: v0Only ? ['postgres.yaml'] : ['kafka.yaml', 'postgres.yaml', 'aws.yaml'] };
+}
+
+async function up(argv = []) {
+  const plan = upPlan(argv);
   step('Docker 엔진');
   run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
   step('도구(kind·kubectl·helm, 고정 판)');
@@ -86,15 +99,19 @@ async function up() {
   } else if (!existsSync(KUBECONFIG)) {
     await kind(['export', 'kubeconfig', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
   }
-  await kubectl(['apply', '-f', '-'], { input: 'apiVersion: v1\nkind: Namespace\nmetadata: { name: kafka }\n---\napiVersion: v1\nkind: Namespace\nmetadata: { name: peaket-local }\n' });
-  step(`Strimzi ${PINNED.strimziVersion} 운영자`);
-  await kubectl(['apply', '--server-side', '--force-conflicts', '-n', 'kafka', '-f', '-'], { input: strimziInstall(await strimziFile(), 'kafka') });
-  await kubectl(['-n', 'kafka', 'rollout', 'status', 'deploy/strimzi-cluster-operator', '--timeout=300s']);
-  step('Kafka 3.9.1(KRaft 하나), PostgreSQL 18, AWS 흉내 서버');
-  for (const f of ['kafka.yaml', 'postgres.yaml', 'aws.yaml']) await kubectl(['apply', '-f', join(REPO, 'deploy', 'local', f)]);
+  await kubectl(['apply', '-f', '-'], { input: `${plan.v0Only ? '' : 'apiVersion: v1\nkind: Namespace\nmetadata: { name: kafka }\n---\n'}apiVersion: v1\nkind: Namespace\nmetadata: { name: peaket-local }\n` });
+  if (!plan.v0Only) {
+    step(`Strimzi ${PINNED.strimziVersion} 운영자`);
+    await kubectl(['apply', '--server-side', '--force-conflicts', '-n', 'kafka', '-f', '-'], { input: strimziInstall(await strimziFile(), 'kafka') });
+    await kubectl(['-n', 'kafka', 'rollout', 'status', 'deploy/strimzi-cluster-operator', '--timeout=300s']);
+  }
+  step(plan.v0Only ? 'PostgreSQL 18(--v0-only: Kafka·AWS 흉내 서버는 올리지 않는다)' : 'Kafka 3.9.1(KRaft 하나), PostgreSQL 18, AWS 흉내 서버');
+  for (const f of plan.manifests) await kubectl(['apply', '-f', join(REPO, 'deploy', 'local', f)]);
   await kubectl(['-n', 'peaket-local', 'rollout', 'status', 'deploy/postgres', '--timeout=300s']);
-  await kubectl(['-n', 'peaket-local', 'rollout', 'status', 'deploy/aws', '--timeout=300s']);
-  await kubectl(['-n', 'kafka', 'wait', 'kafka/peaket', '--for=condition=Ready', '--timeout=600s']);
+  if (!plan.v0Only) {
+    await kubectl(['-n', 'peaket-local', 'rollout', 'status', 'deploy/aws', '--timeout=300s']);
+    await kubectl(['-n', 'kafka', 'wait', 'kafka/peaket', '--for=condition=Ready', '--timeout=600s']);
+  }
   step('준비됨');
   console.log(`kubeconfig: ${KUBECONFIG}`);
 }
@@ -493,9 +510,18 @@ async function down() {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const cmd = process.argv[2];
   const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
-  if (!cmds[cmd]) {
-    console.error('쓰는 법: node tools/local/cluster.mjs up|image|observability|grafana|prometheus|v0|v0-forward|status|down');
+  const usage = () => {
+    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|status|down');
     process.exit(2);
+  };
+  if (!cmds[cmd]) usage();
+  if (cmd === 'up') {
+    try {
+      upPlan(process.argv.slice(3));
+    } catch (e) {
+      console.error(e.message);
+      usage();
+    }
   }
-  await cmds[cmd]();
+  await (cmd === 'up' ? up(process.argv.slice(3)) : cmds[cmd]());
 }
