@@ -1,5 +1,7 @@
 # 가지 규칙 검사(필수 검사 branch-policy, docs/devops.md §2.2.6). PR 제목을 고치면(edited) 다시 돈다(D-T41 ⑤).
-# PR 제목·본문·가지 이름은 여기서 식으로 넘기지 않는다. 스크립트가 사건 파일(GITHUB_EVENT_PATH)에서 읽는다.
+# 작업 가지 수 경고(§2.2.1, D-T49)도 여기서 한다. 경고만 하고 이 필수 검사를 막지 않는다. 병합 방식 주간 점검은 branch-weekly.yml이다.
+# 예약·수동 실행을 여기 두지 않는다. 그 실행이 PR 머리 커밋에 '건너뜀' branch-policy를 붙이면 필수 검사가 통과로 바뀔 수 있다.
+# PR 제목·본문·가지 이름은 여기서 식으로 넘기지 않는다. 스크립트가 사건 파일(GITHUB_EVENT_PATH)과 GitHub API에서 읽는다.
 name: branch-policy
 
 on:
@@ -17,6 +19,10 @@ jobs:
   branch-policy:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # 열린 PR과 그 바뀐 파일을 읽는다(작업 가지 수 경고). 쓰기 권한은 없다
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       # 바뀐 파일과 가지 나이를 git으로 읽으려고 이력을 모두 받는다
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -27,3 +33,9 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: node tools/ci/branch-policy.mjs
+      # 작업 가지 수 경고. 스크립트가 넘어지거나 API가 느려도(단계 시간 제한) 필수 검사를 막지 않는다
+      - run: node tools/ci/branch-watch.mjs count
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

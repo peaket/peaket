@@ -8,6 +8,7 @@
 | `ci-summary.mjs` | 앞선 잡이 하나라도 실패하거나 취소되면 실패합니다. 건너뛴 잡은 실패가 아닙니다 | `ci.yml`의 `ci-summary`(필수 검사) |
 | `fork-guard.mjs` | 비밀이 필요한 단계의 포크 PR 건너뛰기 표시(§4.5, 기술 검토 낮음-010). 포크에서 온 PR이면 출력 `run=false`와 '포크 PR 건너뜀' 알림·잡 요약 줄을 남기고 실패하지 않습니다. 조직 안 PR·푸시에서 비밀이 빠졌으면 실패합니다. 비밀 값은 읽지 않고 있는지만 봅니다. 지금 PR에서 비밀을 쓰는 단계는 없습니다(로컬·CI의 AWS 흉내는 계정이 없습니다) | 비밀이 필요한 단계(앞으로) |
 | `branch-policy.mjs` | 가지 쌍, PR 제목 형식, 빌드 절차 변경 PR에 다른 경로가 섞였는지를 봅니다. 같은 저장소의 릴리스·핫픽스·역병합 PR은 보호 가지에 아직 없는 새 커밋이 바꾼 파일만 섞임 검사를 합니다(이미 병합된 변경을 옮길 뿐입니다). 포크 PR은 바뀐 파일 전부를 봅니다. 작업 가지가 3일을 넘기면 경고합니다(§2.2.6, D-T41) | `branch-policy.yml`(필수 검사) |
+| `branch-watch.mjs` | 경고만 하는 가지 점검 둘(§2.2.1·§2.2.6, D-T49). `count`는 작업 가지 PR마다 같은 저장소에서 열린 작업 가지 PR(`feature/*`·`bugfix/*`, 포크 제외)과 그 바뀐 파일을 GitHub API로 읽어 대상 가지(`origin/<대상>`)의 `.github/CODEOWNERS` 주인 팀마다 세고, 이번 PR의 팀 가운데 3개를 넘는 팀을 경고합니다. API를 읽지 못하면 그 사실만 경고합니다. `weekly`는 지난 8일 `origin/develop` 첫 부모 이력의 병합 커밋마다 들어온 가지(병합 PR의 머리 가지, 없으면 커밋 제목)를 보고 `release/*`·`hotfix/*`·`merge/*`가 아니면 경고하고 잡 요약에 표를 남깁니다. 둘 다 토큰의 `contents: read`·`pull-requests: read`만 씁니다 | `branch-policy.yml`(`count`), `branch-weekly.yml`(`weekly`) |
 | `conventional.mjs` | Conventional Commits 제목 규칙(허용 종류, 형식, 호환을 깨는 표시). PR 제목 검사와 버전 계산이 함께 씁니다 | `branch-policy.mjs`, `release-plan.mjs` |
 | `release-plan.mjs` | 릴리스·핫픽스 계획. `start`는 다음 판(SemVer, 0.y.z 규칙)·변경 기록·바뀐 배포 단위·버전을 올린 `package.json`을, `finish`는 태그·후보·역병합 대상과 `merge/*` 가지 이름을, `verify`는 `main` 병합 커밋의 두 번째 부모와 트리를 봅니다(§2.2.2~§2.2.5, D-T22·D-T23·D-T25·D-T41 ④) | `release.yml` |
 | `contract-breaking.mjs` | 계약 깨짐 검사(docs/api/guidelines.md §1, D-T48). PR의 openapi·asyncapi를 대상 가지와 마지막 출시 태그(`vX.Y.Z` 최대)의 것과 견줍니다. OpenAPI는 `oasdiff breaking --fail-on ERR`, AsyncAPI는 채널·작업을 `asyncapi diff -t breaking`이, 메시지 본문을 oasdiff가 봅니다(본문은 `packages/contracts/scripts/asyncapi-messages.mjs`가 메시지마다 읽기 작업을 붙인 OpenAPI로 바꿉니다. AsyncAPI CLI 6.2.2는 3.0 본문 변경을 분류하지 않습니다). 수준·예외 파일은 `docs/api/breaking/`이고, 예외에는 이유가 있어야 하며 늘어나면 PR에 `breaking-approved` 라벨이 있어야 합니다(라벨은 사건 파일에서 읽습니다). `services`는 서비스 OpenAPI 차이(D-T38)이고 본체는 `service-openapi.mjs`입니다 | `contract-check.yml` |
@@ -56,6 +57,8 @@ node tools/ci/release-plan.mjs start --kind release --from develop
 ```
 
 `release-plan.mjs`는 원격 가지를 `origin/…`으로 읽습니다(`finish`의 후보, 열린 `release/*`·`hotfix/*`). 결과는 `GITHUB_OUTPUT`이 있으면 그 파일에, 없으면 JSON으로 표준 출력에 냅니다. `--notes 파일`을 주면 변경 기록을, `--package-json 파일`을 주면 버전을 올린 `package.json`을 그 파일에 씁니다.
+
+`branch-watch.mjs`는 GitHub API를 부릅니다. 로컬에서는 `GITHUB_REPOSITORY=peaket/peaket`과 읽기 토큰 `GITHUB_TOKEN`(공개 저장소는 없어도 되지만 호출 한도가 낮습니다)을 주고 `node tools/ci/branch-watch.mjs weekly`처럼 돌립니다. `count`는 PR 사건 파일도 읽습니다(`pull_request.number`, `head.ref`, `head.repo.full_name`, `base.ref`. `head.repo`가 없으면 포크로 보고 세지 않습니다). API 주소는 `GITHUB_API_URL`(없으면 `https://api.github.com`)입니다.
 
 `branch-policy.mjs`는 GitHub가 주는 PR 사건 파일을 읽습니다. 로컬에서는 같은 모양의 JSON(`pull_request.title`, `body`, `head.ref`, `head.sha`, `base.ref`, `base.sha`)을 만들어 `GITHUB_EVENT_PATH`로 넘깁니다. `ci-summary.mjs`는 잡 결과를 `NEEDS` 환경 변수(JSON)로 받습니다.
 

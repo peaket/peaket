@@ -8,6 +8,7 @@
 //   5. actions/checkout 단계마다 persist-credentials: false를 둔다
 //   6. 잡마다 timeout-minutes를 둔다(재사용 워크플로를 부르는 잡은 그 워크플로가 정한다)
 //   7. build-image.yml의 잡 build는 잡 권한이 contents: read 하나뿐이고 레지스트리 로그인·푸시·서명·출처 증명 단계가 없다(D-T32 ①)
+//   8. `branch-watch.mjs count`를 부르는 단계는 continue-on-error: true와 timeout-minutes를 둔다. 경고만 하는 점검이 필수 검사(branch-policy)를 막지 않게 한다(D-T49)
 // 쓰는 법: node tools/ci/check-workflows.mjs [파일...]  (파일이 없으면 .github/workflows/*.yml|yaml)
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -79,6 +80,33 @@ function check(file, text) {
     close();
   }
   if (/(^|[\\/])build-image\.ya?ml$/.test(file)) errors.push(...checkBuildJob(file, code, start));
+  errors.push(...checkWatchSteps(file, code, indent));
+  return errors;
+}
+
+// 8. 경고만 하는 가지 점검(D-T49): `branch-watch.mjs count`를 부르는 단계는 넘어지거나 느려도 필수 검사를 막지 않게
+//    continue-on-error: true와 단계 timeout-minutes를 둔다(잡 시간 제한에 걸리면 continue-on-error가 소용없다)
+function checkWatchSteps(file, code, indent) {
+  const errors = [];
+  code.forEach((line, i) => {
+    if (!/\bbranch-watch\.mjs\s+count\b/.test(line)) return;
+    // 그 단계: 위로 '-'로 시작하는 줄을 찾고, 그보다 깊게 들여쓴 줄들
+    let dash = i;
+    while (dash >= 0 && !/^\s*-\s/.test(code[dash])) dash--;
+    const stepIndent = dash >= 0 ? indent(code[dash]) : -1;
+    // 단계의 키만 본다: '-' 줄 자체의 키와, '-' 뒤 키와 같은 깊이(들여쓰기 + 2)의 줄. env: 아래나 run: | 블록 안의 글은 단계 키가 아니다
+    const keys = [(code[dash] ?? '').replace(/^\s*-\s+/, '')];
+    for (let j = dash + 1; j < code.length && (code[j].trim() === '' || indent(code[j]) > stepIndent); j++) {
+      if (indent(code[j]) === stepIndent + 2) keys.push(code[j].trim());
+    }
+    const key = (k) => keys.some((l) => l.startsWith(`${k}:`));
+    if (!keys.some((l) => /^continue-on-error:\s*(['"]?)true\1\s*(#.*)?$/.test(l))) {
+      errors.push(`${file}:${i + 1}: branch-watch.mjs count 단계에 continue-on-error: true가 없다(경고만 하는 점검이 필수 검사를 막는다, D-T49)`);
+    }
+    if (!key('timeout-minutes')) {
+      errors.push(`${file}:${i + 1}: branch-watch.mjs count 단계에 timeout-minutes가 없다(잡 시간 제한에 걸리면 필수 검사가 실패한다, D-T49)`);
+    }
+  });
   return errors;
 }
 
