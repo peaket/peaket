@@ -2,7 +2,7 @@
 // 쓰임새(HoldSeats)는 HoldError를 던지고, 받는 층이 throwHoldProblem으로 바꿔 던진다.
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { COOKIE_CHALLENGE, ProblemError, RequestValidationError } from '@peaket/platform';
-import { SEAT_STORE_RETRY_AFTER_SEC } from '../domain/hold.js';
+import { SEAT_STORE_RETRY_AFTER_SEC, type SeatStoreUnavailable, type SeatStoreUnavailableReason } from '../domain/hold.js';
 
 /** 응답 머리를 다는 곳(FastifyReply가 이 모양이다. 유스케이스 층은 웹 서버 형을 가져오지 않는다) */
 export interface ReplyHeaders {
@@ -24,8 +24,10 @@ export type HoldErrorCode =
   | 'SALE_ENDED'
   /** 좌석 저장소가 준비되지 않음: 세대 키 없음(NOT_READY) 또는 그 회차의 좌석맵 판이 없음 */
   | 'NOT_READY'
-  /** 좌석 Redis 일시 장애(SeatStoreUnavailable) */
+  /** 좌석 Redis 일시 장애 또는 메모리 부족(SeatStoreUnavailable, 까닭은 details.storeReason) */
   | 'STORE_UNAVAILABLE'
+  /** 좌석 Redis를 부르기 전 남은 시간이 SEAT_CALL_MIN_REMAINING_MS(5ms) 미만(guidelines §5, BUILD_ORDER PRF-135) */
+  | 'DEADLINE_EXCEEDED'
   /** 같은 멱등 키에 다른 좌석 선택(지문이 다름) */
   | 'IDEM_REUSED'
   /** 판매 일시정지(명령 3) 또는 판매 중지(ADR-0123) */
@@ -42,6 +44,12 @@ export interface HoldErrorDetails {
   recentlyReleasedSeats?: string[];
   /** REHOLD_WAIT: 그 좌석을 모두 다시 잡을 수 있게 되는 시각(epoch ms) */
   reholdAvailableAtMs?: number;
+  /**
+   * STORE_UNAVAILABLE: 저장소가 준 까닭(SeatStoreUnavailable.reason, BUILD_ORDER PRF-135). 'oom'이어도 응답(503 본문·Retry-After)은 같다.
+   * 응답 본문·머리와 정규 로그 줄에는 싣지 않는다(플랫폼 정규 로그 줄에 그 칸이 없다, 추천 적용 2026-11-04). 지표(seat_lua_errors_total code OOM, HoldSeats)와
+   * 받는 층의 서비스 로그 한 줄({ seatStoreReason: 'oom' })에만 남는다
+   */
+  storeReason?: SeatStoreUnavailableReason;
   cause?: unknown;
 }
 
@@ -87,7 +95,10 @@ export const HOLD_PROBLEMS: Readonly<Record<HoldErrorCode, HoldProblemSpec>> = {
   INVALID_SEAT: { status: 422, type: 'invalid-seat', title: '고를 수 없는 좌석이 있습니다' },
   SALE_ENDED: { status: 410, type: 'sale-ended', title: '판매 시간이 끝났습니다' },
   NOT_READY: { status: 503, type: 'seat-store-unavailable', title: '좌석 정보를 잠시 쓸 수 없습니다', retryAfterSeconds: SEAT_STORE_RETRY_AFTER_SEC },
+  // 메모리 부족(storeReason 'oom')도 이 줄이다. 까닭은 로그·지표에만 둔다(BUILD_ORDER PRF-135)
   STORE_UNAVAILABLE: { status: 503, type: 'seat-store-unavailable', title: '좌석 정보를 잠시 쓸 수 없습니다', retryAfterSeconds: SEAT_STORE_RETRY_AFTER_SEC },
+  // 플랫폼 deadlineExceeded()와 같은 본문(guidelines §5. 게이트웨이 시간 초과도 504라 클라이언트가 보는 결과가 같다)
+  DEADLINE_EXCEEDED: { status: 504, type: 'deadline-exceeded', title: '남은 처리 시간이 모자라 요청을 끝내지 못했습니다' },
   IDEM_REUSED: { status: 422, type: 'idempotency-key-reused', title: '같은 멱등 키를 다른 요청에 썼습니다' },
   PAUSED: { status: 423, type: 'sale-paused', title: '판매가 잠시 멈췄습니다' },
   // 내 좌석을 새 키로 다시 누른 경우도 있어 '다른 분이 먼저'가 아닌 중립 문구다(추천 적용 2026-11-04)
@@ -97,7 +108,18 @@ export const HOLD_PROBLEMS: Readonly<Record<HoldErrorCode, HoldProblemSpec>> = {
 };
 
 /**
+ * 저장소의 SeatStoreUnavailable을 STORE_UNAVAILABLE HoldError로 바꾼다(BUILD_ORDER PRF-135).
+ * 결과: code 'STORE_UNAVAILABLE', details.cause = err, details.storeReason = err.reason('unavailable' 또는 'oom'). 메시지는 까닭과 관계없이
+ * '좌석 Redis를 잠시 쓸 수 없다'다. 대응표의 503 seat-store-unavailable + Retry-After 2초로 답하고(까닭 'oom'도 같은 응답), 던지지 않는다
+ */
+export function storeUnavailableError(err: SeatStoreUnavailable): HoldError {
+  return new HoldError('STORE_UNAVAILABLE', '좌석 Redis를 잠시 쓸 수 없다', { cause: err, storeReason: err.reason });
+}
+
+/**
  * HoldError를 대응표대로 HTTP 오류로 바꿔 던진다(돌아오지 않는다).
+ * - STORE_UNAVAILABLE의 details.storeReason은 응답에 싣지 않는다(본문·머리가 'unavailable'과 같다).
+ * - DEADLINE_EXCEEDED는 이름 있는 줄(504 deadline-exceeded, Retry-After 없음)이다.
  * - 이름 있는 줄: ProblemError(type·status·title·detail·retryAfterSeconds·normalBranch, cause = e). REHOLD_WAIT는 확장 칸
  *   recentlyReleasedSeats(details 그대로)와 reholdAvailableAt(details.reholdAvailableAtMs의 ISO 8601 UTC 'Z', 밀리초 셋째 자리까지)를 싣는다.
  *   CONFLICT의 suggestedSeats는 추천 규칙이 [보완]이라 아직 싣지 않는다.

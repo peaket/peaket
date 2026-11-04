@@ -2,12 +2,14 @@
 // wbs 0.5.1 PoC 측정을 차례로 돈다(loadtest/poc/README.md). 측정마다 결과 JSON과 장부 수집 인자를 .cache/peaket-poc/out/에 남기고,
 // 끝나면 record.mjs가 성능 장부(docs/perf-ledger/runs/)로 옮긴다. 실패한 측정은 기록하고 다음으로 넘어간다.
 // 규칙(docs/perf-ledger.md §3, docs/verification.md §3.5): 오픈 모델, 예열 제외, Redis는 TLS 켬 3회·끔 1회(판정은 켬), 호스트 지표.
-// 쓰는 법: node loadtest/poc/run.mjs [묶음 이름...]   묶음: incr clients behaviors vt41 kafka seat number numberbatch (기본: number·numberbatch 빼고 모두, 이 순서)
+// 쓰는 법: node loadtest/poc/run.mjs [묶음 이름...]   묶음: incr clients behaviors vt41 kafka seat number numberbatch st27 st27smoke (기본: number·numberbatch·st27·st27smoke 빼고 모두, 이 순서)
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { exportSeatLua } from './seat-lua.mjs';
 import { IMAGES, NET, bench, build, ensureNet, kafkaDown, kafkaUp, nodesArg, valkeyDown, valkeyUp } from './stack.mjs';
+import { benchArgs, checkState, ledgerOf, loadPlan, newState, pendingRuns, pickSeries, readState, runIdOf, writeState } from './st27-plan.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OUT = join(ROOT, '.cache', 'peaket-poc', 'out');
@@ -35,6 +37,9 @@ async function syncEntryLua() {
   const head = '-- 생성물: services/queue-svc/src/modules/entry/adapters/entry-lua.ts의 NUMBER_BATCH_LUA. loadtest/poc/run.mjs가 측정 전에 쓴다(고치지 않는다)\n';
   writeFileSync(join(ROOT, 'loadtest', 'poc', 'bench', 'lua', 'entry-number-batch.lua'), head + m.NUMBER_BATCH_LUA);
 }
+
+/** 측정 전에 내보낸 운영 좌석 Lua(seat-lua.mjs exportSeatLua의 결과). 메인에서 채운다 */
+let seatLua = [];
 
 /** 측정 하나를 돌리고 장부 수집 인자를 남긴다 */
 function record(entry) {
@@ -233,70 +238,73 @@ const groups = {
     runBench(`${DAY}-kafka-admin`, { cpus: '4', args: ['src/kafka-perf.mjs', '--case', 'admin'], ledger: null });
     kafkaDown();
   },
-  // S-T27 남은 몫(2026-11-01 11시 다시): 만료 작업 Lua 한 번에 100석. ② 한 샤드 TLS 켬 3회·끔 1회, ② 서로 다른 샤드 1회, ① 켬·끔 1회씩.
-  // ①의 500석 3회는 앞에서 쟀다(500석은 만료 Lua가 10ms를 넘어 SLOWLOG에 남았다)
-  async seatrest() {
+  // S-T27 다시 재기(운영 홀드·만료 Lua, BUILD_ORDER PRF-135, seat-hold §8): loadtest/poc/st27-plan.json의 7번을 차례로 돈다.
+  // 상태 파일(계획의 state_file)에 번마다 끝남·실패를 적어, 멈춘 뒤 같은 명령을 다시 돌리면 끝나지 않은 번부터 이어 돈다.
+  // 만료 원문이 빈 글이거나, 이어 돌 때 Lua 원문이 시작 때와 다르면 시작하지 않는다
+  async st27() {
     kafkaDown();
-    const cases = [
-      ['five', 'same', true, 3],
-      ['five', 'spread', true, 1],
-      ['one', 'same', true, 1],
-      ['five', 'same', false, 1],
-      ['one', 'same', false, 1],
-    ];
+    const plan = loadPlan();
+    const empty = seatLua.filter((r) => r.empty).map((r) => r.file);
+    if (empty.length) throw new Error(`운영 좌석 Lua 원문이 빈 글이다(${empty.join(', ')}). 원문을 채운 뒤 돈다`);
+    const lua = Object.fromEntries(seatLua.map((r) => [r.file, r.sha1]));
+    const statePath = join(ROOT, plan.state_file);
+    let state = readState(statePath);
+    if (state) checkState(state, plan, lua);
+    else {
+      // 같은 날 처음부터 다시 돌아도 앞 묶음의 결과 파일·장부 줄(같은 ID)을 덮지 않게 묶음 글자를 고른다
+      const taken = new Set(readdirSync(OUT).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -'.json'.length)));
+      if (existsSync(PLAN)) for (const l of readFileSync(PLAN, 'utf8').split('\n')) if (l.trim()) taken.add(JSON.parse(l).id);
+      state = newState(plan, DAY, lua, pickSeries(plan, DAY, taken));
+      writeState(statePath, state);
+    }
+    const series = state.series ?? '';
+    const todo = pendingRuns(plan, state);
+    log(`S-T27 계획 ${plan.plan}: 남은 ${todo.length}/${plan.runs.length}번(상태 ${plan.state_file}, 날 ${state.day}, 묶음 '${series}')`);
+    // 이어 돌 때도 첫 번에는 클러스터를 새로 만든다(남아 있던 컨테이너의 상태를 믿지 않는다)
     let tlsNow = null;
-    for (const [mode, layout, tls, reps] of cases) {
-      if (tlsNow !== tls) {
-        await valkeyUp({ tls });
-        tlsNow = tls;
+    for (const run of todo) {
+      if (tlsNow !== run.tls) {
+        await valkeyUp({ tls: run.tls });
+        tlsNow = run.tls;
       }
-      for (let r = 1; r <= reps; r += 1) {
-        const t = tls ? 'tls' : 'notls';
-        runBench(`${DAY}-st27-${mode}-${layout}-rb100-${t}-r${r}`, {
-          cpus: '2',
-          args: ['src/seat-shard.mjs', '--nodes', N, '--tls', String(tls), '--mode', mode, '--layout', layout, '--duration', '600', '--warmup', '60', '--release-batch', '100'],
-          ledger: { kpi: 'NFR-003', rps: mode === 'one' ? 2000 : 6000, duration: 600, warmup: 60, scenario: 'loadtest/poc/bench/src/seat-shard.mjs', scenarioArgs: `--mode ${mode} --layout ${layout} --release-batch 100`, redisTls: tls, pairOf: `${DAY}-st27-${mode}-${layout}-rb100-${tls ? 'notls' : 'tls'}-r1`, notes: `S-T27 ${mode === 'one' ? '한 회차 2,000/s' : '다섯 회차 합 6,000/s'}, 배치 ${layout === 'same' ? '한 샤드' : '서로 다른 샤드'}, 만료 작업 Lua 한 번에 100석, 스냅샷·1초 만료·샤드 발행 함께, p99는 클라이언트가 잰 홀드 Lua 왕복` },
-        });
+      const id = runIdOf(state.day, run.key, series);
+      const startedAt = new Date().toISOString();
+      const cpus = plan.environment.bench_container_cpus;
+      const args = benchArgs(plan, run, N);
+      state.runs[run.key] = { id, status: 'running', startedAt, args };
+      writeState(statePath, state);
+      try {
+        bench(id, { cpus, args });
+        const endedAt = new Date().toISOString();
+        // 결과를 다 읽은 뒤에 장부 줄을 쓴다(읽기가 실패해 다시 돌면 같은 ID의 줄이 두 번 남지 않게)
+        const { judge } = JSON.parse(readFileSync(join(OUT, `${id}.json`), 'utf8'));
+        if (!judge) throw new Error(`결과 ${id}.json에 judge 칸이 없다`);
+        record({ id, startedAt, endedAt, cpus, args, ...ledgerOf(plan, run, state.day, series) });
+        state.runs[run.key] = { id, status: 'done', startedAt, endedAt, args, result: `.cache/peaket-poc/out/${id}.json`, judge };
+        log(`끝 ${id} (${run.n}/${plan.runs.length}): ${JSON.stringify(judge)}`);
+      } catch (err) {
+        state.runs[run.key] = { id, status: 'failed', startedAt, endedAt: new Date().toISOString(), args, error: String(err.message).slice(0, 500) };
+        log(`실패 ${id}: ${String(err.message).slice(0, 500)}`);
       }
+      writeState(statePath, state);
     }
     valkeyDown();
   },
-  // S-T27 만료 묶음 100개로 다시(첫 회차에서 500개 묶음의 만료 Lua가 SLOWLOG 10ms에 남았다). TLS 켬, ①·② 한 번씩
-  async seat100() {
+  // S-T27 연기 실행(장부에 넣지 않는다): TLS 켬, ① 한 회차, 예열 5초 + 20초. 만료 원문이 빈 글이면 만료를 끄고 홀드 경로만 본다
+  async st27smoke() {
     kafkaDown();
     await valkeyUp({ tls: true });
-    for (const [mode, layout] of [['one', 'same'], ['five', 'same']]) {
-      runBench(`${DAY}-st27-${mode}-${layout}-rb100-tls-r1`, {
-        cpus: '2',
-        args: ['src/seat-shard.mjs', '--nodes', N, '--tls', 'true', '--mode', mode, '--layout', layout, '--duration', '600', '--warmup', '60', '--release-batch', '100'],
-        ledger: { kpi: 'NFR-003', rps: mode === 'one' ? 2000 : 6000, duration: 600, warmup: 60, scenario: 'loadtest/poc/bench/src/seat-shard.mjs', scenarioArgs: `--mode ${mode} --layout ${layout} --release-batch 100`, redisTls: true, notes: `S-T27 ${mode === 'one' ? '한 회차 2,000/s' : '다섯 회차 합 6,000/s'}, 한 샤드, 만료 작업 Lua 한 번에 100석(첫 회차는 500석), 스냅샷·1초 만료·샤드 발행 함께, p99는 클라이언트가 잰 홀드 Lua 왕복` },
-      });
-    }
+    const expire = seatLua.find((r) => r.file === 'seat-expire.lua')?.empty ? 'off' : 'on';
+    runBench(`${DAY}-st27-smoke-one-tls`, {
+      cpus: '2',
+      args: ['src/seat-shard.mjs', '--nodes', N, '--tls', 'true', '--mode', 'one', '--layout', 'same', '--duration', '20', '--warmup', '5', '--expire', expire],
+      ledger: null,
+    });
     valkeyDown();
   },
-  // S-T27: 10분씩. ① 한 회차 2,000/s ② 다섯 회차 합 6,000/s(한 샤드) ②' 다섯 회차를 서로 다른 샤드에
+  // S-T27(기본 묶음): 운영 Lua로 다시 재는 정식 계획(st27)을 돈다. 2026-11-01 PoC Lua 측정(seat·seatrest·seat100, --release-batch)은 git 기록에 있다
   async seat() {
-    kafkaDown();
-    const cases = [
-      ['one', 'same', 3],
-      ['five', 'same', 3],
-      ['five', 'spread', 1],
-    ];
-    for (const tls of [true, false]) {
-      await valkeyUp({ tls });
-      for (const [mode, layout, reps] of cases) {
-        if (!tls && layout === 'spread') continue;
-        for (let r = 1; r <= (tls ? reps : 1); r += 1) {
-          const t = tls ? 'tls' : 'notls';
-          runBench(`${DAY}-st27-${mode}-${layout}-${t}-r${r}`, {
-            cpus: '2',
-            args: ['src/seat-shard.mjs', '--nodes', N, '--tls', String(tls), '--mode', mode, '--layout', layout, '--duration', '600', '--warmup', '60'],
-            ledger: { kpi: 'NFR-003', rps: mode === 'one' ? 2000 : 6000, duration: 600, warmup: 60, scenario: 'loadtest/poc/bench/src/seat-shard.mjs', scenarioArgs: `--mode ${mode} --layout ${layout}`, redisTls: tls, pairOf: `${DAY}-st27-${mode}-${layout}-${tls ? 'notls' : 'tls'}-r1`, notes: `S-T27 ${mode === 'one' ? '한 회차 2,000/s' : '다섯 회차 합 6,000/s'}, 배치 ${layout === 'same' ? '한 샤드' : '서로 다른 샤드'}, 스냅샷·1초 만료·샤드 발행 함께, p99는 클라이언트가 잰 홀드 Lua 왕복` },
-          });
-        }
-      }
-    }
-    valkeyDown();
+    await groups.st27();
   },
 };
 
@@ -365,9 +373,15 @@ if (want === null) {
 } else {
 const order = want.length ? want : ['incr', 'clients', 'behaviors', 'vt41', 'kafka', 'seat'];
 log(`시작: ${order.join(', ')}`);
+const unknown = order.filter((g) => !groups[g]);
+if (unknown.length) throw new Error(`모르는 묶음: ${unknown.join(', ')}`);
 await syncEntryLua();
+// 운영 좌석 Lua를 측정 이미지에 넣는다(사본은 커밋하지 않는다). 빈 글도 쓴다: 그 Lua를 쓰는 부하는 seat-shard.mjs·st27 묶음이 거절한다
+seatLua = await exportSeatLua();
+for (const r of seatLua) log(`좌석 Lua ${r.file} ← ${r.source}: ${r.empty ? '빈 글' : `sha1 ${r.sha1}`}`);
 build();
-execFileSync('docker', ['build', '-q', '-f', 'packages/platform/bench/vt41/Dockerfile', '-t', 'peaket/poc-vt41:local', '.'], { cwd: ROOT, stdio: 'ignore' });
+// V-T41 앱 이미지는 V-T41 묶음에서만 쓴다
+if (order.some((g) => g.startsWith('vt41'))) execFileSync('docker', ['build', '-q', '-f', 'packages/platform/bench/vt41/Dockerfile', '-t', 'peaket/poc-vt41:local', '.'], { cwd: ROOT, stdio: 'ignore' });
 for (const g of order) {
   log(`묶음 ${g}`);
   try {

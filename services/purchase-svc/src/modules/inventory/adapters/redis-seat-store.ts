@@ -1,25 +1,54 @@
 // 좌석 저장소를 좌석 Redis(Valkey) Lua로 한다(docs/features/seat-hold.md §3, docs/data.md §3 좌석 키, Lua 계약은 hold-lua.ts).
 // 회차 키는 {event:E} 해시 태그로 한 슬롯에 둔다. 키에 넣는 값(회차 ID·계정 ID)은 받는 층이 KEY_PART 모양만 넘긴다(해시 태그를 깨지 않게).
 import { Inject, Injectable } from '@nestjs/common';
-import { type HotRedis, isRedisUnavailable, redisScript } from '@peaket/platform';
-import { type HeldHold, HOLD_TTL_MS, type HoldInput, type HoldResult, type ReplayInput, type ReplayResult, SeatStoreUnavailable } from '../domain/hold.js';
-import type { SeatStore } from '../domain/ports.js';
+import { type Clock, type HotRedis, isRedisOutOfMemory, isRedisUnavailable, type PlatformLogger, redisScript, systemClock } from '@peaket/platform';
+import {
+  assertDueExpiriesInput,
+  assertExpireInput,
+  type DueExpiriesInput,
+  type DueExpiry,
+  type DueHold,
+  type ExpiredHold,
+  type ExpireInput,
+  type ExpireResult,
+  isExpirableFence,
+} from '../domain/expiry.js';
+import { type HeldHold, HOLD_TTL_MS, type HoldInput, type HoldResult, KEY_PART, REHOLD_WAIT_MS, type ReplayInput, type ReplayResult, SeatStoreUnavailable } from '../domain/hold.js';
+import type { LogGate } from '../domain/log-gate.js';
+import type { SeatCallOptions, SeatExpiries, SeatStore } from '../domain/ports.js';
+import { EXPIRE_LUA } from './expire-lua.js';
 import { HOLD_LUA, OPEN_SALE_LUA } from './hold-lua.js';
+import { keepEventIds, saleEventsWarnGate } from './sale-events.js';
 
 const HOLD = redisScript(HOLD_LUA);
 const OPEN_SALE = redisScript(OPEN_SALE_LUA);
+const EXPIRE = redisScript(EXPIRE_LUA);
 
 const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
+const isNil = (v: unknown): v is null | undefined => v === null || v === undefined;
 
-/** 일시 장애(마감 초과·끊김·클러스터 재구성)만 SeatStoreUnavailable로 바꾼다. 그 밖(스크립트 오류 같은 버그)은 그대로 던진다 */
-async function guard<T>(p: Promise<T>): Promise<T> {
+/**
+ * 좌석 Redis 오류를 가른다: 일시 장애(마감 초과·끊김·클러스터 재구성, platform isRedisUnavailable)는 SeatStoreUnavailable(err),
+ * 메모리 부족(platform isRedisOutOfMemory)은 SeatStoreUnavailable(err, 'oom'), 그 밖(스크립트 오류 같은 버그)은 그대로 돌려준다.
+ * isRedisUnavailable을 먼저 본다. RedisSweepLeases도 같은 가르기를 쓴다
+ */
+export function seatRedisError(err: unknown): unknown {
+  if (isRedisUnavailable(err)) return new SeatStoreUnavailable(err);
+  if (isRedisOutOfMemory(err)) return new SeatStoreUnavailable(err, 'oom');
+  return err;
+}
+
+/** 좌석 Redis 호출 하나를 seatRedisError로 가른 오류로 끝낸다 */
+export async function guard<T>(p: Promise<T>): Promise<T> {
   try {
     return await p;
   } catch (err) {
-    if (isRedisUnavailable(err)) throw new SeatStoreUnavailable(err);
-    throw err;
+    throw seatRedisError(err);
   }
 }
+
+/** 호출 마감 선택값(SeatCallOptions.deadlineMs가 있을 때만 싣는다) */
+const deadlineOf = (o: SeatCallOptions | undefined): { deadlineMs?: number } => (o?.deadlineMs !== undefined ? { deadlineMs: o.deadlineMs } : {});
 
 /** Lua가 돌려준 10진 정수 글(시각) */
 function int(v: unknown, what: string): number {
@@ -70,20 +99,41 @@ export const seatKeys = {
   section: (e: string, sectionId: string) => `s:{event:${e}}:sec:${sectionId}`,
   /** 좌석 비트맵이 있는 회차 목록(회차 태그 없음, 다른 슬롯) */
   ctlEvents: () => 's:ctl:events',
+  /** 회차별 만료 임대(값 = 잡은 파드 ID, BUILD_ORDER PRF-135) */
+  sweep: (e: string) => `s:{event:${e}}:sweep`,
 };
 
 /**
- * SeatStore의 좌석 Redis 구현. hold는 홀드 Lua 한 번(EVALSHA, NOSCRIPT면 같은 마감 안에서 EVAL, platform HotRedis.evalScript)이고
+ * SeatStore·SeatExpiries의 좌석 Redis 구현. hold는 홀드 Lua 한 번(EVALSHA, NOSCRIPT면 같은 마감 안에서 EVAL, platform HotRedis.evalScript)이고
  * KEYS·ARGV·돌려주는 값은 hold-lua.ts의 계약이다. openSale은 s:ctl:events SADD 한 번 뒤 판매 열기 Lua 한 번이다.
  * 일시 장애(platform isRedisUnavailable가 참)는 SeatStoreUnavailable로 바꿔 던지고, 그 밖(스크립트 오류·모르는 결과 값)은 Error로 던진다.
  * Lua의 색인 결과(CONFLICT·REHOLD_WAIT)는 입력 seats로 좌석 ID로 바꿔 돌려준다. 토큰 글은 Number로 바꾸고, 안전한 정수(Number.isSafeInteger)가 아니면 Error를 던진다.
  * ARGV 8의 구역 채널 앞머리는 seatKeys.section(eventId, '')다.
+ *
+ * PRF-135:
+ * - 메모리 부족(platform isRedisOutOfMemory가 참)은 모든 메서드에서 SeatStoreUnavailable(err, 'oom')로 바꿔 던진다(503, 까닭은 지표·서비스 로그에만).
+ * - hold·replay의 둘째 인자 SeatCallOptions.deadlineMs를 HotRedis 호출의 deadlineMs로 넘긴다(없으면 넘기지 않아 플랫폼 기본 100ms).
+ * - saleEvents는 SMEMBERS s:ctl:events 한 번, dueExpiries는 ZRANGE 한 번 뒤 좌석마다 HMGET(함께 보낸다), expire는 만료 Lua 한 번(expire-lua.ts 계약,
+ *   ARGV 2의 구역 채널 앞머리는 seatKeys.section(eventId, '')). 결과 해석과 오류는 ports.ts SeatExpiries의 설명이다.
  */
 @Injectable()
-export class RedisSeatStore implements SeatStore {
-  constructor(@Inject(SEAT_REDIS) private readonly redis: HotRedis) {}
+export class RedisSeatStore implements SeatStore, SeatExpiries {
+  readonly #filterWarnGate: LogGate;
 
-  async hold(i: HoldInput): Promise<HoldResult> {
+  /**
+   * @param redis 좌석 Redis
+   * @param logger 서비스 로거(선택). saleEvents가 거른 값의 수를 남긴다(L8, 파드마다 60초에 한 줄까지, C3). 모듈은 useFactory로 넘긴다
+   * @param clock 경고 문의 시각(기본 systemClock). 모듈은 주입 Clock을 넘긴다
+   */
+  constructor(
+    @Inject(SEAT_REDIS) private readonly redis: HotRedis,
+    private readonly logger?: PlatformLogger,
+    clock: Clock = systemClock,
+  ) {
+    this.#filterWarnGate = saleEventsWarnGate(clock);
+  }
+
+  async hold(i: HoldInput, o?: SeatCallOptions): Promise<HoldResult> {
     const e = i.eventId;
     const a = i.accountId;
     const keys = [
@@ -110,7 +160,7 @@ export class RedisSeatStore implements SeatStore {
       seatKeys.section(e, ''),
       ...i.seats.flatMap((s) => [String(s.index), String(s.sectionIndex), String(s.seatOffset), s.seatId, s.tierId, s.sectionId]),
     ];
-    const r = (await guard(this.redis.evalScript(HOLD, keys, args))) as unknown[];
+    const r = (await guard(this.redis.evalScript(HOLD, keys, args, deadlineOf(o)))) as unknown[];
     if (!Array.isArray(r)) throw new Error(`홀드 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
     const kind = str(r[0]);
     // Lua의 좌석 색인 → 입력의 좌석 ID
@@ -142,9 +192,9 @@ export class RedisSeatStore implements SeatStore {
   }
 
   /** 멱등 기록 하나를 HMGET으로 읽는다(같은 슬롯, 쓰지 않음). 만료는 Redis가 지운다 */
-  async replay(i: ReplayInput): Promise<ReplayResult> {
+  async replay(i: ReplayInput, o?: SeatCallOptions): Promise<ReplayResult> {
     const key = seatKeys.idem(i.eventId, i.accountId, i.idempotencyKey);
-    const r = (await guard(this.redis.command(['HMGET', key, 'fp', 'resp'], { key }))) as unknown[];
+    const r = (await guard(this.redis.command(['HMGET', key, 'fp', 'resp'], { key, ...deadlineOf(o) }))) as unknown[];
     if (!Array.isArray(r) || r[0] === null || r[0] === undefined) return null;
     if (str(r[0]) !== i.fingerprint) return { kind: 'IDEM_REUSED' };
     return { kind: 'IDEM_REPLAY', ...firstResponseOf(r[1] === null || r[1] === undefined ? '' : str(r[1])) };
@@ -159,4 +209,142 @@ export class RedisSeatStore implements SeatStore {
     if (!Array.isArray(r)) throw new Error(`판매 열기 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
     return { created: str(r[0]) === '1', seatEpoch: int(r[1], '세대') };
   }
+
+  /** SeatExpiries.saleEvents: SMEMBERS s:ctl:events 한 번 */
+  async saleEvents(): Promise<string[]> {
+    const list = seatKeys.ctlEvents();
+    const r = await guard(this.redis.command(['SMEMBERS', list], { key: list }));
+    if (!Array.isArray(r)) throw new Error(`회차 목록 답이 배열이 아니다: ${String(r)}`);
+    // 회차 ID 모양이 아닌 값은 거른다(해시 태그를 깨는 값이 임대·만료 키에 들어가지 않게, L8). 값은 로그에 싣지 않고 경고는 파드마다 60초에 한 줄까지다(C3)
+    return keepEventIds(r.map(str), this.#filterWarnGate, this.logger);
+  }
+
+  /**
+   * SeatExpiries.dueExpiries: ZRANGE expiry -inf nowMs BYSCORE LIMIT 0 limit WITHSCORES 한 번 뒤 좌석마다 HMGET hold:{i} holdId fence owner.
+   * 홀드 키의 형이 틀려 HMGET이 WRONGTYPE이면 그 좌석만 { hold: null, corrupt: true }다(B1. 나머지 좌석의 읽기는 그대로 이어진다).
+   * 만료 인덱스 키(ZRANGE) 자체의 오류와 다른 종류의 HMGET 오류는 읽기 전체 오류라 그대로 던진다(일시 장애·메모리 부족은 SeatStoreUnavailable)
+   */
+  async dueExpiries(i: DueExpiriesInput): Promise<DueExpiry[]> {
+    assertDueExpiriesInput(i);
+    const e = i.eventId;
+    const expiry = seatKeys.expiry(e);
+    const range = await guard(this.redis.command(['ZRANGE', expiry, '-inf', String(i.nowMs), 'BYSCORE', 'LIMIT', '0', String(i.limit), 'WITHSCORES'], { key: expiry }));
+    const due = scoredMembers(range).map(([member, score]) => {
+      const m = str(member);
+      const index = Number(m);
+      const expiresAtMs = Number(str(score));
+      // 멤버는 앞 0 없는 10진 정수 글이다('0'은 첫 좌석). 만료 Lua는 String(색인)으로 조회하므로 '007'을 색인 7로 받으면 그 멤버를 지우지 못하고, 정상 '7'과 겹친다
+      if (!/^(0|[1-9][0-9]*)$/.test(m) || !Number.isSafeInteger(index) || !Number.isFinite(expiresAtMs)) throw new Error(`PEAKET_CORRUPT_KEY ${expiry}`);
+      return { index, expiresAtMs };
+    });
+    // 같은 슬롯이라 함께 보낸다(클라이언트가 한 연결에 이어 보낸다)
+    const hashes = await Promise.all(
+      due.map(async (d) => {
+        const key = seatKeys.hold(e, d.index);
+        try {
+          return await this.redis.command(['HMGET', key, 'holdId', 'fence', 'owner'], { key });
+        } catch (err) {
+          // 홀드 키의 형이 틀린 좌석만 망가진 좌석이다(B1). 그 밖의 오류(스크립트 버그·일시 장애·메모리 부족)는 읽기 전체 오류라 가른 오류로 던진다
+          if (isWrongType(err)) return WRONG_TYPE;
+          throw seatRedisError(err);
+        }
+      }),
+    );
+    return due.map((d, k): DueExpiry => {
+      const hold = hashes[k] === WRONG_TYPE ? 'corrupt' : dueHoldOf(hashes[k]);
+      return hold === 'corrupt' ? { ...d, hold: null, corrupt: true } : { ...d, hold };
+    });
+  }
+
+  /** SeatExpiries.expire: 만료 Lua 한 번(expire-lua.ts의 KEYS·ARGV, 계정 m개는 seats의 expected.owner를 처음 나온 차례로) */
+  async expire(i: ExpireInput): Promise<ExpireResult> {
+    assertExpireInput(i);
+    const e = i.eventId;
+    const owners: string[] = [];
+    for (const s of i.seats) if (s.expected && !owners.includes(s.expected.owner)) owners.push(s.expected.owner);
+    const keys = [
+      seatKeys.bitmap(e),
+      seatKeys.expiry(e),
+      seatKeys.stream(e),
+      seatKeys.epoch(e),
+      seatKeys.secver(e),
+      ...i.seats.map((s) => seatKeys.hold(e, s.index)),
+      ...owners.map((a) => seatKeys.quota(e, a)),
+      ...owners.map((a) => seatKeys.rel(e, a)),
+    ];
+    const args = [
+      String(REHOLD_WAIT_MS),
+      seatKeys.section(e, ''),
+      String(i.keepUntilMs),
+      String(owners.length),
+      ...owners,
+      ...i.seats.flatMap((s) => [
+        String(s.index),
+        s.expected?.holdId ?? '',
+        s.expected?.fencingToken ?? '',
+        s.expected ? String(owners.indexOf(s.expected.owner) + 1) : '0',
+        s.seat ? String(s.seat.sectionIndex) : '',
+        s.seat ? String(s.seat.seatOffset) : '',
+        s.seat?.seatId ?? '',
+        s.seat?.tierId ?? '',
+        s.seat?.sectionId ?? '',
+      ]),
+    ];
+    const r = (await guard(this.redis.evalScript(EXPIRE, keys, args))) as unknown;
+    if (!Array.isArray(r)) throw new Error(`만료 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
+    const kind = str(r[0]);
+    if (kind === 'NOT_READY') return { kind };
+    if (kind !== 'OK') throw new Error(`만료 Lua가 모르는 값을 돌려줬다: ${kind}`);
+    // {'OK', µs, 푼 수, 건너뛴 수, 고아 수, (색인, 토큰)…}
+    const released = count(r[2], '푼 수');
+    const skipped = count(r[3], '건너뛴 수');
+    const orphans = count(r[4], '고아 수');
+    if (r.length !== 5 + 2 * released) throw new Error(`만료 Lua 답의 길이가 푼 수와 맞지 않는다: ${r.length}, 푼 수 ${released}`);
+    // 망가진 좌석 수는 Lua 답에 없다: 넘긴 좌석 수 − (푼 + 건너뛴 + 고아)(M2)
+    const corrupt = i.seats.length - (released + skipped + orphans);
+    if (corrupt < 0) throw new Error(`만료 Lua 답의 푼·건너뛴·고아 수의 합이 넘긴 좌석 수(${i.seats.length})보다 크다`);
+    const inputIndexes = new Set(i.seats.map((s) => s.index));
+    const expired: ExpiredHold[] = [];
+    for (let k = 5; k < r.length; k += 2) {
+      const index = count(r[k], '좌석 색인');
+      if (!inputIndexes.has(index)) throw new Error(`만료 Lua가 입력에 없는 좌석 색인을 돌려줬다: ${index}`);
+      expired.push({ index, fencingToken: fencingTokenOf(r[k + 1]) });
+    }
+    return { kind: 'OK', nowUs: count(r[1], '지금(µs)'), released, skipped, orphans, corrupt, expired };
+  }
+}
+
+/** Lua·명령이 돌려준 0 이상의 10진 정수(수 또는 글) */
+function count(v: unknown, what: string): number {
+  const s = str(v);
+  const n = Number(s);
+  if (!/^[0-9]+$/.test(s) || !Number.isSafeInteger(n)) throw new Error(`좌석 Redis 답의 ${what}이(가) 0 이상의 정수가 아니다: ${s}`);
+  return n;
+}
+
+/** ZRANGE … WITHSCORES 답(RESP2 평평한 배열, RESP3 짝 배열)을 [멤버, 점수] 짝으로 */
+function scoredMembers(v: unknown): [unknown, unknown][] {
+  if (!Array.isArray(v)) throw new Error(`ZRANGE 답이 배열이 아니다: ${String(v)}`);
+  if (v.length > 0 && v.every((x) => Array.isArray(x))) return (v as unknown[][]).map((p) => [p[0], p[1]]);
+  if (v.length % 2 !== 0) throw new Error(`ZRANGE WITHSCORES 답의 길이가 짝수가 아니다: ${v.length}`);
+  const out: [unknown, unknown][] = [];
+  for (let k = 0; k < v.length; k += 2) out.push([v[k], v[k + 1]]);
+  return out;
+}
+
+/** HMGET이 홀드 키의 형 오류(WRONGTYPE)로 거절됐다는 표시(B1) */
+const WRONG_TYPE = Symbol('purchase.WrongTypeHold');
+
+/** 홀드 키의 형이 틀려 Redis가 거절한 오류인가(답이 'WRONGTYPE …'로 시작하는 Error, B1) */
+const isWrongType = (err: unknown): boolean => err instanceof Error && /^WRONGTYPE\b/.test(err.message);
+
+/**
+ * 홀드 Hash의 holdId·fence·owner(HMGET 답). 셋 모두 없으면 null, 일부만 있거나 owner가 키 조각 모양이 아니거나 fence가 만료 Lua가 받지 못하는 모양
+ * (앞 0 없는 10진 정수가 아니거나 2^53 − 1 초과, isExpirableFence, A2)이면 망가진 Hash('corrupt', M2)다
+ */
+function dueHoldOf(v: unknown): DueHold | null | 'corrupt' {
+  const [holdId, fence, owner] = Array.isArray(v) ? v : [];
+  if (isNil(holdId) && isNil(fence) && isNil(owner)) return null;
+  if (isNil(holdId) || isNil(fence) || isNil(owner) || !KEY_PART.test(str(owner)) || !isExpirableFence(str(fence))) return 'corrupt';
+  return { holdId: str(holdId), fencingToken: str(fence), owner: str(owner) };
 }

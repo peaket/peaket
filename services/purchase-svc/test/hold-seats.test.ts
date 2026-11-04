@@ -3,7 +3,7 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { ForbiddenException, HttpException, UnauthorizedException } from '@nestjs/common';
-import { COOKIE_CHALLENGE, type FakeClock, fakeClock, type Principal, PROBLEM_TYPE_BASE, ProblemError, RequestValidationError, uuidv7Time } from '@peaket/platform';
+import { COOKIE_CHALLENGE, Deadline, type FakeClock, fakeClock, type Principal, PROBLEM_TYPE_BASE, ProblemError, RequestValidationError, uuidv7Time } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
 import { describe, expect, test } from 'vitest';
 import {
@@ -23,14 +23,24 @@ import {
   type MemorySeatDef,
   MemorySeatMap,
   MemorySeatStore,
+  MemorySweepLeases,
   RecordingHoldAttempts,
+  SEAT_CALL_CAP_MS,
+  SEAT_CALL_MIN_REMAINING_MS,
+  SEAT_STORE_RETRY_AFTER_SEC,
+  type SeatCallOptions,
+  type SeatLuaErrorCode,
+  type SeatLuaScript,
   type SeatMap,
+  type SeatSignals,
   type SeatStore,
   SeatStoreUnavailable,
   holdFingerprint,
   seatKeys,
+  storeUnavailableError,
   throwHoldProblem,
 } from '../src/modules/inventory/index.js';
+import { type ExpiryHarness, expiryCases, okOf } from './expiry-cases.js';
 import {
   ACCOUNT_A,
   ACCOUNT_B,
@@ -43,6 +53,7 @@ import {
   ref,
   type ReplayInput,
   type ReplayPort,
+  type ReplayResult,
   replayOf,
   SEAT_COUNT,
   SEAT_DEFS,
@@ -111,6 +122,58 @@ function memoryHarness(): SeatHarness {
 
 holdCases('메모리', async () => memoryHarness());
 
+/** 만료 사례용 메모리 도구(memoryHarness에 만료 Hash·만료 인덱스·rel·secver 칸·임대를 직접 쓰고 읽는 것을 더한다) */
+function memoryExpiryHarness(): ExpiryHarness {
+  const h = memoryHarness();
+  const store = h.store as MemorySeatStore;
+  const clock = h.clock as FakeClock;
+  const ev = (e: string) => store.db.event(e);
+  // 메모리 Hash의 시각 칸은 수다(MemoryHoldHash)
+  const typed = (fields: Record<string, string>) => Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, k === 'heldAt' || k === 'exp' ? Number(v) : v]));
+  const live = (e: string) => {
+    const s = ev(e).sweep;
+    return s && clock.now() < s.expiresAtMs ? s : undefined;
+  };
+  return {
+    ...h,
+    store,
+    leases: new MemorySweepLeases(store.db, clock),
+    relSlackMs: 0,
+    setHoldRaw: async (e, i, fields) => {
+      if (fields === null) ev(e).holds.delete(i);
+      else ev(e).holds.set(i, typed(fields) as unknown as MemoryHoldHash);
+    },
+    setHoldField: async (e, i, field, value) => void ev(e).holds.set(i, { ...(ev(e).holds.get(i) ?? {}), ...typed({ [field]: value }) } as unknown as MemoryHoldHash),
+    setExpiry: async (e, member, score) => void ev(e).expiry.set(Number(member), score),
+    removeExpiry: async (e, i) => void ev(e).expiry.delete(i),
+    setSecverRaw: async (e, s, v) => void ev(e).secver.set(s, v as number),
+    setQuotaRaw: async (e, a, text) => void ev(e).quota.set(a, text as unknown as number),
+    rel: async (e, a) => Object.fromEntries([...(ev(e).rel.get(a) ?? new Map<number, number>())].map(([k, v]) => [String(k), v])),
+    lease: async (e) => live(e)?.owner ?? null,
+    leaseTtlMs: async (e) => {
+      const s = live(e);
+      return s ? s.expiresAtMs - clock.now() : null;
+    },
+    shortenLease: async (e, ms) => {
+      const s = ev(e).sweep;
+      if (s) s.expiresAtMs = clock.now() + ms;
+    },
+    passLeaseTtl: async (e) => {
+      const s = ev(e).sweep;
+      if (s) s.expiresAtMs = clock.now();
+    },
+    addCtlEvent: async (raw) => void store.db.ctlEvents.add(raw),
+  };
+}
+
+expiryCases('메모리', async () => memoryExpiryHarness());
+
+/** 좌석 Lua 지표 기록(seat_lua_errors_total 대신) */
+function recordingSignals(): SeatSignals & { calls: [SeatLuaScript, SeatLuaErrorCode][] } {
+  const calls: [SeatLuaScript, SeatLuaErrorCode][] = [];
+  return { calls, luaError: (script, code) => void calls.push([script, code]) };
+}
+
 // ---- 쓰임새 조립 ----
 
 /** 다른 회차의 좌석맵 판(이 판에만 있는 C01) */
@@ -125,6 +188,8 @@ interface WorldOptions {
   noConfig?: boolean;
   /** 저장소 hold 대역(기본은 메모리 저장소) */
   hold?: (i: HoldInput, ctx: { inner: MemorySeatStore; clock: FakeClock }) => Promise<HoldResult>;
+  /** 저장소 replay 대역(기본은 메모리 저장소) */
+  replay?: (i: ReplayInput, ctx: { inner: MemorySeatStore; clock: FakeClock }) => Promise<ReplayResult>;
 }
 
 async function world(o: WorldOptions = {}) {
@@ -133,17 +198,23 @@ async function world(o: WorldOptions = {}) {
   const calls: HoldInput[] = [];
   /** 재생 읽기 호출(앱 쪽 거절 전, 추천 적용 2026-11-04) */
   const replays: ReplayInput[] = [];
+  /** 저장소 호출의 둘째 인자(호출 마감, PRF-135) */
+  const holdOpts: (SeatCallOptions | undefined)[] = [];
+  const replayOpts: (SeatCallOptions | undefined)[] = [];
   const store: SeatStore & ReplayPort = {
-    hold: async (i) => {
+    hold: async (i: HoldInput, opt?: SeatCallOptions) => {
       calls.push(i);
+      holdOpts.push(opt);
       return o.hold ? o.hold(i, { inner, clock }) : inner.hold(i);
     },
     openSale: (i) => inner.openSale(i),
-    replay: async (i) => {
+    replay: async (i: ReplayInput, opt?: SeatCallOptions) => {
       replays.push(i);
-      return replayOf(inner)(i);
+      replayOpts.push(opt);
+      return o.replay ? o.replay(i, { inner, clock }) : replayOf(inner)(i);
     },
   };
+  const signals = recordingSignals();
   const seatMap = new MemorySeatMap();
   const sessions = new MemoryPurchaseSessions();
   const attempts = new RecordingHoldAttempts();
@@ -159,12 +230,12 @@ async function world(o: WorldOptions = {}) {
   await inner.openSale({ eventId: otherEvent, seatCount: 10, keepUntilMs: NOW + 2 * DAY });
   sessions.open({ sessionId: 'ps-a', accountId: ACCOUNT_A, eventId, journeyId: JNY_A, loginSessionId: 'ls-a', key: KEY });
   sessions.open({ sessionId: 'ps-b', accountId: ACCOUNT_B, eventId, journeyId: JNY_B, loginSessionId: 'ls-b', key: KEY });
-  const uc = new HoldSeats(store, seatMap, sessions, attempts, clock);
+  const uc = new HoldSeats(store, seatMap, sessions, attempts, clock, signals);
   /** A의 요청(c로 바꾼다). seatIds가 undefined면 본문은 c.body 또는 {} */
   const run = (seatIds: readonly string[] | undefined, c: Partial<HoldCommand> = {}) =>
     uc.execute({ eventId, accountId: ACCOUNT_A, purchaseSessionId: 'ps-a', idempotencyKey: randomUUID(), body: seatIds === undefined ? {} : { seatIds }, ...c });
   const asB = (seatIds: readonly string[], c: Partial<HoldCommand> = {}) => run(seatIds, { accountId: ACCOUNT_B, purchaseSessionId: 'ps-b', ...c });
-  return { clock, inner, store, calls, replays, seatMap, sessions, attempts, eventId, otherEvent, saleEndsAtMs, limit, uc, run, asB, ev: () => inner.db.event(eventId) };
+  return { clock, inner, store, calls, replays, holdOpts, replayOpts, signals, seatMap, sessions, attempts, eventId, otherEvent, saleEndsAtMs, limit, uc, run, asB, ev: () => inner.db.event(eventId) };
 }
 
 async function rejects(p: Promise<unknown>, code: HoldErrorCode): Promise<HoldError> {
@@ -599,7 +670,186 @@ describe('HoldSeats.execute: 앱 쪽 거절 전 멱등 재생(ST24, guidelines �
   });
 });
 
+describe('HoldSeats.execute: 좌석 Redis 호출 마감(guidelines §5, seat-hold.md §3 좌석 Redis 호출 마감, PRF-135)', () => {
+  test('NFR003_ 좌석 Redis를 부르기 전 남은 시간이 5ms 미만이면 504(DEADLINE_EXCEEDED)이고 저장소를 부르지 않으며 시도 기록 ERROR 하나다. 5ms면 부른다', async () => {
+    expect(SEAT_CALL_MIN_REMAINING_MS).toBe(5);
+    const w = await world();
+    await rejects(w.run(['A01'], { deadline: Deadline.after(4, w.clock) }), 'DEADLINE_EXCEEDED');
+    // 단조 시계로 잰다: 10ms 마감에서 6ms가 지나면 4ms 남는다
+    const d = Deadline.after(10, w.clock);
+    w.clock.advance(6);
+    await rejects(w.run(['A01'], { deadline: d }), 'DEADLINE_EXCEEDED');
+    expect(w.calls).toHaveLength(0);
+    expect(w.replays).toHaveLength(0);
+    expect(w.attempts.records.map((a) => a.result)).toEqual(['ERROR', 'ERROR']);
+    expect(w.ev().bits.size).toBe(0);
+    await w.run(['A01'], { deadline: Deadline.after(5, w.clock) });
+    expect(w.calls).toHaveLength(1);
+  });
+
+  test('NFR003_ 504 경계는 남은 시간 그대로 5ms 미만이다: 4.99ms는 부르지 않고 504, 5ms·5.01ms는 부른다(반올림·올림하지 않는다)', async () => {
+    const w = await world();
+    /** 남은 시간이 remaining ms인 마감(쓰임새 시계와 따로 둔 단조 시계라 홀드 시각은 정수 그대로다) */
+    const left = (remaining: number) => {
+      const dc = fakeClock({ monotonic: 0 });
+      const d = Deadline.after(10, dc);
+      dc.advance(10 - remaining);
+      return d;
+    };
+    await rejects(w.run(['A01'], { deadline: left(4.99) }), 'DEADLINE_EXCEEDED');
+    expect(w.calls).toHaveLength(0);
+    expect(w.attempts.records.map((a) => a.result)).toEqual(['ERROR']);
+    await w.run(['A01'], { deadline: left(5) });
+    await w.run(['A02'], { deadline: left(5.01) });
+    expect(w.calls).toHaveLength(2);
+  });
+
+  test('NFR003_ 저장소를 부를 때 마감은 min(남은 시간, 100ms)이고, 요청 마감이 없으면 둘째 인자를 주지 않는다(플랫폼 기본 100ms)', async () => {
+    expect(SEAT_CALL_CAP_MS).toBe(100);
+    const w = await world();
+    await w.run(['A01'], { deadline: Deadline.after(60, w.clock) });
+    await w.run(['A02'], { deadline: Deadline.after(5_000, w.clock) });
+    await w.run(['A03']);
+    expect(w.holdOpts).toEqual([{ deadlineMs: 60 }, { deadlineMs: 100 }, undefined]);
+    // 재생 읽기도 같다(판매 종료 뒤의 거절 앞)
+    const s = await world({ saleEndsAtMs: NOW });
+    await rejects(s.run(['A01'], { deadline: Deadline.after(30, s.clock) }), 'SALE_ENDED');
+    await rejects(s.run(['A01'], { deadline: Deadline.after(15_000, s.clock) }), 'SALE_ENDED');
+    await rejects(s.run(['A01']), 'SALE_ENDED');
+    expect(s.replayOpts).toEqual([{ deadlineMs: 30 }, { deadlineMs: 100 }, undefined]);
+  });
+
+  test('NFR003_ 재생 읽기 앞에서도 마감을 본다: 거절할 요청(판매 종료·좌석맵에 없는 좌석·설정 없음)이 남은 시간 4ms면 재생 읽기를 부르지 않고 504다', async () => {
+    const ended = await world({ saleEndsAtMs: NOW });
+    await rejects(ended.run(['A01'], { deadline: Deadline.after(4, ended.clock) }), 'DEADLINE_EXCEEDED');
+    const bad = await world();
+    await rejects(bad.run(['Z99'], { deadline: Deadline.after(4, bad.clock) }), 'DEADLINE_EXCEEDED');
+    const none = await world({ noConfig: true });
+    await rejects(none.run(['A01'], { deadline: Deadline.after(4, none.clock) }), 'DEADLINE_EXCEEDED');
+    for (const w of [ended, bad, none]) {
+      expect(w.replays).toHaveLength(0);
+      expect(w.calls).toHaveLength(0);
+      expect(w.attempts.records.map((a) => a.result)).toEqual(['ERROR']);
+    }
+  });
+
+  test('NFR003_ 세션 401·회차 403·auto 400·좌석 없음 400은 좌석 Redis를 부르지 않는 단계라 마감보다 먼저다', async () => {
+    const w = await world();
+    const deadline = Deadline.after(1, w.clock);
+    await rejects(w.run(['A01'], { deadline, purchaseSessionId: 'ps-none' }), 'SESSION_NOT_FOUND');
+    await rejects(w.run(['A01'], { deadline, eventId: w.otherEvent }), 'EVENT_MISMATCH');
+    await rejects(w.run(undefined, { deadline, body: { auto: { firstTierId: 'R', count: 1 } } }), 'AUTO_NOT_SUPPORTED');
+    await rejects(w.run([], { deadline }), 'SEATS_REQUIRED');
+    expect(w.calls).toHaveLength(0);
+    expect(w.replays).toHaveLength(0);
+  });
+
+  test('NFR015_ 부르는 도중 마감을 넘겨 저장소가 SeatStoreUnavailable을 던지면 504가 아니라 503(STORE_UNAVAILABLE)이다', async () => {
+    const late = new SeatStoreUnavailable(new Error('deadline'));
+    const w = await world({ hold: async () => Promise.reject(late) });
+    const e = await rejects(w.run(['A01'], { deadline: Deadline.after(50, w.clock) }), 'STORE_UNAVAILABLE');
+    expect(e.details.cause ?? e.cause).toBe(late);
+    expect(w.calls).toHaveLength(1);
+  });
+});
+
+describe('HoldSeats.execute: 메모리 부족과 좌석 Lua 지표(seat_lua_errors_total, PRF-135)', () => {
+  test('NFR015_ 메모리 부족(SeatStoreUnavailable reason oom)은 503(STORE_UNAVAILABLE, storeReason oom, cause 그대로)이고 지표 {hold, OOM}을 한 번 올린다. 일시 장애는 storeReason unavailable이고 지표를 올리지 않는다 [ASVS v5.0.0-16.3.4] [ASVS v5.0.0-16.5.3]', async () => {
+    const oom = new SeatStoreUnavailable(new Error("OOM command not allowed when used memory > 'maxmemory'."), 'oom');
+    const w = await world({ hold: async () => Promise.reject(oom) });
+    const e = await rejects(w.run(['A01']), 'STORE_UNAVAILABLE');
+    expect(e.details.storeReason).toBe('oom');
+    expect(e.details.cause ?? e.cause).toBe(oom);
+    expect(w.signals.calls).toEqual([['hold', 'OOM']]);
+    expect(w.attempts.records.map((a) => a.result)).toEqual(['ERROR']);
+    expect(w.calls).toHaveLength(1);
+    const down = new SeatStoreUnavailable(new Error('down'));
+    const u = await world({ hold: async () => Promise.reject(down) });
+    const ue = await rejects(u.run(['A01']), 'STORE_UNAVAILABLE');
+    expect(ue.details.storeReason).toBe('unavailable');
+    expect(u.signals.calls).toEqual([]);
+  });
+
+  test('ST26_③ 홀드 Lua가 NOT_READY면 503이고 지표 {hold, NOT_READY}를 한 번 올린다. 업무 거절(경합·한도·정지·멱등 키 재사용)과 성공은 올리지 않는다 [ASVS v5.0.0-16.3.4]', async () => {
+    const w = await world({ hold: returns({ kind: 'NOT_READY' }) });
+    await rejects(w.run(['A01']), 'NOT_READY');
+    expect(w.signals.calls).toEqual([['hold', 'NOT_READY']]);
+    const others: HoldResult[] = [{ kind: 'CONFLICT', seatId: 'A01' }, { kind: 'QUOTA_EXCEEDED' }, { kind: 'PAUSED' }, { kind: 'IDEM_REUSED' }];
+    for (const r of others) {
+      const b = await world({ hold: returns(r) });
+      await b.run(['A01']).catch(() => undefined);
+      expect({ kind: r.kind, calls: b.signals.calls }).toEqual({ kind: r.kind, calls: [] });
+    }
+    const ok = await world();
+    await ok.run(['A01']);
+    expect(ok.signals.calls).toEqual([]);
+  });
+
+  test('ST4_ 홀드 Lua의 쓰기 전 지킴 오류는 바꾸지 않고 던지고, 지표 code를 오류 글로 가른다(CORRUPT_KEY·KEEP_UNTIL_PAST·FENCE_OVERFLOW·OTHER) [ASVS v5.0.0-16.5.3]', async () => {
+    const cases: [Error, SeatLuaErrorCode][] = [
+      [new Error(`ERR PEAKET_CORRUPT_KEY s:{event:ev-1}:quota:${ACCOUNT_A}`), 'CORRUPT_KEY'],
+      [new Error('ERR PEAKET_KEEP_UNTIL_PAST keepUntil 1 now 2'), 'KEEP_UNTIL_PAST'],
+      [new Error('ERR PEAKET_FENCE_OVERFLOW 9007199254740992'), 'FENCE_OVERFLOW'],
+      [new Error('ERR Error running script'), 'OTHER'],
+    ];
+    for (const [bug, code] of cases) {
+      const w = await world({ hold: async () => Promise.reject(bug) });
+      await expect(w.run(['A01'])).rejects.toBe(bug);
+      expect({ code, calls: w.signals.calls }).toEqual({ code, calls: [['hold', code]] });
+      expect(w.attempts.records.map((a) => a.result)).toEqual(['ERROR']);
+    }
+  });
+
+  test('NFR015_ 재생 읽기의 오류는 Lua 오류로 세지 않는다: 일시 장애는 503(STORE_UNAVAILABLE), 그 밖은 바꾸지 않고 던진다', async () => {
+    const down = new SeatStoreUnavailable(new Error('down'));
+    const w = await world({ saleEndsAtMs: NOW, replay: async () => Promise.reject(down) });
+    const e = await rejects(w.run(['A01']), 'STORE_UNAVAILABLE');
+    expect(e.details.cause ?? e.cause).toBe(down);
+    expect(w.signals.calls).toEqual([]);
+    const bug = new Error('멱등 기록 모양이 틀렸다');
+    const b = await world({ saleEndsAtMs: NOW, replay: async () => Promise.reject(bug) });
+    await expect(b.run(['A01'])).rejects.toBe(bug);
+    expect(b.signals.calls).toEqual([]);
+  });
+
+  test('NFR015_ 재생 읽기가 일시 장애면 원래 거절(판매 종료 410·좌석맵에 없는 좌석 422·설정 없음 503 NOT_READY)이 아니라 503 STORE_UNAVAILABLE이다(처음 요청이 잡은 홀드를 잃지 않게, seat-hold §3)', async () => {
+    const down = async () => Promise.reject(new SeatStoreUnavailable(new Error('down')));
+    const ended = await world({ saleEndsAtMs: NOW, replay: down });
+    await rejects(ended.run(['A01']), 'STORE_UNAVAILABLE');
+    const bad = await world({ replay: down });
+    await rejects(bad.run(['Z99']), 'STORE_UNAVAILABLE');
+    const none = await world({ noConfig: true, replay: down });
+    await rejects(none.run(['A01']), 'STORE_UNAVAILABLE');
+    for (const x of [ended, bad, none]) {
+      expect(x.calls).toHaveLength(0);
+      expect(x.replays).toHaveLength(1);
+      expect(x.attempts.records.map((a) => a.result)).toEqual(['ERROR']);
+    }
+  });
+});
+
 describe('메모리 저장소의 시각 경계(Valkey Lua는 Redis TIME을 정할 수 없어 hold-cases에 두지 못한다)', () => {
+  test('ST6_FR042_ 만료 Lua의 지금 경계(메모리 시계): Hash exp = 지금이면 풀고 지금 + 1ms면 건너뛰며, rel 점수·수명은 정확히 지금 + 30초, keepUntil = 지금이면 PEAKET_KEEP_UNTIL_PAST다', async () => {
+    const h = memoryExpiryHarness();
+    const e = newEvent();
+    const keepUntilMs = NOW + 2 * DAY;
+    await h.store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+    expect((await h.store.hold(holdInput(e, ['A01'], { keepUntilMs, accountId: ACCOUNT_A }))).kind).toBe('OK');
+    expect((await h.store.hold(holdInput(e, ['A02'], { keepUntilMs, accountId: ACCOUNT_B }))).kind).toBe('OK');
+    await h.setHoldField(e, ref('A01').index, 'exp', String(NOW));
+    await h.setExpiry(e, String(ref('A01').index), NOW);
+    await h.setHoldField(e, ref('A02').index, 'exp', String(NOW + 1));
+    await h.setExpiry(e, String(ref('A02').index), NOW);
+    const d = await h.store.dueExpiries({ eventId: e, nowMs: NOW, limit: 100 });
+    const seats = d.map((x) => ({ index: x.index, expected: x.hold, seat: ref(x.index === ref('A01').index ? 'A01' : 'A02') }));
+    await expectBug(h.store.expire({ eventId: e, keepUntilMs: NOW, seats }), { keepUntil: '지금' });
+    const r = okOf(await h.store.expire({ eventId: e, keepUntilMs, seats }));
+    expect({ nowUs: r.nowUs, released: r.released, skipped: r.skipped }).toEqual({ nowUs: NOW * 1000, released: 1, skipped: 1 });
+    expect(r.expired.map((x) => x.index)).toEqual([ref('A01').index]);
+    expect(await h.rel(e, ACCOUNT_A)).toEqual({ [String(ref('A01').index)]: NOW + 30_000 });
+    expect(await h.expireAt(e, seatKeys.rel(e, ACCOUNT_A))).toBe(NOW + 30_000);
+  });
+
   test('FR010_ST4_ keepUntilMs가 저장소 시각과 같으면 일시 장애가 아닌 Error이고 아무것도 쓰지 않으며, 1ms 뒤면 잡는다', async () => {
     const h = memoryHarness();
     const e = newEvent();
@@ -715,6 +965,37 @@ describe('문제 상세 대응(throwHoldProblem, application/hold-error.ts의 �
     expect(s.err).toBeInstanceOf(RequestValidationError);
     expect(s.headers).toEqual([]);
   });
+
+  test('NFR003_ DEADLINE_EXCEEDED는 504 deadline-exceeded(플랫폼 deadlineExceeded와 같은 제목, Retry-After 없음, 정상 분기 아님)이다', () => {
+    const { e, err, headers } = thrown('DEADLINE_EXCEEDED');
+    expect(err).toBeInstanceOf(ProblemError);
+    const p = err as ProblemError;
+    expect({ status: p.status, type: p.type, title: p.title, retry: p.retryAfterSeconds, normal: p.normalBranch, ext: p.extensions, cause: p.cause === e }).toEqual({
+      status: 504,
+      type: `${PROBLEM_TYPE_BASE}deadline-exceeded`,
+      title: '남은 처리 시간이 모자라 요청을 끝내지 못했습니다',
+      retry: undefined,
+      normal: false,
+      ext: {},
+      cause: true,
+    });
+    expect(headers).toEqual([]);
+  });
+
+  test('NFR015_ storeUnavailableError는 까닭과 관계없이 STORE_UNAVAILABLE·같은 메시지이고 storeReason·cause를 싣는다. 응답은 까닭 oom이어도 503 seat-store-unavailable·Retry-After 2이고 까닭을 싣지 않는다 [ASVS v5.0.0-16.3.4]', () => {
+    const oom = new SeatStoreUnavailable(new Error('OOM command not allowed'), 'oom');
+    const down = new SeatStoreUnavailable(new Error('down'));
+    const a = storeUnavailableError(oom);
+    const b = storeUnavailableError(down);
+    expect({ code: a.code, msg: a.message, reason: a.details.storeReason, cause: a.details.cause === oom }).toEqual({ code: 'STORE_UNAVAILABLE', msg: '좌석 Redis를 잠시 쓸 수 없다', reason: 'oom', cause: true });
+    expect({ code: b.code, msg: b.message, reason: b.details.storeReason, cause: b.details.cause === down }).toEqual({ code: 'STORE_UNAVAILABLE', msg: '좌석 Redis를 잠시 쓸 수 없다', reason: 'unavailable', cause: true });
+    const shape = (x: ProblemError) => ({ status: x.status, type: x.type, title: x.title, retry: x.retryAfterSeconds, ext: x.extensions, detail: x.detail });
+    const pa = thrown('STORE_UNAVAILABLE', a.details).err as ProblemError;
+    const pb = thrown('STORE_UNAVAILABLE', b.details).err as ProblemError;
+    expect(shape(pa)).toEqual(shape(pb));
+    expect(shape(pa)).toEqual({ status: 503, type: `${PROBLEM_TYPE_BASE}seat-store-unavailable`, title: HOLD_PROBLEMS.STORE_UNAVAILABLE.title, retry: SEAT_STORE_RETRY_AFTER_SEC, ext: {}, detail: undefined });
+    expect(JSON.stringify(shape(pa))).not.toMatch(/oom/i);
+  });
 });
 
 describe('홀드 지문(holdFingerprint, seat-hold.md §3 멱등키의 지문)', () => {
@@ -774,6 +1055,26 @@ describe('시험 대역의 계약', () => {
     // 다시 넣으면 통째로 바꾼다
     m.put(cfg('ev-a', SEAT_COUNT), [ref('A02')]);
     expect(await m.resolve('ev-a', ['A01', 'A02'])).toEqual([undefined, ref('A02')]);
+  });
+
+  test('FR042_ 좌석맵 판의 byIndex는 같은 길이·차례이고, 판매 제외석도 좌석을 주며(제외 표시 없이), 판에 없는 색인·넣지 않은 회차는 undefined, 같은 색인 두 번은 두 자리 모두 같은 좌석이다. 다시 넣으면 바뀐 판을 본다', async () => {
+    const m = new MemorySeatMap();
+    m.put(cfg('ev-a', SEAT_COUNT), SEAT_DEFS);
+    const x01 = SEAT_DEFS.find((d) => d.seatId === 'X01')!;
+    const { saleExcluded: _x, ...x01Ref } = x01;
+    expect(await m.byIndex('ev-a', [ref('B01').index, 35, x01.index, ref('A01').index, 40, -1, ref('A01').index])).toStrictEqual([
+      ref('B01'),
+      undefined,
+      x01Ref,
+      ref('A01'),
+      undefined,
+      undefined,
+      ref('A01'),
+    ]);
+    expect(await m.byIndex('ev-none', [0, 1])).toEqual([undefined, undefined]);
+    expect(await m.byIndex('ev-a', [])).toEqual([]);
+    m.put(cfg('ev-a', SEAT_COUNT), [ref('A02')]);
+    expect(await m.byIndex('ev-a', [ref('A01').index, ref('A02').index])).toEqual([undefined, ref('A02')]);
   });
 
   test('FR010_ 구매 세션 대역: 열기·읽기(상태 칸만 사본)·일련번호 올리기·플랫폼 resolve·끝내기', async () => {

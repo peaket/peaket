@@ -1,0 +1,32 @@
+# wbs 0.5.1 PoC 측정 환경(프로파일 local-poc, docs/perf-ledger.md §4)
+수집 시각: 2026-11-03T22:26:36.114Z
+
+## 호스트
+Name                      : Intel(R) Core(TM) i9-14900HX
+NumberOfCores             : 24
+NumberOfLogicalProcessors : 32
+TotalPhysicalMemory : 34049417216
+Caption : Microsoft Windows 11 Home
+Version : 10.0.26200
+WSL: WSL ���: 2.7.10.0 / ��� ���: 6.18.33.2-2 / WSLg ���: 1.0.73.2
+.wslconfig: 없음(WSL 기본: 논리 프로세서 전부, 메모리 절반)
+
+## Docker 엔진(측정 컨테이너가 도는 VM)
+Server 29.8.1, CPUs 32, Mem 16611233792 bytes, OS Docker Desktop, Kernel 6.18.33.2-microsoft-standard-WSL2, cgroup 2
+
+## 이미지(다이제스트 고정)
+valkey: valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a
+k6: grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7
+kafka: apache/kafka:3.9.2@sha256:05b4616e0702ef2729327705d54ad6b50ea70b271c4b730fabd2320789fb7b02
+bench: peaket/poc-bench:local
+peaket/poc-bench:local: sha256:a76c6c98b97162e75c9aefaefdc50ac3acd93df2f94f297ee505ad9c41a3b106
+peaket/poc-vt41:local: sha256:0c30495f668a6a2f54ebc3b30e2ec29f9121047e4f694fa5ccb4703e6b55bc86
+
+## CPU 배치(컨테이너 CPU 한도, --cpus. WSL에서는 어느 코어에 놓일지 고를 수 없어 한도만 둔다, docs/verification.md §3.5 6번)
+- Valkey 주 노드 셋(valkey-1·2·3) 2개씩, 복제 셋(valkey-4·5·6) 1개씩. Kafka 브로커 셋 2개씩(Kafka 묶음에서만 뜬다)
+- 측정 도구 컨테이너: 측정마다 manifest notes와 bench-summary.json의 cpus. 한 키 INCR 6, 클라이언트 셋 비교 1, 동작 시험 2, S-T27 2, Kafka 4
+- V-T41: 앱 컨테이너 1(파드 CPU 한도 고정), k6 컨테이너 4(첫·두 번째 회차)·8(세 번째 회차 -c-)
+- 측정은 한 번에 하나씩 돈다(run.mjs). 측정 중에는 다른 측정·시험을 돌리지 않았다
+
+## 시계
+- 발생기와 대상이 같은 PC·같은 커널이라 시계가 하나다(NTP 오차 해당 없음, perf-ledger §3의 3)

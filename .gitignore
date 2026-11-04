@@ -27,6 +27,8 @@ next-env.d.ts
 .cache/
 # 측정 전에 loadtest/poc/run.mjs가 queue-svc의 진입 Lua 원문에서 만드는 파일(사본을 커밋하지 않는다)
 loadtest/poc/bench/lua/entry-*.lua
+# 측정 전에 loadtest/poc/seat-lua.mjs가 purchase-svc의 운영 좌석 Lua 원문(hold-lua.ts·expire-lua.ts)에서 만드는 파일(S-T27)
+loadtest/poc/bench/lua/seat-*.lua
 
 # 규칙 모델 검사(tools/spec-check)가 명세를 TLA+로 옮길 때 남기는 Apalache 작업 폴더
 _apalache-out/

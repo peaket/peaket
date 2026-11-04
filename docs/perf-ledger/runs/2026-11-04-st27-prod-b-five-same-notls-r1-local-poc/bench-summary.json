@@ -1,0 +1,1017 @@
+{
+  "test": "S-T27",
+  "lua": {
+    "source": "services/purchase-svc/src/modules/inventory/adapters/hold-lua.ts·expire-lua.ts(loadtest/poc/seat-lua.mjs가 내보냄)",
+    "hold_sha1": "b5042a52ed880c3da637903c542a312806464fe5",
+    "open_sale_sha1": "6e038c0a3ce6918e1b12d5dda1994a8ac44dd9c9",
+    "expire_sha1": "6abf0972905ce85ea4cbab149b6ea23a3b9cac37"
+  },
+  "client": "node-redis",
+  "tls": false,
+  "mode": "five",
+  "layout": "same",
+  "expire": true,
+  "expire_batch": 100,
+  "expire_call": "evalsha",
+  "replay_ratio": 0.1,
+  "relay_trim_ms": 1000,
+  "sweep": {
+    "concurrency": 4,
+    "tick_ms": 1000,
+    "ticks": 992,
+    "cap_ticks": 332,
+    "immediate_ticks": 331,
+    "max_concurrent": 4,
+    "event_ticks": 4960,
+    "released": 3943621,
+    "expire_calls": 41594
+  },
+  "duration_s": 600,
+  "warmup_s": 60,
+  "events": [
+    {
+      "tag": "st27e0x0",
+      "slot": 4816,
+      "owner": "valkey-1:6379",
+      "seats": 50000,
+      "hold_rate": 2000,
+      "snapshot_rate": 1000,
+      "replay_rate": 200,
+      "ttl_ms": 5000,
+      "seat_epoch": "1793756476",
+      "outcomes": {
+        "OK": 594276,
+        "CONFLICT": 711069,
+        "QUOTA_EXCEEDED": 14645,
+        "REHOLD_WAIT": 10
+      },
+      "expire": {
+        "ticks": 992,
+        "calls": 13475,
+        "released": 1320109,
+        "skipped": 0,
+        "orphans": 0,
+        "not_ready": 0,
+        "full_batches": 12821,
+        "no_progress": 0,
+        "tick_cap": 331,
+        "errors": 0,
+        "error_kinds": {},
+        "evalsha_measured": 12339,
+        "evalsha_measured_small": 52,
+        "noscript": 0,
+        "immediate_ticks": 331,
+        "cap_ticks": 331,
+        "max_concurrent": 4,
+        "backoff_skips": 0,
+        "latency_client": {
+          "count": 12339,
+          "p50_ms": 2.752,
+          "p90_ms": 4.533,
+          "p99_ms": 7.008,
+          "p999_ms": 46.149,
+          "max_ms": 598.943,
+          "mean_ms": 3.184
+        }
+      },
+      "relay": {
+        "trims": 659,
+        "trimmed": 2643490,
+        "errors": 0
+      },
+      "stream_len_end": 6296
+    },
+    {
+      "tag": "st27e1x2",
+      "slot": 1442,
+      "owner": "valkey-1:6379",
+      "seats": 15000,
+      "hold_rate": 1000,
+      "snapshot_rate": 500,
+      "replay_rate": 100,
+      "ttl_ms": 3000,
+      "seat_epoch": "1793756476",
+      "outcomes": {
+        "OK": 294411,
+        "CONFLICT": 363364,
+        "QUOTA_EXCEEDED": 2215,
+        "REHOLD_WAIT": 10
+      },
+      "expire": {
+        "ticks": 992,
+        "calls": 7006,
+        "released": 657362,
+        "skipped": 0,
+        "orphans": 0,
+        "not_ready": 0,
+        "full_batches": 6019,
+        "no_progress": 0,
+        "tick_cap": 1,
+        "errors": 0,
+        "error_kinds": {},
+        "evalsha_measured": 6399,
+        "evalsha_measured_small": 112,
+        "noscript": 1,
+        "immediate_ticks": 331,
+        "cap_ticks": 1,
+        "max_concurrent": 4,
+        "backoff_skips": 0,
+        "latency_client": {
+          "count": 6399,
+          "p50_ms": 5.275,
+          "p90_ms": 6.918,
+          "p99_ms": 9.521,
+          "p999_ms": 13.512,
+          "max_ms": 598.855,
+          "mean_ms": 5.435
+        }
+      },
+      "relay": {
+        "trims": 659,
+        "trimmed": 1312358,
+        "errors": 0
+      },
+      "stream_len_end": 4244
+    },
+    {
+      "tag": "st27e2x3",
+      "slot": 3283,
+      "owner": "valkey-1:6379",
+      "seats": 15000,
+      "hold_rate": 1000,
+      "snapshot_rate": 500,
+      "replay_rate": 100,
+      "ttl_ms": 3000,
+      "seat_epoch": "1793756476",
+      "outcomes": {
+        "OK": 294694,
+        "CONFLICT": 363075,
+        "QUOTA_EXCEEDED": 2215,
+        "REHOLD_WAIT": 16
+      },
+      "expire": {
+        "ticks": 992,
+        "calls": 7018,
+        "released": 657555,
+        "skipped": 0,
+        "orphans": 0,
+        "not_ready": 0,
+        "full_batches": 6031,
+        "no_progress": 0,
+        "tick_cap": 1,
+        "errors": 0,
+        "error_kinds": {},
+        "evalsha_measured": 6414,
+        "evalsha_measured_small": 113,
+        "noscript": 1,
+        "immediate_ticks": 331,
+        "cap_ticks": 1,
+        "max_concurrent": 4,
+        "backoff_skips": 0,
+        "latency_client": {
+          "count": 6414,
+          "p50_ms": 7.121,
+          "p90_ms": 9.201,
+          "p99_ms": 11.91,
+          "p999_ms": 18.383,
+          "max_ms": 308.648,
+          "mean_ms": 7.257
+        }
+      },
+      "relay": {
+        "trims": 659,
+        "trimmed": 1312797,
+        "errors": 0
+      },
+      "stream_len_end": 4282
+    },
+    {
+      "tag": "st27e3x0",
+      "slot": 2944,
+      "owner": "valkey-1:6379",
+      "seats": 15000,
+      "hold_rate": 1000,
+      "snapshot_rate": 500,
+      "replay_rate": 100,
+      "ttl_ms": 3000,
+      "seat_epoch": "1793756476",
+      "outcomes": {
+        "OK": 294450,
+        "CONFLICT": 363268,
+        "QUOTA_EXCEEDED": 2269,
+        "REHOLD_WAIT": 13
+      },
+      "expire": {
+        "ticks": 992,
+        "calls": 6985,
+        "released": 656190,
+        "skipped": 0,
+        "orphans": 0,
+        "not_ready": 0,
+        "full_batches": 5997,
+        "no_progress": 0,
+        "tick_cap": 0,
+        "errors": 0,
+        "error_kinds": {},
+        "evalsha_measured": 6384,
+        "evalsha_measured_small": 94,
+        "noscript": 1,
+        "immediate_ticks": 331,
+        "cap_ticks": 0,
+        "max_concurrent": 4,
+        "backoff_skips": 0,
+        "latency_client": {
+          "count": 6384,
+          "p50_ms": 9.076,
+          "p90_ms": 11.261,
+          "p99_ms": 13.721,
+          "p999_ms": 36.751,
+          "max_ms": 308.522,
+          "mean_ms": 8.896
+        }
+      },
+      "relay": {
+        "trims": 659,
+        "trimmed": 1310147,
+        "errors": 0
+      },
+      "stream_len_end": 4134
+    },
+    {
+      "tag": "st27e4x0",
+      "slot": 3600,
+      "owner": "valkey-1:6379",
+      "seats": 15000,
+      "hold_rate": 1000,
+      "snapshot_rate": 500,
+      "replay_rate": 100,
+      "ttl_ms": 3000,
+      "seat_epoch": "1793756476",
+      "outcomes": {
+        "OK": 292249,
+        "CONFLICT": 365494,
+        "QUOTA_EXCEEDED": 2236,
+        "REHOLD_WAIT": 21
+      },
+      "expire": {
+        "ticks": 992,
+        "calls": 7110,
+        "released": 652405,
+        "skipped": 0,
+        "orphans": 0,
+        "not_ready": 0,
+        "full_batches": 6130,
+        "no_progress": 0,
+        "tick_cap": 2,
+        "errors": 0,
+        "error_kinds": {},
+        "evalsha_measured": 6493,
+        "evalsha_measured_small": 311,
+        "noscript": 0,
+        "immediate_ticks": 331,
+        "cap_ticks": 2,
+        "max_concurrent": 4,
+        "backoff_skips": 0,
+        "latency_client": {
+          "count": 6493,
+          "p50_ms": 4.684,
+          "p90_ms": 6.118,
+          "p99_ms": 8.942,
+          "p999_ms": 52.857,
+          "max_ms": 60.785,
+          "mean_ms": 4.645
+        }
+      },
+      "relay": {
+        "trims": 659,
+        "trimmed": 1302375,
+        "errors": 0
+      },
+      "stream_len_end": 4150
+    }
+  ],
+  "load": [
+    {
+      "event": "st27e0x0",
+      "kind": "hold",
+      "offered_rate": 2000,
+      "measured": 1200000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 1320000,
+      "done": 1320000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 159,
+      "error_kinds": {},
+      "latency": {
+        "count": 1200000,
+        "p50_ms": 1.842,
+        "p90_ms": 3.806,
+        "p99_ms": 8.776,
+        "p999_ms": 53.284,
+        "max_ms": 79.187,
+        "mean_ms": 2.373
+      },
+      "latency_from_send": {
+        "count": 1200000,
+        "p50_ms": 0.865,
+        "p90_ms": 2.865,
+        "p99_ms": 7.188,
+        "p999_ms": 22.034,
+        "max_ms": 70.627,
+        "mean_ms": 1.398
+      }
+    },
+    {
+      "event": "st27e0x0",
+      "kind": "snapshot",
+      "offered_rate": 1000,
+      "measured": 600000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 660000,
+      "done": 660000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 75,
+      "error_kinds": {},
+      "latency": {
+        "count": 600000,
+        "p50_ms": 2.128,
+        "p90_ms": 5.093,
+        "p99_ms": 11.335,
+        "p999_ms": 52.012,
+        "max_ms": 658.315,
+        "mean_ms": 2.837
+      },
+      "latency_from_send": {
+        "count": 600000,
+        "p50_ms": 0.944,
+        "p90_ms": 4.073,
+        "p99_ms": 10.225,
+        "p999_ms": 18.34,
+        "max_ms": 626.687,
+        "mean_ms": 1.732
+      }
+    },
+    {
+      "event": "st27e0x0",
+      "kind": "replay",
+      "offered_rate": 200,
+      "measured": 120000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 132000,
+      "done": 132000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 17,
+      "error_kinds": {},
+      "latency": {
+        "count": 120000,
+        "p50_ms": 2.006,
+        "p90_ms": 3.881,
+        "p99_ms": 8.922,
+        "p999_ms": 57.562,
+        "max_ms": 84.1,
+        "mean_ms": 2.479
+      },
+      "latency_from_send": {
+        "count": 120000,
+        "p50_ms": 0.844,
+        "p90_ms": 2.888,
+        "p99_ms": 7.271,
+        "p999_ms": 23.233,
+        "max_ms": 64.668,
+        "mean_ms": 1.399
+      }
+    },
+    {
+      "event": "st27e1x2",
+      "kind": "hold",
+      "offered_rate": 1000,
+      "measured": 600000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 660000,
+      "done": 660000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 85,
+      "error_kinds": {},
+      "latency": {
+        "count": 600000,
+        "p50_ms": 1.945,
+        "p90_ms": 3.89,
+        "p99_ms": 9.151,
+        "p999_ms": 57.868,
+        "max_ms": 86.088,
+        "mean_ms": 2.446
+      },
+      "latency_from_send": {
+        "count": 600000,
+        "p50_ms": 0.835,
+        "p90_ms": 2.902,
+        "p99_ms": 7.473,
+        "p999_ms": 25.498,
+        "max_ms": 70.532,
+        "mean_ms": 1.407
+      }
+    },
+    {
+      "event": "st27e1x2",
+      "kind": "snapshot",
+      "offered_rate": 500,
+      "measured": 300000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 330000,
+      "done": 330000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 41,
+      "error_kinds": {},
+      "latency": {
+        "count": 300000,
+        "p50_ms": 2.044,
+        "p90_ms": 5.105,
+        "p99_ms": 11.354,
+        "p999_ms": 55.862,
+        "max_ms": 658.034,
+        "mean_ms": 2.744
+      },
+      "latency_from_send": {
+        "count": 300000,
+        "p50_ms": 0.919,
+        "p90_ms": 4.073,
+        "p99_ms": 10.275,
+        "p999_ms": 21.128,
+        "max_ms": 626.653,
+        "mean_ms": 1.732
+      }
+    },
+    {
+      "event": "st27e1x2",
+      "kind": "replay",
+      "offered_rate": 100,
+      "measured": 60000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 66000,
+      "done": 66000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 9,
+      "error_kinds": {},
+      "latency": {
+        "count": 60000,
+        "p50_ms": 1.869,
+        "p90_ms": 3.877,
+        "p99_ms": 9.32,
+        "p999_ms": 58.652,
+        "max_ms": 82.336,
+        "mean_ms": 2.378
+      },
+      "latency_from_send": {
+        "count": 60000,
+        "p50_ms": 0.833,
+        "p90_ms": 2.905,
+        "p99_ms": 7.434,
+        "p999_ms": 26.464,
+        "max_ms": 64.505,
+        "mean_ms": 1.41
+      }
+    },
+    {
+      "event": "st27e2x3",
+      "kind": "hold",
+      "offered_rate": 1000,
+      "measured": 600000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 660000,
+      "done": 660000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 89,
+      "error_kinds": {},
+      "latency": {
+        "count": 600000,
+        "p50_ms": 1.713,
+        "p90_ms": 3.818,
+        "p99_ms": 9.532,
+        "p999_ms": 59.961,
+        "max_ms": 88.26,
+        "mean_ms": 2.268
+      },
+      "latency_from_send": {
+        "count": 600000,
+        "p50_ms": 0.808,
+        "p90_ms": 2.909,
+        "p99_ms": 7.706,
+        "p999_ms": 28.246,
+        "max_ms": 70.462,
+        "mean_ms": 1.402
+      }
+    },
+    {
+      "event": "st27e2x3",
+      "kind": "snapshot",
+      "offered_rate": 500,
+      "measured": 300000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 330000,
+      "done": 330000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 42,
+      "error_kinds": {},
+      "latency": {
+        "count": 300000,
+        "p50_ms": 1.805,
+        "p90_ms": 5.011,
+        "p99_ms": 11.29,
+        "p999_ms": 56.45,
+        "max_ms": 657.774,
+        "mean_ms": 2.556
+      },
+      "latency_from_send": {
+        "count": 300000,
+        "p50_ms": 0.893,
+        "p90_ms": 4.078,
+        "p99_ms": 10.303,
+        "p999_ms": 21.964,
+        "max_ms": 626.623,
+        "mean_ms": 1.709
+      }
+    },
+    {
+      "event": "st27e2x3",
+      "kind": "replay",
+      "offered_rate": 100,
+      "measured": 60000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 66000,
+      "done": 66000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 9,
+      "error_kinds": {},
+      "latency": {
+        "count": 60000,
+        "p50_ms": 1.647,
+        "p90_ms": 3.772,
+        "p99_ms": 9.578,
+        "p999_ms": 60.837,
+        "max_ms": 85.242,
+        "mean_ms": 2.214
+      },
+      "latency_from_send": {
+        "count": 60000,
+        "p50_ms": 0.8,
+        "p90_ms": 2.929,
+        "p99_ms": 7.61,
+        "p999_ms": 29.45,
+        "max_ms": 64.354,
+        "mean_ms": 1.406
+      }
+    },
+    {
+      "event": "st27e3x0",
+      "kind": "hold",
+      "offered_rate": 1000,
+      "measured": 600000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 660000,
+      "done": 660000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 72,
+      "error_kinds": {},
+      "latency": {
+        "count": 600000,
+        "p50_ms": 1.713,
+        "p90_ms": 3.717,
+        "p99_ms": 8.626,
+        "p999_ms": 48.969,
+        "max_ms": 72.926,
+        "mean_ms": 2.193
+      },
+      "latency_from_send": {
+        "count": 600000,
+        "p50_ms": 0.907,
+        "p90_ms": 2.871,
+        "p99_ms": 7.142,
+        "p999_ms": 19.063,
+        "max_ms": 70.811,
+        "mean_ms": 1.4
+      }
+    },
+    {
+      "event": "st27e3x0",
+      "kind": "snapshot",
+      "offered_rate": 500,
+      "measured": 300000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 330000,
+      "done": 330000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 37,
+      "error_kinds": {},
+      "latency": {
+        "count": 300000,
+        "p50_ms": 1.926,
+        "p90_ms": 5.022,
+        "p99_ms": 11.187,
+        "p999_ms": 50.286,
+        "max_ms": 657.48,
+        "mean_ms": 2.734
+      },
+      "latency_from_send": {
+        "count": 300000,
+        "p50_ms": 1.002,
+        "p90_ms": 4.124,
+        "p99_ms": 9.978,
+        "p999_ms": 14.884,
+        "max_ms": 626.787,
+        "mean_ms": 1.759
+      }
+    },
+    {
+      "event": "st27e3x0",
+      "kind": "replay",
+      "offered_rate": 100,
+      "measured": 60000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 66000,
+      "done": 66000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 7,
+      "error_kinds": {},
+      "latency": {
+        "count": 60000,
+        "p50_ms": 1.967,
+        "p90_ms": 3.835,
+        "p99_ms": 8.486,
+        "p999_ms": 49.415,
+        "max_ms": 70.233,
+        "mean_ms": 2.458
+      },
+      "latency_from_send": {
+        "count": 60000,
+        "p50_ms": 0.907,
+        "p90_ms": 2.886,
+        "p99_ms": 6.929,
+        "p999_ms": 18.529,
+        "max_ms": 61.127,
+        "mean_ms": 1.406
+      }
+    },
+    {
+      "event": "st27e4x0",
+      "kind": "hold",
+      "offered_rate": 1000,
+      "measured": 600000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 660000,
+      "done": 660000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 75,
+      "error_kinds": {},
+      "latency": {
+        "count": 600000,
+        "p50_ms": 2.037,
+        "p90_ms": 3.864,
+        "p99_ms": 8.729,
+        "p999_ms": 51.211,
+        "max_ms": 75.444,
+        "mean_ms": 2.483
+      },
+      "latency_from_send": {
+        "count": 600000,
+        "p50_ms": 0.889,
+        "p90_ms": 2.878,
+        "p99_ms": 7.139,
+        "p999_ms": 19.864,
+        "max_ms": 70.709,
+        "mean_ms": 1.401
+      }
+    },
+    {
+      "event": "st27e4x0",
+      "kind": "snapshot",
+      "offered_rate": 500,
+      "measured": 300000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 330000,
+      "done": 330000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 37,
+      "error_kinds": {},
+      "latency": {
+        "count": 300000,
+        "p50_ms": 2.026,
+        "p90_ms": 5.069,
+        "p99_ms": 11.281,
+        "p999_ms": 50.591,
+        "max_ms": 657.215,
+        "mean_ms": 2.765
+      },
+      "latency_from_send": {
+        "count": 300000,
+        "p50_ms": 0.969,
+        "p90_ms": 4.069,
+        "p99_ms": 10.048,
+        "p999_ms": 15.429,
+        "max_ms": 626.746,
+        "mean_ms": 1.736
+      }
+    },
+    {
+      "event": "st27e4x0",
+      "kind": "replay",
+      "offered_rate": 100,
+      "measured": 60000,
+      "duration_s": 660,
+      "warmup_s": 60,
+      "issued": 66000,
+      "done": 66000,
+      "dropped": 0,
+      "errors": 0,
+      "error_rate": 0,
+      "max_inflight": 8,
+      "error_kinds": {},
+      "latency": {
+        "count": 60000,
+        "p50_ms": 1.874,
+        "p90_ms": 3.888,
+        "p99_ms": 8.484,
+        "p999_ms": 51.807,
+        "max_ms": 72.371,
+        "mean_ms": 2.377
+      },
+      "latency_from_send": {
+        "count": 60000,
+        "p50_ms": 0.873,
+        "p90_ms": 2.882,
+        "p99_ms": 6.978,
+        "p999_ms": 19.458,
+        "max_ms": 61.089,
+        "mean_ms": 1.392
+      }
+    }
+  ],
+  "engine": {
+    "valkey-1:6379": {
+      "events": [
+        "st27e0x0",
+        "st27e1x2",
+        "st27e2x3",
+        "st27e3x0",
+        "st27e4x0"
+      ],
+      "evalsha": {
+        "p50_us": 24.063,
+        "p99_us": 671.743,
+        "p999_us": 1556.479,
+        "calls": 3638163,
+        "usec_per_call": 49.47
+      },
+      "hold_lua": {
+        "evalsha_calls": 3638163,
+        "expire_calls": 38029,
+        "expire_calls_small": 682,
+        "hold_calls": 3600134,
+        "q_lo": 97.9651,
+        "q": 97.984,
+        "q_hi": 99.0105,
+        "p99_us_lo": 134.143,
+        "p99_us": 134.143,
+        "p99_us_hi": 786.431
+      },
+      "eval": {},
+      "eval_ro_snapshot": {
+        "p50_us": 5.023,
+        "p99_us": 58.111,
+        "p999_us": 159.743,
+        "calls": 1800066,
+        "usec_per_call": 7.79
+      },
+      "hmget": {
+        "p50_us": 0.001,
+        "p99_us": 1.003,
+        "p999_us": 5.023,
+        "calls": 16437883,
+        "usec_per_call": 0.42
+      },
+      "zrange_due": {
+        "p50_us": 18.047,
+        "p99_us": 39.167,
+        "p999_us": 123.391,
+        "calls": 38031,
+        "usec_per_call": 18.49
+      },
+      "xtrim_relay": {
+        "p50_us": 56.063,
+        "p99_us": 144.383,
+        "p999_us": 299.007,
+        "calls": 3000,
+        "usec_per_call": 67.08
+      },
+      "xrevrange_relay": {
+        "p50_us": 5.023,
+        "p99_us": 14.015,
+        "p999_us": 40.191,
+        "calls": 3000,
+        "usec_per_call": 5.08
+      },
+      "spublish": {
+        "p50_us": 1.003,
+        "p99_us": 4.015,
+        "p999_us": 13.055,
+        "calls": 2236436,
+        "usec_per_call": 1.25
+      },
+      "main_thread_cpu_pct": 46.6,
+      "process_cpu_pct": 46.6,
+      "slowlog_len": 0,
+      "slowlog_sample": []
+    }
+  },
+  "pubsub_received": 2458371,
+  "invariants": [
+    {
+      "event": "st27e0x0",
+      "oversell": 0,
+      "unknown_release": 0,
+      "held_at_end": 9568,
+      "holds": 1329677,
+      "releases": 1320109,
+      "bitcount": 9568,
+      "expiry_zcard": 9568,
+      "bit_equals_index": true,
+      "log_equals_bits": true,
+      "seats": {
+        "bit_without_log": 0,
+        "log_without_bit": 0,
+        "index_without_log": 0,
+        "log_without_index": 0,
+        "sample": []
+      },
+      "seats_match": true,
+      "hold_errors": 0,
+      "expire_errors": 0,
+      "verifiable": true
+    },
+    {
+      "event": "st27e1x2",
+      "oversell": 0,
+      "unknown_release": 0,
+      "held_at_end": 1878,
+      "holds": 659240,
+      "releases": 657362,
+      "bitcount": 1878,
+      "expiry_zcard": 1878,
+      "bit_equals_index": true,
+      "log_equals_bits": true,
+      "seats": {
+        "bit_without_log": 0,
+        "log_without_bit": 0,
+        "index_without_log": 0,
+        "log_without_index": 0,
+        "sample": []
+      },
+      "seats_match": true,
+      "hold_errors": 0,
+      "expire_errors": 0,
+      "verifiable": true
+    },
+    {
+      "event": "st27e2x3",
+      "oversell": 0,
+      "unknown_release": 0,
+      "held_at_end": 1969,
+      "holds": 659524,
+      "releases": 657555,
+      "bitcount": 1969,
+      "expiry_zcard": 1969,
+      "bit_equals_index": true,
+      "log_equals_bits": true,
+      "seats": {
+        "bit_without_log": 0,
+        "log_without_bit": 0,
+        "index_without_log": 0,
+        "log_without_index": 0,
+        "sample": []
+      },
+      "seats_match": true,
+      "hold_errors": 0,
+      "expire_errors": 0,
+      "verifiable": true
+    },
+    {
+      "event": "st27e3x0",
+      "oversell": 0,
+      "unknown_release": 0,
+      "held_at_end": 1901,
+      "holds": 658091,
+      "releases": 656190,
+      "bitcount": 1901,
+      "expiry_zcard": 1901,
+      "bit_equals_index": true,
+      "log_equals_bits": true,
+      "seats": {
+        "bit_without_log": 0,
+        "log_without_bit": 0,
+        "index_without_log": 0,
+        "log_without_index": 0,
+        "sample": []
+      },
+      "seats_match": true,
+      "hold_errors": 0,
+      "expire_errors": 0,
+      "verifiable": true
+    },
+    {
+      "event": "st27e4x0",
+      "oversell": 0,
+      "unknown_release": 0,
+      "held_at_end": 1715,
+      "holds": 654120,
+      "releases": 652405,
+      "bitcount": 1715,
+      "expiry_zcard": 1715,
+      "bit_equals_index": true,
+      "log_equals_bits": true,
+      "seats": {
+        "bit_without_log": 0,
+        "log_without_bit": 0,
+        "index_without_log": 0,
+        "log_without_index": 0,
+        "sample": []
+      },
+      "seats_match": true,
+      "hold_errors": 0,
+      "expire_errors": 0,
+      "verifiable": true
+    }
+  ],
+  "generator_cpu_pct": 41.7,
+  "host": {
+    "cpu_pct": 4.2,
+    "procs_running_end": 2,
+    "vm_cpus": 32
+  },
+  "bench": {
+    "p99_ms": 9.532,
+    "error_rate": 0,
+    "requests": 3600000,
+    "dropped": 0
+  },
+  "judge": {
+    "hold_lua_p99_us": 134.143,
+    "hold_lua_p99_us_lo": 134.143,
+    "hold_lua_p99_us_hi": 786.431,
+    "slowlog_total": 0,
+    "shard_cpu_max_pct": 46.6,
+    "hold_p99_ms": 9.532,
+    "oversell": 0,
+    "unknown_release": 0,
+    "verifiable": true,
+    "dropped": 0,
+    "pass": {
+      "hold_lua_p99": false,
+      "slowlog_zero": true,
+      "shard_cpu": true,
+      "hold_p99": true,
+      "oversell_zero": true,
+      "no_dropped": true
+    }
+  }
+}

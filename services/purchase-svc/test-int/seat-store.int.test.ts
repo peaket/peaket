@@ -1,17 +1,21 @@
 // 좌석 저장소를 실제 Valkey 8.1로 돈다(test/hold-cases.ts의 사례를 메모리 저장소와 똑같이). 홀드 Lua의 모양(#!lua, KEYS·ARGV 차례,
 // 한 해시 슬롯)은 노드 하나짜리 클러스터 모드 컨테이너에서 CLUSTER KEYSLOT으로 본다(단일 노드는 'cluster support disabled'라 이 명령이 없다).
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import {
   createHotRedis,
+  fakeClock,
   type HotRedis,
   RedisConnectError,
   RedisDeadlineError,
   type RedisScript,
   systemClock,
+  uuidv7,
 } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { HOLD_LUA, HOLD_TTL_MS, OPEN_SALE_LUA, RedisSeatStore, SeatStoreUnavailable, seatKeys } from '../src/modules/inventory/index.js';
-import { ACCOUNT_A, ACCOUNT_B, DAY, expectBug, holdCases, holdInput, idx, newEvent, SEAT_COUNT, SEAT_DEFS, type SeatHarness } from '../test/hold-cases.js';
+import { EXPIRE_LUA, ExpirySweeper, HOLD_LUA, HOLD_TTL_MS, MemorySeatMap, OPEN_SALE_LUA, RedisSeatStore, RedisSweepLeases, SeatStoreUnavailable, seatKeys, slotOf } from '../src/modules/inventory/index.js';
+import { bugOf, type ExpiryHarness, expireSeatsOf, expiryCases, okOf } from '../test/expiry-cases.js';
+import { ACCOUNT_A, ACCOUNT_B, ACCOUNT_C, ACCOUNT_D, DAY, expectBug, fingerprintOf, held, holdCases, holdInput, idx, newEvent, SEAT_COUNT, SEAT_DEFS, type SeatHarness } from '../test/hold-cases.js';
 import { type ShardSubscriber, shardSubscriber, startValkey, type ValkeyContainer } from './valkey.js';
 
 const CONFIG_EPOCH = 3;
@@ -124,6 +128,235 @@ function harness(r: HotRedis = redis): SeatHarness {
 }
 
 holdCases('Valkey Lua', async () => harness());
+
+/** ZRANGE … WITHSCORES 응답(RESP2 평평한 배열, RESP3 짝 배열·Map)을 멤버 → 점수로 */
+function scores(v: unknown): Record<string, number> {
+  if (v instanceof Map) return Object.fromEntries([...v].map(([k, x]) => [String(k), Number(x)]));
+  if (!Array.isArray(v)) return {};
+  if (v.every((x) => Array.isArray(x))) return Object.fromEntries((v as unknown[][]).map((p) => [String(p[0]), Number(p[1])]));
+  const o: Record<string, number> = {};
+  for (let i = 0; i + 1 < v.length; i += 2) o[String(v[i])] = Number(v[i + 1]);
+  return o;
+}
+
+/** 만료 사례용 Valkey 도구(harness에 홀드 Hash·만료 인덱스·secver 칸·rel·임대를 직접 쓰고 읽는 것을 더한다) */
+function expiryHarness(r: HotRedis = redis): ExpiryHarness {
+  const cmd = (key: string, args: string[]) => r.command(args, { key });
+  return {
+    ...harness(r),
+    store: new RedisSeatStore(r),
+    leases: new RedisSweepLeases(r),
+    // 스크립트 안 PEXPIRE는 스크립트를 시작한 때의 시각을 쓴다(TIME과 1ms 안팎 차이)
+    relSlackMs: 5,
+    setHoldRaw: async (e, i, fields) => {
+      const k = seatKeys.hold(e, i);
+      await cmd(k, ['DEL', k]);
+      if (fields && Object.keys(fields).length > 0) await cmd(k, ['HSET', k, ...Object.entries(fields).flat()]);
+    },
+    setHoldField: async (e, i, field, value) => void (await cmd(seatKeys.hold(e, i), ['HSET', seatKeys.hold(e, i), field, value])),
+    setExpiry: async (e, member, score) => void (await cmd(seatKeys.expiry(e), ['ZADD', seatKeys.expiry(e), String(score), member])),
+    removeExpiry: async (e, i) => void (await cmd(seatKeys.expiry(e), ['ZREM', seatKeys.expiry(e), String(i)])),
+    setSecverRaw: async (e, s, v) => void (await cmd(seatKeys.secver(e), ['HSET', seatKeys.secver(e), String(s), String(v)])),
+    setQuotaRaw: async (e, a, text) => void (await cmd(seatKeys.quota(e, a), ['SET', seatKeys.quota(e, a), text])),
+    rel: async (e, a) => scores(await cmd(seatKeys.rel(e, a), ['ZRANGE', seatKeys.rel(e, a), '0', '-1', 'WITHSCORES'])),
+    lease: async (e) => {
+      const v = await cmd(seatKeys.sweep(e), ['GET', seatKeys.sweep(e)]);
+      return v === null || v === undefined ? null : String(v);
+    },
+    leaseTtlMs: async (e) => timeOrNull(await cmd(seatKeys.sweep(e), ['PTTL', seatKeys.sweep(e)])),
+    shortenLease: async (e, ms) => void (await cmd(seatKeys.sweep(e), ['PEXPIRE', seatKeys.sweep(e), String(ms)])),
+    passLeaseTtl: async (e) => void (await cmd(seatKeys.sweep(e), ['DEL', seatKeys.sweep(e)])),
+    addCtlEvent: async (raw) => void (await cmd(seatKeys.ctlEvents(), ['SADD', seatKeys.ctlEvents(), raw])),
+  };
+}
+
+expiryCases('Valkey Lua', async () => expiryHarness());
+
+/** 그 회차 슬롯의 키 전부(형·만료 시각·값). 형이 틀린 키도 읽는다 */
+async function rawState(r: HotRedis, e: string) {
+  const cmd = (key: string, args: string[], binary = false) => r.command(args, { key, binary });
+  const keys = ((await cmd(seatKeys.bitmap(e), ['KEYS', `s:{event:${e}}:*`])) as unknown[]).map(String).sort();
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const type = String(await cmd(k, ['TYPE', k]));
+    const at = Number(await cmd(k, ['PEXPIRETIME', k]));
+    let value: unknown;
+    if (type === 'string') value = Buffer.from((await cmd(k, ['GET', k], true)) as Uint8Array).toString('hex');
+    else if (type === 'hash') value = hash(await cmd(k, ['HGETALL', k]));
+    else if (type === 'zset') value = await cmd(k, ['ZRANGE', k, '0', '-1', 'WITHSCORES']);
+    else if (type === 'stream') value = await cmd(k, ['XRANGE', k, '-', '+']);
+    out[k] = { type, at, value };
+  }
+  return out;
+}
+
+/** 좌석들의 홀드 Hash exp·만료 인덱스 점수를 1분 전으로(시간이 지난 홀드) */
+async function backdate(r: HotRedis, e: string, seatIds: readonly string[]) {
+  const at = Date.now() - 60_000;
+  for (const id of seatIds) {
+    await r.command(['HSET', seatKeys.hold(e, idx(id)), 'exp', String(at)], { key: seatKeys.hold(e, idx(id)) });
+    await r.command(['ZADD', seatKeys.expiry(e), String(at), String(idx(id))], { key: seatKeys.expiry(e) });
+  }
+  return at;
+}
+
+describe('만료 Lua의 모양(ADR-0086, seat-hold.md §5 키 목록·입력값)', () => {
+  test('ST6_ 만료 Lua는 #!lua로 시작하고 MAXLEN·allow-oom을 쓰지 않으며, KEYS(5 + n + 2m)·ARGV(4 + m + 9n)가 정본 차례이고 KEYS와 임대 키가 모두 한 해시 슬롯이다(CLUSTER KEYSLOT) [ASVS v5.0.0-15.4.4]', async () => {
+    const rec = recording(clusterRedis);
+    const store = new RedisSeatStore(rec.redis);
+    const e = newEvent();
+    const keepUntilMs = Date.now() + 2 * DAY;
+    await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+    const ia = holdInput(e, ['A01', 'A02'], { accountId: ACCOUNT_A, keepUntilMs });
+    const ib = holdInput(e, ['B01'], { accountId: ACCOUNT_B, keepUntilMs });
+    const ra = held(await store.hold(ia));
+    const rb = held(await store.hold(ib));
+    await backdate(clusterRedis, e, ['A01', 'A02', 'B01']);
+    rec.calls.splice(0);
+    const d = await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: 100 });
+    expect(rec.calls).toHaveLength(0);
+    const r = okOf(await store.expire({ eventId: e, keepUntilMs, seats: expireSeatsOf(d) }));
+    expect(r.released).toBe(3);
+    expect(rec.calls).toHaveLength(1);
+    const { script, keys, args } = rec.calls[0]!;
+    expect(script.source).toBe(EXPIRE_LUA);
+    expect(EXPIRE_LUA.split('\n')[0]).toMatch(/^#!lua(\s|$)/);
+    // XADD에 길이 상한을 두지 않고(지우기는 릴레이의 XTRIM … MINID), 메모리 부족에도 돌게 하는 표시를 쓰지 않는다(RB-06)
+    expect(EXPIRE_LUA).not.toMatch(/MAXLEN/i);
+    expect(EXPIRE_LUA).not.toMatch(/allow-oom/i);
+    expect(keys).toEqual([
+      seatKeys.bitmap(e),
+      seatKeys.expiry(e),
+      seatKeys.stream(e),
+      seatKeys.epoch(e),
+      seatKeys.secver(e),
+      seatKeys.hold(e, idx('A01')),
+      seatKeys.hold(e, idx('A02')),
+      seatKeys.hold(e, idx('B01')),
+      seatKeys.quota(e, ACCOUNT_A),
+      seatKeys.quota(e, ACCOUNT_B),
+      seatKeys.rel(e, ACCOUNT_A),
+      seatKeys.rel(e, ACCOUNT_B),
+    ]);
+    expect(args).toEqual([
+      '30000',
+      seatKeys.section(e, ''),
+      String(keepUntilMs),
+      '2',
+      ACCOUNT_A,
+      ACCOUNT_B,
+      ...['0', ia.holdId, String(ra.fencingToken), '1', '0', '0', 'A01', 'R', 'SEC-A'],
+      ...['1', ia.holdId, String(ra.fencingToken), '1', '0', '1', 'A02', 'R', 'SEC-A'],
+      ...['20', ib.holdId, String(rb.fencingToken), '2', '1', '0', 'B01', 'S', 'SEC-B'],
+    ]);
+    const slots = await Promise.all([...keys, seatKeys.sweep(e)].map((k) => clusterRedis.command(['CLUSTER', 'KEYSLOT', k], { key: k })));
+    expect(new Set(slots.map(String)).size).toBe(1);
+    // 임대도 클러스터에서 된다
+    expect(await new RedisSweepLeases(clusterRedis).acquire(e, 'pod-a', 3000)).toBe(true);
+  });
+
+  test('ST26_③ 세대 키에 epoch 칸이 없으면(node만 있어도) 만료도 NOT_READY이고 아무것도 쓰지 않는다 [ASVS v5.0.0-16.3.4]', async () => {
+    const store = new RedisSeatStore(redis);
+    const e = newEvent();
+    const keepUntilMs = Date.now() + 2 * DAY;
+    await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+    held(await store.hold(holdInput(e, ['A01'], { keepUntilMs })));
+    await backdate(redis, e, ['A01']);
+    const seats = expireSeatsOf(await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: 100 }));
+    await redis.command(['HDEL', seatKeys.epoch(e), 'epoch'], { key: seatKeys.epoch(e) });
+    const before = await rawState(redis, e);
+    expect(await store.expire({ eventId: e, keepUntilMs, seats })).toEqual({ kind: 'NOT_READY' });
+    expect(await rawState(redis, e)).toEqual(before);
+  });
+
+  test('ST4_ 만료 Lua: 키 전체의 형이 틀리면(expiry zset·stream·secver hash, M2에서 좌석 격리 밖) PEAKET_CORRUPT_KEY(그 키)이고 회차 키가 하나도 바뀌지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
+    const targets: [string, (e: string) => string, string[]][] = [
+      ['expiry', (e) => seatKeys.expiry(e), ['SET', 'x']],
+      ['stream', (e) => seatKeys.stream(e), ['SET', 'x']],
+      ['secver', (e) => seatKeys.secver(e), ['SET', 'x']],
+    ];
+    for (const [what, keyOf, write] of targets) {
+      const store = new RedisSeatStore(redis);
+      const e = newEvent();
+      const keepUntilMs = Date.now() + 2 * DAY;
+      await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+      held(await store.hold(holdInput(e, ['A01'], { accountId: ACCOUNT_A, keepUntilMs })));
+      await backdate(redis, e, ['A01']);
+      const seats = expireSeatsOf(await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: 100 }));
+      const k = keyOf(e);
+      await redis.command(['DEL', k], { key: k });
+      await redis.command([write[0]!, k, ...write.slice(1)], { key: k });
+      const before = await rawState(redis, e);
+      const err = await bugOf(store.expire({ eventId: e, keepUntilMs, seats }), { wrongType: what });
+      expect.soft({ what, msg: err.message }).toMatchObject({ what, msg: expect.stringContaining('PEAKET_CORRUPT_KEY') });
+      expect.soft({ what, msg: err.message }).toMatchObject({ what, msg: expect.stringContaining(k) });
+      expect.soft({ what, s: await rawState(redis, e) }).toEqual({ what, s: before });
+    }
+  });
+});
+
+describe('메모리 부족(maxmemory, noeviction, ADR-0109, seat-hold.md §9)', () => {
+  test('NFR015_ 메모리가 차면 홀드·만료 Lua·임대가 SeatStoreUnavailable(reason oom)이고 아무것도 쓰지 않으며, 읽기(재생 읽기·1단계·회차 목록)는 된다 [ASVS v5.0.0-16.3.4] [ASVS v5.0.0-16.5.3]', async () => {
+    const policy = await redis.command(['CONFIG', 'GET', 'maxmemory-policy'], { key: 'x' });
+    expect(JSON.stringify(policy)).toContain('noeviction');
+    const store = new RedisSeatStore(redis);
+    const leases = new RedisSweepLeases(redis);
+    const e = newEvent();
+    const keepUntilMs = Date.now() + 2 * DAY;
+    await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+    const first = holdInput(e, ['A01'], { keepUntilMs });
+    const r1 = held(await store.hold(first));
+    await backdate(redis, e, ['A01']);
+    const seats = expireSeatsOf(await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: 100 }));
+    const before = await rawState(redis, e);
+    await redis.command(['CONFIG', 'SET', 'maxmemory', '1'], { key: 'x' });
+    try {
+      for (const [what, p] of [
+        ['hold', store.hold(holdInput(e, ['A02'], { keepUntilMs }))],
+        ['expire', store.expire({ eventId: e, keepUntilMs, seats })],
+        ['lease', leases.acquire(e, 'pod-a', 3000)],
+      ] as const) {
+        const x = await (p as Promise<unknown>).then(
+          () => null,
+          (err: unknown) => err,
+        );
+        expect({ what, unavailable: x instanceof SeatStoreUnavailable, reason: (x as SeatStoreUnavailable | null)?.reason }).toEqual({ what, unavailable: true, reason: 'oom' });
+        expect({ what, oom: /^OOM\b/.test(String(((x as Error | null)?.cause as Error | undefined)?.message)) }).toEqual({ what, oom: true });
+      }
+      expect(await store.replay({ eventId: e, accountId: first.accountId, idempotencyKey: first.idempotencyKey, fingerprint: first.fingerprint })).toEqual({ kind: 'IDEM_REPLAY', ...r1 });
+      expect((await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: 100 })).map((d) => d.index)).toEqual([idx('A01')]);
+      expect(await store.saleEvents()).toContain(e);
+    } finally {
+      await redis.command(['CONFIG', 'SET', 'maxmemory', '0'], { key: 'x' });
+    }
+    expect(await rawState(redis, e)).toEqual(before);
+    expect(await redis.command(['GET', seatKeys.sweep(e)], { key: seatKeys.sweep(e) })).toBeNull();
+    // 메모리가 돌아오면 그대로 받는다
+    expect(okOf(await store.expire({ eventId: e, keepUntilMs, seats })).released).toBe(1);
+  });
+});
+
+describe('배치 규칙의 슬롯 계산(placement.ts slotOf, ADR-0176 결정 3)', () => {
+  test('NFR021_ slotOf는 실제 Valkey CLUSTER KEYSLOT과 같다(해시 태그 경계·회차 키·큰 회차 태그 모양·여러 글)', async () => {
+    const keys = ['123456789', 'foo', '', 'x', '{user1000}.following', 'foo{}{bar}', 'foo{{bar}}zap', '{}', '{{}}', 'a{b', '}{x}', '{a}{b}', '{한}', 'event:ev-1:7', '{event:ev-1:7}:bitmap'];
+    const e = newEvent();
+    keys.push(
+      seatKeys.bitmap(e),
+      seatKeys.hold(e, 3),
+      seatKeys.quota(e, ACCOUNT_A),
+      seatKeys.rel(e, ACCOUNT_A),
+      seatKeys.idem(e, ACCOUNT_A, '9a1f0c3e-4b2d-4c8e-9f00-000000000001'),
+      seatKeys.sweep(e),
+      seatKeys.section(e, '2'),
+      seatKeys.ctlEvents(),
+    );
+    for (let i = 0; i < 100; i++) keys.push(`k-${i}-${(i * 104_729).toString(36)}{t${i % 7}}`);
+    for (const k of keys.filter((x) => x !== '')) {
+      const real = Number(await clusterRedis.command(['CLUSTER', 'KEYSLOT', k], { key: 'x' }));
+      expect({ k, slot: slotOf(k) }).toEqual({ k, slot: real });
+    }
+  });
+});
 
 /** evalScript를 부를 때마다 스크립트·KEYS·ARGV를 적는다 */
 function recording(inner: HotRedis): { redis: HotRedis; calls: { script: RedisScript; keys: string[]; args: string[] }[] } {
@@ -305,5 +538,255 @@ describe('RedisSeatStore 오류 가르기(가짜 연결)', () => {
         );
       expect({ reply, isError: err instanceof Error, unavailable: err instanceof SeatStoreUnavailable }).toEqual({ reply, isError: true, unavailable: false });
     }
+  });
+});
+
+describe('새 맥락 리뷰 결함의 재현(추천 적용 2026-11-04, PRF-135 L1·L2·M3·M4)', () => {
+  test('ST4_ 만료 Lua는 bitmap 키의 형(string)도 쓰기 전에 본다: 형이 틀리면 PEAKET_CORRUPT_KEY(bitmap 키)이고 고아 ZREM을 포함해 아무것도 쓰지 않는다(L1) [ASVS v5.0.0-16.5.3]', async () => {
+    for (const write of [
+      ['HSET', 'f', '1'],
+      ['ZADD', '1', 'm'],
+    ]) {
+      const store = new RedisSeatStore(redis);
+      const e = newEvent();
+      const keepUntilMs = Date.now() + 2 * DAY;
+      await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+      held(await store.hold(holdInput(e, ['A01'], { keepUntilMs })));
+      await backdate(redis, e, ['A01']);
+      // 고아 멤버(홀드 Hash 없음): 형 검사보다 먼저 지워지면 안 된다
+      await redis.command(['ZADD', seatKeys.expiry(e), String(Date.now() - 60_000), '36'], { key: seatKeys.expiry(e) });
+      const seats = expireSeatsOf(await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: 100 }));
+      expect(seats.map((s) => s.index)).toEqual([idx('A01'), 36]);
+      const k = seatKeys.bitmap(e);
+      await redis.command(['DEL', k], { key: k });
+      await redis.command([write[0]!, k, ...write.slice(1)], { key: k });
+      const before = await rawState(redis, e);
+      const err = await bugOf(store.expire({ eventId: e, keepUntilMs, seats }), { bitmap: write[0] });
+      expect.soft({ write: write[0], msg: err.message }).toMatchObject({ write: write[0], msg: expect.stringContaining('PEAKET_CORRUPT_KEY') });
+      expect.soft({ write: write[0], msg: err.message }).toMatchObject({ write: write[0], msg: expect.stringContaining(k) });
+      expect.soft({ write: write[0], s: await rawState(redis, e) }).toEqual({ write: write[0], s: before });
+    }
+  });
+
+  test('ST4_ 만료 Lua: 좌석·계정 한 몫의 키 형이 틀리면(hold가 Hash 아님·quota가 문자열 아님·rel이 정렬 집합 아님) 묶음 전체 오류가 아니라 그 좌석·그 계정 좌석만 건너뛰고(corrupt) 다른 좌석은 푼다. 형이 틀린 키와 건너뛴 좌석 몫은 그대로다(M2) [ASVS v5.0.0-16.5.3]', async () => {
+    const store = new RedisSeatStore(redis);
+    const e = newEvent();
+    const keepUntilMs = Date.now() + 2 * DAY;
+    await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+    held(await store.hold(holdInput(e, ['A01'], { accountId: ACCOUNT_A, keepUntilMs })));
+    held(await store.hold(holdInput(e, ['A02'], { accountId: ACCOUNT_B, keepUntilMs })));
+    held(await store.hold(holdInput(e, ['A03'], { accountId: ACCOUNT_C, keepUntilMs })));
+    const rd = held(await store.hold(holdInput(e, ['A04'], { accountId: ACCOUNT_D, keepUntilMs })));
+    await backdate(redis, e, ['A01', 'A02', 'A03', 'A04']);
+    const seats = expireSeatsOf(await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: 100 }));
+    expect(seats.map((s) => s.index)).toEqual(['A01', 'A02', 'A03', 'A04'].map(idx));
+    // 1단계 뒤에 망가뜨린다: A01의 홀드 키는 문자열, B의 보유 수 키는 Hash, C의 방금 놓은 좌석 키는 문자열
+    const wrong: [string, string[]][] = [
+      [seatKeys.hold(e, idx('A01')), ['SET', 'x']],
+      [seatKeys.quota(e, ACCOUNT_B), ['HSET', 'f', '1']],
+      [seatKeys.rel(e, ACCOUNT_C), ['SET', 'x']],
+    ];
+    for (const [k, write] of wrong) {
+      await redis.command(['DEL', k], { key: k });
+      await redis.command([write[0]!, k, ...write.slice(1)], { key: k });
+    }
+    const before = await rawState(redis, e);
+    const out = await store.expire({ eventId: e, keepUntilMs, seats }).then(
+      (r) => okOf(r),
+      (err: unknown) => `던졌다: ${String(err)}`,
+    );
+    if (typeof out === 'string') {
+      expect(out).toBe('OK');
+      return;
+    }
+    expect({ released: out.released, corrupt: (out as { corrupt?: number }).corrupt, skipped: out.skipped, orphans: out.orphans, expired: out.expired }).toEqual({
+      released: 1,
+      corrupt: 3,
+      skipped: 0,
+      orphans: 0,
+      expired: [{ index: idx('A04'), fencingToken: rd.fencingToken }],
+    });
+    const after = await rawState(redis, e);
+    // 형이 틀린 키·건너뛴 좌석의 홀드 Hash·그 계정의 보유 수는 그대로다
+    for (const k of [...wrong.map(([key]) => key), seatKeys.hold(e, idx('A02')), seatKeys.hold(e, idx('A03')), seatKeys.quota(e, ACCOUNT_A), seatKeys.quota(e, ACCOUNT_C)]) {
+      expect.soft({ k, v: after[k] }).toEqual({ k, v: before[k] });
+    }
+    const bit = async (id: string) => Number(await redis.command(['GETBIT', seatKeys.bitmap(e), String(idx(id))], { key: seatKeys.bitmap(e) }));
+    expect([await bit('A01'), await bit('A02'), await bit('A03'), await bit('A04')]).toEqual([1, 1, 1, 0]);
+    // 건너뛴 좌석은 만료 인덱스에 남고(다음 틱에 다시 본다) 푼 좌석만 빠진다
+    const left = scores(await redis.command(['ZRANGE', seatKeys.expiry(e), '0', '-1', 'WITHSCORES'], { key: seatKeys.expiry(e) }));
+    expect(Object.keys(left).sort()).toEqual(['A01', 'A02', 'A03'].map((id) => String(idx(id))).sort());
+    expect(after[seatKeys.quota(e, ACCOUNT_D)]).toBeUndefined();
+  });
+
+  test('NFR025_ 임대 잡기는 한 번에 끝난다: 내 임대를 읽은 뒤 키가 사라지고 다른 파드가 잡아도 남의 임대를 늘리지 않는다(L2, 호출 한 번) [ASVS v5.0.0-15.4.2]', async () => {
+    const e = newEvent();
+    const key = seatKeys.sweep(e);
+    await redis.command(['SET', key, 'pod-a', 'PX', '3000'], { key });
+    let calls = 0;
+    let interfered = false;
+    // GET 답을 돌려준 바로 뒤에 다른 파드가 끼어든다(내 임대가 사라지고 pod-b가 1초짜리로 잡음)
+    const racing: HotRedis = {
+      command: async (args, o) => {
+        calls += 1;
+        const r = await redis.command(args, o);
+        if (!interfered && args[0] === 'GET' && args[1] === key) {
+          interfered = true;
+          await redis.command(['DEL', key], { key });
+          await redis.command(['SET', key, 'pod-b', 'PX', '1000'], { key });
+        }
+        return r;
+      },
+      evalScript: (s, k, a, o) => {
+        calls += 1;
+        return redis.evalScript(s, k, a, o);
+      },
+      sendCommand: (a) => redis.sendCommand(a),
+      close: async () => {},
+    };
+    const ok = await new RedisSweepLeases(racing).acquire(e, 'pod-a', 3000);
+    const owner = String(await redis.command(['GET', key], { key }));
+    const ttl = Number(await redis.command(['PTTL', key], { key }));
+    // 남의 임대를 늘렸다면: 값은 pod-b인데 수명이 1초보다 길고, 잡았다고 답했다
+    expect({ ok, owner, extendedOthers: owner === 'pod-b' && ttl > 1000 }).toEqual(owner === 'pod-b' ? { ok: false, owner, extendedOthers: false } : { ok: true, owner: 'pod-a', extendedOthers: false });
+    expect(calls).toBe(1);
+  });
+
+  test('FR010_FR042_ 큰 색인의 비트 차례: 좌석 수 50,000 회차의 색인 0·7·8·49,999를 홀드 Lua가 켜고 만료 Lua가 끄며, 바이트·GETBIT·BITFIELD로 본 비트 차례가 SETBIT과 같다(M3·M4)', async () => {
+    const store = new RedisSeatStore(redis);
+    const e = newEvent();
+    const keepUntilMs = Date.now() + 2 * DAY;
+    await store.openSale({ eventId: e, seatCount: 50_000, keepUntilMs });
+    const indexes = [0, 7, 8, 49_999];
+    const seats = indexes.map((i) => ({ seatId: `S${String(i).padStart(5, '0')}`, index: i, sectionId: 'SEC-0', sectionIndex: 0, seatOffset: i, tierId: 'R' }));
+    const r = held(
+      await store.hold({
+        eventId: e,
+        accountId: ACCOUNT_A,
+        purchaseSessionId: 'ps-big',
+        holdId: uuidv7(systemClock),
+        idempotencyKey: randomUUID(),
+        fingerprint: fingerprintOf(seats.map((s) => s.seatId)),
+        seats,
+        limit: 4,
+        keepUntilMs,
+      }),
+    );
+    const k = seatKeys.bitmap(e);
+    const ref = `s:{event:${e}}:ref-bits`;
+    for (const i of indexes) await redis.command(['SETBIT', ref, String(i), '1'], { key: ref });
+    const bytes = async (key: string) => Buffer.from((await redis.command(['GET', key], { key, binary: true })) as Uint8Array);
+    const held1 = await bytes(k);
+    expect(held1.length).toBe(6_250);
+    expect([held1[0], held1[1], held1[6_249]]).toEqual([0x81, 0x80, 0x01]);
+    expect(held1.equals(await bytes(ref))).toBe(true);
+    for (const i of indexes) expect({ i, bit: Number(await redis.command(['GETBIT', k, String(i)], { key: k })) }).toEqual({ i, bit: 1 });
+    expect(Number(await redis.command(['GETBIT', k, '49998'], { key: k }))).toBe(0);
+    expect(((await redis.command(['BITFIELD', k, 'GET', 'u1', '#49999', 'GET', 'u1', '#49998', 'GET', 'u8', '#0'], { key: k })) as unknown[]).map(Number)).toEqual([1, 0, 0x81]);
+    expect(Number(await redis.command(['BITCOUNT', k], { key: k }))).toBe(4);
+    // 만료 Lua가 같은 자리를 끈다
+    const at = Date.now() - 60_000;
+    for (const i of indexes) {
+      await redis.command(['HSET', seatKeys.hold(e, i), 'exp', String(at)], { key: seatKeys.hold(e, i) });
+      await redis.command(['ZADD', seatKeys.expiry(e), String(at), String(i)], { key: seatKeys.expiry(e) });
+    }
+    const d = await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: 100 });
+    const out = okOf(await store.expire({ eventId: e, keepUntilMs, seats: d.map((x) => ({ index: x.index, expected: x.hold, seat: seats.find((s) => s.index === x.index)! })) }));
+    expect(out.released).toBe(4);
+    expect(out.expired.map((x) => x.fencingToken)).toEqual([r.fencingToken, r.fencingToken, r.fencingToken, r.fencingToken]);
+    const freed = await bytes(k);
+    expect(freed.length).toBe(6_250);
+    expect(Number(await redis.command(['BITCOUNT', k], { key: k }))).toBe(0);
+  });
+});
+
+describe('최종 검토 결함의 재현(추천 적용 2026-11-04, PRF-135 A2·B1)', () => {
+  test('ST4_ST5_ 1단계 읽기 전에 홀드 키의 형이 틀리거나(문자열) fence가 어긋나도(abc·2^53 − 1 초과) dueExpiries는 던지지 않고 그 좌석만 corrupt이며, 반복(tick)은 나머지를 풀고 회차가 BACKOFF에 들어가지 않는다(B1·A2) [ASVS v5.0.0-16.5.3]', async () => {
+    const store = new RedisSeatStore(redis);
+    const e = newEvent();
+    const keepUntilMs = Date.now() + 2 * DAY;
+    await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+    // A01(A)·A02(B)·A03(C)·A04(D)·A05(A, 보유 2): 앞의 셋을 망가뜨린다
+    const owners = [ACCOUNT_A, ACCOUNT_B, ACCOUNT_C, ACCOUNT_D, ACCOUNT_A];
+    const ids = ['A01', 'A02', 'A03', 'A04', 'A05'];
+    const made: Record<string, { holdId: string; fencingToken: number }> = {};
+    for (const [k, id] of ids.entries()) {
+      const i = holdInput(e, [id], { accountId: owners[k]!, keepUntilMs });
+      made[id] = { holdId: i.holdId, fencingToken: held(await store.hold(i)).fencingToken };
+    }
+    const at = await backdate(redis, e, ids);
+    // 1단계 읽기 '전에' 망가뜨린다(이미 있는 시험은 읽은 뒤에 망가뜨린다)
+    const key1 = seatKeys.hold(e, idx('A01'));
+    await redis.command(['DEL', key1], { key: key1 });
+    await redis.command(['SET', key1, 'x'], { key: key1 });
+    await redis.command(['HSET', seatKeys.hold(e, idx('A02')), 'fence', 'abc'], { key: seatKeys.hold(e, idx('A02')) });
+    await redis.command(['HSET', seatKeys.hold(e, idx('A03')), 'fence', '9007199254740992'], { key: seatKeys.hold(e, idx('A03')) });
+
+    const due = await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: 100 }).then(
+      (d) => d,
+      (err: unknown) => `던졌다: ${String(err)}`,
+    );
+    const normal = (id: string, owner: string) => ({ index: idx(id), expiresAtMs: at, hold: { holdId: made[id]!.holdId, fencingToken: String(made[id]!.fencingToken), owner } });
+    expect(due).toEqual([
+      { index: idx('A01'), expiresAtMs: at, hold: null, corrupt: true },
+      { index: idx('A02'), expiresAtMs: at, hold: null, corrupt: true },
+      { index: idx('A03'), expiresAtMs: at, hold: null, corrupt: true },
+      normal('A04', ACCOUNT_D),
+      normal('A05', ACCOUNT_A),
+    ]);
+
+    // 반복: 만료 반복을 끝까지 돌린다(회차 목록 → 임대 → 1단계 → 만료 Lua)
+    const clock = fakeClock({ now: Date.now() });
+    const seatMap = new MemorySeatMap();
+    seatMap.put({ eventId: e, layoutVersion: 'v1', seatCount: SEAT_COUNT, perAccountLimit: 4, saleEndsAtMs: Date.now() + DAY }, SEAT_DEFS);
+    const luaErrors: [string, string][] = [];
+    const sweeper = new ExpirySweeper({ expiries: store, seatMap, leases: new RedisSweepLeases(redis), clock, podId: 'pod-b1', signals: { luaError: (s, c) => void luaErrors.push([s, c]) } });
+    type Tick = Awaited<ReturnType<ExpirySweeper['tick']>>;
+    const mine = (t: Tick) => t.events.find((x) => x.eventId === e);
+    const t1 = await sweeper.tick();
+    expect(mine(t1)).toMatchObject({ outcome: 'DRAINED', released: 2, corrupt: 3 });
+    const bit = async (id: string) => Number(await redis.command(['GETBIT', seatKeys.bitmap(e), String(idx(id))], { key: seatKeys.bitmap(e) }));
+    expect(await Promise.all(ids.map(bit))).toEqual([1, 1, 1, 0, 0]);
+    // 망가진 키는 그대로 두고(다음 틱에 다시 본다) 정상 좌석의 보유 수만 내려갔다
+    expect(String(await redis.command(['TYPE', key1], { key: key1 }))).toBe('string');
+    expect(String(await redis.command(['HGET', seatKeys.hold(e, idx('A02')), 'fence'], { key: seatKeys.hold(e, idx('A02')) }))).toBe('abc');
+    expect(String(await redis.command(['HGET', seatKeys.hold(e, idx('A03')), 'fence'], { key: seatKeys.hold(e, idx('A03')) }))).toBe('9007199254740992');
+    const q = async (a: string) => {
+      const v = await redis.command(['GET', seatKeys.quota(e, a)], { key: seatKeys.quota(e, a) });
+      return v === null || v === undefined ? null : Number(v);
+    };
+    expect([await q(ACCOUNT_A), await q(ACCOUNT_B), await q(ACCOUNT_C), await q(ACCOUNT_D)]).toEqual([1, 1, 1, null]);
+    expect(luaErrors).toEqual([['expire', 'CORRUPT_KEY']]);
+
+    // 다음 틱: 남은 것은 망가진 좌석뿐이라 회차는 BACKOFF(쉬는 중)가 아니라 보낼 것 없음(NO_PROGRESS)이다
+    clock.advance(1_000);
+    const t2 = await sweeper.tick();
+    expect(mine(t2)).toMatchObject({ outcome: 'NO_PROGRESS', corrupt: 3 });
+  });
+
+  test('ST4_ 만료 인덱스에 앞 0이 붙은 멤버 \'007\'이 정상 멤버 \'7\'과 함께 있으면 색인 겹침 RangeError가 아니라 PEAKET_CORRUPT_KEY(expiry 키)로 던지고, 반복(tick)은 그 회차를 ERROR로 센다(최종 검토 낮음 1) [ASVS v5.0.0-16.5.3]', async () => {
+    const store = new RedisSeatStore(redis);
+    const e = newEvent();
+    const keepUntilMs = Date.now() + 2 * DAY;
+    await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+    const expiry = seatKeys.expiry(e);
+    const past = Date.now() - 10_000;
+    for (const member of ['007', '7']) await redis.command(['ZADD', expiry, String(past), member], { key: expiry });
+
+    const err = await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: 100 }).then(
+      () => undefined,
+      (x: unknown) => x,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(RangeError);
+    expect((err as Error).message).toBe(`PEAKET_CORRUPT_KEY ${expiry}`);
+
+    const seatMap = new MemorySeatMap();
+    seatMap.put({ eventId: e, layoutVersion: 'v1', seatCount: SEAT_COUNT, perAccountLimit: 4, saleEndsAtMs: Date.now() + DAY }, SEAT_DEFS);
+    const sweeper = new ExpirySweeper({ expiries: store, seatMap, leases: new RedisSweepLeases(redis), clock: fakeClock({ now: Date.now() }), podId: 'pod-low1' });
+    const t = await sweeper.tick();
+    expect(t.events.find((x) => x.eventId === e)).toMatchObject({ outcome: 'ERROR' });
+    // 두 멤버 모두 그대로다(건드리지 않았다)
+    expect(Number(await redis.command(['ZCARD', expiry], { key: expiry }))).toBe(2);
   });
 });

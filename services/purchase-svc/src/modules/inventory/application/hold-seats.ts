@@ -1,20 +1,36 @@
 // 좌석 홀드 쓰임새(docs/features/seat-hold.md §3~§5, openapi POST /v1/events/{eventId}/holds, BUILD_ORDER PRF-130 ①).
 // 받는 층(HoldsController)이 신원·멱등 키 형식·구매 요청 서명·본문 모양을 확인한 뒤 부른다.
-import { Inject, Injectable } from '@nestjs/common';
-import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
-import { type HeldHold, type HoldResult, holdFingerprint, KEEP_AFTER_SALE_END_MS, KEY_PART, type ReplayResult, type SeatRef, SeatStoreUnavailable } from '../domain/hold.js';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { CLOCK, type Clock, type Deadline, uuidv7 } from '@peaket/platform';
+import {
+  type HeldHold,
+  type HoldResult,
+  holdFingerprint,
+  KEEP_AFTER_SALE_END_MS,
+  KEY_PART,
+  type ReplayResult,
+  SEAT_CALL_CAP_MS,
+  SEAT_CALL_MIN_REMAINING_MS,
+  type SeatRef,
+  SeatStoreUnavailable,
+} from '../domain/hold.js';
+import { seatLuaErrorOf } from '../domain/lua-errors.js';
 import {
   HOLD_ATTEMPTS,
   type HoldAttemptResult,
   type HoldAttempts,
+  noSeatSignals,
   PURCHASE_SESSIONS,
   type PurchaseSessions,
   SEAT_MAP,
+  SEAT_SIGNALS,
   SEAT_STORE,
+  type SeatCallOptions,
   type SeatMap,
+  type SeatSignals,
   type SeatStore,
 } from '../domain/ports.js';
-import { HoldError, type HoldErrorCode, type HoldErrorDetails } from './hold-error.js';
+import { HoldError, type HoldErrorCode, type HoldErrorDetails, storeUnavailableError } from './hold-error.js';
 
 /** 경로 스키마가 확인한 본문에서 쓰임새가 보는 칸(나머지 칸 behavior·clientEphemeralPublicKey는 PRF-130 ①에서 보지 않고 버린다) */
 export interface HoldBody {
@@ -34,6 +50,11 @@ export interface HoldCommand {
   /** 플랫폼 멱등 모듈이 형식을 확인한 키(@IdempotencyRequest().key, 소문자 UUID v4). 플랫폼의 requestHash는 쓰지 않는다 */
   idempotencyKey: string;
   body: HoldBody;
+  /**
+   * 이 요청의 남은 시간(platform currentDeadline(), guidelines §5, BUILD_ORDER PRF-135). 받는 층이 넘긴다.
+   * 없으면 마감을 보지 않는다(504를 내지 않고 저장소 호출에 deadlineMs를 주지 않아 플랫폼 기본 100ms다)
+   */
+  deadline?: Deadline;
 }
 
 /** 201 응답 본문(openapi Hold) */
@@ -57,6 +78,8 @@ export class HoldSeats {
     @Inject(PURCHASE_SESSIONS) private readonly sessions: PurchaseSessions,
     @Inject(HOLD_ATTEMPTS) private readonly attempts: HoldAttempts,
     @Inject(CLOCK) private readonly clock: Clock,
+    /** 좌석 Lua 지표(BUILD_ORDER PRF-135). 주입하지 않으면 버린다(noSeatSignals) */
+    @Optional() @Inject(SEAT_SIGNALS) private readonly signals: SeatSignals = noSeatSignals,
   ) {}
 
   /**
@@ -94,7 +117,24 @@ export class HoldSeats {
    * 명세에서 모호했던 셋(추천 적용 2026-11-04):
    * - 회차가 달라 403이면 본문이 auto여도 ERROR 하나를 남긴다(구매 세션 확인을 지났고, 403이 본문 검사 400보다 먼저다).
    * - 저장소가 일시 장애가 아닌 오류(스크립트 오류 같은 버그)를 던지면 ERROR 하나를 남기고 그 오류를 바꾸지 않고 던진다.
-   * - HoldAttempt의 firstHeldInSession은 여기서 채우지 않는다. 구매 세션 상태(PRF-135)와 Kafka·Avro 보내기(BAS-030)에서 채운다.
+   * - HoldAttempt의 firstHeldInSession은 여기서 채우지 않는다. 구매 세션 상태(PRF-136)와 Kafka·Avro 보내기(BAS-030)에서 채운다.
+   *
+   * 요청 마감(BUILD_ORDER PRF-135, guidelines §5). c.deadline이 있을 때만 본다:
+   * - 좌석 Redis를 부르기 바로 전(5의 store.replay와 6의 store.hold 각각)에 c.deadline.remainingMs() < SEAT_CALL_MIN_REMAINING_MS(5)이면 부르지 않고
+   *   DEADLINE_EXCEEDED(504 deadline-exceeded, 시도 기록 ERROR). 그 요청에서 저장소 호출 수는 0이다(그 앞의 replay는 이미 불렀을 수 있다).
+   * - 부를 때 둘째 인자로 { deadlineMs: max(1, floor(c.deadline.budgetFor(SEAT_CALL_CAP_MS))) }(= min(남은 시간, 100)을 내림한 정수, 1 이상)를 준다.
+   *   c.deadline이 없으면 둘째 인자를 주지 않는다(undefined).
+   * - 호출 도중 마감을 넘기면 저장소가 SeatStoreUnavailable을 던지므로 지금처럼 STORE_UNAVAILABLE(503)이다.
+   * - 1·2(세션·본문)와 3·4(좌석맵 판·시계)는 좌석 Redis를 부르지 않으므로 마감을 보지 않는다.
+   *
+   * 메모리 부족(PRF-135): 저장소의 SeatStoreUnavailable은 까닭과 관계없이 STORE_UNAVAILABLE(503 seat-store-unavailable + Retry-After)이고
+   * details.storeReason = 그 까닭(storeUnavailableError, cause = 그 오류). store.hold의 reason 'oom'이면 signals.luaError('hold', 'OOM')을 한 번 부른다.
+   * reason 'unavailable'은 지표를 올리지 않는다.
+   *
+   * 좌석 Lua 지표(PRF-135, seat_lua_errors_total): store.hold의 결과가 NOT_READY면 signals.luaError('hold', 'NOT_READY'),
+   * store.hold가 일시 장애가 아닌 오류를 던지면 signals.luaError('hold', seatLuaErrorOf(err).code)를 한 번 부르고 그 오류를 그대로 던진다(바꾸지 않는다.
+   * 계정 ID가 든 키 이름을 지우는 것은 받는 층이다, HoldsController). 업무 거절(경합·한도·정지·멱등 키 재사용)과 성공은 올리지 않는다.
+   * replay의 오류는 Lua 오류가 아니라 세지 않는다.
    */
   async execute(c: HoldCommand): Promise<HoldResponse> {
     const started = this.clock.monotonicMs();
@@ -134,17 +174,26 @@ export class HoldSeats {
     if (c.body.auto !== undefined) throw new HoldError('AUTO_NOT_SUPPORTED', '자동 배정은 아직 받지 않는다(wbs 2.5.4)');
     if (requested.length === 0) throw new HoldError('SEATS_REQUIRED', '본문에 seatIds가 없다');
 
+    /** 좌석 Redis를 부르기 바로 전의 마감 확인: 모자라면 504(시도 기록 ERROR), 있으면 그 호출의 선택값(마감이 없으면 undefined) */
+    const callOptions = (): SeatCallOptions | undefined => {
+      const d = c.deadline;
+      if (!d) return undefined;
+      if (d.remainingMs() < SEAT_CALL_MIN_REMAINING_MS) throw refuse('DEADLINE_EXCEEDED', '남은 시간이 모자라 좌석 Redis를 부르지 않았다');
+      return { deadlineMs: Math.max(1, Math.floor(d.budgetFor(SEAT_CALL_CAP_MS))) };
+    };
+
     /**
      * 앱 쪽 거절(3·4·5) 직전의 멱등 재생 읽기: 같은 지문이면 처음 201을 그대로 돌려주고(기록 없음), 다른 지문이면 422 IDEM_REUSED(ERROR),
      * 기록이 없으면 undefined를 돌려줘 부른 쪽이 원래 거절을 던진다
      */
     const replayOrRefuse = async (): Promise<HoldResponse | undefined> => {
+      const opt = callOptions();
       let r: ReplayResult;
       try {
-        r = await this.store.replay({ eventId: c.eventId, accountId: c.accountId, idempotencyKey: c.idempotencyKey, fingerprint: holdFingerprint(requested) });
+        r = await this.store.replay({ eventId: c.eventId, accountId: c.accountId, idempotencyKey: c.idempotencyKey, fingerprint: holdFingerprint(requested) }, opt);
       } catch (err) {
         record('ERROR');
-        if (err instanceof SeatStoreUnavailable) throw new HoldError('STORE_UNAVAILABLE', '좌석 Redis를 잠시 쓸 수 없다', { cause: err });
+        if (err instanceof SeatStoreUnavailable) throw storeUnavailableError(err);
         throw err;
       }
       if (r === null) return undefined;
@@ -178,22 +227,30 @@ export class HoldSeats {
     // 6 저장소(한 번만)
     seats.sort((a, b) => byCodeUnit(a.seatId, b.seatId));
     const seatIds = seats.map((s) => s.seatId);
+    const opt = callOptions();
     let r: HoldResult;
     try {
-      r = await this.store.hold({
-        eventId: c.eventId,
-        accountId: c.accountId,
-        purchaseSessionId: c.purchaseSessionId,
-        holdId: uuidv7(this.clock),
-        idempotencyKey: c.idempotencyKey,
-        fingerprint: holdFingerprint(seatIds),
-        seats,
-        limit: config.perAccountLimit,
-        keepUntilMs: config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS,
-      });
+      r = await this.store.hold(
+        {
+          eventId: c.eventId,
+          accountId: c.accountId,
+          purchaseSessionId: c.purchaseSessionId,
+          holdId: uuidv7(this.clock),
+          idempotencyKey: c.idempotencyKey,
+          fingerprint: holdFingerprint(seatIds),
+          seats,
+          limit: config.perAccountLimit,
+          keepUntilMs: config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS,
+        },
+        opt,
+      );
     } catch (err) {
       record('ERROR');
-      if (err instanceof SeatStoreUnavailable) throw new HoldError('STORE_UNAVAILABLE', '좌석 Redis를 잠시 쓸 수 없다', { cause: err });
+      if (err instanceof SeatStoreUnavailable) {
+        if (err.reason === 'oom') this.signals.luaError('hold', 'OOM');
+        throw storeUnavailableError(err);
+      }
+      this.signals.luaError('hold', seatLuaErrorOf(err)?.code ?? 'OTHER');
       throw err;
     }
 
@@ -204,6 +261,7 @@ export class HoldSeats {
         if (r.kind === 'OK') record('HELD', r.heldAtMs);
         return responseOf(r, seatIds);
       case 'NOT_READY':
+        this.signals.luaError('hold', 'NOT_READY');
         throw refuse('NOT_READY', '세대 키가 없다(좌석 저장소가 준비되지 않음)');
       case 'IDEM_REUSED':
         throw refuse('IDEM_REUSED', '같은 멱등 키에 다른 좌석 선택이다');

@@ -1,0 +1,74 @@
+{
+  "plan": "st27-prod-lua",
+  "test": "S-T27",
+  "title": "S-T27 좌석 샤드 하나의 처리량을 운영 홀드·만료 Lua로 다시 잰다(FND-120이 넘긴 것)",
+  "basis": [
+    "docs/features/seat-hold.md §8 'S-T27 다시 재기'와 §12 S-T27 줄",
+    "docs/adr/0176-foundation-poc-results.md 결정 3",
+    "docs/BUILD_ORDER.md PRF-135"
+  ],
+  "environment": {
+    "where": "이 PC의 Docker 엔진, 측정용 망 peaket-poc(loadtest/poc/stack.mjs). kind 클러스터가 아니다",
+    "valkey": "Valkey 8.1 클러스터, 주 노드 셋(CPU 2개씩)·복제 셋(1개씩), latency-tracking 켬, SLOWLOG 기록 기준 10ms",
+    "bench_container_cpus": "2",
+    "client": "node-redis 6.3.0(측정 이미지 peaket/poc-bench:local)",
+    "rule": "측정은 한 번에 하나씩 돈다. 측정 중에는 다른 측정·시험·무거운 빌드를 돌리지 않는다(docs/verification.md §3.5)"
+  },
+  "lua": {
+    "export": "node loadtest/poc/seat-lua.mjs",
+    "files": {
+      "seat-hold.lua": "services/purchase-svc/src/modules/inventory/adapters/hold-lua.ts HOLD_LUA",
+      "seat-open-sale.lua": "services/purchase-svc/src/modules/inventory/adapters/hold-lua.ts OPEN_SALE_LUA",
+      "seat-expire.lua": "services/purchase-svc/src/modules/inventory/adapters/expire-lua.ts EXPIRE_LUA"
+    },
+    "precondition": "seat-expire.lua가 빈 글이면 시작하지 않는다. 시작할 때 세 원문의 sha1을 상태 파일에 적고, 이어 돌 때 원문이 바뀌었으면 멈춘다(섞인 판의 결과를 한 묶음으로 내지 않는다)"
+  },
+  "common": {
+    "scenario": "loadtest/poc/bench/src/seat-shard.mjs",
+    "warmup_s": 60,
+    "duration_s": 600,
+    "expire": "on",
+    "expire_batch": 100,
+    "expire_call": "evalsha",
+    "replay_ratio": 0.1,
+    "relay_trim_ms": 1000,
+    "load": "① 한 회차(5만 석) 홀드 2,000/s·스냅샷 1,000/s, ② 다섯 회차(5만 석 하나 2,000/s + 1만 5천 석 넷 1,000/s씩, 합 6,000/s)·스냅샷 큰 회차 1,000/s·중형 500/s. 홀드는 1~4석, 절반은 앞 10% 구역에 몰아 경합, TTL 큰 회차 5초·중형 3초. 같은 때 만료(두 단계, 100석, 운영처럼 EVALSHA·NOSCRIPT면 EVAL. 반복은 운영 ExpirySweeper와 같은 규칙: 1초 격자, 한 틱에 회차 4개까지 동시에, 20묶음 상한에 닿으면 기다림 없이 다음 틱, 결과 sweep 칸), 릴레이 흉내 XTRIM MINID 1초, 틀린 좌석 재생 읽기 HMGET 홀드의 10% [가정]",
+    "hold_lua_p99_note": "홀드·만료 Lua가 둘 다 EVALSHA라 엔진 분포가 섞인다. 측정 도구가 만료 호출 수로 EVALSHA 분포의 백분위를 엔진에 물어 홀드 Lua p99를 낸다(engine.*.hold_lua). 판정 값 p99_us는 20석 [가정] 이하의 만료 호출만 홀드 p99보다 빠를 수 있다고 본 값이고, p99_us_lo(만료가 모두 느림)·p99_us_hi(만료가 모두 빠름, 가정 없는 위 끝)를 함께 남긴다"
+  },
+  "criteria": {
+    "hold_lua_p99_us_max": 100,
+    "slowlog_records": 0,
+    "shard_engine_cpu_pct_max": 50,
+    "hold_p99_ms_max": 50,
+    "oversell": 0,
+    "dropped": 0,
+    "note": "결과 JSON의 judge 칸이 이 기준으로 본다. 판정은 TLS 켬으로 하고 끔은 짝으로만 둔다(docs/verification.md §3.5 7번). 기준을 넘으면 OPEN이 아니라 새 ADR로 정한다(ADR-0176)"
+  },
+  "commands": {
+    "run": "node loadtest/poc/run.mjs st27",
+    "resume": "같은 명령을 다시 돌리면 상태 파일에서 끝나지 않은 번부터 이어 돈다",
+    "start_over": "상태 파일을 지우고 다시 돌린다",
+    "record": "node loadtest/poc/record.mjs",
+    "cleanup": "node loadtest/poc/stack.mjs down"
+  },
+  "state_file": ".cache/peaket-poc/out/st27-state.json",
+  "outputs": {
+    "id": "{시작한 날(KST)}-st27-prod[-{묶음}]-{key}. 날과 묶음 글자는 처음 시작할 때 상태 파일에 적고 이어 돌아도 바꾸지 않는다. 묶음은 같은 날 처음부터 다시 돌 때 앞 결과를 덮지 않게 붙는다('' → b → c, 2026-11-04 고치기 전 운영 Lua의 r1이 '' 묶음이다)",
+    "result": ".cache/peaket-poc/out/{id}.json(입력 인자·Lua sha1·엔진 통계·SLOWLOG·불변식·judge)",
+    "log": ".cache/peaket-poc/out/{id}.log(측정 컨테이너 표준 출력·오류)",
+    "run_log": ".cache/peaket-poc/out/run.log",
+    "ledger_input": ".cache/peaket-poc/out/plan.jsonl(번마다 한 줄, kpi NFR-003)",
+    "ledger": "docs/perf-ledger/runs/{id}-local-poc/(node loadtest/poc/record.mjs가 옮긴다)",
+    "doc": "docs/features/seat-hold.md §12 S-T27 결과 칸과 ADR-0176 결정 3의 표(또는 docs/verification.md)"
+  },
+  "estimate": "번마다 약 12분(예열 60초 + 측정 600초 + 준비·불변식 검사·통계 약 1분), 7번에 클러스터 두 번 만들기와 이미지 만들기를 더해 약 1시간 30분",
+  "runs": [
+    { "n": 1, "key": "five-same-tls-r1", "case": "② 다섯 회차 합 6,000/s, 한 샤드", "mode": "five", "layout": "same", "tls": true, "rps": 6000, "pair": "five-same-notls-r1" },
+    { "n": 2, "key": "five-same-tls-r2", "case": "② 다섯 회차 합 6,000/s, 한 샤드", "mode": "five", "layout": "same", "tls": true, "rps": 6000, "pair": "five-same-notls-r1" },
+    { "n": 3, "key": "five-same-tls-r3", "case": "② 다섯 회차 합 6,000/s, 한 샤드", "mode": "five", "layout": "same", "tls": true, "rps": 6000, "pair": "five-same-notls-r1" },
+    { "n": 4, "key": "five-spread-tls-r1", "case": "② 다섯 회차 합 6,000/s, 나눈 배치(큰 회차 혼자·중형 둘씩)", "mode": "five", "layout": "spread", "tls": true, "rps": 6000 },
+    { "n": 5, "key": "one-same-tls-r1", "case": "① 한 회차 2,000/s", "mode": "one", "layout": "same", "tls": true, "rps": 2000, "pair": "one-same-notls-r1" },
+    { "n": 6, "key": "five-same-notls-r1", "case": "② 다섯 회차 합 6,000/s, 한 샤드(TLS 끈 짝)", "mode": "five", "layout": "same", "tls": false, "rps": 6000, "pair": "five-same-tls-r1" },
+    { "n": 7, "key": "one-same-notls-r1", "case": "① 한 회차 2,000/s(TLS 끈 짝)", "mode": "one", "layout": "same", "tls": false, "rps": 2000, "pair": "one-same-tls-r1" }
+  ]
+}

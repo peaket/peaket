@@ -376,6 +376,16 @@ flowchart LR
   - 전날 하루 사본(`access_log_export_last_success_timestamp`)이 06:00까지 없다
   - 라벨에는 원천(게이트웨이 이름·identity)만 쓰고 IP·계정은 쓰지 않는다(§8)
 - Redis 메모리 신호(추천 적용 2026-10-28, ADR-0109): 세 클러스터(대기열·좌석·세션·캐시)는 모두 `maxmemory-policy noeviction`이라, 메모리가 차면 키를 지우지 않고 쓰기가 실패한다(docs/data.md §3). 메모리 사용률(`DatabaseMemoryUsagePercentage`, CloudWatch 지표를 YACE로 긁는다)이 70% [가정]를 넘으면 SEV3, 85% [가정]를 넘으면 SEV2(`kind` cause, `dependency` 클러스터 이름)다. 지운 키 수(`Evictions`)가 0보다 크면 설정이 틀린 것이라 SEV3이다. 서비스가 받은 메모리 부족 쓰기 오류는 `redis_command_errors_total{cluster, reason}`으로 원인 패널에 둔다. 대기열·좌석은 RB-05·RB-06을 따르고, 세션·캐시는 등급 A 캐시의 TTL을 줄이거나 노드를 키우며, 캐시가 메모리의 절반 [가정]을 넘으면 캐시 전용 클러스터를 검토한다(ADR-0109 결정 6)
+- 좌석 Lua·만료 신호(추천 적용 2026-11-04, BUILD_ORDER PRF-135, docs/features/seat-hold.md §3·§5·§9): purchase-svc가 아래 표의 지표를 낸다. 경보는 표 아래 두 줄이다.
+
+| 지표 | 종류 | 라벨 | 뜻 |
+| --- | --- | --- | --- |
+| `seat_lua_errors_total` | 카운터 | `script`·`code` | 좌석 Lua가 오류로 끝난 수. `script`는 Lua 이름(`hold`·`expire`. 해제·연장 같은 뒤 단계의 Lua가 더한다)이고, `code`는 `CORRUPT_KEY`·`KEEP_UNTIL_PAST`·`FENCE_OVERFLOW`·`OOM`·`NOT_READY`이며 그 밖의 오류는 `OTHER` 하나로 묶는다(라벨 값이 늘지 않게, §8). 만료의 `CORRUPT_KEY`는 망가진 좌석이 여럿이어도 묶음마다 한 번만 올린다. 로그에는 키 종류(`quota`·`secver`처럼 키 이름에서 회차·계정을 뺀 부분)만 남기고, 계정 ID가 든 키 이름은 남기지 않는다 |
+| `seat_expiry_lag_seconds` | 게이지 | 없음 | 만료가 밀린 정도(초): 틱마다 회차의 만료 인덱스 맨 앞 좌석이 만료 시각을 넘긴 시간(지금 − 맨 앞 점수. 지난 것이 없으면 0). 그 파드가 맡은 회차 가운데 가장 큰 값이다(추천 적용 2026-11-04) |
+| `seat_expiry_ticks_total` | 카운터 | `outcome` | 회차 하나를 한 틱에 돈 결과의 수. `outcome`은 `DRAINED`(다 풂)·`BATCH_LIMIT`(20묶음 상한)·`NO_PROGRESS`(더 풀지 못함)·`NOT_LEASED`(임대 없음)·`NO_CONFIG`(회차 설정 없음)·`NOT_READY`(준비 안 됨)·`UNAVAILABLE`(일시 장애)·`ERROR`(오류)·`BACKOFF`(일시 장애·오류 뒤 5초 [가정] 건너뜀)·`STOPPED`(멈춤 신호(stop)로 남은 묶음을 돌지 않고 멈춘 회차)다(추천 적용 2026-11-04) |
+
+- 좌석 Lua 오류 경보: `code`가 `CORRUPT_KEY`·`KEEP_UNTIL_PAST`·`FENCE_OVERFLOW`인 수가 5분 안에 1이라도 늘면 SEV3(`kind` cause, `dependency` 좌석 클러스터 이름) [가정, wbs 4.1.4에서 확정]이다. 이 셋은 다시 보내도 낫지 않고 데이터나 코드를 고쳐야 한다. `OOM`은 위 Redis 메모리 신호, `NOT_READY`는 좌석 장애 조치·다시 만들기 신호(seat-hold §9, RB-06)가 맡아 이 경보에 넣지 않는다. 런북은 wbs 4.1.4에서 정한다.
+- 좌석 만료 밀림 경보(추천 적용 2026-11-04): `seat_expiry_lag_seconds`가 3초 [가정]를 넘은 채 5분 이어지면 SEV3(`kind` cause, `dependency` 좌석 클러스터 이름) [가정, wbs 4.1.4에서 확정]이다. 기준 3초는 만료 좌석이 p99 3초 안에 다시 보여야 한다는 NFR-025에 맞춘 것이다. 함께 볼 것은 `seat_expiry_ticks_total`의 20묶음 상한·일시 장애·오류·BACKOFF 수와 위 좌석 Lua 오류다. 런북은 wbs 4.1.4에서 정한다.
 - 관측 저장소 신호(추천 적용 2026-10-21, ADR-0077 결정 2·8): 다음은 SEV3(`kind` hygiene)다 [가정, wbs 4.1.4에서 확정].
   - Tempo 소비 지연(`tempo_ingest_group_partition_lag_seconds`)이 60초를 넘은 채 5분 이어진다
   - 관측 전용 Kafka 브로커가 오프라인이다

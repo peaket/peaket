@@ -397,6 +397,14 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-03 | 2026-11-03-v0-k7-peak-r1 | K7 | v0 | local-100k | 18,002명, 300 RPS | 1,252 | 38.1% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k7-peak-r1/ |
 | 2026-11-03 | 2026-11-03-v0-k7-peak-r2 | K7 | v0 | local-100k | 18,002명, 300 RPS | 1,227 | 38.3% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k7-peak-r2/ |
 | 2026-11-03 | 2026-11-03-v0-k7-peak-r3 | K7 | v0 | local-100k | 18,002명, 300 RPS | 1,198 | 40.8% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-03-v0-k7-peak-r3/ |
+| 2026-11-04 | 2026-11-04-st27-prod-b-five-same-notls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 9.53 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-04-st27-prod-b-five-same-notls-r1-local-poc/ |
+| 2026-11-04 | 2026-11-04-st27-prod-b-five-same-tls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 20 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-04-st27-prod-b-five-same-tls-r1-local-poc/ |
+| 2026-11-04 | 2026-11-04-st27-prod-b-five-same-tls-r2-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 19 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-04-st27-prod-b-five-same-tls-r2-local-poc/ |
+| 2026-11-04 | 2026-11-04-st27-prod-b-five-same-tls-r3-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 22 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-04-st27-prod-b-five-same-tls-r3-local-poc/ |
+| 2026-11-04 | 2026-11-04-st27-prod-b-five-spread-tls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 24 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-04-st27-prod-b-five-spread-tls-r1-local-poc/ |
+| 2026-11-04 | 2026-11-04-st27-prod-b-one-same-notls-r1-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 2.98 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-04-st27-prod-b-one-same-notls-r1-local-poc/ |
+| 2026-11-04 | 2026-11-04-st27-prod-b-one-same-tls-r1-local-poc | NFR-003 | v1 | local-poc | 2,000 RPS | 3.08 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-04-st27-prod-b-one-same-tls-r1-local-poc/ |
+| 2026-11-04 | 2026-11-04-st27-prod-five-same-tls-r1-local-poc | NFR-003 | v1 | local-poc | 6,000 RPS | 12 | 0.0% | 미판정 | 측정함 | 0 | perf-ledger/runs/2026-11-04-st27-prod-five-same-tls-r1-local-poc/ |
 <!-- ledger:end -->
 
 표준 서식 예시 (참고용 Mock 데이터):

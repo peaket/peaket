@@ -1,0 +1,56 @@
+{
+  "run_id": "2026-11-04-st27-prod-b-five-spread-tls-r1-local-poc",
+  "kpi": "NFR-003",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": 6000.0,
+    "duration_s": 600,
+    "warmup_s": 60
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/seat-shard.mjs",
+    "args": "--mode five --layout spread --duration 600 --warmup 60 --expire on --expire-batch 100 --expire-call evalsha --replay-ratio 0.1 --relay-trim-ms 1000",
+    "open_model": true
+  },
+  "commit": {
+    "code": "d6b6a1dcd17259972a115e2485bac2f2fe38061a",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 2",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-04T01:19:00Z",
+  "ended_at": "2026-11-04T01:30:02Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 23.906,
+    "error_rate": 0,
+    "requests": 3600000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "S-T27 다시 재기(운영 홀드·만료 Lua, st27-prod-lua 4/7) ② 다섯 회차 합 6,000/s, 나눈 배치(큰 회차 혼자·중형 둘씩), 만료 두 단계 100석·1초, 릴레이 흉내 XTRIM MINID 1000ms, 틀린 좌석 재생 읽기 홀드의 10%, 스냅샷 함께, p99는 클라이언트가 잰 홀드 Lua 왕복. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표. 측정한 운영 Lua sha1: 홀드 b5042a52ed880c3da637903c542a312806464fe5, 만료 6abf0972905ce85ea4cbab149b6ea23a3b9cac37. 오버셀 0(좌석마다 잡기·놓기 순서 확인, 켜진 비트 수 = 만료 인덱스 수)",
+  "collected_at": "2026-11-04T02:08:32Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

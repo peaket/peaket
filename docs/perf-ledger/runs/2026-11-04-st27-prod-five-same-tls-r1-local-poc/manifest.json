@@ -1,0 +1,56 @@
+{
+  "run_id": "2026-11-04-st27-prod-five-same-tls-r1-local-poc",
+  "kpi": "NFR-003",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": 6000.0,
+    "duration_s": 600,
+    "warmup_s": 60
+  },
+  "scenario": {
+    "path": "loadtest/poc/bench/src/seat-shard.mjs",
+    "args": "--mode five --layout same --duration 600 --warmup 60 --expire on --expire-batch 100 --replay-ratio 0.1 --relay-trim-ms 1000",
+    "open_model": true
+  },
+  "commit": {
+    "code": "931d80def64b4de1856275627ee3f8d611ab2ea5",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": null,
+  "generator": {
+    "description": "PoC 측정 도구(Node 24 loadtest/poc/bench) 컨테이너, CPU 한도 2",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-03T21:54:45Z",
+  "ended_at": "2026-11-03T22:05:48Z",
+  "region": "local",
+  "cost_krw": 0.0,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 12.155,
+    "error_rate": 0,
+    "requests": 3600000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "고치기 전 운영 Lua(PRF-135 성능 고침 전 원문으로 정식 7번 가운데 1번만 돌고 멈춘 묶음. 만료 Lua는 리뷰 전 도구라 늘 EVAL로 불렀다. 판정용 묶음이 아니다). S-T27 다시 재기(운영 홀드·만료 Lua, st27-prod-lua 1/7) ② 다섯 회차 합 6,000/s, 한 샤드, 만료 두 단계 100석·1초, 릴레이 흉내 XTRIM MINID 1000ms, 틀린 좌석 재생 읽기 홀드의 10%, 스냅샷 함께, p99는 클라이언트가 잰 홀드 Lua 왕복. 결과 표기: 실측(PC). 반복·중앙값은 ADR-0176 표. 측정한 운영 Lua sha1: 홀드 6b7ea7b345ce7a35a80f5bc48112474b57d3120e, 만료 e9145e274d16875e59cc188f781a85069638002b. 오버셀 0(좌석마다 잡기·놓기 순서 확인, 켜진 비트 수 = 만료 인덱스 수)",
+  "collected_at": "2026-11-03T22:26:37Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

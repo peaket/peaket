@@ -1,6 +1,6 @@
 // 핫패스 Redis 연결을 실제 Valkey 8.1로 본다(ADR-0176 결정 2). Docker 엔진이 있어야 한다
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { RedisDeadlineError, createHotRedis, redisScript, type HotRedis } from '../src/redis.js';
+import { RedisDeadlineError, createHotRedis, isRedisOutOfMemory, isRedisUnavailable, redisScript, type HotRedis } from '../src/redis.js';
 import { startPasswordCluster, startValkey, type ValkeyContainer } from './containers.js';
 
 let valkey: ValkeyContainer;
@@ -64,5 +64,21 @@ test('비밀번호를건클러스터에서도_찾아낸노드연결이인증해�
     }
   } finally {
     c.stop();
+  }
+});
+
+test('NFR015_ 실제 Valkey에서 메모리가 차면(maxmemory, noeviction) 쓰기 명령과 #!lua 스크립트의 거절 글이 isRedisOutOfMemory 참·isRedisUnavailable 거짓이고 읽기는 된다', async () => {
+  await redis.command(['SET', 'k:oom', '1'], { key: 'k:oom' });
+  await redis.command(['CONFIG', 'SET', 'maxmemory', '1'], { key: 'k:oom' });
+  try {
+    const catchOf = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e);
+    const write = await catchOf(redis.command(['SET', 'k:oom', '2'], { key: 'k:oom' }));
+    const script = await catchOf(redis.evalScript(redisScript("#!lua\nreturn redis.call('INCR', KEYS[1])"), ['k:oom'], []));
+    for (const e of [write, script]) {
+      expect({ m: String((e as Error | null)?.message), oom: isRedisOutOfMemory(e), unavailable: isRedisUnavailable(e) }).toMatchObject({ oom: true, unavailable: false });
+    }
+    await expect(redis.command(['GET', 'k:oom'], { key: 'k:oom' })).resolves.toBe('1');
+  } finally {
+    await redis.command(['CONFIG', 'SET', 'maxmemory', '0'], { key: 'k:oom' });
   }
 });
