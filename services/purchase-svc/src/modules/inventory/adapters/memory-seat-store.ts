@@ -15,7 +15,8 @@ import {
   SEAT_STATE_HELD,
 } from '../domain/hold.js';
 import type { LogGate } from '../domain/log-gate.js';
-import type { SeatCallOptions, SeatExpiries, SeatStore } from '../domain/ports.js';
+import type { SeatCallOptions, SeatExpiries, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
+import { assertSnapshotInput } from '../domain/snapshot.js';
 import { firstResponseOf, seatKeys } from './redis-seat-store.js';
 import { keepEventIds, saleEventsWarnGate } from './sale-events.js';
 
@@ -95,6 +96,11 @@ export class MemorySeatDb {
   readonly ctlEvents = new Set<string>();
   readonly #events = new Map<string, MemorySeatEvent>();
 
+  /** 회차의 키 묶음을 만들지 않고 찾는다(읽기 전용 메서드가 쓴다). 없으면 undefined */
+  peek(eventId: string): MemorySeatEvent | undefined {
+    return this.#events.get(eventId);
+  }
+
   /** 회차의 키 묶음. 없으면 빈 것을 만들어 둔다(세대 키·비트맵 없음) */
   event(eventId: string): MemorySeatEvent {
     let e = this.#events.get(eventId);
@@ -113,7 +119,7 @@ export class MemorySeatDb {
  * 만료(PRF-135): saleEvents = db.ctlEvents(KEY_PART 모양만), dueExpiries·expire는 MemorySeatEvent의 expiry·holds·bits·quota·rel·secver·stream·published·expireAt을
  * ports.ts SeatExpiries의 차례대로 바꾼다(만료 Lua와 같은 결과. 보유 수가 0 이하가 되면 quota에서 지우고 expireAt의 그 키도 지운다)
  */
-export class MemorySeatStore implements SeatStore, SeatExpiries {
+export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots {
   readonly db = new MemorySeatDb();
   readonly #filterWarnGate: LogGate;
 
@@ -249,6 +255,29 @@ export class MemorySeatStore implements SeatStore, SeatExpiries {
     }
     if (rec.fp !== fingerprint) return { kind: 'IDEM_REUSED' };
     return { kind: 'IDEM_REPLAY', ...firstResponseOf(rec.resp) };
+  }
+
+  async read(i: SnapshotReadInput, _o?: SeatCallOptions): Promise<SnapshotReadResult> {
+    assertSnapshotInput(i);
+    const ev = this.db.peek(i.eventId);
+    if (!ev?.epoch) return { kind: 'NOT_READY' };
+    const corrupt = (key: string): Error => new Error(`PEAKET_CORRUPT_KEY ${key}`);
+    const isU32 = (n: number): boolean => Number.isSafeInteger(n) && n >= 0 && n <= 0xffff_ffff;
+    if (!isU32(ev.epoch.epoch)) throw corrupt(seatKeys.epoch(i.eventId));
+    const firstByte = Math.floor(i.firstBit / 8);
+    const lastByte = Math.floor((i.firstBit + i.bitCount - 1) / 8);
+    // Redis의 비트맵은 바이트 안에서 높은 비트부터다(SETBIT 0 = 첫 바이트의 가장 높은 비트). 비트맵 길이를 넘는 바이트는 0이다
+    const bytes = Buffer.alloc(lastByte - firstByte + 1);
+    for (const idx of ev.bits) {
+      const b = idx >> 3;
+      if (b >= firstByte && b <= lastByte) bytes[b - firstByte]! |= 0x80 >> (idx & 7);
+    }
+    const sectionVersions = i.sectionIndexes.map((s) => {
+      const v = ev.secver.get(s) ?? 0;
+      if (!isU32(v)) throw corrupt(seatKeys.secver(i.eventId));
+      return v;
+    });
+    return { kind: 'OK', seatEpoch: ev.epoch.epoch, bytes, sectionVersions };
   }
 
   async openSale(i: { eventId: string; seatCount: number; keepUntilMs: number }): Promise<{ created: boolean; seatEpoch: number }> {

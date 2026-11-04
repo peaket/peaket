@@ -3,14 +3,16 @@ export { EXPIRE_LUA, SWEEP_LEASE_LUA } from './adapters/expire-lua.js';
 export { HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
 export { MemoryPurchaseSessionStore, RecordingSessionStartedLog } from './adapters/memory-purchase-session-store.js';
 export { MemoryPurchaseSessions, type MemoryPurchaseSession, type PurchaseSessionAccess } from './adapters/memory-purchase-sessions.js';
+export { FileSeatMapSource, LayoutSeatMap, type LayoutSeatMapOptions, type SeatMapSource } from './adapters/layout-seat-map.js';
 export { MemorySeatMap, type MemorySeatDef } from './adapters/memory-seat-map.js';
 export { MemorySeatDb, MemorySeatEvent, MemorySeatStore, type MemoryHoldHash, type MemoryIdemRecord, type MemoryPublished } from './adapters/memory-seat-store.js';
 export { MemorySweepLeases } from './adapters/memory-sweep-leases.js';
 export { PromSeatSignals } from './adapters/prom-seat-signals.js';
-export { ADVANCE_SESSION_LUA, APPEND_SESSION_STARTED_LUA, MARK_SESSION_STARTED_LUA, OPEN_SESSION_LUA } from './adapters/purchase-session-lua.js';
+export { ADVANCE_SESSION_LUA, APPEND_SESSION_STARTED_LUA, MARK_SESSION_STARTED_LUA, OPEN_SESSION_LUA, RECORD_HOLD_LUA } from './adapters/purchase-session-lua.js';
 export { RecordingHoldAttempts, discardHoldAttempts } from './adapters/recording-hold-attempts.js';
 export { RedisPurchaseSessionStore, RedisSessionStartedLog, sessionKeys } from './adapters/redis-purchase-sessions.js';
 export { RedisSeatStore, SEAT_REDIS, seatKeys } from './adapters/redis-seat-store.js';
+export { SNAPSHOT_LUA } from './adapters/snapshot-lua.js';
 export { RedisSweepLeases } from './adapters/redis-sweep-leases.js';
 export { PURCHASE_ECDH_KEY_ENV, ServerEcdhKey, type ServerEcdhJwk } from './adapters/server-ecdh.js';
 export { ADMISSION_TOKEN_HEADER, admissionJtiOf, StoredPurchaseSessions, type StoredPurchaseSessionsDeps } from './adapters/stored-purchase-sessions.js';
@@ -35,6 +37,7 @@ export {
   type OpenSessionOutcome,
 } from './application/open-purchase-session.js';
 export { podIdFrom } from './application/pod-id.js';
+export { ReadSeatSnapshot, SnapshotError, type ReadSeatSnapshotDeps, type SnapshotCommand, type SnapshotErrorCode } from './application/read-seat-snapshot.js';
 export {
   HOLD_PROBLEMS,
   HoldError,
@@ -58,6 +61,8 @@ export {
   type AdmissionRejectReason,
 } from './domain/admission-token.js';
 export { parseClientEphemeralKey, type ClientEphemeralKey } from './domain/client-key.js';
+export { parseEventSeatMapFile, SeatMapFileError, type ParsedSeatMap, type SeatMapFileErrorCode, type SectionRange } from './domain/seat-layout.js';
+export { decodeSnapshot, encodeSnapshot, lsbFirstBits, SNAPSHOT_FLAG_SECTION_ONLY, SNAPSHOT_VERSION, U16_MAX, U32_MAX, type SnapshotBody } from './domain/snapshot.js';
 export {
   EXPIRY_BACKOFF_MS,
   EXPIRY_BATCH_SIZE,
@@ -141,6 +146,9 @@ export {
   PURCHASE_SESSIONS,
   SEAT_EXPIRIES,
   SEAT_MAP,
+  SEAT_MAP_SECTIONS,
+  SEAT_SNAPSHOTS,
+  SESSION_HOLDS,
   SEAT_SIGNALS,
   SEAT_STORE,
   SESSION_STARTED_LOG,
@@ -157,10 +165,16 @@ export {
   type SeatExpiries,
   type SeatMap,
   type SeatMapIndex,
+  type SeatMapSections,
   type SeatSignals,
+  type SeatSnapshots,
+  type SessionHolds,
+  type SnapshotReadInput,
+  type SnapshotReadResult,
   type SeatStore,
   type SessionStartedLog,
   type SweepLeases,
 } from './domain/ports.js';
+export { SnapshotController } from './inbound/snapshot.controller.js';
 export { HOLD_OPERATION, HoldHeaders, HoldParams, HoldRequest, HoldResponseBody, HoldsController, SeatLuaFailure, sanitizedStoreError } from './inbound/holds.controller.js';
-export { InventoryModule, type InventoryModuleOptions } from './inventory.module.js';
+export { InventoryModule, type AdmissionOptions, type InventoryModuleOptions } from './inventory.module.js';

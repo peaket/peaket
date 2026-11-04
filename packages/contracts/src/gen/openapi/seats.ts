@@ -31,7 +31,7 @@ export const GetV1EventsEventIdSeatmapSnapshotQueryParams = zod.object({
 })
 
 export const GetV1EventsEventIdSeatmapSnapshotHeader = zod.object({
-  "X-Client-Ephemeral-Key": zod.string().optional().describe('구매 세션 요청 인증 키 합의용 클라이언트 임시 공개키(P-256, 비압축 점의 base64url). 직접 선택 공연은 입장 토큰의 첫 사용인 스냅샷 요청에 필수이고 그 뒤에는 무시한다(ADR-0050 결정 8)')
+  "X-Client-Ephemeral-Key": zod.string().optional().describe('구매 세션 요청 인증 키 합의용 클라이언트 임시 공개키(P-256, 비압축 점의 base64url). 직접 선택 공연은 입장 토큰의 첫 사용인 스냅샷 요청에 필수이고 그 뒤에는 보내지 않아도 된다(보내면 구매 세션에 적힌 키와 같아야 하고 다르면 401, 추천 적용 2026-11-04, docs/features/seat-hold.md §2)')
 })
 
 export const GetV1EventsEventIdSeatmapSnapshotResponse = zod.unknown()

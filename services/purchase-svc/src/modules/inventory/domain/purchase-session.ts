@@ -1,7 +1,7 @@
 // 구매 세션(docs/features/seat-hold.md §2 '구매 세션 열기와 확인의 첫 구현', docs/data.md §3 s:jti·s:session, BUILD_ORDER PRF-136).
 // 상수·저장소 입력/결과 꼴·입력 검사·SESSION_STARTED Stream 항목과 asyncapi PurchaseSessionStarted로 바꾸는 순수 함수. 도메인 층이라 프레임워크·플랫폼 형을 가져오지 않는다.
 import { createHash } from 'node:crypto';
-import { KEY_PART, SeatStoreUnavailable } from './hold.js';
+import { KEY_PART, MAX_SEATS, SEAT_ID_PATTERN, SeatStoreUnavailable } from './hold.js';
 import { type SeatLuaErrorCode, seatLuaErrorOf } from './lua-errors.js';
 
 /** 유휴 시한: 구매 세션 요청마다 지금 + 5분 [가정]으로 다시 쓴다(queue-admission §6 '무활동 세션 만료 기준은 처음에 5분'). 넘긴 세션을 끝내는 일은 이 단계 밖 */
@@ -33,8 +33,11 @@ export interface OpenSessionInput {
   eventId: string;
   /** 여정 ID(입장 토큰의 jny, UUID) */
   journeyId: string;
-  /** 클라이언트 임시 공개키(CLIENT_KEY_PATTERN). 저장소는 곡선 위의 점인지 보지 않는다(유스케이스가 거른다) */
-  clientKey: string;
+  /**
+   * 클라이언트 임시 공개키(CLIENT_KEY_PATTERN). 저장소는 곡선 위의 점인지 보지 않는다(유스케이스가 거른다).
+   * 없으면(undefined) 세션이 열린 뒤의 재요청이다: 표지가 있을 때 키는 비교하지 않고, 표지가 없어 새로 열어야 하면 KEY_REQUIRED를 돌려준다(BUILD_ORDER PRF-137)
+   */
+  clientKey?: string;
   /** 최대 체류 시각(입장 토큰 exp, epoch ms, 안전한 정수) */
   expiresAtMs: number;
   /** 첫 사용 기한(입장 토큰 iat + 5분, epoch ms, 0 이상의 안전한 정수) */
@@ -58,6 +61,7 @@ export interface OpenSessionInput {
  * - MISMATCH: 표지와 세션 상태가 있는데 위 넷 가운데 하나라도 다르다
  * - ENDED: 표지만 있고 세션 상태가 없다(끝난 세션. 같은 입장 토큰으로 다시 열지 못한다)
  * - FIRST_USE_EXPIRED: 표지가 없는데 지금이 첫 사용 기한을 지났다(아무것도 쓰지 않았다)
+ * - KEY_REQUIRED: 표지가 없어 새로 열어야 하는데 clientKey가 없다(첫 사용 기한 안일 때만. 아무것도 쓰지 않았다)
  * - TOKEN_EXPIRED: 지금이 입장 토큰의 최대 체류(exp) 이상이다(표지 유무와 관계없이 먼저 본다), 또는 REPLAY 갈래에서 세션에 적힌 처음 최대 체류 이상이다. 아무것도 쓰지 않았다
  */
 export type OpenSessionResult =
@@ -66,6 +70,7 @@ export type OpenSessionResult =
   | { kind: 'MISMATCH' }
   | { kind: 'ENDED' }
   | { kind: 'FIRST_USE_EXPIRED' }
+  | { kind: 'KEY_REQUIRED' }
   | { kind: 'TOKEN_EXPIRED' };
 
 /** 저장된 구매 세션 상태(docs/data.md §3 s:session:{jti}). 시간으로 거르지 않은 저장 값 그대로다 */
@@ -150,7 +155,7 @@ export function assertOpenInput(i: OpenSessionInput): void {
   if (!isKeyPart(i.eventId)) throw new RangeError('eventId가 키 조각 모양이 아니다');
   if (i.priorityGrantId !== undefined && !isKeyPart(i.priorityGrantId)) throw new RangeError('priorityGrantId가 키 조각 모양이 아니다');
   if (typeof i.journeyId !== 'string' || !UUID_PATTERN.test(i.journeyId)) throw new RangeError('journeyId가 UUID가 아니다');
-  if (typeof i.clientKey !== 'string' || !CLIENT_KEY_PATTERN.test(i.clientKey)) throw new RangeError('clientKey가 87자 base64url이 아니다');
+  if (i.clientKey !== undefined && (typeof i.clientKey !== 'string' || !CLIENT_KEY_PATTERN.test(i.clientKey))) throw new RangeError('clientKey가 87자 base64url이 아니다');
   if (!isMs(i.expiresAtMs)) throw new RangeError('expiresAtMs가 0 이상의 안전한 정수가 아니다');
   if (!isMs(i.firstUseDeadlineMs)) throw new RangeError('firstUseDeadlineMs가 0 이상의 안전한 정수가 아니다');
   if (!isMs(i.reissueUntilMs) || i.reissueUntilMs < i.expiresAtMs) throw new RangeError('reissueUntilMs가 expiresAtMs 이상의 안전한 정수가 아니다');
@@ -163,6 +168,14 @@ export function assertStartedEntry(e: SessionStartedEntry): void {
   if (!isKeyPart(e.admissionJti)) throw new RangeError('admissionJti가 키 조각 모양이 아니다');
   if (typeof e.journeyId !== 'string' || !UUID_PATTERN.test(e.journeyId)) throw new RangeError('journeyId가 UUID가 아니다');
   if (!isMs(e.startedAtMs) || !isMs(e.maxStayUntilMs)) throw new RangeError('시각이 0 이상의 안전한 정수가 아니다');
+}
+
+/** 홀드 기록(PurchaseSessionStore.recordHold) 입력의 모양 검사. jti·holdId는 KEY_PART, 좌석 ID는 1~MAX_SEATS개이고 좌석 ID 모양. 틀리면 RangeError */
+export function assertHoldRecord(jti: string, holdId: string, seatIds: readonly string[]): void {
+  assertJti(jti);
+  if (!isKeyPart(holdId)) throw new RangeError('holdId가 키 조각 모양이 아니다');
+  if (!Array.isArray(seatIds) || seatIds.length < 1 || seatIds.length > MAX_SEATS) throw new RangeError(`좌석 ID는 1~${MAX_SEATS}개여야 한다`);
+  for (const id of seatIds) if (typeof id !== 'string' || !SEAT_ID_PATTERN.test(id)) throw new RangeError('좌석 ID가 좌석 ID 모양이 아니다');
 }
 
 /** XADD에 넘길 이름·값 쌍(값은 모두 글). 순서: type, purchaseSessionId, admissionJti, journeyId, startedAtMs, maxStayUntilMs */

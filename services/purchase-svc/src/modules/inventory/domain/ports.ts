@@ -6,6 +6,7 @@ import type { DueExpiriesInput, DueExpiry, ExpireInput, ExpireResult, SweepOutco
 import type { HoldInput, HoldResult, ReplayInput, ReplayResult, SeatRef } from './hold.js';
 import type { SeatLuaErrorCode, SeatLuaScript } from './lua-errors.js';
 import type { OpenSessionInput, OpenSessionResult, SessionStartedEntry, StoredSession } from './purchase-session.js';
+import type { SectionRange } from './seat-layout.js';
 
 /** 요청 처리 중 좌석 Redis 호출 하나의 선택값(BUILD_ORDER PRF-135, guidelines §5) */
 export interface SeatCallOptions {
@@ -202,6 +203,52 @@ export interface SweepLeases {
   acquire(eventId: string, owner: string, ttlMs: number): Promise<boolean>;
 }
 
+export const SEAT_SNAPSHOTS = Symbol('purchase.SeatSnapshots');
+/** 스냅샷 읽기 입력(SeatSnapshots.read) */
+export interface SnapshotReadInput {
+  eventId: string;
+  /** 읽을 첫 비트(좌석 색인). 바이트 범위는 floor(firstBit / 8) ~ floor((firstBit + bitCount − 1) / 8)이다 */
+  firstBit: number;
+  /** 읽을 비트 수(1 이상) */
+  bitCount: number;
+  /** 구역 일련번호를 읽을 구역 색인들(0 ~ 65535, 겹치지 않음, 1개 이상) */
+  sectionIndexes: readonly number[];
+}
+/** 스냅샷 읽기 결과 */
+export type SnapshotReadResult =
+  /** 세대 키의 epoch 칸이 없다(좌석 저장소가 준비되지 않음). 아무것도 읽지 않았다 */
+  | { kind: 'NOT_READY' }
+  | {
+      kind: 'OK';
+      /** 회차 세대(0 ~ 2^32 − 1) */
+      seatEpoch: number;
+      /** 비트맵 바이트들: 첫 바이트가 비트맵의 floor(firstBit / 8)번째 바이트이고, 마지막 바이트까지 길이는 항상 (끝 바이트 − 첫 바이트 + 1)이다. 비트맵이 짧거나 없으면 모자란 바이트는 0으로 채운다 */
+      bytes: Buffer;
+      /** 구역 일련번호들(sectionIndexes와 같은 차례, 칸이 없으면 0, 0 ~ 2^32 − 1) */
+      sectionVersions: readonly number[];
+    };
+
+/**
+ * 좌석 스냅샷 읽기 포트(BUILD_ORDER PRF-137, docs/features/seat-hold.md §2 '스냅샷 읽기 Lua', adapters/snapshot-lua.ts의 계약).
+ * SeatStore와 같은 객체가 맡는다(RedisSeatStore·MemorySeatStore가 둘 다 구현한다). 두 구현은 같은 사례에서 같은 결과를 낸다.
+ */
+export interface SeatSnapshots {
+  /**
+   * 세대 키·비트맵 바이트·구역 일련번호를 한 원자 연산으로 읽는다(Redis는 쓰기 없는 Lua 한 번). 아무것도 쓰지 않는다.
+   * @throws RangeError eventId가 KEY_PART가 아님, firstBit·bitCount·sectionIndexes가 위 범위가 아님(아무것도 부르지 않는다)
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애
+   * @throws Error 세대·구역 일련번호가 u32 이하의 표준 10진 정수가 아님(PEAKET_CORRUPT_KEY), 모르는 결과 값
+   */
+  read(i: SnapshotReadInput, o?: SeatCallOptions): Promise<SnapshotReadResult>;
+}
+
+export const SEAT_MAP_SECTIONS = Symbol('purchase.SeatMapSections');
+/** 회차 판의 구역 비트맵 범위(스냅샷 API가 구역 수 검사와 구역 하나 읽기에 쓴다). SeatMap과 같은 객체가 맡는다 */
+export interface SeatMapSections {
+  /** 구역(구역 색인 오름차순, seatIndexRange가 있는 구역만). 그 회차의 판이 없으면 undefined */
+  sections(eventId: string): Promise<readonly SectionRange[] | undefined>;
+}
+
 /** 회차의 좌석 판매 설정(좌석맵 판과 판매 정책에서 온다) */
 export interface EventSeatConfig {
   eventId: string;
@@ -304,7 +351,21 @@ export interface PurchaseSessionStore {
    * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족
    */
   markStarted(jti: string): Promise<boolean>;
+
+  /**
+   * 새로 잡은 홀드를 구매 세션 상태에 기록한다(작은 Lua 한 번, BUILD_ORDER PRF-137): `h:{holdId}` 칸 = 좌석 ID들을 쉼표로 이은 글을 더하고, 첫 홀드 표시 `fh`를 처음 한 번만 쓴다.
+   * 세션이 없으면 아무것도 만들지 않는다.
+   * @returns 세션이 있으면 이번이 이 세션의 첫 홀드인지(참·거짓), 세션이 없으면 null
+   * @param o 호출 마감(SeatCallOptions). Redis 구현만 쓴다(넘기면 HotRedis의 deadlineMs, 없으면 플랫폼 기본)
+   * @throws RangeError jti·holdId가 키 조각 모양이 아니거나 seatIds가 비었거나 좌석 ID 모양이 아님(아무것도 부르지 않는다)
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족(마감 초과 포함)
+   */
+  recordHold(jti: string, holdId: string, seatIds: readonly string[], o?: SeatCallOptions): Promise<boolean | null>;
 }
+
+export const SESSION_HOLDS = Symbol('purchase.SessionHolds');
+/** 새로 잡은 홀드를 구매 세션 상태에 기록하는 포트(PurchaseSessionStore.recordHold의 부분. HoldSeats가 쓴다) */
+export type SessionHolds = Pick<PurchaseSessionStore, 'recordHold'>;
 
 export const SESSION_STARTED_LOG = Symbol('purchase.SessionStartedLog');
 /** SESSION_STARTED Stream 항목을 더한다(docs/data.md §3 s:{event:E}:stream). 세션 키와 슬롯이 달라 열기와 따로 부른다 */
@@ -338,6 +399,8 @@ export interface HoldAttemptRecord {
   result: HoldAttemptResult;
   /** HELD일 때만: 홀드 Lua가 돌려준 잡은 시각(epoch ms) */
   heldAtMs?: number;
+  /** HELD일 때만, 구매 세션 상태에 홀드를 기록한 결과가 있을 때만: 이번 홀드가 이 구매 세션의 첫 홀드인가(PurchaseSessionStore.recordHold의 결과) */
+  firstHeldInSession?: boolean;
   /** 결과를 낸 시각(주입 Clock, epoch ms) */
   occurredAtMs: number;
   /** HoldSeats.execute 시작부터 결과까지 걸린 시간(주입 Clock의 단조 시계 차이, ms, 0 이상) */

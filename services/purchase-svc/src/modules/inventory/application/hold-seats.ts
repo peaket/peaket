@@ -1,7 +1,7 @@
 // 좌석 홀드 쓰임새(docs/features/seat-hold.md §3~§5, openapi POST /v1/events/{eventId}/holds, BUILD_ORDER PRF-130 ①).
 // 받는 층(HoldsController)이 신원·멱등 키 형식·구매 요청 서명·본문 모양을 확인한 뒤 부른다.
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { CLOCK, type Clock, type Deadline, uuidv7 } from '@peaket/platform';
+import { CLOCK, type Clock, type Deadline, PLATFORM_LOGGER, type PlatformLogger, uuidv7 } from '@peaket/platform';
 import {
   type HeldHold,
   type HoldResult,
@@ -11,6 +11,7 @@ import {
   type ReplayResult,
   SEAT_CALL_CAP_MS,
   SEAT_CALL_MIN_REMAINING_MS,
+  SESSION_RECORD_CAP_MS,
   type SeatRef,
   SeatStoreUnavailable,
 } from '../domain/hold.js';
@@ -24,6 +25,8 @@ import {
   type PurchaseSessions,
   SEAT_MAP,
   SEAT_SIGNALS,
+  SESSION_HOLDS,
+  type SessionHolds,
   SEAT_STORE,
   type SeatCallOptions,
   type SeatMap,
@@ -80,7 +83,25 @@ export class HoldSeats {
     @Inject(CLOCK) private readonly clock: Clock,
     /** 좌석 Lua 지표(BUILD_ORDER PRF-135). 주입하지 않으면 버린다(noSeatSignals) */
     @Optional() @Inject(SEAT_SIGNALS) private readonly signals: SeatSignals = noSeatSignals,
+    /** 새 홀드를 구매 세션 상태에 기록하고 첫 홀드 표시를 얻는다(BUILD_ORDER PRF-137). 주입하지 않으면 기록하지 않고 firstHeldInSession도 비운다 */
+    @Optional() @Inject(SESSION_HOLDS) private readonly holds?: SessionHolds,
+    /** 서비스 로거(구매 세션 홀드 기록 실패 경고, 선택) */
+    @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
   ) {}
+
+  /** 새 홀드를 구매 세션 상태에 기록하고 이번이 첫 홀드인지 돌려준다. 보조 기록이라 어떤 오류도 홀드를 막지 않는다(세션이 없거나 실패하면 undefined, 실패는 로그 한 줄) */
+  async #recordHold(sessionId: string, holdId: string, seatIds: readonly string[], deadline?: Deadline): Promise<boolean | undefined> {
+    if (!this.holds) return undefined;
+    // 홀드는 이미 확정됐으니 보조 기록이 응답을 붙들지 않게 짧은 상한으로 부르고, 남은 시간이 모자라면 부르지 않는다(PRF-137 리뷰)
+    if (deadline && deadline.remainingMs() < SEAT_CALL_MIN_REMAINING_MS) return undefined;
+    const deadlineMs = Math.max(1, Math.floor(deadline ? deadline.budgetFor(SESSION_RECORD_CAP_MS) : SESSION_RECORD_CAP_MS));
+    try {
+      return (await this.holds.recordHold(sessionId, holdId, seatIds, { deadlineMs })) ?? undefined;
+    } catch (err) {
+      this.logger?.warn({ errorName: err instanceof Error ? err.name : typeof err }, '구매 세션의 홀드 기록 실패');
+      return undefined;
+    }
+  }
 
   /**
    * 좌석을 잡고 201 본문을 돌려준다. 아니면 HoldError(application/hold-error.ts의 코드)를 던진다. 차례(앞이 걸리면 뒤는 하지 않는다):
@@ -117,7 +138,9 @@ export class HoldSeats {
    * 명세에서 모호했던 셋(추천 적용 2026-11-04):
    * - 회차가 달라 403이면 본문이 auto여도 ERROR 하나를 남긴다(구매 세션 확인을 지났고, 403이 본문 검사 400보다 먼저다).
    * - 저장소가 일시 장애가 아닌 오류(스크립트 오류 같은 버그)를 던지면 ERROR 하나를 남기고 그 오류를 바꾸지 않고 던진다.
-   * - HoldAttempt의 firstHeldInSession은 여기서 채우지 않는다. 구매 세션 상태(PRF-137)와 Kafka·Avro 보내기(BAS-030)에서 채운다.
+   * - HoldAttempt의 firstHeldInSession(BUILD_ORDER PRF-137): 새로 잡은 홀드(OK)마다 holds(SessionHolds)가 있으면 recordHold(구매 세션 ID, holdId, 정렬된 좌석 ID들)를 한 번 부르고
+   *   결과(첫 홀드면 true, 아니면 false)를 HELD 시도 기록에 싣는다. 세션이 없어 null이거나, 던지거나(일시 장애든 버그든 로거 warn 한 줄), holds가 없으면 칸을 비운다.
+   *   멱등 재생(IDEM_REPLAY)과 거절은 기록하지 않는다. 기록 실패는 홀드를 막지 않는다(보조 기록이라서). Kafka·Avro 보내기는 BAS-030이다.
    *
    * 요청 마감(BUILD_ORDER PRF-135, guidelines §5). c.deadline이 있을 때만 본다:
    * - 좌석 Redis를 부르기 바로 전(5의 store.replay와 6의 store.hold 각각)에 c.deadline.remainingMs() < SEAT_CALL_MIN_REMAINING_MS(5)이면 부르지 않고
@@ -154,7 +177,7 @@ export class HoldSeats {
     // 여기부터 결과마다 시도 하나를 남긴다(멱등 재생과 2의 400은 빼고)
     const requested = [...(c.body.seatIds ?? [])];
     let first: SeatRef | undefined;
-    const record = (result: HoldAttemptResult, heldAtMs?: number): void => {
+    const record = (result: HoldAttemptResult, heldAtMs?: number, firstHeldInSession?: boolean): void => {
       this.attempts.record({
         eventId: c.eventId,
         accountId: c.accountId,
@@ -165,6 +188,7 @@ export class HoldSeats {
         ...(first ? { tierId: first.tierId, sectionId: first.sectionId } : {}),
         result,
         ...(heldAtMs !== undefined ? { heldAtMs } : {}),
+        ...(firstHeldInSession !== undefined ? { firstHeldInSession } : {}),
         occurredAtMs: this.clock.now(),
         latencyMs: Math.max(0, this.clock.monotonicMs() - started),
       });
@@ -265,7 +289,7 @@ export class HoldSeats {
     switch (r.kind) {
       case 'OK':
       case 'IDEM_REPLAY':
-        if (r.kind === 'OK') record('HELD', r.heldAtMs);
+        if (r.kind === 'OK') record('HELD', r.heldAtMs, await this.#recordHold(c.purchaseSessionId, r.holdId, seatIds, c.deadline));
         return responseOf(r, seatIds);
       case 'NOT_READY':
         this.signals.luaError('hold', 'NOT_READY');

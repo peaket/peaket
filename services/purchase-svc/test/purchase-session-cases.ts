@@ -300,4 +300,106 @@ export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | 
     const h = await make();
     for (const bad of ['', 'a}b', '{x}', 'a:b', 'x'.repeat(65)]) await expect(h.store.markStarted(bad), bad).rejects.toThrow(RangeError);
   });
+
+  // ── 키 없는 열기(BUILD_ORDER PRF-137): 세션이 열린 뒤의 재요청은 X-Client-Ephemeral-Key 없이 온다(openapi '그 뒤에는 무시한다', docs/features/seat-hold.md §2 '클라이언트 임시 공개키 헤더') ──
+
+  test('ST28_ADR0183_8_키 없는 열기: 재사용 차단 표지가 없고 첫 사용 기한 안이면 KEY_REQUIRED이고 아무것도 쓰지 않는다(읽으면 undefined, 같은 jti로 키를 주고 다시 열면 CREATED)', async () => {
+    const h = await make();
+    const jti = newJti();
+    expect(await h.store.open(openInput(h, jti, { clientKey: undefined }))).toEqual({ kind: 'KEY_REQUIRED' });
+    expect(await h.store.read(jti)).toBeUndefined();
+    expect(await h.store.advance(jti, 1)).toBe(false);
+    expect(await h.store.markStarted(jti)).toBe(false);
+    // 여러 번·동시에 불러도 그대로다
+    const rs = await Promise.all(Array.from({ length: 20 }, () => h.store.open(openInput(h, jti, { clientKey: undefined }))));
+    expect(rs.every((r) => r.kind === 'KEY_REQUIRED')).toBe(true);
+    expect(await h.store.read(jti)).toBeUndefined();
+    // 표지가 남지 않았다: 키를 주고 열면 REPLAY·ENDED가 아니라 CREATED다
+    expect((await h.store.open(openInput(h, jti))).kind).toBe('CREATED');
+  });
+
+  test('ADR0183_8_키 없는 열기: 첫 사용 기한이 지났으면 키 없음보다 먼저 FIRST_USE_EXPIRED이고 아무것도 쓰지 않는다', async () => {
+    const h = await make();
+    const jti = newJti();
+    expect(await h.store.open(openInput(h, jti, { clientKey: undefined, firstUseDeadlineMs: h.now() - 10_000 }))).toEqual({ kind: 'FIRST_USE_EXPIRED' });
+    expect(await h.store.read(jti)).toBeUndefined();
+    expect((await h.store.open(openInput(h, jti))).kind).toBe('CREATED');
+  });
+
+  test('ASVS9.2.1_키 없는 열기: 최대 체류(exp)가 지났으면 맨 먼저 TOKEN_EXPIRED다(기한·키 없음보다 앞). 열린 세션도 처음 최대 체류가 지나면 TOKEN_EXPIRED다 [ASVS v5.0.0-9.2.1]', async () => {
+    const h = await make();
+    const jti = newJti();
+    expect(await h.store.open(openInput(h, jti, { clientKey: undefined, expiresAtMs: h.now() - 10_000, firstUseDeadlineMs: h.now() - 20_000 }))).toEqual({ kind: 'TOKEN_EXPIRED' });
+    expect(await h.store.read(jti)).toBeUndefined();
+    expect((await h.store.open(openInput(h, jti))).kind).toBe('CREATED');
+
+    const live = newJti();
+    const i = openInput(h, live, { expiresAtMs: h.now() + 1_000 });
+    expect((await h.store.open(i)).kind).toBe('CREATED');
+    await h.pass(1_100);
+    expect(await h.store.open({ ...i, clientKey: undefined })).toEqual({ kind: 'TOKEN_EXPIRED' });
+    expect(await h.store.advance(live, 1)).toBe(false);
+  });
+
+  test('ST28_ADR0183_8_세션이 열린 뒤에는 키 없이도 REPLAY다: 처음 연 시각·처음 최대 체류·needsStarted를 주고 세션 상태(저장된 임시 공개키 포함)를 바꾸지 않는다', async () => {
+    const h = await make();
+    const jti = newJti();
+    const i = openInput(h, jti);
+    const first = await h.store.open(i);
+    if (first.kind !== 'CREATED') throw new Error('CREATED여야 한다');
+    expect(await h.store.advance(jti, 2)).toBe(true);
+    expect(await h.store.markStarted(jti)).toBe(true);
+    const before = await h.store.read(jti);
+    await h.pass(20);
+    const keyless = { ...i, clientKey: undefined };
+    expect(await h.store.open(keyless)).toEqual({ kind: 'REPLAY', startedAtMs: first.startedAtMs, maxStayUntilMs: i.expiresAtMs, needsStarted: false });
+    expect(await h.store.read(jti)).toEqual(before);
+    expect((await h.store.read(jti))?.clientKey).toBe(CLIENT_KEY);
+    // 저장된 키는 그대로라서 다른 키는 여전히 MISMATCH, 같은 키는 REPLAY다
+    expect(await h.store.open(openInput(h, jti, { clientKey: OTHER_CLIENT_KEY }))).toEqual({ kind: 'MISMATCH' });
+    expect((await h.store.open(i)).kind).toBe('REPLAY');
+  });
+
+  test('ADR0183_11_키 없는 REPLAY도 needsStarted를 따른다: 시작 사건 기록 표시가 없고 연 지 유예(1초)가 지났으면 true, 그 안이거나 표시가 있으면 false다', async () => {
+    const h = await make();
+    const jti = newJti();
+    const i = openInput(h, jti);
+    expect((await h.store.open(i)).kind).toBe('CREATED');
+    const keyless = { ...i, clientKey: undefined };
+    expect(await h.store.open(keyless)).toMatchObject({ kind: 'REPLAY', needsStarted: false });
+    await h.pass(SESSION_STARTED_GRACE_MS + 150);
+    expect(await h.store.open(keyless)).toMatchObject({ kind: 'REPLAY', needsStarted: true });
+    expect(await h.store.markStarted(jti)).toBe(true);
+    expect(await h.store.open(keyless)).toMatchObject({ kind: 'REPLAY', needsStarted: false });
+  });
+
+  test('ADR0183_8_키 없는 REPLAY는 첫 사용 기한을 보지 않는다: 기한이 지난 뒤에도 최대 체류 안이면 REPLAY다', async () => {
+    const h = await make();
+    const jti = newJti();
+    const i = openInput(h, jti, { firstUseDeadlineMs: h.now() + 1_000, expiresAtMs: h.now() + 60_000 });
+    expect((await h.store.open(i)).kind).toBe('CREATED');
+    await h.pass(1_100);
+    expect((await h.store.open({ ...i, clientKey: undefined })).kind).toBe('REPLAY');
+  });
+
+  test('ST28_ASVS8.2.1_ASVS8.2.2_키 없는 열기: 계정·로그인 세션·회차 가운데 하나라도 다르면 MISMATCH이고 세션 상태는 그대로다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
+    const h = await make();
+    const jti = newJti();
+    await h.store.open(openInput(h, jti));
+    const before = await h.store.read(jti);
+    for (const over of [{ accountId: 'acct-2' }, { loginSessionId: 'login-2' }, { eventId: 'ev-2' }]) {
+      expect(await h.store.open(openInput(h, jti, { ...over, clientKey: undefined })), JSON.stringify(over)).toEqual({ kind: 'MISMATCH' });
+    }
+    expect(await h.store.read(jti)).toEqual(before);
+  });
+
+  test('ADR0183_8_키 없는 열기: 표지만 남고 세션 상태가 없으면(끝난 세션) ENDED다. 세션을 되살리지 않는다', async () => {
+    const h = await make();
+    const jti = newJti();
+    await h.store.open(openInput(h, jti));
+    await h.end(jti);
+    expect(await h.store.open(openInput(h, jti, { clientKey: undefined }))).toEqual({ kind: 'ENDED' });
+    expect(await h.store.read(jti)).toBeUndefined();
+    expect(await h.store.advance(jti, 1)).toBe(false);
+  });
 }

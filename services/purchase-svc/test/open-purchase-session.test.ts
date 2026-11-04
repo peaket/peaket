@@ -320,3 +320,137 @@ describe('응답을 잃은 재시도와 다시 받은 입장 토큰(PRF-136 리�
     await expect(uc.execute(cmd)).rejects.toBe(down);
   });
 });
+
+import type { OpenSessionCommand } from '../src/modules/inventory/index.js';
+
+describe('키 없는 재요청(BUILD_ORDER PRF-137: 세션이 열린 뒤에는 X-Client-Ephemeral-Key 없이 와도 열린다)', () => {
+  /** 키를 뺀 같은 요청 */
+  const keyless = (c: { cmd: unknown }): OpenSessionCommand => ({ ...(c.cmd as OpenSessionCommand), clientKey: undefined });
+
+  test('ST28_ADR0183_8_세션이 없는데 clientKey가 없으면 CLIENT_KEY_INVALID(400)이고 저장소에 쓴 것이 없다: 키를 주고 다시 열면 새로 열린다', async () => {
+    const { uc, store, log, warnings } = setup();
+    const { jti, cmd } = command();
+    expect(await codeOf(uc.execute(keyless({ cmd })))).toBe('CLIENT_KEY_INVALID');
+    expect(await store.read(jti)).toBeUndefined();
+    expect(log.entries).toHaveLength(0);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.obj).toMatchObject({ code: 'CLIENT_KEY_INVALID', eventId: 'ev-1' });
+    const text = JSON.stringify(warnings);
+    expect(text).not.toContain('acct-1');
+    expect(text).not.toContain('login-1');
+    // 표지가 남지 않았다
+    const out = await uc.execute(cmd);
+    expect(out.created).toBe(true);
+    expect(log.entries).toHaveLength(1);
+  });
+
+  test('ST28_ADR0183_8_세션이 열린 뒤 clientKey를 안 보내면 REPLAY로 열린다: 같은 세션을 주고(created false) SESSION_STARTED를 더 더하지 않으며 저장된 임시 공개키는 그대로다', async () => {
+    const { uc, store, log } = setup();
+    const { jti, cmd, client } = command();
+    const first = await uc.execute(cmd);
+    const before = await store.read(jti);
+    const again = await uc.execute(keyless({ cmd }));
+    expect(again).toEqual({ ...first, created: false });
+    expect(log.entries).toHaveLength(1);
+    expect(await store.read(jti)).toEqual(before);
+    expect((await store.read(jti))?.clientKey).toBe(client.text);
+    // 키를 보내는 재요청도 같은 키면 여전히 REPLAY다
+    expect((await uc.execute(cmd)).created).toBe(false);
+  });
+
+  test('ADR0183_11_ST35_키 없는 재요청도 시작 사건을 지킨다: 더하기가 실패한 채 응답을 잃으면 유예(1초) 뒤의 키 없는 재요청이 SESSION_STARTED를 다시 더하고, 더한 뒤에는 더하지 않는다', async () => {
+    const { uc, log, clock } = setup({ logFails: true });
+    const { cmd, jti } = command();
+    const first = await uc.execute(cmd);
+    expect(log.entries).toHaveLength(0);
+    log.failWith = undefined;
+    await uc.execute(keyless({ cmd })); // 유예 안: 처음 연 요청이 더하는 중으로 본다
+    expect(log.entries).toHaveLength(0);
+    clock.advance(SESSION_STARTED_GRACE_MS);
+    const again = await uc.execute(keyless({ cmd }));
+    expect(again).toEqual({ ...first, created: false });
+    expect(log.entries).toEqual<SessionStartedEntry[]>([{ eventId: 'ev-1', purchaseSessionId: jti, admissionJti: jti, journeyId: JNY, startedAtMs: first.startedAtMs, maxStayUntilMs: first.maxStayUntilMs }]);
+    await uc.execute(keyless({ cmd }));
+    expect(log.entries).toHaveLength(1);
+  });
+
+  test('ADR0183_8_세션이 열린 뒤에는 첫 사용 기한이 지나도 키 없는 재요청이 열린다. 기한이 지난 뒤 세션이 없는 키 없는 요청은 FIRST_USE_EXPIRED다', async () => {
+    const { uc, clock } = setup();
+    const { cmd } = command();
+    await uc.execute(cmd);
+    clock.advance(FIRST_USE_MS + 1_000);
+    expect((await uc.execute(keyless({ cmd }))).created).toBe(false);
+
+    const late = setup();
+    const b = command();
+    late.clock.advance(FIRST_USE_MS + 1);
+    expect(await codeOf(late.uc.execute(keyless(b)))).toBe('FIRST_USE_EXPIRED');
+    expect(await late.store.read(b.jti)).toBeUndefined();
+  });
+
+  test('ASVS9.2.1_키 없는 재요청도 exp가 지났으면 TOKEN_EXPIRED다 [ASVS v5.0.0-9.2.1]', async () => {
+    const { uc, clock } = setup();
+    const { cmd } = command();
+    await uc.execute(cmd);
+    clock.advance(45 * 60_000);
+    expect(await codeOf(uc.execute(keyless({ cmd })))).toBe('TOKEN_EXPIRED');
+  });
+
+  test('ASVS8.2.1_ASVS8.2.2_키 없는 재요청도 입장 토큰 검사가 먼저다: 남의 토큰은 TOKEN_MISMATCH, 다른 회차는 EVENT_MISMATCH, 서명이 틀리면 TOKEN_INVALID이고 열린 세션은 그대로다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
+    const { uc, store } = setup();
+    const { jti, cmd } = command();
+    await uc.execute(cmd);
+    const before = await store.read(jti);
+    expect(await codeOf(uc.execute({ ...keyless({ cmd }), accountId: 'acct-2' }))).toBe('TOKEN_MISMATCH');
+    expect(await codeOf(uc.execute({ ...keyless({ cmd }), loginSessionId: 'login-2' }))).toBe('TOKEN_MISMATCH');
+    expect(await codeOf(uc.execute({ ...keyless({ cmd }), eventId: 'ev-2' }))).toBe('EVENT_MISMATCH');
+    expect(await codeOf(uc.execute({ ...keyless({ cmd }), token: 'not-a-token' }))).toBe('TOKEN_INVALID');
+    expect(await store.read(jti)).toEqual(before);
+  });
+
+  test('ADR0183_8_끝난 세션(세션 상태만 사라짐)에 키 없이 다시 열면 TOKEN_USED이고 세션을 되살리지 않는다', async () => {
+    const { uc, store, log } = setup();
+    const { jti, cmd } = command();
+    await uc.execute(cmd);
+    store.endSession(jti);
+    expect(await codeOf(uc.execute(keyless({ cmd })))).toBe('TOKEN_USED');
+    expect(await store.read(jti)).toBeUndefined();
+    expect(log.entries).toHaveLength(1);
+  });
+
+  test('ST28_ASVS8.2.1_열린 뒤 clientKey를 보냈는데 곡선 위의 점이 아니면(87자 base64url 모양이어도) CLIENT_KEY_INVALID(400)이고 세션은 그대로다 [ASVS v5.0.0-8.2.1]', async () => {
+    const { uc, store, log } = setup();
+    const { jti, cmd } = command();
+    await uc.execute(cmd);
+    const before = await store.read(jti);
+    for (const clientKey of ['A'.repeat(87), 'AAAA', Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString('base64url')]) {
+      expect(await codeOf(uc.execute({ ...cmd, clientKey })), clientKey).toBe('CLIENT_KEY_INVALID');
+    }
+    expect(await store.read(jti)).toEqual(before);
+    expect(log.entries).toHaveLength(1);
+  });
+
+  test('ADR0183_8_열린 뒤 다른 유효한 clientKey를 보내면 TOKEN_USED(401)이다(남의 키로 서명하게 두지 않는다). 세션은 그대로다', async () => {
+    const { uc, store } = setup();
+    const { jti, cmd } = command();
+    await uc.execute(cmd);
+    const before = await store.read(jti);
+    expect(await codeOf(uc.execute({ ...cmd, clientKey: clientKeyOf().text }))).toBe('TOKEN_USED');
+    expect(await store.read(jti)).toEqual(before);
+  });
+
+  test('ST28_clientKey가 빈 글(\'\')이면 \'보낸 것\'이라 CLIENT_KEY_INVALID다(키 없음이 아니다): 세션이 없든 열려 있든 REPLAY로 열리지 않는다', async () => {
+    const none = setup();
+    const a = command();
+    expect(await codeOf(none.uc.execute({ ...a.cmd, clientKey: '' }))).toBe('CLIENT_KEY_INVALID');
+    expect(await none.store.read(a.jti)).toBeUndefined();
+
+    const open = setup();
+    const b = command();
+    await open.uc.execute(b.cmd);
+    const before = await open.store.read(b.jti);
+    expect(await codeOf(open.uc.execute({ ...b.cmd, clientKey: '' }))).toBe('CLIENT_KEY_INVALID');
+    expect(await open.store.read(b.jti)).toEqual(before);
+    expect(open.log.entries).toHaveLength(1);
+  });
+});

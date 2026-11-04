@@ -1,0 +1,175 @@
+// 운영 좌석맵 판(BUILD_ORDER PRF-137, docs/features/seat-hold.md §2 '운영 좌석맵 판'): 회차별 판 파일을 읽어 메모리에 두는 SeatMap·SeatMapIndex·SeatMapSections.
+import { readFile, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { Clock } from '@peaket/platform';
+import { KEY_PART, type SeatRef } from '../domain/hold.js';
+import type { EventSeatConfig, SeatMap, SeatMapIndex, SeatMapSections } from '../domain/ports.js';
+import { type ParsedSeatMap, parseEventSeatMapFile, SeatMapFileError, type SectionRange } from '../domain/seat-layout.js';
+
+/** 판 파일의 출처(지금은 폴더의 {eventId}.json. 회차 설정을 core에서 받는 길은 LCH-080) */
+export interface SeatMapSource {
+  /** 회차의 판 파일을 읽은 값(JSON.parse 결과). 파일이 없으면 undefined. 읽지 못하면(입출력 오류·JSON 아님) 던진다 */
+  load(eventId: string): Promise<unknown | undefined>;
+  /**
+   * 파일이 바뀌었는지 싸게 알아보는 표시(선택). 같은 표시면 refresh가 파일을 다시 읽고 해석하지 않는다(큰 파일의 JSON 해석이 이벤트 루프를 막지 않게).
+   * 파일이 없으면 undefined, 읽지 못하면 던진다
+   */
+  stamp?(eventId: string): Promise<string | undefined>;
+}
+
+const isFileMissing = (err: unknown): boolean => (err as { code?: unknown } | null)?.code === 'ENOENT';
+
+/** 폴더 `dir`의 `{eventId}.json`을 읽는 출처. eventId가 KEY_PART 모양이 아니면 파일에 닿지 않고 undefined다(경로를 벗어나는 값을 막는다) */
+export class FileSeatMapSource implements SeatMapSource {
+  constructor(private readonly dir: string) {}
+
+  async load(eventId: string): Promise<unknown | undefined> {
+    if (!KEY_PART.test(eventId)) return undefined;
+    let text: string;
+    try {
+      text = await readFile(join(this.dir, `${eventId}.json`), 'utf8');
+    } catch (err) {
+      if (isFileMissing(err)) return undefined;
+      throw err;
+    }
+    return JSON.parse(text) as unknown;
+  }
+
+  async stamp(eventId: string): Promise<string | undefined> {
+    if (!KEY_PART.test(eventId)) return undefined;
+    try {
+      const s = await stat(join(this.dir, `${eventId}.json`));
+      return `${s.mtimeMs}:${s.size}`;
+    } catch (err) {
+      if (isFileMissing(err)) return undefined;
+      throw err;
+    }
+  }
+}
+
+export interface LayoutSeatMapOptions {
+  source: SeatMapSource;
+  clock: Clock;
+  /** 판 파일을 받지 못했거나 읽지 못했을 때 warn 한 줄(회차 ID와 이유 코드만) */
+  logger?: { warn(obj: object, msg: string): void };
+  /** 파일이 없거나 틀린 회차를 '없음'으로 기억하는 시간(ms, 기본 1000) */
+  missingTtlMs?: number;
+}
+
+interface Entry {
+  parsed: ParsedSeatMap;
+  /** 파일 표시(source.stamp). 없으면 undefined */
+  stamp: string | undefined;
+  /** 판 번호·1인 한도·판매 종료로 만든 같은 판 표시: 같으면 좌석 표를 다시 만들지 않는다 */
+  signature: string;
+}
+
+const MISSING_TTL_MS = 1000;
+/** 없음 기억의 개수 상한(서로 다른 회차 ID로 계속 물어도 메모리가 늘지 않게 가장 오래된 것부터 잊는다) */
+const MISSING_MAX = 1024;
+
+/** 파일 값에서 같은 판인지 가르는 표시를 싸게 뽑는다(틀린 모양이면 undefined) */
+function signatureOf(raw: unknown): string | undefined {
+  const o = raw as { perAccountLimit?: unknown; saleEndsAt?: unknown; layout?: { layoutVersion?: unknown } } | null;
+  const v = o?.layout?.layoutVersion;
+  if (typeof v !== 'number' || typeof o?.perAccountLimit !== 'number' || typeof o?.saleEndsAt !== 'string') return undefined;
+  return `${v}|${o.perAccountLimit}|${o.saleEndsAt}`;
+}
+
+/**
+ * SeatMap·SeatMapIndex·SeatMapSections의 운영 구현. 처음 부를 때만 파일을 읽고(같은 회차의 동시 요청은 한 번만 읽는다), 없음/틀림은 missingTtlMs 동안 기억한다.
+ * refresh()가 읽은 회차를 다시 읽어 바꾼다(실패하면 이전 판을 그대로 둔다. 판 번호와 설정이 같으면 좌석 표를 다시 만들지 않는다).
+ */
+export class LayoutSeatMap implements SeatMap, SeatMapIndex, SeatMapSections {
+  readonly #entries = new Map<string, Entry>();
+  /** 없음/틀림을 기억하는 회차 → 기억이 끝나는 시각(주입 Clock) */
+  readonly #missing = new Map<string, number>();
+  readonly #loading = new Map<string, Promise<Entry | undefined>>();
+
+  constructor(private readonly o: LayoutSeatMapOptions) {}
+
+  async config(eventId: string): Promise<EventSeatConfig | undefined> {
+    const e = await this.#get(eventId);
+    return e ? { ...e.parsed.config } : undefined;
+  }
+
+  async resolve(eventId: string, seatIds: readonly string[]): Promise<(SeatRef | undefined)[]> {
+    const e = await this.#get(eventId);
+    return seatIds.map((id) => e?.parsed.byId.get(id));
+  }
+
+  async byIndex(eventId: string, indexes: readonly number[]): Promise<(SeatRef | undefined)[]> {
+    const e = await this.#get(eventId);
+    return indexes.map((i) => e?.parsed.byIndex.get(i));
+  }
+
+  async sections(eventId: string): Promise<readonly SectionRange[] | undefined> {
+    return (await this.#get(eventId))?.parsed.sections;
+  }
+
+  /** 읽은 회차를 모두 다시 읽어 바꾼다. 던지지 않는다(실패는 로그 한 줄이고 이전 판을 그대로 둔다) */
+  async refresh(): Promise<void> {
+    for (const [eventId, old] of [...this.#entries]) {
+      try {
+        const stamp = await this.o.source.stamp?.(eventId);
+        if (stamp !== undefined && stamp === old.stamp) continue;
+        const raw = await this.o.source.load(eventId);
+        if (raw === undefined) {
+          // 읽은 뒤 파일이 사라졌다: 이전 판을 그대로 둔다
+          this.o.logger?.warn({ eventId, code: 'FILE_GONE' }, '좌석맵 판 파일이 사라져 이전 판을 그대로 둔다');
+          continue;
+        }
+        const signature = signatureOf(raw);
+        if (signature !== undefined && signature === old.signature) {
+          this.#entries.set(eventId, { ...old, stamp });
+          continue;
+        }
+        const parsed = parseEventSeatMapFile(eventId, raw);
+        this.#entries.set(eventId, { parsed, stamp, signature: signature ?? '' });
+      } catch (err) {
+        this.o.logger?.warn({ eventId, code: err instanceof SeatMapFileError ? err.code : 'LOAD_FAILED' }, '좌석맵 판 파일을 다시 받지 못해 이전 판을 그대로 둔다');
+      }
+    }
+  }
+
+  async #get(eventId: string): Promise<Entry | undefined> {
+    if (typeof eventId !== 'string' || !KEY_PART.test(eventId)) return undefined;
+    const known = this.#entries.get(eventId);
+    if (known) return known;
+    const until = this.#missing.get(eventId);
+    if (until !== undefined) {
+      if (this.o.clock.now() < until) return undefined;
+      this.#missing.delete(eventId);
+    }
+    let p = this.#loading.get(eventId);
+    if (!p) {
+      p = this.#load(eventId).finally(() => this.#loading.delete(eventId));
+      this.#loading.set(eventId, p);
+    }
+    return p;
+  }
+
+  async #load(eventId: string): Promise<Entry | undefined> {
+    const remember = (): undefined => {
+      this.#missing.delete(eventId);
+      this.#missing.set(eventId, this.o.clock.now() + (this.o.missingTtlMs ?? MISSING_TTL_MS));
+      while (this.#missing.size > MISSING_MAX) {
+        const oldest = this.#missing.keys().next().value;
+        if (oldest === undefined) break;
+        this.#missing.delete(oldest);
+      }
+      return undefined;
+    };
+    try {
+      const stamp = await this.o.source.stamp?.(eventId);
+      const raw = await this.o.source.load(eventId);
+      if (raw === undefined) return remember();
+      const entry: Entry = { parsed: parseEventSeatMapFile(eventId, raw), stamp, signature: signatureOf(raw) ?? '' };
+      this.#entries.set(eventId, entry);
+      return entry;
+    } catch (err) {
+      this.o.logger?.warn({ eventId, code: err instanceof SeatMapFileError ? err.code : 'LOAD_FAILED' }, '좌석맵 판 파일을 받지 못했다');
+      return remember();
+    }
+  }
+}

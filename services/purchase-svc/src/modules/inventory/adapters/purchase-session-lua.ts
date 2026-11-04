@@ -4,15 +4,15 @@
 //
 // ── 열기 Lua(OPEN_SESSION_LUA) ───────────────────────────────────────────────────────────────────────────────────
 // KEYS: 1 재사용 차단 표지 s:jti:{jti}, 2 세션 상태 s:session:{jti} (해시 태그가 같아 한 슬롯. sessionKeys)
-// ARGV: 1 계정, 2 로그인 세션, 3 회차, 4 여정 ID, 5 클라이언트 임시 공개키 글, 6 최대 체류 ms(이 토큰의 exp), 7 첫 사용 기한 ms, 8 유휴 ms, 9 수명 여유 ms, 10 우선 구매 권리 ID(없으면 빈 글),
+// ARGV: 1 계정, 2 로그인 세션, 3 회차, 4 여정 ID, 5 클라이언트 임시 공개키 글(빈 글이면 키 없음: 세션이 열린 뒤의 재요청), 6 최대 체류 ms(이 토큰의 exp), 7 첫 사용 기한 ms, 8 유휴 ms, 9 수명 여유 ms, 10 우선 구매 권리 ID(없으면 빈 글),
 //       11 같은 jti로 다시 받을 수 있는 가장 늦은 입장 토큰의 exp ms(이 토큰의 exp 이상), 12 시작 사건 더하기 유예 ms(SESSION_STARTED_GRACE_MS)
-// 돌려주는 값(배열의 글): ['TOKEN_EXPIRED'] · ['ENDED'] · ['MISMATCH'] · ['REPLAY', 처음 연 시각, 세션에 적힌 처음 최대 체류, '1' 또는 '0'(시작 사건을 더해야 하나: 표시 sev가 없고 연 지 ARGV 12 ms가 지났다)] · ['FIRST_USE_EXPIRED'] · ['CREATED', 지금]
+// 돌려주는 값(배열의 글): ['TOKEN_EXPIRED'] · ['ENDED'] · ['MISMATCH'] · ['REPLAY', 처음 연 시각, 세션에 적힌 처음 최대 체류, '1' 또는 '0'(시작 사건을 더해야 하나: 표시 sev가 없고 연 지 ARGV 12 ms가 지났다)] · ['FIRST_USE_EXPIRED'] · ['KEY_REQUIRED'] · ['CREATED', 지금]
 // 차례(OpenSessionResult의 설명과 같다):
 //   1. 지금 ≥ 이 토큰의 최대 체류 → TOKEN_EXPIRED (표지 유무와 관계없이 먼저, 아무것도 쓰지 않는다)
-//   2. 표지가 있으면: 세션 상태의 acct·login·event·cpk 칸이 없으면 ENDED, ARGV 1·2·3·5와 모두 같으면 REPLAY, 하나라도 다르면 MISMATCH.
+//   2. 표지가 있으면: 세션 상태의 acct·login·event·cpk 칸이 없으면 ENDED, ARGV 1·2·3·5와 모두 같으면(ARGV 5가 빈 글이면 cpk는 견주지 않는다) REPLAY, 하나라도 다르면 MISMATCH.
 //      REPLAY는 세션에 적힌 max 칸(양의 10진 정수 16자리 이하가 아니면 PEAKET_CORRUPT_KEY)이 지났으면 TOKEN_EXPIRED(다시 받은 토큰의 exp가 남아 있어도 세션은 처음 최대 체류에 끝난다),
 //      이 토큰의 최대 체류가 세션의 max보다 늦으면(같은 jti로 다시 받은 토큰) 표지 수명이 ARGV 11 + 여유보다 이르면 그 시각으로 늘린다(줄이지 않는다). 세션 상태는 바꾸지 않는다
-//   3. 지금 > 첫 사용 기한 → FIRST_USE_EXPIRED (아무것도 쓰지 않아 jti는 쓰이지 않은 채다)
+//   3. 지금 > 첫 사용 기한 → FIRST_USE_EXPIRED (아무것도 쓰지 않아 jti는 쓰이지 않은 채다). 그다음 ARGV 5가 빈 글이면 KEY_REQUIRED(새로 열려면 임시 공개키가 있어야 한다. 아무것도 쓰지 않는다)
 //   4. 세션 HSET(acct·login·event·jny·cpk·seq '0'·idle 지금 + 유휴·started 지금·max, 우선 구매면 prio) + PEXPIREAT 최대 체류 + 여유, 그다음 표지 SET(값 = 지금)
 //      PXAT max(ARGV 11, 최대 체류) + 여유 → CREATED. 오류가 날 수 있는 세션 쓰기(키 형이 해시가 아니면 WRONGTYPE)를 먼저 해서, 오류가 나면 표지가 남지 않는다
 //      (Lua는 오류가 나도 앞서 쓴 것을 되돌리지 않는다).
@@ -23,6 +23,10 @@
 // 돌려주는 값: 1(올렸다) 또는 0. 0은 세션 없음, 지금 ≥ 최대 체류, 새 번호가 마지막 번호 이하다(아무것도 쓰지 않는다).
 // seq 칸이 앞 0 없는 10진 정수(16자리 이하)가 아니거나 max 칸이 양의 10진 정수(16자리 이하)가 아니면 오류 PEAKET_CORRUPT_KEY {키}를 돌려준다(아무것도 쓰지 않는다).
 // 올릴 때: HSET seq 새 번호, idle 지금 + 유휴.
+//
+// ── 홀드 기록 Lua(RECORD_HOLD_LUA, BUILD_ORDER PRF-137) ───────────────────────────────────────────────────────────
+// KEYS: 1 세션 상태 s:session:{jti}. ARGV: 1 holdId, 2 좌석 ID들을 쉼표로 이은 글.
+// 세션이 없으면 아무것도 만들지 않고 -1. 있으면 HSET h:{holdId} = ARGV 2, 그다음 HSETNX fh '1'의 결과(처음이면 1, 이미 있으면 0)를 돌려준다. 수명·다른 칸은 그대로다.
 //
 // ── 시작 사건 기록 표시 Lua(MARK_SESSION_STARTED_LUA) ───────────────────────────────────────────────────────────
 // KEYS: 1 세션 상태 s:session:{jti}. 돌려주는 값: 1(세션이 있어 sev 칸을 '1'로 썼다) 또는 0(세션이 없다, 아무것도 만들지 않는다). 수명·다른 칸은 그대로다.
@@ -44,7 +48,7 @@ if now >= max then return {'TOKEN_EXPIRED'} end
 if redis.call('EXISTS', KEYS[1]) == 1 then
   local h = redis.call('HMGET', KEYS[2], 'acct', 'login', 'event', 'cpk', 'started', 'max', 'sev')
   if not h[1] or not h[2] or not h[3] or not h[4] then return {'ENDED'} end
-  if h[1] == ARGV[1] and h[2] == ARGV[2] and h[3] == ARGV[3] and h[4] == ARGV[5] then
+  if h[1] == ARGV[1] and h[2] == ARGV[2] and h[3] == ARGV[3] and (ARGV[5] == '' or h[4] == ARGV[5]) then
     local stored = h[6] and #h[6] <= 16 and string.match(h[6], '^[1-9][0-9]*$') and tonumber(h[6])
     if not stored then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[2]) end
     if now >= stored then return {'TOKEN_EXPIRED'} end
@@ -58,6 +62,7 @@ if redis.call('EXISTS', KEYS[1]) == 1 then
   return {'MISMATCH'}
 end
 if now > tonumber(ARGV[7]) then return {'FIRST_USE_EXPIRED'} end
+if ARGV[5] == '' then return {'KEY_REQUIRED'} end
 local keep = int(max + tonumber(ARGV[9]))
 local markerKeep = int(math.max(tonumber(ARGV[11]), max) + tonumber(ARGV[9]))
 redis.call('HSET', KEYS[2], 'acct', ARGV[1], 'login', ARGV[2], 'event', ARGV[3], 'jny', ARGV[4], 'cpk', ARGV[5], 'seq', '0', 'idle', int(now + tonumber(ARGV[8])), 'started', int(now), 'max', ARGV[6])
@@ -106,4 +111,11 @@ export const MARK_SESSION_STARTED_LUA = `#!lua
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 redis.call('HSET', KEYS[1], 'sev', '1')
 return 1
+`;
+
+/** 홀드 기록 Lua 원문(위 계약). 첫 줄이 #!lua다 */
+export const RECORD_HOLD_LUA = `#!lua
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+redis.call('HSET', KEYS[1], 'h:' .. ARGV[1], ARGV[2])
+return redis.call('HSETNX', KEYS[1], 'fh', '1')
 `;

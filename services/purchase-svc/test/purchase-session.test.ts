@@ -8,6 +8,7 @@ import {
   KEY_PART,
   MemoryPurchaseSessionStore,
   type PurchaseSessionStore,
+  RedisPurchaseSessionStore,
   SEAT_STORE_RETRY_AFTER_SEC,
   SESSION_KEY_GRACE_MS,
   SESSION_STARTED_GRACE_MS,
@@ -120,6 +121,7 @@ function world(): World {
       return mem.advance(jti, seq);
     },
     markStarted: (jti) => mem.markStarted(jti),
+    recordHold: (jti, holdId, seatIds) => mem.recordHold(jti, holdId, seatIds),
   };
   const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const j = privateKey.export({ format: 'jwk' }) as Record<string, string>;
@@ -272,5 +274,52 @@ describe('StoredPurchaseSessions.advance / get', () => {
     const s = await opened(w);
     const r = await w.sessions.resolve(tokenReq(s.jti), principal());
     expect((await w.sessions.get(r!.ref))?.sessionId).toBe(r!.ref);
+  });
+});
+
+// ── 구매 세션의 홀드 기록(PRF-137, docs/features/seat-hold.md §3 '구매 세션의 홀드 기록과 첫 홀드 표시') ──────────────────────────────────────────────────────
+import { type HoldRecordHarness, sessionHoldRecordCases } from './session-hold-record-cases.js';
+
+function memoryRecordHarness(): HoldRecordHarness & ReturnType<typeof memoryHarness> {
+  const m = memoryHarness();
+  return { ...m, holds: async (jti) => m.mem.holdsOf(jti), exists: async (jti) => (await m.store.read(jti)) !== undefined };
+}
+
+describe('MemoryPurchaseSessionStore.recordHold (홀드 기록 계약 사례)', () => {
+  sessionHoldRecordCases(memoryRecordHarness);
+
+  test('ADR0183_8_기록은 세션 상태의 수명을 늘리지 않는다: 기록은 세션과 같은 순간(처음 최대 체류 + 60초)에 사라지고 그 뒤의 기록은 null이다', async () => {
+    const h = memoryRecordHarness();
+    const jti = newJti();
+    const i = openInput(h, jti);
+    expect((await h.store.open(i)).kind).toBe('CREATED');
+    await h.pass(10 * 60_000);
+    expect(await h.store.recordHold(jti, 'hold-late', ['A01'])).toBe(true);
+    // 세션 상태 수명 직전: 기록이 아직 있다
+    await h.pass(i.expiresAtMs - h.now() + SESSION_KEY_GRACE_MS - 1);
+    expect((await h.holds(jti))?.get('hold-late')).toEqual(['A01']);
+    expect(await h.store.recordHold(jti, 'hold-last', ['A02'])).toBe(false);
+    await h.pass(1);
+    expect(await h.store.read(jti)).toBeUndefined();
+    expect(await h.holds(jti)).toBeUndefined();
+    expect(await h.store.recordHold(jti, 'hold-after', ['A03'])).toBeNull();
+    expect(await h.holds(jti)).toBeUndefined();
+  });
+});
+
+describe('RedisPurchaseSessionStore.recordHold의 호출 마감', () => {
+  test('NFR003_recordHold의 SeatCallOptions.deadlineMs를 evalScript의 마감으로 넘기고, 없으면 빈 선택값이다(마감 칸 없음, 플랫폼 기본)', async () => {
+    const seen: Array<unknown> = [];
+    const redis = {
+      evalScript: async (_s: unknown, _keys: string[], _args: string[], o?: unknown) => {
+        seen.push(o);
+        return -1;
+      },
+    } as unknown as ConstructorParameters<typeof RedisPurchaseSessionStore>[0];
+    const store = new RedisPurchaseSessionStore(redis);
+    expect(await store.recordHold('jti-1', 'hold-1', ['A01'], { deadlineMs: 17 })).toBeNull();
+    expect(await store.recordHold('jti-1', 'hold-1', ['A01'])).toBeNull();
+    expect(seen[0]).toEqual({ deadlineMs: 17 });
+    expect(seen[1]).toEqual({});
   });
 });

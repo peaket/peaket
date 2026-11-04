@@ -288,3 +288,79 @@ describe('RedisSessionStartedLog (SESSION_STARTED Stream 항목)', () => {
     await expect(log.appendStarted({ ...entryOf('ev-ok', newJti()), journeyId: 'nope' })).rejects.toThrow(RangeError);
   });
 });
+
+// ── 구매 세션의 홀드 기록(PRF-137, docs/features/seat-hold.md §3 '구매 세션의 홀드 기록과 첫 홀드 표시', RECORD_HOLD_LUA) ─────────────────────────────────────────────
+import { RECORD_HOLD_LUA } from '../src/modules/inventory/adapters/purchase-session-lua.js';
+import { type HoldRecordHarness, sessionHoldRecordCases } from '../test/session-hold-record-cases.js';
+
+/** 세션 상태 Hash의 h:{holdId} 칸과 fh 칸을 직접 읽는 도구를 더한 도구 */
+function recordHarness(r: HotRedis = redis): HoldRecordHarness {
+  const keyOf = sessionKeys.session;
+  return {
+    ...harness(r),
+    holds: async (jti) => {
+      const key = keyOf(jti);
+      const entries = Object.entries(hash(await r.command(['HGETALL', key], { key }))).filter(([k]) => k.startsWith('h:'));
+      return entries.length ? new Map(entries.map(([k, v]) => [k.slice(2), v.split(',')] as [string, string[]])) : undefined;
+    },
+    exists: async (jti) => Number(await r.command(['EXISTS', keyOf(jti)], { key: keyOf(jti) })) === 1,
+    fh: async (jti) => {
+      const key = keyOf(jti);
+      const v = await r.command(['HGET', key, 'fh'], { key });
+      return v === null || v === undefined ? undefined : String(v);
+    },
+    expireAt: async (jti) => {
+      const t = await pexpireTime(r, keyOf(jti));
+      return t >= 0 ? t : undefined;
+    },
+  };
+}
+
+describe('RedisPurchaseSessionStore.recordHold (홀드 기록 계약 사례, 실제 Valkey 8.1)', () => {
+  sessionHoldRecordCases(() => recordHarness());
+
+  test('ST35_ADR0171_세션 상태 Hash에는 h:{holdId} 칸(좌석 ID들을 쉼표로 이은 글)과 첫 홀드 표시 fh(처음 한 번 1)만 더해지고, 다른 칸과 키 수명은 그대로다', async () => {
+    const h = recordHarness();
+    const jti = newJti();
+    const i = openInput(h, jti);
+    await h.store.open(i);
+    const session = sessionKeys.session(jti);
+    const before = hash(await redis.command(['HGETALL', session], { key: session }));
+    const life = await pexpireTime(redis, session);
+    expect(life).toBe(i.expiresAtMs + SESSION_KEY_GRACE_MS);
+    expect(Object.keys(before).some((k) => k.startsWith('h:') || k === 'fh')).toBe(false);
+
+    expect(await h.store.recordHold(jti, 'hold-1', ['B02', 'A01', 'A02'])).toBe(true);
+    expect(hash(await redis.command(['HGETALL', session], { key: session }))).toEqual({ ...before, 'h:hold-1': 'B02,A01,A02', fh: '1' });
+    expect(await pexpireTime(redis, session)).toBe(life);
+
+    expect(await h.store.recordHold(jti, 'hold-2', ['C01'])).toBe(false);
+    expect(hash(await redis.command(['HGETALL', session], { key: session }))).toEqual({ ...before, 'h:hold-1': 'B02,A01,A02', 'h:hold-2': 'C01', fh: '1' });
+    expect(await pexpireTime(redis, session)).toBe(life);
+  });
+
+  test('ASVS8.2.2_세션이 없으면 세션 키도 재사용 차단 표지도 만들지 않는다(null) [ASVS v5.0.0-8.2.2]', async () => {
+    const h = recordHarness();
+    const jti = newJti();
+    expect(await h.store.recordHold(jti, 'hold-1', ['A01'])).toBeNull();
+    const session = sessionKeys.session(jti);
+    const marker = sessionKeys.marker(jti);
+    expect(Number(await redis.command(['EXISTS', session], { key: session }))).toBe(0);
+    expect(Number(await redis.command(['EXISTS', marker], { key: marker }))).toBe(0);
+  });
+
+  test('ST28_홀드 기록 Lua는 #!lua로 시작하고 세션 키 하나만 쓴다: 노드 하나짜리 클러스터 모드에서도 돈다', async () => {
+    expect(RECORD_HOLD_LUA.startsWith('#!lua\n')).toBe(true);
+    const h = recordHarness(clusterRedis);
+    const jti = newJti();
+    expect((await h.store.open(openInput(h, jti))).kind).toBe('CREATED');
+    expect(await h.store.recordHold(jti, 'hold-1', ['A01', 'A02'])).toBe(true);
+    expect(await h.store.recordHold(jti, 'hold-2', ['A03'])).toBe(false);
+    expect((await h.holds(jti))?.get('hold-1')).toEqual(['A01', 'A02']);
+    expect(await h.fh?.(jti)).toBe('1');
+  });
+
+  describe('노드 하나짜리 클러스터 모드', () => {
+    sessionHoldRecordCases(() => recordHarness(clusterRedis));
+  });
+});

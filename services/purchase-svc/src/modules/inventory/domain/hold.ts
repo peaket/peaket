@@ -25,6 +25,11 @@ export const SEAT_STORE_RETRY_AFTER_SEC = 2;
  * 플랫폼 REDIS_CALL_DEADLINE_MS(100)와 같은 값이다
  */
 export const SEAT_CALL_CAP_MS = 100;
+/**
+ * 새 홀드를 구매 세션 상태에 기록하는 호출(recordHold)의 마감 상한 20ms [가정](BUILD_ORDER PRF-137 리뷰). 홀드는 이미 좌석 Redis에 확정된 뒤라 보조 기록이 느려도
+ * 응답을 100ms까지 붙들지 않게 한다. 부를 때 마감 = min(남은 시간, 이 값)이고, 남은 시간이 SEAT_CALL_MIN_REMAINING_MS 미만이면 부르지 않는다
+ */
+export const SESSION_RECORD_CAP_MS = 20;
 /** 좌석 Redis를 부르기 전 남은 시간이 이보다 작으면 부르지 않고 504 deadline-exceeded로 끝낸다(5ms [가정], guidelines §5, BUILD_ORDER PRF-135) */
 export const SEAT_CALL_MIN_REMAINING_MS = 5;
 

@@ -60,6 +60,7 @@ const flakyStore: PurchaseSessionStore = {
     return mem.advance(jti, seq);
   },
   markStarted: (jti) => mem.markStarted(jti),
+  recordHold: (jti, holdId, seatIds) => mem.recordHold(jti, holdId, seatIds),
 };
 const sessions = new StoredPurchaseSessions({ store: flakyStore, ecdh: serverPriv, clock });
 const opener = new OpenPurchaseSession({ store: mem, log: startedLog, keys: new Map([['k1', admissionKey.pub]]), issuer: ISS, clock });

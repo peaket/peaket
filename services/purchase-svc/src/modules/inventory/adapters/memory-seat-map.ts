@@ -1,6 +1,7 @@
 // 시험용 좌석맵 판. 운영 좌석맵 판(좌석맵 파일·event_seat_price에서 읽는 회차 캐시)은 PRF-130 ①에 없다.
 import { SEAT_ID_PATTERN, type SeatRef } from '../domain/hold.js';
-import type { EventSeatConfig, SeatMap, SeatMapIndex } from '../domain/ports.js';
+import type { SectionRange } from '../domain/seat-layout.js';
+import type { EventSeatConfig, SeatMap, SeatMapIndex, SeatMapSections } from '../domain/ports.js';
 
 /** 좌석맵 판의 좌석 하나. saleExcluded면 그 판에 있어도 고를 수 없다(resolve가 undefined) */
 export interface MemorySeatDef extends SeatRef {
@@ -13,6 +14,8 @@ interface EventEntry {
   seats: Map<string, SeatRef>;
   /** 색인 → 판의 좌석(판매 제외석 포함, 판매 제외 표시 없이) */
   byIndex: Map<number, SeatRef>;
+  /** 구역 비트맵 범위(구역 색인 오름차순) */
+  sections: SectionRange[];
 }
 
 const isNonNegativeInt = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
@@ -21,7 +24,7 @@ const isNonNegativeInt = (v: unknown): v is number => Number.isSafeInteger(v) &&
 const refOf = (s: SeatRef): SeatRef => ({ seatId: s.seatId, index: s.index, sectionId: s.sectionId, sectionIndex: s.sectionIndex, seatOffset: s.seatOffset, tierId: s.tierId });
 
 /** SeatMap·SeatMapIndex의 메모리 구현. 시험이 put으로 회차를 넣는다 */
-export class MemorySeatMap implements SeatMap, SeatMapIndex {
+export class MemorySeatMap implements SeatMap, SeatMapIndex, SeatMapSections {
   readonly #events = new Map<string, EventEntry>();
 
   /**
@@ -47,7 +50,17 @@ export class MemorySeatMap implements SeatMap, SeatMapIndex {
       if (!s.saleExcluded) usable.set(s.seatId, refOf(s));
       all.set(s.index, refOf(s));
     }
-    this.#events.set(config.eventId, { config: { ...config }, seats: usable, byIndex: all });
+    const ranges = new Map<number, SectionRange>();
+    for (const s of seats) {
+      const r = ranges.get(s.sectionIndex);
+      if (!r) ranges.set(s.sectionIndex, { sectionIndex: s.sectionIndex, sectionId: s.sectionId, from: s.index, to: s.index });
+      else {
+        r.from = Math.min(r.from, s.index);
+        r.to = Math.max(r.to, s.index);
+      }
+    }
+    const sections = [...ranges.values()].sort((a, b) => a.sectionIndex - b.sectionIndex);
+    this.#events.set(config.eventId, { config: { ...config }, seats: usable, byIndex: all, sections });
   }
 
   /** 넣은 회차 설정의 사본(없으면 undefined) */
@@ -75,5 +88,13 @@ export class MemorySeatMap implements SeatMap, SeatMapIndex {
       const s = e?.byIndex.get(i);
       return s ? refOf(s) : undefined;
     });
+  }
+
+  /**
+   * SeatMapSections.sections와 같다(BUILD_ORDER PRF-137): put에 넣은 좌석을 구역 색인별로 묶어 가장 작은·큰 색인을 범위로 한다(판매 제외석 포함, 구역 색인 오름차순).
+   * 구역 ID는 그 구역 첫 좌석의 것이다. 넣지 않은 회차는 undefined
+   */
+  async sections(eventId: string): Promise<readonly SectionRange[] | undefined> {
+    return this.#events.get(eventId)?.sections.map((r) => ({ ...r }));
   }
 }

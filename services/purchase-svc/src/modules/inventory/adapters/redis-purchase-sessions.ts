@@ -4,6 +4,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type HotRedis, redisScript } from '@peaket/platform';
 import {
+  assertHoldRecord,
   assertJti,
   assertOpenInput,
   assertSeq,
@@ -18,8 +19,8 @@ import {
   sessionStartedFields,
   type StoredSession,
 } from '../domain/purchase-session.js';
-import type { PurchaseSessionStore, SessionStartedLog } from '../domain/ports.js';
-import { ADVANCE_SESSION_LUA, APPEND_SESSION_STARTED_LUA, MARK_SESSION_STARTED_LUA, OPEN_SESSION_LUA } from './purchase-session-lua.js';
+import type { PurchaseSessionStore, SeatCallOptions, SessionStartedLog } from '../domain/ports.js';
+import { ADVANCE_SESSION_LUA, APPEND_SESSION_STARTED_LUA, MARK_SESSION_STARTED_LUA, OPEN_SESSION_LUA, RECORD_HOLD_LUA } from './purchase-session-lua.js';
 import { guard, SEAT_REDIS, seatKeys } from './redis-seat-store.js';
 
 /** 구매 세션 키 이름(docs/data.md §3). 표지와 세션 상태는 같은 {jti} 해시 태그, Stream은 좌석 쪽 seatKeys.stream과 같다 */
@@ -33,6 +34,7 @@ const OPEN = redisScript(OPEN_SESSION_LUA);
 const ADVANCE = redisScript(ADVANCE_SESSION_LUA);
 const APPEND = redisScript(APPEND_SESSION_STARTED_LUA);
 const MARK = redisScript(MARK_SESSION_STARTED_LUA);
+const RECORD = redisScript(RECORD_HOLD_LUA);
 
 const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 const isNil = (v: unknown): v is null | undefined => v === null || v === undefined;
@@ -57,7 +59,7 @@ export class RedisPurchaseSessionStore implements PurchaseSessionStore {
   async open(i: OpenSessionInput): Promise<OpenSessionResult> {
     assertOpenInput(i);
     const keys = [sessionKeys.marker(i.jti), sessionKeys.session(i.jti)];
-    const args = [i.accountId, i.loginSessionId, i.eventId, i.journeyId, i.clientKey, String(i.expiresAtMs), String(i.firstUseDeadlineMs), String(SESSION_IDLE_MS), String(SESSION_KEY_GRACE_MS), i.priorityGrantId ?? '', String(i.reissueUntilMs), String(SESSION_STARTED_GRACE_MS)];
+    const args = [i.accountId, i.loginSessionId, i.eventId, i.journeyId, i.clientKey ?? '', String(i.expiresAtMs), String(i.firstUseDeadlineMs), String(SESSION_IDLE_MS), String(SESSION_KEY_GRACE_MS), i.priorityGrantId ?? '', String(i.reissueUntilMs), String(SESSION_STARTED_GRACE_MS)];
     const r = await guard(this.redis.evalScript(OPEN, keys, args));
     if (!Array.isArray(r) || r.length < 1) throw new Error(`열기 Lua가 모르는 값을 돌려줬다: ${str(r)}`);
     const kind = str(r[0]);
@@ -69,6 +71,7 @@ export class RedisPurchaseSessionStore implements PurchaseSessionStore {
       case 'MISMATCH':
       case 'ENDED':
       case 'FIRST_USE_EXPIRED':
+      case 'KEY_REQUIRED':
       case 'TOKEN_EXPIRED':
         return { kind };
       default:
@@ -106,6 +109,15 @@ export class RedisPurchaseSessionStore implements PurchaseSessionStore {
     if (r === '1') return true;
     if (r === '0') return false;
     throw new Error(`일련번호 Lua가 모르는 값을 돌려줬다: ${r}`);
+  }
+
+  async recordHold(jti: string, holdId: string, seatIds: readonly string[], o?: SeatCallOptions): Promise<boolean | null> {
+    assertHoldRecord(jti, holdId, seatIds);
+    const r = str(await guard(this.redis.evalScript(RECORD, [sessionKeys.session(jti)], [holdId, seatIds.join(',')], o?.deadlineMs !== undefined ? { deadlineMs: o.deadlineMs } : {})));
+    if (r === '-1') return null;
+    if (r === '1') return true;
+    if (r === '0') return false;
+    throw new Error(`홀드 기록 Lua가 모르는 값을 돌려줬다: ${r}`);
   }
 
   async markStarted(jti: string): Promise<boolean> {

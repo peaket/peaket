@@ -56,7 +56,7 @@ export interface OpenSessionCommand {
   loginSessionId: string;
   /** 주소의 회차 */
   eventId: string;
-  /** X-Client-Ephemeral-Key 머리 값 */
+  /** X-Client-Ephemeral-Key 머리 값. 없으면(undefined) 세션이 열린 뒤의 재요청이다 */
   clientKey: unknown;
 }
 
@@ -93,8 +93,9 @@ export class OpenPurchaseSession {
     }
     if (claims.accountId !== c.accountId || claims.loginSessionId !== c.loginSessionId) throw this.#reject('TOKEN_MISMATCH', c.eventId, 'principal');
     if (claims.eventId !== c.eventId) throw this.#reject('EVENT_MISMATCH', c.eventId, 'event');
-    const client = parseClientEphemeralKey(c.clientKey);
-    if (!client) throw this.#reject('CLIENT_KEY_INVALID', c.eventId, 'client_key');
+    // 임시 공개키 머리는 세션이 열린 뒤의 재요청이면 없어도 된다(없으면 저장소가 표지가 없는 첫 사용에만 KEY_REQUIRED로 거절한다). 보냈으면 모양과 곡선 위의 점을 본다(빈 글도 보낸 것이다)
+    const client = c.clientKey === undefined ? undefined : parseClientEphemeralKey(c.clientKey);
+    if (c.clientKey !== undefined && !client) throw this.#reject('CLIENT_KEY_INVALID', c.eventId, 'client_key');
 
     const r = await this.deps.store
       .open({
@@ -103,7 +104,7 @@ export class OpenPurchaseSession {
         loginSessionId: claims.loginSessionId,
         eventId: claims.eventId,
         journeyId: claims.journeyId,
-        clientKey: client.text,
+        ...(client ? { clientKey: client.text } : {}),
         expiresAtMs: claims.expiresAtMs,
         firstUseDeadlineMs: claims.issuedAtMs + FIRST_USE_MS,
         // queue-svc가 자리가 살아 있는 동안 같은 jti로 다시 주는 토큰의 exp는 새 iat + 최대 체류(= exp − iat)이고 새 iat은 이 exp 앞이라, 가장 늦은 exp는 exp + (exp − iat)다
@@ -118,6 +119,8 @@ export class OpenPurchaseSession {
         throw this.#reject('TOKEN_EXPIRED', c.eventId, 'expired');
       case 'FIRST_USE_EXPIRED':
         throw this.#reject('FIRST_USE_EXPIRED', c.eventId, 'first_use_expired');
+      case 'KEY_REQUIRED':
+        throw this.#reject('CLIENT_KEY_INVALID', c.eventId, 'client_key_required');
       case 'MISMATCH':
         throw this.#reject('TOKEN_USED', c.eventId, 'used');
       case 'ENDED':

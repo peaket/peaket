@@ -15,12 +15,15 @@ import {
 } from '../domain/expiry.js';
 import { type HeldHold, HOLD_TTL_MS, type HoldInput, type HoldResult, KEY_PART, REHOLD_WAIT_MS, type ReplayInput, type ReplayResult, SeatStoreUnavailable } from '../domain/hold.js';
 import type { LogGate } from '../domain/log-gate.js';
-import type { SeatCallOptions, SeatExpiries, SeatStore } from '../domain/ports.js';
+import type { SeatCallOptions, SeatExpiries, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
+import { SNAPSHOT_LUA } from './snapshot-lua.js';
+import { assertSnapshotInput } from '../domain/snapshot.js';
 import { EXPIRE_LUA } from './expire-lua.js';
 import { HOLD_LUA, OPEN_SALE_LUA } from './hold-lua.js';
 import { keepEventIds, saleEventsWarnGate } from './sale-events.js';
 
 const HOLD = redisScript(HOLD_LUA);
+const SNAPSHOT = redisScript(SNAPSHOT_LUA);
 const OPEN_SALE = redisScript(OPEN_SALE_LUA);
 const EXPIRE = redisScript(EXPIRE_LUA);
 
@@ -48,6 +51,14 @@ export async function guard<T>(p: Promise<T>): Promise<T> {
 }
 
 /** 호출 마감 선택값(SeatCallOptions.deadlineMs가 있을 때만 싣는다) */
+/** 스냅샷 읽기 Lua가 돌려준 0 ~ 2^32 − 1의 표준 10진 정수 글(Buffer나 글)을 수로 바꾼다. 아니면 Error(Lua가 이미 거른 값이라 버그다) */
+function u32Of(v: unknown, what: string): number {
+  const text = str(v);
+  const n = Number(text);
+  if (!/^(0|[1-9][0-9]{0,9})$/.test(text) || n > 0xffff_ffff) throw new Error(`스냅샷 읽기 Lua가 돌려준 ${what}이(가) u32 정수 글이 아니다`);
+  return n;
+}
+
 const deadlineOf = (o: SeatCallOptions | undefined): { deadlineMs?: number } => (o?.deadlineMs !== undefined ? { deadlineMs: o.deadlineMs } : {});
 
 /** Lua가 돌려준 10진 정수 글(시각) */
@@ -117,7 +128,7 @@ export const seatKeys = {
  *   ARGV 2의 구역 채널 앞머리는 seatKeys.section(eventId, '')). 결과 해석과 오류는 ports.ts SeatExpiries의 설명이다.
  */
 @Injectable()
-export class RedisSeatStore implements SeatStore, SeatExpiries {
+export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots {
   readonly #filterWarnGate: LogGate;
 
   /**
@@ -198,6 +209,25 @@ export class RedisSeatStore implements SeatStore, SeatExpiries {
     if (!Array.isArray(r) || r[0] === null || r[0] === undefined) return null;
     if (str(r[0]) !== i.fingerprint) return { kind: 'IDEM_REUSED' };
     return { kind: 'IDEM_REPLAY', ...firstResponseOf(r[1] === null || r[1] === undefined ? '' : str(r[1])) };
+  }
+
+  async read(i: SnapshotReadInput, o?: SeatCallOptions): Promise<SnapshotReadResult> {
+    assertSnapshotInput(i);
+    const firstByte = Math.floor(i.firstBit / 8);
+    const lastByte = Math.floor((i.firstBit + i.bitCount - 1) / 8);
+    const keys = [seatKeys.bitmap(i.eventId), seatKeys.epoch(i.eventId), seatKeys.secver(i.eventId)];
+    const args = [String(firstByte), String(lastByte), ...i.sectionIndexes.map(String)];
+    // 비트맵 바이트를 글자로 풀면 0x80 같은 바이트가 깨져 응답을 Buffer로 받는다(platform CallOptions.binary)
+    const r = await guard(this.redis.evalScript(SNAPSHOT, keys, args, { ...deadlineOf(o), binary: true }));
+    if (!Array.isArray(r) || r.length < 1) throw new Error(`스냅샷 읽기 Lua가 모르는 값을 돌려줬다: ${str(r)}`);
+    const kind = str(r[0]);
+    if (kind === 'NOT_READY') return { kind: 'NOT_READY' };
+    if (kind !== 'OK' || r.length !== 3 + i.sectionIndexes.length) throw new Error(`스냅샷 읽기 Lua가 모르는 값을 돌려줬다: ${kind}`);
+    const want = lastByte - firstByte + 1;
+    const got = Buffer.isBuffer(r[2]) ? r[2] : Buffer.from(String(r[2]), 'latin1');
+    // 비트맵이 짧거나 없으면 모자란 바이트는 0으로 채운다
+    const bytes = got.length === want ? got : Buffer.concat([got.subarray(0, want), Buffer.alloc(Math.max(0, want - got.length))]);
+    return { kind: 'OK', seatEpoch: u32Of(r[1], '세대'), bytes, sectionVersions: r.slice(3).map((v) => u32Of(v, '구역 일련번호')) };
   }
 
   async openSale(i: { eventId: string; seatCount: number; keepUntilMs: number }): Promise<{ created: boolean; seatEpoch: number }> {
