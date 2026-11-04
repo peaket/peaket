@@ -1,6 +1,7 @@
 // inventory 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다).
 export { EXPIRE_LUA, SWEEP_LEASE_LUA } from './adapters/expire-lua.js';
 export { HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
+export { PIN_LUA, RELEASE_FAILED_LUA } from './adapters/pin-lua.js';
 export { MemoryPurchaseSessionStore, RecordingSessionStartedLog } from './adapters/memory-purchase-session-store.js';
 export { MemoryPurchaseSessions, type MemoryPurchaseSession, type PurchaseSessionAccess } from './adapters/memory-purchase-sessions.js';
 export { DrizzleSeatHoldLedger } from './adapters/db/drizzle-seat-hold-ledger.js';
@@ -90,6 +91,17 @@ export {
   type AdmissionKeys,
   type AdmissionRejectReason,
 } from './domain/admission-token.js';
+export {
+  INITIAL_SEAT_GEN,
+  RETIRE_AFTER_SALE_END_MS,
+  assertPinInput,
+  assertReleaseFailedInput,
+  type PinInput,
+  type PinResult,
+  type ReleaseFailedInput,
+  type ReleaseFailedResult,
+  type RetireResult,
+} from './domain/pin.js';
 export {
   HOLD_EVENT_TYPES,
   PURCHASE_SESSION_TOPIC,
@@ -227,6 +239,7 @@ export {
   SEAT_EXPIRIES,
   SEAT_MAP,
   SEAT_MAP_SECTIONS,
+  SEAT_PINS,
   SEAT_SALES,
   SEAT_SNAPSHOTS,
   SESSION_ENDED_LOG,
@@ -249,7 +262,9 @@ export {
   type SeatMap,
   type SeatMapIndex,
   type SeatMapSections,
+  type SeatEventRetire,
   type SeatHoldLedger,
+  type SeatPins,
   type SeatSales,
   type SeatSignals,
   type SeatStreamRelaySignals,

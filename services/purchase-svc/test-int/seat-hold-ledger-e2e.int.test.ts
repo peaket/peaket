@@ -111,7 +111,7 @@ function directHeld(eventId: string, seatId: string, heldAtMs: number): Record<s
     accountId: randomUUID(),
     expiresAt: iso(heldAtMs + 7 * 60_000),
     occurredAt: iso(heldAtMs),
-    eventKey: seatEventKeyOf('HELD', eventId, holdId, seatId),
+    eventKey: seatEventKeyOf('HELD', eventId, holdId, seatId, 1_762_250_000_000_101),
   };
 }
 

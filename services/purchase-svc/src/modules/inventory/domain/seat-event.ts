@@ -93,11 +93,11 @@ function isoOf(ms: number, name: string): string {
 }
 
 /**
- * 홀드 사건의 eventKey: UUID 버전 8(SHA-256('SeatEvent:' + type + ':' + eventId + ':' + holdId + ':' + seatId)의 앞 16바이트).
- * 같은 항목을 다시 보내면 같고, 여러 좌석을 한 번에 잡은 홀드의 좌석끼리는 다르다
+ * 홀드 사건의 eventKey: UUID 버전 8(SHA-256('SeatEvent:' + type + ':' + eventId + ':' + holdId + ':' + seatId + ':' + fencingToken)의 앞 16바이트).
+ * 같은 항목을 다시 보내면 같고, 여러 좌석을 한 번에 잡은 홀드의 좌석끼리, 같은 holdId로 다시 잡은 홀드(좌석 묶기, 새 펜싱 토큰)와 처음 홀드끼리는 다르다
  */
-export function seatEventKey(type: HoldEventType, eventId: string, holdId: string, seatId: string): string {
-  return uuid8(`SeatEvent:${type}:${eventId}:${holdId}:${seatId}`);
+export function seatEventKey(type: HoldEventType, eventId: string, holdId: string, seatId: string, fencingToken: number): string {
+  return uuid8(`SeatEvent:${type}:${eventId}:${holdId}:${seatId}:${fencingToken}`);
 }
 
 /**
@@ -127,7 +127,7 @@ export function toSeatEvent(eventId: string, f: Readonly<Record<string, string |
     occurredAt: isoOf(intOf(f.occurredAtMs, 'occurredAtMs'), 'occurredAtMs'),
     eventKey: '',
   };
-  m.eventKey = seatEventKey(type, eventId, holdId, m.seatId);
+  m.eventKey = seatEventKey(type, eventId, holdId, m.seatId, m.fencingToken);
   if (holdKind === 'FAN') m.purchaseSessionId = textOf(f.purchaseSessionId, 'purchaseSessionId');
   else m.priorityGrantId = textOf(f.priorityGrantId, 'priorityGrantId');
   return m;

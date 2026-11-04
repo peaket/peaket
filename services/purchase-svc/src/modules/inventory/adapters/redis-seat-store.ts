@@ -13,19 +13,48 @@ import {
   type ExpireResult,
   isExpirableFence,
 } from '../domain/expiry.js';
-import { type HeldHold, HOLD_TTL_MS, type HoldInput, type HoldResult, KEY_PART, REHOLD_WAIT_MS, type ReplayInput, type ReplayResult, SeatStoreUnavailable } from '../domain/hold.js';
+import {
+  type HeldHold,
+  HOLD_TTL_MS,
+  type HoldInput,
+  type HoldResult,
+  KEY_PART,
+  REHOLD_WAIT_MS,
+  type ReplayInput,
+  type ReplayResult,
+  SeatStoreUnavailable,
+  type SeatRef,
+} from '../domain/hold.js';
 import type { LogGate } from '../domain/log-gate.js';
-import type { SeatCallOptions, SeatExpiries, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
+import type { SeatCallOptions, SeatEventRetire, SeatExpiries, SeatPins, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
+import {
+  assertPinInput,
+  assertReleaseFailedInput,
+  assertRetireInput,
+  type PinInput,
+  type PinResult,
+  type ReleaseFailedInput,
+  type ReleaseFailedResult,
+  RETIRE_AFTER_SALE_END_MS,
+  type RetireResult,
+} from '../domain/pin.js';
+import { STREAM_RELAY_GROUP } from '../domain/seat-event.js';
 import { SNAPSHOT_LUA } from './snapshot-lua.js';
 import { assertSnapshotInput } from '../domain/snapshot.js';
 import { EXPIRE_LUA } from './expire-lua.js';
 import { HOLD_LUA, OPEN_SALE_LUA } from './hold-lua.js';
+import { PIN_LUA, RELEASE_FAILED_LUA } from './pin-lua.js';
 import { keepEventIds, saleEventsWarnGate } from './sale-events.js';
 
 const HOLD = redisScript(HOLD_LUA);
 const SNAPSHOT = redisScript(SNAPSHOT_LUA);
 const OPEN_SALE = redisScript(OPEN_SALE_LUA);
 const EXPIRE = redisScript(EXPIRE_LUA);
+const PIN = redisScript(PIN_LUA);
+const RELEASE_FAILED = redisScript(RELEASE_FAILED_LUA);
+
+/** 좌석마다 Lua ARGV 6칸(hold-lua.ts·pin-lua.ts): 좌석 색인, 구역 색인, 구역 안 거리, 좌석 ID, 등급 ID, 구역 ID */
+const seatArgsOf = (seats: readonly SeatRef[]): string[] => seats.flatMap((s) => [String(s.index), String(s.sectionIndex), String(s.seatOffset), s.seatId, s.tierId, s.sectionId]);
 
 const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 const isNil = (v: unknown): v is null | undefined => v === null || v === undefined;
@@ -130,21 +159,26 @@ export const seatKeys = {
  * - hold·replay의 둘째 인자 SeatCallOptions.deadlineMs를 HotRedis 호출의 deadlineMs로 넘긴다(없으면 넘기지 않아 플랫폼 기본 100ms).
  * - saleEvents는 SMEMBERS s:ctl:events 한 번, dueExpiries는 ZRANGE 한 번 뒤 좌석마다 HMGET(함께 보낸다), expire는 만료 Lua 한 번(expire-lua.ts 계약,
  *   ARGV 2의 구역 채널 앞머리는 seatKeys.section(eventId, '')). 결과 해석과 오류는 ports.ts SeatExpiries의 설명이다.
+ *
+ * PRF-142: pin·releaseFailed는 입력 검사(RangeError, 아무것도 부르지 않는다) 뒤 pin-lua.ts의 Lua 한 번(hold와 같은 마감·오류 가르기),
+ * retireEvent는 주입 Clock으로 시각을 가른 뒤 회차 슬롯의 XLEN·XPENDING과 목록 슬롯의 SREM을 따로 보낸다.
  */
 @Injectable()
-export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots {
+export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, SeatPins, SeatEventRetire {
   readonly #filterWarnGate: LogGate;
+  readonly #clock: Clock;
 
   /**
    * @param redis 좌석 Redis
    * @param logger 서비스 로거(선택). saleEvents가 거른 값의 수를 남긴다(L8, 파드마다 60초에 한 줄까지, C3). 모듈은 useFactory로 넘긴다
-   * @param clock 경고 문의 시각(기본 systemClock). 모듈은 주입 Clock을 넘긴다
+   * @param clock 경고 문의 시각과 retireEvent의 지금(기본 systemClock, Lua 안의 시각은 Redis TIME). 모듈은 주입 Clock을 넘긴다
    */
   constructor(
     @Inject(SEAT_REDIS) private readonly redis: HotRedis,
     private readonly logger?: PlatformLogger,
     clock: Clock = systemClock,
   ) {
+    this.#clock = clock;
     this.#filterWarnGate = saleEventsWarnGate(clock);
   }
 
@@ -232,6 +266,136 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots {
     // 비트맵이 짧거나 없으면 모자란 바이트는 0으로 채운다
     const bytes = got.length === want ? got : Buffer.concat([got.subarray(0, want), Buffer.alloc(Math.max(0, want - got.length))]);
     return { kind: 'OK', seatEpoch: u32Of(r[1], '세대'), bytes, sectionVersions: r.slice(3).map((v) => u32Of(v, '구역 일련번호')) };
+  }
+
+  /**
+   * 좌석 묶기(BUILD_ORDER PRF-142, 계약은 adapters/pin-lua.ts PIN_LUA): assertPinInput 뒤 묶기 Lua 한 번(hold와 같은 마감·오류 가르기).
+   * TAKEN의 색인이 입력에 없거나, 다시 잡은 수와 토큰 글이 맞지 않으면(다시 잡았는데 토큰이 없음·안 잡았는데 토큰이 있음) Error
+   */
+  async pin(i: PinInput, o?: SeatCallOptions): Promise<PinResult> {
+    assertPinInput(i);
+    const e = i.eventId;
+    const a = i.accountId;
+    const keys = [
+      seatKeys.bitmap(e),
+      seatKeys.expiry(e),
+      seatKeys.quota(e, a),
+      seatKeys.stream(e),
+      seatKeys.epoch(e),
+      seatKeys.secver(e),
+      seatKeys.fence(e),
+      ...i.seats.map((s) => seatKeys.hold(e, s.index)),
+    ];
+    const args = [
+      a,
+      i.purchaseSessionId,
+      i.holdId,
+      String(i.limit),
+      String(i.orderGen),
+      String(HOLD_TTL_MS),
+      String(i.keepUntilMs),
+      seatKeys.section(e, ''),
+      ...seatArgsOf(i.seats),
+    ];
+    const r = (await guard(this.redis.evalScript(PIN, keys, args, deadlineOf(o)))) as unknown[];
+    if (!Array.isArray(r)) throw new Error(`묶기 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
+    const kind = str(r[0]);
+    switch (kind) {
+      // {'OK', gen, 다시 잡은 수, 토큰 글 또는 ''}
+      case 'OK': {
+        const gen = int(r[1], '판 번호');
+        const regrabbed = count(r[2], '다시 잡은 수');
+        const tok = str(r[3] ?? '');
+        if (regrabbed === 0) {
+          if (tok !== '') throw new Error(`묶기 Lua가 다시 잡지 않았는데 토큰을 돌려줬다: ${tok}`);
+          return { kind, gen, regrabbed };
+        }
+        return { kind, gen, regrabbed, fencingToken: fencingTokenOf(tok) };
+      }
+      case 'NOT_READY':
+      case 'QUOTA_EXCEEDED':
+        return { kind };
+      case 'TAKEN': {
+        const seatIndex = count(r[1], '좌석 색인');
+        if (!i.seats.some((s) => s.index === seatIndex)) throw new Error(`묶기 Lua가 입력에 없는 좌석 색인을 돌려줬다: ${seatIndex}`);
+        return { kind, seatIndex };
+      }
+      case 'STALE_GEN':
+        return { kind, gen: int(r[1], '판 번호') };
+      default:
+        throw new Error(`묶기 Lua가 모르는 값을 돌려줬다: ${kind}`);
+    }
+  }
+
+  /** 결제 실패 해제(BUILD_ORDER PRF-142, 계약은 adapters/pin-lua.ts RELEASE_FAILED_LUA): assertReleaseFailedInput 뒤 실패 해제 Lua 한 번. 푼 수가 좌석 수보다 크면 Error */
+  async releaseFailed(i: ReleaseFailedInput, o?: SeatCallOptions): Promise<ReleaseFailedResult> {
+    assertReleaseFailedInput(i);
+    const e = i.eventId;
+    const a = i.accountId;
+    const keys = [
+      seatKeys.bitmap(e),
+      seatKeys.expiry(e),
+      seatKeys.quota(e, a),
+      seatKeys.stream(e),
+      seatKeys.epoch(e),
+      seatKeys.secver(e),
+      ...i.seats.map((s) => seatKeys.hold(e, s.index)),
+    ];
+    const args = [a, i.holdId, String(i.keepUntilMs), seatKeys.section(e, ''), ...seatArgsOf(i.seats)];
+    const r = (await guard(this.redis.evalScript(RELEASE_FAILED, keys, args, deadlineOf(o)))) as unknown[];
+    if (!Array.isArray(r)) throw new Error(`실패 해제 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
+    const kind = str(r[0]);
+    if (kind === 'NOT_READY') return { kind };
+    if (kind !== 'OK') throw new Error(`실패 해제 Lua가 모르는 값을 돌려줬다: ${kind}`);
+    const released = count(r[1], '푼 수');
+    if (released > i.seats.length) throw new Error(`실패 해제 Lua의 푼 수(${released})가 넘긴 좌석 수(${i.seats.length})보다 크다`);
+    return { kind, released };
+  }
+
+  /**
+   * 회차 목록에서 빼기(BUILD_ORDER PRF-142, ports.ts SeatEventRetire). 차례(앞이 걸리면 뒤는 부르지 않는다):
+   * 1 주입 Clock의 지금 < 판매 종료 + RETIRE_AFTER_SALE_END_MS → TOO_EARLY(Redis를 부르지 않는다)
+   * 2 회차 슬롯에서 XLEN stream > 0 → STREAM_PENDING, XPENDING stream stream-relay 요약의 수 > 0 → STREAM_PENDING(그룹·키가 없어 NOGROUP이면 0).
+   *   둘 다 읽기라 Stream 키를 만들지 않는다
+   * 3 목록 슬롯에 SREM s:ctl:events 회차 따로 한 번: 1이면 RETIRED, 0이면 NOT_LISTED(목록에 없었다)
+   * 일시 장애·메모리 부족은 SeatStoreUnavailable(다시 부르면 된다. SREM만 멱등이 아닌데 다시 부르면 NOT_LISTED다)
+   */
+  async retireEvent(i: { eventId: string; saleEndMs: number }): Promise<RetireResult> {
+    assertRetireInput(i);
+    if (this.#clock.now() < i.saleEndMs + RETIRE_AFTER_SALE_END_MS) return 'TOO_EARLY';
+    const stream = seatKeys.stream(i.eventId);
+    const expiry = seatKeys.expiry(i.eventId);
+    // 회차 슬롯에서 본다: Stream 길이, 확인받지 못한 항목, 만료 인덱스에 남은 홀드
+    const left = async (): Promise<RetireResult | undefined> => {
+      if (count(await guard(this.redis.command(['XLEN', stream], { key: stream })), 'Stream 길이') > 0) return 'STREAM_PENDING';
+      if ((await this.#pendingOf(stream)) > 0) return 'STREAM_PENDING';
+      if (count(await guard(this.redis.command(['ZCARD', expiry], { key: expiry })), '만료 인덱스 길이') > 0) return 'EXPIRY_PENDING';
+      return undefined;
+    };
+    const before = await left();
+    if (before) return before;
+    const list = seatKeys.ctlEvents();
+    if (count(await guard(this.redis.command(['SREM', list, i.eventId], { key: list })), '뺀 수') === 0) return 'NOT_LISTED';
+    // 두 슬롯 사이(확인과 빼기 사이)에 항목·홀드가 들어왔으면 되돌린다. 릴레이·만료 반복은 목록에 있는 회차만 읽는다
+    const after = await left();
+    if (after) {
+      await guard(this.redis.command(['SADD', list, i.eventId], { key: list }));
+      return after;
+    }
+    return 'RETIRED';
+  }
+
+  /** 소비자 그룹 stream-relay의 확인받지 못한 항목 수(XPENDING 요약의 첫 값). 그룹이나 키가 없으면(NOGROUP) 0 */
+  async #pendingOf(stream: string): Promise<number> {
+    let r: unknown;
+    try {
+      r = await this.redis.command(['XPENDING', stream, STREAM_RELAY_GROUP], { key: stream });
+    } catch (err) {
+      if (err instanceof Error && /^NOGROUP\b/.test(err.message)) return 0;
+      throw seatRedisError(err);
+    }
+    if (!Array.isArray(r)) throw new Error(`XPENDING 답이 배열이 아니다: ${String(r)}`);
+    return count(r[0] ?? 0, '확인받지 못한 항목 수');
   }
 
   async openSale(i: { eventId: string; seatCount: number; keepUntilMs: number }): Promise<{ created: boolean; seatEpoch: number }> {

@@ -287,7 +287,8 @@ return {'OK', tokText, nowText, expText}
 /**
  * 판매 열기 Lua 원문(SeatStore.openSale). KEYS: 1 bitmap, 2 epoch. ARGV: 1 좌석 수, 2 키 만료 시각 ms.
  * 세대 키의 epoch 칸이 있으면 아무것도 바꾸지 않고 {0, 세대}. 없으면 비트맵을 좌석 수만큼(이미 있으면 모자랄 때만, 있는 비트는 그대로) 만들고
- * 마지막에 세대 키(epoch = TIME 초, node)를 써서 {1, 세대}. 두 키의 수명은 keepUntil로 건다. s:ctl:events SADD는 앱이 먼저 한다(다른 슬롯)
+ * 마지막에 세대 키(epoch = TIME 초, node, 다시 만들기 판 번호 gen = '1')를 써서 {1, 세대}. 두 키의 수명은 keepUntil로 건다. s:ctl:events SADD는 앱이 먼저 한다(다른 슬롯).
+ * gen 칸은 세대 키를 처음 쓸 때만 둔다(이미 열린 회차·gen 칸이 없는 옛 세대 키는 바꾸지 않는다. 칸이 없으면 1로 본다, BUILD_ORDER PRF-142)
  */
 export const OPEN_SALE_LUA = `#!lua
 ${INT_TEXT}${EXTEND}${NODE_ID}
@@ -297,7 +298,7 @@ local count = tonumber(ARGV[1])
 -- 길이가 모자랄 때만 마지막 비트를 0으로 써서 늘린다(늘어난 자리는 원래 0이라 있던 홀드 비트를 건드리지 않는다)
 if redis.call('STRLEN', KEYS[1]) * 8 < count then redis.call('SETBIT', KEYS[1], int(count - 1), 0) end
 local sec = redis.call('TIME')[1]
-redis.call('HSET', KEYS[2], 'epoch', sec, 'node', nodeId())
+redis.call('HSET', KEYS[2], 'epoch', sec, 'node', nodeId(), 'gen', '1')
 local keep = tonumber(ARGV[2])
 extend(KEYS[1], keep)
 extend(KEYS[2], keep)

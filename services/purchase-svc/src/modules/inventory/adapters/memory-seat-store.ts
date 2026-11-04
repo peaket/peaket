@@ -13,9 +13,22 @@ import {
   type ReplayResult,
   SEAT_STATE_AVAILABLE,
   SEAT_STATE_HELD,
+  type SeatRef,
 } from '../domain/hold.js';
 import type { LogGate } from '../domain/log-gate.js';
-import type { SeatCallOptions, SeatExpiries, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
+import type { SeatCallOptions, SeatEventRetire, SeatExpiries, SeatPins, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
+import {
+  assertPinInput,
+  assertReleaseFailedInput,
+  assertRetireInput,
+  INITIAL_SEAT_GEN,
+  type PinInput,
+  type PinResult,
+  type ReleaseFailedInput,
+  type ReleaseFailedResult,
+  RETIRE_AFTER_SALE_END_MS,
+  type RetireResult,
+} from '../domain/pin.js';
 import { assertSnapshotInput } from '../domain/snapshot.js';
 import { firstResponseOf, seatKeys } from './redis-seat-store.js';
 import { keepEventIds, saleEventsWarnGate } from './sale-events.js';
@@ -35,6 +48,8 @@ export interface MemoryHoldHash {
   kind: 'FAN' | 'PRIORITY';
   /** 연장한 횟수(10진 글, 홀드 Lua는 '0') */
   ext: string;
+  /** 묶음 표시(묶기 Lua가 '1'로 둔다, BUILD_ORDER PRF-142). 없으면 묶이지 않았다 */
+  pin?: '1';
 }
 
 /** 멱등 기록 s:{event:E}:idem:{account}:{key} */
@@ -55,8 +70,11 @@ export interface MemoryPublished {
 
 /** 회차 하나의 좌석 키(시험이 직접 채우고 읽는다). 이름은 docs/data.md §3의 키와 같다 */
 export class MemorySeatEvent {
-  /** 세대 키 s:{event:E}:epoch의 칸 epoch(세대)·node(주 노드 표지). 없으면 NOT_READY */
-  epoch: { epoch: number; node: string } | undefined;
+  /**
+   * 세대 키 s:{event:E}:epoch의 칸 epoch(세대)·node(주 노드 표지)·gen(다시 만들기 판 번호, 판매 열기가 1로 둔다. 없으면 1로 본다, BUILD_ORDER PRF-142).
+   * 없으면 NOT_READY
+   */
+  epoch: { epoch: number; node: string; gen?: number } | undefined;
   /** 비트맵 크기(openSale의 seatCount). 없으면 비트맵이 없다 */
   seatCount: number | undefined;
   /** 비트맵에서 1인 색인 */
@@ -120,8 +138,9 @@ export class MemorySeatDb {
  * 키 만료는 expireAt에 적기만 한다. 일시 장애·메모리 부족(SeatStoreUnavailable)은 내지 않는다. 호출 마감(SeatCallOptions)은 보지 않는다.
  * 만료(PRF-135): saleEvents = db.ctlEvents(KEY_PART 모양만), dueExpiries·expire는 MemorySeatEvent의 expiry·holds·bits·quota·rel·secver·stream·published·expireAt을
  * ports.ts SeatExpiries의 차례대로 바꾼다(만료 Lua와 같은 결과. 보유 수가 0 이하가 되면 quota에서 지우고 expireAt의 그 키도 지운다)
+ * 묶기·실패 해제·회차 목록 빼기(PRF-142): pin-lua.ts의 계약과 RedisSeatStore.retireEvent의 차례를 같은 키 모형에 둔다. openSale은 epoch.gen = 1을 함께 쓴다
  */
-export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots {
+export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, SeatPins, SeatEventRetire {
   readonly db = new MemorySeatDb();
   readonly #filterWarnGate: LogGate;
 
@@ -282,6 +301,218 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots {
     return { kind: 'OK', seatEpoch: ev.epoch.epoch, bytes, sectionVersions };
   }
 
+  /**
+   * 좌석 묶기(BUILD_ORDER PRF-142): 묶기 Lua(pin-lua.ts PIN_LUA)와 같은 차례(세대 키 → 남의 좌석 → 낡은 판 번호 → 쓰기 전 지킴 → 한도 → 쓰기), 시각은 주입 Clock.
+   * 메모리는 키 형이 정해져 있어 형 검사는 없다. gen은 epoch.gen(없으면 1)이다
+   */
+  async pin(i: PinInput, _o?: SeatCallOptions): Promise<PinResult> {
+    assertPinInput(i);
+    const e = i.eventId;
+    const ev = this.db.event(e);
+
+    // 1 세대 키(gen 칸 값이 앞 0 없는 양의 10진 정수 15자리 이하가 아니면 망가진 키)
+    if (!ev.epoch) return { kind: 'NOT_READY' };
+    const gen = ev.epoch.gen ?? INITIAL_SEAT_GEN;
+    if (!Number.isSafeInteger(gen) || gen < 1 || gen >= 1e15) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.epoch(e)}`);
+
+    // 2 좌석마다 내 홀드(비트 1, holdId·owner 같음) · 빈 좌석(비트 0) · 남의 좌석(그 밖)
+    const mine: MemoryHoldHash[] = [];
+    const empty: SeatRef[] = [];
+    for (const s of i.seats) {
+      if (ev.bits.has(s.index)) {
+        const h = ev.holds.get(s.index);
+        if (!h || h.holdId !== i.holdId || h.owner !== i.accountId) return { kind: 'TAKEN', seatIndex: s.index };
+        mine.push(h);
+      } else {
+        empty.push(s);
+      }
+    }
+    const k = empty.length;
+
+    // 3 낡은 판 번호(빈 좌석이 있을 때만)
+    if (k > 0 && i.orderGen !== gen) return { kind: 'STALE_GEN', gen };
+
+    // 쓰기 전 지킴과 4 한도(빈 좌석이 있을 때만. Lua와 같다)
+    const quotaKey = seatKeys.quota(e, i.accountId);
+    let now = 0;
+    let held = 0;
+    let token = 0;
+    if (k > 0) {
+      now = this.clock.now();
+      if (!(i.keepUntilMs > now)) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${i.keepUntilMs} now ${now}`);
+      const quota = ev.quota.get(i.accountId);
+      if (quota !== undefined && !isStandardInt(String(quota))) throw new Error(`PEAKET_CORRUPT_KEY ${quotaKey}`);
+      if (ev.fence !== undefined && !DIGITS.test(ev.fence)) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.fence(e)}`);
+      for (const s of empty) {
+        const v = ev.secver.get(s.sectionIndex);
+        if (v !== undefined && !isStandardInt(String(v))) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.secver(e)}`);
+      }
+      held = quota === undefined ? 0 : Number(quota);
+      if (held + k > i.limit) return { kind: 'QUOTA_EXCEEDED' };
+      token = Math.max(Number(ev.fence ?? '0') + 1, now * 1000);
+      if (!Number.isSafeInteger(token)) throw new Error(`PEAKET_FENCE_OVERFLOW 펜싱 토큰이 안전한 정수를 넘는다(fence ${ev.fence})`);
+    }
+
+    // 5 쓰기
+    const tok = String(token);
+    const exp = now + HOLD_TTL_MS;
+    const extend = (key: string) => {
+      const cur = ev.expireAt.get(key);
+      if (cur === undefined || cur < i.keepUntilMs) ev.expireAt.set(key, i.keepUntilMs);
+    };
+    if (k > 0) {
+      ev.fence = tok;
+      for (const s of empty) {
+        const hk = seatKeys.hold(e, s.index);
+        ev.bits.add(s.index);
+        // DEL 뒤 HSET: 있던 칸과 수명을 지우고 새로 쓴 뒤 keepUntil을 건다
+        ev.expireAt.delete(hk);
+        ev.holds.set(s.index, { holdId: i.holdId, owner: i.accountId, psid: i.purchaseSessionId, fence: tok, heldAt: now, exp, kind: 'FAN', ext: '0', pin: '1' });
+        ev.expireAt.set(hk, i.keepUntilMs);
+      }
+    }
+    // 내 홀드는 pin 칸만 더한다(exp·토큰은 그대로)
+    for (const h of mine) h.pin = '1';
+    // 모든 좌석을 만료 인덱스에서 뺀다(Valkey는 빈 정렬 집합을 지운다. 그 키의 수명도 함께 사라진다)
+    for (const s of i.seats) ev.expiry.delete(s.index);
+    if (ev.expiry.size === 0) ev.expireAt.delete(seatKeys.expiry(e));
+    if (k === 0) return { kind: 'OK', gen, regrabbed: 0 };
+
+    ev.quota.set(i.accountId, held + k);
+    // 바뀐 구역마다 일련번호 +1(빈 좌석 차례로 처음 나온 차례)
+    const version = new Map<number, number>();
+    const deltas = new Map<number, string[]>();
+    for (const s of empty) {
+      if (!version.has(s.sectionIndex)) {
+        const v = Number(ev.secver.get(s.sectionIndex) ?? 0) + 1;
+        ev.secver.set(s.sectionIndex, v);
+        version.set(s.sectionIndex, v);
+        deltas.set(s.sectionIndex, []);
+      }
+      deltas.get(s.sectionIndex)!.push(`${s.seatOffset}:${SEAT_STATE_HELD}`);
+    }
+    const seatEpoch = String(ev.epoch.epoch);
+    for (const s of empty) {
+      ev.stream.push({
+        type: 'HELD',
+        seatIdx: String(s.index),
+        seatId: s.seatId,
+        tierId: s.tierId,
+        sectionId: s.sectionId,
+        holdId: i.holdId,
+        holdKind: 'FAN',
+        purchaseSessionId: i.purchaseSessionId,
+        accountId: i.accountId,
+        fencingToken: tok,
+        sectionVersion: String(version.get(s.sectionIndex)),
+        seatEpoch,
+        occurredAtMs: String(now),
+        expiresAtMs: String(exp),
+      });
+    }
+    for (const [sec, list] of deltas) {
+      ev.published.push({ channel: seatKeys.section(e, String(sec)), message: `1 ${seatEpoch} ${sec} ${version.get(sec)} ${now} ${list.join(' ')}` });
+    }
+    // expiry는 빼기만 하므로 늘리지 않는다(Lua와 같다)
+    for (const key of [seatKeys.bitmap(e), quotaKey, seatKeys.stream(e), seatKeys.epoch(e), seatKeys.secver(e), seatKeys.fence(e)]) extend(key);
+    return { kind: 'OK', gen, regrabbed: k, fencingToken: token };
+  }
+
+  /**
+   * 결제 실패 해제(BUILD_ORDER PRF-142): 실패 해제 Lua(pin-lua.ts RELEASE_FAILED_LUA)와 같은 차례(세대 키 → 시각 한 번 → keepUntil 지킴 →
+   * 그 주문의 홀드(비트 1, holdId·owner 같음) 고르기 → 보유 수·secver 지킴 → 쓰기). 보유 수가 0 이하가 되면 quota에서 지우고 expireAt의 그 키도 지운다
+   */
+  async releaseFailed(i: ReleaseFailedInput, _o?: SeatCallOptions): Promise<ReleaseFailedResult> {
+    assertReleaseFailedInput(i);
+    const e = i.eventId;
+    const ev = this.db.event(e);
+    if (!ev.epoch) return { kind: 'NOT_READY' };
+    const now = this.clock.now();
+    if (!(i.keepUntilMs > now)) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${i.keepUntilMs} now ${now}`);
+
+    const freed: { seat: SeatRef; hash: MemoryHoldHash }[] = [];
+    for (const s of i.seats) {
+      const h = ev.holds.get(s.index);
+      if (ev.bits.has(s.index) && h && h.holdId === i.holdId && h.owner === i.accountId) freed.push({ seat: s, hash: h });
+    }
+    const k = freed.length;
+    if (k === 0) return { kind: 'OK', released: 0 };
+    const quotaKey = seatKeys.quota(e, i.accountId);
+    const quota = ev.quota.get(i.accountId);
+    if (quota !== undefined && !isStandardInt(String(quota))) throw new Error(`PEAKET_CORRUPT_KEY ${quotaKey}`);
+    for (const { seat } of freed) {
+      const v = ev.secver.get(seat.sectionIndex);
+      if (v !== undefined && !isStandardInt(String(v))) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.secver(e)}`);
+    }
+
+    // 쓰기
+    for (const { seat } of freed) {
+      ev.bits.delete(seat.index);
+      ev.holds.delete(seat.index);
+      ev.expireAt.delete(seatKeys.hold(e, seat.index));
+      ev.expiry.delete(seat.index);
+    }
+    if (ev.expiry.size === 0) ev.expireAt.delete(seatKeys.expiry(e));
+    const left = (quota === undefined ? 0 : Number(quota)) - k;
+    if (left <= 0) {
+      ev.quota.delete(i.accountId);
+      ev.expireAt.delete(quotaKey);
+    } else {
+      ev.quota.set(i.accountId, left);
+    }
+    const version = new Map<number, number>();
+    const deltas = new Map<number, string[]>();
+    for (const { seat } of freed) {
+      if (!version.has(seat.sectionIndex)) {
+        const v = Number(ev.secver.get(seat.sectionIndex) ?? 0) + 1;
+        ev.secver.set(seat.sectionIndex, v);
+        version.set(seat.sectionIndex, v);
+        deltas.set(seat.sectionIndex, []);
+      }
+      deltas.get(seat.sectionIndex)!.push(`${seat.seatOffset}:${SEAT_STATE_AVAILABLE}`);
+    }
+    const seatEpoch = String(ev.epoch.epoch);
+    for (const { seat, hash: h } of freed) {
+      ev.stream.push({
+        type: 'RELEASED',
+        seatIdx: String(seat.index),
+        seatId: seat.seatId,
+        tierId: seat.tierId,
+        sectionId: seat.sectionId,
+        holdId: h.holdId,
+        holdKind: h.kind ?? '',
+        purchaseSessionId: h.psid ?? '',
+        accountId: h.owner,
+        fencingToken: h.fence ?? '',
+        sectionVersion: String(version.get(seat.sectionIndex)),
+        seatEpoch,
+        occurredAtMs: String(now),
+        expiresAtMs: h.exp === undefined ? '' : String(h.exp),
+      });
+    }
+    for (const [sec, list] of deltas) {
+      ev.published.push({ channel: seatKeys.section(e, String(sec)), message: `1 ${seatEpoch} ${sec} ${version.get(sec)} ${now} ${list.join(' ')}` });
+    }
+    for (const key of [seatKeys.stream(e), seatKeys.secver(e)]) {
+      const cur = ev.expireAt.get(key);
+      if (cur === undefined || cur < i.keepUntilMs) ev.expireAt.set(key, i.keepUntilMs);
+    }
+    return { kind: 'OK', released: k };
+  }
+
+  /**
+   * 회차 목록에서 빼기(BUILD_ORDER PRF-142): RedisSeatStore.retireEvent와 같은 차례(주입 Clock → Stream 길이 → 목록에서 빼기).
+   * 메모리에는 소비자 그룹이 없어 확인받지 못한 항목은 늘 0이다(Stream 항목이 남았는지만 본다)
+   */
+  async retireEvent(i: { eventId: string; saleEndMs: number }): Promise<RetireResult> {
+    assertRetireInput(i);
+    if (this.clock.now() < i.saleEndMs + RETIRE_AFTER_SALE_END_MS) return 'TOO_EARLY';
+    const ev = this.db.peek(i.eventId);
+    if ((ev?.stream.length ?? 0) > 0) return 'STREAM_PENDING';
+    if ((ev?.expiry.size ?? 0) > 0) return 'EXPIRY_PENDING';
+    return this.db.ctlEvents.delete(i.eventId) ? 'RETIRED' : 'NOT_LISTED';
+  }
+
   async openSale(i: { eventId: string; seatCount: number; keepUntilMs: number }): Promise<{ created: boolean; seatEpoch: number }> {
     if (!Number.isSafeInteger(i.seatCount) || i.seatCount < 1) throw new RangeError(`좌석 수는 1 이상의 정수다: ${i.seatCount}`);
     const ev = this.db.event(i.eventId);
@@ -289,7 +520,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots {
     if (ev.epoch) return { created: false, seatEpoch: ev.epoch.epoch };
     // 비트맵은 모자랄 때만 늘린다(있는 비트는 그대로). 세대 키는 마지막에
     ev.seatCount = Math.max(ev.seatCount ?? 0, i.seatCount);
-    ev.epoch = { epoch: Math.floor(this.clock.now() / 1000), node: 'standalone' };
+    ev.epoch = { epoch: Math.floor(this.clock.now() / 1000), node: 'standalone', gen: INITIAL_SEAT_GEN };
     for (const key of [seatKeys.bitmap(i.eventId), seatKeys.epoch(i.eventId)]) {
       const cur = ev.expireAt.get(key);
       if (cur === undefined || cur < i.keepUntilMs) ev.expireAt.set(key, i.keepUntilMs);

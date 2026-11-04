@@ -91,7 +91,7 @@ function heldMessage(over: Partial<SeatEventMessage> = {}): SeatEventMessage {
     accountId: ACCOUNT,
     expiresAt: '2026-11-04T03:07:00.123Z',
     occurredAt: '2026-11-04T03:00:00.123Z',
-    eventKey: uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}`),
+    eventKey: uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}:${TOKEN}`),
     ...over,
   };
 }
@@ -119,28 +119,32 @@ describe('seatEventKey: 홀드 사건의 중복 제거 키', () => {
         ['ev-1', 'h-1'],
         ['a', 'b'],
       ] as const) {
-        expect(seatEventKey(type, e, h, SEAT), `${type} ${e} ${h}`).toMatch(UUID8);
+        expect(seatEventKey(type, e, h, SEAT, Number(TOKEN)), `${type} ${e} ${h}`).toMatch(UUID8);
       }
     }
   });
 
-  test('ADR0052_정본 식과 같다: SHA-256("SeatEvent:" + type + ":" + 회차 ID + ":" + holdId + ":" + 좌석 ID)의 앞 16바이트에 버전·변형 비트', () => {
+  test('ADR0052_정본 식과 같다: SHA-256("SeatEvent:" + type + ":" + 회차 ID + ":" + holdId + ":" + 좌석 ID + ":" + 펜싱 토큰)의 앞 16바이트에 버전·변형 비트', () => {
     for (const type of ['HELD', 'RELEASED', 'EXPIRED'] as const) {
-      expect(seatEventKey(type, EV, HOLD, SEAT), type).toBe(uuid8Of(`SeatEvent:${type}:${EV}:${HOLD}:${SEAT}`));
+      expect(seatEventKey(type, EV, HOLD, SEAT, Number(TOKEN)), type).toBe(uuid8Of(`SeatEvent:${type}:${EV}:${HOLD}:${SEAT}:${TOKEN}`));
     }
-    expect(seatEventKey('HELD', 'ev-1', 'h-1', 's-1')).toBe(uuid8Of('SeatEvent:HELD:ev-1:h-1:s-1'));
+    expect(seatEventKey('HELD', 'ev-1', 'h-1', 's-1', 7)).toBe(uuid8Of('SeatEvent:HELD:ev-1:h-1:s-1:7'));
+    // 같은 holdId로 다시 잡은 홀드(새 토큰)는 다른 키다(PRF-142 코드 리뷰)
+    expect(seatEventKey('HELD', 'ev-1', 'h-1', 's-1', 8)).not.toBe(seatEventKey('HELD', 'ev-1', 'h-1', 's-1', 7));
   });
 
   test('ADR0052_같은 입력이면 같은 값(같은 항목을 다시 보내도 같다)이고, type·회차·holdId 가운데 하나만 달라도 다른 값이다', () => {
-    const base = seatEventKey('HELD', EV, HOLD, SEAT);
-    expect(seatEventKey('HELD', EV, HOLD, SEAT)).toBe(base);
+    const base = seatEventKey('HELD', EV, HOLD, SEAT, Number(TOKEN));
+    expect(seatEventKey('HELD', EV, HOLD, SEAT, Number(TOKEN))).toBe(base);
     const others = [
-      seatEventKey('RELEASED', EV, HOLD, SEAT),
-      seatEventKey('EXPIRED', EV, HOLD, SEAT),
-      seatEventKey('HELD', '0190f3a1-7c2e-7a00-8000-0000000000e2', HOLD, SEAT),
-      seatEventKey('HELD', EV, '019a4b2c-1d00-7e00-8a00-00000000b01e', SEAT),
+      seatEventKey('RELEASED', EV, HOLD, SEAT, Number(TOKEN)),
+      seatEventKey('EXPIRED', EV, HOLD, SEAT, Number(TOKEN)),
+      seatEventKey('HELD', '0190f3a1-7c2e-7a00-8000-0000000000e2', HOLD, SEAT, Number(TOKEN)),
+      seatEventKey('HELD', EV, '019a4b2c-1d00-7e00-8a00-00000000b01e', SEAT, Number(TOKEN)),
       // 한 홀드가 잡은 다른 좌석(여러 좌석 홀드의 좌석끼리 키가 겹치지 않는다, PRF-141 시험 작성에서 찾음)
-      seatEventKey('HELD', EV, HOLD, '0190f3a1-7c2e-7a00-8000-00000000a002'),
+      seatEventKey('HELD', EV, HOLD, '0190f3a1-7c2e-7a00-8000-00000000a002', Number(TOKEN)),
+      // 같은 holdId로 다시 잡은 홀드(새 펜싱 토큰, 좌석 묶기)도 다른 키다(PRF-142 코드 리뷰)
+      seatEventKey('HELD', EV, HOLD, SEAT, Number(TOKEN) + 1),
     ];
     for (const k of others) expect(k).not.toBe(base);
     expect(new Set(others).size).toBe(others.length);
@@ -153,7 +157,7 @@ describe('toSeatEvent: Stream 홀드 사건 칸 → SeatEvent', () => {
     expect(m).toEqual(heldMessage());
     expect(m.occurredAt).toBe(new Date(HELD_AT).toISOString());
     expect(m.expiresAt).toBe(new Date(EXP).toISOString());
-    expect(m.eventKey).toBe(seatEventKey('HELD', EV, HOLD, SEAT));
+    expect(m.eventKey).toBe(seatEventKey('HELD', EV, HOLD, SEAT, Number(TOKEN)));
     expect(m.priorityGrantId).toBeUndefined();
     expect(Object.keys(m)).not.toContain('seatIdx');
     for (const k of ['fencingToken', 'sectionVersion', 'seatEpoch'] as const) expect(typeof m[k], k).toBe('number');
@@ -167,7 +171,7 @@ describe('toSeatEvent: Stream 홀드 사건 칸 → SeatEvent', () => {
         sectionVersion: 43,
         occurredAt: new Date(EXPIRED_AT).toISOString(),
         expiresAt: new Date(EXP).toISOString(),
-        eventKey: uuid8Of(`SeatEvent:EXPIRED:${EV}:${HOLD}:${SEAT}`),
+        eventKey: uuid8Of(`SeatEvent:EXPIRED:${EV}:${HOLD}:${SEAT}:${TOKEN}`),
       }),
     );
     expect(m.fencingToken).toBe(Number(TOKEN));
@@ -176,7 +180,7 @@ describe('toSeatEvent: Stream 홀드 사건 칸 → SeatEvent', () => {
 
   test('ST5_RELEASED도 같은 칸 이름으로 바꾼다 [ASVS v5.0.0-2.2.1]', () => {
     const m = toSeatEvent(EV, heldFields({ type: 'RELEASED', occurredAtMs: String(HELD_AT + 1_000) }));
-    expect(m).toEqual(heldMessage({ type: 'RELEASED', occurredAt: new Date(HELD_AT + 1_000).toISOString(), eventKey: uuid8Of(`SeatEvent:RELEASED:${EV}:${HOLD}:${SEAT}`) }));
+    expect(m).toEqual(heldMessage({ type: 'RELEASED', occurredAt: new Date(HELD_AT + 1_000).toISOString(), eventKey: uuid8Of(`SeatEvent:RELEASED:${EV}:${HOLD}:${SEAT}:${TOKEN}`) }));
   });
 
   test('ST35_바꾼 메시지는 계약 Zod 스키마(SeatEvent)를 통과하고, 칸 이름은 모두 Avro 스키마 SeatEvent의 필드다(accountId·expiresAt 포함) [ASVS v5.0.0-2.2.1]', () => {
@@ -342,7 +346,7 @@ describe('toLedgerHoldEvent: Kafka에서 읽은 SeatEvent → 원장 사건', ()
     holdKind: 'FAN',
     occurredAtMs: HELD_AT,
     expiresAtMs: EXP,
-    eventKey: uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}`),
+    eventKey: uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}:${TOKEN}`),
     ...over,
   });
 
@@ -354,8 +358,8 @@ describe('toLedgerHoldEvent: Kafka에서 읽은 SeatEvent → 원장 사건', ()
   test('ST5_RELEASED·EXPIRED도 같다(EXPIRED는 홀드의 토큰과 만료 시각, 푼 시각을 싣는다) [S-T5]', () => {
     const expired = toSeatEvent(EV, expiredFields());
     expect(toLedgerHoldEvent(JSON.parse(JSON.stringify(expired)))).toEqual(ledger({ type: 'EXPIRED', occurredAtMs: EXPIRED_AT, eventKey: expired.eventKey }));
-    const released = seatEventValue({ type: 'RELEASED', occurredAt: new Date(HELD_AT + 9).toISOString(), eventKey: uuid8Of(`SeatEvent:RELEASED:${EV}:${HOLD}:${SEAT}`) });
-    expect(toLedgerHoldEvent(released)).toEqual(ledger({ type: 'RELEASED', occurredAtMs: HELD_AT + 9, eventKey: uuid8Of(`SeatEvent:RELEASED:${EV}:${HOLD}:${SEAT}`) }));
+    const released = seatEventValue({ type: 'RELEASED', occurredAt: new Date(HELD_AT + 9).toISOString(), eventKey: uuid8Of(`SeatEvent:RELEASED:${EV}:${HOLD}:${SEAT}:${TOKEN}`) });
+    expect(toLedgerHoldEvent(released)).toEqual(ledger({ type: 'RELEASED', occurredAtMs: HELD_AT + 9, eventKey: uuid8Of(`SeatEvent:RELEASED:${EV}:${HOLD}:${SEAT}:${TOKEN}`) }));
   });
 
   test('ST35_우선 구매 보류(PRIORITY)는 priorityGrantId를 싣는다(구매 세션 ID는 없다) [ASVS v5.0.0-2.2.1]', () => {

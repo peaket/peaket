@@ -114,8 +114,9 @@ export function uuid8(input: string): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-/** 홀드 사건의 eventKey(정본: SHA-256('SeatEvent:' + type + ':' + 회차 ID + ':' + holdId + ':' + 좌석 ID)의 앞 16바이트, UUID 버전 8) */
-export const seatEventKeyOf = (type: string, eventId: string, holdId: string, seatId: string) => uuid8(`SeatEvent:${type}:${eventId}:${holdId}:${seatId}`);
+/** 홀드 사건의 eventKey(정본: SHA-256('SeatEvent:' + type + ':' + 회차 ID + ':' + holdId + ':' + 좌석 ID + ':' + 펜싱 토큰)의 앞 16바이트, UUID 버전 8) */
+export const seatEventKeyOf = (type: string, eventId: string, holdId: string, seatId: string, fencingToken: number | string) =>
+  uuid8(`SeatEvent:${type}:${eventId}:${holdId}:${seatId}:${fencingToken}`);
 
 export const iso = (ms: number | string) => new Date(Number(ms)).toISOString();
 
@@ -136,6 +137,6 @@ export function expectedSeatEvent(eventId: string, f: Readonly<Record<string, st
     accountId: f.accountId,
     expiresAt: iso(f.expiresAtMs!),
     occurredAt: iso(f.occurredAtMs!),
-    eventKey: seatEventKeyOf(f.type!, eventId, f.holdId!, f.seatId!),
+    eventKey: seatEventKeyOf(f.type!, eventId, f.holdId!, f.seatId!, f.fencingToken!),
   };
 }

@@ -9,6 +9,7 @@ import type { EndedSession, OpenSessionInput, OpenSessionResult, SessionEndedEnt
 import type { SectionRange } from './seat-layout.js';
 import type { ReserveInput, ReserveResult, SeatSaleOrder, SeatSaleRelease } from './seat-sale.js';
 import type { LedgerHoldEvent, SeatStreamEntry, StreamDropReason, TradeTopic } from './seat-event.js';
+import type { PinInput, PinResult, ReleaseFailedInput, ReleaseFailedResult, RetireResult } from './pin.js';
 
 /** 요청 처리 중 좌석 Redis 호출 하나의 선택값(BUILD_ORDER PRF-135, guidelines §5) */
 export interface SeatCallOptions {
@@ -557,4 +558,25 @@ export interface SeatStreamRelaySignals {
 export interface SeatHoldLedger {
   /** 사건 하나를 트랜잭션 하나로 적용한다. 같은 사건을 다시 받으면 아무것도 바꾸지 않는다. DB 오류는 던진다 */
   apply(event: LedgerHoldEvent): Promise<void>;
+}
+
+export const SEAT_PINS = Symbol('purchase.SeatPins');
+/**
+ * 판매 예약 앞의 좌석 묶기와 결제 실패 해제(BUILD_ORDER PRF-142, docs/features/seat-hold.md §6 '좌석 묶기와 실패 해제의 첫 구현', Lua 계약은 adapters/pin-lua.ts).
+ * 운영 구현은 RedisSeatStore, 시험 대역은 MemorySeatStore다(같은 사례에서 같은 결과). 부르는 쪽은 결제 접수 Saga(PRF-160)와 좌석 해제 사건 소비자다.
+ */
+export interface SeatPins {
+  /**
+   * @throws RangeError 입력 모양이 틀림(assertPinInput. 아무것도 부르지 않는다)
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애(쓰였는지 모른다. 같은 입력으로 다시 부르면 모두 내 홀드라 OK다) 또는 메모리 부족
+   */
+  pin(input: PinInput, o?: SeatCallOptions): Promise<PinResult>;
+  /** @throws RangeError 입력 모양이 틀림 · SeatStoreUnavailable 좌석 Redis 일시 장애(다시 부르면 남은 것만 푼다) */
+  releaseFailed(input: ReleaseFailedInput, o?: SeatCallOptions): Promise<ReleaseFailedResult>;
+}
+
+/** 회차 목록 s:ctl:events에서 회차 빼기(판매 종료 정비, BUILD_ORDER PRF-142). 정비 잡이 하루 한 번 부른다(조립은 PRF-160) */
+export interface SeatEventRetire {
+  /** 판매 종료 + RETIRE_AFTER_SALE_END_MS가 지났고 그 회차 Stream의 길이·확인받지 못한 항목이 0일 때만 뺀다. 시각은 저장소 시각(주입 Clock) */
+  retireEvent(input: { eventId: string; saleEndMs: number }): Promise<RetireResult>;
 }

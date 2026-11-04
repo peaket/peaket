@@ -22,7 +22,7 @@ export const SeatEvent = zod.object({
   "accountId": zod.string().optional().describe('홀드한 계정 ID. 홀드 사건에만 싣는다. 홀드 원장 적재가 seat_hold.account_id에 쓴다. 분석 적재는 가명 처리한다(trade.orders·trade.tickets와 같다, 추천 적용 2026-11-04, BUILD_ORDER PRF-141)'),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('홀드 만료 시각. 홀드 사건에만 싣는다. 홀드 원장 적재가 seat_hold.expires_at에 쓴다(추천 적용 2026-11-04, BUILD_ORDER PRF-141)'),
   "occurredAt": zod.iso.datetime({"offset":true}),
-  "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값. 홀드 사건은 UUID 버전 8(SHA-256(\'SeatEvent:\' + type + \':\' + eventId + \':\' + holdId + \':\' + seatId)의 앞 16바이트, docs/features/seat-hold.md §6 \'홀드 원장 적재의 첫 구현\')')
+  "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값. 홀드 사건은 UUID 버전 8(SHA-256(\'SeatEvent:\' + type + \':\' + eventId + \':\' + holdId + \':\' + seatId + \':\' + fencingToken)의 앞 16바이트, docs/features/seat-hold.md §6 \'홀드 원장 적재의 첫 구현\')')
 })
 
 export type SeatEvent = zod.input<typeof SeatEvent>;

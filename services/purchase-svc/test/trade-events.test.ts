@@ -21,6 +21,8 @@ import {
 
 const EV = '0190f3a1-7c2e-7a00-8000-0000000000e1';
 const SEAT = '0190f3a1-7c2e-7a00-8000-00000000a001';
+/** 시험 사건의 펜싱 토큰(eventKey 식의 마지막 조각) */
+const TOKEN = 1762225200123456;
 const ACCOUNT = '0190f3a1-7c2e-7a00-8000-0000000acc01';
 const HOLD = '019a4b2c-1d00-7e00-8a00-00000000b01d';
 const HELD_AT = Date.parse('2026-11-04T03:00:00.123Z');
@@ -50,7 +52,7 @@ function heldMessage(over: Partial<SeatEventMessage> = {}): SeatEventMessage {
     accountId: ACCOUNT,
     expiresAt: new Date(EXP).toISOString(),
     occurredAt: new Date(HELD_AT).toISOString(),
-    eventKey: uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}`),
+    eventKey: uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}:${TOKEN}`),
     ...over,
   };
 }
@@ -179,7 +181,7 @@ const expectedLedger = (over: Partial<LedgerHoldEvent> = {}): LedgerHoldEvent =>
   holdKind: 'FAN',
   occurredAtMs: HELD_AT,
   expiresAtMs: EXP,
-  eventKey: uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}`),
+  eventKey: uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}:${TOKEN}`),
   ...over,
 });
 
@@ -256,14 +258,14 @@ describe('SeatHoldLedgerHandler: 업무 키·중복 제거 키·적용', () => {
   test('ADR0052_중복 제거 키는 홀드 사건이면 eventKey, 건너뛸 레코드면 없다(undefined)', () => {
     const { handler } = fakeLedger();
     const m = consumed(jsonValue(heldMessage()));
-    expect(handler.eventKeyOf(handler.decode(m))).toBe(uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}`));
+    expect(handler.eventKeyOf(handler.decode(m))).toBe(uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}:${TOKEN}`));
     expect(handler.eventKeyOf({ kind: 'skip', key: `skip:${EV}` })).toBeUndefined();
   });
 
   test('ST5_handle은 홀드 사건만 ledger.apply를 한 번 부르고(받은 차례대로), 건너뛸 레코드는 아무것도 부르지 않는다 [S-T5]', async () => {
     const { handler, applied } = fakeLedger();
     const heldM = consumed(jsonValue(heldMessage()));
-    const expiredMsg = heldMessage({ type: 'EXPIRED', occurredAt: new Date(EXP + 5).toISOString(), eventKey: uuid8Of(`SeatEvent:EXPIRED:${EV}:${HOLD}:${SEAT}`) });
+    const expiredMsg = heldMessage({ type: 'EXPIRED', occurredAt: new Date(EXP + 5).toISOString(), eventKey: uuid8Of(`SeatEvent:EXPIRED:${EV}:${HOLD}:${SEAT}:${TOKEN}`) });
     const expiredM = consumed(jsonValue(expiredMsg));
     await handler.handle(handler.decode(heldM), heldM);
     await handler.handle({ kind: 'skip', key: `skip:${EV}` }, consumed(null));

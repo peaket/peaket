@@ -137,7 +137,7 @@ describe('SeatStreamRelay: 읽기·보내기·지우기', () => {
       fencingToken: h.fencingToken,
       occurredAt: new Date(h.heldAtMs).toISOString(),
       expiresAt: new Date(h.expiresAtMs).toISOString(),
-      eventKey: seatEventKeyOf('HELD', eventId, h.holdId, h.seats[0]!.seatId),
+      eventKey: seatEventKeyOf('HELD', eventId, h.holdId, h.seats[0]!.seatId, h.fencingToken),
     });
     // 확인받은 항목은 확인(XACK)되고 지워졌다(XTRIM MINID)
     expect(await xlen(redis, eventId)).toBe(0);
@@ -295,7 +295,7 @@ describe('SeatStreamRelay: 실패와 다시 보내기(적어도 한 번)', () =>
     const recs = await reader.waitFor(on(SEAT_TOPIC, eventId), 2);
     expect(recs).toHaveLength(2);
     expect(valueOf(recs[0]!)).toEqual(valueOf(recs[1]!));
-    expect(valueOf(recs[0]!).eventKey).toBe(seatEventKeyOf('HELD', eventId, h.holdId, h.seats[0]!.seatId));
+    expect(valueOf(recs[0]!).eventKey).toBe(seatEventKeyOf('HELD', eventId, h.holdId, h.seats[0]!.seatId, h.fencingToken));
     expect(valueOf(recs[0]!)).toEqual(expectedSeatEvent(eventId, item!.fields));
     expect(await xlen(redis, eventId)).toBe(0);
     expect(await xpending(redis, eventId)).toBe(0);
@@ -325,6 +325,6 @@ describe('SeatStreamRelay: 실패와 다시 보내기(적어도 한 번)', () =>
     expect(await xpending(redis, eventId)).toBe(0);
     const recs = await reader.waitFor(on(SEAT_TOPIC, eventId), 1, 60_000);
     for (const r of recs) expect(valueOf(r)).toEqual(expectedSeatEvent(eventId, item!.fields));
-    expect(new Set(recs.map((r) => valueOf(r).eventKey))).toEqual(new Set([seatEventKeyOf('HELD', eventId, h.holdId, h.seats[0]!.seatId)]));
+    expect(new Set(recs.map((r) => valueOf(r).eventKey))).toEqual(new Set([seatEventKeyOf('HELD', eventId, h.holdId, h.seats[0]!.seatId, h.fencingToken)]));
   }, 240_000);
 });
