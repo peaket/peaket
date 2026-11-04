@@ -98,6 +98,14 @@ export class DrizzleSessionStore implements SessionStore {
           .where(and(eq(accountProvider.provider, provider), eq(accountProvider.providerUserId, providerUserId), eq(accountProvider.accountId, accountId)));
         return Boolean(row);
       },
+      providersOf: async (accountId) =>
+        (
+          await tx
+            .select({ provider: accountProvider.provider, linkedAt: accountProvider.linkedAt })
+            .from(accountProvider)
+            .where(eq(accountProvider.accountId, accountId))
+            .orderBy(asc(accountProvider.linkedAt))
+        ).map((r) => ({ provider: r.provider as Provider, linkedAt: r.linkedAt.getTime() })),
       bindDevice: async (accountId, deviceRef, now) => {
         const [made] = await tx
           .insert(device)

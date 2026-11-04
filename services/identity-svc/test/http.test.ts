@@ -79,6 +79,16 @@ describe('탈퇴 경로(DELETE /v1/identity/account, identity §8 탈퇴의 첫 
   });
 });
 
+describe('로그인 수단 목록(GET /v1/identity/providers, identity §8 탈퇴 화면 연결)', () => {
+  test('I-T16_연결한로그인수단을연결한순서로주고_마지막로그인은null이며_캐시하지않는다', async () => {
+    const s = await login();
+    const r = await svc.http.inject({ method: 'GET', url: '/v1/identity/providers', headers: { 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '' } });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(r.payload)).toEqual({ providers: [{ provider: 'kakao', linkedAt: new Date(svc.clock.now()).toISOString(), lastLoginAt: null }] });
+  });
+});
+
 describe('팬 토큰 갱신 경로', () => {
   test('I-T4_리프레시쿠키로갱신하면_204와새쿠키둘이고본문에토큰이없다 [ASVS v5.0.0-3.3.4]', async () => {
     const s = await login();

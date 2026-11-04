@@ -600,6 +600,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | sessionStorage | `peaket.admission.{eventId}` | 입장 토큰, 서버 ECDH 공개키(JWK), 좌석맵 파일 경로, 받은 시각 | 구매 세션 | 세션 끝·로그아웃·만료 | P1(구매 세션 자격) |
 | IndexedDB `peaket-purchase` | `sessions/{jti}` | HMAC `CryptoKey`(위조 확인용 값을 만드는 비밀 키. 추출 불가), 일련번호, 만료 | 구매 세션 | 세션 끝·로그아웃·만료, 앱 시작 때 만료 항목 | P1 |
 | 메모리 | — | 재인증 토큰 | 5분, 한 번 | 쓴 뒤 | P1 |
+| sessionStorage | `peaket.withdraw.reauth` | 탈퇴 재인증으로 떠난 시각(밀리초. 토큰은 넣지 않는다, docs/features/identity.md §8 '탈퇴 화면 연결', 추천 적용 2026-11-04) | 10분 [가정] | 재인증에서 돌아왔을 때(늘 지운다) | 등급 밖(숫자) |
 | localStorage | `peaket.autoassign.{eventId}` | 희망 조건(등급 ID·매수·휠체어석·분리 허용) | 판매 종료까지 | 로그아웃, 배정 확정, 판매 종료 | 등급 밖 |
 | sessionStorage | `peaket.checkout.{holdId}` | 동의 체크, 고른 결제 수단(이름·전화는 없다) | 탭 | 결제 접수, 구매 세션 끝 | 등급 밖 |
 | sessionStorage | `peaket.accept.{orderId}` | 결제 접수를 보낸 시각과 그 멱등키(결제사 값은 넣지 않는다) | 탭 | 결과 확정, 구매 세션 끝 | 등급 밖 |
@@ -1353,6 +1354,7 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp
   + 파트너 콘솔: connect-src는 'self' https://partner-api.peaket.example
   + 본인확인을 여는 화면: form-action에 본인확인기관 출처(연동 계약 때 확정)
   + 로그인 화면: form-action에 세 소셜 제공자 인가 출처(연동 때 제공자 문서로 확정)
+  + 재인증을 시작하는 화면(계정 설정의 탈퇴 등, POST /reauth/{provider} 뒤 303으로 제공자로 간다): 로그인 화면과 같은 form-action(추천 적용 2026-11-04, BUILD_ORDER BOT-036)
 
 [E 결제 화면: 주문·결제, 굿즈 결제]  B에 더해
 script-src 'nonce-{n}' 'strict-dynamic' https://js.tosspayments.com https://cdn.portone.io   (호스트는 CSP2 브라우저용)

@@ -63,6 +63,8 @@ export interface SessionTx {
   createAccount(input: { id: string; email: string | null }, now: number): Promise<void>;
   linkProvider(accountId: string, provider: Provider, providerUserId: string, now: number): Promise<void>;
   isProviderLinked(accountId: string, provider: Provider, providerUserId: string): Promise<boolean>;
+  /** 그 계정에 연결된 로그인 수단(연결한 순서) */
+  providersOf(accountId: string): Promise<{ provider: Provider; linkedAt: number }[]>;
   /** 계정의 그 기기 가명 행 ID. 없으면 만든다 */
   bindDevice(accountId: string, deviceRef: string, now: number): Promise<string>;
   /** 끝나지 않았고 만료 전인 그 계정의 세션 */

@@ -62,6 +62,8 @@ test('I-T16_PostgreSQL에서_탈퇴는계정·로그인수단·기기를지우�
   const a = await t.login('pg-w-1');
   await t.login('pg-w-1');
   await t.verify(a.accountId, 'pg-withdraw-person');
+  // 로그인 수단 목록(연결한 순서, BOT-036)
+  expect(await t.sessions.transaction((tx) => tx.providersOf(a.accountId))).toMatchObject([{ provider: 'kakao' }]);
   const token = await t.reauth(a);
   await t.withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: {} });
   expect(await q('select status, email, member_code, deleted_at from account where id = $1', [a.accountId])).toEqual([{ status: 'DELETED', email: null, member_code: null, deleted_at: new Date(clock.now()) }]);

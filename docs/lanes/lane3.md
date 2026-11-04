@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-036(wbs 3.1.2 ③): 탈퇴 화면(SCR-017)을 재인증(`POST /reauth/{provider}` → `POST /reauth/token`)과 실제 `DELETE /v1/identity/account`에 잇기(409 `fraudHold` 문구 → `acknowledgeFraudHold`), 로그인 수단 목록 API, 브라우저 확인. 그 뒤 BOT-037(탈퇴 계정의 대기열 키 5일 삭제) → BOT-040 → BOT-045 → BOT-110~160.
+- BOT-037(wbs 3.1.2 ④): 탈퇴 계정의 대기열 키(`q:dup`·`q:adm`)를 5일 안에 지우는 길(identity 사건 계약과 queue-svc 처리기, 전환 기간의 옛 pid 포함, I-T27). 그 뒤 BOT-040 → BOT-045 → BOT-110~160.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
@@ -23,6 +23,12 @@
 - BOT-030: 탈퇴 뒤 본인확인 기록 파기(둘째 트랜잭션)가 실패해 남은 기록이 있으면, 정비가 돌기 전에 같은 사람이 새 계정으로 본인확인할 때 409와 다른 계정 시도 기록이 잘못 남는다. 중복 판정에서 주인이 탈퇴한 계정이면 그 자리에서 지우고 다시 판정한다(services/identity-svc/src/modules/verification/application/confirm-verification.ts)
 - BOT-030: 정비 withdrawal-finish가 매일 `account` 표 전체를 읽는다. 정리 중·탈퇴한 계정의 부분 인덱스를 트랜잭션 밖 `CREATE INDEX CONCURRENTLY` 파일로 더한다(운영 실행기 BAS-060 뒤, docs/devops.md §7.2)
 - BOT-010: 늦은 메시지를 듣는 10분 타이머를 `cancel()` 때 지우지 않는다(해는 없고 메모리를 잠깐 잡는다), 브라우저의 Web Locks 연결(`refreshLock`)을 직접 보는 시험이 없다(flow.ts, browser.ts)
+- BOT-036: 재인증 버튼이 토큰 갱신을 기다리는 동안 처리 중 표시·연타 막기가 없고, 그사이 창을 닫아도 갱신이 끝나면 제공자로 넘어간다. 처리 중 상태와 `aria-disabled`를 두고 닫으면 이동을 취소한다(apps/web/src/_pages/settings/ui/SettingsFlows.tsx `confirmReauth`)
+- BOT-036: 떠나기 전 갱신이 네트워크 오류·5xx여도 로그인 화면으로 보낸다. 401(갱신 거절)일 때만 로그인, 나머지는 '잠시 뒤 다시'로 안내하고 정본 문장도 401로 좁힌다(features/account-withdraw/flow.ts `refresh`, docs/features/identity.md §8 '탈퇴 화면 연결')
+- BOT-036: `/reauth/token` 응답에 `provider`가 없으면 제공자가 비어 403 뒤 재인증 창이 목업 분기로 빠져 되풀이된다(지금 서버는 늘 싣는 숨은 결함). 비면 `pickProvider()`로 채우고 실제 모드 탈퇴 목적은 목업으로 빠지지 않게 한다(SettingsFlows.tsx)
+- BOT-036: 403 `reauth-required`는 만료 말고 이미 쓴 토큰·계정 불일치·탈퇴할 수 없는 상태에서도 오는데 늘 '5분이 지났습니다'를 보인다. 문구를 '확인이 만료되었거나 이미 쓰였습니다'처럼 넓히고, `reverify-required` 전용 문구를 정본에 적거나 하나로 합친다(flow.ts `reauthFailureText`, docs/features/identity.md §8)
+- BOT-036: 저장소 표의 `peaket.withdraw.reauth` 줄 '지우는 때'에 로그아웃이 없고(§5.14.4 정리 루틴이 지우지 않아 같은 탭의 다른 계정에 묻지 않은 재인증 실패 창이 뜰 수 있다) 수명은 '탭(믿는 시간 10분)'이다(docs/frontend.md §3.12, 로그아웃 정리 루틴)
+- BOT-036: 미리보기 상태 고르기가 클라이언트 이동이라 `SettingsFlows` 상태(창·목적·토큰)가 남아 목업과 실제 흐름이 섞인다(개발 서버만). `key={state}`를 붙인다(apps/web/src/_pages/settings/ui/SettingsPage.tsx)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
@@ -31,3 +37,4 @@
 - 2026-11-04 BOT-025 pid 키 전환과 두 키 1인 1순번(R-273, I-T49·Q-T45): identity 전환 작업(전환 기록, 이어 하기, 끝 시각 뒤 pid_prev 지우기)과 GetVerificationStatus(previous_pid), queue-svc 옛 pid → 새 pid 차례의 두 키 진입·입장 확정과 옮겨 쓰기. 화면이 없어 브라우저 확인은 하지 않았다.
 - 2026-11-04 BOT-030 탈퇴 첫 구현(R-276, I-T16·I-T27·I-T8): 재인증 토큰 1회 사용, 계정·로그인 수단·기기·본인확인 기록 파기와 세션 종료(DELETE), 연계정보 처리 기록 1년 보존 스키마, 정비 다섯(만 14세 미만 정리 마무리 포함), 정리 중 계정의 구매 권한 빼기, 끝난 세션의 리프레시 토큰 해시 지우기. 나머지는 BOT-035로 나눴다.
 - 2026-11-04 BOT-035 이용 제한 중 탈퇴의 대조값 보관(R-278, I-T68): `SetRestrictedCiHold`(판 비교·RELEASED 지우기·탈퇴한 계정의 행), 탈퇴 409 `fraudHold`와 같은 재인증 토큰으로 다시 보내기, 다시 가입한 계정에 잇기·`restrictedUntil`·제한 끝까지 구매 권한 빼기, 정비 지우기. BOT-035를 셋으로 나눠 화면 연결은 BOT-036, 대기열 키는 BOT-037로 뒀다.
+- 2026-11-04 BOT-036 탈퇴 화면 연결(R-281, I-T16·I-T68 ⑨): SCR-017 탈퇴를 재인증(`POST /reauth/{provider}` → `POST /reauth/token`, 토큰은 메모리에만)과 실제 `DELETE /v1/identity/account`에 잇고(409 fraudHold 안내 뒤 같은 토큰으로 다시, 403이면 재인증 실패), 로그인 수단 목록 API를 더했다. 브라우저 확인은 Playwright로 대신(세 시나리오 통과).

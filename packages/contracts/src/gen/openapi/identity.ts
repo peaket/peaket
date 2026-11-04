@@ -428,10 +428,16 @@ export const DeleteV1IdentityAccountBody = zod.object({
 export const DeleteV1IdentityAccountResponse = zod.void()
 
 /**
- * FR-017, FR-048
+ * FR-017, FR-048. 연결한 순서. 캐시하지 않는다
  * @summary 연결된 로그인 수단 목록(제공자, 연결일, 마지막 로그인)
  */
-export const GetV1IdentityProvidersResponse = zod.unknown()
+export const GetV1IdentityProvidersResponse = zod.object({
+  "providers": zod.array(zod.object({
+  "provider": zod.enum(['kakao', 'naver', 'google']),
+  "linkedAt": zod.iso.datetime({"offset":true}),
+  "lastLoginAt": zod.iso.datetime({"offset":true}).nullable().describe('그 제공자로 마지막 로그인한 시각. 아직 기록하지 않아 늘 null이다(제공자별 로그인 시각은 계정 연결·병합 단계 BOT-040이 남긴다)')
+}).describe('계정에 연결된 로그인 수단 하나(GET /v1/identity/providers, docs/features/identity.md §8 \'탈퇴 화면 연결\', 추천 적용 2026-11-04, BUILD_ORDER BOT-036). 화면은 재인증할 제공자를 이것으로 고른다'))
+})
 
 /**
  * FR-017, POL-034. 해제 알림 발송

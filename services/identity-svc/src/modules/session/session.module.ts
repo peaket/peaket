@@ -13,7 +13,8 @@ import { IssueReauthToken } from './application/issue-reauth-token.js';
 import { RefreshSession } from './application/refresh-session.js';
 import { WithdrawAccount } from './application/withdraw-account.js';
 import { ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
-import { AccountController } from './inbound/account.controller.js';
+import { AccountController, ProvidersController } from './inbound/account.controller.js';
+import { ListProviders } from './application/list-providers.js';
 import { COOKIE_DOMAIN, TokenController } from './inbound/token.controller.js';
 
 export interface SessionModuleOptions {
@@ -35,7 +36,7 @@ export class SessionModule {
       module: SessionModule,
       // 본인확인 컨텍스트가 계정 정리(ACCOUNT_CLOSURE)를 쓰므로 전역으로 내준다
       global: true,
-      controllers: [TokenController, AccountController],
+      controllers: [TokenController, AccountController, ProvidersController],
       providers: [
         CloseAccount,
         { provide: ACCOUNT_CLOSURE, useExisting: CloseAccount },
@@ -45,6 +46,7 @@ export class SessionModule {
         GetVerificationStatus,
         RefreshSession,
         WithdrawAccount,
+        ListProviders,
         FinishWithdrawals,
         // 재인증 토큰은 이 서비스의 팬 공개키 묶음과 발급자로 확인한다(identity §8 '탈퇴의 첫 구현')
         { provide: REAUTH_VERIFIER, useFactory: (clock: Clock) => new JoseReauthVerifier(o.keys, o.signer.issuer, clock), inject: [CLOCK] },

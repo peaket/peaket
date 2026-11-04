@@ -5,6 +5,7 @@
 import Link from 'next/link';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
 import { ME } from '@/entities/me';
+import { isLiveWithdraw } from '@/features/account-withdraw';
 import { VERIFY_PURPOSE_TEXT, VerifyIdentityButton } from '@/features/identity-verify';
 import { formatWon } from '@/entities/production';
 import { SCR017_STATES } from '@/shared/config/screens.account';
@@ -56,6 +57,8 @@ export async function SettingsPage({ searchParams }: PageProps) {
         provider={provider}
         quote={quote}
         fraudHoldUntil={FRAUD_HOLD_UNTIL}
+        // 실제 탈퇴는 미리보기 상태가 '기본'일 때만(?state= 미리보기는 목업 흐름, 새 맥락 리뷰 중간 4)
+        live={isLiveWithdraw() && state === '기본'}
         dark={dark}
       >
         <main className="page-main" id="main" tabIndex={-1}>

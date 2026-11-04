@@ -160,6 +160,11 @@ export class MemorySessionStore implements SessionStore {
         s.providers.set(k, { accountId, linkedAt: now });
       },
       isProviderLinked: async (accountId, provider, providerUserId) => s.providers.get(providerKey(provider, providerUserId))?.accountId === accountId,
+      providersOf: async (accountId) =>
+        [...s.providers]
+          .filter(([, v]) => v.accountId === accountId)
+          .map(([k, v]) => ({ provider: k.split('\u0000')[0] as Provider, linkedAt: v.linkedAt }))
+          .sort((a, b) => a.linkedAt - b.linkedAt),
       bindDevice: async (accountId, ref, now) => {
         const found = [...s.devices.values()].find((d) => d.accountId === accountId && d.ref === ref);
         if (found) return found.id;
