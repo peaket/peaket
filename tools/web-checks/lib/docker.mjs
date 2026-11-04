@@ -3,6 +3,7 @@
 //   node lib/docker.mjs layers                        SEED CSS 층 검사. 서버(앱 다섯의 PoC 빌드)는 이 PC에서 먼저 띄워 둔다
 //   node lib/docker.mjs seatmap                       5만 석 좌석맵 PoC(K5) 네 프로젝트
 //   node lib/docker.mjs budgets                       성능 예산(첫 JS·Lighthouse). 서버는 이 PC에서 `node seed-css/serve-all.mjs --budgets`로 먼저 띄운다
+//   node lib/docker.mjs seatmap-pkg                   @peaket/seatmap 세 엔진 검사(HOT-120). 시연 페이지는 먼저 `pnpm --filter @peaket/seatmap demo:build`
 // 기준 이미지는 CI와 같은 이 이미지에서만 찍는다(브라우저 그리기는 OS·판·글꼴에 따라 다르다, d2 §1).
 // 컨테이너는 이 패키지를 node_modules 없이 옮겨 리눅스용으로 다시 설치한다. 결과는 reports/docker-<mode>/에 둔다.
 import { spawnSync } from 'node:child_process';
@@ -16,8 +17,8 @@ export const IMAGE = 'mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a7
 const pkg = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repo = resolve(pkg, '../..');
 const [mode, ...rest] = process.argv.slice(2);
-if (mode !== 'visual' && mode !== 'layers' && mode !== 'seatmap' && mode !== 'budgets') {
-  console.error('쓰는 법: node lib/docker.mjs visual [--update-snapshots] | layers | seatmap | budgets');
+if (mode !== 'visual' && mode !== 'layers' && mode !== 'seatmap' && mode !== 'budgets' && mode !== 'seatmap-pkg') {
+  console.error('쓰는 법: node lib/docker.mjs visual [--update-snapshots] | layers | seatmap | budgets | seatmap-pkg');
   process.exit(2);
 }
 const update = rest.includes('--update-snapshots');
@@ -34,6 +35,14 @@ if (mode === 'visual') {
   }
   mounts.push('-v', `${dist}:/repo/apps/web/queue-room/dist:ro`);
 }
+if (mode === 'seatmap-pkg') {
+  const demo = join(repo, 'packages/seatmap/dist-demo');
+  if (!existsSync(join(demo, 'index.html'))) {
+    console.error('좌석맵 시연 페이지 빌드가 없다: pnpm --filter @peaket/seatmap demo:build');
+    process.exit(2);
+  }
+  mounts.push('-v', `${demo}:/repo/packages/seatmap/dist-demo:ro`, '-v', `${join(repo, 'packages/ds/src/gen')}:/repo/packages/ds/src/gen:ro`);
+}
 const run = {
   visual: `pnpm exec playwright test -c playwright.visual.config.mjs${update ? ' --update-snapshots' : ''}`,
   layers: 'PEAKET_WEB_CHECKS_HOST=host.docker.internal PEAKET_WEB_CHECKS_SERVERS=external pnpm exec playwright test -c playwright.layers.config.mjs',
@@ -41,6 +50,8 @@ const run = {
   seatmap: 'pnpm exec playwright test -c playwright.seatmap.config.mjs',
   // 성능 예산(BAS-220): Lighthouse는 CI와 같은 이 이미지의 Chromium으로 잰다(랩 값은 기계·판에 따라 다르다)
   budgets: 'PEAKET_WEB_CHECKS_HOST=host.docker.internal PEAKET_WEB_CHECKS_SERVERS=external pnpm exec playwright test -c playwright.budgets.config.mjs',
+  // 좌석맵 패키지(HOT-120): 리눅스의 Firefox·WebKit은 OffscreenCanvas가 있어 Worker 길을 본다
+  'seatmap-pkg': 'pnpm exec playwright test -c playwright.seatmap-pkg.config.mjs',
 }[mode];
 const script = [
   'set -e',

@@ -203,8 +203,11 @@ describe('Worker 처리기(메인 스레드 대체와 같은 코드)', () => {
     const ctx = fakeCtx();
     const handle = createHandler(host, () => ctx);
     await handle(init);
-    expect(posted).toEqual([{ type: 'ready', firstPaintAt: 1000, layoutVersion: 3, seatCount: 800, sectionCount: 4 }]);
-    expect(ctx.calls.filter(([n]) => n === 'fillText')).toHaveLength(4); // 구역 이름
+    expect(posted).toEqual([{ type: 'ready', firstPaintAt: 1000, drawnAt: 1000, layoutVersion: 3, seatCount: 800, sectionCount: 4 }, expect.objectContaining({ type: 'view', level: 'overview', zoom: 1, selectable: false })]);
+    // 구역마다 '이름 등급'과 남은 상태 글자(색만으로 가르지 않는다)
+    const texts = ctx.calls.filter(([n]) => n === 'fillText').map((c) => c[1]);
+    // 스냅샷에서 앞 400석(0·1구역)이 점유라 매진
+    expect(texts).toEqual(['1구역 VIP', '매진', '2구역 R', '매진', '3구역 S', '많음', '4구역 VIP', '많음']);
   });
 
   it('누르면 좌석 ID를, 고르면 내 선택 목록을 보내고, 틀린 메시지·판이 다른 스냅샷은 error로 알린다', async () => {
@@ -238,7 +241,7 @@ describe('OffscreenCanvas가 없는 브라우저', () => {
       const createWorker = vi.fn();
       const c = createSeatMap({ canvas, layoutUrl: '/seatmap-layouts/3.json', theme: 'dark', onMessage: (m) => got.push(m), createWorker, env: {} });
       expect(c.mode).toBe('main-thread');
-      await vi.waitFor(() => expect(got).toHaveLength(1));
+      await vi.waitFor(() => expect(got.length).toBeGreaterThanOrEqual(1));
       expect(got[0]).toMatchObject({ type: 'ready', seatCount: 800 });
       expect(createWorker).not.toHaveBeenCalled();
       expect(ctx.calls.length).toBeGreaterThan(0);

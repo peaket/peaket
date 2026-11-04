@@ -57,7 +57,7 @@ export const SeatMapColumns = zod.object({
   "points": zod.array(zod.array(zod.int()).min(seatMapColumnsStageItemPointsItemMin).max(seatMapColumnsStageItemPointsItemMax)).min(seatMapColumnsStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')),
-  "tiers": zod.array(zod.string()).min(1).max(seatMapColumnsTiersMax).describe('등급 ID 목록. 좌석 tier 열이 이 색인을 쓴다'),
+  "tiers": zod.array(zod.string()).min(1).max(seatMapColumnsTiersMax).describe('등급 ID 목록(보통 가격이 높은 등급부터). 좌석 tier 열이 이 색인을 쓴다. 전체 배치의 구역 면 색(앞 셋이 heat.3·heat.2·heat.1, d2 CMP-024)은 화면이 회차 가격표로 넘긴 등급 차례를 쓰고, 넘기지 않으면 이 차례를 쓴다'),
   "seatCount": zod.int().min(1).max(seatMapColumnsSeatCountMax).describe('가장 큰 seatIndexRange.to + 1'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string(),

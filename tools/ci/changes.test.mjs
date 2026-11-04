@@ -355,6 +355,7 @@ test('BAS170_화면앱·화면용패키지·토큰과대비표·화면예산표�
     'apps/web/queue-room/src/main.ts',
     'packages/ds/src/styles/index.css',
     'packages/config/eslint/index.mjs',
+    'packages/seatmap/src/engine.ts',
     'docs/design/tokens.json',
     'docs/design/d2-design-system.md',
     'docs/frontend.md',

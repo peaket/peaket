@@ -115,6 +115,7 @@ export function fakeCtx() {
     fill: () => void calls.push(['fill', ctx.fillStyle]),
     stroke: () => void calls.push(['stroke', ctx.strokeStyle]),
     fillText: rec('fillText'),
+    drawImage: rec('drawImage'),
   };
   return ctx;
 }

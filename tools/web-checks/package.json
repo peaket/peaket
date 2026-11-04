@@ -12,7 +12,8 @@
     "visual": "playwright test -c playwright.visual.config.mjs",
     "visual:update": "playwright test -c playwright.visual.config.mjs --update-snapshots",
     "seatmap": "playwright test -c playwright.seatmap.config.mjs",
-    "budgets": "playwright test -c playwright.budgets.config.mjs"
+    "budgets": "playwright test -c playwright.budgets.config.mjs",
+    "seatmap-pkg": "playwright test -c playwright.seatmap-pkg.config.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

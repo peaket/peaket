@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- HOT-120(wbs 2.6.2 ②, 두 단계 그리기·미니맵·[전체 보기])을 한다. HOT-290~320(wbs 2.10.1)·HOT-340·350(2.10.2)·HOT-360(2.10.7)은 선행 wbs 0.6.2(BAS-180, SEED React 교체)가 OPEN[18](공급망 규칙에 막힌 SEED React·Storybook 설치, 소유자 결정)에 막혀 있어 OPEN[18]이 풀리면 BAS-180 나머지부터 한다(제3자 고지는 끝남). 화면이 바뀌는 단계는 브라우저 확인을 한다.
+- 구간 끝 정리 목록(아래)을 고친다. 구간 1 갈래 2의 남은 단계는 모두 선행에 막혀 있다. HOT-290~320(wbs 2.10.1)·HOT-340·350(2.10.2)·HOT-360(2.10.7)은 선행 wbs 0.6.2(BAS-180, SEED React 교체)가 OPEN[18](공급망 규칙에 막힌 SEED React·Storybook 설치, 소유자 결정)에 막혀 있어 OPEN[18]이 풀리면 BAS-180 나머지부터 한다(제3자 고지는 끝남). 화면이 바뀌는 단계는 브라우저 확인을 한다.
 
 ## 구간 끝 정리 목록
 - 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
@@ -20,6 +20,7 @@
 - BAS-190: 느리게 하기 보정식이 'Worker 시작까지'의 Worker 몫과 첫 프레임 기다림을 곱하지 않는다(지금 거짓 통과 없음). Worker 세션에도 CPU 느리게 하기를 걸 수 있는지 본다(tools/web-checks/seatmap/seatmap.spec.mjs)
 - BAS-190: PoC 받기가 압축 없는 `no-store`라 실제 길(HTTP 캐시의 brotli 풀기)을 재지 않는다. 미리 압축한 `.br`로 한 번 잰다(tools/web-checks/lib/serve.mjs)
 - BAS-190: Worker가 풀기 전 JSON 전체(`L.json`)를 붙들고 힙을 재지 않았다. 좌석 ID 열만 남기고 힙을 잰다(tools/web-checks/seatmap/page/worker.js)
+- HOT-120: 등급이 섞인 구역은 좌석이 가장 많은 등급 하나만 면 색·글자로 적는다(packages/seatmap/src/overview.ts sectionTiers)
 - BAS-210: 기능 확인 범위가 넓다. 모듈 맨 위(Program)의 확인이 파일 전체를 통과시키고, 같은 함수 안에서 확인과 사용의 순서를 보지 않는다(packages/config/eslint/bcd-rule.mjs)
 - BAS-210: TypeScript 문법을 거친 확인(`typeof (AbortSignal as any).any`)을 못 알아봐 헛보고하고, `globalThis.AbortSignal.any`는 놓친다(packages/config/eslint/bcd-rule.mjs)
 - BAS-210: 목표 브라우저 질의에 Android Chrome(NFR-019 스캐너·콘솔)이 없다(Samsung이 대부분 대신 막는다)(packages/config/eslint/web-compat.mjs)
@@ -39,3 +40,4 @@
 - 2026-11-04 BAS-210 화면 공용 패키지 골격(wbs 0.6.4 ①, FE-T3·FE-T4·FE-T15·FE-T22): api-client 실행 정책·telemetry·validation·console-contract를 더하고 화면 코드에 브라우저 지원 린트를 걸었다. eslint-plugin-compat의 판 자료가 `AbortSignal.any` 같은 새 기능을 몰라 MDN 자료를 직접 읽는 보조 규칙을 더했다. 자세한 것은 커밋 본문.
 - 2026-11-04 BAS-220 성능 예산·보안 헤더·정적 자산(wbs 0.6.4 ②, FE-T1): 대기실 size-limit, 경로별 첫 JS와 Lighthouse 적재 지표 검사, 묶음별 보안 헤더 값 한 곳, 서버 액션 키 확인, 올릴 파일 목록·SBOM, Turborepo 캐시, CI `budgets` 잡을 더했다. 소비자 웹 랩 LCP 12.5초(글꼴 전체 2MB)는 기준선으로 막고 HOT-290에 넘겼다. 자세한 것은 커밋 본문.
 - 2026-11-04 HOT-110 좌석맵 패키지(wbs 2.6.2 ①, FE-T15 단위 부분): `packages/seatmap`(열 단위 파일 검사·풀기, 격자 색인 누른 좌석 찾기, 스냅샷·델타 이진 형식, 색 + 무늬, Worker와 메인 스레드 대체)을 만들고 계약에 팬 파일 `SeatMapColumns`를 나눴다. 자세한 것은 커밋 본문.
+- 2026-11-04 HOT-120 두 단계 그리기(wbs 2.6.2 ②): 전체 배치(등급 면 색·남은 상태 글자) → 좌석, 구역 비트맵 캐시, 미니맵·[+]·[−]·[전체 보기]·구역 누르기 확대를 `packages/seatmap`에 더하고, 시연 페이지로 세 엔진 검사와 첫 그림 시각 대조(−0.5ms)를 붙였다. iOS 실기기는 소유자 몫. 자세한 것은 커밋 본문.

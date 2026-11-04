@@ -1083,7 +1083,7 @@ components:
         layoutVersion: { type: integer, minimum: 1, description: "파트너가 저장해 게시한 배치 판(1부터. 0은 게시하지 않는 저장 전 초안이다)" }
         canvas: { type: object, additionalProperties: false, required: [minX, minY, width, height], description: "공연장 캔버스(cm). 한 변 100,000(1km) [가정] 이하이고 무대·구역 도형과 좌석 좌표는 모두 이 안에 있다(브라우저 격자 색인이 끝없이 커지지 않게)", properties: { minX: { type: integer }, minY: { type: integer }, width: { type: integer, minimum: 1, maximum: 100000 }, height: { type: integer, minimum: 1, maximum: 100000 } } }
         stage: { type: array, items: { $ref: '#/components/schemas/SeatMapShape' } }
-        tiers: { type: array, minItems: 1, maxItems: 16, items: { type: string }, description: "등급 ID 목록. 좌석 tier 열이 이 색인을 쓴다" }
+        tiers: { type: array, minItems: 1, maxItems: 16, items: { type: string }, description: "등급 ID 목록(보통 가격이 높은 등급부터). 좌석 tier 열이 이 색인을 쓴다. 전체 배치의 구역 면 색(앞 셋이 heat.3·heat.2·heat.1, d2 CMP-024)은 화면이 회차 가격표로 넘긴 등급 차례를 쓰고, 넘기지 않으면 이 차례를 쓴다" }
         seatCount: { type: integer, minimum: 1, maximum: 1000000, description: "가장 큰 seatIndexRange.to + 1" }
         sections:
           type: array

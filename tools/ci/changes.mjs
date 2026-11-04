@@ -51,9 +51,10 @@ const RULES = [
   // 모델 기반 시험의 명령 이름 목록·재생 기록(services/*/test-int/*-model/, specs.json의 mbt)이 바뀌어도 이름 목록 검사를 돌린다(wbs 2.3.4, V-T40)
   [/^(specs\/|tools\/spec-check\/|\.github\/workflows\/spec-check\.yml$|services\/[^/]+\/test-int\/[a-z0-9-]+-model\/)/, ['specs']],
   // 화면 잡(ci-web.yml, docs/devops.md §3.1, BUILD_ORDER BAS-170): 화면 앱·화면용 패키지, 그 검사가 읽는 정본(토큰·d2 대비표·
-  // frontend 예산 표), 화면 브라우저 검사 도구, 이 워크플로, 작업 공간 파일(잠금 파일이 바뀌면 화면 의존성도 바뀐다)
+  // frontend 예산 표), 화면 브라우저 검사 도구, 이 워크플로, 작업 공간 파일(잠금 파일이 바뀌면 화면 의존성도 바뀐다).
+  // 좌석맵 패키지는 세 엔진 검사(seatmap-pkg 잡, BUILD_ORDER HOT-120)가 본다
   [
-    /^(apps\/|packages\/(ds|config)\/|docs\/design\/(tokens\.json|d2-design-system\.md)$|docs\/frontend\.md$|tools\/web-checks\/|\.github\/workflows\/ci-web\.yml$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|turbo\.json$|\.nvmrc$)/,
+    /^(apps\/|packages\/(ds|config|seatmap)\/|docs\/design\/(tokens\.json|d2-design-system\.md)$|docs\/frontend\.md$|tools\/web-checks\/|\.github\/workflows\/ci-web\.yml$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|turbo\.json$|\.nvmrc$)/,
     ['web'],
   ],
   [/^tools\//, ['tools']],

@@ -10,7 +10,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "demo:build": "node demo/gen.mjs && vite build -c demo/vite.config.mjs"
   },
   "dependencies": {
     "@peaket/ds": "workspace:*",
@@ -20,6 +21,7 @@
     "@peaket/config": "workspace:*",
     "@types/node": "^24.0.0",
     "typescript": "^7.0.2",
+    "vite": "^8.3.5",
     "vitest": "^5.0.5"
   }
 }

@@ -172,3 +172,37 @@ jobs:
           name: budgets-reports
           path: tools/web-checks/reports/
           retention-days: 7
+
+  # 좌석맵 패키지 세 엔진 검사(BUILD_ORDER HOT-120, docs/frontend.md §5.2·§5.17): 시연 페이지를 빌드해 같은 컨테이너의 Chromium·Firefox·WebKit에서
+  # 첫 그림(전체 배치)·구역 확대·상태 색·누르기·미니맵을 보고, Chromium에서 첫 그림 시각을 성능 추적의 프레임 그리기 기록과 맞춰 본다
+  seatmap-pkg:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile --filter "@peaket/seatmap..."
+      - run: pnpm --filter @peaket/seatmap demo:build
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/web-checks
+      - run: pnpm run seatmap-pkg
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: seatmap-pkg-reports
+          path: tools/web-checks/reports/
+          retention-days: 7

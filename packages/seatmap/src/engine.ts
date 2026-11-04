@@ -1,24 +1,40 @@
-// 좌석맵 그리기 엔진(docs/frontend.md §5.2, §1.5 'OffscreenCanvas 2D' 행, BUILD_ORDER HOT-110). Worker와 메인 스레드 대체가 같은 코드를 쓴다
-// (OffscreenCanvas가 없는 브라우저는 같은 그리기 모듈을 메인 스레드에서 돌린다, FE-T15).
-// 첫 그림은 전체 배치도(무대·구역 도형과 구역의 남은 비율, §5.2 단계 5)다. 고를 수 있는 배율에서는 보이는 좌석만 바로 그린다.
-// 두 단계 그리기의 배율 전환·미니맵·[전체 보기]·구역 비트맵 캐시는 BUILD_ORDER HOT-120에서 더한다.
+// 좌석맵 그리기 엔진(docs/frontend.md §5.2, §1.5 'OffscreenCanvas 2D' 행, CMP-021, docs/design/d5 좌석맵 상태 표, BUILD_ORDER HOT-110·HOT-120).
+// Worker와 메인 스레드 대체가 같은 코드를 쓴다(OffscreenCanvas가 없는 브라우저는 같은 그리기 모듈을 메인 스레드에서 돌린다, FE-T15).
+// 단계: loading(스냅샷 전, 구역 외곽선만) → overview(무대·구역 면에 등급 색과 남은 상태 글자, 좌석은 그리지 않는다)
+// → seats(화면에 보이는 구역 하나라도 화면 폭의 1/3 이상 [가정]이면 보이는 구역의 좌석. 축소하면 다시 구역 면으로 합쳐진다).
+// seats에서 좌석이 24 CSS px 미만이면 구역 비트맵(캐시)을 늘려 그리고, 24px 이상(고를 수 있는 배율)이면 보이는 좌석만 바로 그린다.
+// 확대·축소는 카메라 행렬만 바꾼다(seat-hold §10). 미니맵(지금 보는 범위)은 seats 단계에서 캔버스 오른쪽 아래에 그린다.
+import { BitmapCache, scaleBucket } from './bitmaps';
 import { buildGrids, cameraFit, hitAtScreen, type Camera, type SectionGrid } from './grid';
 import { FLAG, decodeLayout, sectionOf, seatIdOf, type DecodedLayout, type SeatMapColumnsFile } from './layout';
+import { overviewPalette, pointInPolygon, sectionStatus, sectionTiers, STATUS_LABEL, tierFace } from './overview';
 import { drawSeat, seatState, seatStyle, type ColorMode, type Ctx2D } from './paint';
-import { applySnapshot, decodeSnapshot, STATE, type SectionVersions } from './wire';
+import { applyDelta, applySnapshot, decodeSnapshot, STATE, type DeltaDecision, type Frame, type SectionVersions } from './wire';
 
 /** 좌석 한 변(cm) [가정] */
 export const SEAT_CM = 50;
-/** 이 크기(CSS px) 이상이면 좌석을 그린다(그보다 작으면 전체 배치도) */
-export const SEAT_DRAW_MIN_PX = 4;
+/** 이 크기(CSS px) 이상이면 좌석을 그린다(그보다 작으면 seats 단계여도 구역 면만) */
+export const SEAT_DRAW_MIN_PX = 2;
 /** 좌석을 고를 수 있는 가장 작은 크기(CSS px, §5.11·CMP-021 minSeatPx). 그보다 작으면 누른 좌석이 없다 */
 export const MIN_SELECT_PX = 24;
+/** 보이는 구역이 화면 폭의 이 비율 이상이면 좌석 단계 [가정](CMP-021, seat-hold §10) */
+export const SEATS_SECTION_RATIO = 1 / 3;
+/** [+]·[−] 한 번의 배율 [가정] */
+export const ZOOM_STEP = 1.5;
+/** 가장 크게 확대한 좌석 크기(CSS px) [가정] */
+export const MAX_SEAT_PX = 64;
+/** 미니맵 폭(CSS px)과 화면 가장자리 여백 [가정] */
+export const MINIMAP = { width: 120, margin: 12 } as const;
 
-/** 전체 배치도 구역 면: 남은 비율 경계는 아직 정하지 않았다(d5 §6 33번) [가정]. 등급 색(heat)·무늬로 바꾸는 일은 HOT-120(두 단계 그리기) */
-const OVERVIEW = {
-  light: { stage: '#1b1d22', plenty: '#cfe9d8', few: '#f4e2b8', none: '#e3e5e8', line: '#5b606a', text: '#1b1d22', bg: '#ffffff' },
-  dark: { stage: '#e6e7ea', plenty: '#1e3b2f', few: '#3d3320', none: '#26292e', line: '#9aa0aa', text: '#e6e7ea', bg: '#16171b' },
-} as const;
+export type Level = 'loading' | 'overview' | 'seats';
+
+/** drawImage가 있는 2D 문맥(구역 비트맵을 늘려 그릴 때) */
+type ImageCtx = Ctx2D & { drawImage(image: unknown, x: number, y: number, w: number, h: number): void };
+
+/** 구역 비트맵을 만드는 쪽(Worker는 OffscreenCanvas, 메인 스레드는 OffscreenCanvas나 canvas 요소, 시험은 가짜) */
+export interface BitmapFactory {
+  create(w: number, h: number): { ctx: Ctx2D; finish(): { image: unknown; close?: () => void } };
+}
 
 export interface EngineOptions {
   ctx: Ctx2D;
@@ -26,6 +42,9 @@ export interface EngineOptions {
   height: number;
   dpr: number;
   theme: ColorMode;
+  bitmaps?: BitmapFactory;
+  /** 등급 ID를 가격이 높은 차례로(화면이 회차 가격표로 정한다). 없으면 좌석맵 파일 tiers 차례 */
+  tierRank?: readonly string[];
 }
 
 export class SeatMapEngine {
@@ -35,7 +54,13 @@ export class SeatMapEngine {
   /** 내가 고른 좌석(비트 배열, ⌈N/8⌉) */
   mine!: Uint8Array;
   versions!: SectionVersions;
+  tiers!: Uint8Array;
+  /** 등급 색인 → 가격 차례 */
+  rank!: Uint8Array;
+  /** 스냅샷을 받았는가(받기 전은 loading) */
+  hasState = false;
   cam: Camera = { scale: 1, tx: 0, ty: 0 };
+  readonly cache = new BitmapCache();
   private o: EngineOptions;
 
   constructor(o: EngineOptions) {
@@ -45,9 +70,18 @@ export class SeatMapEngine {
   load(file: SeatMapColumnsFile, snapshot?: ArrayBuffer | Uint8Array): void {
     this.L = decodeLayout(file);
     this.grids = buildGrids(this.L);
+    this.tiers = sectionTiers(this.L);
+    // 등급 색인 → 가격 차례(0이 가장 비싸다)
+    const rank = this.o.tierRank;
+    this.rank = Uint8Array.from(this.L.file.tiers, (t, i) => {
+      if (!rank) return i;
+      const r = rank.indexOf(t);
+      return r < 0 ? 255 : r;
+    });
     this.state = new Uint8Array(this.L.N);
     this.mine = new Uint8Array(Math.ceil(this.L.N / 8));
     this.versions = { seatEpoch: 0, version: new Uint32Array(this.L.S) };
+    this.cache.clear();
     if (snapshot) {
       const snap = decodeSnapshot(snapshot);
       if (snap.layoutVersion !== this.L.layoutVersion) throw new Error(`스냅샷 layoutVersion ${snap.layoutVersion} ≠ 좌석맵 ${this.L.layoutVersion}`);
@@ -55,26 +89,112 @@ export class SeatMapEngine {
       applySnapshot(this.state, snap, (s) => (s < this.L.S ? [this.L.sectionStart[s]!, this.L.sectionEnd[s]!] : undefined));
       this.versions.seatEpoch = snap.seatEpoch;
       for (const s of snap.sections) this.versions.version[s.sectionIndex] = s.sectionVersion;
+      this.hasState = true;
     }
-    const c = file.canvas;
-    this.cam = cameraFit(this.o.width, this.o.height, c.minX, c.minY, c.width, c.height);
+    this.fitAll();
   }
 
   resize(width: number, height: number, dpr: number): void {
+    const v = this.L ? this.viewRect() : null;
     this.o = { ...this.o, width, height, dpr };
+    this.cache.clear();
+    // 화면 크기가 바뀌면 지금 보던 가운데를 그대로 두고 배율·이동을 다시 묶는다
+    if (v) this.place(this.cam.scale, v.x + v.w / 2, v.y + v.h / 2, width / 2, height / 2);
+  }
+
+  /** 델타 묶음을 반영하고, 바뀐 구역의 비트맵을 버린다(§4.4 적용 순서는 wire.applyDelta) */
+  applyDelta(frame: Extract<Frame, { type: 'delta' }>): DeltaDecision {
+    const d = applyDelta(this.state, this.versions, frame, this.L.sectionStart, this.L.sectionEnd);
+    if (d.kind === 'apply') for (const s of d.sections) this.cache.invalidate(s);
+    else this.cache.clear();
+    return d;
   }
 
   setTheme(theme: ColorMode): void {
     this.o.theme = theme;
+    this.cache.clear();
+  }
+
+  // ── 카메라 ──────────────────────────────────────────────
+
+  private fitScale(): number {
+    const c = this.L.file.canvas;
+    return cameraFit(this.o.width, this.o.height, c.minX, c.minY, c.width, c.height).scale;
+  }
+
+  /** 전체가 맞는 배율 대비 지금 배율 */
+  zoom(): number {
+    return this.cam.scale / this.fitScale();
+  }
+
+  private maxScale(): number {
+    return MAX_SEAT_PX / (SEAT_CM * 0.8);
+  }
+
+  /**
+   * 세계 좌표 (wx, wy)를 화면 (sx, sy)에 두고 배율을 정한다. 배율은 전체가 맞는 배율 ~ 가장 큰 배율 사이로, 이동은 배치가 화면보다 작은 방향은
+   * 가운데로, 큰 방향은 배치 밖 빈 곳이 보이지 않게 묶는다(끝까지 축소하면 [전체 보기]와 같다)
+   */
+  private place(scale: number, wx: number, wy: number, sx: number, sy: number): void {
+    const s = Math.min(this.maxScale(), Math.max(this.fitScale(), scale));
+    const c = this.L.file.canvas;
+    const clamp = (t: number, min: number, size: number, view: number) => {
+      const content = size * s;
+      if (content <= view) return (view - content) / 2 - min * s;
+      return Math.min(-min * s, Math.max(view - (min + size) * s, t));
+    };
+    this.cam = { scale: s, tx: clamp(sx - wx * s, c.minX, c.width, this.o.width), ty: clamp(sy - wy * s, c.minY, c.height, this.o.height) };
+  }
+
+  /** [전체 보기] */
+  fitAll(): void {
+    const c = this.L.file.canvas;
+    this.cam = cameraFit(this.o.width, this.o.height, c.minX, c.minY, c.width, c.height);
   }
 
   /** zoom 배율(1 = 전체가 맞는 배율)과 세계 좌표 중심 */
   setCamera(zoom: number, cx: number, cy: number): void {
-    const c = this.L.file.canvas;
-    const fit = cameraFit(this.o.width, this.o.height, c.minX, c.minY, c.width, c.height);
-    const scale = fit.scale * zoom;
-    this.cam = { scale, tx: this.o.width / 2 - cx * scale, ty: this.o.height / 2 - cy * scale };
+    this.place(this.fitScale() * zoom, cx, cy, this.o.width / 2, this.o.height / 2);
   }
+
+  /** [+]·[−]·휠·핀치: 화면 점(기본은 가운데)을 그대로 두고 factor배 */
+  zoomBy(factor: number, sx = this.o.width / 2, sy = this.o.height / 2): void {
+    const wx = (sx - this.cam.tx) / this.cam.scale;
+    const wy = (sy - this.cam.ty) / this.cam.scale;
+    this.place(this.cam.scale * factor, wx, wy, sx, sy);
+  }
+
+  /** 구역 하나를 화면에 맞춘다(그 구역이 화면 폭의 1/3 이상이 되어 좌석 단계로 간다) */
+  focusSection(s: number): void {
+    const b = this.L.bounds.subarray(s * 4, s * 4 + 4);
+    const pad = 200;
+    const fit = cameraFit(this.o.width, this.o.height, b[0]! - pad, b[1]! - pad, b[2]! - b[0]! + pad * 2, b[3]! - b[1]! + pad * 2);
+    this.place(fit.scale, (b[0]! + b[2]!) / 2, (b[1]! + b[3]!) / 2, this.o.width / 2, this.o.height / 2);
+  }
+
+  /** 화면에 보이는 세계 범위 */
+  viewRect(): { x: number; y: number; w: number; h: number } {
+    const { scale, tx, ty } = this.cam;
+    return { x: -tx / scale, y: -ty / scale, w: this.o.width / scale, h: this.o.height / scale };
+  }
+
+  private sectionVisible(s: number): boolean {
+    const v = this.viewRect();
+    const b = this.L.bounds;
+    return !(b[s * 4 + 2]! < v.x || b[s * 4]! > v.x + v.w || b[s * 4 + 3]! < v.y || b[s * 4 + 1]! > v.y + v.h);
+  }
+
+  level(): Level {
+    if (!this.hasState) return 'loading';
+    for (let s = 0; s < this.L.S; s++) {
+      if (!this.sectionVisible(s)) continue;
+      const w = (this.L.bounds[s * 4 + 2]! - this.L.bounds[s * 4]! + SEAT_CM) * this.cam.scale;
+      if (w >= this.o.width * SEATS_SECTION_RATIO) return 'seats';
+    }
+    return 'overview';
+  }
+
+  // ── 좌석 ────────────────────────────────────────────────
 
   isMine(k: number): boolean {
     return ((this.mine[k >> 3]! >> (k & 7)) & 1) === 1;
@@ -82,6 +202,7 @@ export class SeatMapEngine {
 
   toggleMine(k: number): void {
     this.mine[k >> 3]! ^= 1 << (k & 7);
+    this.cache.invalidate(sectionOf(this.L, k).section);
   }
 
   /** 지금 배율에서 좌석 한 변(CSS px) */
@@ -89,9 +210,9 @@ export class SeatMapEngine {
     return SEAT_CM * this.cam.scale * 0.8;
   }
 
-  /** 좌석을 고를 수 있는 배율인가(24 CSS px 이상) */
+  /** 좌석을 고를 수 있는 배율인가(좌석 단계이고 24 CSS px 이상) */
   selectable(): boolean {
-    return this.seatPx() >= MIN_SELECT_PX;
+    return this.level() === 'seats' && this.seatPx() >= MIN_SELECT_PX;
   }
 
   /** 고를 수 있는 좌석인가: 가능 상태이고 판매 제외가 아니다(이미 고른 좌석은 풀 수 있다) */
@@ -102,89 +223,202 @@ export class SeatMapEngine {
   }
 
   /** 화면 점 → 좌석(없거나 고를 수 없는 배율이면 -1)과 ID·표시 이름·등급 */
+  /** 미니맵 상자(CSS px). 좌석 단계에서만 그린다 */
+  minimapRect(): { x: number; y: number; w: number; h: number } {
+    const c = this.L.file.canvas;
+    const w = MINIMAP.width;
+    const h = (w * c.height) / c.width;
+    return { x: this.o.width - w - MINIMAP.margin, y: this.o.height - h - MINIMAP.margin, w, h };
+  }
+
   hit(px: number, py: number): { seatIndex: number; seatId: string | null; label: string | null; tier: string | null } {
-    const k = this.selectable() ? hitAtScreen(this.L, this.grids, this.cam, px, py) : -1;
+    const m = this.minimapRect();
+    // 미니맵을 누르면 그 밑(가려진) 좌석을 고르지 않는다
+    const onMinimap = px >= m.x && px <= m.x + m.w && py >= m.y && py <= m.y + m.h;
+    const k = this.selectable() && !onMinimap ? hitAtScreen(this.L, this.grids, this.cam, px, py) : -1;
     if (k < 0) return { seatIndex: -1, seatId: null, label: null, tier: null };
     const { section, offset } = sectionOf(this.L, k);
     const sec = this.L.file.sections[section]!;
     return { seatIndex: k, seatId: seatIdOf(this.L, k), label: `${sec.name} ${sec.seats.row[offset]}열 ${sec.seats.number[offset]}번`, tier: this.L.file.tiers[this.L.attr[k]! & 15]! };
   }
 
-  /** 지금 카메라로 그린다. 좌석이 SEAT_DRAW_MIN_PX보다 작으면 전체 배치도, 아니면 보이는 좌석. 그린 좌석 수를 돌려준다 */
+  /** 화면 점이 든 구역(없으면 -1). 전체 배치도에서 구역을 누르면 그 구역으로 확대한다 */
+  sectionAt(px: number, py: number): number {
+    const wx = (px - this.cam.tx) / this.cam.scale;
+    const wy = (py - this.cam.ty) / this.cam.scale;
+    for (let s = 0; s < this.L.S; s++) if (pointInPolygon(this.L.file.sections[s]!.shape.points, wx, wy)) return s;
+    return -1;
+  }
+
+  // ── 그리기 ──────────────────────────────────────────────
+
+  /** 지금 단계로 그린다. 그린 좌석 수(비트맵으로 그린 구역의 좌석 포함)를 돌려준다 */
   draw(): number {
-    const seatPx = this.seatPx();
-    return seatPx < SEAT_DRAW_MIN_PX ? (this.drawOverview(), 0) : this.drawSeats(seatPx);
+    const lv = this.level();
+    this.clear();
+    if (lv !== 'seats') {
+      this.drawSections(lv === 'loading' ? 'wireframe' : 'faces');
+      return 0;
+    }
+    const drawn = this.drawSeats();
+    this.drawMinimap();
+    return drawn;
   }
 
   private clear(): void {
     const { ctx, width, height, dpr, theme } = this.o;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = OVERVIEW[theme].bg;
+    ctx.fillStyle = overviewPalette(theme).bg;
     ctx.fillRect(0, 0, width * dpr, height * dpr);
   }
 
-  /** 전체 배치도: 무대·구역 도형과 구역 상태(남은 비율)만 */
-  drawOverview(): void {
+  private path(points: ReadonlyArray<readonly [number, number]>): void {
+    const { ctx } = this.o;
+    ctx.beginPath();
+    points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+  }
+
+  /**
+   * 무대·구역. wireframe(loading): 외곽선만, 글자 없음. faces(overview): 등급 면과 글자(이름·등급·남은 상태).
+   * outlines(seats): 좌석 밑에 구역 외곽선만(면을 깔면 가능 좌석과 바탕의 대비가 3:1에 못 미친다. 축소하면 다시 면으로 합쳐진다)
+   */
+  private drawSections(mode: 'wireframe' | 'faces' | 'outlines'): void {
+    const wireframe = mode !== 'faces';
     const { ctx, dpr, theme } = this.o;
-    const P = OVERVIEW[theme];
+    const P = overviewPalette(theme);
     const { cam, L } = this;
-    this.clear();
     ctx.setTransform(dpr * cam.scale, 0, 0, dpr * cam.scale, dpr * cam.tx, dpr * cam.ty);
-    ctx.fillStyle = P.stage;
+    ctx.lineWidth = 1.5 / cam.scale;
     for (const st of L.file.stage) {
-      ctx.beginPath();
-      st.points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-      ctx.closePath();
-      ctx.fill();
+      this.path(st.points);
+      ctx.strokeStyle = P.line;
+      if (wireframe) ctx.stroke();
+      else {
+        ctx.fillStyle = P.stage;
+        ctx.fill();
+      }
     }
     for (let s = 0; s < L.S; s++) {
-      // 판매 제외 좌석은 남은 좌석에도 전체에도 세지 않는다
-      let free = 0;
-      let sellable = 0;
-      for (let k = L.sectionStart[s]!; k <= L.sectionEnd[s]!; k++) {
-        if ((L.attr[k]! >> 4) & FLAG.EXCLUDED) continue;
-        sellable++;
-        if (this.state[k] === STATE.AVAILABLE) free++;
+      this.path(L.file.sections[s]!.shape.points);
+      const face = wireframe ? null : tierFace(this.rank[this.tiers[s]!]!, theme);
+      if (face) {
+        ctx.fillStyle = face;
+        ctx.fill();
       }
-      const ratio = sellable ? free / sellable : 0;
-      ctx.fillStyle = ratio > 0.5 ? P.plenty : ratio > 0.1 ? P.few : P.none;
       ctx.strokeStyle = P.line;
-      ctx.lineWidth = 2 / (dpr * cam.scale);
-      ctx.beginPath();
-      L.file.sections[s]!.shape.points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-      ctx.closePath();
-      ctx.fill();
       ctx.stroke();
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = P.text;
+    if (mode !== 'faces') return;
+    ctx.fillStyle = P.ink;
     ctx.font = '600 12px system-ui, sans-serif';
-    for (const sec of L.file.sections) ctx.fillText(sec.name, cam.tx + sec.label.x * cam.scale - 14, cam.ty + sec.label.y * cam.scale + 4);
+    for (let s = 0; s < L.S; s++) {
+      const sec = L.file.sections[s]!;
+      const x = cam.tx + sec.label.x * cam.scale;
+      const y = cam.ty + sec.label.y * cam.scale;
+      // 등급 글자는 늘 함께 쓴다(면 색은 보조, WCAG 1.4.1). 상태는 스냅샷을 받은 뒤에만
+      ctx.fillText(`${sec.name} ${L.file.tiers[this.tiers[s]!]}`, x - 20, y);
+      ctx.fillText(STATUS_LABEL[sectionStatus(L, this.state, s).status], x - 20, y + 14);
+    }
   }
 
-  /** 화면에 보이는 좌석만 그린다 */
-  drawSeats(seatPx: number): number {
-    const { ctx, width, height, dpr, theme } = this.o;
+  /** 좌석 단계: 보이는 구역의 좌석. 24px 미만이면 구역 비트맵을 늘려 그리고, 이상이면 보이는 좌석만 바로 그린다 */
+  private drawSeats(): number {
+    const { ctx, dpr, theme } = this.o;
     const { cam, L } = this;
-    this.clear();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const x0 = -cam.tx / cam.scale - SEAT_CM;
-    const y0 = -cam.ty / cam.scale - SEAT_CM;
-    const x1 = x0 + width / cam.scale + SEAT_CM * 2;
-    const y1 = y0 + height / cam.scale + SEAT_CM * 2;
+    const seatPx = this.seatPx();
+    const v = this.viewRect();
+    const x0 = v.x - SEAT_CM;
+    const y0 = v.y - SEAT_CM;
+    const x1 = v.x + v.w + SEAT_CM;
+    const y1 = v.y + v.h + SEAT_CM;
     let drawn = 0;
+    // 구역 외곽선을 먼저 긋는다(좌석 사이 빈 곳에 구역 모양이 보이게, 면은 칠하지 않는다)
+    this.drawSections('outlines');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (seatPx < SEAT_DRAW_MIN_PX) return 0;
     for (let s = 0; s < L.S; s++) {
-      if (L.bounds[s * 4 + 2]! < x0 || L.bounds[s * 4]! > x1 || L.bounds[s * 4 + 3]! < y0 || L.bounds[s * 4 + 1]! > y1) continue;
+      if (!this.sectionVisible(s)) continue;
+      if (seatPx < MIN_SELECT_PX && this.o.bitmaps && this.drawSectionBitmap(s)) {
+        drawn += L.sectionEnd[s]! - L.sectionStart[s]! + 1;
+        continue;
+      }
       for (let k = L.sectionStart[s]!; k <= L.sectionEnd[s]!; k++) {
         const wx = L.x[k]!;
         const wy = L.y[k]!;
         if (wx < x0 || wx > x1 || wy < y0 || wy > y1) continue;
-        const st = seatStyle(seatState(this.state[k]!, L.attr[k]!, this.isMine(k)), theme);
-        const wheelchair = ((L.attr[k]! >> 4) & FLAG.WHEELCHAIR) !== 0 && st.state !== 'wheelchair';
-        drawSeat(ctx, st, cam.tx + wx * cam.scale, cam.ty + wy * cam.scale, seatPx, wheelchair);
+        this.paintSeat(ctx, k, cam.tx + wx * cam.scale, cam.ty + wy * cam.scale, seatPx, theme);
         drawn++;
       }
     }
     return drawn;
+  }
+
+  private paintSeat(ctx: Ctx2D, k: number, sx: number, sy: number, size: number, theme: ColorMode): void {
+    const st = seatStyle(seatState(this.state[k]!, this.L.attr[k]!, this.isMine(k)), theme);
+    const wheelchair = ((this.L.attr[k]! >> 4) & FLAG.WHEELCHAIR) !== 0 && st.state !== 'wheelchair';
+    drawSeat(ctx, st, sx, sy, size, wheelchair);
+  }
+
+  /** 구역 하나를 비트맵으로 그린다(없으면 만든다). 8MB를 넘어 만들 수 없으면 false */
+  private drawSectionBitmap(s: number): boolean {
+    const { ctx, dpr, theme } = this.o;
+    const { cam, L } = this;
+    const { bucket, scale } = scaleBucket(cam.scale);
+    const b = L.bounds.subarray(s * 4, s * 4 + 4);
+    const pad = SEAT_CM;
+    const wCss = (b[2]! - b[0]! + pad * 2) * scale;
+    const hCss = (b[3]! - b[1]! + pad * 2) * scale;
+    let bmp = this.cache.get(s, bucket);
+    if (!bmp) {
+      const w = Math.ceil(wCss * dpr);
+      const h = Math.ceil(hCss * dpr);
+      if (w * h * 4 > this.cache.maxEntryBytes) return false;
+      const made = this.o.bitmaps!.create(w, h);
+      made.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const size = SEAT_CM * scale * 0.8;
+      for (let k = L.sectionStart[s]!; k <= L.sectionEnd[s]!; k++) {
+        this.paintSeat(made.ctx, k, (L.x[k]! - b[0]! + pad) * scale, (L.y[k]! - b[1]! + pad) * scale, size, theme);
+      }
+      const fin = made.finish();
+      bmp = { image: fin.image, close: fin.close, scale, bytes: w * h * 4 };
+      this.cache.set(s, bucket, bmp);
+    }
+    const k = cam.scale / bmp.scale;
+    (ctx as ImageCtx).drawImage(bmp.image, cam.tx + (b[0]! - pad) * cam.scale, cam.ty + (b[1]! - pad) * cam.scale, wCss * k, hCss * k);
+    return true;
+  }
+
+  /** 미니맵: 전체 배치의 구역 외곽선과 지금 보는 범위 사각형(오른쪽 아래) */
+  private drawMinimap(): void {
+    const { ctx, width, height, dpr, theme } = this.o;
+    const P = overviewPalette(theme);
+    const c = this.L.file.canvas;
+    const { x: ox, y: oy, w, h } = this.minimapRect();
+    const s = w / c.width;
+    void width;
+    void height;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = P.bg;
+    ctx.fillRect(ox, oy, w, h);
+    ctx.strokeStyle = P.line;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(ox, oy, w, h);
+    ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * (ox - c.minX * s), dpr * (oy - c.minY * s));
+    ctx.lineWidth = 1 / s;
+    for (const sec of this.L.file.sections) {
+      this.path(sec.shape.points);
+      ctx.stroke();
+    }
+    // 지금 보는 범위(배치 캔버스 안으로 잘라 미니맵 상자 밖에 그리지 않는다)
+    const v = this.viewRect();
+    const x0 = Math.max(v.x, c.minX);
+    const y0 = Math.max(v.y, c.minY);
+    const x1 = Math.min(v.x + v.w, c.minX + c.width);
+    const y1 = Math.min(v.y + v.h, c.minY + c.height);
+    ctx.strokeStyle = P.text;
+    ctx.lineWidth = 2 / s;
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
   }
 }
