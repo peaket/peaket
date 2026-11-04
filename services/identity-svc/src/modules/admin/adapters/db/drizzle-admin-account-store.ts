@@ -6,8 +6,9 @@ import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, type DbTran
 import { and, asc, eq, gt, gte, inArray, isNull, lt, lte, ne, notInArray, or } from 'drizzle-orm';
 import { type AccountLoginState, FRESH_LOGIN_STATE, type LockKind, type LockReason, type NoticeKind } from '../../domain/login-rules.js';
 import { sql as rawSql } from 'drizzle-orm';
-import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
-import { adminAccount, adminAccountRequest, adminKnownSource, adminLoginStep, adminRecoveryCode, adminRefreshTokenHash, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
+import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
+import { DESIGNATION_KINDS } from '../../domain/ports.js';
+import { adminAccount, adminAccountRequest, adminDesignation, adminKnownSource, adminLoginStep, adminRecoveryCode, adminRefreshTokenHash, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
 
 type AccountRow = typeof adminAccount.$inferSelect;
 /** 알림을 보내지 못했을 때 다음 시도까지(1분부터 두 배씩, 최대 1시간 [가정]) */
@@ -416,7 +417,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
   }
 
   // ── 관리 계정 관리(BOT-150) ──
-  #managed(r: AccountRow): ManagedAccount {
+  #managed(r: AccountRow, designations: DesignationKind[]): ManagedAccount {
     return {
       id: r.id,
       role: r.role as AdminRole,
@@ -432,7 +433,46 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
       lockKind: r.lockKind as LockKind,
       lockReason: (r.lockReason as LockReason | null) ?? null,
       lockedUntil: ms(r.lockedUntil),
+      designations,
     };
+  }
+
+  /** 계정들의 살아 있는 지정(종류 차례) */
+  async #liveDesignations(db: Pick<DbTransaction, 'select'>, ids: string[]): Promise<Map<string, DesignationKind[]>> {
+    const out = new Map<string, DesignationKind[]>();
+    if (ids.length === 0) return out;
+    const rows = await db.select({ id: adminDesignation.adminAccountId, kind: adminDesignation.kind }).from(adminDesignation).where(and(inArray(adminDesignation.adminAccountId, ids), isNull(adminDesignation.revokedAt)));
+    for (const id of ids) {
+      const kinds = new Set(rows.filter((r) => r.id === id).map((r) => r.kind));
+      out.set(id, DESIGNATION_KINDS.filter((k) => kinds.has(k)));
+    }
+    return out;
+  }
+
+  async #withDesignations(db: Pick<DbTransaction, 'select'>, rows: AccountRow[]): Promise<ManagedAccount[]> {
+    const d = await this.#liveDesignations(db, rows.map((r) => r.id));
+    return rows.map((r) => this.#managed(r, d.get(r.id) ?? []));
+  }
+
+  /** 살아 있는 지정과 since 뒤에 거둔 지정을 쿼리 한 번으로 */
+  async #designationsIn(db: Pick<DbTransaction, 'select'>, id: string, since: number): Promise<{ live: DesignationKind[]; revoked: { kind: DesignationKind; revokedAt: number }[] }> {
+    const rows = await db
+      .select({ kind: adminDesignation.kind, revokedAt: adminDesignation.revokedAt })
+      .from(adminDesignation)
+      .where(and(eq(adminDesignation.adminAccountId, id), or(isNull(adminDesignation.revokedAt), gt(adminDesignation.revokedAt, new Date(since)))))
+      .orderBy(asc(adminDesignation.revokedAt), asc(adminDesignation.kind));
+    const live = new Set(rows.filter((r) => r.revokedAt === null).map((r) => r.kind));
+    return {
+      live: DESIGNATION_KINDS.filter((k) => live.has(k)),
+      revoked: rows.filter((r) => r.revokedAt !== null).map((r) => ({ kind: r.kind as DesignationKind, revokedAt: r.revokedAt!.getTime() })),
+    };
+  }
+
+  async designationsOf(accountId: string, since: number): Promise<{ status: AdminStatus | null; live: DesignationKind[]; revoked: { kind: DesignationKind; revokedAt: number }[] }> {
+    const db = this.database.db;
+    const [a] = await db.select({ status: adminAccount.status }).from(adminAccount).where(eq(adminAccount.id, accountId));
+    if (!a) return { status: null, live: [], revoked: [] };
+    return { status: a.status as AdminStatus, ...(await this.#designationsIn(db as unknown as DbTransaction, accountId, since)) };
   }
 
   async manageTransaction<T>(fn: (tx: AdminManagementTx) => Promise<T>): Promise<T> {
@@ -450,11 +490,11 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
         },
         readAccount: async (id) => {
           const [r] = await tx.select().from(adminAccount).where(eq(adminAccount.id, id));
-          return r ? this.#managed(r) : null;
+          return r ? this.#managed(r, []) : null;
         },
         lockAccount: async (id) => {
           const [r] = await tx.select().from(adminAccount).where(eq(adminAccount.id, id)).for('update');
-          return r ? this.#managed(r) : null;
+          return r ? this.#managed(r, []) : null;
         },
         lockPartnerAdmins: async (promoterId) =>
           (
@@ -464,7 +504,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
               .where(and(eq(adminAccount.role, 'partner_admin'), eq(adminAccount.promoterId, promoterId), ne(adminAccount.status, 'REMOVED')))
               .orderBy(asc(adminAccount.id))
               .for('update')
-          ).map((r) => this.#managed(r)),
+          ).map((r) => this.#managed(r, [])),
         insertInvited: async (i) => {
           // 지우지 않은 계정 사이의 이메일 고유 색인(admin_account_email_live_key)으로 가린다: 동시에 와도 하나만 들어간다
           const done = await tx
@@ -522,6 +562,19 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
         addNotice: async (id, kind, now) => {
           await tx.insert(adminSecurityNotice).values({ id: randomUUID(), adminAccountId: id, kind, createdAt: new Date(now) });
         },
+        designationsFor: (id, since) => this.#designationsIn(tx, id, since),
+        insertDesignation: async (i) => {
+          await tx.insert(adminDesignation).values({ id: i.id, adminAccountId: i.accountId, kind: i.kind, basis: i.basis, designatedBy: i.by, designatedAt: new Date(i.now) });
+        },
+        revokeDesignations: async (id, kinds, now) => {
+          if (kinds.length === 0) return [];
+          const done = await tx
+            .update(adminDesignation)
+            .set({ revokedAt: new Date(now) })
+            .where(and(eq(adminDesignation.adminAccountId, id), isNull(adminDesignation.revokedAt), inArray(adminDesignation.kind, [...kinds])))
+            .returning({ kind: adminDesignation.kind });
+          return done.map((d) => d.kind as DesignationKind);
+        },
       };
       return fn(api);
     });
@@ -529,7 +582,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
 
   async getManaged(id: string): Promise<ManagedAccount | null> {
     const [r] = await this.database.db.select().from(adminAccount).where(eq(adminAccount.id, id));
-    return r ? this.#managed(r) : null;
+    return r ? (await this.#withDesignations(this.database.db as unknown as DbTransaction, [r]))[0]! : null;
   }
 
   async listManaged(q: { roles: readonly AdminRole[]; promoterId?: string; status?: AdminStatus; excludeRemoved?: boolean; after?: { lastLoginAt: number | null; id: string }; offset?: number; limit: number; now: number }): Promise<ManagedAccount[]> {
@@ -557,7 +610,9 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
       .orderBy(rawSql`${adminAccount.lastLoginAt} desc nulls last`, asc(adminAccount.id))
       .limit(q.limit)
       .offset(q.offset ?? 0);
-    return rows.map((r) => this.#managed(r));
+    // 지정은 관제 역할에만 붙는다: 파트너 목록이면 읽지 않는다
+    if (q.roles.every((r) => r === 'partner_admin' || r === 'partner_member')) return rows.map((r) => this.#managed(r, []));
+    return this.#withDesignations(this.database.db as unknown as DbTransaction, rows);
   }
 
   async liveSessions(id: string, now: number): Promise<{ id: string; createdAt: number; idleExpiresAt: number }[]> {

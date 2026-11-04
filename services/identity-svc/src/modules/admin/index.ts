@@ -24,6 +24,6 @@ export { adminMailerFromEnv } from './adapters/file-admin-mailer.js';
 export { CheckPasswordOnlyLogins } from './application/check-password-only-logins.js';
 export { GetAdminAuthz } from './application/get-admin-authz.js';
 export { adminAuthzHandlers } from './inbound/admin-authz.grpc.js';
-export { adminAccountHandlers } from './inbound/admin-account.grpc.js';
+export { adminAccountHandlers, adminDesignationHandlers } from './inbound/admin-account.grpc.js';
 export { ManageAdminAccounts } from './application/manage-admin-accounts.js';
 export { DrizzleAdminAccountStore as AdminAccountStoreForMaintenance } from './adapters/db/drizzle-admin-account-store.js';

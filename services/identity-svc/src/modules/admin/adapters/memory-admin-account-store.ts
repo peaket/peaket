@@ -1,7 +1,8 @@
 // 관리 계정 저장소의 메모리 구현(시험·로컬, BUILD_ORDER BOT-110·BOT-111). 계정을 만드는 길(초대)은 BOT-150이라 시험은 create로 바로 만든다.
 import { FRESH_LOGIN_STATE, type AccountLoginState, type NoticeKind } from '../domain/login-rules.js';
 import { randomUUID } from 'node:crypto';
-import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
+import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
+import { DESIGNATION_KINDS } from '../domain/ports.js';
 
 type Row = AdminAccountRow &
   AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null; inviteTokenHash: Buffer | null; inviteExpiresAt: number | null; removedAt: number | null; version: number };
@@ -19,6 +20,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
   readonly #terminated: { accountId: string; sessionId: string; reason: string }[] = [];
   /** 발급한 리프레시 토큰 해시(16진수) → 세션·패밀리·절대 만료(BOT-130) */
   readonly #issued = new Map<string, { sessionId: string; refreshFamily: string; expiresAt: number }>();
+  /** 관리 계정 지정(BOT-151) */
+  readonly #designations: { id: string; accountId: string; kind: DesignationKind; basis: string; by: string; at: number; revokedAt: number | null }[] = [];
   /** 관리 호출의 멱등 기록(BOT-150) */
   readonly #requests = new Map<string, { kind: AdminAccountRequestKind; accountId: string; result: string; at: number }>();
 
@@ -352,7 +355,25 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       lockKind: r.lockKind,
       lockReason: r.lockReason,
       lockedUntil: r.lockedUntil,
+      designations: this.#liveDesignations(r.id),
     };
+  }
+
+  #liveDesignations(id: string): DesignationKind[] {
+    const live = new Set(this.#designations.filter((d) => d.accountId === id && d.revokedAt === null).map((d) => d.kind));
+    return DESIGNATION_KINDS.filter((k) => live.has(k));
+  }
+
+  #designationsOf(id: string, since: number): { live: DesignationKind[]; revoked: { kind: DesignationKind; revokedAt: number }[] } {
+    const revoked = this.#designations
+      .filter((d) => d.accountId === id && d.revokedAt !== null && d.revokedAt > since)
+      .sort((a, b) => (a.revokedAt! - b.revokedAt!) || (a.kind < b.kind ? -1 : 1))
+      .map((d) => ({ kind: d.kind, revokedAt: d.revokedAt! }));
+    return { live: this.#liveDesignations(id), revoked };
+  }
+
+  async designationsOf(accountId: string, since: number): Promise<{ status: AdminStatus | null; live: DesignationKind[]; revoked: { kind: DesignationKind; revokedAt: number }[] }> {
+    return { status: this.#rows.get(accountId)?.status ?? null, ...this.#designationsOf(accountId, since) };
   }
 
   /** 관리 트랜잭션을 차례로 세운다(Drizzle의 행 잠금과 같은 효과). 던지면 그 트랜잭션이 바꾼 것만 거꾸로 되돌린다(재검토 2026-11-05) */
@@ -401,14 +422,17 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       },
       readAccount: async (id) => {
         const r = this.#rows.get(id);
-        return r ? this.#managed(r) : null;
+        return r ? { ...this.#managed(r), designations: [] } : null;
       },
       lockAccount: async (id) => {
         const r = this.#rows.get(id);
-        return r ? this.#managed(r) : null;
+        return r ? { ...this.#managed(r), designations: [] } : null;
       },
       lockPartnerAdmins: async (promoterId) =>
-        [...this.#rows.values()].filter((r) => r.role === 'partner_admin' && r.promoterId === promoterId && r.status !== 'REMOVED').sort((a, b) => (a.id < b.id ? -1 : 1)).map((r) => this.#managed(r)),
+        [...this.#rows.values()]
+          .filter((r) => r.role === 'partner_admin' && r.promoterId === promoterId && r.status !== 'REMOVED')
+          .sort((a, b) => (a.id < b.id ? -1 : 1))
+          .map((r) => ({ ...this.#managed(r), designations: [] })),
       insertInvited: async (i) => {
         if ([...this.#rows.values()].some((r) => r.status !== 'REMOVED' && r.email === i.email)) return false;
         this.create({ id: i.id, role: i.role, email: i.email, status: 'INVITED', promoterId: i.promoterId, displayName: i.displayName, now: i.now });
@@ -471,6 +495,24 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
         const n = { id: randomUUID(), accountId: id, kind, at: now, sentAt: null };
         this.#notices.push(n);
         undo.push(() => this.#notices.splice(this.#notices.indexOf(n), 1));
+      },
+      designationsFor: async (id, since) => this.#designationsOf(id, since),
+      insertDesignation: async (i) => {
+        const d = { id: i.id, accountId: i.accountId, kind: i.kind, basis: i.basis, by: i.by, at: i.now, revokedAt: null };
+        this.#designations.push(d);
+        undo.push(() => this.#designations.splice(this.#designations.indexOf(d), 1));
+      },
+      revokeDesignations: async (id, kinds, now) => {
+        const done: DesignationKind[] = [];
+        for (const d of this.#designations) {
+          if (d.accountId !== id || d.revokedAt !== null || !kinds.includes(d.kind)) continue;
+          d.revokedAt = now;
+          undo.push(() => {
+            d.revokedAt = null;
+          });
+          done.push(d.kind);
+        }
+        return done;
       },
     };
   }

@@ -15,7 +15,7 @@ import { loadPolicyLists } from '../src/modules/admin/adapters/word-list-files.j
 import { ManageAdminAccounts } from '../src/modules/admin/application/manage-admin-accounts.js';
 import { DEFAULT_ADMIN_AUTH_CONFIG } from '../src/modules/admin/domain/auth-config.js';
 import { ADMIN_LOGIN_STORE } from '../src/modules/admin/domain/ports.js';
-import { adminAccountHandlers } from '../src/modules/admin/inbound/admin-account.grpc.js';
+import { adminAccountHandlers, adminDesignationHandlers } from '../src/modules/admin/inbound/admin-account.grpc.js';
 import { identityPackage } from '../src/modules/session/inbound/session.grpc.js';
 import { JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
 import { HmacIdentityHashers } from '../src/modules/verification/index.js';
@@ -31,6 +31,8 @@ let store: MemoryAdminAccountStore;
 let server: Awaited<ReturnType<typeof startGrpcServer>>;
 // biome-ignore lint: 시험용 동적 클라이언트
 let client: any;
+// biome-ignore lint: 시험용 동적 클라이언트
+let designationClient: any;
 
 beforeAll(async () => {
   const fan = await fanKey();
@@ -63,12 +65,21 @@ beforeAll(async () => {
   });
   store = svc.app.get<MemoryAdminAccountStore>(ADMIN_LOGIN_STORE);
   store.create({ id: CMD, role: 'commander', email: 'cmd.http@peaket.example', status: 'ACTIVE', now: clock.now() });
-  server = await startGrpcServer({ host: '127.0.0.1', port: 0, services: [{ definition: identityPackage().AdminAccountService.service, handlers: adminAccountHandlers({ manage: svc.app.get(ManageAdminAccounts) }, () => {}) }] });
+  server = await startGrpcServer({
+    host: '127.0.0.1',
+    port: 0,
+    services: [
+      { definition: identityPackage().AdminAccountService.service, handlers: adminAccountHandlers({ manage: svc.app.get(ManageAdminAccounts) }, () => {}) },
+      { definition: identityPackage().AdminDesignationService.service, handlers: adminDesignationHandlers({ manage: svc.app.get(ManageAdminAccounts) }, () => {}) },
+    ],
+  });
   client = new (identityPackage().AdminAccountService)(`127.0.0.1:${server.port}`, grpc.credentials.createInsecure());
+  designationClient = new (identityPackage().AdminDesignationService)(`127.0.0.1:${server.port}`, grpc.credentials.createInsecure());
 });
 
 afterAll(async () => {
   client?.close();
+  designationClient?.close();
   await server?.close();
   await svc?.close();
 });
@@ -77,7 +88,7 @@ const call = (method: string, req: object) =>
   new Promise<{ err: grpc.ServiceError | null; res: Record<string, unknown> }>((resolve) => client[method](req, (err: grpc.ServiceError | null, res: Record<string, unknown>) => resolve({ err, res })));
 
 describe('gRPC AdminAccountService(BOT-150)', () => {
-  test('초대·목록·상세·역할변경·삭제가실제직렬화로왕복하고_입력꼴오류는INVALID_ARGUMENT·없는계정은NOT_FOUND·지정은UNIMPLEMENTED다', async () => {
+  test('초대·목록·상세·역할변경·삭제가실제직렬화로왕복하고_입력꼴오류는INVALID_ARGUMENT·없는계정은NOT_FOUND이며_지정과지정조회까지왕복한다', async () => {
     const inv = await call('InviteAdminAccount', { request_id: 'g-1', acted_by: CMD, email: 'lead.g@stella.example', role: 'ADMIN_ROLE_PARTNER_ADMIN', display_name: '파트너 담당', promoter_id: PROMOTER });
     expect(inv.err).toBeNull();
     expect(inv.res).toMatchObject({ result: 'ADMIN_ACCOUNT_RESULT_OK', already_done: false, account: { role: 'ADMIN_ROLE_PARTNER_ADMIN', status: 'ADMIN_ACCOUNT_STATUS_INVITED', group: 'ADMIN_ACCOUNT_GROUP_PARTNER', email_masked: 'le***@stella.example', promoter_id: PROMOTER, version: 1, lock_kind: 'ADMIN_LOCK_KIND_NONE' } });
@@ -106,7 +117,18 @@ describe('gRPC AdminAccountService(BOT-150)', () => {
     expect((await call('ReinviteAdminAccount', { request_id: 'g-5', acted_by: CMD, admin_account_id: id, reason: 'REINVITE_REASON_RESEND' })).res).toMatchObject({ result: 'ADMIN_ACCOUNT_RESULT_OK', account: { version: 2 } });
     // 초대 중인 관리자는 활성이 아니라 마지막 관리자 판정에 들지 않는다: 지울 수 있다
     expect((await call('RemoveAdminAccount', { request_id: 'g-6', acted_by: CMD, admin_account_id: id })).res).toMatchObject({ result: 'ADMIN_ACCOUNT_RESULT_OK', account: { status: 'ADMIN_ACCOUNT_STATUS_REMOVED', email_masked: '', display_name: '' } });
-    expect((await call('SetAdminDesignation', { request_id: 'g-7', acted_by: CMD, admin_account_id: CMD, kind: 'DESIGNATION_KIND_ACCESS_REVIEWER', basis: '지정서 1' })).err?.code).toBe(grpc.status.UNIMPLEMENTED);
+    // 지정(BOT-151): 자기 계정은 SELF_TARGET, 모르는 종류는 INVALID_ARGUMENT
+    expect((await call('SetAdminDesignation', { request_id: 'g-7', acted_by: CMD, admin_account_id: CMD, kind: 'DESIGNATION_KIND_ACCESS_REVIEWER', basis: '지정서 1' })).res).toMatchObject({ result: 'ADMIN_ACCOUNT_RESULT_SELF_TARGET' });
+    // 초대 중인 계정에는 주지 않는다(활성 cs_lead가 아님: NOT_ELIGIBLE). 활성 cs_lead로 본다
+    expect((await call('SetAdminDesignation', { request_id: 'g-15', acted_by: CMD, admin_account_id: opsId, kind: 'DESIGNATION_KIND_FRAUD_INVESTIGATOR', basis: '지정서 0' })).res).toMatchObject({ result: 'ADMIN_ACCOUNT_RESULT_DESIGNATION_TARGET_NOT_ELIGIBLE' });
+    const leadId = '0190f3a1-7c2e-7a00-8000-00000000e120';
+    store.create({ id: leadId, role: 'cs_lead', email: 'lead.g@peaket.example', status: 'ACTIVE', now: clock.now() });
+    expect((await call('SetAdminDesignation', { request_id: 'g-12', acted_by: CMD, admin_account_id: leadId, kind: 'DESIGNATION_KIND_UNSPECIFIED', basis: '지정서 1' })).err?.code).toBe(grpc.status.INVALID_ARGUMENT);
+    expect((await call('SetAdminDesignation', { request_id: 'g-13', acted_by: CMD, admin_account_id: leadId, kind: 'DESIGNATION_KIND_FRAUD_INVESTIGATOR', basis: '지정서 2' })).res).toMatchObject({ result: 'ADMIN_ACCOUNT_RESULT_OK', account: { designations: ['DESIGNATION_KIND_FRAUD_INVESTIGATOR'] } });
+    expect((await call('RevokeAdminDesignation', { request_id: 'g-14', acted_by: CMD, admin_account_id: leadId, kind: 'DESIGNATION_KIND_FRAUD_INVESTIGATOR' })).res).toMatchObject({ result: 'ADMIN_ACCOUNT_RESULT_OK', account: { designations: [] } });
+    const dz = await new Promise<{ err: grpc.ServiceError | null; res: Record<string, unknown> }>((resolve) => designationClient.GetAdminDesignations({ admin_account_id: leadId }, (err: grpc.ServiceError | null, res: Record<string, unknown>) => resolve({ err, res })));
+    expect(dz.err).toBeNull();
+    expect(dz.res).toMatchObject({ kinds: [], recently_revoked: [{ kind: 'DESIGNATION_KIND_FRAUD_INVESTIGATOR', revoked_at: { seconds: Math.floor(clock.now() / 1000) } }] });
   });
 });
 

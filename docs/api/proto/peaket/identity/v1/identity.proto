@@ -541,7 +541,7 @@ service AdminAccountService {
   // 초대(docs/planning/03 §2.7 A1). 32바이트 난수 토큰의 SHA-256만 저장하고, 24시간 1회용 링크를 업무 이메일로 보낸다.
   rpc InviteAdminAccount(InviteAdminAccountRequest) returns (AdminAccountChangeResponse);
   // 역할 변경. 바꾸면 그 계정의 모든 세션을 끝내고 control.sessions-terminated(reason ROLE_CHANGED)를 낸다.
-  // commander가 아니게 되면 살아 있는 지정(admin_designation)을 같은 트랜잭션에서 거둔다.
+  // 새 역할이 받을 수 없는 살아 있는 지정(admin_designation)을 같은 트랜잭션에서 거둔다(commander가 아니게 되면 접속기록 점검자·가명정보 취급자, commander·cs_lead가 아니게 되면 부정 거래 조사관).
   rpc ChangeAdminRole(ChangeAdminRoleRequest) returns (AdminAccountChangeResponse);
   // 재초대(A4·A8, 분실). 옛 초대 토큰을 무효로 한다. PROTECT_LOCK·CREDENTIAL_LOST면 비밀번호 해시·TOTP 시드·패스키·복구 코드를 지우고
   // 실패 수·비밀번호 연속 실패 누계·잠금을 되돌리며 상태를 INVITED로 바꾸고 모든 세션을 끝낸다(reason ADMIN_FORCE).

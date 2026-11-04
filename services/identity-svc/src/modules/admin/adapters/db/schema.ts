@@ -128,6 +128,27 @@ export const adminSession = pgTable(
   ],
 );
 
+/** 관리 계정 지정(docs/data.md admin_designation, BOT-151, ADR-0171 결정 7). 살아 있는 행은 (계정, 종류)마다 하나 */
+export const adminDesignation = pgTable(
+  'admin_designation',
+  {
+    id: uuid('id').primaryKey(),
+    adminAccountId: uuid('admin_account_id')
+      .notNull()
+      .references(() => adminAccount.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    basis: text('basis').notNull(),
+    designatedBy: uuid('designated_by').notNull(),
+    designatedAt: at('designated_at').notNull(),
+    revokedAt: at('revoked_at'),
+  },
+  (t) => [
+    uniqueIndex('admin_designation_live_key').on(t.adminAccountId, t.kind).where(sql`${t.revokedAt} is null`),
+    index('admin_designation_account_idx').on(t.adminAccountId, t.revokedAt),
+    check('admin_designation_kind_check', sql`${t.kind} in ('ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR')`),
+  ],
+);
+
 /** 관리 계정 관리 호출의 멱등 기록(docs/data.md admin_account_request, BOT-150). 30일 [가정] 뒤 정비가 지운다 */
 export const adminAccountRequest = pgTable(
   'admin_account_request',
@@ -139,7 +160,7 @@ export const adminAccountRequest = pgTable(
     result: text('result').notNull(),
     createdAt: at('created_at').notNull(),
   },
-  (t) => [index('admin_account_request_created_idx').on(t.createdAt), check('admin_account_request_kind_check', sql`${t.kind} in ('INVITE', 'CHANGE_ROLE', 'REINVITE', 'REMOVE')`)],
+  (t) => [index('admin_account_request_created_idx').on(t.createdAt), check('admin_account_request_kind_check', sql`${t.kind} in ('INVITE', 'CHANGE_ROLE', 'REINVITE', 'REMOVE', 'DESIGNATE', 'REVOKE_DESIGNATION')`)],
 );
 
 /** 발급한 관리 리프레시 토큰 해시(docs/data.md admin_refresh_token_hash, BOT-130). 예전 토큰이 다시 오면 그 패밀리를 끝낸다. 절대 만료가 지나면 정비가 지운다 */

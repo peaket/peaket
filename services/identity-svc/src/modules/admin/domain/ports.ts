@@ -348,6 +348,9 @@ export interface AdminRefreshStore {
 }
 
 // ── 관리 계정 관리(AdminAccountService, identity §6 '관리 계정 관리 gRPC의 첫 구현', BUILD_ORDER BOT-150) ──
+/** 관리 계정 지정(docs/data.md admin_designation, BOT-151). 접속기록 점검자·가명정보 취급자·부정 거래 조사관 */
+export type DesignationKind = 'ACCESS_REVIEWER' | 'PSEUDONYM_HANDLER' | 'FRAUD_INVESTIGATOR';
+export const DESIGNATION_KINDS: readonly DesignationKind[] = ['ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR'];
 /** 관리하는 쪽이 보는 계정 한 줄(가리기 전) */
 export interface ManagedAccount {
   id: string;
@@ -364,18 +367,22 @@ export interface ManagedAccount {
   lockKind: 'NONE' | 'TIMED' | 'PROTECT';
   lockReason: 'FAILED_ATTEMPTS' | 'SECOND_FACTOR_FAILURES' | 'PASSWORD_FAILURE_TOTAL' | null;
   lockedUntil: number | null;
+  /** 살아 있는 지정(종류 차례, BOT-151) */
+  designations: DesignationKind[];
 }
-export type AdminAccountRequestKind = 'INVITE' | 'CHANGE_ROLE' | 'REINVITE' | 'REMOVE';
+/** 트랜잭션 안에서 읽은 계정(지정은 싣지 않는다: designationsFor로 따로 읽는다, 재검토 2026-11-05) */
+export type LockedAccount = Omit<ManagedAccount, 'designations'>;
+export type AdminAccountRequestKind = 'INVITE' | 'CHANGE_ROLE' | 'REINVITE' | 'REMOVE' | 'DESIGNATE' | 'REVOKE_DESIGNATION';
 /** 관리 호출 한 번의 트랜잭션 안에서 쓰는 것 */
 export interface AdminManagementTx {
   findRequest(requestId: string): Promise<{ kind: AdminAccountRequestKind; accountId: string; result: string } | null>;
   recordRequest(r: { requestId: string; kind: AdminAccountRequestKind; accountId: string; result: string; at: number }): Promise<void>;
-  /** 잠그지 않고 읽는다(요청자, 잠글 차례를 정하기 전의 대상) */
-  readAccount(id: string): Promise<ManagedAccount | null>;
-  /** 대상 계정 행을 잠근다(지운 계정도 돌려준다) */
-  lockAccount(id: string): Promise<ManagedAccount | null>;
+  /** 잠그지 않고 읽는다(요청자, 잠글 차례를 정하기 전의 대상). 지정은 싣지 않는다(designationsFor로 따로 읽는다) */
+  readAccount(id: string): Promise<LockedAccount | null>;
+  /** 대상 계정 행을 잠근다(지운 계정도 돌려준다). 지정은 싣지 않는다 */
+  lockAccount(id: string): Promise<LockedAccount | null>;
   /** 그 파트너사의 지우지 않은 partner_admin 행을 ID 순으로 모두 잠그고 돌려준다(마지막 관리자·첫 파트너 계정 판정). 대상 행보다 먼저 잠근다(교착을 막는 차례) */
-  lockPartnerAdmins(promoterId: string): Promise<ManagedAccount[]>;
+  lockPartnerAdmins(promoterId: string): Promise<LockedAccount[]>;
   /** 초대 계정을 넣는다. 지우지 않은 계정의 같은 이메일이 있으면 넣지 않고 false(고유 색인으로 가린다: 동시에 와도 하나만) */
   insertInvited(i: { id: string; role: AdminRole; promoterId: string | null; email: string; displayName: string; now: number }): Promise<boolean>;
   /** 역할을 바꾸고 판을 올린다 */
@@ -389,6 +396,11 @@ export interface AdminManagementTx {
   /** 그 계정의 끝나지 않은 세션을 모두 끝내고 같은 트랜잭션의 마지막 쓰기로 세션 종료 사건을 적는다. 끝낸 세션 ID */
   endAllSessions(id: string, reason: 'ADMIN_FORCE' | 'DELETE' | 'ROLE_CHANGED', now: number): Promise<string[]>;
   addNotice(id: string, kind: 'INVITATION', now: number): Promise<void>;
+  /** 그 계정의 살아 있는 지정과 since 뒤에 거둔 지정(대상 행을 잠근 뒤 부른다, BOT-151) */
+  designationsFor(accountId: string, since: number): Promise<{ live: DesignationKind[]; revoked: { kind: DesignationKind; revokedAt: number }[] }>;
+  insertDesignation(i: { id: string; accountId: string; kind: DesignationKind; basis: string; by: string; now: number }): Promise<void>;
+  /** 그 종류들의 살아 있는 지정에 revoked_at을 적는다. 거둔 종류 */
+  revokeDesignations(accountId: string, kinds: readonly DesignationKind[], now: number): Promise<DesignationKind[]>;
 }
 export const ADMIN_MANAGEMENT_STORE = Symbol('identity.AdminManagementStore');
 export interface AdminManagementStore {
@@ -403,4 +415,6 @@ export interface AdminManagementStore {
   expireInvites(now: number): Promise<number>;
   /** 멱등 기록을 지운다(정비 admin-account-request-expired) */
   purgeRequests(before: number): Promise<number>;
+  /** 조회(GetAdminDesignations): 계정 상태(없으면 null)와 살아 있는 지정, since 뒤에 거둔 지정 */
+  designationsOf(accountId: string, since: number): Promise<{ status: AdminStatus | null; live: DesignationKind[]; revoked: { kind: DesignationKind; revokedAt: number }[] }>;
 }

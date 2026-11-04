@@ -1,9 +1,9 @@
 // 받는 층: gRPC AdminAccountService(identity.proto, docs/api/proto/README.md §3 'ops-svc → identity-svc', BUILD_ORDER BOT-150).
 // 부르는 쪽은 ops-svc 하나다(메시 L7 허용 목록). 거절은 결과 값 AdminAccountResult로, 입력 꼴 오류는 INVALID_ARGUMENT로 돌려준다.
-// 지정(SetAdminDesignation·RevokeAdminDesignation)은 BOT-151이라 아직 UNIMPLEMENTED다.
+// 지정(SetAdminDesignation·RevokeAdminDesignation)과 조회(AdminDesignationService.GetAdminDesignations)는 BOT-151이다.
 import * as grpc from '@grpc/grpc-js';
 import { type AdminAccountChange, AdminAccountInputError, AdminAccountNotFound, type AdminAccountView, type ManageAdminAccounts } from '../application/manage-admin-accounts.js';
-import type { AdminRole, AdminStatus } from '../domain/ports.js';
+import type { AdminRole, AdminStatus, DesignationKind } from '../domain/ports.js';
 
 type Req = Record<string, unknown>;
 
@@ -20,6 +20,13 @@ const ROLE_TO = Object.fromEntries(Object.entries(ROLE_FROM).map(([k, v]) => [v,
 const STATUS_FROM: Record<string, AdminStatus> = { ADMIN_ACCOUNT_STATUS_INVITED: 'INVITED', ADMIN_ACCOUNT_STATUS_ACTIVE: 'ACTIVE', ADMIN_ACCOUNT_STATUS_INVITE_EXPIRED: 'INVITE_EXPIRED', ADMIN_ACCOUNT_STATUS_REMOVED: 'REMOVED' };
 const STATUS_TO = Object.fromEntries(Object.entries(STATUS_FROM).map(([k, v]) => [v, k])) as Record<AdminStatus, string>;
 const REASON_FROM: Record<string, 'RESEND' | 'PROTECT_LOCK' | 'CREDENTIAL_LOST'> = { REINVITE_REASON_RESEND: 'RESEND', REINVITE_REASON_PROTECT_LOCK: 'PROTECT_LOCK', REINVITE_REASON_CREDENTIAL_LOST: 'CREDENTIAL_LOST' };
+
+const KIND_FROM: Record<string, DesignationKind> = { DESIGNATION_KIND_ACCESS_REVIEWER: 'ACCESS_REVIEWER', DESIGNATION_KIND_PSEUDONYM_HANDLER: 'PSEUDONYM_HANDLER', DESIGNATION_KIND_FRAUD_INVESTIGATOR: 'FRAUD_INVESTIGATOR' };
+const kindOf = (v: unknown): DesignationKind => {
+  const k = KIND_FROM[typeof v === 'string' ? v : ''];
+  if (!k) throw new AdminAccountInputError('kind가 없거나 모른다');
+  return k;
+};
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
@@ -53,26 +60,8 @@ export function accountMessage(a: AdminAccountView): object {
 
 const changeMessage = (c: AdminAccountChange): object => ({ result: `ADMIN_ACCOUNT_RESULT_${c.result}`, ...(c.account ? { account: accountMessage(c.account) } : {}), already_done: c.alreadyDone });
 
-export function adminAccountHandlers(uc: { manage: Pick<ManageAdminAccounts, 'list' | 'get' | 'invite' | 'changeRole' | 'reinvite' | 'remove'> }, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
-  const unary =
-    (method: string, run: (r: Req) => Promise<object>): grpc.handleUnaryCall<Req, object> =>
-    (call, cb) => {
-      run(call.request).then(
-        (out) => cb(null, out),
-        (err: unknown) => {
-          if (err instanceof AdminAccountInputError) {
-            cb({ code: grpc.status.INVALID_ARGUMENT, details: err.message });
-            return;
-          }
-          if (err instanceof NotFound || err instanceof AdminAccountNotFound) {
-            cb({ code: grpc.status.NOT_FOUND, details: '관리 계정이 없다' });
-            return;
-          }
-          onError(method, err instanceof Error ? err.name : 'Error');
-          cb({ code: grpc.status.UNAVAILABLE, details: '처리하지 못했다' });
-        },
-      );
-    };
+export function adminAccountHandlers(uc: { manage: Pick<ManageAdminAccounts, 'list' | 'get' | 'invite' | 'changeRole' | 'reinvite' | 'remove' | 'designate' | 'revokeDesignation'> }, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
+  const unary = unaryOf(onError);
   return {
     ListAdminAccounts: unary('ListAdminAccounts', async (r) => {
       const group = str(r.group);
@@ -106,10 +95,49 @@ export function adminAccountHandlers(uc: { manage: Pick<ManageAdminAccounts, 'li
       return changeMessage(await uc.manage.reinvite({ requestId: str(r.request_id), actedBy: str(r.acted_by), accountId: str(r.admin_account_id), reason }));
     }),
     RemoveAdminAccount: unary('RemoveAdminAccount', async (r) => changeMessage(await uc.manage.remove({ requestId: str(r.request_id), actedBy: str(r.acted_by), accountId: str(r.admin_account_id) }))),
-    // 지정은 BOT-151
-    SetAdminDesignation: (_call: unknown, cb: grpc.sendUnaryData<object>) => cb({ code: grpc.status.UNIMPLEMENTED, details: '지정은 아직이다(BUILD_ORDER BOT-151)' }),
-    RevokeAdminDesignation: (_call: unknown, cb: grpc.sendUnaryData<object>) => cb({ code: grpc.status.UNIMPLEMENTED, details: '지정은 아직이다(BUILD_ORDER BOT-151)' }),
+    SetAdminDesignation: unary('SetAdminDesignation', async (r) =>
+      changeMessage(await uc.manage.designate({ requestId: str(r.request_id), actedBy: str(r.acted_by), accountId: str(r.admin_account_id), kind: kindOf(r.kind), basis: str(r.basis) })),
+    ),
+    RevokeAdminDesignation: unary('RevokeAdminDesignation', async (r) =>
+      changeMessage(await uc.manage.revokeDesignation({ requestId: str(r.request_id), actedBy: str(r.acted_by), accountId: str(r.admin_account_id), kind: kindOf(r.kind) })),
+    ),
   };
+}
+
+/** gRPC AdminDesignationService(ops-svc가 조사 경로 요청마다 부른다, 캐시 5초는 ops-svc 몫, BOT-151). 원본 DB에서 읽는다 */
+export function adminDesignationHandlers(uc: { manage: Pick<ManageAdminAccounts, 'designationsOf'> }, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
+  const unary = unaryOf(onError);
+  return {
+    GetAdminDesignations: unary('GetAdminDesignations', async (r) => {
+      const d = await uc.manage.designationsOf(str(r.admin_account_id));
+      return {
+        kinds: d.kinds.map((k) => `DESIGNATION_KIND_${k}`),
+        recently_revoked: d.recentlyRevoked.map((x) => ({ kind: `DESIGNATION_KIND_${x.kind}`, revoked_at: { seconds: Math.floor(x.revokedAt / 1000), nanos: (x.revokedAt % 1000) * 1_000_000 } })),
+      };
+    }),
+  };
+}
+
+/** 한 호출: 입력 꼴 오류는 INVALID_ARGUMENT, 없는 계정은 NOT_FOUND, 그 밖은 UNAVAILABLE(오류 이름만 남긴다) */
+function unaryOf(onError: (method: string, err: unknown) => void) {
+  return (method: string, run: (r: Req) => Promise<object>): grpc.handleUnaryCall<Req, object> =>
+    (call, cb) => {
+      run(call.request).then(
+        (out) => cb(null, out),
+        (err: unknown) => {
+          if (err instanceof AdminAccountInputError) {
+            cb({ code: grpc.status.INVALID_ARGUMENT, details: err.message });
+            return;
+          }
+          if (err instanceof NotFound || err instanceof AdminAccountNotFound) {
+            cb({ code: grpc.status.NOT_FOUND, details: '관리 계정이 없다' });
+            return;
+          }
+          onError(method, err instanceof Error ? err.name : 'Error');
+          cb({ code: grpc.status.UNAVAILABLE, details: '처리하지 못했다' });
+        },
+      );
+    };
 }
 
 class NotFound extends Error {}

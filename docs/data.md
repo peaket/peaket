@@ -289,7 +289,7 @@ erDiagram
     }
     admin_account_request {
         text request_id PK "ops-svc 감사 기록 ID(AdminAccountService 바꾸는 호출의 request_id). 같은 값이 다시 오면 처리하지 않고 적은 결과를 준다(docs/features/identity.md §6 BOT-150)"
-        text kind "INVITE|CHANGE_ROLE|REINVITE|REMOVE(지정은 BOT-151)"
+        text kind "INVITE|CHANGE_ROLE|REINVITE|REMOVE|DESIGNATE|REVOKE_DESIGNATION(지정, BOT-151)"
         uuid admin_account_id "대상 계정(초대는 만든 계정). 외래키 없음(삭제한 계정 행도 남는다)"
         text result "AdminAccountResult 이름(OK, ROLE_NOT_ALLOWED 등)"
         timestamptz created_at "30일 [가정] 지나면 매일 정비가 지운다"
