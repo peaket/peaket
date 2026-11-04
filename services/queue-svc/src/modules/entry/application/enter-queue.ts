@@ -83,6 +83,8 @@ export class EnterQueue {
   readonly #numbers: NumberBatcher;
   /** 회차마다 동시에 하나만 도는 RB-05(파드 안) */
   readonly #recovering = new Map<string, Promise<unknown>>();
+  /** 회차마다 하나씩 뒤에서 도는 RB-05 복제 확인(ADR-0186) */
+  readonly #confirming = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(ENTRY_STORE) private readonly store: EntryStore,
@@ -209,11 +211,38 @@ export class EnterQueue {
         .then((r) => {
           // 운영자는 건너뛴 줄과 진입 재개를 확인한다(docs/infra.md RB-05)
           if (r.kind === 'SKIPPED') this.logger?.warn({ eventId: e, start: r.start, end: r.end, gen: r.gen }, 'RB-05: 장애 전환 뒤 번호 구간을 건너뛰었다');
+          // 건너뛰기를 붙은 복제본이 받은 것을 확인해야 진입 ②가 다시 번호를 낸다(ADR-0186). WAIT가 0.5초까지 걸려 요청은 기다리지 않고 바로 503을 받고,
+          // 확인은 회차마다 하나씩 뒤에서 돈다. 안 되면 다음 진입이나 리더(1초마다)가 다시 하고, 계속 안 되는 것은 리더가 회차마다 10초에 한 번 남긴다
+          if (r.kind === 'SKIPPED' || r.kind === 'PENDING') this.#confirm(e);
         })
         .finally(() => this.#recovering.delete(e));
       this.#recovering.set(e, p);
     }
     await p;
+  }
+
+  /** RB-05 복제 확인을 회차마다 하나씩 뒤에서 돈다. 대기열 Redis 일시 장애는 다음 진입이나 리더가 다시 하므로 삼키고, 그 밖(버그)은 남긴다 */
+  #confirm(e: string): void {
+    if (this.#confirming.has(e)) return;
+    const p = this.store
+      .confirmRb05({ eventId: e })
+      .then(
+        () => undefined,
+        (err: unknown) => {
+          if (!(err instanceof QueueStoreUnavailable)) this.logger?.error({ err, eventId: e }, 'RB-05 복제 확인 실패');
+        },
+      )
+      .finally(() => this.#confirming.delete(e));
+    this.#confirming.set(e, p);
+  }
+
+  /** 뒤에서 도는 RB-05 복제 확인이 끝나기를 기다린다(멈출 때와 시험) */
+  async confirmsSettled(): Promise<void> {
+    await Promise.all([...this.#confirming.values()]);
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.confirmsSettled();
   }
 
   /** 선점 풀기는 덤이다: 대기열 Redis가 잠시 안 되면 선점 수명이 지나 풀린다 */

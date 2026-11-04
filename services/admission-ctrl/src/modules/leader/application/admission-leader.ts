@@ -13,6 +13,7 @@ import {
   MAX_ADVANCE_PER_TICK,
   PRE_OPEN_MS,
   RATIO_FLOOR,
+  RB05_CHECK_MS,
   RB05_SKIP_BASE,
   saleEndOf,
   TICK_MS,
@@ -44,9 +45,13 @@ export class AdmissionLeader {
   readonly #stopped = new Set<string>();
   /** 회차마다 마지막으로 본 판매 상태(판매 상태 칸이 없을 때 쓴다, ADR-0122) */
   readonly #saleStates = new Map<string, string>();
+  /** 회차마다 RB-05를 마지막으로 부른 시각(리더 시계) */
+  readonly #rb05At = new Map<string, number>();
   readonly #loggedAt = new Map<string, number>();
   /** 뒤에서 도는 게시(회차마다 하나) */
   readonly #publishing = new Map<string, Promise<void>>();
+  /** 회차마다 하나씩 뒤에서 도는 RB-05 복제 확인(WAIT가 0.5초까지 걸려 다른 회차의 전진을 막지 않게, ADR-0186) */
+  readonly #confirming = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(LEADER_STORE) private readonly store: LeaderStore,
@@ -69,7 +74,7 @@ export class AdmissionLeader {
     while (this.#busy) await new Promise((r) => setTimeout(r, 10));
     // 게시를 하다 만 채 Lease를 놓으면 새 리더가 같은 묶음을 또 게시한다. 한도 안에서 끝나기를 기다린다
     let timer: NodeJS.Timeout | undefined;
-    await Promise.race([Promise.allSettled([...this.#publishing.values()]), new Promise((r) => (timer = setTimeout(r, STOP_WAIT_MS)))]);
+    await Promise.race([Promise.allSettled([...this.#publishing.values(), ...this.#confirming.values()]), new Promise((r) => (timer = setTimeout(r, STOP_WAIT_MS)))]);
     clearTimeout(timer);
   }
 
@@ -137,11 +142,11 @@ export class AdmissionLeader {
         const c = await this.store.close({ eventId, gen, keepUntilMs, opensAtMs: plan.opensAtMs, closeAtMs, lobbyShuffle: plan.lobbyShuffle, openBatch: plan.openBatch });
         if (c === 'FENCED') return this.#fence(gen, eventId);
         // 장애 전환 뒤 RB-05 전이다: 진입 파드가 오지 않아도 리더가 RB-05를 돌고 다음 주기에 닫는다(ADR-0182 결정 6)
-        if (c === 'RB05') {
-          const s = await this.store.rb05({ eventId, expireAtMs: keepUntilMs, skippedExpireAtMs: saleEndOf(plan), skipBase: RB05_SKIP_BASE, opensAtMs: plan.opensAtMs, closeAtMs, lobbyShuffle: plan.lobbyShuffle, openBatch: plan.openBatch });
-          if (s.kind === 'SKIPPED') this.logger?.warn({ eventId, start: s.start, end: s.end, gen: s.gen }, 'RB-05(리더): 장애 전환 뒤 번호 구간을 건너뛰었다');
-        }
+        if (c === 'RB05') await this.#rb05(eventId, plan, keepUntilMs, closeAtMs, now);
       }
+      // 장애 전환 뒤 새 진입이 오지 않으면(조용한 회차) RB-05가 돌지 않아, 잃은 번호를 든 대기자는 카운터가 그 번호에 닿지 못해 차례가 오지 않는다.
+      // 그래서 리더가 회차마다 1초에 한 번 RB-05를 부른다(세대 키가 같으면 Lua가 바로 끝난다, 명세 rb05의 공정성, ADR-0184)
+      if (now - (this.#rb05At.get(eventId) ?? Number.NEGATIVE_INFINITY) >= RB05_CHECK_MS) await this.#rb05(eventId, plan, keepUntilMs, closeAtMs, now);
       // 묶음이 닫혔고 게시 전이거나 다시 쓰기 표시가 있으면 게시를 부른다(비콘이 아직이면 다음 주기에 다시). 큰 묶음의 게시는 몇 초 걸리므로
       // 뒤에서 돌려 다른 회차의 전진을 막지 않는다. 게시는 세대를 확인하지 않으므로 지금도 같은 세대의 리더일 때만 시작한다
       if (plan.openBatch && r.batchMarked === 1 && (r.batchPublished === 0 || r.repair === 1) && !this.#stopped.has(eventId) && !this.#publishing.has(eventId)) {
@@ -150,6 +155,23 @@ export class AdmissionLeader {
       }
     } catch (err) {
       this.#logError(eventId, now, err, 'admission-ctrl 리더: 회차 주기 실패(같은 회차는 10초에 한 번 남긴다)');
+    }
+  }
+
+  async #rb05(eventId: string, plan: EventPlan, keepUntilMs: number, closeAtMs: number, now: number): Promise<void> {
+    this.#rb05At.set(eventId, now);
+    const s = await this.store.rb05({ eventId, expireAtMs: keepUntilMs, skippedExpireAtMs: saleEndOf(plan), skipBase: RB05_SKIP_BASE, opensAtMs: plan.opensAtMs, closeAtMs, lobbyShuffle: plan.lobbyShuffle, openBatch: plan.openBatch });
+    if (s.kind === 'SKIPPED') this.logger?.warn({ eventId, start: s.start, end: s.end, gen: s.gen }, 'RB-05(리더): 장애 전환 뒤 번호 구간을 건너뛰었다');
+    // 건너뛰기를 붙은 복제본이 받은 것을 확인해야 진입이 다시 열린다(ADR-0186). 1초마다 다시 오므로 조용한 회차도 확인 전에 머물지 않는다
+    if ((s.kind === 'SKIPPED' || s.kind === 'PENDING') && !this.#confirming.has(eventId)) {
+      const p = this.store
+        .confirmRb05({ eventId })
+        .then((c) => {
+          if (c === 'WAITING') this.#logError(`${eventId}:rb05-wait`, this.clock.now(), undefined, 'RB-05 복제 확인 대기: 붙은 복제본이 건너뛰기를 받지 못해 그 회차의 진입이 멈춰 있다(그 샤드 복제본의 연결·지연 확인, docs/infra.md RB-05)');
+        })
+        .catch((err: unknown) => this.#logError(`${eventId}:rb05-error`, this.clock.now(), err, 'RB-05 복제 확인 실패(다음 1초에 다시)'))
+        .finally(() => this.#confirming.delete(eventId));
+      this.#confirming.set(eventId, p);
     }
   }
 
@@ -187,6 +209,7 @@ export class AdmissionLeader {
       this.#plans.delete(e);
       this.#stopped.delete(e);
       this.#saleStates.delete(e);
+      this.#rb05At.delete(e);
       // 다시 오면 세대부터 다시 올린다
       this.#bumped.events.delete(e);
       this.metrics?.forget(e);

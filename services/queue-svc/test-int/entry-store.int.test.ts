@@ -166,9 +166,33 @@ test('RB05는서버시각으로오픈전이고카운터가없으면_건너뛰지
   await cmd(keys.epoch(b), ['HSET', keys.epoch(b), 'node', 'old-primary']);
   await cmd(keys.seq(b), ['SET', keys.seq(b), '7']);
   expect(await store.rb05({ eventId: b, ...base })).toEqual({ kind: 'SKIPPED', start: 8, end: 17, gen: 2 });
-  // 이미 바뀌었으면(다른 파드가 먼저 했다) 아무것도 하지 않는다
+  // 이미 건너뛰었으면(다른 파드가 먼저 했다) 다시 건너뛰지 않는다. 복제 확인 전이면 PENDING, 확인 뒤면 DONE(ADR-0186)
+  expect(await store.rb05({ eventId: b, ...base })).toEqual({ kind: 'PENDING' });
+  expect(await store.confirmRb05({ eventId: b })).toBe('CONFIRMED');
   expect(await store.rb05({ eventId: b, ...base })).toEqual({ kind: 'DONE' });
   expect(Number(await cmd(keys.seq(b), ['GET', keys.seq(b)]))).toBe(17);
+});
+
+test('[Q-T13] [ASVS v5.0.0-15.4.2] RB05가건너뛴뒤_복제확인전(pend)에는진입②가번호를내지않고_확인하면표시를지우고다시낸다(ADR-0186)', async () => {
+  const store = new RedisEntryStore(redis);
+  const now = Date.now();
+  const e = newEvent();
+  const input = { eventId: e, expireAtMs: now + 86_400_000, opensAtMs: now - 60_000, closeAtMs: now - 50_000, lobbyShuffle: false, openBatch: false };
+  expect(await store.number(input)).toMatchObject({ kind: 'NUMBERED', seq: 1 });
+  await cmd(keys.epoch(e), ['HSET', keys.epoch(e), 'node', 'old-primary']);
+  expect(await store.number(input)).toEqual({ kind: 'RECOVERING' });
+  const rb = { eventId: e, expireAtMs: now + 86_400_000, skippedExpireAtMs: now + 86_400_000, skipBase: 10, opensAtMs: now - 60_000, lobbyShuffle: false, openBatch: false };
+  expect(await store.rb05(rb)).toEqual({ kind: 'SKIPPED', start: 2, end: 11, gen: 2 });
+  expect(String(await cmd(keys.epoch(e), ['HGET', keys.epoch(e), 'pend']))).toBe('1');
+  // 세대 키는 지금 노드 표지가 됐지만 확인 전이다
+  expect(await store.number(input)).toEqual({ kind: 'RECOVERING' });
+  // 붙은 복제본이 없는 단일 노드라 기다리지 않고 지운다
+  expect(await store.confirmRb05({ eventId: e })).toBe('CONFIRMED');
+  expect(await cmd(keys.epoch(e), ['HGET', keys.epoch(e), 'pend'])).toBeNull();
+  expect(await cmd(keys.epoch(e), ['HGET', keys.epoch(e), 'wait'])).toBeNull();
+  expect(await store.number(input)).toMatchObject({ kind: 'NUMBERED', seq: 12, gen: 2 });
+  // 확인할 것이 없으면 아무것도 하지 않는다
+  expect(await store.confirmRb05({ eventId: e })).toBe('NONE');
 });
 
 test('일정사본읽기는오픈시각이늦춰져오픈전이돼도_카운터가있으면다른노드표지를바꾸지않는다', async () => {

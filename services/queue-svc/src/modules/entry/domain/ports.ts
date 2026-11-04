@@ -82,7 +82,10 @@ export interface Rb05Input {
   lobbyShuffle: boolean;
   openBatch: boolean;
 }
-export type Rb05Result = { kind: 'SKIPPED'; start: number; end: number; gen: number } | { kind: 'DONE' };
+/** SKIPPED: 이번에 건너뜀(확인 전), PENDING: 이미 건너뛰었고 복제 확인 전, DONE: 할 것 없음(ADR-0186) */
+export type Rb05Result = { kind: 'SKIPPED'; start: number; end: number; gen: number } | { kind: 'PENDING' } | { kind: 'DONE' };
+/** RB-05 복제 확인: CONFIRMED(붙은 복제본이 다 받아 표시를 지움), WAITING(받지 못함, 다음에 다시), NONE(확인할 것이 없음) */
+export type Rb05Confirm = 'CONFIRMED' | 'WAITING' | 'NONE';
 
 export interface NumberInput {
   eventId: string;
@@ -125,8 +128,13 @@ export interface EntryStore {
   numberBatch(i: NumberBatchInput): Promise<NumberResult[]>;
   /** 요청 하나짜리 ②(numberBatch를 1건으로 부른다) */
   number(i: NumberInput): Promise<NumberResult>;
-  /** RB-05: 진입 ②가 RECOVERING을 받은 파드가 부른다. 다른 파드가 먼저 했거나 장애 전환이 아니면 DONE */
+  /** RB-05: 진입 ②가 RECOVERING을 받은 파드가 부른다. 다른 파드가 먼저 했거나 장애 전환이 아니면 DONE, 먼저 건너뛰었지만 복제 확인 전이면 PENDING */
   rb05(i: Rb05Input): Promise<Rb05Result>;
+  /**
+   * RB-05 복제 확인(ADR-0186): 세대 키가 지금 노드 표지이고 확인 전(pend)이면, 같은 연결로 표시를 쓰고 그 주 노드에 붙은 온라인 복제본 수만큼
+   * WAIT로 받은 것을 확인한 뒤 표시를 지운다. 붙은 복제본이 없으면 바로 지운다
+   */
+  confirmRb05(i: { eventId: string }): Promise<Rb05Confirm>;
   /** ③ enterRecord: q:adm이 있으면 ADMITTED. 값이 내 PENDING이거나 비었으면 {번호}:{세대}:{요청 ID}:{jny}:{vr}로 기록(수명 = 판매 종료). 같은 요청의 다른 기록이면 SAME(먼저 기록된 값),
    * 같은 요청의 묶음 기록이면 BATCH(그 토큰 해시), 그 밖은 TAKEN */
   record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number }): Promise<RecordResult>;

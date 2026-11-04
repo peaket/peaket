@@ -23,10 +23,12 @@ const tokens = HmacQueueTokens.fromEnv(process.env);
 const signer = Es256AdmissionTokens.fromEnv(process.env);
 const signals = new PromAdmissionSignals();
 const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url });
+// RB-05 복제 확인(WAIT)은 그 연결을 막으므로 클러스터에서는 따로 연결한다(ADR-0186). 단일 노드(로컬·CI)는 복제본이 없어 기다리지 않는다
+const waitRedis = clusterUrls.length > 0 ? await createHotRedis({ clusterUrls }) : undefined;
 // 위험 판정: trust-svc가 생기기 전(BUILD_ORDER BOT-050)에는 늘 축소 운영(사람 확인 보류)이다
 // 대기열 파일의 교차 출처 허용: 소비자 웹 하나(환경마다 주소가 다르다, 없으면 운영 주소)
 const webOrigin = process.env.PEAKET_WEB_ORIGIN;
-const service = await createService({ name: SERVICE, module: AppModule.register({ redis, tokens, risk: unavailableRisk, state: { ...(webOrigin ? { webOrigin } : {}) }, admission: { signer, signals } }) });
+const service = await createService({ name: SERVICE, module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: unavailableRisk, state: { ...(webOrigin ? { webOrigin } : {}) }, admission: { signer, signals } }) });
 signals.register(service.metrics.registry);
 await service.listen();
 
@@ -35,5 +37,5 @@ process.once('SIGTERM', () => {
   void service
     .close()
     .catch((err: unknown) => service.logger.error({ err }, 'queue-svc 종료 실패'))
-    .finally(() => redis.close());
+    .finally(() => Promise.all([redis.close(), waitRedis?.close()]));
 });

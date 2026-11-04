@@ -4,7 +4,7 @@
 import { fakeClock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { AdmissionLeader } from '../src/modules/leader/application/admission-leader.js';
-import type { CloseInput, EventPlan, LeaderStore, TickInput, TickResult } from '../src/modules/leader/domain/ports.js';
+import type { CloseInput, EventPlan, LeaderStore, Rb05Result, TickInput, TickResult } from '../src/modules/leader/domain/ports.js';
 import { BatchMembersChanged } from '../src/modules/batch/application/publish-batch-results.js';
 
 const T0 = Date.UTC(2026, 10, 3, 3, 0, 0);
@@ -17,7 +17,14 @@ function world(o: { plan?: Partial<EventPlan>; tick?: Partial<TickResult> | Tick
   const ticks: TickInput[] = [];
   const closes: CloseInput[] = [];
   const plan: EventPlan = { opensAtMs: T0 - 10_000, startsAtMs: T0 + 3 * DAY, lobbyShuffle: false, openBatch: true, ...o.plan };
-  const state = { gen: undefined as number | undefined, bump: o.bump ?? 'OK', tick: { ...OK, ...o.tick } as TickResult, close: o.close ?? 'OK' };
+  const state = {
+    gen: undefined as number | undefined,
+    bump: o.bump ?? 'OK',
+    tick: { ...OK, ...o.tick } as TickResult,
+    close: o.close ?? 'OK',
+    rb05: { kind: 'DONE' } as Rb05Result,
+    confirm: 'CONFIRMED' as 'CONFIRMED' | 'WAITING' | 'NONE',
+  };
   const store: LeaderStore = {
     activeEvents: async () => {
       calls.push('events');
@@ -44,7 +51,11 @@ function world(o: { plan?: Partial<EventPlan>; tick?: Partial<TickResult> | Tick
     },
     rb05: async (i) => {
       calls.push(`rb05:${i.eventId}`);
-      return { kind: 'DONE' };
+      return state.rb05;
+    },
+    confirmRb05: async (i) => {
+      calls.push(`confirm:${i.eventId}`);
+      return state.confirm;
     },
   };
   const published: string[] = [];
@@ -60,8 +71,10 @@ function world(o: { plan?: Partial<EventPlan>; tick?: Partial<TickResult> | Tick
     publish: (status: string) => void seen.push(`publish:${status}`),
     forget: (e: string) => void seen.push(`forget:${e}`),
   };
-  const leader = new AdmissionLeader(store, publish, elector, clock, undefined, metrics as never);
-  return { clock, calls, ticks, closes, state, leader, published, publish, seen, store };
+  const warned: string[] = [];
+  const logger = { warn: (_o: unknown, msg: string) => void warned.push(msg), error: (_o: unknown, msg: string) => void warned.push(msg), info: () => undefined };
+  const leader = new AdmissionLeader(store, publish, elector, clock, logger as never, metrics as never);
+  return { clock, calls, ticks, closes, state, leader, published, publish, seen, store, warned };
 }
 
 describe('교체 순서', () => {
@@ -70,7 +83,8 @@ describe('교체 순서', () => {
     w.state.gen = 3;
     await w.leader.tick();
     await w.leader.tick();
-    expect(w.calls.filter((c) => c !== 'events')).toEqual(['bump:e1:3', 'control', 'tick:e1:3', 'control', 'tick:e1:3']);
+    // RB-05 확인은 회차마다 1초에 한 번이라 두 번째 주기에는 없다
+    expect(w.calls.filter((c) => c !== 'events')).toEqual(['bump:e1:3', 'control', 'tick:e1:3', 'rb05:e1', 'control', 'tick:e1:3']);
   });
 
   test('[Q-T30] FENCED를받으면_그세대로는더쓰지않고_새세대가오면세대부터다시올린다', async () => {
@@ -135,6 +149,80 @@ describe('닫기와 게시', () => {
     done.state.gen = 1;
     await done.leader.tick();
     expect(done.calls.some((c) => c.startsWith('close'))).toBe(false);
+  });
+
+  test('장애전환뒤_진입이오지않아도_리더가회차마다1초에한번RB-05를부른다(조용한회차에서잃은번호의대기자가멈추지않게, ADR-0184)', async () => {
+    const w = world();
+    w.state.gen = 1;
+    await w.leader.tick();
+    await w.leader.tick();
+    expect(w.calls.filter((c) => c.startsWith('rb05'))).toEqual(['rb05:e1']);
+    w.clock.advance(1_000);
+    await w.leader.tick();
+    expect(w.calls.filter((c) => c.startsWith('rb05'))).toEqual(['rb05:e1', 'rb05:e1']);
+    // 닫기가 RB05를 돌려줘 이번 주기에 이미 불렀으면 다시 부르지 않는다
+    const c = world({ tick: { batchMarked: 0 }, close: 'RB05' });
+    c.state.gen = 1;
+    await c.leader.tick();
+    expect(c.calls.filter((x) => x.startsWith('rb05'))).toEqual(['rb05:e1']);
+  });
+
+  test('[Q-T13] RB05가건너뛰었거나_확인전이면_이어서복제를확인하고_확인이안되면회차마다10초에한번경고한다(ADR-0186)', async () => {
+    const w = world();
+    w.state.gen = 1;
+    // 세대 키가 같고 확인할 것도 없으면 확인하지 않는다
+    await w.leader.tick();
+    expect(w.calls.filter((c) => c.startsWith('confirm'))).toEqual([]);
+    // 건너뛰었으면 이어서 확인한다
+    w.state.rb05 = { kind: 'SKIPPED', start: 2, end: 11, gen: 2 };
+    w.clock.advance(1_000);
+    await w.leader.tick();
+    expect(w.calls.filter((c) => c.startsWith('rb05') || c.startsWith('confirm')).slice(-2)).toEqual(['rb05:e1', 'confirm:e1']);
+    // 복제본이 받지 못해 확인이 안 되면 경고하고, 다음 1초에 다시 확인한다
+    w.state.rb05 = { kind: 'PENDING' };
+    w.state.confirm = 'WAITING';
+    w.clock.advance(1_000);
+    await w.leader.tick();
+    w.clock.advance(1_000);
+    await w.leader.tick();
+    expect(w.calls.filter((c) => c.startsWith('confirm')).length).toBe(3);
+    expect(w.warned.filter((m) => m.includes('RB-05 복제 확인 대기')).length).toBe(1);
+  });
+
+  test('복제확인이끝나기전에는_다음주기에새확인을띄우지않고(회차마다하나)_멈출때진행중인확인을기다린다(ADR-0186)', async () => {
+    const w = world();
+    w.state.gen = 1;
+    w.state.rb05 = { kind: 'SKIPPED', start: 2, end: 11, gen: 2 };
+    let release!: () => void;
+    let confirms = 0;
+    w.store.confirmRb05 = () => (confirms++, new Promise<'CONFIRMED'>((r) => (release = () => r('CONFIRMED'))));
+    await w.leader.tick();
+    w.state.rb05 = { kind: 'PENDING' };
+    w.clock.advance(1_000);
+    await w.leader.tick();
+    expect(confirms).toBe(1);
+    let stopped = false;
+    const stopping = w.leader.stop().then(() => (stopped = true));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(stopped).toBe(false);
+    release();
+    await stopping;
+    expect(stopped).toBe(true);
+  });
+
+  test('복제확인대기경고와_확인실패오류는_10초제한을나눠쓰지않아서로를가리지않는다(ADR-0186)', async () => {
+    const w = world();
+    w.state.gen = 1;
+    w.state.rb05 = { kind: 'PENDING' };
+    w.state.confirm = 'WAITING';
+    await w.leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    w.store.confirmRb05 = async () => Promise.reject(new Error('WAIT 실패'));
+    w.clock.advance(1_000);
+    await w.leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w.warned.filter((m) => m.includes('RB-05 복제 확인 대기')).length).toBe(1);
+    expect(w.warned.filter((m) => m.includes('RB-05 복제 확인 실패')).length).toBe(1);
   });
 
   test('구간끝전에는묶음을닫지않는다', async () => {

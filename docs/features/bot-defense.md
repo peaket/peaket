@@ -370,7 +370,7 @@ ADR-0171 결정 4는 끝단(CDN과 웹 방화벽처럼 사용자 가까이에서
 | 행동 신호 원시(`trust.behavior_raw`) | ClickHouse(대량 이벤트 집계에 강한 분석용 데이터베이스) | 30일. screen `LOBBY`·`EVENT_DETAIL`만 넣는다(§4.1) | docs/streaming.md §5.4 |
 | 조사용 사본(판정 기록·행동 요약·요청 기록의 `journeyId`·`deviceRef`·IP·JA4·끝단 봇 라벨) | ClickHouse 조사 DB `inv`(분석 저장소와 따로) | 그 회차 공연일 + 30일 [가정]. ops-svc 파기 작업 `inv-partition-purge`가 회차 파티션을 지우고 TTL은 보조다(법률 확인 36번, ADR-0173 결정 7) | docs/data.md, ADR-0171 결정 5 |
 | 재평가 상태·후보 | 세션·캐시 Redis·Kafka | 10분·7일 | docs/streaming.md §5.8, data-classification |
-| 실시간 판정 라벨 | Kafka → 관제 실시간 표·분석 저장소 | 세션 ID는 30일 뒤 지우고 등급별 집계만 남긴다 | data-classification '실시간 봇 판정 라벨' |
+| 실시간 판정 라벨 | Kafka → 관제 실시간 표·분석 저장소, 표본 검토 원장 | 표본 검토 원장(세션 ID와 판정 플래그)은 30일 뒤 세션 ID를 지우고 등급별 집계만 남긴다. 같은 판정 사건의 사본인 관제 실시간 표 `rt.verdict`(판정 종류만 두고 세션 ID가 없다)와 분석 저장소(회차별 가명으로 바꾼 실버 `slv_trust_label`)는 90일이다(docs/streaming.md §4.7, docs/features/analytics.md §5.4, data-classification '분석 저장소 가명 사건', 2026-11-02 정합 점검) | data-classification '실시간 봇 판정 라벨' |
 | 위험 점수·이의 제기 심사 기록 | ops DB(`verification_case`) | 공연이 끝난 뒤 1년 | data-classification '이상 징후 위험 점수 및 이의 제기 심사 기록' |
 
 - 행동 신호는 브라우저가 낸 요약값만 받는다. 원시 좌표·키 값·입력한 글자는 브라우저 밖으로 나가지 않는다(ADR-0065 결정 9).

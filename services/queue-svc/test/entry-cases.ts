@@ -69,6 +69,7 @@ function pausing(store: EntryStore, hooks: { beforeNumber?: () => Promise<void>;
     markRemoved: (i) => store.markRemoved(i),
     markVerifying: (i) => store.markVerifying(i),
     rb05: (i) => store.rb05(i),
+    confirmRb05: (i) => store.confirmRb05(i),
   };
 }
 
@@ -305,7 +306,8 @@ export function entryCases(label: string, make: () => Promise<EntryWorld>) {
       expect([e?.code, e?.retryAfterSeconds]).toEqual(['QUEUE_RECOVERING', 1]);
       expect(await w.skipped(eventId)).toEqual([`4:${3 + SKIP}:1`]);
       expect(await w.counter(eventId)).toBe(3 + SKIP);
-      // 같은 요청 ID로 다시 오면 건너뛴 구간 뒤 번호와 올라간 세대를 받는다
+      // 같은 요청 ID로 다시 오면(그사이 뒤에서 복제 확인이 끝났다) 건너뛴 구간 뒤 번호와 올라간 세대를 받는다
+      await enter.confirmsSettled();
       const t = ticketOf(await enter.run({ ...person(3), eventId, body: b }));
       expect([t.seq, t.generation]).toEqual([3 + SKIP + 1, 2]);
     });
@@ -320,6 +322,7 @@ export function entryCases(label: string, make: () => Promise<EntryWorld>) {
       const b = body();
       expect((await failed(enter.run({ ...person(5), eventId, body: b })))?.code).toBe('QUEUE_RECOVERING');
       expect(await w.skipped(eventId)).toEqual([`4:${3 + SKIP}:1`]);
+      await enter.confirmsSettled();
       const t = ticketOf(await enter.run({ ...person(5), eventId, body: b }));
       expect([t.seq, t.generation]).toEqual([3 + SKIP + 1, 2]);
     });
@@ -330,6 +333,7 @@ export function entryCases(label: string, make: () => Promise<EntryWorld>) {
       expect(ticketOf(await enter.run({ ...person(0), eventId, body: body() })).seq).toBe(1);
       await w.failover(eventId);
       expect((await failed(enter.run({ ...person(1), eventId, body: body() })))?.code).toBe('QUEUE_RECOVERING');
+      await enter.confirmsSettled();
       expect(ticketOf(await enter.run({ ...person(1), eventId, body: body() })).seq).toBe(1 + SKIP + 1);
     });
 

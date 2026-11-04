@@ -1,0 +1,56 @@
+{
+  "$comment": "재생용 동작 기록(wbs 2.3.4, V-T40). node tools/spec-check/run-local.mjs traces --spec queue가 만든다. 손으로 고치지 않는다",
+  "spec": "specs/queue.qnt",
+  "specSha256": "6791d955d3cd12a00c93c4eec8e02ed9688e9aa51e893bd01c4188766cb55542",
+  "quint": "0.33.1",
+  "modules": [
+    {
+      "main": "queue_proposed",
+      "traces": 4
+    },
+    {
+      "main": "queue_admit",
+      "traces": 8
+    },
+    {
+      "main": "queue_lag2",
+      "traces": 4
+    },
+    {
+      "main": "queue_lag2_jump",
+      "traces": 4
+    },
+    {
+      "main": "queue_proposed_full",
+      "traces": 4
+    }
+  ],
+  "seed": "0x5eed",
+  "maxSteps": 40,
+  "files": [
+    "queue_proposed_0.itf.json",
+    "queue_proposed_1.itf.json",
+    "queue_proposed_2.itf.json",
+    "queue_proposed_3.itf.json",
+    "queue_admit_0.itf.json",
+    "queue_admit_1.itf.json",
+    "queue_admit_2.itf.json",
+    "queue_admit_3.itf.json",
+    "queue_admit_4.itf.json",
+    "queue_admit_5.itf.json",
+    "queue_admit_6.itf.json",
+    "queue_admit_7.itf.json",
+    "queue_lag2_0.itf.json",
+    "queue_lag2_1.itf.json",
+    "queue_lag2_2.itf.json",
+    "queue_lag2_3.itf.json",
+    "queue_lag2_jump_0.itf.json",
+    "queue_lag2_jump_1.itf.json",
+    "queue_lag2_jump_2.itf.json",
+    "queue_lag2_jump_3.itf.json",
+    "queue_proposed_full_0.itf.json",
+    "queue_proposed_full_1.itf.json",
+    "queue_proposed_full_2.itf.json",
+    "queue_proposed_full_3.itf.json"
+  ]
+}

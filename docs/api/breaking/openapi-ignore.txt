@@ -1,3 +1,5 @@
 # OpenAPI 깨짐 예외(oasdiff --err-ignore). 의도해서 깨는 변경만 적는다(docs/api/guidelines.md §1).
 # 한 줄에 oasdiff가 낸 변경 문장 하나를 적고, 줄 끝에 '# 이유: …'를 단다. 예외가 늘어난 PR에는 breaking-approved 라벨이 있어야 한다.
 # 예: GET /v1/example removed the success response with the status `200`  # 이유: 초안 판 안의 정리(ADR-0000)
+POST /v1/events/{eventId}/holds the `seatIds` request property's minItems was set to `1`  # 이유: v0.1.0에서 이 경로를 맡던 v0-monolith가 이미 좌석 1~10개를 요구했다. 계약을 실제 동작에 맞춘 것이라 깨지는 클라이언트가 없다(PRF-130, 2026-11-04)
+POST /v1/events/{eventId}/holds added the pattern `^[A-Za-z0-9_-]{1,64}$` to the request property `seatIds/items/`  # 이유: v0-monolith가 이미 같은 좌석 ID 모양을 요구했다. 좌석 ID가 좌석 Stream 값과 로그에 들어가므로 모양을 계약에 적는다(PRF-130, 2026-11-04)

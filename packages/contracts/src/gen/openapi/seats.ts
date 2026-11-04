@@ -144,6 +144,7 @@ export const PostV1EventsEventIdHoldsHeader = zod.object({
   "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1)로 만든 HMAC-SHA256 키이고, 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3)')
 })
 
+export const postV1EventsEventIdHoldsBodySeatIdsItemRegExp = new RegExp('^[A-Za-z0-9_-]{1,64}$');
 export const postV1EventsEventIdHoldsBodySeatIdsMax = 10;
 
 
@@ -167,14 +168,14 @@ export const postV1EventsEventIdHoldsBodyBehaviorScrollDistancePxMin = 0;
 
 
 export const PostV1EventsEventIdHoldsBody = zod.object({
-  "seatIds": zod.array(zod.string()).max(postV1EventsEventIdHoldsBodySeatIdsMax).optional(),
+  "seatIds": zod.array(zod.string().regex(postV1EventsEventIdHoldsBodySeatIdsItemRegExp)).min(1).max(postV1EventsEventIdHoldsBodySeatIdsMax).optional().describe('직접 선택 좌석 ID. 1~10개, 좌석 ID 모양이 틀리면 400이다. 같은 좌석이 두 번 들었거나 좌석맵 판에 없는 좌석·판매 제외석이면 422 invalid-seat다(docs/features/seat-hold.md §3 \'좌석 ID 확인\', 추천 적용 2026-11-04, BUILD_ORDER PRF-130)'),
   "auto": zod.object({
   "firstTierId": zod.string(),
   "secondTierId": zod.string().optional().describe('선택. 1순위와 달라야 한다'),
   "count": zod.int().min(1).describe('1인 매수 한도 이하'),
   "wheelchair": zod.boolean().default(postV1EventsEventIdHoldsBodyAutoWheelchairDefault),
   "allowSplit": zod.boolean().default(postV1EventsEventIdHoldsBodyAutoAllowSplitDefault).describe('연석이 없을 때 같은 등급의 분리 좌석 허용')
-}).optional().describe('희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043)'),
+}).optional().describe('희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정을 여는 wbs 2.5.4 전에는 보내면 400 auto-assign-not-supported다(지금은 좌석 지정만 받는다, 추천 적용 2026-11-04)'),
   "clientEphemeralPublicKey": zod.string().optional().describe('좌석 자동 배정 공연의 첫 요청에만(직접 선택 공연은 스냅샷 요청 헤더). 구매 세션에 저장'),
   "behavior": zod.object({
   "v": zod.literal(1).describe('형식 버전'),
@@ -188,12 +189,15 @@ export const PostV1EventsEventIdHoldsBody = zod.object({
 }).strict().optional().describe('좌석 화면에서 잰 행동 요약. 직접 선택 공연에서 그 구매 세션의 첫 홀드 요청에만 싣는다(다시 보내도 첫 요청의 것만 쓴다). 없어도 홀드는 그대로 처리한다. purchase-svc가 홀드 응답과 따로 BehaviorSignal(screen SEAT)로 낸다(추천 적용 2026-10-31, ADR-0171 결정 4, docs/features/seat-hold.md)')
 }).describe('직접 선택 공연은 seatIds, 좌석 자동 배정 공연은 auto 중 하나를 보낸다(POL-035, ADR-0043)')
 
+
+
+
 export const PostV1EventsEventIdHoldsResponse = zod.object({
-  "holdId": zod.string().optional(),
-  "seatIds": zod.array(zod.string()).optional(),
-  "expiresAt": zod.iso.datetime({"offset":true}).optional(),
-  "extendable": zod.boolean().optional(),
-  "fencingToken": zod.int().optional(),
+  "holdId": zod.string(),
+  "seatIds": zod.array(zod.string()),
+  "expiresAt": zod.iso.datetime({"offset":true}),
+  "extendable": zod.boolean(),
+  "fencingToken": zod.int().min(1),
   "assignResult": zod.enum(['FIRST', 'FIRST_SPLIT', 'SECOND', 'SECOND_SPLIT']).optional().describe('좌석 자동 배정 결과 유형(ADR-0043). 직접 선택 공연은 없음')
 })
 

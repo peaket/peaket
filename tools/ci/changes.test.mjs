@@ -158,6 +158,15 @@ test('V-T1 명세와_검사도구를바꾸면_specs를고르고_전수검사는�
   assert.equal(scopes({ 'specs/queue.qnt': 'module queue {}\n' }).includes('specs_full'), false);
 });
 
+test('V-T40 모델기반시험의_명령이름목록·재생기록을바꾸면_이름목록검사(specs)도고른다', () => {
+  assert.ok(scopes({ 'services/admission-ctrl/test-int/queue-model/actions.ts': 'export const SPEC_ACTIONS = [];\n' }).includes('specs'));
+  assert.ok(scopes({ 'services/admission-ctrl/test-int/queue-model/traces/manifest.json': '{}\n' }).includes('specs'));
+  assert.ok(scopes({ 'services/purchase-svc/test-int/seat-hold-model/actions.ts': 'export const SPEC_ACTIONS = [];\n' }).includes('specs'));
+  // 시험 파일 자체는 서비스 검사(js)만 돈다
+  const own = scopes({ 'services/admission-ctrl/test-int/queue-model.int.test.ts': '\n' });
+  assert.ok(own.includes('js') && !own.includes('specs'));
+});
+
 test('V-T1 명세목록이적은_관련ADR을바꾸면_전수검사(specs_full)를고르고_다른ADR은고르지않는다', () => {
   const manifest = JSON.stringify({ specs: [{ name: 'queue', adrs: ['0056', '0002'] }] });
   const withManifest = (dir) => {

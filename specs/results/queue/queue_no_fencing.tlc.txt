@@ -1,21 +1,21 @@
 Error: Invariant q_inv is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
+/\ queue_no_fencing_queue_evPend = <<>>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
   early |-> FALSE,
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {},
-  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
-  maxNumber |-> 0 ]
+  dupLost |-> {} ]
 /\ queue_no_fencing_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_fencing_queue_tabs = (<<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"])
+/\ queue_no_fencing_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
 /\ queue_no_fencing_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
 /\ queue_no_fencing_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -24,7 +24,11 @@ State 1: <Initial predicate>
   closed |-> FALSE,
   first |-> 0,
   size |-> 0,
-  members |-> {} ]
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -33,28 +37,32 @@ State 1: <Initial predicate>
   closed |-> FALSE,
   first |-> 0,
   size |-> 0,
-  members |-> {} ]
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ctl = [ holder |-> 0,
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"], [gen |-> 0, op |-> "NONE"]>> ]
 
-State 2: <queue_no_fencing_queue_acquire(1) line 854, col 3 to line 874, col 68 of module queue_no_fencing>
+State 2: <queue_no_fencing_queue_acquire(1) line 970, col 3 to line 990, col 68 of module queue_no_fencing>
+/\ queue_no_fencing_queue_evPend = <<>>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
   early |-> FALSE,
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {},
-  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
-  maxNumber |-> 0 ]
+  dupLost |-> {} ]
 /\ queue_no_fencing_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_fencing_queue_tabs = (<<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"])
+/\ queue_no_fencing_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
 /\ queue_no_fencing_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
 /\ queue_no_fencing_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -63,7 +71,11 @@ State 2: <queue_no_fencing_queue_acquire(1) line 854, col 3 to line 874, col 68 
   closed |-> FALSE,
   first |-> 0,
   size |-> 0,
-  members |-> {} ]
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -72,28 +84,32 @@ State 2: <queue_no_fencing_queue_acquire(1) line 854, col 3 to line 874, col 68 
   closed |-> FALSE,
   first |-> 0,
   size |-> 0,
-  members |-> {} ]
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
   c |-> <<[gen |-> 1, op |-> "BUMP"], [gen |-> 0, op |-> "NONE"]>> ]
 
-State 3: <queue_no_fencing_queue_acquire(2) line 854, col 3 to line 874, col 68 of module queue_no_fencing>
+State 3: <queue_no_fencing_queue_acquire(2) line 970, col 3 to line 990, col 68 of module queue_no_fencing>
+/\ queue_no_fencing_queue_evPend = <<>>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
   early |-> FALSE,
   staleApplied |-> 0,
   maxGenSeen |-> 0,
   admLost |-> {},
-  dupLost |-> {},
-  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
-  maxNumber |-> 0 ]
+  dupLost |-> {} ]
 /\ queue_no_fencing_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_fencing_queue_tabs = (<<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"])
+/\ queue_no_fencing_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
 /\ queue_no_fencing_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
 /\ queue_no_fencing_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -102,7 +118,11 @@ State 3: <queue_no_fencing_queue_acquire(2) line 854, col 3 to line 874, col 68 
   closed |-> FALSE,
   first |-> 0,
   size |-> 0,
-  members |-> {} ]
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -111,28 +131,44 @@ State 3: <queue_no_fencing_queue_acquire(2) line 854, col 3 to line 874, col 68 
   closed |-> FALSE,
   first |-> 0,
   size |-> 0,
-  members |-> {} ]
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ctl = [ holder |-> 2,
   transitions |-> 2,
   acquisitions |-> 2,
   c |-> <<[gen |-> 1, op |-> "BUMP"], [gen |-> 2, op |-> "BUMP"]>> ]
 
-State 4: <queue_no_fencing_queue_applyWrite(2) line 1141, col 3 to line 1177, col 64 of module queue_no_fencing>
+State 4: <queue_no_fencing_queue_applyWrite(2) line 1410, col 3 to line 1445, col 64 of module queue_no_fencing>
+/\ queue_no_fencing_queue_evPend = << [ seq |-> 0,
+     serving |-> 0,
+     leader |-> 2,
+     skips |-> {},
+     removed |-> {},
+     closed |-> FALSE,
+     first |-> 0,
+     size |-> 0,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 1,
+     pend |-> FALSE ] >>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
   early |-> FALSE,
   staleApplied |-> 0,
   maxGenSeen |-> 2,
   admLost |-> {},
-  dupLost |-> {},
-  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
-  maxNumber |-> 0 ]
+  dupLost |-> {} ]
 /\ queue_no_fencing_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_fencing_queue_tabs = (<<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"])
+/\ queue_no_fencing_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
 /\ queue_no_fencing_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
 /\ queue_no_fencing_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -141,7 +177,11 @@ State 4: <queue_no_fencing_queue_applyWrite(2) line 1141, col 3 to line 1177, co
   closed |-> FALSE,
   first |-> 0,
   size |-> 0,
-  members |-> {} ]
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 2,
@@ -150,28 +190,44 @@ State 4: <queue_no_fencing_queue_applyWrite(2) line 1141, col 3 to line 1177, co
   closed |-> FALSE,
   first |-> 0,
   size |-> 0,
-  members |-> {} ]
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ctl = [ holder |-> 2,
   transitions |-> 2,
   acquisitions |-> 2,
   c |-> <<[gen |-> 1, op |-> "BUMP"], [gen |-> 2, op |-> "NONE"]>> ]
 
-State 5: <queue_no_fencing_queue_applyWrite(1) line 1141, col 3 to line 1177, col 64 of module queue_no_fencing>
+State 5: <queue_no_fencing_queue_applyWrite(1) line 1410, col 3 to line 1445, col 64 of module queue_no_fencing>
+/\ queue_no_fencing_queue_evPend = << [ seq |-> 0,
+     serving |-> 0,
+     leader |-> 2,
+     skips |-> {},
+     removed |-> {},
+     closed |-> FALSE,
+     first |-> 0,
+     size |-> 0,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 1,
+     pend |-> FALSE ] >>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
   early |-> FALSE,
   staleApplied |-> 1,
   maxGenSeen |-> 2,
   admLost |-> {},
-  dupLost |-> {},
-  batchTruth |-> [gen |-> 0, closed |-> FALSE, first |-> 0, size |-> 0],
-  maxNumber |-> 0 ]
+  dupLost |-> {} ]
 /\ queue_no_fencing_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_fencing_queue_tabs = (<<1, 1>> :> [seq |-> 0, gen |-> 0, phase |-> "IDLE"])
+/\ queue_no_fencing_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
 /\ queue_no_fencing_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, rb05Due |-> FALSE, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_no_fencing_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
 /\ queue_no_fencing_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -180,7 +236,11 @@ State 5: <queue_no_fencing_queue_applyWrite(1) line 1141, col 3 to line 1177, co
   closed |-> FALSE,
   first |-> 0,
   size |-> 0,
-  members |-> {} ]
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 2,
@@ -189,7 +249,11 @@ State 5: <queue_no_fencing_queue_applyWrite(1) line 1141, col 3 to line 1177, co
   closed |-> FALSE,
   first |-> 0,
   size |-> 0,
-  members |-> {} ]
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ctl = [ holder |-> 2,
   transitions |-> 2,
   acquisitions |-> 2,

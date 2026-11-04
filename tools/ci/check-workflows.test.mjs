@@ -127,6 +127,114 @@ test('줄 번호와 파일 이름을 함께 낸다', () => {
   assert.match(r.out, /x\.yml:12: uses: actions\/checkout@v7/);
 });
 
+// --- 규칙 8(D-T49, FND-160): `branch-watch.mjs count` 단계는 continue-on-error: true와 timeout-minutes를 둔다 ---
+// 경고만 하는 점검이 넘어지거나 API가 느려도 필수 검사(branch-policy)를 막지 않게 한다
+
+const COUNT_STEP = `      # 작업 가지 수 경고
+      - run: node tools/ci/branch-watch.mjs count
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          GITHUB_TOKEN: \${{ github.token }}
+`;
+/** GOOD의 잡 build 끝(잡 docs 앞)에 단계를 넣는다 */
+const withCountStep = (step = COUNT_STEP) => GOOD.replace('  docs:\n', `${step}  docs:\n`);
+
+test('FND160_DT49_규칙8 branch-watch count 단계에 continue-on-error: true와 timeout-minutes가 있으면 통과한다', () => {
+  const r = run(withCountStep());
+  assert.equal(r.code, 0, r.out);
+  assert.equal(run(withCountStep().replace(/\n/g, '\r\n')).code, 0, 'CRLF');
+  // 단계 안 키의 차례는 뜻이 없다(name이 먼저, run이 맨 뒤)
+  const nameFirst = run(
+    withCountStep('      - name: 작업 가지 수 경고\n        continue-on-error: true\n        timeout-minutes: 2\n        run: node tools/ci/branch-watch.mjs count\n'),
+  );
+  assert.equal(nameFirst.code, 0, nameFirst.out);
+});
+
+test('FND160_DT49_규칙8 branch-watch count 단계에 continue-on-error: true가 없으면 실패한다', () => {
+  for (const [what, step] of [
+    ['continue-on-error 없음', COUNT_STEP.replace('        continue-on-error: true\n', '')],
+    ['continue-on-error: false', COUNT_STEP.replace('continue-on-error: true', 'continue-on-error: false')],
+    ['run 블록 안에서 부름', '      - name: 작업 가지 수 경고\n        run: |\n          node tools/ci/branch-watch.mjs count\n        timeout-minutes: 2\n'],
+  ]) {
+    const r = run(withCountStep(step));
+    assert.equal(r.code, 1, `${what}: ${r.out}`);
+    assert.match(r.out, /continue-on-error/, what);
+  }
+});
+
+test('FND160_DT49_규칙8 branch-watch count 단계에 timeout-minutes가 없으면 실패한다(잡의 timeout-minutes는 대신하지 못한다)', () => {
+  // GOOD의 잡 build에는 timeout-minutes: 10이 있다
+  const r = run(withCountStep(COUNT_STEP.replace('        timeout-minutes: 2\n', '')));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /timeout-minutes/);
+  assert.doesNotMatch(r.out, /잡 build에 timeout-minutes가 없다/);
+});
+
+test('FND160_DT49_규칙8은 branch-watch count를 부르지 않는 단계의 run에는 걸리지 않는다', () => {
+  for (const [what, text] of [
+    ['weekly 단계', withCountStep('      - run: node tools/ci/branch-watch.mjs weekly\n')],
+    ['count 단계 뒤의 다른 단계', withCountStep(`${COUNT_STEP}      - run: echo 끝\n`)],
+    ['count 단계 앞의 다른 단계', withCountStep(`      - run: node tools/ci/branch-policy.mjs\n${COUNT_STEP}`)],
+    ['주석 속 명령', withCountStep('      # node tools/ci/branch-watch.mjs count는 다른 워크플로가 부른다\n      - run: echo 다른 점검\n')],
+  ]) {
+    const r = run(text);
+    assert.equal(r.code, 0, `${what}: ${r.out}`);
+  }
+});
+
+const KEYS = '        continue-on-error: true\n        timeout-minutes: 2\n';
+
+test('FND160_DT49_규칙8은 인자가 붙거나 ./로 부른 branch-watch count 단계에도 걸린다', () => {
+  for (const cmd of ['node tools/ci/branch-watch.mjs count --codeowners .github/CODEOWNERS', 'node ./tools/ci/branch-watch.mjs count']) {
+    const r = run(withCountStep(`      - run: ${cmd}\n`));
+    assert.equal(r.code, 1, `${cmd}: ${r.out}`);
+    assert.match(r.out, /continue-on-error/, cmd);
+    const ok = run(withCountStep(`      - run: ${cmd}\n${KEYS}`));
+    assert.equal(ok.code, 0, `${cmd}: ${ok.out}`);
+  }
+});
+
+test('FND160_DT49_규칙8에서 잡 수준 continue-on-error는 단계의 것을 대신하지 못한다', () => {
+  const text = withCountStep('      - run: node tools/ci/branch-watch.mjs count\n        timeout-minutes: 2\n').replace(
+    '    timeout-minutes: 10\n',
+    '    timeout-minutes: 10\n    continue-on-error: true\n',
+  );
+  const r = run(text);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /continue-on-error/);
+});
+
+test('FND160_DT49_규칙8에서 이웃 단계의 키는 count 단계의 것이 아니다', () => {
+  for (const [what, step] of [
+    ['앞 단계', `      - run: echo 앞\n${KEYS}      - run: node tools/ci/branch-watch.mjs count\n`],
+    ['뒤 단계', `      - run: node tools/ci/branch-watch.mjs count\n      - run: echo 뒤\n${KEYS}`],
+  ]) {
+    const r = run(withCountStep(step));
+    assert.equal(r.code, 1, `${what}: ${r.out}`);
+  }
+});
+
+test('FND160_DT49_규칙8에서 env: 아래의 같은 이름 키는 단계 키가 아니다', () => {
+  const r = run(withCountStep('      - run: node tools/ci/branch-watch.mjs count\n        timeout-minutes: 2\n        env:\n          continue-on-error: true\n'));
+  assert.equal(r.code, 1, r.out);
+});
+
+test('FND160_DT49_규칙8은 run 블록 뒤에 키가 있거나 키 줄 끝에 주석이 붙어도 통과한다', () => {
+  const block = run(withCountStep(`      - name: 경고\n        run: |\n          node tools/ci/branch-watch.mjs count\n${KEYS}`));
+  assert.equal(block.code, 0, block.out);
+  const comment = run(withCountStep('      - run: node tools/ci/branch-watch.mjs count\n        continue-on-error: true # 경고만 한다\n        timeout-minutes: 2\n'));
+  assert.equal(comment.code, 0, comment.out);
+});
+
+test('FND160_DT49_저장소 branch-policy.yml에 branch-watch count 단계가 있고 branch-policy.yml·branch-weekly.yml이 검사를 통과한다', () => {
+  const dir = join(REPO, '.github', 'workflows');
+  const policy = join(dir, 'branch-policy.yml');
+  assert.match(readFileSync(policy, 'utf8'), /^\s*-\s+run:\s*node tools\/ci\/branch-watch\.mjs count\s*$/m);
+  const r = spawnSync(process.execPath, [script, policy, join(dir, 'branch-weekly.yml')], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
 // --- D-T32 ①: build-image.yml 빌드 잡의 권한(docs/devops.md §3.1 build-image.yml ①, BUILD_ORDER BSL-050) ---
 // 빌드 잡은 그 잡의 permissions가 contents: read뿐이고, 레지스트리 로그인·푸시·cosign·출처 증명 단계가 없어야 한다.
 // 서명 신원(OIDC 토큰)과 레지스트리 쓰기는 저장소 코드를 돌리지 않는 게시 잡(publish, wbs 0.1.5)만 받는다

@@ -184,7 +184,7 @@ test('리더는오픈이지나면로비표시를_구간끝이지나면묶음표�
   expect(await store.close({ ...c, closeAtMs: now - 1 })).toBe('FENCED');
 });
 
-test('리더의닫기도세대키를보고_장애전환뒤면쓰지않고RB05를돌려준다_RB05가건너뛴뒤에닫는다', async () => {
+test('[ASVS v5.0.0-15.4.2] 리더의닫기도세대키를보고_장애전환뒤면쓰지않고RB05를돌려준다_RB05가건너뛴뒤에닫는다', async () => {
   const e = newEvent();
   const now = Date.now();
   await seqTo(e, 30);
@@ -197,6 +197,9 @@ test('리더의닫기도세대키를보고_장애전환뒤면쓰지않고RB05를
   const r = await store.rb05({ eventId: e, expireAtMs: now + DAY, skippedExpireAtMs: now + DAY, skipBase: 10, opensAtMs: c.opensAtMs, closeAtMs: c.closeAtMs, lobbyShuffle: false, openBatch: true });
   // 묶음 표시가 없고 구간 끝이 지났으니 묶음 인원 2를 더 건너뛴다
   expect(r).toEqual({ kind: 'SKIPPED', start: 31, end: 42, gen: 2 });
+  // 건너뛰기를 복제본이 받았는지 확인하기 전(pend)에는 닫지 않는다(ADR-0186). 노드 하나라 붙은 복제본이 없어 바로 확인한다
+  expect(await store.close(c)).toBe('RB05');
+  expect(await store.confirmRb05({ eventId: e })).toBe('CONFIRMED');
   expect(await store.close(c)).toBe('OK');
   expect(String(await cmd(keys.batchDone(e), ['HGET', keys.batchDone(e), '1']))).toBe('43:2:2');
 });

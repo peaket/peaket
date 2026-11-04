@@ -15,6 +15,8 @@ export const NUMBER_BATCH_MAX = 500;
 export const RB05_RATE_MAX_PER_SEC = 200_000;
 export const REPLICATION_LAG_P999_MS = 300;
 export const RB05_SKIP_BASE = Math.ceil((RB05_RATE_MAX_PER_SEC * REPLICATION_LAG_P999_MS * 2) / 1000);
+/** RB-05 복제 확인의 WAIT 한도 [가정](ADR-0186). 붙은 복제본이 이 안에 받지 못하면 다음 RB-05 호출(진입 503의 다시 시도, 리더 1초)이 다시 확인한다 */
+export const RB05_CONFIRM_WAIT_MS = 500;
 /** RB-05 전 진입의 503 queue-recovering Retry-After(초) [가정] */
 export const RECOVERING_RETRY_SEC = 1;
 /** 한 회차의 묶음 번호(오픈 직후 하나) */

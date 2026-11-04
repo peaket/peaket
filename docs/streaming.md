@@ -1,6 +1,6 @@
 # 스트림 처리 설계: 관제 실시간 표, 봇 대기 중 재평가, 원본 적재
 
-- **독자와 용도**: 데이터 엔지니어링·봇 탐지·플랫폼 담당자가 스트림 작업자 셋(`analytics-ingest`, `ops-rt`, `trust-reassess`)과 관제 실시간 표의 조회 시점 집계를 만들고 운영할 때 읽는 기준 문서다. 스트림 작업자는 Kafka 토픽을 계속 읽어 ClickHouse·Redis·Kafka에 쓰는 작은 TypeScript 서비스다. 조회 시점 집계는 원본 사건을 그대로 두고, 읽을 때마다 SQL로 중복을 지우고 세는 방식이다. 원본 적재의 표와 마감은 [features/analytics.md](features/analytics.md), 봇 판정은 [features/queue-admission.md](features/queue-admission.md) §7, 관제 화면은 [features/control-tower.md](features/control-tower.md), 경보와 지표 출처 표는 [observability.md](observability.md) §5·§8에서 다룬다.
+- **독자와 용도**: 데이터 엔지니어링·봇 탐지·플랫폼 담당자가 스트림 작업자 넷(`analytics-ingest`, `ops-rt`, `trust-reassess`, `inv-ingest`)과 관제 실시간 표의 조회 시점 집계를 만들고 운영할 때 읽는 기준 문서다. 스트림 작업자는 Kafka 토픽을 계속 읽어 ClickHouse·Redis·Kafka에 쓰는 작은 TypeScript 서비스다. 조회 시점 집계는 원본 사건을 그대로 두고, 읽을 때마다 SQL로 중복을 지우고 세는 방식이다. 원본 적재의 표와 마감은 [features/analytics.md](features/analytics.md), 봇 판정은 [features/queue-admission.md](features/queue-admission.md) §7, 관제 화면은 [features/control-tower.md](features/control-tower.md), 경보와 지표 출처 표는 [observability.md](observability.md) §5·§8에서 다룬다.
 - **원본 출처**: 설계서의 스트림 처리 서술(Flink의 1초·10초 창, 세션 윈도우·CEP)은 한두 줄이었다. 2026-10-20에 Flink 잡 셋으로 자세히 정했고([ADR-0071](adr/0071-flink-design-verification-rt-upsert-heartbeat-bot-reassess.md)·[ADR-0072](adr/0072-flink-detailed-design-operators-config-capacity-operations.md)), 2026-10-27에 Flink를 빼고 이 문서를 다시 썼다([ADR-0099](adr/0099-drop-flink-typescript-stream-workers-read-time-aggregation.md)). Flink로 짠 설계는 두 ADR과 git 이력(develop d10c955까지의 이 문서)에 있다.
 - **기준 기획 버전**: v1.0. 작성 2026-10-20, 다시 씀 2026-10-27.
 - **표시 규칙**: 방향은 소유자 결정이다(2026-10-27, "B안으로 정하고 다른 대안들에 대한 트레이드오프도 표로 정리해주세요.", ADR-0099). 작업자 설정·표 모양·뷰·시험은 추천 적용(2026-10-27)이다. ADR-0071에서 이어받은 규칙은 2026-10-20 소유자 승인이다. 지표 출처 표, 심장 박동과 끝에서 끝까지 신선도, 봇 판정의 A안·패턴 숫자·격리 상한·그림자 기본, 판매 좌석 상태 규칙, 텔레메트리 키가 여기에 든다. 측정으로 정할 값은 [가정, … 확정], 계산한 어림값은 [추정]으로 적는다. 외부 제품 사실은 2026-10-27에 원문으로 확인했고, 출처는 §17에 있다.
@@ -92,7 +92,7 @@
   - 보류 사건: 처리 못 하는 사건은 Kafka 데드 레터 토픽이 아니라 그 서비스 DB의 보류 표 `held_event`로 옮기고, 같은 업무 키의 뒤 사건도 함께 보류한다(ADR-0142). 대상은 다시 해도 같은 결과일 실패(검증 실패, 상태 전이 불가, 코드 예외)를 5회 [가정] 겪은 사건이다. 표에는 토픽·파티션·오프셋·`eventKey`·업무 키·오류 요약과 사건 값이 든다. 다른 키는 계속 처리한다.
   - 저장소 연결 실패·시간 초과는 보류하지 않는다. 스트림 작업자처럼 그 파티션을 멈춰 기다린다.
   - 보류가 1건 이상이면 결제·주문 토픽은 SEV2, 그 밖은 SEV3이다(docs/observability.md §5). 원인을 고친 뒤 RB-11 '보류 사건 다시 처리'로 다시 넣는다. 보류 행은 다시 처리한 뒤 7일 [가정]에 지운다(Kafka 보존과 같다).
-  - 스트림 작업자 셋은 묶음으로 쓰므로 지금 규칙(파티션마다 묶음 하나, 읽지 못한 레코드는 위치만 남김)을 그대로 쓴다.
+  - 스트림 작업자 넷은 묶음으로 쓰므로 지금 규칙(파티션마다 묶음 하나, 읽지 못한 레코드는 위치만 남김)을 그대로 쓴다.
   - 시험은 ST-T18(키 단위 동시 처리)과 ST-T19(보류 사건)이다(§10).
   - 구현(추천 적용 2026-11-01, openspec 변경 add-maintenance-control-and-consumers): 실행기는 파티션 넷 [가정]을 함께 받아 업무 키 줄에 넘기고, 1초 [가정]마다와 재조정·종료 때 앞 사건이 모두 끝난 위치를 커밋한다. 같은 결과일 실패는 0.2·0.4·0.8·1.6초 [가정] 쉬며 모두 5회 해 보고, 일시 실패(연결 오류 코드, PostgreSQL 08xxx·57P01~03·57014·55P03·53300·40001·40P01, node-postgres가 코드 없이 던지는 연결 끊김·시간 초과 글, 풀 대기 초과 429·503 Problem, 공용 일시 오류 표시)는 0.2~30초 [가정] 늘려 쉬며 그 파티션 가져오기를 멈춘다. 받기 처리기 안에서는 오래 기다리지 않는다: 파티션을 받은 뒤 보류 키 읽기(5초 [가정] 한도)나 값 읽기가 일시 실패면 그 파티션을 멈추고 그 사건부터 다시 받으며, 이미 받은 오프셋이 다시 오면 버린다. 보류 행과 로그의 오류 요약에는 쿼리 매개변수 값을 남기지 않는다. 가져오기 멈춤은 파티션마다 멈춤 이유를 세어 모두 풀릴 때만 연다(클라이언트의 resume 한 번이 앞선 멈춤을 모두 풀기 때문이다). 넘기기·종료 때 처리 중인 키를 마치기는 30초 [가정]까지만 기다리고, 넘으면 끝난 위치까지만 커밋한다. librdkafka는 파티션을 내놓을 때 앱이 건 멈춤을 지우지 않으므로 배정받을 때마다 멈춤을 푼다. 받고 끝나지 않은 사건은 파티션마다 1,000건 [가정]까지다. 값을 읽지 못한 사건은 업무 키를 몰라 Kafka 키 그대로 보류한다. 일시 실패로 멈춘 동안에는 키 자리를 기다리지 않고 받고(쓰는 클라이언트는 받기 처리기가 모두 돌아와야 가져오기 멈춤을 적용한다), 다시 시작할 때 받은 가장 큰 오프셋 + 1로 맞춘다(멈춘 동안 버린 캐시를 건너뛰지 않게, 코드 리뷰 2026-11-01). 다시 받은 사건 거르기(`eventKey`)는 처리기가 자기 트랜잭션에서 한다. 처리기는 사건 머리의 추적을 잇는 소비 span(`process <토픽>`) 안에서 돈다(docs/observability.md §2).
 
@@ -104,6 +104,7 @@
 | `analytics-ingest` | 2 | 1 · 1GiB | 데이터 노드 풀, Spot 허용 |
 | `trust-reassess` | 2 | 0.5 · 512MiB | 일반 노드 풀, 온디맨드 |
 
+- `inv-ingest`의 복제·자원·노드와 네임스페이스(§2.2), 소비자 그룹과 시작 위치(§2.6)는 아직 정하지 않았다(docs/review/open-items.md 98번, 2026-11-01 정합 점검).
 - 숫자는 [가정, 4.3.9 측정에서 확정]이고, 근거는 §11에 있다. 자원 요청과 한도는 같은 값으로 둔다(쿠버네티스에 들어오는 설정을 규칙으로 검사하는 Kyverno가 둘 다 요구한다, devops §4.3).
 - 합은 CPU 5개·메모리 5GiB다. Flink로 짠 설계(CPU 15.5개·메모리 31GiB)의 약 3분의 1이다 [가정].
 - `ops-rt`·`trust-reassess`는 온디맨드로 둔다. Spot이 회수되면 관제 신선도와 재평가가 잠깐 끊기기 때문이다. `analytics-ingest`는 지연을 견디고, 빠진 것은 커버리지 대조(§6)가 찾으므로 Spot을 허용한다.
@@ -190,6 +191,7 @@
 | `TrustVerdict` | `shadow` true는 거른다 | `rt.verdict` | 판정 종류 |
 | `PipelinePulse` | 없다 | `rt.pulse` | 토픽, 파티션, 발행 시각 |
 
+- 배포 설정의 점검 회차 목록(밖에서 1분마다 도는 합성 점검용으로 숨긴 회차, docs/features/queue-admission.md §6)에 든 회차의 사건은 싣지 않는다(analytics §3.1, 기술 검토 중간-075, 2026-11-01 정합 점검).
 - 모든 행에 회차 ID, `eventKey`(심장 박동은 없다), 사건 시각, 적재 시각을 싣는다. `rt.sale_event`에는 Kafka 파티션·오프셋도 싣는다(판매 좌석의 순서, §4.3).
 - 사람 식별값(pid, 계정, 대기 참여, 구매 세션, 주문, 티켓 ID)은 싣지 않는다. '주문마다 한 번', '구매 세션마다 첫 홀드'는 생산자가 실은 표시(`firstInStage`·`firstHeldInSession`)로 센다(ADR-0099 결정 5). 생산자는 purchase-svc다. 주문 상태 기록과 구매 세션 상태로 그 사건이 처음인지 안다.
 - 판매 좌석은 판매 상태가 Outbox 한 곳(purchase-svc의 `seat_sale`, seat-hold §6)에서 회차 키로 온다. 그래서 한 회차의 좌석 사건은 한 파티션에 순서대로 도착한다. 상태는 없음·PENDING·SOLD·RETURNED이고, 판매 좌석은 마지막 상태가 SOLD인 좌석의 수다. 가상계좌 입금 되돌림(주문 Confirmed → AwaitingDeposit, 좌석 SOLD → PENDING, docs/planning/03 §2)도 이 규칙으로 바르게 빠진다. 등급·구역은 `SeatEvent`의 `tierId`·`sectionId`(계약 보강, analytics §3.4)에서 받는다.
@@ -240,7 +242,7 @@ CREATE TABLE rt.hold_attempt ON CLUSTER '{cluster}'
 (
     event_id               LowCardinality(String),
     event_key              UUID,
-    result                 LowCardinality(String),   -- HELD·CONFLICT·LIMIT·ERROR
+    result                 LowCardinality(String),   -- HELD·CONFLICT·LIMIT·ERROR·RECENTLY_RELEASED(§4.1, 2026-11-01 정합 점검)
     tier_id                LowCardinality(String),
     first_held_in_session  Bool,
     occurred_at            DateTime64(3),
@@ -407,9 +409,9 @@ FROM sale WHERE source = 'PAYMENT'
 - **판정 피처(동기)**: 로비 입장·사전 검증 요청 때(로비 입장은 추천 적용 2026-10-30, docs/features/bot-defense.md §4.1) 세션·캐시 Redis에 회차별 기기 공유 수 `tr:devshare:{deviceRef}:E`(Set, 10분, 원소 상한 20개)와 호스팅·프록시 대역 진입 수 `tr:asnhost:{asn}:E:{10초 칸}`(카운터, 만료 30초)를 쓰고 읽는다 [가정]. 기기 공유 수는 작은 정수를 문턱과 견주므로 어림값(HyperLogLog)이 아니라 Set으로 정확히 센다. 두 키는 다른 키와 한 Lua에서 함께 쓰지 않아 해시 태그를 회차가 아니라 기기 가명·ASN에 둔다. 그래서 오픈 직전 사전 검증이 몰려도 한 회차의 키가 한 샤드에 모이지 않는다(추천 적용 2026-10-28, 기술 검토 낮음-033, docs/data.md §3). 통신사 대역은 세지 않는다(사람 대부분이 몇몇 통신사 대역에 몰려 있어서 신호가 약하고, 한 키에 요청이 몰린다).
 - **재평가 모드**: 명령 5(봇 판정 강도) 프로필에 있는 값이다. 값은 끔·그림자·적용이고, 기본값은 그림자다.
   - 그림자: `TrustVerdict`(source `REASSESS`, action `NONE`, `shadow` true)만 낸다.
-  - 적용: 아직 기다리는 사람이면 queue-svc의 `IsolateWaiting`(서비스끼리 함수를 부르듯 호출하는 gRPC 방식, 메시 mTLS, 후보 `eventKey`로 멱등)을 부른다. queue-svc는 1인 1순번 중복 확인 키로 그 사람의 대기표(로비 참가자는 참가를 증명하는 서명된 문자열인 참가 토큰)를 찾아, 빠진 번호와 `VERIFYING`을 쓴다(queue-admission §7 격리 기록, ADR-0062). 응답은 격리함·대기 중 아님·이미 격리됨이다. 이미 입장한 사람은 라벨만 남긴다.
+  - 적용: 아직 기다리는 사람이면 queue-svc의 `IsolateWaiting`(서비스끼리 함수를 부르듯 호출하는 gRPC 방식, 메시 mTLS, 후보 `eventKey`로 멱등)을 부른다. queue-svc는 1인 1순번 중복 확인 키로 그 사람의 대기표(로비 참가자는 참가를 증명하는 서명된 문자열인 참가 토큰)를 찾아, 빠진 번호와 `VERIFYING`을 쓴다(queue-admission §7 격리 기록, ADR-0062). 응답은 격리함·대기 중 아님·이미 격리됨·상한 도달(`ISOLATE_RESULT_CAP_REACHED`)이다. 이미 입장한 사람은 라벨만 남긴다(넷째 응답은 2026-11-01 정합 점검, queue.proto, docs/features/bot-defense.md §8).
 - **후보 중복**: trust-svc는 처리한 후보 `eventKey`를 10분 [가정] 동안 기억해서, 같은 후보를 두 번 처리하지 않는다.
-- **격리 상한**: 재평가로 건 격리는 회차의 지금 대기 인원의 0.5% [가정]를 10분 안에 넘지 않는다. 넘는 몫은 그림자로만 남기고 SEV3를 띄운다. 잘못된 패턴이나 숫자 때문에 사람을 한꺼번에 격리하는 사고를 막기 위해서다.
+- **격리 상한**: 재평가로 건 격리는 회차의 지금 대기 인원의 0.5% [가정]를 10분 안에 넘지 않는다. 대기 인원은 trust-svc가 알 길이 없어, queue-svc가 격리를 쓰는 Lua에서 10분 칸의 재평가 격리 수와 대기 인원(발급 번호 − serving − 빠진 번호)을 함께 보고 넘으면 격리하지 않고 상한 도달로 답한다. trust-svc는 그 답을 받으면 그림자로만 남기고 SEV3를 띄운다(2026-11-01 정합 점검, docs/features/bot-defense.md §8, ADR-0156 결정 10). 잘못된 패턴이나 숫자 때문에 사람을 한꺼번에 격리하는 사고를 막기 위해서다.
 - 격리는 차단이 아니다. 추가 검증(사람 확인과 본인확인 재통과), 이의 제기, 자동화된 결정의 설명 요구(개인정보 보호법 §37의2, POL-006)는 그대로다.
 
 ### 5.6 그림자에서 적용으로
@@ -439,7 +441,7 @@ ADR-0039 평가 절차의 그림자 실행 단계를 거친다. 그림자 기간
 
 ## 6. 원본 적재(`analytics-ingest`)
 
-- 심장 박동(`PipelinePulse`)과 `QueueAggregate`는 건너뛴다.
+- 심장 박동(`PipelinePulse`)과 `QueueAggregate`는 건너뛴다. 배포 설정의 점검 회차 목록에 든 회차의 사건도 건너뛴다(analytics §3.1, 기술 검토 중간-075, 2026-11-01 정합 점검).
 - 거절이 1건이라도 생기면 SEV3다.
 - 마감 커버리지(analytics §7): 파티션마다 대상 오프셋 구간에 있는 고유한 (파티션, 오프셋) 수가 구간 길이와 같은지 본다. 적재 거절 기록(§6.3)의 오프셋도 구간에 넣는다. 모자라면 그 구간을 Kafka 보관 기간(7일) 안에서 다시 적재한다(RB-34). 이 대조는 트랜잭션(여러 변경을 한꺼번에 반영하거나 한꺼번에 취소하는 작업 단위) 생산자를 쓰지 않는다는 것(ADR-0026 결정 3, 트랜잭션 표시는 오프셋을 차지한다)과 토픽이 삭제 보존(압축 아님) 방식이라는 것을 전제로 한다. 그래서 원본 적재가 읽는 토픽 가운데 압축 토픽 `control.settings`는 이 대조에서 뺀다. 압축은 같은 키의 옛 값을 지우므로 지운 자리의 오프셋이 빈 구간으로 보이고, 압축이 지난 구간을 다시 적재해도 키마다 마지막 값만 남기 때문이다. 설정이 바뀐 시각의 원본은 ops-svc 명령 기록이다(§3, docs/features/analytics.md §7). 텔레메트리 생산자가 버퍼가 차서 버린 사건(`telemetry_dropped_total{record}`, §2.6)은 Kafka에 닿지 않아 이 대조로 보이지 않는다. 그 몫은 분석의 커버리지 검사가 버린 수로 따로 표시한다(ADR-0141 결정 6).
 - 다시 적재는 같은 작업자를 오프셋 구간 지정 모드로 띄워 그 구간만 싣는다. 별도 소비자 그룹을 쓰고 커밋하지 않는다. 겹쳐 실린 행은 브론즈가 중복을 허용하고 실버가 지운다.
@@ -526,6 +528,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 | `telemetry.behavior` | `BehaviorSignal` | pid |
 | `telemetry.trust-candidates` | `TrustCandidate` | pid |
 | 위 텔레메트리 셋 | `PipelinePulse` | 키 없음, 파티션 직접 지정 |
+| `investigation.requests` | `InvestigationRequest`(JSON) | 키 없음(docs/api/asyncapi.yaml, 2026-11-01 정합 점검) |
 
 - 회차 하나의 거래 사건은 토픽마다 한 파티션에 온다. 그래서 `rt.sale_event`의 Kafka 위치 순서가 그 회차의 사건 순서다. 판매 좌석 규칙(§4.3)은 이 전제에 기댄다. 키 규칙을 바꾸면 생산자가 늘어나기만 하는 순번을 실어야 한다(§15).
 - 같은 좌석·주문의 사건이 커밋 순서대로 Kafka에 들어가는 것은 Outbox 릴레이의 보내는 규칙이 지킨다(Outbox 행의 `seq` 순서, 트랜잭션 마지막에 넣기, 리더 하나, `SKIP LOCKED` 없이 잠금을 기다리기, docs/data.md §4의 7번, ADR-0116). 서로 다른 좌석 사이의 순서는 커밋 순서와 다를 수 있고, 판매 좌석 규칙은 그 순서를 쓰지 않는다. 확인은 V-T28이다. `trade.seats`에는 생산자가 둘이다(홀드 사건은 좌석 Redis Stream 릴레이, 판매 사건과 `EventSaleChanged`는 purchase-svc Outbox 릴레이). 두 생산자 사이의 순서는 보장하지 않으므로, 받는 쪽은 펜싱 토큰·판 번호·상태 기계로 늦게 온 사건을 거른다(asyncapi info '키와 순서', 추천 적용 2026-10-28, 기술 검토 낮음-025).
@@ -634,7 +637,7 @@ TTL toDateTime(loaded_at) + INTERVAL 90 DAY;
 
 ## 13. 이미지·배포·시험 도구
 
-- **코드 위치**: 모노레포(코드 전부를 저장소 하나에 폴더로 나눠 담는 방식) `peaket`의 `services/analytics-ingest`·`services/ops-rt`·`services/rt-pulse`·`services/trust-reassess`에 작업자를 두고, `rt` 표·뷰의 이전 파일은 `data/`(예: `data/clickhouse/rt/`)에 둔다. 공용 소비 모듈은 `packages/platform`의 `@peaket/stream-worker`(하위 내보내기 `@peaket/platform/stream-worker`)이고, 패키지로 게시하지 않고 `workspace:` 프로토콜로 가져다 쓴다(ADR-0165). 빌드는 서비스와 같은 pnpm·TypeScript로 한다(추천 적용 2026-10-27).
+- **코드 위치**: 모노레포(코드 전부를 저장소 하나에 폴더로 나눠 담는 방식) `peaket`의 `services/analytics-ingest`·`services/ops-rt`·`services/rt-pulse`·`services/trust-reassess`·`services/inv-ingest`(`inv-ingest`는 2026-11-01 정합 점검, §1)에 작업자를 두고, `rt` 표·뷰의 이전 파일은 `data/`(예: `data/clickhouse/rt/`)에 둔다. 공용 소비 모듈은 `packages/platform`의 `@peaket/stream-worker`(하위 내보내기 `@peaket/platform/stream-worker`)이고, 패키지로 게시하지 않고 `workspace:` 프로토콜로 가져다 쓴다(ADR-0165). 빌드는 서비스와 같은 pnpm·TypeScript로 한다(추천 적용 2026-10-27).
 - **이미지**: 서비스와 같은 Node.js 기본 이미지(다이제스트 고정)를 쓴다. 공용 빌드 워크플로가 SBOM(소프트웨어에 들어간 부품 목록)·서명·출처 증명(어느 커밋에서 어떤 빌드 절차로 만들었는지 서명해 남긴 기록)을 붙인다(devops §4). 클러스터 입장 정책이 그 서명을 확인한다.
 - **차트**: 서비스와 같은 공용 차트가 Deployment, 서비스 계정, 네트워크 정책, ExternalSecret, PodMonitor, PodDisruptionBudget을 만든다. 환경 값은 `envs/<환경>/<작업자>.yaml`(이미지 다이제스트, 복제 수, 자원)이고, AppProject는 `data`·`trust`다(devops §5.2).
 - **배포 흐름**: 작업자 코드를 바꾸는 `peaket` PR(코드 변경을 합쳐 달라는 요청) → CI(코드를 올릴 때마다 자동으로 하는 검사·빌드. 바뀐 범위의 단위·통합·계약 시험, ADR-0165) → 이미지 다이제스트 갱신 PR → ArgoCD 동기화(동결 창에는 막힌다) → 롤링 → 확인(준비 상태, 첫 묶음 성공, 신선도, 누락률).

@@ -1,0 +1,232 @@
+// 좌석 홀드 쓰임새(docs/features/seat-hold.md §3~§5, openapi POST /v1/events/{eventId}/holds, BUILD_ORDER PRF-130 ①).
+// 받는 층(HoldsController)이 신원·멱등 키 형식·구매 요청 서명·본문 모양을 확인한 뒤 부른다.
+import { Inject, Injectable } from '@nestjs/common';
+import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
+import { type HeldHold, type HoldResult, holdFingerprint, KEEP_AFTER_SALE_END_MS, KEY_PART, type ReplayResult, type SeatRef, SeatStoreUnavailable } from '../domain/hold.js';
+import {
+  HOLD_ATTEMPTS,
+  type HoldAttemptResult,
+  type HoldAttempts,
+  PURCHASE_SESSIONS,
+  type PurchaseSessions,
+  SEAT_MAP,
+  SEAT_STORE,
+  type SeatMap,
+  type SeatStore,
+} from '../domain/ports.js';
+import { HoldError, type HoldErrorCode, type HoldErrorDetails } from './hold-error.js';
+
+/** 경로 스키마가 확인한 본문에서 쓰임새가 보는 칸(나머지 칸 behavior·clientEphemeralPublicKey는 PRF-130 ①에서 보지 않고 버린다) */
+export interface HoldBody {
+  /** 직접 선택 좌석 ID(1~10개, 겹침 없음, 좌석 ID 모양은 경로 스키마가 확인했다) */
+  seatIds?: readonly string[];
+  /** 자동 배정 희망 조건(모양만 확인했다). PRF-130 ①은 받지 않는다 */
+  auto?: object;
+}
+
+export interface HoldCommand {
+  /** 주소의 회차 ID(경로 스키마가 KEY_PART 모양을 확인했다) */
+  eventId: string;
+  /** 플랫폼 인증 가드가 정한 계정(Principal.accountId). 계정은 이것으로만 정한다 */
+  accountId: string;
+  /** 플랫폼 구매 요청 인증 훅이 확인한 구매 세션 참조(@CurrentPurchaseSession()) */
+  purchaseSessionId: string;
+  /** 플랫폼 멱등 모듈이 형식을 확인한 키(@IdempotencyRequest().key, 소문자 UUID v4). 플랫폼의 requestHash는 쓰지 않는다 */
+  idempotencyKey: string;
+  body: HoldBody;
+}
+
+/** 201 응답 본문(openapi Hold) */
+export interface HoldResponse {
+  holdId: string;
+  /** 잡은 좌석 ID(오름차순) */
+  seatIds: string[];
+  /** 만료 시각, ISO 8601 UTC('Z', 밀리초 셋째 자리까지) */
+  expiresAt: string;
+  /** 1회 연장을 아직 쓰지 않았다(새 홀드와 멱등 재생 모두 true) */
+  extendable: boolean;
+  /** 펜싱 토큰(양의 안전한 정수, 지금 시각으로 16자리. openapi Hold.fencingToken integer) */
+  fencingToken: number;
+}
+
+@Injectable()
+export class HoldSeats {
+  constructor(
+    @Inject(SEAT_STORE) private readonly store: SeatStore,
+    @Inject(SEAT_MAP) private readonly seatMap: SeatMap,
+    @Inject(PURCHASE_SESSIONS) private readonly sessions: PurchaseSessions,
+    @Inject(HOLD_ATTEMPTS) private readonly attempts: HoldAttempts,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
+
+  /**
+   * 좌석을 잡고 201 본문을 돌려준다. 아니면 HoldError(application/hold-error.ts의 코드)를 던진다. 차례(앞이 걸리면 뒤는 하지 않는다):
+   *
+   * 1. 구매 세션: accountId가 KEY_PART 모양이 아니거나(Redis 키에 들어간다), sessions.get(purchaseSessionId)가 없거나, 그 계정이 accountId와 다르면
+   *    SESSION_NOT_FOUND(401).
+   *    세션의 회차가 eventId와 다르면 EVENT_MISMATCH(403).
+   * 2. 본문: auto가 있으면 AUTO_NOT_SUPPORTED(400, seatIds가 함께 있어도). seatIds가 없거나 비었으면 SEATS_REQUIRED(400).
+   * 3. 회차 설정: seatMap.config(eventId)가 없으면 NOT_READY(503).
+   * 4. 판매 종료: clock.now() ≥ saleEndsAtMs면 SALE_ENDED(410).
+   * 5. 좌석 확인: seatIds를 seatMap.resolve로 바꾼다. undefined가 하나라도 있거나 같은 좌석 ID가 두 번 있으면 INVALID_SEAT(422).
+   *    여기까지 걸리면 store.hold를 부르지 않는다(S-T30: Lua 호출 0, 좌석·보유 수·Stream 변화 0).
+   *
+   *    재생이 앱 쪽 거절보다 먼저다(추천 적용 2026-11-04, guidelines §4): 3(설정 없음 503)·4(판매 종료 410)·5(좌석맵에 없는 좌석 422)로 거절하려 할 때
+   *    먼저 store.replay({ eventId, accountId, idempotencyKey, fingerprint: holdFingerprint(본문 seatIds) })를 한 번 부른다.
+   *    같은 지문이면 처음 201을 그대로 돌려준다(seatIds는 정렬한 요청 좌석, 시도 기록 없음). 다른 지문이면 IDEM_REUSED(422, 시도 기록 ERROR).
+   *    기록이 없으면(null) 원래 거절이다. replay가 SeatStoreUnavailable이면 STORE_UNAVAILABLE(503, ERROR).
+   *    1의 401·403과 2의 400은 멱등 범위 밖이라 replay보다 앞이고, 거절하지 않는 정상 경로는 replay를 부르지 않는다(멱등은 홀드 Lua 안에서 본다).
+   * 6. 저장소: 좌석을 좌석 ID 오름차순으로 정렬하고, holdId = uuidv7(clock), fingerprint = holdFingerprint(seatIds), limit = perAccountLimit,
+   *    keepUntilMs = saleEndsAtMs + KEEP_AFTER_SALE_END_MS로 store.hold를 한 번 부른다(다시 시도하지 않는다).
+   *    SeatStoreUnavailable이면 STORE_UNAVAILABLE(503, cause = 그 오류). 그 밖의 오류는 그대로 던진다.
+   * 7. 결과: OK·IDEM_REPLAY → 201 본문(holdId·fencingToken·expiresAt은 저장소가 준 값, seatIds는 정렬한 요청 좌석, extendable true).
+   *    NOT_READY → NOT_READY, IDEM_REUSED → IDEM_REUSED, PAUSED → PAUSED, CONFLICT → CONFLICT,
+   *    REHOLD_WAIT → REHOLD_WAIT(details.recentlyReleasedSeats = 결과의 seatIds, reholdAvailableAtMs = availableAtMs), QUOTA_EXCEEDED → QUOTA_EXCEEDED.
+   *
+   * 시도 기록(attempts.record, S-T35·ADR-0171, seat-hold.md §3 '시도 하나의 내용'): 1의 구매 세션 확인을 지난 요청마다 정확히 한 번, 결과를 정한 뒤 남긴다.
+   * 남기지 않는 것은 1의 401, 2의 400, 멱등 재생(IDEM_REPLAY, 처음 시도가 이미 남겼다)뿐이다.
+   * result는 OK → HELD(heldAtMs = 결과의 heldAtMs), CONFLICT → CONFLICT, REHOLD_WAIT → RECENTLY_RELEASED, QUOTA_EXCEEDED → LIMIT이고,
+   * 그 밖의 거절(EVENT_MISMATCH 403, NOT_READY·STORE_UNAVAILABLE 503, SALE_ENDED 410, INVALID_SEAT·IDEM_REUSED 422, PAUSED 423)은 ERROR(heldAtMs 없음)다.
+   * 칸: eventId = 주소의 회차, accountId·purchaseSessionId, journeyId = 구매 세션의 것, mode PICK, seatIds = 본문 seatIds를 보낸 차례 그대로(없으면 빈 목록),
+   * tierId·sectionId = 본문 첫 좌석을 seatMap.resolve로 찾았으면 그 좌석의 것(5 전에 거절했거나 첫 좌석이 판에 없으면 없음),
+   * occurredAtMs = 결과를 정한 때의 clock.now(), latencyMs = execute 시작부터 그때까지의 clock.monotonicMs() 차이.
+   *
+   * 명세에서 모호했던 셋(추천 적용 2026-11-04):
+   * - 회차가 달라 403이면 본문이 auto여도 ERROR 하나를 남긴다(구매 세션 확인을 지났고, 403이 본문 검사 400보다 먼저다).
+   * - 저장소가 일시 장애가 아닌 오류(스크립트 오류 같은 버그)를 던지면 ERROR 하나를 남기고 그 오류를 바꾸지 않고 던진다.
+   * - HoldAttempt의 firstHeldInSession은 여기서 채우지 않는다. 구매 세션 상태(PRF-135)와 Kafka·Avro 보내기(BAS-030)에서 채운다.
+   */
+  async execute(c: HoldCommand): Promise<HoldResponse> {
+    const started = this.clock.monotonicMs();
+
+    // 1 구매 세션(계정 ID는 Redis 키에 들어가므로 모양부터 본다)
+    if (!KEY_PART.test(c.accountId)) throw new HoldError('SESSION_NOT_FOUND', '계정 ID 모양이 키 조각이 아니다');
+    const session = await this.sessions.get(c.purchaseSessionId);
+    if (!session || session.accountId !== c.accountId) throw new HoldError('SESSION_NOT_FOUND', '구매 세션이 없거나 이 계정의 것이 아니다');
+
+    // 여기부터 결과마다 시도 하나를 남긴다(멱등 재생과 2의 400은 빼고)
+    const requested = [...(c.body.seatIds ?? [])];
+    let first: SeatRef | undefined;
+    const record = (result: HoldAttemptResult, heldAtMs?: number): void => {
+      this.attempts.record({
+        eventId: c.eventId,
+        accountId: c.accountId,
+        purchaseSessionId: c.purchaseSessionId,
+        journeyId: session.journeyId,
+        mode: 'PICK',
+        seatIds: requested,
+        ...(first ? { tierId: first.tierId, sectionId: first.sectionId } : {}),
+        result,
+        ...(heldAtMs !== undefined ? { heldAtMs } : {}),
+        occurredAtMs: this.clock.now(),
+        latencyMs: Math.max(0, this.clock.monotonicMs() - started),
+      });
+    };
+    /** ERROR를 남기고 던질 오류를 돌려준다 */
+    const refuse = (code: HoldErrorCode, message: string, details?: HoldErrorDetails): HoldError => {
+      record('ERROR');
+      return new HoldError(code, message, details);
+    };
+
+    if (session.eventId !== c.eventId) throw refuse('EVENT_MISMATCH', '구매 세션의 회차와 주소의 회차가 다르다');
+
+    // 2 본문(기록 없음)
+    if (c.body.auto !== undefined) throw new HoldError('AUTO_NOT_SUPPORTED', '자동 배정은 아직 받지 않는다(wbs 2.5.4)');
+    if (requested.length === 0) throw new HoldError('SEATS_REQUIRED', '본문에 seatIds가 없다');
+
+    /**
+     * 앱 쪽 거절(3·4·5) 직전의 멱등 재생 읽기: 같은 지문이면 처음 201을 그대로 돌려주고(기록 없음), 다른 지문이면 422 IDEM_REUSED(ERROR),
+     * 기록이 없으면 undefined를 돌려줘 부른 쪽이 원래 거절을 던진다
+     */
+    const replayOrRefuse = async (): Promise<HoldResponse | undefined> => {
+      let r: ReplayResult;
+      try {
+        r = await this.store.replay({ eventId: c.eventId, accountId: c.accountId, idempotencyKey: c.idempotencyKey, fingerprint: holdFingerprint(requested) });
+      } catch (err) {
+        record('ERROR');
+        if (err instanceof SeatStoreUnavailable) throw new HoldError('STORE_UNAVAILABLE', '좌석 Redis를 잠시 쓸 수 없다', { cause: err });
+        throw err;
+      }
+      if (r === null) return undefined;
+      if (r.kind === 'IDEM_REUSED') throw refuse('IDEM_REUSED', '같은 멱등 키에 다른 좌석 선택이다');
+      return responseOf(r, sortedIds(requested));
+    };
+
+    // 3 회차 설정, 4 판매 종료(주입 시계)
+    const config = await this.seatMap.config(c.eventId);
+    if (!config) {
+      const replayed = await replayOrRefuse();
+      if (replayed) return replayed;
+      throw refuse('NOT_READY', '그 회차의 좌석맵 판이 없다');
+    }
+    if (this.clock.now() >= config.saleEndsAtMs) {
+      const replayed = await replayOrRefuse();
+      if (replayed) return replayed;
+      throw refuse('SALE_ENDED', '판매 종료 뒤의 새 홀드다');
+    }
+
+    // 5 좌석 확인(Lua 전에. 없는 좌석·다른 회차·판매 제외석·겹침)
+    const refs = await this.seatMap.resolve(c.eventId, requested);
+    first = refs[0];
+    const seats = refs.filter((r): r is SeatRef => r !== undefined);
+    if (seats.length !== requested.length || new Set(requested).size !== requested.length) {
+      const replayed = await replayOrRefuse();
+      if (replayed) return replayed;
+      throw refuse('INVALID_SEAT', '고를 수 없는 좌석이 있다');
+    }
+
+    // 6 저장소(한 번만)
+    seats.sort((a, b) => byCodeUnit(a.seatId, b.seatId));
+    const seatIds = seats.map((s) => s.seatId);
+    let r: HoldResult;
+    try {
+      r = await this.store.hold({
+        eventId: c.eventId,
+        accountId: c.accountId,
+        purchaseSessionId: c.purchaseSessionId,
+        holdId: uuidv7(this.clock),
+        idempotencyKey: c.idempotencyKey,
+        fingerprint: holdFingerprint(seatIds),
+        seats,
+        limit: config.perAccountLimit,
+        keepUntilMs: config.saleEndsAtMs + KEEP_AFTER_SALE_END_MS,
+      });
+    } catch (err) {
+      record('ERROR');
+      if (err instanceof SeatStoreUnavailable) throw new HoldError('STORE_UNAVAILABLE', '좌석 Redis를 잠시 쓸 수 없다', { cause: err });
+      throw err;
+    }
+
+    // 7 결과
+    switch (r.kind) {
+      case 'OK':
+      case 'IDEM_REPLAY':
+        if (r.kind === 'OK') record('HELD', r.heldAtMs);
+        return responseOf(r, seatIds);
+      case 'NOT_READY':
+        throw refuse('NOT_READY', '세대 키가 없다(좌석 저장소가 준비되지 않음)');
+      case 'IDEM_REUSED':
+        throw refuse('IDEM_REUSED', '같은 멱등 키에 다른 좌석 선택이다');
+      case 'PAUSED':
+        throw refuse('PAUSED', '판매 정지 중이다');
+      case 'CONFLICT':
+        record('CONFLICT');
+        throw new HoldError('CONFLICT', `다른 사람이 잡은 좌석이 있다: ${r.seatId}`);
+      case 'REHOLD_WAIT':
+        record('RECENTLY_RELEASED');
+        throw new HoldError('REHOLD_WAIT', '방금 놓은 좌석이 있다', { recentlyReleasedSeats: [...r.seatIds], reholdAvailableAtMs: r.availableAtMs });
+      case 'QUOTA_EXCEEDED':
+        record('LIMIT');
+        throw new HoldError('QUOTA_EXCEEDED', '1인 한도를 넘는다');
+    }
+  }
+}
+
+/** 좌석 ID 문자 코드 순(Array.prototype.sort 기본과 같다) */
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+const sortedIds = (ids: readonly string[]): string[] => [...ids].sort(byCodeUnit);
+
+/** 201 본문(처음 응답이든 재생이든 저장소가 준 holdId·토큰·만료 시각) */
+function responseOf(h: HeldHold, seatIds: string[]): HoldResponse {
+  return { holdId: h.holdId, seatIds, expiresAt: new Date(h.expiresAtMs).toISOString(), extendable: true, fencingToken: h.fencingToken };
+}

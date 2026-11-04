@@ -69,7 +69,7 @@ export function redisScript(source: string): RedisScript {
 
 /** 클라이언트 하나(단일 노드나 클러스터)를 감싼 최소 면. key는 클러스터가 노드를 고르는 데 쓴다. binary면 문자열 응답을 Buffer로 받는다 */
 export interface RawRedis {
-  send(key: string | undefined, args: string[], binary?: boolean): Promise<unknown>;
+  send(key: string | undefined, args: string[], binary?: boolean, pin?: boolean): Promise<unknown>;
   close(): Promise<void>;
   destroy(): void;
 }
@@ -81,6 +81,12 @@ export interface CallOptions {
   deadlineMs?: number;
   /** 문자열 응답을 글자로 풀지 않고 Buffer로 받는다(비트맵처럼 바이트 값을 읽을 때. 글자로 풀면 0x80 같은 바이트가 깨진다) */
   binary?: boolean;
+  /**
+   * 클러스터에서 key 슬롯의 주 노드 한 곳으로만 보낸다(그 노드와 스크립트가 쓰는 같은 연결). node-redis 6.3은 WAIT·INFO·CLIENT 같은 명령을 Redis 명령 팁(명령 정책)에 따라
+   * 모든 샤드(WAIT는 샤드별 답의 최솟값)나 아무 노드(INFO·CLIENT INFO)로 보내 key를 무시한다(2026-11-04 ADR-0186 클러스터 실측). 한 노드의 같은 연결로 이어 가야 하는 호출
+   * (쓰기 뒤 WAIT, 그 노드의 INFO replication)이 쓴다. 키 명령과 스크립트는 늘 key 슬롯의 주 노드로 가므로 필요 없다. 단일 노드에서는 아무 일도 하지 않는다
+   */
+  pin?: boolean;
 }
 
 export interface HotRedis extends RedisCommander {
@@ -99,14 +105,14 @@ export function hotRedisOver(raw: RawRedis, o: { sleep?: (ms: number) => Promise
   const sleep = o.sleep ?? sleepFor;
 
   /** 한 번 보내고, 연결이 끊겨 소켓에 쓰지 못했으면 잠깐 뒤 한 번 더. 마감이 지났으면 다시 보내지 않는다(부른 쪽은 이미 실패를 받았다) */
-  const once = async (key: string | undefined, args: string[], expired: () => boolean, binary?: boolean): Promise<unknown> => {
+  const once = async (key: string | undefined, args: string[], expired: () => boolean, binary?: boolean, pin?: boolean): Promise<unknown> => {
     try {
-      return await raw.send(key, args, binary);
+      return await raw.send(key, args, binary, pin);
     } catch (err) {
       if (!(err instanceof ClientOfflineError) || expired()) throw err;
       await sleep(RESEND_DELAY_MS);
       if (expired()) throw err;
-      return raw.send(key, args, binary);
+      return raw.send(key, args, binary, pin);
     }
   };
 
@@ -128,7 +134,7 @@ export function hotRedisOver(raw: RawRedis, o: { sleep?: (ms: number) => Promise
     }
   };
 
-  const command = (args: string[], c: CallOptions = {}) => withDeadline(c.deadlineMs ?? REDIS_CALL_DEADLINE_MS, (expired) => once(c.key, args, expired, c.binary));
+  const command = (args: string[], c: CallOptions = {}) => withDeadline(c.deadlineMs ?? REDIS_CALL_DEADLINE_MS, (expired) => once(c.key, args, expired, c.binary, c.pin));
 
   return {
     command,
@@ -231,7 +237,13 @@ export async function createHotRedis(o: HotRedisOptions): Promise<HotRedis> {
     const cluster = createCluster(redisClusterOptions(o.clusterUrls, state, o.nodeAddressMap));
     cluster.on('error', () => {});
     raw = {
-      send: (key, args, binary) => cluster.sendCommand(key, false, args, binary ? BINARY : undefined),
+      send: async (key, args, binary, pin) => {
+        if (!pin) return cluster.sendCommand(key, false, args, binary ? BINARY : undefined);
+        if (key === undefined) throw new Error('pin에는 key가 필요하다');
+        // 명령 정책을 건너뛰고 key 슬롯의 주 노드 클라이언트로 바로 보낸다(키 명령·스크립트가 가는 같은 클라이언트라 같은 연결이다)
+        const node = await cluster.getNodeClientForKey(key);
+        return node.sendCommand(args, { ...(binary ? BINARY : {}), timeout: REDIS_COMMAND_TIMEOUT_MS });
+      },
       close: () => cluster.close(),
       destroy: () => cluster.destroy(),
     };

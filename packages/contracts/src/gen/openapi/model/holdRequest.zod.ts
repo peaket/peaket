@@ -11,6 +11,7 @@
  */
 import * as zod from 'zod';
 
+export const holdRequestSeatIdsItemRegExp = new RegExp('^[A-Za-z0-9_-]{1,64}$');
 export const holdRequestSeatIdsMax = 10;
 
 
@@ -33,14 +34,14 @@ export const holdRequestBehaviorScrollDistancePxMin = 0;
 
 
 export const HoldRequest = zod.object({
-  "seatIds": zod.array(zod.string()).max(holdRequestSeatIdsMax).optional(),
+  "seatIds": zod.array(zod.string().regex(holdRequestSeatIdsItemRegExp)).min(1).max(holdRequestSeatIdsMax).optional().describe('직접 선택 좌석 ID. 1~10개, 좌석 ID 모양이 틀리면 400이다. 같은 좌석이 두 번 들었거나 좌석맵 판에 없는 좌석·판매 제외석이면 422 invalid-seat다(docs/features/seat-hold.md §3 \'좌석 ID 확인\', 추천 적용 2026-11-04, BUILD_ORDER PRF-130)'),
   "auto": zod.object({
   "firstTierId": zod.string(),
   "secondTierId": zod.string().optional().describe('선택. 1순위와 달라야 한다'),
   "count": zod.int().min(1).describe('1인 매수 한도 이하'),
   "wheelchair": zod.boolean().default(holdRequestAutoWheelchairDefault),
   "allowSplit": zod.boolean().default(holdRequestAutoAllowSplitDefault).describe('연석이 없을 때 같은 등급의 분리 좌석 허용')
-}).optional().describe('희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043)'),
+}).optional().describe('희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정을 여는 wbs 2.5.4 전에는 보내면 400 auto-assign-not-supported다(지금은 좌석 지정만 받는다, 추천 적용 2026-11-04)'),
   "clientEphemeralPublicKey": zod.string().optional().describe('좌석 자동 배정 공연의 첫 요청에만(직접 선택 공연은 스냅샷 요청 헤더). 구매 세션에 저장'),
   "behavior": zod.object({
   "v": zod.literal(1).describe('형식 버전'),

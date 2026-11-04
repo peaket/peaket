@@ -1,7 +1,12 @@
 // 규칙 모델 검사 실행기 시험(wbs 0.9.1, docs/verification.md §2.2·§2.6, V-T1). Quint·Java 없이 돈다.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { extractTlcTrace, judge, kstTimestamp, loadManifest, parseSimulation, parseTlc, refoundIsCounterexample, resultRecord, runsInSimulation, simulationFor, invariantsFor } from './spec-check.mjs';
+import { createHash } from 'node:crypto';
+import { PINS } from './fetch-tools.mjs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { DEFAULT_SHARD, extractTlcTrace, judge, kstTimestamp, loadManifest, matrixFor, mbtActions, parseSimulation, parseTlc, refoundIsCounterexample, resolveRun, resultRecord, runsInSimulation, safeOut, shardOf, simulationFor, invariantsFor, stepActions } from './spec-check.mjs';
 
 const SPEC = `module queue {
   val inv_a = true
@@ -466,4 +471,200 @@ test('V-T1 목록_지켜짐 전수 검사 하나는 불변식을 보는 검사�
   const n = liveManifest();
   n.specs[0].checks[2].simulate = false;
   assert.throws(() => load(n, liveFiles), /simulate/);
+});
+
+// ---- 모델 기반 시험과 잇기(wbs 2.3.4, V-T40) ----
+const MBT_SPEC = `module queue {
+  val inv_a = true
+  val inv_b = true
+  action evKeep: bool = all { x' = x }
+  action enterNumber(p: int): bool = evKeep
+  action admit(p: int, ok: bool): bool = evKeep
+  action rb05: bool = evKeep
+  action unused: bool = evKeep
+  action step = {
+    nondet p = Set(1).oneOf()
+    // leave(p)는 주석이라 세지 않는다
+    any { enterNumber(p), admit(p, true), rb05 }
+  }
+}
+module queue_ok { import queue.* }
+module queue_bad { import queue.* }
+`;
+const ACTIONS = (names) => `export const SPEC_ACTIONS = [\n  ${names.map((n) => `'${n}'`).join(',\n  ')},\n] as const;\n`;
+const MBT_MODULES = [{ main: 'queue_ok', traces: 2 }];
+const mbtFiles = (names, specText = MBT_SPEC, hash = createHash('sha256').update(specText).digest('hex'), over = {}) => ({
+  'specs/queue.qnt': specText,
+  'test/actions.ts': ACTIONS(names),
+  'test/traces/manifest.json': JSON.stringify({ specSha256: hash, quint: PINS.quint, modules: MBT_MODULES, ...over }),
+});
+const MBT = { actions: 'test/actions.ts', traces: 'test/traces', modules: MBT_MODULES };
+
+test('V-T40 이름목록_명세 step이 고르는 동작은 선언된 action 가운데 step 본문에 나오는 것이다(도우미·주석·쓰지 않는 동작은 빼고 이름순)', () => {
+  assert.deepEqual(stepActions(MBT_SPEC), ['admit', 'enterNumber', 'rb05']);
+});
+
+test('V-T40 이름목록_step 본문 주석 안의 중괄호는 세지 않는다', () => {
+  const src = MBT_SPEC.replace('    // leave(p)는 주석이라 세지 않는다', '    // 주석의 } 닫는 괄호와 leave(p)');
+  assert.deepEqual(stepActions(src), ['admit', 'enterNumber', 'rb05']);
+});
+
+test('V-T40 재생_기록을 만든 Quint 판이나 기록을 낼 모듈 목록이 바뀌면 다시 만들라고 거절한다', () => {
+  const ok = ['enterNumber', 'admit', 'rb05'];
+  const hash = createHash('sha256').update(MBT_SPEC).digest('hex');
+  assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(ok, MBT_SPEC, hash, { quint: '0.0.1' })), /Quint 0\.0\.1로 만들었다/);
+  assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(ok, MBT_SPEC, hash, { modules: [{ main: 'queue_ok', traces: 4 }] })), /모듈 목록이/);
+});
+
+test('V-T40 이름목록_시험 파일의 SPEC_ACTIONS 목록을 적힌 순서대로 읽는다', () => {
+  assert.deepEqual(mbtActions(ACTIONS(['rb05', 'admit'])), ['rb05', 'admit']);
+  assert.throws(() => mbtActions('export const X = []'), /SPEC_ACTIONS/);
+});
+
+test('V-T40 이름목록_명세와 시험 명령 이름이 같고 기록이 지금 명세로 만든 것이면 받는다', () => {
+  const m = load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit', 'rb05']));
+  assert.equal(m.specs[0].mbt.actions, 'test/actions.ts');
+});
+
+test('V-T40 이름목록_명세에만 있거나 시험에만 있거나 두 번 적힌 이름이 있으면 병합을 막는다', () => {
+  assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit'])), /명세에만: rb05/);
+  assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit', 'rb05', 'leave'])), /시험에만: leave/);
+  assert.throws(() => load(manifest({ mbt: MBT }), mbtFiles(['enterNumber', 'admit', 'rb05', 'admit'])), /두 번: admit/);
+});
+
+test('V-T40 재생_동작 기록이 다른 명세(해시)로 만든 것이거나 목록이 없으면 다시 만들라고 거절하고, traces 명령은 해시를 보지 않는다', () => {
+  const stale = mbtFiles(['enterNumber', 'admit', 'rb05'], MBT_SPEC, 'ab'.repeat(32));
+  assert.throws(() => load(manifest({ mbt: MBT }), stale), /지금 명세로 만든 것이 아니다.*traces --spec queue/);
+  const none = mbtFiles(['enterNumber', 'admit', 'rb05']);
+  delete none['test/traces/manifest.json'];
+  assert.throws(() => load(manifest({ mbt: MBT }), none), /manifest\.json\)이 없다/);
+  assert.equal(loadManifest(JSON.stringify(manifest({ mbt: MBT })), (f) => stale[f], { traceHash: false }).specs.length, 1);
+});
+
+test('V-T40 목록_mbt는 시험 파일·기록 폴더·기록을 낼 모듈(명세에 있는 것)과 기록 수를 적어야 한다', () => {
+  const files = mbtFiles(['enterNumber', 'admit', 'rb05']);
+  assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [] } }), files), /mbt는/);
+  assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [{ main: 'queue_none', traces: 2 }] } }), files), /queue_none가/);
+  assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [{ main: 'queue_ok', traces: 0 }] } }), files), /양의 정수/);
+});
+
+// ---- 전수 검사를 CI 잡으로 나누기(ADR-0187) ----
+const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const sharded = (over = {}) => manifest({
+  checks: [
+    { main: 'queue_ok', expect: 'hold', shard: 'big', why: '지켜짐' },
+    { main: 'queue_bad', expect: 'violate', invariant: 'inv_b', why: 'V-T1' },
+  ],
+  ...over,
+});
+
+test('V-T1 묶음_검사에 shard를 적으면 그 이름의 묶음이고 적지 않으면 default다', () => {
+  const m = load(sharded());
+  assert.deepEqual(m.specs[0].checks.map(shardOf), ['big', DEFAULT_SHARD]);
+  assert.equal(DEFAULT_SHARD, 'default');
+});
+
+test('V-T1 묶음_shard는 식별자만 받는다(결과 파일 이름 <명세>.<묶음>.json과 잡 이름이 된다)', () => {
+  for (const bad of ['a/b', '', 'a b', '..', 7]) {
+    const m = sharded();
+    m.specs[0].checks[0].shard = bad;
+    assert.throws(() => load(m), /shard는 영문자·숫자·밑줄/, String(bad));
+  }
+});
+
+test('V-T1 행렬_full은 묶음이 둘 이상인 명세만 묶음별 잡으로 나누고, 하나뿐이면 통째로 한 잡이다', () => {
+  const m = load(sharded());
+  assert.deepEqual(matrixFor(m, 'full').include, [{ spec: 'queue', shard: 'big' }, { spec: 'queue', shard: 'default' }]);
+  const plain = load(manifest());
+  assert.deepEqual(matrixFor(plain, 'full').include, [{ spec: 'queue', shard: '' }]);
+});
+
+test('V-T1 행렬_pr은 시뮬레이션이 짧아 묶음이 있어도 명세마다 한 잡이다', () => {
+  assert.deepEqual(matrixFor(load(sharded()), 'pr').include, [{ spec: 'queue', shard: '' }]);
+});
+
+test('V-T1 행렬_only로 명세나 명세:묶음 하나만 남기고, 맞는 잡이 없거나 mode가 틀리면 거절한다', () => {
+  const m = load(sharded());
+  assert.deepEqual(matrixFor(m, 'full', 'queue:big').include, [{ spec: 'queue', shard: 'big' }]);
+  assert.deepEqual(matrixFor(m, 'full', 'queue').include.length, 2);
+  assert.throws(() => matrixFor(m, 'full', 'queue:nope'), /맞는 잡이 없다/);
+  assert.throws(() => matrixFor(m, 'full', 'seat'), /맞는 잡이 없다/);
+  assert.throws(() => matrixFor(m, 'weekly'), /mode는 pr 또는 full/);
+});
+
+test('V-T1 행렬_저장소의 specs.json은 대기열의 가장 큰 검사를 따로 한 잡으로 두고 다른 명세는 통째로 돈다', () => {
+  const m = loadManifest(readFileSync(`${REPO_ROOT}specs/specs.json`, 'utf8'), (f) => readFileSync(`${REPO_ROOT}${f}`, 'utf8'), { traceHash: false });
+  const full = matrixFor(m, 'full').include;
+  const queue = full.filter((x) => x.spec === 'queue');
+  assert.deepEqual(queue.map((x) => x.shard).sort(), ['default', 'proposed']);
+  // 큰 러너는 가장 큰 검사의 묶음에만 붙는다
+  assert.deepEqual(queue.filter((x) => x.large).map((x) => x.shard), ['proposed']);
+  // 가장 큰 검사 하나만 따로 두고, 나머지는 한 잡에서 차례로 돈다
+  assert.deepEqual(m.specs.find((x) => x.name === 'queue').checks.filter((c) => shardOf(c) === 'proposed').map((c) => c.main), ['queue_proposed']);
+  for (const x of full.filter((y) => y.spec !== 'queue')) assert.equal(x.shard, '');
+  // 모든 검사는 어느 묶음에든 들어간다
+  const queueChecks = m.specs.find((x) => x.name === 'queue').checks;
+  assert.equal(queueChecks.filter((c) => queue.some((q) => q.shard === shardOf(c))).length, queueChecks.length);
+});
+
+test('V-T1 행렬_matrix 명령은 Quint·Java 없이 GitHub 행렬 JSON 한 줄만 낸다(워크플로의 list 잡이 쓴다)', () => {
+  const out = execFileSync(process.execPath, [fileURLToPath(new URL('./spec-check.mjs', import.meta.url)), 'matrix', '--mode', 'full'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const lines = out.trim().split('\n');
+  assert.equal(lines.length, 1);
+  const parsed = JSON.parse(lines[0]);
+  assert.ok(Array.isArray(parsed.include) && parsed.include.every((x) => typeof x.spec === 'string' && typeof x.shard === 'string'));
+  const only = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./spec-check.mjs', import.meta.url)), 'matrix', '--mode', 'full', '--only', 'queue:proposed'], { cwd: REPO_ROOT, encoding: 'utf8' }));
+  assert.deepEqual(only.include, [{ spec: 'queue', shard: 'proposed', large: true }]);
+});
+
+test('V-T1 인자_일부만 돌릴 때는 --write를 막고(저장소의 결과 파일을 일부만 덮지 않게) --out 폴더를 쓰게 한다', () => {
+  assert.deepEqual(resolveRun({ write: true }), { out: 'specs/results', partial: false, part: '', subset: {} });
+  assert.deepEqual(resolveRun({}), { out: null, partial: false, part: '', subset: {} });
+  const r = resolveRun({ shard: 'proposed', out: 'spec-out' });
+  assert.deepEqual(r, { out: 'spec-out', partial: true, part: 'proposed', subset: { shard: 'proposed' } });
+  assert.equal(resolveRun({ shard: 'a', check: 'm', out: 'o/' }).part, 'a.m');
+  assert.throws(() => resolveRun({ shard: 'proposed', write: true }), /--write는 명세 전체/);
+  assert.throws(() => resolveRun({ check: 'm', write: true }), /--write는 명세 전체/);
+  assert.throws(() => resolveRun({ write: true, out: 'x' }), /함께 쓰지 않는다/);
+  assert.throws(() => resolveRun({ shard: 'a', out: 'specs/results' }), /일부만 돌린 결과/);
+});
+
+test('V-T1 인자_--out은 저장소 안의 상대 폴더만 받는다', () => {
+  assert.equal(safeOut('spec-out'), 'spec-out');
+  assert.equal(safeOut('a\\b/'), 'a/b');
+  for (const bad of ['', ' ', '/tmp/x', 'C:/x', 'C:\\x', '../x', 'a/../../x', 'a\\..\\x']) assert.throws(() => safeOut(bad), /저장소 안의 상대 폴더/, bad);
+});
+
+test('V-T1 기록_일부만 돌린 결과 파일은 어느 묶음·검사였는지 남기고 전체 결과에는 남기지 않는다', () => {
+  const base = {
+    spec: { name: 'queue', file: 'specs/queue.qnt', scope: '사람 2명', adrs: ['0056'] },
+    specSha256: 'a'.repeat(64),
+    commit: { sha: 'b'.repeat(40), dirty: false },
+    tools: {},
+    now: new Date('2026-11-02T03:04:05Z'),
+    checks: [{ check: { main: 'queue_ok', expect: 'hold', why: '지켜짐' }, invariants: ['inv_a'], tlc: parseTlc(TLC_OK), seconds: 1, verdict: { ok: true, message: '' } }],
+  };
+  assert.deepEqual(resultRecord({ ...base, subset: { shard: 'big' } }).subset, { shard: 'big' });
+  assert.equal('subset' in resultRecord(base), false);
+  assert.equal('subset' in resultRecord({ ...base, subset: {} }), false);
+});
+
+test('V-T1 큰러너_large를 적은 검사의 묶음에만 large가 붙고, pr에는 붙지 않는다(큰 러너는 분당 과금이라 전수 검사에서만 쓴다)', () => {
+  const m = load(sharded());
+  m.specs[0].checks[0].large = true;
+  const big = load(m);
+  assert.deepEqual(matrixFor(big, 'full').include, [{ spec: 'queue', shard: 'big', large: true }, { spec: 'queue', shard: 'default' }]);
+  assert.deepEqual(matrixFor(big, 'pr').include, [{ spec: 'queue', shard: '' }]);
+  // 묶음을 나누지 않은 명세는 통째로 한 잡이라 그 안에 하나만 있어도 잡 전체가 큰 러너다
+  const plain = manifest();
+  plain.specs[0].checks[0].large = true;
+  assert.deepEqual(matrixFor(load(plain), 'full').include, [{ spec: 'queue', shard: '', large: true }]);
+});
+
+test('V-T1 큰러너_large는 true만 받는다(적지 않으면 표준 러너)', () => {
+  for (const bad of [false, 'yes', 1, null]) {
+    const m = manifest();
+    m.specs[0].checks[0].large = bad;
+    assert.throws(() => load(m), /large는 true만/, String(bad));
+  }
 });

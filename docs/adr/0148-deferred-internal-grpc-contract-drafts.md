@@ -1,6 +1,6 @@
 # ADR-0148: 미뤄 둔 내부 gRPC 계약 초안(스캐너 기기 관리, 계정 병합 사전 확인, 관제의 CS·카탈로그 반영, 이미지 처리)(추천 적용 묶음, 2026-10-29)
 
-- **상태**: 채택 (2026-10-29. 소유자가 "남은것들도 전부 해주세요."라고 요청했다. docs/api/proto/README.md §4에 '구현 때 더한다'로 남아 있던 내부 호출 가운데 정본에 동작이 정해진 것의 계약 모양을 정했다. 방향은 소유자 요청이고, 세부는 모두 추천 적용이다.)
+- **상태**: 채택 (2026-10-29. 소유자가 "남은것들도 전부 해주세요."라고 요청했다. docs/api/proto/README.md §4에 '구현 때 더한다'로 남아 있던 내부 호출 가운데 정본에 동작이 정해진 것의 계약 모양을 정했다. 방향은 소유자 요청이고, 세부는 모두 추천 적용이다.) 2026-11-01(정합 점검, ADR-0177 해설서 검토 네 번째 묶음): 결정 10의 '계약 저장소(`peaket-contracts`)로 옮길 때'는 옮길 저장소 없이 읽는다. 저장소가 공개 모노레포 `peaket` 하나가 되어(ADR-0165·0169) 초안은 `docs/api/proto/`에 그대로 있고, 같은 저장소 CI의 계약 검사(`contract-check.yml`)가 `buf lint`·`buf breaking`을 돌린다(docs/devops.md §3.1, wbs 0.2.2).
 - **관련**: ADR-0010(gRPC L7 분산), ADR-0038(계정 병합), ADR-0051(현장 입장, 기기 등록), ADR-0062(기기 등록 코드), ADR-0066(CS 처리함·문의), ADR-0082(메시와 앱 경계), ADR-0084(proto 초안), ADR-0093(공연 엔터티), ADR-0102(제어 평면 의존), ADR-0130(이미지 처리 격리), ADR-0145(API 계약 보완), [docs/api/proto/README.md](../api/proto/README.md), [docs/architecture.md](../architecture.md) §3.2, [docs/features/identity.md](../features/identity.md) §2.1, POL-034
 
 ## 맥락
