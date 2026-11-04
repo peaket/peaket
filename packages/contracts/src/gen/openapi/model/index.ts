@@ -236,6 +236,7 @@ export * from './postV1EventsEventIdReviewsHeaders.zod.js';
 export * from './postV1EventsEventIdSubscriptionsBody.zod.js';
 export * from './postV1HoldsHoldIdExtensionHeaders.zod.js';
 export * from './postV1IdentityBoothReverificationsBody.zod.js';
+export * from './postV1IdentityLinkProposalsProposalIdSeparateAccount201.zod.js';
 export * from './postV1IdentityMergeProposalsProposalIdConfirmationHeaders.zod.js';
 export * from './postV1IdentityMinorContractChecks200.zod.js';
 export * from './postV1IdentityMinorContractChecksBody.zod.js';

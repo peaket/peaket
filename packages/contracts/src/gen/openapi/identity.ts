@@ -462,11 +462,11 @@ export const GetV1IdentityLinkProposalsProposalIdParams = zod.object({
 })
 
 export const GetV1IdentityLinkProposalsProposalIdResponse = zod.object({
-  "proposalId": zod.string().optional(),
-  "existingProvider": zod.enum(['kakao', 'naver', 'google']).optional(),
-  "newProvider": zod.enum(['kakao', 'naver', 'google']).optional(),
-  "expiresAt": zod.iso.datetime({"offset":true}).optional(),
-  "attemptsLeft": zod.int().optional()
+  "proposalId": zod.string(),
+  "existingProvider": zod.enum(['kakao', 'naver', 'google']),
+  "newProvider": zod.enum(['kakao', 'naver', 'google']),
+  "expiresAt": zod.iso.datetime({"offset":true}),
+  "attemptsLeft": zod.int()
 })
 
 /**
@@ -477,7 +477,9 @@ export const PostV1IdentityLinkProposalsProposalIdSeparateAccountParams = zod.ob
   "proposalId": zod.string()
 })
 
-export const PostV1IdentityLinkProposalsProposalIdSeparateAccountResponse = zod.void()
+export const PostV1IdentityLinkProposalsProposalIdSeparateAccountResponse = zod.object({
+  "next": zod.string()
+})
 
 /**
  * FR-048, POL-034

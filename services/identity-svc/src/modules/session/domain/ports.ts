@@ -60,7 +60,10 @@ export interface SessionTx {
   /** 계정 단위로 기기 수를 세고 정리하는 일을 한 번에 하나만 한다(트랜잭션 끝까지) */
   lockAccount(accountId: string): Promise<void>;
   findAccountByProvider(provider: Provider, providerUserId: string): Promise<AccountRow | null>;
-  createAccount(input: { id: string; email: string | null }, now: number): Promise<void>;
+  /** emailVerified: 제공자가 준 이메일 검증 여부(가입 때 연결 제안의 대상 조건, identity §2.1) */
+  createAccount(input: { id: string; email: string | null; emailVerified?: boolean }, now: number): Promise<void>;
+  /** 가입 때 연결 제안의 대상 후보: 이메일(normalizeEmail 값)이 같고 검증 표시가 있는 ACTIVE 계정과 그 로그인 수단(처음 연결한 순). 최대 2개(하나인지만 본다) */
+  findLinkTargets(email: string): Promise<{ accountId: string; providers: Provider[] }[]>;
   linkProvider(accountId: string, provider: Provider, providerUserId: string, now: number): Promise<void>;
   isProviderLinked(accountId: string, provider: Provider, providerUserId: string): Promise<boolean>;
   /** 그 계정에 연결된 로그인 수단(연결한 순서) */
@@ -214,4 +217,38 @@ export const FRAUD_HOLDS = Symbol('identity.FraudHolds');
 /** 탈퇴 전 대조값 보관 안내(본인확인 컨텍스트가 채운다, identity §8 '대조값 보관의 첫 구현'). 그 계정이 남겼거나 이은 끝나지 않은 행 하나 */
 export interface FraudHolds {
   activeHold(accountId: string, now: number): Promise<{ state: 'CASE_OPEN' | 'RESTRICTED'; until: number } | null>;
+}
+
+export const LINK_PROPOSALS = Symbol('identity.LinkProposals');
+/** 가입 때 연결 제안(세션·캐시 Redis id:link, 10분, identity §2.1 '가입 때 연결 제안의 첫 구현') */
+export interface StoredLinkProposal {
+  id: string;
+  /** 브라우저 묶음 값의 SHA-256(base64url). 원문은 두지 않는다 */
+  bindingHash: string;
+  newProvider: Provider;
+  newProviderUserId: string;
+  email: string;
+  targetAccountId: string;
+  existingProvider: Provider;
+  attempts: number;
+  createdAt: number;
+  expiresAt: number;
+}
+
+/** 모든 메서드: @throws LinkStoreUnavailable 저장소에 닿지 못함 */
+export interface LinkProposals {
+  save(p: StoredLinkProposal): Promise<void>;
+  /** 없거나 만료면 null */
+  get(id: string): Promise<StoredLinkProposal | null>;
+  /** 실패 횟수를 하나 올린다. LINK_MAX_ATTEMPTS에 닿으면 지운다. 올린 뒤 횟수(제안이 없으면 null) */
+  fail(id: string): Promise<number | null>;
+  remove(id: string): Promise<void>;
+}
+
+/** 제안 저장소(세션·캐시 Redis)에 닿지 못했다 */
+export class LinkStoreUnavailable extends Error {
+  constructor(cause?: unknown) {
+    super('연결 제안 저장소에 닿지 못했다', { cause });
+    this.name = 'LinkStoreUnavailable';
+  }
 }

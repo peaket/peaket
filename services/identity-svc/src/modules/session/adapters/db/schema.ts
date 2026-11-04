@@ -14,6 +14,8 @@ export const account = pgTable(
     mergedIntoAccountId: uuid('merged_into_account_id'),
     nickname: text('nickname'),
     email: text('email'),
+    // 계정을 만들 때 제공자가 준 이메일 검증 여부. 가입 때 연결 제안의 대상은 true인 계정뿐이다(identity §2.1, BUILD_ORDER BOT-040)
+    emailVerified: boolean('email_verified').notNull().default(false),
     phone: text('phone'),
     // 회원 코드는 가입 완료(SCR-005)에서 매긴다. 형식은 그 단계가 정한다
     memberCode: text('member_code').unique(),

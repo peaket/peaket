@@ -4,7 +4,9 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { identityV1Identity } from '@peaket/contracts/proto';
-import type { CreateSession } from '../application/create-session.js';
+import type { CreateSession, CreateSessionResult, LoginOutcome } from '../application/create-session.js';
+import type { GetLinkProposal } from '../application/get-link-proposal.js';
+import type { SeparateAccount } from '../application/separate-account.js';
 import type { EndSession } from '../application/end-session.js';
 import type { GetVerificationStatus } from '../application/get-verification-status.js';
 import type { IssueReauthToken } from '../application/issue-reauth-token.js';
@@ -55,7 +57,32 @@ const providerOf = (v: unknown): Provider => {
 const text = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 type Req = Record<string, unknown>;
-type UseCases = { create: Pick<CreateSession, 'run'>; end: Pick<EndSession, 'run'>; reauth: Pick<IssueReauthToken, 'run'> };
+type UseCases = {
+  create: Pick<CreateSession, 'outcome'>;
+  end: Pick<EndSession, 'run'>;
+  reauth: Pick<IssueReauthToken, 'run'>;
+  /** 가입 때 연결 제안(identity §2.1, BOT-040). 없으면 두 호출이 UNAVAILABLE이다 */
+  linkView?: Pick<GetLinkProposal, 'run'>;
+  separate?: Pick<SeparateAccount, 'run'>;
+};
+
+const PROVIDER_ENUM: Record<Provider, string> = { kakao: 'PROVIDER_KAKAO', naver: 'PROVIDER_NAVER', google: 'PROVIDER_GOOGLE' };
+
+const sessionOf = (out: CreateSessionResult) => ({
+  account_id: out.accountId,
+  session_id: out.sessionId,
+  access_token: out.accessToken,
+  access_token_expires_at_ms: out.accessTokenExpiresAt,
+  refresh_token: out.refreshToken,
+  refresh_token_expires_at_ms: out.refreshTokenExpiresAt,
+});
+
+/** CreateSessionResponse: 세션, 연결 제안(+ 묶음 값), 연결 불일치 가운데 하나 */
+function responseOf(o: LoginOutcome): object {
+  if (o.kind === 'link-proposed') return { link_proposal_id: o.proposalId, link_binding: o.binding, new_account: false };
+  if (o.kind === 'link-mismatch') return { link_mismatch: { attempts_left: o.attemptsLeft }, new_account: false };
+  return { session: sessionOf(o), new_account: o.newAccount, linked_provider: o.linkedProvider ? PROVIDER_ENUM[o.linkedProvider] : 'PROVIDER_UNSPECIFIED' };
+}
 
 /**
  * @param onError 예상하지 못한 오류(INTERNAL로 답한 것)를 받는다. 서비스는 로거에 남긴다
@@ -98,27 +125,29 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
   return {
     CreateSession: unary('CreateSession', async (r) => {
       const provider = providerOf(r.provider);
-      // 연결 제안(identity §2.1)은 wbs 3.1.3이 붙인다. 그 전에는 받지 않는다(identity §2 '첫 구현')
-      if (text(r.link_proposal_id)) throw new SessionError('FAILED_PRECONDITION', '계정 연결 제안은 아직 없다');
+      // 연결 제안을 따라 온 로그인이면 제안 ID와 묶음 값을 함께 받는다(identity §2.1 '가입 때 연결 제안의 첫 구현')
+      const proposalId = text(r.link_proposal_id);
       // client_ip·user_agent는 법정 접속기록 줄(FR-045)에만, auth_methods·asn은 로그인 판정(trust-svc)에 쓴다. 그 둘이 생기기 전에는 받기만 한다
-      const out = await uc.create.run({
+      const out = await uc.create.outcome({
         idempotencyKey: text(r.idempotency_key),
         provider,
         providerUserId: text(r.provider_user_id),
         email: text(r.email) || null,
+        emailVerified: r.email_verified === true,
         deviceId: text(r.device_id) || null,
+        ...(proposalId ? { link: { proposalId, binding: text(r.link_binding) } } : {}),
       });
-      return {
-        session: {
-          account_id: out.accountId,
-          session_id: out.sessionId,
-          access_token: out.accessToken,
-          access_token_expires_at_ms: out.accessTokenExpiresAt,
-          refresh_token: out.refreshToken,
-          refresh_token_expires_at_ms: out.refreshTokenExpiresAt,
-        },
-        new_account: out.newAccount,
-      };
+      return responseOf(out);
+    }),
+    GetLinkProposal: unary('GetLinkProposal', async (r) => {
+      if (!uc.linkView) throw new SessionError('UNAVAILABLE', '연결 제안 저장소가 없다');
+      const v = await uc.linkView.run({ proposalId: text(r.link_proposal_id), binding: text(r.link_binding) });
+      return { existing_provider: PROVIDER_ENUM[v.existingProvider], new_provider: PROVIDER_ENUM[v.newProvider], expires_at_ms: v.expiresAt, attempts_left: v.attemptsLeft };
+    }),
+    SeparateAccount: unary('SeparateAccount', async (r) => {
+      if (!uc.separate) throw new SessionError('UNAVAILABLE', '연결 제안 저장소가 없다');
+      const out = await uc.separate.run({ proposalId: text(r.link_proposal_id), binding: text(r.link_binding), idempotencyKey: text(r.idempotency_key), deviceId: text(r.device_id) || null });
+      return { session: sessionOf(out), new_account: out.newAccount, linked_provider: 'PROVIDER_UNSPECIFIED' };
     }),
     EndSession: unary('EndSession', async (r) => uc.end.run({ sessionId: text(r.session_id), accountId: text(r.account_id) })),
     IssueReauthToken: unary('IssueReauthToken', async (r) => {

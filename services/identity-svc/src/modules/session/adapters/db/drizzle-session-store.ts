@@ -86,8 +86,27 @@ export class DrizzleSessionStore implements SessionStore {
           .where(and(eq(accountProvider.provider, provider), eq(accountProvider.providerUserId, providerUserId)));
         return row ? { id: row.id, status: row.status as 'ACTIVE' } : null;
       },
-      createAccount: async ({ id, email }, now) => {
-        await tx.insert(account).values({ id, status: 'ACTIVE', email, createdAt: date(now) });
+      createAccount: async ({ id, email, emailVerified }, now) => {
+        await tx.insert(account).values({ id, status: 'ACTIVE', email, emailVerified: emailVerified === true, createdAt: date(now) });
+      },
+      findLinkTargets: async (email) => {
+        // 지금은 계정 표를 훑는다. 활성·검증 계정의 이메일 인덱스는 트랜잭션 밖 인덱스 파일을 돌리는 실행기(BAS-060) 뒤에 더한다(identity §2.1)
+        const rows = await tx
+          .select({ id: account.id })
+          .from(account)
+          .where(and(eq(account.status, 'ACTIVE'), eq(account.emailVerified, true), sql`lower(btrim(${account.email})) = ${email}`))
+          .orderBy(asc(account.id))
+          .limit(2);
+        const out: { accountId: string; providers: Provider[] }[] = [];
+        for (const r of rows) {
+          const ps = await tx
+            .select({ provider: accountProvider.provider })
+            .from(accountProvider)
+            .where(eq(accountProvider.accountId, r.id))
+            .orderBy(asc(accountProvider.linkedAt), asc(accountProvider.provider));
+          out.push({ accountId: r.id, providers: ps.map((p) => p.provider as Provider) });
+        }
+        return out;
       },
       linkProvider: async (accountId, provider, providerUserId, now) => {
         await tx.insert(accountProvider).values({ accountId, provider, providerUserId, linkedAt: date(now) });
@@ -145,7 +164,7 @@ export class DrizzleSessionStore implements SessionStore {
         // 프로필 칸을 비우고 DELETED로. 회원 코드도 비운다(UNIQUE). 계정 행과 ID는 다른 서비스의 법정 기록이 잇는 값이라 남긴다(docs/data.md §6)
         await tx
           .update(account)
-          .set({ status: 'DELETED', deletedAt: date(now), nickname: null, email: null, phone: null, memberCode: null, savedBookerName: null, savedBookerPhone: null, closureReason: null, closureStartedAt: null })
+          .set({ status: 'DELETED', deletedAt: date(now), nickname: null, email: null, emailVerified: false, phone: null, memberCode: null, savedBookerName: null, savedBookerPhone: null, closureReason: null, closureStartedAt: null })
           .where(eq(account.id, accountId));
         await tx.delete(accountProvider).where(eq(accountProvider.accountId, accountId));
         await tx.delete(device).where(eq(device.accountId, accountId));

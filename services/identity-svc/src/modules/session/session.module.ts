@@ -5,6 +5,9 @@ import { DrizzleSessionStore } from './adapters/db/drizzle-session-store.js';
 import { JoseReauthVerifier } from './adapters/jose-reauth-verifier.js';
 import { MemorySessionStore } from './adapters/memory-session-store.js';
 import { CreateSession } from './application/create-session.js';
+import { GetLinkProposal } from './application/get-link-proposal.js';
+import { SeparateAccount } from './application/separate-account.js';
+import { MemoryLinkProposals } from './adapters/memory-link-proposals.js';
 import { EndSession } from './application/end-session.js';
 import { CloseAccount } from './application/close-account.js';
 import { FinishWithdrawals } from './application/finish-withdrawals.js';
@@ -12,7 +15,7 @@ import { GetVerificationStatus } from './application/get-verification-status.js'
 import { IssueReauthToken } from './application/issue-reauth-token.js';
 import { RefreshSession } from './application/refresh-session.js';
 import { WithdrawAccount } from './application/withdraw-account.js';
-import { ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
+import { ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, LINK_PROPOSALS, type LinkProposals, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
 import { AccountController, ProvidersController } from './inbound/account.controller.js';
 import { ListProviders } from './application/list-providers.js';
 import { COOKIE_DOMAIN, TokenController } from './inbound/token.controller.js';
@@ -26,6 +29,8 @@ export interface SessionModuleOptions {
   cookieDomain?: string;
   deviceRefs: DeviceRefs;
   signals: SessionSignals;
+  /** 가입 때 연결 제안 저장소(세션·캐시 Redis, identity §2.1). 없으면 메모리(로컬·시험) */
+  linkProposals?: LinkProposals;
 }
 
 @Module({})
@@ -41,6 +46,8 @@ export class SessionModule {
         CloseAccount,
         { provide: ACCOUNT_CLOSURE, useExisting: CloseAccount },
         CreateSession,
+        GetLinkProposal,
+        SeparateAccount,
         EndSession,
         IssueReauthToken,
         GetVerificationStatus,
@@ -51,13 +58,14 @@ export class SessionModule {
         // 재인증 토큰은 이 서비스의 팬 공개키 묶음과 발급자로 확인한다(identity §8 '탈퇴의 첫 구현')
         { provide: REAUTH_VERIFIER, useFactory: (clock: Clock) => new JoseReauthVerifier(o.keys, o.signer.issuer, clock), inject: [CLOCK] },
         o.storage === 'database' ? { provide: SESSION_STORE, useClass: DrizzleSessionStore } : { provide: SESSION_STORE, useValue: new MemorySessionStore() },
+        o.linkProposals ? { provide: LINK_PROPOSALS, useValue: o.linkProposals } : { provide: LINK_PROPOSALS, useFactory: (clock: Clock) => new MemoryLinkProposals(clock), inject: [CLOCK] },
         { provide: TOKEN_SIGNER, useValue: o.signer },
         { provide: DEVICE_REFS, useValue: o.deviceRefs },
         { provide: SESSION_SIGNALS, useValue: o.signals },
         { provide: PUBLIC_KEYS, useValue: o.keys },
         { provide: COOKIE_DOMAIN, useValue: o.cookieDomain },
       ],
-      exports: [CreateSession, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, FinishWithdrawals, ACCOUNT_CLOSURE],
+      exports: [CreateSession, GetLinkProposal, SeparateAccount, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, FinishWithdrawals, ACCOUNT_CLOSURE],
     };
   }
 }

@@ -50,6 +50,12 @@ export const WITHDRAWAL_SWEEP_MS = 7 * 86_400_000;
  * '5일 안에는 같은 회차에 다시 줄 서지 못한다'(I-T27)와 '5일 안에 지운다'(표준 개인정보 보호지침 §10①)를 함께 지킨다
  */
 export const QUEUE_KEYS_PURGE_MS = 5 * 86_400_000;
+/** 가입 때 연결 제안의 수명 10분(identity §2.1, docs/data.md id:link) */
+export const LINK_PROPOSAL_TTL_MS = 10 * 60_000;
+/** 연결 제안을 따라 다른 계정으로 로그인해도 되는 횟수. 이만큼 틀리면 제안을 지운다(SCR-039) */
+export const LINK_MAX_ATTEMPTS = 3;
+/** 이메일 맞추기: 앞뒤 공백을 빼고 소문자로(identity §2.1 '가입 때 연결 제안의 첫 구현') */
+export const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 /** 팬 탈퇴의 재인증 작업 묶음(docs/security/authz-matrix.md §6) */
 export const WITHDRAWAL_REAUTH_ACT = 'FAN_SENSITIVE';
 

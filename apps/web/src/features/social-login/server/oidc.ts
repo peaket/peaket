@@ -66,6 +66,20 @@ export class OidcProviders {
     return { claims, accessToken: tokens.access_token };
   }
 
+  /**
+   * 카카오: ID 토큰에 이메일 검증 여부가 없어 OIDC 사용자 정보로 받는다(정본의 카카오 `is_email_verified`, identity §2.1 '가입 때 연결 제안의 첫 구현',
+   * 실제 응답 칸은 제공자 앱을 등록해야 볼 수 있다 [확인 필요]). 응답의 sub가 ID 토큰 sub와 다르면 막는다
+   */
+  async userInfoEmail(p: Provider, login: VerifiedLogin): Promise<{ email: string | null; emailVerified: boolean }> {
+    const c = await this.config(p);
+    const endpoint = c.serverMetadata().userinfo_endpoint;
+    if (!endpoint) throw new Error(`${p} 사용자 정보 주소가 없다`);
+    const r = await client.fetchProtectedResource(c, login.accessToken, new URL(endpoint), 'GET');
+    const body = (await r.json()) as { sub?: unknown; email?: unknown; email_verified?: unknown; is_email_verified?: unknown };
+    if (body.sub !== login.claims.sub) throw new Error(`${p} 사용자 정보 sub가 ID 토큰 sub와 다르다`);
+    return { email: typeof body.email === 'string' ? body.email : null, emailVerified: body.email_verified === true || body.is_email_verified === true };
+  }
+
   /** 네이버: ID 토큰에 이메일이 없어 사용자 정보 API로 받는다. 응답의 id가 ID 토큰 sub와 다르면 막는다(identity §2, [확인 필요]) */
   async naverProfile(login: VerifiedLogin): Promise<{ email: string | null }> {
     const c = await this.config('naver');

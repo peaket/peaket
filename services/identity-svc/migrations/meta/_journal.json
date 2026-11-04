@@ -78,6 +78,13 @@
       "when": 1793786234950,
       "tag": "0010_restricted_ci_hold",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793792213951,
+      "tag": "0011_account_email_verified",
+      "breakpoints": true
     }
   ]
 }

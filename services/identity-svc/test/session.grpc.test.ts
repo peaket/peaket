@@ -3,24 +3,35 @@
 import * as grpc from '@grpc/grpc-js';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { startGrpcServer } from '../src/grpc-server.js';
+import { MemoryLinkProposals } from '../src/modules/session/adapters/memory-link-proposals.js';
 import { MemorySessionStore } from '../src/modules/session/adapters/memory-session-store.js';
+import { GetLinkProposal } from '../src/modules/session/application/get-link-proposal.js';
+import { SeparateAccount } from '../src/modules/session/application/separate-account.js';
 import { identityPackage, sessionServiceHandlers } from '../src/modules/session/inbound/session.grpc.js';
 import { kit, newKey } from './support.js';
 
 type Cb<T> = (e: grpc.ServiceError | null, v?: T) => void;
 type Unary = (req: Record<string, unknown>, md: grpc.Metadata, opts: grpc.CallOptions, cb: Cb<Record<string, any>>) => void;
-type Client = grpc.Client & Record<'CreateSession' | 'EndSession' | 'IssueReauthToken', Unary>;
+type Client = grpc.Client & Record<'CreateSession' | 'EndSession' | 'IssueReauthToken' | 'GetLinkProposal' | 'SeparateAccount', Unary>;
 
 let server: Awaited<ReturnType<typeof startGrpcServer>>;
 let client: Client;
 const errors: string[] = [];
 
 beforeAll(async () => {
-  const k = await kit(new MemorySessionStore());
+  const store = new MemorySessionStore();
+  const k0 = await kit(store);
+  const links = new MemoryLinkProposals(k0.clock);
+  const k = await kit(store, { clock: k0.clock, links });
   server = await startGrpcServer({
     host: '127.0.0.1',
     port: 0,
-    services: [{ definition: identityPackage().SessionService.service, handlers: sessionServiceHandlers(k, (method) => errors.push(method)) }],
+    services: [
+      {
+        definition: identityPackage().SessionService.service,
+        handlers: sessionServiceHandlers({ ...k, linkView: new GetLinkProposal(links, k.clock), separate: new SeparateAccount(k.create, links) }, (method) => errors.push(method)),
+      },
+    ],
   });
   client = new (identityPackage().SessionService)(`127.0.0.1:${server.port}`, grpc.credentials.createInsecure()) as unknown as Client;
 });
@@ -30,7 +41,7 @@ afterAll(async () => {
   await server?.close();
 });
 
-const call = (method: keyof Pick<Client, 'CreateSession' | 'EndSession' | 'IssueReauthToken'>, req: Record<string, unknown>) =>
+const call = (method: keyof Pick<Client, 'CreateSession' | 'EndSession' | 'IssueReauthToken' | 'GetLinkProposal' | 'SeparateAccount'>, req: Record<string, unknown>) =>
   new Promise<Record<string, any>>((res, rej) => client[method](req, new grpc.Metadata(), { deadline: Date.now() + 5_000 }, (e, v) => (e ? rej(e) : res(v!))));
 const status = async (p: Promise<unknown>) => {
   try {
@@ -69,8 +80,32 @@ describe('SessionService(gRPC)', () => {
     expect(await status(call('EndSession', { session_id: 'x', account_id: 'y' }))).toBe('INVALID_ARGUMENT');
   });
 
-  test('identity§2_연결제안ID는_연결제안이생기기전까지_FAILED_PRECONDITION이다', async () => {
-    expect(await status(create({ link_proposal_id: '0190f3a1-7c2e-7a00-8000-000000000009' }))).toBe('FAILED_PRECONDITION');
+  test('I-T30_없는연결제안ID나모양이틀린ID로온로그인은_NOT_FOUND이다', async () => {
+    expect(await status(create({ link_proposal_id: '0190f3a1-7c2e-7a00-8000-000000000009', link_binding: 'x'.repeat(43) }))).toBe('NOT_FOUND');
+    expect(await status(create({ link_proposal_id: 'A'.repeat(22), link_binding: 'x'.repeat(43) }))).toBe('NOT_FOUND');
+  });
+
+  test('I-T29·I-T30_gRPC로_연결제안(ID·묶음값)·제안조회·다른계정불일치·연결맺기·새계정만들기가오간다', async () => {
+    await create({ provider_user_id: 'grpc-k-1', email: 'link@peaket.test' });
+    const p = await create({ provider: 'PROVIDER_GOOGLE', provider_user_id: 'grpc-g-1', email: 'Link@peaket.test' });
+    expect(p.outcome).toBe('link_proposal_id');
+    expect(p.link_binding).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const ids = { link_proposal_id: p.link_proposal_id, link_binding: p.link_binding };
+    expect(await call('GetLinkProposal', ids)).toMatchObject({ existing_provider: 'PROVIDER_KAKAO', new_provider: 'PROVIDER_GOOGLE', attempts_left: 3 });
+    const miss = await create({ provider_user_id: 'grpc-k-none', email: '', email_verified: false, ...ids });
+    expect(miss.outcome).toBe('link_mismatch');
+    expect(miss.link_mismatch).toEqual({ attempts_left: 2 });
+    const ok = await create({ provider_user_id: 'grpc-k-1', email: '', email_verified: false, ...ids });
+    expect(ok.outcome).toBe('session');
+    expect(ok.linked_provider).toBe('PROVIDER_GOOGLE');
+    expect(await status(call('GetLinkProposal', ids))).toBe('NOT_FOUND');
+    // 새 계정 만들기
+    await create({ provider_user_id: 'grpc-k-2', email: 'sep@peaket.test' });
+    const q = await create({ provider: 'PROVIDER_GOOGLE', provider_user_id: 'grpc-g-2', email: 'sep@peaket.test' });
+    const sep = await call('SeparateAccount', { link_proposal_id: q.link_proposal_id, link_binding: q.link_binding, idempotency_key: newKey(), device_id: 'dev-S' });
+    expect(sep.outcome).toBe('session');
+    expect(sep.new_account).toBe(true);
+    expect(await status(call('SeparateAccount', { link_proposal_id: q.link_proposal_id, link_binding: q.link_binding, idempotency_key: newKey() }))).toBe('NOT_FOUND');
   });
 
   test('I-T50_④_EndSession은멱등이다', async () => {
@@ -116,7 +151,8 @@ describe('SessionService(gRPC)', () => {
 
   test('받는층은_예상하지못한오류의내용을_부르는쪽에보내지않는다', async () => {
     // 업무 오류(SessionError)가 아닌 것은 INTERNAL과 고정 문구, 이유는 서버 쪽 기록에만 남긴다
-    const boom = { run: async () => Promise.reject(new Error('postgres://identity:비밀@db 연결 실패')) };
+    const fail = async () => Promise.reject(new Error('postgres://identity:비밀@db 연결 실패'));
+    const boom = { run: fail, outcome: fail };
     const seen: string[] = [];
     const s = await startGrpcServer({
       host: '127.0.0.1',

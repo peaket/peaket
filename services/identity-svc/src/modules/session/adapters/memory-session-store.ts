@@ -3,10 +3,10 @@
 import { randomUUID } from 'node:crypto';
 import { type OutboxMessage, uuidv7 } from '@peaket/platform';
 import type { AccountRow, CreateKeyRecord, NewSession, RefreshRow, SessionRow, SessionStore, SessionTx } from '../domain/ports.js';
-import { type ActiveSession, CREATE_KEY_TTL_MS, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
+import { type ActiveSession, CREATE_KEY_TTL_MS, normalizeEmail, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
 import { accountWithdrawnMessage } from './account-withdrawn-message.js';
 
-type StoredAccount = AccountRow & { email: string | null; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number };
+type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number };
 
 type StoredSession = NewSession & { terminatedAt: number | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean };
 
@@ -77,6 +77,24 @@ export class MemorySessionStore implements SessionStore {
 
   deviceCount(accountId: string): number {
     return [...this.#state.devices.values()].filter((d) => d.accountId === accountId).length;
+  }
+
+  /** 시험용: 계정 수 */
+  accountCount(): number {
+    return this.#state.accounts.size;
+  }
+
+  /** 시험용: 로그인 수단 없이 그 이메일의 ACTIVE 계정을 만든다(같은 이메일 계정이 여럿인 경우) */
+  forceCreate(email: string, emailVerified: boolean): string {
+    const id = uuidv7({ now: () => Date.now(), monotonicMs: () => 0 });
+    this.#state.accounts.set(id, { id, status: 'ACTIVE', email, emailVerified, createdAt: 0 });
+    return id;
+  }
+
+  /** 시험용: 계정 상태를 바꾼다 */
+  setStatus(id: string, status: AccountRow['status']): void {
+    const a = this.#state.accounts.get(id);
+    if (a) a.status = status;
   }
 
   /** 시험이 보는 계정 행 */
@@ -161,9 +179,21 @@ export class MemorySessionStore implements SessionStore {
         const a = link && s.accounts.get(link.accountId);
         return a ? { id: a.id, status: a.status } : null;
       },
-      createAccount: async ({ id, email }, now) => {
-        s.accounts.set(id, { id, status: 'ACTIVE', email, createdAt: now });
+      createAccount: async ({ id, email, emailVerified }, now) => {
+        s.accounts.set(id, { id, status: 'ACTIVE', email, emailVerified: emailVerified === true, createdAt: now });
       },
+      findLinkTargets: async (email) =>
+        [...s.accounts.values()]
+          .filter((a) => a.status === 'ACTIVE' && a.emailVerified && a.email !== null && normalizeEmail(a.email) === email)
+          .sort((x, y) => (x.id < y.id ? -1 : 1))
+          .slice(0, 2)
+          .map((a) => ({
+            accountId: a.id,
+            providers: [...s.providers]
+              .filter(([, v]) => v.accountId === a.id)
+              .sort(([ka, a1], [kb, b1]) => a1.linkedAt - b1.linkedAt || (ka < kb ? -1 : 1))
+              .map(([k]) => k.split('\u0000')[0] as Provider),
+          })),
       linkProvider: async (accountId, provider, providerUserId, now) => {
         const k = providerKey(provider, providerUserId);
         if (s.providers.has(k)) throw new Error('account_provider (provider, provider_user_id) 중복');
@@ -199,7 +229,7 @@ export class MemorySessionStore implements SessionStore {
       eraseAccount: async (accountId, now) => {
         const a = s.accounts.get(accountId);
         if (!a) return;
-        s.accounts.set(accountId, { id: a.id, status: 'DELETED', email: null, createdAt: a.createdAt, deletedAt: now });
+        s.accounts.set(accountId, { id: a.id, status: 'DELETED', email: null, emailVerified: false, createdAt: a.createdAt, deletedAt: now });
         for (const [k, p] of s.providers) if (p.accountId === accountId) s.providers.delete(k);
         for (const [k, d] of s.devices) if (d.accountId === accountId) s.devices.delete(k);
         for (const [k, c] of s.keys) if (s.sessions.get(c.sessionId)?.accountId === accountId) s.keys.delete(k);

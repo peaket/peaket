@@ -605,7 +605,7 @@ flowchart LR
 | 구성 요소 | gw-fan이 넘기는 팬 API | identity 스키마와 Redis 세션·캐시 |
 | --- | --- | --- |
 | 계정·세션·토큰 | 토큰 갱신 `/v1/identity/access-tokens`, 로그인된 기기 `/v1/identity/sessions`, 로그인 수단 `/v1/identity/providers`, 탈퇴 `/v1/identity/account` | `account`·`account_provider`·`session`·`device`·`consent`, 세션 종료 사건 `control.sessions-terminated`·탈퇴 사건 `identity.accounts-withdrawn`(2026-11-04 BOT-037)의 Outbox, Redis 참조 세션 캐시 |
-| 계정 연결·병합 | `/v1/identity/link-proposals/{proposalId}`, `/v1/identity/merge-proposals/{proposalId}`와 그 하위 경로 | `account_merge`·`account_hold`, 병합 사건 `identity.accounts-merged`의 Outbox, Redis 제안 캐시(`id:link:*`·`id:merge:*`) |
+| 계정 연결·병합 | `/v1/identity/merge-proposals/{proposalId}`와 그 하위 경로. 가입 때 연결 제안 `/v1/identity/link-proposals/{proposalId}`와 그 하위 경로는 gw-fan이 아니라 소비자 웹 앱 서버가 연결 제안 쿠키로 받아 identity gRPC(`GetLinkProposal`·`SeparateAccount`)로 넘긴다(2026-11-04 BOT-040) | `account_merge`·`account_hold`, 병합 사건 `identity.accounts-merged`의 Outbox, Redis 제안 캐시(`id:link:*`·`id:merge:*`) |
 | 휴대폰 본인확인 | `/v1/identity/verifications`와 결과 경로, 부스 대조 `/v1/identity/booth-reverifications`, 미성년자 계약 취소 확인 `/v1/identity/minor-contract-checks` | `identity_verification`·`booth_reverification`(연계정보 원문은 두지 않는다) |
 | 관리 계정 인증 | 없음(gw-partner·gw-ops로 받는다) | `admin_account`·`admin_passkey`·`admin_recovery_code`, Redis 로그인 실패 수 |
 | 현장 스태프·스캐너 로그인 | 초대 수락 `/v1/staff-invitation-lookups`·`/v1/staff-invitation-acceptances`, 스캐너 승인 `/v1/device-approval-lookups`·`/v1/device-approvals` | `staff_assignment`·`scanner_session`, Redis 기기 승인 코드(`id:devauth:*`) |

@@ -54,7 +54,7 @@ export async function startMockOP(port = 0) {
   const users = { kakao: { sub: '4000001', email: 'fan@kakao.test' }, naver: { sub: 'nv-SUB-77', email: 'fan@naver.test' }, google: { sub: '1100223344', email: 'fan@gmail.test' } };
   // 시험이 바꾸는 동작: wrongIss·wrongAud·badSignature·otherNonce·expired(ID 토큰), naverIdMismatch(사용자 정보 id가 sub와 다름),
   // discoveryIssuer(발견 문서 issuer가 다름), staleAuthTime(다시 묻지 않고 통과), googleAuthTime(구글 콘솔에서 auth_time을 켬)
-  const mode = { wrongIss: false, wrongAud: false, naverIdMismatch: false, badSignature: false, otherNonce: false, expired: false, discoveryIssuer: false, staleAuthTime: false, googleAuthTime: true };
+  const mode = { wrongIss: false, wrongAud: false, naverIdMismatch: false, badSignature: false, otherNonce: false, expired: false, discoveryIssuer: false, staleAuthTime: false, googleAuthTime: true, kakaoUnverified: false, kakaoUserinfoFails: false };
   /** 제공자마다 마지막 인가 요청의 매개변수(시험이 prompt·claims를 본다) */
   const lastAuthorize = {};
   const rogue = await generateKeyPair('RS256');
@@ -117,7 +117,8 @@ export async function startMockOP(port = 0) {
       const claims = {
         sub: c.user.sub,
         ...(c.nonce ? { nonce: mode.otherNonce ? `${c.nonce}x` : c.nonce } : {}),
-        ...(p === 'naver' ? {} : { email: c.user.email, email_verified: true }),
+        // 카카오 ID 토큰에는 이메일 검증 여부가 없다(사용자 정보로 준다, identity §2.1 [확인 필요]). 구글은 ID 토큰에 싣는다
+        ...(p === 'naver' ? {} : p === 'kakao' ? { email: c.user.email } : { email: c.user.email, email_verified: true }),
         ...(p === 'naver' || authTime === undefined ? {} : { auth_time: authTime }),
       };
       const idToken = await new SignJWT(claims)
@@ -135,7 +136,8 @@ export async function startMockOP(port = 0) {
       const t = tokens.get((req.headers.get('authorization') ?? '').replace(/^Bearer /, ''));
       if (!t || t.p !== p) return json({ error: 'invalid_token' }, 401);
       if (p === 'naver') return json({ resultcode: '00', message: 'success', response: { id: mode.naverIdMismatch ? 'nv-OTHER-1' : t.user.sub, email: t.user.email } });
-      return json({ sub: t.user.sub, email: t.user.email, email_verified: true });
+      if (p === 'kakao' && mode.kakaoUserinfoFails) return json({ error: 'server_error' }, 500);
+      return json({ sub: t.user.sub, email: t.user.email, email_verified: !(p === 'kakao' && mode.kakaoUnverified) });
     }
     return new Response('없음', { status: 404 });
   }, port);

@@ -51,6 +51,10 @@ service SessionService {
   // 같은 idempotency_key로 다시 오면 새 세션을 만들지 않고 같은 세션을 가리킨다.
   // identity에는 리프레시 토큰의 해시만 있어 같은 값을 다시 줄 수 없으므로, 토큰을 다시 발급하고 앞서 발급한 리프레시 토큰은 무효로 한다.
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  // 가입 때 연결 제안 조회(GET /v1/identity/link-proposals/{proposalId}). 없음·만료·묶음 값이 다르면 NOT_FOUND(추천 적용 2026-11-04, BUILD_ORDER BOT-040)
+  rpc GetLinkProposal(GetLinkProposalRequest) returns (GetLinkProposalResponse);
+  // 연결하지 않고 새 계정 만들기(POST …/separate-account). 제안을 지우고 새 제공자 계정과 세션을 만든다. 없음·만료·묶음 값이 다르면 NOT_FOUND
+  rpc SeparateAccount(SeparateAccountRequest) returns (CreateSessionResponse);
   // 로그아웃. 세션을 끝내고 세션 종료 이벤트를 낸다. 이미 끝난 세션이면 그대로 성공이다(멱등).
   rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
   // 팬 민감 작업 전 재인증(docs/features/identity.md §7.1). 앱 서버가 제공자 재인증과 강도 판정을 마친 뒤 부른다.
@@ -77,6 +81,7 @@ message CreateSessionRequest {
   string email = 4;
   bool email_verified = 5;
   // 같은 이메일 계정 연결 제안을 따라 다시 로그인할 때만 채운다(ADR-0038).
+  // 제안이 없거나 만료됐거나 link_binding이 다르면 NOT_FOUND다(docs/features/identity.md §2.1 '가입 때 연결 제안의 첫 구현').
   string link_proposal_id = 6;
   // 기기 바인딩 값. 저장할 때는 가명으로 바꾼다.
   string device_id = 7;
@@ -85,6 +90,8 @@ message CreateSessionRequest {
   string user_agent = 9;
   // 제공자가 준 acr·amr. 없으면 단일 요소 인증으로 본다(ASVS 6.8.4, ADR-0001).
   repeated string auth_methods = 10;
+  // link_proposal_id와 함께: 제안을 받을 때 준 브라우저 묶음 값(앱 서버가 연결 제안 쿠키에 봉인해 둔 원문, 추천 적용 2026-11-04)
+  string link_binding = 12;
   // CloudFront가 붙인 CloudFront-Viewer-ASN 값. 앱 서버는 원본 확인 헤더가 맞는 요청에서만 읽고, 없으면 0이다.
   // identity-svc가 로그인 판정(trust.proto ScoreRisk LOGIN)의 ClientSignals.asn으로 넘긴다
   // (추천 적용 2026-10-30, docs/infra.md §4.1 'ASN 헤더와 분류표', docs/features/bot-defense.md §3.1).
@@ -97,9 +104,43 @@ message CreateSessionResponse {
     SessionTokens session = 1;
     // 같은 이메일의 활성 계정이 하나 있어 연결 제안으로 간다. 세션은 만들지 않는다(§2.1).
     string link_proposal_id = 2;
+    // 연결 제안을 따라 로그인했는데 제안의 대상 계정이 아니었다. 세션도 계정도 만들지 않는다(추천 적용 2026-11-04)
+    LinkMismatch link_mismatch = 5;
   }
   // 처음 로그인이라 가입·약관 동의 화면(SCR-005)으로 보내야 하면 true.
   bool new_account = 3;
+  // link_proposal_id와 함께: 브라우저 묶음 값(256비트 base64url). 이 응답에서 한 번만 준다. identity에는 SHA-256만 남는다
+  string link_binding = 4;
+  // 연결 제안을 따라 연결을 맺었으면 새로 이은 제공자(화면의 '{제공자} 계정을 연결했습니다'). 아니면 UNSPECIFIED
+  Provider linked_provider = 6;
+}
+
+message LinkMismatch {
+  // 남은 시도. 0이면 제안을 지웠다(3회 실패, SCR-039 만료)
+  int32 attempts_left = 1;
+}
+
+message GetLinkProposalRequest {
+  string link_proposal_id = 1;
+  string link_binding = 2;
+}
+
+message GetLinkProposalResponse {
+  // 대상 계정에 처음 연결한 제공자. 닉네임·이메일은 주지 않는다
+  Provider existing_provider = 1;
+  Provider new_provider = 2;
+  int64 expires_at_ms = 3;
+  int32 attempts_left = 4;
+}
+
+message SeparateAccountRequest {
+  string link_proposal_id = 1;
+  string link_binding = 2;
+  // CreateSession과 같은 규칙의 멱등 키(앱 서버가 이 요청마다 만든다)
+  string idempotency_key = 3;
+  string device_id = 4;
+  string user_agent = 5;
+  repeated string auth_methods = 6;
 }
 
 message SessionTokens {

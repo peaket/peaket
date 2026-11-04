@@ -7,10 +7,14 @@ import * as client from 'openid-client';
 import { allowsMockProviders, type SocialLoginConfig } from './config.ts';
 import {
   ACCESS_COOKIE,
+  clearLinkCookie,
   clearProgressCookie,
   clearReauthCookie,
   clearSessionCookies,
   cookieOf,
+  LINK_COOKIE,
+  LINK_TTL_MS,
+  linkCookie,
   PROGRESS_COOKIE,
   PROGRESS_TTL_MS,
   progressCookie,
@@ -21,7 +25,7 @@ import {
 } from './cookies.ts';
 import { FanTokenVerifier } from './fan-token.ts';
 import { IdentityClient } from './identity-client.ts';
-import { deriveLoginKeys, idempotencyKeyOf } from './keys.ts';
+import { deriveLoginKeys, idempotencyKeyOf, separateKeyOf } from './keys.ts';
 import { OidcProviders } from './oidc.ts';
 import { isProvider, type Provider } from './providers.ts';
 import { reauthPrompt, reauthStrength } from './reauth-strength.ts';
@@ -50,6 +54,15 @@ interface Progress {
   startedAt?: number;
   sid?: string;
   sub?: string;
+  /** 가입 때 연결 제안을 따라 온 기존 제공자 로그인(identity §2.1). 묶음 값은 연결 제안 쿠키에 있다 */
+  linkProposalId?: string;
+}
+
+/** 연결 제안 쿠키 안의 값(identity §2.1·§3) */
+interface LinkSeal {
+  proposalId: string;
+  binding: string;
+  returnTo: string;
 }
 
 /** 재인증 결과 쿠키 안의 값(identity §7.1 ⑤) */
@@ -57,6 +70,17 @@ type ReauthResult = { token: string; provider: Provider; strength: 'verified' | 
 
 export const GENERIC_FAILURE = '로그인하지 못했습니다. 처음부터 다시 시도해 주세요';
 const DEVICE_ID = /^[A-Za-z0-9_-]{22}$/;
+const PROPOSAL_ID = /^[A-Za-z0-9_-]{22}$/;
+/** grpc 상태 코드 NOT_FOUND(연결 제안이 없거나 만료) */
+const GRPC_NOT_FOUND = '5';
+
+const LINK_PROBLEM = {
+  missing: { status: 404, type: 'link-proposal-missing', title: '연결 제안이 없거나 시간이 지났습니다. 다시 로그인해 주세요' },
+  unavailable: { status: 503, type: 'link-unavailable', title: '지금은 처리할 수 없습니다. 잠시 뒤 다시 시도해 주세요' },
+} as const;
+/** 연결 제안 화면(SCR-039). 제안 ID는 주소에 실려도 된다(묶음 값은 쿠키에만 있다, identity §2.1) */
+const LINK_PAGE = '/login/link';
+const LINK_EXPIRED = `${LINK_PAGE}?link=expired`;
 
 const REAUTH_PROBLEM = {
   stale: { status: 409, type: 'reauth-stale', title: '제공자 계정에서 로그아웃한 뒤 다시 시도해 주세요' },
@@ -97,6 +121,12 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
   // 봉인은 지금 키로만, 열기는 옛 키로도(비밀을 바꾼 뒤 쿠키 수명 동안)
   const progressKeys = [keys.progress, ...(previous ? [previous.progress] : [])];
   const reauthKeys = [keys.reauthResult, ...(previous ? [previous.reauthResult] : [])];
+  const linkKeys = [keys.link, ...(previous ? [previous.link] : [])];
+  /** 연결 제안 쿠키가 그 제안 ID의 것일 때만 */
+  const linkOf = (req: Request, id: string): LinkSeal | null => {
+    const l = unseal<LinkSeal>(linkKeys, LINK_COOKIE, cookieOf(req, LINK_COOKIE), now());
+    return l && l.proposalId === id ? l : null;
+  };
   const oidc = new OidcProviders(config.providers, allowsMockProviders(config.env));
   const identity = deps.identity ?? new IdentityClient(config.identityAddress);
   if (!config.fanJwksUrl && !config.fanJwks) throw new Error('팬 토큰 공개키 묶음 주소나 값이 있어야 한다');
@@ -129,7 +159,19 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     if (!isProvider(provider) || !oidc.has(provider)) return respond(404, '없는 로그인 수단입니다');
     const f = await formOf(req);
     const deviceId = f.get('deviceId');
-    return startFlow(provider, { purpose: 'login', p: provider, ...randomFlow(), returnTo: safeReturnTo(f.get('returnTo')), deviceId: deviceId && DEVICE_ID.test(deviceId) ? deviceId : null });
+    // 연결 제안 화면(SCR-039)의 [기존 제공자 로그인]은 제안 ID를 싣는다. 쿠키와 맞는지는 콜백에서 본다
+    const linkProposal = f.get('linkProposal');
+    const linking = linkProposal !== null && PROPOSAL_ID.test(linkProposal);
+    // 연결 화면에서 시작한 로그인은 계정을 다시 고르게 한다: 제공자에 다른 계정이 로그인돼 있어도 남은 시도가 저절로 줄지 않게(새 맥락 리뷰 중간 3)
+    const progress: Progress = {
+      purpose: 'login',
+      p: provider,
+      ...randomFlow(),
+      returnTo: safeReturnTo(f.get('returnTo')),
+      deviceId: deviceId && DEVICE_ID.test(deviceId) ? deviceId : null,
+      ...(linking && linkProposal ? { linkProposalId: linkProposal } : {}),
+    };
+    return startFlow(provider, progress, linking ? reauthPrompt(provider) : undefined);
   }
 
   /** POST /reauth/{provider}: 팬 민감 작업 전 재인증 시작(identity §7.1 ①) */
@@ -221,14 +263,62 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
       } catch (e) {
         return fail('userinfo', codeOf(e));
       }
+    } else if (login.claims.email_verified === undefined && !prog.linkProposalId) {
+      // 카카오처럼 ID 토큰에 검증 여부가 없으면 사용자 정보로 읽는다(새 맥락 리뷰 중간 2). 검증 여부는 가입 때 연결 제안에만 쓰므로,
+      // 사용자 정보가 실패해도 로그인을 막지 않고 '검증 안 됨'(제안 없음)으로 간다. 연결 화면에서 시작한 로그인은 이메일을 쓰지 않아 부르지 않는다(재검토 중간)
+      try {
+        const u = await oidc.userInfoEmail(provider, login);
+        profile = { email: u.email ?? profile.email, emailVerified: u.emailVerified };
+      } catch (e) {
+        log('login.userinfo-fallback', { provider, code: codeOf(e) });
+        profile = { email: profile.email, emailVerified: false };
+      }
+    }
+    // 연결 제안을 따라 온 로그인이면 쿠키의 묶음 값을 싣는다. 쿠키가 없거나 다른 제안이면 identity를 부르지 않고 만료 안내로(identity §2.1)
+    let link: LinkSeal | null = null;
+    if (prog.linkProposalId) {
+      link = linkOf(req, prog.linkProposalId);
+      if (!link) {
+        log('link.expired', { provider, reason: 'cookie' });
+        return redirect(LINK_EXPIRED, [clearProgressCookie(), clearLinkCookie()]);
+      }
     }
     try {
-      const s = await identity.createSession({ idempotencyKey: idempotencyKeyOf(keys, prog.state), provider, providerUserId: sub, ...profile, deviceId: prog.deviceId ?? null, userAgent, authMethods });
-      log('login.completed', { provider, newAccount: s.newAccount });
-      // 처음 로그인이면 가입·약관 동의(SCR-005)로, 끝나면 돌아갈 주소로
-      const to = s.newAccount ? `/signup/consent?next=${encodeURIComponent(prog.returnTo)}` : prog.returnTo;
-      return redirect(to, [clearProgressCookie(), ...sessionCookies(s, now(), config.cookieDomain)]);
+      const r = await identity.createSession({
+        idempotencyKey: idempotencyKeyOf(keys, prog.state),
+        provider,
+        providerUserId: sub,
+        ...profile,
+        deviceId: prog.deviceId ?? null,
+        userAgent,
+        authMethods,
+        ...(link ? { link: { proposalId: link.proposalId, binding: link.binding } } : {}),
+      });
+      if (r.kind === 'link-proposed') {
+        // 같은 이메일 계정이 있어 연결을 제안한다(SCR-039). 세션은 아직 없다
+        log('link.proposed', { provider });
+        const sealed = seal(keys.link, LINK_COOKIE, { proposalId: r.proposalId, binding: r.binding, returnTo: prog.returnTo } satisfies LinkSeal, now() + LINK_TTL_MS);
+        return redirect(`${LINK_PAGE}?proposal=${r.proposalId}`, [clearProgressCookie(), linkCookie(sealed)]);
+      }
+      if (r.kind === 'link-mismatch') {
+        log('link.mismatch', { provider, attemptsLeft: r.attemptsLeft });
+        if (r.attemptsLeft > 0 && link) return redirect(`${LINK_PAGE}?proposal=${link.proposalId}&mismatch=${r.attemptsLeft}`, [clearProgressCookie()]);
+        return redirect(LINK_EXPIRED, [clearProgressCookie(), clearLinkCookie()]);
+      }
+      const s = r.session;
+      log('login.completed', { provider, newAccount: s.newAccount, ...(r.linkedProvider ? { linked: r.linkedProvider } : {}) });
+      const cookies = [clearProgressCookie(), ...sessionCookies(s, now(), config.cookieDomain), ...(link ? [clearLinkCookie()] : [])];
+      // 연결 제안을 따라 왔으면 처음 로그인 때의 돌아갈 주소로. 처음 로그인이면 가입·약관 동의(SCR-005)로
+      const back = link ? link.returnTo : prog.returnTo;
+      const to = s.newAccount ? `/signup/consent?next=${encodeURIComponent(back)}` : back;
+      // 연결을 맺었으면 연결 화면의 '연결 성공'(토스트) 뒤 그 주소로 간다(d5 §5.21)
+      if (r.linkedProvider) return redirect(`${LINK_PAGE}?linked=${r.linkedProvider}&next=${encodeURIComponent(to)}`, cookies);
+      return redirect(to, cookies);
     } catch (e) {
+      if (link && codeOf(e) === GRPC_NOT_FOUND) {
+        log('link.expired', { provider, reason: 'identity' });
+        return redirect(LINK_EXPIRED, [clearProgressCookie(), clearLinkCookie()]);
+      }
       return fail('identity', codeOf(e), 503);
     }
   }
@@ -264,7 +354,46 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     return json(200, { reauthToken: r.token, provider: r.provider, strength: r.strength, expiresAt: r.expiresAt }, clear);
   }
 
-  const handlers = { start, callback, logout, reauthStart, reauthToken };
+  /** GET /v1/identity/link-proposals/{proposalId}: 연결 제안 화면이 기존·새 제공자, 만료, 남은 시도를 읽는다(identity §2.1) */
+  async function linkProposal(req: Request, id: string): Promise<Response> {
+    const l = linkOf(req, id);
+    if (!l) return problem(LINK_PROBLEM.missing);
+    try {
+      const v = await identity.getLinkProposal({ proposalId: id, binding: l.binding });
+      if (!v) return problem(LINK_PROBLEM.missing, [clearLinkCookie()]);
+      return json(200, { proposalId: id, existingProvider: v.existingProvider, newProvider: v.newProvider, expiresAt: new Date(v.expiresAt).toISOString(), attemptsLeft: v.attemptsLeft });
+    } catch (e) {
+      log('link.failed', { reason: 'identity', code: codeOf(e) });
+      return problem(LINK_PROBLEM.unavailable);
+    }
+  }
+
+  /** POST /v1/identity/link-proposals/{proposalId}/separate-account: 연결하지 않고 새 계정 만들기(identity §2.1, FR-048) */
+  async function separateAccount(req: Request, id: string): Promise<Response> {
+    if (!sameOrigin(req)) return forbidden();
+    const l = linkOf(req, id);
+    if (!l) return problem(LINK_PROBLEM.missing);
+    const f = await formOf(req);
+    const deviceId = f.get('deviceId');
+    try {
+      const s = await identity.separateAccount({
+        proposalId: id,
+        binding: l.binding,
+        idempotencyKey: separateKeyOf(keys, id),
+        deviceId: deviceId && DEVICE_ID.test(deviceId) ? deviceId : null,
+        userAgent: (req.headers.get('user-agent') ?? '').slice(0, 512),
+      });
+      if (!s) return problem(LINK_PROBLEM.missing, [clearLinkCookie()]);
+      log('login.completed', { provider: 'separate', newAccount: s.newAccount });
+      const next = s.newAccount ? `/signup/consent?next=${encodeURIComponent(l.returnTo)}` : l.returnTo;
+      return json(201, { next }, [clearLinkCookie(), ...sessionCookies(s, now(), config.cookieDomain)]);
+    } catch (e) {
+      log('link.failed', { reason: 'identity', code: codeOf(e) });
+      return problem(LINK_PROBLEM.unavailable);
+    }
+  }
+
+  const handlers = { start, callback, logout, reauthStart, reauthToken, linkProposal, separateAccount };
 
   /** 경로표대로 고른다(시험과 로컬 대역 서버가 쓴다. Next에서는 경로 파일이 처리기를 바로 부른다) */
   async function dispatch(req: Request): Promise<Response> {
@@ -288,4 +417,6 @@ export const LOGIN_ROUTES = [
   { method: 'POST', pattern: /^\/logout$/, file: '/logout', handler: 'logout' },
   { method: 'POST', pattern: /^\/reauth\/(kakao|naver|google)$/, file: '/reauth/[provider]', handler: 'reauthStart' },
   { method: 'POST', pattern: /^\/reauth\/token$/, file: '/reauth/token', handler: 'reauthToken' },
+  { method: 'GET', pattern: /^\/v1\/identity\/link-proposals\/([A-Za-z0-9_-]{22})$/, file: '/v1/identity/link-proposals/[proposalId]', handler: 'linkProposal' },
+  { method: 'POST', pattern: /^\/v1\/identity\/link-proposals\/([A-Za-z0-9_-]{22})\/separate-account$/, file: '/v1/identity/link-proposals/[proposalId]/separate-account', handler: 'separateAccount' },
 ] as const;

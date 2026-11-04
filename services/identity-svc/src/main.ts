@@ -3,12 +3,13 @@
 // 앱 포트(REST: 팬 토큰 갱신 POST /v1/identity/access-tokens, 공개키 묶음 GET /internal/jwks/{set}.json)·관리 포트(/metrics, /ready)는
 // 서비스 뼈대가, 업무 gRPC 포트는 이 파일이 연다.
 import 'reflect-metadata';
-import { createDatabase, createService } from '@peaket/platform';
+import { createDatabase, createHotRedis, createService } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
   CreateSession,
   EndSession,
+  GetLinkProposal,
   GetVerificationStatus,
   HmacDeviceRefs,
   IssueReauthToken,
@@ -16,6 +17,8 @@ import {
   identityServiceHandlers,
   JoseTokenSigner,
   PromSessionSignals,
+  RedisLinkProposals,
+  SeparateAccount,
   sessionServiceHandlers,
   TokenKeyRing,
   tokenIssuerFromEnv,
@@ -53,11 +56,17 @@ const verification = process.env[VERIFICATION_PROVIDER_ENV]
   : { provider: unavailableProvider, hashers: unavailableHashers };
 const signals = new PromSessionSignals();
 const database = createDatabase({ url, applicationName: SERVICE });
-const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices.refs, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined }, verification }) });
+// 세션·캐시 Redis: 가입 때 연결 제안(id:link, identity §2.1). 운영·데모는 반드시 둔다. 로컬·CI만 없으면 프로세스 메모리로 대신한다(파드가 여럿이면 제안을 잃는다)
+const cacheUrl = process.env.PEAKET_IDENTITY_REDIS_URL;
+const env = process.env.PEAKET_ENV ?? 'local';
+if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTITY_REDIS_URL이 없다(세션·캐시 Redis, 비밀 관리에서 넣는다)');
+const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
+const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices.refs, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now) } : {}) }, verification }) });
 signals.register(service.metrics.registry);
 // 기록이 쓰는 연계정보 키 판을 설정이 모두 갖지 않으면 시작하지 않는다(같은 사람이 계정을 하나 더 만들지 못하게, identity §5 '키 판·만 14세…')
 if (process.env[VERIFICATION_PROVIDER_ENV]) await assertKeyVersions(service.app.get<DrizzleVerificationStore>(VERIFICATION_STORE), verification.hashers);
 if (devices.warning) service.logger.warn(devices.warning);
+if (!cache) service.logger.warn('PEAKET_IDENTITY_REDIS_URL이 없어 가입 때 연결 제안을 이 프로세스 메모리에 둔다(local·ci만)');
 
 await service.listen();
 const grpc = await startGrpcServer({
@@ -67,7 +76,7 @@ const grpc = await startGrpcServer({
     {
       definition: identityPackage().SessionService.service,
       handlers: sessionServiceHandlers(
-        { create: service.app.get(CreateSession), end: service.app.get(EndSession), reauth: service.app.get(IssueReauthToken) },
+        { create: service.app.get(CreateSession), end: service.app.get(EndSession), reauth: service.app.get(IssueReauthToken), linkView: service.app.get(GetLinkProposal), separate: service.app.get(SeparateAccount) },
         (method, err) => service.logger.error({ err, method }, 'SessionService 처리 실패'),
       ),
     },
@@ -91,5 +100,5 @@ process.once('SIGTERM', () => {
     .close()
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err }, 'identity-svc 종료 실패'))
-    .finally(() => database.close());
+    .finally(() => Promise.all([database.close(), cache?.close()]));
 });
