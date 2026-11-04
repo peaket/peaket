@@ -1,8 +1,9 @@
 // 운영의 관리자 비밀번호 페퍼(판마다 AWS KMS HMAC 키, GenerateMac·VerifyMac, docs/security/secrets-and-keys.md '관리자 비밀번호 페퍼 키', BUILD_ORDER BOT-110).
-// MAC 값을 서비스가 견주지 않고 KMS VerifyMac이 판정한다. KMS가 답하지 않으면 PepperUnavailable(복구 리전 복제 키 넘기기는 BOT-130).
+// MAC 값을 서비스가 견주지 않고 KMS VerifyMac이 판정한다. 서울이 답하지 않으면 도쿄 복제 키로 한 번 넘기고(BOT-131, ADR-0102), 그래도 안 되면 PepperUnavailable.
 // 로컬·CI는 설정의 키 값(LocalPepper)을 받을 수 있다. 설정이 없으면 null(관리 계정 비밀번호를 정하거나 확인할 수 없다).
 import { GenerateMacCommand, KMSClient, VerifyMacCommand } from '@aws-sdk/client-kms';
 import { type AdminPepper, PepperUnavailable } from '../domain/ports.js';
+import { kmsFailoverFromEnv, replicaKeyId, requireFailoverOutsideLocal, withFailover } from './kms-failover.js';
 import { LocalPepper } from './local-pepper.js';
 
 export const PEPPER_KMS_KEYS_ENV = 'PEAKET_ADMIN_PEPPER_KMS_KEYS';
@@ -25,7 +26,8 @@ export function kmsPepperClient(o: { region: string; endpoint?: string; credenti
     ...(o.endpoint ? { endpoint: o.endpoint } : {}),
     ...(o.credentials ? { credentials: o.credentials } : {}),
     maxAttempts: 2,
-    requestHandler: { connectionTimeout: CONNECTION_TIMEOUT_MS, requestTimeout: REQUEST_TIMEOUT_MS },
+    // throwOnRequestTimeout: 이 SDK 판은 이것이 없으면 요청 시간 한도를 넘겨도 끊지 않는다(연결만 받고 답하지 않는 서울에서 넘기기 전에 멈춘다, 재검토 2026-11-05)
+    requestHandler: { connectionTimeout: CONNECTION_TIMEOUT_MS, requestTimeout: REQUEST_TIMEOUT_MS, throwOnRequestTimeout: true },
   });
   return {
     async mac(keyId, message) {
@@ -43,6 +45,14 @@ export function kmsPepperClient(o: { region: string; endpoint?: string; credenti
         throw e;
       }
     },
+  };
+}
+
+/** 서울 클라이언트가 응답하지 않으면 넘길 리전의 복제 키(ARN이면 리전 칸만 바꾼다)로 같은 호출을 한 번 한다(BOT-131) */
+export function failoverPepperClient(primary: PepperMacClient, secondary: PepperMacClient, region: string, onFailover?: (errorName: string) => void): PepperMacClient {
+  return {
+    mac: (keyId, message) => withFailover(() => primary.mac(keyId, message), () => secondary.mac(replicaKeyId(keyId, region), message), onFailover),
+    verify: (keyId, message, mac) => withFailover(() => primary.verify(keyId, message, mac), () => secondary.verify(replicaKeyId(keyId, region), message, mac), onFailover),
   };
 }
 
@@ -93,8 +103,11 @@ export class KmsPepper implements AdminPepper {
   }
 }
 
-/** 설정에서 만든다. KMS 키 목록(JSON {판: 키 ID})이 있으면 KMS, 없고 local·ci면 키 값, 둘 다 없으면 null */
-export function adminPepperFromEnv(env: Record<string, string | undefined>, client: (endpoint: string | undefined) => PepperMacClient): AdminPepper | null {
+/**
+ * 설정에서 만든다. KMS 키 목록(JSON {판: 키 ID})이 있으면 KMS, 없고 local·ci면 키 값, 둘 다 없으면 null.
+ * client(끝점, 리전): 서울은 (PEAKET_KMS_ENDPOINT, AWS_REGION), 넘길 리전은 (PEAKET_KMS_FAILOVER_ENDPOINT, PEAKET_KMS_FAILOVER_REGION)으로 부른다
+ */
+export function adminPepperFromEnv(env: Record<string, string | undefined>, client: (endpoint: string | undefined, region: string) => PepperMacClient, onFailover?: (use: 'pepper', errorName: string) => void): AdminPepper | null {
   const peaketEnv = env.PEAKET_ENV ?? 'prod';
   const local = LOCAL_ENVS.includes(peaketEnv);
   const many = env[PEPPER_KMS_KEYS_ENV];
@@ -114,7 +127,13 @@ export function adminPepperFromEnv(env: Record<string, string | undefined>, clie
     const write = Number(env[PEPPER_WRITE_VERSION_ENV] ?? Math.max(...keys.keys()));
     const endpoint = env.PEAKET_KMS_ENDPOINT;
     if (endpoint && !local) throw new Error(`PEAKET_KMS_ENDPOINT는 ${LOCAL_ENVS.join('·')}에서만 쓴다(지금 ${peaketEnv})`);
-    return new KmsPepper(client(endpoint), keys, write);
+    const failover = kmsFailoverFromEnv(env);
+    requireFailoverOutsideLocal(env, failover, '관리자 비밀번호 페퍼');
+    const primary = client(endpoint, env.AWS_REGION ?? 'ap-northeast-2');
+    if (!failover) return new KmsPepper(primary, keys, write);
+    // 넘길 리전이 있으면 모든 판의 키가 다중 리전 키여야 한다(시작 때 확인)
+    for (const id of keys.values()) replicaKeyId(id, failover.region);
+    return new KmsPepper(failoverPepperClient(primary, client(failover.endpoint, failover.region), failover.region, (name) => onFailover?.('pepper', name)), keys, write);
   }
   const raw = env[PEPPER_LOCAL_KEY_ENV];
   if (!raw) return null;

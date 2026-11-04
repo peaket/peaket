@@ -63,18 +63,24 @@ if (!(Number.isInteger(grpcPort) && grpcPort > 0 && grpcPort <= 65535)) throw ne
 // 관리 계정 인증 통제 설정의 범위 검사와 페퍼 키 설정(docs/security/auth-controls.md §5 AC-T10, identity §6): 범위를 벗어나면 시작하지 않는다
 // 대조 목록 파일(L1·L3, 배포가 더한 L3 파일 포함), 유출 목록 주소, 사람 확인 주소도 여기서 본다. local·ci 밖은 페퍼가 필수다(identity §6 BOT-111)
 const adminAuth = adminAuthConfigFromEnv(process.env);
-const adminPepper = adminPepperFromEnv(process.env, (endpoint) => kmsPepperClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }));
+// 서울 KMS가 응답하지 않으면 도쿄 복제 키로 넘긴다(PEAKET_KMS_FAILOVER_REGION, ADR-0102, BOT-131). 넘길 때마다 지표와 경고 로그(로거는 서비스가 선 뒤에 잇는다)
+const kmsFailoverLog: { warn?: (use: 'pepper' | 'totp', error: string) => void } = {};
+const adminSignals = new PromAdminLoginSignals({ refreshed: (aud, result) => signals.refreshed(aud, result) });
+const onKmsFailover = (use: 'pepper' | 'totp', error: string) => {
+  adminSignals.kmsFailover(use);
+  kmsFailoverLog.warn?.(use, error);
+};
+const adminPepper = adminPepperFromEnv(process.env, (endpoint, region) => kmsPepperClient({ region, ...(endpoint ? { endpoint } : {}) }), onKmsFailover);
 if (!adminPepper && !['local', 'ci'].includes(process.env.PEAKET_ENV ?? 'prod')) throw new Error('관리자 비밀번호 페퍼 설정(PEAKET_ADMIN_PEPPER_KMS_KEYS)이 없다');
 const adminLists = loadPolicyLists(process.env);
 const adminBreaches = hibpBreachListFromEnv(process.env, adminAuth);
 const adminHumanCheck = turnstileFromEnv(process.env);
-// 관리 토큰 갱신은 팬과 같은 갱신 지표(aud partner·ops)로 낸다: 재사용 탐지 SEV3 경보가 함께 본다(identity §10.1, BOT-130)
-const adminSignals = new PromAdminLoginSignals({ refreshed: (aud, result) => signals.refreshed(aud, result) });
+// 관리 토큰 갱신은 팬과 같은 갱신 지표(aud partner·ops)로 낸다: 재사용 탐지 SEV3 경보가 함께 본다(identity §10.1, BOT-130). adminSignals는 위(KMS 넘기기 앞)에서 만든다
 // 계정 주인 메일(해제 링크 등): 운영 발송 대행은 정본에 없다 [가정]. local·ci는 PEAKET_ADMIN_MAIL_DIR 파일 대역(BOT-121)
 const adminMailer = adminMailerFromEnv(process.env);
 const consoleOrigins = { partner: process.env.PEAKET_PARTNER_CONSOLE_ORIGIN || 'https://partner.peaket.example', ops: process.env.PEAKET_OPS_CONSOLE_ORIGIN || 'https://console.peaket.example' };
 // TOTP 시드 봉투 암호화(KMS 키, 로컬·CI는 키 값). local·ci에서 없으면 2단계가 503이고, 그 밖에서는 시작하지 않는다(identity §6 BOT-120)
-const adminTotpCipher = totpSeedCipherFromEnv(process.env, (endpoint) => new KMSClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}), maxAttempts: 2, requestHandler: { connectionTimeout: 1_000, requestTimeout: 2_000 } }));
+const adminTotpCipher = totpSeedCipherFromEnv(process.env, (endpoint, region) => new KMSClient({ region, ...(endpoint ? { endpoint } : {}), maxAttempts: 2, requestHandler: { connectionTimeout: 1_000, requestTimeout: 2_000, throwOnRequestTimeout: true } }), onKmsFailover);
 if (adminPepper && !adminTotpCipher && !['local', 'ci'].includes(process.env.PEAKET_ENV ?? 'prod')) throw new Error('TOTP 시드 키 설정(PEAKET_ADMIN_TOTP_KMS_KEY)이 없다');
 const keys = await TokenKeyRing.fromEnv(process.env);
 const signer = new JoseTokenSigner(keys, tokenIssuerFromEnv(process.env));
@@ -111,6 +117,7 @@ const adminAuthz: AdminAuthzPort = { getAdminAuthz: (q, o) => (adminAuthzHolder.
 const service = await createService({ name: SERVICE, ...(adminPepper ? { adminAuthz } : {}), module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
 adminSignals.register(service.metrics.registry);
+kmsFailoverLog.warn = (use, error) => service.logger.warn({ use, error }, '서울 KMS가 응답하지 않아 복제 키로 넘겼다(ADR-0102)');
 if (!adminPepper) service.logger.warn('관리자 비밀번호 페퍼 설정이 없어 관리 계정 로그인 경로를 싣지 않았다(local·ci만)');
 if (adminPepper) adminAuthzHolder.port = service.app.get(GetAdminAuthz);
 // 계정 주인 알림 발송 고리: 5초 [가정]마다 보내지 않은 알림을 보낸다(파드가 여럿이어도 행 잠금으로 한 번만, identity §6 BOT-121)

@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-131(wbs 3.5.1 ③): identity KMS 호출의 복제 키 넘기기(ADR-0102). 그다음 BOT-140·150·160(패스키 부분 빼고). BOT-122(패스키)는 WebAuthn 라이브러리 결정 대기(OPEN[20]), BOT-132(게이트웨이 경로)는 HOT-400 대기라 건너뛴다.
+- BOT-140(wbs 3.5.2): 침입차단·탐지, gw-ops 허용 IP·VPN, 위험 명령 재인증(앞선 단계가 develop에 있는지 먼저 본다). 그다음 BOT-150·160(패스키 부분 빼고). BOT-122(패스키)는 WebAuthn 라이브러리 결정 대기(OPEN[20]), BOT-132(게이트웨이 경로)는 HOT-400 대기라 건너뛴다.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
@@ -59,6 +59,7 @@
 - BOT-123: 알림 메일의 시각이 발송 시각이고 사건(멈춘 로그인) 시각이 아니다. auth-controls §3.4는 알림에 출발지를 싣는다고 하는데 identity §6은 해시뿐이라 싣지 않는다고 한다: 둘을 맞춘다(services/identity-svc/src/modules/admin/application/dispatch-admin-notices.ts, docs/security/auth-controls.md §3.4)
 - BOT-123: identity에는 비밀번호 바꾸기 말고 관리 경로가 없어, '다른 경로는 403 password-change-required'(AC-T4)는 공용 가드 시험으로만 본다. 관리 경로가 생기는 BOT-150에서 HTTP 시험 하나를 더한다(test/admin-login-http.test.ts)
 - BOT-130: 팬 토큰 갱신(`RefreshSession`)은 회전을 커밋한 뒤에 액세스 토큰을 서명한다. 서명이 실패하면 30초 뒤 같은 쿠키가 탈취로 보여 로그인이 끊긴다. 관리 갱신처럼 트랜잭션 안, 쓰기 전에 서명한다(services/identity-svc/src/modules/session/application/refresh-session.ts)
+- BOT-131: 연계정보·pid KMS 클라이언트도 `requestHandler`에 `throwOnRequestTimeout: true`가 없어, 연결만 받고 답하지 않는 KMS에서 요청 시간 한도(2초)에 끊지 않고 기다린다(services/identity-svc/src/modules/verification/adapters/kms-identity-hashers.ts:30)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
@@ -81,3 +82,4 @@
 - 2026-11-05 BOT-121 2단계 보호 잠금과 본인 해제 링크(R-304, AC-T5, I-T11 ①의 메일·②③⑤): BOT-121을 둘로 나눴다(비밀번호만 맞은 로그인·비밀번호 바꾸기는 BOT-123). 2단계 실패 수 5 [가정] 보호 잠금, `admin_unlock_link`(32바이트·30분·한 번·코드 3번, 새 링크는 옛 링크 무효, 마이그레이션 0019), 풀기·다시 받기 REST(1시간 3번, 없는 이메일도), 풀면 시간 잠금만(묶음 잠금은 남김, 푼 시각을 locked_until에), 알림 발송 고리(5초, FOR UPDATE SKIP LOCKED, 메일 포트: 로컬·CI 파일 대역, 운영 대행 미정).
 - 2026-11-05 BOT-123 비밀번호만 맞은 로그인 알림과 비밀번호 바꾸기(R-309, AC-T4·AC-T7 ④): 익숙한 출발지 `admin_known_source`(2단계 성공 때, 30일, 마이그레이션 0020), 로그인 단계 `known_source`, 비밀번호만 맞은 로그인 확인 고리(1분, 10분 지난 단계, 비밀번호 바꾸기 필요 켜기·알림), 비밀번호 바꾸기 필요 세션(scope `password:change`, 플랫폼 가드가 연 처리기 말고 403), 비밀번호 바꾸기 REST(잠김 먼저, 지금 비밀번호 실패는 로그인처럼 그 세션 묶음에 세고 같은 경보, 같은 비밀번호 거절, 임대 안에서 세션 다시 보기, 다른 세션 끝내기 PASSWORD_CHANGED, 제한 푼 새 쿠키), identity 관리 경로 역할 판정(같은 프로세스 포트와 gRPC `AdminAuthzService`), 가드의 관리 스코프 머리 닫기. BAS-040 ①이 넘긴 것(identity `not-found` 넷을 뜻별 이름으로, 탈퇴 본문 닫기, I-T50 기대)도 끝냈다. 새 맥락 리뷰 중간 6·낮음 7과 재검토 중간 1·낮음 4 가운데 낮음 셋만 정리 목록으로 넘겼다. BOT-121 게이트의 깜빡인 통합 시험은 동시 10개 시험의 'BUSY 정확히 9개' 기대였다(앞 시도가 임대를 풀면 늦은 시도가 차례로 처리된다): 기대를 '처리된 만큼, 잠금 전 5번까지만'으로 고쳤다.
 - 2026-11-05 BOT-130 관리 토큰 갱신과 로그아웃(R-311, I-T46 ①②③⑥): BOT-130을 셋으로 나눴다(KMS 복제 키 BOT-131, 게이트웨이 경로 BOT-132는 HOT-400 뒤). 갱신 REST 둘(그 콘솔의 리프레시 쿠키만, 팬과 같은 `decideRefresh`, 다른 콘솔 세션은 없는 것으로, 지운 계정이면 DELETE·역할이 바뀌면 ROLE_CHANGED로 끝냄, 쓰기 전에 서명, 유휴 만료만 늘림, password:change 다시 붙임), 발급 해시 기록 `admin_refresh_token_hash`(마이그레이션 0021, 첫 토큰 포함, 열린 세션 채움, 정비 `admin-refresh-hash-expired`), 로그아웃 REST 둘(LOGOUT 사건, 쿠키 둘 지우기), 팬과 같은 갱신 지표에 aud partner·ops. 새 맥락 리뷰 중간 1(서명이 커밋 뒤)·낮음 4와 재검토 중간 1(메모리 저장소 되돌리기 범위)·낮음 2를 고쳤고, 팬 갱신의 같은 서명 차례는 정리 목록에 넘겼다.
+- 2026-11-05 BOT-131 관리 KMS 호출의 복제 키 넘기기(R-313, ADR-0102): 페퍼(`GenerateMac`·`VerifyMac`)와 TOTP 시드(`GenerateDataKey`·`Decrypt`)를 서울이 응답하지 않으면(응답 없음·5xx·잠시 못 함·한도) 넘길 리전의 다중 리전 복제 키로 한 번, 거절은 넘기지 않음. `PEAKET_KMS_FAILOVER_REGION`(local·ci 밖 필수, 키는 mrk-, ARN은 리전 칸만 바꿈), `PEAKET_KMS_FAILOVER_ENDPOINT`(local·ci), 지표 `identity_kms_failover_total{use}`. moto 5.2.5는 다중 리전 대칭 키 복호를 못 해 TOTP 통합 시험은 보통 키로 넘김 길만 본다. 리뷰 중간 1·낮음 4, 재검토 높음 1(요청 시간 한도를 SDK가 끊지 않음)·중간 1·낮음 1을 고쳤고, 연계정보 KMS 클라이언트의 같은 설정은 정리 목록에 넘겼다.
