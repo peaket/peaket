@@ -8,3 +8,9 @@ export { HibpBreachList, hibpBreachListFromEnv } from './adapters/hibp-breach-li
 export { DrizzleAdminAccountStore } from './adapters/db/drizzle-admin-account-store.js';
 export { SetAdminPassword } from './application/set-admin-password.js';
 export { AdminPasswordError, PASSWORD_ADVICE, REJECTION_TEXT } from './application/admin-password-error.js';
+export { AdminModule, type AdminModuleOptions } from './admin.module.js';
+export { LoginPasswordStep } from './application/login-password-step.js';
+export { RecordAdminLoginSuccess } from './application/record-login-success.js';
+export { RedisLoginCounters } from './adapters/redis-login-counters.js';
+export { turnstileFromEnv } from './adapters/turnstile-human-check.js';
+export { PromAdminLoginSignals } from './adapters/prom-admin-login-signals.js';

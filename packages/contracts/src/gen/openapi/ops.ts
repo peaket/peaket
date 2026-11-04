@@ -17,7 +17,30 @@ import * as zod from 'zod';
  * FR-028, POL-020. 허용 IP는 관제 배포 웹 ACL과 gw-ops가 두 번 본다(servers의 ops-api 설명, ADR-0144 결정 2). 잠금 규칙은 파트너 로그인과 같다(docs/security/auth-controls.md §3)
  * @summary 운영자 로그인(이메일·비밀번호·다중 인증, 관제 배포의 허용 IP만)
  */
-export const PostV1OpsAuthSessionsResponse = zod.unknown()
+export const postV1OpsAuthSessionsBodyEmailMax = 254;
+
+export const postV1OpsAuthSessionsBodyPasswordMax = 1024;
+
+export const postV1OpsAuthSessionsBodyDeviceIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,128}$');
+export const postV1OpsAuthSessionsBodyHumanCheckTokenMax = 2048;
+
+
+
+export const PostV1OpsAuthSessionsBody = zod.object({
+  "email": zod.email().max(postV1OpsAuthSessionsBodyEmailMax),
+  "password": zod.string().min(1).max(postV1OpsAuthSessionsBodyPasswordMax).describe('원문. 서버가 NFC로 맞춘다. 길이 상한은 설정 password.max_length의 허용 상한이다'),
+  "deviceId": zod.string().regex(postV1OpsAuthSessionsBodyDeviceIdRegExp).optional().describe('브라우저 기기 식별값(브라우저 저장소의 값). 출발지 묶음(IP와 이것)을 셀 때 쓴다'),
+  "humanCheckToken": zod.string().min(1).max(postV1OpsAuthSessionsBodyHumanCheckTokenMax).optional().describe('Cloudflare Turnstile 토큰(300초 1회용). identity가 검증 API로 확인한다')
+}).strict().describe('관리 계정 로그인 1단계 본문(POST /v1/partner/auth/sessions·/v1/ops/auth/sessions). 2단계(인증 앱 코드) 본문은 BUILD_ORDER BOT-120이 더한다. 사람 확인 토큰은 직전 응답이 humanCheckRequired였거나 428을 받았을 때 싣는다(docs/security/auth-controls.md §2.3). 정본은 docs/features/identity.md §6 \'관리 계정 로그인 1단계와 실패 제한의 첫 구현\'(추천 적용 2026-11-05)')
+
+export const postV1OpsAuthSessionsResponseLoginStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+
+
+export const PostV1OpsAuthSessionsResponse = zod.object({
+  "next": zod.enum(['TOTP']),
+  "loginStep": zod.string().regex(postV1OpsAuthSessionsResponseLoginStepRegExp).describe('32바이트 난수의 채움 없는 base64url. 서버는 SHA-256만 둔다. 한 번 쓴다'),
+  "expiresInSeconds": zod.int().describe('loginStep 수명(300초 [가정])')
+}).describe('관리 계정 로그인 1단계 통과(비밀번호가 맞았다). 2단계에 loginStep을 그대로 보낸다(추천 적용 2026-11-05)')
 
 /**
  * FR-028, ADR-0171 결정 7. 관제 콘솔이 지정이 있어야 보이는 메뉴(부정 거래 조사 /investigations, 연구 리플레이)를 보이거나 숨기려고 부른다. 지정은 토큰에 싣지 않으므로 ops-svc가 identity-svc GetAdminDesignations로 읽어 준다(캐시 5초 [가정]). 화면 표시용일 뿐이고, 지정이 필요한 작업은 서버가 요청마다 다시 확인한다. cs_lead는 관리 계정 목록(GET /v1/ops/admin-accounts)을 부르지 못해 이 경로를 따로 둔다(추천 적용 2026-10-31)

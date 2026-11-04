@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-111(wbs 3.5.1 ①): 관리 계정 로그인 1단계와 실패 제한(계정·묶음·누계·출발지 계수, 시간·묶음·보호 잠금, 같은 응답, 로그인 때 유출 다시 보기). 그 뒤 BOT-120·121·130~160, 구간 1 끝 정리 목록 비우기.
+- BOT-120(wbs 3.5.1 ②): TOTP와 패스키(등록·단계 인증 확인·재인증 토큰 factors·분실 재등록, I-T53). BOT-111이 넘긴 것: 1단계 통과 토큰 `loginStep`(`admin_login_step`, 해시·5분·한 번)을 2단계 본문으로 받고, 통과하면 `RecordAdminLoginSuccess`(셈 0으로·묶음 지우기·`last_login_at`)를 부른다. 그 뒤 BOT-121·130~160, 구간 1 끝 정리 목록 비우기.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
@@ -48,7 +48,10 @@
 - BOT-043: 지금 계정이 흡수된 뒤(`?ended=MERGED`)에도 탈퇴 완료처럼 로그아웃 정리 루틴(docs/frontend.md §5.14.4, 탭·기기 저장소 지우기)을 돌리지 않는다. 정리 루틴을 붙이는 단계에서 둘 다 부른다(BOT-036 항목과 같은 빈틈)
 - BOT-110: 비밀번호 거절 때 거절 이유 종류와 계정 ID만 남기는 보안 이벤트(auth-controls §4.3 10)를 내는 곳이 없다. 비밀번호를 정하는 받는 층(초대 수락 BOT-150, 비밀번호 바꾸기 BOT-121)이 `AdminPasswordError` REJECTED를 받을 때 남긴다(services/identity-svc/src/modules/admin/application/set-admin-password.ts)
 - BOT-110: 기본 사본은 NFKC 뒤 소문자라 글자 하나가 둘로 늘어나는 것(İ, ㎏, ǆ)이 남은 글자 수를 부풀린다. `Peaket2026!!㎏㎏!!!!`가 받아진다. 남은 글자는 NFC 원문 기준 글자 수로 세는 방법을 정본 §4.3 4에 적고 고친다(services/identity-svc/src/modules/admin/domain/password-policy.ts `easyRest`)
-- BOT-110: 운영에 페퍼 키 설정이 없으면 `adminPepperFromEnv`가 null이고 그대로 시작한다. 로그인 경로를 잇는 BOT-111에서 local·ci 밖은 필수로 바꾼다(services/identity-svc/src/main.ts)
+- BOT-111: Turnstile 검증 호출에 서킷 브레이커(opossum, docs/architecture.md '2차 서비스 내부 차단')가 없다. `@peaket/platform` `createCircuitBreaker`를 쓰는 서비스가 아직 없어 BOT-042의 세 서비스 확인과 함께 붙인다(services/identity-svc/src/modules/admin/adapters/turnstile-human-check.ts)
+- BOT-111: `sourceAddressOf`가 IPv4 번역·호환 꼴(`::ffff:0:a.b.c.d`, `::a.b.c.d`, `64:ff9b::a.b.c.d`)을 IPv4로 바꾸지 않아 `::1`·`::`와 한 /64로 묶거나, NAT64 앞단이면 모든 IPv4 손님을 한 출발지로 센다. 영역 표시(`%eth0`)가 붙은 주소는 원문 그대로다. 게이트웨이가 넘기는 꼴(HOT-400)을 정한 뒤 맞춘다(services/identity-svc/src/modules/admin/application/login-password-step.ts)
+- BOT-111: 임대를 쥔 뒤 계정이 지워진 드문 경우 응답을 `remainingAttempts = 잠금 기준 - 1`로 고정해 그 이메일의 가짜 상태로 센 값과 다를 수 있다. 그때도 가짜 상태로 세어 답한다(services/identity-svc/src/modules/admin/application/login-password-step.ts `#failed`)
+- BOT-111: 없는 계정의 가짜 상태는 Redis에만 있어 장애 조치·30일 뒤 처음부터 다시 센다. 진짜 계정은 DB에 남아 그때를 노리면 가입 여부를 가를 수 있다(남는 위험으로 적음). 가짜 상태를 DB에 둘지(무작위 이메일로 표를 채우는 공격과 맞바꿈) 정한다(docs/features/identity.md §6)
 - BOT-110: AC-T7의 '로그·트레이스에 SHA-1과 그 앞 5자가 0건'은 오류 객체만 시험했다. 요청 경로가 생기는 단계(BOT-111 로그인 때 다시 보기, BOT-150)에서 요청 로그·스팬 속성까지 본다(test/admin-password.test.ts)
 
 ## 진행 로그
@@ -67,3 +70,4 @@
 - 2026-11-04 BOT-045 조사용 값 ①(R-292, I-T63·I-T64·I-T67): BOT-045를 둘로 나눴다(키 회전 이음은 BOT-046). 라벨 키 링(라벨마다 KMS `GenerateMac`, 5분마다 다시 받고 10분 수명, 로컬·CI는 라벨 키 값, 받지 못하면 칸을 비우고 `inv_ref_missing_total`), 기기 가명을 기기 라벨 키로, 연락처 가명 `account_contact_ref`(가입 이메일·본인확인 번호 E.164, 병합·탈퇴 때 지우기, 정비 `contact-ref-backfill`, 마이그레이션 0014), gRPC `ComputeContactRef`(초당 상한)·`BatchGetInvestigationRefs`(500개, 같은 본인확인 시도 1년), 모의 기관의 휴대폰 번호 칸.
 - 2026-11-05 BOT-046 조사용 가명 키 회전의 이음(R-294, I-T73): 라벨마다 옛 판 라벨 키와 이음 끝을 받아 이음 기간에 두 판으로 계산한다. 다시 로그인하면 옛 판 기기 행을 새 판으로 바꾸고 `device_ref_prev`에 대응을 두며, 정비 `contact-ref-rotate`가 EMAIL을 새 판으로(옛 값 `ref_prev`, 마이그레이션 0015), 다시 본인확인이 PHONE을 두 판으로 쓴다. `BatchGetInvestigationRefs`가 두 판 값을 함께 싣고, 정비 `inv-ref-bridge-close`가 이음 끝 + 7일 뒤 옛 판 값과 옛 판 기기 행을 지운다. 정본 secrets-and-keys ④(identity가 번호 원문을 갖는다)를 BOT-045 결정에 맞춰 고쳤다(PHONE은 다시 본인확인 때만).
 - 2026-11-05 BOT-110 관리 계정 비밀번호 저장과 정책(R-295, I-T14·AC-T6·AC-T7 ①②·AC-T10): BOT-110을 셋으로 나눴다(로그인 1단계·실패 제한 BOT-111, 해제 링크·2단계 실패·비밀번호만 맞은 로그인 BOT-121). identity `admin` 모듈과 `admin_account`(마이그레이션 0016), PBKDF2-HMAC-SHA256 600,000회 + KMS 페퍼 PHC(`GenerateMac`·`VerifyMac`), 정책 L1(꼴 규칙과 시험용 작은 목록, 출처 대기 OPEN[19])·L3(목록 파일과 배포가 더하는 파일)~L5(사본 셋, L5는 저장소 행에서)·L2(HIBP 범위 조회, `Add-Padding`, 2초, 빈 응답도 503), 설정 `PEAKET_AUTH_*` 시작 범위 검사(모르는 이름도 거절). 새 맥락 리뷰의 중간 넷(바꿈 사본의 날짜 숫자, 꼴 규칙 나눔, L5 출처, 원문 해시 시험)과 낮음 대부분을 재현 시험부터 고쳤다.
+- 2026-11-05 BOT-111 관리 계정 로그인 1단계와 실패 제한(R-298, I-T11 ①④⑥·AC-T1·AC-T2·AC-T3·AC-T7 ③④·AC-T9): identity REST `POST /v1/partner/auth/sessions`·`/v1/ops/auth/sessions` 1단계(openapi 본문·응답 꼴을 처음 적음, 계약 깨짐 예외 두 줄), 사람 확인(Turnstile 검증, hostname·action·같은 멱등 키로 한 번 더), 계정 값은 `admin_account` 행 잠금 트랜잭션·알림 행 `admin_security_notice`, 출발지 값은 Redis `id:alf:*`(대상·출발지·전체 해시 태그마다 Lua 한 번), 없는 계정은 가짜 상태로 같은 응답, 시간·묶음·보호 잠금, 경보 셋, 로그인 단계 `admin_login_step`(마이그레이션 0017), 로그인 때 유출 다시 보기·다시 저장, 지표 둘. local·ci 밖은 페퍼 필수.

@@ -15,6 +15,8 @@ export interface AdminAuthConfig {
   sourceAccountsPerHour: number;
   sourceCaptchaDurationMs: number;
   globalCaptchaDurationMs: number;
+  /** 전체 경보: 지난 5분 관리 계정 로그인 실패 수(§5 admin_login.global_alert의 앞 절. '7일 평균의 10배'는 관측 단계 경보 규칙) */
+  globalAlertFailures: number;
   passwordOnlyNoticeAfterMs: number;
   knownSourceWindowMs: number;
   unlockLinkTtlMs: number;
@@ -48,6 +50,8 @@ const SPECS: readonly Spec[] = [
   { key: 'admin_login.multi_source_ips_per_hour', field: 'multiSourceIpsPerHour', kind: 'int', def: 5, min: 2, max: 50 },
   { key: 'admin_login.source_accounts_per_hour', field: 'sourceAccountsPerHour', kind: 'int', def: 5, min: 2, max: 50 },
   { key: 'admin_login.source_captcha_duration', field: 'sourceCaptchaDurationMs', kind: 'duration', def: 1 * H, min: 15 * M, max: 24 * H },
+  // §5에 허용 범위가 없다(—). 1~100만은 꼴 검사뿐이다 [가정]
+  { key: 'admin_login.global_alert', field: 'globalAlertFailures', kind: 'int', def: 100, min: 1, max: 1_000_000 },
   { key: 'admin_login.global_captcha_duration', field: 'globalCaptchaDurationMs', kind: 'duration', def: 1 * H, min: 15 * M, max: 24 * H },
   { key: 'admin_login.password_only_notice_after', field: 'passwordOnlyNoticeAfterMs', kind: 'duration', def: 10 * M, min: 1 * M, max: 1 * H },
   { key: 'admin_login.known_source_window', field: 'knownSourceWindowMs', kind: 'duration', def: 30 * D, min: 1 * D, max: 90 * D },

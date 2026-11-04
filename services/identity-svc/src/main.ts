@@ -5,7 +5,7 @@
 import 'reflect-metadata';
 import { createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { adminAuthConfigFromEnv, adminPepperFromEnv, hibpBreachListFromEnv, kmsPepperClient, loadPolicyLists } from './modules/admin/index.js';
+import { adminAuthConfigFromEnv, adminPepperFromEnv, hibpBreachListFromEnv, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, turnstileFromEnv } from './modules/admin/index.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
   AddProvider,
@@ -60,11 +60,14 @@ const grpcPort = Number(process.env.PEAKET_GRPC_PORT ?? DEFAULT_GRPC_PORT);
 if (!(Number.isInteger(grpcPort) && grpcPort > 0 && grpcPort <= 65535)) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${process.env.PEAKET_GRPC_PORT}`);
 
 // 관리 계정 인증 통제 설정의 범위 검사와 페퍼 키 설정(docs/security/auth-controls.md §5 AC-T10, identity §6): 범위를 벗어나면 시작하지 않는다
-// 대조 목록 파일(L1·L3, 배포가 더한 L3 파일 포함)과 유출 목록 주소도 여기서 본다(BOT-111이 로그인 경로에 잇는다)
+// 대조 목록 파일(L1·L3, 배포가 더한 L3 파일 포함), 유출 목록 주소, 사람 확인 주소도 여기서 본다. local·ci 밖은 페퍼가 필수다(identity §6 BOT-111)
 const adminAuth = adminAuthConfigFromEnv(process.env);
-adminPepperFromEnv(process.env, (endpoint) => kmsPepperClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }));
-loadPolicyLists(process.env);
-hibpBreachListFromEnv(process.env, adminAuth);
+const adminPepper = adminPepperFromEnv(process.env, (endpoint) => kmsPepperClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }));
+if (!adminPepper && !['local', 'ci'].includes(process.env.PEAKET_ENV ?? 'prod')) throw new Error('관리자 비밀번호 페퍼 설정(PEAKET_ADMIN_PEPPER_KMS_KEYS)이 없다');
+const adminLists = loadPolicyLists(process.env);
+const adminBreaches = hibpBreachListFromEnv(process.env, adminAuth);
+const adminHumanCheck = turnstileFromEnv(process.env);
+const adminSignals = new PromAdminLoginSignals();
 const keys = await TokenKeyRing.fromEnv(process.env);
 const signer = new JoseTokenSigner(keys, tokenIssuerFromEnv(process.env));
 // 조사용 가명 라벨 키 링(identity §9.1 '조사용 값의 첫 구현'): 라벨마다 KMS GenerateMac(로컬·CI는 라벨 키 값), 10분 [가정] 수명. 시작은 기다리지 않는다
@@ -93,8 +96,10 @@ if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTI
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
 // 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
 const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile);
-const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification }) });
+const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, ...(cache ? { counters: new RedisLoginCounters(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
+adminSignals.register(service.metrics.registry);
+if (!adminPepper) service.logger.warn('관리자 비밀번호 페퍼 설정이 없어 관리 계정 로그인 경로를 싣지 않았다(local·ci만)');
 // 기록이 쓰는 연계정보 키 판을 설정이 모두 갖지 않으면 시작하지 않는다(같은 사람이 계정을 하나 더 만들지 못하게, identity §5 '키 판·만 14세…')
 if (process.env[VERIFICATION_PROVIDER_ENV]) await assertKeyVersions(service.app.get<DrizzleVerificationStore>(VERIFICATION_STORE), verification.hashers);
 for (const w of invRefs.warnings) service.logger.warn(w);

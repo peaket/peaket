@@ -62,6 +62,10 @@ export class Pbkdf2AdminPasswords implements AdminPasswords {
     return this.pepper.verify(p.version, Buffer.concat([CONTEXT, id, dk]), p.mac);
   }
 
+  async burn(raw: string): Promise<void> {
+    await pbkdf2Async(raw.normalize('NFC'), randomBytes(SALT_BYTES), this.#iterations, KEY_BYTES, 'sha256');
+  }
+
   needsRehash(phc: string): boolean {
     const p = parsePhc(phc);
     if (!p) return true;

@@ -17,7 +17,30 @@ import * as zod from 'zod';
  * FR-021, POL-020, ADR-0119(추천 적용 2026-10-28). 파트너 콘솔 화면이 partner-api로 바로 부르고 gw-partner가 identity의 관리 계정 로그인으로 넘긴다(관제 /v1/ops/auth/sessions와 같은 모양, Auth.js Credentials 없음). TOTP까지 맞으면 gw-partner 응답이 파트너 액세스 토큰 쿠키(__Secure-peaket_partner_at)와 리프레시 토큰 쿠키(__Secure-peaket_partner_rt)를 준다. 본문에 토큰 없음. JSON 본문이라 다른 출처면 사전 요청이 생기고 gw-partner가 Origin(파트너 콘솔 출처)을 확인한다
  * @summary 파트너 로그인 1단계(이메일·비밀번호) → 2단계 TOTP. 실패 제한·사람 확인
  */
-export const PostV1PartnerAuthSessionsResponse = zod.unknown()
+export const postV1PartnerAuthSessionsBodyEmailMax = 254;
+
+export const postV1PartnerAuthSessionsBodyPasswordMax = 1024;
+
+export const postV1PartnerAuthSessionsBodyDeviceIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,128}$');
+export const postV1PartnerAuthSessionsBodyHumanCheckTokenMax = 2048;
+
+
+
+export const PostV1PartnerAuthSessionsBody = zod.object({
+  "email": zod.email().max(postV1PartnerAuthSessionsBodyEmailMax),
+  "password": zod.string().min(1).max(postV1PartnerAuthSessionsBodyPasswordMax).describe('원문. 서버가 NFC로 맞춘다. 길이 상한은 설정 password.max_length의 허용 상한이다'),
+  "deviceId": zod.string().regex(postV1PartnerAuthSessionsBodyDeviceIdRegExp).optional().describe('브라우저 기기 식별값(브라우저 저장소의 값). 출발지 묶음(IP와 이것)을 셀 때 쓴다'),
+  "humanCheckToken": zod.string().min(1).max(postV1PartnerAuthSessionsBodyHumanCheckTokenMax).optional().describe('Cloudflare Turnstile 토큰(300초 1회용). identity가 검증 API로 확인한다')
+}).strict().describe('관리 계정 로그인 1단계 본문(POST /v1/partner/auth/sessions·/v1/ops/auth/sessions). 2단계(인증 앱 코드) 본문은 BUILD_ORDER BOT-120이 더한다. 사람 확인 토큰은 직전 응답이 humanCheckRequired였거나 428을 받았을 때 싣는다(docs/security/auth-controls.md §2.3). 정본은 docs/features/identity.md §6 \'관리 계정 로그인 1단계와 실패 제한의 첫 구현\'(추천 적용 2026-11-05)')
+
+export const postV1PartnerAuthSessionsResponseLoginStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+
+
+export const PostV1PartnerAuthSessionsResponse = zod.object({
+  "next": zod.enum(['TOTP']),
+  "loginStep": zod.string().regex(postV1PartnerAuthSessionsResponseLoginStepRegExp).describe('32바이트 난수의 채움 없는 base64url. 서버는 SHA-256만 둔다. 한 번 쓴다'),
+  "expiresInSeconds": zod.int().describe('loginStep 수명(300초 [가정])')
+}).describe('관리 계정 로그인 1단계 통과(비밀번호가 맞았다). 2단계에 loginStep을 그대로 보낸다(추천 적용 2026-11-05)')
 
 /**
  * FR-021, POL-020, 추천 적용 2026-10-29, ADR-0145 결정 2. 로그인 POST /v1/partner/auth/sessions와 짝이고, me는 로그인한 사람의 지금 세션이다(guidelines §10). 파트너 콘솔 화면이 partner-api로 바로 부르고, 로그인·갱신처럼 gw-partner 응답이 쿠키를 다룬다(ADR-0119). identity-svc가 그 세션을 끝내고 세션 종료 사건(asyncapi control.sessions-terminated, reason LOGOUT)을 낸다. 응답은 이 앱의 쿠키 둘(__Secure-peaket_partner_at, __Secure-peaket_partner_rt)만 같은 이름·Domain·Path에 Max-Age=0을 단 Set-Cookie로 지운다. Clear-Site-Data는 보내지 않는다. 그 값은 같은 등록 도메인의 다른 앱 로그인까지 끊기 때문이다(docs/features/identity.md §3, docs/frontend.md §5.14.4, FE-T34). 쿠키로 인증하는 쓰기라 gw-partner가 Origin(파트너 콘솔 출처)을 확인한다(guidelines §9)

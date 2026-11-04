@@ -1,7 +1,7 @@
 // 관리 계정 컨텍스트의 표(docs/data.md admin_account, identity §6, BUILD_ORDER BOT-110). 칸은 data.md 그대로이고, 쓰는 길은 단계마다 붙인다
 // (비밀번호 BOT-110, 로그인 실패 제한 BOT-111, TOTP BOT-120, 해제 링크 BOT-121, 초대·역할·삭제 BOT-150).
 import { sql } from 'drizzle-orm';
-import { bigint, boolean, check, customType, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
@@ -45,5 +45,45 @@ export const adminAccount = pgTable(
     check('admin_account_lock_kind_check', sql`${t.lockKind} in ('NONE', 'TIMED', 'PROTECT')`),
     check('admin_account_lock_reason_check', sql`${t.lockReason} is null or ${t.lockReason} in ('FAILED_ATTEMPTS', 'SECOND_FACTOR_FAILURES', 'PASSWORD_FAILURE_TOTAL')`),
     check('admin_account_partner_check', sql`(${t.role} in ('partner_admin', 'partner_member')) = (${t.promoterId} is not null)`),
+  ],
+);
+
+/** 1단계(비밀번호)를 통과한 로그인. 2단계(TOTP, BOT-120)가 loginStep 토큰의 SHA-256으로 찾는다(identity §6 '관리 계정 로그인 1단계와 실패 제한의 첫 구현') */
+export const adminLoginStep = pgTable(
+  'admin_login_step',
+  {
+    id: uuid('id').primaryKey(),
+    adminAccountId: uuid('admin_account_id')
+      .notNull()
+      .references(() => adminAccount.id, { onDelete: 'cascade' }),
+    tokenHash: bytea('token_hash').notNull(),
+    aud: text('aud').notNull(),
+    pairRef: text('pair_ref').notNull(),
+    createdAt: at('created_at').notNull(),
+    expiresAt: at('expires_at').notNull(),
+    usedAt: at('used_at'),
+  },
+  (t) => [
+    uniqueIndex('admin_login_step_token_key').on(t.tokenHash),
+    index('admin_login_step_account_idx').on(t.adminAccountId, t.createdAt),
+    check('admin_login_step_aud_check', sql`${t.aud} in ('partner', 'ops')`),
+  ],
+);
+
+/** 계정 주인에게 보낼 보안 알림(auth-controls §3.4). 셈과 같은 트랜잭션으로 적고, 메일 대행 단계가 읽어 보낸다 */
+export const adminSecurityNotice = pgTable(
+  'admin_security_notice',
+  {
+    id: uuid('id').primaryKey(),
+    adminAccountId: uuid('admin_account_id')
+      .notNull()
+      .references(() => adminAccount.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    createdAt: at('created_at').notNull(),
+    sentAt: at('sent_at'),
+  },
+  (t) => [
+    index('admin_security_notice_unsent_idx').on(t.createdAt).where(sql`${t.sentAt} is null`),
+    check('admin_security_notice_kind_check', sql`${t.kind} in ('TIMED_LOCK', 'PASSWORD_FAILURE_NOTICE', 'MULTI_SOURCE_ALERT', 'PROTECT_LOCK')`),
   ],
 );
