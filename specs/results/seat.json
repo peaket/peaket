@@ -1,13 +1,13 @@
 {
   "spec": "seat",
   "file": "specs/seat.qnt",
-  "specSha256": "f12ca58e8e77567eb2b0bd50cf2cf6ff46662e7aec9853232dfc8fad65cdb3a3",
+  "specSha256": "08101b7547f81ec957a3a44a571dcdfd3a12980bc031808592f0553f3d114ec1",
   "commit": {
-    "sha": "cffc124df6d16b100267fb12e34922bb2428be6b",
-    "dirty": false
+    "sha": "7dec270ad35ef1072a1dae1df8432f798a214d43",
+    "dirty": true
   },
-  "date": "2026-11-03T20:35:01+09:00",
-  "scope": "정본 범위(docs/verification.md §2.1): 좌석 3석, 사람 3명(홀드 시도 2번씩, 요청은 좌석 1~2석의 모든 목록), 1인 한도 2매, 좌석 Redis 장애 전환 1회(주 노드 승격 또는 클러스터 전체 유실). 전수 검사는 범위를 줄인다: 사람 2명(한 사람은 홀드 시도 2번이라 시도 3개), 요청 4가지([1]·[1,2]·[2,1]·[2,3]). 정본 범위 전체는 시뮬레이션으로 본다. 변형은 반례가 나오는 작은 범위로 줄였다. 복제 지연은 장애 전환마다 쓰기 하나",
+  "date": "2026-11-05T01:08:10+09:00",
+  "scope": "정본 범위(docs/verification.md §2.1): 좌석 3석, 사람 3명(홀드 시도 2번씩, 요청은 좌석 1~2석의 모든 목록), 1인 한도 2매, 좌석 Redis 장애 전환 1회(주 노드 승격 또는 클러스터 전체 유실). 전수 검사는 범위를 줄인다: 사람 2명(한 사람은 홀드 시도 2번이라 시도 3개), 요청 4가지([1]·[1,2]·[2,1]·[2,3]). 정본 범위 전체는 시뮬레이션으로 본다. 진행성은 좌석 2석, 사람 2명(시도 1번씩), 겹치는 요청 2가지([1]·[1,2]), 장애 전환 1회, 공정성 가정에서 TLC로 본다. 변형은 반례가 나오는 작은 범위로 줄였다. 복제 지연은 장애 전환마다 쓰기 하나",
   "adrs": [
     "0014",
     "0057",
@@ -38,7 +38,7 @@
       "distinctStates": 26782397,
       "depth": 30,
       "fingerprintCollision": "4.6E-4",
-      "seconds": 728.05
+      "seconds": 744.701
     },
     {
       "main": "seat_proposed_full",
@@ -60,7 +60,22 @@
       "distinctStates": null,
       "depth": null,
       "fingerprintCollision": null,
-      "seconds": 34.741
+      "seconds": 37.097
+    },
+    {
+      "main": "seat_live",
+      "expect": "hold",
+      "temporal": "fairLiveness",
+      "why": "진행성(BUILD_ORDER PRF-150 ①, 좌석 2석·사람 2명 시도 1번씩·겹치는 요청 [1]·[1,2]·장애 전환 1회, 추천안): 공정성 가정(시간의 흐름·만료 작업·묶기·판매 예약·결제 결과·실패 해제·원장 적재·복제·다시 만들기는 결국 일어남. 홀드 요청·결제 접수·장애에는 두지 않음) 아래에서 좌석 Redis의 홀드는 판매나 풀림(만료·실패 해제, 장애로 잃음)으로 끝나고, 결제를 접수한 시도는 판매나 과금 없는 실패로 끝나는지(묶기·판매 예약의 기다림·판 번호가 바뀐 뒤 묶기부터 다시에서 멈추지 않음)",
+      "invariants": [],
+      "method": "tlc",
+      "result": "hold",
+      "ok": true,
+      "statesGenerated": 253856,
+      "distinctStates": 50820,
+      "depth": 21,
+      "fingerprintCollision": "5.6E-10",
+      "seconds": 16.756
     },
     {
       "main": "seat_canon",
@@ -73,11 +88,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 21810,
-      "distinctStates": 4552,
+      "statesGenerated": 13244,
+      "distinctStates": 2941,
       "depth": 8,
       "fingerprintCollision": null,
-      "seconds": 9.948,
+      "seconds": 10.239,
       "tlcTrace": "specs/results/seat/seat_canon.tlc.txt",
       "counterexample": "specs/results/seat/seat_canon.itf.json"
     },
@@ -92,11 +107,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 1595,
-      "distinctStates": 424,
+      "statesGenerated": 1474,
+      "distinctStates": 399,
       "depth": 6,
       "fingerprintCollision": null,
-      "seconds": 9.474,
+      "seconds": 11.009,
       "tlcTrace": "specs/results/seat/seat_canon_fencing.tlc.txt",
       "counterexample": "specs/results/seat/seat_canon_fencing.itf.json"
     },
@@ -111,11 +126,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 2733,
-      "distinctStates": 1269,
+      "statesGenerated": 2728,
+      "distinctStates": 1268,
       "depth": 13,
       "fingerprintCollision": null,
-      "seconds": 10.676,
+      "seconds": 11.986,
       "tlcTrace": "specs/results/seat/seat_no_unique.tlc.txt",
       "counterexample": "specs/results/seat/seat_no_unique.itf.json"
     },
@@ -130,11 +145,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 17032,
-      "distinctStates": 4273,
+      "statesGenerated": 18093,
+      "distinctStates": 4507,
       "depth": 14,
       "fingerprintCollision": null,
-      "seconds": 9.611,
+      "seconds": 10.8,
       "tlcTrace": "specs/results/seat/seat_no_db_quota.tlc.txt",
       "counterexample": "specs/results/seat/seat_no_db_quota.itf.json"
     },
@@ -149,11 +164,11 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 15260,
-      "distinctStates": 3862,
+      "statesGenerated": 19544,
+      "distinctStates": 4842,
       "depth": 13,
       "fingerprintCollision": null,
-      "seconds": 9.65,
+      "seconds": 10.635,
       "tlcTrace": "specs/results/seat/seat_unsorted.tlc.txt",
       "counterexample": "specs/results/seat/seat_unsorted.itf.json"
     },
@@ -168,13 +183,29 @@
       "method": "tlc",
       "result": "violate",
       "ok": true,
-      "statesGenerated": 6588,
-      "distinctStates": 3043,
+      "statesGenerated": 6618,
+      "distinctStates": 3119,
       "depth": 9,
       "fingerprintCollision": null,
-      "seconds": 10.496,
+      "seconds": 10.305,
       "tlcTrace": "specs/results/seat/seat_no_ready_check.tlc.txt",
       "counterexample": "specs/results/seat/seat_no_ready_check.itf.json"
+    },
+    {
+      "main": "seat_live_no_fail_release",
+      "expect": "violate",
+      "temporal": "fairLiveness",
+      "why": "V-T1(진행성): 결제가 실패한 시도의 좌석 해제(releaseFailed)를 끄면, 묶인 좌석은 만료 인덱스에 없어 판매 예약 뒤 승인이 거절된 시도의 좌석이 끝내 풀리지 않는다(진행성 검사가 묶기 뒤의 해제 경로까지 본다는 것을 보인다)",
+      "invariants": [],
+      "method": "tlc",
+      "result": "violate",
+      "ok": true,
+      "statesGenerated": 121806,
+      "distinctStates": 26818,
+      "depth": 14,
+      "fingerprintCollision": null,
+      "seconds": 13.203,
+      "tlcTrace": "specs/results/seat/seat_live_no_fail_release.tlc.txt"
     }
   ]
 }

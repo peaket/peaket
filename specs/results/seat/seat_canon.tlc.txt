@@ -39,7 +39,7 @@ State 1: <Initial predicate>
          [hid |-> 0, pinned |-> FALSE] >>,
   quota |-> <<0, 0>> ]
 
-State 2: <seat_canon_seat_hold(11,<<1>>) line 409, col 3 to line 447, col 50 of module seat_canon>
+State 2: <seat_canon_seat_hold(11,<<1>>) line 414, col 3 to line 452, col 50 of module seat_canon>
 /\ seat_canon_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 1,
@@ -78,7 +78,7 @@ State 2: <seat_canon_seat_hold(11,<<1>>) line 409, col 3 to line 447, col 50 of 
          [hid |-> 0, pinned |-> FALSE] >>,
   quota |-> <<0, 0>> ]
 
-State 3: <seat_canon_seat_accept(11) line 553, col 3 to line 570, col 54 of module seat_canon>
+State 3: <seat_canon_seat_ttlPasses(11) line 473, col 3 to line 494, col 54 of module seat_canon>
 /\ seat_canon_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 1,
@@ -94,48 +94,9 @@ State 3: <seat_canon_seat_accept(11) line 553, col 3 to line 570, col 54 of modu
   used |-> <<0, 0>>,
   ledger |-> {} ]
 /\ seat_canon_seat_atts = ( 11 :>
-      [ gen |-> 1,
-        seats |-> <<1>>,
-        phase |-> "ACCEPTED",
-        late |-> FALSE,
-        ins |-> 0 ] @@
-  12 :>
       [ gen |-> 0,
-        seats |-> <<>>,
-        phase |-> "IDLE",
-        late |-> FALSE,
-        ins |-> 0 ] @@
-  21 :>
-      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
-/\ seat_canon_seat_ghost = [stale |-> 0, maxTok |-> 1, tokBroken |-> FALSE, newest |-> <<11, 0, 0>>]
-/\ seat_canon_seat_redRep = [ ready |-> TRUE,
-  gen |-> 1,
-  counter |-> 0,
-  seats |->
-      << [hid |-> 0, pinned |-> FALSE],
-         [hid |-> 0, pinned |-> FALSE],
-         [hid |-> 0, pinned |-> FALSE] >>,
-  quota |-> <<0, 0>> ]
-
-State 4: <seat_canon_seat_ttlPasses(11) line 468, col 3 to line 489, col 54 of module seat_canon>
-/\ seat_canon_seat_red = [ ready |-> TRUE,
-  gen |-> 1,
-  counter |-> 1,
-  seats |->
-      << [hid |-> 11, pinned |-> FALSE],
-         [hid |-> 0, pinned |-> FALSE],
-         [hid |-> 0, pinned |-> FALSE] >>,
-  quota |-> <<1, 0>> ]
-/\ seat_canon_seat_env = [partials |-> 0, fulls |-> 0]
-/\ seat_canon_seat_db = [ gen |-> 1,
-  sale |-> <<{}, {}, {}>>,
-  unc |-> <<0, 0, 0>>,
-  used |-> <<0, 0>>,
-  ledger |-> {} ]
-/\ seat_canon_seat_atts = ( 11 :>
-      [ gen |-> 1,
         seats |-> <<1>>,
-        phase |-> "ACCEPTED",
+        phase |-> "HELD",
         late |-> TRUE,
         ins |-> 0 ] @@
   12 :>
@@ -156,7 +117,46 @@ State 4: <seat_canon_seat_ttlPasses(11) line 468, col 3 to line 489, col 54 of m
          [hid |-> 0, pinned |-> FALSE] >>,
   quota |-> <<0, 0>> ]
 
-State 5: <seat_canon_seat_expire(11) line 512, col 3 to line 531, col 28 of module seat_canon>
+State 4: <seat_canon_seat_expire(11) line 517, col 3 to line 536, col 28 of module seat_canon>
+/\ seat_canon_seat_red = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 1,
+  seats |->
+      << [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<0, 0>> ]
+/\ seat_canon_seat_env = [partials |-> 0, fulls |-> 0]
+/\ seat_canon_seat_db = [ gen |-> 1,
+  sale |-> <<{}, {}, {}>>,
+  unc |-> <<0, 0, 0>>,
+  used |-> <<0, 0>>,
+  ledger |-> {} ]
+/\ seat_canon_seat_atts = ( 11 :>
+      [ gen |-> 0,
+        seats |-> <<1>>,
+        phase |-> "HELD",
+        late |-> TRUE,
+        ins |-> 0 ] @@
+  12 :>
+      [ gen |-> 0,
+        seats |-> <<>>,
+        phase |-> "IDLE",
+        late |-> FALSE,
+        ins |-> 0 ] @@
+  21 :>
+      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
+/\ seat_canon_seat_ghost = [stale |-> 0, maxTok |-> 1, tokBroken |-> FALSE, newest |-> <<0, 0, 0>>]
+/\ seat_canon_seat_redRep = [ ready |-> TRUE,
+  gen |-> 1,
+  counter |-> 1,
+  seats |->
+      << [hid |-> 11, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE],
+         [hid |-> 0, pinned |-> FALSE] >>,
+  quota |-> <<1, 0>> ]
+
+State 5: <seat_canon_seat_accept(11) line 558, col 3 to line 575, col 54 of module seat_canon>
 /\ seat_canon_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 1,
@@ -195,7 +195,7 @@ State 5: <seat_canon_seat_expire(11) line 512, col 3 to line 531, col 28 of modu
          [hid |-> 0, pinned |-> FALSE] >>,
   quota |-> <<1, 0>> ]
 
-State 6: <seat_canon_seat_hold(12,<<1>>) line 409, col 3 to line 447, col 50 of module seat_canon>
+State 6: <seat_canon_seat_hold(12,<<1>>) line 414, col 3 to line 452, col 50 of module seat_canon>
 /\ seat_canon_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 2,
@@ -234,7 +234,7 @@ State 6: <seat_canon_seat_hold(12,<<1>>) line 409, col 3 to line 447, col 50 of 
          [hid |-> 0, pinned |-> FALSE] >>,
   quota |-> <<0, 0>> ]
 
-State 7: <seat_canon_seat_accept(12) line 553, col 3 to line 570, col 54 of module seat_canon>
+State 7: <seat_canon_seat_accept(12) line 558, col 3 to line 575, col 54 of module seat_canon>
 /\ seat_canon_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 2,
@@ -273,7 +273,7 @@ State 7: <seat_canon_seat_accept(12) line 553, col 3 to line 570, col 54 of modu
          [hid |-> 0, pinned |-> FALSE] >>,
   quota |-> <<0, 0>> ]
 
-State 8: <seat_canon_seat_saleStep(11) line 1009, col 3 to line 1110, col 50 of module seat_canon>
+State 8: <seat_canon_seat_saleStep(11) line 1015, col 3 to line 1116, col 50 of module seat_canon>
 /\ seat_canon_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 2,

@@ -159,7 +159,7 @@
         "0057",
         "0121"
       ],
-      "scope": "정본 범위(docs/verification.md §2.1): 좌석 3석, 사람 3명(홀드 시도 2번씩, 요청은 좌석 1~2석의 모든 목록), 1인 한도 2매, 좌석 Redis 장애 전환 1회(주 노드 승격 또는 클러스터 전체 유실). 전수 검사는 범위를 줄인다: 사람 2명(한 사람은 홀드 시도 2번이라 시도 3개), 요청 4가지([1]·[1,2]·[2,1]·[2,3]). 정본 범위 전체는 시뮬레이션으로 본다. 변형은 반례가 나오는 작은 범위로 줄였다. 복제 지연은 장애 전환마다 쓰기 하나",
+      "scope": "정본 범위(docs/verification.md §2.1): 좌석 3석, 사람 3명(홀드 시도 2번씩, 요청은 좌석 1~2석의 모든 목록), 1인 한도 2매, 좌석 Redis 장애 전환 1회(주 노드 승격 또는 클러스터 전체 유실). 전수 검사는 범위를 줄인다: 사람 2명(한 사람은 홀드 시도 2번이라 시도 3개), 요청 4가지([1]·[1,2]·[2,1]·[2,3]). 정본 범위 전체는 시뮬레이션으로 본다. 진행성은 좌석 2석, 사람 2명(시도 1번씩), 겹치는 요청 2가지([1]·[1,2]), 장애 전환 1회, 공정성 가정에서 TLC로 본다. 변형은 반례가 나오는 작은 범위로 줄였다. 복제 지연은 장애 전환마다 쓰기 하나",
       "invariants": [
         "inv_noOversell",
         "inv_quotaNotExceeded",
@@ -167,6 +167,24 @@
         "inv_fencingTokensIncrease",
         "inv_noDeadlock"
       ],
+      "temporal": [
+        "fairLiveness"
+      ],
+      "mbt": {
+        "$comment": "모델 기반 시험(wbs 2.5.5, docs/verification.md §2.4, V-T40, BUILD_ORDER PRF-150 ①): actions의 SPEC_ACTIONS가 명세 step의 동작 이름과 같아야 하고, traces의 동작 기록은 modules마다 traces개를 지켜짐 시뮬레이션으로 낸다(spec-check.mjs traces). 하네스·명령·재생은 PRF-151",
+        "actions": "services/purchase-svc/test-int/seat-model/actions.ts",
+        "traces": "services/purchase-svc/test-int/seat-model/traces",
+        "modules": [
+          {
+            "main": "seat_proposed",
+            "traces": 8
+          },
+          {
+            "main": "seat_proposed_full",
+            "traces": 4
+          }
+        ]
+      },
       "checks": [
         {
           "main": "seat_proposed",
@@ -190,6 +208,12 @@
             "inv_staleSalesBounded",
             "inv_noDeadlock"
           ]
+        },
+        {
+          "main": "seat_live",
+          "expect": "hold",
+          "temporal": "fairLiveness",
+          "why": "진행성(BUILD_ORDER PRF-150 ①, 좌석 2석·사람 2명 시도 1번씩·겹치는 요청 [1]·[1,2]·장애 전환 1회, 추천안): 공정성 가정(시간의 흐름·만료 작업·묶기·판매 예약·결제 결과·실패 해제·원장 적재·복제·다시 만들기는 결국 일어남. 홀드 요청·결제 접수·장애에는 두지 않음) 아래에서 좌석 Redis의 홀드는 판매나 풀림(만료·실패 해제, 장애로 잃음)으로 끝나고, 결제를 접수한 시도는 판매나 과금 없는 실패로 끝나는지(묶기·판매 예약의 기다림·판 번호가 바뀐 뒤 묶기부터 다시에서 멈추지 않음)"
         },
         {
           "main": "seat_canon",
@@ -227,6 +251,12 @@
           "invariant": "inv_staleSalesBounded",
           "why": "검사가 살아 있는지: 세대 키 확인을 빼면 클러스터 전체 유실 뒤 다시 만들기 전에 준 홀드가 장애 전에 결제가 묶은 좌석과 겹친다(ADR-0121 결정 4). 한 번뿐인 장애 전환이 앞쪽 걸음에서 쓰이기 쉬워 반례가 드물어(2만 회 남짓에 하나) 시뮬레이션을 10만 회 돈다",
           "samples": 100000
+        },
+        {
+          "main": "seat_live_no_fail_release",
+          "expect": "violate",
+          "temporal": "fairLiveness",
+          "why": "V-T1(진행성): 결제가 실패한 시도의 좌석 해제(releaseFailed)를 끄면, 묶인 좌석은 만료 인덱스에 없어 판매 예약 뒤 승인이 거절된 시도의 좌석이 끝내 풀리지 않는다(진행성 검사가 묶기 뒤의 해제 경로까지 본다는 것을 보인다)"
         }
       ]
     },

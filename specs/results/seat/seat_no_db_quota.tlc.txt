@@ -33,7 +33,7 @@ State 1: <Initial predicate>
   12 :>
       [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
 
-State 2: <seat_no_db_quota_seat_hold(11,<<1>>) line 434, col 3 to line 476, col 62 of module seat_no_db_quota>
+State 2: <seat_no_db_quota_seat_hold(11,<<1>>) line 439, col 3 to line 481, col 62 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
@@ -66,7 +66,7 @@ State 2: <seat_no_db_quota_seat_hold(11,<<1>>) line 434, col 3 to line 476, col 
   12 :>
       [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
 
-State 3: <seat_no_db_quota_seat_ttlPasses(11) line 498, col 3 to line 521, col 66 of module seat_no_db_quota>
+State 3: <seat_no_db_quota_seat_ttlPasses(11) line 503, col 3 to line 526, col 66 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
@@ -99,7 +99,7 @@ State 3: <seat_no_db_quota_seat_ttlPasses(11) line 498, col 3 to line 521, col 6
   12 :>
       [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
 
-State 4: <seat_no_db_quota_seat_expire(11) line 547, col 3 to line 566, col 34 of module seat_no_db_quota>
+State 4: <seat_no_db_quota_seat_expire(11) line 552, col 3 to line 571, col 34 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
@@ -132,7 +132,7 @@ State 4: <seat_no_db_quota_seat_expire(11) line 547, col 3 to line 566, col 34 o
   12 :>
       [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
 
-State 5: <seat_no_db_quota_seat_accept(11) line 592, col 3 to line 610, col 66 of module seat_no_db_quota>
+State 5: <seat_no_db_quota_seat_accept(11) line 597, col 3 to line 615, col 66 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
@@ -165,7 +165,7 @@ State 5: <seat_no_db_quota_seat_accept(11) line 592, col 3 to line 610, col 66 o
   12 :>
       [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
 
-State 6: <seat_no_db_quota_seat_pin(11) line 671, col 3 to line 717, col 62 of module seat_no_db_quota>
+State 6: <seat_no_db_quota_seat_pin(11) line 676, col 3 to line 722, col 62 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
@@ -198,7 +198,7 @@ State 6: <seat_no_db_quota_seat_pin(11) line 671, col 3 to line 717, col 62 of m
   12 :>
       [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
 
-State 7: <seat_no_db_quota_seat_saleStep(11) line 1098, col 3 to line 1204, col 62 of module seat_no_db_quota>
+State 7: <seat_no_db_quota_seat_saleStep(11) line 1104, col 3 to line 1210, col 62 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{11}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
@@ -231,7 +231,7 @@ State 7: <seat_no_db_quota_seat_saleStep(11) line 1098, col 3 to line 1204, col 
   12 :>
       [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
 
-State 8: <seat_no_db_quota_seat_promote line 354, col 3 to line 368, col 66 of module seat_no_db_quota>
+State 8: <seat_no_db_quota_seat_promote line 359, col 3 to line 373, col 66 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{11}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
@@ -264,7 +264,7 @@ State 8: <seat_no_db_quota_seat_promote line 354, col 3 to line 368, col 66 of m
   12 :>
       [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
 
-State 9: <seat_no_db_quota_seat_hold(12,<<2, 3>>) line 434, col 3 to line 476, col 62 of module seat_no_db_quota>
+State 9: <seat_no_db_quota_seat_hold(12,<<2, 3>>) line 439, col 3 to line 481, col 62 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{11}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
@@ -301,7 +301,7 @@ State 9: <seat_no_db_quota_seat_hold(12,<<2, 3>>) line 434, col 3 to line 476, c
         late |-> FALSE,
         ins |-> 0 ] )
 
-State 10: <seat_no_db_quota_seat_accept(12) line 592, col 3 to line 610, col 66 of module seat_no_db_quota>
+State 10: <seat_no_db_quota_seat_accept(12) line 597, col 3 to line 615, col 66 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{11}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
@@ -338,7 +338,7 @@ State 10: <seat_no_db_quota_seat_accept(12) line 592, col 3 to line 610, col 66 
         late |-> FALSE,
         ins |-> 0 ] )
 
-State 11: <seat_no_db_quota_seat_pin(12) line 671, col 3 to line 717, col 62 of module seat_no_db_quota>
+State 11: <seat_no_db_quota_seat_pin(12) line 676, col 3 to line 722, col 62 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{11}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
@@ -375,7 +375,7 @@ State 11: <seat_no_db_quota_seat_pin(12) line 671, col 3 to line 717, col 62 of 
         late |-> FALSE,
         ins |-> 0 ] )
 
-State 12: <seat_no_db_quota_seat_saleStep(12) line 1098, col 3 to line 1204, col 62 of module seat_no_db_quota>
+State 12: <seat_no_db_quota_seat_saleStep(12) line 1104, col 3 to line 1210, col 62 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{11}, {}, {}>>,
   unc |-> <<0, 12, 0>>,
@@ -412,7 +412,7 @@ State 12: <seat_no_db_quota_seat_saleStep(12) line 1098, col 3 to line 1204, col
         late |-> FALSE,
         ins |-> 1 ] )
 
-State 13: <seat_no_db_quota_seat_saleStep(12) line 1098, col 3 to line 1204, col 62 of module seat_no_db_quota>
+State 13: <seat_no_db_quota_seat_saleStep(12) line 1104, col 3 to line 1210, col 62 of module seat_no_db_quota>
 /\ seat_no_db_quota_seat_db = [ gen |-> 1,
   sale |-> <<{11}, {12}, {12}>>,
   unc |-> <<0, 0, 0>>,

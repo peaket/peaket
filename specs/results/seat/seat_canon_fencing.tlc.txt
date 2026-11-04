@@ -39,7 +39,7 @@ State 1: <Initial predicate>
   21 :>
       [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
 
-State 2: <seat_canon_fencing_seat_hold(11,<<1>>) line 456, col 3 to line 500, col 66 of module seat_canon_fencing>
+State 2: <seat_canon_fencing_seat_hold(11,<<1>>) line 461, col 3 to line 505, col 66 of module seat_canon_fencing>
 /\ seat_canon_fencing_seat_db = [ gen |-> 1,
   sale |-> <<{}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
@@ -78,51 +78,12 @@ State 2: <seat_canon_fencing_seat_hold(11,<<1>>) line 456, col 3 to line 500, co
   21 :>
       [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
 
-State 3: <seat_canon_fencing_seat_relay(11) line 903, col 3 to line 922, col 70 of module seat_canon_fencing>
+State 3: <seat_canon_fencing_seat_promote line 361, col 3 to line 375, col 70 of module seat_canon_fencing>
 /\ seat_canon_fencing_seat_db = [ gen |-> 1,
   sale |-> <<{}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
   used |-> <<0, 0>>,
-  ledger |-> {11} ]
-/\ seat_canon_fencing_seat_redRep = [ ready |-> TRUE,
-  gen |-> 1,
-  counter |-> 0,
-  seats |->
-      << [hid |-> 0, pinned |-> FALSE],
-         [hid |-> 0, pinned |-> FALSE],
-         [hid |-> 0, pinned |-> FALSE] >>,
-  quota |-> <<0, 0>> ]
-/\ seat_canon_fencing_seat_red = [ ready |-> TRUE,
-  gen |-> 1,
-  counter |-> 1,
-  seats |->
-      << [hid |-> 11, pinned |-> FALSE],
-         [hid |-> 0, pinned |-> FALSE],
-         [hid |-> 0, pinned |-> FALSE] >>,
-  quota |-> <<1, 0>> ]
-/\ seat_canon_fencing_seat_ghost = [stale |-> 0, maxTok |-> 1, tokBroken |-> FALSE, newest |-> <<11, 0, 0>>]
-/\ seat_canon_fencing_seat_env = [partials |-> 0, fulls |-> 0]
-/\ seat_canon_fencing_seat_atts = ( 11 :>
-      [ gen |-> 0,
-        seats |-> <<1>>,
-        phase |-> "HELD",
-        late |-> FALSE,
-        ins |-> 0 ] @@
-  12 :>
-      [ gen |-> 0,
-        seats |-> <<>>,
-        phase |-> "IDLE",
-        late |-> FALSE,
-        ins |-> 0 ] @@
-  21 :>
-      [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
-
-State 4: <seat_canon_fencing_seat_promote line 356, col 3 to line 370, col 70 of module seat_canon_fencing>
-/\ seat_canon_fencing_seat_db = [ gen |-> 1,
-  sale |-> <<{}, {}, {}>>,
-  unc |-> <<0, 0, 0>>,
-  used |-> <<0, 0>>,
-  ledger |-> {11} ]
+  ledger |-> {} ]
 /\ seat_canon_fencing_seat_redRep = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 0,
@@ -156,12 +117,12 @@ State 4: <seat_canon_fencing_seat_promote line 356, col 3 to line 370, col 70 of
   21 :>
       [gen |-> 0, seats |-> <<>>, phase |-> "IDLE", late |-> FALSE, ins |-> 0] )
 
-State 5: <seat_canon_fencing_seat_hold(12,<<1>>) line 456, col 3 to line 500, col 66 of module seat_canon_fencing>
+State 4: <seat_canon_fencing_seat_hold(12,<<1>>) line 461, col 3 to line 505, col 66 of module seat_canon_fencing>
 /\ seat_canon_fencing_seat_db = [ gen |-> 1,
   sale |-> <<{}, {}, {}>>,
   unc |-> <<0, 0, 0>>,
   used |-> <<0, 0>>,
-  ledger |-> {11} ]
+  ledger |-> {} ]
 /\ seat_canon_fencing_seat_redRep = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 0,
