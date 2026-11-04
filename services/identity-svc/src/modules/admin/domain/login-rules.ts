@@ -4,7 +4,7 @@ import type { AdminAuthConfig } from './auth-config.js';
 
 export type LockKind = 'NONE' | 'TIMED' | 'PROTECT';
 export type LockReason = 'FAILED_ATTEMPTS' | 'SECOND_FACTOR_FAILURES' | 'PASSWORD_FAILURE_TOTAL';
-export type NoticeKind = 'TIMED_LOCK' | 'PASSWORD_FAILURE_NOTICE' | 'MULTI_SOURCE_ALERT' | 'PROTECT_LOCK' | 'SESSION_LIMIT' | 'UNLOCK_LINK' | 'UNLOCKED' | 'PASSWORD_ONLY_LOGIN';
+export type NoticeKind = 'TIMED_LOCK' | 'PASSWORD_FAILURE_NOTICE' | 'MULTI_SOURCE_ALERT' | 'PROTECT_LOCK' | 'SESSION_LIMIT' | 'UNLOCK_LINK' | 'UNLOCKED' | 'PASSWORD_ONLY_LOGIN' | 'INVITATION';
 
 export interface AccountLoginState {
   failedAttempts: number;

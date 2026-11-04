@@ -155,6 +155,13 @@
       "when": 1793823849535,
       "tag": "0021_admin_token_refresh",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793828122893,
+      "tag": "0022_admin_account_request",
+      "breakpoints": true
     }
   ]
 }

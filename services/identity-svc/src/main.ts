@@ -6,7 +6,7 @@ import 'reflect-metadata';
 import { type AdminAuthzPort, createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { KMSClient } from '@aws-sdk/client-kms';
-import { adminAuthConfigFromEnv, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, totpSeedCipherFromEnv, turnstileFromEnv } from './modules/admin/index.js';
+import { adminAccountHandlers, adminAuthConfigFromEnv, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, totpSeedCipherFromEnv, turnstileFromEnv } from './modules/admin/index.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
   AddProvider,
@@ -208,7 +208,11 @@ const grpc = await startGrpcServer({
     },
     // 관리 경로의 역할 판정(관리 경로를 처리하는 서비스의 가드, ADR-0172, BOT-123)
     ...(adminPepper
-      ? [{ definition: identityPackage().AdminAuthzService.service, handlers: adminAuthzHandlers({ authz: service.app.get(GetAdminAuthz) }, (method, err) => service.logger.error({ err, method }, 'AdminAuthzService 처리 실패')) }]
+      ? [
+          { definition: identityPackage().AdminAuthzService.service, handlers: adminAuthzHandlers({ authz: service.app.get(GetAdminAuthz) }, (method, err) => service.logger.error({ err, method }, 'AdminAuthzService 처리 실패')) },
+          // 관리 계정 관리(ops-svc만, BOT-150). 지정은 BOT-151
+          { definition: identityPackage().AdminAccountService.service, handlers: adminAccountHandlers({ manage: service.app.get(ManageAdminAccounts) }, (method, err) => service.logger.error({ err, method }, 'AdminAccountService 처리 실패')) },
+        ]
       : []),
     // 이용 제한 중 탈퇴의 대조값 보관(ops-svc만, identity §8 '대조값 보관의 첫 구현')
     {

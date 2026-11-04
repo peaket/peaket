@@ -28,6 +28,10 @@ export function identityMaintenanceTasks(database: Database, clock: Clock, invRe
     { name: 'admin-known-source-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).purgeKnownSources(clock.now() - knownSourceWindowMs) },
     // 관리 리프레시 토큰 발급 해시는 그 세션의 절대 만료가 지나면 지운다(docs/data.md admin_refresh_token_hash, BOT-130)
     { name: 'admin-refresh-hash-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).purgeRefreshHashes(clock.now()) },
+    // 관리 계정 초대는 보낸 때부터 24시간 지나면 만료로 바꾸고 토큰 해시를 지운다(docs/data.md admin_account.invite_expires_at, BOT-150)
+    { name: 'admin-invite-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).expireInvites(clock.now()) },
+    // 관리 계정 관리 호출의 멱등 기록은 30일 [가정] 뒤 지운다(docs/data.md admin_account_request, BOT-150)
+    { name: 'admin-account-request-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).purgeRequests(clock.now() - 30 * 24 * 60 * 60_000) },
     // 닫힌 이의 제기·소명 계류 행은 30일 [가정] 뒤 지운다(docs/data.md account_hold, BOT-042)
     { name: 'account-hold-closed', when: 'daily', run: () => sessions.transaction((tx) => tx.purgeClosedHolds(clock.now() - ACCOUNT_HOLD_CLOSED_KEEP_MS)) },
     // 라벨 키가 없어 가입 때 쓰지 못한 EMAIL 연락처 가명을 account.email로 채운다(identity §9.1 '조사용 값의 첫 구현', BOT-045)

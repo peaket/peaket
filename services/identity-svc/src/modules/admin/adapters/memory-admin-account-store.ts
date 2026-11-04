@@ -1,14 +1,14 @@
 // 관리 계정 저장소의 메모리 구현(시험·로컬, BUILD_ORDER BOT-110·BOT-111). 계정을 만드는 길(초대)은 BOT-150이라 시험은 create로 바로 만든다.
 import { FRESH_LOGIN_STATE, type AccountLoginState, type NoticeKind } from '../domain/login-rules.js';
 import { randomUUID } from 'node:crypto';
-import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
+import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
 
 type Row = AdminAccountRow &
-  AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null };
+  AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null; inviteTokenHash: Buffer | null; inviteExpiresAt: number | null; removedAt: number | null; version: number };
 type SessionRow = { id: string; accountId: string; aud: AdminAud; refreshHash: string; prevRefreshHash: string | null; rotatedAt: number | null; refreshUsed: boolean; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; terminatedAt: number | null; terminationReason: string | null };
 type Step = { id: string; accountId: string; tokenHash: string; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; usedAt: number | null; knownSource: boolean; passwordOnlyNoticedAt: number | null };
 
-export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore, AdminRefreshStore {
+export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore, AdminRefreshStore, AdminManagementStore {
   readonly #rows = new Map<string, Row>();
   readonly #notices: { id: string; accountId: string; kind: NoticeKind; at: number; sentAt: number | null; attempts?: number; nextAttemptAt?: number }[] = [];
   readonly #links: (UnlockLinkRow & { tokenHash: string })[] = [];
@@ -19,6 +19,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
   readonly #terminated: { accountId: string; sessionId: string; reason: string }[] = [];
   /** 발급한 리프레시 토큰 해시(16진수) → 세션·패밀리·절대 만료(BOT-130) */
   readonly #issued = new Map<string, { sessionId: string; refreshFamily: string; expiresAt: number }>();
+  /** 관리 호출의 멱등 기록(BOT-150) */
+  readonly #requests = new Map<string, { kind: AdminAccountRequestKind; accountId: string; result: string; at: number }>();
 
   /** 시험용: 계정을 만든다(이메일은 소문자·앞뒤 빈칸 제거, 삭제하지 않은 계정 사이에서 하나) */
   create(i: { id: string; role: AdminRole; email: string; status?: AdminStatus; promoterId?: string | null; displayName?: string | null; now: number }): void {
@@ -39,6 +41,10 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       totpSeedEnc: null,
       totpPendingEnc: null,
       totpLastStep: null,
+      inviteTokenHash: null,
+      inviteExpiresAt: null,
+      removedAt: null,
+      version: 1,
       ...structuredClone(FRESH_LOGIN_STATE),
     });
   }
@@ -59,6 +65,11 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
   setPasswordChangeRequired(id: string, v: boolean): void {
     const r = this.#rows.get(id);
     if (r) r.passwordChangeRequired = v;
+  }
+
+  /** 시험용: 행 객체 그 자체(복사하지 않음) */
+  rowForTest(id: string): Row | undefined {
+    return this.#rows.get(id);
   }
 
   /** 시험용: 한 행을 그대로 본다 */
@@ -322,6 +333,199 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       ended.push(s.id);
     }
     return ended;
+  }
+
+  // ── 관리 계정 관리(BOT-150) ──
+  #managed(r: Row): ManagedAccount {
+    return {
+      id: r.id,
+      role: r.role,
+      promoterId: r.promoterId,
+      status: r.status,
+      email: r.status === 'REMOVED' ? null : r.email,
+      displayName: r.displayName,
+      inviteExpiresAt: r.inviteExpiresAt,
+      lastLoginAt: r.lastLoginAt,
+      removedAt: r.removedAt,
+      version: r.version,
+      totpEnrolled: r.totpSeedEnc !== null,
+      lockKind: r.lockKind,
+      lockReason: r.lockReason,
+      lockedUntil: r.lockedUntil,
+    };
+  }
+
+  /** 관리 트랜잭션을 차례로 세운다(Drizzle의 행 잠금과 같은 효과). 던지면 그 트랜잭션이 바꾼 것만 거꾸로 되돌린다(재검토 2026-11-05) */
+  #manageQueue: Promise<unknown> = Promise.resolve();
+
+  async manageTransaction<T>(fn: (tx: AdminManagementTx) => Promise<T>): Promise<T> {
+    const run = async (): Promise<T> => {
+      const undo: (() => void)[] = [];
+      try {
+        return await fn(this.#manageTx(undo));
+      } catch (e) {
+        for (const u of undo.reverse()) u();
+        throw e;
+      }
+    };
+    const p = this.#manageQueue.then(run, run);
+    this.#manageQueue = p.catch(() => undefined);
+    return p;
+  }
+
+  #manageTx(undo: (() => void)[]): AdminManagementTx {
+    /** 계정 행을 바꾸고 판을 올린다. 되돌릴 때 바꾸기 전 칸으로 */
+    const patch = (id: string, change: Partial<Row>, now: number) => {
+      const r = this.#rows.get(id)!;
+      // 얕게 떠 두고 제자리에 되돌린다: 행 객체를 갈아 끼우지 않고(큐 밖에서 쥔 쪽이 버려진 객체에 쓰지 않게) Buffer 칸도 그대로다(재검토 2026-11-05)
+      const before = { ...r, recentLockAt: [...r.recentLockAt] };
+      Object.assign(r, change, { version: r.version + 1, updatedAt: now });
+      undo.push(() => Object.assign(r, before));
+    };
+    /** 배열에서 조건에 맞는 것을 빼고, 되돌릴 때 제자리에 다시 넣는다 */
+    const drop = <X>(arr: X[], keep: (x: X) => boolean) => {
+      const gone: [number, X][] = [];
+      for (let k = arr.length - 1; k >= 0; k--) if (!keep(arr[k]!)) gone.push([k, arr.splice(k, 1)[0]!]);
+      undo.push(() => {
+        for (const [k, x] of gone.reverse()) arr.splice(k, 0, x);
+      });
+    };
+    return {
+      findRequest: async (id) => {
+        const r = this.#requests.get(id);
+        return r ? { kind: r.kind, accountId: r.accountId, result: r.result } : null;
+      },
+      recordRequest: async (r) => {
+        this.#requests.set(r.requestId, { kind: r.kind, accountId: r.accountId, result: r.result, at: r.at });
+        undo.push(() => this.#requests.delete(r.requestId));
+      },
+      readAccount: async (id) => {
+        const r = this.#rows.get(id);
+        return r ? this.#managed(r) : null;
+      },
+      lockAccount: async (id) => {
+        const r = this.#rows.get(id);
+        return r ? this.#managed(r) : null;
+      },
+      lockPartnerAdmins: async (promoterId) =>
+        [...this.#rows.values()].filter((r) => r.role === 'partner_admin' && r.promoterId === promoterId && r.status !== 'REMOVED').sort((a, b) => (a.id < b.id ? -1 : 1)).map((r) => this.#managed(r)),
+      insertInvited: async (i) => {
+        if ([...this.#rows.values()].some((r) => r.status !== 'REMOVED' && r.email === i.email)) return false;
+        this.create({ id: i.id, role: i.role, email: i.email, status: 'INVITED', promoterId: i.promoterId, displayName: i.displayName, now: i.now });
+        undo.push(() => this.#rows.delete(i.id));
+        return true;
+      },
+      setRole: async (id, role, now) => patch(id, { role }, now),
+      resetInvite: async (id, now) => patch(id, { status: 'INVITED', inviteTokenHash: null, inviteExpiresAt: null }, now),
+      wipeCredentials: async (id, now) => {
+        patch(id, { status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, ...structuredClone(FRESH_LOGIN_STATE) }, now);
+        drop(this.#recovery, (c) => c.accountId !== id);
+      },
+      markRemoved: async (id, now) => {
+        patch(
+          id,
+          {
+            status: 'REMOVED',
+            removedAt: now,
+            email: null as unknown as string,
+            displayName: null,
+            passwordPhc: null,
+            totpSeedEnc: null,
+            totpPendingEnc: null,
+            totpLastStep: null,
+            inviteTokenHash: null,
+            inviteExpiresAt: null,
+            lastLoginAt: null,
+            breachCheckedAt: null,
+            passwordChangeRequired: false,
+            ...structuredClone(FRESH_LOGIN_STATE),
+          },
+          now,
+        );
+        drop(this.#recovery, (c) => c.accountId !== id);
+        drop(this.#links, (l) => l.accountId !== id);
+        drop(this.#steps, (x) => x.accountId !== id);
+        const known = [...this.#known.entries()].filter(([k]) => k.startsWith(`${id}|`));
+        for (const [k] of known) this.#known.delete(k);
+        undo.push(() => {
+          for (const [k, v] of known) this.#known.set(k, v);
+        });
+      },
+      endAllSessions: async (id, reason, now) => {
+        const ended: string[] = [];
+        for (const s of this.#sessions) {
+          if (s.accountId !== id || s.terminatedAt !== null) continue;
+          const before = { terminatedAt: s.terminatedAt, terminationReason: s.terminationReason };
+          Object.assign(s, { terminatedAt: now, terminationReason: reason });
+          const ev = { accountId: id, sessionId: s.id, reason };
+          this.#terminated.push(ev);
+          undo.push(() => {
+            Object.assign(s, before);
+            this.#terminated.splice(this.#terminated.indexOf(ev), 1);
+          });
+          ended.push(s.id);
+        }
+        return ended.sort();
+      },
+      addNotice: async (id, kind, now) => {
+        const n = { id: randomUUID(), accountId: id, kind, at: now, sentAt: null };
+        this.#notices.push(n);
+        undo.push(() => this.#notices.splice(this.#notices.indexOf(n), 1));
+      },
+    };
+  }
+
+  async getManaged(id: string): Promise<ManagedAccount | null> {
+    const r = this.#rows.get(id);
+    return r ? this.#managed(r) : null;
+  }
+
+  async listManaged(q: { roles: readonly AdminRole[]; promoterId?: string; status?: AdminStatus; excludeRemoved?: boolean; after?: { lastLoginAt: number | null; id: string }; offset?: number; limit: number; now: number }): Promise<ManagedAccount[]> {
+    const shown = (r: Row): AdminStatus => (r.status === 'INVITED' && r.inviteExpiresAt !== null && r.inviteExpiresAt <= q.now ? 'INVITE_EXPIRED' : r.status);
+    // 마지막 접속이 늦은 순(없으면 뒤), 같으면 ID 순
+    const key = (r: { lastLoginAt: number | null; id: string }) => [r.lastLoginAt === null ? 1 : 0, -(r.lastLoginAt ?? 0), r.id] as const;
+    const cmp = (a: { lastLoginAt: number | null; id: string }, b: { lastLoginAt: number | null; id: string }) => {
+      const x = key(a);
+      const y = key(b);
+      return x[0] - y[0] || x[1] - y[1] || (x[2] < y[2] ? -1 : x[2] > y[2] ? 1 : 0);
+    };
+    return [...this.#rows.values()]
+      .filter((r) => q.roles.includes(r.role) && (!q.promoterId || r.promoterId === q.promoterId) && (!q.status || shown(r) === q.status) && (!q.excludeRemoved || r.status !== 'REMOVED'))
+      .filter((r) => !q.after || cmp(r, q.after) > 0)
+      .sort(cmp)
+      .slice(q.offset ?? 0, (q.offset ?? 0) + q.limit)
+      .map((r) => this.#managed(r));
+  }
+
+  async liveSessions(id: string, now: number): Promise<{ id: string; createdAt: number; idleExpiresAt: number }[]> {
+    return this.#sessions
+      .filter((s) => s.accountId === id && s.terminatedAt === null && s.idleExpiresAt > now && s.absoluteExpiresAt > now)
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((s) => ({ id: s.id, createdAt: s.createdAt, idleExpiresAt: s.idleExpiresAt }));
+  }
+
+  async setInviteToken(id: string, tokenHash: Buffer, expiresAt: number, now: number): Promise<boolean> {
+    const r = this.#rows.get(id);
+    if (!r || r.status !== 'INVITED') return false;
+    Object.assign(r, { inviteTokenHash: Buffer.from(tokenHash), inviteExpiresAt: expiresAt, updatedAt: now });
+    return true;
+  }
+
+  async expireInvites(now: number): Promise<number> {
+    let n = 0;
+    for (const r of this.#rows.values()) {
+      if (r.status === 'INVITED' && r.inviteExpiresAt !== null && r.inviteExpiresAt <= now) {
+        Object.assign(r, { status: 'INVITE_EXPIRED', inviteTokenHash: null, updatedAt: now });
+        n++;
+      }
+    }
+    return n;
+  }
+
+  async purgeRequests(before: number): Promise<number> {
+    let n = 0;
+    for (const [k, v] of this.#requests) if (v.at < before) (this.#requests.delete(k), n++);
+    return n;
   }
 
   // ── 토큰 갱신과 로그아웃(BOT-130) ──

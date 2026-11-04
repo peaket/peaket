@@ -8,6 +8,7 @@ import { LoginPasswordStep } from './application/login-password-step.js';
 import { CONSOLE_ORIGINS, type ConsoleOrigins, DispatchAdminNotices } from './application/dispatch-admin-notices.js';
 import { ChangeAdminPassword } from './application/change-admin-password.js';
 import { EndAdminSession } from './application/end-admin-session.js';
+import { ManageAdminAccounts } from './application/manage-admin-accounts.js';
 import { RefreshAdminSession } from './application/refresh-admin-session.js';
 import { CheckPasswordOnlyLogins } from './application/check-password-only-logins.js';
 import { GetAdminAuthz } from './application/get-admin-authz.js';
@@ -25,6 +26,7 @@ import {
   ADMIN_PASSWORDS,
   ADMIN_MAILER,
   ADMIN_SECOND_STEP_STORE,
+  ADMIN_MANAGEMENT_STORE,
   ADMIN_REFRESH_STORE,
   ADMIN_SESSION_STORE,
   ADMIN_TOKEN_SIGNER,
@@ -48,6 +50,7 @@ import { ADMIN_COOKIE_DOMAIN } from './inbound/admin-cookies.js';
 import { AdminLoginController } from './inbound/admin-login.controller.js';
 import { AdminPasswordChangeController } from './inbound/admin-password-change.controller.js';
 import { AdminTokenController } from './inbound/admin-token.controller.js';
+import { PartnerTeamAccountsController } from './inbound/partner-team-accounts.controller.js';
 import { AdminUnlockController } from './inbound/admin-unlock.controller.js';
 
 export interface AdminModuleOptions {
@@ -100,7 +103,7 @@ export class AdminModule {
     const store = o.storage === 'database' ? { provide: DrizzleAdminAccountStore, useClass: DrizzleAdminAccountStore } : { provide: DrizzleAdminAccountStore, useValue: new MemoryAdminAccountStore() };
     return {
       module: AdminModule,
-      controllers: [AdminLoginController, AdminUnlockController, AdminPasswordChangeController, AdminTokenController],
+      controllers: [AdminLoginController, AdminUnlockController, AdminPasswordChangeController, AdminTokenController, PartnerTeamAccountsController],
       providers: [
         store,
         { provide: ADMIN_ACCOUNT_STORE, useExisting: DrizzleAdminAccountStore },
@@ -109,6 +112,7 @@ export class AdminModule {
         { provide: ADMIN_UNLOCK_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_SESSION_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_REFRESH_STORE, useExisting: DrizzleAdminAccountStore },
+        { provide: ADMIN_MANAGEMENT_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_MAILER, useValue: o.mailer ?? noMailer },
         { provide: CONSOLE_ORIGINS, useValue: o.consoleOrigins ?? { partner: 'https://partner.peaket.example', ops: 'https://console.peaket.example' } },
         { provide: TOTP_SEED_CIPHER, useValue: o.totpCipher ?? unavailableCipher },
@@ -136,8 +140,9 @@ export class AdminModule {
         GetAdminAuthz,
         RefreshAdminSession,
         EndAdminSession,
+        ManageAdminAccounts,
       ],
-      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, UnlockWithLink, RequestUnlockLink, DispatchAdminNotices, CheckPasswordOnlyLogins, ChangeAdminPassword, GetAdminAuthz, RefreshAdminSession, EndAdminSession, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE],
+      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, UnlockWithLink, RequestUnlockLink, DispatchAdminNotices, CheckPasswordOnlyLogins, ChangeAdminPassword, GetAdminAuthz, RefreshAdminSession, EndAdminSession, ManageAdminAccounts, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE],
     };
   }
 }

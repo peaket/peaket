@@ -30,6 +30,7 @@ export interface IdentityPackage {
   InvestigationRefService: grpc.ServiceClientConstructor;
   /** 관리 경로의 역할 판정(ADR-0172, BOT-123) */
   AdminAuthzService: grpc.ServiceClientConstructor;
+  AdminAccountService: grpc.ServiceClientConstructor;
 }
 
 let pkg: IdentityPackage | undefined;

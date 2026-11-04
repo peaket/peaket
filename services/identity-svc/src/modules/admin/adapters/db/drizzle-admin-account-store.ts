@@ -4,10 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, type DbTransaction, writeOutbox } from '@peaket/platform';
 import { and, asc, eq, gt, gte, inArray, isNull, lt, lte, ne, notInArray, or } from 'drizzle-orm';
-import type { AccountLoginState, LockKind, LockReason, NoticeKind } from '../../domain/login-rules.js';
+import { type AccountLoginState, FRESH_LOGIN_STATE, type LockKind, type LockReason, type NoticeKind } from '../../domain/login-rules.js';
 import { sql as rawSql } from 'drizzle-orm';
-import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
-import { adminAccount, adminKnownSource, adminLoginStep, adminRecoveryCode, adminRefreshTokenHash, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
+import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
+import { adminAccount, adminAccountRequest, adminKnownSource, adminLoginStep, adminRecoveryCode, adminRefreshTokenHash, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
 
 type AccountRow = typeof adminAccount.$inferSelect;
 /** 알림을 보내지 못했을 때 다음 시도까지(1분부터 두 배씩, 최대 1시간 [가정]) */
@@ -43,7 +43,7 @@ function stateColumns(s: AccountLoginState) {
 }
 
 @Injectable()
-export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore {
+export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore {
   constructor(
     @Inject(DATABASE) private readonly database: Database,
     /** Outbox 행 ID(UUIDv7)의 시계 */
@@ -413,6 +413,184 @@ export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginSt
       }
       return ids;
     });
+  }
+
+  // ── 관리 계정 관리(BOT-150) ──
+  #managed(r: AccountRow): ManagedAccount {
+    return {
+      id: r.id,
+      role: r.role as AdminRole,
+      promoterId: r.promoterId,
+      status: r.status as AdminStatus,
+      email: r.email,
+      displayName: r.displayName,
+      inviteExpiresAt: ms(r.inviteExpiresAt),
+      lastLoginAt: ms(r.lastLoginAt),
+      removedAt: ms(r.removedAt),
+      version: r.version,
+      totpEnrolled: r.totpSeedEnc !== null,
+      lockKind: r.lockKind as LockKind,
+      lockReason: (r.lockReason as LockReason | null) ?? null,
+      lockedUntil: ms(r.lockedUntil),
+    };
+  }
+
+  async manageTransaction<T>(fn: (tx: AdminManagementTx) => Promise<T>): Promise<T> {
+    return this.database.transaction(async (tx) => {
+      const bump = { version: rawSql`${adminAccount.version} + 1` };
+      const api: AdminManagementTx = {
+        findRequest: async (requestId) => {
+          // 같은 request_id가 동시에 와도 차례로(트랜잭션 끝까지 쥐는 권고 잠금)
+          await tx.execute(rawSql`select pg_advisory_xact_lock(hashtextextended(${`admin-request:${requestId}`}, 0))`);
+          const [r] = await tx.select().from(adminAccountRequest).where(eq(adminAccountRequest.requestId, requestId));
+          return r ? { kind: r.kind as AdminAccountRequestKind, accountId: r.adminAccountId, result: r.result } : null;
+        },
+        recordRequest: async (r) => {
+          await tx.insert(adminAccountRequest).values({ requestId: r.requestId, kind: r.kind, adminAccountId: r.accountId, result: r.result, createdAt: new Date(r.at) });
+        },
+        readAccount: async (id) => {
+          const [r] = await tx.select().from(adminAccount).where(eq(adminAccount.id, id));
+          return r ? this.#managed(r) : null;
+        },
+        lockAccount: async (id) => {
+          const [r] = await tx.select().from(adminAccount).where(eq(adminAccount.id, id)).for('update');
+          return r ? this.#managed(r) : null;
+        },
+        lockPartnerAdmins: async (promoterId) =>
+          (
+            await tx
+              .select()
+              .from(adminAccount)
+              .where(and(eq(adminAccount.role, 'partner_admin'), eq(adminAccount.promoterId, promoterId), ne(adminAccount.status, 'REMOVED')))
+              .orderBy(asc(adminAccount.id))
+              .for('update')
+          ).map((r) => this.#managed(r)),
+        insertInvited: async (i) => {
+          // 지우지 않은 계정 사이의 이메일 고유 색인(admin_account_email_live_key)으로 가린다: 동시에 와도 하나만 들어간다
+          const done = await tx
+            .insert(adminAccount)
+            .values({ id: i.id, role: i.role, promoterId: i.promoterId, status: 'INVITED', email: i.email, displayName: i.displayName, createdAt: new Date(i.now), updatedAt: new Date(i.now) })
+            .onConflictDoNothing({ target: adminAccount.email, where: rawSql`${adminAccount.status} <> 'REMOVED'` })
+            .returning({ id: adminAccount.id });
+          return done.length > 0;
+        },
+        setRole: async (id, role, now) => {
+          await tx.update(adminAccount).set({ role, ...bump, updatedAt: new Date(now) }).where(eq(adminAccount.id, id));
+        },
+        resetInvite: async (id, now) => {
+          await tx.update(adminAccount).set({ status: 'INVITED', inviteTokenHash: null, inviteExpiresAt: null, ...bump, updatedAt: new Date(now) }).where(eq(adminAccount.id, id));
+        },
+        wipeCredentials: async (id, now) => {
+          await tx
+            .update(adminAccount)
+            .set({ status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, ...stateColumns(FRESH_LOGIN_STATE), ...bump, updatedAt: new Date(now) })
+            .where(eq(adminAccount.id, id));
+          await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, id));
+        },
+        markRemoved: async (id, now) => {
+          await tx
+            .update(adminAccount)
+            .set({
+              status: 'REMOVED',
+              removedAt: new Date(now),
+              email: null,
+              displayName: null,
+              passwordPhc: null,
+              totpSeedEnc: null,
+              totpPendingEnc: null,
+              totpLastStep: null,
+              inviteTokenHash: null,
+              inviteExpiresAt: null,
+              // ID·역할·삭제 시각만 남긴다(docs/data.md admin_account, 재검토 2026-11-05)
+              lastLoginAt: null,
+              breachCheckedAt: null,
+              passwordChangeRequired: false,
+              ...stateColumns(FRESH_LOGIN_STATE),
+              ...bump,
+              updatedAt: new Date(now),
+            })
+            .where(eq(adminAccount.id, id));
+          await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, id));
+          await tx.delete(adminKnownSource).where(eq(adminKnownSource.adminAccountId, id));
+          await tx.delete(adminUnlockLink).where(eq(adminUnlockLink.adminAccountId, id));
+          await tx.delete(adminLoginStep).where(eq(adminLoginStep.adminAccountId, id));
+        },
+        endAllSessions: async (id, reason, now) => {
+          const live = await tx.select({ id: adminSession.id }).from(adminSession).where(and(eq(adminSession.adminAccountId, id), isNull(adminSession.terminatedAt)));
+          return this.#endIn(tx, live.map((x) => x.id), reason, now);
+        },
+        addNotice: async (id, kind, now) => {
+          await tx.insert(adminSecurityNotice).values({ id: randomUUID(), adminAccountId: id, kind, createdAt: new Date(now) });
+        },
+      };
+      return fn(api);
+    });
+  }
+
+  async getManaged(id: string): Promise<ManagedAccount | null> {
+    const [r] = await this.database.db.select().from(adminAccount).where(eq(adminAccount.id, id));
+    return r ? this.#managed(r) : null;
+  }
+
+  async listManaged(q: { roles: readonly AdminRole[]; promoterId?: string; status?: AdminStatus; excludeRemoved?: boolean; after?: { lastLoginAt: number | null; id: string }; offset?: number; limit: number; now: number }): Promise<ManagedAccount[]> {
+    const now = new Date(q.now);
+    const conds = [inArray(adminAccount.role, [...q.roles])];
+    if (q.promoterId) conds.push(eq(adminAccount.promoterId, q.promoterId));
+    if (q.excludeRemoved) conds.push(ne(adminAccount.status, 'REMOVED'));
+    // 보이는 상태: 만료가 지난 INVITED는 INVITE_EXPIRED
+    if (q.status === 'INVITE_EXPIRED') conds.push(or(eq(adminAccount.status, 'INVITE_EXPIRED'), and(eq(adminAccount.status, 'INVITED'), lte(adminAccount.inviteExpiresAt, now)))!);
+    else if (q.status === 'INVITED') conds.push(and(eq(adminAccount.status, 'INVITED'), or(isNull(adminAccount.inviteExpiresAt), gt(adminAccount.inviteExpiresAt, now)))!);
+    else if (q.status) conds.push(eq(adminAccount.status, q.status));
+    // 커서: 마지막 접속이 늦은 순(없으면 뒤)·ID 순의 다음 줄부터
+    if (q.after) {
+      const a = q.after;
+      conds.push(
+        a.lastLoginAt === null
+          ? and(isNull(adminAccount.lastLoginAt), gt(adminAccount.id, a.id))!
+          : or(lt(adminAccount.lastLoginAt, new Date(a.lastLoginAt)), and(eq(adminAccount.lastLoginAt, new Date(a.lastLoginAt)), gt(adminAccount.id, a.id)), isNull(adminAccount.lastLoginAt))!,
+      );
+    }
+    const rows = await this.database.db
+      .select()
+      .from(adminAccount)
+      .where(and(...conds))
+      .orderBy(rawSql`${adminAccount.lastLoginAt} desc nulls last`, asc(adminAccount.id))
+      .limit(q.limit)
+      .offset(q.offset ?? 0);
+    return rows.map((r) => this.#managed(r));
+  }
+
+  async liveSessions(id: string, now: number): Promise<{ id: string; createdAt: number; idleExpiresAt: number }[]> {
+    const t = new Date(now);
+    const rows = await this.database.db
+      .select({ id: adminSession.id, createdAt: adminSession.createdAt, idleExpiresAt: adminSession.idleExpiresAt })
+      .from(adminSession)
+      .where(and(eq(adminSession.adminAccountId, id), isNull(adminSession.terminatedAt), gt(adminSession.idleExpiresAt, t), gt(adminSession.absoluteExpiresAt, t)))
+      .orderBy(asc(adminSession.createdAt));
+    return rows.map((r) => ({ id: r.id, createdAt: r.createdAt.getTime(), idleExpiresAt: r.idleExpiresAt.getTime() }));
+  }
+
+  async setInviteToken(id: string, tokenHash: Buffer, expiresAt: number, now: number): Promise<boolean> {
+    const done = await this.database.db
+      .update(adminAccount)
+      .set({ inviteTokenHash: tokenHash, inviteExpiresAt: new Date(expiresAt), updatedAt: new Date(now) })
+      .where(and(eq(adminAccount.id, id), eq(adminAccount.status, 'INVITED')))
+      .returning({ id: adminAccount.id });
+    return done.length > 0;
+  }
+
+  async expireInvites(now: number): Promise<number> {
+    const done = await this.database.db
+      .update(adminAccount)
+      .set({ status: 'INVITE_EXPIRED', inviteTokenHash: null, updatedAt: new Date(now) })
+      .where(and(eq(adminAccount.status, 'INVITED'), lte(adminAccount.inviteExpiresAt, new Date(now))))
+      .returning({ id: adminAccount.id });
+    return done.length;
+  }
+
+  async purgeRequests(before: number): Promise<number> {
+    const gone = await this.database.db.delete(adminAccountRequest).where(lt(adminAccountRequest.createdAt, new Date(before))).returning({ id: adminAccountRequest.requestId });
+    return gone.length;
   }
 
   // ── 토큰 갱신과 로그아웃(BOT-130) ──

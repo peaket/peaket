@@ -86,6 +86,7 @@ erDiagram
     admin_account ||--o{ admin_session : "관리 계정 로그인 세션(추천 적용 2026-11-05)"
     admin_account ||--o{ admin_unlock_link : "본인 해제 링크(추천 적용 2026-11-05)"
     admin_account ||--o{ admin_known_source : "익숙한 출발지(추천 적용 2026-11-05)"
+    admin_account ||--o{ admin_account_request : "관리 계정 관리 호출의 멱등 기록(추천 적용 2026-11-05)"
     admin_session ||--o{ admin_refresh_token_hash : "발급한 관리 리프레시 토큰 해시(추천 적용 2026-11-05)"
     account ||--o{ booth_reverification : "부스 본인확인 대조"
     account ||--o{ staff_assignment : "회차 역할"
@@ -248,7 +249,7 @@ erDiagram
         bytea invite_token_hash "초대·재초대 링크 토큰(32바이트 난수)의 SHA-256. 수락·새 재초대·만료 때 지운다(추천 적용 2026-10-30)"
         timestamptz invite_expires_at "보낸 때부터 24시간"
         timestamptz last_login_at "마지막 로그인 성공 시각. SCR-064 계정 표와 SCR-020 팀 계정의 마지막 접속(추천 적용 2026-10-30)"
-        timestamptz removed_at "삭제 시각. 삭제하면 email·password_phc·totp_seed_enc와 패스키·복구 코드를 바로 지우고 ID·역할·삭제 시각만 남긴다. 행은 권한 부여·변경·말소 내역과 같이 3년 뒤 지운다(고시 제5조 제3항, 추천 적용 2026-10-30)"
+        timestamptz removed_at "삭제 시각. 삭제하면 email·display_name·password_phc·totp_seed_enc와 패스키·복구 코드, 마지막 접속·유출 대조·실패 수·잠금 칸을 바로 지우고 ID·역할·삭제 시각만 남긴다(파트너사 ID는 역할 묶음 제약 때문에 남는다, BOT-150). 행은 권한 부여·변경·말소 내역과 같이 3년 뒤 지운다(고시 제5조 제3항, 추천 적용 2026-10-30)"
         bigint version "판. 역할 변경의 If-Match와 ETag(docs/api/guidelines.md §12, 추천 적용 2026-10-30)"
         text password_phc "pbkdf2-sha256, 600000회 이상, KMS 페퍼 버전 포함(ADR-0033, ADR-0050)"
         bytea totp_seed_enc "AES-256-GCM. KMS 데이터 키 봉투 암호화, 암호화 컨텍스트 {purpose: peaket-admin-totp-v1, accountId}. 꼴은 docs/features/identity.md §6 '관리 계정 TOTP와 로그인 2단계의 첫 구현'(추천 적용 2026-11-05, BOT-120)"
@@ -286,6 +287,13 @@ erDiagram
         timestamptz issued_at
         timestamptz expires_at "그 세션의 절대 만료. 지나면 매일 정비가 지운다"
     }
+    admin_account_request {
+        text request_id PK "ops-svc 감사 기록 ID(AdminAccountService 바꾸는 호출의 request_id). 같은 값이 다시 오면 처리하지 않고 적은 결과를 준다(docs/features/identity.md §6 BOT-150)"
+        text kind "INVITE|CHANGE_ROLE|REINVITE|REMOVE(지정은 BOT-151)"
+        uuid admin_account_id "대상 계정(초대는 만든 계정). 외래키 없음(삭제한 계정 행도 남는다)"
+        text result "AdminAccountResult 이름(OK, ROLE_NOT_ALLOWED 등)"
+        timestamptz created_at "30일 [가정] 지나면 매일 정비가 지운다"
+    }
     admin_known_source {
         uuid admin_account_id PK "FK. 계정을 지우면 함께 지운다"
         text pair_ref PK "출발지 묶음 해시(admin_login_step.pair_ref와 같다)"
@@ -320,7 +328,7 @@ erDiagram
     admin_security_notice {
         uuid id PK
         uuid admin_account_id FK
-        text kind "TIMED_LOCK|PASSWORD_FAILURE_NOTICE|MULTI_SOURCE_ALERT|PROTECT_LOCK(docs/security/auth-controls.md §3.4)|SESSION_LIMIT(동시 세션 2개를 넘어 가장 오래 쓰지 않은 세션을 끝냄, POL-019, BOT-120)|UNLOCK_LINK(해제 링크 다시 받기)|UNLOCKED(본인 해제, BOT-121)|PASSWORD_ONLY_LOGIN(비밀번호만 맞은 로그인, BOT-123)"
+        text kind "TIMED_LOCK|PASSWORD_FAILURE_NOTICE|MULTI_SOURCE_ALERT|PROTECT_LOCK(docs/security/auth-controls.md §3.4)|SESSION_LIMIT(동시 세션 2개를 넘어 가장 오래 쓰지 않은 세션을 끝냄, POL-019, BOT-120)|UNLOCK_LINK(해제 링크 다시 받기)|UNLOCKED(본인 해제, BOT-121)|PASSWORD_ONLY_LOGIN(비밀번호만 맞은 로그인, BOT-123)|INVITATION(초대·재초대 링크, 보낼 때 토큰을 만든다, BOT-150)"
         timestamptz created_at "사건 시각. 셈과 같은 트랜잭션으로 적는다"
         timestamptz sent_at "업무 이메일로 보낸 때(또는 보낼 것이 없어 닫은 때). identity의 발송 고리가 메일 포트로 보낸다(BOT-121, 발송 대행은 [가정])"
         int attempts "보내지 못한 횟수(BOT-121)"

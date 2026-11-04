@@ -93,7 +93,7 @@ export const adminSecurityNotice = pgTable(
   },
   (t) => [
     index('admin_security_notice_unsent_idx').on(t.createdAt).where(sql`${t.sentAt} is null`),
-    check('admin_security_notice_kind_check', sql`${t.kind} in ('TIMED_LOCK', 'PASSWORD_FAILURE_NOTICE', 'MULTI_SOURCE_ALERT', 'PROTECT_LOCK', 'SESSION_LIMIT', 'UNLOCK_LINK', 'UNLOCKED', 'PASSWORD_ONLY_LOGIN')`),
+    check('admin_security_notice_kind_check', sql`${t.kind} in ('TIMED_LOCK', 'PASSWORD_FAILURE_NOTICE', 'MULTI_SOURCE_ALERT', 'PROTECT_LOCK', 'SESSION_LIMIT', 'UNLOCK_LINK', 'UNLOCKED', 'PASSWORD_ONLY_LOGIN', 'INVITATION')`),
   ],
 );
 
@@ -126,6 +126,20 @@ export const adminSession = pgTable(
     index('admin_session_live_idx').on(t.adminAccountId, t.idleExpiresAt).where(sql`${t.terminatedAt} is null`),
     check('admin_session_aud_check', sql`${t.aud} in ('partner', 'ops')`),
   ],
+);
+
+/** 관리 계정 관리 호출의 멱등 기록(docs/data.md admin_account_request, BOT-150). 30일 [가정] 뒤 정비가 지운다 */
+export const adminAccountRequest = pgTable(
+  'admin_account_request',
+  {
+    requestId: text('request_id').primaryKey(),
+    kind: text('kind').notNull(),
+    // 대상 계정(초대는 만든 계정). 외래키 없음(삭제한 계정 행도 남는다)
+    adminAccountId: uuid('admin_account_id').notNull(),
+    result: text('result').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [index('admin_account_request_created_idx').on(t.createdAt), check('admin_account_request_kind_check', sql`${t.kind} in ('INVITE', 'CHANGE_ROLE', 'REINVITE', 'REMOVE')`)],
 );
 
 /** 발급한 관리 리프레시 토큰 해시(docs/data.md admin_refresh_token_hash, BOT-130). 예전 토큰이 다시 오면 그 패밀리를 끝낸다. 절대 만료가 지나면 정비가 지운다 */

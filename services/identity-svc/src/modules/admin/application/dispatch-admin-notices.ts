@@ -1,25 +1,28 @@
 // 계정 주인 알림 발송 고리(identity §6 '관리 계정 본인 해제 링크와 2단계 보호 잠금의 첫 구현', docs/security/auth-controls.md §3.3·§3.4, BUILD_ORDER BOT-121).
 // 보내지 않은 admin_security_notice를 몇 개씩 잠가 메일 포트로 보낸다. TIMED_LOCK·UNLOCK_LINK는 보낼 때 아직 시간 잠금 중이고 보호 잠금이 아니면 새 해제 링크(32바이트, 30분)를 만들어 싣는다.
 // 이미 풀렸거나 보호 잠금이면 링크 없이 닫는다. 삭제한 계정은 닫는다. 메일을 보내지 못하면 남겨 다음에 다시 한다.
+// INVITATION(초대·재초대, BOT-150)은 보낼 때 아직 INVITED이면 32바이트 초대 토큰(24시간)을 새로 만들어 해시만 계정 행에 적고 링크를 보낸다.
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import type { AdminAuthConfig } from '../domain/auth-config.js';
 import { activeLock } from '../domain/login-rules.js';
-import { ADMIN_MAILER, ADMIN_UNLOCK_STORE, type AdminMailer, type AdminSecondStepStore, type AdminUnlockStore, ROLES_OF_AUD } from '../domain/ports.js';
+import { ADMIN_MAILER, ADMIN_UNLOCK_STORE, type AdminMailer, type AdminManagementStore, type AdminSecondStepStore, type AdminUnlockStore, ROLES_OF_AUD } from '../domain/ports.js';
 import { ADMIN_AUTH_CONFIG } from './set-admin-password.js';
 
 export const CONSOLE_ORIGINS = Symbol('identity.ConsoleOrigins');
 export type ConsoleOrigins = { partner: string; ops: string };
 /** 한 번에 보내는 알림 수 [가정] */
 const BATCH = 20;
+/** 초대 링크 수명(docs/data.md admin_account.invite_expires_at: 보낸 때부터 24시간) */
+const INVITE_TTL_MS = 24 * 60 * 60_000;
 /** 메일 한 통의 시간 제한 [가정]. 넘으면 보내지 못한 것으로 보고 미룬다 */
 const MAIL_TIMEOUT_MS = 10_000;
 
 @Injectable()
 export class DispatchAdminNotices {
   constructor(
-    @Inject(ADMIN_UNLOCK_STORE) private readonly store: AdminUnlockStore & AdminSecondStepStore,
+    @Inject(ADMIN_UNLOCK_STORE) private readonly store: AdminUnlockStore & AdminSecondStepStore & AdminManagementStore,
     @Inject(ADMIN_MAILER) private readonly mailer: AdminMailer,
     @Inject(CONSOLE_ORIGINS) private readonly origins: ConsoleOrigins,
     @Inject(ADMIN_AUTH_CONFIG) private readonly cfg: AdminAuthConfig,
@@ -41,6 +44,13 @@ export class DispatchAdminNotices {
         await this.store.createUnlockLink({ id: randomUUID(), accountId: account.id, tokenHash: createHash('sha256').update(token).digest(), createdAt: now, expiresAt: now + this.cfg.unlockLinkTtlMs });
         const origin = ROLES_OF_AUD.partner.includes(account.role) ? this.origins.partner : this.origins.ops;
         link = `${origin.replace(/\/+$/, '')}/unlock#token=${token}`;
+      } else if (n.kind === 'INVITATION') {
+        // 보낼 때 아직 초대 중이어야 한다(그 사이 지웠거나 다시 초대했으면 닫는다: 다시 초대한 쪽의 행이 따로 있다)
+        if (account.status !== 'INVITED') return 'CLOSE';
+        const token = randomBytes(32).toString('base64url');
+        if (!(await this.store.setInviteToken(account.id, createHash('sha256').update(token).digest(), now + INVITE_TTL_MS, now))) return 'CLOSE';
+        const origin = ROLES_OF_AUD.partner.includes(account.role) ? this.origins.partner : this.origins.ops;
+        link = `${origin.replace(/\/+$/, '')}/invitation#token=${token}`;
       }
       try {
         let timer: NodeJS.Timeout | undefined;
