@@ -3,7 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { VERIFICATION_STORE, type VerificationStore } from '../domain/ports.js';
 import { isAttemptId, visible } from '../domain/verification.js';
-import { type VerificationResultView, viewOf } from './confirm-verification.js';
+import { restrictedUntilFor, type VerificationResultView, viewOf } from './confirm-verification.js';
 import { VerificationError } from './verification-error.js';
 
 @Injectable()
@@ -15,7 +15,8 @@ export class GetVerificationResult {
 
   async run(i: { accountId: string; verificationId: string }): Promise<VerificationResultView> {
     const a = isAttemptId(i.verificationId) ? await this.store.attempt(i.verificationId) : null;
-    if (!a || !visible(a, i.accountId, this.clock.now())) throw new VerificationError('NOT_FOUND', '없는 건이거나 만료됐거나 다른 계정의 건이다');
-    return viewOf(a);
+    const now = this.clock.now();
+    if (!a || !visible(a, i.accountId, now)) throw new VerificationError('NOT_FOUND', '없는 건이거나 만료됐거나 다른 계정의 건이다');
+    return viewOf(a, await restrictedUntilFor(this.store, a, now));
   }
 }

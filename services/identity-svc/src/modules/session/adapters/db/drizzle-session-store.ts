@@ -160,6 +160,16 @@ export class DrizzleSessionStore implements SessionStore {
             .orderBy(asc(account.id))
             .limit(limit)
         ).map((r) => r.id),
+      activeHoldOf: async (accountId, now) => {
+        // 대조값 보관 표는 본인확인 컨텍스트의 표다. 같은 트랜잭션에서 상태와 끝만 읽는다(두 번째 연결을 빌리지 않게, 다시 보기 낮음)
+        const r = await tx.execute(sql`
+          select state, until from restricted_ci_hold
+          where until > ${date(now)} and (source_account_id = ${accountId} or carried_account_id = ${accountId})
+          order by (state = 'RESTRICTED') desc, until desc limit 1`);
+        const row = r.rows[0] as { state?: unknown; until?: unknown } | undefined;
+        if (!row || (row.state !== 'CASE_OPEN' && row.state !== 'RESTRICTED')) return null;
+        return { state: row.state, until: new Date(row.until as string | Date).getTime() };
+      },
       useReauth: async (r) => {
         const made = await tx
           .insert(reauthTokenUse)

@@ -86,6 +86,11 @@ export interface SessionTx {
   closuresStartedBefore(before: number, limit: number): Promise<string[]>;
   /** since 뒤에 탈퇴한(DELETED) 계정 ID를 ID 순으로 after 뒤부터 최대 limit개 */
   deletedSince(since: number, after: string, limit: number): Promise<string[]>;
+  /**
+   * 그 계정이 남겼거나 이은 끝나지 않은 대조값 보관 행 하나(RESTRICTED 먼저, 같으면 늦은 끝). 탈퇴가 계정을 잠근 뒤 같은 트랜잭션에서 다시 본다
+   * (본인확인 컨텍스트의 표를 같은 DB 트랜잭션에서 읽는다. 표를 보지 못하는 저장소는 null)
+   */
+  activeHoldOf(accountId: string, now: number): Promise<{ state: 'CASE_OPEN' | 'RESTRICTED'; until: number } | null>;
   /** 재인증 토큰의 jti를 한 번 쓴다. 이미 썼으면 false */
   useReauth(r: { jti: string; accountId: string; usedAt: number; expiresAt: number }): Promise<boolean>;
   insertSession(row: NewSession): Promise<void>;
@@ -194,4 +199,10 @@ export class ReauthRejected extends Error {
     super(`재인증 토큰이 맞지 않는다: ${why}`);
     this.name = 'ReauthRejected';
   }
+}
+
+export const FRAUD_HOLDS = Symbol('identity.FraudHolds');
+/** 탈퇴 전 대조값 보관 안내(본인확인 컨텍스트가 채운다, identity §8 '대조값 보관의 첫 구현'). 그 계정이 남겼거나 이은 끝나지 않은 행 하나 */
+export interface FraudHolds {
+  activeHold(accountId: string, now: number): Promise<{ state: 'CASE_OPEN' | 'RESTRICTED'; until: number } | null>;
 }

@@ -34,6 +34,15 @@ export class AccountController {
         body: { confirmCancelUnusedTickets: body?.confirmCancelUnusedTickets, acknowledgeFraudHold: body?.acknowledgeFraudHold },
       });
     } catch (e) {
+      // 대조값 보관 행이 있으면 409 '탈퇴 전 확인'과 fraudHold(상태와 끝, identity §8 '대조값 보관의 첫 구현')
+      if (e instanceof AccountError && e.code === 'CONFIRMATION_REQUIRED' && e.fraudHold) {
+        throw new ProblemError({
+          type: 'withdrawal-confirmation-required',
+          status: 409,
+          title: '탈퇴 전에 확인해 주세요',
+          extensions: { fraudHold: { state: e.fraudHold.state, until: new Date(e.fraudHold.until).toISOString() } },
+        });
+      }
       // 토큰이 없거나 만료·재사용이거나 세션·작업 묶음이 맞지 않으면 403 reauth-required(이유는 응답에 싣지 않는다)
       if (e instanceof AccountError) throw new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
       throw e;

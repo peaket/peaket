@@ -9,4 +9,6 @@ export { unavailableHashers, unavailableProvider } from './adapters/unavailable-
 export { VERIFICATION_PROVIDER_ENV } from './adapters/test-verification-provider.js';
 export { DrizzleVerificationStore } from './adapters/db/drizzle-verification-store.js';
 export { VerificationEraser } from './adapters/verification-eraser.js';
+export { SetRestrictedCiHold } from './application/set-restricted-ci-hold.js';
+export { restrictedCiHoldHandlers } from './inbound/restricted-ci-hold.grpc.js';
 export { parsePidRotationArgs, PidRotation, PidRotationError } from './application/pid-rotation.js';

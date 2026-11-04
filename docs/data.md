@@ -220,14 +220,14 @@ erDiagram
         timestamptz expires_at "토큰 만료. 지난 줄은 정비가 지운다"
     }
     restricted_ci_hold {
-        bytea ci_hmac PK "부정 예매 이용 제한(booking_restriction 사유 FRAUD)을 받거나 그 사건의 소명 요청을 받은 사람의 연계정보 HMAC(identity_verification.ci_hmac과 같은 값). 기본 키 (ci_hmac, fraud_case_id). ops-svc의 SetRestrictedCiHold(identity.proto)로 소명 요청 때(CASE_OPEN)와 제한을 걸기 전에(RESTRICTED) 만든다(추천 적용 2026-10-31, ADR-0171 결정 5, POL-046 ⑥)"
+        bytea ci_hmac "부정 예매 이용 제한(booking_restriction 사유 FRAUD)을 받거나 그 사건의 소명 요청을 받은 사람의 연계정보 HMAC(identity_verification.ci_hmac과 같은 값). 다시 가입한 계정에 잇는 대조값(인덱스). 기본 키는 멱등 키 (source_account_id, fraud_case_id)다(추천 적용 2026-11-04, BUILD_ORDER BOT-035). ops-svc의 SetRestrictedCiHold(identity.proto)로 소명 요청 때(CASE_OPEN)와 제한을 걸기 전에(RESTRICTED) 만든다(추천 적용 2026-10-31, ADR-0171 결정 5, POL-046 ⑥)"
         int ci_hmac_key_version "연계정보 HMAC 키 판. 다시 가입한 계정의 본인확인 때 보존 중인 모든 판으로 견준다"
         uuid fraud_case_id PK "제한을 정한 부정 예매 사건(ops 논리 DB라 외래키 없음)"
         text state "CASE_OPEN|RESTRICTED. CASE_OPEN은 소명 요청 뒤 결정 전(탈퇴해도 보관만 하고 다시 가입한 계정을 막지 않는다), RESTRICTED는 이용 제한 중. 제한 없이 끝나거나 풀리면(RELEASED) 행을 지운다(추천 적용 2026-10-31, ADR-0171)"
         timestamptz until "행을 지울 끝 시각(두 상태 모두 NOT NULL). CASE_OPEN은 그 회차 공연일 + 30일 [가정](그때까지 제한이 걸리지 않으면 지운다), RESTRICTED는 이용 제한 끝이고 건 날 + 1년 [가정]을 넘지 않는다(넘는 제한은 조치 요청이 422 restriction-too-long). 이 시각이 지나면 정비 작업이 행을 지운다(추천 적용 2026-10-31, ADR-0173)"
-        uuid source_account_id "제한을 받은 계정. 탈퇴해도 이 행은 until까지 남는다(POL-033의 예외, 법률 확인 36번)"
+        uuid source_account_id PK "제한을 받은 계정. 탈퇴해도 이 행은 until까지 남는다(POL-033의 예외, 법률 확인 36번)"
         uuid carried_account_id "같은 연계정보로 다시 가입해 제한을 이은 계정. 상태가 RESTRICTED인 동안 그 계정의 토큰에는 until까지 ticket:buy를 싣지 않는다. CASE_OPEN이면 적어만 두고 막지 않는다(추천 적용 2026-10-31, ADR-0173)"
-        bigint version "SetRestrictedCiHold.version. 더 클 때만 반영. RELEASED가 오면 행을 지운다"
+        bigint version "SetRestrictedCiHold.version. 더 클 때만 반영하고, 같은 판·같은 내용의 재전송은 OK다. RELEASED가 오면 행을 지운다"
     }
     admin_account {
         uuid id PK

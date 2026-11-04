@@ -17,6 +17,7 @@ export const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: 
 export interface IdentityPackage {
   SessionService: grpc.ServiceClientConstructor;
   IdentityService: grpc.ServiceClientConstructor;
+  RestrictedCiHoldService: grpc.ServiceClientConstructor;
 }
 
 let pkg: IdentityPackage | undefined;

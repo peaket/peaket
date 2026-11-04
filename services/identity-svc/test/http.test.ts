@@ -5,7 +5,9 @@ import { Writable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { CreateSession, JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
-import { HmacIdentityHashers } from '../src/modules/verification/index.js';
+import { HmacIdentityHashers, SetRestrictedCiHold } from '../src/modules/verification/index.js';
+import { ConfirmVerification } from '../src/modules/verification/application/confirm-verification.js';
+import { StartVerification } from '../src/modules/verification/application/start-verification.js';
 import { AGENCY_URL, agencyResult, fanKey, ISSUER, newKey, recordingSignals, testAgency, testDeviceRefs } from './support.js';
 
 let svc: Awaited<ReturnType<typeof createService>>;
@@ -58,6 +60,22 @@ describe('탈퇴 경로(DELETE /v1/identity/account, identity §8 탈퇴의 첫 
     expect((await refresh(`__Secure-peaket_rt=${s.refreshToken}`)).statusCode).toBe(401);
     // 같은 토큰을 다시 쓰면 403이다(세션이 끝나 게이트웨이를 지나지 못하지만, 지났다고 쳐도)
     expect((await del({ ...fanHeaders(s), 'x-reauth-token': token })).statusCode).toBe(403);
+  });
+
+  test('I-T68⑨_대조값보관행이있는계정의첫탈퇴는409withdrawal-confirmation-required와fraudHold(상태·끝)이고_acknowledgeFraudHold로다시보내면204다', async () => {
+    const s = await login();
+    const caseId = '0190f3a1-7c2e-7a00-8000-00000000ca5c';
+    const until = svc.clock.now() + 30 * 86_400_000;
+    // 본인확인을 마친 계정이어야 행이 생긴다
+    expect(await svc.app.get(SetRestrictedCiHold).run({ accountId: s.accountId, fraudCaseId: caseId, state: 'CASE_OPEN', until, version: 1 })).toBe('NO_VERIFICATION');
+    const st = await svc.app.get(StartVerification).run({ accountId: s.accountId, sessionId: null, purpose: 'FIRST', next: '/' });
+    await svc.app.get(ConfirmVerification).run({ accountId: s.accountId, verificationId: st.verificationId, providerResult: agencyResult(clock, st.verificationId, { person: 'http-hold-person' }) });
+    expect(await svc.app.get(SetRestrictedCiHold).run({ accountId: s.accountId, fraudCaseId: caseId, state: 'CASE_OPEN', until, version: 1 })).toBe('OK');
+    const token = (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, svc.clock.now())).token;
+    const first = await del({ ...fanHeaders(s), 'x-reauth-token': token });
+    expect(first.statusCode).toBe(409);
+    expect(JSON.parse(first.payload)).toMatchObject({ type: 'https://peaket.example/problems/withdrawal-confirmation-required', status: 409, fraudHold: { state: 'CASE_OPEN', until: new Date(until).toISOString() } });
+    expect((await del({ ...fanHeaders(s), 'x-reauth-token': token }, JSON.stringify({ acknowledgeFraudHold: true }))).statusCode).toBe(204);
   });
 });
 

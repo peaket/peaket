@@ -1,6 +1,6 @@
 // 본인확인 표(docs/data.md §2 identity_verification·verification_attempt, docs/features/identity.md §5).
 import { sql } from 'drizzle-orm';
-import { check, customType, index, integer, pgSchema, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, check, customType, index, integer, pgSchema, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -82,4 +82,29 @@ export const verificationRecord = retention.table(
     deleteAt: at('delete_at').notNull(),
   },
   (t) => [index('verification_record_delete_idx').on(t.deleteAt)],
+);
+
+// 이용 제한 중 탈퇴의 대조값 보관(docs/data.md restricted_ci_hold, identity §8 '대조값 보관의 첫 구현', BUILD_ORDER BOT-035).
+// 계정 외래키를 두지 않는다(탈퇴해도 until까지 남는다). 이 행은 다른 일(분석·조사·연구)에 쓰지 않는다
+export const restrictedCiHold = pgTable(
+  'restricted_ci_hold',
+  {
+    ciHmac: bytea('ci_hmac').notNull(),
+    ciHmacKeyVersion: integer('ci_hmac_key_version').notNull(),
+    fraudCaseId: uuid('fraud_case_id').notNull(),
+    state: text('state').notNull(),
+    until: at('until').notNull(),
+    sourceAccountId: uuid('source_account_id').notNull(),
+    carriedAccountId: uuid('carried_account_id'),
+    version: bigint('version', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    // 멱등 키 (계정, 사건)으로 한 행이다. 같은 사람의 다른 계정이 같은 사건에 들어도 처음 계정의 행을 덮지 않는다(새 맥락 리뷰 M2·다시 보기)
+    primaryKey({ columns: [t.sourceAccountId, t.fraudCaseId] }),
+    // 다시 가입한 계정에 잇기(보존 중인 모든 판의 연계정보 HMAC으로 찾는다)
+    index('restricted_ci_hold_ci_idx').on(t.ciHmac),
+    index('restricted_ci_hold_carried_idx').on(t.carriedAccountId),
+    index('restricted_ci_hold_until_idx').on(t.until),
+    check('restricted_ci_hold_state_check', sql`${t.state} in ('CASE_OPEN', 'RESTRICTED')`),
+  ],
 );

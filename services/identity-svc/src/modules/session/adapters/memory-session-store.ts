@@ -200,6 +200,8 @@ export class MemorySessionStore implements SessionStore {
           .map((a) => a.id)
           .sort()
           .slice(0, limit),
+      // 메모리 세션 저장소는 보관 표를 보지 못한다(시험은 유스케이스의 앞선 확인으로 본다)
+      activeHoldOf: async () => null,
       useReauth: async (r) => {
         if (s.reauthUses.has(r.jti)) return false;
         s.reauthUses.set(r.jti, { accountId: r.accountId, usedAt: r.usedAt, expiresAt: r.expiresAt });

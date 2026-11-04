@@ -71,6 +71,13 @@
       "when": 1793783798060,
       "tag": "0009_account_withdrawal",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793786234950,
+      "tag": "0010_restricted_ci_hold",
+      "breakpoints": true
     }
   ]
 }

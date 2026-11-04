@@ -46,6 +46,18 @@ export interface ConflictAttempt {
   attemptedAt: number;
 }
 
+/** 이용 제한 중 탈퇴의 대조값 보관 행(docs/data.md restricted_ci_hold, identity §8 '대조값 보관의 첫 구현') */
+export interface HoldRow {
+  ciHmac: Buffer;
+  ciHmacKeyVersion: number;
+  fraudCaseId: string;
+  state: 'CASE_OPEN' | 'RESTRICTED';
+  until: number;
+  sourceAccountId: string;
+  carriedAccountId: string | null;
+  version: number;
+}
+
 export interface VerificationTx {
   insertAttempt(a: Attempt): Promise<void>;
   /** 건(쓰기 잠금). 없으면 null */
@@ -59,6 +71,13 @@ export interface VerificationTx {
   /** 옛 판 기록을 새 판 값으로 바꾼다(pid는 그대로, ADR-0050 결정 5) */
   updateCiHmac(accountId: string, ciHmac: Buffer, ciHmacKeyVersion: number): Promise<void>;
   insertConflictAttempt(c: ConflictAttempt): Promise<void>;
+  /** 그 계정이 남긴 그 사건의 보관 행(멱등 키 (계정, 사건), 쓰기 잠금). 없으면 null */
+  holdBySource(accountId: string, fraudCaseId: string): Promise<HoldRow | null>;
+  /** (계정, 사건) 행을 넣거나 바꾼다(연계정보 HMAC·키 판·상태·끝·판) */
+  upsertHold(row: HoldRow): Promise<void>;
+  deleteHold(sourceAccountId: string, fraudCaseId: string): Promise<void>;
+  /** 그 연계정보 HMAC들의 끝나지 않은 보관 행에 다시 가입한 계정을 적는다 */
+  carryHolds(ciHmacs: readonly Buffer[], accountId: string, now: number): Promise<void>;
   /** 그 계정 행을 공유 잠금으로 읽은 상태(탈퇴의 쓰기 잠금과 순서를 맞춘다, identity §8 '탈퇴의 첫 구현'). 계정을 보지 못하는 저장소는 null */
   lockAccountForShare(accountId: string): Promise<string | null>;
 }
@@ -110,6 +129,12 @@ export interface VerificationStore {
    * identity_verification을 지우며, 본인확인 건은 만 14세 미만 건만 남긴다. 지운 것이 있으면 true. 여러 번 불러도 된다
    */
   eraseAccount(accountId: string, now: number): Promise<boolean>;
+  /** 그 계정이 남겼거나 이은 끝나지 않은 보관 행의 상태와 끝 */
+  activeHoldsOf(accountId: string, now: number): Promise<{ state: 'CASE_OPEN' | 'RESTRICTED'; until: number }[]>;
+  /** 그 계정이 이은 RESTRICTED 보관 행 가운데 끝나지 않은 가장 늦은 끝. 없으면 null */
+  restrictedUntilOf(accountId: string, now: number): Promise<number | null>;
+  /** 끝(until)이 지난 보관 행을 지우고 지운 줄 수(정비 restricted-hold-expired) */
+  purgeExpiredHolds(now: number): Promise<number>;
   /** 보존 전용 표에서 지울 시각(처리한 날 + 1년)이 지난 처리 기록을 지우고 지운 줄 수(정비) */
   purgeVerificationRecords(now: number): Promise<number>;
 }

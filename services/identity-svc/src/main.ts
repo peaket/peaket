@@ -25,6 +25,8 @@ import {
   DrizzleVerificationStore,
   HmacIdentityHashers,
   KmsIdentityHashers,
+  restrictedCiHoldHandlers,
+  SetRestrictedCiHold,
   TestVerificationProvider,
   unavailableHashers,
   unavailableProvider,
@@ -73,6 +75,11 @@ const grpc = await startGrpcServer({
     {
       definition: identityPackage().IdentityService.service,
       handlers: identityServiceHandlers({ status: service.app.get(GetVerificationStatus) }, (method, err) => service.logger.error({ err, method }, 'IdentityService 처리 실패')),
+    },
+    // 이용 제한 중 탈퇴의 대조값 보관(ops-svc만, identity §8 '대조값 보관의 첫 구현')
+    {
+      definition: identityPackage().RestrictedCiHoldService.service,
+      handlers: restrictedCiHoldHandlers({ hold: service.app.get(SetRestrictedCiHold) }, (method, err) => service.logger.error({ err, method }, 'RestrictedCiHoldService 처리 실패')),
     },
   ],
 });

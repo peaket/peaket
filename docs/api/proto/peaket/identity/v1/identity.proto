@@ -809,7 +809,7 @@ enum RestrictedCiHoldResult {
   RESTRICTED_CI_HOLD_RESULT_OK = 1;
   // 그 계정에 본인확인 기록이 없다(본인확인 전 계정은 예매를 못 하므로 둘 것이 없다)
   RESTRICTED_CI_HOLD_RESULT_NO_VERIFICATION = 2;
-  // 저장한 판보다 작거나 같아 반영하지 않았다
+  // 저장한 판보다 작거나, 같은 판인데 내용(상태·until)이 달라 반영하지 않았다. 같은 판·같은 내용의 재전송은 OK다(추천 적용 2026-11-04, BUILD_ORDER BOT-035)
   RESTRICTED_CI_HOLD_RESULT_STALE = 3;
 }
 

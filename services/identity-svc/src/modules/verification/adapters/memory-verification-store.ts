@@ -1,6 +1,6 @@
 // 메모리 저장소(시험·로컬 시제품용). 트랜잭션은 한 번에 하나씩 돌고 실패하면 되돌린다(PostgreSQL 저장소와 같은 규칙).
 // pid 키 전환 저장소(PidRotationStore)도 함께 구현한다(identity §5 'pid 키 전환의 첫 구현').
-import type { ConflictAttempt, PidRotationRecord, PidRotationStore, VerificationRecord, VerificationStore, VerificationTx } from '../domain/ports.js';
+import type { ConflictAttempt, HoldRow, PidRotationRecord, PidRotationStore, VerificationRecord, VerificationStore, VerificationTx } from '../domain/ports.js';
 import { type Attempt, CiAlreadyLinked, plusOneYear } from '../domain/verification.js';
 
 /** 저장한 본인확인 기록(pid 판과 전환 기간의 옛 pid까지) */
@@ -23,16 +23,19 @@ interface State {
   attempts: Map<string, Attempt>;
   verifications: Map<string, StoredVerification>;
   conflicts: ConflictAttempt[];
+  holds: Map<string, HoldRow>;
 }
 
 const clone = (s: State): State => ({
   attempts: new Map([...s.attempts].map(([k, v]) => [k, { ...v }])),
   verifications: new Map([...s.verifications].map(([k, v]) => [k, { ...v }])),
   conflicts: s.conflicts.map((c) => ({ ...c })),
+  holds: new Map([...s.holds].map(([k, v]) => [k, { ...v }])),
 });
+const holdKey = (sourceAccountId: string, caseId: string) => `${sourceAccountId}|${caseId}`;
 
 export class MemoryVerificationStore implements VerificationStore, PidRotationStore {
-  #state: State = { attempts: new Map(), verifications: new Map(), conflicts: [] };
+  #state: State = { attempts: new Map(), verifications: new Map(), conflicts: [], holds: new Map() };
   #queue: Promise<unknown> = Promise.resolve();
   readonly #rotations: PidRotationRecord[] = [];
   readonly #retention = new Map<string, RetainedRecord>();
@@ -73,6 +76,20 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
         },
         // 메모리 저장소는 계정 표를 보지 못한다(시험은 유스케이스의 앞선 확인으로 본다)
         lockAccountForShare: async () => null,
+        holdBySource: async (accountId, caseId) => {
+          const h = s.holds.get(holdKey(accountId, caseId));
+          return h ? { ...h } : null;
+        },
+        upsertHold: async (row) => {
+          s.holds.set(holdKey(row.sourceAccountId, row.fraudCaseId), { ...row });
+        },
+        deleteHold: async (sourceAccountId, caseId) => {
+          s.holds.delete(holdKey(sourceAccountId, caseId));
+        },
+        carryHolds: async (hmacs, accountId, now) => {
+          // 처음 계정의 다시 본인확인은 잇지 않는다(이 행은 처음 계정의 토큰을 바꾸지 않는다, 새 맥락 리뷰 M1)
+          for (const h of s.holds.values()) if (h.until > now && h.sourceAccountId !== accountId && hmacs.some((x) => x.equals(h.ciHmac))) h.carriedAccountId = accountId;
+        },
       });
       this.#state = s;
       return out;
@@ -109,8 +126,37 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
     return n - this.#state.conflicts.length;
   }
 
+  async activeHoldsOf(accountId: string, now: number): Promise<{ state: 'CASE_OPEN' | 'RESTRICTED'; until: number }[]> {
+    return [...this.#state.holds.values()].filter((h) => h.until > now && (h.sourceAccountId === accountId || h.carriedAccountId === accountId)).map((h) => ({ state: h.state, until: h.until }));
+  }
+
+  async restrictedUntilOf(accountId: string, now: number): Promise<number | null> {
+    const u = [...this.#state.holds.values()].filter((h) => h.state === 'RESTRICTED' && h.carriedAccountId === accountId && h.until > now).map((h) => h.until);
+    return u.length ? Math.max(...u) : null;
+  }
+
+  purgeExpiredHolds(now: number): Promise<number> {
+    return this.#serial(() => {
+      let n = 0;
+      for (const [k, h] of this.#state.holds) {
+        if (h.until <= now) {
+          this.#state.holds.delete(k);
+          n++;
+        }
+      }
+      return n;
+    });
+  }
+
+  /** 시험이 보는 값: 그 계정이 남긴 보관 행 */
+  holdsOf(sourceAccountId: string): HoldRow[] {
+    return [...this.#state.holds.values()].filter((h) => h.sourceAccountId === sourceAccountId).map((h) => ({ ...h }));
+  }
+
   async ciKeyVersionsInUse(): Promise<number[]> {
-    return [...new Set([...this.#state.verifications.values()].map((v) => v.ciHmacKeyVersion))].sort((a, b) => a - b);
+    // 보관 행이 쓰는 판도 센다(그 판의 키가 없으면 다시 가입한 계정과 견주지 못한다, 새 맥락 리뷰 L3)
+    const versions = [...this.#state.verifications.values()].map((v) => v.ciHmacKeyVersion).concat([...this.#state.holds.values()].map((h) => h.ciHmacKeyVersion));
+    return [...new Set(versions)].sort((a, b) => a - b);
   }
 
   // pid 키 전환

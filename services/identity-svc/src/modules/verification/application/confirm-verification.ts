@@ -32,7 +32,19 @@ export interface VerificationResultView {
   restrictedUntil: string | null;
 }
 
-export const viewOf = (a: Attempt): VerificationResultView => ({ verificationId: a.id, purpose: a.purpose, status: a.status, next: a.next, restrictedUntil: null });
+export const viewOf = (a: Attempt, restrictedUntil: number | null = null): VerificationResultView => ({
+  verificationId: a.id,
+  purpose: a.purpose,
+  status: a.status,
+  next: a.next,
+  restrictedUntil: restrictedUntil === null ? null : new Date(restrictedUntil).toISOString(),
+});
+
+/** FIRST·REVERIFY로 VERIFIED면 같은 연계정보에서 이은 이용 제한의 끝(identity §8 '대조값 보관의 첫 구현', openapi VerificationResult.restrictedUntil) */
+export async function restrictedUntilFor(store: Pick<VerificationStore, 'restrictedUntilOf'>, a: Attempt, now: number): Promise<number | null> {
+  if (a.status !== 'VERIFIED' || (a.purpose !== 'FIRST' && a.purpose !== 'REVERIFY')) return null;
+  return store.restrictedUntilOf(a.accountId, now);
+}
 
 /** 기관 확인과 키 계산을 마친 값(트랜잭션 안에서 쓴다). pid는 새로 저장할 때만 계산해 채운다 */
 type Checked =
@@ -141,6 +153,8 @@ export class ConfirmVerification {
         // 이미 본인확인한 계정의 다시 본인확인(REVERIFY 등)은 같은 사람이어야 하고, pid는 그대로 둔다. 옛 판 기록은 쓰기 판 값으로 바꾼다
         const same = checked.hmacs.some((h) => h.version === mine.ciHmacKeyVersion && h.hmac.equals(mine.ciHmac));
         status = same ? 'VERIFIED' : 'FAILED';
+        // 다시 본인확인한 같은 사람이 이용 제한을 받은 연계정보면 이 계정에 잇는다(identity §8 '대조값 보관의 첫 구현')
+        if (same) await tx.carryHolds(checked.hmacs.map((h) => h.hmac), a.accountId, now);
         if (same && mine.ciHmacKeyVersion < write.version) await tx.updateCiHmac(a.accountId, write.hmac, write.version);
       } else if (a.purpose === 'REVERIFY') {
         // 기록이 없는 계정의 REVERIFY는 첫 기록으로 삼지 않는다(새 맥락 리뷰 낮음 6)
@@ -156,6 +170,8 @@ export class ConfirmVerification {
           verifiedAt: now,
           sourceRecord: JSON.stringify({ source: 'test-provider', purpose: a.purpose, at: new Date(now).toISOString() }),
         });
+        // 같은 연계정보로 다시 가입한 계정: 끝나지 않은 대조값 보관 행에 이 계정을 적는다(보존 중인 모든 키 판으로, identity §8 '대조값 보관의 첫 구현')
+        await tx.carryHolds(checked.hmacs.map((h) => h.hmac), a.accountId, now);
         status = 'VERIFIED';
       }
       await tx.completeAttempt(a.id, status, now);
@@ -182,6 +198,6 @@ export class ConfirmVerification {
       await this.closure.start(a.accountId, 'UNDER_14');
       throw new VerificationError('UNDER_14', '만 14세 미만이다');
     }
-    return viewOf(a);
+    return viewOf(a, await restrictedUntilFor(this.store, a, this.clock.now()));
   }
 }

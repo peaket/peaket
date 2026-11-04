@@ -2,12 +2,22 @@
 // (늦은 쪽은 CiAlreadyLinked로 되돌리고, 유스케이스가 한 번 다시 판정해 DUPLICATE_ACCOUNT와 다른 계정 시도 기록으로 마친다, BUILD_ORDER BOT-020).
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database, type DbTransaction } from '@peaket/platform';
-import { and, asc, count, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from 'drizzle-orm';
-import type { PidRotationRecord, PidRotationStore, VerificationStore, VerificationTx } from '../../domain/ports.js';
+import { and, asc, count, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
+import type { HoldRow, PidRotationRecord, PidRotationStore, VerificationStore, VerificationTx } from '../../domain/ports.js';
 import { type Attempt, CiAlreadyLinked, plusOneYear, VerificationRaced } from '../../domain/verification.js';
-import { identityConflictAttempt, identityVerification, pidKeyRotation, verificationAttempt, verificationRecord } from './schema.js';
+import { identityConflictAttempt, identityVerification, pidKeyRotation, restrictedCiHold, verificationAttempt, verificationRecord } from './schema.js';
 
 type Row = typeof verificationAttempt.$inferSelect;
+const holdOf = (r: typeof restrictedCiHold.$inferSelect): HoldRow => ({
+  ciHmac: r.ciHmac,
+  ciHmacKeyVersion: r.ciHmacKeyVersion,
+  fraudCaseId: r.fraudCaseId,
+  state: r.state as HoldRow['state'],
+  until: r.until.getTime(),
+  sourceAccountId: r.sourceAccountId,
+  carriedAccountId: r.carriedAccountId,
+  version: r.version,
+});
 const attemptOf = (r: Row): Attempt => ({
   id: r.id,
   accountId: r.accountId,
@@ -65,6 +75,28 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
       },
       updateCiHmac: async (accountId, ciHmac, ciHmacKeyVersion) => {
         await tx.update(identityVerification).set({ ciHmac, ciHmacKeyVersion }).where(eq(identityVerification.accountId, accountId));
+      },
+      holdBySource: async (accountId, caseId) => {
+        const [r] = await tx.select().from(restrictedCiHold).where(and(eq(restrictedCiHold.sourceAccountId, accountId), eq(restrictedCiHold.fraudCaseId, caseId))).for('update');
+        return r ? holdOf(r) : null;
+      },
+      upsertHold: async (h) => {
+        const v = { ciHmac: h.ciHmac, ciHmacKeyVersion: h.ciHmacKeyVersion, fraudCaseId: h.fraudCaseId, state: h.state, until: new Date(h.until), sourceAccountId: h.sourceAccountId, carriedAccountId: h.carriedAccountId, version: h.version };
+        await tx
+          .insert(restrictedCiHold)
+          .values(v)
+          .onConflictDoUpdate({ target: [restrictedCiHold.sourceAccountId, restrictedCiHold.fraudCaseId], set: { ciHmac: v.ciHmac, ciHmacKeyVersion: v.ciHmacKeyVersion, state: v.state, until: v.until, version: v.version } });
+      },
+      deleteHold: async (sourceAccountId, caseId) => {
+        await tx.delete(restrictedCiHold).where(and(eq(restrictedCiHold.sourceAccountId, sourceAccountId), eq(restrictedCiHold.fraudCaseId, caseId)));
+      },
+      carryHolds: async (hmacs, accountId, now) => {
+        if (hmacs.length === 0) return;
+        await tx
+          .update(restrictedCiHold)
+          .set({ carriedAccountId: accountId })
+          // 처음 계정의 다시 본인확인은 잇지 않는다(새 맥락 리뷰 M1)
+          .where(and(inArray(restrictedCiHold.ciHmac, [...hmacs]), gt(restrictedCiHold.until, new Date(now)), ne(restrictedCiHold.sourceAccountId, accountId)));
       },
       lockAccountForShare: async (accountId) => {
         // 계정 표는 세션 컨텍스트의 표다. 같은 DB의 같은 트랜잭션에서 상태만 읽고 공유 잠금을 건다(탈퇴의 FOR UPDATE와 순서를 맞춘다)
@@ -135,7 +167,9 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
   async ciKeyVersionsInUse(): Promise<number[]> {
     // 시작할 때 한 번 부른다. 표를 다 읽지만(판 칸에 인덱스가 없다) 파드가 뜰 때만이다 [가정, 커지면 정비 시간에 인덱스]
     const rows = await this.database.db.selectDistinct({ v: identityVerification.ciHmacKeyVersion }).from(identityVerification);
-    return rows.map((r) => r.v).sort((a, b) => a - b);
+    // 보관 행이 쓰는 판도 센다(새 맥락 리뷰 L3)
+    const held = await this.database.db.selectDistinct({ v: restrictedCiHold.ciHmacKeyVersion }).from(restrictedCiHold);
+    return [...new Set([...rows, ...held].map((r) => r.v))].sort((a, b) => a - b);
   }
 
   async claimsOf(accountId: string): Promise<{ pid: string; pidPrev?: string } | null> {
@@ -167,6 +201,27 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
         .returning({ id: verificationAttempt.id });
       return gone.length + attempts.length > 0;
     });
+  }
+
+  async activeHoldsOf(accountId: string, now: number): Promise<{ state: 'CASE_OPEN' | 'RESTRICTED'; until: number }[]> {
+    const rows = await this.database.db
+      .select({ state: restrictedCiHold.state, until: restrictedCiHold.until })
+      .from(restrictedCiHold)
+      .where(and(gt(restrictedCiHold.until, new Date(now)), or(eq(restrictedCiHold.sourceAccountId, accountId), eq(restrictedCiHold.carriedAccountId, accountId))));
+    return rows.map((r) => ({ state: r.state as 'CASE_OPEN' | 'RESTRICTED', until: r.until.getTime() }));
+  }
+
+  async restrictedUntilOf(accountId: string, now: number): Promise<number | null> {
+    const [r] = await this.database.db
+      .select({ until: sql<Date | null>`max(${restrictedCiHold.until})` })
+      .from(restrictedCiHold)
+      .where(and(eq(restrictedCiHold.carriedAccountId, accountId), eq(restrictedCiHold.state, 'RESTRICTED'), gt(restrictedCiHold.until, new Date(now))));
+    return r?.until ? new Date(r.until).getTime() : null;
+  }
+
+  async purgeExpiredHolds(now: number): Promise<number> {
+    const gone = await this.database.db.delete(restrictedCiHold).where(lte(restrictedCiHold.until, new Date(now))).returning({ id: restrictedCiHold.fraudCaseId });
+    return gone.length;
   }
 
   async purgeVerificationRecords(now: number): Promise<number> {

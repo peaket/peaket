@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-035(wbs 3.1.2 ②): 이용 제한 중 탈퇴의 `restricted_ci_hold`(`SetRestrictedCiHold`, 다시 가입한 계정에 잇기, `restrictedUntil`, I-T68), 탈퇴 409 `fraudHold`, 탈퇴 화면(SCR-017)을 재인증과 실제 API에 잇기(브라우저 확인), 탈퇴 계정의 대기열 키 5일 삭제, 탈퇴 참여자의 틀. 그 뒤 BOT-040 → BOT-045 → BOT-110~160.
+- BOT-036(wbs 3.1.2 ③): 탈퇴 화면(SCR-017)을 재인증(`POST /reauth/{provider}` → `POST /reauth/token`)과 실제 `DELETE /v1/identity/account`에 잇기(409 `fraudHold` 문구 → `acknowledgeFraudHold`), 로그인 수단 목록 API, 브라우저 확인. 그 뒤 BOT-037(탈퇴 계정의 대기열 키 5일 삭제) → BOT-040 → BOT-045 → BOT-110~160.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
@@ -30,3 +30,4 @@
 - 2026-11-04 BOT-020 키 판·만 14세·다른 계정 시도·재통과(R-269, I-T42·I-T55·I-T65): 연계정보 키 판(KMS·설정값, 쓰기 판, 시작 때 판 확인), 만 14세 미만 UNDER_14와 계정 정리 시작, 다른 계정 시도 기록, REVERIFY 재통과. BOT-020을 둘로 나눠 pid 키 전환은 BOT-025로 뒀다.
 - 2026-11-04 BOT-025 pid 키 전환과 두 키 1인 1순번(R-273, I-T49·Q-T45): identity 전환 작업(전환 기록, 이어 하기, 끝 시각 뒤 pid_prev 지우기)과 GetVerificationStatus(previous_pid), queue-svc 옛 pid → 새 pid 차례의 두 키 진입·입장 확정과 옮겨 쓰기. 화면이 없어 브라우저 확인은 하지 않았다.
 - 2026-11-04 BOT-030 탈퇴 첫 구현(R-276, I-T16·I-T27·I-T8): 재인증 토큰 1회 사용, 계정·로그인 수단·기기·본인확인 기록 파기와 세션 종료(DELETE), 연계정보 처리 기록 1년 보존 스키마, 정비 다섯(만 14세 미만 정리 마무리 포함), 정리 중 계정의 구매 권한 빼기, 끝난 세션의 리프레시 토큰 해시 지우기. 나머지는 BOT-035로 나눴다.
+- 2026-11-04 BOT-035 이용 제한 중 탈퇴의 대조값 보관(R-278, I-T68): `SetRestrictedCiHold`(판 비교·RELEASED 지우기·탈퇴한 계정의 행), 탈퇴 409 `fraudHold`와 같은 재인증 토큰으로 다시 보내기, 다시 가입한 계정에 잇기·`restrictedUntil`·제한 끝까지 구매 권한 빼기, 정비 지우기. BOT-035를 셋으로 나눠 화면 연결은 BOT-036, 대기열 키는 BOT-037로 뒀다.

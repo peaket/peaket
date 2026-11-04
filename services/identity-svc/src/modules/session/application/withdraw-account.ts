@@ -4,7 +4,7 @@
 // 다른 서비스의 정리(티켓·양도 요청·가상계좌·결제 대기 주문, docs/planning/03 §1.5)는 탈퇴 참여자가 생길 때 BUILD_ORDER BOT-035가 붙인다.
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
-import { ACCOUNT_ERASER, type AccountEraser, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_STORE, type SessionStore, type SessionTx } from '../domain/ports.js';
+import { ACCOUNT_ERASER, type AccountEraser, FRAUD_HOLDS, type FraudHolds, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_STORE, type SessionStore, type SessionTx } from '../domain/ports.js';
 import { WITHDRAWAL_REAUTH_ACT } from '../domain/session.js';
 import { AccountError } from './account-error.js';
 import { checkIds } from './end-session.js';
@@ -34,6 +34,8 @@ export class WithdrawAccount {
     @Inject(REAUTH_VERIFIER) private readonly reauth: ReauthVerifier,
     @Inject(ACCOUNT_ERASER) private readonly eraser: AccountEraser,
     @Inject(CLOCK) private readonly clock: Clock,
+    /** 대조값 보관 안내(없으면 보지 않는다: 시험) */
+    @Optional() @Inject(FRAUD_HOLDS) private readonly holds?: FraudHolds,
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
   ) {}
 
@@ -50,6 +52,9 @@ export class WithdrawAccount {
     }
     if (token.accountId.toLowerCase() !== accountId) throw new AccountError('REAUTH_REQUIRED', '재인증 토큰의 계정이 다르다');
     const now = this.clock.now();
+    // 대조값 보관 행이 살아 있으면 첫 요청은 409로 안내를 보인다. 재인증 토큰은 쓰지 않아 같은 토큰으로 acknowledgeFraudHold를 실어 다시 보낸다(ADR-0173 결정 7)
+    const hold = this.holds ? await this.holds.activeHold(accountId, now) : null;
+    if (hold && i.body.acknowledgeFraudHold !== true) throw new AccountError('CONFIRMATION_REQUIRED', '탈퇴 전 대조값 보관 안내', hold);
     await this.store.transaction(async (tx) => {
       // jti를 쓰는 것과 파기를 한 트랜잭션에: 둘 가운데 하나만 남지 않는다
       if (!(await tx.useReauth({ jti: token.jti, accountId, usedAt: now, expiresAt: token.expiresAt }))) {
@@ -59,6 +64,11 @@ export class WithdrawAccount {
       await tx.lockAccount(accountId);
       const status = await tx.accountStatusOf(accountId);
       if (status !== 'ACTIVE' && status !== 'WITHDRAWAL_PENDING') throw new AccountError('REAUTH_REQUIRED', '탈퇴할 수 있는 계정이 아니다');
+      // 잠근 뒤 한 번 더 본다: 대조값 보관 호출은 계정을 공유 잠금으로 읽으므로, 그 호출이 먼저 끝났으면 여기서 보인다(되돌리면 토큰도 쓰지 않은 것이 된다, L4)
+      if (i.body.acknowledgeFraudHold !== true) {
+        const late = await tx.activeHoldOf(accountId, now);
+        if (late) throw new AccountError('CONFIRMATION_REQUIRED', '탈퇴 전 대조값 보관 안내', late);
+      }
       await completeWithdrawal(tx, accountId, now);
     });
     try {

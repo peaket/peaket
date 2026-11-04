@@ -18,5 +18,6 @@ export function identityMaintenanceTasks(database: Database, clock: Clock): Main
     { name: 'reauth-use-expired', when: 'daily', run: () => sessions.purgeReauthUses(clock.now()) },
     { name: 'conflict-attempt-purge', when: 'window', run: () => verifications.purgeConflictAttempts(clock.now() - CONFLICT_ATTEMPT_KEEP_MS) },
     { name: 'verification-record-purge', when: 'window', run: () => verifications.purgeVerificationRecords(clock.now()) },
+    { name: 'restricted-hold-expired', when: 'daily', run: () => verifications.purgeExpiredHolds(clock.now()) },
   ];
 }
