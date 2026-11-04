@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BAS-190(wbs 0.5.4, PoC 5만석 Canvas)을 한다. BAS-180은 OPEN[18](SEED React·Storybook 설치가 공급망 규칙에 막힘)이 풀리면 나머지를 한다(제3자 고지는 끝남). 그 뒤 구간 1 갈래 2 차례(BAS-210 → BAS-220 → HOT-290~320 → HOT-340·350 → HOT-110·120 → HOT-360). 화면이 바뀌는 단계는 브라우저 확인을 한다.
+- BAS-210(wbs 0.6.4 ①, 화면 앱·공용 패키지 골격)을 한다. BAS-180은 OPEN[18](SEED React·Storybook 설치가 공급망 규칙에 막힘)이 풀리면 나머지를 한다(제3자 고지는 끝남). 그 뒤 구간 1 갈래 2 차례(BAS-220 → HOT-290~320 → HOT-340·350 → HOT-110·120 → HOT-360). 화면이 바뀌는 단계는 브라우저 확인을 한다.
 
 ## 구간 끝 정리 목록
 - 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
@@ -17,8 +17,12 @@
 - BAS-170: `docker.mjs`가 pnpm 판(12.16.0)을 `packageManager`와 따로 적는다(tools/web-checks/lib/docker.mjs)
 - BAS-170: 루트 color-scheme 재현 시험이 탐침(라이트) 화면만 본다. 운영 빌드의 관제·포렌식 첫 화면(`dark`)도 본다(tools/web-checks/seed-css/layers.spec.mjs)
 - BAS-170: PoC 빌드 서버의 `--spa index.html`이 없는 파일을 가리킨다(Vite·webpack의 dist-poc에는 탐침만 있다)(tools/web-checks/seed-css/apps.mjs)
+- BAS-190: 느리게 하기 보정식이 'Worker 시작까지'의 Worker 몫과 첫 프레임 기다림을 곱하지 않는다(지금 거짓 통과 없음). Worker 세션에도 CPU 느리게 하기를 걸 수 있는지 본다(tools/web-checks/seatmap/seatmap.spec.mjs)
+- BAS-190: PoC 받기가 압축 없는 `no-store`라 실제 길(HTTP 캐시의 brotli 풀기)을 재지 않는다. 미리 압축한 `.br`로 한 번 잰다(tools/web-checks/lib/serve.mjs)
+- BAS-190: Worker가 풀기 전 JSON 전체(`L.json`)를 붙들고 힙을 재지 않았다. 좌석 ID 열만 남기고 힙을 잰다(tools/web-checks/seatmap/page/worker.js)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3). 지난 병렬 세션 기록(PRF-010~120)은 [docs/progress-archive.md](../progress-archive.md)에 있다.
 - 2026-11-04 BAS-170 토큰 파이프라인(wbs 0.6.1, FE-T36·FE-T40·FE-T44·FE-T45): SEED CSS 3.1.0 base를 싣고 토큰 형식·대비 계산 CI, 층 순서 PoC(Turbopack 별칭이 조용히 무시되던 것과 진입점 차례를 고침, CSS 크기는 예산 초과라 기준선으로 막음), 대기실 셸 시각 회귀, CI 화면 잡을 더했다. 자세한 것은 커밋 본문.
 - 2026-11-04 BAS-180 일부(wbs 0.6.2, ADR-0040 결정 7): SEED 제3자 고지 파일과 생성·검사 스크립트를 더했다. SEED React(SEED 패키지 다섯)와 Storybook(semver 6.3.1)은 공급망 규칙 trustPolicy no-downgrade에 막혀 OPEN[18]로 물었다.
+- 2026-11-04 BAS-190 5만 석 Canvas PoC(wbs 0.5.4, K5): 열 단위 파일(객체 배열보다 압축 전 3.4배·brotli 3.0배 작음)을 Worker의 OffscreenCanvas로 풀고 그려 K5 랩 조건 Chromium에서 §5.2 예산 안이었다(다섯 번). WebKit의 튐(그리기 한 번 175ms)은 iOS 실기기 확인 목록으로 남겼다. 자세한 것은 커밋 본문.

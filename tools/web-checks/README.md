@@ -3,6 +3,7 @@
 빌드한 화면을 Playwright로 열어 보는 검사 둘이다. 시험 ID와 통과 기준은 [docs/frontend.md](../../docs/frontend.md) §5.17이 정본이다(BUILD_ORDER BAS-170).
 
 - **FE-T36 SEED CSS 층 검사**(`seed-css/`): 앱 다섯(웹·파트너·관제·스캐너·포렌식)을 `PEAKET_POC=seed-css`로 운영 빌드하면 탐침 화면(`packages/ds/src/poc/SeedLayerProbe.tsx`)이 함께 묶인다. 첫 화면 HTML이 싣는 CSS로 ① 층 차례 ② SEED 규칙이 SEED 층 안에 있는지 ③ SEED 전체 CSS가 없는지와 크기를 보고, 탐침 화면의 계산된 스타일로 ④ Tailwind 유틸이 SEED 부품을 이기고 Tailwind 초기화가 SEED 부품을 덮지 않는지를 세 엔진에서 본다. PoC 결과는 [seed-css/RESULT.md](seed-css/RESULT.md)다.
+- **K5 PoC 5만 석 Canvas**(`seatmap/`, BUILD_ORDER BAS-190): 5만 석 열 단위 좌석맵 파일을 만들어(`layout.mjs`) PoC 페이지가 Worker의 OffscreenCanvas로 풀고 그린다. docs/frontend.md §5.2 예산을 K5 랩 조건(Chromium CPU 4배)에서 보고, 다른 엔진은 기록만 한다. 결과는 [seatmap/RESULT.md](seatmap/RESULT.md)다. CI에서는 돌지 않는다(설계를 고르는 PoC. 결과 측정은 wbs 7.5.2의 FE-T10).
 - **FE-T40 시각 회귀**(`visual/`): 대기실 경량 페이지 셸의 네 상태 × 라이트·다크를 Chromium·WebKit으로 찍어 저장소의 기준 이미지(`visual/__screenshots__/`)와 견준다. 기준 이미지는 CI와 같은 Playwright 컨테이너(`lib/docker.mjs`의 `IMAGE`, 다이제스트 고정)에서만 찍는다.
 
 뿌리 작업 공간과 따로 둔 작업 공간이다(자기 `pnpm-lock.yaml`, 보안 설정은 뿌리와 같다, docs/devops.md §4.4). 검사할 앱은 뿌리 작업 공간에서 빌드한다.
@@ -15,6 +16,7 @@ node seed-css/build.mjs                     # 앱 다섯 PoC 빌드(뿌리 작�
 pnpm run seed-css                           # FE-T36(서버는 설정이 띄운다). 크기 표: node seed-css/report.mjs
 pnpm --filter @peaket/queue-room build      # (뿌리에서) 대기실 셸 빌드
 node lib/docker.mjs visual                  # FE-T40을 컨테이너에서. 기준 이미지를 바꿀 때만 --update-snapshots
+node lib/docker.mjs seatmap                 # K5 PoC를 컨테이너의 세 엔진으로(이 PC Chromium만: pnpm exec playwright test -c playwright.seatmap.config.mjs)
 ```
 
 - 이 PC(Windows)의 Firefox는 Playwright 1.64.1 판이 side-by-side 구성 오류로 뜨지 않는다(2026-11-04). 그때는 `node seed-css/serve-all.mjs`로 서버를 띄워 두고 `node lib/docker.mjs layers`로 컨테이너 안 세 엔진이 `host.docker.internal`의 서버를 보게 한다.
