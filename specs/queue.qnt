@@ -22,8 +22,10 @@
 //   (serving이 덜 나가는 쪽이라 ①~⑤와 상관없다).
 // - 탭 하나는 기기 하나이고 탭마다 요청 하나다. 같은 대기표의 요청 둘이 동시에 오는 경합(입장 Lua의 slot_of, SOON 되돌리기의 요청 표지)은
 //   모델 기반 시험이 실제 Lua 위에서 순서를 섞어 본다(wbs 2.3.4). 묶음 참가자는 사전 검증 토큰 해시라(queue-admission §3) 탭마다 따로 센다.
-// - RB-05(ADR-0181): 회차 슬롯의 세대 키(ev.node)에 마지막으로 쓴 주 노드의 설정 세대를 두고, 지금 주 노드의 설정 세대(env.primary)와 다르면
-//   장애 전환으로 본다. 건너뛰는 양 K = 바탕 값(LAG: 쓰기 하나에 번호 하나) × 설정 세대가 오른 수(1~3) + (구간이 끝났는데 묶음 표시가 없으면 참가자 수).
+// - RB-05(ADR-0181·0186): 회차 슬롯의 세대 키(ev.node)에 마지막으로 쓴 주 노드의 설정 세대를 두고, 지금 주 노드의 설정 세대(env.primary)와 다르면
+//   장애 전환으로 본다. 건너뛰는 양 K = 바탕 값(LAG: 쓰기 하나에 번호 하나) + (구간이 끝났는데 묶음 표시가 없으면 참가자 수).
+//   RB-05는 세대 키를 바꿀 때 '확인 전' 표시(ev.pend)를 함께 쓰고, 붙은 복제본이 그 쓰기까지 다 받은 뒤(WAIT, rb05Confirm) 지운다.
+//   그때까지 진입 ②와 리더의 닫기는 쓰지 않는다. 그래서 RB-05의 쓰기와 그 뒤 번호를 다음 장애 전환이 함께 잃지 않는다(소유자 결정 2026-11-04).
 //   설정 세대는 장애 전환마다 EPOCH_JUMPS 가운데 하나만큼 오른다(새로 만든 클러스터는 한 번에도 여럿 오른다, PRF-085 측정).
 //   잃은 묶음 표시는 되살리지 않고 다음 진입이나 리더가 새 카운터 위에서 다시 닫는다(ADR-0181 결정 5).
 // - 묶음 게시(publishBatch)는 리더가 표시가 복제된 것을 확인한 뒤(WAIT) 결과와 게시 표시(pub:1)를 쓰는 한 걸음이고, 참가자 탭은 그 뒤 자기 결과를
@@ -48,16 +50,16 @@ module queue {
   const ENTRY_WAITS_RB05: bool   // 세대 키가 다르면 RB-05가 끝날 때까지 번호를 내지 않고 묶음도 닫지 않음(ADR-0181 결정 1)
   // 1인 1순번 장치(PRF-060): 묶음에 넣은 뒤 사람 슬롯의 PENDING을 묶음 기록(판매 종료 수명)으로 바꾸고, ③과 묶음 기록도 q:adm이 비었는지 본다
   const ONE_PERSON_GUARDS: bool
-  const EPOCH_MULTIPLIER: bool   // RB-05가 설정 세대가 오른 수만큼 바탕 값을 곱함(ADR-0181 결정 4, RB-05 자체를 잃는 연속 장애 전환)
+  const RB05_CONFIRM: bool       // RB-05의 쓰기가 붙은 복제본에 닿은 것을 확인한 뒤에야 번호를 다시 냄(ADR-0186, RB-05 자체를 잃는 연속 장애 전환)
   const MISSING_CHECK: bool      // 게시된 묶음의 참가자 목록에 없는 참가(SADD를 잃음)의 묶음 기록을 지우고 같은 요청으로 다시 진입(batchMissing)
 
   // ---- 값 ----
   type Slot = { kind: str, tab: int, seq: int, gen: int }   // q:dup·q:adm 값. kind: NONE·PENDING·REC(번호 기록)·BATCH(묶음 기록)·ADM(입장 키)
   type PRec = { dup: Slot, adm: Slot }
   type Range = { start: int, end: int, gen: int }          // q:{event:E}:skipped 한 줄
-  // 회차 슬롯: 카운터, serving, 리더 세대, 건너뛴 구간, 빠진 번호, 묶음 닫힘 표시(첫 번호·크기·세대)·게시 표시와 참가자, 세대 키(쓴 주 노드의 설정 세대)
+  // 회차 슬롯: 카운터, serving, 리더 세대, 건너뛴 구간, 빠진 번호, 묶음 닫힘 표시(첫 번호·크기·세대)·게시 표시와 참가자, 세대 키(쓴 주 노드의 설정 세대와 RB-05 확인 전 표시)
   type Ev = { seq: int, serving: int, leader: int, skips: Set[Range], removed: Set[int],
-              closed: bool, first: int, size: int, bgen: int, pub: bool, members: Set[(int, int)], node: int }
+              closed: bool, first: int, size: int, bgen: int, pub: bool, members: Set[(int, int)], node: int, pend: bool }
   // 탭(브라우저와 그 요청을 처리하는 queue-svc). phase: IDLE·PREEMPTED·NUMBERED·SADDED(묶음에 넣고 기록 전)·BATCHED·HELD·ADMITTED·DONE(409·이탈로 끝남)
   //   입장 확정(ADMIT_STEPS): CHECKED(회차 슬롯 확인 통과)·CLAIMED(q:adm을 채움)·SLOTTED(자리를 받음)·RELEASING(q:adm 되돌리기 전, 그 뒤 after로)
   //   own: 이 요청이 q:adm을 비어 있던 데서 채웠다(그때만 되돌린다)
@@ -102,7 +104,7 @@ module queue {
 
   def curGen: int = genOf(ev)
   def tab(p: int, t: int): Tab = tabs.get((p, t))
-  def markerOk: bool = not(ENTRY_WAITS_RB05) or ev.node == env.primary
+  def markerOk: bool = not(ENTRY_WAITS_RB05) or (ev.node == env.primary and not(ev.pend))
   // 표시가 복제본에도 같다(리더는 게시 전에 같은 슬롯 쓰기 뒤 WAIT로 확인한다, ADR-0181 결정 5·PRF-090)
   def markerReplicated: bool = ev.closed and evRep.closed and evRep.first == ev.first and evRep.size == ev.size and evRep.bgen == ev.bgen
 
@@ -121,7 +123,7 @@ module queue {
 
   action init = {
     // 세대 키는 오픈 전에 회차 일정 사본을 읽는 Lua가 쓴다(ADR-0181 결정 1)
-    val ev0: Ev = { seq: 0, serving: 0, leader: 0, skips: Set(), removed: Set(), closed: false, first: 0, size: 0, bgen: 0, pub: false, members: Set(), node: 1 }
+    val ev0: Ev = { seq: 0, serving: 0, leader: 0, skips: Set(), removed: Set(), closed: false, first: 0, size: 0, bgen: 0, pub: false, members: Set(), node: 1, pend: false }
     val p0: PRec = { dup: EMPTY, adm: EMPTY }
     all {
       ev' = ev0,
@@ -360,19 +362,29 @@ module queue {
     evKeep, tabs' = tabs, ctl' = ctl,
   }
 
-  // RB-05(ADR-0181 결정 3·4·5): 세대 키가 지금 주 노드와 다를 때만, 카운터를 K만큼 건너뛰고 그 구간을 skipped에 한 줄 더한 뒤(세대 + 1) 세대 키를 바꾼다.
-  // 잃은 묶음 표시는 되살리지 않는다(그 인원만큼 더 건너뛰고, 다음 진입이나 리더가 다시 닫는다). 진입 파드와 리더 어느 쪽이 돌아도 같다
+  // RB-05(ADR-0181 결정 3·5, ADR-0186): 세대 키가 지금 주 노드와 다를 때만, 카운터를 K만큼 건너뛰고 그 구간을 skipped에 한 줄 더한 뒤(세대 + 1)
+  // 세대 키를 바꾸고 확인 전 표시를 쓴다. 잃은 묶음 표시는 되살리지 않는다(그 인원만큼 더 건너뛰고, 다음 진입이나 리더가 다시 닫는다).
+  // 진입 파드와 리더 어느 쪽이 돌아도 같다
   action rb05: bool = {
-    val gap = env.primary - ev.node
-    val times = if (EPOCH_MULTIPLIER and gap > 1) minI(gap, 3) else 1
     val lostMarker = if (OPEN_BATCH and not(env.windowOpen) and not(ev.closed)) ev.members.size() else 0
-    val k = LAG * times + lostMarker
+    val k = LAG + lostMarker
     all {
       ev.node != env.primary,
       evWrite(ev.with("seq", ev.seq + k).with("skips", ev.skips.union(Set({ start: ev.seq + 1, end: ev.seq + k, gen: curGen })))
-                .with("node", env.primary)),
+                .with("node", env.primary).with("pend", RB05_CONFIRM)),
       env' = env, psKeep, tabs' = tabs, ctl' = ctl, ghost' = ghost,
     }
+  }
+
+  // RB-05 복제 확인(ADR-0186): 세대 키가 지금 주 노드이고 확인 전이며, 붙은 복제본이 지금까지의 쓰기를 다 받았을 때(WAIT: 복제되지 않은 쓰기가 없음)
+  // 확인 전 표시를 지운다. 부른 쪽(진입 파드·리더)이 RB-05 바로 뒤에, 리더는 1초마다 다시 한다
+  action rb05Confirm: bool = all {
+    RB05_CONFIRM,
+    ev.pend,
+    ev.node == env.primary,
+    evPend.length() == 0,
+    evWrite(ev.with("pend", false)),
+    env' = env, psKeep, tabs' = tabs, ctl' = ctl, ghost' = ghost,
   }
 
   // ---- 입장 확정(queue-admission §6, ADR-0183 결정 1: 확인 → q:adm → 입장 → 마무리) ----
@@ -502,7 +514,7 @@ module queue {
     any { acquire(c), plan(c, "ADVANCE"), plan(c, "CLOSE"), applyWrite(c) },
     nondet j = EPOCH_JUMPS.oneOf()
     failoverEv(j),
-    windowEnds, publishBatch, replicateEv, rb05,
+    windowEnds, publishBatch, replicateEv, rb05, rb05Confirm,
   }
 
   // ---- 언제나 참(docs/verification.md §2.1 `queue` ①~④) ----
@@ -541,7 +553,7 @@ module queue {
     always(tabs.get(k).phase == "HELD" implies eventually(tabs.get(k).phase != "HELD" or tabs.get(k).seq <= ev.serving)),
   })
   // 공정성: 시스템이 하는 일(진입 ②③·묶음 기록·결과 받기·다시 진입 안내, 리더 루프와 묶음 게시, 복제, RB-05)과 시간의 흐름(선점 수명, 묶음 구간 끝)은 할 수 있는 동안
-  // 결국 일어난다. RB-05는 진입 ②가 RECOVERING을 받을 때와 리더가 회차마다 1초에 한 번 부른다(새 진입이 없는 조용한 회차에도, ADR-0184).
+  // 결국 일어난다. RB-05와 그 확인은 진입 ②가 RECOVERING을 받을 때와 리더가 회차마다 1초에 한 번 부른다(새 진입이 없는 조용한 회차에도, ADR-0184·0186).
   // 사람의 동작(진입 시작·이탈·입장 확정)과 장애 전환에는 두지 않는다
   temporal fairness = and {
     TICKETS.forall(k => and {
@@ -550,7 +562,7 @@ module queue {
     }),
     PERSONS.forall(p => and { weakFair(pendingExpires(p), vars), weakFair(replicatePerson(p), vars) }),
     CTRLS.forall(c => and { weakFair(acquire(c), vars), weakFair(plan(c, "ADVANCE"), vars), weakFair(plan(c, "CLOSE"), vars), weakFair(applyWrite(c), vars) }),
-    weakFair(windowEnds, vars), weakFair(publishBatch, vars), weakFair(replicateEv, vars), weakFair(rb05, vars),
+    weakFair(windowEnds, vars), weakFair(publishBatch, vars), weakFair(replicateEv, vars), weakFair(rb05, vars), weakFair(rb05Confirm, vars),
   }
   temporal fairLiveness = fairness implies liveness
 }
@@ -570,7 +582,7 @@ module queue_canon {
   import queue(TICKETS = Set((1, 1), (1, 2), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = true, MAX_LEADER_CHANGES = 0,
                LAG = 1, EPOCH_JUMPS = Set(1), OPEN_BATCH = true, ADMIT_STEPS = true,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
 // 정본이 묶음 기록을 정하기 전(2026-11-02)에는 1인 1순번 장치가 없어 ⑤ 반례(결과 게시 전에 선점이 만료돼 같은 사람이 대기표를 하나 더 받음)가 나왔다.
@@ -579,7 +591,7 @@ module queue_canon_batch_dup {
   import queue(TICKETS = Set((1, 1), (1, 2), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = true, MAX_LEADER_CHANGES = 0,
                LAG = 1, EPOCH_JUMPS = Set(1), OPEN_BATCH = true, ADMIT_STEPS = false,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
 // 진입 범위(전수 검사)
@@ -587,7 +599,7 @@ module queue_proposed {
   import queue(TICKETS = Set((1, 1), (1, 2), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = true, MAX_LEADER_CHANGES = 0,
                LAG = 1, EPOCH_JUMPS = Set(1), OPEN_BATCH = true, ADMIT_STEPS = false,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
 // RB-05를 기다리지 않는 변형(반례 기대): RB-05 전에도 번호를 낸다(2026-11-02 정본 그대로). 이 장치가 살아 있는지 본다(ADR-0181)
@@ -595,7 +607,7 @@ module queue_no_rb05_wait {
   import queue(TICKETS = Set((1, 1), (1, 2), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = true, MAX_LEADER_CHANGES = 0,
                LAG = 1, EPOCH_JUMPS = Set(1), OPEN_BATCH = true, ADMIT_STEPS = false,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = false, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
 // 리더 범위
@@ -603,7 +615,7 @@ module queue_leader {
   import queue(TICKETS = Set((1, 1)), CTRLS = Set(1, 2), MAX_FAILOVERS = 2, PERSON_FAILOVERS = false, MAX_LEADER_CHANGES = 2,
                LAG = 1, EPOCH_JUMPS = Set(1), OPEN_BATCH = true, ADMIT_STEPS = false,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
 // 입장 확정 범위(PRF-120): 장애 전환으로 대기표를 두 장 받은 사람의 두 탭이 네 호출을 섞어 보낸다
@@ -611,7 +623,7 @@ module queue_admit {
   import queue(TICKETS = Set((1, 1), (1, 2)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = true, MAX_LEADER_CHANGES = 0,
                LAG = 1, EPOCH_JUMPS = Set(1), OPEN_BATCH = false, ADMIT_STEPS = true,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
 // 복제 지연 두 쓰기 범위(PRF-120): RB-05의 쓰기와 그 뒤 번호를 함께 잃는 연속 장애 전환
@@ -619,7 +631,7 @@ module queue_lag2 {
   import queue(TICKETS = Set((1, 1), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = false, MAX_LEADER_CHANGES = 0,
                LAG = 2, EPOCH_JUMPS = Set(1), OPEN_BATCH = true, ADMIT_STEPS = false,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
 // 정본 범위 전체(시뮬레이션만)
@@ -627,7 +639,7 @@ module queue_proposed_full {
   import queue(TICKETS = Set((1, 1), (1, 2), (2, 1), (2, 2)), CTRLS = Set(1, 2), MAX_FAILOVERS = 2, PERSON_FAILOVERS = true, MAX_LEADER_CHANGES = 2,
                LAG = 1, EPOCH_JUMPS = Set(1, 3), OPEN_BATCH = true, ADMIT_STEPS = true,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
 // 진행성 범위(PRF-120, TLC 진행성 검사)
@@ -635,7 +647,7 @@ module queue_live {
   import queue(TICKETS = Set((1, 1), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 1, PERSON_FAILOVERS = false, MAX_LEADER_CHANGES = 0,
                LAG = 1, EPOCH_JUMPS = Set(1), OPEN_BATCH = true, ADMIT_STEPS = false,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
 // 변형(검사가 살아 있는지, V-T1): 하나씩 끄면 그 불변식의 반례가 나와야 한다
@@ -643,29 +655,29 @@ module queue_no_fencing {
   import queue(TICKETS = Set((1, 1)), CTRLS = Set(1, 2), MAX_FAILOVERS = 2, PERSON_FAILOVERS = false, MAX_LEADER_CHANGES = 2,
                LAG = 1, EPOCH_JUMPS = Set(1), OPEN_BATCH = true, ADMIT_STEPS = false,
                FENCING = false, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
 module queue_no_serving_check {
   import queue(TICKETS = Set((1, 1), (1, 2), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = true, MAX_LEADER_CHANGES = 0,
                LAG = 1, EPOCH_JUMPS = Set(1), OPEN_BATCH = true, ADMIT_STEPS = false,
                FENCING = true, SERVING_CHECK = false, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
 module queue_no_admission_recheck {
   import queue(TICKETS = Set((1, 1), (1, 2), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = true, MAX_LEADER_CHANGES = 0,
                LAG = 1, EPOCH_JUMPS = Set(1), OPEN_BATCH = true, ADMIT_STEPS = false,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = false, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }
 
-// 설정 세대 곱하기를 뺀 변형(반례 기대, PRF-120): RB-05의 쓰기와 그 뒤 번호를 함께 잃으면 다음 RB-05가 같은 번호·세대를 다시 낸다(ADR-0181 결정 4)
-module queue_lag2_no_multiplier {
+// RB-05 복제 확인을 뺀 변형(반례 기대, ADR-0186): RB-05의 쓰기와 그 뒤 번호를 다음 장애 전환이 함께 잃으면 다음 RB-05가 같은 번호·세대를 다시 낸다
+module queue_lag2_no_confirm {
   import queue(TICKETS = Set((1, 1), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = false, MAX_LEADER_CHANGES = 0,
                LAG = 2, EPOCH_JUMPS = Set(1), OPEN_BATCH = false, ADMIT_STEPS = false,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = false, MISSING_CHECK = true).*
+               RB05_CONFIRM = false, MISSING_CHECK = true).*
 }
 
 // 다시 진입을 뺀 변형(진행성 반례 기대, PRF-120): SADD를 잃은 묶음 참가자가 번호도 다시 진입도 없이 남는다
@@ -673,15 +685,14 @@ module queue_live_no_missing_check {
   import queue(TICKETS = Set((1, 1), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 1, PERSON_FAILOVERS = false, MAX_LEADER_CHANGES = 0,
                LAG = 1, EPOCH_JUMPS = Set(1), OPEN_BATCH = true, ADMIT_STEPS = false,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = false).*
+               RB05_CONFIRM = true, MISSING_CHECK = false).*
 }
 
-// 설정 세대가 한 번에 여럿 오르는 복제 지연 두 쓰기 범위(반례 기대, PRF-120 새 맥락 리뷰): 첫 장애 전환에서 설정 세대가 3 이상 오르면 곱하기 상한 3을
-// 이미 다 써서, RB-05의 쓰기와 그 뒤 번호를 함께 잃은 다음 RB-05가 같은 구간을 건너뛰어 같은 번호·세대를 다시 낸다. 설정 세대 차는 잃은 RB-05 수를
-// 세지 못한다(새로 만든 클러스터는 한 번에도 3 이상, ADR-0181 '측정'). 고칠 길은 docs/review/open-items.md 105번(소유자 결정 대기)
+// 설정 세대가 한 번에 여럿 오르는 복제 지연 두 쓰기 범위(지켜짐 기대, ADR-0186): 처음의 곱하기(상한 3)는 첫 장애 전환에서 설정 세대가 3 이상 오르면
+// RB-05와 그 뒤 번호를 함께 잃은 다음 같은 번호·세대를 다시 냈다(PRF-120 새 맥락 리뷰, open-items 105번). 복제 확인 뒤 재개로 바꿔 지켜진다
 module queue_lag2_jump {
   import queue(TICKETS = Set((1, 1), (2, 1)), CTRLS = Set(1), MAX_FAILOVERS = 2, PERSON_FAILOVERS = false, MAX_LEADER_CHANGES = 0,
                LAG = 2, EPOCH_JUMPS = Set(1, 3), OPEN_BATCH = false, ADMIT_STEPS = false,
                FENCING = true, SERVING_CHECK = true, ADMISSION_RECHECK = true, ENTRY_WAITS_RB05 = true, ONE_PERSON_GUARDS = true,
-               EPOCH_MULTIPLIER = true, MISSING_CHECK = true).*
+               RB05_CONFIRM = true, MISSING_CHECK = true).*
 }

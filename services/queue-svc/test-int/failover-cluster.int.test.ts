@@ -28,7 +28,7 @@ afterAll(async () => {
 
 const cmd = (key: string, args: string[]) => redis.command(args, { key });
 
-async function open(): Promise<{ eventId: string; go: (i: number) => Promise<unknown> }> {
+async function open(): Promise<{ eventId: string; go: (i: number) => Promise<unknown>; settled: () => Promise<void> }> {
   const eventId = newEvent();
   const s = openSchedule(Date.now());
   const k = keys.cfg(eventId);
@@ -36,7 +36,7 @@ async function open(): Promise<{ eventId: string; go: (i: number) => Promise<unk
   const enter = new EnterQueue(new RedisEntryStore(redis), new RedisEventSchedules(redis, systemClock), tokens, systemClock, { pendingTtlMs: 300, rb05SkipBase: SKIP });
   const go = (i: number) =>
     enter.run({ accountId: ACCOUNT, pid: `pid-cl-${i}-${eventId}`.slice(0, 64), eventId, body: { preverifyToken: preverifyToken(systemClock, eventId), deviceId: DEVICE, entryRequestId: newRequest() } });
-  return { eventId, go };
+  return { eventId, go, settled: () => enter.confirmsSettled() };
 }
 const node = async (eventId: string) => String(await cmd(keys.epoch(eventId), ['HGET', keys.epoch(eventId), 'node']));
 /** 세대 키에 옛 표지를 쓴다. 실제 승격은 몇 초가 걸리므로 마지막으로 설정 세대까지 견준 초(chk)도 지난 값으로 둔다 */
@@ -68,19 +68,15 @@ test('옛주노드가다시주노드가되면_노드ID가같아도설정세대�
   expect(await node(eventId)).toBe(`${myId}:${CONFIG_EPOCH}`);
 });
 
-test('[Q-T13] 설정세대가둘이상올랐으면_사이에사라진주노드의RB05와번호를덮게바탕값을그만큼곱해건너뛴다', async () => {
-  const { eventId, go } = await open();
+test('[Q-T13] 설정세대가여럿올라도_곱하지않고바탕값만건너뛰며_붙은복제본이없으면바로확인해다음진입이번호를받는다(ADR-0186)', async () => {
+  const { eventId, go, settled } = await open();
   await go(0);
-  // 세대 키는 두 번 전의 주 노드(설정 세대 3)가 쓴 그대로다: 그 사이 주 노드(4)의 RB-05와 번호를 잃었다
-  await older(eventId, `0123456789abcdef0123456789abcdef01234567:${CONFIG_EPOCH - 2}`);
-  await expect(go(1)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
-  expect(await skipped(eventId)).toEqual([`2:${1 + 2 * SKIP}:1`]);
-});
-
-test('설정세대는다른샤드의장애전환으로도쌓이므로_곱하는수는3에서자른다', async () => {
-  const { eventId, go } = await open();
-  await go(0);
+  // 세대 키는 두 번 전의 주 노드가 쓴 그대로다. RB-05는 복제를 확인한 뒤에만 번호를 내므로 사이 주 노드가 낸 번호가 없다
   await older(eventId, `0123456789abcdef0123456789abcdef01234567:${CONFIG_EPOCH - 4}`);
   await expect(go(1)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
-  expect(await skipped(eventId)).toEqual([`2:${1 + 3 * SKIP}:1`]);
+  expect(await skipped(eventId)).toEqual([`2:${1 + SKIP}:1`]);
+  // 복제 확인은 요청 밖에서 돈다(요청은 기다리지 않고 바로 503): 끝나기를 기다린 뒤에 표시가 지워졌다
+  await settled();
+  expect(await cmd(keys.epoch(eventId), ['HGET', keys.epoch(eventId), 'pend'])).toBeNull();
+  await expect(go(2)).resolves.toMatchObject({ kind: 'TICKET', seq: 2 + SKIP, generation: 2 });
 });

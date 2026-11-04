@@ -1,7 +1,7 @@
 // 시험용 진입 저장소와 회차 일정 사본. Valkey의 Lua(redis-entry-store.ts)와 같은 규칙을 메모리로 둔다(같은 사례를 test/entry-cases.ts·batch-cases.ts가 둘 다에 돈다).
 // 서버 시각은 주입한 시계다(Lua는 Redis TIME을 쓴다).
 import type { Clock } from '@peaket/platform';
-import type { BatchedEntry, BatchOutcome, EntryStore, EventSchedules, NumberBatchInput, NumberInput, NumberResult, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
+import type { BatchedEntry, BatchOutcome, EntryStore, EventSchedules, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
 import { BATCH_NO, type EventSchedule, type ReasonCategory, REASONS } from '../domain/queue.js';
 
 const RECORDED = /^(\d+):(\d+):([^:]+):([^:]*):([^:]*)$/;
@@ -38,6 +38,9 @@ export class MemoryEntryStore implements EntryStore {
   /** 세대 키(회차 → 노드 표지 '{ID}:{설정 세대}')와 지금 노드 표지. 시험이 failoverForTest로 지금 노드를 바꾼다(ADR-0181) */
   readonly #epoch = new Map<string, string>();
   #node = 'node-1:1';
+  /** RB-05가 건너뛰었고 복제 확인 전인 회차(세대 키의 pend, ADR-0186). 복제본이 없는 메모리 저장소라 확인은 곧바로 되고, 시험이 blockConfirmForTest로 막는다 */
+  readonly #pend = new Set<string>();
+  #confirmBlocked = false;
 
   constructor(private readonly clock: Clock) {}
 
@@ -84,6 +87,7 @@ export class MemoryEntryStore implements EntryStore {
     const held = this.#epoch.get(i.eventId);
     if (held === undefined) this.#epoch.set(i.eventId, this.#node);
     else if (held !== this.#node) return i.items.map(() => ({ kind: 'RECOVERING' }));
+    if (this.#pend.has(i.eventId)) return i.items.map(() => ({ kind: 'RECOVERING' }));
     const now = this.clock.now();
     if (i.opensAtMs !== undefined && now < i.opensAtMs) return i.items.map(() => ({ kind: 'EARLY' }));
     const gen = (this.#skipped.get(i.eventId)?.length ?? 0) + 1;
@@ -118,16 +122,14 @@ export class MemoryEntryStore implements EntryStore {
 
   async rb05(i: Rb05Input): Promise<Rb05Result> {
     const held = this.#epoch.get(i.eventId);
-    if (held === this.#node) return { kind: 'DONE' };
+    if (held === this.#node) return this.#pend.has(i.eventId) ? { kind: 'PENDING' } : { kind: 'DONE' };
     const now = this.clock.now();
     if (now < i.opensAtMs && !this.#seq.has(i.eventId)) {
       this.#epoch.set(i.eventId, this.#node);
       return { kind: 'DONE' };
     }
     const done = this.#doneOf(i.eventId);
-    const was = held === undefined ? NaN : Number(held.split(':')[1]);
-    const cur = Number(this.#node.split(':')[1]);
-    let k = i.skipBase * (cur - was > 1 ? Math.min(cur - was, 3) : 1);
+    let k = i.skipBase;
     if (i.lobbyShuffle && !done.has('lobby')) k += this.#lobby.get(i.eventId)?.size ?? 0;
     if (i.openBatch && now >= (i.closeAtMs ?? 0) && !done.has(String(BATCH_NO))) k += this.#members.get(i.eventId)?.size ?? 0;
     const seq = this.#seq.get(i.eventId) ?? 0;
@@ -136,7 +138,15 @@ export class MemoryEntryStore implements EntryStore {
     this.#skipped.set(i.eventId, [...lines, `${seq + 1}:${seq + k}:${gen}`]);
     this.#seq.set(i.eventId, seq + k);
     this.#epoch.set(i.eventId, this.#node);
+    this.#pend.add(i.eventId);
     return { kind: 'SKIPPED', start: seq + 1, end: seq + k, gen: gen + 1 };
+  }
+
+  async confirmRb05(i: { eventId: string }): Promise<Rb05Confirm> {
+    if (this.#epoch.get(i.eventId) !== this.#node || !this.#pend.has(i.eventId)) return 'NONE';
+    if (this.#confirmBlocked) return 'WAITING';
+    this.#pend.delete(i.eventId);
+    return 'CONFIRMED';
   }
 
   async number(i: NumberInput): Promise<NumberResult> {
@@ -236,11 +246,17 @@ export class MemoryEntryStore implements EntryStore {
     const [id, e] = this.#node.split(':');
     this.#node = `node-${Number(id!.slice(5)) + 1}:${Number(e) + 1}`;
   }
-  /** 장애 전환으로 잃은 쓰기를 흉내 낸다: 카운터·건너뛴 구간·세대 키를 그 값으로 되돌린다 */
-  rollbackForTest(eventId: string, to: { seq: number; skipped: string[]; epoch: string }): void {
+  /** 장애 전환으로 잃은 쓰기를 흉내 낸다: 카운터·건너뛴 구간·세대 키(확인 전 표시 포함, 주지 않으면 없음)를 그 값으로 되돌린다 */
+  rollbackForTest(eventId: string, to: { seq: number; skipped: string[]; epoch: string; pend?: boolean }): void {
     this.#seq.set(eventId, to.seq);
     this.#skipped.set(eventId, [...to.skipped]);
     this.#epoch.set(eventId, to.epoch);
+    if (to.pend) this.#pend.add(eventId);
+    else this.#pend.delete(eventId);
+  }
+  /** 붙은 복제본이 RB-05의 쓰기를 받지 못하는 것을 흉내 낸다(확인이 WAITING) */
+  blockConfirmForTest(on: boolean): void {
+    this.#confirmBlocked = on;
   }
   epochOf(eventId: string): string | undefined {
     return this.#epoch.get(eventId);

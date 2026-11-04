@@ -12,7 +12,8 @@ State 1: <Initial predicate>
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -32,7 +33,8 @@ State 1: <Initial predicate>
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -53,7 +55,7 @@ State 1: <Initial predicate>
       [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
 /\ queue_no_admission_recheck_queue_evPend = <<>>
 
-State 2: <queue_no_admission_recheck_queue_enterPreempt(1,1) line 555, col 3 to line 589, col 47 of module queue_no_admission_recheck>
+State 2: <queue_no_admission_recheck_queue_enterPreempt(1,1) line 557, col 3 to line 591, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -65,7 +67,8 @@ State 2: <queue_no_admission_recheck_queue_enterPreempt(1,1) line 555, col 3 to 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -85,7 +88,8 @@ State 2: <queue_no_admission_recheck_queue_enterPreempt(1,1) line 555, col 3 to 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -110,7 +114,7 @@ State 2: <queue_no_admission_recheck_queue_enterPreempt(1,1) line 555, col 3 to 
       [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
 /\ queue_no_admission_recheck_queue_evPend = <<>>
 
-State 3: <queue_no_admission_recheck_queue_pendingExpires(1) line 988, col 3 to line 1009, col 47 of module queue_no_admission_recheck>
+State 3: <queue_no_admission_recheck_queue_pendingExpires(1) line 990, col 3 to line 1011, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -122,7 +126,8 @@ State 3: <queue_no_admission_recheck_queue_pendingExpires(1) line 988, col 3 to 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -142,7 +147,8 @@ State 3: <queue_no_admission_recheck_queue_pendingExpires(1) line 988, col 3 to 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -167,7 +173,7 @@ State 3: <queue_no_admission_recheck_queue_pendingExpires(1) line 988, col 3 to 
       [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
 /\ queue_no_admission_recheck_queue_evPend = <<>>
 
-State 4: <queue_no_admission_recheck_queue_windowEnds line 1232, col 3 to line 1242, col 47 of module queue_no_admission_recheck>
+State 4: <queue_no_admission_recheck_queue_windowEnds line 1234, col 3 to line 1244, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -179,7 +185,8 @@ State 4: <queue_no_admission_recheck_queue_windowEnds line 1232, col 3 to line 1
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -199,7 +206,8 @@ State 4: <queue_no_admission_recheck_queue_windowEnds line 1232, col 3 to line 1
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -224,7 +232,7 @@ State 4: <queue_no_admission_recheck_queue_windowEnds line 1232, col 3 to line 1
       [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
 /\ queue_no_admission_recheck_queue_evPend = <<>>
 
-State 5: <queue_no_admission_recheck_queue_enterNumber(1,1) line 1287, col 3 to line 1348, col 45 of module queue_no_admission_recheck>
+State 5: <queue_no_admission_recheck_queue_enterNumber(1,1) line 1289, col 3 to line 1350, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -236,7 +244,8 @@ State 5: <queue_no_admission_recheck_queue_enterNumber(1,1) line 1287, col 3 to 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -256,7 +265,8 @@ State 5: <queue_no_admission_recheck_queue_enterNumber(1,1) line 1287, col 3 to 
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -290,9 +300,10 @@ State 5: <queue_no_admission_recheck_queue_enterNumber(1,1) line 1287, col 3 to 
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 6: <queue_no_admission_recheck_queue_enterRecord(1,1) line 1370, col 3 to line 1419, col 45 of module queue_no_admission_recheck>
+State 6: <queue_no_admission_recheck_queue_enterRecord(1,1) line 1372, col 3 to line 1421, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -304,7 +315,8 @@ State 6: <queue_no_admission_recheck_queue_enterRecord(1,1) line 1370, col 3 to 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -324,7 +336,8 @@ State 6: <queue_no_admission_recheck_queue_enterRecord(1,1) line 1370, col 3 to 
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1]},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -354,9 +367,10 @@ State 6: <queue_no_admission_recheck_queue_enterRecord(1,1) line 1370, col 3 to 
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 7: <queue_no_admission_recheck_queue_failoverPerson(1) line 1045, col 3 to line 1117, col 45 of module queue_no_admission_recheck>
+State 7: <queue_no_admission_recheck_queue_failoverPerson(1) line 1047, col 3 to line 1119, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -368,7 +382,8 @@ State 7: <queue_no_admission_recheck_queue_failoverPerson(1) line 1045, col 3 to
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -388,7 +403,8 @@ State 7: <queue_no_admission_recheck_queue_failoverPerson(1) line 1045, col 3 to
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1]},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -418,9 +434,10 @@ State 7: <queue_no_admission_recheck_queue_failoverPerson(1) line 1045, col 3 to
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 8: <queue_no_admission_recheck_queue_enterPreempt(1,2) line 555, col 3 to line 589, col 47 of module queue_no_admission_recheck>
+State 8: <queue_no_admission_recheck_queue_enterPreempt(1,2) line 557, col 3 to line 591, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -432,7 +449,8 @@ State 8: <queue_no_admission_recheck_queue_enterPreempt(1,2) line 555, col 3 to 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -452,7 +470,8 @@ State 8: <queue_no_admission_recheck_queue_enterPreempt(1,2) line 555, col 3 to 
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1]},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -486,9 +505,10 @@ State 8: <queue_no_admission_recheck_queue_enterPreempt(1,2) line 555, col 3 to 
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 9: <queue_no_admission_recheck_queue_enterNumber(1,2) line 1287, col 3 to line 1348, col 45 of module queue_no_admission_recheck>
+State 9: <queue_no_admission_recheck_queue_enterNumber(1,2) line 1289, col 3 to line 1350, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 1,
   serving |-> 0,
   leader |-> 0,
@@ -500,7 +520,8 @@ State 9: <queue_no_admission_recheck_queue_enterNumber(1,2) line 1287, col 3 to 
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -520,7 +541,8 @@ State 9: <queue_no_admission_recheck_queue_enterNumber(1,2) line 1287, col 3 to 
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1]},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -554,9 +576,10 @@ State 9: <queue_no_admission_recheck_queue_enterNumber(1,2) line 1287, col 3 to 
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 10: <queue_no_admission_recheck_queue_enterRecord(1,2) line 1370, col 3 to line 1419, col 45 of module queue_no_admission_recheck>
+State 10: <queue_no_admission_recheck_queue_enterRecord(1,2) line 1372, col 3 to line 1421, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 1,
   serving |-> 0,
   leader |-> 0,
@@ -568,7 +591,8 @@ State 10: <queue_no_admission_recheck_queue_enterRecord(1,2) line 1370, col 3 to
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -588,7 +612,8 @@ State 10: <queue_no_admission_recheck_queue_enterRecord(1,2) line 1370, col 3 to
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |->
       { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
         [tab |-> 2, seq |-> 2, gen |-> 1, pid |-> 1] },
@@ -620,9 +645,10 @@ State 10: <queue_no_admission_recheck_queue_enterRecord(1,2) line 1370, col 3 to
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 11: <queue_no_admission_recheck_queue_acquire(1) line 1123, col 3 to line 1152, col 47 of module queue_no_admission_recheck>
+State 11: <queue_no_admission_recheck_queue_acquire(1) line 1125, col 3 to line 1154, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 1,
   serving |-> 0,
   leader |-> 0,
@@ -634,7 +660,8 @@ State 11: <queue_no_admission_recheck_queue_acquire(1) line 1123, col 3 to line 
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -654,7 +681,8 @@ State 11: <queue_no_admission_recheck_queue_acquire(1) line 1123, col 3 to line 
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |->
       { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
         [tab |-> 2, seq |-> 2, gen |-> 1, pid |-> 1] },
@@ -686,9 +714,10 @@ State 11: <queue_no_admission_recheck_queue_acquire(1) line 1123, col 3 to line 
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 12: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to line 1704, col 45 of module queue_no_admission_recheck>
+State 12: <queue_no_admission_recheck_queue_applyWrite(1) line 1668, col 3 to line 1706, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 0,
   leader |-> 0,
@@ -700,7 +729,8 @@ State 12: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to li
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -720,7 +750,8 @@ State 12: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to li
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |->
       { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
         [tab |-> 2, seq |-> 2, gen |-> 1, pid |-> 1] },
@@ -752,9 +783,10 @@ State 12: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to li
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 13: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1158, col 3 to line 1194, col 47 of module queue_no_admission_recheck>
+State 13: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1160, col 3 to line 1196, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 0,
   leader |-> 0,
@@ -766,7 +798,8 @@ State 13: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1158, col 3 t
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -786,7 +819,8 @@ State 13: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1158, col 3 t
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |->
       { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
         [tab |-> 2, seq |-> 2, gen |-> 1, pid |-> 1] },
@@ -818,9 +852,10 @@ State 13: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1158, col 3 t
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 14: <queue_no_admission_recheck_queue_publishBatch line 1710, col 3 to line 1725, col 47 of module queue_no_admission_recheck>
+State 14: <queue_no_admission_recheck_queue_publishBatch line 1712, col 3 to line 1727, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 0,
   leader |-> 1,
@@ -832,7 +867,8 @@ State 14: <queue_no_admission_recheck_queue_publishBatch line 1710, col 3 to lin
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -852,7 +888,8 @@ State 14: <queue_no_admission_recheck_queue_publishBatch line 1710, col 3 to lin
   bgen |-> 1,
   pub |-> TRUE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |->
       { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
         [tab |-> 2, seq |-> 2, gen |-> 1, pid |-> 1] },
@@ -884,9 +921,10 @@ State 14: <queue_no_admission_recheck_queue_publishBatch line 1710, col 3 to lin
      bgen |-> 1,
      pub |-> TRUE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 15: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to line 1704, col 45 of module queue_no_admission_recheck>
+State 15: <queue_no_admission_recheck_queue_applyWrite(1) line 1668, col 3 to line 1706, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 0,
   leader |-> 1,
@@ -898,7 +936,8 @@ State 15: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to li
   bgen |-> 1,
   pub |-> TRUE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -918,7 +957,8 @@ State 15: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to li
   bgen |-> 1,
   pub |-> TRUE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |->
       { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
         [tab |-> 2, seq |-> 2, gen |-> 1, pid |-> 1] },
@@ -950,9 +990,10 @@ State 15: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to li
      bgen |-> 1,
      pub |-> TRUE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 16: <queue_no_admission_recheck_queue_admit(1,1) line 1495, col 3 to line 1547, col 45 of module queue_no_admission_recheck>
+State 16: <queue_no_admission_recheck_queue_admit(1,1) line 1497, col 3 to line 1549, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 0,
   leader |-> 1,
@@ -964,7 +1005,8 @@ State 16: <queue_no_admission_recheck_queue_admit(1,1) line 1495, col 3 to line 
   bgen |-> 1,
   pub |-> TRUE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 2, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -984,7 +1026,8 @@ State 16: <queue_no_admission_recheck_queue_admit(1,1) line 1495, col 3 to line 
   bgen |-> 1,
   pub |-> TRUE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |->
       { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
         [tab |-> 2, seq |-> 2, gen |-> 1, pid |-> 1] },
@@ -1020,9 +1063,10 @@ State 16: <queue_no_admission_recheck_queue_admit(1,1) line 1495, col 3 to line 
      bgen |-> 1,
      pub |-> TRUE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 17: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1158, col 3 to line 1194, col 47 of module queue_no_admission_recheck>
+State 17: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1160, col 3 to line 1196, col 47 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 0,
   leader |-> 1,
@@ -1034,7 +1078,8 @@ State 17: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1158, col 3 t
   bgen |-> 1,
   pub |-> TRUE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 2, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -1054,7 +1099,8 @@ State 17: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1158, col 3 t
   bgen |-> 1,
   pub |-> TRUE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |->
       { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
         [tab |-> 2, seq |-> 2, gen |-> 1, pid |-> 1] },
@@ -1090,9 +1136,10 @@ State 17: <queue_no_admission_recheck_queue_plan(1,"ADVANCE") line 1158, col 3 t
      bgen |-> 1,
      pub |-> TRUE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 18: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to line 1704, col 45 of module queue_no_admission_recheck>
+State 18: <queue_no_admission_recheck_queue_applyWrite(1) line 1668, col 3 to line 1706, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 1,
   leader |-> 1,
@@ -1104,7 +1151,8 @@ State 18: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to li
   bgen |-> 1,
   pub |-> TRUE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 2, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -1124,7 +1172,8 @@ State 18: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to li
   bgen |-> 1,
   pub |-> TRUE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |->
       { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
         [tab |-> 2, seq |-> 2, gen |-> 1, pid |-> 1] },
@@ -1160,9 +1209,10 @@ State 18: <queue_no_admission_recheck_queue_applyWrite(1) line 1666, col 3 to li
      bgen |-> 1,
      pub |-> TRUE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 19: <queue_no_admission_recheck_queue_admit(1,2) line 1495, col 3 to line 1547, col 45 of module queue_no_admission_recheck>
+State 19: <queue_no_admission_recheck_queue_admit(1,2) line 1497, col 3 to line 1549, col 45 of module queue_no_admission_recheck>
 /\ queue_no_admission_recheck_queue_evRep = [ seq |-> 2,
   serving |-> 1,
   leader |-> 1,
@@ -1174,7 +1224,8 @@ State 19: <queue_no_admission_recheck_queue_admit(1,2) line 1495, col 3 to line 
   bgen |-> 1,
   pub |-> TRUE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_pssRep = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 2, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -1194,7 +1245,8 @@ State 19: <queue_no_admission_recheck_queue_admit(1,2) line 1495, col 3 to line 
   bgen |-> 1,
   pub |-> TRUE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_admission_recheck_queue_ghost = [ issued |->
       { [tab |-> 1, seq |-> 1, gen |-> 1, pid |-> 1],
         [tab |-> 2, seq |-> 2, gen |-> 1, pid |-> 1] },
@@ -1234,4 +1286,5 @@ State 19: <queue_no_admission_recheck_queue_admit(1,2) line 1495, col 3 to line 
      bgen |-> 1,
      pub |-> TRUE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>

@@ -10,7 +10,7 @@
 // 메서드 이름은 명세의 동작 이름이다. 결과로 탭 상태(명세 Tab)를 바꾸고, 불변식 ①~⑤와 입장 키 유지를 관측으로 센다(violations).
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
-import { type Clock, type HotRedis, redisScript, systemClock } from '@peaket/platform';
+import { type CallOptions, type Clock, type HotRedis, type RedisScript, redisScript, systemClock } from '@peaket/platform';
 import { combinedKey, merkleRoot, shuffle, sortHashes } from '@peaket/shuffle';
 import type { Scheduler } from 'fast-check';
 import { Es256AdmissionTokens } from '../../../queue-svc/src/modules/admission/adapters/es256-admission-tokens.js';
@@ -125,9 +125,17 @@ export const debug = (line: string) => {
 `);
 };
 const text = (b: unknown) => (Buffer.isBuffer(b) ? b.toString('utf8') : String(b));
-/** 걸음 사이에 바뀌어도 명세의 쓰기가 아닌 칸: 세대 키를 견준 초, 게시 전 WAIT 표시, 시험이 넣는 지금 목표 */
+const PATIENT_MS = 5_000;
+/** 호출마다 마감을 적어도 ms로 늘린 HotRedis(기다림 한도가 더 긴 호출, 예: WAIT는 그대로) */
+function patient(r: HotRedis, ms: number): HotRedis {
+  return Object.assign(Object.create(r) as HotRedis, {
+    command: (args: string[], o: CallOptions = {}) => r.command(args, { ...o, deadlineMs: Math.max(o.deadlineMs ?? 0, ms) }),
+    evalScript: (sc: RedisScript, ks: string[], as: string[], o: Omit<CallOptions, 'key'> = {}) => r.evalScript(sc, ks, as, { ...o, deadlineMs: Math.max(o.deadlineMs ?? 0, ms) }),
+  });
+}
+/** 걸음 사이에 바뀌어도 명세의 쓰기가 아닌 칸: 세대 키를 견준 초와 RB-05 확인 전 WAIT 표시, 게시 전 WAIT 표시, 시험이 넣는 지금 목표 */
 const volatile = (key: string, field: string) =>
-  (key.endsWith(':epoch') && field === 'chk') || (key.endsWith(':batch_done') && field.startsWith('wait:')) || (key.endsWith(':ctl') && field === 'targetNow');
+  (key.endsWith(':epoch') && (field === 'chk' || field === 'wait')) || (key.endsWith(':batch_done') && field.startsWith('wait:')) || (key.endsWith(':ctl') && field === 'targetNow');
 /** 수명과 걸음 사이의 값은 빼고 견준다 */
 function canon(c: Copy): string {
   const out: string[] = [];
@@ -201,12 +209,15 @@ export class QueueSystem {
     run: string,
     o: SystemOptions = {},
   ) {
-    this.#raw = raw;
+    // 시험 PC나 CI 러너가 바쁠 때(여러 시험 파일이 함께 돌 때) 운영 기본 마감(100ms)에 걸려 걸음이 실패하지 않게 모든 호출의 마감을 늘린다.
+    // 마감 처리는 이 시험이 보는 것이 아니다(플랫폼 시험이 본다)
+    this.#raw = patient(raw, PATIENT_MS);
     this.#scheduler = o.scheduler;
     const sch = o.scheduler;
+    const base = this.#raw;
     this.#redis = sch
-      ? Object.assign(Object.create(raw) as HotRedis, { command: sch.scheduleFunction(raw.command.bind(raw)), evalScript: sch.scheduleFunction(raw.evalScript.bind(raw)) })
-      : raw;
+      ? Object.assign(Object.create(base) as HotRedis, { command: sch.scheduleFunction(base.command.bind(base)), evalScript: sch.scheduleFunction(base.evalScript.bind(base)) })
+      : base;
     this.eventId = `mbt${run}`;
     const now = Date.now();
     this.#opensAt = now - 60_000;
@@ -342,8 +353,16 @@ export class QueueSystem {
     return null;
   }
   /** 세대 키가 이 노드(지금 주 노드)의 표지인가(명세 ev.node == env.primary) */
-  markerOk(): boolean {
+  markerMine(): boolean {
     return this.#field(this.current, keys.epoch(this.eventId), 'node') === this.#myMarker;
+  }
+  /** RB-05가 건너뛰었고 복제 확인 전인가(명세 ev.pend, ADR-0186) */
+  rb05Pending(): boolean {
+    return this.#field(this.current, keys.epoch(this.eventId), 'pend') !== null;
+  }
+  /** 진입 ②가 번호를 낼 수 있는가(명세 markerOk: 세대 키가 지금 노드이고 확인 전이 아님) */
+  markerOk(): boolean {
+    return this.markerMine() && !this.rb05Pending();
   }
   closed(): boolean {
     return this.#field(this.current, keys.batchDone(this.eventId), '1') !== null;
@@ -419,14 +438,14 @@ export class QueueSystem {
     return canon(await this.#dumpPerson(p)) !== canon(this.personRep.get(p)!);
   }
   /** 재생이 견주는 회차 슬롯 관측(사본): 묶음 표시 '{첫 번호}:{크기}:{세대}', 게시 표시, 빠진 번호, 세대 키가 지금 노드인가 */
-  observed(): { marker: string | null; pub: boolean; removed: number[]; markerOk: boolean } {
+  observed(): { marker: string | null; pub: boolean; removed: number[]; markerMine: boolean; pend: boolean } {
     const bits = this.current.get(keys.removed(this.eventId));
     const removed: number[] = [];
     if (bits) {
       const b = Buffer.from(bits.v as string, 'hex');
       for (let i = 0; i < b.length * 8; i++) if ((b[i >> 3]! >> (7 - (i & 7))) & 1) removed.push(i);
     }
-    return { marker: this.#field(this.current, keys.batchDone(this.eventId), '1'), pub: this.published(), removed, markerOk: this.markerOk() };
+    return { marker: this.#field(this.current, keys.batchDone(this.eventId), '1'), pub: this.published(), removed, markerMine: this.markerMine(), pend: this.rb05Pending() };
   }
   /** 사람 슬롯 값의 종류(명세 Slot.kind): q:dup은 NONE·PENDING·REC·BATCH, q:adm은 NONE·ADM */
   async personKinds(p: number): Promise<{ dup: string; adm: string }> {
@@ -459,7 +478,10 @@ export class QueueSystem {
     return { eventId: this.eventId, expireAtMs: this.#keepUntil, opensAtMs: this.#opensAt, closeAtMs: this.#closeAt, lobbyShuffle: false, openBatch: this.scope.openBatch, batchExpireAtMs: this.#saleEnd };
   }
   async enterNumber(k: K): Promise<void> {
+    // 명세 enterNumber는 markerOk일 때만 할 수 있다: 세대 키가 다르거나 RB-05 확인 전이면 번호도 묶음도 없어야 한다(ADR-0181·0186)
+    const ok = this.markerOk();
     const r = await this.#entry.number({ ...this.#numberInput(), eligible: true, tokenHash: this.#tokenHash(k) });
+    if (!ok && r.kind !== 'RECOVERING') this.#violate(`enterNumber ${keyOf(k)}: 세대 키가 다르거나 RB-05 확인 전인데 결과가 ${r.kind}`);
     const t = this.tab(k);
     if (r.kind === 'NUMBERED') Object.assign(t, { phase: 'NUMBERED', seq: r.seq, gen: r.gen });
     else if (r.kind === 'BATCHING') t.phase = 'SADDED';
@@ -615,11 +637,28 @@ export class QueueSystem {
     this.env.psFailovers += 1;
   }
   async rb05(): Promise<string> {
-    const need = !this.markerOk();
+    const want = !this.markerMine() ? 'SKIPPED' : this.rb05Pending() ? 'PENDING' : 'DONE';
     const r = await this.#entry.rb05({ eventId: this.eventId, expireAtMs: this.#keepUntil, skippedExpireAtMs: this.#saleEnd, skipBase: this.scope.lag,
       opensAtMs: this.#opensAt, closeAtMs: this.#closeAt, lobbyShuffle: false, openBatch: this.scope.openBatch });
-    if (r.kind !== (need ? 'SKIPPED' : 'DONE')) this.#violate(`rb05: 세대 키가 ${need ? '다른데' : '같은데'} 결과가 ${r.kind}`);
+    if (r.kind !== want) this.#violate(`rb05: ${want}이어야 하는데 결과가 ${r.kind}`);
     return r.kind;
+  }
+  /**
+   * RB-05 복제 확인(명세 rb05Confirm, ADR-0186): 운영 코드의 확인(표시 → 붙은 복제본 수만큼 WAIT → 지우기)을 부른다. 이 노드에는 복제본이 없어
+   * WAIT를 건너뛰므로, 'WAIT가 됨'은 하네스의 복제본 사본이 지금까지의 쓰기를 다 받았는지(복제되지 않은 쓰기 없음)로 흉내 낸다. 받지 못했으면 부르지 않는다
+   */
+  async rb05Confirm(): Promise<string> {
+    if (!(this.markerMine() && this.rb05Pending())) {
+      this.#violate('rb05Confirm: 확인할 것이 없는데 불렀다');
+      return 'NONE';
+    }
+    if (this.pending.length > 0) {
+      this.#violate('rb05Confirm: 복제되지 않은 쓰기가 남았는데 확인했다(WAIT 흉내)');
+      return 'WAITING';
+    }
+    const r = await this.#entry.confirmRb05({ eventId: this.eventId });
+    if (r !== 'CONFIRMED') this.#violate(`rb05Confirm: 붙은 복제본이 없는데 결과가 ${r}`);
+    return r;
   }
 
   // ---- 입장 확정 ----

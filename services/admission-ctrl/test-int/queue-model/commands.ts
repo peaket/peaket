@@ -105,7 +105,8 @@ export const COMMANDS: Record<SpecAction, (sc: Scope) => fc.Arbitrary<Act>> = {
           s.note(`failoverPerson(${p})`);
         }),
     ),
-  rb05: () => fc.constant(write('rb05', 'rb05', (s) => !s.markerOk(), (s) => s.rb05())),
+  rb05: () => fc.constant(write('rb05', 'rb05', (s) => !s.markerMine(), (s) => s.rb05())),
+  rb05Confirm: () => fc.constant(write('rb05Confirm', 'rb05Confirm', (s) => s.markerMine() && s.rb05Pending() && s.pending.length === 0, (s) => s.rb05Confirm())),
   // 경합: 같은 대기표의 요청을 셋까지 함께 보내고(copies), 지금 목표를 0에서 시작해 요청 사이 아무 때나 올린다(raiseAfter, 곧 입장과 자리 잡기가 엇갈림)
   admit: (sc) =>
     fc.tuple(tk(sc), fc.integer({ min: 1, max: 3 }), fc.option(fc.integer({ min: 0, max: 12 }), { nil: undefined })).map(([k, copies, raiseAfter]) =>

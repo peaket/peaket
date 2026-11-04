@@ -69,12 +69,12 @@ const FULL: Scope = {
   maxLeaderChanges: 2,
   epochJumps: [1, 3],
 };
-// 복제 지연 2 범위는 설정 세대가 한 번에 1씩만 오르게 둔다: 첫 장애 전환에서 3 이상 오르면 RB-05를 잃었을 때 같은 번호가 다시 나가는 남은 결함이 있다
-// (명세 queue_lag2_jump, docs/review/open-items.md 105번, 소유자 결정 대기). 고치면 [1, 3]으로 되돌린다
+// 설정 세대는 장애 전환 한 번에 1 또는 3 오른다(새로 만든 클러스터). 처음의 곱하기는 3 이상이면 RB-05를 잃은 뒤 같은 번호가 다시 나갔고,
+// 복제 확인 뒤 재개(ADR-0186)로 바꿔 복제 지연 2 범위도 [1, 3]으로 돈다
 const VARIANTS: Array<[string, Scope]> = [
   ['복제 지연 1·묶음·네 호출', FULL],
-  ['복제 지연 2·묶음·한 번', { ...FULL, lag: 2, admitSteps: false, epochJumps: [1] }],
-  ['복제 지연 2·묶음 없음·네 호출', { ...FULL, lag: 2, openBatch: false, epochJumps: [1] }],
+  ['복제 지연 2·묶음·한 번', { ...FULL, lag: 2, admitSteps: false }],
+  ['복제 지연 2·묶음 없음·네 호출', { ...FULL, lag: 2, openBatch: false }],
   ['복제 지연 1·묶음 없음·한 번', { ...FULL, openBatch: false, admitSteps: false }],
 ];
 

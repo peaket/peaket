@@ -35,7 +35,8 @@ State 1: <Initial predicate>
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -47,13 +48,14 @@ State 1: <Initial predicate>
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 
-State 2: <queue_no_serving_check_queue_enterPreempt(1,2) line 543, col 3 to line 574, col 80 of module queue_no_serving_check>
+State 2: <queue_no_serving_check_queue_enterPreempt(1,2) line 545, col 3 to line 576, col 80 of module queue_no_serving_check>
 /\ queue_no_serving_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -92,7 +94,8 @@ State 2: <queue_no_serving_check_queue_enterPreempt(1,2) line 543, col 3 to line
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -104,13 +107,14 @@ State 2: <queue_no_serving_check_queue_enterPreempt(1,2) line 543, col 3 to line
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 
-State 3: <queue_no_serving_check_queue_windowEnds line 1131, col 3 to line 1138, col 80 of module queue_no_serving_check>
+State 3: <queue_no_serving_check_queue_windowEnds line 1133, col 3 to line 1140, col 80 of module queue_no_serving_check>
 /\ queue_no_serving_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -149,7 +153,8 @@ State 3: <queue_no_serving_check_queue_windowEnds line 1131, col 3 to line 1138,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -161,13 +166,14 @@ State 3: <queue_no_serving_check_queue_windowEnds line 1131, col 3 to line 1138,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 
-State 4: <queue_no_serving_check_queue_enterNumber(1,2) line 1170, col 3 to line 1229, col 76 of module queue_no_serving_check>
+State 4: <queue_no_serving_check_queue_enterNumber(1,2) line 1172, col 3 to line 1231, col 76 of module queue_no_serving_check>
 /\ queue_no_serving_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -191,7 +197,8 @@ State 4: <queue_no_serving_check_queue_enterNumber(1,2) line 1170, col 3 to line
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 /\ queue_no_serving_check_queue_tabs = ( <<1, 1>> :>
       [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
   <<1, 2>> :>
@@ -217,7 +224,8 @@ State 4: <queue_no_serving_check_queue_enterNumber(1,2) line 1170, col 3 to line
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -229,13 +237,14 @@ State 4: <queue_no_serving_check_queue_enterNumber(1,2) line 1170, col 3 to line
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 
-State 5: <queue_no_serving_check_queue_enterRecord(1,2) line 1247, col 3 to line 1294, col 76 of module queue_no_serving_check>
+State 5: <queue_no_serving_check_queue_enterRecord(1,2) line 1249, col 3 to line 1296, col 76 of module queue_no_serving_check>
 /\ queue_no_serving_check_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -259,7 +268,8 @@ State 5: <queue_no_serving_check_queue_enterRecord(1,2) line 1247, col 3 to line
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 /\ queue_no_serving_check_queue_tabs = ( <<1, 1>> :>
       [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
   <<1, 2>> :>
@@ -281,7 +291,8 @@ State 5: <queue_no_serving_check_queue_enterRecord(1,2) line 1247, col 3 to line
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -293,13 +304,14 @@ State 5: <queue_no_serving_check_queue_enterRecord(1,2) line 1247, col 3 to line
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 2, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 
-State 6: <queue_no_serving_check_queue_admit(1,2) line 1357, col 3 to line 1406, col 76 of module queue_no_serving_check>
+State 6: <queue_no_serving_check_queue_admit(1,2) line 1359, col 3 to line 1408, col 76 of module queue_no_serving_check>
 /\ queue_no_serving_check_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "ADM", tab |-> 2, seq |-> 1, gen |-> 1] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -323,7 +335,8 @@ State 6: <queue_no_serving_check_queue_admit(1,2) line 1357, col 3 to line 1406,
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 /\ queue_no_serving_check_queue_tabs = ( <<1, 1>> :>
       [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
   <<1, 2>> :>
@@ -349,7 +362,8 @@ State 6: <queue_no_serving_check_queue_admit(1,2) line 1357, col 3 to line 1406,
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_evRep = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -361,7 +375,8 @@ State 6: <queue_no_serving_check_queue_admit(1,2) line 1357, col 3 to line 1406,
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_serving_check_queue_pssRep = << [ dup |-> [kind |-> "REC", tab |-> 2, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],

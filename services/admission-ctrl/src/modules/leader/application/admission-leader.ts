@@ -50,6 +50,8 @@ export class AdmissionLeader {
   readonly #loggedAt = new Map<string, number>();
   /** 뒤에서 도는 게시(회차마다 하나) */
   readonly #publishing = new Map<string, Promise<void>>();
+  /** 회차마다 하나씩 뒤에서 도는 RB-05 복제 확인(WAIT가 0.5초까지 걸려 다른 회차의 전진을 막지 않게, ADR-0186) */
+  readonly #confirming = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(LEADER_STORE) private readonly store: LeaderStore,
@@ -72,7 +74,7 @@ export class AdmissionLeader {
     while (this.#busy) await new Promise((r) => setTimeout(r, 10));
     // 게시를 하다 만 채 Lease를 놓으면 새 리더가 같은 묶음을 또 게시한다. 한도 안에서 끝나기를 기다린다
     let timer: NodeJS.Timeout | undefined;
-    await Promise.race([Promise.allSettled([...this.#publishing.values()]), new Promise((r) => (timer = setTimeout(r, STOP_WAIT_MS)))]);
+    await Promise.race([Promise.allSettled([...this.#publishing.values(), ...this.#confirming.values()]), new Promise((r) => (timer = setTimeout(r, STOP_WAIT_MS)))]);
     clearTimeout(timer);
   }
 
@@ -160,6 +162,17 @@ export class AdmissionLeader {
     this.#rb05At.set(eventId, now);
     const s = await this.store.rb05({ eventId, expireAtMs: keepUntilMs, skippedExpireAtMs: saleEndOf(plan), skipBase: RB05_SKIP_BASE, opensAtMs: plan.opensAtMs, closeAtMs, lobbyShuffle: plan.lobbyShuffle, openBatch: plan.openBatch });
     if (s.kind === 'SKIPPED') this.logger?.warn({ eventId, start: s.start, end: s.end, gen: s.gen }, 'RB-05(리더): 장애 전환 뒤 번호 구간을 건너뛰었다');
+    // 건너뛰기를 붙은 복제본이 받은 것을 확인해야 진입이 다시 열린다(ADR-0186). 1초마다 다시 오므로 조용한 회차도 확인 전에 머물지 않는다
+    if ((s.kind === 'SKIPPED' || s.kind === 'PENDING') && !this.#confirming.has(eventId)) {
+      const p = this.store
+        .confirmRb05({ eventId })
+        .then((c) => {
+          if (c === 'WAITING') this.#logError(`${eventId}:rb05-wait`, this.clock.now(), undefined, 'RB-05 복제 확인 대기: 붙은 복제본이 건너뛰기를 받지 못해 그 회차의 진입이 멈춰 있다(그 샤드 복제본의 연결·지연 확인, docs/infra.md RB-05)');
+        })
+        .catch((err: unknown) => this.#logError(`${eventId}:rb05-error`, this.clock.now(), err, 'RB-05 복제 확인 실패(다음 1초에 다시)'))
+        .finally(() => this.#confirming.delete(eventId));
+      this.#confirming.set(eventId, p);
+    }
   }
 
   async #publish(eventId: string): Promise<void> {

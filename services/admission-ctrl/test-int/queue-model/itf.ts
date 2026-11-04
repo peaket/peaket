@@ -42,6 +42,7 @@ interface SpecEv {
   pub: boolean;
   removed: number[];
   node: number;
+  pend: boolean;
 }
 interface SpecSlot {
   kind: string;
@@ -134,6 +135,8 @@ async function apply(s: QueueSystem, a: SpecAction, picks: Record<string, unknow
       return step(() => s.applyWrite(c));
     case 'rb05':
       return step(() => s.rb05());
+    case 'rb05Confirm':
+      return step(() => s.rb05Confirm());
     case 'admit':
       return step(() => s.admit(k));
     case 'admitCheck':
@@ -204,7 +207,8 @@ export async function replay(s: QueueSystem, states: SpecState[]): Promise<Repla
     if (o.marker !== marker) diffs.push(`묶음 표시 ${o.marker ?? '없음'} ≠ 명세 ${marker ?? '없음'}`);
     if (o.pub !== post.ev.pub) diffs.push(`게시 표시 ${o.pub} ≠ 명세 ${post.ev.pub}`);
     if (JSON.stringify(o.removed) !== JSON.stringify(post.ev.removed)) diffs.push(`빠진 번호 ${JSON.stringify(o.removed)} ≠ 명세 ${JSON.stringify(post.ev.removed)}`);
-    if (o.markerOk !== (post.ev.node === post.env.primary)) diffs.push(`세대 키가 지금 노드인가 ${o.markerOk} ≠ 명세 ${post.ev.node === post.env.primary}`);
+    if (o.markerMine !== (post.ev.node === post.env.primary)) diffs.push(`세대 키가 지금 노드인가 ${o.markerMine} ≠ 명세 ${post.ev.node === post.env.primary}`);
+    if (o.pend !== post.ev.pend) diffs.push(`RB-05 확인 전 ${o.pend} ≠ 명세 ${post.ev.pend}`);
     for (const [p, want] of post.pss) {
       const got = await s.personKinds(p);
       if (got.dup !== want.dup.kind || got.adm !== want.adm.kind) diffs.push(`사람 ${p} q:dup·q:adm ${got.dup}·${got.adm} ≠ 명세 ${want.dup.kind}·${want.adm.kind}`);

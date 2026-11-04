@@ -1,11 +1,11 @@
 // 리더의 대기열 Redis 쓰기(docs/data.md §3: q:{event:E}:leader·ctl·serving·serving_log·calls·call_req·slots·soon·soon_at·batch_done·epoch, q:{admission}:events).
 // 리더가 쓰는 일은 모두 세대를 확인하는 Lua 하나로 한다(ADR-0056 결정 2). Lua 원문은 leader-lua.ts에 있다.
-import { Inject, Injectable } from '@nestjs/common';
-import { type HotRedis, redisScript } from '@peaket/platform';
-import { ADMISSION_REDIS } from '../../batch/index.js';
-import { BATCH_RESULT_DELAY_MS, CALLS_KEEP_MS, DISPERSAL_MS, LATE_DISPERSAL_MS, RATIO_WINDOW_MAX_MS, RATIO_WINDOW_MIN_MS, SCAN_BUDGET, SOON_STALE_MS } from '../domain/plan.js';
-import type { CloseInput, CloseResult, Control, EventPlan, LeaderStore, Rb05Input, Rb05Result, TickInput, TickResult } from '../domain/ports.js';
-import { BUMP_LUA, CLOSE_LUA, RB05_LUA, TICK_LUA } from './leader-lua.js';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { type HotRedis, type RedisScript, redisScript } from '@peaket/platform';
+import { ADMISSION_REDIS, WAIT_REDIS } from '../../batch/index.js';
+import { BATCH_RESULT_DELAY_MS, CALLS_KEEP_MS, DISPERSAL_MS, LATE_DISPERSAL_MS, RATIO_WINDOW_MAX_MS, RATIO_WINDOW_MIN_MS, RB05_CONFIRM_WAIT_MS, SCAN_BUDGET, SOON_STALE_MS } from '../domain/plan.js';
+import type { CloseInput, CloseResult, Control, EventPlan, LeaderStore, Rb05Confirm, Rb05Input, Rb05Result, TickInput, TickResult } from '../domain/ports.js';
+import { BUMP_LUA, CLOSE_LUA, RB05_CLEAR_LUA, RB05_LUA, RB05_MARK_LUA, TICK_LUA } from './leader-lua.js';
 
 export const keys = {
   leader: (e: string) => `q:{event:${e}}:leader`,
@@ -37,6 +37,8 @@ const BUMP = redisScript(BUMP_LUA);
 const TICK = redisScript(TICK_LUA);
 const CLOSE = redisScript(CLOSE_LUA);
 const RB05 = redisScript(RB05_LUA);
+const RB05_MARK = redisScript(RB05_MARK_LUA);
+const RB05_CLEAR = redisScript(RB05_CLEAR_LUA);
 
 const str = (v: unknown): string | null => (v === null || v === undefined ? null : Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 const int = (v: string | null | undefined): number | null => (v !== null && v !== undefined && /^\d{1,16}$/.test(v) ? Number(v) : null);
@@ -54,7 +56,10 @@ function fieldsOf(raw: unknown): Record<string, string> {
 
 @Injectable()
 export class RedisLeaderStore implements LeaderStore {
-  constructor(@Inject(ADMISSION_REDIS) private readonly redis: HotRedis) {}
+  constructor(
+    @Inject(ADMISSION_REDIS) private readonly redis: HotRedis,
+    @Optional() @Inject(WAIT_REDIS) private readonly waitRedis?: HotRedis,
+  ) {}
 
   async activeEvents(nowMs: number): Promise<string[]> {
     const k = keys.events();
@@ -137,6 +142,43 @@ export class RedisLeaderStore implements LeaderStore {
     const args = [i.expireAtMs, i.skippedExpireAtMs, i.skipBase, i.opensAtMs, i.closeAtMs ?? 0, i.lobbyShuffle ? 1 : 0, i.openBatch ? 1 : 0].map(String);
     const r = (await this.redis.evalScript(RB05, [keys.seq(e), keys.skipped(e), keys.epoch(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e)], args)) as unknown[];
     if (str(r[0]) === 'DONE') return { kind: 'DONE' };
+    if (str(r[0]) === 'PENDING') return { kind: 'PENDING' };
     return { kind: 'SKIPPED', start: Number(r[1]), end: Number(r[2]), gen: Number(r[3]) };
   }
+
+  async confirmRb05(i: { eventId: string }): Promise<Rb05Confirm> {
+    return confirmRb05(this.waitRedis ?? this.redis, keys.epoch(i.eventId), RB05_MARK, RB05_CLEAR, RB05_CONFIRM_WAIT_MS);
+  }
+}
+
+/** 주 노드의 INFO replication에서 붙은 온라인 복제본 수(queue-svc redis-entry-store.ts와 같다) */
+export function onlineReplicas(info: string): number {
+  return info.split(/\r?\n/).filter((l) => /^slave\d+:/.test(l) && /(^|,)state=online(,|$)/.test(l.slice(l.indexOf(':') + 1))).length;
+}
+
+/** CLIENT INFO에서 이 연결의 표지: 서버가 붙인 연결 번호(id)와 그 서버의 주소(laddr). 다시 붙으면 id가 바뀌고 다른 노드면 laddr가 다르다 */
+export function connOf(info: string): string | null {
+  const id = /(?:^|\s)id=(\d+)/.exec(info)?.[1];
+  const laddr = /(?:^|\s)laddr=(\S+)/.exec(info)?.[1];
+  return id && laddr ? `${id}@${laddr}` : null;
+}
+
+/**
+ * RB-05 복제 확인(ADR-0186): queue-svc redis-entry-store.ts의 confirmRb05와 같은 글이다(leader-lua.test.ts가 견준다). 순서와 까닭은 그쪽 설명을 본다.
+ * 연결은 묶음 게시 확인과 같은 WAIT 전용 연결이다
+ */
+export async function confirmRb05(redis: HotRedis, epochKey: string, mark: RedisScript, clear: RedisScript, waitMs: number): Promise<Rb05Confirm> {
+  const deadlineMs = waitMs + 300;
+  const o = { key: epochKey, deadlineMs, pin: true };
+  const conn = connOf(String((await redis.command(['CLIENT', 'INFO'], o)) ?? ''));
+  const node = await redis.evalScript(mark, [epochKey], [], { deadlineMs });
+  if (typeof node !== 'string') return 'NONE';
+  const n = onlineReplicas(String((await redis.command(['INFO', 'replication'], o)) ?? ''));
+  if (n > 0) {
+    const acked = Number(await redis.command(['WAIT', String(n), String(waitMs)], o));
+    if (acked < n) return 'WAITING';
+  }
+  // 표시·INFO·WAIT가 한 연결에서 돌았나: 사이에 다시 붙었으면(플랫폼이 끊긴 명령을 새 연결로 다시 보낸다) WAIT가 표시 쓰기를 세지 않았을 수 있다
+  if (conn === null || connOf(String((await redis.command(['CLIENT', 'INFO'], o)) ?? '')) !== conn) return 'WAITING';
+  return Number(await redis.evalScript(clear, [epochKey], [node], { deadlineMs })) > 0 ? 'CONFIRMED' : 'NONE';
 }

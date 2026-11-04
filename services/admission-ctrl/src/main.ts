@@ -24,8 +24,8 @@ if (!resultDir) throw new Error('PEAKET_BATCH_RESULT_DIR가 없다(묶음 결과
 
 const redisOptions = clusterUrls.length > 0 ? { clusterUrls } : { url };
 const redis = await createHotRedis(redisOptions);
-// WAIT는 그 연결을 막으므로 복제 확인은 따로 연결한다(최소 복제본 수가 0이면 기다리지 않아 필요 없다)
-const waitRedis = minReplicas > 0 ? await createHotRedis(redisOptions) : undefined;
+// WAIT는 그 연결을 막으므로 복제 확인(묶음 게시 전, RB-05 뒤 ADR-0186)은 따로 연결한다. 단일 노드에서 최소 복제본 수가 0이면 기다리지 않아 필요 없다
+const waitRedis = minReplicas > 0 || clusterUrls.length > 0 ? await createHotRedis(redisOptions) : undefined;
 const metrics = new LeaderMetrics();
 // 파드 안이면 쿠버네티스 Lease, 밖(로컬)이면 이 프로세스 하나만 리더다
 const baseApi: LeaseApi = process.env.KUBERNETES_SERVICE_HOST ? inClusterLeaseApi(SERVICE) : memoryLeaseApi();

@@ -1,10 +1,10 @@
 // 진입 3단계를 대기열 Redis(Valkey) Lua로 한다(docs/features/queue-admission.md §3·'묶음의 첫 구현', docs/data.md §3).
 // 사람 키는 pid를 해시 태그로 둔다(q:dup:{pid}:E와 q:adm:{pid}:E가 한 슬롯이라 ①·③이 한 Lua다). 회차 키는 {event:E} 태그로 한 슬롯이다.
 // 키에 넣는 값(회차 ID·pid)은 받는 층이 [A-Za-z0-9_-] 1~64자만 넘긴다(해시 태그를 깨지 않게). 이름은 명세 specs/queue.qnt의 동작 이름이다.
-import { Inject, Injectable } from '@nestjs/common';
-import { type HotRedis, isRedisUnavailable, redisScript } from '@peaket/platform';
-import type { BatchedEntry, BatchOutcome, EntryStore, NumberBatchInput, NumberInput, NumberResult, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
-import { BATCH_NO, QueueStoreUnavailable, type ReasonCategory, REASONS } from '../domain/queue.js';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { type HotRedis, isRedisUnavailable, type RedisScript, redisScript } from '@peaket/platform';
+import type { BatchedEntry, BatchOutcome, EntryStore, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
+import { BATCH_NO, QueueStoreUnavailable, RB05_CONFIRM_WAIT_MS, type ReasonCategory, REASONS } from '../domain/queue.js';
 import {
   BATCH_RECORD_LUA,
   BATCH_STATE_LUA,
@@ -14,13 +14,17 @@ import {
   MARK_VERIFYING_LUA,
   NUMBER_BATCH_LUA,
   PREEMPT_LUA,
+  RB05_CLEAR_LUA,
   RB05_LUA,
+  RB05_MARK_LUA,
   RECORD_LUA,
   RELEASE_LUA,
   REQUEST_REPAIR_LUA,
 } from './entry-lua.js';
 
 export const QUEUE_REDIS = Symbol('queue.QueueRedis');
+/** RB-05 복제 확인의 WAIT 전용 연결(ADR-0186): WAIT는 그 연결을 막으므로, 노드마다 하나뿐인 공유 연결로 보내면 같은 노드의 다른 명령이 기다린다. 없으면 공유 연결 */
+export const QUEUE_WAIT_REDIS = Symbol('queue.WaitRedis');
 
 export const keys = {
   dup: (pid: string, e: string) => `q:dup:{${pid}}:${e}`,
@@ -48,6 +52,8 @@ const PREEMPT = redisScript(PREEMPT_LUA);
 const RELEASE = redisScript(RELEASE_LUA);
 const NUMBER_BATCH = redisScript(NUMBER_BATCH_LUA);
 const RB05 = redisScript(RB05_LUA);
+const RB05_MARK = redisScript(RB05_MARK_LUA);
+const RB05_CLEAR = redisScript(RB05_CLEAR_LUA);
 const RECORD = redisScript(RECORD_LUA);
 const BATCH_RECORD = redisScript(BATCH_RECORD_LUA);
 const BATCH_STATE = redisScript(BATCH_STATE_LUA);
@@ -59,6 +65,42 @@ const MARK_VERIFYING = redisScript(MARK_VERIFYING_LUA);
 
 const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 const reason = (v: unknown) => REASONS.find((x) => x === str(v ?? '')) as ReasonCategory | undefined;
+
+/** 주 노드의 INFO replication에서 붙은 온라인 복제본 수(slaveN:...,state=online) */
+export function onlineReplicas(info: string): number {
+  return info.split(/\r?\n/).filter((l) => /^slave\d+:/.test(l) && /(^|,)state=online(,|$)/.test(l.slice(l.indexOf(':') + 1))).length;
+}
+
+/** CLIENT INFO에서 이 연결의 표지: 서버가 붙인 연결 번호(id)와 그 서버의 주소(laddr). 다시 붙으면 id가 바뀌고 다른 노드면 laddr가 다르다 */
+export function connOf(info: string): string | null {
+  const id = /(?:^|\s)id=(\d+)/.exec(info)?.[1];
+  const laddr = /(?:^|\s)laddr=(\S+)/.exec(info)?.[1];
+  return id && laddr ? `${id}@${laddr}` : null;
+}
+
+/**
+ * RB-05 복제 확인(ADR-0186): 연결 표지 → 표시 Lua → 붙은 온라인 복제본 수 n → 같은 연결로 WAIT n → 연결 표지를 다시 견줌 → 지우기 Lua.
+ * 클러스터에서는 세대 키로 주 노드를 고르므로 호출이 모두 그 주 노드로 간다. WAIT는 이 연결이 쓴 것까지만 세므로 표시 Lua의 쓰기가 RB-05 쓰기 뒤에 있어야 하고,
+ * 표시와 WAIT가 같은 연결이어야 한다(연결 표지로 확인). 지우기는 표시가 돌려준 노드 표지를 넘겨 그 노드에서만 지운다.
+ * 키 없는 명령(CLIENT INFO·INFO·WAIT)은 클러스터 클라이언트가 key를 무시하고 모든 샤드나 아무 노드로 보내므로 pin으로 key 슬롯의 주 노드에만 보낸다.
+ * WAIT는 그 연결을 막으므로 부르는 쪽은 WAIT 전용 연결을 넘긴다(묶음 게시 확인과 같은 까닭). 그 연결에서는 다른 회차의 WAIT 뒤에 줄을 설 수 있어
+ * 호출 모두에 WAIT만큼의 마감을 준다. admission-ctrl 리더 저장소에도 같은 글이 있다(leader-lua.test.ts가 견준다)
+ */
+export async function confirmRb05(redis: HotRedis, epochKey: string, mark: RedisScript, clear: RedisScript, waitMs: number): Promise<Rb05Confirm> {
+  const deadlineMs = waitMs + 300;
+  const o = { key: epochKey, deadlineMs, pin: true };
+  const conn = connOf(String((await redis.command(['CLIENT', 'INFO'], o)) ?? ''));
+  const node = await redis.evalScript(mark, [epochKey], [], { deadlineMs });
+  if (typeof node !== 'string') return 'NONE';
+  const n = onlineReplicas(String((await redis.command(['INFO', 'replication'], o)) ?? ''));
+  if (n > 0) {
+    const acked = Number(await redis.command(['WAIT', String(n), String(waitMs)], o));
+    if (acked < n) return 'WAITING';
+  }
+  // 표시·INFO·WAIT가 한 연결에서 돌았나: 사이에 다시 붙었으면(플랫폼이 끊긴 명령을 새 연결로 다시 보낸다) WAIT가 표시 쓰기를 세지 않았을 수 있다
+  if (conn === null || connOf(String((await redis.command(['CLIENT', 'INFO'], o)) ?? '')) !== conn) return 'WAITING';
+  return Number(await redis.evalScript(clear, [epochKey], [node], { deadlineMs })) > 0 ? 'CONFIRMED' : 'NONE';
+}
 
 /** 일시 장애(마감 초과·끊김·클러스터 재구성)는 업무 오류로 바꿔 503으로 답하게 한다. 그 밖(스크립트 오류 같은 버그)은 그대로 던진다 */
 export async function guard<T>(p: Promise<T>): Promise<T> {
@@ -86,7 +128,10 @@ const RESULT = /^(\d+):(\d+)$/;
 
 @Injectable()
 export class RedisEntryStore implements EntryStore {
-  constructor(@Inject(QUEUE_REDIS) private readonly redis: HotRedis) {}
+  constructor(
+    @Inject(QUEUE_REDIS) private readonly redis: HotRedis,
+    @Optional() @Inject(QUEUE_WAIT_REDIS) private readonly waitRedis?: HotRedis,
+  ) {}
 
   async preempt(i: { pid: string; eventId: string; requestId: string; pendingTtlMs: number }): Promise<PreemptResult> {
     const r = (await guard(this.redis.evalScript(PREEMPT, [keys.dup(i.pid, i.eventId), keys.adm(i.pid, i.eventId)], [i.requestId, String(i.pendingTtlMs)]))) as unknown[];
@@ -134,8 +179,13 @@ export class RedisEntryStore implements EntryStore {
     const args = [i.expireAtMs, i.skippedExpireAtMs, i.skipBase, i.opensAtMs, i.closeAtMs ?? 0, i.lobbyShuffle ? 1 : 0, i.openBatch ? 1 : 0].map(String);
     const r = (await guard(this.redis.evalScript(RB05, [keys.seq(e), keys.skipped(e), keys.epoch(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e)], args))) as unknown[];
     if (str(r[0]) === 'DONE') return { kind: 'DONE' };
+    if (str(r[0]) === 'PENDING') return { kind: 'PENDING' };
     if (str(r[0]) !== 'SKIPPED') throw new Error(`RB-05 Lua가 모르는 값을 돌려줬다: ${str(r[0])}`);
     return { kind: 'SKIPPED', start: Number(r[1]), end: Number(r[2]), gen: Number(r[3]) };
+  }
+
+  async confirmRb05(i: { eventId: string }): Promise<Rb05Confirm> {
+    return guard(confirmRb05(this.waitRedis ?? this.redis, keys.epoch(i.eventId), RB05_MARK, RB05_CLEAR, RB05_CONFIRM_WAIT_MS));
   }
 
   async number(i: NumberInput): Promise<NumberResult> {

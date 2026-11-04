@@ -60,7 +60,33 @@ batchCases('메모리', async () => {
   };
 });
 
-test('[Q-T13] 첫RB05와그뒤번호를두번째장애전환으로잃어도_설정세대가오른만큼더건너뛰어_사라진주노드가낸번호와겹치지않는다', async () => {
+test('[Q-T13] RB05가건너뛴뒤_복제를확인하기전에는번호를내지않고_확인되면건너뛴구간뒤번호를낸다(ADR-0186)', async () => {
+  const clock = fakeClock({ now: Date.UTC(2026, 10, 3, 1, 0, 0) });
+  const store = new MemoryEntryStore(clock);
+  const schedules = new MemoryEventSchedules();
+  const eventId = newEvent();
+  await schedules.set(eventId, openSchedule(clock.now()));
+  const enter = new EnterQueue(store, schedules, tokens, clock, { pendingTtlMs: PENDING_TTL_MS, rb05SkipBase: 50 });
+  const go = (i: number, b = { preverifyToken: preverifyToken(clock, eventId), deviceId: DEVICE, entryRequestId: newRequest() }) =>
+    enter.run({ accountId: ACCOUNT, pid: `pid-confirm-${i}-${eventId}`.slice(0, 64), eventId, body: b });
+  for (let i = 0; i < 3; i++) await go(i);
+  store.failoverForTest(eventId);
+  // 복제본이 RB-05의 쓰기를 아직 받지 못했다: 건너뛰기는 했지만 확인 전이라 번호를 내지 않는다
+  store.blockConfirmForTest(true);
+  const b = { preverifyToken: preverifyToken(clock, eventId), deviceId: DEVICE, entryRequestId: newRequest() };
+  await expect(go(3, b)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
+  expect(store.skippedOf(eventId)).toEqual(['4:53:1']);
+  await expect(go(3, b)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
+  expect(store.skippedOf(eventId)).toEqual(['4:53:1']);
+  // 복제본이 받았다: 다음 진입이 뒤에서 확인을 마치고, 그다음 진입이 건너뛴 구간 뒤 번호와 올라간 세대를 받는다
+  store.blockConfirmForTest(false);
+  await expect(go(3, b)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
+  await enter.confirmsSettled();
+  const t = await go(3, b);
+  expect(t.kind === 'TICKET' && [t.seq, t.generation]).toEqual([54, 2]);
+});
+
+test('[Q-T13] 첫RB05의쓰기를두번째장애전환으로잃는것은_확인전이라그뒤번호가없을때뿐이고_두번째RB05가바탕값만건너뛰어도겹치지않는다(ADR-0186)', async () => {
   const clock = fakeClock({ now: Date.UTC(2026, 10, 3, 1, 0, 0) });
   const store = new MemoryEntryStore(clock);
   const schedules = new MemoryEventSchedules();
@@ -71,23 +97,65 @@ test('[Q-T13] 첫RB05와그뒤번호를두번째장애전환으로잃어도_설�
     enter.run({ accountId: ACCOUNT, pid: `pid-twice-${i}-${eventId}`.slice(0, 64), eventId, body: b });
   for (let i = 0; i < 3; i++) await go(i);
   const before = { seq: 3, skipped: store.skippedOf(eventId), epoch: store.epochOf(eventId)! };
-  // 주 노드 B가 올라서 RB-05(4~53 건너뜀)를 하고 54번(세대 2)을 냈다
+  // 주 노드 B가 올라서 RB-05(4~53)를 했지만 복제 확인 전에 B도 죽었다. 그 사이 번호는 하나도 나가지 않았다
   store.failoverForTest(eventId);
-  const b = { preverifyToken: preverifyToken(clock, eventId), deviceId: DEVICE, entryRequestId: newRequest() };
-  await expect(go(3, b)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
-  const t1 = await go(3, b);
-  expect(t1.kind === 'TICKET' && [t1.seq, t1.generation]).toEqual([54, 2]);
-  // 그 쓰기가 복제되기 전에 B도 죽고 C가 더 큰 설정 세대로 올라섰다: C의 기록은 장애 전과 같다
+  store.blockConfirmForTest(true);
+  await expect(go(3)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
+  await expect(go(4)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
   store.rollbackForTest(eventId, before);
   store.failoverForTest(eventId);
-  await expect(go(4)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
-  // 설정 세대가 둘 올랐으니 바탕 값의 두 배를 건너뛴다(B가 냈을 수 있는 번호까지)
-  expect(store.skippedOf(eventId)).toEqual(['4:103:1']);
-  const t2 = await go(4);
-  expect(t2.kind === 'TICKET' && [t2.seq, t2.generation]).toEqual([104, 2]);
+  store.blockConfirmForTest(false);
+  // 설정 세대가 둘 올랐지만 곱하지 않는다: 바탕 값만 건너뛰어도 잃은 RB-05 뒤에 나간 번호가 없다
+  await expect(go(5)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
+  await enter.confirmsSettled();
+  expect(store.skippedOf(eventId)).toEqual(['4:53:1']);
+  const seqs: number[] = [];
+  for (let i = 5; i < 8; i++) {
+    const t = await go(i);
+    if (t.kind === 'TICKET') seqs.push(t.seq);
+  }
+  expect(seqs).toEqual([54, 55, 56]);
 });
 
-test('설정세대가셋넘게올라도_곱하는수는3에서자른다(메모리저장소가Lua와같다)', async () => {
+test('[Q-T13] 복제확인이끝나지않아도_진입은WAIT를기다리지않고바로503이고_확인은회차마다하나만뒤에서돈다(ADR-0186)', async () => {
+  const clock = fakeClock({ now: Date.UTC(2026, 10, 3, 1, 0, 0) });
+  const inner = new MemoryEntryStore(clock);
+  let confirms = 0;
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  // 확인(WAIT)이 끝나지 않는 저장소: 확인 호출만 붙잡는다
+  const store = new Proxy(inner, {
+    get: (t, k) => {
+      if (k === 'confirmRb05') {
+        return async (i: { eventId: string }) => {
+          confirms++;
+          await held;
+          return t.confirmRb05(i);
+        };
+      }
+      const v = Reflect.get(t, k) as unknown;
+      return typeof v === 'function' ? v.bind(t) : v;
+    },
+  });
+  const schedules = new MemoryEventSchedules();
+  const eventId = newEvent();
+  await schedules.set(eventId, openSchedule(clock.now()));
+  const enter = new EnterQueue(store, schedules, tokens, clock, { pendingTtlMs: PENDING_TTL_MS, rb05SkipBase: 50 });
+  const go = (i: number) =>
+    enter.run({ accountId: ACCOUNT, pid: `pid-bg-${i}-${eventId}`.slice(0, 64), eventId, body: { preverifyToken: preverifyToken(clock, eventId), deviceId: DEVICE, entryRequestId: newRequest() } });
+  await go(0);
+  inner.failoverForTest(eventId);
+  // 두 요청 모두 확인을 기다리지 않고 바로 503이다(확인은 아직 붙잡혀 있다)
+  await expect(go(1)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
+  await expect(go(2)).rejects.toMatchObject({ code: 'QUEUE_RECOVERING' });
+  expect(confirms).toBe(1);
+  release();
+  await enter.confirmsSettled();
+  const t = await go(3);
+  expect(t.kind === 'TICKET' && [t.seq, t.generation]).toEqual([52, 2]);
+});
+
+test('설정세대가여럿올라도_곱하지않고바탕값만건너뛴다(메모리저장소가Lua와같다, ADR-0186)', async () => {
   const clock = fakeClock({ now: Date.UTC(2026, 10, 3, 1, 0, 0) });
   const store = new MemoryEntryStore(clock);
   const eventId = newEvent();
@@ -95,7 +163,11 @@ test('설정세대가셋넘게올라도_곱하는수는3에서자른다(메모�
   store.rollbackForTest(eventId, { seq: 3, skipped: [], epoch: 'node-1:1' });
   for (let i = 0; i < 5; i++) store.failoverForTest();
   const input = { eventId, expireAtMs: clock.now() + 1, skippedExpireAtMs: clock.now() + 1, skipBase: 10, opensAtMs: clock.now() - 1, lobbyShuffle: false, openBatch: false };
-  expect(await store.rb05(input)).toEqual({ kind: 'SKIPPED', start: 4, end: 3 + 30, gen: 2 });
+  expect(await store.rb05(input)).toEqual({ kind: 'SKIPPED', start: 4, end: 3 + 10, gen: 2 });
+  // 건너뛰었고 확인 전이다
+  expect(await store.rb05(input)).toEqual({ kind: 'PENDING' });
+  expect(await store.confirmRb05({ eventId })).toBe('CONFIRMED');
+  expect(await store.rb05(input)).toEqual({ kind: 'DONE' });
 });
 
 test('구간은_floor((번호-1)÷1000)이다_구간0이1~1000번', () => {

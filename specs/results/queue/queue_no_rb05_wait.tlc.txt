@@ -12,7 +12,8 @@ State 1: <Initial predicate>
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -50,10 +51,11 @@ State 1: <Initial predicate>
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_evPend = <<>>
 
-State 2: <queue_no_rb05_wait_queue_enterPreempt(2,1) line 537, col 3 to line 567, col 72 of module queue_no_rb05_wait>
+State 2: <queue_no_rb05_wait_queue_enterPreempt(2,1) line 539, col 3 to line 569, col 72 of module queue_no_rb05_wait>
 /\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -65,7 +67,8 @@ State 2: <queue_no_rb05_wait_queue_enterPreempt(2,1) line 537, col 3 to line 567
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -107,10 +110,11 @@ State 2: <queue_no_rb05_wait_queue_enterPreempt(2,1) line 537, col 3 to line 567
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_evPend = <<>>
 
-State 3: <queue_no_rb05_wait_queue_enterPreempt(1,1) line 537, col 3 to line 567, col 72 of module queue_no_rb05_wait>
+State 3: <queue_no_rb05_wait_queue_enterPreempt(1,1) line 539, col 3 to line 569, col 72 of module queue_no_rb05_wait>
 /\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -122,7 +126,8 @@ State 3: <queue_no_rb05_wait_queue_enterPreempt(1,1) line 537, col 3 to line 567
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -168,10 +173,11 @@ State 3: <queue_no_rb05_wait_queue_enterPreempt(1,1) line 537, col 3 to line 567
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_evPend = <<>>
 
-State 4: <queue_no_rb05_wait_queue_windowEnds line 1077, col 3 to line 1084, col 72 of module queue_no_rb05_wait>
+State 4: <queue_no_rb05_wait_queue_windowEnds line 1079, col 3 to line 1086, col 72 of module queue_no_rb05_wait>
 /\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -183,7 +189,8 @@ State 4: <queue_no_rb05_wait_queue_windowEnds line 1077, col 3 to line 1084, col
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -229,10 +236,11 @@ State 4: <queue_no_rb05_wait_queue_windowEnds line 1077, col 3 to line 1084, col
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_evPend = <<>>
 
-State 5: <queue_no_rb05_wait_queue_enterNumber(1,1) line 1114, col 3 to line 1170, col 68 of module queue_no_rb05_wait>
+State 5: <queue_no_rb05_wait_queue_enterNumber(1,1) line 1116, col 3 to line 1172, col 68 of module queue_no_rb05_wait>
 /\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
   serving |-> 0,
   leader |-> 0,
@@ -244,7 +252,8 @@ State 5: <queue_no_rb05_wait_queue_enterNumber(1,1) line 1114, col 3 to line 117
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -290,7 +299,8 @@ State 5: <queue_no_rb05_wait_queue_enterNumber(1,1) line 1114, col 3 to line 117
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_evPend = << [ seq |-> 1,
      serving |-> 0,
      leader |-> 0,
@@ -302,9 +312,10 @@ State 5: <queue_no_rb05_wait_queue_enterNumber(1,1) line 1114, col 3 to line 117
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 6: <queue_no_rb05_wait_queue_enterRecord(1,1) line 1188, col 3 to line 1227, col 68 of module queue_no_rb05_wait>
+State 6: <queue_no_rb05_wait_queue_enterRecord(1,1) line 1190, col 3 to line 1229, col 68 of module queue_no_rb05_wait>
 /\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
   serving |-> 0,
   leader |-> 0,
@@ -316,7 +327,8 @@ State 6: <queue_no_rb05_wait_queue_enterRecord(1,1) line 1188, col 3 to line 122
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -358,7 +370,8 @@ State 6: <queue_no_rb05_wait_queue_enterRecord(1,1) line 1188, col 3 to line 122
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_evPend = << [ seq |-> 1,
      serving |-> 0,
      leader |-> 0,
@@ -370,9 +383,10 @@ State 6: <queue_no_rb05_wait_queue_enterRecord(1,1) line 1188, col 3 to line 122
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 7: <queue_no_rb05_wait_queue_failoverEv(1) line 1051, col 3 to line 1071, col 72 of module queue_no_rb05_wait>
+State 7: <queue_no_rb05_wait_queue_failoverEv(1) line 1053, col 3 to line 1073, col 72 of module queue_no_rb05_wait>
 /\ queue_no_rb05_wait_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -384,7 +398,8 @@ State 7: <queue_no_rb05_wait_queue_failoverEv(1) line 1051, col 3 to line 1071, 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -426,10 +441,11 @@ State 7: <queue_no_rb05_wait_queue_failoverEv(1) line 1051, col 3 to line 1071, 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_evPend = <<>>
 
-State 8: <queue_no_rb05_wait_queue_enterNumber(2,1) line 1114, col 3 to line 1170, col 68 of module queue_no_rb05_wait>
+State 8: <queue_no_rb05_wait_queue_enterNumber(2,1) line 1116, col 3 to line 1172, col 68 of module queue_no_rb05_wait>
 /\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
   serving |-> 0,
   leader |-> 0,
@@ -441,7 +457,8 @@ State 8: <queue_no_rb05_wait_queue_enterNumber(2,1) line 1114, col 3 to line 117
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -483,7 +500,8 @@ State 8: <queue_no_rb05_wait_queue_enterNumber(2,1) line 1114, col 3 to line 117
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_evPend = << [ seq |-> 1,
      serving |-> 0,
      leader |-> 0,
@@ -495,9 +513,10 @@ State 8: <queue_no_rb05_wait_queue_enterNumber(2,1) line 1114, col 3 to line 117
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 
-State 9: <queue_no_rb05_wait_queue_enterRecord(2,1) line 1188, col 3 to line 1227, col 68 of module queue_no_rb05_wait>
+State 9: <queue_no_rb05_wait_queue_enterRecord(2,1) line 1190, col 3 to line 1229, col 68 of module queue_no_rb05_wait>
 /\ queue_no_rb05_wait_queue_ev = [ seq |-> 1,
   serving |-> 0,
   leader |-> 0,
@@ -509,7 +528,8 @@ State 9: <queue_no_rb05_wait_queue_enterRecord(2,1) line 1188, col 3 to line 122
   bgen |-> 1,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 1, gen |-> 1],
@@ -549,7 +569,8 @@ State 9: <queue_no_rb05_wait_queue_enterRecord(2,1) line 1188, col 3 to line 122
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_rb05_wait_queue_evPend = << [ seq |-> 1,
      serving |-> 0,
      leader |-> 0,
@@ -561,4 +582,5 @@ State 9: <queue_no_rb05_wait_queue_enterRecord(2,1) line 1188, col 3 to line 122
      bgen |-> 1,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>

@@ -27,7 +27,8 @@ State 1: <Initial predicate>
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -39,13 +40,14 @@ State 1: <Initial predicate>
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ctl = [ holder |-> 0,
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"], [gen |-> 0, op |-> "NONE"]>> ]
 
-State 2: <queue_no_fencing_queue_acquire(1) line 967, col 3 to line 987, col 68 of module queue_no_fencing>
+State 2: <queue_no_fencing_queue_acquire(1) line 970, col 3 to line 990, col 68 of module queue_no_fencing>
 /\ queue_no_fencing_queue_evPend = <<>>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
@@ -72,7 +74,8 @@ State 2: <queue_no_fencing_queue_acquire(1) line 967, col 3 to line 987, col 68 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -84,13 +87,14 @@ State 2: <queue_no_fencing_queue_acquire(1) line 967, col 3 to line 987, col 68 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
   c |-> <<[gen |-> 1, op |-> "BUMP"], [gen |-> 0, op |-> "NONE"]>> ]
 
-State 3: <queue_no_fencing_queue_acquire(2) line 967, col 3 to line 987, col 68 of module queue_no_fencing>
+State 3: <queue_no_fencing_queue_acquire(2) line 970, col 3 to line 990, col 68 of module queue_no_fencing>
 /\ queue_no_fencing_queue_evPend = <<>>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
@@ -117,7 +121,8 @@ State 3: <queue_no_fencing_queue_acquire(2) line 967, col 3 to line 987, col 68 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -129,13 +134,14 @@ State 3: <queue_no_fencing_queue_acquire(2) line 967, col 3 to line 987, col 68 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ctl = [ holder |-> 2,
   transitions |-> 2,
   acquisitions |-> 2,
   c |-> <<[gen |-> 1, op |-> "BUMP"], [gen |-> 2, op |-> "BUMP"]>> ]
 
-State 4: <queue_no_fencing_queue_applyWrite(2) line 1407, col 3 to line 1442, col 64 of module queue_no_fencing>
+State 4: <queue_no_fencing_queue_applyWrite(2) line 1410, col 3 to line 1445, col 64 of module queue_no_fencing>
 /\ queue_no_fencing_queue_evPend = << [ seq |-> 0,
      serving |-> 0,
      leader |-> 2,
@@ -147,7 +153,8 @@ State 4: <queue_no_fencing_queue_applyWrite(2) line 1407, col 3 to line 1442, co
      bgen |-> 0,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
   early |-> FALSE,
@@ -173,7 +180,8 @@ State 4: <queue_no_fencing_queue_applyWrite(2) line 1407, col 3 to line 1442, co
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 2,
@@ -185,13 +193,14 @@ State 4: <queue_no_fencing_queue_applyWrite(2) line 1407, col 3 to line 1442, co
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ctl = [ holder |-> 2,
   transitions |-> 2,
   acquisitions |-> 2,
   c |-> <<[gen |-> 1, op |-> "BUMP"], [gen |-> 2, op |-> "NONE"]>> ]
 
-State 5: <queue_no_fencing_queue_applyWrite(1) line 1407, col 3 to line 1442, col 64 of module queue_no_fencing>
+State 5: <queue_no_fencing_queue_applyWrite(1) line 1410, col 3 to line 1445, col 64 of module queue_no_fencing>
 /\ queue_no_fencing_queue_evPend = << [ seq |-> 0,
      serving |-> 0,
      leader |-> 2,
@@ -203,7 +212,8 @@ State 5: <queue_no_fencing_queue_applyWrite(1) line 1407, col 3 to line 1442, co
      bgen |-> 0,
      pub |-> FALSE,
      members |-> {},
-     node |-> 1 ] >>
+     node |-> 1,
+     pend |-> FALSE ] >>
 /\ queue_no_fencing_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}>>,
   early |-> FALSE,
@@ -229,7 +239,8 @@ State 5: <queue_no_fencing_queue_applyWrite(1) line 1407, col 3 to line 1442, co
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 2,
@@ -241,7 +252,8 @@ State 5: <queue_no_fencing_queue_applyWrite(1) line 1407, col 3 to line 1442, co
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_no_fencing_queue_ctl = [ holder |-> 2,
   transitions |-> 2,
   acquisitions |-> 2,

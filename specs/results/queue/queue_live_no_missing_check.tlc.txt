@@ -18,7 +18,8 @@ State 1: <Initial predicate>
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -47,13 +48,14 @@ State 1: <Initial predicate>
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_ctl = [ holder |-> 0,
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
 
-State 2: <queue_live_no_missing_check_queue_enterPreempt(2,1) line 583, col 3 to line 618, col 48 of module queue_live_no_missing_check>
+State 2: <queue_live_no_missing_check_queue_enterPreempt(1,1) line 585, col 3 to line 620, col 48 of module queue_live_no_missing_check>
 /\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -69,20 +71,21 @@ State 2: <queue_live_no_missing_check_queue_enterPreempt(2,1) line 583, col 3 to
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+  node |-> 1,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
 /\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] @@
-  <<2, 1>> :>
       [ seq |-> 0,
         gen |-> 0,
         phase |-> "PREEMPTED",
         own |-> FALSE,
-        after |-> "" ] )
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "IDLE", own |-> FALSE, after |-> ""] )
 /\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -102,13 +105,14 @@ State 2: <queue_live_no_missing_check_queue_enterPreempt(2,1) line 583, col 3 to
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_ctl = [ holder |-> 0,
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
 
-State 3: <queue_live_no_missing_check_queue_enterPreempt(1,1) line 583, col 3 to line 618, col 48 of module queue_live_no_missing_check>
+State 3: <queue_live_no_missing_check_queue_enterPreempt(2,1) line 585, col 3 to line 620, col 48 of module queue_live_no_missing_check>
 /\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -124,7 +128,8 @@ State 3: <queue_live_no_missing_check_queue_enterPreempt(1,1) line 583, col 3 to
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -161,13 +166,14 @@ State 3: <queue_live_no_missing_check_queue_enterPreempt(1,1) line 583, col 3 to
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_ctl = [ holder |-> 0,
   transitions |-> 0,
   acquisitions |-> 0,
   c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
 
-State 4: <queue_live_no_missing_check_queue_acquire(1) line 1152, col 3 to line 1182, col 48 of module queue_live_no_missing_check>
+State 4: <queue_live_no_missing_check_queue_enterNumber(2,1) line 1337, col 3 to line 1399, col 46 of module queue_live_no_missing_check>
 /\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
@@ -183,7 +189,8 @@ State 4: <queue_live_no_missing_check_queue_acquire(1) line 1152, col 3 to line 
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
@@ -196,66 +203,7 @@ State 4: <queue_live_no_missing_check_queue_acquire(1) line 1152, col 3 to line 
         own |-> FALSE,
         after |-> "" ] @@
   <<2, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "PREEMPTED",
-        own |-> FALSE,
-        after |-> "" ] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 0,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = <<>>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 0,
-  serving |-> 0,
-  leader |-> 0,
-  skips |-> {},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 1 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
-
-State 5: <queue_live_no_missing_check_queue_enterNumber(1,1) line 1335, col 3 to line 1397, col 46 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 0,
-  serving |-> 0,
-  leader |-> 0,
-  skips |-> {},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 1 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "SADDED", own |-> FALSE, after |-> ""] @@
-  <<2, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "PREEMPTED",
-        own |-> FALSE,
-        after |-> "" ] )
+      [seq |-> 0, gen |-> 0, phase |-> "SADDED", own |-> FALSE, after |-> ""] )
 /\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -273,8 +221,9 @@ State 5: <queue_live_no_missing_check_queue_enterNumber(1,1) line 1335, col 3 to
      size |-> 0,
      bgen |-> 0,
      pub |-> FALSE,
-     members |-> {<<1, 1>>},
-     node |-> 1 ] >>
+     members |-> {<<2, 1>>},
+     node |-> 1,
+     pend |-> FALSE ] >>
 /\ queue_live_no_missing_check_queue_ev = [ seq |-> 0,
   serving |-> 0,
   leader |-> 0,
@@ -285,17 +234,18 @@ State 5: <queue_live_no_missing_check_queue_enterNumber(1,1) line 1335, col 3 to
   size |-> 0,
   bgen |-> 0,
   pub |-> FALSE,
-  members |-> {<<1, 1>>},
-  node |-> 1 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+  members |-> {<<2, 1>>},
+  node |-> 1,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
 
-State 6: <queue_live_no_missing_check_queue_failoverEv(1) line 1231, col 3 to line 1257, col 48 of module queue_live_no_missing_check>
+State 5: <queue_live_no_missing_check_queue_enterBatchRecord(2,1) line 657, col 3 to line 695, col 48 of module queue_live_no_missing_check>
 /\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_live_no_missing_check_queue_evRep = [ seq |-> 0,
   serving |-> 0,
@@ -308,20 +258,159 @@ State 6: <queue_live_no_missing_check_queue_failoverEv(1) line 1231, col 3 to li
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
 /\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "SADDED", own |-> FALSE, after |-> ""] @@
-  <<2, 1>> :>
       [ seq |-> 0,
         gen |-> 0,
         phase |-> "PREEMPTED",
         own |-> FALSE,
-        after |-> "" ] )
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {} ]
+/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 0,
+     serving |-> 0,
+     leader |-> 0,
+     skips |-> {},
+     removed |-> {},
+     closed |-> FALSE,
+     first |-> 0,
+     size |-> 0,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {<<2, 1>>},
+     node |-> 1,
+     pend |-> FALSE ] >>
+/\ queue_live_no_missing_check_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {<<2, 1>>},
+  node |-> 1,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+
+State 6: <queue_live_no_missing_check_queue_replicatePerson(2) line 1046, col 3 to line 1070, col 48 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 1, evFailovers |-> 0, psFailovers |-> 0]
+/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 0,
+        gen |-> 0,
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {} ]
+/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 0,
+     serving |-> 0,
+     leader |-> 0,
+     skips |-> {},
+     removed |-> {},
+     closed |-> FALSE,
+     first |-> 0,
+     size |-> 0,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {<<2, 1>>},
+     node |-> 1,
+     pend |-> FALSE ] >>
+/\ queue_live_no_missing_check_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {<<2, 1>>},
+  node |-> 1,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+
+State 7: <queue_live_no_missing_check_queue_failoverEv(1) line 1233, col 3 to line 1259, col 48 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 0,
+        gen |-> 0,
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
 /\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
@@ -341,16 +430,74 @@ State 6: <queue_live_no_missing_check_queue_failoverEv(1) line 1231, col 3 to li
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 0,
+  transitions |-> 0,
+  acquisitions |-> 0,
+  c |-> <<[gen |-> 0, op |-> "NONE"]>> ]
+
+State 8: <queue_live_no_missing_check_queue_acquire(1) line 1154, col 3 to line 1184, col 48 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 0,
+        gen |-> 0,
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {} ]
+/\ queue_live_no_missing_check_queue_evPend = <<>>
+/\ queue_live_no_missing_check_queue_ev = [ seq |-> 0,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
   c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
 
-State 7: <queue_live_no_missing_check_queue_applyWrite(1) line 1719, col 3 to line 1757, col 46 of module queue_live_no_missing_check>
+State 9: <queue_live_no_missing_check_queue_windowEnds line 1265, col 3 to line 1278, col 48 of module queue_live_no_missing_check>
 /\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_live_no_missing_check_queue_evRep = [ seq |-> 0,
   serving |-> 0,
@@ -363,490 +510,17 @@ State 7: <queue_live_no_missing_check_queue_applyWrite(1) line 1719, col 3 to li
   bgen |-> 0,
   pub |-> FALSE,
   members |-> {},
-  node |-> 1 ]
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "SADDED", own |-> FALSE, after |-> ""] @@
-  <<2, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "PREEMPTED",
-        own |-> FALSE,
-        after |-> "" ] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 1,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 0,
-     serving |-> 0,
-     leader |-> 1,
-     skips |-> {},
-     removed |-> {},
-     closed |-> FALSE,
-     first |-> 0,
-     size |-> 0,
-     bgen |-> 0,
-     pub |-> FALSE,
-     members |-> {},
-     node |-> 1 ] >>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 0,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 1 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
-
-State 8: <queue_live_no_missing_check_queue_enterBatchRecord(1,1) line 655, col 3 to line 693, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 0,
-  serving |-> 0,
-  leader |-> 0,
-  skips |-> {},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 1 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
-  <<2, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "PREEMPTED",
-        own |-> FALSE,
-        after |-> "" ] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 1,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 0,
-     serving |-> 0,
-     leader |-> 1,
-     skips |-> {},
-     removed |-> {},
-     closed |-> FALSE,
-     first |-> 0,
-     size |-> 0,
-     bgen |-> 0,
-     pub |-> FALSE,
-     members |-> {},
-     node |-> 1 ] >>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 0,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 1 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
-
-State 9: <queue_live_no_missing_check_queue_replicatePerson(1) line 1044, col 3 to line 1068, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 0,
-  serving |-> 0,
-  leader |-> 0,
-  skips |-> {},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 1 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
-  <<2, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "PREEMPTED",
-        own |-> FALSE,
-        after |-> "" ] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 1,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 0,
-     serving |-> 0,
-     leader |-> 1,
-     skips |-> {},
-     removed |-> {},
-     closed |-> FALSE,
-     first |-> 0,
-     size |-> 0,
-     bgen |-> 0,
-     pub |-> FALSE,
-     members |-> {},
-     node |-> 1 ] >>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 0,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 1 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
-
-State 10: <queue_live_no_missing_check_queue_rb05 line 1819, col 3 to line 1847, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 0,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 1 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
-  <<2, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "PREEMPTED",
-        own |-> FALSE,
-        after |-> "" ] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 1,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 1,
-     serving |-> 0,
-     leader |-> 1,
-     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-     removed |-> {},
-     closed |-> FALSE,
-     first |-> 0,
-     size |-> 0,
-     bgen |-> 0,
-     pub |-> FALSE,
-     members |-> {},
-     node |-> 2 ] >>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 1,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
-
-State 11: <queue_live_no_missing_check_queue_enterNumber(2,1) line 1335, col 3 to line 1397, col 46 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 1,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> TRUE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
-  <<2, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "SADDED", own |-> FALSE, after |-> ""] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 1,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 1,
-     serving |-> 0,
-     leader |-> 1,
-     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-     removed |-> {},
-     closed |-> FALSE,
-     first |-> 0,
-     size |-> 0,
-     bgen |-> 0,
-     pub |-> FALSE,
-     members |-> {<<2, 1>>},
-     node |-> 2 ] >>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 1,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
-
-State 12: <queue_live_no_missing_check_queue_windowEnds line 1263, col 3 to line 1276, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 1,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
-  <<2, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "SADDED", own |-> FALSE, after |-> ""] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 1,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 1,
-     serving |-> 0,
-     leader |-> 1,
-     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-     removed |-> {},
-     closed |-> FALSE,
-     first |-> 0,
-     size |-> 0,
-     bgen |-> 0,
-     pub |-> FALSE,
-     members |-> {<<2, 1>>},
-     node |-> 2 ] >>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 1,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
-
-State 13: <queue_live_no_missing_check_queue_plan(1,"CLOSE") line 1189, col 3 to line 1225, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 1,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
-  <<2, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "SADDED", own |-> FALSE, after |-> ""] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 1,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 1,
-     serving |-> 0,
-     leader |-> 1,
-     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-     removed |-> {},
-     closed |-> FALSE,
-     first |-> 0,
-     size |-> 0,
-     bgen |-> 0,
-     pub |-> FALSE,
-     members |-> {<<2, 1>>},
-     node |-> 2 ] >>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 1,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "CLOSE"]>> ]
-
-State 14: <queue_live_no_missing_check_queue_enterBatchRecord(2,1) line 655, col 3 to line 693, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 1,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
 /\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
       [ seq |-> 0,
         gen |-> 0,
-        phase |-> "BATCHED",
+        phase |-> "PREEMPTED",
         own |-> FALSE,
         after |-> "" ] @@
   <<2, 1>> :>
@@ -855,243 +529,47 @@ State 14: <queue_live_no_missing_check_queue_enterBatchRecord(2,1) line 655, col
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
   staleApplied |-> 0,
-  maxGenSeen |-> 1,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 1,
-     serving |-> 0,
-     leader |-> 1,
-     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-     removed |-> {},
-     closed |-> FALSE,
-     first |-> 0,
-     size |-> 0,
-     bgen |-> 0,
-     pub |-> FALSE,
-     members |-> {<<2, 1>>},
-     node |-> 2 ] >>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 1,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "CLOSE"]>> ]
-
-State 15: <queue_live_no_missing_check_queue_applyWrite(1) line 1719, col 3 to line 1757, col 46 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 1,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
-  <<2, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 1,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 2,
-     serving |-> 0,
-     leader |-> 1,
-     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-     removed |-> {},
-     closed |-> TRUE,
-     first |-> 2,
-     size |-> 1,
-     bgen |-> 2,
-     pub |-> FALSE,
-     members |-> {<<2, 1>>},
-     node |-> 2 ] >>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 2,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> TRUE,
-  first |-> 2,
-  size |-> 1,
-  bgen |-> 2,
-  pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
-
-State 16: <queue_live_no_missing_check_queue_plan(1,"ADVANCE") line 1189, col 3 to line 1225, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 1,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> FALSE,
-  first |-> 0,
-  size |-> 0,
-  bgen |-> 0,
-  pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
-  <<2, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 1,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 2,
-     serving |-> 0,
-     leader |-> 1,
-     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-     removed |-> {},
-     closed |-> TRUE,
-     first |-> 2,
-     size |-> 1,
-     bgen |-> 2,
-     pub |-> FALSE,
-     members |-> {<<2, 1>>},
-     node |-> 2 ] >>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 2,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> TRUE,
-  first |-> 2,
-  size |-> 1,
-  bgen |-> 2,
-  pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "ADVANCE"]>> ]
-
-State 17: <queue_live_no_missing_check_queue_replicateEv line 1282, col 3 to line 1297, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 2,
-  serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
-  closed |-> TRUE,
-  first |-> 2,
-  size |-> 1,
-  bgen |-> 2,
-  pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
-  <<2, 1>> :>
-      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 1,
+  maxGenSeen |-> 0,
   admLost |-> {},
   dupLost |-> {} ]
 /\ queue_live_no_missing_check_queue_evPend = <<>>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 2,
+/\ queue_live_no_missing_check_queue_ev = [ seq |-> 0,
   serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  leader |-> 0,
+  skips |-> {},
   removed |-> {},
-  closed |-> TRUE,
-  first |-> 2,
-  size |-> 1,
-  bgen |-> 2,
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
   pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "ADVANCE"]>> ]
+  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
 
-State 18: <queue_live_no_missing_check_queue_publishBatch line 1763, col 3 to line 1778, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+State 10: <queue_live_no_missing_check_queue_rb05 line 1803, col 3 to line 1835, col 48 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 2,
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 0,
   serving |-> 0,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  leader |-> 0,
+  skips |-> {},
   removed |-> {},
-  closed |-> TRUE,
-  first |-> 2,
-  size |-> 1,
-  bgen |-> 2,
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
   pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+  members |-> {},
+  node |-> 1,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
@@ -1099,7 +577,271 @@ State 18: <queue_live_no_missing_check_queue_publishBatch line 1763, col 3 to li
 /\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
       [ seq |-> 0,
         gen |-> 0,
-        phase |-> "BATCHED",
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {} ]
+/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 1,
+     serving |-> 0,
+     leader |-> 0,
+     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+     removed |-> {},
+     closed |-> FALSE,
+     first |-> 0,
+     size |-> 0,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 2,
+     pend |-> TRUE ] >>
+/\ queue_live_no_missing_check_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> TRUE ]
+/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+
+State 11: <queue_live_no_missing_check_queue_replicateEv line 1284, col 3 to line 1299, col 48 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> TRUE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 0,
+        gen |-> 0,
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {} ]
+/\ queue_live_no_missing_check_queue_evPend = <<>>
+/\ queue_live_no_missing_check_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> TRUE ]
+/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+
+State 12: <queue_live_no_missing_check_queue_rb05Confirm line 1841, col 3 to line 1858, col 48 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> TRUE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 0,
+        gen |-> 0,
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 0,
+  admLost |-> {},
+  dupLost |-> {} ]
+/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 1,
+     serving |-> 0,
+     leader |-> 0,
+     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+     removed |-> {},
+     closed |-> FALSE,
+     first |-> 0,
+     size |-> 0,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 2,
+     pend |-> FALSE ] >>
+/\ queue_live_no_missing_check_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "BUMP"]>> ]
+
+State 13: <queue_live_no_missing_check_queue_applyWrite(1) line 1721, col 3 to line 1759, col 46 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 0,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 0,
+        gen |-> 0,
+        phase |-> "PREEMPTED",
+        own |-> FALSE,
+        after |-> "" ] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 1,
+  admLost |-> {},
+  dupLost |-> {} ]
+/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 1,
+     serving |-> 0,
+     leader |-> 1,
+     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+     removed |-> {},
+     closed |-> FALSE,
+     first |-> 0,
+     size |-> 0,
+     bgen |-> 0,
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 2,
+     pend |-> FALSE ] >>
+/\ queue_live_no_missing_check_queue_ev = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
+
+State 14: <queue_live_no_missing_check_queue_enterNumber(1,1) line 1337, col 3 to line 1399, col 46 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 1,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {},
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
+      [ seq |-> 2,
+        gen |-> 2,
+        phase |-> "NUMBERED",
         own |-> FALSE,
         after |-> "" ] @@
   <<2, 1>> :>
@@ -1118,11 +860,12 @@ State 18: <queue_live_no_missing_check_queue_publishBatch line 1763, col 3 to li
      removed |-> {},
      closed |-> TRUE,
      first |-> 2,
-     size |-> 1,
+     size |-> 0,
      bgen |-> 2,
-     pub |-> TRUE,
-     members |-> {<<2, 1>>},
-     node |-> 2 ] >>
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 2,
+     pend |-> FALSE ] >>
 /\ queue_live_no_missing_check_queue_ev = [ seq |-> 2,
   serving |-> 0,
   leader |-> 1,
@@ -1130,47 +873,45 @@ State 18: <queue_live_no_missing_check_queue_publishBatch line 1763, col 3 to li
   removed |-> {},
   closed |-> TRUE,
   first |-> 2,
-  size |-> 1,
+  size |-> 0,
   bgen |-> 2,
-  pub |-> TRUE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "ADVANCE"]>> ]
+  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
 
-State 19: <queue_live_no_missing_check_queue_takeBatchResult(2,1) line 766, col 3 to line 823, col 46 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+State 15: <queue_live_no_missing_check_queue_enterRecord(1,1) line 1421, col 3 to line 1470, col 46 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "PENDING", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 2,
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 1,
   serving |-> 0,
   leader |-> 1,
   skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
   removed |-> {},
-  closed |-> TRUE,
-  first |-> 2,
-  size |-> 1,
-  bgen |-> 2,
+  closed |-> FALSE,
+  first |-> 0,
+  size |-> 0,
+  bgen |-> 0,
   pub |-> FALSE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 2],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 2],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
 /\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
+      [seq |-> 2, gen |-> 2, phase |-> "HELD", own |-> FALSE, after |-> ""] @@
   <<2, 1>> :>
-      [seq |-> 2, gen |-> 2, phase |-> "HELD", own |-> FALSE, after |-> ""] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 2]},
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 1]},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
   staleApplied |-> 0,
@@ -1184,11 +925,12 @@ State 19: <queue_live_no_missing_check_queue_takeBatchResult(2,1) line 766, col 
      removed |-> {},
      closed |-> TRUE,
      first |-> 2,
-     size |-> 1,
+     size |-> 0,
      bgen |-> 2,
-     pub |-> TRUE,
-     members |-> {<<2, 1>>},
-     node |-> 2 ] >>
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 2,
+     pend |-> FALSE ] >>
 /\ queue_live_no_missing_check_queue_ev = [ seq |-> 2,
   serving |-> 0,
   leader |-> 1,
@@ -1196,18 +938,19 @@ State 19: <queue_live_no_missing_check_queue_takeBatchResult(2,1) line 766, col 
   removed |-> {},
   closed |-> TRUE,
   first |-> 2,
-  size |-> 1,
+  size |-> 0,
   bgen |-> 2,
-  pub |-> TRUE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "ADVANCE"]>> ]
+  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
 
-State 20: <queue_live_no_missing_check_queue_applyWrite(1) line 1719, col 3 to line 1757, col 46 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+State 16: <queue_live_no_missing_check_queue_leave(1,1) line 1492, col 3 to line 1519, col 48 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 2],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
    [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
@@ -1218,25 +961,22 @@ State 20: <queue_live_no_missing_check_queue_applyWrite(1) line 1719, col 3 to l
   removed |-> {},
   closed |-> TRUE,
   first |-> 2,
-  size |-> 1,
+  size |-> 0,
   bgen |-> 2,
-  pub |-> TRUE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 2],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
 /\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
+      [seq |-> 2, gen |-> 2, phase |-> "DONE", own |-> FALSE, after |-> ""] @@
   <<2, 1>> :>
-      [seq |-> 2, gen |-> 2, phase |-> "HELD", own |-> FALSE, after |-> ""] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 2]},
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 1]},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
   staleApplied |-> 0,
@@ -1244,65 +984,259 @@ State 20: <queue_live_no_missing_check_queue_applyWrite(1) line 1719, col 3 to l
   admLost |-> {},
   dupLost |-> {} ]
 /\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 2,
-     serving |-> 2,
+     serving |-> 0,
      leader |-> 1,
      skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-     removed |-> {},
+     removed |-> {2},
      closed |-> TRUE,
      first |-> 2,
-     size |-> 1,
+     size |-> 0,
      bgen |-> 2,
-     pub |-> TRUE,
-     members |-> {<<2, 1>>},
-     node |-> 2 ] >>
+     pub |-> FALSE,
+     members |-> {},
+     node |-> 2,
+     pend |-> FALSE ] >>
 /\ queue_live_no_missing_check_queue_ev = [ seq |-> 2,
-  serving |-> 2,
+  serving |-> 0,
   leader |-> 1,
   skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
+  removed |-> {2},
   closed |-> TRUE,
   first |-> 2,
-  size |-> 1,
+  size |-> 0,
   bgen |-> 2,
-  pub |-> TRUE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
   c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
 
-State 21: <queue_live_no_missing_check_queue_leave(2,1) line 1490, col 3 to line 1517, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+State 17: <queue_live_no_missing_check_queue_publishBatch line 1765, col 3 to line 1780, col 48 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 2],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 2],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_live_no_missing_check_queue_evRep = [ seq |-> 2,
-  serving |-> 2,
+  serving |-> 0,
   leader |-> 1,
   skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {},
+  removed |-> {2},
   closed |-> TRUE,
   first |-> 2,
-  size |-> 1,
+  size |-> 0,
   bgen |-> 2,
-  pub |-> TRUE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
 /\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
+      [seq |-> 2, gen |-> 2, phase |-> "DONE", own |-> FALSE, after |-> ""] @@
   <<2, 1>> :>
-      [seq |-> 2, gen |-> 2, phase |-> "DONE", own |-> FALSE, after |-> ""] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 2]},
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 1]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 1,
+  admLost |-> {},
+  dupLost |-> {} ]
+/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 2,
+     serving |-> 0,
+     leader |-> 1,
+     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+     removed |-> {2},
+     closed |-> TRUE,
+     first |-> 2,
+     size |-> 0,
+     bgen |-> 2,
+     pub |-> TRUE,
+     members |-> {},
+     node |-> 2,
+     pend |-> FALSE ] >>
+/\ queue_live_no_missing_check_queue_ev = [ seq |-> 2,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {2},
+  closed |-> TRUE,
+  first |-> 2,
+  size |-> 0,
+  bgen |-> 2,
+  pub |-> TRUE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
+
+State 18: <queue_live_no_missing_check_queue_replicatePerson(1) line 1046, col 3 to line 1070, col 48 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 2,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {2},
+  closed |-> TRUE,
+  first |-> 2,
+  size |-> 0,
+  bgen |-> 2,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 2, gen |-> 2, phase |-> "DONE", own |-> FALSE, after |-> ""] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 1]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 1,
+  admLost |-> {},
+  dupLost |-> {} ]
+/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 2,
+     serving |-> 0,
+     leader |-> 1,
+     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+     removed |-> {2},
+     closed |-> TRUE,
+     first |-> 2,
+     size |-> 0,
+     bgen |-> 2,
+     pub |-> TRUE,
+     members |-> {},
+     node |-> 2,
+     pend |-> FALSE ] >>
+/\ queue_live_no_missing_check_queue_ev = [ seq |-> 2,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {2},
+  closed |-> TRUE,
+  first |-> 2,
+  size |-> 0,
+  bgen |-> 2,
+  pub |-> TRUE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
+
+State 19: <queue_live_no_missing_check_queue_plan(1,"ADVANCE") line 1191, col 3 to line 1227, col 48 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 2,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {2},
+  closed |-> TRUE,
+  first |-> 2,
+  size |-> 0,
+  bgen |-> 2,
+  pub |-> FALSE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 2, gen |-> 2, phase |-> "DONE", own |-> FALSE, after |-> ""] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 1]},
+  admittedBy |-> <<{}, {}>>,
+  early |-> FALSE,
+  staleApplied |-> 0,
+  maxGenSeen |-> 1,
+  admLost |-> {},
+  dupLost |-> {} ]
+/\ queue_live_no_missing_check_queue_evPend = << [ seq |-> 2,
+     serving |-> 0,
+     leader |-> 1,
+     skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+     removed |-> {2},
+     closed |-> TRUE,
+     first |-> 2,
+     size |-> 0,
+     bgen |-> 2,
+     pub |-> TRUE,
+     members |-> {},
+     node |-> 2,
+     pend |-> FALSE ] >>
+/\ queue_live_no_missing_check_queue_ev = [ seq |-> 2,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {2},
+  closed |-> TRUE,
+  first |-> 2,
+  size |-> 0,
+  bgen |-> 2,
+  pub |-> TRUE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
+  transitions |-> 1,
+  acquisitions |-> 1,
+  c |-> <<[gen |-> 1, op |-> "ADVANCE"]>> ]
+
+State 20: <queue_live_no_missing_check_queue_applyWrite(1) line 1721, col 3 to line 1759, col 46 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 2,
+  serving |-> 0,
+  leader |-> 1,
+  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
+  removed |-> {2},
+  closed |-> TRUE,
+  first |-> 2,
+  size |-> 0,
+  bgen |-> 2,
+  pub |-> TRUE,
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
+/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
+/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
+      [seq |-> 2, gen |-> 2, phase |-> "DONE", own |-> FALSE, after |-> ""] @@
+  <<2, 1>> :>
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 1]},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
   staleApplied |-> 0,
@@ -1316,11 +1250,12 @@ State 21: <queue_live_no_missing_check_queue_leave(2,1) line 1490, col 3 to line
      removed |-> {2},
      closed |-> TRUE,
      first |-> 2,
-     size |-> 1,
+     size |-> 0,
      bgen |-> 2,
      pub |-> TRUE,
-     members |-> {<<2, 1>>},
-     node |-> 2 ] >>
+     members |-> {},
+     node |-> 2,
+     pend |-> FALSE ] >>
 /\ queue_live_no_missing_check_queue_ev = [ seq |-> 2,
   serving |-> 2,
   leader |-> 1,
@@ -1328,20 +1263,21 @@ State 21: <queue_live_no_missing_check_queue_leave(2,1) line 1490, col 3 to line
   removed |-> {2},
   closed |-> TRUE,
   first |-> 2,
-  size |-> 1,
+  size |-> 0,
   bgen |-> 2,
   pub |-> TRUE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
   c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
 
-State 22: <queue_live_no_missing_check_queue_replicateEv line 1282, col 3 to line 1297, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+State 21: <queue_live_no_missing_check_queue_replicateEv line 1284, col 3 to line 1299, col 48 of module queue_live_no_missing_check>
+/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "REC", tab |-> 1, seq |-> 2, gen |-> 2],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_live_no_missing_check_queue_evRep = [ seq |-> 2,
   serving |-> 2,
@@ -1350,25 +1286,22 @@ State 22: <queue_live_no_missing_check_queue_replicateEv line 1282, col 3 to lin
   removed |-> {2},
   closed |-> TRUE,
   first |-> 2,
-  size |-> 1,
+  size |-> 0,
   bgen |-> 2,
   pub |-> TRUE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
+/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
+   [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
      adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
 /\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
 /\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
+      [seq |-> 2, gen |-> 2, phase |-> "DONE", own |-> FALSE, after |-> ""] @@
   <<2, 1>> :>
-      [seq |-> 2, gen |-> 2, phase |-> "DONE", own |-> FALSE, after |-> ""] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 2]},
+      [seq |-> 0, gen |-> 0, phase |-> "BATCHED", own |-> FALSE, after |-> ""] )
+/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 1]},
   admittedBy |-> <<{}, {}>>,
   early |-> FALSE,
   staleApplied |-> 0,
@@ -1383,70 +1316,16 @@ State 22: <queue_live_no_missing_check_queue_replicateEv line 1282, col 3 to lin
   removed |-> {2},
   closed |-> TRUE,
   first |-> 2,
-  size |-> 1,
+  size |-> 0,
   bgen |-> 2,
   pub |-> TRUE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
+  members |-> {},
+  node |-> 2,
+  pend |-> FALSE ]
 /\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
   transitions |-> 1,
   acquisitions |-> 1,
   c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
 
-State 23: <queue_live_no_missing_check_queue_replicatePerson(2) line 1044, col 3 to line 1068, col 48 of module queue_live_no_missing_check>
-/\ queue_live_no_missing_check_queue_pssRep = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_evRep = [ seq |-> 2,
-  serving |-> 2,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {2},
-  closed |-> TRUE,
-  first |-> 2,
-  size |-> 1,
-  bgen |-> 2,
-  pub |-> TRUE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_pss = << [ dup |-> [kind |-> "BATCH", tab |-> 1, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ],
-   [ dup |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0],
-     adm |-> [kind |-> "NONE", tab |-> 0, seq |-> 0, gen |-> 0] ] >>
-/\ queue_live_no_missing_check_queue_env = [windowOpen |-> FALSE, primary |-> 2, evFailovers |-> 1, psFailovers |-> 0]
-/\ queue_live_no_missing_check_queue_tabs = ( <<1, 1>> :>
-      [ seq |-> 0,
-        gen |-> 0,
-        phase |-> "BATCHED",
-        own |-> FALSE,
-        after |-> "" ] @@
-  <<2, 1>> :>
-      [seq |-> 2, gen |-> 2, phase |-> "DONE", own |-> FALSE, after |-> ""] )
-/\ queue_live_no_missing_check_queue_ghost = [ issued |-> {[tab |-> 1, seq |-> 2, gen |-> 2, pid |-> 2]},
-  admittedBy |-> <<{}, {}>>,
-  early |-> FALSE,
-  staleApplied |-> 0,
-  maxGenSeen |-> 1,
-  admLost |-> {},
-  dupLost |-> {} ]
-/\ queue_live_no_missing_check_queue_evPend = <<>>
-/\ queue_live_no_missing_check_queue_ev = [ seq |-> 2,
-  serving |-> 2,
-  leader |-> 1,
-  skips |-> {[gen |-> 1, start |-> 1, end |-> 1]},
-  removed |-> {2},
-  closed |-> TRUE,
-  first |-> 2,
-  size |-> 1,
-  bgen |-> 2,
-  pub |-> TRUE,
-  members |-> {<<2, 1>>},
-  node |-> 2 ]
-/\ queue_live_no_missing_check_queue_ctl = [ holder |-> 1,
-  transitions |-> 1,
-  acquisitions |-> 1,
-  c |-> <<[gen |-> 1, op |-> "NONE"]>> ]
-
-State 24: Stuttering
+State 22: Stuttering
 Warning: The stuttering counterexample above may be caused by the absence of a behavior specification (SPECIFICATION). Only INIT and NEXT have been provided, so TLC permits infinite stuttering. To rule out such counterexamples, use SPECIFICATION Spec, with Spec asserting a suitable fairness constraint (compare Chapter 8, page 87ff of Specifying Systems at https://lamport.azurewebsites.net/tla/book.html).

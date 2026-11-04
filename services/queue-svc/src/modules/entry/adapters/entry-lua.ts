@@ -11,7 +11,7 @@ end
 `;
 // 지금 노드 표지(ADR-0181): 클러스터 모드는 '{CLUSTER MYID}:{설정 세대 cluster_my_epoch}'. 설정 세대는 승격마다 클러스터 전체에서 더 큰 값으로 바뀌므로
 // 옛 주 노드가 다시 주 노드가 돼도 표지가 다르다. 단일 노드(로컬·CI, 'cluster support disabled')만 'standalone'이고, 다른 오류(권한 등)는
-// 보호가 조용히 꺼지지 않게 스크립트를 실패시킨다. epochOf는 표지의 설정 세대(없으면 nil)다
+// 보호가 조용히 꺼지지 않게 스크립트를 실패시킨다
 const NODE_ID = `
 local function myId()
   local id = redis.pcall('CLUSTER', 'MYID')
@@ -28,10 +28,6 @@ local function valueOf(id)
 end
 local function nodeId()
   return valueOf(myId())
-end
-local function epochOf(v)
-  if not v then return nil end
-  return tonumber(string.match(v, ':(%d+)$'))
 end
 `;
 // 사람 슬롯 값 읽기: 번호 기록 {번호}:{세대}:{요청 ID}:{jny}:{vr}, 묶음 기록 BATCH:1:{토큰 해시}:{요청 ID}:{jny}:{vr}
@@ -67,6 +63,7 @@ return 0
 // → 닫힘 표시 → 번호를 받을 요청 수만큼 INCRBY해 묶음 안 순서대로 나눠 준다. 표시 값은 {첫 번호}:{크기}:{세대}이고 HSETNX라 리더와 겹쳐도
 // 몫마다 한 번만 전진한다(중간-028). 참가자 목록(토큰 해시)은 판매 종료까지만 둔다.
 // 맨 앞에서 세대 키(KEYS[6])의 주 노드 ID를 지금 노드 ID와 견준다. 없으면 쓰고, 다르면 장애 전환 뒤 RB-05 전이라 아무것도 쓰지 않는다(ADR-0181).
+// RB-05가 건너뛰었지만 복제 확인 전(pend)이어도 쓰지 않는다(ADR-0186).
 // ARGV: 1 회차 키 수명, 2 오픈 시각, 3 묶음 구간 끝, 4 로비 셔플, 5 묶음, 6 참가자 목록 수명, 7 요청 수 n, 그 뒤 요청마다 (묶음 대상 여부, 토큰 해시).
 // 돌려주는 값: 장애 전환 뒤 RB-05 전이면 {'RB05'}, 서버 시각으로 오픈 전이면 {'EARLY'}, 아니면 {'OK', 세대, 요청마다 (종류, 값)}. 종류 N = 번호(값), B = 묶음에 넣음, W = 기다림(값 = Retry-After 초)
 export const NUMBER_BATCH_LUA = `${EXTEND}${NODE_ID}
@@ -74,8 +71,10 @@ local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local sec = tostring(math.floor(now / 1000))
 local id = myId()
-local ep = redis.call('HMGET', KEYS[6], 'node', 'chk')
+local ep = redis.call('HMGET', KEYS[6], 'node', 'chk', 'pend')
 local held = ep[1]
+-- RB-05가 건너뛰었지만 그 쓰기를 붙은 복제본이 받았는지 아직 확인하지 않았다(ADR-0186). 무엇이든 쓰기 전에 본다
+if ep[3] then return {'RB05'} end
 if not held then
   redis.call('HSET', KEYS[6], 'node', valueOf(id), 'chk', sec)
   extend(KEYS[6], ARGV[1])
@@ -135,16 +134,22 @@ return out
 
 // RB-05(docs/infra.md, ADR-0181): 세대 키가 지금 노드 표지와 같으면(다른 파드가 먼저 했다) 아무것도 하지 않는다. 다르면 서버 시각으로 오픈 전이고
 // 카운터가 없으면 세대 키만 바꾸고(번호가 나간 적이 없다), 아니면 K만큼 INCRBY하고 {시작}:{끝}:{그때까지의 세대} 한 줄을 skipped에 더한 뒤 세대 키를 바꾼다.
-// K = 바탕 값 × 설정 세대가 오른 수(1~3 [가정]. 사이에 올라섰다 사라진 주 노드의 RB-05와 그 뒤 번호를 잃었을 수 있다. 설정 세대는 다른 샤드의 장애 전환으로도
-//   쌓여 클러스터 수명만큼 커질 수 있으므로, 사이에 사라진 주 노드 둘까지 덮는 3에서 자른다)
-//   + (오픈이 지났는데 로비 표시가 없으면 로비 인원) + (구간 끝이 지났는데 묶음 표시가 없으면 묶음 인원). 잃은 표시의 몫까지 덮는다.
+// K = 바탕 값 + (오픈이 지났는데 로비 표시가 없으면 로비 인원) + (구간 끝이 지났는데 묶음 표시가 없으면 묶음 인원). 잃은 표시의 몫까지 덮는다.
+// 세대 키를 바꿀 때 pend(확인 전)를 함께 쓰고, 진입 ②는 그 표시가 지워질 때까지 번호를 내지 않는다. 그래서 RB-05의 쓰기와 그 뒤 번호를 다음 장애 전환이
+// 함께 잃지 않아, 설정 세대가 오른 수만큼 곱하지 않는다(ADR-0186. 처음의 곱하기는 첫 장애 전환에서 설정 세대가 3 이상 오르면 덮지 못했다).
+// 이미 지금 노드 표지인데 pend가 남았으면 PENDING이다.
 // KEYS: 1 seq, 2 skipped, 3 epoch, 4 batch_done, 5 batch_members:1, 6 lobby_members
 // ARGV: 1 회차 키 수명, 2 skipped 수명, 3 바탕 값, 4 오픈 시각, 5 묶음 구간 끝, 6 로비 셔플, 7 묶음
-// 돌려주는 값: {'DONE'} 또는 {'SKIPPED', 시작, 끝, 새 세대}
+// 돌려주는 값: {'DONE'}, {'PENDING'} 또는 {'SKIPPED', 시작, 끝, 새 세대}
 export const RB05_LUA = `${EXTEND}${NODE_ID}
 local node = nodeId()
-local held = redis.call('HGET', KEYS[3], 'node')
-if held == node then return {'DONE'} end
+local ep = redis.call('HMGET', KEYS[3], 'node', 'pend')
+local held = ep[1]
+if held == node then
+  -- 다른 파드가 먼저 건너뛰었다. 그 건너뛰기를 붙은 복제본이 받았는지 아직 확인하지 않았으면 PENDING(부른 쪽이 확인한다)
+  if ep[2] then return {'PENDING'} end
+  return {'DONE'}
+end
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 if now < tonumber(ARGV[4]) and redis.call('EXISTS', KEYS[1]) == 0 then
@@ -152,21 +157,36 @@ if now < tonumber(ARGV[4]) and redis.call('EXISTS', KEYS[1]) == 0 then
   extend(KEYS[3], ARGV[1])
   return {'DONE'}
 end
-local was, cur = epochOf(held), epochOf(node)
-local times = 1
-if was and cur and cur - was > 1 then times = math.min(cur - was, 3) end
-local k = tonumber(ARGV[3]) * times
+local k = tonumber(ARGV[3])
 if ARGV[6] == '1' and redis.call('HEXISTS', KEYS[4], 'lobby') == 0 then k = k + redis.call('SCARD', KEYS[6]) end
 if ARGV[7] == '1' and now >= tonumber(ARGV[5]) and redis.call('HEXISTS', KEYS[4], '1') == 0 then k = k + redis.call('SCARD', KEYS[5]) end
 local seq = tonumber(redis.call('GET', KEYS[1]) or '0')
 local gen = redis.call('LLEN', KEYS[2]) + 1
 redis.call('RPUSH', KEYS[2], (seq + 1) .. ':' .. (seq + k) .. ':' .. gen)
 redis.call('INCRBY', KEYS[1], k)
-redis.call('HSET', KEYS[3], 'node', node)
+redis.call('HSET', KEYS[3], 'node', node, 'pend', '1')
 extend(KEYS[1], ARGV[1])
 extend(KEYS[2], ARGV[2])
 extend(KEYS[3], ARGV[1])
 return {'SKIPPED', seq + 1, seq + k, gen + 1}
+`;
+
+// RB-05 복제 확인(ADR-0186): 부른 쪽이 연결 표지(CLIENT INFO) → 표시 Lua → INFO replication(붙은 온라인 복제본 수 n) → 같은 연결로 WAIT n
+// → 연결 표지를 다시 견줌 → 지우기 Lua 순서로 돈다. 표시 Lua는 세대 키가 지금 노드 표지이고 pend가 있을 때만 wait에 서버 시각을 써, 이 연결의
+// 쓰기가 그 노드의 복제 흐름에서 RB-05 쓰기 뒤에 오게 한다(WAIT는 이 연결이 쓴 것까지만 센다). 지우기 Lua는 표시한 그 노드에서, 세대 키가 아직
+// 그 노드 표지일 때만 pend·wait을 지운다(사이에 다른 노드로 바뀌었으면 그 노드의 RB-05는 확인하지 않았다). KEYS: 1 epoch, 지우기 ARGV: 1 표시가 돌려준 노드 표지
+// 돌려주는 값: 표시는 노드 표지(확인할 것이 있음)·0, 지우기는 지운 칸 수
+export const RB05_MARK_LUA = `${NODE_ID}
+local me = nodeId()
+if redis.call('HGET', KEYS[1], 'node') ~= me or not redis.call('HGET', KEYS[1], 'pend') then return 0 end
+local t = redis.call('TIME')
+redis.call('HSET', KEYS[1], 'wait', tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000))
+return me
+`;
+export const RB05_CLEAR_LUA = `${NODE_ID}
+local me = nodeId()
+if me ~= ARGV[1] or redis.call('HGET', KEYS[1], 'node') ~= me then return 0 end
+return redis.call('HDEL', KEYS[1], 'pend', 'wait')
 `;
 
 // 회차 일정 사본 읽기(redis-event-schedules.ts, ADR-0181): HGETALL과 함께 세대 키를 맞춘다. 사본이 있으면 세대 키가 없을 때 지금 노드 ID를 쓰고,

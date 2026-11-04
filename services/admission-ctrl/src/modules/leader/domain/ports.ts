@@ -84,7 +84,10 @@ export interface Rb05Input {
   lobbyShuffle: boolean;
   openBatch: boolean;
 }
-export type Rb05Result = { kind: 'SKIPPED'; start: number; end: number; gen: number } | { kind: 'DONE' };
+/** queue-svc와 같다: SKIPPED(이번에 건너뜀, 확인 전), PENDING(이미 건너뛰었고 복제 확인 전), DONE(ADR-0186) */
+export type Rb05Result = { kind: 'SKIPPED'; start: number; end: number; gen: number } | { kind: 'PENDING' } | { kind: 'DONE' };
+/** RB-05 복제 확인(queue-svc와 같다) */
+export type Rb05Confirm = 'CONFIRMED' | 'WAITING' | 'NONE';
 
 export const LEADER_STORE = Symbol('admission.LeaderStore');
 export interface LeaderStore {
@@ -99,6 +102,8 @@ export interface LeaderStore {
   /** 명세 plan·applyWrite의 CLOSE(로비·묶음 표시) */
   close(i: CloseInput): Promise<CloseResult>;
   rb05(i: Rb05Input): Promise<Rb05Result>;
+  /** RB-05 복제 확인(ADR-0186): 표시 → 붙은 온라인 복제본 수만큼 WAIT → 지우기. queue-svc 진입 저장소와 같은 순서다 */
+  confirmRb05(i: { eventId: string }): Promise<Rb05Confirm>;
 }
 
 /** Lease 리더(플랫폼 LeaseElector). 리더가 아니면 세대가 없다 */

@@ -20,6 +20,7 @@ export const SPEC_ACTIONS = [
   'failoverEv',
   'failoverPerson',
   'rb05',
+  'rb05Confirm',
   'admit',
   'admitCheck',
   'admitClaim',

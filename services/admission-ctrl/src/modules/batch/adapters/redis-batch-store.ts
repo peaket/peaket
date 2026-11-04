@@ -74,7 +74,8 @@ export class RedisBatchStore implements BatchStore {
     const ok = Number(await r.evalScript(MARK_WAIT, [k], [marker, String(batchNo), String(Date.now())], { deadlineMs })) === 1;
     if (!ok) return false;
     if (this.minReplicas <= 0) return true;
-    const acked = Number(await r.command(['WAIT', String(this.minReplicas), String(WAIT_MS)], { key: k, deadlineMs }));
+    // pin: WAIT는 pin이 없으면 클러스터 클라이언트가 모든 샤드로 보내 최솟값을 돌려준다(다른 샤드의 복제본이 모자라도 게시가 미뤄진다, ADR-0186 클러스터 실측)
+    const acked = Number(await r.command(['WAIT', String(this.minReplicas), String(WAIT_MS)], { key: k, deadlineMs, pin: true }));
     return acked >= this.minReplicas;
   }
 

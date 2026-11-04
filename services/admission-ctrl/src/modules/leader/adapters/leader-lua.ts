@@ -1,7 +1,7 @@
 // admission-ctrl 리더의 대기열 Redis Lua(docs/features/queue-admission.md §3·§5, docs/data.md §3, ADR-0056·0058·0104·0181·0182). 문자열만 두고 아무것도 가져오지 않는다.
 // 이름은 명세 specs/queue.qnt의 동작 이름이다.
 //
-// EXTEND·NODE_ID·RB05_LUA는 queue-svc services/queue-svc/src/modules/entry/adapters/entry-lua.ts와 같은 글이어야 한다(RB-05는 진입 파드와 리더 어느 쪽이 돌아도 같아야 한다).
+// EXTEND·NODE_ID·RB05_LUA·RB05_MARK_LUA·RB05_CLEAR_LUA는 queue-svc services/queue-svc/src/modules/entry/adapters/entry-lua.ts와 같은 글이어야 한다(RB-05는 진입 파드와 리더 어느 쪽이 돌아도 같아야 한다).
 // test/leader-lua.test.ts가 두 원문을 견준다. 고칠 때는 둘을 함께 고친다.
 
 const EXTEND = `
@@ -26,16 +26,17 @@ end
 local function nodeId()
   return valueOf(myId())
 end
-local function epochOf(v)
-  if not v then return nil end
-  return tonumber(string.match(v, ':(%d+)$'))
-end
 `;
 
 export const RB05_LUA = `${EXTEND}${NODE_ID}
 local node = nodeId()
-local held = redis.call('HGET', KEYS[3], 'node')
-if held == node then return {'DONE'} end
+local ep = redis.call('HMGET', KEYS[3], 'node', 'pend')
+local held = ep[1]
+if held == node then
+  -- 다른 파드가 먼저 건너뛰었다. 그 건너뛰기를 붙은 복제본이 받았는지 아직 확인하지 않았으면 PENDING(부른 쪽이 확인한다)
+  if ep[2] then return {'PENDING'} end
+  return {'DONE'}
+end
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 if now < tonumber(ARGV[4]) and redis.call('EXISTS', KEYS[1]) == 0 then
@@ -43,21 +44,36 @@ if now < tonumber(ARGV[4]) and redis.call('EXISTS', KEYS[1]) == 0 then
   extend(KEYS[3], ARGV[1])
   return {'DONE'}
 end
-local was, cur = epochOf(held), epochOf(node)
-local times = 1
-if was and cur and cur - was > 1 then times = math.min(cur - was, 3) end
-local k = tonumber(ARGV[3]) * times
+local k = tonumber(ARGV[3])
 if ARGV[6] == '1' and redis.call('HEXISTS', KEYS[4], 'lobby') == 0 then k = k + redis.call('SCARD', KEYS[6]) end
 if ARGV[7] == '1' and now >= tonumber(ARGV[5]) and redis.call('HEXISTS', KEYS[4], '1') == 0 then k = k + redis.call('SCARD', KEYS[5]) end
 local seq = tonumber(redis.call('GET', KEYS[1]) or '0')
 local gen = redis.call('LLEN', KEYS[2]) + 1
 redis.call('RPUSH', KEYS[2], (seq + 1) .. ':' .. (seq + k) .. ':' .. gen)
 redis.call('INCRBY', KEYS[1], k)
-redis.call('HSET', KEYS[3], 'node', node)
+redis.call('HSET', KEYS[3], 'node', node, 'pend', '1')
 extend(KEYS[1], ARGV[1])
 extend(KEYS[2], ARGV[2])
 extend(KEYS[3], ARGV[1])
 return {'SKIPPED', seq + 1, seq + k, gen + 1}
+`;
+
+// RB-05 복제 확인(ADR-0186): 부른 쪽이 연결 표지(CLIENT INFO) → 표시 Lua → INFO replication(붙은 온라인 복제본 수 n) → 같은 연결로 WAIT n
+// → 연결 표지를 다시 견줌 → 지우기 Lua 순서로 돈다. 표시 Lua는 세대 키가 지금 노드 표지이고 pend가 있을 때만 wait에 서버 시각을 써, 이 연결의
+// 쓰기가 그 노드의 복제 흐름에서 RB-05 쓰기 뒤에 오게 한다(WAIT는 이 연결이 쓴 것까지만 센다). 지우기 Lua는 표시한 그 노드에서, 세대 키가 아직
+// 그 노드 표지일 때만 pend·wait을 지운다(사이에 다른 노드로 바뀌었으면 그 노드의 RB-05는 확인하지 않았다). KEYS: 1 epoch, 지우기 ARGV: 1 표시가 돌려준 노드 표지
+// 돌려주는 값: 표시는 노드 표지(확인할 것이 있음)·0, 지우기는 지운 칸 수
+export const RB05_MARK_LUA = `${NODE_ID}
+local me = nodeId()
+if redis.call('HGET', KEYS[1], 'node') ~= me or not redis.call('HGET', KEYS[1], 'pend') then return 0 end
+local t = redis.call('TIME')
+redis.call('HSET', KEYS[1], 'wait', tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000))
+return me
+`;
+export const RB05_CLEAR_LUA = `${NODE_ID}
+local me = nodeId()
+if me ~= ARGV[1] or redis.call('HGET', KEYS[1], 'node') ~= me then return 0 end
+return redis.call('HDEL', KEYS[1], 'pend', 'wait')
 `;
 
 // 리더 세대 확인(펜싱, ADR-0056 결정 2): 내 세대 < 저장 세대면 FENCED, 아니면 저장 세대를 내 세대로 올린다. 아래 Lua 모두의 맨 앞에 둔다(KEYS[1] = leader, ARGV[1] = 세대)
@@ -213,11 +229,13 @@ export const CLOSE_LUA = `${EXTEND}${NODE_ID}${FENCE}
 -- FENCE의 SET이 리더 키 수명을 지우므로 일찍 돌아가기 전에 건다
 extend(KEYS[1], ARGV[2])
 local node = nodeId()
-local held = redis.call('HGET', KEYS[7], 'node')
+local ep = redis.call('HMGET', KEYS[7], 'node', 'pend')
+local held = ep[1]
 if not held then
   redis.call('HSET', KEYS[7], 'node', node)
   extend(KEYS[7], ARGV[2])
-elseif held ~= node then
+elseif held ~= node or ep[2] then
+  -- 장애 전환 뒤 RB-05 전이거나, RB-05가 건너뛰었지만 복제 확인 전이다(ADR-0186)
   return {'RB05'}
 end
 local t = redis.call('TIME')

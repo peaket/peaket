@@ -81,7 +81,7 @@ describe('게시 전 복제 확인', () => {
     const shared = { command: async (a: string[]) => (seen.push(`shared:${a[0]}`), null), evalScript: async () => (seen.push('shared:eval'), [1]), sendCommand: async () => null, close: async () => {} };
     let marker = '11:5:1';
     const own = {
-      command: async (a: string[]) => (seen.push(`wait:${a[0]}`), 1),
+      command: async (a: string[], c?: { pin?: boolean }) => (seen.push(`wait:${a[0]}${c?.pin ? ':pin' : ''}`), 1),
       // Lua가 정수 1·0을 돌려주는 것과 같게
       evalScript: async (_s: unknown, _k: string[], args: string[]) => (seen.push('wait:eval'), args[0] === marker ? 1 : 0),
       sendCommand: async () => null,
@@ -89,7 +89,7 @@ describe('게시 전 복제 확인', () => {
     };
     const store = new RedisBatchStore(shared as never, 1, own as never);
     expect(await store.confirmReplicated('e', 1, '11:5:1')).toBe(true);
-    expect(seen).toEqual(['wait:eval', 'wait:WAIT']);
+    expect(seen).toEqual(['wait:eval', 'wait:WAIT:pin']);
     marker = '99:1:2';
     expect(await store.confirmReplicated('e', 1, '11:5:1')).toBe(false);
   });
