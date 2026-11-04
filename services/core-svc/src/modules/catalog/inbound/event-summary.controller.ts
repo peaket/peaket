@@ -6,10 +6,11 @@
 // 무효화하므로, 대문자로 부른 주소의 사본도 함께 지워진다(docs/infra.md §4.1, docs/frontend.md §2.5 /events/[id] 행).
 // 404는 no-store [가정]: 판매 승인 직후 공개가 캐시된 404에 늦게 보이지 않게 한다.
 import { Controller, Get, Res } from '@nestjs/common';
-import { ContractParams, ProblemError, Roles } from '@peaket/platform';
+import { ContractParams, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { type EventPublicSummary, GetEventSummary } from '../application/get-event-summary.js';
+import { notFound } from '../application/problems.js';
 
 /** 계약의 EventId 경로 칸(문자열). 모양이 틀린 ID는 저장소가 없는 회차로 답한다(같은 404) */
 export const EventParams = z.object({ eventId: z.string() }).strict();
@@ -29,7 +30,7 @@ export class EventSummaryController {
     const found = await this.summary.run(params.eventId);
     if (!found) {
       void reply.header('cache-control', 'no-store');
-      throw new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
+      throw notFound();
     }
     void reply.header('cache-control', PUBLIC_SUMMARY_CACHE);
     void reply.header(CACHE_TAG_HEADER, eventCacheTag(found.eventId));

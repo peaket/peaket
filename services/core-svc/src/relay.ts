@@ -1,7 +1,7 @@
 // 서비스별 Outbox 릴레이 프로세스 시작(ADR-0116 결정 1·2, BUILD_ORDER FND-110).
 // 서비스와 같은 이미지를 다른 시작 명령으로 띄운다: node --import @peaket/platform/telemetry/register dist/relay.js
 // 배포는 `<서비스>-outbox-relay` Deployment(복제 2, deploy/charts/peaket-service의 outboxRelay)다. Lease 리더만 보내고 정비를 돈다.
-import { createDatabase, inClusterLeaseApi, kafkaAuthFromEnv, loadOutboxRelayProcessConfig, platformMaintenanceTasks, startOutboxRelayProcess, systemClock } from '@peaket/platform';
+import { createDatabase, inClusterLeaseApi, kafkaAuthFromEnv, loadOutboxRelayProcessConfig, startOutboxRelayProcess } from '@peaket/platform';
 import { createKafkaProducer, kafkaOutboxPublisher } from '@peaket/platform/stream-worker';
 
 const SERVICE = 'core-svc';
@@ -21,8 +21,6 @@ const relay = await startOutboxRelayProcess({
   maintenanceDatabase,
   publisher: kafkaOutboxPublisher(producer),
   leaseApi: inClusterLeaseApi(config.leaseName),
-  // core-svc에는 아직 멱등 기록 표가 없어(멱등 키를 받는 쓰기는 HOT-171) 그 표를 지우는 정비 일을 뺀다. HOT-171이 표를 더할 때 기본 목록으로 되돌린다
-  maintenanceTasks: platformMaintenanceTasks(maintenanceDatabase, systemClock).filter((t) => t.name !== 'idempotency-records-delete'),
 });
 
 // 종료: 보내던 묶음을 마치고 Lease를 놓은 뒤 연결을 닫는다(종료 대기 30초 안, docs/devops.md §6.4).

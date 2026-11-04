@@ -68,6 +68,10 @@ import type {
   ListPartnerWebhooks200,
   ListPartnerWebhooksParams,
   LiveSnapshot,
+  PartnerEventCreate,
+  PartnerEventCreated,
+  PartnerProductionCreate,
+  PartnerProductionCreated,
   PartnerSalesReport,
   PartnerTeamAccountPage,
   PayoutAccountChange,
@@ -937,8 +941,13 @@ export function useListPartnerTeamAccounts<TData = Awaited<ReturnType<typeof lis
 
 
 export type createPartnerProductionResponse201 = {
-  data: void
+  data: PartnerProductionCreated
   status: 201
+}
+
+export type createPartnerProductionResponse404 = {
+  data: ProblemResponse
+  status: 404
 }
 
 export type createPartnerProductionResponse409 = {
@@ -954,7 +963,7 @@ export type createPartnerProductionResponse422 = {
 export type createPartnerProductionResponseSuccess = (createPartnerProductionResponse201) & {
   headers: Headers;
 };
-export type createPartnerProductionResponseError = (createPartnerProductionResponse409 | createPartnerProductionResponse422) & {
+export type createPartnerProductionResponseError = (createPartnerProductionResponse404 | createPartnerProductionResponse409 | createPartnerProductionResponse422) & {
   headers: Headers;
 };
 
@@ -967,17 +976,31 @@ export const getCreatePartnerProductionUrl = () => {
 }
 
 /**
- * FR-022, POL-003·011·018·030. 공연 하나와 회차 여럿을 함께 만든다(추천 적용 2026-10-27, ADR-0093). 회차의 정렬 설정은 lobbyShuffle·openBatch(boolean, 기본 true)다. 둘 다 false면 422다(추천 적용 2026-10-28, ADR-0118). 공연장은 기존 placeId나 새 공연장 요청(이름·주소), 아티스트는 기존 artistId나 새 이름, 공연의 다른 이름은 5개 [가정]까지 받는다. 새 공연장·새 아티스트는 운영자가 판매 승인 때 잇거나 만든다. 한 공연의 회차는 같은 배치본을 쓴다. 온세일 중 정렬 방식 변경 409. 오픈 간격 규칙 위반 409(다른 공연과 5분 안, 가능 시각 제안). 대형 공연끼리의 30분 간격은 판매 승인에서 규모를 정할 때 검사하고, 여기서는 대형으로 승인된 공연과 30분 안이면 저장은 되고 경고만 준다(POL-030, 추천 적용 2026-10-14, ADR-0062). 저장 시 공연 페이지 태그 무효화
- * @summary 공연 등록(위저드 최종 저장: 공연 정보·공연장·아티스트·다른 이름과 첫 회차들, 회차별 정렬 설정·1인 한도·판매 정책 DSL·입장 정책)
+ * FR-022, POL-003·011·018·030. 공연 하나와 회차 여럿을 함께 만든다(추천 적용 2026-10-27, ADR-0093). 회차의 정렬 설정은 lobbyShuffle·openBatch(boolean, 기본 true)다. 둘 다 false면 422다(추천 적용 2026-10-28, ADR-0118). 공연장은 기존 placeId나 새 공연장 요청(이름·주소), 아티스트는 기존 artistId나 새 이름, 공연의 다른 이름은 5개 [가정]까지 받는다. 새 공연장·새 아티스트는 운영자가 판매 승인 때 잇거나 만든다. 한 공연의 회차는 같은 배치본을 쓴다. 오픈 간격 규칙 위반 409(공개 중인 다른 공연과 5분 안, 가능 시각 제안. 승인 전 공연끼리는 판매 승인에서 다시 본다). 대형 공연끼리의 30분 간격은 판매 승인에서 규모를 정할 때 검사하고, 여기서는 대형으로 승인된 공연과 30분 안이면 저장은 되고 경고만 준다(POL-030, 추천 적용 2026-10-14, ADR-0062). 공연은 DRAFT라 공개 페이지가 없어 무효화할 것이 없다. 본문·판정 순서·저장 규칙은 PartnerProductionCreate·PartnerEventCreate와 ADR-0198이다(추천 적용 2026-11-05)
+ * @summary 공연 등록(공연 정보·공연장·아티스트·다른 이름과 첫 회차들, 회차별 정렬 설정·배정 방식·1인 한도·재입장)
  */
-export const createPartnerProduction = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerProductionResponseSuccess> => {
+export const createPartnerProduction = async (partnerProductionCreate: PartnerProductionCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerProductionResponseSuccess> => {
 
-  return orvalFetch<createPartnerProductionResponseSuccess>(getCreatePartnerProductionUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerProductionResponseSuccess>(getCreatePartnerProductionUrl(),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerProductionCreate)
   }
 );}
 
@@ -988,8 +1011,8 @@ export const createPartnerProduction = async ( options?: Parameters<typeof orval
 export const getCreatePartnerProductionMutationKey = () => ['createPartnerProduction'] as const;
 
 export const getCreatePartnerProductionMutationOptions = <TError = ErrorType<ProblemResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduction>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduction>>, TError,void, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduction>>, TError,CreatePartnerProductionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduction>>, TError,CreatePartnerProductionMutationVariables, TContext> => {
 
 const mutationKey = getCreatePartnerProductionMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -1001,10 +1024,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerProduction>>, void> = () => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerProduction>>, CreatePartnerProductionMutationVariables> = (props) => {
+          const {data} = props ?? {};
 
-
-          return  createPartnerProduction(requestOptions)
+          return  createPartnerProduction(data,requestOptions)
         }
 
 
@@ -1015,31 +1038,36 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type CreatePartnerProductionMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerProduction>>>
-
+    export type CreatePartnerProductionMutationBody = BodyType<PartnerProductionCreate>
     export type CreatePartnerProductionMutationError = ErrorType<ProblemResponse>
-
+    export type CreatePartnerProductionMutationVariables = {data: BodyType<PartnerProductionCreate>}
 
     /**
- * @summary 공연 등록(위저드 최종 저장: 공연 정보·공연장·아티스트·다른 이름과 첫 회차들, 회차별 정렬 설정·1인 한도·판매 정책 DSL·입장 정책)
+ * @summary 공연 등록(공연 정보·공연장·아티스트·다른 이름과 첫 회차들, 회차별 정렬 설정·배정 방식·1인 한도·재입장)
  */
 export const useCreatePartnerProduction = <TError = ErrorType<ProblemResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduction>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerProduction>>, TError,CreatePartnerProductionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPartnerProduction>>,
         TError,
-        void,
+        CreatePartnerProductionMutationVariables,
         TContext
       > => {
       return useMutation(getCreatePartnerProductionMutationOptions(options), queryClient);
     }
     export type createPartnerProductionEventResponse201 = {
-  data: void
+  data: PartnerEventCreated
   status: 201
 }
 
 export type createPartnerProductionEventResponse403 = {
   data: ProblemResponse
   status: 403
+}
+
+export type createPartnerProductionEventResponse404 = {
+  data: ProblemResponse
+  status: 404
 }
 
 export type createPartnerProductionEventResponse409 = {
@@ -1055,7 +1083,7 @@ export type createPartnerProductionEventResponse422 = {
 export type createPartnerProductionEventResponseSuccess = (createPartnerProductionEventResponse201) & {
   headers: Headers;
 };
-export type createPartnerProductionEventResponseError = (createPartnerProductionEventResponse403 | createPartnerProductionEventResponse409 | createPartnerProductionEventResponse422) & {
+export type createPartnerProductionEventResponseError = (createPartnerProductionEventResponse403 | createPartnerProductionEventResponse404 | createPartnerProductionEventResponse409 | createPartnerProductionEventResponse422) & {
   headers: Headers;
 };
 
@@ -1068,17 +1096,32 @@ export const getCreatePartnerProductionEventUrl = (productionId: string,) => {
 }
 
 /**
- * FR-022, 추천 적용 2026-10-27, ADR-0093. 오픈 간격 규칙과 정비 창, 정렬 설정(lobbyShuffle·openBatch, 둘 다 false면 422, ADR-0118)은 공연 등록과 같다(POL-030·041). 판매 승인 뒤 더하면 그 공연이 재승인 대기가 되고, 그동안 마지막 승인 내용으로 공개·판매를 계속한다(docs/planning/03 §2.14). 파트너 소속 공연만
+ * FR-022, 추천 적용 2026-10-27, ADR-0093. 오픈 간격 규칙과 정비 창, 정렬 설정(lobbyShuffle·openBatch, 둘 다 false면 422, ADR-0118)은 공연 등록과 같다(POL-030·041). 판매 승인 뒤 더하면 그 공연이 재승인 대기가 되고, 그동안 마지막 승인 내용으로 공개·판매를 계속한다(docs/planning/03 §2.14). 파트너 소속 공연만. 승인 이력이 있는 공연에 더한 회차는 event 행이 아니라 그 공연의 변경분(pending_revision)에만 두고, 판매 승인 때 같은 회차 ID로 옮긴다(응답 pending true). 그런 공연은 파트너 관리자만 더한다(planning/03 §3 첫 행). 배치본은 그 공연의 다른 회차와 같은 값이다(ADR-0198 결정 3, 추천 적용 2026-11-05)
  * @summary 회차 더하기(같은 공연·같은 배치본)
  */
-export const createPartnerProductionEvent = async (productionId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerProductionEventResponseSuccess> => {
+export const createPartnerProductionEvent = async (productionId: string,
+    partnerEventCreate: PartnerEventCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerProductionEventResponseSuccess> => {
 
-  return orvalFetch<createPartnerProductionEventResponseSuccess>(getCreatePartnerProductionEventUrl(productionId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerProductionEventResponseSuccess>(getCreatePartnerProductionEventUrl(productionId),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerEventCreate)
   }
 );}
 
@@ -1103,9 +1146,9 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerProductionEvent>>, CreatePartnerProductionEventMutationVariables> = (props) => {
-          const {productionId} = props ?? {};
+          const {productionId,data} = props ?? {};
 
-          return  createPartnerProductionEvent(productionId,requestOptions)
+          return  createPartnerProductionEvent(productionId,data,requestOptions)
         }
 
 
@@ -1116,9 +1159,9 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type CreatePartnerProductionEventMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerProductionEvent>>>
-
+    export type CreatePartnerProductionEventMutationBody = BodyType<PartnerEventCreate>
     export type CreatePartnerProductionEventMutationError = ErrorType<ProblemResponse>
-    export type CreatePartnerProductionEventMutationVariables = {productionId: string}
+    export type CreatePartnerProductionEventMutationVariables = {productionId: string;data: BodyType<PartnerEventCreate>}
 
     /**
  * @summary 회차 더하기(같은 공연·같은 배치본)

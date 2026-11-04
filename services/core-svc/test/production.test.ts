@@ -1,7 +1,7 @@
 // 공연 카드의 대표 회차·판매 상태와 같은 배치본·공개 여부(ADR-0093 결정 1·7·8, BUILD_ORDER HOT-170 ①)
 import { EventSaleChanged } from '@peaket/contracts/asyncapi';
 import { describe, expect, test } from 'vitest';
-import { type CatalogEvent, cardSaleStatus, EVENT_SALE_STATES, type EventSaleState, isPublic, representativeEvent, sameVenue } from '../src/modules/catalog/domain/production.js';
+import { type CatalogEvent, cardSaleStatus, EVENT_SALE_STATES, type EventSaleState, isPublic, opensAsScheduled, representativeEvent, sameVenue } from '../src/modules/catalog/domain/production.js';
 
 const D = (s: string) => new Date(`2026-${s}T10:00:00.000Z`);
 function ev(id: string, o: Partial<CatalogEvent> = {}): CatalogEvent {
@@ -75,4 +75,9 @@ test('공개는 한 번 승인되고 판매 중지가 아닐 때(재승인 대�
   expect(isPublic({ saleReview: 'REJECTED', saleApprovedAt: at })).toBe(true);
   expect(isPublic({ saleReview: 'SUSPENDED', saleApprovedAt: at })).toBe(false);
   expect(isPublic({ saleReview: 'SUBMITTED', saleApprovedAt: null })).toBe(false);
+});
+
+test('오픈 예약은 판매 승인 상태일 때만 예정대로 한다(재승인 대기·변경 반려·판매 중지는 공개가 이어져도 오픈을 멈춘다, planning/03 §2.14)', () => {
+  expect(opensAsScheduled({ saleReview: 'APPROVED' })).toBe(true);
+  for (const s of ['DRAFT', 'SUBMITTED', 'REJECTED', 'SUSPENDED'] as const) expect(opensAsScheduled({ saleReview: s })).toBe(false);
 });

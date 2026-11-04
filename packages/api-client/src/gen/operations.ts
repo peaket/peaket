@@ -379,7 +379,7 @@ export const OPERATIONS = {
   createPartnerEventCancellation: {operationId: "createPartnerEventCancellation",method: "POST",path: "/v1/partner/events/{eventId}/cancellation",host: "partner-api",kind: "write",idempotent: true,cookie: true},
   createPartnerEventStaffInvitation: {operationId: "createPartnerEventStaffInvitation",method: "POST",path: "/v1/partner/events/{eventId}/staff-invitations",host: "partner-api",kind: "write",cookie: true},
   createPartnerProduct: {operationId: "createPartnerProduct",method: "POST",path: "/v1/partner/products",host: "partner-api",kind: "write",cookie: true},
-  createPartnerProduction: {operationId: "createPartnerProduction",method: "POST",path: "/v1/partner/productions",host: "partner-api",kind: "write",cookie: true},
+  createPartnerProduction: {operationId: "createPartnerProduction",method: "POST",path: "/v1/partner/productions",host: "partner-api",kind: "write",idempotent: true,cookie: true},
   createPartnerProductionEvent: {operationId: "createPartnerProductionEvent",method: "POST",path: "/v1/partner/productions/{productionId}/events",host: "partner-api",kind: "write",idempotent: true,cookie: true},
   createPartnerProductionImage: {operationId: "createPartnerProductionImage",method: "POST",path: "/v1/partner/productions/{productionId}/images",host: "partner-api",kind: "upload",cookie: true},
   createPartnerProductionSaleReview: {operationId: "createPartnerProductionSaleReview",method: "POST",path: "/v1/partner/productions/{productionId}/sale-review",host: "partner-api",kind: "write",cookie: true},

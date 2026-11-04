@@ -15,6 +15,13 @@
       "when": 1793825814963,
       "tag": "0001_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793827154169,
+      "tag": "0002_production_registration",
+      "breakpoints": true
     }
   ]
 }

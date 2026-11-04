@@ -138,13 +138,89 @@ export const ListPartnerTeamAccountsResponse = zod.object({
 })
 
 /**
- * FR-022, POL-003·011·018·030. 공연 하나와 회차 여럿을 함께 만든다(추천 적용 2026-10-27, ADR-0093). 회차의 정렬 설정은 lobbyShuffle·openBatch(boolean, 기본 true)다. 둘 다 false면 422다(추천 적용 2026-10-28, ADR-0118). 공연장은 기존 placeId나 새 공연장 요청(이름·주소), 아티스트는 기존 artistId나 새 이름, 공연의 다른 이름은 5개 [가정]까지 받는다. 새 공연장·새 아티스트는 운영자가 판매 승인 때 잇거나 만든다. 한 공연의 회차는 같은 배치본을 쓴다. 온세일 중 정렬 방식 변경 409. 오픈 간격 규칙 위반 409(다른 공연과 5분 안, 가능 시각 제안). 대형 공연끼리의 30분 간격은 판매 승인에서 규모를 정할 때 검사하고, 여기서는 대형으로 승인된 공연과 30분 안이면 저장은 되고 경고만 준다(POL-030, 추천 적용 2026-10-14, ADR-0062). 저장 시 공연 페이지 태그 무효화
- * @summary 공연 등록(위저드 최종 저장: 공연 정보·공연장·아티스트·다른 이름과 첫 회차들, 회차별 정렬 설정·1인 한도·판매 정책 DSL·입장 정책)
+ * FR-022, POL-003·011·018·030. 공연 하나와 회차 여럿을 함께 만든다(추천 적용 2026-10-27, ADR-0093). 회차의 정렬 설정은 lobbyShuffle·openBatch(boolean, 기본 true)다. 둘 다 false면 422다(추천 적용 2026-10-28, ADR-0118). 공연장은 기존 placeId나 새 공연장 요청(이름·주소), 아티스트는 기존 artistId나 새 이름, 공연의 다른 이름은 5개 [가정]까지 받는다. 새 공연장·새 아티스트는 운영자가 판매 승인 때 잇거나 만든다. 한 공연의 회차는 같은 배치본을 쓴다. 오픈 간격 규칙 위반 409(공개 중인 다른 공연과 5분 안, 가능 시각 제안. 승인 전 공연끼리는 판매 승인에서 다시 본다). 대형 공연끼리의 30분 간격은 판매 승인에서 규모를 정할 때 검사하고, 여기서는 대형으로 승인된 공연과 30분 안이면 저장은 되고 경고만 준다(POL-030, 추천 적용 2026-10-14, ADR-0062). 공연은 DRAFT라 공개 페이지가 없어 무효화할 것이 없다. 본문·판정 순서·저장 규칙은 PartnerProductionCreate·PartnerEventCreate와 ADR-0198이다(추천 적용 2026-11-05)
+ * @summary 공연 등록(공연 정보·공연장·아티스트·다른 이름과 첫 회차들, 회차별 정렬 설정·배정 방식·1인 한도·재입장)
  */
-export const CreatePartnerProductionResponse = zod.void()
+export const CreatePartnerProductionHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const createPartnerProductionBodyTitleMax = 100;
+
+export const createPartnerProductionBodyAgeRatingMax = 30;
+
+export const createPartnerProductionBodyRunningMinutesMax = 1440;
+
+export const createPartnerProductionBodyNewPlaceNameMax = 100;
+
+export const createPartnerProductionBodyNewPlaceAddressMax = 200;
+
+export const createPartnerProductionBodyArtistsItemNameMax = 100;
+
+export const createPartnerProductionBodyArtistsMax = 20;
+
+export const createPartnerProductionBodyAliasesItemMax = 100;
+
+export const createPartnerProductionBodyAliasesMax = 5;
+
+export const createPartnerProductionBodyEventsItemLobbyMinutesDefault = 10;
+export const createPartnerProductionBodyEventsItemLobbyMinutesMin = 0;
+export const createPartnerProductionBodyEventsItemLobbyMinutesMax = 60;
+
+export const createPartnerProductionBodyEventsItemReentryAllowedDefault = false;
+export const createPartnerProductionBodyEventsItemLobbyShuffleDefault = true;
+export const createPartnerProductionBodyEventsItemOpenBatchDefault = true;
+export const createPartnerProductionBodyEventsItemSeatAssignmentDefault = `PICK`;
+export const createPartnerProductionBodyEventsItemPerPersonLimitDefault = 4;
+export const createPartnerProductionBodyEventsItemPerPersonLimitMax = 10;
+
+export const createPartnerProductionBodyEventsMax = 50;
+
+
+
+export const CreatePartnerProductionBody = zod.object({
+  "title": zod.string().min(1).max(createPartnerProductionBodyTitleMax).describe('공연명 1~100자 [가정]'),
+  "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
+  "ageRating": zod.string().min(1).max(createPartnerProductionBodyAgeRatingMax).optional().describe('관람 연령(예: 만 7세 이상)'),
+  "runningMinutes": zod.int().min(1).max(createPartnerProductionBodyRunningMinutesMax).optional().describe('러닝타임(분)'),
+  "placeId": zod.uuid().optional().describe('등록된 공연장(GET /v1/partner/places로 찾는다)'),
+  "newPlace": zod.object({
+  "name": zod.string().min(1).max(createPartnerProductionBodyNewPlaceNameMax),
+  "address": zod.string().min(1).max(createPartnerProductionBodyNewPlaceAddressMax).describe('도로명 주소')
+}).strict().optional().describe('목록에 없는 공연장 요청. 판매 승인 때 운영자가 기존 공연장에 잇거나 새로 만든다(ADR-0093 결정 3)'),
+  "artists": zod.array(zod.object({
+  "artistId": zod.uuid().optional(),
+  "name": zod.string().min(1).max(createPartnerProductionBodyArtistsItemNameMax).optional()
+}).strict()).max(createPartnerProductionBodyArtistsMax).describe('아티스트 목록 20개 [가정]까지, 보이는 순서대로. 칸마다 artistId(등록된 아티스트)와 name(새 이름 요청, 판매 승인 때 운영자가 잇거나 만든다) 가운데 꼭 하나다(아니면 400). 같은 artistId를 두 번 쓰면 400'),
+  "aliases": zod.array(zod.string().min(1).max(createPartnerProductionBodyAliasesItemMax)).max(createPartnerProductionBodyAliasesMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('공연의 다른 이름(영문 표기 등) 5개 [가정]까지. 검색에만 쓰인다(POL-045, ADR-0093 결정 5)'),
+  "events": zod.array(zod.object({
+  "openAt": zod.iso.datetime({"offset":true}).describe('티켓 오픈 시각'),
+  "lobbyMinutes": zod.int().min(createPartnerProductionBodyEventsItemLobbyMinutesMin).max(createPartnerProductionBodyEventsItemLobbyMinutesMax).default(createPartnerProductionBodyEventsItemLobbyMinutesDefault).describe('오픈 전 로비 개방 분 [가정]'),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).optional().describe('입장 시작(공연 시작 이하)'),
+  "startsAt": zod.iso.datetime({"offset":true}).describe('공연 시작. 판매 종료는 이 시각 − 24시간이다(ADR-0064)'),
+  "endsAt": zod.iso.datetime({"offset":true}).describe('공연 종료 예정(필수, ADR-0051)'),
+  "reentryAllowed": zod.boolean().default(createPartnerProductionBodyEventsItemReentryAllowedDefault).describe('재입장 허용(POL-018)'),
+  "lobbyShuffle": zod.boolean().default(createPartnerProductionBodyEventsItemLobbyShuffleDefault).describe('로비 셔플(POL-003, ADR-0118)'),
+  "openBatch": zod.boolean().default(createPartnerProductionBodyEventsItemOpenBatchDefault).describe('오픈 직후 동시 도착 묶음(POL-003, ADR-0118). lobbyShuffle과 둘 다 false면 422'),
+  "seatAssignment": zod.enum(['PICK', 'AUTO']).default(createPartnerProductionBodyEventsItemSeatAssignmentDefault).describe('좌석 배정 방식(POL-035)'),
+  "perPersonLimit": zod.int().min(1).max(createPartnerProductionBodyEventsItemPerPersonLimitMax).default(createPartnerProductionBodyEventsItemPerPersonLimitDefault).describe('1인 한도 [가정](POL-011). 판매 정책 DSL의 단계별 한도(HOT-250)는 이 값을 넘지 않는다')
+}).strict().describe('회차 하나(공연 등록의 events 칸과 회차 더하기 본문, ADR-0198 결정 2). 판정 순서: 일정(422 event-schedule-invalid: 지금 < 오픈 < 판매 종료(공연 시작 − 24시간) < 공연 시작 < 공연 종료, 입장 시작 ≤ 공연 시작) → 정렬 설정(422 queue-order-invalid: 둘 다 false) → 정비 창(409 open-maintenance-window: 오픈이 수요일 03:00~06:30 KST) → 오픈 간격(409 open-too-close: 공개 중인 다른 공연의 취소되지 않은 회차와 5분 안, 정확히 5분은 된다. 확장 칸 suggestedOpenAt은 판매 종료 전인 가능 시각이 있을 때만). 같은 공연의 회차끼리는 오픈 간격을 보지 않는다. 승인 전 공연끼리의 간격은 판매 승인이 다시 본다(ADR-0198 결정 2)')).min(1).max(createPartnerProductionBodyEventsMax).describe('첫 회차들 1~50개 [가정]. 응답의 eventIds가 같은 순서다')
+}).strict().describe('공연 등록 본문(POST /v1/partner/productions, SCR-021 위저드의 공연 정보·회차 저장, 추천 적용 2026-11-05, ADR-0198 결정 1). 공연 설명 글·공연예술통합전산망 항목(HOT-180), 이미지(HOT-190), 좌석맵·가격 등급(HOT-210~240), 판매 정책 DSL·판매 자격 명단(HOT-250)은 각자 경로로 더한다. 판매자 칸은 없다(테넌트는 요청마다 identity에서 받은 값, authz-matrix §3.3). 공연장은 placeId와 newPlace 가운데 꼭 하나다(둘 다거나 둘 다 없으면 400)')
+
+export const CreatePartnerProductionResponse = zod.object({
+  "productionId": zod.uuid(),
+  "eventIds": zod.array(zod.uuid()).describe('요청 events와 같은 순서'),
+  "warnings": zod.array(zod.object({
+  "eventIndex": zod.int().optional().describe('요청 events의 차례(0부터). 회차 더하기면 0'),
+  "code": zod.enum(['LARGE_SHOW_NEAR']).optional(),
+  "suggestedOpenAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('저장은 되었지만 알릴 것(ADR-0062). LARGE_SHOW_NEAR는 대형으로 승인된 다른 공연과 오픈이 30분 안이라는 뜻이다. 이 공연이 판매 승인에서 대형이 되면 그때 막힌다. 공연 규모 칸은 판매 승인(LCH-080)이 더하므로 그 전에는 나오지 않는다'))
+}).describe('공연 등록 결과(ADR-0198 결정 1). 공연은 DRAFT로 만든다(planning/03 §2.14 T1)')
 
 /**
- * FR-022, 추천 적용 2026-10-27, ADR-0093. 오픈 간격 규칙과 정비 창, 정렬 설정(lobbyShuffle·openBatch, 둘 다 false면 422, ADR-0118)은 공연 등록과 같다(POL-030·041). 판매 승인 뒤 더하면 그 공연이 재승인 대기가 되고, 그동안 마지막 승인 내용으로 공개·판매를 계속한다(docs/planning/03 §2.14). 파트너 소속 공연만
+ * FR-022, 추천 적용 2026-10-27, ADR-0093. 오픈 간격 규칙과 정비 창, 정렬 설정(lobbyShuffle·openBatch, 둘 다 false면 422, ADR-0118)은 공연 등록과 같다(POL-030·041). 판매 승인 뒤 더하면 그 공연이 재승인 대기가 되고, 그동안 마지막 승인 내용으로 공개·판매를 계속한다(docs/planning/03 §2.14). 파트너 소속 공연만. 승인 이력이 있는 공연에 더한 회차는 event 행이 아니라 그 공연의 변경분(pending_revision)에만 두고, 판매 승인 때 같은 회차 ID로 옮긴다(응답 pending true). 그런 공연은 파트너 관리자만 더한다(planning/03 §3 첫 행). 배치본은 그 공연의 다른 회차와 같은 값이다(ADR-0198 결정 3, 추천 적용 2026-11-05)
  * @summary 회차 더하기(같은 공연·같은 배치본)
  */
 export const CreatePartnerProductionEventParams = zod.object({
@@ -155,7 +231,41 @@ export const CreatePartnerProductionEventHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const CreatePartnerProductionEventResponse = zod.void()
+export const createPartnerProductionEventBodyLobbyMinutesDefault = 10;
+export const createPartnerProductionEventBodyLobbyMinutesMin = 0;
+export const createPartnerProductionEventBodyLobbyMinutesMax = 60;
+
+export const createPartnerProductionEventBodyReentryAllowedDefault = false;
+export const createPartnerProductionEventBodyLobbyShuffleDefault = true;
+export const createPartnerProductionEventBodyOpenBatchDefault = true;
+export const createPartnerProductionEventBodySeatAssignmentDefault = `PICK`;
+export const createPartnerProductionEventBodyPerPersonLimitDefault = 4;
+export const createPartnerProductionEventBodyPerPersonLimitMax = 10;
+
+
+
+export const CreatePartnerProductionEventBody = zod.object({
+  "openAt": zod.iso.datetime({"offset":true}).describe('티켓 오픈 시각'),
+  "lobbyMinutes": zod.int().min(createPartnerProductionEventBodyLobbyMinutesMin).max(createPartnerProductionEventBodyLobbyMinutesMax).default(createPartnerProductionEventBodyLobbyMinutesDefault).describe('오픈 전 로비 개방 분 [가정]'),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).optional().describe('입장 시작(공연 시작 이하)'),
+  "startsAt": zod.iso.datetime({"offset":true}).describe('공연 시작. 판매 종료는 이 시각 − 24시간이다(ADR-0064)'),
+  "endsAt": zod.iso.datetime({"offset":true}).describe('공연 종료 예정(필수, ADR-0051)'),
+  "reentryAllowed": zod.boolean().default(createPartnerProductionEventBodyReentryAllowedDefault).describe('재입장 허용(POL-018)'),
+  "lobbyShuffle": zod.boolean().default(createPartnerProductionEventBodyLobbyShuffleDefault).describe('로비 셔플(POL-003, ADR-0118)'),
+  "openBatch": zod.boolean().default(createPartnerProductionEventBodyOpenBatchDefault).describe('오픈 직후 동시 도착 묶음(POL-003, ADR-0118). lobbyShuffle과 둘 다 false면 422'),
+  "seatAssignment": zod.enum(['PICK', 'AUTO']).default(createPartnerProductionEventBodySeatAssignmentDefault).describe('좌석 배정 방식(POL-035)'),
+  "perPersonLimit": zod.int().min(1).max(createPartnerProductionEventBodyPerPersonLimitMax).default(createPartnerProductionEventBodyPerPersonLimitDefault).describe('1인 한도 [가정](POL-011). 판매 정책 DSL의 단계별 한도(HOT-250)는 이 값을 넘지 않는다')
+}).strict().describe('회차 하나(공연 등록의 events 칸과 회차 더하기 본문, ADR-0198 결정 2). 판정 순서: 일정(422 event-schedule-invalid: 지금 < 오픈 < 판매 종료(공연 시작 − 24시간) < 공연 시작 < 공연 종료, 입장 시작 ≤ 공연 시작) → 정렬 설정(422 queue-order-invalid: 둘 다 false) → 정비 창(409 open-maintenance-window: 오픈이 수요일 03:00~06:30 KST) → 오픈 간격(409 open-too-close: 공개 중인 다른 공연의 취소되지 않은 회차와 5분 안, 정확히 5분은 된다. 확장 칸 suggestedOpenAt은 판매 종료 전인 가능 시각이 있을 때만). 같은 공연의 회차끼리는 오픈 간격을 보지 않는다. 승인 전 공연끼리의 간격은 판매 승인이 다시 본다(ADR-0198 결정 2)')
+
+export const CreatePartnerProductionEventResponse = zod.object({
+  "eventId": zod.uuid(),
+  "pending": zod.boolean(),
+  "warnings": zod.array(zod.object({
+  "eventIndex": zod.int().optional().describe('요청 events의 차례(0부터). 회차 더하기면 0'),
+  "code": zod.enum(['LARGE_SHOW_NEAR']).optional(),
+  "suggestedOpenAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('저장은 되었지만 알릴 것(ADR-0062). LARGE_SHOW_NEAR는 대형으로 승인된 다른 공연과 오픈이 30분 안이라는 뜻이다. 이 공연이 판매 승인에서 대형이 되면 그때 막힌다. 공연 규모 칸은 판매 승인(LCH-080)이 더하므로 그 전에는 나오지 않는다'))
+}).describe('회차 더하기 결과(ADR-0198 결정 3). pending이 true면 판매 승인 뒤 더한 회차라 재승인 때까지 변경분에만 있고 공개·판매되지 않는다')
 
 /**
  * FR-022, 추천 적용 2026-10-27, ADR-0093. 등록된 아티스트를 이름과 다른 이름으로 찾는다(정규화·낱자·초성, docs/features/search.md §3). 없으면 공연 등록 본문에 새 이름을 적고, 운영자가 판매 승인 때 잇거나 만든다. 파트너 소속 계정

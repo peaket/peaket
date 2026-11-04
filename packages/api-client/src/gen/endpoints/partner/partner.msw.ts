@@ -53,6 +53,10 @@ import type {
   ListPartnerWebhookDeliveries200,
   ListPartnerWebhooks200,
   LiveSnapshot,
+  PartnerEventCreate,
+  PartnerEventCreated,
+  PartnerProductionCreate,
+  PartnerProductionCreated,
   PartnerSalesReport,
   PartnerTeamAccountPage,
   PayoutAccountChange,
@@ -84,6 +88,10 @@ export const getCreatePartnerAuthSessionResponseAdminLoginDoneMock = (overrideRe
 export const getCreatePartnerAuthSessionResponseMock = (): AdminLoginStep | AdminLoginDone => (faker.helpers.arrayElement([{...getCreatePartnerAuthSessionResponseAdminLoginStepMock()},{...getCreatePartnerAuthSessionResponseAdminLoginDoneMock()},]))
 
 export const getListPartnerTeamAccountsResponseMock = (overrideResponse: Partial<Extract<PartnerTeamAccountPage, object>> = {}): PartnerTeamAccountPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({displayName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), emailMasked: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), role: faker.helpers.arrayElement([faker.helpers.arrayElement(['partner_admin','partner_member'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['INVITED','ACTIVE','INVITE_EXPIRED'] as const), undefined]), locked: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), lastLoginAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+
+export const getCreatePartnerProductionResponseMock = (overrideResponse: Partial<Extract<PartnerProductionCreated, object>> = {}): PartnerProductionCreated => ({productionId: faker.string.uuid(), eventIds: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.uuid())), warnings: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({eventIndex: faker.helpers.arrayElement([faker.number.int(), undefined]), code: faker.helpers.arrayElement([faker.helpers.arrayElement(['LARGE_SHOW_NEAR'] as const), undefined]), suggestedOpenAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])})), ...overrideResponse})
+
+export const getCreatePartnerProductionEventResponseMock = (overrideResponse: Partial<Extract<PartnerEventCreated, object>> = {}): PartnerEventCreated => ({eventId: faker.string.uuid(), pending: faker.datatype.boolean(), warnings: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({eventIndex: faker.helpers.arrayElement([faker.number.int(), undefined]), code: faker.helpers.arrayElement([faker.helpers.arrayElement(['LARGE_SHOW_NEAR'] as const), undefined]), suggestedOpenAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])})), ...overrideResponse})
 
 export const getListPartnerArtistsResponseMock = (overrideResponse: Partial<Extract<ListPartnerArtists200, object>> = {}): ListPartnerArtists200 => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({artistId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
 
@@ -228,21 +236,25 @@ export const getListPartnerTeamAccountsMockHandler = (overrideResponse?: Partner
   }, options)
 }
 
-export const getCreatePartnerProductionMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
-  return http.post('*/v1/partner/productions', async (info: Parameters<HttpResponseResolver>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+export const getCreatePartnerProductionMockHandler = (overrideResponse?: PartnerProductionCreated | ((info: Parameters<HttpResponseResolver<PathParams, PartnerProductionCreate>>[0]) => Promise<PartnerProductionCreated> | PartnerProductionCreated), options?: RequestHandlerOptions) => {
+  return http.post<PathParams, PartnerProductionCreate>('*/v1/partner/productions', async (info: Parameters<HttpResponseResolver<PathParams, PartnerProductionCreate>>[0]) => {
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreatePartnerProductionResponseMock(),
       { status: 201
       })
   }, options)
 }
 
-export const getCreatePartnerProductionEventMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ productionId: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
-  return http.post<{ productionId: string }>('*/v1/partner/productions/:productionId/events', async (info: Parameters<HttpResponseResolver<{ productionId: string }>>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+export const getCreatePartnerProductionEventMockHandler = (overrideResponse?: PartnerEventCreated | ((info: Parameters<HttpResponseResolver<{ productionId: string }, PartnerEventCreate>>[0]) => Promise<PartnerEventCreated> | PartnerEventCreated), options?: RequestHandlerOptions) => {
+  return http.post<{ productionId: string }, PartnerEventCreate>('*/v1/partner/productions/:productionId/events', async (info: Parameters<HttpResponseResolver<{ productionId: string }, PartnerEventCreate>>[0]) => {
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreatePartnerProductionEventResponseMock(),
       { status: 201
       })
   }, options)

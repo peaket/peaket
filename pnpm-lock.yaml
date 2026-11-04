@@ -869,12 +869,21 @@ importers:
 
   services/core-svc:
     dependencies:
+      '@grpc/grpc-js':
+        specifier: 1.14.6
+        version: 1.14.6
+      '@grpc/proto-loader':
+        specifier: 0.8.1
+        version: 0.8.1
       '@nestjs/common':
         specifier: ^12.3.2
         version: 12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1)
       '@nestjs/core':
         specifier: ^12.3.2
         version: 12.3.2(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/platform-express@12.3.2)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@peaket/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@peaket/platform':
         specifier: workspace:*
         version: link:../../packages/platform
@@ -897,9 +906,6 @@ importers:
       '@peaket/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@peaket/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2

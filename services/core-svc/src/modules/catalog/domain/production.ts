@@ -11,7 +11,8 @@ export type SaleReview = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'SUSP
 export interface Production {
   id: string;
   promoterId: string;
-  placeId: string;
+  /** 새 공연장 요청이면 판매 승인 때 운영자가 잇기 전까지 null(ADR-0198 결정 4) */
+  placeId: string | null;
   title: string;
   genre: Genre;
   saleReview: SaleReview;
@@ -25,8 +26,8 @@ export type EventStatus = 'SCHEDULED' | 'CANCELLED' | 'POSTPONED';
 export interface CatalogEvent {
   id: string;
   productionId: string;
-  /** 공연의 배치본. 한 공연의 회차는 모두 같은 값이다(ADR-0093 결정 1) */
-  venueId: string;
+  /** 공연의 배치본. 한 공연의 회차는 모두 같은 값이다(ADR-0093 결정 1). 배치본을 만들기 전에는 null(ADR-0198 결정 4) */
+  venueId: string | null;
   openAt: Date;
   startsAt: Date;
   status: EventStatus;
@@ -111,4 +112,13 @@ export function sameVenue(events: Pick<CatalogEvent, 'venueId'>[], candidateVenu
  */
 export function isPublic(p: Pick<Production, 'saleReview' | 'saleApprovedAt'>): boolean {
   return p.saleApprovedAt !== null && p.saleReview !== 'SUSPENDED';
+}
+
+/**
+ * 오픈 예약을 예정대로 하는가: 판매 승인 상태일 때만이다. 승인 이력이 있어도 재승인 대기·변경 반려 중이면 공개는 이어지지만
+ * 오픈 전 회차의 오픈 예약은 멈춘다(planning/03 §2.14 상태 표, d5 §6.4 '승인 뒤 중요 항목 변경'). 판매 중지도 멈춘다.
+ * 대기열·구매 경로의 회차 읽기 모델이 이 값을 싣는다(BUILD_ORDER LCH-080)
+ */
+export function opensAsScheduled(p: Pick<Production, 'saleReview'>): boolean {
+  return p.saleReview === 'APPROVED';
 }

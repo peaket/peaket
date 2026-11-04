@@ -3,21 +3,20 @@ import 'reflect-metadata';
 import { GetEventResponse } from '@peaket/contracts/openapi/catalog';
 import { createService } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
-import { Writable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { MemoryCatalogRepository } from '../src/modules/catalog/index.js';
 import type { Production, SaleReview } from '../src/modules/catalog/index.js';
+import { FakeIdentity, quiet } from './support.js';
 
 let svc: Awaited<ReturnType<typeof createService>>;
-const quiet = new Writable({ write: (_c, _e, cb) => cb() });
 const repo = new MemoryCatalogRepository();
 const PROMOTER = randomUUID();
 const STARTS = new Date('2026-12-24T10:00:00.000Z');
 
 beforeAll(async () => {
   repo.sellerNames.set(PROMOTER, '(주)피켓공연');
-  svc = await createService({ name: 'core-svc', module: AppModule.register({ memory: true, catalog: repo }), env: { PEAKET_ENV: 'ci' }, logDestination: quiet });
+  svc = await createService({ name: 'core-svc', module: AppModule.register({ memory: true, catalog: repo }), env: { PEAKET_ENV: 'ci' }, logDestination: quiet(), adminAuthz: new FakeIdentity() });
 });
 afterAll(async () => {
   await svc?.close();
@@ -53,7 +52,7 @@ describe('회차 공개 요약', () => {
   });
 
   test('[ASVS v5.0.0-8.1.1] 판매승인전·판매중지·없는회차·모양이틀린ID는_모두같은404이고_캐시하지않는다', async () => {
-    const cases = [seed('DRAFT', null), seed('SUBMITTED', null), seed('SUSPENDED', new Date('2026-11-20T00:00:00Z')), seed('SUSPENDED', null), randomUUID(), 'not-a-uuid'];
+    const cases = [seed('DRAFT', null), seed('SUBMITTED', null), seed('SUSPENDED', new Date('2026-11-20T00:00:00Z')), randomUUID(), 'not-a-uuid'];
     const bodies = [];
     for (const id of cases) {
       const r = await get(id);

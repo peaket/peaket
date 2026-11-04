@@ -40,6 +40,7 @@ export type ProblemType =
   | 'duplicate-account'
   | 'duplicate-admission'
   | 'entry-started'
+  | 'event-schedule-invalid'
   | 'first-partner-account-must-be-admin'
   | 'fraud-approver-ineligible'
   | 'fraud-case-exists'
@@ -74,10 +75,13 @@ export type ProblemType =
   | 'not-found'
   | 'not-payer'
   | 'open-interval-conflict'
+  | 'open-maintenance-window'
   | 'open-passed'
+  | 'open-too-close'
   | 'order-expired'
   | 'other-partner-device'
   | 'outside-staff-hours'
+  | 'partner-admin-required'
   | 'password-change-required'
   | 'password-rejected'
   | 'payment-attempts-exceeded'
@@ -88,6 +92,7 @@ export type ProblemType =
   | 'preverify-invalid'
   | 'priority-grant-not-found'
   | 'priority-seat-only'
+  | 'production-suspended'
   | 'promoter-mismatch'
   | 'provider-down'
   | 'pseudonym-handler-required'
@@ -102,6 +107,7 @@ export type ProblemType =
   | 'query-too-short'
   | 'queue-not-found'
   | 'queue-not-open'
+  | 'queue-order-invalid'
   | 'queue-recovering'
   | 'queue-ticket-expired'
   | 'queue-ticket-invalid'
@@ -186,6 +192,7 @@ export const PROBLEM_TYPES = {
   'duplicate-account': { status: 409, title: "이미 다른 계정에서 본인확인한 분입니다. 그 계정으로 로그인해 주세요" },
   'duplicate-admission': { status: 409, title: "이미 다른 기기나 탭에서 입장했습니다" },
   'entry-started': { status: 409, title: "입장이 시작되어 할 수 없습니다" },
+  'event-schedule-invalid': { status: 422, title: "회차 일정이 맞지 않습니다" },
   'first-partner-account-must-be-admin': { status: 422, title: "파트너사의 첫 계정은 관리자여야 합니다" },
   'fraud-approver-ineligible': { status: 403, title: "이 사건을 승인할 수 없는 계정입니다" },
   'fraud-case-exists': { status: 409, title: "이 묶음으로 만든 사건이 이미 있습니다" },
@@ -220,10 +227,13 @@ export const PROBLEM_TYPES = {
   'not-found': { status: 404, title: "찾을 수 없습니다" },
   'not-payer': { status: 403, title: "결제한 분만 할 수 있습니다" },
   'open-interval-conflict': { status: 409, title: "다른 대규모 공연과 오픈 시각이 겹칩니다" },
+  'open-maintenance-window': { status: 409, title: "정비 시간에는 오픈할 수 없습니다" },
   'open-passed': { status: 410, title: "오픈 시각이 지났습니다" },
+  'open-too-close': { status: 409, title: "다른 공연과 오픈 시각이 5분 안입니다" },
   'order-expired': { status: 409, title: "결제하지 않아 끝난 주문입니다" },
   'other-partner-device': { status: 403, title: "다른 파트너사의 기기입니다" },
   'outside-staff-hours': { status: 403, title: "근무 시간이 아닙니다" },
+  'partner-admin-required': { status: 403, title: "파트너 관리자만 할 수 있습니다" },
   'password-change-required': { status: 403, title: "비밀번호를 먼저 바꿔 주세요" },
   'password-rejected': { status: 422, title: "쓸 수 없는 비밀번호입니다" },
   'payment-attempts-exceeded': { status: 409, title: "결제 시도 횟수를 넘었습니다" },
@@ -234,6 +244,7 @@ export const PROBLEM_TYPES = {
   'preverify-invalid': { status: 403, title: "사람 확인을 다시 해 주세요" },
   'priority-grant-not-found': { status: 404, title: "쓸 수 있는 우선 구매 권리가 없습니다" },
   'priority-seat-only': { status: 409, title: "우선 구매 권리의 좌석만 고를 수 있습니다" },
+  'production-suspended': { status: 409, title: "판매 중지 중에는 바꿀 수 없습니다" },
   'promoter-mismatch': { status: 422, title: "계정의 파트너사와 다릅니다" },
   'provider-down': { status: 503, title: "지금은 본인확인을 할 수 없습니다" },
   'pseudonym-handler-required': { status: 403, title: "가명정보 취급자만 할 수 있습니다" },
@@ -248,6 +259,7 @@ export const PROBLEM_TYPES = {
   'query-too-short': { status: 400, title: "검색어가 너무 짧습니다" },
   'queue-not-found': { status: 404, title: "이 회차의 대기열이 열리지 않았습니다" },
   'queue-not-open': { status: 409, title: "아직 예매가 열리지 않았습니다" },
+  'queue-order-invalid': { status: 422, title: "로비 셔플과 오픈 직후 묶음을 둘 다 끌 수는 없습니다" },
   'queue-recovering': { status: 503, title: "대기열을 다시 맞추는 중입니다. 잠시 뒤 다시 시도해 주세요" },
   'queue-ticket-expired': { status: 410, title: "입장 시간이 지났습니다" },
   'queue-ticket-invalid': { status: 403, title: "대기표를 확인할 수 없습니다" },

@@ -418,7 +418,7 @@ erDiagram
         uuid id PK
         uuid production_id FK "공연(회차 묶음, ADR-0093). 한 공연의 회차는 모두 같은 배치본(venue_id)을 쓴다"
         uuid promoter_id FK "공연의 파트너와 같은 값(테넌트 검사용 사본)"
-        uuid venue_id FK
+        uuid venue_id FK "공연의 배치본. 배치본을 만들기 전(위저드 3단계 전)에는 NULL이고, 배치본 단계가 그 공연의 모든 회차에 같은 값을 넣는다(ADR-0198 결정 4)"
         timestamptz open_at "오픈 시각(오픈 간격 규칙)"
         timestamptz entry_opens_at "입장 시작"
         timestamptz starts_at "공연 시작. 판매 종료 = starts_at - 24시간, 칸 없이 계산(ADR-0064)"
@@ -440,7 +440,7 @@ erDiagram
     production {
         uuid id PK
         uuid promoter_id FK "파트너(판매자)"
-        uuid place_id FK "공연장(실제 장소, ADR-0093)"
+        uuid place_id FK "공연장(실제 장소, ADR-0093). 새 공연장 요청이면 판매 승인 때 운영자가 잇거나 만들 때까지 NULL이다. requested_place와 꼭 하나만 찬다. 승인 이력이 있으면 늘 찬다(ADR-0198 결정 4)"
         text title "공연명 1~100자 [가정]"
         text genre "장르 정본 목록: 콘서트|뮤지컬|연극|클래식|페스티벌|팬미팅|기타. SCR-021 1단계·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063. 회차에서 옮김, ADR-0093)"
         text age_rating "관람 연령"
@@ -449,7 +449,9 @@ erDiagram
         jsonb kopis_fields "공연예술통합전산망 항목 가운데 공연에 딸린 것(명칭·종류, 관람 가능 연령, 출연진·제작진 등)"
         text sale_review "DRAFT|SUBMITTED|APPROVED|REJECTED|SUSPENDED, 판매 승인(POL-037, docs/planning/03 §2.14). 공연마다 하나(ADR-0093). SUSPENDED는 운영자의 판매 중지(2인 승인, 비공개·새 판매 막음·판 티켓 유지, 추천 적용 2026-10-28, ADR-0123)"
         timestamptz sale_approved_at "마지막 판매 승인 시각. NULL이면 비공개"
-        jsonb pending_revision "재승인 대기 변경분(회차 추가 포함). 승인 때 공개본에 반영(ADR-0062, 공연으로 옮김 ADR-0093)"
+        jsonb pending_revision "재승인 대기 변경분(회차 추가 포함). 승인 때 공개본에 반영(ADR-0062, 공연으로 옮김 ADR-0093). 승인 뒤 더한 회차는 addedEvents에 회차 ID와 함께 두고 event 행으로 넣지 않는다. production·event 행은 늘 마지막 승인 내용이다(ADR-0198 결정 3)"
+        jsonb requested_place "새 공연장 요청(이름·주소). 판매 승인 때 운영자가 기존 공연장에 잇거나 새로 만들고 비운다(ADR-0093 결정 3, ADR-0198 결정 4)"
+        jsonb requested_artists "새 아티스트 이름 요청(이름과 보이는 순서). 기존 아티스트는 production_artist로 잇는다. 판매 승인 때 운영자가 잇거나 만들고 비운다(ADR-0093 결정 4, ADR-0198 결정 4)"
         jsonb accessible_seating_check "판매 승인 요청 때 서버가 다시 센 휠체어석 수·기준 수·위치 확인 좌석 수·온라인 판매 휠체어석 수와 파트너 확인·부족 이유(FR-023, ADR-0062)"
         timestamptz created_at
     }
@@ -1461,7 +1463,7 @@ erDiagram
     wish {
         uuid account_id PK "identity 논리 DB라 외래키 없음. 병합 때 대표 계정으로 옮긴다(§4의 9번)"
         uuid production_id PK "공연. 기본 키 (account_id, production_id)"
-        timestamptz created_at "찜한 최근 순 목록의 기준. 해제·회원 탈퇴 때 행을 지운다(data-classification '관심 공연 찜하기 내역')"
+        timestamptz created_at "찜한 최근 순 목록의 기준. 같은 찜을 다시 보내도 처음 시각을 그대로 둔다. 해제·회원 탈퇴 때 행을 지운다(data-classification '관심 공연 찜하기 내역', ADR-0198 결정 5)"
     }
     push_subscription {
         uuid id PK
@@ -1996,13 +1998,13 @@ erDiagram
 
 큰 원장 표의 보존 삭제(추천 적용 2026-10-28, ADR-0114. 2026-10-22 ADR-0083의 월 파티션을 다시 봤다): 주문(`purchase_order`)·결제(`payment`)·티켓(`ticket`)과 그 자식 표는 나누지 않는다. 5년 누적(주문 약 1,700만·티켓 약 3,500만)이 한 표로 감당할 크기이기 때문이다. 유일 규칙은 보통 UNIQUE로 건다(주문당 결제 1건은 `payment.order_id` UNIQUE). 주문 멱등키는 멱등 기록 표 `order_idempotency`가 맡는다(계정 × 작업 범위, 기술 검토 중간-046).
 
-**서비스마다 둔 멱등 기록 표(추천 적용 2026-10-29, ADR-0146 결정 1)**: openapi가 `Idempotency-Key`를 요구하는 쓰기는 29곳이다. 그 가운데 홀드(좌석 Redis `s:{event:E}:idem:*`, §3)와 주문 세 작업(`order_idempotency`) 밖의 작업은 요청을 받아 자기 DB의 상태를 바꾸는 서비스가 그 DB의 `idempotency_record`에 남긴다. 칸은 `account_ref`(부른 팬 계정이나 관리 계정), `operation`, `idempotency_key`, `request_hash`(메서드·실제 경로·본문 바이트의 SHA-256), `result_ref`(다시 돌려줄 응답의 대상), `created_at`이고, 기본 키는 앞의 셋이다. 칸의 형은 `account_ref text`, `operation text`, `idempotency_key uuid`(소문자로 맞춘 v4), `request_hash bytea`(32바이트), `result_ref text`(커밋할 때 채운다), `created_at timestamptz`(주입한 시계)이고, 서비스는 `packages/platform`의 `idempotencyRecordTable(작업 목록)`으로 같은 정의를 만든다(추천 적용 2026-11-01). `operation`은 그 서비스 작업 목록으로 `CHECK`한다. 키와 지문은 대상 행을 바꾸는 같은 트랜잭션에 적는다. 그래야 처음 커밋한 결과만 같은 상태 코드와 본문으로 돌려주고, 같은 키에 본문이 다르면 422로 가린다(docs/api/guidelines.md §4). 대상 표의 자연 유일 제약(예: 진행 중 취소 1건)만으로는 다른 본문을 가릴 수 없다. 24시간 [가정] 뒤 정비 시간에 지운다(`(created_at)` 인덱스, §5.1). Redis에만 두지 않는 것은 재시작·장애 조치 때 기록을 잃으면 같은 요청을 두 번 처리할 수 있기 때문이다. purchase의 `order_idempotency`는 같은 꼴이라 이름을 그대로 둔다. 다른 서비스로 넘기는 호출은 gRPC 멱등 키를 따로 싣는다(docs/api/proto/README.md).
+**서비스마다 둔 멱등 기록 표(추천 적용 2026-10-29, ADR-0146 결정 1)**: openapi가 `Idempotency-Key`를 요구하는 쓰기는 50곳이다(2026-11-05 다시 셈. 공연 등록이 더해졌다, ADR-0198). 그 가운데 홀드(좌석 Redis `s:{event:E}:idem:*`, §3)와 주문 세 작업(`order_idempotency`) 밖의 작업은 요청을 받아 자기 DB의 상태를 바꾸는 서비스가 그 DB의 `idempotency_record`에 남긴다. 칸은 `account_ref`(부른 팬 계정이나 관리 계정), `operation`, `idempotency_key`, `request_hash`(메서드·실제 경로·본문 바이트의 SHA-256), `result_ref`(다시 돌려줄 응답의 대상), `created_at`이고, 기본 키는 앞의 셋이다. 칸의 형은 `account_ref text`, `operation text`, `idempotency_key uuid`(소문자로 맞춘 v4), `request_hash bytea`(32바이트), `result_ref text`(커밋할 때 채운다), `created_at timestamptz`(주입한 시계)이고, 서비스는 `packages/platform`의 `idempotencyRecordTable(작업 목록)`으로 같은 정의를 만든다(추천 적용 2026-11-01). `operation`은 그 서비스 작업 목록으로 `CHECK`한다. 키와 지문은 대상 행을 바꾸는 같은 트랜잭션에 적는다. 그래야 처음 커밋한 결과만 같은 상태 코드와 본문으로 돌려주고, 같은 키에 본문이 다르면 422로 가린다(docs/api/guidelines.md §4). 대상 표의 자연 유일 제약(예: 진행 중 취소 1건)만으로는 다른 본문을 가릴 수 없다. 24시간 [가정] 뒤 정비 시간에 지운다(`(created_at)` 인덱스, §5.1). Redis에만 두지 않는 것은 재시작·장애 조치 때 기록을 잃으면 같은 요청을 두 번 처리할 수 있기 때문이다. purchase의 `order_idempotency`는 같은 꼴이라 이름을 그대로 둔다. 다른 서비스로 넘기는 호출은 gRPC 멱등 키를 따로 싣는다(docs/api/proto/README.md).
 
 | 서비스 DB | 이 표에 남기는 작업 |
 | --- | --- |
 | ticket | 양도 요청·수락·거절·철회, 받은 티켓을 결제자에게 돌려주기 |
 | purchase | 예매 취소, 지연 환급 계좌 입력, 배상금 계좌 입력(주문 생성·결제 시도 시작·결제 접수는 `order_idempotency`) |
-| core | 티켓 연동 부가 상품 주문, 굿즈 주문, 후기 쓰기, 후기 신고, 문의 접수·추가 문의, 파트너의 회차 더하기·판매자 정보 변경 요청 |
+| core | 티켓 연동 부가 상품 주문, 굿즈 주문, 후기 쓰기, 후기 신고, 문의 접수·추가 문의, 파트너의 공연 등록·회차 더하기·판매자 정보 변경 요청 |
 | payment | 파트너의 정산서 이의 제기 |
 | ops | 운영 명령, 문의 답변·진행 경과, 승인 업무 요청, 회차 취소 요청(파트너 요청과 운영자 요청), 정산서 수기 조정 요청, 지급 묶음 확인 요청, 결정 기록 |
 

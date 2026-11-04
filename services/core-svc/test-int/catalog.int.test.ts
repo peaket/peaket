@@ -9,6 +9,7 @@ import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { DrizzleCatalogRepository } from '../src/modules/catalog/adapters/db/drizzle-catalog-repository.js';
 import { event, place, production, promoter, searchAlias } from '../src/modules/catalog/adapters/db/schema.js';
+import { FakeIdentity } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 let pg: PostgresContainer;
@@ -58,7 +59,7 @@ async function seed(o: { saleReview?: string; saleApprovedAt?: Date | null } = {
 describe('Drizzle 저장소', () => {
   test('회차_공연_판매자상호를_한번에읽고_없는회차와모양이틀린ID는_없음이다', async () => {
     const s = await seed();
-    const repo = new DrizzleCatalogRepository(database);
+    const repo = new DrizzleCatalogRepository(database, systemClock);
     const row = await repo.findEventSummary(s.eventId);
     expect(row).toMatchObject({
       event: { id: s.eventId, productionId: s.productionId, status: 'SCHEDULED', startsAt: new Date('2026-12-24T10:00:00Z') },
@@ -88,13 +89,15 @@ describe('표 제약', () => {
     await expect(database.db.insert(event).values({ id: randomUUID(), productionId: randomUUID(), promoterId: s.promoterId, venueId: randomUUID(), ...ok })).rejects.toThrow();
   });
 
-  test('판매승인상태와승인시각이맞아야한다(초안은승인이력없음·승인은있음)', async () => {
+  test('판매승인상태와승인시각이맞아야한다(초안은승인이력없음·승인과판매중지는있음)', async () => {
     const s = await seed();
     const base = { promoterId: s.promoterId, placeId: s.placeId, genre: '콘서트', title: '공연' };
     await expect(database.db.insert(production).values({ ...base, id: randomUUID(), saleReview: 'DRAFT', saleApprovedAt: new Date() })).rejects.toThrow();
     await expect(database.db.insert(production).values({ ...base, id: randomUUID(), saleReview: 'APPROVED', saleApprovedAt: null })).rejects.toThrow();
-    // 첫 승인 대기 중 판매 중지(T9)는 승인 이력이 없을 수 있다
-    await database.db.insert(production).values({ ...base, id: randomUUID(), saleReview: 'SUSPENDED', saleApprovedAt: null });
+    // 판매 중지(T9·T10)는 승인 이력이 있을 때만 된다(ADR-0198 결정 7)
+    await expect(database.db.insert(production).values({ ...base, id: randomUUID(), saleReview: 'SUSPENDED', saleApprovedAt: null })).rejects.toThrow();
+    // 첫 승인 대기·첫 반려는 승인 이력이 없다
+    await database.db.insert(production).values({ ...base, id: randomUUID(), saleReview: 'REJECTED', saleApprovedAt: null });
   });
 
   test('회차의판매자사본은_그공연의판매자와같아야한다(다른판매자의ID로는넣지못한다)', async () => {
@@ -120,7 +123,7 @@ describe('서비스 전체 경로(DB 저장소)', () => {
   let svc: Awaited<ReturnType<typeof createService>>;
   beforeAll(async () => {
     const quiet = new Writable({ write: (_c, _e, cb) => cb() });
-    svc = await createService({ name: 'core-svc', module: AppModule.register({ database }), env: { PEAKET_ENV: 'ci' }, logDestination: quiet });
+    svc = await createService({ name: 'core-svc', module: AppModule.register({ database }), env: { PEAKET_ENV: 'ci' }, logDestination: quiet, adminAuthz: new FakeIdentity() });
   });
   afterAll(async () => {
     await svc?.close();
