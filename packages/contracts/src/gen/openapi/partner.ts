@@ -763,7 +763,7 @@ export const GetV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
   "gateZone": zod.string().optional()
 })).optional()
 }))
-}).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 팬 화면 좌석맵 파일과 파트너 저장 본문이 같은 구조다. 5만 석 파일 크기는 K5에서 재고 좌석 목록을 열 단위 배열로 줄일 수 있다 [가정]')
+}).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 파트너 에디터가 불러오고 저장하는 본문이다. 팬 화면 좌석맵 파일은 같은 두 층을 구역마다 열 단위 배열로 낸 SeatMapColumns다(2026-11-04 BUILD_ORDER HOT-110, BAS-190 PoC에서 객체 배열보다 압축 전 3.4배·brotli 3.0배 작았다)')
 
 /**
  * FR-023(추천 적용 2026-10-14, ADR-0063). 서버가 도형(닫힌 다각형, 캔버스 안), 좌석(같은 구역·열·번호 중복 없음, 구역 도형 안 [가정]), 휠체어석 기준 W1~W3, 좌석 겹침(SEAT_OVERLAP, ADR-0066)을 다시 검사한다. 오류는 422와 항목 목록이고 휠체어석, 좌석 겹침과 구역 도형 밖 좌석은 경고만 한다(FR-023, ADR-0063). 자동 채우기 계산은 에디터가 하고 구역의 fillRule은 에디터 값으로 저장한다(팬 좌석맵 파일에는 싣지 않음, ADR-0066). 저장하면 layoutVersion을 올리고 팬 좌석맵 파일을 새 판으로 게시한다. 저장 대상은 이 공연의 배치본(공연장 틀을 복제한 것)이고 편집은 그 배치본에만 미친다. layoutVersion 0이면 templateVenueId의 틀을 복제해 배치본을 새로 만든다. 판매 승인 뒤 바꾸면 다시 승인 대기다(sale-review 설명과 같다). 배치본을 쓰는 회차가 오픈(판매 시작)한 뒤에는 도형·좌표·좌석 추가·삭제를 409 seatmap-geometry-locked로 거절하고 기존 좌석의 속성 변경(판매 제외 등)만 받는다
@@ -857,7 +857,7 @@ export const PutV1PartnerProductionsProductionIdSeatmapBody = zod.object({
   "gateZone": zod.string().optional()
 })).optional()
 }))
-}).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 팬 화면 좌석맵 파일과 파트너 저장 본문이 같은 구조다. 5만 석 파일 크기는 K5에서 재고 좌석 목록을 열 단위 배열로 줄일 수 있다 [가정]')
+}).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 파트너 에디터가 불러오고 저장하는 본문이다. 팬 화면 좌석맵 파일은 같은 두 층을 구역마다 열 단위 배열로 낸 SeatMapColumns다(2026-11-04 BUILD_ORDER HOT-110, BAS-190 PoC에서 객체 배열보다 압축 전 3.4배·brotli 3.0배 작았다)')
 
 export const PutV1PartnerProductionsProductionIdSeatmapResponse = zod.unknown()
 
@@ -959,7 +959,7 @@ export const PostV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
   "gateZone": zod.string().optional()
 })).optional()
 }))
-}).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 팬 화면 좌석맵 파일과 파트너 저장 본문이 같은 구조다. 5만 석 파일 크기는 K5에서 재고 좌석 목록을 열 단위 배열로 줄일 수 있다 [가정]')
+}).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 파트너 에디터가 불러오고 저장하는 본문이다. 팬 화면 좌석맵 파일은 같은 두 층을 구역마다 열 단위 배열로 낸 SeatMapColumns다(2026-11-04 BUILD_ORDER HOT-110, BAS-190 PoC에서 객체 배열보다 압축 전 3.4배·brotli 3.0배 작았다)')
 
 /**
  * FR-023. SVG는 구역 도형(polygon·path·rect, id·data 속성으로 구역 이름)과 좌석 원(circle의 중심 좌표, data 속성으로 열·번호), JSON은 SeatMapLayout, CSV는 좌석 행(구역·열·번호·x·y·등급·휠체어석·게이트 구역)과 구역 첫 행의 shape 열(꼭짓점 'x y;x y;…')로 받는다(추천 적용 2026-10-14, ADR-0063). 검증만 하고 저장하지 않는다(저장은 PUT …/seatmap). 파일 해석은 core-svc가 하지 않고 DB 자격 증명이 없는 별도 작업 seatmap-worker에 gRPC로 맡긴다(seatmap.proto ParseSeatmapImport). core-svc는 돌려받은 배치를 스키마·개수 상한·업무 경고로 다시 본 뒤 결과를 만든다(소유자 결정 2026-10-30, open-items 70번 ②, 세부는 추천 적용 2026-10-30, docs/features/seat-hold.md §10)

@@ -8,7 +8,7 @@ export const WEB_FILES = [
   'apps/**/src/**/*.{ts,tsx,js,mjs}',
   'apps/web/app/**/*.{ts,tsx}',
   'apps/partner/app/**/*.{ts,tsx}',
-  'packages/{ds,api-client,telemetry,validation,console-contract}/src/**/*.{ts,tsx}',
+  'packages/{ds,api-client,telemetry,validation,console-contract,seatmap}/src/**/*.{ts,tsx}',
 ];
 
 export default [

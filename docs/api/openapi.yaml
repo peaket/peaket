@@ -1048,7 +1048,7 @@ components:
     SeatMapShape: { type: object, required: [kind, points], description: "공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다", properties: { kind: { type: string, enum: [RECT, POLYGON, SECTOR, ARC_BAND], description: "그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)" }, points: { type: array, minItems: 3, items: { type: array, minItems: 2, maxItems: 2, items: { type: integer } }, description: "꼭짓점 [x, y] 목록" }, name: { type: string } } }
     SeatMapLayout:
       type: object
-      description: "좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 팬 화면 좌석맵 파일과 파트너 저장 본문이 같은 구조다. 5만 석 파일 크기는 K5에서 재고 좌석 목록을 열 단위 배열로 줄일 수 있다 [가정]"
+      description: "좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 파트너 에디터가 불러오고 저장하는 본문이다. 팬 화면 좌석맵 파일은 같은 두 층을 구역마다 열 단위 배열로 낸 SeatMapColumns다(2026-11-04 BUILD_ORDER HOT-110, BAS-190 PoC에서 객체 배열보다 압축 전 3.4배·brotli 3.0배 작았다)"
       required: [canvas, sections]
       properties:
         layoutVersion: { type: integer, description: "저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본" }
@@ -1073,6 +1073,45 @@ components:
               seats:
                 type: array
                 items: { type: object, required: [seatId, row, number, x, y], properties: { seatId: { type: string }, index: { type: integer, description: "비트맵 인덱스" }, row: { type: string }, number: { type: integer }, x: { type: integer }, y: { type: integer }, tierId: { type: string }, wheelchair: { type: boolean }, unavailable: { type: boolean, description: "판매 제외" }, gateZone: { type: string } } }
+    SeatMapColumns:
+      type: object
+      additionalProperties: false
+      description: "팬 화면 좌석맵 파일(seatmap-layouts/{layoutVersion}.json, 2026-11-04 BUILD_ORDER HOT-110). SeatMapLayout과 같은 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 좌석 ID·행·번호·좌표·등급·플래그)을 구역마다 열 단위 배열로 낸다. 좌석 색인은 구역 순서대로 이어 붙인 위치(seatIndexRange.from부터)이고 스냅샷 비트맵의 차례·델타 seatOffset과 같다(seat-hold §2). 에디터 전용 fillRule·gateZone은 싣지 않는다. 브라우저는 @peaket/seatmap의 decodeLayout으로 검사하고 형식 배열로 푼다"
+      required: [format, layoutVersion, canvas, stage, tiers, seatCount, sections]
+      properties:
+        format: { type: string, const: peaket.seatmap.columns.v1 }
+        layoutVersion: { type: integer, minimum: 1, description: "파트너가 저장해 게시한 배치 판(1부터. 0은 게시하지 않는 저장 전 초안이다)" }
+        canvas: { type: object, additionalProperties: false, required: [minX, minY, width, height], description: "공연장 캔버스(cm). 한 변 100,000(1km) [가정] 이하이고 무대·구역 도형과 좌석 좌표는 모두 이 안에 있다(브라우저 격자 색인이 끝없이 커지지 않게)", properties: { minX: { type: integer }, minY: { type: integer }, width: { type: integer, minimum: 1, maximum: 100000 }, height: { type: integer, minimum: 1, maximum: 100000 } } }
+        stage: { type: array, items: { $ref: '#/components/schemas/SeatMapShape' } }
+        tiers: { type: array, minItems: 1, maxItems: 16, items: { type: string }, description: "등급 ID 목록. 좌석 tier 열이 이 색인을 쓴다" }
+        seatCount: { type: integer, minimum: 1, maximum: 1000000, description: "가장 큰 seatIndexRange.to + 1" }
+        sections:
+          type: array
+          minItems: 1
+          maxItems: 65535
+          items:
+            type: object
+            additionalProperties: false
+            required: [sectionId, name, shape, label, seatIndexRange, seats]
+            properties:
+              sectionId: { type: string }
+              name: { type: string }
+              shape: { $ref: '#/components/schemas/SeatMapShape' }
+              label: { type: object, additionalProperties: false, required: [x, y], properties: { x: { type: integer }, y: { type: integer } } }
+              seatIndexRange: { type: object, additionalProperties: false, required: [from, to], properties: { from: { type: integer, minimum: 0 }, to: { type: integer, minimum: 0 } }, description: "구역의 좌석 색인 범위(끝 포함). 앞 구역 바로 다음부터 빈틈 없이 이어진다. 구역마다 65,536석 이하(델타 seatOffset이 u16)" }
+              seats:
+                type: object
+                additionalProperties: false
+                required: [seatId, row, number, x, y, tier, flags]
+                description: "열마다 길이가 그 구역 좌석 수(to − from + 1)와 같다"
+                properties:
+                  seatId: { type: array, items: { type: string }, description: "홀드 요청에 쓰는 좌석 ID" }
+                  row: { type: array, items: { type: string } }
+                  number: { type: array, items: { type: string } }
+                  x: { type: array, items: { type: integer }, description: "공연장 좌표(1단위 = 1cm [가정])" }
+                  y: { type: array, items: { type: integer } }
+                  tier: { type: array, items: { type: integer, minimum: 0, maximum: 15 }, description: "tiers 색인" }
+                  flags: { type: array, items: { type: integer, minimum: 0, maximum: 15 }, description: "값 1 휠체어석, 값 2 판매 제외(둘 다면 3. 맨 아래 비트부터 0번·1번 비트)" }
     SeatMapImportResult:
       type: object
       description: "좌석맵 가져오기 검증 결과. 오류가 하나라도 있으면 반영하지 않는다(FR-023)"
@@ -1353,7 +1392,7 @@ paths:
       summary: "회차 좌석맵 파일(공연장 캔버스·무대·구역 도형·라벨 위치·좌석 좌표·등급). 인증 없음, CDN 장기 캐시"
       description: "FR-009, NFR-012, seat-hold §2·§10(추천 적용 2026-10-14, ADR-0063). 배치를 바꾸면 layoutVersion이 바뀌어 새 경로가 되므로 Cache-Control: public, max-age=31536000, immutable이다. 판매 상태는 싣지 않는다(상태는 스냅샷 비트맵과 좌석 델타). 대기 중 차례가 가까워지면 미리 받고(K5), 입장 확정 응답의 seatmapLayoutPath와 다르면 다시 받는다"
       parameters: [{ $ref: '#/components/parameters/EventId' }, { name: layoutVersion, in: path, required: true, schema: { type: integer } }]
-      responses: { '200': { description: 좌석맵, content: { application/json: { schema: { $ref: '#/components/schemas/SeatMapLayout' } } } }, '404': { description: "없는 판(정적 파일 404라 본문을 약속하지 않는다, guidelines §2)" } }
+      responses: { '200': { description: "좌석맵(열 단위 팬 파일)", content: { application/json: { schema: { $ref: '#/components/schemas/SeatMapColumns' } } } }, '404': { description: "없는 판(정적 파일 404라 본문을 약속하지 않는다, guidelines §2)" } }
   /v1/events/{eventId}/holds:
     post:
       tags: [seats]

@@ -467,6 +467,7 @@ export * from './scannerPlacement.zod.js';
 export * from './scannerShift.zod.js';
 export * from './searchResultPage.zod.js';
 export * from './seatFillRule.zod.js';
+export * from './seatMapColumns.zod.js';
 export * from './seatMapImportResult.zod.js';
 export * from './seatMapLayout.zod.js';
 export * from './seatMapShape.zod.js';

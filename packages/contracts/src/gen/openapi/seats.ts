@@ -45,87 +45,82 @@ export const GetV1EventsEventIdSeatmapLayoutsLayoutVersionJsonParams = zod.objec
   "layoutVersion": zod.int()
 })
 
+
+export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseCanvasWidthMax = 100000;
+
+export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseCanvasHeightMax = 100000;
+
 export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsItemMin = 2;
 export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsItemMax = 2;
 
 export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsMin = 3;
+
+export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseTiersMax = 16;
+
+export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSeatCountMax = 1000000;
 
 export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsItemMin = 2;
 export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsItemMax = 2;
 
 export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsMin = 3;
 
+export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatIndexRangeFromMin = 0;
 
+export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatIndexRangeToMin = 0;
 
+export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsTierItemMin = 0;
+export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsTierItemMax = 15;
 
+export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsFlagsItemMin = 0;
+export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsFlagsItemMax = 15;
 
-
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemFillRuleAislesMin = 0;
-
-
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemFillRuleFirstNumberMin = 0;
+export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsMax = 65535;
 
 
 
 export const GetV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponse = zod.object({
-  "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본'),
-  "templateVenueId": zod.string().optional().describe('복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063)'),
+  "format": zod.literal("peaket.seatmap.columns.v1"),
+  "layoutVersion": zod.int().min(1).describe('파트너가 저장해 게시한 배치 판(1부터. 0은 게시하지 않는 저장 전 초안이다)'),
   "canvas": zod.object({
-  "width": zod.int(),
-  "height": zod.int()
-}),
+  "minX": zod.int(),
+  "minY": zod.int(),
+  "width": zod.int().min(1).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseCanvasWidthMax),
+  "height": zod.int().min(1).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseCanvasHeightMax)
+}).strict().describe('공연장 캔버스(cm). 한 변 100,000(1km) [가정] 이하이고 무대·구역 도형과 좌석 좌표는 모두 이 안에 있다(브라우저 격자 색인이 끝없이 커지지 않게)'),
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsItemMin).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsItemMax)).min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
-}).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
+}).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')),
+  "tiers": zod.array(zod.string()).min(1).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseTiersMax).describe('등급 ID 목록. 좌석 tier 열이 이 색인을 쓴다'),
+  "seatCount": zod.int().min(1).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSeatCountMax).describe('가장 큰 seatIndexRange.to + 1'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string(),
   "name": zod.string(),
-  "level": zod.string().optional(),
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsItemMin).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsItemMax)).min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
   "label": zod.object({
-  "x": zod.int().optional(),
-  "y": zod.int().optional()
-}).optional().describe('구역 라벨 위치'),
-  "tierId": zod.string().optional().describe('구역 기본 등급. 회차 판매 등급은 좌석의 tierId'),
-  "gateZone": zod.string().optional(),
-  "seatIndexRange": zod.object({
-  "from": zod.int().optional(),
-  "to": zod.int().optional()
-}).optional().describe('이 구역 좌석의 비트맵 인덱스 범위. 브라우저가 스냅샷에서 구역별 남은 좌석을 센다(추천 적용 2026-10-14, ADR-0063)'),
-  "fillRule": zod.object({
-  "method": zod.enum(['COUNT', 'GRID']).describe('COUNT 좌석 수로 채우기, GRID 행 수 × 행마다 좌석 수'),
-  "targetCount": zod.int().min(1).optional().describe('COUNT일 때 목표 좌석 수(예 600)'),
-  "rows": zod.int().min(1).optional().describe('GRID일 때 행 수(예 20)'),
-  "seatsPerRow": zod.int().min(1).optional().describe('GRID일 때 행마다 좌석 수(예 30)'),
-  "rowShape": zod.enum(['STRAIGHT', 'CURVED']).optional().describe('직선, 무대를 향한 곡선'),
-  "seatSpacingCm": zod.int().min(1).optional().describe('좌석 간격(옆), 기본 50 [가정]'),
-  "rowSpacingCm": zod.int().min(1).optional().describe('행 간격(앞뒤), 기본 90 [가정]'),
-  "aisles": zod.int().min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
-  "aisleWidthCm": zod.int().min(1).optional().describe('통로 폭, 기본 120 [가정]'),
-  "rowLabel": zod.enum(['NUMBER', 'ALPHA']).optional().describe('행 이름 1열·2열 또는 A·B·C'),
-  "firstNumber": zod.int().min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
-  "numberFrom": zod.enum(['LEFT', 'RIGHT']).optional().describe('번호 방향(무대를 보고 왼쪽부터·오른쪽부터)')
-}).optional().describe('파트너 에디터 전용 좌석 채우기 규칙(section.editor_meta). 팬 좌석맵 파일에는 싣지 않는다(ADR-0066)'),
-  "seats": zod.array(zod.object({
-  "seatId": zod.string(),
-  "index": zod.int().optional().describe('비트맵 인덱스'),
-  "row": zod.string(),
-  "number": zod.int(),
   "x": zod.int(),
-  "y": zod.int(),
-  "tierId": zod.string().optional(),
-  "wheelchair": zod.boolean().optional(),
-  "unavailable": zod.boolean().optional().describe('판매 제외'),
-  "gateZone": zod.string().optional()
-})).optional()
-}))
-}).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 팬 화면 좌석맵 파일과 파트너 저장 본문이 같은 구조다. 5만 석 파일 크기는 K5에서 재고 좌석 목록을 열 단위 배열로 줄일 수 있다 [가정]')
+  "y": zod.int()
+}).strict(),
+  "seatIndexRange": zod.object({
+  "from": zod.int().min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatIndexRangeFromMin),
+  "to": zod.int().min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatIndexRangeToMin)
+}).strict().describe('구역의 좌석 색인 범위(끝 포함). 앞 구역 바로 다음부터 빈틈 없이 이어진다. 구역마다 65,536석 이하(델타 seatOffset이 u16)'),
+  "seats": zod.object({
+  "seatId": zod.array(zod.string()).describe('홀드 요청에 쓰는 좌석 ID'),
+  "row": zod.array(zod.string()),
+  "number": zod.array(zod.string()),
+  "x": zod.array(zod.int()).describe('공연장 좌표(1단위 = 1cm [가정])'),
+  "y": zod.array(zod.int()),
+  "tier": zod.array(zod.int().min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsTierItemMin).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsTierItemMax)).describe('tiers 색인'),
+  "flags": zod.array(zod.int().min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsFlagsItemMin).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsFlagsItemMax)).describe('값 1 휠체어석, 값 2 판매 제외(둘 다면 3. 맨 아래 비트부터 0번·1번 비트)')
+}).strict().describe('열마다 길이가 그 구역 좌석 수(to − from + 1)와 같다')
+}).strict()).min(1).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsMax)
+}).strict().describe('팬 화면 좌석맵 파일(seatmap-layouts/{layoutVersion}.json, 2026-11-04 BUILD_ORDER HOT-110). SeatMapLayout과 같은 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 좌석 ID·행·번호·좌표·등급·플래그)을 구역마다 열 단위 배열로 낸다. 좌석 색인은 구역 순서대로 이어 붙인 위치(seatIndexRange.from부터)이고 스냅샷 비트맵의 차례·델타 seatOffset과 같다(seat-hold §2). 에디터 전용 fillRule·gateZone은 싣지 않는다. 브라우저는 @peaket/seatmap의 decodeLayout으로 검사하고 형식 배열로 푼다')
 
 /**
  * FR-010, POL-011·012, NFR-003 p99 50ms. 경합 패배는 409 + suggestedSeats(정상 응답으로 집계). 한도 초과 422. 구매 세션 요청 서명(X-Purchase-Seq·X-Purchase-Mac) 필수, 서명 불일치·일련번호 재사용은 401. 자동 배정 공연(POL-035, FR-050, ADR-0043)은 seatIds 대신 auto(희망 조건)를 보내고 서버가 1순위 연석, 분리 허용 시 1순위 분리, 2순위 순으로 골라 같은 Lua로 홀드한다. 모두 실패하면 아무 좌석도 홀드하지 않고 409 manual-selection-required. 자동 배정 공연은 이 요청이 입장 토큰의 첫 사용(구매 세션 시작)

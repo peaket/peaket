@@ -90,7 +90,7 @@ export const PutV1PartnerProductionsProductionIdSeatmapBody = zod.object({
   "gateZone": zod.string().optional()
 })).optional()
 }))
-}).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 팬 화면 좌석맵 파일과 파트너 저장 본문이 같은 구조다. 5만 석 파일 크기는 K5에서 재고 좌석 목록을 열 단위 배열로 줄일 수 있다 [가정]')
+}).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 파트너 에디터가 불러오고 저장하는 본문이다. 팬 화면 좌석맵 파일은 같은 두 층을 구역마다 열 단위 배열로 낸 SeatMapColumns다(2026-11-04 BUILD_ORDER HOT-110, BAS-190 PoC에서 객체 배열보다 압축 전 3.4배·brotli 3.0배 작았다)')
 
 export type PutV1PartnerProductionsProductionIdSeatmapBody = zod.input<typeof PutV1PartnerProductionsProductionIdSeatmapBody>;
 export type PutV1PartnerProductionsProductionIdSeatmapBodyOutput = zod.output<typeof PutV1PartnerProductionsProductionIdSeatmapBody>;
