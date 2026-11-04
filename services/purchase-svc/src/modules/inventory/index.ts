@@ -3,6 +3,8 @@ export { EXPIRE_LUA, SWEEP_LEASE_LUA } from './adapters/expire-lua.js';
 export { HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
 export { MemoryPurchaseSessionStore, RecordingSessionStartedLog } from './adapters/memory-purchase-session-store.js';
 export { MemoryPurchaseSessions, type MemoryPurchaseSession, type PurchaseSessionAccess } from './adapters/memory-purchase-sessions.js';
+export { DrizzleSeatSales } from './adapters/db/drizzle-seat-sales.js';
+export { purchaseQuota, seatHold, seatSale } from './adapters/db/schema.js';
 export { FileSeatMapSource, LayoutSeatMap, type LayoutSeatMapOptions, type SeatMapSource } from './adapters/layout-seat-map.js';
 export { MemorySeatMap, type MemorySeatDef } from './adapters/memory-seat-map.js';
 export { MemorySeatDb, MemorySeatEvent, MemorySeatStore, type MemoryHoldHash, type MemoryIdemRecord, type MemoryPublished } from './adapters/memory-seat-store.js';
@@ -84,6 +86,20 @@ export {
   type AdmissionKeys,
   type AdmissionRejectReason,
 } from './domain/admission-token.js';
+export {
+  MAX_SALE_SEATS,
+  SALE_UUID_PATTERN,
+  SEAT_SALE_STATUSES,
+  assertReserveInput,
+  assertSeatSaleOrder,
+  assertSeatSaleRelease,
+  sortedSeatIds,
+  type ReserveInput,
+  type ReserveResult,
+  type SeatSaleOrder,
+  type SeatSaleRelease,
+  type SeatSaleStatus,
+} from './domain/seat-sale.js';
 export { parseClientEphemeralKey, type ClientEphemeralKey } from './domain/client-key.js';
 export { parseEventSeatMapFile, SeatMapFileError, type ParsedSeatMap, type SeatMapFileErrorCode, type SectionRange } from './domain/seat-layout.js';
 export { decodeSnapshot, encodeSnapshot, lsbFirstBits, SNAPSHOT_FLAG_SECTION_ONLY, SNAPSHOT_VERSION, U16_MAX, U32_MAX, type SnapshotBody } from './domain/snapshot.js';
@@ -184,6 +200,7 @@ export {
   SEAT_EXPIRIES,
   SEAT_MAP,
   SEAT_MAP_SECTIONS,
+  SEAT_SALES,
   SEAT_SNAPSHOTS,
   SESSION_ENDED_LOG,
   SESSION_HOLDS,
@@ -205,6 +222,7 @@ export {
   type SeatMap,
   type SeatMapIndex,
   type SeatMapSections,
+  type SeatSales,
   type SeatSignals,
   type SeatSnapshots,
   type SessionEndedLog,

@@ -639,6 +639,7 @@ erDiagram
         uuid event_id PK
         uuid seat_id PK
         uuid order_id PK "기본 키 (event_id, seat_id, order_id)(ADR-0086)"
+        uuid account_id "주문한 계정. 한도를 되돌릴 때 넘겨받은 계정과 대조한다(추천 적용 2026-11-04, BUILD_ORDER PRF-140 ① 리뷰)"
         text status "PENDING|SOLD|RETURNED"
         timestamptz reserved_at
         timestamptz pending_until "가상계좌 PENDING 기한(입금 기한 + 10분 [가정]), 쓸기 작업의 안전망(ADR-0086)"
@@ -2198,6 +2199,13 @@ erDiagram
    - **넣기**: 다시 해도 같은 결과일 실패(검증 실패, 상태 전이 불가, 코드 예외)를 5회 [가정] 겪은 사건을 `held_event`에 넣는다. 그 뒤로 같은 업무 키의 사건이 오면 처리하지 않고 같은 표에 넣는다. 보류 행을 넣는 트랜잭션이 커밋된 뒤에 그 위치를 커밋하므로, 멈췄다 다시 받아도 `eventKey`로 걸러 두 번 넣지 않는다. 저장소 연결 실패·시간 초과는 보류하지 않고 그 파티션을 멈춰 기다린다(스트림 작업자와 같은 규칙, docs/streaming.md).
    - **다시 처리와 정리**: 보류가 1건이라도 있으면 결제·주문 토픽은 SEV2, 그 밖은 SEV3다. 원인을 고친 뒤 RB-11 '보류 사건 다시 처리'로 업무 키마다 들어온 순서대로 다시 넣고, 다시 처리한 행은 7일 [가정] 뒤 지운다(Kafka 보관과 같다).
 
+**purchase DB의 좌석 표 마이그레이션(추천 적용 2026-11-04, BUILD_ORDER PRF-140 ①, ADR-0086·ADR-0083)**: purchase-svc의 첫 마이그레이션이 `seat_sale`·`purchase_quota`·`seat_hold` 셋을 만든다.
+- `seat_sale (event_id uuid, seat_id uuid, order_id uuid, account_id uuid, status text, reserved_at timestamptz, pending_until timestamptz)`: 기본 키 `(event_id, seat_id, order_id)`, `account_id`는 주문한 계정(한도를 되돌리는 연산이 대조한다), `status`는 `PENDING`·`SOLD`·`RETURNED`만(`CHECK`), 활성 상태 유일 부분 인덱스 `UNIQUE (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`. `reserved_at`은 기본 `now()`다.
+- `purchase_quota (account_id uuid, event_id uuid, used int, limit_count int)`: 기본 키 `(account_id, event_id)`, `CHECK (used >= 0 AND limit_count >= 0 AND used <= limit_count)`. 한도를 넘는 갱신은 이 제약이 막는다(docs/features/seat-hold.md §6의 `reserve`).
+- `seat_hold (event_id uuid, seat_id uuid, account_id uuid, fencing_token bigint, status text, kind text, priority_grant_id uuid, held_at timestamptz, expires_at timestamptz)`: `PARTITION BY RANGE (event_id)`, 기본 키 `(event_id, seat_id, fencing_token)`, `status`는 `HELD`·`RELEASED`·`EXPIRED`, `kind`는 `FAN`·`PRIORITY`(기본 `FAN`), 활성 홀드 유일 부분 인덱스 `UNIQUE (event_id, seat_id) WHERE status = 'HELD'`. 부모 표는 손으로 쓴 SQL 마이그레이션이 만들고(Drizzle 0.45.4에는 파티션 선언이 없다), `DEFAULT` 파티션은 두지 않는다(위 '파티션 표 규칙'). 첫 월 파티션은 마이그레이션 직후 `scripts/migrate.mjs`가 `ensureMonthlyPartitions(spec: seat_hold, uuidv7)`로 만든다(이번 달부터 3개월 앞, 운영 실행기와 매일 정비 잡은 BAS-060·wbs 2.11). 파티션이 없는 달의 회차로 쓰면 삽입이 실패하는 것이 정본 동작이다. 적재(PRF-141)가 이 표를 채운다. Drizzle 표 정의는 부모 표 모양만 적고 파티션 선언은 마이그레이션 SQL에만 있다.
+- 마이그레이션 실행은 `scripts/migrate.mjs`(identity-svc와 같은 방식, 실행기는 BAS-060)다. 표 정의는 `src/modules/inventory/adapters/db/schema.ts`(Drizzle)다.
+- 아래 §5의 저장 매개변수(`purchase_quota`의 `fillfactor`, `seat_hold`의 `autovacuum_vacuum_scale_factor` 0.02 [가정])는 이 마이그레이션에 넣지 않았다. 파티션 부모에는 저장 매개변수를 걸 수 없고 `ensureMonthlyPartitions`의 `CREATE TABLE … LIKE`도 옮기지 않으므로, 파티션을 만들 때 거는 일과 `fillfactor` 값은 측정과 함께 BAS-060·wbs 2.11에서 정한다.
+
 ## 5. 동시성 제어가 필요한 지점
 
 | 동시성 경합 지점 | 제어 메커니즘 | 검증 및 보증 수단 |
@@ -2223,6 +2231,7 @@ erDiagram
 | 같은 미수금을 두 정산서가 동시에 상계, 같은 정산서의 지급 요청 중복 | `partner_receivable` 행 잠금(`FOR UPDATE`) 안에서 남은 금액을 확인하고 상계한다. 상계는 같은 트랜잭션에서 `receivable_movement`에 한 행을 덧붙이고 `remaining`을 '금액 − 이동 기록 합'으로 고친다(추천 적용 2026-10-28, 기술 검토 중간-043). 정산서당 지급 묶음은 하나이고 `ref_payout_id`에 유일 제약을 건다. 결제사 멱등키는 고정한다 | J-T5·J-T11·J-T24 |
 | 오프라인 단절 상황에서 복제 티켓의 중복 입장 시도 | 티켓별로 지정한 게이트 구역으로 통제한다(사전 예방). 변경분으로 입장 상태를 공유한다(온라인 스캐너는 두 번째 입장을 거부한다). 업로드된 뒤 서버 판정 표로 중복 입장에 이상 표시를 한다. 올라오지 않은 기록은 찾지 못한다(ADR-0051) | K10 오프라인 정합성 검증 (O-T2, O-T23) |
 | 다중 좌석 판매 확정(Hard Sale) 때 DB 트랜잭션 간 데드락 발생 | 여러 좌석의 PENDING 행을 좌석 고유 ID 오름차순으로 넣는다. 좌석 Redis 장애 때의 비상 우회 경로(정렬 잠금과 `SET LOCAL lock_timeout = '100ms'`, ADR-0083)는 2026-10-28에 없앴다. 장애 조치 동안은 그 회차의 구매 요청을 503으로 미룬다(추천 적용 2026-10-28, ADR-0121) | K3 판매 확정과 v0 행 잠금 홀드 스트레스 테스트(S-T10) |
+| 결제 접수 `reserve`(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-140 ①): 같은 좌석을 두 주문이 동시에 `PENDING`으로 넣음, 같은 계정의 주문 둘(여러 탭)이 한도 행 하나를 동시에 올림, 같은 주문의 `markSold`와 `releasePending`(승인 성공 응답과 승인 기한 만료)이 겹침 | 좌석은 활성 상태 부분 유일 인덱스에 `INSERT … ON CONFLICT DO NOTHING RETURNING`으로 넣는다. 먼저 넣은 쪽이 아직 커밋하지 않았으면 뒤 쪽은 그 결과를 기다린 뒤 판정한다(커밋되면 경합, 되돌려지면 얻는다). 돌려받지 못한 좌석은 SEAT_TAKEN이고 트랜잭션 전체를 되돌린다. 한도 행은 `ON CONFLICT DO UPDATE … WHERE used + n <= limit` 한 문장이라 읽고 쓰는 사이가 없고, 같은 계정의 주문은 그 행의 쓰기 잠금에서 줄을 선다. 한도 행을 먼저, 좌석을 정렬 순서로 잠가 순환 대기가 없다. `markSold`와 `releasePending`은 바꿀 행을 좌석 ID 순으로 먼저 잠그고(`SELECT … ORDER BY seat_id FOR UPDATE`) 상태 조건(`status = 'PENDING'`)을 잠근 뒤 다시 평가하므로 둘 중 하나만 효과가 있고, 지는 쪽은 0행이다(한도는 `releasePending`이 지운 행 수만큼만 되돌린다). 커밋 응답을 잃은 `reserve` 재시도는 같은 계정·주문의 활성 행이 모두 있으면 아무것도 바꾸지 않는다. 트랜잭션은 모두 READ COMMITTED를 직접 고른다(서버 기본값이 REPEATABLE READ여도 한도 행 경쟁이 40001로 끝나지 않는다). 유일 위반(23505)을 예외로 받지 않고 `DO NOTHING`으로 받아 트랜잭션이 중단되지 않는다 | S-T7·S-T8·S-T10·S-T11(실제 PostgreSQL 통합 시험) |
 | 좌석 상태 전이(`seat_hold`·`seat_sale`) UPDATE 과다로 인한 성능 저하 | `seat_hold`·`seat_sale`의 `status` 전이는 부분 유니크 인덱스의 조건 열을 바꾸므로 HOT(Heap-Only Tuples) 갱신이 되지 않는다(PostgreSQL 18 `relcache.c`가 인덱스 조건 열을 HOT를 막는 열에 넣는다). `fillfactor`는 인덱스 밖 열만 바꾸는 갱신(`purchase_quota.used` 등)에 쓴다. `seat_hold`는 표별 `autovacuum_vacuum_scale_factor`를 0.02 [가정](기본 0.2)로 낮춰 청소를 앞당긴다(추천 적용 2026-10-22, ADR-0083) | K3 데이터베이스 부하 튜닝(죽은 행 수·인덱스 크기) |
 
 데이터베이스 인덱스는 다음을 표준으로 만든다. 활성 판매의 유일 부분 인덱스 `seat_sale (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`(§2), 홀드 원장의 활성 홀드 유일 부분 인덱스 `seat_hold (event_id, seat_id) WHERE status = 'HELD'`, 회차·좌석별 등급 정본 `event_seat_price (event_id, seat_id)` 기본 키(2026-10-28 좌석 Redis 장애 때의 비상 홀드 경로를 없애 잠금 대상이 아니다, ADR-0121), 검색 읽기 모델 `search_term`의 띄어쓰기 없앤 값·낱자·초성에 둔 앞부분 일치용 B-tree 인덱스(`text_pattern_ops`)다(ADR-0094). 트랜잭션 격리 수준 실험(READ COMMITTED, REPEATABLE READ, SERIALIZABLE 환경에서 쓰기 스큐 재현)으로, 애플리케이션 계층의 비즈니스 로직에만 기대지 않고 데이터베이스의 물리 유니크 제약을 마지막 안전 방어선으로 둔 설계가 타당함을 보인다.

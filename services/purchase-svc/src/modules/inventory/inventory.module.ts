@@ -23,11 +23,13 @@ import {
   type PurchaseSessionStore,
   SEAT_MAP,
   SEAT_MAP_SECTIONS,
+  SEAT_SALES,
   SEAT_SNAPSHOTS,
   SESSION_HOLDS,
   type SessionEndedLog,
   type SessionIndex,
   type SeatMapSections,
+  type SeatSales,
   type SeatSnapshots,
   type SessionStartedLog,
   SEAT_SIGNALS,
@@ -78,6 +80,8 @@ export type InventoryModuleOptions = (
   admission?: AdmissionOptions;
   /** 구매 세션. createService의 purchaseSessions에 넘긴 것과 같은 객체여야 한다(요청 서명 확인과 세션 읽기가 같은 세션을 본다) */
   sessions: PurchaseSessionAccess;
+  /** 판매 확정(Hard Sale) 저장소(BUILD_ORDER PRF-140 ①, 운영은 DrizzleSeatSales). 부르는 쪽(결제 접수 Saga)은 PRF-160이다. 없으면 SEAT_SALES를 내놓지 않는다 */
+  seatSales?: SeatSales;
 };
 
 @Module({})
@@ -162,7 +166,7 @@ export class InventoryModule {
     return {
       module: InventoryModule,
       controllers: o.admission ? [HoldsController, SnapshotController, ...(o.admission.endedLog ? [PurchaseSessionController] : [])] : [HoldsController],
-      providers: [HoldSeats, ...storage, ...snapshotProviders, ...sessionSweeperProvider, signals, oomGate, { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
+      providers: [HoldSeats, ...storage, ...snapshotProviders, ...sessionSweeperProvider, ...(o.seatSales ? [{ provide: SEAT_SALES, useValue: o.seatSales }] : []), signals, oomGate, { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
       exports: o.storage === 'redis' ? [HoldSeats, ExpirySweeper, ...(sessionSweeperProvider.length > 0 ? [SessionSweeper] : [])] : [HoldSeats],
     };
   }

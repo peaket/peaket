@@ -7,6 +7,7 @@ import type { HoldInput, HoldResult, ReplayInput, ReplayResult, SeatRef } from '
 import type { SeatLuaErrorCode, SeatLuaScript } from './lua-errors.js';
 import type { EndedSession, OpenSessionInput, OpenSessionResult, SessionEndedEntry, SessionEndReason, SessionStartedEntry, StoredSession, SweepSessionResult } from './purchase-session.js';
 import type { SectionRange } from './seat-layout.js';
+import type { ReserveInput, ReserveResult, SeatSaleOrder, SeatSaleRelease } from './seat-sale.js';
 
 /** 요청 처리 중 좌석 Redis 호출 하나의 선택값(BUILD_ORDER PRF-135, guidelines §5) */
 export interface SeatCallOptions {
@@ -488,3 +489,24 @@ export const noSeatSignals: SeatSignals = {
   expiryLag: () => undefined,
   expiryTick: () => undefined,
 };
+
+export const SEAT_SALES = Symbol('purchase.SeatSales');
+/**
+ * 판매 확정(Hard Sale) 저장소(BUILD_ORDER PRF-140 ①, docs/features/seat-hold.md §6 'Hard Sale 저장소의 첫 구현', docs/data.md §2 seat_sale·purchase_quota).
+ * 운영 어댑터는 DrizzleSeatSales(purchase DB)다. 결제 접수 Saga(PRF-160)가 부른다. 모두 트랜잭션 하나이고, 잠그는 순서는 한도 행(purchase_quota) → 좌석 행이다.
+ * 같은 호출을 두 번 해도 두 번째는 0행을 바꾼다(멱등). purchase DB가 늦거나 끊기면 던진다(좌석을 잡았다고 답하지 않는다).
+ */
+export interface SeatSales {
+  /**
+   * 결제 접수 예약: 한도 행을 조건부로 올리고(used + 좌석 수 <= limit) 좌석을 정렬 순서로 PENDING 삽입한다. 한 좌석이라도 활성 판매 행이 있으면 모두 되돌린다.
+   * @throws RangeError 입력 모양이 틀림(좌석 ID가 소문자 UUID가 아님·중복·0개나 11개 이상, 한도가 양의 정수가 아님). 아무것도 부르지 않는다
+   * @throws Error DB 오류(연결·시간 초과·풀 대기 초과 429 server-busy 포함). 아무것도 남기지 않았다
+   */
+  reserve(input: ReserveInput): Promise<ReserveResult>;
+  /** 승인 성공: 그 주문의 PENDING 좌석 행을 SOLD로 바꾼다(pending_until을 비운다). 바꾼 행 수. PENDING이 없으면 0 */
+  markSold(order: SeatSaleOrder): Promise<number>;
+  /** 승인 실패·기한 초과: 그 주문의 PENDING 행을 지우고 한도 행의 used를 지운 행 수만큼 줄인다(0 밑으로 내려가지 않는다). 지운 행 수 */
+  releasePending(release: SeatSaleRelease): Promise<number>;
+  /** 취소·환불: 그 주문의 SOLD 행을 RETURNED로 바꾸고 used를 바꾼 행 수만큼 줄인다. 바꾼 행 수 */
+  returnSold(release: SeatSaleRelease): Promise<number>;
+}

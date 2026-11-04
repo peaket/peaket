@@ -8,9 +8,10 @@
 // HoldAttempt 보내기(BAS-030)는 아직 없어 시도 기록은 버린다.
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
-import { createHotRedis, createService, systemClock } from '@peaket/platform';
+import { createDatabase, createHotRedis, createService, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import {
+  DrizzleSeatSales,
   ExpirySweeper,
   FileSeatMapSource,
   LayoutSeatMap,
@@ -55,6 +56,10 @@ const podId = podIdFrom(process.env, (n) => randomBytes(n));
 // 서버 고정 ECDH 개인키: Secrets Manager에서 시작 때 메모리로만 읽는다(없거나 틀리면 시작하지 않는다, docs/security/secrets-and-keys.md)
 const ecdh = ServerEcdhKey.fromEnv(process.env);
 
+// purchase DB(PostgreSQL): 판매 확정 저장소 SeatSales의 연결(BUILD_ORDER PRF-140 ①). 핫패스 풀(대기 100ms)이다. 홀드 원장 적재(PRF-141)와 결제 접수 Saga(PRF-160)가 필수로 만들 때까지
+// PEAKET_DATABASE_URL이 없으면 DB 없이 뜬다(좌석 홀드·구매 세션은 좌석 Redis만 쓴다). 풀 크기는 PgBouncer 배치와 함께 정한다(wbs 2.11.2)
+const databaseUrl = process.env.PEAKET_DATABASE_URL;
+const database = databaseUrl ? createDatabase({ url: databaseUrl, profile: 'hot', applicationName: SERVICE }) : undefined;
 const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url });
 const sessionStore = new RedisPurchaseSessionStore(redis);
 const sessions = new StoredPurchaseSessions({ store: sessionStore, ecdh, clock: systemClock });
@@ -71,6 +76,7 @@ const service = await createService({
     sessions,
     podId,
     signals,
+    ...(database ? { seatSales: new DrizzleSeatSales(database) } : {}),
     admission: {
       store: sessionStore,
       startedLog: new RedisSessionStartedLog(redis),
@@ -83,6 +89,8 @@ const service = await createService({
   purchaseSessions: sessions,
 });
 log = service.logger;
+// DB 없이 뜬 것을 시작 로그에 남긴다(운영에서 비밀이 빠진 것을 결제 접수 연결(PRF-160) 전에도 알아채게, PRF-140 ① 리뷰)
+if (!database) service.logger.warn({ dep: 'postgres' }, 'PEAKET_DATABASE_URL이 없어 purchase DB 없이 떴다(판매 확정 저장소 SeatSales를 내놓지 않는다)');
 signals.register(service.metrics.registry);
 await service.listen();
 const sweeper = service.app.get(ExpirySweeper);
@@ -99,5 +107,5 @@ process.once('SIGTERM', () => {
   void Promise.all([sweeper.stop(), sessionSweeper.stop()])
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err }, 'purchase-svc 종료 실패'))
-    .finally(() => redis.close());
+    .finally(() => Promise.all([redis.close(), database?.close()]));
 });

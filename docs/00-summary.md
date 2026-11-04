@@ -325,6 +325,10 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - 5만 석 Canvas PoC(R-272, 2026-11-04, BAS-190, 갈래 2): 열 단위 좌석맵 파일을 Worker의 OffscreenCanvas로 풀고 그려 K5 랩 조건 Chromium에서 §5.2 예산 안을 확인했다. 큰 배율의 구역 비트맵은 메모리·iOS 상한을 넘어 보이는 좌석만 바로 그리게 정본을 고쳤고, iOS 실기기 확인이 남는다.
 - pid 키 전환과 두 키 1인 1순번(R-273, 2026-11-04, BUILD_ORDER BOT-025, I-T49·Q-T45): identity-svc에 pid 키 전환 작업(전환 기록, 이어 하기, 끝 시각 뒤 pid_prev 지우기)과 GetVerificationStatus(previous_pid)를, queue-svc에 옛 pid → 새 pid 차례의 두 키 진입·입장 확정과 옮겨 쓰기를 더했다.
 - 화면 공용 패키지 골격(R-274, 2026-11-04, BAS-210, 갈래 2): api-client 실행 정책·telemetry·validation·console-contract를 더하고 화면 코드에 브라우저 지원 린트를 걸었다. eslint-plugin-compat의 판 자료가 새 기능을 몰라 MDN 자료를 직접 읽는 보조 규칙을 더했다.
+- 구매 세션 종료와 정리(R-275, 2026-11-04, wbs 2.5.1 ③, 추천 적용): 끝내는 연산과 SESSION_ENDED, 회차 슬롯의 정리 색인과 1초 점검 반복, 나가기 DELETE 경로, Paying 표시(결제 중에는 유휴로 끝내지 않되 5분마다 다시 본다), 종료 지표를 넣었다. 점검이 계속 실패하는 멤버는 60초 뒤로 미룬다. 홀드 풀기는 HOT-070, 결제 연결은 PRF-160·170.
+- 팬 탈퇴 첫 구현(R-276, 2026-11-04, BUILD_ORDER BOT-030, I-T16·I-T27·I-T8): 재인증 토큰을 한 번만 받아 계정·로그인 수단·기기·연계정보 HMAC·pid를 지우고 세션을 끝내며, 연계정보 처리 기록만 1년 보존 스키마에 옮긴다. 만 14세 미만 정리는 정비가 10분 뒤 끝내고, 정리 중 계정의 토큰에는 구매 권한이 없다. 대조값 보관과 화면 연결은 BOT-035로 나눴다.
+- 성능 예산·보안 헤더·정적 자산(R-277, 2026-11-04, BAS-220, 갈래 2): 대기실 size-limit, 경로별 첫 JS와 Lighthouse 검사, 묶음별 보안 헤더 값 한 곳, 서버 액션 키 확인, 올릴 파일 목록·SBOM, Turborepo 캐시, CI budgets 잡을 더했다.
+- 이용 제한 중 탈퇴의 대조값 보관(R-278, 2026-11-04, BUILD_ORDER BOT-035, I-T68): ops-svc가 부르는 SetRestrictedCiHold로 연계정보 HMAC 행을 두고, 탈퇴는 그 행이 있으면 409 fraudHold로 안내한 뒤 같은 재인증 토큰으로 마치며, 같은 연계정보로 다시 가입한 계정은 제한 끝까지 구매 권한이 없다. 화면 연결과 대기열 키는 BOT-036·BOT-037로 나눴다.
 
 ## 5. [충돌] 결정 결과
 

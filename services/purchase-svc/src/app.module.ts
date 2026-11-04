@@ -9,6 +9,7 @@ import {
   type SeatMap,
   type SeatMapIndex,
   type SeatMapSections,
+  type SeatSales,
   type SeatSignals,
   type SeatStore,
 } from './modules/inventory/index.js';
@@ -41,6 +42,8 @@ export class AppModule implements NestModule {
       sessions: PurchaseSessionAccess;
       /** 스냅샷 API·홀드 기록(BUILD_ORDER PRF-137). 없으면 스냅샷 경로를 열지 않는다 */
       admission?: AdmissionOptions;
+      /** 판매 확정(Hard Sale) 저장소(BUILD_ORDER PRF-140 ①). 운영은 purchase DB가 있을 때만 넘긴다 */
+      seatSales?: SeatSales;
     },
   ): DynamicModule {
     const inventory =
@@ -53,12 +56,14 @@ export class AppModule implements NestModule {
             podId: o.podId,
             sessions: o.sessions,
             ...(o.admission ? { admission: o.admission } : {}),
+            ...(o.seatSales ? { seatSales: o.seatSales } : {}),
             ...(o.signals ? { signals: o.signals } : {}),
           })
         : InventoryModule.register({
             storage: 'memory',
             sessions: o.sessions,
             ...(o.admission ? { admission: o.admission } : {}),
+            ...(o.seatSales ? { seatSales: o.seatSales } : {}),
             ...(o.store ? { store: o.store } : {}),
             ...(o.seatMap ? { seatMap: o.seatMap } : {}),
             ...(o.attempts ? { attempts: o.attempts } : {}),
