@@ -10,7 +10,7 @@ import { IssueReauthToken } from '../src/modules/session/application/issue-reaut
 import { RefreshSession } from '../src/modules/session/application/refresh-session.js';
 import { JoseTokenSigner } from '../src/modules/session/adapters/jose-token-signer.js';
 import { TokenKeyRing } from '../src/modules/session/adapters/token-keys.js';
-import type { AccountClaims, DeviceRefs, SessionSignals, SessionStore } from '../src/modules/session/domain/ports.js';
+import { type AccountClaims, type AccountClosure, type DeviceRefs, noReverifications, type Reverifications, type SessionSignals, type SessionStore } from '../src/modules/session/domain/ports.js';
 
 export const ISSUER = 'https://identity.peaket.test';
 
@@ -54,7 +54,7 @@ export interface Kit {
 /** 본인확인 전 계정처럼 아무 값도 싣지 않는다 */
 export const noClaims: AccountClaims = { of: async () => ({ scopes: [] }) };
 
-export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: FakeClock; claims?: AccountClaims } = {}): Promise<Kit> {
+export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: FakeClock; claims?: AccountClaims; reverifications?: Reverifications } = {}): Promise<Kit> {
   const clock = o.clock ?? fakeClock({ now: Date.parse('2026-11-03T03:00:00.000Z') });
   const signals = recordingSignals();
   const { privateJwk, publicJwk } = await fanKey();
@@ -66,10 +66,13 @@ export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: F
     publicJwk,
     create: new CreateSession(store, signer, devices, signals, o.claims ?? noClaims, clock),
     end: new EndSession(store, signals, clock),
-    reauth: new IssueReauthToken(store, signer, signals, clock),
+    reauth: new IssueReauthToken(store, signer, signals, o.reverifications ?? noReverifications, clock),
     refresh: new RefreshSession(store, signer, signals, o.claims ?? noClaims, clock),
   };
 }
+
+/** 계정 정리를 하지 않는 대역(정리 사유도 늘 없음) */
+export const noClosure: AccountClosure = { start: async () => {}, closureReasonOf: async () => null };
 
 /** 시험 기관 비밀과 모의 기관 주소(docs/features/identity.md §5 '모의 기관과 기관 창 흐름') */
 export const AGENCY_SECRET = Buffer.alloc(32, 3);
@@ -87,7 +90,9 @@ export function agencyResult(
   secret: Uint8Array = AGENCY_SECRET,
 ): Record<string, string> {
   const outcome = o.outcome ?? (o.person === undefined ? 'FAILED' : 'VERIFIED');
-  return sealTestAgencyResult(secret, { v: 1, tx: verificationId, outcome, person: o.person, birth: o.birth, iat: o.iatMs ?? clock.now() });
+  // 생년월일을 주지 않으면 어른(2000-01-01)으로 둔다. 'birth' 칸을 undefined로 주면 생년월일 없는 결과다(BOT-020)
+  const birth = 'birth' in o ? o.birth : '2000-01-01';
+  return sealTestAgencyResult(secret, { v: 1, tx: verificationId, outcome, person: o.person, birth, iat: o.iatMs ?? clock.now() });
 }
 
 let n = 0;

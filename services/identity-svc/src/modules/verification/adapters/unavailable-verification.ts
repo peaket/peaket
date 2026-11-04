@@ -8,4 +8,4 @@ const down = (): never => {
 };
 
 export const unavailableProvider: VerificationProvider = { window: down, confirm: async () => down() };
-export const unavailableHashers: IdentityHashers = { ci: down, pid: down };
+export const unavailableHashers: IdentityHashers = { ciAll: async () => down(), pid: async () => down(), versions: () => [] };

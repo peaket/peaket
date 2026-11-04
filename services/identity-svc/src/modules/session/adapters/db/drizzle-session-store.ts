@@ -96,6 +96,16 @@ export class DrizzleSessionStore implements SessionStore {
           .for('update');
         return rows.map((r) => ({ sessionId: r.id, deviceId: r.deviceId, idleExpiresAt: r.idle.getTime() }));
       },
+      closureReasonOf: async (accountId) => {
+        const [r] = await tx.select({ status: account.status, reason: account.closureReason }).from(account).where(eq(account.id, accountId));
+        return r && r.status === 'WITHDRAWAL_PENDING' && r.reason === 'UNDER_14' ? 'UNDER_14' : null;
+      },
+      markClosure: async (accountId, reason) => {
+        await tx
+          .update(account)
+          .set({ status: 'WITHDRAWAL_PENDING', closureReason: reason })
+          .where(and(eq(account.id, accountId), eq(account.status, 'ACTIVE')));
+      },
       terminateSessions: async (ids, reason, now) => {
         if (ids.length === 0) return;
         const ended = await tx

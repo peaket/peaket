@@ -7,7 +7,7 @@ import { type ActiveSession, CREATE_KEY_TTL_MS, type Provider, sessionAlive, typ
 type StoredSession = NewSession & { terminatedAt: number | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean };
 
 interface State {
-  accounts: Map<string, AccountRow & { email: string | null; createdAt: number }>;
+  accounts: Map<string, AccountRow & { email: string | null; createdAt: number; closureReason?: string }>;
   providers: Map<string, { accountId: string; linkedAt: number }>;
   devices: Map<string, { id: string; accountId: string; ref: string; boundAt: number }>;
   sessions: Map<string, StoredSession>;
@@ -117,6 +117,14 @@ export class MemorySessionStore implements SessionStore {
         [...s.sessions.values()]
           .filter((x) => x.accountId === accountId && sessionAlive(x, now))
           .map((x): ActiveSession => ({ sessionId: x.id, deviceId: x.deviceId, idleExpiresAt: x.idleExpiresAt })),
+      closureReasonOf: async (accountId) => {
+        const a = s.accounts.get(accountId);
+        return a && a.status === 'WITHDRAWAL_PENDING' && a.closureReason === 'UNDER_14' ? 'UNDER_14' : null;
+      },
+      markClosure: async (accountId, reason) => {
+        const a = s.accounts.get(accountId);
+        if (a && a.status === 'ACTIVE') Object.assign(a, { status: 'WITHDRAWAL_PENDING', closureReason: reason });
+      },
       terminateSessions: async (ids, reason, now) => {
         for (const id of ids) {
           const x = s.sessions.get(id);

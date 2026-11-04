@@ -20,6 +20,8 @@ export const account = pgTable(
     savedBookerName: text('saved_booker_name'),
     savedBookerPhone: text('saved_booker_phone'),
     ageVerified: boolean('age_verified').notNull().default(false),
+    // WITHDRAWAL_PENDING의 정리 사유. UNDER_14는 본인확인 결과 만 14세 미만(docs/features/identity.md §5, BUILD_ORDER BOT-020)
+    closureReason: text('closure_reason'),
     locale: text('locale').notNull().default('ko'),
     createdAt: at('created_at').notNull(),
     deletedAt: at('deleted_at'),
@@ -28,6 +30,7 @@ export const account = pgTable(
     check('account_status_check', sql`${t.status} in ('ACTIVE', 'WITHDRAWAL_PENDING', 'MERGED', 'DELETED')`),
     check('account_locale_check', sql`${t.locale} in ('ko', 'en', 'ja', 'zh')`),
     check('account_merged_check', sql`(${t.status} = 'MERGED') = (${t.mergedIntoAccountId} is not null)`),
+    check('account_closure_reason_check', sql`${t.closureReason} is null or ${t.closureReason} in ('UNDER_14')`),
   ],
 );
 

@@ -12,20 +12,20 @@ import { ConfirmVerification } from '../src/modules/verification/application/con
 import { GetVerificationResult } from '../src/modules/verification/application/get-verification-result.js';
 import { StartVerification } from '../src/modules/verification/application/start-verification.js';
 import { VerificationError } from '../src/modules/verification/application/verification-error.js';
-import { AGENCY_SECRET, AGENCY_URL, agencyResult, kit, newKey, testAgency } from './support.js';
+import { AGENCY_SECRET, AGENCY_URL, agencyResult, kit, newKey, noClosure, testAgency } from './support.js';
 
 async function setup(mode: 'POPUP' | 'REDIRECT' = 'POPUP') {
   const verifications = new MemoryVerificationStore();
   const claims = new VerificationClaims(verifications);
   const k = await kit(new MemorySessionStore(), { claims });
   const provider = testAgency(k.clock, mode);
-  const hashers = new HmacIdentityHashers(Buffer.alloc(32, 4), Buffer.alloc(32, 5));
+  const hashers = HmacIdentityHashers.single(Buffer.alloc(32, 4), Buffer.alloc(32, 5));
   return {
     k,
     verifications,
     provider,
-    start: new StartVerification(verifications, provider, k.clock),
-    confirm: new ConfirmVerification(verifications, provider, hashers, k.clock),
+    start: new StartVerification(verifications, provider, noClosure, k.clock),
+    confirm: new ConfirmVerification(verifications, provider, hashers, noClosure, k.clock),
     result: new GetVerificationResult(verifications, k.clock),
     /** 모의 기관이 돌려준 결과 값 */
     agency: (verificationId: string, o: Parameters<typeof agencyResult>[2]) => agencyResult(k.clock, verificationId, o),
@@ -83,10 +83,10 @@ describe('본인확인(시험 어댑터)', () => {
       ids.push((await t.verifications.claimsOf(s.accountId))!.pid);
     }
     expect(ids[0]).not.toBe(ids[1]);
-    const again = new HmacIdentityHashers(Buffer.alloc(32, 4), Buffer.alloc(32, 5));
+    const again = HmacIdentityHashers.single(Buffer.alloc(32, 4), Buffer.alloc(32, 5));
     const ci = await testAgency(t.k.clock).confirm('x', t.agency('x', { person: 'park' }));
     if (ci.outcome !== 'VERIFIED') throw new Error('x');
-    expect(again.pid(again.ci(ci.ci).hmac).pid.toString('base64url')).toBe(ids[0]);
+    expect((await again.pid((await again.ciAll(ci.ci))[0]!.hmac)).pid.toString('base64url')).toBe(ids[0]);
   });
 
   test('FR002_이미본인확인한계정의FIRST시작은409이고_취소·실패는저장하지않는다', async () => {
@@ -128,7 +128,7 @@ describe('본인확인(시험 어댑터)', () => {
   test('identity§10_본인확인기관이없으면_시작이503PROVIDER_DOWN이고건을남기지않는다', async () => {
     const { unavailableProvider } = await import('../src/modules/verification/adapters/unavailable-verification.js');
     const t = await setup();
-    const start = new StartVerification(t.verifications, unavailableProvider, t.k.clock);
+    const start = new StartVerification(t.verifications, unavailableProvider, noClosure, t.k.clock);
     expect(await code(start.run({ accountId: '0190f3a1-7c2e-7a00-8000-000000000001', purpose: 'FIRST', next: '/' }))).toBe('PROVIDER_DOWN');
   });
 

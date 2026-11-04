@@ -5,6 +5,7 @@
 import Link from 'next/link';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
 import { ME } from '@/entities/me';
+import { VERIFY_PURPOSE_TEXT, VerifyIdentityButton } from '@/features/identity-verify';
 import { formatWon } from '@/entities/production';
 import { SCR017_STATES } from '@/shared/config/screens.account';
 import { cx } from '@/shared/lib/cx';
@@ -209,17 +210,31 @@ function VerifySection() {
           </span>
         ) : null}
       </div>
-      <dl className="kv md:hidden">
-        <dt>인증한 날</dt>
-        <dd>{PROFILE.verifiedAt}</dd>
-      </dl>
-      <p className="t-sm muted md:hidden">계정당 한 번 인증합니다.</p>
-      <div className="row between hidden md:flex">
-        <span className="t-sm">
-          <span className="muted">인증한 날</span> <span className="num fw-b">{PROFILE.verifiedAt}</span>
-        </span>
-        <span className="t-sm muted">계정당 한 번 인증합니다.</span>
-      </div>
+      {ME.verified ? (
+        <>
+          <dl className="kv md:hidden">
+            <dt>인증한 날</dt>
+            <dd>{PROFILE.verifiedAt}</dd>
+          </dl>
+          <p className="t-sm muted md:hidden">계정당 한 번 인증합니다.</p>
+          <div className="row between hidden md:flex">
+            <span className="t-sm">
+              <span className="muted">인증한 날</span> <span className="num fw-b">{PROFILE.verifiedAt}</span>
+            </span>
+            <span className="t-sm muted">계정당 한 번 인증합니다.</span>
+          </div>
+        </>
+      ) : (
+        // 본인확인 전이면 [지금 본인확인](d5 §5.17 ①). 본인확인 창구의 하나다(docs/features/identity.md §5 '창구', BUILD_ORDER BOT-020)
+        <div className="col" style={{ gap: 8 }}>
+          <p className="t-sm muted" id="vf-purpose-settings">
+            {VERIFY_PURPOSE_TEXT.first}
+          </p>
+          <VerifyIdentityButton className="btn btn-secondary" describedBy="vf-purpose-settings" style={{ alignSelf: 'flex-start' }}>
+            지금 본인확인
+          </VerifyIdentityButton>
+        </div>
+      )}
     </section>
   );
 }

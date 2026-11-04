@@ -4,9 +4,10 @@ import { DrizzleSessionStore } from './adapters/db/drizzle-session-store.js';
 import { MemorySessionStore } from './adapters/memory-session-store.js';
 import { CreateSession } from './application/create-session.js';
 import { EndSession } from './application/end-session.js';
+import { CloseAccount } from './application/close-account.js';
 import { IssueReauthToken } from './application/issue-reauth-token.js';
 import { RefreshSession } from './application/refresh-session.js';
-import { DEVICE_REFS, type DeviceRefs, PUBLIC_KEYS, type PublicKeys, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
+import { ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, PUBLIC_KEYS, type PublicKeys, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
 import { COOKIE_DOMAIN, TokenController } from './inbound/token.controller.js';
 
 export interface SessionModuleOptions {
@@ -26,8 +27,12 @@ export class SessionModule {
   static register(o: SessionModuleOptions): DynamicModule {
     return {
       module: SessionModule,
+      // 본인확인 컨텍스트가 계정 정리(ACCOUNT_CLOSURE)를 쓰므로 전역으로 내준다
+      global: true,
       controllers: [TokenController],
       providers: [
+        CloseAccount,
+        { provide: ACCOUNT_CLOSURE, useExisting: CloseAccount },
         CreateSession,
         EndSession,
         IssueReauthToken,
@@ -39,7 +44,7 @@ export class SessionModule {
         { provide: PUBLIC_KEYS, useValue: o.keys },
         { provide: COOKIE_DOMAIN, useValue: o.cookieDomain },
       ],
-      exports: [CreateSession, EndSession, IssueReauthToken, RefreshSession],
+      exports: [CreateSession, EndSession, IssueReauthToken, RefreshSession, ACCOUNT_CLOSURE],
     };
   }
 }

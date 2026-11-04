@@ -9,7 +9,7 @@ import { HmacIdentityHashers } from '../src/modules/verification/adapters/hmac-i
 import { VerificationClaims } from '../src/modules/verification/adapters/verification-claims.js';
 import { ConfirmVerification } from '../src/modules/verification/application/confirm-verification.js';
 import { StartVerification } from '../src/modules/verification/application/start-verification.js';
-import { agencyResult, kit, newKey, testAgency } from '../test/support.js';
+import { agencyResult, kit, newKey, noClosure, testAgency } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 let pg: PostgresContainer;
@@ -31,8 +31,8 @@ async function setup() {
   const verifications = new DrizzleVerificationStore(database);
   const k = await kit(new DrizzleSessionStore(database, systemClock), { claims: new VerificationClaims(verifications) });
   const provider = testAgency(k.clock);
-  const hashers = new HmacIdentityHashers(Buffer.alloc(32, 4), Buffer.alloc(32, 5));
-  return { k, start: new StartVerification(verifications, provider, k.clock), confirm: new ConfirmVerification(verifications, provider, hashers, k.clock) };
+  const hashers = HmacIdentityHashers.single(Buffer.alloc(32, 4), Buffer.alloc(32, 5));
+  return { k, start: new StartVerification(verifications, provider, noClosure, k.clock), confirm: new ConfirmVerification(verifications, provider, hashers, noClosure, k.clock) };
 }
 
 test('FR002_PostgreSQL에서도_본인확인뒤갱신토큰에ticket:buy와pid가실린다', async () => {
@@ -54,6 +54,13 @@ test('I-T6_같은사람이두계정에서동시에확정해도_한계정만본�
   expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
   // 늦은 쪽은 UNIQUE에 걸려도 500이 아니라 DUPLICATE_ACCOUNT(409)다
   expect(results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason.code)).toEqual(['DUPLICATE_ACCOUNT']);
+  // 늦은 쪽은 한 번 다시 판정해 DUPLICATE_ACCOUNT로 마치고 다른 계정 시도 기록을 남긴다(BOT-020, 새 맥락 리뷰 중간 4)
+  const late = accounts[results.findIndex((r) => r.status === 'rejected')]!;
+  const lateAttempt = attempts[results.findIndex((r) => r.status === 'rejected')]!;
+  const st = (await database.db.execute(`select status from verification_attempt where id = '${lateAttempt.verificationId}'`)).rows[0] as { status: string };
+  expect(st.status).toBe('DUPLICATE_ACCOUNT');
+  const rows = (await database.db.execute(`select count(*)::int as n from identity_conflict_attempt where attempted_account_id = '${late.accountId}'`)).rows[0] as { n: number };
+  expect(rows.n).toBe(1);
   const n = (await database.db.execute(`select count(*)::int as n from identity_verification where account_id in ('${accounts[0]!.accountId}', '${accounts[1]!.accountId}')`)).rows[0] as { n: number };
   expect(n.n).toBe(1);
 });

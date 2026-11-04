@@ -96,6 +96,7 @@ erDiagram
         text saved_booker_name "optional, 저장된 예매자 성명(SCR-017 ⑦)"
         text saved_booker_phone "optional, 저장된 예매자 휴대폰 번호(SCR-017 ⑦)"
         bool age_verified "14세 이상 확인 여부만"
+        text closure_reason "optional, WITHDRAWAL_PENDING의 정리 사유. UNDER_14는 본인확인 결과 만 14세 미만이라 탈퇴와 같은 절차로 정리 중(추천 적용 2026-11-04, BUILD_ORDER BOT-020)"
         text locale "ko|en|ja|zh, 알림 문구 언어(NFR-024). 가입·로그인 때 화면의 로케일(주소 접두)로 쓰고 없으면 ko [가정]. 알림 받는 사람 묶음 조회 BatchGetRecipients의 locale(추천 적용 2026-10-30, docs/features/notify.md §2.1 E6)"
         timestamptz created_at
         timestamptz deleted_at
@@ -115,7 +116,8 @@ erDiagram
         uuid account_id FK "시작한 계정. 다른 계정의 결과 확정·조회는 404"
         text purpose "FIRST|REVERIFY|MINOR_CONTRACT"
         text next "결과를 보인 뒤 돌아갈 같은 출처 경로(safeNext 규칙)"
-        text status "PENDING|VERIFIED|CANCELLED|FAILED|DUPLICATE_ACCOUNT|PROVIDER_DOWN(결과 경로에서 기관 장애를 만난 건, 추천 적용 2026-11-04, BUILD_ORDER BOT-010)"
+        text status "PENDING|VERIFIED|CANCELLED|FAILED|DUPLICATE_ACCOUNT|PROVIDER_DOWN(결과 경로에서 기관 장애·KMS 장애를 만난 건, 추천 적용 2026-11-04, BUILD_ORDER BOT-010)|UNDER_14(만 14세 미만, 연계정보 처리 기록이라 1년 [가정] 남긴다, BUILD_ORDER BOT-020)"
+        uuid session_id "optional, 시작한 세션. 고위험 재인증의 재통과 확인에 쓴다(추천 적용 2026-11-04, BUILD_ORDER BOT-020)"
         timestamptz expires_at "시작 + 10분 [가정]. 지나면 결과를 받지 않는다"
         timestamptz created_at
         timestamptz completed_at "확정 시각. 결과는 1일 [가정] 조회하고 지운다"

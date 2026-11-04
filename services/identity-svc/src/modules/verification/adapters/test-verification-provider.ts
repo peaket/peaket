@@ -79,6 +79,8 @@ export class TestVerificationProvider implements VerificationProvider {
     const person = body.person;
     if (typeof person !== 'string' || person.length === 0 || person.length > MAX_PERSON) return { outcome: 'FAILED' };
     // 실제 연계정보처럼 88자 base64 값으로 만든다(64바이트)
-    return { outcome: 'VERIFIED', ci: createHmac('sha512', this.#secret).update(`ci:${person}`).digest().toString('base64') };
+    const ci = createHmac('sha512', this.#secret).update(`ci:${person}`).digest().toString('base64');
+    // 생년월일은 유스케이스가 만 나이 계산에만 쓴다(BUILD_ORDER BOT-020). 없으면 싣지 않고, 유스케이스가 FAILED로 본다
+    return body.birth === undefined ? { outcome: 'VERIFIED', ci } : { outcome: 'VERIFIED', ci, birthDate: body.birth };
   }
 }

@@ -54,7 +54,8 @@ export interface ResultBody {
   restrictedUntil?: string | null;
 }
 
-export type StartAnswer = { kind: 'started'; id: string; window: AgencyWindow } | { kind: 'already' } | { kind: 'login' } | { kind: 'down' } | { kind: 'error' };
+/** under14: 만 14세 미만으로 정리 중인 계정이라 시작을 받지 않는다(403 under-14, BUILD_ORDER BOT-020) */
+export type StartAnswer = { kind: 'started'; id: string; window: AgencyWindow } | { kind: 'already' } | { kind: 'under14' } | { kind: 'login' } | { kind: 'down' } | { kind: 'error' };
 export type ResultAnswer =
   | { kind: 'result'; body: ResultBody }
   | { kind: 'duplicate' }
@@ -242,6 +243,7 @@ export function createVerifyApi(o: { origin: string; fetch: FetchLike; lock?: <T
       }
       const type = await problemType(r);
       if (r.status === 409 && type === 'already-verified') return { kind: 'already' };
+      if (r.status === 403 && type === 'under-14') return { kind: 'under14' };
       if (r.status === 503) return { kind: 'down' };
       return { kind: 'error' };
     },
@@ -313,7 +315,7 @@ export function startCallerFlow(env: CallerEnv, h: CallerHandlers): { cancel(): 
     if (stopped) return;
     if (s.kind !== 'started') {
       win?.close();
-      finish(s.kind === 'login' ? 'login' : s.kind === 'already' ? 'success' : 'down', next);
+      finish(s.kind === 'login' ? 'login' : s.kind === 'already' ? 'success' : s.kind === 'under14' ? 'under14' : 'down', next);
       return;
     }
     const usePopup = s.window.mode === 'POPUP' && win !== null && !win.closed;

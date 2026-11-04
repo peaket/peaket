@@ -30,6 +30,9 @@ export type LoginVerdict = 'ALLOW' | 'CHALLENGE' | 'UNKNOWN';
  * 고위험 재인증에 본인확인 재통과가 필요한가(identity §7 '로그인 판정의 처리', §7.1 ③): 요청만 함 + 로그인 판정 CHALLENGE·UNKNOWN.
  * UNKNOWN을 CHALLENGE와 같게 다루는 것은 이 작업들에서만이다
  */
+/** 고위험 재인증이 받는 본인확인 재통과: 같은 세션의 REVERIFY VERIFIED가 확정된 지 10분 [가정] 안(identity §5) */
+export const REVERIFY_WINDOW_MS = 10 * 60_000;
+
 export function needsReverification(purpose: ReauthPurpose, strength: ReauthStrength, verdict: LoginVerdict): boolean {
   return purpose === 'high-risk' && strength === 'requested' && verdict !== 'ALLOW';
 }

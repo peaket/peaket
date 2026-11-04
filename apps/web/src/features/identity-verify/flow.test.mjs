@@ -227,6 +227,8 @@ test('I-T45 시작이 막히면 미리 연 창을 닫는다: 401은 로그인(�
   for (const [start, want] of [
     [{ kind: 'login' }, 'login'],
     [{ kind: 'already' }, 'success'],
+    // 만 14세 미만으로 정리 중인 계정(BOT-020): 시작이 403 under-14
+    [{ kind: 'under14' }, 'under14'],
     [{ kind: 'down' }, 'down'],
     [{ kind: 'error' }, 'down'],
   ]) {
@@ -396,6 +398,7 @@ test('I-T45 API: 모든 호출은 API 출처로 자격 증명을 싣고, 시작�
   const f = fakeFetch([
     { status: 201, body: { verificationId: ID, window: AGENCY, expiresAt: '2026-11-04T00:10:00Z' } },
     problem(409, 'already-verified'),
+    problem(403, 'under-14'),
     problem(503, 'provider-down'),
     { status: 200, body: body('VERIFIED').body },
     problem(409, 'duplicate-account'),
@@ -407,6 +410,7 @@ test('I-T45 API: 모든 호출은 API 출처로 자격 증명을 싣고, 시작�
   const api = createVerifyApi({ origin: 'http://localhost:18930', fetch: f.fn });
   assert.deepEqual(await api.start('/events/e-1', 'FIRST'), { kind: 'started', id: ID, window: AGENCY });
   assert.deepEqual(await api.start('/', 'FIRST'), { kind: 'already' });
+  assert.deepEqual(await api.start('/', 'FIRST'), { kind: 'under14' });
   assert.deepEqual(await api.start('/', 'FIRST'), { kind: 'down' });
   assert.deepEqual(await api.confirm(ID, SEALED), body('VERIFIED'));
   assert.deepEqual(await api.confirm(ID, SEALED), { kind: 'duplicate' });
@@ -416,10 +420,10 @@ test('I-T45 API: 모든 호출은 API 출처로 자격 증명을 싣고, 시작�
   assert.equal(await api.refresh(), true);
   assert.equal(f.calls[0].url, 'http://localhost:18930/v1/identity/verifications');
   assert.deepEqual(JSON.parse(f.calls[0].body), { purpose: 'FIRST', next: '/events/e-1' });
-  assert.equal(f.calls[3].url, `http://localhost:18930/v1/identity/verifications/${ID}/result`);
-  assert.deepEqual(JSON.parse(f.calls[3].body), { providerResult: SEALED });
-  assert.equal(f.calls[6].method, 'GET');
-  assert.equal(f.calls[8].url, 'http://localhost:18930/v1/identity/access-tokens');
+  assert.equal(f.calls[4].url, `http://localhost:18930/v1/identity/verifications/${ID}/result`);
+  assert.deepEqual(JSON.parse(f.calls[4].body), { providerResult: SEALED });
+  assert.equal(f.calls[7].method, 'GET');
+  assert.equal(f.calls[9].url, 'http://localhost:18930/v1/identity/access-tokens');
   for (const c of f.calls) assert.equal(c.credentials, 'include');
   for (const c of f.calls.filter((x) => x.body !== undefined)) assert.equal(c.headers['content-type'], 'application/json');
 });

@@ -24,7 +24,7 @@ beforeAll(async () => {
   const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(fan.privateJwk) });
   svc = await createService({
     name: 'identity-svc',
-    module: AppModule.register({ memory: true, session: { signer: new JoseTokenSigner(keys, ISSUER), keys, deviceRefs: testDeviceRefs(), signals: recordingSignals(), cookieDomain: 'peaket.example' }, verification: { provider: testAgency(clock), hashers: new HmacIdentityHashers(Buffer.alloc(32, 4), Buffer.alloc(32, 5)) } }),
+    module: AppModule.register({ memory: true, session: { signer: new JoseTokenSigner(keys, ISSUER), keys, deviceRefs: testDeviceRefs(), signals: recordingSignals(), cookieDomain: 'peaket.example' }, verification: { provider: testAgency(clock), hashers: HmacIdentityHashers.single(Buffer.alloc(32, 4), Buffer.alloc(32, 5)) } }),
     // 정규 로그 줄을 모두 남긴다(표본 1/1): 기관 결과 값이 로그에 없는지 본다
     env: { PEAKET_ENV: 'ci', PEAKET_LOG_SAMPLE_ONE_IN: '1' },
     clock,
@@ -145,6 +145,27 @@ describe('기관 결과 값과 로그', () => {
     const logged = logLines.slice(before).join('');
     expect(logged).toContain('/v1/identity/verifications/');
     for (const v of [sealed.result!, sealed.mac!, forged.result!, forged.mac!, 'log-check', 'log-forged', '2001-02-03', '2002-03-04']) expect(logged).not.toContain(v);
+  });
+});
+
+describe('만 14세 미만과 로그(BOT-020)', () => {
+  test('I-T42_ASVS v5.0.0-16.2.5_만14세미만이면_403under-14이고_생년월일은서비스로그에0건이다', async () => {
+    const s = await login();
+    const h = { 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'content-type': 'application/json' };
+    const st = await svc.http.inject({ method: 'POST', url: '/v1/identity/verifications', headers: h, payload: JSON.stringify({ next: '/' }) });
+    const id = (JSON.parse(st.payload) as { verificationId: string }).verificationId;
+    const birth = '2013-09-27';
+    const before = logLines.length;
+    const r = await svc.http.inject({ method: 'POST', url: `/v1/identity/verifications/${id}/result`, headers: h, payload: JSON.stringify({ providerResult: agencyResult(clock, id, { person: 'log-kid', birth }) }) });
+    expect(r.statusCode).toBe(403);
+    expect(JSON.parse(r.payload).type).toBe('https://peaket.example/problems/under-14');
+    const got = await svc.http.inject({ method: 'GET', url: `/v1/identity/verifications/${id}/result`, headers: h });
+    expect(JSON.parse(got.payload).status).toBe('UNDER_14');
+    // 정리 중인 계정은 다시 시작하지 못한다
+    const again = await svc.http.inject({ method: 'POST', url: '/v1/identity/verifications', headers: h, payload: JSON.stringify({ next: '/' }) });
+    expect(again.statusCode).toBe(403);
+    const logged = logLines.slice(before).join('');
+    for (const v of [birth, 'log-kid']) expect(logged).not.toContain(v);
   });
 });
 

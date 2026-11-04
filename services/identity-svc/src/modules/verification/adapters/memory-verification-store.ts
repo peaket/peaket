@@ -1,21 +1,21 @@
 // 메모리 저장소(시험·로컬 시제품용). 트랜잭션은 한 번에 하나씩 돌고 실패하면 되돌린다(PostgreSQL 저장소와 같은 규칙).
-import type { VerificationStore, VerificationTx } from '../domain/ports.js';
-import type { Attempt } from '../domain/verification.js';
-
-interface Record {
-  ciHmac: Buffer;
-  pid: Buffer;
-}
+import type { ConflictAttempt, VerificationRecord, VerificationStore, VerificationTx } from '../domain/ports.js';
+import { type Attempt, CiAlreadyLinked } from '../domain/verification.js';
 
 interface State {
   attempts: Map<string, Attempt>;
-  verifications: Map<string, Record>;
+  verifications: Map<string, VerificationRecord>;
+  conflicts: ConflictAttempt[];
 }
 
-const clone = (s: State): State => ({ attempts: new Map([...s.attempts].map(([k, v]) => [k, { ...v }])), verifications: new Map(s.verifications) });
+const clone = (s: State): State => ({
+  attempts: new Map([...s.attempts].map(([k, v]) => [k, { ...v }])),
+  verifications: new Map([...s.verifications].map(([k, v]) => [k, { ...v }])),
+  conflicts: s.conflicts.map((c) => ({ ...c })),
+});
 
 export class MemoryVerificationStore implements VerificationStore {
-  #state: State = { attempts: new Map(), verifications: new Map() };
+  #state: State = { attempts: new Map(), verifications: new Map(), conflicts: [] };
   #queue: Promise<unknown> = Promise.resolve();
 
   transaction<T>(fn: (tx: VerificationTx) => Promise<T>): Promise<T> {
@@ -33,10 +33,24 @@ export class MemoryVerificationStore implements VerificationStore {
           const a = s.attempts.get(id);
           if (a) Object.assign(a, { status, completedAt: now });
         },
-        verificationOf: async (accountId) => s.verifications.get(accountId) ?? null,
-        accountByCiHmac: async (h) => [...s.verifications].find(([, v]) => v.ciHmac.equals(h))?.[0] ?? null,
+        verificationOf: async (accountId) => {
+          const v = s.verifications.get(accountId);
+          return v ? { ...v } : null;
+        },
+        accountByCiHmac: async (hs, except) => {
+          const hits = [...s.verifications].filter(([, v]) => hs.some((h) => v.ciHmac.equals(h))).map(([id]) => id);
+          return hits.find((id) => id !== except) ?? hits[0] ?? null;
+        },
         saveVerification: async (v) => {
-          s.verifications.set(v.accountId, { ciHmac: v.ciHmac, pid: v.pid });
+          if ([...s.verifications].some(([id, x]) => id !== v.accountId && x.ciHmac.equals(v.ciHmac))) throw new CiAlreadyLinked();
+          s.verifications.set(v.accountId, { ciHmac: v.ciHmac, ciHmacKeyVersion: v.ciHmacKeyVersion, pid: v.pid });
+        },
+        updateCiHmac: async (accountId, ciHmac, ciHmacKeyVersion) => {
+          const v = s.verifications.get(accountId);
+          if (v) Object.assign(v, { ciHmac, ciHmacKeyVersion });
+        },
+        insertConflictAttempt: async (c) => {
+          s.conflicts.push({ ...c });
         },
       });
       this.#state = s;
@@ -59,5 +73,32 @@ export class MemoryVerificationStore implements VerificationStore {
   async claimsOf(accountId: string): Promise<{ pid: string } | null> {
     const v = this.#state.verifications.get(accountId);
     return v ? { pid: v.pid.toString('base64url') } : null;
+  }
+
+  async recentlyReverified(accountId: string, sessionId: string, since: number): Promise<boolean> {
+    return [...this.#state.attempts.values()].some(
+      (a) => a.accountId === accountId && a.sessionId === sessionId && a.purpose === 'REVERIFY' && a.status === 'VERIFIED' && a.completedAt !== null && a.completedAt >= since,
+    );
+  }
+
+  async purgeConflictAttempts(before: number): Promise<number> {
+    const n = this.#state.conflicts.length;
+    this.#state.conflicts = this.#state.conflicts.filter((c) => c.attemptedAt >= before);
+    return n - this.#state.conflicts.length;
+  }
+
+  async ciKeyVersionsInUse(): Promise<number[]> {
+    return [...new Set([...this.#state.verifications.values()].map((v) => v.ciHmacKeyVersion))].sort((a, b) => a - b);
+  }
+
+  /** 시험이 보는 값: 그 계정이 시도한 다른 계정 시도 기록 */
+  async conflictAttempts(accountId: string): Promise<ConflictAttempt[]> {
+    return this.#state.conflicts.filter((c) => c.attemptedAccountId === accountId).map((c) => ({ ...c }));
+  }
+
+  /** 시험이 보는 값: 그 계정의 본인확인 기록 */
+  async recordOf(accountId: string): Promise<VerificationRecord | null> {
+    const v = this.#state.verifications.get(accountId);
+    return v ? { ...v } : null;
   }
 }

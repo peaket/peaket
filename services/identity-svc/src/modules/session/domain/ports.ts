@@ -69,6 +69,10 @@ export interface SessionTx {
   activeSessions(accountId: string, now: number): Promise<ActiveSession[]>;
   /** 세션을 끝내고, 같은 트랜잭션에 세션 종료 사건(control.sessions-terminated)을 적는다(ADR-0143 결정 3) */
   terminateSessions(ids: readonly string[], reason: TerminationReason, now: number): Promise<void>;
+  /** ACTIVE 계정을 WITHDRAWAL_PENDING과 정리 사유로 둔다. 이미 정리 중이거나 다른 상태면 그대로 둔다(멱등) */
+  markClosure(accountId: string, reason: 'UNDER_14'): Promise<void>;
+  /** 정리 중(WITHDRAWAL_PENDING)인 계정의 정리 사유. 아니면 null */
+  closureReasonOf(accountId: string): Promise<'UNDER_14' | null>;
   insertSession(row: NewSession): Promise<void>;
   /** 세션 행(쓰기 잠금). 없으면 null */
   getSessionForUpdate(id: string): Promise<SessionRow | null>;
@@ -129,4 +133,21 @@ export const ACCOUNT_CLAIMS = Symbol('identity.AccountClaims');
 /** 액세스 토큰에 실을 계정 값(identity §3): 본인확인을 마친 계정의 scope(ticket:buy)·pid·pid_prev. 본인확인 컨텍스트가 채운다 */
 export interface AccountClaims {
   of(accountId: string): Promise<{ scopes: string[]; pid?: string; pidPrev?: string }>;
+}
+
+export const REVERIFICATIONS = Symbol('identity.Reverifications');
+/** 본인확인 재통과 기록(본인확인 컨텍스트가 내준다, identity §5 '키 판·만 14세…'·§7.1 ③) */
+export interface Reverifications {
+  /** 그 세션에서 목적 REVERIFY 건이 since 뒤에 VERIFIED로 확정됐는가 */
+  recentlyReverified(accountId: string, sessionId: string, since: number): Promise<boolean>;
+}
+/** 재통과 기록이 없는 경우(시험) */
+export const noReverifications: Reverifications = { recentlyReverified: async () => false };
+
+export const ACCOUNT_CLOSURE = Symbol('identity.AccountClosure');
+/** 계정 정리 시작(세션 컨텍스트가 내준다). 본인확인이 만 14세 미만을 찾으면 부른다. 멱등이다 */
+export interface AccountClosure {
+  start(accountId: string, reason: 'UNDER_14'): Promise<void>;
+  /** 정리 중(WITHDRAWAL_PENDING)이면 그 사유, 아니면 null. 정리 중인 계정은 다시 본인확인하지 못한다(새 맥락 리뷰 중간 2) */
+  closureReasonOf(accountId: string): Promise<'UNDER_14' | null>;
 }

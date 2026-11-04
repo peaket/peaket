@@ -2,5 +2,8 @@
 export { VerificationModule, type VerificationModuleOptions } from './verification.module.js';
 export { TestVerificationProvider } from './adapters/test-verification-provider.js';
 export { HmacIdentityHashers } from './adapters/hmac-identity-hashers.js';
+export { KmsIdentityHashers } from './adapters/kms-identity-hashers.js';
+export { assertKeyVersions } from './application/key-versions.js';
+export { VERIFICATION_STORE, type VerificationStore } from './domain/ports.js';
 export { unavailableHashers, unavailableProvider } from './adapters/unavailable-verification.js';
 export { VERIFICATION_PROVIDER_ENV } from './adapters/test-verification-provider.js';
