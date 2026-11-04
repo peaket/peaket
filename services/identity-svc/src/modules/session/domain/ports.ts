@@ -1,4 +1,5 @@
 // 세션 컨텍스트의 포트: 저장소(트랜잭션 하나에서 쓰는 일), 토큰 서명, 기기 가명, 운영 신호.
+import type { InvRefLabel } from './inv-ref.js';
 import type { ActiveSession, LoginVerdict, Provider, ReauthPurpose, ReauthStrength, TerminationReason } from './session.js';
 
 export interface CreateKeyRecord {
@@ -113,6 +114,8 @@ export interface SessionTx {
    * 세션 끝내기는 부르는 쪽이 terminateSessions로 한다
    */
   eraseAccount(accountId: string, now: number): Promise<void>;
+  /** 조사용 연락처 가명 행을 쓴다(있으면 값과 시각을 바꾼다, docs/data.md account_contact_ref, identity §9.1 '조사용 값의 첫 구현') */
+  setContactRef(i: { accountId: string; kind: ContactKind; ref: string; now: number }): Promise<void>;
   /** 정리 사유 UNDER_14로 before 때나 그 전에 정리를 시작한 정리 중 계정 ID(최대 limit개) */
   closuresStartedBefore(before: number, limit: number): Promise<string[]>;
   /** since 뒤에 탈퇴한(DELETED) 계정 ID를 ID 순으로 after 뒤부터 최대 limit개 */
@@ -146,6 +149,27 @@ export interface SessionStore {
   purgeExpiredRefreshHashes(now: number, signal?: AbortSignal): Promise<number>;
   /** 토큰 만료가 지난 재인증 토큰 사용 기록을 지우고 지운 줄 수(정비) */
   purgeReauthUses(now: number): Promise<number>;
+  /**
+   * 조사 적재가 읽는 연결 값(BatchGetInvestigationRefs, identity §9.1). 있는 계정만, 받은 순서대로. 탈퇴한 계정은 빈 값이다.
+   * identityConflicts는 since 뒤의 같은 본인확인 시도 기록(본인확인 컨텍스트의 표를 읽는다. 표를 보지 못하는 저장소는 빈 목록)
+   */
+  investigationRefsOf(accountIds: readonly string[], since: number): Promise<InvestigationRefsRow[]>;
+  /** 이메일은 있는데 EMAIL 연락처 가명 행이 없는 ACTIVE 계정을 ID 순으로 after 뒤부터 최대 limit개(정비 contact-ref-backfill) */
+  accountsMissingEmailRef(after: string, limit: number): Promise<{ accountId: string; email: string }[]>;
+}
+
+export type ContactKind = 'PHONE' | 'EMAIL';
+export interface InvestigationRefsRow {
+  accountId: string;
+  contactRefs: { kind: ContactKind; ref: string }[];
+  deviceRefs: string[];
+  identityConflicts: { otherAccountId: string; attemptedAt: number }[];
+}
+
+export const INV_REFS = Symbol('identity.InvRefs');
+/** 조사용 가명 invRef(라벨, 값)(docs/security/secrets-and-keys.md). 라벨 키가 없으면 undefined(칸을 비운다, 세는 일은 구현이 한다) */
+export interface InvRefs {
+  ref(label: InvRefLabel, value: string): string | undefined;
 }
 
 export interface SignedToken {
@@ -178,6 +202,8 @@ export interface SessionSignals {
   reauthMismatch(provider: Provider): void;
   reverifyRequired(provider: Provider): void;
   refreshed(aud: 'fan', result: 'rotated' | 'retried' | 'reused' | 'invalid'): void;
+  /** 조사용 가명을 계산해야 하는데 라벨 키가 없었다(inv_ref_missing_total, SEV3, identity §9.1) */
+  invRefMissing(label: InvRefLabel, reason: 'THROTTLED' | 'KMS_ERROR'): void;
   /** 병합 불변식 위반: 흡수 계정에 티켓·후기가 있다(SEV3, I-T32, BOT-042) */
   mergeInvariantViolated(): void;
 }

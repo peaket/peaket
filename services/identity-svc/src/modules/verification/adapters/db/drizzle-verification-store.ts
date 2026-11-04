@@ -40,6 +40,12 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
 
   #tx(tx: DbTransaction): VerificationTx {
     return {
+      setPhoneRef: async (i) => {
+        // 조사용 연락처 가명 표는 세션 컨텍스트의 표다(같은 DB, 같은 트랜잭션). 원문 번호는 두지 않는다(BOT-045)
+        await tx.execute(sql`
+          insert into account_contact_ref (account_id, kind, ref, updated_at) values (${i.accountId}, 'PHONE', ${i.ref}, ${new Date(i.now)})
+          on conflict (account_id, kind) do update set ref = excluded.ref, updated_at = excluded.updated_at`);
+      },
       insertAttempt: async (a) => {
         await tx.insert(verificationAttempt).values({
           id: a.id,

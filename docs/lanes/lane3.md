@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-045(wbs 3.1.4): identity 조사용 값(라벨 키 캐시·축소 동작·SEV3, 기기 가명 `device_ref` 전환, 연락처 가명 `account_contact_ref`, gRPC `ComputeContactRef`·`BatchGetInvestigationRefs`, 키 회전 이음). 그 뒤 BOT-110~160.
+- BOT-046(wbs 3.1.4 ②): 조사용 가명 키 회전의 이음 30일(옛 판·새 판 라벨 키, 로그인 때 기기 행 새 판으로, 연락처 다시 계산, 끝에 두 판 값 싣기). 그 뒤 BOT-110~160.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
@@ -38,6 +38,10 @@
 - BOT-042: 같은 제안을 동시에 두 번 확정하는 PostgreSQL 시험이 없다. 병합 도중 로그인이 계정을 X → P(대표) 순서로 잠가 ID 순 규칙을 벗어나므로 같은 쌍의 확정과 겹치면 교착(40P01)으로 한쪽이 끝날 수 있다(드묾, create-session.ts `#open`)
 - BOT-042: 로그인 수단 추가 콜백의 앱 서버 기한(2초) 안에 병합 확인(세 서비스 1초)이 더해져 빠듯하다. 세 서비스 클라이언트에 차단기(`createCircuitBreaker`)도 아직 없다(grpc-merge-checkers.ts)
 - BOT-042: 마이그레이션 0013의 `account_merge`(대표·흡수 계정)·`account_hold`(계정)에 외래키가 없다. docs/data.md 그림은 FK로 적는다(services/identity-svc/src/modules/session/adapters/db/schema.ts)
+- BOT-045: `ComputeContactRef`의 파드마다 초당 상한 기본값 2,000 [가정]이 정본의 '주문 설계 피크의 2배'와 맞는지 근거가 없다. 1초 고정 창이라 경계에서 두 배까지 몰리고, 전체 상한이 파드 수에 비례해 휴대폰 번호 대입을 충분히 늦추지 못할 수 있다. 피크 값과 파드 수로 정하거나 신원별 전역 상한(게이트웨이·메시)을 둔다(services/identity-svc/src/modules/session/application/compute-contact-ref.ts)
+- BOT-045: 병합된 흡수 계정의 기기 행은 병합 때 옮기지도 지우지도 않아 `BatchGetInvestigationRefs`가 그 계정의 기기 가명을 돌려준다. 흡수 계정의 기기를 대표 계정으로 옮길지, 지울지, 조사용으로 둘지 정본이 정하지 않았다(docs/features/identity.md §9.1)
+- BOT-045: demo는 클라우드 계정이 없어 KMS 키가 없고 라벨 키 값 설정은 local·ci만 받으므로 기기 행이 늘 비고 새 기기 알림이 늘 간다. 본인확인 키처럼 demo에도 라벨 키 값을 허용할지 정한다(services/identity-svc/src/modules/session/adapters/inv-ref-key-ring.ts `fromEnv`)
+- BOT-045: 본인확인 저장소가 세션 컨텍스트의 표 `account_contact_ref`에 원시 SQL로 쓴다(정본이 같은 트랜잭션 쓰기를 허용). 세션 쪽 스키마가 바뀌면 형 검사가 잡지 못하니, 세션 컨텍스트가 내주는 쓰기 함수로 바꾸거나 시험으로 묶는다(drizzle-verification-store.ts `setPhoneRef`)
 - BOT-043: 합치기 제안의 남은 시간과 만료 전환이 서버의 절대 시각(`expiresAt`)을 브라우저 시계와 견준다. 기기 시계가 크게 틀리면 받자마자 만료로 보이거나 늦게 바뀐다. 서버가 남은 초를 함께 주거나 응답 시각으로 맞춘다(apps/web/src/features/login-methods/flow.ts `mergeView`, ds MergeSummary `deadline`)
 - BOT-043: 병합 제안 ID가 주소(`?mergeProposal=`)에 남아 방문 기록에 남고, 카드를 닫은 뒤 새로 고치면 다시 뜬다. 읽은 뒤 주소창에서 지울지 정한다(apps/web/src/_pages/settings-providers/ui/SettingsProvidersPage.tsx)
 - BOT-043: `?ended=MERGED`를 서버가 세션 상태를 보지 않고 믿어, 로그인한 사람이 그 주소를 열어도 로그인 전 셸과 '대표 계정으로 합쳐졌습니다'를 본다(버튼은 /login이라 혼동뿐). 세션 종료 사유가 MERGED일 때만 보이게 한다(apps/web/src/_pages/settings-providers/ui/SettingsProvidersPage.tsx)
@@ -56,3 +60,4 @@
 - 2026-11-04 BOT-041 설정의 로그인 수단 연결·해제(R-287, I-T33·I-T34): 재인증 뒤 `POST /link/{provider}`(앱 서버) → 새 제공자 인증 → identity `AddProvider`(LINKED·ALREADY_LINKED·PROVIDER_TYPE_TAKEN·OTHER_ACCOUNT·REAUTH_REQUIRED), `DELETE /v1/identity/providers/{provider}`(마지막 하나 409 `last-login-method`), `account_provider.last_login_at`(마이그레이션 0012), 연결·해제 사건 `identity.login-methods-changed`(asyncapi·Avro `LoginMethodChanged`, 가입 때 연결 제안의 연결 포함, 받는 쪽은 GAT-250), SCR-040 실제 목록·해제·추가, 재인증할 제공자 고르기(SCR-017·SCR-040).
 - 2026-11-04 BOT-042 계정 병합의 identity 쪽(R-289, I-T31·I-T32·I-T34): BOT-042를 둘로 나눴다(화면은 BOT-043). 로그인 수단 추가가 다른 계정이면 병합 제안(세션·캐시 Redis `id:merge`, 대표 계정 규칙, identity 사유와 purchase·ticket·core `CheckAccountMerge`의 사유·개수, 불변식 위반은 BLOCKED·SEV3), `GET /v1/identity/merge-proposals/{id}`·`POST …/confirmation`(재인증, 다시 확인, 한 트랜잭션에서 로그인 수단 이전·MERGED·사슬·`account_merge`·세션 MERGED·`identity.accounts-merged`), `account_hold`·`SetAccountHold`·닫힌 행 정비, 로그인의 잠근 뒤 다시 찾기(BOT-030·BOT-041이 넘긴 것), 마이그레이션 0013. 세 서비스 주소가 없으면 로컬·CI만 대역.
 - 2026-11-04 BOT-043 계정 합치기 화면(R-290, I-T31·I-T32): 로그인 수단 화면이 `?mergeProposal=`의 병합 제안을 읽어 ds MergeSummary로 보인다(PROPOSED 요약·남은 시간, BLOCKED 다섯 범주·막는 사유, 404 만료). [다시 로그인하고 계속] → 재인증(탭 저장소 할 일 `merge`와 제안 ID) → 확인 창 → 확정: 202 처리 중(지금 계정이 흡수되면 흡수 안내), 409 사유·고객센터, 403·503 안내. openapi `MergeProposal`에 `newProvider`·`requesterRole`·`primaryVerified`, ds MergeSummary `deadline`(시계가 흐름).
+- 2026-11-04 BOT-045 조사용 값 ①(R-292, I-T63·I-T64·I-T67): BOT-045를 둘로 나눴다(키 회전 이음은 BOT-046). 라벨 키 링(라벨마다 KMS `GenerateMac`, 5분마다 다시 받고 10분 수명, 로컬·CI는 라벨 키 값, 받지 못하면 칸을 비우고 `inv_ref_missing_total`), 기기 가명을 기기 라벨 키로, 연락처 가명 `account_contact_ref`(가입 이메일·본인확인 번호 E.164, 병합·탈퇴 때 지우기, 정비 `contact-ref-backfill`, 마이그레이션 0014), gRPC `ComputeContactRef`(초당 상한)·`BatchGetInvestigationRefs`(500개, 같은 본인확인 시도 1년), 모의 기관의 휴대폰 번호 칸.

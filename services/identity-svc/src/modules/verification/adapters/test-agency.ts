@@ -13,6 +13,8 @@ export interface TestAgencyResult {
   outcome: TestAgencyOutcome;
   person?: string;
   birth?: string;
+  /** 휴대폰 번호(기관이 주는 모양 그대로, 예 010-1234-5678). identity는 연락처 가명 계산에만 쓴다(BUILD_ORDER BOT-045) */
+  phone?: string;
   iat: number;
 }
 
@@ -59,8 +61,10 @@ export function openTestAgencyResult(secret: Uint8Array, fields: Record<string, 
   if (typeof b.iat !== 'number' || !Number.isFinite(b.iat)) return null;
   if (b.person !== undefined && typeof b.person !== 'string') return null;
   if (b.birth !== undefined && !(typeof b.birth === 'string' && BIRTH.test(b.birth))) return null;
+  if (b.phone !== undefined && !isText(b.phone, 32)) return null;
   const out: TestAgencyResult = { v: 1, tx: b.tx, outcome: b.outcome as TestAgencyOutcome, iat: b.iat };
   if (b.person !== undefined) out.person = b.person as string;
   if (b.birth !== undefined) out.birth = b.birth as string;
+  if (b.phone !== undefined) out.phone = b.phone as string;
   return out;
 }

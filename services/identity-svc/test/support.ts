@@ -10,7 +10,7 @@ import { IssueReauthToken } from '../src/modules/session/application/issue-reaut
 import { RefreshSession } from '../src/modules/session/application/refresh-session.js';
 import { JoseTokenSigner } from '../src/modules/session/adapters/jose-token-signer.js';
 import { TokenKeyRing } from '../src/modules/session/adapters/token-keys.js';
-import { type AccountClaims, type AccountClosure, type DeviceRefs, type LinkProposals, noReverifications, type Reverifications, type SessionSignals, type SessionStore } from '../src/modules/session/domain/ports.js';
+import { type AccountClaims, type AccountClosure, type DeviceRefs, type InvRefs, type LinkProposals, noReverifications, type Reverifications, type SessionSignals, type SessionStore } from '../src/modules/session/domain/ports.js';
 
 export const ISSUER = 'https://identity.peaket.test';
 
@@ -33,6 +33,7 @@ export function recordingSignals(): SessionSignals & { seen: string[] } {
     reverifyRequired: (p) => seen.push(`reverify:${p}`),
     refreshed: (aud, result) => seen.push(`refresh:${aud}:${result}`),
     mergeInvariantViolated: () => seen.push('merge-invariant'),
+    invRefMissing: (l, r) => seen.push(`inv-ref-missing:${l}:${r}`),
   };
 }
 
@@ -58,20 +59,21 @@ export interface Kit {
 /** 본인확인 전 계정처럼 아무 값도 싣지 않는다 */
 export const noClaims: AccountClaims = { of: async () => ({ scopes: [] }) };
 
-export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: FakeClock; claims?: AccountClaims; reverifications?: Reverifications; links?: LinkProposals } = {}): Promise<Kit> {
+export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: FakeClock; claims?: AccountClaims; reverifications?: Reverifications; links?: LinkProposals; invRefs?: InvRefs } = {}): Promise<Kit> {
   const clock = o.clock ?? fakeClock({ now: Date.parse('2026-11-03T03:00:00.000Z') });
   const signals = recordingSignals();
   const { privateJwk, publicJwk } = await fanKey();
   const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(privateJwk) });
   const signer = new JoseTokenSigner(keys, ISSUER);
-  const devices = testDeviceRefs(o.keyless);
+  const invRefs = o.invRefs;
+  const devices: DeviceRefs = invRefs ? { ref: (id) => invRefs.ref('device', id) } : testDeviceRefs(o.keyless);
   return {
     clock,
     signer,
     keys,
     signals,
     publicJwk,
-    create: new CreateSession(store, signer, devices, signals, o.claims ?? noClaims, clock, o.links),
+    create: new CreateSession(store, signer, devices, signals, o.claims ?? noClaims, clock, o.links, invRefs),
     end: new EndSession(store, signals, clock),
     reauth: new IssueReauthToken(store, signer, signals, o.reverifications ?? noReverifications, clock),
     refresh: new RefreshSession(store, signer, signals, o.claims ?? noClaims, clock),
@@ -93,13 +95,13 @@ export const testAgency = (clock: Clock, mode: 'POPUP' | 'REDIRECT' = 'POPUP'): 
 export function agencyResult(
   clock: Clock,
   verificationId: string,
-  o: { person?: string; outcome?: TestAgencyOutcome; birth?: string; iatMs?: number },
+  o: { person?: string; outcome?: TestAgencyOutcome; birth?: string; iatMs?: number; phone?: string },
   secret: Uint8Array = AGENCY_SECRET,
 ): Record<string, string> {
   const outcome = o.outcome ?? (o.person === undefined ? 'FAILED' : 'VERIFIED');
   // 생년월일을 주지 않으면 어른(2000-01-01)으로 둔다. 'birth' 칸을 undefined로 주면 생년월일 없는 결과다(BOT-020)
   const birth = 'birth' in o ? o.birth : '2000-01-01';
-  return sealTestAgencyResult(secret, { v: 1, tx: verificationId, outcome, person: o.person, birth, iat: o.iatMs ?? clock.now() });
+  return sealTestAgencyResult(secret, { v: 1, tx: verificationId, outcome, person: o.person, birth, iat: o.iatMs ?? clock.now(), ...(o.phone === undefined ? {} : { phone: o.phone }) });
 }
 
 let n = 0;

@@ -5,10 +5,10 @@
 // - pid는 계정의 첫 본인확인 때 한 번 계산하고 다시 본인확인해도 바꾸지 않는다. 기록이 쓰기 판보다 옛 판이면 그 자리에서 쓰기 판 값으로 바꾼다(ADR-0050 결정 5)
 // - 만 14세 미만이면 연계정보를 계산·저장하지 않고 UNDER_14(403)이며 계정 정리를 시작한다(ADR-0062). 생년월일은 계산에만 쓴다
 // - 기관이나 연계정보 키(KMS)를 쓸 수 없으면 그 건을 PROVIDER_DOWN으로 마친다(503)
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import { ACCOUNT_CLOSURE, type AccountClosure } from '../../session/index.js';
-import { IDENTITY_HASHERS, type IdentityHashers, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from '../domain/ports.js';
+import { IDENTITY_HASHERS, type IdentityHashers, PHONE_REFS, type PhoneRefs, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from '../domain/ports.js';
 import {
   acceptsResult,
   ageOnKst,
@@ -50,7 +50,7 @@ export async function restrictedUntilFor(store: Pick<VerificationStore, 'restric
 type Checked =
   | { outcome: 'CANCELLED' | 'FAILED' }
   | { outcome: 'UNDER_14' }
-  | { outcome: 'VERIFIED'; hmacs: { hmac: Buffer; version: number }[]; pid: { pid: Buffer; version: number } | null };
+  | { outcome: 'VERIFIED'; hmacs: { hmac: Buffer; version: number }[]; pid: { pid: Buffer; version: number } | null; phoneRef?: string };
 
 /** 트랜잭션 안에서 새로 저장해야 하는데 아직 pid가 없다: 트랜잭션을 되돌리고 pid를 계산해(KMS는 트랜잭션 밖) 한 번 더 한다 */
 class NeedPid extends Error {}
@@ -63,6 +63,8 @@ export class ConfirmVerification {
     @Inject(IDENTITY_HASHERS) private readonly hashers: IdentityHashers,
     @Inject(ACCOUNT_CLOSURE) private readonly closure: AccountClosure,
     @Inject(CLOCK) private readonly clock: Clock,
+    /** 본인확인 번호의 연락처 가명(없으면 쓰지 않는다: 시험, identity §9.1 '조사용 값의 첫 구현') */
+    @Optional() @Inject(PHONE_REFS) private readonly phoneRefs?: PhoneRefs,
   ) {}
 
   async run(i: { accountId: string; verificationId: string; providerResult: Record<string, string> }): Promise<VerificationResultView> {
@@ -102,7 +104,9 @@ export class ConfirmVerification {
     if (hmacs.length === 0) throw new Error('연계정보 HMAC 판이 없다');
     // pid는 트랜잭션이 새로 저장할 때만 계산한다(NeedPid로 한 번 더 돈다). 중복·다시 본인확인에는 pid 키를 부르지 않는다
     // (pid 키 장애가 중복 판정과 다시 본인확인을 막지 않게, 새 맥락 리뷰 낮음 7)
-    return { outcome: 'VERIFIED', hmacs, pid: null };
+    // 번호는 가명 계산에만 쓰고 버린다(저장·로그 없음). 라벨 키가 없으면 비우고 다음 본인확인 때 쓴다
+    const phoneRef = outcome.phone === undefined ? undefined : this.phoneRefs?.ref(outcome.phone);
+    return { outcome: 'VERIFIED', hmacs, pid: null, ...(phoneRef ? { phoneRef } : {}) };
   }
 
   async #confirm(verificationId: string, checked: Extract<Checked, { outcome: 'VERIFIED' }>, now: number): Promise<Attempt> {
@@ -174,6 +178,8 @@ export class ConfirmVerification {
         await tx.carryHolds(checked.hmacs.map((h) => h.hmac), a.accountId, now);
         status = 'VERIFIED';
       }
+      // 본인확인이 이 계정의 것으로 끝났을 때만 번호의 연락처 가명을 쓴다(다른 사람·중복은 쓰지 않는다)
+      if (status === 'VERIFIED' && checked.phoneRef) await tx.setPhoneRef({ accountId: a.accountId, ref: checked.phoneRef, now });
       await tx.completeAttempt(a.id, status, now);
       return { ...a, status, completedAt: now };
     });

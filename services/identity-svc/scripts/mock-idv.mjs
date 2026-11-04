@@ -25,7 +25,7 @@ const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, 
 /**
  * 결과 본문을 봉한다(시험 어댑터의 sealTestAgencyResult와 같은 형식)
  * @param {Uint8Array} secret
- * @param {{ v: 1, tx: string, outcome: string, person?: string, birth?: string, iat: number }} body
+ * @param {{ v: 1, tx: string, outcome: string, person?: string, birth?: string, phone?: string, iat: number }} body
  */
 export function sealResult(secret, body) {
   const result = Buffer.from(JSON.stringify(body), 'utf8').toString('base64url');
@@ -54,6 +54,8 @@ button{padding:10px 14px;font-size:15px}.note{color:#555;font-size:13px}</style>
 <input type="text" id="person" name="person" value="tester-1" maxlength="64" autocomplete="off">
 <label for="birth">생년월일</label>
 <input type="date" id="birth" name="birth" value="2000-01-01">
+<label for="phone">휴대폰 번호(시험용, 비워도 된다)</label>
+<input type="tel" id="phone" name="phone" value="" maxlength="20" autocomplete="off">
 <fieldset><legend>돌려주는 방식</legend>
 <label><input type="radio" name="returnStyle" value="post" checked> POST 본문으로 돌려주기</label>
 <label><input type="radio" name="returnStyle" value="query"> 쿼리로 돌려주기</label>
@@ -133,13 +135,15 @@ export async function startMockIdv(o) {
     const style = f.get('returnStyle') ?? 'post';
     const person = f.get('person') ?? '';
     const birth = f.get('birth') ?? '';
-    if (!outcome || (style !== 'post' && style !== 'query') || person.length > 64 || (birth !== '' && !BIRTH.test(birth))) return html(400, '<!doctype html><p>고른 값이 틀렸다</p>', common);
+    const phone = f.get('phone') ?? '';
+    if (!outcome || (style !== 'post' && style !== 'query') || person.length > 64 || (birth !== '' && !BIRTH.test(birth)) || !/^[0-9+\- ()]{0,20}$/.test(phone)) return html(400, '<!doctype html><p>고른 값이 틀렸다</p>', common);
     if (outcome === 'VERIFIED' && person.length === 0) return html(400, '<!doctype html><p>이름표를 적어 주세요</p>', common);
-    /** @type {{ v: 1, tx: string, outcome: string, person?: string, birth?: string, iat: number }} */
+    /** @type {{ v: 1, tx: string, outcome: string, person?: string, birth?: string, phone?: string, iat: number }} */
     const body = { v: 1, tx: id, outcome, iat: now() };
     if (outcome === 'VERIFIED') {
       body.person = person;
       if (birth) body.birth = birth;
+      if (phone) body.phone = phone;
     }
     const sealed = sealResult(secret, body);
     if (style === 'query') {

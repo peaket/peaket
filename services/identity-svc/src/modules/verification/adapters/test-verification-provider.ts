@@ -81,6 +81,7 @@ export class TestVerificationProvider implements VerificationProvider {
     // 실제 연계정보처럼 88자 base64 값으로 만든다(64바이트)
     const ci = createHmac('sha512', this.#secret).update(`ci:${person}`).digest().toString('base64');
     // 생년월일은 유스케이스가 만 나이 계산에만 쓴다(BUILD_ORDER BOT-020). 없으면 싣지 않고, 유스케이스가 FAILED로 본다
-    return body.birth === undefined ? { outcome: 'VERIFIED', ci } : { outcome: 'VERIFIED', ci, birthDate: body.birth };
+    // 휴대폰 번호는 연락처 가명 계산에만 쓴다(BUILD_ORDER BOT-045)
+    return { outcome: 'VERIFIED', ci, ...(body.birth === undefined ? {} : { birthDate: body.birth }), ...(body.phone === undefined ? {} : { phone: body.phone }) };
   }
 }

@@ -6,9 +6,9 @@ import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { accountWithdrawnMessage } from '../account-withdrawn-message.js';
 import { loginMethodChangedMessage } from '../login-method-message.js';
 import { accountMergedMessage } from '../account-merged-message.js';
-import type { AccountStatus, CreateKeyRecord, RefreshRow, SessionRow, SessionStore, SessionTx } from '../../domain/ports.js';
+import type { AccountStatus, ContactKind, CreateKeyRecord, InvestigationRefsRow, RefreshRow, SessionRow, SessionStore, SessionTx } from '../../domain/ports.js';
 import { CREATE_KEY_TTL_MS, type LoginVerdict, type Provider } from '../../domain/session.js';
-import { account, accountHold, accountMerge, accountProvider, device, reauthTokenUse, refreshTokenHash, session, sessionCreateKey } from './schema.js';
+import { account, accountContactRef, accountHold, accountMerge, accountProvider, device, reauthTokenUse, refreshTokenHash, session, sessionCreateKey } from './schema.js';
 
 const date = (ms: number) => new Date(ms);
 const ms = (d: Date | null) => (d === null ? null : d.getTime());
@@ -54,6 +54,52 @@ export class DrizzleSessionStore implements SessionStore {
   async purgeReauthUses(now: number): Promise<number> {
     const gone = await this.database.db.delete(reauthTokenUse).where(lte(reauthTokenUse.expiresAt, date(now))).returning({ jti: reauthTokenUse.jti });
     return gone.length;
+  }
+
+  async investigationRefsOf(accountIds: readonly string[], since: number): Promise<InvestigationRefsRow[]> {
+    if (accountIds.length === 0) return [];
+    const db = this.database.db;
+    const ids = [...accountIds];
+    const found = await db.select({ id: account.id, status: account.status }).from(account).where(inArray(account.id, ids));
+    const live = new Set(found.filter((a) => a.status !== 'DELETED').map((a) => a.id));
+    const present = new Set(found.map((a) => a.id));
+    const list = sql.join(ids.map((x) => sql`${x}::uuid`), sql`, `);
+    const [contacts, devices, conflicts] = await Promise.all([
+      db.select({ accountId: accountContactRef.accountId, kind: accountContactRef.kind, ref: accountContactRef.ref }).from(accountContactRef).where(inArray(accountContactRef.accountId, ids)),
+      db.select({ accountId: device.accountId, ref: device.deviceRef }).from(device).where(inArray(device.accountId, ids)).orderBy(asc(device.boundAt), asc(device.id)),
+      // 같은 본인확인 시도 기록은 본인확인 컨텍스트의 표다(같은 DB, 읽기만). 이 계정이 시도했으면 원래 계정, 원래 계정이면 시도한 계정을 상대로 준다
+      db.execute(sql`
+        select attempted_account_id as a, existing_account_id as e, attempted_at as t from identity_conflict_attempt
+        where attempted_at > ${date(since)} and (attempted_account_id in (${list}) or existing_account_id in (${list}))
+        order by attempted_at asc`),
+    ]);
+    const order: readonly ContactKind[] = ['PHONE', 'EMAIL'];
+    return ids
+      .filter((id) => present.has(id))
+      .map((id) => {
+        // 탈퇴한 계정은 연결 값을 지웠다(남은 행이 있어도 싣지 않는다)
+        if (!live.has(id)) return { accountId: id, contactRefs: [], deviceRefs: [], identityConflicts: [] };
+        return {
+          accountId: id,
+          contactRefs: contacts
+            .filter((c) => c.accountId === id)
+            .map((c) => ({ kind: c.kind as ContactKind, ref: c.ref }))
+            .sort((x, y) => order.indexOf(x.kind) - order.indexOf(y.kind)),
+          deviceRefs: devices.filter((d) => d.accountId === id).map((d) => d.ref),
+          identityConflicts: (conflicts.rows as { a: string; e: string; t: string | Date }[])
+            .filter((r) => r.a === id || r.e === id)
+            .map((r) => ({ otherAccountId: r.a === id ? r.e : r.a, attemptedAt: new Date(r.t).getTime() })),
+        };
+      });
+  }
+
+  async accountsMissingEmailRef(after: string, limit: number): Promise<{ accountId: string; email: string }[]> {
+    const rows = await this.database.db.execute(sql`
+      select a.id, a.email from account a
+      where a.status = 'ACTIVE' and a.email is not null ${after ? sql`and a.id > ${after}::uuid` : sql``}
+        and not exists (select 1 from account_contact_ref c where c.account_id = a.id and c.kind = 'EMAIL')
+      order by a.id limit ${limit}`);
+    return (rows.rows as { id: string; email: string }[]).map((r) => ({ accountId: r.id, email: r.email }));
   }
 
   #tx(tx: DbTransaction): SessionTx {
@@ -172,6 +218,8 @@ export class DrizzleSessionStore implements SessionStore {
           // 흡수 계정의 프로필은 병합 즉시 파기한다(POL-034, data-classification, 새 맥락 리뷰 중간 2). 회원 코드도 비운다(UNIQUE)
           .set({ status: 'MERGED', mergedIntoAccountId: i.primaryAccountId, email: null, emailVerified: false, nickname: null, phone: null, memberCode: null, savedBookerName: null, savedBookerPhone: null })
           .where(eq(account.id, i.absorbedAccountId));
+        // 흡수 계정의 연락처 가명도 지운다(프로필 파기, BOT-045)
+        await tx.delete(accountContactRef).where(eq(accountContactRef.accountId, i.absorbedAccountId));
         // 병합 사슬을 한 단계로(흡수 계정을 가리키던 계정도 대표 계정으로, docs/data.md §4)
         await tx.update(account).set({ mergedIntoAccountId: i.primaryAccountId }).where(eq(account.mergedIntoAccountId, i.absorbedAccountId));
         await tx.insert(accountMerge).values({
@@ -235,6 +283,8 @@ export class DrizzleSessionStore implements SessionStore {
         await tx.delete(accountProvider).where(eq(accountProvider.accountId, accountId));
         await tx.delete(device).where(eq(device.accountId, accountId));
         await tx.execute(sql`delete from session_create_key where session_id in (select id from session where account_id = ${accountId})`);
+        // 조사용 연락처 가명도 지운다(docs/data.md account_contact_ref '탈퇴 때 지운다', BOT-045)
+        await tx.delete(accountContactRef).where(eq(accountContactRef.accountId, accountId));
         // 대표 계정이 탈퇴하면 그 계정의 병합 이력도 함께 파기한다(data-classification '계정 연결 및 병합 감사 원장', 새 맥락 리뷰 중간 6)
         // 사슬 앞단(이 계정에 흡수된 계정이 대표였던 병합)도 함께 지운다. 사슬은 한 단계로 고쳐 두어 그 계정들은 이 계정을 바로 가리킨다(다시 검토 낮음 1)
         await tx
@@ -259,6 +309,12 @@ export class DrizzleSessionStore implements SessionStore {
             .orderBy(asc(account.id))
             .limit(limit)
         ).map((r) => r.id),
+      setContactRef: async (i) => {
+        await tx
+          .insert(accountContactRef)
+          .values({ accountId: i.accountId, kind: i.kind, ref: i.ref, updatedAt: date(i.now) })
+          .onConflictDoUpdate({ target: [accountContactRef.accountId, accountContactRef.kind], set: { ref: i.ref, updatedAt: date(i.now) } });
+      },
       verifiedOf: async (accountId) => {
         // 본인확인 기록 표는 본인확인 컨텍스트의 표다. 같은 트랜잭션에서 있는지만 본다(activeHoldOf와 같은 방식)
         const r = await tx.execute(sql`select 1 from identity_verification where account_id = ${accountId}`);

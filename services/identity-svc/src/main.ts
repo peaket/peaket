@@ -3,7 +3,7 @@
 // 앱 포트(REST: 팬 토큰 갱신 POST /v1/identity/access-tokens, 공개키 묶음 GET /internal/jwks/{set}.json)·관리 포트(/metrics, /ready)는
 // 서비스 뼈대가, 업무 gRPC 포트는 이 파일이 연다.
 import 'reflect-metadata';
-import { createDatabase, createHotRedis, createService, loadPlatformConfig } from '@peaket/platform';
+import { createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
@@ -11,8 +11,13 @@ import {
   CreateSession,
   EndSession,
   GetLinkProposal,
+  ComputeContactRef,
+  contactRefHandlers,
+  GetInvestigationRefs,
   GetVerificationStatus,
-  HmacDeviceRefs,
+  investigationRefHandlers,
+  InvRefKeyRing,
+  phoneContactRefs,
   IssueReauthToken,
   identityPackage,
   identityServiceHandlers,
@@ -33,6 +38,7 @@ import {
   DrizzleVerificationStore,
   HmacIdentityHashers,
   KmsIdentityHashers,
+  kmsMacClient,
   restrictedCiHoldHandlers,
   SetRestrictedCiHold,
   TestVerificationProvider,
@@ -53,13 +59,24 @@ if (!(Number.isInteger(grpcPort) && grpcPort > 0 && grpcPort <= 65535)) throw ne
 
 const keys = await TokenKeyRing.fromEnv(process.env);
 const signer = new JoseTokenSigner(keys, tokenIssuerFromEnv(process.env));
-const devices = HmacDeviceRefs.fromEnv(process.env);
+// 조사용 가명 라벨 키 링(identity §9.1 '조사용 값의 첫 구현'): 라벨마다 KMS GenerateMac(로컬·CI는 라벨 키 값), 10분 [가정] 수명. 시작은 기다리지 않는다
+const invRefs = InvRefKeyRing.fromEnv(process.env, systemClock, (endpoint) => kmsMacClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }));
+const devices = { ref: (deviceId: string) => invRefs.ring.ref('device', deviceId) };
 // 본인확인기관: 계약 전에는 시험 어댑터만 있다(local·ci·demo). 켜지 않으면 본인확인 시작이 503 PROVIDER_DOWN이다(identity §5)
 const verification = process.env[VERIFICATION_PROVIDER_ENV]
   ? // 연계정보·pid 키: KMS 키 목록이 있으면 KMS, 없으면 설정값 키(local·ci·demo만, identity §5 '키 판·만 14세…')
-    { provider: TestVerificationProvider.fromEnv(process.env), hashers: KmsIdentityHashers.fromEnv(process.env) ?? HmacIdentityHashers.fromEnv(process.env) }
+    { provider: TestVerificationProvider.fromEnv(process.env), hashers: KmsIdentityHashers.fromEnv(process.env) ?? HmacIdentityHashers.fromEnv(process.env), phoneRefs: phoneContactRefs(invRefs.ring) }
   : { provider: unavailableProvider, hashers: unavailableHashers };
 const signals = new PromSessionSignals();
+invRefs.ring.onMissing((label, reason) => signals.invRefMissing(label, reason));
+// 뜰 때 라벨 키를 먼저 받는다(2초 [가정]까지 기다리고, 그 뒤에는 받는 대로 쓴다). 로거가 서기 전의 실패는 모아 두었다가 남긴다
+const earlyInvRefErrors: { label: string; reason: string; err: unknown }[] = [];
+invRefs.ring.onRefreshError((label, reason, err) => earlyInvRefErrors.push({ label, reason, err }));
+const invRefStart = invRefs.ring.start();
+await invRefStart.ready;
+const stopInvRefs = invRefStart.stop;
+const contactRefRps = process.env.PEAKET_CONTACT_REF_RPS ? Number(process.env.PEAKET_CONTACT_REF_RPS) : undefined;
+if (contactRefRps !== undefined && !(Number.isInteger(contactRefRps) && contactRefRps > 0)) throw new Error(`PEAKET_CONTACT_REF_RPS가 틀렸다: ${process.env.PEAKET_CONTACT_REF_RPS}`);
 const database = createDatabase({ url, applicationName: SERVICE });
 // 세션·캐시 Redis: 가입 때 연결 제안(id:link, identity §2.1). 운영·데모는 반드시 둔다. 로컬·CI만 없으면 프로세스 메모리로 대신한다(파드가 여럿이면 제안을 잃는다)
 const cacheUrl = process.env.PEAKET_IDENTITY_REDIS_URL;
@@ -68,11 +85,13 @@ if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTI
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
 // 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
 const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile);
-const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices.refs, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers }, verification }) });
+const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification }) });
 signals.register(service.metrics.registry);
 // 기록이 쓰는 연계정보 키 판을 설정이 모두 갖지 않으면 시작하지 않는다(같은 사람이 계정을 하나 더 만들지 못하게, identity §5 '키 판·만 14세…')
 if (process.env[VERIFICATION_PROVIDER_ENV]) await assertKeyVersions(service.app.get<DrizzleVerificationStore>(VERIFICATION_STORE), verification.hashers);
-if (devices.warning) service.logger.warn(devices.warning);
+for (const w of invRefs.warnings) service.logger.warn(w);
+for (const e of earlyInvRefErrors) service.logger.warn(e, '조사용 가명 라벨 키를 받지 못했다(identity §9.1)');
+invRefs.ring.onRefreshError((label, reason, err) => service.logger.warn({ label, reason, err }, '조사용 가명 라벨 키를 다시 받지 못했다(identity §9.1)'));
 for (const w of merge.warnings) service.logger.warn(w);
 if (!cache) service.logger.warn('PEAKET_IDENTITY_REDIS_URL이 없어 가입 때 연결 제안을 이 프로세스 메모리에 둔다(local·ci만)');
 
@@ -98,6 +117,15 @@ const grpc = await startGrpcServer({
       definition: identityPackage().AccountHoldService.service,
       handlers: accountHoldHandlers({ hold: service.app.get(SetAccountHold) }, (method, err) => service.logger.error({ err, method }, 'AccountHoldService 처리 실패')),
     },
+    // 주문 예매자 번호의 연락처 가명(purchase-svc만), 조사 적재의 연결 값(inv-ingest만). 신원은 메시 L7 허용 목록(identity §9.1 '조사용 값의 첫 구현')
+    {
+      definition: identityPackage().ContactRefService.service,
+      handlers: contactRefHandlers({ compute: service.app.get(ComputeContactRef) }, (method, err) => service.logger.error({ err, method }, 'ContactRefService 처리 실패')),
+    },
+    {
+      definition: identityPackage().InvestigationRefService.service,
+      handlers: investigationRefHandlers({ refs: service.app.get(GetInvestigationRefs) }, (method, err) => service.logger.error({ err, method }, 'InvestigationRefService 처리 실패')),
+    },
     // 이용 제한 중 탈퇴의 대조값 보관(ops-svc만, identity §8 '대조값 보관의 첫 구현')
     {
       definition: identityPackage().RestrictedCiHoldService.service,
@@ -113,5 +141,8 @@ process.once('SIGTERM', () => {
     .close()
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err }, 'identity-svc 종료 실패'))
-    .finally(() => Promise.all([database.close(), cache?.close()]));
+    .finally(() => {
+      stopInvRefs();
+      return Promise.all([database.close(), cache?.close()]);
+    });
 });

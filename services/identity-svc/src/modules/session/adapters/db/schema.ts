@@ -179,3 +179,18 @@ export const accountMerge = pgTable(
   },
   (t) => [index('account_merge_primary_idx').on(t.primaryAccountId)],
 );
+
+// 조사용 연락처 가명(docs/data.md account_contact_ref, identity §9.1 '조사용 값의 첫 구현', ADR-0171, BUILD_ORDER BOT-045). 원문 번호·이메일은 두지 않는다.
+export const accountContactRef = pgTable(
+  'account_contact_ref',
+  {
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => account.id),
+    kind: text('kind').notNull(),
+    // invRef("contact", 맞춘 값). 키 판 접두어 포함
+    ref: text('ref').notNull(),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.kind] }), check('account_contact_ref_kind_check', sql`${t.kind} in ('PHONE', 'EMAIL')`)],
+);

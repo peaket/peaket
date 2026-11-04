@@ -11,13 +11,15 @@ import { SetRestrictedCiHold } from './application/set-restricted-ci-hold.js';
 import { ConfirmVerification } from './application/confirm-verification.js';
 import { GetVerificationResult } from './application/get-verification-result.js';
 import { StartVerification } from './application/start-verification.js';
-import { IDENTITY_HASHERS, type IdentityHashers, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from './domain/ports.js';
+import { IDENTITY_HASHERS, type IdentityHashers, PHONE_REFS, type PhoneRefs, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from './domain/ports.js';
 import { VerificationController } from './inbound/verification.controller.js';
 
 export interface VerificationModuleOptions {
   storage: 'database' | 'memory';
   provider: VerificationProvider;
   hashers: IdentityHashers;
+  /** 본인확인 번호의 연락처 가명(identity §9.1). 없으면 쓰지 않는다 */
+  phoneRefs?: PhoneRefs;
 }
 
 @Module({})
@@ -34,6 +36,7 @@ export class VerificationModule {
         o.storage === 'database' ? { provide: VERIFICATION_STORE, useClass: DrizzleVerificationStore } : { provide: VERIFICATION_STORE, useValue: new MemoryVerificationStore() },
         { provide: VERIFICATION_PROVIDER, useValue: o.provider },
         { provide: IDENTITY_HASHERS, useValue: o.hashers },
+        ...(o.phoneRefs ? [{ provide: PHONE_REFS, useValue: o.phoneRefs }] : []),
         SetRestrictedCiHold,
         { provide: ACCOUNT_CLAIMS, useFactory: (store: VerificationStore, closure: AccountClosure, clock: Clock) => new VerificationClaims(store, closure, clock), inject: [VERIFICATION_STORE, ACCOUNT_CLOSURE, CLOCK] },
         { provide: FRAUD_HOLDS, useFactory: (store: VerificationStore) => new VerificationHolds(store), inject: [VERIFICATION_STORE] },

@@ -13,6 +13,9 @@ import type { EndSession } from '../application/end-session.js';
 import type { GetVerificationStatus } from '../application/get-verification-status.js';
 import type { IssueReauthToken } from '../application/issue-reauth-token.js';
 import { SessionError } from '../application/session-error.js';
+import type { ComputeContactRef } from '../application/compute-contact-ref.js';
+import type { GetInvestigationRefs } from '../application/get-investigation-refs.js';
+import { InvRefError } from '../application/inv-ref-error.js';
 import type { Provider, ReauthPurpose, ReauthStrength } from '../domain/session.js';
 
 /** 설명자를 읽는 선택지: 필드 이름은 proto 그대로, enum은 이름, int64는 숫자(밀리초 시각은 2^53 안), oneof 이름 칸을 단다 */
@@ -23,6 +26,8 @@ export interface IdentityPackage {
   IdentityService: grpc.ServiceClientConstructor;
   RestrictedCiHoldService: grpc.ServiceClientConstructor;
   AccountHoldService: grpc.ServiceClientConstructor;
+  ContactRefService: grpc.ServiceClientConstructor;
+  InvestigationRefService: grpc.ServiceClientConstructor;
 }
 
 let pkg: IdentityPackage | undefined;
@@ -209,6 +214,57 @@ export function accountHoldHandlers(uc: { hold: Pick<SetAccountHold, 'run'> }, o
       }
       if (out === 'CONFLICT') throw new SessionError('ALREADY_EXISTS', '같은 건에 다른 계정·종류가 왔다');
       return { changed: out === 'APPLIED' };
+    }),
+  };
+}
+
+const INV_REF_STATUS = { INVALID: grpc.status.INVALID_ARGUMENT, UNAVAILABLE: grpc.status.UNAVAILABLE, EXHAUSTED: grpc.status.RESOURCE_EXHAUSTED } as const;
+const CONTACT_KIND = { PHONE: 'CONTACT_REF_KIND_PHONE', EMAIL: 'CONTACT_REF_KIND_EMAIL' } as const;
+const timestamp = (ms: number) => ({ seconds: Math.floor(ms / 1000), nanos: (ms % 1000) * 1_000_000 });
+
+/** 조사용 값 호출의 응답 틀: InvRefError는 그 상태로, 그 밖은 기록하고 INTERNAL(번호·이메일은 기록에 싣지 않는다) */
+function invRefUnary(onError: (method: string, err: unknown) => void) {
+  return (method: string, fn: (r: Req) => Promise<object> | object): grpc.handleUnaryCall<Req, object> =>
+    (call, cb) => {
+      Promise.resolve()
+        .then(() => fn(call.request))
+        .then(
+          (v) => cb(null, v),
+          (err: unknown) => {
+            if (err instanceof InvRefError) {
+              cb({ code: INV_REF_STATUS[err.code], details: err.message });
+              return;
+            }
+            onError(method, err);
+            cb({ code: unreachable(err) ? grpc.status.UNAVAILABLE : grpc.status.INTERNAL, details: '처리하지 못했다' });
+          },
+        );
+    };
+}
+
+/** ContactRefService: 주문 예매자 번호의 연락처 가명(purchase-svc만, 그 신원 확인은 메시 L7 허용 목록, identity §9.1 '조사용 값의 첫 구현') */
+export function contactRefHandlers(uc: { compute: Pick<ComputeContactRef, 'run'> }, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
+  const unary = invRefUnary(onError);
+  return {
+    ComputeContactRef: unary('ComputeContactRef', (r) => ({ contact_ref: uc.compute.run(text(r.phone_e164)) })),
+  };
+}
+
+/** InvestigationRefService: 조사 적재의 연결 값 조회(inv-ingest만, 그 신원 확인은 메시 L7 허용 목록, I-T67 ②는 HOT-400) */
+export function investigationRefHandlers(uc: { refs: Pick<GetInvestigationRefs, 'run'> }, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
+  const unary = invRefUnary(onError);
+  return {
+    BatchGetInvestigationRefs: unary('BatchGetInvestigationRefs', async (r) => {
+      const ids = Array.isArray(r.account_ids) ? (r.account_ids as unknown[]).map((x) => String(x)) : [];
+      const rows = await uc.refs.run(ids);
+      return {
+        items: rows.map((x) => ({
+          account_id: x.accountId,
+          contact_refs: x.contactRefs.map((c) => ({ kind: CONTACT_KIND[c.kind], ref: c.ref })),
+          device_refs: x.deviceRefs,
+          identity_conflicts: x.identityConflicts.map((c) => ({ other_account_id: c.otherAccountId, attempted_at: timestamp(c.attemptedAt) })),
+        })),
+      };
     }),
   };
 }

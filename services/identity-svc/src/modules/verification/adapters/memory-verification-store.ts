@@ -24,6 +24,8 @@ interface State {
   verifications: Map<string, StoredVerification>;
   conflicts: ConflictAttempt[];
   holds: Map<string, HoldRow>;
+  /** 본인확인 번호의 연락처 가명(account_contact_ref의 PHONE 행, BOT-045). 시험이 읽는다 */
+  phones: Map<string, { ref: string; updatedAt: number }>;
 }
 
 const clone = (s: State): State => ({
@@ -31,19 +33,29 @@ const clone = (s: State): State => ({
   verifications: new Map([...s.verifications].map(([k, v]) => [k, { ...v }])),
   conflicts: s.conflicts.map((c) => ({ ...c })),
   holds: new Map([...s.holds].map(([k, v]) => [k, { ...v }])),
+  phones: new Map([...s.phones].map(([k, v]) => [k, { ...v }])),
 });
 const holdKey = (sourceAccountId: string, caseId: string) => `${sourceAccountId}|${caseId}`;
 
 export class MemoryVerificationStore implements VerificationStore, PidRotationStore {
-  #state: State = { attempts: new Map(), verifications: new Map(), conflicts: [], holds: new Map() };
+  #state: State = { attempts: new Map(), verifications: new Map(), conflicts: [], holds: new Map(), phones: new Map() };
   #queue: Promise<unknown> = Promise.resolve();
   readonly #rotations: PidRotationRecord[] = [];
   readonly #retention = new Map<string, RetainedRecord>();
+
+  /** 시험용: 그 계정의 PHONE 연락처 가명 */
+  contactRefsOf(accountId: string): { kind: 'PHONE'; ref: string }[] {
+    const p = this.#state.phones.get(accountId);
+    return p ? [{ kind: 'PHONE', ref: p.ref }] : [];
+  }
 
   transaction<T>(fn: (tx: VerificationTx) => Promise<T>): Promise<T> {
     const run = async () => {
       const s = clone(this.#state);
       const out = await fn({
+        setPhoneRef: async (i) => {
+          s.phones.set(i.accountId, { ref: i.ref, updatedAt: i.now });
+        },
         insertAttempt: async (a) => {
           s.attempts.set(a.id, { ...a });
         },

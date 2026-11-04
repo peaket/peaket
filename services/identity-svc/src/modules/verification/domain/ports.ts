@@ -10,7 +10,7 @@ export interface VerificationProvider {
    * 기관이 돌려준 값을 기관 규격대로 확인하고 그 건(attemptId)의 결과인지 본다. 연계정보(ci) 원문은 해시한 뒤 바로 버린다.
    * 생년월일(birthDate, YYYY-MM-DD)은 만 나이 계산에만 쓰고 남기지 않는다(identity §5 만 14세 확인)
    */
-  confirm(attemptId: string, providerResult: Record<string, string>): Promise<{ outcome: 'VERIFIED'; ci: string; birthDate?: string } | { outcome: 'CANCELLED' | 'FAILED' }>;
+  confirm(attemptId: string, providerResult: Record<string, string>): Promise<{ outcome: 'VERIFIED'; ci: string; birthDate?: string; phone?: string } | { outcome: 'CANCELLED' | 'FAILED' }>;
 }
 
 export const IDENTITY_HASHERS = Symbol('identity.IdentityHashers');
@@ -60,6 +60,8 @@ export interface HoldRow {
 
 export interface VerificationTx {
   insertAttempt(a: Attempt): Promise<void>;
+  /** 본인확인 번호의 PHONE 연락처 가명(세션 컨텍스트의 표 account_contact_ref를 같은 트랜잭션에서 쓴다, identity §9.1 '조사용 값의 첫 구현') */
+  setPhoneRef(i: { accountId: string; ref: string; now: number }): Promise<void>;
   /** 건(쓰기 잠금). 없으면 null */
   attemptForUpdate(id: string): Promise<Attempt | null>;
   completeAttempt(id: string, status: Exclude<AttemptStatus, 'PENDING'>, now: number): Promise<void>;
@@ -137,4 +139,10 @@ export interface VerificationStore {
   purgeExpiredHolds(now: number): Promise<number>;
   /** 보존 전용 표에서 지울 시각(처리한 날 + 1년)이 지난 처리 기록을 지우고 지운 줄 수(정비) */
   purgeVerificationRecords(now: number): Promise<number>;
+}
+
+export const PHONE_REFS = Symbol('identity.PhoneRefs');
+/** 본인확인 결과 번호(기관 값 그대로)의 연락처 가명. 맞출 수 없는 번호거나 라벨 키가 없으면 undefined(번호는 저장하지 않는다, identity §9.1) */
+export interface PhoneRefs {
+  ref(rawPhone: string): string | undefined;
 }

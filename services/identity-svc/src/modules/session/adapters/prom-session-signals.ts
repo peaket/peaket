@@ -11,12 +11,13 @@ export class PromSessionSignals implements SessionSignals {
   readonly #refresh = new Counter({ name: 'identity_refresh_total', help: '토큰 갱신 결과(rotated·retried·reused·invalid)', labelNames: ['aud', 'result'] as const, registers: [] });
   readonly #retry = new Counter({ name: 'identity_refresh_retry_reuse_total', help: '응답을 잃은 재시도로 받아 준 바로 앞 리프레시 토큰', labelNames: ['aud'] as const, registers: [] });
   readonly #reuse = new Counter({ name: 'identity_refresh_reuse_detected_total', help: '탈취로 본 리프레시 토큰 재사용', labelNames: ['aud'] as const, registers: [] });
+  readonly #invRefMissing = new Counter({ name: 'inv_ref_missing_total', help: '라벨 키가 없어 계산하지 못한 조사용 가명(SEV3, docs/observability.md §5)', labelNames: ['service', 'label', 'reason'] as const, registers: [] });
   readonly #mergeInvariant = new Counter({ name: 'identity_merge_invariant_violation_total', help: '흡수 계정에 티켓·후기가 있어 막은 병합(불변식 위반, SEV3)', registers: [] });
   readonly #reverify = new Counter({ name: 'identity_reauth_reverify_required_total', help: '본인확인 재통과가 필요해 주지 않은 고위험 재인증', labelNames: ['provider'] as const, registers: [] });
 
   /** 서비스의 지표 모음(/metrics)에 단다 */
   register(registry: Registry): this {
-    const all: Array<Parameters<Registry['registerMetric']>[0]> = [this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify, this.#refresh, this.#retry, this.#reuse, this.#mergeInvariant];
+    const all: Array<Parameters<Registry['registerMetric']>[0]> = [this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify, this.#refresh, this.#retry, this.#reuse, this.#mergeInvariant, this.#invRefMissing];
     for (const m of all) registry.registerMetric(m);
     return this;
   }
@@ -43,6 +44,10 @@ export class PromSessionSignals implements SessionSignals {
 
   reverifyRequired(provider: string): void {
     this.#reverify.inc({ provider });
+  }
+
+  invRefMissing(label: string, reason: string): void {
+    this.#invRefMissing.inc({ service: 'identity-svc', label, reason });
   }
 
   mergeInvariantViolated(): void {

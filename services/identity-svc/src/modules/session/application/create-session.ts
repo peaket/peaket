@@ -7,6 +7,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
+import { contactEmail } from '../domain/inv-ref.js';
 import {
   ACCOUNT_CLAIMS,
   type AccountClaims,
@@ -16,6 +17,8 @@ import {
   type LinkProposals,
   LinkStoreUnavailable,
   SESSION_SIGNALS,
+  INV_REFS,
+  type InvRefs,
   SESSION_STORE,
   type SessionSignals,
   type SessionStore,
@@ -124,7 +127,16 @@ export class CreateSession {
     @Inject(CLOCK) private readonly clock: Clock,
     /** 가입 때 연결 제안(없으면 제안하지 않는다: 시험) */
     @Optional() @Inject(LINK_PROPOSALS) private readonly links?: LinkProposals,
+    /** 조사용 연락처 가명(없으면 쓰지 않는다: 시험, identity §9.1 '조사용 값의 첫 구현') */
+    @Optional() @Inject(INV_REFS) private readonly invRefs?: InvRefs,
   ) {}
+
+  /** 새 계정의 로그인 이메일로 EMAIL 연락처 가명 행을 쓴다. 라벨 키가 없으면 쓰지 않는다(정비 contact-ref-backfill이 나중에 채운다) */
+  async #emailRef(tx: SessionTx, accountId: string, raw: string | null | undefined, now: number): Promise<void> {
+    const email = contactEmail(raw);
+    const ref = email === null ? undefined : this.invRefs?.ref('contact', email);
+    if (ref) await tx.setContactRef({ accountId, kind: 'EMAIL', ref, now });
+  }
 
   /** 세션만 받는 쪽(시험·옛 호출): 연결 제안이나 불일치면 FAILED_PRECONDITION */
   async run(i: CreateSessionInput): Promise<CreateSessionResult> {
@@ -186,6 +198,7 @@ export class CreateSession {
       }
       const accountId = uuidv7(this.clock);
       await tx.createAccount({ id: accountId, email: i.email, emailVerified: i.emailVerified === true }, now);
+      await this.#emailRef(tx, accountId, i.email, now);
       await tx.linkProvider(accountId, i.provider, i.providerUserId, now);
       return this.#open(tx, i, accountId, true, now, refresh);
     });
@@ -302,6 +315,7 @@ export class CreateSession {
       accountId = uuidv7(this.clock);
       newAccount = true;
       await tx.createAccount({ id: accountId, email: i.email, emailVerified: i.emailVerified === true }, now);
+      await this.#emailRef(tx, accountId, i.email, now);
       await tx.linkProvider(accountId, i.provider, i.providerUserId, now);
       await tx.lockAccount(accountId);
     }
