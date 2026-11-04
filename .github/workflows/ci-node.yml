@@ -54,7 +54,8 @@ jobs:
             echo "전체를 돈다(넓게 쓰이는 것이 바뀌었거나 기준이 없다)"
             pnpm exec turbo run typecheck test build
           fi
-      # 층 의존 방향 린트(docs/architecture.md §3.1, 기술 검토 낮음-008). 서비스와 서비스 뼈대(template/)를 본다
+      # 층 의존 방향 린트(docs/architecture.md §3.1, 기술 검토 낮음-008)는 서비스와 서비스 뼈대(template/)를, 브라우저 지원 린트
+      # (docs/frontend.md §1.5, NFR-019)는 화면 앱과 화면 패키지(ds·api-client·telemetry·validation·console-contract)를 본다
       - run: pnpm lint
       # 서비스 템플릿의 통합 시험: 실제 PostgreSQL 18 컨테이너를 docker로 띄운다(러너에 Docker가 있다). Drizzle 설정·풀 대기 429·행 보안
       - run: pnpm --filter @peaket/platform test:integration

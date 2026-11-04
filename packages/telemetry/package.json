@@ -1,0 +1,22 @@
+{
+  "name": "@peaket/telemetry",
+  "private": true,
+  "version": "0.0.0",
+  "description": "브라우저 지표 묶음(asyncapi RumSample 판 2)과 같은 출처 traceparent. lite(대기실 경량 페이지)·full(그 밖 앱) 두 판(docs/frontend.md §5.16)",
+  "type": "module",
+  "exports": {
+    "./lite": "./src/lite.ts",
+    "./full": "./src/full.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@peaket/contracts": "workspace:*",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@peaket/console-contract",
+  "private": true,
+  "version": "0.0.0",
+  "description": "관제 원격 위젯 계약(docs/frontend.md §4.5). 원격 위젯은 이 패키지와 공유 싱글턴만 가져온다",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "react": "^19.3.1"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

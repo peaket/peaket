@@ -1,0 +1,24 @@
+{
+  "name": "@peaket/api-client",
+  "private": true,
+  "version": "0.0.0",
+  "description": "화면이 API를 부르는 한 곳: 호스트·자격 증명·본문·멱등키·시간 초과·자동 재시도·오류 모양 정책(docs/frontend.md §4.1). orval 생성물은 화면 계약 보강(BUILD_ORDER BAS-040)에서 더한다",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@peaket/validation": "workspace:*"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
+    "yaml": "^2.9.1"
+  }
+}
