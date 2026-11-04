@@ -1,5 +1,6 @@
 // 리더의 대기열 Redis Lua를 실제 Valkey 8.1로 돈다(docs/features/queue-admission.md §5, ADR-0056·0058·0104·0182).
 // 이름은 명세 specs/queue.qnt의 동작 이름(acquire의 BUMP, plan·applyWrite의 ADVANCE·CLOSE)이다. Lua는 서버 시각을 쓰므로 시각은 Date.now() 기준으로 둔다.
+import { setTimeout as sleep } from 'node:timers/promises';
 import { createHotRedis, type HotRedis } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { RedisLeaderStore, keys } from '../src/modules/leader/adapters/redis-leader-store.js';
@@ -50,10 +51,14 @@ test('[Q-T12] 리더가바뀌며옛리더와새리더가번갈아전진해도_se
   await seqTo(e, 10_000);
   await store.bump(e, 1, Date.now() + DAY);
   await store.tick(tickOf(e, 1, { maxAdvance: 100 }));
+  // 전진 기록의 이름이 서버 시각(ms)과 유효 번호라, 같은 ms에 두 번 전진하면 한 줄로 합쳐진다(빠른 CI 러너에서 4줄 대신 3줄이 나왔다). 전진 사이에 ms를 띄운다.
+  // 운영은 전진이 1초 간격이라 영향이 없다
+  await sleep(3);
   await store.bump(e, 2, Date.now() + DAY);
   for (let i = 0; i < 3; i++) {
     await store.tick(tickOf(e, 1, { maxAdvance: 100 }));
     await store.tick(tickOf(e, 2, { maxAdvance: 100 }));
+    await sleep(3);
   }
   expect(await serving(e)).toBe(400);
   // 전진 기록도 네 번(옛 리더의 거절된 전진은 남지 않는다)
