@@ -49,3 +49,20 @@ export class ApiError extends Error {
     return new ApiError(res.status, body, res.headers.get('retry-after'), res.headers.get('date'));
   }
 }
+
+/** 412 precondition-failed(다른 곳에서 먼저 고침). 화면은 다시 보내지 않고 지금 값과의 비교 보기를 띄운다(docs/api/guidelines.md §12) */
+export function isPreconditionFailed(e: unknown): e is ApiError {
+  return e instanceof ApiError && e.status === 412;
+}
+
+/**
+ * 구매 경로 401의 다음 동작(docs/frontend.md §4.1 '401', BAS-040·BAS-041):
+ * 'refresh'는 팬 쿠키 401(이름 없음)이라 토큰을 한 번 갱신하고 다시 보낸다. 'skip-seq-and-retry'는 일련번호가 서버보다 뒤라
+ * 번호를 건너뛰어 같은 멱등 키로 한 번 다시 보낸다(서명기, wbs 2.10.7). 'session-ended'는 구매 세션이 끝난 것이다(키를 지우고 SCR-010)
+ */
+export function purchaseUnauthorizedAction(e: unknown): 'refresh' | 'skip-seq-and-retry' | 'session-ended' | undefined {
+  if (!(e instanceof ApiError) || e.status !== 401) return undefined;
+  if (e.type === 'purchase-seq-reused') return 'skip-seq-and-retry';
+  if (e.type === 'purchase-session-ended' || e.type === 'admission-token-invalid' || e.type === 'purchase-signature-invalid') return 'session-ended';
+  return 'refresh';
+}

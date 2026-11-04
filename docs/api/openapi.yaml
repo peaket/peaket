@@ -1731,6 +1731,7 @@ paths:
     servers: [{ url: 'https://queue-files.peaket.example', description: "대기열 파일 배포(ADR-0058)" }]
     get:
       operationId: getQueueSegmentState
+      x-peaket-fetch-cache: no-store  # 브라우저 HTTP 캐시를 쓰지 않는다(CDN 1초 캐시만, ADR-0110, docs/frontend.md §5.9). api-client가 fetch의 cache로 넘긴다(BAS-041)
       tags: [queue]
       x-peaket-roles: [public]
       security: []
@@ -1913,6 +1914,7 @@ paths:
   /v1/orders/{orderId}/payment-status:
     get:
       operationId: getOrderPaymentStatus
+      x-peaket-timeout: longpoll  # api-client 시간 초과 30초(서버 상한 25초 + 5초, docs/frontend.md §4.1 '시간 초과', BAS-041)
       tags: [orders]
       x-peaket-roles: [fan]
       summary: 결제 결과 long polling(최대 25초 [가정] 대기, 추천 적용 2026-10-28, 기술 검토 중간-047)

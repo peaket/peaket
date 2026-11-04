@@ -1,5 +1,6 @@
 // api-client 실행 정책(docs/frontend.md §4.1, ADR-0079 결정 21). 화면 코드는 fetch를 직접 부르지 않고 이 함수만 부른다.
-// 작업 서술(Operation)은 지금 손으로 적고, 화면 계약 보강(BUILD_ORDER BAS-040)에서 openapi로 orval이 만든 것으로 바꾼다.
+// 작업 서술(Operation)은 계약에서 만든 표(src/gen/operations.ts의 OPERATIONS, BUILD_ORDER BAS-041)를 쓴다. orval이 만든 호출 함수·훅은
+// src/orval-fetch.ts의 orvalFetch를 거쳐 이 함수로 온다.
 import { parseJsonSafe } from '@peaket/validation/safe-json';
 import { ApiError } from './error';
 import { anySignal } from './signal';
@@ -25,8 +26,16 @@ export interface Operation {
    * 쓰지 않는 경로가 함께 있는 곳(www: 정적 JSON과 계정 연결 제안 앱 서버 경로)은 작업마다 정한다
    */
   cookie?: boolean;
-  /** fetch 캐시 방식(대기 상태 파일은 'no-store', docs/frontend.md §5.9) */
+  /** fetch 캐시 방식(대기 상태 파일은 'no-store', docs/frontend.md §5.9, openapi x-peaket-fetch-cache) */
   cache?: RequestCache;
+  /** openapi가 IfMatch를 붙인 PUT·PATCH(동시 수정, docs/api/guidelines.md §12). 판(ETag) 없이 보내지 않는다 */
+  ifMatch?: boolean;
+  /** T=0 text/plain 두 호출(openapi requestBody에 text/plain이 있다) */
+  t0?: boolean;
+  /** SSE 흐름(text/event-stream). fetch로 부르지 않고 EventSource로 연다 */
+  sse?: boolean;
+  /** 계약이 정한 쿼리 이름(생성 함수의 주소에 그 밖의 쿼리가 있으면 orvalFetch가 거절한다) */
+  query?: readonly string[];
 }
 
 /**
@@ -48,7 +57,12 @@ export function credentialsFor(host: Host, op?: Pick<Operation, 'cookie'>): Requ
 
 export interface RequestOptions {
   params?: Record<string, string>;
-  query?: Record<string, string | number | boolean | undefined>;
+  /** 쿼리. 같은 이름을 여러 번 보내면 배열로 준다 */
+  query?: Record<string, string | number | boolean | undefined | readonly (string | number | boolean)[]>;
+  /**
+   * JSON으로 보낼 값. FormData(올리기)는 처음 한 번 바이트로 만들어 그 경계(boundary)와 함께 다시 시도에도 그대로 쓴다(서버 요청 지문이 같게).
+   * URLSearchParams는 application/x-www-form-urlencoded로 보낸다
+   */
   body?: unknown;
   /** 기본 application/json. text/plain은 T=0 두 호출만 쓰고, 그 둘은 text/plain만 쓴다(어기면 보내지 않고 거절한다) */
   contentType?: 'application/json' | 'text/plain';
@@ -60,6 +74,15 @@ export interface RequestOptions {
   /** 화면을 떠날 때의 취소 신호 */
   signal?: AbortSignal;
   headers?: Record<string, string>;
+  /** 고칠 자원의 판(읽은 응답의 ETag 그대로, 예 '"7"'). ifMatch 작업에 필수(docs/api/guidelines.md §12) */
+  ifMatch?: string;
+}
+
+/** 응답 상태·머리와 읽은 본문(orval 생성 함수의 반환 모양, ETag는 headers.get('etag')) */
+export interface ApiResponse<T = unknown> {
+  data: T;
+  status: number;
+  headers: Headers;
 }
 
 export interface ClientOptions {
@@ -85,7 +108,11 @@ function buildUrl(base: string, op: Operation, o: RequestOptions): string {
     return encodeURIComponent(v);
   });
   const url = new URL(path, base);
-  for (const [k, v] of Object.entries(o.query ?? {})) if (v !== undefined) url.searchParams.set(k, String(v));
+  for (const [k, v] of Object.entries(o.query ?? {})) {
+    if (v === undefined) continue;
+    if (Array.isArray(v)) for (const x of v) url.searchParams.append(k, String(x));
+    else url.searchParams.set(k, String(v));
+  }
   return url.href;
 }
 
@@ -112,22 +139,42 @@ export function createApiClient(opts: ClientOptions) {
   const budget = new RetryBudget(now);
 
   async function request<T = unknown>(op: Operation, o: RequestOptions = {}): Promise<T> {
+    return (await send<T>(op, o)).data;
+  }
+
+  /** request와 같고 상태·머리도 돌려준다(ETag 읽기, orval 생성 함수) */
+  async function send<T = unknown>(op: Operation, o: RequestOptions = {}): Promise<ApiResponse<T>> {
     const t0 = T0.has(opKey(op));
     const contentType = o.contentType ?? (t0 ? 'text/plain' : 'application/json');
     if ((contentType === 'text/plain') !== t0) {
       throw new TypeError(`text/plain 본문은 T=0 두 호출만, 그 둘은 text/plain만 쓴다(사전 요청 0): ${opKey(op)}(FE-T3)`);
     }
     if (o.idempotencyKey !== undefined && !UUID.test(o.idempotencyKey)) throw new TypeError(`멱등 키는 따옴표 없는 UUID여야 한다: ${opKey(op)}`);
+    if (op.sse) throw new TypeError(`SSE 흐름은 fetch로 부르지 않고 EventSource로 연다: ${opKey(op)}`);
+    // 동시 수정: 판 없이 보내면 서버가 428로 거절한다. 보내기 전에 막는다(docs/api/guidelines.md §12)
+    if (op.ifMatch && !o.ifMatch) throw new TypeError(`If-Match(읽은 응답의 ETag)가 있어야 한다: ${opKey(op)}`);
     const base = opts.baseUrls[op.host];
     if (!base) throw new TypeError(`호스트 ${op.host}의 기본 주소가 없다`);
     const url = buildUrl(base, op, o);
     // 본문 문자열은 한 번만 만든다: 다시 시도할 때 같은 키와 처음 만든 본문 문자열을 그대로 쓴다(서버는 본문 지문으로 같은 요청인지 본다)
-    const body = o.body === undefined ? undefined : JSON.stringify(o.body);
     const headers = new Headers();
-    if (body !== undefined) headers.set('content-type', contentType === 'text/plain' ? 'text/plain;charset=UTF-8' : 'application/json');
+    let body: string | ArrayBuffer | undefined;
+    if (typeof FormData !== 'undefined' && o.body instanceof FormData) {
+      // 다시 보낼 때 경계가 새로 생기면 본문 바이트가 달라져 같은 멱등 키가 422가 된다. 한 번만 만든다
+      const encoded = new Response(o.body);
+      body = await encoded.arrayBuffer();
+      headers.set('content-type', encoded.headers.get('content-type') ?? 'multipart/form-data');
+    } else if (o.body instanceof URLSearchParams) {
+      body = o.body.toString();
+      headers.set('content-type', 'application/x-www-form-urlencoded;charset=UTF-8');
+    } else if (o.body !== undefined) {
+      body = JSON.stringify(o.body);
+      headers.set('content-type', contentType === 'text/plain' ? 'text/plain;charset=UTF-8' : 'application/json');
+    }
     if (!t0) {
-      for (const [k, v] of Object.entries(o.headers ?? {})) headers.set(k, v);
+      for (const [k, v] of Object.entries(o.headers ?? {})) if (k.toLowerCase() !== 'content-type') headers.set(k, v);
       if (op.idempotent) headers.set('idempotency-key', o.idempotencyKey ?? crypto.randomUUID());
+      if (o.ifMatch) headers.set('if-match', o.ifMatch);
     }
     const retryable = op.method === 'GET' || Boolean(op.idempotent);
 
@@ -157,12 +204,14 @@ export function createApiClient(opts: ClientOptions) {
       let error: ApiError;
       try {
         if (res.ok) {
-          if (res.status === 204) return undefined as T;
+          const done = (data: unknown): ApiResponse<T> => ({ data: data as T, status: res.status, headers: res.headers });
+          if (res.status === 204) return done(undefined);
           const ct = res.headers.get('content-type') ?? '';
-          // JSON은 공용 안전 파서로 읽는다(__proto__·constructor·prototype 키 거절, ASVS 15.3.6). 이진(octet-stream, 좌석 스냅샷)은 ArrayBuffer, 그 밖은 글자
-          if (ct.includes('json')) return parseJsonSafe(await res.text()) as T;
-          if (ct.includes('application/octet-stream')) return (await res.arrayBuffer()) as T;
-          return (await res.text()) as T;
+          // JSON은 공용 안전 파서로 읽는다(__proto__·constructor·prototype 키 거절, ASVS 15.3.6). 글자(text/*)는 글자, 그 밖의 이진
+          // (좌석 스냅샷 octet-stream, pdf·xlsx·arrow 내보내기)은 Blob(생성 형과 같다, 좌석 스냅샷은 blob.arrayBuffer()로 읽는다)
+          if (ct.includes('json')) return done(parseJsonSafe(await res.text()));
+          if (ct.startsWith('text/') || ct === '') return done(await res.text());
+          return done(await res.blob());
         }
         error = await ApiError.from(res);
       } finally {
@@ -180,5 +229,7 @@ export function createApiClient(opts: ClientOptions) {
     }
   }
 
-  return { request };
+  return { request, send };
 }
+
+export type ApiClient = ReturnType<typeof createApiClient>;

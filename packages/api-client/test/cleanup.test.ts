@@ -26,13 +26,13 @@ describe('Retry-After 읽기', () => {
 const baseUrls = { api: 'https://api.peaket.example', 'queue-files': 'https://queue-files.peaket.example' };
 
 describe('응답 형식·캐시', () => {
-  it('JSON이 아닌 이진 응답(좌석 스냅샷 application/octet-stream)은 ArrayBuffer로 돌려준다', async () => {
+  it('JSON이 아닌 이진 응답(좌석 스냅샷 application/octet-stream)은 Blob으로 돌려준다(생성 형과 같다, BAS-041 새 맥락 리뷰)', async () => {
     const snap: Operation = { method: 'GET', path: '/v1/events/{eventId}/seatmap-snapshot', host: 'api', kind: 'read' };
     const bytes = new Uint8Array([1, 0, 255, 128]);
     const client = createApiClient({ baseUrls, fetch: async () => new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } }) });
-    const got = await client.request<ArrayBuffer>(snap, { params: { eventId: 'e' } });
-    expect(got).toBeInstanceOf(ArrayBuffer);
-    expect([...new Uint8Array(got)]).toEqual([1, 0, 255, 128]);
+    const got = await client.request<Blob>(snap, { params: { eventId: 'e' } });
+    expect(got).toBeInstanceOf(Blob);
+    expect([...new Uint8Array(await got.arrayBuffer())]).toEqual([1, 0, 255, 128]);
   });
 
   it('대기열 파일은 cache: no-store로 받는다(작업이 정한 캐시를 fetch에 넘긴다)', async () => {
