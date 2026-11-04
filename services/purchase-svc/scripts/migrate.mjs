@@ -37,6 +37,23 @@ export async function ensureSeatHoldPartitions(databaseUrl) {
   }
 }
 
+/**
+ * 마이그레이션 직후 Outbox의 일 파티션(오늘부터 7일 [가정] 앞, 한국 시각 날)을 만든다(0003이 만든 부모 표, BUILD_ORDER PRF-160).
+ * 첫 쓰기가 파티션 없이 실패하지 않게 한다. 운영 실행기와 매일 정비 잡의 같은 일은 BUILD_ORDER BAS-060·PRF-164다
+ * @param {string} databaseUrl
+ * @returns {Promise<string[]>} 새로 만든 파티션 이름
+ */
+export async function ensurePurchaseOutboxPartitions(databaseUrl) {
+  const { createDatabase, ensureOutboxPartitions, systemClock } = await import('@peaket/platform');
+  const database = createDatabase({ url: databaseUrl, applicationName: 'purchase-svc-migrate', max: 1 });
+  try {
+    const { created } = await ensureOutboxPartitions(database, systemClock);
+    return created;
+  } finally {
+    await database.close();
+  }
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const url = process.env.PEAKET_DATABASE_URL;
   if (!url) {
@@ -46,5 +63,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   await migratePurchase(url);
   const created = await ensureSeatHoldPartitions(url);
   console.log(`seat_hold 파티션 ${created.length}개를 만들었다`);
+  const outbox = await ensurePurchaseOutboxPartitions(url);
+  console.log(`Outbox 파티션 ${outbox.length}개를 만들었다`);
   console.log('purchase 마이그레이션 끝');
 }

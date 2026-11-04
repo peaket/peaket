@@ -2,14 +2,16 @@
 // '다시 만들기 표와 원장 칸'(BUILD_ORDER PRF-143), §2 ERD, BUILD_ORDER PRF-140 ①).
 // ① Drizzle 표 정의(schema.ts)를 getTableConfig로 읽어 표·열·기본 키·부분 유일 인덱스·check 제약 이름과 식이 정본과 같은지 보고,
 // ② 마이그레이션 SQL 파일(0000 좌석 표, 0002 다시 만들기 표·원장 칸)을 글로 읽어 파티션 선언(seat_hold만, DEFAULT 파티션 없음)과 표 정의 ↔ SQL 일치를 보고,
-// ③ 마이그레이션 기록(meta)이 맞물리는지 본다.
-// 실제 PostgreSQL에서 돌려 보는 것은 test-int/purchase-migration.int.test.ts다.
+// ③ 마이그레이션 기록(meta)이 맞물리는지 본다. 네 번째 마이그레이션(0003 주문 표·Outbox, BUILD_ORDER PRF-160)도 기록·파일 목록에 있고,
+// 마지막 스냅샷(0003)의 주문 표 다섯(booking schema.ts)이 표 정의와 같은지 본다.
+// 실제 PostgreSQL에서 돌려 보는 것은 test-int/purchase-migration.int.test.ts(주문 표는 test-int/order-store.int.test.ts)다.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { SQL } from 'drizzle-orm';
 import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { describe, expect, test } from 'vitest';
+import { orderEvent, orderIdempotency, orderItem, paymentAttempt, purchaseOrder } from '../src/modules/booking/adapters/db/schema.js';
 import { purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
 import { SEAT_SALE_STATUSES } from '../src/modules/inventory/domain/seat-sale.js';
 
@@ -19,6 +21,8 @@ const TAG = '0000_purchase_seat_tables';
 const HELD_TAG = '0001_held_event_and_stat_snapshot';
 /** 다시 만들기 표 seat_rebuild와 원장 칸 seat_hold.hold_id·purchase_session_id(BUILD_ORDER PRF-143) */
 const REBUILD_TAG = '0002_seat_rebuild_and_hold_ids';
+/** 주문 표 다섯과 Outbox 부모 표(BUILD_ORDER PRF-160) */
+const ORDER_TAG = '0003_order_tables';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
 
@@ -329,12 +333,13 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
   };
 
-  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141)·0002(다시 만들기 표·원장 칸, PRF-143) 차례이고 tag가 SQL 파일 이름과 맞으며 when이 차례대로 커진다 [ASVS v5.0.0-2.3.4]', () => {
+  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141)·0002(다시 만들기 표·원장 칸, PRF-143)·0003(주문 표·Outbox, PRF-160) 차례이고 tag가 SQL 파일 이름과 맞으며 when이 차례대로 커진다 [ASVS v5.0.0-2.3.4]', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
       [1, HELD_TAG],
       [2, REBUILD_TAG],
+      [3, ORDER_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -346,20 +351,29 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   });
 
   test('migrations 폴더의 SQL 파일은 기록에 있는 것뿐이다(기록에 없는 SQL이 몰래 쌓이지 않는다)', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${HELD_TAG}.sql`, `${REBUILD_TAG}.sql`]);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${HELD_TAG}.sql`, `${REBUILD_TAG}.sql`, `${ORDER_TAG}.sql`]);
   });
 
   type Snapshot = {
     id: string;
     prevId: string;
-    tables: Record<string, { columns: Record<string, { type: string; notNull: boolean; primaryKey: boolean }>; checkConstraints?: Record<string, unknown> }>;
+    tables: Record<
+      string,
+      {
+        columns: Record<string, { type: string; notNull: boolean; primaryKey: boolean }>;
+        checkConstraints?: Record<string, unknown>;
+        compositePrimaryKeys?: Record<string, { name: string; columns: string[] }>;
+        foreignKeys?: Record<string, unknown>;
+        indexes?: Record<string, { isUnique: boolean }>;
+      }
+    >;
   };
   const snapshotFiles = readdirSync(join(MIGRATIONS, 'meta'))
     .filter((f) => /^\d{4}_snapshot\.json$/.test(f))
     .sort();
   const snapshotOf = (f: string) => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', f), 'utf8')) as Snapshot;
 
-  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002)', () => {
+  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003)', () => {
     expect(snapshotFiles).toEqual(journal.entries.map((e) => `${String(e.idx).padStart(4, '0')}_snapshot.json`));
     let prev = '00000000-0000-0000-0000-000000000000';
     for (const f of snapshotFiles) {
@@ -369,15 +383,31 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     }
   });
 
-  test('마지막 스냅샷(0002_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0002_snapshot.json');
+  /** booking schema.ts의 주문 표 다섯(PRF-160). Outbox 부모 표는 손으로 쓴 SQL이라 스냅샷에 없다 */
+  const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt];
+  const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
+
+  test('마지막 스냅샷(0003_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 주문 표 다섯)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0003_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
-    expect(Object.keys(snap.tables).sort()).toEqual(SHAPES.map((s) => `public.${s.name}`).sort());
-    for (const s of SHAPES) {
+    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, ...ORDER_SHAPES].map((s) => `public.${s.name}`).sort());
+    for (const s of [...SHAPES, ...ORDER_SHAPES]) {
       const t = snap.tables[`public.${s.name}`]!;
       expect(Object.entries(t.columns).map(([n, c]) => [n, c.type, c.notNull]), s.name).toEqual(cols(s));
       expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), `${s.name} 열 기본 키`).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));
       expect(Object.keys(t.checkConstraints ?? {}), `${s.name} check`).toEqual(s.checks.map((k) => k.name));
     }
+  });
+
+  test('0003 스냅샷의 주문 표 다섯은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160) [ASVS v5.0.0-2.3.4]', () => {
+    const snap = snapshotOf('0003_snapshot.json');
+    expect(ORDER_SHAPES.map((s) => s.name)).toEqual(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt']);
+    ORDER_TABLES.forEach((table, i) => {
+      const s = ORDER_SHAPES[i]!;
+      const t = snap.tables[`public.${s.name}`]!;
+      expect(Object.values(t.compositePrimaryKeys ?? {}).map((p) => [p.name, p.columns]), `${s.name} 기본 키`).toEqual(s.primaryKeys.map((p) => [p.name, p.columns]));
+      expect(Object.keys(t.foreignKeys ?? {}), `${s.name} 외래 키`).toEqual(getTableConfig(table).foreignKeys.map((f) => f.getName()));
+      expect(Object.entries(t.indexes ?? {}).map(([n, x]) => [n, x.isUnique]), `${s.name} 인덱스`).toEqual(s.indexes.map((x) => [x.name, x.unique]));
+    });
   });
 });

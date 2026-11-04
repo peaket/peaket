@@ -668,15 +668,15 @@ erDiagram
         text buyer_phone "예매자 휴대폰 번호. buyer_name과 같은 보존"
         text idempotency_key "사본. 멱등 확인은 order_idempotency(계정 × 작업 범위, 기술 검토 중간-046)"
         text consent_version "판매자 제공 동의(SCR-011 ③)와 판매 조건 동의(POL-004)에 보인 고지 문안의 판. 두 동의는 주문 생성의 필수 값이라 동의 일시는 created_at이다. 주문 원장과 함께 보존(ADR-0089)"
+        text seat_assignment "PICK|AUTO. 주문 사건마다 싣는 좌석 고르기 방식(ADR-0150, 추천 적용 2026-11-05, BUILD_ORDER PRF-160)"
         timestamptz created_at
     }
     order_idempotency {
-        uuid account_id PK "부른 계정. 키 범위는 계정 × 작업이라 다른 계정의 같은 키는 다른 행이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)"
+        text account_ref PK "부른 계정 ID. 키 범위는 계정 × 작업이라 다른 계정의 같은 키는 다른 행이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046). 칸은 서비스마다 둔 멱등 기록 표와 같은 꼴이다(packages/platform idempotencyRecordTable, 추천 적용 2026-11-05, BUILD_ORDER PRF-160)"
         text operation PK "CREATE_ORDER|START_PAYMENT|ACCEPT_PAYMENT(주문 생성·결제 시도 시작·결제 접수)"
-        text idempotency_key PK "클라이언트 Idempotency-Key, 파티션하지 않음"
+        uuid idempotency_key PK "클라이언트 Idempotency-Key(소문자로 맞춘 v4), 파티션하지 않음"
         bytea request_hash "요청 지문(메서드·실제 경로·본문 바이트의 SHA-256). 같은 키에 지문이 다르면 422 idempotency-key-reused"
-        uuid order_id
-        uuid result_id "다시 돌려줄 응답의 대상(결제 시도 ID. 주문 생성·결제 접수는 비움)"
+        text result_ref "다시 돌려줄 응답의 대상(주문 생성·결제 접수는 주문 ID, 결제 시도 시작은 결제 시도 ID). 업무 쓰기를 커밋할 때 채운다"
         timestamptz created_at "24시간 [가정] 뒤 정비 시간에 지움"
     }
     order_event {
@@ -684,8 +684,8 @@ erDiagram
         int seq PK "주문마다 1부터 빈틈 없이 늘어난다. purchase_order.event_seq와 같은 UPDATE에서 매긴다(ADR-0113)"
         text from_status "이전 상태(첫 행은 비움)"
         text to_status "새 상태"
-        text cause "전이 원인(요청·결제 결과·만료·취소 등)"
-        text actor "행위자(팬 계정, 관리 계정, 시스템 작업)"
+        text cause "전이 원인. 전이 번호 T1~T26(payment §3 전이 표, 추천 적용 2026-11-05, BUILD_ORDER PRF-160)"
+        text actor "행위자. account:<계정 ID>(팬)|admin:<관리 계정 ID>|system:<작업 이름>(추천 적용 2026-11-05)"
         timestamptz occurred_at
     }
     seat_sale {
@@ -821,7 +821,8 @@ erDiagram
         uuid order_id PK "기본 키 (order_id, line_no). 표는 나누지 않는다(ADR-0114)"
         int line_no PK
         uuid seat_id
-        text tier "등급"
+        text tier "등급 ID(주문 사건 items의 tierId)"
+        text section_id "구역 ID(주문 사건 items의 sectionId, ADR-0150, 추천 적용 2026-11-05, BUILD_ORDER PRF-160)"
         int unit_price "주문 때 가격 스냅샷, 티켓 단위 환급 계산의 기준"
         uuid ticket_id "발권 뒤 채움, ticket DB라 외래 키 없음"
     }
@@ -2274,6 +2275,16 @@ erDiagram
 - `seat_hold`에 `hold_id uuid`·`purchase_session_id text`(널 허용): 홀드 원장 적재가 SeatEvent의 holdId·purchaseSessionId를 쓴다. 다시 만들기가 되살린 홀드 Hash의 holdId·psid로 쓴다.
 - 좌석 Redis 회차 슬롯의 새 키 `s:{event:E}:rebuild`(글, 다시 만들기 시도의 판 번호, 수명 판매 종료 + 1일): 다시 만들기의 첫 Lua가 쓰고 그 뒤 Lua들이 대조한다(앞 시도·늦은 파드의 쓰기를 막는 펜싱).
 
+**주문 표 마이그레이션(추천 적용 2026-11-05, BUILD_ORDER PRF-160, ADR-0113·ADR-0114)**: purchase DB 네 번째 마이그레이션이 주문 저장소의 표를 만든다. 전이 규칙의 정본은 docs/features/payment.md §3 '주문 저장소의 첫 구현'이다.
+- `purchase_order`: 위 칸 그대로이고 `status`는 열세 값만(`CHECK`), `amount >= 0`, `event_seq >= 1`, `payment_event_seq >= 0`, `seat_assignment`는 `PICK`·`AUTO`다. 표는 나누지 않는다(ADR-0114). 새 인덱스는 두지 않는다(쓰기가 많은 표, §5.1).
+- `order_item (order_id, line_no)` 기본 키, `unit_price >= 0`, 같은 주문의 좌석 중복을 막는 `UNIQUE (order_id, seat_id)`. `order_event (order_id, seq)` 기본 키, `seq >= 1`, `from_status`·`to_status`는 주문 상태 열세 값만(`CHECK`), `occurred_at`의 BRIN 인덱스(`autosummarize = on`. 덧붙이기만 하는 표라 시각 순으로 쌓여 작은 BRIN으로 '전날 이력'을 찾는다, 매일 검사, §5.1). 두 표는 주문에 외래 키를 건다(보존 삭제는 자식부터, ADR-0114).
+- 지연 제약 트리거 `order_status_has_event`(`AFTER INSERT OR UPDATE OF status, event_seq ON purchase_order DEFERRABLE INITIALLY DEFERRED`): 커밋 때 (주문, `event_seq`, `status`)와 같은 `order_event` 행이 없으면 실패한다(이력 없이 상태만 바꾸는 길을 막는다, 추천 적용 2026-11-05, payment §3).
+- `order_idempotency`: packages/platform의 `idempotencyRecordTable(작업 셋, 'order_idempotency')`로 만든다(위 ERD).
+- `payment_attempt`: `pg`는 `TOSS`·`PORTONE`·`SIMULATOR`, `status`는 `READY`·`ACCEPTED`·`SUPERSEDED`·`EXPIRED`, 활성 시도 유일 부분 인덱스 `UNIQUE (order_id) WHERE status IN ('READY','ACCEPTED')`, 외래 키 조회·주문의 시도 목록용 일반 인덱스 `(order_id)`(부분 인덱스는 상태 조건이 없는 외래 키 점검에 쓰이지 않아 주문을 지울 때마다 표를 다 훑었다, 2026-11-05 코드 리뷰). 결제 접수가 저장할 결제 참조 칸은 PRF-162가 더한다.
+- Outbox 부모 표: platform 템플릿 `0002_outbox.sql`과 같다(일 파티션은 `ensureOutboxPartitions`가 만든다).
+- 발권 재시도 큐 `ticket_issue_job`은 승인 결과를 반영하는 PRF-163이 더한다.
+- 마이그레이션 SQL은 `pnpm --filter @peaket/purchase-svc db:generate`(`scripts/db-generate.mjs`가 `tsconfig.drizzle.json`으로 drizzle-kit을 띄운다. 표 정의가 `@peaket/platform`의 `idempotencyRecordTable`을 가져와, 원본 경로를 읽으면 실패하므로 빌드된 패키지를 읽는다)로 만들고, 파티션·BRIN·트리거처럼 Drizzle 0.45가 나타내지 못하는 문장은 손으로 덧붙인다.
+
 ## 5. 동시성 제어가 필요한 지점
 
 | 동시성 경합 지점 | 제어 메커니즘 | 검증 및 보증 수단 |
@@ -2303,6 +2314,7 @@ erDiagram
 | 홀드 원장 적재(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-141): 같은 좌석의 홀드 사건이 뒤바뀐 차례로 오거나(끝 사건이 HELD보다 먼저, 옛 홀드의 HELD가 새 홀드 뒤에) 두 번 옴, 릴레이 리더가 바뀌는 동안 두 파드가 같은 항목을 보냄 | 업무 키(`회차 ID:좌석 ID`)마다 받은 차례로 하나씩 처리하고(키 단위 소비자, ADR-0142), 행 키에 펜싱 토큰을 넣어 옛 토큰 사건은 자기 행만 바꾼다. 새 HELD는 같은 좌석의 낮은 토큰 HELD 행을 끝 상태로 바꾼 뒤 넣어 HELD 하나 규칙(부분 유일 인덱스)을 지키고, 늦게 온 끝 사건이 바른 상태로 고친다. 다시 받은 사건은 기본 키 `ON CONFLICT`가 거른다. 릴레이는 확인받은 항목만 지우므로 리더가 바뀌면 같은 항목이 두 번 나갈 수 있고(적어도 한 번), 위 멱등이 받아 낸다 | S-T5·S-T35, 적재 처리기 통합 시험(실제 PostgreSQL), 릴레이 통합 시험(실제 Valkey·Kafka) |
 | 결제 접수 뒤 좌석 묶기(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-142): 묶기와 같은 좌석의 만료·다른 사람의 홀드가 겹침, 같은 주문의 묶기가 두 번 옴, 실패 해제가 남의 새 홀드를 풂 | 묶기·실패 해제·홀드·만료는 모두 같은 회차 슬롯의 Lua라 샤드에서 하나씩 차례로 돈다. 묶기는 판정을 모두 먼저 하고 쓰기를 마지막에 한꺼번에 해(하나라도 남의 좌석이면 아무것도 쓰지 않는다) 만료가 사이에 끼지 못하고, 묶은 좌석은 만료 인덱스에서 빠져 만료가 건드리지 않는다. 실패 해제는 홀드 Hash의 `holdId`·`owner`가 같은 좌석만 푼다. 다시 만든 뒤의 빈 좌석은 판 번호가 같을 때만 다시 잡는다 | `specs/seat.qnt`의 `inv_noOversell`·`inv_quotaNotExceeded`·`inv_staleSalesBounded`, 묶기·실패 해제 Lua 통합 시험(실제 Valkey) |
 | 다시 만들기(RB-06, 추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-143): 두 파드가 같은 회차를 함께 다시 만듦, 다시 만드는 동안 판매 예약이 커밋됨, 다시 만들기와 판매 열기가 둘 다 세대 키를 씀 | `seat_rebuild` 회차 행 하나를 임대로 잡는 한 문장(`ON CONFLICT … DO UPDATE … WHERE lease_until이 비었거나 지남 RETURNING gen`)이 판 번호를 올려 커밋한다. 임대를 못 잡은 쪽은 BUSY로 끝난다. 판 번호를 커밋한 뒤 판매 행을 읽으므로, 그 전에 커밋된 판매는 읽히고 그 뒤의 판매 예약은 판 번호가 달라 묶기부터 다시 한다(PRF-160). 좌석 Redis 쓰기 Lua는 세대 키가 이미 있으면 아무것도 쓰지 않는다. 판매 열기는 판매 시작 전에만 부른다 | `specs/seat.qnt`의 `rebuild`·`inv_noOversell`·`inv_staleSalesBounded`, 다시 만들기 통합 시험(실제 PostgreSQL·Valkey, S-T26 ④) |
+| 주문 상태 전이(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-160): 같은 주문의 두 전이가 겹침(승인 결과와 승인 기한 만료, 같은 결제 사건이 사건 길과 당기기로 두 번 옴), 이력 번호를 두 트랜잭션이 같이 매김 | 상태 바꾸기는 주문 전이 함수의 조건부 UPDATE 하나(`WHERE id = $1 AND status = <출발>`)다. 같은 행을 바꾸는 트랜잭션은 행 쓰기 잠금에서 줄을 서고, 뒤 쪽은 앞 쪽이 커밋한 뒤 조건을 다시 평가해 0행이 되므로 하나만 효과가 있다. 이력 번호는 같은 UPDATE가 `event_seq`를 1 올려 얻으므로 빈틈도 겹침도 없고 커밋 순서와 같다. 이력 없이 상태만 바꾼 트랜잭션은 지연 제약 트리거가 커밋 때 막는다. 결제 결과는 `payment_event_seq < 받은 순번` 조건을 같은 UPDATE에 두어 늦게 온 같은 사건을 거른다(ADR-0146 결정 2). Outbox 행은 마지막 문장이다(ADR-0116 결정 3) | 주문 저장소 통합 시험(실제 PostgreSQL 18, 같은 주문에 전이 둘을 동시에), P-T13(이력 역추적), 매일 상태·이력 검사 |
 | 좌석 상태 전이(`seat_hold`·`seat_sale`) UPDATE 과다로 인한 성능 저하 | `seat_hold`·`seat_sale`의 `status` 전이는 부분 유니크 인덱스의 조건 열을 바꾸므로 HOT(Heap-Only Tuples) 갱신이 되지 않는다(PostgreSQL 18 `relcache.c`가 인덱스 조건 열을 HOT를 막는 열에 넣는다). `fillfactor`는 인덱스 밖 열만 바꾸는 갱신(`purchase_quota.used` 등)에 쓴다. `seat_hold`는 표별 `autovacuum_vacuum_scale_factor`를 0.02 [가정](기본 0.2)로 낮춰 청소를 앞당긴다(추천 적용 2026-10-22, ADR-0083) | K3 데이터베이스 부하 튜닝(죽은 행 수·인덱스 크기) |
 
 데이터베이스 인덱스는 다음을 표준으로 만든다. 활성 판매의 유일 부분 인덱스 `seat_sale (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`(§2), 홀드 원장의 활성 홀드 유일 부분 인덱스 `seat_hold (event_id, seat_id) WHERE status = 'HELD'`, 회차·좌석별 등급 정본 `event_seat_price (event_id, seat_id)` 기본 키(2026-10-28 좌석 Redis 장애 때의 비상 홀드 경로를 없애 잠금 대상이 아니다, ADR-0121), 검색 읽기 모델 `search_term`의 띄어쓰기 없앤 값·낱자·초성에 둔 앞부분 일치용 B-tree 인덱스(`text_pattern_ops`)다(ADR-0094). 트랜잭션 격리 수준 실험(READ COMMITTED, REPEATABLE READ, SERIALIZABLE 환경에서 쓰기 스큐 재현)으로, 애플리케이션 계층의 비즈니스 로직에만 기대지 않고 데이터베이스의 물리 유니크 제약을 마지막 안전 방어선으로 둔 설계가 타당함을 보인다.
@@ -2334,6 +2346,7 @@ erDiagram
 | 상태 쓸기 작업(각 서비스) | `WHERE status = '<대기 상태>' AND <기한> < now() ORDER BY <기한> LIMIT n` | 새로 대기 상태만 담은 부분 인덱스: `payment (status_changed_at) WHERE status = 'UNKNOWN'`, `payment (deposit_due_at) WHERE status = 'AWAITING_DEPOSIT'`, `seat_sale (pending_until) WHERE status = 'PENDING'`, `transfer_offer (expires_at) WHERE status = 'OFFERED'`, `(purge_at) WHERE purge_at IS NOT NULL`, `order_idempotency (created_at)`, 서비스마다 둔 `idempotency_record (created_at)`(ADR-0146 결정 1), Outbox `(seq) WHERE sent_at IS NULL`(모든 환경의 폴링 릴레이, ADR-0116), `ticket_issue_job (next_attempt_at)`(발권 재시도, 행이 적은 작은 표, ADR-0106), `merch_order (stock_reserved_until) WHERE status = 'CREATED'`(굿즈 재고 예약 만료의 안전망, ADR-0107) | `Limit → Index Scan`(끝난 행은 인덱스에 없다) | 한 번에 찾은 행 수, 부분 인덱스 크기 추이 |
 | 알림 발송 워커(core, 추천 적용 2026-10-30, docs/features/notify.md §4) | 낱건: `WHERE status IN ('PENDING','RETRYING') AND next_attempt_at <= now() AND (lease_until IS NULL OR lease_until < now()) ORDER BY next_attempt_at LIMIT 50 FOR UPDATE SKIP LOCKED`(ADR-0109). 대량 발송: 같은 꼴로 `notification_broadcast_chunk`의 `slot_at`을 `LIMIT 1`, 조각 범위의 신청은 `WHERE event_id = $1 AND kind = $2 AND status = 'ACTIVE' AND id > $sent_upto AND id < $id_to ORDER BY id LIMIT 100`(읽기 전용 복제본), 그 계정들의 구독은 `push_subscription WHERE account_id = ANY($1)` | 새로 `notification_job (next_attempt_at) WHERE status IN ('PENDING','RETRYING')`, `notification_broadcast_chunk (slot_at) WHERE status IN ('PENDING','RUNNING')`, `notification_subscription (event_id, kind, id)`, `push_subscription (account_id)`. `webhook_delivery`의 부분 인덱스는 정본(§2) | `LockRows → Limit → Index Scan`(끝난 행은 인덱스에 없다), 신청 범위는 `Limit → Index Scan`(범위 조건) | 한 번에 고른 행 수, 잠금 대기, 조각 하나의 처리 시간(N-T6) |
 | 주문 만료 안전망(purchase) | `WHERE id >= $1 AND id < $2 AND status IN ('CREATED','AUTHENTICATED') ORDER BY id LIMIT 500`($1·$2는 '만든 지 1일~90분 [가정]'을 UUIDv7 경계로 바꾼 값) | 새 인덱스 없음(정본 기본 키). 쓰기가 많은 `purchase_order`에 인덱스를 더하지 않는다 | `Limit → Index Scan using purchase_order_pkey`, 상태는 Filter | `Rows Removed by Filter`, 한 번에 끝낸 수(ADR-0107) |
+| 매일 주문 상태·이력 검사(purchase, 추천 적용 2026-11-05, BUILD_ORDER PRF-160, ADR-0113) | 전날(한국 시각) `order_event.occurred_at` 범위의 주문 ID를 한 번에 모으기(`SELECT DISTINCT order_id … WHERE occurred_at >= $1 AND occurred_at < $2`), 그 ID를 1,000건 [가정]씩 이력 행 수·마지막 번호·마지막 도착 상태와 `purchase_order.status`·`event_seq` 견주기. 묶음마다 `ORDER BY order_id LIMIT`로 범위를 다시 훑으면 기본 키 색인을 처음부터 타 비용이 표 전체에 비례했다(2026-11-05 코드 리뷰 실측: 397만 행에서 16배) | 새로 `order_event USING brin (occurred_at)`. 나머지는 정본 기본 키 `order_event (order_id, seq)`·`purchase_order_pkey` | `Bitmap Heap Scan`(BRIN) → `HashAggregate`, 주문별 `Index Scan using order_event_pkey` | 한 번에 본 주문 수, 어긋난 주문 수(`order_history_mismatch`), 실행 시간 |
 
 - 외래 키를 참조하는 쪽 열에는 인덱스를 둔다. PostgreSQL은 자동으로 만들지 않고(18 문서), 보존 기한이 지난 행의 나눠 지우기(§2, ADR-0114), 부모 행 삭제, 파티션 떼어 내기가 이 인덱스로 자식 행을 찾는다.
 - 쓰기가 많은 표(`seat_hold`, `seat_sale`, `purchase_order`, `payment`, Outbox)는 인덱스를 아낀다. 인덱스마다 INSERT·UPDATE 비용이 늘고, 인덱스가 걸린 칸을 바꾸면 HOT 갱신이 되지 않는다.

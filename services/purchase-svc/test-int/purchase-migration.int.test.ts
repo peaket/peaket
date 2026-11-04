@@ -1,6 +1,8 @@
 // purchase DB의 좌석 표 마이그레이션을 실제 PostgreSQL 18 컨테이너에서 돈다(docs/data.md §4 'purchase DB의 좌석 표 마이그레이션', docs/features/seat-hold.md §6 'Hard Sale 저장소의 첫 구현',
 // BUILD_ORDER PRF-140 ①). 마이그레이션 멱등, seat_hold의 월 파티션, check 제약, 활성 상태 부분 유일 인덱스가 실제 DB에서 정본대로 막는지 본다.
 // 세 번째 마이그레이션(0002, BUILD_ORDER PRF-143, docs/data.md §4 '다시 만들기 표와 원장 칸')의 seat_rebuild 표와 seat_hold의 hold_id·purchase_session_id 칸도 본다.
+// 네 번째 마이그레이션(0003, BUILD_ORDER PRF-160, docs/data.md §4 '주문 표 마이그레이션')은 표가 생기는 것과 파티션 여부만 여기서 보고(주문 표 다섯은 나누지 않고 Outbox 부모만 ID 범위로 나눈다),
+// 주문 표의 제약·인덱스·전이는 test-int/order-store.int.test.ts가 본다.
 // 컨테이너는 이 파일이 끝나면 afterAll에서 지운다.
 import { randomUUID } from 'node:crypto';
 import { fakeClock, systemClock, uuidv7, uuidv7Time } from '@peaket/platform';
@@ -60,13 +62,21 @@ const count = async (text: string, params: unknown[]): Promise<number> => Number
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
-  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 3(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 4(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox)와 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)).rows.map((r) => r.relname);
     const before = await tables();
+    // 0003이 만든 주문 표 다섯과 Outbox 부모 표가 있다(PRF-160)
+    expect(before).toEqual(expect.arrayContaining(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'outbox']));
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(3);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(4);
+  });
+
+  test('0003: payment_attempt.order_id에 일반(유일 아님) 인덱스 payment_attempt_order_id_idx가 있다(주문으로 결제 시도 찾기, 주문 행을 지울 때 외래 키 검사) [ASVS v5.0.0-2.3.4]', async () => {
+    const r = await q<{ indexdef: string }>(`select indexdef from pg_indexes where schemaname = 'public' and indexname = 'payment_attempt_order_id_idx'`);
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0]!.indexdef).toBe('CREATE INDEX payment_attempt_order_id_idx ON public.payment_attempt USING btree (order_id)');
   });
 
   test('seat_sale·purchase_quota·seat_hold·seat_rebuild 네 표가 있다 [ASVS v5.0.0-2.3.4]', async () => {
@@ -76,13 +86,22 @@ describe('마이그레이션과 표 모양', () => {
     expect(r.rows.map((x) => x.relname)).toEqual(['purchase_quota', 'seat_hold', 'seat_rebuild', 'seat_sale']);
   });
 
-  test('seat_hold는 event_id로 나눈 범위(RANGE) 파티션 부모이고 seat_sale·purchase_quota·seat_rebuild는 파티션 표가 아니다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('파티션 부모는 seat_hold(event_id 범위)와 0003의 outbox(id 범위) 둘뿐이고, seat_sale·purchase_quota·seat_rebuild와 주문 표 다섯은 파티션 표가 아니다 [ASVS v5.0.0-2.3.4]', async () => {
     const parts = await q<{ relname: string; partstrat: string; keydef: string }>(
       `select c.relname, pt.partstrat, pg_get_partkeydef(pt.partrelid) as keydef
          from pg_partitioned_table pt join pg_class c on c.oid = pt.partrelid
         where c.relnamespace = 'public'::regnamespace order by c.relname`,
     );
-    expect(parts.rows).toEqual([{ relname: 'seat_hold', partstrat: 'r', keydef: 'RANGE (event_id)' }]);
+    expect(parts.rows).toEqual([
+      { relname: 'outbox', partstrat: 'r', keydef: 'RANGE (id)' },
+      { relname: 'seat_hold', partstrat: 'r', keydef: 'RANGE (event_id)' },
+    ]);
+    // 주문 표는 나누지 않는다(ADR-0114)
+    const orders = await q<{ relname: string; relkind: string }>(
+      `select relname, relkind from pg_class where relnamespace = 'public'::regnamespace
+         and relname in ('purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt') order by relname`,
+    );
+    expect(orders.rows).toEqual(['order_event', 'order_idempotency', 'order_item', 'payment_attempt', 'purchase_order'].map((relname) => ({ relname, relkind: 'r' })));
     const kinds = await q<{ relname: string; relkind: string }>(
       `select relname, relkind from pg_class where relnamespace = 'public'::regnamespace and relname in ('seat_sale', 'purchase_quota', 'seat_hold', 'seat_rebuild') and relkind in ('r', 'p') order by relname`,
     );
