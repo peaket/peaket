@@ -2,6 +2,7 @@
 // ① 회차 슬롯 확인(읽기만) → ② 사람 슬롯 q:adm → ③ 회차 슬롯 입장(빈자리·곧 입장) → ④ 사람 슬롯 마무리. 이름은 명세 specs/queue.qnt의 admit이다.
 // ①에서 걸리는 대기표(만료·빠진 번호·차례 전)는 q:adm을 건드리지 않는다. ②가 새로 채운 값은 입장하지 않으면(SOON·장애) 지운다(ADR-0183 결정 3).
 // 요청마다 표지(fresh) 하나를 만들어 q:adm 값의 표지와 새 자리의 jti로 함께 쓴다. 같은 대기표가 받은 자리는 회차 슬롯 slot_of가 가린다(결정 2).
+// pid 키 전환 기간에는 ②·④와 15분 만료를 옛 pid → 새 pid 두 키에 차례로 한다(§3 'pid 키 전환 기간'의 첫 구현, BUILD_ORDER BOT-025, Q-T45).
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
@@ -16,6 +17,8 @@ export const ADMISSION_TICKETS = Symbol('queue.AdmissionTickets');
 export interface ConfirmInput {
   accountId: string;
   pid: string;
+  /** pid 키 전환 기간의 옛 pid(X-User-Pid-Prev). 있고 pid와 다르면 두 키에 한다 */
+  pidPrev?: string;
   /** 로그인 세션(입장 토큰 sid) */
   sessionId: string;
   eventId: string;
@@ -55,6 +58,8 @@ export class ConfirmAdmission {
     if (now >= saleEnd) throw new AdmissionError('SALE_ENDED', '판매 종료 뒤의 입장 확정');
     const hash = this.tickets.hash(b.queueTicket);
     const keepUntil = keepUntilOf(schedule);
+    // 사람 키를 부를 pid들(옛 pid부터, 교체 직전 토큰과 두 pid 토큰이 옛 키에서 만나게)
+    const persons = i.pidPrev && i.pidPrev !== i.pid ? [i.pidPrev, i.pid] : [i.pid];
 
     const pre = await this.store.precheck({ eventId: i.eventId, seq: t.s, gen: t.g, ticketHash: hash });
     switch (pre.kind) {
@@ -71,7 +76,8 @@ export class ConfirmAdmission {
       case 'NOT_YET':
         return { status: 'NOT_YET', retryAfterMs: pre.retryAfterMs, serverTimeMs: now, verificationReason: null };
       case 'EXPIRED': {
-        const { admittedBefore } = await this.store.expire({ pid: i.pid, eventId: i.eventId, seq: t.s, gen: t.g });
+        let admittedBefore = false;
+        for (const pid of persons) admittedBefore = (await this.store.expire({ pid, eventId: i.eventId, seq: t.s, gen: t.g })).admittedBefore || admittedBefore;
         this.signals.turnEntryFailed('user');
         throw new AdmissionError('EXPIRED', '차례 뒤 15분이 지났다', !admittedBefore && now < saleEnd);
       }
@@ -81,14 +87,19 @@ export class ConfirmAdmission {
 
     // 차례가 왔다. 여기부터의 저장소 일시 장애는 차례가 온 사람의 시스템 원인 실패다(Q-T28)
     const fresh = randomUUID();
-    let newlyClaimed = false;
+    // 이 요청이 새로 채운 q:adm의 pid들. 입장하지 않으면(SOON·장애·다른 키의 DUP) 지운다
+    let claimed: string[] = [];
     try {
-      const claim = await this.store.claim({ pid: i.pid, eventId: i.eventId, ticketHash: hash, nonce: fresh, expireAtMs: saleEnd });
-      if (claim.kind === 'DUP') {
-        await this.store.markRemoved({ eventId: i.eventId, seq: t.s, expireAtMs: keepUntil });
-        throw new AdmissionError('DUPLICATE_ADMISSION', '같은 사람이 다른 대기표로 이미 입장했다');
+      for (const pid of persons) {
+        const claim = await this.store.claim({ pid, eventId: i.eventId, ticketHash: hash, nonce: fresh, expireAtMs: saleEnd });
+        if (claim.kind === 'DUP') {
+          await this.#release(i, claimed, hash, fresh, saleEnd);
+          claimed = [];
+          await this.store.markRemoved({ eventId: i.eventId, seq: t.s, expireAtMs: keepUntil });
+          throw new AdmissionError('DUPLICATE_ADMISSION', '같은 사람이 다른 대기표로 이미 입장했다');
+        }
+        if (claim.kind === 'NEW') claimed.push(pid);
       }
-      newlyClaimed = claim.kind === 'NEW';
       const r = await this.store.admit({
         eventId: i.eventId,
         seq: t.s,
@@ -101,9 +112,10 @@ export class ConfirmAdmission {
       });
       if ('arrivalDelayMs' in r && r.arrivalDelayMs !== undefined) this.signals.arrivalDelay(r.arrivalDelayMs / 1000);
       if (r.kind === 'ADMITTED') {
-        // ADMITTED면 q:adm을 이 요청의 표지로 다시 쓰고(없으면 되살린다) q:dup을 지운다
-        await this.store.settle({ pid: i.pid, eventId: i.eventId, ticketHash: hash, outcome: 'ADMITTED', nonce: fresh, expireAtMs: saleEnd });
-        newlyClaimed = false;
+        // 입장했으니 되돌리지 않는다: 마무리가 중간에 오류로 끝나도 이미 마무리한 키의 q:adm을 지우지 않는다(같은 대기표로 다시 오면 마무리한다)
+        claimed = [];
+        // ADMITTED면 q:adm을 이 요청의 표지로 다시 쓰고(없으면 되살린다) q:dup을 지운다(두 키면 둘 다)
+        for (const pid of persons) await this.store.settle({ pid, eventId: i.eventId, ticketHash: hash, outcome: 'ADMITTED', nonce: fresh, expireAtMs: saleEnd });
         // 입장 Lua가 이미 막으므로 늘 0이다. 그 확인이 빠지는 코드 퇴행을 잡는 감시다(ADR-0183 결정 7)
         if (t.s > r.serving) this.signals.admittedBeforeTurn();
         if (r.soonWaitMs !== undefined) this.signals.soonWait(r.soonWaitMs / 1000);
@@ -112,8 +124,8 @@ export class ConfirmAdmission {
         const ecdh = this.signer.serverEcdhPublicKey();
         return { status: 'ADMITTED', admissionToken: token, serverTimeMs: now, verificationReason: null, ...(ecdh ? { serverEcdhPublicKey: ecdh } : {}) };
       }
-      if (newlyClaimed) await this.#release(i, hash, fresh, saleEnd);
-      newlyClaimed = false;
+      await this.#release(i, claimed, hash, fresh, saleEnd);
+      claimed = [];
       if (r.kind === 'SOON') return { status: 'SOON', retryAfterSeconds: r.retryAfterSeconds, serverTimeMs: now, verificationReason: null };
       // 확인과 입장 사이에 빠진 번호가 됐거나 serving이 모자라다(장애 전환으로 serving이 되돌아감)
       if (r.kind === 'REMOVED') throw new AdmissionError('REMOVED', '확인 뒤 빠진 번호가 됐다');
@@ -122,14 +134,15 @@ export class ConfirmAdmission {
       if (e instanceof QueueStoreUnavailable) {
         this.signals.turnEntryFailed('system');
         // 입장하지 않았으니 이 요청이 새로 채운 q:adm은 지운다(최선 노력)
-        if (newlyClaimed) await this.#release(i, hash, fresh, saleEnd).catch(() => undefined);
+        await this.#release(i, claimed, hash, fresh, saleEnd).catch(() => undefined);
       }
       throw e;
     }
   }
 
-  async #release(i: ConfirmInput, hash: string, nonce: string, saleEnd: number): Promise<void> {
-    await this.store.settle({ pid: i.pid, eventId: i.eventId, ticketHash: hash, outcome: 'RELEASE', nonce, expireAtMs: saleEnd });
+  /** 이 요청이 새로 채운 q:adm만 지운다(값이 이 요청이 채운 그대로일 때만) */
+  async #release(i: ConfirmInput, pids: readonly string[], hash: string, nonce: string, saleEnd: number): Promise<void> {
+    for (const pid of pids) await this.store.settle({ pid, eventId: i.eventId, ticketHash: hash, outcome: 'RELEASE', nonce, expireAtMs: saleEnd });
   }
 
   /** 예상 대기 오차(관측용): (차례 시각 − 처음 보인 시각) ÷ 처음 예상 대기. 범위 밖이면 버린다(ADR-0183 결정 10) */

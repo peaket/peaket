@@ -57,6 +57,13 @@
       "when": 1793777081693,
       "tag": "0007_verification_keys_age_conflicts_validate",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793780342259,
+      "tag": "0008_pid_key_rotation",
+      "breakpoints": true
     }
   ]
 }

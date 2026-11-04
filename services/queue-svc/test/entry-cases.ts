@@ -70,6 +70,8 @@ function pausing(store: EntryStore, hooks: { beforeNumber?: () => Promise<void>;
     markVerifying: (i) => store.markVerifying(i),
     rb05: (i) => store.rb05(i),
     confirmRb05: (i) => store.confirmRb05(i),
+    mirror: (i) => store.mirror(i),
+    dropOwn: (i) => store.dropOwn(i),
   };
 }
 

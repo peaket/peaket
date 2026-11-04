@@ -10,13 +10,16 @@ import {
   BATCH_STATE_LUA,
   CONVERT_LUA,
   DROP_BATCH_LUA,
+  DROP_OWN_LUA,
   MARK_REMOVED_LUA,
   MARK_VERIFYING_LUA,
+  MIRROR_LUA,
   NUMBER_BATCH_LUA,
   PREEMPT_LUA,
   RB05_CLEAR_LUA,
   RB05_LUA,
   RB05_MARK_LUA,
+  READ_OWN_LUA,
   RECORD_LUA,
   RELEASE_LUA,
   REQUEST_REPAIR_LUA,
@@ -55,6 +58,9 @@ const RB05 = redisScript(RB05_LUA);
 const RB05_MARK = redisScript(RB05_MARK_LUA);
 const RB05_CLEAR = redisScript(RB05_CLEAR_LUA);
 const RECORD = redisScript(RECORD_LUA);
+const READ_OWN = redisScript(READ_OWN_LUA);
+const MIRROR = redisScript(MIRROR_LUA);
+const DROP_OWN = redisScript(DROP_OWN_LUA);
 const BATCH_RECORD = redisScript(BATCH_RECORD_LUA);
 const BATCH_STATE = redisScript(BATCH_STATE_LUA);
 const REQUEST_REPAIR = redisScript(REQUEST_REPAIR_LUA);
@@ -253,6 +259,18 @@ export class RedisEntryStore implements EntryStore {
 
   async dropBatch(i: { pid: string; eventId: string; requestId: string; tokenHash: string }): Promise<void> {
     await guard(this.redis.evalScript(DROP_BATCH, [keys.dup(i.pid, i.eventId)], [i.requestId, i.tokenHash]));
+  }
+
+  async mirror(i: { from: string; to: string; eventId: string; requestId: string }): Promise<'COPIED' | 'TAKEN' | 'ADMITTED'> {
+    const own = (await guard(this.redis.evalScript(READ_OWN, [keys.dup(i.from, i.eventId)], [i.requestId]))) as unknown[];
+    if (own.length === 0) return 'COPIED';
+    const r = str(await guard(this.redis.evalScript(MIRROR, [keys.dup(i.to, i.eventId), keys.adm(i.to, i.eventId)], [str(own[0]), String(Number(own[1])), i.requestId])));
+    if (r === 'COPIED' || r === 'TAKEN' || r === 'ADMITTED') return r;
+    throw new Error(`옮겨 쓰기 Lua가 모르는 값을 돌려줬다: ${r}`);
+  }
+
+  async dropOwn(i: { pid: string; eventId: string; requestId: string }): Promise<void> {
+    await guard(this.redis.evalScript(DROP_OWN, [keys.dup(i.pid, i.eventId)], [i.requestId]));
   }
 
   async markRemoved(i: { eventId: string; seq: number; expireAtMs: number }): Promise<void> {

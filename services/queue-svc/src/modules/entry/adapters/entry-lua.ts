@@ -280,6 +280,47 @@ if bh and brq == ARGV[1] and bh == ARGV[2] then redis.call('DEL', KEYS[1]) retur
 return 0
 `;
 
+// pid 키 전환(docs/features/queue-admission.md §3 'pid 키 전환 기간'의 첫 구현, BUILD_ORDER BOT-025): 두 pid의 사람 키는 해시 슬롯이 달라
+// 한 Lua로 묶지 못한다. 앞 키에서 이 요청의 값(번호 기록·묶음 기록)과 수명을 읽고(READ_OWN), 다른 키가 비었거나 이 요청의 값일 때만 옮겨 쓴다(MIRROR).
+// 다른 요청의 값이 있으면 TAKEN, 입장 키가 있으면 ADMITTED다. 옮기지 못하면 앞 키의 이 요청 값을 지운다(DROP_OWN, 선점도 지운다)
+export const READ_OWN_LUA = `
+local v = redis.call('GET', KEYS[1])
+if not v then return {} end
+local s, g, rq = string.match(v, ${RECORDED})
+local bh, brq = string.match(v, ${BATCHED})
+if (s and rq == ARGV[1]) or (bh and brq == ARGV[1]) then return {v, redis.call('PEXPIRETIME', KEYS[1])} end
+return {}
+`;
+
+export const MIRROR_LUA = `
+if redis.call('EXISTS', KEYS[2]) == 1 then return 'ADMITTED' end
+local v = redis.call('GET', KEYS[1])
+if v and v ~= 'PENDING:' .. ARGV[3] then
+  local s, g, rq = string.match(v, ${RECORDED})
+  local bh, brq = string.match(v, ${BATCHED})
+  if not ((s and rq == ARGV[3]) or (bh and brq == ARGV[3])) then return 'TAKEN' end
+end
+if tonumber(ARGV[2]) > 0 then
+  redis.call('SET', KEYS[1], ARGV[1], 'PXAT', ARGV[2])
+else
+  redis.call('SET', KEYS[1], ARGV[1])
+end
+return 'COPIED'
+`;
+
+export const DROP_OWN_LUA = `
+local v = redis.call('GET', KEYS[1])
+if not v then return 0 end
+local own = v == 'PENDING:' .. ARGV[1]
+if not own then
+  local s, g, rq = string.match(v, ${RECORDED})
+  local bh, brq = string.match(v, ${BATCHED})
+  own = (s and rq == ARGV[1]) or (bh and brq == ARGV[1])
+end
+if own then redis.call('DEL', KEYS[1]) return 1 end
+return 0
+`;
+
 export const MARK_REMOVED_LUA = `${EXTEND}
 redis.call('SETBIT', KEYS[1], ARGV[1], 1)
 extend(KEYS[1], ARGV[2])

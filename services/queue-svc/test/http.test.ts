@@ -42,7 +42,7 @@ async function event(o: Parameters<typeof openSchedule>[1] = {}) {
 const entryBody = (eventId: string, o: Record<string, unknown> = {}) =>
   JSON.stringify({ preverifyToken: preverifyToken(svc.clock, eventId), deviceId: DEVICE, entryRequestId: newRequest(), ...o });
 
-const enter = (eventId: string, payload: string, contentType = 'text/plain;charset=UTF-8', headers = fan()) =>
+const enter = (eventId: string, payload: string, contentType = 'text/plain;charset=UTF-8', headers: Record<string, string> = fan()) =>
   svc.http.inject({ method: 'POST', url: `/v1/queues/${eventId}/entries`, headers: { ...headers, 'content-type': contentType }, payload });
 
 describe('진입 경로', () => {
@@ -78,6 +78,19 @@ describe('진입 경로', () => {
     const noPid = await enter(id, entryBody(id), undefined, fan({ pid: null }));
     expect(noPid.statusCode).toBe(403);
     expect(JSON.parse(noPid.payload).type).toMatch(/identity-verification-required$/);
+  });
+
+  test('[Q-T45] 옛pid머리(X-User-Pid-Prev)가오면_옛pid키로도막고_키에넣을수없는모양이면403본인확인필요다', async () => {
+    const id = await event({ openBatch: false });
+    const OLD = `pid-old-${newRequest().slice(0, 8)}`;
+    const NEW = `pid-new-${newRequest().slice(0, 8)}`;
+    expect((await enter(id, entryBody(id), undefined, fan({ pid: OLD }))).statusCode).toBe(201);
+    const again = await enter(id, entryBody(id), undefined, { ...fan({ pid: NEW }), 'x-user-pid-prev': OLD });
+    expect(again.statusCode).toBe(409);
+    expect(JSON.parse(again.payload).type).toMatch(/already-waiting$/);
+    const bad = await enter(id, entryBody(id), undefined, { ...fan({ pid: NEW }), 'x-user-pid-prev': 'pid:{x}' });
+    expect(bad.statusCode).toBe(403);
+    expect(JSON.parse(bad.payload).type).toMatch(/identity-verification-required$/);
   });
 
   test('오류는_문제상세형식이다_404queue-not-found·403preverify-invalid·409already-waiting·410sale-ended', async () => {

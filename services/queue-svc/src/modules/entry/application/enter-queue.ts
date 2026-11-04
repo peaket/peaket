@@ -1,10 +1,11 @@
 // 대기열 진입(openapi POST /v1/queues/{eventId}/entries, docs/features/queue-admission.md §3·'묶음의 첫 구현', FR-006, POL-002, ADR-0041).
 // ① 사람 슬롯 선점 → ② 회차 슬롯 번호(구간 안의 묶음 대상은 묶음에 넣음) → ③ 사람 슬롯 기록(묶음이면 묶음 기록, OPEN[14]).
 // 세 단계는 원자적이지 않아 선점 값 PENDING:{요청 ID}로 같은 사람이 갇히지 않게 한다(중간-035). 이름은 명세 specs/queue.qnt의 동작 이름이다.
+// pid 키 전환 기간에는 옛 pid → 새 pid 차례로 선점하고, 앞 키의 기록을 다른 키에 옮겨 쓴다(§3 'pid 키 전환 기간'의 첫 구현, BUILD_ORDER BOT-025, Q-T45).
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
-import { type BatchedEntry, ENTRY_STORE, EVENT_SCHEDULES, type EntryStore, type EventSchedules, QUEUE_TOKENS, type QueueTokens } from '../domain/ports.js';
+import { type BatchedEntry, ENTRY_STORE, EVENT_SCHEDULES, type EntryStore, type EventSchedules, type PreemptResult, QUEUE_TOKENS, type QueueTokens } from '../domain/ports.js';
 import {
   BATCH_REPAIR_RETRY_SEC,
   BATCH_RESULT_DELAY_MS,
@@ -41,6 +42,8 @@ export const DEFAULT_ENTRY_OPTIONS: EntryOptions = { pendingTtlMs: PENDING_TTL_M
 export interface EnterInput {
   accountId: string;
   pid: string;
+  /** pid 키 전환 기간의 옛 pid(게이트웨이 머리 X-User-Pid-Prev). 있고 pid와 다르면 두 키로 처리한다 */
+  pidPrev?: string;
   eventId: string;
   body: { preverifyToken: string; deviceId?: string; entryRequestId?: string };
 }
@@ -76,6 +79,8 @@ interface Ctx {
   requestId: string;
   keepUntil: number;
   saleEnd: number;
+  /** 사람 키를 부를 pid(앞 키). 한 키로 처리하면 pid, 두 키면 옛 pid(옛 키에 이 요청의 값을 잃었으면 새 pid) */
+  pid: string;
 }
 
 @Injectable()
@@ -109,13 +114,63 @@ export class EnterQueue {
     if (!pre || pre.e !== i.eventId || pre.a !== i.accountId || pre.d !== device || now >= pre.exp) {
       throw new EntryError('PREVERIFY_INVALID', '사전 검증 토큰이 없거나 맞지 않는다');
     }
-    const c: Ctx = { i, schedule, requestId: i.body.entryRequestId ?? randomUUID(), keepUntil: keepUntilOf(schedule), saleEnd: saleEndOf(schedule) };
-    return this.#enter(c, pre.jny, pre.vr, pre.i0 < schedule.opensAtMs, this.tokens.hash(i.body.preverifyToken), true);
+    const c: Ctx = { i, schedule, requestId: i.body.entryRequestId ?? randomUUID(), keepUntil: keepUntilOf(schedule), saleEnd: saleEndOf(schedule), pid: i.pid };
+    const eligible = pre.i0 < schedule.opensAtMs;
+    const tokenHash = this.tokens.hash(i.body.preverifyToken);
+    if (i.pidPrev && i.pidPrev !== i.pid) return this.#enterTwoKeys(c, i.pidPrev, pre.jny, pre.vr, eligible, tokenHash);
+    return this.#enter(c, pre.jny, pre.vr, eligible, tokenHash, true);
+  }
+
+  /**
+   * pid 키 전환 기간의 진입: 옛 pid → 새 pid 차례로 선점하고, 그 뒤 단계는 앞 키에서 한 뒤 앞 키의 값을 다른 키에 옮겨 쓴다.
+   * 두 pid의 키는 해시 슬롯이 달라 한 Lua로 묶지 못한다. 옛 pid부터 부르는 것은 교체 직전 토큰(옛 pid만)과 두 pid 토큰이 옛 키에서 만나 하나만 통과하게 하려는 것이다
+   */
+  async #enterTwoKeys(c: Ctx, old: string, jny: string, vr: ReasonCategory | undefined, eligible: boolean, tokenHash: string): Promise<EnterOutcome> {
+    const { i, requestId } = c;
+    const p1 = await this.store.preempt({ pid: old, eventId: i.eventId, requestId, pendingTtlMs: this.options.pendingTtlMs });
+    if (p1.kind === 'ADMITTED') throw new EntryError('ALREADY_ADMITTED', '이 회차에 이미 입장했다(옛 pid)');
+    if (p1.kind === 'BUSY') throw new EntryError('ALREADY_WAITING', '이미 대기 중이다(옛 pid)');
+    let p2: PreemptResult;
+    try {
+      p2 = await this.store.preempt({ pid: i.pid, eventId: i.eventId, requestId, pendingTtlMs: this.options.pendingTtlMs });
+    } catch (e) {
+      // 새 pid 쪽 오류: 옛 선점을 지우고 503(같은 요청 ID로 다시 보내면 처음부터 한다)
+      await this.#release(c, old);
+      throw e;
+    }
+    if (p2.kind === 'ADMITTED' || p2.kind === 'BUSY') {
+      await this.#release(c, old);
+      throw new EntryError(p2.kind === 'ADMITTED' ? 'ALREADY_ADMITTED' : 'ALREADY_WAITING', '새 pid 쪽이 거절했다');
+    }
+    // 앞 키는 옛 pid다. 옛 키에 이 요청의 값이 없고 새 키에만 있으면(장애 전환으로 옛 키의 쓰기를 잃음) 새 pid가 앞 키다
+    const newLeads = p1.kind === 'PROCEED' && p2.kind !== 'PROCEED';
+    const lead = newLeads ? i.pid : old;
+    const other = newLeads ? old : i.pid;
+    let out: EnterOutcome;
+    try {
+      out = await this.#after({ ...c, pid: lead }, newLeads ? p2 : p1, jny, vr, eligible, tokenHash, true);
+    } catch (e) {
+      // 번호를 받지 못하고 끝났다: 다른 키의 선점도 푼다(값이 이 요청의 PENDING일 때만)
+      await this.#release(c, other);
+      throw e;
+    }
+    // 대기표·202를 주기 전에 앞 키의 값과 수명을 다른 키에 옮겨 쓴다. 오류면 503이고, 같은 요청 ID로 다시 보내면 같은 대기표와 옮겨 쓰기를 다시 한다
+    const m = await this.store.mirror({ from: lead, to: other, eventId: i.eventId, requestId });
+    if (m === 'COPIED') return out;
+    // 다른 키에 다른 요청의 값이나 입장 키가 있다: 한 사람이 번호 둘을 갖지 않게 앞 키의 이 요청 값을 지우고 받은 번호를 빠진 번호로 돌린다
+    await this.store.dropOwn({ pid: lead, eventId: i.eventId, requestId });
+    if (out.kind === 'TICKET') await this.store.markRemoved({ eventId: i.eventId, seq: out.seq, expireAtMs: c.keepUntil });
+    throw new EntryError(m === 'ADMITTED' ? 'ALREADY_ADMITTED' : 'ALREADY_WAITING', '다른 pid 키에 다른 요청의 값이 있다');
   }
 
   async #enter(c: Ctx, jny: string, vr: ReasonCategory | undefined, eligible: boolean, tokenHash: string, firstTry: boolean): Promise<EnterOutcome> {
+    const pre1 = await this.store.preempt({ pid: c.pid, eventId: c.i.eventId, requestId: c.requestId, pendingTtlMs: this.options.pendingTtlMs });
+    return this.#after(c, pre1, jny, vr, eligible, tokenHash, firstTry);
+  }
+
+  /** ① 선점 결과 뒤의 단계(② 번호·묶음, ③ 기록). 사람 키는 c.pid로 부른다 */
+  async #after(c: Ctx, pre1: PreemptResult, jny: string, vr: ReasonCategory | undefined, eligible: boolean, tokenHash: string, firstTry: boolean): Promise<EnterOutcome> {
     const { i, schedule, requestId, keepUntil, saleEnd } = c;
-    const pre1 = await this.store.preempt({ pid: i.pid, eventId: i.eventId, requestId, pendingTtlMs: this.options.pendingTtlMs });
     if (pre1.kind === 'ADMITTED') throw new EntryError('ALREADY_ADMITTED', '이 회차에 이미 입장했다');
     if (pre1.kind === 'BUSY') throw new EntryError('ALREADY_WAITING', '이미 대기 중이다');
     // 응답을 잃은 재시도: 기록 값(번호·세대·jny·vr)으로 처음 대기표를 그대로 다시 만든다. 그 사이 사전 검증 토큰을 갱신했어도 같다
@@ -150,7 +205,7 @@ export class EnterQueue {
       throw new EntryError('BATCHING', '오픈 직후 묶음 구간이다', num.retryAfterSeconds);
     }
     if (num.kind === 'BATCHING') {
-      const br = await this.store.batchRecord({ pid: i.pid, eventId: i.eventId, requestId, tokenHash, jny, ...(vr ? { vr } : {}), expireAtMs: saleEnd });
+      const br = await this.store.batchRecord({ pid: c.pid, eventId: i.eventId, requestId, tokenHash, jny, ...(vr ? { vr } : {}), expireAtMs: saleEnd });
       // 같은 요청이 다른 토큰으로 먼저 기록했으면 그 토큰의 결과 파일을 알려 준다(이 토큰의 자리는 아무도 갖지 않는 번호가 된다)
       if (br.kind === 'BATCHED') return this.#batching(c, br.tokenHash);
       // 같은 요청이 구간 끝을 걸쳐 둘로 와서 뒤 요청이 먼저 번호를 기록했다: 그 대기표를 준다(이 토큰의 묶음 자리는 아무도 갖지 않는 번호가 된다)
@@ -161,7 +216,7 @@ export class EnterQueue {
     }
 
     const { seq, gen } = num;
-    const rec = await this.store.record({ pid: i.pid, eventId: i.eventId, requestId, seq, gen, jny, ...(vr ? { vr } : {}), expireAtMs: saleEnd });
+    const rec = await this.store.record({ pid: c.pid, eventId: i.eventId, requestId, seq, gen, jny, ...(vr ? { vr } : {}), expireAtMs: saleEnd });
     if (rec.kind === 'RECORDED') return this.#issue(c, seq, gen, jny, vr);
     // 기록하지 못한 번호는 아무도 갖지 않으므로 빠진 번호로 돌린다
     await this.store.markRemoved({ eventId: i.eventId, seq, expireAtMs: keepUntil });
@@ -181,11 +236,11 @@ export class EnterQueue {
     // 묶음 기록은 그대로 두고 잠시 뒤 다시 오게 한다. admission-ctrl이 같은 입력으로 결과를 다시 쓴다
     if (res.kind === 'REPAIRING') throw new EntryError('BATCHING', '묶음 결과를 다시 쓰는 중이다', BATCH_REPAIR_RETRY_SEC);
     if (res.kind === 'RESULT') {
-      const conv = await this.store.convertBatch({ pid: i.pid, eventId: i.eventId, requestId, tokenHash: rec.tokenHash, seq: res.seq, gen: res.gen, expireAtMs: saleEnd });
+      const conv = await this.store.convertBatch({ pid: c.pid, eventId: i.eventId, requestId, tokenHash: rec.tokenHash, seq: res.seq, gen: res.gen, expireAtMs: saleEnd });
       if (conv.kind === 'RECORDED') return this.#issue(c, conv.seq, conv.gen, conv.jny, conv.vr);
       throw new EntryError('ALREADY_WAITING', '묶음 기록이 바뀌었다');
     }
-    await this.store.dropBatch({ pid: i.pid, eventId: i.eventId, requestId, tokenHash: rec.tokenHash });
+    await this.store.dropBatch({ pid: c.pid, eventId: i.eventId, requestId, tokenHash: rec.tokenHash });
     if (!firstTry) throw new EntryError('ALREADY_WAITING', '묶음 기록을 지운 뒤에도 다시 묶음 기록이 보인다');
     // 결과가 이미 게시돼 묶음 구간은 닫혔다. 같은 요청 ID로 일반 진입(맨 뒤 번호)을 한다
     return this.#enter(c, jny, vr, eligible, tokenHash, false);
@@ -245,10 +300,10 @@ export class EnterQueue {
     await this.confirmsSettled();
   }
 
-  /** 선점 풀기는 덤이다: 대기열 Redis가 잠시 안 되면 선점 수명이 지나 풀린다 */
-  async #release(c: Ctx): Promise<void> {
+  /** 선점 풀기는 덤이다: 대기열 Redis가 잠시 안 되면 선점 수명이 지나 풀린다. pid를 주지 않으면 앞 키 */
+  async #release(c: Ctx, pid: string = c.pid): Promise<void> {
     try {
-      await this.store.release({ pid: c.i.pid, eventId: c.i.eventId, requestId: c.requestId });
+      await this.store.release({ pid, eventId: c.i.eventId, requestId: c.requestId });
     } catch (e) {
       if (!(e instanceof QueueStoreUnavailable)) throw e;
     }

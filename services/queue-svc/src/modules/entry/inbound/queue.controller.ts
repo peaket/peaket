@@ -52,11 +52,13 @@ async function problem<T>(p: Promise<T>): Promise<T> {
   }
 }
 
-/** 키에 넣을 수 있는 회차·pid인지 본다. 회차가 틀리면 없는 대기열, pid가 없거나 틀리면 본인확인 필요 */
-function who(eventId: string, me: Principal): { pid: string } {
+/** 키에 넣을 수 있는 회차·pid인지 본다. 회차가 틀리면 없는 대기열, pid가 없거나 틀리면 본인확인 필요.
+ * pid 키 전환 기간의 옛 pid(X-User-Pid-Prev)도 같은 모양이어야 하고, pid와 같으면 버린다(§3 'pid 키 전환 기간'의 첫 구현) */
+function who(eventId: string, me: Principal): { pid: string; pidPrev?: string } {
   if (!KEY_PART.test(eventId)) throw new EntryError('NOT_FOUND', '회차 ID 모양이 틀렸다');
   if (!me.pid || !KEY_PART.test(me.pid)) throw new EntryError('IDENTITY_VERIFICATION_REQUIRED', 'pid가 없다(본인확인 전)');
-  return { pid: me.pid };
+  if (me.pidPrev !== undefined && !KEY_PART.test(me.pidPrev)) throw new EntryError('IDENTITY_VERIFICATION_REQUIRED', '옛 pid 모양이 틀렸다');
+  return me.pidPrev && me.pidPrev !== me.pid ? { pid: me.pid, pidPrev: me.pidPrev } : { pid: me.pid };
 }
 
 @Controller('v1/queues/:eventId')

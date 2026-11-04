@@ -107,7 +107,7 @@ erDiagram
         int ci_hmac_key_version
         bytea pid "HMAC(pid 키, ci_hmac), 계정의 첫 본인확인 때 한 번 계산. 다시 본인확인해도 그대로(ADR-0050, 기술 검토 높음-18)"
         int pid_key_version
-        bytea pid_prev "optional, pid 키 전환 기간에만 두는 옛 pid. 전환이 끝나면 지운다(docs/features/identity.md §5)"
+        bytea pid_prev "optional, pid 키 전환 기간에만 두는 옛 pid. 전환이 끝나면 지운다(docs/features/identity.md §5, 전환 기록은 pid_key_rotation)"
         timestamptz verified_at
         text source_record "출처·시기·목적·대상, 1년 이상"
     }
@@ -203,6 +203,13 @@ erDiagram
         uuid attempted_account_id "본인확인을 시도한 계정"
         uuid existing_account_id "그 연계정보로 이미 본인확인한 계정"
         timestamptz attempted_at "본인확인 409(이미 다른 계정에서 본인확인) 때 남긴다. 1년 [가정] 뒤 지운다. 명의 대여·사들인 계정 후보의 연결 신호이고 사람이 확인한 라벨이 아니다(추천 적용 2026-10-31, ADR-0171)"
+    }
+    pid_key_rotation {
+        int to_version PK "새 pid 키 판. pid 키 전환마다 한 줄(추천 적용 2026-11-04, docs/features/identity.md §5 'pid 키 전환의 첫 구현', BUILD_ORDER BOT-025)"
+        timestamptz started_at
+        timestamptz transition_ends_at "전환 끝 시각(운영자가 정한 --until). 이 전에는 pid_prev를 지우지 않는다"
+        timestamptz moved_at "optional, 모든 본인확인 기록의 옛 pid를 pid_prev로 옮긴 시각"
+        timestamptz finished_at "optional, pid_prev를 지우고 닫은 시각. 닫지 않은 줄은 하나만 둔다"
     }
     restricted_ci_hold {
         bytea ci_hmac PK "부정 예매 이용 제한(booking_restriction 사유 FRAUD)을 받거나 그 사건의 소명 요청을 받은 사람의 연계정보 HMAC(identity_verification.ci_hmac과 같은 값). 기본 키 (ci_hmac, fraud_case_id). ops-svc의 SetRestrictedCiHold(identity.proto)로 소명 요청 때(CASE_OPEN)와 제한을 걸기 전에(RESTRICTED) 만든다(추천 적용 2026-10-31, ADR-0171 결정 5, POL-046 ⑥)"

@@ -5,6 +5,7 @@ import { MemorySessionStore } from './adapters/memory-session-store.js';
 import { CreateSession } from './application/create-session.js';
 import { EndSession } from './application/end-session.js';
 import { CloseAccount } from './application/close-account.js';
+import { GetVerificationStatus } from './application/get-verification-status.js';
 import { IssueReauthToken } from './application/issue-reauth-token.js';
 import { RefreshSession } from './application/refresh-session.js';
 import { ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, PUBLIC_KEYS, type PublicKeys, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
@@ -36,6 +37,7 @@ export class SessionModule {
         CreateSession,
         EndSession,
         IssueReauthToken,
+        GetVerificationStatus,
         RefreshSession,
         o.storage === 'database' ? { provide: SESSION_STORE, useClass: DrizzleSessionStore } : { provide: SESSION_STORE, useValue: new MemorySessionStore() },
         { provide: TOKEN_SIGNER, useValue: o.signer },
@@ -44,7 +46,7 @@ export class SessionModule {
         { provide: PUBLIC_KEYS, useValue: o.keys },
         { provide: COOKIE_DOMAIN, useValue: o.cookieDomain },
       ],
-      exports: [CreateSession, EndSession, IssueReauthToken, RefreshSession, ACCOUNT_CLOSURE],
+      exports: [CreateSession, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, ACCOUNT_CLOSURE],
     };
   }
 }

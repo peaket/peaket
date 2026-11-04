@@ -223,6 +223,30 @@ export class MemoryEntryStore implements EntryStore {
     if (b && b.requestId === i.requestId && b.tokenHash === i.tokenHash) this.#dup.delete(k);
   }
 
+  /** 이 요청의 값인가(선점 포함 여부는 고른다) */
+  #own(v: string, requestId: string, pending: boolean): boolean {
+    if (pending && v === `PENDING:${requestId}`) return true;
+    return recorded(v, requestId) !== null || batched(v)?.requestId === requestId;
+  }
+
+  async mirror(i: { from: string; to: string; eventId: string; requestId: string }): Promise<'COPIED' | 'TAKEN' | 'ADMITTED'> {
+    const from = `${i.from}|${i.eventId}`;
+    const v = this.#dupOf(from);
+    if (v === null || !this.#own(v, i.requestId, false)) return 'COPIED';
+    const to = `${i.to}|${i.eventId}`;
+    if (this.#adm.has(to)) return 'ADMITTED';
+    const cur = this.#dupOf(to);
+    if (cur !== null && !this.#own(cur, i.requestId, true)) return 'TAKEN';
+    this.#dup.set(to, { v, until: this.#dup.get(from)!.until });
+    return 'COPIED';
+  }
+
+  async dropOwn(i: { pid: string; eventId: string; requestId: string }): Promise<void> {
+    const k = `${i.pid}|${i.eventId}`;
+    const v = this.#dupOf(k);
+    if (v !== null && this.#own(v, i.requestId, true)) this.#dup.delete(k);
+  }
+
   async markRemoved(i: { eventId: string; seq: number }): Promise<void> {
     const s = this.#removed.get(i.eventId) ?? new Set<number>();
     s.add(i.seq);
@@ -293,6 +317,12 @@ export class MemoryEntryStore implements EntryStore {
   }
   markerOf(eventId: string, field: string): string | null {
     return this.#done.get(eventId)?.get(field) ?? null;
+  }
+  /** 사람 키 값을 바꾼다(null이면 지운다, 수명이 없으면 하루) */
+  setDupForTest(pid: string, eventId: string, value: string | null, expireAtMs?: number): void {
+    const k = `${pid}|${eventId}`;
+    if (value === null) this.#dup.delete(k);
+    else this.#dup.set(k, { v: value, until: expireAtMs ?? this.clock.now() + 86_400_000 });
   }
   dupForTest(pid: string, eventId: string): { value: string | null; expireAtMs: number | null } {
     const k = `${pid}|${eventId}`;

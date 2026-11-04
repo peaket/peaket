@@ -102,6 +102,10 @@ export class HmacIdentityHashers implements IdentityHashers {
     return this.#ciKeys.map(([v]) => v);
   }
 
+  pidVersion(): number {
+    return this.#pidVersion;
+  }
+
   async ciAll(ci: string) {
     return this.#ciKeys.map(([version, key]) => ({ hmac: createHmac('sha256', key).update(ci, 'utf8').digest(), version }));
   }

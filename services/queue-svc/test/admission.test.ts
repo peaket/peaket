@@ -11,6 +11,7 @@ import { PurchaseSessionSlots } from '../src/modules/admission/application/purch
 import { AppModule } from '../src/app.module.js';
 import { MemoryEventSchedules } from '../src/modules/entry/adapters/memory-entry-store.js';
 import { ADMISSION_JWK, admissionCases, type AdmissionHarness, ISSUER, readAdmissionToken, signer } from './admission-cases.js';
+import { pidTransitionAdmissionCases } from './pid-transition-cases.js';
 import { ACCOUNT, DEVICE, JNY, newEvent, openSchedule, PID, recordingRisk, tokens } from './support.js';
 
 function memoryHarness(): AdmissionHarness {
@@ -53,6 +54,7 @@ function memoryHarness(): AdmissionHarness {
 }
 
 admissionCases('메모리', async () => memoryHarness());
+pidTransitionAdmissionCases('메모리', async () => memoryHarness());
 
 describe('입장 토큰 서명(ES256, ADR-0050 결정 9, ADR-0183)', () => {
   test('[ASVS v5.0.0-9.2.2] 머리는 alg ES256·typ admission+jwt·kid이고 클레임은 iss·sub·aud purchase·jti·sid·event·jny·iat·exp(= iat + 45분)이다', () => {
@@ -184,6 +186,20 @@ describe('받는 층: POST /v1/queues/{eventId}/admission', () => {
     expect(gone.statusCode).toBe(410);
     expect(JSON.parse(gone.payload)).toMatchObject({ rejoinAllowed: true });
     expect(JSON.parse(gone.payload).type).toContain('queue-ticket-expired');
+  });
+
+  test('[Q-T45] 옛 pid 머리(X-User-Pid-Prev)가 오면 옛 pid 키로도 1인 1순번을 보고, 키에 넣을 수 없는 모양이면 403 본인확인 필요다', async () => {
+    const { eventId, ticket } = await world();
+    const OLD = `pid-old-${crypto.randomUUID().slice(0, 8)}`;
+    const NEW = `pid-new-${crypto.randomUUID().slice(0, 8)}`;
+    const body = (t: string) => JSON.stringify({ queueTicket: t });
+    expect((await post(eventId, body(ticket(150)), undefined, fan({ pid: OLD }))).statusCode).toBe(200);
+    const dup = await post(eventId, body(ticket(160)), undefined, { ...fan({ pid: NEW }), 'x-user-pid-prev': OLD });
+    expect(dup.statusCode).toBe(409);
+    expect(JSON.parse(dup.payload).type).toMatch(/duplicate-admission$/);
+    const bad = await post(eventId, body(ticket(170)), undefined, { ...fan({ pid: NEW }), 'x-user-pid-prev': 'pid:{x}' });
+    expect(bad.statusCode).toBe(403);
+    expect(JSON.parse(bad.payload).type).toMatch(/identity-verification-required$/);
   });
 
   test('곧 입장은 200 SOON과 retryAfterSeconds, 차례 전은 200 NOT_YET과 retryAfterMs, 우선 구매 권리는 404다', async () => {

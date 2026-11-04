@@ -196,6 +196,7 @@ describe('연계정보 HMAC 키 판(ADR-0050 결정 5)', () => {
         throw new KeyServiceUnavailable('ThrottlingException');
       },
       versions: () => [1],
+      pidVersion: () => 1,
     };
     const t = await setup({ hashers: down });
     const s = await t.login('kms-down');
@@ -245,13 +246,14 @@ describe('연계정보 HMAC 키 판(ADR-0050 결정 5)', () => {
   test('ADR0050_pid는새로저장할때만계산한다_pid키장애는다시본인확인을막지않는다(새맥락리뷰낮음7)', async () => {
     const base = hashers({ 1: K(1) });
     let pidCalls = 0;
-    const counting: IdentityHashers = { ciAll: (ci) => base.ciAll(ci), pid: async (x) => (pidCalls++, base.pid(x)), versions: () => base.versions() };
+    const counting: IdentityHashers = { ciAll: (ci) => base.ciAll(ci), pid: async (x) => (pidCalls++, base.pid(x)), versions: () => base.versions(), pidVersion: () => base.pidVersion() };
     const t = await setup({ hashers: counting });
     const a = await t.login('pid-a');
     await t.confirm(a.accountId, (await t.start(a.accountId)).verificationId, { person: 'pid' });
     expect(pidCalls).toBe(1);
     t.useHashers({
       versions: () => base.versions(),
+      pidVersion: () => base.pidVersion(),
       ciAll: (ci) => base.ciAll(ci),
       pid: async () => {
         throw new KeyServiceUnavailable('down');
@@ -267,6 +269,7 @@ describe('연계정보 HMAC 키 판(ADR-0050 결정 5)', () => {
     const t = await setup({
       hashers: {
         versions: () => base.versions(),
+      pidVersion: () => base.pidVersion(),
         ciAll: (ci) => base.ciAll(ci),
         pid: async () => {
           throw new KeyServiceUnavailable('ThrottlingException');

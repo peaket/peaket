@@ -156,6 +156,14 @@ export interface EntryStore {
   convertBatch(i: { pid: string; eventId: string; requestId: string; tokenHash: string; seq: number; gen: number; expireAtMs: number }): Promise<({ kind: 'RECORDED' } & RecordedEntry) | { kind: 'GONE' }>;
   /** batchMissing: 결과에 없는 같은 요청의 묶음 기록을 지운다 */
   dropBatch(i: { pid: string; eventId: string; requestId: string; tokenHash: string }): Promise<void>;
+  /**
+   * pid 키 전환(§3 'pid 키 전환 기간'의 첫 구현): 앞 키(from)의 이 요청 값(번호 기록·묶음 기록)과 수명을 다른 키(to)에 옮겨 쓴다.
+   * to가 비었거나 이 요청의 값(선점 포함)일 때만 쓰고 COPIED, 다른 요청의 값이면 TAKEN, to에 입장 키가 있으면 ADMITTED다.
+   * from에 이 요청의 값이 없으면(장애 전환으로 잃음) 아무것도 하지 않고 COPIED다
+   */
+  mirror(i: { from: string; to: string; eventId: string; requestId: string }): Promise<'COPIED' | 'TAKEN' | 'ADMITTED'>;
+  /** 값이 이 요청의 것(선점·번호 기록·묶음 기록)이면 지운다. 옮겨 쓰기가 막혔을 때 앞 키를 되돌린다 */
+  dropOwn(i: { pid: string; eventId: string; requestId: string }): Promise<void>;
   /** 번호를 빠진 번호 비트맵에 켠다. 회차 키의 수명은 부를 때마다 더 늦은 쪽으로만 늘린다 */
   markRemoved(i: { eventId: string; seq: number; expireAtMs: number }): Promise<void>;
   /** 고위험 진입: 빠진 번호 비트를 켜고 q:{event:E}:verify에 대기표 해시를 VERIFYING으로 쓴다(이미 있으면 그대로). 비트맵 수명은 expireAtMs, verify는 verifyExpireAtMs(판매 종료) */

@@ -6,6 +6,7 @@ import { RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-s
 import { type EventSchedule, QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
 import { batchCases } from '../test/batch-cases.js';
 import { entryCases } from '../test/entry-cases.js';
+import { type PidWorld, pidTransitionEntryCases } from '../test/pid-transition-cases.js';
 import { newEvent, openSchedule } from '../test/support.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -35,7 +36,7 @@ async function writeSchedule(eventId: string, s: EventSchedule): Promise<void> {
 const WINDOW_MS = 800;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-entryCases('Valkey Lua', async () => {
+const valkeyWorld = async (): Promise<PidWorld> => {
   const schedules = new RedisEventSchedules(redis, systemClock);
   return {
     store: new RedisEntryStore(redis),
@@ -53,9 +54,22 @@ entryCases('Valkey Lua', async () => {
     counter: async (eventId) => Number((await cmd(keys.seq(eventId), ['GET', keys.seq(eventId)])) ?? 0),
     failover: async (eventId) => void (await cmd(keys.epoch(eventId), ['HSET', keys.epoch(eventId), 'node', 'old-primary'])),
     skipped: async (eventId) => ((await cmd(keys.skipped(eventId), ['LRANGE', keys.skipped(eventId), '0', '-1'])) as unknown[]).map(String),
-    lose: async (eventId, seq) => void (await cmd(keys.seq(eventId), ['SET', keys.seq(eventId), String(seq), 'KEEPTTL'])),
+    lose: async (eventId: string, seq: number) => void (await cmd(keys.seq(eventId), ['SET', keys.seq(eventId), String(seq), 'KEEPTTL'])),
+    dupOf: async (pid: string, eventId: string) => {
+      const k = keys.dup(pid, eventId);
+      const value = await cmd(k, ['GET', k]);
+      const at = Number(await cmd(k, ['PEXPIRETIME', k]));
+      return { value: value === null ? null : String(value), expireAtMs: at > 0 ? at : null };
+    },
+    setDup: async (pid: string, eventId: string, value: string | null, expireAtMs?: number) => {
+      const k = keys.dup(pid, eventId);
+      await cmd(k, value === null ? ['DEL', k] : ['SET', k, value, ...(expireAtMs ? ['PXAT', String(expireAtMs)] : [])]);
+    },
   };
-});
+};
+
+entryCases('Valkey Lua', valkeyWorld);
+pidTransitionEntryCases('Valkey Lua', valkeyWorld);
 
 batchCases('Valkey Lua', async () => {
   const schedules = new RedisEventSchedules(redis, systemClock);

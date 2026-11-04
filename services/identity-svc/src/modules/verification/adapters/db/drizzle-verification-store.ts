@@ -2,10 +2,10 @@
 // (늦은 쪽은 CiAlreadyLinked로 되돌리고, 유스케이스가 한 번 다시 판정해 DUPLICATE_ACCOUNT와 다른 계정 시도 기록으로 마친다, BUILD_ORDER BOT-020).
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database, type DbTransaction } from '@peaket/platform';
-import { and, eq, gte, inArray, lt } from 'drizzle-orm';
-import type { VerificationStore, VerificationTx } from '../../domain/ports.js';
+import { and, asc, count, eq, gt, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import type { PidRotationRecord, PidRotationStore, VerificationStore, VerificationTx } from '../../domain/ports.js';
 import { type Attempt, CiAlreadyLinked, VerificationRaced } from '../../domain/verification.js';
-import { identityConflictAttempt, identityVerification, verificationAttempt } from './schema.js';
+import { identityConflictAttempt, identityVerification, pidKeyRotation, verificationAttempt } from './schema.js';
 
 type Row = typeof verificationAttempt.$inferSelect;
 const attemptOf = (r: Row): Attempt => ({
@@ -21,7 +21,7 @@ const attemptOf = (r: Row): Attempt => ({
 });
 
 @Injectable()
-export class DrizzleVerificationStore implements VerificationStore {
+export class DrizzleVerificationStore implements VerificationStore, PidRotationStore {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
   transaction<T>(fn: (tx: VerificationTx) => Promise<T>): Promise<T> {
@@ -139,5 +139,65 @@ export class DrizzleVerificationStore implements VerificationStore {
       .where(eq(identityVerification.accountId, accountId));
     if (!r) return null;
     return { pid: r.pid.toString('base64url'), ...(r.pidPrev ? { pidPrev: r.pidPrev.toString('base64url') } : {}) };
+  }
+
+  // pid 키 전환(identity §5 'pid 키 전환의 첫 구현'). 운영자가 한 번 띄우는 작업만 부른다. 표를 다 읽는 질의는 그 작업에서만이다 [가정]
+  async pidKeyVersionsInUse(): Promise<number[]> {
+    const rows = await this.database.db.selectDistinct({ v: identityVerification.pidKeyVersion }).from(identityVerification);
+    return rows.map((r) => r.v).sort((a, b) => a - b);
+  }
+
+  async openPidRotation(): Promise<PidRotationRecord | null> {
+    const [r] = await this.database.db.select().from(pidKeyRotation).where(isNull(pidKeyRotation.finishedAt));
+    if (!r) return null;
+    return {
+      toVersion: r.toVersion,
+      startedAt: r.startedAt.getTime(),
+      transitionEndsAt: r.transitionEndsAt.getTime(),
+      movedAt: r.movedAt === null ? null : r.movedAt.getTime(),
+      finishedAt: null,
+    };
+  }
+
+  async beginPidRotation(r: { toVersion: number; startedAt: number; transitionEndsAt: number }): Promise<void> {
+    await this.database.db.insert(pidKeyRotation).values({ toVersion: r.toVersion, startedAt: new Date(r.startedAt), transitionEndsAt: new Date(r.transitionEndsAt) });
+  }
+
+  async pidRowsToMove(version: number, after: string, limit: number): Promise<{ accountId: string; ciHmac: Buffer }[]> {
+    const below = and(lt(identityVerification.pidKeyVersion, version), isNull(identityVerification.pidPrev));
+    return this.database.db
+      .select({ accountId: identityVerification.accountId, ciHmac: identityVerification.ciHmac })
+      .from(identityVerification)
+      .where(after ? and(below, gt(identityVerification.accountId, after)) : below)
+      .orderBy(asc(identityVerification.accountId))
+      .limit(limit);
+  }
+
+  async movePid(accountId: string, pid: Buffer, version: number): Promise<boolean> {
+    const rows = await this.database.db
+      .update(identityVerification)
+      .set({ pidPrev: sql`${identityVerification.pid}`, pid, pidKeyVersion: version })
+      .where(and(eq(identityVerification.accountId, accountId), lt(identityVerification.pidKeyVersion, version), isNull(identityVerification.pidPrev)))
+      .returning({ id: identityVerification.accountId });
+    return rows.length > 0;
+  }
+
+  async pidRowsBelow(version: number): Promise<number> {
+    const [r] = await this.database.db.select({ n: count() }).from(identityVerification).where(lt(identityVerification.pidKeyVersion, version));
+    return r?.n ?? 0;
+  }
+
+  async markPidMoved(version: number, at: number): Promise<void> {
+    await this.database.db.update(pidKeyRotation).set({ movedAt: new Date(at) }).where(and(eq(pidKeyRotation.toVersion, version), isNull(pidKeyRotation.finishedAt)));
+  }
+
+  async clearPidPrev(limit: number): Promise<number> {
+    const some = this.database.db.select({ id: identityVerification.accountId }).from(identityVerification).where(isNotNull(identityVerification.pidPrev)).limit(limit);
+    const rows = await this.database.db.update(identityVerification).set({ pidPrev: null }).where(inArray(identityVerification.accountId, some)).returning({ id: identityVerification.accountId });
+    return rows.length;
+  }
+
+  async finishPidRotation(version: number, at: number): Promise<void> {
+    await this.database.db.update(pidKeyRotation).set({ finishedAt: new Date(at) }).where(and(eq(pidKeyRotation.toVersion, version), isNull(pidKeyRotation.finishedAt)));
   }
 }

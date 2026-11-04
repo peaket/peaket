@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-025(wbs 3.1.1 ② 뒤): pid 키 전환 절차(`pid_prev`와 두 pid 토큰, 전환 끝, identity `GetVerificationStatus`의 `previous_pid`, queue-svc 진입·입장 확정의 두 키 Lua와 지우기, Q-T45·I-T49). 그 뒤 BOT-030(탈퇴, BOT-020이 넘긴 만 14세 미만 정리 포함) → BOT-040 → BOT-045 → BOT-110~160.
+- BOT-030(wbs 3.1.2): 탈퇴·재가입, 이용 제한 중 탈퇴의 `restricted_ci_hold`(I-T68), BOT-020이 넘긴 만 14세 미만 정리, R-255가 넘긴 `refresh_token_hash` 바로 지우기. 티켓·양도·가상계좌 쪽 서비스가 아직 없으면 그 몫은 그 단계에 넘긴다. 그 뒤 BOT-040 → BOT-045 → BOT-110~160.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
@@ -17,9 +17,13 @@
 - BOT-010: demo에서 쓸 기관이 없다. 시험 어댑터는 demo에서 켜지는데(비밀 필수) 모의 기관은 local·ci에서만 돈다. 정본에 demo 기관을 정하거나 어댑터의 demo 허용을 뺀다(docs/features/identity.md §5, services/identity-svc/scripts/mock-idv.mjs)
 - BOT-010: 쿼리로 돌려주는 기관이면 결과 값이 CDN·Envoy 접근 로그의 요청 줄에 남을 수 있다. `/verify/return`의 쿼리를 접근 로그에서 지우는 규칙을 정본에 적는다(docs/infra.md 접근 로그, HOT-290과 맞춘다)
 - BOT-020: SCR-017에 '본인확인 전' 상태 미리보기가 없어 [지금 본인확인] 갈래를 화면에서 보지 못했다(퍼블리싱 목업 `ME`가 본인확인 완료). d5 §5.17 ①의 그 상태를 미리보기에 더한다(apps/web/src/shared/config/screens.account.ts `SCR017_STATES`, apps/web/src/_pages/settings)
+- BOT-025: `GetVerificationStatus`가 읽기만 하는데 세션 줄을 잠근다(`getSessionForUpdate`). 잠그지 않는 세션 조회를 세션 저장소에 더한다(services/identity-svc/src/modules/session/application/get-verification-status.ts)
+- BOT-025: pid 키 전환 작업이 KMS 호출 속도를 조절하지 않는다(100건씩 쉬지 않고). 운영 본인확인·관리자 로그인의 KMS 몫을 깎지 않게 초당 상한 선택지를 둔다(services/identity-svc/src/modules/verification/application/pid-rotation.ts)
+- BOT-025: 두 pid 진입에서 옛 키가 다른 요청 값(대기 중·입장)으로 409일 때 그 값을 새 키에 최선 노력으로 옮겨 쓰는 변형 Lua를 둘지 본다(절차 규칙 '다 옮긴 뒤 15분 전에는 새 회차를 열지 않는다'를 어긴 경우의 덤, services/queue-svc/src/modules/entry/application/enter-queue.ts)
 - BOT-010: 늦은 메시지를 듣는 10분 타이머를 `cancel()` 때 지우지 않는다(해는 없고 메모리를 잠깐 잡는다), 브라우저의 Web Locks 연결(`refreshLock`)을 직접 보는 시험이 없다(flow.ts, browser.ts)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
 - 2026-11-04 BOT-010 모의 기관과 기관 창 흐름(R-267, I-T45): 서명한 결과만 믿는 시험 어댑터·모의 기관, 결과 때 기관 장애는 PROVIDER_DOWN으로 마침, 부르는 화면의 실제 창 흐름(팝업·차단 대체·REDIRECT, 받은 표시, 늦은 메시지, 갱신 잠금), 복귀 화면 처리기(proxy.ts, COOP unsafe-none), 로컬 게이트웨이 대역. 브라우저 확인은 Playwright로 대신(Chrome 연결 없음).
 - 2026-11-04 BOT-020 키 판·만 14세·다른 계정 시도·재통과(R-269, I-T42·I-T55·I-T65): 연계정보 키 판(KMS·설정값, 쓰기 판, 시작 때 판 확인), 만 14세 미만 UNDER_14와 계정 정리 시작, 다른 계정 시도 기록, REVERIFY 재통과. BOT-020을 둘로 나눠 pid 키 전환은 BOT-025로 뒀다.
+- 2026-11-04 BOT-025 pid 키 전환과 두 키 1인 1순번(R-273, I-T49·Q-T45): identity 전환 작업(전환 기록, 이어 하기, 끝 시각 뒤 pid_prev 지우기)과 GetVerificationStatus(previous_pid), queue-svc 옛 pid → 새 pid 차례의 두 키 진입·입장 확정과 옮겨 쓰기. 화면이 없어 브라우저 확인은 하지 않았다.

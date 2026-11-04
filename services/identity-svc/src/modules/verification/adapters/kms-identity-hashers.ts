@@ -76,6 +76,10 @@ export class KmsIdentityHashers implements IdentityHashers {
     return this.#ciKeys.map(([v]) => v);
   }
 
+  pidVersion(): number {
+    return this.#pidVersion;
+  }
+
   async #mac(keyId: string, message: Uint8Array): Promise<Buffer> {
     try {
       return Buffer.from(await this.#client.mac(keyId, message));

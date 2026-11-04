@@ -27,6 +27,8 @@ export interface IdentityHashers {
   pid(ciHmac: Buffer): Promise<{ pid: Buffer; version: number }>;
   /** 설정한 연계정보 키 판 목록 */
   versions(): number[];
+  /** 설정한 pid 키 판(새 기록과 pid 키 전환이 쓰는 판, identity §5 'pid 키 전환의 첫 구현') */
+  pidVersion(): number;
 }
 
 /** 이 계정의 본인확인 기록 */
@@ -57,6 +59,35 @@ export interface VerificationTx {
   /** 옛 판 기록을 새 판 값으로 바꾼다(pid는 그대로, ADR-0050 결정 5) */
   updateCiHmac(accountId: string, ciHmac: Buffer, ciHmacKeyVersion: number): Promise<void>;
   insertConflictAttempt(c: ConflictAttempt): Promise<void>;
+}
+
+/** pid 키 전환 기록 한 줄(docs/data.md pid_key_rotation) */
+export interface PidRotationRecord {
+  toVersion: number;
+  startedAt: number;
+  transitionEndsAt: number;
+  movedAt: number | null;
+  finishedAt: number | null;
+}
+
+/** pid 키 전환 저장소(identity §5 'pid 키 전환의 첫 구현', BUILD_ORDER BOT-025). 본인확인 저장소가 함께 구현한다 */
+export interface PidRotationStore {
+  /** 기록이 쓰는 pid 키 판들 */
+  pidKeyVersionsInUse(): Promise<number[]>;
+  /** 닫지 않은 전환(하나뿐). 없으면 null */
+  openPidRotation(): Promise<PidRotationRecord | null>;
+  beginPidRotation(r: { toVersion: number; startedAt: number; transitionEndsAt: number }): Promise<void>;
+  /** 옮길 줄: pid 판이 version보다 작고 pid_prev가 빈 줄을 계정 ID 순으로 after 뒤부터 limit개 */
+  pidRowsToMove(version: number, after: string, limit: number): Promise<{ accountId: string; ciHmac: Buffer }[]>;
+  /** 옛 pid를 pid_prev로 옮기고 새 pid·판을 넣는다(판이 version보다 작고 pid_prev가 빈 줄만). 바꿨으면 true */
+  movePid(accountId: string, pid: Buffer, version: number): Promise<boolean>;
+  /** pid 판이 version보다 작은 줄 수 */
+  pidRowsBelow(version: number): Promise<number>;
+  /** 다 옮긴 시각을 적는다(다시 옮기면 그 시각으로 늦춘다) */
+  markPidMoved(version: number, at: number): Promise<void>;
+  /** pid_prev를 limit줄까지 지우고 지운 줄 수 */
+  clearPidPrev(limit: number): Promise<number>;
+  finishPidRotation(version: number, at: number): Promise<void>;
 }
 
 export const VERIFICATION_STORE = Symbol('identity.VerificationStore');

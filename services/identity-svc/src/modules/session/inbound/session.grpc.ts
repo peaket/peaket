@@ -1,4 +1,4 @@
-// 받는 층: gRPC SessionService(docs/api/proto/peaket/identity/v1/identity.proto)를 유스케이스에 잇는다.
+// 받는 층: gRPC SessionService·IdentityService(docs/api/proto/peaket/identity/v1/identity.proto)를 유스케이스에 잇는다.
 // 업무 오류는 상태 코드로, 예상하지 못한 오류는 INTERNAL과 고정 문구로 돌려주고 이유는 서버 쪽 기록에만 남긴다
 // (docs/api/proto/README.md §2 'gRPC 상태 코드'). 부르는 쪽 신원 확인은 메시 웨이포인트의 L7 허용 목록이 한다(identity §2, I-T50 ③).
 import * as grpc from '@grpc/grpc-js';
@@ -6,6 +6,7 @@ import * as protoLoader from '@grpc/proto-loader';
 import { identityV1Identity } from '@peaket/contracts/proto';
 import type { CreateSession } from '../application/create-session.js';
 import type { EndSession } from '../application/end-session.js';
+import type { GetVerificationStatus } from '../application/get-verification-status.js';
 import type { IssueReauthToken } from '../application/issue-reauth-token.js';
 import { SessionError } from '../application/session-error.js';
 import type { Provider, ReauthPurpose, ReauthStrength } from '../domain/session.js';
@@ -15,6 +16,7 @@ export const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: 
 
 export interface IdentityPackage {
   SessionService: grpc.ServiceClientConstructor;
+  IdentityService: grpc.ServiceClientConstructor;
 }
 
 let pkg: IdentityPackage | undefined;
@@ -57,9 +59,9 @@ type UseCases = { create: Pick<CreateSession, 'run'>; end: Pick<EndSession, 'run
 /**
  * @param onError 예상하지 못한 오류(INTERNAL로 답한 것)를 받는다. 서비스는 로거에 남긴다
  */
-export function sessionServiceHandlers(uc: UseCases, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
-  const unary =
-    (method: string, fn: (r: Req) => Promise<object>): grpc.handleUnaryCall<Req, object> =>
+/** 유스케이스 호출을 단항 처리기로 감싼다. 업무 오류는 상태 코드, 닿지 못한 의존성은 UNAVAILABLE, 그 밖은 INTERNAL과 고정 문구 */
+function unaryOf(onError: (method: string, err: unknown) => void) {
+  return (method: string, fn: (r: Req) => Promise<object>): grpc.handleUnaryCall<Req, object> =>
     (call, cb) => {
       fn(call.request).then(
         (v) => cb(null, v),
@@ -74,7 +76,24 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
         },
       );
     };
+}
 
+/**
+ * IdentityService: 주문 생성의 본인확인 재확인(purchase-svc). 부르는 쪽 신원 확인은 메시 웨이포인트의 L7 허용 목록이 한다(identity §2).
+ * 응답이 없으면 부르는 쪽은 게이트웨이가 넘긴 토큰 값으로 판정한다(ADR-0055)
+ */
+export function identityServiceHandlers(uc: { status: Pick<GetVerificationStatus, 'run'> }, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
+  const unary = unaryOf(onError);
+  return {
+    GetVerificationStatus: unary('GetVerificationStatus', async (r) => {
+      const s = await uc.status.run({ accountId: text(r.account_id), sessionId: text(r.session_id) });
+      return { verified: s.verified, pid: s.pid, previous_pid: s.previousPid };
+    }),
+  };
+}
+
+export function sessionServiceHandlers(uc: UseCases, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
+  const unary = unaryOf(onError);
   return {
     CreateSession: unary('CreateSession', async (r) => {
       const provider = providerOf(r.provider);

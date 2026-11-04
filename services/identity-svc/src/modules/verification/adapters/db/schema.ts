@@ -1,6 +1,6 @@
 // 본인확인 표(docs/data.md §2 identity_verification·verification_attempt, docs/features/identity.md §5).
 import { sql } from 'drizzle-orm';
-import { check, customType, index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { check, customType, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -36,6 +36,20 @@ export const verificationAttempt = pgTable(
     check('verification_attempt_purpose_check', sql`${t.purpose} in ('FIRST', 'REVERIFY', 'MINOR_CONTRACT')`),
     check('verification_attempt_status_check', sql`${t.status} in ('PENDING', 'VERIFIED', 'CANCELLED', 'FAILED', 'DUPLICATE_ACCOUNT', 'PROVIDER_DOWN', 'UNDER_14')`),
   ],
+);
+
+// pid 키 전환 기록(docs/data.md pid_key_rotation, docs/features/identity.md §5 'pid 키 전환의 첫 구현', BUILD_ORDER BOT-025).
+// 닫지 않은 줄은 하나만 둔다(옛 값을 두 번 옮기면 처음 옛 pid를 잃는다)
+export const pidKeyRotation = pgTable(
+  'pid_key_rotation',
+  {
+    toVersion: integer('to_version').primaryKey(),
+    startedAt: at('started_at').notNull(),
+    transitionEndsAt: at('transition_ends_at').notNull(),
+    movedAt: at('moved_at'),
+    finishedAt: at('finished_at'),
+  },
+  () => [uniqueIndex('pid_key_rotation_open_idx').on(sql`(true)`).where(sql`finished_at is null`)],
 );
 
 // 같은 본인확인을 다른 계정에서 시도한 기록(docs/data.md identity_conflict_attempt, ADR-0171, I-T65). 연계정보·HMAC은 두지 않는다.

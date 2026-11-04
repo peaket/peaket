@@ -6,11 +6,12 @@ import { EnterQueue } from '../src/modules/entry/application/enter-queue.js';
 import { segmentOf } from '../src/modules/entry/domain/queue.js';
 import { batchCases } from './batch-cases.js';
 import { entryCases } from './entry-cases.js';
+import { type PidWorld, pidTransitionEntryCases } from './pid-transition-cases.js';
 import { DEVICE, ACCOUNT, newEvent, newRequest, openSchedule, preverifyToken, tokens } from './support.js';
 
 const PENDING_TTL_MS = 10_000;
 
-entryCases('메모리', async () => {
+const memoryWorld = async (): Promise<PidWorld> => {
   const clock = fakeClock({ now: Date.UTC(2026, 10, 3, 1, 0, 0) });
   const store = new MemoryEntryStore(clock);
   return {
@@ -27,8 +28,13 @@ entryCases('메모리', async () => {
     failover: async (eventId) => store.failoverForTest(eventId),
     lose: async (eventId, seq) => store.rollbackForTest(eventId, { seq, skipped: store.skippedOf(eventId), epoch: store.epochOf(eventId)! }),
     skipped: async (eventId) => store.skippedOf(eventId),
+    dupOf: async (pid: string, eventId: string) => store.dupForTest(pid, eventId),
+    setDup: async (pid: string, eventId: string, value: string | null, expireAtMs?: number) => store.setDupForTest(pid, eventId, value, expireAtMs),
   };
-});
+};
+
+entryCases('메모리', memoryWorld);
+pidTransitionEntryCases('메모리', memoryWorld);
 
 batchCases('메모리', async () => {
   const clock = fakeClock({ now: Date.UTC(2026, 10, 3, 1, 0, 0) });

@@ -9,6 +9,8 @@ import { EntryError } from './entry-error.js';
 export interface PreverifyInput {
   accountId: string;
   pid: string;
+  /** pid 키 전환 기간의 옛 pid. 위험 판정에 넘기는 사람 식별값은 옛 pid다(docs/features/queue-admission.md §3 'pid 키 전환 기간') */
+  pidPrev?: string;
   eventId: string;
   body: { humanCheckToken?: string; deviceId?: string; preverifyToken?: string; behaviorSummary?: Record<string, unknown> };
 }
@@ -43,7 +45,7 @@ export class IssuePreverification {
         context: 'PREVERIFY',
         eventId: i.eventId,
         accountId: i.accountId,
-        pid: i.pid,
+        pid: i.pidPrev ?? i.pid,
         deviceId: device,
         journeyId: jny,
         lobbyShuffle: schedule.lobbyShuffle,

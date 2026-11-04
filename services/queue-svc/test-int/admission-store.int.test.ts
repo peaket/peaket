@@ -7,6 +7,7 @@ import { RedisEntryStore } from '../src/modules/entry/adapters/redis-entry-store
 import { RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-schedules.js';
 import type { EventSchedule } from '../src/modules/entry/domain/queue.js';
 import { admissionCases, recordingSignals, signer } from '../test/admission-cases.js';
+import { pidTransitionAdmissionCases } from '../test/pid-transition-cases.js';
 import { ACCOUNT, DEVICE, JNY, newEvent, openSchedule, PID, tokens } from '../test/support.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -77,6 +78,7 @@ function harness() {
 }
 
 admissionCases('Valkey Lua', async () => harness());
+pidTransitionAdmissionCases('Valkey Lua', async () => harness());
 
 test('[Valkey Lua] 입장한 사람은 진입 ①이 ADMITTED로 막고, 키 수명이 판매 종료·회차 키 수명을 따른다(Q-T35 ③)', async () => {
   const h = harness();

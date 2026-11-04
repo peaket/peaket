@@ -48,7 +48,10 @@ export class AdmissionController {
     try {
       if (!KEY_PART.test(eventId)) throw new AdmissionError('NOT_FOUND', '회차 ID 모양이 틀렸다');
       if (!me.pid || !KEY_PART.test(me.pid)) throw new AdmissionError('IDENTITY_VERIFICATION_REQUIRED', 'pid가 없다(본인확인 전)');
-      return await this.confirmAdmission.run({ accountId: me.accountId, pid: me.pid, sessionId: me.sessionId, eventId, body });
+      // pid 키 전환 기간의 옛 pid(X-User-Pid-Prev)도 같은 모양이어야 한다. pid와 같으면 버린다(queue-admission §3 'pid 키 전환 기간'의 첫 구현)
+      if (me.pidPrev !== undefined && !KEY_PART.test(me.pidPrev)) throw new AdmissionError('IDENTITY_VERIFICATION_REQUIRED', '옛 pid 모양이 틀렸다');
+      const pidPrev = me.pidPrev && me.pidPrev !== me.pid ? { pidPrev: me.pidPrev } : {};
+      return await this.confirmAdmission.run({ accountId: me.accountId, pid: me.pid, ...pidPrev, sessionId: me.sessionId, eventId, body });
     } catch (e) {
       if (e instanceof AdmissionError) {
         throw new ProblemError({ ...PROBLEM[e.code], ...(e.code === 'EXPIRED' ? { extensions: { rejoinAllowed: e.rejoinAllowed ?? false } } : {}) });

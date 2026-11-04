@@ -9,9 +9,11 @@ import { startGrpcServer } from './grpc-server.js';
 import {
   CreateSession,
   EndSession,
+  GetVerificationStatus,
   HmacDeviceRefs,
   IssueReauthToken,
   identityPackage,
+  identityServiceHandlers,
   JoseTokenSigner,
   PromSessionSignals,
   sessionServiceHandlers,
@@ -20,6 +22,7 @@ import {
 } from './modules/session/index.js';
 import {
   assertKeyVersions,
+  DrizzleVerificationStore,
   HmacIdentityHashers,
   KmsIdentityHashers,
   TestVerificationProvider,
@@ -27,7 +30,6 @@ import {
   unavailableProvider,
   VERIFICATION_PROVIDER_ENV,
   VERIFICATION_STORE,
-  type VerificationStore,
 } from './modules/verification/index.js';
 
 const SERVICE = 'identity-svc';
@@ -52,7 +54,7 @@ const database = createDatabase({ url, applicationName: SERVICE });
 const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices.refs, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined }, verification }) });
 signals.register(service.metrics.registry);
 // 기록이 쓰는 연계정보 키 판을 설정이 모두 갖지 않으면 시작하지 않는다(같은 사람이 계정을 하나 더 만들지 못하게, identity §5 '키 판·만 14세…')
-if (process.env[VERIFICATION_PROVIDER_ENV]) await assertKeyVersions(service.app.get<VerificationStore>(VERIFICATION_STORE), verification.hashers);
+if (process.env[VERIFICATION_PROVIDER_ENV]) await assertKeyVersions(service.app.get<DrizzleVerificationStore>(VERIFICATION_STORE), verification.hashers);
 if (devices.warning) service.logger.warn(devices.warning);
 
 await service.listen();
@@ -66,6 +68,11 @@ const grpc = await startGrpcServer({
         { create: service.app.get(CreateSession), end: service.app.get(EndSession), reauth: service.app.get(IssueReauthToken) },
         (method, err) => service.logger.error({ err, method }, 'SessionService 처리 실패'),
       ),
+    },
+    // 주문 생성의 본인확인 재확인(purchase-svc, 전환 기간의 옛 pid 포함, identity §5 'pid 키 전환의 첫 구현')
+    {
+      definition: identityPackage().IdentityService.service,
+      handlers: identityServiceHandlers({ status: service.app.get(GetVerificationStatus) }, (method, err) => service.logger.error({ err, method }, 'IdentityService 처리 실패')),
     },
   ],
 });
