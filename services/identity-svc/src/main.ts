@@ -5,6 +5,7 @@
 import 'reflect-metadata';
 import { createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
+import { adminAuthConfigFromEnv, adminPepperFromEnv, hibpBreachListFromEnv, kmsPepperClient, loadPolicyLists } from './modules/admin/index.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
   AddProvider,
@@ -58,6 +59,12 @@ if (!url) throw new Error('PEAKET_DATABASE_URL이 없다(비밀 관리에서 넣
 const grpcPort = Number(process.env.PEAKET_GRPC_PORT ?? DEFAULT_GRPC_PORT);
 if (!(Number.isInteger(grpcPort) && grpcPort > 0 && grpcPort <= 65535)) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${process.env.PEAKET_GRPC_PORT}`);
 
+// 관리 계정 인증 통제 설정의 범위 검사와 페퍼 키 설정(docs/security/auth-controls.md §5 AC-T10, identity §6): 범위를 벗어나면 시작하지 않는다
+// 대조 목록 파일(L1·L3, 배포가 더한 L3 파일 포함)과 유출 목록 주소도 여기서 본다(BOT-111이 로그인 경로에 잇는다)
+const adminAuth = adminAuthConfigFromEnv(process.env);
+adminPepperFromEnv(process.env, (endpoint) => kmsPepperClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }));
+loadPolicyLists(process.env);
+hibpBreachListFromEnv(process.env, adminAuth);
 const keys = await TokenKeyRing.fromEnv(process.env);
 const signer = new JoseTokenSigner(keys, tokenIssuerFromEnv(process.env));
 // 조사용 가명 라벨 키 링(identity §9.1 '조사용 값의 첫 구현'): 라벨마다 KMS GenerateMac(로컬·CI는 라벨 키 값), 10분 [가정] 수명. 시작은 기다리지 않는다

@@ -256,6 +256,8 @@ erDiagram
         jsonb recent_lock_at "24시간 안의 잠금 시각 목록. 24시간 안 잠금 횟수를 센다"
         timestamptz locked_at "마지막으로 잠긴 시각(감사·화면 표시용)"
         text lock_reason "FAILED_ATTEMPTS|SECOND_FACTOR_FAILURES|PASSWORD_FAILURE_TOTAL. 잠근 까닭(계정 실패 수 5, 2단계 실패 수 5, 비밀번호 연속 실패 누계 100). 관제 화면의 잠김 상세에만 쓰고 계정 주인에게는 알리지 않는다(추천 적용 2026-10-30)"
+        timestamptz created_at "행을 만든 때(초대 때, 추천 적용 2026-11-05, BUILD_ORDER BOT-110)"
+        timestamptz updated_at "행을 마지막으로 고친 때(추천 적용 2026-11-05)"
     }
     admin_passkey {
         bytea credential_id PK "WebAuthn 자격 ID"

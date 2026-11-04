@@ -1,0 +1,52 @@
+# 관리 계정 비밀번호 L3 서비스 맥락 말(docs/security/auth-controls.md §4.2 표, 모든 계정 공통, 한 줄에 하나).
+# 이 파일과 §4.2 표는 같은 PR에서 함께 고친다. 운영 도메인은 공개 저장소에 쓰지 않고, 배포가 PEAKET_AUTH_CONTEXT_WORDS_FILE로 더한다(ADR-0153).
+# 영문 4자 이상, 한글 2자 이상만 대조에 쓴다(더 짧은 줄은 읽지만 쓰지 않는다).
+# 서비스·회사 이름
+peaket
+피켓
+vlzpt
+peaketexample
+# 저장소·코드 이름
+ticketpass
+# 앱·호스트 이름
+partner
+console
+queue
+scanner
+파트너
+관제
+콘솔
+# 기능 이름
+ticket
+ticketing
+onsale
+admin
+티켓
+티케팅
+온세일
+관리자
+고객센터
+# 역할 이름(docs/planning/03 §3)
+partner_admin
+partner_member
+viewer
+operator
+commander
+cs_agent
+cs_lead
+gate_staff
+gate_lead
+운영자
+현장 스태프
+현장 책임자
+파트너 관리자
+파트너 실무자
+CS 담당자
+CS 책임자
+# 흔한 기본 계정·비밀번호 말
+root
+administrator
+master
+password
+passwd
+비밀번호

@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-110~160(구간 1 갈래 3 남은 단계). 그 뒤 구간 1 끝 정리 목록 비우기.
+- BOT-111(wbs 3.5.1 ①): 관리 계정 로그인 1단계와 실패 제한(계정·묶음·누계·출발지 계수, 시간·묶음·보호 잠금, 같은 응답, 로그인 때 유출 다시 보기). 그 뒤 BOT-120·121·130~160, 구간 1 끝 정리 목록 비우기.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
@@ -46,6 +46,10 @@
 - BOT-043: 병합 제안 ID가 주소(`?mergeProposal=`)에 남아 방문 기록에 남고, 카드를 닫은 뒤 새로 고치면 다시 뜬다. 읽은 뒤 주소창에서 지울지 정한다(apps/web/src/_pages/settings-providers/ui/SettingsProvidersPage.tsx)
 - BOT-043: `?ended=MERGED`를 서버가 세션 상태를 보지 않고 믿어, 로그인한 사람이 그 주소를 열어도 로그인 전 셸과 '대표 계정으로 합쳐졌습니다'를 본다(버튼은 /login이라 혼동뿐). 세션 종료 사유가 MERGED일 때만 보이게 한다(apps/web/src/_pages/settings-providers/ui/SettingsProvidersPage.tsx)
 - BOT-043: 지금 계정이 흡수된 뒤(`?ended=MERGED`)에도 탈퇴 완료처럼 로그아웃 정리 루틴(docs/frontend.md §5.14.4, 탭·기기 저장소 지우기)을 돌리지 않는다. 정리 루틴을 붙이는 단계에서 둘 다 부른다(BOT-036 항목과 같은 빈틈)
+- BOT-110: 비밀번호 거절 때 거절 이유 종류와 계정 ID만 남기는 보안 이벤트(auth-controls §4.3 10)를 내는 곳이 없다. 비밀번호를 정하는 받는 층(초대 수락 BOT-150, 비밀번호 바꾸기 BOT-121)이 `AdminPasswordError` REJECTED를 받을 때 남긴다(services/identity-svc/src/modules/admin/application/set-admin-password.ts)
+- BOT-110: 기본 사본은 NFKC 뒤 소문자라 글자 하나가 둘로 늘어나는 것(İ, ㎏, ǆ)이 남은 글자 수를 부풀린다. `Peaket2026!!㎏㎏!!!!`가 받아진다. 남은 글자는 NFC 원문 기준 글자 수로 세는 방법을 정본 §4.3 4에 적고 고친다(services/identity-svc/src/modules/admin/domain/password-policy.ts `easyRest`)
+- BOT-110: 운영에 페퍼 키 설정이 없으면 `adminPepperFromEnv`가 null이고 그대로 시작한다. 로그인 경로를 잇는 BOT-111에서 local·ci 밖은 필수로 바꾼다(services/identity-svc/src/main.ts)
+- BOT-110: AC-T7의 '로그·트레이스에 SHA-1과 그 앞 5자가 0건'은 오류 객체만 시험했다. 요청 경로가 생기는 단계(BOT-111 로그인 때 다시 보기, BOT-150)에서 요청 로그·스팬 속성까지 본다(test/admin-password.test.ts)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
@@ -62,3 +66,4 @@
 - 2026-11-04 BOT-043 계정 합치기 화면(R-290, I-T31·I-T32): 로그인 수단 화면이 `?mergeProposal=`의 병합 제안을 읽어 ds MergeSummary로 보인다(PROPOSED 요약·남은 시간, BLOCKED 다섯 범주·막는 사유, 404 만료). [다시 로그인하고 계속] → 재인증(탭 저장소 할 일 `merge`와 제안 ID) → 확인 창 → 확정: 202 처리 중(지금 계정이 흡수되면 흡수 안내), 409 사유·고객센터, 403·503 안내. openapi `MergeProposal`에 `newProvider`·`requesterRole`·`primaryVerified`, ds MergeSummary `deadline`(시계가 흐름).
 - 2026-11-04 BOT-045 조사용 값 ①(R-292, I-T63·I-T64·I-T67): BOT-045를 둘로 나눴다(키 회전 이음은 BOT-046). 라벨 키 링(라벨마다 KMS `GenerateMac`, 5분마다 다시 받고 10분 수명, 로컬·CI는 라벨 키 값, 받지 못하면 칸을 비우고 `inv_ref_missing_total`), 기기 가명을 기기 라벨 키로, 연락처 가명 `account_contact_ref`(가입 이메일·본인확인 번호 E.164, 병합·탈퇴 때 지우기, 정비 `contact-ref-backfill`, 마이그레이션 0014), gRPC `ComputeContactRef`(초당 상한)·`BatchGetInvestigationRefs`(500개, 같은 본인확인 시도 1년), 모의 기관의 휴대폰 번호 칸.
 - 2026-11-05 BOT-046 조사용 가명 키 회전의 이음(R-294, I-T73): 라벨마다 옛 판 라벨 키와 이음 끝을 받아 이음 기간에 두 판으로 계산한다. 다시 로그인하면 옛 판 기기 행을 새 판으로 바꾸고 `device_ref_prev`에 대응을 두며, 정비 `contact-ref-rotate`가 EMAIL을 새 판으로(옛 값 `ref_prev`, 마이그레이션 0015), 다시 본인확인이 PHONE을 두 판으로 쓴다. `BatchGetInvestigationRefs`가 두 판 값을 함께 싣고, 정비 `inv-ref-bridge-close`가 이음 끝 + 7일 뒤 옛 판 값과 옛 판 기기 행을 지운다. 정본 secrets-and-keys ④(identity가 번호 원문을 갖는다)를 BOT-045 결정에 맞춰 고쳤다(PHONE은 다시 본인확인 때만).
+- 2026-11-05 BOT-110 관리 계정 비밀번호 저장과 정책(R-295, I-T14·AC-T6·AC-T7 ①②·AC-T10): BOT-110을 셋으로 나눴다(로그인 1단계·실패 제한 BOT-111, 해제 링크·2단계 실패·비밀번호만 맞은 로그인 BOT-121). identity `admin` 모듈과 `admin_account`(마이그레이션 0016), PBKDF2-HMAC-SHA256 600,000회 + KMS 페퍼 PHC(`GenerateMac`·`VerifyMac`), 정책 L1(꼴 규칙과 시험용 작은 목록, 출처 대기 OPEN[19])·L3(목록 파일과 배포가 더하는 파일)~L5(사본 셋, L5는 저장소 행에서)·L2(HIBP 범위 조회, `Add-Padding`, 2초, 빈 응답도 503), 설정 `PEAKET_AUTH_*` 시작 범위 검사(모르는 이름도 거절). 새 맥락 리뷰의 중간 넷(바꿈 사본의 날짜 숫자, 꼴 규칙 나눔, L5 출처, 원문 해시 시험)과 낮음 대부분을 재현 시험부터 고쳤다.
