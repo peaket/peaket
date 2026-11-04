@@ -5,18 +5,24 @@ import { createServer } from 'node:http';
 import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import { JoseAdminTokenSigner } from '../src/modules/admin/adapters/jose-admin-token-signer.js';
 import { LocalPepper } from '../src/modules/admin/adapters/local-pepper.js';
+import { LocalTotpSeedCipher } from '../src/modules/admin/adapters/local-totp-seed-cipher.js';
 import type { MemoryAdminAccountStore } from '../src/modules/admin/adapters/memory-admin-account-store.js';
 import { Pbkdf2AdminPasswords } from '../src/modules/admin/adapters/pbkdf2-admin-passwords.js';
 import { TurnstileHumanCheck } from '../src/modules/admin/adapters/turnstile-human-check.js';
 import { loadPolicyLists } from '../src/modules/admin/adapters/word-list-files.js';
 import { DEFAULT_ADMIN_AUTH_CONFIG } from '../src/modules/admin/domain/auth-config.js';
+import { BeginTotpEnrollment, ConfirmTotpEnrollment } from '../src/modules/admin/application/totp-enrollment.js';
 import { ADMIN_LOGIN_STORE } from '../src/modules/admin/domain/ports.js';
+import { base32Decode, totpAt } from '../src/modules/admin/domain/totp.js';
 import { JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
 import { HmacIdentityHashers } from '../src/modules/verification/index.js';
 import { fanKey, ISSUER, recordingSignals, testAgency, testDeviceRefs } from './support.js';
 
 const PARTNER = '0190f3a1-7c2e-7a00-8000-0000000002a1';
+const OPS = '0190f3a1-7c2e-7a00-8000-0000000002a2';
+let seeds: Record<string, Buffer> = {};
 const PW = '봄비내리는월요일아침의커피한잔';
 const clock = fakeClock({ now: Date.parse('2026-11-05T02:00:00Z') });
 const pepper = new LocalPepper(new Map([[1, Buffer.alloc(32, 8)]]), 1);
@@ -24,7 +30,8 @@ let svc: Awaited<ReturnType<typeof createService>>;
 
 beforeAll(async () => {
   const fan = await fanKey();
-  const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(fan.privateJwk) });
+  const admin = await fanKey();
+  const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(fan.privateJwk), PEAKET_ADMIN_TOKEN_KEY: JSON.stringify({ ...admin.privateJwk, kid: 'admin-http' }) });
   svc = await createService({
     name: 'identity-svc',
     module: AppModule.register({
@@ -39,6 +46,9 @@ beforeAll(async () => {
         breaches: { isBreached: async () => false },
         humanCheck: { verify: async (t) => (t === 'ok' ? 'OK' : 'FAILED') },
         signals: { failure: () => {}, alert: () => {} },
+        totpCipher: new LocalTotpSeedCipher(Buffer.alloc(32, 6)),
+        signer: new JoseAdminTokenSigner(keys, ISSUER),
+        cookieDomain: 'peaket.example',
       },
     }),
     env: { PEAKET_ENV: 'ci' },
@@ -47,6 +57,15 @@ beforeAll(async () => {
   const store = svc.app.get<MemoryAdminAccountStore>(ADMIN_LOGIN_STORE);
   store.create({ id: PARTNER, role: 'partner_admin', email: 'minji.kim@haeoreum.example', status: 'ACTIVE', promoterId: '0190f3a1-7c2e-7a00-8000-000000000001', now: clock.now() });
   await store.setPassword({ id: PARTNER, phc: await new Pbkdf2AdminPasswords(pepper, { iterations: 1_000 }).hash(PARTNER, PW), breachCheckedAt: clock.now(), now: clock.now() });
+  store.create({ id: OPS, role: 'operator', email: 'ops.http@peaket.example', status: 'ACTIVE', now: clock.now() });
+  await store.setPassword({ id: OPS, phc: await new Pbkdf2AdminPasswords(pepper, { iterations: 1_000 }).hash(OPS, PW), breachCheckedAt: clock.now(), now: clock.now() });
+  // TOTP 등록(받는 경로는 BOT-150): 유스케이스를 바로 부른다
+  for (const id of [PARTNER, OPS]) {
+    const { otpauthUri } = await svc.app.get(BeginTotpEnrollment).run({ accountId: id });
+    seeds[id] = base32Decode(new URL(otpauthUri).searchParams.get('secret')!);
+    await svc.app.get(ConfirmTotpEnrollment).run({ accountId: id, code: totpAt(seeds[id]!, Math.floor(clock.now() / 30_000)) });
+  }
+  clock.advance(30_000);
 });
 afterAll(async () => {
   await svc?.close();
@@ -159,5 +178,46 @@ describe('사람 확인 검증(Turnstile siteverify 흉내 서버, auth-controls
     expect(await new TurnstileHumanCheck({ url: dead.url, secret: 'test-secret', hostnames, timeoutMs: 150 }).verify('t', { aud: 'ops', remoteIp: '198.51.100.1' })).toBe('UNAVAILABLE');
     await dead.close();
     expect(await new TurnstileHumanCheck({ url: 'http://127.0.0.1:9', secret: undefined, hostnames }).verify('t', { aud: 'ops', remoteIp: '198.51.100.1' })).toBe('UNAVAILABLE');
+  });
+});
+
+describe('로그인 2단계 REST(openapi AdminLoginSecondStep·AdminLoginDone, BOT-120)', () => {
+  const cookieMap = (sc: string | string[] | undefined) => Object.fromEntries((Array.isArray(sc) ? sc : sc ? [sc] : []).map((c) => [c.split('=')[0]!, c]));
+
+  test('I-T10_2단계가맞으면200next DONE과파트너쿠키둘(Domain·Path·Max-Age·Strict)이고본문에토큰이없다', async () => {
+    clock.advance(16 * 60_000);
+    const r1 = await post('/v1/partner/auth/sessions', { email: 'minji.kim@haeoreum.example', password: PW, humanCheckToken: 'ok' }, '198.51.100.140');
+    expect(r1.statusCode).toBe(200);
+    const { loginStep } = JSON.parse(r1.payload) as { loginStep: string };
+    const r2 = await post('/v1/partner/auth/sessions', { loginStep, code: totpAt(seeds[PARTNER]!, Math.floor(clock.now() / 30_000)) }, '198.51.100.140');
+    expect(r2.statusCode).toBe(200);
+    expect(JSON.parse(r2.payload)).toEqual({ next: 'DONE' });
+    const c = cookieMap(r2.headers['set-cookie']);
+    expect(c['__Secure-peaket_partner_at']).toMatch(/; Domain=peaket\.example; Path=\/; Max-Age=86400; Secure; HttpOnly; SameSite=Strict$/);
+    expect(c['__Secure-peaket_partner_rt']).toMatch(/; Domain=peaket\.example; Path=\/v1\/partner\/auth\/access-tokens; Max-Age=86400; Secure; HttpOnly; SameSite=Strict$/);
+    expect(r2.payload).not.toContain(c['__Secure-peaket_partner_at']!.split(';')[0]!.split('=')[1]!);
+    // 같은 loginStep은 다시 못 쓴다
+    const again = await post('/v1/partner/auth/sessions', { loginStep, code: '000000' }, '198.51.100.140');
+    expect(again.statusCode).toBe(401);
+    expect(JSON.parse(again.payload)).toMatchObject({ type: 'https://peaket.example/problems/admin-login-step-invalid' });
+  });
+
+  test('관제는__Host-쿠키둘(Domain없음·Path=/)이고_틀린코드는401admin-login-code-invalid와남은수다', async () => {
+    clock.advance(30_000);
+    const r1 = await post('/v1/ops/auth/sessions', { email: 'ops.http@peaket.example', password: PW }, '198.51.100.141');
+    const { loginStep } = JSON.parse(r1.payload) as { loginStep: string };
+    const bad = await post('/v1/ops/auth/sessions', { loginStep, code: totpAt(seeds[OPS]!, Math.floor(clock.now() / 30_000)) === '123456' ? '654321' : '123456' }, '198.51.100.141');
+    expect(bad.statusCode).toBe(401);
+    expect(JSON.parse(bad.payload)).toMatchObject({ type: 'https://peaket.example/problems/admin-login-code-invalid', remainingAttempts: 4 });
+    const ok = await post('/v1/ops/auth/sessions', { loginStep, code: totpAt(seeds[OPS]!, Math.floor(clock.now() / 30_000)) }, '198.51.100.141');
+    expect(ok.statusCode).toBe(200);
+    const c = cookieMap(ok.headers['set-cookie']);
+    expect(c['__Host-peaket_ops_at']).toMatch(/^__Host-peaket_ops_at=[^;]+; Path=\/; Max-Age=86400; Secure; HttpOnly; SameSite=Strict$/);
+    expect(c['__Host-peaket_ops_rt']).toMatch(/^__Host-peaket_ops_rt=[^;]+; Path=\/; Max-Age=86400; Secure; HttpOnly; SameSite=Strict$/);
+  });
+
+  test('두단계꼴을섞은본문은400이다', async () => {
+    expect((await post('/v1/partner/auth/sessions', { email: 'minji.kim@haeoreum.example', password: PW, loginStep: 'A'.repeat(43), code: '123456' })).statusCode).toBe(400);
+    expect((await post('/v1/partner/auth/sessions', { loginStep: 'short', code: '123456' })).statusCode).toBe(400);
   });
 });

@@ -14,3 +14,7 @@ export { RecordAdminLoginSuccess } from './application/record-login-success.js';
 export { RedisLoginCounters } from './adapters/redis-login-counters.js';
 export { turnstileFromEnv } from './adapters/turnstile-human-check.js';
 export { PromAdminLoginSignals } from './adapters/prom-admin-login-signals.js';
+export { LoginSecondStep } from './application/login-second-step.js';
+export { BeginTotpEnrollment, ConfirmTotpEnrollment } from './application/totp-enrollment.js';
+export { totpSeedCipherFromEnv } from './adapters/kms-totp-seed-cipher.js';
+export { JoseAdminTokenSigner } from './adapters/jose-admin-token-signer.js';

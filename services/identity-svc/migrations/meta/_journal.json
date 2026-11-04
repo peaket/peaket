@@ -127,6 +127,13 @@
       "when": 1793810574175,
       "tag": "0017_admin_login",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793814051512,
+      "tag": "0018_admin_totp_session",
+      "breakpoints": true
     }
   ]
 }

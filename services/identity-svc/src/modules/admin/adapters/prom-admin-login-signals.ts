@@ -4,7 +4,7 @@ import { Counter, type Registry } from '@prometheus-io/client';
 import type { AdminAud, AdminLoginFailureReason, AdminLoginSignals, AdminSecurityAlertKind } from '../domain/ports.js';
 
 export class PromAdminLoginSignals implements AdminLoginSignals {
-  readonly #failures = new Counter({ name: 'identity_admin_login_failures_total', help: '관리 계정 로그인 실패(사유: 비밀번호·잠김·사람 확인)', labelNames: ['aud', 'reason'] as const, registers: [] });
+  readonly #failures = new Counter({ name: 'identity_admin_login_failures_total', help: '관리 계정 로그인 실패(사유: 비밀번호·2단계 코드·잠김·사람 확인)', labelNames: ['aud', 'reason'] as const, registers: [] });
   readonly #alerts = new Counter({ name: 'identity_admin_security_alerts_total', help: '관리 계정 보안 경보(SEV3)', labelNames: ['kind'] as const, registers: [] });
 
   register(registry: Registry): void {

@@ -152,10 +152,80 @@ export interface HumanCheck {
 }
 
 export const ADMIN_LOGIN_SIGNALS = Symbol('identity.AdminLoginSignals');
-export type AdminLoginFailureReason = 'password' | 'locked' | 'human_check';
-export type AdminSecurityAlertKind = 'password_failure_notice' | 'multi_source' | 'protect_lock' | 'source' | 'global';
+export type AdminLoginFailureReason = 'password' | 'second_factor' | 'locked' | 'human_check';
+export type AdminSecurityAlertKind = 'password_failure_notice' | 'multi_source' | 'protect_lock' | 'source' | 'global' | 'totp_seed_unreadable';
 export interface AdminLoginSignals {
   failure(aud: AdminAud, reason: AdminLoginFailureReason): void;
   /** SEV3 보안 경보(관측 단계가 경보 규칙을 붙인다) */
   alert(kind: AdminSecurityAlertKind): void;
+}
+
+// ── TOTP와 로그인 2단계(BUILD_ORDER BOT-120) ──
+export const TOTP_SEED_CIPHER = Symbol('identity.TotpSeedCipher');
+/** TOTP 시드 봉투 암호화(암호화 컨텍스트 {purpose: "peaket-admin-totp-v1", accountId}, identity §6) */
+export interface TotpSeedCipher {
+  encrypt(accountId: string, seed: Uint8Array): Promise<Buffer>;
+  /** 다른 계정의 암호문이거나 깨졌으면 TotpSeedUnreadable, 키 서비스에 닿지 못하면 TotpKeyUnavailable */
+  decrypt(accountId: string, blob: Uint8Array): Promise<Buffer>;
+}
+export class TotpSeedUnreadable extends Error {
+  constructor(cause?: unknown) {
+    super('TOTP 시드 암호문을 그 계정으로 풀 수 없다', { cause });
+    this.name = 'TotpSeedUnreadable';
+  }
+}
+export class TotpKeyUnavailable extends Error {
+  constructor(cause?: unknown) {
+    super('TOTP 시드 키 서비스에 닿지 못했다', { cause });
+    this.name = 'TotpKeyUnavailable';
+  }
+}
+
+export const RECOVERY_CODE_HASHER = Symbol('identity.RecoveryCodeHasher');
+
+export const ADMIN_TOKEN_SIGNER = Symbol('identity.AdminTokenSigner');
+/** 관리 액세스 토큰(관리 토큰 키, ES256, typ at+jwt, aud partner·ops, 15분). 역할·테넌트는 싣지 않는다(ADR-0172) */
+export interface AdminTokenSigner {
+  access(c: { accountId: string; sessionId: string; aud: AdminAud }, now: number): Promise<{ token: string; expiresAt: number }>;
+}
+
+export interface AdminTotpState {
+  email: string;
+  seedEnc: Buffer | null;
+  pendingEnc: Buffer | null;
+  lastStep: number | null;
+}
+export interface LoginStepRow {
+  id: string;
+  accountId: string;
+  aud: AdminAud;
+  pairRef: string;
+  createdAt: number;
+  expiresAt: number;
+  usedAt: number | null;
+}
+
+export const ADMIN_SECOND_STEP_STORE = Symbol('identity.AdminSecondStepStore');
+export interface AdminSecondStepStore {
+  findLoginById(id: string): Promise<(AdminLoginAccount & { email: string }) | null>;
+  getTotp(id: string): Promise<AdminTotpState | null>;
+  setTotpPending(id: string, enc: Buffer, now: number): Promise<boolean>;
+  /** 대기 시드를 확정하고(받은 시간 칸을 적는다) 복구 코드를 모두 바꾼다 */
+  confirmTotp(id: string, i: { seedEnc: Buffer; step: number; recoveryPhcs: string[]; now: number }): Promise<boolean>;
+  /** 그 시간 칸이 마지막으로 받은 칸보다 클 때만 적는다(같은 코드 재사용 막기). 적었으면 true */
+  recordTotpStep(id: string, step: number, now: number): Promise<boolean>;
+  listRecoveryCodes(id: string): Promise<{ id: string; phc: string }[]>;
+  /** 그 복구 코드 행을 지운다(한 번만). 지웠으면 true */
+  useRecoveryCode(rowId: string): Promise<boolean>;
+  findLoginStep(tokenHash: Buffer): Promise<LoginStepRow | null>;
+  /** 로그인 단계를 쓴 것으로 적는다(한 번만). 적었으면 true */
+  useLoginStep(id: string, at: number): Promise<boolean>;
+  /**
+   * 관리 세션을 만든다. 그 계정의 살아 있는 세션이 limit개면 유휴 만료가 가장 이른 것부터 끝내고(DEVICE_LIMIT),
+   * 같은 트랜잭션에 세션 종료 사건과 계정 주인 알림(SESSION_LIMIT)을 적는다. 끝낸 세션 ID를 돌려준다
+   */
+  createSession(
+    i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number },
+    limit: number,
+  ): Promise<{ evicted: string[] }>;
 }

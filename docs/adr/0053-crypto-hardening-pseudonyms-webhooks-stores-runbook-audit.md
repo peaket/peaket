@@ -79,7 +79,7 @@
    - 분석 적재의 금지 필드 검사(ADR-0052)는 그대로 둔다.
 
 7. **TOTP 시드 암호문을 계정에 묶는다(보강 9).**
-   - AWS Encryption SDK로 봉투 암호화할 때 암호화 컨텍스트 `{purpose: "peaket-admin-totp-v1", accountId}`를 넣고, 복호한 뒤 컨텍스트가 그 계정과 같은지 확인한다.
+   - (2026-11-05 ADR-0195: 수단을 AWS Encryption SDK에서 KMS 데이터 키 직접 호출로 바꿨다. 결속은 같다.) AWS Encryption SDK로 봉투 암호화할 때 암호화 컨텍스트 `{purpose: "peaket-admin-totp-v1", accountId}`를 넣고, 복호한 뒤 컨텍스트가 그 계정과 같은지 확인한다.
    - KMS 키 정책은 이 `purpose` 값이 있을 때만 identity-svc의 복호를 허용한다.
    - 다른 계정 행으로 옮긴 암호문은 풀리지 않는다.
 

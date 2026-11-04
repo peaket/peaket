@@ -54,7 +54,7 @@ const q = async <R>(sql: string, params: unknown[] = []): Promise<R[]> => (await
 const ID = '0190f3a1-7c2e-7a00-8000-0000000000b1';
 
 test('PostgreSQL·KMS에서_정한비밀번호는PHC로저장되고KMS VerifyMac으로맞으며_틀린원문·다른페퍼판으로는맞지않고_페퍼판이바뀌면다시저장을알린다', async () => {
-  const store = new DrizzleAdminAccountStore(database);
+  const store = new DrizzleAdminAccountStore(database, clock);
   await store.create({ id: ID, role: 'operator', email: '  Ops.Kim@Peaket.Example ', now: clock.now() });
   const client = kmsPepperClient({ region: 'ap-northeast-2', endpoint, credentials: creds });
   const v1 = new KmsPepper(client, new Map([[1, keys.v1]]), 1);
@@ -76,7 +76,7 @@ test('PostgreSQL·KMS에서_정한비밀번호는PHC로저장되고KMS VerifyMac
 });
 
 test('PostgreSQL에서_삭제하지않은계정사이에서업무이메일은하나이고_삭제한계정의이메일은다시쓸수있다', async () => {
-  const store = new DrizzleAdminAccountStore(database);
+  const store = new DrizzleAdminAccountStore(database, clock);
   await store.create({ id: '0190f3a1-7c2e-7a00-8000-0000000000b2', role: 'cs_agent', email: 'same@peaket.example', now: clock.now() });
   await expect(store.create({ id: '0190f3a1-7c2e-7a00-8000-0000000000b3', role: 'cs_agent', email: 'SAME@peaket.example', now: clock.now() })).rejects.toThrow();
   await q("update admin_account set status = 'REMOVED' where id = $1", ['0190f3a1-7c2e-7a00-8000-0000000000b2']);

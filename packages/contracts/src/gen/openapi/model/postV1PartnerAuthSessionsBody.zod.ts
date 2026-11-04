@@ -11,20 +11,27 @@
  */
 import * as zod from 'zod';
 
-export const postV1PartnerAuthSessionsBodyEmailMax = 254;
+export const postV1PartnerAuthSessionsBodyOneEmailMax = 254;
 
-export const postV1PartnerAuthSessionsBodyPasswordMax = 1024;
+export const postV1PartnerAuthSessionsBodyOnePasswordMax = 1024;
 
-export const postV1PartnerAuthSessionsBodyDeviceIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,128}$');
-export const postV1PartnerAuthSessionsBodyHumanCheckTokenMax = 2048;
+export const postV1PartnerAuthSessionsBodyOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,128}$');
+export const postV1PartnerAuthSessionsBodyOneHumanCheckTokenMax = 2048;
+
+export const postV1PartnerAuthSessionsBodyTwoLoginStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const postV1PartnerAuthSessionsBodyTwoCodeMin = 6;
+export const postV1PartnerAuthSessionsBodyTwoCodeMax = 32;
 
 
-export const PostV1PartnerAuthSessionsBody = zod.object({
-  "email": zod.email().max(postV1PartnerAuthSessionsBodyEmailMax),
-  "password": zod.string().min(1).max(postV1PartnerAuthSessionsBodyPasswordMax).describe('원문. 서버가 NFC로 맞춘다. 길이 상한은 설정 password.max_length의 허용 상한이다'),
-  "deviceId": zod.string().regex(postV1PartnerAuthSessionsBodyDeviceIdRegExp).optional().describe('브라우저 기기 식별값(브라우저 저장소의 값). 출발지 묶음(IP와 이것)을 셀 때 쓴다'),
-  "humanCheckToken": zod.string().min(1).max(postV1PartnerAuthSessionsBodyHumanCheckTokenMax).optional().describe('Cloudflare Turnstile 토큰(300초 1회용). identity가 검증 API로 확인한다')
-}).strict().describe('관리 계정 로그인 1단계 본문(POST /v1/partner/auth/sessions·/v1/ops/auth/sessions). 2단계(인증 앱 코드) 본문은 BUILD_ORDER BOT-120이 더한다. 사람 확인 토큰은 직전 응답이 humanCheckRequired였거나 428을 받았을 때 싣는다(docs/security/auth-controls.md §2.3). 정본은 docs/features/identity.md §6 \'관리 계정 로그인 1단계와 실패 제한의 첫 구현\'(추천 적용 2026-11-05)')
+export const PostV1PartnerAuthSessionsBody = zod.union([zod.object({
+  "email": zod.email().max(postV1PartnerAuthSessionsBodyOneEmailMax),
+  "password": zod.string().min(1).max(postV1PartnerAuthSessionsBodyOnePasswordMax).describe('원문. 서버가 NFC로 맞춘다. 길이 상한은 설정 password.max_length의 허용 상한이다'),
+  "deviceId": zod.string().regex(postV1PartnerAuthSessionsBodyOneDeviceIdRegExp).optional().describe('브라우저 기기 식별값(브라우저 저장소의 값). 출발지 묶음(IP와 이것)을 셀 때 쓴다'),
+  "humanCheckToken": zod.string().min(1).max(postV1PartnerAuthSessionsBodyOneHumanCheckTokenMax).optional().describe('Cloudflare Turnstile 토큰(300초 1회용). identity가 검증 API로 확인한다')
+}).strict().describe('관리 계정 로그인 1단계 본문(POST /v1/partner/auth/sessions·/v1/ops/auth/sessions). 2단계(인증 앱 코드) 본문은 BUILD_ORDER BOT-120이 더한다. 사람 확인 토큰은 직전 응답이 humanCheckRequired였거나 428을 받았을 때 싣는다(docs/security/auth-controls.md §2.3). 정본은 docs/features/identity.md §6 \'관리 계정 로그인 1단계와 실패 제한의 첫 구현\'(추천 적용 2026-11-05)'),zod.object({
+  "loginStep": zod.string().regex(postV1PartnerAuthSessionsBodyTwoLoginStepRegExp),
+  "code": zod.string().min(postV1PartnerAuthSessionsBodyTwoCodeMin).max(postV1PartnerAuthSessionsBodyTwoCodeMax)
+}).strict().describe('관리 계정 로그인 2단계 본문(같은 두 경로). 1단계 응답의 loginStep과 인증 앱 코드(숫자 6자리)나 복구 코드(Crockford base32 16자를 4자씩 붙임표로 이은 꼴)를 보낸다. 정본은 docs/features/identity.md §6 \'관리 계정 TOTP와 로그인 2단계의 첫 구현\'(추천 적용 2026-11-05, BUILD_ORDER BOT-120)')])
 
 export type PostV1PartnerAuthSessionsBody = zod.input<typeof PostV1PartnerAuthSessionsBody>;
 export type PostV1PartnerAuthSessionsBodyOutput = zod.output<typeof PostV1PartnerAuthSessionsBody>;

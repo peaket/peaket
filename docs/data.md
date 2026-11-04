@@ -83,6 +83,7 @@ erDiagram
     admin_account ||--o{ admin_designation : "지정(접속기록 점검자·가명정보 취급자, 추천 적용 2026-10-30. 부정 거래 조사관, 추천 적용 2026-10-31)"
     admin_account ||--o{ admin_login_step : "1단계를 통과한 로그인(TOTP를 기다림, 추천 적용 2026-11-05)"
     admin_account ||--o{ admin_security_notice : "보낼 보안 알림(추천 적용 2026-11-05)"
+    admin_account ||--o{ admin_session : "관리 계정 로그인 세션(추천 적용 2026-11-05)"
     account ||--o{ booth_reverification : "부스 본인확인 대조"
     account ||--o{ staff_assignment : "회차 역할"
     event ||--o{ staff_assignment : ""
@@ -247,7 +248,9 @@ erDiagram
         timestamptz removed_at "삭제 시각. 삭제하면 email·password_phc·totp_seed_enc와 패스키·복구 코드를 바로 지우고 ID·역할·삭제 시각만 남긴다. 행은 권한 부여·변경·말소 내역과 같이 3년 뒤 지운다(고시 제5조 제3항, 추천 적용 2026-10-30)"
         bigint version "판. 역할 변경의 If-Match와 ETag(docs/api/guidelines.md §12, 추천 적용 2026-10-30)"
         text password_phc "pbkdf2-sha256, 600000회 이상, KMS 페퍼 버전 포함(ADR-0033, ADR-0050)"
-        bytea totp_seed_enc "AES-256-GCM"
+        bytea totp_seed_enc "AES-256-GCM. KMS 데이터 키 봉투 암호화, 암호화 컨텍스트 {purpose: peaket-admin-totp-v1, accountId}. 꼴은 docs/features/identity.md §6 '관리 계정 TOTP와 로그인 2단계의 첫 구현'(추천 적용 2026-11-05, BOT-120)"
+        bytea totp_pending_enc "등록 중인 TOTP 시드(같은 꼴). 등록 확인 때 totp_seed_enc로 옮기고 지운다(추천 적용 2026-11-05)"
+        bigint totp_last_step "마지막으로 받은 TOTP 시간 칸(유닉스 초 / 30). 그 칸 이하는 다시 받지 않는다(같은 코드 재사용 막기, 추천 적용 2026-11-05)"
         int failed_attempts "계정 실패 수: 비밀번호·TOTP·복구 코드가 틀릴 때 센다(잠긴 동안 거절한 시도는 세지 않는다). 로그인 성공·시간 잠금을 걸 때·본인 해제 때 0. 3 [가정]이면 사람 확인, 5면 시간 잠금. 출발지가 든 값(묶음 실패 수 등)은 Redis에 둔다(docs/security/auth-controls.md §3.1, 추천 적용 2026-10-30)"
         int second_factor_failures "2단계 실패 수: 비밀번호가 맞은 뒤나 해제 링크에서 TOTP·복구 코드가 틀릴 때 센다. 로그인 성공만 0(시간 잠금·본인 해제로는 0이 되지 않는다). 5 [가정]면 보호 잠금(auth-controls §3.1·§3.2, 추천 적용 2026-10-30)"
         int password_failure_total "비밀번호 연속 실패 누계: 비밀번호가 틀릴 때 센다(잠긴 동안 거절한 시도는 세지 않는다). 비밀번호와 2단계를 모두 통과한 로그인만 0. 50 [가정]이면 알림, 100이면 보호 잠금(NIST SP 800-63B-4 §3.2.2 상한, auth-controls §3.1, 추천 적용 2026-10-30)"
@@ -271,10 +274,23 @@ erDiagram
         timestamptz expires_at "만든 때 + 5분 [가정]"
         timestamptz used_at "2단계에서 쓴 때(한 번만)"
     }
+    admin_session {
+        uuid id PK "액세스 토큰의 sid"
+        uuid admin_account_id FK
+        text aud "partner|ops"
+        bytea refresh_hash "지금 리프레시 토큰의 SHA-256"
+        uuid refresh_family
+        text pair_ref "로그인한 출발지 묶음 해시(admin_login_step과 같다)"
+        timestamptz created_at
+        timestamptz absolute_expires_at "만든 때 + 24시간(POL-019)"
+        timestamptz idle_expires_at "마지막 활동 + 1시간(POL-019). 토큰 갱신이 늦춘다(BOT-130)"
+        timestamptz terminated_at
+        text termination_reason "LOGOUT|DEVICE_LIMIT|ADMIN_FORCE|REFRESH_REUSE|DELETE|ROLE_CHANGED|PASSWORD_CHANGED(asyncapi SessionTerminated.reason)"
+    }
     admin_security_notice {
         uuid id PK
         uuid admin_account_id FK
-        text kind "TIMED_LOCK|PASSWORD_FAILURE_NOTICE|MULTI_SOURCE_ALERT|PROTECT_LOCK(docs/security/auth-controls.md §3.4)"
+        text kind "TIMED_LOCK|PASSWORD_FAILURE_NOTICE|MULTI_SOURCE_ALERT|PROTECT_LOCK(docs/security/auth-controls.md §3.4)|SESSION_LIMIT(동시 세션 2개를 넘어 가장 오래 쓰지 않은 세션을 끝냄, POL-019, BOT-120)"
         timestamptz created_at "사건 시각. 셈과 같은 트랜잭션으로 적는다"
         timestamptz sent_at "업무 이메일로 보낸 때. 보내는 일은 메일 대행을 정하는 단계가 한다 [가정]"
     }

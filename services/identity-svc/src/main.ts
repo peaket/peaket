@@ -5,7 +5,8 @@
 import 'reflect-metadata';
 import { createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { adminAuthConfigFromEnv, adminPepperFromEnv, hibpBreachListFromEnv, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, turnstileFromEnv } from './modules/admin/index.js';
+import { KMSClient } from '@aws-sdk/client-kms';
+import { adminAuthConfigFromEnv, adminPepperFromEnv, hibpBreachListFromEnv, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, totpSeedCipherFromEnv, turnstileFromEnv } from './modules/admin/index.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
   AddProvider,
@@ -68,6 +69,9 @@ const adminLists = loadPolicyLists(process.env);
 const adminBreaches = hibpBreachListFromEnv(process.env, adminAuth);
 const adminHumanCheck = turnstileFromEnv(process.env);
 const adminSignals = new PromAdminLoginSignals();
+// TOTP 시드 봉투 암호화(KMS 키, 로컬·CI는 키 값). local·ci에서 없으면 2단계가 503이고, 그 밖에서는 시작하지 않는다(identity §6 BOT-120)
+const adminTotpCipher = totpSeedCipherFromEnv(process.env, (endpoint) => new KMSClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}), maxAttempts: 2, requestHandler: { connectionTimeout: 1_000, requestTimeout: 2_000 } }));
+if (adminPepper && !adminTotpCipher && !['local', 'ci'].includes(process.env.PEAKET_ENV ?? 'prod')) throw new Error('TOTP 시드 키 설정(PEAKET_ADMIN_TOTP_KMS_KEY)이 없다');
 const keys = await TokenKeyRing.fromEnv(process.env);
 const signer = new JoseTokenSigner(keys, tokenIssuerFromEnv(process.env));
 // 조사용 가명 라벨 키 링(identity §9.1 '조사용 값의 첫 구현'): 라벨마다 KMS GenerateMac(로컬·CI는 라벨 키 값), 10분 [가정] 수명. 시작은 기다리지 않는다
@@ -96,7 +100,7 @@ if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTI
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
 // 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
 const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile);
-const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, ...(cache ? { counters: new RedisLoginCounters(cache) } : {}) } } : {}) }) });
+const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { counters: new RedisLoginCounters(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
 adminSignals.register(service.metrics.registry);
 if (!adminPepper) service.logger.warn('관리자 비밀번호 페퍼 설정이 없어 관리 계정 로그인 경로를 싣지 않았다(local·ci만)');

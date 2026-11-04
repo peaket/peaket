@@ -11,7 +11,8 @@ export const ADMIN_PBKDF2_MIN_ITERATIONS = 600_000;
 export const ADMIN_PBKDF2_MAX_ITERATIONS = 10_000_000;
 const SALT_BYTES = 16;
 const KEY_BYTES = 32;
-const CONTEXT = Buffer.from('admin-pw-v1', 'utf8');
+/** 복구 코드(80비트 난수)의 반복 횟수 [가정](identity §6 '관리 계정 TOTP와 로그인 2단계의 첫 구현') */
+export const RECOVERY_CODE_ITERATIONS = 10_000;
 const PHC = /^\$pbkdf2-sha256\$i=(\d+),k=(\d+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/;
 
 const b64 = (b: Uint8Array) => Buffer.from(b).toString('base64').replace(/=+$/, '');
@@ -36,10 +37,13 @@ function parsePhc(phc: string): { iterations: number; version: number; salt: Buf
 
 export class Pbkdf2AdminPasswords implements AdminPasswords {
   readonly #iterations: number;
+  /** 페퍼 입력의 맥락 앞머리(비밀번호 admin-pw-v1, 복구 코드 admin-rc-v1) */
+  readonly #context: Buffer;
   constructor(
     private readonly pepper: AdminPepper,
-    o: { iterations?: number } = {},
+    o: { iterations?: number; context?: 'admin-pw-v1' | 'admin-rc-v1' } = {},
   ) {
+    this.#context = Buffer.from(o.context ?? 'admin-pw-v1', 'utf8');
     this.#iterations = o.iterations ?? ADMIN_PBKDF2_MIN_ITERATIONS;
     if (!(Number.isInteger(this.#iterations) && this.#iterations > 0 && this.#iterations <= ADMIN_PBKDF2_MAX_ITERATIONS)) throw new Error(`PBKDF2 반복 횟수는 1~${ADMIN_PBKDF2_MAX_ITERATIONS}의 정수다`);
   }
@@ -50,7 +54,7 @@ export class Pbkdf2AdminPasswords implements AdminPasswords {
     const salt = randomBytes(SALT_BYTES);
     const dk = await pbkdf2Async(raw.normalize('NFC'), salt, this.#iterations, KEY_BYTES, 'sha256');
     const v = this.pepper.writeVersion;
-    const mac = await this.pepper.mac(v, Buffer.concat([CONTEXT, id, dk]));
+    const mac = await this.pepper.mac(v, Buffer.concat([this.#context, id, dk]));
     return `$pbkdf2-sha256$i=${this.#iterations},k=${v}$${b64(salt)}$${b64(mac)}`;
   }
 
@@ -59,7 +63,7 @@ export class Pbkdf2AdminPasswords implements AdminPasswords {
     const id = uuidBytes(accountId);
     if (!p || !id || !this.pepper.has(p.version)) return false;
     const dk = await pbkdf2Async(raw.normalize('NFC'), p.salt, p.iterations, KEY_BYTES, 'sha256');
-    return this.pepper.verify(p.version, Buffer.concat([CONTEXT, id, dk]), p.mac);
+    return this.pepper.verify(p.version, Buffer.concat([this.#context, id, dk]), p.mac);
   }
 
   async burn(raw: string): Promise<void> {

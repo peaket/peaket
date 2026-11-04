@@ -1,14 +1,20 @@
 // 관리 계정 저장소의 메모리 구현(시험·로컬, BUILD_ORDER BOT-110·BOT-111). 계정을 만드는 길(초대)은 BOT-150이라 시험은 create로 바로 만든다.
 import { FRESH_LOGIN_STATE, type AccountLoginState, type NoticeKind } from '../domain/login-rules.js';
-import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminStatus } from '../domain/ports.js';
+import { randomUUID } from 'node:crypto';
+import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminSecondStepStore, AdminStatus, AdminTotpState, LoginStepRow } from '../domain/ports.js';
 
-type Row = AdminAccountRow & AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null };
+type Row = AdminAccountRow &
+  AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null };
+type SessionRow = { id: string; accountId: string; aud: AdminAud; refreshHash: string; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; terminatedAt: number | null; terminationReason: string | null };
 type Step = { id: string; accountId: string; tokenHash: string; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; usedAt: number | null };
 
-export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore {
+export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore {
   readonly #rows = new Map<string, Row>();
   readonly #notices: { accountId: string; kind: NoticeKind; at: number }[] = [];
   readonly #steps: Step[] = [];
+  readonly #recovery: { id: string; accountId: string; phc: string }[] = [];
+  readonly #sessions: SessionRow[] = [];
+  readonly #terminated: { accountId: string; sessionId: string; reason: string }[] = [];
 
   /** 시험용: 계정을 만든다(이메일은 소문자·앞뒤 빈칸 제거, 삭제하지 않은 계정 사이에서 하나) */
   create(i: { id: string; role: AdminRole; email: string; status?: AdminStatus; promoterId?: string | null; displayName?: string | null; now: number }): void {
@@ -27,6 +33,9 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       passwordChangeRequired: false,
       secondFactorFailures: 0,
       lastLoginAt: null,
+      totpSeedEnc: null,
+      totpPendingEnc: null,
+      totpLastStep: null,
       ...structuredClone(FRESH_LOGIN_STATE),
     });
   }
@@ -123,5 +132,103 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     const r = this.#rows.get(id);
     if (!r || r.status === 'REMOVED') return;
     Object.assign(r, { failedAttempts: 0, secondFactorFailures: 0, passwordFailureTotal: 0, lastLoginAt: at, updatedAt: at });
+  }
+
+  // ── TOTP와 2단계(BOT-120) ──
+  /** 시험용: 시드 암호문을 바로 바꾼다(I-T41) */
+  setTotpSeedEnc(id: string, blob: Buffer): void {
+    const r = this.#rows.get(id);
+    if (r) r.totpSeedEnc = Buffer.from(blob);
+  }
+
+  /** 시험용: 그 계정의 복구 코드 행 */
+  recoveryCodes(id: string): { id: string; phc: string }[] {
+    return this.#recovery.filter((c) => c.accountId === id).map((c) => ({ id: c.id, phc: c.phc }));
+  }
+
+  /** 시험용: 그 계정의 관리 세션 행 */
+  sessions(id: string): SessionRow[] {
+    return this.#sessions.filter((s) => s.accountId === id).map((s) => ({ ...s }));
+  }
+
+  /** 시험용: 적은 세션 종료 사건 */
+  terminatedEvents(): { accountId: string; sessionId: string; reason: string }[] {
+    return this.#terminated.map((e) => ({ ...e }));
+  }
+
+  async findLoginById(id: string): Promise<(AdminLoginAccount & { email: string }) | null> {
+    const r = this.#rows.get(id);
+    return r && r.status !== 'REMOVED' ? { ...this.#loginView(r), email: r.email } : null;
+  }
+
+  async getTotp(id: string): Promise<AdminTotpState | null> {
+    const r = this.#rows.get(id);
+    if (!r || r.status === 'REMOVED') return null;
+    return { email: r.email, seedEnc: r.totpSeedEnc && Buffer.from(r.totpSeedEnc), pendingEnc: r.totpPendingEnc && Buffer.from(r.totpPendingEnc), lastStep: r.totpLastStep };
+  }
+
+  async setTotpPending(id: string, enc: Buffer, now: number): Promise<boolean> {
+    const r = this.#rows.get(id);
+    if (!r || r.status === 'REMOVED') return false;
+    Object.assign(r, { totpPendingEnc: Buffer.from(enc), updatedAt: now });
+    return true;
+  }
+
+  async confirmTotp(id: string, i: { seedEnc: Buffer; step: number; recoveryPhcs: string[]; now: number }): Promise<boolean> {
+    const r = this.#rows.get(id);
+    if (!r || r.status === 'REMOVED' || !r.totpPendingEnc || !r.totpPendingEnc.equals(i.seedEnc)) return false;
+    Object.assign(r, { totpSeedEnc: Buffer.from(i.seedEnc), totpPendingEnc: null, totpLastStep: i.step, updatedAt: i.now });
+    for (let k = this.#recovery.length - 1; k >= 0; k--) if (this.#recovery[k]!.accountId === id) this.#recovery.splice(k, 1);
+    for (const phc of i.recoveryPhcs) this.#recovery.push({ id: randomUUID(), accountId: id, phc });
+    return true;
+  }
+
+  async recordTotpStep(id: string, step: number, now: number): Promise<boolean> {
+    const r = this.#rows.get(id);
+    if (!r || (r.totpLastStep !== null && r.totpLastStep >= step)) return false;
+    Object.assign(r, { totpLastStep: step, updatedAt: now });
+    return true;
+  }
+
+  async listRecoveryCodes(id: string): Promise<{ id: string; phc: string }[]> {
+    return this.recoveryCodes(id);
+  }
+
+  async useRecoveryCode(rowId: string): Promise<boolean> {
+    const k = this.#recovery.findIndex((c) => c.id === rowId);
+    if (k < 0) return false;
+    this.#recovery.splice(k, 1);
+    return true;
+  }
+
+  async findLoginStep(tokenHash: Buffer): Promise<LoginStepRow | null> {
+    const h = tokenHash.toString('hex');
+    const s = this.#steps.find((x) => x.tokenHash === h);
+    return s ? { id: s.id, accountId: s.accountId, aud: s.aud, pairRef: s.pairRef, createdAt: s.createdAt, expiresAt: s.expiresAt, usedAt: s.usedAt } : null;
+  }
+
+  async useLoginStep(id: string, at: number): Promise<boolean> {
+    const s = this.#steps.find((x) => x.id === id);
+    if (!s || s.usedAt !== null) return false;
+    s.usedAt = at;
+    return true;
+  }
+
+  async createSession(
+    i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number },
+    limit: number,
+  ): Promise<{ evicted: string[] }> {
+    const now = i.createdAt;
+    const live = this.#sessions.filter((s) => s.accountId === i.accountId && s.terminatedAt === null && s.idleExpiresAt > now && s.absoluteExpiresAt > now).sort((a, b) => a.idleExpiresAt - b.idleExpiresAt);
+    const evicted: string[] = [];
+    while (live.length >= limit) {
+      const s = live.shift()!;
+      Object.assign(s, { terminatedAt: now, terminationReason: 'DEVICE_LIMIT' });
+      this.#terminated.push({ accountId: s.accountId, sessionId: s.id, reason: 'DEVICE_LIMIT' });
+      evicted.push(s.id);
+    }
+    if (evicted.length > 0) this.#notices.push({ accountId: i.accountId, kind: 'SESSION_LIMIT', at: now });
+    this.#sessions.push({ id: i.id, accountId: i.accountId, aud: i.aud, refreshHash: i.refreshHash.toString('hex'), refreshFamily: i.refreshFamily, pairRef: i.pairRef, createdAt: i.createdAt, absoluteExpiresAt: i.absoluteExpiresAt, idleExpiresAt: i.idleExpiresAt, terminatedAt: null, terminationReason: null });
+    return { evicted };
   }
 }

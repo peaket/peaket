@@ -4,7 +4,7 @@ import type { AdminAuthConfig } from './auth-config.js';
 
 export type LockKind = 'NONE' | 'TIMED' | 'PROTECT';
 export type LockReason = 'FAILED_ATTEMPTS' | 'SECOND_FACTOR_FAILURES' | 'PASSWORD_FAILURE_TOTAL';
-export type NoticeKind = 'TIMED_LOCK' | 'PASSWORD_FAILURE_NOTICE' | 'MULTI_SOURCE_ALERT' | 'PROTECT_LOCK';
+export type NoticeKind = 'TIMED_LOCK' | 'PASSWORD_FAILURE_NOTICE' | 'MULTI_SOURCE_ALERT' | 'PROTECT_LOCK' | 'SESSION_LIMIT';
 
 export interface AccountLoginState {
   failedAttempts: number;
@@ -44,19 +44,26 @@ export function accountNeedsHumanCheck(s: AccountLoginState, now: number, cfg: C
   return s.failedAttempts >= cfg.captchaAfterFailures || recentLocks(s, now, cfg).length > 0;
 }
 
+type FailureResult = { next: AccountLoginState; notices: NoticeKind[]; locked: { kind: 'TIMED'; until: number } | { kind: 'PROTECT' } | null };
+
+/** 2단계(인증 앱 코드·복구 코드)가 틀렸을 때: 계정 실패 수에만 세고 비밀번호 연속 실패 누계에는 세지 않는다(§3.1). 2단계 실패 수와 보호 잠금은 BOT-121 */
+export function onSecondFactorFailure(s: AccountLoginState, now: number, cfg: Cfg): FailureResult {
+  return failure(s, now, cfg, false);
+}
+
 /** 비밀번호가 틀렸을 때. 잠긴 동안 거절한 시도에는 부르지 않는다 */
-export function onPasswordFailure(
-  s: AccountLoginState,
-  now: number,
-  cfg: Cfg,
-): { next: AccountLoginState; notices: NoticeKind[]; locked: { kind: 'TIMED'; until: number } | { kind: 'PROTECT' } | null } {
+export function onPasswordFailure(s: AccountLoginState, now: number, cfg: Cfg): FailureResult {
+  return failure(s, now, cfg, true);
+}
+
+function failure(s: AccountLoginState, now: number, cfg: Cfg, password: boolean): FailureResult {
   const failedAttempts = s.failedAttempts + 1;
-  const passwordFailureTotal = s.passwordFailureTotal + 1;
+  const passwordFailureTotal = s.passwordFailureTotal + (password ? 1 : 0);
   const recent = recentLocks(s, now, cfg);
   const notices: NoticeKind[] = [];
-  if (passwordFailureTotal === cfg.passwordFailureNotice && passwordFailureTotal < cfg.passwordFailureCap) notices.push('PASSWORD_FAILURE_NOTICE');
+  if (password && passwordFailureTotal === cfg.passwordFailureNotice && passwordFailureTotal < cfg.passwordFailureCap) notices.push('PASSWORD_FAILURE_NOTICE');
   // 누계 상한(NIST §3.2.2)이면 보호 잠금. 시간 잠금과 겹쳐도 보호 잠금만 건다(해제 링크를 보내지 않는다)
-  if (passwordFailureTotal >= cfg.passwordFailureCap) {
+  if (password && passwordFailureTotal >= cfg.passwordFailureCap) {
     notices.push('PROTECT_LOCK');
     return {
       next: { failedAttempts, passwordFailureTotal, lockKind: 'PROTECT', lockedUntil: null, recentLockAt: recent, lockReason: 'PASSWORD_FAILURE_TOTAL', lockedAt: now },

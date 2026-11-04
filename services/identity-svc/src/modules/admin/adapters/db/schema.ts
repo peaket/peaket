@@ -25,6 +25,9 @@ export const adminAccount = pgTable(
     // $pbkdf2-sha256$i=…,k=…$솔트$MAC(identity §6 '관리 계정 비밀번호 저장과 정책의 첫 구현')
     passwordPhc: text('password_phc'),
     totpSeedEnc: bytea('totp_seed_enc'),
+    // 등록 중인 시드(같은 꼴)와 마지막으로 받은 TOTP 시간 칸(BOT-120)
+    totpPendingEnc: bytea('totp_pending_enc'),
+    totpLastStep: bigint('totp_last_step', { mode: 'number' }),
     failedAttempts: integer('failed_attempts').notNull().default(0),
     secondFactorFailures: integer('second_factor_failures').notNull().default(0),
     passwordFailureTotal: integer('password_failure_total').notNull().default(0),
@@ -84,6 +87,45 @@ export const adminSecurityNotice = pgTable(
   },
   (t) => [
     index('admin_security_notice_unsent_idx').on(t.createdAt).where(sql`${t.sentAt} is null`),
-    check('admin_security_notice_kind_check', sql`${t.kind} in ('TIMED_LOCK', 'PASSWORD_FAILURE_NOTICE', 'MULTI_SOURCE_ALERT', 'PROTECT_LOCK')`),
+    check('admin_security_notice_kind_check', sql`${t.kind} in ('TIMED_LOCK', 'PASSWORD_FAILURE_NOTICE', 'MULTI_SOURCE_ALERT', 'PROTECT_LOCK', 'SESSION_LIMIT')`),
   ],
+);
+
+/** 관리 계정 로그인 세션(POL-019: 최대 24시간, 유휴 1시간, 동시 2개, identity §6 '관리 계정 TOTP와 로그인 2단계의 첫 구현', BOT-120) */
+export const adminSession = pgTable(
+  'admin_session',
+  {
+    id: uuid('id').primaryKey(),
+    adminAccountId: uuid('admin_account_id')
+      .notNull()
+      .references(() => adminAccount.id, { onDelete: 'cascade' }),
+    aud: text('aud').notNull(),
+    refreshHash: bytea('refresh_hash').notNull(),
+    refreshFamily: uuid('refresh_family').notNull(),
+    pairRef: text('pair_ref').notNull(),
+    createdAt: at('created_at').notNull(),
+    absoluteExpiresAt: at('absolute_expires_at').notNull(),
+    idleExpiresAt: at('idle_expires_at').notNull(),
+    terminatedAt: at('terminated_at'),
+    terminationReason: text('termination_reason'),
+  },
+  (t) => [
+    uniqueIndex('admin_session_refresh_key').on(t.refreshHash),
+    index('admin_session_live_idx').on(t.adminAccountId, t.idleExpiresAt).where(sql`${t.terminatedAt} is null`),
+    check('admin_session_aud_check', sql`${t.aud} in ('partner', 'ops')`),
+  ],
+);
+
+/** 복구 코드(docs/data.md admin_recovery_code, BOT-120). 쓰거나 다시 만들면 바로 지운다 */
+export const adminRecoveryCode = pgTable(
+  'admin_recovery_code',
+  {
+    id: uuid('id').primaryKey(),
+    adminAccountId: uuid('admin_account_id')
+      .notNull()
+      .references(() => adminAccount.id, { onDelete: 'cascade' }),
+    codePhc: text('code_phc').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [index('admin_recovery_code_account_idx').on(t.adminAccountId)],
 );

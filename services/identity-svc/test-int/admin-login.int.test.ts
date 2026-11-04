@@ -42,7 +42,7 @@ afterAll(async () => {
 const q = async <R>(sql: string, params: unknown[] = []): Promise<R[]> => (await database.pool.query(sql, params)).rows as R[];
 
 async function account(id: string, email: string, role: 'partner_admin' | 'operator' = 'operator') {
-  const store = new DrizzleAdminAccountStore(database);
+  const store = new DrizzleAdminAccountStore(database, clock);
   await store.create({ id, role, email, status: 'ACTIVE', promoterId: role === 'partner_admin' ? '0190f3a1-7c2e-7a00-8000-000000000001' : null, now: clock.now() });
   await store.setPassword({ id, phc: await passwords.hash(id, PW), breachCheckedAt: clock.now(), now: clock.now() });
   return store;
@@ -106,7 +106,7 @@ test('PostgreSQL·Valkey에서_한계정에동시에온시도10개는Redis임대
 });
 
 test('Valkey에서_한IP가서로다른이메일5개로틀리면출발지경보이고_없는이메일의가짜상태는25시간짜리키로남는다(AC-T1·AC-T2)', async () => {
-  const store = new DrizzleAdminAccountStore(database);
+  const store = new DrizzleAdminAccountStore(database, clock);
   const { step, counters } = stepWith(store);
   const ip = '192.0.2.80';
   for (let i = 0; i < 5; i++) await step.run({ aud: 'partner', email: `ghost${i}@haeoreum.example`, password: 'x', ip, deviceId: '' });
@@ -122,7 +122,7 @@ test('Valkey에서_한IP가서로다른이메일5개로틀리면출발지경보�
 });
 
 test('Valkey에서_5분에실패100건이면전체경보가한번나고_모든로그인에사람확인이며_1시간뒤풀린다(AC-T9)', async () => {
-  const store = new DrizzleAdminAccountStore(database);
+  const store = new DrizzleAdminAccountStore(database, clock);
   const { step } = stepWith(store);
   clock.advance(2 * 60 * M);
   const before = alerts.filter((a) => a === 'global').length;
