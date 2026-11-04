@@ -1,3 +1,4 @@
+// asvs-report: ignore(이 파일의 태그는 시험 자료다)
 // trace-check.mjs를 바깥에서 돌려 보는 시험(docs/architecture.md §8.6의 5단계 '대조', ADR-0178 결정 4). 실행: node --test "tools/ci/*.test.mjs"
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

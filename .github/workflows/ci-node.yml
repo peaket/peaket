@@ -2,7 +2,7 @@
 # 잠금 파일대로 설치하고 Turborepo로 타입 검사·단위 시험·빌드를 돈다. 넓게 쓰이는 것(packages/platform·packages/contracts,
 # docs/api, 잠금 파일·작업 공간 설정)이 바뀌었거나 범위를 고르지 못했으면 전체, 아니면 바뀐 패키지와 그것에 기대는 패키지만 돈다.
 # 린트(서비스 안 구조의 층 의존 방향)와 서비스 템플릿의 컨테이너 통합 시험(실제 PostgreSQL)은 늘 돈다(openspec 변경
-# add-service-structure-and-request-checks). ASVS 태그 보고는 그 도구가 생기는 단계(wbs 0.1.4)에서 더한다.
+# add-service-structure-and-request-checks). ASVS 태그 보고 도구는 tools/ci/asvs-report.mjs(BOT-160)이고, 작업 요약에 잇는 것은 BOT-162다.
 name: ci-node
 
 on:
