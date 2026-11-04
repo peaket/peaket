@@ -3,7 +3,9 @@ import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { CLOCK, type Clock, type HotRedis, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import type { PurchaseSessionAccess } from './adapters/memory-purchase-sessions.js';
 import { OpenPurchaseSession } from './application/open-purchase-session.js';
+import { EndPurchaseSession } from './application/end-purchase-session.js';
 import { ReadSeatSnapshot } from './application/read-seat-snapshot.js';
+import { SessionSweeper } from './application/session-sweeper.js';
 import type { AdmissionKeys } from './domain/admission-token.js';
 import { MemorySeatMap } from './adapters/memory-seat-map.js';
 import { MemorySeatStore } from './adapters/memory-seat-store.js';
@@ -23,6 +25,8 @@ import {
   SEAT_MAP_SECTIONS,
   SEAT_SNAPSHOTS,
   SESSION_HOLDS,
+  type SessionEndedLog,
+  type SessionIndex,
   type SeatMapSections,
   type SeatSnapshots,
   type SessionStartedLog,
@@ -36,6 +40,7 @@ import {
   type SweepLeases,
 } from './domain/ports.js';
 import { HoldsController } from './inbound/holds.controller.js';
+import { PurchaseSessionController } from './inbound/purchase-session.controller.js';
 import { SnapshotController } from './inbound/snapshot.controller.js';
 
 /**
@@ -47,6 +52,10 @@ export interface AdmissionOptions {
   store: PurchaseSessionStore;
   /** SESSION_STARTED를 회차 Stream에 더하는 길 */
   startedLog: SessionStartedLog;
+  /** SESSION_ENDED를 더하는 길(BUILD_ORDER PRF-138). 있으면 구매 세션 나가기 경로(PurchaseSessionController)와 끝내기 유스케이스를 연다 */
+  endedLog?: SessionEndedLog;
+  /** 구매 세션 정리 색인(BUILD_ORDER PRF-138). endedLog와 함께 있고 저장소가 redis이면 정리 반복(SessionSweeper)을 만들어 내보낸다 */
+  index?: SessionIndex;
   /** 입장 토큰 공개키 묶음(PEAKET_ADMISSION_JWKS) */
   keys: AdmissionKeys;
   /** 입장 토큰 발급자(PEAKET_ADMISSION_ISSUER) */
@@ -117,6 +126,16 @@ export class InventoryModule {
               new OpenPurchaseSession({ store: o.admission!.store, log: o.admission!.startedLog, keys: o.admission!.keys, issuer: o.admission!.issuer, clock, ...(logger ? { logger } : {}) }),
             inject: [CLOCK, optionalLoggerToken],
           },
+          ...(o.admission.endedLog
+            ? [
+                {
+                  provide: EndPurchaseSession,
+                  useFactory: (clock: Clock, signals: SeatSignals, logger?: PlatformLogger) =>
+                    new EndPurchaseSession({ store: o.admission!.store, ended: o.admission!.endedLog!, clock, signals, ...(logger ? { logger } : {}) }),
+                  inject: [CLOCK, SEAT_SIGNALS, optionalLoggerToken],
+                } satisfies Provider,
+              ]
+            : []),
           {
             provide: ReadSeatSnapshot,
             useFactory: (opener: OpenPurchaseSession, seatMap: SeatMap & SeatMapSections, snapshots: SeatSnapshots, clock: Clock) => {
@@ -128,11 +147,23 @@ export class InventoryModule {
           },
         ]
       : [];
+    // 구매 세션 정리 반복(BUILD_ORDER PRF-138): 운영(redis)이고 종료 사건 길·정리 색인이 있을 때만 만든다. 켜고 끄는 것은 main.ts다
+    const sessionSweeperProvider: Provider[] =
+      o.storage === 'redis' && o.admission?.endedLog && o.admission.index
+        ? [
+            {
+              provide: SessionSweeper,
+              useFactory: (store: RedisSeatStore, leases: SweepLeases, ending: EndPurchaseSession, clock: Clock, logger?: PlatformLogger) =>
+                new SessionSweeper({ store: o.admission!.store, index: o.admission!.index!, expiries: store, leases, ending, clock, podId: o.podId, ...(logger ? { logger: logger as never } : {}) }),
+              inject: [SEAT_STORE, SWEEP_LEASES, EndPurchaseSession, CLOCK, optionalLoggerToken],
+            },
+          ]
+        : [];
     return {
       module: InventoryModule,
-      controllers: o.admission ? [HoldsController, SnapshotController] : [HoldsController],
-      providers: [HoldSeats, ...storage, ...snapshotProviders, signals, oomGate, { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
-      exports: o.storage === 'redis' ? [HoldSeats, ExpirySweeper] : [HoldSeats],
+      controllers: o.admission ? [HoldsController, SnapshotController, ...(o.admission.endedLog ? [PurchaseSessionController] : [])] : [HoldsController],
+      providers: [HoldSeats, ...storage, ...snapshotProviders, ...sessionSweeperProvider, signals, oomGate, { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
+      exports: o.storage === 'redis' ? [HoldSeats, ExpirySweeper, ...(sessionSweeperProvider.length > 0 ? [SessionSweeper] : [])] : [HoldSeats],
     };
   }
 }

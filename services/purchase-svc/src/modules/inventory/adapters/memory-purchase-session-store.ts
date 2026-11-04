@@ -1,8 +1,8 @@
 // 구매 세션 저장소와 시작 사건 기록의 메모리 구현(시험·메모리 조립용). Redis 구현(redis-purchase-sessions.ts, Lua 계약은 purchase-session-lua.ts)과 같은 사례에서 같은 결과를 낸다
 // (test/purchase-session-cases.ts). 시각은 주입 Clock이다.
 import type { Clock } from '@peaket/platform';
-import { assertHoldRecord, assertJti, assertOpenInput, assertSeq, assertStartedEntry, type OpenSessionInput, type OpenSessionResult, SESSION_IDLE_MS, SESSION_KEY_GRACE_MS, SESSION_STARTED_GRACE_MS, type SessionStartedEntry, type StoredSession } from '../domain/purchase-session.js';
-import type { PurchaseSessionStore, SeatCallOptions, SessionStartedLog } from '../domain/ports.js';
+import { assertEndedEntry, assertHoldRecord, assertIndexArgs, sessionCheckAt, type EndedSession, type SweepSessionResult, assertJti, assertOpenInput, assertSeq, assertStartedEntry, type OpenSessionInput, type OpenSessionResult, SESSION_IDLE_MS, SESSION_KEY_GRACE_MS, SESSION_STARTED_GRACE_MS, type SessionEndedEntry, type SessionStartedEntry, type StoredSession } from '../domain/purchase-session.js';
+import type { PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionIndex, SessionStartedLog } from '../domain/ports.js';
 
 interface Marker {
   startedAtMs: number;
@@ -24,6 +24,8 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
   readonly #holds = new Map<string, Map<string, string[]>>();
   /** 첫 홀드 표시 fh가 쓰인 세션 */
   readonly #firstHeld = new Set<string>();
+  /** Paying 표시 pay가 쓰인 세션(BUILD_ORDER PRF-138) */
+  readonly #paying = new Set<string>();
 
   constructor(private readonly clock: Clock) {}
 
@@ -94,18 +96,63 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
     return true;
   }
 
+  /** 세션 상태만 지운다(재사용 차단 표지는 남는다) */
+  #drop(jti: string): void {
+    this.#sessions.delete(jti);
+    this.#recorded.delete(jti);
+    this.#sessionUntil.delete(jti);
+    this.#holds.delete(jti);
+    this.#firstHeld.delete(jti);
+    this.#paying.delete(jti);
+  }
+
   /** 지금 시각에 사라졌어야 할 키를 지운다(Redis 키 수명과 같은 순간: 지금 ≥ 사라지는 시각) */
   #expire(jti: string, now: number): void {
     const su = this.#sessionUntil.get(jti);
-    if (su !== undefined && now >= su) {
-      this.#sessions.delete(jti);
-      this.#recorded.delete(jti);
-      this.#sessionUntil.delete(jti);
-      this.#holds.delete(jti);
-      this.#firstHeld.delete(jti);
-    }
+    if (su !== undefined && now >= su) this.#drop(jti);
     const m = this.#markers.get(jti);
     if (m && now >= m.untilMs) this.#markers.delete(jti);
+  }
+
+  async end(jti: string, _o?: SeatCallOptions): Promise<EndedSession | null> {
+    assertJti(jti);
+    this.#expire(jti, this.clock.now());
+    const s = this.#sessions.get(jti);
+    if (!s) return null;
+    this.#drop(jti);
+    return { eventId: s.eventId, journeyId: s.journeyId };
+  }
+
+  async sweep(jti: string, _o?: SeatCallOptions): Promise<SweepSessionResult> {
+    assertJti(jti);
+    const now = this.clock.now();
+    this.#expire(jti, now);
+    const s = this.#sessions.get(jti);
+    if (!s) return { kind: 'GONE' };
+    if (now >= s.maxStayUntilMs) {
+      this.#drop(jti);
+      return { kind: 'ENDED', reason: 'MAX_STAY', eventId: s.eventId, journeyId: s.journeyId, endedAtMs: now };
+    }
+    if (this.#paying.has(jti)) return { kind: 'LIVE', nextCheckMs: Math.min(s.maxStayUntilMs, now + SESSION_IDLE_MS) };
+    if (now >= s.idleUntilMs) {
+      this.#drop(jti);
+      return { kind: 'ENDED', reason: 'IDLE', eventId: s.eventId, journeyId: s.journeyId, endedAtMs: now };
+    }
+    return { kind: 'LIVE', nextCheckMs: Math.min(s.maxStayUntilMs, s.idleUntilMs) };
+  }
+
+  async setPaying(jti: string, paying: boolean, _o?: SeatCallOptions): Promise<boolean> {
+    assertJti(jti);
+    const now = this.clock.now();
+    this.#expire(jti, now);
+    const s = this.#sessions.get(jti);
+    if (!s) return false;
+    if (paying) this.#paying.add(jti);
+    else {
+      this.#paying.delete(jti);
+      s.idleUntilMs = now + SESSION_IDLE_MS;
+    }
+    return true;
   }
 
   async recordHold(jti: string, holdId: string, seatIds: readonly string[], _o?: SeatCallOptions): Promise<boolean | null> {
@@ -132,15 +179,15 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
 
   /** 시험용: 세션 상태만 지운다(세션이 끝난 것. 재사용 차단 표지는 남아 같은 입장 토큰으로 다시 열 수 없다). 없으면 아무 일도 없다 */
   endSession(jti: string): void {
-    this.#sessions.delete(jti);
-    this.#recorded.delete(jti);
-    this.#holds.delete(jti);
-    this.#firstHeld.delete(jti);
+    this.#drop(jti);
   }
 }
 
-/** SessionStartedLog의 메모리 구현: 더한 항목을 순서대로 모은다. failWith를 두면 그 오류로 실패한다(시험) */
-export class RecordingSessionStartedLog implements SessionStartedLog {
+/**
+ * SessionStartedLog·SessionEndedLog·SessionIndex의 메모리 구현: 더한 항목을 순서대로 모은다. failWith를 두면 appendStarted가, failEndedWith를 두면 appendEnded가 그 오류로 실패한다(시험).
+ * 정리 색인(index: 회차 → (jti → 다음 점검 시각))은 appendStarted가 ZADD NX처럼 넣고 appendEnded가 ZREM처럼 뺀다(BUILD_ORDER PRF-138)
+ */
+export class RecordingSessionStartedLog implements SessionStartedLog, SessionEndedLog, SessionIndex {
   readonly entries: SessionStartedEntry[] = [];
   failWith: unknown;
 
@@ -148,5 +195,48 @@ export class RecordingSessionStartedLog implements SessionStartedLog {
     assertStartedEntry(e);
     if (this.failWith !== undefined) throw this.failWith;
     this.entries.push({ ...e });
+    // 정리 색인에 ZADD NX처럼 넣는다: 이미 있으면 점수를 바꾸지 않는다
+    let m = this.index.get(e.eventId);
+    if (!m) {
+      m = new Map();
+      this.index.set(e.eventId, m);
+    }
+    if (!m.has(e.admissionJti)) m.set(e.admissionJti, sessionCheckAt(e.startedAtMs, e.maxStayUntilMs));
+  }
+
+  /** 더한 종료 항목(차례대로) */
+  readonly endedEntries: SessionEndedEntry[] = [];
+  failEndedWith: unknown;
+  /** 정리 색인: 회차 → (jti → 다음 점검 시각 ms) */
+  readonly index = new Map<string, Map<string, number>>();
+
+  async appendEnded(e: SessionEndedEntry, _o?: SeatCallOptions): Promise<void> {
+    assertEndedEntry(e);
+    if (this.failEndedWith !== undefined) throw this.failEndedWith;
+    this.endedEntries.push({ ...e });
+    this.index.get(e.eventId)?.delete(e.admissionJti);
+  }
+
+  async due(eventId: string, nowMs: number, limit: number, _o?: SeatCallOptions): Promise<string[]> {
+    assertIndexArgs(eventId, undefined, nowMs);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new RangeError('limit이 1 ~ 1000의 정수가 아니다');
+    const m = this.index.get(eventId);
+    if (!m) return [];
+    return [...m]
+      .filter(([, score]) => score <= nowMs)
+      .sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+      .slice(0, limit)
+      .map(([jti]) => jti);
+  }
+
+  async requeue(eventId: string, jti: string, atMs: number, _o?: SeatCallOptions): Promise<void> {
+    assertIndexArgs(eventId, jti, atMs);
+    const m = this.index.get(eventId);
+    if (m?.has(jti)) m.set(jti, atMs);
+  }
+
+  async drop(eventId: string, jti: string, _o?: SeatCallOptions): Promise<void> {
+    assertIndexArgs(eventId, jti, 0);
+    this.index.get(eventId)?.delete(jti);
   }
 }

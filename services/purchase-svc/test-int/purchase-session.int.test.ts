@@ -364,3 +364,227 @@ describe('RedisPurchaseSessionStore.recordHold (홀드 기록 계약 사례, 실
     sessionHoldRecordCases(() => recordHarness(clusterRedis));
   });
 });
+
+// ── 구매 세션 종료와 정리(PRF-138, docs/features/seat-hold.md §2 '구매 세션 종료와 정리', END_SESSION_LUA·SWEEP_SESSION_LUA·PAY_SESSION_LUA) ─────────────────────────
+import {
+  APPEND_SESSION_ENDED_LUA,
+  END_SESSION_LUA,
+  PAY_SESSION_LUA,
+  SESSION_IDLE_MS,
+  SeatStoreUnavailable,
+  SWEEP_SESSION_LUA,
+  seatLuaErrorOf,
+} from '../src/modules/inventory/index.js';
+import { type EndHarness, sessionEndCases } from '../test/session-end-cases.js';
+
+/** 세션 상태의 유휴 시한 칸을 직접 쓰는 시험 전용 도구를 더한 도구(유휴 5분을 실제로 기다릴 수 없다) */
+function endHarness(r: HotRedis = redis): EndHarness {
+  return {
+    ...harness(r),
+    setIdle: async (jti, ms) => {
+      const key = sessionKeys.session(jti);
+      if (Number(await r.command(['EXISTS', key], { key })) !== 1) throw new Error('세션이 있을 때만 유휴 시한 칸을 쓴다');
+      await r.command(['HSET', key, 'idle', String(ms)], { key });
+    },
+  };
+}
+
+const exists = async (r: HotRedis, key: string) => Number(await r.command(['EXISTS', key], { key })) === 1;
+const session = (jti: string) => sessionKeys.session(jti);
+const allFields = async (r: HotRedis, jti: string) => hash(await r.command(['HGETALL', session(jti)], { key: session(jti) }));
+/** 시험마다 다른 회차 ID(회차 Stream·정리 색인 키가 시험끼리 섞이지 않게) */
+const eventOf = () => `ev-${newJti()}`;
+
+describe('RedisPurchaseSessionStore.end·sweep·setPaying (종료·정리 계약 사례, 실제 Valkey 8.1)', () => {
+  sessionEndCases(() => endHarness());
+
+  test('QT11_ASVS8.2.1_end는 세션 상태 키만 지운다: 재사용 차단 표지 s:jti는 값·수명 그대로 남고, 회차 Stream·정리 색인은 만들지도 건드리지도 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+    const h = endHarness();
+    const jti = newJti();
+    const eventId = eventOf();
+    await h.store.open(openInput(h, jti, { eventId }));
+    const marker = sessionKeys.marker(jti);
+    const markerValue = String(await redis.command(['GET', marker], { key: marker }));
+    const markerExpire = await pexpireTime(redis, marker);
+    expect(await h.store.end(jti)).toEqual({ eventId, journeyId: openInput(h, jti).journeyId });
+    expect(await exists(redis, session(jti))).toBe(false);
+    expect(await exists(redis, marker)).toBe(true);
+    expect(String(await redis.command(['GET', marker], { key: marker }))).toBe(markerValue);
+    expect(await pexpireTime(redis, marker)).toBe(markerExpire);
+    expect(await exists(redis, seatKeys.stream(eventId))).toBe(false);
+    expect(await exists(redis, seatKeys.sessions(eventId))).toBe(false);
+    // 세션이 없는 jti의 end는 어떤 키도 만들지 않는다
+    const ghost = newJti();
+    expect(await h.store.end(ghost)).toBeNull();
+    expect(await exists(redis, session(ghost))).toBe(false);
+    expect(await exists(redis, sessionKeys.marker(ghost))).toBe(false);
+  });
+
+  test('QT11_ASVS9.2.1_sweep: LIVE는 칸도 키 수명도 바꾸지 않고, 끝낼 때(MAX_STAY·IDLE)는 세션 상태 키만 지운다(표지 그대로, 회차 Stream·정리 색인은 건드리지 않는다: 사건은 appendEnded가 따로 더한다) [ASVS v5.0.0-9.2.1]', async () => {
+    const h = endHarness();
+    const eventId = eventOf();
+    const live = newJti();
+    const i = openInput(h, live, { eventId });
+    await h.store.open(i);
+    const before = await allFields(redis, live);
+    const expireAt = await pexpireTime(redis, session(live));
+    expect(expireAt).toBe(i.expiresAtMs + SESSION_KEY_GRACE_MS);
+    expect((await h.store.sweep(live)).kind).toBe('LIVE');
+    expect(await allFields(redis, live)).toEqual(before);
+    expect(await pexpireTime(redis, session(live))).toBe(expireAt);
+
+    // 유휴로 끝낸다
+    await h.setIdle!(live, h.now() - 1_000);
+    expect((await h.store.sweep(live)).kind).toBe('ENDED');
+    expect(await exists(redis, session(live))).toBe(false);
+    expect(await exists(redis, sessionKeys.marker(live))).toBe(true);
+
+    // 최대 체류로 끝낸다
+    const late = newJti();
+    const j = openInput(h, late, { eventId, expiresAtMs: h.now() + 1_000 });
+    await h.store.open(j);
+    await sleep(1_150);
+    expect((await h.store.sweep(late)).kind).toBe('ENDED');
+    expect(await exists(redis, session(late))).toBe(false);
+    expect(await exists(redis, sessionKeys.marker(late))).toBe(true);
+    expect(await exists(redis, seatKeys.stream(eventId))).toBe(false);
+    expect(await exists(redis, seatKeys.sessions(eventId))).toBe(false);
+  });
+
+  test('POL009_ADR0183_11_setPaying(true)는 pay 칸 하나만 "1"로 더하고(유휴 시한을 바꾸지 않는다), setPaying(false)는 pay 칸을 지우고 idle 칸만 지금 + 5분으로 다시 쓴다. 세션 키 수명은 둘 다 그대로다', async () => {
+    const h = endHarness();
+    const jti = newJti();
+    const i = openInput(h, jti);
+    await h.store.open(i);
+    const before = await allFields(redis, jti);
+    const life = await pexpireTime(redis, session(jti));
+    expect(Object.keys(before)).not.toContain('pay');
+
+    expect(await h.store.setPaying(jti, true)).toBe(true);
+    expect(await allFields(redis, jti)).toEqual({ ...before, pay: '1' });
+    expect(await pexpireTime(redis, session(jti))).toBe(life);
+    expect(await h.store.setPaying(jti, true)).toBe(true);
+    expect(await allFields(redis, jti)).toEqual({ ...before, pay: '1' });
+
+    await sleep(30);
+    expect(await h.store.setPaying(jti, false)).toBe(true);
+    const after = await allFields(redis, jti);
+    expect(Object.keys(after)).not.toContain('pay');
+    expect({ ...after, idle: '' }).toEqual({ ...before, idle: '' });
+    expect(Number(after.idle)).toBeGreaterThan(Number(before.idle));
+    expect(Math.abs(Number(after.idle) - (h.now() + SESSION_IDLE_MS))).toBeLessThanOrEqual(3_000);
+    expect(await pexpireTime(redis, session(jti))).toBe(life);
+  });
+
+  test('POL009_setPaying은 세션이 없으면 키를 만들지 않는다(pay 칸 하나짜리 해시도 idle 칸 하나짜리 해시도 남기지 않는다)', async () => {
+    const h = endHarness();
+    const jti = newJti();
+    expect(await h.store.setPaying(jti, true)).toBe(false);
+    expect(await h.store.setPaying(jti, false)).toBe(false);
+    expect(await exists(redis, session(jti))).toBe(false);
+    expect(await exists(redis, sessionKeys.marker(jti))).toBe(false);
+  });
+
+  test('QT11_sweep는 max 칸이 양의 10진 정수(16자리 이하)가 아니면 PEAKET_CORRUPT_KEY로 거절한다: 일시 장애가 아닌 오류(seatLuaErrorOf가 CORRUPT_KEY로 읽는다)이고 아무것도 지우거나 쓰지 않는다', async () => {
+    const h = endHarness();
+    for (const bad of ['abc', '1.5', '-5', '1e9', '0', '12345678901234567']) {
+      const jti = newJti();
+      await h.store.open(openInput(h, jti));
+      await redis.command(['HSET', session(jti), 'max', bad], { key: session(jti) });
+      const before = await allFields(redis, jti);
+      const err = await h.store.sweep(jti).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(err, `max ${bad}`).toBeInstanceOf(Error);
+      expect((err as Error).message).toMatch(/PEAKET_CORRUPT_KEY/);
+      expect(err).not.toBeInstanceOf(SeatStoreUnavailable);
+      expect(seatLuaErrorOf(err)).toMatchObject({ code: 'CORRUPT_KEY' });
+      expect(await allFields(redis, jti), `max ${bad}`).toEqual(before);
+    }
+  });
+
+  test('QT11_sweep는 Active 세션의 idle 칸이 10진 정수가 아니면 PEAKET_CORRUPT_KEY로 거절한다(아무것도 지우거나 쓰지 않는다)', async () => {
+    const h = endHarness();
+    for (const bad of ['abc', '1.5', '-5', '1e9']) {
+      const jti = newJti();
+      await h.store.open(openInput(h, jti));
+      await redis.command(['HSET', session(jti), 'idle', bad], { key: session(jti) });
+      const before = await allFields(redis, jti);
+      const err = await h.store.sweep(jti).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(err, `idle ${bad}`).toBeInstanceOf(Error);
+      expect(seatLuaErrorOf(err)).toMatchObject({ code: 'CORRUPT_KEY' });
+      expect(err).not.toBeInstanceOf(SeatStoreUnavailable);
+      expect(await allFields(redis, jti), `idle ${bad}`).toEqual(before);
+    }
+  });
+
+  test('QT11_세션 키의 형이 틀리면(문자열) end·sweep·setPaying은 일시 장애로 숨기지 않고 WRONGTYPE 오류로 던진다', async () => {
+    const h = endHarness();
+    const jti = newJti();
+    await redis.command(['SET', session(jti), 'x'], { key: session(jti) });
+    for (const run of [() => h.store.end(jti), () => h.store.sweep(jti), () => h.store.setPaying(jti, true), () => h.store.setPaying(jti, false)]) {
+      const err = await run().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(SeatStoreUnavailable);
+    }
+    expect(String(await redis.command(['GET', session(jti)], { key: session(jti) }))).toBe('x');
+  });
+
+  describe('노드 하나짜리 클러스터 모드', () => {
+    sessionEndCases(() => endHarness(clusterRedis));
+  });
+});
+
+describe('종료·정리 Lua 모양', () => {
+  test('ST28_QT11_새 Lua 넷(세션 끝내기·정리 점검·Paying 표시·종료 사건 더하기)은 첫 줄이 #!lua뿐이다(allow-oom 같은 표시가 없어 메모리 부족이면 시작 전에 거절된다)', () => {
+    for (const lua of [END_SESSION_LUA, SWEEP_SESSION_LUA, PAY_SESSION_LUA, APPEND_SESSION_ENDED_LUA]) {
+      expect(lua.startsWith('#!lua\n')).toBe(true);
+      expect(lua.split('\n')[0]).toBe('#!lua');
+      expect(lua).not.toContain('allow-oom');
+    }
+  });
+});
+
+describe('종료·정리 Lua: 망가진 칸과 경계(PRF-138 시험 검토)', () => {
+  test('ST28_QT11_event·jny가 없는 찌꺼기 해시에 end를 부르면 null이고 그 키를 지운다. sweep은 event 칸이 없으면 GONE이고 키를 건드리지 않는다(키 수명이 지운다)', async () => {
+    const h = endHarness();
+    const trash = newJti();
+    await redis.command(['HSET', session(trash), 'acct', 'x'], { key: session(trash) });
+    expect(await h.store.end(trash)).toBeNull();
+    expect(await exists(redis, session(trash))).toBe(false);
+
+    const gone = newJti();
+    await redis.command(['HSET', session(gone), 'acct', 'x'], { key: session(gone) });
+    expect(await h.store.sweep(gone)).toEqual({ kind: 'GONE' });
+    expect(await exists(redis, session(gone))).toBe(true);
+  });
+
+  test('ASVS16.2.5_event만 있고 jny·max·idle이 빠진 해시에 sweep을 부르면 PEAKET_CORRUPT_KEY로 거절하고 키를 그대로 둔다. Paying(pay=1)이어도 idle이 10진 정수가 아니면 같다 [ASVS v5.0.0-16.2.5]', async () => {
+    const h = endHarness();
+    const half = newJti();
+    await redis.command(['HSET', session(half), 'event', 'ev-1'], { key: session(half) });
+    await expect(h.store.sweep(half)).rejects.toThrow(/PEAKET_CORRUPT_KEY/);
+    expect(await exists(redis, session(half))).toBe(true);
+
+    const jti = newJti();
+    expect((await h.store.open(openInput(h, jti))).kind).toBe('CREATED');
+    expect(await h.store.setPaying(jti, true)).toBe(true);
+    await redis.command(['HSET', session(jti), 'idle', 'abc'], { key: session(jti) });
+    await expect(h.store.sweep(jti)).rejects.toThrow(/PEAKET_CORRUPT_KEY/);
+    expect(await exists(redis, session(jti))).toBe(true);
+  });
+
+  test('POL009_정리 점검 Lua의 경계: 지금 ≥ 최대 체류와 지금 ≥ 유휴 시한이 같은 밀리초에서도 끝난다(>=). Redis 시각을 시험이 정할 수 없어 Lua 원문의 비교식을 고정한다', async () => {
+    expect(SWEEP_SESSION_LUA).toContain('if now >= max then');
+    expect(SWEEP_SESSION_LUA).toContain('if now >= idle then');
+    // 최대 체류 검사가 Paying 검사보다 먼저다(Paying이어도 최대 체류에는 끝난다)
+    expect(SWEEP_SESSION_LUA.indexOf('if now >= max then')).toBeLessThan(SWEEP_SESSION_LUA.indexOf("if h[5] == '1' then"));
+  });
+});

@@ -202,6 +202,24 @@ export const PostV1EventsEventIdHoldsResponse = zod.object({
 })
 
 /**
+ * FR-010, POL-009, 구매 세션 상태 기계 T9·T11(docs/planning/03 §2.2). 구매 세션 요청 서명 필수(X-Purchase-Seq·X-Purchase-Mac, 입장 토큰 머리). 그 구매 세션을 LEFT로 끝내고(세션 상태를 지우고 입장 토큰의 재사용 차단 표지는 남긴다) PurchaseSessionEnded를 낸다. 브라우저는 화면을 나갈 때 fetch keepalive로 서명해 보낸다(sendBeacon은 머리를 달 수 없다). 이미 끝난 세션의 요청은 구매 세션 확인에서 401이다. 그 세션의 홀드를 푸는 일은 해제 연산이 생긴 뒤 이 연산에 잇는다(그전에는 홀드가 7분 만료로 풀린다). 추천 적용 2026-11-04, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'
+ * @summary 구매 세션 나가기(구매 화면을 나갈 때 세션을 끝냄)
+ */
+export const DeleteV1EventsEventIdPurchaseSessionParams = zod.object({
+  "eventId": zod.string()
+})
+
+
+
+
+export const DeleteV1EventsEventIdPurchaseSessionHeader = zod.object({
+  "X-Purchase-Seq": zod.int().min(1).describe('구매 세션 요청 일련번호. 요청마다 1씩 올리고 서버는 마지막 번호보다 큰 것만 받는다(ADR-0050 결정 8)'),
+  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1)로 만든 HMAC-SHA256 키이고, 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3)')
+})
+
+export const DeleteV1EventsEventIdPurchaseSessionResponse = zod.void()
+
+/**
  * FR-010, FR-042. 구매 세션 요청 서명 필수. purchase-svc는 요청한 구매 세션 상태에 적힌 그 세션의 holdId 목록에서만 찾고, 해제 Lua는 좌석 홀드 Hash의 holdId와 소유 계정이 요청과 같을 때만 바꾼다(추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 3). 놓은 좌석은 같은 계정이 30초 [가정] 동안 다시 잡지 못한다(홀드 409 seat-recently-released, 소유자 결정 2026-10-30, open-items 67번, docs/features/seat-hold.md §5)
  * @summary 홀드 해제
  */

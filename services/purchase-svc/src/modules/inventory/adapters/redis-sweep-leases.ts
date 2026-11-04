@@ -4,7 +4,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type HotRedis, redisScript } from '@peaket/platform';
 import { assertSweepLeaseArgs } from '../domain/expiry.js';
-import type { SweepLeases } from '../domain/ports.js';
+import type { SweepLane, SweepLeases } from '../domain/ports.js';
 import { SWEEP_LEASE_LUA } from './expire-lua.js';
 import { guard, SEAT_REDIS, seatKeys } from './redis-seat-store.js';
 
@@ -21,9 +21,10 @@ const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : S
 export class RedisSweepLeases implements SweepLeases {
   constructor(@Inject(SEAT_REDIS) private readonly redis: HotRedis) {}
 
-  async acquire(eventId: string, owner: string, ttlMs: number): Promise<boolean> {
+  async acquire(eventId: string, owner: string, ttlMs: number, lane: SweepLane = 'expiry'): Promise<boolean> {
     assertSweepLeaseArgs(eventId, owner, ttlMs);
-    const r = str(await guard(this.redis.evalScript(SWEEP_LEASE, [seatKeys.sweep(eventId)], [owner, String(ttlMs)])));
+    const key = lane === 'session' ? seatKeys.sessionSweep(eventId) : seatKeys.sweep(eventId);
+    const r = str(await guard(this.redis.evalScript(SWEEP_LEASE, [key], [owner, String(ttlMs)])));
     if (r === '1') return true;
     if (r === '0') return false;
     throw new Error(`임대 Lua가 모르는 값을 돌려줬다: ${r}`);

@@ -3,7 +3,7 @@
 // 임대는 MemorySeatDb의 회차 묶음(MemorySeatEvent.sweep)에 적어, 시험이 같은 db로 만든 MemorySeatStore와 함께 읽고 채운다. 시각은 주입 Clock이다.
 import type { Clock } from '@peaket/platform';
 import { assertSweepLeaseArgs } from '../domain/expiry.js';
-import type { SweepLeases } from '../domain/ports.js';
+import type { SweepLane, SweepLeases } from '../domain/ports.js';
 import type { MemorySeatDb } from './memory-seat-store.js';
 
 /**
@@ -20,13 +20,15 @@ export class MemorySweepLeases implements SweepLeases {
     private readonly clock: Clock,
   ) {}
 
-  async acquire(eventId: string, owner: string, ttlMs: number): Promise<boolean> {
+  async acquire(eventId: string, owner: string, ttlMs: number, lane: SweepLane = 'expiry'): Promise<boolean> {
     assertSweepLeaseArgs(eventId, owner, ttlMs);
     const ev = this.db.event(eventId);
     const now = this.clock.now();
-    const cur = ev.sweep;
+    const cur = lane === 'session' ? ev.sessionSweep : ev.sweep;
     if (cur && now < cur.expiresAtMs && cur.owner !== owner) return false;
-    ev.sweep = { owner, expiresAtMs: now + ttlMs };
+    const next = { owner, expiresAtMs: now + ttlMs };
+    if (lane === 'session') ev.sessionSweep = next;
+    else ev.sweep = next;
     return true;
   }
 }

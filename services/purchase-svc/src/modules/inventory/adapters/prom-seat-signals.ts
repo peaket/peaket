@@ -5,12 +5,14 @@ import { Counter, Gauge, type Registry } from '@peaket/platform';
 import type { SweepOutcome } from '../domain/expiry.js';
 import type { SeatLuaErrorCode, SeatLuaScript } from '../domain/lua-errors.js';
 import type { SeatSignals } from '../domain/ports.js';
+import type { SessionEndReason } from '../domain/purchase-session.js';
 
 /**
  * SeatSignals의 Prometheus 구현. 이름표에 회차 ID·계정 ID·키 이름을 달지 않는다.
  * - seat_lua_errors_total{script, code}(카운터, script는 SeatLuaScript, code는 SeatLuaErrorCode의 값만)
  * - seat_expiry_lag_seconds(게이지, 이름표 없음): 이 파드가 마지막 틱에 돈 회차 가운데 지금 − 가장 오래된 지난 점수(초)의 최댓값, 밀린 것이 없으면 0(M1)
  * - seat_expiry_ticks_total{outcome}(카운터, outcome은 SweepOutcome의 값만): 회차의 틱 결과마다 1(M1)
+ * - purchase_sessions_ended_total{reason}(카운터, reason은 COMPLETED·LEFT·IDLE·MAX_STAY): 구매 세션을 끝낼 때마다 1(BUILD_ORDER PRF-138)
  */
 export class PromSeatSignals implements SeatSignals {
   readonly #luaErrors = new Counter({
@@ -22,9 +24,11 @@ export class PromSeatSignals implements SeatSignals {
   readonly #lag = new Gauge({ name: 'seat_expiry_lag_seconds', help: '이 파드가 돈 회차 가운데 지금 − 가장 오래된 지난 만료 점수(초). 밀린 것이 없으면 0', registers: [] });
   readonly #ticks = new Counter({ name: 'seat_expiry_ticks_total', help: '만료 반복의 회차별 틱 결과 수', labelNames: ['outcome'] as const, registers: [] });
 
+  readonly #sessionEnds = new Counter({ name: 'purchase_sessions_ended_total', help: '끝낸 구매 세션 수(reason: COMPLETED·LEFT·IDLE·MAX_STAY)', labelNames: ['reason'] as const, registers: [] });
+
   /** 지표를 registry에 붙이고 자신을 돌려준다(main.ts가 service.metrics.registry로 한 번 부른다) */
   register(registry: Registry): this {
-    for (const m of [this.#luaErrors, this.#lag, this.#ticks]) registry.registerMetric(m);
+    for (const m of [this.#luaErrors, this.#lag, this.#ticks, this.#sessionEnds]) registry.registerMetric(m);
     return this;
   }
 
@@ -41,5 +45,10 @@ export class PromSeatSignals implements SeatSignals {
   /** seat_expiry_ticks_total{outcome}을 1 올린다 */
   expiryTick(outcome: SweepOutcome): void {
     this.#ticks.inc({ outcome });
+  }
+
+  /** purchase_sessions_ended_total{reason}을 1 올린다 */
+  sessionEnded(reason: SessionEndReason): void {
+    this.#sessionEnds.inc({ reason });
   }
 }

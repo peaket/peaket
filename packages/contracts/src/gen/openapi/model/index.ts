@@ -59,6 +59,7 @@ export * from './dataRequestRejectionCreate.zod.js';
 export * from './dataRequestSubmissionCreate.zod.js';
 export * from './decisionRecord.zod.js';
 export * from './decisionRecordPage.zod.js';
+export * from './deleteV1EventsEventIdPurchaseSessionHeaders.zod.js';
 export * from './deleteV1EventsEventIdSubscriptionsParams.zod.js';
 export * from './deleteV1HoldsHoldIdHeaders.zod.js';
 export * from './deleteV1IdentityAccountBody.zod.js';

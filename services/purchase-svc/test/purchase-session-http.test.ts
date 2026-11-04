@@ -61,6 +61,9 @@ const flakyStore: PurchaseSessionStore = {
   },
   markStarted: (jti) => mem.markStarted(jti),
   recordHold: (jti, holdId, seatIds) => mem.recordHold(jti, holdId, seatIds),
+  end: (jti) => mem.end(jti),
+  sweep: (jti) => mem.sweep(jti),
+  setPaying: (jti, paying) => mem.setPaying(jti, paying),
 };
 const sessions = new StoredPurchaseSessions({ store: flakyStore, ecdh: serverPriv, clock });
 const opener = new OpenPurchaseSession({ store: mem, log: startedLog, keys: new Map([['k1', admissionKey.pub]]), issuer: ISS, clock });

@@ -1,7 +1,7 @@
 // purchase-svc 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
 // 앱 포트(REST: 좌석 홀드 POST /v1/events/{eventId}/holds, 좌석 스냅샷 GET /v1/events/{eventId}/seatmap-snapshot)·관리 포트(/metrics, /ready)는 서비스 뼈대가 연다.
-// 1초 만료 반복(ExpirySweeper, BUILD_ORDER PRF-135)을 듣기 시작한 뒤 켜고 SIGTERM 때 끈다. 좌석 Lua 지표(seat_lua_errors_total)를 /metrics에 붙인다.
+// 1초 만료 반복(ExpirySweeper, BUILD_ORDER PRF-135)과 구매 세션 정리 반복(SessionSweeper, PRF-138)을 듣기 시작한 뒤 켜고 SIGTERM 때 끈다. 좌석 Lua 지표(seat_lua_errors_total)를 /metrics에 붙인다.
 // 구매 세션은 좌석 Redis의 s:jti·s:session과 서버 고정 ECDH 개인키(PEAKET_PURCHASE_ECDH_KEY)로 확인한다(BUILD_ORDER PRF-136). 입장 토큰은 공개키 묶음
 // (PEAKET_ADMISSION_JWKS)과 발급자(PEAKET_ADMISSION_ISSUER)로 확인하고, 스냅샷 API가 입장 토큰의 첫 사용에 구매 세션을 연다(PRF-137).
 // 좌석맵 판은 환경 값 PEAKET_SEATMAP_DIR 폴더의 {eventId}.json이다(docs/features/seat-hold.md §2 '운영 좌석맵 판'). 30초 [가정]마다 읽은 회차를 다시 읽는다.
@@ -16,7 +16,10 @@ import {
   LayoutSeatMap,
   PromSeatSignals,
   RedisPurchaseSessionStore,
+  RedisSessionEndedLog,
+  RedisSessionIndex,
   RedisSessionStartedLog,
+  SessionSweeper,
   ServerEcdhKey,
   StoredPurchaseSessions,
   discardHoldAttempts,
@@ -68,7 +71,14 @@ const service = await createService({
     sessions,
     podId,
     signals,
-    admission: { store: sessionStore, startedLog: new RedisSessionStartedLog(redis), keys: admissionKeys, issuer: admissionIssuer },
+    admission: {
+      store: sessionStore,
+      startedLog: new RedisSessionStartedLog(redis),
+      endedLog: new RedisSessionEndedLog(redis),
+      index: new RedisSessionIndex(redis),
+      keys: admissionKeys,
+      issuer: admissionIssuer,
+    },
   }),
   purchaseSessions: sessions,
 });
@@ -77,14 +87,16 @@ signals.register(service.metrics.registry);
 await service.listen();
 const sweeper = service.app.get(ExpirySweeper);
 sweeper.start();
+// 구매 세션 정리 반복(유휴·최대 체류, BUILD_ORDER PRF-138). 만료 반복과 같이 켜고 끈다
+const sessionSweeper = service.app.get(SessionSweeper);
+sessionSweeper.start();
 const seatMapRefresh = setInterval(() => void seatMap.refresh(), SEATMAP_REFRESH_MS);
 seatMapRefresh.unref();
 
 process.once('SIGTERM', () => {
   // 좌석맵 판 다시 읽기를 멈추고, 만료 반복을 멈추고(돌던 틱을 기다린다) 서비스를 닫은 뒤 연결을 닫는다. 어느 단계가 실패해도 연결은 닫는다
   clearInterval(seatMapRefresh);
-  void sweeper
-    .stop()
+  void Promise.all([sweeper.stop(), sessionSweeper.stop()])
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err }, 'purchase-svc 종료 실패'))
     .finally(() => redis.close());

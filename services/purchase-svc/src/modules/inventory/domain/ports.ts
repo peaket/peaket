@@ -5,7 +5,7 @@
 import type { DueExpiriesInput, DueExpiry, ExpireInput, ExpireResult, SweepOutcome } from './expiry.js';
 import type { HoldInput, HoldResult, ReplayInput, ReplayResult, SeatRef } from './hold.js';
 import type { SeatLuaErrorCode, SeatLuaScript } from './lua-errors.js';
-import type { OpenSessionInput, OpenSessionResult, SessionStartedEntry, StoredSession } from './purchase-session.js';
+import type { EndedSession, OpenSessionInput, OpenSessionResult, SessionEndedEntry, SessionEndReason, SessionStartedEntry, StoredSession, SweepSessionResult } from './purchase-session.js';
 import type { SectionRange } from './seat-layout.js';
 
 /** 요청 처리 중 좌석 Redis 호출 하나의 선택값(BUILD_ORDER PRF-135, guidelines §5) */
@@ -200,8 +200,11 @@ export interface SweepLeases {
    * @throws SeatStoreUnavailable 좌석 Redis 일시 장애(reason 'unavailable') 또는 메모리 부족(`#!lua` 스크립트가 시작 전에 거절됨, reason 'oom')
    * @throws Error 모르는 답·스크립트 오류
    */
-  acquire(eventId: string, owner: string, ttlMs: number): Promise<boolean>;
+  acquire(eventId: string, owner: string, ttlMs: number, lane?: SweepLane): Promise<boolean>;
 }
+
+/** 임대 줄: 'expiry'(기본, 만료 반복 s:{event:E}:sweep)와 'session'(구매 세션 정리 반복 s:{event:E}:sesweep, BUILD_ORDER PRF-138) */
+export type SweepLane = 'expiry' | 'session';
 
 export const SEAT_SNAPSHOTS = Symbol('purchase.SeatSnapshots');
 /** 스냅샷 읽기 입력(SeatSnapshots.read) */
@@ -361,6 +364,53 @@ export interface PurchaseSessionStore {
    * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족(마감 초과 포함)
    */
   recordHold(jti: string, holdId: string, seatIds: readonly string[], o?: SeatCallOptions): Promise<boolean | null>;
+
+  /**
+   * 구매 세션을 끝낸다(BUILD_ORDER PRF-138, 한 원자 연산): 세션 상태 s:session:{jti}를 지우고(재사용 차단 표지는 남긴다) 그 세션의 회차 ID·여정 ID를 돌려준다.
+   * 세션이 없으면 아무것도 만들지 않고 null이다(두 번 불러도 한 번만 끝난다). Active·Paying 모두 끝낸다. 끝낸 뒤 일련번호 올리기는 거짓이다.
+   * @throws RangeError jti가 키 조각 모양이 아님
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족
+   */
+  end(jti: string, o?: SeatCallOptions): Promise<EndedSession | null>;
+
+  /**
+   * 정리 점검(한 원자 연산): 세션 상태가 없으면 GONE, 지금 ≥ 최대 체류면 지우고 MAX_STAY로 ENDED, Paying이면 LIVE(다음 점검 = min(최대 체류, 지금 + 유휴 5분): 결제 실패로 Active에 돌아와도 유휴 정리가 밀리지 않게 5분마다 다시 본다),
+   * 지금 ≥ 유휴 시한이면 지우고 IDLE로 ENDED, 아니면 LIVE(다음 점검 = min(최대 체류, 유휴 시한)). LIVE는 아무것도 바꾸지 않는다.
+   * @throws RangeError jti가 키 조각 모양이 아님
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족
+   * @throws Error 세션 상태의 max·idle 칸이 망가짐(PEAKET_CORRUPT_KEY)
+   */
+  sweep(jti: string, o?: SeatCallOptions): Promise<SweepSessionResult>;
+
+  /**
+   * Paying 표시를 쓴다(한 원자 연산, T5·T8): paying true면 `pay` 칸을 '1'로 쓰고, false면 칸을 지우고 유휴 시한을 지금 + 5분으로 다시 쓴다.
+   * 세션이 있으면 true, 없으면 아무것도 만들지 않고 false.
+   * @throws RangeError jti가 키 조각 모양이 아님
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족
+   */
+  setPaying(jti: string, paying: boolean, o?: SeatCallOptions): Promise<boolean>;
+}
+
+export const SESSION_ENDED_LOG = Symbol('purchase.SessionEndedLog');
+/** SESSION_ENDED Stream 항목을 더하고 정리 색인에서 그 세션을 뺀다(docs/data.md §3 s:{event:E}:stream·sessions). 세션 키와 슬롯이 달라 끝내는 연산과 따로 부른다 */
+export interface SessionEndedLog {
+  /**
+   * 그 회차 Stream에 항목 하나를 더하고(MAXLEN 없음) s:{event:E}:sessions에서 그 세션을 빼고(ZREM), 스트림 수명이 없거나 이르면 늘린다(시작 사건과 같은 규칙).
+   * @throws RangeError 항목 모양이 틀림(assertEndedEntry)
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애(더했는지 모른다)
+   */
+  appendEnded(e: SessionEndedEntry, o?: SeatCallOptions): Promise<void>;
+}
+
+export const SESSION_INDEX = Symbol('purchase.SessionIndex');
+/** 구매 세션 정리 색인 s:{event:E}:sessions(정렬 집합, 멤버 jti, 점수 = 다음에 볼 시각 ms) */
+export interface SessionIndex {
+  /** 점수가 nowMs 이하인 멤버를 점수 오름차순(같은 점수는 멤버 글 순서)으로 limit개까지 읽는다. 아무것도 쓰지 않는다. 없으면 [] (limit은 1 이상의 정수) */
+  due(eventId: string, nowMs: number, limit: number, o?: SeatCallOptions): Promise<string[]>;
+  /** 멤버가 있을 때만 점수를 atMs로 바꾼다(ZADD XX). 없으면 아무것도 만들지 않는다(끝난 세션을 되살리지 않는다). eventId·jti가 KEY_PART가 아니거나 atMs가 0 이상의 안전한 정수가 아니면 RangeError */
+  requeue(eventId: string, jti: string, atMs: number, o?: SeatCallOptions): Promise<void>;
+  /** 멤버를 뺀다(ZREM). 없으면 아무 일도 없다. eventId·jti가 KEY_PART가 아니면 RangeError */
+  drop(eventId: string, jti: string, o?: SeatCallOptions): Promise<void>;
 }
 
 export const SESSION_HOLDS = Symbol('purchase.SessionHolds');
@@ -428,6 +478,8 @@ export interface SeatSignals {
   expiryLag?(seconds: number): void;
   /** 카운터 seat_expiry_ticks_total{outcome}을 1 올린다: 회차의 틱 결과마다 하나(M1). 선택 메서드다 */
   expiryTick?(outcome: SweepOutcome): void;
+  /** 카운터 purchase_sessions_ended_total{reason}를 1 올린다: 구매 세션을 끝낼 때마다 하나(BUILD_ORDER PRF-138). 선택 메서드다 */
+  sessionEnded?(reason: SessionEndReason): void;
 }
 
 /** 지표를 버리는 구현(시험·지표를 달지 않은 조립의 기본값) */

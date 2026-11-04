@@ -88,6 +88,8 @@ export class MemorySeatEvent {
    * 주입 Clock의 지금이 expiresAtMs 이상이면 없는 것으로 본다. 없으면 undefined
    */
   sweep: { owner: string; expiresAtMs: number } | undefined;
+  /** 구매 세션 정리 반복의 회차별 임대 s:{event:E}:sesweep(BUILD_ORDER PRF-138). 모양은 sweep과 같다 */
+  sessionSweep: { owner: string; expiresAtMs: number } | undefined;
 }
 
 /** 좌석 저장소 전체의 메모리 모양 */

@@ -1,0 +1,63 @@
+// 구매 세션 끝내기(BUILD_ORDER PRF-138, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'). 나가기(LEFT, 받는 층)와 결제 확정(COMPLETED, 결제 단계)이 부른다.
+// 차례: 세션 상태 지우기(store.end) → SESSION_ENDED 더하기(SessionEndedLog, 실패해도 끝난 것은 그대로, 로그 한 줄) → 지표.
+import type { Clock } from '@peaket/platform';
+import type { PurchaseSessionStore, SeatSignals, SessionEndedLog } from '../domain/ports.js';
+import { assertJti } from '../domain/purchase-session.js';
+import type { SessionEndReason } from '../domain/purchase-session.js';
+
+export interface EndSessionLogger {
+  warn(obj: object, msg: string): void;
+}
+
+export interface EndPurchaseSessionDeps {
+  store: Pick<PurchaseSessionStore, 'end' | 'read'>;
+  ended: SessionEndedLog;
+  clock: Clock;
+  signals?: Pick<SeatSignals, 'sessionEnded'>;
+  logger?: EndSessionLogger;
+}
+
+/** 끝내기 거절: 세션이 묶인 회차가 기대한 회차와 다르다(받는 층이 403으로 바꾼다) */
+export class EndSessionError extends Error {
+  constructor(readonly code: 'EVENT_MISMATCH') {
+    super(`구매 세션 끝내기 거절: ${code}`);
+    this.name = 'EndSessionError';
+  }
+}
+
+export class EndPurchaseSession {
+  constructor(private readonly deps: EndPurchaseSessionDeps) {}
+
+  /**
+   * 구매 세션을 끝낸다. 끝냈으면 true, 이미 없었으면 false(아무 사건도 더하지 않는다).
+   * expectEventId가 있으면 세션을 읽어(store.read) 회차가 다르면 EndSessionError('EVENT_MISMATCH')로 거절하고 세션은 그대로 둔다. 세션이 없으면 false다.
+   * 사건 더하기가 실패하면(좌석 Redis 일시 장애) 던지지 않고 warn 한 줄(오류 이름만)을 남긴다: 세션 상태는 이미 지워졌고 입장 자리는 최대 체류 시각에 정리된다.
+   * 지표 sessionEnded(reason)은 끝낸 때마다 한 번이다.
+   * @throws RangeError sessionId가 키 조각 모양이 아님
+   * @throws SeatStoreUnavailable store.end(또는 read)의 좌석 Redis 일시 장애·메모리 부족
+   */
+  async execute(c: { sessionId: string; reason: 'LEFT' | 'COMPLETED'; expectEventId?: string }): Promise<boolean> {
+    assertJti(c.sessionId);
+    const { store, clock } = this.deps;
+    if (c.expectEventId !== undefined) {
+      const s = await store.read(c.sessionId);
+      if (!s) return false;
+      if (s.eventId !== c.expectEventId) throw new EndSessionError('EVENT_MISMATCH');
+    }
+    const ended = await store.end(c.sessionId);
+    if (!ended) return false;
+    await this.recordEnded({ eventId: ended.eventId, sessionId: c.sessionId, reason: c.reason, endedAtMs: clock.now() });
+    return true;
+  }
+
+  /** 정리 반복이 끝낸 세션(IDLE·MAX_STAY)의 사건을 더하고 지표를 올린다. 사건 더하기 실패는 던지지 않는다 */
+  async recordEnded(e: { eventId: string; sessionId: string; reason: SessionEndReason; endedAtMs: number }): Promise<void> {
+    try {
+      await this.deps.ended.appendEnded({ eventId: e.eventId, purchaseSessionId: e.sessionId, admissionJti: e.sessionId, reason: e.reason, endedAtMs: e.endedAtMs });
+    } catch (err) {
+      // 세션 상태는 이미 지워졌다. 사건이 빠지면 입장 자리는 최대 체류 시각에 정리된다(queue-admission §6)
+      this.deps.logger?.warn({ errorName: err instanceof Error ? err.name : typeof err }, '구매 세션 종료 사건 더하기 실패');
+    }
+    this.deps.signals?.sessionEnded?.(e.reason);
+  }
+}

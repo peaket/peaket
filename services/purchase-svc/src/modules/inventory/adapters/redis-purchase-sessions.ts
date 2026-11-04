@@ -4,8 +4,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type HotRedis, redisScript } from '@peaket/platform';
 import {
+  assertEndedEntry,
   assertHoldRecord,
+  assertIndexArgs,
   assertJti,
+  type EndedSession,
+  type SweepSessionResult,
   assertOpenInput,
   assertSeq,
   assertStartedEntry,
@@ -15,16 +19,31 @@ import {
   SESSION_KEY_GRACE_MS,
   SESSION_STARTED_GRACE_MS,
   SESSION_STARTED_KEEP_MS,
+  type SessionEndedEntry,
   type SessionStartedEntry,
+  sessionCheckAt,
+  sessionEndedFields,
   sessionStartedFields,
   type StoredSession,
 } from '../domain/purchase-session.js';
-import type { PurchaseSessionStore, SeatCallOptions, SessionStartedLog } from '../domain/ports.js';
-import { ADVANCE_SESSION_LUA, APPEND_SESSION_STARTED_LUA, MARK_SESSION_STARTED_LUA, OPEN_SESSION_LUA, RECORD_HOLD_LUA } from './purchase-session-lua.js';
+import type { PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionIndex, SessionStartedLog } from '../domain/ports.js';
+import {
+  ADVANCE_SESSION_LUA,
+  APPEND_SESSION_ENDED_LUA,
+  APPEND_SESSION_STARTED_LUA,
+  END_SESSION_LUA,
+  MARK_SESSION_STARTED_LUA,
+  OPEN_SESSION_LUA,
+  PAY_SESSION_LUA,
+  RECORD_HOLD_LUA,
+  SWEEP_SESSION_LUA,
+} from './purchase-session-lua.js';
 import { guard, SEAT_REDIS, seatKeys } from './redis-seat-store.js';
 
 /** 구매 세션 키 이름(docs/data.md §3). 표지와 세션 상태는 같은 {jti} 해시 태그, Stream은 좌석 쪽 seatKeys.stream과 같다 */
 export const sessionKeys = {
+  /** 구매 세션 정리 색인 s:{event:E}:sessions(BUILD_ORDER PRF-138) */
+  index: (eventId: string) => seatKeys.sessions(eventId),
   marker: (jti: string) => `s:jti:{${jti}}`,
   session: (jti: string) => `s:session:{${jti}}`,
   stream: (eventId: string) => seatKeys.stream(eventId),
@@ -35,7 +54,12 @@ const ADVANCE = redisScript(ADVANCE_SESSION_LUA);
 const APPEND = redisScript(APPEND_SESSION_STARTED_LUA);
 const MARK = redisScript(MARK_SESSION_STARTED_LUA);
 const RECORD = redisScript(RECORD_HOLD_LUA);
+const END = redisScript(END_SESSION_LUA);
+const SWEEP = redisScript(SWEEP_SESSION_LUA);
+const PAY = redisScript(PAY_SESSION_LUA);
+const APPEND_ENDED = redisScript(APPEND_SESSION_ENDED_LUA);
 
+const deadlineOf = (o: SeatCallOptions | undefined): { deadlineMs?: number } => (o?.deadlineMs !== undefined ? { deadlineMs: o.deadlineMs } : {});
 const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 const isNil = (v: unknown): v is null | undefined => v === null || v === undefined;
 const MS_TEXT = /^(0|[1-9][0-9]*)$/;
@@ -111,6 +135,39 @@ export class RedisPurchaseSessionStore implements PurchaseSessionStore {
     throw new Error(`일련번호 Lua가 모르는 값을 돌려줬다: ${r}`);
   }
 
+  async end(jti: string, o?: SeatCallOptions): Promise<EndedSession | null> {
+    assertJti(jti);
+    const r = await guard(this.redis.evalScript(END, [sessionKeys.session(jti)], [], deadlineOf(o)));
+    if (!Array.isArray(r) || r.length < 1) throw new Error(`세션 끝내기 Lua가 모르는 값을 돌려줬다: ${str(r)}`);
+    const kind = str(r[0]);
+    if (kind === 'GONE') return null;
+    if (kind === 'ENDED' && r.length === 3) return { eventId: str(r[1]), journeyId: str(r[2]) };
+    throw new Error(`세션 끝내기 Lua가 모르는 결과를 돌려줬다: ${kind}`);
+  }
+
+  async sweep(jti: string, o?: SeatCallOptions): Promise<SweepSessionResult> {
+    assertJti(jti);
+    const r = await guard(this.redis.evalScript(SWEEP, [sessionKeys.session(jti)], [String(SESSION_IDLE_MS)], deadlineOf(o)));
+    if (!Array.isArray(r) || r.length < 1) throw new Error(`정리 점검 Lua가 모르는 값을 돌려줬다: ${str(r)}`);
+    const kind = str(r[0]);
+    if (kind === 'GONE') return { kind: 'GONE' };
+    if (kind === 'LIVE' && r.length === 2) return { kind: 'LIVE', nextCheckMs: msOf(r[1], 'nextCheck') };
+    if (kind === 'ENDED' && r.length === 5) {
+      const reason = str(r[1]);
+      if (reason !== 'IDLE' && reason !== 'MAX_STAY') throw new Error(`정리 점검 Lua가 모르는 까닭을 돌려줬다: ${reason}`);
+      return { kind: 'ENDED', reason, eventId: str(r[2]), journeyId: str(r[3]), endedAtMs: msOf(r[4], 'endedAt') };
+    }
+    throw new Error(`정리 점검 Lua가 모르는 결과를 돌려줬다: ${kind}`);
+  }
+
+  async setPaying(jti: string, paying: boolean, o?: SeatCallOptions): Promise<boolean> {
+    assertJti(jti);
+    const r = str(await guard(this.redis.evalScript(PAY, [sessionKeys.session(jti)], [paying ? '1' : '0', String(SESSION_IDLE_MS)], deadlineOf(o))));
+    if (r === '1') return true;
+    if (r === '0') return false;
+    throw new Error(`Paying 표시 Lua가 모르는 값을 돌려줬다: ${r}`);
+  }
+
   async recordHold(jti: string, holdId: string, seatIds: readonly string[], o?: SeatCallOptions): Promise<boolean | null> {
     assertHoldRecord(jti, holdId, seatIds);
     const r = str(await guard(this.redis.evalScript(RECORD, [sessionKeys.session(jti)], [holdId, seatIds.join(',')], o?.deadlineMs !== undefined ? { deadlineMs: o.deadlineMs } : {})));
@@ -137,7 +194,49 @@ export class RedisSessionStartedLog implements SessionStartedLog {
   async appendStarted(e: SessionStartedEntry): Promise<void> {
     assertStartedEntry(e);
     const keepUntil = e.maxStayUntilMs + SESSION_STARTED_KEEP_MS;
-    const r = str(await guard(this.redis.evalScript(APPEND, [sessionKeys.stream(e.eventId)], [String(keepUntil), ...sessionStartedFields(e)])));
+    const keys = [sessionKeys.stream(e.eventId), sessionKeys.index(e.eventId)];
+    const r = str(await guard(this.redis.evalScript(APPEND, keys, [String(keepUntil), e.purchaseSessionId, String(sessionCheckAt(e.startedAtMs, e.maxStayUntilMs)), ...sessionStartedFields(e)])));
     if (r !== '1') throw new Error(`시작 사건 Lua가 모르는 값을 돌려줬다: ${r}`);
+  }
+}
+
+/** SessionEndedLog의 좌석 Redis 구현: 종료 사건 더하기 Lua 한 번(KEYS = [회차 Stream, 정리 색인]) */
+@Injectable()
+export class RedisSessionEndedLog implements SessionEndedLog {
+  constructor(@Inject(SEAT_REDIS) private readonly redis: HotRedis) {}
+
+  async appendEnded(e: SessionEndedEntry, o?: SeatCallOptions): Promise<void> {
+    assertEndedEntry(e);
+    const keepUntil = e.endedAtMs + SESSION_STARTED_KEEP_MS;
+    const keys = [sessionKeys.stream(e.eventId), sessionKeys.index(e.eventId)];
+    const r = str(await guard(this.redis.evalScript(APPEND_ENDED, keys, [String(keepUntil), e.admissionJti, ...sessionEndedFields(e)], deadlineOf(o))));
+    if (r !== '1') throw new Error(`종료 사건 Lua가 모르는 값을 돌려줬다: ${r}`);
+  }
+}
+
+/** SessionIndex의 좌석 Redis 구현: 정렬 집합 s:{event:E}:sessions를 일반 명령으로 읽고 고친다 */
+@Injectable()
+export class RedisSessionIndex implements SessionIndex {
+  constructor(@Inject(SEAT_REDIS) private readonly redis: HotRedis) {}
+
+  async due(eventId: string, nowMs: number, limit: number, o?: SeatCallOptions): Promise<string[]> {
+    assertIndexArgs(eventId, undefined, nowMs);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new RangeError('limit이 1 ~ 1000의 정수가 아니다');
+    const key = sessionKeys.index(eventId);
+    const r = await guard(this.redis.command(['ZRANGE', key, '-inf', String(nowMs), 'BYSCORE', 'LIMIT', '0', String(limit)], { key, ...deadlineOf(o) }));
+    if (!Array.isArray(r)) throw new Error('정리 색인 읽기가 모르는 값을 돌려줬다');
+    return r.map(str);
+  }
+
+  async requeue(eventId: string, jti: string, atMs: number, o?: SeatCallOptions): Promise<void> {
+    assertIndexArgs(eventId, jti, atMs);
+    const key = sessionKeys.index(eventId);
+    await guard(this.redis.command(['ZADD', key, 'XX', String(atMs), jti], { key, ...deadlineOf(o) }));
+  }
+
+  async drop(eventId: string, jti: string, o?: SeatCallOptions): Promise<void> {
+    assertIndexArgs(eventId, jti, 0);
+    const key = sessionKeys.index(eventId);
+    await guard(this.redis.command(['ZREM', key, jti], { key, ...deadlineOf(o) }));
   }
 }

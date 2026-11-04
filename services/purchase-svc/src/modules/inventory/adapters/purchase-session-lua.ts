@@ -32,8 +32,8 @@
 // KEYS: 1 세션 상태 s:session:{jti}. 돌려주는 값: 1(세션이 있어 sev 칸을 '1'로 썼다) 또는 0(세션이 없다, 아무것도 만들지 않는다). 수명·다른 칸은 그대로다.
 //
 // ── 시작 사건 더하기 Lua(APPEND_SESSION_STARTED_LUA) ───────────────────────────────────────────────────────────
-// KEYS: 1 회차 Stream s:{event:E}:stream. ARGV: 1 keepUntil ms(최대 체류 + 1일), 2부터 XADD의 이름·값 쌍(sessionStartedFields)
-// XADD key * … (MAXLEN 없음) 한 번 뒤, 스트림 수명이 keepUntil보다 이르면(수명이 없으면 −1) PEXPIREAT keepUntil. 돌려주는 값 1.
+// KEYS: 1 회차 Stream s:{event:E}:stream, 2 정리 색인 s:{event:E}:sessions(BUILD_ORDER PRF-138). ARGV: 1 keepUntil ms(최대 체류 + 1일), 2 jti, 3 첫 점검 시각 ms(sessionCheckAt), 4부터 XADD의 이름·값 쌍(sessionStartedFields)
+// XADD key * … (MAXLEN 없음) 한 번, ZADD NX index 점검 시각 jti(이미 있으면 점수를 바꾸지 않는다: 시작 사건 재시도가 뒤로 민 점수를 되돌리지 않게), 두 키 모두 수명이 keepUntil보다 이르면(수명이 없으면 −1) PEXPIREAT keepUntil. 돌려주는 값 1.
 // 홀드·만료 Lua와 같은 수명 규칙이다(더 늦은 수명은 둔다).
 
 /** 열기 Lua 원문(위 계약). 첫 줄이 #!lua다 */
@@ -95,13 +95,16 @@ redis.call('HSET', KEYS[1], 'seq', ARGV[1], 'idle', int(now + tonumber(ARGV[2]))
 return 1
 `;
 
-/** 시작 사건 더하기 Lua 원문(위 계약). 첫 줄이 #!lua다 */
+/** 시작 사건 더하기 Lua 원문(위 계약, PRF-138에서 정리 색인을 더했다). 첫 줄이 #!lua다 */
 export const APPEND_SESSION_STARTED_LUA = `#!lua
 local fields = {}
-for i = 2, #ARGV do fields[#fields + 1] = ARGV[i] end
+for i = 4, #ARGV do fields[#fields + 1] = ARGV[i] end
 redis.call('XADD', KEYS[1], '*', unpack(fields))
-if redis.call('PEXPIRETIME', KEYS[1]) < tonumber(ARGV[1]) then
-  redis.call('PEXPIREAT', KEYS[1], ARGV[1])
+redis.call('ZADD', KEYS[2], 'NX', ARGV[3], ARGV[2])
+for k = 1, 2 do
+  if redis.call('PEXPIRETIME', KEYS[k]) < tonumber(ARGV[1]) then
+    redis.call('PEXPIREAT', KEYS[k], ARGV[1])
+  end
 end
 return 1
 `;
@@ -118,4 +121,90 @@ export const RECORD_HOLD_LUA = `#!lua
 if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
 redis.call('HSET', KEYS[1], 'h:' .. ARGV[1], ARGV[2])
 return redis.call('HSETNX', KEYS[1], 'fh', '1')
+`;
+
+// ── 구매 세션 종료와 정리(BUILD_ORDER PRF-138, docs/features/seat-hold.md §2 '구매 세션 종료와 정리') ───────────────────────
+// 모두 첫 줄이 `#!lua`이고 allow-oom 표시가 없다. 시각은 Redis TIME을 한 번 읽은 값(밀리초)이다.
+//
+// END_SESSION_LUA — KEYS: 1 세션 상태 s:session:{jti}. ARGV 없음.
+//   event·jny 칸이 모두 있으면 DEL 하고 {'ENDED', 회차 ID, 여정 ID}. 키가 없거나 칸이 모자란 찌꺼기 해시면(있으면 지우고) {'GONE'}. 재사용 차단 표지는 건드리지 않는다.
+//
+// SWEEP_SESSION_LUA — KEYS: 1 세션 상태. ARGV: 1 유휴 ms(SESSION_IDLE_MS).
+//   HMGET event jny max idle pay. event 칸이 없으면 {'GONE'}(키는 건드리지 않는다. 찌꺼기는 키 수명이 지운다). max·idle이 양의 10진 정수(16자리 이하)가 아니거나 jny 칸이 없으면 pay와 관계없이 오류 PEAKET_CORRUPT_KEY {키}(아무것도 쓰지 않는다).
+//   지금 ≥ max → DEL, {'ENDED', 'MAX_STAY', 회차, 여정, 지금}. pay == '1' → {'LIVE', min(max, 지금 + ARGV 1)}(Paying이어도 유휴 시한 길이마다 다시 본다: 결제 실패로 Active에 돌아오면 그 뒤 유휴 정리가 최대 체류까지 밀리지 않게). 지금 ≥ idle → DEL, {'ENDED', 'IDLE', 회차, 여정, 지금}.
+//   아니면 {'LIVE', min(max, idle)}. LIVE는 아무것도 바꾸지 않는다.
+//
+// PAY_SESSION_LUA — KEYS: 1 세션 상태. ARGV: 1 '1'(Paying) 또는 '0'(Active), 2 유휴 ms.
+//   세션이 없으면 0(아무것도 만들지 않는다). '1'이면 HSET pay '1', '0'이면 HDEL pay와 HSET idle 지금 + ARGV 2. 돌려주는 값 1.
+//
+// APPEND_SESSION_ENDED_LUA — KEYS: 1 회차 Stream s:{event:E}:stream, 2 정리 색인 s:{event:E}:sessions. ARGV: 1 keepUntil ms, 2 jti, 3부터 XADD의 이름·값 쌍(sessionEndedFields).
+//   XADD stream * … 한 번, ZREM index jti, 스트림 수명이 keepUntil보다 이르면(수명이 없으면 −1) PEXPIREAT keepUntil. 돌려주는 값 1.
+//
+// 시작 사건 더하기 Lua(APPEND_SESSION_STARTED_LUA)는 이 단계에서 KEYS에 2 정리 색인을, ARGV에 2 jti·3 첫 점검 시각 ms를 더한다(ZADD NX index 점검 시각 jti, 색인의 수명도 같은 규칙).
+
+/** 세션 끝내기 Lua 원문(위 계약) */
+export const END_SESSION_LUA = `#!lua
+local h = redis.call('HMGET', KEYS[1], 'event', 'jny')
+if not h[1] or not h[2] then
+  -- 세션이 아니거나(키가 없다) 칸이 모자란 찌꺼기다: 있으면 지우고 없음으로 답한다
+  redis.call('DEL', KEYS[1])
+  return {'GONE'}
+end
+redis.call('DEL', KEYS[1])
+return {'ENDED', h[1], h[2]}
+`;
+
+/** 정리 점검 Lua 원문(위 계약) */
+export const SWEEP_SESSION_LUA = `#!lua
+local function int(x)
+  return string.format('%.0f', x)
+end
+-- 양의 10진 정수 글(16자리 이하)인가
+local function num(v)
+  if not v or #v > 16 or not string.match(v, '^[1-9][0-9]*$') then return nil end
+  return tonumber(v)
+end
+local h = redis.call('HMGET', KEYS[1], 'event', 'jny', 'max', 'idle', 'pay')
+if not h[1] then return {'GONE'} end
+local max = num(h[3])
+local idle = num(h[4])
+if not max or not idle or not h[2] then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[1]) end
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if now >= max then
+  redis.call('DEL', KEYS[1])
+  return {'ENDED', 'MAX_STAY', h[1], h[2], int(now)}
+end
+if h[5] == '1' then return {'LIVE', int(math.min(max, now + tonumber(ARGV[1])))} end
+if now >= idle then
+  redis.call('DEL', KEYS[1])
+  return {'ENDED', 'IDLE', h[1], h[2], int(now)}
+end
+return {'LIVE', int(math.min(max, idle))}
+`;
+
+/** Paying 표시 Lua 원문(위 계약) */
+export const PAY_SESSION_LUA = `#!lua
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+if ARGV[1] == '1' then
+  redis.call('HSET', KEYS[1], 'pay', '1')
+else
+  local t = redis.call('TIME')
+  local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+  redis.call('HDEL', KEYS[1], 'pay')
+  redis.call('HSET', KEYS[1], 'idle', string.format('%.0f', now + tonumber(ARGV[2])))
+end
+return 1
+`;
+
+/** 종료 사건 더하기 Lua 원문(위 계약) */
+export const APPEND_SESSION_ENDED_LUA = `#!lua
+local fields = {}
+for i = 3, #ARGV do fields[#fields + 1] = ARGV[i] end
+redis.call('XADD', KEYS[1], '*', unpack(fields))
+redis.call('ZREM', KEYS[2], ARGV[2])
+if redis.call('PEXPIRETIME', KEYS[1]) < tonumber(ARGV[1]) then
+  redis.call('PEXPIREAT', KEYS[1], ARGV[1])
+end
+return 1
 `;

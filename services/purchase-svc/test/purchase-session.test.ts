@@ -122,6 +122,9 @@ function world(): World {
     },
     markStarted: (jti) => mem.markStarted(jti),
     recordHold: (jti, holdId, seatIds) => mem.recordHold(jti, holdId, seatIds),
+    end: (jti) => mem.end(jti),
+    sweep: (jti) => mem.sweep(jti),
+    setPaying: (jti, paying) => mem.setPaying(jti, paying),
   };
   const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const j = privateKey.export({ format: 'jwk' }) as Record<string, string>;
@@ -321,5 +324,178 @@ describe('RedisPurchaseSessionStore.recordHold의 호출 마감', () => {
     expect(await store.recordHold('jti-1', 'hold-1', ['A01'])).toBeNull();
     expect(seen[0]).toEqual({ deadlineMs: 17 });
     expect(seen[1]).toEqual({});
+  });
+});
+
+// ── 구매 세션 종료와 정리(PRF-138, docs/features/seat-hold.md §2 '구매 세션 종료와 정리', 상태 기계 docs/planning/03 §2.2 T4~T12) ──────────────────────────────────
+import { SESSION_IDLE_MS } from '../src/modules/inventory/index.js';
+import { sessionEndCases } from './session-end-cases.js';
+
+describe('MemoryPurchaseSessionStore.end·sweep·setPaying (종료·정리 계약 사례)', () => {
+  sessionEndCases(memoryHarness);
+
+  test('QT11_POL009_경계: 지금이 유휴 시한과 같으면 IDLE로 끝나고, 1ms 앞이면 LIVE다(지금 ≥ 유휴 시한). 끝낸 시각은 주입 시계의 지금이다', async () => {
+    const h = memoryHarness();
+    const jti = newJti();
+    const r = await h.store.open(openInput(h, jti));
+    if (r.kind !== 'CREATED') throw new Error('CREATED여야 한다');
+    await h.pass(SESSION_IDLE_MS - 1);
+    expect(await h.store.sweep(jti)).toEqual({ kind: 'LIVE', nextCheckMs: r.startedAtMs + SESSION_IDLE_MS });
+    await h.pass(1);
+    expect(await h.store.sweep(jti)).toEqual({ kind: 'ENDED', reason: 'IDLE', eventId: EVENT, journeyId: JOURNEY, endedAtMs: r.startedAtMs + SESSION_IDLE_MS });
+    expect(await h.store.sweep(jti)).toEqual({ kind: 'GONE' });
+  });
+
+  test('QT11_ADR0183_8_경계: 최대 체류가 유휴 시한보다 이르면 지금이 최대 체류와 같을 때 MAX_STAY로 끝나고, 1ms 앞이면 LIVE(다음 점검 = 최대 체류)다', async () => {
+    const h = memoryHarness();
+    const jti = newJti();
+    const i = openInput(h, jti, { expiresAtMs: NOW + 200_000 });
+    expect((await h.store.open(i)).kind).toBe('CREATED');
+    await h.pass(199_999);
+    expect(await h.store.sweep(jti)).toEqual({ kind: 'LIVE', nextCheckMs: NOW + 200_000 });
+    await h.pass(1);
+    expect(await h.store.sweep(jti)).toEqual({ kind: 'ENDED', reason: 'MAX_STAY', eventId: EVENT, journeyId: JOURNEY, endedAtMs: NOW + 200_000 });
+  });
+
+  test('QT11_POL009_경계: Paying 세션은 유휴 시한을 한참 넘겨도 최대 체류 1ms 앞까지 LIVE(다음 점검 = 최대 체류)이고 최대 체류에서 MAX_STAY로 끝난다', async () => {
+    const h = memoryHarness();
+    const jti = newJti();
+    const i = openInput(h, jti, { expiresAtMs: NOW + 20 * 60_000 });
+    expect((await h.store.open(i)).kind).toBe('CREATED');
+    expect(await h.store.setPaying(jti, true)).toBe(true);
+    await h.pass(20 * 60_000 - 1);
+    expect(await h.store.sweep(jti)).toEqual({ kind: 'LIVE', nextCheckMs: i.expiresAtMs });
+    await h.pass(1);
+    expect(await h.store.sweep(jti)).toMatchObject({ kind: 'ENDED', reason: 'MAX_STAY', endedAtMs: i.expiresAtMs });
+  });
+
+  test('QT11_메모리 키 수명 모형: 세션 상태 키가 사라진 뒤(처음 최대 체류 + 60초)의 end·sweep·setPaying은 null·GONE·false다', async () => {
+    const h = memoryHarness();
+    const jti = newJti();
+    const i = openInput(h, jti);
+    expect((await h.store.open(i)).kind).toBe('CREATED');
+    await h.pass(i.expiresAtMs - h.now() + SESSION_KEY_GRACE_MS - 1);
+    expect(await h.store.sweep(jti)).toMatchObject({ kind: 'ENDED', reason: 'MAX_STAY' });
+
+    const gone = newJti();
+    const j = openInput(h, gone, { expiresAtMs: h.now() + 1_000 });
+    expect((await h.store.open(j)).kind).toBe('CREATED');
+    await h.pass(1_000 + SESSION_KEY_GRACE_MS);
+    expect(await h.store.sweep(gone)).toEqual({ kind: 'GONE' });
+    expect(await h.store.end(gone)).toBeNull();
+    expect(await h.store.setPaying(gone, true)).toBe(false);
+  });
+
+  test('QT11_메모리 end는 세션 상태와 함께 홀드 기록·시작 표시·첫 홀드 표시를 지운다: 같은 jti로 다시 열 수 없으니 되살아날 길이 없다', async () => {
+    const h = memoryRecordHarness();
+    const jti = newJti();
+    expect((await h.store.open(openInput(h, jti))).kind).toBe('CREATED');
+    expect(await h.store.recordHold(jti, 'hold-1', ['A01'])).toBe(true);
+    expect(await h.store.markStarted(jti)).toBe(true);
+    expect((await h.holds(jti))?.get('hold-1')).toEqual(['A01']);
+    expect(await h.store.end(jti)).toEqual({ eventId: EVENT, journeyId: JOURNEY });
+    expect(await h.holds(jti)).toBeUndefined();
+    expect(await h.store.recordHold(jti, 'hold-2', ['A02'])).toBeNull();
+    expect(await h.holds(jti)).toBeUndefined();
+  });
+});
+
+describe('RedisPurchaseSessionStore.end·sweep·setPaying의 Lua 호출 (가짜 Redis)', () => {
+  interface Call {
+    keys: string[];
+    args: string[];
+    o: unknown;
+  }
+  /** 스크립트 호출을 모으고 미리 정한 답을 차례로 돌려주는 가짜 좌석 Redis */
+  function fake(replies: unknown[]) {
+    const calls: Call[] = [];
+    const redis = {
+      evalScript: async (_s: unknown, keys: string[], args: string[], o?: unknown) => {
+        calls.push({ keys, args, o });
+        return replies[calls.length - 1];
+      },
+    } as unknown as ConstructorParameters<typeof RedisPurchaseSessionStore>[0];
+    return { calls, store: new RedisPurchaseSessionStore(redis) };
+  }
+
+  test('NFR003_end·sweep·setPaying는 Lua 한 번씩이다: KEYS = [s:session:{jti}], sweep의 ARGV = [유휴 ms], setPaying의 ARGV = [1 또는 0, 유휴 ms]이고 SeatCallOptions.deadlineMs를 evalScript의 마감으로 넘기며 없으면 빈 선택값이다', async () => {
+    const f = fake([['GONE'], ['GONE'], 0, ['GONE'], ['GONE'], 0]);
+    expect(await f.store.end('jti-1', { deadlineMs: 17 })).toBeNull();
+    expect(await f.store.sweep('jti-1', { deadlineMs: 19 })).toEqual({ kind: 'GONE' });
+    expect(await f.store.setPaying('jti-1', true, { deadlineMs: 23 })).toBe(false);
+    expect(await f.store.end('jti-1')).toBeNull();
+    expect(await f.store.sweep('jti-1')).toEqual({ kind: 'GONE' });
+    expect(await f.store.setPaying('jti-1', false)).toBe(false);
+    expect(f.calls.map((c) => c.o)).toEqual([{ deadlineMs: 17 }, { deadlineMs: 19 }, { deadlineMs: 23 }, {}, {}, {}]);
+    expect(f.calls.every((c) => c.keys.length === 1 && c.keys[0] === sessionKeys.session('jti-1'))).toBe(true);
+    expect(f.calls[0]!.args).toEqual([]);
+    expect(f.calls[1]!.args).toEqual([String(SESSION_IDLE_MS)]); // 점검 Lua의 ARGV 1 = 유휴 ms(Paying이어도 이만큼마다 다시 본다)
+    expect(f.calls[2]!.args).toEqual(['1', String(SESSION_IDLE_MS)]);
+    expect(f.calls[5]!.args).toEqual(['0', String(SESSION_IDLE_MS)]);
+  });
+
+  test('QT11_end의 Lua 답을 읽는다: ["ENDED", 회차, 여정]은 { eventId, journeyId }, ["GONE"]은 null이고 모르는 답은 일시 장애가 아닌 Error다', async () => {
+    const f = fake([['ENDED', 'ev-1', JOURNEY], [Buffer.from('ENDED'), Buffer.from('ev-2'), Buffer.from(JOURNEY)], ['GONE'], ['WAT'], 'ENDED', null]);
+    expect(await f.store.end('jti-1')).toEqual({ eventId: 'ev-1', journeyId: JOURNEY });
+    expect(await f.store.end('jti-1')).toEqual({ eventId: 'ev-2', journeyId: JOURNEY });
+    expect(await f.store.end('jti-1')).toBeNull();
+    for (let k = 0; k < 3; k++) {
+      const err = await f.store.end('jti-1').then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(RangeError);
+    }
+  });
+
+  test('QT11_sweep의 Lua 답을 읽는다: LIVE는 다음 점검 시각, ENDED는 까닭(IDLE·MAX_STAY)·회차·여정·끝낸 시각, GONE이고 모르는 답·까닭·시각은 Error다', async () => {
+    const f = fake([
+      ['LIVE', '1793761199000'],
+      ['LIVE', 1793761199000],
+      ['ENDED', 'IDLE', 'ev-1', JOURNEY, '1793761199500'],
+      ['ENDED', 'MAX_STAY', 'ev-2', JOURNEY, 1793761199500],
+      ['GONE'],
+      ['WAT'],
+      ['ENDED', 'LEFT', 'ev-1', JOURNEY, '1793761199500'],
+      ['ENDED', 'COMPLETED', 'ev-1', JOURNEY, '1793761199500'],
+      ['LIVE', 'abc'],
+      ['LIVE', '1.5'],
+      ['ENDED', 'IDLE', 'ev-1', JOURNEY, 'abc'],
+    ]);
+    expect(await f.store.sweep('jti-1')).toEqual({ kind: 'LIVE', nextCheckMs: 1793761199000 });
+    expect(await f.store.sweep('jti-1')).toEqual({ kind: 'LIVE', nextCheckMs: 1793761199000 });
+    expect(await f.store.sweep('jti-1')).toEqual({ kind: 'ENDED', reason: 'IDLE', eventId: 'ev-1', journeyId: JOURNEY, endedAtMs: 1793761199500 });
+    expect(await f.store.sweep('jti-1')).toEqual({ kind: 'ENDED', reason: 'MAX_STAY', eventId: 'ev-2', journeyId: JOURNEY, endedAtMs: 1793761199500 });
+    expect(await f.store.sweep('jti-1')).toEqual({ kind: 'GONE' });
+    for (let k = 0; k < 6; k++) {
+      const err = await f.store.sweep('jti-1').then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(err, `모르는 답 ${k}`).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(RangeError);
+    }
+  });
+
+  test('POL009_setPaying의 Lua 답을 읽는다: 1(글 "1" 포함)은 true, 0은 false이고 그 밖은 Error다', async () => {
+    const f = fake([1, '1', Buffer.from('1'), 0, '0', 7, 'x']);
+    expect(await f.store.setPaying('jti-1', true)).toBe(true);
+    expect(await f.store.setPaying('jti-1', true)).toBe(true);
+    expect(await f.store.setPaying('jti-1', false)).toBe(true);
+    expect(await f.store.setPaying('jti-1', true)).toBe(false);
+    expect(await f.store.setPaying('jti-1', false)).toBe(false);
+    await expect(f.store.setPaying('jti-1', true)).rejects.toThrow();
+    await expect(f.store.setPaying('jti-1', true)).rejects.toThrow();
+  });
+
+  test('ASVS1.2.4_end·sweep·setPaying는 jti가 키 조각 모양이 아니면 Redis를 부르지 않고 RangeError다 [ASVS v5.0.0-1.2.4]', async () => {
+    const f = fake([]);
+    for (const bad of ['', 'a}b', '{x}', 'a:b', 'x'.repeat(65)]) {
+      await expect(f.store.end(bad), bad).rejects.toThrow(RangeError);
+      await expect(f.store.sweep(bad), bad).rejects.toThrow(RangeError);
+      await expect(f.store.setPaying(bad, true), bad).rejects.toThrow(RangeError);
+    }
+    expect(f.calls).toHaveLength(0);
   });
 });

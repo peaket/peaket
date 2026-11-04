@@ -321,6 +321,10 @@ C4 그림은 모두 Mermaid 흐름도 코드로 문서 안에 있다. mermaid의
 - 토큰 파이프라인(R-268, 2026-11-04, BAS-170, 갈래 2): SEED CSS 3.1.0 base를 싣고 토큰 형식 검사(FE-T45)·대비 계산 CI(FE-T44)·SEED CSS 층 순서 PoC(FE-T36)·대기실 셸 시각 회귀(FE-T40)와 CI 화면 잡을 더했다. PoC가 Turbopack 별칭 무시·진입점 가져오기 차례·루트 color-scheme 결함을 찾아 고쳤고, 첫 화면 CSS가 모든 앱에서 예산을 넘어 기준선으로 막는다.
 - 본인확인 키 판·만 14세·다른 계정 시도·재통과(R-269, 2026-11-04, BUILD_ORDER BOT-020, I-T42·I-T55·I-T65): 연계정보 HMAC을 판마다 따로 된 KMS 키(로컬은 설정값 키)로 계산하고 쓰기 판·조회 판을 나눴으며, 만 14세 미만은 연계정보를 남기지 않고 계정 정리를 시작하고, 다른 계정 시도를 기록하며, 같은 세션의 REVERIFY 재통과로 고위험 재인증 토큰을 준다. pid 키 전환은 BOT-025로 나눴다.
 - SEED 제3자 고지와 공급망 막힘(R-270, 2026-11-04, BAS-180 일부, 갈래 2): SEED CSS가 앱 번들에 들어가 Apache-2.0 고지 파일을 만들었다. SEED React와 Storybook은 출처 증명이 빠진 판 때문에 설치가 막혀, §4.4로 풀리지 않는 세 판을 OPEN[18]로 물었다.
+- 스냅샷 API와 운영 좌석맵 판(R-271, 2026-11-04, wbs 2.5.1 ②, 추천 적용): 입장 토큰의 첫 사용이 구매 세션을 여는 `GET seatmap-snapshot`(쓰기 없는 읽기 Lua 한 번, 이진 본문, 오류까지 no-store), 파일에서 읽는 `LayoutSeatMap`, 새 홀드의 구매 세션 기록과 첫 홀드 표시, 키 없는 재요청, 운영 조립을 넣었다. 홀드 기록은 20ms 마감의 보조 기록이다. 구매 세션 종료·정리는 PRF-138.
+- 5만 석 Canvas PoC(R-272, 2026-11-04, BAS-190, 갈래 2): 열 단위 좌석맵 파일을 Worker의 OffscreenCanvas로 풀고 그려 K5 랩 조건 Chromium에서 §5.2 예산 안을 확인했다. 큰 배율의 구역 비트맵은 메모리·iOS 상한을 넘어 보이는 좌석만 바로 그리게 정본을 고쳤고, iOS 실기기 확인이 남는다.
+- pid 키 전환과 두 키 1인 1순번(R-273, 2026-11-04, BUILD_ORDER BOT-025, I-T49·Q-T45): identity-svc에 pid 키 전환 작업(전환 기록, 이어 하기, 끝 시각 뒤 pid_prev 지우기)과 GetVerificationStatus(previous_pid)를, queue-svc에 옛 pid → 새 pid 차례의 두 키 진입·입장 확정과 옮겨 쓰기를 더했다.
+- 화면 공용 패키지 골격(R-274, 2026-11-04, BAS-210, 갈래 2): api-client 실행 정책·telemetry·validation·console-contract를 더하고 화면 코드에 브라우저 지원 린트를 걸었다. eslint-plugin-compat의 판 자료가 새 기능을 몰라 MDN 자료를 직접 읽는 보조 규칙을 더했다.
 
 ## 5. [충돌] 결정 결과
 

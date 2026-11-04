@@ -18,6 +18,8 @@ export const SESSION_STARTED_KEEP_MS = 24 * 3600_000;
 export const SESSION_STARTED_GRACE_MS = 1_000;
 /** Stream 항목의 type */
 export const SESSION_STARTED_TYPE = 'SESSION_STARTED';
+/** 종료 사건 Stream 항목의 type(BUILD_ORDER PRF-138) */
+export const SESSION_ENDED_TYPE = 'SESSION_ENDED';
 
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** 클라이언트 임시 공개키 글: 비압축 점 65바이트의 base64url(채움 없음) = 87자 */
@@ -188,7 +190,12 @@ export function sessionStartedFields(e: SessionStartedEntry): string[] {
  * 같은 사건을 다시 보내면 같은 값이다(중복 제거 키, ADR-0052)
  */
 export function sessionStartedEventKey(purchaseSessionId: string): string {
-  const b = Buffer.from(createHash('sha256').update(`PurchaseSessionStarted:${purchaseSessionId}`).digest().subarray(0, 16));
+  return uuid8(`PurchaseSessionStarted:${purchaseSessionId}`);
+}
+
+/** SHA-256(입력)의 앞 16바이트에 UUID 버전 8(RFC 9562 사용자 정의)·변형 비트를 맞춘 UUID 글 */
+function uuid8(input: string): string {
+  const b = Buffer.from(createHash('sha256').update(input).digest().subarray(0, 16));
   b[6] = (b[6]! & 0x0f) | 0x80;
   b[8] = (b[8]! & 0x3f) | 0x80;
   const h = b.toString('hex');
@@ -224,4 +231,94 @@ export function toPurchaseSessionStarted(eventId: string, f: Readonly<Record<str
     maxStayUntil: new Date(maxStayUntilMs).toISOString(),
     eventKey: sessionStartedEventKey(purchaseSessionId),
   };
+}
+
+// ── 구매 세션 종료와 정리(BUILD_ORDER PRF-138, docs/features/seat-hold.md §2 '구매 세션 종료와 정리') ──────────────────────
+
+/** 구매 세션이 끝나는 까닭(asyncapi PurchaseSessionEnded.reason의 UNRECOGNIZED를 뺀 값) */
+export type SessionEndReason = 'COMPLETED' | 'LEFT' | 'IDLE' | 'MAX_STAY';
+export const SESSION_END_REASONS: readonly SessionEndReason[] = ['COMPLETED', 'LEFT', 'IDLE', 'MAX_STAY'];
+
+/** 끝낸 세션에서 읽은 값(PurchaseSessionStore.end의 결과) */
+export interface EndedSession {
+  /** 세션이 묶인 회차 ID */
+  eventId: string;
+  /** 여정 ID */
+  journeyId: string;
+}
+
+/** SESSION_ENDED Stream 항목 하나 */
+export interface SessionEndedEntry {
+  eventId: string;
+  purchaseSessionId: string;
+  admissionJti: string;
+  reason: SessionEndReason;
+  endedAtMs: number;
+}
+
+/** asyncapi/Avro PurchaseSessionEnded (docs/api/avro/peaket/trade/PurchaseSessionEnded.avsc) */
+export interface PurchaseSessionEndedMessage {
+  eventId: string;
+  purchaseSessionId: string;
+  admissionJti: string;
+  reason: SessionEndReason;
+  endedAt: string;
+  eventKey: string;
+}
+
+/**
+ * 정리 점검(PurchaseSessionStore.sweep)의 결과. 저장소 시각(Redis TIME, 메모리는 주입 Clock)으로 가른다:
+ * - GONE: 세션 상태가 없다(이미 끝났거나 키 수명으로 사라졌다)
+ * - LIVE: 살아 있다. nextCheckMs = 다음에 볼 시각(Paying이면 min(최대 체류, 지금 + 유휴 5분), 아니면 min(최대 체류, 유휴 시한))
+ * - ENDED: 이번 점검이 끝냈다(세션 상태를 지웠다). reason은 IDLE 또는 MAX_STAY, endedAtMs = 끝낸 저장소 시각
+ */
+export type SweepSessionResult =
+  | { kind: 'GONE' }
+  | { kind: 'LIVE'; nextCheckMs: number }
+  | { kind: 'ENDED'; reason: 'IDLE' | 'MAX_STAY'; eventId: string; journeyId: string; endedAtMs: number };
+
+/** 정리 색인 s:{event:E}:sessions의 첫 점수 = min(최대 체류, 시작 + 유휴 5분). 시작 사건을 더하는 Lua가 ZADD NX로 넣는다 */
+export function sessionCheckAt(startedAtMs: number, maxStayUntilMs: number): number {
+  return Math.min(maxStayUntilMs, startedAtMs + SESSION_IDLE_MS);
+}
+
+/** 정리 색인 입력의 모양 검사(공용): eventId·jti는 KEY_PART, 시각은 0 이상의 안전한 정수. 틀리면 RangeError */
+export function assertIndexArgs(eventId: string, jti: string | undefined, atMs: number): void {
+  assertJti(eventId);
+  if (jti !== undefined) assertJti(jti);
+  if (!Number.isSafeInteger(atMs) || atMs < 0) throw new RangeError('시각이 0 이상의 안전한 정수가 아니다');
+}
+
+/** SESSION_ENDED 항목의 모양 검사. 틀리면 RangeError(eventId·purchaseSessionId·admissionJti는 KEY_PART, reason은 SESSION_END_REASONS, 시각은 0 이상의 안전한 정수) */
+export function assertEndedEntry(e: SessionEndedEntry): void {
+  if (!isKeyPart(e.eventId)) throw new RangeError('eventId가 키 조각 모양이 아니다');
+  if (!isKeyPart(e.purchaseSessionId)) throw new RangeError('purchaseSessionId가 키 조각 모양이 아니다');
+  if (!isKeyPart(e.admissionJti)) throw new RangeError('admissionJti가 키 조각 모양이 아니다');
+  if (!SESSION_END_REASONS.includes(e.reason)) throw new RangeError('reason이 모르는 값이다');
+  if (!isMs(e.endedAtMs)) throw new RangeError('endedAtMs가 0 이상의 안전한 정수가 아니다');
+}
+
+/** XADD에 넘길 이름·값 쌍(값은 모두 글). 순서: type, purchaseSessionId, admissionJti, reason, endedAtMs */
+export function sessionEndedFields(e: SessionEndedEntry): string[] {
+  return ['type', SESSION_ENDED_TYPE, 'purchaseSessionId', e.purchaseSessionId, 'admissionJti', e.admissionJti, 'reason', e.reason, 'endedAtMs', String(e.endedAtMs)];
+}
+
+/**
+ * 같은 구매 세션이면 같은 UUID 버전 8: SHA-256("PurchaseSessionEnded:" + 구매 세션 ID)의 앞 16바이트에 버전 8·변형 비트를 맞춘다(세션 하나는 한 번 끝난다, ADR-0052).
+ * sessionStartedEventKey와 같은 방식이고 접두만 다르다
+ */
+export function sessionEndedEventKey(purchaseSessionId: string): string {
+  return uuid8(`PurchaseSessionEnded:${purchaseSessionId}`);
+}
+
+/** Stream 항목의 칸을 asyncapi PurchaseSessionEnded로 바꾼다. type이 SESSION_ENDED가 아니거나 칸이 없거나 모양이 틀리거나 reason이 모르는 값이면 RangeError */
+export function toPurchaseSessionEnded(eventId: string, f: Readonly<Record<string, string | undefined>>): PurchaseSessionEndedMessage {
+  if (!isKeyPart(eventId)) throw new RangeError('eventId가 키 조각 모양이 아니다');
+  if (f.type !== SESSION_ENDED_TYPE) throw new RangeError('type이 SESSION_ENDED가 아니다');
+  const { purchaseSessionId, admissionJti } = f;
+  if (!isKeyPart(purchaseSessionId) || !isKeyPart(admissionJti)) throw new RangeError('구매 세션 ID·입장 토큰 jti가 키 조각 모양이 아니다');
+  const reason = f.reason as SessionEndReason | undefined;
+  if (reason === undefined || !SESSION_END_REASONS.includes(reason)) throw new RangeError('reason이 모르는 값이다');
+  const endedAtMs = msOf(f.endedAtMs, 'endedAtMs');
+  return { eventId, purchaseSessionId, admissionJti, reason, endedAt: new Date(endedAtMs).toISOString(), eventKey: sessionEndedEventKey(purchaseSessionId) };
 }

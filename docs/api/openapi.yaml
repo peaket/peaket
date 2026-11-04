@@ -1375,6 +1375,19 @@ paths:
         '503': { $ref: '#/components/responses/ServiceUnavailable', description: "좌석 Redis 장애 조치 중이거나 그 회차 좌석 저장소가 준비되지 않음(세대 키 s:{event:E}:epoch 없음, Problem type seat-store-unavailable, Retry-After 2초 [가정]). 좌석을 잡지 않는다. 이미 잡은 홀드는 그대로다. 해제·연장·스냅샷·주문 생성·결제 시도 시작·결제 접수도 그 회차 좌석 샤드를 쓰지 못하면 같은 503이다(추천 적용 2026-10-28, ADR-0121)" }
         '504': { $ref: '#/components/responses/Problem', description: "좌석 Redis를 부르기 전에 요청의 남은 시간(x-peaket-deadline-ms)이 5ms [가정] 미만이라 부르지 않았다(Problem type deadline-exceeded, Retry-After 없음). 좌석을 잡지 않는다. 부른 뒤 마감을 넘긴 것은 504가 아니라 503 seat-store-unavailable이다(추천 적용 2026-11-04, BUILD_ORDER PRF-135, guidelines §5, docs/features/seat-hold.md §3 '좌석 Redis 호출 마감')" }
         '401': { $ref: '#/components/responses/Unauthorized', description: "입장 토큰 없음·만료, 구매 세션 요청 서명 불일치·일련번호 재사용" }
+  /v1/events/{eventId}/purchase-session:
+    delete:
+      tags: [seats]
+      x-peaket-roles: [fan]
+      summary: 구매 세션 나가기(구매 화면을 나갈 때 세션을 끝냄)
+      description: "FR-010, POL-009, 구매 세션 상태 기계 T9·T11(docs/planning/03 §2.2). 구매 세션 요청 서명 필수(X-Purchase-Seq·X-Purchase-Mac, 입장 토큰 머리). 그 구매 세션을 LEFT로 끝내고(세션 상태를 지우고 입장 토큰의 재사용 차단 표지는 남긴다) PurchaseSessionEnded를 낸다. 브라우저는 화면을 나갈 때 fetch keepalive로 서명해 보낸다(sendBeacon은 머리를 달 수 없다). 이미 끝난 세션의 요청은 구매 세션 확인에서 401이다. 그 세션의 홀드를 푸는 일은 해제 연산이 생긴 뒤 이 연산에 잇는다(그전에는 홀드가 7분 만료로 풀린다). 추천 적용 2026-11-04, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'"
+      security: [{ fanCookie: [], admissionToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/EventId' }, { $ref: '#/components/parameters/PurchaseSeq' }, { $ref: '#/components/parameters/PurchaseMac' }]
+      responses:
+        '204': { description: 끝났다 }
+        '401': { $ref: '#/components/responses/Unauthorized', description: "입장 토큰 없음·만료, 구매 세션 요청 서명 불일치·일련번호 재사용, 이미 끝난 세션" }
+        '403': { $ref: '#/components/responses/Problem', description: "주소의 회차 ID가 구매 세션에 적힌 회차와 다르다. 세션은 그대로 둔다" }
+        '503': { $ref: '#/components/responses/ServiceUnavailable', description: "좌석 Redis 장애 조치 중이거나 메모리 부족(Problem type seat-store-unavailable, Retry-After 2초 [가정], ADR-0121)" }
   /v1/holds/{holdId}:
     delete:
       tags: [seats]

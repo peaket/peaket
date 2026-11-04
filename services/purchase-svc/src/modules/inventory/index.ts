@@ -8,9 +8,19 @@ export { MemorySeatMap, type MemorySeatDef } from './adapters/memory-seat-map.js
 export { MemorySeatDb, MemorySeatEvent, MemorySeatStore, type MemoryHoldHash, type MemoryIdemRecord, type MemoryPublished } from './adapters/memory-seat-store.js';
 export { MemorySweepLeases } from './adapters/memory-sweep-leases.js';
 export { PromSeatSignals } from './adapters/prom-seat-signals.js';
-export { ADVANCE_SESSION_LUA, APPEND_SESSION_STARTED_LUA, MARK_SESSION_STARTED_LUA, OPEN_SESSION_LUA, RECORD_HOLD_LUA } from './adapters/purchase-session-lua.js';
+export {
+  ADVANCE_SESSION_LUA,
+  APPEND_SESSION_ENDED_LUA,
+  APPEND_SESSION_STARTED_LUA,
+  END_SESSION_LUA,
+  MARK_SESSION_STARTED_LUA,
+  OPEN_SESSION_LUA,
+  PAY_SESSION_LUA,
+  RECORD_HOLD_LUA,
+  SWEEP_SESSION_LUA,
+} from './adapters/purchase-session-lua.js';
 export { RecordingHoldAttempts, discardHoldAttempts } from './adapters/recording-hold-attempts.js';
-export { RedisPurchaseSessionStore, RedisSessionStartedLog, sessionKeys } from './adapters/redis-purchase-sessions.js';
+export { RedisPurchaseSessionStore, RedisSessionEndedLog, RedisSessionIndex, RedisSessionStartedLog, sessionKeys } from './adapters/redis-purchase-sessions.js';
 export { RedisSeatStore, SEAT_REDIS, seatKeys } from './adapters/redis-seat-store.js';
 export { SNAPSHOT_LUA } from './adapters/snapshot-lua.js';
 export { RedisSweepLeases } from './adapters/redis-sweep-leases.js';
@@ -36,7 +46,21 @@ export {
   type OpenSessionLogger,
   type OpenSessionOutcome,
 } from './application/open-purchase-session.js';
+export { EndPurchaseSession, EndSessionError, type EndPurchaseSessionDeps, type EndSessionLogger } from './application/end-purchase-session.js';
 export { podIdFrom } from './application/pod-id.js';
+export {
+  SESSION_SWEEP_BACKOFF_MS,
+  SESSION_SWEEP_BATCH,
+  SESSION_SWEEP_LEASE_TTL_MS,
+  SESSION_SWEEP_MAX_BATCHES,
+  SESSION_SWEEP_POISON_RETRY_MS,
+  SESSION_SWEEP_TICK_MS,
+  SessionSweeper,
+  type SessionSweepEventReport,
+  type SessionSweeperDeps,
+  type SessionSweepOutcome,
+  type SessionSweepTickReport,
+} from './application/session-sweeper.js';
 export { ReadSeatSnapshot, SnapshotError, type ReadSeatSnapshotDeps, type SnapshotCommand, type SnapshotErrorCode } from './application/read-seat-snapshot.js';
 export {
   HOLD_PROBLEMS,
@@ -109,22 +133,35 @@ export {
   SESSION_KEY_GRACE_MS,
   SESSION_STARTED_GRACE_MS,
   SESSION_STARTED_KEEP_MS,
+  SESSION_END_REASONS,
+  SESSION_ENDED_TYPE,
   SESSION_STARTED_TYPE,
   SessionStoreFailure,
   UUID_PATTERN,
   assertJti,
+  assertEndedEntry,
+  assertIndexArgs,
   assertOpenInput,
   assertSeq,
   assertStartedEntry,
+  sessionCheckAt,
+  sessionEndedEventKey,
+  sessionEndedFields,
   sessionStartedEventKey,
   sessionStartedFields,
   sessionStoreErrorOf,
+  toPurchaseSessionEnded,
   toPurchaseSessionStarted,
+  type EndedSession,
   type OpenSessionInput,
   type OpenSessionResult,
+  type PurchaseSessionEndedMessage,
   type PurchaseSessionStartedMessage,
+  type SessionEndedEntry,
+  type SessionEndReason,
   type SessionStartedEntry,
   type StoredSession,
+  type SweepSessionResult,
 } from './domain/purchase-session.js';
 export { seatLuaErrorOf, type SeatKeyKind, type SeatLuaError, type SeatLuaErrorCode, type SeatLuaScript } from './domain/lua-errors.js';
 export {
@@ -148,7 +185,9 @@ export {
   SEAT_MAP,
   SEAT_MAP_SECTIONS,
   SEAT_SNAPSHOTS,
+  SESSION_ENDED_LOG,
   SESSION_HOLDS,
+  SESSION_INDEX,
   SEAT_SIGNALS,
   SEAT_STORE,
   SESSION_STARTED_LOG,
@@ -168,13 +207,17 @@ export {
   type SeatMapSections,
   type SeatSignals,
   type SeatSnapshots,
+  type SessionEndedLog,
   type SessionHolds,
+  type SessionIndex,
+  type SweepLane,
   type SnapshotReadInput,
   type SnapshotReadResult,
   type SeatStore,
   type SessionStartedLog,
   type SweepLeases,
 } from './domain/ports.js';
+export { PurchaseSessionController } from './inbound/purchase-session.controller.js';
 export { SnapshotController } from './inbound/snapshot.controller.js';
 export { HOLD_OPERATION, HoldHeaders, HoldParams, HoldRequest, HoldResponseBody, HoldsController, SeatLuaFailure, sanitizedStoreError } from './inbound/holds.controller.js';
 export { InventoryModule, type AdmissionOptions, type InventoryModuleOptions } from './inventory.module.js';
