@@ -22,6 +22,7 @@
 | `check-codeowners.mjs` | `.github/CODEOWNERS`의 팀이 `teams.json`에 있는지, 첫 줄이 `*`인지, 같은 경로가 두 번 없는지 봅니다(§2.3) | `tools-check.yml` |
 | `check-workspace-protocol.mjs` | `@peaket/*`을 `workspace:` 밖의 판으로 적은 곳을 막습니다(§4.4) | `tools-check.yml` |
 | `trace-check.mjs` | 정본 ID 대조(docs/architecture.md §8.6의 5단계, ADR-0178). 범위 목록의 시험 ID마다 이름에 그 ID를 단 시험이 통과했는지 시험 보고서(vitest JSON, JUnit XML)로 봅니다. `X-T12`·`FR-073` 꼴은 가운데 `-`를 빼고 적은 이름(`FR073_…`)도 맞고, `S-T2`는 `S-T27`에 걸리지 않습니다. 통과한 시험이 없는 ID가 있으면 종료 코드 1입니다. ID는 시험 이름 자체에 답니다(`node --test`의 JUnit 보고서는 `describe` 이름을 싣지 않습니다). 같은 ID에 통과와 실패가 섞이면 통과로 세므로, 시험 실행 자체가 통과했는지는 따로 봅니다 | 단계를 끝낼 때(docs/PROGRESS.md 턴 규칙) |
+| `records.mjs` | 공용 기록 표 맞추기(ADR-0190 결정 3). 커밋 본문의 정합 점검 행(`정합 점검:`으로 시작하는 R 행)과 BUILD_ORDER 체크로 docs/review/consistency-review.md R 표, docs/00-summary.md §4, docs/wbs/wbs.md·wbs.csv 상태 칸을 맞춥니다. `--check`는 고칠 것이 있으면 1, 읽기·실행 오류는 2, `--next-r`는 다른 갈래의 작업 가지까지 본 다음 R 번호. 지난 커밋의 잘못된 행과 겹친 번호는 경고하고 건너뜁니다. 갈래 1(루프)만 돌립니다 | 루프 턴(손으로) |
 | `git-fixture.mjs` | 시험용 임시 git 저장소. 시험만 씁니다 | `*.test.mjs` |
 
 ## 로컬에서 돌리기
