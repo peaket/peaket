@@ -24,8 +24,8 @@ on:
         description: "한 묶음만 다시 돌릴 때 '명세' 또는 '명세:묶음'(예: queue:proposed). 비우면 전부"
         type: string
         required: false
-      java_tool_options:
-        description: 'JVM 설정 실험용 JAVA_TOOL_OPTIONS(예: -XX:+UseParallelGC). 비우면 기본'
+      tlc_jvm_args:
+        description: 'TLC를 띄우는 JVM에만 더할 인자(설정 실험용, 예: -XX:+UseParallelGC). 비우면 기본. Apalache의 JVM에는 주지 않는다(G1을 직접 골라 GC 인자가 겹치면 시작하지 못한다)'
         type: string
         required: false
 
@@ -89,16 +89,29 @@ jobs:
           key: quint-tools-${{ hashFiles('tools/spec-check/fetch-tools.mjs') }}
       - run: node tools/spec-check/fetch-tools.mjs
       - run: node --test "tools/spec-check/*.test.mjs"
-      # 결과는 spec-out/에 쓴다(저장소의 specs/results를 일부만 덮지 않게, 묶음마다 파일이 따로다). JVM 설정 실험은 수동 실행의 java_tool_options로 준다
+      # 결과는 spec-out/에 쓴다(저장소의 specs/results를 일부만 덮지 않게, 묶음마다 파일이 따로다). JVM 설정 실험은 수동 실행의 tlc_jvm_args로 준다
       - env:
           MODE: ${{ inputs.mode || 'full' }}
           SPEC: ${{ matrix.spec }}
           SHARD: ${{ matrix.shard }}
-          JVM_OPTS: ${{ inputs.java_tool_options }}
+          JVM_OPTS: ${{ inputs.tlc_jvm_args }}
         run: |
           case "$MODE" in pr|full) ;; *) echo "::error::mode는 pr 또는 full이다: $MODE"; exit 1 ;; esac
-          if printf '%s' "$JVM_OPTS" | grep -qE '[^-A-Za-z0-9=:+., _]'; then echo "::error::java_tool_options에 쓸 수 없는 글자가 있다"; exit 1; fi
-          if [ -n "$JVM_OPTS" ]; then export JAVA_TOOL_OPTIONS="$JVM_OPTS"; fi
+          if printf '%s' "$JVM_OPTS" | grep -qE '[^-A-Za-z0-9=:+., _]'; then echo "::error::tlc_jvm_args에 쓸 수 없는 글자가 있다"; exit 1; fi
+          # JAVA_TOOL_OPTIONS는 Apalache의 JVM에도 걸려 GC 인자가 겹친다(2026-11-04 첫 시도: 'Multiple garbage collectors selected'). Quint가 `java`로 TLC(tlc2.TLC)를 띄울 때만 더하는 껍데기를 앞에 둔다
+          if [ -n "$JVM_OPTS" ]; then
+            real=$(command -v java)
+            mkdir -p "$RUNNER_TEMP/jbin"
+            cat > "$RUNNER_TEMP/jbin/java" <<EOF
+          #!/usr/bin/env bash
+          for a in "\$@"; do
+            if [ "\$a" = "tlc2.TLC" ]; then exec "$real" $JVM_OPTS "\$@"; fi
+          done
+          exec "$real" "\$@"
+          EOF
+            chmod +x "$RUNNER_TEMP/jbin/java"
+            export PATH="$RUNNER_TEMP/jbin:$PATH"
+          fi
           if [ "$MODE" = full ]; then
             node tools/spec-check/spec-check.mjs full --spec "$SPEC" ${SHARD:+--shard "$SHARD"} --out spec-out
           else
