@@ -601,7 +601,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | IndexedDB `peaket-purchase` | `sessions/{jti}` | HMAC `CryptoKey`(위조 확인용 값을 만드는 비밀 키. 추출 불가), 일련번호, 만료 | 구매 세션 | 세션 끝·로그아웃·만료, 앱 시작 때 만료 항목 | P1 |
 | 메모리 | — | 재인증 토큰(로그인 수단 추가만 `POST /link/{provider}` 양식 칸으로 앱 서버에 넘겨 로그인 진행 쿠키에 봉인한다, 2026-11-04 BOT-041) | 5분, 한 번 | 쓴 뒤 | P1 |
 | sessionStorage | `peaket.withdraw.reauth` | 탈퇴 재인증으로 떠난 시각(밀리초. 토큰은 넣지 않는다, docs/features/identity.md §8 '탈퇴 화면 연결', 추천 적용 2026-11-04) | 10분 [가정] | 재인증에서 돌아왔을 때(늘 지운다) | 등급 밖(숫자) |
-| sessionStorage | `peaket.providers.pending` | 로그인 수단 해제·추가로 재인증을 떠날 때의 할 일(종류·제공자·떠난 시각. 토큰은 넣지 않는다, docs/features/identity.md §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', 추천 적용 2026-11-04) | 10분 [가정] | 재인증에서 돌아왔을 때(늘 지운다) | 등급 밖 |
+| sessionStorage | `peaket.providers.pending` | 로그인 수단 해제·추가·계정 합치기로 재인증을 떠날 때의 할 일(종류 unlink·add·merge, 제공자, 합치기면 병합 제안 ID, 떠난 시각. 토큰은 넣지 않는다, docs/features/identity.md §2.1 '설정의 로그인 수단 연결·해제의 첫 구현'·'계정 병합의 첫 구현', 추천 적용 2026-11-04, BOT-043) | 10분 [가정] | 재인증에서 돌아왔을 때(늘 지운다) | 등급 밖 |
 | localStorage | `peaket.autoassign.{eventId}` | 희망 조건(등급 ID·매수·휠체어석·분리 허용) | 판매 종료까지 | 로그아웃, 배정 확정, 판매 종료 | 등급 밖 |
 | sessionStorage | `peaket.checkout.{holdId}` | 동의 체크, 고른 결제 수단(이름·전화는 없다) | 탭 | 결제 접수, 구매 세션 끝 | 등급 밖 |
 | sessionStorage | `peaket.accept.{orderId}` | 결제 접수를 보낸 시각과 그 멱등키(결제사 값은 넣지 않는다) | 탭 | 결과 확정, 구매 세션 끝 | 등급 밖 |

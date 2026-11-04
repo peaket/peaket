@@ -35,15 +35,16 @@ export class MergePlanner {
   ) {}
 
   /** 지금 본인확인 상태로 고른 대표·흡수 계정(제안 만들기와 확정 직전에 같은 규칙) */
-  async roles(i: { current: string; other: string }): Promise<{ primary: string; absorbed: string; bothVerified: boolean }> {
+  async roles(i: { current: string; other: string }): Promise<{ primary: string; absorbed: string; bothVerified: boolean; primaryVerified: boolean }> {
     const [currentVerified, otherVerified] = await Promise.all([this.verifications.pidsOf(i.current), this.verifications.pidsOf(i.other)]).then((r) => r.map((x) => x.length > 0));
-    return choosePrimary({ current: i.current, other: i.other, currentVerified: currentVerified!, otherVerified: otherVerified! });
+    const c = choosePrimary({ current: i.current, other: i.other, currentVerified: currentVerified!, otherVerified: otherVerified! });
+    return { ...c, primaryVerified: c.primary === i.current ? currentVerified! : otherVerified! };
   }
 
   /** 대표·흡수 계정과 막는 사유·요약. @throws MergeCheckUnavailable 세 서비스 가운데 하나라도 답하지 않음 */
-  async assess(i: { current: string; other: string }): Promise<MergePlan> {
-    const { primary, absorbed, bothVerified } = await this.roles(i);
-    return this.assessPair(primary, absorbed, bothVerified);
+  async assess(i: { current: string; other: string }): Promise<MergePlan & { primaryVerified: boolean }> {
+    const { primary, absorbed, bothVerified, primaryVerified } = await this.roles(i);
+    return { ...(await this.assessPair(primary, absorbed, bothVerified)), primaryVerified };
   }
 
   /** 정해진 대표·흡수 계정으로 다시 본다(확정 직전) */
@@ -70,7 +71,7 @@ export class MergePlanner {
 
   /** 병합 제안을 만들어 저장하고 ID를 돌려준다. 세 서비스가 답하지 않거나 저장소에 닿지 못하면 null(로그인 수단 추가는 OTHER_ACCOUNT만) */
   async plan(i: { requesterAccountId: string; requesterSessionId: string; otherAccountId: string; newProvider: Provider; newProviderUserId: string }): Promise<string | null> {
-    let p: MergePlan;
+    let p: MergePlan & { primaryVerified: boolean };
     try {
       p = await this.assess({ current: i.requesterAccountId, other: i.otherAccountId });
     } catch (e) {

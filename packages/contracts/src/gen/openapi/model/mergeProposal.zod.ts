@@ -26,7 +26,10 @@ export const MergeProposal = zod.object({
   "providers": zod.int().optional()
 }).optional(),
   "blockers": zod.array(zod.enum(['ACTIVE_PURCHASE_SESSION', 'PENDING_PAYMENT', 'QUOTA_EXCEEDED', 'BOTH_VERIFIED', 'WITHDRAWAL_IN_PROGRESS', 'APPEAL_PENDING', 'ENTRY_STARTED'])).optional(),
-  "expiresAt": zod.iso.datetime({"offset":true}).optional()
+  "expiresAt": zod.iso.datetime({"offset":true}).optional(),
+  "newProvider": zod.enum(['kakao', 'naver', 'google']).optional().describe('추가하려던 로그인 수단의 종류(다른 계정의 것). 화면의 \'구글 계정은 이미 다른 PEAKET 계정입니다\' 문구에 쓴다(추천 적용 2026-11-04, BOT-043)'),
+  "requesterRole": zod.enum(['PRIMARY', 'MERGED']).optional().describe('지금 로그인한 계정이 남는 쪽(PRIMARY)인지 흡수되는 쪽(MERGED)인지. MERGED면 확정 뒤 지금 세션이 끝난다(SCR-040 \'지금 계정이 흡수됨\', 추천 적용 2026-11-04, BOT-043)'),
+  "primaryVerified": zod.boolean().optional().describe('남는 계정이 본인확인을 마쳤는가(제안을 만든 때 값, 화면 \'남는 계정(대표): 본인확인한 계정\', 추천 적용 2026-11-04, BOT-043)')
 })
 
 export type MergeProposal = zod.input<typeof MergeProposal>;

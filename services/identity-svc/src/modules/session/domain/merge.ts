@@ -49,6 +49,8 @@ export interface StoredMergeProposal {
   newProviderUserId: string;
   status: 'PROPOSED' | 'BLOCKED';
   blockers: MergeBlocker[];
+  /** 남는 계정이 본인확인을 마쳤는가(제안을 만든 때, 화면 문구 '본인확인한 계정', BOT-043) */
+  primaryVerified: boolean;
   /** 흡수 계정에 티켓·후기가 있다(불변식 위반, SEV3) */
   invariantViolated: boolean;
   moved: MovedSummary;

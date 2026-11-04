@@ -72,6 +72,17 @@ describe('병합 제안(I-T31)', () => {
     expect(r.mergeProposalId).toMatch(/^[A-Za-z0-9_-]{22}$/);
     const v = await t.view.run({ accountId: a.accountId, proposalId: r.mergeProposalId! });
     expect(v).toMatchObject({ primaryAccountId: a.accountId, mergedAccountId: b.accountId, status: 'PROPOSED', blockers: [], moved: { providers: 1, tickets: 0, reviews: 0 } });
+    // 화면 문구에 쓰는 값(BOT-043): 추가하려던 종류, 지금 계정이 남는 쪽인지, 남는 계정의 본인확인 여부
+    expect(v).toMatchObject({ newProvider: 'google', requesterRole: 'PRIMARY', primaryVerified: false });
+  });
+
+  test('I-T31_지금계정만본인확인을마쳤으면지금계정이대표이고_조회는PRIMARY와남는계정의본인확인참이다', async () => {
+    const t = await setup();
+    const x = await t.login('kakao', 'k-x1');
+    await t.login('google', 'g-y1');
+    t.verified.add(x.accountId);
+    const r = await t.add.add({ accountId: x.accountId, sessionId: x.sessionId, reauthToken: await t.token(x), provider: 'google', providerUserId: 'g-y1' });
+    expect(await t.view.run({ accountId: x.accountId, proposalId: r.mergeProposalId! })).toMatchObject({ primaryAccountId: x.accountId, status: 'PROPOSED', requesterRole: 'PRIMARY', primaryVerified: true });
   });
 
   test('I-T31_다른계정만본인확인을마쳤으면그계정이대표이고_둘다마쳤으면BOTH_VERIFIED로막는다', async () => {
@@ -80,7 +91,7 @@ describe('병합 제안(I-T31)', () => {
     const y = await t.login('google', 'g-y', 'y@peaket.test');
     t.verified.add(y.accountId);
     const r1 = await t.add.add({ accountId: x.accountId, sessionId: x.sessionId, reauthToken: await t.token(x), provider: 'google', providerUserId: 'g-y' });
-    expect(await t.view.run({ accountId: x.accountId, proposalId: r1.mergeProposalId! })).toMatchObject({ primaryAccountId: y.accountId, mergedAccountId: x.accountId, status: 'PROPOSED' });
+    expect(await t.view.run({ accountId: x.accountId, proposalId: r1.mergeProposalId! })).toMatchObject({ primaryAccountId: y.accountId, mergedAccountId: x.accountId, status: 'PROPOSED', requesterRole: 'MERGED', primaryVerified: true });
     t.verified.add(x.accountId);
     const r2 = await t.add.add({ accountId: x.accountId, sessionId: x.sessionId, reauthToken: await t.token(x), provider: 'google', providerUserId: 'g-y' });
     expect(await t.view.run({ accountId: x.accountId, proposalId: r2.mergeProposalId! })).toMatchObject({ status: 'BLOCKED', blockers: ['BOTH_VERIFIED'] });

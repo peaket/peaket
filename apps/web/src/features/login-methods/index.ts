@@ -1,15 +1,25 @@
-// SCR-040 로그인 수단 연결·해제(account 담당, docs/features/identity.md §2.1 '설정의 로그인 수단 연결·해제의 첫 구현'). 계정 설정의 로그인 수단 화면이 실제 모드에서 쓴다.
+// SCR-040 로그인 수단 연결·해제와 계정 합치기(account 담당, docs/features/identity.md §2.1 '설정의 로그인 수단 연결·해제의 첫 구현'·'계정 병합의 첫 구현'). 계정 설정의 로그인 수단 화면이 실제 모드에서 쓴다.
 export { browserLoginMethodsApi, isLiveLoginMethods, submitForm, tabStore } from './browser';
 export {
   addResultText,
+  confirmMergeText,
   dayText,
+  isMergeProposalId,
   linkForm,
   markPending,
+  MERGED_AWAY_PATH,
+  mergeAfterConfirm,
+  mergeAfterGet,
+  mergeToOpen,
+  mergeView,
   PROVIDERS,
   reauthForm,
   takePending,
   unlinkResultText,
   type LinkedMethod,
   type LoginMethodsApi,
+  type MergeProposalView,
+  type MergeState,
+  type MergeStep,
   type Provider,
 } from './flow';

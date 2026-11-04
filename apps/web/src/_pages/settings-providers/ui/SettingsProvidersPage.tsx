@@ -2,7 +2,8 @@
 // ① 연결된 로그인 수단 목록(연결 해제) → ② [로그인 수단 추가] → ④~⑥ 계정 합치기 카드(MergePanel: ds MergeSummary + 확인 창).
 // 휴대폰은 바탕 위에 쌓고(합치기 카드만 카드), md 768부터 두 구역 모두 카드, lg 1280은 왼쪽 계정 설정 메뉴(3칸) + 오른쪽 본문(9칸).
 // 흡수된 세션 안내는 세션이 끝난 뒤라 셸을 로그인 전 모양으로 그린다(추천안). 상태는 ?state=, 다크는 ?theme=dark.
-// API 출처가 있고 미리보기 상태가 '목록'이면 ①②③은 실제 흐름(LiveLoginMethods, identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BUILD_ORDER BOT-041)이다. 합치기(④)는 BOT-042.
+// API 출처가 있고 미리보기 상태가 '목록'이면 ①②③은 실제 흐름(LiveLoginMethods, identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BUILD_ORDER BOT-041)이고,
+// ?mergeProposal=(앱 서버가 붙인다)이 있으면 ④~⑥ 합치기도 실제 흐름(LiveMergeCard, 같은 절 '계정 병합의 첫 구현', BUILD_ORDER BOT-043)이다. 미리보기 상태의 합치기는 목업(MergePanel)이다.
 import Link from 'next/link';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
@@ -31,12 +32,16 @@ export async function SettingsProvidersPage({ searchParams }: PageProps) {
   const providers = v.onlyOne ? LINKED_PROVIDERS.filter((p) => p.id === SURVIVOR_PROVIDER) : LINKED_PROVIDERS;
   const live = isLiveLoginMethods() && state === '목록';
   const loginMethod = typeof sp.loginMethod === 'string' ? sp.loginMethod : undefined;
+  const mergeProposal = typeof sp.mergeProposal === 'string' ? sp.mergeProposal : undefined;
+  // 실제 합치기에서 지금 계정이 흡수되어 세션이 끝난 뒤 여는 주소(features/login-methods MERGED_AWAY_PATH). 셸을 로그인 전 모양으로 그린다
+  const endedMerged = sp.ended === 'MERGED';
+  const absorbed = v.absorbed || endedMerged;
 
   return (
-    <AppShell dark={dark} guest={v.absorbed}>
+    <AppShell dark={dark} guest={absorbed}>
       <main className="page-main pb-10 md:pb-12 lg:pb-16" id="main" tabIndex={-1}>
-        {v.absorbed ? (
-          <Absorbed />
+        {absorbed ? (
+          <Absorbed live={endedMerged} />
         ) : (
           <div className="mx-auto w-full lg:grid lg:max-w-[1040px] lg:grid-cols-12 lg:items-start lg:gap-x-6 lg:px-8 lg:pt-8">
             <SettingsSideNav />
@@ -55,7 +60,7 @@ export async function SettingsProvidersPage({ searchParams }: PageProps) {
                 <h1 className="t-xl md:text-[32px] md:leading-[42px]">로그인 수단·계정 합치기</h1>
               </div>
 
-              {live ? <LiveLoginMethods loginMethod={loginMethod} /> : null}
+              {live ? <LiveLoginMethods loginMethod={loginMethod} mergeProposal={mergeProposal} /> : null}
               {live ? null : <section className={cx('col gap-2 px-4 pt-4', CARD_FROM_MD)} aria-labelledby="h-list">
                 <div className="section-title">
                   <h2 id="h-list">연결된 로그인 수단</h2>
@@ -155,8 +160,8 @@ function SettingsSideNav() {
   );
 }
 
-/** 지금 계정이 대표 계정으로 흡수되어 세션이 끝났다(세션 종료 MERGED, 휴대폰 보드) */
-function Absorbed() {
+/** 지금 계정이 대표 계정으로 흡수되어 세션이 끝났다(세션 종료 MERGED, 휴대폰 보드). live면 실제 흐름에서 왔다(목업의 제공자 이름 대신 일반 문장) */
+function Absorbed({ live }: { live: boolean }) {
   return (
     <div className="col mx-auto w-full max-w-[400px] gap-5 px-4 pt-14 pb-6">
       <div className="state" role="alert" style={{ padding: 0 }}>
@@ -167,7 +172,7 @@ function Absorbed() {
         <p className="t-md muted">대표 계정으로 다시 로그인해 주세요</p>
       </div>
       <p className="t-sm muted" style={{ textAlign: 'center' }}>
-        {PROVIDER_NAME[MERGE_PROPOSAL.incoming]}로 로그인해도 대표 계정으로 들어갑니다.
+        {live ? '지금까지 쓰던 로그인 수단으로 로그인해도 대표 계정으로 들어갑니다.' : `${PROVIDER_NAME[MERGE_PROPOSAL.incoming]}로 로그인해도 대표 계정으로 들어갑니다.`}
       </p>
       <Link className="btn btn-primary btn-lg btn-block" href="/login">
         로그인 화면으로 가기

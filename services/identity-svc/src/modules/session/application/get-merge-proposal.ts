@@ -2,6 +2,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import type { MergeBlocker, MovedSummary } from '../domain/merge.js';
+import type { Provider } from '../domain/session.js';
 import { LinkStoreUnavailable, MERGE_PROPOSALS, type MergeProposals } from '../domain/ports.js';
 import { MergeError } from './merge-error.js';
 
@@ -16,6 +17,11 @@ export interface MergeProposalView {
   moved: MovedSummary;
   blockers: MergeBlocker[];
   expiresAt: string;
+  /** 추가하려던 로그인 수단의 종류(BOT-043 화면 문구) */
+  newProvider: Provider;
+  /** 지금 로그인한 계정이 남는 쪽인지 */
+  requesterRole: 'PRIMARY' | 'MERGED';
+  primaryVerified: boolean;
 }
 
 @Injectable()
@@ -36,6 +42,17 @@ export class GetMergeProposal {
       throw e;
     }
     if (!p || p.expiresAt <= this.clock.now() || p.requesterAccountId !== i.accountId.toLowerCase()) throw new MergeError('NOT_FOUND', '병합 제안이 없다');
-    return { proposalId: p.id, primaryAccountId: p.primaryAccountId, mergedAccountId: p.absorbedAccountId, status: p.status, moved: p.moved, blockers: p.blockers, expiresAt: new Date(p.expiresAt).toISOString() };
+    return {
+      proposalId: p.id,
+      primaryAccountId: p.primaryAccountId,
+      mergedAccountId: p.absorbedAccountId,
+      status: p.status,
+      moved: p.moved,
+      blockers: p.blockers,
+      expiresAt: new Date(p.expiresAt).toISOString(),
+      newProvider: p.newProvider,
+      requesterRole: p.primaryAccountId === p.requesterAccountId ? 'PRIMARY' : 'MERGED',
+      primaryVerified: p.primaryVerified === true,
+    };
   }
 }
