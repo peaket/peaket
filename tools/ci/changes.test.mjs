@@ -360,6 +360,7 @@ test('BAS170_화면앱·화면용패키지·토큰과대비표·화면예산표�
     'docs/design/d2-design-system.md',
     'docs/frontend.md',
     'tools/web-checks/seed-css/check-css.mjs',
+    'tools/storybook/.storybook/main.ts',
     '.github/workflows/ci-web.yml',
     'pnpm-lock.yaml',
     'pnpm-workspace.yaml',
@@ -374,6 +375,16 @@ test('BAS170_화면앱·화면용패키지·토큰과대비표·화면예산표�
 test('BAS170_서비스·플랫폼·다른문서·다른도구만바꾸면_web을고르지않는다', () => {
   for (const f of ['services/queue-svc/src/main.ts', 'packages/platform/x.ts', 'docs/design/d5-screen-blueprint.md', 'docs/a.md', 'tools/ci/x.mjs', 'tools/poc/login-compare/x.mjs']) {
     assert.ok(!scopes({ [f]: '바꿈\n' }).includes('web'), f);
+  }
+});
+
+// 신뢰 정책 예외 검사(tools-check의 check-trust-exceptions.mjs, ADR-0191): 어느 작업 공간 파일이나 그 예외 표(devops §4.4)가 바뀌어도 돈다
+test('BAS180_작업공간파일이나devops문서를바꾸면_tools를고른다', () => {
+  for (const f of ['pnpm-workspace.yaml', 'tools/storybook/pnpm-workspace.yaml', 'loadtest/poc/bench/pnpm-workspace.yaml', 'docs/devops.md']) {
+    assert.ok(scopes({ [f]: '바꿈\n' }).includes('tools'), f);
+  }
+  for (const f of ['docs/a.md', 'packages/ds/src/x.ts']) {
+    assert.ok(!scopes({ [f]: '바꿈\n' }).includes('tools'), f);
   }
 });
 

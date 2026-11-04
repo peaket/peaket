@@ -5,5 +5,11 @@
     "allowJs": true,
     "checkJs": false
   },
-  "include": ["src", "scripts"]
+  "include": [
+    "src",
+    "scripts"
+  ],
+  "exclude": [
+    "src/**/*.stories.tsx"
+  ]
 }

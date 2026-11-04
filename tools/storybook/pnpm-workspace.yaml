@@ -1,0 +1,11 @@
+# @peaket/ds Storybook 전용 작업 공간(뿌리 작업 공간과 따로). 보안 설정은 뿌리 pnpm-workspace.yaml과 같다(docs/devops.md §4.4)
+# 뿌리에 두면 Storybook이 들여온 @babel/core 7이 화면 앱의 next → styled-jsx 선택 의존성으로 이어져 semver 6.3.1이 앱 의존성에 섞인다(BAS-180 새 맥락 리뷰)
+minimumReleaseAge: 4320
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
+strictDepBuilds: true
+trustLockfile: false
+allowBuilds:
+  esbuild: true             # Vite가 끌고 오는 esbuild(뿌리 작업 공간과 같은 허용, docs/frontend.md §5.14.5)
+trustPolicyExclude:         # 출처 증명이 빠진 판의 예외. 판 번호까지 적는다. 까닭과 지울 조건은 docs/devops.md §4.4 예외 표(ADR-0191, 소유자 결정 2026-11-04)
+  - 'semver@6.3.1'          # Storybook → react-docgen → @babel/core 7이 ^6.3.1을 요구, 앞 판 6.3.0은 CVE-2022-25883

@@ -8,9 +8,16 @@ PEAKET은 SEED Design을 쓰지만 당근마켓과 제휴·후원·보증 관계
 패키지
 ========================================================================
 - @seed-design/css 3.1.0 (Apache-2.0) https://github.com/daangn/seed-design
+- @seed-design/dom-utils 2.1.0 (Apache-2.0) https://github.com/daangn/seed-design
+- @seed-design/react-dialog 2.0.2 (Apache-2.0) https://github.com/daangn/seed-design
+- @seed-design/react-dismissible-layer 1.0.1 (Apache-2.0) https://github.com/daangn/seed-design
+- @seed-design/react-presence 1.0.1 (Apache-2.0) https://github.com/daangn/seed-design
+- @seed-design/react-prevent-scroll 1.0.1 (Apache-2.0) https://github.com/daangn/seed-design
+- @seed-design/react-primitive 2.0.2 (Apache-2.0) https://github.com/daangn/seed-design
+- @seed-design/react-use-controllable-state 2.0.1 (Apache-2.0) https://github.com/daangn/seed-design
 
 ========================================================================
-NOTICE — @seed-design/css 3.1.0
+NOTICE — @seed-design/css 3.1.0, @seed-design/dom-utils 2.1.0, @seed-design/react-dialog 2.0.2, @seed-design/react-dismissible-layer 1.0.1, @seed-design/react-presence 1.0.1, @seed-design/react-prevent-scroll 1.0.1, @seed-design/react-primitive 2.0.2, @seed-design/react-use-controllable-state 2.0.1
 ========================================================================
 
 SEED Design
@@ -35,7 +42,7 @@ Copyright 2025 주식회사 당근마켓
 [당근마켓 브랜드 리소스 가이드라인]: https://app.notion.com/p/daangn/6fdd92981e4a42d8b29c89cbbba7a8b7
 
 ========================================================================
-LICENSE — @seed-design/css 3.1.0
+LICENSE — @seed-design/css 3.1.0, @seed-design/dom-utils 2.1.0, @seed-design/react-dialog 2.0.2, @seed-design/react-dismissible-layer 1.0.1, @seed-design/react-presence 1.0.1, @seed-design/react-prevent-scroll 1.0.1, @seed-design/react-primitive 2.0.2, @seed-design/react-use-controllable-state 2.0.1
 ========================================================================
 
                                  Apache License

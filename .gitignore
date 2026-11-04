@@ -20,6 +20,7 @@ crash.log
 .next-*/
 dist/
 dist-poc/
+storybook-static/
 .turbo/
 *.tsbuildinfo
 next-env.d.ts

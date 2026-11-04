@@ -25,6 +25,19 @@ PEAKET 디자인 시스템 패키지다. 디자인 토큰(`docs/design/tokens.js
 - 색은 키트의 의미 변수(`var(--primary)` 등)나 Tailwind 테마 색만 쓴다. 원시 색(hex)은 쓰지 않는다(포스터 그림·제공자 버튼만 키트가 예외로 둔다).
 - Tailwind 유틸은 반응형 배치(`md:`·`lg:`·`xl:` — 중단점은 SEED 값 768·1280·1440, `sm`은 480)와 키트에 없는 간격에 쓴다. SEED 부품 요소에는 Tailwind 유틸을 겹치지 않는다(d2 §1의 Turbopack 대비책).
 
+## Storybook(부품 이야기, BAS-180)
+
+- Storybook은 뿌리와 따로 둔 작업 공간 `tools/storybook`이다(자기 잠금 파일. 뿌리에 두면 Babel 7·semver 6이 화면 앱 의존성에 섞인다). 그 폴더에서 `pnpm install --frozen-lockfile` 뒤 `pnpm run dev`(개발 서버 6006) · `pnpm run build`(정적 빌드 `storybook-static/`, git에 넣지 않는다) · `pnpm run typecheck`(이야기 파일 타입 검사. ds의 tsc는 이야기 파일을 뺀다). 사용 통계 전송·새 판 확인·새 소식 알림은 끈다(`tools/storybook/.storybook/main.ts`). 개발 서버의 관리 화면은 새 소식 내용을 storybook.js.org에서 받아 올 수 있다. 운영 배포에는 올리지 않는다.
+- 이야기는 부품 폴더의 `*.stories.tsx`에 상태마다 하나를 둔다(d4 #1·#13). 도구 막대의 '테마'로 라이트·다크를 고른다(`body.pk`·`body.pk.dark`, 주소에 `&globals=theme:dark`).
+- 검사: 시각 회귀 FE-T40(`tools/web-checks/visual/ds-stories.spec.mjs`, 기준 이미지는 `node lib/docker.mjs visual --update-snapshots`), 접근성 FE-T18(모든 이야기 axe, `tools/web-checks/ds/a11y.spec.mjs`, Storybook 화면에서는 `addon-a11y` 패널), 동작(`tools/web-checks/ds/behavior.spec.mjs`). 컨테이너에서 `node lib/docker.mjs ds`.
+- 새 부품이나 상태를 더하면 이야기를 더하고 기준 이미지를 다시 만든다. 부품 속을 바꿀 때는 바꾸기 전 구현으로 기준 이미지를 먼저 만든다(ADR-0192).
+
+## SEED React를 쓰는 방식(ADR-0192)
+
+- 모양은 캔버스 키트를 따르고, 속은 손으로 짠 동작보다 나은 것이 있는 부품만 SEED 동작 부품(모양 없는 headless 부품)으로 바꾼다. 지금은 Dialog·DangerConfirm이 `@seed-design/react-dialog` 2.0.2를 쓴다(바깥 내용 숨기기, 초점 가두기, 겹친 층 닫기 차례, 스크롤 잠금).
+- 판은 출처 증명 있는 것만 받는다: `react-dialog`는 정확한 판 2.0.2, 그것이 요구하는 `react-dismissible-layer`는 뿌리 `pnpm-workspace.yaml`의 `overrides`로 1.0.1이다(docs/devops.md §4.4 예외 표, ADR-0191). 판을 올릴 때 그 표를 다시 본다.
+- 스타일 부품 `@seed-design/react`는 아직 붙이지 않았다. 처음 붙이는 단계는 ADR-0192 결정 5를 먼저 한다.
+
 ## 퍼블리싱 도우미(`@peaket/ds/Preview`)
 
 ```tsx
@@ -50,7 +63,7 @@ const theme = resolvePreviewTheme(searchParams); // ?theme=dark
 
 ## 부품
 
-부품은 `@peaket/ds/<폴더 이름>`으로 하나씩 가져온다(`exports`의 `"./*"`). 겉모양은 캔버스 키트 클래스와 디자인 시스템 보드(`Main.dc.html`)·화면 보드의 마크업을 그대로 낸다. 속을 SEED React 부품으로 바꾸는 일은 BAS-180에서 같은 API를 지키며 한다(지금은 SEED React로 감싸지 않는다).
+부품은 `@peaket/ds/<폴더 이름>`으로 하나씩 가져온다(`exports`의 `"./*"`). 겉모양은 캔버스 키트 클래스와 디자인 시스템 보드(`Main.dc.html`)·화면 보드의 마크업을 그대로 낸다. 속을 SEED 동작 부품으로 바꾸는 것은 위 'SEED React를 쓰는 방식'대로 같은 API를 지키며 한다(ADR-0192).
 
 - `'use client'` 부품(상태·이벤트를 가진 것)도 서버 컴포넌트에서 그릴 수 있지만, 함수 props(onClick 등)는 클라이언트 부품에서만 넘긴다. 나머지 부품은 서버 컴포넌트에서도 쓴다.
 - 앱 라우터 링크(Next.js `Link`)는 `as`·`linkAs`로 넣는다(ButtonLink·Link·Chip·ListItem·TabNav·LogoWordmark). 셸·RoundPicker·AccountLinkPrompt·AlertPanel·ScannerStatusStrip은 링크를 그리는 함수 `renderLink`(`(p) => <Link {...p} />`, 없으면 `<a>`)로 받는다.

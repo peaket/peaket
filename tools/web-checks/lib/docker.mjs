@@ -1,5 +1,6 @@
 // 판을 고정한 Playwright 컨테이너에서 검사를 돌린다(docs/frontend.md §5.17 FE-T40·FE-T36, BUILD_ORDER BAS-170).
-//   node lib/docker.mjs visual [--update-snapshots]   대기실 셸 시각 회귀. 셸(apps/web/queue-room/dist)은 먼저 빌드해 둔다
+//   node lib/docker.mjs visual [--update-snapshots[=missing]]   대기실 셸과 ds 이야기 시각 회귀. 셸(apps/web/queue-room/dist)과 Storybook(tools/storybook/storybook-static)은 먼저 빌드해 둔다
+//   node lib/docker.mjs ds                            @peaket/ds 접근성(axe)·동작 검사(BAS-180). Storybook은 먼저 tools/storybook에서 `pnpm run build`
 //   node lib/docker.mjs layers                        SEED CSS 층 검사. 서버(앱 다섯의 PoC 빌드)는 이 PC에서 먼저 띄워 둔다
 //   node lib/docker.mjs seatmap                       5만 석 좌석맵 PoC(K5) 네 프로젝트
 //   node lib/docker.mjs budgets                       성능 예산(첫 JS·Lighthouse). 서버는 이 PC에서 `node seed-css/serve-all.mjs --budgets`로 먼저 띄운다
@@ -33,11 +34,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 
 function main() {
   const [mode, ...rest] = process.argv.slice(2);
-  if (mode !== 'visual' && mode !== 'layers' && mode !== 'seatmap' && mode !== 'budgets' && mode !== 'seatmap-pkg') {
-    console.error('쓰는 법: node lib/docker.mjs visual [--update-snapshots] | layers | seatmap | budgets | seatmap-pkg');
+  if (!['visual', 'layers', 'seatmap', 'budgets', 'seatmap-pkg', 'ds'].includes(mode)) {
+    console.error('쓰는 법: node lib/docker.mjs visual [--update-snapshots] | layers | seatmap | budgets | seatmap-pkg | ds');
     process.exit(2);
   }
-  const update = rest.includes('--update-snapshots');
+  // --update-snapshots(모두 다시) 또는 --update-snapshots=missing(새 이야기처럼 없는 것만 만들고 나머지는 견준다)
+  const update = rest.find((a) => a === '--update-snapshots' || a === '--update-snapshots=missing');
   const pnpm = pnpmVersion(JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8')));
   const out = join(pkg, 'reports', `docker-${mode}`);
   rmSync(out, { recursive: true, force: true });
@@ -52,6 +54,14 @@ function main() {
     }
     mounts.push('-v', `${dist}:/repo/apps/web/queue-room/dist:ro`);
   }
+  if (mode === 'visual' || mode === 'ds') {
+    const sb = join(repo, 'tools/storybook/storybook-static');
+    if (!existsSync(join(sb, 'index.json'))) {
+      console.error('ds Storybook 정적 빌드가 없다: tools/storybook에서 pnpm install --frozen-lockfile && pnpm run build');
+      process.exit(2);
+    }
+    mounts.push('-v', `${sb}:/repo/tools/storybook/storybook-static:ro`);
+  }
   if (mode === 'seatmap-pkg') {
     const demo = join(repo, 'packages/seatmap/dist-demo');
     if (!existsSync(join(demo, 'index.html'))) {
@@ -61,7 +71,7 @@ function main() {
     mounts.push('-v', `${demo}:/repo/packages/seatmap/dist-demo:ro`, '-v', `${join(repo, 'packages/ds/src/gen')}:/repo/packages/ds/src/gen:ro`);
   }
   const run = {
-    visual: `pnpm exec playwright test -c playwright.visual.config.mjs${update ? ' --update-snapshots' : ''}`,
+    visual: `pnpm exec playwright test -c playwright.visual.config.mjs${update ? ` ${update}` : ''}`,
     layers: 'PEAKET_WEB_CHECKS_HOST=host.docker.internal PEAKET_WEB_CHECKS_SERVERS=external pnpm exec playwright test -c playwright.layers.config.mjs',
     // 좌석맵 PoC(K5, BAS-190): 페이지·배치 파일은 컨테이너 안에서 만들고 띄운다. 웹킷·Firefox의 OffscreenCanvas를 리눅스 판으로 본다
     seatmap: 'pnpm exec playwright test -c playwright.seatmap.config.mjs',
@@ -69,6 +79,8 @@ function main() {
     budgets: 'PEAKET_WEB_CHECKS_HOST=host.docker.internal PEAKET_WEB_CHECKS_SERVERS=external pnpm exec playwright test -c playwright.budgets.config.mjs',
     // 좌석맵 패키지(HOT-120): 리눅스의 Firefox·WebKit은 OffscreenCanvas가 있어 Worker 길을 본다
     'seatmap-pkg': 'pnpm exec playwright test -c playwright.seatmap-pkg.config.mjs',
+    // ds 부품(BAS-180): 접근성은 Chromium, 동작은 세 엔진
+    ds: 'pnpm exec playwright test -c playwright.ds.config.mjs',
   }[mode];
   const script = [
     'set -e',

@@ -1,0 +1,28 @@
+{
+  "name": "peaket-storybook",
+  "private": true,
+  "version": "0.0.0",
+  "description": "@peaket/ds 부품 이야기(Storybook) 전용 작업 공간. 이야기 파일은 packages/ds/src/components/*/*.stories.tsx에 두고, Storybook과 그 빌드 도구(Babel 7 → semver 6.3.1 포함)는 뿌리 작업 공간과 따로 둔다(docs/frontend.md FE-T18·FE-T40, ADR-0191·0192, BUILD_ORDER BAS-180)",
+  "type": "module",
+  "packageManager": "pnpm@12.16.0",
+  "scripts": {
+    "dev": "storybook dev -p 6006 --no-open --no-version-updates",
+    "build": "storybook build -o storybook-static --quiet",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "@storybook/addon-a11y": "10.6.5",
+    "@storybook/react-vite": "10.6.5",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "storybook": "10.6.5",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  }
+}

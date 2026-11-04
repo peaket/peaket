@@ -54,10 +54,11 @@ const RULES = [
   // frontend 예산 표), 화면 브라우저 검사 도구, 이 워크플로, 작업 공간 파일(잠금 파일이 바뀌면 화면 의존성도 바뀐다).
   // 좌석맵 패키지는 세 엔진 검사(seatmap-pkg 잡, BUILD_ORDER HOT-120)가 본다
   [
-    /^(apps\/|packages\/(ds|config|seatmap)\/|docs\/design\/(tokens\.json|d2-design-system\.md)$|docs\/frontend\.md$|tools\/web-checks\/|\.github\/workflows\/ci-web\.yml$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|turbo\.json$|\.nvmrc$)/,
+    /^(apps\/|packages\/(ds|config|seatmap)\/|docs\/design\/(tokens\.json|d2-design-system\.md)$|docs\/frontend\.md$|tools\/web-checks\/|tools\/storybook\/|\.github\/workflows\/ci-web\.yml$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|turbo\.json$|\.nvmrc$)/,
     ['web'],
   ],
-  [/^tools\//, ['tools']],
+  // 신뢰 정책 예외 검사(tools-check, check-trust-exceptions.mjs, ADR-0191)가 보는 작업 공간 파일과 그 예외 표가 바뀌어도 돌린다
+  [/^tools\/|(^|\/)pnpm-workspace\.yaml$|^docs\/devops\.md$/, ['tools']],
   [/^\.github\//, ['ci']],
 ];
 // 넓게 쓰이는 것: 기대는 배포 단위 전부를 돌린다(§3.1 2번)

@@ -33,5 +33,7 @@ jobs:
       - run: node tools/ci/check-workflows.mjs
       - run: node tools/ci/check-codeowners.mjs
       - run: node tools/ci/check-workspace-protocol.mjs
+      # 신뢰 정책 예외는 이름@정확한 판만, devops §4.4 예외 표에 적은 것만(ADR-0191)
+      - run: node tools/ci/check-trust-exceptions.mjs
       # Kafka 클라이언트 필수 설정 정적 검사(D-T45, ADR-0142 결정 3)
       - run: node tools/ci/check-kafka-settings.mjs
