@@ -45,6 +45,11 @@ export type TerminationReason = 'LOGOUT' | 'DEVICE_LIMIT' | 'REFRESH_REUSE' | 'D
 export const CLOSURE_GRACE_MS = 10 * 60_000;
 /** 탈퇴 뒤 남은 본인확인 기록을 정비가 다시 지우는 기간 [가정](늦어도 5일 안, identity §8) */
 export const WITHDRAWAL_SWEEP_MS = 7 * 86_400_000;
+/**
+ * 탈퇴 사건의 purgeBy: 탈퇴 + 5일(identity §8 '탈퇴 계정의 대기열 키 지우기', BOT-037). 대기열 키는 그 순간 만료되어 읽히지 않으므로
+ * '5일 안에는 같은 회차에 다시 줄 서지 못한다'(I-T27)와 '5일 안에 지운다'(표준 개인정보 보호지침 §10①)를 함께 지킨다
+ */
+export const QUEUE_KEYS_PURGE_MS = 5 * 86_400_000;
 /** 팬 탈퇴의 재인증 작업 묶음(docs/security/authz-matrix.md §6) */
 export const WITHDRAWAL_REAUTH_ACT = 'FAN_SENSITIVE';
 

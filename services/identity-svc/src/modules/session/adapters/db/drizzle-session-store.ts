@@ -3,6 +3,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, type DbTransaction, uuidv7, writeOutbox } from '@peaket/platform';
 import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { accountWithdrawnMessage } from '../account-withdrawn-message.js';
 import type { AccountStatus, CreateKeyRecord, RefreshRow, SessionRow, SessionStore, SessionTx } from '../../domain/ports.js';
 import { CREATE_KEY_TTL_MS, type LoginVerdict, type Provider } from '../../domain/session.js';
 import { account, accountProvider, device, reauthTokenUse, refreshTokenHash, session, sessionCreateKey } from './schema.js';
@@ -209,6 +210,10 @@ export class DrizzleSessionStore implements SessionStore {
               payload: Buffer.from(JSON.stringify({ accountId: e.accountId, sessionId: e.id, reason, terminatedAt })),
             })),
         );
+      },
+      recordWithdrawn: async (i) => {
+        // 세션 종료 사건 뒤, 트랜잭션의 마지막 쓰기로 탈퇴 사건을 적는다(BOT-037, ADR-0143 결정 3)
+        await writeOutbox(tx, this.clock, [accountWithdrawnMessage({ eventKey: uuidv7(this.clock), ...i })]);
       },
       insertSession: async (r) => {
         await tx.insert(session).values({

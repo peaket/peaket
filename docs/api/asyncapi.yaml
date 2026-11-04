@@ -84,6 +84,12 @@ channels:
     description: "계정 병합 이벤트(identity 발행, 키 = mergedAccountId). 각 서비스는 지금의 소유·상태 값(찜·오픈 알림 구독·배송지)만 account_id를 대표 계정으로 바꾼다(mergeId로 멱등). 사건·원장·법정 보존 기록(주문·결제·정산·스캔·접속기록)은 account_id를 고치지 않고, 자기 DB의 대응표 merged_account(흡수 계정 → 대표 계정)를 이 이벤트로 채운다(docs/data.md §4의 9번, 추천 적용 2026-10-28, 기술 검토 중간-054, POL-034, ADR-0038)"
     messages:
       AccountMerged: { $ref: '#/components/messages/AccountMerged' }
+  identity.accounts-withdrawn:
+    address: identity.accounts-withdrawn
+    servers: [{ $ref: '#/servers/kafka-trade' }]
+    description: "탈퇴 사건(identity 발행, 키 = accountId). 계정을 탈퇴 처리하는 트랜잭션(docs/features/identity.md §8 '탈퇴의 첫 구현'의 첫 트랜잭션)이 계정을 잠근 뒤 읽은 본인확인 기록의 pid(pid 키 전환 기간이면 옛 pid도)를 실어, 세션 종료 사건 뒤 identity DB Outbox에 적는다. 본인확인을 하지 않은 계정은 pid가 없어 내지 않는다. 본인확인 기록을 지우는 둘째 트랜잭션이 실패해도 사건은 탈퇴 시각에 나간다. queue-svc가 서비스 소비자 그룹 하나로 받아, 진행 중인 회차(`q:{admission}:events`)마다 그 pid의 1인 1순번 키 `q:dup:{pid}:E`·`q:adm:{pid}:E`의 만료를 purgeBy(탈퇴 + 5일)로 당긴다(`PEXPIREAT … LT`라 이미 더 이른 키는 그대로, 다시 받아도 같다. docs/data.md §3, 표준 개인정보 보호지침 §10①). 값에 pid가 있어 보존을 짧게 둔다: retention.ms 3일·segment.ms 1일 [가정](한 레코드가 늦어도 약 4일 안에 지워진다). 소비가 3일 넘게 멈추면 그 사이 사건을 잃고 그 키는 판매 종료 TTL로만 지워진다(남는 한계. 소비 지연 경보가 막는다). 추천 적용 2026-11-04, BUILD_ORDER BOT-037"
+    messages:
+      AccountWithdrawn: { $ref: '#/components/messages/AccountWithdrawn' }
   support.cases-requested:
     address: support.cases-requested
     servers: [{ $ref: '#/servers/kafka-trade' }]
@@ -189,6 +195,8 @@ operations:
   consumeSessionTerminated: { action: receive, channel: { $ref: '#/channels/control.sessions-terminated' }, summary: "모든 서비스의 모든 파드(공용 서버 패키지 packages/platform의 종료 세션 목록. 파드마다 따로 읽고, 뜰 때 지금 − 15분부터 다시 읽는다, ADR-0103)" }
   publishAccountMerged: { action: send, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "identity-svc" }
   consumeAccountMerged: { action: receive, channel: { $ref: '#/channels/identity.accounts-merged' }, summary: "각 도메인 서비스(지금의 소유·상태 값만 대표 계정으로 바꾸고 사건·원장·법정 보존 기록은 고치지 않고 merged_account 대응표를 채움, mergeId로 멱등, docs/data.md §4의 9번, POL-034)" }
+  publishAccountWithdrawn: { action: send, channel: { $ref: '#/channels/identity.accounts-withdrawn' }, summary: "identity-svc Outbox(계정을 탈퇴 처리하는 트랜잭션, 세션 종료 사건 뒤) → Outbox 릴레이(identity-outbox-relay, 폴링, ADR-0116·0143)" }
+  consumeAccountWithdrawn: { action: receive, channel: { $ref: '#/channels/identity.accounts-withdrawn' }, summary: "queue-svc(서비스 소비자 그룹 하나. 진행 중인 회차의 q:dup·q:adm 만료를 purgeBy로 당긴다, docs/features/queue-admission.md §3 '탈퇴 계정의 사람 키')" }
   publishCaseRequested: { action: send, channel: { $ref: '#/channels/support.cases-requested' }, summary: "core-svc support(문의 접수·추가 문의, 소명 APPEAL. 소명은 추천 적용 2026-10-30)·review(게시물 신고) Outbox. queue-svc(봇 판정 이의 제기 VERIFICATION_APPEAL): DB가 없어 Outbox 없이 바로 낸다. 발행에 실패하면 이의 접수 요청에 503과 Retry-After로 답하고 화면이 다시 보낸다. 같은 이의는 같은 eventKey라 ops-svc가 중복을 지운다(추천 적용 2026-10-30, docs/features/bot-defense.md §12, ADR-0156 결정 14)" }
   consumeCaseRequested: { action: receive, channel: { $ref: '#/channels/support.cases-requested' }, summary: "ops-svc CS 처리함(건 만들기·신고 수 더하기·기한 계산, 멱등)" }
   streamSeatDelta: { action: send, channel: { $ref: '#/channels/ws.seat-delta' }, summary: "realtime-gw → 브라우저 Worker(델타 묶음, 하트비트, 묶음 간격 변경)", messages: [{ $ref: '#/channels/ws.seat-delta/messages/SeatDeltaBatch' }, { $ref: '#/channels/ws.seat-delta/messages/Heartbeat' }, { $ref: '#/channels/ws.seat-delta/messages/BatchInterval' }] }
@@ -389,6 +397,16 @@ components:
           primaryAccountId: { type: string }
           mergedAccountId: { type: string }
           confirmedAt: { type: string, format: date-time }
+    AccountWithdrawn:
+      payload:
+        type: object
+        required: [eventKey, accountId, pids, withdrawnAt, purgeBy]
+        properties:
+          eventKey: { type: string, format: uuid, description: "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값" }
+          accountId: { type: string, format: uuid, description: "탈퇴한 계정" }
+          pids: { type: array, minItems: 1, maxItems: 2, items: { type: string }, description: "그 계정의 pid(액세스 토큰의 pid와 같은 base64url 글자). 1~2개이고 지금 pid가 먼저, pid 키 전환 기간이면 옛 pid가 뒤다(docs/features/identity.md §5 'pid 키 전환의 첫 구현')" }
+          withdrawnAt: { type: string, format: date-time, description: "계정을 탈퇴 처리한 시각(account.deleted_at)" }
+          purgeBy: { type: string, format: date-time, description: "이 시각까지 사람 단위 대기열 키를 남기고 이 시각에 지운다. withdrawnAt + 5일(그 순간 만료되어 읽히지 않으므로 '5일 안에는 같은 회차에 다시 줄 서지 못한다'와 '5일 안에 지운다'를 함께 지킨다, docs/features/identity.md §8 '탈퇴 계정의 대기열 키 지우기'). 받는 쪽은 withdrawnAt ~ withdrawnAt + 5일 밖이면 보류한다" }
     CaseRequested:
       payload:
         type: object

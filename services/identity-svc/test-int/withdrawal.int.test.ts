@@ -130,3 +130,33 @@ test('I-T27_M2_PostgreSQL에서_본인확인확정의계정공유잠금이_탈�
   // 탈퇴가 끝난 뒤의 확정은 DELETED를 본다
   expect(await t.verifications.transaction((tx) => tx.lockAccountForShare(a.accountId))).toBe('DELETED');
 });
+
+test('I-T27_PostgreSQL에서_탈퇴트랜잭션이_pid와옛pid를실은탈퇴사건을Outbox에적고_본인확인기록파기가실패해도withdrawnAt은account.deleted_at이다', async () => {
+  const t = await setup();
+  const a = await t.login('pg-q-1');
+  await t.verify(a.accountId, 'pg-queue-person');
+  // pid 키 전환 기간처럼 옛 pid를 둔다
+  await q("update identity_verification set pid_prev = decode(repeat('ab', 32), 'hex') where account_id = $1", [a.accountId]);
+  const [row] = await q<{ pid: Buffer; pid_prev: Buffer }>('select pid, pid_prev from identity_verification where account_id = $1', [a.accountId]);
+  const token = await t.reauth(a);
+  // 본인확인 기록 파기(둘째 트랜잭션)가 실패하게 한다. 사건은 첫 트랜잭션이 이미 적었다
+  const real = new VerificationEraser(t.verifications);
+  const failing = { erase: async () => { throw new Error('주입한 DB 장애'); }, pidsOf: (id: string) => real.pidsOf(id) };
+  await new WithdrawAccount(t.sessions, new JoseReauthVerifier(t.k.keys, ISSUER, clock), failing, clock).run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: {} });
+  const [{ deleted_at: deletedAt }] = (await q<{ deleted_at: Date }>('select deleted_at from account where id = $1', [a.accountId])) as [{ deleted_at: Date }];
+  const events = await q<{ payload: Buffer }>("select payload from outbox where topic = 'identity.accounts-withdrawn' and msg_key = $1", [a.accountId]);
+  expect(events).toHaveLength(1);
+  expect(JSON.parse(events[0]!.payload.toString())).toEqual({
+    eventKey: expect.any(String),
+    accountId: a.accountId,
+    pids: [row!.pid.toString('base64url'), row!.pid_prev.toString('base64url')],
+    withdrawnAt: deletedAt.toISOString(),
+    purgeBy: new Date(deletedAt.getTime() + 5 * 86_400_000).toISOString(),
+  });
+  expect(await q('select 1 from identity_verification where account_id = $1', [a.accountId])).toHaveLength(1);
+  // 정비가 남은 기록을 지워도 사건을 다시 적지 않는다
+  clock.advance(60_000);
+  await t.finish.run();
+  expect(await q('select 1 from identity_verification where account_id = $1', [a.accountId])).toHaveLength(0);
+  expect(await q("select 1 from outbox where topic = 'identity.accounts-withdrawn' and msg_key = $1", [a.accountId])).toHaveLength(1);
+});

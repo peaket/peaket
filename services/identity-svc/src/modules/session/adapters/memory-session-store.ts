@@ -1,8 +1,10 @@
 // 메모리 저장소(시험·로컬 시제품용). PostgreSQL 저장소와 같은 규칙을 지킨다: 트랜잭션은 한 번에 하나씩 돌고(직렬),
 // 실패하면 그 트랜잭션의 변경을 모두 되돌린다. 세션 종료 사건은 Outbox 대신 목록에 모은다.
-import { uuidv7 } from '@peaket/platform';
+import { randomUUID } from 'node:crypto';
+import { type OutboxMessage, uuidv7 } from '@peaket/platform';
 import type { AccountRow, CreateKeyRecord, NewSession, RefreshRow, SessionRow, SessionStore, SessionTx } from '../domain/ports.js';
 import { type ActiveSession, CREATE_KEY_TTL_MS, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
+import { accountWithdrawnMessage } from './account-withdrawn-message.js';
 
 type StoredAccount = AccountRow & { email: string | null; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number };
 
@@ -17,9 +19,11 @@ interface State {
   hashes: Map<string, { sessionId: string; refreshFamily: string; expiresAt: number }>;
   events: Array<{ sessionId: string; accountId: string; reason: TerminationReason; at: number }>;
   reauthUses: Map<string, { accountId: string; usedAt: number; expiresAt: number }>;
+  /** 트랜잭션이 Outbox에 적었을 탈퇴 사건(BOT-037). 시험이 읽는다 */
+  withdrawn: OutboxMessage[];
 }
 
-const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [], reauthUses: new Map() });
+const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [], reauthUses: new Map(), withdrawn: [] });
 const copy = <K, V extends object>(m: Map<K, V>) => new Map([...m].map(([k, v]) => [k, { ...v }]));
 const clone = (s: State): State => ({
   accounts: copy(s.accounts),
@@ -30,6 +34,7 @@ const clone = (s: State): State => ({
   hashes: copy(s.hashes),
   events: [...s.events],
   reauthUses: copy(s.reauthUses),
+  withdrawn: [...s.withdrawn],
 });
 const providerKey = (p: Provider, id: string) => `${p}\u0000${id}`;
 const hex = (h: Uint8Array) => Buffer.from(h).toString('hex');
@@ -122,6 +127,11 @@ export class MemorySessionStore implements SessionStore {
     const next = this.#queue.then(run, run);
     this.#queue = next.catch(() => {});
     return next;
+  }
+
+  /** 적힌 탈퇴 사건(BOT-037, 시험용) */
+  withdrawnMessages(): OutboxMessage[] {
+    return [...this.#state.withdrawn];
   }
 
   /** 그 계정의 세션 종료 사건(적힌 순서): [세션 ID, 사유] */
@@ -222,6 +232,9 @@ export class MemorySessionStore implements SessionStore {
           // 끝난 세션의 리프레시 토큰 해시는 같은 트랜잭션에서 지운다(R-255)
           for (const [k, h] of s.hashes) if (h.sessionId === id) s.hashes.delete(k);
         }
+      },
+      recordWithdrawn: async (i) => {
+        s.withdrawn.push(accountWithdrawnMessage({ eventKey: randomUUID(), ...i }));
       },
       insertSession: async (r) => {
         s.sessions.set(r.id, { ...r, terminatedAt: null, prevRefreshHash: null, rotatedAt: null, refreshUsed: false });

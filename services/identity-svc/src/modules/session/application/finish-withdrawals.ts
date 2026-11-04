@@ -31,9 +31,11 @@ export class FinishWithdrawals {
       for (const id of ids) {
         try {
           // 잠근 뒤 사유를 본다. 사이에 다른 길로 끝났으면(재인증 탈퇴) 그대로 둔다(L4)
+          // 탈퇴 사건의 pid는 트랜잭션 밖에서 먼저 읽는다(잠근 채 연결을 하나 더 빌리지 않게, BOT-037)
+          const pids = await this.eraser.pidsOf(id);
           await this.store.transaction(async (tx) => {
             await tx.lockAccount(id);
-            if ((await tx.closureReasonOf(id)) === 'UNDER_14') await completeWithdrawal(tx, id, now);
+            if ((await tx.closureReasonOf(id)) === 'UNDER_14') await completeWithdrawal(tx, id, now, pids);
           });
           await this.eraser.erase(id, now);
           closed++;

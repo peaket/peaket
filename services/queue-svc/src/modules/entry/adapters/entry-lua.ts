@@ -335,3 +335,16 @@ extend(KEYS[1], ARGV[4])
 extend(KEYS[2], ARGV[5])
 return 1
 `;
+
+/**
+ * 탈퇴 계정의 사람 키 만료 당기기(docs/features/queue-admission.md §3 '탈퇴 계정의 사람 키', BUILD_ORDER BOT-037).
+ * KEYS = 한 pid의 q:dup·q:adm(회차마다, 해시 태그가 pid라 한 슬롯), ARGV[1] = 기한(밀리초 Unix 시각).
+ * LT라 이미 더 일찍 지워질 키는 그대로이고, 없는 키는 만들지 않는다. 기한이 지났으면 바로 지워진다. 만료를 건 키 수를 돌려준다
+ */
+export const EXPIRE_BY_LUA = `
+local n = 0
+for i = 1, #KEYS do
+  n = n + redis.call('PEXPIREAT', KEYS[i], ARGV[1], 'LT')
+end
+return n
+`;

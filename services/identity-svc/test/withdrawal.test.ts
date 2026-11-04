@@ -8,7 +8,7 @@ import { AccountError } from '../src/modules/session/application/account-error.j
 import { CloseAccount } from '../src/modules/session/application/close-account.js';
 import { FinishWithdrawals } from '../src/modules/session/application/finish-withdrawals.js';
 import { GetVerificationStatus } from '../src/modules/session/application/get-verification-status.js';
-import { WithdrawAccount } from '../src/modules/session/application/withdraw-account.js';
+import { completeWithdrawal, WithdrawAccount } from '../src/modules/session/application/withdraw-account.js';
 import type { AccountEraser, SessionStore } from '../src/modules/session/domain/ports.js';
 import { CreateSession } from '../src/modules/session/application/create-session.js';
 import { plusOneYear } from '../src/modules/verification/domain/verification.js';
@@ -19,6 +19,7 @@ import { VerificationEraser } from '../src/modules/verification/adapters/verific
 import { ConfirmVerification } from '../src/modules/verification/application/confirm-verification.js';
 import { StartVerification } from '../src/modules/verification/application/start-verification.js';
 import { VerificationError } from '../src/modules/verification/application/verification-error.js';
+import { AccountWithdrawn } from '@peaket/contracts/asyncapi';
 import { agencyResult, ISSUER, kit, newKey, noClaims, recordingSignals, testAgency, testDeviceRefs } from './support.js';
 
 const DAY = 86_400_000;
@@ -43,6 +44,7 @@ async function setup(o: { failErase?: number; failEraseFor?: (accountId: string)
       }
       return real.erase(accountId, now);
     },
+    pidsOf: (accountId) => real.pidsOf(accountId),
   };
   const reauth = new JoseReauthVerifier(k.keys, ISSUER, clock);
   const withdraw = new WithdrawAccount(sessions, reauth, eraser, clock);
@@ -295,5 +297,92 @@ describe('탈퇴와 겹치는 로그인·갱신·본인확인(새 맥락 리뷰 
     await expect(t.finish.run()).rejects.toThrow(/1/);
     expect(await t.verifications.recordOf(b.accountId)).toBeNull();
     expect(await t.verifications.recordOf(a.accountId)).not.toBeNull();
+  });
+});
+
+describe('탈퇴 계정의 대기열 키 지우기(BOT-037, I-T27)', () => {
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const withdrawn = (t: { sessions: MemorySessionStore }) => t.sessions.withdrawnMessages();
+  const valueOf = (m: { payload: Uint8Array }) => JSON.parse(Buffer.from(m.payload).toString('utf8')) as Record<string, unknown>;
+
+  test('I-T27_탈퇴하면계정트랜잭션이_pid를실은탈퇴사건을한번적고_purgeBy는탈퇴시각+5일이다', async () => {
+    const t = await setup();
+    const a = await t.login('q-1');
+    await t.verify(a.accountId, 'queue-person');
+    const pid = (await t.verifications.claimsOf(a.accountId))!.pid;
+    const at = t.clock.now();
+    await t.withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+    const ev = withdrawn(t);
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ topic: 'identity.accounts-withdrawn', key: a.accountId });
+    const v = valueOf(ev[0]!);
+    expect(v).toEqual({ eventKey: expect.any(String), accountId: a.accountId, pids: [pid], withdrawnAt: iso(at), purgeBy: iso(at + 5 * DAY) });
+    // 계약 모양(asyncapi AccountWithdrawn)
+    expect(AccountWithdrawn.safeParse(v).success).toBe(true);
+    // 정비가 다시 돌아도 또 적지 않는다
+    t.clock.advance(DAY);
+    await t.finish.run();
+    expect(withdrawn(t)).toHaveLength(1);
+  });
+
+  test('I-T27_pid키전환기간에탈퇴하면_옛pid도지금pid뒤에싣는다', async () => {
+    const t = await setup();
+    const a = await t.login('q-2');
+    await t.verify(a.accountId, 'queue-person-2');
+    const old = (await t.verifications.claimsOf(a.accountId))!.pid;
+    expect(await t.verifications.movePid(a.accountId, Buffer.alloc(32, 9), 2)).toBe(true);
+    await t.withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+    expect(valueOf(withdrawn(t)[0]!).pids).toEqual([Buffer.alloc(32, 9).toString('base64url'), old]);
+  });
+
+  test('I-T27_본인확인을하지않은계정의탈퇴는_대기열키가없어탈퇴사건을적지않는다', async () => {
+    const t = await setup();
+    const a = await t.login('q-3');
+    await t.withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+    expect(t.sessions.accountOf(a.accountId)?.status).toBe('DELETED');
+    expect(withdrawn(t)).toEqual([]);
+  });
+
+  test('I-T27_본인확인기록파기가실패해도_탈퇴사건은탈퇴트랜잭션에서이미나가고_정비가뒤에지워도다시적지않는다', async () => {
+    const t = await setup({ failErase: 1 });
+    const a = await t.login('q-4');
+    await t.verify(a.accountId, 'queue-person-4');
+    const at = t.clock.now();
+    await t.withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+    expect(await t.verifications.recordOf(a.accountId)).not.toBeNull();
+    expect(withdrawn(t)).toHaveLength(1);
+    expect(valueOf(withdrawn(t)[0]!)).toMatchObject({ withdrawnAt: iso(at), purgeBy: iso(at + 5 * DAY) });
+    t.clock.advance(DAY);
+    expect(await t.finish.run()).toMatchObject({ erased: 1 });
+    expect(withdrawn(t)).toHaveLength(1);
+  });
+
+  test('I-T27_탈퇴사건을적은뒤트랜잭션이되돌려지면_사건도계정도남지않는다', async () => {
+    const t = await setup();
+    const a = await t.login('q-5');
+    await t.verify(a.accountId, 'queue-person-5');
+    const pids = await t.verifications.claimsOf(a.accountId).then((c) => [c!.pid]);
+    const failed = await t.sessions
+      .transaction(async (tx) => {
+        await completeWithdrawal(tx, a.accountId, t.clock.now(), pids);
+        throw new Error('사건을 적은 뒤 실패');
+      })
+      .catch((e: unknown) => e);
+    expect(failed).toBeInstanceOf(Error);
+    expect(withdrawn(t)).toEqual([]);
+    expect(t.sessions.accountOf(a.accountId)?.status).toBe('ACTIVE');
+  });
+
+  test('I-T27_만14세미만정리를정비가끝낼때도_본인확인한계정이면탈퇴사건을적는다', async () => {
+    const t = await setup();
+    const a = await t.login('q-6');
+    await t.verify(a.accountId, 'queue-person-6');
+    const pid = (await t.verifications.claimsOf(a.accountId))!.pid;
+    await t.closure.start(a.accountId, 'UNDER_14');
+    t.clock.advance(11 * 60_000);
+    const at = t.clock.now();
+    await t.finish.run();
+    expect(t.sessions.accountOf(a.accountId)?.status).toBe('DELETED');
+    expect(withdrawn(t).map(valueOf)).toEqual([{ eventKey: expect.any(String), accountId: a.accountId, pids: [pid], withdrawnAt: iso(at), purgeBy: iso(at + 5 * DAY) }]);
   });
 });

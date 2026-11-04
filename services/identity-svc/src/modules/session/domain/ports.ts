@@ -73,6 +73,8 @@ export interface SessionTx {
   unterminatedSessions(accountId: string): Promise<string[]>;
   /** 세션을 끝내고 그 세션들의 리프레시 토큰 해시를 지우며, 같은 트랜잭션에 세션 종료 사건(control.sessions-terminated)을 적는다(ADR-0143 결정 3, R-255) */
   terminateSessions(ids: readonly string[], reason: TerminationReason, now: number): Promise<void>;
+  /** 탈퇴 사건(pid를 실음)을 이 트랜잭션의 Outbox에 적는다. 세션 종료 사건 뒤, 트랜잭션의 마지막 쓰기다(identity §8 '탈퇴 계정의 대기열 키 지우기', BOT-037) */
+  recordWithdrawn(i: { accountId: string; pids: readonly string[]; withdrawnAt: number }): Promise<void>;
   /** ACTIVE 계정을 WITHDRAWAL_PENDING과 정리 사유·시작 시각으로 둔다. 이미 정리 중이거나 다른 상태면 그대로 둔다(멱등) */
   markClosure(accountId: string, reason: 'UNDER_14', now: number): Promise<void>;
   /** 정리 중(WITHDRAWAL_PENDING)인 계정의 정리 사유. 아니면 null */
@@ -187,6 +189,11 @@ export const ACCOUNT_ERASER = Symbol('identity.AccountEraser');
 export interface AccountEraser {
   /** 지운 것이 있으면 true */
   erase(accountId: string, now: number): Promise<boolean>;
+  /**
+   * 지우기 전 본인확인 기록의 pid(지금 pid가 먼저, 전환 기간이면 옛 pid가 뒤). 본인확인 전이면 빈 목록.
+   * 탈퇴 트랜잭션을 열기 전에 부른다(잠근 채 연결을 하나 더 빌리지 않게). 그 사이 끝난 첫 본인확인의 pid는 아직 토큰·대기열 키가 없다(BOT-037)
+   */
+  pidsOf(accountId: string): Promise<string[]>;
 }
 
 export const REAUTH_VERIFIER = Symbol('identity.ReauthVerifier');

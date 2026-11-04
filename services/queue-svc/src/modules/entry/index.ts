@@ -7,3 +7,5 @@ export { type EventSchedule, keepUntilOf, QueueStoreUnavailable, REASONS, saleEn
 export { unavailableRisk } from './adapters/unavailable-risk.js';
 export type { EventSchedules, QueueTokens, RiskPort } from './domain/ports.js';
 export { EntryModule, type EntryModuleOptions } from './entry.module.js';
+export { PurgeWithdrawnKeys } from './application/purge-withdrawn-keys.js';
+export { ACCOUNTS_WITHDRAWN_TOPIC, AccountWithdrawnHandler, type AccountWithdrawnCodec, type AccountWithdrawnEvent, jsonAccountWithdrawnCodec } from './inbound/account-withdrawn.handler.js';

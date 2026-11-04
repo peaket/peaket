@@ -12,6 +12,15 @@ export interface QueueTokens {
   hash(token: string): string;
 }
 
+export const WITHDRAWN_KEYS = Symbol('queue.WithdrawnKeys');
+/** 탈퇴 계정의 사람 키(q:dup·q:adm) 만료 당기기(docs/features/queue-admission.md §3 '탈퇴 계정의 사람 키', BOT-037) */
+export interface WithdrawnKeys {
+  /** 진행 중인 회차(q:{admission}:events에서 점수가 now보다 큰 회차) ID. 키 조각 모양이 아닌 값은 거른다 */
+  activeEvents(now: number): Promise<string[]>;
+  /** 한 pid의 그 회차들 q:dup·q:adm에 만료 at(밀리초)을 건다(이미 더 이르면 그대로). 만료를 건 키 수 */
+  expireBy(pid: string, eventIds: readonly string[], at: number): Promise<number>;
+}
+
 export const EVENT_SCHEDULES = Symbol('queue.EventSchedules');
 export interface EventSchedules {
   /** 사본이 없으면 null(그 회차의 대기열이 열리지 않음) */

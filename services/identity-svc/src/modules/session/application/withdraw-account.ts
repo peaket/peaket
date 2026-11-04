@@ -18,13 +18,17 @@ export interface WithdrawInput {
   body: { confirmCancelUnusedTickets?: boolean; acknowledgeFraudHold?: boolean };
 }
 
-/** 계정 트랜잭션 안의 탈퇴 끝내기(재인증 탈퇴와 만 14세 미만 정리 마무리가 함께 쓴다) */
-export async function completeWithdrawal(tx: SessionTx, accountId: string, now: number): Promise<void> {
+/**
+ * 계정 트랜잭션 안의 탈퇴 끝내기(재인증 탈퇴와 만 14세 미만 정리 마무리가 함께 쓴다).
+ * pids가 있으면(본인확인한 계정) 마지막에 탈퇴 사건을 적는다. 본인확인 기록을 지우는 둘째 트랜잭션이 실패해도 사건은 늘 탈퇴 시각에 나간다(BOT-037)
+ */
+export async function completeWithdrawal(tx: SessionTx, accountId: string, now: number, pids: readonly string[] = []): Promise<void> {
   await tx.lockAccount(accountId);
   // 만료와 상관없이 끝나지 않은 세션을 모두 잠그고 끝낸다: 만료 경계에서 갱신이 더 이른 시각으로 출발해 겹쳐도 세션이 남지 않는다(다시 보기 낮음)
   const open = await tx.unterminatedSessions(accountId);
   await tx.eraseAccount(accountId, now);
   await tx.terminateSessions(open, 'DELETE', now);
+  if (pids.length > 0) await tx.recordWithdrawn({ accountId, pids, withdrawnAt: now });
 }
 
 @Injectable()
@@ -55,6 +59,9 @@ export class WithdrawAccount {
     // 대조값 보관 행이 살아 있으면 첫 요청은 409로 안내를 보인다. 재인증 토큰은 쓰지 않아 같은 토큰으로 acknowledgeFraudHold를 실어 다시 보낸다(ADR-0173 결정 7)
     const hold = this.holds ? await this.holds.activeHold(accountId, now) : null;
     if (hold && i.body.acknowledgeFraudHold !== true) throw new AccountError('CONFIRMATION_REQUIRED', '탈퇴 전 대조값 보관 안내', hold);
+    // 탈퇴 사건에 실을 pid는 트랜잭션을 열기 전에 읽는다: 계정을 잠근 채 DB 연결을 하나 더 빌리지 않게(activeHoldOf와 같은 까닭, 재검토 낮음 1).
+    // 그 사이에 끝난 첫 본인확인의 pid는 빠질 수 있지만, 그 pid로 받은 토큰이 없어 대기열 키도 아직 없다(BOT-037)
+    const pids = await this.eraser.pidsOf(accountId);
     await this.store.transaction(async (tx) => {
       // jti를 쓰는 것과 파기를 한 트랜잭션에: 둘 가운데 하나만 남지 않는다
       if (!(await tx.useReauth({ jti: token.jti, accountId, usedAt: now, expiresAt: token.expiresAt }))) {
@@ -69,7 +76,7 @@ export class WithdrawAccount {
         const late = await tx.activeHoldOf(accountId, now);
         if (late) throw new AccountError('CONFIRMATION_REQUIRED', '탈퇴 전 대조값 보관 안내', late);
       }
-      await completeWithdrawal(tx, accountId, now);
+      await completeWithdrawal(tx, accountId, now, pids);
     });
     try {
       await this.eraser.erase(accountId, now);

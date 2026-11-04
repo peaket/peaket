@@ -6,6 +6,7 @@
  */
 
 export * from './accountMerged.zod.js';
+export * from './accountWithdrawn.zod.js';
 export * from './behaviorSignal.zod.js';
 export * from './caseRequested.zod.js';
 export * from './commandAck.zod.js';
