@@ -20,6 +20,8 @@
     "tokens": "node scripts/build-tokens.mjs",
     "tokens:check": "node scripts/build-tokens.mjs --check",
     "tokens:lint": "node scripts/check-tokens.mjs",
+    "notices": "node scripts/build-notices.mjs",
+    "notices:check": "node scripts/build-notices.mjs --check",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/build-tokens.mjs --check && node --test"
   },

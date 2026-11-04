@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BAS-180(wbs 0.6.2)을 한다: `packages/ds` 속을 같은 API로 @seed-design/react로 바꾸기, Storybook·addon-a11y, Apache-2.0 NOTICE, 이유 있는 비활성 버튼, 첫 브라우저 확인. 그 뒤 구간 1 갈래 2 차례(BAS-190 → BAS-210 → BAS-220 → HOT-290~320 → HOT-340·350 → HOT-110·120 → HOT-360). 화면이 바뀌는 단계는 브라우저 확인을 한다.
+- BAS-190(wbs 0.5.4, PoC 5만석 Canvas)을 한다. BAS-180은 OPEN[18](SEED React·Storybook 설치가 공급망 규칙에 막힘)이 풀리면 나머지를 한다(제3자 고지는 끝남). 그 뒤 구간 1 갈래 2 차례(BAS-210 → BAS-220 → HOT-290~320 → HOT-340·350 → HOT-110·120 → HOT-360). 화면이 바뀌는 단계는 브라우저 확인을 한다.
 
 ## 구간 끝 정리 목록
 - 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
@@ -21,3 +21,4 @@
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3). 지난 병렬 세션 기록(PRF-010~120)은 [docs/progress-archive.md](../progress-archive.md)에 있다.
 - 2026-11-04 BAS-170 토큰 파이프라인(wbs 0.6.1, FE-T36·FE-T40·FE-T44·FE-T45): SEED CSS 3.1.0 base를 싣고 토큰 형식·대비 계산 CI, 층 순서 PoC(Turbopack 별칭이 조용히 무시되던 것과 진입점 차례를 고침, CSS 크기는 예산 초과라 기준선으로 막음), 대기실 셸 시각 회귀, CI 화면 잡을 더했다. 자세한 것은 커밋 본문.
+- 2026-11-04 BAS-180 일부(wbs 0.6.2, ADR-0040 결정 7): SEED 제3자 고지 파일과 생성·검사 스크립트를 더했다. SEED React(SEED 패키지 다섯)와 Storybook(semver 6.3.1)은 공급망 규칙 trustPolicy no-downgrade에 막혀 OPEN[18]로 물었다.

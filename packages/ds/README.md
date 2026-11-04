@@ -3,6 +3,7 @@
 PEAKET 디자인 시스템 패키지다. 디자인 토큰(`docs/design/tokens.json`)에서 만든 CSS 변수·Tailwind 4 테마·TS 상수, 디자인 캔버스의 키트 CSS(`src/styles/kit.css`, 캔버스 `peaket.css`를 옮긴 것), 공용 부품(CMP)과 퍼블리싱 도우미를 둔다. 게시하지 않고 앱이 `workspace:`로 잇는다(ADR-0165). 정본은 docs/design/d2-design-system.md다.
 
 - 토큰 빌드: `pnpm --filter @peaket/ds tokens`(만들기) · `tokens:check`(tokens.json과 다르면 실패). `src/gen/`의 다섯 파일 — `tokens.css`(--peaket-* 변수), `theme.css`(Tailwind 테마), `tokens.ts`(Canvas용 TS 상수), `kit-tokens.css`(키트 변수 `.pk`·`.pk.dark`), `queue-room-tokens.css`(대기실 경량 CSS용 같은 블록) — 은 손으로 고치지 않는다.
+- 제3자 고지: `THIRD-PARTY-NOTICES.txt`는 붙인 SEED 판의 NOTICE·LICENSE를 그대로 옮긴 고지 파일이다(ADR-0040 결정 7). `notices`로 만들고 `notices:check`(시험에도 있다)로 판과 같은지 본다. SEED 판을 올리면 다시 만든다. 앱 배포에 함께 싣는 일은 HOT-390이 한다.
 - 토큰 검사: `pnpm --filter @peaket/ds test`가 생성물 차이(`tokens:check`), 토큰 형식 검사(FE-T45: DTCG 이름·형식·별칭·확장 키, SEED 대응 이름과 중단점, SEED 색 모드 선택자), d2 §5 대비표 계산(FE-T44)을 돈다. 문제 목록만 보려면 `tokens:lint`. 규칙은 `scripts/token-rules.mjs`, 정본 읽기는 `scripts/token-canon.mjs`다.
 - 스타일 파일: `styles/index.css`가 SEED base 층 판(`@seed-design/css/base.layered.css`, 스스로 `seed-base` 층에 든다) → tokens.css → theme.css → kit-tokens.css → kit.css → ds.css 순서로 싣는다. 피켓 토큰이 `components` 층이라 같은 이름의 `--seed-*` 변수를 덮는다. 붙인 SEED 판은 `@seed-design/css` 3.1.0이다(BAS-170). `ds.css`는 키트에 없는 ds 보조 규칙(`pk-skip-link` 등)이다. 대기실 경량 페이지는 `@peaket/ds/queue-room.css` 하나만 싣는다(키트 부분집합, 맨 앞에서 queue-room-tokens.css를 싣는다).
 
