@@ -1,6 +1,8 @@
 // SEED CSS 층 검사(FE-T36)가 보는 앱 다섯과 경로(docs/frontend.md §5.17 FE-T36, §5.8 성능 예산 표).
 // 경로마다 §5.8 표의 경로 묶음 이름(row)을 적고, 예산 숫자는 정본 표에서 읽는다(lib/canon.mjs).
 // 탐침(probe)은 PoC 빌드(PEAKET_POC=seed-css)에만 있는 화면이다(packages/ds/src/poc/SeedLayerProbe.tsx).
+import { randomBytes } from 'node:crypto';
+
 export const APPS = [
   {
     name: 'web',
@@ -70,12 +72,18 @@ export const BUILDS = {
 /** 그 빌드의 서버 포트(운영 빌드 4101~4105, PoC 빌드 4111~4115) */
 export const portOf = (app, build) => app.port + BUILDS[build].portOffset;
 
+/** 검사용 서버의 서버 액션 암호화 키(32바이트, 띄울 때마다 새로) */
+const CHECK_KEY = randomBytes(32).toString('base64');
+
 /** 앱 하나의 그 빌드를 띄우는 명령(검사 패키지 폴더 기준). Next는 next start, 나머지는 lib/serve.mjs */
 export function serverCommand(app, build) {
   const b = BUILDS[build];
   if (!b) throw new Error(`모르는 빌드: ${build}`);
   const port = portOf(app, build);
-  if (app.kind === 'next') return { command: `pnpm --dir ../../${app.dir} exec next start -p ${port}`, env: { PEAKET_NEXT_DIST: b.nextDist } };
+  // next start는 서버 액션 암호화 키가 있어야 뜬다(packages/config/next/server-actions-key.mjs). 검사용 서버는 띄울 때마다 새 키를 쓴다
+  if (app.kind === 'next') {
+    return { command: `pnpm --dir ../../${app.dir} exec next start -p ${port}`, env: { PEAKET_NEXT_DIST: b.nextDist, NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: CHECK_KEY } };
+  }
   return { command: `node lib/serve.mjs --root ../../${app.dir}/${b.dist} --port ${port} --spa index.html`, env: {} };
 }
 
@@ -98,6 +106,27 @@ export function stylesheetHrefs(html) {
     if (href) out.push(href.replaceAll('&amp;', '&'));
   }
   return out;
+}
+
+/**
+ * HTML에서 첫 화면이 받는 스크립트 주소(문서에 나오는 차례, 겹친 것은 한 번): `<script src>`, `<link rel=modulepreload>`,
+ * `<link rel=preload as=script>`. 첫 JS 예산(docs/frontend.md §5.8 '첫 JS')을 잴 때 쓴다
+ */
+export function scriptSrcs(html) {
+  const out = new Set();
+  for (const m of html.matchAll(/<script\b[^>]*>/gi)) {
+    // nomodule은 옛 브라우저용 보충 스크립트(Next.js polyfillFiles)라 요즘 브라우저가 받지 않는다(첫 JS에 넣지 않는다)
+    if (/\snomodule(?=[\s=>/])/i.test(m[0])) continue;
+    const src = attr(m[0], 'src');
+    if (src) out.add(src.replaceAll('&amp;', '&'));
+  }
+  for (const m of html.matchAll(/<link\b[^>]*>/gi)) {
+    const rel = (attr(m[0], 'rel') ?? '').toLowerCase().split(/\s+/);
+    const as = (attr(m[0], 'as') ?? '').toLowerCase();
+    const href = attr(m[0], 'href');
+    if (href && (rel.includes('modulepreload') || (rel.includes('preload') && as === 'script'))) out.add(href.replaceAll('&amp;', '&'));
+  }
+  return [...out];
 }
 
 /** 검사가 서버에 닿는 주소의 호스트. 컨테이너 안의 브라우저가 이 PC의 서버를 볼 때는 host.docker.internal(lib/docker.mjs) */

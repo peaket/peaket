@@ -6,10 +6,12 @@
   "type": "module",
   "exports": {
     "./tsconfig/*": "./tsconfig/*",
-    "./eslint/*": "./eslint/*"
+    "./eslint/*": "./eslint/*",
+    "./headers/*": "./headers/*",
+    "./next/*": "./next/*"
   },
   "scripts": {
-    "test": "node --test \"eslint/*.test.mjs\""
+    "test": "node --test \"eslint/*.test.mjs\" \"headers/*.test.mjs\" \"next/*.test.mjs\""
   },
   "dependencies": {
     "@mdn/browser-compat-data": "^8.1.7",

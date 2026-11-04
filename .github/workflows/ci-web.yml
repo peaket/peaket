@@ -2,7 +2,8 @@
 # 지금 있는 것(2026-11-04, BUILD_ORDER BAS-170): 토큰 검사(FE-T44·FE-T45와 생성물 차이), 시각 회귀(FE-T40, 대기실 셸),
 # SEED CSS 층 검사(FE-T36, 앱 다섯의 PoC 빌드). 브라우저 잡은 기준 이미지를 찍은 것과 같은 Playwright 컨테이너(다이제스트 고정,
 # tools/web-checks/lib/docker.mjs의 IMAGE와 같다)에서 돈다. 브라우저 그리기는 OS·판·글꼴에 따라 달라서다(docs/design/d2 §1).
-# size-limit·Lighthouse CI·axe·Storybook은 그 도구가 생기는 단계(BUILD_ORDER BAS-180·BAS-220)에서 이 워크플로에 더한다.
+# 성능 예산(2026-11-04 BAS-220): 대기실 FE-T1(size-limit), 경로별 첫 JS, Lighthouse 적재 지표, 정적 자산 올리기 목록·소스 맵 링크·SBOM.
+# axe·Storybook은 그 도구가 생기는 단계(BUILD_ORDER BAS-180)에서 이 워크플로에 더한다.
 name: ci-web
 
 on:
@@ -106,5 +107,68 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: seed-css-reports
+          path: tools/web-checks/reports/
+          retention-days: 7
+
+  # 성능 예산과 정적 자산(docs/frontend.md §5.8·§5.18·§5.14.5, BUILD_ORDER BAS-220). 운영 빌드만 만든다.
+  # FE-T1 대기실 size-limit → 경로별 첫 JS(HTML이 싣는 스크립트의 gzip) → Lighthouse 적재 지표(이 이미지의 Chromium, 세 번의 가운데 값)
+  # → 올릴 파일 목록(허용 확장자, 소스 맵 링크 0)과 앱별 정적 자산 SBOM(CycloneDX, 산출물로 남긴다)
+  budgets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: >-
+          pnpm install --frozen-lockfile
+          --filter "@peaket/web..." --filter "@peaket/partner..." --filter "@peaket/console-host..."
+          --filter "@peaket/scanner..." --filter "@peaket/forensics..." --filter "@peaket/queue-room..." --filter "@peaket/config"
+      # 정본(docs/frontend.md §5.14.1·§5.8)과 코드 값을 견주는 시험: 문서만 바뀐 PR(바뀐 범위 web)에서도 돈다
+      - run: pnpm --filter @peaket/config test
+      - run: pnpm --filter @peaket/queue-room test
+      - run: node seed-css/build.mjs
+        working-directory: tools/web-checks
+        env:
+          PEAKET_BUILDS: prod
+      - run: pnpm --filter @peaket/queue-room build
+      # FE-T1: 대기실 경량 페이지 JS 50KB 이하·CSS 10KB 미만(gzip)
+      - run: pnpm --filter @peaket/queue-room size
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/web-checks
+      - run: pnpm run budgets
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      # 올릴 파일 목록과 정적 자산 SBOM. 실행 중에 밖에서 받는 스크립트(사람 확인·결제사)는 SBOM 비고에 적는다(ADR-0079 결정 22)
+      - run: |
+          set -e
+          o=reports/static
+          node static/assets.mjs --app queue-room --dir ../../apps/web/queue-room/dist --out "$o/queue-room" --external https://challenges.cloudflare.com
+          node static/assets.mjs --app console --dir ../../apps/console-host/dist --out "$o/console"
+          node static/assets.mjs --app scanner --dir ../../apps/scanner/dist --out "$o/scanner"
+          node static/assets.mjs --app forensics --dir ../../apps/forensics/dist --out "$o/forensics"
+          node static/assets.mjs --app web --dir ../../apps/web/.next/static --out "$o/web" --external https://challenges.cloudflare.com --external https://js.tosspayments.com --external https://cdn.portone.io
+          node static/assets.mjs --app partner --dir ../../apps/partner/.next/static --out "$o/partner"
+        working-directory: tools/web-checks
+      # Next.js 앱은 브라우저 소스 맵을 내지 않아(§5.18 '숨김 소스 맵') 실행 의존성 SBOM(묶음보다 넓다)을 함께 남긴다
+      - run: |
+          set -e
+          pnpm --filter @peaket/web sbom --sbom-format cyclonedx --prod --lockfile-only > tools/web-checks/reports/static/web/sbom-runtime.cdx.json
+          pnpm --filter @peaket/partner sbom --sbom-format cyclonedx --prod --lockfile-only > tools/web-checks/reports/static/partner/sbom-runtime.cdx.json
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: budgets-reports
           path: tools/web-checks/reports/
           retention-days: 7

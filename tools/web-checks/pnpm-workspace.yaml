@@ -5,3 +5,8 @@ blockExoticSubdeps: true
 strictDepBuilds: true
 trustLockfile: false
 allowBuilds: {}
+# lighthouse가 부르는 puppeteer-core 25.13 이후는 chromium-bidi 157.0.8090-0(출처 증명 없이 사람 계정 게시)을 고정해 trustPolicy에 막힌다.
+# docs/devops.md §4.4 '신뢰 증거가 약해진 판'대로 부르는 쪽의 앞선 판을 고른다: lighthouse 13.5.0(^25.9.0) 안에서 출처 증명 있는
+# chromium-bidi 17.0.2를 고정하는 마지막 판 puppeteer-core 25.12.0(BUILD_ORDER BAS-220, 2026-11-04)
+overrides:
+  puppeteer-core: 25.12.0

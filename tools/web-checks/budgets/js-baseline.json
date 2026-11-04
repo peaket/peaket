@@ -1,0 +1,8 @@
+{
+  "note": "첫 JS가 §5.8 예산을 넘은 경로의 잰 값(kB, gzip). wbs 7.5.2에서 예산을 다시 정할 때까지 이 값 + 1kB를 넘지 않게만 막는다(budgets/js.spec.mjs)",
+  "pages": {
+    "web /events/evt-lumen-1025": 186.5,
+    "web /my/tickets": 158.2
+  },
+  "measured": "2026-11-04 BAS-220 운영 빌드(퍼블리싱 화면, 목업 데이터, nomodule 보충 스크립트 뺌)"
+}

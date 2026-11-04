@@ -34,12 +34,19 @@
         "$TURBO_ROOT$/docs/observability.md",
         "$TURBO_ROOT$/tools/ci/service-openapi.mjs",
         "$TURBO_ROOT$/docs/design/tokens.json",
-        "$TURBO_ROOT$/docs/design/d2-design-system.md"
+        "$TURBO_ROOT$/docs/design/d2-design-system.md",
+        "$TURBO_ROOT$/docs/frontend.md"
       ],
       "outputs": [],
       "dependsOn": [
         "^build"
       ]
+    },
+    "size": {
+      "dependsOn": [
+        "build"
+      ],
+      "outputs": []
     }
   }
 }

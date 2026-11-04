@@ -30,8 +30,10 @@ const ARGS = {
   webpack: (b) => ['webpack', '--mode', 'production', '--output-path', b.dist],
   vite: (b) => ['vite', 'build', '--outDir', b.dist],
 };
+// PEAKET_BUILDS=prod면 운영 빌드만 한다(성능 예산 잡, BAS-220)
+const builds = process.env.PEAKET_BUILDS ? process.env.PEAKET_BUILDS.split(',') : Object.keys(BUILDS);
 for (const app of targets) {
-  for (const [build, b] of Object.entries(BUILDS)) {
+  for (const [build, b] of Object.entries(BUILDS).filter(([k]) => builds.includes(k))) {
     console.log(`== ${app.name}: ${build === 'poc' ? 'PoC 빌드(탐침)' : '운영 빌드'}(${app.kind})`);
     const env = { PEAKET_POC: build === 'poc' ? 'seed-css' : '', ...(app.kind === 'next' ? { PEAKET_NEXT_DIST: b.nextDist } : {}) };
     run(['--filter', app.pkg, 'exec', ...ARGS[app.kind](b)], env);

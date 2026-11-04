@@ -39,6 +39,8 @@ export default defineConfig(({ command }) => ({
   plugins: [cloudFrontShellRewrite()],
   build: {
     target: 'es2022',
+    // 링크 없는 숨김 소스 맵: .map은 만들되 JS에 sourceMappingURL을 넣지 않고 올리지 않는다(docs/frontend.md §5.18, FE-T21, BAS-220)
+    sourcemap: 'hidden',
     // `/preview`(preview.html)는 빌드 입력에 넣지 않는다: 운영 빌드에는 화면 목록이 없다(design.md 결정 7)
     rolldownOptions: {
       input: { 'shell.ko': fileURLToPath(new URL('./shell.ko.html', import.meta.url)) },

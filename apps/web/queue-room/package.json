@@ -7,11 +7,15 @@
   "scripts": {
     "dev": "vite --port 3004",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "size": "size-limit",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
     "@peaket/config": "workspace:*",
     "@peaket/ds": "workspace:*",
+    "@size-limit/file": "^14.3.0",
+    "size-limit": "^14.3.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.5"
   }

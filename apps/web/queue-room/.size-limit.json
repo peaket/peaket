@@ -1,0 +1,14 @@
+[
+  {
+    "name": "대기실 경량 페이지 JS(FE-T1, docs/frontend.md §5.8: 50KB 이하 정본, 목표 15KB [가정])",
+    "path": "dist/assets/*.js",
+    "gzip": true,
+    "limit": "50 kB"
+  },
+  {
+    "name": "대기실 경량 페이지 CSS(FE-T1, docs/frontend.md §5.8: 10KB 미만 정본, 목표 8KB [가정])",
+    "path": "dist/assets/*.css",
+    "gzip": true,
+    "limit": "9.99 kB"
+  }
+]

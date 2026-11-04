@@ -14,7 +14,8 @@ export default defineConfig({
   resolve: { conditions: ['seed-layered', ...defaultClientConditions] },
   server: { port: 3005, strictPort: true },
   preview: { port: 3005, strictPort: true },
+  // 링크 없는 숨김 소스 맵(docs/frontend.md §5.18, FE-T21, BAS-220)
   build: seedCssPoc
-    ? { rolldownOptions: { input: { 'poc-seed-css': page('./poc-seed-css.html') } } }
-    : {},
+    ? { sourcemap: 'hidden', rolldownOptions: { input: { 'poc-seed-css': page('./poc-seed-css.html') } } }
+    : { sourcemap: 'hidden' },
 });

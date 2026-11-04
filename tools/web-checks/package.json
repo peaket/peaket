@@ -2,18 +2,20 @@
   "name": "peaket-web-checks",
   "private": true,
   "version": "0.0.0",
-  "description": "빌드한 화면을 실제 브라우저로 보는 검사: SEED CSS 층 순서 FE-T36, 시각 회귀 FE-T40, 5만 석 Canvas PoC K5(docs/frontend.md §5.17, BUILD_ORDER BAS-170·BAS-190). 뿌리 작업 공간과 따로 둔다",
+  "description": "빌드한 화면을 실제 브라우저로 보는 검사: SEED CSS 층 순서 FE-T36, 시각 회귀 FE-T40, 5만 석 Canvas PoC K5, 성능 예산(첫 JS·Lighthouse)(docs/frontend.md §5.17, BUILD_ORDER BAS-170·BAS-190·BAS-220). 뿌리 작업 공간과 따로 둔다",
   "type": "module",
   "packageManager": "pnpm@12.16.0",
   "scripts": {
-    "test": "node --test \"seed-css/*.test.mjs\" \"lib/*.test.mjs\" \"seatmap/*.test.mjs\"",
+    "test": "node --test \"seed-css/*.test.mjs\" \"lib/*.test.mjs\" \"seatmap/*.test.mjs\" \"budgets/*.test.mjs\" \"static/*.test.mjs\"",
     "seed-css:build": "node seed-css/build.mjs",
     "seed-css": "playwright test -c playwright.layers.config.mjs",
     "visual": "playwright test -c playwright.visual.config.mjs",
     "visual:update": "playwright test -c playwright.visual.config.mjs --update-snapshots",
-    "seatmap": "playwright test -c playwright.seatmap.config.mjs"
+    "seatmap": "playwright test -c playwright.seatmap.config.mjs",
+    "budgets": "playwright test -c playwright.budgets.config.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "1.64.1"
+    "@playwright/test": "1.64.1",
+    "lighthouse": "13.5.0"
   }
 }

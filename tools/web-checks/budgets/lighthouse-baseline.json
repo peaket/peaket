@@ -1,0 +1,27 @@
+{
+  "note": "Lighthouse 적재 지표(가운데 값)가 목표를 넘은 주소의 잰 값. wbs 7.5.2까지 이 값 + 여유(시간 10%, CLS 0.02)를 넘지 않게만 막는다(budgets/lighthouse.spec.mjs). 주소 이름 → { lcpMs?, cls?, tbtMs? }",
+  "pages": {
+    "결제 데모": {
+      "lcpMs": 12534
+    },
+    "공연 상세": {
+      "lcpMs": 12840
+    },
+    "관제 대시보드 데모": {
+      "lcpMs": 6796
+    },
+    "월렛": {
+      "lcpMs": 12541
+    },
+    "좌석 화면 데모": {
+      "lcpMs": 12463
+    },
+    "파트너 판매 현황 데모": {
+      "lcpMs": 2352
+    },
+    "홈": {
+      "lcpMs": 12763
+    }
+  },
+  "measured": "2026-11-04 BAS-220 CI 컨테이너(Playwright 1.64.1 Chromium, lighthouse 13.5.0), 퍼블리싱 화면"
+}

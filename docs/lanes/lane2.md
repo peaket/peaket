@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BAS-220(wbs 0.6.4 ②, size-limit·Lighthouse CI 예산·화면 묶음별 보안 헤더 등)을 한다. BAS-180은 OPEN[18](SEED React·Storybook 설치가 공급망 규칙에 막힘)이 풀리면 나머지를 한다(제3자 고지는 끝남). 그 뒤 구간 1 갈래 2 차례(HOT-290~320 → HOT-340·350 → HOT-110·120 → HOT-360). 화면이 바뀌는 단계는 브라우저 확인을 한다.
+- HOT-290(wbs 2.10.1 ①, 소비자 웹 셸과 CSP)을 한다. BAS-180은 OPEN[18](SEED React·Storybook 설치가 공급망 규칙에 막힘)이 풀리면 나머지를 한다(제3자 고지는 끝남). 그 뒤 구간 1 갈래 2 차례(HOT-300~320 → HOT-340·350 → HOT-110·120 → HOT-360). 화면이 바뀌는 단계는 브라우저 확인을 한다.
 
 ## 구간 끝 정리 목록
 - 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
@@ -26,6 +26,9 @@
 - BAS-210: `Retry-After`의 "1.5"를 날짜로 읽어 0ms가 되고, HTTP 날짜를 보정하지 않은 기기 시계와 견준다(packages/api-client/src/retry.ts)
 - BAS-210: JSON이 아닌 응답을 늘 글자로 읽어 좌석 스냅샷(octet-stream)이 깨지고, 대기열 파일의 `cache: 'no-store'`를 넘길 칸이 없다(packages/api-client/src/client.ts)
 - BAS-210: 지표 보내기가 머리 주석과 다르다. 60초 주기·`visibilitychange` 연결이 없고, fetch가 어떤 이유로든 실패하면 sendBeacon으로 가며, 숨길 때 묶음을 하나씩 기다려 뒤 묶음을 잃을 수 있고, `routeTemplate`이 목록에서 처음 맞는 틀을 써 고정 경로보다 동적 경로를 먼저 고를 수 있다(packages/telemetry/src/lite.ts)
+- BAS-220: Vite 앱(대기실·스캐너·포렌식)은 CSS 소스 맵을 내지 않아 정적 자산 SBOM에서 CSS로만 실리는 패키지(@peaket/ds·@seed-design/css)가 빠진다(tools/web-checks/static/assets.mjs)
+- BAS-220: `apps/web/public/`(예: sale-paused.html)이 올리기 목록 검사 범위 밖이다(.github/workflows/ci-web.yml budgets)
+- BAS-220: CI가 만든 첫 JS·Lighthouse 크기 표를 잡 요약에 남기지 않는다(seed-css/report.mjs처럼, tools/web-checks/budgets/)
 - BAS-210: 뿌리 린트가 `**/src/gen/**`를 빼서 BAS-040에서 들어올 `packages/api-client/src/gen/`(orval 생성물)이 브라우저 지원 린트를 받지 않는다(eslint.config.mjs)
 
 ## 진행 로그
@@ -34,3 +37,4 @@
 - 2026-11-04 BAS-180 일부(wbs 0.6.2, ADR-0040 결정 7): SEED 제3자 고지 파일과 생성·검사 스크립트를 더했다. SEED React(SEED 패키지 다섯)와 Storybook(semver 6.3.1)은 공급망 규칙 trustPolicy no-downgrade에 막혀 OPEN[18]로 물었다.
 - 2026-11-04 BAS-190 5만 석 Canvas PoC(wbs 0.5.4, K5): 열 단위 파일(객체 배열보다 압축 전 3.4배·brotli 3.0배 작음)을 Worker의 OffscreenCanvas로 풀고 그려 K5 랩 조건 Chromium에서 §5.2 예산 안이었다(다섯 번). WebKit의 튐(그리기 한 번 175ms)은 iOS 실기기 확인 목록으로 남겼다. 자세한 것은 커밋 본문.
 - 2026-11-04 BAS-210 화면 공용 패키지 골격(wbs 0.6.4 ①, FE-T3·FE-T4·FE-T15·FE-T22): api-client 실행 정책·telemetry·validation·console-contract를 더하고 화면 코드에 브라우저 지원 린트를 걸었다. eslint-plugin-compat의 판 자료가 `AbortSignal.any` 같은 새 기능을 몰라 MDN 자료를 직접 읽는 보조 규칙을 더했다. 자세한 것은 커밋 본문.
+- 2026-11-04 BAS-220 성능 예산·보안 헤더·정적 자산(wbs 0.6.4 ②, FE-T1): 대기실 size-limit, 경로별 첫 JS와 Lighthouse 적재 지표 검사, 묶음별 보안 헤더 값 한 곳, 서버 액션 키 확인, 올릴 파일 목록·SBOM, Turborepo 캐시, CI `budgets` 잡을 더했다. 소비자 웹 랩 LCP 12.5초(글꼴 전체 2MB)는 기준선으로 막고 HOT-290에 넘겼다. 자세한 것은 커밋 본문.
