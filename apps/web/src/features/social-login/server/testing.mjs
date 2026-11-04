@@ -16,7 +16,7 @@ export async function startIdentityStub() {
   const sessions = new Map(); // sessionId → { accountId, ended }
   const keys = new Map(); // 멱등 키 → { provider, sub, sessionId }
   const calls = [];
-  const mode = { endFails: false, createFails: false, proposeFor: null };
+  const mode = { endFails: false, createFails: false, proposeFor: null, addResult: null, addFails: false };
   const sign = (sub, sid, typ = 'at+jwt', expSec = 900, at = Date.now()) =>
     new SignJWT({ sid })
       .setProtectedHeader({ alg: 'ES256', typ, kid: 'fan-test' })
@@ -80,6 +80,18 @@ export async function startIdentityStub() {
       sessions.set(sessionId, { accountId, ended: false });
       keys.set(r.idempotency_key, { provider: r.provider, sub: r.provider_user_id, sessionId });
       cb(null, { session: await sessionOf(accountId, sessionId), new_account: newAccount, linked_provider: linked });
+    },
+    AddProvider(call, cb) {
+      const r = call.request;
+      calls.push({ method: 'AddProvider', request: r });
+      if (mode.addFails) return fail(cb, 'UNAVAILABLE', '대역 장애');
+      const s = sessions.get(r.session_id);
+      if (!s || s.ended || s.accountId !== r.account_id || !r.reauth_token) return cb(null, { result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED' });
+      if (mode.addResult) return cb(null, { result: mode.addResult });
+      const k = `${r.provider}|${r.provider_user_id}`;
+      if (accounts.has(k)) return cb(null, { result: accounts.get(k) === r.account_id ? 'ADD_PROVIDER_RESULT_ALREADY_LINKED' : 'ADD_PROVIDER_RESULT_OTHER_ACCOUNT' });
+      accounts.set(k, r.account_id);
+      cb(null, { result: 'ADD_PROVIDER_RESULT_LINKED' });
     },
     GetLinkProposal(call, cb) {
       const r = call.request;

@@ -47,6 +47,8 @@ export const accountProvider = pgTable(
     provider: text('provider').notNull(),
     providerUserId: text('provider_user_id').notNull(),
     linkedAt: at('linked_at').notNull(),
+    // 이 (제공자, sub)로 로그인 세션을 만든 마지막 시각(SCR-040 '최근 로그인', BUILD_ORDER BOT-041)
+    lastLoginAt: at('last_login_at'),
   },
   (t) => [
     // (제공자, 제공자 사용자 ID) 복합 키(ASVS v5.0.0-6.8.1·10.5.2)

@@ -126,6 +126,17 @@ sequenceDiagram
   - 카카오는 ID 토큰에 이메일 검증 여부가 없어 앱 서버가 OIDC 사용자 정보의 `email_verified`(정본의 `is_email_verified`)를 읽는다. 실제 응답 칸 이름은 제공자 앱을 등록해야 볼 수 있다 [확인 필요](소유자 몫, 모의 제공자로 확인).
   - 남는 한계: 연결을 맺은 사실의 알림(두 계정의 알림 채널, I-T34)은 알림 사건과 함께 BUILD_ORDER BOT-041이 붙인다. 닫기는 제안을 지우지 않고 10분 만료에 맡긴다. `?linked=`는 누구나 만들 수 있어 '연결했습니다' 토스트만 거짓으로 띄울 수 있다(보이는 것뿐이다).
 
+- **설정의 로그인 수단 연결·해제의 첫 구현(추천 적용 2026-11-04, BUILD_ORDER BOT-041, I-T33·I-T34)**: SCR-040 ①②③을 실제 API에 잇는다. 계정 병합(④)은 BOT-042다.
+  - 목록: `GET /v1/identity/providers`는 연결한 순서와 마지막 로그인 시각을 준다. 마지막 로그인 시각은 `account_provider.last_login_at`(새 칸)이고, 그 (제공자, sub)로 로그인 세션을 만들 때마다 적는다(가입 때 연결 제안의 연결 로그인 포함).
+  - 추가(②): 화면이 먼저 재인증(재인증 토큰, 5분 한 번, §7.1)을 받은 뒤 새 제공자 인증을 앱 서버 경로 `POST /link/{provider}`(폼 칸 `reauthToken`·`returnTo`)로 시작한다. 앱 서버는 팬 액세스 토큰으로 세션을 확인하고 재인증 토큰을 로그인 진행 쿠키에 봉인한다. 콜백(`GET /login/callback/{provider}`)은 `SessionService.AddProvider`(세션·계정, 재인증 토큰, 제공자, sub)를 부른다. 새 제공자 인증은 계정을 다시 고르게 한다(재인증과 같은 prompt).
+  - identity의 판정: 재인증 토큰을 확인하고(같은 세션·`FAN_SENSITIVE`, 한 번만 쓴다) 계정을 잠근 뒤, 그 (제공자, sub)가 어느 계정에도 없으면 이 계정에 잇는다(`LINKED`). 이미 이 계정이면 그대로다(`ALREADY_LINKED`). 이 계정에 같은 종류 제공자가 다른 sub로 있으면 잇지 않는다(`PROVIDER_TYPE_TAKEN`, 종류마다 하나 [가정], 가입 때 제안과 같은 규칙). 다른 계정에 묶였으면 `OTHER_ACCOUNT`다(그 계정과 합치는 병합 제안은 BUILD_ORDER BOT-042가 붙인다. 그 전에는 '이미 다른 PEAKET 계정입니다'만 보인다). 재인증 토큰이 맞지 않으면 `REAUTH_REQUIRED`다. 앱 서버는 결과를 돌아갈 주소의 `?loginMethod=` 값으로 넘기고 화면이 안내한다.
+  - 해제(③): `DELETE /v1/identity/providers/{provider}`(gw-fan, `X-Reauth-Token`). 재인증 토큰을 확인하고(한 번만) 계정을 잠근 뒤, 그 종류 연결이 없으면 404, 그 계정의 마지막 로그인 수단이면 409 `last-login-method`(I-T33), 아니면 지우고 204다. 지금 그 제공자로 로그인한 세션은 끝내지 않는다(세션은 계정에 묶인다).
+  - 재인증할 제공자: 탈퇴(SCR-017)와 SCR-040의 재인증 창은 연결한 제공자가 둘 이상이면 그 가운데서 고르게 한다(BOT-036이 넘긴 것). 하나면 지금처럼 그 제공자다.
+  - 알림 사건(I-T34): 연결(가입 때 연결 제안의 연결 포함)과 해제는 같은 트랜잭션의 마지막 쓰기로 `identity.login-methods-changed`(asyncapi `LoginMethodChanged`: `eventKey`, 계정, `LINKED`·`UNLINKED`, 제공자, 시각)를 Outbox에 적는다. core-svc notify가 받아 그 계정의 알림 채널로 한 번 보낸다(받는 쪽은 그 단계, docs/features/notify.md §2.1 E2). 병합은 `identity.accounts-merged`(BOT-042)다. 값은 BAS-030 전까지 JSON이다.
+  - 재인증 토큰: 추가는 판정 결과와 상관없이(재인증이 맞지 않은 경우 말고) 토큰을 쓴 것으로 남긴다. 해제의 404·409는 트랜잭션을 되돌려 토큰이 그대로다. 그래서 `OTHER_ACCOUNT` 뒤 계정 병합(BOT-042)의 확정은 재인증을 새로 받는다(§2.1 위 병합 확정 줄과 같다). 추가는 재인증 토큰을 준 세션이 아직 살아 있을 때만 받는다(앱 서버 gRPC라 게이트웨이의 세션 확인을 거치지 않는다).
+  - 가입 때 연결 제안이 남은 사이 설정에서 같은 종류를 이었으면, 제안을 따라 온 로그인은 잇지 않고 대상 계정으로만 로그인한다(종류마다 하나). 추가 흐름이 제공자에서 실패·취소되면 `?loginMethod=failed`로 설정 화면에 돌아온다.
+  - 남는 한계: '두 계정에 등록된 모든 채널'은 병합에만 해당한다. 연결·해제는 한 계정의 일이라 그 계정에만 보낸다. 재인증과 새 제공자 인증 사이에 5분이 지나면 `REAUTH_REQUIRED`로 처음부터 다시 한다. I-T34의 '알림 채널로 1회'는 받는 쪽(BUILD_ORDER GAT-250)이 생겨야 끝까지 본다(지금 시험은 사건을 한 번 적는 데까지). 해제·추가 뒤 다른 세션을 끝내는 길(ASVS 7.4.3)은 팬의 로그인한 기기 API를 붙일 단계가 아직 없다.
+
 ## 3. 토큰과 쿠키
 
 | 토큰 및 쿠키 명칭 | 보관 데이터 및 페이로드 스키마 | 접근 및 판독 주체 | 유효 수명 |
@@ -141,7 +152,7 @@ sequenceDiagram
   - 파트너 리프레시 토큰 `__Secure-peaket_partner_rt`(`SameSite=Strict`, `Path=/v1/partner/auth/access-tokens`): `gw-partner`의 로그인 응답이 준다(ADR-0119). `gw-partner`의 토큰 갱신(`POST /v1/partner/auth/access-tokens`)이 읽고 새 토큰으로 회전한다(추천 적용 2026-10-15, ADR-0065 결정 11).
   - 운영자 액세스 토큰 `__Host-peaket_ops_at`(`SameSite=Strict`): `gw-ops`의 운영자 로그인·토큰 갱신 응답이 주고, `gw-ops`만 읽는다. 관제 콘솔은 앱 서버 없이 `gw-ops`를 부른다(§6).
   - 운영자 리프레시 토큰 `__Host-peaket_ops_rt`(`SameSite=Strict`, `Path=/`): `gw-ops`의 운영자 로그인·토큰 갱신 응답이 주고, `gw-ops`는 토큰 갱신(`POST /v1/ops/auth/access-tokens`)에서만 읽는다. `__Host-`는 `Path=/`여야 해서 경로를 좁히지 못하므로, 이 쿠키는 모든 `ops-api` 요청에 실린다(추천 적용 2026-10-15, ADR-0065 결정 11). `gw-ops`는 갱신 경로가 아니면 이 쿠키를 백엔드로 넘기지 않는다[보완]. 접근 로그와 트레이스(요청 하나가 여러 서비스를 거친 길과 시간을 남긴 기록)에서는 다른 쿠키처럼 가린다(docs/observability.md §7).
-  - 로그인 진행 쿠키 `__Host-peaket_oidc`(`SameSite=Lax`, `Path=/`, 10분 [가정]): 소비자 웹 앱 서버만 쓴다. 소셜 제공자에서 돌아오는 최상위 이동(GET)에 실려야 하므로 Lax다. 콜백은 이 쿠키의 state·nonce·PKCE 코드 베리파이어로 그 브라우저가 시작한 흐름인지 확인하고 쿠키를 바로 지운다. 로그인 시작과 로그아웃은 POST이고 앱 서버가 `Origin`을 소비자 웹 출처와 대조한다(CSRF: 사용자가 모르게 다른 사이트가 요청을 보내게 하는 공격 막기, ADR-0065 결정 5). 그래서 따로 CSRF 쿠키를 두지 않는다(추천 적용 2026-10-28, ADR-0119). PoC가 Auth.js 고정 판으로 돌아가면 지난 규칙(`__Host-authjs.*`, 앱별 비밀)을 되살린다.
+  - 로그인 진행 쿠키 `__Host-peaket_oidc`(`SameSite=Lax`, `Path=/`, 10분 [가정]): 소비자 웹 앱 서버만 쓴다. 소셜 제공자에서 돌아오는 최상위 이동(GET)에 실려야 하므로 Lax다. 콜백은 이 쿠키의 state·nonce·PKCE 코드 베리파이어로 그 브라우저가 시작한 흐름인지 확인하고 쿠키를 바로 지운다. 로그인 시작과 로그아웃은 POST이고 앱 서버가 `Origin`을 소비자 웹 출처와 대조한다(CSRF: 사용자가 모르게 다른 사이트가 요청을 보내게 하는 공격 막기, ADR-0065 결정 5). 그래서 따로 CSRF 쿠키를 두지 않는다(추천 적용 2026-10-28, ADR-0119). PoC가 Auth.js 고정 판으로 돌아가면 지난 규칙(`__Host-authjs.*`, 앱별 비밀)을 되살린다. 로그인 수단 추가(`POST /link/{provider}`, §2.1 '설정의 로그인 수단 연결·해제의 첫 구현')면 세션·계정과 화면이 넘긴 재인증 토큰도 봉인해 둔다(2026-11-04 BOT-041).
   - 계정 연결 제안 임시 쿠키 `__Host-peaket_link`(`SameSite=Lax`, `Path=/`, 10분): 소비자 웹 앱 서버만 쓴다. 기존 제공자 로그인에서 돌아올 때 실려야 하므로 Lax다(§2.1). 값은 제안 ID·브라우저 묶음 값·돌아갈 주소를 앱 서버 키로 봉인한 것이고, 연결을 맺거나 새 계정을 만들거나 제안이 없다는 답을 받으면 지운다(추천 적용 2026-11-04, BUILD_ORDER BOT-040).
   - 재인증 결과 쿠키 `__Host-peaket_reauth`(`SameSite=Strict`, `Path=/`, 1분 [가정], 추천 적용 2026-11-03, BUILD_ORDER PRF-020): 소비자 웹 앱 서버만 쓴다. 재인증 콜백이 결과(재인증 토큰이나 실패 종류)를 앱 서버 키로 봉인해 두고, 화면 스크립트의 같은 출처 `POST /reauth/token`이 한 번 읽고 지운다(§7.1). 화면 스크립트의 같은 사이트 요청만 읽으면 되므로 Strict다.
   - 도착 시각 쿠키 `__Host-peaket_arr`는 docs/features/queue-admission.md §10, 봇 방어의 최초 방문 쿠키 `__Host-peaket_fv`(`SameSite=Strict`, `queue` 호스트의 엣지 함수가 사전 검증 응답에서 처음 주고, 비밀 키로 만든 위조 확인용 값인 HMAC으로 서명한다)는 같은 문서 §7에서 다룬다(추천 적용 2026-10-15, ADR-0065 결정 9).

@@ -222,12 +222,17 @@ export class CreateSession {
       await tx.lockAccount(account.id);
       if ((await tx.accountStatusOf(account.id)) !== 'ACTIVE') return { gone: true };
       // 그 사이 새 제공자 계정이 다른 계정에 묶였으면 잇지 않고 대상 계정으로만 로그인한다
+      // 대상 계정에 같은 종류가 그 사이 생겼으면(설정에서 추가) 잇지 않는다(종류마다 하나, 새 맥락 리뷰 중간 2)
       let linked: Provider | null = null;
-      if (!(await tx.findAccountByProvider(p.newProvider, p.newProviderUserId))) {
+      const sameType = (await tx.providersOf(account.id)).some((x) => x.provider === p.newProvider);
+      if (!sameType && !(await tx.findAccountByProvider(p.newProvider, p.newProviderUserId))) {
         await tx.linkProvider(account.id, p.newProvider, p.newProviderUserId, now);
         linked = p.newProvider;
       }
-      return { ...(await this.#open(tx, i, account.id, false, now, refresh)), linked };
+      const opened = await this.#open(tx, i, account.id, false, now, refresh);
+      // 연결 사건은 세션 쓰기 뒤, 트랜잭션의 마지막 쓰기로 적는다(I-T34, BOT-041)
+      if (linked) await tx.recordLoginMethodChanged({ accountId: account.id, change: 'LINKED', provider: linked, occurredAt: now });
+      return { ...opened, linked };
     });
     if ('gone' in r) {
       await this.#links()
@@ -281,6 +286,8 @@ export class CreateSession {
       await tx.linkProvider(accountId, i.provider, i.providerUserId, now);
       await tx.lockAccount(accountId);
     }
+    // 이 (제공자, sub)의 마지막 로그인 시각(SCR-040 '최근 로그인', BOT-041)
+    await tx.touchProviderLogin(i.provider, i.providerUserId, now);
     const ref = i.deviceId === null ? undefined : this.devices.ref(i.deviceId);
     const deviceId = ref === undefined ? null : await tx.bindDevice(accountId, ref, now);
     const ended = sessionsOverDeviceLimit(await tx.activeSessions(accountId, now), deviceId);

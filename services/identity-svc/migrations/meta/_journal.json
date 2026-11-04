@@ -85,6 +85,13 @@
       "when": 1793792213951,
       "tag": "0011_account_email_verified",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793794992811,
+      "tag": "0012_account_provider_last_login",
+      "breakpoints": true
     }
   ]
 }

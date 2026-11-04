@@ -6,6 +6,8 @@ export { FinishWithdrawals } from './application/finish-withdrawals.js';
 export { DrizzleSessionStore } from './adapters/db/drizzle-session-store.js';
 export { CreateSession } from './application/create-session.js';
 export { GetLinkProposal } from './application/get-link-proposal.js';
+export { AddProvider, type AddProviderResult } from './application/add-provider.js';
+export { UnlinkProvider } from './application/unlink-provider.js';
 export { SeparateAccount } from './application/separate-account.js';
 export { RedisLinkProposals } from './adapters/redis-link-proposals.js';
 export { EndSession } from './application/end-session.js';

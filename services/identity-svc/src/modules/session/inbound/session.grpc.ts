@@ -5,6 +5,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { identityV1Identity } from '@peaket/contracts/proto';
 import type { CreateSession, CreateSessionResult, LoginOutcome } from '../application/create-session.js';
+import type { AddProvider } from '../application/add-provider.js';
 import type { GetLinkProposal } from '../application/get-link-proposal.js';
 import type { SeparateAccount } from '../application/separate-account.js';
 import type { EndSession } from '../application/end-session.js';
@@ -64,6 +65,8 @@ type UseCases = {
   /** 가입 때 연결 제안(identity §2.1, BOT-040). 없으면 두 호출이 UNAVAILABLE이다 */
   linkView?: Pick<GetLinkProposal, 'run'>;
   separate?: Pick<SeparateAccount, 'run'>;
+  /** 계정 설정의 로그인 수단 추가(SCR-040 ②, BOT-041). 없으면 UNAVAILABLE */
+  addProvider?: Pick<AddProvider, 'run'>;
 };
 
 const PROVIDER_ENUM: Record<Provider, string> = { kakao: 'PROVIDER_KAKAO', naver: 'PROVIDER_NAVER', google: 'PROVIDER_GOOGLE' };
@@ -143,6 +146,17 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
       if (!uc.linkView) throw new SessionError('UNAVAILABLE', '연결 제안 저장소가 없다');
       const v = await uc.linkView.run({ proposalId: text(r.link_proposal_id), binding: text(r.link_binding) });
       return { existing_provider: PROVIDER_ENUM[v.existingProvider], new_provider: PROVIDER_ENUM[v.newProvider], expires_at_ms: v.expiresAt, attempts_left: v.attemptsLeft };
+    }),
+    AddProvider: unary('AddProvider', async (r) => {
+      if (!uc.addProvider) throw new SessionError('UNAVAILABLE', '로그인 수단 추가를 받지 않는다');
+      const result = await uc.addProvider.run({
+        sessionId: text(r.session_id),
+        accountId: text(r.account_id),
+        reauthToken: text(r.reauth_token),
+        provider: providerOf(r.provider),
+        providerUserId: text(r.provider_user_id),
+      });
+      return { result: `ADD_PROVIDER_RESULT_${result}` };
     }),
     SeparateAccount: unary('SeparateAccount', async (r) => {
       if (!uc.separate) throw new SessionError('UNAVAILABLE', '연결 제안 저장소가 없다');

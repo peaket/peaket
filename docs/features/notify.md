@@ -51,7 +51,7 @@ flowchart LR
 | 번호 | 무엇이 오가나 | 규칙 |
 | --- | --- | --- |
 | E1 | 신청·끄기, 찜·해제, 웹 푸시 구독 등록·해제 | 팬 쿠키 인증, 쓰기는 `Origin` 확인(docs/api/guidelines.md §9). §3 |
-| E2 | `trade.seats`의 판매 상태 바뀜(매진 풀림), `trade.orders`(예매 확정·취소), `trade.tickets`(양도 요청·수락·거절·철회·만료·돌려주기·회수, 추천 적용 2026-10-30), `trade.settlements`, `identity.accounts-merged` | Kafka(이벤트를 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템)의 소비자(메시지를 읽는 쪽)가 받아 같은 트랜잭션으로 원장에 적은 뒤 읽은 위치를 커밋한다(ADR-0026의 멱등 소비자, ADR-0109) |
+| E2 | `trade.seats`의 판매 상태 바뀜(매진 풀림), `trade.orders`(예매 확정·취소), `trade.tickets`(양도 요청·수락·거절·철회·만료·돌려주기·회수, 추천 적용 2026-10-30), `trade.settlements`, `identity.accounts-merged`, `identity.login-methods-changed`(로그인 수단 연결·해제 안내, I-T34, 2026-11-04 BOT-041이 identity 쪽을 냈다) | Kafka(이벤트를 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템)의 소비자(메시지를 읽는 쪽)가 받아 같은 트랜잭션으로 원장에 적은 뒤 읽은 위치를 커밋한다(ADR-0026의 멱등 소비자, ADR-0109) |
 | E3 | 오픈 시각(`open_at`)·로비 개방 리드·판매 승인 상태·회차 취소·연기 | 같은 core 논리 DB라 Kafka를 거치지 않는다. 바뀌는 트랜잭션 안에서 대량 발송 계획을 고친다(§5.6) |
 | E4 | 낱건 작업 행(`notification_job`·`webhook_delivery`)과 대량 발송 조각 행(`notification_broadcast_chunk`) | §4 |
 | E5 | 팬 알림 워커가 보낼 때가 된 행을 짧은 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 골라 임대(lease: 워커가 일을 맡았다고 표에 적어 두는 짧은 시간)를 건다 | ADR-0109 결정 2. 잠금을 쥔 채 바깥 호출을 하지 않는다 |

@@ -130,6 +130,7 @@ erDiagram
         text provider
         text provider_user_id "UNIQUE (provider, provider_user_id)"
         timestamptz linked_at
+        timestamptz last_login_at "optional, 이 (제공자, sub)로 로그인 세션을 만든 마지막 시각(SCR-040 '최근 로그인', 추천 적용 2026-11-04, BUILD_ORDER BOT-041)"
     }
     account_merge {
         uuid id PK

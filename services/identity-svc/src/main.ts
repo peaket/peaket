@@ -7,6 +7,7 @@ import { createDatabase, createHotRedis, createService } from '@peaket/platform'
 import { AppModule } from './app.module.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
+  AddProvider,
   CreateSession,
   EndSession,
   GetLinkProposal,
@@ -76,7 +77,7 @@ const grpc = await startGrpcServer({
     {
       definition: identityPackage().SessionService.service,
       handlers: sessionServiceHandlers(
-        { create: service.app.get(CreateSession), end: service.app.get(EndSession), reauth: service.app.get(IssueReauthToken), linkView: service.app.get(GetLinkProposal), separate: service.app.get(SeparateAccount) },
+        { create: service.app.get(CreateSession), end: service.app.get(EndSession), reauth: service.app.get(IssueReauthToken), linkView: service.app.get(GetLinkProposal), separate: service.app.get(SeparateAccount), addProvider: service.app.get(AddProvider) },
         (method, err) => service.logger.error({ err, method }, 'SessionService 처리 실패'),
       ),
     },

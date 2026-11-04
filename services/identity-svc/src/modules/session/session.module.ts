@@ -18,6 +18,8 @@ import { WithdrawAccount } from './application/withdraw-account.js';
 import { ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, LINK_PROPOSALS, type LinkProposals, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
 import { AccountController, ProvidersController } from './inbound/account.controller.js';
 import { ListProviders } from './application/list-providers.js';
+import { AddProvider } from './application/add-provider.js';
+import { UnlinkProvider } from './application/unlink-provider.js';
 import { COOKIE_DOMAIN, TokenController } from './inbound/token.controller.js';
 
 export interface SessionModuleOptions {
@@ -54,6 +56,8 @@ export class SessionModule {
         RefreshSession,
         WithdrawAccount,
         ListProviders,
+        AddProvider,
+        UnlinkProvider,
         FinishWithdrawals,
         // 재인증 토큰은 이 서비스의 팬 공개키 묶음과 발급자로 확인한다(identity §8 '탈퇴의 첫 구현')
         { provide: REAUTH_VERIFIER, useFactory: (clock: Clock) => new JoseReauthVerifier(o.keys, o.signer.issuer, clock), inject: [CLOCK] },
@@ -65,7 +69,7 @@ export class SessionModule {
         { provide: PUBLIC_KEYS, useValue: o.keys },
         { provide: COOKIE_DOMAIN, useValue: o.cookieDomain },
       ],
-      exports: [CreateSession, GetLinkProposal, SeparateAccount, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, FinishWithdrawals, ACCOUNT_CLOSURE],
+      exports: [CreateSession, GetLinkProposal, SeparateAccount, AddProvider, UnlinkProvider, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, FinishWithdrawals, ACCOUNT_CLOSURE],
     };
   }
 }

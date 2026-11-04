@@ -1,12 +1,16 @@
 // 받는 층: 팬 탈퇴(openapi DELETE /v1/identity/account, docs/features/identity.md §8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030, FR-017, POL-033).
 // gw-fan이 넘긴 신원(계정·세션)과 재인증 토큰 머리(X-Reauth-Token, docs/api/guidelines.md 재인증 토큰)를 쓴다. 응답은 캐시하지 않는다.
-import { Controller, Delete, Get, Headers, HttpCode, Res } from '@nestjs/common';
+import { Controller, Delete, Get, Headers, HttpCode, Param, Res } from '@nestjs/common';
 import { ContractBody, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { AccountError } from '../application/account-error.js';
 import { ListProviders } from '../application/list-providers.js';
+import { UnlinkProvider } from '../application/unlink-provider.js';
 import { WithdrawAccount } from '../application/withdraw-account.js';
+import type { Provider } from '../domain/session.js';
+
+const PROVIDERS: readonly string[] = ['kakao', 'naver', 'google'];
 
 // openapi 요청 본문(환불 계좌는 가상계좌 지금 환급 때만 쓰고 저장하지 않는다. 가상계좌 결제가 생기기 전에는 받기만 하고 버린다, BUILD_ORDER BOT-035)
 const WithdrawBody = z
@@ -54,7 +58,32 @@ export class AccountController {
 /** 받는 층: 연결된 로그인 수단 목록(openapi GET /v1/identity/providers, identity §8 '탈퇴 화면 연결'). 응답은 캐시하지 않는다 */
 @Controller('v1/identity/providers')
 export class ProvidersController {
-  constructor(private readonly list: ListProviders) {}
+  constructor(
+    private readonly list: ListProviders,
+    private readonly unlink: UnlinkProvider,
+  ) {}
+
+  /** 로그인 수단 해제(SCR-040 ③, identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BOT-041, I-T33): 재인증 토큰 머리, 마지막 하나는 409 */
+  @Delete(':provider')
+  @Roles(['fan'])
+  @HttpCode(204)
+  async remove(
+    @Param('provider') provider: string,
+    @Headers('x-reauth-token') reauthToken: string | undefined,
+    @CurrentPrincipal() me: Principal,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<void> {
+    void reply.header('cache-control', 'no-store');
+    if (!PROVIDERS.includes(provider)) throw new ProblemError({ type: 'not-found', status: 404, title: '연결된 로그인 수단이 아닙니다' });
+    try {
+      await this.unlink.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: reauthToken ?? '', provider: provider as Provider });
+    } catch (e) {
+      if (e instanceof AccountError && e.code === 'NOT_FOUND') throw new ProblemError({ type: 'not-found', status: 404, title: '연결된 로그인 수단이 아닙니다' });
+      if (e instanceof AccountError && e.code === 'LAST_LOGIN_METHOD') throw new ProblemError({ type: 'last-login-method', status: 409, title: '마지막 로그인 수단은 해제할 수 없습니다' });
+      if (e instanceof AccountError) throw new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
+      throw e;
+    }
+  }
 
   @Get()
   @Roles(['fan'])

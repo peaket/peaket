@@ -4,7 +4,7 @@ import { createService, fakeClock } from '@peaket/platform';
 import { Writable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
-import { CreateSession, JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
+import { AddProvider, CreateSession, JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
 import { HmacIdentityHashers, SetRestrictedCiHold } from '../src/modules/verification/index.js';
 import { ConfirmVerification } from '../src/modules/verification/application/confirm-verification.js';
 import { StartVerification } from '../src/modules/verification/application/start-verification.js';
@@ -80,12 +80,12 @@ describe('탈퇴 경로(DELETE /v1/identity/account, identity §8 탈퇴의 첫 
 });
 
 describe('로그인 수단 목록(GET /v1/identity/providers, identity §8 탈퇴 화면 연결)', () => {
-  test('I-T16_연결한로그인수단을연결한순서로주고_마지막로그인은null이며_캐시하지않는다', async () => {
+  test('I-T16_연결한로그인수단을연결한순서로주고_마지막로그인시각을주며_캐시하지않는다(BOT-041부터 로그인 때 적는다)', async () => {
     const s = await login();
     const r = await svc.http.inject({ method: 'GET', url: '/v1/identity/providers', headers: { 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '' } });
     expect(r.statusCode).toBe(200);
     expect(r.headers['cache-control']).toBe('no-store');
-    expect(JSON.parse(r.payload)).toEqual({ providers: [{ provider: 'kakao', linkedAt: new Date(svc.clock.now()).toISOString(), lastLoginAt: null }] });
+    expect(JSON.parse(r.payload)).toEqual({ providers: [{ provider: 'kakao', linkedAt: new Date(svc.clock.now()).toISOString(), lastLoginAt: new Date(svc.clock.now()).toISOString() }] });
   });
 });
 
@@ -239,6 +239,27 @@ describe('본인확인기관이 없는 환경', () => {
     } finally {
       await down.close();
     }
+  });
+});
+
+describe('로그인 수단 해제 경로(BOT-041, I-T33)', () => {
+  const fan = (s: { accountId: string; sessionId: string }) => ({ 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '' });
+  const reauthOf = async (s: { accountId: string; sessionId: string }) => (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, svc.clock.now())).token;
+  const unlink = (p: string, headers: Record<string, string>) => svc.http.inject({ method: 'DELETE', url: `/v1/identity/providers/${p}`, headers });
+
+  test('I-T33_마지막로그인수단해제는409last-login-method_재인증없으면403_없는종류는404_둘이면204이고캐시하지않는다', async () => {
+    const s = await login();
+    expect((await unlink('kakao', fan(s))).statusCode).toBe(403);
+    const last = await unlink('kakao', { ...fan(s), 'x-reauth-token': await reauthOf(s) });
+    expect(last.statusCode).toBe(409);
+    expect(JSON.parse(last.payload)).toMatchObject({ type: expect.stringMatching(/last-login-method$/), status: 409 });
+    expect(last.headers['cache-control']).toBe('no-store');
+    expect((await unlink('naver', { ...fan(s), 'x-reauth-token': await reauthOf(s) })).statusCode).toBe(404);
+    expect((await unlink('apple', { ...fan(s), 'x-reauth-token': await reauthOf(s) })).statusCode).toBe(404);
+    expect(await svc.app.get(AddProvider).run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: await reauthOf(s), provider: 'google', providerUserId: `g-${newKey().slice(0, 8)}` })).toBe('LINKED');
+    const ok = await unlink('google', { ...fan(s), 'x-reauth-token': await reauthOf(s) });
+    expect(ok.statusCode).toBe(204);
+    expect(ok.headers['cache-control']).toBe('no-store');
   });
 });
 

@@ -67,7 +67,13 @@ export interface SessionTx {
   linkProvider(accountId: string, provider: Provider, providerUserId: string, now: number): Promise<void>;
   isProviderLinked(accountId: string, provider: Provider, providerUserId: string): Promise<boolean>;
   /** 그 계정에 연결된 로그인 수단(연결한 순서) */
-  providersOf(accountId: string): Promise<{ provider: Provider; linkedAt: number }[]>;
+  providersOf(accountId: string): Promise<{ provider: Provider; linkedAt: number; lastLoginAt: number | null }[]>;
+  /** 그 (제공자, sub)로 로그인 세션을 만들었다(SCR-040 '최근 로그인', BOT-041) */
+  touchProviderLogin(provider: Provider, providerUserId: string, now: number): Promise<void>;
+  /** 그 계정의 그 종류 로그인 수단을 지운다. 지운 행 수 */
+  unlinkProvider(accountId: string, provider: Provider): Promise<number>;
+  /** 로그인 수단 연결·해제 사건을 Outbox에 적는다. 트랜잭션의 마지막 쓰기다(identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BOT-041) */
+  recordLoginMethodChanged(i: { accountId: string; change: 'LINKED' | 'UNLINKED'; provider: Provider; occurredAt: number }): Promise<void>;
   /** 계정의 그 기기 가명 행 ID. 없으면 만든다 */
   bindDevice(accountId: string, deviceRef: string, now: number): Promise<string>;
   /** 끝나지 않았고 만료 전인 그 계정의 세션 */

@@ -46,7 +46,7 @@ after(async () => {
 
 beforeEach(() => {
   Object.assign(op.mode, { kakaoUnverified: false, kakaoUserinfoFails: false, wrongIss: false, wrongAud: false, naverIdMismatch: false, badSignature: false, otherNonce: false, expired: false, discoveryIssuer: false, staleAuthTime: false, googleAuthTime: true });
-  Object.assign(identity.mode, { endFails: false, createFails: false, proposeFor: null });
+  Object.assign(identity.mode, { endFails: false, createFails: false, proposeFor: null, addResult: null, addFails: false });
   op.users.kakao.sub = '4000001';
   clock.offset = 0;
   logs.length = 0;
@@ -671,3 +671,69 @@ test('카카오 사용자 정보가 실패해도 로그인은 되고 이메일 �
   }
 });
 
+// ---- 계정 설정의 로그인 수단 추가(identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BUILD_ORDER BOT-041, I-T34) ----
+
+/** 카카오로 로그인한 브라우저(팬 세션 쿠키가 있다) */
+async function signedIn() {
+  const b = new Browser();
+  op.users.kakao.sub = `k-${Math.random().toString(36).slice(2)}`;
+  await login(b, 'kakao');
+  return b;
+}
+const addProvider = (b, provider, fields = {}, origin = web.url) => b.go(`${web.url}/link/${provider}`, formPost(origin, { returnTo: '/my/settings/providers', reauthToken: 'reauth.verified.kakao.x', ...fields }));
+
+test('I-T34 로그인 수단 추가는 팬 세션·재인증 토큰을 받아 새 제공자 인증(계정 다시 고르기) 뒤 AddProvider를 부르고 돌아갈 주소에 결과를 싣는다', async () => {
+  const b = await signedIn();
+  const sid = identity.calls.filter((c) => c.method === 'CreateSession').length;
+  op.users.google.sub = `g-${Math.random().toString(36).slice(2)}`;
+  const r = await addProvider(b, 'google');
+  assert.equal(op.lastAuthorize.google.prompt, 'select_account');
+  const req = lastCall('AddProvider');
+  assert.equal(req.reauth_token, 'reauth.verified.kakao.x');
+  assert.equal(req.provider, 'PROVIDER_GOOGLE');
+  assert.equal(req.provider_user_id, op.users.google.sub);
+  assert.ok(req.session_id && req.account_id);
+  // 새 로그인 세션을 만들지 않는다
+  assert.equal(identity.calls.filter((c) => c.method === 'CreateSession').length, sid);
+  assert.equal(new URL(r.trail.at(-1).url).pathname + new URL(r.trail.at(-1).url).search, '/my/settings/providers?loginMethod=linked');
+  assert.ok(b.names().includes(AT) && !b.names().includes(OIDC));
+});
+
+test('로그인 수단 추가의 결과값(이미 이 계정·같은 종류·다른 계정·재인증 필요·실패)을 돌아갈 주소의 loginMethod로 넘긴다', async () => {
+  const b = await signedIn();
+  for (const [result, expected] of [
+    ['ADD_PROVIDER_RESULT_ALREADY_LINKED', 'already-linked'],
+    ['ADD_PROVIDER_RESULT_PROVIDER_TYPE_TAKEN', 'type-taken'],
+    ['ADD_PROVIDER_RESULT_OTHER_ACCOUNT', 'other-account'],
+    ['ADD_PROVIDER_RESULT_REAUTH_REQUIRED', 'reauth-required'],
+  ]) {
+    identity.mode.addResult = result;
+    const r = await addProvider(b, 'google');
+    assert.equal(new URL(r.trail.at(-1).url).searchParams.get('loginMethod'), expected, result);
+  }
+  identity.mode.addResult = null;
+  identity.mode.addFails = true;
+  const r = await addProvider(b, 'google');
+  assert.equal(new URL(r.trail.at(-1).url).searchParams.get('loginMethod'), 'failed');
+  assert.ok(logs.some((l) => l.event === 'link-add.failed'));
+});
+
+test('로그인 수단 추가는 다른 출처·팬 세션 없음·재인증 토큰 없음이면 시작하지 않는다 [ASVS v5.0.0-3.5.1]', async () => {
+  const b = await signedIn();
+  assert.equal((await addProvider(b, 'google', {}, 'https://evil.test')).res.status, 403);
+  assert.equal((await addProvider(new Browser(), 'google')).res.status, 401);
+  assert.equal((await addProvider(b, 'google', { reauthToken: '' })).res.status, 400);
+  assert.equal((await addProvider(b, 'apple')).res.status, 404);
+});
+
+test('리뷰 재현: 로그인 수단 추가에서 제공자가 오류(취소)를 돌려주면 막다른 페이지가 아니라 설정 화면으로 loginMethod=failed다', async () => {
+  const b = await signedIn();
+  const start = await b.go(`${web.url}/link/google`, { ...formPost(web.url, { returnTo: '/my/settings/providers', reauthToken: 'reauth.verified.kakao.x' }), follow: false });
+  const toOp = new URL(start.res.headers.get('location'));
+  const state = toOp.searchParams.get('state');
+  const back = await b.go(`${web.url}/login/callback/google?error=access_denied&state=${state}`, { follow: false });
+  assert.equal(back.res.status, 303);
+  assert.equal(back.res.headers.get('location'), '/my/settings/providers?loginMethod=failed');
+  assert.ok(logs.some((l) => l.event === 'link-add.failed' && l.reason === 'provider_error'));
+  assert.ok(!b.names().includes(OIDC));
+});

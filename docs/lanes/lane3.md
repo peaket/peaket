@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-041(wbs 3.1.3 ②): 설정의 로그인 수단 연결·해제(재인증할 제공자 고르기와 `lastLoginAt`은 BOT-036이 넘긴 것). 그 뒤 BOT-042(계정 병합) → BOT-045 → BOT-110~160.
+- BOT-042(wbs 3.1.3 ③): 계정 병합(병합 제안·요약·차단 사유, 확정 트랜잭션, 흡수 계정 불변식, SCR-040 ④, 로그인 수단 추가의 OTHER_ACCOUNT를 병합 제안으로). 그 뒤 BOT-045 → BOT-110~160.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
@@ -30,6 +30,9 @@
 - BOT-036: 저장소 표의 `peaket.withdraw.reauth` 줄 '지우는 때'에 로그아웃이 없고(§5.14.4 정리 루틴이 지우지 않아 같은 탭의 다른 계정에 묻지 않은 재인증 실패 창이 뜰 수 있다) 수명은 '탭(믿는 시간 10분)'이다(docs/frontend.md §3.12, 로그아웃 정리 루틴)
 - BOT-036: 미리보기 상태 고르기가 클라이언트 이동이라 `SettingsFlows` 상태(창·목적·토큰)가 남아 목업과 실제 흐름이 섞인다(개발 서버만). `key={state}`를 붙인다(apps/web/src/_pages/settings/ui/SettingsPage.tsx)
 - BOT-040: '새 계정 만들기'의 응답을 잃고 같은 멱등 키로 다시 보내면 제안이 이미 지워져 404다. 다시 보내기를 받으려면 제안을 지우기 전에 만든 세션을 멱등 키로 찾아 같은 세션을 돌려주거나, 제안을 '쓴 것'으로 표시해 잠시 남긴다(services/identity-svc/src/modules/session/application/separate-account.ts, apps/web keys.ts `separateKeyOf` 주석)
+- BOT-041: 해제와 로그인이 겹치면, 해제 직전에 연결 행을 읽은 로그인이 해제가 끝난 뒤 그 계정에 세션을 만든다(로그인은 계정을 잠근 뒤 연결을 다시 찾지 않는다). BOT-042가 붙일 '잠근 뒤 findAccountByProvider 다시 부르기'로 함께 막는다(services/identity-svc/src/modules/session/application/create-session.ts `#open`)
+- BOT-041: 로그인 수단 화면의 재인증 실패는 사유(오래된 인증·계정 불일치)를 버리고 한 문구만 보인다. 탈퇴 화면처럼 사유별 문구로 맞춘다(apps/web/src/features/login-methods/flow.ts `pickupReauth`)
+- BOT-041: ASVS 7.4.3(인증 요소를 바꾼 뒤 다른 세션 끝내기)을 팬에게 줄 로그인한 기기 API(`/v1/identity/sessions`, SCR-017 로그인한 기기)를 붙일 단계가 BUILD_ORDER에 없다. 단계를 정하거나 소유자에게 묻는다(docs/security/asvs/auth.md 7.4.3)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
@@ -41,3 +44,4 @@
 - 2026-11-04 BOT-036 탈퇴 화면 연결(R-281, I-T16·I-T68 ⑨): SCR-017 탈퇴를 재인증(`POST /reauth/{provider}` → `POST /reauth/token`, 토큰은 메모리에만)과 실제 `DELETE /v1/identity/account`에 잇고(409 fraudHold 안내 뒤 같은 토큰으로 다시, 403이면 재인증 실패), 로그인 수단 목록 API를 더했다. 브라우저 확인은 Playwright로 대신(세 시나리오 통과).
 - 2026-11-04 BOT-037 탈퇴 계정의 대기열 키 지우기(R-283, I-T27): 계정 탈퇴 트랜잭션이 계정을 잠근 뒤 읽은 pid(전환 기간이면 옛 pid도)를 실은 탈퇴 사건 `identity.accounts-withdrawn`(asyncapi·Avro `AccountWithdrawn`, `purgeBy` = 탈퇴 + 5일)을 세션 종료 사건 뒤 Outbox에 적고, queue-svc 처리기가 진행 중인 회차마다 `q:dup`·`q:adm`에 `PEXPIREAT … LT`를 건다. 토픽 보존 3일·조각 1일 [가정]. Kafka 구독·보류 사건 정리·15분 뒤 처리는 HOT-010.
 - 2026-11-04 BOT-040 가입 때 계정 연결 제안(R-286, I-T29·I-T30): BOT-040을 셋으로 나눴다(①은 이것, ② BOT-041 설정 연결·해제, ③ BOT-042 병합). 같은 검증 이메일의 활성 계정이 하나면 `CreateSession`이 세션 대신 연결 제안(세션·캐시 Redis `id:link`, 10분, 묶음 값은 해시만)을 주고, 앱 서버가 `__Host-peaket_link`에 봉인해 SCR-039로 보낸다. 기존 제공자 로그인이 대상 계정이면 새 제공자를 잇고 연결 성공 화면을 거쳐 처음 주소로, 다른 계정이면 3회까지 남은 시도를 보이고 만료한다. 새 계정 만들기(`SeparateAccount`)·제안 조회(`GetLinkProposal`), `account.email_verified`(마이그레이션 0011).
+- 2026-11-04 BOT-041 설정의 로그인 수단 연결·해제(R-287, I-T33·I-T34): 재인증 뒤 `POST /link/{provider}`(앱 서버) → 새 제공자 인증 → identity `AddProvider`(LINKED·ALREADY_LINKED·PROVIDER_TYPE_TAKEN·OTHER_ACCOUNT·REAUTH_REQUIRED), `DELETE /v1/identity/providers/{provider}`(마지막 하나 409 `last-login-method`), `account_provider.last_login_at`(마이그레이션 0012), 연결·해제 사건 `identity.login-methods-changed`(asyncapi·Avro `LoginMethodChanged`, 가입 때 연결 제안의 연결 포함, 받는 쪽은 GAT-250), SCR-040 실제 목록·해제·추가, 재인증할 제공자 고르기(SCR-017·SCR-040).

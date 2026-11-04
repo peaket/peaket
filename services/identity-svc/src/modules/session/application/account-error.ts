@@ -1,5 +1,6 @@
-// 계정 받는 층의 업무 오류(탈퇴, docs/features/identity.md §8 '탈퇴의 첫 구현'). 받는 층이 문제 상세(RFC 9457)로 바꾼다.
-export type AccountErrorCode = 'REAUTH_REQUIRED' | 'CONFIRMATION_REQUIRED';
+// 계정 받는 층의 업무 오류(탈퇴 §8, 로그인 수단 해제 §2.1). 받는 층이 문제 상세(RFC 9457)로 바꾼다.
+// NOT_FOUND: 해제할 종류가 연결돼 있지 않음, LAST_LOGIN_METHOD: 마지막 로그인 수단(I-T33, BOT-041)
+export type AccountErrorCode = 'REAUTH_REQUIRED' | 'CONFIRMATION_REQUIRED' | 'NOT_FOUND' | 'LAST_LOGIN_METHOD';
 
 export class AccountError extends Error {
   constructor(

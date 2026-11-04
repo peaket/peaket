@@ -5,6 +5,7 @@ import { type OutboxMessage, uuidv7 } from '@peaket/platform';
 import type { AccountRow, CreateKeyRecord, NewSession, RefreshRow, SessionRow, SessionStore, SessionTx } from '../domain/ports.js';
 import { type ActiveSession, CREATE_KEY_TTL_MS, normalizeEmail, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
 import { accountWithdrawnMessage } from './account-withdrawn-message.js';
+import { loginMethodChangedMessage } from './login-method-message.js';
 
 type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number };
 
@@ -12,18 +13,18 @@ type StoredSession = NewSession & { terminatedAt: number | null; prevRefreshHash
 
 interface State {
   accounts: Map<string, StoredAccount>;
-  providers: Map<string, { accountId: string; linkedAt: number }>;
+  providers: Map<string, { accountId: string; linkedAt: number; lastLoginAt: number | null }>;
   devices: Map<string, { id: string; accountId: string; ref: string; boundAt: number }>;
   sessions: Map<string, StoredSession>;
   keys: Map<string, CreateKeyRecord & { createdAt: number }>;
   hashes: Map<string, { sessionId: string; refreshFamily: string; expiresAt: number }>;
   events: Array<{ sessionId: string; accountId: string; reason: TerminationReason; at: number }>;
   reauthUses: Map<string, { accountId: string; usedAt: number; expiresAt: number }>;
-  /** 트랜잭션이 Outbox에 적었을 탈퇴 사건(BOT-037). 시험이 읽는다 */
-  withdrawn: OutboxMessage[];
+  /** 트랜잭션이 Outbox에 적었을 사건(탈퇴 BOT-037, 로그인 수단 연결·해제 BOT-041). 시험이 읽는다 */
+  outbox: OutboxMessage[];
 }
 
-const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [], reauthUses: new Map(), withdrawn: [] });
+const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [], reauthUses: new Map(), outbox: [] });
 const copy = <K, V extends object>(m: Map<K, V>) => new Map([...m].map(([k, v]) => [k, { ...v }]));
 const clone = (s: State): State => ({
   accounts: copy(s.accounts),
@@ -34,7 +35,7 @@ const clone = (s: State): State => ({
   hashes: copy(s.hashes),
   events: [...s.events],
   reauthUses: copy(s.reauthUses),
-  withdrawn: [...s.withdrawn],
+  outbox: [...s.outbox],
 });
 const providerKey = (p: Provider, id: string) => `${p}\u0000${id}`;
 const hex = (h: Uint8Array) => Buffer.from(h).toString('hex');
@@ -149,7 +150,12 @@ export class MemorySessionStore implements SessionStore {
 
   /** 적힌 탈퇴 사건(BOT-037, 시험용) */
   withdrawnMessages(): OutboxMessage[] {
-    return [...this.#state.withdrawn];
+    return this.#state.outbox.filter((m) => m.topic === 'identity.accounts-withdrawn');
+  }
+
+  /** 적힌 모든 사건(시험용) */
+  outboxMessages(): OutboxMessage[] {
+    return [...this.#state.outbox];
   }
 
   /** 그 계정의 세션 종료 사건(적힌 순서): [세션 ID, 사유] */
@@ -197,14 +203,30 @@ export class MemorySessionStore implements SessionStore {
       linkProvider: async (accountId, provider, providerUserId, now) => {
         const k = providerKey(provider, providerUserId);
         if (s.providers.has(k)) throw new Error('account_provider (provider, provider_user_id) 중복');
-        s.providers.set(k, { accountId, linkedAt: now });
+        s.providers.set(k, { accountId, linkedAt: now, lastLoginAt: null });
       },
       isProviderLinked: async (accountId, provider, providerUserId) => s.providers.get(providerKey(provider, providerUserId))?.accountId === accountId,
       providersOf: async (accountId) =>
         [...s.providers]
           .filter(([, v]) => v.accountId === accountId)
-          .map(([k, v]) => ({ provider: k.split('\u0000')[0] as Provider, linkedAt: v.linkedAt }))
+          .map(([k, v]) => ({ provider: k.split('\u0000')[0] as Provider, linkedAt: v.linkedAt, lastLoginAt: v.lastLoginAt }))
           .sort((a, b) => a.linkedAt - b.linkedAt),
+      touchProviderLogin: async (provider, providerUserId, now) => {
+        const v = s.providers.get(providerKey(provider, providerUserId));
+        if (v) v.lastLoginAt = now;
+      },
+      unlinkProvider: async (accountId, provider) => {
+        let n = 0;
+        for (const [k, v] of s.providers)
+          if (v.accountId === accountId && k.split('\u0000')[0] === provider) {
+            s.providers.delete(k);
+            n++;
+          }
+        return n;
+      },
+      recordLoginMethodChanged: async (i) => {
+        s.outbox.push(loginMethodChangedMessage({ eventKey: randomUUID(), ...i }));
+      },
       bindDevice: async (accountId, ref, now) => {
         const found = [...s.devices.values()].find((d) => d.accountId === accountId && d.ref === ref);
         if (found) return found.id;
@@ -264,7 +286,7 @@ export class MemorySessionStore implements SessionStore {
         }
       },
       recordWithdrawn: async (i) => {
-        s.withdrawn.push(accountWithdrawnMessage({ eventKey: randomUUID(), ...i }));
+        s.outbox.push(accountWithdrawnMessage({ eventKey: randomUUID(), ...i }));
       },
       insertSession: async (r) => {
         s.sessions.set(r.id, { ...r, terminatedAt: null, prevRefreshHash: null, rotatedAt: null, refreshUsed: false });

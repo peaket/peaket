@@ -10,7 +10,7 @@ export const IDENTITY_DEADLINE_MS = 2_000;
 const OPTS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 
 type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, any>) => void) => grpc.ClientUnaryCall;
-type SessionClient = grpc.Client & { CreateSession: Unary; EndSession: Unary; IssueReauthToken: Unary; GetLinkProposal: Unary; SeparateAccount: Unary };
+type SessionClient = grpc.Client & { CreateSession: Unary; EndSession: Unary; IssueReauthToken: Unary; GetLinkProposal: Unary; SeparateAccount: Unary; AddProvider: Unary };
 
 export interface CreatedSession {
   accountId: string;
@@ -34,6 +34,15 @@ export interface LinkProposalInfo {
   expiresAt: number;
   attemptsLeft: number;
 }
+
+export type AddProviderResult = 'linked' | 'already-linked' | 'type-taken' | 'other-account' | 'reauth-required';
+const ADD_RESULT: Record<string, AddProviderResult> = {
+  ADD_PROVIDER_RESULT_LINKED: 'linked',
+  ADD_PROVIDER_RESULT_ALREADY_LINKED: 'already-linked',
+  ADD_PROVIDER_RESULT_PROVIDER_TYPE_TAKEN: 'type-taken',
+  ADD_PROVIDER_RESULT_OTHER_ACCOUNT: 'other-account',
+  ADD_PROVIDER_RESULT_REAUTH_REQUIRED: 'reauth-required',
+};
 
 const FROM_PROTO: Record<string, Provider> = { PROVIDER_KAKAO: 'kakao', PROVIDER_NAVER: 'naver', PROVIDER_GOOGLE: 'google' };
 const isNotFound = (e: unknown) => (e as { code?: unknown })?.code === grpc.status.NOT_FOUND;
@@ -62,7 +71,7 @@ export class IdentityClient {
     this.#client = new pkg.peaket.identity.v1.SessionService(address, grpc.credentials.createInsecure()) as unknown as SessionClient;
   }
 
-  #call(method: 'CreateSession' | 'EndSession' | 'IssueReauthToken' | 'GetLinkProposal' | 'SeparateAccount', req: object): Promise<Record<string, any>> {
+  #call(method: 'CreateSession' | 'EndSession' | 'IssueReauthToken' | 'GetLinkProposal' | 'SeparateAccount' | 'AddProvider', req: object): Promise<Record<string, any>> {
     return new Promise((res, rej) => {
       this.#client[method](req, new grpc.Metadata(), { deadline: Date.now() + IDENTITY_DEADLINE_MS }, (e, v) => (e ? rej(e) : res(v ?? {})));
     });
@@ -97,6 +106,14 @@ export class IdentityClient {
     if (r.outcome === 'link_mismatch') return { kind: 'link-mismatch', attemptsLeft: Number(r.link_mismatch?.attempts_left ?? 0) };
     if (r.outcome !== 'session' || !r.session) throw new Error(`CreateSession 결과를 모른다(${String(r.outcome)})`);
     return { kind: 'session', session: sessionOf(r), linkedProvider: FROM_PROTO[String(r.linked_provider)] ?? null };
+  }
+
+  /** 계정 설정의 로그인 수단 추가(SCR-040 ②, identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현') */
+  async addProvider(i: { sessionId: string; accountId: string; reauthToken: string; provider: Provider; providerUserId: string }): Promise<AddProviderResult> {
+    const r = await this.#call('AddProvider', { session_id: i.sessionId, account_id: i.accountId, reauth_token: i.reauthToken, provider: PROTO_PROVIDER[i.provider], provider_user_id: i.providerUserId });
+    const v = ADD_RESULT[String(r.result)];
+    if (!v) throw new Error(`AddProvider 결과를 모른다(${String(r.result)})`);
+    return v;
   }
 
   /** 없음·만료·묶음 값이 다르면 null */

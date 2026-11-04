@@ -80,6 +80,8 @@ export function SettingsFlows({
   // 실제 탈퇴(identity §8 '탈퇴 화면 연결'): 재인증할 제공자, 메모리에만 둔 재인증 토큰, 409 fraudHold, 완료
   const api = useMemo(() => (live ? browserWithdrawApi() : null), [live]);
   const [liveProvider, setLiveProvider] = useState<WithdrawProvider | null>(null);
+  /** 연결한 로그인 수단(둘 이상이면 재인증 창에서 고른다, identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BOT-036이 넘긴 것) */
+  const [liveProviders, setLiveProviders] = useState<WithdrawProvider[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [liveHold, setLiveHold] = useState<FraudHold | null>(null);
   const [liveDone, setLiveDone] = useState<'done' | 'deferred' | null>(null);
@@ -100,6 +102,7 @@ export function SettingsFlows({
     const r = await api!.providers();
     if (r.kind === 'ok') {
       setLiveProvider(r.providers[0]!);
+      setLiveProviders(r.providers);
       return r.providers[0]!;
     }
     if (r.kind === 'login') toLogin();
@@ -128,9 +131,11 @@ export function SettingsFlows({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const confirmReauth = () => {
-    if (api && purpose.kind === 'withdraw' && liveProvider) {
-      const provider = liveProvider;
+  /** chosen: 연결한 수단이 둘 이상이라 재인증 창에서 고른 제공자(없으면 목록의 첫 제공자) */
+  const confirmReauth = (chosen?: WithdrawProvider) => {
+    const via = chosen ?? liveProvider;
+    if (api && purpose.kind === 'withdraw' && via) {
+      const provider = via;
       void (async () => {
         // 떠나기 직전에 액세스 토큰을 갱신한다(만료된 토큰이면 재인증 시작이 401 막다른 페이지가 된다, 새 맥락 리뷰 중간 1)
         if (!(await api.refresh())) {
@@ -226,18 +231,36 @@ export function SettingsFlows({
         ) : null}
         <p className="t-sm" id={`${ids}-ra`}>
           {reauthWhat}
-          {purpose.kind === 'device' ? '은 되돌리기 어려운' : '는 되돌릴 수 없는'} 작업이라 로그인한 분이 맞는지 한 번 더 확인합니다. 지금 로그인한 {shown.label} 계정으로 다시
-          로그인해 주세요.
+          {purpose.kind === 'device' ? '은 되돌리기 어려운' : '는 되돌릴 수 없는'} 작업이라 로그인한 분이 맞는지 한 번 더 확인합니다.{' '}
+          {live && purpose.kind === 'withdraw' && liveProviders.length > 1 ? '이 계정에 연결된 로그인 수단 가운데 하나로 다시 로그인해 주세요.' : `지금 로그인한 ${shown.label} 계정으로 다시 로그인해 주세요.`}
         </p>
         <p className="t-sm muted">
           다시 로그인한 뒤 5분 안에 {reauthWhat}
           {purpose.kind === 'device' ? '을' : '를'} 마쳐야 합니다.
         </p>
         <div className="col" style={{ gap: 8 }}>
-          <button className={`btn ${shown.btn} btn-lg btn-block`} type="button" onClick={confirmReauth}>
-            <i className={`prov ${shown.prov}`} aria-hidden="true" />
-            {shown.label}로 다시 로그인하고 계속
-          </button>
+          {live && purpose.kind === 'withdraw' && liveProviders.length > 1 ? (
+            // 연결한 로그인 수단이 둘 이상이면 고른다(고른 수단으로 재인증 양식을 보낸다)
+            liveProviders.map((p) => (
+              <button
+                key={p}
+                className={`btn ${PROVIDER_INFO[p].btn} btn-lg btn-block`}
+                type="button"
+                onClick={() => {
+                  setLiveProvider(p);
+                  confirmReauth(p);
+                }}
+              >
+                <i className={`prov ${PROVIDER_INFO[p].prov}`} aria-hidden="true" />
+                {PROVIDER_INFO[p].label}로 다시 로그인하고 계속
+              </button>
+            ))
+          ) : (
+            <button className={`btn ${shown.btn} btn-lg btn-block`} type="button" onClick={() => confirmReauth()}>
+              <i className={`prov ${shown.prov}`} aria-hidden="true" />
+              {shown.label}로 다시 로그인하고 계속
+            </button>
+          )}
           <button className="btn btn-ghost btn-block" type="button" onClick={close}>
             닫기
           </button>

@@ -7,15 +7,18 @@ import { MemoryLinkProposals } from '../src/modules/session/adapters/memory-link
 import { MemorySessionStore } from '../src/modules/session/adapters/memory-session-store.js';
 import { GetLinkProposal } from '../src/modules/session/application/get-link-proposal.js';
 import { SeparateAccount } from '../src/modules/session/application/separate-account.js';
+import { AddProvider } from '../src/modules/session/application/add-provider.js';
+import { JoseReauthVerifier } from '../src/modules/session/adapters/jose-reauth-verifier.js';
 import { identityPackage, sessionServiceHandlers } from '../src/modules/session/inbound/session.grpc.js';
-import { kit, newKey } from './support.js';
+import { ISSUER, kit, newKey } from './support.js';
 
 type Cb<T> = (e: grpc.ServiceError | null, v?: T) => void;
 type Unary = (req: Record<string, unknown>, md: grpc.Metadata, opts: grpc.CallOptions, cb: Cb<Record<string, any>>) => void;
-type Client = grpc.Client & Record<'CreateSession' | 'EndSession' | 'IssueReauthToken' | 'GetLinkProposal' | 'SeparateAccount', Unary>;
+type Client = grpc.Client & Record<'CreateSession' | 'EndSession' | 'IssueReauthToken' | 'GetLinkProposal' | 'SeparateAccount' | 'AddProvider', Unary>;
 
 let server: Awaited<ReturnType<typeof startGrpcServer>>;
 let client: Client;
+let kitRef: Awaited<ReturnType<typeof kit>>;
 const errors: string[] = [];
 
 beforeAll(async () => {
@@ -23,13 +26,17 @@ beforeAll(async () => {
   const k0 = await kit(store);
   const links = new MemoryLinkProposals(k0.clock);
   const k = await kit(store, { clock: k0.clock, links });
+  kitRef = k;
   server = await startGrpcServer({
     host: '127.0.0.1',
     port: 0,
     services: [
       {
         definition: identityPackage().SessionService.service,
-        handlers: sessionServiceHandlers({ ...k, linkView: new GetLinkProposal(links, k.clock), separate: new SeparateAccount(k.create, links) }, (method) => errors.push(method)),
+        handlers: sessionServiceHandlers(
+          { ...k, linkView: new GetLinkProposal(links, k.clock), separate: new SeparateAccount(k.create, links), addProvider: new AddProvider(store, new JoseReauthVerifier(k.keys, ISSUER, k.clock), k.clock) },
+          (method) => errors.push(method),
+        ),
       },
     ],
   });
@@ -41,7 +48,7 @@ afterAll(async () => {
   await server?.close();
 });
 
-const call = (method: keyof Pick<Client, 'CreateSession' | 'EndSession' | 'IssueReauthToken' | 'GetLinkProposal' | 'SeparateAccount'>, req: Record<string, unknown>) =>
+const call = (method: keyof Pick<Client, 'CreateSession' | 'EndSession' | 'IssueReauthToken' | 'GetLinkProposal' | 'SeparateAccount' | 'AddProvider'>, req: Record<string, unknown>) =>
   new Promise<Record<string, any>>((res, rej) => client[method](req, new grpc.Metadata(), { deadline: Date.now() + 5_000 }, (e, v) => (e ? rej(e) : res(v!))));
 const status = async (p: Promise<unknown>) => {
   try {
@@ -106,6 +113,15 @@ describe('SessionService(gRPC)', () => {
     expect(sep.outcome).toBe('session');
     expect(sep.new_account).toBe(true);
     expect(await status(call('SeparateAccount', { link_proposal_id: q.link_proposal_id, link_binding: q.link_binding, idempotency_key: newKey() }))).toBe('NOT_FOUND');
+  });
+
+  test('I-T34_AddProvider는_재인증토큰으로새제공자를잇고결과를열거로준다(재인증이맞지않거나다시쓰면REAUTH_REQUIRED)', async () => {
+    const r = await create({ provider_user_id: 'grpc-add-1', email: '' });
+    const tok = (await kitRef.signer.reauth({ accountId: r.session.account_id, sessionId: r.session.session_id, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, kitRef.clock.now())).token;
+    const base = { session_id: r.session.session_id, account_id: r.session.account_id, provider: 'PROVIDER_GOOGLE', provider_user_id: 'grpc-add-g' };
+    expect(await call('AddProvider', { ...base, reauth_token: 'nope' })).toEqual({ result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED' });
+    expect(await call('AddProvider', { ...base, reauth_token: tok })).toEqual({ result: 'ADD_PROVIDER_RESULT_LINKED' });
+    expect(await call('AddProvider', { ...base, reauth_token: tok })).toEqual({ result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED' });
   });
 
   test('I-T50_④_EndSession은멱등이다', async () => {

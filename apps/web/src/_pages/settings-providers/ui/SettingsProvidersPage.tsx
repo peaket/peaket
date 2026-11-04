@@ -2,6 +2,7 @@
 // ① 연결된 로그인 수단 목록(연결 해제) → ② [로그인 수단 추가] → ④~⑥ 계정 합치기 카드(MergePanel: ds MergeSummary + 확인 창).
 // 휴대폰은 바탕 위에 쌓고(합치기 카드만 카드), md 768부터 두 구역 모두 카드, lg 1280은 왼쪽 계정 설정 메뉴(3칸) + 오른쪽 본문(9칸).
 // 흡수된 세션 안내는 세션이 끝난 뒤라 셸을 로그인 전 모양으로 그린다(추천안). 상태는 ?state=, 다크는 ?theme=dark.
+// API 출처가 있고 미리보기 상태가 '목록'이면 ①②③은 실제 흐름(LiveLoginMethods, identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BUILD_ORDER BOT-041)이다. 합치기(④)는 BOT-042.
 import Link from 'next/link';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
@@ -14,6 +15,8 @@ import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { mergeContent, SETTINGS_MENU, SURVIVOR_PROVIDER } from '../model/content';
 import { providersView } from '../model/state';
+import { isLiveLoginMethods } from '@/features/login-methods';
+import { LiveLoginMethods } from './LiveLoginMethods';
 import { MergePanel } from './MergePanel';
 
 const LAST_ONE_ID = 'last-w';
@@ -26,6 +29,8 @@ export async function SettingsProvidersPage({ searchParams }: PageProps) {
   const dark = resolvePreviewTheme(sp) === 'dark';
   const v = providersView(state);
   const providers = v.onlyOne ? LINKED_PROVIDERS.filter((p) => p.id === SURVIVOR_PROVIDER) : LINKED_PROVIDERS;
+  const live = isLiveLoginMethods() && state === '목록';
+  const loginMethod = typeof sp.loginMethod === 'string' ? sp.loginMethod : undefined;
 
   return (
     <AppShell dark={dark} guest={v.absorbed}>
@@ -50,7 +55,8 @@ export async function SettingsProvidersPage({ searchParams }: PageProps) {
                 <h1 className="t-xl md:text-[32px] md:leading-[42px]">로그인 수단·계정 합치기</h1>
               </div>
 
-              <section className={cx('col gap-2 px-4 pt-4', CARD_FROM_MD)} aria-labelledby="h-list">
+              {live ? <LiveLoginMethods loginMethod={loginMethod} /> : null}
+              {live ? null : <section className={cx('col gap-2 px-4 pt-4', CARD_FROM_MD)} aria-labelledby="h-list">
                 <div className="section-title">
                   <h2 id="h-list">연결된 로그인 수단</h2>
                 </div>
@@ -71,9 +77,9 @@ export async function SettingsProvidersPage({ searchParams }: PageProps) {
                     로그인 수단 추가
                   </button>
                 </div>
-              </section>
+              </section>}
 
-              {v.merge ? <MergePanel initialStatus={v.merge} confirmOpen={v.confirm} content={mergeContent()} provider={SURVIVOR_PROVIDER} /> : null}
+              {v.merge && !live ? <MergePanel initialStatus={v.merge} confirmOpen={v.confirm} content={mergeContent()} provider={SURVIVOR_PROVIDER} /> : null}
             </div>
           </div>
         )}

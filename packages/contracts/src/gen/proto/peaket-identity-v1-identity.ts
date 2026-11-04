@@ -57,6 +57,10 @@ export const identityV1Identity: Record<string, unknown> = {
                       "requestType": "SeparateAccountRequest",
                       "responseType": "CreateSessionResponse"
                     },
+                    "AddProvider": {
+                      "requestType": "AddProviderRequest",
+                      "responseType": "AddProviderResponse"
+                    },
                     "EndSession": {
                       "requestType": "EndSessionRequest",
                       "responseType": "EndSessionResponse"
@@ -202,6 +206,48 @@ export const identityV1Identity: Record<string, unknown> = {
                     "attempts_left": {
                       "type": "int32",
                       "id": 4
+                    }
+                  }
+                },
+                "AddProviderRequest": {
+                  "fields": {
+                    "session_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "reauth_token": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "provider": {
+                      "type": "Provider",
+                      "id": 4
+                    },
+                    "provider_user_id": {
+                      "type": "string",
+                      "id": 5
+                    }
+                  }
+                },
+                "AddProviderResult": {
+                  "values": {
+                    "ADD_PROVIDER_RESULT_UNSPECIFIED": 0,
+                    "ADD_PROVIDER_RESULT_LINKED": 1,
+                    "ADD_PROVIDER_RESULT_ALREADY_LINKED": 2,
+                    "ADD_PROVIDER_RESULT_PROVIDER_TYPE_TAKEN": 3,
+                    "ADD_PROVIDER_RESULT_OTHER_ACCOUNT": 4,
+                    "ADD_PROVIDER_RESULT_REAUTH_REQUIRED": 5
+                  }
+                },
+                "AddProviderResponse": {
+                  "fields": {
+                    "result": {
+                      "type": "AddProviderResult",
+                      "id": 1
                     }
                   }
                 },

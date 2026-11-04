@@ -42,7 +42,8 @@ export interface SocialLoginDeps {
 
 /** 로그인 진행 쿠키 안의 값(identity §3) */
 interface Progress {
-  purpose: 'login' | 'reauth';
+  /** link: 계정 설정의 로그인 수단 추가(SCR-040 ②, identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현') */
+  purpose: 'login' | 'reauth' | 'link';
   p: Provider;
   state: string;
   nonce: string;
@@ -56,6 +57,8 @@ interface Progress {
   sub?: string;
   /** 가입 때 연결 제안을 따라 온 기존 제공자 로그인(identity §2.1). 묶음 값은 연결 제안 쿠키에 있다 */
   linkProposalId?: string;
+  /** 로그인 수단 추가만: 화면이 먼저 받은 재인증 토큰(5분 한 번). identity AddProvider가 쓴다 */
+  reauthToken?: string;
 }
 
 /** 연결 제안 쿠키 안의 값(identity §2.1·§3) */
@@ -195,6 +198,28 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     return startFlow(provider, progress, reauthPrompt(provider));
   }
 
+  /** POST /link/{provider}: 계정 설정의 로그인 수단 추가(SCR-040 ②). 팬 세션과 화면이 먼저 받은 재인증 토큰이 있어야 시작한다 */
+  async function linkStart(req: Request, provider: string): Promise<Response> {
+    if (!sameOrigin(req)) return forbidden();
+    if (!isProvider(provider) || !oidc.has(provider)) return respond(404, '없는 로그인 수단입니다');
+    const at = now();
+    const fan = await fanTokens.verify(cookieOf(req, ACCESS_COOKIE), at, { allowExpired: false });
+    if (!fan) return respond(401, '다시 로그인해 주세요');
+    const f = await formOf(req);
+    const reauthToken = f.get('reauthToken') ?? '';
+    if (!reauthToken || reauthToken.length > 4096) return respond(400, '다시 로그인한 뒤 시도해 주세요');
+    const progress: Progress = { purpose: 'link', p: provider, ...randomFlow(), returnTo: safeReturnTo(f.get('returnTo')), sid: fan.sessionId, sub: fan.accountId, reauthToken };
+    // 새 제공자 인증은 계정을 다시 고르게 한다(재인증과 같은 prompt): 제공자에 이미 로그인한 다른 계정이 저절로 붙지 않게
+    return startFlow(provider, progress, reauthPrompt(provider));
+  }
+
+  /** 돌아갈 주소에 결과 값을 붙인다(같은 출처 경로만, safeReturnTo를 거친 값) */
+  const withResult = (to: string, key: string, value: string): string => {
+    const u = new URL(to, config.origin);
+    u.searchParams.set(key, value);
+    return `${u.pathname}${u.search}${u.hash}`;
+  };
+
   /** GET /login/callback/{provider}: 로그인·재인증 공용 콜백 */
   async function callback(req: Request, provider: string): Promise<Response> {
     const prog = unseal<Progress>(progressKeys, PROGRESS_COOKIE, cookieOf(req, PROGRESS_COOKIE), now());
@@ -205,8 +230,11 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     // 진행 쿠키는 한 번만 쓴다: 성공·실패 모두 지운다. 재인증은 실패해도 돌아갈 주소로 보내고 실패 종류만 넘긴다(identity §7.1 ⑤)
     const reauthDone = (r: ReauthResult) => redirect(prog.returnTo, [clearProgressCookie(), reauthCookie(seal(keys.reauthResult, REAUTH_COOKIE, r, now() + REAUTH_RESULT_TTL_MS))]);
     const fail = (reason: string, code?: string, status = 400) => {
-      log(prog.purpose === 'reauth' ? 'reauth.failed' : 'login.failed', { provider, reason, code });
-      return prog.purpose === 'reauth' ? reauthDone({ error: 'failed' }) : respond(status, GENERIC_FAILURE, [clearProgressCookie()]);
+      log(prog.purpose === 'reauth' ? 'reauth.failed' : prog.purpose === 'link' ? 'link-add.failed' : 'login.failed', { provider, reason, code });
+      if (prog.purpose === 'reauth') return reauthDone({ error: 'failed' });
+      // 로그인 수단 추가는 실패해도 설정 화면으로 돌려보내 결과를 안내한다(막다른 페이지가 되지 않게, 새 맥락 리뷰 중간 3)
+      if (prog.purpose === 'link') return redirect(withResult(prog.returnTo, 'loginMethod', 'failed'), [clearProgressCookie()]);
+      return respond(status, GENERIC_FAILURE, [clearProgressCookie()]);
     };
     const u = new URL(req.url);
     // 제공자가 돌려준 오류(사용자 취소 등)와 다른 state는 코드 교환 전에 나눠 남긴다(운영 확인의 이유 범주, identity §10.1)
@@ -225,6 +253,18 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     const userAgent = (req.headers.get('user-agent') ?? '').slice(0, 512);
     // acr·amr가 없으면 단일 요소로 본다(asvs 6.8.4). 있으면 그대로 넘긴다
     const authMethods = [login.claims.acr, ...(Array.isArray(login.claims.amr) ? login.claims.amr : [])].filter((v): v is string => typeof v === 'string');
+
+    if (prog.purpose === 'link') {
+      // 로그인 수단 추가: 새 로그인 세션은 만들지 않는다. 결과는 돌아갈 주소의 loginMethod로 넘긴다(identity §2.1)
+      try {
+        const result = await identity.addProvider({ sessionId: prog.sid ?? '', accountId: prog.sub ?? '', reauthToken: prog.reauthToken ?? '', provider, providerUserId: sub });
+        log('link-add.completed', { provider, result });
+        return redirect(withResult(prog.returnTo, 'loginMethod', result), [clearProgressCookie()]);
+      } catch (e) {
+        log('link-add.failed', { provider, reason: 'identity', code: codeOf(e) });
+        return redirect(withResult(prog.returnTo, 'loginMethod', 'failed'), [clearProgressCookie()]);
+      }
+    }
 
     if (prog.purpose === 'reauth') {
       const done = reauthDone;
@@ -393,7 +433,7 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     }
   }
 
-  const handlers = { start, callback, logout, reauthStart, reauthToken, linkProposal, separateAccount };
+  const handlers = { start, callback, logout, reauthStart, reauthToken, linkProposal, separateAccount, linkStart };
 
   /** 경로표대로 고른다(시험과 로컬 대역 서버가 쓴다. Next에서는 경로 파일이 처리기를 바로 부른다) */
   async function dispatch(req: Request): Promise<Response> {
@@ -417,6 +457,7 @@ export const LOGIN_ROUTES = [
   { method: 'POST', pattern: /^\/logout$/, file: '/logout', handler: 'logout' },
   { method: 'POST', pattern: /^\/reauth\/(kakao|naver|google)$/, file: '/reauth/[provider]', handler: 'reauthStart' },
   { method: 'POST', pattern: /^\/reauth\/token$/, file: '/reauth/token', handler: 'reauthToken' },
+  { method: 'POST', pattern: /^\/link\/(kakao|naver|google)$/, file: '/link/[provider]', handler: 'linkStart' },
   { method: 'GET', pattern: /^\/v1\/identity\/link-proposals\/([A-Za-z0-9_-]{22})$/, file: '/v1/identity/link-proposals/[proposalId]', handler: 'linkProposal' },
   { method: 'POST', pattern: /^\/v1\/identity\/link-proposals\/([A-Za-z0-9_-]{22})\/separate-account$/, file: '/v1/identity/link-proposals/[proposalId]/separate-account', handler: 'separateAccount' },
 ] as const;

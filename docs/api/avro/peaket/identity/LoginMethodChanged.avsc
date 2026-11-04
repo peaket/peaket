@@ -1,0 +1,58 @@
+{
+  "type": "record",
+  "name": "LoginMethodChanged",
+  "namespace": "peaket.identity",
+  "doc": "로그인 수단 연결·해제. 토픽 identity.login-methods-changed, 키 accountId. identity-svc가 로그인 수단을 잇거나 지운 트랜잭션에서 낸다(BUILD_ORDER BOT-041).",
+  "fields": [
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "accountId",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "change",
+      "doc": "LINKED는 로그인 수단을 이었다(계정 설정의 추가, 가입 때 연결 제안의 연결). UNLINKED는 해제했다",
+      "type": {
+        "type": "enum",
+        "name": "LoginMethodChange",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "LINKED",
+          "UNLINKED"
+        ]
+      }
+    },
+    {
+      "name": "provider",
+      "type": {
+        "type": "enum",
+        "name": "LoginMethodProvider",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "kakao",
+          "naver",
+          "google"
+        ]
+      }
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

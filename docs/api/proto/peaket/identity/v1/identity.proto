@@ -55,6 +55,8 @@ service SessionService {
   rpc GetLinkProposal(GetLinkProposalRequest) returns (GetLinkProposalResponse);
   // 연결하지 않고 새 계정 만들기(POST …/separate-account). 제안을 지우고 새 제공자 계정과 세션을 만든다. 없음·만료·묶음 값이 다르면 NOT_FOUND
   rpc SeparateAccount(SeparateAccountRequest) returns (CreateSessionResponse);
+  // 계정 설정의 로그인 수단 추가(SCR-040 ②): 재인증 토큰을 확인하고 새 제공자 (제공자, sub)를 이 계정에 잇는다. 결과는 응답의 result다(추천 적용 2026-11-04, BUILD_ORDER BOT-041)
+  rpc AddProvider(AddProviderRequest) returns (AddProviderResponse);
   // 로그아웃. 세션을 끝내고 세션 종료 이벤트를 낸다. 이미 끝난 세션이면 그대로 성공이다(멱등).
   rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
   // 팬 민감 작업 전 재인증(docs/features/identity.md §7.1). 앱 서버가 제공자 재인증과 강도 판정을 마친 뒤 부른다.
@@ -131,6 +133,35 @@ message GetLinkProposalResponse {
   Provider new_provider = 2;
   int64 expires_at_ms = 3;
   int32 attempts_left = 4;
+}
+
+message AddProviderRequest {
+  // 액세스 토큰에서 앱 서버가 확인한 세션과 계정
+  string session_id = 1;
+  string account_id = 2;
+  // 화면이 먼저 받은 재인증 토큰(typ reauth+jwt, 5분 한 번). 이 호출이 쓴다
+  string reauth_token = 3;
+  Provider provider = 4;
+  // 새 제공자 ID 토큰의 sub
+  string provider_user_id = 5;
+}
+
+enum AddProviderResult {
+  ADD_PROVIDER_RESULT_UNSPECIFIED = 0;
+  // 이 계정에 이었다
+  ADD_PROVIDER_RESULT_LINKED = 1;
+  // 이미 이 계정의 로그인 수단이다
+  ADD_PROVIDER_RESULT_ALREADY_LINKED = 2;
+  // 이 계정에 같은 종류 제공자가 다른 sub로 있다(종류마다 하나 [가정])
+  ADD_PROVIDER_RESULT_PROVIDER_TYPE_TAKEN = 3;
+  // 다른 PEAKET 계정의 로그인 수단이다(병합 제안은 BUILD_ORDER BOT-042)
+  ADD_PROVIDER_RESULT_OTHER_ACCOUNT = 4;
+  // 재인증 토큰이 없거나 만료·재사용이거나 세션·계정이 맞지 않는다
+  ADD_PROVIDER_RESULT_REAUTH_REQUIRED = 5;
+}
+
+message AddProviderResponse {
+  AddProviderResult result = 1;
 }
 
 message SeparateAccountRequest {
