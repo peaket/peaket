@@ -1,6 +1,6 @@
 // 이 모듈의 공개 파일. 다른 컨텍스트와 시작 파일은 층 폴더가 아니라 이 파일로만 가져온다(층 규칙).
 export { SessionModule, type SessionModuleOptions } from './session.module.js';
-export { ACCESS_TOKEN_TTL_MS } from './domain/session.js';
+export { ACCESS_TOKEN_TTL_MS, decideRefresh, REFRESH_RETRY_GRACE_MS, sessionAlive } from './domain/session.js';
 export { ACCOUNT_HOLD_CLOSED_KEEP_MS } from './domain/merge.js';
 export { ACCOUNT_CLAIMS, ACCOUNT_CLOSURE, ACCOUNT_ERASER, type AccountClaims, type AccountClosure, type AccountEraser, FRAUD_HOLDS, type FraudHolds, REVERIFICATIONS, type Reverifications } from './domain/ports.js';
 export { FinishWithdrawals } from './application/finish-withdrawals.js';
@@ -21,6 +21,7 @@ export { identityPackage, identityServiceHandlers, sessionServiceHandlers } from
 export { GetVerificationStatus } from './application/get-verification-status.js';
 export { JoseTokenSigner, tokenIssuerFromEnv } from './adapters/jose-token-signer.js';
 export { TokenKeyRing } from './adapters/token-keys.js';
+export { cookieOf } from './inbound/session-cookies.js';
 export { RefreshSession } from './application/refresh-session.js';
 export { InvRefKeyRing } from './adapters/inv-ref-key-ring.js';
 export { deviceRefsOf, phoneContactRefs } from './adapters/phone-contact-refs.js';

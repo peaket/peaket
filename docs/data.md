@@ -86,6 +86,7 @@ erDiagram
     admin_account ||--o{ admin_session : "관리 계정 로그인 세션(추천 적용 2026-11-05)"
     admin_account ||--o{ admin_unlock_link : "본인 해제 링크(추천 적용 2026-11-05)"
     admin_account ||--o{ admin_known_source : "익숙한 출발지(추천 적용 2026-11-05)"
+    admin_session ||--o{ admin_refresh_token_hash : "발급한 관리 리프레시 토큰 해시(추천 적용 2026-11-05)"
     account ||--o{ booth_reverification : "부스 본인확인 대조"
     account ||--o{ staff_assignment : "회차 역할"
     event ||--o{ staff_assignment : ""
@@ -257,7 +258,7 @@ erDiagram
         int second_factor_failures "2단계 실패 수: 비밀번호가 맞은 뒤나 해제 링크에서 TOTP·복구 코드가 틀릴 때 센다. 로그인 성공만 0(시간 잠금·본인 해제로는 0이 되지 않는다). 5 [가정]면 보호 잠금(auth-controls §3.1·§3.2, 추천 적용 2026-10-30)"
         int password_failure_total "비밀번호 연속 실패 누계: 비밀번호가 틀릴 때 센다(잠긴 동안 거절한 시도는 세지 않는다). 비밀번호와 2단계를 모두 통과한 로그인만 0. 50 [가정]이면 알림, 100이면 보호 잠금(NIST SP 800-63B-4 §3.2.2 상한, auth-controls §3.1, 추천 적용 2026-10-30)"
         timestamptz breach_checked_at "마지막으로 유출 비밀번호 목록과 대조한 시각. 로그인에 성공할 때 30일 [가정]이 지났으면 다시 본다(auth-controls §4.3 8, 추천 적용 2026-10-30)"
-        bool password_change_required "비밀번호 바꾸기 필요 표시. 비밀번호만 맞은 로그인이나 유출 목록 적중 때 켠다. 켜져 있으면 다음 세션은 비밀번호 바꾸기와 로그아웃만 한다. 바꾸면 끈다(auth-controls §3.5, 추천 적용 2026-10-30)"
+        bool password_change_required "비밀번호 바꾸기 필요 표시. 비밀번호만 맞은 로그인이나 유출 목록 적중 때 켠다. 켜져 있으면 다음 세션은 비밀번호 바꾸기와 로그아웃만 한다. 이미 열린 세션도 다음 토큰 갱신부터 같다(BOT-130). 바꾸면 끈다(auth-controls §3.5, 추천 적용 2026-10-30)"
         text lock_kind "NONE|TIMED|PROTECT(없음·시간 잠금·보호 잠금, docs/security/auth-controls.md §3.2, 기술 검토 중간-052)"
         timestamptz locked_until "TIMED면 잠금이 풀리는 시각(15분, 풀린 뒤 24시간 안에 다시 잠기면 1시간). 본인 해제 때는 푼 시각을 남긴다(반복 잠금 기준, BOT-121)"
         jsonb recent_lock_at "24시간 안의 잠금 시각 목록. 24시간 안 잠금 횟수를 센다"
@@ -277,6 +278,13 @@ erDiagram
         timestamptz used_at "2단계에서 쓴 때(한 번만)"
         bool known_source "1단계 통과 때 그 묶음이 30일 [가정] 안에 성공한 익숙한 출발지였는지(BOT-123)"
         timestamptz password_only_noticed_at "비밀번호만 맞은 로그인으로 알린 때(BOT-123)"
+    }
+    admin_refresh_token_hash {
+        bytea hash PK "발급한 관리 리프레시 토큰의 SHA-256(로그인 때 준 첫 토큰 포함). 예전 토큰이 다시 오면 그 패밀리를 끝낸다(docs/features/identity.md §6 BOT-130)"
+        uuid admin_session_id FK "세션을 지우면 함께 지운다"
+        uuid refresh_family
+        timestamptz issued_at
+        timestamptz expires_at "그 세션의 절대 만료. 지나면 매일 정비가 지운다"
     }
     admin_known_source {
         uuid admin_account_id PK "FK. 계정을 지우면 함께 지운다"
@@ -298,6 +306,9 @@ erDiagram
         uuid admin_account_id FK
         text aud "partner|ops"
         bytea refresh_hash "지금 리프레시 토큰의 SHA-256"
+        bytea prev_refresh_hash "바로 앞 리프레시 토큰의 SHA-256(응답을 잃은 재시도, BOT-130)"
+        timestamptz rotated_at "마지막 회전 시각. 바로 앞 토큰을 받아 주는 유예 30초 [가정]의 기준"
+        bool refresh_used "팬 session과 같은 칸(회전마다 false)"
         uuid refresh_family
         text pair_ref "로그인한 출발지 묶음 해시(admin_login_step과 같다)"
         timestamptz created_at

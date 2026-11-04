@@ -18,3 +18,11 @@ export function adminSessionCookies(aud: AdminAud, t: { accessToken: string; ref
   const tail = `; Max-Age=${maxAge}; Secure; HttpOnly; SameSite=Strict`;
   return [`${names.at}=${t.accessToken}${dom}; Path=/${tail}`, `${names.rt}=${t.refreshToken}${dom}; Path=${names.rtPath}${tail}`];
 }
+
+/** 그 콘솔의 쿠키 둘을 같은 이름·Domain·Path에 Max-Age=0으로 지운다(갱신 실패·로그아웃, BOT-130). Clear-Site-Data는 쓰지 않는다(다른 앱 로그인까지 끊는다) */
+export function clearAdminSessionCookies(aud: AdminAud, domain: string | undefined): string[] {
+  const names = ADMIN_COOKIES[aud];
+  const dom = aud === 'partner' && domain ? `; Domain=${domain}` : '';
+  const tail = '; Max-Age=0; Secure; HttpOnly; SameSite=Strict';
+  return [`${names.at}=${dom}; Path=/${tail}`, `${names.rt}=${dom}; Path=${names.rtPath}${tail}`];
+}

@@ -2,12 +2,12 @@
 // 로그인 실패 셈은 행을 잠근 트랜잭션에서 고치고 알림 행을 같은 트랜잭션에 적는다(auth-controls §3.1).
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, writeOutbox } from '@peaket/platform';
-import { and, asc, eq, gt, gte, isNull, lt, lte, ne, notInArray, or } from 'drizzle-orm';
+import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, type DbTransaction, writeOutbox } from '@peaket/platform';
+import { and, asc, eq, gt, gte, inArray, isNull, lt, lte, ne, notInArray, or } from 'drizzle-orm';
 import type { AccountLoginState, LockKind, LockReason, NoticeKind } from '../../domain/login-rules.js';
 import { sql as rawSql } from 'drizzle-orm';
-import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminSecondStepStore, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
-import { adminAccount, adminKnownSource, adminLoginStep, adminRecoveryCode, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
+import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
+import { adminAccount, adminKnownSource, adminLoginStep, adminRecoveryCode, adminRefreshTokenHash, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
 
 type AccountRow = typeof adminAccount.$inferSelect;
 /** 알림을 보내지 못했을 때 다음 시도까지(1분부터 두 배씩, 최대 1시간 [가정]) */
@@ -260,6 +260,8 @@ export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginSt
         absoluteExpiresAt: new Date(i.absoluteExpiresAt),
         idleExpiresAt: new Date(i.idleExpiresAt),
       });
+      // 로그인 때 준 첫 리프레시 토큰도 발급 해시 기록에 남긴다(회전 뒤 다시 오면 재사용, BOT-130)
+      await tx.insert(adminRefreshTokenHash).values({ hash: i.refreshHash, adminSessionId: i.id, refreshFamily: i.refreshFamily, issuedAt: now, expiresAt: new Date(i.absoluteExpiresAt) });
       if (evicted.length > 0) {
         await tx.insert(adminSecurityNotice).values({ id: randomUUID(), adminAccountId: i.accountId, kind: 'SESSION_LIMIT', createdAt: now });
         // 같은 트랜잭션의 마지막 쓰기로 세션 종료 사건을 적는다(asyncapi control.sessions-terminated, 이유 DEVICE_LIMIT, ADR-0143 결정 3)
@@ -411,6 +413,94 @@ export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginSt
       }
       return ids;
     });
+  }
+
+  // ── 토큰 갱신과 로그아웃(BOT-130) ──
+  async refreshTransaction<T>(fn: (tx: AdminRefreshTx) => Promise<T>): Promise<T> {
+    return this.database.transaction(async (tx) => {
+      const api: AdminRefreshTx = {
+        findByRefreshHash: async (hash): Promise<AdminRefreshRow | null> => {
+          // 지금·바로 앞 토큰이면 그 세션 행을 잠근다. 동시 갱신은 앞 갱신이 끝난 뒤 바뀐 행으로 다시 판정한다(READ COMMITTED의 FOR UPDATE)
+          const [cur] = await tx
+            .select()
+            .from(adminSession)
+            .where(or(eq(adminSession.refreshHash, hash), eq(adminSession.prevRefreshHash, hash)))
+            .for('update');
+          const past = cur ? undefined : (await tx.select({ sessionId: adminRefreshTokenHash.adminSessionId }).from(adminRefreshTokenHash).where(eq(adminRefreshTokenHash.hash, hash)))[0];
+          const r = cur ?? (past ? (await tx.select().from(adminSession).where(eq(adminSession.id, past.sessionId)).for('update'))[0] : undefined);
+          if (!r) return null;
+          const match = cur ? (Buffer.from(cur.refreshHash).equals(hash) ? 'current' : 'previous') : 'history';
+          return {
+            id: r.id,
+            accountId: r.adminAccountId,
+            aud: r.aud as AdminAud,
+            refreshFamily: r.refreshFamily,
+            absoluteExpiresAt: r.absoluteExpiresAt.getTime(),
+            idleExpiresAt: r.idleExpiresAt.getTime(),
+            terminatedAt: ms(r.terminatedAt),
+            match,
+            rotatedAt: ms(r.rotatedAt),
+            refreshUsed: r.refreshUsed,
+          };
+        },
+        accountOf: async (id) => {
+          const [a] = await tx.select({ status: adminAccount.status, role: adminAccount.role, passwordChangeRequired: adminAccount.passwordChangeRequired }).from(adminAccount).where(eq(adminAccount.id, id));
+          return a ? { status: a.status as AdminStatus, role: a.role as AdminRole, passwordChangeRequired: a.passwordChangeRequired } : null;
+        },
+        familySessions: async (family) => (await tx.select({ id: adminSession.id }).from(adminSession).where(and(eq(adminSession.refreshFamily, family), isNull(adminSession.terminatedAt)))).map((x) => x.id),
+        terminateSessions: (ids, reason, now) => this.#endIn(tx, ids, reason, now).then(() => undefined),
+        rotateRefresh: async (id, hash, now, idleExpiresAt) => {
+          await tx
+            .update(adminSession)
+            .set({ prevRefreshHash: rawSql`${adminSession.refreshHash}`, refreshHash: hash, rotatedAt: new Date(now), refreshUsed: false, idleExpiresAt: new Date(idleExpiresAt) })
+            .where(eq(adminSession.id, id));
+        },
+        setRefreshHash: async (id, hash) => {
+          await tx.update(adminSession).set({ refreshHash: hash }).where(eq(adminSession.id, id));
+        },
+        recordRefreshHash: async (r) => {
+          await tx.insert(adminRefreshTokenHash).values({ hash: r.hash, adminSessionId: r.sessionId, refreshFamily: r.refreshFamily, issuedAt: new Date(r.issuedAt), expiresAt: new Date(r.expiresAt) });
+        },
+      };
+      return fn(api);
+    });
+  }
+
+  async endSession(accountId: string, sessionId: string, reason: 'LOGOUT', now: number): Promise<boolean> {
+    return this.database.transaction(async (tx) => {
+      const [s] = await tx
+        .select({ id: adminSession.id })
+        .from(adminSession)
+        .where(and(eq(adminSession.id, sessionId), eq(adminSession.adminAccountId, accountId), isNull(adminSession.terminatedAt)))
+        .for('update');
+      if (!s) return false;
+      return (await this.#endIn(tx, [s.id], reason, now)).length > 0;
+    });
+  }
+
+  async purgeRefreshHashes(before: number): Promise<number> {
+    const gone = await this.database.db.delete(adminRefreshTokenHash).where(lt(adminRefreshTokenHash.expiresAt, new Date(before))).returning({ hash: adminRefreshTokenHash.hash });
+    return gone.length;
+  }
+
+  /** 끝나지 않은 세션들을 끝내고 같은 트랜잭션의 마지막 쓰기로 세션 종료 사건을 적는다(asyncapi control.sessions-terminated, ADR-0143 결정 3). 끝낸 세션 ID */
+  async #endIn(tx: DbTransaction, ids: string[], reason: AdminSessionEndReason, now: number): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const ended = await tx
+      .update(adminSession)
+      .set({ terminatedAt: new Date(now), terminationReason: reason })
+      .where(and(inArray(adminSession.id, ids), isNull(adminSession.terminatedAt)))
+      .returning({ id: adminSession.id, accountId: adminSession.adminAccountId });
+    const sorted = ended.sort((a, b) => (a.id < b.id ? -1 : 1));
+    if (sorted.length > 0) {
+      const terminatedAt = new Date(now).toISOString();
+      await writeOutbox(
+        tx,
+        this.clock,
+        sorted.map((e) => ({ topic: CONTROL_TOPICS.sessionsTerminated, key: e.accountId, payload: Buffer.from(JSON.stringify({ accountId: e.accountId, sessionId: e.id, reason, terminatedAt })) })),
+      );
+    }
+    return sorted.map((e) => e.id);
   }
 
   async touchKnownSource(accountId: string, pairRef: string, at: number): Promise<void> {

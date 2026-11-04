@@ -26,6 +26,8 @@ export function identityMaintenanceTasks(database: Database, clock: Clock, invRe
     { name: 'restricted-hold-expired', when: 'daily', run: () => verifications.purgeExpiredHolds(clock.now()) },
     // 관리 계정 익숙한 출발지는 마지막 성공에서 30일 [가정] 지나면 지운다(docs/data.md admin_known_source, BOT-123)
     { name: 'admin-known-source-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).purgeKnownSources(clock.now() - knownSourceWindowMs) },
+    // 관리 리프레시 토큰 발급 해시는 그 세션의 절대 만료가 지나면 지운다(docs/data.md admin_refresh_token_hash, BOT-130)
+    { name: 'admin-refresh-hash-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).purgeRefreshHashes(clock.now()) },
     // 닫힌 이의 제기·소명 계류 행은 30일 [가정] 뒤 지운다(docs/data.md account_hold, BOT-042)
     { name: 'account-hold-closed', when: 'daily', run: () => sessions.transaction((tx) => tx.purgeClosedHolds(clock.now() - ACCOUNT_HOLD_CLOSED_KEEP_MS)) },
     // 라벨 키가 없어 가입 때 쓰지 못한 EMAIL 연락처 가명을 account.email로 채운다(identity §9.1 '조사용 값의 첫 구현', BOT-045)

@@ -107,6 +107,10 @@ export const adminSession = pgTable(
       .references(() => adminAccount.id, { onDelete: 'cascade' }),
     aud: text('aud').notNull(),
     refreshHash: bytea('refresh_hash').notNull(),
+    // 바로 앞 리프레시 토큰·마지막 회전·지금 토큰 쓰임(팬 session과 같은 판정, BOT-130)
+    prevRefreshHash: bytea('prev_refresh_hash'),
+    rotatedAt: at('rotated_at'),
+    refreshUsed: boolean('refresh_used').notNull().default(false),
     refreshFamily: uuid('refresh_family').notNull(),
     pairRef: text('pair_ref').notNull(),
     createdAt: at('created_at').notNull(),
@@ -117,9 +121,26 @@ export const adminSession = pgTable(
   },
   (t) => [
     uniqueIndex('admin_session_refresh_key').on(t.refreshHash),
+    index('admin_session_prev_refresh_idx').on(t.prevRefreshHash).where(sql`${t.prevRefreshHash} is not null`),
+    index('admin_session_family_idx').on(t.refreshFamily),
     index('admin_session_live_idx').on(t.adminAccountId, t.idleExpiresAt).where(sql`${t.terminatedAt} is null`),
     check('admin_session_aud_check', sql`${t.aud} in ('partner', 'ops')`),
   ],
+);
+
+/** 발급한 관리 리프레시 토큰 해시(docs/data.md admin_refresh_token_hash, BOT-130). 예전 토큰이 다시 오면 그 패밀리를 끝낸다. 절대 만료가 지나면 정비가 지운다 */
+export const adminRefreshTokenHash = pgTable(
+  'admin_refresh_token_hash',
+  {
+    hash: bytea('hash').primaryKey(),
+    adminSessionId: uuid('admin_session_id')
+      .notNull()
+      .references(() => adminSession.id, { onDelete: 'cascade' }),
+    refreshFamily: uuid('refresh_family').notNull(),
+    issuedAt: at('issued_at').notNull(),
+    expiresAt: at('expires_at').notNull(),
+  },
+  (t) => [index('admin_refresh_token_hash_expires_idx').on(t.expiresAt), index('admin_refresh_token_hash_session_idx').on(t.adminSessionId)],
 );
 
 /** 복구 코드(docs/data.md admin_recovery_code, BOT-120). 쓰거나 다시 만들면 바로 지운다 */

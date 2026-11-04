@@ -1,14 +1,14 @@
 // 관리 계정 저장소의 메모리 구현(시험·로컬, BUILD_ORDER BOT-110·BOT-111). 계정을 만드는 길(초대)은 BOT-150이라 시험은 create로 바로 만든다.
 import { FRESH_LOGIN_STATE, type AccountLoginState, type NoticeKind } from '../domain/login-rules.js';
 import { randomUUID } from 'node:crypto';
-import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminSecondStepStore, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
+import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
 
 type Row = AdminAccountRow &
   AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null };
-type SessionRow = { id: string; accountId: string; aud: AdminAud; refreshHash: string; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; terminatedAt: number | null; terminationReason: string | null };
+type SessionRow = { id: string; accountId: string; aud: AdminAud; refreshHash: string; prevRefreshHash: string | null; rotatedAt: number | null; refreshUsed: boolean; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; terminatedAt: number | null; terminationReason: string | null };
 type Step = { id: string; accountId: string; tokenHash: string; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; usedAt: number | null; knownSource: boolean; passwordOnlyNoticedAt: number | null };
 
-export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore {
+export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore, AdminRefreshStore {
   readonly #rows = new Map<string, Row>();
   readonly #notices: { id: string; accountId: string; kind: NoticeKind; at: number; sentAt: number | null; attempts?: number; nextAttemptAt?: number }[] = [];
   readonly #links: (UnlockLinkRow & { tokenHash: string })[] = [];
@@ -17,6 +17,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
   readonly #recovery: { id: string; accountId: string; phc: string }[] = [];
   readonly #sessions: SessionRow[] = [];
   readonly #terminated: { accountId: string; sessionId: string; reason: string }[] = [];
+  /** 발급한 리프레시 토큰 해시(16진수) → 세션·패밀리·절대 만료(BOT-130) */
+  readonly #issued = new Map<string, { sessionId: string; refreshFamily: string; expiresAt: number }>();
 
   /** 시험용: 계정을 만든다(이메일은 소문자·앞뒤 빈칸 제거, 삭제하지 않은 계정 사이에서 하나) */
   create(i: { id: string; role: AdminRole; email: string; status?: AdminStatus; promoterId?: string | null; displayName?: string | null; now: number }): void {
@@ -45,6 +47,12 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
   remove(id: string): void {
     const r = this.#rows.get(id);
     if (r) this.#rows.set(id, { ...r, status: 'REMOVED' });
+  }
+
+  /** 시험용: 역할을 바로 바꾼다(바꾸는 길은 BOT-150) */
+  setRole(id: string, role: AdminRole): void {
+    const r = this.#rows.get(id);
+    if (r) r.role = role;
   }
 
   /** 시험용: 비밀번호 바꾸기 필요 표시를 바로 켜거나 끈다(켜는 길은 BOT-121) */
@@ -234,7 +242,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       evicted.push(s.id);
     }
     if (evicted.length > 0) this.#notices.push({ id: randomUUID(), accountId: i.accountId, kind: 'SESSION_LIMIT', at: now, sentAt: null });
-    this.#sessions.push({ id: i.id, accountId: i.accountId, aud: i.aud, refreshHash: i.refreshHash.toString('hex'), refreshFamily: i.refreshFamily, pairRef: i.pairRef, createdAt: i.createdAt, absoluteExpiresAt: i.absoluteExpiresAt, idleExpiresAt: i.idleExpiresAt, terminatedAt: null, terminationReason: null });
+    this.#issued.set(i.refreshHash.toString('hex'), { sessionId: i.id, refreshFamily: i.refreshFamily, expiresAt: i.absoluteExpiresAt });
+    this.#sessions.push({ id: i.id, accountId: i.accountId, aud: i.aud, refreshHash: i.refreshHash.toString('hex'), prevRefreshHash: null, rotatedAt: null, refreshUsed: false, refreshFamily: i.refreshFamily, pairRef: i.pairRef, createdAt: i.createdAt, absoluteExpiresAt: i.absoluteExpiresAt, idleExpiresAt: i.idleExpiresAt, terminatedAt: null, terminationReason: null });
     return { evicted };
   }
 
@@ -313,6 +322,95 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       ended.push(s.id);
     }
     return ended;
+  }
+
+  // ── 토큰 갱신과 로그아웃(BOT-130) ──
+  /** 갱신 트랜잭션을 차례로 세운다(Drizzle의 세션 행 잠금과 같은 효과). 던지면 그 트랜잭션이 바꾼 세션 칸·발급 해시·사건만 거꾸로 되돌린다(재검토 2026-11-05) */
+  #refreshQueue: Promise<unknown> = Promise.resolve();
+
+  async refreshTransaction<T>(fn: (tx: AdminRefreshTx) => Promise<T>): Promise<T> {
+    const run = async (): Promise<T> => {
+      const undo: (() => void)[] = [];
+      try {
+        return await fn(this.#refreshTx(undo));
+      } catch (e) {
+        for (const u of undo.reverse()) u();
+        throw e;
+      }
+    };
+    const p = this.#refreshQueue.then(run, run);
+    this.#refreshQueue = p.catch(() => undefined);
+    return p;
+  }
+
+  #refreshTx(undo: (() => void)[]): AdminRefreshTx {
+    /** 세션 행의 칸을 바꾸고, 되돌릴 때 그 칸만 앞 값으로 */
+    const patch = (s: SessionRow, change: Partial<SessionRow>) => {
+      const prev = Object.fromEntries(Object.keys(change).map((k) => [k, s[k as keyof SessionRow]])) as Partial<SessionRow>;
+      Object.assign(s, change);
+      undo.push(() => Object.assign(s, prev));
+    };
+    return {
+      findByRefreshHash: async (hash): Promise<AdminRefreshRow | null> => {
+        const h = hash.toString('hex');
+        const cur = this.#sessions.find((x) => x.refreshHash === h || x.prevRefreshHash === h);
+        const past = cur ? undefined : this.#issued.get(h);
+        const s = cur ?? (past ? this.#sessions.find((x) => x.id === past.sessionId) : undefined);
+        if (!s) return null;
+        const match = cur ? (cur.refreshHash === h ? 'current' : 'previous') : 'history';
+        return { id: s.id, accountId: s.accountId, aud: s.aud, refreshFamily: s.refreshFamily, absoluteExpiresAt: s.absoluteExpiresAt, idleExpiresAt: s.idleExpiresAt, terminatedAt: s.terminatedAt, match, rotatedAt: s.rotatedAt, refreshUsed: s.refreshUsed };
+      },
+      accountOf: async (id) => {
+        const r = this.#rows.get(id);
+        return r ? { status: r.status, role: r.role, passwordChangeRequired: r.passwordChangeRequired } : null;
+      },
+      familySessions: async (family) => this.#sessions.filter((x) => x.refreshFamily === family && x.terminatedAt === null).map((x) => x.id),
+      terminateSessions: async (ids, reason, now) => {
+        for (const id of [...ids].sort()) {
+          const s = this.#sessions.find((x) => x.id === id);
+          if (!s || s.terminatedAt !== null) continue;
+          patch(s, { terminatedAt: now, terminationReason: reason });
+          const ev = { accountId: s.accountId, sessionId: s.id, reason };
+          this.#terminated.push(ev);
+          undo.push(() => this.#terminated.splice(this.#terminated.indexOf(ev), 1));
+        }
+      },
+      rotateRefresh: async (id, hash, now, idleExpiresAt) => {
+        const s = this.#sessions.find((x) => x.id === id)!;
+        patch(s, { prevRefreshHash: s.refreshHash, refreshHash: hash.toString('hex'), rotatedAt: now, refreshUsed: false, idleExpiresAt });
+      },
+      setRefreshHash: async (id, hash) => {
+        patch(this.#sessions.find((x) => x.id === id)!, { refreshHash: hash.toString('hex') });
+      },
+      recordRefreshHash: async (r) => {
+        const h = r.hash.toString('hex');
+        const had = this.#issued.get(h);
+        this.#issued.set(h, { sessionId: r.sessionId, refreshFamily: r.refreshFamily, expiresAt: r.expiresAt });
+        undo.push(() => (had ? this.#issued.set(h, had) : this.#issued.delete(h)));
+      },
+    };
+  }
+
+  async endSession(accountId: string, sessionId: string, reason: 'LOGOUT', now: number): Promise<boolean> {
+    const s = this.#sessions.find((x) => x.id === sessionId && x.accountId === accountId && x.terminatedAt === null);
+    if (!s) return false;
+    this.#end([s.id], reason, now);
+    return true;
+  }
+
+  async purgeRefreshHashes(before: number): Promise<number> {
+    let n = 0;
+    for (const [h, v] of this.#issued) if (v.expiresAt < before) (this.#issued.delete(h), n++);
+    return n;
+  }
+
+  #end(ids: string[], reason: AdminSessionEndReason, now: number): void {
+    for (const id of [...ids].sort()) {
+      const s = this.#sessions.find((x) => x.id === id);
+      if (!s || s.terminatedAt !== null) continue;
+      Object.assign(s, { terminatedAt: now, terminationReason: reason });
+      this.#terminated.push({ accountId: s.accountId, sessionId: s.id, reason });
+    }
   }
 
   async touchKnownSource(accountId: string, pairRef: string, at: number): Promise<void> {

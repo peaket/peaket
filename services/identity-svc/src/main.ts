@@ -68,7 +68,8 @@ if (!adminPepper && !['local', 'ci'].includes(process.env.PEAKET_ENV ?? 'prod'))
 const adminLists = loadPolicyLists(process.env);
 const adminBreaches = hibpBreachListFromEnv(process.env, adminAuth);
 const adminHumanCheck = turnstileFromEnv(process.env);
-const adminSignals = new PromAdminLoginSignals();
+// 관리 토큰 갱신은 팬과 같은 갱신 지표(aud partner·ops)로 낸다: 재사용 탐지 SEV3 경보가 함께 본다(identity §10.1, BOT-130)
+const adminSignals = new PromAdminLoginSignals({ refreshed: (aud, result) => signals.refreshed(aud, result) });
 // 계정 주인 메일(해제 링크 등): 운영 발송 대행은 정본에 없다 [가정]. local·ci는 PEAKET_ADMIN_MAIL_DIR 파일 대역(BOT-121)
 const adminMailer = adminMailerFromEnv(process.env);
 const consoleOrigins = { partner: process.env.PEAKET_PARTNER_CONSOLE_ORIGIN || 'https://partner.peaket.example', ops: process.env.PEAKET_OPS_CONSOLE_ORIGIN || 'https://console.peaket.example' };

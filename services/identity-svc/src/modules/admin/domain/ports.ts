@@ -162,6 +162,8 @@ export interface AdminLoginSignals {
   failure(aud: AdminAud, reason: AdminLoginFailureReason): void;
   /** SEV3 보안 경보(관측 단계가 경보 규칙을 붙인다) */
   alert(kind: AdminSecurityAlertKind): void;
+  /** 관리 토큰 갱신 결과(팬과 같은 identity_refresh_total 등에 aud partner·ops로, BOT-130). 시험 대역은 빼도 된다 */
+  refreshed?(aud: AdminAud, result: 'rotated' | 'retried' | 'reused' | 'invalid'): void;
 }
 
 // ── TOTP와 로그인 2단계(BUILD_ORDER BOT-120) ──
@@ -302,4 +304,45 @@ export interface AdminSessionStore {
    * 그 단계를 만든 뒤 같은 묶음에서 2단계까지 끝낸 기록(익숙한 출발지)이 있으면 본 시각만 적고 알리지 않는다(false)
    */
   markPasswordOnly(stepId: string, accountId: string, now: number): Promise<boolean>;
+}
+
+/** 관리 세션을 끝내는 이유(asyncapi SessionTerminated.reason 가운데 갱신·로그아웃이 쓰는 것, BOT-130) */
+export type AdminSessionEndReason = 'LOGOUT' | 'REFRESH_REUSE' | 'DELETE' | 'ROLE_CHANGED';
+
+/** 리프레시 토큰 해시로 찾은 관리 세션(팬 RefreshRow와 같은 판정 재료) */
+export interface AdminRefreshRow {
+  id: string;
+  accountId: string;
+  aud: AdminAud;
+  refreshFamily: string;
+  absoluteExpiresAt: number;
+  idleExpiresAt: number;
+  terminatedAt: number | null;
+  /** 지금 토큰, 바로 앞 토큰, 그 패밀리가 예전에 받았던 토큰 */
+  match: 'current' | 'previous' | 'history';
+  rotatedAt: number | null;
+  refreshUsed: boolean;
+}
+
+/** 갱신 한 번의 트랜잭션 안에서 쓰는 것(세션 행을 잠근다) */
+export interface AdminRefreshTx {
+  findByRefreshHash(hash: Buffer): Promise<AdminRefreshRow | null>;
+  accountOf(accountId: string): Promise<{ status: AdminStatus; role: AdminRole; passwordChangeRequired: boolean } | null>;
+  familySessions(refreshFamily: string): Promise<string[]>;
+  /** 세션들을 끝내고 같은 트랜잭션의 마지막 쓰기로 세션 종료 사건을 적는다 */
+  terminateSessions(ids: string[], reason: AdminSessionEndReason, now: number): Promise<void>;
+  /** 회전: 지금 해시를 바로 앞으로 옮기고 새 해시를 둔다. rotated_at = now, refresh_used = false, 유휴 만료를 고친다 */
+  rotateRefresh(sessionId: string, hash: Buffer, now: number, idleExpiresAt: number): Promise<void>;
+  /** 재시도: 지금 해시만 바꾼다 */
+  setRefreshHash(sessionId: string, hash: Buffer): Promise<void>;
+  recordRefreshHash(r: { hash: Buffer; sessionId: string; refreshFamily: string; issuedAt: number; expiresAt: number }): Promise<void>;
+}
+
+export const ADMIN_REFRESH_STORE = Symbol('identity.AdminRefreshStore');
+export interface AdminRefreshStore {
+  refreshTransaction<T>(fn: (tx: AdminRefreshTx) => Promise<T>): Promise<T>;
+  /** 로그아웃: 그 계정의 그 세션이 끝나지 않았으면 끝내고 같은 트랜잭션에 사건을 적는다. 끝냈으면 true */
+  endSession(accountId: string, sessionId: string, reason: 'LOGOUT', now: number): Promise<boolean>;
+  /** 절대 만료가 before보다 이른 발급 해시 기록을 지운다(정비 admin-refresh-hash-expired) */
+  purgeRefreshHashes(before: number): Promise<number>;
 }
