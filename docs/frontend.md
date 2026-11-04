@@ -305,7 +305,7 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 | `/my/tickets`, `/my/tickets/[ticketId]` | 013 | 정적 셸 + CSR + 서비스 워커 | `s-maxage=300` / `max-age=0`, 서비스 워커가 셸을 미리 저장한다 | 티켓 API → IndexedDB | A | ADR-0079 결정 14·18 |
 | `/my/tickets/[ticketId]/transfer`·`/cancel`·`/addons` | 014·038·015 | 요청마다 셸 + CSR | `private, no-store` | 양도·취소·부가 상품 API | B | 서비스 워커 범위 안이지만 네트워크로만 받는다 |
 | `/my/orders*`, `/my/transfers/*`, `/my/compensations/*`, `/my/refunds/*`, `/my/appeals/*`, `/my/likes`, `/my/settings*`, `/staff` | 055·041·043·060·042·054·017·040·061 | 요청마다 셸 + CSR | `private, no-store` | 각 API | B | 알림 링크로 들어와도 서버는 쿠키로 로그인 여부를 정하지 않는다. 화면 스크립트가 401을 받으면 로그인 뒤 같은 주소로 돌아온다 |
-| `/verify/return` | 006 | 요청마다(기관이 POST로 보낸 결과 값을 받는 서버 처리기, 값은 저장·로그하지 않는다) + CSR | `private, no-store` | 본인확인 결과 경로 | A, `no-referrer` | 결과는 `BroadcastChannel`로 알리고 창을 닫는다 |
+| `/verify/return` | 006 | 요청마다(기관이 POST로 보낸 결과 값을 받는 서버 처리기, 값은 저장·로그하지 않는다) + CSR | `private, no-store` | 본인확인 결과 경로 | A, `no-referrer` | 결과는 `BroadcastChannel`로 알리고 창을 닫는다. COOP는 `unsafe-none`이다(기관 화면에서 넘어와도 부르는 화면과 창 관계를 잃지 않게, docs/features/identity.md §5, 추천 적용 2026-11-04) |
 | `/staff/invitations`, `/staff/approve` | 050·051 | 정적 셸 + CSR | `s-maxage=300` / `max-age=0` | 조회·수락·승인 API | A, `no-referrer` | URL 조각은 바로 지운다(ADR-0065 결정 10) |
 | `/login`, `/login/link`, `/signup/consent` | 004·039·005 | 요청마다(앱 서버 로그인 경로) | `private, no-store` | 소셜 로그인(얇은 OIDC 클라이언트, ADR-0119), 연결 제안 | B | 로그인 진행 쿠키와 연결 제안 쿠키는 앱 서버만 읽는다 |
 | `/shop`, `/shop/[productId]` | 015 | ISR(`cacheTag('product:{id}')`, 300초) | 위 ISR과 같다 | 상품 목록(공개) | A | docs/design/d5의 ISR 제안을 채택했다(추천 적용, ADR-0079) |
@@ -696,7 +696,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 부스 재발급 | `POST /v1/identity/booth-reverifications` → `POST /v1/tickets/{ticketId}/booth-requests` | 부스 코드 QR 10분, 허용된 뒤 `reason: BOOTH`로 등록 |
 | 양도 | `POST /v1/transfer-recipient-lookups` → 재인증 → `POST /v1/tickets/{ticketId}/transfers` | 참조값 10분 > 재인증 5분 순서(정본) |
 | 예매 취소 | `GET …/cancellation-quote` → 재인증 → `POST …/cancellation` | 환불 계좌는 저장하지 않고 요청 본문으로만 보낸다 |
-| 본인확인 | 버튼 동작 안에서 빈 창 열기 → `POST /v1/identity/verifications` → 창에 기관 양식 제출 → 복귀 화면이 `POST …/result` → `BroadcastChannel('peaket.verify')`로 `{verificationId, status}`만 알린다 | 메시지가 없으면 `GET …/result`로 확인한다. 끝나면 토큰을 바로 갱신해, 다음 요청에 `ticket:buy`를 싣는다 |
+| 본인확인 | 버튼 동작 안에서 빈 창 열기 → `POST /v1/identity/verifications` → 창에 기관 양식 제출 → 복귀 화면이 `POST …/result` → `BroadcastChannel('peaket.verify')`로 `{verificationId, status}`만 알린다 | 메시지가 없으면 `GET …/result`로 확인한다. 끝나면 토큰을 바로 갱신해, 다음 요청에 `ticket:buy`를 싣는다. 부르는 화면은 맞는 메시지에 받은 표시(`ack`)를 돌려주고 화면은 조회 값으로만 그린다. 받은 표시가 없으면 복귀 화면은 페이지 이동으로 보고 `next`로 간다(docs/features/identity.md §5 '모의 기관과 기관 창 흐름', 추천 적용 2026-11-04) |
 | 웹 푸시 구독 등록(추천 적용 2026-10-30, docs/features/notify.md §3.4) | 권한을 받은 버튼 동작 안에서 웹 푸시 워커 등록(`/push/sw.js`, 범위 `/push/`, §5.4)의 `pushManager.subscribe()` → `POST /v1/push-subscriptions`(`{endpoint, keys: {p256dh, auth}, expirationTime}`, 본문으로만) | 201·200이면 끝이다. 422 `push-service-not-allowed`면 "이메일로 알려 드립니다"를 보인다. 구독 주소는 주소창·로그·저장소 밖으로 내지 않는다(서버 응답의 `subscriptionKey`도 저장하지 않는다) |
 | 웹 푸시 다시 묶기(로그인 뒤) | 로그인이 끝나 앱 셸이 다시 그려질 때, `Notification.permission`이 허용이고 웹 푸시 워커 등록(`getRegistration('/push/')`)의 `getSubscription()`이 구독을 주면 `POST /v1/push-subscriptions`로 지금 계정에 묶는다. `peaket-push`의 `pending`이 있으면 그 구독을 먼저 등록하고 지운다 | 권한을 새로 묻지 않으므로 사용자 조작이 필요 없다. 실패하면 다음 화면 열림에 한 번 더 한다. 그래서 한 기기를 여러 사람이 쓰면 마지막에 로그인한 사람의 알림만 간다 |
 | 웹 푸시 해제(로그아웃 때) | `DELETE /v1/push-subscriptions/{subscriptionKey}`를 로그아웃 요청보다 먼저 | §5.14.4 2번 |
@@ -1380,7 +1380,7 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 | 헤더 | 소비자 웹 | 좌석 화면 | 결제 화면 | 파트너 | 관제 | 스캐너 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `Referrer-Policy` | `strict-origin-when-cross-origin`, 복귀·스태프 화면은 `no-referrer` | 기본 | `no-referrer` | `no-referrer` | `no-referrer` | `no-referrer` |
-| `Cross-Origin-Opener-Policy` | `same-origin-allow-popups`(본인확인 새 창) | `same-origin`(이 화면은 새 창을 열지 않는다) | `same-origin-allow-popups`(소비자 웹 기본값, 결제창은 페이지 이동) | `same-origin` | `same-origin` | `same-origin` |
+| `Cross-Origin-Opener-Policy` | `same-origin-allow-popups`(본인확인 새 창). 예외: 본인확인 복귀 화면 `/verify/return`은 `unsafe-none`(기관 화면에서 넘어올 때 창 관계가 끊기지 않게, docs/features/identity.md §5, 추천 적용 2026-11-04) | `same-origin`(이 화면은 새 창을 열지 않는다) | `same-origin-allow-popups`(소비자 웹 기본값, 결제창은 페이지 이동) | `same-origin` | `same-origin` | `same-origin` |
 | `Cross-Origin-Embedder-Policy` | 없다 | 없다(좌석 상태를 메시지로만 받는다, 추천 적용 2026-10-28, 기술 검토 중간-015) | 없다 | 없다 | 없다(포렌식 리플레이 2단계 `/forensics`만 `require-corp`) | 없다 |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), usb=(), serial=(), hid=(), bluetooth=()` | 같다 | 같다(`payment`는 두지 않는다. 결제사 수단과 호환하려고) | 같다 | 같다 | `camera=(self)`, 나머지는 끈다 |
 

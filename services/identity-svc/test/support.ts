@@ -1,6 +1,8 @@
 // 시험 도구: 고정 시계, 시험용 팬 토큰 키(매번 새로 만든다), 운영 신호 기록, 유스케이스 묶음.
 import { createHmac, randomBytes } from 'node:crypto';
-import { type FakeClock, fakeClock } from '@peaket/platform';
+import { type Clock, type FakeClock, fakeClock } from '@peaket/platform';
+import { sealTestAgencyResult, type TestAgencyOutcome } from '../src/modules/verification/adapters/test-agency.js';
+import { TestVerificationProvider } from '../src/modules/verification/adapters/test-verification-provider.js';
 import { exportJWK, generateKeyPair, type JWK } from 'jose';
 import { CreateSession } from '../src/modules/session/application/create-session.js';
 import { EndSession } from '../src/modules/session/application/end-session.js';
@@ -67,6 +69,25 @@ export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: F
     reauth: new IssueReauthToken(store, signer, signals, clock),
     refresh: new RefreshSession(store, signer, signals, o.claims ?? noClaims, clock),
   };
+}
+
+/** 시험 기관 비밀과 모의 기관 주소(docs/features/identity.md §5 '모의 기관과 기관 창 흐름') */
+export const AGENCY_SECRET = Buffer.alloc(32, 3);
+export const AGENCY_URL = 'http://127.0.0.1:18920/verify';
+
+/** 시험 어댑터(모의 기관 결과만 믿는다). 시계는 결과 값의 만든 시각을 보는 데 쓴다 */
+export const testAgency = (clock: Clock, mode: 'POPUP' | 'REDIRECT' = 'POPUP'): TestVerificationProvider =>
+  new TestVerificationProvider({ secret: AGENCY_SECRET, agencyUrl: AGENCY_URL, mode, clock });
+
+/** 모의 기관이 돌려줄 결과 값(서명함). person이 있으면 VERIFIED, 없으면 outcome */
+export function agencyResult(
+  clock: Clock,
+  verificationId: string,
+  o: { person?: string; outcome?: TestAgencyOutcome; birth?: string; iatMs?: number },
+  secret: Uint8Array = AGENCY_SECRET,
+): Record<string, string> {
+  const outcome = o.outcome ?? (o.person === undefined ? 'FAILED' : 'VERIFIED');
+  return sealTestAgencyResult(secret, { v: 1, tx: verificationId, outcome, person: o.person, birth: o.birth, iat: o.iatMs ?? clock.now() });
 }
 
 let n = 0;

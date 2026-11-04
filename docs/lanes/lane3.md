@@ -6,11 +6,18 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-010(wbs 3.1.1 ①)부터 한다: 구간 1 갈래 3(본인확인·탈퇴·계정 연결·조사용 값 → 파트너·운영자 인증·관리 계정·보안 판정).
+- BOT-020(wbs 3.1.1 ②): 연계정보·pid 키 버전(KMS 포트와 로컬 대역), 만 14세 재확인(모의 기관의 서명한 결과에 생년월일이 이미 있다), 다른 계정 시도 기록 `identity_conflict_attempt`, pid 키 전환과 queue-svc `X-User-Pid-Prev`, 고위험 재인증의 REVERIFY 재통과. 그 뒤 구간 1 갈래 3(탈퇴·계정 연결·조사용 값 → 파트너·운영자 인증·관리 계정·보안 판정).
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
-- (아직 없음) 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
+- 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
+- BOT-010: 복귀 화면의 결과 확정이 401이고 갱신도 안 되면 `/login?next=/verify/return`으로 가 기관 값을 잃고 그 건은 처리 중으로 남는다. 로그인 next를 첫 화면으로 하거나 실패를 알리고 [다시 시도]로 안내한다(apps/web/src/features/identity-verify/flow.ts `runReturnFlow`)
+- BOT-010: 결과의 `next`가 본인확인 부품이 없는 화면이면 탭 저장소 `peaket.verify.return`이 남아, 1일 안에 다른 화면에서 지난 결과 대화상자가 뜰 수 있다. 저장 시각과 짧은 기한을 둔다(flow.ts)
+- BOT-010: 마이그레이션 0005의 '따로 트랜잭션' 주석은 운영 실행기(BAS-060)에서만 맞고, 로컬 Drizzle 실행기는 0004·0005를 한 트랜잭션으로 돌린다. 주석을 고치거나 검증 파일을 정비 시간 묶음으로 옮긴다(services/identity-svc/migrations/0005_verification_provider_down_validate.sql)
+- BOT-010: demo에서 쓸 기관이 없다. 시험 어댑터는 demo에서 켜지는데(비밀 필수) 모의 기관은 local·ci에서만 돈다. 정본에 demo 기관을 정하거나 어댑터의 demo 허용을 뺀다(docs/features/identity.md §5, services/identity-svc/scripts/mock-idv.mjs)
+- BOT-010: 쿼리로 돌려주는 기관이면 결과 값이 CDN·Envoy 접근 로그의 요청 줄에 남을 수 있다. `/verify/return`의 쿼리를 접근 로그에서 지우는 규칙을 정본에 적는다(docs/infra.md 접근 로그, HOT-290과 맞춘다)
+- BOT-010: 늦은 메시지를 듣는 10분 타이머를 `cancel()` 때 지우지 않는다(해는 없고 메모리를 잠깐 잡는다), 브라우저의 Web Locks 연결(`refreshLock`)을 직접 보는 시험이 없다(flow.ts, browser.ts)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
+- 2026-11-04 BOT-010 모의 기관과 기관 창 흐름(R-267, I-T45): 서명한 결과만 믿는 시험 어댑터·모의 기관, 결과 때 기관 장애는 PROVIDER_DOWN으로 마침, 부르는 화면의 실제 창 흐름(팝업·차단 대체·REDIRECT, 받은 표시, 늦은 메시지, 갱신 잠금), 복귀 화면 처리기(proxy.ts, COOP unsafe-none), 로컬 게이트웨이 대역. 브라우저 확인은 Playwright로 대신(Chrome 연결 없음).

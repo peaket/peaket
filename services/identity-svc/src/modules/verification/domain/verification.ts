@@ -3,7 +3,9 @@
 export const PURPOSES = ['FIRST', 'REVERIFY', 'MINOR_CONTRACT'] as const;
 export type Purpose = (typeof PURPOSES)[number];
 
-export type AttemptStatus = 'PENDING' | 'VERIFIED' | 'CANCELLED' | 'FAILED' | 'DUPLICATE_ACCOUNT';
+/** PROVIDER_DOWN은 결과 경로에서 기관 장애를 만난 건이다(그 건은 마치고, [다시 시도]는 새 건으로 한다. identity §5 '모의 기관과 기관 창 흐름') */
+export const ATTEMPT_STATUSES = ['PENDING', 'VERIFIED', 'CANCELLED', 'FAILED', 'DUPLICATE_ACCOUNT', 'PROVIDER_DOWN'] as const;
+export type AttemptStatus = (typeof ATTEMPT_STATUSES)[number];
 
 /** 시작 뒤 결과를 받는 시간 10분 [가정], 확정한 결과를 조회하는 시간 1일 [가정](docs/data.md verification_attempt) */
 export const ATTEMPT_TTL_MS = 10 * 60_000;

@@ -5,20 +5,29 @@ import { Writable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { CreateSession, JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
-import { HmacIdentityHashers, TestVerificationProvider } from '../src/modules/verification/index.js';
-import { fanKey, ISSUER, newKey, recordingSignals, testDeviceRefs } from './support.js';
+import { HmacIdentityHashers } from '../src/modules/verification/index.js';
+import { AGENCY_URL, agencyResult, fanKey, ISSUER, newKey, recordingSignals, testAgency, testDeviceRefs } from './support.js';
 
 let svc: Awaited<ReturnType<typeof createService>>;
-const quiet = new Writable({ write: (_c, _e, cb) => cb() });
+const clock = fakeClock({ now: Date.parse('2026-11-03T03:00:00Z') });
+/** 서비스 로그(정규 로그 줄)를 모은다: 기관 결과 값이 로그에 남지 않는지 본다(I-T45) */
+const logLines: string[] = [];
+const quiet = new Writable({
+  write: (c, _e, cb) => {
+    logLines.push(String(c));
+    cb();
+  },
+});
 
 beforeAll(async () => {
   const fan = await fanKey();
   const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(fan.privateJwk) });
   svc = await createService({
     name: 'identity-svc',
-    module: AppModule.register({ memory: true, session: { signer: new JoseTokenSigner(keys, ISSUER), keys, deviceRefs: testDeviceRefs(), signals: recordingSignals(), cookieDomain: 'peaket.example' }, verification: { provider: new TestVerificationProvider(Buffer.alloc(32, 3), 'https://www.peaket.test'), hashers: new HmacIdentityHashers(Buffer.alloc(32, 4), Buffer.alloc(32, 5)) } }),
-    env: { PEAKET_ENV: 'ci' },
-    clock: fakeClock({ now: Date.parse('2026-11-03T03:00:00Z') }),
+    module: AppModule.register({ memory: true, session: { signer: new JoseTokenSigner(keys, ISSUER), keys, deviceRefs: testDeviceRefs(), signals: recordingSignals(), cookieDomain: 'peaket.example' }, verification: { provider: testAgency(clock), hashers: new HmacIdentityHashers(Buffer.alloc(32, 4), Buffer.alloc(32, 5)) } }),
+    // 정규 로그 줄을 모두 남긴다(표본 1/1): 기관 결과 값이 로그에 없는지 본다
+    env: { PEAKET_ENV: 'ci', PEAKET_LOG_SAMPLE_ONE_IN: '1' },
+    clock,
     logDestination: quiet,
   });
 });
@@ -85,8 +94,8 @@ describe('본인확인 경로(시험 어댑터)', () => {
     const start = await svc.http.inject({ method: 'POST', url: '/v1/identity/verifications', headers: h, payload: JSON.stringify({ next: '/booking/e-1' }) });
     expect(start.statusCode).toBe(201);
     const { verificationId, window } = JSON.parse(start.payload) as { verificationId: string; window: { url: string } };
-    expect(window.url).toBe('https://www.peaket.test/verify/return');
-    const done = await svc.http.inject({ method: 'POST', url: `/v1/identity/verifications/${verificationId}/result`, headers: h, payload: JSON.stringify({ providerResult: { testPerson: 'http-1' } }) });
+    expect(window.url).toBe(AGENCY_URL);
+    const done = await svc.http.inject({ method: 'POST', url: `/v1/identity/verifications/${verificationId}/result`, headers: h, payload: JSON.stringify({ providerResult: agencyResult(clock, verificationId, { person: 'http-1' }) }) });
     expect(done.statusCode).toBe(200);
     expect(done.headers['cache-control']).toBe('no-store');
     expect(JSON.parse(done.payload)).toEqual({ verificationId, purpose: 'FIRST', status: 'VERIFIED', next: '/booking/e-1', restrictedUntil: null });
@@ -105,7 +114,7 @@ describe('본인확인 경로(시험 어댑터)', () => {
     const go = async (s: { accountId: string; sessionId: string }) => {
       const st = await svc.http.inject({ method: 'POST', url: '/v1/identity/verifications', headers: fan(s.accountId, s.sessionId), payload: JSON.stringify({ next: '/' }) });
       const id = (JSON.parse(st.payload) as { verificationId: string }).verificationId;
-      return svc.http.inject({ method: 'POST', url: `/v1/identity/verifications/${id}/result`, headers: fan(s.accountId, s.sessionId), payload: JSON.stringify({ providerResult: { testPerson: 'http-dup' } }) });
+      return svc.http.inject({ method: 'POST', url: `/v1/identity/verifications/${id}/result`, headers: fan(s.accountId, s.sessionId), payload: JSON.stringify({ providerResult: agencyResult(clock, id, { person: 'http-dup' }) }) });
     };
     expect((await go(a)).statusCode).toBe(200);
     const dup = await go(b);
@@ -113,6 +122,29 @@ describe('본인확인 경로(시험 어댑터)', () => {
     expect(JSON.parse(dup.payload).type).toBe('https://peaket.example/problems/duplicate-account');
     const bad = await svc.http.inject({ method: 'POST', url: '/v1/identity/verifications', headers: fan(b.accountId, b.sessionId), payload: JSON.stringify({ next: '//evil.example' }) });
     expect(bad.statusCode).toBe(400);
+  });
+});
+
+describe('기관 결과 값과 로그', () => {
+  test('I-T45_ASVS v5.0.0-16.2.5_결과경로에보낸기관값(result·mac)은_서비스로그에0건이다', async () => {
+    const s = await login();
+    const h = { 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'content-type': 'application/json' };
+    const st = await svc.http.inject({ method: 'POST', url: '/v1/identity/verifications', headers: h, payload: JSON.stringify({ next: '/' }) });
+    const id = (JSON.parse(st.payload) as { verificationId: string }).verificationId;
+    // 서명이 틀린 결과(기관 값 확인이 실패하는 길)는 따로 시작한 건으로 보낸다
+    const st2 = await svc.http.inject({ method: 'POST', url: '/v1/identity/verifications', headers: h, payload: JSON.stringify({ next: '/' }) });
+    const id2 = (JSON.parse(st2.payload) as { verificationId: string }).verificationId;
+    const sealed = agencyResult(clock, id, { person: 'log-check', birth: '2001-02-03' });
+    const forged = agencyResult(clock, id2, { person: 'log-forged', birth: '2002-03-04' });
+    forged.mac = forged.mac!.replace(/.$/, forged.mac!.endsWith('A') ? 'B' : 'A');
+    const before = logLines.length;
+    const ok = await svc.http.inject({ method: 'POST', url: `/v1/identity/verifications/${id}/result`, headers: h, payload: JSON.stringify({ providerResult: sealed }) });
+    expect(JSON.parse(ok.payload).status).toBe('VERIFIED');
+    const bad = await svc.http.inject({ method: 'POST', url: `/v1/identity/verifications/${id2}/result`, headers: h, payload: JSON.stringify({ providerResult: forged }) });
+    expect(JSON.parse(bad.payload).status).toBe('FAILED');
+    const logged = logLines.slice(before).join('');
+    expect(logged).toContain('/v1/identity/verifications/');
+    for (const v of [sealed.result!, sealed.mac!, forged.result!, forged.mac!, 'log-check', 'log-forged', '2001-02-03', '2002-03-04']) expect(logged).not.toContain(v);
   });
 });
 

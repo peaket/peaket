@@ -3,6 +3,7 @@
 // 나머지 상태는 보드처럼 부르는 화면(공연 상세 · 마이 티켓 부스 재발급 · 추가 검증)을 그리고 그 위에 기관 창·결과 대화상자를 연다.
 // 부르는 화면의 [휴대폰 본인확인]은 실제로 눌러 볼 수 있다(@/features/identity-verify). 상태는 ?state=(보드 state 값), 다크는 ?theme=dark.
 import Link from 'next/link';
+import { headers } from 'next/headers';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
 import { Stepper } from '@peaket/ds/Stepper';
 import { ME, type MeSummary } from '@/entities/me';
@@ -11,6 +12,7 @@ import { getProduction, ProductionPoster, type Production } from '@/entities/pro
 import { DEMO_TICKET_ID, getTicket } from '@/entities/ticket';
 import { getVenue } from '@/entities/venue';
 import { VERIFY_PURPOSE_TEXT, VerifyFlowProvider, VerifyShow, VerifyTrigger, VerifyWaitingStatus } from '@/features/identity-verify';
+import { decodeAgencyFields, RETURN_HEADER } from '@/features/identity-verify/server/return-post';
 import { OpenAlertToggle } from '@/features/open-alert';
 import { queueRoomHref } from '@/shared/config/origins';
 import { SCR006_STATES } from '@/shared/config/screens.account';
@@ -19,6 +21,7 @@ import type { PageProps } from '@/shared/lib/page-props';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { verifyView } from '../model/state';
+import { VerifyReturnLive } from './VerifyReturnLive';
 
 /** 데스크톱 보드 머리의 '새 사용자'(가입 직후 본인확인 전 팬) */
 const NEW_FAN: MeSummary = { ...ME, id: 'fan-new', name: '새 사용자', avatarText: '새', verified: false, likedProductionIds: [], openAlertProductionIds: [] };
@@ -37,9 +40,14 @@ export async function VerifyReturnPage({ searchParams }: PageProps) {
   const when = `${perf.label} · ${venueName}`;
 
   if (v.caller === 'return') {
+    // 상태 미리보기(?state=)가 아니면 실제 복귀 화면이다: 서버 처리기(apps/web/proxy.ts)가 넘긴 기관 값을 스크립트에 싣는다.
+    // 값은 React가 화면 데이터로 직렬화한다(`</script>`·U+2028 등 이스케이프, ASVS v5.0.0-1.2.3). 저장·로그하지 않는다
+    const live = sp.state === undefined;
+    const posted = live ? decodeAgencyFields((await headers()).get(RETURN_HEADER)) : null;
     return (
       // 복귀 화면은 로고만 있는 머리, 바닥글 없음(보드 SCR-006 '복귀 화면')
       <AppShell variant="minimal" dark={dark} footer={false}>
+        {live ? <VerifyReturnLive posted={posted} /> : null}
         <main className="page-main" id="main" tabIndex={-1}>
           <div className="center px-8 py-[120px] md:py-[160px]" style={{ flex: 1 }}>
             <h1 className="sr-only">본인확인 결과 확인</h1>

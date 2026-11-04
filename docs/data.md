@@ -115,7 +115,7 @@ erDiagram
         uuid account_id FK "시작한 계정. 다른 계정의 결과 확정·조회는 404"
         text purpose "FIRST|REVERIFY|MINOR_CONTRACT"
         text next "결과를 보인 뒤 돌아갈 같은 출처 경로(safeNext 규칙)"
-        text status "PENDING|VERIFIED|CANCELLED|FAILED|DUPLICATE_ACCOUNT"
+        text status "PENDING|VERIFIED|CANCELLED|FAILED|DUPLICATE_ACCOUNT|PROVIDER_DOWN(결과 경로에서 기관 장애를 만난 건, 추천 적용 2026-11-04, BUILD_ORDER BOT-010)"
         timestamptz expires_at "시작 + 10분 [가정]. 지나면 결과를 받지 않는다"
         timestamptz created_at
         timestamptz completed_at "확정 시각. 결과는 1일 [가정] 조회하고 지운다"

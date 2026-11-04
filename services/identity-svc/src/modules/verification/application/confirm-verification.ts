@@ -37,11 +37,23 @@ export class ConfirmVerification {
     try {
       outcome = await this.provider.confirm(i.verificationId, i.providerResult);
     } catch (e) {
-      if (e instanceof ProviderUnavailable) throw new VerificationError('PROVIDER_DOWN', '본인확인기관을 쓸 수 없다');
-      throw e;
+      if (!(e instanceof ProviderUnavailable)) throw e;
+      // 기관 장애: 그 건을 PROVIDER_DOWN으로 마친다(결과 조회가 같은 값을 주고, 다시 보내도 503이다)
+      return this.#answer(await this.#settle(i.verificationId, 'PROVIDER_DOWN', now));
     }
     const done = await this.#confirm(i.verificationId, outcome, now);
     return this.#answer(done);
+  }
+
+  /** 처리 중인 건만 그 상태로 마친다(이미 마쳤으면 그 결과) */
+  #settle(verificationId: string, status: Exclude<AttemptStatus, 'PENDING'>, now: number): Promise<Attempt> {
+    return this.store.transaction(async (tx) => {
+      const a = await tx.attemptForUpdate(verificationId);
+      if (!a) throw new VerificationError('NOT_FOUND', '없는 건이다');
+      if (a.status !== 'PENDING') return a;
+      await tx.completeAttempt(a.id, status, now);
+      return { ...a, status, completedAt: now };
+    });
   }
 
   async #confirm(verificationId: string, outcome: Awaited<ReturnType<VerificationProvider['confirm']>>, now: number): Promise<Attempt> {
@@ -95,6 +107,7 @@ export class ConfirmVerification {
 
   #answer(a: Attempt): VerificationResultView {
     if (a.status === 'DUPLICATE_ACCOUNT') throw new VerificationError('DUPLICATE_ACCOUNT', '이미 다른 계정에서 본인확인한 분이다');
+    if (a.status === 'PROVIDER_DOWN') throw new VerificationError('PROVIDER_DOWN', '본인확인기관을 쓸 수 없다');
     return viewOf(a);
   }
 }

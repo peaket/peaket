@@ -15,6 +15,11 @@ export const ORIGINS = {
   scanner: process.env.NEXT_PUBLIC_SCANNER_ORIGIN || (DEV ? dev(3003) : 'https://scanner.peaket.example'),
   queueRoom: DEV ? dev(3004) : '',
   forensics: process.env.NEXT_PUBLIC_FORENSICS_ORIGIN || (DEV ? dev(3005) : 'https://console.peaket.example/forensics'),
+  /**
+   * 팬 API(gw-fan) 출처(docs/frontend.md §2.1 `api`). 개발 서버에서 값이 없으면 비워 두고, 그때 본인확인 버튼은 퍼블리싱용 시험 창을 연다.
+   * 로컬에서 실제 흐름을 돌릴 때는 게이트웨이 대역(scripts/local-fan-gateway.mjs) 주소를 넣는다(docs/features/identity.md §5)
+   */
+  api: process.env.NEXT_PUBLIC_API_ORIGIN || (DEV ? '' : 'https://api.peaket.example'),
 } as const;
 
 /** 대기실(로비·대기열, SCR-007·008·018) 주소. 대기실 경량 페이지는 별도 빌드(apps/web/queue-room)이고 운영에서는 같은 출처의 `/queue/{id}`다 */

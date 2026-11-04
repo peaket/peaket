@@ -40,3 +40,14 @@
 | `PEAKET_COOKIE_DOMAIN` | 비운다(운영은 `peaket.example`) |
 
 로그인 화면은 `/login`(SCR-004)이다. 기본 상태(`?state=` 없음)에서 버튼이 로그인 시작 폼이다.
+
+## 휴대폰 본인확인을 로컬에서 돌려 보기(BUILD_ORDER BOT-010)
+
+실제 본인확인기관 없이 모의 기관으로 기관 창 흐름 전체(팝업·페이지 이동·POST 본문 복귀·쿼리 복귀)를 돌린다(docs/features/identity.md §5 '모의 기관과 기관 창 흐름', I-T45). 위 '소셜 로그인을 로컬에서 돌려 보기'의 스택에 셋을 더한다.
+
+1. 모의 기관: `PEAKET_ENV=local PEAKET_TEST_VERIFICATION_RETURN_URL=<웹 출처>/verify/return node services/identity-svc/scripts/mock-idv.mjs 18920`. 비밀은 identity-svc와 같은 `PEAKET_TEST_VERIFICATION_SECRET`(base64)이고, 없으면 둘 다 개발용 값을 쓴다.
+2. identity-svc에 더하는 값: `PEAKET_VERIFICATION_PROVIDER=test`, `PEAKET_TEST_VERIFICATION_URL=http://127.0.0.1:18920/verify`, `PEAKET_CI_HMAC_KEY`·`PEAKET_PID_HMAC_KEY`(base64 32바이트), 페이지 이동 방식 기관을 흉내 내려면 `PEAKET_TEST_VERIFICATION_MODE=REDIRECT`.
+3. 게이트웨이 대역(로컬에는 gw-fan이 없다): `PEAKET_ENV=local PEAKET_IDENTITY_HTTP=http://127.0.0.1:<identity 앱 포트> PEAKET_WEB_ORIGIN=<웹 출처> PEAKET_FAN_TOKEN_JWKS_URL=http://127.0.0.1:<identity 앱 포트>/internal/jwks/fan.json PEAKET_TOKEN_ISSUER=<발급자> node apps/web/scripts/local-fan-gateway.mjs 18930`.
+4. 소비자 웹은 빌드할 때 `NEXT_PUBLIC_API_ORIGIN=http://localhost:18930`을 준다. 쿠키가 `localhost` 이름에 붙으므로 `127.0.0.1`이 아니라 `localhost`로 적는다. 이 값이 없으면 개발 서버의 본인확인 버튼은 퍼블리싱용 시험 창을 연다.
+
+로그인한 뒤 공연 상세(`/events/evt-lumen-1025`)에서 [휴대폰 본인확인]을 누르면 모의 기관 창이 열린다. 이름표가 같으면 같은 사람이라, 다른 계정에서 같은 이름표로 하면 '다른 계정의 본인'이 나온다.

@@ -6,11 +6,10 @@ import { migrateIdentity } from '../scripts/migrate.mjs';
 import { DrizzleSessionStore } from '../src/modules/session/adapters/db/drizzle-session-store.js';
 import { DrizzleVerificationStore } from '../src/modules/verification/adapters/db/drizzle-verification-store.js';
 import { HmacIdentityHashers } from '../src/modules/verification/adapters/hmac-identity-hashers.js';
-import { TestVerificationProvider } from '../src/modules/verification/adapters/test-verification-provider.js';
 import { VerificationClaims } from '../src/modules/verification/adapters/verification-claims.js';
 import { ConfirmVerification } from '../src/modules/verification/application/confirm-verification.js';
 import { StartVerification } from '../src/modules/verification/application/start-verification.js';
-import { kit, newKey } from '../test/support.js';
+import { agencyResult, kit, newKey, testAgency } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 let pg: PostgresContainer;
@@ -31,7 +30,7 @@ afterAll(async () => {
 async function setup() {
   const verifications = new DrizzleVerificationStore(database);
   const k = await kit(new DrizzleSessionStore(database, systemClock), { claims: new VerificationClaims(verifications) });
-  const provider = new TestVerificationProvider(Buffer.alloc(32, 3), 'https://www.peaket.test');
+  const provider = testAgency(k.clock);
   const hashers = new HmacIdentityHashers(Buffer.alloc(32, 4), Buffer.alloc(32, 5));
   return { k, start: new StartVerification(verifications, provider, k.clock), confirm: new ConfirmVerification(verifications, provider, hashers, k.clock) };
 }
@@ -40,7 +39,7 @@ test('FR002_PostgreSQL에서도_본인확인뒤갱신토큰에ticket:buy와pid�
   const t = await setup();
   const s = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: `pv-${newKey().slice(0, 8)}`, email: null, deviceId: null });
   const st = await t.start.run({ accountId: s.accountId, purpose: 'FIRST', next: '/' });
-  expect((await t.confirm.run({ accountId: s.accountId, verificationId: st.verificationId, providerResult: { testPerson: `pg-${s.accountId}` } })).status).toBe('VERIFIED');
+  expect((await t.confirm.run({ accountId: s.accountId, verificationId: st.verificationId, providerResult: agencyResult(t.k.clock, st.verificationId, { person: `pg-${s.accountId}` }) })).status).toBe('VERIFIED');
   const r = await t.k.refresh.run({ refreshToken: s.refreshToken });
   if (r.result !== 'OK') throw new Error(r.result);
   expect(decodeJwt(r.accessToken)).toMatchObject({ scope: 'ticket:buy', pid: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
@@ -51,7 +50,7 @@ test('I-T6_같은사람이두계정에서동시에확정해도_한계정만본�
   const person = `race-${newKey().slice(0, 8)}`;
   const accounts = await Promise.all([1, 2].map(() => t.k.create.run({ idempotencyKey: newKey(), provider: 'naver', providerUserId: `pr-${newKey().slice(0, 8)}`, email: null, deviceId: null })));
   const attempts = await Promise.all(accounts.map((a) => t.start.run({ accountId: a.accountId, purpose: 'FIRST', next: '/' })));
-  const results = await Promise.allSettled(accounts.map((a, i) => t.confirm.run({ accountId: a.accountId, verificationId: attempts[i]!.verificationId, providerResult: { testPerson: person } })));
+  const results = await Promise.allSettled(accounts.map((a, i) => t.confirm.run({ accountId: a.accountId, verificationId: attempts[i]!.verificationId, providerResult: agencyResult(t.k.clock, attempts[i]!.verificationId, { person }) })));
   expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
   // 늦은 쪽은 UNIQUE에 걸려도 500이 아니라 DUPLICATE_ACCOUNT(409)다
   expect(results.filter((r) => r.status === 'rejected').map((r) => (r as PromiseRejectedResult).reason.code)).toEqual(['DUPLICATE_ACCOUNT']);
@@ -72,7 +71,16 @@ test('FR002_한계정의건둘을동시에확정해도_500없이둘다같은사�
   const s = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: `pd-${newKey().slice(0, 8)}`, email: null, deviceId: null });
   const [a, b] = await Promise.all([t.start.run({ accountId: s.accountId, purpose: 'FIRST', next: '/' }), t.start.run({ accountId: s.accountId, purpose: 'FIRST', next: '/' })]);
   const person = `same-${newKey().slice(0, 8)}`;
-  const rs = await Promise.all([a, b].map((x) => t.confirm.run({ accountId: s.accountId, verificationId: x.verificationId, providerResult: { testPerson: person } })));
+  const rs = await Promise.all([a, b].map((x) => t.confirm.run({ accountId: s.accountId, verificationId: x.verificationId, providerResult: agencyResult(t.k.clock, x.verificationId, { person }) })));
   expect(rs.map((r) => r.status)).toEqual(['VERIFIED', 'VERIFIED']);
 });
 
+
+test('I-T45_PostgreSQL에서도_기관장애로마친건은PROVIDER_DOWN으로남는다', async () => {
+  const t = await setup();
+  const s = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: `pdown-${newKey().slice(0, 8)}`, email: null, deviceId: null });
+  const st = await t.start.run({ accountId: s.accountId, purpose: 'FIRST', next: '/' });
+  await expect(t.confirm.run({ accountId: s.accountId, verificationId: st.verificationId, providerResult: agencyResult(t.k.clock, st.verificationId, { outcome: 'DOWN' }) })).rejects.toMatchObject({ code: 'PROVIDER_DOWN' });
+  const row = (await database.db.execute(`select status, completed_at is not null as done from verification_attempt where id = '${st.verificationId}'`)).rows[0] as { status: string; done: boolean };
+  expect(row).toEqual({ status: 'PROVIDER_DOWN', done: true });
+});

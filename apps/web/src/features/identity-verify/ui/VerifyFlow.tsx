@@ -5,10 +5,14 @@
 //   d5 §5.6 '시연 흉내 방법'대로 결과를 고르는 시험 버튼을 둔다(추천안). 상태 미리보기(?state=)로 연 창은 보드 그대로 aria-hidden이다.
 // - 결과 대화상자는 휴대폰 시트, md 이상 대화상자(WebShellModal). 닫으면 초점이 연 버튼으로 돌아간다(d3 SCR-006 접근성).
 // - 부르는 화면은 VerifyFlowProvider로 감싸고 VerifyTrigger·VerifyWaitingStatus·VerifyShow를 둔다. 버튼 하나만 이으면 VerifyIdentityButton.
+// - 실제 흐름(BUILD_ORDER BOT-010, docs/features/identity.md §5 '모의 기관과 기관 창 흐름'): 팬 API 출처가 있고 상태 미리보기가 아니면
+//   버튼이 진짜 기관 창을 연다(../flow.ts). 부스 대조는 그 경로(BUILD_ORDER GAT-190 쪽)가 붙기 전까지 시험 창이다.
 import Link from 'next/link';
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { WebShellModal, webModalButtonClass } from '@peaket/ds/WebShell';
 import { useToast } from '@/shared/ui/toast';
+import { browserCallerEnv, browserSessionStore, browserVerifyApi, isLiveVerify } from '../browser';
+import { resumeReturnedResult, startCallerFlow } from '../flow';
 import {
   BOOTH_CONSENT,
   demoOutcomes,
@@ -65,8 +69,11 @@ export interface VerifyFlowProviderProps {
 
 export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/login', children }: VerifyFlowProviderProps) {
   const toast = useToast();
-  // 미리보기로 연 기관 창은 보드 그대로(시험 버튼 없음), 사용자가 연 창은 시험용 결과 고르기를 둔다
-  const [popup, setPopup] = useState<'none' | 'preview' | 'demo'>(initial?.waiting ? 'preview' : 'none');
+  // 미리보기로 연 기관 창은 보드 그대로(시험 버튼 없음), 사용자가 연 창은 시험용 결과 고르기를 둔다. live는 진짜 기관 창이 열려 있다
+  const [popup, setPopup] = useState<'none' | 'preview' | 'demo' | 'live'>(initial?.waiting ? 'preview' : 'none');
+  // 실제 흐름: 상태 미리보기가 아니고 팬 API 출처가 있을 때(부스 대조는 아직 시험 창). 출처는 빌드 때 정해지는 값이라 서버·브라우저가 같다
+  const live = initial === undefined && purpose !== 'booth' && isLiveVerify();
+  const flowRef = useRef<{ cancel(): void } | null>(null);
   const [outcome, setOutcome] = useState<ResultOutcome | null>(initial?.outcome ?? null);
   const [consent, setConsent] = useState<{ open: boolean; error: boolean }>({ open: !!initial?.consentError, error: !!initial?.consentError });
   const [consented, setConsented] = useState(initial?.consented ?? purpose !== 'booth');
@@ -86,10 +93,51 @@ export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/l
     });
   }, []);
 
+  const pick = useCallback(
+    (o: VerifyOutcome) => {
+      setPopup('none');
+      if (o === 'success') {
+        // 늦게 온 결과가 앞서 띄운 '창을 닫음·실패'를 바꿀 수 있다(flow.ts 늦은 메시지)
+        setOutcome(null);
+        setDone(true);
+        setStaticToast(false);
+        toast(VERIFY_DONE_TOAST);
+        returnFocus();
+      } else setOutcome(o);
+    },
+    [toast, returnFocus],
+  );
+
+  // 실제 흐름은 누른 동작 안에서 시작해야 한다(창을 먼저 열어 팝업 차단을 피한다, identity §5)
   const openWindow = useCallback(() => {
     setOutcome(null);
-    setPopup('demo');
-  }, []);
+    if (!live) {
+      setPopup('demo');
+      return;
+    }
+    flowRef.current?.cancel();
+    flowRef.current = startCallerFlow(browserCallerEnv(), {
+      purpose: purpose === 'reverify' ? 'REVERIFY' : 'FIRST',
+      onWaiting: () => setPopup('live'),
+      // 흐름은 다음 시도나 화면을 떠날 때 끝낸다(창이 닫힌 뒤에도 늦은 메시지를 들을 수 있다)
+      onDone: (o) => pick(o),
+    });
+  }, [live, purpose, pick]);
+
+  // 페이지 이동으로 돌아왔으면(복귀 화면 → next) 그 건의 결과 대화상자를 띄운다. 저장소 값은 처음 읽을 때 지우므로,
+  // 개발 모드 StrictMode가 효과를 두 번 돌려도 한 번만 읽고 그 결과를 그대로 쓴다(새 맥락 리뷰 낮음 L1)
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (!live || resumed.current) return;
+    resumed.current = true;
+    void resumeReturnedResult({ api: browserVerifyApi(), storage: browserSessionStore }).then((o) => {
+      if (o === null) return;
+      if (o === 'login') location.assign(`${loginHref}?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`);
+      else pick(o);
+    });
+  }, [live, loginHref, pick]);
+
+  useEffect(() => () => flowRef.current?.cancel(), []);
 
   const askConsent = useCallback((trigger?: HTMLElement) => {
     if (trigger) triggerRef.current = trigger;
@@ -105,19 +153,6 @@ export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/l
     [purpose, consented, openWindow],
   );
 
-  const pick = useCallback(
-    (o: VerifyOutcome) => {
-      setPopup('none');
-      if (o === 'success') {
-        setDone(true);
-        setStaticToast(false);
-        toast(VERIFY_DONE_TOAST);
-        returnFocus();
-      } else setOutcome(o);
-    },
-    [toast, returnFocus],
-  );
-
   const flow = useMemo<Flow>(
     () => ({ purpose, waiting: popup !== 'none', done, consented, begin, askConsent }),
     [purpose, popup, done, consented, begin, askConsent],
@@ -126,7 +161,7 @@ export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/l
   return (
     <FlowContext.Provider value={flow}>
       {children}
-      {popup !== 'none' ? (
+      {popup === 'preview' || popup === 'demo' ? (
         <VerifyPopupWindow
           demo={popup === 'demo' ? { purpose, onPick: pick } : undefined}
         />
