@@ -69,6 +69,7 @@ erDiagram
     account ||--o{ device : binds
     account ||--o{ account_contact_ref : "조사용 연락처 가명(추천 적용 2026-10-31, ADR-0171)"
     account ||--o{ identity_conflict_attempt : "같은 본인확인 시도(추천 적용 2026-10-31, ADR-0171)"
+    account ||--o{ reauth_token_use : "쓴 재인증 토큰(탈퇴, 추천 적용 2026-11-04)"
     account ||--o{ consent : gives
     account ||--o| identity_verification : "verified_by (ci_hmac)"
     account ||--o{ verification_attempt : "본인확인 건(추천 적용 2026-11-03)"
@@ -97,6 +98,7 @@ erDiagram
         text saved_booker_phone "optional, 저장된 예매자 휴대폰 번호(SCR-017 ⑦)"
         bool age_verified "14세 이상 확인 여부만"
         text closure_reason "optional, WITHDRAWAL_PENDING의 정리 사유. UNDER_14는 본인확인 결과 만 14세 미만이라 탈퇴와 같은 절차로 정리 중(추천 적용 2026-11-04, BUILD_ORDER BOT-020)"
+        timestamptz closure_started_at "optional, 정리를 시작한 시각. 만 14세 미만 정리는 10분 [가정]이 지난 뒤 처음 도는 정비(하루 한 번)가 끝낸다(추천 적용 2026-11-04, BUILD_ORDER BOT-030)"
         text locale "ko|en|ja|zh, 알림 문구 언어(NFR-024). 가입·로그인 때 화면의 로케일(주소 접두)로 쓰고 없으면 ko [가정]. 알림 받는 사람 묶음 조회 BatchGetRecipients의 locale(추천 적용 2026-10-30, docs/features/notify.md §2.1 E6)"
         timestamptz created_at
         timestamptz deleted_at
@@ -210,6 +212,12 @@ erDiagram
         timestamptz transition_ends_at "전환 끝 시각(운영자가 정한 --until). 이 전에는 pid_prev를 지우지 않는다"
         timestamptz moved_at "optional, 모든 본인확인 기록의 옛 pid를 pid_prev로 옮긴 시각"
         timestamptz finished_at "optional, pid_prev를 지우고 닫은 시각. 닫지 않은 줄은 하나만 둔다"
+    }
+    reauth_token_use {
+        uuid jti PK "한 번 쓴 재인증 토큰의 jti(탈퇴를 실행할 때, docs/features/identity.md §8 '탈퇴의 첫 구현', 추천 적용 2026-11-04, BUILD_ORDER BOT-030)"
+        uuid account_id
+        timestamptz used_at
+        timestamptz expires_at "토큰 만료. 지난 줄은 정비가 지운다"
     }
     restricted_ci_hold {
         bytea ci_hmac PK "부정 예매 이용 제한(booking_restriction 사유 FRAUD)을 받거나 그 사건의 소명 요청을 받은 사람의 연계정보 HMAC(identity_verification.ci_hmac과 같은 값). 기본 키 (ci_hmac, fraud_case_id). ops-svc의 SetRestrictedCiHold(identity.proto)로 소명 요청 때(CASE_OPEN)와 제한을 걸기 전에(RESTRICTED) 만든다(추천 적용 2026-10-31, ADR-0171 결정 5, POL-046 ⑥)"
@@ -2332,6 +2340,7 @@ erDiagram
 | 서비스 DB | 보존 전용 표 [가정] | 옮기는 칸 | 보존 기한(정본) |
 | --- | --- | --- | --- |
 | purchase | `retention.order_buyer` | `purchase_order.buyer_name`·`buyer_phone` | 주문과 같은 5년(data-classification '예매자 성명 및 휴대폰 번호') |
+| identity | `retention.verification_record` | `identity_verification.source_record`·`verified_at`(연계정보 HMAC·pid는 옮기지 않는다) | 처리한 날의 달력 1년 뒤(연계정보 처리 기록, docs/features/identity.md §5 법적 안전조치. 그보다 오래된 기록은 옮기지 않는다, 추천 적용 2026-11-04, BUILD_ORDER BOT-030) |
 | core | `retention.merch_order_recipient` | `merch_order.recipient_name`·`recipient_phone`·`delivery_address` | 5년(data-classification '굿즈 배송지') |
 | core | `retention.inquiry_text` | `inquiry.title`, 팬이 쓴 `inquiry_message.body` | 닫힌 뒤 3년(data-classification '고객 문의') |
 | core | `retention.appeal_body` | `appeal.body` | 처리를 마치고 3년(data-classification '소명 본문'). 소명은 2026-10-30에 core-svc support 모듈로 옮겼다(추천 적용 2026-10-30) |

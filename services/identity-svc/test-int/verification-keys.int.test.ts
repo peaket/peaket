@@ -38,7 +38,7 @@ async function setup(versions: Record<number, number> = { 1: 4 }) {
   const k = await kit(sessions, { claims, reverifications: claims });
   const provider = testAgency(k.clock);
   let hashers = mk(versions);
-  const closure = new CloseAccount(sessions);
+  const closure = new CloseAccount(sessions, k.clock);
   return {
     k,
     verifications,

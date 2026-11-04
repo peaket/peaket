@@ -43,6 +43,9 @@ export function testDeviceRefs(keyless = false): DeviceRefs {
 
 export interface Kit {
   clock: FakeClock;
+  /** 팬 토큰 키 서명기와 키 셋(재인증 토큰을 바로 만들거나 확인할 때) */
+  signer: JoseTokenSigner;
+  keys: TokenKeyRing;
   signals: ReturnType<typeof recordingSignals>;
   publicJwk: JWK;
   create: CreateSession;
@@ -58,10 +61,13 @@ export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: F
   const clock = o.clock ?? fakeClock({ now: Date.parse('2026-11-03T03:00:00.000Z') });
   const signals = recordingSignals();
   const { privateJwk, publicJwk } = await fanKey();
-  const signer = new JoseTokenSigner(await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(privateJwk) }), ISSUER);
+  const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(privateJwk) });
+  const signer = new JoseTokenSigner(keys, ISSUER);
   const devices = testDeviceRefs(o.keyless);
   return {
     clock,
+    signer,
+    keys,
     signals,
     publicJwk,
     create: new CreateSession(store, signer, devices, signals, o.claims ?? noClaims, clock),
@@ -72,7 +78,7 @@ export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: F
 }
 
 /** 계정 정리를 하지 않는 대역(정리 사유도 늘 없음) */
-export const noClosure: AccountClosure = { start: async () => {}, closureReasonOf: async () => null };
+export const noClosure: AccountClosure = { start: async () => {}, closureReasonOf: async () => null, isClosing: async () => false };
 
 /** 시험 기관 비밀과 모의 기관 주소(docs/features/identity.md §5 '모의 기관과 기관 창 흐름') */
 export const AGENCY_SECRET = Buffer.alloc(32, 3);

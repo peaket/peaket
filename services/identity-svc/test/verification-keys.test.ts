@@ -31,6 +31,7 @@ async function setup(o: { now?: string; hashers?: IdentityHashers } = {}) {
   const closure: AccountClosure = {
     start: async (accountId, reason) => void closures.push(`${accountId}:${reason}`),
     closureReasonOf: async (accountId) => (closing.has(accountId) ? 'UNDER_14' : null),
+    isClosing: async (accountId) => closing.has(accountId),
   };
   const k = await kit(sessions, { claims: new VerificationClaims(verifications), clock, reverifications: new VerificationClaims(verifications) });
   const provider = testAgency(clock);

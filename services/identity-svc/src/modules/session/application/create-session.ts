@@ -107,6 +107,15 @@ export class CreateSession {
 
       // 같은 계정의 로그인이 겹쳐도 기기 수는 한 번에 하나씩 센다(POL-019)
       await tx.lockAccount(accountId);
+      // 계정을 찾은 뒤 잠그기 전에 탈퇴가 끝났을 수 있다(새 맥락 리뷰 M1): 잠근 뒤 상태를 다시 본다. 탈퇴로 로그인 수단 연결도 지워졌으니
+      // 그 계정에 세션·기기를 만들지 않고 새 계정으로 간다(바로 재가입, identity §8). 제공자 잠금을 잡고 있어 같은 제공자 계정의 다른 로그인과 겹치지 않는다
+      if (!newAccount && (await tx.accountStatusOf(accountId)) === 'DELETED') {
+        accountId = uuidv7(this.clock);
+        newAccount = true;
+        await tx.createAccount({ id: accountId, email: i.email }, now);
+        await tx.linkProvider(accountId, i.provider, i.providerUserId, now);
+        await tx.lockAccount(accountId);
+      }
       const ref = i.deviceId === null ? undefined : this.devices.ref(i.deviceId);
       const deviceId = ref === undefined ? null : await tx.bindDevice(accountId, ref, now);
       const ended = sessionsOverDeviceLimit(await tx.activeSessions(accountId, now), deviceId);

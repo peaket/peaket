@@ -4,19 +4,22 @@ import { uuidv7 } from '@peaket/platform';
 import type { AccountRow, CreateKeyRecord, NewSession, RefreshRow, SessionRow, SessionStore, SessionTx } from '../domain/ports.js';
 import { type ActiveSession, CREATE_KEY_TTL_MS, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
 
+type StoredAccount = AccountRow & { email: string | null; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number };
+
 type StoredSession = NewSession & { terminatedAt: number | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean };
 
 interface State {
-  accounts: Map<string, AccountRow & { email: string | null; createdAt: number; closureReason?: string }>;
+  accounts: Map<string, StoredAccount>;
   providers: Map<string, { accountId: string; linkedAt: number }>;
   devices: Map<string, { id: string; accountId: string; ref: string; boundAt: number }>;
   sessions: Map<string, StoredSession>;
   keys: Map<string, CreateKeyRecord & { createdAt: number }>;
   hashes: Map<string, { sessionId: string; refreshFamily: string; expiresAt: number }>;
   events: Array<{ sessionId: string; accountId: string; reason: TerminationReason; at: number }>;
+  reauthUses: Map<string, { accountId: string; usedAt: number; expiresAt: number }>;
 }
 
-const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [] });
+const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [], reauthUses: new Map() });
 const copy = <K, V extends object>(m: Map<K, V>) => new Map([...m].map(([k, v]) => [k, { ...v }]));
 const clone = (s: State): State => ({
   accounts: copy(s.accounts),
@@ -26,6 +29,7 @@ const clone = (s: State): State => ({
   keys: copy(s.keys),
   hashes: copy(s.hashes),
   events: [...s.events],
+  reauthUses: copy(s.reauthUses),
 });
 const providerKey = (p: Provider, id: string) => `${p}\u0000${id}`;
 const hex = (h: Uint8Array) => Buffer.from(h).toString('hex');
@@ -68,6 +72,56 @@ export class MemorySessionStore implements SessionStore {
 
   deviceCount(accountId: string): number {
     return [...this.#state.devices.values()].filter((d) => d.accountId === accountId).length;
+  }
+
+  /** 시험이 보는 계정 행 */
+  accountOf(id: string): StoredAccount | undefined {
+    const a = this.#state.accounts.get(id);
+    return a ? { ...a } : undefined;
+  }
+
+  providerCount(accountId: string): number {
+    return [...this.#state.providers.values()].filter((p) => p.accountId === accountId).length;
+  }
+
+  /** 그 계정 세션들의 리프레시 토큰 해시 줄 수 */
+  refreshHashCount(accountId: string): number {
+    return [...this.#state.hashes.values()].filter((h) => this.#state.sessions.get(h.sessionId)?.accountId === accountId).length;
+  }
+
+  async purgeExpiredRefreshHashes(now: number): Promise<number> {
+    return this.#serial(() => {
+      let n = 0;
+      for (const [k, h] of this.#state.hashes) {
+        const x = this.#state.sessions.get(h.sessionId);
+        if (h.expiresAt <= now || !x || !sessionAlive(x, now)) {
+          this.#state.hashes.delete(k);
+          n++;
+        }
+      }
+      return n;
+    });
+  }
+
+  async purgeReauthUses(now: number): Promise<number> {
+    return this.#serial(() => {
+      let n = 0;
+      for (const [k, u] of this.#state.reauthUses) {
+        if (u.expiresAt <= now) {
+          this.#state.reauthUses.delete(k);
+          n++;
+        }
+      }
+      return n;
+    });
+  }
+
+  /** 트랜잭션과 같은 줄에 세워 바꾼다 */
+  #serial<T>(fn: () => T): Promise<T> {
+    const run = async () => fn();
+    const next = this.#queue.then(run, run);
+    this.#queue = next.catch(() => {});
+    return next;
   }
 
   /** 그 계정의 세션 종료 사건(적힌 순서): [세션 ID, 사유] */
@@ -117,13 +171,39 @@ export class MemorySessionStore implements SessionStore {
         [...s.sessions.values()]
           .filter((x) => x.accountId === accountId && sessionAlive(x, now))
           .map((x): ActiveSession => ({ sessionId: x.id, deviceId: x.deviceId, idleExpiresAt: x.idleExpiresAt })),
+      unterminatedSessions: async (accountId) => [...s.sessions.values()].filter((x) => x.accountId === accountId && x.terminatedAt === null).map((x) => x.id),
       closureReasonOf: async (accountId) => {
         const a = s.accounts.get(accountId);
         return a && a.status === 'WITHDRAWAL_PENDING' && a.closureReason === 'UNDER_14' ? 'UNDER_14' : null;
       },
-      markClosure: async (accountId, reason) => {
+      markClosure: async (accountId, reason, now) => {
         const a = s.accounts.get(accountId);
-        if (a && a.status === 'ACTIVE') Object.assign(a, { status: 'WITHDRAWAL_PENDING', closureReason: reason });
+        if (a && a.status === 'ACTIVE') Object.assign(a, { status: 'WITHDRAWAL_PENDING', closureReason: reason, closureStartedAt: now });
+      },
+      accountStatusOf: async (accountId) => s.accounts.get(accountId)?.status ?? null,
+      eraseAccount: async (accountId, now) => {
+        const a = s.accounts.get(accountId);
+        if (!a) return;
+        s.accounts.set(accountId, { id: a.id, status: 'DELETED', email: null, createdAt: a.createdAt, deletedAt: now });
+        for (const [k, p] of s.providers) if (p.accountId === accountId) s.providers.delete(k);
+        for (const [k, d] of s.devices) if (d.accountId === accountId) s.devices.delete(k);
+        for (const [k, c] of s.keys) if (s.sessions.get(c.sessionId)?.accountId === accountId) s.keys.delete(k);
+      },
+      closuresStartedBefore: async (before, limit) =>
+        [...s.accounts.values()]
+          .filter((a) => a.status === 'WITHDRAWAL_PENDING' && a.closureReason === 'UNDER_14' && a.closureStartedAt !== undefined && a.closureStartedAt <= before)
+          .slice(0, limit)
+          .map((a) => a.id),
+      deletedSince: async (since, after, limit) =>
+        [...s.accounts.values()]
+          .filter((a) => a.status === 'DELETED' && a.deletedAt !== undefined && a.deletedAt > since && a.id > after)
+          .map((a) => a.id)
+          .sort()
+          .slice(0, limit),
+      useReauth: async (r) => {
+        if (s.reauthUses.has(r.jti)) return false;
+        s.reauthUses.set(r.jti, { accountId: r.accountId, usedAt: r.usedAt, expiresAt: r.expiresAt });
+        return true;
       },
       terminateSessions: async (ids, reason, now) => {
         for (const id of ids) {
@@ -132,6 +212,8 @@ export class MemorySessionStore implements SessionStore {
             x.terminatedAt = now;
             s.events.push({ sessionId: x.id, accountId: x.accountId, reason, at: now });
           }
+          // 끝난 세션의 리프레시 토큰 해시는 같은 트랜잭션에서 지운다(R-255)
+          for (const [k, h] of s.hashes) if (h.sessionId === id) s.hashes.delete(k);
         }
       },
       insertSession: async (r) => {

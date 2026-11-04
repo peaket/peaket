@@ -75,6 +75,12 @@ export class KeyServiceUnavailable extends Error {
 
 /** 만 14세 미만은 정리한다(ADR-0062) */
 export const MIN_AGE = 14;
+/** 연계정보 처리 기록 보존 끝: 처리한 날의 달력 1년 뒤(identity §5 법적 안전조치의 1년 이상, 윤년에도 1년 이상, 새 맥락 리뷰 L2) */
+export function plusOneYear(ms: number): number {
+  const d = new Date(ms);
+  d.setUTCFullYear(d.getUTCFullYear() + 1);
+  return d.getTime();
+}
 const BIRTH = /^(\d{4})-(\d{2})-(\d{2})$/;
 const KST_OFFSET_MS = 9 * 3_600_000;
 

@@ -1,8 +1,9 @@
 // identity-svc의 Outbox 릴레이 프로세스 시작(세션 종료 사건 control.sessions-terminated, ADR-0116 결정 1·2, ADR-0143 결정 3). 서비스 뼈대 relay.ts를 옮겼다.
 // 서비스와 같은 이미지를 다른 시작 명령으로 띄운다: node --import @peaket/platform/telemetry/register dist/relay.js
 // 배포는 `<서비스>-outbox-relay` Deployment(복제 2, deploy/charts/peaket-service의 outboxRelay)다. Lease 리더만 보내고 정비를 돈다.
-import { createDatabase, inClusterLeaseApi, kafkaAuthFromEnv, loadOutboxRelayProcessConfig, startOutboxRelayProcess } from '@peaket/platform';
+import { createDatabase, inClusterLeaseApi, kafkaAuthFromEnv, loadOutboxRelayProcessConfig, platformMaintenanceTasks, startOutboxRelayProcess, systemClock } from '@peaket/platform';
 import { createKafkaProducer, kafkaOutboxPublisher } from '@peaket/platform/stream-worker';
+import { identityMaintenanceTasks } from './maintenance-tasks.js';
 
 const SERVICE = 'identity-svc';
 const config = loadOutboxRelayProcessConfig(SERVICE, process.env);
@@ -21,6 +22,8 @@ const relay = await startOutboxRelayProcess({
   maintenanceDatabase,
   publisher: kafkaOutboxPublisher(producer),
   leaseApi: inClusterLeaseApi(config.leaseName),
+  // 공용 정비 일과 identity의 일(탈퇴 뒤 정리, 끝난 세션의 리프레시 토큰 해시 등, docs/features/identity.md §8 '탈퇴의 첫 구현')
+  maintenanceTasks: [...platformMaintenanceTasks(maintenanceDatabase, systemClock), ...identityMaintenanceTasks(maintenanceDatabase, systemClock)],
 });
 
 // 종료: 보내던 묶음을 마치고 Lease를 놓은 뒤 연결을 닫는다(종료 대기 30초 안, docs/devops.md §6.4).

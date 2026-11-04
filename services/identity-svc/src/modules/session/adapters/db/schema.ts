@@ -22,6 +22,8 @@ export const account = pgTable(
     ageVerified: boolean('age_verified').notNull().default(false),
     // WITHDRAWAL_PENDING의 정리 사유. UNDER_14는 본인확인 결과 만 14세 미만(docs/features/identity.md §5, BUILD_ORDER BOT-020)
     closureReason: text('closure_reason'),
+    // 정리를 시작한 시각. 만 14세 미만 정리는 10분 [가정] 뒤 정비가 끝낸다(identity §8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030)
+    closureStartedAt: at('closure_started_at'),
     locale: text('locale').notNull().default('ko'),
     createdAt: at('created_at').notNull(),
     deletedAt: at('deleted_at'),
@@ -126,4 +128,16 @@ export const sessionCreateKey = pgTable(
     createdAt: at('created_at').notNull(),
   },
   (t) => [index('session_create_key_created_idx').on(t.createdAt)],
+);
+
+// 한 번 쓴 재인증 토큰(docs/data.md reauth_token_use, identity §8 '탈퇴의 첫 구현'). 토큰 만료가 지나면 정비가 지운다
+export const reauthTokenUse = pgTable(
+  'reauth_token_use',
+  {
+    jti: uuid('jti').primaryKey(),
+    accountId: uuid('account_id').notNull(),
+    usedAt: at('used_at').notNull(),
+    expiresAt: at('expires_at').notNull(),
+  },
+  (t) => [index('reauth_token_use_expires_idx').on(t.expiresAt)],
 );

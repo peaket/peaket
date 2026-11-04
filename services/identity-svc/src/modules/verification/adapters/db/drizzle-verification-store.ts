@@ -2,10 +2,10 @@
 // (늦은 쪽은 CiAlreadyLinked로 되돌리고, 유스케이스가 한 번 다시 판정해 DUPLICATE_ACCOUNT와 다른 계정 시도 기록으로 마친다, BUILD_ORDER BOT-020).
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database, type DbTransaction } from '@peaket/platform';
-import { and, asc, count, eq, gt, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from 'drizzle-orm';
 import type { PidRotationRecord, PidRotationStore, VerificationStore, VerificationTx } from '../../domain/ports.js';
-import { type Attempt, CiAlreadyLinked, VerificationRaced } from '../../domain/verification.js';
-import { identityConflictAttempt, identityVerification, pidKeyRotation, verificationAttempt } from './schema.js';
+import { type Attempt, CiAlreadyLinked, plusOneYear, VerificationRaced } from '../../domain/verification.js';
+import { identityConflictAttempt, identityVerification, pidKeyRotation, verificationAttempt, verificationRecord } from './schema.js';
 
 type Row = typeof verificationAttempt.$inferSelect;
 const attemptOf = (r: Row): Attempt => ({
@@ -65,6 +65,12 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
       },
       updateCiHmac: async (accountId, ciHmac, ciHmacKeyVersion) => {
         await tx.update(identityVerification).set({ ciHmac, ciHmacKeyVersion }).where(eq(identityVerification.accountId, accountId));
+      },
+      lockAccountForShare: async (accountId) => {
+        // 계정 표는 세션 컨텍스트의 표다. 같은 DB의 같은 트랜잭션에서 상태만 읽고 공유 잠금을 건다(탈퇴의 FOR UPDATE와 순서를 맞춘다)
+        const r = await tx.execute(sql`select status from account where id = ${accountId} for share`);
+        const row = r.rows[0] as { status?: unknown } | undefined;
+        return typeof row?.status === 'string' ? row.status : null;
       },
       insertConflictAttempt: async (c) => {
         await tx.insert(identityConflictAttempt).values({ id: c.id, attemptedAccountId: c.attemptedAccountId, existingAccountId: c.existingAccountId, attemptedAt: new Date(c.attemptedAt) });
@@ -139,6 +145,33 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
       .where(eq(identityVerification.accountId, accountId));
     if (!r) return null;
     return { pid: r.pid.toString('base64url'), ...(r.pidPrev ? { pidPrev: r.pidPrev.toString('base64url') } : {}) };
+  }
+
+  async eraseAccount(accountId: string, now: number): Promise<boolean> {
+    return this.database.transaction(async (tx) => {
+      const [v] = await tx
+        .select({ sourceRecord: identityVerification.sourceRecord, verifiedAt: identityVerification.verifiedAt })
+        .from(identityVerification)
+        .where(eq(identityVerification.accountId, accountId))
+        .for('update');
+      if (v && plusOneYear(v.verifiedAt.getTime()) > now) {
+        await tx
+          .insert(verificationRecord)
+          .values({ accountId, sourceRecord: v.sourceRecord, verifiedAt: v.verifiedAt, movedAt: new Date(now), deleteAt: new Date(plusOneYear(v.verifiedAt.getTime())) })
+          .onConflictDoNothing({ target: verificationRecord.accountId });
+      }
+      const gone = await tx.delete(identityVerification).where(eq(identityVerification.accountId, accountId)).returning({ id: identityVerification.accountId });
+      const attempts = await tx
+        .delete(verificationAttempt)
+        .where(and(eq(verificationAttempt.accountId, accountId), ne(verificationAttempt.status, 'UNDER_14')))
+        .returning({ id: verificationAttempt.id });
+      return gone.length + attempts.length > 0;
+    });
+  }
+
+  async purgeVerificationRecords(now: number): Promise<number> {
+    const gone = await this.database.db.delete(verificationRecord).where(lte(verificationRecord.deleteAt, new Date(now))).returning({ id: verificationRecord.accountId });
+    return gone.length;
   }
 
   // pid 키 전환(identity §5 'pid 키 전환의 첫 구현'). 운영자가 한 번 띄우는 작업만 부른다. 표를 다 읽는 질의는 그 작업에서만이다 [가정]

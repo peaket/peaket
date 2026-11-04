@@ -38,7 +38,15 @@ export function needsReverification(purpose: ReauthPurpose, strength: ReauthStre
 }
 
 /** 세션이 끝나는 까닭(asyncapi SessionTerminated.reason 가운데 이 단계가 쓰는 것) */
-export type TerminationReason = 'LOGOUT' | 'DEVICE_LIMIT' | 'REFRESH_REUSE';
+/** DELETE: 계정이 없어져 끝냄(팬 탈퇴, asyncapi control.sessions-terminated) */
+export type TerminationReason = 'LOGOUT' | 'DEVICE_LIMIT' | 'REFRESH_REUSE' | 'DELETE';
+
+/** 만 14세 미만 정리를 시작하고 끝내기까지 두는 틈 [가정](결과 대화상자를 보일 틈, identity §8 '탈퇴의 첫 구현') */
+export const CLOSURE_GRACE_MS = 10 * 60_000;
+/** 탈퇴 뒤 남은 본인확인 기록을 정비가 다시 지우는 기간 [가정](늦어도 5일 안, identity §8) */
+export const WITHDRAWAL_SWEEP_MS = 7 * 86_400_000;
+/** 팬 탈퇴의 재인증 작업 묶음(docs/security/authz-matrix.md §6) */
+export const WITHDRAWAL_REAUTH_ACT = 'FAN_SENSITIVE';
 
 export interface ActiveSession {
   sessionId: string;

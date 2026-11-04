@@ -67,12 +67,27 @@ export interface SessionTx {
   bindDevice(accountId: string, deviceRef: string, now: number): Promise<string>;
   /** 끝나지 않았고 만료 전인 그 계정의 세션 */
   activeSessions(accountId: string, now: number): Promise<ActiveSession[]>;
-  /** 세션을 끝내고, 같은 트랜잭션에 세션 종료 사건(control.sessions-terminated)을 적는다(ADR-0143 결정 3) */
+  /** 끝나지 않은 그 계정의 세션 ID(만료와 상관없이, 쓰기 잠금). 탈퇴가 모두 끝낸다(만료 경계에서 갱신과 겹쳐도 남지 않게) */
+  unterminatedSessions(accountId: string): Promise<string[]>;
+  /** 세션을 끝내고 그 세션들의 리프레시 토큰 해시를 지우며, 같은 트랜잭션에 세션 종료 사건(control.sessions-terminated)을 적는다(ADR-0143 결정 3, R-255) */
   terminateSessions(ids: readonly string[], reason: TerminationReason, now: number): Promise<void>;
-  /** ACTIVE 계정을 WITHDRAWAL_PENDING과 정리 사유로 둔다. 이미 정리 중이거나 다른 상태면 그대로 둔다(멱등) */
-  markClosure(accountId: string, reason: 'UNDER_14'): Promise<void>;
+  /** ACTIVE 계정을 WITHDRAWAL_PENDING과 정리 사유·시작 시각으로 둔다. 이미 정리 중이거나 다른 상태면 그대로 둔다(멱등) */
+  markClosure(accountId: string, reason: 'UNDER_14', now: number): Promise<void>;
   /** 정리 중(WITHDRAWAL_PENDING)인 계정의 정리 사유. 아니면 null */
   closureReasonOf(accountId: string): Promise<'UNDER_14' | null>;
+  /** 계정 상태. 없으면 null */
+  accountStatusOf(accountId: string): Promise<AccountStatus | null>;
+  /**
+   * 탈퇴 끝내기의 계정 쪽(identity §8 '탈퇴의 첫 구현'): DELETED·deleted_at, 프로필 칸 비우기, 로그인 수단 연결·기기 행·세션 생성 기억 지우기.
+   * 세션 끝내기는 부르는 쪽이 terminateSessions로 한다
+   */
+  eraseAccount(accountId: string, now: number): Promise<void>;
+  /** 정리 사유 UNDER_14로 before 때나 그 전에 정리를 시작한 정리 중 계정 ID(최대 limit개) */
+  closuresStartedBefore(before: number, limit: number): Promise<string[]>;
+  /** since 뒤에 탈퇴한(DELETED) 계정 ID를 ID 순으로 after 뒤부터 최대 limit개 */
+  deletedSince(since: number, after: string, limit: number): Promise<string[]>;
+  /** 재인증 토큰의 jti를 한 번 쓴다. 이미 썼으면 false */
+  useReauth(r: { jti: string; accountId: string; usedAt: number; expiresAt: number }): Promise<boolean>;
   insertSession(row: NewSession): Promise<void>;
   /** 세션 행(쓰기 잠금). 없으면 null */
   getSessionForUpdate(id: string): Promise<SessionRow | null>;
@@ -91,6 +106,10 @@ export interface SessionTx {
 export const SESSION_STORE = Symbol('identity.SessionStore');
 export interface SessionStore {
   transaction<T>(fn: (tx: SessionTx) => Promise<T>): Promise<T>;
+  /** 끝났거나 유휴·절대 만료가 지난 세션의 리프레시 토큰 해시를 지우고 지운 줄 수(정비 refresh-hash-expired, R-255) */
+  purgeExpiredRefreshHashes(now: number, signal?: AbortSignal): Promise<number>;
+  /** 토큰 만료가 지난 재인증 토큰 사용 기록을 지우고 지운 줄 수(정비) */
+  purgeReauthUses(now: number): Promise<number>;
 }
 
 export interface SignedToken {
@@ -101,6 +120,8 @@ export interface SignedToken {
 export const TOKEN_SIGNER = Symbol('identity.TokenSigner');
 /** 팬 토큰 키 서명(identity §3). 키 셋·회전·공개키 배포는 BUILD_ORDER PRF-030 */
 export interface TokenSigner {
+  /** 발급자(iss). 재인증 토큰을 확인할 때 같은 값을 본다 */
+  readonly issuer: string;
   access(c: { accountId: string; sessionId: string; scopes?: string[]; pid?: string; pidPrev?: string }, now: number): Promise<SignedToken>;
   reauth(c: { accountId: string; sessionId: string; provider: Provider; strength: ReauthStrength; purpose: ReauthPurpose }, now: number): Promise<SignedToken>;
 }
@@ -150,4 +171,27 @@ export interface AccountClosure {
   start(accountId: string, reason: 'UNDER_14'): Promise<void>;
   /** 정리 중(WITHDRAWAL_PENDING)이면 그 사유, 아니면 null. 정리 중인 계정은 다시 본인확인하지 못한다(새 맥락 리뷰 중간 2) */
   closureReasonOf(accountId: string): Promise<'UNDER_14' | null>;
+  /** 구매·본인확인을 할 수 없는 계정인가(ACTIVE가 아님: 정리·탈퇴 유예 중, 탈퇴, 병합). 그 계정의 토큰에는 ticket:buy·pid를 싣지 않는다(identity §8 '탈퇴의 첫 구현') */
+  isClosing(accountId: string): Promise<boolean>;
+}
+
+export const ACCOUNT_ERASER = Symbol('identity.AccountEraser');
+/** 탈퇴한 계정의 본인확인 기록 파기(본인확인 컨텍스트가 채운다, identity §8 '탈퇴의 첫 구현'). 여러 번 불러도 된다 */
+export interface AccountEraser {
+  /** 지운 것이 있으면 true */
+  erase(accountId: string, now: number): Promise<boolean>;
+}
+
+export const REAUTH_VERIFIER = Symbol('identity.ReauthVerifier');
+/** 재인증 토큰 확인(typ reauth+jwt, 팬 토큰 키, 세션·작업 묶음). 맞지 않으면 ReauthRejected를 던진다 */
+export interface ReauthVerifier {
+  verify(token: string, o: { sessionId: string; act: string }): Promise<{ jti: string; accountId: string; expiresAt: number }>;
+}
+
+/** 재인증 토큰이 없거나 맞지 않는다(403 reauth-required, docs/api/guidelines.md 재인증 토큰) */
+export class ReauthRejected extends Error {
+  constructor(readonly why: string) {
+    super(`재인증 토큰이 맞지 않는다: ${why}`);
+    this.name = 'ReauthRejected';
+  }
 }

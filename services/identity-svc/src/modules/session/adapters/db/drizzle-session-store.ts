@@ -2,10 +2,10 @@
 // 그래서 데드라인 뒤 다시 보낸 요청이 먼저 온 요청과 겹쳐도 세션·기기 행은 한 번만 생긴다(I-T50 ①).
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, type DbTransaction, uuidv7, writeOutbox } from '@peaket/platform';
-import { and, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
-import type { CreateKeyRecord, RefreshRow, SessionRow, SessionStore, SessionTx } from '../../domain/ports.js';
+import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import type { AccountStatus, CreateKeyRecord, RefreshRow, SessionRow, SessionStore, SessionTx } from '../../domain/ports.js';
 import { CREATE_KEY_TTL_MS, type LoginVerdict, type Provider } from '../../domain/session.js';
-import { account, accountProvider, device, refreshTokenHash, session, sessionCreateKey } from './schema.js';
+import { account, accountProvider, device, reauthTokenUse, refreshTokenHash, session, sessionCreateKey } from './schema.js';
 
 const date = (ms: number) => new Date(ms);
 const ms = (d: Date | null) => (d === null ? null : d.getTime());
@@ -31,6 +31,26 @@ export class DrizzleSessionStore implements SessionStore {
 
   transaction<T>(fn: (tx: SessionTx) => Promise<T>): Promise<T> {
     return this.database.transaction((tx) => fn(this.#tx(tx)));
+  }
+
+  async purgeExpiredRefreshHashes(now: number, signal?: AbortSignal): Promise<number> {
+    // 절대 만료가 지났거나, 세션이 끝났거나 유휴 만료가 지난 줄(정비 refresh-hash-expired, R-255). 한 번에 1,000줄 [가정]씩
+    let total = 0;
+    for (;;) {
+      const r = await this.database.db.execute(sql`
+        delete from refresh_token_hash where hash in (
+          select h.hash from refresh_token_hash h join session s on s.id = h.session_id
+          where h.expires_at <= ${date(now)} or s.terminated_at is not null or s.idle_expires_at <= ${date(now)} or s.absolute_expires_at <= ${date(now)}
+          limit 1000)`);
+      const n = r.rowCount ?? 0;
+      total += n;
+      if (n < 1000 || signal?.aborted) return total;
+    }
+  }
+
+  async purgeReauthUses(now: number): Promise<number> {
+    const gone = await this.database.db.delete(reauthTokenUse).where(lte(reauthTokenUse.expiresAt, date(now))).returning({ jti: reauthTokenUse.jti });
+    return gone.length;
   }
 
   #tx(tx: DbTransaction): SessionTx {
@@ -96,15 +116,57 @@ export class DrizzleSessionStore implements SessionStore {
           .for('update');
         return rows.map((r) => ({ sessionId: r.id, deviceId: r.deviceId, idleExpiresAt: r.idle.getTime() }));
       },
+      unterminatedSessions: async (accountId) =>
+        (await tx.select({ id: session.id }).from(session).where(and(eq(session.accountId, accountId), isNull(session.terminatedAt))).for('update')).map((r) => r.id),
       closureReasonOf: async (accountId) => {
         const [r] = await tx.select({ status: account.status, reason: account.closureReason }).from(account).where(eq(account.id, accountId));
         return r && r.status === 'WITHDRAWAL_PENDING' && r.reason === 'UNDER_14' ? 'UNDER_14' : null;
       },
-      markClosure: async (accountId, reason) => {
+      markClosure: async (accountId, reason, now) => {
         await tx
           .update(account)
-          .set({ status: 'WITHDRAWAL_PENDING', closureReason: reason })
+          .set({ status: 'WITHDRAWAL_PENDING', closureReason: reason, closureStartedAt: date(now) })
           .where(and(eq(account.id, accountId), eq(account.status, 'ACTIVE')));
+      },
+      accountStatusOf: async (accountId) => {
+        const [r] = await tx.select({ status: account.status }).from(account).where(eq(account.id, accountId));
+        return r ? (r.status as AccountStatus) : null;
+      },
+      eraseAccount: async (accountId, now) => {
+        // 프로필 칸을 비우고 DELETED로. 회원 코드도 비운다(UNIQUE). 계정 행과 ID는 다른 서비스의 법정 기록이 잇는 값이라 남긴다(docs/data.md §6)
+        await tx
+          .update(account)
+          .set({ status: 'DELETED', deletedAt: date(now), nickname: null, email: null, phone: null, memberCode: null, savedBookerName: null, savedBookerPhone: null, closureReason: null, closureStartedAt: null })
+          .where(eq(account.id, accountId));
+        await tx.delete(accountProvider).where(eq(accountProvider.accountId, accountId));
+        await tx.delete(device).where(eq(device.accountId, accountId));
+        await tx.execute(sql`delete from session_create_key where session_id in (select id from session where account_id = ${accountId})`);
+      },
+      closuresStartedBefore: async (before, limit) =>
+        (
+          await tx
+            .select({ id: account.id })
+            .from(account)
+            .where(and(eq(account.status, 'WITHDRAWAL_PENDING'), eq(account.closureReason, 'UNDER_14'), lte(account.closureStartedAt, date(before))))
+            .orderBy(asc(account.closureStartedAt))
+            .limit(limit)
+        ).map((r) => r.id),
+      deletedSince: async (since, after, limit) =>
+        (
+          await tx
+            .select({ id: account.id })
+            .from(account)
+            .where(and(eq(account.status, 'DELETED'), gt(account.deletedAt, date(since)), after ? gt(account.id, after) : undefined))
+            .orderBy(asc(account.id))
+            .limit(limit)
+        ).map((r) => r.id),
+      useReauth: async (r) => {
+        const made = await tx
+          .insert(reauthTokenUse)
+          .values({ jti: r.jti, accountId: r.accountId, usedAt: date(r.usedAt), expiresAt: date(r.expiresAt) })
+          .onConflictDoNothing({ target: reauthTokenUse.jti })
+          .returning({ jti: reauthTokenUse.jti });
+        return made.length > 0;
       },
       terminateSessions: async (ids, reason, now) => {
         if (ids.length === 0) return;
@@ -113,6 +175,8 @@ export class DrizzleSessionStore implements SessionStore {
           .set({ terminatedAt: date(now) })
           .where(and(inArray(session.id, [...ids]), isNull(session.terminatedAt)))
           .returning({ id: session.id, accountId: session.accountId });
+        // 끝난 세션의 리프레시 토큰 해시는 같은 트랜잭션에서 지운다(R-255, docs/data.md refresh_token_hash)
+        await tx.delete(refreshTokenHash).where(inArray(refreshTokenHash.sessionId, [...ids]));
         // 같은 트랜잭션의 마지막 쓰기로 세션 종료 사건을 적는다(ADR-0143 결정 3). 값은 공용 Avro 인코더(BUILD_ORDER BAS-030) 전까지 JSON이다
         const terminatedAt = date(now).toISOString();
         await writeOutbox(

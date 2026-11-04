@@ -1,12 +1,22 @@
 // 메모리 저장소(시험·로컬 시제품용). 트랜잭션은 한 번에 하나씩 돌고 실패하면 되돌린다(PostgreSQL 저장소와 같은 규칙).
 // pid 키 전환 저장소(PidRotationStore)도 함께 구현한다(identity §5 'pid 키 전환의 첫 구현').
 import type { ConflictAttempt, PidRotationRecord, PidRotationStore, VerificationRecord, VerificationStore, VerificationTx } from '../domain/ports.js';
-import { type Attempt, CiAlreadyLinked } from '../domain/verification.js';
+import { type Attempt, CiAlreadyLinked, plusOneYear } from '../domain/verification.js';
 
 /** 저장한 본인확인 기록(pid 판과 전환 기간의 옛 pid까지) */
 export interface StoredVerification extends VerificationRecord {
   pidKeyVersion: number;
   pidPrev: Buffer | null;
+  verifiedAt: number;
+  sourceRecord: string;
+}
+
+/** 보존 전용 표의 연계정보 처리 기록(연계정보 HMAC·pid 없음) */
+export interface RetainedRecord {
+  sourceRecord: string;
+  verifiedAt: number;
+  movedAt: number;
+  deleteAt: number;
 }
 
 interface State {
@@ -25,6 +35,7 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
   #state: State = { attempts: new Map(), verifications: new Map(), conflicts: [] };
   #queue: Promise<unknown> = Promise.resolve();
   readonly #rotations: PidRotationRecord[] = [];
+  readonly #retention = new Map<string, RetainedRecord>();
 
   transaction<T>(fn: (tx: VerificationTx) => Promise<T>): Promise<T> {
     const run = async () => {
@@ -51,7 +62,7 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
         },
         saveVerification: async (v) => {
           if ([...s.verifications].some(([id, x]) => id !== v.accountId && x.ciHmac.equals(v.ciHmac))) throw new CiAlreadyLinked();
-          s.verifications.set(v.accountId, { ciHmac: v.ciHmac, ciHmacKeyVersion: v.ciHmacKeyVersion, pid: v.pid, pidKeyVersion: v.pidKeyVersion, pidPrev: null });
+          s.verifications.set(v.accountId, { ciHmac: v.ciHmac, ciHmacKeyVersion: v.ciHmacKeyVersion, pid: v.pid, pidKeyVersion: v.pidKeyVersion, pidPrev: null, verifiedAt: v.verifiedAt, sourceRecord: v.sourceRecord });
         },
         updateCiHmac: async (accountId, ciHmac, ciHmacKeyVersion) => {
           const v = s.verifications.get(accountId);
@@ -60,6 +71,8 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
         insertConflictAttempt: async (c) => {
           s.conflicts.push({ ...c });
         },
+        // 메모리 저장소는 계정 표를 보지 못한다(시험은 유스케이스의 앞선 확인으로 본다)
+        lockAccountForShare: async () => null,
       });
       this.#state = s;
       return out;
@@ -160,6 +173,50 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
   async finishPidRotation(version: number, at: number): Promise<void> {
     const r = this.#rotations.find((x) => x.toVersion === version && x.finishedAt === null);
     if (r) r.finishedAt = at;
+  }
+
+  eraseAccount(accountId: string, now: number): Promise<boolean> {
+    return this.#serial(() => {
+      const s = this.#state;
+      let erased = false;
+      const v = s.verifications.get(accountId);
+      if (v) {
+        if (plusOneYear(v.verifiedAt) > now && !this.#retention.has(accountId)) {
+          this.#retention.set(accountId, { sourceRecord: v.sourceRecord, verifiedAt: v.verifiedAt, movedAt: now, deleteAt: plusOneYear(v.verifiedAt) });
+        }
+        s.verifications.delete(accountId);
+        erased = true;
+      }
+      for (const [id, a] of s.attempts) {
+        if (a.accountId === accountId && a.status !== 'UNDER_14') {
+          s.attempts.delete(id);
+          erased = true;
+        }
+      }
+      return erased;
+    });
+  }
+
+  async purgeVerificationRecords(now: number): Promise<number> {
+    let n = 0;
+    for (const [k, r] of this.#retention) {
+      if (r.deleteAt <= now) {
+        this.#retention.delete(k);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  /** 시험이 보는 값: 보존 전용 표의 처리 기록 */
+  retentionOf(accountId: string): RetainedRecord | null {
+    const r = this.#retention.get(accountId);
+    return r ? { ...r } : null;
+  }
+
+  /** 시험이 보는 값: 그 계정의 본인확인 건 */
+  attemptsOf(accountId: string): Attempt[] {
+    return [...this.#state.attempts.values()].filter((a) => a.accountId === accountId).map((a) => ({ ...a }));
   }
 
   /** 시험이 보는 값: 그 계정이 시도한 다른 계정 시도 기록 */

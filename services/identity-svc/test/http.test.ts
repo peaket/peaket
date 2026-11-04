@@ -9,6 +9,7 @@ import { HmacIdentityHashers } from '../src/modules/verification/index.js';
 import { AGENCY_URL, agencyResult, fanKey, ISSUER, newKey, recordingSignals, testAgency, testDeviceRefs } from './support.js';
 
 let svc: Awaited<ReturnType<typeof createService>>;
+let signer: JoseTokenSigner;
 const clock = fakeClock({ now: Date.parse('2026-11-03T03:00:00Z') });
 /** 서비스 로그(정규 로그 줄)를 모은다: 기관 결과 값이 로그에 남지 않는지 본다(I-T45) */
 const logLines: string[] = [];
@@ -24,7 +25,7 @@ beforeAll(async () => {
   const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(fan.privateJwk) });
   svc = await createService({
     name: 'identity-svc',
-    module: AppModule.register({ memory: true, session: { signer: new JoseTokenSigner(keys, ISSUER), keys, deviceRefs: testDeviceRefs(), signals: recordingSignals(), cookieDomain: 'peaket.example' }, verification: { provider: testAgency(clock), hashers: HmacIdentityHashers.single(Buffer.alloc(32, 4), Buffer.alloc(32, 5)) } }),
+    module: AppModule.register({ memory: true, session: { signer: (signer = new JoseTokenSigner(keys, ISSUER)), keys, deviceRefs: testDeviceRefs(), signals: recordingSignals(), cookieDomain: 'peaket.example' }, verification: { provider: testAgency(clock), hashers: HmacIdentityHashers.single(Buffer.alloc(32, 4), Buffer.alloc(32, 5)) } }),
     // 정규 로그 줄을 모두 남긴다(표본 1/1): 기관 결과 값이 로그에 없는지 본다
     env: { PEAKET_ENV: 'ci', PEAKET_LOG_SAMPLE_ONE_IN: '1' },
     clock,
@@ -38,6 +39,27 @@ afterAll(async () => {
 const login = () => svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: `u-${newKey().slice(0, 8)}`, email: null, deviceId: null });
 const refresh = (cookie?: string) => svc.http.inject({ method: 'POST', url: '/v1/identity/access-tokens', headers: cookie ? { cookie } : {} });
 const attrs = (c: string) => Object.fromEntries(c.split(';').slice(1).map((x) => { const [k, v] = x.trim().split('='); return [k!.toLowerCase(), v ?? true]; }));
+
+describe('탈퇴 경로(DELETE /v1/identity/account, identity §8 탈퇴의 첫 구현)', () => {
+  const fanHeaders = (s: { accountId: string; sessionId: string }) => ({ 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '' });
+  const del = (headers: Record<string, string>, payload = '{}') =>
+    svc.http.inject({ method: 'DELETE', url: '/v1/identity/account', headers: { ...headers, 'content-type': 'application/json' }, payload });
+
+  test('I-T16_재인증토큰머리가없거나틀리면403reauth-required이고_맞으면204·캐시하지않으며_그세션의갱신이더는안된다 [ASVS v5.0.0-7.4.2]', async () => {
+    const s = await login();
+    for (const r of [await del(fanHeaders(s)), await del({ ...fanHeaders(s), 'x-reauth-token': 'nope' })]) {
+      expect(r.statusCode).toBe(403);
+      expect(JSON.parse(r.payload)).toMatchObject({ type: 'https://peaket.example/problems/reauth-required', status: 403 });
+    }
+    const token = (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, svc.clock.now())).token;
+    const ok = await del({ ...fanHeaders(s), 'x-reauth-token': token });
+    expect(ok.statusCode).toBe(204);
+    expect(ok.headers['cache-control']).toBe('no-store');
+    expect((await refresh(`__Secure-peaket_rt=${s.refreshToken}`)).statusCode).toBe(401);
+    // 같은 토큰을 다시 쓰면 403이다(세션이 끝나 게이트웨이를 지나지 못하지만, 지났다고 쳐도)
+    expect((await del({ ...fanHeaders(s), 'x-reauth-token': token })).statusCode).toBe(403);
+  });
+});
 
 describe('팬 토큰 갱신 경로', () => {
   test('I-T4_리프레시쿠키로갱신하면_204와새쿠키둘이고본문에토큰이없다 [ASVS v5.0.0-3.3.4]', async () => {

@@ -74,6 +74,8 @@ export class ConfirmVerification {
   async #check(a: Attempt, providerResult: Record<string, string>, now: number): Promise<Checked> {
     // 시작한 뒤 정리 중이 된 계정도 받지 않는다(새 맥락 리뷰 중간 2)
     if ((await this.closure.closureReasonOf(a.accountId)) === 'UNDER_14') return { outcome: 'UNDER_14' };
+    // 탈퇴·탈퇴 유예·병합 계정은 본인확인을 남기지 않는다(남은 액세스 토큰으로 온 경우, 새 맥락 리뷰 M2)
+    if (await this.closure.isClosing(a.accountId)) return { outcome: 'FAILED' };
     const outcome = await this.provider.confirm(a.id, providerResult);
     if (outcome.outcome !== 'VERIFIED') return outcome;
     const verified = await this.store.isVerified(a.accountId);
@@ -118,6 +120,13 @@ export class ConfirmVerification {
       const a = await tx.attemptForUpdate(verificationId);
       if (!a) throw new VerificationError('NOT_FOUND', '없는 건이다');
       if (a.status !== 'PENDING') return a;
+      // 계정 행을 공유 잠금으로 읽어 탈퇴의 쓰기 잠금과 순서를 맞춘다: 탈퇴가 먼저면 DELETED를 보고 FAILED, 이 확정이 먼저면 탈퇴는 이 커밋을 기다린 뒤
+      // 파기 트랜잭션이 이 기록까지 지운다(새 맥락 리뷰 M2). 메모리 저장소는 계정을 보지 못해 null이다
+      const accountStatus = await tx.lockAccountForShare(a.accountId);
+      if (accountStatus !== null && accountStatus !== 'ACTIVE') {
+        await tx.completeAttempt(a.id, 'FAILED', now);
+        return { ...a, status: 'FAILED' as const, completedAt: now };
+      }
       const write = checked.hmacs[0]!;
       const owner = await tx.accountByCiHmac(checked.hmacs.map((h) => h.hmac), a.accountId);
       const mine = await tx.verificationOf(a.accountId);

@@ -1,6 +1,6 @@
 // 본인확인 표(docs/data.md §2 identity_verification·verification_attempt, docs/features/identity.md §5).
 import { sql } from 'drizzle-orm';
-import { check, customType, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { check, customType, index, integer, pgSchema, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -67,4 +67,19 @@ export const identityConflictAttempt = pgTable(
     index('identity_conflict_attempt_existing_idx').on(t.existingAccountId),
     index('identity_conflict_attempt_at_idx').on(t.attemptedAt),
   ],
+);
+
+// 탈퇴 회원의 연계정보 처리 기록 보존(docs/data.md §6 '탈퇴 회원 거래 기록의 보존 전용 스키마', identity §8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030).
+// 연계정보 HMAC·pid는 옮기지 않는다. 처리한 날 + 1년(delete_at)이 지나면 정비가 지운다. 서비스 역할이 읽지 못하게 하는 권한은 DB 역할을 나누는 단계가 한다
+export const retention = pgSchema('retention');
+export const verificationRecord = retention.table(
+  'verification_record',
+  {
+    accountId: uuid('account_id').primaryKey(),
+    sourceRecord: text('source_record').notNull(),
+    verifiedAt: at('verified_at').notNull(),
+    movedAt: at('moved_at').notNull(),
+    deleteAt: at('delete_at').notNull(),
+  },
+  (t) => [index('verification_record_delete_idx').on(t.deleteAt)],
 );

@@ -28,6 +28,10 @@ export class JoseTokenSigner implements TokenSigner {
     this.#issuer = issuer;
   }
 
+  get issuer(): string {
+    return this.#issuer;
+  }
+
   async access(c: { accountId: string; sessionId: string; scopes?: string[]; pid?: string; pidPrev?: string }, now: number): Promise<SignedToken> {
     const { kid, key } = this.#keys.signingKey('fan');
     const exp = seconds(now + ACCESS_TOKEN_TTL_MS);

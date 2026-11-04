@@ -59,6 +59,8 @@ export interface VerificationTx {
   /** 옛 판 기록을 새 판 값으로 바꾼다(pid는 그대로, ADR-0050 결정 5) */
   updateCiHmac(accountId: string, ciHmac: Buffer, ciHmacKeyVersion: number): Promise<void>;
   insertConflictAttempt(c: ConflictAttempt): Promise<void>;
+  /** 그 계정 행을 공유 잠금으로 읽은 상태(탈퇴의 쓰기 잠금과 순서를 맞춘다, identity §8 '탈퇴의 첫 구현'). 계정을 보지 못하는 저장소는 null */
+  lockAccountForShare(accountId: string): Promise<string | null>;
 }
 
 /** pid 키 전환 기록 한 줄(docs/data.md pid_key_rotation) */
@@ -103,4 +105,11 @@ export interface VerificationStore {
   purgeConflictAttempts(before: number): Promise<number>;
   /** 기록이 쓰는 연계정보 키 판들(시작할 때 설정과 견준다) */
   ciKeyVersionsInUse(): Promise<number[]>;
+  /**
+   * 탈퇴한 계정의 본인확인 기록 파기(identity §8 '탈퇴의 첫 구현'): 처리한 날 + 1년이 지나지 않은 처리 기록(source_record)은 보존 전용 표로 옮기고,
+   * identity_verification을 지우며, 본인확인 건은 만 14세 미만 건만 남긴다. 지운 것이 있으면 true. 여러 번 불러도 된다
+   */
+  eraseAccount(accountId: string, now: number): Promise<boolean>;
+  /** 보존 전용 표에서 지울 시각(처리한 날 + 1년)이 지난 처리 기록을 지우고 지운 줄 수(정비) */
+  purgeVerificationRecords(now: number): Promise<number>;
 }

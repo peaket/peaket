@@ -36,6 +36,12 @@ export class RefreshSession {
       if (!s) return { kind: 'invalid' as const };
       const decision = decideRefresh({ match: s.match, rotatedAt: s.rotatedAt, refreshUsed: s.refreshUsed, alive: sessionAlive(s, now) }, now);
       if (decision === 'invalid') return { kind: 'invalid' as const };
+      // 탈퇴·병합된 계정의 세션이 남아 있으면(로그인과 탈퇴가 겹침) 갱신하지 않고 그 세션을 끝낸다(새 맥락 리뷰 M1)
+      const status = await tx.accountStatusOf(s.accountId);
+      if (status === 'DELETED' || status === 'MERGED') {
+        await tx.terminateSessions([s.id], 'DELETE', now);
+        return { kind: 'invalid' as const };
+      }
       if (decision === 'reuse') {
         // 탈취로 본다: 그 패밀리의 모든 활성 세션을 끝내고 종료 사건을 낸다
         await tx.terminateSessions(await tx.familySessions(s.refreshFamily), 'REFRESH_REUSE', now);

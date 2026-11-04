@@ -64,6 +64,13 @@
       "when": 1793780342259,
       "tag": "0008_pid_key_rotation",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793783798060,
+      "tag": "0009_account_withdrawal",
+      "breakpoints": true
     }
   ]
 }
