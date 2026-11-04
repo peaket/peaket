@@ -57,6 +57,16 @@ test('FE-T21 올릴 JS·CSS에 소스 맵 링크가 있으면 오류다', () => 
   }
 });
 
+test('FE-T21 올릴 JS·HTML에 MSW 목업 처리기 글자가 있으면 오류다(ADR-0199 결정 2)', () => {
+  const dir = fixture({ 'w.js': "navigator.serviceWorker.register('/mockServiceWorker.js')", 'l.js': 'console.log("[MSW] Mocking enabled")', 'ok.js': 'fetch("/v1/home")', 'p.html': '<p>msw 글자만으로는 걸리지 않는다</p>' });
+  try {
+    const plan = planUpload(dir);
+    assert.deepEqual(plan.errors.map((e) => e.split(':')[0]).sort(), ['l.js', 'w.js']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('[ASVS v5.0.0-15.1.2] 숨김 소스 맵의 원본 경로에서 묶음에 든 패키지(pnpm 저장 경로·작업 공간 패키지)를 읽어 CycloneDX로 낸다', () => {
   const map = {
     version: 3,

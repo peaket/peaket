@@ -9,7 +9,8 @@
     "start": "node server/start.mjs --port 3000",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
-    "color-mode": "node scripts/build-color-mode.mjs"
+    "color-mode": "node scripts/build-color-mode.mjs",
+    "mock-api": "node scripts/mock-api.mjs"
   },
   "dependencies": {
     "next": "^16.4.3",
@@ -22,7 +23,9 @@
     "@grpc/proto-loader": "0.8.1",
     "@peaket/contracts": "workspace:*",
     "jose": "6.2.14",
-    "openid-client": "6.8.8"
+    "openid-client": "6.8.8",
+    "@peaket/api-client": "workspace:*",
+    "@tanstack/react-query": "5.105.0"
   },
   "devDependencies": {
     "@peaket/config": "workspace:*",

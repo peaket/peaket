@@ -15,7 +15,7 @@ const config: NextConfig = {
   poweredByHeader: false,
   // 퍼블리싱 중 여러 사람이 같은 앱을 동시에 빌드할 때만 산출 폴더를 나눈다(기본은 .next)
   distDir: process.env.PEAKET_NEXT_DIST ?? '.next',
-  transpilePackages: ['@peaket/ds'],
+  transpilePackages: ['@peaket/ds', '@peaket/api-client'],
   // SEED recipe를 층 판(@layer seed-components)으로 돌린다. Turbopack은 내보내기 조건 seed-layered를 고르지 못해서다(d2 §1, FE-T36)
   turbopack: { root: path.join(import.meta.dirname, '../..'), resolveAlias: seedLayeredAlias(import.meta.dirname) },
   pageExtensions: seedCssPoc ? ['poc.tsx', 'tsx', 'ts', 'jsx', 'js'] : ['tsx', 'ts', 'jsx', 'js'],
@@ -34,6 +34,13 @@ const config: NextConfig = {
   },
   // next dev가 앱 폴더에 AGENTS.md를 만들지 않게 한다(저장소 규칙은 뿌리 CLAUDE.md·docs가 정한다)
   agentRules: false,
+  // 이미지는 image-worker가 만든 파생본을 CDN에서 바로 받는다. /_next/image는 쓰지 않고, 폭 목록은 파생본 단계와 같다(ADR-0199 결정 4)
+  images: { loader: 'custom', loaderFile: './src/shared/lib/image-loader.ts', deviceSizes: [320, 640, 960, 1280], imageSizes: [] },
+  // 개발 서버에서만: 같은 출처 정적 파일(랭킹 파일)을 계약 모양 가짜 API(scripts/mock-api.mjs)로 넘긴다(ADR-0199 결정 2)
+  async rewrites() {
+    const mock = process.env.NODE_ENV === 'development' ? process.env.PEAKET_DEV_STATIC_ORIGIN : undefined;
+    return mock ? [{ source: '/v1/home/rankings.json', destination: `${mock}/v1/home/rankings.json` }] : [];
+  },
 };
 
 export default config;

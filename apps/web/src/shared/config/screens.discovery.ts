@@ -4,18 +4,11 @@
 import { ORIGINS } from './origins';
 import type { WebScreen } from './screens.types';
 
-/** SCR-001 홈: 보드 상태 8 + d5 상태 표의 '빈 화면(오픈 예정)' */
-export const SCR001_STATES = [
-  '기본',
-  '로딩',
-  '알림 권한 안내',
-  '배너 멈춤',
-  '섹션 비어 있음',
-  '랭킹 갱신 실패',
-  '비로그인',
-  '오프라인',
-  '빈 화면(오픈 예정)',
-] as const;
+/**
+ * SCR-001 홈: 데이터 단계(HOT-300)에서 목업과 ?state=를 걷어 냈다. 상태(섹션 비어 있음·랭킹 갱신 실패·비로그인 등)는
+ * 계약 모양 가짜 API(apps/web/scripts/mock-api.mjs)의 응답으로 본다(ADR-0199 결정 2)
+ */
+export const SCR001_STATES = ['기본'] as const;
 export type Scr001State = (typeof SCR001_STATES)[number];
 
 /** SCR-002 공연 상세: 보드 상태 29(첫 값 '로비 열림'이 기본) */

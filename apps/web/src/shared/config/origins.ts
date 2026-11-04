@@ -20,6 +20,9 @@ export const ORIGINS = {
    * 로컬에서 실제 흐름을 돌릴 때는 게이트웨이 대역(scripts/local-fan-gateway.mjs) 주소를 넣는다(docs/features/identity.md §5)
    */
   api: process.env.NEXT_PUBLIC_API_ORIGIN || (DEV ? '' : 'https://api.peaket.example'),
+  /** 대기열 API·파일 출처(docs/frontend.md §2.1 `queue`·`queue-files`). api-client 클라이언트가 함께 담는다(ADR-0199) */
+  queue: process.env.NEXT_PUBLIC_QUEUE_ORIGIN || (DEV ? '' : 'https://queue.peaket.example'),
+  queueFiles: process.env.NEXT_PUBLIC_QUEUE_FILES_ORIGIN || (DEV ? '' : 'https://queue-files.peaket.example'),
 } as const;
 
 /** 대기실(로비·대기열, SCR-007·008·018) 주소. 대기실 경량 페이지는 별도 빌드(apps/web/queue-room)이고 운영에서는 같은 출처의 `/queue/{id}`다 */

@@ -1336,7 +1336,7 @@ sequenceDiagram
 
 ```text
 [A 캐시 화면: 홈·공연 상세·검색 셸·굿즈·정적 문서·복귀 화면·스태프 화면·셔플 검증·월렛 셸]  붙이는 곳: 웹 앱 서버(ISR 응답), 정적 셸은 www 배포 정책
-default-src 'self'; script-src 'self' {h}; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self';
+default-src 'self'; script-src 'self' {h}; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https://img.peaket.example; font-src 'self';
 connect-src 'self' https://api.peaket.example https://queue.peaket.example https://queue-files.peaket.example;
 worker-src 'self'; manifest-src 'self'; frame-src 'none'; form-action 'self';
 object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp
@@ -1350,7 +1350,7 @@ frame-src https://challenges.cloudflare.com; manifest-src 'self'; form-action {�
 object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp
 
 [B 요청마다 그리는 화면: 추가 검증·결과·/my/*(월렛 셸 제외)·로그인·파트너 콘솔]  붙이는 곳: 앱 서버의 proxy.ts
-default-src 'self'; script-src 'nonce-{n}' 'strict-dynamic'; style-src 'self' 'nonce-{n}'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self';
+default-src 'self'; script-src 'nonce-{n}' 'strict-dynamic'; style-src 'self' 'nonce-{n}'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https://img.peaket.example; font-src 'self';
 connect-src 'self' https://api.peaket.example https://queue.peaket.example https://queue-files.peaket.example;
 worker-src 'self'; manifest-src 'self'; frame-src 'none'; form-action 'self';
 object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp
@@ -1399,7 +1399,7 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 - **Trusted Types**(ADR-0079 결정 14): 관제 콘솔에서 보고 모드로 시작해, 30일 [가정] 위반이 없으면 파트너, 소비자 웹 순으로 넓힌다. 기본 정책 `peaket`에서는 `@peaket/ds`의 정화한 서식 글 컴포넌트만 HTML을 만든다(서식 글이 구조 문서 기본안으로 정해지면 이 정책으로 HTML을 만드는 곳이 없어진다, §5.14.3).
   - **보고 모드를 켜기 전 조건(추천 적용 2026-10-28, 기술 검토 낮음-098)**: webpack은 Trusted Types 지원(`output.trustedTypes`)이 기본으로 꺼져 있어, 켜지 않으면 화면별 덩어리와 원격을 실을 때마다 스크립트 주소를 문자열로 넣어 위반 보고가 늘 난다(webpack 설정 문서). 그래서 ① 관제 호스트와 원격 빌드마다 `output.trustedTypes.policyName`을 켜고 이름을 따로 준다(호스트 `peaket-webpack-host`, 원격 `peaket-webpack-<원격 이름>`). 목록에 없는 이름이나 이미 만든 이름으로 정책을 만들면 실패하므로(보고 모드에서는 위반 보고로 남는다) 이름을 나누고, `'allow-duplicates'`는 쓰지 않는다 ② 원격 적재기(§4.5의 런타임 플러그인 `createScript`)는 스크립트 주소를 정책 `peaket-remote`로 만든다. 이 정책은 `remotes.json`에 있는 `/remotes/<이름>/<sha>/remoteEntry.js`만 통과시킨다 ③ 이 이름들을 묶음 C의 `trusted-types` 목록에 넣는다. 원격을 더하거나 빼면 목록도 함께 고친다 ④ FE-T39가 덩어리와 모든 원격을 싣는 동안 위반 보고 0을 확인한다. 넷을 다 채운 뒤 보고 모드를 켠다. 파트너·소비자 웹으로 넓힐 때 Next.js 빌드의 덩어리 적재가 Trusted Types 정책을 쓰는지는 그때 확인한다(확인 필요).
 - **이미지 출처**: 공연 포스터·후기 사진 파생본의 호스트가 계약에 없다(openapi `posterUrl` 등). 그래서 www 배포의 같은 출처 경로로 내는 것을 기본으로 둔다 [가정]. 다른 호스트로 내면 `img-src`에 그 출처를 더한다(§6.2).
-- **이미지 경로는 하나다(추천 적용 2026-10-28, 기술 검토 중간-068)**: 이미지는 올릴 때 `image-worker`가 만든 파생본(폭 단계 × 형식, docs/data.md §1 'S3 공개 정적 객체')을 CDN에서 바로 받는다. Next.js 이미지 최적화(`/_next/image`)는 쓰지 않는다. `next/image`는 파생본 주소를 돌려주는 사용자 로더(`images.loader: 'custom'`, 폭 목록은 파생본 단계와 같다)로만 쓰고, AVIF·WebP는 `getImageProps()`로 만든 `<picture>`가 고른다(AVIF 먼저, WebP 대체). CloudFront와 게이트웨이에는 `/_next/image` 경로를 두지 않는다. 그래서 앱 서버는 이미지를 가져오지도 다시 인코딩하지도 않아, 같은 이미지를 두 번 처리하지 않고, 온세일 직전 새 포스터의 첫 요청이 앱 서버 CPU를 쓰지 않으며, 앱 서버 쪽 SSRF·자원 고갈 경로가 하나 준다(asvs/frontend 1.3.6).
+- **이미지 경로는 하나다(추천 적용 2026-10-28, 기술 검토 중간-068)**: 이미지는 올릴 때 `image-worker`가 만든 파생본(폭 단계 × 형식, docs/data.md §1 'S3 공개 정적 객체')을 CDN에서 바로 받는다. Next.js 이미지 최적화(`/_next/image`)는 쓰지 않는다. `next/image`는 파생본 주소를 돌려주는 사용자 로더(`images.loader: 'custom'`, 폭 목록은 파생본 단계와 같다)로만 쓰고, AVIF·WebP는 `<picture>`가 고른다(AVIF 먼저, WebP 대체). `<picture>`의 srcset은 파생본 폭 단계에서 바로 만든다. `getImageProps()`는 클라이언트 부품에서 이미지 설정 코드를 첫 화면 JS에 싣게 해 쓰지 않는다(2026-11-05 HOT-300 측정, ADR-0199 결정 4). 계약의 이미지 주소(`posterUrl`·배너 `imageUrl`)는 파생본 묶음의 기준 주소이고, 파생본 하나는 `{기준 주소}/{폭}.{avif|webp}`다(폭 320·640·960·1280 [가정]). 이미지 출처(운영 `https://img.peaket.example` [가정])는 CSP `img-src`에 넣고, 환경마다 다른 값은 `PEAKET_CSP_ORIGINS`의 `img`로 바꾼다(ADR-0199 결정 4). CloudFront와 게이트웨이에는 `/_next/image` 경로를 두지 않는다. 그래서 앱 서버는 이미지를 가져오지도 다시 인코딩하지도 않아, 같은 이미지를 두 번 처리하지 않고, 온세일 직전 새 포스터의 첫 요청이 앱 서버 CPU를 쓰지 않으며, 앱 서버 쪽 SSRF·자원 고갈 경로가 하나 준다(asvs/frontend 1.3.6).
 
 #### 5.14.2 외부 스크립트 결정(ASVS 3.6.1)
 

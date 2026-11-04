@@ -1186,7 +1186,7 @@ components:
         eventId: { type: string, description: "대표 회차: 판매 중인 회차 가운데 판매 종료가 가장 이른 것 → 오픈 예정 회차 가운데 오픈이 가장 이른 것 → 매진 회차 가운데 공연 시작이 가장 이른 것 → 가장 최근에 공연한 회차(취소 회차 제외, ADR-0093 결정 8)" }
         title: { type: string }
         genre: { $ref: '#/components/schemas/Genre' }
-        posterUrl: { type: string, format: uri, description: "포스터 파생본(ADR-0062 결정 38)" }
+        posterUrl: { type: string, format: uri, description: "포스터 파생본 묶음의 기준 주소(ADR-0062 결정 38). 파생본 하나는 {기준 주소}/{폭}.{avif|webp}이고 폭은 320·640·960·1280 [가정]이다. 화면은 AVIF를 먼저, WebP를 대체로 둔 <picture>로 고른다(ADR-0199 결정 4)" }
         posterAlt: { type: string }
         placeName: { type: string, description: "공연장 이름(ADR-0093)" }
         periodStart: { type: string, format: date, description: "첫 회차 시작 날짜(KST)" }
@@ -1204,7 +1204,7 @@ components:
         banners:
           type: array
           description: "운영자가 [홈 구성]에서 정한 순서. 노출 기간 안이고 판매 승인된 공연만"
-          items: { type: object, properties: { bannerId: { type: string }, productionId: { type: string }, eventId: { type: string, description: "대표 회차(누르면 이 회차 상세, ADR-0093)" }, imageUrl: { type: string, format: uri, description: "가로형 배너 파생본(1240×400 이상 [가정])" }, alt: { type: string }, displayUntil: { type: string, format: date-time } } }
+          items: { type: object, properties: { bannerId: { type: string }, productionId: { type: string }, eventId: { type: string, description: "대표 회차(누르면 이 회차 상세, ADR-0093)" }, title: { type: string, description: "배너의 핵심 문구(HTML 글자로 이미지 위·아래에 보인다. 이미지 안 글자로 넣지 않는다, d5 §5.1, WCAG 2.2 SC 1.4.5). [홈 구성]에서 적지 않았으면 없다" }, subtitle: { type: string, description: "둘째 줄(일시·장소 등)" }, imageUrl: { type: string, format: uri, description: "가로형 배너 파생본 묶음의 기준 주소(원본 1240×400 이상 [가정]). 파생본 이름은 posterUrl과 같은 규칙이다(ADR-0199 결정 4)" }, alt: { type: string }, displayUntil: { type: string, format: date-time } } }
         upcoming: { type: array, description: "오픈 예정 공연(다음 오픈 시각 순, ADR-0093)", items: { $ref: '#/components/schemas/ProductionCard' } }
         onSale: { type: array, description: "지금 판매 중. 잔여석이 있는 공연을 판매 종료(마지막 회차의 공연 시작 24시간 전, saleEndsAt)가 가까운 순으로(POL-043, ADR-0064)", items: { $ref: '#/components/schemas/ProductionCard' } }
         themes:
@@ -1385,6 +1385,8 @@ components:
               productionId: { type: string, description: "판매 승인된 공연만(아니면 422, ADR-0093). 누르면 대표 회차 상세" }
               imageId: { type: string, description: "POST /v1/ops/home-layout/banner-images로 올린 이미지" }
               alt: { type: string, minLength: 1, maxLength: 300, description: "대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다" }
+              title: { type: string, minLength: 1, maxLength: 40, description: "배너의 핵심 문구 40자 [가정]. 화면이 HTML 글자로 보인다(이미지 안 글자로 넣지 않는다, d5 §5.1, ADR-0199 결정 5)" }
+              subtitle: { type: string, minLength: 1, maxLength: 80, description: "둘째 줄 80자 [가정](일시·장소 등)" }
               displayFrom: { type: string, format: date-time }
               displayUntil: { type: string, format: date-time }
         themes:
@@ -1420,6 +1422,8 @@ components:
               productionId: {type: string, description: '판매 승인된 공연만(아니면 422, ADR-0093). 누르면 대표 회차 상세'}
               imageId: {type: string, description: POST /v1/ops/home-layout/banner-images로 올린 이미지}
               alt: {type: string, minLength: 1, maxLength: 300, description: 대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다}
+              title: {type: string, minLength: 1, maxLength: 40, description: '배너의 핵심 문구 40자 [가정]. 화면이 HTML 글자로 보인다(ADR-0199 결정 5)'}
+              subtitle: {type: string, minLength: 1, maxLength: 80, description: '둘째 줄 80자 [가정]'}
               displayFrom: {type: string, format: date-time}
               displayUntil: {type: string, format: date-time}
         themes:

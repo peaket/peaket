@@ -55,6 +55,7 @@ const asWritten = (bundle, variants) =>
     .replaceAll('{scannerApi}', 'https://scanner-api.peaket.example')
     .replaceAll('{partnerApi}', 'https://partner-api.peaket.example')
     .replaceAll('{apiWs}', 'wss://api.peaket.example')
+    .replaceAll('{img}', 'https://img.peaket.example')
     .replaceAll('{identity}', '{본인확인기관 출처(연동 계약 때 확정)}');
 
 test('[ASVS v5.0.0-3.4.3] 묶음 A·A′·B·C·D·G의 CSP 본문이 정본 글 상자와 글자까지 같다', () => {

@@ -22,6 +22,18 @@ export type HomeLayoutInputBannersItem = {
      * @maxLength 300
      */
   alt: string;
+  /**
+     * 배너의 핵심 문구 40자 [가정]. 화면이 HTML 글자로 보인다(ADR-0199 결정 5)
+     * @minLength 1
+     * @maxLength 40
+     */
+  title?: string;
+  /**
+     * 둘째 줄 80자 [가정]
+     * @minLength 1
+     * @maxLength 80
+     */
+  subtitle?: string;
   displayFrom: string;
   displayUntil: string;
 };

@@ -4,7 +4,7 @@
 // 정적 앱의 개발·미리보기 서버(vite·webpack 설정. 운영과 같은 헤더로 화면을 본다). HSTS·nosniff는 배포·게이트웨이 정책이 붙인다(ADR-0065 결정 3).
 //
 // 자리 표시: {n} 요청마다 만드는 nonce, {h} 빌드 때 정한 인라인 스크립트 해시 목록, {api}·{queue}·{queueFiles}·{partnerApi}·{opsApi}·
-// {scannerApi} API 출처, {apiWs} 좌석 WebSocket 출처, {identity} 본인확인기관 출처(연동 계약 때 확정이라 아직 값이 없다. 쓰는 곳이 넘긴다).
+// {scannerApi} API 출처, {apiWs} 좌석 WebSocket 출처, {img} 이미지 파생본 출처, {identity} 본인확인기관 출처(연동 계약 때 확정이라 아직 값이 없다. 쓰는 곳이 넘긴다).
 // 출처 값은 https·wss 출처(개발은 http://localhost·127.0.0.1)만 받는다. 채우지 않은 자리 표시가 남거나 꼴이 틀리면 만들지 않는다.
 
 /** 운영 출처(정본 §5.14.1이 쓰는 이름). 환경마다 다른 값은 renderCsp의 origins로 넘긴다 */
@@ -16,6 +16,8 @@ export const PROD_ORIGINS = {
   opsApi: 'https://ops-api.peaket.example',
   scannerApi: 'https://scanner-api.peaket.example',
   apiWs: 'wss://api.peaket.example',
+  /** 공연 포스터·배너 파생본(ADR-0199 결정 4) [가정] */
+  img: 'https://img.peaket.example',
 };
 
 /** 정본 글 상자의 '+' 줄(화면에 따라 더하거나 바꾸는 것). 로그인 화면의 소셜 제공자 form-action 출처는 연동 때 제공자 문서로 확정한다 */
@@ -40,7 +42,7 @@ const TAIL = "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report
 /** 묶음별 기본 CSP(정본 글 상자의 '+' 줄을 뺀 본문) */
 export const CSP = {
   A:
-    "default-src 'self'; script-src 'self' {h}; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; " +
+    "default-src 'self'; script-src 'self' {h}; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: {img}; font-src 'self'; " +
     "connect-src 'self' {api} {queue} {queueFiles}; worker-src 'self'; manifest-src 'self'; frame-src 'none'; form-action 'self'; " +
     TAIL,
   'A′':
@@ -48,7 +50,7 @@ export const CSP = {
     "connect-src 'self' {queue} {queueFiles} {api}; frame-src https://challenges.cloudflare.com; manifest-src 'self'; form-action {identity}; " +
     TAIL,
   B:
-    "default-src 'self'; script-src 'nonce-{n}' 'strict-dynamic'; style-src 'self' 'nonce-{n}'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; " +
+    "default-src 'self'; script-src 'nonce-{n}' 'strict-dynamic'; style-src 'self' 'nonce-{n}'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: {img}; font-src 'self'; " +
     "connect-src 'self' {api} {queue} {queueFiles}; worker-src 'self'; manifest-src 'self'; frame-src 'none'; form-action 'self'; " +
     TAIL,
   C:

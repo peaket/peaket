@@ -566,6 +566,8 @@ erDiagram
         uuid production_id "대상 공연(판매 승인된 공연만, ADR-0093). 누르면 대표 회차 상세"
         text image_key "운영자가 올린 가로형 배너 원본 키. 공개는 메타데이터를 지운 파생본만"
         text alt_text "대체 텍스트, 필수"
+        text title "배너의 핵심 문구 1~40자 [가정], 선택. 화면이 HTML 글자로 보인다(이미지 안 글자로 넣지 않는다, d5 §5.1, ADR-0199 결정 5)"
+        text subtitle "둘째 줄 1~80자 [가정], 선택"
         int sort_order
         timestamptz display_from "노출 시작"
         timestamptz display_until "노출 끝"

@@ -15,7 +15,11 @@ export type HomeFeedBannersItem = {
   productionId?: string;
   /** 대표 회차(누르면 이 회차 상세, ADR-0093) */
   eventId?: string;
-  /** 가로형 배너 파생본(1240×400 이상 [가정]) */
+  /** 배너의 핵심 문구(HTML 글자로 이미지 위·아래에 보인다. 이미지 안 글자로 넣지 않는다, d5 §5.1, WCAG 2.2 SC 1.4.5). [홈 구성]에서 적지 않았으면 없다 */
+  title?: string;
+  /** 둘째 줄(일시·장소 등) */
+  subtitle?: string;
+  /** 가로형 배너 파생본 묶음의 기준 주소(원본 1240×400 이상 [가정]). 파생본 이름은 posterUrl과 같은 규칙이다(ADR-0199 결정 4) */
   imageUrl?: string;
   alt?: string;
   displayUntil?: string;

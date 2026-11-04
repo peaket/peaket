@@ -18,6 +18,23 @@
 | 대기실 경량 페이지 | `pnpm --filter @peaket/queue-room dev` | http://localhost:3004/preview |
 | 포렌식 데모 | `pnpm --filter @peaket/forensics dev` | http://localhost:3005/ |
 
+## 계약 모양 가짜 API로 화면 띄워 보기(ADR-0199, BUILD_ORDER HOT-300)
+
+서버가 아직 없는 화면(홈 등)은 고정 자료를 내는 가짜 API로 띄운다. 운영·CI에서는 쓰지 않는다.
+
+1. 가짜 API: `PEAKET_WEB_ORIGIN=http://localhost:3000 pnpm --filter @peaket/web mock-api`(127.0.0.1:4010).
+2. 소비자 웹: `PEAKET_API_ORIGIN=http://127.0.0.1:4010 NEXT_PUBLIC_API_ORIGIN=http://127.0.0.1:4010 PEAKET_DEV_STATIC_ORIGIN=http://127.0.0.1:4010 PEAKET_CSP_ORIGINS='{"api":"http://127.0.0.1:4010","img":"http://127.0.0.1:4010"}' pnpm --filter @peaket/web dev`.
+3. 화면 상태 바꾸기: `http://127.0.0.1:4010/__mock/state?home=empty|normal&ranking=normal|stale|old|missing&fan=member|guest`. 홈 피드는 서버 캐시(60초) 뒤에 바뀐다.
+4. 고정 자료(`apps/web/scripts/mock-api/cards.json`)가 계약 Zod를 지나는지는 `pnpm --filter @peaket/web test`가 본다. 계약을 바꾸면 고정 자료도 고친다.
+
+| 환경값 | 뜻 |
+| --- | --- |
+| `PEAKET_API_ORIGIN` | 앱 서버가 공개 API(홈 피드 등)를 빌드·ISR 때 부르는 주소. 없으면 부르지 않고 빈 피드로 그린다 |
+| `NEXT_PUBLIC_API_ORIGIN` | 브라우저가 개인 값(찜·알림)을 부르는 팬 API 주소. 개발 서버에서 없으면 비로그인처럼 둔다 |
+| `PEAKET_DEV_STATIC_ORIGIN` | 개발 서버에서만: 같은 출처 정적 파일(랭킹 파일)을 넘길 곳 |
+| `NEXT_PUBLIC_QUEUE_ORIGIN`·`NEXT_PUBLIC_QUEUE_FILES_ORIGIN` | 브라우저 api-client가 함께 담는 대기열 API·파일 출처(개발 서버에서 없으면 비워 둔다) |
+| `PEAKET_CSP_ORIGINS` | CSP 자리 출처 바꾸기(JSON). 이미지 파생본 출처는 `img`(운영 기본 `https://img.peaket.example` [가정]) |
+
 ## 소셜 로그인을 로컬에서 돌려 보기(BUILD_ORDER PRF-020)
 
 실제 제공자 앱 등록 없이 모의 OIDC 제공자로 한다(docs/features/identity.md §2 '웹 앱 서버 경로', §12.1 '대역').

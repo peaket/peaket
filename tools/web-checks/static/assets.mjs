@@ -18,6 +18,8 @@ export const ALLOWED_EXTENSIONS = ['js', 'mjs', 'css', 'woff2', 'avif', 'webp', 
 const TEXT_EXTENSIONS = new Set(['js', 'mjs', 'css', 'html', 'json', 'webmanifest', 'svg']);
 // 소스 맵 링크: JS의 `//# sourceMappingURL=`와 CSS의 블록 주석 꼴(예전 꼴 `//@`도 본다)
 const SOURCE_MAP_LINK = /[#@]\s*sourceMappingURL\s*=/;
+/** MSW(목업 처리기)가 묶음에 든 흔적: 서비스 워커 이름, 로그 머리, 진입점 이름(FE-T21 '개발 도구·MSW', ADR-0199 결정 2) */
+export const MSW_MARKERS = /mockServiceWorker|\[MSW\]|msw\/(?:browser|node)/;
 
 function walk(dir) {
   const out = [];
@@ -56,7 +58,9 @@ export function planUpload(dir) {
       continue;
     }
     const bytes = readFileSync(abs);
-    if (TEXT_EXTENSIONS.has(ext) && SOURCE_MAP_LINK.test(bytes.toString('utf8'))) errors.push(`${rel}: 소스 맵 링크가 있다(숨김 소스 맵으로 빌드한다)`);
+    const text = TEXT_EXTENSIONS.has(ext) ? bytes.toString('utf8') : '';
+    if (text && SOURCE_MAP_LINK.test(text)) errors.push(`${rel}: 소스 맵 링크가 있다(숨김 소스 맵으로 빌드한다)`);
+    if ((ext === 'js' || ext === 'mjs' || ext === 'html') && MSW_MARKERS.test(text)) errors.push(`${rel}: MSW 목업 처리기 글자가 있다(운영 묶음에 넣지 않는다, FE-T21)`);
     upload.push({ path: rel, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
   }
   return { upload, excluded, errors };

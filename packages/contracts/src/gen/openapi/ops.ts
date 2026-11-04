@@ -669,6 +669,10 @@ export const CreateOpsCommandPostReviewConfirmationResponse = zod.unknown()
  */
 export const getOpsHomeLayoutResponseBannersItemAltMax = 300;
 
+export const getOpsHomeLayoutResponseBannersItemTitleMax = 40;
+
+export const getOpsHomeLayoutResponseBannersItemSubtitleMax = 80;
+
 export const getOpsHomeLayoutResponseBannersMax = 10;
 
 export const getOpsHomeLayoutResponseThemesItemNameMax = 30;
@@ -686,6 +690,8 @@ export const GetOpsHomeLayoutResponse = zod.object({
   "productionId": zod.string().describe('판매 승인된 공연만(아니면 422, ADR-0093). 누르면 대표 회차 상세'),
   "imageId": zod.string().describe('POST /v1/ops/home-layout/banner-images로 올린 이미지'),
   "alt": zod.string().min(1).max(getOpsHomeLayoutResponseBannersItemAltMax).describe('대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다'),
+  "title": zod.string().min(1).max(getOpsHomeLayoutResponseBannersItemTitleMax).optional().describe('배너의 핵심 문구 40자 [가정]. 화면이 HTML 글자로 보인다(이미지 안 글자로 넣지 않는다, d5 §5.1, ADR-0199 결정 5)'),
+  "subtitle": zod.string().min(1).max(getOpsHomeLayoutResponseBannersItemSubtitleMax).optional().describe('둘째 줄 80자 [가정](일시·장소 등)'),
   "displayFrom": zod.iso.datetime({"offset":true}),
   "displayUntil": zod.iso.datetime({"offset":true})
 })).max(getOpsHomeLayoutResponseBannersMax),
@@ -710,6 +716,10 @@ export const PutOpsHomeLayoutHeader = zod.object({
 
 export const putOpsHomeLayoutBodyBannersItemAltMax = 300;
 
+export const putOpsHomeLayoutBodyBannersItemTitleMax = 40;
+
+export const putOpsHomeLayoutBodyBannersItemSubtitleMax = 80;
+
 export const putOpsHomeLayoutBodyBannersMax = 10;
 
 export const putOpsHomeLayoutBodyThemesItemNameMax = 30;
@@ -729,6 +739,8 @@ export const PutOpsHomeLayoutBody = zod.object({
   "productionId": zod.string().describe('판매 승인된 공연만(아니면 422, ADR-0093). 누르면 대표 회차 상세'),
   "imageId": zod.string().describe('POST /v1/ops/home-layout/banner-images로 올린 이미지'),
   "alt": zod.string().min(1).max(putOpsHomeLayoutBodyBannersItemAltMax).describe('대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다'),
+  "title": zod.string().min(1).max(putOpsHomeLayoutBodyBannersItemTitleMax).optional().describe('배너의 핵심 문구 40자 [가정]. 화면이 HTML 글자로 보인다(ADR-0199 결정 5)'),
+  "subtitle": zod.string().min(1).max(putOpsHomeLayoutBodyBannersItemSubtitleMax).optional().describe('둘째 줄 80자 [가정]'),
   "displayFrom": zod.iso.datetime({"offset":true}),
   "displayUntil": zod.iso.datetime({"offset":true})
 }).strict()).max(putOpsHomeLayoutBodyBannersMax),
@@ -743,6 +755,10 @@ export const PutOpsHomeLayoutBody = zod.object({
 }).strict().describe('HomeLayout의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(HomeLayout)와 같고 응답은 HomeLayout(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040). 서버가 채우는 updatedBy·updatedAt은 받지 않고, 저장 사유 reason을 함께 받는다(PUT /v1/ops/home-layout. allOf로 잇던 것을 한 스키마로 바꿔 orval이 읽기 전용 칸을 본문 Zod에 넣던 차이도 없앴다).')
 
 export const putOpsHomeLayoutResponseBannersItemAltMax = 300;
+
+export const putOpsHomeLayoutResponseBannersItemTitleMax = 40;
+
+export const putOpsHomeLayoutResponseBannersItemSubtitleMax = 80;
 
 export const putOpsHomeLayoutResponseBannersMax = 10;
 
@@ -761,6 +777,8 @@ export const PutOpsHomeLayoutResponse = zod.object({
   "productionId": zod.string().describe('판매 승인된 공연만(아니면 422, ADR-0093). 누르면 대표 회차 상세'),
   "imageId": zod.string().describe('POST /v1/ops/home-layout/banner-images로 올린 이미지'),
   "alt": zod.string().min(1).max(putOpsHomeLayoutResponseBannersItemAltMax).describe('대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다'),
+  "title": zod.string().min(1).max(putOpsHomeLayoutResponseBannersItemTitleMax).optional().describe('배너의 핵심 문구 40자 [가정]. 화면이 HTML 글자로 보인다(이미지 안 글자로 넣지 않는다, d5 §5.1, ADR-0199 결정 5)'),
+  "subtitle": zod.string().min(1).max(putOpsHomeLayoutResponseBannersItemSubtitleMax).optional().describe('둘째 줄 80자 [가정](일시·장소 등)'),
   "displayFrom": zod.iso.datetime({"offset":true}),
   "displayUntil": zod.iso.datetime({"offset":true})
 })).max(putOpsHomeLayoutResponseBannersMax),

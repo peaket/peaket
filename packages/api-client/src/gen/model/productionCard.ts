@@ -22,7 +22,7 @@ export interface ProductionCard {
   eventId?: string;
   title?: string;
   genre?: Genre;
-  /** 포스터 파생본(ADR-0062 결정 38) */
+  /** 포스터 파생본 묶음의 기준 주소(ADR-0062 결정 38). 파생본 하나는 {기준 주소}/{폭}.{avif|webp}이고 폭은 320·640·960·1280 [가정]이다. 화면은 AVIF를 먼저, WebP를 대체로 둔 <picture>로 고른다(ADR-0199 결정 4) */
   posterUrl?: string;
   posterAlt?: string;
   /** 공연장 이름(ADR-0093) */

@@ -377,12 +377,18 @@ importers:
       '@grpc/proto-loader':
         specifier: 0.8.1
         version: 0.8.1
+      '@peaket/api-client':
+        specifier: workspace:*
+        version: link:../../packages/api-client
       '@peaket/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
       '@peaket/ds':
         specifier: workspace:*
         version: link:../../packages/ds
+      '@tanstack/react-query':
+        specifier: 5.105.0
+        version: 5.105.0(@types/react@19.3.0)(react@19.3.1)
       jose:
         specifier: 6.2.14
         version: 6.2.14
