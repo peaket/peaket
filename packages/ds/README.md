@@ -3,7 +3,8 @@
 PEAKET 디자인 시스템 패키지다. 디자인 토큰(`docs/design/tokens.json`)에서 만든 CSS 변수·Tailwind 4 테마·TS 상수, 디자인 캔버스의 키트 CSS(`src/styles/kit.css`, 캔버스 `peaket.css`를 옮긴 것), 공용 부품(CMP)과 퍼블리싱 도우미를 둔다. 게시하지 않고 앱이 `workspace:`로 잇는다(ADR-0165). 정본은 docs/design/d2-design-system.md다.
 
 - 토큰 빌드: `pnpm --filter @peaket/ds tokens`(만들기) · `tokens:check`(tokens.json과 다르면 실패). `src/gen/`의 다섯 파일 — `tokens.css`(--peaket-* 변수), `theme.css`(Tailwind 테마), `tokens.ts`(Canvas용 TS 상수), `kit-tokens.css`(키트 변수 `.pk`·`.pk.dark`), `queue-room-tokens.css`(대기실 경량 CSS용 같은 블록) — 은 손으로 고치지 않는다.
-- 스타일 파일: `styles/index.css`가 tokens.css → theme.css → kit-tokens.css → kit.css → ds.css 순서로 싣는다. `ds.css`는 키트에 없는 ds 보조 규칙(`pk-skip-link` 등)이다. 대기실 경량 페이지는 `@peaket/ds/queue-room.css` 하나만 싣는다(키트 부분집합, 맨 앞에서 queue-room-tokens.css를 싣는다).
+- 토큰 검사: `pnpm --filter @peaket/ds test`가 생성물 차이(`tokens:check`), 토큰 형식 검사(FE-T45: DTCG 이름·형식·별칭·확장 키, SEED 대응 이름과 중단점, SEED 색 모드 선택자), d2 §5 대비표 계산(FE-T44)을 돈다. 문제 목록만 보려면 `tokens:lint`. 규칙은 `scripts/token-rules.mjs`, 정본 읽기는 `scripts/token-canon.mjs`다.
+- 스타일 파일: `styles/index.css`가 SEED base 층 판(`@seed-design/css/base.layered.css`, 스스로 `seed-base` 층에 든다) → tokens.css → theme.css → kit-tokens.css → kit.css → ds.css 순서로 싣는다. 피켓 토큰이 `components` 층이라 같은 이름의 `--seed-*` 변수를 덮는다. 붙인 SEED 판은 `@seed-design/css` 3.1.0이다(BAS-170). `ds.css`는 키트에 없는 ds 보조 규칙(`pk-skip-link` 등)이다. 대기실 경량 페이지는 `@peaket/ds/queue-room.css` 하나만 싣는다(키트 부분집합, 맨 앞에서 queue-room-tokens.css를 싣는다).
 
 ## CSS 싣기
 
@@ -16,6 +17,8 @@ PEAKET 디자인 시스템 패키지다. 디자인 토큰(`docs/design/tokens.js
 @source "../../../packages/ds/src"; /* 앱 CSS 파일 위치에서 packages/ds/src까지의 상대 경로 */
 ```
 
+- Vite·webpack 앱의 진입점(`main.tsx`)은 이 첫 CSS를 다른 무엇보다 먼저 가져온다. 부품을 먼저 가져오면 그 부품 CSS의 층이 가장 약한 층이 된다(FE-T36 PoC).
+- Next.js 앱은 `next.config.ts`의 `turbopack.resolveAlias`에 `seedLayeredAlias(import.meta.dirname)`(`@peaket/ds/seed-layered-alias`)를 준다. SEED recipe를 층 판으로 돌리는 표다(Turbopack은 내보내기 조건 `seed-layered`를 고르지 못한다). Vite는 `resolve.conditions`, webpack은 `resolve.conditionNames`에 `seed-layered`를 넣는다.
 - 화면의 맨 바깥(`<body>`)에 `class="pk"`를 붙인다. 다크는 `class="pk dark"`다. 키트의 모든 색 변수(`--surface`, `--text`, `--primary` …)와 바탕 정리 규칙은 `.pk` 아래에서만 돈다.
 - 키트 클래스(버튼 `btn btn-primary`, 카드 `card`, 배지 `badge badge-success`, 칩 `chip`, 입력 `input`, 표 `table`, 탭 `tabs`, 배너 `banner`, 셸 `wh`·`ps`·`cs`·`ss`, 아이콘 `ic ic-<이름>`, 배치 도우미 `row`·`col`·`grow`·`between`·`center`·`wrap`, 글자 `t-xs`~`t-display`·`fw-m`·`fw-b`·`muted`·`num`·`ellipsis`, `sr-only`, 뼈대 `skel` 등)는 디자인 캔버스 보드와 이름이 같다. 보드를 옮길 때 클래스를 그대로 쓴다. 전체 목록은 `src/styles/kit.css`의 절 제목(1~21절)을 본다.
 - 색은 키트의 의미 변수(`var(--primary)` 등)나 Tailwind 테마 색만 쓴다. 원시 색(hex)은 쓰지 않는다(포스터 그림·제공자 버튼만 키트가 예외로 둔다).

@@ -4,7 +4,11 @@
  * gen/kit-tokens.css: tokens.json → 캔버스 키트 변수(.pk·.pk.dark의 --surface 등). kit.css보다 먼저 싣는다
  * kit.css: 캔버스 디자인 키트(.pk 루트와 부품 클래스)
  * ds.css: 키트에 없는 ds 부품 보조 규칙(본문 바로가기 등, pk- 앞말)
+ * 맨 앞의 SEED base 층 판(@seed-design/css/base.layered.css, 스스로 seed-base 층에 든다)은 SEED 색·간격 변수와
+ * SEED 기본 규칙이다. 피켓 토큰(gen/tokens.css, components 층)이 그 뒤 층이라 같은 이름의 --seed-* 변수를 덮는다
+ * (docs/design/d2 §1 'SEED CSS 싣기'·'CSS 층 순서'). SEED 전체 CSS(all*.css)는 싣지 않는다.
  */
+@import "@seed-design/css/base.layered.css";
 @import "../gen/tokens.css";
 @import "../gen/theme.css";
 @import "../gen/kit-tokens.css";

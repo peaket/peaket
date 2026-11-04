@@ -16,6 +16,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import StyleDictionary from "style-dictionary";
+import { LIGHT_SELECTORS, DARK_SELECTORS } from "./token-rules.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(here, "..");
@@ -24,22 +25,10 @@ const tokensPath = resolve(repoRoot, "docs/design/tokens.json");
 const outDir = resolve(pkgRoot, "src/gen");
 const checkMode = process.argv.includes("--check");
 
-// SEED 3.0.3 base.layered.css가 쓰는 색 모드 선택자를 그대로 옮긴다(@seed-design/css/base.layered.css에서 확인).
-// SEED는 system 모드에서 prefers-color-scheme을 CSS로 직접 보지 않고, 색 모드 스크립트(@seed-design/css/theming)가
-// html에 data-seed-user-color-scheme을 달아 고른다. 그래서 피켓도 같은 선택자를 써서 SEED와 함께 바뀌게 한다.
-const LIGHT_SELECTOR = [
-  ":root",
-  ':root[data-seed-color-mode="system"][data-seed-user-color-scheme="light"]',
-  ':root[data-seed-color-mode="light-only"]',
-  ':root [data-seed-color-mode="light-only"]',
-].join(",\n  ");
-// 퍼블리싱 화면은 키트처럼 맨 바깥(body)의 `.pk.dark`로 다크를 켜므로(SEED 색 모드 스크립트는 아직 싣지 않는다) 그 선택자도 둔다.
-const DARK_SELECTOR = [
-  ".pk.dark",
-  ':root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"]',
-  ':root[data-seed-color-mode="dark-only"]',
-  ':root [data-seed-color-mode="dark-only"]',
-].join(",\n  ");
+// 색 모드 선택자는 SEED base.layered.css가 색 변수에 쓰는 것을 옮긴 것이다. 목록과 까닭은 token-rules.mjs에 있고,
+// 붙인 SEED 판의 선택자와 같은지는 토큰 형식 검사(FE-T45 ⑦)가 본다.
+const LIGHT_SELECTOR = LIGHT_SELECTORS.join(",\n  ");
+const DARK_SELECTOR = DARK_SELECTORS.join(",\n  ");
 
 // tokens.json에 짝이 없는 SEED 브랜드 역할. SEED 부품이 쓰므로 당근 색이 새지 않게 가까운 피켓 의미 토큰 값으로 덮는다.
 // (recipes/*.layered.css에서 쓰는 곳을 확인했다. carrot-200은 브랜드 역할 대신 팔레트를 바로 쓰는 곳이 있어 함께 덮는다.)

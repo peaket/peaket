@@ -19,6 +19,7 @@ crash.log
 .next/
 .next-*/
 dist/
+dist-poc/
 .turbo/
 *.tsbuildinfo
 next-env.d.ts

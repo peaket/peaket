@@ -12,15 +12,19 @@
     "./queue-room.css": "./src/styles/queue-room.css",
     "./tokens": "./src/gen/tokens.ts",
     "./icons": "./src/icons/index.tsx",
+    "./poc/seed-layer-probe": "./src/poc/SeedLayerProbe.tsx",
+    "./seed-layered-alias": "./scripts/seed-layered-alias.mjs",
     "./*": "./src/components/*/index.ts"
   },
   "scripts": {
     "tokens": "node scripts/build-tokens.mjs",
     "tokens:check": "node scripts/build-tokens.mjs --check",
+    "tokens:lint": "node scripts/check-tokens.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test"
+    "test": "node scripts/build-tokens.mjs --check && node --test"
   },
   "dependencies": {
+    "@seed-design/css": "^3.1.0",
     "@tanstack/react-table": "^9.3.1",
     "chart.js": "^4.6.1",
     "clsx": "^2.1.1"

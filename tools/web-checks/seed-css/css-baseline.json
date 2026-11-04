@@ -1,0 +1,16 @@
+{
+  "$description": "FE-T36 크기 기준선(kB, gzip). docs/frontend.md §5.8 예산을 넘은 경로만 적고, 그 경로는 이 값 + 0.5kB를 한도로 더 커지지 않게 막는다. 줄면 낮춘다(늘리려면 PR에서 까닭을 적는다). 예산은 wbs 7.5.2(BUILD_ORDER LCH-200)에서 다시 정한다",
+  "pages": {
+    "console /": 31.3,
+    "forensics /": 29.5,
+    "partner /events": 31.7,
+    "scanner /": 29.6,
+    "web /": 34.2,
+    "web /booking/evt-lumen-1025/checkout": 34.2,
+    "web /booking/evt-lumen-1025/seats": 34.2,
+    "web /events/evt-lumen-1025": 34.2,
+    "web /login": 34.2,
+    "web /my/tickets": 34.2,
+    "web /search": 34.2
+  }
+}
