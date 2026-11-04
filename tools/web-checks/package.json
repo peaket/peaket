@@ -14,7 +14,8 @@
     "seatmap": "playwright test -c playwright.seatmap.config.mjs",
     "budgets": "playwright test -c playwright.budgets.config.mjs",
     "seatmap-pkg": "playwright test -c playwright.seatmap-pkg.config.mjs",
-    "ds": "playwright test -c playwright.ds.config.mjs"
+    "ds": "playwright test -c playwright.ds.config.mjs",
+    "csp": "playwright test -c playwright.csp.config.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",

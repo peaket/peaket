@@ -81,8 +81,11 @@ export function serverCommand(app, build) {
   if (!b) throw new Error(`모르는 빌드: ${build}`);
   const port = portOf(app, build);
   // next start는 서버 액션 암호화 키가 있어야 뜬다(packages/config/next/server-actions-key.mjs). 검사용 서버는 띄울 때마다 새 키를 쓴다
+  // 소비자 웹은 운영처럼 캐시 화면 응답 때 해시 서버(apps/web/server/start.mjs)를 앞에 두고 Next.js를 안쪽 포트(+1000)에 띄운다(ADR-0193)
   if (app.kind === 'next') {
-    return { command: `pnpm --dir ../../${app.dir} exec next start -p ${port}`, env: { PEAKET_NEXT_DIST: b.nextDist, NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: CHECK_KEY } };
+    const env = { PEAKET_NEXT_DIST: b.nextDist, NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: CHECK_KEY };
+    if (app.name === 'web') return { command: `node ../../${app.dir}/server/start.mjs --port ${port} --inner-port ${port + 1000}`, env };
+    return { command: `pnpm --dir ../../${app.dir} exec next start -p ${port}`, env };
   }
   // 없는 경로에 줄 대체 파일: 운영 빌드는 index.html, Vite·webpack PoC 빌드(dist-poc)는 탐침 페이지 하나만 있으므로 탐침 페이지다
   const spa = build === 'poc' ? app.probe.replace(/^\//, '') : 'index.html';

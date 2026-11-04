@@ -14,9 +14,11 @@ test('도구 앱 다섯(웹·파트너·관제·스캐너·포렌식)을 모두 
   const ports = APPS.flatMap((a) => Object.keys(BUILDS).map((b) => portOf(a, b)));
   assert.equal(new Set(ports).size, ports.length);
   // 경로 검사는 운영 빌드(운영과 같은 산출 폴더), 탐침은 PoC 빌드
-  assert.match(serverCommand(APPS[0], 'prod').command, /next start -p 4101$/);
+  // 소비자 웹은 운영처럼 캐시 화면 응답 때 해시 서버를 앞에 두고 Next.js를 안쪽 포트(+1000)에 띄운다(ADR-0193). 파트너는 next start 그대로
+  assert.match(serverCommand(APPS[0], 'prod').command, /apps\/web\/server\/start\.mjs --port 4101 --inner-port 5101$/);
   assert.equal(serverCommand(APPS[0], 'prod').env.PEAKET_NEXT_DIST, '.next');
-  assert.match(serverCommand(APPS[0], 'poc').command, /next start -p 4111$/);
+  assert.match(serverCommand(APPS[0], 'poc').command, /start\.mjs --port 4111 --inner-port 5111$/);
+  assert.match(serverCommand(APPS[1], 'prod').command, /next start -p 4102$/);
   assert.equal(serverCommand(APPS[0], 'poc').env.PEAKET_NEXT_DIST, '.next-poc');
   assert.match(serverCommand(APPS[3], 'prod').command, /serve\.mjs .*scanner\/dist .*--spa/);
   assert.match(serverCommand(APPS[3], 'prod').command, /--spa index\.html$/);

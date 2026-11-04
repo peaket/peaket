@@ -3,6 +3,7 @@
 # SEED CSS 층 검사(FE-T36, 앱 다섯의 PoC 빌드). 브라우저 잡은 기준 이미지를 찍은 것과 같은 Playwright 컨테이너(다이제스트 고정,
 # tools/web-checks/lib/docker.mjs의 IMAGE와 같다)에서 돈다. 브라우저 그리기는 OS·판·글꼴에 따라 달라서다(docs/design/d2 §1).
 # 성능 예산(2026-11-04 BAS-220): 대기실 FE-T1(size-limit), 경로별 첫 JS, Lighthouse 적재 지표, 정적 자산 올리기 목록·소스 맵 링크·SBOM.
+# 소비자 웹 CSP(2026-11-04 HOT-290): budgets 잡이 같은 운영 빌드로 FE-T35·FE-T30·캐시 화면 응답 때 해시(ADR-0193)를 세 엔진에서 본다.
 # ds 부품(2026-11-04 BAS-180): Storybook 정적 빌드의 모든 이야기를 시각 회귀(FE-T40, visual 잡)와 axe·동작 검사(FE-T18, ds 잡)로 본다.
 name: ci-web
 
@@ -161,7 +162,7 @@ jobs:
   # → 올릴 파일 목록(허용 확장자, 소스 맵 링크 0)과 앱별 정적 자산 SBOM(CycloneDX, 산출물로 남긴다)
   budgets:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 50
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
       options: --ipc=host
@@ -193,6 +194,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: tools/web-checks
       - run: pnpm run budgets
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      # 소비자 웹 CSP(HOT-290): 같은 운영 빌드를 캐시 화면 응답 때 해시 서버 앞으로 띄워 세 엔진에서 FE-T35·FE-T30·캐시 화면 해시를 본다(ADR-0193)
+      - run: pnpm run csp
         working-directory: tools/web-checks
         env:
           HOME: /root

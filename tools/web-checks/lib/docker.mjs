@@ -1,5 +1,6 @@
 // 판을 고정한 Playwright 컨테이너에서 검사를 돌린다(docs/frontend.md §5.17 FE-T40·FE-T36, BUILD_ORDER BAS-170).
 //   node lib/docker.mjs visual [--update-snapshots[=missing]]   대기실 셸과 ds 이야기 시각 회귀. 셸(apps/web/queue-room/dist)과 Storybook(tools/storybook/storybook-static)은 먼저 빌드해 둔다
+//   node lib/docker.mjs csp                           소비자 웹 CSP(FE-T35·FE-T30·SRI PoC, HOT-290). 웹 운영 빌드 서버(4101)는 이 PC에서 먼저 띄운다
 //   node lib/docker.mjs ds                            @peaket/ds 접근성(axe)·동작 검사(BAS-180). Storybook은 먼저 tools/storybook에서 `pnpm run build`
 //   node lib/docker.mjs layers                        SEED CSS 층 검사. 서버(앱 다섯의 PoC 빌드)는 이 PC에서 먼저 띄워 둔다
 //   node lib/docker.mjs seatmap                       5만 석 좌석맵 PoC(K5) 네 프로젝트
@@ -34,8 +35,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 
 function main() {
   const [mode, ...rest] = process.argv.slice(2);
-  if (!['visual', 'layers', 'seatmap', 'budgets', 'seatmap-pkg', 'ds'].includes(mode)) {
-    console.error('쓰는 법: node lib/docker.mjs visual [--update-snapshots] | layers | seatmap | budgets | seatmap-pkg | ds');
+  if (!['visual', 'layers', 'seatmap', 'budgets', 'seatmap-pkg', 'ds', 'csp'].includes(mode)) {
+    console.error('쓰는 법: node lib/docker.mjs visual [--update-snapshots] | layers | seatmap | budgets | seatmap-pkg | ds | csp');
     process.exit(2);
   }
   // --update-snapshots(모두 다시) 또는 --update-snapshots=missing(새 이야기처럼 없는 것만 만들고 나머지는 견준다)
@@ -53,6 +54,15 @@ function main() {
       process.exit(2);
     }
     mounts.push('-v', `${dist}:/repo/apps/web/queue-room/dist:ro`);
+  }
+  if (mode === 'csp') {
+    // 정본 CSP 값(packages/config/headers)과 웹 운영 빌드 산출물(사전 렌더 목록·빌드 셸 HTML)을 읽기 전용으로 붙인다
+    const build = join(repo, 'apps/web/.next');
+    if (!existsSync(join(build, 'prerender-manifest.json'))) {
+      console.error('웹 운영 빌드가 없다: node seed-css/build.mjs web');
+      process.exit(2);
+    }
+    mounts.push('-v', `${join(repo, 'packages/config/headers')}:/repo/packages/config/headers:ro`, '-v', `${build}:/repo/apps/web/.next:ro`);
   }
   if (mode === 'visual' || mode === 'ds') {
     const sb = join(repo, 'tools/storybook/storybook-static');
@@ -81,6 +91,8 @@ function main() {
     'seatmap-pkg': 'pnpm exec playwright test -c playwright.seatmap-pkg.config.mjs',
     // ds 부품(BAS-180): 접근성은 Chromium, 동작은 세 엔진
     ds: 'pnpm exec playwright test -c playwright.ds.config.mjs',
+    // 소비자 웹 CSP(HOT-290): 서버는 이 PC의 웹 운영 빌드(4101)
+    csp: 'PEAKET_WEB_CHECKS_HOST=host.docker.internal PEAKET_WEB_CHECKS_SERVERS=external pnpm exec playwright test -c playwright.csp.config.mjs',
   }[mode];
   const script = [
     'set -e',
