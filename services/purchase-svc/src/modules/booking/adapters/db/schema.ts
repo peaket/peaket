@@ -1,6 +1,7 @@
 // purchase DB의 주문 표(docs/data.md §2 ERD purchase_order·order_item·order_event·order_idempotency·payment_attempt와 §4 '주문 표 마이그레이션',
 // docs/features/payment.md §3 '주문 저장소의 첫 구현', BUILD_ORDER PRF-160, ADR-0113·0114). 마이그레이션은 0003_order_tables.sql이다.
-// - 주문 표는 나누지 않는다(ADR-0114). 쓰기가 많은 purchase_order에는 새 인덱스를 두지 않는다(data.md §5.1).
+// - 주문 표는 나누지 않는다(ADR-0114). 쓰기가 많은 purchase_order에는 새 인덱스를 두지 않는다(data.md §5.1). 예외는 0004의 hold_id 유일 인덱스
+//   (한 홀드에 주문 하나를 DB가 정한다, BUILD_ORDER PRF-161)다.
 // - order_event의 occurred_at BRIN 인덱스(매일 검사가 '전날 이력'을 찾는다, autosummarize = on), 상태 이력 지연 제약 트리거(order_status_has_event)와
 //   Outbox 부모 표는 마이그레이션 SQL에만 손으로 적었다(Drizzle 표 정의로 적을 수 없다).
 // - 결제 접수가 저장할 결제 참조 칸은 PRF-162, 발권 재시도 큐 ticket_issue_job은 PRF-163이 더한다.
@@ -39,8 +40,14 @@ export const purchaseOrder = pgTable(
     consentVersion: text('consent_version').notNull(),
     seatAssignment: text('seat_assignment').notNull(),
     createdAt: at('created_at').notNull(),
+    // 주문을 만든 홀드(한 홀드에 주문 하나, 겹치면 409 hold-already-ordered). 실패 해제·다시 만들기가 주문 기준으로 쓴다(마이그레이션 0004, BUILD_ORDER PRF-161)
+    holdId: uuid('hold_id').notNull(),
+    // 주문을 만든 구매 세션(입장 토큰 jti). 결제 시도·접수가 '이 구매 세션의 주문'을 가린다(0004, PRF-161. 사건에는 CREATED에만 싣는다)
+    purchaseSessionId: text('purchase_session_id').notNull(),
   },
   (t) => [
+    // 한 홀드에 주문 하나(docs/data.md §5 '주문 생성'). 뒤 쪽 트랜잭션은 유일 확인에서 앞 쪽 커밋을 기다리고 23505로 끝난다
+    uniqueIndex('purchase_order_hold_key').on(t.holdId),
     check('purchase_order_status_check', sql`${t.status} in (${STATUS_LIST})`),
     check('purchase_order_amount_check', sql`${t.amount} >= 0`),
     check('purchase_order_event_seq_check', sql`${t.eventSeq} >= 1`),

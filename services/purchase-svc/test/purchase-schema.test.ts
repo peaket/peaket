@@ -2,8 +2,9 @@
 // '다시 만들기 표와 원장 칸'(BUILD_ORDER PRF-143), §2 ERD, BUILD_ORDER PRF-140 ①).
 // ① Drizzle 표 정의(schema.ts)를 getTableConfig로 읽어 표·열·기본 키·부분 유일 인덱스·check 제약 이름과 식이 정본과 같은지 보고,
 // ② 마이그레이션 SQL 파일(0000 좌석 표, 0002 다시 만들기 표·원장 칸)을 글로 읽어 파티션 선언(seat_hold만, DEFAULT 파티션 없음)과 표 정의 ↔ SQL 일치를 보고,
-// ③ 마이그레이션 기록(meta)이 맞물리는지 본다. 네 번째 마이그레이션(0003 주문 표·Outbox, BUILD_ORDER PRF-160)도 기록·파일 목록에 있고,
-// 마지막 스냅샷(0003)의 주문 표 다섯(booking schema.ts)이 표 정의와 같은지 본다.
+// ③ 마이그레이션 기록(meta)이 맞물리는지 본다. 네 번째 마이그레이션(0003 주문 표·Outbox, BUILD_ORDER PRF-160)과 다섯 번째(0004 주문의 홀드·구매 세션 칸과
+// hold_id 유일 인덱스, BUILD_ORDER PRF-161)도 기록·파일 목록에 있고, 마지막 스냅샷(0004)의 주문 표 다섯(booking schema.ts)이 표 정의와 같은지 본다.
+// ④ 0004 SQL의 칸(hold_id·purchase_session_id)과 유일 인덱스(purchase_order_hold_key)가 schema.ts와 같은지 본다.
 // 실제 PostgreSQL에서 돌려 보는 것은 test-int/purchase-migration.int.test.ts(주문 표는 test-int/order-store.int.test.ts)다.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,6 +24,8 @@ const HELD_TAG = '0001_held_event_and_stat_snapshot';
 const REBUILD_TAG = '0002_seat_rebuild_and_hold_ids';
 /** 주문 표 다섯과 Outbox 부모 표(BUILD_ORDER PRF-160) */
 const ORDER_TAG = '0003_order_tables';
+/** 주문을 만든 홀드·구매 세션 칸과 hold_id 유일 인덱스(BUILD_ORDER PRF-161) */
+const ORDER_HOLD_TAG = '0004_order_hold_and_session';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
 
@@ -333,13 +336,14 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
   };
 
-  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141)·0002(다시 만들기 표·원장 칸, PRF-143)·0003(주문 표·Outbox, PRF-160) 차례이고 tag가 SQL 파일 이름과 맞으며 when이 차례대로 커진다 [ASVS v5.0.0-2.3.4]', () => {
+  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141)·0002(다시 만들기 표·원장 칸, PRF-143)·0003(주문 표·Outbox, PRF-160)·0004(주문의 홀드·구매 세션 칸, PRF-161) 차례이고 tag가 SQL 파일 이름과 맞으며 when이 차례대로 커진다 [ASVS v5.0.0-2.3.4]', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
       [1, HELD_TAG],
       [2, REBUILD_TAG],
       [3, ORDER_TAG],
+      [4, ORDER_HOLD_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -351,7 +355,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   });
 
   test('migrations 폴더의 SQL 파일은 기록에 있는 것뿐이다(기록에 없는 SQL이 몰래 쌓이지 않는다)', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${HELD_TAG}.sql`, `${REBUILD_TAG}.sql`, `${ORDER_TAG}.sql`]);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${HELD_TAG}.sql`, `${REBUILD_TAG}.sql`, `${ORDER_TAG}.sql`, `${ORDER_HOLD_TAG}.sql`]);
   });
 
   type Snapshot = {
@@ -373,7 +377,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     .sort();
   const snapshotOf = (f: string) => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', f), 'utf8')) as Snapshot;
 
-  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003)', () => {
+  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003 → 0004)', () => {
     expect(snapshotFiles).toEqual(journal.entries.map((e) => `${String(e.idx).padStart(4, '0')}_snapshot.json`));
     let prev = '00000000-0000-0000-0000-000000000000';
     for (const f of snapshotFiles) {
@@ -387,8 +391,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt];
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
 
-  test('마지막 스냅샷(0003_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 주문 표 다섯)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0003_snapshot.json');
+  test('마지막 스냅샷(0004_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 주문 표 다섯)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0004_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
     expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, ...ORDER_SHAPES].map((s) => `public.${s.name}`).sort());
     for (const s of [...SHAPES, ...ORDER_SHAPES]) {
@@ -399,8 +403,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     }
   });
 
-  test('0003 스냅샷의 주문 표 다섯은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160) [ASVS v5.0.0-2.3.4]', () => {
-    const snap = snapshotOf('0003_snapshot.json');
+  test('마지막 스냅샷(0004)의 주문 표 다섯은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160, 0004의 purchase_order_hold_key는 PRF-161) [ASVS v5.0.0-2.3.4]', () => {
+    const snap = snapshotOf('0004_snapshot.json');
     expect(ORDER_SHAPES.map((s) => s.name)).toEqual(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt']);
     ORDER_TABLES.forEach((table, i) => {
       const s = ORDER_SHAPES[i]!;
@@ -409,5 +413,65 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       expect(Object.keys(t.foreignKeys ?? {}), `${s.name} 외래 키`).toEqual(getTableConfig(table).foreignKeys.map((f) => f.getName()));
       expect(Object.entries(t.indexes ?? {}).map(([n, x]) => [n, x.isUnique]), `${s.name} 인덱스`).toEqual(s.indexes.map((x) => [x.name, x.unique]));
     });
+  });
+
+  test('0003 스냅샷에는 0004가 더한 칸·인덱스가 없다: 0004 스냅샷의 purchase_order만 hold_id·purchase_session_id 두 칸과 purchase_order_hold_key 하나가 늘었다(다른 표는 같다) [ASVS v5.0.0-2.3.4]', () => {
+    const before = snapshotOf('0003_snapshot.json');
+    const after = snapshotOf('0004_snapshot.json');
+    expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
+    for (const name of Object.keys(after.tables)) {
+      if (name === 'public.purchase_order') continue;
+      expect(after.tables[name], name).toEqual(before.tables[name]);
+    }
+    const b = before.tables['public.purchase_order']!;
+    const a = after.tables['public.purchase_order']!;
+    expect(Object.keys(a.columns).filter((c) => !(c in b.columns))).toEqual(['hold_id', 'purchase_session_id']);
+    expect(Object.keys(a.indexes ?? {}).filter((i) => !(i in (b.indexes ?? {})))).toEqual(['purchase_order_hold_key']);
+  });
+});
+
+/** booking schema.ts의 purchase_order(0004가 칸 둘·유일 인덱스 하나를 더한다, PRF-161) */
+const orderShape = shapeOf(purchaseOrder);
+const holdFile = readFileSync(join(MIGRATIONS, `${ORDER_HOLD_TAG}.sql`), 'utf8');
+const holdBody = holdFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const holdStatements = statementsOf(holdFile);
+
+describe('마이그레이션 SQL 파일(0004_order_hold_and_session.sql, PRF-161)', () => {
+  test('문 셋뿐이다: purchase_order에 hold_id·purchase_session_id를 더하고 유일 인덱스 하나를 만든다(지우거나 바꾸는 문이 없다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(holdStatements).toHaveLength(3);
+    expect(holdStatements.map((s) => /^ALTER TABLE "([a-z_]+)" ADD COLUMN "([a-z_]+)" /.exec(s)?.slice(1).join('.'))).toEqual(['purchase_order.hold_id', 'purchase_order.purchase_session_id', undefined]);
+    expect(holdStatements[2]).toMatch(/^CREATE UNIQUE INDEX "purchase_order_hold_key" /);
+    expect(holdBody).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b/i);
+    expect(holdBody).not.toMatch(/ALTER\s+COLUMN|USING\s+\(|\bDEFAULT\b/i);
+    expect(holdBody.split(BREAKPOINT)).toHaveLength(3);
+  });
+
+  test('더한 두 칸은 schema.ts purchase_order의 같은 이름·종류이고 둘 다 널 불허·기본값 없음이다(hold_id uuid, purchase_session_id text) [ASVS v5.0.0-2.3.4]', () => {
+    const added = holdStatements.flatMap((x) => {
+      const m = /^ALTER TABLE "purchase_order" ADD COLUMN "([a-z_]+)" /.exec(x);
+      return m ? [[m[1]!, x] as [string, string]] : [];
+    });
+    expect(added.map(([c]) => c)).toEqual(['hold_id', 'purchase_session_id']);
+    for (const [col, stmt] of added) {
+      const c = orderShape.columns.find((x) => x.name === col);
+      expect(c, `schema.ts purchase_order.${col}`).toBeDefined();
+      expect({ col, notNull: c!.notNull, hasDefault: c!.hasDefault }).toEqual({ col, notNull: true, hasDefault: false });
+      expect(canon(stmt).replace(/;$/, ''), col).toBe(`alter table purchase_order add column ${col} ${c!.type} not null`);
+    }
+    expect(orderShape.columns.find((c) => c.name === 'hold_id')!.type).toBe('uuid');
+    expect(orderShape.columns.find((c) => c.name === 'purchase_session_id')!.type).toBe('text');
+  });
+
+  test('ADD COLUMN이 표 끝에 붙으므로 schema.ts purchase_order의 마지막 두 칸이 hold_id·purchase_session_id다(DB 칸 차례와 같다)', () => {
+    expect(orderShape.columns.slice(-2).map((c) => c.name)).toEqual(['hold_id', 'purchase_session_id']);
+  });
+
+  test('한 홀드에 주문 하나: purchase_order_hold_key는 purchase_order (hold_id)의 btree 유일 인덱스이고 WHERE가 없다. schema.ts의 purchase_order 인덱스는 이것 하나다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(orderShape.indexes).toEqual([{ name: 'purchase_order_hold_key', unique: true, columns: ['hold_id'], where: undefined }]);
+    const c = canon(holdStatements[2]!).replace(/;$/, '');
+    expect(c).toBe('create unique index purchase_order_hold_key on purchase_order using btree(hold_id)');
   });
 });

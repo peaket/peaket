@@ -128,10 +128,15 @@ export function makeItems(n: number): OrderItem[] {
   }));
 }
 
-/** 새 주문 입력(T1). 주문 ID는 그 시계의 UUIDv7, 계정·회차·좌석 ID는 새 UUID, 금액은 항목 가격의 합이다. 행위자는 그 계정의 팬 */
+/**
+ * 새 주문 입력(T1). 주문 ID는 그 시계의 UUIDv7, 계정·회차·좌석 ID는 새 UUID, 금액은 항목 가격의 합이다. 행위자는 그 계정의 팬.
+ * 홀드 ID는 새 UUIDv7(홀드 ID는 purchase-svc가 Lua 전에 만든 UUIDv7, seat-hold §3)이고, 구매 세션 ID는 새 UUID이며 created.purchaseSessionId에도 같은 값을 준다
+ * (NewOrder.purchaseSessionId 설명, 마이그레이션 0004, PRF-161)
+ */
 export function newOrderInput(clock: Clock, o: Partial<NewOrder> = {}): NewOrder {
   const items = o.items ?? makeItems(3);
   const accountId = o.accountId ?? randomUUID();
+  const purchaseSessionId = o.purchaseSessionId ?? randomUUID();
   return {
     id: uuidv7(clock),
     eventId: randomUUID(),
@@ -141,7 +146,9 @@ export function newOrderInput(clock: Clock, o: Partial<NewOrder> = {}): NewOrder
     idempotencyKey: randomUUID(),
     consentVersion: 'consent-2026.11_v1',
     seatAssignment: 'PICK',
-    created: { purchaseSessionId: randomUUID(), journeyId: uuidv7(clock), contactRef: 'c1.contact-ref-Zk3QpL0', refMissing: false },
+    holdId: uuidv7(clock),
+    purchaseSessionId,
+    created: { purchaseSessionId, journeyId: uuidv7(clock), contactRef: 'c1.contact-ref-Zk3QpL0', refMissing: false },
     ...o,
     items,
     accountId,

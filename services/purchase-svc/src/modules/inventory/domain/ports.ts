@@ -267,6 +267,11 @@ export interface EventSeatConfig {
   perAccountLimit: number;
   /** 판매 종료 시각(epoch ms, 공연 시작 24시간 전, ADR-0064). 주입 Clock의 지금이 이 시각 이상이면 새 홀드는 410 sale-ended */
   saleEndsAtMs: number;
+  /**
+   * 등급 ID → 가격(원, 0 이상 정수). 판 파일의 선택 칸 tierPrices({등급 ID: 원})이고 없으면 이 칸도 없다(주문 생성이 그 등급을 가격 없음 500으로 본다,
+   * docs/features/payment.md §2 '주문 생성의 첫 구현' 금액, BUILD_ORDER PRF-161). 해석은 seat-layout.ts parseTierPrices다
+   */
+  tierPrices?: Readonly<Record<string, number>>;
 }
 
 export const SEAT_MAP = Symbol('purchase.SeatMap');
@@ -561,6 +566,40 @@ export interface SeatStreamRelaySignals {
 export interface SeatHoldLedger {
   /** 사건 하나를 트랜잭션 하나로 적용한다. 같은 사건을 다시 받으면 아무것도 바꾸지 않는다. DB 오류는 던진다 */
   apply(event: LedgerHoldEvent): Promise<void>;
+}
+
+/** 주문 생성의 홀드 확인 입력(booking OrderHoldQuery와 같은 모양, BUILD_ORDER PRF-161) */
+export interface OrderHoldQuery {
+  /** 구매 세션의 회차(KEY_PART 모양이 아니면 NOT_FOUND) */
+  eventId: string;
+  /** 구매 세션 ID(= jti, KEY_PART 모양이 아니면 NOT_FOUND) */
+  purchaseSessionId: string;
+  /** 요청한 계정(홀드 Hash owner와 견준다) */
+  accountId: string;
+  /** 본문 holdId(받은 글 그대로. KEY_PART 모양이 아니면 저장소를 부르지 않고 NOT_FOUND) */
+  holdId: string;
+}
+
+/** 주문 생성의 홀드 확인 결과(booking OrderHoldCheck와 같은 모양) */
+export type OrderHoldCheck =
+  /** heldAtMs: 홀드 Hash heldAt(좌석마다 같다). seats: 구매 세션의 h:{holdId}에 적힌 좌석 차례, 등급·구역은 좌석맵 판(SeatMap.resolve)에서 */
+  | { status: 'OK'; heldAtMs: number; seats: { seatId: string; tierId: string; sectionId: string }[] }
+  /** 목록에 없음·남의 것·다른 회차·끝난 것·좌석맵 판에 없는 좌석을 가리지 않는다 */
+  | { status: 'NOT_FOUND' }
+  /** 좌석 Redis 일시 장애·메모리 부족, 세대 키 없음(NOT_READY), 그 회차 좌석맵 판 없음 */
+  | { status: 'STORE_UNAVAILABLE' };
+
+export const ORDER_HOLDS = Symbol('purchase.OrderHolds');
+/**
+ * 주문 생성의 홀드 확인(docs/features/payment.md §2 '주문 생성의 첫 구현' 홀드 확인, Lua 계약은 adapters/order-hold-lua.ts, BUILD_ORDER PRF-161).
+ * 운영 구현은 RedisOrderHolds, 시험 대역은 MemoryOrderHolds다(같은 사례에서 같은 결과). booking의 OrderHolds 포트를 구조로 맞춘다.
+ * 차례: ① 구매 세션 상태 s:session:{sid}의 h:{holdId} 칸(좌석 ID 쉼표 목록, jti 슬롯 HGET 한 번)이 없으면 NOT_FOUND
+ * ② 좌석맵 판으로 좌석 ID → 색인·등급·구역(판이 없으면 STORE_UNAVAILABLE, 판에 없는 좌석이 있으면 NOT_FOUND)
+ * ③ 회차 슬롯의 읽기 전용 Lua 한 번(ORDER_HOLD_LUA): 세대 키 없음 → STORE_UNAVAILABLE, 좌석마다 홀드 Hash의 holdId·owner·psid가 같고 kind가 FAN이며 exp > Redis TIME이면 OK(heldAt), 아니면 NOT_FOUND.
+ * 아무것도 쓰지 않는다. 던지지 않는다(좌석 Redis 장애는 STORE_UNAVAILABLE, 그 밖의 버그(모르는 결과 값·망가진 칸)는 Error)
+ */
+export interface OrderHoldReader {
+  check(q: OrderHoldQuery, o?: SeatCallOptions): Promise<OrderHoldCheck>;
 }
 
 export const SEAT_PINS = Symbol('purchase.SeatPins');

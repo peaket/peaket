@@ -14,8 +14,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@grpc/grpc-js": "1.14.6",
+    "@grpc/proto-loader": "0.8.1",
     "@nestjs/common": "^12.3.2",
     "@nestjs/core": "^12.3.2",
+    "@peaket/contracts": "workspace:*",
     "@peaket/platform": "workspace:*",
     "drizzle-orm": "0.45.4",
     "fastify": "^5.12.7",
@@ -25,7 +28,6 @@
   },
   "devDependencies": {
     "@peaket/config": "workspace:*",
-    "@peaket/contracts": "workspace:*",
     "@types/node": "^24.19.2",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "0.31.11",

@@ -20,7 +20,9 @@ export type SeatMapFileErrorCode =
   | 'SEAT_ID_DUPLICATE'
   | 'SEAT_INDEX_DUPLICATE'
   | 'NO_TIER'
-  | 'BAD_SECTION_ID';
+  | 'BAD_SECTION_ID'
+  /** tierPrices가 객체가 아니거나 값이 0 이상 안전한 정수가 아니거나 등급 ID가 비었다(BUILD_ORDER PRF-161) */
+  | 'BAD_TIER_PRICES';
 
 export class SeatMapFileError extends Error {
   constructor(readonly code: SeatMapFileErrorCode) {
@@ -55,6 +57,32 @@ const isId = (v: unknown): v is string => typeof v === 'string' && SEAT_ID_PATTE
 const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
 
 /**
+ * 판 파일의 선택 칸 tierPrices({등급 ID: 원}, docs/features/payment.md §2 '주문 생성의 첫 구현' 금액, BUILD_ORDER PRF-161)를 해석한다.
+ * 칸이 없으면(undefined) undefined(기존 판 파일도 그대로 읽힌다). 있으면 배열이 아닌 객체이고 값마다 0 이상 PostgreSQL int4 이하 정수, 등급 ID는 1~64자여야 한다.
+ * 판에 없는 등급의 가격이 있어도 받는다(쓰지 않을 뿐이다). 결과는 얼린 새 객체(자기 속성만, 프로토타입 없음)다.
+ * parseEventSeatMapFile이 이 함수로 config.tierPrices를 채운다(칸이 없으면 config에 tierPrices 칸도 없다)
+ * @throws SeatMapFileError('BAD_TIER_PRICES') 위 규칙을 어김
+ */
+export function parseTierPrices(raw: unknown): Readonly<Record<string, number>> | undefined {
+  if (raw === undefined) return undefined;
+  if (!isObject(raw)) throw new SeatMapFileError('BAD_TIER_PRICES');
+  // 프로토타입 없는 새 객체에 자기 속성만 옮긴다(JSON의 "__proto__" 칸도 자기 속성으로 검사되고, 결과의 프로토타입을 바꾸지 못한다)
+  const out = Object.create(null) as Record<string, number>;
+  for (const tierId of Object.keys(raw)) {
+    const price = raw[tierId];
+    if (tierId.length < 1 || tierId.length > TIER_ID_MAX) throw new SeatMapFileError('BAD_TIER_PRICES');
+    if (typeof price !== 'number' || !Number.isInteger(price) || price < 0 || price > INT4_MAX) throw new SeatMapFileError('BAD_TIER_PRICES');
+    out[tierId] = price;
+  }
+  return Object.freeze(out);
+}
+
+/** 가격 상한(PostgreSQL int4, 주문 금액·항목 가격 칸) */
+const INT4_MAX = 2_147_483_647;
+/** 등급 ID 글 길이 상한(주문 항목 tier 칸과 같은 64자) */
+const TIER_ID_MAX = 64;
+
+/**
  * 판 파일(JSON을 읽은 값)을 해석한다. 규칙은 docs/features/seat-hold.md §2 '운영 좌석맵 판'이다:
  * { perAccountLimit(1~4 정수), saleEndsAt(ISO 8601 날짜), layout(SeatMapLayout: layoutVersion u32 정수, sections[] 각 {sectionId, tierId?, seatIndexRange{from,to}, seats[] {seatId, index, tierId?, unavailable?}}) }.
  * 구역 색인 = sections 배열 차례, seatOffset = index − from, 등급 = 좌석 tierId ?? 구역 tierId, 판매 제외 = unavailable === true, seatCount = 가장 큰 to + 1.
@@ -68,6 +96,8 @@ export function parseEventSeatMapFile(eventId: string, raw: unknown): ParsedSeat
   const saleEnd = raw.saleEndsAt;
   const saleEndsAtMs = typeof saleEnd === 'string' && ISO_DATE_TIME.test(saleEnd) ? Date.parse(saleEnd) : Number.NaN;
   if (!Number.isFinite(saleEndsAtMs)) throw new SeatMapFileError('BAD_SALE_END');
+  // 선택 칸 등급 가격(주문 생성의 금액, BUILD_ORDER PRF-161). 틀리면 그 파일 전체를 받지 않는다
+  const tierPrices = parseTierPrices(raw.tierPrices);
   const layout = raw.layout;
   if (!isObject(layout)) throw new SeatMapFileError('NOT_OBJECT');
   const version = layout.layoutVersion;
@@ -115,7 +145,7 @@ export function parseEventSeatMapFile(eventId: string, raw: unknown): ParsedSeat
 
   const seatCount = sorted[sorted.length - 1]!.to + 1;
   return {
-    config: { eventId, layoutVersion: String(version), seatCount, perAccountLimit: limit, saleEndsAtMs },
+    config: { eventId, layoutVersion: String(version), seatCount, perAccountLimit: limit, saleEndsAtMs, ...(tierPrices !== undefined ? { tierPrices } : {}) },
     sections,
     byId,
     byIndex,

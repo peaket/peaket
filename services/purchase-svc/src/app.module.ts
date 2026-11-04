@@ -1,6 +1,7 @@
-// 뿌리 모듈: 컨텍스트 모듈을 모은다. 지금은 inventory(좌석 홀드·1초 만료 반복)만 있다(booking·구매 세션 시작은 뒤 단계).
+// 뿌리 모듈: 컨텍스트 모듈을 모은다. inventory(좌석 홀드·1초 만료 반복·구매 세션)와, 조립 값을 넘겼을 때만 booking(주문 생성 POST /v1/orders, BUILD_ORDER PRF-161)이다.
 import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule, RequestMethod } from '@nestjs/common';
 import type { HotRedis } from '@peaket/platform';
+import { BookingModule, type BookingModuleDeps } from './modules/booking/index.js';
 import {
   type AdmissionOptions,
   type HoldAttempts,
@@ -44,6 +45,11 @@ export class AppModule implements NestModule {
       admission?: AdmissionOptions;
       /** 판매 확정(Hard Sale) 저장소(BUILD_ORDER PRF-140 ①). 운영은 purchase DB가 있을 때만 넘긴다 */
       seatSales?: SeatSales;
+      /**
+       * 주문 생성(booking, BUILD_ORDER PRF-161). 넘기면 BookingModule.register(booking)을 함께 넣고, 없으면 주문 경로를 열지 않는다.
+       * 운영은 purchase DB가 있을 때만 넘긴다(main.ts)
+       */
+      booking?: BookingModuleDeps;
     },
   ): DynamicModule {
     const inventory =
@@ -69,6 +75,6 @@ export class AppModule implements NestModule {
             ...(o.attempts ? { attempts: o.attempts } : {}),
             ...(o.signals ? { signals: o.signals } : {}),
           });
-    return { module: AppModule, imports: [inventory] };
+    return { module: AppModule, imports: [inventory, ...(o.booking ? [BookingModule.register(o.booking)] : [])] };
   }
 }

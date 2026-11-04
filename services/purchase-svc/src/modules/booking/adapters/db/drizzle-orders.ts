@@ -39,6 +39,8 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const JOURNEY_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 /** 두 동의에 보인 고지 문안의 판 */
 const CONSENT_VERSION = /^[0-9A-Za-z._-]{1,32}$/;
+/** 구매 세션 ID(입장 토큰 jti). 좌석 Redis 키 조각과 같은 모양이다(inventory KEY_PART) */
+const PURCHASE_SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 /** PostgreSQL int4 최댓값(amount·unit_price 칸) */
 const INT4_MAX = 2_147_483_647;
 /** 주문 하나의 좌석 수 상한 [가정: 주문 하나 10석 이하] */
@@ -95,10 +97,15 @@ function assertNewOrder(o: NewOrder): void {
   assertBuyerText(o.buyerPhone, 'buyerPhone');
   if (typeof o.seatAssignment !== 'string' || !SEAT_ASSIGNMENTS.has(o.seatAssignment)) throw new RangeError('seatAssignment는 PICK·AUTO 가운데 하나다');
   assertActor(o.actor);
+  // 0004(PRF-161): 주문을 만든 홀드(소문자 UUID, hold_id 유일)와 구매 세션(입장 토큰 jti, 1~64자 키 조각 글)
+  assertUuid(o.holdId, 'holdId');
+  if (typeof o.purchaseSessionId !== 'string' || !PURCHASE_SESSION_ID.test(o.purchaseSessionId)) throw new RangeError('purchaseSessionId가 1~64자의 영문·숫자·_-가 아니다');
   const c: unknown = o.created;
   if (!isObject(c)) throw new RangeError('created가 객체가 아니다');
   if (c.journeyId !== undefined && (typeof c.journeyId !== 'string' || !JOURNEY_UUID.test(c.journeyId))) throw new RangeError('created.journeyId가 UUID가 아니다');
   if (c.purchaseSessionId !== undefined && typeof c.purchaseSessionId !== 'string') throw new RangeError('created.purchaseSessionId가 글이 아니다');
+  // CREATED 사건의 구매 세션은 주문 행의 구매 세션과 같은 값이다(NewOrder.purchaseSessionId 설명)
+  if (c.purchaseSessionId !== undefined && c.purchaseSessionId !== o.purchaseSessionId) throw new RangeError('created.purchaseSessionId가 purchaseSessionId와 다르다');
   if (c.contactRef !== undefined && typeof c.contactRef !== 'string') throw new RangeError('created.contactRef가 글이 아니다');
   if (typeof c.refMissing !== 'boolean') throw new RangeError('created.refMissing이 불리언이 아니다');
   // 조사용 가명은 계산하지 못했을 때만 비운다(refMissing 참 ⇔ contactRef 없음, 계약 OrderEvent.refMissing)
@@ -189,9 +196,11 @@ export class DrizzleOrderStore {
     const message = buildOrderEvent({ order: row, items: order.items, transition: T1, seq: 1, occurredAtMs: now, reachedBefore: false, created: order.created });
     if (!message) throw new Error('T1은 CREATED 사건을 낸다');
     await tx.execute(sql`
-      insert into purchase_order (id, account_id, event_id, status, amount, event_seq, payment_event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at)
+      insert into purchase_order (id, account_id, event_id, status, amount, event_seq, payment_event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at,
+                                  hold_id, purchase_session_id)
       values (${order.id}::uuid, ${order.accountId}::uuid, ${order.eventId}::uuid, ${T1.to}, ${order.amount}::int, 1, 0,
-              ${order.buyerName}, ${order.buyerPhone}, ${order.idempotencyKey}, ${order.consentVersion}, ${order.seatAssignment}, ${at}::timestamptz)`);
+              ${order.buyerName}, ${order.buyerPhone}, ${order.idempotencyKey}, ${order.consentVersion}, ${order.seatAssignment}, ${at}::timestamptz,
+              ${order.holdId}::uuid, ${order.purchaseSessionId})`);
     // 항목은 준 차례로 줄 번호 1부터, 한 문장으로 넣는다
     const lines = order.items.map((item, i) => sql`(${order.id}::uuid, ${i + 1}::int, ${item.seatId}::uuid, ${item.tierId}, ${item.sectionId}, ${item.unitPrice}::int)`);
     await tx.execute(sql`insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price) values ${sql.join(lines, sql`, `)}`);

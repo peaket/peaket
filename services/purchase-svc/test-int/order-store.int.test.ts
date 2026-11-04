@@ -173,6 +173,9 @@ interface OrderDbRow {
   consent_version: string;
   seat_assignment: string;
   created_at: Date;
+  /** 마이그레이션 0004(PRF-161) */
+  hold_id: string;
+  purchase_session_id: string;
 }
 interface HistoryRow {
   seq: number;
@@ -195,7 +198,8 @@ interface OutboxRow {
 const orderRowOf = async (id: string): Promise<OrderDbRow | undefined> =>
   (
     await q<OrderDbRow>(
-      `select id, account_id, event_id, status, amount, event_seq, payment_event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at
+      `select id, account_id, event_id, status, amount, event_seq, payment_event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at,
+              hold_id, purchase_session_id
          from purchase_order where id = $1`,
       [id],
     )
@@ -303,6 +307,9 @@ async function insertRawOrder(o: Partial<Record<string, unknown>> = {}) {
     consent_version: 'v1',
     seat_assignment: 'PICK',
     created_at: new Date(BASE_MS),
+    // 마이그레이션 0004(PRF-161)가 더한 NOT NULL 칸. 주문마다 새 홀드(hold_id 유일)와 구매 세션
+    hold_id: randomUUID(),
+    purchase_session_id: randomUUID(),
     ...o,
   };
   const cols = Object.keys(row);
@@ -375,6 +382,9 @@ describe('마이그레이션: 표·칸·키·제약', () => {
       consent_version: { type: 'text' },
       seat_assignment: { type: 'text' },
       created_at: { type: 'timestamp with time zone' },
+      // 마이그레이션 0004(PRF-161): 주문을 만든 홀드(uuid)와 구매 세션(입장 토큰 jti, text). 둘 다 NOT NULL
+      hold_id: { type: 'uuid', nullable: false },
+      purchase_session_id: { type: 'text', nullable: false },
     });
   });
 
@@ -479,11 +489,27 @@ describe('마이그레이션: 표·칸·키·제약', () => {
     expect(await count('select count(*) as n from purchase_order where id = $1', [parent.id])).toBe(0);
   });
 
-  test('purchase_order의 인덱스는 기본 키 하나뿐이다(쓰기가 많은 표라 새 인덱스를 두지 않는다, data.md §4·§5.1) [ASVS v5.0.0-2.3.4]', async () => {
-    const r = await q<{ primary: boolean; def: string }>(`select i.indisprimary as primary, pg_get_indexdef(i.indexrelid) as def from pg_index i where i.indrelid = 'purchase_order'::regclass`);
-    expect(r).toHaveLength(1);
+  test('purchase_order의 인덱스는 기본 키와 0004의 hold_id 유일 인덱스(purchase_order_hold_key) 둘뿐이다(쓰기가 많은 표라 그 밖의 인덱스를 두지 않는다, data.md §4·§5.1, payment §2 같은 홀드의 두 주문) [ASVS v5.0.0-2.3.4]', async () => {
+    const r = await q<{ primary: boolean; unique: boolean; name: string; def: string }>(
+      `select i.indisprimary as primary, i.indisunique as unique, c.relname as name, pg_get_indexdef(i.indexrelid) as def
+         from pg_index i join pg_class c on c.oid = i.indexrelid where i.indrelid = 'purchase_order'::regclass order by i.indisprimary desc`,
+    );
+    expect(r).toHaveLength(2);
     expect(r[0]).toMatchObject({ primary: true });
     expect(r[0]!.def).toMatch(/USING btree \(id\)$/);
+    expect(r[1]).toMatchObject({ primary: false, unique: true, name: 'purchase_order_hold_key' });
+    // 부분 인덱스가 아니다(모든 주문이 홀드 하나에 묶인다)
+    expect(r[1]!.def).toMatch(/^CREATE UNIQUE INDEX purchase_order_hold_key ON (public\.)?purchase_order USING btree \(hold_id\)$/);
+  });
+
+  test('0004: 같은 hold_id로 주문 행을 또 넣으면 23505(purchase_order_hold_key)이고, hold_id·purchase_session_id에 널을 넣으면 거절된다 [ASVS v5.0.0-2.3.4]', async () => {
+    const first = await insertRawOrder();
+    await expect(insertRawOrder({ hold_id: first.hold_id })).rejects.toMatchObject({ code: '23505', table: 'purchase_order', constraint: 'purchase_order_hold_key' });
+    expect(await count('select count(*) as n from purchase_order where hold_id = $1', [first.hold_id])).toBe(1);
+    for (const column of ['hold_id', 'purchase_session_id']) {
+      const err = await insertRawOrder({ [column]: null }).catch((e: unknown) => e);
+      expect((err as { code?: string }).code, column).toMatch(NULL_REJECTED);
+    }
   });
 
   test('order_event의 인덱스는 기본 키와 occurred_at의 BRIN 인덱스 둘이다(매일 검사가 전날 이력을 찾는다, data.md §5.1) [ASVS v5.0.0-2.3.3]', async () => {
@@ -539,9 +565,9 @@ describe('마이그레이션: 표·칸·키·제약', () => {
     expect(await orderRowOf(o.id)).toMatchObject({ amount: 0, event_seq: 1, payment_event_seq: '0' });
     const id = uuidv7(fakeClock({ now: BASE_MS }));
     await rawNoHistory(
-      `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at)
-       values ($1, $2, $3, 'CREATED', 1000, 1, '김피켓', '01012345678', $4, 'v1', 'AUTO', $5)`,
-      [id, randomUUID(), randomUUID(), randomUUID(), new Date(BASE_MS)],
+      `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
+       values ($1, $2, $3, 'CREATED', 1000, 1, '김피켓', '01012345678', $4, 'v1', 'AUTO', $5, $6, $7)`,
+      [id, randomUUID(), randomUUID(), randomUUID(), new Date(BASE_MS), randomUUID(), randomUUID()],
     );
     expect(await orderRowOf(id)).toMatchObject({ payment_event_seq: '0' });
   });
@@ -721,6 +747,9 @@ describe('createOrder', () => {
       consent_version: o.consentVersion,
       seat_assignment: 'PICK',
       created_at: new Date(at),
+      // 0004(PRF-161): NewOrder.holdId·purchaseSessionId를 그대로 쓴다
+      hold_id: o.holdId,
+      purchase_session_id: o.purchaseSessionId,
     });
     expect(t.items).toEqual(o.items.map((it, i) => ({ line_no: i + 1, seat_id: it.seatId, tier: it.tierId, section_id: it.sectionId, unit_price: it.unitPrice, ticket_id: null })));
     expect(t.history).toEqual([{ seq: 1, from_status: null, to_status: 'CREATED', cause: 'T1', actor: o.actor, occurred_at: new Date(at) }]);
@@ -814,6 +843,9 @@ describe('createOrder', () => {
     { label: 'refMissing이 거짓인데 contactRef가 없음', change: (o) => ({ ...o, created: { purchaseSessionId: o.created.purchaseSessionId, refMissing: false } }) },
     { label: '예매자 성명이 101자', change: (o) => ({ ...o, buyerName: '가'.repeat(101) }) },
     { label: '예매자 번호가 101자', change: (o) => ({ ...o, buyerPhone: '1'.repeat(101) }) },
+    // NewOrder.holdId는 소문자 UUID다(ports.ts, 0004 PRF-161)
+    { label: '홀드 ID가 UUID가 아님', change: (o) => ({ ...o, holdId: 'hold-1' }) },
+    { label: '홀드 ID가 대문자 UUID', change: (o) => ({ ...o, holdId: o.holdId.toUpperCase() }) },
   ];
 
   test('예매자 성명·번호는 100자 [가정]까지 들어간다(경계) [ASVS v5.0.0-2.2.1]', async () => {
@@ -1295,9 +1327,9 @@ describe('상태 이력 지연 제약 트리거(order_status_has_event, 전이 �
     await expect(
       rawTx([
         [
-          `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at)
-           values ($1, $2, $3, 'CREATED', 1000, 1, '김피켓', '01012345678', $4, 'v1', 'PICK', $5)`,
-          [id, randomUUID(), randomUUID(), randomUUID(), new Date(BASE_MS)],
+          `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
+           values ($1, $2, $3, 'CREATED', 1000, 1, '김피켓', '01012345678', $4, 'v1', 'PICK', $5, $6, $7)`,
+          [id, randomUUID(), randomUUID(), randomUUID(), new Date(BASE_MS), randomUUID(), randomUUID()],
         ],
       ]),
     ).rejects.toMatchObject(HISTORY_MISSING);

@@ -1,0 +1,57 @@
+// 주문 생성의 보안·설정 로그를 서비스 로거(platform PlatformLogger)에 한 줄씩 남기는 어댑터(OrderLog, ADR-0055, BUILD_ORDER PRF-161).
+// 번호 원문·토큰·pid는 싣지 않는다. 대체 판정은 warn(보안 로그), 설정 오류는 error(kind config, 재확인 설정 오류는 SEV2)다.
+import type { PlatformLogger } from '@peaket/platform';
+import type { OrderLog } from '../domain/ports.js';
+
+/**
+ * - identityFallback: warn 한 줄 { kind: 'security', event: 'identity_recheck_fallback', accountId, reason, passed, idempotencyKey }
+ * - configError: error 한 줄 { kind: 'config', what, eventId?·tierId?(가격 없음·합 넘침), reason?·severity SEV2(재확인) }
+ * - payingMarkFailed: warn 한 줄 { event: 'order_paying_mark_failed', purchaseSessionId, orderId }
+ * 로거가 던져도 삼킨다(부른 쪽을 막지 않는다)
+ */
+export class LoggerOrderLog implements OrderLog {
+  constructor(private readonly logger: Pick<PlatformLogger, 'warn' | 'error'>) {}
+
+  identityFallback(e: Parameters<OrderLog['identityFallback']>[0]): void {
+    // 칸을 하나씩 골라 싣는다(받은 객체를 그대로 펼치지 않아 다른 칸이 섞여 들지 않게)
+    const line = { kind: 'security', event: 'identity_recheck_fallback', accountId: e.accountId, reason: e.reason, passed: e.passed, idempotencyKey: e.idempotencyKey };
+    try {
+      this.logger.warn(line, e.passed ? '본인확인 재확인이 답하지 않아 토큰 판정으로 통과시켰다' : '본인확인 재확인이 답하지 않아 토큰 판정으로 거부했다');
+    } catch {
+      // 로그 실패는 주문을 막지 않는다
+    }
+  }
+
+  configError(e: Parameters<OrderLog['configError']>[0]): void {
+    let line: Record<string, unknown>;
+    let msg: string;
+    switch (e.what) {
+      case 'tier_price_missing':
+        line = { kind: 'config', what: e.what, eventId: e.eventId, tierId: e.tierId };
+        msg = '좌석맵 판에 가격이 없는 등급이 있어 주문을 만들지 않았다';
+        break;
+      case 'amount_out_of_range':
+        line = { kind: 'config', what: e.what, eventId: e.eventId };
+        msg = '등급 가격 합이 주문 금액 상한(int4)을 넘어 주문을 만들지 않았다';
+        break;
+      default:
+        line = { kind: 'config', what: e.what, reason: e.reason, severity: 'SEV2' };
+        msg = '본인확인 재확인 설정 오류(호출 신원·요청 값·정본 목록 밖의 답)로 주문을 503으로 답했다';
+        break;
+    }
+    try {
+      this.logger.error(line, msg);
+    } catch {
+      // 로그 실패는 응답을 바꾸지 않는다
+    }
+  }
+
+  /** warn 한 줄 { event: 'order_paying_mark_failed', purchaseSessionId, orderId }(그 밖의 칸은 싣지 않는다, 리뷰 고침 M3) */
+  payingMarkFailed(e: Parameters<OrderLog['payingMarkFailed']>[0]): void {
+    try {
+      this.logger.warn({ event: 'order_paying_mark_failed', purchaseSessionId: e.purchaseSessionId, orderId: e.orderId }, '주문 뒤 구매 세션 Paying 표시를 다시 불러도 하지 못했다(결제 중 유휴로 끝날 수 있다)');
+    } catch {
+      // 로그 실패는 응답을 바꾸지 않는다
+    }
+  }
+}

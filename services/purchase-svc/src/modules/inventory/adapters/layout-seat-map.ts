@@ -60,7 +60,7 @@ interface Entry {
   parsed: ParsedSeatMap;
   /** 파일 표시(source.stamp). 없으면 undefined */
   stamp: string | undefined;
-  /** 판 번호·1인 한도·판매 종료로 만든 같은 판 표시: 같으면 좌석 표를 다시 만들지 않는다 */
+  /** 판 번호·1인 한도·판매 종료·등급 가격으로 만든 같은 판 표시: 같으면 좌석 표를 다시 만들지 않는다 */
   signature: string;
 }
 
@@ -68,12 +68,17 @@ const MISSING_TTL_MS = 1000;
 /** 없음 기억의 개수 상한(서로 다른 회차 ID로 계속 물어도 메모리가 늘지 않게 가장 오래된 것부터 잊는다) */
 const MISSING_MAX = 1024;
 
-/** 파일 값에서 같은 판인지 가르는 표시를 싸게 뽑는다(틀린 모양이면 undefined) */
+/**
+ * 파일 값에서 같은 판인지 가르는 표시를 싸게 뽑는다(틀린 모양이면 undefined).
+ * 선택 칸 tierPrices(등급 가격, config.tierPrices, BUILD_ORDER PRF-161)도 표시에 든다: 가격만 바꾼 파일도 다시 해석된다(틀린 가격이면 이전 판을 둔다)
+ */
 function signatureOf(raw: unknown): string | undefined {
-  const o = raw as { perAccountLimit?: unknown; saleEndsAt?: unknown; layout?: { layoutVersion?: unknown } } | null;
+  const o = raw as { perAccountLimit?: unknown; saleEndsAt?: unknown; tierPrices?: unknown; layout?: { layoutVersion?: unknown } } | null;
   const v = o?.layout?.layoutVersion;
   if (typeof v !== 'number' || typeof o?.perAccountLimit !== 'number' || typeof o?.saleEndsAt !== 'string') return undefined;
-  return `${v}|${o.perAccountLimit}|${o.saleEndsAt}`;
+  // 가격 칸이 없으면 빈 글. 있으면 JSON 글 그대로(칸 차례만 바뀐 파일은 다시 해석될 뿐이다)
+  const prices = o.tierPrices === undefined ? '' : JSON.stringify(o.tierPrices);
+  return `${v}|${o.perAccountLimit}|${o.saleEndsAt}|${prices}`;
 }
 
 /**

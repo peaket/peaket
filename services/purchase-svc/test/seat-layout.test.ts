@@ -12,6 +12,7 @@ import {
   LayoutSeatMap,
   MemorySeatMap,
   parseEventSeatMapFile,
+  parseTierPrices,
   type SeatMapFileErrorCode,
   SeatMapFileError,
   type SeatMapSource,
@@ -819,5 +820,137 @@ describe('MemorySeatMap.sections', () => {
       { sectionIndex: 1, sectionId: 'SEC-B', from: 10, to: 10 },
     ]);
     expect(await m.sections('ev-none')).toBeUndefined();
+  });
+});
+
+// ── (e) 판 파일의 등급 가격 tierPrices(docs/features/payment.md §2 '주문 생성의 첫 구현' 금액, BUILD_ORDER PRF-161) ────────────────────────────────
+// 규칙은 seat-layout.ts parseTierPrices 주석이다: 없으면 undefined, 있으면 배열이 아닌 객체·값은 0 이상 int4 이하 정수·등급 ID 1~64자, 판에 없는 등급도 받는다,
+// 결과는 얼린 새 객체(자기 속성만, 프로토타입 없음). 틀리면 BAD_TIER_PRICES. LayoutSeatMap의 판 표시에 가격이 들어가 가격만 바뀐 파일도 새 판으로 본다.
+
+/** parseTierPrices를 불러 SeatMapFileError의 코드를 돌려준다(통과하면 'ok'. 다른 오류는 그대로 던진다) */
+function priceCodeOf(raw: unknown): SeatMapFileErrorCode | 'ok' {
+  try {
+    parseTierPrices(raw);
+  } catch (e) {
+    if (e instanceof SeatMapFileError) return e.code;
+    throw e;
+  }
+  return 'ok';
+}
+
+const INT4_MAX = 2_147_483_647;
+
+describe('parseTierPrices: 판 파일의 선택 칸 tierPrices', () => {
+  test('FR011_칸이 없으면(undefined) undefined다(기존 판 파일도 그대로 읽힌다)', () => {
+    expect(parseTierPrices(undefined)).toBeUndefined();
+  });
+
+  test('FR011_등급 ID → 원을 그대로 읽는다. 0원과 int4 상한(2,147,483,647)은 받고, 빈 객체도 받는다', () => {
+    expect(parseTierPrices({ R: 110_000, S: 0, VIP: INT4_MAX })).toEqual({ R: 110_000, S: 0, VIP: INT4_MAX });
+    expect(parseTierPrices({})).toEqual({});
+  });
+
+  test('FR011_판에 없는 등급의 가격이 있어도 받는다(쓰지 않을 뿐이다)', () => {
+    expect(parseTierPrices({ R: 1, NOT_IN_LAYOUT: 2 })).toEqual({ R: 1, NOT_IN_LAYOUT: 2 });
+  });
+
+  test('FR011_ASVS1.3.3_결과는 얼린 새 객체이고 프로토타입이 없다: 받은 값을 고쳐도 결과가 바뀌지 않는다 [ASVS v5.0.0-1.3.3]', () => {
+    const raw: Record<string, number> = { R: 1_000 };
+    const p = parseTierPrices(raw)!;
+    expect(p).not.toBe(raw);
+    expect(Object.isFrozen(p)).toBe(true);
+    expect(Object.getPrototypeOf(p)).toBeNull();
+    raw.R = 9;
+    raw.S = 5;
+    expect({ ...p }).toEqual({ R: 1_000 });
+  });
+
+  test('FR011_자기 속성만 읽는다: 프로토타입에서 물려받은 칸은 가격이 아니다', () => {
+    const raw = Object.assign(Object.create({ INHERITED: 7 }) as Record<string, number>, { R: 1 });
+    expect({ ...parseTierPrices(raw)! }).toEqual({ R: 1 });
+  });
+
+  test('FR011_BAD_TIER_PRICES: 객체가 아니다(null·배열·글·수·참거짓)', () => {
+    for (const raw of [null, [], [1, 2], 'R=1', 1000, true]) expect({ raw, code: priceCodeOf(raw) }).toEqual({ raw, code: 'BAD_TIER_PRICES' });
+  });
+
+  test('FR011_BAD_TIER_PRICES: 값이 0 이상 int4 이하 정수가 아니다(음수·소수·글·null·NaN·무한·int4 + 1·안전 정수 밖)', () => {
+    for (const v of [-1, 1.5, 0.1, '1000', null, Number.NaN, Number.POSITIVE_INFINITY, INT4_MAX + 1, Number.MAX_SAFE_INTEGER + 2, {}, [1]]) {
+      expect({ v, code: priceCodeOf({ R: 1, S: v }) }).toEqual({ v, code: 'BAD_TIER_PRICES' });
+    }
+  });
+
+  test('FR011_BAD_TIER_PRICES: 등급 ID가 빈 글이거나 64자를 넘는다. 64자는 받는다', () => {
+    expect(priceCodeOf({ '': 1 })).toBe('BAD_TIER_PRICES');
+    expect(priceCodeOf({ ['T'.repeat(65)]: 1 })).toBe('BAD_TIER_PRICES');
+    expect(priceCodeOf({ ['T'.repeat(64)]: 1 })).toBe('ok');
+  });
+
+  test('FR011_ASVS1.3.3_JSON에서 온 __proto__ 칸도 자기 속성으로 검사한다: 값이 객체면 BAD_TIER_PRICES이고 결과 객체의 프로토타입을 바꾸지 않는다 [ASVS v5.0.0-1.3.3]', () => {
+    expect(priceCodeOf(JSON.parse('{"R": 1, "__proto__": {"polluted": 1}}'))).toBe('BAD_TIER_PRICES');
+    const ok = parseTierPrices(JSON.parse('{"R": 1}'))!;
+    expect(Object.getPrototypeOf(ok)).toBeNull();
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});
+
+describe('parseEventSeatMapFile: tierPrices를 config.tierPrices에 싣는다', () => {
+  test('FR011_tierPrices가 없는 판 파일은 그대로 읽히고 config에 tierPrices 칸이 없다', () => {
+    const p = parseEventSeatMapFile(EVENT, validFile());
+    expect(p.config).toEqual(CONFIG_V7);
+    expect(p.config).not.toHaveProperty('tierPrices');
+  });
+
+  test('FR011_tierPrices가 있으면 config.tierPrices로 싣는다(등급 R·VIP·S)', () => {
+    const p = parseEventSeatMapFile(EVENT, file([secA(), secB()], { tierPrices: { R: 110_000, VIP: 150_000, S: 88_000 } }));
+    expect(p.config).toEqual({ ...CONFIG_V7, tierPrices: { R: 110_000, VIP: 150_000, S: 88_000 } });
+  });
+
+  test('FR011_tierPrices가 틀리면 그 파일 전체를 받지 않는다(BAD_TIER_PRICES)', () => {
+    for (const tierPrices of [{ R: -1 }, { R: 1.5 }, { R: '1000' }, [100], null, { '': 1 }]) {
+      expect({ tierPrices, code: codeOf(file([secA(), secB()], { tierPrices })) }).toEqual({ tierPrices, code: 'BAD_TIER_PRICES' });
+    }
+  });
+});
+
+describe('LayoutSeatMap: 가격만 바뀐 판 파일도 새 판으로 본다', () => {
+  test('FR011_NFR003_판 번호·1인 한도·판매 종료가 같고 tierPrices만 바뀐 파일을 다시 읽으면 config.tierPrices가 새 값이다', async () => {
+    const { source, map } = setup();
+    source.files.set(EVENT, file([secA(), secB()], { tierPrices: { R: 110_000, VIP: 150_000, S: 88_000 } }));
+    expect((await map.config(EVENT))?.tierPrices).toEqual({ R: 110_000, VIP: 150_000, S: 88_000 });
+    source.files.set(EVENT, file([secA(), secB()], { tierPrices: { R: 120_000, VIP: 150_000, S: 88_000 } }));
+    await map.refresh();
+    expect((await map.config(EVENT))?.tierPrices).toEqual({ R: 120_000, VIP: 150_000, S: 88_000 });
+    expect((await map.config(EVENT))?.layoutVersion).toBe('7');
+  });
+
+  test('FR011_가격이 없던 판에 tierPrices를 더하거나 빼도 다시 읽으면 보인다', async () => {
+    const { source, map } = setup();
+    expect((await map.config(EVENT))?.tierPrices).toBeUndefined();
+    source.files.set(EVENT, file([secA(), secB()], { tierPrices: { R: 1_000 } }));
+    await map.refresh();
+    expect((await map.config(EVENT))?.tierPrices).toEqual({ R: 1_000 });
+    source.files.set(EVENT, validFile());
+    await map.refresh();
+    expect((await map.config(EVENT))?.tierPrices).toBeUndefined();
+  });
+
+  test('FR011_NFR003_가격도 같으면 좌석 표를 새로 만들지 않는다(같은 SeatRef 객체)', async () => {
+    const { source, map } = setup();
+    source.files.set(EVENT, file([secA(), secB()], { tierPrices: { R: 1_000 } }));
+    const [a1] = await map.resolve(EVENT, ['A01']);
+    await map.refresh();
+    expect((await map.resolve(EVENT, ['A01']))[0]).toBe(a1);
+  });
+
+  test('FR011_ASVS16.2.5_다시 읽은 파일의 tierPrices가 틀리면 이전 판(이전 가격)을 그대로 두고 warn 한 줄(이유 코드 BAD_TIER_PRICES)을 남긴다 [ASVS v5.0.0-16.2.5]', async () => {
+    const { source, warns, map } = setup();
+    source.files.set(EVENT, file([secA(), secB()], { tierPrices: { R: 1_000 } }));
+    expect((await map.config(EVENT))?.tierPrices).toEqual({ R: 1_000 });
+    source.files.set(EVENT, file([secA(), secB()], { tierPrices: { R: -5 } }));
+    await map.refresh();
+    expect((await map.config(EVENT))?.tierPrices).toEqual({ R: 1_000 });
+    expect(warns).toHaveLength(1);
+    expect(JSON.stringify(warns)).toContain('BAD_TIER_PRICES');
   });
 });

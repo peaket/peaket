@@ -1,6 +1,9 @@
 // inventory 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다).
 export { EXPIRE_LUA, SWEEP_LEASE_LUA } from './adapters/expire-lua.js';
 export { HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
+export { ORDER_HOLD_LUA } from './adapters/order-hold-lua.js';
+export { MemoryOrderHolds, type MemoryOrderHoldsDeps } from './adapters/memory-order-holds.js';
+export { RedisOrderHolds } from './adapters/redis-order-holds.js';
 export { PIN_LUA, RELEASE_FAILED_LUA } from './adapters/pin-lua.js';
 export { BEGIN_REBUILD_LUA, BUMP_EPOCH_LUA, FINISH_REBUILD_LUA, REBUILD_QUOTAS_LUA, REBUILD_SEATS_LUA } from './adapters/rebuild-lua.js';
 export { DrizzleSeatRebuildSource } from './adapters/db/drizzle-seat-rebuild.js';
@@ -156,7 +159,7 @@ export {
   type SeatSaleStatus,
 } from './domain/seat-sale.js';
 export { parseClientEphemeralKey, type ClientEphemeralKey } from './domain/client-key.js';
-export { parseEventSeatMapFile, SeatMapFileError, type ParsedSeatMap, type SeatMapFileErrorCode, type SectionRange } from './domain/seat-layout.js';
+export { parseEventSeatMapFile, parseTierPrices, SeatMapFileError, type ParsedSeatMap, type SeatMapFileErrorCode, type SectionRange } from './domain/seat-layout.js';
 export { decodeSnapshot, encodeSnapshot, lsbFirstBits, SNAPSHOT_FLAG_SECTION_ONLY, SNAPSHOT_VERSION, U16_MAX, U32_MAX, type SnapshotBody } from './domain/snapshot.js';
 export {
   EXPIRY_BACKOFF_MS,
@@ -250,6 +253,7 @@ export {
 } from './domain/placement.js';
 export {
   HOLD_ATTEMPTS,
+  ORDER_HOLDS,
   PURCHASE_SESSION_STORE,
   PURCHASE_SESSIONS,
   SEAT_EXPIRIES,
@@ -270,6 +274,9 @@ export {
   type HoldAttemptRecord,
   type HoldAttemptResult,
   type HoldAttempts,
+  type OrderHoldCheck,
+  type OrderHoldQuery,
+  type OrderHoldReader,
   type PurchaseSessionInfo,
   type PurchaseSessionStore,
   type PurchaseSessions,
