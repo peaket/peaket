@@ -3,7 +3,7 @@
 // 맞으면 그 단계를 쓴 것으로 적고 성공 처리 뒤 관리 세션(동시 2개)과 액세스·리프레시 토큰을 만든다. 2단계 실패 수와 보호 잠금은 BOT-121.
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { CLOCK, type Clock } from '@peaket/platform';
+import { CLOCK, type Clock, PASSWORD_CHANGE_SCOPE } from '@peaket/platform';
 import type { AdminAuthConfig } from '../domain/auth-config.js';
 import { activeLock, nextTimedLockMs, onSecondFactorFailure, remainingBeforeLock } from '../domain/login-rules.js';
 import {
@@ -11,6 +11,7 @@ import {
   ADMIN_LOGIN_STORE,
   ADMIN_SECOND_STEP_STORE,
   ADMIN_TOKEN_SIGNER,
+  type AdminSessionStore,
   type AdminAud,
   type AdminLoginSignals,
   type AdminLoginStore,
@@ -51,7 +52,7 @@ const secondsUntil = (until: number, now: number) => Math.max(1, Math.ceil((unti
 @Injectable()
 export class LoginSecondStep {
   constructor(
-    @Inject(ADMIN_SECOND_STEP_STORE) private readonly store: AdminSecondStepStore & AdminLoginStore,
+    @Inject(ADMIN_SECOND_STEP_STORE) private readonly store: AdminSecondStepStore & AdminLoginStore & AdminSessionStore,
     @Inject(LOGIN_COUNTERS) private readonly counters: LoginCounters,
     @Inject(TOTP_SEED_CIPHER) private readonly cipher: TotpSeedCipher,
     @Inject(RECOVERY_CODE_HASHER) private readonly recovery: AdminPasswords,
@@ -96,7 +97,8 @@ export class LoginSecondStep {
     if (check === 'BAD') return this.#failed(accountId, emailKeyOf(account.email), pair, ipHash, i.aud, now);
     // 되돌릴 수 없는 일(시간 칸·복구 코드·단계 소비, 셈 0, 세션·종료 사건) 전에 토큰부터 서명한다: 키가 없으면 아무것도 쓰지 않고 503(새 맥락 리뷰 2026-11-05)
     const sessionId = randomUUID();
-    const at = await this.signer.access({ accountId, sessionId, aud: i.aud }, now);
+    // 비밀번호 바꾸기가 필요하면 그 세션은 비밀번호 바꾸기·로그아웃만(scope password:change, auth-controls §3.5, BOT-123)
+    const at = await this.signer.access({ accountId, sessionId, aud: i.aud, ...(account.passwordChangeRequired ? { scopes: [PASSWORD_CHANGE_SCOPE] } : {}) }, now);
     // 코드를 쓴 것으로 적는다(같은 시간 칸·같은 복구 코드는 한 번만). 그 사이 다른 요청이 썼으면 틀린 코드로 센다
     if (!(await check.commit())) return this.#failed(accountId, emailKeyOf(account.email), pair, ipHash, i.aud, now);
     // 한 번만: 그 사이 같은 단계를 다른 요청이 썼으면 처음부터
@@ -109,6 +111,8 @@ export class LoginSecondStep {
     );
     // 세션을 만든 뒤 셈을 0으로(묶음 지우기가 셈 저장소 장애로 실패해도 로그인은 막지 않는다)
     await this.success.run({ accountId, pair });
+    // 익숙한 출발지로 적는다(BOT-123)
+    await this.store.touchKnownSource(accountId, pair, now);
     return { kind: 'DONE', sessionId, accessToken: at.token, accessExpiresAt: at.expiresAt, refreshToken, absoluteExpiresAt };
   }
 

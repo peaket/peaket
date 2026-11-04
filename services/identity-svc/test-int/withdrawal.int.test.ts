@@ -98,7 +98,7 @@ test('BOT-020넘김_PostgreSQL에서_만14세미만정리는정리시작시각�
   expect(await q<{ status: string }>('select status from verification_attempt where account_id = $1', [a.accountId])).toEqual([{ status: 'UNDER_14' }]);
   // 정비 일: 끝난 세션의 해시는 이미 없고, 쓴 재인증 토큰 기록과 보존 기한이 지난 처리 기록을 지운다
   const tasks = identityMaintenanceTasks(database, clock);
-  expect(tasks.map((x) => x.name)).toEqual(['withdrawal-finish', 'refresh-hash-expired', 'reauth-use-expired', 'conflict-attempt-purge', 'verification-record-purge', 'restricted-hold-expired', 'account-hold-closed']);
+  expect(tasks.map((x) => x.name)).toEqual(['withdrawal-finish', 'refresh-hash-expired', 'reauth-use-expired', 'conflict-attempt-purge', 'verification-record-purge', 'restricted-hold-expired', 'admin-known-source-expired', 'account-hold-closed']);
   clock.advance(366 * 86_400_000);
   for (const task of tasks) await task.run();
   expect(await q('select 1 from reauth_token_use')).toHaveLength(0);

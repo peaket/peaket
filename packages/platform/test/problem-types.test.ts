@@ -13,14 +13,9 @@ const FROZEN = new Set(['v0-monolith']);
 /**
  * 목록과 제목이 다른 코드(서비스 갈래가 고친다). 새로 늘리지 않는다: 같은 뜻이면 목록의 제목을 쓰고, 뜻이 다르면 이름을 따로 짓는다.
  * - queue-svc: dependency-unavailable 둘(대기 상태 파일·대기열의 503), queue-not-found 하나(구간 대기 상태 없음)
- * - identity-svc: not-found 넷(병합 제안·본인확인 건·공개키 묶음·로그인 수단). 뜻마다 이름을 따로 짓는다
  * - purchase-svc: seat-already-held(제목을 목록과 맞춘다)
  */
 const KNOWN_TITLE_DIFFS = [
-  "identity-svc not-found '병합 제안이 없거나 시간이 지났습니다'",
-  "identity-svc not-found '본인확인 건을 찾을 수 없습니다'",
-  "identity-svc not-found '없는 공개키 묶음입니다'",
-  "identity-svc not-found '연결된 로그인 수단이 아닙니다'",
   "purchase-svc seat-already-held '이미 잡힌 좌석이 있습니다'",
   "queue-svc dependency-unavailable '대기 상태를 잠시 만들 수 없습니다'",
   "queue-svc dependency-unavailable '대기열을 잠시 쓸 수 없습니다'",

@@ -85,6 +85,7 @@ erDiagram
     admin_account ||--o{ admin_security_notice : "보낼 보안 알림(추천 적용 2026-11-05)"
     admin_account ||--o{ admin_session : "관리 계정 로그인 세션(추천 적용 2026-11-05)"
     admin_account ||--o{ admin_unlock_link : "본인 해제 링크(추천 적용 2026-11-05)"
+    admin_account ||--o{ admin_known_source : "익숙한 출발지(추천 적용 2026-11-05)"
     account ||--o{ booth_reverification : "부스 본인확인 대조"
     account ||--o{ staff_assignment : "회차 역할"
     event ||--o{ staff_assignment : ""
@@ -274,6 +275,13 @@ erDiagram
         timestamptz created_at "비밀번호가 맞은 때. 10분 [가정] 안에 2단계를 끝내지 않으면 비밀번호만 맞은 로그인 알림(BOT-121)"
         timestamptz expires_at "만든 때 + 5분 [가정]"
         timestamptz used_at "2단계에서 쓴 때(한 번만)"
+        bool known_source "1단계 통과 때 그 묶음이 30일 [가정] 안에 성공한 익숙한 출발지였는지(BOT-123)"
+        timestamptz password_only_noticed_at "비밀번호만 맞은 로그인으로 알린 때(BOT-123)"
+    }
+    admin_known_source {
+        uuid admin_account_id PK "FK. 계정을 지우면 함께 지운다"
+        text pair_ref PK "출발지 묶음 해시(admin_login_step.pair_ref와 같다)"
+        timestamptz last_success_at "비밀번호와 2단계를 모두 통과한 마지막 때. 30일 [가정] 지나면 매일 정비가 지운다(docs/security/auth-controls.md §3.1, BOT-123)"
     }
     admin_unlock_link {
         uuid id PK
@@ -301,7 +309,7 @@ erDiagram
     admin_security_notice {
         uuid id PK
         uuid admin_account_id FK
-        text kind "TIMED_LOCK|PASSWORD_FAILURE_NOTICE|MULTI_SOURCE_ALERT|PROTECT_LOCK(docs/security/auth-controls.md §3.4)|SESSION_LIMIT(동시 세션 2개를 넘어 가장 오래 쓰지 않은 세션을 끝냄, POL-019, BOT-120)|UNLOCK_LINK(해제 링크 다시 받기)|UNLOCKED(본인 해제, BOT-121)"
+        text kind "TIMED_LOCK|PASSWORD_FAILURE_NOTICE|MULTI_SOURCE_ALERT|PROTECT_LOCK(docs/security/auth-controls.md §3.4)|SESSION_LIMIT(동시 세션 2개를 넘어 가장 오래 쓰지 않은 세션을 끝냄, POL-019, BOT-120)|UNLOCK_LINK(해제 링크 다시 받기)|UNLOCKED(본인 해제, BOT-121)|PASSWORD_ONLY_LOGIN(비밀번호만 맞은 로그인, BOT-123)"
         timestamptz created_at "사건 시각. 셈과 같은 트랜잭션으로 적는다"
         timestamptz sent_at "업무 이메일로 보낸 때(또는 보낼 것이 없어 닫은 때). identity의 발송 고리가 메일 포트로 보낸다(BOT-121, 발송 대행은 [가정])"
         int attempts "보내지 못한 횟수(BOT-121)"

@@ -3,11 +3,11 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, writeOutbox } from '@peaket/platform';
-import { and, asc, eq, gt, isNull, lt, lte, ne, notInArray, or } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, isNull, lt, lte, ne, notInArray, or } from 'drizzle-orm';
 import type { AccountLoginState, LockKind, LockReason, NoticeKind } from '../../domain/login-rules.js';
 import { sql as rawSql } from 'drizzle-orm';
-import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminSecondStepStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
-import { adminAccount, adminLoginStep, adminRecoveryCode, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
+import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminSecondStepStore, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
+import { adminAccount, adminKnownSource, adminLoginStep, adminRecoveryCode, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
 
 type AccountRow = typeof adminAccount.$inferSelect;
 /** 알림을 보내지 못했을 때 다음 시도까지(1분부터 두 배씩, 최대 1시간 [가정]) */
@@ -43,7 +43,7 @@ function stateColumns(s: AccountLoginState) {
 }
 
 @Injectable()
-export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore {
+export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore {
   constructor(
     @Inject(DATABASE) private readonly database: Database,
     /** Outbox 행 ID(UUIDv7)의 시계 */
@@ -135,8 +135,16 @@ export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginSt
       .where(and(eq(adminAccount.id, id), ne(adminAccount.status, 'REMOVED')));
   }
 
-  async createLoginStep(i: { id: string; accountId: string; tokenHash: Buffer; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number }): Promise<void> {
-    await this.database.db.insert(adminLoginStep).values({ id: i.id, adminAccountId: i.accountId, tokenHash: i.tokenHash, aud: i.aud, pairRef: i.pairRef, createdAt: new Date(i.createdAt), expiresAt: new Date(i.expiresAt) });
+  async createLoginStep(i: { id: string; accountId: string; tokenHash: Buffer; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; knownSource?: boolean }): Promise<void> {
+    await this.database.db.insert(adminLoginStep).values({ id: i.id, adminAccountId: i.accountId, tokenHash: i.tokenHash, aud: i.aud, pairRef: i.pairRef, createdAt: new Date(i.createdAt), expiresAt: new Date(i.expiresAt), knownSource: i.knownSource === true });
+  }
+
+  async isKnownSource(accountId: string, pairRef: string, since: number): Promise<boolean> {
+    const [r] = await this.database.db
+      .select({ at: adminKnownSource.lastSuccessAt })
+      .from(adminKnownSource)
+      .where(and(eq(adminKnownSource.adminAccountId, accountId), eq(adminKnownSource.pairRef, pairRef)));
+    return !!r && r.at.getTime() >= since;
   }
 
   async recordLoginSuccess(id: string, at: number): Promise<void> {
@@ -147,13 +155,13 @@ export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginSt
   }
 
   // ── TOTP와 2단계(BOT-120) ──
-  async findLoginById(id: string): Promise<(AdminLoginAccount & { email: string }) | null> {
+  async findLoginById(id: string): Promise<(AdminLoginAccount & { email: string; promoterId: string | null }) | null> {
     const [r] = await this.database.db
       .select()
       .from(adminAccount)
       .where(and(eq(adminAccount.id, id), ne(adminAccount.status, 'REMOVED')));
     if (!r) return null;
-    return { id: r.id, role: r.role as AdminRole, status: r.status as AdminStatus, passwordPhc: r.passwordPhc, breachCheckedAt: ms(r.breachCheckedAt), passwordChangeRequired: r.passwordChangeRequired, state: stateOf(r), email: r.email ?? '' };
+    return { id: r.id, role: r.role as AdminRole, status: r.status as AdminStatus, passwordPhc: r.passwordPhc, breachCheckedAt: ms(r.breachCheckedAt), passwordChangeRequired: r.passwordChangeRequired, state: stateOf(r), email: r.email ?? '', promoterId: r.promoterId };
   }
 
   async getTotp(id: string): Promise<AdminTotpState | null> {
@@ -218,7 +226,8 @@ export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginSt
     const done = await this.database.db
       .update(adminLoginStep)
       .set({ usedAt: new Date(at) })
-      .where(and(eq(adminLoginStep.id, id), isNull(adminLoginStep.usedAt)))
+      // 수명 안이고, 비밀번호만 맞은 로그인으로 본 단계가 아니어야 쓴다(정비와 2단계가 같은 행을 두고 겹쳐도 둘 중 하나만, 재검토 2026-11-05)
+      .where(and(eq(adminLoginStep.id, id), isNull(adminLoginStep.usedAt), isNull(adminLoginStep.passwordOnlyNoticedAt), gt(adminLoginStep.expiresAt, new Date(at))))
       .returning({ id: adminLoginStep.id });
     return done.length > 0;
   }
@@ -376,4 +385,79 @@ export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginSt
     return { done, failed };
   }
 
+
+  // ── 비밀번호만 맞은 로그인·세션(BOT-123) ──
+  async findSession(sessionId: string): Promise<AdminSessionRow | null> {
+    const [r] = await this.database.db.select().from(adminSession).where(eq(adminSession.id, sessionId));
+    return r ? { id: r.id, accountId: r.adminAccountId, aud: r.aud as AdminAud, pairRef: r.pairRef, absoluteExpiresAt: r.absoluteExpiresAt.getTime(), idleExpiresAt: r.idleExpiresAt.getTime(), terminatedAt: ms(r.terminatedAt) } : null;
+  }
+
+  async terminateOtherSessions(accountId: string, keepSessionId: string, reason: 'PASSWORD_CHANGED', now: number): Promise<string[]> {
+    return this.database.transaction(async (tx) => {
+      const ended = await tx
+        .update(adminSession)
+        .set({ terminatedAt: new Date(now), terminationReason: reason })
+        .where(and(eq(adminSession.adminAccountId, accountId), ne(adminSession.id, keepSessionId), isNull(adminSession.terminatedAt)))
+        .returning({ id: adminSession.id });
+      const ids = ended.map((e) => e.id).sort();
+      if (ids.length > 0) {
+        // 같은 트랜잭션의 마지막 쓰기로 세션 종료 사건을 적는다(asyncapi control.sessions-terminated, ADR-0143 결정 3)
+        const terminatedAt = new Date(now).toISOString();
+        await writeOutbox(
+          tx,
+          this.clock,
+          ids.map((sessionId) => ({ topic: CONTROL_TOPICS.sessionsTerminated, key: accountId, payload: Buffer.from(JSON.stringify({ accountId, sessionId, reason, terminatedAt })) })),
+        );
+      }
+      return ids;
+    });
+  }
+
+  async touchKnownSource(accountId: string, pairRef: string, at: number): Promise<void> {
+    await this.database.db
+      .insert(adminKnownSource)
+      .values({ adminAccountId: accountId, pairRef, lastSuccessAt: new Date(at) })
+      .onConflictDoUpdate({ target: [adminKnownSource.adminAccountId, adminKnownSource.pairRef], set: { lastSuccessAt: new Date(at) } });
+  }
+
+  async purgeKnownSources(before: number): Promise<number> {
+    const done = await this.database.db.delete(adminKnownSource).where(lt(adminKnownSource.lastSuccessAt, new Date(before))).returning({ id: adminKnownSource.adminAccountId });
+    return done.length;
+  }
+
+  async findPasswordOnlySteps(createdBefore: number, limit: number): Promise<{ id: string; accountId: string }[]> {
+    return this.database.db
+      .select({ id: adminLoginStep.id, accountId: adminLoginStep.adminAccountId })
+      .from(adminLoginStep)
+      .where(and(lte(adminLoginStep.createdAt, new Date(createdBefore)), isNull(adminLoginStep.usedAt), eq(adminLoginStep.knownSource, false), isNull(adminLoginStep.passwordOnlyNoticedAt)))
+      .orderBy(asc(adminLoginStep.createdAt))
+      .limit(limit);
+  }
+
+  async markPasswordOnly(stepId: string, accountId: string, now: number): Promise<boolean> {
+    return this.database.transaction(async (tx) => {
+      const marked = await tx
+        .update(adminLoginStep)
+        .set({ passwordOnlyNoticedAt: new Date(now) })
+        .where(and(eq(adminLoginStep.id, stepId), eq(adminLoginStep.adminAccountId, accountId), isNull(adminLoginStep.passwordOnlyNoticedAt), isNull(adminLoginStep.usedAt)))
+        .returning({ pairRef: adminLoginStep.pairRef, createdAt: adminLoginStep.createdAt });
+      const step = marked[0];
+      if (!step) return false;
+      // 그 단계 뒤에 같은 묶음에서 2단계까지 끝냈으면 주인이 다시 시도해 들어온 것이다: 본 것으로 적고 알리지 않는다(새 맥락 리뷰 2026-11-05)
+      const later = await tx
+        .select({ id: adminKnownSource.adminAccountId })
+        .from(adminKnownSource)
+        .where(and(eq(adminKnownSource.adminAccountId, accountId), eq(adminKnownSource.pairRef, step.pairRef), gte(adminKnownSource.lastSuccessAt, step.createdAt)));
+      if (later.length > 0) return false;
+      const updated = await tx
+        .update(adminAccount)
+        .set({ passwordChangeRequired: true, updatedAt: new Date(now) })
+        .where(and(eq(adminAccount.id, accountId), ne(adminAccount.status, 'REMOVED')))
+        .returning({ id: adminAccount.id });
+      // 지운 계정은 본 것으로만 적고 알리지 않는다
+      if (updated.length === 0) return false;
+      await tx.insert(adminSecurityNotice).values({ id: randomUUID(), adminAccountId: accountId, kind: 'PASSWORD_ONLY_LOGIN', createdAt: new Date(now) });
+      return true;
+    });
+  }
 }

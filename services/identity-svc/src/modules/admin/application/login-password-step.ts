@@ -24,6 +24,7 @@ import {
   LOGIN_COUNTERS,
   type LoginCounters,
   type LoginFailureLimits,
+  type LoginFailureRecorded,
   ROLES_OF_AUD,
 } from '../domain/ports.js';
 import { ADMIN_AUTH_CONFIG } from './set-admin-password.js';
@@ -88,6 +89,38 @@ export function sourceAddressOf(ip: string): string {
 
 const NOTICE_ALERT: Partial<Record<NoticeKind, 'password_failure_notice' | 'protect_lock'>> = { PASSWORD_FAILURE_NOTICE: 'password_failure_notice', PROTECT_LOCK: 'protect_lock' };
 const secondsUntil = (until: number, now: number) => Math.max(1, Math.ceil((until - now) / 1000));
+
+/** 출발지가 든 실패 셈의 한도(1단계와 비밀번호 바꾸기가 같이 쓴다, auth-controls §3.1) */
+export const failureLimitsOf = (cfg: AdminAuthConfig): LoginFailureLimits => ({
+  pairLockAfter: cfg.pairLockAfterFailures,
+  multiSourceIps: cfg.multiSourceIpsPerHour,
+  sourceAccounts: cfg.sourceAccountsPerHour,
+  windowMs: SOURCE_WINDOW_MS,
+  accountAlertMs: cfg.sourceCaptchaDurationMs,
+  sourceAlertMs: cfg.sourceCaptchaDurationMs,
+  globalFailures: cfg.globalAlertFailures,
+  globalWindowMs: GLOBAL_WINDOW_MS,
+  globalAlertMs: cfg.globalCaptchaDurationMs,
+});
+
+/** 비밀번호 실패 하나를 센 뒤의 지표·SEV3 경보와 여러 출발지 알림(1단계와 비밀번호 바꾸기가 같이 쓴다, auth-controls §3.1·§3.4) */
+export async function signalPasswordFailure(
+  signals: AdminLoginSignals,
+  store: Pick<AdminLoginStore, 'addNotice'>,
+  c: { accountId: string | null; aud: AdminAud; notices: readonly NoticeKind[]; rec: LoginFailureRecorded; now: number },
+): Promise<void> {
+  signals.failure(c.aud, 'password');
+  for (const n of c.notices) {
+    const a = NOTICE_ALERT[n];
+    if (a) signals.alert(a);
+  }
+  if (c.rec.newAccountAlert) {
+    signals.alert('multi_source');
+    if (c.accountId) await store.addNotice(c.accountId, 'MULTI_SOURCE_ALERT', c.now);
+  }
+  if (c.rec.newSourceAlert) signals.alert('source');
+  if (c.rec.newGlobalAlert) signals.alert('global');
+}
 
 type GateCtx = {
   i: { aud: AdminAud; email: string; password: string; ip: string; deviceId: string; humanCheckToken?: string };
@@ -220,17 +253,7 @@ export class LoginPasswordStep {
     }
     const accountLock = activeLock(next, now);
     // 출발지가 든 값(Redis)
-    const limits: LoginFailureLimits = {
-      pairLockAfter: this.cfg.pairLockAfterFailures,
-      multiSourceIps: this.cfg.multiSourceIpsPerHour,
-      sourceAccounts: this.cfg.sourceAccountsPerHour,
-      windowMs: SOURCE_WINDOW_MS,
-      accountAlertMs: this.cfg.sourceCaptchaDurationMs,
-      sourceAlertMs: this.cfg.sourceCaptchaDurationMs,
-      globalFailures: this.cfg.globalAlertFailures,
-      globalWindowMs: GLOBAL_WINDOW_MS,
-      globalAlertMs: this.cfg.globalCaptchaDurationMs,
-    };
+    const limits = failureLimitsOf(this.cfg);
     const rec = await this.counters.recordFailure({
       subject,
       pair,
@@ -241,17 +264,7 @@ export class LoginPasswordStep {
       pairLockMs: nextTimedLockMs(next, now, this.cfg),
       limits,
     });
-    this.signals.failure(aud, 'password');
-    for (const n of notices) {
-      const a = NOTICE_ALERT[n];
-      if (a) this.signals.alert(a);
-    }
-    if (rec.newAccountAlert) {
-      this.signals.alert('multi_source');
-      if (account) await this.store.addNotice(account.id, 'MULTI_SOURCE_ALERT', now);
-    }
-    if (rec.newSourceAlert) this.signals.alert('source');
-    if (rec.newGlobalAlert) this.signals.alert('global');
+    await signalPasswordFailure(this.signals, this.store, { accountId: account ? account.id : null, aud, notices, rec, now });
     // 응답: 이번에 잠겼으면 423, 아니면 401과 남은 수·다음 사람 확인
     if (accountLock?.kind === 'PROTECT') return { kind: 'LOCKED', lock: 'PROTECT' };
     const lockedUntil = Math.max(accountLock?.kind === 'TIMED' ? accountLock.until : 0, rec.pairLockedUntil ?? 0);
@@ -279,7 +292,9 @@ export class LoginPasswordStep {
       }
     }
     const token = randomBytes(32).toString('base64url');
-    await this.store.createLoginStep({ id: randomUUID(), accountId: account.id, tokenHash: createHash('sha256').update(token).digest(), aud: i.aud, pairRef: pair, createdAt: now, expiresAt: now + LOGIN_STEP_TTL_MS });
+    // 그 묶음이 30일 [가정] 안에 성공한 익숙한 출발지였는지 적는다(비밀번호만 맞은 로그인 알림의 기준, BOT-123)
+    const knownSource = await this.store.isKnownSource(account.id, pair, now - this.cfg.knownSourceWindowMs);
+    await this.store.createLoginStep({ id: randomUUID(), accountId: account.id, tokenHash: createHash('sha256').update(token).digest(), aud: i.aud, pairRef: pair, createdAt: now, expiresAt: now + LOGIN_STEP_TTL_MS, knownSource });
     return { kind: 'PASSED', loginStep: token, expiresInSeconds: LOGIN_STEP_TTL_MS / 1000 };
   }
 }

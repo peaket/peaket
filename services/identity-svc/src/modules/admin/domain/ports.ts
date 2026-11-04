@@ -94,7 +94,9 @@ export interface AdminLoginStore {
   rehash(id: string, phc: string, now: number): Promise<void>;
   /** 로그인 때 유출 다시 보기의 결과. breached면 비밀번호 바꾸기 필요 표시를 켠다 */
   markBreachChecked(id: string, at: number, breached: boolean): Promise<void>;
-  createLoginStep(i: { id: string; accountId: string; tokenHash: Buffer; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number }): Promise<void>;
+  createLoginStep(i: { id: string; accountId: string; tokenHash: Buffer; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; knownSource?: boolean }): Promise<void>;
+  /** 그 묶음이 since 뒤에 성공한 익숙한 출발지인가(BOT-123) */
+  isKnownSource(accountId: string, pairRef: string, since: number): Promise<boolean>;
   /** 비밀번호와 2단계를 모두 통과했다: 계정 실패 수·2단계 실패 수·누계를 0으로, last_login_at을 쓴다 */
   recordLoginSuccess(id: string, at: number): Promise<void>;
 }
@@ -188,7 +190,8 @@ export const RECOVERY_CODE_HASHER = Symbol('identity.RecoveryCodeHasher');
 export const ADMIN_TOKEN_SIGNER = Symbol('identity.AdminTokenSigner');
 /** 관리 액세스 토큰(관리 토큰 키, ES256, typ at+jwt, aud partner·ops, 15분). 역할·테넌트는 싣지 않는다(ADR-0172) */
 export interface AdminTokenSigner {
-  access(c: { accountId: string; sessionId: string; aud: AdminAud }, now: number): Promise<{ token: string; expiresAt: number }>;
+  /** scopes: 비밀번호 바꾸기 필요 세션이면 ['password:change'](BOT-123), 보통은 비운다 */
+  access(c: { accountId: string; sessionId: string; aud: AdminAud; scopes?: readonly string[] }, now: number): Promise<{ token: string; expiresAt: number }>;
 }
 
 export interface AdminTotpState {
@@ -209,7 +212,7 @@ export interface LoginStepRow {
 
 export const ADMIN_SECOND_STEP_STORE = Symbol('identity.AdminSecondStepStore');
 export interface AdminSecondStepStore {
-  findLoginById(id: string): Promise<(AdminLoginAccount & { email: string }) | null>;
+  findLoginById(id: string): Promise<(AdminLoginAccount & { email: string; promoterId: string | null }) | null>;
   getTotp(id: string): Promise<AdminTotpState | null>;
   setTotpPending(id: string, enc: Buffer, now: number): Promise<boolean>;
   /** 대기 시드를 확정하고(받은 시간 칸을 적는다) 복구 코드를 모두 바꾼다 */
@@ -271,4 +274,32 @@ export type AdminMailKind = NoticeKind;
 /** 계정 주인 업무 이메일 보내기. 운영 구현(발송 대행)은 정본에 없다 [가정] */
 export interface AdminMailer {
   send(m: { to: string; kind: AdminMailKind; link?: string; at: number }): Promise<void>;
+}
+
+// ── 비밀번호만 맞은 로그인과 비밀번호 바꾸기·역할 확인(BUILD_ORDER BOT-123) ──
+export interface AdminSessionRow {
+  id: string;
+  accountId: string;
+  aud: AdminAud;
+  /** 그 세션이 로그인한 출발지 묶음(비밀번호 바꾸기의 실패를 이 묶음에 센다) */
+  pairRef: string;
+  absoluteExpiresAt: number;
+  idleExpiresAt: number;
+  terminatedAt: number | null;
+}
+export const ADMIN_SESSION_STORE = Symbol('identity.AdminSessionStore');
+export interface AdminSessionStore {
+  findSession(sessionId: string): Promise<AdminSessionRow | null>;
+  /** 그 계정의 keep 말고 살아 있는 관리 세션을 모두 끝내고 같은 트랜잭션에 세션 종료 사건을 적는다. 끝낸 세션 ID */
+  terminateOtherSessions(accountId: string, keepSessionId: string, reason: 'PASSWORD_CHANGED', now: number): Promise<string[]>;
+  /** 비밀번호와 2단계를 모두 통과한 묶음의 마지막 성공 시각 */
+  touchKnownSource(accountId: string, pairRef: string, at: number): Promise<void>;
+  purgeKnownSources(before: number): Promise<number>;
+  /** 만든 때가 createdBefore 이전이고, 쓰이지 않았고, 익숙하지 않은 출발지이며, 아직 알리지 않은 로그인 단계 */
+  findPasswordOnlySteps(createdBefore: number, limit: number): Promise<{ id: string; accountId: string }[]>;
+  /**
+   * 한 트랜잭션: 그 단계에 본 시각을 적고(아직이면), 계정의 비밀번호 바꾸기 필요를 켜고, PASSWORD_ONLY_LOGIN 알림을 적는다. 알렸으면 true.
+   * 그 단계를 만든 뒤 같은 묶음에서 2단계까지 끝낸 기록(익숙한 출발지)이 있으면 본 시각만 적고 알리지 않는다(false)
+   */
+  markPasswordOnly(stepId: string, accountId: string, now: number): Promise<boolean>;
 }

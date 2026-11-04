@@ -52,6 +52,12 @@ class AuthController {
   partner(@CurrentPrincipal() p: Principal, @Query('promoterId') _ignored?: string) {
     return { tenantId: p.tenantId, role: p.role };
   }
+
+  @Post('partner/password-changes')
+  @Roles(['partner_admin', 'partner_member'], { passwordChangeSession: true })
+  changePassword() {
+    return { ok: true };
+  }
 }
 
 @Module({ controllers: [AuthController] })
@@ -286,5 +292,37 @@ describe('역할 판정(ADR-0172)', () => {
   test('FND070_관리역할처리기가있는데_identity조회를주지않으면_시작이실패한다', async () => {
     const logs = collector();
     await expect(createService({ name: 'x', module: AuthModule, env: { PEAKET_ENV: 'ci' }, clock: fakeClock(), logDestination: logs.stream })).rejects.toThrow(/adminAuthz/);
+  });
+});
+
+// 비밀번호 바꾸기 필요 세션(docs/features/identity.md §6 '관리 계정 비밀번호만 맞은 로그인 알림과 비밀번호 바꾸기의 첫 구현', BUILD_ORDER BOT-123)
+describe('비밀번호 바꾸기 필요 세션(AC-T4)', () => {
+  const partner = (scope: string) => ({ 'x-user-id': 'acc-p', 'x-session-id': 's-p', 'x-user-aud': 'partner', 'x-user-scope': scope });
+  test('AC_T4_password_change스코프의관리세션은_연처리기말고는403_password_change_required이고_보통세션은그대로다 [ASVS v5.0.0-6.3.1]', async () => {
+    const { get, identity } = await boot();
+    identity.answers.set('acc-p/s-p', { valid: true, role: 'partner_admin', tenantId: 't-1' });
+    const blocked = await get('/v1/a/partner', partner('password:change'));
+    expect(blocked.statusCode).toBe(403);
+    expect(JSON.parse(blocked.payload)).toMatchObject({ type: 'https://peaket.example/problems/password-change-required' });
+    expect((await get('/v1/a/partner/password-changes', partner('password:change'), 'POST')).statusCode).toBe(201);
+    expect((await get('/v1/a/partner', partner(''))).statusCode).toBe(200);
+    expect((await get('/v1/a/partner/password-changes', partner(''), 'POST')).statusCode).toBe(201);
+  });
+
+  test('AC_T4_세션판정이valid가아니면password_change스코프여도403이아니라401이고_운영자콘솔도같이막으며_관리신원의스코프머리를읽지못하면401이다', async () => {
+    const { get, identity } = await boot();
+    // 끝난 세션(판정 valid 아님)은 스코프와 관계없이 401
+    expect((await get('/v1/a/partner', partner('password:change'))).statusCode).toBe(401);
+    identity.answers.set('acc-ops/s-ops', { valid: true, role: 'operator' });
+    const blocked = await get('/v1/a/ops', ops('s-ops', { 'x-user-scope': 'password:change' }));
+    expect(blocked.statusCode).toBe(403);
+    expect(JSON.parse(blocked.payload)).toMatchObject({ type: 'https://peaket.example/problems/password-change-required' });
+    // 읽지 못하는 스코프 머리: 제한 스코프가 빠져 보통 세션처럼 통과하지 않는다
+    expect((await get('/v1/a/ops', ops('s-ops', { 'x-user-scope': `password:change ${'x'.repeat(1024)}` }))).statusCode).toBe(401);
+    expect((await get('/v1/a/ops', ops('s-ops', { 'x-user-scope': 'password:change,openid' }))).statusCode).toBe(401);
+    expect((await get('/v1/a/ops', ops('s-ops', { 'x-user-scope': '' }))).statusCode).toBe(200);
+    expect((await get('/v1/a/ops', ops('s-ops'))).statusCode).toBe(200);
+    // 팬 신원은 지금과 같다(스코프 머리를 읽지 못하면 스코프 없음)
+    expect((await get('/v1/a/fan', fan('s-fan', { 'x-user-scope': 'x'.repeat(1025) }))).statusCode).not.toBe(401);
   });
 });

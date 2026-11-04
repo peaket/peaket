@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-123(wbs 3.5.1 ②): 비밀번호만 맞은 로그인 알림·익숙한 출발지, 비밀번호 바꾸기 필요 세션과 비밀번호 바꾸기 경로, identity 관리 경로의 역할 확인. 그 뒤 BOT-122(패스키: WebAuthn 확인에 라이브러리가 필요하면 의존성 추가를 소유자에게 묻는다)·130~160, 구간 1 끝 정리 목록 비우기.
+- BOT-130(wbs 3.5.1 ③): 파트너·운영자 토큰 갱신 경로와 리프레시 쿠키, identity KMS 호출의 복제 키 넘기기, gw-partner 경로(I-T52). BOT-122(패스키)는 WebAuthn 라이브러리 결정 대기(OPEN[20])라 건너뛴다. 그 뒤 BOT-140~160(패스키가 있어야 하는 몫은 OPEN[20] 뒤), 구간 1 끝 정리 목록 비우기.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
@@ -54,8 +54,10 @@
 - BOT-111: 없는 계정의 가짜 상태는 Redis에만 있어 장애 조치·30일 뒤 처음부터 다시 센다. 진짜 계정은 DB에 남아 그때를 노리면 가입 여부를 가를 수 있다(남는 위험으로 적음). 가짜 상태를 DB에 둘지(무작위 이메일로 표를 채우는 공격과 맞바꿈) 정한다(docs/features/identity.md §6)
 - BOT-120: 2단계에서 코드(복구 코드 행 지우기·시간 칸)를 쓴 뒤 로그인 단계를 쓰므로, 처리 중 임대(30초)가 끝난 뒤의 드문 경합이면 복구 코드만 사라지고 결과는 '처음부터 다시'가 될 수 있다. 단계 소비와 코드 소비를 한 트랜잭션으로 묶는다(services/identity-svc/src/modules/admin/application/login-second-step.ts)
 - BOT-120: 세션 2개 제한(계정 행 `FOR UPDATE`)을 동시 트랜잭션으로 보는 PostgreSQL 시험이 없다(test-int/admin-totp.int.test.ts)
-- BOT-121: 게이트에서 identity 통합 시험(75개)이 한 번 1개 실패했고 이어 다섯 번 모두 통과했다. 그때 어느 시험인지 로그를 남기지 못했다. 다시 나오면 이름을 잡아 고친다(services/identity-svc/test-int)
 - BOT-110: AC-T7의 '로그·트레이스에 SHA-1과 그 앞 5자가 0건'은 오류 객체만 시험했다. 요청 경로가 생기는 단계(BOT-111 로그인 때 다시 보기, BOT-150)에서 요청 로그·스팬 속성까지 본다(test/admin-password.test.ts)
+- BOT-123: 마이그레이션 0020 앞에 만든 `admin_login_step` 행은 `known_source`가 false로 채워져, 0020을 올린 뒤 10분 안의 옛 단계가 비밀번호만 맞은 로그인으로 잡힐 수 있다. 찾는 조건에 아래 한도(예: 0020 뒤에 만든 행, 또는 만든 지 1시간 안)를 두고, 찾기용 부분 색인(`used_at is null and known_source = false and password_only_noticed_at is null`)을 더한다. `admin_login_step`을 지우는 정비가 없다(services/identity-svc/migrations/0020_admin_known_source.sql, drizzle-admin-account-store.ts `findPasswordOnlySteps`)
+- BOT-123: 알림 메일의 시각이 발송 시각이고 사건(멈춘 로그인) 시각이 아니다. auth-controls §3.4는 알림에 출발지를 싣는다고 하는데 identity §6은 해시뿐이라 싣지 않는다고 한다: 둘을 맞춘다(services/identity-svc/src/modules/admin/application/dispatch-admin-notices.ts, docs/security/auth-controls.md §3.4)
+- BOT-123: identity에는 비밀번호 바꾸기 말고 관리 경로가 없어, '다른 경로는 403 password-change-required'(AC-T4)는 공용 가드 시험으로만 본다. 관리 경로가 생기는 BOT-150에서 HTTP 시험 하나를 더한다(test/admin-login-http.test.ts)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
@@ -76,3 +78,4 @@
 - 2026-11-05 BOT-111 관리 계정 로그인 1단계와 실패 제한(R-298, I-T11 ①④⑥·AC-T1·AC-T2·AC-T3·AC-T7 ③④·AC-T9): identity REST `POST /v1/partner/auth/sessions`·`/v1/ops/auth/sessions` 1단계(openapi 본문·응답 꼴을 처음 적음, 계약 깨짐 예외 두 줄), 사람 확인(Turnstile 검증, hostname·action·같은 멱등 키로 한 번 더), 계정 값은 `admin_account` 행 잠금 트랜잭션·알림 행 `admin_security_notice`, 출발지 값은 Redis `id:alf:*`(대상·출발지·전체 해시 태그마다 Lua 한 번), 없는 계정은 가짜 상태로 같은 응답, 시간·묶음·보호 잠금, 경보 셋, 로그인 단계 `admin_login_step`(마이그레이션 0017), 로그인 때 유출 다시 보기·다시 저장, 지표 둘. local·ci 밖은 페퍼 필수.
 - 2026-11-05 BOT-120 관리 계정 TOTP와 로그인 2단계(R-303, I-T10·I-T41): BOT-120을 둘로 나눴다(패스키·단계 인증은 BOT-122). TOTP(RFC 6238, 지금 칸과 한 칸 뒤, 받은 칸 재사용 막기), 시드 봉투 암호화(KMS `GenerateDataKey`·`Decrypt`와 암호화 컨텍스트, AES-256-GCM, 로컬·CI 키 값), 등록 유스케이스, 복구 코드 10개(PBKDF2 10,000회 + 페퍼), 같은 로그인 경로의 2단계(openapi 본문·응답 oneOf), 관리 세션 `admin_session`(24시간·유휴 1시간·동시 2개, 넘으면 DEVICE_LIMIT 사건·알림), 관리 액세스 토큰과 쿠키 넷(마이그레이션 0018).
 - 2026-11-05 BOT-121 2단계 보호 잠금과 본인 해제 링크(R-304, AC-T5, I-T11 ①의 메일·②③⑤): BOT-121을 둘로 나눴다(비밀번호만 맞은 로그인·비밀번호 바꾸기는 BOT-123). 2단계 실패 수 5 [가정] 보호 잠금, `admin_unlock_link`(32바이트·30분·한 번·코드 3번, 새 링크는 옛 링크 무효, 마이그레이션 0019), 풀기·다시 받기 REST(1시간 3번, 없는 이메일도), 풀면 시간 잠금만(묶음 잠금은 남김, 푼 시각을 locked_until에), 알림 발송 고리(5초, FOR UPDATE SKIP LOCKED, 메일 포트: 로컬·CI 파일 대역, 운영 대행 미정).
+- 2026-11-05 BOT-123 비밀번호만 맞은 로그인 알림과 비밀번호 바꾸기(R-309, AC-T4·AC-T7 ④): 익숙한 출발지 `admin_known_source`(2단계 성공 때, 30일, 마이그레이션 0020), 로그인 단계 `known_source`, 비밀번호만 맞은 로그인 확인 고리(1분, 10분 지난 단계, 비밀번호 바꾸기 필요 켜기·알림), 비밀번호 바꾸기 필요 세션(scope `password:change`, 플랫폼 가드가 연 처리기 말고 403), 비밀번호 바꾸기 REST(잠김 먼저, 지금 비밀번호 실패는 로그인처럼 그 세션 묶음에 세고 같은 경보, 같은 비밀번호 거절, 임대 안에서 세션 다시 보기, 다른 세션 끝내기 PASSWORD_CHANGED, 제한 푼 새 쿠키), identity 관리 경로 역할 판정(같은 프로세스 포트와 gRPC `AdminAuthzService`), 가드의 관리 스코프 머리 닫기. BAS-040 ①이 넘긴 것(identity `not-found` 넷을 뜻별 이름으로, 탈퇴 본문 닫기, I-T50 기대)도 끝냈다. 새 맥락 리뷰 중간 6·낮음 7과 재검토 중간 1·낮음 4 가운데 낮음 셋만 정리 목록으로 넘겼다. BOT-121 게이트의 깜빡인 통합 시험은 동시 10개 시험의 'BUSY 정확히 9개' 기대였다(앞 시도가 임대를 풀면 늦은 시도가 차례로 처리된다): 기대를 '처리된 만큼, 잠금 전 5번까지만'으로 고쳤다.

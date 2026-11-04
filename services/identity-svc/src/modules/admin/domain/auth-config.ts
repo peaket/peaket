@@ -53,7 +53,7 @@ const SPECS: readonly Spec[] = [
   // §5에 허용 범위가 없다(—). 1~100만은 꼴 검사뿐이다 [가정]
   { key: 'admin_login.global_alert', field: 'globalAlertFailures', kind: 'int', def: 100, min: 1, max: 1_000_000 },
   { key: 'admin_login.global_captcha_duration', field: 'globalCaptchaDurationMs', kind: 'duration', def: 1 * H, min: 15 * M, max: 24 * H },
-  { key: 'admin_login.password_only_notice_after', field: 'passwordOnlyNoticeAfterMs', kind: 'duration', def: 10 * M, min: 1 * M, max: 1 * H },
+  { key: 'admin_login.password_only_notice_after', field: 'passwordOnlyNoticeAfterMs', kind: 'duration', def: 10 * M, min: 6 * M, max: 1 * H },
   { key: 'admin_login.known_source_window', field: 'knownSourceWindowMs', kind: 'duration', def: 30 * D, min: 1 * D, max: 90 * D },
   { key: 'unlock_link.ttl', field: 'unlockLinkTtlMs', kind: 'duration', def: 30 * M, min: 5 * M, max: 24 * H },
   { key: 'unlock_link.code_attempts', field: 'unlockLinkCodeAttempts', kind: 'int', def: 3, min: 1, max: 5 },

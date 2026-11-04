@@ -3,10 +3,10 @@
 // 앱 포트(REST: 팬 토큰 갱신 POST /v1/identity/access-tokens, 공개키 묶음 GET /internal/jwks/{set}.json)·관리 포트(/metrics, /ready)는
 // 서비스 뼈대가, 업무 gRPC 포트는 이 파일이 연다.
 import 'reflect-metadata';
-import { createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { KMSClient } from '@aws-sdk/client-kms';
-import { adminAuthConfigFromEnv, adminMailerFromEnv, adminPepperFromEnv, DispatchAdminNotices, hibpBreachListFromEnv, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, totpSeedCipherFromEnv, turnstileFromEnv } from './modules/admin/index.js';
+import { adminAuthConfigFromEnv, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, totpSeedCipherFromEnv, turnstileFromEnv } from './modules/admin/index.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
   AddProvider,
@@ -103,10 +103,15 @@ if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTI
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
 // 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
 const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile);
-const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache) } : {}) } } : {}) }) });
+// identity 자신의 관리 경로 역할 판정(ADR-0172): 같은 프로세스의 GetAdminAuthz를 가드 포트로 넣는다. 앱이 선 뒤에 잇는다(BOT-123)
+const adminAuthzHolder: { port?: AdminAuthzPort } = {};
+const adminAuthz: AdminAuthzPort = { getAdminAuthz: (q, o) => (adminAuthzHolder.port ? adminAuthzHolder.port.getAdminAuthz(q, o) : Promise.reject(new Error('관리 역할 판정이 아직 준비되지 않았다'))) };
+// 관리 경로(페퍼가 있을 때만 싣는다)가 없으면 판정 포트도 넘기지 않는다: 시작 확인이 관리 역할 처리기 없음을 그대로 본다(새 맥락 리뷰 2026-11-05)
+const service = await createService({ name: SERVICE, ...(adminPepper ? { adminAuthz } : {}), module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
 adminSignals.register(service.metrics.registry);
 if (!adminPepper) service.logger.warn('관리자 비밀번호 페퍼 설정이 없어 관리 계정 로그인 경로를 싣지 않았다(local·ci만)');
+if (adminPepper) adminAuthzHolder.port = service.app.get(GetAdminAuthz);
 // 계정 주인 알림 발송 고리: 5초 [가정]마다 보내지 않은 알림을 보낸다(파드가 여럿이어도 행 잠금으로 한 번만, identity §6 BOT-121)
 const ADMIN_NOTICE_INTERVAL_MS = 5_000;
 let stopAdminNotices: () => Promise<void> = async () => {};
@@ -131,7 +136,29 @@ if (adminPepper && adminMailer) {
     clearInterval(timer);
     await inflight;
   };
-} else if (adminPepper) service.logger.warn('관리 계정 메일 포트가 없어 계정 주인 알림(해제 링크 등)을 보내지 않는다. 알림 행은 쌓인다(identity §6 BOT-121)');
+}
+// 비밀번호만 맞은 로그인 확인 고리: 1분 [가정]마다(identity §6 BOT-123). 메일이 없어도 비밀번호 바꾸기 필요는 켠다
+const PASSWORD_ONLY_INTERVAL_MS = 60_000;
+let stopPasswordOnly: () => Promise<void> = async () => {};
+if (adminPepper) {
+  const check = service.app.get(CheckPasswordOnlyLogins);
+  let inflight: Promise<unknown> | null = null;
+  const timer = setInterval(() => {
+    if (inflight) return;
+    inflight = check
+      .run()
+      .catch((err: unknown) => service.logger.warn({ err }, '비밀번호만 맞은 로그인을 확인하지 못했다(다음 고리에서 다시 한다)'))
+      .finally(() => {
+        inflight = null;
+      });
+  }, PASSWORD_ONLY_INTERVAL_MS);
+  timer.unref();
+  stopPasswordOnly = async () => {
+    clearInterval(timer);
+    await inflight;
+  };
+}
+if (adminPepper && !adminMailer) service.logger.warn('관리 계정 메일 포트가 없어 계정 주인 알림(해제 링크 등)을 보내지 않는다. 알림 행은 쌓인다(identity §6 BOT-121)');
 // 기록이 쓰는 연계정보 키 판을 설정이 모두 갖지 않으면 시작하지 않는다(같은 사람이 계정을 하나 더 만들지 못하게, identity §5 '키 판·만 14세…')
 if (process.env[VERIFICATION_PROVIDER_ENV]) await assertKeyVersions(service.app.get<DrizzleVerificationStore>(VERIFICATION_STORE), verification.hashers);
 for (const w of invRefs.warnings) service.logger.warn(w);
@@ -171,6 +198,10 @@ const grpc = await startGrpcServer({
       definition: identityPackage().InvestigationRefService.service,
       handlers: investigationRefHandlers({ refs: service.app.get(GetInvestigationRefs) }, (method, err) => service.logger.error({ err, method }, 'InvestigationRefService 처리 실패')),
     },
+    // 관리 경로의 역할 판정(관리 경로를 처리하는 서비스의 가드, ADR-0172, BOT-123)
+    ...(adminPepper
+      ? [{ definition: identityPackage().AdminAuthzService.service, handlers: adminAuthzHandlers({ authz: service.app.get(GetAdminAuthz) }, (method, err) => service.logger.error({ err, method }, 'AdminAuthzService 처리 실패')) }]
+      : []),
     // 이용 제한 중 탈퇴의 대조값 보관(ops-svc만, identity §8 '대조값 보관의 첫 구현')
     {
       definition: identityPackage().RestrictedCiHoldService.service,
@@ -184,7 +215,7 @@ process.once('SIGTERM', () => {
   // gRPC 포트를 먼저 닫아 새 호출을 받지 않고, 처리 중인 호출이 끝나면 서비스와 연결을 닫는다
   void grpc
     .close()
-    .then(() => stopAdminNotices())
+    .then(() => Promise.all([stopAdminNotices(), stopPasswordOnly()]))
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err }, 'identity-svc 종료 실패'))
     .finally(() => {

@@ -13,7 +13,7 @@ const RETRY_AFTER_S = 5;
 function problemOf(e: MergeError): ProblemError {
   switch (e.code) {
     case 'NOT_FOUND':
-      return new ProblemError({ type: 'not-found', status: 404, title: '병합 제안이 없거나 시간이 지났습니다' });
+      return new ProblemError({ type: 'merge-proposal-not-found', status: 404, title: '병합 제안이 없거나 시간이 지났습니다' });
     case 'REAUTH_REQUIRED':
       return new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
     case 'BLOCKED':

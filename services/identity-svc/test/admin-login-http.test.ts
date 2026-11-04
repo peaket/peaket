@@ -2,7 +2,7 @@
 // (docs/features/identity.md §6 '관리 계정 로그인 1단계와 실패 제한의 첫 구현', BUILD_ORDER BOT-111).
 import 'reflect-metadata';
 import { createServer } from 'node:http';
-import { createService, fakeClock } from '@peaket/platform';
+import { type AdminAuthzPort, createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { JoseAdminTokenSigner } from '../src/modules/admin/adapters/jose-admin-token-signer.js';
@@ -10,6 +10,7 @@ import { LocalPepper } from '../src/modules/admin/adapters/local-pepper.js';
 import { LocalTotpSeedCipher } from '../src/modules/admin/adapters/local-totp-seed-cipher.js';
 import { MemoryAdminMailer } from '../src/modules/admin/adapters/memory-admin-mailer.js';
 import { DispatchAdminNotices } from '../src/modules/admin/application/dispatch-admin-notices.js';
+import { GetAdminAuthz } from '../src/modules/admin/application/get-admin-authz.js';
 import type { MemoryAdminAccountStore } from '../src/modules/admin/adapters/memory-admin-account-store.js';
 import { Pbkdf2AdminPasswords } from '../src/modules/admin/adapters/pbkdf2-admin-passwords.js';
 import { TurnstileHumanCheck } from '../src/modules/admin/adapters/turnstile-human-check.js';
@@ -30,6 +31,8 @@ const PW = '봄비내리는월요일아침의커피한잔';
 const clock = fakeClock({ now: Date.parse('2026-11-05T02:00:00Z') });
 const pepper = new LocalPepper(new Map([[1, Buffer.alloc(32, 8)]]), 1);
 let svc: Awaited<ReturnType<typeof createService>>;
+// identity 자신의 관리 경로 역할 판정: 앱이 선 뒤에 잇는다(main.ts와 같다, BOT-123)
+const authzHolder: { port?: AdminAuthzPort } = {};
 
 beforeAll(async () => {
   const fan = await fanKey();
@@ -57,7 +60,9 @@ beforeAll(async () => {
     }),
     env: { PEAKET_ENV: 'ci' },
     clock,
+    adminAuthz: { getAdminAuthz: (q, o) => authzHolder.port!.getAdminAuthz(q, o) },
   });
+  authzHolder.port = svc.app.get(GetAdminAuthz);
   const store = svc.app.get<MemoryAdminAccountStore>(ADMIN_LOGIN_STORE);
   store.create({ id: PARTNER, role: 'partner_admin', email: 'minji.kim@haeoreum.example', status: 'ACTIVE', promoterId: '0190f3a1-7c2e-7a00-8000-000000000001', now: clock.now() });
   await store.setPassword({ id: PARTNER, phc: await new Pbkdf2AdminPasswords(pepper, { iterations: 1_000 }).hash(PARTNER, PW), breachCheckedAt: clock.now(), now: clock.now() });
@@ -252,5 +257,40 @@ describe('본인 해제 REST(openapi /unlocks·/unlock-links, BOT-121)', () => {
     expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
     expect(JSON.parse(limited.payload)).toMatchObject({ type: 'https://peaket.example/problems/unlock-link-resend-limit' });
     expect((await post('/v1/ops/auth/unlocks', { unlockToken: 'short', code: '123456' }, ip)).statusCode).toBe(400);
+  });
+});
+
+describe('비밀번호 바꾸기 REST(openapi /password-changes, BOT-123)', () => {
+  test('AC-T4_password_change세션은다른관리경로가403이고_비밀번호바꾸기는204와제한을푼새쿠키이며_다른세션은끝난다 [ASVS v5.0.0-6.3.1]', async () => {
+    clock.advance(3 * 60 * 60_000);
+    const store = svc.app.get<MemoryAdminAccountStore>(ADMIN_LOGIN_STORE);
+    // 보통 세션 하나
+    clock.advance(30_000);
+    const a1 = JSON.parse((await post('/v1/ops/auth/sessions', { email: 'ops.http@peaket.example', password: PW, humanCheckToken: 'ok' }, '198.51.100.170')).payload) as { loginStep: string };
+    const first = await post('/v1/ops/auth/sessions', { loginStep: a1.loginStep, code: totpAt(seeds[OPS]!, Math.floor(clock.now() / 30_000)) }, '198.51.100.170');
+    expect(first.statusCode).toBe(200);
+    const firstSession = store.sessions(OPS).at(-1)!.id;
+    // 비밀번호 바꾸기 필요 세션
+    store.setPasswordChangeRequired(OPS, true);
+    clock.advance(30_000);
+    const a2 = JSON.parse((await post('/v1/ops/auth/sessions', { email: 'ops.http@peaket.example', password: PW, humanCheckToken: 'ok' }, '198.51.100.171')).payload) as { loginStep: string };
+    await post('/v1/ops/auth/sessions', { loginStep: a2.loginStep, code: totpAt(seeds[OPS]!, Math.floor(clock.now() / 30_000)) }, '198.51.100.171');
+    const restricted = store.sessions(OPS).at(-1)!.id;
+    const headers = { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.171', 'x-user-id': OPS, 'x-session-id': restricted, 'x-user-aud': 'ops', 'x-user-scope': 'password:change' };
+    const bad = await svc.http.inject({ method: 'POST', url: '/v1/ops/auth/password-changes', headers, payload: JSON.stringify({ currentPassword: 'nope', newPassword: '바다건너온편지를천천히읽는저녁' }) });
+    expect(bad.statusCode).toBe(422);
+    expect(JSON.parse(bad.payload)).toMatchObject({ type: 'https://peaket.example/problems/current-password-invalid' });
+    const weak = await svc.http.inject({ method: 'POST', url: '/v1/ops/auth/password-changes', headers, payload: JSON.stringify({ currentPassword: PW, newPassword: 'Peaket2026!!!!!!' }) });
+    expect(weak.statusCode).toBe(422);
+    // 제목은 하나이고(guidelines §2) 이유 문구는 detail에 싣는다
+    expect(JSON.parse(weak.payload)).toMatchObject({ type: 'https://peaket.example/problems/password-rejected', title: '쓸 수 없는 비밀번호입니다', detail: expect.any(String), reason: 'CONTEXT', advice: expect.any(String) });
+    const same = await svc.http.inject({ method: 'POST', url: '/v1/ops/auth/password-changes', headers, payload: JSON.stringify({ currentPassword: PW, newPassword: PW }) });
+    expect(JSON.parse(same.payload)).toMatchObject({ type: 'https://peaket.example/problems/password-rejected', reason: 'SAME_AS_CURRENT', detail: '지금 비밀번호와 다른 비밀번호를 정해 주세요' });
+    const ok = await svc.http.inject({ method: 'POST', url: '/v1/ops/auth/password-changes', headers, payload: JSON.stringify({ currentPassword: PW, newPassword: '바다건너온편지를천천히읽는저녁' }) });
+    expect(ok.statusCode).toBe(204);
+    expect(String(ok.headers['set-cookie'])).toMatch(/^__Host-peaket_ops_at=[^;]+; Path=\/; Max-Age=\d+; Secure; HttpOnly; SameSite=Strict$/);
+    expect(store.sessions(OPS).find((x) => x.id === firstSession)!.terminationReason).toBe('PASSWORD_CHANGED');
+    // 로그인되지 않은 요청은 401
+    expect((await svc.http.inject({ method: 'POST', url: '/v1/ops/auth/password-changes', headers: { 'content-type': 'application/json' }, payload: JSON.stringify({ currentPassword: PW, newPassword: '바다건너온편지를천천히읽는저녁' }) })).statusCode).toBe(401);
   });
 });

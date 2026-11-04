@@ -2,7 +2,8 @@
 // REJECTED는 422(걸린 이유 종류와 안내 문구, auth-controls §4.3 7), UNAVAILABLE은 503과 Retry-After(유출 목록·페퍼 키 서비스), NOT_FOUND는 404.
 import type { PolicyReason } from '../domain/password-policy.js';
 
-export type AdminPasswordRejection = PolicyReason | 'BREACHED';
+/** SAME_AS_CURRENT: 비밀번호 바꾸기에서 새 비밀번호가 지금 것과 같다(바꾸기 필요 표시를 같은 비밀번호로 끄지 않게, BOT-123) */
+export type AdminPasswordRejection = PolicyReason | 'BREACHED' | 'SAME_AS_CURRENT';
 
 export class AdminPasswordError extends Error {
   constructor(
@@ -22,5 +23,6 @@ export const REJECTION_TEXT: Record<AdminPasswordRejection, string> = {
   CONTEXT: '서비스·회사·계정 이름에 숫자나 기호만 붙인 비밀번호는 쓸 수 없습니다',
   TOO_SHORT: '15자 이상이어야 합니다',
   TOO_LONG: '비밀번호가 너무 깁니다',
+  SAME_AS_CURRENT: '지금 비밀번호와 다른 비밀번호를 정해 주세요',
 };
 export const PASSWORD_ADVICE = '서로 관계없는 낱말 여러 개를 이은 문장이나 비밀번호 관리자가 만든 값을 쓰세요';

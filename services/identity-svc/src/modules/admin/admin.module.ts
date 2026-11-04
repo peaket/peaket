@@ -6,6 +6,9 @@ import { MemoryLoginCounters } from './adapters/memory-login-counters.js';
 import { Pbkdf2AdminPasswords, RECOVERY_CODE_ITERATIONS } from './adapters/pbkdf2-admin-passwords.js';
 import { LoginPasswordStep } from './application/login-password-step.js';
 import { CONSOLE_ORIGINS, type ConsoleOrigins, DispatchAdminNotices } from './application/dispatch-admin-notices.js';
+import { ChangeAdminPassword } from './application/change-admin-password.js';
+import { CheckPasswordOnlyLogins } from './application/check-password-only-logins.js';
+import { GetAdminAuthz } from './application/get-admin-authz.js';
 import { LoginSecondStep } from './application/login-second-step.js';
 import { RequestUnlockLink, UnlockWithLink } from './application/unlock-account.js';
 import { RecordAdminLoginSuccess } from './application/record-login-success.js';
@@ -20,6 +23,7 @@ import {
   ADMIN_PASSWORDS,
   ADMIN_MAILER,
   ADMIN_SECOND_STEP_STORE,
+  ADMIN_SESSION_STORE,
   ADMIN_TOKEN_SIGNER,
   ADMIN_UNLOCK_STORE,
   type AdminMailer,
@@ -39,6 +43,7 @@ import {
 } from './domain/ports.js';
 import { ADMIN_COOKIE_DOMAIN } from './inbound/admin-cookies.js';
 import { AdminLoginController } from './inbound/admin-login.controller.js';
+import { AdminPasswordChangeController } from './inbound/admin-password-change.controller.js';
 import { AdminUnlockController } from './inbound/admin-unlock.controller.js';
 
 export interface AdminModuleOptions {
@@ -91,13 +96,14 @@ export class AdminModule {
     const store = o.storage === 'database' ? { provide: DrizzleAdminAccountStore, useClass: DrizzleAdminAccountStore } : { provide: DrizzleAdminAccountStore, useValue: new MemoryAdminAccountStore() };
     return {
       module: AdminModule,
-      controllers: [AdminLoginController, AdminUnlockController],
+      controllers: [AdminLoginController, AdminUnlockController, AdminPasswordChangeController],
       providers: [
         store,
         { provide: ADMIN_ACCOUNT_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_LOGIN_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_SECOND_STEP_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_UNLOCK_STORE, useExisting: DrizzleAdminAccountStore },
+        { provide: ADMIN_SESSION_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_MAILER, useValue: o.mailer ?? noMailer },
         { provide: CONSOLE_ORIGINS, useValue: o.consoleOrigins ?? { partner: 'https://partner.peaket.example', ops: 'https://console.peaket.example' } },
         { provide: TOTP_SEED_CIPHER, useValue: o.totpCipher ?? unavailableCipher },
@@ -120,8 +126,11 @@ export class AdminModule {
         UnlockWithLink,
         RequestUnlockLink,
         DispatchAdminNotices,
+        CheckPasswordOnlyLogins,
+        ChangeAdminPassword,
+        GetAdminAuthz,
       ],
-      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, UnlockWithLink, RequestUnlockLink, DispatchAdminNotices, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE],
+      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, UnlockWithLink, RequestUnlockLink, DispatchAdminNotices, CheckPasswordOnlyLogins, ChangeAdminPassword, GetAdminAuthz, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE],
     };
   }
 }

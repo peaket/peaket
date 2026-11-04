@@ -78,6 +78,14 @@ describe('탈퇴 경로(DELETE /v1/identity/account, identity §8 탈퇴의 첫 
     expect(JSON.parse(first.payload)).toMatchObject({ type: 'https://peaket.example/problems/withdrawal-confirmation-required', status: 409, fraudHold: { state: 'CASE_OPEN', until: new Date(until).toISOString() } });
     expect((await del({ ...fanHeaders(s), 'x-reauth-token': token }, JSON.stringify({ acknowledgeFraudHold: true }))).statusCode).toBe(204);
   });
+
+  test('탈퇴본문은계약처럼닫혀있다_모르는칸이나환불계좌의모르는칸·빠진칸은400이고_계약의환불계좌는받는다(guidelines §1, BAS-040이 넘긴 것)', async () => {
+    const s = await login();
+    const bad = [{ unknown: true }, { refundAccount: { bankCode: '004', accountNumber: '1', holderName: '가', memo: 'x' } }, { refundAccount: { bankCode: '004' } }];
+    for (const b of bad) expect((await del(fanHeaders(s), JSON.stringify(b))).statusCode).toBe(400);
+    // 본문이 맞으면 재인증 확인까지 간다(토큰이 없어 403)
+    expect((await del(fanHeaders(s), JSON.stringify({ confirmCancelUnusedTickets: true, refundAccount: { bankCode: '004', accountNumber: '1234', holderName: '김민지' } }))).statusCode).toBe(403);
+  });
 });
 
 describe('로그인 수단 목록(GET /v1/identity/providers, identity §8 탈퇴 화면 연결)', () => {

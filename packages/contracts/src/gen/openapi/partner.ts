@@ -95,7 +95,7 @@ export const CreatePartnerAuthUnlockLinkBody = zod.object({
 export const CreatePartnerAuthUnlockLinkResponse = zod.void()
 
 /**
- * FR-021, POL-020, docs/security/auth-controls.md §3.5·§4. 지금 비밀번호가 틀리면 로그인 실패와 같이 계정 실패 수와 비밀번호 연속 실패 누계에 센다(auth-controls §3.1 '비밀번호가 틀릴 때'). 바꾸면 이 세션은 이어지고 그 계정의 다른 세션을 모두 끝낸다(asyncapi control.sessions-terminated, reason PASSWORD_CHANGED). 비밀번호만 맞은 로그인이나 유출 목록 재확인 때문에 비밀번호 바꾸기와 로그아웃만 허용된 세션(scope 제한)이면, 응답이 제한을 푼 새 액세스 토큰 쿠키를 준다. 쿠키로 인증하는 쓰기라 gw-partner가 Origin을 확인한다(추천 적용 2026-10-30, ADR-0157 결정 4)
+ * FR-021, POL-020, docs/security/auth-controls.md §3.5·§4. 지금 비밀번호가 틀리면 로그인 실패와 같이 계정 실패 수와 비밀번호 연속 실패 누계에 센다(auth-controls §3.1 '비밀번호가 틀릴 때'). 바꾸면 이 세션은 이어지고 그 계정의 다른 세션을 모두 끝낸다(asyncapi control.sessions-terminated, reason PASSWORD_CHANGED). 비밀번호만 맞은 로그인이나 유출 목록 재확인 때문에 비밀번호 바꾸기와 로그아웃만 허용된 세션(scope 제한)이면, 응답이 제한을 푼 새 액세스 토큰 쿠키를 준다. 그 세션으로 다른 관리 경로를 부르면 403 password-change-required다(AC-T4). 쿠키로 인증하는 쓰기라 gw-partner가 Origin을 확인한다(추천 적용 2026-10-30, ADR-0157 결정 4)
  * @summary 파트너 계정 비밀번호 바꾸기
  */
 export const createPartnerAuthPasswordChangeBodyCurrentPasswordMax = 256;

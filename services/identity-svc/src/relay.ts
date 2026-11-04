@@ -5,6 +5,7 @@ import { createDatabase, createPlatformLogger, inClusterLeaseApi, kafkaAuthFromE
 import { Counter } from '@prometheus-io/client';
 import { createKafkaProducer, kafkaOutboxPublisher } from '@peaket/platform/stream-worker';
 import { identityMaintenanceTasks } from './maintenance-tasks.js';
+import { adminAuthConfigFromEnv } from './modules/admin/index.js';
 import { InvRefKeyRing } from './modules/session/index.js';
 import { kmsMacClient } from './modules/verification/index.js';
 
@@ -33,7 +34,7 @@ const relay = await startOutboxRelayProcess({
   publisher: kafkaOutboxPublisher(producer),
   leaseApi: inClusterLeaseApi(config.leaseName),
   // 공용 정비 일과 identity의 일(탈퇴 뒤 정리, 끝난 세션의 리프레시 토큰 해시 등, docs/features/identity.md §8 '탈퇴의 첫 구현')
-  maintenanceTasks: [...platformMaintenanceTasks(maintenanceDatabase, systemClock), ...identityMaintenanceTasks(maintenanceDatabase, systemClock, invRefs.ring, InvRefKeyRing.bridgesFromEnv(process.env))],
+  maintenanceTasks: [...platformMaintenanceTasks(maintenanceDatabase, systemClock), ...identityMaintenanceTasks(maintenanceDatabase, systemClock, invRefs.ring, InvRefKeyRing.bridgesFromEnv(process.env), adminAuthConfigFromEnv(process.env).knownSourceWindowMs)],
 });
 const invRefMissing = new Counter({ name: 'inv_ref_missing_total', help: '라벨 키가 없어 계산하지 못한 조사용 가명(SEV3, docs/observability.md §5)', labelNames: ['service', 'label', 'reason'] as const, registers: [relay.registry] });
 invRefs.ring.onMissing((label, reason) => invRefMissing.inc({ service: SERVICE, label, reason }));

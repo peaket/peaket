@@ -36,7 +36,7 @@ export class TokenController {
   @Roles(['public'])
   jwks(@Param('file') file: string, @Res({ passthrough: true }) reply: FastifyReply): object {
     const m = /^(fan|admin|staff)\.json$/.exec(file);
-    if (!m) throw new ProblemError({ type: 'not-found', status: 404, title: '없는 공개키 묶음입니다' });
+    if (!m) throw new ProblemError({ type: 'jwks-not-found', status: 404, title: '없는 공개키 묶음입니다' });
     void reply.header('cache-control', 'public, max-age=300').header('content-type', 'application/jwk-set+json');
     return this.keys.jwks(m[1] as 'fan' | 'admin' | 'staff', this.clock.now());
   }

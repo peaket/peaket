@@ -47,13 +47,19 @@ export interface RolesOptions {
   scopes?: readonly string[];
   /** 위험 작업(재인증 토큰을 받는 작업): 역할 캐시를 쓰지 않고 identity에 다시 묻는다(ADR-0172 결정 2) */
   fresh?: boolean;
+  /** 비밀번호 바꾸기 필요 세션(관리 토큰 scope password:change)도 받는 처리기: 비밀번호 바꾸기·로그아웃만(identity §6 BOT-123, auth-controls §3.5) */
+  passwordChangeSession?: boolean;
 }
 
 export interface RolesPolicy {
   roles: readonly RoleValue[];
   scopes: readonly string[];
   fresh: boolean;
+  passwordChangeSession: boolean;
 }
+
+/** 비밀번호 바꾸기와 로그아웃만 되는 관리 세션의 스코프(auth-controls §3.5, BOT-123) */
+export const PASSWORD_CHANGE_SCOPE = 'password:change';
 
 export const ROLES_METADATA = 'peaket:roles';
 
@@ -61,7 +67,7 @@ export const ROLES_METADATA = 'peaket:roles';
 export function Roles(roles: readonly RoleValue[], options: RolesOptions = {}): MethodDecorator & ClassDecorator {
   if (roles.length === 0) throw new Error('허용 역할 목록이 비었다(공개 작업은 [public])');
   if (new Set(roles).size !== roles.length) throw new Error(`허용 역할에 같은 값이 두 번 있다: ${roles.join(', ')}`);
-  const policy: RolesPolicy = { roles: [...roles], scopes: [...(options.scopes ?? [])], fresh: options.fresh === true };
+  const policy: RolesPolicy = { roles: [...roles], scopes: [...(options.scopes ?? [])], fresh: options.fresh === true, passwordChangeSession: options.passwordChangeSession === true };
   return SetMetadata(ROLES_METADATA, policy);
 }
 
@@ -257,7 +263,11 @@ function identityOf(headers: FastifyRequest['headers']): Principal | undefined {
   const sessionId = one(headers['x-session-id']);
   const aud = one(headers['x-user-aud']);
   if (!accountId || !sessionId || !aud || !AUDIENCES.includes(aud)) return undefined;
-  const p: Principal = { accountId, sessionId, aud: aud as Audience, scopes: (one(headers['x-user-scope']) ?? '').split(/\s+/).filter(Boolean) };
+  const rawScope = headers['x-user-scope'];
+  const scope = one(rawScope);
+  // 관리 신원은 스코프 머리가 있는데 읽지 못하면(여럿·1024자 넘음·쉼표) 신원 없음으로 닫는다: 제한 스코프가 빠져 보통 세션처럼 통과하지 않게(새 맥락 리뷰 2026-11-05). 빈 값은 스코프 없음이다
+  if ((aud === 'partner' || aud === 'ops') && rawScope !== undefined && (typeof rawScope !== 'string' || rawScope.length > 1024 || rawScope.includes(','))) return undefined;
+  const p: Principal = { accountId, sessionId, aud: aud as Audience, scopes: (scope ?? '').split(/\s+/).filter(Boolean) };
   const pid = one(headers['x-user-pid']);
   const pidPrev = one(headers['x-user-pid-prev']);
   if (pid) p.pid = pid;
@@ -268,7 +278,7 @@ function identityOf(headers: FastifyRequest['headers']): Principal | undefined {
 /** 쿠키 경로의 challenge(docs/api/guidelines.md §12) */
 export const COOKIE_CHALLENGE = 'Cookie realm="peaket"';
 
-/** 모든 요청에 거는 가드(전역). 순서: 공개 → 신원 → 종료 세션 → 대상 → 스코프 → 관리 역할 → 멱등 키 → 구매 세션 요청 서명 → 경로 스키마 검사 실패 */
+/** 모든 요청에 거는 가드(전역). 순서: 공개 → 신원 → 종료 세션 → 대상 → 스코프 → 관리 역할(세션 판정 → 비밀번호 바꾸기 필요 세션 → 역할) → 멱등 키 → 구매 세션 요청 서명 → 경로 스키마 검사 실패 */
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
@@ -303,6 +313,10 @@ export class AuthGuard implements CanActivate {
     if (identity.aud === 'partner' || identity.aud === 'ops') {
       const authz = await this.state.adminAuthzOf(identity.accountId, identity.sessionId, policy.fresh);
       if (!authz.valid) throw unauthorized();
+      // 비밀번호 바꾸기 필요 세션은 연 처리기(비밀번호 바꾸기·로그아웃)만(auth-controls §3.5, AC-T4). 끝난 세션이면 위에서 먼저 401이다
+      if (identity.scopes.includes(PASSWORD_CHANGE_SCOPE) && !policy.passwordChangeSession) {
+        throw new ProblemError({ type: 'password-change-required', status: 403, title: '비밀번호를 먼저 바꿔 주세요' });
+      }
       const role = authz.role as RoleValue;
       if (!roles.includes(role as Exclude<RoleValue, 'public'>) || AUDIENCE_OF[role as Exclude<RoleValue, 'public'>] !== identity.aud) {
         throw new ForbiddenException();

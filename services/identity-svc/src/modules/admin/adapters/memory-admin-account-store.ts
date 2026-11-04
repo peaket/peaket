@@ -1,17 +1,18 @@
 // 관리 계정 저장소의 메모리 구현(시험·로컬, BUILD_ORDER BOT-110·BOT-111). 계정을 만드는 길(초대)은 BOT-150이라 시험은 create로 바로 만든다.
 import { FRESH_LOGIN_STATE, type AccountLoginState, type NoticeKind } from '../domain/login-rules.js';
 import { randomUUID } from 'node:crypto';
-import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminSecondStepStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
+import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminSecondStepStore, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
 
 type Row = AdminAccountRow &
   AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null };
 type SessionRow = { id: string; accountId: string; aud: AdminAud; refreshHash: string; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; terminatedAt: number | null; terminationReason: string | null };
-type Step = { id: string; accountId: string; tokenHash: string; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; usedAt: number | null };
+type Step = { id: string; accountId: string; tokenHash: string; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; usedAt: number | null; knownSource: boolean; passwordOnlyNoticedAt: number | null };
 
-export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore {
+export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore {
   readonly #rows = new Map<string, Row>();
   readonly #notices: { id: string; accountId: string; kind: NoticeKind; at: number; sentAt: number | null; attempts?: number; nextAttemptAt?: number }[] = [];
   readonly #links: (UnlockLinkRow & { tokenHash: string })[] = [];
+  readonly #known = new Map<string, number>();
   readonly #steps: Step[] = [];
   readonly #recovery: { id: string; accountId: string; phc: string }[] = [];
   readonly #sessions: SessionRow[] = [];
@@ -124,8 +125,13 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     r.updatedAt = at;
   }
 
-  async createLoginStep(i: { id: string; accountId: string; tokenHash: Buffer; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number }): Promise<void> {
-    this.#steps.push({ id: i.id, accountId: i.accountId, tokenHash: i.tokenHash.toString('hex'), aud: i.aud, pairRef: i.pairRef, createdAt: i.createdAt, expiresAt: i.expiresAt, usedAt: null });
+  async createLoginStep(i: { id: string; accountId: string; tokenHash: Buffer; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; knownSource?: boolean }): Promise<void> {
+    this.#steps.push({ id: i.id, accountId: i.accountId, tokenHash: i.tokenHash.toString('hex'), aud: i.aud, pairRef: i.pairRef, createdAt: i.createdAt, expiresAt: i.expiresAt, usedAt: null, knownSource: i.knownSource === true, passwordOnlyNoticedAt: null });
+  }
+
+  async isKnownSource(accountId: string, pairRef: string, since: number): Promise<boolean> {
+    const at = this.#known.get(`${accountId}|${pairRef}`);
+    return at !== undefined && at >= since;
   }
 
   async recordLoginSuccess(id: string, at: number): Promise<void> {
@@ -156,9 +162,9 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return this.#terminated.map((e) => ({ ...e }));
   }
 
-  async findLoginById(id: string): Promise<(AdminLoginAccount & { email: string }) | null> {
+  async findLoginById(id: string): Promise<(AdminLoginAccount & { email: string; promoterId: string | null }) | null> {
     const r = this.#rows.get(id);
-    return r && r.status !== 'REMOVED' ? { ...this.#loginView(r), email: r.email } : null;
+    return r && r.status !== 'REMOVED' ? { ...this.#loginView(r), email: r.email, promoterId: r.promoterId } : null;
   }
 
   async getTotp(id: string): Promise<AdminTotpState | null> {
@@ -209,7 +215,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
 
   async useLoginStep(id: string, at: number): Promise<boolean> {
     const s = this.#steps.find((x) => x.id === id);
-    if (!s || s.usedAt !== null) return false;
+    if (!s || s.usedAt !== null || s.passwordOnlyNoticedAt !== null || s.expiresAt <= at) return false;
     s.usedAt = at;
     return true;
   }
@@ -290,5 +296,54 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       done++;
     }
     return { done, failed };
+  }
+
+  // ── 비밀번호만 맞은 로그인·세션(BOT-123) ──
+  async findSession(sessionId: string): Promise<AdminSessionRow | null> {
+    const s = this.#sessions.find((x) => x.id === sessionId);
+    return s ? { id: s.id, accountId: s.accountId, aud: s.aud, pairRef: s.pairRef, absoluteExpiresAt: s.absoluteExpiresAt, idleExpiresAt: s.idleExpiresAt, terminatedAt: s.terminatedAt } : null;
+  }
+
+  async terminateOtherSessions(accountId: string, keepSessionId: string, reason: 'PASSWORD_CHANGED', now: number): Promise<string[]> {
+    const ended: string[] = [];
+    for (const s of this.#sessions) {
+      if (s.accountId !== accountId || s.id === keepSessionId || s.terminatedAt !== null) continue;
+      Object.assign(s, { terminatedAt: now, terminationReason: reason });
+      this.#terminated.push({ accountId, sessionId: s.id, reason });
+      ended.push(s.id);
+    }
+    return ended;
+  }
+
+  async touchKnownSource(accountId: string, pairRef: string, at: number): Promise<void> {
+    this.#known.set(`${accountId}|${pairRef}`, at);
+  }
+
+  async purgeKnownSources(before: number): Promise<number> {
+    let n = 0;
+    for (const [k, at] of this.#known) if (at < before) (this.#known.delete(k), n++);
+    return n;
+  }
+
+  async findPasswordOnlySteps(createdBefore: number, limit: number): Promise<{ id: string; accountId: string }[]> {
+    return this.#steps
+      .filter((s) => s.createdAt <= createdBefore && s.usedAt === null && !s.knownSource && s.passwordOnlyNoticedAt === null)
+      .slice(0, limit)
+      .map((s) => ({ id: s.id, accountId: s.accountId }));
+  }
+
+  async markPasswordOnly(stepId: string, accountId: string, now: number): Promise<boolean> {
+    const s = this.#steps.find((x) => x.id === stepId);
+    const r = this.#rows.get(accountId);
+    if (!s || s.passwordOnlyNoticedAt !== null || s.usedAt !== null) return false;
+    s.passwordOnlyNoticedAt = now;
+    // 지운 계정은 본 것으로만 적고 알리지 않는다(Drizzle 저장소와 같다)
+    if (!r || r.status === 'REMOVED') return false;
+    // 그 단계 뒤에 같은 묶음에서 2단계까지 끝냈으면 알리지 않는다(Drizzle 저장소와 같다)
+    const later = this.#known.get(`${accountId}|${s.pairRef}`);
+    if (later !== undefined && later >= s.createdAt) return false;
+    r.passwordChangeRequired = true;
+    this.#notices.push({ id: randomUUID(), accountId, kind: 'PASSWORD_ONLY_LOGIN', at: now, sentAt: null });
+    return true;
   }
 }

@@ -865,6 +865,11 @@ export type createOpsAuthPasswordChangeResponse401 = {
   status: 401
 }
 
+export type createOpsAuthPasswordChangeResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
 export type createOpsAuthPasswordChangeResponse422 = {
   data: ProblemResponse
   status: 422
@@ -875,6 +880,11 @@ export type createOpsAuthPasswordChangeResponse423 = {
   status: 423
 }
 
+export type createOpsAuthPasswordChangeResponse429 = {
+  data: ProblemResponse
+  status: 429
+}
+
 export type createOpsAuthPasswordChangeResponse503 = {
   data: ServiceUnavailableResponse
   status: 503
@@ -883,7 +893,7 @@ export type createOpsAuthPasswordChangeResponse503 = {
 export type createOpsAuthPasswordChangeResponseSuccess = (createOpsAuthPasswordChangeResponse204) & {
   headers: Headers;
 };
-export type createOpsAuthPasswordChangeResponseError = (createOpsAuthPasswordChangeResponse400 | createOpsAuthPasswordChangeResponse401 | createOpsAuthPasswordChangeResponse422 | createOpsAuthPasswordChangeResponse423 | createOpsAuthPasswordChangeResponse503) & {
+export type createOpsAuthPasswordChangeResponseError = (createOpsAuthPasswordChangeResponse400 | createOpsAuthPasswordChangeResponse401 | createOpsAuthPasswordChangeResponse404 | createOpsAuthPasswordChangeResponse422 | createOpsAuthPasswordChangeResponse423 | createOpsAuthPasswordChangeResponse429 | createOpsAuthPasswordChangeResponse503) & {
   headers: Headers;
 };
 

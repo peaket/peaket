@@ -29,6 +29,7 @@ export type ProblemType =
   | 'commander-removal-needs-role-change'
   | 'consent-required'
   | 'consent-version-outdated'
+  | 'current-password-invalid'
   | 'data-request-required'
   | 'deadline-exceeded'
   | 'dependency-unavailable'
@@ -59,12 +60,15 @@ export type ProblemType =
   | 'invalid-seat'
   | 'investigation-source-expired'
   | 'investigator-required'
+  | 'jwks-not-found'
   | 'last-login-method'
   | 'last-partner-admin'
+  | 'login-provider-not-linked'
   | 'manual-selection-required'
   | 'merge-blocked'
   | 'merge-check-unavailable'
   | 'merge-invariant-violated'
+  | 'merge-proposal-not-found'
   | 'next-invalid'
   | 'no-placement'
   | 'not-found'
@@ -74,6 +78,8 @@ export type ProblemType =
   | 'order-expired'
   | 'other-partner-device'
   | 'outside-staff-hours'
+  | 'password-change-required'
+  | 'password-rejected'
   | 'payment-attempts-exceeded'
   | 'pickup-slot-unavailable'
   | 'place-exists'
@@ -133,6 +139,7 @@ export type ProblemType =
   | 'unlock-code-invalid'
   | 'unlock-link-invalid'
   | 'unlock-link-resend-limit'
+  | 'verification-not-found'
   | 'webhook-url-not-allowed'
   | 'wish-limit'
   | 'withdrawal-confirmation-required';
@@ -168,6 +175,7 @@ export const PROBLEM_TYPES = {
   'commander-removal-needs-role-change': { status: 409, title: "commander 역할을 먼저 바꿔 주세요" },
   'consent-required': { status: 422, title: "동의가 필요합니다" },
   'consent-version-outdated': { status: 422, title: "동의 문안이 바뀌었습니다. 다시 확인해 주세요" },
+  'current-password-invalid': { status: 422, title: "지금 비밀번호가 맞지 않습니다" },
   'data-request-required': { status: 422, title: "접수된 기관 요청이 필요합니다" },
   'deadline-exceeded': { status: 504, title: "남은 처리 시간이 모자라 요청을 끝내지 못했습니다" },
   'dependency-unavailable': { status: 503, title: "의존 서비스를 잠시 쓸 수 없습니다" },
@@ -198,12 +206,15 @@ export const PROBLEM_TYPES = {
   'invalid-seat': { status: 422, title: "고를 수 없는 좌석이 있습니다" },
   'investigation-source-expired': { status: 410, title: "조사 원천 보존 기간이 끝났습니다" },
   'investigator-required': { status: 403, title: "부정 거래 조사관만 할 수 있습니다" },
+  'jwks-not-found': { status: 404, title: "없는 공개키 묶음입니다" },
   'last-login-method': { status: 409, title: "마지막 로그인 수단은 해제할 수 없습니다" },
   'last-partner-admin': { status: 409, title: "마지막 파트너 관리자는 바꿀 수 없습니다" },
+  'login-provider-not-linked': { status: 404, title: "연결된 로그인 수단이 아닙니다" },
   'manual-selection-required': { status: 409, title: "좌석을 직접 골라 주세요" },
   'merge-blocked': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다" },
   'merge-check-unavailable': { status: 503, title: "잠시 뒤 다시 시도해 주세요" },
   'merge-invariant-violated': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다. 고객센터로 문의해 주세요" },
+  'merge-proposal-not-found': { status: 404, title: "병합 제안이 없거나 시간이 지났습니다" },
   'next-invalid': { status: 400, title: "돌아갈 주소가 같은 출처 경로가 아닙니다" },
   'no-placement': { status: 409, title: "배치되지 않은 기기입니다" },
   'not-found': { status: 404, title: "찾을 수 없습니다" },
@@ -213,6 +224,8 @@ export const PROBLEM_TYPES = {
   'order-expired': { status: 409, title: "결제하지 않아 끝난 주문입니다" },
   'other-partner-device': { status: 403, title: "다른 파트너사의 기기입니다" },
   'outside-staff-hours': { status: 403, title: "근무 시간이 아닙니다" },
+  'password-change-required': { status: 403, title: "비밀번호를 먼저 바꿔 주세요" },
+  'password-rejected': { status: 422, title: "쓸 수 없는 비밀번호입니다" },
   'payment-attempts-exceeded': { status: 409, title: "결제 시도 횟수를 넘었습니다" },
   'pickup-slot-unavailable': { status: 422, title: "고를 수 없는 수령 시간대입니다" },
   'place-exists': { status: 409, title: "같은 공연장이 있습니다" },
@@ -272,6 +285,7 @@ export const PROBLEM_TYPES = {
   'unlock-code-invalid': { status: 422, title: "코드가 맞지 않습니다" },
   'unlock-link-invalid': { status: 410, title: "이 링크는 더 쓸 수 없습니다" },
   'unlock-link-resend-limit': { status: 429, title: "해제 링크는 1시간에 3번까지 다시 받을 수 있습니다" },
+  'verification-not-found': { status: 404, title: "본인확인 건을 찾을 수 없습니다" },
   'webhook-url-not-allowed': { status: 400, title: "받지 않는 웹훅 주소입니다" },
   'wish-limit': { status: 422, title: "찜 수를 넘었습니다" },
   'withdrawal-confirmation-required': { status: 409, title: "탈퇴 전에 확인해 주세요" },

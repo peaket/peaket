@@ -17,9 +17,10 @@ test('PRF020_내보내는이름은_peaket을뺀경로다', () => {
   expect(exportName('peaket/purchase/v1/refund.proto')).toBe('purchaseV1Refund');
 });
 
-test('I-T50_ADR0119_identity설명자에_SessionService세호출이있다', () => {
+test('I-T50_ADR0119_identity설명자에_SessionService호출여섯이있다', () => {
   const svc = at(identityV1Identity as Ns, 'peaket.identity.v1.SessionService');
-  expect(Object.keys(svc.methods ?? {})).toEqual(['CreateSession', 'EndSession', 'IssueReauthToken']);
+  // 계정 잇기 셋(GetLinkProposal·SeparateAccount·AddProvider)은 identity.proto가 더했다(BUILD_ORDER BOT-123이 넘겨받아 고침)
+  expect(Object.keys(svc.methods ?? {})).toEqual(['CreateSession', 'GetLinkProposal', 'SeparateAccount', 'AddProvider', 'EndSession', 'IssueReauthToken']);
   expect(svc.methods?.IssueReauthToken).toMatchObject({ requestType: 'IssueReauthTokenRequest', responseType: 'IssueReauthTokenResponse' });
   expect(at(identityV1Identity as Ns, 'peaket.identity.v1.ReauthStrength').values).toEqual({
     REAUTH_STRENGTH_UNSPECIFIED: 0,

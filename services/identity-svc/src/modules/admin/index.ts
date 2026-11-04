@@ -21,3 +21,7 @@ export { JoseAdminTokenSigner } from './adapters/jose-admin-token-signer.js';
 export { DispatchAdminNotices } from './application/dispatch-admin-notices.js';
 export { RequestUnlockLink, UnlockWithLink } from './application/unlock-account.js';
 export { adminMailerFromEnv } from './adapters/file-admin-mailer.js';
+export { CheckPasswordOnlyLogins } from './application/check-password-only-logins.js';
+export { GetAdminAuthz } from './application/get-admin-authz.js';
+export { adminAuthzHandlers } from './inbound/admin-authz.grpc.js';
+export { DrizzleAdminAccountStore as AdminAccountStoreForMaintenance } from './adapters/db/drizzle-admin-account-store.js';

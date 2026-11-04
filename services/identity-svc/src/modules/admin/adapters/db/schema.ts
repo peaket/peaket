@@ -1,7 +1,7 @@
 // 관리 계정 컨텍스트의 표(docs/data.md admin_account, identity §6, BUILD_ORDER BOT-110). 칸은 data.md 그대로이고, 쓰는 길은 단계마다 붙인다
 // (비밀번호 BOT-110, 로그인 실패 제한 BOT-111, TOTP BOT-120, 해제 링크 BOT-121, 초대·역할·삭제 BOT-150).
 import { sql } from 'drizzle-orm';
-import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
@@ -65,6 +65,9 @@ export const adminLoginStep = pgTable(
     createdAt: at('created_at').notNull(),
     expiresAt: at('expires_at').notNull(),
     usedAt: at('used_at'),
+    // 1단계 통과 때 익숙한 출발지였는지와 비밀번호만 맞은 로그인으로 알린 때(BOT-123)
+    knownSource: boolean('known_source').notNull().default(false),
+    passwordOnlyNoticedAt: at('password_only_noticed_at'),
   },
   (t) => [
     uniqueIndex('admin_login_step_token_key').on(t.tokenHash),
@@ -90,7 +93,7 @@ export const adminSecurityNotice = pgTable(
   },
   (t) => [
     index('admin_security_notice_unsent_idx').on(t.createdAt).where(sql`${t.sentAt} is null`),
-    check('admin_security_notice_kind_check', sql`${t.kind} in ('TIMED_LOCK', 'PASSWORD_FAILURE_NOTICE', 'MULTI_SOURCE_ALERT', 'PROTECT_LOCK', 'SESSION_LIMIT', 'UNLOCK_LINK', 'UNLOCKED')`),
+    check('admin_security_notice_kind_check', sql`${t.kind} in ('TIMED_LOCK', 'PASSWORD_FAILURE_NOTICE', 'MULTI_SOURCE_ALERT', 'PROTECT_LOCK', 'SESSION_LIMIT', 'UNLOCK_LINK', 'UNLOCKED', 'PASSWORD_ONLY_LOGIN')`),
   ],
 );
 
@@ -149,4 +152,17 @@ export const adminUnlockLink = pgTable(
     revokedAt: at('revoked_at'),
   },
   (t) => [uniqueIndex('admin_unlock_link_token_key').on(t.tokenHash), index('admin_unlock_link_live_idx').on(t.adminAccountId).where(sql`${t.usedAt} is null and ${t.revokedAt} is null`)],
+);
+
+/** 익숙한 출발지(docs/data.md admin_known_source, auth-controls §3.1, BOT-123). 30일 [가정] 지나면 매일 정비가 지운다 */
+export const adminKnownSource = pgTable(
+  'admin_known_source',
+  {
+    adminAccountId: uuid('admin_account_id')
+      .notNull()
+      .references(() => adminAccount.id, { onDelete: 'cascade' }),
+    pairRef: text('pair_ref').notNull(),
+    lastSuccessAt: at('last_success_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.adminAccountId, t.pairRef] }), index('admin_known_source_last_idx').on(t.lastSuccessAt)],
 );

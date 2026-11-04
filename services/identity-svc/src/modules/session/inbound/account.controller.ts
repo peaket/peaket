@@ -13,8 +13,11 @@ import type { Provider } from '../domain/session.js';
 const PROVIDERS: readonly string[] = ['kakao', 'naver', 'google'];
 
 // openapi 요청 본문(환불 계좌는 가상계좌 지금 환급 때만 쓰고 저장하지 않는다. 가상계좌 결제가 생기기 전에는 받기만 하고 버린다, BUILD_ORDER BOT-035)
+// 계약처럼 닫는다(모르는 칸은 400, docs/api/guidelines.md §1). 환불 계좌는 계약 RefundAccount의 세 칸
+const RefundAccount = z.object({ bankCode: z.string(), accountNumber: z.string(), holderName: z.string() }).strict();
 const WithdrawBody = z
-  .object({ confirmCancelUnusedTickets: z.boolean().optional(), acknowledgeFraudHold: z.boolean().optional(), refundAccount: z.object({}).passthrough().optional() })
+  .object({ confirmCancelUnusedTickets: z.boolean().optional(), acknowledgeFraudHold: z.boolean().optional(), refundAccount: RefundAccount.optional() })
+  .strict()
   .optional();
 
 @Controller('v1/identity/account')
@@ -74,11 +77,11 @@ export class ProvidersController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<void> {
     void reply.header('cache-control', 'no-store');
-    if (!PROVIDERS.includes(provider)) throw new ProblemError({ type: 'not-found', status: 404, title: '연결된 로그인 수단이 아닙니다' });
+    if (!PROVIDERS.includes(provider)) throw new ProblemError({ type: 'login-provider-not-linked', status: 404, title: '연결된 로그인 수단이 아닙니다' });
     try {
       await this.unlink.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: reauthToken ?? '', provider: provider as Provider });
     } catch (e) {
-      if (e instanceof AccountError && e.code === 'NOT_FOUND') throw new ProblemError({ type: 'not-found', status: 404, title: '연결된 로그인 수단이 아닙니다' });
+      if (e instanceof AccountError && e.code === 'NOT_FOUND') throw new ProblemError({ type: 'login-provider-not-linked', status: 404, title: '연결된 로그인 수단이 아닙니다' });
       if (e instanceof AccountError && e.code === 'LAST_LOGIN_METHOD') throw new ProblemError({ type: 'last-login-method', status: 409, title: '마지막 로그인 수단은 해제할 수 없습니다' });
       if (e instanceof AccountError) throw new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
       throw e;

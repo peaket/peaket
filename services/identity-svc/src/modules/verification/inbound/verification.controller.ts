@@ -17,7 +17,7 @@ const ResultBody = z.object({ providerResult: z.record(z.string(), z.string()) }
 const PROBLEM: Record<VerificationError['code'], { status: number; type: string; title: string; retryAfterSeconds?: number }> = {
   NEXT_INVALID: { status: 400, type: 'next-invalid', title: '돌아갈 주소가 같은 출처 경로가 아닙니다' },
   ALREADY_VERIFIED: { status: 409, type: 'already-verified', title: '이미 본인확인을 마친 계정입니다' },
-  NOT_FOUND: { status: 404, type: 'not-found', title: '본인확인 건을 찾을 수 없습니다' },
+  NOT_FOUND: { status: 404, type: 'verification-not-found', title: '본인확인 건을 찾을 수 없습니다' },
   DUPLICATE_ACCOUNT: { status: 409, type: 'duplicate-account', title: '이미 다른 계정에서 본인확인한 분입니다. 그 계정으로 로그인해 주세요' },
   PROVIDER_DOWN: { status: 503, type: 'provider-down', title: '지금은 본인확인을 할 수 없습니다', retryAfterSeconds: 30 },
   PURPOSE_UNSUPPORTED: { status: 400, type: 'purpose-not-supported', title: '아직 받지 않는 본인확인 목적입니다' },
