@@ -387,6 +387,8 @@ flowchart LR
 | `seat_stream_relay_sent_total` | 카운터 | `topic` | 좌석 Redis Stream 릴레이가 Kafka 확인을 받아 지운 항목 수(추천 적용 2026-11-04, BUILD_ORDER PRF-141). `topic`은 `trade.seats`·`trade.purchase-sessions`다 |
 | `seat_stream_relay_dropped_total` | 카운터 | `reason` | 보낼 수 없어 확인해 넘긴 항목 수. `reason`은 `unknown_type`(모르는 type)·`malformed`(모양이 틀림)·`unmapped_seat`(좌석맵 판에 없는 좌석)이다. 0보다 크면 좌석 Lua나 좌석맵 판의 결함이라 SEV3 |
 | `seat_stream_relay_failures_total` | 카운터 | `stage` | 릴레이가 실패한 틱 수. `stage`는 `read`(좌석 Redis)·`publish`(Kafka)·`ack`다. 온세일 중 1분에 3번 [가정] 넘으면 SEV2(원장 적재와 관제·분석 사건이 늦는다) |
+| `seat_hold_deferred_total` | 카운터 | `reason` | 홀드 요청을 503으로 미룬 수(추천 적용 2026-11-04, BUILD_ORDER PRF-143, ADR-0121). `reason`은 `not_ready`(세대 키 없음: 다시 만들기 전)·`store_unavailable`(좌석 Redis 일시 장애)다. 온세일 중 1분에 100번 [가정] 넘으면 SEV2 |
+| `seat_rebuild_total` | 카운터 | `result` | 다시 만들기 결과 수. `result`는 `rebuilt`·`ready`(이미 세대 키가 있음)·`busy`(다른 파드가 임대 중)·`failed`다. `failed`가 0보다 크면 SEV2(RB-06) |
 
 - 좌석 Lua 오류 경보: `code`가 `CORRUPT_KEY`·`KEEP_UNTIL_PAST`·`FENCE_OVERFLOW`인 수가 5분 안에 1이라도 늘면 SEV3(`kind` cause, `dependency` 좌석 클러스터 이름) [가정, wbs 4.1.4에서 확정]이다. 이 셋은 다시 보내도 낫지 않고 데이터나 코드를 고쳐야 한다. `OOM`은 위 Redis 메모리 신호, `NOT_READY`는 좌석 장애 조치·다시 만들기 신호(seat-hold §9, RB-06)가 맡아 이 경보에 넣지 않는다. 런북은 wbs 4.1.4에서 정한다.
 - 좌석 만료 밀림 경보(추천 적용 2026-11-04): `seat_expiry_lag_seconds`가 3초 [가정]를 넘은 채 5분 이어지면 SEV3(`kind` cause, `dependency` 좌석 클러스터 이름) [가정, wbs 4.1.4에서 확정]이다. 기준 3초는 만료 좌석이 p99 3초 안에 다시 보여야 한다는 NFR-025에 맞춘 것이다. 함께 볼 것은 `seat_expiry_ticks_total`의 20묶음 상한·일시 장애·오류·BACKOFF 수와 위 좌석 Lua 오류다. 런북은 wbs 4.1.4에서 정한다.

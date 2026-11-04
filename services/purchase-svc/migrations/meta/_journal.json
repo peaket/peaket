@@ -15,6 +15,13 @@
       "when": 1793788868254,
       "tag": "0001_held_event_and_stat_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793799731319,
+      "tag": "0002_seat_rebuild_and_hold_ids",
+      "breakpoints": true
     }
   ]
 }

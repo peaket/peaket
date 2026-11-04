@@ -8,11 +8,14 @@ import type { SeatSignals } from '../domain/ports.js';
 import type { SessionEndReason } from '../domain/purchase-session.js';
 
 /**
- * SeatSignals의 Prometheus 구현. 이름표에 회차 ID·계정 ID·키 이름을 달지 않는다.
+ * SeatSignals(와 다시 만들기의 SeatRebuilderSignals)의 Prometheus 구현. 이름표에 회차 ID·계정 ID·키 이름을 달지 않는다.
  * - seat_lua_errors_total{script, code}(카운터, script는 SeatLuaScript, code는 SeatLuaErrorCode의 값만)
  * - seat_expiry_lag_seconds(게이지, 이름표 없음): 이 파드가 마지막 틱에 돈 회차 가운데 지금 − 가장 오래된 지난 점수(초)의 최댓값, 밀린 것이 없으면 0(M1)
  * - seat_expiry_ticks_total{outcome}(카운터, outcome은 SweepOutcome의 값만): 회차의 틱 결과마다 1(M1)
  * - purchase_sessions_ended_total{reason}(카운터, reason은 COMPLETED·LEFT·IDLE·MAX_STAY): 구매 세션을 끝낼 때마다 1(BUILD_ORDER PRF-138)
+ * - seat_hold_deferred_total{reason}(카운터, reason은 not_ready·store_unavailable): 홀드 요청을 503으로 미룰 때마다 1(BUILD_ORDER PRF-143)
+ * - seat_rebuild_total{result}(카운터, result는 rebuilt·ready·busy·failed): 다시 만들기(RB-06) 한 회차의 결과마다 1(BUILD_ORDER PRF-143).
+ *   rebuilt 메서드가 application/seat-rebuilder.ts의 SeatRebuilderSignals 모양이라 SeatRebuilder의 signals로 그대로 넘긴다(어댑터가 응용 층을 가져오지 않게 implements는 달지 않는다)
  */
 export class PromSeatSignals implements SeatSignals {
   readonly #luaErrors = new Counter({
@@ -25,10 +28,12 @@ export class PromSeatSignals implements SeatSignals {
   readonly #ticks = new Counter({ name: 'seat_expiry_ticks_total', help: '만료 반복의 회차별 틱 결과 수', labelNames: ['outcome'] as const, registers: [] });
 
   readonly #sessionEnds = new Counter({ name: 'purchase_sessions_ended_total', help: '끝낸 구매 세션 수(reason: COMPLETED·LEFT·IDLE·MAX_STAY)', labelNames: ['reason'] as const, registers: [] });
+  readonly #deferred = new Counter({ name: 'seat_hold_deferred_total', help: '503으로 미룬 홀드 요청 수(reason: not_ready·store_unavailable)', labelNames: ['reason'] as const, registers: [] });
+  readonly #rebuilds = new Counter({ name: 'seat_rebuild_total', help: '좌석 Redis 다시 만들기(RB-06) 결과 수(result: rebuilt·ready·busy·failed)', labelNames: ['result'] as const, registers: [] });
 
   /** 지표를 registry에 붙이고 자신을 돌려준다(main.ts가 service.metrics.registry로 한 번 부른다) */
   register(registry: Registry): this {
-    for (const m of [this.#luaErrors, this.#lag, this.#ticks, this.#sessionEnds]) registry.registerMetric(m);
+    for (const m of [this.#luaErrors, this.#lag, this.#ticks, this.#sessionEnds, this.#deferred, this.#rebuilds]) registry.registerMetric(m);
     return this;
   }
 
@@ -50,5 +55,15 @@ export class PromSeatSignals implements SeatSignals {
   /** purchase_sessions_ended_total{reason}을 1 올린다 */
   sessionEnded(reason: SessionEndReason): void {
     this.#sessionEnds.inc({ reason });
+  }
+
+  /** seat_hold_deferred_total{reason}을 1 올린다. 던지지 않는다(붙이기 전에도 센다) */
+  holdDeferred(reason: 'not_ready' | 'store_unavailable'): void {
+    this.#deferred.inc({ reason });
+  }
+
+  /** seat_rebuild_total{result}을 1 올린다(SeatRebuilderSignals). 던지지 않는다 */
+  rebuilt(result: 'rebuilt' | 'ready' | 'busy' | 'failed'): void {
+    this.#rebuilds.inc({ result });
   }
 }

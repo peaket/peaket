@@ -10,6 +10,7 @@ import type { SectionRange } from './seat-layout.js';
 import type { ReserveInput, ReserveResult, SeatSaleOrder, SeatSaleRelease } from './seat-sale.js';
 import type { LedgerHoldEvent, SeatStreamEntry, StreamDropReason, TradeTopic } from './seat-event.js';
 import type { PinInput, PinResult, ReleaseFailedInput, ReleaseFailedResult, RetireResult } from './pin.js';
+import type { RebuildFinishInput, RebuildHold, RebuildSale, RebuildSeat, RebuildStep } from './rebuild.js';
 
 /** 요청 처리 중 좌석 Redis 호출 하나의 선택값(BUILD_ORDER PRF-135, guidelines §5) */
 export interface SeatCallOptions {
@@ -483,6 +484,8 @@ export interface SeatSignals {
   expiryTick?(outcome: SweepOutcome): void;
   /** 카운터 purchase_sessions_ended_total{reason}를 1 올린다: 구매 세션을 끝낼 때마다 하나(BUILD_ORDER PRF-138). 선택 메서드다 */
   sessionEnded?(reason: SessionEndReason): void;
+  /** 카운터 seat_hold_deferred_total{reason}을 1 올린다: 홀드 요청을 503으로 미룰 때마다(BUILD_ORDER PRF-143, ADR-0121). 선택 메서드다 */
+  holdDeferred?(reason: 'not_ready' | 'store_unavailable'): void;
 }
 
 /** 지표를 버리는 구현(시험·지표를 달지 않은 조립의 기본값) */
@@ -579,4 +582,46 @@ export interface SeatPins {
 export interface SeatEventRetire {
   /** 판매 종료 + RETIRE_AFTER_SALE_END_MS가 지났고 그 회차 Stream의 길이·확인받지 못한 항목이 0일 때만 뺀다. 시각은 저장소 시각(주입 Clock) */
   retireEvent(input: { eventId: string; saleEndMs: number }): Promise<RetireResult>;
+}
+
+/** 다시 만들기의 purchase DB 쪽(BUILD_ORDER PRF-143). 운영 구현은 DrizzleSeatRebuildSource다 */
+export interface SeatRebuildSource {
+  /** 임대를 잡으면서 판 번호를 올려 커밋한다(한 문장). 다른 파드가 임대 중이면 null. 돌려주는 값은 올린 판 번호 */
+  acquire(eventId: string, holder: string): Promise<number | null>;
+  /** 회차의 활성 판매(PENDING·SOLD) */
+  sales(eventId: string): Promise<RebuildSale[]>;
+  /** 회차의 만료 전 원장 홀드(HELD, expires_at > now()) */
+  holds(eventId: string): Promise<RebuildHold[]>;
+  /**
+   * 활성 판매(PENDING·SOLD)가 있는 좌석·그 판매 계정의 HELD 원장 행(만료 조건 없음). 판매 좌석의 holdId·구매 세션·토큰·시각을 대조한다
+   * (묶인 홀드는 사건을 내지 않아 원장 행이 HELD인 채 처음 만료 시각이 지난다, 코드 리뷰 PRF-143)
+   */
+  saleHolds(eventId: string): Promise<RebuildHold[]>;
+  /**
+   * 임대를 비운다(그 holder일 때만). o.setGen이면 같은 문장에서 판 번호를 그 값으로 맞춘다: 임대를 잡은 뒤 세대 키가 이미 서 있던 경우(다른 곳이 먼저 끝냄)에
+   * DB 판 번호를 세대 키의 gen과 같게 둔다(docs/features/seat-hold.md §6 '회차마다 하나와 판 번호')
+   */
+  release(eventId: string, holder: string, o?: { setGen?: number }): Promise<void>;
+}
+
+/**
+ * 다시 만들기의 좌석 Redis 쪽(회차 슬롯의 Lua, 계약은 adapters/rebuild-lua.ts). 운영 구현은 RedisSeatStore, 시험 대역은 MemorySeatStore.
+ * 시도마다 begin(gen) → writeSeats(gen)들 → finish(gen)이고, 쓰기는 rebuild 키의 판 번호가 내 gen일 때만 한다(아니면 STALE, 앞 시도·늦은 파드의 잔여 쓰기를 막는다)
+ */
+export interface SeatRebuildTarget {
+  /** 세대 키가 있나(있으면 다시 만들 필요가 없다) */
+  isReady(eventId: string): Promise<boolean>;
+  /**
+   * 시도를 연다: 세대 키가 있으면 READY(그 gen), rebuild 키의 판 번호 > gen이면 STALE, 아니면 bitmap·만료 인덱스를 지우고 rebuild 키 = gen(수명 keepUntil) → OK
+   */
+  begin(eventId: string, gen: number, keepUntilMs: number): Promise<RebuildStep>;
+  /** 좌석들을 쓴다(REBUILD_BATCH 이하). 세대 키가 이미 있으면 READY, rebuild 키 ≠ gen이면 STALE(둘 다 아무것도 쓰지 않는다) */
+  writeSeats(eventId: string, seats: readonly RebuildSeat[], keepUntilMs: number, gen: number): Promise<RebuildStep>;
+  /**
+   * 회차 목록에 회차를 먼저 넣고(결과와 관계없이), 계정마다 보유 수를 쓰고, 펜싱 카운터를 max(fence, maxToken)로 되살린 뒤 세대 키(epoch = TIME 초, node, gen)를 마지막에 쓴다.
+   * 세대 키가 이미 있으면 READY, rebuild 키 ≠ gen이면 STALE
+   */
+  finish(eventId: string, input: RebuildFinishInput): Promise<RebuildStep>;
+  /** 장애 조치 뒤 세대 올리기: node가 다를 때만 epoch = max(epoch + 1, TIME 초). 세대 키가 없으면 NOT_READY */
+  bumpEpoch(eventId: string, node: string): Promise<{ result: 'BUMPED' | 'SAME'; epoch: number } | { result: 'NOT_READY' }>;
 }

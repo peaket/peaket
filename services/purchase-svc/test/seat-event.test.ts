@@ -347,6 +347,8 @@ describe('toLedgerHoldEvent: Kafka에서 읽은 SeatEvent → 원장 사건', ()
     occurredAtMs: HELD_AT,
     expiresAtMs: EXP,
     eventKey: uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}:${TOKEN}`),
+    // 원장 칸(PRF-143): FAN은 holdId·purchaseSessionId, PRIORITY는 holdId만
+    ...(over.holdKind === 'PRIORITY' ? { holdId: HOLD } : { holdId: HOLD, purchaseSessionId: PSID }),
     ...over,
   });
 
@@ -405,9 +407,33 @@ describe('toLedgerHoldEvent: Kafka에서 읽은 SeatEvent → 원장 사건', ()
     for (const v of [null, undefined, 'x', 42, [], [seatEventValue()]]) expect(() => toLedgerHoldEvent(v), JSON.stringify(v) ?? 'undefined').toThrow(RangeError);
   });
 
+  test('ST26_원장 칸(PRF-143): FAN 홀드 사건은 SeatEvent의 holdId·purchaseSessionId를 원장 사건에 싣는다(HELD·RELEASED·EXPIRED 모두, 다시 만들기가 되살린 홀드 Hash의 holdId·psid로 쓴다) [S-T26] [ASVS v5.0.0-2.2.1]', () => {
+    for (const type of HOLD_EVENT_TYPES) {
+      const key = uuid8Of(`SeatEvent:${type}:${EV}:${HOLD}:${SEAT}:${TOKEN}`);
+      const e = toLedgerHoldEvent(seatEventValue({ type, eventKey: key }));
+      expect({ type, holdId: e?.holdId, purchaseSessionId: e?.purchaseSessionId }).toEqual({ type, holdId: HOLD, purchaseSessionId: PSID });
+    }
+    // Stream 칸에서 온 사건도 같다
+    const m = toSeatEvent(EV, heldFields());
+    expect(toLedgerHoldEvent(JSON.parse(JSON.stringify(m)))).toMatchObject({ holdId: HOLD, purchaseSessionId: PSID });
+  });
+
+  test('ST26_원장 칸(PRF-143): 우선 구매 보류(PRIORITY)는 holdId만 싣고 purchaseSessionId 칸이 없다(값이 와도 싣지 않는다) [S-T26] [ASVS v5.0.0-2.2.1]', () => {
+    const grant = '0190f3a1-7c2e-7a00-8000-00000000c001';
+    const v = seatEventValue({ holdKind: 'PRIORITY', priorityGrantId: grant });
+    delete v.purchaseSessionId;
+    const e = toLedgerHoldEvent(v)!;
+    expect(e.holdId).toBe(HOLD);
+    expect(e.priorityGrantId).toBe(grant);
+    expect('purchaseSessionId' in e).toBe(false);
+    const stray = toLedgerHoldEvent(seatEventValue({ holdKind: 'PRIORITY', priorityGrantId: grant, purchaseSessionId: PSID }))!;
+    expect(stray.holdId).toBe(HOLD);
+    expect('purchaseSessionId' in stray).toBe(false);
+  });
+
   test('ST35_Stream HELD 칸 → SeatEvent → JSON → 원장 사건으로 옮겨도 시각·토큰·계정이 그대로다 [ASVS v5.0.0-2.2.1]', () => {
     const m = toSeatEvent(EV, heldFields());
     const back = toLedgerHoldEvent(JSON.parse(JSON.stringify(m)));
-    expect(back).toEqual({ eventId: EV, seatId: SEAT, accountId: ACCOUNT, type: 'HELD', fencingToken: Number(TOKEN), holdKind: 'FAN', occurredAtMs: HELD_AT, expiresAtMs: EXP, eventKey: m.eventKey });
+    expect(back).toEqual({ eventId: EV, seatId: SEAT, accountId: ACCOUNT, type: 'HELD', fencingToken: Number(TOKEN), holdKind: 'FAN', occurredAtMs: HELD_AT, expiresAtMs: EXP, eventKey: m.eventKey, holdId: HOLD, purchaseSessionId: PSID });
   });
 });

@@ -89,6 +89,12 @@ export class HoldSeats {
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
   ) {}
 
+  /** 좌석 Redis 일시 장애(SeatStoreUnavailable)로 503을 낼 때: 미룸 지표 seat_hold_deferred_total{reason="store_unavailable"}을 올리고 503 오류를 돌려준다(PRF-143) */
+  #deferred(err: SeatStoreUnavailable): HoldError {
+    this.signals.holdDeferred?.('store_unavailable');
+    return storeUnavailableError(err);
+  }
+
   /** 새 홀드를 구매 세션 상태에 기록하고 이번이 첫 홀드인지 돌려준다. 보조 기록이라 어떤 오류도 홀드를 막지 않는다(세션이 없거나 실패하면 undefined, 실패는 로그 한 줄) */
   async #recordHold(sessionId: string, holdId: string, seatIds: readonly string[], deadline?: Deadline): Promise<boolean | undefined> {
     if (!this.holds) return undefined;
@@ -158,6 +164,10 @@ export class HoldSeats {
    * store.hold가 일시 장애가 아닌 오류를 던지면 signals.luaError('hold', seatLuaErrorOf(err).code)를 한 번 부르고 그 오류를 그대로 던진다(바꾸지 않는다.
    * 계정 ID가 든 키 이름을 지우는 것은 받는 층이다, HoldsController). 업무 거절(경합·한도·정지·멱등 키 재사용)과 성공은 올리지 않는다.
    * replay의 오류는 Lua 오류가 아니라 세지 않는다.
+   *
+   * 미룸 지표(BUILD_ORDER PRF-143, seat_hold_deferred_total{reason}): store.hold의 결과가 NOT_READY(세대 키 없음)면 signals.holdDeferred('not_ready'),
+   * 구매 세션 읽기·replay·hold가 SeatStoreUnavailable이라 503(STORE_UNAVAILABLE)이면 signals.holdDeferred('store_unavailable')를 한 번 부른다.
+   * 좌석맵 판이 없어 내는 3의 503(NOT_READY)은 세지 않는다(좌석 저장소가 아니라 판 문제다).
    */
   async execute(c: HoldCommand): Promise<HoldResponse> {
     const started = this.clock.monotonicMs();
@@ -169,7 +179,7 @@ export class HoldSeats {
       session = await this.sessions.get(c.purchaseSessionId);
     } catch (err) {
       // 구매 세션 저장소(좌석 Redis)의 일시 장애·메모리 부족도 503이다. 아직 시도 기록을 남기기 전이다(PRF-136 리뷰)
-      if (err instanceof SeatStoreUnavailable) throw storeUnavailableError(err);
+      if (err instanceof SeatStoreUnavailable) throw this.#deferred(err);
       throw err;
     }
     if (!session || session.accountId !== c.accountId) throw new HoldError('SESSION_NOT_FOUND', '구매 세션이 없거나 이 계정의 것이 아니다');
@@ -224,7 +234,7 @@ export class HoldSeats {
         r = await this.store.replay({ eventId: c.eventId, accountId: c.accountId, idempotencyKey: c.idempotencyKey, fingerprint: holdFingerprint(requested) }, opt);
       } catch (err) {
         record('ERROR');
-        if (err instanceof SeatStoreUnavailable) throw storeUnavailableError(err);
+        if (err instanceof SeatStoreUnavailable) throw this.#deferred(err);
         throw err;
       }
       if (r === null) return undefined;
@@ -279,7 +289,7 @@ export class HoldSeats {
       record('ERROR');
       if (err instanceof SeatStoreUnavailable) {
         if (err.reason === 'oom') this.signals.luaError('hold', 'OOM');
-        throw storeUnavailableError(err);
+        throw this.#deferred(err);
       }
       this.signals.luaError('hold', seatLuaErrorOf(err)?.code ?? 'OTHER');
       throw err;
@@ -293,6 +303,8 @@ export class HoldSeats {
         return responseOf(r, seatIds);
       case 'NOT_READY':
         this.signals.luaError('hold', 'NOT_READY');
+        // 세대 키가 없어 503으로 미룬다(다시 만들기 RB-06 전·도중, PRF-143). 좌석맵 판이 없어 내는 3의 503은 세지 않는다
+        this.signals.holdDeferred?.('not_ready');
         throw refuse('NOT_READY', '세대 키가 없다(좌석 저장소가 준비되지 않음)');
       case 'IDEM_REUSED':
         throw refuse('IDEM_REUSED', '같은 멱등 키에 다른 좌석 선택이다');

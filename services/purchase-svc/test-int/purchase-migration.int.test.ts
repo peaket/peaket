@@ -1,5 +1,6 @@
 // purchase DB의 좌석 표 마이그레이션을 실제 PostgreSQL 18 컨테이너에서 돈다(docs/data.md §4 'purchase DB의 좌석 표 마이그레이션', docs/features/seat-hold.md §6 'Hard Sale 저장소의 첫 구현',
 // BUILD_ORDER PRF-140 ①). 마이그레이션 멱등, seat_hold의 월 파티션, check 제약, 활성 상태 부분 유일 인덱스가 실제 DB에서 정본대로 막는지 본다.
+// 세 번째 마이그레이션(0002, BUILD_ORDER PRF-143, docs/data.md §4 '다시 만들기 표와 원장 칸')의 seat_rebuild 표와 seat_hold의 hold_id·purchase_session_id 칸도 본다.
 // 컨테이너는 이 파일이 끝나면 afterAll에서 지운다.
 import { randomUUID } from 'node:crypto';
 import { fakeClock, systemClock, uuidv7, uuidv7Time } from '@peaket/platform';
@@ -7,7 +8,7 @@ import { getTableConfig } from 'drizzle-orm/pg-core';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { ensureSeatHoldPartitions, migratePurchase } from '../scripts/migrate.mjs';
-import { purchaseQuota, seatHold, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
+import { purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -59,23 +60,23 @@ const count = async (text: string, params: unknown[]): Promise<number> => Number
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
-  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수(0000 좌석 표, 0001 보류 표)와 같다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 3(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)).rows.map((r) => r.relname);
     const before = await tables();
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(2);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(3);
   });
 
-  test('seat_sale·purchase_quota·seat_hold 세 표가 있다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('seat_sale·purchase_quota·seat_hold·seat_rebuild 네 표가 있다 [ASVS v5.0.0-2.3.4]', async () => {
     const r = await q<{ relname: string }>(
-      `select relname from pg_class where relnamespace = 'public'::regnamespace and relname in ('seat_sale', 'purchase_quota', 'seat_hold') and relkind in ('r', 'p') order by relname`,
+      `select relname from pg_class where relnamespace = 'public'::regnamespace and relname in ('seat_sale', 'purchase_quota', 'seat_hold', 'seat_rebuild') and relkind in ('r', 'p') order by relname`,
     );
-    expect(r.rows.map((x) => x.relname)).toEqual(['purchase_quota', 'seat_hold', 'seat_sale']);
+    expect(r.rows.map((x) => x.relname)).toEqual(['purchase_quota', 'seat_hold', 'seat_rebuild', 'seat_sale']);
   });
 
-  test('seat_hold는 event_id로 나눈 범위(RANGE) 파티션 부모이고 seat_sale·purchase_quota는 파티션 표가 아니다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('seat_hold는 event_id로 나눈 범위(RANGE) 파티션 부모이고 seat_sale·purchase_quota·seat_rebuild는 파티션 표가 아니다 [ASVS v5.0.0-2.3.4]', async () => {
     const parts = await q<{ relname: string; partstrat: string; keydef: string }>(
       `select c.relname, pt.partstrat, pg_get_partkeydef(pt.partrelid) as keydef
          from pg_partitioned_table pt join pg_class c on c.oid = pt.partrelid
@@ -83,17 +84,18 @@ describe('마이그레이션과 표 모양', () => {
     );
     expect(parts.rows).toEqual([{ relname: 'seat_hold', partstrat: 'r', keydef: 'RANGE (event_id)' }]);
     const kinds = await q<{ relname: string; relkind: string }>(
-      `select relname, relkind from pg_class where relnamespace = 'public'::regnamespace and relname in ('seat_sale', 'purchase_quota', 'seat_hold') and relkind in ('r', 'p') order by relname`,
+      `select relname, relkind from pg_class where relnamespace = 'public'::regnamespace and relname in ('seat_sale', 'purchase_quota', 'seat_hold', 'seat_rebuild') and relkind in ('r', 'p') order by relname`,
     );
     expect(kinds.rows).toEqual([
       { relname: 'purchase_quota', relkind: 'r' },
       { relname: 'seat_hold', relkind: 'p' },
+      { relname: 'seat_rebuild', relkind: 'r' },
       { relname: 'seat_sale', relkind: 'r' },
     ]);
   });
 
   test('DB의 열 이름·차례·종류·널 허용이 schema.ts 정의와 같다 [ASVS v5.0.0-2.3.4]', async () => {
-    for (const t of [seatSale, purchaseQuota, seatHold]) {
+    for (const t of [seatSale, purchaseQuota, seatHold, seatRebuild]) {
       const c = getTableConfig(t);
       const r = await q<{ column_name: string; data_type: string; is_nullable: string }>(
         `select column_name, data_type, is_nullable from information_schema.columns where table_schema = 'public' and table_name = $1 order by ordinal_position`,
@@ -106,14 +108,36 @@ describe('마이그레이션과 표 모양', () => {
     }
   });
 
-  test('인덱스는 기본 키와 활성 상태 유일 부분 인덱스뿐이고, 활성 인덱스는 유일하며 WHERE 조건이 있다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('0002가 더한 칸: seat_hold의 hold_id(uuid)·purchase_session_id(text)는 널 허용이고(파티션에도 있다), seat_rebuild는 event_id(uuid)·gen(integer, 널 불허)·holder(text)·lease_until(timestamptz)이다 [ASVS v5.0.0-2.3.4]', async () => {
+    const cols = async (table: string) =>
+      (
+        await q<{ column_name: string; data_type: string; is_nullable: string }>(
+          `select column_name, data_type, is_nullable from information_schema.columns where table_schema = 'public' and table_name = $1 order by ordinal_position`,
+          [table],
+        )
+      ).rows.map((x) => [x.column_name, x.data_type, x.is_nullable]);
+    for (const table of ['seat_hold', firstCreated[0]!]) {
+      const hold = await cols(table);
+      expect(hold, table).toContainEqual(['hold_id', 'uuid', 'YES']);
+      expect(hold, table).toContainEqual(['purchase_session_id', 'text', 'YES']);
+    }
+    expect(await cols('seat_rebuild')).toEqual([
+      ['event_id', 'uuid', 'NO'],
+      ['gen', 'integer', 'NO'],
+      ['holder', 'text', 'YES'],
+      ['lease_until', 'timestamp with time zone', 'YES'],
+    ]);
+  });
+
+  test('인덱스는 기본 키와 활성 상태 유일 부분 인덱스뿐이고(seat_rebuild는 기본 키만), 활성 인덱스는 유일하며 WHERE 조건이 있다 [ASVS v5.0.0-2.3.4]', async () => {
     const r = await q<{ tablename: string; indexname: string; indexdef: string }>(
-      `select tablename, indexname, indexdef from pg_indexes where schemaname = 'public' and tablename in ('seat_sale', 'purchase_quota', 'seat_hold') order by tablename, indexname`,
+      `select tablename, indexname, indexdef from pg_indexes where schemaname = 'public' and tablename in ('seat_sale', 'purchase_quota', 'seat_hold', 'seat_rebuild') order by tablename, indexname`,
     );
     expect(r.rows.map((x) => `${x.tablename}.${x.indexname}`)).toEqual([
       'purchase_quota.purchase_quota_pkey',
       'seat_hold.seat_hold_active_key',
       'seat_hold.seat_hold_pkey',
+      'seat_rebuild.seat_rebuild_pkey',
       'seat_sale.seat_sale_active_key',
       'seat_sale.seat_sale_pkey',
     ]);
@@ -124,11 +148,11 @@ describe('마이그레이션과 표 모양', () => {
 
   test('check 제약 이름이 schema.ts와 같게 DB에 있다 [ASVS v5.0.0-2.3.2]', async () => {
     const r = await q<{ conname: string }>(
-      `select conname from pg_constraint where contype = 'c' and conrelid in ('seat_sale'::regclass, 'purchase_quota'::regclass, 'seat_hold'::regclass) order by conname`,
+      `select conname from pg_constraint where contype = 'c' and conrelid in ('seat_sale'::regclass, 'purchase_quota'::regclass, 'seat_hold'::regclass, 'seat_rebuild'::regclass) order by conname`,
     );
-    const expected = [seatSale, purchaseQuota, seatHold].flatMap((t) => getTableConfig(t).checks.map((k) => k.name)).sort();
+    const expected = [seatSale, purchaseQuota, seatHold, seatRebuild].flatMap((t) => getTableConfig(t).checks.map((k) => k.name)).sort();
     expect(r.rows.map((x) => x.conname)).toEqual(expected);
-    expect(expected).toEqual(['purchase_quota_used_within_limit', 'seat_hold_kind_check', 'seat_hold_status_check', 'seat_sale_status_check']);
+    expect(expected).toEqual(['purchase_quota_used_within_limit', 'seat_hold_kind_check', 'seat_hold_status_check', 'seat_rebuild_gen_check', 'seat_sale_status_check']);
   });
 });
 
@@ -278,11 +302,21 @@ describe('check 제약', () => {
 });
 
 describe('기본값', () => {
-  test('seat_hold.kind의 기본값은 FAN이고, priority_grant_id·held_at은 비어 있다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('seat_hold.kind의 기본값은 FAN이고, priority_grant_id·held_at·hold_id·purchase_session_id는 비어 있다 [ASVS v5.0.0-2.3.4]', async () => {
     const e = uuidv7(systemClock);
     await putHold(e, id(), 1, 'HELD');
-    const r = await q<{ kind: string; priority_grant_id: string | null; held_at: Date | null }>('select kind, priority_grant_id, held_at from seat_hold where event_id = $1', [e]);
-    expect(r.rows).toEqual([{ kind: 'FAN', priority_grant_id: null, held_at: null }]);
+    const r = await q<{ kind: string; priority_grant_id: string | null; held_at: Date | null; hold_id: string | null; purchase_session_id: string | null }>(
+      'select kind, priority_grant_id, held_at, hold_id, purchase_session_id from seat_hold where event_id = $1',
+      [e],
+    );
+    expect(r.rows).toEqual([{ kind: 'FAN', priority_grant_id: null, held_at: null, hold_id: null, purchase_session_id: null }]);
+  });
+
+  test('seat_rebuild에 event_id만 넣으면 gen 1(판매 열기의 판 번호)이고 holder·lease_until은 비어 있다 [ASVS v5.0.0-2.3.4]', async () => {
+    const e = id();
+    await q('insert into seat_rebuild (event_id) values ($1)', [e]);
+    const r = await q<{ gen: number; holder: string | null; lease_until: Date | null }>('select gen, holder, lease_until from seat_rebuild where event_id = $1', [e]);
+    expect(r.rows).toEqual([{ gen: 1, holder: null, lease_until: null }]);
   });
 
   test('seat_sale.reserved_at의 기본값은 now()라 넣은 직후 5초 안이고, pending_until은 비어 있다 [ASVS v5.0.0-2.3.4]', async () => {
@@ -298,6 +332,24 @@ describe('기본값', () => {
       [e, s],
     );
     expect(r.rows).toEqual([{ filled: true, not_future: true, recent: true, pending_until_null: true }]);
+  });
+});
+
+describe('seat_rebuild 제약', () => {
+  test.each([0, -1])('seat_rebuild.gen에 %i를 넣거나 그 값으로 바꾸면 check 위반(23514)이고 행은 그대로다 [ASVS v5.0.0-2.3.2]', async (bad) => {
+    const e = id();
+    await expect(q('insert into seat_rebuild (event_id, gen) values ($1, $2)', [e, bad])).rejects.toMatchObject({ code: '23514', constraint: 'seat_rebuild_gen_check' });
+    expect(await count('select count(*) as n from seat_rebuild where event_id = $1', [e])).toBe(0);
+    await q('insert into seat_rebuild (event_id, gen) values ($1, 2)', [e]);
+    await expect(q('update seat_rebuild set gen = $2 where event_id = $1', [e, bad])).rejects.toMatchObject({ code: '23514', constraint: 'seat_rebuild_gen_check' });
+    expect(await count('select gen as n from seat_rebuild where event_id = $1', [e])).toBe(2);
+  });
+
+  test('seat_rebuild는 회차마다 한 행이다: 같은 event_id를 또 넣으면 23505(seat_rebuild_pkey)이고 처음 행만 남는다 [ASVS v5.0.0-2.3.4]', async () => {
+    const e = id();
+    await q('insert into seat_rebuild (event_id) values ($1)', [e]);
+    await expect(q('insert into seat_rebuild (event_id, gen) values ($1, 5)', [e])).rejects.toMatchObject({ code: '23505', constraint: 'seat_rebuild_pkey' });
+    expect(await count('select gen as n from seat_rebuild where event_id = $1', [e])).toBe(1);
   });
 });
 

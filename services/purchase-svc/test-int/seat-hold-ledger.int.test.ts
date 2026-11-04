@@ -315,3 +315,70 @@ describe('시험 검토 B가 더한 차례 보정 사례', () => {
     expect(got[2]).toEqual(rowOf(h3, 'HELD'));
   });
 });
+
+// ─────────────── 다시 만들기의 원장 칸(BUILD_ORDER PRF-143, docs/data.md §4 '다시 만들기 표와 원장 칸') ───────────────
+
+/** 그 좌석 원장 행의 hold_id·purchase_session_id(토큰 순). 직접 SQL */
+async function idsOf(eventId: string, seatId: string): Promise<{ token: number; holdId: string | null; purchaseSessionId: string | null }[]> {
+  const r = await admin.pool.query(
+    'select fencing_token::text as fencing_token, hold_id::text as hold_id, purchase_session_id from seat_hold where event_id = $1 and seat_id = $2 order by fencing_token',
+    [eventId, seatId],
+  );
+  return r.rows.map((x: Record<string, unknown>) => ({
+    token: Number(x.fencing_token),
+    holdId: x.hold_id === null ? null : String(x.hold_id),
+    purchaseSessionId: x.purchase_session_id === null ? null : String(x.purchase_session_id),
+  }));
+}
+
+describe('DrizzleSeatHoldLedger: hold_id·purchase_session_id 적재(다시 만들기가 되살릴 홀드 Hash의 holdId·psid, PRF-143)', () => {
+  test('ST26_HELD 사건의 holdId·purchaseSessionId를 새 행의 hold_id·purchase_session_id에 쓴다(다른 칸은 그대로) [S-T26]', async () => {
+    const h = hold({ eventId: newEventId(), seatId: randomUUID(), token: T1 });
+    const holdId = uuidv7(systemClock);
+    const purchaseSessionId = randomUUID();
+    await ledger.apply({ ...heldEvent(h), holdId, purchaseSessionId });
+    expect(await idsOf(h.eventId, h.seatId)).toEqual([{ token: T1, holdId, purchaseSessionId }]);
+    expect(await rows(h.eventId, h.seatId)).toEqual([rowOf(h, 'HELD')]);
+  });
+
+  test.each(['EXPIRED', 'RELEASED'] as const)(
+    'ST26_끝 사건 %s가 HELD보다 먼저 와서 넣는 행에도 hold_id·purchase_session_id를 쓰고, 뒤에 온 HELD가 그 값을 지우지 않는다 [S-T26]',
+    async (type) => {
+      const h = hold({ eventId: newEventId(), seatId: randomUUID(), token: T1 });
+      const holdId = uuidv7(systemClock);
+      const purchaseSessionId = randomUUID();
+      await ledger.apply({ ...endEvent(h, type, h.heldAtMs + 60_000), holdId, purchaseSessionId });
+      expect(await idsOf(h.eventId, h.seatId)).toEqual([{ token: T1, holdId, purchaseSessionId }]);
+      await ledger.apply({ ...heldEvent(h), holdId, purchaseSessionId });
+      expect(await idsOf(h.eventId, h.seatId)).toEqual([{ token: T1, holdId, purchaseSessionId }]);
+      expect(await rows(h.eventId, h.seatId)).toEqual([rowOf(h, type, h.heldAtMs)]);
+    },
+  );
+
+  test('ST26_늦게 온 옛 HELD(끝 상태로 넣는 행)에도 hold_id·purchase_session_id를 쓴다 [S-T5] [S-T26]', async () => {
+    const eventId = newEventId();
+    const seatId = randomUUID();
+    const h1 = hold({ eventId, seatId, token: T1 });
+    const h2 = hold({ eventId, seatId, token: T2, heldAtMs: h1.expiresAtMs });
+    const [id1, id2] = [uuidv7(systemClock), uuidv7(systemClock)];
+    const [ps1, ps2] = [randomUUID(), randomUUID()];
+    await ledger.apply({ ...heldEvent(h2), holdId: id2, purchaseSessionId: ps2 });
+    await ledger.apply({ ...heldEvent(h1), holdId: id1, purchaseSessionId: ps1 });
+    expect(await idsOf(eventId, seatId)).toEqual([
+      { token: T1, holdId: id1, purchaseSessionId: ps1 },
+      { token: T2, holdId: id2, purchaseSessionId: ps2 },
+    ]);
+  });
+
+  test.each([
+    { name: 'HELD', make: (h: Hold) => heldEvent(h) },
+    { name: 'EXPIRED(HELD보다 먼저)', make: (h: Hold) => endEvent(h, 'EXPIRED', h.expiresAtMs) },
+  ])('ST26_$name 사건에 holdId·purchaseSessionId가 없으면 두 칸은 NULL이다(옛 사건, 다시 만들기가 되살리지 않는다) [S-T26]', async ({ make }) => {
+    const h = hold({ eventId: newEventId(), seatId: randomUUID(), token: T1 });
+    const e = make(h);
+    expect(e.holdId).toBeUndefined();
+    expect(e.purchaseSessionId).toBeUndefined();
+    await ledger.apply(e);
+    expect(await idsOf(h.eventId, h.seatId)).toEqual([{ token: T1, holdId: null, purchaseSessionId: null }]);
+  });
+});

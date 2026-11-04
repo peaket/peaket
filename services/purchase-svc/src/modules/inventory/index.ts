@@ -2,11 +2,27 @@
 export { EXPIRE_LUA, SWEEP_LEASE_LUA } from './adapters/expire-lua.js';
 export { HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
 export { PIN_LUA, RELEASE_FAILED_LUA } from './adapters/pin-lua.js';
+export { BEGIN_REBUILD_LUA, BUMP_EPOCH_LUA, FINISH_REBUILD_LUA, REBUILD_QUOTAS_LUA, REBUILD_SEATS_LUA } from './adapters/rebuild-lua.js';
+export { DrizzleSeatRebuildSource } from './adapters/db/drizzle-seat-rebuild.js';
+export { SeatRebuilder, type SeatRebuilderDeps, type SeatRebuilderSignals } from './application/seat-rebuilder.js';
+export {
+  maxTokenOf,
+  REBUILD_BATCH,
+  REBUILD_LEASE_MS,
+  planRebuild,
+  quotasOf,
+  type RebuildFinishInput,
+  type RebuildHold,
+  type RebuildReport,
+  type RebuildSale,
+  type RebuildSeat,
+  type RebuildStep,
+} from './domain/rebuild.js';
 export { MemoryPurchaseSessionStore, RecordingSessionStartedLog } from './adapters/memory-purchase-session-store.js';
 export { MemoryPurchaseSessions, type MemoryPurchaseSession, type PurchaseSessionAccess } from './adapters/memory-purchase-sessions.js';
 export { DrizzleSeatHoldLedger } from './adapters/db/drizzle-seat-hold-ledger.js';
 export { DrizzleSeatSales } from './adapters/db/drizzle-seat-sales.js';
-export { purchaseQuota, seatHold, seatSale } from './adapters/db/schema.js';
+export { purchaseQuota, seatHold, seatRebuild, seatSale } from './adapters/db/schema.js';
 export { FileSeatMapSource, LayoutSeatMap, type LayoutSeatMapOptions, type SeatMapSource } from './adapters/layout-seat-map.js';
 export { MemorySeatMap, type MemorySeatDef } from './adapters/memory-seat-map.js';
 export { MemorySeatDb, MemorySeatEvent, MemorySeatStore, type MemoryHoldHash, type MemoryIdemRecord, type MemoryPublished } from './adapters/memory-seat-store.js';
@@ -265,6 +281,8 @@ export {
   type SeatEventRetire,
   type SeatHoldLedger,
   type SeatPins,
+  type SeatRebuildSource,
+  type SeatRebuildTarget,
   type SeatSales,
   type SeatSignals,
   type SeatStreamRelaySignals,

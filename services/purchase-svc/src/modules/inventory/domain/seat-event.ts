@@ -173,6 +173,9 @@ export interface LedgerHoldEvent {
   occurredAtMs: number;
   expiresAtMs: number;
   eventKey: string;
+  /** SeatEvent의 holdId·purchaseSessionId(원장 hold_id·purchase_session_id, 다시 만들기가 쓴다, BUILD_ORDER PRF-143) */
+  holdId?: string;
+  purchaseSessionId?: string;
 }
 
 /**
@@ -198,7 +201,11 @@ export function toLedgerHoldEvent(value: unknown): LedgerHoldEvent | null {
     occurredAtMs: msOfIso(v.occurredAt, 'occurredAt'),
     expiresAtMs: msOfIso(v.expiresAt, 'expiresAt'),
     eventKey: v.eventKey,
+    // 원장 hold_id(다시 만들기가 되살린 홀드 Hash의 holdId, BUILD_ORDER PRF-143). 위에서 빈 글이 아님을 봤다
+    holdId: v.holdId,
   };
   if (v.holdKind === 'PRIORITY') e.priorityGrantId = uuidOf(v.priorityGrantId, 'priorityGrantId');
+  // 구매 세션 ID는 FAN 홀드만 싣는다(우선 구매 보류는 구매 세션이 없다. 값이 와도 싣지 않는다). 빈 글·글이 아닌 값은 싣지 않는다(원장 칸은 NULL)
+  else if (typeof v.purchaseSessionId === 'string' && v.purchaseSessionId.length > 0) e.purchaseSessionId = v.purchaseSessionId;
   return e;
 }

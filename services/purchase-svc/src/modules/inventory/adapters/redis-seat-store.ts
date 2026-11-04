@@ -26,7 +26,8 @@ import {
   type SeatRef,
 } from '../domain/hold.js';
 import type { LogGate } from '../domain/log-gate.js';
-import type { SeatCallOptions, SeatEventRetire, SeatExpiries, SeatPins, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
+import type { SeatCallOptions, SeatEventRetire, SeatExpiries, SeatPins, SeatRebuildTarget, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
+import { assertRebuildBegin, assertRebuildFinish, assertRebuildSeats, REBUILD_BATCH, type RebuildFinishInput, type RebuildSeat, type RebuildStep } from '../domain/rebuild.js';
 import {
   assertPinInput,
   assertReleaseFailedInput,
@@ -44,6 +45,7 @@ import { assertSnapshotInput } from '../domain/snapshot.js';
 import { EXPIRE_LUA } from './expire-lua.js';
 import { HOLD_LUA, OPEN_SALE_LUA } from './hold-lua.js';
 import { PIN_LUA, RELEASE_FAILED_LUA } from './pin-lua.js';
+import { BEGIN_REBUILD_LUA, BUMP_EPOCH_LUA, FINISH_REBUILD_LUA, REBUILD_QUOTAS_LUA, REBUILD_SEATS_LUA } from './rebuild-lua.js';
 import { keepEventIds, saleEventsWarnGate } from './sale-events.js';
 
 const HOLD = redisScript(HOLD_LUA);
@@ -52,9 +54,35 @@ const OPEN_SALE = redisScript(OPEN_SALE_LUA);
 const EXPIRE = redisScript(EXPIRE_LUA);
 const PIN = redisScript(PIN_LUA);
 const RELEASE_FAILED = redisScript(RELEASE_FAILED_LUA);
+const BEGIN_REBUILD = redisScript(BEGIN_REBUILD_LUA);
+const REBUILD_SEATS = redisScript(REBUILD_SEATS_LUA);
+const REBUILD_QUOTAS = redisScript(REBUILD_QUOTAS_LUA);
+const FINISH_REBUILD = redisScript(FINISH_REBUILD_LUA);
+const BUMP_EPOCH = redisScript(BUMP_EPOCH_LUA);
 
 /** 좌석마다 Lua ARGV 6칸(hold-lua.ts·pin-lua.ts): 좌석 색인, 구역 색인, 구역 안 거리, 좌석 ID, 등급 ID, 구역 ID */
 const seatArgsOf = (seats: readonly SeatRef[]): string[] => seats.flatMap((s) => [String(s.index), String(s.sectionIndex), String(s.seatOffset), s.seatId, s.tierId, s.sectionId]);
+
+/** 다시 만들기 좌석 Lua의 좌석 하나 ARGV 10칸(rebuild-lua.ts): 색인, 방식, holdId, owner, psid, fence, heldAt, exp, kind, 예비 ''. 원장 행 없는 판매 좌석의 세 칸은 '' */
+const rebuildSeatArgsOf = (s: RebuildSeat): string[] => {
+  const timed = s.fencingToken !== undefined ? [String(s.fencingToken), String(s.heldAtMs), String(s.expiresAtMs)] : ['', '', ''];
+  return s.mode === 'SOLD'
+    ? [String(s.seat.index), 'S', s.holdId, s.accountId, s.purchaseSessionId, ...timed, 'FAN', '']
+    : [String(s.seat.index), 'H', s.holdId, s.accountId, s.purchaseSessionId, ...timed, s.kind, ''];
+};
+
+/** 다시 만들기 Lua의 답 → RebuildStep(OK·READY gen·STALE). OK의 둘째 칸은 부른 쪽이 본다. 모르는 답이면 Error */
+function rebuildStepOf(r: unknown, what: string): { step: RebuildStep; raw: unknown[] } {
+  if (!Array.isArray(r)) throw new Error(`${what} Lua가 모르는 값을 돌려줬다: ${String(r)}`);
+  const kind = str(r[0]);
+  if (kind === 'OK' || kind === 'STALE') return { step: { result: kind }, raw: r };
+  if (kind === 'READY') {
+    const gen = int(r[1], '세대 키의 판 번호');
+    if (gen < 1) throw new Error(`${what} Lua가 돌려준 판 번호가 1 이상이 아니다: ${gen}`);
+    return { step: { result: 'READY', gen }, raw: r };
+  }
+  throw new Error(`${what} Lua가 모르는 값을 돌려줬다: ${kind}`);
+}
 
 const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 const isNil = (v: unknown): v is null | undefined => v === null || v === undefined;
@@ -139,6 +167,8 @@ export const seatKeys = {
   section: (e: string, sectionId: string) => `s:{event:${e}}:sec:${sectionId}`,
   /** 좌석 비트맵이 있는 회차 목록(회차 태그 없음, 다른 슬롯) */
   ctlEvents: () => 's:ctl:events',
+  /** 다시 만들기 시도의 판 번호(값 = gen, 코드 리뷰 PRF-143. 시작 Lua가 쓰고 좌석·보유 수·끝내기 Lua가 대조한다) */
+  rebuild: (e: string) => `s:{event:${e}}:rebuild`,
   /** 회차별 만료 임대(값 = 잡은 파드 ID, BUILD_ORDER PRF-135) */
   sweep: (e: string) => `s:{event:${e}}:sweep`,
   /** 구매 세션 정리 색인(정렬 집합, 멤버 jti, 점수 = 다음에 볼 시각, BUILD_ORDER PRF-138) */
@@ -162,9 +192,12 @@ export const seatKeys = {
  *
  * PRF-142: pin·releaseFailed는 입력 검사(RangeError, 아무것도 부르지 않는다) 뒤 pin-lua.ts의 Lua 한 번(hold와 같은 마감·오류 가르기),
  * retireEvent는 주입 Clock으로 시각을 가른 뒤 회차 슬롯의 XLEN·XPENDING과 목록 슬롯의 SREM을 따로 보낸다.
+ *
+ * PRF-143: isReady는 HEXISTS epoch 한 번, begin·writeSeats·bumpEpoch는 입력 검사(RangeError) 뒤 rebuild-lua.ts의 Lua 한 번(같은 오류 가르기,
+ * 마감은 플랫폼 기본). finish는 목록 슬롯에 SADD s:ctl:events를 먼저 따로 보낸 뒤 보유 수 Lua(200계정씩)와 끝내기 Lua다(코드 리뷰로 고침).
  */
 @Injectable()
-export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, SeatPins, SeatEventRetire {
+export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, SeatPins, SeatEventRetire, SeatRebuildTarget {
   readonly #filterWarnGate: LogGate;
   readonly #clock: Clock;
 
@@ -396,6 +429,77 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
     }
     if (!Array.isArray(r)) throw new Error(`XPENDING 답이 배열이 아니다: ${String(r)}`);
     return count(r[0] ?? 0, '확인받지 못한 항목 수');
+  }
+
+  /** 다시 만들기(BUILD_ORDER PRF-143): 세대 키의 epoch 칸이 있나(HEXISTS 한 번, 쓰지 않음) */
+  async isReady(eventId: string): Promise<boolean> {
+    if (!KEY_PART.test(eventId)) throw new RangeError('회차 ID가 키 조각 모양이 아니다');
+    const key = seatKeys.epoch(eventId);
+    return count(await guard(this.redis.command(['HEXISTS', key, 'epoch'], { key })), '세대 칸 있음') === 1;
+  }
+
+  /** 다시 만들기 시작(BEGIN_REBUILD_LUA): assertRebuildBegin 뒤 Lua 한 번(오류 가르기는 pin과 같다). 모르는 답이면 Error */
+  async begin(eventId: string, gen: number, keepUntilMs: number): Promise<RebuildStep> {
+    assertRebuildBegin(eventId, gen, keepUntilMs);
+    const e = eventId;
+    const keys = [seatKeys.bitmap(e), seatKeys.expiry(e), seatKeys.epoch(e), seatKeys.rebuild(e)];
+    return rebuildStepOf(await guard(this.redis.evalScript(BEGIN_REBUILD, keys, [String(gen), String(keepUntilMs)])), '다시 만들기 시작').step;
+  }
+
+  /**
+   * 다시 만들기 좌석 쓰기(계약은 adapters/rebuild-lua.ts REBUILD_SEATS_LUA): assertRebuildSeats 뒤 Lua 한 번(오류 가르기는 pin과 같다).
+   * 쓴 수가 넘긴 좌석 수와 다르거나 모르는 답이면 Error
+   */
+  async writeSeats(eventId: string, seats: readonly RebuildSeat[], keepUntilMs: number, gen: number): Promise<RebuildStep> {
+    assertRebuildSeats(eventId, seats, keepUntilMs, gen);
+    const e = eventId;
+    const keys = [seatKeys.bitmap(e), seatKeys.expiry(e), seatKeys.epoch(e), seatKeys.rebuild(e), ...seats.map((s) => seatKeys.hold(e, s.seat.index))];
+    const args = [String(keepUntilMs), String(gen), ...seats.flatMap(rebuildSeatArgsOf)];
+    const { step, raw } = rebuildStepOf(await guard(this.redis.evalScript(REBUILD_SEATS, keys, args)), '다시 만들기 좌석');
+    if (step.result === 'OK') {
+      const written = count(raw[1], '쓴 수');
+      if (written !== seats.length) throw new Error(`다시 만들기 좌석 Lua의 쓴 수(${written})가 넘긴 좌석 수(${seats.length})와 다르다`);
+    }
+    return step;
+  }
+
+  /**
+   * 다시 만들기 끝: assertRebuildFinish 뒤 회차 목록 s:ctl:events에 SADD를 먼저 따로 한 번(다른 슬롯, 여러 번 해도 같다. Lua 뒤에 두면 SADD가 실패했을 때
+   * 세대 키만 서고 목록에서 빠진 회차가 READY로 굳는다) → 보유 수 Lua(REBUILD_QUOTAS_LUA)를 REBUILD_BATCH계정씩(KEYS·ARGV의 계정 차례는 quotas의 차례)
+   * → 끝내기 Lua(FINISH_REBUILD_LUA: 펜싱 카운터 = max(fence, maxToken), 세대 키) 한 번. 어느 Lua든 READY·STALE이면 거기서 멈춘다
+   */
+  async finish(eventId: string, input: RebuildFinishInput): Promise<RebuildStep> {
+    assertRebuildFinish(eventId, input);
+    const e = eventId;
+    // 전체 유실 때 회차 목록도 사라진다. 다시 넣어야 만료 반복·Stream 릴레이가 이 회차를 돈다
+    const list = seatKeys.ctlEvents();
+    await guard(this.redis.command(['SADD', list, e], { key: list }));
+    const gen = String(input.gen);
+    const keep = String(input.keepUntilMs);
+    const accounts = [...input.quotas.keys()];
+    for (let k = 0; k < accounts.length; k += REBUILD_BATCH) {
+      const batch = accounts.slice(k, k + REBUILD_BATCH);
+      const keys = [seatKeys.epoch(e), seatKeys.rebuild(e), ...batch.map((a) => seatKeys.quota(e, a))];
+      const { step, raw } = rebuildStepOf(await guard(this.redis.evalScript(REBUILD_QUOTAS, keys, [gen, keep, ...batch.map((a) => String(input.quotas.get(a)))])), '다시 만들기 보유 수');
+      if (step.result !== 'OK') return step;
+      if (count(raw[1], '쓴 수') !== batch.length) throw new Error(`다시 만들기 보유 수 Lua의 쓴 수가 넘긴 계정 수(${batch.length})와 다르다`);
+    }
+    const keys = [seatKeys.epoch(e), seatKeys.rebuild(e), seatKeys.fence(e)];
+    const { step, raw } = rebuildStepOf(await guard(this.redis.evalScript(FINISH_REBUILD, keys, [gen, input.node, keep, String(input.maxToken ?? 0)])), '다시 만들기 끝내기');
+    if (step.result === 'OK') int(raw[1], '세대');
+    return step;
+  }
+
+  /** 장애 조치 뒤 세대 올리기(BUMP_EPOCH_LUA): Lua 한 번. eventId가 KEY_PART가 아니거나 node가 비었으면 RangeError(부르지 않는다) */
+  async bumpEpoch(eventId: string, node: string): Promise<{ result: 'BUMPED' | 'SAME'; epoch: number } | { result: 'NOT_READY' }> {
+    if (!KEY_PART.test(eventId)) throw new RangeError('회차 ID가 키 조각 모양이 아니다');
+    if (typeof node !== 'string' || node.length === 0) throw new RangeError('node가 비었다');
+    const r = (await guard(this.redis.evalScript(BUMP_EPOCH, [seatKeys.epoch(eventId)], [node]))) as unknown[];
+    if (!Array.isArray(r)) throw new Error(`세대 올리기 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
+    const kind = str(r[0]);
+    if (kind === 'NOT_READY') return { result: kind };
+    if (kind === 'SAME' || kind === 'BUMPED') return { result: kind, epoch: count(r[1], '세대') };
+    throw new Error(`세대 올리기 Lua가 모르는 값을 돌려줬다: ${kind}`);
   }
 
   async openSale(i: { eventId: string; seatCount: number; keepUntilMs: number }): Promise<{ created: boolean; seatEpoch: number }> {

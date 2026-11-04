@@ -58,6 +58,10 @@ export const seatHold = pgTable(
     // 좌석을 잡은 시각(SeatEvent HELD의 occurredAt = 홀드 Lua의 Redis TIME). 홀드 원장 적재(PRF-141)가 채운다
     heldAt: at('held_at'),
     expiresAt: at('expires_at').notNull(),
+    // 홀드 ID·구매 세션 ID(SeatEvent의 holdId·purchaseSessionId). 다시 만들기(RB-06)가 되살린 홀드 Hash에 쓴다(BUILD_ORDER PRF-143). 옛 행은 비어 있다.
+    // 0002 마이그레이션의 ADD COLUMN이 표 끝에 붙이므로 DB 칸 차례와 맞춰 expires_at 뒤에 둔다
+    holdId: uuid('hold_id'),
+    purchaseSessionId: text('purchase_session_id'),
   },
   (t) => [
     primaryKey({ name: 'seat_hold_pkey', columns: [t.eventId, t.seatId, t.fencingToken] }),
@@ -68,4 +72,16 @@ export const seatHold = pgTable(
     check('seat_hold_status_check', sql`${t.status} in ('HELD', 'RELEASED', 'EXPIRED')`),
     check('seat_hold_kind_check', sql`${t.kind} in ('FAN', 'PRIORITY')`),
   ],
+);
+
+/** 회차마다 한 행: 다시 만들기 판 번호와 다시 만들기 임대(BUILD_ORDER PRF-143, docs/features/seat-hold.md §6 '다시 만들기(RB-06)의 첫 구현') */
+export const seatRebuild = pgTable(
+  'seat_rebuild',
+  {
+    eventId: uuid('event_id').primaryKey(),
+    gen: integer('gen').notNull().default(1),
+    holder: text('holder'),
+    leaseUntil: at('lease_until'),
+  },
+  (t) => [check('seat_rebuild_gen_check', sql`${t.gen} >= 1`)],
 );

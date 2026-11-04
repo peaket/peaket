@@ -16,7 +16,8 @@ import {
   type SeatRef,
 } from '../domain/hold.js';
 import type { LogGate } from '../domain/log-gate.js';
-import type { SeatCallOptions, SeatEventRetire, SeatExpiries, SeatPins, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
+import type { SeatCallOptions, SeatEventRetire, SeatExpiries, SeatPins, SeatRebuildTarget, SeatSnapshots, SeatStore, SnapshotReadInput, SnapshotReadResult } from '../domain/ports.js';
+import { assertRebuildBegin, assertRebuildFinish, assertRebuildSeats, type RebuildFinishInput, type RebuildSeat, type RebuildStep } from '../domain/rebuild.js';
 import {
   assertPinInput,
   assertReleaseFailedInput,
@@ -95,6 +96,8 @@ export class MemorySeatEvent {
   readonly secver = new Map<number, number>();
   /** 마지막 펜싱 토큰(10진 글). 없으면 0으로 본다 */
   fence: string | undefined;
+  /** 다시 만들기 시도의 판 번호 s:{event:E}:rebuild(시작이 쓴다, 코드 리뷰 PRF-143). 없으면 undefined */
+  rebuildGen: number | undefined;
   /** Stream 항목(XADD 차례). 칸 이름·값은 docs/data.md §3 HELD 칸(모두 글) */
   readonly stream: Record<string, string>[] = [];
   /** 샤드 Pub/Sub(보낸 차례) */
@@ -140,7 +143,7 @@ export class MemorySeatDb {
  * ports.ts SeatExpiries의 차례대로 바꾼다(만료 Lua와 같은 결과. 보유 수가 0 이하가 되면 quota에서 지우고 expireAt의 그 키도 지운다)
  * 묶기·실패 해제·회차 목록 빼기(PRF-142): pin-lua.ts의 계약과 RedisSeatStore.retireEvent의 차례를 같은 키 모형에 둔다. openSale은 epoch.gen = 1을 함께 쓴다
  */
-export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, SeatPins, SeatEventRetire {
+export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, SeatPins, SeatEventRetire, SeatRebuildTarget {
   readonly db = new MemorySeatDb();
   readonly #filterWarnGate: LogGate;
 
@@ -511,6 +514,122 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     if ((ev?.stream.length ?? 0) > 0) return 'STREAM_PENDING';
     if ((ev?.expiry.size ?? 0) > 0) return 'EXPIRY_PENDING';
     return this.db.ctlEvents.delete(i.eventId) ? 'RETIRED' : 'NOT_LISTED';
+  }
+
+  /** 다시 만들기(BUILD_ORDER PRF-143): 세대 키가 있나(회차 키 묶음을 만들지 않는다) */
+  async isReady(eventId: string): Promise<boolean> {
+    if (!KEY_PART.test(eventId)) throw new RangeError('회차 ID가 키 조각 모양이 아니다');
+    return this.db.peek(eventId)?.epoch !== undefined;
+  }
+
+  /** 세대 키가 있으면 READY(gen 칸, 없으면 1), rebuild 판 번호 ≠ gen이면 STALE, 둘 다 아니면 undefined(rebuild-lua.ts fenced와 같다) */
+  #fenced(ev: MemorySeatEvent, gen: number): RebuildStep | undefined {
+    if (ev.epoch) return { result: 'READY', gen: ev.epoch.gen ?? INITIAL_SEAT_GEN };
+    if (ev.rebuildGen !== gen) return { result: 'STALE' };
+    return undefined;
+  }
+
+  /**
+   * 다시 만들기 시작(BEGIN_REBUILD_LUA의 쌍둥이): 입력 검사 → 세대 키가 있으면 READY(gen) → 저장된 판 번호 > gen이면 STALE → 시각 한 번·keepUntil 지킴 →
+   * 비트맵(비트·seatCount)·만료 인덱스와 그 수명을 지우고 rebuildGen = gen(수명 keepUntil) → OK
+   */
+  async begin(eventId: string, gen: number, keepUntilMs: number): Promise<RebuildStep> {
+    assertRebuildBegin(eventId, gen, keepUntilMs);
+    const e = eventId;
+    const ev = this.db.event(e);
+    if (ev.epoch) return { result: 'READY', gen: ev.epoch.gen ?? INITIAL_SEAT_GEN };
+    if (ev.rebuildGen !== undefined && ev.rebuildGen > gen) return { result: 'STALE' };
+    const now = this.clock.now();
+    if (!(keepUntilMs > now)) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${keepUntilMs} now ${now}`);
+    ev.bits.clear();
+    ev.seatCount = undefined;
+    ev.expiry.clear();
+    ev.expireAt.delete(seatKeys.bitmap(e));
+    ev.expireAt.delete(seatKeys.expiry(e));
+    ev.rebuildGen = gen;
+    ev.expireAt.set(seatKeys.rebuild(e), keepUntilMs);
+    return { result: 'OK' };
+  }
+
+  /**
+   * 다시 만들기 좌석 쓰기(계약은 adapters/rebuild-lua.ts REBUILD_SEATS_LUA): 입력 검사 → 세대 키가 있으면 READY → rebuild 판 번호 ≠ gen이면 STALE → 시각 한 번·keepUntil 지킴 → 쓰기.
+   * 판매(SOLD)는 묶음 Hash(원장 행의 fence·heldAt·exp, 없으면 fence = 저장소 시각 µs(now × 1000)·heldAt = exp = now, kind FAN·ext '0'·pin '1')이고 만료 인덱스에서 빠지며,
+   * 되살린 홀드(HELD)는 원장 값 그대로(ext '0', pin 없음)와 만료 인덱스.
+   * 홀드 Hash 수명은 keepUntil(DEL 뒤 새로 걸기), 비트맵·만료 인덱스는 더 늦은 쪽(만료 인덱스가 비면 Valkey처럼 키와 수명이 사라진다)
+   */
+  async writeSeats(eventId: string, seats: readonly RebuildSeat[], keepUntilMs: number, gen: number): Promise<RebuildStep> {
+    assertRebuildSeats(eventId, seats, keepUntilMs, gen);
+    const e = eventId;
+    const ev = this.db.event(e);
+    const stop = this.#fenced(ev, gen);
+    if (stop) return stop;
+    const now = this.clock.now();
+    if (!(keepUntilMs > now)) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${keepUntilMs} now ${now}`);
+    for (const s of seats) {
+      const i = s.seat.index;
+      ev.bits.add(i);
+      ev.holds.set(
+        i,
+        s.mode === 'SOLD'
+          ? s.fencingToken !== undefined
+            ? { holdId: s.holdId, owner: s.accountId, psid: s.purchaseSessionId, fence: String(s.fencingToken), heldAt: s.heldAtMs!, exp: s.expiresAtMs!, kind: 'FAN', ext: '0', pin: '1' }
+            : { holdId: s.holdId, owner: s.accountId, psid: s.purchaseSessionId, fence: String(now * 1000), heldAt: now, exp: now, kind: 'FAN', ext: '0', pin: '1' }
+          : { holdId: s.holdId, owner: s.accountId, psid: s.purchaseSessionId, fence: String(s.fencingToken), heldAt: s.heldAtMs, exp: s.expiresAtMs, kind: s.kind, ext: '0' },
+      );
+      ev.expireAt.set(seatKeys.hold(e, i), keepUntilMs);
+      if (s.mode === 'HELD') ev.expiry.set(i, s.expiresAtMs);
+      else ev.expiry.delete(i);
+    }
+    const extend = (key: string) => {
+      const cur = ev.expireAt.get(key);
+      if (cur === undefined || cur < keepUntilMs) ev.expireAt.set(key, keepUntilMs);
+    };
+    extend(seatKeys.bitmap(e));
+    if (ev.expiry.size > 0) extend(seatKeys.expiry(e));
+    else ev.expireAt.delete(seatKeys.expiry(e));
+    return { result: 'OK' };
+  }
+
+  /**
+   * 다시 만들기 끝(RedisSeatStore.finish의 차례: 회차 목록 → REBUILD_QUOTAS_LUA들 → FINISH_REBUILD_LUA. 메모리는 한 번에 한다): 입력 검사 → 회차 목록에 넣기(결과와 관계없이) →
+   * 세대 키가 있으면 READY(gen) → rebuild 판 번호 ≠ gen이면 STALE → 시각 한 번·keepUntil 지킴 → 계정마다 보유 수를 그 값으로(수명 keepUntil) →
+   * 펜싱 카운터 = max(fence, maxToken)(바뀌면 수명은 더 늦은 쪽 keepUntil) → 세대 키(epoch = floor(now / 1000), node, gen, 수명 keepUntil)
+   */
+  async finish(eventId: string, input: RebuildFinishInput): Promise<RebuildStep> {
+    assertRebuildFinish(eventId, input);
+    const e = eventId;
+    const ev = this.db.event(e);
+    this.db.ctlEvents.add(e);
+    const stop = this.#fenced(ev, input.gen);
+    if (stop) return stop;
+    const now = this.clock.now();
+    if (!(input.keepUntilMs > now)) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${input.keepUntilMs} now ${now}`);
+    if (ev.fence !== undefined && !/^[0-9]+$/.test(ev.fence)) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.fence(e)}`);
+    for (const [a, n] of input.quotas) {
+      ev.quota.set(a, n);
+      ev.expireAt.set(seatKeys.quota(e, a), input.keepUntilMs);
+    }
+    const maxToken = input.maxToken ?? 0;
+    if (maxToken > 0 && (ev.fence === undefined || Number(ev.fence) < maxToken)) ev.fence = String(maxToken);
+    if (ev.fence !== undefined) {
+      const cur = ev.expireAt.get(seatKeys.fence(e));
+      if (cur === undefined || cur < input.keepUntilMs) ev.expireAt.set(seatKeys.fence(e), input.keepUntilMs);
+    }
+    ev.epoch = { epoch: Math.floor(now / 1000), node: input.node, gen: input.gen };
+    ev.expireAt.set(seatKeys.epoch(e), input.keepUntilMs);
+    return { result: 'OK' };
+  }
+
+  /** 장애 조치 뒤 세대 올리기(BUMP_EPOCH_LUA): 세대 키가 없으면 NOT_READY, node가 같으면 SAME, 다르면 epoch = max(epoch + 1, 지금 초)와 node(gen·수명 그대로) */
+  async bumpEpoch(eventId: string, node: string): Promise<{ result: 'BUMPED' | 'SAME'; epoch: number } | { result: 'NOT_READY' }> {
+    if (!KEY_PART.test(eventId)) throw new RangeError('회차 ID가 키 조각 모양이 아니다');
+    if (typeof node !== 'string' || node.length === 0) throw new RangeError('node가 비었다');
+    const ep = this.db.peek(eventId)?.epoch;
+    if (!ep) return { result: 'NOT_READY' };
+    if (ep.node === node) return { result: 'SAME', epoch: ep.epoch };
+    ep.epoch = Math.max(ep.epoch + 1, Math.floor(this.clock.now() / 1000));
+    ep.node = node;
+    return { result: 'BUMPED', epoch: ep.epoch };
   }
 
   async openSale(i: { eventId: string; seatCount: number; keepUntilMs: number }): Promise<{ created: boolean; seatEpoch: number }> {

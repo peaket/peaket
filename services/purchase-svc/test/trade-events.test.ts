@@ -182,6 +182,8 @@ const expectedLedger = (over: Partial<LedgerHoldEvent> = {}): LedgerHoldEvent =>
   occurredAtMs: HELD_AT,
   expiresAtMs: EXP,
   eventKey: uuid8Of(`SeatEvent:HELD:${EV}:${HOLD}:${SEAT}:${TOKEN}`),
+  holdId: HOLD,
+  purchaseSessionId: 'jti-abc-1',
   ...over,
 });
 
