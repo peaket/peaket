@@ -1,10 +1,11 @@
 # 규칙 모델 검사(docs/verification.md §2.2, wbs 0.9.1). 판단은 tools/spec-check/spec-check.mjs가 하고 여기서는 부르기만 한다.
 # - pr: 명세(specs/)·검사 도구(tools/spec-check/)·이 워크플로가 바뀌는 PR마다 형식 검사와 검사마다 시뮬레이션 1만 회(고정 시드)
 # - full: TLC 전수 검사. 주 1회(월요일 03:00 KST)와, 명세 목록(specs/specs.json)이 적은 관련 ADR이 바뀔 때(ci.yml의 specs_full)
-#   결과 파일(specs/results/)은 내려받을 묶음으로 남긴다. 저장소의 결과 파일은 사람이 로컬에서 `full --write`로 고쳐 커밋한다
+#   결과 파일은 spec-out/에 묶음마다 따로(<명세>.<묶음>.json과 반례) 내려받을 묶음으로 남긴다. 저장소의 결과 파일(specs/results/)은 사람이 로컬에서 `full --write`로 고쳐 커밋한다
 # 검사 도구(Quint, Apalache 묶음 안의 TLC, Quint 평가기)는 고정 판·고정 해시로 받는다(tools/spec-check/fetch-tools.mjs). 외부 계정은 필요 없다
-# 명세마다 잡 하나다(목록은 specs/specs.json에서 읽는다). 대기열 명세의 전수 검사가 길어져(2026-11-04 PRF-120, 로컬 8코어 30분 남짓) 세 명세를 한 잡에 넣으면
-# 러너(4코어)에서 90분을 넘을 수 있다
+# 잡은 명세마다 하나이고, 전수 검사(full)는 검사 목록의 shard가 다른 검사를 따로 한 잡씩 돈다(잡 목록은 `spec-check.mjs matrix`가 specs/specs.json에서 만든다).
+# 대기열 명세의 전수 검사가 길어져(2026-11-04 PRF-120, 로컬 8코어 30분 남짓) 세 명세를 한 잡에 넣으면 러너(4코어)에서 90분을 넘을 수 있어 명세별로 나눴고,
+# 그래도 대기열 한 잡이 러너에서 약 130분 [추정]이라 가장 큰 검사(진입 범위)를 따로 둔다. 전체 시간은 가장 긴 잡이 정한다(ADR-0187)
 # GitHub는 워크플로 파일이 바뀐 푸시에서 그 워크플로를 등록한다. 첫 푸시(2026-11-03)에 함께 올라간 이 파일은 등록되지 않아 수동·예약 실행이 돌지 않았다(FND-160에서 찾음).
 name: spec-check
 
@@ -18,6 +19,15 @@ on:
   schedule:
     - cron: '0 18 * * 0'
   workflow_dispatch:
+    inputs:
+      only:
+        description: "한 묶음만 다시 돌릴 때 '명세' 또는 '명세:묶음'(예: queue:proposed). 비우면 전부"
+        type: string
+        required: false
+      java_tool_options:
+        description: 'JVM 설정 실험용 JAVA_TOOL_OPTIONS(예: -XX:+UseParallelGC). 비우면 기본'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -27,24 +37,33 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      specs: ${{ steps.list.outputs.specs }}
+      matrix: ${{ steps.list.outputs.matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # 잡 목록(명세, 전수 검사는 묶음별)은 도구가 specs/specs.json에서 만든다. only는 수동 실행으로 한 묶음만 다시 돌릴 때다
       - id: list
-        run: echo "specs=$(node -p "JSON.stringify(require('./specs/specs.json').specs.map((s) => s.name))")" >> "$GITHUB_OUTPUT"
+        env:
+          MODE: ${{ inputs.mode || 'full' }}
+          ONLY: ${{ inputs.only }}
+        run: |
+          case "$MODE" in pr|full) ;; *) echo "::error::mode는 pr 또는 full이다: $MODE"; exit 1 ;; esac
+          echo "matrix=$(node tools/spec-check/spec-check.mjs matrix --mode "$MODE" ${ONLY:+--only "$ONLY"})" >> "$GITHUB_OUTPUT"
 
   spec:
+    name: spec (${{ matrix.spec }}${{ matrix.shard && format(', {0}', matrix.shard) || '' }})
     needs: list
     runs-on: ubuntu-24.04
-    # 대기열 명세의 전수 검사가 러너(4코어)에서 88.7분 걸렸다(2026-11-04 첫 실행, 로컬 8코어 31분). RB-05 복제 확인(ADR-0186)으로 로컬이 47분이 돼
-    # 러너는 약 135분 [추정]이다. 한도에 붙지 않게 두 배쯤을 둔다(호스트 러너 잡 상한 360분)
-    timeout-minutes: 300
+    # 대기열 명세의 전수 검사가 러너(4코어)에서 88.7분 걸렸다(2026-11-04 첫 실행, 로컬 8코어 31분). RB-05 복제 확인(ADR-0186)으로 로컬이 47분, 러너는 약 135분 [추정]이 돼
+    # 가장 큰 검사(진입 범위, 로컬 35분)를 따로 한 잡으로 뒀다. 그 잡이 러너에서 약 100분 [추정]이다(ADR-0187). 한도에 붙지 않게 두 배 가까이를 둔다(호스트 러너 잡 상한 360분)
+    timeout-minutes: 180
     strategy:
       fail-fast: false
-      matrix:
-        spec: ${{ fromJSON(needs.list.outputs.specs) }}
+      matrix: ${{ fromJSON(needs.list.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -70,19 +89,24 @@ jobs:
           key: quint-tools-${{ hashFiles('tools/spec-check/fetch-tools.mjs') }}
       - run: node tools/spec-check/fetch-tools.mjs
       - run: node --test "tools/spec-check/*.test.mjs"
+      # 결과는 spec-out/에 쓴다(저장소의 specs/results를 일부만 덮지 않게, 묶음마다 파일이 따로다). JVM 설정 실험은 수동 실행의 java_tool_options로 준다
       - env:
           MODE: ${{ inputs.mode || 'full' }}
           SPEC: ${{ matrix.spec }}
+          SHARD: ${{ matrix.shard }}
+          JVM_OPTS: ${{ inputs.java_tool_options }}
         run: |
           case "$MODE" in pr|full) ;; *) echo "::error::mode는 pr 또는 full이다: $MODE"; exit 1 ;; esac
+          if printf '%s' "$JVM_OPTS" | grep -qE '[^-A-Za-z0-9=:+., _]'; then echo "::error::java_tool_options에 쓸 수 없는 글자가 있다"; exit 1; fi
+          if [ -n "$JVM_OPTS" ]; then export JAVA_TOOL_OPTIONS="$JVM_OPTS"; fi
           if [ "$MODE" = full ]; then
-            node tools/spec-check/spec-check.mjs full --spec "$SPEC" --write
+            node tools/spec-check/spec-check.mjs full --spec "$SPEC" ${SHARD:+--shard "$SHARD"} --out spec-out
           else
             node tools/spec-check/spec-check.mjs pr --spec "$SPEC"
           fi
       - if: ${{ always() && (inputs.mode || 'full') == 'full' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: spec-results-${{ matrix.spec }}
-          path: specs/results/
+          name: spec-results-${{ matrix.spec }}${{ matrix.shard && format('-{0}', matrix.shard) || '' }}
+          path: spec-out/
           if-no-files-found: ignore

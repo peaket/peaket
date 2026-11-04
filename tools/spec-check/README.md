@@ -4,7 +4,7 @@
 
 | 파일 | 하는 일 |
 | --- | --- |
-| `spec-check.mjs` | `typecheck`(형식 검사), `pr`(형식 검사 + 검사마다 시뮬레이션, 고정 시드), `full`(형식 검사 + 검사마다 TLC 전수 검사, `--write`면 `specs/results/`에 결과와 반례 경로). 지켜짐을 기대한 검사는 위반이 없고 TLC가 끝까지 돌아야, 반례를 기대한 변형은 노린 불변식의 반례가 나와야 통과합니다. 진행성 검사(검사 목록의 `temporal`, `quint verify --temporal`)와 `simulate: false`인 검사는 `full`에서만 돌고 `pr`은 건너뛰었다고 찍습니다(wbs 0.9.3) |
+| `spec-check.mjs` | `typecheck`(형식 검사), `pr`(형식 검사 + 검사마다 시뮬레이션, 고정 시드), `full`(형식 검사 + 검사마다 TLC 전수 검사, `--write`면 `specs/results/`에 결과와 반례 경로). 일부만 돌릴 때는 `--shard 묶음`(검사 목록의 `shard`가 같은 검사끼리 한 묶음, 적지 않으면 `default`)·`--check 모듈`과 `--out 폴더`(저장소 안, `--write` 대신)를 쓰고, `matrix --mode pr|full [--only 명세[:묶음]]`은 CI 잡 목록을 JSON 한 줄로 냅니다(ADR-0187). 지켜짐을 기대한 검사는 위반이 없고 TLC가 끝까지 돌아야, 반례를 기대한 변형은 노린 불변식의 반례가 나와야 통과합니다. 진행성 검사(검사 목록의 `temporal`, `quint verify --temporal`)와 `simulate: false`인 검사는 `full`에서만 돌고 `pr`은 건너뛰었다고 찍습니다(wbs 0.9.3) |
 | `fetch-tools.mjs` | Apalache 묶음(안에 TLC가 있습니다)과 Quint Rust 평가기를 고정 판·고정 해시로 받아 Quint가 찾는 자리(`QUINT_HOME`, 기본 `~/.quint`)에 둡니다. Quint는 처음 쓸 때 이 둘을 해시 확인 없이 받기 때문에 먼저 채워 둡니다. `spec-check.mjs`도 검사 전에 매번 불러 해시를 다시 봅니다 |
 | `run-local.mjs` | 이 PC(Windows)에서 컨테이너(`peaket/spec-check:local`)로 `spec-check.mjs`를 같은 인자로 부릅니다 |
 | (모델 기반 시험과 잇기) | `specs.json`의 명세에 `mbt`가 있으면 형식 검사가 명세 `step`의 동작 이름과 시험 파일의 `SPEC_ACTIONS`를 견주고, 재생 기록 목록(`manifest.json`)의 명세 해시가 지금 명세와 같은지 봅니다. `traces`는 `mbt.modules`마다 지켜짐 시뮬레이션의 동작 기록(`--mbt --out-itf`)을 고정 시드로 내고 목록을 씁니다(wbs 2.3.4, V-T40, ADR-0184) |
@@ -31,6 +31,9 @@ node --test "tools/spec-check/*.test.mjs"          # 도구 자체 시험(Quint�
 node tools/spec-check/run-local.mjs pr              # 컨테이너에서 시뮬레이션
 node tools/spec-check/run-local.mjs full --write    # 컨테이너에서 TLC 전수 검사와 결과 기록
 node tools/spec-check/run-local.mjs traces --spec queue  # 모델 기반 시험의 재생 기록을 다시 만듦
+node tools/spec-check/run-local.mjs full --spec queue --shard proposed --out spec-out   # 한 묶음만(CI가 잡마다 이렇게 돈다)
+node tools/spec-check/run-local.mjs full --spec queue --check queue_lag2 --out spec-out # 검사 하나만
+node tools/spec-check/spec-check.mjs matrix --mode full   # CI 잡 목록(JSON). Quint·Java 없이 돈다
 ```
 
 이 PC에서는 pnpm 12 실행 파일이 Windows 응용 프로그램 제어에 막혀 있어(PROGRESS OPEN[12]) 잠금 파일을 컨테이너 안의 pnpm 12.16.0으로 만들었습니다(`pnpm install --lockfile-only`).

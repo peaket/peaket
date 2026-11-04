@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 import { PINS } from './fetch-tools.mjs';
-import { extractTlcTrace, judge, kstTimestamp, loadManifest, mbtActions, parseSimulation, parseTlc, refoundIsCounterexample, resultRecord, runsInSimulation, simulationFor, invariantsFor, stepActions } from './spec-check.mjs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { DEFAULT_SHARD, extractTlcTrace, judge, kstTimestamp, loadManifest, matrixFor, mbtActions, parseSimulation, parseTlc, refoundIsCounterexample, resolveRun, resultRecord, runsInSimulation, safeOut, shardOf, simulationFor, invariantsFor, stepActions } from './spec-check.mjs';
 
 const SPEC = `module queue {
   val inv_a = true
@@ -543,4 +546,103 @@ test('V-T40 목록_mbt는 시험 파일·기록 폴더·기록을 낼 모듈(명
   assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [] } }), files), /mbt는/);
   assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [{ main: 'queue_none', traces: 2 }] } }), files), /queue_none가/);
   assert.throws(() => load(manifest({ mbt: { ...MBT, modules: [{ main: 'queue_ok', traces: 0 }] } }), files), /양의 정수/);
+});
+
+// ---- 전수 검사를 CI 잡으로 나누기(ADR-0187) ----
+const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const sharded = (over = {}) => manifest({
+  checks: [
+    { main: 'queue_ok', expect: 'hold', shard: 'big', why: '지켜짐' },
+    { main: 'queue_bad', expect: 'violate', invariant: 'inv_b', why: 'V-T1' },
+  ],
+  ...over,
+});
+
+test('V-T1 묶음_검사에 shard를 적으면 그 이름의 묶음이고 적지 않으면 default다', () => {
+  const m = load(sharded());
+  assert.deepEqual(m.specs[0].checks.map(shardOf), ['big', DEFAULT_SHARD]);
+  assert.equal(DEFAULT_SHARD, 'default');
+});
+
+test('V-T1 묶음_shard는 식별자만 받는다(결과 파일 이름 <명세>.<묶음>.json과 잡 이름이 된다)', () => {
+  for (const bad of ['a/b', '', 'a b', '..', 7]) {
+    const m = sharded();
+    m.specs[0].checks[0].shard = bad;
+    assert.throws(() => load(m), /shard는 영문자·숫자·밑줄/, String(bad));
+  }
+});
+
+test('V-T1 행렬_full은 묶음이 둘 이상인 명세만 묶음별 잡으로 나누고, 하나뿐이면 통째로 한 잡이다', () => {
+  const m = load(sharded());
+  assert.deepEqual(matrixFor(m, 'full').include, [{ spec: 'queue', shard: 'big' }, { spec: 'queue', shard: 'default' }]);
+  const plain = load(manifest());
+  assert.deepEqual(matrixFor(plain, 'full').include, [{ spec: 'queue', shard: '' }]);
+});
+
+test('V-T1 행렬_pr은 시뮬레이션이 짧아 묶음이 있어도 명세마다 한 잡이다', () => {
+  assert.deepEqual(matrixFor(load(sharded()), 'pr').include, [{ spec: 'queue', shard: '' }]);
+});
+
+test('V-T1 행렬_only로 명세나 명세:묶음 하나만 남기고, 맞는 잡이 없거나 mode가 틀리면 거절한다', () => {
+  const m = load(sharded());
+  assert.deepEqual(matrixFor(m, 'full', 'queue:big').include, [{ spec: 'queue', shard: 'big' }]);
+  assert.deepEqual(matrixFor(m, 'full', 'queue').include.length, 2);
+  assert.throws(() => matrixFor(m, 'full', 'queue:nope'), /맞는 잡이 없다/);
+  assert.throws(() => matrixFor(m, 'full', 'seat'), /맞는 잡이 없다/);
+  assert.throws(() => matrixFor(m, 'weekly'), /mode는 pr 또는 full/);
+});
+
+test('V-T1 행렬_저장소의 specs.json은 대기열의 가장 큰 검사를 따로 한 잡으로 두고 다른 명세는 통째로 돈다', () => {
+  const m = loadManifest(readFileSync(`${REPO_ROOT}specs/specs.json`, 'utf8'), (f) => readFileSync(`${REPO_ROOT}${f}`, 'utf8'), { traceHash: false });
+  const full = matrixFor(m, 'full').include;
+  const queue = full.filter((x) => x.spec === 'queue');
+  assert.deepEqual(queue.map((x) => x.shard).sort(), ['default', 'proposed']);
+  // 가장 큰 검사 하나만 따로 두고, 나머지는 한 잡에서 차례로 돈다
+  assert.deepEqual(m.specs.find((x) => x.name === 'queue').checks.filter((c) => shardOf(c) === 'proposed').map((c) => c.main), ['queue_proposed']);
+  for (const x of full.filter((y) => y.spec !== 'queue')) assert.equal(x.shard, '');
+  // 모든 검사는 어느 묶음에든 들어간다
+  const queueChecks = m.specs.find((x) => x.name === 'queue').checks;
+  assert.equal(queueChecks.filter((c) => queue.some((q) => q.shard === shardOf(c))).length, queueChecks.length);
+});
+
+test('V-T1 행렬_matrix 명령은 Quint·Java 없이 GitHub 행렬 JSON 한 줄만 낸다(워크플로의 list 잡이 쓴다)', () => {
+  const out = execFileSync(process.execPath, [fileURLToPath(new URL('./spec-check.mjs', import.meta.url)), 'matrix', '--mode', 'full'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const lines = out.trim().split('\n');
+  assert.equal(lines.length, 1);
+  const parsed = JSON.parse(lines[0]);
+  assert.ok(Array.isArray(parsed.include) && parsed.include.every((x) => typeof x.spec === 'string' && typeof x.shard === 'string'));
+  const only = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./spec-check.mjs', import.meta.url)), 'matrix', '--mode', 'full', '--only', 'queue:proposed'], { cwd: REPO_ROOT, encoding: 'utf8' }));
+  assert.deepEqual(only.include, [{ spec: 'queue', shard: 'proposed' }]);
+});
+
+test('V-T1 인자_일부만 돌릴 때는 --write를 막고(저장소의 결과 파일을 일부만 덮지 않게) --out 폴더를 쓰게 한다', () => {
+  assert.deepEqual(resolveRun({ write: true }), { out: 'specs/results', partial: false, part: '', subset: {} });
+  assert.deepEqual(resolveRun({}), { out: null, partial: false, part: '', subset: {} });
+  const r = resolveRun({ shard: 'proposed', out: 'spec-out' });
+  assert.deepEqual(r, { out: 'spec-out', partial: true, part: 'proposed', subset: { shard: 'proposed' } });
+  assert.equal(resolveRun({ shard: 'a', check: 'm', out: 'o/' }).part, 'a.m');
+  assert.throws(() => resolveRun({ shard: 'proposed', write: true }), /--write는 명세 전체/);
+  assert.throws(() => resolveRun({ check: 'm', write: true }), /--write는 명세 전체/);
+  assert.throws(() => resolveRun({ write: true, out: 'x' }), /함께 쓰지 않는다/);
+  assert.throws(() => resolveRun({ shard: 'a', out: 'specs/results' }), /일부만 돌린 결과/);
+});
+
+test('V-T1 인자_--out은 저장소 안의 상대 폴더만 받는다', () => {
+  assert.equal(safeOut('spec-out'), 'spec-out');
+  assert.equal(safeOut('a\\b/'), 'a/b');
+  for (const bad of ['', ' ', '/tmp/x', 'C:/x', 'C:\\x', '../x', 'a/../../x', 'a\\..\\x']) assert.throws(() => safeOut(bad), /저장소 안의 상대 폴더/, bad);
+});
+
+test('V-T1 기록_일부만 돌린 결과 파일은 어느 묶음·검사였는지 남기고 전체 결과에는 남기지 않는다', () => {
+  const base = {
+    spec: { name: 'queue', file: 'specs/queue.qnt', scope: '사람 2명', adrs: ['0056'] },
+    specSha256: 'a'.repeat(64),
+    commit: { sha: 'b'.repeat(40), dirty: false },
+    tools: {},
+    now: new Date('2026-11-02T03:04:05Z'),
+    checks: [{ check: { main: 'queue_ok', expect: 'hold', why: '지켜짐' }, invariants: ['inv_a'], tlc: parseTlc(TLC_OK), seconds: 1, verdict: { ok: true, message: '' } }],
+  };
+  assert.deepEqual(resultRecord({ ...base, subset: { shard: 'big' } }).subset, { shard: 'big' });
+  assert.equal('subset' in resultRecord(base), false);
+  assert.equal('subset' in resultRecord({ ...base, subset: {} }), false);
 });
