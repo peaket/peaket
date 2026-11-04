@@ -6,8 +6,9 @@ import type { AccountRow, CreateKeyRecord, NewSession, RefreshRow, SessionRow, S
 import { type ActiveSession, CREATE_KEY_TTL_MS, normalizeEmail, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
 import { accountWithdrawnMessage } from './account-withdrawn-message.js';
 import { loginMethodChangedMessage } from './login-method-message.js';
+import { accountMergedMessage } from './account-merged-message.js';
 
-type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number };
+type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; mergedInto?: string; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number };
 
 type StoredSession = NewSession & { terminatedAt: number | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean };
 
@@ -22,9 +23,11 @@ interface State {
   reauthUses: Map<string, { accountId: string; usedAt: number; expiresAt: number }>;
   /** 트랜잭션이 Outbox에 적었을 사건(탈퇴 BOT-037, 로그인 수단 연결·해제 BOT-041). 시험이 읽는다 */
   outbox: OutboxMessage[];
+  holds: Map<string, { accountId: string; kind: string; state: 'OPEN' | 'CLOSED'; sourceVersion: number; updatedAt: number }>;
+  merges: Map<string, { primaryAccountId: string; mergedAccountId: string; mergedProvider: string; moved: Record<string, number>; requestedAt: number; confirmedAt: number }>;
 }
 
-const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [], reauthUses: new Map(), outbox: [] });
+const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [], reauthUses: new Map(), outbox: [], holds: new Map(), merges: new Map() });
 const copy = <K, V extends object>(m: Map<K, V>) => new Map([...m].map(([k, v]) => [k, { ...v }]));
 const clone = (s: State): State => ({
   accounts: copy(s.accounts),
@@ -36,6 +39,8 @@ const clone = (s: State): State => ({
   events: [...s.events],
   reauthUses: copy(s.reauthUses),
   outbox: [...s.outbox],
+  holds: copy(s.holds),
+  merges: copy(s.merges),
 });
 const providerKey = (p: Provider, id: string) => `${p}\u0000${id}`;
 const hex = (h: Uint8Array) => Buffer.from(h).toString('hex');
@@ -153,6 +158,11 @@ export class MemorySessionStore implements SessionStore {
     return this.#state.outbox.filter((m) => m.topic === 'identity.accounts-withdrawn');
   }
 
+  /** 남긴 병합 이력(시험용) */
+  mergesOf(primaryAccountId: string): { mergedAccountId: string; mergedProvider: string; moved: Record<string, number> }[] {
+    return [...this.#state.merges.values()].filter((m) => m.primaryAccountId === primaryAccountId).map((m) => ({ mergedAccountId: m.mergedAccountId, mergedProvider: m.mergedProvider, moved: m.moved }));
+  }
+
   /** 적힌 모든 사건(시험용) */
   outboxMessages(): OutboxMessage[] {
     return [...this.#state.outbox];
@@ -224,6 +234,33 @@ export class MemorySessionStore implements SessionStore {
           }
         return n;
       },
+      openHoldsOf: async (accountId) => [...s.holds.values()].filter((h) => h.accountId === accountId && h.state === 'OPEN').length,
+      setAccountHold: async (i) => {
+        const h = s.holds.get(i.sourceRef);
+        if (h && (h.accountId !== i.accountId || h.kind !== i.kind)) return 'CONFLICT';
+        if (h && i.sourceVersion <= h.sourceVersion) return 'STALE';
+        s.holds.set(i.sourceRef, { accountId: i.accountId, kind: i.kind, state: i.state, sourceVersion: i.sourceVersion, updatedAt: i.now });
+        return 'APPLIED';
+      },
+      purgeClosedHolds: async (before) => {
+        let n = 0;
+        for (const [k, h] of s.holds)
+          if (h.state === 'CLOSED' && h.updatedAt < before) {
+            s.holds.delete(k);
+            n++;
+          }
+        return n;
+      },
+      mergeAccounts: async (i) => {
+        for (const [k, v] of s.providers) if (v.accountId === i.absorbedAccountId) s.providers.set(k, { ...v, accountId: i.primaryAccountId });
+        const a = s.accounts.get(i.absorbedAccountId);
+        if (a) s.accounts.set(i.absorbedAccountId, { ...a, status: 'MERGED', mergedInto: i.primaryAccountId, email: null, emailVerified: false });
+        for (const [k, x] of s.accounts) if (x.mergedInto === i.absorbedAccountId) s.accounts.set(k, { ...x, mergedInto: i.primaryAccountId });
+        s.merges.set(i.mergeId, { primaryAccountId: i.primaryAccountId, mergedAccountId: i.absorbedAccountId, mergedProvider: i.mergedProvider, moved: i.moved, requestedAt: i.requestedAt, confirmedAt: i.now });
+      },
+      recordAccountMerged: async (i) => {
+        s.outbox.push(accountMergedMessage(i));
+      },
       recordLoginMethodChanged: async (i) => {
         s.outbox.push(loginMethodChangedMessage({ eventKey: randomUUID(), ...i }));
       },
@@ -255,6 +292,9 @@ export class MemorySessionStore implements SessionStore {
         for (const [k, p] of s.providers) if (p.accountId === accountId) s.providers.delete(k);
         for (const [k, d] of s.devices) if (d.accountId === accountId) s.devices.delete(k);
         for (const [k, c] of s.keys) if (s.sessions.get(c.sessionId)?.accountId === accountId) s.keys.delete(k);
+        // 대표 계정이 탈퇴하면 그 계정의 병합 이력도 지운다(data-classification '계정 연결 및 병합 감사 원장', 새 맥락 리뷰 중간 6)
+        const chain = new Set([accountId, ...[...s.accounts.values()].filter((x) => x.mergedInto === accountId).map((x) => x.id)]);
+        for (const [k, m] of s.merges) if (chain.has(m.primaryAccountId)) s.merges.delete(k);
       },
       closuresStartedBefore: async (before, limit) =>
         [...s.accounts.values()]
@@ -269,6 +309,7 @@ export class MemorySessionStore implements SessionStore {
           .slice(0, limit),
       // 메모리 세션 저장소는 보관 표를 보지 못한다(시험은 유스케이스의 앞선 확인으로 본다)
       activeHoldOf: async () => null,
+      verifiedOf: async () => null,
       useReauth: async (r) => {
         if (s.reauthUses.has(r.jti)) return false;
         s.reauthUses.set(r.jti, { accountId: r.accountId, usedAt: r.usedAt, expiresAt: r.expiresAt });

@@ -2,7 +2,7 @@
 // 탈퇴 뒤 정리와 만 14세 미만 정리 마무리(withdrawal-finish), 끝난 세션의 리프레시 토큰 해시(R-255), 쓴 재인증 토큰 기록,
 // 다른 계정 시도 기록 1년(BOT-020), 보존 전용 표의 연계정보 처리 기록 1년(docs/features/identity.md §5·§8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030)
 import type { Clock, Database, MaintenanceTask } from '@peaket/platform';
-import { DrizzleSessionStore, FinishWithdrawals } from './modules/session/index.js';
+import { ACCOUNT_HOLD_CLOSED_KEEP_MS, DrizzleSessionStore, FinishWithdrawals } from './modules/session/index.js';
 import { DrizzleVerificationStore, VerificationEraser } from './modules/verification/index.js';
 
 /** 다른 계정 시도 기록을 남기는 기간 [가정](docs/data.md identity_conflict_attempt) */
@@ -19,5 +19,7 @@ export function identityMaintenanceTasks(database: Database, clock: Clock): Main
     { name: 'conflict-attempt-purge', when: 'window', run: () => verifications.purgeConflictAttempts(clock.now() - CONFLICT_ATTEMPT_KEEP_MS) },
     { name: 'verification-record-purge', when: 'window', run: () => verifications.purgeVerificationRecords(clock.now()) },
     { name: 'restricted-hold-expired', when: 'daily', run: () => verifications.purgeExpiredHolds(clock.now()) },
+    // 닫힌 이의 제기·소명 계류 행은 30일 [가정] 뒤 지운다(docs/data.md account_hold, BOT-042)
+    { name: 'account-hold-closed', when: 'daily', run: () => sessions.transaction((tx) => tx.purgeClosedHolds(clock.now() - ACCOUNT_HOLD_CLOSED_KEEP_MS)) },
   ];
 }

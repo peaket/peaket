@@ -8,6 +8,7 @@ import type { CreateSession, CreateSessionResult, LoginOutcome } from '../applic
 import type { AddProvider } from '../application/add-provider.js';
 import type { GetLinkProposal } from '../application/get-link-proposal.js';
 import type { SeparateAccount } from '../application/separate-account.js';
+import type { SetAccountHold } from '../application/set-account-hold.js';
 import type { EndSession } from '../application/end-session.js';
 import type { GetVerificationStatus } from '../application/get-verification-status.js';
 import type { IssueReauthToken } from '../application/issue-reauth-token.js';
@@ -21,6 +22,7 @@ export interface IdentityPackage {
   SessionService: grpc.ServiceClientConstructor;
   IdentityService: grpc.ServiceClientConstructor;
   RestrictedCiHoldService: grpc.ServiceClientConstructor;
+  AccountHoldService: grpc.ServiceClientConstructor;
 }
 
 let pkg: IdentityPackage | undefined;
@@ -66,7 +68,7 @@ type UseCases = {
   linkView?: Pick<GetLinkProposal, 'run'>;
   separate?: Pick<SeparateAccount, 'run'>;
   /** 계정 설정의 로그인 수단 추가(SCR-040 ②, BOT-041). 없으면 UNAVAILABLE */
-  addProvider?: Pick<AddProvider, 'run'>;
+  addProvider?: Pick<AddProvider, 'add'>;
 };
 
 const PROVIDER_ENUM: Record<Provider, string> = { kakao: 'PROVIDER_KAKAO', naver: 'PROVIDER_NAVER', google: 'PROVIDER_GOOGLE' };
@@ -149,14 +151,14 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
     }),
     AddProvider: unary('AddProvider', async (r) => {
       if (!uc.addProvider) throw new SessionError('UNAVAILABLE', '로그인 수단 추가를 받지 않는다');
-      const result = await uc.addProvider.run({
+      const out = await uc.addProvider.add({
         sessionId: text(r.session_id),
         accountId: text(r.account_id),
         reauthToken: text(r.reauth_token),
         provider: providerOf(r.provider),
         providerUserId: text(r.provider_user_id),
       });
-      return { result: `ADD_PROVIDER_RESULT_${result}` };
+      return { result: `ADD_PROVIDER_RESULT_${out.result}`, merge_proposal_id: out.mergeProposalId ?? '' };
     }),
     SeparateAccount: unary('SeparateAccount', async (r) => {
       if (!uc.separate) throw new SessionError('UNAVAILABLE', '연결 제안 저장소가 없다');
@@ -179,6 +181,34 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
       });
       if (out.result === 'ISSUED') return { result: 'REAUTH_RESULT_ISSUED', reauth_token: out.token, reauth_token_expires_at_ms: out.expiresAt };
       return { result: out.result === 'ACCOUNT_MISMATCH' ? 'REAUTH_RESULT_ACCOUNT_MISMATCH' : 'REAUTH_RESULT_REVERIFY_REQUIRED' };
+    }),
+  };
+}
+
+const HOLD_KIND: Record<string, 'VERIFICATION_APPEAL' | 'DISPUTE' | 'APPEAL'> = {
+  ACCOUNT_HOLD_KIND_VERIFICATION_APPEAL: 'VERIFICATION_APPEAL',
+  ACCOUNT_HOLD_KIND_DISPUTE: 'DISPUTE',
+  ACCOUNT_HOLD_KIND_APPEAL: 'APPEAL',
+};
+const HOLD_STATE: Record<string, 'OPEN' | 'CLOSED'> = { ACCOUNT_HOLD_STATE_OPEN: 'OPEN', ACCOUNT_HOLD_STATE_CLOSED: 'CLOSED' };
+
+/** AccountHoldService: ops-svc가 이의 제기·소명 건의 열림·닫힘을 알린다(identity §2.1 '계정 병합의 첫 구현', BOT-042) */
+export function accountHoldHandlers(uc: { hold: Pick<SetAccountHold, 'run'> }, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
+  const unary = unaryOf(onError);
+  return {
+    SetAccountHold: unary('SetAccountHold', async (r) => {
+      const kind = HOLD_KIND[String(r.kind)];
+      const state = HOLD_STATE[String(r.state)];
+      if (!kind || !state) throw new SessionError('INVALID_ARGUMENT', 'kind·state가 없다');
+      let out: 'APPLIED' | 'STALE' | 'CONFLICT';
+      try {
+        out = await uc.hold.run({ sourceRef: text(r.source_ref), accountId: text(r.account_id), kind, state, sourceVersion: Number(r.source_version ?? 0) });
+      } catch (e) {
+        if (e instanceof Error && !(e instanceof SessionError)) throw new SessionError('INVALID_ARGUMENT', e.message);
+        throw e;
+      }
+      if (out === 'CONFLICT') throw new SessionError('ALREADY_EXISTS', '같은 건에 다른 계정·종류가 왔다');
+      return { changed: out === 'APPLIED' };
     }),
   };
 }

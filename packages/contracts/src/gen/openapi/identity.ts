@@ -508,7 +508,7 @@ export const GetV1IdentityMergeProposalsProposalIdResponse = zod.object({
 })
 
 /**
- * FR-048, POL-034. 막는 사유가 있으면 409. 되돌리기 없음, 두 계정에 알림
+ * FR-048, POL-034. 막는 사유가 있으면 409(type merge-blocked, 본문 blockers), 흡수 계정에 티켓·후기가 있으면 409(type merge-invariant-violated, SEV3). 세 서비스 확인이 답하지 않으면 503과 Retry-After. 되돌리기 없음, 두 계정에 알림(docs/features/identity.md §2.1 '계정 병합의 첫 구현', 추천 적용 2026-11-04)
  * @summary 병합 확인(재인증 토큰 필요). 흡수 계정 잠금·세션 종료 뒤 데이터 이동 시작
  */
 export const PostV1IdentityMergeProposalsProposalIdConfirmationParams = zod.object({

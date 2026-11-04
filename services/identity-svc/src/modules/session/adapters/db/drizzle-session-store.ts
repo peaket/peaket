@@ -5,9 +5,10 @@ import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, type DbTran
 import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { accountWithdrawnMessage } from '../account-withdrawn-message.js';
 import { loginMethodChangedMessage } from '../login-method-message.js';
+import { accountMergedMessage } from '../account-merged-message.js';
 import type { AccountStatus, CreateKeyRecord, RefreshRow, SessionRow, SessionStore, SessionTx } from '../../domain/ports.js';
 import { CREATE_KEY_TTL_MS, type LoginVerdict, type Provider } from '../../domain/session.js';
-import { account, accountProvider, device, reauthTokenUse, refreshTokenHash, session, sessionCreateKey } from './schema.js';
+import { account, accountHold, accountMerge, accountProvider, device, reauthTokenUse, refreshTokenHash, session, sessionCreateKey } from './schema.js';
 
 const date = (ms: number) => new Date(ms);
 const ms = (d: Date | null) => (d === null ? null : d.getTime());
@@ -135,6 +136,58 @@ export class DrizzleSessionStore implements SessionStore {
       },
       unlinkProvider: async (accountId, provider) =>
         (await tx.delete(accountProvider).where(and(eq(accountProvider.accountId, accountId), eq(accountProvider.provider, provider))).returning({ a: accountProvider.accountId })).length,
+      openHoldsOf: async (accountId) => {
+        const [r] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(accountHold)
+          .where(and(eq(accountHold.accountId, accountId), eq(accountHold.state, 'OPEN')));
+        return r?.n ?? 0;
+      },
+      setAccountHold: async (i) => {
+        const [h] = await tx.select().from(accountHold).where(eq(accountHold.sourceRef, i.sourceRef)).for('update');
+        if (h && (h.accountId !== i.accountId || h.kind !== i.kind)) return 'CONFLICT';
+        if (h && i.sourceVersion <= h.sourceVersion) return 'STALE';
+        const row = { sourceRef: i.sourceRef, accountId: i.accountId, kind: i.kind, state: i.state, sourceVersion: i.sourceVersion, updatedAt: date(i.now) };
+        // 같은 건의 처음 쓰기가 겹치면 기본 키가 한쪽을 막고, 늦은 쪽은 충돌 갱신으로 온다: 계정·종류가 같고 판이 클 때만 바꾸고(새 맥락 리뷰 낮음 11),
+        // 바꾸지 않았으면 지금 행으로 STALE·CONFLICT를 가린다
+        const done = await tx
+          .insert(accountHold)
+          .values(row)
+          .onConflictDoUpdate({
+            target: accountHold.sourceRef,
+            set: { state: row.state, sourceVersion: row.sourceVersion, updatedAt: row.updatedAt },
+            where: sql`${accountHold.sourceVersion} < ${i.sourceVersion} and ${accountHold.accountId} = ${i.accountId} and ${accountHold.kind} = ${i.kind}`,
+          })
+          .returning({ r: accountHold.sourceRef });
+        if (done.length > 0) return 'APPLIED';
+        const [cur] = await tx.select({ accountId: accountHold.accountId, kind: accountHold.kind }).from(accountHold).where(eq(accountHold.sourceRef, i.sourceRef));
+        return cur && (cur.accountId !== i.accountId || cur.kind !== i.kind) ? 'CONFLICT' : 'STALE';
+      },
+      purgeClosedHolds: async (before) =>
+        (await tx.delete(accountHold).where(and(eq(accountHold.state, 'CLOSED'), lte(accountHold.updatedAt, date(before)))).returning({ r: accountHold.sourceRef })).length,
+      mergeAccounts: async (i) => {
+        await tx.update(accountProvider).set({ accountId: i.primaryAccountId }).where(eq(accountProvider.accountId, i.absorbedAccountId));
+        await tx
+          .update(account)
+          // 흡수 계정의 프로필은 병합 즉시 파기한다(POL-034, data-classification, 새 맥락 리뷰 중간 2). 회원 코드도 비운다(UNIQUE)
+          .set({ status: 'MERGED', mergedIntoAccountId: i.primaryAccountId, email: null, emailVerified: false, nickname: null, phone: null, memberCode: null, savedBookerName: null, savedBookerPhone: null })
+          .where(eq(account.id, i.absorbedAccountId));
+        // 병합 사슬을 한 단계로(흡수 계정을 가리키던 계정도 대표 계정으로, docs/data.md §4)
+        await tx.update(account).set({ mergedIntoAccountId: i.primaryAccountId }).where(eq(account.mergedIntoAccountId, i.absorbedAccountId));
+        await tx.insert(accountMerge).values({
+          id: i.mergeId,
+          primaryAccountId: i.primaryAccountId,
+          mergedAccountId: i.absorbedAccountId,
+          mergedProvider: i.mergedProvider,
+          movedSummary: i.moved,
+          requestedAt: date(i.requestedAt),
+          confirmedAt: date(i.now),
+        });
+      },
+      recordAccountMerged: async (i) => {
+        // 병합 확정 트랜잭션의 마지막 쓰기(ADR-0143 결정 3, docs/data.md §4의 9번)
+        await writeOutbox(tx, this.clock, [accountMergedMessage(i)]);
+      },
       recordLoginMethodChanged: async (i) => {
         // 로그인 수단을 잇거나 지운 트랜잭션의 마지막 쓰기(BOT-041, ADR-0143 결정 3)
         await writeOutbox(tx, this.clock, [loginMethodChangedMessage({ eventKey: uuidv7(this.clock), ...i })]);
@@ -182,6 +235,11 @@ export class DrizzleSessionStore implements SessionStore {
         await tx.delete(accountProvider).where(eq(accountProvider.accountId, accountId));
         await tx.delete(device).where(eq(device.accountId, accountId));
         await tx.execute(sql`delete from session_create_key where session_id in (select id from session where account_id = ${accountId})`);
+        // 대표 계정이 탈퇴하면 그 계정의 병합 이력도 함께 파기한다(data-classification '계정 연결 및 병합 감사 원장', 새 맥락 리뷰 중간 6)
+        // 사슬 앞단(이 계정에 흡수된 계정이 대표였던 병합)도 함께 지운다. 사슬은 한 단계로 고쳐 두어 그 계정들은 이 계정을 바로 가리킨다(다시 검토 낮음 1)
+        await tx
+          .delete(accountMerge)
+          .where(or(eq(accountMerge.primaryAccountId, accountId), inArray(accountMerge.primaryAccountId, tx.select({ id: account.id }).from(account).where(eq(account.mergedIntoAccountId, accountId)))));
       },
       closuresStartedBefore: async (before, limit) =>
         (
@@ -201,6 +259,11 @@ export class DrizzleSessionStore implements SessionStore {
             .orderBy(asc(account.id))
             .limit(limit)
         ).map((r) => r.id),
+      verifiedOf: async (accountId) => {
+        // 본인확인 기록 표는 본인확인 컨텍스트의 표다. 같은 트랜잭션에서 있는지만 본다(activeHoldOf와 같은 방식)
+        const r = await tx.execute(sql`select 1 from identity_verification where account_id = ${accountId}`);
+        return r.rows.length > 0;
+      },
       activeHoldOf: async (accountId, now) => {
         // 대조값 보관 표는 본인확인 컨텍스트의 표다. 같은 트랜잭션에서 상태와 끝만 읽는다(두 번째 연결을 빌리지 않게, 다시 보기 낮음)
         const r = await tx.execute(sql`

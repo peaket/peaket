@@ -32,6 +32,7 @@ export function recordingSignals(): SessionSignals & { seen: string[] } {
     reauthMismatch: (p) => seen.push(`mismatch:${p}`),
     reverifyRequired: (p) => seen.push(`reverify:${p}`),
     refreshed: (aud, result) => seen.push(`refresh:${aud}:${result}`),
+    mergeInvariantViolated: () => seen.push('merge-invariant'),
   };
 }
 

@@ -39,7 +39,7 @@ export function needsReverification(purpose: ReauthPurpose, strength: ReauthStre
 
 /** 세션이 끝나는 까닭(asyncapi SessionTerminated.reason 가운데 이 단계가 쓰는 것) */
 /** DELETE: 계정이 없어져 끝냄(팬 탈퇴, asyncapi control.sessions-terminated) */
-export type TerminationReason = 'LOGOUT' | 'DEVICE_LIMIT' | 'REFRESH_REUSE' | 'DELETE';
+export type TerminationReason = 'LOGOUT' | 'DEVICE_LIMIT' | 'REFRESH_REUSE' | 'DELETE' | 'MERGED';
 
 /** 만 14세 미만 정리를 시작하고 끝내기까지 두는 틈 [가정](결과 대화상자를 보일 틈, identity §8 '탈퇴의 첫 구현') */
 export const CLOSURE_GRACE_MS = 10 * 60_000;

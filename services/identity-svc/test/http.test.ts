@@ -5,6 +5,7 @@ import { Writable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { AddProvider, CreateSession, JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
+import { MergeCheckUnavailable } from '../src/modules/session/domain/ports.js';
 import { HmacIdentityHashers, SetRestrictedCiHold } from '../src/modules/verification/index.js';
 import { ConfirmVerification } from '../src/modules/verification/application/confirm-verification.js';
 import { StartVerification } from '../src/modules/verification/application/start-verification.js';
@@ -260,6 +261,78 @@ describe('로그인 수단 해제 경로(BOT-041, I-T33)', () => {
     const ok = await unlink('google', { ...fan(s), 'x-reauth-token': await reauthOf(s) });
     expect(ok.statusCode).toBe(204);
     expect(ok.headers['cache-control']).toBe('no-store');
+  });
+});
+
+describe('계정 병합 경로(BOT-042, I-T31·I-T32)', () => {
+  const fan = (s: { accountId: string; sessionId: string }) => ({ 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '' });
+  const reauthOf = async (s: { accountId: string; sessionId: string }) => (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, svc.clock.now())).token;
+
+  test('I-T31·I-T32_병합제안은제안한계정만읽고_확정은재인증이있어야202이며_그뒤흡수계정의제공자로로그인하면대표계정이다', async () => {
+    const a = await login();
+    const gsub = `g-${newKey().slice(0, 8)}`;
+    const b = await svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'google', providerUserId: gsub, email: null, deviceId: null });
+    const r = await svc.app.get(AddProvider).add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await reauthOf(a), provider: 'google', providerUserId: gsub });
+    expect(r.result).toBe('OTHER_ACCOUNT');
+    const url = `/v1/identity/merge-proposals/${r.mergeProposalId}`;
+    const got = await svc.http.inject({ method: 'GET', url, headers: fan(a) });
+    expect(got.statusCode).toBe(200);
+    expect(got.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(got.payload)).toMatchObject({ proposalId: r.mergeProposalId, primaryAccountId: a.accountId, mergedAccountId: b.accountId, status: 'PROPOSED', blockers: [], moved: { providers: 1 } });
+    expect((await svc.http.inject({ method: 'GET', url, headers: fan(b) })).statusCode).toBe(404);
+    expect((await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: fan(a) })).statusCode).toBe(403);
+    const ok = await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: { ...fan(a), 'x-reauth-token': await reauthOf(a) } });
+    expect(ok.statusCode).toBe(202);
+    expect((await svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'google', providerUserId: gsub, email: null, deviceId: null })).accountId).toBe(a.accountId);
+    expect((await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: { ...fan(a), 'x-reauth-token': await reauthOf(a) } })).statusCode).toBe(404);
+  });
+
+  test('새맥락리뷰낮음9_확정의막는사유는409merge-blocked와blockers_불변식위반은409merge-invariant-violated_세서비스가답하지않으면503과Retry-After다', async () => {
+    let mode: 'ok' | 'blocked' | 'invariant' | 'down' = 'ok';
+    const checkers = (['purchase', 'ticket', 'core'] as const).map((service) => ({
+      service,
+      check: async () => {
+        if (mode === 'down' && service === 'core') throw new MergeCheckUnavailable(service);
+        if (mode === 'blocked' && service === 'purchase') return { blocks: [{ service, reason: 'SEAT_HOLD' as const }], counts: {} };
+        if (mode === 'invariant' && service === 'ticket') return { blocks: [{ service, reason: 'ABSORBED_HAS_TICKETS' as const }], counts: {} };
+        return { blocks: [], counts: {} };
+      },
+    }));
+    const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify((await fanKey()).privateJwk) });
+    const signer2 = new JoseTokenSigner(keys, ISSUER);
+    const seen2 = recordingSignals();
+    const reauth2 = async (s: { accountId: string; sessionId: string }) => (await signer2.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, clock.now())).token;
+    const s2 = await createService({
+      name: 'identity-svc',
+      module: AppModule.register({ memory: true, session: { signer: signer2, keys, deviceRefs: testDeviceRefs(), signals: seen2, mergeCheckers: checkers as never }, verification: { provider: testAgency(clock), hashers: HmacIdentityHashers.single(Buffer.alloc(32, 4), Buffer.alloc(32, 5)) } }),
+      env: { PEAKET_ENV: 'ci' },
+      clock,
+      logDestination: quiet,
+    });
+    try {
+      const a = await s2.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: `k-${newKey().slice(0, 8)}`, email: null, deviceId: null });
+      const gsub = `g-${newKey().slice(0, 8)}`;
+      await s2.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'google', providerUserId: gsub, email: null, deviceId: null });
+      const r = await s2.app.get(AddProvider).add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await reauth2(a), provider: 'google', providerUserId: gsub });
+      const url = `/v1/identity/merge-proposals/${r.mergeProposalId}/confirmation`;
+      const post = async () => s2.http.inject({ method: 'POST', url, headers: { ...fan(a), 'x-reauth-token': await reauth2(a) } });
+      mode = 'blocked';
+      const blocked = await post();
+      expect(blocked.statusCode).toBe(409);
+      expect(JSON.parse(blocked.payload)).toMatchObject({ type: expect.stringMatching(/merge-blocked$/), blockers: ['ACTIVE_PURCHASE_SESSION'] });
+      mode = 'invariant';
+      const inv = await post();
+      expect(inv.statusCode).toBe(409);
+      expect(JSON.parse(inv.payload)).toMatchObject({ type: expect.stringMatching(/merge-invariant-violated$/) });
+      expect(seen2.seen.filter((x) => x === 'merge-invariant')).toHaveLength(1);
+      mode = 'down';
+      const down = await post();
+      expect(down.statusCode).toBe(503);
+      expect(JSON.parse(down.payload)).toMatchObject({ type: expect.stringMatching(/merge-check-unavailable$/) });
+      expect(down.headers['retry-after']).toBe('5');
+    } finally {
+      await s2.close();
+    }
   });
 });
 

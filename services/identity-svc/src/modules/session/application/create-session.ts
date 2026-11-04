@@ -277,9 +277,28 @@ export class CreateSession {
     let newAccount = isNew;
     // 같은 계정의 로그인이 겹쳐도 기기 수는 한 번에 하나씩 센다(POL-019)
     await tx.lockAccount(accountId);
+    // 잠근 뒤 그 (제공자, sub)의 계정을 다시 찾는다(BOT-030이 넘긴 것, BOT-042): 잠그기 전에 병합으로 다른 계정에 옮겨졌으면 그 계정으로 간다(흡수된 계정에 세션·기기를 만들지 않게).
+    // 해제·탈퇴로 사라졌으면 아래 새 계정 길로 간다. 제공자 잠금을 잡고 있어 같은 제공자 계정의 다른 로그인과 겹치지 않는다
+    // 옮겨 간 계정의 상태(탈퇴 정리 중 등)는 처음 찾은 계정과 같게 다룬다(그 수단은 그 계정 것이라 새 계정을 만들면 수단을 빼앗는다, 새 맥락 리뷰 중간 4).
+    // 그 계정을 잠그는 사이 또 옮겨졌을 수 있어 자리를 잡을 때까지 다시 찾는다(병합 두 번이 겹치는 일은 드물어 세 번까지)
+    let gone = false;
+    if (!newAccount) {
+      for (let hop = 0; ; hop++) {
+        const again = await tx.findAccountByProvider(i.provider, i.providerUserId);
+        if (!again) {
+          gone = true;
+          break;
+        }
+        if (again.id === accountId) break;
+        if (hop >= 2) throw new SessionError('UNAVAILABLE', '로그인하는 동안 로그인 수단이 계속 옮겨졌다');
+        accountId = again.id;
+        await tx.lockAccount(accountId);
+      }
+    }
     // 계정을 찾은 뒤 잠그기 전에 탈퇴가 끝났을 수 있다(새 맥락 리뷰 M1): 잠근 뒤 상태를 다시 본다. 탈퇴로 로그인 수단 연결도 지워졌으니
-    // 그 계정에 세션·기기를 만들지 않고 새 계정으로 간다(바로 재가입, identity §8). 제공자 잠금을 잡고 있어 같은 제공자 계정의 다른 로그인과 겹치지 않는다
-    if (!newAccount && (await tx.accountStatusOf(accountId)) === 'DELETED') {
+    // 그 계정에 세션·기기를 만들지 않고 새 계정으로 간다(바로 재가입, identity §8)
+    const nowStatus = newAccount ? 'ACTIVE' : await tx.accountStatusOf(accountId);
+    if (!newAccount && (gone || nowStatus === 'DELETED' || nowStatus === 'MERGED')) {
       accountId = uuidv7(this.clock);
       newAccount = true;
       await tx.createAccount({ id: accountId, email: i.email, emailVerified: i.emailVerified === true }, now);

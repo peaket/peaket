@@ -257,9 +257,11 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     if (prog.purpose === 'link') {
       // 로그인 수단 추가: 새 로그인 세션은 만들지 않는다. 결과는 돌아갈 주소의 loginMethod로 넘긴다(identity §2.1)
       try {
-        const result = await identity.addProvider({ sessionId: prog.sid ?? '', accountId: prog.sub ?? '', reauthToken: prog.reauthToken ?? '', provider, providerUserId: sub });
-        log('link-add.completed', { provider, result });
-        return redirect(withResult(prog.returnTo, 'loginMethod', result), [clearProgressCookie()]);
+        const { result, mergeProposalId } = await identity.addProvider({ sessionId: prog.sid ?? '', accountId: prog.sub ?? '', reauthToken: prog.reauthToken ?? '', provider, providerUserId: sub });
+        log('link-add.completed', { provider, result, merge: mergeProposalId !== null });
+        // 다른 계정이고 병합 제안이 있으면 그 ID도 싣는다(계정 합치기 화면 SCR-040 ④, BOT-043)
+        const to = withResult(prog.returnTo, 'loginMethod', result);
+        return redirect(mergeProposalId ? withResult(to, 'mergeProposal', mergeProposalId) : to, [clearProgressCookie()]);
       } catch (e) {
         log('link-add.failed', { provider, reason: 'identity', code: codeOf(e) });
         return redirect(withResult(prog.returnTo, 'loginMethod', 'failed'), [clearProgressCookie()]);

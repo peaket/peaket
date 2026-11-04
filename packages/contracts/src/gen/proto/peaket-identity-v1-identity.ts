@@ -248,6 +248,10 @@ export const identityV1Identity: Record<string, unknown> = {
                     "result": {
                       "type": "AddProviderResult",
                       "id": 1
+                    },
+                    "merge_proposal_id": {
+                      "type": "string",
+                      "id": 2
                     }
                   }
                 },

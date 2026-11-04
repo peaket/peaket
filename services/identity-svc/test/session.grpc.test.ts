@@ -119,9 +119,9 @@ describe('SessionService(gRPC)', () => {
     const r = await create({ provider_user_id: 'grpc-add-1', email: '' });
     const tok = (await kitRef.signer.reauth({ accountId: r.session.account_id, sessionId: r.session.session_id, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, kitRef.clock.now())).token;
     const base = { session_id: r.session.session_id, account_id: r.session.account_id, provider: 'PROVIDER_GOOGLE', provider_user_id: 'grpc-add-g' };
-    expect(await call('AddProvider', { ...base, reauth_token: 'nope' })).toEqual({ result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED' });
-    expect(await call('AddProvider', { ...base, reauth_token: tok })).toEqual({ result: 'ADD_PROVIDER_RESULT_LINKED' });
-    expect(await call('AddProvider', { ...base, reauth_token: tok })).toEqual({ result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED' });
+    expect(await call('AddProvider', { ...base, reauth_token: 'nope' })).toEqual({ result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED', merge_proposal_id: '' });
+    expect(await call('AddProvider', { ...base, reauth_token: tok })).toEqual({ result: 'ADD_PROVIDER_RESULT_LINKED', merge_proposal_id: '' });
+    expect(await call('AddProvider', { ...base, reauth_token: tok })).toEqual({ result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED', merge_proposal_id: '' });
   });
 
   test('I-T50_④_EndSession은멱등이다', async () => {

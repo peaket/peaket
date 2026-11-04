@@ -162,6 +162,8 @@ enum AddProviderResult {
 
 message AddProviderResponse {
   AddProviderResult result = 1;
+  // OTHER_ACCOUNT이고 병합 제안을 만들었으면 그 ID(id:merge, 10분, docs/features/identity.md §2.1 '계정 병합의 첫 구현'). 세 서비스 확인이 답하지 않으면 비운다
+  string merge_proposal_id = 2;
 }
 
 message SeparateAccountRequest {

@@ -225,6 +225,10 @@ message MergeBlock {
 
 message CheckAccountMergeResponse {
   repeated MergeBlock blocks = 1;
+  // 흡수 계정의 찜·오픈 알림 구독·배송지 수(대표 계정으로 옮겨질 것, 병합 요약 MergeProposal.moved, 추천 적용 2026-11-04)
+  int32 absorbed_wishes = 2;
+  int32 absorbed_subscriptions = 3;
+  int32 absorbed_addresses = 4;
 }
 
 // 부르는 쪽: ops-svc만(CS 처리함 상세 SCR-045의 문의 건, ADR-0148 결정 7).

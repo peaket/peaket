@@ -74,6 +74,24 @@ export interface SessionTx {
   unlinkProvider(accountId: string, provider: Provider): Promise<number>;
   /** 로그인 수단 연결·해제 사건을 Outbox에 적는다. 트랜잭션의 마지막 쓰기다(identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BOT-041) */
   recordLoginMethodChanged(i: { accountId: string; change: 'LINKED' | 'UNLINKED'; provider: Provider; occurredAt: number }): Promise<void>;
+  /**
+   * 그 계정에 본인확인 기록이 있는가(병합 확정이 두 계정을 잠근 뒤 대표 계정을 다시 고른다, 새 맥락 리뷰 높음 1).
+   * 본인확인 컨텍스트의 표를 같은 DB 트랜잭션에서 읽는다(본인확인 확정은 계정을 공유 잠금으로 읽으므로 잠근 뒤의 값이 맞다). 표를 보지 못하는 저장소는 null
+   */
+  verifiedOf(accountId: string): Promise<boolean | null>;
+  /** 그 계정의 열린(OPEN) 이의 제기·소명 계류 행 수(account_hold, 병합의 APPEAL_PENDING, BOT-042) */
+  openHoldsOf(accountId: string): Promise<number>;
+  /** account_hold 쓰기: 판 번호가 저장한 판보다 클 때만(같은 source_ref에 다른 계정·종류면 'CONFLICT'). 반영했으면 'APPLIED', 아니면 'STALE' */
+  setAccountHold(i: { sourceRef: string; accountId: string; kind: 'VERIFICATION_APPEAL' | 'DISPUTE' | 'APPEAL'; state: 'OPEN' | 'CLOSED'; sourceVersion: number; now: number }): Promise<'APPLIED' | 'STALE' | 'CONFLICT'>;
+  /** before 전에 닫힌 account_hold 행을 지운다. 지운 수 */
+  purgeClosedHolds(before: number): Promise<number>;
+  /**
+   * 병합 확정의 계정 쓰기(identity §2.1 '계정 병합의 첫 구현'): 흡수 계정의 로그인 수단을 대표 계정으로 옮기고, 흡수 계정을 MERGED로 바꾸며 이메일·닉네임을 지우고,
+   * 흡수 계정을 가리키던 계정도 대표 계정을 가리키게 고친 뒤 account_merge 행을 남긴다. 세션 끝내기와 사건은 부르는 쪽이 한다
+   */
+  mergeAccounts(i: { mergeId: string; primaryAccountId: string; absorbedAccountId: string; mergedProvider: Provider; moved: Record<string, number>; requestedAt: number; now: number }): Promise<void>;
+  /** 병합 사건(identity.accounts-merged)을 Outbox에 적는다. 트랜잭션의 마지막 쓰기다 */
+  recordAccountMerged(i: { mergeId: string; primaryAccountId: string; mergedAccountId: string; confirmedAt: number }): Promise<void>;
   /** 계정의 그 기기 가명 행 ID. 없으면 만든다 */
   bindDevice(accountId: string, deviceRef: string, now: number): Promise<string>;
   /** 끝나지 않았고 만료 전인 그 계정의 세션 */
@@ -160,6 +178,8 @@ export interface SessionSignals {
   reauthMismatch(provider: Provider): void;
   reverifyRequired(provider: Provider): void;
   refreshed(aud: 'fan', result: 'rotated' | 'retried' | 'reused' | 'invalid'): void;
+  /** 병합 불변식 위반: 흡수 계정에 티켓·후기가 있다(SEV3, I-T32, BOT-042) */
+  mergeInvariantViolated(): void;
 }
 
 export const PUBLIC_KEYS = Symbol('identity.PublicKeys');
@@ -257,4 +277,31 @@ export class LinkStoreUnavailable extends Error {
     super('연결 제안 저장소에 닿지 못했다', { cause });
     this.name = 'LinkStoreUnavailable';
   }
+}
+
+export const MERGE_CHECKERS = Symbol('identity.MergeCheckers');
+/** 세 서비스의 CheckAccountMerge(purchase·ticket·core, identity §2.1 '계정 병합의 첫 구현'). 답하지 않으면 MergeCheckUnavailable */
+export interface MergeChecker {
+  readonly service: 'purchase' | 'ticket' | 'core';
+  check(i: { primaryAccountId: string; absorbedAccountId: string }): Promise<import('./merge.js').CheckResult>;
+}
+
+/** CheckAccountMerge가 기한 안에 답하지 않았다(503, Retry-After) */
+export class MergeCheckUnavailable extends Error {
+  constructor(
+    readonly service: string,
+    cause?: unknown,
+  ) {
+    super(`${service} CheckAccountMerge가 답하지 않았다`, { cause });
+    this.name = 'MergeCheckUnavailable';
+  }
+}
+
+export const MERGE_PROPOSALS = Symbol('identity.MergeProposals');
+/** 병합 제안(세션·캐시 Redis id:merge, 10분). 모든 메서드: @throws LinkStoreUnavailable 저장소에 닿지 못함 */
+export interface MergeProposals {
+  save(p: import('./merge.js').StoredMergeProposal): Promise<void>;
+  /** 없거나 만료면 null */
+  get(id: string): Promise<import('./merge.js').StoredMergeProposal | null>;
+  remove(id: string): Promise<void>;
 }

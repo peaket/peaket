@@ -15,11 +15,18 @@ import { GetVerificationStatus } from './application/get-verification-status.js'
 import { IssueReauthToken } from './application/issue-reauth-token.js';
 import { RefreshSession } from './application/refresh-session.js';
 import { WithdrawAccount } from './application/withdraw-account.js';
-import { ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, LINK_PROPOSALS, type LinkProposals, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
+import { ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, LINK_PROPOSALS, type LinkProposals, MERGE_CHECKERS, MERGE_PROPOSALS, type MergeChecker, type MergeProposals, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
 import { AccountController, ProvidersController } from './inbound/account.controller.js';
 import { ListProviders } from './application/list-providers.js';
 import { AddProvider } from './application/add-provider.js';
 import { UnlinkProvider } from './application/unlink-provider.js';
+import { ConfirmMerge } from './application/confirm-merge.js';
+import { GetMergeProposal } from './application/get-merge-proposal.js';
+import { MergePlanner } from './application/plan-merge.js';
+import { SetAccountHold } from './application/set-account-hold.js';
+import { MemoryMergeProposals } from './adapters/memory-merge-proposals.js';
+import { noBlockChecker } from './adapters/grpc-merge-checkers.js';
+import { MergeProposalsController } from './inbound/merge.controller.js';
 import { COOKIE_DOMAIN, TokenController } from './inbound/token.controller.js';
 
 export interface SessionModuleOptions {
@@ -33,6 +40,10 @@ export interface SessionModuleOptions {
   signals: SessionSignals;
   /** 가입 때 연결 제안 저장소(세션·캐시 Redis, identity §2.1). 없으면 메모리(로컬·시험) */
   linkProposals?: LinkProposals;
+  /** 병합 제안 저장소(세션·캐시 Redis id:merge). 없으면 메모리 */
+  mergeProposals?: MergeProposals;
+  /** 세 서비스의 CheckAccountMerge. 없으면 막는 것이 없다고 보는 대역(시험) */
+  mergeCheckers?: MergeChecker[];
 }
 
 @Module({})
@@ -43,7 +54,7 @@ export class SessionModule {
       module: SessionModule,
       // 본인확인 컨텍스트가 계정 정리(ACCOUNT_CLOSURE)를 쓰므로 전역으로 내준다
       global: true,
-      controllers: [TokenController, AccountController, ProvidersController],
+      controllers: [TokenController, AccountController, ProvidersController, MergeProposalsController],
       providers: [
         CloseAccount,
         { provide: ACCOUNT_CLOSURE, useExisting: CloseAccount },
@@ -58,18 +69,24 @@ export class SessionModule {
         ListProviders,
         AddProvider,
         UnlinkProvider,
+        MergePlanner,
+        GetMergeProposal,
+        ConfirmMerge,
+        SetAccountHold,
         FinishWithdrawals,
         // 재인증 토큰은 이 서비스의 팬 공개키 묶음과 발급자로 확인한다(identity §8 '탈퇴의 첫 구현')
         { provide: REAUTH_VERIFIER, useFactory: (clock: Clock) => new JoseReauthVerifier(o.keys, o.signer.issuer, clock), inject: [CLOCK] },
         o.storage === 'database' ? { provide: SESSION_STORE, useClass: DrizzleSessionStore } : { provide: SESSION_STORE, useValue: new MemorySessionStore() },
         o.linkProposals ? { provide: LINK_PROPOSALS, useValue: o.linkProposals } : { provide: LINK_PROPOSALS, useFactory: (clock: Clock) => new MemoryLinkProposals(clock), inject: [CLOCK] },
+        o.mergeProposals ? { provide: MERGE_PROPOSALS, useValue: o.mergeProposals } : { provide: MERGE_PROPOSALS, useFactory: (clock: Clock) => new MemoryMergeProposals(clock), inject: [CLOCK] },
+        { provide: MERGE_CHECKERS, useValue: o.mergeCheckers ?? (['purchase', 'ticket', 'core'] as const).map(noBlockChecker) },
         { provide: TOKEN_SIGNER, useValue: o.signer },
         { provide: DEVICE_REFS, useValue: o.deviceRefs },
         { provide: SESSION_SIGNALS, useValue: o.signals },
         { provide: PUBLIC_KEYS, useValue: o.keys },
         { provide: COOKIE_DOMAIN, useValue: o.cookieDomain },
       ],
-      exports: [CreateSession, GetLinkProposal, SeparateAccount, AddProvider, UnlinkProvider, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, FinishWithdrawals, ACCOUNT_CLOSURE],
+      exports: [CreateSession, GetLinkProposal, SeparateAccount, AddProvider, UnlinkProvider, SetAccountHold, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, FinishWithdrawals, ACCOUNT_CLOSURE],
     };
   }
 }

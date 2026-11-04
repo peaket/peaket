@@ -1,6 +1,7 @@
 // 이 모듈의 공개 파일. 다른 컨텍스트와 시작 파일은 층 폴더가 아니라 이 파일로만 가져온다(층 규칙).
 export { SessionModule, type SessionModuleOptions } from './session.module.js';
 export { ACCESS_TOKEN_TTL_MS } from './domain/session.js';
+export { ACCOUNT_HOLD_CLOSED_KEEP_MS } from './domain/merge.js';
 export { ACCOUNT_CLAIMS, ACCOUNT_CLOSURE, ACCOUNT_ERASER, type AccountClaims, type AccountClosure, type AccountEraser, FRAUD_HOLDS, type FraudHolds, REVERIFICATIONS, type Reverifications } from './domain/ports.js';
 export { FinishWithdrawals } from './application/finish-withdrawals.js';
 export { DrizzleSessionStore } from './adapters/db/drizzle-session-store.js';
@@ -8,6 +9,10 @@ export { CreateSession } from './application/create-session.js';
 export { GetLinkProposal } from './application/get-link-proposal.js';
 export { AddProvider, type AddProviderResult } from './application/add-provider.js';
 export { UnlinkProvider } from './application/unlink-provider.js';
+export { SetAccountHold } from './application/set-account-hold.js';
+export { RedisMergeProposals } from './adapters/redis-merge-proposals.js';
+export { mergeCheckersFromEnv } from './adapters/grpc-merge-checkers.js';
+export { accountHoldHandlers } from './inbound/session.grpc.js';
 export { SeparateAccount } from './application/separate-account.js';
 export { RedisLinkProposals } from './adapters/redis-link-proposals.js';
 export { EndSession } from './application/end-session.js';

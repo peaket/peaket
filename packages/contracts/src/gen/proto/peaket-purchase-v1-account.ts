@@ -57,6 +57,10 @@ export const purchaseV1Account: Record<string, unknown> = {
                       "rule": "repeated",
                       "type": "MergeBlock",
                       "id": 1
+                    },
+                    "absorbed_orders": {
+                      "type": "int32",
+                      "id": 2
                     }
                   }
                 },

@@ -737,3 +737,20 @@ test('리뷰 재현: 로그인 수단 추가에서 제공자가 오류(취소)�
   assert.ok(logs.some((l) => l.event === 'link-add.failed' && l.reason === 'provider_error'));
   assert.ok(!b.names().includes(OIDC));
 });
+
+test('I-T31 로그인 수단이 다른 계정의 것이고 병합 제안이 있으면 돌아갈 주소에 mergeProposal을 함께 싣는다(BOT-042)', async () => {
+  const b = await signedIn();
+  identity.mode.addResult = 'ADD_PROVIDER_RESULT_OTHER_ACCOUNT';
+  identity.mode.mergeProposalId = 'M'.repeat(22);
+  try {
+    const r = await addProvider(b, 'google');
+    const u = new URL(r.trail.at(-1).url);
+    assert.equal(u.searchParams.get('loginMethod'), 'other-account');
+    assert.equal(u.searchParams.get('mergeProposal'), 'M'.repeat(22));
+    identity.mode.mergeProposalId = '';
+    const r2 = await addProvider(b, 'google');
+    assert.equal(new URL(r2.trail.at(-1).url).searchParams.get('mergeProposal'), null);
+  } finally {
+    identity.mode.mergeProposalId = undefined;
+  }
+});

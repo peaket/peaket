@@ -87,7 +87,7 @@ export async function startIdentityStub() {
       if (mode.addFails) return fail(cb, 'UNAVAILABLE', '대역 장애');
       const s = sessions.get(r.session_id);
       if (!s || s.ended || s.accountId !== r.account_id || !r.reauth_token) return cb(null, { result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED' });
-      if (mode.addResult) return cb(null, { result: mode.addResult });
+      if (mode.addResult) return cb(null, { result: mode.addResult, merge_proposal_id: mode.addResult === 'ADD_PROVIDER_RESULT_OTHER_ACCOUNT' ? (mode.mergeProposalId ?? '') : '' });
       const k = `${r.provider}|${r.provider_user_id}`;
       if (accounts.has(k)) return cb(null, { result: accounts.get(k) === r.account_id ? 'ADD_PROVIDER_RESULT_ALREADY_LINKED' : 'ADD_PROVIDER_RESULT_OTHER_ACCOUNT' });
       accounts.set(k, r.account_id);

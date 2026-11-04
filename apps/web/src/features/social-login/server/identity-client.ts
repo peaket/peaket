@@ -109,11 +109,13 @@ export class IdentityClient {
   }
 
   /** 계정 설정의 로그인 수단 추가(SCR-040 ②, identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현') */
-  async addProvider(i: { sessionId: string; accountId: string; reauthToken: string; provider: Provider; providerUserId: string }): Promise<AddProviderResult> {
+  async addProvider(i: { sessionId: string; accountId: string; reauthToken: string; provider: Provider; providerUserId: string }): Promise<{ result: AddProviderResult; mergeProposalId: string | null }> {
     const r = await this.#call('AddProvider', { session_id: i.sessionId, account_id: i.accountId, reauth_token: i.reauthToken, provider: PROTO_PROVIDER[i.provider], provider_user_id: i.providerUserId });
     const v = ADD_RESULT[String(r.result)];
     if (!v) throw new Error(`AddProvider 결과를 모른다(${String(r.result)})`);
-    return v;
+    // 다른 계정이면 병합 제안 ID(만들 수 있었으면, identity §2.1 '계정 병합의 첫 구현')
+    const m = typeof r.merge_proposal_id === 'string' && /^[A-Za-z0-9_-]{22}$/.test(r.merge_proposal_id) ? r.merge_proposal_id : null;
+    return { result: v, mergeProposalId: v === 'other-account' ? m : null };
   }
 
   /** 없음·만료·묶음 값이 다르면 null */

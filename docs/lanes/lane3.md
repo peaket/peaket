@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-042(wbs 3.1.3 ③): 계정 병합(병합 제안·요약·차단 사유, 확정 트랜잭션, 흡수 계정 불변식, SCR-040 ④, 로그인 수단 추가의 OTHER_ACCOUNT를 병합 제안으로). 그 뒤 BOT-045 → BOT-110~160.
+- BOT-043(wbs 3.1.3 ④): SCR-040 ④ 계정 합치기 화면(`?mergeProposal=`로 병합 요약 → 재인증 → 확정, 처리 중·흡수된 세션·만료). 그 뒤 BOT-045 → BOT-110~160.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
@@ -30,9 +30,14 @@
 - BOT-036: 저장소 표의 `peaket.withdraw.reauth` 줄 '지우는 때'에 로그아웃이 없고(§5.14.4 정리 루틴이 지우지 않아 같은 탭의 다른 계정에 묻지 않은 재인증 실패 창이 뜰 수 있다) 수명은 '탭(믿는 시간 10분)'이다(docs/frontend.md §3.12, 로그아웃 정리 루틴)
 - BOT-036: 미리보기 상태 고르기가 클라이언트 이동이라 `SettingsFlows` 상태(창·목적·토큰)가 남아 목업과 실제 흐름이 섞인다(개발 서버만). `key={state}`를 붙인다(apps/web/src/_pages/settings/ui/SettingsPage.tsx)
 - BOT-040: '새 계정 만들기'의 응답을 잃고 같은 멱등 키로 다시 보내면 제안이 이미 지워져 404다. 다시 보내기를 받으려면 제안을 지우기 전에 만든 세션을 멱등 키로 찾아 같은 세션을 돌려주거나, 제안을 '쓴 것'으로 표시해 잠시 남긴다(services/identity-svc/src/modules/session/application/separate-account.ts, apps/web keys.ts `separateKeyOf` 주석)
-- BOT-041: 해제와 로그인이 겹치면, 해제 직전에 연결 행을 읽은 로그인이 해제가 끝난 뒤 그 계정에 세션을 만든다(로그인은 계정을 잠근 뒤 연결을 다시 찾지 않는다). BOT-042가 붙일 '잠근 뒤 findAccountByProvider 다시 부르기'로 함께 막는다(services/identity-svc/src/modules/session/application/create-session.ts `#open`)
 - BOT-041: 로그인 수단 화면의 재인증 실패는 사유(오래된 인증·계정 불일치)를 버리고 한 문구만 보인다. 탈퇴 화면처럼 사유별 문구로 맞춘다(apps/web/src/features/login-methods/flow.ts `pickupReauth`)
 - BOT-041: ASVS 7.4.3(인증 요소를 바꾼 뒤 다른 세션 끝내기)을 팬에게 줄 로그인한 기기 API(`/v1/identity/sessions`, SCR-017 로그인한 기기)를 붙일 단계가 BUILD_ORDER에 없다. 단계를 정하거나 소유자에게 묻는다(docs/security/asvs/auth.md 7.4.3)
+- BOT-042: 두 계정에 같은 종류의 다른 로그인 수단이 있으면(추가하는 종류가 아닌 종류) 병합 뒤 대표 계정에 그 종류가 둘이 되어 '종류마다 하나'가 깨지고 종류 단위 해제가 모호해진다. 막는 사유를 하나 더할지(openapi `blockers`·d5 §5.22 다섯 줄을 고침) 둘 다 둘지 정한다(services/identity-svc/src/modules/session/application/plan-merge.ts, adapters/db/drizzle-session-store.ts `mergeAccounts`)
+- BOT-042: POL-034 '두 계정 이메일로 완료 통지'를 받을 길이 없다. 흡수 계정 이메일은 확정 트랜잭션에서 지우고 `identity.accounts-merged`에는 주소가 없다. 알림 쪽 단계(GAT-250 등)가 연락처 가명이나 통지 대상을 정하게 넘긴다(docs/features/identity.md §2.1 '남는 한계')
+- BOT-042: 대표가 될 계정이 탈퇴 정리 중이어도 제안은 PROPOSED로 보이고 확정하면 404다. 확정 트랜잭션 안에서 흡수 계정의 정리 중을 발견하면 409 `WITHDRAWAL_IN_PROGRESS`가 아니라 404다(services/identity-svc/src/modules/session/application/plan-merge.ts `assessPair`, confirm-merge.ts)
+- BOT-042: 같은 제안을 동시에 두 번 확정하는 PostgreSQL 시험이 없다. 병합 도중 로그인이 계정을 X → P(대표) 순서로 잠가 ID 순 규칙을 벗어나므로 같은 쌍의 확정과 겹치면 교착(40P01)으로 한쪽이 끝날 수 있다(드묾, create-session.ts `#open`)
+- BOT-042: 로그인 수단 추가 콜백의 앱 서버 기한(2초) 안에 병합 확인(세 서비스 1초)이 더해져 빠듯하다. 세 서비스 클라이언트에 차단기(`createCircuitBreaker`)도 아직 없다(grpc-merge-checkers.ts)
+- BOT-042: 마이그레이션 0013의 `account_merge`(대표·흡수 계정)·`account_hold`(계정)에 외래키가 없다. docs/data.md 그림은 FK로 적는다(services/identity-svc/src/modules/session/adapters/db/schema.ts)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
@@ -45,3 +50,4 @@
 - 2026-11-04 BOT-037 탈퇴 계정의 대기열 키 지우기(R-283, I-T27): 계정 탈퇴 트랜잭션이 계정을 잠근 뒤 읽은 pid(전환 기간이면 옛 pid도)를 실은 탈퇴 사건 `identity.accounts-withdrawn`(asyncapi·Avro `AccountWithdrawn`, `purgeBy` = 탈퇴 + 5일)을 세션 종료 사건 뒤 Outbox에 적고, queue-svc 처리기가 진행 중인 회차마다 `q:dup`·`q:adm`에 `PEXPIREAT … LT`를 건다. 토픽 보존 3일·조각 1일 [가정]. Kafka 구독·보류 사건 정리·15분 뒤 처리는 HOT-010.
 - 2026-11-04 BOT-040 가입 때 계정 연결 제안(R-286, I-T29·I-T30): BOT-040을 셋으로 나눴다(①은 이것, ② BOT-041 설정 연결·해제, ③ BOT-042 병합). 같은 검증 이메일의 활성 계정이 하나면 `CreateSession`이 세션 대신 연결 제안(세션·캐시 Redis `id:link`, 10분, 묶음 값은 해시만)을 주고, 앱 서버가 `__Host-peaket_link`에 봉인해 SCR-039로 보낸다. 기존 제공자 로그인이 대상 계정이면 새 제공자를 잇고 연결 성공 화면을 거쳐 처음 주소로, 다른 계정이면 3회까지 남은 시도를 보이고 만료한다. 새 계정 만들기(`SeparateAccount`)·제안 조회(`GetLinkProposal`), `account.email_verified`(마이그레이션 0011).
 - 2026-11-04 BOT-041 설정의 로그인 수단 연결·해제(R-287, I-T33·I-T34): 재인증 뒤 `POST /link/{provider}`(앱 서버) → 새 제공자 인증 → identity `AddProvider`(LINKED·ALREADY_LINKED·PROVIDER_TYPE_TAKEN·OTHER_ACCOUNT·REAUTH_REQUIRED), `DELETE /v1/identity/providers/{provider}`(마지막 하나 409 `last-login-method`), `account_provider.last_login_at`(마이그레이션 0012), 연결·해제 사건 `identity.login-methods-changed`(asyncapi·Avro `LoginMethodChanged`, 가입 때 연결 제안의 연결 포함, 받는 쪽은 GAT-250), SCR-040 실제 목록·해제·추가, 재인증할 제공자 고르기(SCR-017·SCR-040).
+- 2026-11-04 BOT-042 계정 병합의 identity 쪽(R-289, I-T31·I-T32·I-T34): BOT-042를 둘로 나눴다(화면은 BOT-043). 로그인 수단 추가가 다른 계정이면 병합 제안(세션·캐시 Redis `id:merge`, 대표 계정 규칙, identity 사유와 purchase·ticket·core `CheckAccountMerge`의 사유·개수, 불변식 위반은 BLOCKED·SEV3), `GET /v1/identity/merge-proposals/{id}`·`POST …/confirmation`(재인증, 다시 확인, 한 트랜잭션에서 로그인 수단 이전·MERGED·사슬·`account_merge`·세션 MERGED·`identity.accounts-merged`), `account_hold`·`SetAccountHold`·닫힌 행 정비, 로그인의 잠근 뒤 다시 찾기(BOT-030·BOT-041이 넘긴 것), 마이그레이션 0013. 세 서비스 주소가 없으면 로컬·CI만 대역.

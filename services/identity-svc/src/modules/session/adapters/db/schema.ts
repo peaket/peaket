@@ -1,7 +1,7 @@
 // identity DB의 계정·로그인 수단·기기·세션 표(docs/data.md §2 identity, docs/features/identity.md §11).
 // 이 단계(BUILD_ORDER PRF-020)가 쓰는 표만 둔다. 본인확인·병합·관리 계정 표는 그 단계가 더한다.
 import { sql } from 'drizzle-orm';
-import { boolean, check, customType, index, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, customType, index, jsonb, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -144,4 +144,38 @@ export const reauthTokenUse = pgTable(
     expiresAt: at('expires_at').notNull(),
   },
   (t) => [index('reauth_token_use_expires_idx').on(t.expiresAt)],
+);
+
+// 이의 제기·소명 계류(ops-svc가 SetAccountHold로 알린다, docs/data.md account_hold, ADR-0148 결정 5, BUILD_ORDER BOT-042). 병합의 APPEAL_PENDING을 본다
+export const accountHold = pgTable(
+  'account_hold',
+  {
+    sourceRef: uuid('source_ref').primaryKey(),
+    accountId: uuid('account_id').notNull(),
+    kind: text('kind').notNull(),
+    state: text('state').notNull(),
+    sourceVersion: bigint('source_version', { mode: 'number' }).notNull(),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    index('account_hold_account_idx').on(t.accountId, t.state),
+    check('account_hold_kind_check', sql`${t.kind} in ('VERIFICATION_APPEAL', 'DISPUTE', 'APPEAL')`),
+    check('account_hold_state_check', sql`${t.state} in ('OPEN', 'CLOSED')`),
+  ],
+);
+
+// 계정 병합 감사 이력(docs/data.md account_merge, POL-034, I-T34). 대표 계정이 탈퇴할 때까지 남는다(docs/security/data-classification.md '계정 연결 및 병합 감사 원장')
+export const accountMerge = pgTable(
+  'account_merge',
+  {
+    id: uuid('id').primaryKey(),
+    primaryAccountId: uuid('primary_account_id').notNull(),
+    mergedAccountId: uuid('merged_account_id').notNull().unique(),
+    mergedProvider: text('merged_provider').notNull(),
+    movedSummary: jsonb('moved_summary').notNull(),
+    requestedAt: at('requested_at').notNull(),
+    confirmedAt: at('confirmed_at').notNull(),
+    completedAt: at('completed_at'),
+  },
+  (t) => [index('account_merge_primary_idx').on(t.primaryAccountId)],
 );

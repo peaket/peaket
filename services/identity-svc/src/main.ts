@@ -3,7 +3,7 @@
 // 앱 포트(REST: 팬 토큰 갱신 POST /v1/identity/access-tokens, 공개키 묶음 GET /internal/jwks/{set}.json)·관리 포트(/metrics, /ready)는
 // 서비스 뼈대가, 업무 gRPC 포트는 이 파일이 연다.
 import 'reflect-metadata';
-import { createDatabase, createHotRedis, createService } from '@peaket/platform';
+import { createDatabase, createHotRedis, createService, loadPlatformConfig } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
@@ -18,8 +18,12 @@ import {
   identityServiceHandlers,
   JoseTokenSigner,
   PromSessionSignals,
+  accountHoldHandlers,
+  mergeCheckersFromEnv,
   RedisLinkProposals,
+  RedisMergeProposals,
   SeparateAccount,
+  SetAccountHold,
   sessionServiceHandlers,
   TokenKeyRing,
   tokenIssuerFromEnv,
@@ -62,11 +66,14 @@ const cacheUrl = process.env.PEAKET_IDENTITY_REDIS_URL;
 const env = process.env.PEAKET_ENV ?? 'local';
 if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTITY_REDIS_URL이 없다(세션·캐시 Redis, 비밀 관리에서 넣는다)');
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
-const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices.refs, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now) } : {}) }, verification }) });
+// 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
+const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile);
+const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices.refs, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers }, verification }) });
 signals.register(service.metrics.registry);
 // 기록이 쓰는 연계정보 키 판을 설정이 모두 갖지 않으면 시작하지 않는다(같은 사람이 계정을 하나 더 만들지 못하게, identity §5 '키 판·만 14세…')
 if (process.env[VERIFICATION_PROVIDER_ENV]) await assertKeyVersions(service.app.get<DrizzleVerificationStore>(VERIFICATION_STORE), verification.hashers);
 if (devices.warning) service.logger.warn(devices.warning);
+for (const w of merge.warnings) service.logger.warn(w);
 if (!cache) service.logger.warn('PEAKET_IDENTITY_REDIS_URL이 없어 가입 때 연결 제안을 이 프로세스 메모리에 둔다(local·ci만)');
 
 await service.listen();
@@ -85,6 +92,11 @@ const grpc = await startGrpcServer({
     {
       definition: identityPackage().IdentityService.service,
       handlers: identityServiceHandlers({ status: service.app.get(GetVerificationStatus) }, (method, err) => service.logger.error({ err, method }, 'IdentityService 처리 실패')),
+    },
+    // 이의 제기·소명 계류(ops-svc만, 계정 병합의 APPEAL_PENDING, identity §2.1 '계정 병합의 첫 구현')
+    {
+      definition: identityPackage().AccountHoldService.service,
+      handlers: accountHoldHandlers({ hold: service.app.get(SetAccountHold) }, (method, err) => service.logger.error({ err, method }, 'AccountHoldService 처리 실패')),
     },
     // 이용 제한 중 탈퇴의 대조값 보관(ops-svc만, identity §8 '대조값 보관의 첫 구현')
     {
