@@ -13,7 +13,7 @@ export const LIGHT_SELECTORS = [
   ':root[data-seed-color-mode="light-only"]',
   ':root [data-seed-color-mode="light-only"]',
 ];
-// 퍼블리싱 화면은 키트처럼 맨 바깥(body)의 `.pk.dark`로 다크를 켜므로(SEED 색 모드 스크립트는 아직 싣지 않는다) 그 선택자도 둔다.
+// 다크 미리보기(?theme=dark)는 키트처럼 셸 루트의 `.pk.dark`로 다크를 켜므로 그 선택자도 둔다. 운영체제 다크는 SEED 색 모드 스크립트(소비자 웹, HOT-291)가 단다.
 export const DARK_SELECTORS = [
   '.pk.dark',
   ':root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"]',

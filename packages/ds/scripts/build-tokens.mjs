@@ -386,6 +386,9 @@ function kitValue(ref) {
 }
 const kitNames = KIT_VARS.map(([kit]) => kit);
 if (new Set(kitNames).size !== kitNames.length) throw new Error("KIT_VARS에 같은 키트 변수가 두 번 있다");
+// 키트 다크: 셸 루트의 .pk.dark(다크 미리보기)와, SEED 색 모드 스크립트가 운영체제 다크로 단 html 아래의 .pk(소비자 웹은 OS 테마를
+// 따른다, d1 §4, HOT-291). light-only·dark-only 앱과 스크립트를 싣지 않는 앱은 그대로다.
+const KIT_DARK_SELECTOR = '.pk.dark,\n  :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"] .pk';
 const kitBlock = (selector, col) =>
   `  ${selector} {\n${KIT_VARS.filter((row) => row[col] !== null)
     .map(([kit, ...refs]) => {
@@ -402,7 +405,7 @@ const kitTokensCss =
  */
 @layer components {
 ${kitBlock(".pk", 1)}
-${kitBlock(".pk.dark", 2)}}
+${kitBlock(KIT_DARK_SELECTOR, 2)}}
 `;
 
 // ---------------------------------------------------------------- queue-room-tokens.css

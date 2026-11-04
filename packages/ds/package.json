@@ -14,6 +14,7 @@
     "./icons": "./src/icons/index.tsx",
     "./poc/seed-layer-probe": "./src/poc/SeedLayerProbe.tsx",
     "./seed-layered-alias": "./scripts/seed-layered-alias.mjs",
+    "./color-mode-script": "./scripts/color-mode-script.mjs",
     "./*": "./src/components/*/index.ts"
   },
   "scripts": {

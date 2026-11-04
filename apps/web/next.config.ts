@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { NextConfig } from 'next';
 import { seedLayeredAlias } from '@peaket/ds/seed-layered-alias';
+import { hideSourceMaps } from './scripts/hide-source-maps.mjs';
 
 // SEED CSS 층 PoC 빌드(FE-T36, tools/web-checks/seed-css/). 이때만 page.poc.tsx가 경로가 된다(운영 빌드에는 탐침 화면이 없다)
 const seedCssPoc = process.env.PEAKET_POC === 'seed-css';
@@ -23,6 +24,14 @@ const config: NextConfig = {
   // 링크는 경로마다 하나인 정적 셸(App Shell)만 미리 받는다(Cache Components 새 프로젝트 권장값, Next.js 'Adopting Partial Prefetching')
   partialPrefetching: true,
   experimental: { globalNotFound: true, sri: { algorithm: 'sha256' } },
+  // 숨김 소스 맵(docs/frontend.md §5.18, HOT-291): 맵을 만들되, 컴파일 직후(정적 화면을 만들기 전) static/의 JS·CSS 끝 링크를 지우고
+  // 지운 JS의 새 해시로 SRI 표를 고치며 맵을 static/ 밖(<distDir>/browser-source-maps/)으로 옮긴다. 맵은 올리지 않는다(오류 도구 단계에서 올린다)
+  productionBrowserSourceMaps: true,
+  compiler: {
+    runAfterProductionCompile: async ({ distDir }) => {
+      hideSourceMaps({ distDir });
+    },
+  },
   // next dev가 앱 폴더에 AGENTS.md를 만들지 않게 한다(저장소 규칙은 뿌리 CLAUDE.md·docs가 정한다)
   agentRules: false,
 };

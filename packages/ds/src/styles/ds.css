@@ -6,11 +6,15 @@
   /* 맨 바깥(<html>)의 color-scheme은 키트 테마를 따른다(퍼블리싱 단계: .pk가 라이트, .pk.dark가 다크, kit.css 1절).
      SEED base(seed-base 층)의 :root·[data-seed-color-mode="system"]{color-scheme: light dark}가 운영체제 다크에서
      밝은 화면의 맨 바깥 스크롤바를 어둡게 그리지 않게 한다(BAS-170 리뷰). light-only·dark-only 판(스캐너)은 SEED 규칙(light only)을 그대로 둔다.
-     SEED 색 모드 스크립트를 실어 운영체제를 따르게 할 때(소비자 웹 셸 HOT-290) 다시 본다 */
+     운영체제 다크는 SEED 색 모드 스크립트를 싣는 앱(소비자 웹, HOT-291)에서 아래 규칙이 맡는다 */
   :root:not([data-seed-color-mode$="-only"]):has(.pk) {
     color-scheme: light;
   }
   :root:not([data-seed-color-mode$="-only"]):has(.pk.dark) {
+    color-scheme: dark;
+  }
+  /* 운영체제 다크: SEED 색 모드 스크립트가 system 모드에서 단 값을 따른다(소비자 웹, d1 §4, HOT-291) */
+  :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"]:has(.pk) {
     color-scheme: dark;
   }
 

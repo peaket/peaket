@@ -11,7 +11,18 @@ for (const theme of ['light', 'dark']) {
   for (const story of storyEntries()) {
     test(`FE-T18 ${story.id} ${theme}: axe 위반 0`, async ({ page }) => {
       await openStory(page, story.id, theme);
-      const { violations } = await new AxeBuilder({ page }).include('#storybook-root').withTags(AXE_TAGS).analyze();
+      // Storybook 접근성 애드온이 이야기를 그린 뒤 미리보기 안에서 axe를 스스로 돌린다. 겹치면 'Axe is already running'이라 잠깐 기다려 다시 돌린다
+      let result;
+      for (let i = 0; ; i++) {
+        try {
+          result = await new AxeBuilder({ page }).include('#storybook-root').withTags(AXE_TAGS).analyze();
+          break;
+        } catch (e) {
+          if (i >= 10 || !String(e).includes('Axe is already running')) throw e;
+          await page.waitForTimeout(200);
+        }
+      }
+      const { violations } = result;
       const summary = violations.map((v) => `${v.id}(${v.impact}): ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`);
       expect(summary).toEqual([]);
     });

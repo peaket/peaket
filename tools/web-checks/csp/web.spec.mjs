@@ -251,3 +251,19 @@ test.describe('빠진 화면 없이 헤더·상태 코드(HOT-290 새 맥락 리
     expect(req.headers()['content-security-policy'] ?? '').toContain("'strict-dynamic'");
   });
 });
+
+test.describe('SRI 값과 소스 맵 링크(HOT-291 숨김 소스 맵)', () => {
+  for (const path of ['/', '/my/settings', '/system-notice']) {
+    test(`[ASVS v5.0.0-13.4.7] ${path}: 모든 integrity가 내려받은 파일의 SHA-256과 같고, 받은 JS에 소스 맵 링크가 없다`, async ({ request, browserName }) => {
+      test.skip(browserName !== 'chromium', 'HTTP 응답 검사는 엔진과 상관없다');
+      const html = await (await request.get(`${WEB_BASE}${path}`)).text();
+      const tags = [...html.matchAll(/<(?:script|link)\b[^>]*\s(?:src|href)="([^"]+\.js)"[^>]*\sintegrity="(sha256-[^"]+)"/g)];
+      expect(tags.length).toBeGreaterThan(0);
+      for (const [, url, integrity] of tags) {
+        const body = await (await request.get(`${WEB_BASE}${url}`)).body();
+        expect(`sha256-${createHash('sha256').update(body).digest('base64')}`, url).toBe(integrity);
+        expect(body.toString('utf8'), url).not.toMatch(/sourceMappingURL=/);
+      }
+    });
+  }
+});

@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "node server/start.mjs --port 3000",
     "typecheck": "tsc --noEmit",
-    "test": "node --test"
+    "test": "node --test",
+    "color-mode": "node scripts/build-color-mode.mjs"
   },
   "dependencies": {
     "next": "^16.4.3",

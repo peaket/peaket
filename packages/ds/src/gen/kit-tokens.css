@@ -66,7 +66,8 @@
     --mono: 'JetBrains Mono', ui-monospace, monospace; /* typography.font-family.mono */
   }
 
-  .pk.dark {
+  .pk.dark,
+  :root[data-seed-color-mode="system"][data-seed-user-color-scheme="dark"] .pk {
     --surface: #16171b; /* color.semantic.dark.surface */
     --surface-muted: #1d2025; /* color.semantic.dark.surface-muted */
     --surface-basement: #000000; /* color.semantic.dark.surface-basement */
