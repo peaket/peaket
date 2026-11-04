@@ -1,15 +1,17 @@
 // 주문 생성의 보안·설정 로그를 서비스 로거(platform PlatformLogger)에 한 줄씩 남기는 어댑터(OrderLog, ADR-0055, BUILD_ORDER PRF-161).
 // 번호 원문·토큰·pid는 싣지 않는다. 대체 판정은 warn(보안 로그), 설정 오류는 error(kind config, 재확인 설정 오류는 SEV2)다.
 import type { PlatformLogger } from '@peaket/platform';
-import type { OrderLog } from '../domain/ports.js';
+import type { AcceptLog, OrderLog } from '../domain/ports.js';
 
 /**
  * - identityFallback: warn 한 줄 { kind: 'security', event: 'identity_recheck_fallback', accountId, reason, passed, idempotencyKey }
  * - configError: error 한 줄 { kind: 'config', what, eventId?·tierId?(가격 없음·합 넘침), reason?·severity SEV2(재확인) }
  * - payingMarkFailed: warn 한 줄 { event: 'order_paying_mark_failed', purchaseSessionId, orderId }
+ * - attemptMismatch(결제 접수, PRF-162): warn 한 줄 { kind: 'security', event: 'payment_attempt_mismatch', accountId, orderId, reason }(결제 참조·본문 값·금액은 싣지 않는다).
+ *   금액 불일치(400)도 같은 줄이고 reason이 amount_mismatch다
  * 로거가 던져도 삼킨다(부른 쪽을 막지 않는다)
  */
-export class LoggerOrderLog implements OrderLog {
+export class LoggerOrderLog implements OrderLog, AcceptLog {
   constructor(private readonly logger: Pick<PlatformLogger, 'warn' | 'error'>) {}
 
   identityFallback(e: Parameters<OrderLog['identityFallback']>[0]): void {
@@ -50,6 +52,17 @@ export class LoggerOrderLog implements OrderLog {
   payingMarkFailed(e: Parameters<OrderLog['payingMarkFailed']>[0]): void {
     try {
       this.logger.warn({ event: 'order_paying_mark_failed', purchaseSessionId: e.purchaseSessionId, orderId: e.orderId }, '주문 뒤 구매 세션 Paying 표시를 다시 불러도 하지 못했다(결제 중 유휴로 끝날 수 있다)');
+    } catch {
+      // 로그 실패는 응답을 바꾸지 않는다
+    }
+  }
+
+  /** 결제 시도 대조 실패·금액 불일치 warn 한 줄(보안 사건, payment §4.2 18·ASVS 16.3.3). 계정·주문·까닭 세 칸만 싣는다 */
+  attemptMismatch(e: Parameters<AcceptLog['attemptMismatch']>[0]): void {
+    // 칸을 하나씩 골라 싣는다(받은 객체를 펼치지 않아 결제 참조·토큰·금액이 섞여 들지 않게)
+    const line = { kind: 'security', event: 'payment_attempt_mismatch', accountId: e.accountId, orderId: e.orderId, reason: e.reason };
+    try {
+      this.logger.warn(line, e.reason === 'amount_mismatch' ? '결제 접수 본문 금액이 주문 금액과 달라 받지 않았다' : '결제 접수가 활성 결제 시도와 맞지 않아 받지 않았다');
     } catch {
       // 로그 실패는 응답을 바꾸지 않는다
     }

@@ -1,21 +1,28 @@
 // 주문 생성(BUILD_ORDER PRF-161) booking 어댑터·조립의 작은 단위 시험: 좌석맵 판의 판매 설정(SeatMapSaleConfigs), 구매 세션 다리(InventoryOrderSessions,
 // setPaying 연결), 대체 판정 지표(PromOrderSignals.identityFallback), 보안·설정 로그(LoggerOrderLog), 모듈 조립의 동의 문안 판 검사(BookingModule.register).
+// 결제 접수(PRF-162)의 보안 로그(LoggerOrderLog.attemptMismatch)와 회차 슬롯 읽기 다리(InventorySeatSlots)도 여기서 본다.
 // 쓰임새·받는 층은 create-order.test.ts·orders-http.test.ts, 실제 저장소로 도는 것은 test-int(order-*.int.test.ts)가 본다.
 import 'reflect-metadata';
-import { fakeClock, PlatformMetrics, type Registry } from '@peaket/platform';
+import { type Database, fakeClock, PlatformMetrics, type Registry, type TransactionOptions } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import {
   BookingModule,
+  DrizzleOrderAccepts,
+  DrizzleOrderStore,
+  DrizzleOrderWrites,
   FALLBACK_REASONS,
   type FallbackReason,
   InventoryOrderSessions,
+  InventorySeatSlots,
   LoggerOrderLog,
   OrderSeatStoreUnavailable,
   OrdersController,
   PromOrderSignals,
   SeatMapSaleConfigs,
+  type SeatSlotRead,
 } from '../src/modules/booking/index.js';
 import { MemoryPurchaseSessionStore, MemorySeatMap, SeatStoreUnavailable, SESSION_IDLE_MS, StoredPurchaseSessions } from '../src/modules/inventory/index.js';
+import { AcceptFakes } from './accept-cases.js';
 import { CONSENT_VERSION, OrderFakes } from './order-cases.js';
 import { newJti, openInput } from './purchase-session-cases.js';
 
@@ -219,10 +226,139 @@ describe('LoggerOrderLog(보안·설정 로그)', () => {
     expect(() => log.configError({ what: 'identity_misconfigured', reason: 'invalid_argument' })).not.toThrow();
     expect(() => log.payingMarkFailed({ purchaseSessionId: 'jti-1', orderId: 'o-1' })).not.toThrow();
   });
+
+  // ── 결제 접수의 보안 로그(AcceptLog.attemptMismatch, payment §4.2 18, BUILD_ORDER PRF-162) ──
+  const ORDER = '0190f3a1-7c2e-7f00-8000-0000000000f2';
+
+  // 금액 불일치(400)도 같은 줄이다(까닭 amount_mismatch, payment §2 '활성 결제 시도 대조', ASVS 16.3.3, 2026-11-05 정본 바로잡음)
+  const MISMATCH_REASONS = ['no_attempt', 'attempt_expired', 'pg_mismatch', 'payment_id_mismatch', 'amount_mismatch'] as const;
+
+  test('PT28_PT7_ASVS16.3.2_결제 시도 대조 실패·금액 불일치는 warn 한 줄(kind security, event payment_attempt_mismatch, 계정·주문·까닭)이다 [ASVS v5.0.0-16.3.2] [ASVS v5.0.0-16.3.3]', () => {
+    const { lines, log } = recorder();
+    for (const reason of MISMATCH_REASONS) log.attemptMismatch({ accountId: ACCOUNT, orderId: ORDER, reason });
+    expect(lines.map((l) => [l.level, l.obj])).toEqual(
+      MISMATCH_REASONS.map((reason) => [
+        'warn',
+        { kind: 'security', event: 'payment_attempt_mismatch', accountId: ACCOUNT, orderId: ORDER, reason },
+      ]),
+    );
+  });
+
+  test('PT28_ADR0053_ASVS16.2.5_결제 참조·토큰·본문 값이 섞여 와도 로그 줄은 계정·주문·까닭 세 칸뿐이다 [ASVS v5.0.0-16.2.5]', () => {
+    const { lines, log } = recorder();
+    const leaky = { paymentKey: 'PAYKEYSECRET', paymentToken: 'PAYTOKENSECRET', txId: 'TXIDSECRET', paymentId: 'pay-x', amount: 123_456, pg: 'TOSS' };
+    log.attemptMismatch({ accountId: ACCOUNT, orderId: ORDER, reason: 'pg_mismatch', ...leaky } as never);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.obj).toEqual({ kind: 'security', event: 'payment_attempt_mismatch', accountId: ACCOUNT, orderId: ORDER, reason: 'pg_mismatch' });
+    const text = JSON.stringify(lines);
+    for (const v of ['PAYKEYSECRET', 'PAYTOKENSECRET', 'TXIDSECRET', '123456']) expect(text).not.toContain(v);
+  });
+
+  test('PT28_결제 시도 대조 실패 로그도 로거가 던지면 삼킨다', () => {
+    const boom = () => {
+      throw new Error('log down');
+    };
+    const log = new LoggerOrderLog({ warn: boom, error: boom } as never);
+    expect(() => log.attemptMismatch({ accountId: ACCOUNT, orderId: ORDER, reason: 'no_attempt' })).not.toThrow();
+  });
+});
+
+describe('InventorySeatSlots(회차 슬롯 읽기 다리, PRF-162)', () => {
+  function source(answer: SeatSlotRead | Error) {
+    const calls: { eventId: string; o: { deadlineMs?: number } | undefined }[] = [];
+    return {
+      calls,
+      src: {
+        read: async (eventId: string, o?: { deadlineMs?: number }) => {
+          calls.push({ eventId, o });
+          if (answer instanceof Error) throw answer;
+          return answer;
+        },
+      },
+    };
+  }
+
+  test.each<[SeatSlotRead]>([[{ status: 'OK', gen: 4 }], [{ status: 'NOT_READY' }], [{ status: 'PAUSED' }]])('FR011_inventory의 답(%o)을 그대로 돌려주고 회차·마감을 그대로 넘긴다', async (answer) => {
+    const { calls, src } = source(answer);
+    expect(await new InventorySeatSlots(src).read(EVENT, { deadlineMs: 40 })).toEqual(answer);
+    expect(calls).toEqual([{ eventId: EVENT, o: { deadlineMs: 40 } }]);
+  });
+
+  test('NFR015_inventory의 좌석 Redis 장애(SeatStoreUnavailable)는 OrderSeatStoreUnavailable로 바꿔 던진다(원인은 cause에)', async () => {
+    const down = new SeatStoreUnavailable(new Error('ECONNRESET'));
+    const { src } = source(down);
+    const err = await new InventorySeatSlots(src).read(EVENT).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OrderSeatStoreUnavailable);
+    expect((err as Error).cause).toBe(down);
+  });
+
+  test('NFR015_이름으로 가른다: name이 SeatStoreUnavailable인 Error도 바꾼다(inventory를 가져오지 않는다)', async () => {
+    const named = Object.assign(new Error('down'), { name: 'SeatStoreUnavailable' });
+    const { src } = source(named);
+    await expect(new InventorySeatSlots(src).read(EVENT)).rejects.toBeInstanceOf(OrderSeatStoreUnavailable);
+  });
+
+  test('ASVS16.5.3_그 밖의 오류(망가진 세대 키·WRONGTYPE·RangeError)는 같은 객체 그대로 던진다 [ASVS v5.0.0-16.5.3]', async () => {
+    for (const e of [new Error('PEAKET_CORRUPT_KEY s:{event:x}:epoch'), new Error('WRONGTYPE Operation against a key'), new RangeError('eventId')]) {
+      const { src } = source(e);
+      const err = await new InventorySeatSlots(src).read(EVENT).catch((x: unknown) => x);
+      expect(err).toBe(e);
+    }
+  });
+});
+
+describe('주문 생성·결제 접수 트랜잭션의 선택값(리뷰 고침 L3·L4)', () => {
+  /** transaction에 넘긴 선택값을 적고 바로 멈추는 Database 대역(DB에 가지 않는다) */
+  function recordingDb() {
+    const seen: (TransactionOptions | undefined)[] = [];
+    const db = {
+      db: undefined,
+      pool: undefined,
+      close: async () => {},
+      transaction: async (_fn: unknown, o?: TransactionOptions) => {
+        seen.push(o);
+        throw new Error('stop');
+      },
+    } as unknown as Database;
+    return { db, seen };
+  }
+  const clock = fakeClock({ now: Date.parse('2026-11-05T03:00:00.000Z') });
+  const U = (n: number) => `0190f3a1-7c2e-7f00-8000-${String(n).padStart(12, '0')}`;
+  const once = { accountRef: U(1), operation: 'ACCEPT_PAYMENT', key: '9a0b8c1e-2d4a-4b6c-9e8f-1a2b3c4d5e6f', requestHash: new Uint8Array(32) };
+  const input = { orderId: U(2), attemptId: U(3), eventId: U(4), refs: { pg: 'TOSS', paymentKey: 'tgen_1' }, seatGen: 1, actor: `account:${U(1)}` } as const;
+  /** 주문 생성은 트랜잭션 안(createOrder)에서 입력을 보므로, 트랜잭션을 열기 전에 멈추는 이 시험에는 빈 주문으로 충분하다 */
+  const order = {} as never;
+
+  test('FR011_결제 접수 트랜잭션은 늘 read committed이고, 남은 시간을 받으면 statementTimeoutMs로 건다', async () => {
+    const { db, seen } = recordingDb();
+    const accepts = new DrizzleOrderAccepts({ database: db, store: new DrizzleOrderStore({ clock }), clock });
+    await expect(accepts.accept(once, input)).rejects.toThrow('stop');
+    await expect(accepts.accept(once, input, {})).rejects.toThrow('stop');
+    await expect(accepts.accept(once, input, { deadlineMs: 120 })).rejects.toThrow('stop');
+    expect(seen).toEqual([{ isolationLevel: 'read committed' }, { isolationLevel: 'read committed' }, { isolationLevel: 'read committed', statementTimeoutMs: 120 }]);
+  });
+
+  test('FR011_주문 생성 트랜잭션도 늘 read committed이고, 남은 시간을 받으면 statementTimeoutMs로 건다', async () => {
+    const { db, seen } = recordingDb();
+    const writes = new DrizzleOrderWrites({ database: db, store: new DrizzleOrderStore({ clock }), clock });
+    await expect(writes.create({ ...once, operation: 'CREATE_ORDER' }, order)).rejects.toThrow('stop');
+    await expect(writes.create({ ...once, operation: 'CREATE_ORDER' }, order, { deadlineMs: 40 })).rejects.toThrow('stop');
+    expect(seen).toEqual([{ isolationLevel: 'read committed' }, { isolationLevel: 'read committed', statementTimeoutMs: 40 }]);
+  });
+
+  test.each([[0], [-1], [1.5], [Number.NaN]])('FR011_남은 시간(deadlineMs) %s는 RangeError이고 트랜잭션을 열지 않는다', async (deadlineMs) => {
+    const { db, seen } = recordingDb();
+    const accepts = new DrizzleOrderAccepts({ database: db, store: new DrizzleOrderStore({ clock }), clock });
+    await expect(accepts.accept(once, input, { deadlineMs })).rejects.toBeInstanceOf(RangeError);
+    const writes = new DrizzleOrderWrites({ database: db, store: new DrizzleOrderStore({ clock }), clock });
+    await expect(writes.create(once, order, { deadlineMs })).rejects.toBeInstanceOf(RangeError);
+    expect(seen).toEqual([]);
+  });
 });
 
 describe('BookingModule.register(동의 문안 판 검사)', () => {
-  const deps = (consentVersion: unknown) => ({ ...new OrderFakes().ports(), consentVersion: consentVersion as string });
+  // 결제 접수 칸(accepts·slots, PRF-162)은 결제 접수 가짜로 채운다
+  const deps = (consentVersion: unknown) => ({ ...new OrderFakes().ports(), ...new AcceptFakes().bookingPorts(), consentVersion: consentVersion as string });
 
   test('FR011_판 모양(1~32자의 영문·숫자·._-)이면 주문 컨트롤러 하나를 담은 모듈이고 내보내는 것이 없다', () => {
     for (const v of [CONSENT_VERSION, 'consent-2026.11_v1', 'v'.repeat(32), '1']) {

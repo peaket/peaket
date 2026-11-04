@@ -13,7 +13,7 @@ import type { PaymentAcceptPortonePg } from './paymentAcceptPortonePg';
 
 export interface PaymentAcceptPortone {
   pg: PaymentAcceptPortonePg;
-  /** 결제 시도 응답의 paymentId와 같아야 한다 */
+  /** 결제 시도 응답의 paymentId와 같아야 한다. 세 칸 모두 1~200자 [가정]의 보이는 ASCII만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-05) */
   paymentId: string;
   /** 수동 승인 API용 결제 토큰. 승인 결과가 정해지면 서버에서 지운다 */
   paymentToken: string;

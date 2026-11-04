@@ -4,7 +4,8 @@
 //   (한 홀드에 주문 하나를 DB가 정한다, BUILD_ORDER PRF-161)다.
 // - order_event의 occurred_at BRIN 인덱스(매일 검사가 '전날 이력'을 찾는다, autosummarize = on), 상태 이력 지연 제약 트리거(order_status_has_event)와
 //   Outbox 부모 표는 마이그레이션 SQL에만 손으로 적었다(Drizzle 표 정의로 적을 수 없다).
-// - 결제 접수가 저장할 결제 참조 칸은 PRF-162, 발권 재시도 큐 ticket_issue_job은 PRF-163이 더한다.
+// - 결제 접수(PRF-162)는 0005로 결제 시도의 결제 참조 칸 다섯, 주문의 판 번호 seat_gen, Saga 작업 표 order_saga_job을 더했다(data.md §4 여섯 번째 마이그레이션).
+//   발권 재시도 큐 ticket_issue_job은 PRF-163이 더한다.
 // - drizzle-kit이 이 파일을 읽으므로 도메인 파일을 가져오지 않는다(도메인 → inventory 공개 면 → Nest 모듈까지 끌려 온다).
 //   상태 목록은 도메인 상수 ORDER_STATUSES와 같은 차례로 글로 적는다(inventory schema.ts의 seat_sale 상태 목록과 같은 방식).
 import { idempotencyRecordTable } from '@peaket/platform';
@@ -44,6 +45,9 @@ export const purchaseOrder = pgTable(
     holdId: uuid('hold_id').notNull(),
     // 주문을 만든 구매 세션(입장 토큰 jti). 결제 시도·접수가 '이 구매 세션의 주문'을 가린다(0004, PRF-161. 사건에는 CREATED에만 싣는다)
     purchaseSessionId: text('purchase_session_id').notNull(),
+    // 결제 접수 때 적은 좌석 Redis 다시 만들기 판 번호(회차 슬롯 읽기의 gen, 명세 accept). 접수 전에는 비어 있다(0005, PRF-162).
+    // 판매 예약은 이 번호가 seat_rebuild의 지금 번호와 같을 때만 커밋한다(PRF-165)
+    seatGen: integer('seat_gen'),
   },
   (t) => [
     // 한 홀드에 주문 하나(docs/data.md §5 '주문 생성'). 뒤 쪽 트랜잭션은 유일 확인에서 앞 쪽 커밋을 기다리고 23505로 끝난다
@@ -124,6 +128,18 @@ export const paymentAttempt = pgTable(
     pgOrderRef: text('pg_order_ref'),
     status: text('status').notNull(),
     createdAt: at('created_at').notNull(),
+    // 결제 참조 칸(0005, PRF-162). 결제 접수(READY → ACCEPTED)에서 채우고, Saga가 승인 명령을 접수시키거나 과금 없이 끝나면 지운다(PRF-165).
+    // 5년 보관은 payment-svc 결제 원장이다. 로그·사건·응답에 싣지 않는다(data-classification '결제 참조', ADR-0044·0053)
+    // 토스·시뮬레이터 paymentKey
+    pgPaymentKey: text('pg_payment_key'),
+    // 포트원 txId
+    pgTxId: text('pg_tx_id'),
+    // 포트원 paymentToken
+    pgPaymentToken: text('pg_payment_token'),
+    // 결제창 인증 완료 시각(= 접수 시각. 인증만 따로 알리는 API가 없다). 승인 기한(인증 + 10분)의 기준
+    authenticatedAt: at('authenticated_at'),
+    // 결제 접수 시각
+    acceptedAt: at('accepted_at'),
   },
   (t) => [
     // 활성(READY·ACCEPTED) 결제 시도는 주문마다 하나
@@ -135,4 +151,31 @@ export const paymentAttempt = pgTable(
     check('payment_attempt_pg_check', sql`${t.pg} in ('TOSS', 'PORTONE', 'SIMULATOR')`),
     check('payment_attempt_status_check', sql`${t.status} in ('READY', 'ACCEPTED', 'SUPERSEDED', 'EXPIRED')`),
   ],
+);
+
+/**
+ * 주문 Saga 작업 표(0005, BUILD_ORDER PRF-162, data.md §4 여섯 번째 마이그레이션. ticket_issue_job과 같은 꼴).
+ * 결제 접수가 같은 트랜잭션에서 한 행을 넣고(step 'RESERVE'), Saga 실행기(PRF-165)가 next_attempt_at이 지난 행을 임대(lease_until)로 잡아 돈다.
+ * 주문 ID가 기본 키라 한 주문에 작업 행은 하나뿐이다(두 탭이 겹쳐도 둘이 될 수 없다, data.md §5 '결제 접수').
+ * step 값 CHECK는 두지 않는다: 값 목록은 PRF-165가 정하고 그때 CHECK를 더한다
+ */
+export const orderSagaJob = pgTable(
+  'order_saga_job',
+  {
+    orderId: uuid('order_id')
+      .primaryKey()
+      .references(() => purchaseOrder.id),
+    // 회차(쓸기·Kafka 키를 회차로 묶는다)
+    eventId: uuid('event_id').notNull(),
+    // Saga 단계(접수는 'RESERVE'로 넣는다. 값 목록은 PRF-165)
+    step: text('step').notNull(),
+    // 이 단계를 해 본 횟수
+    attempts: integer('attempts').notNull().default(0),
+    // 다음에 해 볼 시각(쓸기 색인)
+    nextAttemptAt: at('next_attempt_at').notNull(),
+    // 잡은 실행기의 임대 끝 시각(잡지 않았으면 비움)
+    leaseUntil: at('lease_until'),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [index('order_saga_job_next_attempt_idx').on(t.nextAttemptAt)],
 );

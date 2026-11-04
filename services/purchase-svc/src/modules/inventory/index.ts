@@ -4,6 +4,9 @@ export { HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
 export { ORDER_HOLD_LUA } from './adapters/order-hold-lua.js';
 export { MemoryOrderHolds, type MemoryOrderHoldsDeps } from './adapters/memory-order-holds.js';
 export { RedisOrderHolds } from './adapters/redis-order-holds.js';
+export { SEAT_SLOT_READ_LUA } from './adapters/seat-slot-lua.js';
+export { MemorySeatSlots, type MemorySeatSlotsDeps } from './adapters/memory-seat-slots.js';
+export { RedisSeatSlots } from './adapters/redis-seat-slots.js';
 export { PIN_LUA, RELEASE_FAILED_LUA } from './adapters/pin-lua.js';
 export { BEGIN_REBUILD_LUA, BUMP_EPOCH_LUA, FINISH_REBUILD_LUA, REBUILD_QUOTAS_LUA, REBUILD_SEATS_LUA } from './adapters/rebuild-lua.js';
 export { DrizzleSeatRebuildSource } from './adapters/db/drizzle-seat-rebuild.js';
@@ -298,6 +301,8 @@ export {
   type TradeEventPublisher,
   type TradeRecord,
   type SeatSnapshots,
+  type SeatSlotRead,
+  type SeatSlotReader,
   type SessionEndedLog,
   type SessionHolds,
   type SessionIndex,

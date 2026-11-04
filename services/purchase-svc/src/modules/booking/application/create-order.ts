@@ -21,6 +21,7 @@ import {
   type SaleConfigs,
 } from '../domain/ports.js';
 import { judgeRecheck, type RecheckFailure, type RecheckToken } from '../domain/recheck.js';
+import { budgetOf, seatCallOf, seatCallTooLate, transactionCallOf } from './call-budget.js';
 
 /** 멱등 작업 이름(order_idempotency의 operation, 범위 = 계정 × 이 작업, guidelines §4) */
 export const CREATE_ORDER_OPERATION = 'CREATE_ORDER';
@@ -84,6 +85,7 @@ export interface CreateOrderCommand {
  * - BOOKING_RESTRICTED: 예매 제한 ACTIVE이고 끝 시각 전 → 403 booking-restricted
  * - PRICE_MISSING: 가격이 없는 등급, 또는 등급 가격 합이 int4를 넘음(리뷰 고침 L5) → 500(설정 오류)
  * - HOLD_ALREADY_ORDERED: 같은 홀드로 만든 주문이 있음(다른 멱등 키) → 409 hold-already-ordered
+ * - DEADLINE_EXCEEDED: 좌석 Redis(구매 세션·홀드 확인·예매 제한)를 부르기 전 남은 시간이 5ms [가정] 미만 → 504 deadline-exceeded(부르지 않는다, 리뷰 고침 L4)
  */
 export type CreateOrderRejection =
   | 'SESSION_NOT_FOUND'
@@ -98,7 +100,8 @@ export type CreateOrderRejection =
   | 'IDENTITY_MISCONFIGURED'
   | 'BOOKING_RESTRICTED'
   | 'PRICE_MISSING'
-  | 'HOLD_ALREADY_ORDERED';
+  | 'HOLD_ALREADY_ORDERED'
+  | 'DEADLINE_EXCEEDED';
 
 /** 쓰임새 결과 */
 export type CreateOrderResult =
@@ -128,16 +131,19 @@ export type CreateOrderResult =
  * 11. sessions.markPaying(purchaseSessionId): 실패(false·던짐)해도 응답을 바꾸지 않는다(주문은 커밋됐다). 2의 COMMITTED 재생도 같이 부른다.
  *     실패면 남은 시간이 있을 때 한 번 더, 그래도 실패면 signals.payingMarkFailed?.()와 log.payingMarkFailed(구매 세션 ID·주문 ID)(리뷰 고침 M3)
  * 12. 201 { order, replayed }
- * 좌석 Redis 포트가 OrderSeatStoreUnavailable을 던지면(1·7) SEAT_STORE_UNAVAILABLE. writes.create가 던지는 ProblemError(409·422)·DB 오류는 그대로 던진다
+ * 좌석 Redis 포트가 OrderSeatStoreUnavailable을 던지면(1·7) SEAT_STORE_UNAVAILABLE. writes.create가 던지는 ProblemError(409·422)·DB 오류는 그대로 던진다.
+ * 1·3·7의 좌석 Redis 호출 바로 전 남은 시간이 5ms [가정] 미만이면 부르지 않고 DEADLINE_EXCEEDED(504). 10의 트랜잭션에는 남은 시간이 DB 문장 상한(1초 [가정])보다
+ * 짧을 때 그것을 문장 시간 초과로 넘긴다(리뷰 고침 L4). 11의 Paying 표시는 주문을 커밋한 뒤라 이 기준으로 막지 않는다
  */
 export class CreateOrder {
   constructor(private readonly deps: CreateOrderDeps) {}
 
   async execute(c: CreateOrderCommand): Promise<CreateOrderResult> {
     const d = this.deps;
-    const seatCall = seatCallOf(c.deadline);
 
     // 1. 구매 세션(없거나 끝났으면 401). 세션의 계정이 요청 계정과 다르면 없는 것과 같게 본다(플랫폼 가드가 이미 막지만 한 번 더 본다)
+    //    좌석 Redis를 부르기 전 남은 시간이 5ms [가정] 미만이면 부르지 않는다(504, 리뷰 고침 L4. 3·7도 같다)
+    if (seatCallTooLate(c.deadline)) return rejected('DEADLINE_EXCEEDED');
     let session: OrderSessionView | undefined;
     try {
       session = await d.sessions.get(c.purchaseSessionId);
@@ -158,7 +164,11 @@ export class CreateOrder {
     // 3. 판매 설정과 홀드 확인. 판매 종료 뒤에는 판매 종료 전에 잡은 홀드만 받고 그 밖은 모두 410(있는지 새지 않게 같은 답)
     const sale = await d.saleConfigs.get(session.eventId);
     if (!sale) return rejected('SEAT_STORE_UNAVAILABLE');
-    const hold = await d.holds.check({ eventId: session.eventId, purchaseSessionId: c.purchaseSessionId, accountId: c.accountId, holdId: c.body.holdId }, seatCall);
+    if (seatCallTooLate(c.deadline)) return rejected('DEADLINE_EXCEEDED');
+    const hold = await d.holds.check(
+      { eventId: session.eventId, purchaseSessionId: c.purchaseSessionId, accountId: c.accountId, holdId: c.body.holdId },
+      seatCallOf(c.deadline),
+    );
     if (hold.status === 'STORE_UNAVAILABLE') return rejected('SEAT_STORE_UNAVAILABLE');
     if (d.clock.now() >= sale.saleEndsAtMs && (hold.status !== 'OK' || hold.heldAtMs >= sale.saleEndsAtMs)) return rejected('SALE_ENDED');
     if (hold.status !== 'OK') return rejected('HOLD_NOT_FOUND');
@@ -185,6 +195,7 @@ export class CreateOrder {
 
     // 7. 예매 제한 사본(ACTIVE이고 끝 시각 전이면 403). 망가진 사본(Error)은 제한 없음으로 숨기지 않고 그대로 던진다
     let restriction: BookingRestriction | undefined;
+    if (seatCallTooLate(c.deadline)) return rejected('DEADLINE_EXCEEDED');
     try {
       restriction = await d.restrictions.read(c.accountId);
     } catch (e) {
@@ -233,7 +244,8 @@ export class CreateOrder {
       holdId: c.body.holdId,
       purchaseSessionId: c.purchaseSessionId,
     };
-    const outcome = await d.writes.create(c.idem, order);
+    // 남은 시간이 DB 문장 상한보다 짧으면 트랜잭션의 문장 시간 초과로 넘긴다(리뷰 고침 L4)
+    const outcome = await d.writes.create(c.idem, order, transactionCallOf(c.deadline));
     if (outcome.status === 'HOLD_ALREADY_ORDERED') return rejected('HOLD_ALREADY_ORDERED');
 
     // 11. 커밋 뒤 Paying 표시(실패해도 응답을 바꾸지 않는다), 12. 201
@@ -277,15 +289,3 @@ const rejected = (reason: CreateOrderRejection): CreateOrderResult => ({ status:
 /** 재확인이 이 까닭으로 답하지 않았으면 가명 호출을 건너뛴다(같은 identity-svc가 지금 답하지 않는다, 리뷰 고침 M4 2026-11-05) */
 const SKIP_CONTACT_REF_AFTER: ReadonlySet<RecheckFailure> = new Set<RecheckFailure>(['circuit_open', 'deadline', 'unavailable']);
 
-/** 호출 하나의 데드라인: min(상한, 요청의 남은 시간)을 내림한 정수(1 이상). 남은 시간이 없으면 상한 그대로 */
-function budgetOf(deadline: Deadline | undefined, capMs: number): number {
-  return deadline ? Math.max(1, Math.floor(deadline.budgetFor(capMs))) : capMs;
-}
-
-/** 좌석 Redis 호출 하나의 마감 상한(ms, 플랫폼 REDIS_CALL_DEADLINE_MS와 같은 값. inventory SEAT_CALL_CAP_MS와 같은 뜻) */
-const SEAT_CALL_CAP_MS = 100;
-
-/** 좌석 Redis 포트(홀드 확인·Paying 표시)에 줄 마감. 요청의 남은 시간이 없으면 플랫폼 기본을 쓴다(넘기지 않는다) */
-function seatCallOf(deadline: Deadline | undefined): { deadlineMs?: number } {
-  return deadline ? { deadlineMs: budgetOf(deadline, SEAT_CALL_CAP_MS) } : {};
-}

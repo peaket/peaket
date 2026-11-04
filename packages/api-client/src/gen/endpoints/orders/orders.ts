@@ -115,10 +115,15 @@ export type createOrderResponse503 = {
   status: 503
 }
 
+export type createOrderResponse504 = {
+  data: ProblemResponse
+  status: 504
+}
+
 export type createOrderResponseSuccess = (createOrderResponse201) & {
   headers: Headers;
 };
-export type createOrderResponseError = (createOrderResponse401 | createOrderResponse403 | createOrderResponse404 | createOrderResponse409 | createOrderResponse410 | createOrderResponse415 | createOrderResponse422 | createOrderResponse429 | createOrderResponse503) & {
+export type createOrderResponseError = (createOrderResponse401 | createOrderResponse403 | createOrderResponse404 | createOrderResponse409 | createOrderResponse410 | createOrderResponse415 | createOrderResponse422 | createOrderResponse429 | createOrderResponse503 | createOrderResponse504) & {
   headers: Headers;
 };
 
@@ -391,10 +396,15 @@ export type createOrderPaymentAcceptanceResponse503 = {
   status: 503
 }
 
+export type createOrderPaymentAcceptanceResponse504 = {
+  data: ProblemResponse
+  status: 504
+}
+
 export type createOrderPaymentAcceptanceResponseSuccess = (createOrderPaymentAcceptanceResponse202) & {
   headers: Headers;
 };
-export type createOrderPaymentAcceptanceResponseError = (createOrderPaymentAcceptanceResponse400 | createOrderPaymentAcceptanceResponse401 | createOrderPaymentAcceptanceResponse404 | createOrderPaymentAcceptanceResponse409 | createOrderPaymentAcceptanceResponse415 | createOrderPaymentAcceptanceResponse423 | createOrderPaymentAcceptanceResponse429 | createOrderPaymentAcceptanceResponse503) & {
+export type createOrderPaymentAcceptanceResponseError = (createOrderPaymentAcceptanceResponse400 | createOrderPaymentAcceptanceResponse401 | createOrderPaymentAcceptanceResponse404 | createOrderPaymentAcceptanceResponse409 | createOrderPaymentAcceptanceResponse415 | createOrderPaymentAcceptanceResponse423 | createOrderPaymentAcceptanceResponse429 | createOrderPaymentAcceptanceResponse503 | createOrderPaymentAcceptanceResponse504) & {
   headers: Headers;
 };
 

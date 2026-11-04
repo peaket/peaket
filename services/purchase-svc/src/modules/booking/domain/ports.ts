@@ -277,9 +277,10 @@ export interface OrderWrites {
    * @throws ProblemError 409 idempotency-request-in-progress(같은 키가 1초 [가정] 안에 끝나지 않음), 422 idempotency-key-reused(그사이 다른 지문이 커밋함)
    *   — 플랫폼 IdempotencyStore가 던지는 그대로
    * @throws RangeError 입력이 틀림(코드 오류, DB에 가지 않는다)
-   * @throws Error 그 밖의 DB 오류(트랜잭션째 되돌렸다)
+   * @throws Error 그 밖의 DB 오류(문장 시간 초과 포함, 트랜잭션째 되돌렸다)
+   * @param o.deadlineMs 트랜잭션의 문장 시간 초과(리뷰 고침 L4). 트랜잭션은 read committed다(리뷰 고침 L3)
    */
-  create(once: OrderRequestOnce, order: NewOrder): Promise<OrderCreateOutcome>;
+  create(once: OrderRequestOnce, order: NewOrder, o?: TransactionCallOptions): Promise<OrderCreateOutcome>;
 }
 
 /** 주문 생성의 보안·설정 로그(서비스 로그 한 줄씩. 번호 원문·토큰은 싣지 않는다). 던지지 않는다 */
@@ -298,4 +299,157 @@ export interface OrderLog {
   ): void;
   /** 커밋 뒤 Paying 표시가 다시 불러도 실패했다(warn 한 줄, 구매 세션 ID·주문 ID만. 세션 정리 반복이 결제 중 유휴로 끝낼 수 있어 알린다, POL-009) */
   payingMarkFailed(e: { readonly purchaseSessionId: string; readonly orderId: string }): void;
+}
+
+// ---- 결제 접수 POST /v1/orders/{orderId}/payment-acceptance(docs/features/payment.md §2 '결제 접수의 첫 구현', docs/data.md §5 '결제 접수', BUILD_ORDER PRF-162) ----
+// 검사 차례: (플랫폼 가드) → OrderSessions.get → OrderAcceptReads.findCommitted → OrderAcceptReads.order → 상태 표 → OrderAcceptReads.activeAttempt 대조
+// → SeatSlotReads.read(회차 슬롯 읽기) → OrderAcceptWrites.accept(한 트랜잭션) → 202(본문 없음).
+// Saga 1단계(묶기·판 번호 대조·판매 예약·승인 명령)는 PRF-165다. 접수는 order_saga_job 행을 넣는 데서 끝난다.
+
+/** 결제사(payment_attempt.pg의 CHECK 값) */
+export type PaymentPg = 'TOSS' | 'PORTONE' | 'SIMULATOR';
+
+/**
+ * 결제 접수 본문(openapi PaymentAccept, pg로 갈리는 oneOf). 토스·시뮬레이터는 성공 URL의 paymentKey·amount,
+ * 포트원은 결제창 응답의 paymentId·paymentToken·txId다(payment §2.2 '결제사별 접수 계약')
+ */
+export type PaymentAcceptBody =
+  | { readonly pg: 'TOSS' | 'SIMULATOR'; readonly paymentKey: string; readonly amount: number }
+  | { readonly pg: 'PORTONE'; readonly paymentId: string; readonly paymentToken: string; readonly txId: string };
+
+/** 결제 접수가 보는 주문 모습(주문 행의 칸 몇 개) */
+export interface AcceptOrderView {
+  readonly orderId: string;
+  readonly accountId: string;
+  readonly eventId: string;
+  /** 주문을 만든 구매 세션(purchase_order.purchase_session_id, 0004) */
+  readonly purchaseSessionId: string;
+  readonly status: OrderStatus;
+  /** 서버가 계산한 금액(원). 토스·시뮬레이터 본문 amount와 견준다 */
+  readonly amount: number;
+}
+
+/** 그 주문의 활성 결제 시도(READY·ACCEPTED 가운데 하나, payment_attempt_active_key 부분 유일) */
+export interface ActiveAttemptView {
+  readonly attemptId: string;
+  readonly pg: PaymentPg;
+  readonly status: 'READY' | 'ACCEPTED';
+  /** 토스 orderId 또는 포트원 paymentId(pay-{orderId}). 칸이 비었으면 undefined */
+  readonly pgOrderRef?: string;
+  /** 시도를 만든 시각(epoch ms). 40분 [가정](결제창 인증 유효 30분 + 승인 기한 10분)을 넘으면 없는 시도로 본다(ADR-0107) */
+  readonly createdAtMs: number;
+}
+
+/** 커밋된 결제 접수 멱등 기록 읽기 결과(트랜잭션 밖, 범위 계정 × ACCEPT_PAYMENT × 키) */
+export type CommittedAcceptLookup =
+  /** 같은 키·같은 지문으로 커밋한 접수가 있다: 처음 202를 그대로 돌려준다(주문이 그 뒤 상태로 갔어도 같은 답). orderId = result_ref */
+  | { readonly status: 'COMMITTED'; readonly orderId: string }
+  /** 같은 키에 다른 지문(422 idempotency-key-reused) */
+  | { readonly status: 'MISMATCH' }
+  /** 기록이 없거나, 처리 중(result_ref 비어 있음)이거나, 보관 기간(24시간 [가정])이 지났다: 검사를 이어 간다 */
+  | { readonly status: 'NONE' };
+
+/** 결제 접수의 읽기(트랜잭션 밖, 운영은 adapters/db/drizzle-order-accepts.ts). 아무것도 쓰지 않는다 */
+export interface OrderAcceptReads {
+  /** 커밋된 멱등 기록(order_idempotency, 범위 계정 × ACCEPT_PAYMENT × 키)을 읽는다. 지문은 상수 시간으로 견준다 */
+  findCommitted(once: OrderRequestOnce): Promise<CommittedAcceptLookup>;
+  /** 주문 하나. 없거나 orderId가 소문자 UUID가 아니면 undefined(쓰임새가 404, 남의 것과 가리지 않는다) */
+  order(orderId: string): Promise<AcceptOrderView | undefined>;
+  /** 그 주문의 활성 결제 시도(READY·ACCEPTED). 없으면 undefined */
+  activeAttempt(orderId: string): Promise<ActiveAttemptView | undefined>;
+}
+
+/** 결제 참조(결제 시도에 저장하는 값. 로그·사건·응답에 싣지 않는다, data-classification '결제 참조', ADR-0044·0053) */
+export type PaymentRefs =
+  /** 토스·시뮬레이터: payment_attempt.pg_payment_key */
+  | { readonly pg: 'TOSS' | 'SIMULATOR'; readonly paymentKey: string }
+  /** 포트원: pg_tx_id·pg_payment_token(paymentId는 이미 pg_order_ref와 같음을 봤다) */
+  | { readonly pg: 'PORTONE'; readonly txId: string; readonly paymentToken: string };
+
+/** 한 트랜잭션의 입력 */
+export interface AcceptInput {
+  readonly orderId: string;
+  /** 대조를 지난 READY 시도 */
+  readonly attemptId: string;
+  /** 주문의 회차(order_saga_job.event_id) */
+  readonly eventId: string;
+  readonly refs: PaymentRefs;
+  /** 회차 슬롯 읽기의 다시 만들기 판 번호(purchase_order.seat_gen, 1 이상 정수) */
+  readonly seatGen: number;
+  /** 행위자(ACTOR_PATTERN). 결제 접수는 account:<계정 ID> */
+  readonly actor: string;
+}
+
+/** 한 트랜잭션 결과 */
+export type AcceptOutcome =
+  /** 이번에 접수했다(시도 ACCEPTED, 주문 T3·T4, seat_gen, Saga 작업 행 커밋) */
+  | { readonly status: 'ACCEPTED' }
+  /** 그사이 같은 키·같은 지문의 요청이 먼저 커밋했다: 처음 202를 그대로 */
+  | { readonly status: 'REPLAYED' }
+  /**
+   * 조건부 UPDATE가 0행이라 트랜잭션째 되돌렸다(멱등 키 행도 남지 않는다). 잠금 차례는 주문 행(T3) → 결제 시도 행이다(리뷰 고침 M2 2026-11-05).
+   * ORDER_STATE: 주문 T3·T4가 출발 상태가 아님(다른 탭이 먼저 접수했거나 만료와 겹침). current가 EXPIRED면 409 order-expired, 그 밖은 409 payment-already-accepted.
+   * ATTEMPT_GONE: 주문은 CREATED였지만 시도가 그사이 READY가 아님(대체·만료). current = 시도의 지금 상태(행이 없으면 없음).
+   *   쓰임새가 시도 대조 실패(409 payment-attempt-mismatch, 보안 로그 EXPIRED면 attempt_expired, 그 밖은 no_attempt)로 답한다
+   */
+  | { readonly status: 'STALE'; readonly reason: 'ORDER_STATE'; readonly current?: OrderStatus }
+  | { readonly status: 'STALE'; readonly reason: 'ATTEMPT_GONE'; readonly current?: 'ACCEPTED' | 'SUPERSEDED' | 'EXPIRED' };
+
+/** 트랜잭션 하나의 선택값(리뷰 고침 L4) */
+export interface TransactionCallOptions {
+  /** 이 트랜잭션의 문장 시간 초과(ms, 1 이상 정수). 요청의 남은 시간이 DB 역할의 문장 상한보다 짧을 때만 준다. 없으면 역할 기본 */
+  readonly deadlineMs?: number;
+}
+
+/** 결제 접수 쓰기(운영은 adapters/db/drizzle-order-accepts.ts: purchase DB 트랜잭션 하나, read committed) */
+export interface OrderAcceptWrites {
+  /**
+   * 한 트랜잭션: 멱등 기록 잡기(범위 계정 × ACCEPT_PAYMENT, 결과 참조 = 주문 ID) → 주문 T3(주문 행 잠금, DrizzleOrderStore.transition)
+   * → 시도 READY → ACCEPTED 조건부 UPDATE(결제 참조·authenticated_at·accepted_at) → seat_gen → order_saga_job INSERT(step 'RESERVE')
+   * → 주문 T4(ACCEPTED 사건을 Outbox에 쓴다. 업무 문장의 마지막, ADR-0116 결정 3).
+   * @throws ProblemError 409 idempotency-request-in-progress, 422 idempotency-key-reused — 플랫폼 IdempotencyStore가 던지는 그대로
+   * @throws RangeError 입력이 틀림(코드 오류, DB에 가지 않는다)
+   * @throws Error 그 밖의 DB 오류(문장 시간 초과 포함, 트랜잭션째 되돌렸다)
+   */
+  accept(once: OrderRequestOnce, input: AcceptInput, o?: TransactionCallOptions): Promise<AcceptOutcome>;
+}
+
+/**
+ * 회차 슬롯 읽기 결과(inventory SEAT_SLOT_READ_LUA, 세대 키 s:{event:E}:epoch와 판매 정지 사본 s:{event:E}:ctl을 한 번에 읽는다).
+ * - OK: 좌석 저장소가 준비됐고 정지가 아니다. gen = 세대 키의 gen 칸(다시 만들기 판 번호, 칸이 없으면 1)
+ * - NOT_READY: 세대 키의 epoch 칸이 없다(503 seat-store-unavailable)
+ * - PAUSED: ctl의 paused·allPaused·suspended 가운데 하나라도 '1'(423 sale-paused)
+ */
+export type SeatSlotRead = { readonly status: 'OK'; readonly gen: number } | { readonly status: 'NOT_READY' } | { readonly status: 'PAUSED' };
+
+/** 회차 슬롯 읽기(운영은 inventory RedisSeatSlots를 InventorySeatSlots 다리로 잇는다, adapters/inventory-bridges.ts) */
+export interface SeatSlotReads {
+  /**
+   * @param o.deadlineMs 좌석 Redis 호출 하나의 마감(ms, 1 이상 정수). 없으면 플랫폼 기본
+   * @throws OrderSeatStoreUnavailable 좌석 Redis 일시 장애
+   * @throws Error 망가진 세대 키(gen 칸 형식 틀림, PEAKET_CORRUPT_KEY)·WRONGTYPE
+   */
+  read(eventId: string, o?: { deadlineMs?: number }): Promise<SeatSlotRead>;
+}
+
+/** 결제 시도 대조 실패의 까닭(보안 로그 reason, payment §4.2 18) */
+export type AttemptMismatchReason =
+  /** 활성 시도가 없거나 READY가 아님 */
+  | 'no_attempt'
+  /** READY 시도가 만든 지 40분 [가정]을 넘음 */
+  | 'attempt_expired'
+  /** 본문 pg가 시도의 결제사와 다름 */
+  | 'pg_mismatch'
+  /** 포트원 본문 paymentId가 시도의 pg_order_ref와 다름 */
+  | 'payment_id_mismatch'
+  /** 토스·시뮬레이터 본문 amount가 주문 금액과 다름(400, 금액 변조는 보안 사건이다, ASVS 16.3.3. 금액은 싣지 않는다) */
+  | 'amount_mismatch';
+
+/** 결제 접수의 보안 로그(서비스 로그 한 줄. 결제 참조·토큰·본문 값·금액은 싣지 않는다). 던지지 않는다 */
+export interface AcceptLog {
+  /**
+   * 결제 시도 대조 실패(409 payment-attempt-mismatch)와 금액 불일치(400) 한 줄: 계정·주문·까닭만(payment §2 '활성 결제 시도 대조', §4.2 18).
+   * 금액 불일치는 까닭 amount_mismatch로 같은 줄을 쓴다(2026-11-05 정본 바로잡음)
+   */
+  attemptMismatch(e: { readonly accountId: string; readonly orderId: string; readonly reason: AttemptMismatchReason }): void;
 }

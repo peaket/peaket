@@ -13,7 +13,7 @@ import type { PaymentAcceptTossPg } from './paymentAcceptTossPg';
 
 export interface PaymentAcceptToss {
   pg: PaymentAcceptTossPg;
-  /** 토스 성공 URL의 paymentKey(SIMULATOR도 같은 형식) */
+  /** 토스 성공 URL의 paymentKey(SIMULATOR도 같은 형식). 1~200자 [가정]의 보이는 ASCII만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-05) */
   paymentKey: string;
   /** 성공 URL의 금액. 서버 주문 금액과 대조 */
   amount: number;

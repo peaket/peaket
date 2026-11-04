@@ -16,11 +16,13 @@ import {
   type BookingModuleDeps,
   CONSENT_VERSION_ENV,
   type ContactRefs,
+  DrizzleOrderAccepts,
   DrizzleOrderStore,
   DrizzleOrderWrites,
   type IdentityRecheck,
   identityClientsFromEnv,
   InventoryOrderSessions,
+  InventorySeatSlots,
   missingContactRefs,
   PromOrderSignals,
   RedisBookingRestrictions,
@@ -35,6 +37,7 @@ import {
   PromSeatSignals,
   RedisOrderHolds,
   RedisPurchaseSessionStore,
+  RedisSeatSlots,
   RedisSessionEndedLog,
   RedisSessionIndex,
   RedisSessionStartedLog,
@@ -92,9 +95,13 @@ const seatMap = new LayoutSeatMap({ source: new FileSeatMapSource(seatMapDir), c
 // - 로그는 넘기지 않는다(모듈이 서비스 로거로 LoggerOrderLog를 만든다). 지표 PromOrderSignals는 서비스 레지스트리에 붙인다
 const orderSignals = new PromOrderSignals();
 const identityLate: { recheck?: IdentityRecheck; contactRefs?: ContactRefs } = {};
+// - 결제 접수(POST /v1/orders/{orderId}/payment-acceptance, PRF-162)는 주문 생성과 같은 주문 전이 함수(DrizzleOrderStore)를 쓰고, 회차 슬롯 읽기는 좌석 Redis(RedisSeatSlots)다
+const orderStore = new DrizzleOrderStore({ clock: systemClock });
 const booking: BookingModuleDeps | undefined = database
   ? {
-      writes: new DrizzleOrderWrites({ database, store: new DrizzleOrderStore({ clock: systemClock }), clock: systemClock }),
+      writes: new DrizzleOrderWrites({ database, store: orderStore, clock: systemClock }),
+      accepts: new DrizzleOrderAccepts({ database, store: orderStore, clock: systemClock }),
+      slots: new InventorySeatSlots(new RedisSeatSlots(redis)),
       holds: new RedisOrderHolds(redis, seatMap),
       saleConfigs: new SeatMapSaleConfigs(seatMap),
       sessions: new InventoryOrderSessions({ sessions, store: sessionStore }),

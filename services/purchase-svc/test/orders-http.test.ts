@@ -11,6 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { AppModule } from '../src/app.module.js';
 import { type CreateOrderRejection, ORDER_PROBLEMS, orderResponseOf } from '../src/modules/booking/index.js';
 import { MemoryPurchaseSessions } from '../src/modules/inventory/index.js';
+import { AcceptFakes } from './accept-cases.js';
 import {
   ACCOUNT,
   AMOUNT,
@@ -48,7 +49,8 @@ beforeAll(async () => {
   // 뼈대 단계에서는 BookingModule.register가 '미구현'을 던져 여기서 멈춘다(이 파일의 시험이 모두 그 까닭으로 실패한다)
   svc = await createService({
     name: 'purchase-svc',
-    module: AppModule.register({ memory: true, sessions, booking: { ...fx.ports(), consentVersion: CONSENT_VERSION, clock } }),
+    // 결제 접수 칸(accepts·slots, PRF-162)은 결제 접수 가짜로 채운다(이 파일은 주문 생성만 본다. 결제 접수는 accept-http.test.ts)
+    module: AppModule.register({ memory: true, sessions, booking: { ...fx.ports(), ...new AcceptFakes().bookingPorts(), consentVersion: CONSENT_VERSION, clock } }),
     purchaseSessions: sessions,
     env: { PEAKET_ENV: 'ci' },
     clock,
@@ -161,7 +163,7 @@ describe('201 Order', () => {
 });
 
 /** 거절 까닭마다 그 거절이 나게 하는 준비(가짜 포트 값 또는 본문) */
-const REJECTIONS: Record<CreateOrderRejection, { arrange?: () => void; body?: () => unknown }> = {
+const REJECTIONS: Record<CreateOrderRejection, { arrange?: () => void; body?: () => unknown; headers?: Record<string, string> }> = {
   SESSION_NOT_FOUND: { arrange: () => (fx.session = undefined) },
   IDEM_REUSED: { arrange: () => (fx.committed = { status: 'MISMATCH' }) },
   HOLD_NOT_FOUND: { arrange: () => (fx.hold = { status: 'NOT_FOUND' }) },
@@ -185,6 +187,8 @@ const REJECTIONS: Record<CreateOrderRejection, { arrange?: () => void; body?: ()
     },
   },
   HOLD_ALREADY_ORDERED: { arrange: () => (fx.outcome = { status: 'HOLD_ALREADY_ORDERED' }) },
+  // 남은 시간 4ms(5ms [가정] 미만)면 좌석 Redis를 부르지 않는다(리뷰 고침 L4)
+  DEADLINE_EXCEEDED: { headers: { [DEADLINE_HEADER]: '4' } },
 };
 
 /** openapi x-peaket-problem-types(이름 → status·title)를 계약 파일에서 읽는다 */
@@ -220,6 +224,7 @@ describe('거절 → 문제 상세(ORDER_PROBLEMS 전부)', () => {
       BOOKING_RESTRICTED: [403, 'booking-restricted'],
       PRICE_MISSING: [500, 'about:blank'],
       HOLD_ALREADY_ORDERED: [409, 'hold-already-ordered'],
+      DEADLINE_EXCEEDED: [504, 'deadline-exceeded'],
     };
     for (const [reason, [status, type]] of Object.entries(want)) expect({ reason, status: ORDER_PROBLEMS[reason as CreateOrderRejection].status, type: ORDER_PROBLEMS[reason as CreateOrderRejection].type }).toEqual({ reason, status, type });
     expect(ORDER_PROBLEMS.SEAT_STORE_UNAVAILABLE.retryAfterSeconds).toBe(2);
@@ -233,7 +238,7 @@ describe('거절 → 문제 상세(ORDER_PROBLEMS 전부)', () => {
       const spec = ORDER_PROBLEMS[reason];
       const setup = REJECTIONS[reason];
       setup.arrange?.();
-      const r = await post(setup.body ? setup.body() : okBody());
+      const r = await post(setup.body ? setup.body() : okBody(), setup.headers ? { headers: setup.headers } : {});
       expect(r.statusCode).toBe(spec.status);
       expect(r.headers['content-type']).toMatch(/^application\/problem\+json/);
       expect(r.headers['cache-control']).toBe('no-store');

@@ -602,6 +602,24 @@ export interface OrderHoldReader {
   check(q: OrderHoldQuery, o?: SeatCallOptions): Promise<OrderHoldCheck>;
 }
 
+/**
+ * 결제 접수의 회차 슬롯 읽기 결과(booking SeatSlotRead와 같은 모양, BUILD_ORDER PRF-162).
+ * OK의 gen은 세대 키의 gen 칸(다시 만들기 판 번호, 칸이 없으면 INITIAL_SEAT_GEN = 1)이다
+ */
+export type SeatSlotRead = { status: 'OK'; gen: number } | { status: 'NOT_READY' } | { status: 'PAUSED' };
+
+/**
+ * 결제 접수의 회차 슬롯 읽기(docs/features/payment.md §2 '결제 접수의 첫 구현', Lua 계약은 adapters/seat-slot-lua.ts, BUILD_ORDER PRF-162).
+ * 운영 구현은 RedisSeatSlots, 시험 대역은 MemorySeatSlots다(같은 사례에서 같은 결과). booking은 InventorySeatSlots 다리로 잇는다(오류 이름 바꾸기).
+ * 세대 키의 epoch 칸이 없으면 NOT_READY, ctl의 paused·allPaused·suspended 가운데 하나라도 '1'이면 PAUSED, 아니면 OK(gen).
+ * 아무것도 쓰지 않는다. eventId가 KEY_PART 모양이 아니면 저장소를 부르지 않고 RangeError(booking이 주문 행의 UUID를 넘기므로 코드 오류다).
+ * @throws SeatStoreUnavailable 좌석 Redis 일시 장애(platform isRedisUnavailable, guard가 바꾼 것)
+ * @throws Error 'PEAKET_CORRUPT_KEY {epoch 키}'(gen 칸 형식 틀림)·WRONGTYPE·모르는 결과
+ */
+export interface SeatSlotReader {
+  read(eventId: string, o?: SeatCallOptions): Promise<SeatSlotRead>;
+}
+
 export const SEAT_PINS = Symbol('purchase.SeatPins');
 /**
  * 판매 예약 앞의 좌석 묶기와 결제 실패 해제(BUILD_ORDER PRF-142, docs/features/seat-hold.md §6 '좌석 묶기와 실패 해제의 첫 구현', Lua 계약은 adapters/pin-lua.ts).

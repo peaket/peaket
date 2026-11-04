@@ -700,6 +700,7 @@ erDiagram
         text idempotency_key "사본. 멱등 확인은 order_idempotency(계정 × 작업 범위, 기술 검토 중간-046)"
         text consent_version "판매자 제공 동의(SCR-011 ③)와 판매 조건 동의(POL-004)에 보인 고지 문안의 판. 두 동의는 주문 생성의 필수 값이라 동의 일시는 created_at이다. 주문 원장과 함께 보존(ADR-0089)"
         text seat_assignment "PICK|AUTO. 주문 사건마다 싣는 좌석 고르기 방식(ADR-0150, 추천 적용 2026-11-05, BUILD_ORDER PRF-160)"
+        int seat_gen "결제 접수 때 적은 좌석 Redis 다시 만들기 판 번호(명세 accept). 판매 예약은 이 번호가 seat_rebuild의 지금 번호와 같을 때만 커밋한다(OPEN[15], PRF-165)"
         uuid hold_id "주문을 만든 홀드(UNIQUE: 한 홀드에 주문 하나, 겹치면 409 hold-already-ordered). 실패 해제·다시 만들기가 주문 기준으로 쓴다(추천 적용 2026-11-05, BUILD_ORDER PRF-161)"
         text purchase_session_id "주문을 만든 구매 세션. 결제 시도·접수가 '이 구매 세션의 주문'을 가린다(PRF-161, 사건에는 CREATED에만 싣는다)"
         timestamptz created_at
@@ -789,6 +790,11 @@ erDiagram
         uuid order_id "활성(READY·ACCEPTED) 부분 유니크"
         text pg "TOSS|PORTONE|SIMULATOR"
         text pg_order_ref "토스 orderId 또는 포트원 paymentId"
+        text pg_payment_key "토스 paymentKey(결제 접수 때 저장, 승인 명령이 접수되거나 과금 없이 끝나면 지움, 추천 적용 2026-11-05, BUILD_ORDER PRF-162)"
+        text pg_tx_id "포트원 txId(같은 수명)"
+        text pg_payment_token "포트원 paymentToken(같은 수명, 로그·사건·응답에 싣지 않는다, ADR-0044)"
+        timestamptz authenticated_at "결제창 인증 완료(접수) 시각. 승인 기한(인증 + 10분)의 기준"
+        timestamptz accepted_at "결제 접수 시각"
         text status "READY|ACCEPTED|SUPERSEDED|EXPIRED. READY는 만든 지 40분 [가정](결제창 인증 유효 30분 + 승인 기한 10분) 지나면 EXPIRED(ADR-0107)"
         timestamptz created_at
     }
@@ -2317,6 +2323,7 @@ erDiagram
 - Outbox 부모 표: platform 템플릿 `0002_outbox.sql`과 같다(일 파티션은 `ensureOutboxPartitions`가 만든다).
 - 발권 재시도 큐 `ticket_issue_job`은 승인 결과를 반영하는 PRF-163이 더한다.
 - 다섯 번째 마이그레이션(0004, BUILD_ORDER PRF-161)이 `purchase_order`에 `hold_id uuid NOT NULL`(유일 인덱스 `purchase_order_hold_key`)과 `purchase_session_id text NOT NULL`을 더한다(주문 표가 비어 있는 단계라 기본값 없이 더한다).
+- 여섯 번째 마이그레이션(0005, BUILD_ORDER PRF-162): `payment_attempt`에 결제 참조 칸 다섯(`pg_payment_key`·`pg_tx_id`·`pg_payment_token`·`authenticated_at`·`accepted_at`, 널 허용), `purchase_order.seat_gen int`(널 허용, 접수 때 채움), Saga 작업 표 `order_saga_job (order_id uuid PK FK, event_id uuid, step text, attempts int, next_attempt_at timestamptz, lease_until timestamptz, created_at timestamptz)`(`ticket_issue_job`과 같은 꼴, 쓸기 색인 `(next_attempt_at)`). `step`은 PRF-165가 값 목록을 정한다(접수는 `RESERVE`로 넣는다).
 - 마이그레이션 SQL은 `pnpm --filter @peaket/purchase-svc db:generate`(`scripts/db-generate.mjs`가 `tsconfig.drizzle.json`으로 drizzle-kit을 띄운다. 표 정의가 `@peaket/platform`의 `idempotencyRecordTable`을 가져와, 원본 경로를 읽으면 실패하므로 빌드된 패키지를 읽는다)로 만들고, 파티션·BRIN·트리거처럼 Drizzle 0.45가 나타내지 못하는 문장은 손으로 덧붙인다.
 
 ## 5. 동시성 제어가 필요한 지점
@@ -2350,6 +2357,7 @@ erDiagram
 | 다시 만들기(RB-06, 추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-143): 두 파드가 같은 회차를 함께 다시 만듦, 다시 만드는 동안 판매 예약이 커밋됨, 다시 만들기와 판매 열기가 둘 다 세대 키를 씀 | `seat_rebuild` 회차 행 하나를 임대로 잡는 한 문장(`ON CONFLICT … DO UPDATE … WHERE lease_until이 비었거나 지남 RETURNING gen`)이 판 번호를 올려 커밋한다. 임대를 못 잡은 쪽은 BUSY로 끝난다. 판 번호를 커밋한 뒤 판매 행을 읽으므로, 그 전에 커밋된 판매는 읽히고 그 뒤의 판매 예약은 판 번호가 달라 묶기부터 다시 한다(PRF-160). 좌석 Redis 쓰기 Lua는 세대 키가 이미 있으면 아무것도 쓰지 않는다. 판매 열기는 판매 시작 전에만 부른다 | `specs/seat.qnt`의 `rebuild`·`inv_noOversell`·`inv_staleSalesBounded`, 다시 만들기 통합 시험(실제 PostgreSQL·Valkey, S-T26 ④) |
 | 주문 상태 전이(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-160): 같은 주문의 두 전이가 겹침(승인 결과와 승인 기한 만료, 같은 결제 사건이 사건 길과 당기기로 두 번 옴), 이력 번호를 두 트랜잭션이 같이 매김 | 상태 바꾸기는 주문 전이 함수의 조건부 UPDATE 하나(`WHERE id = $1 AND status = <출발>`)다. 같은 행을 바꾸는 트랜잭션은 행 쓰기 잠금에서 줄을 서고, 뒤 쪽은 앞 쪽이 커밋한 뒤 조건을 다시 평가해 0행이 되므로 하나만 효과가 있다. 이력 번호는 같은 UPDATE가 `event_seq`를 1 올려 얻으므로 빈틈도 겹침도 없고 커밋 순서와 같다. 이력 없이 상태만 바꾼 트랜잭션은 지연 제약 트리거가 커밋 때 막는다. 결제 결과는 `payment_event_seq < 받은 순번` 조건을 같은 UPDATE에 두어 늦게 온 같은 사건을 거른다(ADR-0146 결정 2). Outbox 행은 마지막 문장이다(ADR-0116 결정 3) | 주문 저장소 통합 시험(실제 PostgreSQL 18, 같은 주문에 전이 둘을 동시에), P-T13(이력 역추적), 매일 상태·이력 검사 |
 | 주문 생성(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-161): 같은 홀드로 주문 둘이 겹침(여러 탭, 다른 멱등 키), 같은 멱등 키의 요청이 겹침, 주문을 만드는 사이에 홀드가 끝남 | 한 홀드에 주문 하나는 `purchase_order.hold_id` 유일 인덱스가 정한다. 뒤 쪽 트랜잭션은 앞 쪽이 커밋할 때까지 유일 확인에서 기다리고, 커밋되면 23505로 끝나 409 `hold-already-ordered`다. 같은 멱등 키는 `order_idempotency`의 키 행이 트랜잭션의 첫 쓰기라 뒤 쪽이 기다렸다가 처음 결과를 다시 돌려준다(guidelines §4). 홀드 확인은 읽기 Lua 한 번이라 커밋 전에 홀드가 끝날 수 있고, 그 주문은 결제를 접수하지 않으면 만료(T5)로 끝난다(ADR-0107) | 주문 생성 통합 시험(실제 PostgreSQL·Valkey, 같은 홀드 두 주문 동시), P-T45 |
+| 결제 접수(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-162): 같은 주문을 두 탭이 동시에 접수, 같은 멱등 키가 겹침, 접수와 주문 만료가 겹침 | 잠금 차례는 늘 '주문 행 → 결제 시도 행'이다(결제 시도 시작·만료도 같은 차례, 거꾸로 잡으면 교착). 주문 CREATED → AUTHENTICATED(T3)가 첫 조건부 UPDATE라 같은 주문의 두 트랜잭션은 주문 행 쓰기 잠금에서 줄을 서고, 뒤 쪽은 0행이 되어 409 `payment-already-accepted`로 트랜잭션째 되돌린다. 만료(T5)가 먼저 커밋되면 접수의 T3가 0행이라 409 `order-expired`다. 그 뒤 시도 READY → ACCEPTED가 0행이면 그사이 시도가 대체·만료된 것이라 409 `payment-attempt-mismatch`다. READ COMMITTED를 직접 고른다(REPEATABLE READ면 뒤 쪽이 40001로 끝난다). Saga 작업 행은 주문 ID 기본 키라 둘이 될 수 없다 | 결제 접수 통합 시험(실제 PostgreSQL, 두 탭 동시), P-T23 |
 | 좌석 상태 전이(`seat_hold`·`seat_sale`) UPDATE 과다로 인한 성능 저하 | `seat_hold`·`seat_sale`의 `status` 전이는 부분 유니크 인덱스의 조건 열을 바꾸므로 HOT(Heap-Only Tuples) 갱신이 되지 않는다(PostgreSQL 18 `relcache.c`가 인덱스 조건 열을 HOT를 막는 열에 넣는다). `fillfactor`는 인덱스 밖 열만 바꾸는 갱신(`purchase_quota.used` 등)에 쓴다. `seat_hold`는 표별 `autovacuum_vacuum_scale_factor`를 0.02 [가정](기본 0.2)로 낮춰 청소를 앞당긴다(추천 적용 2026-10-22, ADR-0083) | K3 데이터베이스 부하 튜닝(죽은 행 수·인덱스 크기) |
 
 데이터베이스 인덱스는 다음을 표준으로 만든다. 활성 판매의 유일 부분 인덱스 `seat_sale (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`(§2), 홀드 원장의 활성 홀드 유일 부분 인덱스 `seat_hold (event_id, seat_id) WHERE status = 'HELD'`, 회차·좌석별 등급 정본 `event_seat_price (event_id, seat_id)` 기본 키(2026-10-28 좌석 Redis 장애 때의 비상 홀드 경로를 없애 잠금 대상이 아니다, ADR-0121), 검색 읽기 모델 `search_term`의 띄어쓰기 없앤 값·낱자·초성에 둔 앞부분 일치용 B-tree 인덱스(`text_pattern_ops`)다(ADR-0094). 트랜잭션 격리 수준 실험(READ COMMITTED, REPEATABLE READ, SERIALIZABLE 환경에서 쓰기 스큐 재현)으로, 애플리케이션 계층의 비즈니스 로직에만 기대지 않고 데이터베이스의 물리 유니크 제약을 마지막 안전 방어선으로 둔 설계가 타당함을 보인다.

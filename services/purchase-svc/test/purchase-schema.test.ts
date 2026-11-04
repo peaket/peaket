@@ -2,9 +2,11 @@
 // '다시 만들기 표와 원장 칸'(BUILD_ORDER PRF-143), §2 ERD, BUILD_ORDER PRF-140 ①).
 // ① Drizzle 표 정의(schema.ts)를 getTableConfig로 읽어 표·열·기본 키·부분 유일 인덱스·check 제약 이름과 식이 정본과 같은지 보고,
 // ② 마이그레이션 SQL 파일(0000 좌석 표, 0002 다시 만들기 표·원장 칸)을 글로 읽어 파티션 선언(seat_hold만, DEFAULT 파티션 없음)과 표 정의 ↔ SQL 일치를 보고,
-// ③ 마이그레이션 기록(meta)이 맞물리는지 본다. 네 번째 마이그레이션(0003 주문 표·Outbox, BUILD_ORDER PRF-160)과 다섯 번째(0004 주문의 홀드·구매 세션 칸과
-// hold_id 유일 인덱스, BUILD_ORDER PRF-161)도 기록·파일 목록에 있고, 마지막 스냅샷(0004)의 주문 표 다섯(booking schema.ts)이 표 정의와 같은지 본다.
+// ③ 마이그레이션 기록(meta)이 맞물리는지 본다. 네 번째 마이그레이션(0003 주문 표·Outbox, BUILD_ORDER PRF-160), 다섯 번째(0004 주문의 홀드·구매 세션 칸과
+// hold_id 유일 인덱스, BUILD_ORDER PRF-161), 여섯 번째(0005 결제 접수의 결제 참조 칸·seat_gen·order_saga_job, BUILD_ORDER PRF-162)도 기록·파일 목록에 있고,
+// 마지막 스냅샷(0005)의 주문 표 여섯(booking schema.ts)이 표 정의와 같은지 본다.
 // ④ 0004 SQL의 칸(hold_id·purchase_session_id)과 유일 인덱스(purchase_order_hold_key)가 schema.ts와 같은지 본다.
+// ⑤ 0005 SQL의 칸(payment_attempt 다섯·purchase_order.seat_gen)과 order_saga_job 표·외래 키·색인이 schema.ts와 같은지 본다.
 // 실제 PostgreSQL에서 돌려 보는 것은 test-int/purchase-migration.int.test.ts(주문 표는 test-int/order-store.int.test.ts)다.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import type { SQL } from 'drizzle-orm';
 import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { describe, expect, test } from 'vitest';
-import { orderEvent, orderIdempotency, orderItem, paymentAttempt, purchaseOrder } from '../src/modules/booking/adapters/db/schema.js';
+import { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder } from '../src/modules/booking/adapters/db/schema.js';
 import { purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
 import { SEAT_SALE_STATUSES } from '../src/modules/inventory/domain/seat-sale.js';
 
@@ -26,6 +28,8 @@ const REBUILD_TAG = '0002_seat_rebuild_and_hold_ids';
 const ORDER_TAG = '0003_order_tables';
 /** 주문을 만든 홀드·구매 세션 칸과 hold_id 유일 인덱스(BUILD_ORDER PRF-161) */
 const ORDER_HOLD_TAG = '0004_order_hold_and_session';
+/** 결제 접수의 결제 참조 칸 다섯·주문의 판 번호 seat_gen·Saga 작업 표 order_saga_job(BUILD_ORDER PRF-162) */
+const PAY_TAG = '0005_payment_acceptance';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
 
@@ -336,7 +340,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
   };
 
-  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141)·0002(다시 만들기 표·원장 칸, PRF-143)·0003(주문 표·Outbox, PRF-160)·0004(주문의 홀드·구매 세션 칸, PRF-161) 차례이고 tag가 SQL 파일 이름과 맞으며 when이 차례대로 커진다 [ASVS v5.0.0-2.3.4]', () => {
+  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141)·0002(다시 만들기 표·원장 칸, PRF-143)·0003(주문 표·Outbox, PRF-160)·0004(주문의 홀드·구매 세션 칸, PRF-161)·0005(결제 접수, PRF-162) 차례이고 tag가 SQL 파일 이름과 맞으며 when이 차례대로 커진다 [ASVS v5.0.0-2.3.4]', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
@@ -344,6 +348,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [2, REBUILD_TAG],
       [3, ORDER_TAG],
       [4, ORDER_HOLD_TAG],
+      [5, PAY_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -355,7 +360,14 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   });
 
   test('migrations 폴더의 SQL 파일은 기록에 있는 것뿐이다(기록에 없는 SQL이 몰래 쌓이지 않는다)', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${HELD_TAG}.sql`, `${REBUILD_TAG}.sql`, `${ORDER_TAG}.sql`, `${ORDER_HOLD_TAG}.sql`]);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([
+      `${TAG}.sql`,
+      `${HELD_TAG}.sql`,
+      `${REBUILD_TAG}.sql`,
+      `${ORDER_TAG}.sql`,
+      `${ORDER_HOLD_TAG}.sql`,
+      `${PAY_TAG}.sql`,
+    ]);
   });
 
   type Snapshot = {
@@ -377,7 +389,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     .sort();
   const snapshotOf = (f: string) => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', f), 'utf8')) as Snapshot;
 
-  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003 → 0004)', () => {
+  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003 → 0004 → 0005)', () => {
     expect(snapshotFiles).toEqual(journal.entries.map((e) => `${String(e.idx).padStart(4, '0')}_snapshot.json`));
     let prev = '00000000-0000-0000-0000-000000000000';
     for (const f of snapshotFiles) {
@@ -387,12 +399,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     }
   });
 
-  /** booking schema.ts의 주문 표 다섯(PRF-160). Outbox 부모 표는 손으로 쓴 SQL이라 스냅샷에 없다 */
-  const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt];
+  /** booking schema.ts의 주문 표 여섯(PRF-160 다섯 + PRF-162 order_saga_job). Outbox 부모 표는 손으로 쓴 SQL이라 스냅샷에 없다 */
+  const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt, orderSagaJob];
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
 
-  test('마지막 스냅샷(0004_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 주문 표 다섯)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0004_snapshot.json');
+  test('마지막 스냅샷(0005_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 주문 표 여섯)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0005_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
     expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, ...ORDER_SHAPES].map((s) => `public.${s.name}`).sort());
     for (const s of [...SHAPES, ...ORDER_SHAPES]) {
@@ -403,9 +415,9 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     }
   });
 
-  test('마지막 스냅샷(0004)의 주문 표 다섯은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160, 0004의 purchase_order_hold_key는 PRF-161) [ASVS v5.0.0-2.3.4]', () => {
-    const snap = snapshotOf('0004_snapshot.json');
-    expect(ORDER_SHAPES.map((s) => s.name)).toEqual(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt']);
+  test('마지막 스냅샷(0005)의 주문 표 여섯은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160, 0004의 purchase_order_hold_key는 PRF-161, 0005의 order_saga_job은 PRF-162) [ASVS v5.0.0-2.3.4]', () => {
+    const snap = snapshotOf('0005_snapshot.json');
+    expect(ORDER_SHAPES.map((s) => s.name)).toEqual(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'order_saga_job']);
     ORDER_TABLES.forEach((table, i) => {
       const s = ORDER_SHAPES[i]!;
       const t = snap.tables[`public.${s.name}`]!;
@@ -427,6 +439,30 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     const a = after.tables['public.purchase_order']!;
     expect(Object.keys(a.columns).filter((c) => !(c in b.columns))).toEqual(['hold_id', 'purchase_session_id']);
     expect(Object.keys(a.indexes ?? {}).filter((i) => !(i in (b.indexes ?? {})))).toEqual(['purchase_order_hold_key']);
+  });
+
+  test('0004 → 0005 스냅샷: order_saga_job이 새로 생기고, payment_attempt에 결제 참조 칸 다섯, purchase_order에 seat_gen 하나가 늘었다. 인덱스·외래 키·check는 그대로이고 다른 표는 같다 [ASVS v5.0.0-2.3.4]', () => {
+    const before = snapshotOf('0004_snapshot.json');
+    const after = snapshotOf('0005_snapshot.json');
+    expect(Object.keys(after.tables).filter((n) => !(n in before.tables))).toEqual(['public.order_saga_job']);
+    expect(Object.keys(before.tables).filter((n) => !(n in after.tables))).toEqual([]);
+    const changed: Record<string, string[]> = { 'public.payment_attempt': ['pg_payment_key', 'pg_tx_id', 'pg_payment_token', 'authenticated_at', 'accepted_at'], 'public.purchase_order': ['seat_gen'] };
+    for (const name of Object.keys(before.tables)) {
+      const b = before.tables[name]!;
+      const a = after.tables[name]!;
+      if (!(name in changed)) {
+        expect(a, name).toEqual(b);
+        continue;
+      }
+      expect(Object.keys(a.columns).filter((c) => !(c in b.columns)), name).toEqual(changed[name]);
+      // 앞에 있던 칸은 그대로다(바꾸거나 지우지 않는다)
+      for (const [c, col] of Object.entries(b.columns)) expect(a.columns[c], `${name}.${c}`).toEqual(col);
+      expect(a.indexes, `${name} 인덱스`).toEqual(b.indexes);
+      expect(a.foreignKeys, `${name} 외래 키`).toEqual(b.foreignKeys);
+      expect(a.checkConstraints, `${name} check`).toEqual(b.checkConstraints);
+      // 더한 칸은 모두 널 허용(접수 전에는 비어 있다)
+      for (const c of changed[name]!) expect({ c, notNull: a.columns[c]!.notNull }).toEqual({ c, notNull: false });
+    }
   });
 });
 
@@ -465,13 +501,122 @@ describe('마이그레이션 SQL 파일(0004_order_hold_and_session.sql, PRF-161
     expect(orderShape.columns.find((c) => c.name === 'purchase_session_id')!.type).toBe('text');
   });
 
-  test('ADD COLUMN이 표 끝에 붙으므로 schema.ts purchase_order의 마지막 두 칸이 hold_id·purchase_session_id다(DB 칸 차례와 같다)', () => {
-    expect(orderShape.columns.slice(-2).map((c) => c.name)).toEqual(['hold_id', 'purchase_session_id']);
+  test('ADD COLUMN이 표 끝에 붙으므로 schema.ts purchase_order에서 0004 앞 칸 뒤의 두 칸이 hold_id·purchase_session_id이고, 그 뒤는 0005의 seat_gen 하나다(DB 칸 차례와 같다)', () => {
+    expect(orderShape.columns.slice(-3).map((c) => c.name)).toEqual(['hold_id', 'purchase_session_id', 'seat_gen']);
   });
 
   test('한 홀드에 주문 하나: purchase_order_hold_key는 purchase_order (hold_id)의 btree 유일 인덱스이고 WHERE가 없다. schema.ts의 purchase_order 인덱스는 이것 하나다 [ASVS v5.0.0-2.3.4]', () => {
     expect(orderShape.indexes).toEqual([{ name: 'purchase_order_hold_key', unique: true, columns: ['hold_id'], where: undefined }]);
     const c = canon(holdStatements[2]!).replace(/;$/, '');
     expect(c).toBe('create unique index purchase_order_hold_key on purchase_order using btree(hold_id)');
+  });
+});
+
+/** booking schema.ts의 payment_attempt·order_saga_job(0005가 칸 다섯·표 하나를 더한다, PRF-162) */
+const attemptShape = shapeOf(paymentAttempt);
+const sagaShape = shapeOf(orderSagaJob);
+const payFile = readFileSync(join(MIGRATIONS, `${PAY_TAG}.sql`), 'utf8');
+const payBody = payFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const payStatements = statementsOf(payFile);
+/** 0005의 ALTER TABLE … ADD COLUMN: [표, 열, 그 문] */
+const payAdded = (): [string, string, string][] =>
+  payStatements.flatMap((x) => {
+    const m = /^ALTER TABLE "([a-z_]+)" ADD COLUMN "([a-z_]+)" /.exec(x);
+    return m ? [[m[1]!, m[2]!, x] as [string, string, string]] : [];
+  });
+const ATTEMPT_REF_COLUMNS = ['pg_payment_key', 'pg_tx_id', 'pg_payment_token', 'authenticated_at', 'accepted_at'];
+
+describe('마이그레이션 SQL 파일(0005_payment_acceptance.sql, PRF-162)', () => {
+  test('문 아홉뿐이다: order_saga_job을 만들고, payment_attempt에 다섯·purchase_order에 하나를 더하고, 외래 키 하나와 색인 하나(지우거나 바꾸는 문이 없다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(payStatements).toHaveLength(9);
+    expect(payStatements[0]).toMatch(/^CREATE TABLE "order_saga_job" /);
+    expect(payAdded().map(([t, c]) => `${t}.${c}`)).toEqual([...ATTEMPT_REF_COLUMNS.map((c) => `payment_attempt.${c}`), 'purchase_order.seat_gen']);
+    expect(payStatements.filter((s) => /^ALTER TABLE "order_saga_job" ADD CONSTRAINT /.test(s))).toHaveLength(1);
+    expect(payStatements.filter((s) => /^CREATE (UNIQUE )?INDEX /.test(s))).toHaveLength(1);
+    expect(payBody).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b(?! no action)/i);
+    expect(payBody).not.toMatch(/ALTER\s+COLUMN|SET\s+NOT\s+NULL|USING\s+\(/i);
+    expect(payBody.split(BREAKPOINT)).toHaveLength(9);
+  });
+
+  test('payment_attempt에 더한 다섯 칸은 schema.ts의 같은 이름·종류이고 널 허용·기본값 없음이며, 표 끝 다섯 칸이 이 차례다(ADD COLUMN이 끝에 붙는다) [ASVS v5.0.0-2.3.4]', () => {
+    for (const [table, col, stmt] of payAdded().filter(([t]) => t === 'payment_attempt')) {
+      const c = attemptShape.columns.find((x) => x.name === col);
+      expect(c, `schema.ts ${table}.${col}`).toBeDefined();
+      expect({ col, notNull: c!.notNull, hasDefault: c!.hasDefault }).toEqual({ col, notNull: false, hasDefault: false });
+      expect(canon(stmt).replace(/;$/, ''), col).toBe(`alter table payment_attempt add column ${col} ${c!.type}`);
+    }
+    expect(attemptShape.columns.slice(-5).map((c) => [c.name, c.type])).toEqual([
+      ['pg_payment_key', 'text'],
+      ['pg_tx_id', 'text'],
+      ['pg_payment_token', 'text'],
+      ['authenticated_at', TZ],
+      ['accepted_at', TZ],
+    ]);
+  });
+
+  test('purchase_order.seat_gen은 integer·널 허용·기본값 없음이고 표 끝 칸이다(접수 전에는 비어 있다) [ASVS v5.0.0-2.3.4]', () => {
+    const [, , stmt] = payAdded().find(([t]) => t === 'purchase_order')!;
+    expect(canon(stmt).replace(/;$/, '')).toBe('alter table purchase_order add column seat_gen integer');
+    const c = orderShape.columns.at(-1)!;
+    expect({ name: c.name, type: c.type, notNull: c.notNull, hasDefault: c.hasDefault }).toEqual({ name: 'seat_gen', type: 'integer', notNull: false, hasDefault: false });
+    // 쓰기가 많은 purchase_order에 새 인덱스를 두지 않는다(data.md §5.1)
+    expect(orderShape.indexes.map((i) => i.name)).toEqual(['purchase_order_hold_key']);
+  });
+
+  test('order_saga_job의 열 이름·종류·널 허용이 schema.ts와 같고 SQL의 만드는 문에도 그 열뿐이다(lease_until만 비울 수 있다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(cols(sagaShape)).toEqual([
+      ['order_id', 'uuid', true],
+      ['event_id', 'uuid', true],
+      ['step', 'text', true],
+      ['attempts', 'integer', true],
+      ['next_attempt_at', TZ, true],
+      ['lease_until', TZ, false],
+      ['created_at', TZ, true],
+    ]);
+    const body = payStatements[0]!;
+    expect([...body.matchAll(/^\t"([a-z_]+)" /gm)].map((m) => m[1])).toEqual(sagaShape.columns.map((c) => c.name));
+    const c = canon(body);
+    for (const col of sagaShape.columns) expect(c, col.name).toContain(`${col.name} ${col.type}`);
+  });
+
+  test('order_saga_job은 order_id 하나의 기본 키(한 주문에 작업 행 하나)이고, 기본값은 attempts의 0 하나이며 step CHECK가 없다(값 목록은 PRF-165) [ASVS v5.0.0-2.3.4]', () => {
+    expect(sagaShape.columns.filter((x) => x.primary).map((x) => x.name)).toEqual(['order_id']);
+    expect(sagaShape.primaryKeys).toEqual([]);
+    const c = canon(payStatements[0]!);
+    expect(c).toContain('order_id uuid primary key not null');
+    expect((c.match(/primary key/g) ?? []).length).toBe(1);
+    expect(sagaShape.columns.filter((x) => x.hasDefault).map((x) => x.name)).toEqual(['attempts']);
+    expect(getTableConfig(orderSagaJob).columns.find((x) => x.name === 'attempts')!.default).toBe(0);
+    expect(c).toContain('attempts integer default 0 not null');
+    expect([...payBody.matchAll(/\bDEFAULT\b/gi)]).toHaveLength(1);
+    expect(sagaShape.checks).toEqual([]);
+    expect(payBody).not.toMatch(/\bCHECK\b/i);
+    expect(c).not.toMatch(/partition/);
+  });
+
+  test('order_saga_job.order_id는 purchase_order.id를 가리키는 외래 키 하나이고, 이름이 schema.ts와 같다 [ASVS v5.0.0-2.3.4]', () => {
+    const fks = getTableConfig(orderSagaJob).foreignKeys;
+    expect(fks.map((f) => f.getName())).toEqual(['order_saga_job_order_id_purchase_order_id_fk']);
+    const ref = fks[0]!.reference();
+    expect({ from: ref.columns.map((x) => x.name), to: getTableConfig(ref.foreignTable).name, toCols: ref.foreignColumns.map((x) => x.name) }).toEqual({
+      from: ['order_id'],
+      to: 'purchase_order',
+      toCols: ['id'],
+    });
+    const stmt = payStatements.find((s) => s.includes('ADD CONSTRAINT'))!;
+    // canon은 "public". 한정자와 괄호 둘레 공백을 지운다
+    expect(canon(stmt).replace(/;$/, '')).toBe(
+      'alter table order_saga_job add constraint order_saga_job_order_id_purchase_order_id_fk foreign key(order_id)references purchase_order(id)on delete no action on update no action',
+    );
+    expect(stmt).toContain('REFERENCES "public"."purchase_order"("id")');
+  });
+
+  test('쓸기 색인: order_saga_job_next_attempt_idx는 order_saga_job (next_attempt_at)의 btree 일반 색인이고 WHERE가 없다. 이 표의 색인은 이것 하나다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(sagaShape.indexes).toEqual([{ name: 'order_saga_job_next_attempt_idx', unique: false, columns: ['next_attempt_at'], where: undefined }]);
+    const stmt = payStatements.find((s) => /^CREATE INDEX /.test(s))!;
+    expect(canon(stmt).replace(/;$/, '')).toBe('create index order_saga_job_next_attempt_idx on order_saga_job using btree(next_attempt_at)');
   });
 });

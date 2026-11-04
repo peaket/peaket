@@ -36,12 +36,14 @@ import { migratePurchase } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import {
   bookingRestrictionKey,
+  DrizzleOrderAccepts,
   DrizzleOrderStore,
   DrizzleOrderWrites,
   type FallbackReason,
   GrpcContactRefs,
   GrpcIdentityRecheck,
   InventoryOrderSessions,
+  InventorySeatSlots,
   type OrderLog,
   type OrderSignals,
   RedisBookingRestrictions,
@@ -57,6 +59,7 @@ import {
   RecordingSessionStartedLog,
   RedisOrderHolds,
   RedisPurchaseSessionStore,
+  RedisSeatSlots,
   RedisSeatStore,
   ServerEcdhKey,
   StoredPurchaseSessions,
@@ -201,6 +204,7 @@ beforeAll(async () => {
   opener = new OpenPurchaseSession({ store: sessionStore, log: startedLog, keys, issuer: ISS, clock });
   recheck = new GrpcIdentityRecheck({ address: identity!.address });
   contactRefs = new GrpcContactRefs({ address: identity!.address });
+  const orderStore = new DrizzleOrderStore({ clock });
 
   svc = await createService({
     name: 'purchase-svc',
@@ -212,7 +216,10 @@ beforeAll(async () => {
       sessions,
       admission: { store: sessionStore, startedLog, keys, issuer: ISS },
       booking: {
-        writes: new DrizzleOrderWrites({ database, store: new DrizzleOrderStore({ clock }), clock }),
+        writes: new DrizzleOrderWrites({ database, store: orderStore, clock }),
+        // 결제 접수(PRF-162)의 조립 자리. 접수 시험은 accept-e2e.int.test.ts가 본다
+        accepts: new DrizzleOrderAccepts({ database, store: orderStore, clock }),
+        slots: new InventorySeatSlots(new RedisSeatSlots(redis)),
         holds: new RedisOrderHolds(redis, seatMap),
         saleConfigs: new SeatMapSaleConfigs(seatMap),
         sessions: new InventoryOrderSessions({ sessions, store: sessionStore }),

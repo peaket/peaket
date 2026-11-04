@@ -28,6 +28,7 @@ import type {
   RecheckAnswer,
   SaleConfig,
   SaleConfigs,
+  TransactionCallOptions,
 } from '../src/modules/booking/index.js';
 
 export const NOW = Date.parse('2026-11-05T03:00:00.000Z');
@@ -160,6 +161,8 @@ export class OrderFakes {
   restrictionReads: string[] = [];
   contactCalls: { phoneE164: string; deadlineMs: number }[] = [];
   created: { once: OrderRequestOnce; order: NewOrder }[] = [];
+  /** writes.create에 넘긴 트랜잭션 선택값(부른 차례, 리뷰 고침 L4) */
+  createOptions: (TransactionCallOptions | undefined)[] = [];
   payingCalls: string[] = [];
   /** markPaying에 넘긴 마감 선택값(부른 차례) */
   payingOptions: ({ deadlineMs?: number } | undefined)[] = [];
@@ -186,6 +189,7 @@ export class OrderFakes {
     this.restrictionReads = [];
     this.contactCalls = [];
     this.created = [];
+    this.createOptions = [];
     this.payingCalls = [];
     this.payingOptions = [];
     this.payingSeq = [];
@@ -220,9 +224,10 @@ export class OrderFakes {
       if (this.committed instanceof Error) throw this.committed;
       return this.committed;
     },
-    create: async (once, order) => {
+    create: async (once, order, o) => {
       this.calls.push('writes.create');
       this.created.push({ once, order });
+      this.createOptions.push(o);
       if (this.outcome instanceof Error) throw this.outcome;
       return this.outcome ?? { status: 'CREATED', order: viewOf(order) };
     },

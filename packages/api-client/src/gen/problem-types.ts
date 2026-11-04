@@ -85,6 +85,8 @@ export type ProblemType =
   | 'partner-admin-required'
   | 'password-change-required'
   | 'password-rejected'
+  | 'payment-already-accepted'
+  | 'payment-attempt-mismatch'
   | 'payment-attempts-exceeded'
   | 'pickup-slot-unavailable'
   | 'place-exists'
@@ -238,6 +240,8 @@ export const PROBLEM_TYPES = {
   'partner-admin-required': { status: 403, title: "파트너 관리자만 할 수 있습니다" },
   'password-change-required': { status: 403, title: "비밀번호를 먼저 바꿔 주세요" },
   'password-rejected': { status: 422, title: "쓸 수 없는 비밀번호입니다" },
+  'payment-already-accepted': { status: 409, title: "이 주문의 결제를 이미 접수했습니다" },
+  'payment-attempt-mismatch': { status: 409, title: "결제 시도와 맞지 않습니다. 결제를 다시 시작해 주세요" },
   'payment-attempts-exceeded': { status: 409, title: "결제 시도 횟수를 넘었습니다" },
   'pickup-slot-unavailable': { status: 422, title: "고를 수 없는 수령 시간대입니다" },
   'place-exists': { status: 409, title: "같은 공연장이 있습니다" },

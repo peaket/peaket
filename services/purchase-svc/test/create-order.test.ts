@@ -222,6 +222,57 @@ describe('요청의 남은 시간(deadline)', () => {
     expect(fx.recheckQueries[0]!.deadlineMs).toBe(30);
     expect(fx.contactCalls[0]!.deadlineMs).toBe(30);
   });
+
+  // 리뷰 고침 L4(2026-11-05): 좌석 Redis(구매 세션·홀드 확인·예매 제한)를 부르기 전 남은 시간이 5ms [가정] 미만이면 부르지 않고 504 deadline-exceeded
+  test('FR011_남은 시간이 4ms면 구매 세션(좌석 Redis)을 부르지 않고 DEADLINE_EXCEEDED다. 5ms면 이어 간다', async () => {
+    expect(await run(okCommand({ deadline: Deadline.after(4, clock) }))).toEqual({ status: 'REJECTED', reason: 'DEADLINE_EXCEEDED' });
+    expect(fx.calls).toEqual([]);
+    fx.reset();
+    expect(await run(okCommand({ deadline: Deadline.after(5, clock) }))).toMatchObject({ status: 201 });
+  });
+
+  test.each<[string, 'writes.findCommitted' | 'identity.check', string[]]>([
+    ['홀드 확인', 'writes.findCommitted', ['sessions.get', 'writes.findCommitted', 'saleConfigs.get']],
+    ['예매 제한 읽기', 'identity.check', ['sessions.get', 'writes.findCommitted', 'saleConfigs.get', 'holds.check', 'identity.check']],
+  ])('FR011_%s 바로 전 남은 시간이 5ms 미만이면(앞 호출이 시간을 씀) 부르지 않고 DEADLINE_EXCEEDED이며 주문을 만들지 않는다', async (_label, spender, calls) => {
+    const own = fakeClock({ now: NOW });
+    const deadline = Deadline.after(200, own);
+    const over: Partial<CreateOrderDeps> =
+      spender === 'writes.findCommitted'
+        ? {
+            writes: {
+              ...fx.writes,
+              findCommitted: async (once) => {
+                const r = await fx.writes.findCommitted(once);
+                own.advance(196);
+                return r;
+              },
+            },
+          }
+        : {
+            identity: {
+              check: async (q) => {
+                const r = await fx.identity.check(q);
+                own.advance(196);
+                return r;
+              },
+            },
+          };
+    expect(await run(okCommand({ deadline }), { ...over, clock: own })).toEqual({ status: 'REJECTED', reason: 'DEADLINE_EXCEEDED' });
+    expect(fx.calls).toEqual(calls);
+    noOrder();
+  });
+
+  test('FR011_트랜잭션에는 남은 시간이 DB 문장 상한(1초 [가정])보다 짧을 때만 그 남은 시간을 넘긴다(300ms → 300, 5초·없음 → 넘기지 않음)', async () => {
+    await run(okCommand({ deadline: Deadline.after(300, clock) }));
+    expect(fx.createOptions).toEqual([{ deadlineMs: 300 }]);
+    fx.reset();
+    await run(okCommand({ deadline: Deadline.after(5_000, clock) }));
+    expect(fx.createOptions).toEqual([{}]);
+    fx.reset();
+    await run();
+    expect(fx.createOptions).toEqual([{}]);
+  });
 });
 
 describe('구매 세션(401 purchase-session-ended)', () => {

@@ -1,11 +1,12 @@
-// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161).
+// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161·PRF-162).
 import type { MaintenanceTask } from '@peaket/platform';
 import { checkOrderHistory } from './adapters/db/drizzle-orders.js';
 import { orderHistoryCheckTask as historyTaskOf, type OrderHistoryTaskDeps } from './application/order-history-check.js';
 
 export { DrizzleOrderStore, checkOrderHistory, type DrizzleOrderStoreOptions } from './adapters/db/drizzle-orders.js';
+export { DrizzleOrderAccepts, type DrizzleOrderAcceptsOptions } from './adapters/db/drizzle-order-accepts.js';
 export { DrizzleOrderWrites, ORDER_HOLD_KEY, type DrizzleOrderWritesOptions } from './adapters/db/drizzle-order-writes.js';
-export { orderEvent, orderIdempotency, orderItem, paymentAttempt, purchaseOrder } from './adapters/db/schema.js';
+export { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder } from './adapters/db/schema.js';
 export {
   GrpcContactRefs,
   GrpcIdentityRecheck,
@@ -17,11 +18,28 @@ export {
   unavailableIdentityRecheck,
   type GrpcIdentityOptions,
 } from './adapters/grpc-identity.js';
-export { InventoryOrderSessions, SeatMapSaleConfigs, type PurchaseSessionSource, type SaleConfigSource } from './adapters/inventory-bridges.js';
+export {
+  InventoryOrderSessions,
+  InventorySeatSlots,
+  SeatMapSaleConfigs,
+  type PurchaseSessionSource,
+  type SaleConfigSource,
+  type SeatSlotSource,
+} from './adapters/inventory-bridges.js';
 export { jsonOrderEventCodec, TRADE_ORDERS_TOPIC } from './adapters/order-events.js';
 export { LoggerOrderLog } from './adapters/order-log.js';
 export { PromOrderSignals } from './adapters/prom-order-signals.js';
 export { bookingRestrictionKey, MemoryBookingRestrictions, RedisBookingRestrictions } from './adapters/redis-booking-restrictions.js';
+export {
+  ACCEPT_PAYMENT_OPERATION,
+  AcceptPayment,
+  ATTEMPT_ACCEPT_WINDOW_MS,
+  SAGA_FIRST_STEP,
+  type AcceptPaymentCommand,
+  type AcceptPaymentDeps,
+  type AcceptPaymentRejection,
+  type AcceptPaymentResult,
+} from './application/accept-payment.js';
 export {
   CONTACT_REF_DEADLINE_MS,
   CREATE_ORDER_OPERATION,
@@ -59,6 +77,8 @@ export {
   type RecheckVerdict,
 } from './domain/recheck.js';
 export {
+  ACCEPT_PROBLEMS,
+  AcceptParams,
   CONSENT_VERSION_PATTERN,
   CreateOrderRequest,
   ORDER_PROBLEMS,
@@ -66,6 +86,8 @@ export {
   OrderResponseBody,
   OrdersController,
   orderResponseOf,
+  PaymentAcceptRequest,
+  throwAcceptProblem,
   throwOrderProblem,
   type OrderProblemSpec,
   type OrderResponse,
@@ -102,14 +124,23 @@ export {
 } from './domain/order.js';
 export { OrderSeatStoreUnavailable } from './domain/ports.js';
 export type {
+  AcceptInput,
+  AcceptLog,
+  AcceptOrderView,
+  AcceptOutcome,
+  ActiveAttemptView,
+  AttemptMismatchReason,
   BookingRestriction,
   BookingRestrictions,
+  CommittedAcceptLookup,
   CommittedOrderLookup,
   ContactRefs,
   HeldSeat,
   IdentityRecheck,
   IdentityRecheckQuery,
   NewOrder,
+  OrderAcceptReads,
+  OrderAcceptWrites,
   OrderCreateOutcome,
   OrderEventCodec,
   OrderHistoryMismatch,
@@ -124,8 +155,14 @@ export type {
   OrderSignals,
   OrderView,
   OrderWrites,
+  PaymentAcceptBody,
+  PaymentPg,
+  PaymentRefs,
   SaleConfig,
   SaleConfigs,
+  SeatSlotRead,
+  SeatSlotReads,
+  TransactionCallOptions,
   TransitionInput,
   TransitionResult,
 } from './domain/ports.js';

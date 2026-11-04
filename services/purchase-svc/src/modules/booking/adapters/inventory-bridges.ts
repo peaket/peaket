@@ -1,6 +1,14 @@
 // booking 포트를 inventory의 좌석맵 판·구매 세션에 잇는 어댑터(BUILD_ORDER PRF-161). inventory 공개 면을 가져오지 않고
 // 필요한 메서드 모양만 받는다(조립은 app.module.ts·main.ts가 LayoutSeatMap·StoredPurchaseSessions·RedisPurchaseSessionStore를 넘긴다).
-import { OrderSeatStoreUnavailable, type OrderSessions, type OrderSessionView, type SaleConfig, type SaleConfigs } from '../domain/ports.js';
+import {
+  OrderSeatStoreUnavailable,
+  type OrderSessions,
+  type OrderSessionView,
+  type SaleConfig,
+  type SaleConfigs,
+  type SeatSlotRead,
+  type SeatSlotReads,
+} from '../domain/ports.js';
 
 /** inventory SeatMap.config의 필요한 칸(EventSeatConfig의 saleEndsAtMs·tierPrices) */
 export interface SaleConfigSource {
@@ -52,6 +60,27 @@ export class InventoryOrderSessions implements OrderSessions {
   async markPaying(sessionId: string, o?: { deadlineMs?: number }): Promise<boolean> {
     try {
       return await this.source.store.setPaying(sessionId, true, o);
+    } catch (e) {
+      throw seatStoreErrorOf(e);
+    }
+  }
+}
+
+/** inventory의 회차 슬롯 읽기(SeatSlotReader.read, 운영 RedisSeatSlots·시험 MemorySeatSlots)의 모양(BUILD_ORDER PRF-162) */
+export interface SeatSlotSource {
+  read(eventId: string, o?: { deadlineMs?: number }): Promise<SeatSlotRead>;
+}
+
+/**
+ * SeatSlotReads의 회차 슬롯 구현: source.read(eventId, o) 그대로. inventory가 던지는 좌석 Redis 장애(SeatStoreUnavailable, 이름으로 가른다)는
+ * OrderSeatStoreUnavailable로 바꿔 던지고, 그 밖(망가진 세대 키·WRONGTYPE·RangeError)은 그대로 던진다(BUILD_ORDER PRF-162)
+ */
+export class InventorySeatSlots implements SeatSlotReads {
+  constructor(private readonly source: SeatSlotSource) {}
+
+  async read(eventId: string, o?: { deadlineMs?: number }): Promise<SeatSlotRead> {
+    try {
+      return await this.source.read(eventId, o);
     } catch (e) {
       throw seatStoreErrorOf(e);
     }

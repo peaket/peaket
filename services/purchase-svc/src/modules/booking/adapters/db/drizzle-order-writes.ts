@@ -1,13 +1,15 @@
 // 주문 생성의 purchase DB 쓰기(OrderWrites, docs/features/payment.md §2 '주문 생성의 첫 구현', docs/data.md §5 '주문 생성', BUILD_ORDER PRF-161).
 // - findCommitted: 트랜잭션 밖에서 order_idempotency의 커밋된 기록 하나를 읽는다(검사 차례의 셋째. 홀드가 그사이 끝나도 같은 201을 돌려주려는 것)
-// - create: 트랜잭션 하나에 플랫폼 IdempotencyStore.run(첫 쓰기 = 키 행, table order_idempotency)과 DrizzleOrderStore.createOrder를 묶는다.
+// - create: 트랜잭션 하나(read committed, 남은 시간을 받으면 문장 시간 초과, 리뷰 고침 L3·L4)에 플랫폼 IdempotencyStore.run(첫 쓰기 = 키 행, table order_idempotency)과
+//   DrizzleOrderStore.createOrder를 묶는다.
 //   같은 홀드의 두 주문은 purchase_order_hold_key 유일 위반(23505)으로 HOLD_ALREADY_ORDERED다(트랜잭션째 되돌려 키 행도 남지 않는다).
 // 주문 상태를 바꾸는 SQL은 쓰지 않는다(상태 SQL은 drizzle-orders.ts에만, test/order-status-sql.test.ts). 여기는 읽기(select)뿐이다.
 import { timingSafeEqual } from 'node:crypto';
 import { type Clock, type Database, type DbTransaction, IDEMPOTENCY_RETENTION_MS, IdempotencyStore } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import type { OrderItem, OrderStatus } from '../../domain/order.js';
-import type { CommittedOrderLookup, NewOrder, OrderCreateOutcome, OrderRequestOnce, OrderView, OrderWrites } from '../../domain/ports.js';
+import type { CommittedOrderLookup, NewOrder, OrderCreateOutcome, OrderRequestOnce, OrderView, OrderWrites, TransactionCallOptions } from '../../domain/ports.js';
+import { transactionOptionsOf } from './drizzle-order-accepts.js';
 import type { DrizzleOrderStore } from './drizzle-orders.js';
 
 /** 유일 인덱스 이름(마이그레이션 0004). 23505의 constraint가 이 이름일 때만 HOLD_ALREADY_ORDERED로 본다 */
@@ -82,21 +84,25 @@ export class DrizzleOrderWrites implements OrderWrites {
     return { status: 'COMMITTED', order: firstResponseOf(order) };
   }
 
-  async create(once: OrderRequestOnce, order: NewOrder): Promise<OrderCreateOutcome> {
+  async create(once: OrderRequestOnce, order: NewOrder, o?: TransactionCallOptions): Promise<OrderCreateOutcome> {
+    // read committed를 늘 걸고, 남은 시간을 받았으면 문장 시간 초과로 건다(리뷰 고침 L3·L4)
+    const options = transactionOptionsOf(o);
     try {
-      return await this.o.database.transaction((tx) =>
-        this.#idempotency.run<OrderCreateOutcome>(tx, once, {
-          execute: async () => {
-            await this.o.store.createOrder(tx, order);
-            // 방금 넣은 행을 다시 읽지 않고 입력으로 응답 모습을 만든다(줄 번호 = items 차례, 상태 CREATED. 트랜잭션 안 왕복 둘을 줄인다, 리뷰 고침 L7)
-            return { resultRef: order.id, value: { status: 'CREATED', order: newOrderViewOf(order) } };
-          },
-          replay: async (ref) => {
-            const view = await readOrderWith(tx, ref);
-            if (!view) throw new Error('멱등 기록의 결과 참조가 가리키는 주문이 없다(멱등 기록과 주문이 어긋났다)');
-            return { status: 'REPLAYED', order: firstResponseOf(view) };
-          },
-        }),
+      return await this.o.database.transaction(
+        (tx) =>
+          this.#idempotency.run<OrderCreateOutcome>(tx, once, {
+            execute: async () => {
+              await this.o.store.createOrder(tx, order);
+              // 방금 넣은 행을 다시 읽지 않고 입력으로 응답 모습을 만든다(줄 번호 = items 차례, 상태 CREATED. 트랜잭션 안 왕복 둘을 줄인다, 리뷰 고침 L7)
+              return { resultRef: order.id, value: { status: 'CREATED', order: newOrderViewOf(order) } };
+            },
+            replay: async (ref) => {
+              const view = await readOrderWith(tx, ref);
+              if (!view) throw new Error('멱등 기록의 결과 참조가 가리키는 주문이 없다(멱등 기록과 주문이 어긋났다)');
+              return { status: 'REPLAYED', order: firstResponseOf(view) };
+            },
+          }),
+        options,
       );
     } catch (e) {
       // 트랜잭션째 되돌렸다(키 행도 남지 않는다). 같은 홀드의 주문이 먼저 커밋됐을 때만 이름 붙은 결과다
