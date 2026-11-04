@@ -190,6 +190,8 @@ export const accountContactRef = pgTable(
     kind: text('kind').notNull(),
     // invRef("contact", 맞춘 값). 키 판 접두어 포함
     ref: text('ref').notNull(),
+    // 키 회전의 이음 기간에만: 같은 원문을 옛 판으로 구한 값(BOT-046)
+    refPrev: text('ref_prev'),
     updatedAt: at('updated_at').notNull(),
   },
   (t) => [primaryKey({ columns: [t.accountId, t.kind] }), check('account_contact_ref_kind_check', sql`${t.kind} in ('PHONE', 'EMAIL')`)],

@@ -114,7 +114,7 @@ test('I-T63·I-T64①_KMS로받은라벨키로_기기행은invRef(device,deviceI
   expect(await q('select 1 from account_contact_ref where account_id = $1', [a.accountId])).toHaveLength(0);
   const cols = await q<{ table_name: string; column_name: string }>("select table_name, column_name from information_schema.columns where table_name in ('device', 'account_contact_ref')");
   expect(cols.map((c) => c.column_name)).not.toContain('device_hash');
-  expect(cols.filter((c) => c.table_name === 'account_contact_ref').map((c) => c.column_name).sort()).toEqual(['account_id', 'kind', 'ref', 'updated_at']);
+  expect(cols.filter((c) => c.table_name === 'account_contact_ref').map((c) => c.column_name).sort()).toEqual(['account_id', 'kind', 'ref', 'ref_prev', 'updated_at']);
 });
 
 test('I-T67①·I-T64⑤_연결값조회는연락처·기기두개·같은본인확인시도의상대계정을주고_탈퇴한계정은빈항목이며연락처행이0건이다', async () => {

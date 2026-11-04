@@ -6,7 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- BOT-046(wbs 3.1.4 ②): 조사용 가명 키 회전의 이음 30일(옛 판·새 판 라벨 키, 로그인 때 기기 행 새 판으로, 연락처 다시 계산, 끝에 두 판 값 싣기). 그 뒤 BOT-110~160.
+- BOT-110~160(구간 1 갈래 3 남은 단계). 그 뒤 구간 1 끝 정리 목록 비우기.
 - 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
 
 ## 구간 끝 정리 목록
@@ -61,3 +61,4 @@
 - 2026-11-04 BOT-042 계정 병합의 identity 쪽(R-289, I-T31·I-T32·I-T34): BOT-042를 둘로 나눴다(화면은 BOT-043). 로그인 수단 추가가 다른 계정이면 병합 제안(세션·캐시 Redis `id:merge`, 대표 계정 규칙, identity 사유와 purchase·ticket·core `CheckAccountMerge`의 사유·개수, 불변식 위반은 BLOCKED·SEV3), `GET /v1/identity/merge-proposals/{id}`·`POST …/confirmation`(재인증, 다시 확인, 한 트랜잭션에서 로그인 수단 이전·MERGED·사슬·`account_merge`·세션 MERGED·`identity.accounts-merged`), `account_hold`·`SetAccountHold`·닫힌 행 정비, 로그인의 잠근 뒤 다시 찾기(BOT-030·BOT-041이 넘긴 것), 마이그레이션 0013. 세 서비스 주소가 없으면 로컬·CI만 대역.
 - 2026-11-04 BOT-043 계정 합치기 화면(R-290, I-T31·I-T32): 로그인 수단 화면이 `?mergeProposal=`의 병합 제안을 읽어 ds MergeSummary로 보인다(PROPOSED 요약·남은 시간, BLOCKED 다섯 범주·막는 사유, 404 만료). [다시 로그인하고 계속] → 재인증(탭 저장소 할 일 `merge`와 제안 ID) → 확인 창 → 확정: 202 처리 중(지금 계정이 흡수되면 흡수 안내), 409 사유·고객센터, 403·503 안내. openapi `MergeProposal`에 `newProvider`·`requesterRole`·`primaryVerified`, ds MergeSummary `deadline`(시계가 흐름).
 - 2026-11-04 BOT-045 조사용 값 ①(R-292, I-T63·I-T64·I-T67): BOT-045를 둘로 나눴다(키 회전 이음은 BOT-046). 라벨 키 링(라벨마다 KMS `GenerateMac`, 5분마다 다시 받고 10분 수명, 로컬·CI는 라벨 키 값, 받지 못하면 칸을 비우고 `inv_ref_missing_total`), 기기 가명을 기기 라벨 키로, 연락처 가명 `account_contact_ref`(가입 이메일·본인확인 번호 E.164, 병합·탈퇴 때 지우기, 정비 `contact-ref-backfill`, 마이그레이션 0014), gRPC `ComputeContactRef`(초당 상한)·`BatchGetInvestigationRefs`(500개, 같은 본인확인 시도 1년), 모의 기관의 휴대폰 번호 칸.
+- 2026-11-05 BOT-046 조사용 가명 키 회전의 이음(R-294, I-T73): 라벨마다 옛 판 라벨 키와 이음 끝을 받아 이음 기간에 두 판으로 계산한다. 다시 로그인하면 옛 판 기기 행을 새 판으로 바꾸고 `device_ref_prev`에 대응을 두며, 정비 `contact-ref-rotate`가 EMAIL을 새 판으로(옛 값 `ref_prev`, 마이그레이션 0015), 다시 본인확인이 PHONE을 두 판으로 쓴다. `BatchGetInvestigationRefs`가 두 판 값을 함께 싣고, 정비 `inv-ref-bridge-close`가 이음 끝 + 7일 뒤 옛 판 값과 옛 판 기기 행을 지운다. 정본 secrets-and-keys ④(identity가 번호 원문을 갖는다)를 BOT-045 결정에 맞춰 고쳤다(PHONE은 다시 본인확인 때만).

@@ -25,7 +25,7 @@ interface State {
   conflicts: ConflictAttempt[];
   holds: Map<string, HoldRow>;
   /** 본인확인 번호의 연락처 가명(account_contact_ref의 PHONE 행, BOT-045). 시험이 읽는다 */
-  phones: Map<string, { ref: string; updatedAt: number }>;
+  phones: Map<string, { ref: string; refPrev: string | null; updatedAt: number }>;
 }
 
 const clone = (s: State): State => ({
@@ -43,6 +43,12 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
   readonly #rotations: PidRotationRecord[] = [];
   readonly #retention = new Map<string, RetainedRecord>();
 
+  /** 시험용: 그 계정의 PHONE 행(옛 판 값 포함) */
+  phoneRowOf(accountId: string): { ref: string; refPrev: string | null } | undefined {
+    const p = this.#state.phones.get(accountId);
+    return p ? { ref: p.ref, refPrev: p.refPrev } : undefined;
+  }
+
   /** 시험용: 그 계정의 PHONE 연락처 가명 */
   contactRefsOf(accountId: string): { kind: 'PHONE'; ref: string }[] {
     const p = this.#state.phones.get(accountId);
@@ -54,7 +60,10 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
       const s = clone(this.#state);
       const out = await fn({
         setPhoneRef: async (i) => {
-          s.phones.set(i.accountId, { ref: i.ref, updatedAt: i.now });
+          // 옛 판 값: 문자열이면 그 값, null이면 남은 값 그대로, 없으면 판이 바뀔 때 지금 값을(세션 쪽 nextRefPrev와 같은 규칙)
+          const cur = s.phones.get(i.accountId);
+          const prev = typeof i.refPrev === 'string' ? i.refPrev : !cur ? null : i.refPrev === null ? cur.refPrev : cur.ref.split('.')[0] !== i.ref.split('.')[0] ? cur.ref : cur.refPrev;
+          s.phones.set(i.accountId, { ref: i.ref, refPrev: prev, updatedAt: i.now });
         },
         insertAttempt: async (a) => {
           s.attempts.set(a.id, { ...a });

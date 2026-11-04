@@ -200,6 +200,7 @@ erDiagram
         uuid account_id PK
         text kind PK "PHONE|EMAIL. 기본 키 (account_id, kind)"
         text ref "invRef(contact, 정규화한 값), 키 판 접두어 포함(docs/security/secrets-and-keys.md). 계산하지 못하면 행을 쓰지 않고 identity-svc 작업이 원문으로 다시 계산한다. 휴대폰은 본인확인 번호를 E.164로, 이메일은 로그인 이메일을 소문자·앞뒤 빈칸 제거로 맞춘다. 원문은 이 표에 두지 않는다. 부정 예매 후보 묶음의 연락처 신호(FR-072)에만 쓰고 조사 적재가 BatchGetInvestigationRefs로 읽는다(추천 적용 2026-10-31, ADR-0171)"
+        text ref_prev "키 회전의 이음 기간에만: 같은 원문을 옛 판으로 구한 값. 이음 기간이 끝나고 대응을 조사 저장소에 넘긴 뒤 지운다(docs/security/secrets-and-keys.md 회전 절차 ④⑧, 추천 적용 2026-11-05, BUILD_ORDER BOT-046)"
         timestamptz updated_at "번호·이메일이 바뀌면 다시 계산한다. 탈퇴 때 지운다"
     }
     identity_conflict_attempt {

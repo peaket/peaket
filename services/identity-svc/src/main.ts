@@ -18,6 +18,7 @@ import {
   investigationRefHandlers,
   InvRefKeyRing,
   phoneContactRefs,
+  deviceRefsOf,
   IssueReauthToken,
   identityPackage,
   identityServiceHandlers,
@@ -61,7 +62,7 @@ const keys = await TokenKeyRing.fromEnv(process.env);
 const signer = new JoseTokenSigner(keys, tokenIssuerFromEnv(process.env));
 // 조사용 가명 라벨 키 링(identity §9.1 '조사용 값의 첫 구현'): 라벨마다 KMS GenerateMac(로컬·CI는 라벨 키 값), 10분 [가정] 수명. 시작은 기다리지 않는다
 const invRefs = InvRefKeyRing.fromEnv(process.env, systemClock, (endpoint) => kmsMacClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }));
-const devices = { ref: (deviceId: string) => invRefs.ring.ref('device', deviceId) };
+const devices = deviceRefsOf(invRefs.ring);
 // 본인확인기관: 계약 전에는 시험 어댑터만 있다(local·ci·demo). 켜지 않으면 본인확인 시작이 503 PROVIDER_DOWN이다(identity §5)
 const verification = process.env[VERIFICATION_PROVIDER_ENV]
   ? // 연계정보·pid 키: KMS 키 목록이 있으면 KMS, 없으면 설정값 키(local·ci·demo만, identity §5 '키 판·만 14세…')

@@ -12,7 +12,7 @@ const SERVICE = 'identity-svc';
 const config = loadOutboxRelayProcessConfig(SERVICE, process.env);
 // 연락처 가명 다시 계산(정비 contact-ref-backfill)이 쓰는 라벨 키 링(identity §9.1). 정비가 돌 때 다시 받는다
 // contact 라벨만 받는다(기기 라벨 키를 relay 메모리에 두지 않게). 받지 못하면 경고 로그와 inv_ref_missing_total(정비가 0건으로 조용히 끝나지 않게)
-const invRefs = InvRefKeyRing.fromEnv(process.env, systemClock, (endpoint) => kmsMacClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }), ['contact']);
+const invRefs = InvRefKeyRing.fromEnv(process.env, systemClock, (endpoint) => kmsMacClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }), ['contact'], { previous: false });
 const platformConfig = loadPlatformConfig(process.env);
 const invRefLog = createPlatformLogger({ service: SERVICE, env: platformConfig.env, version: platformConfig.version, clock: systemClock, level: platformConfig.logLevel });
 for (const w of invRefs.warnings) invRefLog.warn(w);
@@ -33,7 +33,7 @@ const relay = await startOutboxRelayProcess({
   publisher: kafkaOutboxPublisher(producer),
   leaseApi: inClusterLeaseApi(config.leaseName),
   // 공용 정비 일과 identity의 일(탈퇴 뒤 정리, 끝난 세션의 리프레시 토큰 해시 등, docs/features/identity.md §8 '탈퇴의 첫 구현')
-  maintenanceTasks: [...platformMaintenanceTasks(maintenanceDatabase, systemClock), ...identityMaintenanceTasks(maintenanceDatabase, systemClock, invRefs.ring)],
+  maintenanceTasks: [...platformMaintenanceTasks(maintenanceDatabase, systemClock), ...identityMaintenanceTasks(maintenanceDatabase, systemClock, invRefs.ring, InvRefKeyRing.bridgesFromEnv(process.env))],
 });
 const invRefMissing = new Counter({ name: 'inv_ref_missing_total', help: '라벨 키가 없어 계산하지 못한 조사용 가명(SEV3, docs/observability.md §5)', labelNames: ['service', 'label', 'reason'] as const, registers: [relay.registry] });
 invRefs.ring.onMissing((label, reason) => invRefMissing.inc({ service: SERVICE, label, reason }));

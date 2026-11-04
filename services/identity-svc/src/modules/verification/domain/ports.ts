@@ -61,7 +61,8 @@ export interface HoldRow {
 export interface VerificationTx {
   insertAttempt(a: Attempt): Promise<void>;
   /** 본인확인 번호의 PHONE 연락처 가명(세션 컨텍스트의 표 account_contact_ref를 같은 트랜잭션에서 쓴다, identity §9.1 '조사용 값의 첫 구현') */
-  setPhoneRef(i: { accountId: string; ref: string; now: number }): Promise<void>;
+  /** refPrev: 문자열이면 그 값, null이면 남은 옛 판 값을 그대로, 없으면 판이 바뀔 때 지금 값을 옛 판으로(세션의 nextRefPrev와 같은 규칙) */
+  setPhoneRef(i: { accountId: string; ref: string; refPrev?: string | null; now: number }): Promise<void>;
   /** 건(쓰기 잠금). 없으면 null */
   attemptForUpdate(id: string): Promise<Attempt | null>;
   completeAttempt(id: string, status: Exclude<AttemptStatus, 'PENDING'>, now: number): Promise<void>;
@@ -145,4 +146,6 @@ export const PHONE_REFS = Symbol('identity.PhoneRefs');
 /** 본인확인 결과 번호(기관 값 그대로)의 연락처 가명. 맞출 수 없는 번호거나 라벨 키가 없으면 undefined(번호는 저장하지 않는다, identity §9.1) */
 export interface PhoneRefs {
   ref(rawPhone: string): string | undefined;
+  /** 키 회전의 이음 기간에만: 옛 판의 값(BOT-046) */
+  prevRef?(rawPhone: string): string | undefined;
 }

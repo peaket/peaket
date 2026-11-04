@@ -94,7 +94,11 @@ export interface SessionTx {
   /** 병합 사건(identity.accounts-merged)을 Outbox에 적는다. 트랜잭션의 마지막 쓰기다 */
   recordAccountMerged(i: { mergeId: string; primaryAccountId: string; mergedAccountId: string; confirmedAt: number }): Promise<void>;
   /** 계정의 그 기기 가명 행 ID. 없으면 만든다 */
-  bindDevice(accountId: string, deviceRef: string, now: number): Promise<string>;
+  /**
+   * 기기 행을 묶고 ID를 돌려준다. prevRef(키 회전의 이음 기간의 옛 판 값)가 있으면: 새 판 값의 행이 없고 옛 판 값의 행이 있으면 그 행을 새 판 값으로 바꾸고
+   * device_ref_prev에 옛 판을 둔다(새 기기로 세지 않는다). 새로 묶는 행에도 device_ref_prev를 둔다(identity §9.1 '조사용 가명 키 회전 이음의 첫 구현')
+   */
+  bindDevice(accountId: string, deviceRef: string, now: number, prevRef?: string): Promise<string>;
   /** 끝나지 않았고 만료 전인 그 계정의 세션 */
   activeSessions(accountId: string, now: number): Promise<ActiveSession[]>;
   /** 끝나지 않은 그 계정의 세션 ID(만료와 상관없이, 쓰기 잠금). 탈퇴가 모두 끝낸다(만료 경계에서 갱신과 겹쳐도 남지 않게) */
@@ -115,7 +119,8 @@ export interface SessionTx {
    */
   eraseAccount(accountId: string, now: number): Promise<void>;
   /** 조사용 연락처 가명 행을 쓴다(있으면 값과 시각을 바꾼다, docs/data.md account_contact_ref, identity §9.1 '조사용 값의 첫 구현') */
-  setContactRef(i: { accountId: string; kind: ContactKind; ref: string; now: number }): Promise<void>;
+  /** refPrev: 문자열이면 그 값, null이면 남은 옛 판 값을 그대로, 없으면 판이 바뀔 때 지금 값을 옛 판으로(domain/inv-ref.ts nextRefPrev) */
+  setContactRef(i: { accountId: string; kind: ContactKind; ref: string; refPrev?: string | null; now: number }): Promise<void>;
   /** 정리 사유 UNDER_14로 before 때나 그 전에 정리를 시작한 정리 중 계정 ID(최대 limit개) */
   closuresStartedBefore(before: number, limit: number): Promise<string[]>;
   /** since 뒤에 탈퇴한(DELETED) 계정 ID를 ID 순으로 after 뒤부터 최대 limit개 */
@@ -156,6 +161,13 @@ export interface SessionStore {
   investigationRefsOf(accountIds: readonly string[], since: number): Promise<InvestigationRefsRow[]>;
   /** 이메일은 있는데 EMAIL 연락처 가명 행이 없는 ACTIVE 계정을 ID 순으로 after 뒤부터 최대 limit개(정비 contact-ref-backfill) */
   accountsMissingEmailRef(after: string, limit: number): Promise<{ accountId: string; email: string }[]>;
+  /** 새 판(writePrefix, 예 'k2.')이 아닌 EMAIL 행을 가진 ACTIVE 계정과 그 이메일·지금 값을 ID 순으로 after 뒤부터 최대 limit개(정비 contact-ref-rotate, BOT-046) */
+  contactRefsToRotate(after: string, writePrefix: string, limit: number): Promise<{ accountId: string; email: string; ref: string }[]>;
+  /**
+   * 이음 기간이 끝난 라벨의 옛 판 값을 지운다(정비 inv-ref-bridge-close, BOT-046). device: device_ref_prev를 비우고 옛 판(prevPrefix)으로 남은 기기 행을 지운다.
+   * contact: ref_prev를 비운다. 지운·비운 수
+   */
+  closeInvRefBridge(label: 'device' | 'contact', prevPrefix: string, chunk?: number): Promise<{ cleared: number; removed: number }>;
 }
 
 export type ContactKind = 'PHONE' | 'EMAIL';
@@ -166,10 +178,22 @@ export interface InvestigationRefsRow {
   identityConflicts: { otherAccountId: string; attemptedAt: number }[];
 }
 
+/** 키 회전의 이음(옛 판, 이음 끝, 설정에서 읽은 지금 판). 라벨 키 링이나 키 없는 설정(bridgesFromEnv)이 준다 */
+export interface InvRefBridge {
+  prevVersion: number;
+  until: number;
+  writeVersion?: number;
+}
+export interface InvRefBridges {
+  bridgeOf(label: InvRefLabel): InvRefBridge | null;
+}
+
 export const INV_REFS = Symbol('identity.InvRefs');
 /** 조사용 가명 invRef(라벨, 값)(docs/security/secrets-and-keys.md). 라벨 키가 없으면 undefined(칸을 비운다, 세는 일은 구현이 한다) */
 export interface InvRefs {
   ref(label: InvRefLabel, value: string): string | undefined;
+  /** 키 회전의 이음 기간에만: 옛 판의 값(대응을 남긴다). 이음이 아니면 undefined */
+  prevRef?(label: InvRefLabel, value: string): string | undefined;
 }
 
 export interface SignedToken {
@@ -190,6 +214,8 @@ export const DEVICE_REFS = Symbol('identity.DeviceRefs');
 /** 기기 가명 invRef("device", deviceId)(docs/security/secrets-and-keys.md). 라벨 키가 없으면 undefined(기기 행을 쓰지 않는다, identity §10) */
 export interface DeviceRefs {
   ref(deviceId: string): string | undefined;
+  /** 키 회전의 이음 기간에만: 옛 판의 기기 가명(BOT-046) */
+  prevRef?(deviceId: string): string | undefined;
 }
 
 export const SESSION_SIGNALS = Symbol('identity.SessionSignals');

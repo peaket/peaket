@@ -23,8 +23,10 @@ export { JoseTokenSigner, tokenIssuerFromEnv } from './adapters/jose-token-signe
 export { TokenKeyRing } from './adapters/token-keys.js';
 export { RefreshSession } from './application/refresh-session.js';
 export { InvRefKeyRing } from './adapters/inv-ref-key-ring.js';
-export { phoneContactRefs } from './adapters/phone-contact-refs.js';
+export { deviceRefsOf, phoneContactRefs } from './adapters/phone-contact-refs.js';
 export { BackfillContactRefs } from './application/backfill-contact-refs.js';
+export { RotateContactRefs } from './application/rotate-contact-refs.js';
+export { CloseInvRefBridge } from './application/close-inv-ref-bridge.js';
 export { ComputeContactRef } from './application/compute-contact-ref.js';
 export { GetInvestigationRefs } from './application/get-investigation-refs.js';
 export { contactRefHandlers, investigationRefHandlers } from './inbound/session.grpc.js';

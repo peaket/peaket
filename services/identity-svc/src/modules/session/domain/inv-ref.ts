@@ -41,3 +41,17 @@ export function toE164(raw: string | null | undefined): string | null {
   const v = s.startsWith('+820') ? `+82${s.slice(4)}` : s.startsWith('+') ? s : s.startsWith('0') ? `+82${s.slice(1)}` : null;
   return v !== null && isE164(v) ? v : null;
 }
+
+/** 키 판 접두어(예 'k2.'). 값마다 붙어 판을 가른다 */
+export const invRefPrefix = (version: number): string => `k${version}.`;
+
+/**
+ * 연락처 행을 다시 쓸 때 남길 옛 판 값(키 회전의 이음, BOT-046). given: 문자열이면 그 값, null이면 지금 남은 옛 판 값을 그대로,
+ * undefined면 지금 값의 판이 새 값과 다를 때 지금 값을 옛 판으로(같으면 지금 남은 옛 판 값)
+ */
+export function nextRefPrev(cur: { ref: string; refPrev: string | null } | undefined, ref: string, given: string | null | undefined): string | null {
+  if (typeof given === 'string') return given;
+  if (!cur) return null;
+  if (given === null) return cur.refPrev;
+  return cur.ref.split('.')[0] !== ref.split('.')[0] ? cur.ref : cur.refPrev;
+}

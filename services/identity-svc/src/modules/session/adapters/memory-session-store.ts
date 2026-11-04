@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { type OutboxMessage, uuidv7 } from '@peaket/platform';
 import type { AccountRow, ContactKind, CreateKeyRecord, InvestigationRefsRow, NewSession, RefreshRow, SessionRow, SessionStore, SessionTx } from '../domain/ports.js';
+import { nextRefPrev } from '../domain/inv-ref.js';
 import { type ActiveSession, CREATE_KEY_TTL_MS, normalizeEmail, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
 import { accountWithdrawnMessage } from './account-withdrawn-message.js';
 import { loginMethodChangedMessage } from './login-method-message.js';
@@ -15,7 +16,7 @@ type StoredSession = NewSession & { terminatedAt: number | null; prevRefreshHash
 interface State {
   accounts: Map<string, StoredAccount>;
   providers: Map<string, { accountId: string; linkedAt: number; lastLoginAt: number | null }>;
-  devices: Map<string, { id: string; accountId: string; ref: string; boundAt: number }>;
+  devices: Map<string, { id: string; accountId: string; ref: string; prevRef?: string | null; boundAt: number }>;
   sessions: Map<string, StoredSession>;
   keys: Map<string, CreateKeyRecord & { createdAt: number }>;
   hashes: Map<string, { sessionId: string; refreshFamily: string; expiresAt: number }>;
@@ -26,7 +27,7 @@ interface State {
   holds: Map<string, { accountId: string; kind: string; state: 'OPEN' | 'CLOSED'; sourceVersion: number; updatedAt: number }>;
   merges: Map<string, { primaryAccountId: string; mergedAccountId: string; mergedProvider: string; moved: Record<string, number>; requestedAt: number; confirmedAt: number }>;
   /** 조사용 연락처 가명(account_contact_ref, BOT-045). 키는 계정 ID|종류 */
-  contacts: Map<string, { accountId: string; kind: ContactKind; ref: string; updatedAt: number }>;
+  contacts: Map<string, { accountId: string; kind: ContactKind; ref: string; refPrev?: string | null; updatedAt: number }>;
 }
 
 const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [], reauthUses: new Map(), outbox: [], holds: new Map(), merges: new Map(), contacts: new Map() });
@@ -97,6 +98,60 @@ export class MemorySessionStore implements SessionStore {
       .map((d) => d.ref);
   }
 
+  /** 시험용: 그 계정 기기 행의 옛 판 대응(묶은 순, 있는 것만) */
+  devicePrevsOf(accountId: string): string[] {
+    return [...this.#state.devices.values()]
+      .filter((d) => d.accountId === accountId && d.prevRef)
+      .sort((a, b) => a.boundAt - b.boundAt)
+      .map((d) => d.prevRef!);
+  }
+
+  /** 시험용: 그 계정의 연락처 행(옛 판 값 포함) */
+  contactRowsOf(accountId: string): { kind: ContactKind; ref: string; refPrev: string | null }[] {
+    return [...this.#state.contacts.values()]
+      .filter((c) => c.accountId === accountId)
+      .sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind))
+      .map((c) => ({ kind: c.kind, ref: c.ref, refPrev: c.refPrev ?? null }));
+  }
+
+  async contactRefsToRotate(after: string, writePrefix: string, limit: number): Promise<{ accountId: string; email: string; ref: string }[]> {
+    return this.#serial(() =>
+      [...this.#state.contacts.values()]
+        .filter((c) => c.kind === 'EMAIL' && !c.ref.startsWith(writePrefix) && c.accountId > after)
+        .map((c) => ({ c, a: this.#state.accounts.get(c.accountId) }))
+        .filter((x) => x.a?.status === 'ACTIVE' && x.a.email)
+        .sort((x, y) => (x.c.accountId < y.c.accountId ? -1 : 1))
+        .slice(0, limit)
+        .map((x) => ({ accountId: x.c.accountId, email: x.a!.email!, ref: x.c.ref })),
+    );
+  }
+
+  async closeInvRefBridge(label: 'device' | 'contact', prevPrefix: string, _chunk?: number): Promise<{ cleared: number; removed: number }> {
+    return this.#serial(() => {
+      let cleared = 0;
+      let removed = 0;
+      if (label === 'device') {
+        for (const [k, d] of this.#state.devices) {
+          if (d.prevRef) {
+            cleared++;
+            this.#state.devices.set(k, { ...d, prevRef: null });
+          } else if (d.ref.startsWith(prevPrefix)) {
+            removed++;
+            this.#state.devices.delete(k);
+          }
+        }
+      } else {
+        for (const [k, c] of this.#state.contacts) {
+          if (c.refPrev) {
+            cleared++;
+            this.#state.contacts.set(k, { ...c, refPrev: null });
+          }
+        }
+      }
+      return { cleared, removed };
+    });
+  }
+
   /** 시험용: 그 계정의 연락처 가명(PHONE, EMAIL 순) */
   contactRefsOf(accountId: string): { kind: ContactKind; ref: string }[] {
     return [...this.#state.contacts.values()]
@@ -111,7 +166,9 @@ export class MemorySessionStore implements SessionStore {
         const a = this.#state.accounts.get(id);
         if (!a) return [];
         // 같은 본인확인 시도 기록은 본인확인 컨텍스트의 표라 메모리 저장소는 보지 못한다(빈 목록)
-        return [{ accountId: id, contactRefs: this.contactRefsOf(id), deviceRefs: this.devicesOf(id), identityConflicts: [] }];
+        // 키 회전의 이음 동안 남은 옛 판 값도 함께 싣는다(BOT-046)
+        const contactRefs = this.contactRowsOf(id).flatMap((c) => [{ kind: c.kind, ref: c.ref }, ...(c.refPrev ? [{ kind: c.kind, ref: c.refPrev }] : [])]);
+        return [{ accountId: id, contactRefs, deviceRefs: [...this.devicesOf(id), ...this.devicePrevsOf(id)], identityConflicts: [] }];
       }),
     );
   }
@@ -307,11 +364,17 @@ export class MemorySessionStore implements SessionStore {
       recordLoginMethodChanged: async (i) => {
         s.outbox.push(loginMethodChangedMessage({ eventKey: randomUUID(), ...i }));
       },
-      bindDevice: async (accountId, ref, now) => {
+      bindDevice: async (accountId, ref, now, prevRef) => {
         const found = [...s.devices.values()].find((d) => d.accountId === accountId && d.ref === ref);
         if (found) return found.id;
+        // 키 회전의 이음: 옛 판 값의 행이 있으면 새 판 값으로 바꾼다(새 기기로 세지 않는다, BOT-046)
+        const old = prevRef ? [...s.devices.values()].find((d) => d.accountId === accountId && d.ref === prevRef) : undefined;
+        if (old) {
+          s.devices.set(old.id, { ...old, ref, prevRef });
+          return old.id;
+        }
         const id = uuidv7({ now: () => now, monotonicMs: () => 0 });
-        s.devices.set(id, { id, accountId, ref, boundAt: now });
+        s.devices.set(id, { id, accountId, ref, prevRef: prevRef ?? null, boundAt: now });
         return id;
       },
       activeSessions: async (accountId, now) =>
@@ -354,7 +417,9 @@ export class MemorySessionStore implements SessionStore {
       // 메모리 세션 저장소는 보관 표를 보지 못한다(시험은 유스케이스의 앞선 확인으로 본다)
       activeHoldOf: async () => null,
       setContactRef: async (i) => {
-        s.contacts.set(`${i.accountId}|${i.kind}`, { accountId: i.accountId, kind: i.kind, ref: i.ref, updatedAt: i.now });
+        const k = `${i.accountId}|${i.kind}`;
+        const cur = s.contacts.get(k);
+        s.contacts.set(k, { accountId: i.accountId, kind: i.kind, ref: i.ref, refPrev: nextRefPrev(cur && { ref: cur.ref, refPrev: cur.refPrev ?? null }, i.ref, i.refPrev), updatedAt: i.now });
       },
       verifiedOf: async () => null,
       useReauth: async (r) => {

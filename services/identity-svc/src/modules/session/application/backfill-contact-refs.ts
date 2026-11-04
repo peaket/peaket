@@ -44,7 +44,8 @@ export class BackfillContactRefs {
         await tx.lockAccount(r.accountId);
         const st = await tx.accountStatusOf(r.accountId);
         if (st !== 'ACTIVE') return false;
-        await tx.setContactRef({ accountId: r.accountId, kind: 'EMAIL', ref, now: this.clock.now() });
+        // 빠졌던 행이라 옛 판 값이 없다(relay는 옛 판 키를 받지 않는다). 남은 값을 건드리지 않는다
+        await tx.setContactRef({ accountId: r.accountId, kind: 'EMAIL', ref, refPrev: null, now: this.clock.now() });
         return true;
       });
       if (wrote) n += 1;

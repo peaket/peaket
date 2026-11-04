@@ -2,7 +2,7 @@
 // 그래서 데드라인 뒤 다시 보낸 요청이 먼저 온 요청과 겹쳐도 세션·기기 행은 한 번만 생긴다(I-T50 ①).
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, type DbTransaction, uuidv7, writeOutbox } from '@peaket/platform';
-import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import { accountWithdrawnMessage } from '../account-withdrawn-message.js';
 import { loginMethodChangedMessage } from '../login-method-message.js';
 import { accountMergedMessage } from '../account-merged-message.js';
@@ -10,6 +10,13 @@ import type { AccountStatus, ContactKind, CreateKeyRecord, InvestigationRefsRow,
 import { CREATE_KEY_TTL_MS, type LoginVerdict, type Provider } from '../../domain/session.js';
 import { account, accountContactRef, accountHold, accountMerge, accountProvider, device, reauthTokenUse, refreshTokenHash, session, sessionCreateKey } from './schema.js';
 
+/** 연락처 행을 다시 쓸 때의 옛 판 값(domain/inv-ref.ts nextRefPrev와 같은 규칙, BOT-046) */
+const refPrevSql = (given: string | null | undefined) =>
+  typeof given === 'string'
+    ? sql`${given}`
+    : given === null
+      ? sql`account_contact_ref.ref_prev`
+      : sql`case when split_part(account_contact_ref.ref, '.', 1) <> split_part(excluded.ref, '.', 1) then account_contact_ref.ref else account_contact_ref.ref_prev end`;
 const date = (ms: number) => new Date(ms);
 const ms = (d: Date | null) => (d === null ? null : d.getTime());
 type SessionRecord = typeof session.$inferSelect;
@@ -65,8 +72,8 @@ export class DrizzleSessionStore implements SessionStore {
     const present = new Set(found.map((a) => a.id));
     const list = sql.join(ids.map((x) => sql`${x}::uuid`), sql`, `);
     const [contacts, devices, conflicts] = await Promise.all([
-      db.select({ accountId: accountContactRef.accountId, kind: accountContactRef.kind, ref: accountContactRef.ref }).from(accountContactRef).where(inArray(accountContactRef.accountId, ids)),
-      db.select({ accountId: device.accountId, ref: device.deviceRef }).from(device).where(inArray(device.accountId, ids)).orderBy(asc(device.boundAt), asc(device.id)),
+      db.select({ accountId: accountContactRef.accountId, kind: accountContactRef.kind, ref: accountContactRef.ref, refPrev: accountContactRef.refPrev }).from(accountContactRef).where(inArray(accountContactRef.accountId, ids)),
+      db.select({ accountId: device.accountId, ref: device.deviceRef, prev: device.deviceRefPrev }).from(device).where(inArray(device.accountId, ids)).orderBy(asc(device.boundAt), asc(device.id)),
       // 같은 본인확인 시도 기록은 본인확인 컨텍스트의 표다(같은 DB, 읽기만). 이 계정이 시도했으면 원래 계정, 원래 계정이면 시도한 계정을 상대로 준다
       db.execute(sql`
         select attempted_account_id as a, existing_account_id as e, attempted_at as t from identity_conflict_attempt
@@ -81,16 +88,47 @@ export class DrizzleSessionStore implements SessionStore {
         if (!live.has(id)) return { accountId: id, contactRefs: [], deviceRefs: [], identityConflicts: [] };
         return {
           accountId: id,
+          // 키 회전의 이음 동안 남은 옛 판 값도 함께 싣는다(값마다 판 접두어가 있어 조사 적재가 가른다, BOT-046)
           contactRefs: contacts
             .filter((c) => c.accountId === id)
-            .map((c) => ({ kind: c.kind as ContactKind, ref: c.ref }))
-            .sort((x, y) => order.indexOf(x.kind) - order.indexOf(y.kind)),
-          deviceRefs: devices.filter((d) => d.accountId === id).map((d) => d.ref),
+            .sort((x, y) => order.indexOf(x.kind as ContactKind) - order.indexOf(y.kind as ContactKind))
+            .flatMap((c) => [{ kind: c.kind as ContactKind, ref: c.ref }, ...(c.refPrev ? [{ kind: c.kind as ContactKind, ref: c.refPrev }] : [])]),
+          deviceRefs: [...devices.filter((d) => d.accountId === id).map((d) => d.ref), ...devices.filter((d) => d.accountId === id && d.prev).map((d) => d.prev!)],
           identityConflicts: (conflicts.rows as { a: string; e: string; t: string | Date }[])
             .filter((r) => r.a === id || r.e === id)
             .map((r) => ({ otherAccountId: r.a === id ? r.e : r.a, attemptedAt: new Date(r.t).getTime() })),
         };
       });
+  }
+
+  async contactRefsToRotate(after: string, writePrefix: string, limit: number): Promise<{ accountId: string; email: string; ref: string }[]> {
+    const rows = await this.database.db.execute(sql`
+      select c.account_id, a.email, c.ref from account_contact_ref c join account a on a.id = c.account_id
+      where c.kind = 'EMAIL' and left(c.ref, ${writePrefix.length}) <> ${writePrefix} and a.status = 'ACTIVE' and a.email is not null
+        ${after ? sql`and c.account_id > ${after}::uuid` : sql``}
+      order by c.account_id limit ${limit}`);
+    return (rows.rows as { account_id: string; email: string; ref: string }[]).map((r) => ({ accountId: r.account_id, email: r.email, ref: r.ref }));
+  }
+
+  async closeInvRefBridge(label: 'device' | 'contact', prevPrefix: string, chunk = 1_000): Promise<{ cleared: number; removed: number }> {
+    // 묶음씩 끝까지(한 트랜잭션에 몇백만 행을 쥐지 않게, 다른 정비처럼)
+    const db = this.database.db;
+    const loop = async (q: () => Promise<number>) => {
+      let n = 0;
+      for (;;) {
+        const k = await q();
+        n += k;
+        if (k < chunk) return n;
+      }
+    };
+    if (label === 'contact') {
+      const cleared = await loop(async () => (await db.execute(sql`update account_contact_ref set ref_prev = null where (account_id, kind) in (select account_id, kind from account_contact_ref where ref_prev is not null limit ${chunk}) returning account_id`)).rows.length);
+      return { cleared, removed: 0 };
+    }
+    const cleared = await loop(async () => (await db.execute(sql`update device set device_ref_prev = null where id in (select id from device where device_ref_prev is not null limit ${chunk}) returning id`)).rows.length);
+    // 옛 판으로 남은 기기 행: 이음 기간에 다시 로그인하지 않은 기기(나중에 로그인하면 새 기기 알림이 한 번 간다)
+    const removed = await loop(async () => (await db.execute(sql`delete from device where id in (select id from device where left(device_ref, ${prevPrefix.length}) = ${prevPrefix} limit ${chunk}) returning id`)).rows.length);
+    return { cleared, removed };
   }
 
   async accountsMissingEmailRef(after: string, limit: number): Promise<{ accountId: string; email: string }[]> {
@@ -240,10 +278,21 @@ export class DrizzleSessionStore implements SessionStore {
         // 로그인 수단을 잇거나 지운 트랜잭션의 마지막 쓰기(BOT-041, ADR-0143 결정 3)
         await writeOutbox(tx, this.clock, [loginMethodChangedMessage({ eventKey: uuidv7(this.clock), ...i })]);
       },
-      bindDevice: async (accountId, deviceRef, now) => {
+      bindDevice: async (accountId, deviceRef, now, prevRef) => {
+        // 키 회전의 이음: 새 판 값의 행이 없고 옛 판 값의 행이 있으면 그 행을 새 판 값으로 바꾼다(새 기기로 세지 않는다, BOT-046)
+        if (prevRef) {
+          const [has] = await tx.select({ id: device.id }).from(device).where(and(eq(device.accountId, accountId), eq(device.deviceRef, deviceRef)));
+          if (has) return has.id;
+          const [moved] = await tx
+            .update(device)
+            .set({ deviceRef, deviceRefPrev: prevRef })
+            .where(and(eq(device.accountId, accountId), eq(device.deviceRef, prevRef)))
+            .returning({ id: device.id });
+          if (moved) return moved.id;
+        }
         const [made] = await tx
           .insert(device)
-          .values({ id: uuidv7({ now: () => now, monotonicMs: () => 0 }), accountId, deviceRef, boundAt: date(now) })
+          .values({ id: uuidv7({ now: () => now, monotonicMs: () => 0 }), accountId, deviceRef, deviceRefPrev: prevRef ?? null, boundAt: date(now) })
           .onConflictDoNothing({ target: [device.accountId, device.deviceRef] })
           .returning({ id: device.id });
         if (made) return made.id;
@@ -312,8 +361,8 @@ export class DrizzleSessionStore implements SessionStore {
       setContactRef: async (i) => {
         await tx
           .insert(accountContactRef)
-          .values({ accountId: i.accountId, kind: i.kind, ref: i.ref, updatedAt: date(i.now) })
-          .onConflictDoUpdate({ target: [accountContactRef.accountId, accountContactRef.kind], set: { ref: i.ref, updatedAt: date(i.now) } });
+          .values({ accountId: i.accountId, kind: i.kind, ref: i.ref, refPrev: i.refPrev ?? null, updatedAt: date(i.now) })
+          .onConflictDoUpdate({ target: [accountContactRef.accountId, accountContactRef.kind], set: { ref: i.ref, refPrev: refPrevSql(i.refPrev), updatedAt: date(i.now) } });
       },
       verifiedOf: async (accountId) => {
         // 본인확인 기록 표는 본인확인 컨텍스트의 표다. 같은 트랜잭션에서 있는지만 본다(activeHoldOf와 같은 방식)

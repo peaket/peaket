@@ -135,7 +135,8 @@ export class CreateSession {
   async #emailRef(tx: SessionTx, accountId: string, raw: string | null | undefined, now: number): Promise<void> {
     const email = contactEmail(raw);
     const ref = email === null ? undefined : this.invRefs?.ref('contact', email);
-    if (ref) await tx.setContactRef({ accountId, kind: 'EMAIL', ref, now });
+    // 키 회전의 이음 기간이면 옛 판 값도 둔다(조사 적재가 회전 전 기록과 잇는다, BOT-046)
+    if (ref) await tx.setContactRef({ accountId, kind: 'EMAIL', ref, refPrev: (email !== null && this.invRefs?.prevRef?.('contact', email)) || null, now });
   }
 
   /** 세션만 받는 쪽(시험·옛 호출): 연결 제안이나 불일치면 FAILED_PRECONDITION */
@@ -322,7 +323,7 @@ export class CreateSession {
     // 이 (제공자, sub)의 마지막 로그인 시각(SCR-040 '최근 로그인', BOT-041)
     await tx.touchProviderLogin(i.provider, i.providerUserId, now);
     const ref = i.deviceId === null ? undefined : this.devices.ref(i.deviceId);
-    const deviceId = ref === undefined ? null : await tx.bindDevice(accountId, ref, now);
+    const deviceId = ref === undefined || i.deviceId === null ? null : await tx.bindDevice(accountId, ref, now, this.devices.prevRef?.(i.deviceId));
     const ended = sessionsOverDeviceLimit(await tx.activeSessions(accountId, now), deviceId);
 
     const sessionId = uuidv7(this.clock);

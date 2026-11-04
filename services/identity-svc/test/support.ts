@@ -10,6 +10,7 @@ import { IssueReauthToken } from '../src/modules/session/application/issue-reaut
 import { RefreshSession } from '../src/modules/session/application/refresh-session.js';
 import { JoseTokenSigner } from '../src/modules/session/adapters/jose-token-signer.js';
 import { TokenKeyRing } from '../src/modules/session/adapters/token-keys.js';
+import { deviceRefsOf } from '../src/modules/session/adapters/phone-contact-refs.js';
 import { type AccountClaims, type AccountClosure, type DeviceRefs, type InvRefs, type LinkProposals, noReverifications, type Reverifications, type SessionSignals, type SessionStore } from '../src/modules/session/domain/ports.js';
 
 export const ISSUER = 'https://identity.peaket.test';
@@ -66,7 +67,7 @@ export async function kit(store: SessionStore, o: { keyless?: boolean; clock?: F
   const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(privateJwk) });
   const signer = new JoseTokenSigner(keys, ISSUER);
   const invRefs = o.invRefs;
-  const devices: DeviceRefs = invRefs ? { ref: (id) => invRefs.ref('device', id) } : testDeviceRefs(o.keyless);
+  const devices: DeviceRefs = invRefs ? deviceRefsOf(invRefs) : testDeviceRefs(o.keyless);
   return {
     clock,
     signer,

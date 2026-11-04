@@ -226,6 +226,8 @@ describe('탈퇴와 겹치는 로그인·갱신·본인확인(새 맥락 리뷰 
       purgeReauthUses: (n) => t.sessions.purgeReauthUses(n),
       investigationRefsOf: (ids, since) => t.sessions.investigationRefsOf(ids, since),
       accountsMissingEmailRef: (after, n) => t.sessions.accountsMissingEmailRef(after, n),
+      contactRefsToRotate: (after, prefix, n) => t.sessions.contactRefsToRotate(after, prefix, n),
+      closeInvRefBridge: (label, prefix) => t.sessions.closeInvRefBridge(label, prefix),
     };
     const create = new CreateSession(racing, t.k.signer, testDeviceRefs(), recordingSignals(), noClaims, t.clock);
     const b = await create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'race-1', email: null, deviceId: 'dev-2' });

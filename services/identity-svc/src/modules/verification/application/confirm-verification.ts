@@ -50,7 +50,7 @@ export async function restrictedUntilFor(store: Pick<VerificationStore, 'restric
 type Checked =
   | { outcome: 'CANCELLED' | 'FAILED' }
   | { outcome: 'UNDER_14' }
-  | { outcome: 'VERIFIED'; hmacs: { hmac: Buffer; version: number }[]; pid: { pid: Buffer; version: number } | null; phoneRef?: string };
+  | { outcome: 'VERIFIED'; hmacs: { hmac: Buffer; version: number }[]; pid: { pid: Buffer; version: number } | null; phoneRef?: string; phoneRefPrev?: string };
 
 /** 트랜잭션 안에서 새로 저장해야 하는데 아직 pid가 없다: 트랜잭션을 되돌리고 pid를 계산해(KMS는 트랜잭션 밖) 한 번 더 한다 */
 class NeedPid extends Error {}
@@ -106,7 +106,9 @@ export class ConfirmVerification {
     // (pid 키 장애가 중복 판정과 다시 본인확인을 막지 않게, 새 맥락 리뷰 낮음 7)
     // 번호는 가명 계산에만 쓰고 버린다(저장·로그 없음). 라벨 키가 없으면 비우고 다음 본인확인 때 쓴다
     const phoneRef = outcome.phone === undefined ? undefined : this.phoneRefs?.ref(outcome.phone);
-    return { outcome: 'VERIFIED', hmacs, pid: null, ...(phoneRef ? { phoneRef } : {}) };
+    // 키 회전의 이음 기간이면 옛 판 값도 구해 둔다(회전 전 기록과 잇는다, BOT-046)
+    const phoneRefPrev = phoneRef && outcome.phone !== undefined ? this.phoneRefs?.prevRef?.(outcome.phone) : undefined;
+    return { outcome: 'VERIFIED', hmacs, pid: null, ...(phoneRef ? { phoneRef } : {}), ...(phoneRefPrev ? { phoneRefPrev } : {}) };
   }
 
   async #confirm(verificationId: string, checked: Extract<Checked, { outcome: 'VERIFIED' }>, now: number): Promise<Attempt> {
@@ -179,7 +181,7 @@ export class ConfirmVerification {
         status = 'VERIFIED';
       }
       // 본인확인이 이 계정의 것으로 끝났을 때만 번호의 연락처 가명을 쓴다(다른 사람·중복은 쓰지 않는다)
-      if (status === 'VERIFIED' && checked.phoneRef) await tx.setPhoneRef({ accountId: a.accountId, ref: checked.phoneRef, now });
+      if (status === 'VERIFIED' && checked.phoneRef) await tx.setPhoneRef({ accountId: a.accountId, ref: checked.phoneRef, refPrev: checked.phoneRefPrev ?? null, now });
       await tx.completeAttempt(a.id, status, now);
       return { ...a, status, completedAt: now };
     });
