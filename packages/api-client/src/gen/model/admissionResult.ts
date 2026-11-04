@@ -14,6 +14,8 @@ import type { AdmissionResultStatus } from './admissionResultStatus';
 import type { AdmissionResultVerificationReason } from './admissionResultVerificationReason';
 
 export interface AdmissionResult {
+  /** ADMITTED일 때만: 입장 토큰의 만료 시각(exp, 구매 세션이 끝나는 가장 늦은 때). 화면은 남은 구매 시간 표시에만 쓰고(serverTimeMs로 시계를 맞춘다) 판단은 서버가 한다. 토큰 본문을 화면이 읽지 않게 응답에 싣는다(docs/frontend.md §6.2 22번, BUILD_ORDER BAS-042) */
+  purchaseSessionExpiresAt?: string;
   /**
      * 추가 검증(VERIFYING)일 때 이용자에게 보이는 사유 범주(trust.proto ReasonCategory 이름에서 접두사를 뺀 값). 그 밖에는 null(FR-020, docs/features/bot-defense.md §5, 추천 적용 2026-10-30)
      * @nullable

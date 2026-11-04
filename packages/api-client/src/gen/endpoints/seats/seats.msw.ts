@@ -33,7 +33,9 @@ export const getGetEventSeatmapSnapshotResponseMock = (): Blob => (new Blob([new
 
 export const getGetEventSeatmapLayoutResponseMock = (overrideResponse: Partial<Extract<SeatMapColumns, object>> = {}): SeatMapColumns => ({format: "peaket.seatmap.columns.v1", layoutVersion: faker.number.int({min: 1}), canvas: {minX: faker.number.int(), minY: faker.number.int(), width: faker.number.int({min: 1, max: 100000}), height: faker.number.int({min: 1, max: 100000})}, stage: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({kind: faker.helpers.arrayElement(['RECT','POLYGON','SECTOR','ARC_BAND'] as const), points: Array.from({ length: faker.number.int({min: 3, max: 10}) }, (_, i) => i + 1).map(() => (Array.from({ length: faker.number.int({min: 2, max: 2}) }, (_, i) => i + 1).map(() => (faker.number.int())))), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), tiers: Array.from({ length: faker.number.int({min: 1, max: 16}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), seatCount: faker.number.int({min: 1, max: 1000000}), sections: Array.from({ length: faker.number.int({min: 1, max: 65535}) }, (_, i) => i + 1).map(() => ({sectionId: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), shape: {kind: faker.helpers.arrayElement(['RECT','POLYGON','SECTOR','ARC_BAND'] as const), points: Array.from({ length: faker.number.int({min: 3, max: 10}) }, (_, i) => i + 1).map(() => (Array.from({ length: faker.number.int({min: 2, max: 2}) }, (_, i) => i + 1).map(() => (faker.number.int())))), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, label: {x: faker.number.int(), y: faker.number.int()}, seatIndexRange: {from: faker.number.int({min: 0}), to: faker.number.int({min: 0})}, seats: {seatId: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), row: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), number: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), x: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.number.int())), y: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.number.int())), tier: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.number.int({min: 0, max: 15}))), flags: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.number.int({min: 0, max: 15})))}})), ...overrideResponse})
 
-export const getCreateEventHoldResponseMock = (overrideResponse: Partial<Extract<Hold, object>> = {}): Hold => ({holdId: faker.string.alpha({length: {min: 10, max: 20}}), seatIds: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), expiresAt: faker.date.past().toISOString().slice(0, 19) + 'Z', extendable: faker.datatype.boolean(), fencingToken: faker.number.int({min: 1}), assignResult: faker.helpers.arrayElement([faker.helpers.arrayElement(['FIRST','FIRST_SPLIT','SECOND','SECOND_SPLIT'] as const), undefined]), ...overrideResponse})
+export const getCreateEventHoldResponseMock = (overrideResponse: Partial<Extract<Hold, object>> = {}): Hold => ({seats: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({seatId: faker.string.alpha({length: {min: 10, max: 20}}), label: faker.string.alpha({length: {min: 10, max: 20}}), tierId: faker.string.alpha({length: {min: 10, max: 20}}), tierName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), price: faker.number.int()})), undefined]), totalAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), holdId: faker.string.alpha({length: {min: 10, max: 20}}), seatIds: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), expiresAt: faker.date.past().toISOString().slice(0, 19) + 'Z', extendable: faker.datatype.boolean(), fencingToken: faker.number.int({min: 1}), assignResult: faker.helpers.arrayElement([faker.helpers.arrayElement(['FIRST','FIRST_SPLIT','SECOND','SECOND_SPLIT'] as const), undefined]), ...overrideResponse})
+
+export const getGetHoldResponseMock = (overrideResponse: Partial<Extract<Hold, object>> = {}): Hold => ({seats: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({seatId: faker.string.alpha({length: {min: 10, max: 20}}), label: faker.string.alpha({length: {min: 10, max: 20}}), tierId: faker.string.alpha({length: {min: 10, max: 20}}), tierName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), price: faker.number.int()})), undefined]), totalAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), holdId: faker.string.alpha({length: {min: 10, max: 20}}), seatIds: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), expiresAt: faker.date.past().toISOString().slice(0, 19) + 'Z', extendable: faker.datatype.boolean(), fencingToken: faker.number.int({min: 1}), assignResult: faker.helpers.arrayElement([faker.helpers.arrayElement(['FIRST','FIRST_SPLIT','SECOND','SECOND_SPLIT'] as const), undefined]), ...overrideResponse})
 
 
 export const getGetEventSeatmapSnapshotMockHandler = (overrideResponse?: Blob | ((info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => Promise<Blob> | Blob), options?: RequestHandlerOptions) => {
@@ -83,6 +85,18 @@ export const getDeleteEventPurchaseSessionMockHandler = (overrideResponse?: void
   }, options)
 }
 
+export const getGetHoldMockHandler = (overrideResponse?: Hold | ((info: Parameters<HttpResponseResolver<{ holdId: string }>>[0]) => Promise<Hold> | Hold), options?: RequestHandlerOptions) => {
+  return http.get<{ holdId: string }>('*/v1/holds/:holdId', async (info: Parameters<HttpResponseResolver<{ holdId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetHoldResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
 export const getDeleteHoldMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ holdId: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
   return http.delete<{ holdId: string }>('*/v1/holds/:holdId', async (info: Parameters<HttpResponseResolver<{ holdId: string }>>[0]) => {
   if (typeof overrideResponse === 'function') {await overrideResponse(info); }
@@ -107,6 +121,7 @@ export const getSeatsMock = () => [
   getGetEventSeatmapLayoutMockHandler(),
   getCreateEventHoldMockHandler(),
   getDeleteEventPurchaseSessionMockHandler(),
+  getGetHoldMockHandler(),
   getDeleteHoldMockHandler(),
   getCreateHoldExtensionMockHandler()
 ]

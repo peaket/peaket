@@ -6,6 +6,7 @@ export { identityV1Identity } from './peaket-identity-v1-identity.js';
 export { imageV1Image } from './peaket-image-v1-image.js';
 export { paymentV1Payment } from './peaket-payment-v1-payment.js';
 export { purchaseV1Account } from './peaket-purchase-v1-account.js';
+export { purchaseV1Fraudcancellation } from './peaket-purchase-v1-fraud_cancellation.js';
 export { purchaseV1Refund } from './peaket-purchase-v1-refund.js';
 export { queueV1Queue } from './peaket-queue-v1-queue.js';
 export { seatmapV1Seatmap } from './peaket-seatmap-v1-seatmap.js';

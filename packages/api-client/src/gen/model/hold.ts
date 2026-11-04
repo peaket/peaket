@@ -10,8 +10,13 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { HoldAssignResult } from './holdAssignResult';
+import type { HoldSeatsItem } from './holdSeatsItem';
 
 export interface Hold {
+  /** 홀드한 좌석의 표시 값(좌석 이름·등급·가격). 새로고침과 좌석 ↔ 결제 화면을 오갈 때 다시 그린다(docs/design/d5 §1.6 26번, BAS-042) */
+  seats?: HoldSeatsItem[];
+  /** 좌석 정가 합(원). 할인·수수료가 붙은 결제 금액은 주문(Order.amount)이 정한다 */
+  totalAmount?: number;
   holdId: string;
   seatIds: string[];
   expiresAt: string;

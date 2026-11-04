@@ -167,6 +167,7 @@ export type OperationId =
   | 'getEventReviewSummary'
   | 'getEventSeatmapLayout'
   | 'getEventSeatmapSnapshot'
+  | 'getHold'
   | 'getHome'
   | 'getHomeRankings'
   | 'getIdentityLinkProposal'
@@ -442,6 +443,7 @@ export const OPERATIONS = {
   getEventReviewSummary: {operationId: "getEventReviewSummary",method: "GET",path: "/v1/events/{eventId}/review-summary",host: "api",kind: "read",cookie: false},
   getEventSeatmapLayout: {operationId: "getEventSeatmapLayout",method: "GET",path: "/v1/events/{eventId}/seatmap-layouts/{layoutVersion}.json",host: "www",kind: "read",cookie: false},
   getEventSeatmapSnapshot: {operationId: "getEventSeatmapSnapshot",method: "GET",path: "/v1/events/{eventId}/seatmap-snapshot",host: "api",kind: "read",cookie: true,query: ["section"]},
+  getHold: {operationId: "getHold",method: "GET",path: "/v1/holds/{holdId}",host: "api",kind: "read",cookie: true},
   getHome: {operationId: "getHome",method: "GET",path: "/v1/home",host: "api",kind: "read",cookie: false},
   getHomeRankings: {operationId: "getHomeRankings",method: "GET",path: "/v1/home/rankings.json",host: "www",kind: "read",cookie: false},
   getIdentityLinkProposal: {operationId: "getIdentityLinkProposal",method: "GET",path: "/v1/identity/link-proposals/{proposalId}",host: "www",kind: "read",cookie: true},

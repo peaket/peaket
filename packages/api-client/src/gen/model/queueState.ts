@@ -15,6 +15,20 @@ import type { QueueStateSaleStatus } from './queueStateSaleStatus';
  * 구간별 대기 상태 파일(CDN 1초 캐시. 입장 임박 구간 파일은 다음 생성 시각까지만 캐시한다(Expires, 낡은 값 허용 없음, ADR-0110). 차례에서 먼 구간의 수명을 늘리는 방식은 Phase 2에서 정함, queue-admission §4). 사용자별 값 없음. 대기 화면 진행 막대의 '처음 받은 앞 인원'은 브라우저가 처음 계산한 앞 인원을 세션 저장소에 두고 쓰므로 이 파일에 새 값이 없다(추천 적용 2026-10-14, ADR-0063)
  */
 export interface QueueState {
+  /** 입장 일시정지(관제 명령 2 ADMISSION_PAUSE)가 걸려 있다. 대기열은 그대로이고 차례 반영만 멈춘다. 안내 문구와 화면 동작(예상 시간 숨기기, 정지 중 앞 인원 갱신)은 docs/design/d5와 docs/features/queue-admission.md §4를 따르고, 이 칸은 그 판단의 재료다(BAS-042) */
+  admissionPaused?: boolean;
+  /** 그 회차 팬 좌석맵 파일의 경로(GET /v1/events/{eventId}/seatmap-layouts/{layoutVersion}.json). 대기 중에 미리 받아 두고, 입장 확정 응답의 seatmapLayoutPath와 다르면 다시 받는다(docs/frontend.md §4.2.2, BAS-042) */
+  seatmapLayoutPath?: string;
+  /**
+     * 그 회차의 남은(판매 가능) 좌석 수. 파일을 만들 때 좌석 원장에서 받은 값이라 몇 초 늦을 수 있다. 남은 앞 인원 × avgTicketsPerOrder > remainingSeats이면 화면이 '현재 순번으로는 구매가 어려울 수 있습니다'를 띄운다(POL-015, queue-admission §4, BAS-042)
+     * @minimum 0
+     */
+  remainingSeats?: number;
+  /**
+     * 공연 평균 구매 매수(POL-015, queue-admission §4의 '공연 평균 구매 매수'). 값을 정하는 법(같은 공연의 지난 판매, 없으면 정한 기본값)은 이 칸을 채우는 단계(HOT-010)가 정한다(BAS-042)
+     * @minimum 0
+     */
+  avgTicketsPerOrder?: number;
   serving?: number;
   /** 차례 진행 속도(번호/초). 다 지난 최근 10칸 [가정](1초 칸, 지금 칸 제외) 동안 지난 유효 번호 수 ÷ 칸 수(창 앞 기록이 있으면 10, 없으면 창 안 첫 기록 칸부터 지난 칸 끝까지), 소수점 셋째 자리(추천 적용 2026-11-03, queue-admission §4) */
   servingRate?: number;

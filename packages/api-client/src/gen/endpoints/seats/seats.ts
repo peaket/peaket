@@ -589,7 +589,140 @@ export const useDeleteEventPurchaseSession = <TError = ErrorType<UnauthorizedRes
       > => {
       return useMutation(getDeleteEventPurchaseSessionMutationOptions(options), queryClient);
     }
-    export type deleteHoldResponse204 = {
+    export type getHoldResponse200 = {
+  data: Hold
+  status: 200
+}
+
+export type getHoldResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getHoldResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getHoldResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type getHoldResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type getHoldResponseSuccess = (getHoldResponse200) & {
+  headers: Headers;
+};
+export type getHoldResponseError = (getHoldResponse401 | getHoldResponse404 | getHoldResponse429 | getHoldResponse503) & {
+  headers: Headers;
+};
+
+export const getGetHoldUrl = (holdId: string,) => {
+
+
+
+
+  return `/v1/holds/${encodeURIComponent(String(holdId))}`
+}
+
+/**
+ * FR-010(docs/design/d5 §1.6 26번, docs/frontend.md §6.2 29번, BUILD_ORDER BAS-042). 읽기라 구매 세션 요청 서명은 없고 입장 토큰 머리만 받는다(docs/frontend.md §4.1 '구매 세션'). purchase-svc는 요청한 구매 세션에 적힌 holdId에서만 찾는다(남의 holdId와 없는 holdId는 같은 404). 만료된 홀드는 404다(좌석은 이미 놓였다). 읽기는 구매 세션의 무활동 시간을 늘리지 않는다(서명 없는 요청으로 세션을 살려 두지 못하게). Cache-Control: no-store
+ * @summary 홀드 다시 읽기(새로고침, 좌석 ↔ 결제 화면을 오갈 때)
+ */
+export const getHold = async (holdId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getHoldResponseSuccess> => {
+
+  return orvalFetch<getHoldResponseSuccess>(getGetHoldUrl(holdId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHoldQueryKey = (holdId: string,) => {
+    return [
+    `/v1/holds/${holdId}`
+    ] as const;
+    }
+
+
+export const getGetHoldQueryOptions = <TData = Awaited<ReturnType<typeof getHold>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>>(holdId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHold>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHoldQueryKey(holdId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHold>>> = ({ signal }) => getHold(holdId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: holdId !== null && holdId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHold>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHoldQueryResult = NonNullable<Awaited<ReturnType<typeof getHold>>>
+export type GetHoldQueryError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+
+
+export function useGetHold<TData = Awaited<ReturnType<typeof getHold>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>>(
+ holdId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHold>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHold>>,
+          TError,
+          Awaited<ReturnType<typeof getHold>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHold<TData = Awaited<ReturnType<typeof getHold>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>>(
+ holdId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHold>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHold>>,
+          TError,
+          Awaited<ReturnType<typeof getHold>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHold<TData = Awaited<ReturnType<typeof getHold>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>>(
+ holdId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHold>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 홀드 다시 읽기(새로고침, 좌석 ↔ 결제 화면을 오갈 때)
+ */
+
+export function useGetHold<TData = Awaited<ReturnType<typeof getHold>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>>(
+ holdId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHold>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetHoldQueryOptions(holdId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type deleteHoldResponse204 = {
   data: void
   status: 204
 }

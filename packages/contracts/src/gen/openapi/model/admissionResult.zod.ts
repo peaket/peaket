@@ -12,6 +12,7 @@
 import * as zod from 'zod';
 
 export const AdmissionResult = zod.object({
+  "purchaseSessionExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('ADMITTED일 때만: 입장 토큰의 만료 시각(exp, 구매 세션이 끝나는 가장 늦은 때). 화면은 남은 구매 시간 표시에만 쓰고(serverTimeMs로 시계를 맞춘다) 판단은 서버가 한다. 토큰 본문을 화면이 읽지 않게 응답에 싣는다(docs/frontend.md §6.2 22번, BUILD_ORDER BAS-042)'),
   "verificationReason": zod.union([zod.literal('RAPID_REQUESTS'),zod.literal('DEVICE_HISTORY'),zod.literal('NETWORK'),zod.literal('INTERACTION'),zod.literal('HUMAN_CHECK'),zod.literal('SHARED_PATTERN'),zod.literal(null)]).nullish().describe('추가 검증(VERIFYING)일 때 이용자에게 보이는 사유 범주(trust.proto ReasonCategory 이름에서 접두사를 뺀 값). 그 밖에는 null(FR-020, docs/features/bot-defense.md §5, 추천 적용 2026-10-30)'),
   "status": zod.enum(['NOT_YET', 'ADMITTED', 'SOON', 'VERIFYING']).optional().describe('만료와 판매 종료는 410 응답으로 알린다. NOT_YET은 좌석 자동 배정 공연의 차례 직전 직접 확인에서 아직 차례 전(ADR-0043). VERIFYING은 빠진 번호이고 추가 검증 중이라 화면이 SCR-009로 간다(303 대신, ADR-0079 결정 4). SOON은 자리가 없어 곧 입장 대기열에 번호로 넣었다는 뜻이고, 빈자리는 그 대기열의 낮은 번호부터 간다(ADR-0104)'),
   "admissionToken": zod.string().optional().describe('ES256, 첫 사용 기한 5분, 만료는 최대 체류 시각. 머리 typ admission+jwt·kid, 클레임 iss·sub(계정)·aud purchase·jti·sid·event·jny·iat·exp(= iat + 최대 체류 45분). 첫 사용 기한은 따로 싣지 않고 purchase-svc가 iat + 5분으로 본다(추천 적용 2026-11-03, ADR-0183)'),

@@ -32,6 +32,7 @@ import type {
   LobbyToken,
   PreverifyResult,
   QueueEntryRequest,
+  QueueResultFile,
   QueueState,
   QueueTicket
 } from '../../model';
@@ -43,9 +44,17 @@ export const getCreateQueuePreVerificationResponseMock = (overrideResponse: Part
 
 export const getCreateQueueEntryResponseMock = (overrideResponse: Partial<Extract<QueueTicket | BatchingResponse, object>> = {}): QueueTicket | BatchingResponse => (faker.helpers.arrayElement([{verificationReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['RAPID_REQUESTS','DEVICE_HISTORY','NETWORK','INTERACTION','HUMAN_CHECK','SHARED_PATTERN'] as const), null]), queueTicket: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), seq: faker.helpers.arrayElement([faker.number.int(), undefined]), generation: faker.helpers.arrayElement([faker.number.int(), undefined]), segment: faker.helpers.arrayElement([faker.number.int(), undefined]), verification: faker.helpers.arrayElement([faker.helpers.arrayElement(['REQUIRED'] as const), undefined]), serverTimeMs: faker.helpers.arrayElement([faker.number.int(), undefined]), ...overrideResponse}, {entryRequestId: faker.helpers.arrayElement([faker.string.uuid(), undefined]), resultPath: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), resultAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), spreadSec: faker.helpers.arrayElement([faker.number.int(), undefined]), serverTimeMs: faker.helpers.arrayElement([faker.number.int(), undefined]), ...overrideResponse}]))
 
-export const getGetQueueSegmentStateResponseMock = (overrideResponse: Partial<Extract<QueueState, object>> = {}): QueueState => ({serving: faker.helpers.arrayElement([faker.number.int(), undefined]), servingRate: faker.helpers.arrayElement([faker.number.float({fractionDigits: 2}), undefined]), saleStatus: faker.helpers.arrayElement([faker.helpers.arrayElement(['ON_SALE','PAUSED','ALL_HELD','TIER_SOLD_OUT','SOLD_OUT','ENDED'] as const), undefined]), soldOutTiers: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), removedUpToServing: faker.helpers.arrayElement([faker.number.int(), undefined]), removedBeforeSegment: faker.helpers.arrayElement([faker.number.int(), undefined]), removedBitmap: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), banner: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), generatedAtMs: faker.helpers.arrayElement([faker.number.int(), undefined]), servingSteps: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (Array.from({ length: faker.number.int({min: 2, max: 2}) }, (_, i) => i + 1).map(() => (faker.number.int())))), undefined]), pollHintMs: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), ...overrideResponse})
+export const getGetQueueSegmentStateResponseMock = (overrideResponse: Partial<Extract<QueueState, object>> = {}): QueueState => ({admissionPaused: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), seatmapLayoutPath: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), remainingSeats: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), avgTicketsPerOrder: faker.helpers.arrayElement([faker.number.float({min: 0, fractionDigits: 2}), undefined]), serving: faker.helpers.arrayElement([faker.number.int(), undefined]), servingRate: faker.helpers.arrayElement([faker.number.float({fractionDigits: 2}), undefined]), saleStatus: faker.helpers.arrayElement([faker.helpers.arrayElement(['ON_SALE','PAUSED','ALL_HELD','TIER_SOLD_OUT','SOLD_OUT','ENDED'] as const), undefined]), soldOutTiers: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), removedUpToServing: faker.helpers.arrayElement([faker.number.int(), undefined]), removedBeforeSegment: faker.helpers.arrayElement([faker.number.int(), undefined]), removedBitmap: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), banner: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), generatedAtMs: faker.helpers.arrayElement([faker.number.int(), undefined]), servingSteps: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (Array.from({ length: faker.number.int({min: 2, max: 2}) }, (_, i) => i + 1).map(() => (faker.number.int())))), undefined]), pollHintMs: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), ...overrideResponse})
 
-export const getCreateQueueAdmissionResponseMock = (overrideResponse: Partial<Extract<AdmissionResult, object>> = {}): AdmissionResult => ({verificationReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['RAPID_REQUESTS','DEVICE_HISTORY','NETWORK','INTERACTION','HUMAN_CHECK','SHARED_PATTERN'] as const), null]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['NOT_YET','ADMITTED','SOON','VERIFYING'] as const), undefined]), admissionToken: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), retryAfterSeconds: faker.helpers.arrayElement([faker.number.int(), undefined]), serverTimeMs: faker.helpers.arrayElement([faker.number.int(), undefined]), retryAfterMs: faker.helpers.arrayElement([faker.number.int(), undefined]), serverEcdhPublicKey: faker.helpers.arrayElement([{kty: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), crv: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), x: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), y: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), kid: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined]), seatmapLayoutPath: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
+export const getGetQueueShuffleResultResponseMock = (): QueueResultFile => ({
+        [faker.string.alphanumeric(5)]: faker.number.int({min: 1})
+      })
+
+export const getGetQueueBatchResultResponseMock = (): QueueResultFile => ({
+        [faker.string.alphanumeric(5)]: faker.number.int({min: 1})
+      })
+
+export const getCreateQueueAdmissionResponseMock = (overrideResponse: Partial<Extract<AdmissionResult, object>> = {}): AdmissionResult => ({purchaseSessionExpiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), verificationReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['RAPID_REQUESTS','DEVICE_HISTORY','NETWORK','INTERACTION','HUMAN_CHECK','SHARED_PATTERN'] as const), null]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['NOT_YET','ADMITTED','SOON','VERIFYING'] as const), undefined]), admissionToken: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), retryAfterSeconds: faker.helpers.arrayElement([faker.number.int(), undefined]), serverTimeMs: faker.helpers.arrayElement([faker.number.int(), undefined]), retryAfterMs: faker.helpers.arrayElement([faker.number.int(), undefined]), serverEcdhPublicKey: faker.helpers.arrayElement([{kty: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), crv: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), x: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), y: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), kid: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined]), seatmapLayoutPath: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
 
 
 export const getCreateQueueLobbyParticipantMockHandler = (overrideResponse?: LobbyToken | ((info: Parameters<HttpResponseResolver<{ eventId: string }, CreateQueueLobbyParticipantBody>>[0]) => Promise<LobbyToken> | LobbyToken), options?: RequestHandlerOptions) => {
@@ -116,21 +125,25 @@ export const getGetQueueSegmentStateMockHandler = (overrideResponse?: QueueState
   }, options)
 }
 
-export const getGetQueueShuffleResultMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ eventId: string; hashPrefix: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+export const getGetQueueShuffleResultMockHandler = (overrideResponse?: QueueResultFile | ((info: Parameters<HttpResponseResolver<{ eventId: string; hashPrefix: string }>>[0]) => Promise<QueueResultFile> | QueueResultFile), options?: RequestHandlerOptions) => {
   return http.get<{ eventId: string; hashPrefix: string }>('*/v1/queues/:eventId/shuffle-results/:hashPrefix.json', async (info: Parameters<HttpResponseResolver<{ eventId: string; hashPrefix: string }>>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetQueueShuffleResultResponseMock(),
       { status: 200
       })
   }, options)
 }
 
-export const getGetQueueBatchResultMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ eventId: string; hashPrefix: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+export const getGetQueueBatchResultMockHandler = (overrideResponse?: QueueResultFile | ((info: Parameters<HttpResponseResolver<{ eventId: string; hashPrefix: string }>>[0]) => Promise<QueueResultFile> | QueueResultFile), options?: RequestHandlerOptions) => {
   return http.get<{ eventId: string; hashPrefix: string }>('*/v1/queues/:eventId/batch-results/:hashPrefix.json', async (info: Parameters<HttpResponseResolver<{ eventId: string; hashPrefix: string }>>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetQueueBatchResultResponseMock(),
       { status: 200
       })
   }, options)

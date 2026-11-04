@@ -17,6 +17,10 @@ export const ticketV1Ticket: Record<string, unknown> = {
                       "requestType": "CancelTicketsRequest",
                       "responseType": "CancelTicketsResponse"
                     },
+                    "OperatorCancelTickets": {
+                      "requestType": "OperatorCancelTicketsRequest",
+                      "responseType": "OperatorCancelTicketsResponse"
+                    },
                     "CheckReviewEligibility": {
                       "requestType": "CheckReviewEligibilityRequest",
                       "responseType": "CheckReviewEligibilityResponse"
@@ -132,6 +136,77 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "outcomes": {
                       "rule": "repeated",
                       "type": "CancelTicketOutcome",
+                      "id": 1
+                    }
+                  }
+                },
+                "OperatorCancelTarget": {
+                  "fields": {
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "expected_holder_account_id": {
+                      "type": "string",
+                      "id": 2
+                    }
+                  }
+                },
+                "OperatorCancelTicketsRequest": {
+                  "fields": {
+                    "approval_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "fraud_case_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "event_id": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "targets": {
+                      "rule": "repeated",
+                      "type": "OperatorCancelTarget",
+                      "id": 4
+                    }
+                  }
+                },
+                "OperatorCancelResult": {
+                  "values": {
+                    "OPERATOR_CANCEL_RESULT_UNSPECIFIED": 0,
+                    "OPERATOR_CANCEL_RESULT_CANCELED": 1,
+                    "OPERATOR_CANCEL_RESULT_SKIPPED_ALREADY_ENDED": 2,
+                    "OPERATOR_CANCEL_RESULT_SKIPPED_ENTRY_RECORDED": 3,
+                    "OPERATOR_CANCEL_RESULT_SKIPPED_HOLDER_CHANGED": 4
+                  }
+                },
+                "OperatorCancelOutcome": {
+                  "fields": {
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "result": {
+                      "type": "OperatorCancelResult",
+                      "id": 2
+                    },
+                    "order_id": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "withdrawn_transfer_offer_id": {
+                      "type": "string",
+                      "id": 4
+                    }
+                  }
+                },
+                "OperatorCancelTicketsResponse": {
+                  "fields": {
+                    "outcomes": {
+                      "rule": "repeated",
+                      "type": "OperatorCancelOutcome",
                       "id": 1
                     }
                   }

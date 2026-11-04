@@ -188,6 +188,14 @@ export const CreateEventHoldBody = zod.object({
 
 
 export const CreateEventHoldResponse = zod.object({
+  "seats": zod.array(zod.object({
+  "seatId": zod.string(),
+  "label": zod.string().describe('구역·열·번호(예 A구역 3열 12)'),
+  "tierId": zod.string(),
+  "tierName": zod.string().optional(),
+  "price": zod.int().describe('원 단위 정가(할인 전)')
+})).optional().describe('홀드한 좌석의 표시 값(좌석 이름·등급·가격). 새로고침과 좌석 ↔ 결제 화면을 오갈 때 다시 그린다(docs/design/d5 §1.6 26번, BAS-042)'),
+  "totalAmount": zod.int().optional().describe('좌석 정가 합(원). 할인·수수료가 붙은 결제 금액은 주문(Order.amount)이 정한다'),
   "holdId": zod.string(),
   "seatIds": zod.array(zod.string()),
   "expiresAt": zod.iso.datetime({"offset":true}),
@@ -213,6 +221,34 @@ export const DeleteEventPurchaseSessionHeader = zod.object({
 })
 
 export const DeleteEventPurchaseSessionResponse = zod.void()
+
+/**
+ * FR-010(docs/design/d5 §1.6 26번, docs/frontend.md §6.2 29번, BUILD_ORDER BAS-042). 읽기라 구매 세션 요청 서명은 없고 입장 토큰 머리만 받는다(docs/frontend.md §4.1 '구매 세션'). purchase-svc는 요청한 구매 세션에 적힌 holdId에서만 찾는다(남의 holdId와 없는 holdId는 같은 404). 만료된 홀드는 404다(좌석은 이미 놓였다). 읽기는 구매 세션의 무활동 시간을 늘리지 않는다(서명 없는 요청으로 세션을 살려 두지 못하게). Cache-Control: no-store
+ * @summary 홀드 다시 읽기(새로고침, 좌석 ↔ 결제 화면을 오갈 때)
+ */
+export const GetHoldParams = zod.object({
+  "holdId": zod.string()
+})
+
+
+
+
+export const GetHoldResponse = zod.object({
+  "seats": zod.array(zod.object({
+  "seatId": zod.string(),
+  "label": zod.string().describe('구역·열·번호(예 A구역 3열 12)'),
+  "tierId": zod.string(),
+  "tierName": zod.string().optional(),
+  "price": zod.int().describe('원 단위 정가(할인 전)')
+})).optional().describe('홀드한 좌석의 표시 값(좌석 이름·등급·가격). 새로고침과 좌석 ↔ 결제 화면을 오갈 때 다시 그린다(docs/design/d5 §1.6 26번, BAS-042)'),
+  "totalAmount": zod.int().optional().describe('좌석 정가 합(원). 할인·수수료가 붙은 결제 금액은 주문(Order.amount)이 정한다'),
+  "holdId": zod.string(),
+  "seatIds": zod.array(zod.string()),
+  "expiresAt": zod.iso.datetime({"offset":true}),
+  "extendable": zod.boolean(),
+  "fencingToken": zod.int().min(1),
+  "assignResult": zod.enum(['FIRST', 'FIRST_SPLIT', 'SECOND', 'SECOND_SPLIT']).optional().describe('좌석 자동 배정 결과 유형(ADR-0043). 직접 선택 공연은 없음')
+})
 
 /**
  * FR-010, FR-042. 구매 세션 요청 서명 필수. purchase-svc는 요청한 구매 세션 상태에 적힌 그 세션의 holdId 목록에서만 찾고, 해제 Lua는 좌석 홀드 Hash의 holdId와 소유 계정이 요청과 같을 때만 바꾼다(추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 3). 놓은 좌석은 같은 계정이 30초 [가정] 동안 다시 잡지 못한다(홀드 409 seat-recently-released, 소유자 결정 2026-10-30, open-items 67번, docs/features/seat-hold.md §5)

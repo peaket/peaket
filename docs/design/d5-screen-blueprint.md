@@ -228,14 +228,14 @@
 | 16 | 파트너 공연 목록·할 일, 공연 개요, 등록 임시저장·수정, 상품 목록·굿즈 주문 현황, 파트너 배송·반품 처리(송장, 도착 확인·거절, 현장 수령, 배송 명단 내려받기), 웹훅 조회·비밀 재발급·발송 이력·다시 보내기, 명단 조회·다운로드 이력·정산 리포트 내보내기, 회차 취소 요청 상태 조회, 판매자 정보 변경 요청, 현장 현황의 스태프 로그인 표시(목록은 guidelines §3 커서 페이징). 이 가운데 다운로드 이력(`GET /v1/partner/events/{eventId}/attendee-exports`)과 판매자 정보 보기·변경 요청(`GET /v1/partner/seller-profile`, `POST /v1/partner/seller-profile/change-requests`)은 해소했다(추천 적용 2026-10-19, ADR-0066). 공연 이미지 올리기·고치기·지우기(한 장씩, 파생본 주소)는 `POST /v1/partner/productions/{productionId}/images`·`PATCH`·`DELETE /v1/partner/productions/{productionId}/images/{imageId}`로, 좌석맵 저장은 `PUT /v1/partner/productions/{productionId}/seatmap`으로 해소했고(추천 적용 2026-10-14, ADR-0063. 경로는 2026-10-27 공연 단위로 옮김, ADR-0093), 좌석맵 내보내기는 브라우저가 만든다(docs/frontend.md §2.6). 웹훅 조회·고치기·비밀 재발급·발송 이력·다시 보내기는 `GET /v1/partner/webhooks`, `PATCH /v1/partner/webhooks/{endpointId}`, `POST /v1/partner/webhooks/{endpointId}/secret-rotations`, `GET /v1/partner/webhooks/{endpointId}/deliveries`, `POST /v1/partner/webhook-deliveries/{deliveryId}/redeliveries`로 해소했다(추천 적용 2026-10-30, docs/features/notify.md §9) | SCR-062, 063, 021, 022, 023, 025, 027, 044, 020, 037 |
 | 17 | 같은 주문의 여러 티켓 일괄 취소(티켓 ID 목록, 재인증 1회, 티켓별 결과. 지금 API는 티켓마다 따로 부르고, 재인증 토큰은 1회용이다) | SCR-038 |
 | 18 | 내 차단 글 조회, 프로필·동의 변경, 휴대폰 쪽 스캐너 세션 목록·종료, 소명(예매 제한이나 양도 회수 대상이 된 팬이 사정을 설명하는 절차) 건 조회, 배상 건 조회. 후기 수정·삭제(`PATCH`·`DELETE /v1/reviews/{reviewId}`)와 찜 해제(`DELETE /v1/productions/{productionId}/wish`)는 해소했다(2026-10-14, ADR-0063. 2026-10-27 공연 단위로 옮김, ADR-0093). 소명 건 조회는 반쯤 풀렸다(추천 적용 2026-10-30): 소명을 받는 곳을 core-svc support 모듈로 정해(`POST /v1/appeals`, docs/features/transfer-refund.md §7.1 '소명이 들어오는 길') 소명 글과 결과가 core DB `appeal`에 있으므로, 조회는 support 모듈이 자기 DB로 답하면 된다. 예매 제한 소명의 사유 범주·기한은 `GET /v1/booking-restrictions/me`가 준다. 남은 것은 조회 경로와, 양도 회수 소명의 사유 범주·기한을 support가 어디서 받을지다(support에 양도 회수의 사본이 없다). wbs 0.2.3에서 정한다 | SCR-016, 017, 042, 043, 054 |
-| 19 | 구매 세션 나가기(LEFT, 입장 자리를 바로 비운다) | SCR-010 |
-| 20 | 대기 상태 파일의 남은 좌석 수(근사)·평균 구매 매수(④ 조건부 경고)와 입장 일시정지(명령 2) 표시 | SCR-008 |
+| 19 | 구매 세션 나가기(LEFT, 입장 자리를 바로 비운다) 해소: `DELETE /v1/events/{eventId}/purchase-session`(PRF-138). | SCR-010  |
+| 20 | 대기 상태 파일의 남은 좌석 수(근사)·평균 구매 매수(④ 조건부 경고)와 입장 일시정지(명령 2) 표시 해소(2026-11-05, BAS-042): 대기 상태 파일의 `remainingSeats`·`avgTicketsPerOrder`·`admissionPaused`. | SCR-008  |
 | 21 | 공연 목록·상세·검색·자동완성(당시 이름 연관 검색어), 가입 완료(동의·만 14세·닉네임), 닉네임 중복 검사, 예매 제한 상태 조회(웹 서버 내부 경로로 둘지 공개 API로 둘지 함께 정한다). 공연 검색·자동완성은 해소했다(2026-10-14, ADR-0063: openapi `/v1/search`·`/v1/search/suggestions`, 2026-10-23 확인). 예매 제한 상태 조회는 해소했다(추천 적용 2026-10-30): 공개 API `GET /v1/booking-restrictions/me`(gw-fan → core-svc support 모듈, 상태·제한 ID·사유 코드·시작·끝·소명 기한)다. 공연 상세는 ISR 정적 셸이고 개인 영역을 화면 스크립트가 읽으므로 웹 서버 내부 경로로 두지 않았다. 원본은 ops DB `booking_restriction`이고 ops-svc가 화면용 사본을 보낸다(docs/features/queue-admission.md §6 '화면용 사본'). 제한 ID는 소명 제출 `POST /v1/appeals`(kind RESTRICTION)의 targetId이고, 제한을 풀거나 유지하는 판단은 CS 처리함 '예매 제한 목록'(§7.6, `cs_lead`)에서 한다. 소명 건 조회(18번)는 남는다 | SCR-001~005, 017, 042 |
 | 22 | 스캐너 기기 배정 변경, 회수 기기 재등록, 퇴역(RETIRED) 처리 | SCR-053 |
 | 23 | 추가 검증 이의 심사 기록(인정·기각, data.md `verification_case.appeal_result`) | SCR-045 |
 | 24 | 재인증 토큰 받기(팬은 소셜 제공자로 다시 로그인한 뒤, 관리 계정은 비밀번호와 TOTP를 다시 넣은 뒤)와 관리 계정·스캐너 로그아웃(세션 종료). openapi에는 보내는 헤더 `X-Reauth-Token`(guidelines §7)만 있고 받는 경로가 없다. 팬 쪽은 해소(추천 적용 2026-11-03, BUILD_ORDER PRF-020): 공개 API가 아니라 로그인처럼 웹 앱 서버 경로로 받는다(`POST /reauth/{provider}` → 제공자 → `POST /reauth/token`으로 화면 메모리에, docs/features/identity.md §7.1). 관리 계정 쪽은 남았다 | SCR-013·014·017·038·040, SCR-020·028·030·046·064, SCR-036 |
 | 25 | 티켓 목록 응답(`Ticket`)의 화면 표시 값: 공연명·장소·시작·입장 시작 시각, 받은 티켓의 보낸 분 닉네임, 예매번호, 입장 시각 | SCR-013 |
-| 26 | 홀드 다시 읽기(새로고침, 좌석 ↔ 결제 화면을 오갈 때 좌석 이름·등급·서버가 계산한 금액). `Hold` 응답에 좌석 이름과 금액이 없다 | SCR-010·011 |
+| 26 | 홀드 다시 읽기(새로고침, 좌석 ↔ 결제 화면을 오갈 때 좌석 이름·등급·서버가 계산한 금액). `Hold` 응답에 좌석 이름과 금액이 없다 해소(2026-11-05, BAS-042): `GET /v1/holds/{holdId}`와 `Hold.seats`·`totalAmount`. | SCR-010·011  |
 | 27 | 차례 도래 시각(유예 마감). 이 값이 입장 확정 응답과 대기 상태 파일에 없어서 '차례 도래 유예'의 남은 시간을 계산할 수 없다 | SCR-008 |
 | 28 | 스캐너 응답 값: 토큰 발급 200 본문, `DeviceApprovalView`의 권한 없음 사유·배정 공연명·시작 시각, `ScannerShift`의 세션 ID·닉네임·권한 끝 시각·공연명. 기기 승인 흐름(RFC 8628)의 `error` 값을 problem+json(guidelines §2)에 싣는 규칙 | SCR-036·051·033 |
 | 29 | 이상 표시 종류 '시각 불확실'(offline-gate §7.1, §8.5 ③)이 `GateFlag.kind`에 없다 | SCR-052·037 |
@@ -1124,7 +1124,7 @@ sm 360 · 집중 셸 · 100dvh · 기본 화면
 │ ── 생길 때만 ①~② 위에 ──
 │ ⑤ ! [공지] 운영 공지                            명령 7 템플릿
 │    ! 판매가 잠시 멈췄습니다 … / 순서를 정하는 중 / 곧 입장 / 연결 확인 중 … (아래 상태 표)
-│ ④ ! 현재 순번으로는 구매가 어려울 수 있습니다    앞 인원 × 평균 매수 > 잔여석일 때만(두 값은 대기 상태 파일에 아직 없다, §1.6 20번)
+│ ④ ! 현재 순번으로는 구매가 어려울 수 있습니다    앞 인원 × 평균 매수 > 잔여석일 때만(두 값은 대기 상태 파일의 `avgTicketsPerOrder`·`remainingSeats`, 2026-11-05 계약에 더함, §1.6 20번)
 │ ⑧ 희망 R석 2매 [ 바꾸기 ]                       AUTO 공연만 한 줄 요약. [바꾸기]가 CMP-057 preference 시트를 연다
 │ ── 화면 아래 ──
 │ ⑥ [ 차례 알림 받기 ]                           탭 제목 카운트다운·알림음·웹 푸시(CMP-068)
@@ -1157,7 +1157,7 @@ sm 360 · ⑨ '순번 안내' 시트
 | 입장 확정 | SCR-010으로 이동(AUTO는 자동 배정까지 요청한 뒤) | 입장 확정 ADMITTED |
 | tier-sold-out(AUTO) | ⑧ 요약 줄에 "1순위 등급이 매진되었습니다. 2순위 등급을 골라 두세요" [ 바꾸기 ] | 1순위 등급 매진 |
 | stale | 숫자를 흐리게 하고, 진행 막대의 흐름 효과를 멈춘 채 "연결 확인 중"을 보인다 | 폴링 실패, 백오프(재시도 간격을 점점 늘리는 것) |
-| paused | ① 위에 "판매가 잠시 멈췄습니다. 대기 순서는 그대로입니다" | 판매 상태 PAUSED(명령 3이 걸리면 queue-svc가 대기 상태 파일에 쓴다)·입장 일시정지(명령 2, 최대 10분)·Go/No-Go 판정이 No-Go여서 입장 일시정지로 시작한 오픈(입장 일시정지 표시는 대기 상태 파일에 아직 없다, §1.6 20번) |
+| paused | ① 위에 "판매가 잠시 멈췄습니다. 대기 순서는 그대로입니다" | 판매 상태 PAUSED(명령 3이 걸리면 queue-svc가 대기 상태 파일에 쓴다)·입장 일시정지(명령 2, 최대 10분)·Go/No-Go 판정이 No-Go여서 입장 일시정지로 시작한 오픈(입장 일시정지 표시는 대기 상태 파일의 `admissionPaused`, 2026-11-05 계약에 더함, §1.6 20번) |
 | 로그인 만료 | "로그인이 만료되었습니다. 다시 로그인해도 순번은 그대로입니다" [ 다시 로그인 ] | 입장 확정 401·identity 장애(ADR-0055) |
 | 대기 취소 확인 | 대화상자 "대기를 취소하면 이 순번은 사라집니다" [! 대기 취소 ] | ⑦을 누름 → 취소 뒤 SCR-002 |
 | expired | CMP-045 page "차례가 지난 지 15분이 넘어 대기표가 만료됐습니다. 다시 줄을 서면 맨 뒤 순번을 받습니다" [[ 다시 줄 서기 ]] ( 공연 상세 › ). 사전 셔플 공연도 같은 문구다(추천 적용 2026-10-14, ADR-0064). 다시 줄 설 수 없으면(rejoinAllowed=false) 판매 종료가 지났을 때는 ended로, 이 회차에 이미 입장했을 때는 already-admitted로 보인다 | 차례가 온 뒤 15분 안에 입장하지 않은 경우(410, rejoinAllowed) |

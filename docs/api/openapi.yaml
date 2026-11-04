@@ -246,6 +246,10 @@ components:
       type: object
       description: "구간별 대기 상태 파일(CDN 1초 캐시. 입장 임박 구간 파일은 다음 생성 시각까지만 캐시한다(Expires, 낡은 값 허용 없음, ADR-0110). 차례에서 먼 구간의 수명을 늘리는 방식은 Phase 2에서 정함, queue-admission §4). 사용자별 값 없음. 대기 화면 진행 막대의 '처음 받은 앞 인원'은 브라우저가 처음 계산한 앞 인원을 세션 저장소에 두고 쓰므로 이 파일에 새 값이 없다(추천 적용 2026-10-14, ADR-0063)"
       properties:
+        admissionPaused: { type: boolean, description: "입장 일시정지(관제 명령 2 ADMISSION_PAUSE)가 걸려 있다. 대기열은 그대로이고 차례 반영만 멈춘다. 안내 문구와 화면 동작(예상 시간 숨기기, 정지 중 앞 인원 갱신)은 docs/design/d5와 docs/features/queue-admission.md §4를 따르고, 이 칸은 그 판단의 재료다(BAS-042)" }
+        seatmapLayoutPath: { type: string, description: "그 회차 팬 좌석맵 파일의 경로(GET /v1/events/{eventId}/seatmap-layouts/{layoutVersion}.json). 대기 중에 미리 받아 두고, 입장 확정 응답의 seatmapLayoutPath와 다르면 다시 받는다(docs/frontend.md §4.2.2, BAS-042)" }
+        remainingSeats: { type: integer, minimum: 0, description: "그 회차의 남은(판매 가능) 좌석 수. 파일을 만들 때 좌석 원장에서 받은 값이라 몇 초 늦을 수 있다. 남은 앞 인원 × avgTicketsPerOrder > remainingSeats이면 화면이 '현재 순번으로는 구매가 어려울 수 있습니다'를 띄운다(POL-015, queue-admission §4, BAS-042)" }
+        avgTicketsPerOrder: { type: number, minimum: 0, description: "공연 평균 구매 매수(POL-015, queue-admission §4의 '공연 평균 구매 매수'). 값을 정하는 법(같은 공연의 지난 판매, 없으면 정한 기본값)은 이 칸을 채우는 단계(HOT-010)가 정한다(BAS-042)" }
         serving: { type: integer }
         servingRate: { type: number, description: "차례 진행 속도(번호/초). 다 지난 최근 10칸 [가정](1초 칸, 지금 칸 제외) 동안 지난 유효 번호 수 ÷ 칸 수(창 앞 기록이 있으면 10, 없으면 창 안 첫 기록 칸부터 지난 칸 끝까지), 소수점 셋째 자리(추천 적용 2026-11-03, queue-admission §4)" }
         saleStatus: { type: string, enum: [ON_SALE, PAUSED, ALL_HELD, TIER_SOLD_OUT, SOLD_OUT, ENDED], description: "회차 판매 상태(docs/planning/03 §2.15, purchase-svc 판정)에 판매 일시정지·판매 중지(PAUSED)와 등급 매진(TIER_SOLD_OUT)을 덧씌운 값이고, ENDED > SOLD_OUT > PAUSED > ALL_HELD > TIER_SOLD_OUT > ON_SALE 순으로 앞의 것을 쓴다. ALL_HELD는 일시 매진(가용 좌석 0이지만 홀드나 결제 중인 판매 예약이 남음)이라 대기는 이어지고 입장만 멈춘다. SOLD_OUT은 가용·홀드·결제 중이 모두 0인 매진이고, 판매 종료 전에 좌석이 돌아오면 ON_SALE로 돌아온다(매진 풀림, 추천 적용 2026-10-28, ADR-0122). ENDED는 그 회차의 판매 종료(공연 시작 24시간 전, event.starts_at − 24시간)가 지남. 차례 전 대기는 끝나고(대기 기록 SALE_END) 대기 화면은 ended로 바뀌며 폴링을 멈춘다(ADR-0063 결정 11, 소유자 결정 2026-10-14, ADR-0064)" }
@@ -260,6 +264,7 @@ components:
     AdmissionResult:
       type: object
       properties:
+        purchaseSessionExpiresAt: { type: string, format: date-time, description: "ADMITTED일 때만: 입장 토큰의 만료 시각(exp, 구매 세션이 끝나는 가장 늦은 때). 화면은 남은 구매 시간 표시에만 쓰고(serverTimeMs로 시계를 맞춘다) 판단은 서버가 한다. 토큰 본문을 화면이 읽지 않게 응답에 싣는다(docs/frontend.md §6.2 22번, BUILD_ORDER BAS-042)" }
         verificationReason: { type: [string, 'null'], enum: [RAPID_REQUESTS, DEVICE_HISTORY, NETWORK, INTERACTION, HUMAN_CHECK, SHARED_PATTERN, null], description: "추가 검증(VERIFYING)일 때 이용자에게 보이는 사유 범주(trust.proto ReasonCategory 이름에서 접두사를 뺀 값). 그 밖에는 null(FR-020, docs/features/bot-defense.md §5, 추천 적용 2026-10-30)" }
         status: { type: string, enum: [NOT_YET, ADMITTED, SOON, VERIFYING], description: "만료와 판매 종료는 410 응답으로 알린다. NOT_YET은 좌석 자동 배정 공연의 차례 직전 직접 확인에서 아직 차례 전(ADR-0043). VERIFYING은 빠진 번호이고 추가 검증 중이라 화면이 SCR-009로 간다(303 대신, ADR-0079 결정 4). SOON은 자리가 없어 곧 입장 대기열에 번호로 넣었다는 뜻이고, 빈자리는 그 대기열의 낮은 번호부터 간다(ADR-0104)" }
         admissionToken: { type: string, description: "ES256, 첫 사용 기한 5분, 만료는 최대 체류 시각. 머리 typ admission+jwt·kid, 클레임 iss·sub(계정)·aud purchase·jti·sid·event·jny·iat·exp(= iat + 최대 체류 45분). 첫 사용 기한은 따로 싣지 않고 purchase-svc가 iat + 5분으로 본다(추천 적용 2026-11-03, ADR-0183)" }
@@ -287,7 +292,7 @@ components:
             allowSplit: { type: boolean, default: false, description: "연석이 없을 때 같은 등급의 분리 좌석 허용" }
         clientEphemeralPublicKey: { type: string, description: "좌석 자동 배정 공연의 첫 요청에만(직접 선택 공연은 스냅샷 요청 헤더). 구매 세션에 저장" }
         behavior: { $ref: '#/components/schemas/BehaviorSummary', description: "좌석 화면에서 잰 행동 요약. 직접 선택 공연에서 그 구매 세션의 첫 홀드 요청에만 싣는다(다시 보내도 첫 요청의 것만 쓴다). 없어도 홀드는 그대로 처리한다. purchase-svc가 홀드 응답과 따로 BehaviorSignal(screen SEAT)로 낸다(추천 적용 2026-10-31, ADR-0171 결정 4, docs/features/seat-hold.md)" }
-    Hold: { type: object, required: [holdId, seatIds, expiresAt, extendable, fencingToken], properties: { holdId: { type: string }, seatIds: { type: array, items: { type: string } }, expiresAt: { type: string, format: date-time }, extendable: { type: boolean }, fencingToken: { type: integer, minimum: 1 }, assignResult: { type: string, enum: [FIRST, FIRST_SPLIT, SECOND, SECOND_SPLIT], description: "좌석 자동 배정 결과 유형(ADR-0043). 직접 선택 공연은 없음" } } }
+    Hold: { type: object, required: [holdId, seatIds, expiresAt, extendable, fencingToken], properties: { seats: { type: array, description: "홀드한 좌석의 표시 값(좌석 이름·등급·가격). 새로고침과 좌석 ↔ 결제 화면을 오갈 때 다시 그린다(docs/design/d5 §1.6 26번, BAS-042)", items: { type: object, required: [seatId, label, tierId, price], properties: { seatId: { type: string }, label: { type: string, description: "구역·열·번호(예 A구역 3열 12)" }, tierId: { type: string }, tierName: { type: string }, price: { type: integer, description: "원 단위 정가(할인 전)" } } } }, totalAmount: { type: integer, description: "좌석 정가 합(원). 할인·수수료가 붙은 결제 금액은 주문(Order.amount)이 정한다" }, holdId: { type: string }, seatIds: { type: array, items: { type: string } }, expiresAt: { type: string, format: date-time }, extendable: { type: boolean }, fencingToken: { type: integer, minimum: 1 }, assignResult: { type: string, enum: [FIRST, FIRST_SPLIT, SECOND, SECOND_SPLIT], description: "좌석 자동 배정 결과 유형(ADR-0043). 직접 선택 공연은 없음" } } }
     Order: { type: object, properties: { orderId: { type: string }, amount: { type: integer }, status: { type: string, enum: [CREATED, AUTHENTICATED, ACCEPTED, RESERVED, AWAITING_DEPOSIT, APPROVED, UNKNOWN, CONFIRMED, FAILED, COMPENSATED, PARTIALLY_REFUNDED, REFUNDED, EXPIRED], description: "주문 상태(docs/planning/03 §2.4). 결제 시도 상태와 결제 원장 상태는 따로다(payment §3). EXPIRED는 결제를 접수하지 않고 끝난 주문이다(과금 없음, 추천 적용 2026-10-28, ADR-0107)" }, items: { type: array, items: { type: object } } } }
     PaymentStatus: { type: object, properties: { status: { type: string, enum: [ACCEPTED, RESERVED, AWAITING_DEPOSIT, APPROVED, CONFIRMED, FAILED, UNKNOWN, COMPENSATED] }, issueDelayed: { type: boolean, description: "APPROVED에서 승인 뒤 첫 발권 시도가 실패해 같은 주문 ID로 다시 발권하는 중. 화면은 '결제 완료, 티켓 발급 중'(payment §3, 추천 적용 2026-10-28, ADR-0106)" }, virtualAccount: { type: object, description: "가상계좌 안내(입금 대기일 때만, docs/planning/03 §2.4, ADR-0062)", properties: { bank: { type: string }, accountNumber: { type: string }, dueAt: { type: string, format: date-time } } }, reason: { type: string }, pg: { type: string, enum: [TOSS, PORTONE, SIMULATOR], description: 결제 접수에서 고정된 결제사(ADR-0044) } } }
     LiveSnapshot:
@@ -1082,6 +1087,7 @@ components:
     CommandState: { type: object, properties: { commandId: { type: string }, state: { type: string, enum: [DRAFTED, DRY_RUN, PENDING_APPROVAL, APPROVED, REJECTED, DISPATCHED, ACKED, FAILED, REVERT_PENDING, REVERTED, AUTO_EXPIRED], description: "REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)" }, dryRun: { type: object }, approvals: { type: array, items: { type: string } }, ackedAt: { type: string, format: date-time }, expiresAt: { type: string, format: date-time, description: "만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)" } } }
     QueueEntryRequest: { description: "대기열 진입 본문(POST /v1/queues/{eventId}/entries). application/json과 text/plain(JSON 글자, T=0 사전 요청 없음) 두 표현이 같은 이 스키마를 쓴다(BAS-040)", additionalProperties: false, type: object, required: [preverifyToken], properties: { preverifyToken: { type: string }, deviceId: { type: string }, entryRequestId: { type: string, format: uuid, description: "진입 시도 하나에 브라우저가 만든 UUID. 응답을 못 받아 다시 보낼 때 같은 값을 쓰면 이어서 처리하고, 이미 번호를 기록했으면 같은 번호의 대기표를 다시 준다. 1인 1순번 선점 값 PENDING:{요청 ID}에 쓴다(헤더가 아니라 본문이라 사전 요청이 없다, 추천 적용 2026-10-28, 기술 검토 중간-035)" } } }
     AdmissionRequest: { description: "입장 확정 본문(POST /v1/queues/{eventId}/admission). application/json과 text/plain(JSON 글자, T=0 사전 요청 없음) 두 표현이 같은 이 스키마를 쓴다(BAS-040)", additionalProperties: false, type: object, properties: { queueTicket: { type: string }, lobbyToken: { type: string }, priorityGrantId: { type: string, format: uuid, description: "우선 구매(이의가 인정된 부정 예매 표 취소의 되돌림, POL-046 ⑦)의 권리 ID(GET /v1/fraud-appeal-requests의 priorityPurchases). 대기표·참가 토큰 대신 보낸다. 그 계정의 OFFERED 권리이고 만료 전이면 대기 번호·15분 만료 없이 입장 토큰(클레임 prio)을 주고 입장 자리 수에 세지 않는다. 이때 queue-svc가 새 여정 ID(jny)를 만든다. 판매 종료 뒤에도 받는다(판매 종료 규칙의 예외, 추천 적용 2026-10-31, ADR-0171)" }, firstEtaSec: { type: number, description: "선택. 대기 화면이 이 대기에서 처음 보인 예상 대기(초, 1~86,400). firstEtaAtMs와 함께 오면 queue-svc가 그 대기표가 처음 자리를 잡을 때 (차례 시각 − firstEtaAtMs) ÷ firstEtaSec을 예상 대기 오차 지표(queue_eta_error_ratio)에 넣는다. 관측용이라 서버는 모양을 묻지 않고(입장을 400으로 막지 않는다) 숫자가 아니거나 범위 밖이면 버리며, 판정에 쓰지 않는다(추천 적용 2026-11-03, ADR-0183)" }, firstEtaAtMs: { type: number, description: "선택. firstEtaSec을 처음 보인 때의 보정된 서버 시각(유닉스 밀리초, ADR-0110). 미래이거나 이틀보다 앞이면 버린다" } } }
+    QueueResultFile: { type: object, description: "셔플 결과 파일과 동시 도착 묶음 결과 파일의 본문: 토큰 해시 → 순번의 평평한 표다(docs/features/queue-admission.md §3 '결과 게시', ADR-0058, BUILD_ORDER BAS-042). 키는 SHA-256(UTF-8(토큰))의 소문자 16진 64자이고(셔플은 참가 토큰, 묶음은 사전 검증 토큰), 파일 이름의 hashPrefix는 그 앞 세 자리다(파일 4,096개 [가정]). 순번은 1부터다. 받는 시각의 분산은 응답의 spreadSec·shuffleSpreadSec 안에서 토큰 해시로 정한다", additionalProperties: { type: integer, minimum: 1 } }
     BatchingResponse: { type: object, description: "202 BATCHING 본문(ADR-0041·0058)", properties: { entryRequestId: { type: string, format: uuid, description: "이 묶음 참가의 진입 요청 ID(본문에 없었으면 queue-svc가 만든 값). 결과 뒤 이 값으로 진입을 다시 보낸다(묶음 기록은 같은 요청 ID로만 잇는다. 화면은 이 값을 localStorage에 둔다, 추천 적용 2026-11-03)" }, resultPath: { type: string, description: "queue-files의 묶음 결과 파일 경로(/v1/queues/{eventId}/batch-results/{hashPrefix}.json)" }, resultAt: { type: string, format: date-time, description: 결과 공개 예정 시각 }, spreadSec: { type: integer, description: "분산 창(초, 8 [가정])" }, serverTimeMs: { type: integer, format: int64, description: "서버 시각(유닉스 밀리초). 시계 보정 표본(ADR-0110)" } } }
     RecipientLookupResult: { type: object, description: "양도 받는 사람 확인 결과(FR-013)", properties: { recipientRef: { type: string, description: "불투명 참조값(10분 [가정], 양도 요청 한 번에만 쓴다)" }, nicknameMasked: { type: string, description: 닉네임 일부 } } }
     Genre: { type: string, enum: [콘서트, 뮤지컬, 연극, 클래식, 페스티벌, 팬미팅, 기타], description: "장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)" }
@@ -1754,9 +1760,9 @@ paths:
       x-peaket-roles: [public]
       security: []
       summary: 셔플 결과 파일(참가 토큰 해시 앞자리별, 인증 없음, CDN 캐시. 공개 예정 시각 뒤 토큰 해시로 정한 0~8초에 받음, ADR-0058)
-      description: "FR-038, POL-005. 약 1,000개 파일, 각 '해시 → 순번' 약 1,000건"
+      description: "FR-038, POL-005. 파일 4,096개 [가정](참가 토큰 해시 16진 앞 세 자리), 각 '해시 → 순번'(100만 명이면 파일마다 약 250건). 본문 형식은 QueueResultFile(BAS-042)"
       parameters: [{ $ref: '#/components/parameters/EventId' }, { name: hashPrefix, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: 'map of hash → seq' }, '404': { description: "셔플 전(정적 파일 404라 본문을 약속하지 않는다, guidelines §2). 대기열 파일 배포는 이 응답을 1초 [가정]만 캐시한다. 2초부터 두 배씩 최대 20초 간격으로 다시 묻는다(ADR-0058)" } }
+      responses: { '200': { description: "해시 → 순번 표(QueueResultFile)", content: { application/json: { schema: { $ref: '#/components/schemas/QueueResultFile' } } } }, '404': { description: "셔플 전(정적 파일 404라 본문을 약속하지 않는다, guidelines §2). 대기열 파일 배포는 이 응답을 1초 [가정]만 캐시한다. 2초부터 두 배씩 최대 20초 간격으로 다시 묻는다(ADR-0058)" } }
   /v1/queues/{eventId}/batch-results/{hashPrefix}.json:
     servers: [{ url: 'https://queue-files.peaket.example', description: "대기열 파일 배포(ADR-0058)" }]
     get:
@@ -1767,7 +1773,7 @@ paths:
       summary: 동시 도착 묶음 결과 파일(사전 검증 토큰 해시 앞자리별, 인증 없음, CDN 캐시. 결과 공개 예정 시각 뒤 토큰 해시로 정한 분산 창 안에 받음, ADR-0041·0058)
       description: "FR-006, ADR-0041. 각 '사전 검증 토큰 해시 → 순번'. 받는 규칙은 셔플 결과 파일과 같다"
       parameters: [{ $ref: '#/components/parameters/EventId' }, { name: hashPrefix, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: 'map of hash → seq' }, '404': { description: "묶음 셔플 전(정적 파일 404라 본문을 약속하지 않는다, guidelines §2). 404는 1초 [가정]만 캐시하고 2초부터 두 배씩 최대 20초 간격으로 다시 묻는다(ADR-0058)" } }
+      responses: { '200': { description: "해시 → 순번 표(QueueResultFile)", content: { application/json: { schema: { $ref: '#/components/schemas/QueueResultFile' } } } }, '404': { description: "묶음 셔플 전(정적 파일 404라 본문을 약속하지 않는다, guidelines §2). 404는 1초 [가정]만 캐시하고 2초부터 두 배씩 최대 20초 간격으로 다시 묻는다(ADR-0058)" } }
   /v1/queues/{eventId}/shuffle-proof:
     get:
       operationId: getQueueShuffleProof
@@ -1866,6 +1872,15 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: "주소의 회차 ID가 구매 세션에 적힌 회차와 다르다. 세션은 그대로 둔다" }
         '503': { $ref: '#/components/responses/ServiceUnavailable', description: "좌석 Redis 장애 조치 중이거나 메모리 부족(Problem type seat-store-unavailable, Retry-After 2초 [가정], ADR-0121)" }
   /v1/holds/{holdId}:
+    get:
+      operationId: getHold
+      tags: [seats]
+      x-peaket-roles: [fan]
+      summary: 홀드 다시 읽기(새로고침, 좌석 ↔ 결제 화면을 오갈 때)
+      description: "FR-010(docs/design/d5 §1.6 26번, docs/frontend.md §6.2 29번, BUILD_ORDER BAS-042). 읽기라 구매 세션 요청 서명은 없고 입장 토큰 머리만 받는다(docs/frontend.md §4.1 '구매 세션'). purchase-svc는 요청한 구매 세션에 적힌 holdId에서만 찾는다(남의 holdId와 없는 holdId는 같은 404). 만료된 홀드는 404다(좌석은 이미 놓였다). 읽기는 구매 세션의 무활동 시간을 늘리지 않는다(서명 없는 요청으로 세션을 살려 두지 못하게). Cache-Control: no-store"
+      security: [{ fanCookie: [], admissionToken: [] }]
+      parameters: [{ name: holdId, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: 홀드, content: { application/json: { schema: { $ref: '#/components/schemas/Hold' } } } }, '404': { $ref: '#/components/responses/Problem', description: "그 구매 세션의 홀드가 아니거나 만료됐다(BOLA 방지, guidelines §12)" }, '401': { $ref: '#/components/responses/Unauthorized', description: "팬 쿠키 없음·만료(about:blank), 입장 토큰 없음·만료이거나 구매 세션이 없거나 끝남(purchase-session-ended)" }, '429': { $ref: '#/components/responses/TooManyRequests', description: "게이트웨이 로컬 한도 초과, 또는 purchase-svc 파드의 자기 과부하(server-busy)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "좌석 Redis 장애 조치 중이거나 그 회차 좌석 저장소가 준비되지 않음(Problem type seat-store-unavailable, Retry-After 2초 [가정], ADR-0121)" } }
     delete:
       operationId: deleteHold
       tags: [seats]

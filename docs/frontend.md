@@ -638,7 +638,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 본문 | `application/json`을 쓴다. 예외는 T=0의 두 호출(대기열 진입, 입장 확정)이다. 이 둘은 본문을 JSON 문자열로 보내고 `Content-Type: text/plain;charset=UTF-8`을 쓰며, safelisted가 아닌 헤더는 금지한다(`Idempotency-Key`·`traceparent` 포함). 이 두 경로 밖에서 `text/plain`을 쓰면 클라이언트가 거절한다(FE-T3). 올리기(`multipart/form-data`)는 `FormData`를 그대로 보내고 `Content-Type`은 브라우저가 경계와 함께 정한다(2026-11-05, BAS-041) |
 | 멱등키 | openapi가 `IdempotencyKey`를 붙인 쓰기 요청은 사용자 동작 하나에 `crypto.randomUUID()`(UUID v4, 따옴표 없이)로 키 하나를 만든다. 그 동작을 다시 시도할 때는 같은 키와 처음 만든 본문 문자열을 그대로 쓴다(서버는 본문 지문으로 같은 요청인지 본다. 일련번호·서명 헤더는 지문에 들지 않는다). 한 요청 안의 자동 재시도는 api-client가 같은 키를 쓰고, 사람이 [다시 시도]를 누를 때는 화면이 처음 키를 api-client에 넘긴다(`idempotencyKey`). 422 `idempotency-key-reused`는 버그로 보고 다시 보내지 않고 오류 수집에 남긴다. 409 `idempotency-request-in-progress`는 `Retry-After` 뒤 같은 키로 다시 보낸다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046) 생성 훅의 `mutate`는 훅을 만들 때 정한 요청 옵션을 쓰므로 시도마다 새 키가 생긴다. 같은 키를 다시 써야 하는 [다시 시도](구매 세션 쓰기, 결제 접수 등)는 생성 함수를 직접 부르며 `request.headers`로 처음 키(`Idempotency-Key`)를 넘긴다(api-client가 그 키를 그대로 쓴다, 2026-11-05 BAS-041 새 맥락 리뷰) |
 | 재인증 | `X-Reauth-Token`은 메모리에서만 꺼내 붙이고, 한 번 쓰면 버린다. 403 `reauth-required`면 CMP-064를 띄우고 새 토큰으로 한 번 다시 보낸다 |
-| 구매 세션 | 여섯 작업(홀드, 홀드 해제, 연장, 주문, 결제 시도, 결제 접수)은 서명기(§5.3)를 거쳐 `X-Admission-Token`·`X-Purchase-Seq`·`X-Purchase-Mac`을 붙인다. 스냅샷 요청에는 `X-Admission-Token`을 붙인다(첫 사용 때는 `X-Client-Ephemeral-Key`도) |
+| 구매 세션 | 여섯 작업(홀드, 홀드 해제, 연장, 주문, 결제 시도, 결제 접수)은 서명기(§5.3)를 거쳐 `X-Admission-Token`·`X-Purchase-Seq`·`X-Purchase-Mac`을 붙인다. 스냅샷 요청에는 `X-Admission-Token`을 붙인다(첫 사용 때는 `X-Client-Ephemeral-Key`도). 홀드 다시 읽기(`GET /v1/holds/{holdId}`)도 서명 없이 `X-Admission-Token`만 붙인다(읽기는 무활동 시간을 늘리지 않는다, 2026-11-05 BAS-042) |
 | 시간 초과 | 읽기 10초, 쓰기 15초, 결제 결과 롱 폴링 30초(서버 상한 25초 + 5초. 게이트웨이 27초·CloudFront 원본 응답 시간 초과 30초와의 순서는 docs/infra.md §4.1, 추천 적용 2026-10-28, 기술 검토 중간-047), 대기 상태 파일 5초, 올리기 120초 [가정]. `AbortSignal.timeout`과 화면을 떠날 때의 신호를 `AbortSignal.any`로 묶는다. `AbortSignal.any`가 없는 브라우저(iOS·iPadOS 16.4~17.3)에서는 §1.5의 대체 함수 `anySignal`로 묶는다(기술 검토 중간-095). 응답은 JSON이면 공용 안전 파서로, 글자(`text/*`)는 글자로, 그 밖의 이진(좌석 스냅샷 `application/octet-stream`, pdf·xlsx·arrow 내보내기)은 `Blob`으로 돌려주고(생성 형과 같다, 좌석 스냅샷은 `blob.arrayBuffer()`로 읽는다, 2026-11-05 BAS-041), 대기 상태 파일처럼 캐시를 쓰지 않는 작업은 작업 서술의 `cache: 'no-store'`를 fetch에 넘긴다(2026-11-04 구간 1 끝 정리) |
 | 자동 재시도 | 읽기와 멱등키가 있는 쓰기만 자동으로 다시 시도한다. 네트워크 오류·시간 초과·`Retry-After`가 붙은 503일 때 최대 2회 [가정] 다시 시도한다. 구매 세션 쓰기는 같은 멱등키로 1회 다시 보내되, 일련번호와 MAC은 새로 만든다. 멱등키가 없는 생성형 쓰기(소명, 부스 요청, 알림 신청 등)는 자동으로 다시 시도하지 않는다 |
 | 기다림 | 서버가 준 다시 시도 시각(`Retry-After`(초 또는 HTTP 날짜), 본문의 `retryAfterSeconds`·`pollHintMs`)은 하한이다. 기다림 = `하한 × (1 + U(0, 0.2))`로, 하한보다 이르게 보내지 않고 위쪽으로만 0~20% 퍼뜨린다(U는 0~0.2의 고른 무작위 값, guidelines §5, 추천 적용 2026-10-28, 기술 검토 중간-038). 하한으로 자르기만 하면 503을 같은 1초에 받은 사람들이 정확히 같은 때 다시 온다. 예외로 `NOT_YET`의 `retryAfterMs`는 사람마다 계산한 예상 도래 시각이라 지터 없이 그 시각에 보낸다(§5.1). 하한이 없으면 전체 지터(0부터 지금 상한 사이의 고른 무작위 값)를 쓰고, 시작 0.5초·상한 8초 [가정]로 한다. 한 페이지의 자동 재시도는 분당 60회를 넘지 않는다(guidelines §5의 재시도 예산) |
@@ -661,12 +661,12 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 6 | 입장 확정 `POST https://queue…/v1/queues/{eventId}/admission` | `text/plain` JSON 문자열 `{queueTicket}` 또는 `{lobbyToken}` | `ADMITTED`·`SOON`·`NOT_YET`·`VERIFYING` / 409 / 410 |
 | 7 | 대기 취소 `DELETE …/entries/me`, 로비 취소 `DELETE …/lobby-participants/me` | 쿠키 | 204 → 저장소를 지운다 |
 
-**셔플·묶음 결과 파일 초안**(정본에는 해시 함수·앞자리 길이·키 표기가 비어 있다. 아래는 서버와 맞출 초안이다 [가정, wbs 0.2.3·2.4.x])
+**셔플·묶음 결과 파일**(2026-11-05 BAS-042에서 openapi `QueueResultFile`로 계약에 올렸다. 형식은 정본 docs/features/queue-admission.md §3 '결과 게시'와 그 구현을 따른다. 처음 적은 초안의 10비트 파일 번호·22자 키·`seqs` 감싸기는 정본·구현과 달라 버렸다(BAS-042 새 맥락 리뷰))
 
-- `h = SHA-256(UTF-8(참가 토큰))`(묶음 결과 파일에서는 사전 검증 토큰을 쓴다).
-- 파일 번호 `p = (h[0] << 2) | (h[1] >> 6)`(10비트, 0~1023). `hashPrefix`는 세 자리 소문자 16진수다(`000`~`3ff`). 파일은 1,024개다. 100만 명이면 파일마다 약 1,000건이다(정본의 '약 1,000개'와 같다).
-- 키 = `base64url(h[0..16])`(채움 문자 없이 22자). 지연 = `u32be(h[2..6]) mod (shuffleSpreadSec × 1000)` 밀리초(정본의 '해시의 다음 4바이트').
-- 본문 `{"v":1,"eventId":"…","seqs":{"<키>":<순번>,…}}`. 키 22자와 순번 7자리면 한 항목이 약 34바이트, 파일은 약 33KB다. 그래서 정본의 '각 약 36KB'와 맞는다(외삽).
+- `h = SHA-256(UTF-8(참가 토큰))`의 소문자 16진 64자(묶음 결과 파일에서는 사전 검증 토큰을 쓴다).
+- 파일 이름의 `hashPrefix`는 `h`의 앞 세 자리다(`000`~`fff`, 파일 4,096개 [가정]). 100만 명이면 파일마다 약 250건이다.
+- 본문은 `{"<h 64자>": <순번>, …}` 평평한 표다. 내 `h`를 키로 찾는다.
+- 받는 시각은 결과 공개 시각 뒤 응답의 분산 창(`shuffleSpreadSec`·`spreadSec`) 안에서 `h`로 정한 지연만큼 늦춘다. 지연 = `u32be(h의 바이트 2..6) mod (분산 창 × 1000)` 밀리초 [가정]
 
 #### 4.2.2 좌석·홀드
 
@@ -678,7 +678,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 4 | 구역 스냅샷 `GET …/seatmap-snapshot?section={구역 색인}` | 위와 같다 | 버전 갭(중간 판을 놓친 경우), 재연결, 전체 보기 구역의 5초 [가정] 갱신 |
 | 5 | 홀드 `POST https://api…/v1/events/{eventId}/holds` | `HoldRequest`(직접 선택은 `seatIds`를 정렬해 보내고, 자동 배정은 `auto` + `clientEphemeralPublicKey`), 멱등키, 구매 세션 헤더 | 201 / 409(`seat-already-held`면 `suggestedSeats`, `seat-recently-released`면 `recentlyReleasedSeats`·`reholdAvailableAt`) / 422 / 423 / 410 / 401 |
 | 6 | 연장 `POST …/holds/{holdId}/extension`, 해제 `DELETE …/holds/{holdId}` | 구매 세션 헤더 | 두 번째 연장은 409. 해제가 204로 끝나거나 홀드가 만료되면 그 좌석 ID와 시각을 좌석 Worker 상태에 30초 [가정] 동안 둔다. 그동안 그 좌석은 이 화면에서만 '방금 놓은 좌석'으로 흐리게 그리고 홀드 요청을 보내지 않는다. 30초는 서버 설정과 같은 상수이고, 다르면 409의 `reholdAvailableAt`으로 맞춘다(소유자 결정 2026-10-30, open-items 67번, 화면 동작은 추천 적용 2026-10-30, docs/design/d5 §5.10) |
-| 7 | 구매 세션 나가기 | 계약에 없다(docs/design/d5 §1.6 19번) | 지금은 홀드를 해제한 뒤 대기실로 가고, 무활동 5분이 지나면 서버가 세션을 닫는다. 경로는 wbs 0.2.3에서 정한다 |
+| 7 | 구매 세션 나가기 | `DELETE https://api…/v1/events/{eventId}/purchase-session`(구매 세션 서명) | 세션을 LEFT로 끝내고 홀드를 놓는다(PRF-138). 새로고침·좌석 ↔ 결제 화면을 오갈 때 홀드는 `GET /v1/holds/{holdId}`로 다시 읽는다(좌석 이름·등급·가격, 2026-11-05 BAS-042) |
 
 #### 4.2.3 주문·결제·결과
 
@@ -1709,20 +1709,20 @@ ADR-0111의 결정은 서버가 그린 화면의 SEED 스타일 속성과 CSP를
 | 16 | SSE `event`·`id`·`retry`·전체 상태 여부 | asyncapi, openapi | 초안 §4.4.3, asyncapi 설명 고침 |
 | 17 | Socket.IO 이벤트 이름·방향·인증, 그리고 본문이 기본값 `application/avro`로 잡힌다 | asyncapi | 고침: 이벤트와 `application/json`(결정 12). 2026-10-28 ADR-0100으로 채널을 `sse.ops-live`·`sse.ops-event-live`(본문 JSON)로 바꿨다 |
 | 18 | graphql-ws 구독 주소·하위 프로토콜이 asyncapi에 없다 | openapi `/graphql` | 2026-10-28 ADR-0100으로 GraphQL을 빼서 닫혔다. 관제 흐름 둘과 위젯 조회는 openapi·asyncapi에 적었다 |
-| 19 | 셔플·묶음 파일의 해시 함수·앞자리·키 표기·지연 계산 | openapi, queue-admission §2 | 초안 §4.2.1, wbs 0.2.3 |
+| 19 | 셔플·묶음 파일의 해시 함수·앞자리·키 표기·지연 계산 | openapi, queue-admission §2 | 고침(2026-11-05, BAS-042): openapi `QueueResultFile`(정본 queue-admission §3과 구현의 형식, §4.2.1) |
 | 20 | 교차 출처에서 `Date`가 읽히지 않아 시계 보정 근거가 없다 | guidelines §9, Fetch 표준 | 고침: `Access-Control-Expose-Headers`에 `Date`(결정 3). 2026-10-28 다시 고침: CDN이 캐시한 응답의 `Date`는 원본 시각 그대로라 쓰지 않는다. 대기실은 대기열 API 응답 본문의 `serverTimeMs`를 쓰고, `queue-files`는 `Date`를 노출하지 않는다(§3.3, ADR-0110) |
 | 21 | `deviceId` 만드는 법·보관 위치, 토큰 보관 위치 | openapi, queue-admission §2·§3 | 결정 5, §3.12 |
-| 22 | 사전 검증 토큰 만료 시각, 입장 토큰 최대 체류 시각이 응답에 없다 | openapi | wbs 0.2.3. 그때까지 사전 검증 만료는 발급 시각 + 15분으로 보고, 남은 구매 시간은 입장 토큰 `exp`를 표시용으로만 읽는다 |
+| 22 | 사전 검증 토큰 만료 시각, 입장 토큰 최대 체류 시각이 응답에 없다 | openapi | 고침(2026-11-05, BAS-042): 사전 검증은 `PreverifyResult.expiresAt`, 입장 토큰 최대 체류는 `AdmissionResult.purchaseSessionExpiresAt`. 토큰 본문을 읽지 않는다 |
 | 23 | 구매 경로 401이 쿠키 만료·입장 토큰 만료·서명 불일치를 가르지 않는다 | openapi | 고침(2026-11-05, BAS-040): `purchase-session-ended`·`admission-token-invalid`·`purchase-signature-invalid`·`purchase-seq-reused`(§4.1 401) |
-| 24 | '구매 어려움' 재료·입장 일시정지·좌석맵 파일 경로가 대기 상태 파일에 없다 | queue-admission §4, docs/design/d5 §1.6 20번 | wbs 0.2.3 |
+| 24 | '구매 어려움' 재료·입장 일시정지·좌석맵 파일 경로가 대기 상태 파일에 없다 | queue-admission §4, docs/design/d5 §1.6 20번 | 고침(2026-11-05, BAS-042): `QueueState`에 `remainingSeats`·`avgTicketsPerOrder`·`admissionPaused`·`seatmapLayoutPath`를 더했다(queue-svc가 채우는 일은 HOT-010) |
 | 25 | 결제창 방식(팝업·주문서형·이동)이 정해지지 않았다 | payment §2 | 결정 7 |
 | 26 | 결제 결과 롱 폴링의 다시 묻기·상한 | openapi, payment §2 | 결정 8 |
 | 27 | payment.md에 423이 없고 순서도에 구매 세션 서명 표시가 없다 | payment §2, seat-hold §3 | 고침 |
 | 28 | 결제 복귀가 '브라우저 저장소를 쓰지 않는다'고 적혔다(결정 6과 부딪친다) | asvs/payment 14.3.1 | 고침: 구매 세션 키·입장 토큰만 두고 세션이 끝나면 지운다. 복귀 주소에 `order` 쿼리를 붙인다 |
-| 29 | 구매 세션 나가기(LEFT)와 홀드 다시 읽기 경로가 없다 | docs/design/d5 §1.6 19·26번 | wbs 0.2.3 |
-| 30 | 굿즈 결제 경로가 입장 토큰·구매 세션 서명을 요구하는 경로뿐이다 | openapi(굿즈 주문·결제) | wbs 0.2.3 |
-| 31 | 인기 MD 대기열이 어떤 대기열 식별자를 쓰는지 | openapi 굿즈 주문 | wbs 0.2.3 |
-| 32 | 화면이 쓰는데 openapi에 없는 경로가 20개 항목이다(대부분 읽기). docs/design/d5 §1.6에는 공연 상세(21번), 주문 내역(2번), 계정 설정·소명·배상 조회(18번), 티켓 표시 값(25번), 지연 환급 계좌(4번), 내 현장 배정(5번), 파트너 공연 목록·등록 임시저장·상품·웹훅·정산 리포트·회차 취소 요청 상태(16번), 관리 계정·파트너사·팬 조회·봇 표본·공지(8~12번)가 있다. 그 표에 없는 것은 웹 푸시 구독 정보 등록, 월렛의 티켓 상세·부가 상품 목록(SCR-013), 굿즈 상품 상세와 상품 목록 응답 형식(SCR-015), 받은 양도 요청 목록(SCR-041), 관제 명령 목록·상세(SCR-030), 법정 조치 목록·상세(SCR-032), 승인 업무·회차 취소 요청·판매 승인 대기·지급 묶음 목록(SCR-046~049)이다. 관제 목록을 REST로 둘지 GraphQL로 읽을지도 정해지지 않았다 | docs/planning/04 화면 표, openapi, docs/design/d5 §1.6 | wbs 0.2.3. 2026-10-30 일부 해소: 웹 푸시 구독 정보 등록·해제(`POST /v1/push-subscriptions`, `DELETE /v1/push-subscriptions/{subscriptionKey}`)와 docs/design/d5 §1.6 16번 가운데 웹훅 조회·고치기·비밀 재발급·발송 이력·다시 보내기(`/v1/partner/webhooks*`, `/v1/partner/webhook-deliveries/{deliveryId}/redeliveries`)가 openapi에 들어갔다(docs/features/notify.md §3.4·§9, 호출 순서는 §4.2.4). 같은 날 법정 조치 목록·상세(`GET /v1/ops/compliance/notices`·`…/data-requests`·`…/incidents`와 그 단건, open-items 74번)와 docs/design/d5 §1.6 8번 가운데 관리 계정 관리(`/v1/ops/admin-accounts`와 그 아래, `GET /v1/partner/team-accounts`, open-items 73번)도 들어갔다. 나머지는 그대로 wbs 0.2.3이다 |
+| 29 | 구매 세션 나가기(LEFT)와 홀드 다시 읽기 경로가 없다 | docs/design/d5 §1.6 19·26번 | 고침: 나가기는 `DELETE /v1/events/{eventId}/purchase-session`(PRF-138), 홀드 다시 읽기는 `GET /v1/holds/{holdId}`와 `Hold.seats`·`totalAmount`(2026-11-05, BAS-042) |
+| 30 | 굿즈 결제 경로가 입장 토큰·구매 세션 서명을 요구하는 경로뿐이다 | openapi(굿즈 주문·결제) | BAS-043(굿즈 결제 경로와 인기 MD 대기열 식별자, 굿즈 화면 전에) |
+| 31 | 인기 MD 대기열이 어떤 대기열 식별자를 쓰는지 | openapi 굿즈 주문 | BAS-043 |
+| 32 | 화면이 쓰는데 openapi에 없는 경로가 20개 항목이다(대부분 읽기). docs/design/d5 §1.6에는 공연 상세(21번), 주문 내역(2번), 계정 설정·소명·배상 조회(18번), 티켓 표시 값(25번), 지연 환급 계좌(4번), 내 현장 배정(5번), 파트너 공연 목록·등록 임시저장·상품·웹훅·정산 리포트·회차 취소 요청 상태(16번), 관리 계정·파트너사·팬 조회·봇 표본·공지(8~12번)가 있다. 그 표에 없는 것은 웹 푸시 구독 정보 등록, 월렛의 티켓 상세·부가 상품 목록(SCR-013), 굿즈 상품 상세와 상품 목록 응답 형식(SCR-015), 받은 양도 요청 목록(SCR-041), 관제 명령 목록·상세(SCR-030), 법정 조치 목록·상세(SCR-032), 승인 업무·회차 취소 요청·판매 승인 대기·지급 묶음 목록(SCR-046~049)이다. 관제 목록을 REST로 둘지 GraphQL로 읽을지도 정해지지 않았다 | docs/planning/04 화면 표, openapi, docs/design/d5 §1.6 | wbs 0.2.3. 2026-10-30 일부 해소: 웹 푸시 구독 정보 등록·해제(`POST /v1/push-subscriptions`, `DELETE /v1/push-subscriptions/{subscriptionKey}`)와 docs/design/d5 §1.6 16번 가운데 웹훅 조회·고치기·비밀 재발급·발송 이력·다시 보내기(`/v1/partner/webhooks*`, `/v1/partner/webhook-deliveries/{deliveryId}/redeliveries`)가 openapi에 들어갔다(docs/features/notify.md §3.4·§9, 호출 순서는 §4.2.4). 같은 날 법정 조치 목록·상세(`GET /v1/ops/compliance/notices`·`…/data-requests`·`…/incidents`와 그 단건, open-items 74번)와 docs/design/d5 §1.6 8번 가운데 관리 계정 관리(`/v1/ops/admin-accounts`와 그 아래, `GET /v1/partner/team-accounts`, open-items 73번)도 들어갔다. 나머지는 그대로 wbs 0.2.3이다 2026-11-05: 공연 목록·상세·검색은 HOT-170(공연 데이터와 API)이, 나머지 초안은 BAS-043이 그 화면 단계 전에 더한다 |
 | 33 | `operationId` 0/180, Problem 선언 6/242, 429·503 `Retry-After` 미선언 | openapi, guidelines §2 | Problem 선언(243/244)·`Retry-After`(429·503 19개)·401 `WWW-Authenticate`(16개)는 고쳤다(ADR-0081). Problem을 선언하지 않은 1개는 기기 승인 토큰 엔드포인트 `POST /v1/scanner/token`의 400으로, OAuth(다른 서비스 계정으로 로그인하게 하는 표준) 오류 형식을 쓴다. 이때 작업이 180개에서 181개로, 4xx·5xx 응답이 242개에서 244개로 늘어 어긋남 칸과 전체 수가 다르다. `operationId`는 2026-11-05에 272개 모두 달았다(BAS-040, docs/api/guidelines.md §10 '작업 이름') |
 | 34 | 파트너 콘솔 통신이 tRPC(architecture)와 REST(openapi)로 갈린다 | architecture §6.4, openapi | 결정 11: tRPC BFF가 REST를 부른다. 2026-10-28 ADR-0100으로 tRPC를 빼고 화면이 api-client 훅으로 REST를 직접 부른다 |
 | 35 | 관제 원격 위젯의 빌드·업로드 주체가 불분명하다 | architecture §10, devops §6.6 | 고침(결정 16) |

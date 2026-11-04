@@ -27,6 +27,11 @@ service TicketService {
   // 같은 티켓의 취소·양도·스캔이 겹치면 ticket-svc 행 잠금으로 하나만 성공한다. cancellation_id로 멱등하다.
   rpc CancelTickets(CancelTicketsRequest) returns (CancelTicketsResponse);
 
+  // 부정 예매 운영자 취소의 티켓 단계(부르는 쪽: purchase-svc FraudCancellationService, ADR-0197). 보유자·결제자와 무관하다(docs/planning/03 §2.5 T10·T11).
+  // 표마다 행 잠금 안에서 ① 진행 중 양도 요청을 FRAUD_LOCK으로 철회 ② 이미 환급·무효인 표, 입장 기록이 있는 표, 지금 보유자가 기대 보유자와 다른 표는 건너뜀
+  // ③ 나머지는 키를 바로 폐기하고(스캐너에는 1분 변경분으로 간다) 환급 상태로 둔다. (approval_id, ticket_id)로 멱등하다(docs/features/transfer-refund.md §7.4)
+  rpc OperatorCancelTickets(OperatorCancelTicketsRequest) returns (OperatorCancelTicketsResponse);
+
   // 관람 후기 작성 자격. core-svc review가 쓸 때마다 부른다(논리 DB 사이 조인을 하지 않는다).
   rpc CheckReviewEligibility(CheckReviewEligibilityRequest) returns (CheckReviewEligibilityResponse);
 
@@ -92,6 +97,44 @@ message CancelTicketOutcome {
 
 message CancelTicketsResponse {
   repeated CancelTicketOutcome outcomes = 1;
+}
+
+message OperatorCancelTarget {
+  string ticket_id = 1;
+  // 사건 기록의 보유 계정. 지금 보유자가 다르면 건너뛴다
+  string expected_holder_account_id = 2;
+}
+
+message OperatorCancelTicketsRequest {
+  string approval_id = 1;
+  string fraud_case_id = 2;
+  string event_id = 3;
+  repeated OperatorCancelTarget targets = 4;
+}
+
+enum OperatorCancelResult {
+  OPERATOR_CANCEL_RESULT_UNSPECIFIED = 0;
+  // 키를 폐기하고 환급 상태로 두었다
+  OPERATOR_CANCEL_RESULT_CANCELED = 1;
+  // 건너뜀: 이미 환급·무효인 표
+  OPERATOR_CANCEL_RESULT_SKIPPED_ALREADY_ENDED = 2;
+  // 건너뜀: 입장 기록이 있다
+  OPERATOR_CANCEL_RESULT_SKIPPED_ENTRY_RECORDED = 3;
+  // 건너뜀: 지금 보유자가 기대 보유자와 다르다
+  OPERATOR_CANCEL_RESULT_SKIPPED_HOLDER_CHANGED = 4;
+}
+
+message OperatorCancelOutcome {
+  string ticket_id = 1;
+  OperatorCancelResult result = 2;
+  // 그 표의 주문(환급할 결제)
+  string order_id = 3;
+  // 시스템이 철회한 양도 요청(없으면 빈 값)
+  string withdrawn_transfer_offer_id = 4;
+}
+
+message OperatorCancelTicketsResponse {
+  repeated OperatorCancelOutcome outcomes = 1;
 }
 
 message CheckReviewEligibilityRequest {

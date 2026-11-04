@@ -140,6 +140,10 @@ export const GetQueueSegmentStateParams = zod.object({
   "segment": zod.int()
 })
 
+export const getQueueSegmentStateResponseRemainingSeatsMin = 0;
+
+export const getQueueSegmentStateResponseAvgTicketsPerOrderMin = 0;
+
 export const getQueueSegmentStateResponseServingStepsItemMin = 2;
 export const getQueueSegmentStateResponseServingStepsItemMax = 2;
 
@@ -148,6 +152,10 @@ export const getQueueSegmentStateResponsePollHintMsMin = 0;
 
 
 export const GetQueueSegmentStateResponse = zod.object({
+  "admissionPaused": zod.boolean().optional().describe('입장 일시정지(관제 명령 2 ADMISSION_PAUSE)가 걸려 있다. 대기열은 그대로이고 차례 반영만 멈춘다. 안내 문구와 화면 동작(예상 시간 숨기기, 정지 중 앞 인원 갱신)은 docs/design/d5와 docs/features/queue-admission.md §4를 따르고, 이 칸은 그 판단의 재료다(BAS-042)'),
+  "seatmapLayoutPath": zod.string().optional().describe('그 회차 팬 좌석맵 파일의 경로(GET /v1/events/{eventId}/seatmap-layouts/{layoutVersion}.json). 대기 중에 미리 받아 두고, 입장 확정 응답의 seatmapLayoutPath와 다르면 다시 받는다(docs/frontend.md §4.2.2, BAS-042)'),
+  "remainingSeats": zod.int().min(getQueueSegmentStateResponseRemainingSeatsMin).optional().describe('그 회차의 남은(판매 가능) 좌석 수. 파일을 만들 때 좌석 원장에서 받은 값이라 몇 초 늦을 수 있다. 남은 앞 인원 × avgTicketsPerOrder > remainingSeats이면 화면이 \'현재 순번으로는 구매가 어려울 수 있습니다\'를 띄운다(POL-015, queue-admission §4, BAS-042)'),
+  "avgTicketsPerOrder": zod.number().min(getQueueSegmentStateResponseAvgTicketsPerOrderMin).optional().describe('공연 평균 구매 매수(POL-015, queue-admission §4의 \'공연 평균 구매 매수\'). 값을 정하는 법(같은 공연의 지난 판매, 없으면 정한 기본값)은 이 칸을 채우는 단계(HOT-010)가 정한다(BAS-042)'),
   "serving": zod.int().optional(),
   "servingRate": zod.number().optional().describe('차례 진행 속도(번호/초). 다 지난 최근 10칸 [가정](1초 칸, 지금 칸 제외) 동안 지난 유효 번호 수 ÷ 칸 수(창 앞 기록이 있으면 10, 없으면 창 안 첫 기록 칸부터 지난 칸 끝까지), 소수점 셋째 자리(추천 적용 2026-11-03, queue-admission §4)'),
   "saleStatus": zod.enum(['ON_SALE', 'PAUSED', 'ALL_HELD', 'TIER_SOLD_OUT', 'SOLD_OUT', 'ENDED']).optional().describe('회차 판매 상태(docs/planning/03 §2.15, purchase-svc 판정)에 판매 일시정지·판매 중지(PAUSED)와 등급 매진(TIER_SOLD_OUT)을 덧씌운 값이고, ENDED > SOLD_OUT > PAUSED > ALL_HELD > TIER_SOLD_OUT > ON_SALE 순으로 앞의 것을 쓴다. ALL_HELD는 일시 매진(가용 좌석 0이지만 홀드나 결제 중인 판매 예약이 남음)이라 대기는 이어지고 입장만 멈춘다. SOLD_OUT은 가용·홀드·결제 중이 모두 0인 매진이고, 판매 종료 전에 좌석이 돌아오면 ON_SALE로 돌아온다(매진 풀림, 추천 적용 2026-10-28, ADR-0122). ENDED는 그 회차의 판매 종료(공연 시작 24시간 전, event.starts_at − 24시간)가 지남. 차례 전 대기는 끝나고(대기 기록 SALE_END) 대기 화면은 ended로 바뀌며 폴링을 멈춘다(ADR-0063 결정 11, 소유자 결정 2026-10-14, ADR-0064)'),
@@ -162,7 +170,7 @@ export const GetQueueSegmentStateResponse = zod.object({
 }).describe('구간별 대기 상태 파일(CDN 1초 캐시. 입장 임박 구간 파일은 다음 생성 시각까지만 캐시한다(Expires, 낡은 값 허용 없음, ADR-0110). 차례에서 먼 구간의 수명을 늘리는 방식은 Phase 2에서 정함, queue-admission §4). 사용자별 값 없음. 대기 화면 진행 막대의 \'처음 받은 앞 인원\'은 브라우저가 처음 계산한 앞 인원을 세션 저장소에 두고 쓰므로 이 파일에 새 값이 없다(추천 적용 2026-10-14, ADR-0063)')
 
 /**
- * FR-038, POL-005. 약 1,000개 파일, 각 '해시 → 순번' 약 1,000건
+ * FR-038, POL-005. 파일 4,096개 [가정](참가 토큰 해시 16진 앞 세 자리), 각 '해시 → 순번'(100만 명이면 파일마다 약 250건). 본문 형식은 QueueResultFile(BAS-042)
  * @summary 셔플 결과 파일(참가 토큰 해시 앞자리별, 인증 없음, CDN 캐시. 공개 예정 시각 뒤 토큰 해시로 정한 0~8초에 받음, ADR-0058)
  */
 export const GetQueueShuffleResultParams = zod.object({
@@ -170,7 +178,10 @@ export const GetQueueShuffleResultParams = zod.object({
   "hashPrefix": zod.string()
 })
 
-export const GetQueueShuffleResultResponse = zod.unknown()
+
+
+
+export const GetQueueShuffleResultResponse = zod.record(zod.string(), zod.int().min(1)).describe('셔플 결과 파일과 동시 도착 묶음 결과 파일의 본문: 토큰 해시 → 순번의 평평한 표다(docs/features/queue-admission.md §3 \'결과 게시\', ADR-0058, BUILD_ORDER BAS-042). 키는 SHA-256(UTF-8(토큰))의 소문자 16진 64자이고(셔플은 참가 토큰, 묶음은 사전 검증 토큰), 파일 이름의 hashPrefix는 그 앞 세 자리다(파일 4,096개 [가정]). 순번은 1부터다. 받는 시각의 분산은 응답의 spreadSec·shuffleSpreadSec 안에서 토큰 해시로 정한다')
 
 /**
  * FR-006, ADR-0041. 각 '사전 검증 토큰 해시 → 순번'. 받는 규칙은 셔플 결과 파일과 같다
@@ -181,7 +192,10 @@ export const GetQueueBatchResultParams = zod.object({
   "hashPrefix": zod.string()
 })
 
-export const GetQueueBatchResultResponse = zod.unknown()
+
+
+
+export const GetQueueBatchResultResponse = zod.record(zod.string(), zod.int().min(1)).describe('셔플 결과 파일과 동시 도착 묶음 결과 파일의 본문: 토큰 해시 → 순번의 평평한 표다(docs/features/queue-admission.md §3 \'결과 게시\', ADR-0058, BUILD_ORDER BAS-042). 키는 SHA-256(UTF-8(토큰))의 소문자 16진 64자이고(셔플은 참가 토큰, 묶음은 사전 검증 토큰), 파일 이름의 hashPrefix는 그 앞 세 자리다(파일 4,096개 [가정]). 순번은 1부터다. 받는 시각의 분산은 응답의 spreadSec·shuffleSpreadSec 안에서 토큰 해시로 정한다')
 
 /**
  * FR-038, POL-005, SCR-019
@@ -210,6 +224,7 @@ export const CreateQueueAdmissionBody = zod.object({
 }).strict().describe('입장 확정 본문(POST /v1/queues/{eventId}/admission). application/json과 text/plain(JSON 글자, T=0 사전 요청 없음) 두 표현이 같은 이 스키마를 쓴다(BAS-040)')
 
 export const CreateQueueAdmissionResponse = zod.object({
+  "purchaseSessionExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('ADMITTED일 때만: 입장 토큰의 만료 시각(exp, 구매 세션이 끝나는 가장 늦은 때). 화면은 남은 구매 시간 표시에만 쓰고(serverTimeMs로 시계를 맞춘다) 판단은 서버가 한다. 토큰 본문을 화면이 읽지 않게 응답에 싣는다(docs/frontend.md §6.2 22번, BUILD_ORDER BAS-042)'),
   "verificationReason": zod.union([zod.literal('RAPID_REQUESTS'),zod.literal('DEVICE_HISTORY'),zod.literal('NETWORK'),zod.literal('INTERACTION'),zod.literal('HUMAN_CHECK'),zod.literal('SHARED_PATTERN'),zod.literal(null)]).nullish().describe('추가 검증(VERIFYING)일 때 이용자에게 보이는 사유 범주(trust.proto ReasonCategory 이름에서 접두사를 뺀 값). 그 밖에는 null(FR-020, docs/features/bot-defense.md §5, 추천 적용 2026-10-30)'),
   "status": zod.enum(['NOT_YET', 'ADMITTED', 'SOON', 'VERIFYING']).optional().describe('만료와 판매 종료는 410 응답으로 알린다. NOT_YET은 좌석 자동 배정 공연의 차례 직전 직접 확인에서 아직 차례 전(ADR-0043). VERIFYING은 빠진 번호이고 추가 검증 중이라 화면이 SCR-009로 간다(303 대신, ADR-0079 결정 4). SOON은 자리가 없어 곧 입장 대기열에 번호로 넣었다는 뜻이고, 빈자리는 그 대기열의 낮은 번호부터 간다(ADR-0104)'),
   "admissionToken": zod.string().optional().describe('ES256, 첫 사용 기한 5분, 만료는 최대 체류 시각. 머리 typ admission+jwt·kid, 클레임 iss·sub(계정)·aud purchase·jti·sid·event·jny·iat·exp(= iat + 최대 체류 45분). 첫 사용 기한은 따로 싣지 않고 purchase-svc가 iat + 5분으로 본다(추천 적용 2026-11-03, ADR-0183)'),

@@ -40,6 +40,7 @@ import type {
   Problem,
   ProblemResponse,
   QueueEntryRequest,
+  QueueResultFile,
   QueueState,
   QueueTicket,
   ServiceUnavailableResponse,
@@ -735,7 +736,7 @@ export function useGetQueueSegmentState<TData = Awaited<ReturnType<typeof getQue
 
 
 export type getQueueShuffleResultResponse200 = {
-  data: void
+  data: QueueResultFile
   status: 200
 }
 
@@ -761,7 +762,7 @@ export const getGetQueueShuffleResultUrl = (eventId: string,
 }
 
 /**
- * FR-038, POL-005. 약 1,000개 파일, 각 '해시 → 순번' 약 1,000건
+ * FR-038, POL-005. 파일 4,096개 [가정](참가 토큰 해시 16진 앞 세 자리), 각 '해시 → 순번'(100만 명이면 파일마다 약 250건). 본문 형식은 QueueResultFile(BAS-042)
  * @summary 셔플 결과 파일(참가 토큰 해시 앞자리별, 인증 없음, CDN 캐시. 공개 예정 시각 뒤 토큰 해시로 정한 0~8초에 받음, ADR-0058)
  */
 export const getQueueShuffleResult = async (eventId: string,
@@ -861,7 +862,7 @@ export function useGetQueueShuffleResult<TData = Awaited<ReturnType<typeof getQu
 
 
 export type getQueueBatchResultResponse200 = {
-  data: void
+  data: QueueResultFile
   status: 200
 }
 

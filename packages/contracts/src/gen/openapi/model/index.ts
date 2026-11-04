@@ -440,6 +440,7 @@ export * from './putScannerEventDevicePlacementBody.zod.js';
 export * from './putScannerEventDevicePlacementHeaders.zod.js';
 export * from './putScannerShiftReadinessBody.zod.js';
 export * from './queueEntryRequest.zod.js';
+export * from './queueResultFile.zod.js';
 export * from './queueState.zod.js';
 export * from './queueTicket.zod.js';
 export * from './rankingFile.zod.js';

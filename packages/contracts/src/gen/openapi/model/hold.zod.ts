@@ -14,6 +14,14 @@ import * as zod from 'zod';
 
 
 export const Hold = zod.object({
+  "seats": zod.array(zod.object({
+  "seatId": zod.string(),
+  "label": zod.string().describe('구역·열·번호(예 A구역 3열 12)'),
+  "tierId": zod.string(),
+  "tierName": zod.string().optional(),
+  "price": zod.int().describe('원 단위 정가(할인 전)')
+})).optional().describe('홀드한 좌석의 표시 값(좌석 이름·등급·가격). 새로고침과 좌석 ↔ 결제 화면을 오갈 때 다시 그린다(docs/design/d5 §1.6 26번, BAS-042)'),
+  "totalAmount": zod.int().optional().describe('좌석 정가 합(원). 할인·수수료가 붙은 결제 금액은 주문(Order.amount)이 정한다'),
   "holdId": zod.string(),
   "seatIds": zod.array(zod.string()),
   "expiresAt": zod.iso.datetime({"offset":true}),

@@ -11,6 +11,10 @@
  */
 import * as zod from 'zod';
 
+export const queueStateRemainingSeatsMin = 0;
+
+export const queueStateAvgTicketsPerOrderMin = 0;
+
 export const queueStateServingStepsItemMin = 2;
 export const queueStateServingStepsItemMax = 2;
 
@@ -18,6 +22,10 @@ export const queueStatePollHintMsMin = 0;
 
 
 export const QueueState = zod.object({
+  "admissionPaused": zod.boolean().optional().describe('입장 일시정지(관제 명령 2 ADMISSION_PAUSE)가 걸려 있다. 대기열은 그대로이고 차례 반영만 멈춘다. 안내 문구와 화면 동작(예상 시간 숨기기, 정지 중 앞 인원 갱신)은 docs/design/d5와 docs/features/queue-admission.md §4를 따르고, 이 칸은 그 판단의 재료다(BAS-042)'),
+  "seatmapLayoutPath": zod.string().optional().describe('그 회차 팬 좌석맵 파일의 경로(GET /v1/events/{eventId}/seatmap-layouts/{layoutVersion}.json). 대기 중에 미리 받아 두고, 입장 확정 응답의 seatmapLayoutPath와 다르면 다시 받는다(docs/frontend.md §4.2.2, BAS-042)'),
+  "remainingSeats": zod.int().min(queueStateRemainingSeatsMin).optional().describe('그 회차의 남은(판매 가능) 좌석 수. 파일을 만들 때 좌석 원장에서 받은 값이라 몇 초 늦을 수 있다. 남은 앞 인원 × avgTicketsPerOrder > remainingSeats이면 화면이 \'현재 순번으로는 구매가 어려울 수 있습니다\'를 띄운다(POL-015, queue-admission §4, BAS-042)'),
+  "avgTicketsPerOrder": zod.number().min(queueStateAvgTicketsPerOrderMin).optional().describe('공연 평균 구매 매수(POL-015, queue-admission §4의 \'공연 평균 구매 매수\'). 값을 정하는 법(같은 공연의 지난 판매, 없으면 정한 기본값)은 이 칸을 채우는 단계(HOT-010)가 정한다(BAS-042)'),
   "serving": zod.int().optional(),
   "servingRate": zod.number().optional().describe('차례 진행 속도(번호/초). 다 지난 최근 10칸 [가정](1초 칸, 지금 칸 제외) 동안 지난 유효 번호 수 ÷ 칸 수(창 앞 기록이 있으면 10, 없으면 창 안 첫 기록 칸부터 지난 칸 끝까지), 소수점 셋째 자리(추천 적용 2026-11-03, queue-admission §4)'),
   "saleStatus": zod.enum(['ON_SALE', 'PAUSED', 'ALL_HELD', 'TIER_SOLD_OUT', 'SOLD_OUT', 'ENDED']).optional().describe('회차 판매 상태(docs/planning/03 §2.15, purchase-svc 판정)에 판매 일시정지·판매 중지(PAUSED)와 등급 매진(TIER_SOLD_OUT)을 덧씌운 값이고, ENDED > SOLD_OUT > PAUSED > ALL_HELD > TIER_SOLD_OUT > ON_SALE 순으로 앞의 것을 쓴다. ALL_HELD는 일시 매진(가용 좌석 0이지만 홀드나 결제 중인 판매 예약이 남음)이라 대기는 이어지고 입장만 멈춘다. SOLD_OUT은 가용·홀드·결제 중이 모두 0인 매진이고, 판매 종료 전에 좌석이 돌아오면 ON_SALE로 돌아온다(매진 풀림, 추천 적용 2026-10-28, ADR-0122). ENDED는 그 회차의 판매 종료(공연 시작 24시간 전, event.starts_at − 24시간)가 지남. 차례 전 대기는 끝나고(대기 기록 SALE_END) 대기 화면은 ended로 바뀌며 폴링을 멈춘다(ADR-0063 결정 11, 소유자 결정 2026-10-14, ADR-0064)'),
