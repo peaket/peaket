@@ -92,6 +92,19 @@ export class MemoryLoginCounters implements LoginCounters {
     if (this.#leases.get(subject)?.token === token) this.#leases.delete(subject);
   }
 
+  readonly #resends = new Map<string, number[]>();
+  async countResend(emailHash: string, now: number, windowMs: number, limit: number): Promise<{ allowed: boolean; retryAfterMs: number }> {
+    this.#check();
+    const list = (this.#resends.get(emailHash) ?? []).filter((t) => t > now - windowMs);
+    if (list.length >= limit) {
+      this.#resends.set(emailHash, list);
+      return { allowed: false, retryAfterMs: list[0]! + windowMs - now };
+    }
+    list.push(now);
+    this.#resends.set(emailHash, list);
+    return { allowed: true, retryAfterMs: 0 };
+  }
+
   async clearPair(subject: string, pair: string): Promise<void> {
     this.#check();
     this.#pairs.delete(`${subject}|${pair}`);

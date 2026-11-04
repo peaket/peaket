@@ -18,3 +18,6 @@ export { LoginSecondStep } from './application/login-second-step.js';
 export { BeginTotpEnrollment, ConfirmTotpEnrollment } from './application/totp-enrollment.js';
 export { totpSeedCipherFromEnv } from './adapters/kms-totp-seed-cipher.js';
 export { JoseAdminTokenSigner } from './adapters/jose-admin-token-signer.js';
+export { DispatchAdminNotices } from './application/dispatch-admin-notices.js';
+export { RequestUnlockLink, UnlockWithLink } from './application/unlock-account.js';
+export { adminMailerFromEnv } from './adapters/file-admin-mailer.js';

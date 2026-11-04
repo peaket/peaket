@@ -20,6 +20,8 @@ export const loginKeys = {
   /** ghostKey = `{aud}:{이메일 해시}`(대상 g:{ghostKey}와 같은 태그) */
   ghost: (ghostKey: string) => `id:alf:{a:g:${ghostKey}}:state`,
   busy: (subject: string) => `id:alf:{a:${subject}}:busy`,
+  /** 해제 링크 다시 받기 횟수(콘솔·이메일 해시마다, 1시간 창, BOT-121) */
+  resend: (hash: string) => `id:alf:{r:${hash}}:resend`,
   sourceAccounts: (ipHash: string) => `id:alf:{s:${ipHash}}:acct`,
   sourceAlert: (ipHash: string) => `id:alf:{s:${ipHash}}:alert`,
   globalMinute: (minute: number) => `id:alf:{g}:min:${minute}`,
@@ -54,6 +56,21 @@ if ips >= tonumber(ARGV[7]) then
   end
 end
 return { n, lockUntil, raised }
+`);
+
+// 창 안의 횟수가 한도 밑이면 하나 더한다. 넘으면 가장 오래된 것이 창을 벗어날 때까지 남은 ms
+const RESEND = redisScript(`
+local now = tonumber(ARGV[1])
+local win = tonumber(ARGV[2])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', string.format('%.0f', now - win))
+local n = redis.call('ZCARD', KEYS[1])
+if n >= tonumber(ARGV[3]) then
+  local first = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+  return { 0, tonumber(first[2]) + win - now }
+end
+redis.call('ZADD', KEYS[1], string.format('%.0f', now), ARGV[4])
+redis.call('PEXPIRE', KEYS[1], string.format('%.0f', win))
+return { 1, 0 }
 `);
 
 const RELEASE = redisScript(`
@@ -122,6 +139,7 @@ function parseGhost(raw: string): AccountLoginState {
     return {
       failedAttempts: int(o.failedAttempts),
       passwordFailureTotal: int(o.passwordFailureTotal),
+      secondFactorFailures: int(o.secondFactorFailures),
       lockKind: o.lockKind === 'TIMED' || o.lockKind === 'PROTECT' ? o.lockKind : 'NONE',
       lockedUntil: Number.isFinite(o.lockedUntil) ? (o.lockedUntil as number) : null,
       recentLockAt: Array.isArray(o.recentLockAt) ? o.recentLockAt.filter((t): t is number => Number.isFinite(t)) : [],
@@ -196,6 +214,12 @@ export class RedisLoginCounters implements LoginCounters {
 
   async release(subject: string, token: string): Promise<void> {
     await guard(this.redis.evalScript(RELEASE, [loginKeys.busy(subject)], [token]));
+  }
+
+  async countResend(emailHash: string, now: number, windowMs: number, limit: number): Promise<{ allowed: boolean; retryAfterMs: number }> {
+    const r = (await guard(this.redis.evalScript(RESEND, [loginKeys.resend(emailHash)], [f0(now), f0(windowMs), String(limit), randomUUID()]))) as unknown[];
+    const [ok, wait] = r.map(num);
+    return { allowed: ok === 1, retryAfterMs: Math.max(0, wait ?? 0) };
   }
 
   async clearPair(subject: string, pair: string): Promise<void> {

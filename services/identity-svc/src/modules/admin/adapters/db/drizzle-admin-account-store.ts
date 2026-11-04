@@ -3,18 +3,24 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, writeOutbox } from '@peaket/platform';
-import { and, asc, eq, gt, isNull, lt, ne, or } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, lt, lte, ne, notInArray, or } from 'drizzle-orm';
 import type { AccountLoginState, LockKind, LockReason, NoticeKind } from '../../domain/login-rules.js';
-import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminSecondStepStore, AdminStatus, AdminTotpState, LoginStepRow } from '../../domain/ports.js';
-import { adminAccount, adminLoginStep, adminRecoveryCode, adminSecurityNotice, adminSession } from './schema.js';
+import { sql as rawSql } from 'drizzle-orm';
+import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminSecondStepStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
+import { adminAccount, adminLoginStep, adminRecoveryCode, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
 
 type AccountRow = typeof adminAccount.$inferSelect;
+/** 알림을 보내지 못했을 때 다음 시도까지(1분부터 두 배씩, 최대 1시간 [가정]) */
+const retryDelayMs = (attempts: number) => Math.min(60 * 60_000, 60_000 * 2 ** Math.max(0, attempts - 1));
+/** 트랜잭션을 되돌리라는 안쪽 신호(바깥에서 false로 바꾼다) */
+class AbortTx extends Error {}
 const ms = (d: Date | null) => (d ? d.getTime() : null);
 
 function stateOf(r: AccountRow): AccountLoginState {
   return {
     failedAttempts: r.failedAttempts,
     passwordFailureTotal: r.passwordFailureTotal,
+    secondFactorFailures: r.secondFactorFailures,
     lockKind: r.lockKind as LockKind,
     lockedUntil: ms(r.lockedUntil),
     recentLockAt: (r.recentLockAt ?? []).map((t) => Date.parse(t)).filter((t) => Number.isFinite(t)),
@@ -27,6 +33,7 @@ function stateColumns(s: AccountLoginState) {
   return {
     failedAttempts: s.failedAttempts,
     passwordFailureTotal: s.passwordFailureTotal,
+    secondFactorFailures: s.secondFactorFailures,
     lockKind: s.lockKind,
     lockedUntil: s.lockedUntil === null ? null : new Date(s.lockedUntil),
     recentLockAt: s.recentLockAt.map((t) => new Date(t).toISOString()),
@@ -36,7 +43,7 @@ function stateColumns(s: AccountLoginState) {
 }
 
 @Injectable()
-export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore {
+export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore {
   constructor(
     @Inject(DATABASE) private readonly database: Database,
     /** Outbox 행 ID(UUIDv7)의 시계 */
@@ -261,4 +268,112 @@ export class DrizzleAdminAccountStore implements AdminAccountStore, AdminLoginSt
       return { evicted };
     });
   }
+
+  // ── 본인 해제 링크와 알림 발송(BOT-121) ──
+  async createUnlockLink(i: { id: string; accountId: string; tokenHash: Buffer; createdAt: number; expiresAt: number }): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      // 계정 행을 잠가 같은 계정의 링크 만들기를 차례로 한다(살아 있는 링크가 하나만 남게)
+      await tx.select({ id: adminAccount.id }).from(adminAccount).where(eq(adminAccount.id, i.accountId)).for('update');
+      await tx
+        .update(adminUnlockLink)
+        .set({ revokedAt: new Date(i.createdAt) })
+        .where(and(eq(adminUnlockLink.adminAccountId, i.accountId), isNull(adminUnlockLink.usedAt), isNull(adminUnlockLink.revokedAt)));
+      await tx.insert(adminUnlockLink).values({ id: i.id, adminAccountId: i.accountId, tokenHash: i.tokenHash, createdAt: new Date(i.createdAt), expiresAt: new Date(i.expiresAt) });
+    });
+  }
+
+  async findUnlockLink(tokenHash: Buffer): Promise<UnlockLinkRow | null> {
+    const [r] = await this.database.db.select().from(adminUnlockLink).where(eq(adminUnlockLink.tokenHash, tokenHash));
+    return r ? { id: r.id, accountId: r.adminAccountId, codeFailures: r.codeFailures, createdAt: r.createdAt.getTime(), expiresAt: r.expiresAt.getTime(), usedAt: ms(r.usedAt), revokedAt: ms(r.revokedAt) } : null;
+  }
+
+  async failUnlockCode(linkId: string): Promise<number> {
+    const [r] = await this.database.db
+      .update(adminUnlockLink)
+      .set({ codeFailures: rawSql`${adminUnlockLink.codeFailures} + 1` })
+      .where(eq(adminUnlockLink.id, linkId))
+      .returning({ n: adminUnlockLink.codeFailures });
+    return r?.n ?? 0;
+  }
+
+  async useUnlockLink(linkId: string, accountId: string, now: number, fn: (cur: AccountLoginState) => AccountLoginState | null, notice: NoticeKind): Promise<boolean> {
+    return this.database
+      .transaction(async (tx) => {
+      // 계정 행을 먼저 잠근다: 링크 만들기(createUnlockLink)와 같은 순서라 교착하지 않는다(새 맥락 리뷰 2026-11-05)
+      const [r] = await tx
+        .select()
+        .from(adminAccount)
+        .where(and(eq(adminAccount.id, accountId), ne(adminAccount.status, 'REMOVED')))
+        .for('update');
+      if (!r) return false;
+      const used = await tx
+        .update(adminUnlockLink)
+        .set({ usedAt: new Date(now) })
+        .where(and(eq(adminUnlockLink.id, linkId), eq(adminUnlockLink.adminAccountId, accountId), isNull(adminUnlockLink.usedAt), isNull(adminUnlockLink.revokedAt)))
+        .returning({ id: adminUnlockLink.id });
+      if (used.length === 0) return false;
+      const next = fn(stateOf(r));
+      // 확정할 수 없으면(보호 잠금 등) 링크 쓰기까지 되돌린다
+      if (!next) throw new AbortTx();
+      await tx
+        .update(adminAccount)
+        .set({ ...stateColumns(next), updatedAt: new Date(now) })
+        .where(eq(adminAccount.id, accountId));
+      await tx.insert(adminSecurityNotice).values({ id: randomUUID(), adminAccountId: accountId, kind: notice, createdAt: new Date(now) });
+      return true;
+    })
+      .catch((e: unknown) => {
+        if (e instanceof AbortTx) return false;
+        throw e;
+      });
+  }
+
+  async dispatchNotices(limit: number, now: number, handle: (n: PendingNotice) => Promise<'SENT' | 'CLOSE' | 'KEEP'>): Promise<{ done: number; failed: number }> {
+    // 한 행에 트랜잭션 하나: 한 행의 예외가 앞에서 보낸 행의 sent_at을 되돌리지 않는다. 보내지 못한 행은 다음 시도를 미뤄 뒤의 알림을 막지 않는다(새 맥락 리뷰 2026-11-05)
+    let done = 0;
+    let failed = 0;
+    const skip: string[] = [];
+    const due = or(isNull(adminSecurityNotice.nextAttemptAt), lte(adminSecurityNotice.nextAttemptAt, new Date(now)));
+    for (let k = 0; k < limit; k++) {
+      let row: { id: string; attempts: number } | null = null;
+      try {
+        await this.database.transaction(async (tx) => {
+          const [r] = await tx
+            .select({ id: adminSecurityNotice.id, accountId: adminSecurityNotice.adminAccountId, kind: adminSecurityNotice.kind, createdAt: adminSecurityNotice.createdAt, attempts: adminSecurityNotice.attempts })
+            .from(adminSecurityNotice)
+            .where(and(isNull(adminSecurityNotice.sentAt), due, skip.length > 0 ? notInArray(adminSecurityNotice.id, skip) : undefined))
+            .orderBy(asc(adminSecurityNotice.createdAt))
+            .limit(1)
+            .for('update', { skipLocked: true });
+          if (!r) return;
+          row = { id: r.id, attempts: r.attempts };
+          skip.push(r.id);
+          const result = await handle({ id: r.id, accountId: r.accountId, kind: r.kind as NoticeKind, createdAt: r.createdAt.getTime() });
+          if (result === 'KEEP') {
+            failed++;
+            await tx
+              .update(adminSecurityNotice)
+              .set({ attempts: r.attempts + 1, nextAttemptAt: new Date(now + retryDelayMs(r.attempts + 1)) })
+              .where(eq(adminSecurityNotice.id, r.id));
+            return;
+          }
+          await tx.update(adminSecurityNotice).set({ sentAt: new Date(now) }).where(eq(adminSecurityNotice.id, r.id));
+          done++;
+        });
+      } catch {
+        // 그 행만 되돌렸다: 다음 시도를 따로 미룬다(같은 행이 앞을 막지 않게)
+        if (!row) break;
+        failed++;
+        const failedRow: { id: string; attempts: number } = row;
+        await this.database.db
+          .update(adminSecurityNotice)
+          .set({ attempts: failedRow.attempts + 1, nextAttemptAt: new Date(now + retryDelayMs(failedRow.attempts + 1)) })
+          .where(eq(adminSecurityNotice.id, failedRow.id))
+          .catch(() => undefined);
+      }
+      if (!row) break;
+    }
+    return { done, failed };
+  }
+
 }

@@ -1,16 +1,17 @@
 // 관리 계정 저장소의 메모리 구현(시험·로컬, BUILD_ORDER BOT-110·BOT-111). 계정을 만드는 길(초대)은 BOT-150이라 시험은 create로 바로 만든다.
 import { FRESH_LOGIN_STATE, type AccountLoginState, type NoticeKind } from '../domain/login-rules.js';
 import { randomUUID } from 'node:crypto';
-import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminSecondStepStore, AdminStatus, AdminTotpState, LoginStepRow } from '../domain/ports.js';
+import type { AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminRole, AdminSecondStepStore, AdminStatus, AdminTotpState, AdminUnlockStore, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
 
 type Row = AdminAccountRow &
   AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null };
 type SessionRow = { id: string; accountId: string; aud: AdminAud; refreshHash: string; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; terminatedAt: number | null; terminationReason: string | null };
 type Step = { id: string; accountId: string; tokenHash: string; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; usedAt: number | null };
 
-export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore {
+export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore {
   readonly #rows = new Map<string, Row>();
-  readonly #notices: { accountId: string; kind: NoticeKind; at: number }[] = [];
+  readonly #notices: { id: string; accountId: string; kind: NoticeKind; at: number; sentAt: number | null; attempts?: number; nextAttemptAt?: number }[] = [];
+  readonly #links: (UnlockLinkRow & { tokenHash: string })[] = [];
   readonly #steps: Step[] = [];
   readonly #recovery: { id: string; accountId: string; phc: string }[] = [];
   readonly #sessions: SessionRow[] = [];
@@ -31,7 +32,6 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       breachCheckedAt: null,
       updatedAt: i.now,
       passwordChangeRequired: false,
-      secondFactorFailures: 0,
       lastLoginAt: null,
       totpSeedEnc: null,
       totpPendingEnc: null,
@@ -63,7 +63,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return this.#notices.filter((n) => n.accountId === id).map((n) => n.kind);
   }
 
-  allNotices(): { accountId: string; kind: NoticeKind; at: number }[] {
+  allNotices(): { id: string; accountId: string; kind: NoticeKind; at: number; sentAt: number | null }[] {
     return this.#notices.map((n) => ({ ...n }));
   }
 
@@ -92,7 +92,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
   }
 
   #loginView(r: Row): AdminLoginAccount {
-    const state: AccountLoginState = { failedAttempts: r.failedAttempts, passwordFailureTotal: r.passwordFailureTotal, lockKind: r.lockKind, lockedUntil: r.lockedUntil, recentLockAt: [...r.recentLockAt], lockReason: r.lockReason, lockedAt: r.lockedAt };
+    const state: AccountLoginState = { failedAttempts: r.failedAttempts, passwordFailureTotal: r.passwordFailureTotal, secondFactorFailures: r.secondFactorFailures, lockKind: r.lockKind, lockedUntil: r.lockedUntil, recentLockAt: [...r.recentLockAt], lockReason: r.lockReason, lockedAt: r.lockedAt };
     return { id: r.id, role: r.role, status: r.status, passwordPhc: r.passwordPhc, breachCheckedAt: r.breachCheckedAt, passwordChangeRequired: r.passwordChangeRequired, state };
   }
 
@@ -103,12 +103,12 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     const d = fn(cur);
     if (!d) return cur;
     Object.assign(r, structuredClone(d.next), { updatedAt: now });
-    for (const kind of d.notices) this.#notices.push({ accountId: id, kind, at: now });
+    for (const kind of d.notices) this.#notices.push({ id: randomUUID(), accountId: id, kind, at: now, sentAt: null });
     return structuredClone(d.next);
   }
 
   async addNotice(id: string, kind: NoticeKind, at: number): Promise<void> {
-    this.#notices.push({ accountId: id, kind, at });
+    this.#notices.push({ id: randomUUID(), accountId: id, kind, at, sentAt: null });
   }
 
   async rehash(id: string, phc: string, now: number): Promise<void> {
@@ -227,8 +227,68 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       this.#terminated.push({ accountId: s.accountId, sessionId: s.id, reason: 'DEVICE_LIMIT' });
       evicted.push(s.id);
     }
-    if (evicted.length > 0) this.#notices.push({ accountId: i.accountId, kind: 'SESSION_LIMIT', at: now });
+    if (evicted.length > 0) this.#notices.push({ id: randomUUID(), accountId: i.accountId, kind: 'SESSION_LIMIT', at: now, sentAt: null });
     this.#sessions.push({ id: i.id, accountId: i.accountId, aud: i.aud, refreshHash: i.refreshHash.toString('hex'), refreshFamily: i.refreshFamily, pairRef: i.pairRef, createdAt: i.createdAt, absoluteExpiresAt: i.absoluteExpiresAt, idleExpiresAt: i.idleExpiresAt, terminatedAt: null, terminationReason: null });
     return { evicted };
+  }
+
+  // ── 본인 해제 링크와 알림 발송(BOT-121) ──
+  /** 시험용: 그 계정의 해제 링크 행(토큰 해시는 16진수) */
+  unlockLinks(id: string): (UnlockLinkRow & { tokenHash: string })[] {
+    return this.#links.filter((l) => l.accountId === id).map((l) => ({ ...l }));
+  }
+
+  async createUnlockLink(i: { id: string; accountId: string; tokenHash: Buffer; createdAt: number; expiresAt: number }): Promise<void> {
+    for (const l of this.#links) if (l.accountId === i.accountId && l.usedAt === null && l.revokedAt === null) l.revokedAt = i.createdAt;
+    this.#links.push({ id: i.id, accountId: i.accountId, tokenHash: i.tokenHash.toString('hex'), codeFailures: 0, createdAt: i.createdAt, expiresAt: i.expiresAt, usedAt: null, revokedAt: null });
+  }
+
+  async findUnlockLink(tokenHash: Buffer): Promise<UnlockLinkRow | null> {
+    const h = tokenHash.toString('hex');
+    const l = this.#links.find((x) => x.tokenHash === h);
+    if (!l) return null;
+    const { tokenHash: _t, ...row } = l;
+    return { ...row };
+  }
+
+  async failUnlockCode(linkId: string): Promise<number> {
+    const l = this.#links.find((x) => x.id === linkId);
+    if (!l) return 0;
+    l.codeFailures += 1;
+    return l.codeFailures;
+  }
+
+  async useUnlockLink(linkId: string, accountId: string, now: number, fn: (cur: AccountLoginState) => AccountLoginState | null, notice: NoticeKind): Promise<boolean> {
+    const l = this.#links.find((x) => x.id === linkId);
+    const r = this.#rows.get(accountId);
+    if (!l || !r || l.accountId !== accountId || l.usedAt !== null || l.revokedAt !== null || r.status === 'REMOVED') return false;
+    const next = fn(this.#loginView(r).state);
+    if (!next) return false;
+    l.usedAt = now;
+    Object.assign(r, structuredClone(next), { updatedAt: now });
+    this.#notices.push({ id: randomUUID(), accountId, kind: notice, at: now, sentAt: null });
+    return true;
+  }
+
+  async dispatchNotices(limit: number, now: number, handle: (n: PendingNotice) => Promise<'SENT' | 'CLOSE' | 'KEEP'>): Promise<{ done: number; failed: number }> {
+    let done = 0;
+    let failed = 0;
+    for (const n of this.#notices.filter((x) => x.sentAt === null && (x.nextAttemptAt === undefined || x.nextAttemptAt <= now)).slice(0, limit)) {
+      let r: 'SENT' | 'CLOSE' | 'KEEP';
+      try {
+        r = await handle({ id: n.id, accountId: n.accountId, kind: n.kind, createdAt: n.at });
+      } catch {
+        r = 'KEEP';
+      }
+      if (r === 'KEEP') {
+        failed++;
+        n.attempts = (n.attempts ?? 0) + 1;
+        n.nextAttemptAt = now + Math.min(60 * 60_000, 60_000 * 2 ** (n.attempts - 1));
+        continue;
+      }
+      n.sentAt = now;
+      done++;
+    }
+    return { done, failed };
   }
 }

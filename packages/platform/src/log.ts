@@ -26,6 +26,9 @@ export const REDACTED_KEYS = [
   'email', 'phone', 'phoneNumber', 'mobile', 'address', 'addressLine1', 'addressLine2', 'ci', 'di',
   // 인증 값
   'password', 'secret', 'token', 'accessToken', 'refreshToken', 'idToken', 'authorization', 'cookie', 'set-cookie',
+  // 관리 계정 로그인·해제의 1회용 값(identity §6, BOT-120·121): 1단계 통과 토큰, 해제 링크 토큰, 새·지금 비밀번호, 사람 확인 토큰.
+  // 인증 앱·복구 코드 칸(code)은 다른 서비스가 오류 코드를 같은 이름으로 남겨 넣지 않는다(요청 본문은 로그에 남기지 않는다)
+  'loginStep', 'unlockToken', 'currentPassword', 'newPassword', 'humanCheckToken',
   // 결제 값(paymentKey는 아래에서 뒤 4자만 남긴다)
   'paymentKey', 'paymentToken', 'cardNumber', 'refundAccount', 'refundAccountNumber', 'bankAccount', 'accountNumber',
   'virtualAccount', 'virtualAccountNumber',

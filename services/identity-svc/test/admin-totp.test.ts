@@ -153,7 +153,7 @@ describe('로그인 2단계(I-T10)', () => {
     expect(t.store.peek(PARTNER)!.failedAttempts).toBe(0);
   });
 
-  test('코드가틀리면계정실패수와묶음실패수에세고비밀번호누계에는세지않으며_5번째면잠긴다', async () => {
+  test('코드가틀리면계정실패수·묶음실패수·2단계실패수에세고비밀번호누계에는세지않으며_5번째면보호잠금이다(BOT-121)', async () => {
     const t = await harness();
     const { seed } = await t.enroll(PARTNER);
     const outs: SecondStepOutcome[] = [];
@@ -163,8 +163,8 @@ describe('로그인 2단계(I-T10)', () => {
       if (i === 2) t.clock.advance(1_000);
     }
     expect(outs[0]).toEqual({ kind: 'CODE_INVALID', remainingAttempts: 4 });
-    expect(outs[4]).toEqual({ kind: 'LOCKED', lock: 'TIMED', retryAfterSeconds: 15 * 60 });
-    expect(t.store.peek(PARTNER)).toMatchObject({ passwordFailureTotal: 0, lockKind: 'TIMED' });
+    expect(outs[4]).toEqual({ kind: 'LOCKED', lock: 'PROTECT' });
+    expect(t.store.peek(PARTNER)).toMatchObject({ passwordFailureTotal: 0, secondFactorFailures: 5, lockKind: 'PROTECT' });
   });
 
   test('같은시간칸의코드는한번만받고_지금칸만받는다(앞칸·뒤칸은받지않는다) [ASVS v5.0.0-6.5.1] [ASVS v5.0.0-6.5.5]', async () => {

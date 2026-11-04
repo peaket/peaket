@@ -6,7 +6,7 @@ import 'reflect-metadata';
 import { createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { KMSClient } from '@aws-sdk/client-kms';
-import { adminAuthConfigFromEnv, adminPepperFromEnv, hibpBreachListFromEnv, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, totpSeedCipherFromEnv, turnstileFromEnv } from './modules/admin/index.js';
+import { adminAuthConfigFromEnv, adminMailerFromEnv, adminPepperFromEnv, DispatchAdminNotices, hibpBreachListFromEnv, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, totpSeedCipherFromEnv, turnstileFromEnv } from './modules/admin/index.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
   AddProvider,
@@ -69,6 +69,9 @@ const adminLists = loadPolicyLists(process.env);
 const adminBreaches = hibpBreachListFromEnv(process.env, adminAuth);
 const adminHumanCheck = turnstileFromEnv(process.env);
 const adminSignals = new PromAdminLoginSignals();
+// 계정 주인 메일(해제 링크 등): 운영 발송 대행은 정본에 없다 [가정]. local·ci는 PEAKET_ADMIN_MAIL_DIR 파일 대역(BOT-121)
+const adminMailer = adminMailerFromEnv(process.env);
+const consoleOrigins = { partner: process.env.PEAKET_PARTNER_CONSOLE_ORIGIN || 'https://partner.peaket.example', ops: process.env.PEAKET_OPS_CONSOLE_ORIGIN || 'https://console.peaket.example' };
 // TOTP 시드 봉투 암호화(KMS 키, 로컬·CI는 키 값). local·ci에서 없으면 2단계가 503이고, 그 밖에서는 시작하지 않는다(identity §6 BOT-120)
 const adminTotpCipher = totpSeedCipherFromEnv(process.env, (endpoint) => new KMSClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}), maxAttempts: 2, requestHandler: { connectionTimeout: 1_000, requestTimeout: 2_000 } }));
 if (adminPepper && !adminTotpCipher && !['local', 'ci'].includes(process.env.PEAKET_ENV ?? 'prod')) throw new Error('TOTP 시드 키 설정(PEAKET_ADMIN_TOTP_KMS_KEY)이 없다');
@@ -100,10 +103,35 @@ if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTI
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
 // 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
 const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile);
-const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { counters: new RedisLoginCounters(cache) } : {}) } } : {}) }) });
+const service = await createService({ name: SERVICE, module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
 adminSignals.register(service.metrics.registry);
 if (!adminPepper) service.logger.warn('관리자 비밀번호 페퍼 설정이 없어 관리 계정 로그인 경로를 싣지 않았다(local·ci만)');
+// 계정 주인 알림 발송 고리: 5초 [가정]마다 보내지 않은 알림을 보낸다(파드가 여럿이어도 행 잠금으로 한 번만, identity §6 BOT-121)
+const ADMIN_NOTICE_INTERVAL_MS = 5_000;
+let stopAdminNotices: () => Promise<void> = async () => {};
+if (adminPepper && adminMailer) {
+  const dispatch = service.app.get(DispatchAdminNotices);
+  let inflight: Promise<unknown> | null = null;
+  const timer = setInterval(() => {
+    if (inflight) return;
+    inflight = dispatch
+      .run()
+      .then((r) => {
+        if (r.failed > 0) service.logger.warn({ failed: r.failed, done: r.done }, '관리 계정 알림 일부를 보내지 못해 미뤘다(다음 시도 때 다시 한다)');
+      })
+      .catch((err: unknown) => service.logger.warn({ err }, '관리 계정 알림을 보내지 못했다(다음 고리에서 다시 한다)'))
+      .finally(() => {
+        inflight = null;
+      });
+  }, ADMIN_NOTICE_INTERVAL_MS);
+  timer.unref();
+  // 종료 때는 새 고리를 멈추고 도는 중인 고리가 끝나기를 기다린 뒤 DB를 닫는다
+  stopAdminNotices = async () => {
+    clearInterval(timer);
+    await inflight;
+  };
+} else if (adminPepper) service.logger.warn('관리 계정 메일 포트가 없어 계정 주인 알림(해제 링크 등)을 보내지 않는다. 알림 행은 쌓인다(identity §6 BOT-121)');
 // 기록이 쓰는 연계정보 키 판을 설정이 모두 갖지 않으면 시작하지 않는다(같은 사람이 계정을 하나 더 만들지 못하게, identity §5 '키 판·만 14세…')
 if (process.env[VERIFICATION_PROVIDER_ENV]) await assertKeyVersions(service.app.get<DrizzleVerificationStore>(VERIFICATION_STORE), verification.hashers);
 for (const w of invRefs.warnings) service.logger.warn(w);
@@ -156,6 +184,7 @@ process.once('SIGTERM', () => {
   // gRPC 포트를 먼저 닫아 새 호출을 받지 않고, 처리 중인 호출이 끝나면 서비스와 연결을 닫는다
   void grpc
     .close()
+    .then(() => stopAdminNotices())
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err }, 'identity-svc 종료 실패'))
     .finally(() => {

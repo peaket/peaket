@@ -84,10 +84,13 @@ export const adminSecurityNotice = pgTable(
     kind: text('kind').notNull(),
     createdAt: at('created_at').notNull(),
     sentAt: at('sent_at'),
+    // 보내지 못한 횟수와 다음에 해 볼 때(앞의 실패 행이 뒤의 알림을 막지 않게, BOT-121)
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: at('next_attempt_at'),
   },
   (t) => [
     index('admin_security_notice_unsent_idx').on(t.createdAt).where(sql`${t.sentAt} is null`),
-    check('admin_security_notice_kind_check', sql`${t.kind} in ('TIMED_LOCK', 'PASSWORD_FAILURE_NOTICE', 'MULTI_SOURCE_ALERT', 'PROTECT_LOCK', 'SESSION_LIMIT')`),
+    check('admin_security_notice_kind_check', sql`${t.kind} in ('TIMED_LOCK', 'PASSWORD_FAILURE_NOTICE', 'MULTI_SOURCE_ALERT', 'PROTECT_LOCK', 'SESSION_LIMIT', 'UNLOCK_LINK', 'UNLOCKED')`),
   ],
 );
 
@@ -128,4 +131,22 @@ export const adminRecoveryCode = pgTable(
     createdAt: at('created_at').notNull(),
   },
   (t) => [index('admin_recovery_code_account_idx').on(t.adminAccountId)],
+);
+
+/** 본인 해제 링크(docs/data.md admin_unlock_link, BOT-121). 토큰은 해시만, 30분·한 번·코드 3번 틀리면 무효 */
+export const adminUnlockLink = pgTable(
+  'admin_unlock_link',
+  {
+    id: uuid('id').primaryKey(),
+    adminAccountId: uuid('admin_account_id')
+      .notNull()
+      .references(() => adminAccount.id, { onDelete: 'cascade' }),
+    tokenHash: bytea('token_hash').notNull(),
+    codeFailures: integer('code_failures').notNull().default(0),
+    createdAt: at('created_at').notNull(),
+    expiresAt: at('expires_at').notNull(),
+    usedAt: at('used_at'),
+    revokedAt: at('revoked_at'),
+  },
+  (t) => [uniqueIndex('admin_unlock_link_token_key').on(t.tokenHash), index('admin_unlock_link_live_idx').on(t.adminAccountId).where(sql`${t.usedAt} is null and ${t.revokedAt} is null`)],
 );

@@ -84,6 +84,7 @@ erDiagram
     admin_account ||--o{ admin_login_step : "1단계를 통과한 로그인(TOTP를 기다림, 추천 적용 2026-11-05)"
     admin_account ||--o{ admin_security_notice : "보낼 보안 알림(추천 적용 2026-11-05)"
     admin_account ||--o{ admin_session : "관리 계정 로그인 세션(추천 적용 2026-11-05)"
+    admin_account ||--o{ admin_unlock_link : "본인 해제 링크(추천 적용 2026-11-05)"
     account ||--o{ booth_reverification : "부스 본인확인 대조"
     account ||--o{ staff_assignment : "회차 역할"
     event ||--o{ staff_assignment : ""
@@ -257,7 +258,7 @@ erDiagram
         timestamptz breach_checked_at "마지막으로 유출 비밀번호 목록과 대조한 시각. 로그인에 성공할 때 30일 [가정]이 지났으면 다시 본다(auth-controls §4.3 8, 추천 적용 2026-10-30)"
         bool password_change_required "비밀번호 바꾸기 필요 표시. 비밀번호만 맞은 로그인이나 유출 목록 적중 때 켠다. 켜져 있으면 다음 세션은 비밀번호 바꾸기와 로그아웃만 한다. 바꾸면 끈다(auth-controls §3.5, 추천 적용 2026-10-30)"
         text lock_kind "NONE|TIMED|PROTECT(없음·시간 잠금·보호 잠금, docs/security/auth-controls.md §3.2, 기술 검토 중간-052)"
-        timestamptz locked_until "TIMED만. 15분, 24시간 안에 다시 잠기면 1시간"
+        timestamptz locked_until "TIMED면 잠금이 풀리는 시각(15분, 풀린 뒤 24시간 안에 다시 잠기면 1시간). 본인 해제 때는 푼 시각을 남긴다(반복 잠금 기준, BOT-121)"
         jsonb recent_lock_at "24시간 안의 잠금 시각 목록. 24시간 안 잠금 횟수를 센다"
         timestamptz locked_at "마지막으로 잠긴 시각(감사·화면 표시용)"
         text lock_reason "FAILED_ATTEMPTS|SECOND_FACTOR_FAILURES|PASSWORD_FAILURE_TOTAL. 잠근 까닭(계정 실패 수 5, 2단계 실패 수 5, 비밀번호 연속 실패 누계 100). 관제 화면의 잠김 상세에만 쓰고 계정 주인에게는 알리지 않는다(추천 적용 2026-10-30)"
@@ -273,6 +274,16 @@ erDiagram
         timestamptz created_at "비밀번호가 맞은 때. 10분 [가정] 안에 2단계를 끝내지 않으면 비밀번호만 맞은 로그인 알림(BOT-121)"
         timestamptz expires_at "만든 때 + 5분 [가정]"
         timestamptz used_at "2단계에서 쓴 때(한 번만)"
+    }
+    admin_unlock_link {
+        uuid id PK
+        uuid admin_account_id FK
+        bytea token_hash "해제 링크 토큰(32바이트 난수)의 SHA-256. 원문은 메일 본문에만 있다"
+        int code_failures "이 링크에서 틀린 인증 앱 코드·복구 코드 수. 3 [가정]이면 무효"
+        timestamptz created_at
+        timestamptz expires_at "만든 때 + 30분 [가정]"
+        timestamptz used_at "본인 해제에 쓴 때(한 번만)"
+        timestamptz revoked_at "새 링크를 만들어 무효가 된 때"
     }
     admin_session {
         uuid id PK "액세스 토큰의 sid"
@@ -290,9 +301,11 @@ erDiagram
     admin_security_notice {
         uuid id PK
         uuid admin_account_id FK
-        text kind "TIMED_LOCK|PASSWORD_FAILURE_NOTICE|MULTI_SOURCE_ALERT|PROTECT_LOCK(docs/security/auth-controls.md §3.4)|SESSION_LIMIT(동시 세션 2개를 넘어 가장 오래 쓰지 않은 세션을 끝냄, POL-019, BOT-120)"
+        text kind "TIMED_LOCK|PASSWORD_FAILURE_NOTICE|MULTI_SOURCE_ALERT|PROTECT_LOCK(docs/security/auth-controls.md §3.4)|SESSION_LIMIT(동시 세션 2개를 넘어 가장 오래 쓰지 않은 세션을 끝냄, POL-019, BOT-120)|UNLOCK_LINK(해제 링크 다시 받기)|UNLOCKED(본인 해제, BOT-121)"
         timestamptz created_at "사건 시각. 셈과 같은 트랜잭션으로 적는다"
-        timestamptz sent_at "업무 이메일로 보낸 때. 보내는 일은 메일 대행을 정하는 단계가 한다 [가정]"
+        timestamptz sent_at "업무 이메일로 보낸 때(또는 보낼 것이 없어 닫은 때). identity의 발송 고리가 메일 포트로 보낸다(BOT-121, 발송 대행은 [가정])"
+        int attempts "보내지 못한 횟수(BOT-121)"
+        timestamptz next_attempt_at "다음에 해 볼 때(1분부터 두 배씩, 최대 1시간 [가정]). 앞의 실패 행이 뒤의 알림을 막지 않게 한다"
     }
     admin_passkey {
         bytea credential_id PK "WebAuthn 자격 ID"

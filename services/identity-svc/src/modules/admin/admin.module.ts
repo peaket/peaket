@@ -5,7 +5,9 @@ import { MemoryAdminAccountStore } from './adapters/memory-admin-account-store.j
 import { MemoryLoginCounters } from './adapters/memory-login-counters.js';
 import { Pbkdf2AdminPasswords, RECOVERY_CODE_ITERATIONS } from './adapters/pbkdf2-admin-passwords.js';
 import { LoginPasswordStep } from './application/login-password-step.js';
+import { CONSOLE_ORIGINS, type ConsoleOrigins, DispatchAdminNotices } from './application/dispatch-admin-notices.js';
 import { LoginSecondStep } from './application/login-second-step.js';
+import { RequestUnlockLink, UnlockWithLink } from './application/unlock-account.js';
 import { RecordAdminLoginSuccess } from './application/record-login-success.js';
 import { BeginTotpEnrollment, ConfirmTotpEnrollment } from './application/totp-enrollment.js';
 import { ADMIN_AUTH_CONFIG, POLICY_LISTS, SetAdminPassword } from './application/set-admin-password.js';
@@ -16,8 +18,11 @@ import {
   ADMIN_LOGIN_SIGNALS,
   ADMIN_LOGIN_STORE,
   ADMIN_PASSWORDS,
+  ADMIN_MAILER,
   ADMIN_SECOND_STEP_STORE,
   ADMIN_TOKEN_SIGNER,
+  ADMIN_UNLOCK_STORE,
+  type AdminMailer,
   type AdminLoginSignals,
   type AdminTokenSigner,
   RECOVERY_CODE_HASHER,
@@ -34,6 +39,7 @@ import {
 } from './domain/ports.js';
 import { ADMIN_COOKIE_DOMAIN } from './inbound/admin-cookies.js';
 import { AdminLoginController } from './inbound/admin-login.controller.js';
+import { AdminUnlockController } from './inbound/admin-unlock.controller.js';
 
 export interface AdminModuleOptions {
   storage: 'database' | 'memory';
@@ -53,7 +59,17 @@ export interface AdminModuleOptions {
   signer: AdminTokenSigner | null;
   /** 파트너 쿠키의 Domain(운영 peaket.example). 없으면 그 호스트만 */
   cookieDomain?: string;
+  /** 계정 주인 메일. 없으면 발송 고리를 돌리지 않는다(알림 행은 쌓인다, BOT-121) */
+  mailer?: AdminMailer | null;
+  /** 해제 링크의 콘솔 출처 */
+  consoleOrigins?: ConsoleOrigins;
 }
+
+const noMailer: AdminMailer = {
+  send: async () => {
+    throw new Error('관리 계정 메일 포트가 없다');
+  },
+};
 
 const unavailableCipher: TotpSeedCipher = {
   encrypt: async () => {
@@ -75,12 +91,15 @@ export class AdminModule {
     const store = o.storage === 'database' ? { provide: DrizzleAdminAccountStore, useClass: DrizzleAdminAccountStore } : { provide: DrizzleAdminAccountStore, useValue: new MemoryAdminAccountStore() };
     return {
       module: AdminModule,
-      controllers: [AdminLoginController],
+      controllers: [AdminLoginController, AdminUnlockController],
       providers: [
         store,
         { provide: ADMIN_ACCOUNT_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_LOGIN_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_SECOND_STEP_STORE, useExisting: DrizzleAdminAccountStore },
+        { provide: ADMIN_UNLOCK_STORE, useExisting: DrizzleAdminAccountStore },
+        { provide: ADMIN_MAILER, useValue: o.mailer ?? noMailer },
+        { provide: CONSOLE_ORIGINS, useValue: o.consoleOrigins ?? { partner: 'https://partner.peaket.example', ops: 'https://console.peaket.example' } },
         { provide: TOTP_SEED_CIPHER, useValue: o.totpCipher ?? unavailableCipher },
         { provide: ADMIN_TOKEN_SIGNER, useValue: o.signer ?? unavailableSigner },
         { provide: ADMIN_COOKIE_DOMAIN, useValue: o.cookieDomain },
@@ -98,8 +117,11 @@ export class AdminModule {
         LoginSecondStep,
         BeginTotpEnrollment,
         ConfirmTotpEnrollment,
+        UnlockWithLink,
+        RequestUnlockLink,
+        DispatchAdminNotices,
       ],
-      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE],
+      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, UnlockWithLink, RequestUnlockLink, DispatchAdminNotices, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE],
     };
   }
 }

@@ -8,6 +8,8 @@ import { AppModule } from '../src/app.module.js';
 import { JoseAdminTokenSigner } from '../src/modules/admin/adapters/jose-admin-token-signer.js';
 import { LocalPepper } from '../src/modules/admin/adapters/local-pepper.js';
 import { LocalTotpSeedCipher } from '../src/modules/admin/adapters/local-totp-seed-cipher.js';
+import { MemoryAdminMailer } from '../src/modules/admin/adapters/memory-admin-mailer.js';
+import { DispatchAdminNotices } from '../src/modules/admin/application/dispatch-admin-notices.js';
 import type { MemoryAdminAccountStore } from '../src/modules/admin/adapters/memory-admin-account-store.js';
 import { Pbkdf2AdminPasswords } from '../src/modules/admin/adapters/pbkdf2-admin-passwords.js';
 import { TurnstileHumanCheck } from '../src/modules/admin/adapters/turnstile-human-check.js';
@@ -23,6 +25,7 @@ import { fanKey, ISSUER, recordingSignals, testAgency, testDeviceRefs } from './
 const PARTNER = '0190f3a1-7c2e-7a00-8000-0000000002a1';
 const OPS = '0190f3a1-7c2e-7a00-8000-0000000002a2';
 let seeds: Record<string, Buffer> = {};
+const mailer = new MemoryAdminMailer();
 const PW = '봄비내리는월요일아침의커피한잔';
 const clock = fakeClock({ now: Date.parse('2026-11-05T02:00:00Z') });
 const pepper = new LocalPepper(new Map([[1, Buffer.alloc(32, 8)]]), 1);
@@ -49,6 +52,7 @@ beforeAll(async () => {
         totpCipher: new LocalTotpSeedCipher(Buffer.alloc(32, 6)),
         signer: new JoseAdminTokenSigner(keys, ISSUER),
         cookieDomain: 'peaket.example',
+        mailer,
       },
     }),
     env: { PEAKET_ENV: 'ci' },
@@ -219,5 +223,34 @@ describe('로그인 2단계 REST(openapi AdminLoginSecondStep·AdminLoginDone, B
   test('두단계꼴을섞은본문은400이다', async () => {
     expect((await post('/v1/partner/auth/sessions', { email: 'minji.kim@haeoreum.example', password: PW, loginStep: 'A'.repeat(43), code: '123456' })).statusCode).toBe(400);
     expect((await post('/v1/partner/auth/sessions', { loginStep: 'short', code: '123456' })).statusCode).toBe(400);
+  });
+});
+
+describe('본인 해제 REST(openapi /unlocks·/unlock-links, BOT-121)', () => {
+  test('AC-T5_해제링크로풀면204이고_틀린코드는422와남은수·쓴링크는410이며_다시받기는202·넷째는429와Retry-After다', async () => {
+    clock.advance(2 * 60 * 60_000);
+    const ip = '198.51.100.160';
+    for (let i = 0; i < 5; i++) await post('/v1/ops/auth/sessions', { email: 'ops.http@peaket.example', password: `x${i}`, humanCheckToken: 'ok' }, ip);
+    await svc.app.get(DispatchAdminNotices).run();
+    const mail = mailer.sent.filter((m) => m.to === 'ops.http@peaket.example' && m.link).at(-1)!;
+    expect(mail.link).toMatch(/^https:\/\/console\.peaket\.example\/unlock#token=/);
+    const unlockToken = new URL(mail.link!).hash.slice('#token='.length);
+    const code = () => totpAt(seeds[OPS]!, Math.floor(clock.now() / 30_000));
+    const bad = await post('/v1/ops/auth/unlocks', { unlockToken, code: code() === '000000' ? '111111' : '000000' }, ip);
+    expect(bad.statusCode).toBe(422);
+    expect(JSON.parse(bad.payload)).toMatchObject({ type: 'https://peaket.example/problems/unlock-code-invalid', remainingAttempts: 2 });
+    clock.advance(30_000);
+    const ok = await post('/v1/ops/auth/unlocks', { unlockToken, code: code() }, ip);
+    expect(ok.statusCode).toBe(204);
+    expect(ok.headers['cache-control']).toBe('no-store');
+    const again = await post('/v1/ops/auth/unlocks', { unlockToken, code: code() }, ip);
+    expect(again.statusCode).toBe(410);
+    expect(JSON.parse(again.payload)).toMatchObject({ type: 'https://peaket.example/problems/unlock-link-invalid' });
+    for (let i = 0; i < 3; i++) expect((await post('/v1/ops/auth/unlock-links', { email: 'someone@peaket.example' }, ip)).statusCode).toBe(202);
+    const limited = await post('/v1/ops/auth/unlock-links', { email: 'someone@peaket.example' }, ip);
+    expect(limited.statusCode).toBe(429);
+    expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
+    expect(JSON.parse(limited.payload)).toMatchObject({ type: 'https://peaket.example/problems/unlock-link-resend-limit' });
+    expect((await post('/v1/ops/auth/unlocks', { unlockToken: 'short', code: '123456' }, ip)).statusCode).toBe(400);
   });
 });

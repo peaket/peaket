@@ -131,6 +131,8 @@ export interface LoginCounters {
   /** 실패 하나를 센다. 계정이 이번에 시간 잠금이면 accountLockedUntil, 묶음만 잠그게 되면 pairLockMs 길이로 묶음 잠금 */
   recordFailure(i: { subject: string; pair: string; ipHash: string; emailHash: string; now: number; accountLockedUntil: number | null; pairLockMs: number; limits: LoginFailureLimits }): Promise<LoginFailureRecorded>;
   clearPair(subject: string, pair: string): Promise<void>;
+  /** 해제 링크 다시 받기: 이메일 해시마다 창 안의 횟수를 세고(없는 이메일도), 한도 안이면 하나 더한다 */
+  countResend(emailHash: string, now: number, windowMs: number, limit: number): Promise<{ allowed: boolean; retryAfterMs: number }>;
   /** 없는 계정의 가짜 상태. 키는 콘솔마다 따로다(`{aud}:{이메일 해시}`, 새 맥락 리뷰 2026-11-05) */
   ghostState(ghostKey: string, now: number): Promise<AccountLoginState>;
   setGhostState(ghostKey: string, state: AccountLoginState, now: number): Promise<void>;
@@ -228,4 +230,45 @@ export interface AdminSecondStepStore {
     i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number },
     limit: number,
   ): Promise<{ evicted: string[] }>;
+}
+
+// ── 본인 해제 링크와 알림 발송(BUILD_ORDER BOT-121) ──
+export interface UnlockLinkRow {
+  id: string;
+  accountId: string;
+  codeFailures: number;
+  createdAt: number;
+  expiresAt: number;
+  usedAt: number | null;
+  revokedAt: number | null;
+}
+export interface PendingNotice {
+  id: string;
+  accountId: string;
+  kind: NoticeKind;
+  createdAt: number;
+}
+
+export const ADMIN_UNLOCK_STORE = Symbol('identity.AdminUnlockStore');
+export interface AdminUnlockStore {
+  /** 새 링크를 만들고 그 계정의 살아 있는 옛 링크를 무효로 한다 */
+  createUnlockLink(i: { id: string; accountId: string; tokenHash: Buffer; createdAt: number; expiresAt: number }): Promise<void>;
+  findUnlockLink(tokenHash: Buffer): Promise<UnlockLinkRow | null>;
+  /** 링크의 틀린 코드 수를 하나 올리고 새 값을 준다 */
+  failUnlockCode(linkId: string): Promise<number>;
+  /**
+   * 한 트랜잭션: 링크를 쓴 것으로 적고(살아 있을 때만) 계정 상태를 fn으로 바꾸고 알림을 적는다. 링크가 이미 쓰였거나 무효면 false
+   */
+  useUnlockLink(linkId: string, accountId: string, now: number, fn: (cur: AccountLoginState) => AccountLoginState | null, notice: NoticeKind): Promise<boolean>;
+  /**
+   * 보내지 않은 알림을 하나씩 잠가(FOR UPDATE SKIP LOCKED, 한 행에 트랜잭션 하나) handle을 부른다. handle이 SENT·CLOSE면 sent_at을 적고, KEEP이거나 예외면 보내지 않은 채 다음 시도를 미루고(1분·2분·4분… 최대 1시간 [가정]) 다음 행으로 간다. 다음 시도 때가 안 된 행은 고르지 않는다. limit개까지
+   */
+  dispatchNotices(limit: number, now: number, handle: (n: PendingNotice) => Promise<'SENT' | 'CLOSE' | 'KEEP'>): Promise<{ done: number; failed: number }>;
+}
+
+export const ADMIN_MAILER = Symbol('identity.AdminMailer');
+export type AdminMailKind = NoticeKind;
+/** 계정 주인 업무 이메일 보내기. 운영 구현(발송 대행)은 정본에 없다 [가정] */
+export interface AdminMailer {
+  send(m: { to: string; kind: AdminMailKind; link?: string; at: number }): Promise<void>;
 }

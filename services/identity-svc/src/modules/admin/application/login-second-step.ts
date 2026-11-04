@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import type { AdminAuthConfig } from '../domain/auth-config.js';
-import { activeLock, nextTimedLockMs, onSecondFactorFailure } from '../domain/login-rules.js';
+import { activeLock, nextTimedLockMs, onSecondFactorFailure, remainingBeforeLock } from '../domain/login-rules.js';
 import {
   ADMIN_LOGIN_SIGNALS,
   ADMIN_LOGIN_STORE,
@@ -92,7 +92,7 @@ export class LoginSecondStep {
     if (until > now) return this.#locked(i.aud, { kind: 'LOCKED', lock: 'TIMED', retryAfterSeconds: secondsUntil(until, now) });
 
     const check = await this.#checkCode(accountId, i.code, now);
-    if (check === 'UNREADABLE') return { kind: 'CODE_INVALID', remainingAttempts: Math.max(0, this.cfg.lockAfterFailures - account.state.failedAttempts) };
+    if (check === 'UNREADABLE') return { kind: 'CODE_INVALID', remainingAttempts: remainingBeforeLock(account.state, this.cfg, true) };
     if (check === 'BAD') return this.#failed(accountId, emailKeyOf(account.email), pair, ipHash, i.aud, now);
     // 되돌릴 수 없는 일(시간 칸·복구 코드·단계 소비, 셈 0, 세션·종료 사건) 전에 토큰부터 서명한다: 키가 없으면 아무것도 쓰지 않고 503(새 맥락 리뷰 2026-11-05)
     const sessionId = randomUUID();
@@ -189,8 +189,13 @@ export class LoginSecondStep {
     }
     if (rec.newSourceAlert) this.signals.alert('source');
     if (rec.newGlobalAlert) this.signals.alert('global');
+    // 이번에 보호 잠금(2단계 실패 수 5 [가정], BOT-121)이면 그것을 먼저 알린다
+    if (accountLock?.kind === 'PROTECT') {
+      this.signals.alert('protect_lock');
+      return { kind: 'LOCKED', lock: 'PROTECT' };
+    }
     const lockedUntil = Math.max(accountLock?.kind === 'TIMED' ? accountLock.until : 0, rec.pairLockedUntil ?? 0);
     if (lockedUntil > now) return { kind: 'LOCKED', lock: 'TIMED', retryAfterSeconds: secondsUntil(lockedUntil, now) };
-    return { kind: 'CODE_INVALID', remainingAttempts: Math.max(0, Math.min(this.cfg.lockAfterFailures - box.d.next.failedAttempts, this.cfg.pairLockAfterFailures - rec.pairFailures)) };
+    return { kind: 'CODE_INVALID', remainingAttempts: Math.max(0, Math.min(remainingBeforeLock(box.d.next, this.cfg, true), this.cfg.pairLockAfterFailures - rec.pairFailures)) };
   }
 }

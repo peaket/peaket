@@ -32,7 +32,7 @@ export const ProblemResponse = zod.object({
   "state": zod.enum(['CASE_OPEN', 'RESTRICTED']).optional(),
   "until": zod.iso.datetime({"offset":true}).optional()
 }).optional().describe('탈퇴(DELETE /v1/identity/account)의 409 \'탈퇴 전 확인\'에만. 그 계정에 부정 예매 연계정보 대조값 보관 행(docs/data.md restricted_ci_hold)이 살아 있을 때 상태와 끝 시각을 싣고, 화면(SCR-017)이 보관 안내를 보인다. RESTRICTED면 이용 제한 끝, CASE_OPEN이면 그 회차 공연일 + 30일 [가정](docs/features/identity.md §8(추천 적용 2026-10-31, ADR-0173))'),
-  "remainingAttempts": zod.int().min(problemResponseRemainingAttemptsMin).optional().describe('관리 계정 로그인 401 admin-login-failed에만. 잠금까지 남은 실패 수(계정 실패 수와 출발지 묶음 실패 수 가운데 잠금에 가까운 쪽). 없는 이메일도 같은 규칙으로 센 값이다(docs/security/auth-controls.md §2.2, 추천 적용 2026-11-05, BUILD_ORDER BOT-111)'),
+  "remainingAttempts": zod.int().min(problemResponseRemainingAttemptsMin).optional().describe('관리 계정 로그인 401 admin-login-failed·admin-login-code-invalid와 본인 해제 422 unlock-code-invalid(그 링크로 남은 수, BOT-121)에만. 잠금까지 남은 실패 수(계정 실패 수와 출발지 묶음 실패 수 가운데 잠금에 가까운 쪽). 없는 이메일도 같은 규칙으로 센 값이다(docs/security/auth-controls.md §2.2, 추천 적용 2026-11-05, BUILD_ORDER BOT-111)'),
   "humanCheckRequired": zod.boolean().optional().describe('관리 계정 로그인 401 admin-login-failed에만. 다음 시도에 사람 확인 토큰이 필요한지(auth-controls §2.3, 추천 적용 2026-11-05)'),
   "lock": zod.enum(['TIMED', 'PROTECT']).optional().describe('관리 계정 로그인 423 admin-account-locked에만. TIMED는 시간 잠금이나 출발지 묶음 잠금(Retry-After와 retryAfterSeconds를 함께 준다), PROTECT는 보호 잠금(원인은 싣지 않는다, auth-controls §3.2, 추천 적용 2026-11-05)'),
   "retryAfterSeconds": zod.int().min(1).optional().describe('관리 계정 로그인 423(lock TIMED)에만. 잠금이 풀릴 때까지 남은 초(화면의 남은 분 표시, Retry-After와 같은 값, 추천 적용 2026-11-05)')
