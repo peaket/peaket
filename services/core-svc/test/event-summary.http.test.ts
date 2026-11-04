@@ -38,7 +38,7 @@ describe('회차 공개 요약', () => {
     const r = await get(id);
     expect(r.statusCode).toBe(200);
     expect(r.headers['cache-control']).toBe('public, max-age=300, stale-if-error=86400');
-    expect(r.headers['x-peaket-cache-tag']).toBe(`event:${id}`);
+    expect(r.headers['x-peaket-cache-tag']).toBe(`event:${id},production:${repo.events.get(id)?.productionId}`);
     expect(r.headers['set-cookie']).toBeUndefined();
     const body = JSON.parse(r.payload);
     expect(Object.keys(body).sort()).toEqual(['eventId', 'productionId', 'sellerName', 'startsAt', 'title']);
@@ -51,8 +51,16 @@ describe('회차 공개 요약', () => {
     expect((await get(seed('REJECTED', at))).statusCode).toBe(200);
   });
 
-  test('[ASVS v5.0.0-8.1.1] 판매승인전·판매중지·없는회차·모양이틀린ID는_모두같은404이고_캐시하지않는다', async () => {
-    const cases = [seed('DRAFT', null), seed('SUBMITTED', null), seed('SUSPENDED', new Date('2026-11-20T00:00:00Z')), randomUUID(), 'not-a-uuid'];
+  test('[ASVS v5.0.0-8.1.1] 한번공개된뒤판매중지된회차는_410 event-suspended이고_캐시하지않는다', async () => {
+    const r = await get(seed('SUSPENDED', new Date('2026-11-20T00:00:00Z')));
+    expect(r.statusCode).toBe(410);
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(r.payload)).toMatchObject({ type: 'https://peaket.example/problems/event-suspended', status: 410 });
+    expect(r.payload).not.toContain('사유');
+  });
+
+  test('[ASVS v5.0.0-8.1.1] 판매승인전·없는회차·모양이틀린ID는_모두같은404이고_캐시하지않는다', async () => {
+    const cases = [seed('DRAFT', null), seed('SUBMITTED', null), seed('REJECTED', null), randomUUID(), 'not-a-uuid'];
     const bodies = [];
     for (const id of cases) {
       const r = await get(id);
@@ -80,7 +88,7 @@ describe('회차 공개 요약', () => {
     repo.events.set(id.toUpperCase(), repo.events.get(id)!);
     const r = await get(id.toUpperCase());
     expect(r.statusCode).toBe(200);
-    expect(r.headers['x-peaket-cache-tag']).toBe(`event:${id}`);
+    expect(r.headers['x-peaket-cache-tag']).toBe(`event:${id},production:${repo.events.get(id)?.productionId}`);
   });
 
   // 경로 칸이 100자를 넘으면 그 전에 Fastify가 414로 막는다(maxParamLength 기본값, 모든 서비스 같음)

@@ -41,6 +41,7 @@ export type ProblemType =
   | 'duplicate-admission'
   | 'entry-started'
   | 'event-schedule-invalid'
+  | 'event-suspended'
   | 'first-partner-account-must-be-admin'
   | 'fraud-approver-ineligible'
   | 'fraud-case-exists'
@@ -196,6 +197,7 @@ export const PROBLEM_TYPES = {
   'duplicate-admission': { status: 409, title: "이미 다른 기기나 탭에서 입장했습니다" },
   'entry-started': { status: 409, title: "입장이 시작되어 할 수 없습니다" },
   'event-schedule-invalid': { status: 422, title: "회차 일정이 맞지 않습니다" },
+  'event-suspended': { status: 410, title: "판매가 중지된 공연입니다" },
   'first-partner-account-must-be-admin': { status: 422, title: "파트너사의 첫 계정은 관리자여야 합니다" },
   'fraud-approver-ineligible': { status: 403, title: "이 사건을 승인할 수 없는 계정입니다" },
   'fraud-case-exists': { status: 409, title: "이 묶음으로 만든 사건이 이미 있습니다" },

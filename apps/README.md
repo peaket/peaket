@@ -24,7 +24,7 @@
 
 1. 가짜 API: `PEAKET_WEB_ORIGIN=http://localhost:3000 pnpm --filter @peaket/web mock-api`(127.0.0.1:4010).
 2. 소비자 웹: `PEAKET_API_ORIGIN=http://127.0.0.1:4010 NEXT_PUBLIC_API_ORIGIN=http://127.0.0.1:4010 PEAKET_DEV_STATIC_ORIGIN=http://127.0.0.1:4010 PEAKET_CSP_ORIGINS='{"api":"http://127.0.0.1:4010","img":"http://127.0.0.1:4010"}' pnpm --filter @peaket/web dev`.
-3. 화면 상태 바꾸기: `http://127.0.0.1:4010/__mock/state?home=empty|normal&ranking=normal|stale|old|missing&fan=member|guest`. 홈 피드는 서버 캐시(60초) 뒤에 바뀐다.
+3. 화면 상태 바꾸기: `http://127.0.0.1:4010/__mock/state?home=empty|normal&ranking=normal|stale|old|missing&fan=member|guest&detail=normal|suspended`. 홈 피드는 서버 캐시(60초) 뒤에 바뀐다. 공연 상세(`/v1/events/{eventId}`)는 고정 자료 카드의 모든 회차를 답하고, `detail=suspended`면 410 `event-suspended`다(ADR-0200).
 4. 고정 자료(`apps/web/scripts/mock-api/cards.json`)가 계약 Zod를 지나는지는 `pnpm --filter @peaket/web test`가 본다. 계약을 바꾸면 고정 자료도 고친다.
 
 | 환경값 | 뜻 |

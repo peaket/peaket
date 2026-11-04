@@ -546,10 +546,15 @@ export type getEventResponse404 = {
   status: 404
 }
 
+export type getEventResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
 export type getEventResponseSuccess = (getEventResponse200) & {
   headers: Headers;
 };
-export type getEventResponseError = (getEventResponse404) & {
+export type getEventResponseError = (getEventResponse404 | getEventResponse410) & {
   headers: Headers;
 };
 
@@ -562,8 +567,8 @@ export const getGetEventUrl = (eventId: string,) => {
 }
 
 /**
- * FR-003, FR-046, POL-037(소유자 결정 2026-10-30, open-items 78번. 칸과 캐시는 추천 적용 2026-10-30). 전자상거래법 제20조 제2항은 통신판매중개업자가 판매자의 신원정보(법인이면 명칭과 대표자 성명, 주소, 전화번호 등)를 확인해 청약 전에 소비자에게 제공하라고 정한다(2026-10-30 원문 확인). 그래서 판매자 상호는 공개 정보이고, 공연 상세의 판매자 줄에 이미 보인다. 이 경로는 판매 승인되고 판매 중지가 아닌 회차만 답하고, 그 밖의 회차와 없는 회차는 같은 404다(docs/security/authz-matrix.md §3.5). 스캐너 승인 화면(SCR-051)이 내 배정의 공연명·회차 시각과 배정 파트너 이름을 이 응답에서 읽는다. 파트너 이름을 위한 내부 호출은 두지 않는다(DeviceApprovalView). 판매자 신원정보의 나머지 여섯 항목과 공연 상세의 다른 칸(가격 등급, 판매 정책, 고지, 이미지)은 공연 상세 계약과 함께 wbs 0.2.3에서 더한다. 쿠키를 캐시 키에 넣지 않고 Cache-Control: public, max-age=300, stale-if-error=86400 [가정]이다. 판매 승인·판매자 정보 변경 반영·판매 중지·회차 변경 때 공연 상세 ISR과 같은 태그(event:{eventId})로 무효화한다(docs/frontend.md의 /events/[id] 행). 그래서 200은 CDN 태그 머리 x-peaket-cache-tag에 event:{eventId}(소문자 회차 ID)를 싣는다 [가정](docs/infra.md §4.1). 404는 Cache-Control: no-store [가정]이다(판매 승인 직후 캐시된 404가 공개를 늦추지 않게)
- * @summary 회차 공개 요약(공연명·회차 시작·판매자 상호). 인증 없음, CDN 캐시
+ * FR-003, FR-046, POL-037(소유자 결정 2026-10-30, open-items 78번. 칸과 캐시는 추천 적용 2026-10-30). 전자상거래법 제20조 제2항은 통신판매중개업자가 판매자의 신원정보(법인이면 명칭과 대표자 성명, 주소, 전화번호 등)를 확인해 청약 전에 소비자에게 제공하라고 정한다(2026-10-30 원문 확인). 그래서 판매자 상호는 공개 정보이고, 공연 상세의 판매자 줄에 이미 보인다. 이 경로는 판매 승인되고 판매 중지가 아닌 회차만 답한다. 승인 이력이 없는 회차와 없는 회차는 같은 404이고, 한 번 공개된 뒤 판매 중지된 회차는 410 event-suspended다(사유는 싣지 않는다. 상세 화면이 판매 중지 안내를 보인다, docs/planning/03 §2.14, ADR-0123 결정 1, ADR-0200 결정 3, docs/security/authz-matrix.md §3.5). 스캐너 승인 화면(SCR-051)이 내 배정의 공연명·회차 시각과 배정 파트너 이름을 이 응답에서 읽는다. 파트너 이름을 위한 내부 호출은 두지 않는다(DeviceApprovalView). 판매자 신원정보 7항목과 공연 상세의 다른 칸(공연 정보·이미지·회차 목록·등급별 정가·판매 조건 재료)은 같은 응답에 더했다(추천 적용 2026-11-05, ADR-0200). 등급별 판매 상태·후기 요약·개인 값은 싣지 않는다. 쿠키를 캐시 키에 넣지 않고 Cache-Control: public, max-age=300, stale-if-error=86400 [가정]이다. 판매 승인·판매자 정보 변경 반영·판매 중지·회차 변경 때 공연 상세 ISR과 같은 태그로 무효화한다(docs/frontend.md의 /events/[id] 행). 그래서 200은 CDN 태그 머리 x-peaket-cache-tag에 event:{eventId}와 production:{productionId}(소문자 ID, 쉼표로 이음)를 싣는다 [가정](docs/infra.md §4.1). 응답에 같은 공연의 회차 목록·공연 칸·판매자 정보가 있어, 공연 단위 변경은 production 태그로 그 공연의 모든 회차를 지운다(ADR-0200 결정 5). 404는 Cache-Control: no-store [가정]이다(판매 승인 직후 캐시된 404가 공개를 늦추지 않게)
+ * @summary 회차 공개 요약과 공연 상세(ADR-0200). 인증 없음, CDN 캐시
  */
 export const getEvent = async (eventId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getEventResponseSuccess> => {
 
@@ -634,7 +639,7 @@ export function useGetEvent<TData = Awaited<ReturnType<typeof getEvent>>, TError
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary 회차 공개 요약(공연명·회차 시작·판매자 상호). 인증 없음, CDN 캐시
+ * @summary 회차 공개 요약과 공연 상세(ADR-0200). 인증 없음, CDN 캐시
  */
 
 export function useGetEvent<TData = Awaited<ReturnType<typeof getEvent>>, TError = ErrorType<ProblemResponse>>(

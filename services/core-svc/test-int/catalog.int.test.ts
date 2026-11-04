@@ -129,14 +129,14 @@ describe('서비스 전체 경로(DB 저장소)', () => {
     await svc?.close();
   });
 
-  test('판매승인된회차는200이고_판매중지·승인전은404다', async () => {
+  test('판매승인된회차는200이고_판매중지는410·승인전은404다', async () => {
     const open = await seed();
     const r = await svc.http.inject({ method: 'GET', url: `/v1/events/${open.eventId}` });
     expect(r.statusCode).toBe(200);
     expect(JSON.parse(r.payload)).toEqual({ eventId: open.eventId, productionId: open.productionId, title: '겨울 콘서트', startsAt: '2026-12-24T10:00:00.000Z', sellerName: '(주)피켓공연' });
     const suspended = await seed({ saleReview: 'SUSPENDED' });
     const draft = await seed({ saleReview: 'DRAFT', saleApprovedAt: null });
-    expect((await svc.http.inject({ method: 'GET', url: `/v1/events/${suspended.eventId}` })).statusCode).toBe(404);
+    expect((await svc.http.inject({ method: 'GET', url: `/v1/events/${suspended.eventId}` })).statusCode).toBe(410);
     expect((await svc.http.inject({ method: 'GET', url: `/v1/events/${draft.eventId}` })).statusCode).toBe(404);
   });
 });

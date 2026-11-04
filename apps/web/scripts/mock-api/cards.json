@@ -46,7 +46,7 @@
     "nextOpenAt": "2026-11-25T11:00:00Z",
     "nextOpenEventId": "0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e03",
     "saleStatus": "UPCOMING",
-    "saleEndsAt": "2026-12-04T10:00:00Z",
+    "saleEndsAt": "2026-12-05T10:00:00Z",
     "minPrice": 99000,
     "badges": ["FIFO"]
   },
@@ -82,7 +82,7 @@
     "saleStatus": "ON_SALE",
     "saleEndsAt": "2026-11-14T01:00:00Z",
     "minPrice": 132000,
-    "badges": ["HYBRID"]
+    "badges": ["HYBRID", "AUTO_SEAT"]
   },
   "play": {
     "productionId": "0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4d06",

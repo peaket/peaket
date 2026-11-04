@@ -274,6 +274,7 @@ export * from './eventCancellationRequest.zod.js';
 export * from './eventPublicSummary.zod.js';
 export * from './eventReport.zod.js';
 export * from './eventReportSummary.zod.js';
+export * from './eventStatus.zod.js';
 export * from './evidenceBundle.zod.js';
 export * from './evidenceBundleCreate.zod.js';
 export * from './evidenceBundlePage.zod.js';

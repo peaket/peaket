@@ -274,18 +274,80 @@ export const GetSearchSuggestionsResponse = zod.object({
 }).describe('자동완성 창의 응답(소유자 결정 2026-10-14, ADR-0063. 이름 \'자동완성\'은 소유자 결정 2026-10-27, ADR-0094). 최대 8개 [가정]이고 종류별 몫은 공연 5·아티스트 2·공연장 1 [가정], 빈 몫은 다른 종류로 채운다(docs/features/search.md §4)')
 
 /**
- * FR-003, FR-046, POL-037(소유자 결정 2026-10-30, open-items 78번. 칸과 캐시는 추천 적용 2026-10-30). 전자상거래법 제20조 제2항은 통신판매중개업자가 판매자의 신원정보(법인이면 명칭과 대표자 성명, 주소, 전화번호 등)를 확인해 청약 전에 소비자에게 제공하라고 정한다(2026-10-30 원문 확인). 그래서 판매자 상호는 공개 정보이고, 공연 상세의 판매자 줄에 이미 보인다. 이 경로는 판매 승인되고 판매 중지가 아닌 회차만 답하고, 그 밖의 회차와 없는 회차는 같은 404다(docs/security/authz-matrix.md §3.5). 스캐너 승인 화면(SCR-051)이 내 배정의 공연명·회차 시각과 배정 파트너 이름을 이 응답에서 읽는다. 파트너 이름을 위한 내부 호출은 두지 않는다(DeviceApprovalView). 판매자 신원정보의 나머지 여섯 항목과 공연 상세의 다른 칸(가격 등급, 판매 정책, 고지, 이미지)은 공연 상세 계약과 함께 wbs 0.2.3에서 더한다. 쿠키를 캐시 키에 넣지 않고 Cache-Control: public, max-age=300, stale-if-error=86400 [가정]이다. 판매 승인·판매자 정보 변경 반영·판매 중지·회차 변경 때 공연 상세 ISR과 같은 태그(event:{eventId})로 무효화한다(docs/frontend.md의 /events/[id] 행). 그래서 200은 CDN 태그 머리 x-peaket-cache-tag에 event:{eventId}(소문자 회차 ID)를 싣는다 [가정](docs/infra.md §4.1). 404는 Cache-Control: no-store [가정]이다(판매 승인 직후 캐시된 404가 공개를 늦추지 않게)
- * @summary 회차 공개 요약(공연명·회차 시작·판매자 상호). 인증 없음, CDN 캐시
+ * FR-003, FR-046, POL-037(소유자 결정 2026-10-30, open-items 78번. 칸과 캐시는 추천 적용 2026-10-30). 전자상거래법 제20조 제2항은 통신판매중개업자가 판매자의 신원정보(법인이면 명칭과 대표자 성명, 주소, 전화번호 등)를 확인해 청약 전에 소비자에게 제공하라고 정한다(2026-10-30 원문 확인). 그래서 판매자 상호는 공개 정보이고, 공연 상세의 판매자 줄에 이미 보인다. 이 경로는 판매 승인되고 판매 중지가 아닌 회차만 답한다. 승인 이력이 없는 회차와 없는 회차는 같은 404이고, 한 번 공개된 뒤 판매 중지된 회차는 410 event-suspended다(사유는 싣지 않는다. 상세 화면이 판매 중지 안내를 보인다, docs/planning/03 §2.14, ADR-0123 결정 1, ADR-0200 결정 3, docs/security/authz-matrix.md §3.5). 스캐너 승인 화면(SCR-051)이 내 배정의 공연명·회차 시각과 배정 파트너 이름을 이 응답에서 읽는다. 파트너 이름을 위한 내부 호출은 두지 않는다(DeviceApprovalView). 판매자 신원정보 7항목과 공연 상세의 다른 칸(공연 정보·이미지·회차 목록·등급별 정가·판매 조건 재료)은 같은 응답에 더했다(추천 적용 2026-11-05, ADR-0200). 등급별 판매 상태·후기 요약·개인 값은 싣지 않는다. 쿠키를 캐시 키에 넣지 않고 Cache-Control: public, max-age=300, stale-if-error=86400 [가정]이다. 판매 승인·판매자 정보 변경 반영·판매 중지·회차 변경 때 공연 상세 ISR과 같은 태그로 무효화한다(docs/frontend.md의 /events/[id] 행). 그래서 200은 CDN 태그 머리 x-peaket-cache-tag에 event:{eventId}와 production:{productionId}(소문자 ID, 쉼표로 이음)를 싣는다 [가정](docs/infra.md §4.1). 응답에 같은 공연의 회차 목록·공연 칸·판매자 정보가 있어, 공연 단위 변경은 production 태그로 그 공연의 모든 회차를 지운다(ADR-0200 결정 5). 404는 Cache-Control: no-store [가정]이다(판매 승인 직후 캐시된 404가 공개를 늦추지 않게)
+ * @summary 회차 공개 요약과 공연 상세(ADR-0200). 인증 없음, CDN 캐시
  */
 export const GetEventParams = zod.object({
   "eventId": zod.string()
 })
+
+export const getEventResponseDescriptionTextMax = 20000;
+
+export const getEventResponseDetailImagesMax = 10;
+
+export const getEventResponseArtistsMax = 20;
+
+export const getEventResponseRoundsMax = 60;
+
+export const getEventResponsePriceTiersMax = 20;
+
+
 
 export const GetEventResponse = zod.object({
   "eventId": zod.string().optional(),
   "productionId": zod.string().optional(),
   "title": zod.string().optional().describe('공연명'),
   "startsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
-  "sellerName": zod.string().optional().describe('판매자 상호(판매자 신원정보 SellerInfo.legalName과 같은 값, 전자상거래법 제20조 제2항, POL-037). 공연 상세의 판매자 줄에 보이는 값이다')
-}).describe('회차 공개 요약(GET /v1/events/{eventId}, 소유자 결정 2026-10-30, open-items 78번. 칸은 추천 적용 2026-10-30). 공연 상세의 나머지 칸은 공연 상세 계약과 함께 더한다')
+  "sellerName": zod.string().optional().describe('판매자 상호(판매자 신원정보 SellerInfo.legalName과 같은 값, 전자상거래법 제20조 제2항, POL-037). 공연 상세의 판매자 줄에 보이는 값이다'),
+  "genre": zod.enum(['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타']).optional().describe('장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)'),
+  "ageRating": zod.string().optional().describe('관람 연령(예: 만 7세 이상)'),
+  "runningMinutes": zod.int().optional().describe('러닝타임(분)'),
+  "posterUrl": zod.url().optional().describe('포스터 파생본 묶음의 기준 주소(ProductionCard.posterUrl과 같은 규칙, ADR-0199 결정 4)'),
+  "posterAlt": zod.string().optional(),
+  "descriptionText": zod.string().max(getEventResponseDescriptionTextMax).optional().describe('공연 설명 글의 글자판(줄바꿈만, 20,000자 [가정]). 서식 있는 구조 문서(허용 노드 다섯, asvs/catalog-review 1.3.1)는 HOT-180이 칸 description으로 더한다. 화면은 이 칸을 글자로만 그린다(ADR-0200 결정 1)'),
+  "detailImages": zod.array(zod.object({
+  "url": zod.url().describe('파생본 묶음의 기준 주소'),
+  "alt": zod.string()
+})).max(getEventResponseDetailImagesMax).optional().describe('상세 이미지 0~10장(ADR-0062 결정 38). 이미지에만 있는 정보는 설명 글에도 있다'),
+  "artists": zod.array(zod.object({
+  "artistId": zod.string().optional(),
+  "name": zod.string().optional()
+})).max(getEventResponseArtistsMax).optional(),
+  "placeId": zod.string().optional(),
+  "placeName": zod.string().optional(),
+  "placeAddress": zod.string().optional().describe('도로명 주소(장소 섹션의 [주소 복사])'),
+  "openAt": zod.iso.datetime({"offset":true}).optional().describe('티켓 오픈(T=0)'),
+  "lobbyOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('로비 개방(오픈 − 로비 분). 로비 셔플을 끈 회차(FIFO)는 null'),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시작'),
+  "endsAt": zod.iso.datetime({"offset":true}).optional().describe('공연 종료 예정'),
+  "saleEndsAt": zod.iso.datetime({"offset":true}).optional().describe('판매 종료(공연 시작 − 24시간, ADR-0064)'),
+  "status": zod.enum(['SCHEDULED', 'CANCELLED', 'POSTPONED']).optional().describe('회차 상태(docs/data.md event.status). 판매 상태(판매 전·판매 중·판매 종료)는 이 값이 아니다'),
+  "queueOrder": zod.enum(['HYBRID', 'PREQUEUE_SHUFFLE', 'FIFO']).optional().describe('정렬 방식 이름(회차의 lobbyShuffle·openBatch 두 값에서 계산, ADR-0118). 화면은 POL-004 표준 문구를 고른다'),
+  "seatAssignment": zod.enum(['PICK', 'AUTO']).optional(),
+  "perPersonLimit": zod.int().optional().describe('1인 한도(POL-011)'),
+  "reentryAllowed": zod.boolean().optional().describe('재입장 허용(POL-018)'),
+  "badges": zod.array(zod.enum(['PREQUEUE_SHUFFLE', 'HYBRID', 'FIFO', 'PRESALE', 'AUTO_SEAT'])).optional().describe('판매 정보 배지 코드(ProductionCard.badges와 같다)'),
+  "rounds": zod.array(zod.object({
+  "eventId": zod.string().optional(),
+  "startsAt": zod.iso.datetime({"offset":true}).optional(),
+  "openAt": zod.iso.datetime({"offset":true}).optional(),
+  "saleEndsAt": zod.iso.datetime({"offset":true}).optional(),
+  "status": zod.enum(['SCHEDULED', 'CANCELLED', 'POSTPONED']).optional().describe('회차 상태(docs/data.md event.status). 판매 상태(판매 전·판매 중·판매 종료)는 이 값이 아니다')
+})).max(getEventResponseRoundsMax).optional().describe('같은 공연의 공개 회차(시작 순, 이 회차 포함). 취소된 회차와 판매 종료가 지난 회차는 빼고(이 회차는 늘 넣는다) 60개 [가정]까지다. 승인 뒤 더한 회차(변경분, ADR-0198 결정 3)는 재승인 전까지 없다. 회차 칩(CMP-066)이 회차마다 주소를 바꾸고 오픈 예정·판매 중·판매 종료를 가른다(ADR-0093)'),
+  "priceTiers": zod.array(zod.object({
+  "tierId": zod.string().optional().describe('등급 ID(좌석맵 판의 tierId, 대기 상태 파일 soldOutTiers와 같은 값)'),
+  "name": zod.string().optional().describe('등급 이름(예: R석)'),
+  "price": zod.int().optional().describe('정가(원). 예매 수수료가 없어 소비자가 내는 총금액이다(POL-032)')
+})).max(getEventResponsePriceTiersMax).optional().describe('등급별 정가(보이는 순서). 판매 상태 배지는 싣지 않는다. 실시간 상태는 등급 ID로 맞춰 화면이 얹는다(출처는 HOT-010·HOT-311, ADR-0200 결정 2)'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('판매자 신원정보(전자상거래법 §20②, POL-037)')
+}).describe('회차 공개 요약과 공연 상세(GET /v1/events/{eventId}). 처음 다섯 칸은 소유자 결정 2026-10-30(open-items 78번, 칸은 추천 적용 2026-10-30)이고, 스캐너 승인 화면(SCR-051)은 그 가운데 title·startsAt·sellerName을 읽는다. 나머지는 공연 상세(SCR-002) 정적 셸이 읽는 칸이다(추천 적용 2026-11-05, ADR-0200). 등급별 판매 상태·후기 요약·개인 값은 싣지 않는다(실시간 값은 대기 상태 파일, 후기는 review-summary, 개인 값은 화면 스크립트)')
 

@@ -2,6 +2,7 @@
 import { ProblemError } from '@peaket/platform';
 
 export const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
+export const eventSuspended = () => new ProblemError({ type: 'event-suspended', status: 410, title: '판매가 중지된 공연입니다' });
 export const eventScheduleInvalid = (eventIndex: number) =>
   new ProblemError({ type: 'event-schedule-invalid', status: 422, title: '회차 일정이 맞지 않습니다', extensions: { eventIndex } });
 export const queueOrderInvalid = (eventIndex: number) =>

@@ -9,9 +9,19 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { EventPublicSummaryArtistsItem } from './eventPublicSummaryArtistsItem';
+import type { EventPublicSummaryBadgesItem } from './eventPublicSummaryBadgesItem';
+import type { EventPublicSummaryDetailImagesItem } from './eventPublicSummaryDetailImagesItem';
+import type { EventPublicSummaryPriceTiersItem } from './eventPublicSummaryPriceTiersItem';
+import type { EventPublicSummaryQueueOrder } from './eventPublicSummaryQueueOrder';
+import type { EventPublicSummaryRoundsItem } from './eventPublicSummaryRoundsItem';
+import type { EventPublicSummarySeatAssignment } from './eventPublicSummarySeatAssignment';
+import type { EventStatus } from './eventStatus';
+import type { Genre } from './genre';
+import type { SellerInfo } from './sellerInfo';
 
 /**
- * 회차 공개 요약(GET /v1/events/{eventId}, 소유자 결정 2026-10-30, open-items 78번. 칸은 추천 적용 2026-10-30). 공연 상세의 나머지 칸은 공연 상세 계약과 함께 더한다
+ * 회차 공개 요약과 공연 상세(GET /v1/events/{eventId}). 처음 다섯 칸은 소유자 결정 2026-10-30(open-items 78번, 칸은 추천 적용 2026-10-30)이고, 스캐너 승인 화면(SCR-051)은 그 가운데 title·startsAt·sellerName을 읽는다. 나머지는 공연 상세(SCR-002) 정적 셸이 읽는 칸이다(추천 적용 2026-11-05, ADR-0200). 등급별 판매 상태·후기 요약·개인 값은 싣지 않는다(실시간 값은 대기 상태 파일, 후기는 review-summary, 개인 값은 화면 스크립트)
  */
 export interface EventPublicSummary {
   eventId?: string;
@@ -22,4 +32,65 @@ export interface EventPublicSummary {
   startsAt?: string;
   /** 판매자 상호(판매자 신원정보 SellerInfo.legalName과 같은 값, 전자상거래법 제20조 제2항, POL-037). 공연 상세의 판매자 줄에 보이는 값이다 */
   sellerName?: string;
+  genre?: Genre;
+  /** 관람 연령(예: 만 7세 이상) */
+  ageRating?: string;
+  /** 러닝타임(분) */
+  runningMinutes?: number;
+  /** 포스터 파생본 묶음의 기준 주소(ProductionCard.posterUrl과 같은 규칙, ADR-0199 결정 4) */
+  posterUrl?: string;
+  posterAlt?: string;
+  /**
+     * 공연 설명 글의 글자판(줄바꿈만, 20,000자 [가정]). 서식 있는 구조 문서(허용 노드 다섯, asvs/catalog-review 1.3.1)는 HOT-180이 칸 description으로 더한다. 화면은 이 칸을 글자로만 그린다(ADR-0200 결정 1)
+     * @maxLength 20000
+     */
+  descriptionText?: string;
+  /**
+     * 상세 이미지 0~10장(ADR-0062 결정 38). 이미지에만 있는 정보는 설명 글에도 있다
+     * @maxItems 10
+     */
+  detailImages?: EventPublicSummaryDetailImagesItem[];
+  /** @maxItems 20 */
+  artists?: EventPublicSummaryArtistsItem[];
+  placeId?: string;
+  placeName?: string;
+  /** 도로명 주소(장소 섹션의 [주소 복사]) */
+  placeAddress?: string;
+  /** 티켓 오픈(T=0) */
+  openAt?: string;
+  /**
+     * 로비 개방(오픈 − 로비 분). 로비 셔플을 끈 회차(FIFO)는 null
+     * @nullable
+     */
+  lobbyOpensAt?: string | null;
+  /**
+     * 입장 시작
+     * @nullable
+     */
+  entryOpensAt?: string | null;
+  /** 공연 종료 예정 */
+  endsAt?: string;
+  /** 판매 종료(공연 시작 − 24시간, ADR-0064) */
+  saleEndsAt?: string;
+  status?: EventStatus;
+  /** 정렬 방식 이름(회차의 lobbyShuffle·openBatch 두 값에서 계산, ADR-0118). 화면은 POL-004 표준 문구를 고른다 */
+  queueOrder?: EventPublicSummaryQueueOrder;
+  seatAssignment?: EventPublicSummarySeatAssignment;
+  /** 1인 한도(POL-011) */
+  perPersonLimit?: number;
+  /** 재입장 허용(POL-018) */
+  reentryAllowed?: boolean;
+  /** 판매 정보 배지 코드(ProductionCard.badges와 같다) */
+  badges?: EventPublicSummaryBadgesItem[];
+  /**
+     * 같은 공연의 공개 회차(시작 순, 이 회차 포함). 취소된 회차와 판매 종료가 지난 회차는 빼고(이 회차는 늘 넣는다) 60개 [가정]까지다. 승인 뒤 더한 회차(변경분, ADR-0198 결정 3)는 재승인 전까지 없다. 회차 칩(CMP-066)이 회차마다 주소를 바꾸고 오픈 예정·판매 중·판매 종료를 가른다(ADR-0093)
+     * @maxItems 60
+     */
+  rounds?: EventPublicSummaryRoundsItem[];
+  /**
+     * 등급별 정가(보이는 순서). 판매 상태 배지는 싣지 않는다. 실시간 상태는 등급 ID로 맞춰 화면이 얹는다(출처는 HOT-010·HOT-311, ADR-0200 결정 2)
+     * @maxItems 20
+     */
+  priceTiers?: EventPublicSummaryPriceTiersItem[];
+  seller?: SellerInfo;
 }
