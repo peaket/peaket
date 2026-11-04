@@ -597,6 +597,8 @@ test('V-T1 행렬_저장소의 specs.json은 대기열의 가장 큰 검사를 �
   const full = matrixFor(m, 'full').include;
   const queue = full.filter((x) => x.spec === 'queue');
   assert.deepEqual(queue.map((x) => x.shard).sort(), ['default', 'proposed']);
+  // 큰 러너는 가장 큰 검사의 묶음에만 붙는다
+  assert.deepEqual(queue.filter((x) => x.large).map((x) => x.shard), ['proposed']);
   // 가장 큰 검사 하나만 따로 두고, 나머지는 한 잡에서 차례로 돈다
   assert.deepEqual(m.specs.find((x) => x.name === 'queue').checks.filter((c) => shardOf(c) === 'proposed').map((c) => c.main), ['queue_proposed']);
   for (const x of full.filter((y) => y.spec !== 'queue')) assert.equal(x.shard, '');
@@ -612,7 +614,7 @@ test('V-T1 행렬_matrix 명령은 Quint·Java 없이 GitHub 행렬 JSON 한 줄
   const parsed = JSON.parse(lines[0]);
   assert.ok(Array.isArray(parsed.include) && parsed.include.every((x) => typeof x.spec === 'string' && typeof x.shard === 'string'));
   const only = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./spec-check.mjs', import.meta.url)), 'matrix', '--mode', 'full', '--only', 'queue:proposed'], { cwd: REPO_ROOT, encoding: 'utf8' }));
-  assert.deepEqual(only.include, [{ spec: 'queue', shard: 'proposed' }]);
+  assert.deepEqual(only.include, [{ spec: 'queue', shard: 'proposed', large: true }]);
 });
 
 test('V-T1 인자_일부만 돌릴 때는 --write를 막고(저장소의 결과 파일을 일부만 덮지 않게) --out 폴더를 쓰게 한다', () => {
@@ -645,4 +647,24 @@ test('V-T1 기록_일부만 돌린 결과 파일은 어느 묶음·검사였는�
   assert.deepEqual(resultRecord({ ...base, subset: { shard: 'big' } }).subset, { shard: 'big' });
   assert.equal('subset' in resultRecord(base), false);
   assert.equal('subset' in resultRecord({ ...base, subset: {} }), false);
+});
+
+test('V-T1 큰러너_large를 적은 검사의 묶음에만 large가 붙고, pr에는 붙지 않는다(큰 러너는 분당 과금이라 전수 검사에서만 쓴다)', () => {
+  const m = load(sharded());
+  m.specs[0].checks[0].large = true;
+  const big = load(m);
+  assert.deepEqual(matrixFor(big, 'full').include, [{ spec: 'queue', shard: 'big', large: true }, { spec: 'queue', shard: 'default' }]);
+  assert.deepEqual(matrixFor(big, 'pr').include, [{ spec: 'queue', shard: '' }]);
+  // 묶음을 나누지 않은 명세는 통째로 한 잡이라 그 안에 하나만 있어도 잡 전체가 큰 러너다
+  const plain = manifest();
+  plain.specs[0].checks[0].large = true;
+  assert.deepEqual(matrixFor(load(plain), 'full').include, [{ spec: 'queue', shard: '', large: true }]);
+});
+
+test('V-T1 큰러너_large는 true만 받는다(적지 않으면 표준 러너)', () => {
+  for (const bad of [false, 'yes', 1, null]) {
+    const m = manifest();
+    m.specs[0].checks[0].large = bad;
+    assert.throws(() => load(m), /large는 true만/, String(bad));
+  }
 });

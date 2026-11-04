@@ -57,7 +57,10 @@ jobs:
   spec:
     name: spec (${{ matrix.spec }}${{ matrix.shard && format(', {0}', matrix.shard) || '' }})
     needs: list
-    runs-on: ubuntu-24.04
+    # 큰 러너가 필요한 묶음(검사 목록의 large, 대기열의 진입 범위 검사)은 조직에 만든 큰 러너에서 돈다. 러너 이름은 저장소 변수 PEAKET_LARGE_RUNNER에 둔다
+    # (변수가 없으면 표준 러너라 아무것도 막히지 않고, 변수를 지우면 되돌아간다). 큰 러너는 분당 과금이라 전수 검사(full)에서만 쓰고,
+    # 포크에서 온 PR은 표준 러너로 돌려 외부 사람이 큰 러너 시간을 쓰지 못하게 한다(ADR-0187)
+    runs-on: ${{ (matrix.large && vars.PEAKET_LARGE_RUNNER && (inputs.mode || 'full') == 'full' && github.event.pull_request.head.repo.fork != true) && vars.PEAKET_LARGE_RUNNER || 'ubuntu-24.04' }}
     # 대기열 명세의 전수 검사가 러너(4코어)에서 88.7분 걸렸다(2026-11-04 첫 실행, 로컬 8코어 31분). RB-05 복제 확인(ADR-0186)으로 로컬이 47분, 러너는 약 135분 [추정]이 돼
     # 가장 큰 검사(진입 범위, 로컬 35분)를 따로 한 잡으로 뒀다. 그 잡이 러너에서 약 100분 [추정]이다(ADR-0187). 한도에 붙지 않게 두 배 가까이를 둔다(호스트 러너 잡 상한 360분)
     timeout-minutes: 180
@@ -88,6 +91,8 @@ jobs:
           path: ~/.quint
           key: quint-tools-${{ hashFiles('tools/spec-check/fetch-tools.mjs') }}
       - run: node tools/spec-check/fetch-tools.mjs
+      # 어느 기계에서 돌았는지 로그에 남긴다(코어 수에 따른 시간을 견줄 때 쓴다)
+      - run: echo "러너 ${RUNNER_NAME}, 코어 $(nproc), 메모리 $(free -g | awk '/Mem:/ {print $2}')GB"
       - run: node --test "tools/spec-check/*.test.mjs"
       # 결과는 spec-out/에 쓴다(저장소의 specs/results를 일부만 덮지 않게, 묶음마다 파일이 따로다). JVM 설정 실험은 수동 실행의 tlc_jvm_args로 준다
       - env:

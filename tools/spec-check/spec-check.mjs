@@ -138,6 +138,8 @@ export function loadManifest(text, readFile, { traceHash = true } = {}) {
       if (typeof c.why !== 'string' || !c.why) fail(`${s.name}/${c.main}: why(까닭)가 없다`);
       // shard는 CI가 전수 검사를 잡 여럿으로 나눌 때 같은 잡에서 차례로 돌 검사끼리 붙이는 이름이다(적지 않으면 default). 오래 걸리는 검사를 따로 둘 때 적는다(ADR-0187)
       if ('shard' in c && (typeof c.shard !== 'string' || !NAME.test(c.shard))) fail(`${s.name}/${c.main}: shard는 영문자·숫자·밑줄로 된 식별자다`);
+      // large는 CI가 이 검사가 든 묶음을 큰 러너(분당 과금)에서 돌려야 할 때만 적는다. 적지 않으면 표준 러너다(ADR-0187)
+      if ('large' in c && c.large !== true) fail(`${s.name}/${c.main}: large는 true만 적는다(적지 않으면 표준 러너)`);
       // 진행성 검사는 그 속성 하나만 TLC로 본다. 시뮬레이션(quint run)은 시간 논리를 보지 않아 tlc: false·samples가 뜻이 없고,
       // 불변식과 섞으면 어느 쪽 반례인지 갈리지 않는다(wbs 0.9.3)
       if ('temporal' in c) {
@@ -332,7 +334,7 @@ export function shardOf(c) {
 
 /**
  * CI 잡 목록(GitHub 행렬). pr은 명세마다 잡 하나다(시뮬레이션은 짧다). full은 묶음이 둘 이상인 명세만 묶음마다 잡 하나이고,
- * 묶음이 하나뿐인 명세는 나누지 않고(shard '') 통째로 돈다. only는 '명세' 또는 '명세:묶음' 하나만 남긴다(수동 실행으로 한 묶음만 다시 돌릴 때)
+ * 묶음이 하나뿐인 명세는 나누지 않고(shard '') 통째로 돈다. 큰 러너가 필요한 묶음에는 large가 붙는다. only는 '명세' 또는 '명세:묶음' 하나만 남긴다(수동 실행으로 한 묶음만 다시 돌릴 때)
  */
 export function matrixFor(m, mode, only = '') {
   if (mode !== 'pr' && mode !== 'full') throw new Error(`mode는 pr 또는 full이다: ${mode}`);
@@ -343,7 +345,9 @@ export function matrixFor(m, mode, only = '') {
     const shards = [...new Set(s.checks.map(shardOf))];
     for (const shard of mode === 'full' && shards.length > 1 ? shards : ['']) {
       if (onlyShard && shard !== onlyShard) continue;
-      include.push({ spec: s.name, shard });
+      // large: 이 묶음에 큰 러너가 필요한 검사가 있다. 큰 러너는 분당 과금이라 전수 검사(full)에서만 쓴다
+      const large = mode === 'full' && s.checks.some((c) => c.large === true && (shard === '' || shardOf(c) === shard));
+      include.push({ spec: s.name, shard, ...(large ? { large: true } : {}) });
     }
   }
   if (include.length === 0) throw new Error(`맞는 잡이 없다(only=${only})`);
