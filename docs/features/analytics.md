@@ -148,7 +148,7 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 | 모든 trade·telemetry 메시지(심장 박동 `PipelinePulse`는 빼고)와 `control.settings`의 `SettingChanged`(ADR-0073) | `eventKey`(UUID, 중복 제거 키는 이것 하나다. `OrderEvent.idempotencyKey`와 모든 메시지의 `schemaVersion`은 2026-10-28에 뺐다. 판은 레지스트리 스키마 ID가 말한다, 추천 적용 2026-10-28, 기술 검토 낮음-026) | 전체 |
 | `OrderEvent` | `purchaseSessionId`, `items[{seatId, tierId, sectionId, price}]`, `seatAssignment`(PICK·AUTO) | 전환, 등급·구역별 판매 |
 | `PaymentEvent` | `amount`, `payMethodCategory`, `result`(payment §2.1의 정규화 결과), `failureCategory`, `attemptNo`, `latencyMs` | 결제 실패 사유, 결제사별 승인율 |
-| `SeatEvent` | `holdId`, `purchaseSessionId`, `tierId`, `sectionId`(관제 실시간 표의 등급·구역별 판매 좌석, ADR-0072) | 홀드 만료율, 세션 퍼널, 등급·구역별 판매 좌석 |
+| `SeatEvent` | `holdId`, `purchaseSessionId`, `tierId`, `sectionId`(관제 실시간 표의 등급·구역별 판매 좌석, ADR-0072), 홀드 사건의 `accountId`(적재 때 가명 처리)·`expiresAt`(추천 적용 2026-11-04, BUILD_ORDER PRF-141) | 홀드 만료율, 세션 퍼널, 등급·구역별 판매 좌석 |
 | `TicketEvent` | `eventId`, `orderId`, `accountId`, 스캔 결과 종류 `ENTRY_SCANNED`의 `scanResult`·`reason`·`gateZone`·`direction`·`scannedAt`(스캔 ID로 중복 제거) | 현장 입장률, 거부 사유, 양도·환불 |
 | `SettlementEvent` | `salesAmount`, `refundAmount`, `feeAmount`(정산서 통지 때) | 정산서 대조, 1,000장당 수수료 |
 | `QueueEntryRecord`(`telemetry.queue`, 신설 메시지) | `eventId`, `queueEntryId`, `pid`, `number`, `entryMode`(로비·오픈 뒤), `enteredAt`, `firstEtaSec`, `turnAt`, `admittedAt`·`admissionJti` 또는 `removedAt`·`removeReason`, `verifyRoute`(바로 통과·추가 검증 통과·추가 검증 실패·차단) | 진입 인원, 대기 오차, 차례 뒤 미입장, 봇 연결 |

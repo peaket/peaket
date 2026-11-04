@@ -193,8 +193,8 @@ export function sessionStartedEventKey(purchaseSessionId: string): string {
   return uuid8(`PurchaseSessionStarted:${purchaseSessionId}`);
 }
 
-/** SHA-256(입력)의 앞 16바이트에 UUID 버전 8(RFC 9562 사용자 정의)·변형 비트를 맞춘 UUID 글 */
-function uuid8(input: string): string {
+/** SHA-256(입력)의 앞 16바이트에 UUID 버전 8(RFC 9562 사용자 정의)·변형 비트를 맞춘 UUID 글(좌석 사건 eventKey도 쓴다, seat-event.ts) */
+export function uuid8(input: string): string {
   const b = Buffer.from(createHash('sha256').update(input).digest().subarray(0, 16));
   b[6] = (b[6]! & 0x0f) | 0x80;
   b[8] = (b[8]! & 0x3f) | 0x80;

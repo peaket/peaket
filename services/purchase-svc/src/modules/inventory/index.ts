@@ -3,6 +3,7 @@ export { EXPIRE_LUA, SWEEP_LEASE_LUA } from './adapters/expire-lua.js';
 export { HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
 export { MemoryPurchaseSessionStore, RecordingSessionStartedLog } from './adapters/memory-purchase-session-store.js';
 export { MemoryPurchaseSessions, type MemoryPurchaseSession, type PurchaseSessionAccess } from './adapters/memory-purchase-sessions.js';
+export { DrizzleSeatHoldLedger } from './adapters/db/drizzle-seat-hold-ledger.js';
 export { DrizzleSeatSales } from './adapters/db/drizzle-seat-sales.js';
 export { purchaseQuota, seatHold, seatSale } from './adapters/db/schema.js';
 export { FileSeatMapSource, LayoutSeatMap, type LayoutSeatMapOptions, type SeatMapSource } from './adapters/layout-seat-map.js';
@@ -24,6 +25,9 @@ export {
 export { RecordingHoldAttempts, discardHoldAttempts } from './adapters/recording-hold-attempts.js';
 export { RedisPurchaseSessionStore, RedisSessionEndedLog, RedisSessionIndex, RedisSessionStartedLog, sessionKeys } from './adapters/redis-purchase-sessions.js';
 export { RedisSeatStore, SEAT_REDIS, seatKeys } from './adapters/redis-seat-store.js';
+export { RedisSeatStreamSource } from './adapters/redis-seat-stream.js';
+export { KafkaTradeEventPublisher, jsonTradeEventCodec } from './adapters/trade-events.js';
+export { SeatStreamRelay, type RelayEventReport, type RelayTickReport, type SeatStreamRelayDeps, type SeatStreamRelayLogger } from './application/seat-stream-relay.js';
 export { SNAPSHOT_LUA } from './adapters/snapshot-lua.js';
 export { RedisSweepLeases } from './adapters/redis-sweep-leases.js';
 export { PURCHASE_ECDH_KEY_ENV, ServerEcdhKey, type ServerEcdhJwk } from './adapters/server-ecdh.js';
@@ -86,6 +90,29 @@ export {
   type AdmissionKeys,
   type AdmissionRejectReason,
 } from './domain/admission-token.js';
+export {
+  HOLD_EVENT_TYPES,
+  PURCHASE_SESSION_TOPIC,
+  SEAT_TOPIC,
+  STREAM_RELAY_BACKOFF_MAX_MS,
+  STREAM_RELAY_BACKOFF_MIN_MS,
+  STREAM_RELAY_BATCH,
+  STREAM_RELAY_CONSUMER,
+  STREAM_RELAY_GROUP,
+  STREAM_RELAY_MAX_BATCHES,
+  STREAM_RELAY_TICK_MS,
+  routeStreamEntry,
+  seatEventKey,
+  toLedgerHoldEvent,
+  toSeatEvent,
+  type HoldEventType,
+  type LedgerHoldEvent,
+  type SeatEventMessage,
+  type SeatStreamEntry,
+  type StreamDropReason,
+  type StreamRoute,
+  type TradeTopic,
+} from './domain/seat-event.js';
 export {
   MAX_SALE_SEATS,
   SALE_UUID_PATTERN,
@@ -222,8 +249,14 @@ export {
   type SeatMap,
   type SeatMapIndex,
   type SeatMapSections,
+  type SeatHoldLedger,
   type SeatSales,
   type SeatSignals,
+  type SeatStreamRelaySignals,
+  type SeatStreamSource,
+  type TradeEventCodec,
+  type TradeEventPublisher,
+  type TradeRecord,
   type SeatSnapshots,
   type SessionEndedLog,
   type SessionHolds,
@@ -236,6 +269,7 @@ export {
   type SweepLeases,
 } from './domain/ports.js';
 export { PurchaseSessionController } from './inbound/purchase-session.controller.js';
+export { SeatHoldLedgerHandler, type LedgerRecord } from './inbound/seat-hold-ledger.handler.js';
 export { SnapshotController } from './inbound/snapshot.controller.js';
 export { HOLD_OPERATION, HoldHeaders, HoldParams, HoldRequest, HoldResponseBody, HoldsController, SeatLuaFailure, sanitizedStoreError } from './inbound/holds.controller.js';
 export { InventoryModule, type AdmissionOptions, type InventoryModuleOptions } from './inventory.module.js';

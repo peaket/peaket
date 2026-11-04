@@ -8,6 +8,7 @@ import type { SeatLuaErrorCode, SeatLuaScript } from './lua-errors.js';
 import type { EndedSession, OpenSessionInput, OpenSessionResult, SessionEndedEntry, SessionEndReason, SessionStartedEntry, StoredSession, SweepSessionResult } from './purchase-session.js';
 import type { SectionRange } from './seat-layout.js';
 import type { ReserveInput, ReserveResult, SeatSaleOrder, SeatSaleRelease } from './seat-sale.js';
+import type { LedgerHoldEvent, SeatStreamEntry, StreamDropReason, TradeTopic } from './seat-event.js';
 
 /** 요청 처리 중 좌석 Redis 호출 하나의 선택값(BUILD_ORDER PRF-135, guidelines §5) */
 export interface SeatCallOptions {
@@ -509,4 +510,51 @@ export interface SeatSales {
   releasePending(release: SeatSaleRelease): Promise<number>;
   /** 취소·환불: 그 주문의 SOLD 행을 RETURNED로 바꾸고 used를 바꾼 행 수만큼 줄인다. 바꾼 행 수 */
   returnSold(release: SeatSaleRelease): Promise<number>;
+}
+
+/**
+ * 좌석 Redis Stream 읽기(BUILD_ORDER PRF-141, docs/features/seat-hold.md §6 '홀드 원장 적재의 첫 구현'). 운영 구현은 RedisSeatStreamSource다.
+ * 소비자 그룹 stream-relay, 소비자 이름 relay 하나(리더 하나가 읽는다). 시험 대역은 시험이 만든다
+ */
+export interface SeatStreamSource {
+  /** 좌석 비트맵이 있는 회차 목록(s:ctl:events) */
+  events(): Promise<string[]>;
+  /**
+   * 그 회차 Stream에서 확인받지 못한 항목을 먼저, 없으면 새 항목을 count개까지 Stream ID 순으로 읽는다. 처음 보는 Stream이면 소비자 그룹을 만든다.
+   * Stream이 없으면 빈 배열(키를 만들지 않는다)
+   */
+  read(eventId: string, count: number): Promise<SeatStreamEntry[]>;
+  /** Kafka 확인을 받은 항목을 XACK하고 XTRIM MINID로 지운다 */
+  ack(eventId: string, ids: string[]): Promise<void>;
+}
+
+/** Kafka로 보낼 레코드 하나 */
+export interface TradeRecord {
+  topic: TradeTopic;
+  key: string;
+  value: Buffer;
+  headers: Record<string, string>;
+}
+
+/** 거래 토픽 보내기. 레코드는 준 차례대로 보내고 모두 확인받아야 끝난다. 실패·시간 초과면 던진다(일부만 나갔을 수 있다) */
+export interface TradeEventPublisher {
+  publish(records: TradeRecord[]): Promise<void>;
+}
+
+/** 사건 값 부호기. Avro 인코더(BAS-030)가 오기 전에는 JSON 대역(jsonTradeEventCodec)이다 */
+export interface TradeEventCodec {
+  encode(topic: TradeTopic, message: object): Buffer;
+}
+
+/** 좌석 Stream 릴레이 지표(seat_stream_relay_*, docs/observability.md). 부른 쪽을 막거나 던지지 않는다 */
+export interface SeatStreamRelaySignals {
+  sent(topic: TradeTopic, n: number): void;
+  dropped(reason: StreamDropReason): void;
+  failed(stage: 'read' | 'publish' | 'ack'): void;
+}
+
+/** 홀드 원장(seat_hold) 쓰기. 운영 구현은 DrizzleSeatHoldLedger다. 규칙은 seat-hold.md §6 '적재 소비자' */
+export interface SeatHoldLedger {
+  /** 사건 하나를 트랜잭션 하나로 적용한다. 같은 사건을 다시 받으면 아무것도 바꾸지 않는다. DB 오류는 던진다 */
+  apply(event: LedgerHoldEvent): Promise<void>;
 }

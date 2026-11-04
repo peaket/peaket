@@ -13,6 +13,8 @@ import { SEAT_SALE_STATUSES } from '../src/modules/inventory/domain/seat-sale.js
 
 const MIGRATIONS = join(fileURLToPath(new URL('..', import.meta.url)), 'migrations');
 const TAG = '0000_purchase_seat_tables';
+/** 보류 표 held_event·정비 통계 stat_snapshot(platform 템플릿 0003을 옮김, BUILD_ORDER PRF-141) */
+const HELD_TAG = '0001_held_event_and_stat_snapshot';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
 
@@ -257,19 +259,21 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
   };
 
-  test('_journal.json은 0000 한 항목이고 tag가 SQL 파일 이름과 맞는다 [ASVS v5.0.0-2.3.4]', () => {
+  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141) 차례이고 tag가 SQL 파일 이름과 맞는다 [ASVS v5.0.0-2.3.4]', () => {
     expect(journal.dialect).toBe('postgresql');
-    expect(journal.entries).toHaveLength(1);
-    const [e] = journal.entries;
-    expect(e!.idx).toBe(0);
-    expect(e!.tag).toBe(TAG);
-    expect(e!.breakpoints).toBe(true);
-    expect(Number.isSafeInteger(e!.when) && e!.when > 0).toBe(true);
-    expect(existsSync(join(MIGRATIONS, `${e!.tag}.sql`))).toBe(true);
+    expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
+      [0, TAG],
+      [1, HELD_TAG],
+    ]);
+    for (const e of journal.entries) {
+      expect(e.breakpoints).toBe(true);
+      expect(Number.isSafeInteger(e.when) && e.when > 0).toBe(true);
+      expect(existsSync(join(MIGRATIONS, `${e.tag}.sql`))).toBe(true);
+    }
   });
 
-  test('migrations 폴더의 SQL 파일은 기록에 있는 그 하나뿐이다(기록에 없는 SQL이 몰래 쌓이지 않는다)', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`]);
+  test('migrations 폴더의 SQL 파일은 기록에 있는 것뿐이다(기록에 없는 SQL이 몰래 쌓이지 않는다)', () => {
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${HELD_TAG}.sql`]);
   });
 
   test('0000_snapshot.json의 표·열이 schema.ts와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {

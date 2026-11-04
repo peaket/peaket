@@ -59,13 +59,13 @@ const count = async (text: string, params: unknown[]): Promise<number> => Number
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
-  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 하나다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수(0000 좌석 표, 0001 보류 표)와 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)).rows.map((r) => r.relname);
     const before = await tables();
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(1);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(2);
   });
 
   test('seat_sale·purchase_quota·seat_hold 세 표가 있다 [ASVS v5.0.0-2.3.4]', async () => {

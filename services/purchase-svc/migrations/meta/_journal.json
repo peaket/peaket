@@ -8,6 +8,13 @@
       "when": 1793787361531,
       "tag": "0000_purchase_seat_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793788868254,
+      "tag": "0001_held_event_and_stat_snapshot",
+      "breakpoints": true
     }
   ]
 }
