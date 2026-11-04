@@ -154,12 +154,18 @@ jobs:
       - run: |
           set -e
           o=reports/static
-          node static/assets.mjs --app queue-room --dir ../../apps/web/queue-room/dist --out "$o/queue-room" --external https://challenges.cloudflare.com
-          node static/assets.mjs --app console --dir ../../apps/console-host/dist --out "$o/console"
-          node static/assets.mjs --app scanner --dir ../../apps/scanner/dist --out "$o/scanner"
-          node static/assets.mjs --app forensics --dir ../../apps/forensics/dist --out "$o/forensics"
+          node static/assets.mjs --app queue-room --dir ../../apps/web/queue-room/dist --package ../../apps/web/queue-room --out "$o/queue-room" --external https://challenges.cloudflare.com
+          node static/assets.mjs --app console --dir ../../apps/console-host/dist --package ../../apps/console-host --out "$o/console"
+          node static/assets.mjs --app scanner --dir ../../apps/scanner/dist --package ../../apps/scanner --out "$o/scanner"
+          node static/assets.mjs --app forensics --dir ../../apps/forensics/dist --package ../../apps/forensics --out "$o/forensics"
           node static/assets.mjs --app web --dir ../../apps/web/.next/static --out "$o/web" --external https://challenges.cloudflare.com --external https://js.tosspayments.com --external https://cdn.portone.io
           node static/assets.mjs --app partner --dir ../../apps/partner/.next/static --out "$o/partner"
+          # 소비자 웹의 public/(판매 일시 중지 정적 화면 등)도 같은 올리기 규칙을 받는다(구간 1 끝 정리)
+          node static/assets.mjs --app web-public --dir ../../apps/web/public --out "$o/web-public"
+        working-directory: tools/web-checks
+      # 첫 JS·Lighthouse 표를 잡 요약에 남긴다(seed-css 잡의 CSS 크기 표와 같은 꼴)
+      - if: always()
+        run: node budgets/report.mjs >> "$GITHUB_STEP_SUMMARY" || true
         working-directory: tools/web-checks
       # Next.js 앱은 브라우저 소스 맵을 내지 않아(§5.18 '숨김 소스 맵') 실행 의존성 SBOM(묶음보다 넓다)을 함께 남긴다
       - run: |

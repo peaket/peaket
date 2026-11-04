@@ -11,8 +11,10 @@ export const WEB_FILES = [
   'packages/{ds,api-client,telemetry,validation,console-contract,seatmap}/src/**/*.{ts,tsx}',
 ];
 
+// 계약 생성물(packages/contracts/src/gen)만 뺀다. 화면이 묶는 생성물(packages/ds/src/gen 토큰, BAS-040의 packages/api-client/src/gen orval 호출 함수)은
+// 브라우저 지원 린트를 받는다(구간 1 끝 정리)
 export default [
-  { ignores: ['**/node_modules/**', '**/dist/**', '**/dist-poc/**', '**/.next/**', '**/.next-*/**', '**/.turbo/**', '**/src/gen/**'] },
+  { ignores: ['**/node_modules/**', '**/dist/**', '**/dist-poc/**', '**/.next/**', '**/.next-*/**', '**/.turbo/**', 'packages/contracts/src/gen/**'] },
   ...serviceLayerConfigs(['services/*/src/modules', 'packages/platform/template/src/modules']),
   ...webCompatConfigs(WEB_FILES),
 ];

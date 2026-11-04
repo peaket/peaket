@@ -9,7 +9,8 @@
 // 기능을 먼저 확인한 코드는 보고하지 않는다: `typeof X.y`, `if (X.y)`, `X.y ? … : …`, `X.y && …`, `X.y || …`, `'y' in X`, `X.y?.()`.
 // 선언 안 된 전역 이름 X 자체는 `typeof X`와 `'X' in globalThis`(window·self)만 확인으로 친다(`if (X)`는 없는 브라우저에서 ReferenceError).
 // 상위 객체만 확인한 것(`typeof document`)은 그 속성의 지원 범위가 상위 객체와 같을 때만 속성 확인으로 친다.
-// 같은 함수(또는 그것을 감싼 함수) 안에서 한 번 확인했으면 그 함수 안의 다른 사용도 통과한다.
+// 같은 함수(또는 그것을 감싼 함수·모듈 맨 위) 안에서 확인한 뒤(소스 차례로 확인보다 뒤)의 사용만 통과한다.
+// TypeScript 문법(`as`·`!`·`satisfies`)을 거친 확인과 사용도 같은 것으로 보고, `globalThis.X.y`·`window.X.y`도 `X.y`로 본다.
 // 접두사·플래그·다른 이름으로만 있는 것은 지원으로 치지 않는다. 부분 지원(partial_implementation)은 지원으로 친다. 부분 지원은 대개
 // 특정 인자에서만 다르게 도는 것(예: iOS의 window.open은 `_blank` 대상만 안 된다)이라 이름만으로 막으면 헛보고가 많다. 그런 차이는
 // §1.5 표가 맡는다(예: Screen Wake Lock은 iOS 18.4부터로 센다).
@@ -142,6 +143,10 @@ function isDetection(node) {
         if (cur === parent.left) return 'test';
         continue;
       case 'ChainExpression':
+      case 'TSAsExpression':
+      case 'TSNonNullExpression':
+      case 'TSSatisfiesExpression':
+      case 'TSTypeAssertion':
         continue;
       case 'MemberExpression':
         if (cur === parent.object && parent.optional) return 'test';
@@ -193,26 +198,52 @@ export function createBcdRule() {
           const refs = [...scope.through];
           for (const v of scope.variables) if (v.defs.length === 0) refs.push(...v.references);
           const uses = [];
-          const guards = new Map(); // 함수 노드 → 확인한 이름들
+          const guards = new Map(); // 함수 노드 → 확인한 이름 → 가장 앞선 확인의 소스 위치
           const guard = (node, key) => {
             const fn = enclosingFunctions(node)[0];
-            if (!guards.has(fn)) guards.set(fn, new Set());
-            guards.get(fn).add(key);
+            if (!guards.has(fn)) guards.set(fn, new Map());
+            const m = guards.get(fn);
+            const at = node.range?.[0] ?? 0;
+            if (!m.has(key) || at < m.get(key)) m.set(key, at);
+          };
+          /** 그 함수에서 key를 use보다 앞에서 확인했는가 */
+          const guardedBefore = (fn, key, use) => {
+            const at = guards.get(fn)?.get(key);
+            return at !== undefined && at < (use.range?.[0] ?? 0);
+          };
+          // TypeScript 문법 감싸기를 벗긴다(`(X as any).y`의 X)
+          const TS_WRAP = new Set(['TSAsExpression', 'TSNonNullExpression', 'TSSatisfiesExpression', 'TSTypeAssertion']);
+          const unwrapUp = (n) => {
+            let cur = n;
+            while (cur.parent && TS_WRAP.has(cur.parent.type) && cur.parent.expression === cur) cur = cur.parent;
+            return cur;
           };
           for (const ref of refs) {
             if (ref.isValueReference === false) continue; // 타입 자리
             const id = ref.identifier;
-            const parent = id.parent;
+            const idw = unwrapUp(id);
+            const parent = idw.parent;
             let name = id.name;
             let node = id;
             let compat;
-            if (GLOBAL_OBJECTS.has(name) && parent?.type === 'MemberExpression' && parent.object === id) {
+            if (GLOBAL_OBJECTS.has(name) && parent?.type === 'MemberExpression' && parent.object === idw) {
               const p = propertyName(parent);
               if (!p) continue;
-              name = p;
-              node = parent;
-              compat = lookupGlobal(p);
-            } else if (parent?.type === 'MemberExpression' && parent.object === id && propertyName(parent)) {
+              const pw = unwrapUp(parent);
+              const grand = pw.parent;
+              const q = grand?.type === 'MemberExpression' && grand.object === pw ? propertyName(grand) : undefined;
+              const member = q ? lookupMember(p, q) : undefined;
+              if (member) {
+                // globalThis.X.y → X.y
+                name = `${p}.${q}`;
+                node = grand;
+                compat = member;
+              } else {
+                name = p;
+                node = parent;
+                compat = lookupGlobal(p);
+              }
+            } else if (parent?.type === 'MemberExpression' && parent.object === idw && propertyName(parent)) {
               const p = propertyName(parent);
               name = `${id.name}.${p}`;
               node = parent;
@@ -227,7 +258,7 @@ export function createBcdRule() {
               compat = SINGLETONS[name] ? undefined : lookupGlobal(name);
             }
             // `'y' in X`(X는 전역 이름이나 window류)
-            if (parent?.type === 'BinaryExpression' && parent.operator === 'in' && parent.right === id) {
+            if (parent?.type === 'BinaryExpression' && parent.operator === 'in' && parent.right === idw) {
               const left = parent.left;
               if (left.type === 'Literal' && typeof left.value === 'string') {
                 guard(id, GLOBAL_OBJECTS.has(id.name) ? left.value : `${id.name}.${left.value}`);
@@ -257,7 +288,7 @@ export function createBcdRule() {
             const head = u.name.split('.')[0];
             const fns = enclosingFunctions(u.node);
             const dotted = u.name.includes('.');
-            if (fns.some((fn) => guards.get(fn)?.has(u.name) || (dotted && guards.get(fn)?.has(head) && headCovers(u, head)))) continue;
+            if (fns.some((fn) => guardedBefore(fn, u.name, u.node) || (dotted && guardedBefore(fn, head, u.node) && headCovers(u, head)))) continue;
             context.report({
               node: u.node,
               messageId: 'unsupported',

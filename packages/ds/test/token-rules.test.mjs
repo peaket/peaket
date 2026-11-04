@@ -52,6 +52,14 @@ test('FE-T45 ① 토큰·그룹 이름의 마침표·중괄호와 $로 시작하
   assert.ok(has(problems, /my\.group/), problems.join(' / '));
 });
 
+test('FE-T45 ① 값($value)을 가진 토큰 아래에 토큰·그룹을 두면 위반이다(DTCG: 토큰은 자식을 갖지 않는다)', () => {
+  const problems = lint({ c: { $type: 'color', a: { $value: '#ffffff', b: { $value: '#000000' }, g: { x: { $value: '#000000' } } } } });
+  assert.ok(has(problems, /c\.a\.b.*토큰 아래/), problems.join(' / '));
+  assert.ok(has(problems, /c\.a\.g.*토큰 아래/), problems.join(' / '));
+  // 자식은 토큰으로 세지 않는다(별칭으로 가리킬 수 없다)
+  assert.ok(has(lint({ c: { $type: 'color', a: { $value: '#ffffff', b: { $value: '#000000' } }, r: { $value: '{c.a.b}' } } }), /c\.r.*c\.a\.b/));
+});
+
 test('FE-T45 ① DTCG가 정한 $ 속성($type·$value·$description·$extensions·$deprecated·$schema)은 이름 위반이 아니다', () => {
   const problems = lintTokens(
     { $schema: 'x', $description: 'd', ...BP, color: { $type: 'color', $description: '그룹', a: { $value: '#ffffff', $deprecated: true, $description: '토큰' } } },
@@ -146,6 +154,46 @@ test('FE-T45 ③ 값 안에 섞인 별칭(그림자 칸)도 풀어서 본다', (
   const sh = (color) => ({ color, offsetX: '0px', offsetY: '1px', blur: '4px', spread: '0px' });
   assert.deepEqual(lint({ c: { $type: 'color', a: { $value: '#00000014' } }, s: { $type: 'shadow', $value: sh('{c.a}') } }), []);
   assert.ok(has(lint({ c: { $type: 'color', a: { $value: '#00000014' } }, s: { $type: 'shadow', $value: sh('{c.none}') } }), /s.*c\.none/));
+});
+
+test('FE-T45 ③ 배열 값 안의 별칭(글꼴 배열·3차 베지어의 수)도 풀어서 본다', () => {
+  const font = (sans) => ({ f: { $type: 'fontFamily', base: { $value: 'Pretendard' }, sans: { $value: sans } } });
+  assert.deepEqual(lint(font(['{f.base}', 'sans-serif'])), []);
+  assert.ok(has(lint(font(['{f.none}', 'sans-serif'])), /f\.sans.*f\.none/));
+  // 글꼴 배열 칸이 다른 형식(색)을 가리키면 위반이다
+  const mixed = lint({ c: { $type: 'color', a: { $value: '#ffffff' } }, f: { $type: 'fontFamily', $value: ['{c.a}', 'sans-serif'] } });
+  assert.ok(has(mixed, /^f: .*형식/), mixed.join(' / '));
+  // 배열을 가진 글꼴 토큰을 배열 칸에서 가리키면 배열 속 배열이 되어 위반이다
+  assert.ok(has(lint({ f: { $type: 'fontFamily', a: { $value: ['A', 'B'] }, b: { $value: ['{f.a}', 'C'] } } }), /f\.b.*글꼴/));
+  // 배열 칸끼리 도는 별칭도 잡는다(끝없이 풀지 않는다)
+  assert.ok(has(lint({ f: { $type: 'fontFamily', a: { $value: ['{f.b}'] }, b: { $value: ['{f.a}'] } } }), /돈다/));
+  const bez = (x) => ({ n: { $type: 'number', x: { $value: 0.35 } }, e: { $type: 'cubicBezier', $value: [x, 0, 1, 1] } });
+  assert.deepEqual(lint(bez('{n.x}')), []);
+  assert.ok(has(lint(bez('{n.none}')), /^e: .*n\.none/));
+});
+
+test('FE-T45 ③ 묶음 형식(글자 모양·테두리·전환)의 칸 안 별칭도 풀고 칸의 형식과 견준다', () => {
+  const base = {
+    f: { $type: 'fontFamily', a: { $value: 'Pretendard' } },
+    d: { $type: 'dimension', s: { $value: '16px' } },
+    c: { $type: 'color', a: { $value: '#ffffff' } },
+    m: { $type: 'duration', t: { $value: '200ms' } },
+  };
+  const typo = (extra) => ({ ...base, t: { $type: 'typography', $value: { fontFamily: '{f.a}', fontSize: '{d.s}', fontWeight: 400, lineHeight: 1.5, letterSpacing: '0px', ...extra } } });
+  assert.deepEqual(lint(typo({})), []);
+  assert.ok(has(lint(typo({ fontFamily: '{f.none}' })), /^t: .*f\.none/));
+  assert.ok(has(lint(typo({ fontFamily: ['{f.none}', 'x'] })), /^t: .*f\.none/));
+  const wrong = lint(typo({ fontSize: '{f.a}' }));
+  assert.ok(has(wrong, /^t: .*f\.a.*형식/), wrong.join(' / '));
+  assert.deepEqual(lint({ ...base, b: { $type: 'border', $value: { color: '{c.a}', width: '{d.s}', style: 'solid' } } }), []);
+  assert.ok(has(lint({ ...base, b: { $type: 'border', $value: { color: '{d.s}', width: '1px', style: 'solid' } } }), /^b: .*형식/));
+  assert.ok(has(lint({ ...base, x: { $type: 'transition', $value: { duration: '{m.none}', delay: '0ms', timingFunction: [0, 0, 1, 1] } } }), /^x: .*m\.none/));
+});
+
+test('FE-T45 ③ 글 안에 섞은 별칭(값 전체가 아닌 {…})은 풀리지 않으므로 위반이다', () => {
+  const problems = lint({ f: { $type: 'fontFamily', a: { $value: 'Pretendard' }, b: { $value: '{f.a}, sans-serif' } } });
+  assert.ok(has(problems, /f\.b.*전체/), problems.join(' / '));
+  assert.ok(has(lint({ f: { $type: 'fontFamily', $value: ['x', 'a {f.a}'] } }), /^f: .*전체/));
 });
 
 // ---------------------------------------------------------------- FE-T45 ④ 확장 키

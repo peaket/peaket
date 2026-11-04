@@ -24,7 +24,8 @@ export default defineConfig({
     { name: 'firefox', use: { ...devices['Desktop Firefox'], ...K5 } },
   ],
   webServer: {
-    command: `node lib/serve.mjs --root seatmap/page --port ${PORT}`,
+    // 캐시하게 두고(대기 중에 미리 받아 둔 HTTP 캐시 길), 배치 파일은 미리 압축한 layout.json.br을 Content-Encoding: br로 준다
+    command: `node lib/serve.mjs --root seatmap/page --port ${PORT} --cache-control max-age=3600`,
     url: `http://127.0.0.1:${PORT}/index.html`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

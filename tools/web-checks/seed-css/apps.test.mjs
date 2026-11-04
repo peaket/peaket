@@ -19,7 +19,11 @@ test('도구 앱 다섯(웹·파트너·관제·스캐너·포렌식)을 모두 
   assert.match(serverCommand(APPS[0], 'poc').command, /next start -p 4111$/);
   assert.equal(serverCommand(APPS[0], 'poc').env.PEAKET_NEXT_DIST, '.next-poc');
   assert.match(serverCommand(APPS[3], 'prod').command, /serve\.mjs .*scanner\/dist .*--spa/);
-  assert.match(serverCommand(APPS[3], 'poc').command, /serve\.mjs .*scanner\/dist-poc .*--spa/);
+  assert.match(serverCommand(APPS[3], 'prod').command, /--spa index\.html$/);
+  // Vite·webpack PoC 빌드(dist-poc)에는 탐침 페이지만 있다(index.html이 없다). 대체 파일은 탐침 페이지다
+  for (const app of APPS.filter((a) => a.kind !== 'next')) {
+    assert.match(serverCommand(app, 'poc').command, new RegExp(`${app.dir.split('/')[1]}/dist-poc --port \\d+ --spa poc-seed-css\\.html$`), app.name);
+  }
   assert.throws(() => serverCommand(APPS[3], 'other'), /모르는 빌드/);
 });
 

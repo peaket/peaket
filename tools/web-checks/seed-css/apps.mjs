@@ -84,7 +84,9 @@ export function serverCommand(app, build) {
   if (app.kind === 'next') {
     return { command: `pnpm --dir ../../${app.dir} exec next start -p ${port}`, env: { PEAKET_NEXT_DIST: b.nextDist, NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: CHECK_KEY } };
   }
-  return { command: `node lib/serve.mjs --root ../../${app.dir}/${b.dist} --port ${port} --spa index.html`, env: {} };
+  // 없는 경로에 줄 대체 파일: 운영 빌드는 index.html, Vite·webpack PoC 빌드(dist-poc)는 탐침 페이지 하나만 있으므로 탐침 페이지다
+  const spa = build === 'poc' ? app.probe.replace(/^\//, '') : 'index.html';
+  return { command: `node lib/serve.mjs --root ../../${app.dir}/${b.dist} --port ${port} --spa ${spa}`, env: {} };
 }
 
 /** 서버가 떴는지 볼 주소: 운영 빌드는 첫 경로, PoC 빌드는 탐침 */

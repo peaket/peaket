@@ -61,10 +61,10 @@ describe('묶음', () => {
 describe('보내기', () => {
   it('fetch keepalive·쿠키 없음으로 보내고, keepalive가 안 되면 sendBeacon을 쓴다', async () => {
     const fetchFn = vi.fn(async () => new Response(null, { status: 204 }));
-    await sendBatch('/_t/rum', '[]', { fetch: fetchFn });
+    await sendBatch('/_t/rum', '[]', { fetch: fetchFn, keepaliveSupported: true });
     expect(fetchFn).toHaveBeenCalledWith('/_t/rum', expect.objectContaining({ method: 'POST', keepalive: true, credentials: 'omit' }));
     const beacon = vi.fn(() => true);
-    await sendBatch('/_t/rum', '[]', { fetch: vi.fn(async () => Promise.reject(new TypeError('keepalive 안 됨'))), sendBeacon: beacon });
+    await sendBatch('/_t/rum', '[]', { fetch: vi.fn(), sendBeacon: beacon, keepaliveSupported: false });
     expect(beacon).toHaveBeenCalledWith('/_t/rum', '[]');
   });
 });

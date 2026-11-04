@@ -62,12 +62,17 @@ export function routeTemplate(urlOrPath: string, templates: readonly string[]): 
     return UNKNOWN_ROUTE;
   }
   const segs = path.split('/').filter(Boolean);
+  // 맞는 틀 가운데 고정 조각이 가장 많은 틀(같으면 목록에서 앞의 틀). '/events/new'가 '/events/[id]'보다 먼저다
+  let best: string = UNKNOWN_ROUTE;
+  let bestStatic = -1;
   for (const t of templates) {
     const ts = t.split('/').filter(Boolean);
     if (ts.length !== segs.length) continue;
-    if (ts.every((p, i) => (p.startsWith('[') ? segs[i] !== '' : p === segs[i]))) return t;
+    if (!ts.every((p, i) => (p.startsWith('[') ? segs[i] !== '' : p === segs[i]))) continue;
+    const fixed = ts.filter((p) => !p.startsWith('[')).length;
+    if (fixed > bestStatic) [best, bestStatic] = [t, fixed];
   }
-  return UNKNOWN_ROUTE;
+  return best;
 }
 
 export interface BatcherOptions {
@@ -116,24 +121,53 @@ export function createRumBatcher(o: BatcherOptions) {
     queue.push(json);
   }
 
-  /** 쌓인 사건을 64KiB 이하 묶음으로 나눠 보낸다 */
-  async function flush(_reason: 'interval' | 'hidden') {
+  /** 큐 앞에서 64KiB 이하 묶음 하나를 뗀다(본문과 바이트 수) */
+  function takeBatch(): { body: string; size: number } {
+    const batch: string[] = [];
+    let size = 2;
     while (queue.length > 0) {
-      const batch: string[] = [];
-      let size = 2;
-      while (queue.length > 0) {
-        const next = bytes(queue[0]!) + (batch.length > 0 ? 1 : 0);
-        if (size + next > MAX_BATCH_BYTES) break;
-        batch.push(queue.shift()!);
-        size += next;
-      }
-      await o.send(`[${batch.join(',')}]`);
+      const next = bytes(queue[0]!) + (batch.length > 0 ? 1 : 0);
+      if (size + next > MAX_BATCH_BYTES) break;
+      batch.push(queue.shift()!);
+      size += next;
     }
+    return { body: `[${batch.join(',')}]`, size };
+  }
+
+  /**
+   * 쌓인 사건을 64KiB 이하 묶음으로 나눠 보낸다. 주기 보내기(interval)는 묶음을 하나씩 기다려 모두 보낸다.
+   * 화면을 숨길 때(hidden)는 keepalive 한도(문서 하나에서 아직 나가는 중인 keepalive 본문의 합 64KiB, Fetch 표준) 안의 묶음만 바로 내보내고
+   * 나머지는 큐에 남긴다(다시 보이면 다음 주기에 보낸다). 한도를 넘겨 내보내면 브라우저가 그 요청을 바로 거절해 잃기 때문이다
+   */
+  async function flush(reason: 'interval' | 'hidden') {
+    if (reason === 'interval') {
+      while (queue.length > 0) await o.send(takeBatch().body);
+      return;
+    }
+    const sends: Array<Promise<void>> = [];
+    let inFlight = 0;
+    while (queue.length > 0) {
+      const first = bytes(queue[0]!) + 2;
+      if (inFlight + first > MAX_BATCH_BYTES) break;
+      const b = takeBatch();
+      if (inFlight + b.size > MAX_BATCH_BYTES) {
+        // 이 묶음을 다 실으면 한도를 넘는다: 되돌리고 멈춘다
+        queue.unshift(...(JSON.parse(b.body) as unknown[]).map((e) => JSON.stringify(e)));
+        break;
+      }
+      inFlight += b.size;
+      sends.push(o.send(b.body));
+    }
+    await Promise.allSettled(sends);
   }
 
   return {
     add,
     flush,
+    /** 아직 보내지 않은 사건 수 */
+    get pending() {
+      return queue.length;
+    },
     get dropped() {
       return state.dropped;
     },
@@ -143,15 +177,52 @@ export function createRumBatcher(o: BatcherOptions) {
 export interface SendDeps {
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
   sendBeacon?: (url: string, body: string) => boolean;
+  /** 시험에서 바꾼다(기본은 이 브라우저가 keepalive를 아는지) */
+  keepaliveSupported?: boolean;
 }
 
-/** fetch(keepalive, 쿠키 없음)로 보내고, keepalive가 안 되면 sendBeacon(쿠키가 실려 가므로 게이트웨이가 지운다, observability §11) */
+/** 이 브라우저의 fetch가 keepalive를 아는가(Request.keepalive, §1.5 'fetch keepalive' 행: Firefox 133·Safari 13부터) */
+export function keepaliveSupported(): boolean {
+  return typeof Request === 'function' && 'keepalive' in Request.prototype;
+}
+
+/**
+ * fetch(keepalive, 쿠키 없음)로 보내고, keepalive가 안 되는 브라우저만 sendBeacon(쿠키가 실려 가므로 게이트웨이가 지운다, observability §11).
+ * keepalive로 보냈는데 실패한 묶음은 버린다(sendBeacon으로 다시 보내면 쿠키가 실린 같은 묶음이 두 번 갈 수 있다)
+ */
 export async function sendBatch(url: string, body: string, deps: SendDeps = {}): Promise<void> {
+  const keepalive = deps.keepaliveSupported ?? keepaliveSupported();
+  if (!keepalive) {
+    const beacon = deps.sendBeacon ?? ((u: string, b: string) => navigator.sendBeacon(u, b));
+    beacon(url, body);
+    return;
+  }
   const f = deps.fetch ?? ((u: string, i: RequestInit) => fetch(u, i));
   try {
     await f(url, { method: 'POST', body, keepalive: true, credentials: 'omit', headers: { 'content-type': 'application/json' } });
   } catch {
-    const beacon = deps.sendBeacon ?? ((u: string, b: string) => navigator.sendBeacon(u, b));
-    beacon(url, body);
+    // 지표는 잃어도 된다(다시 보내지 않는다)
   }
+}
+
+/** 보내기 일정을 거는 문서(시험은 가짜로 바꾼다) */
+export interface ScheduleDoc {
+  visibilityState: DocumentVisibilityState;
+  addEventListener(type: 'visibilitychange', f: () => void): void;
+  removeEventListener(type: 'visibilitychange', f: () => void): void;
+}
+
+/** 화면이 보이는 동안 60초 [가정]마다, 화면을 숨길 때 바로 보낸다(§5.16 '묶음'). 멈추는 함수를 돌려준다 */
+export function startRumSchedule(b: Pick<ReturnType<typeof createRumBatcher>, 'flush'>, doc: ScheduleDoc = document, intervalMs = FLUSH_INTERVAL_MS): () => void {
+  const timer = setInterval(() => {
+    if (doc.visibilityState === 'visible') void b.flush('interval');
+  }, intervalMs);
+  const onVisibility = () => {
+    if (doc.visibilityState === 'hidden') void b.flush('hidden');
+  };
+  doc.addEventListener('visibilitychange', onVisibility);
+  return () => {
+    clearInterval(timer);
+    doc.removeEventListener('visibilitychange', onVisibility);
+  };
 }

@@ -25,7 +25,8 @@ test('NFR-019 목표 밖의 웹 API와 ES 내장 기능을 바로 쓰면 막는�
   assert.deepEqual(flagged('export const r = Promise.withResolvers();'), ['Promise.withResolvers']);
   assert.deepEqual(flagged('export const g = Object.groupBy([1], (x) => x);'), ['Object.groupBy']);
   assert.deepEqual(flagged('export const v = () => document.startViewTransition(() => {});'), ['document.startViewTransition']);
-  assert.deepEqual(flagged('export const y = () => window.scheduler.yield();'), ['scheduler']);
+  // compat은 scheduler를, 보조 규칙은 window.X.y를 X.y로 보아 scheduler.yield를 잡는다
+  assert.deepEqual(flagged('export const y = () => window.scheduler.yield();'), ['scheduler', 'scheduler.yield']);
   const msg = errors('export const s = AbortSignal.any([]);')[0].message;
   assert.match(msg, /iOS Safari 16\.4/);
   assert.match(msg, /MDN 자료 8\./);

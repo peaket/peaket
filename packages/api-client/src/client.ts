@@ -25,6 +25,8 @@ export interface Operation {
    * 쓰지 않는 경로가 함께 있는 곳(www: 정적 JSON과 계정 연결 제안 앱 서버 경로)은 작업마다 정한다
    */
   cookie?: boolean;
+  /** fetch 캐시 방식(대기 상태 파일은 'no-store', docs/frontend.md §5.9) */
+  cache?: RequestCache;
 }
 
 /**
@@ -143,7 +145,7 @@ export function createApiClient(opts: ClientOptions) {
       };
       let res: Response;
       try {
-        res = await doFetch(url, { method: op.method, headers, body, credentials: credentialsFor(op.host, op), redirect: 'error', signal });
+        res = await doFetch(url, { method: op.method, headers, body, credentials: credentialsFor(op.host, op), redirect: 'error', signal, ...(op.cache ? { cache: op.cache } : {}) });
       } catch (err) {
         release();
         // 화면을 떠나 끊긴 것은 다시 보내지 않는다. 네트워크 오류·시간 초과는 다시 보낼 수 있다
@@ -157,9 +159,10 @@ export function createApiClient(opts: ClientOptions) {
         if (res.ok) {
           if (res.status === 204) return undefined as T;
           const ct = res.headers.get('content-type') ?? '';
-          // JSON은 공용 안전 파서로 읽는다(__proto__·constructor·prototype 키 거절, ASVS 15.3.6)
-          const text = await res.text();
-          return (ct.includes('json') ? parseJsonSafe(text) : text) as T;
+          // JSON은 공용 안전 파서로 읽는다(__proto__·constructor·prototype 키 거절, ASVS 15.3.6). 이진(octet-stream, 좌석 스냅샷)은 ArrayBuffer, 그 밖은 글자
+          if (ct.includes('json')) return parseJsonSafe(await res.text()) as T;
+          if (ct.includes('application/octet-stream')) return (await res.arrayBuffer()) as T;
+          return (await res.text()) as T;
         }
         error = await ApiError.from(res);
       } finally {
@@ -172,7 +175,7 @@ export function createApiClient(opts: ClientOptions) {
       const inProgress = error.status === 409 && error.type === 'idempotency-request-in-progress';
       const unavailable = error.status === 503 && error.retryAfter !== null;
       if (!(inProgress || unavailable) || !retryable || attempt >= maxRetries || !budget.take()) throw error;
-      const delay = retryDelayMs({ retryAfterHeader: error.retryAfter, body: error.body as never, attempt, random, nowMs: now() });
+      const delay = retryDelayMs({ retryAfterHeader: error.retryAfter, dateHeader: error.date, body: error.body as never, attempt, random, nowMs: now() });
       await sleep(delay, o.signal);
     }
   }

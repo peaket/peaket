@@ -9,14 +9,20 @@ const FULL_JITTER_START_MS = 500;
 const FULL_JITTER_CAP_MS = 8000;
 const UPWARD_JITTER = 0.2;
 
-/** Retry-After 헤더 → 기다릴 ms(지금 기준). 읽지 못하면 undefined */
-export function parseRetryAfter(header: string | null | undefined, nowMs: number): number | undefined {
+/**
+ * Retry-After 헤더 → 기다릴 ms. 읽지 못하면 undefined.
+ * 값은 0 이상의 정수 초이거나 HTTP 날짜다(RFC 9110 §10.2.3). '1.5' 같은 값은 Date.parse가 엉뚱한 날짜로 읽으므로 날짜 꼴(요일·월 이름과
+ * 시:분:초)일 때만 날짜로 읽는다. 날짜는 같은 응답의 Date 머리(서버 시계)와 견주고, 그 머리가 없을 때만 기기 시계(nowMs)와 견준다
+ */
+export function parseRetryAfter(header: string | null | undefined, nowMs: number, serverDate?: string | null): number | undefined {
   if (header == null) return undefined;
   const v = header.trim();
   if (/^\d+$/.test(v)) return Number(v) * 1000;
+  if (!/[A-Za-z]{3}/.test(v) || !/\d{1,2}:\d{2}:\d{2}/.test(v)) return undefined;
   const at = Date.parse(v);
   if (Number.isNaN(at)) return undefined;
-  return Math.max(0, at - nowMs);
+  const server = serverDate ? Date.parse(serverDate) : Number.NaN;
+  return Math.max(0, at - (Number.isNaN(server) ? nowMs : server));
 }
 
 /** 하한이 없을 때: attempt번째 다시 시도(0부터)의 전체 지터 */
@@ -27,6 +33,8 @@ export function fullJitterMs(attempt: number, random: Random): number {
 
 export interface RetryHint {
   retryAfterHeader?: string | null;
+  /** 같은 응답의 Date 머리(Retry-After가 날짜일 때 견준다) */
+  dateHeader?: string | null;
   body?: { retryAfterSeconds?: number; pollHintMs?: number; retryAfterMs?: number } | null;
   attempt: number;
   random: Random;
@@ -38,7 +46,7 @@ export function retryDelayMs(h: RetryHint): number {
   const exact = h.body?.retryAfterMs;
   if (typeof exact === 'number' && Number.isFinite(exact) && exact >= 0) return exact;
   const floors = [
-    parseRetryAfter(h.retryAfterHeader, h.nowMs),
+    parseRetryAfter(h.retryAfterHeader, h.nowMs, h.dateHeader),
     typeof h.body?.retryAfterSeconds === 'number' ? h.body.retryAfterSeconds * 1000 : undefined,
     typeof h.body?.pollHintMs === 'number' ? h.body.pollHintMs : undefined,
   ].filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0);

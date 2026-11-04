@@ -120,3 +120,19 @@ describe('HOT-120 새 맥락 리뷰 재현', () => {
     expect(posted.at(-1)).toMatchObject({ type: 'error' });
   });
 });
+
+describe('구간 1 끝 정리', () => {
+  it('등급이 섞인 구역은 좌석이 있는 등급을 모두 가격 차례로 글자에 적고, 면 색은 좌석이 가장 많은 등급이다', () => {
+    const layout = makeLayout();
+    // 0구역의 앞 열 20석을 R로 바꾼다(VIP 180석·R 20석)
+    for (let i = 0; i < 20; i++) layout.sections[0]!.seats.tier[i] = 1;
+    const ctx = fakeCtx();
+    const e = new SeatMapEngine({ ctx, width: 400, height: 300, dpr: 1, theme: 'light' });
+    e.load(layout, snapAll());
+    expect(e.tierLabel(0)).toBe('VIP·R');
+    ctx.calls.length = 0;
+    e.draw();
+    expect(ctx.calls.filter(([n]) => n === 'fillText').map((c) => c[1])[0]).toBe('1구역 VIP·R');
+    expect(ctx.calls.filter(([n]) => n === 'fill').map(([, c]) => c)[1]).toBe(color.light['heat-3']);
+  });
+});

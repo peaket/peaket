@@ -97,6 +97,14 @@ function collect(raw) {
     if ('$value' in node) {
       tokens.set(where, { node, type, path });
       if (type === undefined) problems.push(`${where}: $type이 없다(그룹에서도 물려받지 못했다)`);
+      // DTCG: 토큰은 자식을 갖지 않는다. $ 속성 말고 다른 이름이 있으면 위반이고, 그 아래는 토큰·그룹으로 세지 않는다
+      for (const key of Object.keys(node)) {
+        if (!key.startsWith('$')) problems.push(`${[...path, key].join('.')}: 값($value)을 가진 토큰 아래에는 토큰·그룹을 둘 수 없다(DTCG)`);
+      }
+      for (const key of Object.keys(node)) {
+        if (key.startsWith('$') && !DTCG_PROPS.has(key)) problems.push(`${[...path, key].join('.')}: 이름이 $로 시작한다(DTCG가 정한 속성이 아니다)`);
+      }
+      return;
     } else if (path.length > 0) {
       groups.add(where);
     }
@@ -114,14 +122,50 @@ function collect(raw) {
   return { tokens, groups, problems };
 }
 
+/** 묶음 형식의 칸마다 형식(DTCG 2025.10). 칸 안의 별칭은 이 형식의 토큰을 가리켜야 한다. 여기 없는 칸은 별칭만 푼다 */
+const SUB_TYPES = {
+  shadow: { color: 'color', offsetX: 'dimension', offsetY: 'dimension', blur: 'dimension', spread: 'dimension' },
+  typography: { fontFamily: 'fontFamily', fontSize: 'dimension', fontWeight: 'fontWeight', letterSpacing: 'dimension', lineHeight: 'number' },
+  border: { color: 'color', width: 'dimension', style: 'strokeStyle' },
+  transition: { duration: 'duration', delay: 'duration', timingFunction: 'cubicBezier' },
+  strokeStyle: { dashArray: 'dimension' },
+  gradient: { color: 'color', position: 'number' },
+};
+/** 배열 값의 칸 형식. 여기 없는 형식(그림자·그라데이션 배열 등)은 칸도 같은 형식이다 */
+const ITEM_TYPES = { fontFamily: 'fontFamily', cubicBezier: 'number' };
+/** 값 전체가 아니라 글 안에 섞인 {…}. 빌드도 검사도 별칭으로 풀지 않는다 */
+const INNER_ALIAS = /\{[^{}]*\}/;
+
 /**
  * 값 하나를 끝까지 푼다. 별칭이면 가리키는 토큰의 값을 따라가고, 돌거나 없으면 문제를 남긴다.
- * want가 있으면 별칭이 가리킨 토큰의 형식이 want와 같아야 한다. 풀지 못하면 undefined.
+ * 배열·객체(글꼴 배열, 3차 베지어, 그림자·글자 모양 같은 묶음 형식) 안의 별칭도 칸마다 푼다(칸 형식은 ITEM_TYPES·SUB_TYPES).
+ * want가 있으면 별칭이 가리킨 토큰의 형식이 want와 같아야 한다. 하나라도 풀지 못하면 undefined.
  */
 function resolveValue(ctx, value, where, want, stack = []) {
+  if (Array.isArray(value)) {
+    const item = ITEM_TYPES[want] ?? want;
+    const out = value.map((v) => resolveValue(ctx, v, where, item, stack));
+    return out.includes(undefined) ? undefined : out;
+  }
+  if (isObj(value)) {
+    const subs = SUB_TYPES[want];
+    const out = {};
+    let failed = false;
+    for (const [key, v] of Object.entries(value)) {
+      out[key] = resolveValue(ctx, v, where, subs?.[key], stack);
+      if (out[key] === undefined) failed = true;
+    }
+    return failed ? undefined : out;
+  }
   if (typeof value !== 'string') return value;
   const m = ALIAS.exec(value);
-  if (!m) return value;
+  if (!m) {
+    if (INNER_ALIAS.test(value)) {
+      ctx.problems.push(`${where}: 별칭은 값(칸) 전체여야 한다(글 안에 섞은 ${show(value)}는 풀리지 않는다)`);
+      return undefined;
+    }
+    return value;
+  }
   const target = m[1];
   if (stack.includes(target)) {
     ctx.problems.push(`${where}: 별칭이 돈다(${[...stack, target].join(' → ')})`);
@@ -139,7 +183,7 @@ function resolveValue(ctx, value, where, want, stack = []) {
   return resolveValue(ctx, hit.node.$value, where, hit.type, [...stack, target]);
 }
 
-/** 그림자 값(객체 하나나 배열) 검사. 칸마다 별칭을 풀어 본다 */
+/** 그림자 값(객체 하나나 배열) 검사. 칸 안 별칭은 resolveValue가 이미 풀었다(풀린 값에 다시 불러도 그대로다) */
 function shadowErrors(ctx, value, where) {
   const list = Array.isArray(value) ? value : [value];
   if (list.length === 0 || !list.every(isObj)) return [`그림자 값은 칸 다섯(color·offsetX·offsetY·blur·spread)을 가진 객체(또는 그 배열)여야 한다(받은 값 ${show(value)})`];

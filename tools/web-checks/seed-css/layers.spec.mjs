@@ -37,3 +37,18 @@ for (const app of APPS) {
     expect(scheme).toBe(app.name === 'scanner' ? 'light only' : 'light');
   });
 }
+
+// 탐침 화면은 밝은 화면(.pk)이라 위 시험은 라이트 쪽만 본다. 관제·포렌식의 운영 첫 화면은 <body class="pk dark">라
+// 루트 color-scheme이 dark여야 한다(packages/ds/src/styles/ds.css의 :root:has(.pk.dark)). 운영체제가 라이트여도 다크여도 같다
+const DARK_FIRST_SCREEN = ['console', 'forensics'];
+for (const app of APPS.filter((a) => DARK_FIRST_SCREEN.includes(a.name))) {
+  for (const os of ['light', 'dark']) {
+    test(`SEED base를 실어도 ${app.name} 운영 첫 화면(.pk.dark)의 루트 color-scheme은 dark다(운영체제 ${os})`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: os });
+      await page.goto(`http://${HOST}:${portOf(app, 'prod')}${app.pages[0].path}`);
+      await expect(page.locator('body.pk.dark')).toHaveCount(1);
+      const scheme = await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme);
+      expect(scheme).toBe('dark');
+    });
+  }
+}

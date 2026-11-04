@@ -1,6 +1,8 @@
 // 정적 자산 올리기 목록·소스 맵 링크 검사·정적 자산 SBOM(docs/frontend.md §5.18 '정적 업로드 허용 확장자'·§5.14.5 'SBOM',
 // FE-T21의 '소스 맵 링크·허용 확장자', ASVS 13.4.1·13.4.7·15.1.2, BUILD_ORDER BAS-220).
-//   node static/assets.mjs --app <이름> --dir <빌드 폴더> --out <결과 폴더> [--external <출처>]...
+//   node static/assets.mjs --app <이름> --dir <빌드 폴더> --out <결과 폴더> [--package <앱 폴더>] [--external <출처>]...
+// --package: 앱이 기대는 작업 공간 패키지(@peaket/*, 설정 패키지 빼고)와 그 실행 의존성도 SBOM에 더한다. Vite는 CSS 소스 맵을 내지 않아
+// CSS로만 실리는 패키지(@peaket/ds·@seed-design/css)가 소스 맵에서 빠지기 때문이다(구간 1 끝 정리).
 // 결과: upload.json(올릴 파일과 뺀 파일·까닭), sbom.cdx.json(CycloneDX 1.6, 묶음에 실제로 든 패키지). 오류가 있으면 끝 코드 1.
 // 묶음에 든 패키지는 링크 없는 숨김 소스 맵(.map, 올리지 않는다)의 원본 경로에서 읽는다. 맵이 없는 빌드(Next.js 앱)는 이 도구로
 // SBOM을 만들지 않고 `pnpm --filter <앱> sbom --sbom-format cyclonedx --prod`(실행 의존성, 묶음보다 넓다)를 쓴다.
@@ -93,6 +95,67 @@ export function bundledPackages(dir, repoRoot) {
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** 작업 공간 패키지 이름 → 폴더(packages/*, apps/*) */
+function workspaceDirs(repoRoot) {
+  const out = new Map();
+  for (const top of ['packages', 'apps']) {
+    let names = [];
+    try {
+      names = readdirSync(join(repoRoot, top));
+    } catch {
+      continue;
+    }
+    for (const n of names) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(repoRoot, top, n, 'package.json'), 'utf8'));
+        out.set(pkg.name, join(repoRoot, top, n));
+      } catch {
+        // package.json이 없는 폴더
+      }
+    }
+  }
+  return out;
+}
+
+/** 설치된 패키지의 판(그 패키지 폴더의 node_modules에서, pnpm은 연결로 둔다) */
+function installedVersion(fromDir, name) {
+  try {
+    return JSON.parse(readFileSync(join(fromDir, 'node_modules', ...name.split('/'), 'package.json'), 'utf8')).version;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 앱이 기대는 작업 공간 패키지(dependencies·devDependencies의 workspace:, @peaket/config 빼고)와 그 패키지들의 실행 의존성(dependencies)을 판과 함께 모은다
+ * @param {string} appDir 앱 폴더
+ * @param {string} repoRoot
+ */
+export function workspaceDeps(appDir, repoRoot) {
+  const dirs = workspaceDirs(repoRoot);
+  const found = new Map();
+  const seen = new Set();
+  const visit = (dir, includeDev) => {
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    const deps = { ...(pkg.dependencies ?? {}), ...(includeDev ? (pkg.devDependencies ?? {}) : {}) };
+    for (const [name, spec] of Object.entries(deps)) {
+      if (String(spec).startsWith('workspace:')) {
+        if (name === '@peaket/config' || seen.has(name) || !dirs.has(name)) continue;
+        seen.add(name);
+        const wdir = dirs.get(name);
+        const wpkg = JSON.parse(readFileSync(join(wdir, 'package.json'), 'utf8'));
+        found.set(`${name}@${wpkg.version}`, { name, version: wpkg.version, workspace: true, declared: true });
+        visit(wdir, false);
+      } else if (!includeDev) {
+        const version = installedVersion(dir, name);
+        if (version) found.set(`${name}@${version}`, { name, version, declared: true });
+      }
+    }
+  };
+  visit(appDir, true);
+  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 const purl = (name, version) => `pkg:npm/${name.startsWith('@') ? `%40${name.slice(1)}` : name}@${version}`;
 
 /**
@@ -116,7 +179,12 @@ export function cycloneDx(o) {
       name: p.name,
       version: p.version,
       'bom-ref': purl(p.name, p.version),
-      ...(p.workspace ? { properties: [{ name: 'peaket:workspace', value: 'true' }] } : { purl: purl(p.name, p.version) }),
+      ...(p.workspace ? {} : { purl: purl(p.name, p.version) }),
+      // 출처: source-map = 숨김 소스 맵에서 읽은 묶음에 든 패키지, declared = 앱이 기대는 작업 공간 패키지의 실행 의존성(CSS로만 실리는 것 포함, 묶음에 없을 수 있다)
+      properties: [
+        ...(p.workspace ? [{ name: 'peaket:workspace', value: 'true' }] : []),
+        { name: 'peaket:source', value: p.declared ? 'declared' : 'source-map' },
+      ],
     })),
     // 올린 파일 수(파일마다 크기·SHA-256은 upload.json에 있다)
     properties: [{ name: 'peaket:upload-files', value: String(o.upload.length) }],
@@ -124,14 +192,19 @@ export function cycloneDx(o) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { app: { type: 'string' }, dir: { type: 'string' }, out: { type: 'string' }, external: { type: 'string', multiple: true } } });
+  const { values } = parseArgs({ options: { app: { type: 'string' }, dir: { type: 'string' }, out: { type: 'string' }, package: { type: 'string' }, external: { type: 'string', multiple: true } } });
   if (!values.app || !values.dir || !values.out) {
     console.error('쓰는 법: node static/assets.mjs --app <이름> --dir <빌드 폴더> --out <결과 폴더> [--external <출처>]...');
     process.exit(2);
   }
   const repoRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
   const plan = planUpload(resolve(values.dir));
-  const packages = bundledPackages(resolve(values.dir), repoRoot);
+  const fromMaps = bundledPackages(resolve(values.dir), repoRoot);
+  const fromPkg = values.package ? workspaceDeps(resolve(values.package), repoRoot) : [];
+  // 소스 맵에서 읽은 패키지(묶음에 실제로 든 것)가 이긴다. --package로 더한 것은 '선언한 의존성'(묶음에 들 수 있는 것)으로 표시한다
+  const merged = new Map(fromPkg.map((p) => [`${p.name}@${p.version}`, p]));
+  for (const p of fromMaps) merged.set(`${p.name}@${p.version}`, p);
+  const packages = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
   mkdirSync(values.out, { recursive: true });
   writeFileSync(join(values.out, 'upload.json'), `${JSON.stringify(plan, null, 2)}\n`);
   writeFileSync(join(values.out, 'sbom.cdx.json'), `${JSON.stringify(cycloneDx({ app: values.app, packages, external: values.external, upload: plan.upload }), null, 2)}\n`);

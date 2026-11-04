@@ -124,6 +124,12 @@ export function sizes(text) {
   return {
     raw: buf.length,
     gzip: gzipSync(buf, { level: 6 }).length,
-    brotli: brotliCompressSync(buf, { params: { [constants.BROTLI_PARAM_QUALITY]: 11, [constants.BROTLI_PARAM_SIZE_HINT]: buf.length } }).length,
+    brotli: brotli(buf).length,
   };
+}
+
+/** brotli 11로 미리 압축한다(CDN이 주는 꼴 [가정]). setup이 page/gen/layout.json.br로 쓰고 lib/serve.mjs가 Content-Encoding: br로 준다 */
+export function brotli(text) {
+  const buf = Buffer.isBuffer(text) ? text : Buffer.from(text);
+  return brotliCompressSync(buf, { params: { [constants.BROTLI_PARAM_QUALITY]: 11, [constants.BROTLI_PARAM_SIZE_HINT]: buf.length } });
 }

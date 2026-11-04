@@ -7,7 +7,7 @@
 import { BitmapCache, scaleBucket } from './bitmaps';
 import { buildGrids, cameraFit, hitAtScreen, type Camera, type SectionGrid } from './grid';
 import { FLAG, decodeLayout, sectionOf, seatIdOf, type DecodedLayout, type SeatMapColumnsFile } from './layout';
-import { overviewPalette, pointInPolygon, sectionStatus, sectionTiers, STATUS_LABEL, tierFace } from './overview';
+import { overviewPalette, pointInPolygon, sectionStatus, sectionTierMask, sectionTiers, STATUS_LABEL, tierFace } from './overview';
 import { drawSeat, seatState, seatStyle, type ColorMode, type Ctx2D } from './paint';
 import { applyDelta, applySnapshot, decodeSnapshot, STATE, type DeltaDecision, type Frame, type SectionVersions } from './wire';
 
@@ -57,6 +57,15 @@ export class SeatMapEngine {
   tiers!: Uint8Array;
   /** 등급 색인 → 가격 차례 */
   rank!: Uint8Array;
+  /** 구역마다 있는 등급(비트) */
+  tierMask!: Uint16Array;
+
+  /** 구역의 등급 글자: 좌석이 있는 등급을 모두 가격 차례로(면 색은 가장 많은 등급) */
+  tierLabel(s: number): string {
+    const ids: number[] = [];
+    for (let t = 0; t < 16; t++) if ((this.tierMask[s]! >> t) & 1) ids.push(t);
+    return ids.sort((a, b) => this.rank[a]! - this.rank[b]! || a - b).map((t) => this.L.file.tiers[t]).join('·');
+  }
   /** 스냅샷을 받았는가(받기 전은 loading) */
   hasState = false;
   cam: Camera = { scale: 1, tx: 0, ty: 0 };
@@ -71,6 +80,7 @@ export class SeatMapEngine {
     this.L = decodeLayout(file);
     this.grids = buildGrids(this.L);
     this.tiers = sectionTiers(this.L);
+    this.tierMask = sectionTierMask(this.L);
     // 등급 색인 → 가격 차례(0이 가장 비싸다)
     const rank = this.o.tierRank;
     this.rank = Uint8Array.from(this.L.file.tiers, (t, i) => {
@@ -318,7 +328,7 @@ export class SeatMapEngine {
       const x = cam.tx + sec.label.x * cam.scale;
       const y = cam.ty + sec.label.y * cam.scale;
       // 등급 글자는 늘 함께 쓴다(면 색은 보조, WCAG 1.4.1). 상태는 스냅샷을 받은 뒤에만
-      ctx.fillText(`${sec.name} ${L.file.tiers[this.tiers[s]!]}`, x - 20, y);
+      ctx.fillText(`${sec.name} ${this.tierLabel(s)}`, x - 20, y);
       ctx.fillText(STATUS_LABEL[sectionStatus(L, this.state, s).status], x - 20, y + 14);
     }
   }

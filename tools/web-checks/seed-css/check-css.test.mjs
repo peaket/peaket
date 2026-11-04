@@ -53,6 +53,22 @@ test('검사기 문자열 안의 /* 는 주석 시작이 아니다(리뷰 낮음
   assert.ok(has(checkSeedRules([css]), /seed-action-button.*층 밖/));
 });
 
+test('검사기 @import … layer(x)도 층 선언으로 문서 차례대로 센다(이름 없는 layer는 이름 없는 층)', () => {
+  const css = `@import url("a.css") layer(theme);@import 'b.css' layer( base ) supports(display:grid) screen;@import url(c.css);@import "d.css" layer;@layer seed-base{.a{b:c}}`;
+  assert.deepEqual(scanCss(css).layers, ['theme', 'base', '(이름 없음)', 'seed-base']);
+  // 규칙·블록 뒤의 @import는 브라우저가 버리므로 세지 않는다
+  assert.deepEqual(scanCss('@layer seed-base{.a{b:c}}@import "d.css" layer(late);').layers, ['seed-base']);
+  assert.deepEqual(scanCss('.a{b:c}@import "d.css" layer(late);').layers, []);
+  // url 안의 'layer(' 글은 층이 아니다
+  assert.deepEqual(scanCss(`@import url("x/layer(y).css");@import "layer(z).css" screen;`).layers, []);
+  // 블록 안의 @import는 브라우저가 버리므로 세지 않는다
+  assert.deepEqual(scanCss('@layer outer{@import "e.css" layer(inner);}').layers, ['outer']);
+  // 부품 CSS를 층 순서 선언보다 먼저 @import로 넣으면 ①이 잡는다
+  const importFirst = `@import "recipe.css" layer(seed-components);${ORDER}`;
+  assert.ok(has(checkLayerOrder([importFirst]), /seed-components → theme/), checkLayerOrder([importFirst]).join(' / '));
+  assert.ok(has(checkLayerOrder([ORDER, '@import "w.css" layer(widgets);']), /widgets/));
+});
+
 test('검사기 중첩 층 a.b는 부모 층 a를 먼저 만든다', () => {
   assert.deepEqual(scanCss('@layer x.y{.a{b:c}}@layer x;').layers, ['x', 'x.y']);
   assert.deepEqual(scanCss('@layer p.q, r;').layers, ['p', 'p.q', 'r']);

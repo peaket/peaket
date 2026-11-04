@@ -17,6 +17,8 @@ export const BROWSERS = [
   'last 2 Firefox versions',
   'last 2 Safari versions',
   'last 2 Samsung versions',
+  // 스캐너·관제의 Android Chrome(NFR-019). 데스크톱 Chrome과 판 자료가 따로다
+  'last 2 ChromeAndroid versions',
   'iOS >= 16.4',
 ];
 

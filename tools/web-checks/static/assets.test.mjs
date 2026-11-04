@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ALLOWED_EXTENSIONS, bundledPackages, cycloneDx, planUpload } from './assets.mjs';
+import { ALLOWED_EXTENSIONS, bundledPackages, cycloneDx, planUpload, workspaceDeps } from './assets.mjs';
 import { repoRoot } from '../lib/canon.mjs';
 
 const md = readFileSync(join(repoRoot, 'docs/frontend.md'), 'utf8');
@@ -82,4 +82,21 @@ test('[ASVS v5.0.0-15.1.2] 숨김 소스 맵의 원본 경로에서 묶음에 �
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('[ASVS v5.0.0-15.1.2] --package는 앱이 기대는 작업 공간 패키지와 그 실행 의존성을 더한다(CSS로만 실리는 @peaket/ds·@seed-design/css, 구간 1 끝 정리)', () => {
+  const deps = workspaceDeps(join(repoRoot, 'apps/web/queue-room'), repoRoot);
+  const names = deps.map((d) => d.name);
+  assert.ok(names.includes('@peaket/ds'), names.join(', '));
+  assert.ok(names.includes('@seed-design/css'), names.join(', '));
+  assert.ok(!names.includes('@peaket/config'));
+  assert.ok(!names.includes('vite'), '빌드 도구(앱의 devDependencies 가운데 작업 공간 밖)는 넣지 않는다');
+  assert.match(deps.find((d) => d.name === '@seed-design/css').version, /^\d+\.\d+\.\d+/);
+});
+
+test('[ASVS v5.0.0-15.1.2] --package로 더한 것은 출처를 declared로, 소스 맵에서 읽은 것은 source-map으로 표시한다(묶음에 실제로 든 것과 가른다)', () => {
+  const bom = cycloneDx({ app: 'queue-room', upload: [], packages: [{ name: 'react', version: '19.3.1' }, { name: 'chart.js', version: '4.6.0', declared: true }, { name: '@peaket/ds', version: '0.0.0', workspace: true, declared: true }] });
+  const src = Object.fromEntries(bom.components.map((c) => [c.name, c.properties.find((p) => p.name === 'peaket:source').value]));
+  assert.deepEqual(src, { react: 'source-map', 'chart.js': 'declared', '@peaket/ds': 'declared' });
+  assert.equal(bom.components.find((c) => c.name === '@peaket/ds').purl, undefined);
 });

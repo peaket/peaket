@@ -26,6 +26,13 @@ export function sectionTiers(L: DecodedLayout): Uint8Array {
   return out;
 }
 
+/** 구역마다 좌석이 하나라도 있는 등급 색인 비트(비트 t = tiers[t]가 있다) */
+export function sectionTierMask(L: DecodedLayout): Uint16Array {
+  const out = new Uint16Array(L.S);
+  for (let s = 0; s < L.S; s++) for (let k = L.sectionStart[s]!; k <= L.sectionEnd[s]!; k++) out[s]! |= 1 << (L.attr[k]! & 15);
+  return out;
+}
+
 /** 구역 하나의 남은 좌석(판매 제외 좌석은 세지 않는다)과 상태 */
 export function sectionStatus(L: DecodedLayout, state: Uint8Array, s: number): { free: number; sellable: number; status: SectionStatus } {
   let free = 0;

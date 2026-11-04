@@ -41,6 +41,20 @@ function stripComments(css) {
 }
 
 /**
+ * `@import` 머리말에서 층 이름을 읽는다. `layer(x)`면 x, 이름 없는 `layer`면 '(이름 없음)'(@layer {}와 같은 이름), 층이 없으면 null.
+ * 따옴표 글과 url(…)은 먼저 비운다(파일 이름 안의 'layer('는 층이 아니다).
+ */
+function importLayer(prelude) {
+  const rest = prelude
+    .slice('@import'.length)
+    .replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, '""')
+    .replace(/url\([^)]*\)/gi, 'url()');
+  const m = /(?<![\w-])layer(?:\(\s*([^()]*?)\s*\)|(?![\w(-]))/i.exec(rest);
+  if (!m) return null;
+  return m[1] || '(이름 없음)';
+}
+
+/**
  * CSS 한 파일을 훑는다.
  * @returns {{ layers: string[], rules: { selector: string, layer: string | null }[] }} 층 이름(처음 나온 차례, 중첩은 a.b)과 규칙마다 든 층
  */
@@ -59,6 +73,8 @@ export function scanCss(input) {
   };
   const stack = [{ kind: 'root', layer: null }];
   let start = 0;
+  // @import는 맨 앞(@charset·@layer 문 다음)에만 쓸 수 있다. 규칙·블록이 한 번 나온 뒤의 @import는 브라우저가 버린다
+  let pastImports = false;
   let quote = null;
   let paren = 0;
   for (let i = 0; i < css.length; i++) {
@@ -88,6 +104,7 @@ export function scanCss(input) {
     if (paren > 0) continue;
     const top = stack[stack.length - 1];
     if (ch === '{') {
+      if (stack.length === 1) pastImports = true;
       const prelude = css.slice(start, i).trim();
       start = i + 1;
       if (top.kind === 'skip') {
@@ -115,6 +132,12 @@ export function scanCss(input) {
         for (const n of prelude.slice('@layer'.length).split(',').map((s) => s.trim()).filter(Boolean)) {
           declare(top.layer ? `${top.layer}.${n}` : n);
         }
+      } else if (top.kind === 'root' && /^@import\b/i.test(prelude)) {
+        // @import … layer(x)·layer도 그 자리(문서 차례)에서 층을 선언한다. 블록 안의 @import와 규칙 뒤의 @import는 브라우저가 버리므로 세지 않는다
+        const n = pastImports ? null : importLayer(prelude);
+        if (n !== null) declare(n);
+      } else if (top.kind === 'root' && prelude && !/^@charset\b/i.test(prelude)) {
+        pastImports = true;
       }
     } else if (ch === '}') {
       if (stack.length > 1) stack.pop();

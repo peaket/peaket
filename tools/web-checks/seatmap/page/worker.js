@@ -1,6 +1,7 @@
 // 5만 석 좌석맵 PoC Worker(BUILD_ORDER BAS-190, K5, docs/frontend.md §3.5·§5.2). 제품 코드가 아니다.
 // 열 단위 좌석맵 파일을 받아 형식 배열(Float32Array·Uint8Array)로 풀고 구역별 격자 색인을 만든 뒤 OffscreenCanvas에 그린다.
 // 잰 값은 절대 시각(timeOrigin + now)으로 메인에 보낸다.
+// 풀기 뒤에는 그리기·홀드 요청에 쓰는 것(형식 배열, 좌석 ID 열, 구역 이름·도형·글자 자리, 무대, 캔버스 크기)만 쥐고 JSON 나머지는 버린다(힙).
 const abs = () => performance.timeOrigin + performance.now();
 // Chromium 캔버스는 그리기 명령을 모아 두었다가 나중에 그린다. 잰 구간 끝에서 한 화소를 읽어 그리기를 끝내게 한다(읽기 비용이 더해져 보수적이다)
 const flush = (c) => c.getImageData(0, 0, 1, 1);
@@ -51,7 +52,32 @@ function decode(json) {
     const r = h % 100;
     state[k] = r < 15 ? 2 : r < 30 ? 1 : 0;
   }
-  return { N, S, x, y, attr, state, sectionStart, sectionEnd, bounds, seatIds, json };
+  // 그리기에 쓰는 구역 정보만 옮긴다. 좌석 열(row·number·x·y·tier·flags)과 원문 JSON은 쥐지 않는다(좌석 ID 열만 남긴다)
+  const meta = {
+    canvas: json.canvas,
+    stage: json.stage,
+    sections: json.sections.map((sec) => ({ name: sec.name, shape: sec.shape, label: sec.label })),
+  };
+  return { N, S, x, y, attr, state, sectionStart, sectionEnd, bounds, seatIds, meta };
+}
+
+/**
+ * 받기·JSON 풀기·형식 배열. 원문 글과 JSON은 이 함수의 지역 값이라 돌아가면 버려진다(keep이 'json'이면 예전처럼 L.json에 쥔다)
+ * @returns {Promise<{ L: object, jsonChars: number, encoding: string | null, fromCache: boolean | null }>}
+ */
+async function load(url, t, keep) {
+  const res = await fetch(url);
+  const text = await res.text();
+  t.fetched = abs();
+  const json = JSON.parse(text);
+  t.parsed = abs();
+  const out = decode(json);
+  t.decoded = abs();
+  if (keep === 'json') out.json = json;
+  // 전송 크기 0이면 HTTP 캐시에서 읽었다(Resource Timing. 모르는 엔진은 null)
+  const entry = performance.getEntriesByName(url).pop();
+  const fromCache = entry && 'transferSize' in entry ? entry.transferSize === 0 : null;
+  return { L: out, jsonChars: text.length, encoding: res.headers.get('content-encoding'), fromCache };
 }
 
 /** 구역별 격자 색인(CSR): 칸 → 좌석 색인 목록 */
@@ -119,13 +145,13 @@ function drawOverview(cam) {
   clear();
   ctx.setTransform(DPR * cam.scale, 0, 0, DPR * cam.scale, DPR * cam.tx, DPR * cam.ty);
   ctx.fillStyle = '#1b1d22';
-  for (const st of L.json.stage) {
+  for (const st of L.meta.stage) {
     ctx.beginPath();
     ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2);
     ctx.fill();
   }
   for (let s = 0; s < L.S; s++) {
-    const sec = L.json.sections[s];
+    const sec = L.meta.sections[s];
     let free = 0;
     for (let k = L.sectionStart[s]; k <= L.sectionEnd[s]; k++) if (L.state[k] === 0) free++;
     const ratio = free / (L.sectionEnd[s] - L.sectionStart[s] + 1);
@@ -141,7 +167,7 @@ function drawOverview(cam) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = '#1b1d22';
   ctx.font = '600 12px system-ui, sans-serif';
-  for (const sec of L.json.sections) ctx.fillText(sec.name, cam.tx + sec.label.x * cam.scale - 14, cam.ty + sec.label.y * cam.scale + 4);
+  for (const sec of L.meta.sections) ctx.fillText(sec.name, cam.tx + sec.label.x * cam.scale - 14, cam.ty + sec.label.y * cam.scale + 4);
 }
 
 /** 좌석 하나: 상태 색 + 무늬(판매 X, 다른 분 선택 빗금 한 줄, 내 좌석은 테두리) — 색만으로 가르지 않는다(d2 §1) */
@@ -227,16 +253,11 @@ async function run(m) {
   canvas.width = Math.round(W * DPR);
   canvas.height = Math.round(H * DPR);
   ctx = canvas.getContext('2d', { alpha: false });
-  const res = await fetch(m.url);
-  const text = await res.text();
-  t.fetched = abs();
-  const json = JSON.parse(text);
-  t.parsed = abs();
-  L = decode(json);
-  t.decoded = abs();
+  const loaded = await load(m.url, t, m.keep);
+  L = loaded.L;
   buildGrid();
   t.indexed = abs();
-  const cv = json.canvas;
+  const cv = L.meta.canvas;
   const overviewCam = cameraFit(cv.minX, cv.minY, cv.width, cv.height);
   drawOverview(overviewCam);
   flush(ctx);
@@ -292,7 +313,9 @@ async function run(m) {
     t,
     seatCount: L.N,
     sections: L.S,
-    jsonChars: text.length,
+    jsonChars: loaded.jsonChars,
+    encoding: loaded.encoding,
+    fromCache: loaded.fromCache,
     mid: { drawn: midDrawn, directMs: midDirectMs, prerenderMs, blitMs, bitmapBytes: pre.bytes, bitmapPx: [pre.w, pre.h] },
     close: { drawn: closeDrawn, ms: closeMs },
     deltaMs,

@@ -1,7 +1,15 @@
 // 5만 석 배치 생성기 시험(BUILD_ORDER BAS-190, K5 PoC의 도구). 인수 시험 ID K5는 브라우저 측정(seatmap.spec.mjs)에만 단다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateLayout, toObjectLayout, sizes, FLAG, DEFAULT_GRID } from './layout.mjs';
+import { brotliDecompressSync } from 'node:zlib';
+import { generateLayout, toObjectLayout, sizes, brotli, FLAG, DEFAULT_GRID } from './layout.mjs';
+
+test('도구 미리 압축(brotli 11)은 풀면 원문이고 크기 표의 brotli 값과 같다(정적 서버가 layout.json.br로 준다)', () => {
+  const text = JSON.stringify(generateLayout({ sections: 2, rows: 3, perRow: 4 }));
+  const br = brotli(text);
+  assert.equal(brotliDecompressSync(br).toString(), text);
+  assert.equal(br.length, sizes(text).brotli);
+});
 
 test('도구 기본 배치는 5만 석이고 구역 색인 범위가 겹치지 않고 빈틈없이 이어진다', () => {
   const l = generateLayout();

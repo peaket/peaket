@@ -20,6 +20,8 @@ node lib/docker.mjs seatmap                 # K5 PoC를 컨테이너의 세 엔�
 ```
 
 - 이 PC(Windows)의 Firefox는 Playwright 1.64.1 판이 side-by-side 구성 오류로 뜨지 않는다(2026-11-04). 그때는 `node seed-css/serve-all.mjs`로 서버를 띄워 두고 `node lib/docker.mjs layers`로 컨테이너 안 세 엔진이 `host.docker.internal`의 서버를 보게 한다.
+- 리눅스 Docker Engine에서는 `host.docker.internal`이 다리 주소라 127.0.0.1에 붙은 정적 서버에 닿지 않는다. `node seed-css/serve-all.mjs --host 0.0.0.0`(또는 `PEAKET_SERVE_HOST=0.0.0.0`)으로 띄운다(Docker Desktop은 기본값으로 닿는다). 서버를 끌 때(Ctrl+C) 셸 아래 서버까지 끈다(Windows `taskkill /T /F`, 그 밖은 프로세스 묶음).
+- 성능 예산 기록의 표: `node budgets/report.mjs [--reports <폴더>]`(첫 JS·Lighthouse, Markdown을 표준 출력으로).
 - 시각 회귀 설정은 리눅스가 아니면 멈춘다(그리기가 달라 늘 실패한다). 연습으로만 돌릴 때는 `PEAKET_VISUAL_ANY_OS=1`.
 - 기준 이미지를 바꾸면 PR에서 그림 차이를 보고 승인한다(FE-T40). 토큰이나 `@peaket/ds`를 바꾼 PR은 CI 화면 잡의 `visual`이 반드시 돈다(docs/devops.md §3.1 `ci-web.yml`).
 - 크기는 docs/frontend.md §5.8 CSS 열의 예산(kB = 1,000바이트)과 견준다. 예산을 넘은 경로는 [seed-css/css-baseline.json](seed-css/css-baseline.json)의 값 + 0.5kB를 넘지 않게만 막는다. 줄면 그 값을 낮춘다.
@@ -32,5 +34,7 @@ node lib/docker.mjs seatmap                 # K5 PoC를 컨테이너의 세 엔�
 | `seed-css/css.spec.mjs`·`layers.spec.mjs` | FE-T36 ①②③·크기(브라우저 없이), ④(세 엔진) |
 | `visual/queue-room.spec.mjs` | FE-T40 대기실 셸 |
 | `lib/canon.mjs` | 정본에서 읽는 값(§5.8 CSS 예산, tokens.json 의미 색) |
-| `lib/serve.mjs` | 의존성 없는 정적 서버(대기실 배포 흉내 `--preset queue-room`, 단일 페이지 대체) |
-| `lib/docker.mjs` | 판을 고정한 Playwright 컨테이너에서 검사 돌리기 |
+| `lib/serve.mjs` | 의존성 없는 정적 서버(대기실 배포 흉내 `--preset queue-room`, 단일 페이지 대체, 붙을 주소 `--host`·`PEAKET_SERVE_HOST`, 미리 압축한 `<파일>.br` 전송, `--cache-control`) |
+| `lib/docker.mjs` | 판을 고정한 Playwright 컨테이너에서 검사 돌리기(pnpm 판은 이 패키지 `packageManager`에서 읽는다) |
+| `budgets/report.mjs` | 성능 예산 기록(`reports/sizes-js/`·`reports/lighthouse/`)을 Markdown 표로 |
+| `seatmap/judge.mjs` | K5 PoC 판정 어림(CPU 느리게 하기가 걸리지 않는 Worker 몫에 배수 곱하기) |

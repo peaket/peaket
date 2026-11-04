@@ -13,6 +13,17 @@ if (PerformanceObserver.supportedEntryTypes?.includes('longtask')) {
   result.longTasks = null;
 }
 
+// 좌석 화면에 들어오기 전(대기 중)에 배치 파일을 미리 받아 HTTP 캐시에 둔다(§5.2 실제 길). Worker는 캐시에서 받아 brotli를 푼다.
+// ?keep=json이면 Worker가 풀기 뒤에도 JSON 전체를 쥔다(예전 방식, 힙 비교용)
+const layoutUrl = new URL('./gen/layout.json', import.meta.url).href;
+const keep = new URLSearchParams(location.search).get('keep');
+{
+  const p0 = abs();
+  const pr = await fetch(layoutUrl);
+  const bytes = (await pr.arrayBuffer()).byteLength;
+  result.prefetch = { ms: abs() - p0, encoding: pr.headers.get('content-encoding'), bytes };
+}
+
 const started = abs();
 const canvas = document.getElementById('seatmap');
 // OffscreenCanvas가 없는 브라우저는 메인 스레드 그리기로 대신한다(docs/frontend.md FE-T15). PoC는 '미지원'으로 기록만 한다
@@ -26,7 +37,9 @@ const W = canvas.clientWidth;
 const H = canvas.clientHeight;
 const offscreen = canvas.transferControlToOffscreen();
 const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
-worker.postMessage({ type: 'init', canvas: offscreen, width: W, height: H, dpr: window.devicePixelRatio, url: new URL('./gen/layout.json', import.meta.url).href }, [offscreen]);
+worker.postMessage({ type: 'init', canvas: offscreen, width: W, height: H, dpr: window.devicePixelRatio, url: layoutUrl, keep }, [offscreen]);
+// 여기까지가 메인 몫(Worker 만들기·캔버스 넘기기·init 보내기). CPU 느리게 하기는 이 몫에만 걸린다
+const posted = abs();
 
 /** 접근성 목록 모형(CMP-022): 지금 연 구역의 좌석 상태와 '가능' 좌석 수 */
 const list = { section: -1, states: null, free: 0 };
@@ -38,7 +51,7 @@ worker.onmessage = (e) => {
   const t0 = performance.now();
   const m = e.data;
   if (m.type === 'ready') {
-    result.ready = { ...m, startedAt: started, readyAt: abs() };
+    result.ready = { ...m, startedAt: started, postedAt: posted, readyAt: abs() };
   } else if (m.type === 'sectionState') {
     latency.push(abs() - m.sentAt);
     list.section = m.section;

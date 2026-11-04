@@ -14,9 +14,11 @@ export class ApiError extends Error {
   readonly extensions: Record<string, unknown>;
   /** 서버가 준 다시 시도 시각(있으면) */
   readonly retryAfter: string | null;
+  /** 응답의 Date 머리(서버 시계, Retry-After 날짜와 견준다) */
+  readonly date: string | null;
   readonly body: Record<string, unknown> | null;
 
-  constructor(status: number, problem: Record<string, unknown> | null, retryAfter: string | null) {
+  constructor(status: number, problem: Record<string, unknown> | null, retryAfter: string | null, date: string | null = null) {
     const type = typeof problem?.type === 'string' ? (problem.type.split('/').filter(Boolean).pop() ?? 'about:blank') : `http-${status}`;
     super(`HTTP ${status} ${type}`);
     this.name = 'ApiError';
@@ -27,6 +29,7 @@ export class ApiError extends Error {
     this.traceId = typeof problem?.traceId === 'string' ? problem.traceId : undefined;
     this.extensions = Object.fromEntries(Object.entries(problem ?? {}).filter(([k]) => !KNOWN.has(k)));
     this.retryAfter = retryAfter;
+    this.date = date;
     this.body = problem;
   }
 
@@ -43,6 +46,6 @@ export class ApiError extends Error {
         body = null;
       }
     }
-    return new ApiError(res.status, body, res.headers.get('retry-after'));
+    return new ApiError(res.status, body, res.headers.get('retry-after'), res.headers.get('date'));
   }
 }
