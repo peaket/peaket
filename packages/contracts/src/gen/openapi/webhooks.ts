@@ -17,24 +17,24 @@ import * as zod from 'zod';
  * FR-041, FR-062, ADR-0015·0044·0047. 인증 없음(gw-partner), payment-svc가 검증. 결제 이벤트는 결제 기록의 결제사가 TOSS일 때만 반영. 지급대행 이벤트(payout.changed·seller.changed)는 tosspayments-webhook-signature를 보안 키 HMAC-SHA256으로 상수 시간 비교하고, 맞아도 단건 조회로 확정
  * @summary 토스페이먼츠 웹훅 수신(PAYMENT_STATUS_CHANGED, DEPOSIT_CALLBACK, payout.changed, seller.changed). 본문 불신, 조회 API 재확인, transmission-id 중복 제거
  */
-export const PostV1WebhooksTossHeader = zod.object({
+export const ReceiveTossWebhookHeader = zod.object({
   "tosspayments-webhook-transmission-id": zod.string(),
   "tosspayments-webhook-transmission-time": zod.string().describe('발송 시각(예 2024-09-05T12:19:21+09:00). 지급 웹훅은 지금과 5분 넘게 다르면 본문을 쓰지 않고 단건 조회만 한다(ADR-0053)'),
   "tosspayments-webhook-transmission-retried-count": zod.int().optional(),
   "tosspayments-webhook-signature": zod.string().optional().describe('payout.changed·seller.changed에만. v1: 뒤 base64 값(키 재발급 중 최대 4개)')
 })
 
-export const PostV1WebhooksTossResponse = zod.unknown()
+export const ReceiveTossWebhookResponse = zod.unknown()
 
 /**
  * FR-041, ADR-0029, ADR-0036. 서명 헤더는 Standard Webhooks의 세 헤더(2026-10-09 확인). 검증은 서버 SDK가 하고 시각 차이 5분을 넘으면 거부. 모르는 이벤트 종류는 무시. 결제 기록의 결제사가 PORTONE일 때만 반영(ADR-0044)
  * @summary 포트원 웹훅 수신(Transaction.Paid·Failed·Cancelled·PartialCancelled·CancelPending 등). Standard Webhooks 서명을 서버 SDK로 검증, 조회 API 재확인, webhook-id로 중복 제거
  */
-export const PostV1WebhooksPortoneHeader = zod.object({
+export const ReceivePortoneWebhookHeader = zod.object({
   "webhook-id": zod.string(),
   "webhook-timestamp": zod.string(),
   "webhook-signature": zod.string()
 })
 
-export const PostV1WebhooksPortoneResponse = zod.unknown()
+export const ReceivePortoneWebhookResponse = zod.unknown()
 

@@ -20,7 +20,7 @@ export const PortoneCheckout = zod.object({
   "currency": zod.string().describe('결제 통화. SDK에 넘기는 값의 표기는 연동 때 포트원 문서로 확인한다'),
   "redirectUrl": zod.url(),
   "customer": zod.record(zod.string(), zod.string()).optional().describe('채널이 요구하는 구매자 항목만(이메일·휴대폰. SDK 필드 이름은 연동 때 확인)')
-}).strict()
+})
 
 export type PortoneCheckout = zod.input<typeof PortoneCheckout>;
 export type PortoneCheckoutOutput = zod.output<typeof PortoneCheckout>;

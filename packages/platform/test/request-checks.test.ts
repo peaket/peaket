@@ -5,13 +5,13 @@ import { Body, Controller, Get, HttpCode, Module, Post } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { z } from 'zod';
 import { MerchOrderItems } from '@peaket/contracts/openapi/model';
-import { PostV1QueuesEventIdEntriesBody, PostV1QueuesEventIdEntriesParams } from '@peaket/contracts/openapi/queue';
+import { CreateQueueEntryBody, CreateQueueEntryParams } from '@peaket/contracts/openapi/queue';
 import {
-  GetV1EventsEventIdSeatmapSnapshotParams,
-  GetV1EventsEventIdSeatmapSnapshotQueryParams,
-  PostV1EventsEventIdHoldsBody,
-  PostV1EventsEventIdHoldsHeader,
-  PostV1EventsEventIdHoldsParams,
+  GetEventSeatmapSnapshotParams,
+  GetEventSeatmapSnapshotQueryParams,
+  CreateEventHoldBody,
+  CreateEventHoldHeader,
+  CreateEventHoldParams,
 } from '@peaket/contracts/openapi/seats';
 import {
   AcceptTextPlain,
@@ -41,8 +41,8 @@ class PipeController {
   @Get('events/:eventId/seatmap/snapshot')
   @Roles(['public'])
   snapshot(
-    @ContractParams(GetV1EventsEventIdSeatmapSnapshotParams) params: unknown,
-    @ContractQuery(GetV1EventsEventIdSeatmapSnapshotQueryParams) query: unknown,
+    @ContractParams(GetEventSeatmapSnapshotParams) params: unknown,
+    @ContractQuery(GetEventSeatmapSnapshotQueryParams) query: unknown,
   ) {
     return { params, query };
   }
@@ -54,9 +54,9 @@ class PipeController {
   @Idempotent({ operation: 'CREATE_HOLD' })
   @PurchaseSigned()
   hold(
-    @ContractParams(PostV1EventsEventIdHoldsParams) _params: unknown,
-    @ContractHeaders(PostV1EventsEventIdHoldsHeader) headers: Record<string, unknown>,
-    @ContractBody(PostV1EventsEventIdHoldsBody) body: unknown,
+    @ContractParams(CreateEventHoldParams) _params: unknown,
+    @ContractHeaders(CreateEventHoldHeader) headers: Record<string, unknown>,
+    @ContractBody(CreateEventHoldBody) body: unknown,
     @IdempotencyRequest() idem: IdempotencyRequest,
   ) {
     return { headers, key: idem.key, body };
@@ -72,7 +72,7 @@ class PipeController {
   @Post('queues/:eventId/entries')
   @Roles(['public'])
   @AcceptTextPlain()
-  entry(@ContractParams(PostV1QueuesEventIdEntriesParams) _p: unknown, @ContractBody(PostV1QueuesEventIdEntriesBody) body: unknown) {
+  entry(@ContractParams(CreateQueueEntryParams) _p: unknown, @ContractBody(CreateQueueEntryBody) body: unknown) {
     return { body };
   }
 
@@ -110,7 +110,7 @@ class RouteSchemaController {
   @Roles(['fan'])
   @Idempotent({ operation: 'CREATE_HOLD' })
   @PurchaseSigned()
-  @ContractRouteSchema({ params: PostV1EventsEventIdHoldsParams, headers: PostV1EventsEventIdHoldsHeader, body: PostV1EventsEventIdHoldsBody })
+  @ContractRouteSchema({ params: CreateEventHoldParams, headers: CreateEventHoldHeader, body: CreateEventHoldBody })
   hold(@Body() body: unknown) {
     return { body };
   }
@@ -119,7 +119,7 @@ class RouteSchemaController {
   @Post('queues/:eventId/entries')
   @Roles(['public'])
   @AcceptTextPlain()
-  @ContractRouteSchema({ params: PostV1QueuesEventIdEntriesParams, body: PostV1QueuesEventIdEntriesBody })
+  @ContractRouteSchema({ params: CreateQueueEntryParams, body: CreateQueueEntryBody })
   entry() {
     return { ok: true };
   }
@@ -240,12 +240,14 @@ async function bothWays(pathA: string, pathB: string, samples: { name: string; h
 }
 
 describe('두 길의 표본 일치(V-T41 표본 묶음)', () => {
-  test('FND070_좌석홀드표본을_Zod파이프와경로스키마가_같게거른다', async () => {
+  test('[ASVS v5.0.0-15.3.3] FND070_좌석홀드표본을_Zod파이프와경로스키마가_같게거른다', async () => {
     const seats11 = JSON.stringify({ seatIds: Array.from({ length: 11 }, (_, i) => `A-${i}`) });
     await bothWays('/v1/t/events/e1/holds', '/v1/t/rs/events/e1/holds', [
       { name: '직접 선택', headers: holdHeaders, payload: '{"seatIds":["A-1"]}', expect: 200 },
       { name: '자동 배정(기본값)', headers: holdHeaders, payload: '{"auto":{"firstTierId":"t1","count":2}}', expect: 200 },
-      { name: '모르는 칸(닫지 않은 객체)', headers: holdHeaders, payload: '{"seatIds":["A-1"],"zzz":1}', expect: 200 },
+      // 핫패스 요청 본문은 계약에서 닫혀 있다(BAS-040, FND-070이 넘긴 것): 두 길 모두 정의 밖 칸을 400으로 거절한다
+      { name: '모르는 칸(닫은 본문)', headers: holdHeaders, payload: '{"seatIds":["A-1"],"zzz":1}', expect: 400 },
+      { name: '모르는 칸(닫은 안쪽 객체)', headers: holdHeaders, payload: '{"auto":{"firstTierId":"t1","count":2,"zzz":1}}', expect: 400 },
       { name: '배열 자리에 문자열', headers: holdHeaders, payload: '{"seatIds":"A-1"}', expect: 400 },
       { name: '배열 상한 초과', headers: holdHeaders, payload: seats11, expect: 400 },
       { name: '닫은 객체의 모르는 칸', headers: holdHeaders, payload: '{"behavior":{"v":1,"windowMs":10,"extra":1}}', expect: 400 },

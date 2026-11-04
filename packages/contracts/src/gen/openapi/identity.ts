@@ -17,12 +17,12 @@ import * as zod from 'zod';
  * FR-066, ADR-0051, 정보통신망법 §23의5④ 단서. 본인확인기관 결과의 ci_hmac을 보유 계정 값과 비교해 같으면 reverificationToken(5분, 계정·티켓에 묶임)을 준다. 연계정보 원문은 저장하지 않는다
  * @summary 부스 재발급용 본인확인 대조 시작(대조 목적 별도 동의 필수)
  */
-export const PostV1IdentityBoothReverificationsBody = zod.object({
+export const CreateIdentityBoothReverificationBody = zod.object({
   "ticketId": zod.string(),
   "consent": zod.boolean().describe('대조 목적 동의(true만 허용)')
-})
+}).strict()
 
-export const PostV1IdentityBoothReverificationsResponse = zod.object({
+export const CreateIdentityBoothReverificationResponse = zod.object({
   "verificationId": zod.string().optional(),
   "window": zod.object({
   "url": zod.url().optional(),
@@ -40,13 +40,13 @@ export const PostV1IdentityBoothReverificationsResponse = zod.object({
 
 
 
-export const PostV1IdentityMinorContractChecksBody = zod.object({
+export const CreateIdentityMinorContractCheckBody = zod.object({
   "orderIds": zod.array(zod.string()).min(1),
   "consent": zod.literal(true).describe('확인 목적 동의(true만 허용)'),
   "verificationResultToken": zod.string()
-})
+}).strict()
 
-export const PostV1IdentityMinorContractChecksResponse = zod.object({
+export const CreateIdentityMinorContractCheckResponse = zod.object({
   "under19AtContract": zod.boolean().optional()
 })
 
@@ -54,11 +54,11 @@ export const PostV1IdentityMinorContractChecksResponse = zod.object({
  * FR-046, POL-031, ADR-0051
  * @summary 초대 내용 조회(SCR-050). 토큰은 링크의 URL 조각에서 꺼내 본문으로 보낸다
  */
-export const PostV1StaffInvitationLookupsBody = zod.object({
+export const CreateStaffInvitationLookupBody = zod.object({
   "inviteToken": zod.string()
-})
+}).strict()
 
-export const PostV1StaffInvitationLookupsResponse = zod.object({
+export const CreateStaffInvitationLookupResponse = zod.object({
   "partnerName": zod.string().optional(),
   "eventTitle": zod.string().optional(),
   "eventStartsAt": zod.iso.datetime({"offset":true}).optional(),
@@ -77,17 +77,17 @@ export const PostV1StaffInvitationLookupsResponse = zod.object({
  * FR-046, POL-031, ADR-0051, 개인정보 보호법 §15①1호·§17①1호·§22①1호·2호. 역할은 초대에서 정해지고 본문으로 받지 않는다
  * @summary 현장 스태프 초대 수락(본인확인 완료·검증 이메일 일치 계정, 동의 두 개, 24시간·1회용)
  */
-export const postV1StaffInvitationAcceptancesBodyConsentVersionRegExp = new RegExp('^[0-9A-Za-z._-]{1,32}$');
+export const createStaffInvitationAcceptanceBodyConsentVersionRegExp = new RegExp('^[0-9A-Za-z._-]{1,32}$');
 
 
-export const PostV1StaffInvitationAcceptancesBody = zod.object({
+export const CreateStaffInvitationAcceptanceBody = zod.object({
   "inviteToken": zod.string(),
   "consentCollection": zod.boolean().optional().describe('수집·이용 동의'),
   "consentProvision": zod.boolean().optional().describe('파트너 제공 동의'),
-  "consentVersion": zod.string().regex(postV1StaffInvitationAcceptancesBodyConsentVersionRegExp).optional().describe('초대 내용 조회(StaffInvitationView.consents.consentVersion)로 받아 화면에 보인 두 고지 문안의 판. staff_assignment.consent_version에 넣는다(ADR-0089). 32자 상한은 [가정](추천 적용 2026-10-30, docs/data.md staff_assignment)')
-})
+  "consentVersion": zod.string().regex(createStaffInvitationAcceptanceBodyConsentVersionRegExp).optional().describe('초대 내용 조회(StaffInvitationView.consents.consentVersion)로 받아 화면에 보인 두 고지 문안의 판. staff_assignment.consent_version에 넣는다(ADR-0089). 32자 상한은 [가정](추천 적용 2026-10-30, docs/data.md staff_assignment)')
+}).strict()
 
-export const PostV1StaffInvitationAcceptancesResponse = zod.object({
+export const CreateStaffInvitationAcceptanceResponse = zod.object({
   "assignmentId": zod.string().optional(),
   "eventId": zod.string().optional(),
   "nickname": zod.string().optional(),
@@ -104,11 +104,11 @@ export const PostV1StaffInvitationAcceptancesResponse = zod.object({
  * FR-046, RFC 8628 §5.4 원격 피싱 대응, ADR-0051. 배정 파트너 이름(상호)과 배정 회차의 공연명은 싣지 않고, 화면이 배정의 eventId로 회차 공개 요약(GET /v1/events/{eventId})을 읽는다(소유자 결정 2026-10-30, open-items 78번, DeviceApprovalView)
  * @summary 승인할 스캐너 정보(SCR-051: 기기 이름·확인 코드·이 기기 파트너 회차의 내 유효 배정). 코드는 QR 링크의 URL 조각에서 꺼내 본문으로 보낸다
  */
-export const PostV1DeviceApprovalLookupsBody = zod.object({
+export const CreateDeviceApprovalLookupBody = zod.object({
   "userCode": zod.string()
-})
+}).strict()
 
-export const PostV1DeviceApprovalLookupsResponse = zod.object({
+export const CreateDeviceApprovalLookupResponse = zod.object({
   "deviceName": zod.string().optional(),
   "userCode": zod.string().optional(),
   "assignments": zod.array(zod.object({
@@ -130,72 +130,72 @@ export const PostV1DeviceApprovalLookupsResponse = zod.object({
  * FR-046, POL-031, ADR-0051. 승인하면 같은 기기·같은 계정의 이전 스캐너 세션을 끝낸다. 대리 승인 세션의 역할은 gate_staff
  * @summary 스캐너 로그인 승인·거부(그 파트너 회차의 유효 배정만, 대리 승인은 책임자만)
  */
-export const PostV1DeviceApprovalsBody = zod.object({
+export const CreateDeviceApprovalBody = zod.object({
   "userCode": zod.string(),
   "decision": zod.enum(['APPROVE', 'DENY']),
   "assignmentId": zod.string().optional().describe('유효 배정이 둘 이상일 때 필수'),
   "proxy": zod.boolean().optional().describe('책임자의 대리 승인')
-})
+}).strict()
 
-export const PostV1DeviceApprovalsResponse = zod.void()
+export const CreateDeviceApprovalResponse = zod.void()
 
 /**
  * FR-004, FR-018, FR-040. 신청 알림이다. 밤(21:00~08:00 KST)에는 nightPush를 켠 사람에게만 웹 푸시를 보내고 끈 사람에게는 이메일만 보낸다. 취소표 알림은 같은 회차로 10분에 한 번 [가정], 신청 한 번에 최대 5번 [가정] 보내고 신청을 끝낸다(docs/design/d5 §9.1.1, 추천 적용 2026-10-14, ADR-0062). 취소표 알림 신청은 그 회차의 판매 종료(공연 시작 24시간 전)에 끝나고, 그 뒤의 CANCELLATION 신청은 410 sale-ended다(소유자 결정 2026-10-14, ADR-0064). 이미 있으면 nightPush만 바꾸고 200, 끝난 취소표 신청은 ACTIVE로 되돌리고 보낸 횟수를 0으로 한다. 오픈 알림 신청은 그 회차의 open_at 전까지만 받는다(뒤에는 410 open-passed). 웹 푸시는 그 계정에 살아 있는 웹 푸시 구독(POST /v1/push-subscriptions)이 있을 때만 가고 이메일은 늘 간다. 계정마다 살아 있는 신청은 200건 [가정]까지(추천 적용 2026-10-30, docs/features/notify.md §3)
  * @summary 알림 신청 켜기(오픈 알림·취소표 알림, Web Push·이메일)
  */
-export const PostV1EventsEventIdSubscriptionsParams = zod.object({
+export const CreateEventSubscriptionParams = zod.object({
   "eventId": zod.string()
 })
 
-export const postV1EventsEventIdSubscriptionsBodyNightPushDefault = false;
+export const createEventSubscriptionBodyNightPushDefault = false;
 
-export const PostV1EventsEventIdSubscriptionsBody = zod.object({
+export const CreateEventSubscriptionBody = zod.object({
   "kind": zod.enum(['OPEN', 'CANCELLATION']),
-  "nightPush": zod.boolean().default(postV1EventsEventIdSubscriptionsBodyNightPushDefault).describe('21:00~08:00 KST에도 웹 푸시를 받을지. 끄면 밤에는 이메일만')
+  "nightPush": zod.boolean().default(createEventSubscriptionBodyNightPushDefault).describe('21:00~08:00 KST에도 웹 푸시를 받을지. 끄면 밤에는 이메일만')
 }).strict()
 
-export const postV1EventsEventIdSubscriptionsResponseSentCountMin = 0;
+export const createEventSubscriptionResponseSentCountMin = 0;
 
 
 
-export const PostV1EventsEventIdSubscriptionsResponse = zod.object({
+export const CreateEventSubscriptionResponse = zod.object({
   "eventId": zod.string().optional(),
   "open": zod.boolean().optional().describe('오픈 알림 신청'),
   "cancellation": zod.boolean().optional().describe('취소표 알림 신청(끝난 신청도 true, 상태는 cancellationStatus)'),
   "nightPush": zod.boolean().optional(),
   "cancellationStatus": zod.union([zod.literal('ACTIVE'),zod.literal('ENDED'),zod.literal(null)]).nullish().describe('취소표 알림 신청이 없으면 null'),
   "endReason": zod.union([zod.literal('SENT_MAX'),zod.literal('BOOKED'),zod.literal('SALE_ENDED'),zod.literal(null)]).nullish().describe('SENT_MAX는 5번 [가정] 보냄, BOOKED는 그 회차 예매, SALE_ENDED는 판매 종료. SALE_ENDED면 화면에 [다시 신청]을 보이지 않는다'),
-  "sentCount": zod.int().min(postV1EventsEventIdSubscriptionsResponseSentCountMin).optional().describe('취소표 알림을 보낸 횟수')
+  "sentCount": zod.int().min(createEventSubscriptionResponseSentCountMin).optional().describe('취소표 알림을 보낸 횟수')
 }).describe('회차별 알림 신청 상태(추천 적용 2026-10-14, ADR-0063). 취소표 알림의 끝남 칸은 SCR-054 \'신청 끝\'을 그린다(추천 적용 2026-10-30, docs/features/notify.md §3.2)')
 
 /**
  * FR-004, FR-018(추천 적용 2026-10-14, ADR-0063). kind로 고른 신청만 끈다. 없어도 204(멱등). 끄면 행을 바로 지우고, 진행 중인 대량 발송도 그 뒤 조각부터 이 신청을 보내지 않는다(docs/features/notify.md §4.2)
  * @summary 알림 신청 끄기(오픈 알림·취소표 알림)
  */
-export const DeleteV1EventsEventIdSubscriptionsParams = zod.object({
+export const DeleteEventSubscriptionsParams = zod.object({
   "eventId": zod.string()
 })
 
-export const DeleteV1EventsEventIdSubscriptionsQueryParams = zod.object({
+export const DeleteEventSubscriptionsQueryParams = zod.object({
   "kind": zod.enum(['OPEN', 'CANCELLATION'])
 })
 
-export const DeleteV1EventsEventIdSubscriptionsResponse = zod.void()
+export const DeleteEventSubscriptionsResponse = zod.void()
 
 /**
  * FR-019, SCR-001 ③·SCR-054(추천 적용 2026-10-14, ADR-0063). 찜은 공연 단위다(ADR-0093). 홈 피드는 개인 값을 싣지 않으므로 로그인한 브라우저가 따로 부른다. 찜한 최근 순. 판매 승인이 취소된 공연은 빠진다. Cache-Control: private, no-store
  * @summary 찜한 공연 목록(홈 찜한 공연 줄, 관심 공연 화면)
  */
-export const getV1WishesQueryLimitMax = 100;
+export const listWishesQueryLimitMax = 100;
 
 
 
-export const GetV1WishesQueryParams = zod.object({
+export const ListWishesQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1WishesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listWishesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1WishesResponse = zod.object({
+export const ListWishesResponse = zod.object({
   "items": zod.array(zod.object({
   "productionId": zod.string().optional(),
   "eventId": zod.string().optional().describe('대표 회차: 판매 중인 회차 가운데 판매 종료가 가장 이른 것 → 오픈 예정 회차 가운데 오픈이 가장 이른 것 → 매진 회차 가운데 공연 시작이 가장 이른 것 → 가장 최근에 공연한 회차(취소 회차 제외, ADR-0093 결정 8)'),
@@ -220,21 +220,21 @@ export const GetV1WishesResponse = zod.object({
  * FR-004, FR-018, SCR-001 ①·SCR-054(추천 적용 2026-10-14, ADR-0063). eventIds를 주면 그 회차들의 상태만(최대 50개, 홈 카드 한 번에), 없으면 신청 목록을 커서로 준다. Cache-Control: private, no-store
  * @summary 알림 신청 상태 조회(오픈 예정 카드의 [오픈 알림 받기] 토글, 관심 공연 화면)
  */
-export const getV1SubscriptionsQueryLimitMax = 100;
+export const listSubscriptionsQueryLimitMax = 100;
 
 
 
-export const GetV1SubscriptionsQueryParams = zod.object({
+export const ListSubscriptionsQueryParams = zod.object({
   "eventIds": zod.string().optional().describe('쉼표로 이은 회차 ID, 최대 50개'),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1SubscriptionsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listSubscriptionsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const getV1SubscriptionsResponseItemsItemSentCountMin = 0;
+export const listSubscriptionsResponseItemsItemSentCountMin = 0;
 
 
 
-export const GetV1SubscriptionsResponse = zod.object({
+export const ListSubscriptionsResponse = zod.object({
   "items": zod.array(zod.object({
   "eventId": zod.string().optional(),
   "open": zod.boolean().optional().describe('오픈 알림 신청'),
@@ -242,7 +242,7 @@ export const GetV1SubscriptionsResponse = zod.object({
   "nightPush": zod.boolean().optional(),
   "cancellationStatus": zod.union([zod.literal('ACTIVE'),zod.literal('ENDED'),zod.literal(null)]).nullish().describe('취소표 알림 신청이 없으면 null'),
   "endReason": zod.union([zod.literal('SENT_MAX'),zod.literal('BOOKED'),zod.literal('SALE_ENDED'),zod.literal(null)]).nullish().describe('SENT_MAX는 5번 [가정] 보냄, BOOKED는 그 회차 예매, SALE_ENDED는 판매 종료. SALE_ENDED면 화면에 [다시 신청]을 보이지 않는다'),
-  "sentCount": zod.int().min(getV1SubscriptionsResponseItemsItemSentCountMin).optional().describe('취소표 알림을 보낸 횟수')
+  "sentCount": zod.int().min(listSubscriptionsResponseItemsItemSentCountMin).optional().describe('취소표 알림을 보낸 횟수')
 }).describe('회차별 알림 신청 상태(추천 적용 2026-10-14, ADR-0063). 취소표 알림의 끝남 칸은 SCR-054 \'신청 끝\'을 그린다(추천 적용 2026-10-30, docs/features/notify.md §3.2)')).optional(),
   "nextCursor": zod.string().nullish()
 })
@@ -251,32 +251,32 @@ export const GetV1SubscriptionsResponse = zod.object({
  * FR-019(추천 적용 2026-10-14, ADR-0063). 공연 단위(ADR-0093). 없어도 204(멱등)
  * @summary 찜 해제
  */
-export const DeleteV1ProductionsProductionIdWishParams = zod.object({
+export const DeleteProductionWishParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-export const DeleteV1ProductionsProductionIdWishResponse = zod.void()
+export const DeleteProductionWishResponse = zod.void()
 
 /**
  * FR-019. 공연 단위(ADR-0093). 같은 요청을 다시 보내도 결과가 같아 오프라인 대기열(localStorage peaket.wishQueue)이 멱등 키 없이 다시 보낸다(FE-T37). 혼자 바꾸는 자기 상태라 If-Match 없이 마지막 저장이 이긴다(guidelines §12 예외). 계정마다 1,000개 [가정]까지(추천 적용 2026-10-30, docs/features/notify.md §3.3)
  * @summary 찜(오프라인 큐 재전송 가능)
  */
-export const PutV1ProductionsProductionIdWishParams = zod.object({
+export const PutProductionWishParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-export const PutV1ProductionsProductionIdWishResponse = zod.void()
+export const PutProductionWishResponse = zod.void()
 
 /**
  * FR-004, FR-040(추천 적용 2026-10-30, docs/features/notify.md §3.4). 브라우저 PushSubscription의 구독 주소와 키를 이 계정에 묶는다. 같은 구독 주소가 있으면 지금 계정으로 다시 묶고 200(한 기기를 여러 사람이 쓰면 마지막에 로그인한 사람에게 묶인다), 없으면 201. 구독 주소는 https·포트 443이고 호스트가 푸시 서비스 허용 목록(FCM·Mozilla·Apple·WNS)에 있어야 한다. 보낼 때도 연결마다 해석한 IP를 검사하고 리디렉션을 따르지 않는다(SSRF 막기, guidelines §8). 계정마다 10개 [가정]까지이고 넘으면 가장 오래 쓰지 않은 구독을 지운다. 로그인 뒤 권한이 허용이고 getSubscription()이 값을 주면 화면이 다시 부른다. Cache-Control: no-store
  * @summary 웹 푸시 구독 정보 등록·다시 묶기(구독 주소는 본문으로만)
  */
-export const postV1PushSubscriptionsBodyEndpointMax = 1024;
+export const createPushSubscriptionBodyEndpointMax = 1024;
 
 
 
-export const PostV1PushSubscriptionsBody = zod.object({
-  "endpoint": zod.url().max(postV1PushSubscriptionsBodyEndpointMax).describe('https, 포트 443, 푸시 서비스 호스트 허용 목록 안. 경로·쿼리에 넣지 않고 본문으로만 받는다'),
+export const CreatePushSubscriptionBody = zod.object({
+  "endpoint": zod.url().max(createPushSubscriptionBodyEndpointMax).describe('https, 포트 443, 푸시 서비스 호스트 허용 목록 안. 경로·쿼리에 넣지 않고 본문으로만 받는다'),
   "keys": zod.object({
   "p256dh": zod.string().describe('base64url, 풀면 65바이트 비압축 P-256 점'),
   "auth": zod.string().describe('base64url, 풀면 16바이트')
@@ -284,7 +284,7 @@ export const PostV1PushSubscriptionsBody = zod.object({
   "expirationTime": zod.int().nullish().describe('밀리초 유닉스 시각, 없으면 null')
 }).strict().describe('브라우저 PushSubscription.toJSON()의 값(추천 적용 2026-10-30, docs/features/notify.md §3.4)')
 
-export const PostV1PushSubscriptionsResponse = zod.object({
+export const CreatePushSubscriptionResponse = zod.object({
   "subscriptionKey": zod.string().optional().describe('SHA-256(endpoint)의 채움 없는 base64url(43자). 해제 경로의 ID. 브라우저가 같은 값을 계산할 수 있어 저장하지 않아도 된다'),
   "service": zod.enum(['FCM', 'MOZILLA', 'APPLE', 'WNS']).optional()
 })
@@ -293,50 +293,50 @@ export const PostV1PushSubscriptionsResponse = zod.object({
  * FR-004(추천 적용 2026-10-30, docs/features/notify.md §3.4). subscriptionKey는 SHA-256(구독 주소)의 채움 없는 base64url이라 구독 주소를 경로에 넣지 않는다. 이 계정의 구독만 지운다. 없거나 남의 구독이어도 같은 204다(있는지 알리지 않는다). 브라우저의 구독 자체는 남긴다. 로그아웃 정리 루틴이 부른다
  * @summary 웹 푸시 구독 해제(로그아웃·알림 끄기)
  */
-export const deleteV1PushSubscriptionsSubscriptionKeyPathSubscriptionKeyRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const deletePushSubscriptionPathSubscriptionKeyRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
 
 
-export const DeleteV1PushSubscriptionsSubscriptionKeyParams = zod.object({
-  "subscriptionKey": zod.string().regex(deleteV1PushSubscriptionsSubscriptionKeyPathSubscriptionKeyRegExp)
+export const DeletePushSubscriptionParams = zod.object({
+  "subscriptionKey": zod.string().regex(deletePushSubscriptionPathSubscriptionKeyRegExp)
 })
 
-export const DeleteV1PushSubscriptionsSubscriptionKeyResponse = zod.void()
+export const DeletePushSubscriptionResponse = zod.void()
 
 /**
  * FR-040(추천 적용 2026-10-30, docs/features/notify.md §7.4). 메일 프로그램이 List-Unsubscribe 주소로 본문 List-Unsubscribe=One-Click을 POST하면 토큰이 가리키는 신청 하나를 지운다. 인증·쿠키가 없고(그래서 Origin 확인에서 뺀다), 토큰의 힘은 그 신청 하나 지우기뿐이다. 토큰은 base64url(신청 ID ‖ HMAC-SHA256(수신 거부 토큰 키, 신청 ID)의 앞 16바이트)이고 저장하지 않는다. 토큰이 틀리거나 신청이 이미 없어도 같은 200이다(있는지 알리지 않는다). 상수 시간으로 비교한다. 이 경로에 GET은 없다(링크 미리 보기가 지우지 않게). 토큰이 경로에 드는 것은 RFC 8058 규격 때문이며 guidelines §9 예외로 둔다. 로그와 요청 기록에는 경로 템플릿만 남긴다. IP별 요청 한도를 둔다
  * @summary 신청 알림 이메일의 한 번 누름 수신 거부(RFC 8058 List-Unsubscribe-Post)
  */
-export const postV1SubscriptionOptOutsOptOutTokenPathOptOutTokenMax = 64;
+export const createSubscriptionOptOutPathOptOutTokenMax = 64;
 
 
 
-export const PostV1SubscriptionOptOutsOptOutTokenParams = zod.object({
-  "optOutToken": zod.string().max(postV1SubscriptionOptOutsOptOutTokenPathOptOutTokenMax)
+export const CreateSubscriptionOptOutParams = zod.object({
+  "optOutToken": zod.string().max(createSubscriptionOptOutPathOptOutTokenMax)
 })
 
-export const PostV1SubscriptionOptOutsOptOutTokenBody = zod.object({
+export const CreateSubscriptionOptOutBody = zod.object({
   "List-Unsubscribe": zod.enum(['One-Click'])
-})
+}).strict()
 
-export const PostV1SubscriptionOptOutsOptOutTokenResponse = zod.unknown()
+export const CreateSubscriptionOptOutResponse = zod.unknown()
 
 /**
  * FR-002, POL-001. 계정당 1회. 본인확인 흐름(소유자 결정 2026-10-14, ADR-0063): 부르는 화면(SCR-002·005·007·008·009·013·017·050 등)의 [휴대폰 본인확인] 버튼이 누른 동작 안에서 빈 창을 먼저 열고(팝업 차단을 피함) 이 응답의 양식을 그 창에 제출한다. 기관은 결과를 복귀 주소 `/verify/return`(서버가 고정한 같은 출처 주소, 클라이언트 입력을 받지 않음)으로 돌려주고, 복귀 화면이 결과 경로(POST …/{verificationId}/result)를 부른다. 팝업이면 복귀 화면이 같은 출처 BroadcastChannel로 결과 코드만 알리고 창을 닫는다. 기관이 페이지 이동으로 처리하면(모바일·일부 브라우저) 복귀 화면에 진행 표시만 보이고 결과를 받으면 next로 돌아가 그 화면이 결과 대화상자를 띄운다. next는 같은 출처 상대 경로만 받는다(추천 적용 2026-10-14, ADR-0063). 만 14세 확인·중복 연계정보는 결과 경로에서 판정한다
  * @summary 휴대폰 본인확인 시작(본인확인기관 창 값 발급). 별도 화면 없이 부르는 화면의 버튼이 기관 창을 연다
  */
-export const postV1IdentityVerificationsBodyPurposeDefault = `FIRST`;
-export const postV1IdentityVerificationsBodyNextMax = 512;
+export const createIdentityVerificationBodyPurposeDefault = `FIRST`;
+export const createIdentityVerificationBodyNextMax = 512;
 
 
-export const postV1IdentityVerificationsBodyNextRegExp = new RegExp('^(?!.*%(?:2[fF]%2[fF]|5[cC]))/(?!/)[^\\\\\\u0000-\\u001f\\u007f]*$');
+export const createIdentityVerificationBodyNextRegExp = new RegExp('^(?!.*%(?:2[fF]%2[fF]|5[cC]))/(?!/)[^\\\\\\u0000-\\u001f\\u007f]*$');
 
 
-export const PostV1IdentityVerificationsBody = zod.object({
-  "purpose": zod.enum(['FIRST', 'REVERIFY', 'MINOR_CONTRACT']).default(postV1IdentityVerificationsBodyPurposeDefault).describe('목적 문구는 부르는 화면이 버튼 위 한 줄로 보인다. REVERIFY는 추가 검증(SCR-009)과, 로그인 판정이 CHALLENGE·UNKNOWN인 세션에서 재인증이 \'요청만 함\'인 양도 요청·환급·배상 계좌 입력(docs/features/identity.md §7 \'로그인 판정의 처리\', 추천 적용 2026-10-30), MINOR_CONTRACT는 미성년자 계약 취소 확인(목적 동의 뒤). 부스 대조는 POST /v1/identity/booth-reverifications로 시작한다'),
-  "next": zod.string().max(postV1IdentityVerificationsBodyNextMax).regex(postV1IdentityVerificationsBodyNextRegExp).describe('결과를 보인 뒤 돌아갈 같은 출처 상대 경로. docs/frontend.md §5.14.3 safeNext()와 같은 규칙이다: 512자 이하, /로 시작, //·/\\로 시작하지 않음, 제어 문자·백슬래시·%2f%2f·%5c(대소문자 무시) 없음(FE-T12). 서버도 이 규칙으로 거절한다(ASVS 3.7.2)')
-})
+export const CreateIdentityVerificationBody = zod.object({
+  "purpose": zod.enum(['FIRST', 'REVERIFY', 'MINOR_CONTRACT']).default(createIdentityVerificationBodyPurposeDefault).describe('목적 문구는 부르는 화면이 버튼 위 한 줄로 보인다. REVERIFY는 추가 검증(SCR-009)과, 로그인 판정이 CHALLENGE·UNKNOWN인 세션에서 재인증이 \'요청만 함\'인 양도 요청·환급·배상 계좌 입력(docs/features/identity.md §7 \'로그인 판정의 처리\', 추천 적용 2026-10-30), MINOR_CONTRACT는 미성년자 계약 취소 확인(목적 동의 뒤). 부스 대조는 POST /v1/identity/booth-reverifications로 시작한다'),
+  "next": zod.string().max(createIdentityVerificationBodyNextMax).regex(createIdentityVerificationBodyNextRegExp).describe('결과를 보인 뒤 돌아갈 같은 출처 상대 경로. docs/frontend.md §5.14.3 safeNext()와 같은 규칙이다: 512자 이하, /로 시작, //·/\\로 시작하지 않음, 제어 문자·백슬래시·%2f%2f·%5c(대소문자 무시) 없음(FE-T12). 서버도 이 규칙으로 거절한다(ASVS 3.7.2)')
+}).strict()
 
-export const PostV1IdentityVerificationsResponse = zod.object({
+export const CreateIdentityVerificationResponse = zod.object({
   "verificationId": zod.string().optional(),
   "window": zod.object({
   "url": zod.url().optional(),
@@ -351,15 +351,15 @@ export const PostV1IdentityVerificationsResponse = zod.object({
  * FR-002, POL-001(소유자 결정 2026-10-14, ADR-0063). 기관이 복귀 주소로 돌려준 결과 값(기관 형식, 불투명)을 본문으로 받는다. identity-svc가 기관 규격대로 복호·조회해 확인하고 이 계정·시작 요청에 묶인 건인지 본다. 완료 시 ci_hmac 저장, ticket:buy·pid 부여. 같은 연계정보가 다른 계정에 있으면 409. 완료 결과의 생년월일로 만 나이를 계산해 만 14세 미만이면 연계정보 HMAC을 저장하지 않고 403 under-14로 답하며 계정을 회원 탈퇴와 같은 절차로 정리한다(사유 UNDER_14, 재인증 없음). 생년월일은 계산에만 쓰고 저장·로그하지 않는다(POL-023, 추천 적용 2026-10-14, ADR-0062). 기관 값은 POST 본문으로만 받고 URL에 두지 않는다(guidelines §9). 쿼리로만 돌려주는 기관이면 복귀 화면이 받자마자 주소에서 지운다(기관 규격 확인 필요). 한 번 확정된 건을 다시 보내면 같은 결과를 돌려준다
  * @summary 본인확인 결과 확정(복귀 화면이 기관이 돌려준 값을 넘김)
  */
-export const PostV1IdentityVerificationsVerificationIdResultParams = zod.object({
+export const CreateIdentityVerificationResultParams = zod.object({
   "verificationId": zod.string()
 })
 
-export const PostV1IdentityVerificationsVerificationIdResultBody = zod.object({
+export const CreateIdentityVerificationResultBody = zod.object({
   "providerResult": zod.record(zod.string(), zod.string()).describe('기관이 돌려준 값 그대로(기관별)')
-})
+}).strict()
 
-export const PostV1IdentityVerificationsVerificationIdResultResponse = zod.object({
+export const CreateIdentityVerificationResultResponse = zod.object({
   "verificationId": zod.string().optional(),
   "purpose": zod.enum(['FIRST', 'REVERIFY', 'BOOTH', 'MINOR_CONTRACT']).optional(),
   "status": zod.enum(['PENDING', 'VERIFIED', 'CANCELLED', 'FAILED', 'PROVIDER_DOWN', 'DUPLICATE_ACCOUNT', 'UNDER_14', 'BOOTH_MISMATCH']).optional(),
@@ -372,11 +372,11 @@ export const PostV1IdentityVerificationsVerificationIdResultResponse = zod.objec
  * FR-002(추천 적용 2026-10-14, ADR-0063). 팝업 메시지가 오지 않았거나(창이 막힘·닫힘) 페이지 이동으로 next에 돌아왔을 때 부른다. 기관 창이 아직 열려 있으면 PENDING. 개인정보는 싣지 않는다. Cache-Control: no-store
  * @summary 본인확인 결과 조회(부르는 화면이 결과 대화상자를 띄울 때)
  */
-export const GetV1IdentityVerificationsVerificationIdResultParams = zod.object({
+export const GetIdentityVerificationResultParams = zod.object({
   "verificationId": zod.string()
 })
 
-export const GetV1IdentityVerificationsVerificationIdResultResponse = zod.object({
+export const GetIdentityVerificationResultResponse = zod.object({
   "verificationId": zod.string().optional(),
   "purpose": zod.enum(['FIRST', 'REVERIFY', 'BOOTH', 'MINOR_CONTRACT']).optional(),
   "status": zod.enum(['PENDING', 'VERIFIED', 'CANCELLED', 'FAILED', 'PROVIDER_DOWN', 'DUPLICATE_ACCOUNT', 'UNDER_14', 'BOOTH_MISMATCH']).optional(),
@@ -389,49 +389,49 @@ export const GetV1IdentityVerificationsVerificationIdResultResponse = zod.object
  * ADR-0011, POL-019. 재사용 탐지 시 패밀리 전체 폐기 + 세션 종료 이벤트. 다만 바로 앞 리프레시 토큰이 회전 뒤 30초 [가정] 안에 다시 오고 그때 준 새 토큰이 아직 쓰이지 않았으면 응답을 잃은 재시도로 보고 새 쿠키를 한 번 더 준다(docs/features/identity.md §3, 추천 적용 2026-10-28, 기술 검토 중간-053). 본문이 없어 사전 요청이 생기지 않으므로 gw-fan이 Origin을 확인한다(docs/security/asvs/auth.md 3.5.1)
  * @summary 액세스 토큰 갱신(리프레시 토큰 쿠키, 회전·재사용 탐지)
  */
-export const PostV1IdentityAccessTokensResponse = zod.void()
+export const CreateIdentityAccessTokenResponse = zod.void()
 
 /**
  * FR-017, POL-019
  * @summary 로그인한 기기 목록
  */
-export const GetV1IdentitySessionsResponse = zod.unknown()
+export const GetIdentitySessionsResponse = zod.unknown()
 
 /**
  * FR-017
  * @summary 세션 끄기(세션 종료 이벤트 → 수 초 안 거부)
  */
-export const DeleteV1IdentitySessionsSessionIdParams = zod.object({
+export const DeleteIdentitySessionParams = zod.object({
   "sessionId": zod.string()
 })
 
-export const DeleteV1IdentitySessionsSessionIdResponse = zod.void()
+export const DeleteIdentitySessionResponse = zod.void()
 
 /**
  * FR-017, POL-019, POL-023, POL-033. 소셜 제공자 재인증 토큰 필요(403 REAUTH_REQUIRED). 미사용 티켓이 있으면 confirmCancelUnusedTickets=true가 있어야 하고 티켓을 취소·환급한 뒤 탈퇴. 결제 확정 대기 주문이 있으면 202 후 처리. 받은 티켓·양도 요청·가상계좌 결제·입금 대기·양도 완료 티켓·굿즈 주문은 docs/planning/03 §1.5대로 처리하고, 가상계좌 결제 티켓을 지금 환급할 수 없으면 환급을 실행할 때까지 탈퇴를 미룬다(202, 추천 적용 2026-10-14, ADR-0062)
  * @summary 탈퇴(모든 세션 종료, 계정 정보·연계정보 HMAC 파기, 거래 기록 분리 보관, 바로 재가입 가능)
  */
-export const DeleteV1IdentityAccountHeader = zod.object({
+export const DeleteIdentityAccountHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const DeleteV1IdentityAccountBody = zod.object({
+export const DeleteIdentityAccountBody = zod.object({
   "confirmCancelUnusedTickets": zod.boolean().optional(),
   "acknowledgeFraudHold": zod.boolean().optional().describe('보관 안내(409의 fraudHold)를 본 뒤 true로 다시 보낸다. 보관 행이 있는데 없으면 다른 확인할 것이 없어도 409다(추천 적용 2026-10-31, ADR-0173)'),
   "refundAccount": zod.object({
   "bankCode": zod.string(),
   "accountNumber": zod.string(),
   "holderName": zod.string()
-}).optional().describe('가상계좌 결제 티켓을 지금 환급할 때만. 저장하지 않고 결제사 취소 요청에 바로 넘긴다(POL-014)')
-})
+}).strict().optional().describe('가상계좌 결제 티켓을 지금 환급할 때만. 저장하지 않고 결제사 취소 요청에 바로 넘긴다(POL-014)')
+}).strict()
 
-export const DeleteV1IdentityAccountResponse = zod.void()
+export const DeleteIdentityAccountResponse = zod.void()
 
 /**
  * FR-017, FR-048. 연결한 순서. 캐시하지 않는다
  * @summary 연결된 로그인 수단 목록(제공자, 연결일, 마지막 로그인)
  */
-export const GetV1IdentityProvidersResponse = zod.object({
+export const GetIdentityProvidersResponse = zod.object({
   "providers": zod.array(zod.object({
   "provider": zod.enum(['kakao', 'naver', 'google']),
   "linkedAt": zod.iso.datetime({"offset":true}),
@@ -443,25 +443,25 @@ export const GetV1IdentityProvidersResponse = zod.object({
  * FR-017, POL-034. 해제 알림 발송
  * @summary 로그인 수단 해제(재인증 토큰 필요, 마지막 1개는 409)
  */
-export const DeleteV1IdentityProvidersProviderParams = zod.object({
+export const DeleteIdentityProviderParams = zod.object({
   "provider": zod.enum(['kakao', 'naver', 'google'])
 })
 
-export const DeleteV1IdentityProvidersProviderHeader = zod.object({
+export const DeleteIdentityProviderHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const DeleteV1IdentityProvidersProviderResponse = zod.void()
+export const DeleteIdentityProviderResponse = zod.void()
 
 /**
  * FR-048, POL-034, ADR-0038. 제안을 만든 브라우저(로그인 전 임시 쿠키 __Host-peaket_link, 소비자 웹 앱 서버만 읽음)만 조회. 연결 완료는 기존 제공자 로그인(소비자 웹 앱 서버의 소셜 로그인 경로, 로그인 진행 쿠키에 proposalId, ADR-0119)으로 한다
  * @summary 가입 때 연결 제안 조회(기존 계정의 제공자 종류, 만료 시각, 남은 시도)
  */
-export const GetV1IdentityLinkProposalsProposalIdParams = zod.object({
+export const GetIdentityLinkProposalParams = zod.object({
   "proposalId": zod.string()
 })
 
-export const GetV1IdentityLinkProposalsProposalIdResponse = zod.object({
+export const GetIdentityLinkProposalResponse = zod.object({
   "proposalId": zod.string(),
   "existingProvider": zod.enum(['kakao', 'naver', 'google']),
   "newProvider": zod.enum(['kakao', 'naver', 'google']),
@@ -473,11 +473,11 @@ export const GetV1IdentityLinkProposalsProposalIdResponse = zod.object({
  * FR-001, FR-048
  * @summary 연결하지 않고 새 계정 만들기(제안 소비 → 새 계정 세션 → 가입 완료 화면)
  */
-export const PostV1IdentityLinkProposalsProposalIdSeparateAccountParams = zod.object({
+export const CreateIdentityLinkProposalSeparateAccountParams = zod.object({
   "proposalId": zod.string()
 })
 
-export const PostV1IdentityLinkProposalsProposalIdSeparateAccountResponse = zod.object({
+export const CreateIdentityLinkProposalSeparateAccountResponse = zod.object({
   "next": zod.string()
 })
 
@@ -485,11 +485,11 @@ export const PostV1IdentityLinkProposalsProposalIdSeparateAccountResponse = zod.
  * FR-048, POL-034
  * @summary 병합 제안 조회(대표 계정, 옮겨지는 항목과 개수, 막는 사유)
  */
-export const GetV1IdentityMergeProposalsProposalIdParams = zod.object({
+export const GetIdentityMergeProposalParams = zod.object({
   "proposalId": zod.string()
 })
 
-export const GetV1IdentityMergeProposalsProposalIdResponse = zod.object({
+export const GetIdentityMergeProposalResponse = zod.object({
   "proposalId": zod.string().optional(),
   "primaryAccountId": zod.string().optional(),
   "mergedAccountId": zod.string().optional(),
@@ -514,13 +514,13 @@ export const GetV1IdentityMergeProposalsProposalIdResponse = zod.object({
  * FR-048, POL-034. 막는 사유가 있으면 409(type merge-blocked, 본문 blockers), 흡수 계정에 티켓·후기가 있으면 409(type merge-invariant-violated, SEV3). 세 서비스 확인이 답하지 않으면 503과 Retry-After. 되돌리기 없음, 두 계정에 알림(docs/features/identity.md §2.1 '계정 병합의 첫 구현', 추천 적용 2026-11-04)
  * @summary 병합 확인(재인증 토큰 필요). 흡수 계정 잠금·세션 종료 뒤 데이터 이동 시작
  */
-export const PostV1IdentityMergeProposalsProposalIdConfirmationParams = zod.object({
+export const CreateIdentityMergeProposalConfirmationParams = zod.object({
   "proposalId": zod.string()
 })
 
-export const PostV1IdentityMergeProposalsProposalIdConfirmationHeader = zod.object({
+export const CreateIdentityMergeProposalConfirmationHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const PostV1IdentityMergeProposalsProposalIdConfirmationResponse = zod.void()
+export const CreateIdentityMergeProposalConfirmationResponse = zod.void()
 

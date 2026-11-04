@@ -27,7 +27,7 @@ export const ReviewWrite = zod.object({
   "imageId": zod.string(),
   "alt": zod.string().max(reviewWriteImagesItemAltMax).optional().describe('사진 설명(대체 텍스트, 선택). NFC 정규화 뒤 grapheme 100자 [가정]. 비우면 화면이 \'후기 사진 1/3\'으로 읽는다')
 }).strict()).max(reviewWriteImagesMax).optional().describe('붙일 사진(최대 3장 [가정], 순서대로). POST /v1/review-images로 이 계정이 올린 READY 사진만. 고치기에서 보내면 사진 목록을 이 값으로 바꾸고 빠진 사진은 지운다(소유자 요청 2026-10-19, 세부는 추천 적용 2026-10-19, ADR-0066)')
-})
+}).strict()
 
 export type ReviewWrite = zod.input<typeof ReviewWrite>;
 export type ReviewWriteOutput = zod.output<typeof ReviewWrite>;

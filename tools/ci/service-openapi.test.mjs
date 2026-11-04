@@ -166,6 +166,23 @@ test('DT38_요청본문의모양·필수·내용형식이다르면_실패한다'
   assert.match(diffs, /요청 본문 application\/json.*state.*서비스에 없는 칸/);
 });
 
+test('DT38_요청본문의닫힘(additionalProperties false)이다르면_실패한다(BAS-040, guidelines §1)', () => {
+  // 계약이 닫았는데 서비스가 연 본문은 정의 밖 칸을 처리기까지 넘긴다
+  const contract = clone(CONTRACT);
+  contract.components.schemas.Item.additionalProperties = false;
+  const open = cmp(clone(EMITTED), OWNS, contract).join('\n');
+  assert.match(open, /PUT \/v1\/items\/\{itemId\} 요청 본문 application\/json: \$: 닫힘이 다르다\(계약 닫힘, 서비스 열림\)/);
+  const e = clone(EMITTED);
+  e.paths['/v1/items/{itemId}'].put.requestBody.content['application/json'].schema = { ...ITEM_30, additionalProperties: false };
+  e.paths['/v1/items/{itemId}'].get.responses['200'].content['application/json'].schema = { ...ITEM_30, additionalProperties: false };
+  e.paths['/v1/items/{itemId}'].put.responses['200'].content['application/json'].schema = { ...ITEM_30, additionalProperties: false };
+  // 응답 쪽 닫힘은 견주지 않는다(서비스의 응답 직렬화 스키마는 정의 밖 칸을 버리려고 닫을 수 있다)
+  assert.deepEqual(cmp(e, OWNS, contract), []);
+  // Zod never(빈 객체만 받는 record(string, never))의 { not: {} }도 닫힘으로 읽는다
+  e.paths['/v1/items/{itemId}'].put.requestBody.content['application/json'].schema = { ...ITEM_30, additionalProperties: { not: {} } };
+  assert.deepEqual(cmp(e, OWNS, contract), []);
+});
+
 test('DT38_2xx상태모음은같아야하고_서비스가적은오류응답은계약에있어야한다', () => {
   const e = clone(EMITTED);
   const put = e.paths['/v1/items/{itemId}'].put;

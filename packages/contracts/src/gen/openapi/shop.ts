@@ -17,95 +17,95 @@ import * as zod from 'zod';
  * FR-015. 목록은 커서로 나눈다(guidelines §3). 유형별 속성 필터의 이름은 굿즈 상세 설계에서 정하되 예약 파라미터(q·cursor·limit·page·sort·fields)와 겹치지 않게 한다(guidelines §11)(추천 적용 2026-10-21, ADR-0081)
  * @summary 상품 목록(유형별 속성 필터)
  */
-export const getV1ShopProductsQueryLimitMax = 100;
+export const listShopProductsQueryLimitMax = 100;
 
 
 
-export const GetV1ShopProductsQueryParams = zod.object({
+export const ListShopProductsQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1ShopProductsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listShopProductsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1ShopProductsResponse = zod.unknown()
+export const ListShopProductsResponse = zod.unknown()
 
 /**
  * FR-015, POL-016. 계정당 수량 제한. 인기 MD 오픈은 대기열 입장 토큰 필요. 한 주문은 한 판매자·한 수령 방식의 상품만 담는다(다르면 422). 택배 주문은 에스크로를 켠 결제 상점으로 결제해 신용카드 외 결제에서 결제대금예치를 고를 수 있고, 현장 수령은 에스크로를 켜지 않은 상점으로 결제한다(POL-014, 추천 적용 2026-10-14, ADR-0062). 본문은 수령 방식(fulfillment)으로 갈리는 MerchOrderCreate다. 택배만 배송지와 배송 정보 판매자 제공 동의를 받고, 현장 수령은 수령 시간대만 받는다(FR-015 인수 조건, SCR-015 ④·⑨, docs/design/d5 §5.15). 금액은 본문으로 받지 않고 서버가 상품 가격·배송비로 계산한다. 본문 모양은 추천 적용 2026-10-30(ADR-0089 '남는 한계'). 인증은 두 가지 가운데 하나다. 보통 상품은 팬 쿠키만, 대기열을 거치는 인기 MD 오픈 상품은 팬 쿠키와 대기열 입장 토큰을 함께 받는다(security의 두 번째 묶음). 인기 MD 오픈 상품에 입장 토큰이 없거나 만료면 401이다. 그 입장 토큰이 어떤 대기열 식별자를 쓰는지는 정하지 않았다(docs/frontend.md §6.2 31번, wbs 0.2.3). security 표기는 추천 적용 2026-10-30(이 작업 설명의 '인기 MD 오픈은 대기열 입장 토큰 필요'를 security에 맞춤)
  * @summary 굿즈 주문(한정 재고 Redis 차감 → 승인 직전 PostgreSQL 확정, 수령 방식)
  */
-export const PostV1ShopOrdersHeader = zod.object({
+export const CreateShopOrderHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1ShopOrdersBodyOneItemsItemQuantityMax = 99;
+export const createShopOrderBodyOneItemsItemQuantityMax = 99;
 
-export const postV1ShopOrdersBodyOneItemsItemOptionsMaxOne = 50;
+export const createShopOrderBodyOneItemsItemOptionsMaxOne = 50;
 
-export const postV1ShopOrdersBodyOneItemsMax = 20;
+export const createShopOrderBodyOneItemsMax = 20;
 
-export const postV1ShopOrdersBodyOneDeliveryRecipientNameMax = 50;
+export const createShopOrderBodyOneDeliveryRecipientNameMax = 50;
 
-export const postV1ShopOrdersBodyOneDeliveryRecipientPhoneRegExp = new RegExp('^[0-9]{8,12}$');
-export const postV1ShopOrdersBodyOneDeliveryPostalCodeRegExp = new RegExp('^[0-9]{5}$');
-export const postV1ShopOrdersBodyOneDeliveryAddressMax = 200;
+export const createShopOrderBodyOneDeliveryRecipientPhoneRegExp = new RegExp('^[0-9]{8,12}$');
+export const createShopOrderBodyOneDeliveryPostalCodeRegExp = new RegExp('^[0-9]{5}$');
+export const createShopOrderBodyOneDeliveryAddressMax = 200;
 
-export const postV1ShopOrdersBodyOneDeliveryAddressDetailMax = 100;
+export const createShopOrderBodyOneDeliveryAddressDetailMax = 100;
 
-export const postV1ShopOrdersBodyOneConsentsConsentVersionRegExp = new RegExp('^[0-9A-Za-z._-]{1,32}$');
-export const postV1ShopOrdersBodyTwoItemsItemQuantityMax = 99;
+export const createShopOrderBodyOneConsentsConsentVersionRegExp = new RegExp('^[0-9A-Za-z._-]{1,32}$');
+export const createShopOrderBodyTwoItemsItemQuantityMax = 99;
 
-export const postV1ShopOrdersBodyTwoItemsItemOptionsMaxOne = 50;
+export const createShopOrderBodyTwoItemsItemOptionsMaxOne = 50;
 
-export const postV1ShopOrdersBodyTwoItemsMax = 20;
+export const createShopOrderBodyTwoItemsMax = 20;
 
-export const postV1ShopOrdersBodyTwoPickupSlotIdMax = 64;
+export const createShopOrderBodyTwoPickupSlotIdMax = 64;
 
 
 
-export const PostV1ShopOrdersBody = zod.union([zod.object({
+export const CreateShopOrderBody = zod.union([zod.object({
   "fulfillment": zod.enum(['DELIVERY']),
   "items": zod.array(zod.object({
   "productId": zod.uuid().describe('product.id(UUIDv7). 없거나 판매 중이 아니거나 그 수령 방식을 받지 않는 상품, 티켓 연동 부가 상품이면 422'),
-  "quantity": zod.int().min(1).max(postV1ShopOrdersBodyOneItemsItemQuantityMax).describe('99는 형식 상한 [가정]이다. 상품마다 정한 계정당 한도(SCR-015 ⑦)를 넘으면 422'),
-  "options": zod.record(zod.string(), zod.string().min(1).max(postV1ShopOrdersBodyOneItemsItemOptionsMaxOne)).refine((() => {
+  "quantity": zod.int().min(1).max(createShopOrderBodyOneItemsItemQuantityMax).describe('99는 형식 상한 [가정]이다. 상품마다 정한 계정당 한도(SCR-015 ⑦)를 넘으면 422'),
+  "options": zod.record(zod.string(), zod.string().min(1).max(createShopOrderBodyOneItemsItemOptionsMaxOne)).refine((() => {
   const maxProperties = 10;
   return ((v) => Object.keys(v).length <= maxProperties);
 })()).meta({ "maxProperties": 10 }).refine((() => {
   const maxNameLength = 30;
   return ((v) => Object.keys(v).every((k) => [...k].length <= maxNameLength));
 })()).meta({ "propertyNames": { "maxLength": 30 } }).optional().describe('고른 옵션(옵션 이름 → 고른 값). 그 상품의 유형 스키마 판(product.schema_version, @peaket/validation)으로 검사하고 맞지 않으면 422. 옵션이 없는 상품은 빼거나 빈 객체로 보낸다. 10개·이름 30자·값 50자 상한은 [가정](ADR-0101)')
-}).strict()).min(1).max(postV1ShopOrdersBodyOneItemsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+}).strict()).min(1).max(createShopOrderBodyOneItemsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
   ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
   : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('주문 항목. 한 판매자·한 수령 방식의 상품만 담는다(다르면 422). 20개 상한은 [가정]이다. 금액은 받지 않는다. 서버가 주문 때 가격·수수료율·고른 옵션을 merch_order_item에 복사한다(ADR-0101)'),
   "delivery": zod.object({
-  "recipientName": zod.string().min(1).max(postV1ShopOrdersBodyOneDeliveryRecipientNameMax).describe('받는 분 성명'),
-  "recipientPhone": zod.string().regex(postV1ShopOrdersBodyOneDeliveryRecipientPhoneRegExp).describe('받는 분 연락처. 숫자만(하이픈 없이) 8~12자리 [가정]'),
-  "postalCode": zod.string().regex(postV1ShopOrdersBodyOneDeliveryPostalCodeRegExp).describe('우편번호 5자리(2015-08-01부터 쓰는 국가기초구역 번호, 인터넷우체국 우편번호 안내 2026-10-30 확인)'),
-  "address": zod.string().min(1).max(postV1ShopOrdersBodyOneDeliveryAddressMax).describe('주소 찾기로 고른 기본 주소'),
-  "addressDetail": zod.string().max(postV1ShopOrdersBodyOneDeliveryAddressDetailMax).optional().describe('상세 주소(동·호수 등). 없으면 뺀다')
+  "recipientName": zod.string().min(1).max(createShopOrderBodyOneDeliveryRecipientNameMax).describe('받는 분 성명'),
+  "recipientPhone": zod.string().regex(createShopOrderBodyOneDeliveryRecipientPhoneRegExp).describe('받는 분 연락처. 숫자만(하이픈 없이) 8~12자리 [가정]'),
+  "postalCode": zod.string().regex(createShopOrderBodyOneDeliveryPostalCodeRegExp).describe('우편번호 5자리(2015-08-01부터 쓰는 국가기초구역 번호, 인터넷우체국 우편번호 안내 2026-10-30 확인)'),
+  "address": zod.string().min(1).max(createShopOrderBodyOneDeliveryAddressMax).describe('주소 찾기로 고른 기본 주소'),
+  "addressDetail": zod.string().max(createShopOrderBodyOneDeliveryAddressDetailMax).optional().describe('상세 주소(동·호수 등). 없으면 뺀다')
 }).strict().describe('택배 배송지(CMP-067 AddressForm: 받는 분·연락처·주소 찾기·상세 주소). docs/data.md merch_order의 recipient_name·recipient_phone·delivery_address에 넣고, 우편번호·기본 주소·상세 주소는 delivery_address 한 칸에 함께 담는다. 대금결제·재화 공급 기록으로 5년 보존하고, 판매자에게는 동의 범위 안에서만 준다(docs/security/data-classification.md \'굿즈 배송지\'). 길이 상한은 [가정]'),
   "consents": zod.object({
   "provisionToSeller": zod.boolean().optional().describe('배송 정보 판매자 제공 동의(필수). 받는 자·목적·항목·보유 기간·거부권과 불이익 문안은 docs/design/d5 §5.15 \'배송 정보 판매자 제공 동의\'(개인정보 보호법 §17, docs/planning/03 §1.2 \'굿즈 배송 정보의 판매자 제공\')'),
-  "consentVersion": zod.string().regex(postV1ShopOrdersBodyOneConsentsConsentVersionRegExp).optional().describe('주문서에 보인 고지 문안의 판. merch_order.consent_version에 넣는다(문안은 판마다 따로 보관한다, docs/security/data-classification.md \'법적 동의 기록\'). 서버가 지금 쓰는 판이 아니면 422 consent-version-outdated이고, 화면은 지금 문안을 다시 보이고 다시 동의받는다. 32자 상한은 [가정]')
+  "consentVersion": zod.string().regex(createShopOrderBodyOneConsentsConsentVersionRegExp).optional().describe('주문서에 보인 고지 문안의 판. merch_order.consent_version에 넣는다(문안은 판마다 따로 보관한다, docs/security/data-classification.md \'법적 동의 기록\'). 서버가 지금 쓰는 판이 아니면 422 consent-version-outdated이고, 화면은 지금 문안을 다시 보이고 다시 동의받는다. 32자 상한은 [가정]')
 }).strict().optional().describe('배송 정보를 판매자에게 주는 동의. 없거나, provisionToSeller가 true가 아니거나, consentVersion이 없으면 422 consent-required다(guidelines §12 \'동의 누락\'). 동의 일시는 주문의 created_at이다(ADR-0089)')
 }).strict().describe('택배 주문. 판매자가 직접 보내므로 배송지와 배송 정보 판매자 제공 동의를 함께 받는다(SCR-015 ⑨, POL-016, ADR-0062)'),zod.object({
   "fulfillment": zod.enum(['PICKUP']),
   "items": zod.array(zod.object({
   "productId": zod.uuid().describe('product.id(UUIDv7). 없거나 판매 중이 아니거나 그 수령 방식을 받지 않는 상품, 티켓 연동 부가 상품이면 422'),
-  "quantity": zod.int().min(1).max(postV1ShopOrdersBodyTwoItemsItemQuantityMax).describe('99는 형식 상한 [가정]이다. 상품마다 정한 계정당 한도(SCR-015 ⑦)를 넘으면 422'),
-  "options": zod.record(zod.string(), zod.string().min(1).max(postV1ShopOrdersBodyTwoItemsItemOptionsMaxOne)).refine((() => {
+  "quantity": zod.int().min(1).max(createShopOrderBodyTwoItemsItemQuantityMax).describe('99는 형식 상한 [가정]이다. 상품마다 정한 계정당 한도(SCR-015 ⑦)를 넘으면 422'),
+  "options": zod.record(zod.string(), zod.string().min(1).max(createShopOrderBodyTwoItemsItemOptionsMaxOne)).refine((() => {
   const maxProperties = 10;
   return ((v) => Object.keys(v).length <= maxProperties);
 })()).meta({ "maxProperties": 10 }).refine((() => {
   const maxNameLength = 30;
   return ((v) => Object.keys(v).every((k) => [...k].length <= maxNameLength));
 })()).meta({ "propertyNames": { "maxLength": 30 } }).optional().describe('고른 옵션(옵션 이름 → 고른 값). 그 상품의 유형 스키마 판(product.schema_version, @peaket/validation)으로 검사하고 맞지 않으면 422. 옵션이 없는 상품은 빼거나 빈 객체로 보낸다. 10개·이름 30자·값 50자 상한은 [가정](ADR-0101)')
-}).strict()).min(1).max(postV1ShopOrdersBodyTwoItemsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+}).strict()).min(1).max(createShopOrderBodyTwoItemsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
   ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
   : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('주문 항목. 한 판매자·한 수령 방식의 상품만 담는다(다르면 422). 20개 상한은 [가정]이다. 금액은 받지 않는다. 서버가 주문 때 가격·수수료율·고른 옵션을 merch_order_item에 복사한다(ADR-0101)'),
-  "pickupSlotId": zod.string().min(1).max(postV1ShopOrdersBodyTwoPickupSlotIdMax).describe('고른 현장 수령 시간대. 티켓 소지자 전용 시간대는 그 공연 티켓을 가진 계정만 고른다(구매 자격이 아니라 혜택, FR-015·POL-016). 그 상품의 시간대가 아니거나 끝났거나, 티켓 없이 전용 시간대를 고르면 422 pickup-slot-unavailable이다. 수령 시간대는 docs/data.md `pickup_slot`(상품 단위, 회차·시작·끝·티켓 소지자 전용 여부 [가정])이고 주문의 칸은 `merch_order.pickup_slot_id`다(2026-10-30 더함). 화면이 시간대 목록을 읽는 경로는 아직 없다(wbs 0.2.3)')
+  "pickupSlotId": zod.string().min(1).max(createShopOrderBodyTwoPickupSlotIdMax).describe('고른 현장 수령 시간대. 티켓 소지자 전용 시간대는 그 공연 티켓을 가진 계정만 고른다(구매 자격이 아니라 혜택, FR-015·POL-016). 그 상품의 시간대가 아니거나 끝났거나, 티켓 없이 전용 시간대를 고르면 422 pickup-slot-unavailable이다. 수령 시간대는 docs/data.md `pickup_slot`(상품 단위, 회차·시작·끝·티켓 소지자 전용 여부 [가정])이고 주문의 칸은 `merch_order.pickup_slot_id`다(2026-10-30 더함). 화면이 시간대 목록을 읽는 경로는 아직 없다(wbs 0.2.3)')
 }).strict().describe('현장 수령 주문. PEAKET 교환권으로 확인하므로 판매자에게 개인정보를 주지 않고, 배송지와 동의를 받지 않는다(POL-016, docs/design/d5 §5.15)')]).describe('굿즈 주문 본문(POST /v1/shop/orders). fulfillment 값으로 갈리고, 갈래마다 허용 필드 밖의 값은 400이다. 티켓 연동 부가 상품은 이 경로가 아니라 POST /v1/tickets/{ticketId}/addons로 주문한다(FR-014). 칸은 docs/data.md의 merch_order·merch_order_item에 맞췄다(추천 적용 2026-10-30, ADR-0089 \'남는 한계\')')
 
-export const PostV1ShopOrdersResponse = zod.object({
+export const CreateShopOrderResponse = zod.object({
   "orderId": zod.string().optional(),
   "fulfillment": zod.enum(['DELIVERY', 'PICKUP']).optional(),
   "paymentStore": zod.enum(['STANDARD', 'ESCROW']).optional().describe('결제 상점(에스크로 여부). ESCROW(택배)면 결제창에서 결제대금예치를 고를 수 있고, 구매자가 골랐는지는 결제 승인 뒤 정해진다'),

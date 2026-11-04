@@ -22,7 +22,7 @@ import type { Clock } from './clock.js';
 import { requestContext } from './context.js';
 import { ProblemError } from './problem.js';
 import { IDEMPOTENT_METADATA, type IdempotentOptions, prepareIdempotency } from './idempotency.js';
-import { PURCHASE_SIGNED_METADATA, type PurchaseRejection, type PurchaseSessionPort, verifyPurchaseRequest } from './purchase-auth.js';
+import { PURCHASE_REJECTION_PROBLEMS, PURCHASE_SIGNED_METADATA, type PurchaseRejection, type PurchaseSessionPort, verifyPurchaseRequest } from './purchase-auth.js';
 import { IDEMPOTENCY_KEY_BY_MODULE, PURCHASE_SIGNATURE_BY_MODULE, throwAttachedValidationError } from './request-checks.js';
 
 /** 허용 역할 값(docs/security/authz-matrix.md §5.5 표, openapi x-peaket-roles) */
@@ -327,7 +327,9 @@ export class AuthGuard implements CanActivate {
       const rejected = await verifyPurchaseRequest(request, principal, port);
       if (rejected) {
         this.state.purchase.onRejected?.(rejected);
-        throw unauthorized();
+        // 이유별 이름 붙은 401(BAS-040). 신원 401과 같은 WWW-Authenticate를 싣는다(RFC 9110 §15.5.2)
+        void http.getResponse<FastifyReply>().header('www-authenticate', COOKIE_CHALLENGE);
+        throw new ProblemError({ ...PURCHASE_REJECTION_PROBLEMS[rejected] });
       }
     }
     throwAttachedValidationError(request);

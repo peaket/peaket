@@ -31,7 +31,8 @@ export const HOLD_OPERATION = 'HOLD_SEATS';
 /** NFR-003 홀드 p99 50ms */
 const HOLD_SLO_MS = 50;
 
-// openapi 모양을 여기 둔다(계약 생성물의 작업별 스키마 이름이 operationId 정리(wbs 0.2.3) 뒤 바뀌므로, queue-svc와 같은 방식).
+// openapi 모양을 여기 둔다(queue-svc와 같은 방식). 계약 생성물 이름은 BAS-040 뒤 작업 이름을 따라 바뀌지 않는다(CreateEventHoldBody)
+// 요청 본문은 계약처럼 모든 층을 닫는다(.strict(), docs/api/guidelines.md §1 '요청은 닫고 응답은 연다', BAS-040).
 // 회차 ID는 Redis 키의 해시 태그에 들어가므로 모양을 묻는다(틀리면 400).
 export const HoldParams = z.object({ eventId: z.string().regex(KEY_PART) }).strict();
 
@@ -70,10 +71,11 @@ export const HoldRequest = z.object({
       wheelchair: z.boolean().default(false),
       allowSplit: z.boolean().default(false),
     })
+    .strict()
     .optional(),
   clientEphemeralPublicKey: z.string().optional(),
   behavior: BehaviorSummary.optional(),
-});
+}).strict();
 export type HoldRequest = z.output<typeof HoldRequest>;
 
 /** 201 응답 Hold(직렬화 스키마. 스키마에 없는 칸은 내보내지 않는다) */

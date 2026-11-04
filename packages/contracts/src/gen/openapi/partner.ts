@@ -17,35 +17,35 @@ import * as zod from 'zod';
  * FR-021, POL-020, ADR-0119(추천 적용 2026-10-28). 파트너 콘솔 화면이 partner-api로 바로 부르고 gw-partner가 identity의 관리 계정 로그인으로 넘긴다(관제 /v1/ops/auth/sessions와 같은 모양, Auth.js Credentials 없음). TOTP까지 맞으면 gw-partner 응답이 파트너 액세스 토큰 쿠키(__Secure-peaket_partner_at)와 리프레시 토큰 쿠키(__Secure-peaket_partner_rt)를 준다. 본문에 토큰 없음. JSON 본문이라 다른 출처면 사전 요청이 생기고 gw-partner가 Origin(파트너 콘솔 출처)을 확인한다
  * @summary 파트너 로그인 1단계(이메일·비밀번호) → 2단계 TOTP. 실패 제한·사람 확인
  */
-export const postV1PartnerAuthSessionsBodyOneEmailMax = 254;
+export const createPartnerAuthSessionBodyOneEmailMax = 254;
 
-export const postV1PartnerAuthSessionsBodyOnePasswordMax = 1024;
+export const createPartnerAuthSessionBodyOnePasswordMax = 1024;
 
-export const postV1PartnerAuthSessionsBodyOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,128}$');
-export const postV1PartnerAuthSessionsBodyOneHumanCheckTokenMax = 2048;
+export const createPartnerAuthSessionBodyOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,128}$');
+export const createPartnerAuthSessionBodyOneHumanCheckTokenMax = 2048;
 
-export const postV1PartnerAuthSessionsBodyTwoLoginStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
-export const postV1PartnerAuthSessionsBodyTwoCodeMin = 6;
-export const postV1PartnerAuthSessionsBodyTwoCodeMax = 32;
+export const createPartnerAuthSessionBodyTwoLoginStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const createPartnerAuthSessionBodyTwoCodeMin = 6;
+export const createPartnerAuthSessionBodyTwoCodeMax = 32;
 
 
 
-export const PostV1PartnerAuthSessionsBody = zod.union([zod.object({
-  "email": zod.email().max(postV1PartnerAuthSessionsBodyOneEmailMax),
-  "password": zod.string().min(1).max(postV1PartnerAuthSessionsBodyOnePasswordMax).describe('원문. 서버가 NFC로 맞춘다. 길이 상한은 설정 password.max_length의 허용 상한이다'),
-  "deviceId": zod.string().regex(postV1PartnerAuthSessionsBodyOneDeviceIdRegExp).optional().describe('브라우저 기기 식별값(브라우저 저장소의 값). 출발지 묶음(IP와 이것)을 셀 때 쓴다'),
-  "humanCheckToken": zod.string().min(1).max(postV1PartnerAuthSessionsBodyOneHumanCheckTokenMax).optional().describe('Cloudflare Turnstile 토큰(300초 1회용). identity가 검증 API로 확인한다')
+export const CreatePartnerAuthSessionBody = zod.union([zod.object({
+  "email": zod.email().max(createPartnerAuthSessionBodyOneEmailMax),
+  "password": zod.string().min(1).max(createPartnerAuthSessionBodyOnePasswordMax).describe('원문. 서버가 NFC로 맞춘다. 길이 상한은 설정 password.max_length의 허용 상한이다'),
+  "deviceId": zod.string().regex(createPartnerAuthSessionBodyOneDeviceIdRegExp).optional().describe('브라우저 기기 식별값(브라우저 저장소의 값). 출발지 묶음(IP와 이것)을 셀 때 쓴다'),
+  "humanCheckToken": zod.string().min(1).max(createPartnerAuthSessionBodyOneHumanCheckTokenMax).optional().describe('Cloudflare Turnstile 토큰(300초 1회용). identity가 검증 API로 확인한다')
 }).strict().describe('관리 계정 로그인 1단계 본문(POST /v1/partner/auth/sessions·/v1/ops/auth/sessions). 2단계(인증 앱 코드) 본문은 BUILD_ORDER BOT-120이 더한다. 사람 확인 토큰은 직전 응답이 humanCheckRequired였거나 428을 받았을 때 싣는다(docs/security/auth-controls.md §2.3). 정본은 docs/features/identity.md §6 \'관리 계정 로그인 1단계와 실패 제한의 첫 구현\'(추천 적용 2026-11-05)'),zod.object({
-  "loginStep": zod.string().regex(postV1PartnerAuthSessionsBodyTwoLoginStepRegExp),
-  "code": zod.string().min(postV1PartnerAuthSessionsBodyTwoCodeMin).max(postV1PartnerAuthSessionsBodyTwoCodeMax)
+  "loginStep": zod.string().regex(createPartnerAuthSessionBodyTwoLoginStepRegExp),
+  "code": zod.string().min(createPartnerAuthSessionBodyTwoCodeMin).max(createPartnerAuthSessionBodyTwoCodeMax)
 }).strict().describe('관리 계정 로그인 2단계 본문(같은 두 경로). 1단계 응답의 loginStep과 인증 앱 코드(숫자 6자리)나 복구 코드(Crockford base32 16자를 4자씩 붙임표로 이은 꼴)를 보낸다. 정본은 docs/features/identity.md §6 \'관리 계정 TOTP와 로그인 2단계의 첫 구현\'(추천 적용 2026-11-05, BUILD_ORDER BOT-120)')])
 
-export const postV1PartnerAuthSessionsResponseOneLoginStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const createPartnerAuthSessionResponseOneLoginStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
 
 
-export const PostV1PartnerAuthSessionsResponse = zod.union([zod.object({
+export const CreatePartnerAuthSessionResponse = zod.union([zod.object({
   "next": zod.enum(['TOTP']),
-  "loginStep": zod.string().regex(postV1PartnerAuthSessionsResponseOneLoginStepRegExp).describe('32바이트 난수의 채움 없는 base64url. 서버는 SHA-256만 둔다. 한 번 쓴다'),
+  "loginStep": zod.string().regex(createPartnerAuthSessionResponseOneLoginStepRegExp).describe('32바이트 난수의 채움 없는 base64url. 서버는 SHA-256만 둔다. 한 번 쓴다'),
   "expiresInSeconds": zod.int().describe('loginStep 수명(300초 [가정])')
 }).describe('관리 계정 로그인 1단계 통과(비밀번호가 맞았다). 2단계에 loginStep을 그대로 보낸다(추천 적용 2026-11-05)'),zod.object({
   "next": zod.enum(['DONE'])
@@ -55,77 +55,77 @@ export const PostV1PartnerAuthSessionsResponse = zod.union([zod.object({
  * FR-021, POL-020, 추천 적용 2026-10-29, ADR-0145 결정 2. 로그인 POST /v1/partner/auth/sessions와 짝이고, me는 로그인한 사람의 지금 세션이다(guidelines §10). 파트너 콘솔 화면이 partner-api로 바로 부르고, 로그인·갱신처럼 gw-partner 응답이 쿠키를 다룬다(ADR-0119). identity-svc가 그 세션을 끝내고 세션 종료 사건(asyncapi control.sessions-terminated, reason LOGOUT)을 낸다. 응답은 이 앱의 쿠키 둘(__Secure-peaket_partner_at, __Secure-peaket_partner_rt)만 같은 이름·Domain·Path에 Max-Age=0을 단 Set-Cookie로 지운다. Clear-Site-Data는 보내지 않는다. 그 값은 같은 등록 도메인의 다른 앱 로그인까지 끊기 때문이다(docs/features/identity.md §3, docs/frontend.md §5.14.4, FE-T34). 쿠키로 인증하는 쓰기라 gw-partner가 Origin(파트너 콘솔 출처)을 확인한다(guidelines §9)
  * @summary 파트너 로그아웃(지금 세션 끝내기)
  */
-export const DeleteV1PartnerAuthSessionsMeResponse = zod.void()
+export const DeleteMyPartnerAuthSessionResponse = zod.void()
 
 /**
  * FR-021, POL-019, POL-020, ADR-0011(추천 적용 2026-10-15, ADR-0065 결정 11). 파트너 액세스 토큰(15분)을 유휴 만료(1시간)와 절대 만료(24시간) 안에서만 새로 준다. 지났으면 401이고 비밀번호와 TOTP로 다시 로그인한다. 재사용 탐지 시 패밀리 전체 폐기 + 세션 종료 이벤트(응답을 잃은 재시도의 30초 [가정] 유예는 팬 갱신과 같다, 기술 검토 중간-053). 본문이 없어 사전 요청이 생기지 않으므로 gw-partner가 Origin(파트너 콘솔 출처)을 확인한다
  * @summary 파트너 액세스 토큰 갱신(리프레시 토큰 쿠키, 회전·재사용 탐지)
  */
-export const PostV1PartnerAuthAccessTokensResponse = zod.void()
+export const CreatePartnerAuthAccessTokenResponse = zod.void()
 
 /**
  * FR-021, POL-020. 정본은 docs/security/auth-controls.md §3.3이다. 코드가 맞으면 시간 잠금만 풀린다. 계정·출발지 묶음 잠금, 2단계 실패 수, 비밀번호 연속 실패 누계는 그대로이고, 그 뒤 비밀번호와 TOTP로 다시 로그인한다. 코드가 틀리면 2단계 실패 수에 세고, 한 링크는 3번 [가정] 틀리면 무효다. 2단계 실패 수가 5 [가정]에 닿으면 보호 잠금이 걸린다. 보호 잠금 중에는 해제 링크로 풀 수 없다(운영자 재초대). 화면은 파트너 콘솔 출처라 gw-partner가 Origin을 확인한다(추천 적용 2026-10-30, ADR-0157 결정 6)
  * @summary 파트너 계정 시간 잠금 본인 해제(업무 이메일 해제 링크 + 인증 앱 코드나 복구 코드)
  */
-export const postV1PartnerAuthUnlocksBodyUnlockTokenRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
-export const postV1PartnerAuthUnlocksBodyCodeMin = 6;
-export const postV1PartnerAuthUnlocksBodyCodeMax = 64;
+export const createPartnerAuthUnlockBodyUnlockTokenRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const createPartnerAuthUnlockBodyCodeMin = 6;
+export const createPartnerAuthUnlockBodyCodeMax = 64;
 
 
 
-export const PostV1PartnerAuthUnlocksBody = zod.object({
-  "unlockToken": zod.string().regex(postV1PartnerAuthUnlocksBodyUnlockTokenRegExp).describe('해제 링크 토큰(32바이트 난수의 채움 없는 base64url). 서버는 SHA-256 해시만 저장하고 수명은 30분 [가정]이다'),
-  "code": zod.string().min(postV1PartnerAuthUnlocksBodyCodeMin).max(postV1PartnerAuthUnlocksBodyCodeMax).describe('인증 앱 코드(TOTP 6자리)나 복구 코드')
+export const CreatePartnerAuthUnlockBody = zod.object({
+  "unlockToken": zod.string().regex(createPartnerAuthUnlockBodyUnlockTokenRegExp).describe('해제 링크 토큰(32바이트 난수의 채움 없는 base64url). 서버는 SHA-256 해시만 저장하고 수명은 30분 [가정]이다'),
+  "code": zod.string().min(createPartnerAuthUnlockBodyCodeMin).max(createPartnerAuthUnlockBodyCodeMax).describe('인증 앱 코드(TOTP 6자리)나 복구 코드')
 }).strict().describe('관리 계정 시간 잠금 본인 해제 본문(POST /v1/partner/auth/unlocks·/v1/ops/auth/unlocks). 해제 링크 토큰은 링크의 URL 조각(#)에만 있고, 화면이 읽자마자 주소에서 지운 뒤 이 본문으로 보낸다(guidelines §9, docs/features/identity.md §6.1 \'URL 조각의 비밀 처리\'와 같다). 정본은 docs/security/auth-controls.md §3.3(추천 적용 2026-10-30, ADR-0157 결정 6)')
 
-export const PostV1PartnerAuthUnlocksResponse = zod.void()
+export const CreatePartnerAuthUnlockResponse = zod.void()
 
 /**
  * FR-021, POL-020, docs/security/auth-controls.md §3.3. 계정이 있는지, 잠겨 있는지와 상관없이 같은 202를 준다(계정 유무를 알리지 않는다, auth-controls §2.2). 시간 잠금 중인 계정에만 업무 이메일로 새 링크를 보내고, 새 링크를 보내면 옛 링크는 무효다. 보호 잠금 중이면 보내지 않는다. 다시 받기는 이메일마다 1시간에 3번 [가정]까지이고 없는 이메일도 같은 수로 센다(추천 적용 2026-10-30, ADR-0157 결정 5·6)
  * @summary 파트너 계정 해제 링크 다시 받기
  */
-export const postV1PartnerAuthUnlockLinksBodyEmailMax = 254;
+export const createPartnerAuthUnlockLinkBodyEmailMax = 254;
 
 
 
-export const PostV1PartnerAuthUnlockLinksBody = zod.object({
-  "email": zod.email().max(postV1PartnerAuthUnlockLinksBodyEmailMax)
+export const CreatePartnerAuthUnlockLinkBody = zod.object({
+  "email": zod.email().max(createPartnerAuthUnlockLinkBodyEmailMax)
 }).strict().describe('해제 링크 다시 받기 본문(POST /v1/partner/auth/unlock-links·/v1/ops/auth/unlock-links). 로그인 화면의 잠김 안내(SCR-020·SCR-028)가 이미 넣은 업무 이메일을 보낸다(docs/security/auth-controls.md §3.3, 추천 적용 2026-10-30)')
 
-export const PostV1PartnerAuthUnlockLinksResponse = zod.void()
+export const CreatePartnerAuthUnlockLinkResponse = zod.void()
 
 /**
  * FR-021, POL-020, docs/security/auth-controls.md §3.5·§4. 지금 비밀번호가 틀리면 로그인 실패와 같이 계정 실패 수와 비밀번호 연속 실패 누계에 센다(auth-controls §3.1 '비밀번호가 틀릴 때'). 바꾸면 이 세션은 이어지고 그 계정의 다른 세션을 모두 끝낸다(asyncapi control.sessions-terminated, reason PASSWORD_CHANGED). 비밀번호만 맞은 로그인이나 유출 목록 재확인 때문에 비밀번호 바꾸기와 로그아웃만 허용된 세션(scope 제한)이면, 응답이 제한을 푼 새 액세스 토큰 쿠키를 준다. 쿠키로 인증하는 쓰기라 gw-partner가 Origin을 확인한다(추천 적용 2026-10-30, ADR-0157 결정 4)
  * @summary 파트너 계정 비밀번호 바꾸기
  */
-export const postV1PartnerAuthPasswordChangesBodyCurrentPasswordMax = 256;
+export const createPartnerAuthPasswordChangeBodyCurrentPasswordMax = 256;
 
-export const postV1PartnerAuthPasswordChangesBodyNewPasswordMin = 15;
-export const postV1PartnerAuthPasswordChangesBodyNewPasswordMax = 256;
+export const createPartnerAuthPasswordChangeBodyNewPasswordMin = 15;
+export const createPartnerAuthPasswordChangeBodyNewPasswordMax = 256;
 
 
 
-export const PostV1PartnerAuthPasswordChangesBody = zod.object({
-  "currentPassword": zod.string().min(1).max(postV1PartnerAuthPasswordChangesBodyCurrentPasswordMax),
-  "newPassword": zod.string().min(postV1PartnerAuthPasswordChangesBodyNewPasswordMin).max(postV1PartnerAuthPasswordChangesBodyNewPasswordMax)
+export const CreatePartnerAuthPasswordChangeBody = zod.object({
+  "currentPassword": zod.string().min(1).max(createPartnerAuthPasswordChangeBodyCurrentPasswordMax),
+  "newPassword": zod.string().min(createPartnerAuthPasswordChangeBodyNewPasswordMin).max(createPartnerAuthPasswordChangeBodyNewPasswordMax)
 }).strict().describe('관리 계정 비밀번호 바꾸기 본문(POST /v1/partner/auth/password-changes·/v1/ops/auth/password-changes). 지금 비밀번호와 새 비밀번호를 함께 검증한다(ASVS 6.2.3). 새 비밀번호는 15자 이상 256자 [가정] 이하이고, 흔한 비밀번호·서비스 맥락 말·계정 맥락 말·유출 목록과 대조한다(docs/security/auth-controls.md §4, POL-020). 정기 변경은 강제하지 않는다(추천 적용 2026-10-30, auth-controls §3.5·§5)')
 
-export const PostV1PartnerAuthPasswordChangesResponse = zod.void()
+export const CreatePartnerAuthPasswordChangeResponse = zod.void()
 
 /**
  * FR-021, POL-020, docs/planning/03 §3 '파트너 계정 초대·역할 변경·잠금 해제' 행의 파트너 칸 'R(관리자: 소속 계정 목록)'(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). 소속 파트너사(요청마다 판정한 요청 테넌트, ADR-0172)의 삭제하지 않은 관리 계정만 준다(docs/security/authz-matrix.md §3.3). 초대·역할 변경·삭제·재초대는 파트너 콘솔에 없고 PEAKET 운영자가 관제 콘솔(SCR-064, /v1/ops/admin-accounts)에서 한다(docs/design/d5 SCR-020 ⑨). 이메일은 가린 값만, 잠금은 걸렸는지만 싣고 계정 ID는 싣지 않는다. partner_member는 403이다. gw-partner가 identity-svc로 넘긴다. 최근 접속 순, 커서 페이징(guidelines §3). Cache-Control: no-store
  * @summary 팀 계정 목록(SCR-020 ⑨, 파트너 관리자만, 보기만)
  */
-export const getV1PartnerTeamAccountsQueryLimitMax = 100;
+export const listPartnerTeamAccountsQueryLimitMax = 100;
 
 
 
-export const GetV1PartnerTeamAccountsQueryParams = zod.object({
+export const ListPartnerTeamAccountsQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1PartnerTeamAccountsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listPartnerTeamAccountsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1PartnerTeamAccountsResponse = zod.object({
+export const ListPartnerTeamAccountsResponse = zod.object({
   "items": zod.array(zod.object({
   "displayName": zod.string().optional().describe('표시 이름(화면의 \'이름\' 칸, AdminAccount.displayName과 같은 값, 추천 적용 2026-10-30)'),
   "emailMasked": zod.string().optional(),
@@ -141,39 +141,39 @@ export const GetV1PartnerTeamAccountsResponse = zod.object({
  * FR-022, POL-003·011·018·030. 공연 하나와 회차 여럿을 함께 만든다(추천 적용 2026-10-27, ADR-0093). 회차의 정렬 설정은 lobbyShuffle·openBatch(boolean, 기본 true)다. 둘 다 false면 422다(추천 적용 2026-10-28, ADR-0118). 공연장은 기존 placeId나 새 공연장 요청(이름·주소), 아티스트는 기존 artistId나 새 이름, 공연의 다른 이름은 5개 [가정]까지 받는다. 새 공연장·새 아티스트는 운영자가 판매 승인 때 잇거나 만든다. 한 공연의 회차는 같은 배치본을 쓴다. 온세일 중 정렬 방식 변경 409. 오픈 간격 규칙 위반 409(다른 공연과 5분 안, 가능 시각 제안). 대형 공연끼리의 30분 간격은 판매 승인에서 규모를 정할 때 검사하고, 여기서는 대형으로 승인된 공연과 30분 안이면 저장은 되고 경고만 준다(POL-030, 추천 적용 2026-10-14, ADR-0062). 저장 시 공연 페이지 태그 무효화
  * @summary 공연 등록(위저드 최종 저장: 공연 정보·공연장·아티스트·다른 이름과 첫 회차들, 회차별 정렬 설정·1인 한도·판매 정책 DSL·입장 정책)
  */
-export const PostV1PartnerProductionsResponse = zod.void()
+export const CreatePartnerProductionResponse = zod.void()
 
 /**
  * FR-022, 추천 적용 2026-10-27, ADR-0093. 오픈 간격 규칙과 정비 창, 정렬 설정(lobbyShuffle·openBatch, 둘 다 false면 422, ADR-0118)은 공연 등록과 같다(POL-030·041). 판매 승인 뒤 더하면 그 공연이 재승인 대기가 되고, 그동안 마지막 승인 내용으로 공개·판매를 계속한다(docs/planning/03 §2.14). 파트너 소속 공연만
  * @summary 회차 더하기(같은 공연·같은 배치본)
  */
-export const PostV1PartnerProductionsProductionIdEventsParams = zod.object({
+export const CreatePartnerProductionEventParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-export const PostV1PartnerProductionsProductionIdEventsHeader = zod.object({
+export const CreatePartnerProductionEventHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const PostV1PartnerProductionsProductionIdEventsResponse = zod.void()
+export const CreatePartnerProductionEventResponse = zod.void()
 
 /**
  * FR-022, 추천 적용 2026-10-27, ADR-0093. 등록된 아티스트를 이름과 다른 이름으로 찾는다(정규화·낱자·초성, docs/features/search.md §3). 없으면 공연 등록 본문에 새 이름을 적고, 운영자가 판매 승인 때 잇거나 만든다. 파트너 소속 계정
  * @summary 아티스트 찾기(공연 등록 1단계)
  */
-export const getV1PartnerArtistsQueryQMax = 50;
+export const listPartnerArtistsQueryQMax = 50;
 
-export const getV1PartnerArtistsQueryLimitMax = 100;
+export const listPartnerArtistsQueryLimitMax = 100;
 
 
 
-export const GetV1PartnerArtistsQueryParams = zod.object({
-  "q": zod.string().min(1).max(getV1PartnerArtistsQueryQMax),
+export const ListPartnerArtistsQueryParams = zod.object({
+  "q": zod.string().min(1).max(listPartnerArtistsQueryQMax),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1PartnerArtistsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listPartnerArtistsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1PartnerArtistsResponse = zod.object({
+export const ListPartnerArtistsResponse = zod.object({
   "items": zod.array(zod.object({
   "artistId": zod.string().optional(),
   "name": zod.string().optional()
@@ -185,19 +185,19 @@ export const GetV1PartnerArtistsResponse = zod.object({
  * FR-022, 추천 적용 2026-10-27, ADR-0093. 등록된 공연장을 이름과 다른 이름으로 찾는다. 없으면 공연 등록 본문에 새 공연장(이름·주소)을 요청하고 운영자가 판매 승인 때 잇거나 만든다. 파트너 소속 계정
  * @summary 공연장 찾기(공연 등록 1단계)
  */
-export const getV1PartnerPlacesQueryQMax = 50;
+export const listPartnerPlacesQueryQMax = 50;
 
-export const getV1PartnerPlacesQueryLimitMax = 100;
+export const listPartnerPlacesQueryLimitMax = 100;
 
 
 
-export const GetV1PartnerPlacesQueryParams = zod.object({
-  "q": zod.string().min(1).max(getV1PartnerPlacesQueryQMax),
+export const ListPartnerPlacesQueryParams = zod.object({
+  "q": zod.string().min(1).max(listPartnerPlacesQueryQMax),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1PartnerPlacesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listPartnerPlacesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1PartnerPlacesResponse = zod.object({
+export const ListPartnerPlacesResponse = zod.object({
   "items": zod.array(zod.object({
   "placeId": zod.string().optional(),
   "name": zod.string().optional(),
@@ -210,51 +210,51 @@ export const GetV1PartnerPlacesResponse = zod.object({
  * FR-022, POL-018. 오픈 뒤에는 불가 → 허용만. 스캐너 목록 묶음·1분 변경분에 반영
  * @summary 회차 입장 정책(재입장 허용 여부, 기본 불가)
  */
-export const PutV1PartnerEventsEventIdEntryPolicyParams = zod.object({
+export const PutPartnerEventEntryPolicyParams = zod.object({
   "eventId": zod.string()
 })
 
-export const PutV1PartnerEventsEventIdEntryPolicyHeader = zod.object({
+export const PutPartnerEventEntryPolicyHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const PutV1PartnerEventsEventIdEntryPolicyBody = zod.object({
+export const PutPartnerEventEntryPolicyBody = zod.object({
   "reentryAllowed": zod.boolean()
-})
+}).strict()
 
-export const PutV1PartnerEventsEventIdEntryPolicyResponse = zod.unknown()
+export const PutPartnerEventEntryPolicyResponse = zod.unknown()
 
 /**
  * FR-055, POL-032, POL-038, ADR-0046. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
  * @summary 회차 취소·연기 요청(확정은 운영자의 귀책 판정과 2인 승인). 귀책 의견은 참고값
  */
-export const PostV1PartnerEventsEventIdCancellationParams = zod.object({
+export const CreatePartnerEventCancellationParams = zod.object({
   "eventId": zod.string()
 })
 
-export const PostV1PartnerEventsEventIdCancellationHeader = zod.object({
+export const CreatePartnerEventCancellationHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const PostV1PartnerEventsEventIdCancellationBody = zod.object({
+export const CreatePartnerEventCancellationBody = zod.object({
   "kind": zod.enum(['CANCEL', 'POSTPONE']),
   "faultOpinion": zod.enum(['ORGANIZER', 'FORCE_MAJEURE', 'CONTENT_CHANGE']).optional(),
   "reason": zod.string(),
   "evidenceRef": zod.string().optional(),
   "newStartsAt": zod.iso.datetime({"offset":true}).optional()
-})
+}).strict()
 
-export const postV1PartnerEventsEventIdCancellationResponseFanNoticeReasonMax = 200;
+export const createPartnerEventCancellationResponseFanNoticeReasonMax = 200;
 
 
 
-export const PostV1PartnerEventsEventIdCancellationResponse = zod.object({
+export const CreatePartnerEventCancellationResponse = zod.object({
   "requestId": zod.string().optional(),
   "eventId": zod.string().optional(),
   "kind": zod.enum(['CANCEL', 'POSTPONE']).optional(),
   "status": zod.enum(['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW', 'COMPLETED', 'REJECTED']).optional().describe('REFUND_WINDOW는 연기(POSTPONE) 확정 뒤 바뀐 공연 시작 전까지 환급 신청을 받는 때(docs/planning/03 §2.11, 기술 검토 중간-044)'),
   "fault": zod.enum(['ORGANIZER', 'FORCE_MAJEURE', 'CONTENT_CHANGE']).optional(),
-  "fanNoticeReason": zod.string().max(postV1PartnerEventsEventIdCancellationResponseFanNoticeReasonMax).optional().describe('팬 통지의 사유 요약(200자 [가정], 판정자가 통지 문안 미리보기에서 씀, docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(ADR-0062)'),
+  "fanNoticeReason": zod.string().max(createPartnerEventCancellationResponseFanNoticeReasonMax).optional().describe('팬 통지의 사유 요약(200자 [가정], 판정자가 통지 문안 미리보기에서 씀, docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(ADR-0062)'),
   "dryRun": zod.looseObject({
 
 }).optional().describe('대상 주문 수, 환급 총액, 배상 대상 수와 총액, 결제사별 건수와 예상 소요 시간'),
@@ -277,15 +277,15 @@ export const PostV1PartnerEventsEventIdCancellationResponse = zod.object({
  * FR-052, POL-037, ADR-0045. 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 승인 뒤 회차를 더하거나 가격·회차·좌석 등급·좌석맵·판매 정책을 바꾸면 다시 승인 대기(마지막 승인 내용으로 공개·판매는 계속, 변경분은 승인 때 반영, docs/planning/03 §2.14, ADR-0062). 정산 계좌는 저장하지 않고 결제사 지급대행 등록 요청에 바로 넘기고 은행·끝 4자리만 남긴다(ADR-0047). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
  * @summary 판매 승인 요청(판매자 신원정보 포함). 승인 전에는 공개되지 않음
  */
-export const PostV1PartnerProductionsProductionIdSaleReviewParams = zod.object({
+export const CreatePartnerProductionSaleReviewParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-export const postV1PartnerProductionsProductionIdSaleReviewBodyAccessibleSeatingNoteMax = 500;
+export const createPartnerProductionSaleReviewBodyAccessibleSeatingNoteMax = 500;
 
 
 
-export const PostV1PartnerProductionsProductionIdSaleReviewBody = zod.object({
+export const CreatePartnerProductionSaleReviewBody = zod.object({
   "seller": zod.object({
   "legalName": zod.string(),
   "representative": zod.string(),
@@ -295,40 +295,40 @@ export const PostV1PartnerProductionsProductionIdSaleReviewBody = zod.object({
   "businessRegNo": zod.string(),
   "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
   "exemptionBasis": zod.string().optional()
-}).describe('판매자 신원정보(전자상거래법 §20②, POL-037)'),
+}).strict().describe('SellerInfo의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SellerInfo)와 같고 응답은 SellerInfo(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).'),
   "payoutAccount": zod.object({
   "bankCode": zod.string(),
   "accountNumber": zod.string(),
   "holderName": zod.string()
-}).describe('정산 계좌 변경. 저장하지 않고 결제사 수정 요청에 바로 넘김(POL-039)'),
+}).strict().describe('정산 계좌 변경. 저장하지 않고 결제사 수정 요청에 바로 넘김(POL-039)'),
   "accessibleSeating": zod.object({
   "confirmed": zod.literal(true).describe('휠체어석의 수와 위치를 공연장 좌석 배치도와 대조함(FR-023)'),
   "shortfallReason": zod.enum(['RELAXED_STANDARD', 'RECOMMENDED_FACILITY', 'NOT_USED_THIS_SHOW', 'OTHER']).optional().describe('휠체어석 수가 기준 min(⌈전체 좌석÷100⌉, 20)보다 적을 때 필수'),
-  "note": zod.string().max(postV1PartnerProductionsProductionIdSaleReviewBodyAccessibleSeatingNoteMax).optional().describe('OTHER일 때 필수')
-}).describe('휠체어석 확인(FR-023). 서버는 저장된 좌석맵으로 수량·위치·온라인 판매 경고를 다시 센다(추천 적용 2026-10-14, ADR-0062)')
-})
+  "note": zod.string().max(createPartnerProductionSaleReviewBodyAccessibleSeatingNoteMax).optional().describe('OTHER일 때 필수')
+}).strict().describe('휠체어석 확인(FR-023). 서버는 저장된 좌석맵으로 수량·위치·온라인 판매 경고를 다시 센다(추천 적용 2026-10-14, ADR-0062)')
+}).strict()
 
-export const PostV1PartnerProductionsProductionIdSaleReviewResponse = zod.void()
+export const CreatePartnerProductionSaleReviewResponse = zod.void()
 
 /**
  * docs/planning/03 §2.14의 변경 취소(Submitted·Rejected → Approved), FR-052, POL-037. 승인 이력이 있는 공연에서 승인 대기 중이거나 반려된 변경 요청을 거두고 마지막 승인 내용으로 돌아간다. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(추천 적용 2026-10-23)
  * @summary 판매 승인 요청 변경 취소(승인 이력이 있을 때만, 마지막 승인 내용으로 되돌림)
  */
-export const DeleteV1PartnerProductionsProductionIdSaleReviewParams = zod.object({
+export const DeletePartnerProductionSaleReviewParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-export const DeleteV1PartnerProductionsProductionIdSaleReviewResponse = zod.void()
+export const DeletePartnerProductionSaleReviewResponse = zod.void()
 
 /**
  * FR-027, FR-062, POL-039. 소속 테넌트만, 계좌는 끝 4자리만
  * @summary 회차·결제사별 정산서와 지급 상태
  */
-export const GetV1PartnerEventsEventIdSettlementsParams = zod.object({
+export const GetPartnerEventSettlementsParams = zod.object({
   "eventId": zod.string()
 })
 
-export const GetV1PartnerEventsEventIdSettlementsResponseItem = zod.object({
+export const GetPartnerEventSettlementsResponseItem = zod.object({
   "statementId": zod.string().optional(),
   "kind": zod.enum(['EVENT', 'PRODUCT']).optional().describe('EVENT는 티켓, PRODUCT는 굿즈·티켓 연동 부가 상품'),
   "eventId": zod.string().optional().describe('회차. 상품 정산서는 null(ADR-0086)'),
@@ -352,25 +352,25 @@ export const GetV1PartnerEventsEventIdSettlementsResponseItem = zod.object({
   "payoutBankCode": zod.string().optional().describe('정산 은행 코드(docs/data.md promoter.payout_bank_code). 화면은 은행 이름으로 바꿔 끝 4자리와 함께 보인다(ADR-0162 결정 5, 추천 적용 2026-10-30)'),
   "payoutAccountLast4": zod.string().optional()
 }).describe('정산서(회차 정산서는 회차·결제사, 상품 정산서는 파트너·결제사·결제 상점·주 단위, POL-039, ADR-0047, 상품 정산서는 추천 적용 2026-10-14, ADR-0062). 계좌는 끝 4자리만')
-export const GetV1PartnerEventsEventIdSettlementsResponse = zod.array(GetV1PartnerEventsEventIdSettlementsResponseItem)
+export const GetPartnerEventSettlementsResponse = zod.array(GetPartnerEventSettlementsResponseItem)
 
 /**
  * FR-062, POL-039 ②, 추천 적용 2026-10-14, ADR-0062. 소속 파트너만, 계좌는 끝 4자리만. 이의 제기는 /v1/partner/settlements/{statementId}/disputes를 쓴다
  * @summary 상품 정산서 목록(굿즈·티켓 연동 부가 상품, 주·결제 상점별)과 정산 대기 금액
  */
-export const getV1PartnerProductSettlementsQueryLimitMax = 100;
+export const listPartnerProductSettlementsQueryLimitMax = 100;
 
 
 
-export const GetV1PartnerProductSettlementsQueryParams = zod.object({
+export const ListPartnerProductSettlementsQueryParams = zod.object({
   "from": zod.iso.date().optional().describe('주 시작(KST) 이후'),
   "to": zod.iso.date().optional(),
   "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional(),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1PartnerProductSettlementsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listPartnerProductSettlementsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1PartnerProductSettlementsResponse = zod.object({
+export const ListPartnerProductSettlementsResponse = zod.object({
   "items": zod.array(zod.object({
   "statementId": zod.string().optional(),
   "kind": zod.enum(['EVENT', 'PRODUCT']).optional().describe('EVENT는 티켓, PRODUCT는 굿즈·티켓 연동 부가 상품'),
@@ -403,11 +403,11 @@ export const GetV1PartnerProductSettlementsResponse = zod.object({
  * FR-068, POL-040, ADR-0052. 소속 테넌트 회차만. R3 전이면 404
  * @summary 파트너 판매 요약(SCR-027, R3 뒤)
  */
-export const GetV1PartnerEventsEventIdReportParams = zod.object({
+export const GetPartnerEventReportParams = zod.object({
   "eventId": zod.string()
 })
 
-export const GetV1PartnerEventsEventIdReportResponse = zod.object({
+export const GetPartnerEventReportResponse = zod.object({
   "eventId": zod.string().optional(),
   "soldSeats": zod.int().optional(),
   "soldOutAt": zod.iso.datetime({"offset":true}).optional(),
@@ -436,47 +436,47 @@ export const GetV1PartnerEventsEventIdReportResponse = zod.object({
  * FR-062, POL-039. 그 정산서만 지급을 멈추고 CS 처리함 건이 됨. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
  * @summary 정산서 이의 제기(통지 뒤 2영업일 안)
  */
-export const PostV1PartnerSettlementsStatementIdDisputesParams = zod.object({
+export const CreatePartnerSettlementDisputeParams = zod.object({
   "statementId": zod.string()
 })
 
-export const PostV1PartnerSettlementsStatementIdDisputesHeader = zod.object({
+export const CreatePartnerSettlementDisputeHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1PartnerSettlementsStatementIdDisputesBodyDetailMax = 2000;
+export const createPartnerSettlementDisputeBodyDetailMax = 2000;
 
 
 
-export const PostV1PartnerSettlementsStatementIdDisputesBody = zod.object({
+export const CreatePartnerSettlementDisputeBody = zod.object({
   "reasonCode": zod.enum(['GROSS_AMOUNT', 'REFUND_AMOUNT', 'COMMISSION', 'OFFSET', 'OTHER']).describe('정산서 항목에 맞춘 사유 코드(settlement §4.2, 추천 적용 2026-10-14, ADR-0062)'),
-  "detail": zod.string().max(postV1PartnerSettlementsStatementIdDisputesBodyDetailMax).optional().describe('OTHER면 필수')
-})
+  "detail": zod.string().max(createPartnerSettlementDisputeBodyDetailMax).optional().describe('OTHER면 필수')
+}).strict()
 
-export const PostV1PartnerSettlementsStatementIdDisputesResponse = zod.void()
+export const CreatePartnerSettlementDisputeResponse = zod.void()
 
 /**
  * FR-062, POL-039, ADR-0047. 재인증 토큰은 비밀번호·TOTP와 패스키를 거친 것이어야 한다(factors에 passkey, 없으면 403 reauth-required, POL-020, 기술 검토 중간-051). 계좌는 저장하지 않고 두 결제사 수정 요청에 바로 넘김. 변경 뒤 3영업일 지급 보류, 등록 이메일·전화로 알림. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
  * @summary 정산 계좌 변경(관리자 재인증, 예금주가 판매자와 같을 때만)
  */
-export const PutV1PartnerPayoutAccountHeader = zod.object({
+export const PutPartnerPayoutAccountHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const PutV1PartnerPayoutAccountBody = zod.object({
+export const PutPartnerPayoutAccountBody = zod.object({
   "bankCode": zod.string(),
   "accountNumber": zod.string(),
   "holderName": zod.string()
-}).describe('정산 계좌 변경. 저장하지 않고 결제사 수정 요청에 바로 넘김(POL-039)')
+}).strict().describe('정산 계좌 변경. 저장하지 않고 결제사 수정 요청에 바로 넘김(POL-039)')
 
-export const PutV1PartnerPayoutAccountResponse = zod.unknown()
+export const PutPartnerPayoutAccountResponse = zod.unknown()
 
 /**
  * FR-052, FR-053, POL-037, 추천 적용 2026-10-19, ADR-0066. 공연 상세·결제 직전·예매 확인서에 판매자 정보로 보이는 값이고 PEAKET 판매 승인에 쓰인 값이다(전자상거래법 §20②). 소속 파트너만, 파트너 관리자·실무자 모두 읽는다
  * @summary 판매자 정보(판매자 신원정보 7항목, 마지막 확인, 검토 중인 변경 요청)
  */
-export const GetV1PartnerSellerProfileResponse = zod.object({
+export const GetPartnerSellerProfileResponse = zod.object({
   "seller": zod.object({
   "legalName": zod.string(),
   "representative": zod.string(),
@@ -501,24 +501,24 @@ export const GetV1PartnerSellerProfileResponse = zod.object({
  * FR-052, POL-037, 추천 적용 2026-10-19, ADR-0066. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(화면은 '변경 요청은 파트너 관리자만 할 수 있습니다'). 근거 서류는 참조값만 받고 파일은 받지 않는다. PEAKET 운영자가 확인해 반영할 때까지 공연 상세·결제 직전·예매 확인서에는 지금 정보가 보인다. 상호나 대표자를 바꾸면 PEAKET 운영자가 판매자 정보를 다시 확인하므로 응답의 identityReviewRequired가 true다(공연의 판매 재승인이 아니다, POL-039, docs/planning/03 §2.14, ADR-0066 결정 12). 검토 중인 요청이 있으면 409
  * @summary 판매자 정보 변경 요청(바꿀 항목·새 값·근거 서류 참조, 파일 없음)
  */
-export const PostV1PartnerSellerProfileChangeRequestsHeader = zod.object({
+export const CreatePartnerSellerProfileChangeRequestHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
 
-export const postV1PartnerSellerProfileChangeRequestsBodyChangesMax = 7;
+export const createPartnerSellerProfileChangeRequestBodyChangesMax = 7;
 
 
 
-export const PostV1PartnerSellerProfileChangeRequestsBody = zod.object({
+export const CreatePartnerSellerProfileChangeRequestBody = zod.object({
   "changes": zod.array(zod.object({
   "field": zod.enum(['legalName', 'representative', 'address', 'phone', 'email', 'businessRegNo', 'mailOrderReportNo']),
   "newValue": zod.string().min(1)
-}).strict()).min(1).max(postV1PartnerSellerProfileChangeRequestsBodyChangesMax),
+}).strict()).min(1).max(createPartnerSellerProfileChangeRequestBodyChangesMax),
   "evidenceRef": zod.string().optional().describe('근거 서류 참조(예 서류 종류와 발급 번호). 파일은 받지 않는다')
 }).strict().describe('판매자 정보 변경 요청(파트너 관리자, 추천 적용 2026-10-19, ADR-0066). 근거 서류는 참조값만 받고 파일은 받지 않는다')
 
-export const PostV1PartnerSellerProfileChangeRequestsResponse = zod.object({
+export const CreatePartnerSellerProfileChangeRequestResponse = zod.object({
   "requestId": zod.string().optional(),
   "status": zod.enum(['IN_REVIEW', 'APPLIED', 'REJECTED']).optional(),
   "fields": zod.array(zod.string()).optional(),
@@ -530,22 +530,22 @@ export const PostV1PartnerSellerProfileChangeRequestsResponse = zod.object({
  * FR-046, POL-031, ADR-0051. 초대마다 32바이트 토큰을 만들고 해시만 저장한다. 링크는 토큰을 URL 조각(#token=)에 담는다
  * @summary 현장 스태프 초대(이메일 여러 개, 최대 200명 [가정], 역할 gate_staff·gate_lead, 회차 단위)
  */
-export const PostV1PartnerEventsEventIdStaffInvitationsParams = zod.object({
+export const CreatePartnerEventStaffInvitationParams = zod.object({
   "eventId": zod.string()
 })
 
-export const postV1PartnerEventsEventIdStaffInvitationsBodyInvitationsMax = 200;
+export const createPartnerEventStaffInvitationBodyInvitationsMax = 200;
 
 
 
-export const PostV1PartnerEventsEventIdStaffInvitationsBody = zod.object({
+export const CreatePartnerEventStaffInvitationBody = zod.object({
   "invitations": zod.array(zod.object({
   "email": zod.email(),
   "role": zod.enum(['gate_staff', 'gate_lead'])
-})).max(postV1PartnerEventsEventIdStaffInvitationsBodyInvitationsMax)
-})
+}).strict()).max(createPartnerEventStaffInvitationBodyInvitationsMax)
+}).strict()
 
-export const PostV1PartnerEventsEventIdStaffInvitationsResponseItem = zod.object({
+export const CreatePartnerEventStaffInvitationResponseItem = zod.object({
   "assignmentId": zod.string().optional(),
   "eventId": zod.string().optional(),
   "nickname": zod.string().optional(),
@@ -557,26 +557,26 @@ export const PostV1PartnerEventsEventIdStaffInvitationsResponseItem = zod.object
   "scanCount": zod.int().optional(),
   "overrideCount": zod.int().optional()
 }).describe('파트너용 명단에는 이메일·계정 ID를 넣지 않는다')
-export const PostV1PartnerEventsEventIdStaffInvitationsResponse = zod.array(PostV1PartnerEventsEventIdStaffInvitationsResponseItem)
+export const CreatePartnerEventStaffInvitationResponse = zod.array(CreatePartnerEventStaffInvitationResponseItem)
 
 /**
  * FR-046, SCR-037. 이메일·계정 ID는 넣지 않는다
  * @summary 현장 스태프 명단(닉네임, 역할, 수락 여부·만료, 유효 시간, 스캔·예외 통과 건수)
  */
-export const GetV1PartnerEventsEventIdStaffParams = zod.object({
+export const ListPartnerEventStaffParams = zod.object({
   "eventId": zod.string()
 })
 
-export const getV1PartnerEventsEventIdStaffQueryLimitMax = 100;
+export const listPartnerEventStaffQueryLimitMax = 100;
 
 
 
-export const GetV1PartnerEventsEventIdStaffQueryParams = zod.object({
+export const ListPartnerEventStaffQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1PartnerEventsEventIdStaffQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listPartnerEventStaffQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1PartnerEventsEventIdStaffResponse = zod.object({
+export const ListPartnerEventStaffResponse = zod.object({
   "items": zod.array(zod.object({
   "assignmentId": zod.string().optional(),
   "eventId": zod.string().optional(),
@@ -596,21 +596,21 @@ export const GetV1PartnerEventsEventIdStaffResponse = zod.object({
  * FR-046, POL-031, ADR-0051
  * @summary 현장 스태프 해제(그 스캐너의 다음 요청부터 거부, 다음 변경분에서 로그아웃)
  */
-export const DeleteV1PartnerStaffAssignmentIdParams = zod.object({
+export const DeletePartnerStaffParams = zod.object({
   "assignmentId": zod.string()
 })
 
-export const DeleteV1PartnerStaffAssignmentIdResponse = zod.void()
+export const DeletePartnerStaffResponse = zod.void()
 
 /**
  * FR-046, ADR-0051. 배정의 초대를 새로 만든다(POST, 보낼 때마다 새 토큰). 배정 ID만으로 찾고 서버가 그 배정이 요청한 파트너 소속인지 확인한다(추천 적용 2026-10-21, ADR-0081)
  * @summary 초대 재발송(새 토큰, 옛 토큰 무효)
  */
-export const PostV1PartnerStaffAssignmentIdInvitationParams = zod.object({
+export const CreatePartnerStaffInvitationParams = zod.object({
   "assignmentId": zod.string()
 })
 
-export const PostV1PartnerStaffAssignmentIdInvitationResponse = zod.object({
+export const CreatePartnerStaffInvitationResponse = zod.object({
   "assignmentId": zod.string().optional(),
   "eventId": zod.string().optional(),
   "nickname": zod.string().optional(),
@@ -627,31 +627,31 @@ export const PostV1PartnerStaffAssignmentIdInvitationResponse = zod.object({
  * FR-066, ADR-0051. 퇴장 모드는 재입장 허용 회차만
  * @summary 기기 배치(게이트 구역·모드). 소속 기기만
  */
-export const PutV1PartnerEventsEventIdDevicePlacementsDeviceIdParams = zod.object({
+export const PutPartnerEventDevicePlacementParams = zod.object({
   "eventId": zod.string(),
   "deviceId": zod.string()
 })
 
-export const PutV1PartnerEventsEventIdDevicePlacementsDeviceIdHeader = zod.object({
+export const PutPartnerEventDevicePlacementHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const PutV1PartnerEventsEventIdDevicePlacementsDeviceIdBody = zod.object({
+export const PutPartnerEventDevicePlacementBody = zod.object({
   "gateZone": zod.string(),
   "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)')
-})
+}).strict().describe('ScannerPlacement의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(ScannerPlacement)와 같고 응답은 ScannerPlacement(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')
 
-export const PutV1PartnerEventsEventIdDevicePlacementsDeviceIdResponse = zod.unknown()
+export const PutPartnerEventDevicePlacementResponse = zod.unknown()
 
 /**
  * FR-066, FR-067, SCR-037
  * @summary 현장 운영 현황(기기 준비·배치·동기화, 구역별 입장 수, 거부 사유, 이상 표시 수, 마감 상태). 개인정보 없음
  */
-export const GetV1PartnerEventsEventIdGateStatusParams = zod.object({
+export const GetPartnerEventGateStatusParams = zod.object({
   "eventId": zod.string()
 })
 
-export const GetV1PartnerEventsEventIdGateStatusResponse = zod.object({
+export const GetPartnerEventGateStatusResponse = zod.object({
   "devices": zod.array(zod.object({
   "deviceId": zod.string().optional(),
   "name": zod.string().optional(),
@@ -676,20 +676,20 @@ export const GetV1PartnerEventsEventIdGateStatusResponse = zod.object({
  * FR-066, FR-067
  * @summary 이상 표시 목록(좌석 표시·종류·처리 결과)
  */
-export const GetV1PartnerEventsEventIdFlagsParams = zod.object({
+export const ListPartnerEventFlagsParams = zod.object({
   "eventId": zod.string()
 })
 
-export const getV1PartnerEventsEventIdFlagsQueryLimitMax = 100;
+export const listPartnerEventFlagsQueryLimitMax = 100;
 
 
 
-export const GetV1PartnerEventsEventIdFlagsQueryParams = zod.object({
+export const ListPartnerEventFlagsQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1PartnerEventsEventIdFlagsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listPartnerEventFlagsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1PartnerEventsEventIdFlagsResponse = zod.object({
+export const ListPartnerEventFlagsResponse = zod.object({
   "items": zod.array(zod.object({
   "flagId": zod.string().optional(),
   "ticketId": zod.string().optional(),
@@ -707,37 +707,37 @@ export const GetV1PartnerEventsEventIdFlagsResponse = zod.object({
  * FR-023(추천 적용 2026-10-14, ADR-0063). 이 공연의 배치본을 돌려준다(공연의 회차는 모두 이 배치본을 쓴다, ADR-0093). 아직 없으면 fromTemplate에 공연장 틀 ID를 넣어 틀을 복제한 저장 전 초안(layoutVersion 0)을 받는다. 변형과 목표 좌석 수를 반영한 템플릿에서 만들기는 같은 경로의 POST다(ADR-0066, 경로는 ADR-0081). 구역마다 에디터 전용 fillRule(좌석 채우기 규칙)이 함께 온다. 내보내기(SVG·JSON·CSV)는 이 값으로 브라우저가 만든다
  * @summary 좌석맵 불러오기(SCR-022 에디터, 배치 층·좌석 층)
  */
-export const GetV1PartnerProductionsProductionIdSeatmapParams = zod.object({
+export const GetPartnerProductionSeatmapParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-export const GetV1PartnerProductionsProductionIdSeatmapQueryParams = zod.object({
+export const GetPartnerProductionSeatmapQueryParams = zod.object({
   "fromTemplate": zod.string().optional().describe('복제할 공연장 틀(venue kind TEMPLATE) ID')
 })
 
-export const getV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsItemMin = 2;
-export const getV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsItemMax = 2;
+export const getPartnerProductionSeatmapResponseStageItemPointsItemMin = 2;
+export const getPartnerProductionSeatmapResponseStageItemPointsItemMax = 2;
 
-export const getV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsMin = 3;
+export const getPartnerProductionSeatmapResponseStageItemPointsMin = 3;
 
-export const getV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsItemMin = 2;
-export const getV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsItemMax = 2;
+export const getPartnerProductionSeatmapResponseSectionsItemShapePointsItemMin = 2;
+export const getPartnerProductionSeatmapResponseSectionsItemShapePointsItemMax = 2;
 
-export const getV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsMin = 3;
-
-
+export const getPartnerProductionSeatmapResponseSectionsItemShapePointsMin = 3;
 
 
 
 
-export const getV1PartnerProductionsProductionIdSeatmapResponseSectionsItemFillRuleAislesMin = 0;
 
 
-export const getV1PartnerProductionsProductionIdSeatmapResponseSectionsItemFillRuleFirstNumberMin = 0;
+export const getPartnerProductionSeatmapResponseSectionsItemFillRuleAislesMin = 0;
+
+
+export const getPartnerProductionSeatmapResponseSectionsItemFillRuleFirstNumberMin = 0;
 
 
 
-export const GetV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
+export const GetPartnerProductionSeatmapResponse = zod.object({
   "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본'),
   "templateVenueId": zod.string().optional().describe('복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063)'),
   "canvas": zod.object({
@@ -746,7 +746,7 @@ export const GetV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
 }),
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(getV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsItemMin).max(getV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsItemMax)).min(getV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(getPartnerProductionSeatmapResponseStageItemPointsItemMin).max(getPartnerProductionSeatmapResponseStageItemPointsItemMax)).min(getPartnerProductionSeatmapResponseStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
@@ -755,7 +755,7 @@ export const GetV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
   "level": zod.string().optional(),
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(getV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsItemMin).max(getV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsItemMax)).min(getV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(getPartnerProductionSeatmapResponseSectionsItemShapePointsItemMin).max(getPartnerProductionSeatmapResponseSectionsItemShapePointsItemMax)).min(getPartnerProductionSeatmapResponseSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
   "label": zod.object({
@@ -776,10 +776,10 @@ export const GetV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
   "rowShape": zod.enum(['STRAIGHT', 'CURVED']).optional().describe('직선, 무대를 향한 곡선'),
   "seatSpacingCm": zod.int().min(1).optional().describe('좌석 간격(옆), 기본 50 [가정]'),
   "rowSpacingCm": zod.int().min(1).optional().describe('행 간격(앞뒤), 기본 90 [가정]'),
-  "aisles": zod.int().min(getV1PartnerProductionsProductionIdSeatmapResponseSectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
+  "aisles": zod.int().min(getPartnerProductionSeatmapResponseSectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
   "aisleWidthCm": zod.int().min(1).optional().describe('통로 폭, 기본 120 [가정]'),
   "rowLabel": zod.enum(['NUMBER', 'ALPHA']).optional().describe('행 이름 1열·2열 또는 A·B·C'),
-  "firstNumber": zod.int().min(getV1PartnerProductionsProductionIdSeatmapResponseSectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
+  "firstNumber": zod.int().min(getPartnerProductionSeatmapResponseSectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
   "numberFrom": zod.enum(['LEFT', 'RIGHT']).optional().describe('번호 방향(무대를 보고 왼쪽부터·오른쪽부터)')
 }).optional().describe('파트너 에디터 전용 좌석 채우기 규칙(section.editor_meta). 팬 좌석맵 파일에는 싣지 않는다(ADR-0066)'),
   "seats": zod.array(zod.object({
@@ -801,67 +801,67 @@ export const GetV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
  * FR-023(추천 적용 2026-10-14, ADR-0063). 서버가 도형(닫힌 다각형, 캔버스 안), 좌석(같은 구역·열·번호 중복 없음, 구역 도형 안 [가정]), 휠체어석 기준 W1~W3, 좌석 겹침(SEAT_OVERLAP, ADR-0066)을 다시 검사한다. 오류는 422와 항목 목록이고 휠체어석, 좌석 겹침과 구역 도형 밖 좌석은 경고만 한다(FR-023, ADR-0063). 자동 채우기 계산은 에디터가 하고 구역의 fillRule은 에디터 값으로 저장한다(팬 좌석맵 파일에는 싣지 않음, ADR-0066). 저장하면 layoutVersion을 올리고 팬 좌석맵 파일을 새 판으로 게시한다. 저장 대상은 이 공연의 배치본(공연장 틀을 복제한 것)이고 편집은 그 배치본에만 미친다. layoutVersion 0이면 templateVenueId의 틀을 복제해 배치본을 새로 만든다. 판매 승인 뒤 바꾸면 다시 승인 대기다(sale-review 설명과 같다). 배치본을 쓰는 회차가 오픈(판매 시작)한 뒤에는 도형·좌표·좌석 추가·삭제를 409 seatmap-geometry-locked로 거절하고 기존 좌석의 속성 변경(판매 제외 등)만 받는다
  * @summary 좌석맵 저장(배치 층과 좌석 층을 함께, If-Match의 layoutVersion으로 동시 수정 방지)
  */
-export const PutV1PartnerProductionsProductionIdSeatmapParams = zod.object({
+export const PutPartnerProductionSeatmapParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-export const PutV1PartnerProductionsProductionIdSeatmapHeader = zod.object({
+export const PutPartnerProductionSeatmapHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const putV1PartnerProductionsProductionIdSeatmapBodyStageItemPointsItemMin = 2;
-export const putV1PartnerProductionsProductionIdSeatmapBodyStageItemPointsItemMax = 2;
+export const putPartnerProductionSeatmapBodyStageItemPointsItemMin = 2;
+export const putPartnerProductionSeatmapBodyStageItemPointsItemMax = 2;
 
-export const putV1PartnerProductionsProductionIdSeatmapBodyStageItemPointsMin = 3;
+export const putPartnerProductionSeatmapBodyStageItemPointsMin = 3;
 
-export const putV1PartnerProductionsProductionIdSeatmapBodySectionsItemShapePointsItemMin = 2;
-export const putV1PartnerProductionsProductionIdSeatmapBodySectionsItemShapePointsItemMax = 2;
+export const putPartnerProductionSeatmapBodySectionsItemShapePointsItemMin = 2;
+export const putPartnerProductionSeatmapBodySectionsItemShapePointsItemMax = 2;
 
-export const putV1PartnerProductionsProductionIdSeatmapBodySectionsItemShapePointsMin = 3;
-
-
+export const putPartnerProductionSeatmapBodySectionsItemShapePointsMin = 3;
 
 
 
 
-export const putV1PartnerProductionsProductionIdSeatmapBodySectionsItemFillRuleAislesMin = 0;
 
 
-export const putV1PartnerProductionsProductionIdSeatmapBodySectionsItemFillRuleFirstNumberMin = 0;
+export const putPartnerProductionSeatmapBodySectionsItemFillRuleAislesMin = 0;
+
+
+export const putPartnerProductionSeatmapBodySectionsItemFillRuleFirstNumberMin = 0;
 
 
 
-export const PutV1PartnerProductionsProductionIdSeatmapBody = zod.object({
+export const PutPartnerProductionSeatmapBody = zod.object({
   "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본'),
   "templateVenueId": zod.string().optional().describe('복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063)'),
   "canvas": zod.object({
   "width": zod.int(),
   "height": zod.int()
-}),
+}).strict(),
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(putV1PartnerProductionsProductionIdSeatmapBodyStageItemPointsItemMin).max(putV1PartnerProductionsProductionIdSeatmapBodyStageItemPointsItemMax)).min(putV1PartnerProductionsProductionIdSeatmapBodyStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(putPartnerProductionSeatmapBodyStageItemPointsItemMin).max(putPartnerProductionSeatmapBodyStageItemPointsItemMax)).min(putPartnerProductionSeatmapBodyStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
-}).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
+}).strict().describe('SeatMapShape의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapShape)와 같고 응답은 SeatMapShape(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string(),
   "name": zod.string(),
   "level": zod.string().optional(),
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(putV1PartnerProductionsProductionIdSeatmapBodySectionsItemShapePointsItemMin).max(putV1PartnerProductionsProductionIdSeatmapBodySectionsItemShapePointsItemMax)).min(putV1PartnerProductionsProductionIdSeatmapBodySectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(putPartnerProductionSeatmapBodySectionsItemShapePointsItemMin).max(putPartnerProductionSeatmapBodySectionsItemShapePointsItemMax)).min(putPartnerProductionSeatmapBodySectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
-}).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
+}).strict().describe('SeatMapShape의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapShape)와 같고 응답은 SeatMapShape(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).'),
   "label": zod.object({
   "x": zod.int().optional(),
   "y": zod.int().optional()
-}).optional().describe('구역 라벨 위치'),
+}).strict().optional().describe('구역 라벨 위치'),
   "tierId": zod.string().optional().describe('구역 기본 등급. 회차 판매 등급은 좌석의 tierId'),
   "gateZone": zod.string().optional(),
   "seatIndexRange": zod.object({
   "from": zod.int().optional(),
   "to": zod.int().optional()
-}).optional().describe('이 구역 좌석의 비트맵 인덱스 범위. 브라우저가 스냅샷에서 구역별 남은 좌석을 센다(추천 적용 2026-10-14, ADR-0063)'),
+}).strict().optional().describe('이 구역 좌석의 비트맵 인덱스 범위. 브라우저가 스냅샷에서 구역별 남은 좌석을 센다(추천 적용 2026-10-14, ADR-0063)'),
   "fillRule": zod.object({
   "method": zod.enum(['COUNT', 'GRID']).describe('COUNT 좌석 수로 채우기, GRID 행 수 × 행마다 좌석 수'),
   "targetCount": zod.int().min(1).optional().describe('COUNT일 때 목표 좌석 수(예 600)'),
@@ -870,12 +870,12 @@ export const PutV1PartnerProductionsProductionIdSeatmapBody = zod.object({
   "rowShape": zod.enum(['STRAIGHT', 'CURVED']).optional().describe('직선, 무대를 향한 곡선'),
   "seatSpacingCm": zod.int().min(1).optional().describe('좌석 간격(옆), 기본 50 [가정]'),
   "rowSpacingCm": zod.int().min(1).optional().describe('행 간격(앞뒤), 기본 90 [가정]'),
-  "aisles": zod.int().min(putV1PartnerProductionsProductionIdSeatmapBodySectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
+  "aisles": zod.int().min(putPartnerProductionSeatmapBodySectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
   "aisleWidthCm": zod.int().min(1).optional().describe('통로 폭, 기본 120 [가정]'),
   "rowLabel": zod.enum(['NUMBER', 'ALPHA']).optional().describe('행 이름 1열·2열 또는 A·B·C'),
-  "firstNumber": zod.int().min(putV1PartnerProductionsProductionIdSeatmapBodySectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
+  "firstNumber": zod.int().min(putPartnerProductionSeatmapBodySectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
   "numberFrom": zod.enum(['LEFT', 'RIGHT']).optional().describe('번호 방향(무대를 보고 왼쪽부터·오른쪽부터)')
-}).optional().describe('파트너 에디터 전용 좌석 채우기 규칙(section.editor_meta). 팬 좌석맵 파일에는 싣지 않는다(ADR-0066)'),
+}).strict().optional().describe('파트너 에디터 전용 좌석 채우기 규칙(section.editor_meta). 팬 좌석맵 파일에는 싣지 않는다(ADR-0066)'),
   "seats": zod.array(zod.object({
   "seatId": zod.string(),
   "index": zod.int().optional().describe('비트맵 인덱스'),
@@ -887,53 +887,53 @@ export const PutV1PartnerProductionsProductionIdSeatmapBody = zod.object({
   "wheelchair": zod.boolean().optional(),
   "unavailable": zod.boolean().optional().describe('판매 제외'),
   "gateZone": zod.string().optional()
-})).optional()
-}))
-}).describe('좌석맵 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 행·좌석·좌표, 추천 적용 2026-10-14, ADR-0063). 파트너 에디터가 불러오고 저장하는 본문이다. 팬 화면 좌석맵 파일은 같은 두 층을 구역마다 열 단위 배열로 낸 SeatMapColumns다(2026-11-04 BUILD_ORDER HOT-110, BAS-190 PoC에서 객체 배열보다 압축 전 3.4배·brotli 3.0배 작았다)')
+}).strict()).optional()
+}).strict())
+}).strict().describe('SeatMapLayout의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SeatMapLayout)와 같고 응답은 SeatMapLayout(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')
 
-export const PutV1PartnerProductionsProductionIdSeatmapResponse = zod.unknown()
+export const PutPartnerProductionSeatmapResponse = zod.unknown()
 
 /**
  * FR-023, 소유자 요청 2026-10-19(세부는 추천 적용 2026-10-19), ADR-0066. variant는 템플릿 variants에서 고른 값이고, 서버가 targetCapacity(목표 좌석 수)를 구역 비율대로 나눠 구역별 채우기 규칙(fillRule)의 목표 수로 넣는다. 좌석 배치(자동 채우기)는 에디터가 계산해 PUT …/seatmap으로 저장하고 서버가 그때 도형 안·번호 중복을 다시 검사한다(겹침과 도형 밖 좌석은 경고만). 대상은 이 공연의 배치본이고 편집은 그 배치본에만 미친다. templateId는 TEMPLATE 행만 받으므로 다른 파트너의 배치본은 복제할 수 없다. 이미 좌석이 있는 배치본은 replace가 true가 아니면 409이고 화면은 지우고 다시 만들지 확인을 받는다. 배치본을 쓰는 회차가 오픈한 뒤에는 replace와 상관없이 409 seatmap-geometry-locked다. 판매 승인 뒤 바꾸면 다시 승인 대기다(sale-review 설명과 같다). 템플릿은 흔한 모양을 본뜬 출발점이고 실제 공연장의 배치도가 아니다. 파트너 소속 공연만
  * @summary 템플릿에서 만들기(템플릿 도형과 채우기 규칙을 이 공연의 배치본으로 복제)
  */
-export const PostV1PartnerProductionsProductionIdSeatmapParams = zod.object({
+export const CreatePartnerProductionSeatmapParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
 
-export const postV1PartnerProductionsProductionIdSeatmapBodyReplaceDefault = false;
+export const createPartnerProductionSeatmapBodyReplaceDefault = false;
 
-export const PostV1PartnerProductionsProductionIdSeatmapBody = zod.object({
+export const CreatePartnerProductionSeatmapBody = zod.object({
   "templateId": zod.string().describe('venue kind TEMPLATE의 ID(배치본 ID면 404)'),
   "variant": zod.record(zod.string(), zod.union([zod.string(),zod.int(),zod.boolean()])).optional().describe('고를 수 있는 것의 값. 키는 템플릿 variants[].key이고 없으면 기본값'),
   "targetCapacity": zod.int().min(1).describe('목표 좌석 수'),
-  "replace": zod.boolean().default(postV1PartnerProductionsProductionIdSeatmapBodyReplaceDefault).describe('이미 좌석이 있는 배치본을 지우고 다시 만들 때 true')
+  "replace": zod.boolean().default(createPartnerProductionSeatmapBodyReplaceDefault).describe('이미 좌석이 있는 배치본을 지우고 다시 만들 때 true')
 }).strict()
 
-export const postV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsItemMin = 2;
-export const postV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsItemMax = 2;
+export const createPartnerProductionSeatmapResponseStageItemPointsItemMin = 2;
+export const createPartnerProductionSeatmapResponseStageItemPointsItemMax = 2;
 
-export const postV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsMin = 3;
+export const createPartnerProductionSeatmapResponseStageItemPointsMin = 3;
 
-export const postV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsItemMin = 2;
-export const postV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsItemMax = 2;
+export const createPartnerProductionSeatmapResponseSectionsItemShapePointsItemMin = 2;
+export const createPartnerProductionSeatmapResponseSectionsItemShapePointsItemMax = 2;
 
-export const postV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsMin = 3;
-
-
+export const createPartnerProductionSeatmapResponseSectionsItemShapePointsMin = 3;
 
 
 
 
-export const postV1PartnerProductionsProductionIdSeatmapResponseSectionsItemFillRuleAislesMin = 0;
 
 
-export const postV1PartnerProductionsProductionIdSeatmapResponseSectionsItemFillRuleFirstNumberMin = 0;
+export const createPartnerProductionSeatmapResponseSectionsItemFillRuleAislesMin = 0;
+
+
+export const createPartnerProductionSeatmapResponseSectionsItemFillRuleFirstNumberMin = 0;
 
 
 
-export const PostV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
+export const CreatePartnerProductionSeatmapResponse = zod.object({
   "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본'),
   "templateVenueId": zod.string().optional().describe('복제한 공연장 틀 ID. 배치본은 틀을 복제한 공연용 사본이고 편집은 그 사본에만 미친다(추천 적용 2026-10-14, ADR-0063)'),
   "canvas": zod.object({
@@ -942,7 +942,7 @@ export const PostV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
 }),
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(postV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsItemMin).max(postV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsItemMax)).min(postV1PartnerProductionsProductionIdSeatmapResponseStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(createPartnerProductionSeatmapResponseStageItemPointsItemMin).max(createPartnerProductionSeatmapResponseStageItemPointsItemMax)).min(createPartnerProductionSeatmapResponseStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
@@ -951,7 +951,7 @@ export const PostV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
   "level": zod.string().optional(),
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(postV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsItemMin).max(postV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsItemMax)).min(postV1PartnerProductionsProductionIdSeatmapResponseSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(createPartnerProductionSeatmapResponseSectionsItemShapePointsItemMin).max(createPartnerProductionSeatmapResponseSectionsItemShapePointsItemMax)).min(createPartnerProductionSeatmapResponseSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
   "label": zod.object({
@@ -972,10 +972,10 @@ export const PostV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
   "rowShape": zod.enum(['STRAIGHT', 'CURVED']).optional().describe('직선, 무대를 향한 곡선'),
   "seatSpacingCm": zod.int().min(1).optional().describe('좌석 간격(옆), 기본 50 [가정]'),
   "rowSpacingCm": zod.int().min(1).optional().describe('행 간격(앞뒤), 기본 90 [가정]'),
-  "aisles": zod.int().min(postV1PartnerProductionsProductionIdSeatmapResponseSectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
+  "aisles": zod.int().min(createPartnerProductionSeatmapResponseSectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
   "aisleWidthCm": zod.int().min(1).optional().describe('통로 폭, 기본 120 [가정]'),
   "rowLabel": zod.enum(['NUMBER', 'ALPHA']).optional().describe('행 이름 1열·2열 또는 A·B·C'),
-  "firstNumber": zod.int().min(postV1PartnerProductionsProductionIdSeatmapResponseSectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
+  "firstNumber": zod.int().min(createPartnerProductionSeatmapResponseSectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
   "numberFrom": zod.enum(['LEFT', 'RIGHT']).optional().describe('번호 방향(무대를 보고 왼쪽부터·오른쪽부터)')
 }).optional().describe('파트너 에디터 전용 좌석 채우기 규칙(section.editor_meta). 팬 좌석맵 파일에는 싣지 않는다(ADR-0066)'),
   "seats": zod.array(zod.object({
@@ -997,38 +997,38 @@ export const PostV1PartnerProductionsProductionIdSeatmapResponse = zod.object({
  * FR-023. SVG는 구역 도형(polygon·path·rect, id·data 속성으로 구역 이름)과 좌석 원(circle의 중심 좌표, data 속성으로 열·번호), JSON은 SeatMapLayout, CSV는 좌석 행(구역·열·번호·x·y·등급·휠체어석·게이트 구역)과 구역 첫 행의 shape 열(꼭짓점 'x y;x y;…')로 받는다(추천 적용 2026-10-14, ADR-0063). 검증만 하고 저장하지 않는다(저장은 PUT …/seatmap). 파일 해석은 core-svc가 하지 않고 DB 자격 증명이 없는 별도 작업 seatmap-worker에 gRPC로 맡긴다(seatmap.proto ParseSeatmapImport). core-svc는 돌려받은 배치를 스키마·개수 상한·업무 경고로 다시 본 뒤 결과를 만든다(소유자 결정 2026-10-30, open-items 70번 ②, 세부는 추천 적용 2026-10-30, docs/features/seat-hold.md §10)
  * @summary 좌석맵 가져오기(SVG/JSON/CSV, 구역 도형과 좌석 좌표를 함께, 행별 검증 결과)
  */
-export const PostV1PartnerProductionsProductionIdSeatmapImportsParams = zod.object({
+export const CreatePartnerProductionSeatmapImportParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-export const PostV1PartnerProductionsProductionIdSeatmapImportsBody = zod.object({
+export const CreatePartnerProductionSeatmapImportBody = zod.object({
   "file": zod.instanceof(Blob),
   "format": zod.enum(['SVG', 'JSON', 'CSV'])
-})
+}).strict()
 
-export const postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutStageItemPointsItemMin = 2;
-export const postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutStageItemPointsItemMax = 2;
+export const createPartnerProductionSeatmapImportResponseLayoutStageItemPointsItemMin = 2;
+export const createPartnerProductionSeatmapImportResponseLayoutStageItemPointsItemMax = 2;
 
-export const postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutStageItemPointsMin = 3;
+export const createPartnerProductionSeatmapImportResponseLayoutStageItemPointsMin = 3;
 
-export const postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutSectionsItemShapePointsItemMin = 2;
-export const postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutSectionsItemShapePointsItemMax = 2;
+export const createPartnerProductionSeatmapImportResponseLayoutSectionsItemShapePointsItemMin = 2;
+export const createPartnerProductionSeatmapImportResponseLayoutSectionsItemShapePointsItemMax = 2;
 
-export const postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutSectionsItemShapePointsMin = 3;
-
-
+export const createPartnerProductionSeatmapImportResponseLayoutSectionsItemShapePointsMin = 3;
 
 
 
 
-export const postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutSectionsItemFillRuleAislesMin = 0;
 
 
-export const postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutSectionsItemFillRuleFirstNumberMin = 0;
+export const createPartnerProductionSeatmapImportResponseLayoutSectionsItemFillRuleAislesMin = 0;
+
+
+export const createPartnerProductionSeatmapImportResponseLayoutSectionsItemFillRuleFirstNumberMin = 0;
 
 
 
-export const PostV1PartnerProductionsProductionIdSeatmapImportsResponse = zod.object({
+export const CreatePartnerProductionSeatmapImportResponse = zod.object({
   "ok": zod.boolean().optional(),
   "layout": zod.object({
   "layoutVersion": zod.int().optional().describe('저장할 때 읽은 판. 서버 판과 다르면 409. 0이면 새 배치본'),
@@ -1039,7 +1039,7 @@ export const PostV1PartnerProductionsProductionIdSeatmapImportsResponse = zod.ob
 }),
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutStageItemPointsItemMin).max(postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutStageItemPointsItemMax)).min(postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(createPartnerProductionSeatmapImportResponseLayoutStageItemPointsItemMin).max(createPartnerProductionSeatmapImportResponseLayoutStageItemPointsItemMax)).min(createPartnerProductionSeatmapImportResponseLayoutStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
@@ -1048,7 +1048,7 @@ export const PostV1PartnerProductionsProductionIdSeatmapImportsResponse = zod.ob
   "level": zod.string().optional(),
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutSectionsItemShapePointsItemMin).max(postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutSectionsItemShapePointsItemMax)).min(postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(createPartnerProductionSeatmapImportResponseLayoutSectionsItemShapePointsItemMin).max(createPartnerProductionSeatmapImportResponseLayoutSectionsItemShapePointsItemMax)).min(createPartnerProductionSeatmapImportResponseLayoutSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
   "label": zod.object({
@@ -1069,10 +1069,10 @@ export const PostV1PartnerProductionsProductionIdSeatmapImportsResponse = zod.ob
   "rowShape": zod.enum(['STRAIGHT', 'CURVED']).optional().describe('직선, 무대를 향한 곡선'),
   "seatSpacingCm": zod.int().min(1).optional().describe('좌석 간격(옆), 기본 50 [가정]'),
   "rowSpacingCm": zod.int().min(1).optional().describe('행 간격(앞뒤), 기본 90 [가정]'),
-  "aisles": zod.int().min(postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutSectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
+  "aisles": zod.int().min(createPartnerProductionSeatmapImportResponseLayoutSectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
   "aisleWidthCm": zod.int().min(1).optional().describe('통로 폭, 기본 120 [가정]'),
   "rowLabel": zod.enum(['NUMBER', 'ALPHA']).optional().describe('행 이름 1열·2열 또는 A·B·C'),
-  "firstNumber": zod.int().min(postV1PartnerProductionsProductionIdSeatmapImportsResponseLayoutSectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
+  "firstNumber": zod.int().min(createPartnerProductionSeatmapImportResponseLayoutSectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
   "numberFrom": zod.enum(['LEFT', 'RIGHT']).optional().describe('번호 방향(무대를 보고 왼쪽부터·오른쪽부터)')
 }).optional().describe('파트너 에디터 전용 좌석 채우기 규칙(section.editor_meta). 팬 좌석맵 파일에는 싣지 않는다(ADR-0066)'),
   "seats": zod.array(zod.object({
@@ -1105,7 +1105,7 @@ export const PostV1PartnerProductionsProductionIdSeatmapImportsResponse = zod.ob
  * FR-023, 소유자 요청 2026-10-19(목록 10종은 추천 적용 2026-10-19), ADR-0066. 흔한 공연장 모양을 본뜬 출발점이고 실제 공연장의 배치도가 아니며 특정 공연장 이름은 쓰지 않는다. 템플릿은 저장소의 정적 파일을 배포 때 넣고(published인 것만 보인다) 파트너는 읽기만 한다. 기본 좌석 수는 모두 [가정]이다. 스탠딩(정리번호 입장) 구역은 지원하지 않아 플로어는 지정석이다(ADR-0051). 10종이라 페이지를 나누지 않는다. 파트너 소속 계정이면 관리자·실무자 모두
  * @summary 좌석맵 템플릿 목록(코드·이름·계열·기본 좌석·층·구역 수·변형·개략도 주소)
  */
-export const GetV1PartnerSeatmapTemplatesResponse = zod.object({
+export const GetPartnerSeatmapTemplatesResponse = zod.object({
   "items": zod.array(zod.object({
   "templateId": zod.string().optional().describe('venue kind TEMPLATE의 ID'),
   "code": zod.enum(['ARENA-END', 'ARENA-THRUST', 'ARENA-CENTER', 'DOME', 'STADIUM', 'THEATER-L', 'THEATER-M', 'THEATER-S', 'HALL', 'FLAT']).optional(),
@@ -1133,33 +1133,33 @@ export const GetV1PartnerSeatmapTemplatesResponse = zod.object({
  * FR-023, 추천 적용 2026-10-19, ADR-0066. 템플릿 설정 대화상자의 미리보기와 목표 좌석 수를 구역별로 나눠 보이는 표를 그린다. 좌석 좌표는 싣지 않는다(에디터가 채우기 규칙으로 계산). 없거나 공개되지 않은 템플릿은 404
  * @summary 좌석맵 템플릿 하나(도형·구역별 채우기 규칙·등급 기본값·변형)
  */
-export const GetV1PartnerSeatmapTemplatesTemplateIdParams = zod.object({
+export const GetPartnerSeatmapTemplateParams = zod.object({
   "templateId": zod.string()
 })
 
-export const getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutStageItemPointsItemMin = 2;
-export const getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutStageItemPointsItemMax = 2;
+export const getPartnerSeatmapTemplateResponseTwoLayoutStageItemPointsItemMin = 2;
+export const getPartnerSeatmapTemplateResponseTwoLayoutStageItemPointsItemMax = 2;
 
-export const getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutStageItemPointsMin = 3;
+export const getPartnerSeatmapTemplateResponseTwoLayoutStageItemPointsMin = 3;
 
-export const getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutSectionsItemShapePointsItemMin = 2;
-export const getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutSectionsItemShapePointsItemMax = 2;
+export const getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemShapePointsItemMin = 2;
+export const getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemShapePointsItemMax = 2;
 
-export const getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutSectionsItemShapePointsMin = 3;
-
-
+export const getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemShapePointsMin = 3;
 
 
 
 
-export const getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutSectionsItemFillRuleAislesMin = 0;
 
 
-export const getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutSectionsItemFillRuleFirstNumberMin = 0;
+export const getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemFillRuleAislesMin = 0;
+
+
+export const getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemFillRuleFirstNumberMin = 0;
 
 
 
-export const GetV1PartnerSeatmapTemplatesTemplateIdResponse = zod.object({
+export const GetPartnerSeatmapTemplateResponse = zod.object({
   "templateId": zod.string().optional().describe('venue kind TEMPLATE의 ID'),
   "code": zod.enum(['ARENA-END', 'ARENA-THRUST', 'ARENA-CENTER', 'DOME', 'STADIUM', 'THEATER-L', 'THEATER-M', 'THEATER-S', 'HALL', 'FLAT']).optional(),
   "name": zod.string().optional().describe('예 \'실내 아레나 · 엔드 스테이지\'. 특정 공연장 이름을 쓰지 않는다'),
@@ -1189,7 +1189,7 @@ export const GetV1PartnerSeatmapTemplatesTemplateIdResponse = zod.object({
 }),
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutStageItemPointsItemMin).max(getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutStageItemPointsItemMax)).min(getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(getPartnerSeatmapTemplateResponseTwoLayoutStageItemPointsItemMin).max(getPartnerSeatmapTemplateResponseTwoLayoutStageItemPointsItemMax)).min(getPartnerSeatmapTemplateResponseTwoLayoutStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')).optional().describe('무대·통로 등 판매하지 않는 도형'),
   "sections": zod.array(zod.object({
@@ -1198,7 +1198,7 @@ export const GetV1PartnerSeatmapTemplatesTemplateIdResponse = zod.object({
   "level": zod.string().optional(),
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutSectionsItemShapePointsItemMin).max(getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutSectionsItemShapePointsItemMax)).min(getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemShapePointsItemMin).max(getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemShapePointsItemMax)).min(getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
   "label": zod.object({
@@ -1219,10 +1219,10 @@ export const GetV1PartnerSeatmapTemplatesTemplateIdResponse = zod.object({
   "rowShape": zod.enum(['STRAIGHT', 'CURVED']).optional().describe('직선, 무대를 향한 곡선'),
   "seatSpacingCm": zod.int().min(1).optional().describe('좌석 간격(옆), 기본 50 [가정]'),
   "rowSpacingCm": zod.int().min(1).optional().describe('행 간격(앞뒤), 기본 90 [가정]'),
-  "aisles": zod.int().min(getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutSectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
+  "aisles": zod.int().min(getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemFillRuleAislesMin).optional().describe('세로 통로 수, 기본 2 [가정]'),
   "aisleWidthCm": zod.int().min(1).optional().describe('통로 폭, 기본 120 [가정]'),
   "rowLabel": zod.enum(['NUMBER', 'ALPHA']).optional().describe('행 이름 1열·2열 또는 A·B·C'),
-  "firstNumber": zod.int().min(getV1PartnerSeatmapTemplatesTemplateIdResponseTwoLayoutSectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
+  "firstNumber": zod.int().min(getPartnerSeatmapTemplateResponseTwoLayoutSectionsItemFillRuleFirstNumberMin).optional().describe('첫 번호, 기본 1 [가정]'),
   "numberFrom": zod.enum(['LEFT', 'RIGHT']).optional().describe('번호 방향(무대를 보고 왼쪽부터·오른쪽부터)')
 }).optional().describe('파트너 에디터 전용 좌석 채우기 규칙(section.editor_meta). 팬 좌석맵 파일에는 싣지 않는다(ADR-0066)'),
   "seats": zod.array(zod.object({
@@ -1245,29 +1245,29 @@ export const GetV1PartnerSeatmapTemplatesTemplateIdResponse = zod.object({
  * FR-022, SCR-021 1단계 CMP-069, ADR-0062 결정 38(추천 적용 2026-10-14, ADR-0063). JPEG·PNG·WebP만, 한 장 10MB, 포스터 1장(가로 800·세로 1,000px 이상 세로형), 상세 0~10장(가로 800px 이상), 긴 변 20,000px·4,000만 화소 상한(수치는 [가정]). 서버가 확장자와 파일 앞부분(매직 바이트)을 함께 보고 디코딩해 화소 수를 확인한 뒤 다시 인코딩해 메타데이터(EXIF·GPS 등)를 지운 파생본만 S3 공개 정적 객체로 낸다. 원본은 공개하지 않는다. 원본 파일 이름은 버리고 서버가 만든 ID로 저장한다. 출연자 사진의 처리 근거는 docs/security/data-classification.md 법률 질문 23번(확인 필요)이다. 포스터를 다시 올리면 이전 포스터를 바꾼다. 판매 승인 뒤 바꿔도 재승인 대상이 아니다(재승인 대상은 가격·회차·좌석 등급·좌석맵·판매 정책, docs/planning/03 §2.14). 파트너 소속 공연만(공연 이미지는 공연에 딸린다, ADR-0093)
  * @summary 공연 이미지 올리기(포스터·상세 이미지, 한 장씩)
  */
-export const PostV1PartnerProductionsProductionIdImagesParams = zod.object({
+export const CreatePartnerProductionImageParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-export const PostV1PartnerProductionsProductionIdImagesHeader = zod.object({
+export const CreatePartnerProductionImageHeader = zod.object({
   "X-Requested-With": zod.string()
 })
 
-export const postV1PartnerProductionsProductionIdImagesBodyAltMax = 300;
+export const createPartnerProductionImageBodyAltMax = 300;
 
-export const postV1PartnerProductionsProductionIdImagesBodyOrderMin = 0;
-export const postV1PartnerProductionsProductionIdImagesBodyOrderMax = 9;
+export const createPartnerProductionImageBodyOrderMin = 0;
+export const createPartnerProductionImageBodyOrderMax = 9;
 
 
 
-export const PostV1PartnerProductionsProductionIdImagesBody = zod.object({
+export const CreatePartnerProductionImageBody = zod.object({
   "file": zod.instanceof(Blob),
   "kind": zod.enum(['POSTER', 'DETAIL']),
-  "alt": zod.string().min(1).max(postV1PartnerProductionsProductionIdImagesBodyAltMax),
-  "order": zod.int().min(postV1PartnerProductionsProductionIdImagesBodyOrderMin).max(postV1PartnerProductionsProductionIdImagesBodyOrderMax).optional()
-})
+  "alt": zod.string().min(1).max(createPartnerProductionImageBodyAltMax),
+  "order": zod.int().min(createPartnerProductionImageBodyOrderMin).max(createPartnerProductionImageBodyOrderMax).optional()
+}).strict()
 
-export const PostV1PartnerProductionsProductionIdImagesResponse = zod.object({
+export const CreatePartnerProductionImageResponse = zod.object({
   "imageId": zod.string().optional(),
   "kind": zod.enum(['POSTER', 'DETAIL']).optional(),
   "alt": zod.string().optional().describe('대체 텍스트(필수). 이미지에만 있는 정보는 공연 설명 글에도 적는다'),
@@ -1281,28 +1281,28 @@ export const PostV1PartnerProductionsProductionIdImagesResponse = zod.object({
  * FR-022(추천 적용 2026-10-14, ADR-0063). 판매 승인 뒤 바꿔도 재승인 대상이 아니다(docs/planning/03 §2.14)
  * @summary 공연 이미지 대체 텍스트·순서 고치기
  */
-export const PatchV1PartnerProductionsProductionIdImagesImageIdParams = zod.object({
+export const UpdatePartnerProductionImageParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)'),
   "imageId": zod.string()
 })
 
-export const PatchV1PartnerProductionsProductionIdImagesImageIdHeader = zod.object({
+export const UpdatePartnerProductionImageHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const patchV1PartnerProductionsProductionIdImagesImageIdBodyAltMax = 300;
+export const updatePartnerProductionImageBodyAltMax = 300;
 
-export const patchV1PartnerProductionsProductionIdImagesImageIdBodyOrderMin = 0;
-export const patchV1PartnerProductionsProductionIdImagesImageIdBodyOrderMax = 9;
+export const updatePartnerProductionImageBodyOrderMin = 0;
+export const updatePartnerProductionImageBodyOrderMax = 9;
 
 
 
-export const PatchV1PartnerProductionsProductionIdImagesImageIdBody = zod.object({
-  "alt": zod.string().min(1).max(patchV1PartnerProductionsProductionIdImagesImageIdBodyAltMax).optional(),
-  "order": zod.int().min(patchV1PartnerProductionsProductionIdImagesImageIdBodyOrderMin).max(patchV1PartnerProductionsProductionIdImagesImageIdBodyOrderMax).optional()
-})
+export const UpdatePartnerProductionImageBody = zod.object({
+  "alt": zod.string().min(1).max(updatePartnerProductionImageBodyAltMax).optional(),
+  "order": zod.int().min(updatePartnerProductionImageBodyOrderMin).max(updatePartnerProductionImageBodyOrderMax).optional()
+}).strict()
 
-export const PatchV1PartnerProductionsProductionIdImagesImageIdResponse = zod.object({
+export const UpdatePartnerProductionImageResponse = zod.object({
   "imageId": zod.string().optional(),
   "kind": zod.enum(['POSTER', 'DETAIL']).optional(),
   "alt": zod.string().optional().describe('대체 텍스트(필수). 이미지에만 있는 정보는 공연 설명 글에도 적는다'),
@@ -1316,33 +1316,33 @@ export const PatchV1PartnerProductionsProductionIdImagesImageIdResponse = zod.ob
  * FR-022(추천 적용 2026-10-14, ADR-0063). 포스터는 지울 수 없고 바꾸기만 한다(판매 승인 요청에 포스터 필수). 판매 승인 뒤 지워도 재승인 대상이 아니다(docs/planning/03 §2.14)
  * @summary 공연 이미지 지우기(파생본 삭제와 CDN 무효화)
  */
-export const DeleteV1PartnerProductionsProductionIdImagesImageIdParams = zod.object({
+export const DeletePartnerProductionImageParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)'),
   "imageId": zod.string()
 })
 
-export const DeleteV1PartnerProductionsProductionIdImagesImageIdResponse = zod.void()
+export const DeletePartnerProductionImageResponse = zod.void()
 
 /**
  * FR-024, ADR-0101(ADR-0013의 MongoDB를 대신함, 2026-10-28). 공통 칸과 돈(가격·배송비·반품 배송비)은 칸, 유형마다 다른 속성만 attributes에 둔다. 유형은 product_type 목록에 있어야 하고 schema_version 판의 스키마를 통과해야 저장한다
  * @summary 상품 빌더 저장(PostgreSQL product 표, 유형별 속성은 Zod 스키마로 검사하는 JSONB)
  */
-export const PostV1PartnerProductsResponse = zod.void()
+export const CreatePartnerProductResponse = zod.void()
 
 /**
  * FR-025, ADR-0053. 목적: 판매·취소·매진·회차 취소·연기·정산 같은 일이 생기면 PEAKET이 파트너 회사 서버 주소로 바로 알려 파트너 시스템(매출·회계, 사내 메신저, 자사 공지, 정산 입금 확인)이 콘솔을 계속 확인하지 않게 한다. 본문에 개인정보·좌석 번호가 없어 팬 관리(CRM)에는 쓸 수 없고, 쓰지 않아도 판매·정산은 그대로다(추천 적용 2026-10-19, ADR-0066). Standard Webhooks 형식으로 보낸다. 헤더는 webhook-id(사건 키, 재전송에도 같음), webhook-timestamp(시도 시각, 유닉스 초), webhook-signature(v1, 뒤에 base64 HMAC-SHA256(비밀, id.timestamp.본문))다. 비밀(whsec_, 32바이트)은 등록 응답에 한 번만 보여 준다. 비밀을 바꾸면 24시간 동안 옛 비밀과 새 비밀의 서명을 공백으로 이어 함께 보낸다. 받는 쪽은 시각 차이 5분 초과를 거부하고 webhook-id로 중복을 거른다. 보내는 이벤트 8종과 본문은 webhooks의 partnerEvent이고, 엔드포인트마다 고른 type만 보낸다. 등록·비밀 재발급·다시 보내기는 파트너 관리자(partner_admin)만 하고 partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
  * @summary 웹훅 등록(https만, 엔드포인트마다 서명 비밀 발급)
  */
-export const postV1PartnerWebhooksBodyEventTypesMin = 0;
+export const createPartnerWebhookBodyEventTypesMin = 0;
 
 
 
-export const PostV1PartnerWebhooksBody = zod.object({
+export const CreatePartnerWebhookBody = zod.object({
   "url": zod.url().describe('https만'),
-  "eventTypes": zod.array(zod.enum(['order.confirmed', 'order.cancelled', 'event.sold_out', 'event.cancelled', 'event.postponed', 'statement.notified', 'payout.completed', 'payout.failed'])).min(postV1PartnerWebhooksBodyEventTypesMin).optional().describe('구독할 이벤트. 기본값은 아무것도 고르지 않음이고 이때는 보내지 않는다')
-})
+  "eventTypes": zod.array(zod.enum(['order.confirmed', 'order.cancelled', 'event.sold_out', 'event.cancelled', 'event.postponed', 'statement.notified', 'payout.completed', 'payout.failed'])).min(createPartnerWebhookBodyEventTypesMin).optional().describe('구독할 이벤트. 기본값은 아무것도 고르지 않음이고 이때는 보내지 않는다')
+}).strict()
 
-export const PostV1PartnerWebhooksResponse = zod.object({
+export const CreatePartnerWebhookResponse = zod.object({
   "endpointId": zod.string().optional(),
   "url": zod.url().optional(),
   "eventTypes": zod.array(zod.string()).optional(),
@@ -1359,16 +1359,16 @@ export const PostV1PartnerWebhooksResponse = zod.object({
  * FR-025(추천 적용 2026-10-30, docs/features/notify.md §9, docs/design/d5 §1.6 16번). 이 파트너사의 엔드포인트만 준다. 서명 비밀은 발급 시각과 옛 비밀이 함께 유효한 끝 시각만 싣는다. 파트너 사용자(partner_admin·partner_member)가 부른다. Cache-Control: no-store
  * @summary 웹훅 엔드포인트 목록(SCR-025, 비밀 원문 없음)
  */
-export const getV1PartnerWebhooksQueryLimitMax = 100;
+export const listPartnerWebhooksQueryLimitMax = 100;
 
 
 
-export const GetV1PartnerWebhooksQueryParams = zod.object({
+export const ListPartnerWebhooksQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1PartnerWebhooksQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listPartnerWebhooksQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1PartnerWebhooksResponse = zod.object({
+export const ListPartnerWebhooksResponse = zod.object({
   "items": zod.array(zod.object({
   "endpointId": zod.string().optional(),
   "url": zod.url().optional(),
@@ -1386,21 +1386,21 @@ export const GetV1PartnerWebhooksResponse = zod.object({
  * FR-025(추천 적용 2026-10-30, docs/features/notify.md §9). 파트너 관리자만. 주소를 바꾸면 등록과 같은 SSRF 검사를 한다(400 webhook-url-not-allowed). 계속 실패로 꺼진(DISABLED, FAILING) 엔드포인트는 status ACTIVE로 다시 켜고, 그 뒤 사건부터 보낸다. 다른 파트너사의 엔드포인트는 404다
  * @summary 웹훅 주소·구독 이벤트·켜고 끄기 고치기
  */
-export const PatchV1PartnerWebhooksEndpointIdParams = zod.object({
+export const UpdatePartnerWebhookParams = zod.object({
   "endpointId": zod.string()
 })
 
-export const PatchV1PartnerWebhooksEndpointIdHeader = zod.object({
+export const UpdatePartnerWebhookHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const PatchV1PartnerWebhooksEndpointIdBody = zod.object({
+export const UpdatePartnerWebhookBody = zod.object({
   "url": zod.url().optional().describe('https만'),
   "eventTypes": zod.array(zod.enum(['order.confirmed', 'order.cancelled', 'event.sold_out', 'event.cancelled', 'event.postponed', 'statement.notified', 'payout.completed', 'payout.failed'])).optional(),
   "status": zod.enum(['ACTIVE', 'DISABLED']).optional()
 }).strict()
 
-export const PatchV1PartnerWebhooksEndpointIdResponse = zod.object({
+export const UpdatePartnerWebhookResponse = zod.object({
   "endpointId": zod.string().optional(),
   "url": zod.url().optional(),
   "eventTypes": zod.array(zod.string()).optional(),
@@ -1415,11 +1415,11 @@ export const PatchV1PartnerWebhooksEndpointIdResponse = zod.object({
  * FR-025, ADR-0053 결정 4(추천 적용 2026-10-30, docs/features/notify.md §9). 파트너 관리자만. 새 whsec_ 비밀(32바이트)을 응답에 한 번만 보이고 Secrets Manager에 둔다. 그 뒤 24시간 동안 옛 비밀과 새 비밀의 서명을 공백으로 이어 함께 보낸다. 24시간 안에 다시 재발급하면 가장 오래된 비밀을 버린다. 같은 엔드포인트의 재발급은 1분 [가정]에 한 번이다(두 번 누름으로 방금 받은 비밀을 잃지 않게, 409 rotation-too-soon). 다른 파트너사의 엔드포인트는 404다
  * @summary 웹훅 서명 비밀 재발급(새 비밀은 한 번만, 24시간 두 서명)
  */
-export const PostV1PartnerWebhooksEndpointIdSecretRotationsParams = zod.object({
+export const CreatePartnerWebhookSecretRotationParams = zod.object({
   "endpointId": zod.string()
 })
 
-export const PostV1PartnerWebhooksEndpointIdSecretRotationsResponse = zod.object({
+export const CreatePartnerWebhookSecretRotationResponse = zod.object({
   "secret": zod.string().optional().describe('whsec_로 시작'),
   "previousSecretValidUntil": zod.iso.datetime({"offset":true}).optional()
 })
@@ -1428,21 +1428,21 @@ export const PostV1PartnerWebhooksEndpointIdSecretRotationsResponse = zod.object
  * FR-025, FR-040, ADR-0109(추천 적용 2026-10-30, docs/features/notify.md §9). 발송 원장 webhook_delivery를 최근 순 커서로 준다(guidelines §3). 상대 서버의 응답 본문은 저장하지 않으므로 응답 코드와 오류 분류만 싣는다. 원장은 끝난 뒤 30일 [가정] 보존한다. 파트너 사용자가 부른다. 다른 파트너사의 엔드포인트는 404다. Cache-Control: no-store
  * @summary 웹훅 발송 이력(SCR-025 ③: 보낸 이벤트·응답·재시도 횟수·상태)
  */
-export const GetV1PartnerWebhooksEndpointIdDeliveriesParams = zod.object({
+export const ListPartnerWebhookDeliveriesParams = zod.object({
   "endpointId": zod.string()
 })
 
-export const getV1PartnerWebhooksEndpointIdDeliveriesQueryLimitMax = 100;
+export const listPartnerWebhookDeliveriesQueryLimitMax = 100;
 
 
 
-export const GetV1PartnerWebhooksEndpointIdDeliveriesQueryParams = zod.object({
+export const ListPartnerWebhookDeliveriesQueryParams = zod.object({
   "status": zod.array(zod.enum(['PENDING', 'RETRYING', 'SUCCEEDED', 'DEAD'])).optional().describe('쉼표로 이은 상태(없으면 전체)'),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1PartnerWebhooksEndpointIdDeliveriesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listPartnerWebhookDeliveriesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1PartnerWebhooksEndpointIdDeliveriesResponse = zod.object({
+export const ListPartnerWebhookDeliveriesResponse = zod.object({
   "items": zod.array(zod.object({
   "deliveryId": zod.string().optional(),
   "webhookId": zod.string().optional().describe('webhook-id(사건 키, 다시 보내도 같다)'),
@@ -1462,11 +1462,11 @@ export const GetV1PartnerWebhooksEndpointIdDeliveriesResponse = zod.object({
  * FR-025, FR-040, ADR-0109 결정 3(추천 적용 2026-10-30, docs/features/notify.md §9). 파트너 관리자만. DEAD·SUCCEEDED 행을 PENDING으로 되돌려 같은 webhook-id와 새 webhook-timestamp로 다시 보내고, 재시도 간격은 처음부터 다시 센다. PENDING·RETRYING 행은 409. 엔드포인트마다 분당 10건 [가정]. 대형·중형 온세일 윈도우에는 다시 보내기 묶음을 미루는 규칙(guidelines §8)을 따라 접수만 하고 창이 끝난 뒤 보낸다. 다른 파트너사의 행은 404다. 엔지니어의 다시 보내기는 RB-11이다
  * @summary 웹훅 다시 보내기(같은 webhook-id)
  */
-export const PostV1PartnerWebhookDeliveriesDeliveryIdRedeliveriesParams = zod.object({
+export const CreatePartnerWebhookDeliveryRedeliveryParams = zod.object({
   "deliveryId": zod.string()
 })
 
-export const PostV1PartnerWebhookDeliveriesDeliveryIdRedeliveriesResponse = zod.object({
+export const CreatePartnerWebhookDeliveryRedeliveryResponse = zod.object({
   "deliveryId": zod.string().optional(),
   "webhookId": zod.string().optional().describe('webhook-id(사건 키, 다시 보내도 같다)'),
   "eventType": zod.string().optional(),
@@ -1483,15 +1483,15 @@ export const PostV1PartnerWebhookDeliveriesDeliveryIdRedeliveriesResponse = zod.
  * FR-026, ADR-0027. 2026-10-28 SSE(/v1/partner/events/{eventId}/live)에서 1분 주기 조회로 바꿨다(추천 적용, 기술 검토 낮음-024). 값은 1분마다 한 번 바뀌는 전체 상태라 조회로 같은 신선도를 얻고, 열린 연결·게이트웨이 시간 초과 끄기·Last-Event-ID 복구가 필요 없다. 화면은 응답의 nextUpdateAt(다음 집계 시각)에 0~5초 [가정] 무작위를 더한 때 다시 묻고, 탭을 숨기면 5분 [가정]마다, 다시 보이면 바로 한 번 묻는다(ADR-0091, docs/frontend.md §4.4.3). ops-svc는 회차마다 1분에 한 번 계산한 값을 나눠 준다. Cache-Control: no-store
  * @summary 실시간 판매 현황(1분 지연 집계의 전체 상태, 1분마다 조회, 개인정보·봇 정보 제외)
  */
-export const GetV1PartnerEventsEventIdLiveSnapshotParams = zod.object({
+export const GetPartnerEventLiveSnapshotParams = zod.object({
   "eventId": zod.string()
 })
 
-export const getV1PartnerEventsEventIdLiveSnapshotResponseSoldPerMinuteMax = 180;
+export const getPartnerEventLiveSnapshotResponseSoldPerMinuteMax = 180;
 
 
 
-export const GetV1PartnerEventsEventIdLiveSnapshotResponse = zod.object({
+export const GetPartnerEventLiveSnapshotResponse = zod.object({
   "asOf": zod.iso.datetime({"offset":true}).describe('이 값의 집계 시각. 화면의 \'마지막 갱신 n초 전\''),
   "nextUpdateAt": zod.iso.datetime({"offset":true}).describe('다음 집계 시각. 화면은 이 시각에 0~5초 [가정] 무작위를 더해 다시 묻는다'),
   "sold": zod.int().describe('판매 좌석(지금 SOLD인 좌석 수, 반환은 빠짐, ADR-0072)'),
@@ -1506,104 +1506,104 @@ export const GetV1PartnerEventsEventIdLiveSnapshotResponse = zod.object({
   "soldPerMinute": zod.array(zod.object({
   "minute": zod.iso.datetime({"offset":true}).optional(),
   "sold": zod.int().optional()
-})).max(getV1PartnerEventsEventIdLiveSnapshotResponseSoldPerMinuteMax).optional().describe('분당 판매(최근 180분 [가정]). 판매 좌석 누적 값의 1분 차이(docs/streaming.md §4.3, ADR-0073)')
+})).max(getPartnerEventLiveSnapshotResponseSoldPerMinuteMax).optional().describe('분당 판매(최근 180분 [가정]). 판매 좌석 누적 값의 1분 차이(docs/streaming.md §4.3, ADR-0073)')
 }).describe('파트너 실시간 판매 현황(관제 실시간 표의 누적 뷰를 1분 지연으로, docs/features/control-tower.md §11). 응답마다 전체 상태다. 2026-10-28 asyncapi의 SSE 메시지에서 옮겼다(기술 검토 낮음-024)')
 
 /**
  * FR-074, POL-046 ⑧, forensic-replay.md §6.7.7. ops-svc가 gw-partner로 답한다(실시간 판매 현황과 같은 길). 증거 묶음 내보내기 PROMOTER와 같은 계산·같은 칸 합치기(2차 가림 포함)이고, 그 회차의 끝난 사건으로 하루 한 번 06:00 KST [가정]에 다시 센다. 소속 테넌트 회차만. 온세일 윈도우가 끝나기 전(기록 고정 판이 없을 때)은 404 fraud-report-not-ready다. Cache-Control: no-store(추천 적용 2026-10-31, ADR-0171, FRN-070)
  * @summary 부정 예매 조치 집계(기획사 보고, SCR-027 '부정 예매 조치' 탭)
  */
-export const GetV1PartnerEventsEventIdFraudReportParams = zod.object({
+export const GetPartnerEventFraudReportParams = zod.object({
   "eventId": zod.string()
 })
 
-export const getV1PartnerEventsEventIdFraudReportResponseClosedCaseCountValueMin = 0;
+export const getPartnerEventFraudReportResponseClosedCaseCountValueMin = 0;
 
-export const getV1PartnerEventsEventIdFraudReportResponseCancelActionCountValueMin = 0;
+export const getPartnerEventFraudReportResponseCancelActionCountValueMin = 0;
 
-export const getV1PartnerEventsEventIdFraudReportResponseRestrictActionCountValueMin = 0;
+export const getPartnerEventFraudReportResponseRestrictActionCountValueMin = 0;
 
-export const getV1PartnerEventsEventIdFraudReportResponseCancelledTicketCountValueMin = 0;
+export const getPartnerEventFraudReportResponseCancelledTicketCountValueMin = 0;
 
-export const getV1PartnerEventsEventIdFraudReportResponseResoldAtFaceValueCountValueMin = 0;
+export const getPartnerEventFraudReportResponseResoldAtFaceValueCountValueMin = 0;
 
-export const getV1PartnerEventsEventIdFraudReportResponseByReasonCategoryItemCountValueMin = 0;
+export const getPartnerEventFraudReportResponseByReasonCategoryItemCountValueMin = 0;
 
-export const getV1PartnerEventsEventIdFraudReportResponseAppealAcceptedRatioMin = 0;
-export const getV1PartnerEventsEventIdFraudReportResponseAppealAcceptedRatioMax = 1;
+export const getPartnerEventFraudReportResponseAppealAcceptedRatioMin = 0;
+export const getPartnerEventFraudReportResponseAppealAcceptedRatioMax = 1;
 
 
 
-export const GetV1PartnerEventsEventIdFraudReportResponse = zod.object({
+export const GetPartnerEventFraudReportResponse = zod.object({
   "eventId": zod.string().optional(),
   "asOf": zod.iso.datetime({"offset":true}).optional().describe('집계 시각. 사건이 끝날 때마다가 아니라 하루 한 번 06:00 KST [가정]에 다시 센다(사건 하나가 끝난 때를 집계 변화로 짚지 못하게)'),
   "closedCaseCount": zod.object({
-  "value": zod.int().min(getV1PartnerEventsEventIdFraudReportResponseClosedCaseCountValueMin).nullish(),
+  "value": zod.int().min(getPartnerEventFraudReportResponseClosedCaseCountValueMin).nullish(),
   "suppressed": zod.boolean()
 }).optional().describe('기획사 보고의 칸 하나(forensic-replay.md §6.7.7 \'칸 합치기\'). 1~4건인 칸과, 다른 칸이나 합계에서 빼서 그런 칸을 알아낼 수 있는 칸(2차 가림)은 value가 null이고 suppressed가 true다. 0건은 0이다(추천 적용 2026-10-31, ADR-0171, FRN-070)'),
   "cancelActionCount": zod.object({
-  "value": zod.int().min(getV1PartnerEventsEventIdFraudReportResponseCancelActionCountValueMin).nullish(),
+  "value": zod.int().min(getPartnerEventFraudReportResponseCancelActionCountValueMin).nullish(),
   "suppressed": zod.boolean()
 }).optional().describe('기획사 보고의 칸 하나(forensic-replay.md §6.7.7 \'칸 합치기\'). 1~4건인 칸과, 다른 칸이나 합계에서 빼서 그런 칸을 알아낼 수 있는 칸(2차 가림)은 value가 null이고 suppressed가 true다. 0건은 0이다(추천 적용 2026-10-31, ADR-0171, FRN-070)'),
   "restrictActionCount": zod.object({
-  "value": zod.int().min(getV1PartnerEventsEventIdFraudReportResponseRestrictActionCountValueMin).nullish(),
+  "value": zod.int().min(getPartnerEventFraudReportResponseRestrictActionCountValueMin).nullish(),
   "suppressed": zod.boolean()
 }).optional().describe('기획사 보고의 칸 하나(forensic-replay.md §6.7.7 \'칸 합치기\'). 1~4건인 칸과, 다른 칸이나 합계에서 빼서 그런 칸을 알아낼 수 있는 칸(2차 가림)은 value가 null이고 suppressed가 true다. 0건은 0이다(추천 적용 2026-10-31, ADR-0171, FRN-070)'),
   "cancelledTicketCount": zod.object({
-  "value": zod.int().min(getV1PartnerEventsEventIdFraudReportResponseCancelledTicketCountValueMin).nullish(),
+  "value": zod.int().min(getPartnerEventFraudReportResponseCancelledTicketCountValueMin).nullish(),
   "suppressed": zod.boolean()
 }).optional().describe('기획사 보고의 칸 하나(forensic-replay.md §6.7.7 \'칸 합치기\'). 1~4건인 칸과, 다른 칸이나 합계에서 빼서 그런 칸을 알아낼 수 있는 칸(2차 가림)은 value가 null이고 suppressed가 true다. 0건은 0이다(추천 적용 2026-10-31, ADR-0171, FRN-070)'),
   "resoldAtFaceValueCount": zod.object({
-  "value": zod.int().min(getV1PartnerEventsEventIdFraudReportResponseResoldAtFaceValueCountValueMin).nullish(),
+  "value": zod.int().min(getPartnerEventFraudReportResponseResoldAtFaceValueCountValueMin).nullish(),
   "suppressed": zod.boolean()
 }).optional().describe('기획사 보고의 칸 하나(forensic-replay.md §6.7.7 \'칸 합치기\'). 1~4건인 칸과, 다른 칸이나 합계에서 빼서 그런 칸을 알아낼 수 있는 칸(2차 가림)은 value가 null이고 suppressed가 true다. 0건은 0이다(추천 적용 2026-10-31, ADR-0171, FRN-070)'),
   "byReasonCategory": zod.array(zod.object({
   "category": zod.enum(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION', 'OTHER']).optional().describe('5건 미만 칸은 OTHER로 합친다. OTHER가 5건 미만이거나 합계에서 빼서 알아낼 수 있으면 OTHER와 그다음으로 작은 칸을 함께 가린다(2차 가림)'),
   "count": zod.object({
-  "value": zod.int().min(getV1PartnerEventsEventIdFraudReportResponseByReasonCategoryItemCountValueMin).nullish(),
+  "value": zod.int().min(getPartnerEventFraudReportResponseByReasonCategoryItemCountValueMin).nullish(),
   "suppressed": zod.boolean()
 }).optional().describe('기획사 보고의 칸 하나(forensic-replay.md §6.7.7 \'칸 합치기\'). 1~4건인 칸과, 다른 칸이나 합계에서 빼서 그런 칸을 알아낼 수 있는 칸(2차 가림)은 value가 null이고 suppressed가 true다. 0건은 0이다(추천 적용 2026-10-31, ADR-0171, FRN-070)')
 })).optional(),
-  "appealAcceptedRatio": zod.number().min(getV1PartnerEventsEventIdFraudReportResponseAppealAcceptedRatioMin).max(getV1PartnerEventsEventIdFraudReportResponseAppealAcceptedRatioMax).nullish().describe('소명 인정 비율. 분모(소명 판단을 받은 계정 수)가 5건 [가정] 이상일 때만, 아니면 null')
+  "appealAcceptedRatio": zod.number().min(getPartnerEventFraudReportResponseAppealAcceptedRatioMin).max(getPartnerEventFraudReportResponseAppealAcceptedRatioMax).nullish().describe('소명 인정 비율. 분모(소명 판단을 받은 계정 수)가 5건 [가정] 이상일 때만, 아니면 null')
 }).describe('부정 예매 조치 집계(기획사 보고, FR-074·POL-046 ⑧, SCR-027 \'부정 예매 조치\' 탭). 증거 묶음 내보내기 PROMOTER와 같은 계산·같은 칸 합치기다. 그 회차의 끝난 사건(ACTIONED·CLEARED·REVERSED)으로 센다. 사람 단위 행·좌석 번호·계정·주문 ID·점수는 없다(추천 적용 2026-10-31, ADR-0171, FRN-070)')
 
 /**
  * FR-027, POL-023. 명단 보기·내려받기는 회차 종료 1개월 뒤 닫는다(연기 회차는 바뀐 회차 기준, 예매 때 받은 제3자 제공 동의의 보유 기간). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062). 내려받기 직전에 비밀번호·TOTP와 패스키로 재인증한 토큰(factors에 passkey)이 있어야 한다(피싱에 강한 단계 인증, POL-020, 추천 적용 2026-10-28, 기술 검토 중간-051)
  * @summary 예매자 명단 내보내기(사유 필수, 건수·사유 접속기록, 동의 범위 항목만, 스트리밍)
  */
-export const PostV1PartnerEventsEventIdAttendeeExportsParams = zod.object({
+export const CreatePartnerEventAttendeeExportParams = zod.object({
   "eventId": zod.string()
 })
 
-export const PostV1PartnerEventsEventIdAttendeeExportsHeader = zod.object({
+export const CreatePartnerEventAttendeeExportHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const PostV1PartnerEventsEventIdAttendeeExportsBody = zod.object({
+export const CreatePartnerEventAttendeeExportBody = zod.object({
   "reason": zod.string(),
   "format": zod.enum(['CSV', 'XLSX', 'PDF']).optional()
-})
+}).strict()
 
-export const PostV1PartnerEventsEventIdAttendeeExportsResponse = zod.unknown()
+export const CreatePartnerEventAttendeeExportResponse = zod.unknown()
 
 /**
  * FR-027, POL-023, 추천 적용 2026-10-19, ADR-0066. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(화면은 '다운로드 이력은 파트너 관리자만 볼 수 있습니다'). 같은 기록이 PEAKET 접속기록에 최소 2년 이상 남는다. 내려받은 사람은 표시 이름과 역할만 싣고 이메일·계정 ID는 싣지 않는다. 최근 순, 커서 페이징(guidelines §3). Cache-Control: no-store
  * @summary 예매자 명단 다운로드 이력(일시·내려받은 사람·사유·건수·형식·결과)
  */
-export const GetV1PartnerEventsEventIdAttendeeExportsParams = zod.object({
+export const ListPartnerEventAttendeeExportsParams = zod.object({
   "eventId": zod.string()
 })
 
-export const getV1PartnerEventsEventIdAttendeeExportsQueryLimitMax = 100;
+export const listPartnerEventAttendeeExportsQueryLimitMax = 100;
 
 
 
-export const GetV1PartnerEventsEventIdAttendeeExportsQueryParams = zod.object({
+export const ListPartnerEventAttendeeExportsQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1PartnerEventsEventIdAttendeeExportsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listPartnerEventAttendeeExportsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1PartnerEventsEventIdAttendeeExportsResponse = zod.object({
+export const ListPartnerEventAttendeeExportsResponse = zod.object({
   "items": zod.array(zod.object({
   "exportId": zod.string().optional(),
   "exportedAt": zod.iso.datetime({"offset":true}).optional(),

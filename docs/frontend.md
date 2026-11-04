@@ -642,7 +642,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 자동 재시도 | 읽기와 멱등키가 있는 쓰기만 자동으로 다시 시도한다. 네트워크 오류·시간 초과·`Retry-After`가 붙은 503일 때 최대 2회 [가정] 다시 시도한다. 구매 세션 쓰기는 같은 멱등키로 1회 다시 보내되, 일련번호와 MAC은 새로 만든다. 멱등키가 없는 생성형 쓰기(소명, 부스 요청, 알림 신청 등)는 자동으로 다시 시도하지 않는다 |
 | 기다림 | 서버가 준 다시 시도 시각(`Retry-After`(초 또는 HTTP 날짜), 본문의 `retryAfterSeconds`·`pollHintMs`)은 하한이다. 기다림 = `하한 × (1 + U(0, 0.2))`로, 하한보다 이르게 보내지 않고 위쪽으로만 0~20% 퍼뜨린다(U는 0~0.2의 고른 무작위 값, guidelines §5, 추천 적용 2026-10-28, 기술 검토 중간-038). 하한으로 자르기만 하면 503을 같은 1초에 받은 사람들이 정확히 같은 때 다시 온다. 예외로 `NOT_YET`의 `retryAfterMs`는 사람마다 계산한 예상 도래 시각이라 지터 없이 그 시각에 보낸다(§5.1). 하한이 없으면 전체 지터(0부터 지금 상한 사이의 고른 무작위 값)를 쓰고, 시작 0.5초·상한 8초 [가정]로 한다. 한 페이지의 자동 재시도는 분당 60회를 넘지 않는다(guidelines §5의 재시도 예산) |
 | 오류 모양 | `application/problem+json`이면 `ApiError{status, type, title, detail, traceId, 확장 필드}`로 읽는다. `type`은 주소의 끝 경로(케밥 표기)다. 화면은 `type` → 문구 키 표(§5.12)로 문구를 고르고, 서버의 `title`·`detail` 원문은 보이지 않는다. 5xx 화면에는 문의용 `traceId`만 보인다 |
-| 401 | 팬: 갱신을 한 번만 한다(`POST /v1/identity/access-tokens`, Web Locks `token-refresh`로 탭 사이에서도 한 번만). 그 뒤 원래 요청을 한 번 다시 보낸다. 갱신 요청이 401이면 세션이 끝난다(SCR-004). 구매 경로의 401에는 쿠키 만료·입장 토큰 만료·서명 불일치를 가를 `type`이 없다(wbs 0.2.3). 그래서 갱신 한 번 뒤에도 401이면 구매 세션이 끝난 것으로 본다. 관리 계정: 결정 11의 사람 동작 조건을 지킨다 |
+| 401 | 팬: 갱신을 한 번만 한다(`POST /v1/identity/access-tokens`, Web Locks `token-refresh`로 탭 사이에서도 한 번만). 그 뒤 원래 요청을 한 번 다시 보낸다. 갱신 요청이 401이면 세션이 끝난다(SCR-004). 구매 경로의 401은 `type`으로 가른다(추천 적용 2026-11-05, BUILD_ORDER BAS-040, ADR-0194 결정 3): `about:blank`(팬 쿠키 없음·만료)는 위처럼 갱신 한 번 뒤 다시 보낸다. `purchase-seq-reused`는 IndexedDB의 일련번호가 서버보다 뒤로 간 것이라 번호를 1,000 [가정] 건너뛰어 같은 멱등 키로 한 번 다시 보낸다(서버는 마지막 번호보다 큰 번호만 받는다). `purchase-session-ended`·`admission-token-invalid`·`purchase-signature-invalid`(키가 없거나 어긋남)는 구매 세션이 끝난 것으로 본다(§5.3). 다시 보낸 뒤에도 401이면 끝난 것으로 본다. 구매 서비스가 스스로 내는 401(스냅샷 첫 사용의 입장 토큰 거절, 홀드의 세션 없음)은 PRF-190 전까지 `about:blank`라, 그때까지는 갱신 한 번 뒤에도 401이면 끝난 것으로 본다. 관리 계정: 결정 11의 사람 동작 조건을 지킨다 |
 | 추적 | `traceparent`는 같은 출처 요청(웹·파트너 앱 서버의 경로)에만 붙인다(observability §2·§11). API 호스트로 가는 요청에는 붙이지 않는다. 엣지 게이트웨이가 바깥에서 온 추적 문맥을 지우고 새 trace를 시작하므로, 붙여도 이어지지 않는다. 앱 서버도 받은 값을 부모로 쓰지 않고 span 링크로만 남긴다(observability §6, 추천 적용 2026-10-28, 기술 검토 중간-066). 그래서 브라우저 추적은 앱 서버 요청만 링크로 서버 추적과 이어지고, API 호출은 오류 응답의 `traceId`로 찾는다 |
 | 지표 | 실패를 `rum_api_fail_total{app, route, class}`로 센다(§5.16). 409 홀드 경합과 423은 실패로 세지 않는다(guidelines §2) |
 
@@ -1093,7 +1093,7 @@ sequenceDiagram
 - **남길지(추천 적용 2026-10-28, ADR-0124)**: 이 서명기는 wbs 3.4.1의 탈취 재현 시험(S-T16)이 '막는 피해가 방해 수준뿐'으로 나오면 빠진다. 그때는 아래 키 저장(`peaket-purchase`)·Web Locks `ps:{jti}`·서명 시험 벡터(FE-T7)를 지우고, 구매 세션은 gw-fan이 주는 `__Host-peaket_ps` 쿠키(HttpOnly)와 기기 식별값 확인으로 묶는다. 화면이 따로 할 일은 없다(쿠키는 브라우저가 싣는다).
 - **서명**: `mac = base64url(HMAC-SHA256(key, utf8(METHOD + "\n" + pathAndQuery + "\n" + seq + "\n" + base64url(SHA-256(body)))))`. `pathAndQuery`는 보낸 주소의 경로와 쿼리를 호스트 없이 그대로 쓴다. 본문이 없으면 빈 바이트의 해시를 쓴다. 요청 인증 키는 32바이트다: `deriveKey`의 HMAC 키 매개변수에 `length: 256`을 준다(주지 않으면 해시 블록 크기 512비트 키가 되어 서버와 MAC이 달라진다, 추천 적용 2026-11-01). 서버와 같은 시험 벡터를 `@peaket/api-client`와 purchase-svc가 함께 쓴다(FE-T7). 서버 쪽 벡터는 `packages/platform/test/vectors/purchase-request-mac.v1.json`이다(공유 비밀·jti → 키, MAC 입력 → MAC. 구현과 따로 계산했다, openspec 변경 add-breakers-purchase-auth-and-grpc-channel).
 - **순서 보장**: Web Locks `ps:{jti}`를 잡고, IndexedDB에서 일련번호를 올린 뒤 요청을 보낸다. 잠금은 응답(또는 시간 초과)이 올 때까지 놓지 않는다. 복제한 탭이 같은 입장 토큰을 가져도, 두 요청이 겹쳐 날아가 번호가 뒤집히는 일이 없다. 구매 세션 요청은 사람이 누를 때만 생기므로, 하나씩 차례로 보내도(직렬화) 느려지지 않는다.
-- **401**: 서명 불일치·일련번호 재사용·입장 토큰 만료를 가를 `type`이 아직 없다(wbs 0.2.3). 팬 쿠키를 한 번 갱신한 뒤에도 401이면 구매 세션이 끝난 것으로 본다. 키를 지우고 SCR-010 '예매 시간이 끝났습니다'로 간다. 차례가 온 뒤 15분 안이면 대기실에서 같은 대기표로 다시 입장한다.
+- **401**: `type`으로 가른다(§4.1 '401', BAS-040). 서명 머리 없음·형식·불일치는 `purchase-signature-invalid`, 구매 세션이 없거나 끝남은 `purchase-session-ended`, 입장 토큰 없음·만료·첫 사용 기한 지남은 `admission-token-invalid`, 일련번호 재사용은 `purchase-seq-reused`다. 일련번호 재사용만 번호를 건너뛰어 한 번 다시 보내고, 팬 쿠키 401(`about:blank`)은 한 번 갱신한다. 그 밖이거나 다시 보낸 뒤에도 401이면 구매 세션이 끝난 것으로 본다. 키를 지우고 SCR-010 '예매 시간이 끝났습니다'로 간다. 차례가 온 뒤 15분 안이면 대기실에서 같은 대기표로 다시 입장한다.
 - **결제사 SDK 싣기**: 결제 화면에서만 동적 import한다(`@tosspayments/tosspayments-sdk`의 `loadTossPayments`, `@portone/browser-sdk/v2`). 토스 주문서형은 결제 수단 UI가 위젯 안에 있다. 그래서 결제 시도 시작(`POST …/payments`)을 위젯을 그리기 직전에 부른다. 포트원은 화면 목록에서 수단을 고른 뒤 [결제하기]를 누를 때 부른다(정본 '결제창을 열기 직전'). 결제 시도 응답이 `switched`면 다른 결제사로 결제한다고 알린다.
 - **결제창 방식**: 두 결제사 모두 페이지 이동으로 끝난다(ADR-0079 결정 7). 포트원의 `windowType`은 결제사 기본값에 맡기고, `forceRedirect: true`로 결과만 페이지 이동으로 받는다. 결제창이 보내는 창 메시지는 우리 코드가 받지 않는다.
 - **복귀 화면**: 정적 셸이 뜨면, 스크립트가 주소의 결제 값을 읽고 `history.replaceState`로 지운다. 그 뒤 같은 사이트 요청으로 서명한 결제 접수를 보낸다. 실패 주소(토스 `failUrl`의 코드, 포트원 `code`)면 사유를 보이고 결제 화면으로 돌아가며, 홀드는 그대로 남는다(결제창 실패 3회 [가정]까지, 정본). 복귀 화면은 결제 접수를 보낸 사실과 그 멱등키(UUID v4)를 탭 세션 저장소에 둔다. 그래서 새로고침하면 결제 값 없이 결과 확인으로 바로 간다. 접수를 보내기 전에 새로고침해 결제 값을 잃으면 '결제가 끝나지 않았습니다'와 다시 시도를 보인다(결제사 인증은 승인 기한 10분이 지나면 과금 없이 만료된다, 정본).
@@ -1306,11 +1306,11 @@ sequenceDiagram
 | `trigger-deferred` | `ops.decision.deferred` | 51번 |
 | `no-placement` | `scanner.shift.noPlacement` | 54번 |
 | `open-interval-conflict`, `scale-change-closed` | `ops.saleReview.*` | SCR-048 상태 표 |
-| 423(이름 없음) | `sale.paused` | 19번 |
+| `sale-paused`(423) | `sale.paused` | 19번 |
 | `sold-out`(410 엣지 정적 응답, ADR-0081) | `queue.soldOut` | 12번 |
 | 429·503 + `Retry-After` | `common.retryAfter` | 1번 |
 
-- `type` 이름이 없는 오류(423, 대기표 만료 410, 이미 대기 중 409 등)는 wbs 0.2.3에서 이름을 붙인다. 그때까지는 api-client가 상태 코드와 경로로 키를 고른다.
+- 이름 붙은 `type`의 정본 목록은 openapi `x-peaket-problem-types`다(2026-11-05, BAS-040, docs/api/guidelines.md §2). 423은 `sale-paused`, 대기표 만료 410은 `queue-ticket-expired`, 이미 대기 중 409는 `already-waiting`이다. 목록에 없는 오류(`about:blank`)는 api-client가 상태 코드와 경로로 키를 고른다.
 - 빠진 번역 키는 CI가 0으로 막는다(FE-T19).
 
 ### 5.13 다기기·반응형
@@ -1712,7 +1712,7 @@ ADR-0111의 결정은 서버가 그린 화면의 SEED 스타일 속성과 CSP를
 | 20 | 교차 출처에서 `Date`가 읽히지 않아 시계 보정 근거가 없다 | guidelines §9, Fetch 표준 | 고침: `Access-Control-Expose-Headers`에 `Date`(결정 3). 2026-10-28 다시 고침: CDN이 캐시한 응답의 `Date`는 원본 시각 그대로라 쓰지 않는다. 대기실은 대기열 API 응답 본문의 `serverTimeMs`를 쓰고, `queue-files`는 `Date`를 노출하지 않는다(§3.3, ADR-0110) |
 | 21 | `deviceId` 만드는 법·보관 위치, 토큰 보관 위치 | openapi, queue-admission §2·§3 | 결정 5, §3.12 |
 | 22 | 사전 검증 토큰 만료 시각, 입장 토큰 최대 체류 시각이 응답에 없다 | openapi | wbs 0.2.3. 그때까지 사전 검증 만료는 발급 시각 + 15분으로 보고, 남은 구매 시간은 입장 토큰 `exp`를 표시용으로만 읽는다 |
-| 23 | 구매 경로 401이 쿠키 만료·입장 토큰 만료·서명 불일치를 가르지 않는다 | openapi | wbs 0.2.3, 그때까지는 §4.1 401 규칙을 따른다 |
+| 23 | 구매 경로 401이 쿠키 만료·입장 토큰 만료·서명 불일치를 가르지 않는다 | openapi | 고침(2026-11-05, BAS-040): `purchase-session-ended`·`admission-token-invalid`·`purchase-signature-invalid`·`purchase-seq-reused`(§4.1 401) |
 | 24 | '구매 어려움' 재료·입장 일시정지·좌석맵 파일 경로가 대기 상태 파일에 없다 | queue-admission §4, docs/design/d5 §1.6 20번 | wbs 0.2.3 |
 | 25 | 결제창 방식(팝업·주문서형·이동)이 정해지지 않았다 | payment §2 | 결정 7 |
 | 26 | 결제 결과 롱 폴링의 다시 묻기·상한 | openapi, payment §2 | 결정 8 |
@@ -1722,7 +1722,7 @@ ADR-0111의 결정은 서버가 그린 화면의 SEED 스타일 속성과 CSP를
 | 30 | 굿즈 결제 경로가 입장 토큰·구매 세션 서명을 요구하는 경로뿐이다 | openapi(굿즈 주문·결제) | wbs 0.2.3 |
 | 31 | 인기 MD 대기열이 어떤 대기열 식별자를 쓰는지 | openapi 굿즈 주문 | wbs 0.2.3 |
 | 32 | 화면이 쓰는데 openapi에 없는 경로가 20개 항목이다(대부분 읽기). docs/design/d5 §1.6에는 공연 상세(21번), 주문 내역(2번), 계정 설정·소명·배상 조회(18번), 티켓 표시 값(25번), 지연 환급 계좌(4번), 내 현장 배정(5번), 파트너 공연 목록·등록 임시저장·상품·웹훅·정산 리포트·회차 취소 요청 상태(16번), 관리 계정·파트너사·팬 조회·봇 표본·공지(8~12번)가 있다. 그 표에 없는 것은 웹 푸시 구독 정보 등록, 월렛의 티켓 상세·부가 상품 목록(SCR-013), 굿즈 상품 상세와 상품 목록 응답 형식(SCR-015), 받은 양도 요청 목록(SCR-041), 관제 명령 목록·상세(SCR-030), 법정 조치 목록·상세(SCR-032), 승인 업무·회차 취소 요청·판매 승인 대기·지급 묶음 목록(SCR-046~049)이다. 관제 목록을 REST로 둘지 GraphQL로 읽을지도 정해지지 않았다 | docs/planning/04 화면 표, openapi, docs/design/d5 §1.6 | wbs 0.2.3. 2026-10-30 일부 해소: 웹 푸시 구독 정보 등록·해제(`POST /v1/push-subscriptions`, `DELETE /v1/push-subscriptions/{subscriptionKey}`)와 docs/design/d5 §1.6 16번 가운데 웹훅 조회·고치기·비밀 재발급·발송 이력·다시 보내기(`/v1/partner/webhooks*`, `/v1/partner/webhook-deliveries/{deliveryId}/redeliveries`)가 openapi에 들어갔다(docs/features/notify.md §3.4·§9, 호출 순서는 §4.2.4). 같은 날 법정 조치 목록·상세(`GET /v1/ops/compliance/notices`·`…/data-requests`·`…/incidents`와 그 단건, open-items 74번)와 docs/design/d5 §1.6 8번 가운데 관리 계정 관리(`/v1/ops/admin-accounts`와 그 아래, `GET /v1/partner/team-accounts`, open-items 73번)도 들어갔다. 나머지는 그대로 wbs 0.2.3이다 |
-| 33 | `operationId` 0/180, Problem 선언 6/242, 429·503 `Retry-After` 미선언 | openapi, guidelines §2 | Problem 선언(243/244)·`Retry-After`(429·503 19개)·401 `WWW-Authenticate`(16개)는 고쳤다(ADR-0081). Problem을 선언하지 않은 1개는 기기 승인 토큰 엔드포인트 `POST /v1/scanner/token`의 400으로, OAuth(다른 서비스 계정으로 로그인하게 하는 표준) 오류 형식을 쓴다. 이때 작업이 180개에서 181개로, 4xx·5xx 응답이 242개에서 244개로 늘어 어긋남 칸과 전체 수가 다르다. `operationId`(0/182)는 wbs 0.2.3으로 넘긴다 |
+| 33 | `operationId` 0/180, Problem 선언 6/242, 429·503 `Retry-After` 미선언 | openapi, guidelines §2 | Problem 선언(243/244)·`Retry-After`(429·503 19개)·401 `WWW-Authenticate`(16개)는 고쳤다(ADR-0081). Problem을 선언하지 않은 1개는 기기 승인 토큰 엔드포인트 `POST /v1/scanner/token`의 400으로, OAuth(다른 서비스 계정으로 로그인하게 하는 표준) 오류 형식을 쓴다. 이때 작업이 180개에서 181개로, 4xx·5xx 응답이 242개에서 244개로 늘어 어긋남 칸과 전체 수가 다르다. `operationId`는 2026-11-05에 272개 모두 달았다(BAS-040, docs/api/guidelines.md §10 '작업 이름') |
 | 34 | 파트너 콘솔 통신이 tRPC(architecture)와 REST(openapi)로 갈린다 | architecture §6.4, openapi | 결정 11: tRPC BFF가 REST를 부른다. 2026-10-28 ADR-0100으로 tRPC를 빼고 화면이 api-client 훅으로 REST를 직접 부른다 |
 | 35 | 관제 원격 위젯의 빌드·업로드 주체가 불분명하다 | architecture §10, devops §6.6 | 고침(결정 16) |
 | 36 | CI 유형 표가 `ds`·`telemetry`를 '라이브러리'에 두고, `validation`·`api-client`는 어느 행에도 없다 | devops §3.2 | 고침 |

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { Body, Controller, Delete, HttpCode, Module, Post } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { PostV1EventsEventIdHoldsBody, PostV1EventsEventIdHoldsHeader } from '@peaket/contracts/openapi/seats';
+import { CreateEventHoldBody, CreateEventHoldHeader } from '@peaket/contracts/openapi/seats';
 import {
   ContractHeaders,
   ContractRouteSchema,
@@ -108,7 +108,7 @@ class BuyController {
   @Roles(['fan'])
   @Idempotent({ operation: 'CREATE_HOLD' })
   @PurchaseSigned()
-  hold(@ContractHeaders(PostV1EventsEventIdHoldsHeader) headers: Record<string, unknown>, @CurrentPurchaseSession() ps: string) {
+  hold(@ContractHeaders(CreateEventHoldHeader) headers: Record<string, unknown>, @CurrentPurchaseSession() ps: string) {
     return { ps, headers };
   }
 
@@ -117,7 +117,7 @@ class BuyController {
   @Roles(['fan'])
   @Idempotent({ operation: 'CREATE_HOLD' })
   @PurchaseSigned()
-  @ContractRouteSchema({ headers: PostV1EventsEventIdHoldsHeader, body: PostV1EventsEventIdHoldsBody })
+  @ContractRouteSchema({ headers: CreateEventHoldHeader, body: CreateEventHoldBody })
   holdRs(@Body() body: unknown, @CurrentPurchaseSession() ps: string) {
     return { ps, body };
   }
@@ -185,7 +185,8 @@ describe('훅(ADR-0050 결정 8)', () => {
     expect((await call('POST', url, h, '{}')).statusCode).toBe(200);
     const again = await call('POST', url, h, '{}');
     expect(again.statusCode).toBe(401);
-    expect(json(again).type).toBe('about:blank');
+    // 거절 이유를 type으로 가른다(BAS-040, openapi x-peaket-problem-types, docs/frontend.md §4.1 '401')
+    expect(json(again)).toMatchObject({ type: `${PROBLEM_TYPE_BASE}purchase-seq-reused`, title: '이미 받은 요청 번호입니다', status: 401 });
     expect(again.headers['www-authenticate']).toBe('Cookie realm="peaket"');
     // 더 작은 번호도 같다
     const smaller = signed('POST', url, '{}', { seq: Number(h['x-purchase-seq']) - 1 });
@@ -207,7 +208,7 @@ describe('훅(ADR-0050 결정 8)', () => {
     ];
     for (const c of cases) {
       const r = await call('POST', c.url, c.headers, c.payload);
-      expect({ what: c.what, status: r.statusCode }).toEqual({ what: c.what, status: 401 });
+      expect({ what: c.what, status: r.statusCode, type: json(r).type }).toEqual({ what: c.what, status: 401, type: `${PROBLEM_TYPE_BASE}purchase-signature-invalid` });
     }
     expect(sessions.advanced.length).toBe(advancedBefore);
     expect(sessions.last.get('ps-s-1')).toBe(before);
@@ -232,7 +233,8 @@ describe('훅(ADR-0050 결정 8)', () => {
         ['MAC 형식', { ...good, 'x-purchase-mac': 'm' }],
       ] as const) {
         const r = await call('POST', url, headers as Record<string, string>, HOLD);
-        expect({ url, what, status: r.statusCode, type: json(r).type }).toEqual({ url, what, status: 401, type: 'about:blank' });
+        expect({ url, what, status: r.statusCode, type: json(r).type }).toEqual({ url, what, status: 401, type: `${PROBLEM_TYPE_BASE}purchase-signature-invalid` });
+        expect(r.headers['www-authenticate']).toBe('Cookie realm="peaket"');
       }
     }
   });
@@ -241,7 +243,9 @@ describe('훅(ADR-0050 결정 8)', () => {
     const url = '/v1/rs/events/e1/holds';
     const resolvedBefore = sessions.resolved.length;
     const { 'x-user-id': _u, 'x-session-id': _s, 'x-user-aud': _a, ...anon } = signed('POST', url, '{"seatIds":1}');
-    expect((await call('POST', url, anon, '{"seatIds":1}')).statusCode).toBe(401);
+    const anonymous = await call('POST', url, anon, '{"seatIds":1}');
+    // 신원(팬 쿠키)이 없는 401은 이름 없는 오류 그대로다(화면은 토큰을 한 번 갱신한다)
+    expect({ status: anonymous.statusCode, type: json(anonymous).type }).toEqual({ status: 401, type: 'about:blank' });
     expect(sessions.resolved.length).toBe(resolvedBefore);
 
     const badKey = await call('POST', url, signed('POST', url, '{"seatIds":1}', { extra: { 'idempotency-key': 'k-1', 'x-purchase-mac': 'm' } }), '{"seatIds":1}');
@@ -258,7 +262,8 @@ describe('훅(ADR-0050 결정 8)', () => {
     const url = '/v1/orders/o-2/payments';
     sessions.missing = true;
     try {
-      expect((await call('POST', url, signed('POST', url, '{}'), '{}')).statusCode).toBe(401);
+      const r = await call('POST', url, signed('POST', url, '{}'), '{}');
+      expect({ status: r.statusCode, type: json(r).type }).toEqual({ status: 401, type: `${PROBLEM_TYPE_BASE}purchase-session-ended` });
     } finally {
       sessions.missing = false;
     }
@@ -296,14 +301,14 @@ describe('시작 확인', () => {
       @Post('pipe')
       @Roles(['fan'])
       @Idempotent({ operation: 'CREATE_HOLD' })
-      pipe(@ContractHeaders(PostV1EventsEventIdHoldsHeader) _h: unknown) {
+      pipe(@ContractHeaders(CreateEventHoldHeader) _h: unknown) {
         return {};
       }
 
       @Post('rs')
       @Roles(['fan'])
       @Idempotent({ operation: 'CREATE_HOLD' })
-      @ContractRouteSchema({ headers: PostV1EventsEventIdHoldsHeader })
+      @ContractRouteSchema({ headers: CreateEventHoldHeader })
       rs() {
         return {};
       }

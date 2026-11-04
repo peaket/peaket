@@ -158,7 +158,7 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 
 ### 4.2 쓰는 칸
 
-- 서버가 정하는 칸(상태, 소유 계정, 테넌트, 작성자, 시각, 계산한 금액, 판)은 요청 본문에서 받지 않는다. 요청 스키마(데이터의 구조 정의)는 허용한 칸만 두고(`additionalProperties: false`), 그 밖의 칸이 오면 400으로 거절한다(support.md·catalog-review.md 8.2.3과 같다).
+- 서버가 정하는 칸(상태, 소유 계정, 테넌트, 작성자, 시각, 계산한 금액, 판)은 요청 본문에서 받지 않는다. 요청 스키마(데이터의 구조 정의)는 허용한 칸만 두고(`additionalProperties: false`), 그 밖의 칸이 오면 400으로 거절한다(support.md·catalog-review.md 8.2.3과 같다). 2026-11-05에 계약의 모든 요청 본문을 닫았고, 요청·응답 겸용이던 스키마는 서버가 정하는 칸을 뺀 요청용(`<이름>Input`)으로 나눴다. 문서 점검(`api` 검사)이 이 규칙을 본다(docs/api/guidelines.md §1 '요청은 닫고 응답은 연다', BUILD_ORDER BAS-040).
 - **부정 거래 조사의 쓰는 칸(추천 적용 2026-10-31, ADR-0171)**: 사건 고치기(`PATCH /v1/ops/fraud-cases/{caseId}`, `If-Match` 필수)는 계정 빼기·더하기(이유 필수), 메모, 사유 범주, 조사관 의견, 계정별 소명 판단·이의 판단만 받는다. 상태, 담당 조사관, 판, 기록 고정 판, 점수·근거 신호, 정답 라벨은 서버 칸이다. 사건 요약은 `readOnly`라 승인자는 사건 칸을 쓰지 못한다. 팬의 소명 본문은 대상 종류·대상 ID·글만 받고, 낸 계정은 세션으로 정한다.
 - **부정 예매 조치의 승인 본문과 조치 요청의 칸(추천 적용 2026-10-31, ADR-0173 결정 2·7)**: 승인(`POST /v1/ops/approval-requests/{approvalId}/approvals`)의 본문 `ApprovalDecisionBody`는 판단 이유 `reason`(1~1000자. `FRAUD_ACTION`이면 필수이고 없으면 422 `approval-reason-required`)과 범위 줄이기 `excludeAccountIds`·`excludeTicketIds`만 받는다. 뺀 값이 요청 범위 밖이거나 다 빼면 422 `approval-scope-invalid`다. 반려(`…/rejections`)도 이유가 필수다. 승인자는 범위를 줄일 수만 있고 넓히지 못한다. 조치 요청의 이용 제한 끝은 건 날 + 1년 [가정]을 넘지 못하고(넘으면 422 `restriction-too-long`), 더 늘리려면 새 이용 제한 요청을 2인 승인으로 받는다.
 - 역할에 따라 쓸 수 있는 칸이 다른 곳은 그 기능의 ASVS 추적 표 8.2.3 행이 정본이다. 예: 후기는 별점·본문·사진만, 홈 구성의 `updatedBy`·`updatedAt`은 읽기 전용, 판매 승인 뒤 재승인 대상 항목은 `partner_admin`만.

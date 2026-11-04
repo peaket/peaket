@@ -72,6 +72,12 @@ describe('진입 경로', () => {
     expect((await enter(id, entryBody(id, { entryRequestId: 'not-uuid' }))).statusCode).toBe(400);
   });
 
+  test('[ASVS v5.0.0-15.3.3] 진입_본문의_정하지않은칸은_400이다(계약처럼닫힌본문, BAS-040)', async () => {
+    const id = await event({ openBatch: false });
+    const r = await enter(id, entryBody(id, { zzz: 1 }));
+    expect({ status: r.statusCode, type: JSON.parse(r.payload).type }).toEqual({ status: 400, type: 'about:blank' });
+  });
+
   test('구매권한(ticket:buy)이나pid가없는팬은_403이다', async () => {
     const id = await event({ openBatch: false });
     expect((await enter(id, entryBody(id), undefined, fan({ scope: '' }))).statusCode).toBe(403);
@@ -156,6 +162,12 @@ describe('사전 검증 경로', () => {
   test('구매권한이없는팬은_403이다', async () => {
     const id = await event();
     expect((await preverify(id, 'application/json', fan({ scope: '' }))).statusCode).toBe(403);
+  });
+
+  test('[ASVS v5.0.0-15.3.3] 사전검증_본문의_정하지않은칸은_400이다(계약처럼닫힌본문, BAS-040)', async () => {
+    const id = await event();
+    const r = await svc.http.inject({ method: 'POST', url: `/v1/queues/${id}/pre-verifications`, headers: { ...fan(), 'content-type': 'application/json' }, payload: JSON.stringify({ deviceId: DEVICE, humanCheckToken: 't', zzz: 1 }) });
+    expect(r.statusCode).toBe(400);
   });
 });
 

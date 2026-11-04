@@ -14,7 +14,7 @@ import * as zod from 'zod';
 export const ComplianceDocumentUpload = zod.object({
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT']).describe('OFFICIAL_LETTER는 통보 공문·자료 요청서, COURT_WARRANT는 법원 허가서(영장)'),
   "file": zod.instanceof(Blob)
-}).describe('요청서·공문 원본 올리기 본문(multipart/form-data). PDF만 받는다: 확장자 .pdf와 첫 바이트 %PDF-가 함께 맞아야 하고(아니면 415), 한 파일 20MB [가정]를 넘으면 413, 압축 파일은 받지 않는다. 올린 파일 이름은 정화해 메타데이터로만 남기고 객체 키는 서버가 만든다(추천 적용 2026-10-30, docs/features/control-tower.md §9 \'자료 추출 및 법정 대장 관리\', docs/security/asvs/control-tower.md V5, ADR-0159 결정 9)')
+}).strict().describe('요청서·공문 원본 올리기 본문(multipart/form-data). PDF만 받는다: 확장자 .pdf와 첫 바이트 %PDF-가 함께 맞아야 하고(아니면 415), 한 파일 20MB [가정]를 넘으면 413, 압축 파일은 받지 않는다. 올린 파일 이름은 정화해 메타데이터로만 남기고 객체 키는 서버가 만든다(추천 적용 2026-10-30, docs/features/control-tower.md §9 \'자료 추출 및 법정 대장 관리\', docs/security/asvs/control-tower.md V5, ADR-0159 결정 9)')
 
 export type ComplianceDocumentUpload = zod.input<typeof ComplianceDocumentUpload>;
 export type ComplianceDocumentUploadOutput = zod.output<typeof ComplianceDocumentUpload>;

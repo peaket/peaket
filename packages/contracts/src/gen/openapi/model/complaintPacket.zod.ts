@@ -34,10 +34,10 @@ export const ComplaintPacket = zod.object({
   "url": zod.url(),
   "postedAt": zod.iso.datetime({"offset":true}).describe('게시 시각(게시물에 보이는 값, 없으면 수집 시각)'),
   "captureSha256": zod.string().regex(complaintPacketResalePostsItemCaptureSha256RegExp).describe('수집본 캡처의 SHA-256(ExternalPost.captureSha256)')
-}).strict()).describe('공개 게시물의 주소·게시 시각·캡처 해시. 캡처 파일은 이 본문에 싣지 않는다'),
+})).describe('공개 게시물의 주소·게시 시각·캡처 해시. 캡처 파일은 이 본문에 싣지 않는다'),
   "bundleManifestSha256": zod.string().regex(complaintPacketBundleManifestSha256RegExp).describe('증거 묶음의 봉인 해시(목록 파일의 SHA-256)'),
   "statement": zod.literal("기록을 보존하고 있으며 영장이나 공연법 제4조의3 요청을 받으면 정해진 절차로 냅니다").describe('고정 문장')
-}).strict().describe('고소·고발용 요약(증거 묶음 내보내기 kind COMPLAINT의 200 본문, FR-074, 법률 확인 35번(추천 적용 2026-10-31, ADR-0173)). 피고소인은 \'성명불상자(PEAKET 부정 예매 사건 caseNumber번에 묶인 계정 accountCount개를 쓴 사람)\'로 적는다. 개인정보 칸이 없도록 칸을 이 목록으로 막는다. 계정 ID·실명·연락처·IP·결제 정보·연계정보·묶음의 다른 계정은 없다. 고소장 최소 항목과 고발 선택은 docs/features/forensic-replay.md §6.7.7이다')
+}).describe('고소·고발용 요약(증거 묶음 내보내기 kind COMPLAINT의 200 본문, FR-074, 법률 확인 35번(추천 적용 2026-10-31, ADR-0173)). 피고소인은 \'성명불상자(PEAKET 부정 예매 사건 caseNumber번에 묶인 계정 accountCount개를 쓴 사람)\'로 적는다. 개인정보 칸이 없도록 서버는 이 목록의 칸만 낸다(응답 직렬화 스키마가 정의 밖 칸을 버린다. 응답 칸 추가가 깨짐이 아니도록 스키마는 닫지 않는다, guidelines §1, BAS-040). 계정 ID·실명·연락처·IP·결제 정보·연계정보·묶음의 다른 계정은 없다. 고소장 최소 항목과 고발 선택은 docs/features/forensic-replay.md §6.7.7이다')
 
 export type ComplaintPacket = zod.input<typeof ComplaintPacket>;
 export type ComplaintPacketOutput = zod.output<typeof ComplaintPacket>;

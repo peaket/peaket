@@ -174,6 +174,8 @@ describe('받는 층: POST /v1/queues/{eventId}/admission', () => {
   test('본문이 비면 400, 대기표가 틀리면 403 queue-ticket-invalid, 다른 대기표 409 duplicate-admission, 만료 410 queue-ticket-expired(rejoinAllowed)', async () => {
     const { eventId, ticket } = await world();
     expect((await post(eventId, '{}')).statusCode).toBe(400);
+    // 본문은 계약처럼 닫혀 있다(정하지 않은 칸은 400, BAS-040). 관측용 칸(firstEtaSec·firstEtaAtMs)은 모양만 묻지 않는다
+    expect((await post(eventId, JSON.stringify({ queueTicket: ticket(150), zzz: 1 }))).statusCode).toBe(400);
     const bad = await post(eventId, JSON.stringify({ queueTicket: 'v1.k1.x.y' }));
     expect(bad.statusCode).toBe(403);
     expect(JSON.parse(bad.payload).type).toContain('queue-ticket-invalid');

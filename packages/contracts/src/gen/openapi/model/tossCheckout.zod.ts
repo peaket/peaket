@@ -19,7 +19,7 @@ export const TossCheckout = zod.object({
   "amount": zod.int().describe('원 단위'),
   "successUrl": zod.url(),
   "failUrl": zod.url()
-}).strict()
+})
 
 export type TossCheckout = zod.input<typeof TossCheckout>;
 export type TossCheckoutOutput = zod.output<typeof TossCheckout>;

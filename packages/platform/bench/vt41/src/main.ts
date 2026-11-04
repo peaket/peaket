@@ -14,8 +14,8 @@ import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter, type NestExpressApplication } from '@nestjs/platform-express';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { FastifyInstance } from 'fastify';
-import { PostV1QueuesEventIdEntriesBody, PostV1QueuesEventIdEntriesParams, PostV1QueuesEventIdEntriesResponse } from '@peaket/contracts/openapi/queue';
-import { PostV1EventsEventIdHoldsBody, PostV1EventsEventIdHoldsParams, PostV1EventsEventIdHoldsResponse } from '@peaket/contracts/openapi/seats';
+import { CreateQueueEntryBody, CreateQueueEntryParams, CreateQueueEntryResponse } from '@peaket/contracts/openapi/queue';
+import { CreateEventHoldBody, CreateEventHoldParams, CreateEventHoldResponse } from '@peaket/contracts/openapi/seats';
 // 플랫폼 원본을 바로 가져온다(본문 해석기·경로 스키마 검사기를 거는 installRequestChecks는 서비스 시작 함수 안에서만 쓰여 내보내지 않는다)
 import { ProblemFilter } from '../../../src/problem-filter.js';
 import { AcceptTextPlain, ContractBody, ContractParams, ContractRouteSchema, installRequestChecks, throwAttachedValidationError } from '../../../src/request-checks.js';
@@ -32,7 +32,7 @@ const ENTRY = { queueTicket: 'qt-1', seq: 1234, generation: 1, segment: 3, serve
 class ZodController {
   @HttpCode(201)
   @Post('events/:eventId/holds')
-  hold(@ContractParams(PostV1EventsEventIdHoldsParams) _p: unknown, @ContractBody(PostV1EventsEventIdHoldsBody) _b: unknown) {
+  hold(@ContractParams(CreateEventHoldParams) _p: unknown, @ContractBody(CreateEventHoldBody) _b: unknown) {
     handled += 1;
     return HOLD;
   }
@@ -40,7 +40,7 @@ class ZodController {
   @HttpCode(202)
   @Post('queues/:eventId/entries')
   @AcceptTextPlain()
-  entry(@ContractParams(PostV1QueuesEventIdEntriesParams) _p: unknown, @ContractBody(PostV1QueuesEventIdEntriesBody) _b: unknown) {
+  entry(@ContractParams(CreateQueueEntryParams) _p: unknown, @ContractBody(CreateQueueEntryBody) _b: unknown) {
     handled += 1;
     return ENTRY;
   }
@@ -50,7 +50,7 @@ class ZodController {
 class SchemaController {
   @HttpCode(201)
   @Post('events/:eventId/holds')
-  @ContractRouteSchema({ params: PostV1EventsEventIdHoldsParams, body: PostV1EventsEventIdHoldsBody, responses: { 201: PostV1EventsEventIdHoldsResponse } })
+  @ContractRouteSchema({ params: CreateEventHoldParams, body: CreateEventHoldBody, responses: { 201: CreateEventHoldResponse } })
   hold(@Body() _b: unknown) {
     handled += 1;
     return HOLD;
@@ -59,7 +59,7 @@ class SchemaController {
   @HttpCode(202)
   @Post('queues/:eventId/entries')
   @AcceptTextPlain()
-  @ContractRouteSchema({ params: PostV1QueuesEventIdEntriesParams, body: PostV1QueuesEventIdEntriesBody, responses: { 202: PostV1QueuesEventIdEntriesResponse } })
+  @ContractRouteSchema({ params: CreateQueueEntryParams, body: CreateQueueEntryBody, responses: { 202: CreateQueueEntryResponse } })
   entry(@Body() _b: unknown) {
     handled += 1;
     return ENTRY;

@@ -37,17 +37,17 @@ async enter() {
 
 ```ts
 import { AcceptTextPlain, ContractBody, ContractHeaders, ContractRouteSchema, CurrentPrincipal, Roles, type Principal } from '@peaket/platform';
-import { PostV1EventsEventIdHoldsBody, PostV1EventsEventIdHoldsHeader } from '@peaket/contracts/openapi/seats';
+import { CreateEventHoldBody, CreateEventHoldHeader } from '@peaket/contracts/openapi/seats';
 
 @Post('holds')
 @Roles(['fan'], { scopes: ['ticket:buy'] })
-hold(@ContractHeaders(PostV1EventsEventIdHoldsHeader) h: Headers, @ContractBody(PostV1EventsEventIdHoldsBody) body: Body, @CurrentPrincipal() me: Principal) {}
+hold(@ContractHeaders(CreateEventHoldHeader) h: Headers, @ContractBody(CreateEventHoldBody) body: Body, @CurrentPrincipal() me: Principal) {}
 
 // 핫패스: Zod 파이프 대신 Fastify 경로 스키마(같은 계약 Zod)
 @Post('entries')
 @Roles(['fan'], { scopes: ['ticket:buy'] })
 @AcceptTextPlain()
-@ContractRouteSchema({ body: PostV1QueuesEventIdEntriesBody, responses: { 201: PostV1QueuesEventIdEntriesResponse } })
+@ContractRouteSchema({ body: CreateQueueEntryBody, responses: { 201: CreateQueueEntryResponse } })
 enter() {}
 ```
 

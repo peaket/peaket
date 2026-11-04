@@ -950,6 +950,235 @@ def check_api_contract(spec, rep):
     rep.info['api_problem_exempt'] = exempt_seen
 
 
+def each_operation(spec):
+    for path, item in (spec.get('paths') or {}).items():
+        if not isinstance(item, dict):
+            continue
+        for method in HTTP_METHODS:
+            op = item.get(method)
+            if isinstance(op, dict):
+                yield method, path, op
+
+
+# ---------- 4의3의1. 작업 이름(operationId, docs/api/guidelines.md §10 '작업 이름', BUILD_ORDER BAS-040) ----------
+# orval이 이 이름으로 계약 Zod·타입과 api-client의 호출 함수·훅을 만든다. 동사는 메서드로 정한다
+OPERATION_VERBS = {'get': ('get', 'list'), 'post': ('create', 'receive'), 'put': ('put',), 'patch': ('update',), 'delete': ('delete',)}
+OPERATION_ID_RE = re.compile(r'^[a-z]+[A-Z][A-Za-z0-9]*$')
+
+
+def check_operation_ids(spec, rep):
+    where0 = 'docs/api/openapi.yaml'
+    if not isinstance(spec, dict) or not isinstance(spec.get('paths'), dict):
+        rep.err('api', where0, 'openapi를 읽지 못해 작업 이름을 검사하지 못함')
+        return
+    seen = {}
+    n = 0
+    for method, path, op in each_operation(spec):
+        where = '%s %s %s' % (where0, method.upper(), path)
+        oid = op.get('operationId')
+        if not oid:
+            rep.err('api', where, '%s %s: operationId가 없음(guidelines §10 \'작업 이름\')' % (method.upper(), path))
+            continue
+        n += 1
+        if oid in seen:
+            rep.err('api', where, '%s %s: operationId %s가 겹침(%s, guidelines §10)' % (method.upper(), path, oid, seen[oid]))
+        seen.setdefault(oid, '%s %s' % (method.upper(), path))
+        verbs = OPERATION_VERBS.get(method)
+        if not verbs:
+            rep.err('api', where, '%s %s: 작업 이름 동사를 정하지 않은 메서드(guidelines §10)' % (method.upper(), path))
+            continue
+        if not OPERATION_ID_RE.match(str(oid)) or not any(re.match(r'^%s[A-Z]' % v, str(oid)) for v in verbs):
+            rep.err('api', where, '%s %s: operationId %s는 %s로 시작하는 camelCase여야 함(guidelines §10)' % (method.upper(), path, oid, '·'.join(verbs)))
+    rep.info.setdefault('api', {})['operation_ids'] = n
+
+
+# ---------- 4의3의2. 오류 목록(x-peaket-problem-types, docs/api/guidelines.md §2, BUILD_ORDER BAS-040) ----------
+# 한 type은 언제나 같은 상태 코드와 제목으로 낸다. 오류 응답 설명에 적힌 케밥 이름은 목록에 있어야 한다.
+# 오류 이름이 아닌 케밥 낱말(서비스·게이트웨이·머리 이름, 캐시 지시어, 사유 값, 문서 이름)은 아래에서 거른다
+PROBLEM_NAME_RE = re.compile(r'^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$|^[a-z][a-z0-9]*$')
+PROBLEM_TOKEN_RE = re.compile(r'(?<![A-Za-z0-9_./{:-])([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?![A-Za-z0-9_/}-]|\.[A-Za-z0-9])')
+PROBLEM_UPPER_RE = re.compile(r'(?<![A-Za-z0-9_])([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)(?![A-Za-z0-9_])')
+PROBLEM_NON_TYPE_RE = re.compile(r'-svc$|^gw-|^x-|-ctrl$|-worker$')
+PROBLEM_NON_TYPE_WORDS = {
+    'auth-controls', 'open-items',            # 문서 이름
+    'max-age', 'no-store', 'stale-if-error', 'stale-while-revalidate',  # 캐시 지시어
+    'ip-literal', 'private-address',          # webhook-url-not-allowed의 사유(reason) 값
+}
+
+
+def check_problem_types(spec, rep):
+    where0 = 'docs/api/openapi.yaml'
+    if not isinstance(spec, dict) or not isinstance(spec.get('paths'), dict):
+        rep.err('api', where0, 'openapi를 읽지 못해 오류 목록을 검사하지 못함')
+        return
+    types = ((spec.get('x-peaket-problem-types') or {}).get('types')) or {}
+    if not isinstance(types, dict) or not types:
+        rep.err('api', where0 + ' x-peaket-problem-types', '오류 목록(x-peaket-problem-types.types)이 없음(guidelines §2)')
+        return
+    status_of = {}
+    for name, t in types.items():
+        w = '%s x-peaket-problem-types.%s' % (where0, name)
+        t = t if isinstance(t, dict) else {}
+        st, title = t.get('status'), t.get('title')
+        # 문서 점검은 YAML 값을 글자로 읽는다(check_yaml). 숫자 글자도 받는다
+        st = int(st) if isinstance(st, str) and st.isdigit() else st
+        bad = []
+        if not PROBLEM_NAME_RE.match(str(name)):
+            bad.append('이름은 소문자 케밥 표기')
+        if not isinstance(st, int) or isinstance(st, bool) or not 400 <= st <= 599:
+            bad.append('status는 400~599의 정수')
+        if not isinstance(title, str) or not title.strip():
+            bad.append('title이 있어야 함')
+        if bad:
+            rep.err('api', w, '오류 목록 항목 %s: %s(guidelines §2)' % (name, ', '.join(bad)))
+        status_of[name] = st
+    for method, path, op in each_operation(spec):
+        for code, r in (op.get('responses') or {}).items():
+            code = str(code)
+            if code[:1] not in ('4', '5') or not isinstance(r, dict):
+                continue
+            d = str(r.get('description') or '')
+            where = '%s %s %s %s' % (where0, method.upper(), path, code)
+            for tok in sorted(set(PROBLEM_TOKEN_RE.findall(d))):
+                if tok in PROBLEM_NON_TYPE_WORDS or PROBLEM_NON_TYPE_RE.search(tok):
+                    continue
+                if tok not in status_of:
+                    rep.err('api', where, '오류 응답 설명의 %s가 목록(x-peaket-problem-types)에 없음(오류 이름이면 목록에 더하고, 아니면 check_all.py PROBLEM_NON_TYPE_WORDS에 더한다)' % tok)
+                elif str(status_of[tok]) != code:
+                    rep.warn('api', where, '%s는 목록에서 %s인데 %s 응답 설명에 적힘(대비 설명이 아니면 고친다, guidelines §2)' % (tok, status_of[tok], code))
+            for tok in sorted(set(PROBLEM_UPPER_RE.findall(d))):
+                name = tok.lower().replace('_', '-')
+                if name in status_of and str(status_of[name]) != code:
+                    rep.warn('api', where, '%s(%s)는 목록에서 %s인데 %s 응답 설명에 적힘(guidelines §2)' % (tok, name, status_of[name], code))
+    rep.info.setdefault('api', {})['problem_types'] = len(types)
+
+
+# ---------- 4의3의3. 칸 닫힘(docs/api/guidelines.md §1, docs/security/authz-matrix.md '요청 스키마는 허용한 칸만', BUILD_ORDER BAS-040) ----------
+# 요청 본문에서 닿는 객체는 정의 밖 칸을 거절하게 닫고(additionalProperties: false), 응답에서 닿는 객체는 열어 둔다
+# (응답에 칸을 더해도 옛 화면이 거절하지 않게). 둘 다에서 닿는 객체 스키마는 요청용과 나눈다. 맵(additionalProperties에
+# 스키마)은 닫지 않아도 되고, 일부러 연 객체는 x-peaket-open-object에 이유를 적는다. 요청 본문은 allOf로 잇지 않는다
+# (칸이 다른 조각에 있어 닫을 수 없다).
+OPEN_OBJECT_KEY = 'x-peaket-open-object'
+
+
+def _is_object_schema(s):
+    return isinstance(s, dict) and (s.get('type') == 'object' or 'properties' in s)
+
+
+def _is_false(v):
+    # 문서 점검은 YAML 값을 글자로 읽는다(check_yaml). 시험은 safe_load로 읽어 bool이다
+    return v is False or v == 'false'
+
+
+def check_schema_closure(spec, rep):
+    where0 = 'docs/api/openapi.yaml'
+    if not isinstance(spec, dict) or not isinstance(spec.get('paths'), dict):
+        rep.err('api', where0, 'openapi를 읽지 못해 칸 닫힘을 검사하지 못함')
+        return
+    comps = ((spec.get('components') or {}).get('schemas')) or {}
+
+    def ref_name(s):
+        return str(s['$ref']).rsplit('/', 1)[-1]
+
+    # 1단계: 구성 요소마다 요청·응답 어느 쪽에서 닿는지
+    sides = collections.defaultdict(set)
+
+    def mark(s, side, seen):
+        if isinstance(s, dict):
+            if '$ref' in s:
+                name = ref_name(s)
+                sides[name].add(side)
+                if name not in seen:
+                    mark(comps.get(name), side, seen | {name})
+                return
+            for v in s.values():
+                mark(v, side, seen)
+        elif isinstance(s, list):
+            for v in s:
+                mark(v, side, seen)
+
+    allc = spec.get('components') or {}
+
+    def resolved(obj, kind):
+        # 작업이 components/requestBodies·responses를 가리키면 그것을 읽는다
+        if isinstance(obj, dict) and isinstance(obj.get('$ref'), str) and '/%s/' % kind in obj['$ref']:
+            return (allc.get(kind) or {}).get(ref_name(obj)) or {}
+        return obj if isinstance(obj, dict) else {}
+
+    bodies = []
+    json_bodies = 0
+    for method, path, op in each_operation(spec):
+        where = '%s %s' % (method.upper(), path)
+        content = (resolved(op.get('requestBody'), 'requestBodies').get('content')) or {}
+        if 'application/json' in content:
+            json_bodies += 1
+        for c in content.values():
+            if isinstance(c, dict) and c.get('schema') is not None:
+                bodies.append((where, 'req', c['schema']))
+                mark(c['schema'], 'req', set())
+        for code, r in (op.get('responses') or {}).items():
+            for c in (resolved(r, 'responses').get('content') or {}).values():
+                if isinstance(c, dict) and c.get('schema') is not None:
+                    bodies.append((where, 'resp', c['schema']))
+                    mark(c['schema'], 'resp', set())
+    shared = {n for n, s in sides.items() if s == {'req', 'resp'} and _is_object_schema(comps.get(n))}
+    for n in sorted(shared):
+        rep.err('api', '%s components/schemas/%s' % (where0, n),
+                '요청과 응답이 함께 쓰는 객체 스키마 %s: 요청용(%sInput, 닫힘)과 나눈다(guidelines §1)' % (n, n))
+
+    # 2단계: 닫힘 검사(나눌 구성 요소 안으로는 들어가지 않는다)
+    reported = set()
+
+    def report(key, where, msg):
+        if key not in reported:
+            reported.add(key)
+            rep.err('api', where, msg)
+
+    def walk(s, side, where, trail, comp, seen):
+        if not isinstance(s, dict):
+            return
+        if '$ref' in s:
+            name = ref_name(s)
+            if name in shared or (name, side) in seen:
+                return
+            walk(comps.get(name), side, where, [], name, seen | {(name, side)})
+            return
+        at = ('components/schemas/%s' % comp if comp else where + ' 본문') + ('/' + '/'.join(trail) if trail else '')
+        if side == 'req' and s.get('allOf'):
+            report(('allOf', at), '%s %s' % (where0, at), '%s: 요청 본문 스키마를 allOf로 잇지 않는다(칸이 다른 조각에 있어 닫을 수 없다, 요청용 스키마를 따로 둔다)' % at)
+            return
+        if _is_object_schema(s):
+            ap = s.get('additionalProperties')
+            if side == 'req' and not _is_false(ap) and not isinstance(ap, dict) and OPEN_OBJECT_KEY not in s:
+                report(('req', at), '%s %s' % (where0, at),
+                       '%s: 요청 본문에서 닿는 객체가 닫혀 있지 않음(additionalProperties: false. 맵이면 additionalProperties에 스키마, 일부러 열면 %s에 이유, guidelines §1)' % (at, OPEN_OBJECT_KEY))
+            if side == 'resp' and _is_false(ap):
+                report(('resp', at), '%s %s' % (where0, at),
+                       '%s: 응답에서 닿는 객체가 닫혀 있음(응답에 칸을 더하면 옛 화면이 거절한다, guidelines §1 \'응답 칸 추가는 깨짐 아님\')' % at)
+        for pn, ps in (s.get('properties') or {}).items():
+            walk(ps, side, where, trail + [str(pn)], comp, seen)
+        if isinstance(s.get('items'), dict):
+            walk(s['items'], side, where, trail + ['[]'], comp, seen)
+        if isinstance(s.get('additionalProperties'), dict):
+            walk(s['additionalProperties'], side, where, trail + ['{}'], comp, seen)
+        # 스키마 하나를 담는 키(text/plain의 JSON 글자는 contentSchema, JSON Schema 2020-12)
+        for k in ('contentSchema', 'not', 'if', 'then', 'else'):
+            if isinstance(s.get(k), dict):
+                walk(s[k], side, where, trail + [k], comp, seen)
+        # 이름마다 스키마를 담는 키
+        for k in ('patternProperties', 'dependentSchemas'):
+            for pn, ps in (s.get(k) or {}).items() if isinstance(s.get(k), dict) else []:
+                walk(ps, side, where, trail + ['%s(%s)' % (k, pn)], comp, seen)
+        for k in ('allOf', 'oneOf', 'anyOf', 'prefixItems'):
+            for i, x in enumerate(s.get(k) or []):
+                walk(x, side, where, trail + ['%s%d' % (k, i)], comp, seen)
+
+    for where, side, schema in bodies:
+        walk(schema, side, where, [], None, frozenset())
+    rep.info.setdefault('api', {})['json_request_bodies'] = json_bodies
+    rep.info['api']['shared_object_schemas'] = len(shared)
+
+
 # ---------- 4의4. 작업별 허용 역할(x-peaket-roles, docs/security/authz-matrix.md §5.5, open-items 71번) ----------
 # 허용 역할 값의 정본은 권한 표 §5.5의 표 하나다. 첫 칸이 `값`인 행에서 값, '알아보는 자격', '함께 오는 자격'을 읽는다.
 # 자격 칸의 코드 표시 가운데 securitySchemes의 이름은 인증 방식이고, `{}`는 빈 요구(공개)다.
@@ -1508,6 +1737,9 @@ def main():
     check_links(texts, rep)
     check_api(texts, rep)
     check_api_contract(yaml_docs.get('docs/api/openapi.yaml'), rep)
+    check_operation_ids(yaml_docs.get('docs/api/openapi.yaml'), rep)
+    check_problem_types(yaml_docs.get('docs/api/openapi.yaml'), rep)
+    check_schema_closure(yaml_docs.get('docs/api/openapi.yaml'), rep)
     check_roles(texts, yaml_docs.get('docs/api/openapi.yaml'), rep)
     check_blockers(texts, yaml_docs.get('docs/api/openapi.yaml'), rep)
     check_secrefs(texts, rep)

@@ -17,7 +17,7 @@ import * as zod from 'zod';
  * FR-061, POL-038(소유자 결정 2026-10-30 open-items 75번의 화면 쪽. 경로와 칸은 추천 적용 2026-10-30, docs/design/d5 §1.6 21번). 웹 서버 내부 경로가 아니라 공개 API다. 공연 상세(SCR-002)는 ISR 정적 셸이고 개인 영역은 화면 스크립트가 gw-fan으로 따로 읽기 때문이다(docs/frontend.md의 /events/[id] 행). gw-fan → core-svc support 모듈이 받는다. ops-svc는 팬 요청을 받지 않으므로(독립 제어 평면), 원본(ops DB booking_restriction)을 바꿀 때 ops-svc가 support 모듈에 화면용 사본을 보낸다(core.proto BookingRestrictionViewService, 판 번호, docs/data.md §3 sup:rst:{account}). 집행은 이 사본이 아니라 입장 확정(queue-svc)과 주문 생성(purchase-svc)이 각자의 사본으로 한다. 그래서 이 사본이 늦거나 비어도 집행은 그대로이고, 화면이 '제한 없음'을 보인 뒤 입장 확정에서 403 booking-restricted를 받을 수 있다(남는 한계, 화면 문구는 docs/design/d5 §9.2). restrictionId는 소명 제출(POST /v1/appeals, kind RESTRICTION)의 targetId다. 본인 것만 답하고, 제한이 없으면 200에 status NONE이다. Cache-Control: private, no-store
  * @summary 내 예매 제한 상태와 소명 기한(공연 상세·계정 설정·소명 화면)
  */
-export const GetV1BookingRestrictionsMeResponse = zod.object({
+export const GetMyBookingRestrictionResponse = zod.object({
   "status": zod.enum(['NONE', 'ACTIVE']),
   "restrictionId": zod.string().nullish().describe('ACTIVE일 때. 소명 제출(POST /v1/appeals, kind RESTRICTION)의 targetId'),
   "reasonCode": zod.string().nullish().describe('booking_restriction.reason_code. 화면은 이 코드로 사유 범주 문구를 고른다(SCR-042 ①). 부정 예매 이용 제한은 FRAUD이고 소명은 kind FRAUD_CASE로 낸다(POL-046 ⑥, 추천 적용 2026-10-31)'),
@@ -30,38 +30,38 @@ export const GetV1BookingRestrictionsMeResponse = zod.object({
  * FR-073, POL-046 ③(추천 적용 2026-10-31, ADR-0171). 예매 제한 상태(GET /v1/booking-restrictions/me)와 같은 길이다. gw-fan → core-svc support 모듈이 세션·캐시 Redis의 화면용 사본(docs/data.md §3 sup:far:{account})으로 답한다. ops-svc는 팬 요청을 받지 않으므로, 소명 요청을 보내거나 결과가 바뀔 때 support 모듈에 사본을 보낸다(core.proto FraudAppealViewService, 판 번호). 열린 요청과 결정된 지 30일 [가정] 안의 요청만 준다. caseId는 소명 제출(POST /v1/appeals, kind FRAUD_CASE)의 targetId다. 사건의 다른 계정·점수·근거 신호는 싣지 않고 사유 범주만 준다(POL-046 ⑦). 사건 계정이 결제한 표를 양도로 받아 가진 사람에게도 party HOLDER인 요청이 보이고, 거기에는 사유 범주 없이 그 사람이 가진 표(heldTicketIds)와 기한만 있다(추천 적용 2026-10-31, ADR-0173). 없으면 200과 빈 items다. Cache-Control: private, no-store
  * @summary 내 부정 예매 소명 요청(사유 범주·기한·잠긴 표, 소명 화면 SCR-042)
  */
-export const getV1FraudAppealRequestsQueryLimitMax = 100;
+export const listFraudAppealRequestsQueryLimitMax = 100;
 
 
 
-export const GetV1FraudAppealRequestsQueryParams = zod.object({
+export const ListFraudAppealRequestsQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1FraudAppealRequestsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listFraudAppealRequestsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const getV1FraudAppealRequestsResponseItemsItemPartyDefault = `PAYER`;
-export const getV1FraudAppealRequestsResponseItemsItemObjectionNoteMax = 1000;
+export const listFraudAppealRequestsResponseItemsItemPartyDefault = `PAYER`;
+export const listFraudAppealRequestsResponseItemsItemObjectionNoteMax = 1000;
 
-export const getV1FraudAppealRequestsResponseItemsItemLockActiveDefault = false;
+export const listFraudAppealRequestsResponseItemsItemLockActiveDefault = false;
 
-export const GetV1FraudAppealRequestsResponse = zod.object({
+export const ListFraudAppealRequestsResponse = zod.object({
   "items": zod.array(zod.object({
   "caseId": zod.uuid().optional().describe('소명 제출의 targetId'),
   "eventId": zod.string().optional(),
-  "party": zod.enum(['PAYER', 'HOLDER']).default(getV1FraudAppealRequestsResponseItemsItemPartyDefault).describe('PAYER 결제자(사건 계정), HOLDER 받은 사람. HOLDER에는 사유 범주·이용 제한·우선 구매·잠긴 표·잠금 기한을 싣지 않고 lockActive는 늘 false다(결제자의 사유라서. 받은 사람은 기한과 가진 표만 본다)(추천 적용 2026-10-31, ADR-0173)'),
+  "party": zod.enum(['PAYER', 'HOLDER']).default(listFraudAppealRequestsResponseItemsItemPartyDefault).describe('PAYER 결제자(사건 계정), HOLDER 받은 사람. HOLDER에는 사유 범주·이용 제한·우선 구매·잠긴 표·잠금 기한을 싣지 않고 lockActive는 늘 false다(결제자의 사유라서. 받은 사람은 기한과 가진 표만 본다)(추천 적용 2026-10-31, ADR-0173)'),
   "heldTicketIds": zod.array(zod.string()).optional().describe('HOLDER만. 내가 가진 이 사건의 표(결제자가 결제한 표). 받은 사람은 원래 다시 양도할 수 없고 돌려주기는 되므로 잠금 줄을 보이지 않는다(lockActive false, lockExpiresAt null). PAYER면 빈 목록(추천 적용 2026-10-31, ADR-0173)'),
   "excludedTicketIds": zod.array(zod.string()).optional().describe('HOLDER만. heldTicketIds 가운데 이 사건에서 더는 취소하지 않게 된 표(취소 대상에서 빠짐). 빠졌다고 알린 표는 이 사건에서 다시 취소 대상이 되지 않는다(core.proto excluded_ticket_ids(추천 적용 2026-10-31, ADR-0173))'),
   "reasonCategories": zod.array(zod.enum(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION']).describe('부정 예매 사유 범주 다섯(POL-046 ①): 자동화 프로그램(매크로·봇), 대기열 우회 링크, 보안문자 우회, 명의 대여·사들인 계정, 1인 매수 제한 회피. 팬에게 알리는 것은 이 범주뿐이고 점수와 가중치는 알리지 않는다(추천 적용 2026-10-31, ADR-0171)')).optional().describe('PAYER만. HOLDER면 빈 목록'),
   "dueAt": zod.iso.datetime({"offset":true}).optional().describe('소명 기한'),
   "objectionDueAt": zod.iso.datetime({"offset":true}).nullish().describe('조치 결과를 알린 뒤의 이의 창 끝(통지 + 30일 [가정]). 조치 전이거나 HOLDER면 null(받은 사람은 이의 대신 고객 문의로 묻는다, 추천 적용 2026-10-31, ADR-0173). 이 안이면 같은 소명 제출(kind FRAUD_CASE)이 이의로 접수된다'),
   "objectionStatus": zod.enum(['NONE', 'SUBMITTED', 'ACCEPTED', 'REJECTED']).optional().describe('이의 상태'),
-  "objectionNote": zod.string().max(getV1FraudAppealRequestsResponseItemsItemObjectionNoteMax).nullish().describe('이의 결과의 이유(조사관이 사건 고치기 objectionDecisions[].reason에 적은 글, 팬에게 그대로 보인다). 이의가 결정되기 전이면 null(추천 적용 2026-10-31, ADR-0171, FRN-070)'),
+  "objectionNote": zod.string().max(listFraudAppealRequestsResponseItemsItemObjectionNoteMax).nullish().describe('이의 결과의 이유(조사관이 사건 고치기 objectionDecisions[].reason에 적은 글, 팬에게 그대로 보인다). 이의가 결정되기 전이면 null(추천 적용 2026-10-31, ADR-0171, FRN-070)'),
   "actionResult": zod.object({
   "cancelledTicketIds": zod.array(zod.string()).optional().describe('부정 예매로 취소한 내 티켓(전액 환급). HOLDER면 내가 가진 표 가운데 취소된 표이고, 환급은 결제자에게 간다(알림 FRAUD_HOLDER_RESULT(추천 적용 2026-10-31, ADR-0173))'),
   "restrictedUntil": zod.iso.datetime({"offset":true}).nullish().describe('이용 제한 끝. 제한이 없거나 HOLDER면 null')
 }).nullish().describe('내 계정에 내려진 조치(조치 결과를 알린 뒤에만, 아니면 null). 조치 결과 알림과 같은 값이다(추천 적용 2026-10-31, ADR-0171, FRN-070)'),
   "lockedTicketIds": zod.array(zod.string()).optional().describe('PAYER만. 이 요청으로 양도가 잠긴 내 티켓. 소명 인정·사건 정상 종료·조치 실행 끝·묶음에서 빠짐·입장 시작·조치 요청의 반려·만료·최대 기한 가운데 먼저 오는 때에 풀린다. 풀려도 목록은 그대로 두고, 풀렸는지는 lockActive false로만 알린다(풀림 알림 FRAUD_TRANSFER_LOCK_RELEASED(추천 적용 2026-10-31, ADR-0173))'),
-  "lockActive": zod.boolean().default(getV1FraudAppealRequestsResponseItemsItemLockActiveDefault).describe('양도 잠금이 지금 걸려 있으면 true(core.proto lock_active). 풀리면 false가 되고 lockedTicketIds는 그대로 남는다. HOLDER는 늘 false다. 주문·결제 화면(SCR-011)은 같은 eventId이고 party PAYER이며 이 값이 true인 항목이 있을 때만 결제 전 잠금 안내를 보인다(추천 적용 2026-10-31, ADR-0173)'),
+  "lockActive": zod.boolean().default(listFraudAppealRequestsResponseItemsItemLockActiveDefault).describe('양도 잠금이 지금 걸려 있으면 true(core.proto lock_active). 풀리면 false가 되고 lockedTicketIds는 그대로 남는다. HOLDER는 늘 false다. 주문·결제 화면(SCR-011)은 같은 eventId이고 party PAYER이며 이 값이 true인 항목이 있을 때만 결제 전 잠금 안내를 보인다(추천 적용 2026-10-31, ADR-0173)'),
   "lockExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('양도 잠금의 최대 기한(그 계정의 첫 소명 요청 + 14일 [가정], 연장 없음). 늦어도 이때 풀린다. 잠금이 없거나 HOLDER면 null(core.proto lock_expires_at(추천 적용 2026-10-31, ADR-0173))'),
   "status": zod.enum(['OPEN', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional().describe('소명 상태. OPEN 제출 전, SUBMITTED 제출했고 판단 전, ACCEPTED 인정, REJECTED 불인정, EXPIRED 기한까지 제출하지 않음'),
   "priorityPurchases": zod.array(zod.object({
@@ -80,40 +80,40 @@ export const GetV1FraudAppealRequestsResponse = zod.object({
  * FR-059, FR-061, POL-038. 민감정보를 적지 않아도 된다고 안내. 받는 곳(추천 적용 2026-10-30): 고객 문의(POST /v1/inquiries, ADR-0066)와 같은 길이다. gw-fan → core-svc support 모듈이 받는다. ops-svc는 팬 요청을 받지 않는다(독립 제어 평면). support 모듈이 소명(core DB appeal, 본문 포함)을 저장하고, 같은 트랜잭션의 Outbox로 CS 처리함 건 요청(asyncapi support.cases-requested, kind APPEAL, sourceId = appealId, category = RESTRICTION·RECLAIM, 본문 없음)을 낸다. ops-svc가 그것으로 CS 처리함 건 APPEAL을 만들고, support 모듈 내부 API로 소명의 대상 ID·계정을 읽어 대상(ops DB booking_restriction, 양도 회수 승인 업무 approval_request)에 잇고 계정 병합을 막는 건 알림(SetAccountHold, kind APPEAL)을 보낸다. 대상이 이 계정의 것인지와 소명 기한은 원본을 가진 ops-svc가 건을 만들 때 본다. 맞지 않으면 그 소명을 '대상 아님·기한 경과'로 닫고 팬에게 알린다. kind RESTRICTION은 support가 가진 화면용 사본(docs/data.md §3 sup:rst:{account}, GET /v1/booking-restrictions/me와 같은 값)으로 기한이 지났는지 먼저 보고 409로 답한다. 처리는 cs_lead(예매 제한)와 양도 회수 승인 업무의 승인자(commander)가 CS 처리함·승인 업무 화면에서 본문을 support 모듈 내부 API로 읽어 하고, 결과(제한 해제·유지, 회수하지 않음·회수됨)는 ops-svc가 support 모듈 내부 API로 그 소명에 적고 팬에게 알린다(docs/design/d5 SCR-042 결과). 그 내부 호출은 docs/api/proto 초안에 아직 없다(wbs 0.2.3). 본문은 처리를 마치고 3년 뒤 파기한다(docs/data.md §6 '소명 본문')
  * @summary 소명 제출(예매 제한·양도 회수 대상 본인, 기한 안)
  */
-export const postV1AppealsBodyBodyMax = 2000;
+export const createAppealBodyBodyMax = 2000;
 
 
 
-export const PostV1AppealsBody = zod.object({
+export const CreateAppealBody = zod.object({
   "kind": zod.enum(['RESTRICTION', 'RECLAIM', 'FRAUD_CASE']).describe('FRAUD_CASE는 부정 예매 소명(POL-046 ③)이고 targetId는 사건 ID다(GET /v1/fraud-appeal-requests의 caseId). support 모듈은 FRAUD_CASE를 409로 미리 막지 않는다(정본 docs/features/transfer-refund.md §7.1 \'부정 예매 사건의 소명\'). 기한은 ops-svc가 건을 사건에 이을 때 본다. 조치 전의 소명은 소명 기한(dueAt)으로, 조치 뒤의 이의는 이의 창(결과 통지 + 30일 [가정], objectionDueAt)으로 보고, 맞지 않으면 \'대상 아님·기한 경과\'로 닫고 팬에게 알린다. 화면용 사본(sup:far)의 기한은 화면에 보이는 값일 뿐이다(추천 적용 2026-10-31, ADR-0171). 대상 계정·기한의 최종 확인과 처리는 그 사건의 조사관이 사건 작업대(SCR-071)에서 한다. CS 처리함 건 요청의 category도 FRAUD_CASE다(추천 적용 2026-10-31, ADR-0171). 사건 계정이 결제한 표를 받아 가진 사람(FraudAppealView party HOLDER)도 같은 kind·targetId로 낸다. ops-svc는 그 소명을 보유자 진술로 사건에 잇고, 조사관은 그것을 보고 그 사람이 가진 표마다 취소 대상에 넣을지 정해 조치 요청의 표 목록(ticketIds)에 적는다(추천 적용 2026-10-31, ADR-0173)'),
   "targetId": zod.string(),
-  "body": zod.string().max(postV1AppealsBodyBodyMax)
-})
+  "body": zod.string().max(createAppealBodyBodyMax)
+}).strict()
 
-export const PostV1AppealsResponse = zod.void()
+export const CreateAppealResponse = zod.void()
 
 /**
  * FR-069, FR-057, POL-038, 추천 적용 2026-10-19, ADR-0066. 로그인한 팬만. core-svc support 모듈이 문의와 첫 기록(FAN·MESSAGE)을 저장하고 CS 처리함 건을 만든다(유형 SELLER_DISPUTE는 DISPUTE, MINOR_CONTRACT_CANCEL은 MINOR_CONTRACT_CANCEL, 그 밖은 INQUIRY). dueAt은 결과 안내 기한이고(일반 문의 답변 3영업일 [가정], 분쟁 결과 10영업일), 분쟁 유형은 진행 경과 기한(3영업일)도 문의 상세에 보인다(전자상거래법 §20③, 시행령 §25의2). 관련 주문은 이 계정의 예매·굿즈 주문만 붙는다(아니면 422). 계정당 하루 10건 [가정]. 문의 기록은 닫힌 뒤 3년 보존한다(전자상거래법 시행령 §6①4호, 일반 문의는 해석)
  * @summary 문의 접수(문의 유형, 관련 주문, 제목, 내용. 첨부 없음)
  */
-export const PostV1InquiriesHeader = zod.object({
+export const CreateInquiryHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1InquiriesBodyTitleMax = 200;
+export const createInquiryBodyTitleMax = 200;
 
-export const postV1InquiriesBodyBodyMax = 8000;
+export const createInquiryBodyBodyMax = 8000;
 
 
 
-export const PostV1InquiriesBody = zod.object({
+export const CreateInquiryBody = zod.object({
   "category": zod.enum(['BOOKING_PAYMENT', 'CANCEL_REFUND', 'TRANSFER', 'ENTRY', 'ACCOUNT', 'AUTOMATED_DECISION', 'SELLER_DISPUTE', 'MINOR_CONTRACT_CANCEL', 'MERCH', 'MODERATION_APPEAL', 'RESALE_POST_REPORT', 'OTHER']).describe('문의 유형 12개(추천 적용 2026-10-19, ADR-0066): 예매·결제, 취소·환불(사정이 있어 공제 면제를 요청), 양도, 입장·현장, 계정, 자동화된 결정(추가 검증) 설명·재검토, 공연(판매자) 관련 분쟁, 미성년자 계약 취소, 굿즈·상품, 게시물 조치 이의, 외부 되팔이 게시물 신고, 기타. 외부 되팔이 게시물 신고(RESALE_POST_REPORT)는 PEAKET 밖 사이트의 되팔이 글을 알리는 창구다. 문의에는 첨부가 없어 신고는 공개 게시물의 주소와 설명만 담는다. 신고자가 받은 비공개 메시지나 로그인해야 보이는 비공개 모임의 글은 모으지 않는다고 화면이 안내한다. CS 처리함 건(INQUIRY)이 되고, 답변은 접수 확인까지만 하며 조사 결과를 신고자에게 알리지 않는다. 담당자가 그 건을 조사관에게 넘기면 조사관이 외부 게시물 등록(POST /v1/ops/external-posts, source REPORT)의 출처로 쓴다. 신고자 정보는 수집본에 넣지 않는다(법률 확인 37번(추천 적용 2026-10-31, ADR-0173))'),
   "orderRef": zod.string().optional().describe('관련 주문(선택). 이 계정의 예매번호나 굿즈 주문번호만'),
-  "title": zod.string().max(postV1InquiriesBodyTitleMax).describe('NFC 정규화 뒤 grapheme 5~50자 [가정]'),
-  "body": zod.string().max(postV1InquiriesBodyBodyMax).describe('NFC 정규화 뒤 grapheme 10~2,000자 [가정]. 건강 정보 같은 민감한 내용과 계좌번호는 적지 않아도 된다(화면 안내)')
+  "title": zod.string().max(createInquiryBodyTitleMax).describe('NFC 정규화 뒤 grapheme 5~50자 [가정]'),
+  "body": zod.string().max(createInquiryBodyBodyMax).describe('NFC 정규화 뒤 grapheme 10~2,000자 [가정]. 건강 정보 같은 민감한 내용과 계좌번호는 적지 않아도 된다(화면 안내)')
 }).strict().describe('문의하기(SCR-056, FR-069, ADR-0066). 첨부 파일은 받지 않는다')
 
-export const PostV1InquiriesResponse = zod.object({
+export const CreateInquiryResponse = zod.object({
   "inquiryId": zod.string().optional(),
   "number": zod.string().optional().describe('접수 번호 Q-YYMM-NNNN [가정](예 Q-2610-0042)'),
   "dueAt": zod.iso.datetime({"offset":true}).optional().describe('결과 안내 기한(일반 문의 답변 3영업일 [가정], 분쟁 결과 10영업일)')
@@ -123,20 +123,20 @@ export const PostV1InquiriesResponse = zod.object({
  * FR-069, 추천 적용 2026-10-19, ADR-0066. 이 계정의 문의만 최근 접수 순으로 준다. 화면 칩 '답변 기다리는 중'은 status=RECEIVED,IN_PROGRESS다. 목록은 페이지 번호로 나눈다(화면의 페이지 번호, 한 페이지 20개 [가정]. 공연 검색처럼 guidelines §3 예외이고 한 계정의 목록이라 깊은 페이지 부하가 작다). Cache-Control: private, no-store
  * @summary 내 문의 내역(상태 필터, 새 답변 표시)
  */
-export const getV1InquiriesQueryPageDefault = 1;
+export const listInquiriesQueryPageDefault = 1;
 
-export const getV1InquiriesQueryLimitDefault = 20;
-export const getV1InquiriesQueryLimitMax = 50;
+export const listInquiriesQueryLimitDefault = 20;
+export const listInquiriesQueryLimitMax = 50;
 
 
 
-export const GetV1InquiriesQueryParams = zod.object({
+export const ListInquiriesQueryParams = zod.object({
   "status": zod.array(zod.enum(['RECEIVED', 'IN_PROGRESS', 'ANSWERED', 'CLOSED'])).optional().describe('쉼표로 이은 상태(없으면 전체)'),
-  "page": zod.int().min(1).default(getV1InquiriesQueryPageDefault),
-  "limit": zod.int().min(1).max(getV1InquiriesQueryLimitMax).default(getV1InquiriesQueryLimitDefault).describe('한 페이지 20개 [가정]')
+  "page": zod.int().min(1).default(listInquiriesQueryPageDefault),
+  "limit": zod.int().min(1).max(listInquiriesQueryLimitMax).default(listInquiriesQueryLimitDefault).describe('한 페이지 20개 [가정]')
 })
 
-export const GetV1InquiriesResponse = zod.object({
+export const ListInquiriesResponse = zod.object({
   "items": zod.array(zod.object({
   "inquiryId": zod.string().optional(),
   "number": zod.string().optional().describe('접수 번호 Q-YYMM-NNNN [가정]'),
@@ -169,11 +169,11 @@ export const GetV1InquiriesResponse = zod.object({
  * FR-069, 추천 적용 2026-10-19, ADR-0066. 이 계정의 문의만. 남의 문의와 없는 문의는 같은 404다(있는지 여부를 알리지 않는다). 기록은 시간 순이고 담당자 글은 authorDisplay '피켓 고객센터'로만 싣는다. 열면 팬이 본 시각을 남겨 새 답변 표시를 끈다(민감한 상태 변경이 아니다). 답변 알림의 링크로 연 화면도 같은 사이트 요청으로 이 경로를 부른다(architecture §6.3). Cache-Control: private, no-store
  * @summary 문의 상세(머리·기한·기록)
  */
-export const GetV1InquiriesInquiryIdParams = zod.object({
+export const GetInquiryParams = zod.object({
   "inquiryId": zod.string()
 })
 
-export const GetV1InquiriesInquiryIdResponse = zod.object({
+export const GetInquiryResponse = zod.object({
   "inquiryId": zod.string().optional(),
   "number": zod.string().optional().describe('접수 번호 Q-YYMM-NNNN [가정]'),
   "category": zod.enum(['BOOKING_PAYMENT', 'CANCEL_REFUND', 'TRANSFER', 'ENTRY', 'ACCOUNT', 'AUTOMATED_DECISION', 'SELLER_DISPUTE', 'MINOR_CONTRACT_CANCEL', 'MERCH', 'MODERATION_APPEAL', 'RESALE_POST_REPORT', 'OTHER']).optional().describe('문의 유형 12개(추천 적용 2026-10-19, ADR-0066): 예매·결제, 취소·환불(사정이 있어 공제 면제를 요청), 양도, 입장·현장, 계정, 자동화된 결정(추가 검증) 설명·재검토, 공연(판매자) 관련 분쟁, 미성년자 계약 취소, 굿즈·상품, 게시물 조치 이의, 외부 되팔이 게시물 신고, 기타. 외부 되팔이 게시물 신고(RESALE_POST_REPORT)는 PEAKET 밖 사이트의 되팔이 글을 알리는 창구다. 문의에는 첨부가 없어 신고는 공개 게시물의 주소와 설명만 담는다. 신고자가 받은 비공개 메시지나 로그인해야 보이는 비공개 모임의 글은 모으지 않는다고 화면이 안내한다. CS 처리함 건(INQUIRY)이 되고, 답변은 접수 확인까지만 하며 조사 결과를 신고자에게 알리지 않는다. 담당자가 그 건을 조사관에게 넘기면 조사관이 외부 게시물 등록(POST /v1/ops/external-posts, source REPORT)의 출처로 쓴다. 신고자 정보는 수집본에 넣지 않는다(법률 확인 37번(추천 적용 2026-10-31, ADR-0173))'),
@@ -201,23 +201,23 @@ export const GetV1InquiriesInquiryIdResponse = zod.object({
  * FR-069, 추천 적용 2026-10-19, ADR-0066. 내용 10~2,000자 [가정], 첨부 없음. 답변 완료(ANSWERED) 문의에 쓰면 처리 중(IN_PROGRESS)으로 돌아가고 CS 처리함 건이 다시 열린다. 닫힌 문의는 409이고 화면은 새로 문의하라고 안내한다. 남의 문의·없는 문의는 404. 답변 뒤 14일 [가정] 동안 추가 문의가 없으면 문의가 닫힌다
  * @summary 추가 문의(닫히지 않은 내 문의에)
  */
-export const PostV1InquiriesInquiryIdMessagesParams = zod.object({
+export const CreateInquiryMessageParams = zod.object({
   "inquiryId": zod.string()
 })
 
-export const PostV1InquiriesInquiryIdMessagesHeader = zod.object({
+export const CreateInquiryMessageHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1InquiriesInquiryIdMessagesBodyBodyMax = 8000;
+export const createInquiryMessageBodyBodyMax = 8000;
 
 
 
-export const PostV1InquiriesInquiryIdMessagesBody = zod.object({
-  "body": zod.string().max(postV1InquiriesInquiryIdMessagesBodyBodyMax).describe('NFC 정규화 뒤 grapheme 10~2,000자 [가정]')
+export const CreateInquiryMessageBody = zod.object({
+  "body": zod.string().max(createInquiryMessageBodyBodyMax).describe('NFC 정규화 뒤 grapheme 10~2,000자 [가정]')
 }).strict()
 
-export const PostV1InquiriesInquiryIdMessagesResponse = zod.object({
+export const CreateInquiryMessageResponse = zod.object({
   "messageId": zod.string().optional(),
   "authorKind": zod.enum(['FAN', 'AGENT', 'SYSTEM']).optional(),
   "authorDisplay": zod.string().optional().describe('AGENT는 \'피켓 고객센터\'. 담당자 이름·계정 ID는 싣지 않는다'),

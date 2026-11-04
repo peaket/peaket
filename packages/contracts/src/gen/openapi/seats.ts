@@ -17,177 +17,177 @@ import * as zod from 'zod';
  * FR-009. 첫 사용 요청이 구매 세션을 연다. 헤지 요청은 첫 요청과 재요청 모두 쓰지 않는다(ADR-0117). 재요청이 늦거나 503이면 브라우저가 Retry-After와 지터를 지켜 다시 묻고, 같은 구역은 한 번에 하나만 묻는다. realtime-gw WebSocket은 asyncapi.yaml
  * @summary 좌석 비트맵 스냅샷(압축 바이트). 입장 토큰의 첫 사용 → 구매 세션 시작
  */
-export const GetV1EventsEventIdSeatmapSnapshotParams = zod.object({
+export const GetEventSeatmapSnapshotParams = zod.object({
   "eventId": zod.string()
 })
 
-export const getV1EventsEventIdSeatmapSnapshotQuerySectionMin = 0;
-export const getV1EventsEventIdSeatmapSnapshotQuerySectionMax = 65535;
+export const getEventSeatmapSnapshotQuerySectionMin = 0;
+export const getEventSeatmapSnapshotQuerySectionMax = 65535;
 
 
 
-export const GetV1EventsEventIdSeatmapSnapshotQueryParams = zod.object({
-  "section": zod.int().min(getV1EventsEventIdSeatmapSnapshotQuerySectionMin).max(getV1EventsEventIdSeatmapSnapshotQuerySectionMax).optional().describe('구역 하나만 받을 때의 구역 색인(0 이상, 좌석 델타 SubscribeSections·SeatDeltaBatch의 sectionIndex와 같은 값, docs/frontend.md §4.4). 빼면 전체다. 그 회차 좌석맵 판의 구역 수 밖이거나 두 번 오면 400이다(추천 적용 2026-10-30, docs/features/seat-hold.md §7, docs/security/asvs/seat-hold.md 2.1.1·15.3.7)')
+export const GetEventSeatmapSnapshotQueryParams = zod.object({
+  "section": zod.int().min(getEventSeatmapSnapshotQuerySectionMin).max(getEventSeatmapSnapshotQuerySectionMax).optional().describe('구역 하나만 받을 때의 구역 색인(0 이상, 좌석 델타 SubscribeSections·SeatDeltaBatch의 sectionIndex와 같은 값, docs/frontend.md §4.4). 빼면 전체다. 그 회차 좌석맵 판의 구역 수 밖이거나 두 번 오면 400이다(추천 적용 2026-10-30, docs/features/seat-hold.md §7, docs/security/asvs/seat-hold.md 2.1.1·15.3.7)')
 })
 
-export const GetV1EventsEventIdSeatmapSnapshotHeader = zod.object({
+export const GetEventSeatmapSnapshotHeader = zod.object({
   "X-Client-Ephemeral-Key": zod.string().optional().describe('구매 세션 요청 인증 키 합의용 클라이언트 임시 공개키(P-256, 비압축 점의 base64url). 직접 선택 공연은 입장 토큰의 첫 사용인 스냅샷 요청에 필수이고 그 뒤에는 보내지 않아도 된다(보내면 구매 세션에 적힌 키와 같아야 하고 다르면 401, 추천 적용 2026-11-04, docs/features/seat-hold.md §2)')
 })
 
-export const GetV1EventsEventIdSeatmapSnapshotResponse = zod.unknown()
+export const GetEventSeatmapSnapshotResponse = zod.unknown()
 
 /**
  * FR-009, NFR-012, seat-hold §2·§10(추천 적용 2026-10-14, ADR-0063). 배치를 바꾸면 layoutVersion이 바뀌어 새 경로가 되므로 Cache-Control: public, max-age=31536000, immutable이다. 판매 상태는 싣지 않는다(상태는 스냅샷 비트맵과 좌석 델타). 대기 중 차례가 가까워지면 미리 받고(K5), 입장 확정 응답의 seatmapLayoutPath와 다르면 다시 받는다
  * @summary 회차 좌석맵 파일(공연장 캔버스·무대·구역 도형·라벨 위치·좌석 좌표·등급). 인증 없음, CDN 장기 캐시
  */
-export const GetV1EventsEventIdSeatmapLayoutsLayoutVersionJsonParams = zod.object({
+export const GetEventSeatmapLayoutParams = zod.object({
   "eventId": zod.string(),
   "layoutVersion": zod.int()
 })
 
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseCanvasWidthMax = 100000;
+export const getEventSeatmapLayoutResponseCanvasWidthMax = 100000;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseCanvasHeightMax = 100000;
+export const getEventSeatmapLayoutResponseCanvasHeightMax = 100000;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsItemMin = 2;
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsItemMax = 2;
+export const getEventSeatmapLayoutResponseStageItemPointsItemMin = 2;
+export const getEventSeatmapLayoutResponseStageItemPointsItemMax = 2;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsMin = 3;
+export const getEventSeatmapLayoutResponseStageItemPointsMin = 3;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseTiersMax = 16;
+export const getEventSeatmapLayoutResponseTiersMax = 16;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSeatCountMax = 1000000;
+export const getEventSeatmapLayoutResponseSeatCountMax = 1000000;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsItemMin = 2;
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsItemMax = 2;
+export const getEventSeatmapLayoutResponseSectionsItemShapePointsItemMin = 2;
+export const getEventSeatmapLayoutResponseSectionsItemShapePointsItemMax = 2;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsMin = 3;
+export const getEventSeatmapLayoutResponseSectionsItemShapePointsMin = 3;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatIndexRangeFromMin = 0;
+export const getEventSeatmapLayoutResponseSectionsItemSeatIndexRangeFromMin = 0;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatIndexRangeToMin = 0;
+export const getEventSeatmapLayoutResponseSectionsItemSeatIndexRangeToMin = 0;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsTierItemMin = 0;
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsTierItemMax = 15;
+export const getEventSeatmapLayoutResponseSectionsItemSeatsTierItemMin = 0;
+export const getEventSeatmapLayoutResponseSectionsItemSeatsTierItemMax = 15;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsFlagsItemMin = 0;
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsFlagsItemMax = 15;
+export const getEventSeatmapLayoutResponseSectionsItemSeatsFlagsItemMin = 0;
+export const getEventSeatmapLayoutResponseSectionsItemSeatsFlagsItemMax = 15;
 
-export const getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsMax = 65535;
+export const getEventSeatmapLayoutResponseSectionsMax = 65535;
 
 
 
-export const GetV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponse = zod.object({
+export const GetEventSeatmapLayoutResponse = zod.object({
   "format": zod.literal("peaket.seatmap.columns.v1"),
   "layoutVersion": zod.int().min(1).describe('파트너가 저장해 게시한 배치 판(1부터. 0은 게시하지 않는 저장 전 초안이다)'),
   "canvas": zod.object({
   "minX": zod.int(),
   "minY": zod.int(),
-  "width": zod.int().min(1).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseCanvasWidthMax),
-  "height": zod.int().min(1).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseCanvasHeightMax)
-}).strict().describe('공연장 캔버스(cm). 한 변 100,000(1km) [가정] 이하이고 무대·구역 도형과 좌석 좌표는 모두 이 안에 있다(브라우저 격자 색인이 끝없이 커지지 않게)'),
+  "width": zod.int().min(1).max(getEventSeatmapLayoutResponseCanvasWidthMax),
+  "height": zod.int().min(1).max(getEventSeatmapLayoutResponseCanvasHeightMax)
+}).describe('공연장 캔버스(cm). 한 변 100,000(1km) [가정] 이하이고 무대·구역 도형과 좌석 좌표는 모두 이 안에 있다(브라우저 격자 색인이 끝없이 커지지 않게)'),
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsItemMin).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsItemMax)).min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(getEventSeatmapLayoutResponseStageItemPointsItemMin).max(getEventSeatmapLayoutResponseStageItemPointsItemMax)).min(getEventSeatmapLayoutResponseStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다')),
-  "tiers": zod.array(zod.string()).min(1).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseTiersMax).describe('등급 ID 목록(보통 가격이 높은 등급부터). 좌석 tier 열이 이 색인을 쓴다. 전체 배치의 구역 면 색(앞 셋이 heat.3·heat.2·heat.1, d2 CMP-024)은 화면이 회차 가격표로 넘긴 등급 차례를 쓰고, 넘기지 않으면 이 차례를 쓴다'),
-  "seatCount": zod.int().min(1).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSeatCountMax).describe('가장 큰 seatIndexRange.to + 1'),
+  "tiers": zod.array(zod.string()).min(1).max(getEventSeatmapLayoutResponseTiersMax).describe('등급 ID 목록(보통 가격이 높은 등급부터). 좌석 tier 열이 이 색인을 쓴다. 전체 배치의 구역 면 색(앞 셋이 heat.3·heat.2·heat.1, d2 CMP-024)은 화면이 회차 가격표로 넘긴 등급 차례를 쓰고, 넘기지 않으면 이 차례를 쓴다'),
+  "seatCount": zod.int().min(1).max(getEventSeatmapLayoutResponseSeatCountMax).describe('가장 큰 seatIndexRange.to + 1'),
   "sections": zod.array(zod.object({
   "sectionId": zod.string(),
   "name": zod.string(),
   "shape": zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
-  "points": zod.array(zod.array(zod.int()).min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsItemMin).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsItemMax)).min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
+  "points": zod.array(zod.array(zod.int()).min(getEventSeatmapLayoutResponseSectionsItemShapePointsItemMin).max(getEventSeatmapLayoutResponseSectionsItemShapePointsItemMax)).min(getEventSeatmapLayoutResponseSectionsItemShapePointsMin).describe('꼭짓점 [x, y] 목록'),
   "name": zod.string().optional()
 }).describe('공연장 좌표계 도형. 그린 도구가 무엇이든 저장 값은 꼭짓점 목록(다각형)이다'),
   "label": zod.object({
   "x": zod.int(),
   "y": zod.int()
-}).strict(),
+}),
   "seatIndexRange": zod.object({
-  "from": zod.int().min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatIndexRangeFromMin),
-  "to": zod.int().min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatIndexRangeToMin)
-}).strict().describe('구역의 좌석 색인 범위(끝 포함). 앞 구역 바로 다음부터 빈틈 없이 이어진다. 구역마다 65,536석 이하(델타 seatOffset이 u16)'),
+  "from": zod.int().min(getEventSeatmapLayoutResponseSectionsItemSeatIndexRangeFromMin),
+  "to": zod.int().min(getEventSeatmapLayoutResponseSectionsItemSeatIndexRangeToMin)
+}).describe('구역의 좌석 색인 범위(끝 포함). 앞 구역 바로 다음부터 빈틈 없이 이어진다. 구역마다 65,536석 이하(델타 seatOffset이 u16)'),
   "seats": zod.object({
   "seatId": zod.array(zod.string()).describe('홀드 요청에 쓰는 좌석 ID'),
   "row": zod.array(zod.string()),
   "number": zod.array(zod.string()),
   "x": zod.array(zod.int()).describe('공연장 좌표(1단위 = 1cm [가정])'),
   "y": zod.array(zod.int()),
-  "tier": zod.array(zod.int().min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsTierItemMin).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsTierItemMax)).describe('tiers 색인'),
-  "flags": zod.array(zod.int().min(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsFlagsItemMin).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsItemSeatsFlagsItemMax)).describe('값 1 휠체어석, 값 2 판매 제외(둘 다면 3. 맨 아래 비트부터 0번·1번 비트)')
-}).strict().describe('열마다 길이가 그 구역 좌석 수(to − from + 1)와 같다')
-}).strict()).min(1).max(getV1EventsEventIdSeatmapLayoutsLayoutVersionJsonResponseSectionsMax)
-}).strict().describe('팬 화면 좌석맵 파일(seatmap-layouts/{layoutVersion}.json, 2026-11-04 BUILD_ORDER HOT-110). SeatMapLayout과 같은 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 좌석 ID·행·번호·좌표·등급·플래그)을 구역마다 열 단위 배열로 낸다. 좌석 색인은 구역 순서대로 이어 붙인 위치(seatIndexRange.from부터)이고 스냅샷 비트맵의 차례·델타 seatOffset과 같다(seat-hold §2). 에디터 전용 fillRule·gateZone은 싣지 않는다. 브라우저는 @peaket/seatmap의 decodeLayout으로 검사하고 형식 배열로 푼다')
+  "tier": zod.array(zod.int().min(getEventSeatmapLayoutResponseSectionsItemSeatsTierItemMin).max(getEventSeatmapLayoutResponseSectionsItemSeatsTierItemMax)).describe('tiers 색인'),
+  "flags": zod.array(zod.int().min(getEventSeatmapLayoutResponseSectionsItemSeatsFlagsItemMin).max(getEventSeatmapLayoutResponseSectionsItemSeatsFlagsItemMax)).describe('값 1 휠체어석, 값 2 판매 제외(둘 다면 3. 맨 아래 비트부터 0번·1번 비트)')
+}).describe('열마다 길이가 그 구역 좌석 수(to − from + 1)와 같다')
+})).min(1).max(getEventSeatmapLayoutResponseSectionsMax)
+}).describe('팬 화면 좌석맵 파일(seatmap-layouts/{layoutVersion}.json, 2026-11-04 BUILD_ORDER HOT-110). SeatMapLayout과 같은 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 좌석 ID·행·번호·좌표·등급·플래그)을 구역마다 열 단위 배열로 낸다. 좌석 색인은 구역 순서대로 이어 붙인 위치(seatIndexRange.from부터)이고 스냅샷 비트맵의 차례·델타 seatOffset과 같다(seat-hold §2). 에디터 전용 fillRule·gateZone은 싣지 않는다. 브라우저는 @peaket/seatmap의 decodeLayout으로 검사하고 형식 배열로 푼다')
 
 /**
  * FR-010, POL-011·012, NFR-003 p99 50ms. 경합 패배는 409 + suggestedSeats(정상 응답으로 집계). 한도 초과 422. 구매 세션 요청 서명(X-Purchase-Seq·X-Purchase-Mac) 필수, 서명 불일치·일련번호 재사용은 401. 자동 배정 공연(POL-035, FR-050, ADR-0043)은 seatIds 대신 auto(희망 조건)를 보내고 서버가 1순위 연석, 분리 허용 시 1순위 분리, 2순위 순으로 골라 같은 Lua로 홀드한다. 모두 실패하면 아무 좌석도 홀드하지 않고 409 manual-selection-required. 자동 배정 공연은 이 요청이 입장 토큰의 첫 사용(구매 세션 시작)
  * @summary 좌석 홀드(다중 좌석, 1인 한도 같은 Lua)
  */
-export const PostV1EventsEventIdHoldsParams = zod.object({
+export const CreateEventHoldParams = zod.object({
   "eventId": zod.string()
 })
 
 
 
 
-export const PostV1EventsEventIdHoldsHeader = zod.object({
+export const CreateEventHoldHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Purchase-Seq": zod.int().min(1).describe('구매 세션 요청 일련번호. 요청마다 1씩 올리고 서버는 마지막 번호보다 큰 것만 받는다(ADR-0050 결정 8)'),
-  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1)로 만든 HMAC-SHA256 키이고, 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3)')
+  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1, 출력 32바이트)로 만든 32바이트 HMAC-SHA256 키이고(그래서 MAC은 32바이트, base64url 43자), 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3). 머리가 없거나 형식이 틀리거나 MAC이 맞지 않으면 401 purchase-signature-invalid, 일련번호가 그 구매 세션의 마지막 번호보다 크지 않으면 401 purchase-seq-reused다(BAS-040)')
 })
 
-export const postV1EventsEventIdHoldsBodySeatIdsItemRegExp = new RegExp('^[A-Za-z0-9_-]{1,64}$');
-export const postV1EventsEventIdHoldsBodySeatIdsMax = 10;
+export const createEventHoldBodySeatIdsItemRegExp = new RegExp('^[A-Za-z0-9_-]{1,64}$');
+export const createEventHoldBodySeatIdsMax = 10;
 
 
-export const postV1EventsEventIdHoldsBodyAutoWheelchairDefault = false;
-export const postV1EventsEventIdHoldsBodyAutoAllowSplitDefault = false;
-export const postV1EventsEventIdHoldsBodyBehaviorWindowMsMin = 0;
-export const postV1EventsEventIdHoldsBodyBehaviorWindowMsMax = 3600000;
+export const createEventHoldBodyAutoWheelchairDefault = false;
+export const createEventHoldBodyAutoAllowSplitDefault = false;
+export const createEventHoldBodyBehaviorWindowMsMin = 0;
+export const createEventHoldBodyBehaviorWindowMsMax = 3600000;
 
-export const postV1EventsEventIdHoldsBodyBehaviorPointerMovesMin = 0;
+export const createEventHoldBodyBehaviorPointerMovesMin = 0;
 
-export const postV1EventsEventIdHoldsBodyBehaviorPointerEntropyMin = 0;
+export const createEventHoldBodyBehaviorPointerEntropyMin = 0;
 
-export const postV1EventsEventIdHoldsBodyBehaviorInputIntervalMeanMsMin = 0;
+export const createEventHoldBodyBehaviorInputIntervalMeanMsMin = 0;
 
-export const postV1EventsEventIdHoldsBodyBehaviorInputIntervalStdMsMin = 0;
+export const createEventHoldBodyBehaviorInputIntervalStdMsMin = 0;
 
-export const postV1EventsEventIdHoldsBodyBehaviorScrollEventsMin = 0;
+export const createEventHoldBodyBehaviorScrollEventsMin = 0;
 
-export const postV1EventsEventIdHoldsBodyBehaviorScrollDistancePxMin = 0;
+export const createEventHoldBodyBehaviorScrollDistancePxMin = 0;
 
 
 
-export const PostV1EventsEventIdHoldsBody = zod.object({
-  "seatIds": zod.array(zod.string().regex(postV1EventsEventIdHoldsBodySeatIdsItemRegExp)).min(1).max(postV1EventsEventIdHoldsBodySeatIdsMax).optional().describe('직접 선택 좌석 ID. 1~10개, 좌석 ID 모양이 틀리면 400이다. 같은 좌석이 두 번 들었거나 좌석맵 판에 없는 좌석·판매 제외석이면 422 invalid-seat다(docs/features/seat-hold.md §3 \'좌석 ID 확인\', 추천 적용 2026-11-04, BUILD_ORDER PRF-130)'),
+export const CreateEventHoldBody = zod.object({
+  "seatIds": zod.array(zod.string().regex(createEventHoldBodySeatIdsItemRegExp)).min(1).max(createEventHoldBodySeatIdsMax).optional().describe('직접 선택 좌석 ID. 1~10개, 좌석 ID 모양이 틀리면 400이다. 같은 좌석이 두 번 들었거나 좌석맵 판에 없는 좌석·판매 제외석이면 422 invalid-seat다(docs/features/seat-hold.md §3 \'좌석 ID 확인\', 추천 적용 2026-11-04, BUILD_ORDER PRF-130)'),
   "auto": zod.object({
   "firstTierId": zod.string(),
   "secondTierId": zod.string().optional().describe('선택. 1순위와 달라야 한다'),
   "count": zod.int().min(1).describe('1인 매수 한도 이하'),
-  "wheelchair": zod.boolean().default(postV1EventsEventIdHoldsBodyAutoWheelchairDefault),
-  "allowSplit": zod.boolean().default(postV1EventsEventIdHoldsBodyAutoAllowSplitDefault).describe('연석이 없을 때 같은 등급의 분리 좌석 허용')
-}).optional().describe('희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정을 여는 wbs 2.5.4 전에는 보내면 400 auto-assign-not-supported다(지금은 좌석 지정만 받는다, 추천 적용 2026-11-04)'),
+  "wheelchair": zod.boolean().default(createEventHoldBodyAutoWheelchairDefault),
+  "allowSplit": zod.boolean().default(createEventHoldBodyAutoAllowSplitDefault).describe('연석이 없을 때 같은 등급의 분리 좌석 허용')
+}).strict().optional().describe('희망 조건. 대기 중 브라우저에만 저장했다가 차례가 오면 자동으로 보낸다. 서버가 다시 검증한다(ADR-0043). 자동 배정을 여는 wbs 2.5.4 전에는 보내면 400 auto-assign-not-supported다(지금은 좌석 지정만 받는다, 추천 적용 2026-11-04)'),
   "clientEphemeralPublicKey": zod.string().optional().describe('좌석 자동 배정 공연의 첫 요청에만(직접 선택 공연은 스냅샷 요청 헤더). 구매 세션에 저장'),
   "behavior": zod.object({
   "v": zod.literal(1).describe('형식 버전'),
-  "windowMs": zod.int().min(postV1EventsEventIdHoldsBodyBehaviorWindowMsMin).max(postV1EventsEventIdHoldsBodyBehaviorWindowMsMax).describe('요약한 구간 길이(밀리초)'),
-  "pointerMoves": zod.int().min(postV1EventsEventIdHoldsBodyBehaviorPointerMovesMin).optional().describe('포인터 이동 이벤트 수'),
-  "pointerEntropy": zod.number().min(postV1EventsEventIdHoldsBodyBehaviorPointerEntropyMin).optional().describe('포인터 이동 방향의 엔트로피(비트)'),
-  "inputIntervalMeanMs": zod.number().min(postV1EventsEventIdHoldsBodyBehaviorInputIntervalMeanMsMin).optional().describe('터치·키 입력 간격 평균(밀리초)'),
-  "inputIntervalStdMs": zod.number().min(postV1EventsEventIdHoldsBodyBehaviorInputIntervalStdMsMin).optional().describe('터치·키 입력 간격 표준편차(밀리초)'),
-  "scrollEvents": zod.int().min(postV1EventsEventIdHoldsBodyBehaviorScrollEventsMin).optional().describe('스크롤 이벤트 수'),
-  "scrollDistancePx": zod.int().min(postV1EventsEventIdHoldsBodyBehaviorScrollDistancePxMin).optional().describe('스크롤 이동 거리 합(CSS 픽셀)')
+  "windowMs": zod.int().min(createEventHoldBodyBehaviorWindowMsMin).max(createEventHoldBodyBehaviorWindowMsMax).describe('요약한 구간 길이(밀리초)'),
+  "pointerMoves": zod.int().min(createEventHoldBodyBehaviorPointerMovesMin).optional().describe('포인터 이동 이벤트 수'),
+  "pointerEntropy": zod.number().min(createEventHoldBodyBehaviorPointerEntropyMin).optional().describe('포인터 이동 방향의 엔트로피(비트)'),
+  "inputIntervalMeanMs": zod.number().min(createEventHoldBodyBehaviorInputIntervalMeanMsMin).optional().describe('터치·키 입력 간격 평균(밀리초)'),
+  "inputIntervalStdMs": zod.number().min(createEventHoldBodyBehaviorInputIntervalStdMsMin).optional().describe('터치·키 입력 간격 표준편차(밀리초)'),
+  "scrollEvents": zod.int().min(createEventHoldBodyBehaviorScrollEventsMin).optional().describe('스크롤 이벤트 수'),
+  "scrollDistancePx": zod.int().min(createEventHoldBodyBehaviorScrollDistancePxMin).optional().describe('스크롤 이동 거리 합(CSS 픽셀)')
 }).strict().optional().describe('좌석 화면에서 잰 행동 요약. 직접 선택 공연에서 그 구매 세션의 첫 홀드 요청에만 싣는다(다시 보내도 첫 요청의 것만 쓴다). 없어도 홀드는 그대로 처리한다. purchase-svc가 홀드 응답과 따로 BehaviorSignal(screen SEAT)로 낸다(추천 적용 2026-10-31, ADR-0171 결정 4, docs/features/seat-hold.md)')
-}).describe('직접 선택 공연은 seatIds, 좌석 자동 배정 공연은 auto 중 하나를 보낸다(POL-035, ADR-0043)')
+}).strict().describe('직접 선택 공연은 seatIds, 좌석 자동 배정 공연은 auto 중 하나를 보낸다(POL-035, ADR-0043)')
 
 
 
 
-export const PostV1EventsEventIdHoldsResponse = zod.object({
+export const CreateEventHoldResponse = zod.object({
   "holdId": zod.string(),
   "seatIds": zod.array(zod.string()),
   "expiresAt": zod.iso.datetime({"offset":true}),
@@ -200,53 +200,53 @@ export const PostV1EventsEventIdHoldsResponse = zod.object({
  * FR-010, POL-009, 구매 세션 상태 기계 T9·T11(docs/planning/03 §2.2). 구매 세션 요청 서명 필수(X-Purchase-Seq·X-Purchase-Mac, 입장 토큰 머리). 그 구매 세션을 LEFT로 끝내고(세션 상태를 지우고 입장 토큰의 재사용 차단 표지는 남긴다) PurchaseSessionEnded를 낸다. 브라우저는 화면을 나갈 때 fetch keepalive로 서명해 보낸다(sendBeacon은 머리를 달 수 없다). 이미 끝난 세션의 요청은 구매 세션 확인에서 401이다. 그 세션의 홀드를 푸는 일은 해제 연산이 생긴 뒤 이 연산에 잇는다(그전에는 홀드가 7분 만료로 풀린다). 추천 적용 2026-11-04, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'
  * @summary 구매 세션 나가기(구매 화면을 나갈 때 세션을 끝냄)
  */
-export const DeleteV1EventsEventIdPurchaseSessionParams = zod.object({
+export const DeleteEventPurchaseSessionParams = zod.object({
   "eventId": zod.string()
 })
 
 
 
 
-export const DeleteV1EventsEventIdPurchaseSessionHeader = zod.object({
+export const DeleteEventPurchaseSessionHeader = zod.object({
   "X-Purchase-Seq": zod.int().min(1).describe('구매 세션 요청 일련번호. 요청마다 1씩 올리고 서버는 마지막 번호보다 큰 것만 받는다(ADR-0050 결정 8)'),
-  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1)로 만든 HMAC-SHA256 키이고, 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3)')
+  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1, 출력 32바이트)로 만든 32바이트 HMAC-SHA256 키이고(그래서 MAC은 32바이트, base64url 43자), 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3). 머리가 없거나 형식이 틀리거나 MAC이 맞지 않으면 401 purchase-signature-invalid, 일련번호가 그 구매 세션의 마지막 번호보다 크지 않으면 401 purchase-seq-reused다(BAS-040)')
 })
 
-export const DeleteV1EventsEventIdPurchaseSessionResponse = zod.void()
+export const DeleteEventPurchaseSessionResponse = zod.void()
 
 /**
  * FR-010, FR-042. 구매 세션 요청 서명 필수. purchase-svc는 요청한 구매 세션 상태에 적힌 그 세션의 holdId 목록에서만 찾고, 해제 Lua는 좌석 홀드 Hash의 holdId와 소유 계정이 요청과 같을 때만 바꾼다(추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 3). 놓은 좌석은 같은 계정이 30초 [가정] 동안 다시 잡지 못한다(홀드 409 seat-recently-released, 소유자 결정 2026-10-30, open-items 67번, docs/features/seat-hold.md §5)
  * @summary 홀드 해제
  */
-export const DeleteV1HoldsHoldIdParams = zod.object({
+export const DeleteHoldParams = zod.object({
   "holdId": zod.string()
 })
 
 
 
 
-export const DeleteV1HoldsHoldIdHeader = zod.object({
+export const DeleteHoldHeader = zod.object({
   "X-Purchase-Seq": zod.int().min(1).describe('구매 세션 요청 일련번호. 요청마다 1씩 올리고 서버는 마지막 번호보다 큰 것만 받는다(ADR-0050 결정 8)'),
-  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1)로 만든 HMAC-SHA256 키이고, 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3)')
+  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1, 출력 32바이트)로 만든 32바이트 HMAC-SHA256 키이고(그래서 MAC은 32바이트, base64url 43자), 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3). 머리가 없거나 형식이 틀리거나 MAC이 맞지 않으면 401 purchase-signature-invalid, 일련번호가 그 구매 세션의 마지막 번호보다 크지 않으면 401 purchase-seq-reused다(BAS-040)')
 })
 
-export const DeleteV1HoldsHoldIdResponse = zod.void()
+export const DeleteHoldResponse = zod.void()
 
 /**
  * POL-012, NFR-020. 홀드 시간 제한은 WCAG 2.2.1의 실시간 예외로 판단(ADR-0060). 구매 세션 요청 서명 필수. 해제와 같이 그 구매 세션의 holdId만 찾고, 연장 Lua가 holdId와 소유 계정을 다시 대조한다(추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 3)
  * @summary 홀드 1회 연장(접근성 배려)
  */
-export const PostV1HoldsHoldIdExtensionParams = zod.object({
+export const CreateHoldExtensionParams = zod.object({
   "holdId": zod.string()
 })
 
 
 
 
-export const PostV1HoldsHoldIdExtensionHeader = zod.object({
+export const CreateHoldExtensionHeader = zod.object({
   "X-Purchase-Seq": zod.int().min(1).describe('구매 세션 요청 일련번호. 요청마다 1씩 올리고 서버는 마지막 번호보다 큰 것만 받는다(ADR-0050 결정 8)'),
-  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1)로 만든 HMAC-SHA256 키이고, 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3)')
+  "X-Purchase-Mac": zod.string().describe('HMAC-SHA256(구매 세션 요청 인증 키, 이어 붙인 입력)의 채움 없는 base64url. 입력은 메서드, LF, 경로와 쿼리(호스트 없음), LF, 일련번호(10진수), LF, base64url(SHA-256(본문 바이트))를 이은 UTF-8 바이트다. 키는 HKDF-SHA256(ECDH 공유 비밀, salt = 입장 토큰 jti, info = PEAKET-purchase-v1, 출력 32바이트)로 만든 32바이트 HMAC-SHA256 키이고(그래서 MAC은 32바이트, base64url 43자), 브라우저는 추출 불가 키로 IndexedDB에 두어 결제창 복귀·새로고침에도 이어 쓴다(추천 적용 2026-10-21, ADR-0079 결정 6, docs/frontend.md §5.3). 머리가 없거나 형식이 틀리거나 MAC이 맞지 않으면 401 purchase-signature-invalid, 일련번호가 그 구매 세션의 마지막 번호보다 크지 않으면 401 purchase-seq-reused다(BAS-040)')
 })
 
-export const PostV1HoldsHoldIdExtensionResponse = zod.unknown()
+export const CreateHoldExtensionResponse = zod.unknown()
 

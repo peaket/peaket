@@ -5,7 +5,7 @@ import { Body, Controller, HttpCode, Module, Post, Req } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { z } from 'zod';
-import { PostV1EventsEventIdHoldsBody, PostV1EventsEventIdHoldsHeader } from '@peaket/contracts/openapi/seats';
+import { CreateEventHoldBody, CreateEventHoldHeader } from '@peaket/contracts/openapi/seats';
 import {
   AcceptTextPlain,
   ContractBody,
@@ -42,8 +42,8 @@ class IdemController {
   @Idempotent({ operation: 'CREATE_HOLD' })
   @PurchaseSigned()
   pipe(
-    @ContractHeaders(PostV1EventsEventIdHoldsHeader) headers: Record<string, unknown>,
-    @ContractBody(PostV1EventsEventIdHoldsBody) _body: unknown,
+    @ContractHeaders(CreateEventHoldHeader) headers: Record<string, unknown>,
+    @ContractBody(CreateEventHoldBody) _body: unknown,
     @IdempotencyRequest() idem: IdempotencyRequest,
   ) {
     return { headers, idem: idemView(idem) };
@@ -54,7 +54,7 @@ class IdemController {
   @Roles(['fan'])
   @Idempotent({ operation: 'CREATE_HOLD' })
   @PurchaseSigned()
-  @ContractRouteSchema({ headers: PostV1EventsEventIdHoldsHeader, body: PostV1EventsEventIdHoldsBody })
+  @ContractRouteSchema({ headers: CreateEventHoldHeader, body: CreateEventHoldBody })
   route(@IdempotencyRequest() idem: IdempotencyRequest) {
     return { idem: idemView(idem) };
   }
@@ -166,7 +166,7 @@ describe('검사 순서(결정 1)', () => {
 
   test('FND080_리뷰_경로스키마함수는_Fastify에바로붙이는경로를위해_멱등키칸을남긴다', () => {
     // 코드 리뷰 2026-11-01: 키를 늘 빼면 가드를 지나지 않는 경로는 키 없는 요청을 조용히 받았다. 빼는 것은 Nest 장식자(@ContractRouteSchema)뿐이다
-    const s = contractRouteSchema({ headers: PostV1EventsEventIdHoldsHeader }) as { headers: { properties: Record<string, unknown>; required: string[] } };
+    const s = contractRouteSchema({ headers: CreateEventHoldHeader }) as { headers: { properties: Record<string, unknown>; required: string[] } };
     expect(Object.keys(s.headers.properties)).toContain('idempotency-key');
     expect(s.headers.required).toEqual(expect.arrayContaining(['idempotency-key', 'x-purchase-seq']));
   });
@@ -214,13 +214,13 @@ describe('시작 확인(결정 5)', () => {
     class Forgot {
       @Post('pipe')
       @Roles(['fan'])
-      pipe(@ContractHeaders(PostV1EventsEventIdHoldsHeader) _h: unknown) {
+      pipe(@ContractHeaders(CreateEventHoldHeader) _h: unknown) {
         return {};
       }
 
       @Post('rs')
       @Roles(['fan'])
-      @ContractRouteSchema({ headers: PostV1EventsEventIdHoldsHeader })
+      @ContractRouteSchema({ headers: CreateEventHoldHeader })
       rs() {
         return {};
       }

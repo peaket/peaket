@@ -17,35 +17,35 @@ import * as zod from 'zod';
  * FR-028, POL-020. 허용 IP는 관제 배포 웹 ACL과 gw-ops가 두 번 본다(servers의 ops-api 설명, ADR-0144 결정 2). 잠금 규칙은 파트너 로그인과 같다(docs/security/auth-controls.md §3)
  * @summary 운영자 로그인(이메일·비밀번호·다중 인증, 관제 배포의 허용 IP만)
  */
-export const postV1OpsAuthSessionsBodyOneEmailMax = 254;
+export const createOpsAuthSessionBodyOneEmailMax = 254;
 
-export const postV1OpsAuthSessionsBodyOnePasswordMax = 1024;
+export const createOpsAuthSessionBodyOnePasswordMax = 1024;
 
-export const postV1OpsAuthSessionsBodyOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,128}$');
-export const postV1OpsAuthSessionsBodyOneHumanCheckTokenMax = 2048;
+export const createOpsAuthSessionBodyOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,128}$');
+export const createOpsAuthSessionBodyOneHumanCheckTokenMax = 2048;
 
-export const postV1OpsAuthSessionsBodyTwoLoginStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
-export const postV1OpsAuthSessionsBodyTwoCodeMin = 6;
-export const postV1OpsAuthSessionsBodyTwoCodeMax = 32;
+export const createOpsAuthSessionBodyTwoLoginStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const createOpsAuthSessionBodyTwoCodeMin = 6;
+export const createOpsAuthSessionBodyTwoCodeMax = 32;
 
 
 
-export const PostV1OpsAuthSessionsBody = zod.union([zod.object({
-  "email": zod.email().max(postV1OpsAuthSessionsBodyOneEmailMax),
-  "password": zod.string().min(1).max(postV1OpsAuthSessionsBodyOnePasswordMax).describe('원문. 서버가 NFC로 맞춘다. 길이 상한은 설정 password.max_length의 허용 상한이다'),
-  "deviceId": zod.string().regex(postV1OpsAuthSessionsBodyOneDeviceIdRegExp).optional().describe('브라우저 기기 식별값(브라우저 저장소의 값). 출발지 묶음(IP와 이것)을 셀 때 쓴다'),
-  "humanCheckToken": zod.string().min(1).max(postV1OpsAuthSessionsBodyOneHumanCheckTokenMax).optional().describe('Cloudflare Turnstile 토큰(300초 1회용). identity가 검증 API로 확인한다')
+export const CreateOpsAuthSessionBody = zod.union([zod.object({
+  "email": zod.email().max(createOpsAuthSessionBodyOneEmailMax),
+  "password": zod.string().min(1).max(createOpsAuthSessionBodyOnePasswordMax).describe('원문. 서버가 NFC로 맞춘다. 길이 상한은 설정 password.max_length의 허용 상한이다'),
+  "deviceId": zod.string().regex(createOpsAuthSessionBodyOneDeviceIdRegExp).optional().describe('브라우저 기기 식별값(브라우저 저장소의 값). 출발지 묶음(IP와 이것)을 셀 때 쓴다'),
+  "humanCheckToken": zod.string().min(1).max(createOpsAuthSessionBodyOneHumanCheckTokenMax).optional().describe('Cloudflare Turnstile 토큰(300초 1회용). identity가 검증 API로 확인한다')
 }).strict().describe('관리 계정 로그인 1단계 본문(POST /v1/partner/auth/sessions·/v1/ops/auth/sessions). 2단계(인증 앱 코드) 본문은 BUILD_ORDER BOT-120이 더한다. 사람 확인 토큰은 직전 응답이 humanCheckRequired였거나 428을 받았을 때 싣는다(docs/security/auth-controls.md §2.3). 정본은 docs/features/identity.md §6 \'관리 계정 로그인 1단계와 실패 제한의 첫 구현\'(추천 적용 2026-11-05)'),zod.object({
-  "loginStep": zod.string().regex(postV1OpsAuthSessionsBodyTwoLoginStepRegExp),
-  "code": zod.string().min(postV1OpsAuthSessionsBodyTwoCodeMin).max(postV1OpsAuthSessionsBodyTwoCodeMax)
+  "loginStep": zod.string().regex(createOpsAuthSessionBodyTwoLoginStepRegExp),
+  "code": zod.string().min(createOpsAuthSessionBodyTwoCodeMin).max(createOpsAuthSessionBodyTwoCodeMax)
 }).strict().describe('관리 계정 로그인 2단계 본문(같은 두 경로). 1단계 응답의 loginStep과 인증 앱 코드(숫자 6자리)나 복구 코드(Crockford base32 16자를 4자씩 붙임표로 이은 꼴)를 보낸다. 정본은 docs/features/identity.md §6 \'관리 계정 TOTP와 로그인 2단계의 첫 구현\'(추천 적용 2026-11-05, BUILD_ORDER BOT-120)')])
 
-export const postV1OpsAuthSessionsResponseOneLoginStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const createOpsAuthSessionResponseOneLoginStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
 
 
-export const PostV1OpsAuthSessionsResponse = zod.union([zod.object({
+export const CreateOpsAuthSessionResponse = zod.union([zod.object({
   "next": zod.enum(['TOTP']),
-  "loginStep": zod.string().regex(postV1OpsAuthSessionsResponseOneLoginStepRegExp).describe('32바이트 난수의 채움 없는 base64url. 서버는 SHA-256만 둔다. 한 번 쓴다'),
+  "loginStep": zod.string().regex(createOpsAuthSessionResponseOneLoginStepRegExp).describe('32바이트 난수의 채움 없는 base64url. 서버는 SHA-256만 둔다. 한 번 쓴다'),
   "expiresInSeconds": zod.int().describe('loginStep 수명(300초 [가정])')
 }).describe('관리 계정 로그인 1단계 통과(비밀번호가 맞았다). 2단계에 loginStep을 그대로 보낸다(추천 적용 2026-11-05)'),zod.object({
   "next": zod.enum(['DONE'])
@@ -55,7 +55,7 @@ export const PostV1OpsAuthSessionsResponse = zod.union([zod.object({
  * FR-028, ADR-0171 결정 7. 관제 콘솔이 지정이 있어야 보이는 메뉴(부정 거래 조사 /investigations, 연구 리플레이)를 보이거나 숨기려고 부른다. 지정은 토큰에 싣지 않으므로 ops-svc가 identity-svc GetAdminDesignations로 읽어 준다(캐시 5초 [가정]). 화면 표시용일 뿐이고, 지정이 필요한 작업은 서버가 요청마다 다시 확인한다. cs_lead는 관리 계정 목록(GET /v1/ops/admin-accounts)을 부르지 못해 이 경로를 따로 둔다(추천 적용 2026-10-31)
  * @summary 내 관리 세션 정보(역할과 살아 있는 지정, 콘솔 메뉴 그리기용)
  */
-export const GetV1OpsAuthSessionsMeResponse = zod.object({
+export const GetMyOpsAuthSessionResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다'),
   "displayName": zod.string().nullish(),
@@ -66,84 +66,84 @@ export const GetV1OpsAuthSessionsMeResponse = zod.object({
  * FR-028, POL-020, 추천 적용 2026-10-29, ADR-0145 결정 2. 로그인 POST /v1/ops/auth/sessions와 짝이고, me는 로그인한 사람의 지금 세션이다(guidelines §10). 관제 콘솔은 앱 서버가 없어 ops-api(gw-ops)가 응답한다. identity-svc가 그 세션을 끝내고 세션 종료 사건(asyncapi control.sessions-terminated, reason LOGOUT)을 낸다. 응답은 이 앱의 쿠키 둘(__Host-peaket_ops_at, __Host-peaket_ops_rt)만 같은 이름·Path=/에 Max-Age=0을 단 Set-Cookie로 지운다. Clear-Site-Data는 보내지 않는다(docs/features/identity.md §3, docs/frontend.md §5.14.4, FE-T34). 쿠키로 인증하는 쓰기라 gw-ops가 Origin(관제 콘솔 출처)을 확인한다(guidelines §9)
  * @summary 운영자 로그아웃(지금 세션 끝내기)
  */
-export const DeleteV1OpsAuthSessionsMeResponse = zod.void()
+export const DeleteMyOpsAuthSessionResponse = zod.void()
 
 /**
  * FR-028, POL-019, POL-020, ADR-0011(추천 적용 2026-10-15, ADR-0065 결정 11). 운영자 액세스 토큰(15분)을 유휴 만료(1시간)와 절대 만료(24시간) 안에서만 새로 준다. 지났으면 401이고 비밀번호와 다중 인증으로 다시 로그인한다. 재사용 탐지 시 패밀리 전체 폐기 + 세션 종료 이벤트(응답을 잃은 재시도의 30초 [가정] 유예는 팬 갱신과 같다, 기술 검토 중간-053). 관제 배포의 허용 IP만(ADR-0144 결정 2). 본문이 없어 사전 요청이 생기지 않으므로 gw-ops가 Origin(관제 콘솔 출처)을 확인한다
  * @summary 운영자 액세스 토큰 갱신(리프레시 토큰 쿠키, 회전·재사용 탐지)
  */
-export const PostV1OpsAuthAccessTokensResponse = zod.void()
+export const CreateOpsAuthAccessTokenResponse = zod.void()
 
 /**
  * FR-028, POL-020. 파트너 본인 해제(POST /v1/partner/auth/unlocks)와 같은 규칙이고 정본은 docs/security/auth-controls.md §3.3이다. 관제 배포의 허용 IP에서만 받는다(ADR-0144 결정 2). gw-ops가 Origin(관제 콘솔 출처)을 확인한다(추천 적용 2026-10-30, ADR-0157 결정 6)
  * @summary 운영자·CS 계정 시간 잠금 본인 해제(업무 이메일 해제 링크 + 인증 앱 코드나 복구 코드)
  */
-export const postV1OpsAuthUnlocksBodyUnlockTokenRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
-export const postV1OpsAuthUnlocksBodyCodeMin = 6;
-export const postV1OpsAuthUnlocksBodyCodeMax = 64;
+export const createOpsAuthUnlockBodyUnlockTokenRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const createOpsAuthUnlockBodyCodeMin = 6;
+export const createOpsAuthUnlockBodyCodeMax = 64;
 
 
 
-export const PostV1OpsAuthUnlocksBody = zod.object({
-  "unlockToken": zod.string().regex(postV1OpsAuthUnlocksBodyUnlockTokenRegExp).describe('해제 링크 토큰(32바이트 난수의 채움 없는 base64url). 서버는 SHA-256 해시만 저장하고 수명은 30분 [가정]이다'),
-  "code": zod.string().min(postV1OpsAuthUnlocksBodyCodeMin).max(postV1OpsAuthUnlocksBodyCodeMax).describe('인증 앱 코드(TOTP 6자리)나 복구 코드')
+export const CreateOpsAuthUnlockBody = zod.object({
+  "unlockToken": zod.string().regex(createOpsAuthUnlockBodyUnlockTokenRegExp).describe('해제 링크 토큰(32바이트 난수의 채움 없는 base64url). 서버는 SHA-256 해시만 저장하고 수명은 30분 [가정]이다'),
+  "code": zod.string().min(createOpsAuthUnlockBodyCodeMin).max(createOpsAuthUnlockBodyCodeMax).describe('인증 앱 코드(TOTP 6자리)나 복구 코드')
 }).strict().describe('관리 계정 시간 잠금 본인 해제 본문(POST /v1/partner/auth/unlocks·/v1/ops/auth/unlocks). 해제 링크 토큰은 링크의 URL 조각(#)에만 있고, 화면이 읽자마자 주소에서 지운 뒤 이 본문으로 보낸다(guidelines §9, docs/features/identity.md §6.1 \'URL 조각의 비밀 처리\'와 같다). 정본은 docs/security/auth-controls.md §3.3(추천 적용 2026-10-30, ADR-0157 결정 6)')
 
-export const PostV1OpsAuthUnlocksResponse = zod.void()
+export const CreateOpsAuthUnlockResponse = zod.void()
 
 /**
  * FR-028, POL-020. 파트너 다시 받기(POST /v1/partner/auth/unlock-links)와 같은 규칙이다: 계정 유무와 상관없이 같은 202, 시간 잠금 중인 계정에만 새 링크, 이메일마다 1시간에 3번 [가정]. 관제 배포의 허용 IP에서만 받는다(추천 적용 2026-10-30, docs/security/auth-controls.md §2.2·§3.3)
  * @summary 운영자·CS 계정 해제 링크 다시 받기
  */
-export const postV1OpsAuthUnlockLinksBodyEmailMax = 254;
+export const createOpsAuthUnlockLinkBodyEmailMax = 254;
 
 
 
-export const PostV1OpsAuthUnlockLinksBody = zod.object({
-  "email": zod.email().max(postV1OpsAuthUnlockLinksBodyEmailMax)
+export const CreateOpsAuthUnlockLinkBody = zod.object({
+  "email": zod.email().max(createOpsAuthUnlockLinkBodyEmailMax)
 }).strict().describe('해제 링크 다시 받기 본문(POST /v1/partner/auth/unlock-links·/v1/ops/auth/unlock-links). 로그인 화면의 잠김 안내(SCR-020·SCR-028)가 이미 넣은 업무 이메일을 보낸다(docs/security/auth-controls.md §3.3, 추천 적용 2026-10-30)')
 
-export const PostV1OpsAuthUnlockLinksResponse = zod.void()
+export const CreateOpsAuthUnlockLinkResponse = zod.void()
 
 /**
  * FR-028, POL-020. 파트너 비밀번호 바꾸기(POST /v1/partner/auth/password-changes)와 같은 규칙이다. 바꾸면 이 세션은 이어지고 다른 세션을 모두 끝낸다(reason PASSWORD_CHANGED). scope 제한 세션이면 제한을 푼 새 운영자 액세스 토큰 쿠키(__Host-peaket_ops_at)를 준다. gw-ops가 Origin을 확인한다(추천 적용 2026-10-30, docs/security/auth-controls.md §3.5·§4)
  * @summary 운영자·CS 계정 비밀번호 바꾸기
  */
-export const postV1OpsAuthPasswordChangesBodyCurrentPasswordMax = 256;
+export const createOpsAuthPasswordChangeBodyCurrentPasswordMax = 256;
 
-export const postV1OpsAuthPasswordChangesBodyNewPasswordMin = 15;
-export const postV1OpsAuthPasswordChangesBodyNewPasswordMax = 256;
+export const createOpsAuthPasswordChangeBodyNewPasswordMin = 15;
+export const createOpsAuthPasswordChangeBodyNewPasswordMax = 256;
 
 
 
-export const PostV1OpsAuthPasswordChangesBody = zod.object({
-  "currentPassword": zod.string().min(1).max(postV1OpsAuthPasswordChangesBodyCurrentPasswordMax),
-  "newPassword": zod.string().min(postV1OpsAuthPasswordChangesBodyNewPasswordMin).max(postV1OpsAuthPasswordChangesBodyNewPasswordMax)
+export const CreateOpsAuthPasswordChangeBody = zod.object({
+  "currentPassword": zod.string().min(1).max(createOpsAuthPasswordChangeBodyCurrentPasswordMax),
+  "newPassword": zod.string().min(createOpsAuthPasswordChangeBodyNewPasswordMin).max(createOpsAuthPasswordChangeBodyNewPasswordMax)
 }).strict().describe('관리 계정 비밀번호 바꾸기 본문(POST /v1/partner/auth/password-changes·/v1/ops/auth/password-changes). 지금 비밀번호와 새 비밀번호를 함께 검증한다(ASVS 6.2.3). 새 비밀번호는 15자 이상 256자 [가정] 이하이고, 흔한 비밀번호·서비스 맥락 말·계정 맥락 말·유출 목록과 대조한다(docs/security/auth-controls.md §4, POL-020). 정기 변경은 강제하지 않는다(추천 적용 2026-10-30, auth-controls §3.5·§5)')
 
-export const PostV1OpsAuthPasswordChangesResponse = zod.void()
+export const CreateOpsAuthPasswordChangeResponse = zod.void()
 
 /**
  * FR-021, FR-028, POL-020, docs/planning/03 §3 '파트너 계정 초대·역할 변경·잠금 해제' 행과 '관리 계정(운영자·CS)' 행(소유자 결정 2026-10-30, open-items 73번. 경로 모양과 이 경로들의 세부 규칙은 추천 적용 2026-10-30). operator·commander만 본다. viewer·CS는 403이다. 이메일은 가린 값만 싣는다. gw-ops → ops-svc가 역할을 보고 identity-svc AdminAccountService.ListAdminAccounts로 읽는다(docs/api/proto/README.md §3). 커서 페이징(guidelines §3). Cache-Control: no-store
  * @summary 관리 계정 목록(SCR-064 탭: 운영자·CS, 파트너 계정)
  */
-export const getV1OpsAdminAccountsQueryLimitMax = 100;
+export const listOpsAdminAccountsQueryLimitMax = 100;
 
 
 
-export const GetV1OpsAdminAccountsQueryParams = zod.object({
+export const ListOpsAdminAccountsQueryParams = zod.object({
   "group": zod.enum(['OPS', 'PARTNER']).describe('OPS는 운영자·CS 탭, PARTNER는 파트너 계정 탭'),
   "promoterId": zod.string().optional().describe('PARTNER 탭에서 파트너사로 거른다'),
   "status": zod.enum(['INVITED', 'ACTIVE', 'INVITE_EXPIRED', 'REMOVED']).optional(),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsAdminAccountsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsAdminAccountsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const getV1OpsAdminAccountsResponseItemsItemPasskeyCountMin = 0;
+export const listOpsAdminAccountsResponseItemsItemPasskeyCountMin = 0;
 
 
 
-export const GetV1OpsAdminAccountsResponse = zod.object({
+export const ListOpsAdminAccountsResponse = zod.object({
   "items": zod.array(zod.object({
   "adminAccountId": zod.string().optional(),
   "emailMasked": zod.string().optional().describe('가린 업무용 이메일(예 st****@stella.example). 삭제한 계정은 비운다'),
@@ -156,7 +156,7 @@ export const GetV1OpsAdminAccountsResponse = zod.object({
   "lockReason": zod.enum(['FAILED_ATTEMPTS', 'SECOND_FACTOR_FAILURES', 'PASSWORD_FAILURE_TOTAL']).optional().describe('잠겼을 때만. 계정 연속 실패 5회(시간 잠금), 2단계 실패 5회, 비밀번호 연속 실패 누계 100(보호 잠금). 화면은 이 값으로 잠김 상세 글을 고른다(docs/design/d5 SCR-064 \'잠김 상세\'). 계정 주인에게는 보호 잠금의 원인을 알리지 않는다(auth-controls §3.2)'),
   "lockedUntil": zod.iso.datetime({"offset":true}).optional().describe('시간 잠금만'),
   "totpEnrolled": zod.boolean().optional().describe('인증 앱 등록 여부'),
-  "passkeyCount": zod.int().min(getV1OpsAdminAccountsResponseItemsItemPasskeyCountMin).optional(),
+  "passkeyCount": zod.int().min(listOpsAdminAccountsResponseItemsItemPasskeyCountMin).optional(),
   "designations": zod.array(zod.enum(['ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR'])).optional().describe('살아 있는 지정(접속기록 점검자·가명정보 취급자·부정 거래 조사관). 앞의 둘은 commander에게만, FRAUD_INVESTIGATOR는 commander와 cs_lead에게 붙는다. 그 밖의 역할이면 비어 있다(FRAUD_INVESTIGATOR는 추천 적용 2026-10-31, ADR-0171)'),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('초대됨일 때만. 보낸 때부터 24시간'),
   "lastLoginAt": zod.iso.datetime({"offset":true}).optional().describe('마지막 로그인 성공 시각(\'마지막 접속\')'),
@@ -170,29 +170,29 @@ export const GetV1OpsAdminAccountsResponse = zod.object({
  * FR-021, FR-028, POL-020, docs/planning/03 §2.7 A1·§3, docs/features/identity.md §6 '계정 발급 절차'(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). 누가: operator는 파트너 역할(partner_admin·partner_member)만, commander는 파트너 역할과 viewer·operator·cs_agent·cs_lead를 초대한다(그 밖은 403 admin-role-not-allowed). commander로는 초대하지 않는다. commander는 다른 역할로 초대해 활성화한 뒤 역할 변경의 2인 승인으로만 준다(POL-038 ⑨). 파트너사 조건: 파트너 역할이면 promoterId가 필수이고 관제 역할이면 넣지 않는다(422 promoter-mismatch). promoterId는 파트너사·계약 관리(SCR-065)에 등록된 파트너사여야 한다(422 unknown-promoter). 그 파트너사에 활성이거나 초대 중인 partner_admin이 없으면 partner_admin으로만 초대한다(422 first-partner-account-must-be-admin. 파트너사마다 활성 관리자 1명 이상, identity §6). 같은 업무 이메일의 삭제하지 않은 계정이 있으면 409 admin-email-in-use다(한 사람에 계정 하나, 고시 제5조 제4항). 재인증: 비밀번호·TOTP와 패스키를 거친 재인증 토큰(factors에 passkey, 작업 묶음 act는 권한 변경)이 있어야 한다(docs/security/authz-matrix.md §6). 처리: ops-svc가 역할·재인증을 보고 권한 부여 내역을 감사 기록에 남긴 뒤(3년, 고시 제5조 제3항) identity-svc InviteAdminAccount를 부른다. identity-svc는 요청자의 지금 역할을 DB로 다시 보고, 32바이트 난수 초대 토큰의 SHA-256만 저장한 뒤 업무 이메일로 링크를 보낸다(토큰은 URL 조각 #token=에만, docs/features/identity.md §6.1 'URL 조각의 비밀 처리'와 같다). 초대 수락 경로(비밀번호·TOTP·패스키·복구 코드 등록)는 패스키 등록 경로와 함께 wbs 0.2.3에서 더한다(identity §13)
  * @summary 관리 계정 초대(업무 이메일, 역할, 파트너 계정이면 파트너사). 24시간 1회용 링크, 재인증
  */
-export const PostV1OpsAdminAccountsHeader = zod.object({
+export const CreateOpsAdminAccountHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const postV1OpsAdminAccountsBodyEmailMax = 254;
+export const createOpsAdminAccountBodyEmailMax = 254;
 
-export const postV1OpsAdminAccountsBodyDisplayNameMax = 30;
+export const createOpsAdminAccountBodyDisplayNameMax = 30;
 
 
 
-export const PostV1OpsAdminAccountsBody = zod.object({
-  "email": zod.email().max(postV1OpsAdminAccountsBodyEmailMax).describe('업무용 이메일. 삭제하지 않은 관리 계정 사이에서 하나뿐이어야 한다'),
-  "displayName": zod.string().min(1).max(postV1OpsAdminAccountsBodyDisplayNameMax).describe('표시 이름. 30자 [가정](NFC 정규화 뒤 grapheme으로 센다). 제어 문자와 양방향 제어 문자는 지운다. 초대한 사람이 넣고, 수락할 때 계정 주인이 고칠 수 있다(초대 수락 경로는 wbs 0.2.3, 추천 적용 2026-10-30)'),
+export const CreateOpsAdminAccountBody = zod.object({
+  "email": zod.email().max(createOpsAdminAccountBodyEmailMax).describe('업무용 이메일. 삭제하지 않은 관리 계정 사이에서 하나뿐이어야 한다'),
+  "displayName": zod.string().min(1).max(createOpsAdminAccountBodyDisplayNameMax).describe('표시 이름. 30자 [가정](NFC 정규화 뒤 grapheme으로 센다). 제어 문자와 양방향 제어 문자는 지운다. 초대한 사람이 넣고, 수락할 때 계정 주인이 고칠 수 있다(초대 수락 경로는 wbs 0.2.3, 추천 적용 2026-10-30)'),
   "role": zod.enum(['viewer', 'operator', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']),
   "promoterId": zod.string().optional()
 }).strict().describe('관리 계정 초대 본문(POST /v1/ops/admin-accounts). commander로는 초대하지 않는다(역할 변경의 2인 승인으로만 준다, POL-038 ⑨, 추천 적용 2026-10-30). 파트너 역할이면 promoterId가 필수이고 관제 역할이면 넣지 않는다')
 
-export const postV1OpsAdminAccountsResponsePasskeyCountMin = 0;
+export const createOpsAdminAccountResponsePasskeyCountMin = 0;
 
 
 
-export const PostV1OpsAdminAccountsResponse = zod.object({
+export const CreateOpsAdminAccountResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "emailMasked": zod.string().optional().describe('가린 업무용 이메일(예 st****@stella.example). 삭제한 계정은 비운다'),
   "displayName": zod.string().nullish().describe('표시 이름(업무에서 부르는 이름이나 별명). 관제·파트너 화면이 담당자·내려받은 사람을 보일 때 쓴다(SCR-020 ⑨, SCR-045 문의 담당자, 명단 다운로드 이력). 삭제한 계정은 null이다(docs/data.md admin_account.display_name, 추천 적용 2026-10-30)'),
@@ -204,7 +204,7 @@ export const PostV1OpsAdminAccountsResponse = zod.object({
   "lockReason": zod.enum(['FAILED_ATTEMPTS', 'SECOND_FACTOR_FAILURES', 'PASSWORD_FAILURE_TOTAL']).optional().describe('잠겼을 때만. 계정 연속 실패 5회(시간 잠금), 2단계 실패 5회, 비밀번호 연속 실패 누계 100(보호 잠금). 화면은 이 값으로 잠김 상세 글을 고른다(docs/design/d5 SCR-064 \'잠김 상세\'). 계정 주인에게는 보호 잠금의 원인을 알리지 않는다(auth-controls §3.2)'),
   "lockedUntil": zod.iso.datetime({"offset":true}).optional().describe('시간 잠금만'),
   "totpEnrolled": zod.boolean().optional().describe('인증 앱 등록 여부'),
-  "passkeyCount": zod.int().min(postV1OpsAdminAccountsResponsePasskeyCountMin).optional(),
+  "passkeyCount": zod.int().min(createOpsAdminAccountResponsePasskeyCountMin).optional(),
   "designations": zod.array(zod.enum(['ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR'])).optional().describe('살아 있는 지정(접속기록 점검자·가명정보 취급자·부정 거래 조사관). 앞의 둘은 commander에게만, FRAUD_INVESTIGATOR는 commander와 cs_lead에게 붙는다. 그 밖의 역할이면 비어 있다(FRAUD_INVESTIGATOR는 추천 적용 2026-10-31, ADR-0171)'),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('초대됨일 때만. 보낸 때부터 24시간'),
   "lastLoginAt": zod.iso.datetime({"offset":true}).optional().describe('마지막 로그인 성공 시각(\'마지막 접속\')'),
@@ -216,15 +216,15 @@ export const PostV1OpsAdminAccountsResponse = zod.object({
  * FR-021, FR-028, SCR-064 ④⑤(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). operator·commander만. 잠금 상세 글은 lockKind·lockReason으로 고른다(docs/design/d5 SCR-064 '잠김 상세'). 세션 목록은 브라우저·운영체제·시각만 싣는다. 응답의 ETag(판)를 역할 변경의 If-Match로 보낸다(guidelines §12). Cache-Control: no-store
  * @summary 관리 계정 상세(상태·잠금·인증 수단 등록 여부·지정·활성 세션). ETag로 판을 준다
  */
-export const GetV1OpsAdminAccountsAdminAccountIdParams = zod.object({
+export const GetOpsAdminAccountParams = zod.object({
   "adminAccountId": zod.string()
 })
 
-export const getV1OpsAdminAccountsAdminAccountIdResponseOnePasskeyCountMin = 0;
+export const getOpsAdminAccountResponseOnePasskeyCountMin = 0;
 
 
 
-export const GetV1OpsAdminAccountsAdminAccountIdResponse = zod.object({
+export const GetOpsAdminAccountResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "emailMasked": zod.string().optional().describe('가린 업무용 이메일(예 st****@stella.example). 삭제한 계정은 비운다'),
   "displayName": zod.string().nullish().describe('표시 이름(업무에서 부르는 이름이나 별명). 관제·파트너 화면이 담당자·내려받은 사람을 보일 때 쓴다(SCR-020 ⑨, SCR-045 문의 담당자, 명단 다운로드 이력). 삭제한 계정은 null이다(docs/data.md admin_account.display_name, 추천 적용 2026-10-30)'),
@@ -236,7 +236,7 @@ export const GetV1OpsAdminAccountsAdminAccountIdResponse = zod.object({
   "lockReason": zod.enum(['FAILED_ATTEMPTS', 'SECOND_FACTOR_FAILURES', 'PASSWORD_FAILURE_TOTAL']).optional().describe('잠겼을 때만. 계정 연속 실패 5회(시간 잠금), 2단계 실패 5회, 비밀번호 연속 실패 누계 100(보호 잠금). 화면은 이 값으로 잠김 상세 글을 고른다(docs/design/d5 SCR-064 \'잠김 상세\'). 계정 주인에게는 보호 잠금의 원인을 알리지 않는다(auth-controls §3.2)'),
   "lockedUntil": zod.iso.datetime({"offset":true}).optional().describe('시간 잠금만'),
   "totpEnrolled": zod.boolean().optional().describe('인증 앱 등록 여부'),
-  "passkeyCount": zod.int().min(getV1OpsAdminAccountsAdminAccountIdResponseOnePasskeyCountMin).optional(),
+  "passkeyCount": zod.int().min(getOpsAdminAccountResponseOnePasskeyCountMin).optional(),
   "designations": zod.array(zod.enum(['ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR'])).optional().describe('살아 있는 지정(접속기록 점검자·가명정보 취급자·부정 거래 조사관). 앞의 둘은 commander에게만, FRAUD_INVESTIGATOR는 commander와 cs_lead에게 붙는다. 그 밖의 역할이면 비어 있다(FRAUD_INVESTIGATOR는 추천 적용 2026-10-31, ADR-0171)'),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('초대됨일 때만. 보낸 때부터 24시간'),
   "lastLoginAt": zod.iso.datetime({"offset":true}).optional().describe('마지막 로그인 성공 시각(\'마지막 접속\')'),
@@ -256,29 +256,29 @@ export const GetV1OpsAdminAccountsAdminAccountIdResponse = zod.object({
  * FR-021, FR-028, POL-020, POL-038 ⑨, docs/planning/03 §3(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). 누가: operator는 파트너 계정의 partner_admin·partner_member 사이만, commander는 그에 더해 viewer·operator·cs_agent·cs_lead 사이를 바꾼다(그 밖은 403 admin-role-not-allowed). 파트너 역할과 관제 역할 사이는 바꾸지 않는다(422 role-group-mismatch. 파트너사가 묶인 계정이라 삭제하고 새로 초대한다). 자기 역할은 바꾸지 못한다(403 self-target-forbidden). 그 파트너사의 마지막 활성 partner_admin은 낮추지 못한다(409 last-partner-admin, I-T44). 삭제한 계정은 409 admin-account-state-conflict다. commander가 되거나 commander에서 다른 역할이 되는 변경은 commander만 요청하고 바로 바꾸지 않는다. ops-svc가 승인 업무 COMMANDER_ROLE_CHANGE(targetRef = 대상 관리 계정 ID, 바꿀 역할을 함께 둔다)를 만들어 202로 돌려주고, 요청자가 아닌 commander가 POST /v1/ops/approval-requests/{approvalId}/approvals(재인증)로 승인하면 그때 바꾼다(POL-038 ⑨, SCR-046). 재인증: 비밀번호·TOTP와 패스키(factors에 passkey, act는 권한 변경, authz-matrix §6). If-Match는 상세 응답의 ETag다(guidelines §12). 바꾸면 identity-svc가 그 계정의 모든 세션을 끝내고(asyncapi control.sessions-terminated, reason ROLE_CHANGED, authz-matrix §5.4), commander가 아니게 되면 지정을 같은 트랜잭션에서 거둔다(docs/data.md admin_designation). ops-svc가 이전·새 역할, 사유, 요청자·승인자를 권한 변경 내역으로 3년 남긴다(고시 제5조 제3항)
  * @summary 관리 계정 역할 변경(사유 필수, 재인증, commander 부여·회수는 2인 승인)
  */
-export const PutV1OpsAdminAccountsAdminAccountIdRoleParams = zod.object({
+export const PutOpsAdminAccountRoleParams = zod.object({
   "adminAccountId": zod.string()
 })
 
-export const PutV1OpsAdminAccountsAdminAccountIdRoleHeader = zod.object({
+export const PutOpsAdminAccountRoleHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const putV1OpsAdminAccountsAdminAccountIdRoleBodyReasonMax = 500;
+export const putOpsAdminAccountRoleBodyReasonMax = 500;
 
 
 
-export const PutV1OpsAdminAccountsAdminAccountIdRoleBody = zod.object({
+export const PutOpsAdminAccountRoleBody = zod.object({
   "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다'),
-  "reason": zod.string().min(1).max(putV1OpsAdminAccountsAdminAccountIdRoleBodyReasonMax)
+  "reason": zod.string().min(1).max(putOpsAdminAccountRoleBodyReasonMax)
 }).strict().describe('역할 변경 본문(PUT /v1/ops/admin-accounts/{adminAccountId}/role). 사유는 권한 변경 내역에 남는다(고시 제5조 제3항)')
 
-export const putV1OpsAdminAccountsAdminAccountIdRoleResponsePasskeyCountMin = 0;
+export const putOpsAdminAccountRoleResponsePasskeyCountMin = 0;
 
 
 
-export const PutV1OpsAdminAccountsAdminAccountIdRoleResponse = zod.object({
+export const PutOpsAdminAccountRoleResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "emailMasked": zod.string().optional().describe('가린 업무용 이메일(예 st****@stella.example). 삭제한 계정은 비운다'),
   "displayName": zod.string().nullish().describe('표시 이름(업무에서 부르는 이름이나 별명). 관제·파트너 화면이 담당자·내려받은 사람을 보일 때 쓴다(SCR-020 ⑨, SCR-045 문의 담당자, 명단 다운로드 이력). 삭제한 계정은 null이다(docs/data.md admin_account.display_name, 추천 적용 2026-10-30)'),
@@ -290,7 +290,7 @@ export const PutV1OpsAdminAccountsAdminAccountIdRoleResponse = zod.object({
   "lockReason": zod.enum(['FAILED_ATTEMPTS', 'SECOND_FACTOR_FAILURES', 'PASSWORD_FAILURE_TOTAL']).optional().describe('잠겼을 때만. 계정 연속 실패 5회(시간 잠금), 2단계 실패 5회, 비밀번호 연속 실패 누계 100(보호 잠금). 화면은 이 값으로 잠김 상세 글을 고른다(docs/design/d5 SCR-064 \'잠김 상세\'). 계정 주인에게는 보호 잠금의 원인을 알리지 않는다(auth-controls §3.2)'),
   "lockedUntil": zod.iso.datetime({"offset":true}).optional().describe('시간 잠금만'),
   "totpEnrolled": zod.boolean().optional().describe('인증 앱 등록 여부'),
-  "passkeyCount": zod.int().min(putV1OpsAdminAccountsAdminAccountIdRoleResponsePasskeyCountMin).optional(),
+  "passkeyCount": zod.int().min(putOpsAdminAccountRoleResponsePasskeyCountMin).optional(),
   "designations": zod.array(zod.enum(['ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR'])).optional().describe('살아 있는 지정(접속기록 점검자·가명정보 취급자·부정 거래 조사관). 앞의 둘은 commander에게만, FRAUD_INVESTIGATOR는 commander와 cs_lead에게 붙는다. 그 밖의 역할이면 비어 있다(FRAUD_INVESTIGATOR는 추천 적용 2026-10-31, ADR-0171)'),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('초대됨일 때만. 보낸 때부터 24시간'),
   "lastLoginAt": zod.iso.datetime({"offset":true}).optional().describe('마지막 로그인 성공 시각(\'마지막 접속\')'),
@@ -302,29 +302,29 @@ export const PutV1OpsAdminAccountsAdminAccountIdRoleResponse = zod.object({
  * FR-021, FR-028, POL-020, docs/planning/03 §2.7 A4·A8, docs/security/auth-controls.md §3.2(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). reasonCode: RESEND는 초대됨·초대 만료 계정에 새 링크를 보낸다(A4). PROTECT_LOCK은 보호 잠금을 푸는 유일한 길이다(A8). CREDENTIAL_LOST는 활성 계정이나 시간 잠금 중인 계정의 주인이 비밀번호나 인증 앱을 잃어 요청했을 때다(docs/planning/03 §2.7 A11·A12, 스스로 하는 비밀번호 재설정은 없다, auth-controls §3.2, asvs/auth.md 6.4.3). 시간 잠금만 걸린 계정에 PROTECT_LOCK을 보내면 409 admin-account-state-conflict다(시간 잠금은 본인 해제, docs/design/d5 SCR-064). PROTECT_LOCK·CREDENTIAL_LOST는 업무 이메일 밖의 길로 신원을 확인한 뒤 하고, 어떻게 확인했는지 reason에 적는다(ASVS 6.4.4). 누가: 파트너 계정은 operator 이상, 운영자·CS 계정은 commander다(auth-controls §3.2, 그 밖은 403 admin-role-not-allowed). 자기 계정은 하지 못한다(403 self-target-forbidden). 재인증은 초대와 같다. 처리: identity-svc가 새 초대 토큰을 만들고 옛 토큰을 무효로 한다. PROTECT_LOCK·CREDENTIAL_LOST면 비밀번호 해시·TOTP 시드·패스키·복구 코드를 지우고, 실패 수·비밀번호 연속 실패 누계와 잠금을 되돌리며, 상태를 INVITED로 바꾸고 모든 세션을 끝낸다(reason ADMIN_FORCE). 수락할 때 비밀번호와 TOTP를, 그 역할이면 패스키를 새로 정한다(NIST SP 800-63B-4 §3.2.2의 '다시 묶기'). 링크는 계정의 지금 업무 이메일로만 보내고 다른 주소로 바꾸지 않는다. ops-svc가 감사 기록을 남긴다
  * @summary 관리 계정 재초대(새 24시간 링크, 옛 링크 무효). 보호 잠금 해제와 인증 수단 분실은 신원 확인 뒤, 재인증
  */
-export const PostV1OpsAdminAccountsAdminAccountIdInvitationParams = zod.object({
+export const CreateOpsAdminAccountInvitationParams = zod.object({
   "adminAccountId": zod.string()
 })
 
-export const PostV1OpsAdminAccountsAdminAccountIdInvitationHeader = zod.object({
+export const CreateOpsAdminAccountInvitationHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const postV1OpsAdminAccountsAdminAccountIdInvitationBodyReasonMax = 500;
+export const createOpsAdminAccountInvitationBodyReasonMax = 500;
 
 
 
-export const PostV1OpsAdminAccountsAdminAccountIdInvitationBody = zod.object({
+export const CreateOpsAdminAccountInvitationBody = zod.object({
   "reasonCode": zod.enum(['RESEND', 'PROTECT_LOCK', 'CREDENTIAL_LOST']),
-  "reason": zod.string().min(1).max(postV1OpsAdminAccountsAdminAccountIdInvitationBodyReasonMax)
+  "reason": zod.string().min(1).max(createOpsAdminAccountInvitationBodyReasonMax)
 }).strict().describe('재초대 본문(POST /v1/ops/admin-accounts/{adminAccountId}/invitation, 추천 적용 2026-10-30). RESEND는 초대됨·초대 만료 계정의 링크 다시 보내기, PROTECT_LOCK은 보호 잠금 해제, CREDENTIAL_LOST는 활성 계정이나 시간 잠금 중인 계정의 주인이 비밀번호·인증 앱을 잃은 경우다(docs/planning/03 §2.7 A11·A12). 뒤의 둘은 신원을 어떻게 확인했는지 reason에 적는다(개인정보 원문은 적지 않는다)')
 
-export const postV1OpsAdminAccountsAdminAccountIdInvitationResponsePasskeyCountMin = 0;
+export const createOpsAdminAccountInvitationResponsePasskeyCountMin = 0;
 
 
 
-export const PostV1OpsAdminAccountsAdminAccountIdInvitationResponse = zod.object({
+export const CreateOpsAdminAccountInvitationResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "emailMasked": zod.string().optional().describe('가린 업무용 이메일(예 st****@stella.example). 삭제한 계정은 비운다'),
   "displayName": zod.string().nullish().describe('표시 이름(업무에서 부르는 이름이나 별명). 관제·파트너 화면이 담당자·내려받은 사람을 보일 때 쓴다(SCR-020 ⑨, SCR-045 문의 담당자, 명단 다운로드 이력). 삭제한 계정은 null이다(docs/data.md admin_account.display_name, 추천 적용 2026-10-30)'),
@@ -336,7 +336,7 @@ export const PostV1OpsAdminAccountsAdminAccountIdInvitationResponse = zod.object
   "lockReason": zod.enum(['FAILED_ATTEMPTS', 'SECOND_FACTOR_FAILURES', 'PASSWORD_FAILURE_TOTAL']).optional().describe('잠겼을 때만. 계정 연속 실패 5회(시간 잠금), 2단계 실패 5회, 비밀번호 연속 실패 누계 100(보호 잠금). 화면은 이 값으로 잠김 상세 글을 고른다(docs/design/d5 SCR-064 \'잠김 상세\'). 계정 주인에게는 보호 잠금의 원인을 알리지 않는다(auth-controls §3.2)'),
   "lockedUntil": zod.iso.datetime({"offset":true}).optional().describe('시간 잠금만'),
   "totpEnrolled": zod.boolean().optional().describe('인증 앱 등록 여부'),
-  "passkeyCount": zod.int().min(postV1OpsAdminAccountsAdminAccountIdInvitationResponsePasskeyCountMin).optional(),
+  "passkeyCount": zod.int().min(createOpsAdminAccountInvitationResponsePasskeyCountMin).optional(),
   "designations": zod.array(zod.enum(['ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR'])).optional().describe('살아 있는 지정(접속기록 점검자·가명정보 취급자·부정 거래 조사관). 앞의 둘은 commander에게만, FRAUD_INVESTIGATOR는 commander와 cs_lead에게 붙는다. 그 밖의 역할이면 비어 있다(FRAUD_INVESTIGATOR는 추천 적용 2026-10-31, ADR-0171)'),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('초대됨일 때만. 보낸 때부터 24시간'),
   "lastLoginAt": zod.iso.datetime({"offset":true}).optional().describe('마지막 로그인 성공 시각(\'마지막 접속\')'),
@@ -348,27 +348,27 @@ export const PostV1OpsAdminAccountsAdminAccountIdInvitationResponse = zod.object
  * FR-021, FR-028, POL-020, docs/planning/03 §2.7 A9·A13~A16·§3(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). 정본의 '삭제'(Removed)다. 지울 수 있는 상태는 지우지 않은 계정 모두다: INVITED·INVITE_EXPIRED·ACTIVE이고, ACTIVE에는 시간 잠금·보호 잠금이 걸린 계정도 든다(퇴직·업무 변경 통보 당일 삭제, docs/security/internal-management-plan.md §2 제5호, 추천 적용 2026-10-30). 초대 중인 계정을 지우면 초대 링크가 바로 무효가 된다. 누가: operator는 파트너 계정만, commander는 파트너 계정과 viewer·operator·cs_agent·cs_lead 계정을 지운다(그 밖은 403 admin-role-not-allowed). commander 계정은 바로 지우지 않는다. 먼저 역할 변경(2인 승인)으로 commander가 아니게 한 뒤 지운다(409 commander-removal-needs-role-change, POL-038 ⑨). 자기 계정은 지우지 못하고(403 self-target-forbidden), 그 파트너사의 마지막 활성 partner_admin도 지우지 못한다(409 last-partner-admin). 재인증은 역할 변경과 같다. 지우면 identity-svc가 상태를 REMOVED로 바꾸고 모든 세션을 끝내며(reason DELETE), 업무 이메일·비밀번호 해시·TOTP 시드·패스키·복구 코드를 바로 파기한다(docs/security/data-classification.md). 행에는 ID·역할·삭제 시각만 남긴다(docs/data.md admin_account). 이미 삭제한 계정이면 그대로 200이다. ops-svc가 권한 말소 내역을 3년 남긴다(고시 제5조 제3항)
  * @summary 관리 계정 삭제(사유 필수, 재인증)
  */
-export const PostV1OpsAdminAccountsAdminAccountIdRemovalParams = zod.object({
+export const CreateOpsAdminAccountRemovalParams = zod.object({
   "adminAccountId": zod.string()
 })
 
-export const PostV1OpsAdminAccountsAdminAccountIdRemovalHeader = zod.object({
+export const CreateOpsAdminAccountRemovalHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const postV1OpsAdminAccountsAdminAccountIdRemovalBodyReasonMax = 500;
+export const createOpsAdminAccountRemovalBodyReasonMax = 500;
 
 
 
-export const PostV1OpsAdminAccountsAdminAccountIdRemovalBody = zod.object({
-  "reason": zod.string().min(1).max(postV1OpsAdminAccountsAdminAccountIdRemovalBodyReasonMax).describe('권한 말소 내역에 남는 사유')
+export const CreateOpsAdminAccountRemovalBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsAdminAccountRemovalBodyReasonMax).describe('권한 말소 내역에 남는 사유')
 }).strict()
 
-export const postV1OpsAdminAccountsAdminAccountIdRemovalResponsePasskeyCountMin = 0;
+export const createOpsAdminAccountRemovalResponsePasskeyCountMin = 0;
 
 
 
-export const PostV1OpsAdminAccountsAdminAccountIdRemovalResponse = zod.object({
+export const CreateOpsAdminAccountRemovalResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "emailMasked": zod.string().optional().describe('가린 업무용 이메일(예 st****@stella.example). 삭제한 계정은 비운다'),
   "displayName": zod.string().nullish().describe('표시 이름(업무에서 부르는 이름이나 별명). 관제·파트너 화면이 담당자·내려받은 사람을 보일 때 쓴다(SCR-020 ⑨, SCR-045 문의 담당자, 명단 다운로드 이력). 삭제한 계정은 null이다(docs/data.md admin_account.display_name, 추천 적용 2026-10-30)'),
@@ -380,7 +380,7 @@ export const PostV1OpsAdminAccountsAdminAccountIdRemovalResponse = zod.object({
   "lockReason": zod.enum(['FAILED_ATTEMPTS', 'SECOND_FACTOR_FAILURES', 'PASSWORD_FAILURE_TOTAL']).optional().describe('잠겼을 때만. 계정 연속 실패 5회(시간 잠금), 2단계 실패 5회, 비밀번호 연속 실패 누계 100(보호 잠금). 화면은 이 값으로 잠김 상세 글을 고른다(docs/design/d5 SCR-064 \'잠김 상세\'). 계정 주인에게는 보호 잠금의 원인을 알리지 않는다(auth-controls §3.2)'),
   "lockedUntil": zod.iso.datetime({"offset":true}).optional().describe('시간 잠금만'),
   "totpEnrolled": zod.boolean().optional().describe('인증 앱 등록 여부'),
-  "passkeyCount": zod.int().min(postV1OpsAdminAccountsAdminAccountIdRemovalResponsePasskeyCountMin).optional(),
+  "passkeyCount": zod.int().min(createOpsAdminAccountRemovalResponsePasskeyCountMin).optional(),
   "designations": zod.array(zod.enum(['ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR'])).optional().describe('살아 있는 지정(접속기록 점검자·가명정보 취급자·부정 거래 조사관). 앞의 둘은 commander에게만, FRAUD_INVESTIGATOR는 commander와 cs_lead에게 붙는다. 그 밖의 역할이면 비어 있다(FRAUD_INVESTIGATOR는 추천 적용 2026-10-31, ADR-0171)'),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('초대됨일 때만. 보낸 때부터 24시간'),
   "lastLoginAt": zod.iso.datetime({"offset":true}).optional().describe('마지막 로그인 성공 시각(\'마지막 접속\')'),
@@ -392,25 +392,25 @@ export const PostV1OpsAdminAccountsAdminAccountIdRemovalResponse = zod.object({
  * FR-064, POL-023, docs/planning/03 §3 '관리 계정(운영자·CS)' 행의 commander 칸, docs/security/authz-matrix.md §3.7(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). 지정은 개인정보 보호책임자가 정한 사람을 commander가 기록하는 일이고, basis에 그 지정 문서 번호 같은 근거를 적는다(docs/data.md admin_designation.basis). 대상은 활성 commander 계정만이다(422 designation-target-not-commander). 예외로 부정 거래 조사관(FRAUD_INVESTIGATOR)은 활성 commander와 cs_lead 계정에 줄 수 있고, 그 밖의 역할이면 422 designation-target-not-eligible다. 한 계정에 FRAUD_INVESTIGATOR와 PSEUDONYM_HANDLER를 함께 두지 않는다(먼저 있는 쪽이 있으면 409 designation-conflict, 조사·연구 두 갈래를 잇지 않으려는 것이다, 추천 적용 2026-10-31, ADR-0171 결정 7). 자기 자신에게는 지정하지 못한다(403 self-target-forbidden). 같은 종류의 살아 있는 지정이 있으면 409 designation-exists다. FRAUD_INVESTIGATOR와 PSEUDONYM_HANDLER 사이에는 냉각 기간이 있다: 줄 지정과 함께 둘 수 없는 다른 종류의 지정을 지난 90일 [가정] 안에 거둔 기록이 있으면 409 designation-conflict다. 이 검사들은 identity-svc가 대상 관리 계정 행을 잠근 트랜잭션 안에서 한다(추천 적용 2026-10-31, ADR-0171). 재인증은 역할 변경과 같다. 지정은 토큰에 싣지 않으므로, ops-svc의 지정 확인 캐시(5초 [가정]) 안에 반영된다(identity.proto AdminDesignationService). ops-svc가 권한 부여 내역으로 감사 기록을 남긴다(3년, 고시 제5조 제3항)
  * @summary 접속기록 점검자·가명정보 취급자·부정 거래 조사관 지정(지정 근거 필수, 재인증)
  */
-export const PostV1OpsAdminAccountsAdminAccountIdDesignationsParams = zod.object({
+export const CreateOpsAdminAccountDesignationParams = zod.object({
   "adminAccountId": zod.string()
 })
 
-export const PostV1OpsAdminAccountsAdminAccountIdDesignationsHeader = zod.object({
+export const CreateOpsAdminAccountDesignationHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const postV1OpsAdminAccountsAdminAccountIdDesignationsBodyBasisMax = 200;
+export const createOpsAdminAccountDesignationBodyBasisMax = 200;
 
 
 
-export const PostV1OpsAdminAccountsAdminAccountIdDesignationsBody = zod.object({
+export const CreateOpsAdminAccountDesignationBody = zod.object({
   "kind": zod.enum(['ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR']).describe('접속기록 점검자·가명정보 취급자·부정 거래 조사관(FRAUD_INVESTIGATOR, 2026-10-31 ADR-0171)'),
-  "basis": zod.string().min(1).max(postV1OpsAdminAccountsAdminAccountIdDesignationsBodyBasisMax)
+  "basis": zod.string().min(1).max(createOpsAdminAccountDesignationBodyBasisMax)
 }).strict().describe('지정 본문(POST /v1/ops/admin-accounts/{adminAccountId}/designations). basis는 개인정보 보호책임자의 지정 문서 번호 같은 근거다(docs/data.md admin_designation.basis, SCR-064 ⑤)')
 
-export const PostV1OpsAdminAccountsAdminAccountIdDesignationsResponse = zod.object({
+export const CreateOpsAdminAccountDesignationResponse = zod.object({
   "kind": zod.enum(['ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR']).optional(),
   "basis": zod.string().optional(),
   "designatedBy": zod.string().optional().describe('지정을 기록한 관리 계정 ID'),
@@ -421,56 +421,56 @@ export const PostV1OpsAdminAccountsAdminAccountIdDesignationsResponse = zod.obje
  * FR-064, docs/security/authz-matrix.md §3.7(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). admin_designation의 revoked_at을 채운다. 자기 지정도 거둘 수 있다(권한을 줄이는 쪽이다). 이미 거둔 지정이면 그대로 204다. 거두면 지정이 필요한 작업은 ops-svc 캐시(5초 [가정]) 뒤 403이다(AZ-T12). ops-svc가 권한 말소 내역을 남긴다
  * @summary 지정 거두기(재인증)
  */
-export const DeleteV1OpsAdminAccountsAdminAccountIdDesignationsKindParams = zod.object({
+export const DeleteOpsAdminAccountDesignationParams = zod.object({
   "adminAccountId": zod.string(),
   "kind": zod.enum(['ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR'])
 })
 
-export const DeleteV1OpsAdminAccountsAdminAccountIdDesignationsKindHeader = zod.object({
+export const DeleteOpsAdminAccountDesignationHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const DeleteV1OpsAdminAccountsAdminAccountIdDesignationsKindResponse = zod.void()
+export const DeleteOpsAdminAccountDesignationResponse = zod.void()
 
 /**
  * FR-028, POL-019, docs/planning/03 §3 '관리 계정(운영자·CS)' 행의 operator 'U(세션 강제 종료)'(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). 운영자·CS·파트너 계정 모두에 쓴다. 끊는 쪽의 안전 조치라 재인증 없이 하고 휴대폰에서도 한다(docs/features/control-tower.md §12). ops-svc가 감사 기록을 남긴 뒤 identity-svc TerminateAdminSessions(session_id 비움, request_id = 감사 기록 ID)를 부르고, 끝낸 세션마다 control.sessions-terminated(reason ADMIN_FORCE)가 나간다. 계정 상태는 바꾸지 않으므로 비밀번호와 TOTP를 가진 사람은 다시 로그인할 수 있다. 다시 들어오지 못하게 하려면 재초대(CREDENTIAL_LOST·PROTECT_LOCK)나 삭제를 함께 한다. 끝낼 세션이 없어도 204다
  * @summary 관리 계정의 모든 세션 강제 종료
  */
-export const DeleteV1OpsAdminAccountsAdminAccountIdSessionsParams = zod.object({
+export const DeleteOpsAdminAccountSessionsParams = zod.object({
   "adminAccountId": zod.string()
 })
 
-export const DeleteV1OpsAdminAccountsAdminAccountIdSessionsResponse = zod.void()
+export const DeleteOpsAdminAccountSessionsResponse = zod.void()
 
 /**
  * FR-028, POL-019(소유자 결정 2026-10-30, open-items 73번). 모든 세션 강제 종료와 같고 그 세션 하나만 끝낸다(TerminateAdminSessions의 session_id). 그 계정의 세션이 아니면 404다. 이미 끝난 세션이면 그대로 204다
  * @summary 관리 계정의 세션 하나 강제 종료
  */
-export const DeleteV1OpsAdminAccountsAdminAccountIdSessionsSessionIdParams = zod.object({
+export const DeleteOpsAdminAccountSessionParams = zod.object({
   "adminAccountId": zod.string(),
   "sessionId": zod.string()
 })
 
-export const DeleteV1OpsAdminAccountsAdminAccountIdSessionsSessionIdResponse = zod.void()
+export const DeleteOpsAdminAccountSessionResponse = zod.void()
 
 /**
  * FR-021, FR-028, 고시 제5조 제3항(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). ops-svc 감사 저장소의 이 계정 기록을 최근 순으로 준다. 초대·재초대·역할 변경·지정·지정 거두기·삭제가 들고, 3년 보관한다. 요청자·승인자는 관리 계정 ID와 역할로 싣는다(ADR-0149의 3년 안 규칙). 커서 페이징. Cache-Control: no-store
  * @summary 권한 부여·변경·말소 내역(SCR-064 ⑥)
  */
-export const GetV1OpsAdminAccountsAdminAccountIdPermissionChangesParams = zod.object({
+export const ListOpsAdminAccountPermissionChangesParams = zod.object({
   "adminAccountId": zod.string()
 })
 
-export const getV1OpsAdminAccountsAdminAccountIdPermissionChangesQueryLimitMax = 100;
+export const listOpsAdminAccountPermissionChangesQueryLimitMax = 100;
 
 
 
-export const GetV1OpsAdminAccountsAdminAccountIdPermissionChangesQueryParams = zod.object({
+export const ListOpsAdminAccountPermissionChangesQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsAdminAccountsAdminAccountIdPermissionChangesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsAdminAccountPermissionChangesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1OpsAdminAccountsAdminAccountIdPermissionChangesResponse = zod.object({
+export const ListOpsAdminAccountPermissionChangesResponse = zod.object({
   "items": zod.array(zod.object({
   "changedAt": zod.iso.datetime({"offset":true}).optional(),
   "action": zod.enum(['INVITED', 'REINVITED', 'ROLE_CHANGED', 'DESIGNATED', 'DESIGNATION_REVOKED', 'REMOVED']).optional(),
@@ -489,24 +489,24 @@ export const GetV1OpsAdminAccountsAdminAccountIdPermissionChangesResponse = zod.
  * FR-030, POL-021. 허용 범위 밖 422. 2인 명령은 PENDING_APPROVAL. 위험 명령(2인 승인 명령, 명령 4의 2인 조건, 멈추는 쪽인 명령 3·11)은 X-Reauth-Token 필요. 명령 3·11은 1인 실행이라 승인 대기 없이 전달한다(ADR-0095). 전달 경로는 features/control-tower.md
  * @summary 운영 명령 생성(사유 필수) → dry-run → 승인 → 전달 → ack
  */
-export const PostV1OpsCommandsHeader = zod.object({
+export const CreateOpsCommandHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Reauth-Token": zod.string().optional().describe('위험 명령일 때 필수(guidelines §7)')
 })
 
-export const postV1OpsCommandsBodyReasonMax = 2000;
+export const createOpsCommandBodyReasonMax = 2000;
 
 
 
-export const PostV1OpsCommandsBody = zod.object({
+export const CreateOpsCommandBody = zod.object({
   "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN']).describe('PG_ASSIGN은 명령 12 결제사 지정(온세일 윈도우 밖, ADR-0044). 결제사 전환은 DEGRADED_MODE의 결제 모드'),
-  "reason": zod.string().min(1).max(postV1OpsCommandsBodyReasonMax).describe('실행 사유. 제어 문자와 양방향 제어 문자는 지운다(ADR-0159 결정 11, docs/security/asvs/control-tower.md 1.3.3)'),
+  "reason": zod.string().min(1).max(createOpsCommandBodyReasonMax).describe('실행 사유. 제어 문자와 양방향 제어 문자는 지운다(ADR-0159 결정 11, docs/security/asvs/control-tower.md 1.3.3)'),
   "params": zod.looseObject({
 
 }).optional().describe('명령 유형별 값. 유형마다 oneOf 스키마로 칸과 범위를 정한다(구현 전에 더한다, 추천 적용 2026-10-30): 설정 사건으로 퍼지는 명령(5·8·9·12, 6의 설정 갈래, 7의 purchase-svc 쪽)은 SettingChanged.avsc의 value 갈래와 같은 칸, 제어 gRPC 명령(1·2·3·6 진입·6 대체 결제사 전환·7·11)은 control.proto desired_state_json과 같은 칸, 명령 4는 대역·ASN 목록과 만료 시각(24시간 이하), 명령 10은 통보 ID다(control-tower §3 안전 허용 범위). KILL_SWITCH는 {scope: EVENT|PLATFORM, eventIds: [...]}이고 EVENT면 회차 1개 이상(추천 적용 2026-10-14, ADR-0062). BOT_LEVEL은 {level: RELAXED|STANDARD|AGGRESSIVE, reassessMode: OFF|SHADOW|ENFORCE}이고 강도와 대기 중 재평가 모드를 따로 고른다(asyncapi SettingChanged, 추천 적용 2026-10-20, ADR-0073)')
-})
+}).strict()
 
-export const PostV1OpsCommandsResponse = zod.object({
+export const CreateOpsCommandResponse = zod.object({
   "commandId": zod.string().optional(),
   "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
   "dryRun": zod.looseObject({
@@ -521,15 +521,15 @@ export const PostV1OpsCommandsResponse = zod.object({
  * FR-030, POL-021. 재인증 토큰은 비밀번호·TOTP와 패스키를 거친 것이어야 한다(factors에 passkey, POL-020, 기술 검토 중간-051). PENDING_APPROVAL이면 승인해 전달한다. REVERT_PENDING(명령 3·11의 되돌리기 요청)이면 요청자 아닌 operator 이상 1인이 재인증 뒤 승인해 되돌리고 REVERTED가 된다(POL-021 B, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)
  * @summary 두 번째 승인(요청자와 달라야 함, 실행 직전 재인증). 명령 3·11 되돌리기 요청의 승인도 받는다
  */
-export const PostV1OpsCommandsCommandIdApprovalsParams = zod.object({
+export const CreateOpsCommandApprovalParams = zod.object({
   "commandId": zod.string()
 })
 
-export const PostV1OpsCommandsCommandIdApprovalsHeader = zod.object({
+export const CreateOpsCommandApprovalHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const PostV1OpsCommandsCommandIdApprovalsResponse = zod.object({
+export const CreateOpsCommandApprovalResponse = zod.object({
   "commandId": zod.string().optional(),
   "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
   "dryRun": zod.looseObject({
@@ -544,36 +544,36 @@ export const PostV1OpsCommandsCommandIdApprovalsResponse = zod.object({
  * FR-030, POL-021. PENDING_APPROVAL → REJECTED. 10분 안에 승인이 없으면 시스템이 같은 상태로 만료. REVERT_PENDING(명령 3·11의 되돌리기 요청)을 거부하면 ACKED로 돌아가고 명령은 그대로다. 10분 안에 승인이 없을 때도 ACKED로 돌아간다(docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)
  * @summary 두 번째 승인자의 거부(사유 필수)
  */
-export const PostV1OpsCommandsCommandIdRejectionsParams = zod.object({
+export const CreateOpsCommandRejectionParams = zod.object({
   "commandId": zod.string()
 })
 
-export const PostV1OpsCommandsCommandIdRejectionsBody = zod.object({
+export const CreateOpsCommandRejectionBody = zod.object({
   "reason": zod.string()
-})
+}).strict()
 
-export const PostV1OpsCommandsCommandIdRejectionsResponse = zod.unknown()
+export const CreateOpsCommandRejectionResponse = zod.unknown()
 
 /**
  * FR-030, POL-021 B. ACKED인 명령만 되돌린다. 명령 3(판매 재개)·11(자동 제어 재개)의 되돌리기는 2인이다. commander가 사유와 재인증(X-Reauth-Token)으로 요청하면 202와 REVERT_PENDING이고, 요청자 아닌 operator 이상 1인이 POST /v1/ops/commands/{commandId}/approvals(재인증)로 승인하면 REVERTED, 10분 안에 승인이 없거나 거부(POST …/rejections)하면 ACKED로 돌아간다(명령은 그대로). 그 밖의 명령은 1인 되돌리기라 200과 REVERTED다(docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073). 허용 역할 [가정]: 1인 되돌리기를 누가 하는지 정본에 없어, 그 명령을 낼 수 있는 역할(POL-021 B의 권한 칸, operator·commander)로 두고 서버가 명령마다 그 권한을 본다(추천 적용 2026-10-30, docs/security/authz-matrix.md §5.5)
  * @summary 되돌리기(직전 값 복원, 재개, 해제. 사유 필수). 명령 3·11은 2인
  */
-export const PostV1OpsCommandsCommandIdReversionsParams = zod.object({
+export const CreateOpsCommandReversionParams = zod.object({
   "commandId": zod.string()
 })
 
-export const PostV1OpsCommandsCommandIdReversionsHeader = zod.object({
+export const CreateOpsCommandReversionHeader = zod.object({
   "X-Reauth-Token": zod.string().optional().describe('명령 3·11의 되돌리기 요청일 때 필수(guidelines §7)')
 })
 
 
 
 
-export const PostV1OpsCommandsCommandIdReversionsBody = zod.object({
+export const CreateOpsCommandReversionBody = zod.object({
   "reason": zod.string().min(1).describe('되돌리는 사유(감사 로그)')
-})
+}).strict()
 
-export const PostV1OpsCommandsCommandIdReversionsResponse = zod.object({
+export const CreateOpsCommandReversionResponse = zod.object({
   "commandId": zod.string().optional(),
   "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
   "dryRun": zod.looseObject({
@@ -588,18 +588,18 @@ export const PostV1OpsCommandsCommandIdReversionsResponse = zod.object({
  * FR-030, POL-021, 추천 적용 2026-10-14, ADR-0062. operator 이상, 재인증 없음(명령 2와 같음). 새 명령이 아니라 같은 명령에 연장 기록(EXTENDED: 사유, 행위자, 새 만료 시각)을 더한다. admission-ctrl에 바뀐 만료 시각을 보내 ack를 받은 뒤 200. 연장 횟수는 묶지 않는다. 연장하지 않으면 리더가 만료 시각에 입장을 다시 시작하고 명령은 AUTO_EXPIRED(행위자 SYSTEM)가 된다
  * @summary 입장 일시정지 10분 연장(명령 2만, 사유 필수). 새 만료 = 지금 + 10분
  */
-export const PostV1OpsCommandsCommandIdExtensionsParams = zod.object({
+export const CreateOpsCommandExtensionParams = zod.object({
   "commandId": zod.string()
 })
 
 
 
 
-export const PostV1OpsCommandsCommandIdExtensionsBody = zod.object({
+export const CreateOpsCommandExtensionBody = zod.object({
   "reason": zod.string().min(1)
-})
+}).strict()
 
-export const PostV1OpsCommandsCommandIdExtensionsResponse = zod.object({
+export const CreateOpsCommandExtensionResponse = zod.object({
   "commandId": zod.string().optional(),
   "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
   "dryRun": zod.looseObject({
@@ -614,88 +614,88 @@ export const PostV1OpsCommandsCommandIdExtensionsResponse = zod.object({
  * FR-030, POL-021 A·C(4), 추천 적용 2026-10-14, ADR-0062. 명령 3·11만(명령 3은 추천 적용 2026-10-27, ADR-0095. 명령 3은 인시던트 포스트모템의 한 절로도 쓴다). 실행 기록·정지 동안의 조치·영향·재개는 시스템이 감사 로그와 지표에서 채운다(docs/features/control-tower.md §6). 제출하면 다른 commander에게 검토를 요청한다. 기한을 넘기면 SEV3
  * @summary 명령 3·11 사후 검토 보고서 제출(실행한 commander, 실행 뒤 48시간 안)
  */
-export const PostV1OpsCommandsCommandIdPostReviewParams = zod.object({
+export const CreateOpsCommandPostReviewParams = zod.object({
   "commandId": zod.string()
 })
 
-export const postV1OpsCommandsCommandIdPostReviewBodyTriggerDetailMax = 2000;
+export const createOpsCommandPostReviewBodyTriggerDetailMax = 2000;
 
-export const postV1OpsCommandsCommandIdPostReviewBodyWhyNoSecondApprovalMax = 2000;
+export const createOpsCommandPostReviewBodyWhyNoSecondApprovalMax = 2000;
 
-export const postV1OpsCommandsCommandIdPostReviewBodyActionsNoteMax = 2000;
+export const createOpsCommandPostReviewBodyActionsNoteMax = 2000;
 
-export const postV1OpsCommandsCommandIdPostReviewBodyImpactNoteMax = 2000;
+export const createOpsCommandPostReviewBodyImpactNoteMax = 2000;
 
 
 
-export const PostV1OpsCommandsCommandIdPostReviewBody = zod.object({
+export const CreateOpsCommandPostReviewBody = zod.object({
   "trigger": zod.enum(['METRIC_OR_INPUT_ERROR', 'CONTROL_MALFUNCTION', 'MISHANDLED_EXTERNAL_CAUSE', 'MONEY_OR_SEAT_SUSPICION', 'PRICE_OR_DISPLAY_ERROR', 'SYSTEM_FAILURE', 'PREVENTIVE_STOP', 'OTHER']).describe('계기. 명령 11: 지표·입력 오류, 자동 제어 동작 오류, 외부 원인에 대한 잘못된 대응. 명령 3: 돈·좌석 의심(오버셀·이중 결제·결제-발권 불일치·위조 통과), 가격·표시 오류, 시스템 장애 대응. 둘 다: 예방 정지(점검·시험), 그 밖. 명령에 맞지 않는 값은 422'),
-  "triggerDetail": zod.string().max(postV1OpsCommandsCommandIdPostReviewBodyTriggerDetailMax).describe('무엇을 보고 멈췄는지'),
-  "whyNoSecondApproval": zod.string().max(postV1OpsCommandsCommandIdPostReviewBodyWhyNoSecondApprovalMax).optional().describe('2인 승인을 기다리지 않은 이유(명령 11은 필수, 빠지면 422. 명령 3은 1인 실행이 규칙이라 쓰지 않는다)'),
-  "actionsNote": zod.string().max(postV1OpsCommandsCommandIdPostReviewBodyActionsNoteMax).optional().describe('정지 동안의 조치에 덧붙일 설명(선택)'),
-  "impactNote": zod.string().max(postV1OpsCommandsCommandIdPostReviewBodyImpactNoteMax).optional().describe('영향 해석(선택)'),
+  "triggerDetail": zod.string().max(createOpsCommandPostReviewBodyTriggerDetailMax).describe('무엇을 보고 멈췄는지'),
+  "whyNoSecondApproval": zod.string().max(createOpsCommandPostReviewBodyWhyNoSecondApprovalMax).optional().describe('2인 승인을 기다리지 않은 이유(명령 11은 필수, 빠지면 422. 명령 3은 1인 실행이 규칙이라 쓰지 않는다)'),
+  "actionsNote": zod.string().max(createOpsCommandPostReviewBodyActionsNoteMax).optional().describe('정지 동안의 조치에 덧붙일 설명(선택)'),
+  "impactNote": zod.string().max(createOpsCommandPostReviewBodyImpactNoteMax).optional().describe('영향 해석(선택)'),
   "followUps": zod.array(zod.object({
   "task": zod.string().optional(),
   "owner": zod.string().optional(),
   "dueDate": zod.iso.date().optional(),
   "issueUrl": zod.url().optional()
-})).optional().describe('후속 조치(0개 이상). 자동 제어 규칙이나 임계값을 바꿔야 하면 결정 기록이나 ADR로 잇는다')
-})
+}).strict()).optional().describe('후속 조치(0개 이상). 자동 제어 규칙이나 임계값을 바꿔야 하면 결정 기록이나 ADR로 잇는다')
+}).strict()
 
-export const PostV1OpsCommandsCommandIdPostReviewResponse = zod.void()
+export const CreateOpsCommandPostReviewResponse = zod.void()
 
 /**
  * FR-030, POL-021 C(4), 추천 적용 2026-10-14, ADR-0062. 실행한 commander가 부르면 403('실행한 분은 검토할 수 없습니다. 다른 commander가 검토합니다', 1인 기간 예외는 403 설명). 기한을 넘기면 SEV3
  * @summary 명령 3·11 사후 검토 보고서 검토(실행자가 아닌 commander, 제출 뒤 7일 안)
  */
-export const PostV1OpsCommandsCommandIdPostReviewConfirmationParams = zod.object({
+export const CreateOpsCommandPostReviewConfirmationParams = zod.object({
   "commandId": zod.string()
 })
 
-export const postV1OpsCommandsCommandIdPostReviewConfirmationBodyCommentMax = 2000;
+export const createOpsCommandPostReviewConfirmationBodyCommentMax = 2000;
 
 
 
-export const PostV1OpsCommandsCommandIdPostReviewConfirmationBody = zod.object({
+export const CreateOpsCommandPostReviewConfirmationBody = zod.object({
   "assessment": zod.enum(['APPROPRIATE', 'INAPPROPRIATE', 'INCONCLUSIVE']).describe('정지가 적절했는가: 적절했다, 적절하지 않았다, 판단 보류'),
-  "comment": zod.string().min(1).max(postV1OpsCommandsCommandIdPostReviewConfirmationBodyCommentMax)
-})
+  "comment": zod.string().min(1).max(createOpsCommandPostReviewConfirmationBodyCommentMax)
+}).strict()
 
-export const PostV1OpsCommandsCommandIdPostReviewConfirmationResponse = zod.unknown()
+export const CreateOpsCommandPostReviewConfirmationResponse = zod.unknown()
 
 /**
  * SCR-068 [홈 구성] 탭(추천 적용 2026-10-14, ADR-0063). viewer 이상
  * @summary 홈 구성 읽기(배너·테마와 판)
  */
-export const getV1OpsHomeLayoutResponseBannersItemAltMax = 300;
+export const getOpsHomeLayoutResponseBannersItemAltMax = 300;
 
-export const getV1OpsHomeLayoutResponseBannersMax = 10;
+export const getOpsHomeLayoutResponseBannersMax = 10;
 
-export const getV1OpsHomeLayoutResponseThemesItemNameMax = 30;
+export const getOpsHomeLayoutResponseThemesItemNameMax = 30;
 
-export const getV1OpsHomeLayoutResponseThemesItemProductionIdsMax = 20;
+export const getOpsHomeLayoutResponseThemesItemProductionIdsMax = 20;
 
-export const getV1OpsHomeLayoutResponseThemesMax = 5;
+export const getOpsHomeLayoutResponseThemesMax = 5;
 
 
 
-export const GetV1OpsHomeLayoutResponse = zod.object({
+export const GetOpsHomeLayoutResponse = zod.object({
   "version": zod.int().describe('읽은 판. 저장 때 서버 판과 다르면 409'),
   "banners": zod.array(zod.object({
   "bannerId": zod.string().optional(),
   "productionId": zod.string().describe('판매 승인된 공연만(아니면 422, ADR-0093). 누르면 대표 회차 상세'),
   "imageId": zod.string().describe('POST /v1/ops/home-layout/banner-images로 올린 이미지'),
-  "alt": zod.string().min(1).max(getV1OpsHomeLayoutResponseBannersItemAltMax).describe('대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다'),
+  "alt": zod.string().min(1).max(getOpsHomeLayoutResponseBannersItemAltMax).describe('대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다'),
   "displayFrom": zod.iso.datetime({"offset":true}),
   "displayUntil": zod.iso.datetime({"offset":true})
-})).max(getV1OpsHomeLayoutResponseBannersMax),
+})).max(getOpsHomeLayoutResponseBannersMax),
   "themes": zod.array(zod.object({
   "themeId": zod.string().optional(),
-  "name": zod.string().min(1).max(getV1OpsHomeLayoutResponseThemesItemNameMax),
-  "productionIds": zod.array(zod.string()).min(1).max(getV1OpsHomeLayoutResponseThemesItemProductionIdsMax).describe('판매 승인된 공연만, 순서대로(ADR-0093)'),
+  "name": zod.string().min(1).max(getOpsHomeLayoutResponseThemesItemNameMax),
+  "productionIds": zod.array(zod.string()).min(1).max(getOpsHomeLayoutResponseThemesItemProductionIdsMax).describe('판매 승인된 공연만, 순서대로(ADR-0093)'),
   "displayFrom": zod.iso.datetime({"offset":true}),
   "displayUntil": zod.iso.datetime({"offset":true})
-})).max(getV1OpsHomeLayoutResponseThemesMax),
+})).max(getOpsHomeLayoutResponseThemesMax),
   "updatedBy": zod.string().optional().describe('마지막으로 저장한 운영자'),
   "updatedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('홈 구성(SCR-068 [홈 구성] 탭, operator 1인, 감사 로그). 배너와 테마를 한 문서로 통째로 저장하고 version으로 동시 수정을 막는다. 개수 상한은 [가정](추천 적용 2026-10-14, ADR-0063)')
@@ -704,76 +704,73 @@ export const GetV1OpsHomeLayoutResponse = zod.object({
  * SCR-068 [홈 구성] 탭(추천 적용 2026-10-14, ADR-0063). 판매 승인된 공연만(아니면 422), 노출 끝은 시작 뒤, 배너 이미지는 banner-images로 먼저 올린 것. If-Match의 version이 서버 판과 다르면 412(다른 운영자가 먼저 저장, 2026-10-28 기술 검토 낮음-030로 409에서 바꿨다). 저장하면 감사 로그에 사유와 전후 차이를 남기고 홈 캐시 태그를 무효화한다. 운영 명령 카탈로그(control-tower §3) 밖의 콘텐츠 설정이라 2인 승인·되돌리기 명령이 없고, 되돌리려면 이전 판을 다시 저장한다
  * @summary 홈 구성 저장(배너·테마 통째로, operator 1인, 사유 필수, 감사 로그)
  */
-export const PutV1OpsHomeLayoutHeader = zod.object({
+export const PutOpsHomeLayoutHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const putV1OpsHomeLayoutBodyOneBannersItemAltMax = 300;
+export const putOpsHomeLayoutBodyBannersItemAltMax = 300;
 
-export const putV1OpsHomeLayoutBodyOneBannersMax = 10;
+export const putOpsHomeLayoutBodyBannersMax = 10;
 
-export const putV1OpsHomeLayoutBodyOneThemesItemNameMax = 30;
+export const putOpsHomeLayoutBodyThemesItemNameMax = 30;
 
-export const putV1OpsHomeLayoutBodyOneThemesItemProductionIdsMax = 20;
+export const putOpsHomeLayoutBodyThemesItemProductionIdsMax = 20;
 
-export const putV1OpsHomeLayoutBodyOneThemesMax = 5;
+export const putOpsHomeLayoutBodyThemesMax = 5;
 
-export const putV1OpsHomeLayoutBodyTwoReasonMax = 500;
+export const putOpsHomeLayoutBodyReasonMax = 500;
 
 
 
-export const PutV1OpsHomeLayoutBody = zod.object({
+export const PutOpsHomeLayoutBody = zod.object({
   "version": zod.int().describe('읽은 판. 저장 때 서버 판과 다르면 409'),
   "banners": zod.array(zod.object({
   "bannerId": zod.string().optional(),
   "productionId": zod.string().describe('판매 승인된 공연만(아니면 422, ADR-0093). 누르면 대표 회차 상세'),
   "imageId": zod.string().describe('POST /v1/ops/home-layout/banner-images로 올린 이미지'),
-  "alt": zod.string().min(1).max(putV1OpsHomeLayoutBodyOneBannersItemAltMax).describe('대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다'),
+  "alt": zod.string().min(1).max(putOpsHomeLayoutBodyBannersItemAltMax).describe('대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다'),
   "displayFrom": zod.iso.datetime({"offset":true}),
   "displayUntil": zod.iso.datetime({"offset":true})
-})).max(putV1OpsHomeLayoutBodyOneBannersMax),
+}).strict()).max(putOpsHomeLayoutBodyBannersMax),
   "themes": zod.array(zod.object({
   "themeId": zod.string().optional(),
-  "name": zod.string().min(1).max(putV1OpsHomeLayoutBodyOneThemesItemNameMax),
-  "productionIds": zod.array(zod.string()).min(1).max(putV1OpsHomeLayoutBodyOneThemesItemProductionIdsMax).describe('판매 승인된 공연만, 순서대로(ADR-0093)'),
+  "name": zod.string().min(1).max(putOpsHomeLayoutBodyThemesItemNameMax),
+  "productionIds": zod.array(zod.string()).min(1).max(putOpsHomeLayoutBodyThemesItemProductionIdsMax).describe('판매 승인된 공연만, 순서대로(ADR-0093)'),
   "displayFrom": zod.iso.datetime({"offset":true}),
   "displayUntil": zod.iso.datetime({"offset":true})
-})).max(putV1OpsHomeLayoutBodyOneThemesMax),
-  "updatedBy": zod.string().optional().describe('마지막으로 저장한 운영자'),
-  "updatedAt": zod.iso.datetime({"offset":true}).optional()
-}).describe('홈 구성(SCR-068 [홈 구성] 탭, operator 1인, 감사 로그). 배너와 테마를 한 문서로 통째로 저장하고 version으로 동시 수정을 막는다. 개수 상한은 [가정](추천 적용 2026-10-14, ADR-0063)').and(zod.object({
-  "reason": zod.string().min(1).max(putV1OpsHomeLayoutBodyTwoReasonMax)
-}))
+}).strict()).max(putOpsHomeLayoutBodyThemesMax),
+  "reason": zod.string().min(1).max(putOpsHomeLayoutBodyReasonMax)
+}).strict().describe('HomeLayout의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(HomeLayout)와 같고 응답은 HomeLayout(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040). 서버가 채우는 updatedBy·updatedAt은 받지 않고, 저장 사유 reason을 함께 받는다(PUT /v1/ops/home-layout. allOf로 잇던 것을 한 스키마로 바꿔 orval이 읽기 전용 칸을 본문 Zod에 넣던 차이도 없앴다).')
 
-export const putV1OpsHomeLayoutResponseBannersItemAltMax = 300;
+export const putOpsHomeLayoutResponseBannersItemAltMax = 300;
 
-export const putV1OpsHomeLayoutResponseBannersMax = 10;
+export const putOpsHomeLayoutResponseBannersMax = 10;
 
-export const putV1OpsHomeLayoutResponseThemesItemNameMax = 30;
+export const putOpsHomeLayoutResponseThemesItemNameMax = 30;
 
-export const putV1OpsHomeLayoutResponseThemesItemProductionIdsMax = 20;
+export const putOpsHomeLayoutResponseThemesItemProductionIdsMax = 20;
 
-export const putV1OpsHomeLayoutResponseThemesMax = 5;
+export const putOpsHomeLayoutResponseThemesMax = 5;
 
 
 
-export const PutV1OpsHomeLayoutResponse = zod.object({
+export const PutOpsHomeLayoutResponse = zod.object({
   "version": zod.int().describe('읽은 판. 저장 때 서버 판과 다르면 409'),
   "banners": zod.array(zod.object({
   "bannerId": zod.string().optional(),
   "productionId": zod.string().describe('판매 승인된 공연만(아니면 422, ADR-0093). 누르면 대표 회차 상세'),
   "imageId": zod.string().describe('POST /v1/ops/home-layout/banner-images로 올린 이미지'),
-  "alt": zod.string().min(1).max(putV1OpsHomeLayoutResponseBannersItemAltMax).describe('대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다'),
+  "alt": zod.string().min(1).max(putOpsHomeLayoutResponseBannersItemAltMax).describe('대체 텍스트. 이미지에만 있는 정보(일시·장소)도 적는다'),
   "displayFrom": zod.iso.datetime({"offset":true}),
   "displayUntil": zod.iso.datetime({"offset":true})
-})).max(putV1OpsHomeLayoutResponseBannersMax),
+})).max(putOpsHomeLayoutResponseBannersMax),
   "themes": zod.array(zod.object({
   "themeId": zod.string().optional(),
-  "name": zod.string().min(1).max(putV1OpsHomeLayoutResponseThemesItemNameMax),
-  "productionIds": zod.array(zod.string()).min(1).max(putV1OpsHomeLayoutResponseThemesItemProductionIdsMax).describe('판매 승인된 공연만, 순서대로(ADR-0093)'),
+  "name": zod.string().min(1).max(putOpsHomeLayoutResponseThemesItemNameMax),
+  "productionIds": zod.array(zod.string()).min(1).max(putOpsHomeLayoutResponseThemesItemProductionIdsMax).describe('판매 승인된 공연만, 순서대로(ADR-0093)'),
   "displayFrom": zod.iso.datetime({"offset":true}),
   "displayUntil": zod.iso.datetime({"offset":true})
-})).max(putV1OpsHomeLayoutResponseThemesMax),
+})).max(putOpsHomeLayoutResponseThemesMax),
   "updatedBy": zod.string().optional().describe('마지막으로 저장한 운영자'),
   "updatedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('홈 구성(SCR-068 [홈 구성] 탭, operator 1인, 감사 로그). 배너와 테마를 한 문서로 통째로 저장하고 version으로 동시 수정을 막는다. 개수 상한은 [가정](추천 적용 2026-10-14, ADR-0063)')
@@ -782,36 +779,36 @@ export const PutV1OpsHomeLayoutResponse = zod.object({
  * SCR-068 [홈 구성](추천 적용 2026-10-14, ADR-0063). ADR-0062 결정 38의 공연 이미지 기준(형식·용량·화소 상한, 서버 재검사, 메타데이터 제거 뒤 파생본만 공개)을 따르고 크기는 가로형 1240×400 이상 [가정]이다. 출연자 사진이 든 이미지는 판매자가 홍보용으로 준 것만 쓴다(처리 근거는 docs/security/data-classification.md 법률 질문 23번, 확인 필요)
  * @summary 홈 배너 이미지 올리기(가로형, 한 장씩)
  */
-export const PostV1OpsHomeLayoutBannerImagesHeader = zod.object({
+export const CreateOpsHomeLayoutBannerImageHeader = zod.object({
   "X-Requested-With": zod.string()
 })
 
-export const PostV1OpsHomeLayoutBannerImagesBody = zod.object({
+export const CreateOpsHomeLayoutBannerImageBody = zod.object({
   "file": zod.instanceof(Blob)
-})
+}).strict()
 
-export const PostV1OpsHomeLayoutBannerImagesResponse = zod.void()
+export const CreateOpsHomeLayoutBannerImageResponse = zod.void()
 
 /**
  * FR-033, POL-024. 소유자 결정 2026-10-30(open-items 74번), 세부는 추천 적용 2026-10-30(docs/features/control-tower.md §9 '목록·상세 조회'). 목록은 커서로 나눈다(guidelines §3). sort 기본 DUE_ASC는 처리 기한이 가까운 순, LATEST는 최근 등록 순이다. 칸 가림은 docs/security/authz-matrix.md §4.1 '기관 요청' 행대로 서버가 역할에 맞춰 뺀다. CS 담당자는 view SUMMARY(ID, 기관, 종류, 기한, 상태)만, operator·commander는 view FULL이다. 칸을 더 달라는 매개변수는 무시한다. viewer는 이 기능이 없어 403이다(docs/planning/03 §3). Cache-Control: private, no-store
  * @summary 통보 목록(SCR-032, 기본은 처리 기한이 가까운 순)
  */
-export const getV1OpsComplianceNoticesQuerySortDefault = `DUE_ASC`;
-export const getV1OpsComplianceNoticesQueryLimitMax = 100;
+export const listOpsComplianceNoticesQuerySortDefault = `DUE_ASC`;
+export const listOpsComplianceNoticesQueryLimitMax = 100;
 
 
 
-export const GetV1OpsComplianceNoticesQueryParams = zod.object({
+export const ListOpsComplianceNoticesQueryParams = zod.object({
   "status": zod.array(zod.enum(['OPEN', 'TAKEN_DOWN', 'WITHDRAWN'])).optional().describe('쉼표로 이은 상태(없으면 전체)'),
-  "sort": zod.enum(['DUE_ASC', 'LATEST']).default(getV1OpsComplianceNoticesQuerySortDefault),
+  "sort": zod.enum(['DUE_ASC', 'LATEST']).default(listOpsComplianceNoticesQuerySortDefault),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsComplianceNoticesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsComplianceNoticesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const getV1OpsComplianceNoticesResponseItemsItemDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const listOpsComplianceNoticesResponseItemsItemDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const GetV1OpsComplianceNoticesResponse = zod.object({
+export const ListOpsComplianceNoticesResponse = zod.object({
   "items": zod.array(zod.object({
   "view": zod.enum(['SUMMARY', 'FULL']),
   "noticeId": zod.uuid(),
@@ -828,7 +825,7 @@ export const GetV1OpsComplianceNoticesResponse = zod.object({
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT', 'SUBMISSION_FILE']).optional().describe('SUBMISSION_FILE은 commander가 추출을 승인한 뒤 서버가 만든 제출 파일이다. 올리기로는 만들 수 없다(ComplianceDocumentUpload.kind에 없다, 추천 적용 2026-10-30, open-items 68번)'),
   "mediaType": zod.enum(['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']).optional().describe('내려받기 응답의 Content-Type. 올린 원본은 늘 application/pdf이고, 제출 파일만 요청 기관의 형식에 맞춰 셋 가운데 하나다(형식 목록은 [가정, wbs 4.4.1], 추천 적용 2026-10-30, GET /v1/ops/compliance/documents/{documentId})'),
   "sizeBytes": zod.int().optional(),
-  "sha256": zod.string().regex(getV1OpsComplianceNoticesResponseItemsItemDocumentsItemSha256RegExp).optional(),
+  "sha256": zod.string().regex(listOpsComplianceNoticesResponseItemsItemDocumentsItemSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional().describe('PENDING 검사 중, CLEAN 위협 없음(내려받기 가능), THREAT 위협 발견(내려받기 막음, SEV2)'),
   "uploadedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('올린 원본의 메타데이터. 원본은 공개하지 않는 격리 버킷에 받아 악성 코드 검사 결과가 \'위협 없음\'(CLEAN)일 때만 감사 저장소로 옮겨 내려받게 한다. 보존은 그 기록과 같다(통신사실확인자료 7년, 통신이용자정보 1년, control-tower §9)')).optional().describe('FULL만. 공문 원본'),
@@ -842,30 +839,30 @@ export const GetV1OpsComplianceNoticesResponse = zod.object({
  * FR-033, POL-024. operator 이상만 등록한다(control-tower §9 '접근 권한 통제'). 쓰기는 application/json만 받는다. 본문 스키마는 추천 적용 2026-10-30(docs/security/asvs/control-tower.md 2.1.1)
  * @summary 신고기관·수사기관 통보 문서 등록(24시간 타이머)
  */
-export const PostV1OpsComplianceNoticesHeader = zod.object({
+export const CreateOpsComplianceNoticeHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsComplianceNoticesBodyAgencyNameMax = 100;
+export const createOpsComplianceNoticeBodyAgencyNameMax = 100;
 
-export const postV1OpsComplianceNoticesBodyReviewIdsMax = 100;
+export const createOpsComplianceNoticeBodyReviewIdsMax = 100;
 
-export const postV1OpsComplianceNoticesBodySummaryMax = 2000;
+export const createOpsComplianceNoticeBodySummaryMax = 2000;
 
 
 
-export const PostV1OpsComplianceNoticesBody = zod.object({
+export const CreateOpsComplianceNoticeBody = zod.object({
   "requester": zod.enum(['AGENCY', 'POLICE']).describe('통보한 기관 종류. AGENCY는 신고기관(한국콘텐츠진흥원), POLICE는 경찰청 등 수사기관(docs/data.md data_request.requester와 같은 값)'),
-  "agencyName": zod.string().min(1).max(postV1OpsComplianceNoticesBodyAgencyNameMax).describe('접수 기관 이름'),
+  "agencyName": zod.string().min(1).max(createOpsComplianceNoticeBodyAgencyNameMax).describe('접수 기관 이름'),
   "receivedAt": zod.iso.datetime({"offset":true}).describe('공문 접수 시각. 처리 기한은 이 시각부터 센다'),
   "deadline": zod.enum(['H24', 'H10']).describe('처리 기한. 기본 H24(24시간)이고, 문화체육관광부 고시 사항이면 H10(10시간, 공연법 시행령 §3의3 2호 바목. 고시는 확인 필요, POL-024). 기한 2시간 전까지 미조치면 SEV2다'),
-  "reviewIds": zod.array(zod.uuid()).min(1).max(postV1OpsComplianceNoticesBodyReviewIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+  "reviewIds": zod.array(zod.uuid()).min(1).max(createOpsComplianceNoticeBodyReviewIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
   ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
   : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('통보에 적힌 불법 거래 게시물(관람 후기) ID. 노출 차단(…/takedown)이 이 목록에 명령 10을 건다(docs/data.md takedown_action.review_id)'),
-  "summary": zod.string().max(postV1OpsComplianceNoticesBodySummaryMax).optional().describe('통보 요약. 제어 문자와 양방향 제어 문자는 지운다(asvs/control-tower.md 1.3.3)')
+  "summary": zod.string().max(createOpsComplianceNoticeBodySummaryMax).optional().describe('통보 요약. 제어 문자와 양방향 제어 문자는 지운다(asvs/control-tower.md 1.3.3)')
 }).strict().describe('신고기관·수사기관 통보 문서 등록 본문(POST /v1/ops/compliance/notices, SCR-032). 등록하는 즉시 법정 처리 기한 타이머가 시작되고, 공문 원본은 등록 뒤 …/notices/{noticeId}/documents로 올린다(원본 올리기와 악성 코드 검사 때문에 타이머 시작이 늦어지지 않게 하려는 것이다). 칸은 docs/features/control-tower.md §9 \'신고기관·수사기관 통보 문서 등록\' 행이다. 길이·개수 상한은 [가정](추천 적용 2026-10-30, docs/security/asvs/control-tower.md 2.1.1, ADR-0159)')
 
-export const PostV1OpsComplianceNoticesResponse = zod.object({
+export const CreateOpsComplianceNoticeResponse = zod.object({
   "noticeId": zod.uuid().optional(),
   "dueAt": zod.iso.datetime({"offset":true}).optional()
 })
@@ -874,14 +871,14 @@ export const PostV1OpsComplianceNoticesResponse = zod.object({
  * FR-033, open-items 74번(추천 적용 2026-10-30). 칸 가림은 목록과 같다(CS 담당자는 view SUMMARY). 없는 통보는 404다. Cache-Control: private, no-store
  * @summary 통보 상세(SCR-032)
  */
-export const GetV1OpsComplianceNoticesNoticeIdParams = zod.object({
+export const GetOpsComplianceNoticeParams = zod.object({
   "noticeId": zod.uuid()
 })
 
-export const getV1OpsComplianceNoticesNoticeIdResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const getOpsComplianceNoticeResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const GetV1OpsComplianceNoticesNoticeIdResponse = zod.object({
+export const GetOpsComplianceNoticeResponse = zod.object({
   "view": zod.enum(['SUMMARY', 'FULL']),
   "noticeId": zod.uuid(),
   "requester": zod.enum(['AGENCY', 'POLICE']).describe('통보한 기관 종류(ComplianceNoticeCreate.requester와 같다)'),
@@ -897,7 +894,7 @@ export const GetV1OpsComplianceNoticesNoticeIdResponse = zod.object({
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT', 'SUBMISSION_FILE']).optional().describe('SUBMISSION_FILE은 commander가 추출을 승인한 뒤 서버가 만든 제출 파일이다. 올리기로는 만들 수 없다(ComplianceDocumentUpload.kind에 없다, 추천 적용 2026-10-30, open-items 68번)'),
   "mediaType": zod.enum(['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']).optional().describe('내려받기 응답의 Content-Type. 올린 원본은 늘 application/pdf이고, 제출 파일만 요청 기관의 형식에 맞춰 셋 가운데 하나다(형식 목록은 [가정, wbs 4.4.1], 추천 적용 2026-10-30, GET /v1/ops/compliance/documents/{documentId})'),
   "sizeBytes": zod.int().optional(),
-  "sha256": zod.string().regex(getV1OpsComplianceNoticesNoticeIdResponseDocumentsItemSha256RegExp).optional(),
+  "sha256": zod.string().regex(getOpsComplianceNoticeResponseDocumentsItemSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional().describe('PENDING 검사 중, CLEAN 위협 없음(내려받기 가능), THREAT 위협 발견(내려받기 막음, SEV2)'),
   "uploadedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('올린 원본의 메타데이터. 원본은 공개하지 않는 격리 버킷에 받아 악성 코드 검사 결과가 \'위협 없음\'(CLEAN)일 때만 감사 저장소로 옮겨 내려받게 한다. 보존은 그 기록과 같다(통신사실확인자료 7년, 통신이용자정보 1년, control-tower §9)')).optional().describe('FULL만. 공문 원본'),
@@ -909,24 +906,24 @@ export const GetV1OpsComplianceNoticesNoticeIdResponse = zod.object({
  * FR-033, control-tower §9 '자료 추출 및 법정 대장 관리'. operator 이상. multipart/form-data로 받고, 쿠키로 인증하는 쓰기라 gw-ops가 Origin을 확인한다(guidelines §9). 원본은 격리 버킷에 받고 악성 코드 검사가 끝나면 scanStatus가 바뀐다. 위협이 나오면 내려받기를 막고 SEV2로 알린다(추천 적용 2026-10-30, ADR-0159 결정 9)
  * @summary 통보 공문 원본 올리기(PDF만)
  */
-export const PostV1OpsComplianceNoticesNoticeIdDocumentsParams = zod.object({
+export const CreateOpsComplianceNoticeDocumentParams = zod.object({
   "noticeId": zod.uuid()
 })
 
-export const PostV1OpsComplianceNoticesNoticeIdDocumentsBody = zod.object({
+export const CreateOpsComplianceNoticeDocumentBody = zod.object({
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT']).describe('OFFICIAL_LETTER는 통보 공문·자료 요청서, COURT_WARRANT는 법원 허가서(영장)'),
   "file": zod.instanceof(Blob)
-}).describe('요청서·공문 원본 올리기 본문(multipart/form-data). PDF만 받는다: 확장자 .pdf와 첫 바이트 %PDF-가 함께 맞아야 하고(아니면 415), 한 파일 20MB [가정]를 넘으면 413, 압축 파일은 받지 않는다. 올린 파일 이름은 정화해 메타데이터로만 남기고 객체 키는 서버가 만든다(추천 적용 2026-10-30, docs/features/control-tower.md §9 \'자료 추출 및 법정 대장 관리\', docs/security/asvs/control-tower.md V5, ADR-0159 결정 9)')
+}).strict().describe('요청서·공문 원본 올리기 본문(multipart/form-data). PDF만 받는다: 확장자 .pdf와 첫 바이트 %PDF-가 함께 맞아야 하고(아니면 415), 한 파일 20MB [가정]를 넘으면 413, 압축 파일은 받지 않는다. 올린 파일 이름은 정화해 메타데이터로만 남기고 객체 키는 서버가 만든다(추천 적용 2026-10-30, docs/features/control-tower.md §9 \'자료 추출 및 법정 대장 관리\', docs/security/asvs/control-tower.md V5, ADR-0159 결정 9)')
 
-export const postV1OpsComplianceNoticesNoticeIdDocumentsResponseSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsComplianceNoticeDocumentResponseSha256RegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const PostV1OpsComplianceNoticesNoticeIdDocumentsResponse = zod.object({
+export const CreateOpsComplianceNoticeDocumentResponse = zod.object({
   "documentId": zod.uuid().optional(),
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT', 'SUBMISSION_FILE']).optional().describe('SUBMISSION_FILE은 commander가 추출을 승인한 뒤 서버가 만든 제출 파일이다. 올리기로는 만들 수 없다(ComplianceDocumentUpload.kind에 없다, 추천 적용 2026-10-30, open-items 68번)'),
   "mediaType": zod.enum(['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']).optional().describe('내려받기 응답의 Content-Type. 올린 원본은 늘 application/pdf이고, 제출 파일만 요청 기관의 형식에 맞춰 셋 가운데 하나다(형식 목록은 [가정, wbs 4.4.1], 추천 적용 2026-10-30, GET /v1/ops/compliance/documents/{documentId})'),
   "sizeBytes": zod.int().optional(),
-  "sha256": zod.string().regex(postV1OpsComplianceNoticesNoticeIdDocumentsResponseSha256RegExp).optional(),
+  "sha256": zod.string().regex(createOpsComplianceNoticeDocumentResponseSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional().describe('PENDING 검사 중, CLEAN 위협 없음(내려받기 가능), THREAT 위협 발견(내려받기 막음, SEV2)'),
   "uploadedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('올린 원본의 메타데이터. 원본은 공개하지 않는 격리 버킷에 받아 악성 코드 검사 결과가 \'위협 없음\'(CLEAN)일 때만 감사 저장소로 옮겨 내려받게 한다. 보존은 그 기록과 같다(통신사실확인자료 7년, 통신이용자정보 1년, control-tower §9)')
@@ -935,66 +932,66 @@ export const PostV1OpsComplianceNoticesNoticeIdDocumentsResponse = zod.object({
  * FR-033. 명령 10은 이 경로로만 낸다(Command.type TAKEDOWN은 이 경로가 남기는 명령 기록의 종류다). 본문 reason(사유 필수, 2,000자)과 Idempotency-Key를 받는다. 차단하면 통보 status가 TAKEN_DOWN이 된다. 통보가 정식으로 철회되면 그 통보로 가린 게시물을 모두 되살리는 복원은 POST /v1/ops/compliance/notices/{noticeId}/withdrawal(operator·commander, 사유 필수, status WITHDRAWN, takedown_action.restored_at)로 따로 낸다. 권한 밖은 403, 없는 통보는 404, 이미 차단했거나 철회한 통보는 409다(추천 적용 2026-10-30, control-tower §3·§9)
  * @summary 통보에 적힌 게시물 노출 차단 + 결과 제출 기록
  */
-export const PostV1OpsComplianceNoticesNoticeIdTakedownParams = zod.object({
+export const CreateOpsComplianceNoticeTakedownParams = zod.object({
   "noticeId": zod.string()
 })
 
-export const PostV1OpsComplianceNoticesNoticeIdTakedownHeader = zod.object({
+export const CreateOpsComplianceNoticeTakedownHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsComplianceNoticesNoticeIdTakedownBodyReasonMax = 2000;
+export const createOpsComplianceNoticeTakedownBodyReasonMax = 2000;
 
 
 
-export const PostV1OpsComplianceNoticesNoticeIdTakedownBody = zod.object({
-  "reason": zod.string().min(1).max(postV1OpsComplianceNoticesNoticeIdTakedownBodyReasonMax).describe('사유. 제어 문자와 양방향 제어 문자는 지운다(ADR-0159 결정 11)')
+export const CreateOpsComplianceNoticeTakedownBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsComplianceNoticeTakedownBodyReasonMax).describe('사유. 제어 문자와 양방향 제어 문자는 지운다(ADR-0159 결정 11)')
 }).strict()
 
-export const PostV1OpsComplianceNoticesNoticeIdTakedownResponse = zod.unknown()
+export const CreateOpsComplianceNoticeTakedownResponse = zod.unknown()
 
 /**
  * FR-033. 통보가 정식으로 철회되면 그 통보로 가린 게시물을 모두 되살린다. 통보 status는 WITHDRAWN이 되고 takedown_action.restored_at을 적는다. 사유는 필수다. 차단하지 않았거나 이미 철회한 통보는 409다(추천 적용 2026-10-30, control-tower §9 '게시물 차단 및 증적 생성')
  * @summary 통보 철회에 따른 노출 복원(명령 10 되돌리기)
  */
-export const PostV1OpsComplianceNoticesNoticeIdWithdrawalParams = zod.object({
+export const CreateOpsComplianceNoticeWithdrawalParams = zod.object({
   "noticeId": zod.string()
 })
 
-export const PostV1OpsComplianceNoticesNoticeIdWithdrawalHeader = zod.object({
+export const CreateOpsComplianceNoticeWithdrawalHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsComplianceNoticesNoticeIdWithdrawalBodyReasonMax = 2000;
+export const createOpsComplianceNoticeWithdrawalBodyReasonMax = 2000;
 
 
 
-export const PostV1OpsComplianceNoticesNoticeIdWithdrawalBody = zod.object({
-  "reason": zod.string().min(1).max(postV1OpsComplianceNoticesNoticeIdWithdrawalBodyReasonMax).describe('사유. 제어 문자와 양방향 제어 문자는 지운다(ADR-0159 결정 11)')
+export const CreateOpsComplianceNoticeWithdrawalBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsComplianceNoticeWithdrawalBodyReasonMax).describe('사유. 제어 문자와 양방향 제어 문자는 지운다(ADR-0159 결정 11)')
 }).strict()
 
-export const PostV1OpsComplianceNoticesNoticeIdWithdrawalResponse = zod.unknown()
+export const CreateOpsComplianceNoticeWithdrawalResponse = zod.unknown()
 
 /**
  * FR-034, POL-025. 소유자 결정 2026-10-30(open-items 74번), 세부는 추천 적용 2026-10-30(docs/features/control-tower.md §9 '목록·상세 조회'). 목록은 커서로 나눈다(guidelines §3). sort 기본 DUE_ASC는 제출 기한이 가까운 순, LATEST는 최근 접수 순이다. CS 담당자는 view SUMMARY(ID, 기관, 종류, 기한, 상태)만 받고 요청 대상자 식별값·범위·제출 파일은 받지 않는다. operator·commander는 view FULL이다(docs/security/authz-matrix.md §4.1 '기관 요청' 행). 칸을 더 달라는 매개변수는 무시한다. viewer는 이 기능이 없어 403이다. Cache-Control: private, no-store
  * @summary 자료 요청 목록(SCR-032, 기본은 제출 기한이 가까운 순)
  */
-export const getV1OpsComplianceDataRequestsQuerySortDefault = `DUE_ASC`;
-export const getV1OpsComplianceDataRequestsQueryLimitMax = 100;
+export const listOpsComplianceDataRequestsQuerySortDefault = `DUE_ASC`;
+export const listOpsComplianceDataRequestsQueryLimitMax = 100;
 
 
 
-export const GetV1OpsComplianceDataRequestsQueryParams = zod.object({
+export const ListOpsComplianceDataRequestsQueryParams = zod.object({
   "status": zod.array(zod.enum(['RECEIVED', 'REFUSED', 'PENDING_APPROVAL', 'APPROVED', 'EXTRACTED', 'SUBMITTED'])).optional().describe('쉼표로 이은 상태(없으면 전체). PENDING_APPROVAL로 거르면 commander의 승인 대기 목록이다'),
-  "sort": zod.enum(['DUE_ASC', 'LATEST']).default(getV1OpsComplianceDataRequestsQuerySortDefault),
+  "sort": zod.enum(['DUE_ASC', 'LATEST']).default(listOpsComplianceDataRequestsQuerySortDefault),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsComplianceDataRequestsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsComplianceDataRequestsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const getV1OpsComplianceDataRequestsResponseItemsItemDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const listOpsComplianceDataRequestsResponseItemsItemDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const GetV1OpsComplianceDataRequestsResponse = zod.object({
+export const ListOpsComplianceDataRequestsResponse = zod.object({
   "items": zod.array(zod.object({
   "view": zod.enum(['SUMMARY', 'FULL']),
   "requestId": zod.uuid(),
@@ -1019,7 +1016,7 @@ export const GetV1OpsComplianceDataRequestsResponse = zod.object({
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT', 'SUBMISSION_FILE']).optional().describe('SUBMISSION_FILE은 commander가 추출을 승인한 뒤 서버가 만든 제출 파일이다. 올리기로는 만들 수 없다(ComplianceDocumentUpload.kind에 없다, 추천 적용 2026-10-30, open-items 68번)'),
   "mediaType": zod.enum(['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']).optional().describe('내려받기 응답의 Content-Type. 올린 원본은 늘 application/pdf이고, 제출 파일만 요청 기관의 형식에 맞춰 셋 가운데 하나다(형식 목록은 [가정, wbs 4.4.1], 추천 적용 2026-10-30, GET /v1/ops/compliance/documents/{documentId})'),
   "sizeBytes": zod.int().optional(),
-  "sha256": zod.string().regex(getV1OpsComplianceDataRequestsResponseItemsItemDocumentsItemSha256RegExp).optional(),
+  "sha256": zod.string().regex(listOpsComplianceDataRequestsResponseItemsItemDocumentsItemSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional().describe('PENDING 검사 중, CLEAN 위협 없음(내려받기 가능), THREAT 위협 발견(내려받기 막음, SEV2)'),
   "uploadedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('올린 원본의 메타데이터. 원본은 공개하지 않는 격리 버킷에 받아 악성 코드 검사 결과가 \'위협 없음\'(CLEAN)일 때만 감사 저장소로 옮겨 내려받게 한다. 보존은 그 기록과 같다(통신사실확인자료 7년, 통신이용자정보 1년, control-tower §9)')).optional().describe('FULL만. 요청서·법원 허가서 원본과, 승인 뒤 만든 제출 파일(kind SUBMISSION_FILE)'),
@@ -1054,37 +1051,37 @@ export const GetV1OpsComplianceDataRequestsResponse = zod.object({
  * FR-034, POL-025. operator 이상만 등록한다(control-tower §9 '접근 권한 통제'). 점검표를 모두 통과하면 RECEIVED이고 아직 아무 자료도 뽑지 않는다. 추출과 제출은 요청자가 아닌 commander가 승인한 뒤에만 한다(소유자 결정 2026-10-30, open-items 68번, control-tower §9 '자료 요청의 상태'). 쓰기는 application/json만 받는다. 본문 스키마는 추천 적용 2026-10-30(docs/security/asvs/control-tower.md 2.1.1)
  * @summary 자료 요청 등록·검증(법적 근거·목적·범위·기한, 법원 허가). 추출·제출은 commander 승인 뒤(…/extraction-requests → …/approvals → …/submission)
  */
-export const PostV1OpsComplianceDataRequestsHeader = zod.object({
+export const CreateOpsComplianceDataRequestHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsComplianceDataRequestsBodyAgencyNameMax = 100;
+export const createOpsComplianceDataRequestBodyAgencyNameMax = 100;
 
-export const postV1OpsComplianceDataRequestsBodyLegalBasisMax = 500;
+export const createOpsComplianceDataRequestBodyLegalBasisMax = 500;
 
-export const postV1OpsComplianceDataRequestsBodyPurposeMax = 2000;
+export const createOpsComplianceDataRequestBodyPurposeMax = 2000;
 
-export const postV1OpsComplianceDataRequestsBodySubjectsItemValueMax = 200;
+export const createOpsComplianceDataRequestBodySubjectsItemValueMax = 200;
 
-export const postV1OpsComplianceDataRequestsBodySubjectsMax = 100;
-
-
-export const postV1OpsComplianceDataRequestsBodyNoteMax = 2000;
+export const createOpsComplianceDataRequestBodySubjectsMax = 100;
 
 
+export const createOpsComplianceDataRequestBodyNoteMax = 2000;
 
-export const PostV1OpsComplianceDataRequestsBody = zod.object({
+
+
+export const CreateOpsComplianceDataRequestBody = zod.object({
   "requester": zod.enum(['AGENCY', 'POLICE']).describe('요청 기관 종류(docs/data.md data_request.requester)'),
-  "agencyName": zod.string().min(1).max(postV1OpsComplianceDataRequestsBodyAgencyNameMax),
+  "agencyName": zod.string().min(1).max(createOpsComplianceDataRequestBodyAgencyNameMax),
   "kind": zod.enum(['REPORT', 'CDR', 'SUBSCRIBER']).describe('자료 종류(docs/data.md data_request.kind). REPORT는 신고기관 자료 제출(공연법 §4의3), CDR은 통신사실확인자료(법원 허가서 필수, 대장과 원본 7년 보존, 통신비밀보호법 §13), SUBSCRIBER는 통신이용자정보(1년 보존, 전기통신사업법 §83)'),
   "receivedAt": zod.iso.datetime({"offset":true}).describe('요청서 접수 시각'),
   "dueAt": zod.iso.datetime({"offset":true}).describe('요청서에 적힌 제출 기한'),
-  "legalBasis": zod.string().min(1).max(postV1OpsComplianceDataRequestsBodyLegalBasisMax).describe('요청서에 적힌 법적 근거'),
-  "purpose": zod.string().min(1).max(postV1OpsComplianceDataRequestsBodyPurposeMax).describe('요청 목적'),
+  "legalBasis": zod.string().min(1).max(createOpsComplianceDataRequestBodyLegalBasisMax).describe('요청서에 적힌 법적 근거'),
+  "purpose": zod.string().min(1).max(createOpsComplianceDataRequestBodyPurposeMax).describe('요청 목적'),
   "subjects": zod.array(zod.object({
   "kind": zod.enum(['ACCOUNT_ID', 'ORDER_NUMBER', 'PHONE', 'EMAIL']),
-  "value": zod.string().min(1).max(postV1OpsComplianceDataRequestsBodySubjectsItemValueMax)
-}).strict()).min(1).max(postV1OpsComplianceDataRequestsBodySubjectsMax).describe('요청 대상자. 이 값으로 범위 안의 자료만 골라 뽑는다'),
+  "value": zod.string().min(1).max(createOpsComplianceDataRequestBodySubjectsItemValueMax)
+}).strict()).min(1).max(createOpsComplianceDataRequestBodySubjectsMax).describe('요청 대상자. 이 값으로 범위 안의 자료만 골라 뽑는다'),
   "dataItems": zod.array(zod.enum(['BOOKINGS', 'BUYER_INFO', 'ACCESS_LOGS', 'POSTS', 'SUBSCRIBER_INFO'])).min(1).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
   ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
   : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('요청 범위의 자료 항목(POL-025: 예매 내역, 구매자 정보(카드 번호는 저장하지 않는다), 통신 접속기록, 관련 게시물, 통신이용자정보(성명·전화번호·ID·가입일))'),
@@ -1097,10 +1094,10 @@ export const PostV1OpsComplianceDataRequestsBody = zod.object({
   "dueChecked": zod.boolean().describe('제출 기한이 적혀 있는지'),
   "courtWarrantAttached": zod.boolean().describe('법원 허가서(영장)가 첨부됐는지. kind CDR이면 true여야 한다. 다른 종류는 false여도 된다')
 }).strict().describe('운영자가 단계별로 확인한 결과(docs/data.md data_request.legal_basis_checked). 앞의 넷(legalBasisChecked·purposeChecked·scopeChecked·dueChecked)은 모두 true여야 하고, courtWarrantAttached는 kind CDR일 때만 true여야 한다. 둘을 모두 지켜야 접수한다(control-tower §9 P1·P2)'),
-  "note": zod.string().max(postV1OpsComplianceDataRequestsBodyNoteMax).optional().describe('운영자 메모. 거부할 때 사유를 더 적는다')
+  "note": zod.string().max(createOpsComplianceDataRequestBodyNoteMax).optional().describe('운영자 메모. 거부할 때 사유를 더 적는다')
 }).strict().describe('신고기관·수사기관 자료 요청 등록 본문(POST /v1/ops/compliance/data-requests, SCR-032). 점검표가 하나라도 통과하지 않으면(통신사실확인자료인데 법원 허가서가 없는 경우 포함) 서버가 거부 사유를 기록하고 422로 답한다. 요청서·법원 허가서 원본은 등록 뒤 …/data-requests/{requestId}/documents로 올린다. 칸은 docs/features/control-tower.md §9 \'법적 자료 요청서 검증\' 행과 POL-025다. 대상자 식별값(subjects)은 본문으로만 받고(guidelines §9) 조회만 하는 역할에는 보이지 않는다(control-tower §9 \'접근 권한 통제\'). 대상자 식별값의 종류, 길이·개수 상한은 [가정](추천 적용 2026-10-30, docs/security/asvs/control-tower.md 2.1.1, ADR-0159)')
 
-export const PostV1OpsComplianceDataRequestsResponse = zod.object({
+export const CreateOpsComplianceDataRequestResponse = zod.object({
   "requestId": zod.uuid().optional(),
   "status": zod.enum(['RECEIVED']).optional(),
   "retainUntil": zod.iso.datetime({"offset":true}).optional()
@@ -1110,14 +1107,14 @@ export const PostV1OpsComplianceDataRequestsResponse = zod.object({
  * FR-034, open-items 74번(추천 적용 2026-10-30). 칸 가림은 목록과 같다(CS 담당자는 view SUMMARY). operator·commander가 열면 대상자 식별값이 들어 있어 관리 계정 접속기록(admin_data_access)에 남는다. 없는 요청은 404다. Cache-Control: private, no-store
  * @summary 자료 요청 상세(SCR-032, 점검표·추출 범위·승인 기록·제출 기록)
  */
-export const GetV1OpsComplianceDataRequestsRequestIdParams = zod.object({
+export const GetOpsComplianceDataRequestParams = zod.object({
   "requestId": zod.uuid()
 })
 
-export const getV1OpsComplianceDataRequestsRequestIdResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const getOpsComplianceDataRequestResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const GetV1OpsComplianceDataRequestsRequestIdResponse = zod.object({
+export const GetOpsComplianceDataRequestResponse = zod.object({
   "view": zod.enum(['SUMMARY', 'FULL']),
   "requestId": zod.uuid(),
   "requester": zod.enum(['AGENCY', 'POLICE']),
@@ -1141,7 +1138,7 @@ export const GetV1OpsComplianceDataRequestsRequestIdResponse = zod.object({
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT', 'SUBMISSION_FILE']).optional().describe('SUBMISSION_FILE은 commander가 추출을 승인한 뒤 서버가 만든 제출 파일이다. 올리기로는 만들 수 없다(ComplianceDocumentUpload.kind에 없다, 추천 적용 2026-10-30, open-items 68번)'),
   "mediaType": zod.enum(['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']).optional().describe('내려받기 응답의 Content-Type. 올린 원본은 늘 application/pdf이고, 제출 파일만 요청 기관의 형식에 맞춰 셋 가운데 하나다(형식 목록은 [가정, wbs 4.4.1], 추천 적용 2026-10-30, GET /v1/ops/compliance/documents/{documentId})'),
   "sizeBytes": zod.int().optional(),
-  "sha256": zod.string().regex(getV1OpsComplianceDataRequestsRequestIdResponseDocumentsItemSha256RegExp).optional(),
+  "sha256": zod.string().regex(getOpsComplianceDataRequestResponseDocumentsItemSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional().describe('PENDING 검사 중, CLEAN 위협 없음(내려받기 가능), THREAT 위협 발견(내려받기 막음, SEV2)'),
   "uploadedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('올린 원본의 메타데이터. 원본은 공개하지 않는 격리 버킷에 받아 악성 코드 검사 결과가 \'위협 없음\'(CLEAN)일 때만 감사 저장소로 옮겨 내려받게 한다. 보존은 그 기록과 같다(통신사실확인자료 7년, 통신이용자정보 1년, control-tower §9)')).optional().describe('FULL만. 요청서·법원 허가서 원본과, 승인 뒤 만든 제출 파일(kind SUBMISSION_FILE)'),
@@ -1174,32 +1171,32 @@ export const GetV1OpsComplianceDataRequestsRequestIdResponse = zod.object({
  * FR-034, POL-025. 소유자 결정 2026-10-30(open-items 68번), 세부는 추천 적용 2026-10-30. RECEIVED인 요청만 받고 PENDING_APPROVAL로 바꾼다. 승인 대기의 모양은 2인 명령과 같다(control-tower §4 T4·T6·T7). 서버가 항목별로 뽑힐 행 수를 세어 extraction.rowCounts로 돌려준다(센 값). 재인증 토큰은 비밀번호·TOTP와 패스키를 거친 것이어야 하고 작업 묶음 act는 '수사기관 자료'다(추천 적용 2026-10-30, docs/features/identity.md §3). 승인 대기는 요청 뒤 24시간 [가정]과 제출 기한 가운데 이른 때에 만료되어 RECEIVED로 돌아간다(행위자 SYSTEM). 승인 권한자에게 콘솔 알림과 온콜 앱 푸시를 보낸다
  * @summary 자료 추출 요청(최소 범위와 사유, commander 승인 대기)
  */
-export const PostV1OpsComplianceDataRequestsRequestIdExtractionRequestsParams = zod.object({
+export const CreateOpsComplianceDataRequestExtractionRequestParams = zod.object({
   "requestId": zod.uuid()
 })
 
-export const PostV1OpsComplianceDataRequestsRequestIdExtractionRequestsHeader = zod.object({
+export const CreateOpsComplianceDataRequestExtractionRequestHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
 
-export const postV1OpsComplianceDataRequestsRequestIdExtractionRequestsBodyReasonMax = 2000;
+export const createOpsComplianceDataRequestExtractionRequestBodyReasonMax = 2000;
 
 
 
-export const PostV1OpsComplianceDataRequestsRequestIdExtractionRequestsBody = zod.object({
+export const CreateOpsComplianceDataRequestExtractionRequestBody = zod.object({
   "dataItems": zod.array(zod.enum(['BOOKINGS', 'BUYER_INFO', 'ACCESS_LOGS', 'POSTS', 'SUBSCRIBER_INFO'])).min(1).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
   ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
   : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('뽑을 자료 항목. 요청서의 dataItems 안이어야 한다(밖이면 422)'),
   "periodFrom": zod.iso.datetime({"offset":true}).optional().describe('뽑을 기간의 시작. 요청서에 기간이 있으면 그 안이어야 한다(밖이면 422)'),
   "periodTo": zod.iso.datetime({"offset":true}).optional(),
-  "reason": zod.string().min(1).max(postV1OpsComplianceDataRequestsRequestIdExtractionRequestsBodyReasonMax).describe('이 범위가 꼭 필요한 이유. 제어 문자와 양방향 제어 문자는 지운다(docs/security/asvs/control-tower.md 1.3.3)')
+  "reason": zod.string().min(1).max(createOpsComplianceDataRequestExtractionRequestBodyReasonMax).describe('이 범위가 꼭 필요한 이유. 제어 문자와 양방향 제어 문자는 지운다(docs/security/asvs/control-tower.md 1.3.3)')
 }).strict().describe('자료 추출 요청 본문(POST /v1/ops/compliance/data-requests/{requestId}/extraction-requests, SCR-032). 요청서 범위 안에서 꼭 필요한 최소 범위를 고른다. 대상자는 등록한 요청서의 대상자 그대로이고 더할 수 없다. 받으면 PENDING_APPROVAL이 되고, 요청자가 아닌 commander가 승인한 뒤에만 뽑는다(소유자 결정 2026-10-30, open-items 68번. 칸과 길이 상한은 추천 적용 2026-10-30, docs/features/control-tower.md §9 \'자료 추출·제출 승인\')')
 
-export const postV1OpsComplianceDataRequestsRequestIdExtractionRequestsResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsComplianceDataRequestExtractionRequestResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const PostV1OpsComplianceDataRequestsRequestIdExtractionRequestsResponse = zod.object({
+export const CreateOpsComplianceDataRequestExtractionRequestResponse = zod.object({
   "view": zod.enum(['SUMMARY', 'FULL']),
   "requestId": zod.uuid(),
   "requester": zod.enum(['AGENCY', 'POLICE']),
@@ -1223,7 +1220,7 @@ export const PostV1OpsComplianceDataRequestsRequestIdExtractionRequestsResponse 
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT', 'SUBMISSION_FILE']).optional().describe('SUBMISSION_FILE은 commander가 추출을 승인한 뒤 서버가 만든 제출 파일이다. 올리기로는 만들 수 없다(ComplianceDocumentUpload.kind에 없다, 추천 적용 2026-10-30, open-items 68번)'),
   "mediaType": zod.enum(['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']).optional().describe('내려받기 응답의 Content-Type. 올린 원본은 늘 application/pdf이고, 제출 파일만 요청 기관의 형식에 맞춰 셋 가운데 하나다(형식 목록은 [가정, wbs 4.4.1], 추천 적용 2026-10-30, GET /v1/ops/compliance/documents/{documentId})'),
   "sizeBytes": zod.int().optional(),
-  "sha256": zod.string().regex(postV1OpsComplianceDataRequestsRequestIdExtractionRequestsResponseDocumentsItemSha256RegExp).optional(),
+  "sha256": zod.string().regex(createOpsComplianceDataRequestExtractionRequestResponseDocumentsItemSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional().describe('PENDING 검사 중, CLEAN 위협 없음(내려받기 가능), THREAT 위협 발견(내려받기 막음, SEV2)'),
   "uploadedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('올린 원본의 메타데이터. 원본은 공개하지 않는 격리 버킷에 받아 악성 코드 검사 결과가 \'위협 없음\'(CLEAN)일 때만 감사 저장소로 옮겨 내려받게 한다. 보존은 그 기록과 같다(통신사실확인자료 7년, 통신이용자정보 1년, control-tower §9)')).optional().describe('FULL만. 요청서·법원 허가서 원본과, 승인 뒤 만든 제출 파일(kind SUBMISSION_FILE)'),
@@ -1256,18 +1253,18 @@ export const PostV1OpsComplianceDataRequestsRequestIdExtractionRequestsResponse 
  * FR-034, POL-025. 소유자 결정 2026-10-30(open-items 68번), 세부는 추천 적용 2026-10-30. 두 번째 승인(POST /v1/ops/commands/{commandId}/approvals)과 같은 모양이다. 재인증 토큰은 비밀번호·TOTP와 패스키를 거친 것이어야 한다(factors에 passkey, act는 '수사기관 자료', POL-020, docs/features/identity.md §3, 추천 적용 2026-10-30). PENDING_APPROVAL이면 APPROVED로 바꾸고, 시스템이 승인된 범위의 행만 뽑아 제출 파일(documents의 kind SUBMISSION_FILE)과 SHA-256을 만든 뒤 EXTRACTED가 된다. 요청자 ≠ 승인자는 DB 검사 제약도 지킨다(docs/data.md data_request_approval)
  * @summary 자료 추출 승인(요청자가 아닌 commander, 실행 직전 재인증)
  */
-export const PostV1OpsComplianceDataRequestsRequestIdApprovalsParams = zod.object({
+export const CreateOpsComplianceDataRequestApprovalParams = zod.object({
   "requestId": zod.uuid()
 })
 
-export const PostV1OpsComplianceDataRequestsRequestIdApprovalsHeader = zod.object({
+export const CreateOpsComplianceDataRequestApprovalHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const postV1OpsComplianceDataRequestsRequestIdApprovalsResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsComplianceDataRequestApprovalResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const PostV1OpsComplianceDataRequestsRequestIdApprovalsResponse = zod.object({
+export const CreateOpsComplianceDataRequestApprovalResponse = zod.object({
   "view": zod.enum(['SUMMARY', 'FULL']),
   "requestId": zod.uuid(),
   "requester": zod.enum(['AGENCY', 'POLICE']),
@@ -1291,7 +1288,7 @@ export const PostV1OpsComplianceDataRequestsRequestIdApprovalsResponse = zod.obj
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT', 'SUBMISSION_FILE']).optional().describe('SUBMISSION_FILE은 commander가 추출을 승인한 뒤 서버가 만든 제출 파일이다. 올리기로는 만들 수 없다(ComplianceDocumentUpload.kind에 없다, 추천 적용 2026-10-30, open-items 68번)'),
   "mediaType": zod.enum(['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']).optional().describe('내려받기 응답의 Content-Type. 올린 원본은 늘 application/pdf이고, 제출 파일만 요청 기관의 형식에 맞춰 셋 가운데 하나다(형식 목록은 [가정, wbs 4.4.1], 추천 적용 2026-10-30, GET /v1/ops/compliance/documents/{documentId})'),
   "sizeBytes": zod.int().optional(),
-  "sha256": zod.string().regex(postV1OpsComplianceDataRequestsRequestIdApprovalsResponseDocumentsItemSha256RegExp).optional(),
+  "sha256": zod.string().regex(createOpsComplianceDataRequestApprovalResponseDocumentsItemSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional().describe('PENDING 검사 중, CLEAN 위협 없음(내려받기 가능), THREAT 위협 발견(내려받기 막음, SEV2)'),
   "uploadedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('올린 원본의 메타데이터. 원본은 공개하지 않는 격리 버킷에 받아 악성 코드 검사 결과가 \'위협 없음\'(CLEAN)일 때만 감사 저장소로 옮겨 내려받게 한다. 보존은 그 기록과 같다(통신사실확인자료 7년, 통신이용자정보 1년, control-tower §9)')).optional().describe('FULL만. 요청서·법원 허가서 원본과, 승인 뒤 만든 제출 파일(kind SUBMISSION_FILE)'),
@@ -1324,23 +1321,23 @@ export const PostV1OpsComplianceDataRequestsRequestIdApprovalsResponse = zod.obj
  * FR-034. 소유자 결정 2026-10-30(open-items 68번), 세부는 추천 적용 2026-10-30. outcome REVISE면 RECEIVED로 돌아가 operator가 범위를 고쳐 다시 요청하고, DECLINE이면 REFUSED(제공하지 않음)로 끝난다. 사유는 요청 기록에 남는다(control-tower §9 P5·P6)
  * @summary 자료 추출 요청의 거부(commander, 사유 필수)
  */
-export const PostV1OpsComplianceDataRequestsRequestIdRejectionsParams = zod.object({
+export const CreateOpsComplianceDataRequestRejectionParams = zod.object({
   "requestId": zod.uuid()
 })
 
-export const postV1OpsComplianceDataRequestsRequestIdRejectionsBodyReasonMax = 2000;
+export const createOpsComplianceDataRequestRejectionBodyReasonMax = 2000;
 
 
 
-export const PostV1OpsComplianceDataRequestsRequestIdRejectionsBody = zod.object({
+export const CreateOpsComplianceDataRequestRejectionBody = zod.object({
   "outcome": zod.enum(['REVISE', 'DECLINE']),
-  "reason": zod.string().min(1).max(postV1OpsComplianceDataRequestsRequestIdRejectionsBodyReasonMax)
+  "reason": zod.string().min(1).max(createOpsComplianceDataRequestRejectionBodyReasonMax)
 }).strict().describe('자료 추출 요청의 거부 본문(POST /v1/ops/compliance/data-requests/{requestId}/rejections, commander). REVISE는 범위를 고쳐 다시 요청하도록 접수(RECEIVED)로 돌리고, DECLINE은 제공하지 않음(REFUSED)으로 끝낸다. 사유는 요청 기록에 남는다(추천 적용 2026-10-30, docs/features/control-tower.md §9 \'자료 요청의 상태\' P5·P6)')
 
-export const postV1OpsComplianceDataRequestsRequestIdRejectionsResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsComplianceDataRequestRejectionResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const PostV1OpsComplianceDataRequestsRequestIdRejectionsResponse = zod.object({
+export const CreateOpsComplianceDataRequestRejectionResponse = zod.object({
   "view": zod.enum(['SUMMARY', 'FULL']),
   "requestId": zod.uuid(),
   "requester": zod.enum(['AGENCY', 'POLICE']),
@@ -1364,7 +1361,7 @@ export const PostV1OpsComplianceDataRequestsRequestIdRejectionsResponse = zod.ob
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT', 'SUBMISSION_FILE']).optional().describe('SUBMISSION_FILE은 commander가 추출을 승인한 뒤 서버가 만든 제출 파일이다. 올리기로는 만들 수 없다(ComplianceDocumentUpload.kind에 없다, 추천 적용 2026-10-30, open-items 68번)'),
   "mediaType": zod.enum(['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']).optional().describe('내려받기 응답의 Content-Type. 올린 원본은 늘 application/pdf이고, 제출 파일만 요청 기관의 형식에 맞춰 셋 가운데 하나다(형식 목록은 [가정, wbs 4.4.1], 추천 적용 2026-10-30, GET /v1/ops/compliance/documents/{documentId})'),
   "sizeBytes": zod.int().optional(),
-  "sha256": zod.string().regex(postV1OpsComplianceDataRequestsRequestIdRejectionsResponseDocumentsItemSha256RegExp).optional(),
+  "sha256": zod.string().regex(createOpsComplianceDataRequestRejectionResponseDocumentsItemSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional().describe('PENDING 검사 중, CLEAN 위협 없음(내려받기 가능), THREAT 위협 발견(내려받기 막음, SEV2)'),
   "uploadedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('올린 원본의 메타데이터. 원본은 공개하지 않는 격리 버킷에 받아 악성 코드 검사 결과가 \'위협 없음\'(CLEAN)일 때만 감사 저장소로 옮겨 내려받게 한다. 보존은 그 기록과 같다(통신사실확인자료 7년, 통신이용자정보 1년, control-tower §9)')).optional().describe('FULL만. 요청서·법원 허가서 원본과, 승인 뒤 만든 제출 파일(kind SUBMISSION_FILE)'),
@@ -1397,28 +1394,28 @@ export const PostV1OpsComplianceDataRequestsRequestIdRejectionsResponse = zod.ob
  * FR-034, POL-025. 소유자 결정 2026-10-30(open-items 68번), 세부는 추천 적용 2026-10-30. EXTRACTED인 요청만 받는다. fileSha256이 승인 뒤 만든 제출 파일과 다르면 422이고 대장에 행을 만들지 않는다. 받으면 SUBMITTED가 되고 제공 대장(provision_ledger)에 행을 쓰며, 보존 끝을 제공한 날부터 다시 센다(통신사실확인자료 7년, 통신이용자정보 1년, control-tower §9 P8)
  * @summary 제출 기록(제출 일시·받는 기관·방법·파일 SHA-256) → 제공 대장
  */
-export const PostV1OpsComplianceDataRequestsRequestIdSubmissionParams = zod.object({
+export const CreateOpsComplianceDataRequestSubmissionParams = zod.object({
   "requestId": zod.uuid()
 })
 
-export const postV1OpsComplianceDataRequestsRequestIdSubmissionBodyRecipientMax = 200;
+export const createOpsComplianceDataRequestSubmissionBodyRecipientMax = 200;
 
-export const postV1OpsComplianceDataRequestsRequestIdSubmissionBodyChannelMax = 200;
+export const createOpsComplianceDataRequestSubmissionBodyChannelMax = 200;
 
-export const postV1OpsComplianceDataRequestsRequestIdSubmissionBodyFileSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsComplianceDataRequestSubmissionBodyFileSha256RegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const PostV1OpsComplianceDataRequestsRequestIdSubmissionBody = zod.object({
+export const CreateOpsComplianceDataRequestSubmissionBody = zod.object({
   "submittedAt": zod.iso.datetime({"offset":true}).describe('기관에 낸 시각'),
-  "recipient": zod.string().min(1).max(postV1OpsComplianceDataRequestsRequestIdSubmissionBodyRecipientMax).describe('받은 기관과 부서'),
-  "channel": zod.string().min(1).max(postV1OpsComplianceDataRequestsRequestIdSubmissionBodyChannelMax).describe('낸 방법(전자 제출, 암호화한 파일 전달 등)'),
-  "fileSha256": zod.string().regex(postV1OpsComplianceDataRequestsRequestIdSubmissionBodyFileSha256RegExp).describe('낸 파일의 SHA-256(소문자 16진수)')
+  "recipient": zod.string().min(1).max(createOpsComplianceDataRequestSubmissionBodyRecipientMax).describe('받은 기관과 부서'),
+  "channel": zod.string().min(1).max(createOpsComplianceDataRequestSubmissionBodyChannelMax).describe('낸 방법(전자 제출, 암호화한 파일 전달 등)'),
+  "fileSha256": zod.string().regex(createOpsComplianceDataRequestSubmissionBodyFileSha256RegExp).describe('낸 파일의 SHA-256(소문자 16진수)')
 }).strict().describe('제출 기록 본문(POST /v1/ops/compliance/data-requests/{requestId}/submission). 승인 뒤 만든 제출 파일을 기관에 낸 뒤 적는다. fileSha256이 그 파일과 다르면 422다. 이 기록이 제공 대장(provision_ledger)의 행이 되고, 보존 끝(retainUntil)을 제공한 날부터 다시 센다(통신사실확인자료 7년, 통신이용자정보 1년. 추천 적용 2026-10-30, docs/features/control-tower.md §9 P8)')
 
-export const postV1OpsComplianceDataRequestsRequestIdSubmissionResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsComplianceDataRequestSubmissionResponseDocumentsItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const PostV1OpsComplianceDataRequestsRequestIdSubmissionResponse = zod.object({
+export const CreateOpsComplianceDataRequestSubmissionResponse = zod.object({
   "view": zod.enum(['SUMMARY', 'FULL']),
   "requestId": zod.uuid(),
   "requester": zod.enum(['AGENCY', 'POLICE']),
@@ -1442,7 +1439,7 @@ export const PostV1OpsComplianceDataRequestsRequestIdSubmissionResponse = zod.ob
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT', 'SUBMISSION_FILE']).optional().describe('SUBMISSION_FILE은 commander가 추출을 승인한 뒤 서버가 만든 제출 파일이다. 올리기로는 만들 수 없다(ComplianceDocumentUpload.kind에 없다, 추천 적용 2026-10-30, open-items 68번)'),
   "mediaType": zod.enum(['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']).optional().describe('내려받기 응답의 Content-Type. 올린 원본은 늘 application/pdf이고, 제출 파일만 요청 기관의 형식에 맞춰 셋 가운데 하나다(형식 목록은 [가정, wbs 4.4.1], 추천 적용 2026-10-30, GET /v1/ops/compliance/documents/{documentId})'),
   "sizeBytes": zod.int().optional(),
-  "sha256": zod.string().regex(postV1OpsComplianceDataRequestsRequestIdSubmissionResponseDocumentsItemSha256RegExp).optional(),
+  "sha256": zod.string().regex(createOpsComplianceDataRequestSubmissionResponseDocumentsItemSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional().describe('PENDING 검사 중, CLEAN 위협 없음(내려받기 가능), THREAT 위협 발견(내려받기 막음, SEV2)'),
   "uploadedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('올린 원본의 메타데이터. 원본은 공개하지 않는 격리 버킷에 받아 악성 코드 검사 결과가 \'위협 없음\'(CLEAN)일 때만 감사 저장소로 옮겨 내려받게 한다. 보존은 그 기록과 같다(통신사실확인자료 7년, 통신이용자정보 1년, control-tower §9)')).optional().describe('FULL만. 요청서·법원 허가서 원본과, 승인 뒤 만든 제출 파일(kind SUBMISSION_FILE)'),
@@ -1475,24 +1472,24 @@ export const PostV1OpsComplianceDataRequestsRequestIdSubmissionResponse = zod.ob
  * FR-034, POL-025. 통보 공문 원본 올리기(POST /v1/ops/compliance/notices/{noticeId}/documents)와 같은 규칙이다. 요청서와 법원 허가서는 대장과 함께 법정 기간 보존한다(추천 적용 2026-10-30, control-tower §9, ADR-0159 결정 9)
  * @summary 자료 요청서·법원 허가서 원본 올리기(PDF만)
  */
-export const PostV1OpsComplianceDataRequestsRequestIdDocumentsParams = zod.object({
+export const CreateOpsComplianceDataRequestDocumentParams = zod.object({
   "requestId": zod.uuid()
 })
 
-export const PostV1OpsComplianceDataRequestsRequestIdDocumentsBody = zod.object({
+export const CreateOpsComplianceDataRequestDocumentBody = zod.object({
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT']).describe('OFFICIAL_LETTER는 통보 공문·자료 요청서, COURT_WARRANT는 법원 허가서(영장)'),
   "file": zod.instanceof(Blob)
-}).describe('요청서·공문 원본 올리기 본문(multipart/form-data). PDF만 받는다: 확장자 .pdf와 첫 바이트 %PDF-가 함께 맞아야 하고(아니면 415), 한 파일 20MB [가정]를 넘으면 413, 압축 파일은 받지 않는다. 올린 파일 이름은 정화해 메타데이터로만 남기고 객체 키는 서버가 만든다(추천 적용 2026-10-30, docs/features/control-tower.md §9 \'자료 추출 및 법정 대장 관리\', docs/security/asvs/control-tower.md V5, ADR-0159 결정 9)')
+}).strict().describe('요청서·공문 원본 올리기 본문(multipart/form-data). PDF만 받는다: 확장자 .pdf와 첫 바이트 %PDF-가 함께 맞아야 하고(아니면 415), 한 파일 20MB [가정]를 넘으면 413, 압축 파일은 받지 않는다. 올린 파일 이름은 정화해 메타데이터로만 남기고 객체 키는 서버가 만든다(추천 적용 2026-10-30, docs/features/control-tower.md §9 \'자료 추출 및 법정 대장 관리\', docs/security/asvs/control-tower.md V5, ADR-0159 결정 9)')
 
-export const postV1OpsComplianceDataRequestsRequestIdDocumentsResponseSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsComplianceDataRequestDocumentResponseSha256RegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const PostV1OpsComplianceDataRequestsRequestIdDocumentsResponse = zod.object({
+export const CreateOpsComplianceDataRequestDocumentResponse = zod.object({
   "documentId": zod.uuid().optional(),
   "kind": zod.enum(['OFFICIAL_LETTER', 'COURT_WARRANT', 'SUBMISSION_FILE']).optional().describe('SUBMISSION_FILE은 commander가 추출을 승인한 뒤 서버가 만든 제출 파일이다. 올리기로는 만들 수 없다(ComplianceDocumentUpload.kind에 없다, 추천 적용 2026-10-30, open-items 68번)'),
   "mediaType": zod.enum(['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']).optional().describe('내려받기 응답의 Content-Type. 올린 원본은 늘 application/pdf이고, 제출 파일만 요청 기관의 형식에 맞춰 셋 가운데 하나다(형식 목록은 [가정, wbs 4.4.1], 추천 적용 2026-10-30, GET /v1/ops/compliance/documents/{documentId})'),
   "sizeBytes": zod.int().optional(),
-  "sha256": zod.string().regex(postV1OpsComplianceDataRequestsRequestIdDocumentsResponseSha256RegExp).optional(),
+  "sha256": zod.string().regex(createOpsComplianceDataRequestDocumentResponseSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional().describe('PENDING 검사 중, CLEAN 위협 없음(내려받기 가능), THREAT 위협 발견(내려받기 막음, SEV2)'),
   "uploadedAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('올린 원본의 메타데이터. 원본은 공개하지 않는 격리 버킷에 받아 악성 코드 검사 결과가 \'위협 없음\'(CLEAN)일 때만 감사 저장소로 옮겨 내려받게 한다. 보존은 그 기록과 같다(통신사실확인자료 7년, 통신이용자정보 1년, control-tower §9)')
@@ -1501,29 +1498,29 @@ export const PostV1OpsComplianceDataRequestsRequestIdDocumentsResponse = zod.obj
  * FR-033·034, control-tower §9. operator 이상만 내려받는다. 제출 파일(kind SUBMISSION_FILE)은 commander가 추출을 승인한 뒤에만 생기므로 승인 전에는 받을 documentId가 없다(open-items 68번, 추천 적용 2026-10-30). 조회만 하는 역할(CS의 기관 요청 조회, viewer·CS의 보안 사고 조회)은 건 요약만 보고 원본과 제출 파일은 받지 못한다(403, control-tower §9 '접근 권한 통제'). 악성 코드 검사 결과가 CLEAN일 때만 내준다. 응답 형식: 요청서·공문·법원 허가서 원본(OFFICIAL_LETTER·COURT_WARRANT)은 올릴 때 PDF만 받았으므로 늘 application/pdf다. 제출 파일(SUBMISSION_FILE)은 요청 기관이 정한 형식에 맞춰 시스템이 PDF·CSV(UTF-8)·XLSX 가운데 하나로 만들고, 그 형식을 ComplianceDocument.mediaType에 적는다(세 형식은 [가정, wbs 4.4.1]). CSV·XLSX는 정산 내려받기와 같은 공용 내보내기 함수로 만들어, 칸 값이 =·+·-·@·탭·널 문자로 시작하면 앞에 작은따옴표를 붙인다(docs/security/asvs/settlement.md 1.2.10). 어느 형식이든 Content-Type은 mediaType 그대로이고 X-Content-Type-Options: nosniff, Content-Disposition: attachment에 서버가 정한 이름(종류·ID·날짜와 형식에 맞는 확장자 .pdf·.csv·.xlsx, ASCII 영문·숫자·하이픈)을 넣으며 Cache-Control: no-store다(형식 규칙은 추천 적용 2026-10-30). 콘솔 안에서 열지 않는다. 내려받기는 접속기록에 남는다(추천 적용 2026-10-30, docs/security/asvs/control-tower.md 5.4.1~5.4.3, ADR-0159 결정 9·10)
  * @summary 요청서·공문 원본과 제출 파일 내려받기
  */
-export const GetV1OpsComplianceDocumentsDocumentIdParams = zod.object({
+export const GetOpsComplianceDocumentParams = zod.object({
   "documentId": zod.uuid()
 })
 
-export const GetV1OpsComplianceDocumentsDocumentIdResponse = zod.unknown()
+export const GetOpsComplianceDocumentResponse = zod.unknown()
 
 /**
  * FR-063. 소유자 결정 2026-10-30(open-items 74번), 세부는 추천 적용 2026-10-30(docs/features/control-tower.md §9 '목록·상세 조회'). 목록은 커서로 나눈다(guidelines §3). sort 기본 DUE_ASC는 아직 하지 않은 의무 가운데 가장 가까운 기한 순, LATEST는 최근 등록 순이다. viewer와 CS 담당자는 view SUMMARY(ID, 종류, 가장 가까운 기한, 상태)만, operator·commander는 view FULL이다. 통지 대상 목록과 대상자 식별값은 어느 역할에도 싣지 않는다(docs/security/authz-matrix.md §4.1 '보안 사고와 이용자 통지' 행). 칸을 더 달라는 매개변수는 무시한다. Cache-Control: private, no-store
  * @summary 보안 사고 목록(SCR-032, 기본은 가장 가까운 의무 기한 순)
  */
-export const getV1OpsComplianceIncidentsQuerySortDefault = `DUE_ASC`;
-export const getV1OpsComplianceIncidentsQueryLimitMax = 100;
+export const listOpsComplianceIncidentsQuerySortDefault = `DUE_ASC`;
+export const listOpsComplianceIncidentsQueryLimitMax = 100;
 
 
 
-export const GetV1OpsComplianceIncidentsQueryParams = zod.object({
+export const ListOpsComplianceIncidentsQueryParams = zod.object({
   "status": zod.array(zod.enum(['OPEN', 'CLOSED'])).optional().describe('쉼표로 이은 상태(없으면 전체)'),
-  "sort": zod.enum(['DUE_ASC', 'LATEST']).default(getV1OpsComplianceIncidentsQuerySortDefault),
+  "sort": zod.enum(['DUE_ASC', 'LATEST']).default(listOpsComplianceIncidentsQuerySortDefault),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsComplianceIncidentsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsComplianceIncidentsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1OpsComplianceIncidentsResponse = zod.object({
+export const ListOpsComplianceIncidentsResponse = zod.object({
   "items": zod.array(zod.object({
   "view": zod.enum(['SUMMARY', 'FULL']),
   "incidentId": zod.uuid(),
@@ -1557,36 +1554,36 @@ export const GetV1OpsComplianceIncidentsResponse = zod.object({
  * FR-063, ADR-0049. 침해사고 24시간 신고, 추가 사실 24시간, 이용자 통지, 피해구제 조치 14일(과학기술정보통신부장관에게 제출, 정보통신망법 §48의10②, 시행령 §60의16), 유출 72시간 통지·신고. operator 이상이 등록하고 해당 여부 판단은 commander가 한다(control-tower §10). 쓰기는 application/json만 받는다. 본문 스키마는 추천 적용 2026-10-30(docs/security/asvs/control-tower.md 2.1.1)
  * @summary 보안 사고 등록(종류, 인지 시각, 대상 수, 민감정보·고유식별정보, 외부 불법 접근) → 의무별 신고·통지 기한 생성과 SEV1
  */
-export const PostV1OpsComplianceIncidentsHeader = zod.object({
+export const CreateOpsComplianceIncidentHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsComplianceIncidentsBodyAffectedCountMin = 0;
+export const createOpsComplianceIncidentBodyAffectedCountMin = 0;
 
-export const postV1OpsComplianceIncidentsBodySummaryMax = 2000;
+export const createOpsComplianceIncidentBodySummaryMax = 2000;
 
 
 
-export const PostV1OpsComplianceIncidentsBody = zod.object({
+export const CreateOpsComplianceIncidentBody = zod.object({
   "kind": zod.enum(['INTRUSION', 'PERSONAL_DATA', 'PERSONAL_DATA_POSSIBLE']).describe('INTRUSION 침해사고(정보통신망법 §2①7호), PERSONAL_DATA 개인정보 유출등, PERSONAL_DATA_POSSIBLE 유출 가능성(시행령 §39의2·§39의3)'),
   "awareAt": zod.iso.datetime({"offset":true}).describe('인지 시각. 모든 기한의 기준이다'),
-  "affectedCount": zod.int().min(postV1OpsComplianceIncidentsBodyAffectedCountMin).optional().describe('유출등 대상 수. 모르면 뺀다'),
+  "affectedCount": zod.int().min(createOpsComplianceIncidentBodyAffectedCountMin).optional().describe('유출등 대상 수. 모르면 뺀다'),
   "sensitiveOrUnique": zod.boolean().describe('민감정보·고유식별정보 포함'),
   "externalAccess": zod.boolean().describe('외부 불법 접근'),
-  "summary": zod.string().max(postV1OpsComplianceIncidentsBodySummaryMax).optional().describe('사고 요약. 개인정보 원문을 넣지 않는다')
+  "summary": zod.string().max(createOpsComplianceIncidentBodySummaryMax).optional().describe('사고 요약. 개인정보 원문을 넣지 않는다')
 }).strict().describe('보안 사고 등록 본문(POST /v1/ops/compliance/incidents, FR-063). 등록하면 의무별 신고·통지 기한이 생기고 SEV1을 띄운다. 공격으로 생긴 장애의 시작·끝은 관제 지표가 채우므로 받지 않는다. 개인정보 원문은 넣지 않고 대상 수와 요약만 받는다(docs/data.md security_incident, ADR-0049). 길이 상한은 [가정](추천 적용 2026-10-30, docs/security/asvs/control-tower.md 2.1.1)')
 
-export const PostV1OpsComplianceIncidentsResponse = zod.void()
+export const CreateOpsComplianceIncidentResponse = zod.void()
 
 /**
  * FR-063, open-items 74번(추천 적용 2026-10-30). 칸 가림은 목록과 같다(viewer와 CS 담당자는 view SUMMARY). 없는 사고는 404다. Cache-Control: private, no-store
  * @summary 보안 사고 상세(SCR-032, 의무별 기한과 신고·통지 기록)
  */
-export const GetV1OpsComplianceIncidentsIncidentIdParams = zod.object({
+export const GetOpsComplianceIncidentParams = zod.object({
   "incidentId": zod.uuid()
 })
 
-export const GetV1OpsComplianceIncidentsIncidentIdResponse = zod.object({
+export const GetOpsComplianceIncidentResponse = zod.object({
   "view": zod.enum(['SUMMARY', 'FULL']),
   "incidentId": zod.uuid(),
   "kind": zod.enum(['INTRUSION', 'PERSONAL_DATA', 'PERSONAL_DATA_POSSIBLE']),
@@ -1617,123 +1614,123 @@ export const GetV1OpsComplianceIncidentsIncidentIdResponse = zod.object({
  * FR-063. 개인정보 원문은 받지 않음. operator 이상. commander의 해당 판단이 기록되기 전이면 409다(판단 기록은 POST /v1/ops/compliance/incidents/{incidentId}/determination, commander, 본문 outcome APPLICABLE·UNDECIDED·NOT_APPLICABLE과 사유. control-tower §9.1 보내는 규칙 6, 추천 적용 2026-10-30). 쓰기는 application/json만 받는다. 본문 스키마는 추천 적용 2026-10-30(docs/security/asvs/control-tower.md 2.1.1)
  * @summary 신고·통지 수행 기록(의무, 기관, 방법, 시각, 내용 요약)
  */
-export const PostV1OpsComplianceIncidentsIncidentIdFilingsParams = zod.object({
+export const CreateOpsComplianceIncidentFilingParams = zod.object({
   "incidentId": zod.string()
 })
 
-export const postV1OpsComplianceIncidentsIncidentIdFilingsBodyChannelMax = 200;
+export const createOpsComplianceIncidentFilingBodyChannelMax = 200;
 
-export const postV1OpsComplianceIncidentsIncidentIdFilingsBodySummaryMax = 2000;
+export const createOpsComplianceIncidentFilingBodySummaryMax = 2000;
 
 
 
-export const PostV1OpsComplianceIncidentsIncidentIdFilingsBody = zod.object({
+export const CreateOpsComplianceIncidentFilingBody = zod.object({
   "duty": zod.enum(['KISA_REPORT_24H', 'ADDITIONAL_24H', 'USER_NOTICE', 'RELIEF_14D', 'SUBJECT_NOTICE_72H', 'PIPC_REPORT_72H', 'POSSIBILITY_NOTICE_72H', 'NOT_LEAKED_NOTICE']).describe('수행한 의무(docs/data.md incident_filing.duty)'),
-  "channel": zod.string().min(1).max(postV1OpsComplianceIncidentsIncidentIdFilingsBodyChannelMax).describe('기관과 방법(서면, 전자우편, 홈페이지 게시 등)'),
+  "channel": zod.string().min(1).max(createOpsComplianceIncidentFilingBodyChannelMax).describe('기관과 방법(서면, 전자우편, 홈페이지 게시 등)'),
   "doneAt": zod.iso.datetime({"offset":true}),
-  "summary": zod.string().min(1).max(postV1OpsComplianceIncidentsIncidentIdFilingsBodySummaryMax).describe('신고·통지 내용 요약. 개인정보 원문 없음')
+  "summary": zod.string().min(1).max(createOpsComplianceIncidentFilingBodySummaryMax).describe('신고·통지 내용 요약. 개인정보 원문 없음')
 }).strict().describe('신고·통지 수행 기록 본문(POST /v1/ops/compliance/incidents/{incidentId}/filings). 의무 하나에 한 줄이다. 개인정보 원문과 통지 대상 목록은 받지 않는다(docs/data.md incident_filing). 길이 상한은 [가정](추천 적용 2026-10-30, docs/security/asvs/control-tower.md 2.1.1)')
 
-export const PostV1OpsComplianceIncidentsIncidentIdFilingsResponse = zod.void()
+export const CreateOpsComplianceIncidentFilingResponse = zod.void()
 
 /**
  * FR-063. commander가 판단과 사유를 적는다(docs/data.md security_incident.decision·decided_by·decided_at). 해당함·판단이 서지 않음이면 그때부터 신고·통지 기록(…/filings)을 받는다. 이미 판단한 사고는 409다. 판단을 고칠 일이 생기면 사후 검토에 적는다(추천 적용 2026-10-30, control-tower §9.1 보내는 규칙 6)
  * @summary 보안 사고 해당 판단 기록(해당함·판단이 서지 않음·해당 없음)
  */
-export const PostV1OpsComplianceIncidentsIncidentIdDeterminationParams = zod.object({
+export const CreateOpsComplianceIncidentDeterminationParams = zod.object({
   "incidentId": zod.uuid()
 })
 
-export const PostV1OpsComplianceIncidentsIncidentIdDeterminationHeader = zod.object({
+export const CreateOpsComplianceIncidentDeterminationHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsComplianceIncidentsIncidentIdDeterminationBodyReasonMax = 2000;
+export const createOpsComplianceIncidentDeterminationBodyReasonMax = 2000;
 
 
 
-export const PostV1OpsComplianceIncidentsIncidentIdDeterminationBody = zod.object({
+export const CreateOpsComplianceIncidentDeterminationBody = zod.object({
   "outcome": zod.enum(['APPLICABLE', 'UNDECIDED', 'NOT_APPLICABLE']),
-  "reason": zod.string().min(1).max(postV1OpsComplianceIncidentsIncidentIdDeterminationBodyReasonMax)
+  "reason": zod.string().min(1).max(createOpsComplianceIncidentDeterminationBodyReasonMax)
 }).strict()
 
-export const PostV1OpsComplianceIncidentsIncidentIdDeterminationResponse = zod.unknown()
+export const CreateOpsComplianceIncidentDeterminationResponse = zod.unknown()
 
 /**
  * FR-063. 해당 없음으로 판단했거나 모든 신고·통지 의무의 기록을 마친 사고를 닫는다(status CLOSED). 판단 전이거나 남은 의무가 있으면 409다(추천 적용 2026-10-30, control-tower §9.1 6번)
  * @summary 보안 사고 종결(의무를 모두 마친 뒤)
  */
-export const PostV1OpsComplianceIncidentsIncidentIdClosureParams = zod.object({
+export const CreateOpsComplianceIncidentClosureParams = zod.object({
   "incidentId": zod.uuid()
 })
 
-export const PostV1OpsComplianceIncidentsIncidentIdClosureHeader = zod.object({
+export const CreateOpsComplianceIncidentClosureHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const PostV1OpsComplianceIncidentsIncidentIdClosureResponse = zod.unknown()
+export const CreateOpsComplianceIncidentClosureResponse = zod.unknown()
 
 /**
  * FR-064, ADR-0049. commander만
  * @summary 접속기록 정기 점검 목록(월별 점검과 자동 탐지된 이상 건)
  */
-export const getV1OpsComplianceAccessReviewsQueryLimitMax = 100;
+export const listOpsComplianceAccessReviewsQueryLimitMax = 100;
 
 
 
-export const GetV1OpsComplianceAccessReviewsQueryParams = zod.object({
+export const ListOpsComplianceAccessReviewsQueryParams = zod.object({
   "period": zod.string().optional(),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsComplianceAccessReviewsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsComplianceAccessReviewsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1OpsComplianceAccessReviewsResponse = zod.unknown()
+export const ListOpsComplianceAccessReviewsResponse = zod.unknown()
 
 /**
  * FR-064
  * @summary 월 정기 점검 완료 기록
  */
-export const PostV1OpsComplianceAccessReviewsReviewIdCompletionParams = zod.object({
+export const CreateOpsComplianceAccessReviewCompletionParams = zod.object({
   "reviewId": zod.string()
 })
 
-export const PostV1OpsComplianceAccessReviewsReviewIdCompletionResponse = zod.unknown()
+export const CreateOpsComplianceAccessReviewCompletionResponse = zod.unknown()
 
 /**
  * FR-064. 점검 대상 본인의 종결은 403이다. 예외는 시연 데이터(데모 환경의 점검 기록)뿐이고, 그때는 본인 종결을 받아 '자기 점검(시연)'(access_finding.self_review_demo)으로 남긴다. 스테이징·운영에는 이 예외가 없다(소유자 결정 2026-10-30, open-items 69번, 세부는 추천 적용 2026-10-30, docs/features/control-tower.md §9, C-T24·C-T60)
  * @summary 이상 건의 사유 확인과 사후조치 기록(자기 기록은 다른 commander만 종결)
  */
-export const PostV1OpsComplianceAccessFindingsFindingIdResolutionParams = zod.object({
+export const CreateOpsComplianceAccessFindingResolutionParams = zod.object({
   "findingId": zod.string()
 })
 
-export const postV1OpsComplianceAccessFindingsFindingIdResolutionBodyReasonMax = 2000;
+export const createOpsComplianceAccessFindingResolutionBodyReasonMax = 2000;
 
 
 
-export const PostV1OpsComplianceAccessFindingsFindingIdResolutionBody = zod.object({
-  "reason": zod.string().min(1).max(postV1OpsComplianceAccessFindingsFindingIdResolutionBodyReasonMax).describe('확인한 사유(소명). docs/data.md access_finding.reason'),
+export const CreateOpsComplianceAccessFindingResolutionBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsComplianceAccessFindingResolutionBodyReasonMax).describe('확인한 사유(소명). docs/data.md access_finding.reason'),
   "action": zod.enum(['NONE', 'REPORTED', 'RECALLED', 'DELETED', 'ACCESS_REVOKED', 'INCIDENT']).describe('사후조치(docs/data.md access_finding.action, docs/security/internal-management-plan.md §4.4)')
 }).strict()
 
-export const PostV1OpsComplianceAccessFindingsFindingIdResolutionResponse = zod.unknown()
+export const CreateOpsComplianceAccessFindingResolutionResponse = zod.unknown()
 
 /**
  * FR-057, POL-038. 결제자 이름·전화는 가려서 반환. 종류 필터에 문의(INQUIRY)·게시물 신고(CONTENT_REPORT)·권리 침해 삭제 요청(RIGHTS_REQUEST)이 있고, 신고 건은 신고 수·사유별 수만 싣고 신고자는 싣지 않는다(추천 적용 2026-10-19, ADR-0066). 정산 건 가운데 CS 담당자(cs_agent·cs_lead)에게 싣는 것은 정산 이의(STATEMENT_DISPUTE) 하나다. 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)은 operator·commander의 목록에만 나오고(viewer는 이 경로를 부르지 않는다, 소유자 결정 2026-10-30, open-items 82번 ①), CS 담당자가 kind로 걸러도 0건이다(소유자 결정 2026-10-30, open-items 72번, 건 종류의 나눔은 추천 적용 2026-10-30, docs/features/settlement.md §9, J-T27)
  * @summary CS 처리함 목록(종류·기한 필터)
  */
-export const getV1OpsCasesQueryLimitMax = 100;
+export const listOpsCasesQueryLimitMax = 100;
 
 
 
-export const GetV1OpsCasesQueryParams = zod.object({
+export const ListOpsCasesQueryParams = zod.object({
   "kind": zod.string().optional(),
   "dueWithinDays": zod.int().optional(),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsCasesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsCasesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1OpsCasesResponse = zod.object({
+export const ListOpsCasesResponse = zod.object({
   "items": zod.array(zod.object({
   "caseId": zod.string().optional(),
   "kind": zod.enum(['UNKNOWN_PAYMENT', 'REFUND_FAILED', 'FLAGGED', 'REFUND_ACCOUNT_PENDING', 'COMPENSATION_PENDING', 'ABUSE_FLAG', 'DISPUTE', 'JUDGEMENT_PENDING', 'STATEMENT_DISPUTE', 'SELLER_KYC_REQUIRED', 'PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'PORTONE_PAYOUT_EXECUTION', 'SCANNER_UNREPORTED', 'KOPIS_REPORT_FAILED', 'VERIFICATION_APPEAL', 'APPROVAL_EXECUTION_FAILED', 'RETURN_DELAYED', 'MINOR_CONTRACT_CANCEL', 'INQUIRY', 'CONTENT_REPORT', 'RIGHTS_REQUEST', 'PORTONE_LEDGER_MISMATCH', 'TICKET_NOT_ISSUED', 'PG_BALANCE_MISMATCH', 'APPEAL', 'FRAUD_OBJECTION_COMPENSATION']).optional().describe('APPEAL은 소명(예매 제한·양도 회수 대상 팬의 사정 설명, POST /v1/appeals). core-svc support 모듈이 받아 건을 요청하고, 건은 그 대상(예매 제한, 양도 회수 승인 업무)에 이어진다. 결과 기한은 예매 제한 소명이 3영업일 [가정], 양도 회수 소명이 그 승인 업무의 기한(입장 시작 전)이다(추천 적용 2026-10-30, docs/features/transfer-refund.md §7.1). PG_BALANCE_MISMATCH는 결제사 잔액 대사 차이(결제사·상점별 지급대행 잔액이 PEAKET 원장과 다름. 차이가 0이 아니면 건을 만들고 1만 원 [가정]을 넘으면 SEV3, 지급 묶음은 멈추지 않는다, settlement §5.5, 추천 적용 2026-10-28, 기술 검토 중간-043). TICKET_NOT_ISSUED는 결제 뒤 미발권(승인 뒤 발권 기한 30분 [가정]을 넘겼거나 다시 보내도 같은 오류로 자동 재시도를 멈춘 주문. 확인 4시간 [가정], 발권 다시 실행 또는 \'시스템 잘못이 확인된 환불\', 추천 적용 2026-10-28, ADR-0106). PORTONE_LEDGER_MISMATCH는 포트원 원장 불일치(PEAKET 지급과 이어지지 않거나 금액·받는 계좌가 다른 출금, 콘솔에서 바뀐 파트너 정산 계좌, 이체 원장과 다른 잔액 입력). targetRef는 포트원 이체 ID·파트너 ID·지급 묶음 ID이고, 열린 건에서 (kind, targetRef)가 하나다(settlement §5.3, 추천 적용 2026-10-28, ADR-0108). RETURN_DELAYED는 굿즈 반품 요청 뒤 7일 [가정] 동안 판매자 도착 확인이 없는 건(transfer-refund §7.1). MINOR_CONTRACT_CANCEL은 미성년자 계약 취소 요청(확인 결과 안내 3영업일, 승인 뒤 환급 3영업일, POL-038 ⑧). 추천 적용 2026-10-14, ADR-0062. INQUIRY는 고객 문의(답변 3영업일 [가정], 문의 유형 \'공연(판매자) 관련 분쟁\'은 DISPUTE, \'미성년자 계약 취소\'는 MINOR_CONTRACT_CANCEL로 온다), CONTENT_REPORT는 게시물 신고(같은 후기의 신고는 한 건, 결과 3영업일 [가정]), RIGHTS_REQUEST는 권리 침해 삭제 요청(정보통신망법 §44의2, 1영업일 [가정]). 추천 적용 2026-10-19, ADR-0066'),
@@ -1753,17 +1750,17 @@ export const GetV1OpsCasesResponse = zod.object({
  * FR-057, FR-069, FR-070, POL-038, POL-044, 추천 적용 2026-10-19, ADR-0066. CS 처리함 상세 패널(SCR-045)이 부른다. 문의 건은 문의 기록(팬·답변·진행 경과), 게시물 신고 건은 사유별 수·신고 상세(신고한 계정은 가림)·후기 본문과 사진 파생본 주소, 권리 침해 삭제 요청은 신청인이 고른 통지 수단을 준다. 팬의 이름·연락처는 가린 값이고 가림 해제는 열람 사유를 남기는 팬 조회(SCR-066) 규칙을 따른다. ops-svc가 권한과 감사 로그를 처리하고 core-svc support·review 모듈 내부 API로 읽는다. operator·commander(조회)와 CS 담당자(docs/planning/03 §3 'CS 처리함' 행). 정산 이의 건은 그 정산서 하나의 금액 항목·상태·이의 내용(statementDispute)만 싣고 결제사 내부 ID·결제사 오류 원문·정산 계좌는 싣지 않는다. CS 담당자가 지급·대사·KYC 건 상세를 열면 없는 건과 같은 404다(소유자 결정 2026-10-30, open-items 72번, 세부는 추천 적용 2026-10-30, docs/features/settlement.md §9, J-T27)
  * @summary CS 처리함 건 상세(문의 기록·게시물 신고 목록·후기 본문과 사진, 가린 값)
  */
-export const GetV1OpsCasesCaseIdParams = zod.object({
+export const GetOpsCaseParams = zod.object({
   "caseId": zod.string()
 })
 
-export const getV1OpsCasesCaseIdResponseTwoReportsItemDetailMax = 2000;
+export const getOpsCaseResponseTwoReportsItemDetailMax = 2000;
 
-export const getV1OpsCasesCaseIdResponseTwoStatementDisputeDisputeDetailMax = 2000;
+export const getOpsCaseResponseTwoStatementDisputeDisputeDetailMax = 2000;
 
 
 
-export const GetV1OpsCasesCaseIdResponse = zod.object({
+export const GetOpsCaseResponse = zod.object({
   "caseId": zod.string().optional(),
   "kind": zod.enum(['UNKNOWN_PAYMENT', 'REFUND_FAILED', 'FLAGGED', 'REFUND_ACCOUNT_PENDING', 'COMPENSATION_PENDING', 'ABUSE_FLAG', 'DISPUTE', 'JUDGEMENT_PENDING', 'STATEMENT_DISPUTE', 'SELLER_KYC_REQUIRED', 'PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'PORTONE_PAYOUT_EXECUTION', 'SCANNER_UNREPORTED', 'KOPIS_REPORT_FAILED', 'VERIFICATION_APPEAL', 'APPROVAL_EXECUTION_FAILED', 'RETURN_DELAYED', 'MINOR_CONTRACT_CANCEL', 'INQUIRY', 'CONTENT_REPORT', 'RIGHTS_REQUEST', 'PORTONE_LEDGER_MISMATCH', 'TICKET_NOT_ISSUED', 'PG_BALANCE_MISMATCH', 'APPEAL', 'FRAUD_OBJECTION_COMPENSATION']).optional().describe('APPEAL은 소명(예매 제한·양도 회수 대상 팬의 사정 설명, POST /v1/appeals). core-svc support 모듈이 받아 건을 요청하고, 건은 그 대상(예매 제한, 양도 회수 승인 업무)에 이어진다. 결과 기한은 예매 제한 소명이 3영업일 [가정], 양도 회수 소명이 그 승인 업무의 기한(입장 시작 전)이다(추천 적용 2026-10-30, docs/features/transfer-refund.md §7.1). PG_BALANCE_MISMATCH는 결제사 잔액 대사 차이(결제사·상점별 지급대행 잔액이 PEAKET 원장과 다름. 차이가 0이 아니면 건을 만들고 1만 원 [가정]을 넘으면 SEV3, 지급 묶음은 멈추지 않는다, settlement §5.5, 추천 적용 2026-10-28, 기술 검토 중간-043). TICKET_NOT_ISSUED는 결제 뒤 미발권(승인 뒤 발권 기한 30분 [가정]을 넘겼거나 다시 보내도 같은 오류로 자동 재시도를 멈춘 주문. 확인 4시간 [가정], 발권 다시 실행 또는 \'시스템 잘못이 확인된 환불\', 추천 적용 2026-10-28, ADR-0106). PORTONE_LEDGER_MISMATCH는 포트원 원장 불일치(PEAKET 지급과 이어지지 않거나 금액·받는 계좌가 다른 출금, 콘솔에서 바뀐 파트너 정산 계좌, 이체 원장과 다른 잔액 입력). targetRef는 포트원 이체 ID·파트너 ID·지급 묶음 ID이고, 열린 건에서 (kind, targetRef)가 하나다(settlement §5.3, 추천 적용 2026-10-28, ADR-0108). RETURN_DELAYED는 굿즈 반품 요청 뒤 7일 [가정] 동안 판매자 도착 확인이 없는 건(transfer-refund §7.1). MINOR_CONTRACT_CANCEL은 미성년자 계약 취소 요청(확인 결과 안내 3영업일, 승인 뒤 환급 3영업일, POL-038 ⑧). 추천 적용 2026-10-14, ADR-0062. INQUIRY는 고객 문의(답변 3영업일 [가정], 문의 유형 \'공연(판매자) 관련 분쟁\'은 DISPUTE, \'미성년자 계약 취소\'는 MINOR_CONTRACT_CANCEL로 온다), CONTENT_REPORT는 게시물 신고(같은 후기의 신고는 한 건, 결과 3영업일 [가정]), RIGHTS_REQUEST는 권리 침해 삭제 요청(정보통신망법 §44의2, 1영업일 [가정]). 추천 적용 2026-10-19, ADR-0066'),
   "targetRef": zod.string().optional().describe('문의 건은 inquiryId, 신고 건은 신고된 reviewId, 소명 건은 appealId, 포트원 원장 불일치는 포트원 이체 ID·파트너 ID·지급 묶음 ID'),
@@ -1785,7 +1782,7 @@ export const GetV1OpsCasesCaseIdResponse = zod.object({
 }).describe('문의 기록 한 줄(ADR-0066)')).optional().describe('문의 건만. 시간 순 기록(팬·답변·진행 경과)'),
   "reports": zod.array(zod.object({
   "category": zod.enum(['SCALPING', 'MACRO', 'ABUSE', 'RIGHTS', 'ILLEGAL_FILMING', 'SPAM', 'OFF_TOPIC', 'OTHER']).optional(),
-  "detail": zod.string().max(getV1OpsCasesCaseIdResponseTwoReportsItemDetailMax).nullish().describe('grapheme 500자 [가정]'),
+  "detail": zod.string().max(getOpsCaseResponseTwoReportsItemDetailMax).nullish().describe('grapheme 500자 [가정]'),
   "rightsHolder": zod.boolean().optional(),
   "notifyChannel": zod.union([zod.literal('APP'),zod.literal('EMAIL'),zod.literal(null)]).nullish(),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
@@ -1818,7 +1815,7 @@ export const GetV1OpsCasesCaseIdResponse = zod.object({
   "status": zod.string().optional().describe('SettlementStatement.status와 같은 값(이의 중이면 DISPUTED)'),
   "disputeDueAt": zod.iso.datetime({"offset":true}).optional(),
   "disputeReasonCode": zod.enum(['GROSS_AMOUNT', 'REFUND_AMOUNT', 'COMMISSION', 'OFFSET', 'OTHER']).optional().describe('파트너가 낸 이의 사유 코드(POST /v1/partner/settlements/{statementId}/disputes)'),
-  "disputeDetail": zod.string().max(getV1OpsCasesCaseIdResponseTwoStatementDisputeDisputeDetailMax).nullish(),
+  "disputeDetail": zod.string().max(getOpsCaseResponseTwoStatementDisputeDisputeDetailMax).nullish(),
   "disputedAt": zod.iso.datetime({"offset":true}).optional()
 }).nullish().describe('STATEMENT_DISPUTE만. 그 정산서 하나의 금액 항목·상태·이의 내용이다. 결제사(pg·결제 상점), 결제사 내부 ID, 결제사 오류 원문, 정산 계좌는 싣지 않는다(SettlementStatement와 다른 모양이다). cs_lead는 이 건에서 이의 기각(POST /v1/ops/settlements/{statementId}/dispute-dismissal)이나 이의를 인정한 수기 조정 요청(POST /v1/ops/settlements/{statementId}/adjustments)을 부른다(소유자 결정 2026-10-30, open-items 72번, 칸은 추천 적용 2026-10-30, docs/features/settlement.md §9, docs/design/d5 §7.6)')
 })).describe('CS 처리함 건 상세(GET /v1/ops/cases/{caseId}, 추천 적용 2026-10-19, ADR-0066). 신고한 계정은 싣지 않는다')
@@ -1827,25 +1824,25 @@ export const GetV1OpsCasesCaseIdResponse = zod.object({
  * FR-057, POL-038. 정책 밖 돈·소유권 처리는 이 경로가 아니라 승인 업무(approval-requests)로 한다. 누가 갱신하는가: CS 담당자(cs_agent·cs_lead)는 CS 담당자 목록에 나오는 건을, operator·commander는 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)을 갱신한다(docs/design/d5 §7.6 '정산 건의 나눔'의 처리 버튼, docs/features/settlement.md §9). 서버가 건 종류와 역할로 다시 판정하고, 맞지 않으면 403이다(추천 적용 2026-10-30)
  * @summary CS 처리함 건 갱신(담당 배정, 상태, 결과 통지 기록)
  */
-export const PatchV1OpsCasesCaseIdParams = zod.object({
+export const UpdateOpsCaseParams = zod.object({
   "caseId": zod.string()
 })
 
-export const PatchV1OpsCasesCaseIdHeader = zod.object({
+export const UpdateOpsCaseHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const patchV1OpsCasesCaseIdBodyResultNoteMax = 2000;
+export const updateOpsCaseBodyResultNoteMax = 2000;
 
 
 
-export const PatchV1OpsCasesCaseIdBody = zod.object({
+export const UpdateOpsCaseBody = zod.object({
   "assignee": zod.string().optional(),
   "status": zod.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional(),
-  "resultNote": zod.string().max(patchV1OpsCasesCaseIdBodyResultNoteMax).optional()
-})
+  "resultNote": zod.string().max(updateOpsCaseBodyResultNoteMax).optional()
+}).strict()
 
-export const PatchV1OpsCasesCaseIdResponse = zod.object({
+export const UpdateOpsCaseResponse = zod.object({
   "caseId": zod.string().optional(),
   "kind": zod.enum(['UNKNOWN_PAYMENT', 'REFUND_FAILED', 'FLAGGED', 'REFUND_ACCOUNT_PENDING', 'COMPENSATION_PENDING', 'ABUSE_FLAG', 'DISPUTE', 'JUDGEMENT_PENDING', 'STATEMENT_DISPUTE', 'SELLER_KYC_REQUIRED', 'PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'PORTONE_PAYOUT_EXECUTION', 'SCANNER_UNREPORTED', 'KOPIS_REPORT_FAILED', 'VERIFICATION_APPEAL', 'APPROVAL_EXECUTION_FAILED', 'RETURN_DELAYED', 'MINOR_CONTRACT_CANCEL', 'INQUIRY', 'CONTENT_REPORT', 'RIGHTS_REQUEST', 'PORTONE_LEDGER_MISMATCH', 'TICKET_NOT_ISSUED', 'PG_BALANCE_MISMATCH', 'APPEAL', 'FRAUD_OBJECTION_COMPENSATION']).optional().describe('APPEAL은 소명(예매 제한·양도 회수 대상 팬의 사정 설명, POST /v1/appeals). core-svc support 모듈이 받아 건을 요청하고, 건은 그 대상(예매 제한, 양도 회수 승인 업무)에 이어진다. 결과 기한은 예매 제한 소명이 3영업일 [가정], 양도 회수 소명이 그 승인 업무의 기한(입장 시작 전)이다(추천 적용 2026-10-30, docs/features/transfer-refund.md §7.1). PG_BALANCE_MISMATCH는 결제사 잔액 대사 차이(결제사·상점별 지급대행 잔액이 PEAKET 원장과 다름. 차이가 0이 아니면 건을 만들고 1만 원 [가정]을 넘으면 SEV3, 지급 묶음은 멈추지 않는다, settlement §5.5, 추천 적용 2026-10-28, 기술 검토 중간-043). TICKET_NOT_ISSUED는 결제 뒤 미발권(승인 뒤 발권 기한 30분 [가정]을 넘겼거나 다시 보내도 같은 오류로 자동 재시도를 멈춘 주문. 확인 4시간 [가정], 발권 다시 실행 또는 \'시스템 잘못이 확인된 환불\', 추천 적용 2026-10-28, ADR-0106). PORTONE_LEDGER_MISMATCH는 포트원 원장 불일치(PEAKET 지급과 이어지지 않거나 금액·받는 계좌가 다른 출금, 콘솔에서 바뀐 파트너 정산 계좌, 이체 원장과 다른 잔액 입력). targetRef는 포트원 이체 ID·파트너 ID·지급 묶음 ID이고, 열린 건에서 (kind, targetRef)가 하나다(settlement §5.3, 추천 적용 2026-10-28, ADR-0108). RETURN_DELAYED는 굿즈 반품 요청 뒤 7일 [가정] 동안 판매자 도착 확인이 없는 건(transfer-refund §7.1). MINOR_CONTRACT_CANCEL은 미성년자 계약 취소 요청(확인 결과 안내 3영업일, 승인 뒤 환급 3영업일, POL-038 ⑧). 추천 적용 2026-10-14, ADR-0062. INQUIRY는 고객 문의(답변 3영업일 [가정], 문의 유형 \'공연(판매자) 관련 분쟁\'은 DISPUTE, \'미성년자 계약 취소\'는 MINOR_CONTRACT_CANCEL로 온다), CONTENT_REPORT는 게시물 신고(같은 후기의 신고는 한 건, 결과 3영업일 [가정]), RIGHTS_REQUEST는 권리 침해 삭제 요청(정보통신망법 §44의2, 1영업일 [가정]). 추천 적용 2026-10-19, ADR-0066'),
   "targetRef": zod.string().optional().describe('문의 건은 inquiryId, 신고 건은 신고된 reviewId, 소명 건은 appealId, 포트원 원장 불일치는 포트원 이체 ID·파트너 ID·지급 묶음 ID'),
@@ -1862,24 +1859,24 @@ export const PatchV1OpsCasesCaseIdResponse = zod.object({
  * FR-057, FR-069, POL-038, 추천 적용 2026-10-19, ADR-0066. kind ANSWER는 답변, PROGRESS는 진행 경과다. 문의가 이어진 건(INQUIRY와 문의로 접수한 DISPUTE·MINOR_CONTRACT_CANCEL)만 받고 그 밖은 409. CS 담당자(cs_agent)만(docs/planning/03 §3). ops-svc가 권한과 감사 로그(담당자 관리 계정 ID)를 처리한 뒤 core-svc support 모듈 내부 API로 기록을 넣고 팬에게 알린다(앱 알림·이메일). 팬에게는 '피켓 고객센터'로만 보이고 담당자 이름은 싣지 않는다. ANSWER면 문의가 답변 완료가 되고 답변 뒤 14일 [가정] 동안 추가 문의가 없으면 닫힌다. 담당자가 문의를 닫을 때는 PATCH /v1/ops/cases/{caseId}의 status RESOLVED다. 분쟁 건은 진행 경과 3영업일·결과 10영업일 기한을 지킨다(전자상거래법 §20③, 시행령 §25의2). 휴대폰 화면은 보기만 한다(docs/design/d5 §3.9)
  * @summary 문의 답변·진행 경과 남기기(CS 담당자, 문의가 이어진 건만)
  */
-export const PostV1OpsCasesCaseIdRepliesParams = zod.object({
+export const CreateOpsCaseReplyParams = zod.object({
   "caseId": zod.string()
 })
 
-export const PostV1OpsCasesCaseIdRepliesHeader = zod.object({
+export const CreateOpsCaseReplyHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsCasesCaseIdRepliesBodyBodyMax = 8000;
+export const createOpsCaseReplyBodyBodyMax = 8000;
 
 
 
-export const PostV1OpsCasesCaseIdRepliesBody = zod.object({
+export const CreateOpsCaseReplyBody = zod.object({
   "kind": zod.enum(['ANSWER', 'PROGRESS']),
-  "body": zod.string().min(1).max(postV1OpsCasesCaseIdRepliesBodyBodyMax).describe('NFC 정규화 뒤 grapheme 2,000자까지. 팬에게는 \'피켓 고객센터\'로 보인다')
+  "body": zod.string().min(1).max(createOpsCaseReplyBodyBodyMax).describe('NFC 정규화 뒤 grapheme 2,000자까지. 팬에게는 \'피켓 고객센터\'로 보인다')
 }).strict().describe('문의 답변·진행 경과(ADR-0066)')
 
-export const PostV1OpsCasesCaseIdRepliesResponse = zod.object({
+export const CreateOpsCaseReplyResponse = zod.object({
   "messageId": zod.string().optional(),
   "authorKind": zod.enum(['FAN', 'AGENT', 'SYSTEM']).optional(),
   "authorDisplay": zod.string().optional().describe('AGENT는 \'피켓 고객센터\'. 담당자 이름·계정 ID는 싣지 않는다'),
@@ -1892,120 +1889,63 @@ export const PostV1OpsCasesCaseIdRepliesResponse = zod.object({
  * FR-070, POL-044, POL-042, 추천 적용 2026-10-19, ADR-0066. CS 담당자(cs_agent)가 태블릿·데스크톱 관제 콘솔에서 부른다(휴대폰은 보기만, docs/design/d5 §3.9, docs/planning/03 §3). NO_ACTION은 조치 없음, TEMP_BLOCK은 임시조치(endsAt 필수, 지금부터 30일 이내, 정보통신망법 §44의2④·§44의3), BLOCK은 운영정책 위반 노출 차단, RELEASE는 가린 후기를 다시 보이게 한다(불법 촬영물 신고로 가린 후기를 확인한 뒤 되돌릴 때 포함). ops-svc가 권한·사유·감사 로그를 처리한 뒤 core-svc review 모듈 내부 API로 반영하고 그 후기의 신고를 처리 완료로 바꾼다. 결과는 신고자에게 알리고(처리함·해당 없음), 임시조치·노출 차단은 글쓴이에게 조치 사실과 사유 종류(violation)만 알리며 신고자를 밝히지 않는다. 후기 자리에는 '권리 침해 신고로 임시조치된 후기입니다(끝 날짜까지)'·'운영정책에 따라 가려진 후기입니다'를 보인다(§44의2② 후단 공시). 불법 촬영물인지 판단하기 어려우면 방송미디어통신심의위원회에 심의를 요청할 수 있다(전기통신사업법 시행령 §30의5③). 법정 통보에 따른 노출 차단은 이 경로가 아니라 POST /v1/ops/compliance/notices/{noticeId}/takedown이다. 같은 조치를 다시 보내면 지금 상태를 그대로 돌려준다
  * @summary 신고된 후기 처리(조치 없음·임시조치·노출 차단·해제, 사유 필수)
  */
-export const PostV1OpsReviewsReviewIdModerationParams = zod.object({
+export const CreateOpsReviewModerationParams = zod.object({
   "reviewId": zod.string()
 })
 
-export const postV1OpsReviewsReviewIdModerationBodyReasonMax = 2000;
+export const createOpsReviewModerationBodyReasonMax = 2000;
 
 
 
-export const PostV1OpsReviewsReviewIdModerationBody = zod.object({
+export const CreateOpsReviewModerationBody = zod.object({
   "action": zod.enum(['NO_ACTION', 'TEMP_BLOCK', 'BLOCK', 'RELEASE']).describe('NO_ACTION 조치 없음, TEMP_BLOCK 임시조치(최대 30일), BLOCK 운영정책 위반 노출 차단, RELEASE 가린 후기를 다시 보이게 함'),
-  "reason": zod.string().min(1).max(postV1OpsReviewsReviewIdModerationBodyReasonMax).describe('사유(필수, 감사 로그). 팬 개인정보를 적지 않는다'),
+  "reason": zod.string().min(1).max(createOpsReviewModerationBodyReasonMax).describe('사유(필수, 감사 로그). 팬 개인정보를 적지 않는다'),
   "violation": zod.enum(['SCALPING', 'MACRO', 'ABUSE', 'RIGHTS', 'ILLEGAL_FILMING', 'SPAM', 'OFF_TOPIC', 'OTHER']).optional().describe('TEMP_BLOCK·BLOCK일 때 필수. 글쓴이에게 알리는 사유 종류(신고 사유와 같은 코드)'),
   "endsAt": zod.iso.datetime({"offset":true}).optional().describe('TEMP_BLOCK일 때 필수. 지금부터 30일 이내(정보통신망법 §44의2④)')
 }).strict().describe('신고된 후기 처리(FR-070, POL-044, 추천 적용 2026-10-19, ADR-0066)')
 
-export const PostV1OpsReviewsReviewIdModerationResponse = zod.unknown()
+export const CreateOpsReviewModerationResponse = zod.unknown()
 
 /**
  * FR-058, FR-059, FR-061, POL-038. 필요한 승인 인원은 서버가 정함. kind COMMANDER_ROLE_CHANGE는 이 경로로 만들지 않고 PUT /v1/ops/admin-accounts/{adminAccountId}/role의 202만 만든다(그 경로의 대상·역할 조건을 거치게 하려는 것이다, docs/security/authz-matrix.md §6.1). 이 경로로 보내면 422이고, requestedRole은 받지 않는다(추천 적용 2026-10-30). kind FRAUD_ACTION도 이 경로로 만들지 않고 POST /v1/ops/fraud-cases/{caseId}/action-requests만 만든다(조사관 지정과 사건 상태를 거치게 하려는 것이다, 보내면 422, 추천 적용 2026-10-31, ADR-0171)
  * @summary 승인 업무 요청(사유 필수, 증빙은 확인 사실만)
  */
-export const PostV1OpsApprovalRequestsHeader = zod.object({
+export const CreateOpsApprovalRequestHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAccountCountMin = 0;
-
-export const postV1OpsApprovalRequestsBodyFraudCaseSummaryOneTicketCountMin = 0;
-
-export const postV1OpsApprovalRequestsBodyFraudCaseSummaryOnePurchaseCountMin = 0;
-
-
-export const postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
-
-export const postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAppealCountsRejectedMin = 0;
-
-export const postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAppealCountsExpiredMin = 0;
-
-export const postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
-
-export const postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAppealCountsPendingMin = 0;
-
-export const postV1OpsApprovalRequestsBodyFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
-export const postV1OpsApprovalRequestsBodyFraudCaseSummaryOneTargetsMax = 100;
-
-
-
-export const PostV1OpsApprovalRequestsBody = zod.object({
-  "approvalId": zod.string().optional(),
+export const CreateOpsApprovalRequestBody = zod.object({
   "kind": zod.enum(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'BOOKING_RESTRICTION', 'PAYOUT_BATCH', 'SETTLEMENT_ADJUSTMENT', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE', 'MINOR_CONTRACT_CANCEL', 'SALE_SUSPENSION', 'SALE_RESUMPTION', 'FRAUD_ACTION']).optional().describe('FRAUD_ACTION은 부정 예매 조치(표 취소, 이용 제한 걸기·풀기)다. 지정 부정 거래 조사관이 POST /v1/ops/fraud-cases/{caseId}/action-requests로만 만들고(이 스키마의 POST /v1/ops/approval-requests로 보내면 422), targetRef는 사건 ID, 승인자는 요청자가 아니고 가명정보 취급자 지정이 없으며 지난 90일 안에 그 지정을 거둔 적도 없는 commander다(2인, POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다. MINOR_CONTRACT_CANCEL은 미성년자 계약 취소(cs_agent 요청, 요청자 아닌 cs_lead 1인 승인, POL-038 ⑧, 추천 적용 2026-10-14, ADR-0062). SALE_SUSPENSION·SALE_RESUMPTION은 승인한 공연의 판매 중지·재개다. targetRef는 공연 ID이고 reasonCode는 SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER [가정] 가운데 하나다. operator 이상이 요청하고 요청자가 아닌 commander가 승인한다(2인, docs/planning/03 §2.14, POL-038 ⑩, 추천 적용 2026-10-28, ADR-0123)'),
   "targetRef": zod.string().optional(),
-  "requestedRole": zod.union([zod.literal('commander'),zod.literal('viewer'),zod.literal('operator'),zod.literal('cs_agent'),zod.literal('cs_lead'),zod.literal(null)]).nullish().describe('COMMANDER_ROLE_CHANGE에만. 승인되면 대상 관리 계정(targetRef)에 줄 역할이다. commander로 올리면 commander, commander에서 내리면 나머지 관제 역할 가운데 하나다. 그 밖의 종류는 null이다. 요청은 PUT /v1/ops/admin-accounts/{adminAccountId}/role의 202가 만들고, 승인 뒤 ops-svc가 이 값으로 identity-svc ChangeAdminRole을 부른다(docs/data.md approval_request.requested_role, 소유자 결정 2026-10-30, open-items 73번, 칸은 추천 적용 2026-10-30)'),
   "amount": zod.int().optional().describe('원 단위. 지급 묶음 합계를 담으므로 64비트 정수다(DB bigint, 추천 적용 2026-10-28, 기술 검토 높음-20)'),
   "reasonCode": zod.string().optional(),
   "reasonText": zod.string().optional(),
-  "evidenceChecked": zod.string().optional().describe('확인한 증빙 종류만. 파일과 내용은 받지 않는다'),
-  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2)]).optional().describe('서버가 정한다'),
-  "approvals": zod.array(zod.string()).optional(),
-  "status": zod.enum(['REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED']).optional().describe('승인 대기 저장 값은 PENDING_APPROVAL. FAILED는 원인을 고친 뒤 승인자가 approve를 다시 부르면 다시 실행한다(docs/planning/03 §2.10, 추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한이 지나 시스템이 끝낸 것이다(POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)'),
-  "dueAt": zod.iso.datetime({"offset":true}).optional(),
-  "fraudAction": zod.union([zod.literal('CANCEL_TICKETS'),zod.literal('RESTRICT'),zod.literal('LIFT_RESTRICTION'),zod.literal(null)]).nullish().describe('FRAUD_ACTION에만. 그 밖의 종류는 null(docs/data.md approval_request.fraud_action)'),
-  "fraudCaseSummary": zod.union([zod.object({
-  "caseId": zod.uuid().optional(),
-  "eventId": zod.string().optional(),
-  "reasonCategory": zod.enum(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION']).optional().describe('부정 예매 사유 범주 다섯(POL-046 ①): 자동화 프로그램(매크로·봇), 대기열 우회 링크, 보안문자 우회, 명의 대여·사들인 계정, 1인 매수 제한 회피. 팬에게 알리는 것은 이 범주뿐이고 점수와 가중치는 알리지 않는다(추천 적용 2026-10-31, ADR-0171)'),
-  "accountCount": zod.int().min(postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAccountCountMin).optional(),
-  "ticketCount": zod.int().min(postV1OpsApprovalRequestsBodyFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
-  "purchaseCount": zod.int().min(postV1OpsApprovalRequestsBodyFraudCaseSummaryOnePurchaseCountMin).optional(),
-  "limitPerPerson": zod.int().min(1).optional(),
-  "sharedAttributes": zod.array(zod.enum(['DEVICE', 'PAYMENT_METHOD', 'CONTACT', 'IP', 'ASN', 'IDENTITY_CONFLICT']).describe('묶음 계정이 함께 쓴 연결 값의 종류(FR-072): 기기 가명(deviceRef), 결제 수단 연결값(paymentMethodRef. 카드 지문이 없어 약한 값이다, docs/features/payment.md), 연락처·수령 정보 가명(contactRef), 시간창 안의 같은 IP, 같은 ASN(망 운영자 번호), 같은 본인확인으로 다른 계정에서 시도한 기록(docs/data.md identity_conflict_attempt). 추천 적용 2026-10-31, ADR-0171')).optional(),
-  "signals": zod.array(zod.enum(['LINK_GRAPH', 'SYNC_STEPS', 'VELOCITY', 'TIMING_BASELINE', 'BYPASS_TRACE', 'POST_MATCH']).describe('근거 신호. ADR-0171 결정 6의 분석 방법 여섯과 같다: 연결 그래프, 거의 같은 시각에 같은 단계를 밟는 동시 행동 군집, 같은 IP·기기에서 여러 계정을 빠르게 오가는 속도 규칙, 판매 시작부터 단계별 걸린 시간이 정상 기준선 밖, 입장 토큰 없는 홀드 시도·우회 링크 흔적, 외부 되팔이 게시물과 좌석 대조. 규칙과 점수는 docs/features/forensic-replay.md가 정한다(추천 적용 2026-10-31)')).optional(),
-  "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'ACCEPTED', 'REJECTED', 'PARTIAL']).optional(),
-  "investigatorOpinion": zod.string().nullish(),
-  "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('표 취소는 이 시각까지만 승인할 수 있고, 취소한 좌석은 언제나 정가 재판매로 돌린다(2026-10-31 정함, 그래서 예전 초안의 재판매 여부 칸 resaleOnCancel은 뺐다)'),
-  "appealCounts": zod.object({
-  "accepted": zod.int().min(postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
-  "rejected": zod.int().min(postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
-  "expired": zod.int().min(postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
-  "submitted": zod.int().min(postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
-  "pending": zod.int().min(postV1OpsApprovalRequestsBodyFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
-}).optional().describe('계정별 소명 결과의 수. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다(추천 적용 2026-10-31, ADR-0173)'),
-  "snapshotHash": zod.string().regex(postV1OpsApprovalRequestsBodyFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
-  "targets": zod.array(zod.object({
-  "accountId": zod.string().optional(),
-  "ticketIds": zod.array(zod.string()).optional().describe('이 요청에 든 그 계정 결제 표(CANCEL_TICKETS만)'),
-  "holderTicketIds": zod.array(zod.string()).optional().describe('그 가운데 받은 사람(사건 밖 계정)이 가진 표. 조사관이 받은 사람의 진술을 보고 넣은 표다'),
-  "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional()
-})).max(postV1OpsApprovalRequestsBodyFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
-}).describe('승인 업무 FRAUD_ACTION에 붙는 사건 요약(읽기 전용, POL-038 ⑪, SCR-046). 그 업무의 요청자와 승인 자격자만 상세를 받고(그 밖은 404) 그 상세에 늘 실린다(추천 적용 2026-10-31, ADR-0171). 승인자는 조사 경로(/v1/ops/fraud-cases 아래)를 부르지 않고 이것만 본다. 계정 수·근거 신호 범주·소명 결과·조사관 의견과, 범위를 줄이는 데 쓰는 대상 계정·표의 내부 ID(targets)만 싣고, 기기 가명·연락처 가명·IP 같은 연결 값은 싣지 않는다. 열람은 접속기록에 남는다(추천 적용 2026-10-31, ADR-0171 결정 7. targets는 (추천 적용 2026-10-31, ADR-0173))'),zod.null()]).optional().describe('FRAUD_ACTION에만, 읽기 전용. FRAUD_ACTION 상세는 요청자와 승인 자격자만 받으므로(그 밖은 404) 상세에는 늘 실리고, 다른 종류에는 null이다(추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다(POL-038 ⑪·공통, 추천 적용 2026-10-31, ADR-0171)')
-}).describe('승인 업무(POL-038)')
+  "evidenceChecked": zod.string().optional().describe('확인한 증빙 종류만. 파일과 내용은 받지 않는다')
+}).strict().describe('ApprovalRequest의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(ApprovalRequest)와 같고 응답은 ApprovalRequest(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040). 서버가 정하거나 채우는 칸(approvalId·requiredApprovals·approvals·status·dueAt·summaryViewedAt·fraudCaseSummary)과 이 경로가 받지 않는 칸(requestedRole: COMMANDER_ROLE_CHANGE는 역할 경로만, fraudAction: FRAUD_ACTION은 사건 조치 요청 경로만)은 받지 않는다.')
 
-export const postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAccountCountMin = 0;
+export const createOpsApprovalRequestResponseFraudCaseSummaryOneAccountCountMin = 0;
 
-export const postV1OpsApprovalRequestsResponseFraudCaseSummaryOneTicketCountMin = 0;
+export const createOpsApprovalRequestResponseFraudCaseSummaryOneTicketCountMin = 0;
 
-export const postV1OpsApprovalRequestsResponseFraudCaseSummaryOnePurchaseCountMin = 0;
+export const createOpsApprovalRequestResponseFraudCaseSummaryOnePurchaseCountMin = 0;
 
 
-export const postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
+export const createOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
 
-export const postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAppealCountsRejectedMin = 0;
+export const createOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsRejectedMin = 0;
 
-export const postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAppealCountsExpiredMin = 0;
+export const createOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsExpiredMin = 0;
 
-export const postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
+export const createOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
 
-export const postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAppealCountsPendingMin = 0;
+export const createOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsPendingMin = 0;
 
-export const postV1OpsApprovalRequestsResponseFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
-export const postV1OpsApprovalRequestsResponseFraudCaseSummaryOneTargetsMax = 100;
+export const createOpsApprovalRequestResponseFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsApprovalRequestResponseFraudCaseSummaryOneTargetsMax = 100;
 
 
 
-export const PostV1OpsApprovalRequestsResponse = zod.object({
+export const CreateOpsApprovalRequestResponse = zod.object({
   "approvalId": zod.string().optional(),
   "kind": zod.enum(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'BOOKING_RESTRICTION', 'PAYOUT_BATCH', 'SETTLEMENT_ADJUSTMENT', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE', 'MINOR_CONTRACT_CANCEL', 'SALE_SUSPENSION', 'SALE_RESUMPTION', 'FRAUD_ACTION']).optional().describe('FRAUD_ACTION은 부정 예매 조치(표 취소, 이용 제한 걸기·풀기)다. 지정 부정 거래 조사관이 POST /v1/ops/fraud-cases/{caseId}/action-requests로만 만들고(이 스키마의 POST /v1/ops/approval-requests로 보내면 422), targetRef는 사건 ID, 승인자는 요청자가 아니고 가명정보 취급자 지정이 없으며 지난 90일 안에 그 지정을 거둔 적도 없는 commander다(2인, POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다. MINOR_CONTRACT_CANCEL은 미성년자 계약 취소(cs_agent 요청, 요청자 아닌 cs_lead 1인 승인, POL-038 ⑧, 추천 적용 2026-10-14, ADR-0062). SALE_SUSPENSION·SALE_RESUMPTION은 승인한 공연의 판매 중지·재개다. targetRef는 공연 ID이고 reasonCode는 SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER [가정] 가운데 하나다. operator 이상이 요청하고 요청자가 아닌 commander가 승인한다(2인, docs/planning/03 §2.14, POL-038 ⑩, 추천 적용 2026-10-28, ADR-0123)'),
   "targetRef": zod.string().optional(),
@@ -2024,9 +1964,9 @@ export const PostV1OpsApprovalRequestsResponse = zod.object({
   "caseId": zod.uuid().optional(),
   "eventId": zod.string().optional(),
   "reasonCategory": zod.enum(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION']).optional().describe('부정 예매 사유 범주 다섯(POL-046 ①): 자동화 프로그램(매크로·봇), 대기열 우회 링크, 보안문자 우회, 명의 대여·사들인 계정, 1인 매수 제한 회피. 팬에게 알리는 것은 이 범주뿐이고 점수와 가중치는 알리지 않는다(추천 적용 2026-10-31, ADR-0171)'),
-  "accountCount": zod.int().min(postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAccountCountMin).optional(),
-  "ticketCount": zod.int().min(postV1OpsApprovalRequestsResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
-  "purchaseCount": zod.int().min(postV1OpsApprovalRequestsResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
+  "accountCount": zod.int().min(createOpsApprovalRequestResponseFraudCaseSummaryOneAccountCountMin).optional(),
+  "ticketCount": zod.int().min(createOpsApprovalRequestResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
+  "purchaseCount": zod.int().min(createOpsApprovalRequestResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
   "limitPerPerson": zod.int().min(1).optional(),
   "sharedAttributes": zod.array(zod.enum(['DEVICE', 'PAYMENT_METHOD', 'CONTACT', 'IP', 'ASN', 'IDENTITY_CONFLICT']).describe('묶음 계정이 함께 쓴 연결 값의 종류(FR-072): 기기 가명(deviceRef), 결제 수단 연결값(paymentMethodRef. 카드 지문이 없어 약한 값이다, docs/features/payment.md), 연락처·수령 정보 가명(contactRef), 시간창 안의 같은 IP, 같은 ASN(망 운영자 번호), 같은 본인확인으로 다른 계정에서 시도한 기록(docs/data.md identity_conflict_attempt). 추천 적용 2026-10-31, ADR-0171')).optional(),
   "signals": zod.array(zod.enum(['LINK_GRAPH', 'SYNC_STEPS', 'VELOCITY', 'TIMING_BASELINE', 'BYPASS_TRACE', 'POST_MATCH']).describe('근거 신호. ADR-0171 결정 6의 분석 방법 여섯과 같다: 연결 그래프, 거의 같은 시각에 같은 단계를 밟는 동시 행동 군집, 같은 IP·기기에서 여러 계정을 빠르게 오가는 속도 규칙, 판매 시작부터 단계별 걸린 시간이 정상 기준선 밖, 입장 토큰 없는 홀드 시도·우회 링크 흔적, 외부 되팔이 게시물과 좌석 대조. 규칙과 점수는 docs/features/forensic-replay.md가 정한다(추천 적용 2026-10-31)')).optional(),
@@ -2034,19 +1974,19 @@ export const PostV1OpsApprovalRequestsResponse = zod.object({
   "investigatorOpinion": zod.string().nullish(),
   "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('표 취소는 이 시각까지만 승인할 수 있고, 취소한 좌석은 언제나 정가 재판매로 돌린다(2026-10-31 정함, 그래서 예전 초안의 재판매 여부 칸 resaleOnCancel은 뺐다)'),
   "appealCounts": zod.object({
-  "accepted": zod.int().min(postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
-  "rejected": zod.int().min(postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
-  "expired": zod.int().min(postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
-  "submitted": zod.int().min(postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
-  "pending": zod.int().min(postV1OpsApprovalRequestsResponseFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
+  "accepted": zod.int().min(createOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
+  "rejected": zod.int().min(createOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
+  "expired": zod.int().min(createOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
+  "submitted": zod.int().min(createOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
+  "pending": zod.int().min(createOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
 }).optional().describe('계정별 소명 결과의 수. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다(추천 적용 2026-10-31, ADR-0173)'),
-  "snapshotHash": zod.string().regex(postV1OpsApprovalRequestsResponseFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
+  "snapshotHash": zod.string().regex(createOpsApprovalRequestResponseFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
   "targets": zod.array(zod.object({
   "accountId": zod.string().optional(),
   "ticketIds": zod.array(zod.string()).optional().describe('이 요청에 든 그 계정 결제 표(CANCEL_TICKETS만)'),
   "holderTicketIds": zod.array(zod.string()).optional().describe('그 가운데 받은 사람(사건 밖 계정)이 가진 표. 조사관이 받은 사람의 진술을 보고 넣은 표다'),
   "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional()
-})).max(postV1OpsApprovalRequestsResponseFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
+})).max(createOpsApprovalRequestResponseFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
 }).describe('승인 업무 FRAUD_ACTION에 붙는 사건 요약(읽기 전용, POL-038 ⑪, SCR-046). 그 업무의 요청자와 승인 자격자만 상세를 받고(그 밖은 404) 그 상세에 늘 실린다(추천 적용 2026-10-31, ADR-0171). 승인자는 조사 경로(/v1/ops/fraud-cases 아래)를 부르지 않고 이것만 본다. 계정 수·근거 신호 범주·소명 결과·조사관 의견과, 범위를 줄이는 데 쓰는 대상 계정·표의 내부 ID(targets)만 싣고, 기기 가명·연락처 가명·IP 같은 연결 값은 싣지 않는다. 열람은 접속기록에 남는다(추천 적용 2026-10-31, ADR-0171 결정 7. targets는 (추천 적용 2026-10-31, ADR-0173))'),zod.null()]).optional().describe('FRAUD_ACTION에만, 읽기 전용. FRAUD_ACTION 상세는 요청자와 승인 자격자만 받으므로(그 밖은 404) 상세에는 늘 실리고, 다른 종류에는 null이다(추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다(POL-038 ⑪·공통, 추천 적용 2026-10-31, ADR-0171)')
 }).describe('승인 업무(POL-038)')
 
@@ -2054,33 +1994,33 @@ export const PostV1OpsApprovalRequestsResponse = zod.object({
  * POL-038, SCR-046. 승인 업무 상세를 읽는 경로가 없어 2026-10-31에 더했다. 요청자와 그 업무를 승인·반려할 수 있는 역할만 읽고, 그 밖은 없는 업무와 같은 404다(guidelines §12 '개인·거래 기록'). kind FRAUD_ACTION은 그 업무의 요청자와 승인 자격자(요청자가 아니고, PSEUDONYM_HANDLER 지정이 없고 지난 90일 [가정] 안에 거둔 적도 없는 commander)만 200이고, 그 밖(그 사건의 다른 조사관, 가명정보 취급자인 commander, cs_lead 등)은 없는 업무와 같은 404다. 승인 자격은 ops-svc가 identity-svc GetAdminDesignations로 보고, 답이 없으면 자격이 없는 것으로 보아 404로 닫는다. 200에는 늘 fraudCaseSummary(묶음 요약·근거 신호·소명 결과·조사관 의견, 읽기 전용)가 있다(docs/security/authz-matrix.md §3.7, 추천 적용 2026-10-31, ADR-0171). 승인자는 조사 경로를 부르지 않고 이것만 보며, 이 열람도 접속기록에 남는다(docs/observability.md §7 invAccess APPROVAL_SUMMARY, POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171 결정 7). 처음 열면 서버가 부른 계정의 첫 열람 시각을 ops DB approval_summary_view(approval_id, admin_account_id, first_viewed_at)에 남기고 summaryViewedAt으로 돌려준다. 승인은 그 승인자 자신의 열람 기록이 있어야 받는다(추천 적용 2026-10-31, ADR-0173)
  * @summary 승인 업무 상세(승인자가 판단할 내용, FRAUD_ACTION이면 사건 요약)
  */
-export const GetV1OpsApprovalRequestsApprovalIdParams = zod.object({
+export const GetOpsApprovalRequestParams = zod.object({
   "approvalId": zod.string()
 })
 
-export const getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAccountCountMin = 0;
+export const getOpsApprovalRequestResponseFraudCaseSummaryOneAccountCountMin = 0;
 
-export const getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneTicketCountMin = 0;
+export const getOpsApprovalRequestResponseFraudCaseSummaryOneTicketCountMin = 0;
 
-export const getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOnePurchaseCountMin = 0;
-
-
-export const getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
-
-export const getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAppealCountsRejectedMin = 0;
-
-export const getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAppealCountsExpiredMin = 0;
-
-export const getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
-
-export const getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAppealCountsPendingMin = 0;
-
-export const getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
-export const getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneTargetsMax = 100;
+export const getOpsApprovalRequestResponseFraudCaseSummaryOnePurchaseCountMin = 0;
 
 
+export const getOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
 
-export const GetV1OpsApprovalRequestsApprovalIdResponse = zod.object({
+export const getOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsRejectedMin = 0;
+
+export const getOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsExpiredMin = 0;
+
+export const getOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
+
+export const getOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsPendingMin = 0;
+
+export const getOpsApprovalRequestResponseFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
+export const getOpsApprovalRequestResponseFraudCaseSummaryOneTargetsMax = 100;
+
+
+
+export const GetOpsApprovalRequestResponse = zod.object({
   "approvalId": zod.string().optional(),
   "kind": zod.enum(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'BOOKING_RESTRICTION', 'PAYOUT_BATCH', 'SETTLEMENT_ADJUSTMENT', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE', 'MINOR_CONTRACT_CANCEL', 'SALE_SUSPENSION', 'SALE_RESUMPTION', 'FRAUD_ACTION']).optional().describe('FRAUD_ACTION은 부정 예매 조치(표 취소, 이용 제한 걸기·풀기)다. 지정 부정 거래 조사관이 POST /v1/ops/fraud-cases/{caseId}/action-requests로만 만들고(이 스키마의 POST /v1/ops/approval-requests로 보내면 422), targetRef는 사건 ID, 승인자는 요청자가 아니고 가명정보 취급자 지정이 없으며 지난 90일 안에 그 지정을 거둔 적도 없는 commander다(2인, POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다. MINOR_CONTRACT_CANCEL은 미성년자 계약 취소(cs_agent 요청, 요청자 아닌 cs_lead 1인 승인, POL-038 ⑧, 추천 적용 2026-10-14, ADR-0062). SALE_SUSPENSION·SALE_RESUMPTION은 승인한 공연의 판매 중지·재개다. targetRef는 공연 ID이고 reasonCode는 SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER [가정] 가운데 하나다. operator 이상이 요청하고 요청자가 아닌 commander가 승인한다(2인, docs/planning/03 §2.14, POL-038 ⑩, 추천 적용 2026-10-28, ADR-0123)'),
   "targetRef": zod.string().optional(),
@@ -2099,9 +2039,9 @@ export const GetV1OpsApprovalRequestsApprovalIdResponse = zod.object({
   "caseId": zod.uuid().optional(),
   "eventId": zod.string().optional(),
   "reasonCategory": zod.enum(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION']).optional().describe('부정 예매 사유 범주 다섯(POL-046 ①): 자동화 프로그램(매크로·봇), 대기열 우회 링크, 보안문자 우회, 명의 대여·사들인 계정, 1인 매수 제한 회피. 팬에게 알리는 것은 이 범주뿐이고 점수와 가중치는 알리지 않는다(추천 적용 2026-10-31, ADR-0171)'),
-  "accountCount": zod.int().min(getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAccountCountMin).optional(),
-  "ticketCount": zod.int().min(getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
-  "purchaseCount": zod.int().min(getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
+  "accountCount": zod.int().min(getOpsApprovalRequestResponseFraudCaseSummaryOneAccountCountMin).optional(),
+  "ticketCount": zod.int().min(getOpsApprovalRequestResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
+  "purchaseCount": zod.int().min(getOpsApprovalRequestResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
   "limitPerPerson": zod.int().min(1).optional(),
   "sharedAttributes": zod.array(zod.enum(['DEVICE', 'PAYMENT_METHOD', 'CONTACT', 'IP', 'ASN', 'IDENTITY_CONFLICT']).describe('묶음 계정이 함께 쓴 연결 값의 종류(FR-072): 기기 가명(deviceRef), 결제 수단 연결값(paymentMethodRef. 카드 지문이 없어 약한 값이다, docs/features/payment.md), 연락처·수령 정보 가명(contactRef), 시간창 안의 같은 IP, 같은 ASN(망 운영자 번호), 같은 본인확인으로 다른 계정에서 시도한 기록(docs/data.md identity_conflict_attempt). 추천 적용 2026-10-31, ADR-0171')).optional(),
   "signals": zod.array(zod.enum(['LINK_GRAPH', 'SYNC_STEPS', 'VELOCITY', 'TIMING_BASELINE', 'BYPASS_TRACE', 'POST_MATCH']).describe('근거 신호. ADR-0171 결정 6의 분석 방법 여섯과 같다: 연결 그래프, 거의 같은 시각에 같은 단계를 밟는 동시 행동 군집, 같은 IP·기기에서 여러 계정을 빠르게 오가는 속도 규칙, 판매 시작부터 단계별 걸린 시간이 정상 기준선 밖, 입장 토큰 없는 홀드 시도·우회 링크 흔적, 외부 되팔이 게시물과 좌석 대조. 규칙과 점수는 docs/features/forensic-replay.md가 정한다(추천 적용 2026-10-31)')).optional(),
@@ -2109,19 +2049,19 @@ export const GetV1OpsApprovalRequestsApprovalIdResponse = zod.object({
   "investigatorOpinion": zod.string().nullish(),
   "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('표 취소는 이 시각까지만 승인할 수 있고, 취소한 좌석은 언제나 정가 재판매로 돌린다(2026-10-31 정함, 그래서 예전 초안의 재판매 여부 칸 resaleOnCancel은 뺐다)'),
   "appealCounts": zod.object({
-  "accepted": zod.int().min(getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
-  "rejected": zod.int().min(getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
-  "expired": zod.int().min(getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
-  "submitted": zod.int().min(getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
-  "pending": zod.int().min(getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
+  "accepted": zod.int().min(getOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
+  "rejected": zod.int().min(getOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
+  "expired": zod.int().min(getOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
+  "submitted": zod.int().min(getOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
+  "pending": zod.int().min(getOpsApprovalRequestResponseFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
 }).optional().describe('계정별 소명 결과의 수. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다(추천 적용 2026-10-31, ADR-0173)'),
-  "snapshotHash": zod.string().regex(getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
+  "snapshotHash": zod.string().regex(getOpsApprovalRequestResponseFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
   "targets": zod.array(zod.object({
   "accountId": zod.string().optional(),
   "ticketIds": zod.array(zod.string()).optional().describe('이 요청에 든 그 계정 결제 표(CANCEL_TICKETS만)'),
   "holderTicketIds": zod.array(zod.string()).optional().describe('그 가운데 받은 사람(사건 밖 계정)이 가진 표. 조사관이 받은 사람의 진술을 보고 넣은 표다'),
   "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional()
-})).max(getV1OpsApprovalRequestsApprovalIdResponseFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
+})).max(getOpsApprovalRequestResponseFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
 }).describe('승인 업무 FRAUD_ACTION에 붙는 사건 요약(읽기 전용, POL-038 ⑪, SCR-046). 그 업무의 요청자와 승인 자격자만 상세를 받고(그 밖은 404) 그 상세에 늘 실린다(추천 적용 2026-10-31, ADR-0171). 승인자는 조사 경로(/v1/ops/fraud-cases 아래)를 부르지 않고 이것만 본다. 계정 수·근거 신호 범주·소명 결과·조사관 의견과, 범위를 줄이는 데 쓰는 대상 계정·표의 내부 ID(targets)만 싣고, 기기 가명·연락처 가명·IP 같은 연결 값은 싣지 않는다. 열람은 접속기록에 남는다(추천 적용 2026-10-31, ADR-0171 결정 7. targets는 (추천 적용 2026-10-31, ADR-0173))'),zod.null()]).optional().describe('FRAUD_ACTION에만, 읽기 전용. FRAUD_ACTION 상세는 요청자와 승인 자격자만 받으므로(그 밖은 404) 상세에는 늘 실리고, 다른 종류에는 null이다(추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다(POL-038 ⑪·공통, 추천 적용 2026-10-31, ADR-0171)')
 }).describe('승인 업무(POL-038)')
 
@@ -2129,55 +2069,55 @@ export const GetV1OpsApprovalRequestsApprovalIdResponse = zod.object({
  * POL-038. FAILED 상태에서 원인을 고친 뒤 승인자가 다시 부르면(실행 직전 재인증, 처리 기한 안) 같은 대상·금액으로 같은 승인을 다시 실행한다. 승인 ID가 멱등키라 두 번 실행되지 않는다. 새 경로는 두지 않는다(docs/planning/03 §2.10, 추천 적용 2026-10-20, ADR-0073). kind FRAUD_ACTION은 요청자가 아니고 가명정보 취급자(PSEUDONYM_HANDLER) 지정이 없으며 지난 90일 [가정] 안에 그 지정을 거둔 적도 없는 commander만 승인·반려한다. ops-svc는 이때 지정 확인 캐시를 쓰지 않고 identity-svc GetAdminDesignations를 바로 부르며, 지정이 있거나 90일 안에 거둔 기록이 있거나 identity-svc가 답하지 않으면 403 fraud-approver-ineligible이다(추천 적용 2026-10-31, ADR-0171). 승인자는 GET /v1/ops/approval-requests/{approvalId}의 fraudCaseSummary를 보고 재인증한 뒤 승인한다(POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171). 사람이 실질적으로 결정하도록(자동화된 결정 안내서 pp.7–8) FRAUD_ACTION 승인에는 세 규칙을 더한다(추천 적용 2026-10-31, ADR-0173). ① 승인자가 자기 판단 이유를 본문 reason에 직접 적는다(없으면 422 approval-reason-required). ② 그 승인자가 상세를 연 적이 없으면(summaryViewedAt 없음) 409 fraud-summary-not-viewed다. ③ 계정·표를 빼서 범위를 줄여 승인할 수 있다(excludeAccountIds·excludeTicketIds). 요청 범위 밖 값이거나 다 빼면 422 approval-scope-invalid이고, 다 빼려면 반려한다. 실행은 요청 범위에서 뺀 것을 덜고 한다. 뺀 계정·표는 그 요청에서 반려한 것으로 보고, 뺀 계정의 양도 잠금은 그 계정을 다룬 다른 열린 조치 요청이 없으면 풀린다. 한 번 부를 때 승인 업무 하나만 승인하고, 여러 사건을 한꺼번에 승인하는 경로는 두지 않는다. 다른 종류의 승인에서 본문은 선택이고 reason만 읽으며 범위 줄이기 칸은 받지 않는다(보내면 422 approval-scope-invalid)
  * @summary 승인(요청자 불가, 실행 직전 관리 계정 재인증). 실행 실패(FAILED) 뒤 다시 부르면 다시 실행
  */
-export const PostV1OpsApprovalRequestsApprovalIdApprovalsParams = zod.object({
+export const CreateOpsApprovalRequestApprovalParams = zod.object({
   "approvalId": zod.string()
 })
 
-export const PostV1OpsApprovalRequestsApprovalIdApprovalsHeader = zod.object({
+export const CreateOpsApprovalRequestApprovalHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const postV1OpsApprovalRequestsApprovalIdApprovalsBodyReasonMax = 1000;
+export const createOpsApprovalRequestApprovalBodyReasonMax = 1000;
 
-export const postV1OpsApprovalRequestsApprovalIdApprovalsBodyExcludeAccountIdsMax = 100;
+export const createOpsApprovalRequestApprovalBodyExcludeAccountIdsMax = 100;
 
-export const postV1OpsApprovalRequestsApprovalIdApprovalsBodyExcludeTicketIdsMax = 500;
+export const createOpsApprovalRequestApprovalBodyExcludeTicketIdsMax = 500;
 
 
 
-export const PostV1OpsApprovalRequestsApprovalIdApprovalsBody = zod.object({
-  "reason": zod.string().min(1).max(postV1OpsApprovalRequestsApprovalIdApprovalsBodyReasonMax).optional().describe('승인자의 판단 이유(1~1000자). kind FRAUD_ACTION이면 필수이고 없으면 422 approval-reason-required다. 요청자의 사유를 그대로 옮기지 말고 자기 판단을 적는다(화면 안내)'),
-  "excludeAccountIds": zod.array(zod.string()).max(postV1OpsApprovalRequestsApprovalIdApprovalsBodyExcludeAccountIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+export const CreateOpsApprovalRequestApprovalBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsApprovalRequestApprovalBodyReasonMax).optional().describe('승인자의 판단 이유(1~1000자). kind FRAUD_ACTION이면 필수이고 없으면 422 approval-reason-required다. 요청자의 사유를 그대로 옮기지 말고 자기 판단을 적는다(화면 안내)'),
+  "excludeAccountIds": zod.array(zod.string()).max(createOpsApprovalRequestApprovalBodyExcludeAccountIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
   ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
   : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('FRAUD_ACTION만. 요청 범위에서 빼고 승인할 계정. 요청 범위 밖이면 422 approval-scope-invalid'),
-  "excludeTicketIds": zod.array(zod.string()).max(postV1OpsApprovalRequestsApprovalIdApprovalsBodyExcludeTicketIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+  "excludeTicketIds": zod.array(zod.string()).max(createOpsApprovalRequestApprovalBodyExcludeTicketIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
   ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
   : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('FRAUD_ACTION의 CANCEL_TICKETS만. 요청 범위에서 빼고 승인할 표. 요청 범위 밖이면 422 approval-scope-invalid, 계정·표를 다 빼면 같은 422(그때는 반려한다)')
 }).strict().describe('승인 본문(POST /v1/ops/approval-requests/{approvalId}/approvals, POL-038 ⑪). FRAUD_ACTION에서 승인자가 실질적으로 결정했음을 남기는 칸이다. 승인자가 직접 적은 판단 이유와 뺀 계정·표는 승인 기록(docs/data.md approval_vote)과 사건 기록에 남는다(추천 적용 2026-10-31, ADR-0173)')
 
-export const postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAccountCountMin = 0;
+export const createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAccountCountMin = 0;
 
-export const postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneTicketCountMin = 0;
+export const createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneTicketCountMin = 0;
 
-export const postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOnePurchaseCountMin = 0;
-
-
-export const postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
-
-export const postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAppealCountsRejectedMin = 0;
-
-export const postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAppealCountsExpiredMin = 0;
-
-export const postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
-
-export const postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAppealCountsPendingMin = 0;
-
-export const postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
-export const postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneTargetsMax = 100;
+export const createOpsApprovalRequestApprovalResponseFraudCaseSummaryOnePurchaseCountMin = 0;
 
 
+export const createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
 
-export const PostV1OpsApprovalRequestsApprovalIdApprovalsResponse = zod.object({
+export const createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAppealCountsRejectedMin = 0;
+
+export const createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAppealCountsExpiredMin = 0;
+
+export const createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
+
+export const createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAppealCountsPendingMin = 0;
+
+export const createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneTargetsMax = 100;
+
+
+
+export const CreateOpsApprovalRequestApprovalResponse = zod.object({
   "approvalId": zod.string().optional(),
   "kind": zod.enum(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'BOOKING_RESTRICTION', 'PAYOUT_BATCH', 'SETTLEMENT_ADJUSTMENT', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE', 'MINOR_CONTRACT_CANCEL', 'SALE_SUSPENSION', 'SALE_RESUMPTION', 'FRAUD_ACTION']).optional().describe('FRAUD_ACTION은 부정 예매 조치(표 취소, 이용 제한 걸기·풀기)다. 지정 부정 거래 조사관이 POST /v1/ops/fraud-cases/{caseId}/action-requests로만 만들고(이 스키마의 POST /v1/ops/approval-requests로 보내면 422), targetRef는 사건 ID, 승인자는 요청자가 아니고 가명정보 취급자 지정이 없으며 지난 90일 안에 그 지정을 거둔 적도 없는 commander다(2인, POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다. MINOR_CONTRACT_CANCEL은 미성년자 계약 취소(cs_agent 요청, 요청자 아닌 cs_lead 1인 승인, POL-038 ⑧, 추천 적용 2026-10-14, ADR-0062). SALE_SUSPENSION·SALE_RESUMPTION은 승인한 공연의 판매 중지·재개다. targetRef는 공연 ID이고 reasonCode는 SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER [가정] 가운데 하나다. operator 이상이 요청하고 요청자가 아닌 commander가 승인한다(2인, docs/planning/03 §2.14, POL-038 ⑩, 추천 적용 2026-10-28, ADR-0123)'),
   "targetRef": zod.string().optional(),
@@ -2196,9 +2136,9 @@ export const PostV1OpsApprovalRequestsApprovalIdApprovalsResponse = zod.object({
   "caseId": zod.uuid().optional(),
   "eventId": zod.string().optional(),
   "reasonCategory": zod.enum(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION']).optional().describe('부정 예매 사유 범주 다섯(POL-046 ①): 자동화 프로그램(매크로·봇), 대기열 우회 링크, 보안문자 우회, 명의 대여·사들인 계정, 1인 매수 제한 회피. 팬에게 알리는 것은 이 범주뿐이고 점수와 가중치는 알리지 않는다(추천 적용 2026-10-31, ADR-0171)'),
-  "accountCount": zod.int().min(postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAccountCountMin).optional(),
-  "ticketCount": zod.int().min(postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
-  "purchaseCount": zod.int().min(postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
+  "accountCount": zod.int().min(createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAccountCountMin).optional(),
+  "ticketCount": zod.int().min(createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
+  "purchaseCount": zod.int().min(createOpsApprovalRequestApprovalResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
   "limitPerPerson": zod.int().min(1).optional(),
   "sharedAttributes": zod.array(zod.enum(['DEVICE', 'PAYMENT_METHOD', 'CONTACT', 'IP', 'ASN', 'IDENTITY_CONFLICT']).describe('묶음 계정이 함께 쓴 연결 값의 종류(FR-072): 기기 가명(deviceRef), 결제 수단 연결값(paymentMethodRef. 카드 지문이 없어 약한 값이다, docs/features/payment.md), 연락처·수령 정보 가명(contactRef), 시간창 안의 같은 IP, 같은 ASN(망 운영자 번호), 같은 본인확인으로 다른 계정에서 시도한 기록(docs/data.md identity_conflict_attempt). 추천 적용 2026-10-31, ADR-0171')).optional(),
   "signals": zod.array(zod.enum(['LINK_GRAPH', 'SYNC_STEPS', 'VELOCITY', 'TIMING_BASELINE', 'BYPASS_TRACE', 'POST_MATCH']).describe('근거 신호. ADR-0171 결정 6의 분석 방법 여섯과 같다: 연결 그래프, 거의 같은 시각에 같은 단계를 밟는 동시 행동 군집, 같은 IP·기기에서 여러 계정을 빠르게 오가는 속도 규칙, 판매 시작부터 단계별 걸린 시간이 정상 기준선 밖, 입장 토큰 없는 홀드 시도·우회 링크 흔적, 외부 되팔이 게시물과 좌석 대조. 규칙과 점수는 docs/features/forensic-replay.md가 정한다(추천 적용 2026-10-31)')).optional(),
@@ -2206,19 +2146,19 @@ export const PostV1OpsApprovalRequestsApprovalIdApprovalsResponse = zod.object({
   "investigatorOpinion": zod.string().nullish(),
   "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('표 취소는 이 시각까지만 승인할 수 있고, 취소한 좌석은 언제나 정가 재판매로 돌린다(2026-10-31 정함, 그래서 예전 초안의 재판매 여부 칸 resaleOnCancel은 뺐다)'),
   "appealCounts": zod.object({
-  "accepted": zod.int().min(postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
-  "rejected": zod.int().min(postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
-  "expired": zod.int().min(postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
-  "submitted": zod.int().min(postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
-  "pending": zod.int().min(postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
+  "accepted": zod.int().min(createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
+  "rejected": zod.int().min(createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
+  "expired": zod.int().min(createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
+  "submitted": zod.int().min(createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
+  "pending": zod.int().min(createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
 }).optional().describe('계정별 소명 결과의 수. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다(추천 적용 2026-10-31, ADR-0173)'),
-  "snapshotHash": zod.string().regex(postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
+  "snapshotHash": zod.string().regex(createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
   "targets": zod.array(zod.object({
   "accountId": zod.string().optional(),
   "ticketIds": zod.array(zod.string()).optional().describe('이 요청에 든 그 계정 결제 표(CANCEL_TICKETS만)'),
   "holderTicketIds": zod.array(zod.string()).optional().describe('그 가운데 받은 사람(사건 밖 계정)이 가진 표. 조사관이 받은 사람의 진술을 보고 넣은 표다'),
   "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional()
-})).max(postV1OpsApprovalRequestsApprovalIdApprovalsResponseFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
+})).max(createOpsApprovalRequestApprovalResponseFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
 }).describe('승인 업무 FRAUD_ACTION에 붙는 사건 요약(읽기 전용, POL-038 ⑪, SCR-046). 그 업무의 요청자와 승인 자격자만 상세를 받고(그 밖은 404) 그 상세에 늘 실린다(추천 적용 2026-10-31, ADR-0171). 승인자는 조사 경로(/v1/ops/fraud-cases 아래)를 부르지 않고 이것만 본다. 계정 수·근거 신호 범주·소명 결과·조사관 의견과, 범위를 줄이는 데 쓰는 대상 계정·표의 내부 ID(targets)만 싣고, 기기 가명·연락처 가명·IP 같은 연결 값은 싣지 않는다. 열람은 접속기록에 남는다(추천 적용 2026-10-31, ADR-0171 결정 7. targets는 (추천 적용 2026-10-31, ADR-0173))'),zod.null()]).optional().describe('FRAUD_ACTION에만, 읽기 전용. FRAUD_ACTION 상세는 요청자와 승인 자격자만 받으므로(그 밖은 404) 상세에는 늘 실리고, 다른 종류에는 null이다(추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다(POL-038 ⑪·공통, 추천 적용 2026-10-31, ADR-0171)')
 }).describe('승인 업무(POL-038)')
 
@@ -2226,51 +2166,51 @@ export const PostV1OpsApprovalRequestsApprovalIdApprovalsResponse = zod.object({
  * POL-038. 허용 역할 [가정]: 반려(docs/planning/03 §2.10 T5)를 누가 하는지 정본에 없어, 승인 업무를 승인할 수 있는 역할(cs_lead·commander)로 두고 서버가 그 업무에 필요한 승인자 역할인지와 요청자가 아닌지를 본다(추천 적용 2026-10-30, docs/security/authz-matrix.md §5.5). FRAUD_ACTION의 반려 사유는 승인자가 직접 적은 판단 이유로 사건 기록에 남고, 반려되면 그 계정에 다른 열린 조치 요청이 없을 때 양도 잠금이 풀린다(추천 적용 2026-10-31, ADR-0173)
  * @summary 반려(사유 필수)
  */
-export const PostV1OpsApprovalRequestsApprovalIdRejectionsParams = zod.object({
+export const CreateOpsApprovalRequestRejectionParams = zod.object({
   "approvalId": zod.string()
 })
 
-export const PostV1OpsApprovalRequestsApprovalIdRejectionsBody = zod.object({
+export const CreateOpsApprovalRequestRejectionBody = zod.object({
   "reason": zod.string()
-})
+}).strict()
 
-export const PostV1OpsApprovalRequestsApprovalIdRejectionsResponse = zod.unknown()
+export const CreateOpsApprovalRequestRejectionResponse = zod.unknown()
 
 /**
  * POL-038 공통, docs/planning/03 §2.10. REQUESTED·PENDING_APPROVAL·ESCALATED에서만 WITHDRAWN으로 바꾼다. 이미 철회·만료된 요청이면 그대로 성공한다(추천 적용 2026-10-28, 기술 검토 낮음-087)
  * @summary 요청 철회(요청자만, 승인 전, 사유 필수)
  */
-export const PostV1OpsApprovalRequestsApprovalIdWithdrawalsParams = zod.object({
+export const CreateOpsApprovalRequestWithdrawalParams = zod.object({
   "approvalId": zod.string()
 })
 
-export const PostV1OpsApprovalRequestsApprovalIdWithdrawalsBody = zod.object({
+export const CreateOpsApprovalRequestWithdrawalBody = zod.object({
   "reason": zod.string()
-})
+}).strict()
 
-export const postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAccountCountMin = 0;
+export const createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAccountCountMin = 0;
 
-export const postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneTicketCountMin = 0;
+export const createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneTicketCountMin = 0;
 
-export const postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOnePurchaseCountMin = 0;
-
-
-export const postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
-
-export const postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAppealCountsRejectedMin = 0;
-
-export const postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAppealCountsExpiredMin = 0;
-
-export const postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
-
-export const postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAppealCountsPendingMin = 0;
-
-export const postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
-export const postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneTargetsMax = 100;
+export const createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOnePurchaseCountMin = 0;
 
 
+export const createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
 
-export const PostV1OpsApprovalRequestsApprovalIdWithdrawalsResponse = zod.object({
+export const createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAppealCountsRejectedMin = 0;
+
+export const createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAppealCountsExpiredMin = 0;
+
+export const createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
+
+export const createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAppealCountsPendingMin = 0;
+
+export const createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneTargetsMax = 100;
+
+
+
+export const CreateOpsApprovalRequestWithdrawalResponse = zod.object({
   "approvalId": zod.string().optional(),
   "kind": zod.enum(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'BOOKING_RESTRICTION', 'PAYOUT_BATCH', 'SETTLEMENT_ADJUSTMENT', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE', 'MINOR_CONTRACT_CANCEL', 'SALE_SUSPENSION', 'SALE_RESUMPTION', 'FRAUD_ACTION']).optional().describe('FRAUD_ACTION은 부정 예매 조치(표 취소, 이용 제한 걸기·풀기)다. 지정 부정 거래 조사관이 POST /v1/ops/fraud-cases/{caseId}/action-requests로만 만들고(이 스키마의 POST /v1/ops/approval-requests로 보내면 422), targetRef는 사건 ID, 승인자는 요청자가 아니고 가명정보 취급자 지정이 없으며 지난 90일 안에 그 지정을 거둔 적도 없는 commander다(2인, POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다. MINOR_CONTRACT_CANCEL은 미성년자 계약 취소(cs_agent 요청, 요청자 아닌 cs_lead 1인 승인, POL-038 ⑧, 추천 적용 2026-10-14, ADR-0062). SALE_SUSPENSION·SALE_RESUMPTION은 승인한 공연의 판매 중지·재개다. targetRef는 공연 ID이고 reasonCode는 SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER [가정] 가운데 하나다. operator 이상이 요청하고 요청자가 아닌 commander가 승인한다(2인, docs/planning/03 §2.14, POL-038 ⑩, 추천 적용 2026-10-28, ADR-0123)'),
   "targetRef": zod.string().optional(),
@@ -2289,9 +2229,9 @@ export const PostV1OpsApprovalRequestsApprovalIdWithdrawalsResponse = zod.object
   "caseId": zod.uuid().optional(),
   "eventId": zod.string().optional(),
   "reasonCategory": zod.enum(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION']).optional().describe('부정 예매 사유 범주 다섯(POL-046 ①): 자동화 프로그램(매크로·봇), 대기열 우회 링크, 보안문자 우회, 명의 대여·사들인 계정, 1인 매수 제한 회피. 팬에게 알리는 것은 이 범주뿐이고 점수와 가중치는 알리지 않는다(추천 적용 2026-10-31, ADR-0171)'),
-  "accountCount": zod.int().min(postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAccountCountMin).optional(),
-  "ticketCount": zod.int().min(postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
-  "purchaseCount": zod.int().min(postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
+  "accountCount": zod.int().min(createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAccountCountMin).optional(),
+  "ticketCount": zod.int().min(createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
+  "purchaseCount": zod.int().min(createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
   "limitPerPerson": zod.int().min(1).optional(),
   "sharedAttributes": zod.array(zod.enum(['DEVICE', 'PAYMENT_METHOD', 'CONTACT', 'IP', 'ASN', 'IDENTITY_CONFLICT']).describe('묶음 계정이 함께 쓴 연결 값의 종류(FR-072): 기기 가명(deviceRef), 결제 수단 연결값(paymentMethodRef. 카드 지문이 없어 약한 값이다, docs/features/payment.md), 연락처·수령 정보 가명(contactRef), 시간창 안의 같은 IP, 같은 ASN(망 운영자 번호), 같은 본인확인으로 다른 계정에서 시도한 기록(docs/data.md identity_conflict_attempt). 추천 적용 2026-10-31, ADR-0171')).optional(),
   "signals": zod.array(zod.enum(['LINK_GRAPH', 'SYNC_STEPS', 'VELOCITY', 'TIMING_BASELINE', 'BYPASS_TRACE', 'POST_MATCH']).describe('근거 신호. ADR-0171 결정 6의 분석 방법 여섯과 같다: 연결 그래프, 거의 같은 시각에 같은 단계를 밟는 동시 행동 군집, 같은 IP·기기에서 여러 계정을 빠르게 오가는 속도 규칙, 판매 시작부터 단계별 걸린 시간이 정상 기준선 밖, 입장 토큰 없는 홀드 시도·우회 링크 흔적, 외부 되팔이 게시물과 좌석 대조. 규칙과 점수는 docs/features/forensic-replay.md가 정한다(추천 적용 2026-10-31)')).optional(),
@@ -2299,19 +2239,19 @@ export const PostV1OpsApprovalRequestsApprovalIdWithdrawalsResponse = zod.object
   "investigatorOpinion": zod.string().nullish(),
   "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('표 취소는 이 시각까지만 승인할 수 있고, 취소한 좌석은 언제나 정가 재판매로 돌린다(2026-10-31 정함, 그래서 예전 초안의 재판매 여부 칸 resaleOnCancel은 뺐다)'),
   "appealCounts": zod.object({
-  "accepted": zod.int().min(postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
-  "rejected": zod.int().min(postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
-  "expired": zod.int().min(postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
-  "submitted": zod.int().min(postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
-  "pending": zod.int().min(postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
+  "accepted": zod.int().min(createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
+  "rejected": zod.int().min(createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
+  "expired": zod.int().min(createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
+  "submitted": zod.int().min(createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
+  "pending": zod.int().min(createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
 }).optional().describe('계정별 소명 결과의 수. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다(추천 적용 2026-10-31, ADR-0173)'),
-  "snapshotHash": zod.string().regex(postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
+  "snapshotHash": zod.string().regex(createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
   "targets": zod.array(zod.object({
   "accountId": zod.string().optional(),
   "ticketIds": zod.array(zod.string()).optional().describe('이 요청에 든 그 계정 결제 표(CANCEL_TICKETS만)'),
   "holderTicketIds": zod.array(zod.string()).optional().describe('그 가운데 받은 사람(사건 밖 계정)이 가진 표. 조사관이 받은 사람의 진술을 보고 넣은 표다'),
   "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional()
-})).max(postV1OpsApprovalRequestsApprovalIdWithdrawalsResponseFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
+})).max(createOpsApprovalRequestWithdrawalResponseFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
 }).describe('승인 업무 FRAUD_ACTION에 붙는 사건 요약(읽기 전용, POL-038 ⑪, SCR-046). 그 업무의 요청자와 승인 자격자만 상세를 받고(그 밖은 404) 그 상세에 늘 실린다(추천 적용 2026-10-31, ADR-0171). 승인자는 조사 경로(/v1/ops/fraud-cases 아래)를 부르지 않고 이것만 본다. 계정 수·근거 신호 범주·소명 결과·조사관 의견과, 범위를 줄이는 데 쓰는 대상 계정·표의 내부 ID(targets)만 싣고, 기기 가명·연락처 가명·IP 같은 연결 값은 싣지 않는다. 열람은 접속기록에 남는다(추천 적용 2026-10-31, ADR-0171 결정 7. targets는 (추천 적용 2026-10-31, ADR-0173))'),zod.null()]).optional().describe('FRAUD_ACTION에만, 읽기 전용. FRAUD_ACTION 상세는 요청자와 승인 자격자만 받으므로(그 밖은 404) 상세에는 늘 실리고, 다른 종류에는 null이다(추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다(POL-038 ⑪·공통, 추천 적용 2026-10-31, ADR-0171)')
 }).describe('승인 업무(POL-038)')
 
@@ -2319,26 +2259,26 @@ export const PostV1OpsApprovalRequestsApprovalIdWithdrawalsResponse = zod.object
  * FR-071, docs/features/forensic-replay.md. 예전 초안 이름 /v1/forensics/exports를 이 이름으로 바꿔 넣었다(추천 적용 2026-10-31, ADR-0171 결정 2). 개인정보 보호책임자가 가명정보 취급자(PSEUDONYM_HANDLER)로 지정한 commander만 부른다(서버가 요청마다 지정 확인, 없으면 403 pseudonym-handler-required). 분석 실버의 회차 가명 사건만 읽고(an_forensic_reader) 조사 저장소 inv는 읽지 못한다. 결과는 다음 회차 봇 판정 규칙 개선에만 쓰고 개인에게 조치하는 데 쓰지 않는다(개인정보 보호법 §28의5). 시간창은 오픈 뒤 30분 [가정] 안, 회차는 실버 보존 기간(90일) 안, 계정당 하루 5회 [가정]이다. 이 갈래는 과학적 연구로, 가명 사건으로 가설을 세우고 다시 재생하며 분석하는 데까지다. 그림자 실행(trust-svc가 실명 세션에 다른 판의 판정을 함께 남기는 운영 처리, POL-006)은 이 갈래가 아니다. 결과는 규칙 값만 내고 세션·기기 목록을 차단 목록으로 넘기지 않는다. 가명처리 적정성 검토 결과서가 승인되기 전이거나, 열 허용 목록·행동 요약·외부 제공이 바뀌어 다시 검토하는 동안에는 403 pseudonymization-review-pending이다. 내보낼 때마다 pseudonymization_log에 목적 SCIENTIFIC_RESEARCH로 남는다(법률 확인 31번(추천 적용 2026-10-31, ADR-0173))
  * @summary 연구 갈래 리플레이 내보내기 만들기(회차 가명 사건, 가명정보 취급자만)
  */
-export const PostV1OpsResearchExportsHeader = zod.object({
+export const CreateOpsResearchExportHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsResearchExportsBodyFromMsMin = 0;
+export const createOpsResearchExportBodyFromMsMin = 0;
 
-export const postV1OpsResearchExportsBodyToMsMin = 0;
+export const createOpsResearchExportBodyToMsMin = 0;
 
-export const postV1OpsResearchExportsBodyReasonMax = 500;
+export const createOpsResearchExportBodyReasonMax = 500;
 
 
 
-export const PostV1OpsResearchExportsBody = zod.object({
+export const CreateOpsResearchExportBody = zod.object({
   "eventId": zod.string(),
-  "fromMs": zod.int().min(postV1OpsResearchExportsBodyFromMsMin).describe('오픈 기준 시작(밀리초)'),
-  "toMs": zod.int().min(postV1OpsResearchExportsBodyToMsMin).describe('오픈 기준 끝. 시간창은 30분 [가정] 이하'),
-  "reason": zod.string().min(1).max(postV1OpsResearchExportsBodyReasonMax)
+  "fromMs": zod.int().min(createOpsResearchExportBodyFromMsMin).describe('오픈 기준 시작(밀리초)'),
+  "toMs": zod.int().min(createOpsResearchExportBodyToMsMin).describe('오픈 기준 끝. 시간창은 30분 [가정] 이하'),
+  "reason": zod.string().min(1).max(createOpsResearchExportBodyReasonMax)
 }).strict().describe('연구 갈래 내보내기 본문(회차 가명 사건, docs/features/forensic-replay.md. 예전 초안 이름은 /v1/forensics/exports였다). 목적은 과학적 연구(봇 판정 규칙의 탐지율·사람 오탐률 개선)이고 가명정보 처리 기록(pseudonymization_log)에 목적 SCIENTIFIC_RESEARCH로 통계작성(STATISTICS)과 나눠 남는다(추천 적용 2026-10-31, ADR-0173)')
 
-export const PostV1OpsResearchExportsResponse = zod.object({
+export const CreateOpsResearchExportResponse = zod.object({
   "exportId": zod.uuid().optional(),
   "eventId": zod.string().optional(),
   "status": zod.enum(['PENDING', 'READY', 'FAILED']).optional(),
@@ -2349,38 +2289,38 @@ export const PostV1OpsResearchExportsResponse = zod.object({
  * FR-071. READY이면 200 Apache Arrow IPC 파일을 흘려보내고 서버에 남기지 않는다. Cache-Control no-store, Content-Disposition 없음, Sec-Fetch-Mode navigate면 403, Sec-Fetch-Site same-origin인 fetch만 받는다(가명정보 파일이 디스크에 저장되지 않게, 추천 적용 2026-10-28 기술 검토 낮음-051을 이어받음). 아직 만드는 중이면 409 research-export-not-ready와 Retry-After다(추천 적용 2026-10-31, ADR-0171)
  * @summary 연구 갈래 리플레이 파일 받기(만든 계정의 세션만)
  */
-export const GetV1OpsResearchExportsExportIdParams = zod.object({
+export const GetOpsResearchExportParams = zod.object({
   "exportId": zod.uuid()
 })
 
-export const GetV1OpsResearchExportsExportIdResponse = zod.unknown()
+export const GetOpsResearchExportResponse = zod.unknown()
 
 /**
  * FR-055, POL-038. 파트너 요청을 기다리지 않고 commander가 회차 취소를 요청한다. 판매 중지(docs/planning/03 §2.14)된 공연의 회차만 받는다. 그 뒤 판정·판정자 외 1인 승인·일괄 환불은 파트너 요청과 같다(docs/planning/03 §2.11, 추천 적용 2026-10-28, ADR-0123)
  * @summary 판매 중지된 공연의 회차 취소 요청(commander)
  */
-export const PostV1OpsEventCancellationsHeader = zod.object({
+export const CreateOpsEventCancellationHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const PostV1OpsEventCancellationsBody = zod.object({
+export const CreateOpsEventCancellationBody = zod.object({
   "eventId": zod.string(),
   "kind": zod.enum(['CANCEL']).optional().describe('취소만 받는다. 연기는 파트너가 요청한다'),
   "reason": zod.string()
-})
+}).strict()
 
-export const postV1OpsEventCancellationsResponseFanNoticeReasonMax = 200;
+export const createOpsEventCancellationResponseFanNoticeReasonMax = 200;
 
 
 
-export const PostV1OpsEventCancellationsResponse = zod.object({
+export const CreateOpsEventCancellationResponse = zod.object({
   "requestId": zod.string().optional(),
   "eventId": zod.string().optional(),
   "kind": zod.enum(['CANCEL', 'POSTPONE']).optional(),
   "status": zod.enum(['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW', 'COMPLETED', 'REJECTED']).optional().describe('REFUND_WINDOW는 연기(POSTPONE) 확정 뒤 바뀐 공연 시작 전까지 환급 신청을 받는 때(docs/planning/03 §2.11, 기술 검토 중간-044)'),
   "fault": zod.enum(['ORGANIZER', 'FORCE_MAJEURE', 'CONTENT_CHANGE']).optional(),
-  "fanNoticeReason": zod.string().max(postV1OpsEventCancellationsResponseFanNoticeReasonMax).optional().describe('팬 통지의 사유 요약(200자 [가정], 판정자가 통지 문안 미리보기에서 씀, docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(ADR-0062)'),
+  "fanNoticeReason": zod.string().max(createOpsEventCancellationResponseFanNoticeReasonMax).optional().describe('팬 통지의 사유 요약(200자 [가정], 판정자가 통지 문안 미리보기에서 씀, docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(ADR-0062)'),
   "dryRun": zod.looseObject({
 
 }).optional().describe('대상 주문 수, 환급 총액, 배상 대상 수와 총액, 결제사별 건수와 예상 소요 시간'),
@@ -2403,31 +2343,31 @@ export const PostV1OpsEventCancellationsResponse = zod.object({
  * FR-055, POL-038. 요청 접수 뒤 1영업일 안
  * @summary 귀책 판정(commander)과 미리보기 계산
  */
-export const PostV1OpsEventCancellationsRequestIdJudgementParams = zod.object({
+export const CreateOpsEventCancellationJudgementParams = zod.object({
   "requestId": zod.string()
 })
 
-export const postV1OpsEventCancellationsRequestIdJudgementBodyFanNoticeReasonMax = 200;
+export const createOpsEventCancellationJudgementBodyFanNoticeReasonMax = 200;
 
 
 
-export const PostV1OpsEventCancellationsRequestIdJudgementBody = zod.object({
+export const CreateOpsEventCancellationJudgementBody = zod.object({
   "fault": zod.enum(['ORGANIZER', 'FORCE_MAJEURE', 'CONTENT_CHANGE']),
   "reason": zod.string(),
-  "fanNoticeReason": zod.string().max(postV1OpsEventCancellationsRequestIdJudgementBodyFanNoticeReasonMax).describe('팬 통지의 사유 요약(200자 [가정], docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(추천 적용 2026-10-14, ADR-0062)')
-})
+  "fanNoticeReason": zod.string().max(createOpsEventCancellationJudgementBodyFanNoticeReasonMax).describe('팬 통지의 사유 요약(200자 [가정], docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(추천 적용 2026-10-14, ADR-0062)')
+}).strict()
 
-export const postV1OpsEventCancellationsRequestIdJudgementResponseFanNoticeReasonMax = 200;
+export const createOpsEventCancellationJudgementResponseFanNoticeReasonMax = 200;
 
 
 
-export const PostV1OpsEventCancellationsRequestIdJudgementResponse = zod.object({
+export const CreateOpsEventCancellationJudgementResponse = zod.object({
   "requestId": zod.string().optional(),
   "eventId": zod.string().optional(),
   "kind": zod.enum(['CANCEL', 'POSTPONE']).optional(),
   "status": zod.enum(['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW', 'COMPLETED', 'REJECTED']).optional().describe('REFUND_WINDOW는 연기(POSTPONE) 확정 뒤 바뀐 공연 시작 전까지 환급 신청을 받는 때(docs/planning/03 §2.11, 기술 검토 중간-044)'),
   "fault": zod.enum(['ORGANIZER', 'FORCE_MAJEURE', 'CONTENT_CHANGE']).optional(),
-  "fanNoticeReason": zod.string().max(postV1OpsEventCancellationsRequestIdJudgementResponseFanNoticeReasonMax).optional().describe('팬 통지의 사유 요약(200자 [가정], 판정자가 통지 문안 미리보기에서 씀, docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(ADR-0062)'),
+  "fanNoticeReason": zod.string().max(createOpsEventCancellationJudgementResponseFanNoticeReasonMax).optional().describe('팬 통지의 사유 요약(200자 [가정], 판정자가 통지 문안 미리보기에서 씀, docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(ADR-0062)'),
   "dryRun": zod.looseObject({
 
 }).optional().describe('대상 주문 수, 환급 총액, 배상 대상 수와 총액, 결제사별 건수와 예상 소요 시간'),
@@ -2450,54 +2390,54 @@ export const PostV1OpsEventCancellationsRequestIdJudgementResponse = zod.object(
  * FR-055, POL-038. 판정자 본인은 403. 실행된 환불은 되돌리지 않음
  * @summary 회차 취소 확정 승인(판정자 외 operator 이상). 승인되면 팬 통지와 일괄 환불 작업 시작
  */
-export const PostV1OpsEventCancellationsRequestIdApprovalsParams = zod.object({
+export const CreateOpsEventCancellationApprovalParams = zod.object({
   "requestId": zod.string()
 })
 
-export const PostV1OpsEventCancellationsRequestIdApprovalsHeader = zod.object({
+export const CreateOpsEventCancellationApprovalHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
-export const PostV1OpsEventCancellationsRequestIdApprovalsResponse = zod.unknown()
+export const CreateOpsEventCancellationApprovalResponse = zod.unknown()
 
 /**
  * FR-055, POL-038. 판정 뒤 반려는 판정자 외 operator 이상. 허용 역할 [가정]: 판정 전 반려(docs/planning/03 §2.11 T4)를 누가 하는지 정본에 없다. 역할 칸은 판정 뒤 반려에 맞춰 operator·commander로 두고, 판정 전 반려는 귀책을 판정하는 commander만 한다(추천 적용 2026-10-30, docs/security/authz-matrix.md §5.5)
  * @summary 회차 취소 반려(사유 필수). 판정 전이면 요청 반려(REJECTED), 판정 뒤 승인자가 반려하면 재판정 대기
  */
-export const PostV1OpsEventCancellationsRequestIdRejectionsParams = zod.object({
+export const CreateOpsEventCancellationRejectionParams = zod.object({
   "requestId": zod.string()
 })
 
-export const PostV1OpsEventCancellationsRequestIdRejectionsBody = zod.object({
+export const CreateOpsEventCancellationRejectionBody = zod.object({
   "reason": zod.string()
-})
+}).strict()
 
-export const PostV1OpsEventCancellationsRequestIdRejectionsResponse = zod.unknown()
+export const CreateOpsEventCancellationRejectionResponse = zod.unknown()
 
 /**
  * FR-055. 작업 전체나 결제사 몫 하나를 멈춘다(pg를 비우면 전체). 이미 보낸 결제사 취소 호출의 답은 기다리고 새 호출만 보내지 않는다. 수동으로 멈춘 몫은 재개로만 다시 시작한다. 결제사 몫이 스스로 멈추는 기준(1분 창 실패율 5% [가정]·연속 실패 20건 [가정]·서킷 열림, 거절률 5% [가정]이면 전체)은 transfer-refund §5다(추천 적용 2026-10-28, 기술 검토 중간-045)
  * @summary 일괄 환불 작업 일시정지(commander, 사유 필수)
  */
-export const PostV1OpsEventCancellationsRequestIdPausesParams = zod.object({
+export const CreateOpsEventCancellationPauseParams = zod.object({
   "requestId": zod.string()
 })
 
-export const PostV1OpsEventCancellationsRequestIdPausesBody = zod.object({
+export const CreateOpsEventCancellationPauseBody = zod.object({
   "pg": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal('SIMULATOR'),zod.literal(null)]).nullish().describe('멈출 결제사 몫. 비우면 작업 전체'),
   "reason": zod.string()
-})
+}).strict()
 
-export const postV1OpsEventCancellationsRequestIdPausesResponseFanNoticeReasonMax = 200;
+export const createOpsEventCancellationPauseResponseFanNoticeReasonMax = 200;
 
 
 
-export const PostV1OpsEventCancellationsRequestIdPausesResponse = zod.object({
+export const CreateOpsEventCancellationPauseResponse = zod.object({
   "requestId": zod.string().optional(),
   "eventId": zod.string().optional(),
   "kind": zod.enum(['CANCEL', 'POSTPONE']).optional(),
   "status": zod.enum(['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW', 'COMPLETED', 'REJECTED']).optional().describe('REFUND_WINDOW는 연기(POSTPONE) 확정 뒤 바뀐 공연 시작 전까지 환급 신청을 받는 때(docs/planning/03 §2.11, 기술 검토 중간-044)'),
   "fault": zod.enum(['ORGANIZER', 'FORCE_MAJEURE', 'CONTENT_CHANGE']).optional(),
-  "fanNoticeReason": zod.string().max(postV1OpsEventCancellationsRequestIdPausesResponseFanNoticeReasonMax).optional().describe('팬 통지의 사유 요약(200자 [가정], 판정자가 통지 문안 미리보기에서 씀, docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(ADR-0062)'),
+  "fanNoticeReason": zod.string().max(createOpsEventCancellationPauseResponseFanNoticeReasonMax).optional().describe('팬 통지의 사유 요약(200자 [가정], 판정자가 통지 문안 미리보기에서 씀, docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(ADR-0062)'),
   "dryRun": zod.looseObject({
 
 }).optional().describe('대상 주문 수, 환급 총액, 배상 대상 수와 총액, 결제사별 건수와 예상 소요 시간'),
@@ -2520,26 +2460,26 @@ export const PostV1OpsEventCancellationsRequestIdPausesResponse = zod.object({
  * FR-055. 스스로 멈춘 몫과 수동으로 멈춘 몫을 다시 시작한다(pg를 비우면 멈춘 몫 모두). 결과 모름 건을 결제사 조회로 먼저 끝낸 뒤 새 취소를 보낸다. 화면은 그 결제사의 서킷 상태와 최근 5분 실패율로 '재개 조건 충족'을 보이고, 자동 정지 기준은 재개 뒤에도 살아 있다(transfer-refund §5, 추천 적용 2026-10-28, 기술 검토 중간-045)
  * @summary 일괄 환불 작업 재개(commander, 확정 범위 안, 사유 필수)
  */
-export const PostV1OpsEventCancellationsRequestIdResumptionsParams = zod.object({
+export const CreateOpsEventCancellationResumptionParams = zod.object({
   "requestId": zod.string()
 })
 
-export const PostV1OpsEventCancellationsRequestIdResumptionsBody = zod.object({
+export const CreateOpsEventCancellationResumptionBody = zod.object({
   "pg": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal('SIMULATOR'),zod.literal(null)]).nullish().describe('다시 시작할 결제사 몫. 비우면 멈춘 몫 모두'),
   "reason": zod.string()
-})
+}).strict()
 
-export const postV1OpsEventCancellationsRequestIdResumptionsResponseFanNoticeReasonMax = 200;
+export const createOpsEventCancellationResumptionResponseFanNoticeReasonMax = 200;
 
 
 
-export const PostV1OpsEventCancellationsRequestIdResumptionsResponse = zod.object({
+export const CreateOpsEventCancellationResumptionResponse = zod.object({
   "requestId": zod.string().optional(),
   "eventId": zod.string().optional(),
   "kind": zod.enum(['CANCEL', 'POSTPONE']).optional(),
   "status": zod.enum(['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW', 'COMPLETED', 'REJECTED']).optional().describe('REFUND_WINDOW는 연기(POSTPONE) 확정 뒤 바뀐 공연 시작 전까지 환급 신청을 받는 때(docs/planning/03 §2.11, 기술 검토 중간-044)'),
   "fault": zod.enum(['ORGANIZER', 'FORCE_MAJEURE', 'CONTENT_CHANGE']).optional(),
-  "fanNoticeReason": zod.string().max(postV1OpsEventCancellationsRequestIdResumptionsResponseFanNoticeReasonMax).optional().describe('팬 통지의 사유 요약(200자 [가정], 판정자가 통지 문안 미리보기에서 씀, docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(ADR-0062)'),
+  "fanNoticeReason": zod.string().max(createOpsEventCancellationResumptionResponseFanNoticeReasonMax).optional().describe('팬 통지의 사유 요약(200자 [가정], 판정자가 통지 문안 미리보기에서 씀, docs/design/d5 §9.3). 내부 판정 사유와 따로 둔다(ADR-0062)'),
   "dryRun": zod.looseObject({
 
 }).optional().describe('대상 주문 수, 환급 총액, 배상 대상 수와 총액, 결제사별 건수와 예상 소요 시간'),
@@ -2562,60 +2502,60 @@ export const PostV1OpsEventCancellationsRequestIdResumptionsResponse = zod.objec
  * FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 확인 항목에 아티스트·공연장 연결이 있다: 운영자가 파트너가 고르거나 적은 값을 기존 아티스트·공연장에 잇거나, POST /v1/ops/artists·POST /v1/ops/places로 새로 만든 뒤 그 ID로 승인한다. 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078)
  * @summary 판매 승인(operator). 판매 조건은 고치지 않음
  */
-export const PostV1OpsSaleReviewsProductionIdApprovalsParams = zod.object({
+export const CreateOpsSaleReviewApprovalParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
 
-export const postV1OpsSaleReviewsProductionIdApprovalsBodyAliasesItemMax = 100;
+export const createOpsSaleReviewApprovalBodyAliasesItemMax = 100;
 
-export const postV1OpsSaleReviewsProductionIdApprovalsBodyAliasesMax = 5;
+export const createOpsSaleReviewApprovalBodyAliasesMax = 5;
 
 
 
-export const PostV1OpsSaleReviewsProductionIdApprovalsBody = zod.object({
+export const CreateOpsSaleReviewApprovalBody = zod.object({
   "scales": zod.array(zod.object({
   "eventId": zod.string(),
   "scale": zod.enum(['LARGE', 'MEDIUM', 'SMALL'])
-})).min(1).describe('그 공연의 회차마다 규모(architecture §9.5). 빠진 회차가 있으면 422. LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격 검사'),
+}).strict()).min(1).describe('그 공연의 회차마다 규모(architecture §9.5). 빠진 회차가 있으면 422. LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격 검사'),
   "placeId": zod.string().describe('확인한 공연장'),
   "artistIds": zod.array(zod.string()).describe('확인한 아티스트(보이는 순서, 없으면 빈 배열)'),
-  "aliases": zod.array(zod.string().min(1).max(postV1OpsSaleReviewsProductionIdApprovalsBodyAliasesItemMax)).max(postV1OpsSaleReviewsProductionIdApprovalsBodyAliasesMax).optional().describe('공연의 다른 이름 최종 목록(파트너가 적은 것에서 고친다, POL-045)')
-})
+  "aliases": zod.array(zod.string().min(1).max(createOpsSaleReviewApprovalBodyAliasesItemMax)).max(createOpsSaleReviewApprovalBodyAliasesMax).optional().describe('공연의 다른 이름 최종 목록(파트너가 적은 것에서 고친다, POL-045)')
+}).strict()
 
-export const PostV1OpsSaleReviewsProductionIdApprovalsResponse = zod.unknown()
+export const CreateOpsSaleReviewApprovalResponse = zod.unknown()
 
 /**
  * FR-052, POL-037. 공연 단위(ADR-0093)
  * @summary 판매 승인 반려(사유 필수)
  */
-export const PostV1OpsSaleReviewsProductionIdRejectionsParams = zod.object({
+export const CreateOpsSaleReviewRejectionParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-export const PostV1OpsSaleReviewsProductionIdRejectionsBody = zod.object({
+export const CreateOpsSaleReviewRejectionBody = zod.object({
   "reason": zod.string()
-})
+}).strict()
 
-export const PostV1OpsSaleReviewsProductionIdRejectionsResponse = zod.unknown()
+export const CreateOpsSaleReviewRejectionResponse = zod.unknown()
 
 /**
  * 추천 적용 2026-10-27, ADR-0093. 이름과 다른 이름으로 찾는다(정규화·낱자·초성)
  * @summary 아티스트 찾기(판매 승인 화면, viewer 이상과 CS 담당자 조회, 소유자 결정 2026-10-30, open-items 82번 ③)
  */
-export const getV1OpsArtistsQueryQMax = 50;
+export const listOpsArtistsQueryQMax = 50;
 
-export const getV1OpsArtistsQueryLimitMax = 100;
+export const listOpsArtistsQueryLimitMax = 100;
 
 
 
-export const GetV1OpsArtistsQueryParams = zod.object({
-  "q": zod.string().min(1).max(getV1OpsArtistsQueryQMax),
+export const ListOpsArtistsQueryParams = zod.object({
+  "q": zod.string().min(1).max(listOpsArtistsQueryQMax),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsArtistsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsArtistsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1OpsArtistsResponse = zod.object({
+export const ListOpsArtistsResponse = zod.object({
   "items": zod.array(zod.object({
   "artistId": zod.string().optional(),
   "name": zod.string().optional(),
@@ -2628,63 +2568,63 @@ export const GetV1OpsArtistsResponse = zod.object({
  * 추천 적용 2026-10-27, ADR-0093. 판매 승인 때 파트너가 적은 새 이름이 기존 아티스트가 아닐 때 만든다. 정규화한 이름이 같은 아티스트가 이미 있으면 409와 그 ID를 준다(같은 아티스트가 둘로 갈라지지 않게)
  * @summary 아티스트 만들기(operator, 사유 필수, 감사 로그)
  */
-export const postV1OpsArtistsBodyNameMax = 100;
+export const createOpsArtistBodyNameMax = 100;
 
-export const postV1OpsArtistsBodyReasonMax = 500;
+export const createOpsArtistBodyReasonMax = 500;
 
 
 
-export const PostV1OpsArtistsBody = zod.object({
-  "name": zod.string().min(1).max(postV1OpsArtistsBodyNameMax),
-  "reason": zod.string().min(1).max(postV1OpsArtistsBodyReasonMax)
+export const CreateOpsArtistBody = zod.object({
+  "name": zod.string().min(1).max(createOpsArtistBodyNameMax),
+  "reason": zod.string().min(1).max(createOpsArtistBodyReasonMax)
 }).strict()
 
-export const PostV1OpsArtistsResponse = zod.void()
+export const CreateOpsArtistResponse = zod.void()
 
 /**
  * POL-045, 추천 적용 2026-10-27, ADR-0093·0094. 다른 이름은 검색에만 쓰고 화면 이름은 바꾸지 않는다. 다음 판 확인(10초 [가정]) 때 자동완성 사전에 반영된다. 지운 이름을 바로 내려야 하면 검색 경로 CDN 무효화를 함께 부른다
  * @summary 아티스트 다른 이름 고치기(목록 통째로, operator, 사유 필수, 감사 로그)
  */
-export const PutV1OpsArtistsArtistIdAliasesParams = zod.object({
+export const PutOpsArtistAliasesParams = zod.object({
   "artistId": zod.string()
 })
 
-export const PutV1OpsArtistsArtistIdAliasesHeader = zod.object({
+export const PutOpsArtistAliasesHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const putV1OpsArtistsArtistIdAliasesBodyAliasesItemMax = 100;
+export const putOpsArtistAliasesBodyAliasesItemMax = 100;
 
-export const putV1OpsArtistsArtistIdAliasesBodyAliasesMax = 20;
+export const putOpsArtistAliasesBodyAliasesMax = 20;
 
-export const putV1OpsArtistsArtistIdAliasesBodyReasonMax = 500;
+export const putOpsArtistAliasesBodyReasonMax = 500;
 
 
 
-export const PutV1OpsArtistsArtistIdAliasesBody = zod.object({
-  "aliases": zod.array(zod.string().min(1).max(putV1OpsArtistsArtistIdAliasesBodyAliasesItemMax)).max(putV1OpsArtistsArtistIdAliasesBodyAliasesMax).describe('20개 [가정]까지'),
-  "reason": zod.string().min(1).max(putV1OpsArtistsArtistIdAliasesBodyReasonMax)
+export const PutOpsArtistAliasesBody = zod.object({
+  "aliases": zod.array(zod.string().min(1).max(putOpsArtistAliasesBodyAliasesItemMax)).max(putOpsArtistAliasesBodyAliasesMax).describe('20개 [가정]까지'),
+  "reason": zod.string().min(1).max(putOpsArtistAliasesBodyReasonMax)
 }).strict()
 
-export const PutV1OpsArtistsArtistIdAliasesResponse = zod.unknown()
+export const PutOpsArtistAliasesResponse = zod.unknown()
 
 /**
  * 추천 적용 2026-10-27, ADR-0093. 이름과 다른 이름으로 찾는다
  * @summary 공연장 찾기(판매 승인 화면, viewer 이상과 CS 담당자 조회, 소유자 결정 2026-10-30, open-items 82번 ③)
  */
-export const getV1OpsPlacesQueryQMax = 50;
+export const listOpsPlacesQueryQMax = 50;
 
-export const getV1OpsPlacesQueryLimitMax = 100;
+export const listOpsPlacesQueryLimitMax = 100;
 
 
 
-export const GetV1OpsPlacesQueryParams = zod.object({
-  "q": zod.string().min(1).max(getV1OpsPlacesQueryQMax),
+export const ListOpsPlacesQueryParams = zod.object({
+  "q": zod.string().min(1).max(listOpsPlacesQueryQMax),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsPlacesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsPlacesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1OpsPlacesResponse = zod.object({
+export const ListOpsPlacesResponse = zod.object({
   "items": zod.array(zod.object({
   "placeId": zod.string().optional(),
   "name": zod.string().optional(),
@@ -2700,118 +2640,118 @@ export const GetV1OpsPlacesResponse = zod.object({
  * 추천 적용 2026-10-27, ADR-0093. 파트너가 요청한 새 공연장이 목록에 없을 때 만든다. 정규화한 이름과 주소가 같은 공연장이 있으면 409와 그 ID를 준다
  * @summary 공연장 만들기(operator, 사유 필수, 감사 로그)
  */
-export const postV1OpsPlacesBodyNameMax = 100;
+export const createOpsPlaceBodyNameMax = 100;
 
-export const postV1OpsPlacesBodyAddressMax = 200;
+export const createOpsPlaceBodyAddressMax = 200;
 
-export const postV1OpsPlacesBodyReasonMax = 500;
+export const createOpsPlaceBodyReasonMax = 500;
 
 
 
-export const PostV1OpsPlacesBody = zod.object({
-  "name": zod.string().min(1).max(postV1OpsPlacesBodyNameMax),
-  "address": zod.string().min(1).max(postV1OpsPlacesBodyAddressMax).describe('도로명 주소'),
+export const CreateOpsPlaceBody = zod.object({
+  "name": zod.string().min(1).max(createOpsPlaceBodyNameMax),
+  "address": zod.string().min(1).max(createOpsPlaceBodyAddressMax).describe('도로명 주소'),
   "region": zod.string().describe('시·도'),
-  "reason": zod.string().min(1).max(postV1OpsPlacesBodyReasonMax)
+  "reason": zod.string().min(1).max(createOpsPlaceBodyReasonMax)
 }).strict()
 
-export const PostV1OpsPlacesResponse = zod.void()
+export const CreateOpsPlaceResponse = zod.void()
 
 /**
  * 추천 적용 2026-10-27, ADR-0093. 이름이 바뀌면 옛 이름을 다른 이름으로 남길지 함께 정한다(예: 올림픽체조경기장 → KSPO DOME). 바꾸면 그 공연장 공연의 검색 읽기 모델을 같은 트랜잭션에서 고친다(ADR-0094)
  * @summary 공연장 고치기(이름·주소·운영 상태, operator, 사유 필수, 감사 로그)
  */
-export const PatchV1OpsPlacesPlaceIdParams = zod.object({
+export const UpdateOpsPlaceParams = zod.object({
   "placeId": zod.string()
 })
 
-export const PatchV1OpsPlacesPlaceIdHeader = zod.object({
+export const UpdateOpsPlaceHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const patchV1OpsPlacesPlaceIdBodyNameMax = 100;
+export const updateOpsPlaceBodyNameMax = 100;
 
-export const patchV1OpsPlacesPlaceIdBodyAddressMax = 200;
+export const updateOpsPlaceBodyAddressMax = 200;
 
-export const patchV1OpsPlacesPlaceIdBodyKeepOldNameAsAliasDefault = true;
-export const patchV1OpsPlacesPlaceIdBodyReasonMax = 500;
+export const updateOpsPlaceBodyKeepOldNameAsAliasDefault = true;
+export const updateOpsPlaceBodyReasonMax = 500;
 
 
 
-export const PatchV1OpsPlacesPlaceIdBody = zod.object({
-  "name": zod.string().min(1).max(patchV1OpsPlacesPlaceIdBodyNameMax).optional(),
-  "address": zod.string().min(1).max(patchV1OpsPlacesPlaceIdBodyAddressMax).optional(),
+export const UpdateOpsPlaceBody = zod.object({
+  "name": zod.string().min(1).max(updateOpsPlaceBodyNameMax).optional(),
+  "address": zod.string().min(1).max(updateOpsPlaceBodyAddressMax).optional(),
   "region": zod.string().optional(),
   "status": zod.enum(['ACTIVE', 'CLOSED']).optional(),
-  "keepOldNameAsAlias": zod.boolean().default(patchV1OpsPlacesPlaceIdBodyKeepOldNameAsAliasDefault),
-  "reason": zod.string().min(1).max(patchV1OpsPlacesPlaceIdBodyReasonMax)
+  "keepOldNameAsAlias": zod.boolean().default(updateOpsPlaceBodyKeepOldNameAsAliasDefault),
+  "reason": zod.string().min(1).max(updateOpsPlaceBodyReasonMax)
 }).strict()
 
-export const PatchV1OpsPlacesPlaceIdResponse = zod.unknown()
+export const UpdateOpsPlaceResponse = zod.unknown()
 
 /**
  * POL-045, 추천 적용 2026-10-27, ADR-0093·0094. 검색에만 쓰고 화면 이름은 바꾸지 않는다. 다음 판 확인 때 자동완성 사전에 반영된다
  * @summary 공연장 다른 이름 고치기(목록 통째로, operator, 사유 필수, 감사 로그)
  */
-export const PutV1OpsPlacesPlaceIdAliasesParams = zod.object({
+export const PutOpsPlaceAliasesParams = zod.object({
   "placeId": zod.string()
 })
 
-export const PutV1OpsPlacesPlaceIdAliasesHeader = zod.object({
+export const PutOpsPlaceAliasesHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const putV1OpsPlacesPlaceIdAliasesBodyAliasesItemMax = 100;
+export const putOpsPlaceAliasesBodyAliasesItemMax = 100;
 
-export const putV1OpsPlacesPlaceIdAliasesBodyAliasesMax = 20;
+export const putOpsPlaceAliasesBodyAliasesMax = 20;
 
-export const putV1OpsPlacesPlaceIdAliasesBodyReasonMax = 500;
+export const putOpsPlaceAliasesBodyReasonMax = 500;
 
 
 
-export const PutV1OpsPlacesPlaceIdAliasesBody = zod.object({
-  "aliases": zod.array(zod.string().min(1).max(putV1OpsPlacesPlaceIdAliasesBodyAliasesItemMax)).max(putV1OpsPlacesPlaceIdAliasesBodyAliasesMax).describe('20개 [가정]까지'),
-  "reason": zod.string().min(1).max(putV1OpsPlacesPlaceIdAliasesBodyReasonMax)
+export const PutOpsPlaceAliasesBody = zod.object({
+  "aliases": zod.array(zod.string().min(1).max(putOpsPlaceAliasesBodyAliasesItemMax)).max(putOpsPlaceAliasesBodyAliasesMax).describe('20개 [가정]까지'),
+  "reason": zod.string().min(1).max(putOpsPlaceAliasesBodyReasonMax)
 }).strict()
 
-export const PutV1OpsPlacesPlaceIdAliasesResponse = zod.unknown()
+export const PutOpsPlaceAliasesResponse = zod.unknown()
 
 /**
  * POL-045, 추천 적용 2026-10-27, ADR-0093·0094. 파트너가 등록 때 적은 다른 이름을 승인 뒤에도 고친다(재승인 대상 아님). 검색에만 쓴다
  * @summary 공연 다른 이름 고치기(목록 통째로, operator, 사유 필수, 감사 로그)
  */
-export const PutV1OpsProductionsProductionIdAliasesParams = zod.object({
+export const PutOpsProductionAliasesParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-export const PutV1OpsProductionsProductionIdAliasesHeader = zod.object({
+export const PutOpsProductionAliasesHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const putV1OpsProductionsProductionIdAliasesBodyAliasesItemMax = 100;
+export const putOpsProductionAliasesBodyAliasesItemMax = 100;
 
-export const putV1OpsProductionsProductionIdAliasesBodyAliasesMax = 5;
+export const putOpsProductionAliasesBodyAliasesMax = 5;
 
-export const putV1OpsProductionsProductionIdAliasesBodyReasonMax = 500;
+export const putOpsProductionAliasesBodyReasonMax = 500;
 
 
 
-export const PutV1OpsProductionsProductionIdAliasesBody = zod.object({
-  "aliases": zod.array(zod.string().min(1).max(putV1OpsProductionsProductionIdAliasesBodyAliasesItemMax)).max(putV1OpsProductionsProductionIdAliasesBodyAliasesMax).describe('5개 [가정]까지'),
-  "reason": zod.string().min(1).max(putV1OpsProductionsProductionIdAliasesBodyReasonMax)
+export const PutOpsProductionAliasesBody = zod.object({
+  "aliases": zod.array(zod.string().min(1).max(putOpsProductionAliasesBodyAliasesItemMax)).max(putOpsProductionAliasesBodyAliasesMax).describe('5개 [가정]까지'),
+  "reason": zod.string().min(1).max(putOpsProductionAliasesBodyReasonMax)
 }).strict()
 
-export const PutV1OpsProductionsProductionIdAliasesResponse = zod.unknown()
+export const PutOpsProductionAliasesResponse = zod.unknown()
 
 /**
  * POL-030, 추천 적용 2026-10-21, ADR-0078 결정 1. 예상 진입 인원 = 오픈 알림 구독 수 × 구독 대비 진입 비율이다. 비율은 구독 수가 이 회차의 0.5~2배 [가정]인 지난 회차(골드, 최근 2년)의 '실제 진입 ÷ 오픈 30분 전 구독 수' 중앙값과 75번째 백분위이고, 그런 회차가 10개 미만이면 기본 비율(중앙 2.0·상단 3.0 [가정])을 쓴다. 판매 승인 화면을 열 때, 승인 뒤 매일 09:00 [가정], T-30분 점검 때 계산하며 가장 최근 값을 준다. 머신러닝이 아니다. 회차 경로다(판매 승인은 공연 단위, ADR-0093)
  * @summary 수요 예측 조회(viewer 이상)
  */
-export const GetV1OpsEventsEventIdDemandForecastParams = zod.object({
+export const GetOpsEventDemandForecastParams = zod.object({
   "eventId": zod.string()
 })
 
-export const GetV1OpsEventsEventIdDemandForecastResponse = zod.object({
+export const GetOpsEventDemandForecastResponse = zod.object({
   "eventId": zod.string().optional(),
   "computedAt": zod.iso.datetime({"offset":true}).optional(),
   "trigger": zod.enum(['SALE_REVIEW', 'DAILY', 'T_MINUS_30']).optional(),
@@ -2831,45 +2771,45 @@ export const GetV1OpsEventsEventIdDemandForecastResponse = zod.object({
  * POL-030, 추천 적용 2026-10-21, ADR-0078 결정 1. 사유 필수, 감사 로그에 남는다. 올리면 변경 동결 달력이 다음 갱신(10분 안)에 창을 다시 계산한다(devops §8.1). LARGE로 올릴 때 다른 LARGE 공연과 오픈 30분 안이면 409이고, commander가 재인증하고 intervalException=true와 사유를 주면 '간격 예외'로 올린다(두 회차의 CDN 한도와 동결 창을 다시 확인한다). 오픈 시각 검사는 판매 승인과 같은 잠금으로 직렬화한다
  * @summary 회차의 공연 규모 올리기(operator 이상, 판매 승인 뒤 T-30분 점검 시작 전까지). 내리기는 없음
  */
-export const PostV1OpsEventsEventIdScaleChangesParams = zod.object({
+export const CreateOpsEventScaleChangeParams = zod.object({
   "eventId": zod.string()
 })
 
-export const PostV1OpsEventsEventIdScaleChangesHeader = zod.object({
+export const CreateOpsEventScaleChangeHeader = zod.object({
   "X-Reauth-Token": zod.string().optional().describe('intervalException=true일 때 필수(guidelines §7)')
 })
 
-export const postV1OpsEventsEventIdScaleChangesBodyReasonMax = 500;
+export const createOpsEventScaleChangeBodyReasonMax = 500;
 
-export const postV1OpsEventsEventIdScaleChangesBodyIntervalExceptionDefault = false;
+export const createOpsEventScaleChangeBodyIntervalExceptionDefault = false;
 
-export const PostV1OpsEventsEventIdScaleChangesBody = zod.object({
+export const CreateOpsEventScaleChangeBody = zod.object({
   "scale": zod.enum(['LARGE', 'MEDIUM']).describe('지금보다 큰 등급만'),
-  "reason": zod.string().min(1).max(postV1OpsEventsEventIdScaleChangesBodyReasonMax),
-  "intervalException": zod.boolean().default(postV1OpsEventsEventIdScaleChangesBodyIntervalExceptionDefault).describe('commander만. 다른 LARGE와 30분 안이어도 올린다')
-})
+  "reason": zod.string().min(1).max(createOpsEventScaleChangeBodyReasonMax),
+  "intervalException": zod.boolean().default(createOpsEventScaleChangeBodyIntervalExceptionDefault).describe('commander만. 다른 LARGE와 30분 안이어도 올린다')
+}).strict()
 
-export const PostV1OpsEventsEventIdScaleChangesResponse = zod.unknown()
+export const CreateOpsEventScaleChangeResponse = zod.unknown()
 
 /**
  * FR-062, POL-039. 관제 역할(viewer·operator·commander)만. CS 담당자는 정산 화면(SCR-049)을 쓰지 않아 403이고, 정산 이의는 CS 처리함 '정산 이의' 건으로만 본다. 응답의 정산 계좌는 은행과 끝 4자리뿐이다(소유자 결정 2026-10-30, open-items 72번, docs/features/settlement.md §9)
  * @summary 정산서 목록(종류·상태·결제사·결제 상점·지급일 필터)
  */
-export const getV1OpsSettlementsQueryLimitMax = 100;
+export const listOpsSettlementsQueryLimitMax = 100;
 
 
 
-export const GetV1OpsSettlementsQueryParams = zod.object({
+export const ListOpsSettlementsQueryParams = zod.object({
   "kind": zod.enum(['EVENT', 'PRODUCT']).optional().describe('회차(EVENT)·상품(PRODUCT) 정산서(추천 적용 2026-10-14, ADR-0062)'),
   "status": zod.string().optional(),
   "pg": zod.string().optional(),
   "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional(),
   "payoutDate": zod.iso.date().optional(),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsSettlementsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsSettlementsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1OpsSettlementsResponse = zod.object({
+export const ListOpsSettlementsResponse = zod.object({
   "items": zod.array(zod.object({
   "statementId": zod.string().optional(),
   "kind": zod.enum(['EVENT', 'PRODUCT']).optional().describe('EVENT는 티켓, PRODUCT는 굿즈·티켓 연동 부가 상품'),
@@ -2901,62 +2841,62 @@ export const GetV1OpsSettlementsResponse = zod.object({
  * FR-062, POL-038, POL-039. DISPUTED → NOTIFIED. 조정이 필요하면 adjustments를 쓴다. cs_lead가 CS 처리함 '정산 이의' 건 상세에서 부른다(정산 화면에서 부르지 않는다, open-items 72번, docs/features/settlement.md §9)
  * @summary 정산 이의 기각(사유 필수, 파트너에게 다시 알림)
  */
-export const PostV1OpsSettlementsStatementIdDisputeDismissalParams = zod.object({
+export const CreateOpsSettlementDisputeDismissalParams = zod.object({
   "statementId": zod.string()
 })
 
-export const PostV1OpsSettlementsStatementIdDisputeDismissalBody = zod.object({
+export const CreateOpsSettlementDisputeDismissalBody = zod.object({
   "reason": zod.string()
-})
+}).strict()
 
-export const PostV1OpsSettlementsStatementIdDisputeDismissalResponse = zod.unknown()
+export const CreateOpsSettlementDisputeDismissalResponse = zod.unknown()
 
 /**
  * FR-062, POL-038, POL-039. 승인 업무로 만들어지고 조정 행만 더함. 앞의 다섯 코드는 그 정산서의 이의를 받아들일 때만, 그 이의와 같은 코드로 쓴다. 뒤의 세 코드(LEDGER_ERROR 원장 오류 정정, CONTRACT_CORRECTION 계약 수수료율 정정, AGREED_DEDUCTION 합의한 차감)는 이의 없이 쓴다. 상품 정산서도 같다(추천 적용 2026-10-14, ADR-0062). cs_lead는 정산 화면(SCR-049)을 쓰지 않으므로, 이의 인정 조정은 CS 처리함 '정산 이의' 건에서, 이의 없는 조정은 승인 업무 화면(SCR-046)에서 정산서 ID로 부른다. 그때 화면에는 그 정산서의 금액 항목·상태만 보인다(소유자 결정 2026-10-30, open-items 72번, 세부는 추천 적용 2026-10-30)
  * @summary 정산서 수기 조정 요청(cs_lead 요청, commander 승인)
  */
-export const PostV1OpsSettlementsStatementIdAdjustmentsParams = zod.object({
+export const CreateOpsSettlementAdjustmentParams = zod.object({
   "statementId": zod.string()
 })
 
-export const PostV1OpsSettlementsStatementIdAdjustmentsHeader = zod.object({
+export const CreateOpsSettlementAdjustmentHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsSettlementsStatementIdAdjustmentsBodyEvidenceNoteMax = 2000;
+export const createOpsSettlementAdjustmentBodyEvidenceNoteMax = 2000;
 
 
 
-export const PostV1OpsSettlementsStatementIdAdjustmentsBody = zod.object({
+export const CreateOpsSettlementAdjustmentBody = zod.object({
   "amount": zod.int().describe('+는 지급 늘림, −는 줄임'),
   "reasonCode": zod.enum(['GROSS_AMOUNT', 'REFUND_AMOUNT', 'COMMISSION', 'OFFSET', 'OTHER', 'LEDGER_ERROR', 'CONTRACT_CORRECTION', 'AGREED_DEDUCTION']),
   "disputeId": zod.string().optional().describe('앞의 다섯 코드면 필수. 그 이의의 사유 코드와 같아야 함'),
-  "evidenceNote": zod.string().max(postV1OpsSettlementsStatementIdAdjustmentsBodyEvidenceNoteMax).optional().describe('OTHER와 뒤의 세 코드면 필수. 팬 개인정보 금지')
-})
+  "evidenceNote": zod.string().max(createOpsSettlementAdjustmentBodyEvidenceNoteMax).optional().describe('OTHER와 뒤의 세 코드면 필수. 팬 개인정보 금지')
+}).strict()
 
-export const postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAccountCountMin = 0;
+export const createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAccountCountMin = 0;
 
-export const postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneTicketCountMin = 0;
+export const createOpsSettlementAdjustmentResponseFraudCaseSummaryOneTicketCountMin = 0;
 
-export const postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOnePurchaseCountMin = 0;
-
-
-export const postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
-
-export const postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAppealCountsRejectedMin = 0;
-
-export const postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAppealCountsExpiredMin = 0;
-
-export const postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
-
-export const postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAppealCountsPendingMin = 0;
-
-export const postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
-export const postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneTargetsMax = 100;
+export const createOpsSettlementAdjustmentResponseFraudCaseSummaryOnePurchaseCountMin = 0;
 
 
+export const createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
 
-export const PostV1OpsSettlementsStatementIdAdjustmentsResponse = zod.object({
+export const createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAppealCountsRejectedMin = 0;
+
+export const createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAppealCountsExpiredMin = 0;
+
+export const createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
+
+export const createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAppealCountsPendingMin = 0;
+
+export const createOpsSettlementAdjustmentResponseFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsSettlementAdjustmentResponseFraudCaseSummaryOneTargetsMax = 100;
+
+
+
+export const CreateOpsSettlementAdjustmentResponse = zod.object({
   "approvalId": zod.string().optional(),
   "kind": zod.enum(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'BOOKING_RESTRICTION', 'PAYOUT_BATCH', 'SETTLEMENT_ADJUSTMENT', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE', 'MINOR_CONTRACT_CANCEL', 'SALE_SUSPENSION', 'SALE_RESUMPTION', 'FRAUD_ACTION']).optional().describe('FRAUD_ACTION은 부정 예매 조치(표 취소, 이용 제한 걸기·풀기)다. 지정 부정 거래 조사관이 POST /v1/ops/fraud-cases/{caseId}/action-requests로만 만들고(이 스키마의 POST /v1/ops/approval-requests로 보내면 422), targetRef는 사건 ID, 승인자는 요청자가 아니고 가명정보 취급자 지정이 없으며 지난 90일 안에 그 지정을 거둔 적도 없는 commander다(2인, POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다. MINOR_CONTRACT_CANCEL은 미성년자 계약 취소(cs_agent 요청, 요청자 아닌 cs_lead 1인 승인, POL-038 ⑧, 추천 적용 2026-10-14, ADR-0062). SALE_SUSPENSION·SALE_RESUMPTION은 승인한 공연의 판매 중지·재개다. targetRef는 공연 ID이고 reasonCode는 SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER [가정] 가운데 하나다. operator 이상이 요청하고 요청자가 아닌 commander가 승인한다(2인, docs/planning/03 §2.14, POL-038 ⑩, 추천 적용 2026-10-28, ADR-0123)'),
   "targetRef": zod.string().optional(),
@@ -2975,9 +2915,9 @@ export const PostV1OpsSettlementsStatementIdAdjustmentsResponse = zod.object({
   "caseId": zod.uuid().optional(),
   "eventId": zod.string().optional(),
   "reasonCategory": zod.enum(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION']).optional().describe('부정 예매 사유 범주 다섯(POL-046 ①): 자동화 프로그램(매크로·봇), 대기열 우회 링크, 보안문자 우회, 명의 대여·사들인 계정, 1인 매수 제한 회피. 팬에게 알리는 것은 이 범주뿐이고 점수와 가중치는 알리지 않는다(추천 적용 2026-10-31, ADR-0171)'),
-  "accountCount": zod.int().min(postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAccountCountMin).optional(),
-  "ticketCount": zod.int().min(postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
-  "purchaseCount": zod.int().min(postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
+  "accountCount": zod.int().min(createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAccountCountMin).optional(),
+  "ticketCount": zod.int().min(createOpsSettlementAdjustmentResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
+  "purchaseCount": zod.int().min(createOpsSettlementAdjustmentResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
   "limitPerPerson": zod.int().min(1).optional(),
   "sharedAttributes": zod.array(zod.enum(['DEVICE', 'PAYMENT_METHOD', 'CONTACT', 'IP', 'ASN', 'IDENTITY_CONFLICT']).describe('묶음 계정이 함께 쓴 연결 값의 종류(FR-072): 기기 가명(deviceRef), 결제 수단 연결값(paymentMethodRef. 카드 지문이 없어 약한 값이다, docs/features/payment.md), 연락처·수령 정보 가명(contactRef), 시간창 안의 같은 IP, 같은 ASN(망 운영자 번호), 같은 본인확인으로 다른 계정에서 시도한 기록(docs/data.md identity_conflict_attempt). 추천 적용 2026-10-31, ADR-0171')).optional(),
   "signals": zod.array(zod.enum(['LINK_GRAPH', 'SYNC_STEPS', 'VELOCITY', 'TIMING_BASELINE', 'BYPASS_TRACE', 'POST_MATCH']).describe('근거 신호. ADR-0171 결정 6의 분석 방법 여섯과 같다: 연결 그래프, 거의 같은 시각에 같은 단계를 밟는 동시 행동 군집, 같은 IP·기기에서 여러 계정을 빠르게 오가는 속도 규칙, 판매 시작부터 단계별 걸린 시간이 정상 기준선 밖, 입장 토큰 없는 홀드 시도·우회 링크 흔적, 외부 되팔이 게시물과 좌석 대조. 규칙과 점수는 docs/features/forensic-replay.md가 정한다(추천 적용 2026-10-31)')).optional(),
@@ -2985,19 +2925,19 @@ export const PostV1OpsSettlementsStatementIdAdjustmentsResponse = zod.object({
   "investigatorOpinion": zod.string().nullish(),
   "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('표 취소는 이 시각까지만 승인할 수 있고, 취소한 좌석은 언제나 정가 재판매로 돌린다(2026-10-31 정함, 그래서 예전 초안의 재판매 여부 칸 resaleOnCancel은 뺐다)'),
   "appealCounts": zod.object({
-  "accepted": zod.int().min(postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
-  "rejected": zod.int().min(postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
-  "expired": zod.int().min(postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
-  "submitted": zod.int().min(postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
-  "pending": zod.int().min(postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
+  "accepted": zod.int().min(createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
+  "rejected": zod.int().min(createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
+  "expired": zod.int().min(createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
+  "submitted": zod.int().min(createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
+  "pending": zod.int().min(createOpsSettlementAdjustmentResponseFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
 }).optional().describe('계정별 소명 결과의 수. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다(추천 적용 2026-10-31, ADR-0173)'),
-  "snapshotHash": zod.string().regex(postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
+  "snapshotHash": zod.string().regex(createOpsSettlementAdjustmentResponseFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
   "targets": zod.array(zod.object({
   "accountId": zod.string().optional(),
   "ticketIds": zod.array(zod.string()).optional().describe('이 요청에 든 그 계정 결제 표(CANCEL_TICKETS만)'),
   "holderTicketIds": zod.array(zod.string()).optional().describe('그 가운데 받은 사람(사건 밖 계정)이 가진 표. 조사관이 받은 사람의 진술을 보고 넣은 표다'),
   "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional()
-})).max(postV1OpsSettlementsStatementIdAdjustmentsResponseFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
+})).max(createOpsSettlementAdjustmentResponseFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
 }).describe('승인 업무 FRAUD_ACTION에 붙는 사건 요약(읽기 전용, POL-038 ⑪, SCR-046). 그 업무의 요청자와 승인 자격자만 상세를 받고(그 밖은 404) 그 상세에 늘 실린다(추천 적용 2026-10-31, ADR-0171). 승인자는 조사 경로(/v1/ops/fraud-cases 아래)를 부르지 않고 이것만 본다. 계정 수·근거 신호 범주·소명 결과·조사관 의견과, 범위를 줄이는 데 쓰는 대상 계정·표의 내부 ID(targets)만 싣고, 기기 가명·연락처 가명·IP 같은 연결 값은 싣지 않는다. 열람은 접속기록에 남는다(추천 적용 2026-10-31, ADR-0171 결정 7. targets는 (추천 적용 2026-10-31, ADR-0173))'),zod.null()]).optional().describe('FRAUD_ACTION에만, 읽기 전용. FRAUD_ACTION 상세는 요청자와 승인 자격자만 받으므로(그 밖은 404) 상세에는 늘 실리고, 다른 종류에는 null이다(추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다(POL-038 ⑪·공통, 추천 적용 2026-10-31, ADR-0171)')
 }).describe('승인 업무(POL-038)')
 
@@ -3005,25 +2945,25 @@ export const PostV1OpsSettlementsStatementIdAdjustmentsResponse = zod.object({
  * FR-062, POL-038, POL-039. 지급일 전 영업일 15시까지 승인되지 않으면 지급일이 다음 영업일로 밀림
  * @summary 지급 묶음 확인 요청(operator). 승인 업무(commander)로 넘어감
  */
-export const PostV1OpsPayoutBatchesHeader = zod.object({
+export const CreateOpsPayoutBatchHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsPayoutBatchesBodyPortoneBalanceAmountMin = 0;
+export const createOpsPayoutBatchBodyPortoneBalanceAmountMin = 0;
 
 
 
-export const PostV1OpsPayoutBatchesBody = zod.object({
+export const CreateOpsPayoutBatchBody = zod.object({
   "pg": zod.enum(['TOSS', 'PORTONE']),
   "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional().describe('pg가 TOSS면 필수. 결제 상점별로 묶음을 만들고 잔액도 상점마다 본다(추천 적용 2026-10-14, ADR-0062)'),
   "payoutDate": zod.iso.date(),
   "portoneBalance": zod.object({
-  "amount": zod.int().min(postV1OpsPayoutBatchesBodyPortoneBalanceAmountMin),
+  "amount": zod.int().min(createOpsPayoutBatchBodyPortoneBalanceAmountMin),
   "observedAt": zod.iso.datetime({"offset":true})
-}).optional().describe('pg=PORTONE이면 필수. 포트원 콘솔 \'내 가상계좌\'의 지급 대행 계좌 잔액(운영자 확인값). 포트원에는 잔액 조회 API가 없고 이 값은 검증할 수 없어 지급을 미루는 쪽으로만 쓴다. 입력자·값·본 시각을 묶음과 감사 로그에 남긴다(추천 적용 2026-10-14, ADR-0062)')
-})
+}).strict().optional().describe('pg=PORTONE이면 필수. 포트원 콘솔 \'내 가상계좌\'의 지급 대행 계좌 잔액(운영자 확인값). 포트원에는 잔액 조회 API가 없고 이 값은 검증할 수 없어 지급을 미루는 쪽으로만 쓴다. 입력자·값·본 시각을 묶음과 감사 로그에 남긴다(추천 적용 2026-10-14, ADR-0062)')
+}).strict()
 
-export const PostV1OpsPayoutBatchesResponse = zod.object({
+export const CreateOpsPayoutBatchResponse = zod.object({
   "batchId": zod.string().optional(),
   "pg": zod.enum(['TOSS', 'PORTONE']).optional(),
   "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional().describe('토스페이먼츠 결제 상점. 같은 지급일·같은 상점이면 회차·상품 정산서가 한 묶음에 든다(추천 적용 2026-10-14, ADR-0062)'),
@@ -3047,30 +2987,30 @@ export const PostV1OpsPayoutBatchesResponse = zod.object({
  * FR-062, ADR-0047. 공개 API에 지급 생성이 없어 콘솔에서 실행하고 일괄 지급 ID를 적음. 결과는 지급 내역 조회로 맞춤
  * @summary 포트원 콘솔 일괄 지급 실행 기록(operator)
  */
-export const PostV1OpsPayoutBatchesBatchIdPortoneExecutionParams = zod.object({
+export const CreateOpsPayoutBatchPortoneExecutionParams = zod.object({
   "batchId": zod.string()
 })
 
-export const PostV1OpsPayoutBatchesBatchIdPortoneExecutionBody = zod.object({
+export const CreateOpsPayoutBatchPortoneExecutionBody = zod.object({
   "bulkPayoutId": zod.string()
-})
+}).strict()
 
-export const PostV1OpsPayoutBatchesBatchIdPortoneExecutionResponse = zod.unknown()
+export const CreateOpsPayoutBatchPortoneExecutionResponse = zod.unknown()
 
 /**
  * POL-039. 상계 → 보증 → 청구. 목록은 커서로 나눈다(추천 적용 2026-10-21, ADR-0081). 관제 역할(viewer·operator·commander)만이고 CS 담당자는 403이다(open-items 72번, 2026-10-30)
  * @summary 미수금 목록(원인·상태)
  */
-export const getV1OpsReceivablesQueryLimitMax = 100;
+export const listOpsReceivablesQueryLimitMax = 100;
 
 
 
-export const GetV1OpsReceivablesQueryParams = zod.object({
+export const ListOpsReceivablesQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsReceivablesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsReceivablesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1OpsReceivablesResponse = zod.object({
+export const ListOpsReceivablesResponse = zod.object({
   "items": zod.array(zod.object({
   "receivableId": zod.string().optional(),
   "cause": zod.enum(['REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT']).optional(),
@@ -3085,11 +3025,11 @@ export const GetV1OpsReceivablesResponse = zod.object({
  * FR-068, POL-040, ADR-0052. viewer 이상
  * @summary 공연 리포트 판 목록과 마감 상태(SCR-029 ④)
  */
-export const GetV1OpsEventsEventIdReportsParams = zod.object({
+export const GetOpsEventReportsParams = zod.object({
   "eventId": zod.string()
 })
 
-export const GetV1OpsEventsEventIdReportsResponseItem = zod.object({
+export const GetOpsEventReportsResponseItem = zod.object({
   "eventId": zod.string().optional(),
   "stage": zod.enum(['R0', 'R1', 'R2', 'R3', 'FROZEN']).optional().describe('마감 단계(POL-040, docs/features/analytics.md §4.2)'),
   "status": zod.enum(['DONE', 'DELAYED', 'PENDING']).optional(),
@@ -3098,18 +3038,18 @@ export const GetV1OpsEventsEventIdReportsResponseItem = zod.object({
   "rulesTriggered": zod.int().optional(),
   "rulesDeferred": zod.int().optional()
 }).describe('공연 리포트 판 목록의 한 줄(FR-068)')
-export const GetV1OpsEventsEventIdReportsResponse = zod.array(GetV1OpsEventsEventIdReportsResponseItem)
+export const GetOpsEventReportsResponse = zod.array(GetOpsEventReportsResponseItem)
 
 /**
  * FR-068, ADR-0052. Accept가 text/markdown이면 첨부 파일(Content-Disposition, 서버가 정한 이름)로 준다. 마감 상태가 '완료'인 판만
  * @summary 공연 리포트 한 판(JSON 또는 Markdown)
  */
-export const GetV1OpsEventsEventIdReportsStageParams = zod.object({
+export const GetOpsEventReportParams = zod.object({
   "eventId": zod.string(),
   "stage": zod.enum(['R0', 'R1', 'R2', 'R3', 'FROZEN'])
 })
 
-export const GetV1OpsEventsEventIdReportsStageResponse = zod.object({
+export const GetOpsEventReportResponse = zod.object({
   "eventId": zod.string().optional(),
   "stage": zod.enum(['R0', 'R1', 'R2', 'R3', 'FROZEN']).optional().describe('마감 단계(POL-040, docs/features/analytics.md §4.2)'),
   "generatedAt": zod.iso.datetime({"offset":true}).optional(),
@@ -3150,42 +3090,42 @@ export const GetV1OpsEventsEventIdReportsStageResponse = zod.object({
  * FR-068, POL-040. viewer 이상
  * @summary 결정 기록 목록(회차·상태 필터)
  */
-export const getV1OpsDecisionsQueryLimitMax = 100;
+export const listOpsDecisionsQueryLimitMax = 100;
 
 
 
-export const GetV1OpsDecisionsQueryParams = zod.object({
+export const ListOpsDecisionsQueryParams = zod.object({
   "eventId": zod.string().optional(),
   "status": zod.enum(['AWAITING_CHECK', 'CHECKED', 'WITHDRAWN']).optional(),
   "checkResult": zod.enum(['MET', 'NOT_MET', 'INCONCLUSIVE']).optional(),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsDecisionsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsDecisionsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const getV1OpsDecisionsResponseItemsItemSummaryMax = 4000;
+export const listOpsDecisionsResponseItemsItemSummaryMax = 4000;
 
-export const getV1OpsDecisionsResponseItemsItemDecisionMax = 4000;
+export const listOpsDecisionsResponseItemsItemDecisionMax = 4000;
 
-export const getV1OpsDecisionsResponseItemsItemRevertConditionMax = 4000;
+export const listOpsDecisionsResponseItemsItemRevertConditionMax = 4000;
 
 
 
-export const GetV1OpsDecisionsResponse = zod.object({
+export const ListOpsDecisionsResponse = zod.object({
   "items": zod.array(zod.object({
   "decisionId": zod.string().optional(),
   "eventId": zod.string().optional(),
   "triggerRule": zod.string().optional(),
   "triggerStage": zod.enum(['R0', 'R1', 'R2', 'R3']).optional().describe('결정 규칙이 걸린 마감 단계(동결 FROZEN은 계기가 아니다, docs/data.md decision_record)'),
   "kind": zod.enum(['OPERATING_DEFAULT', 'PRODUCT', 'SALES_POLICY', 'BOT_POLICY', 'PARTNER_RECOMMENDATION', 'TARGET']).optional(),
-  "summary": zod.string().max(getV1OpsDecisionsResponseItemsItemSummaryMax).optional(),
-  "decision": zod.string().max(getV1OpsDecisionsResponseItemsItemDecisionMax).optional(),
+  "summary": zod.string().max(listOpsDecisionsResponseItemsItemSummaryMax).optional(),
+  "decision": zod.string().max(listOpsDecisionsResponseItemsItemDecisionMax).optional(),
   "evidenceStrength": zod.enum(['WEAK', 'MEDIUM', 'STRONG']).optional(),
   "expectedEffect": zod.object({
   "metric": zod.string().optional(),
   "target": zod.string().optional(),
   "checkAfterEvents": zod.int().optional()
 }).optional(),
-  "revertCondition": zod.string().max(getV1OpsDecisionsResponseItemsItemRevertConditionMax).optional(),
+  "revertCondition": zod.string().max(listOpsDecisionsResponseItemsItemRevertConditionMax).optional(),
   "ref": zod.string().optional().describe('ADR·POL 번호나 설정 변경 ID'),
   "partnerResponse": zod.enum(['ACCEPTED', 'DECLINED', 'NONE']).optional(),
   "status": zod.enum(['AWAITING_CHECK', 'CHECKED', 'WITHDRAWN']).optional(),
@@ -3200,64 +3140,58 @@ export const GetV1OpsDecisionsResponse = zod.object({
  * FR-068, POL-040. commander만. 계기 지표가 '판정 보류'면 409 TRIGGER_DEFERRED
  * @summary 결정 기록 작성
  */
-export const PostV1OpsDecisionsHeader = zod.object({
+export const CreateOpsDecisionHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
-export const postV1OpsDecisionsBodySummaryMax = 4000;
+export const createOpsDecisionBodySummaryMax = 4000;
 
-export const postV1OpsDecisionsBodyDecisionMax = 4000;
+export const createOpsDecisionBodyDecisionMax = 4000;
 
-export const postV1OpsDecisionsBodyRevertConditionMax = 4000;
+export const createOpsDecisionBodyRevertConditionMax = 4000;
 
 
 
-export const PostV1OpsDecisionsBody = zod.object({
+export const CreateOpsDecisionBody = zod.object({
+  "eventId": zod.string().optional(),
+  "triggerRule": zod.string().optional(),
+  "triggerStage": zod.enum(['R0', 'R1', 'R2', 'R3']).optional().describe('결정 규칙이 걸린 마감 단계(동결 FROZEN은 계기가 아니다, docs/data.md decision_record)'),
+  "kind": zod.enum(['OPERATING_DEFAULT', 'PRODUCT', 'SALES_POLICY', 'BOT_POLICY', 'PARTNER_RECOMMENDATION', 'TARGET']).optional(),
+  "summary": zod.string().max(createOpsDecisionBodySummaryMax).optional(),
+  "decision": zod.string().max(createOpsDecisionBodyDecisionMax).optional(),
+  "evidenceStrength": zod.enum(['WEAK', 'MEDIUM', 'STRONG']).optional(),
+  "expectedEffect": zod.object({
+  "metric": zod.string().optional(),
+  "target": zod.string().optional(),
+  "checkAfterEvents": zod.int().optional()
+}).strict().optional(),
+  "revertCondition": zod.string().max(createOpsDecisionBodyRevertConditionMax).optional(),
+  "ref": zod.string().optional().describe('ADR·POL 번호나 설정 변경 ID')
+}).strict().describe('DecisionRecord의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(DecisionRecord)와 같고 응답은 DecisionRecord(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040). 서버가 채우는 칸(decisionId·status·decidedBy·decidedAt)과 나중에 PATCH로 고치는 칸(checkResult·partnerResponse)은 받지 않는다.')
+
+export const createOpsDecisionResponseSummaryMax = 4000;
+
+export const createOpsDecisionResponseDecisionMax = 4000;
+
+export const createOpsDecisionResponseRevertConditionMax = 4000;
+
+
+
+export const CreateOpsDecisionResponse = zod.object({
   "decisionId": zod.string().optional(),
   "eventId": zod.string().optional(),
   "triggerRule": zod.string().optional(),
   "triggerStage": zod.enum(['R0', 'R1', 'R2', 'R3']).optional().describe('결정 규칙이 걸린 마감 단계(동결 FROZEN은 계기가 아니다, docs/data.md decision_record)'),
   "kind": zod.enum(['OPERATING_DEFAULT', 'PRODUCT', 'SALES_POLICY', 'BOT_POLICY', 'PARTNER_RECOMMENDATION', 'TARGET']).optional(),
-  "summary": zod.string().max(postV1OpsDecisionsBodySummaryMax).optional(),
-  "decision": zod.string().max(postV1OpsDecisionsBodyDecisionMax).optional(),
+  "summary": zod.string().max(createOpsDecisionResponseSummaryMax).optional(),
+  "decision": zod.string().max(createOpsDecisionResponseDecisionMax).optional(),
   "evidenceStrength": zod.enum(['WEAK', 'MEDIUM', 'STRONG']).optional(),
   "expectedEffect": zod.object({
   "metric": zod.string().optional(),
   "target": zod.string().optional(),
   "checkAfterEvents": zod.int().optional()
 }).optional(),
-  "revertCondition": zod.string().max(postV1OpsDecisionsBodyRevertConditionMax).optional(),
-  "ref": zod.string().optional().describe('ADR·POL 번호나 설정 변경 ID'),
-  "partnerResponse": zod.enum(['ACCEPTED', 'DECLINED', 'NONE']).optional(),
-  "status": zod.enum(['AWAITING_CHECK', 'CHECKED', 'WITHDRAWN']).optional(),
-  "checkResult": zod.enum(['MET', 'NOT_MET', 'INCONCLUSIVE']).optional(),
-  "decidedBy": zod.string().optional(),
-  "decidedAt": zod.iso.datetime({"offset":true}).optional()
-}).describe('결정 기록(POL-040, docs/data.md decision_record)')
-
-export const postV1OpsDecisionsResponseSummaryMax = 4000;
-
-export const postV1OpsDecisionsResponseDecisionMax = 4000;
-
-export const postV1OpsDecisionsResponseRevertConditionMax = 4000;
-
-
-
-export const PostV1OpsDecisionsResponse = zod.object({
-  "decisionId": zod.string().optional(),
-  "eventId": zod.string().optional(),
-  "triggerRule": zod.string().optional(),
-  "triggerStage": zod.enum(['R0', 'R1', 'R2', 'R3']).optional().describe('결정 규칙이 걸린 마감 단계(동결 FROZEN은 계기가 아니다, docs/data.md decision_record)'),
-  "kind": zod.enum(['OPERATING_DEFAULT', 'PRODUCT', 'SALES_POLICY', 'BOT_POLICY', 'PARTNER_RECOMMENDATION', 'TARGET']).optional(),
-  "summary": zod.string().max(postV1OpsDecisionsResponseSummaryMax).optional(),
-  "decision": zod.string().max(postV1OpsDecisionsResponseDecisionMax).optional(),
-  "evidenceStrength": zod.enum(['WEAK', 'MEDIUM', 'STRONG']).optional(),
-  "expectedEffect": zod.object({
-  "metric": zod.string().optional(),
-  "target": zod.string().optional(),
-  "checkAfterEvents": zod.int().optional()
-}).optional(),
-  "revertCondition": zod.string().max(postV1OpsDecisionsResponseRevertConditionMax).optional(),
+  "revertCondition": zod.string().max(createOpsDecisionResponseRevertConditionMax).optional(),
   "ref": zod.string().optional().describe('ADR·POL 번호나 설정 변경 ID'),
   "partnerResponse": zod.enum(['ACCEPTED', 'DECLINED', 'NONE']).optional(),
   "status": zod.enum(['AWAITING_CHECK', 'CHECKED', 'WITHDRAWN']).optional(),
@@ -3270,43 +3204,43 @@ export const PostV1OpsDecisionsResponse = zod.object({
  * FR-068, POL-040. commander만. 바꿀 수 있는 필드는 checkResult, partnerResponse, status(WITHDRAWN)뿐
  * @summary 결정 기록의 확인 결과 확정, 파트너 응답 기록, 철회
  */
-export const PatchV1OpsDecisionsDecisionIdParams = zod.object({
+export const UpdateOpsDecisionParams = zod.object({
   "decisionId": zod.string()
 })
 
-export const PatchV1OpsDecisionsDecisionIdHeader = zod.object({
+export const UpdateOpsDecisionHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
-export const PatchV1OpsDecisionsDecisionIdBody = zod.object({
+export const UpdateOpsDecisionBody = zod.object({
   "checkResult": zod.enum(['MET', 'NOT_MET', 'INCONCLUSIVE']).optional(),
   "partnerResponse": zod.enum(['ACCEPTED', 'DECLINED', 'NONE']).optional(),
   "status": zod.enum(['WITHDRAWN']).optional()
 }).strict()
 
-export const patchV1OpsDecisionsDecisionIdResponseSummaryMax = 4000;
+export const updateOpsDecisionResponseSummaryMax = 4000;
 
-export const patchV1OpsDecisionsDecisionIdResponseDecisionMax = 4000;
+export const updateOpsDecisionResponseDecisionMax = 4000;
 
-export const patchV1OpsDecisionsDecisionIdResponseRevertConditionMax = 4000;
+export const updateOpsDecisionResponseRevertConditionMax = 4000;
 
 
 
-export const PatchV1OpsDecisionsDecisionIdResponse = zod.object({
+export const UpdateOpsDecisionResponse = zod.object({
   "decisionId": zod.string().optional(),
   "eventId": zod.string().optional(),
   "triggerRule": zod.string().optional(),
   "triggerStage": zod.enum(['R0', 'R1', 'R2', 'R3']).optional().describe('결정 규칙이 걸린 마감 단계(동결 FROZEN은 계기가 아니다, docs/data.md decision_record)'),
   "kind": zod.enum(['OPERATING_DEFAULT', 'PRODUCT', 'SALES_POLICY', 'BOT_POLICY', 'PARTNER_RECOMMENDATION', 'TARGET']).optional(),
-  "summary": zod.string().max(patchV1OpsDecisionsDecisionIdResponseSummaryMax).optional(),
-  "decision": zod.string().max(patchV1OpsDecisionsDecisionIdResponseDecisionMax).optional(),
+  "summary": zod.string().max(updateOpsDecisionResponseSummaryMax).optional(),
+  "decision": zod.string().max(updateOpsDecisionResponseDecisionMax).optional(),
   "evidenceStrength": zod.enum(['WEAK', 'MEDIUM', 'STRONG']).optional(),
   "expectedEffect": zod.object({
   "metric": zod.string().optional(),
   "target": zod.string().optional(),
   "checkAfterEvents": zod.int().optional()
 }).optional(),
-  "revertCondition": zod.string().max(patchV1OpsDecisionsDecisionIdResponseRevertConditionMax).optional(),
+  "revertCondition": zod.string().max(updateOpsDecisionResponseRevertConditionMax).optional(),
   "ref": zod.string().optional().describe('ADR·POL 번호나 설정 변경 ID'),
   "partnerResponse": zod.enum(['ACCEPTED', 'DECLINED', 'NONE']).optional(),
   "status": zod.enum(['AWAITING_CHECK', 'CHECKED', 'WITHDRAWN']).optional(),
@@ -3319,16 +3253,16 @@ export const PatchV1OpsDecisionsDecisionIdResponse = zod.object({
  * FR-065, SCR-053. 목록은 커서로 나눈다(추천 적용 2026-10-21, ADR-0081)
  * @summary 스캐너 기기 목록(이름, 배정 파트너, 상태, 인증서 만료, 마지막 연락, 지금 로그인한 세션)
  */
-export const getV1OpsScannerDevicesQueryLimitMax = 100;
+export const listOpsScannerDevicesQueryLimitMax = 100;
 
 
 
-export const GetV1OpsScannerDevicesQueryParams = zod.object({
+export const ListOpsScannerDevicesQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(getV1OpsScannerDevicesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listOpsScannerDevicesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
-export const GetV1OpsScannerDevicesResponse = zod.object({
+export const ListOpsScannerDevicesResponse = zod.object({
   "items": zod.array(zod.object({
   "deviceId": zod.string().optional(),
   "name": zod.string().optional(),
@@ -3346,12 +3280,12 @@ export const GetV1OpsScannerDevicesResponse = zod.object({
  * FR-065, ADR-0051. operator 이상. 기기 자격의 기본안은 기기 키 DPoP다(추천 적용 2026-10-28, 기술 검토 중간-057). 기기 원장의 주인은 ticket-svc다. 등록·폐기·등록 코드 새로 만들기 모두 ops-svc가 권한 확인과 감사 기록 뒤 ticket-svc 내부 gRPC를 부른다(docs/architecture.md §3.2, 추천 적용 2026-10-29. 내부 계약은 docs/api/proto/peaket/ticket/v1/ticket.proto `ScannerDeviceService`, ADR-0148)
  * @summary 스캐너 기기 등록(이름, 배정 파트너). 등록 코드 발급(mTLS 선택지면 관리 앱 등록 절차 시작)
  */
-export const PostV1OpsScannerDevicesBody = zod.object({
+export const CreateOpsScannerDeviceBody = zod.object({
   "name": zod.string(),
   "promoterId": zod.string()
-})
+}).strict()
 
-export const PostV1OpsScannerDevicesResponse = zod.object({
+export const CreateOpsScannerDeviceResponse = zod.object({
   "deviceId": zod.string().optional(),
   "name": zod.string().optional(),
   "promoterId": zod.string().optional(),
@@ -3366,15 +3300,15 @@ export const PostV1OpsScannerDevicesResponse = zod.object({
  * FR-065, RB-22, ADR-0051. operator 이상, 감사 로그
  * @summary 스캐너 기기 즉시 폐기(사유 필수). 그 기기의 스캐너 요청과 스태프 세션을 다음 요청부터 막는다
  */
-export const PostV1OpsScannerDevicesDeviceIdRevocationParams = zod.object({
+export const CreateOpsScannerDeviceRevocationParams = zod.object({
   "deviceId": zod.string()
 })
 
-export const PostV1OpsScannerDevicesDeviceIdRevocationBody = zod.object({
+export const CreateOpsScannerDeviceRevocationBody = zod.object({
   "reason": zod.string()
-})
+}).strict()
 
-export const PostV1OpsScannerDevicesDeviceIdRevocationResponse = zod.object({
+export const CreateOpsScannerDeviceRevocationResponse = zod.object({
   "deviceId": zod.string().optional(),
   "name": zod.string().optional(),
   "promoterId": zod.string().optional(),
@@ -3389,15 +3323,15 @@ export const PostV1OpsScannerDevicesDeviceIdRevocationResponse = zod.object({
  * FR-065, ADR-0051, 추천 적용 2026-10-14, ADR-0062. operator 이상. 코드는 RFC 8628 §6.1 문자 집합(BCDFGHJKLMNPQRSTVWXZ) 12자를 4자씩 하이픈으로 나눈 XXXX-XXXX-XXXX, 만든 뒤 10분 [가정] 한 번만 쓴다. 서버는 코드의 SHA-256만 Redis에 10분 TTL로 두고 등록되면 바로 지운다. SCR-053은 코드와 QR(https://<스캐너 주소>/enroll#code=…, 코드는 URL 조각에만)을 보인다
  * @summary 스캐너 기기 등록 코드 새로 만들기. 이전 코드는 무효
  */
-export const PostV1OpsScannerDevicesDeviceIdEnrollmentCodeParams = zod.object({
+export const CreateOpsScannerDeviceEnrollmentCodeParams = zod.object({
   "deviceId": zod.string()
 })
 
-export const postV1OpsScannerDevicesDeviceIdEnrollmentCodeResponseEnrollmentCodeRegExp = new RegExp('^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$');
+export const createOpsScannerDeviceEnrollmentCodeResponseEnrollmentCodeRegExp = new RegExp('^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$');
 
 
-export const PostV1OpsScannerDevicesDeviceIdEnrollmentCodeResponse = zod.object({
-  "enrollmentCode": zod.string().regex(postV1OpsScannerDevicesDeviceIdEnrollmentCodeResponseEnrollmentCodeRegExp).optional(),
+export const CreateOpsScannerDeviceEnrollmentCodeResponse = zod.object({
+  "enrollmentCode": zod.string().regex(createOpsScannerDeviceEnrollmentCodeResponseEnrollmentCodeRegExp).optional(),
   "enrollmentCodeExpiresAt": zod.iso.datetime({"offset":true}).optional()
 })
 
@@ -3405,45 +3339,45 @@ export const PostV1OpsScannerDevicesDeviceIdEnrollmentCodeResponse = zod.object(
  * FR-029·030, NFR-008, ADR-0100(GraphQL 구독과 Socket.IO를 대신한다). text/event-stream. event는 command·approval·alert·control·autoAction·presence·reset이고 id는 ops DB 알림 표의 순번이다. 다시 붙을 때 Last-Event-ID 뒤를 다시 보내고, 1시간 [가정]보다 오래된 번호면 reset을 보낸다(화면은 REST로 다시 읽는다). 15초 [가정]마다 주석 줄. 액세스 토큰 만료·세션 종료 때 서버가 닫는다. gw-ops 경로 시간 초과를 끈다(timeouts.request 0s). 계약은 asyncapi sse.ops-live
  * @summary 관제 늘 여는 SSE 흐름(명령 상태·ack, 내 승인 대기, 경보, 자동 제어 상태, 걸린 자동 조치, 접속자)
  */
-export const GetV1OpsLiveQueryParams = zod.object({
+export const GetOpsLiveQueryParams = zod.object({
   "eventId": zod.string().optional().describe('접속자를 보일 회차')
 })
 
-export const GetV1OpsLiveHeader = zod.object({
+export const GetOpsLiveHeader = zod.object({
   "Last-Event-ID": zod.string().optional()
 })
 
-export const GetV1OpsLiveResponse = zod.unknown()
+export const GetOpsLiveResponse = zod.unknown()
 
 /**
  * FR-029, NFR-009, ADR-0100. text/event-stream. event widget(위젯 키마다 전체 값), id는 계산 시각(밀리초). 보이는 위젯 목록이 바뀌면 브라우저가 1초 [가정] 묶어 새 widgets로 다시 연다. 다시 붙으면 지금 값부터 보낸다. gw-ops 경로 시간 초과를 끈다. 계약은 asyncapi sse.ops-event-live
  * @summary 관제 위젯 SSE 흐름(보이는 위젯의 값)
  */
-export const GetV1OpsEventsEventIdLiveParams = zod.object({
+export const GetOpsEventLiveParams = zod.object({
   "eventId": zod.string()
 })
 
-export const GetV1OpsEventsEventIdLiveQueryParams = zod.object({
+export const GetOpsEventLiveQueryParams = zod.object({
   "widgets": zod.string().describe('쉼표로 이은 위젯 키 목록')
 })
 
-export const GetV1OpsEventsEventIdLiveResponse = zod.unknown()
+export const GetOpsEventLiveResponse = zod.unknown()
 
 /**
  * FR-029, ADR-0100. 위젯 키마다 응답 모양이 다르고 위젯 키 열거와 모양은 wbs 0.2.3에서 적는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store
  * @summary 관제 위젯 조회(처음 그릴 때와 다시 보일 때의 지난 값, 그래프 최근 15분 창)
  */
-export const GetV1OpsWidgetsWidgetKeyParams = zod.object({
+export const GetOpsWidgetParams = zod.object({
   "widgetKey": zod.string()
 })
 
-export const GetV1OpsWidgetsWidgetKeyQueryParams = zod.object({
+export const GetOpsWidgetQueryParams = zod.object({
   "eventId": zod.string().optional(),
   "from": zod.iso.datetime({"offset":true}).optional(),
   "to": zod.iso.datetime({"offset":true}).optional()
 })
 
-export const GetV1OpsWidgetsWidgetKeyResponse = zod.looseObject({
+export const GetOpsWidgetResponse = zod.looseObject({
 
 })
 

@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'vitest';
 import { OrderEvent, RumSample } from '@peaket/contracts/asyncapi';
 import { BehaviorSummary, PaymentAcceptToss, Problem } from '@peaket/contracts/openapi/model';
-import { PostV1QueuesEventIdLobbyParticipantsResponse } from '@peaket/contracts/openapi/queue';
+import { CreateQueueLobbyParticipantResponse } from '@peaket/contracts/openapi/queue';
 
 describe('OpenAPI 구성 요소 스키마', () => {
   test('중간085_Problem본문을받고_상태코드가숫자가아니면_거른다', () => {
@@ -29,9 +29,9 @@ describe('OpenAPI 구성 요소 스키마', () => {
 
 describe('OpenAPI 작업별 스키마', () => {
   test('중간085_로비입장응답_추가검증사유는_열거값이나null만받는다', () => {
-    expect(PostV1QueuesEventIdLobbyParticipantsResponse.safeParse({ lobbyToken: 't', verificationReason: null }).success).toBe(true);
-    expect(PostV1QueuesEventIdLobbyParticipantsResponse.safeParse({ lobbyToken: 't', verificationReason: 'RAPID_REQUESTS' }).success).toBe(true);
-    expect(PostV1QueuesEventIdLobbyParticipantsResponse.safeParse({ lobbyToken: 't', verificationReason: 'UNKNOWN' }).success).toBe(false);
+    expect(CreateQueueLobbyParticipantResponse.safeParse({ lobbyToken: 't', verificationReason: null }).success).toBe(true);
+    expect(CreateQueueLobbyParticipantResponse.safeParse({ lobbyToken: 't', verificationReason: 'RAPID_REQUESTS' }).success).toBe(true);
+    expect(CreateQueueLobbyParticipantResponse.safeParse({ lobbyToken: 't', verificationReason: 'UNKNOWN' }).success).toBe(false);
   });
 });
 

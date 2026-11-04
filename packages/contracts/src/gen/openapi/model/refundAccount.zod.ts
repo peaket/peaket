@@ -15,7 +15,7 @@ export const RefundAccount = zod.object({
   "bankCode": zod.string(),
   "accountNumber": zod.string(),
   "holderName": zod.string()
-}).describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014)')
+}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014)')
 
 export type RefundAccount = zod.input<typeof RefundAccount>;
 export type RefundAccountOutput = zod.output<typeof RefundAccount>;

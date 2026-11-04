@@ -43,9 +43,9 @@ export const ExternalPostCreate = zod.object({
   "y": zod.number().min(externalPostCreateMaskRegionsItemYMin).max(externalPostCreateMaskRegionsItemYMax),
   "w": zod.number().gt(externalPostCreateMaskRegionsItemWExclusiveMin).max(externalPostCreateMaskRegionsItemWMax),
   "h": zod.number().gt(externalPostCreateMaskRegionsItemHExclusiveMin).max(externalPostCreateMaskRegionsItemHMax)
-}).strict().describe('캡처 위의 가릴 상자 하나(왼쪽 위 기준, 캡처 너비·높이에 대한 비율(추천 적용 2026-10-31, ADR-0173))')).max(externalPostCreateMaskRegionsMax).optional().describe('보기용 사본에서 칠할 자리(연락처·계좌·채팅 링크). 화면 글자 읽기(OCR)를 쓰지 않으므로 조사관이 캡처 위에 상자로 고른다. 값은 캡처 크기에 대한 비율(0~1)이고, 서버가 그 부분을 칠해 보기용 사본을 만든다. 원본은 바꾸지 않는다. multipart 안에서는 JSON 부분으로 보낸다(추천 적용 2026-10-31, ADR-0173)'),
+}).strict().describe('MaskRegion의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(MaskRegion)와 같고 응답은 MaskRegion(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).')).max(externalPostCreateMaskRegionsMax).optional().describe('보기용 사본에서 칠할 자리(연락처·계좌·채팅 링크). 화면 글자 읽기(OCR)를 쓰지 않으므로 조사관이 캡처 위에 상자로 고른다. 값은 캡처 크기에 대한 비율(0~1)이고, 서버가 그 부분을 칠해 보기용 사본을 만든다. 원본은 바꾸지 않는다. multipart 안에서는 JSON 부분으로 보낸다(추천 적용 2026-10-31, ADR-0173)'),
   "capture": zod.instanceof(Blob)
-}).describe('외부 되팔이 게시물 수동 등록 본문(multipart/form-data, SCR-070 ④, FR-072). 화면 캡처는 PNG·JPEG·PDF만, 10MB [가정]까지. 서버가 캡처의 SHA-256을 계산해 남기고, 원본은 격리 버킷에 받아 악성 코드 검사 뒤 증거 버킷으로 옮긴다(공문 원본과 같은 방식). 자동 수집은 하지 않는다(ADR-0171 결정 4). 최소한만 받는다(법률 확인 37번(추천 적용 2026-10-31, ADR-0173)): 로그인 없이 누구나 볼 수 있는 공개 게시물만, 게시물 한 건의 화면만 받고 작성자 프로필·다른 글·신원 추적은 하지 않는다. 서버는 화면 글자 읽기(OCR)로 연락처를 뽑지 않고 contactRef와 자동으로 맞추지 않는다(대조는 좌석으로만). 보기용 사본은 연락처·계좌·채팅 링크를 가리고, 신고자 정보는 수집본에 넣지 않는다')
+}).strict().describe('외부 되팔이 게시물 수동 등록 본문(multipart/form-data, SCR-070 ④, FR-072). 화면 캡처는 PNG·JPEG·PDF만, 10MB [가정]까지. 서버가 캡처의 SHA-256을 계산해 남기고, 원본은 격리 버킷에 받아 악성 코드 검사 뒤 증거 버킷으로 옮긴다(공문 원본과 같은 방식). 자동 수집은 하지 않는다(ADR-0171 결정 4). 최소한만 받는다(법률 확인 37번(추천 적용 2026-10-31, ADR-0173)): 로그인 없이 누구나 볼 수 있는 공개 게시물만, 게시물 한 건의 화면만 받고 작성자 프로필·다른 글·신원 추적은 하지 않는다. 서버는 화면 글자 읽기(OCR)로 연락처를 뽑지 않고 contactRef와 자동으로 맞추지 않는다(대조는 좌석으로만). 보기용 사본은 연락처·계좌·채팅 링크를 가리고, 신고자 정보는 수집본에 넣지 않는다')
 
 export type ExternalPostCreate = zod.input<typeof ExternalPostCreate>;
 export type ExternalPostCreateOutput = zod.output<typeof ExternalPostCreate>;

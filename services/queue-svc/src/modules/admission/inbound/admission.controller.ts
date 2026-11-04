@@ -8,7 +8,7 @@ import { QueueStoreUnavailable } from '../../entry/index.js';
 import { AdmissionError } from '../application/admission-error.js';
 import { ConfirmAdmission } from '../application/confirm-admission.js';
 
-// openapi 요청 본문 모양(계약 생성물의 작업별 스키마 이름이 operationId 정리(wbs 0.2.3) 뒤 바뀌므로 여기 같은 모양으로 둔다)
+// openapi 요청 본문 모양을 여기 같은 모양으로 둔다. 계약처럼 닫는다(정하지 않은 칸은 400, docs/api/guidelines.md §1, BAS-040)
 const AdmissionBody = z
   .object({
     queueTicket: z.string().min(1).max(4096).optional(),
@@ -18,6 +18,7 @@ const AdmissionBody = z
     firstEtaSec: z.unknown().optional(),
     firstEtaAtMs: z.unknown().optional(),
   })
+  .strict()
   .refine((b) => b.queueTicket !== undefined || b.lobbyToken !== undefined || b.priorityGrantId !== undefined, { message: '대기표·참가 토큰·우선 구매 권리 ID 가운데 하나가 있어야 한다' });
 
 /** Redis 키의 해시 태그 안에 들어가는 값(회차 ID·pid)의 모양 */

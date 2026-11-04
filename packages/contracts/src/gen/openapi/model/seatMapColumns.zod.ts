@@ -51,7 +51,7 @@ export const SeatMapColumns = zod.object({
   "minY": zod.int(),
   "width": zod.int().min(1).max(seatMapColumnsCanvasWidthMax),
   "height": zod.int().min(1).max(seatMapColumnsCanvasHeightMax)
-}).strict().describe('공연장 캔버스(cm). 한 변 100,000(1km) [가정] 이하이고 무대·구역 도형과 좌석 좌표는 모두 이 안에 있다(브라우저 격자 색인이 끝없이 커지지 않게)'),
+}).describe('공연장 캔버스(cm). 한 변 100,000(1km) [가정] 이하이고 무대·구역 도형과 좌석 좌표는 모두 이 안에 있다(브라우저 격자 색인이 끝없이 커지지 않게)'),
   "stage": zod.array(zod.object({
   "kind": zod.enum(['RECT', 'POLYGON', 'SECTOR', 'ARC_BAND']).describe('그린 도구(사각형·다각형·부채꼴·곡선 띠). 곡선 띠는 안쪽·바깥 반지름이 있는 부채꼴 띠다(추천 적용 2026-10-19, ADR-0066)'),
   "points": zod.array(zod.array(zod.int()).min(seatMapColumnsStageItemPointsItemMin).max(seatMapColumnsStageItemPointsItemMax)).min(seatMapColumnsStageItemPointsMin).describe('꼭짓점 [x, y] 목록'),
@@ -70,11 +70,11 @@ export const SeatMapColumns = zod.object({
   "label": zod.object({
   "x": zod.int(),
   "y": zod.int()
-}).strict(),
+}),
   "seatIndexRange": zod.object({
   "from": zod.int().min(seatMapColumnsSectionsItemSeatIndexRangeFromMin),
   "to": zod.int().min(seatMapColumnsSectionsItemSeatIndexRangeToMin)
-}).strict().describe('구역의 좌석 색인 범위(끝 포함). 앞 구역 바로 다음부터 빈틈 없이 이어진다. 구역마다 65,536석 이하(델타 seatOffset이 u16)'),
+}).describe('구역의 좌석 색인 범위(끝 포함). 앞 구역 바로 다음부터 빈틈 없이 이어진다. 구역마다 65,536석 이하(델타 seatOffset이 u16)'),
   "seats": zod.object({
   "seatId": zod.array(zod.string()).describe('홀드 요청에 쓰는 좌석 ID'),
   "row": zod.array(zod.string()),
@@ -83,9 +83,9 @@ export const SeatMapColumns = zod.object({
   "y": zod.array(zod.int()),
   "tier": zod.array(zod.int().min(seatMapColumnsSectionsItemSeatsTierItemMin).max(seatMapColumnsSectionsItemSeatsTierItemMax)).describe('tiers 색인'),
   "flags": zod.array(zod.int().min(seatMapColumnsSectionsItemSeatsFlagsItemMin).max(seatMapColumnsSectionsItemSeatsFlagsItemMax)).describe('값 1 휠체어석, 값 2 판매 제외(둘 다면 3. 맨 아래 비트부터 0번·1번 비트)')
-}).strict().describe('열마다 길이가 그 구역 좌석 수(to − from + 1)와 같다')
-}).strict()).min(1).max(seatMapColumnsSectionsMax)
-}).strict().describe('팬 화면 좌석맵 파일(seatmap-layouts/{layoutVersion}.json, 2026-11-04 BUILD_ORDER HOT-110). SeatMapLayout과 같은 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 좌석 ID·행·번호·좌표·등급·플래그)을 구역마다 열 단위 배열로 낸다. 좌석 색인은 구역 순서대로 이어 붙인 위치(seatIndexRange.from부터)이고 스냅샷 비트맵의 차례·델타 seatOffset과 같다(seat-hold §2). 에디터 전용 fillRule·gateZone은 싣지 않는다. 브라우저는 @peaket/seatmap의 decodeLayout으로 검사하고 형식 배열로 푼다')
+}).describe('열마다 길이가 그 구역 좌석 수(to − from + 1)와 같다')
+})).min(1).max(seatMapColumnsSectionsMax)
+}).describe('팬 화면 좌석맵 파일(seatmap-layouts/{layoutVersion}.json, 2026-11-04 BUILD_ORDER HOT-110). SeatMapLayout과 같은 두 층(배치 층: 캔버스·무대·구역 도형·라벨 위치·등급, 좌석 층: 좌석 ID·행·번호·좌표·등급·플래그)을 구역마다 열 단위 배열로 낸다. 좌석 색인은 구역 순서대로 이어 붙인 위치(seatIndexRange.from부터)이고 스냅샷 비트맵의 차례·델타 seatOffset과 같다(seat-hold §2). 에디터 전용 fillRule·gateZone은 싣지 않는다. 브라우저는 @peaket/seatmap의 decodeLayout으로 검사하고 형식 배열로 푼다')
 
 export type SeatMapColumns = zod.input<typeof SeatMapColumns>;
 export type SeatMapColumnsOutput = zod.output<typeof SeatMapColumns>;

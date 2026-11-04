@@ -29,7 +29,7 @@ export const MaskRegion = zod.object({
   "y": zod.number().min(maskRegionYMin).max(maskRegionYMax),
   "w": zod.number().gt(maskRegionWExclusiveMin).max(maskRegionWMax),
   "h": zod.number().gt(maskRegionHExclusiveMin).max(maskRegionHMax)
-}).strict().describe('캡처 위의 가릴 상자 하나(왼쪽 위 기준, 캡처 너비·높이에 대한 비율(추천 적용 2026-10-31, ADR-0173))')
+}).describe('캡처 위의 가릴 상자 하나(왼쪽 위 기준, 캡처 너비·높이에 대한 비율(추천 적용 2026-10-31, ADR-0173))')
 
 export type MaskRegion = zod.input<typeof MaskRegion>;
 export type MaskRegionOutput = zod.output<typeof MaskRegion>;

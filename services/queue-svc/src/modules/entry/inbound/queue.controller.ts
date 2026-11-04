@@ -23,8 +23,9 @@ const BehaviorSummary = z
     scrollDistancePx: z.int().min(0).optional(),
   })
   .strict();
-const PreverifyBody = z.object({ humanCheckToken: z.string().max(4096).optional(), deviceId: z.string().max(128).optional(), preverifyToken: z.string().max(4096).optional(), behaviorSummary: BehaviorSummary.optional() });
-const EntryBody = z.object({ preverifyToken: z.string().max(4096), deviceId: z.string().max(128).optional(), entryRequestId: z.uuid().optional() });
+// 요청 본문은 계약처럼 닫는다(정하지 않은 칸은 400, docs/api/guidelines.md §1 '요청은 닫고 응답은 연다', BAS-040)
+const PreverifyBody = z.object({ humanCheckToken: z.string().max(4096).optional(), deviceId: z.string().max(128).optional(), preverifyToken: z.string().max(4096).optional(), behaviorSummary: BehaviorSummary.optional() }).strict();
+const EntryBody = z.object({ preverifyToken: z.string().max(4096), deviceId: z.string().max(128).optional(), entryRequestId: z.uuid().optional() }).strict();
 
 /** Redis 키의 해시 태그 안에 들어가는 값(회차 ID·pid)의 모양 */
 const KEY_PART = /^[A-Za-z0-9_-]{1,64}$/;

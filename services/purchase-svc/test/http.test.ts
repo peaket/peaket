@@ -4,7 +4,7 @@ import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { contractRouteSchema, createService, DEADLINE_HEADER, fakeClock, PROBLEM_TYPE_BASE, purchaseMac, purchaseMacInput } from '@peaket/platform';
-import { PostV1EventsEventIdHoldsBody, PostV1EventsEventIdHoldsParams, PostV1EventsEventIdHoldsResponse } from '@peaket/contracts/openapi/seats';
+import { CreateEventHoldBody, CreateEventHoldParams, CreateEventHoldResponse } from '@peaket/contracts/openapi/seats';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import {
@@ -625,13 +625,13 @@ describe('앱 쪽 거절 전 멱등 재생(ST24, guidelines §4, 추천 적용 2
 });
 
 describe('경로 스키마와 계약(@peaket/contracts 생성물)이 같은 표본을 같게 판정한다(ADR-0176 결정 4)', () => {
-  // 알려진 차이(BAS-040): 계약은 정하지 않은 위층 칸(추가 칸)을 받고 경로 스키마는 막을 수 있다. 추가 칸 표본은 견주지 않는다
+  // 계약은 요청 본문을 모든 층에서 닫는다(BAS-040, docs/api/guidelines.md §1 '요청은 닫고 응답은 연다'). 정하지 않은 칸 표본도 셋이 같게 거절한다
   const ids = (k: number) => Array.from({ length: k }, (_, i) => `A${String(i + 1).padStart(2, '0')}`);
   const judge = (route: { safeParse(v: unknown): { success: boolean } }, contract: { safeParse(v: unknown): { success: boolean } }, samples: [string, unknown][]) =>
     samples.map(([what, v]) => ({ what, route: route.safeParse(v).success, contract: contract.safeParse(v).success }));
 
-  test('FR010_ 요청 본문: 좌석 0·1·10·11개, 좌석 ID 모양·형이 틀린 것, auto·behavior 모양을 계약과 같게 받고 거절한다 [ASVS v5.0.0-1.3.3] [ASVS v5.0.0-15.3.5]', () => {
-    const v = judge(HoldRequest, PostV1EventsEventIdHoldsBody, [
+  test('FR010_ 요청 본문: 좌석 0·1·10·11개, 좌석 ID 모양·형이 틀린 것, auto·behavior 모양을 계약과 같게 받고 거절한다 [ASVS v5.0.0-1.3.3] [ASVS v5.0.0-15.3.5] [ASVS v5.0.0-15.3.3]', () => {
+    const v = judge(HoldRequest, CreateEventHoldBody, [
       ['좌석 0개', { seatIds: [] }],
       ['좌석 1개', { seatIds: ids(1) }],
       ['좌석 10개', { seatIds: ids(10) }],
@@ -654,8 +654,11 @@ describe('경로 스키마와 계약(@peaket/contracts 생성물)이 같은 표�
       ['behavior 구간 넘음', { seatIds: ids(1), behavior: { v: 1, windowMs: 3_600_001 } }],
       ['behavior 음수 이동 수', { seatIds: ids(1), behavior: { v: 1, windowMs: 1, pointerMoves: -1 } }],
       ['clientEphemeralPublicKey가 수', { seatIds: ids(1), clientEphemeralPublicKey: 1 }],
+      ['정하지 않은 위층 칸', { seatIds: ids(1), zzz: 1 }],
+      ['auto 정하지 않은 칸', { auto: { firstTierId: 'R', count: 2, zzz: 1 } }],
     ]);
     expect(v.filter((x) => x.route !== x.contract)).toEqual([]);
+    expect(v.filter((x) => x.what.includes('정하지 않은')).map((x) => x.route)).toEqual([false, false]);
     // 표본이 받는 쪽·거절하는 쪽을 모두 지난다
     expect(Object.fromEntries(v.filter((x) => x.what.startsWith('좌석 ') && x.what.endsWith('개')).map((x) => [x.what, x.route]))).toEqual({ '좌석 0개': false, '좌석 1개': true, '좌석 10개': true, '좌석 11개': false });
   });
@@ -677,7 +680,7 @@ describe('경로 스키마와 계약(@peaket/contracts 생성물)이 같은 표�
   }
   const routeSchema = contractRouteSchema({ params: HoldParams, body: HoldRequest }) as { params: unknown; body: unknown };
 
-  test('FR010_ 요청 본문: Fastify가 쓰는 JSON Schema 판정(contractRouteSchema + 플랫폼 검사기)도 Zod 경로 스키마·계약과 같게 받고 거절한다 [ASVS v5.0.0-1.3.3] [ASVS v5.0.0-15.3.5]', () => {
+  test('FR010_ 요청 본문: Fastify가 쓰는 JSON Schema 판정(contractRouteSchema + 플랫폼 검사기)도 Zod 경로 스키마·계약과 같게 받고 거절한다 [ASVS v5.0.0-1.3.3] [ASVS v5.0.0-15.3.5] [ASVS v5.0.0-15.3.3]', () => {
     const json = fastifyJudge('body', routeSchema.body);
     const samples: [string, unknown][] = [
       ['좌석 0개', { seatIds: [] }],
@@ -705,10 +708,12 @@ describe('경로 스키마와 계약(@peaket/contracts 생성물)이 같은 표�
       ['behavior 음수 이동 수', { seatIds: ids(1), behavior: { v: 1, windowMs: 1, pointerMoves: -1 } }],
       ['behavior 정하지 않은 칸', { seatIds: ids(1), behavior: { v: 1, windowMs: 1, x: 1 } }],
       ['clientEphemeralPublicKey가 수', { seatIds: ids(1), clientEphemeralPublicKey: 1 }],
+      ['정하지 않은 위층 칸', { seatIds: ids(1), zzz: 1 }],
+      ['auto 정하지 않은 칸', { auto: { firstTierId: 'R', count: 2, zzz: 1 } }],
     ];
     const zodVsJson = judge(HoldRequest, json, samples);
     expect(zodVsJson.filter((x) => x.route !== x.contract)).toEqual([]);
-    const jsonVsContract = judge(json, PostV1EventsEventIdHoldsBody, samples);
+    const jsonVsContract = judge(json, CreateEventHoldBody, samples);
     expect(jsonVsContract.filter((x) => x.route !== x.contract)).toEqual([]);
     expect(Object.fromEntries(jsonVsContract.filter((x) => x.what.startsWith('좌석 ') && x.what.endsWith('개')).map((x) => [x.what, x.route]))).toEqual({ '좌석 0개': false, '좌석 1개': true, '좌석 10개': true, '좌석 11개': false });
   });
@@ -722,7 +727,7 @@ describe('경로 스키마와 계약(@peaket/contracts 생성물)이 같은 표�
     // Zod 경로 스키마와 Fastify 판정은 같다
     expect(judge(HoldParams, json, samples).filter((x) => x.route !== x.contract)).toEqual([]);
     // 계약과의 차이는 키 조각 밖의 회차 ID뿐이다(경로 스키마만 거절)
-    expect(judge(json, PostV1EventsEventIdHoldsParams, samples)).toEqual([...fine.map((what) => ({ what, route: true, contract: true })), ...strict.map((what) => ({ what, route: false, contract: true }))]);
+    expect(judge(json, CreateEventHoldParams, samples)).toEqual([...fine.map((what) => ({ what, route: true, contract: true })), ...strict.map((what) => ({ what, route: false, contract: true }))]);
   });
 
   const OK = { holdId: '0190f3a1-7c2e-7a00-8000-00000000f001', seatIds: ['A01'], expiresAt: '2026-11-04T03:07:00.000Z', extendable: true, fencingToken: NOW * 1000 };
@@ -732,7 +737,7 @@ describe('경로 스키마와 계약(@peaket/contracts 생성물)이 같은 표�
   };
 
   test('FR010_ 응답 Hold: 칸 누락·형이 틀린 것·배정 결과 값을 계약과 같게 받고 거절한다 [ASVS v5.0.0-15.3.1]', () => {
-    const v = judge(HoldResponseBody, PostV1EventsEventIdHoldsResponse, [
+    const v = judge(HoldResponseBody, CreateEventHoldResponse, [
       ['정상', OK],
       ['배정 결과 FIRST', { ...OK, assignResult: 'FIRST' }],
       ['배정 결과 모르는 값', { ...OK, assignResult: 'BEST' }],
@@ -756,7 +761,7 @@ describe('경로 스키마와 계약(@peaket/contracts 생성물)이 같은 표�
   test('FR010_ 응답 Hold: 펜싱 토큰 0·음수는 계약과 경로 스키마가 모두 거절하고, 시간대가 붙은 expiresAt은 알려진 차이다(경로 스키마만 거절)', () => {
     // 계약 Hold.fencingToken은 minimum 1(추천 적용 2026-11-04). 0·음수는 둘 다 거절해야 한다
     expect(
-      judge(HoldResponseBody, PostV1EventsEventIdHoldsResponse, [
+      judge(HoldResponseBody, CreateEventHoldResponse, [
         ['fencingToken 0', { ...OK, fencingToken: 0 }],
         ['fencingToken 음수', { ...OK, fencingToken: -1 }],
       ]),
@@ -766,7 +771,7 @@ describe('경로 스키마와 계약(@peaket/contracts 생성물)이 같은 표�
     ]);
     // 알려진 차이(추천 적용 2026-11-04): 서버는 expiresAt을 늘 'Z'(UTC)로 내므로 경로 스키마는 시간대 표기를 받지 않고, 계약(offset 허용)은 받는다.
     // 차이가 바뀌면(어느 쪽이든) 이 시험이 드러낸다
-    expect(judge(HoldResponseBody, PostV1EventsEventIdHoldsResponse, [['expiresAt +09:00', { ...OK, expiresAt: '2026-11-04T12:07:00.000+09:00' }]])).toEqual([
+    expect(judge(HoldResponseBody, CreateEventHoldResponse, [['expiresAt +09:00', { ...OK, expiresAt: '2026-11-04T12:07:00.000+09:00' }]])).toEqual([
       { what: 'expiresAt +09:00', route: false, contract: true },
     ]);
   });

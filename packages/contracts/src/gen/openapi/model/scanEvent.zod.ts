@@ -31,7 +31,7 @@ export const ScanEvent = zod.object({
   "clockOffsetMs": zod.int().optional(),
   "knownSeq": zod.int().describe('판정 때 반영한 서버 변경 일련번호(두 칸 버전 벡터의 첫 칸)'),
   "deviceSeq": zod.int().describe('기기 일련번호(두 번째 칸)')
-}).describe('스캔 기록(offline-gate §6.5). 스태프 계정과 역할은 서버가 scannerSessionId로 정한다(클라이언트 값을 받지 않음)')
+}).strict().describe('스캔 기록(offline-gate §6.5). 스태프 계정과 역할은 서버가 scannerSessionId로 정한다(클라이언트 값을 받지 않음)')
 
 export type ScanEvent = zod.input<typeof ScanEvent>;
 export type ScanEventOutput = zod.output<typeof ScanEvent>;
