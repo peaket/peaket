@@ -1,9 +1,11 @@
 // inventory 컨텍스트의 포트: 좌석 저장소(좌석 Redis), 만료 저장소, 만료 임대, 좌석맵 판, 구매 세션, 홀드 시도 기록, 좌석 Lua 지표.
-// 운영 어댑터: 좌석 저장소·만료 저장소는 RedisSeatStore, 만료 임대는 RedisSweepLeases. 좌석맵 판·구매 세션은 PRF-130 ①에서 메모리 대역뿐이고
-// (실제 구매 세션 s:session은 PRF-136), 홀드 시도 기록의 Kafka·Avro 보내기는 BAS-030이다. 도메인 층이라 프레임워크·플랫폼 형을 가져오지 않는다.
+// 운영 어댑터: 좌석 저장소·만료 저장소는 RedisSeatStore, 만료 임대는 RedisSweepLeases, 구매 세션 저장소는 RedisPurchaseSessionStore(PRF-136),
+// 구매 세션 읽기·플랫폼 요청 인증 포트는 StoredPurchaseSessions(PRF-136). 좌석맵 판은 PRF-130 ①에서 메모리 대역뿐이고(운영 구현은 PRF-137),
+// 홀드 시도 기록의 Kafka·Avro 보내기는 BAS-030이다. 도메인 층이라 프레임워크·플랫폼 형을 가져오지 않는다.
 import type { DueExpiriesInput, DueExpiry, ExpireInput, ExpireResult, SweepOutcome } from './expiry.js';
 import type { HoldInput, HoldResult, ReplayInput, ReplayResult, SeatRef } from './hold.js';
 import type { SeatLuaErrorCode, SeatLuaScript } from './lua-errors.js';
+import type { OpenSessionInput, OpenSessionResult, SessionStartedEntry, StoredSession } from './purchase-session.js';
 
 /** 요청 처리 중 좌석 Redis 호출 하나의 선택값(BUILD_ORDER PRF-135, guidelines §5) */
 export interface SeatCallOptions {
@@ -254,11 +256,65 @@ export interface PurchaseSessionInfo {
 export const PURCHASE_SESSIONS = Symbol('purchase.PurchaseSessions');
 /**
  * 구매 세션 읽기 포트. 구현은 플랫폼 구매 요청 인증 훅의 포트(PurchaseSessionPort: resolve·advance, createService의 purchaseSessions)도
- * 함께 맡는다(같은 세션을 보게, adapters/memory-purchase-sessions.ts의 PurchaseSessionAccess). PRF-130 ①에는 시험 대역(MemoryPurchaseSessions)만 있다
+ * 함께 맡는다(같은 세션을 보게, adapters/memory-purchase-sessions.ts의 PurchaseSessionAccess). 운영 구현은 StoredPurchaseSessions(PRF-136), 시험 대역은 MemoryPurchaseSessions다
  */
 export interface PurchaseSessions {
   /** 구매 세션 상태. 없거나 끝났으면 undefined */
   get(sessionId: string): Promise<PurchaseSessionInfo | undefined>;
+}
+
+export const PURCHASE_SESSION_STORE = Symbol('purchase.PurchaseSessionStore');
+/**
+ * 구매 세션 저장소(BUILD_ORDER PRF-136, docs/features/seat-hold.md §2 '구매 세션 열기와 확인의 첫 구현', docs/data.md §3 s:jti·s:session, Lua 계약은 adapters/purchase-session-lua.ts).
+ * 구매 세션 ID는 입장 토큰의 jti다. 재사용 차단 표지 s:jti:{jti}와 세션 상태 s:session:{jti}는 해시 태그가 같아 한 슬롯이고, 열기·일련번호 올리기는 각각 Lua 한 번이다.
+ * 시각 판단은 모두 저장소 시각(Redis TIME, 메모리 구현은 주입 Clock)이다. 메모리 구현과 Redis 구현은 같은 사례에서 같은 결과를 낸다(test/purchase-session-cases.ts).
+ */
+export interface PurchaseSessionStore {
+  /**
+   * 구매 세션을 연다(한 원자 연산). 결과의 뜻과 차례는 OpenSessionResult의 설명이다: 최대 체류 지남(TOKEN_EXPIRED) → 표지가 있으면 세션 상태를 견줘
+   * REPLAY·MISMATCH·ENDED → 표지가 없으면 첫 사용 기한(FIRST_USE_EXPIRED) → 세션 상태(수명 = 최대 체류 + 60초, 칸은 docs/data.md §3)와 표지(값 = 연 시각,
+   * 수명 = reissueUntilMs + 60초)를 함께 만든다. 형이 틀린 세션 키에는 아무것도 쓰지 않고 오류를 던진다(표지만 남기지 않는다).
+   * @throws RangeError 입력 모양이 틀림(assertOpenInput. 아무것도 부르지 않는다)
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애(reason 'unavailable', 쓰였는지 모른다. 같은 입력으로 다시 부르면 REPLAY나 CREATED다) 또는 메모리 부족(reason 'oom', 아무것도 쓰지 않았다)
+   * @throws Error 스크립트 오류·모르는 결과 값
+   */
+  open(i: OpenSessionInput): Promise<OpenSessionResult>;
+
+  /**
+   * 세션 상태를 읽는다(시간으로 거르지 않는다: 최대 체류가 지났어도 키가 있으면 준다. 거르는 것은 부르는 쪽이다). 없으면 undefined.
+   * @throws RangeError jti가 키 조각 모양이 아님
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애
+   * @throws Error 칸이 망가졌음(모르는 모양)
+   */
+  read(jti: string): Promise<StoredSession | undefined>;
+
+  /**
+   * 일련번호를 올린다(한 원자 연산): 세션이 있고 최대 체류 앞이며 seq가 마지막 번호보다 클 때만 seq를 쓰고 유휴 시한을 지금 + 5분으로 다시 쓰고 true.
+   * 그 밖(세션 없음, 최대 체류 지남, seq가 마지막 번호 이하)은 아무것도 바꾸지 않고 false.
+   * @throws RangeError jti가 키 조각 모양이 아니거나 seq가 1 이상의 안전한 정수가 아님
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애(쓰였는지 모른다)
+   * @throws Error seq·max 칸이 망가졌음(PEAKET_CORRUPT_KEY)
+   */
+  advance(jti: string, seq: number): Promise<boolean>;
+
+  /**
+   * SESSION_STARTED를 더했다는 표시를 세션 상태에 쓴다(한 원자 연산, sev 칸). 세션이 있으면 true, 없으면 아무것도 만들지 않고 false.
+   * 열기가 REPLAY로 돌려주는 needsStarted가 이 표시를 본다: 표시가 없고 연 지 SESSION_STARTED_GRACE_MS(1초 [가정])가 지났으면 응답을 잃은 재시도(REPLAY)가 시작 사건을 한 번 더 더한다.
+   * @throws RangeError jti가 키 조각 모양이 아님
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족
+   */
+  markStarted(jti: string): Promise<boolean>;
+}
+
+export const SESSION_STARTED_LOG = Symbol('purchase.SessionStartedLog');
+/** SESSION_STARTED Stream 항목을 더한다(docs/data.md §3 s:{event:E}:stream). 세션 키와 슬롯이 달라 열기와 따로 부른다 */
+export interface SessionStartedLog {
+  /**
+   * 그 회차 Stream에 항목 하나를 더하고, 스트림 수명이 없거나 최대 체류 + 1일보다 이르면 그 시각까지 늘린다(더 늦은 수명은 둔다).
+   * @throws RangeError 항목 모양이 틀림(assertStartedEntry)
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애(더했는지 모른다)
+   */
+  appendStarted(e: SessionStartedEntry): Promise<void>;
 }
 
 /** HoldAttempt의 result(asyncapi HoldAttempt.result와 같은 값) */

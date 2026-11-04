@@ -2,7 +2,7 @@
 // 쓰임새(HoldSeats)는 HoldError를 던지고, 받는 층이 throwHoldProblem으로 바꿔 던진다.
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { COOKIE_CHALLENGE, ProblemError, RequestValidationError } from '@peaket/platform';
-import { SEAT_STORE_RETRY_AFTER_SEC, type SeatStoreUnavailable, type SeatStoreUnavailableReason } from '../domain/hold.js';
+import { SEAT_STORE_RETRY_AFTER_SEC, SEAT_STORE_UNAVAILABLE_PROBLEM, type SeatStoreUnavailable, type SeatStoreUnavailableReason } from '../domain/hold.js';
 
 /** 응답 머리를 다는 곳(FastifyReply가 이 모양이다. 유스케이스 층은 웹 서버 형을 가져오지 않는다) */
 export interface ReplyHeaders {
@@ -94,9 +94,9 @@ export const HOLD_PROBLEMS: Readonly<Record<HoldErrorCode, HoldProblemSpec>> = {
   SEATS_REQUIRED: { status: 400, type: 'about:blank', title: 'Bad Request' },
   INVALID_SEAT: { status: 422, type: 'invalid-seat', title: '고를 수 없는 좌석이 있습니다' },
   SALE_ENDED: { status: 410, type: 'sale-ended', title: '판매 시간이 끝났습니다' },
-  NOT_READY: { status: 503, type: 'seat-store-unavailable', title: '좌석 정보를 잠시 쓸 수 없습니다', retryAfterSeconds: SEAT_STORE_RETRY_AFTER_SEC },
+  NOT_READY: { status: 503, ...SEAT_STORE_UNAVAILABLE_PROBLEM, retryAfterSeconds: SEAT_STORE_RETRY_AFTER_SEC },
   // 메모리 부족(storeReason 'oom')도 이 줄이다. 까닭은 로그·지표에만 둔다(BUILD_ORDER PRF-135)
-  STORE_UNAVAILABLE: { status: 503, type: 'seat-store-unavailable', title: '좌석 정보를 잠시 쓸 수 없습니다', retryAfterSeconds: SEAT_STORE_RETRY_AFTER_SEC },
+  STORE_UNAVAILABLE: { status: 503, ...SEAT_STORE_UNAVAILABLE_PROBLEM, retryAfterSeconds: SEAT_STORE_RETRY_AFTER_SEC },
   // 플랫폼 deadlineExceeded()와 같은 본문(guidelines §5. 게이트웨이 시간 초과도 504라 클라이언트가 보는 결과가 같다)
   DEADLINE_EXCEEDED: { status: 504, type: 'deadline-exceeded', title: '남은 처리 시간이 모자라 요청을 끝내지 못했습니다' },
   IDEM_REUSED: { status: 422, type: 'idempotency-key-reused', title: '같은 멱등 키를 다른 요청에 썼습니다' },

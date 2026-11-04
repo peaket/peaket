@@ -1,5 +1,5 @@
-// 시험용 구매 세션 대역. 실제 구매 세션(s:session:{sid}, 입장 토큰 jti → s:jti, PurchaseSessionStarted)은 PRF-135다.
-// 플랫폼 구매 요청 인증 훅의 포트(resolve·advance)와 inventory의 세션 읽기(get)를 함께 맡는다.
+// 시험용 구매 세션 대역. 실제 구매 세션(s:jti·s:session, 입장 토큰 확인, SESSION_STARTED)은 stored-purchase-sessions.ts·redis-purchase-sessions.ts다(PRF-136).
+// 플랫폼 구매 요청 인증 훅의 포트(resolve·advance)와 inventory의 세션 읽기(get)를 함께 맡는 PurchaseSessionAccess 면은 둘이 같다.
 import type { Principal, PurchaseSession, PurchaseSessionPort } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
 import type { PurchaseSessionInfo, PurchaseSessions } from '../domain/ports.js';
@@ -63,13 +63,3 @@ export class MemoryPurchaseSessions implements PurchaseSessionAccess {
     return s ? { sessionId: s.sessionId, accountId: s.accountId, eventId: s.eventId, journeyId: s.journeyId } : undefined;
   }
 }
-
-/**
- * 구매 세션이 아직 없는 운영 조립(PRF-130 ①의 main.ts)용: 어떤 요청에도 구매 세션이 없다. 그래서 @PurchaseSigned 경로는 모두 401이다.
- * 실제 구매 세션 저장소(PRF-135)가 생기면 바꾼다
- */
-export const unavailablePurchaseSessions: PurchaseSessionAccess = {
-  resolve: async () => undefined,
-  advance: async () => false,
-  get: async () => undefined,
-};

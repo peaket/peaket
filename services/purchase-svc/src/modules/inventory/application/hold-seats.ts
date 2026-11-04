@@ -87,7 +87,7 @@ export class HoldSeats {
    *
    * 1. 구매 세션: accountId가 KEY_PART 모양이 아니거나(Redis 키에 들어간다), sessions.get(purchaseSessionId)가 없거나, 그 계정이 accountId와 다르면
    *    SESSION_NOT_FOUND(401).
-   *    세션의 회차가 eventId와 다르면 EVENT_MISMATCH(403).
+   *    세션의 회차가 eventId와 다르면 EVENT_MISMATCH(403). sessions.get이 SeatStoreUnavailable이면 STORE_UNAVAILABLE(503, 시도 기록 없음).
    * 2. 본문: auto가 있으면 AUTO_NOT_SUPPORTED(400, seatIds가 함께 있어도). seatIds가 없거나 비었으면 SEATS_REQUIRED(400).
    * 3. 회차 설정: seatMap.config(eventId)가 없으면 NOT_READY(503).
    * 4. 판매 종료: clock.now() ≥ saleEndsAtMs면 SALE_ENDED(410).
@@ -117,7 +117,7 @@ export class HoldSeats {
    * 명세에서 모호했던 셋(추천 적용 2026-11-04):
    * - 회차가 달라 403이면 본문이 auto여도 ERROR 하나를 남긴다(구매 세션 확인을 지났고, 403이 본문 검사 400보다 먼저다).
    * - 저장소가 일시 장애가 아닌 오류(스크립트 오류 같은 버그)를 던지면 ERROR 하나를 남기고 그 오류를 바꾸지 않고 던진다.
-   * - HoldAttempt의 firstHeldInSession은 여기서 채우지 않는다. 구매 세션 상태(PRF-136)와 Kafka·Avro 보내기(BAS-030)에서 채운다.
+   * - HoldAttempt의 firstHeldInSession은 여기서 채우지 않는다. 구매 세션 상태(PRF-137)와 Kafka·Avro 보내기(BAS-030)에서 채운다.
    *
    * 요청 마감(BUILD_ORDER PRF-135, guidelines §5). c.deadline이 있을 때만 본다:
    * - 좌석 Redis를 부르기 바로 전(5의 store.replay와 6의 store.hold 각각)에 c.deadline.remainingMs() < SEAT_CALL_MIN_REMAINING_MS(5)이면 부르지 않고
@@ -141,7 +141,14 @@ export class HoldSeats {
 
     // 1 구매 세션(계정 ID는 Redis 키에 들어가므로 모양부터 본다)
     if (!KEY_PART.test(c.accountId)) throw new HoldError('SESSION_NOT_FOUND', '계정 ID 모양이 키 조각이 아니다');
-    const session = await this.sessions.get(c.purchaseSessionId);
+    let session;
+    try {
+      session = await this.sessions.get(c.purchaseSessionId);
+    } catch (err) {
+      // 구매 세션 저장소(좌석 Redis)의 일시 장애·메모리 부족도 503이다. 아직 시도 기록을 남기기 전이다(PRF-136 리뷰)
+      if (err instanceof SeatStoreUnavailable) throw storeUnavailableError(err);
+      throw err;
+    }
     if (!session || session.accountId !== c.accountId) throw new HoldError('SESSION_NOT_FOUND', '구매 세션이 없거나 이 계정의 것이 아니다');
 
     // 여기부터 결과마다 시도 하나를 남긴다(멱등 재생과 2의 400은 빼고)

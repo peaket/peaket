@@ -2,7 +2,7 @@
   "name": "@peaket/purchase-svc",
   "private": true,
   "version": "0.0.0",
-  "description": "purchase-svc. inventory 모듈의 좌석 홀드 POST /v1/events/{eventId}/holds(docs/features/seat-hold.md §3~§5, BUILD_ORDER PRF-130 ①)가 있다. 좌석 Redis만 쓰고 DB는 아직 없다",
+  "description": "purchase-svc. inventory 모듈의 좌석 홀드 POST /v1/events/{eventId}/holds(docs/features/seat-hold.md §3~§5, BUILD_ORDER PRF-130 ①), 1초 만료 반복(PRF-135), 구매 세션 열기·확인(입장 토큰 확인, s:jti·s:session, 요청 인증 키, PRF-136)이 있다. 좌석 Redis만 쓰고 DB는 아직 없다",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

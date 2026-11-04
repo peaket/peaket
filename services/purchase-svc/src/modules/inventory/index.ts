@@ -1,14 +1,19 @@
 // inventory 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다).
 export { EXPIRE_LUA, SWEEP_LEASE_LUA } from './adapters/expire-lua.js';
 export { HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
-export { MemoryPurchaseSessions, type MemoryPurchaseSession, type PurchaseSessionAccess, unavailablePurchaseSessions } from './adapters/memory-purchase-sessions.js';
+export { MemoryPurchaseSessionStore, RecordingSessionStartedLog } from './adapters/memory-purchase-session-store.js';
+export { MemoryPurchaseSessions, type MemoryPurchaseSession, type PurchaseSessionAccess } from './adapters/memory-purchase-sessions.js';
 export { MemorySeatMap, type MemorySeatDef } from './adapters/memory-seat-map.js';
 export { MemorySeatDb, MemorySeatEvent, MemorySeatStore, type MemoryHoldHash, type MemoryIdemRecord, type MemoryPublished } from './adapters/memory-seat-store.js';
 export { MemorySweepLeases } from './adapters/memory-sweep-leases.js';
 export { PromSeatSignals } from './adapters/prom-seat-signals.js';
+export { ADVANCE_SESSION_LUA, APPEND_SESSION_STARTED_LUA, MARK_SESSION_STARTED_LUA, OPEN_SESSION_LUA } from './adapters/purchase-session-lua.js';
 export { RecordingHoldAttempts, discardHoldAttempts } from './adapters/recording-hold-attempts.js';
+export { RedisPurchaseSessionStore, RedisSessionStartedLog, sessionKeys } from './adapters/redis-purchase-sessions.js';
 export { RedisSeatStore, SEAT_REDIS, seatKeys } from './adapters/redis-seat-store.js';
 export { RedisSweepLeases } from './adapters/redis-sweep-leases.js';
+export { PURCHASE_ECDH_KEY_ENV, ServerEcdhKey, type ServerEcdhJwk } from './adapters/server-ecdh.js';
+export { ADMISSION_TOKEN_HEADER, admissionJtiOf, StoredPurchaseSessions, type StoredPurchaseSessionsDeps } from './adapters/stored-purchase-sessions.js';
 export {
   ExpirySweeper,
   systemSweepTimer,
@@ -20,6 +25,15 @@ export {
   type SweepTimer,
 } from './application/expiry-sweeper.js';
 export { LogGate, OOM_WARN_GATE } from './application/log-gate.js';
+export {
+  OpenPurchaseSession,
+  OpenSessionError,
+  type OpenPurchaseSessionDeps,
+  type OpenSessionCommand,
+  type OpenSessionErrorCode,
+  type OpenSessionLogger,
+  type OpenSessionOutcome,
+} from './application/open-purchase-session.js';
 export { podIdFrom } from './application/pod-id.js';
 export {
   HOLD_PROBLEMS,
@@ -32,6 +46,18 @@ export {
   throwHoldProblem,
 } from './application/hold-error.js';
 export { HoldSeats, type HoldBody, type HoldCommand, type HoldResponse } from './application/hold-seats.js';
+export {
+  ADMISSION_TOKEN_MAX_CHARS,
+  AdmissionTokenRejected,
+  FIRST_USE_MS,
+  IAT_SKEW_MS,
+  parseAdmissionJwks,
+  verifyAdmissionToken,
+  type AdmissionClaims,
+  type AdmissionKeys,
+  type AdmissionRejectReason,
+} from './domain/admission-token.js';
+export { parseClientEphemeralKey, type ClientEphemeralKey } from './domain/client-key.js';
 export {
   EXPIRY_BACKOFF_MS,
   EXPIRY_BATCH_SIZE,
@@ -72,6 +98,29 @@ export {
   type SeatRef,
   type SeatStoreUnavailableReason,
 } from './domain/hold.js';
+export {
+  CLIENT_KEY_PATTERN,
+  SESSION_IDLE_MS,
+  SESSION_KEY_GRACE_MS,
+  SESSION_STARTED_GRACE_MS,
+  SESSION_STARTED_KEEP_MS,
+  SESSION_STARTED_TYPE,
+  SessionStoreFailure,
+  UUID_PATTERN,
+  assertJti,
+  assertOpenInput,
+  assertSeq,
+  assertStartedEntry,
+  sessionStartedEventKey,
+  sessionStartedFields,
+  sessionStoreErrorOf,
+  toPurchaseSessionStarted,
+  type OpenSessionInput,
+  type OpenSessionResult,
+  type PurchaseSessionStartedMessage,
+  type SessionStartedEntry,
+  type StoredSession,
+} from './domain/purchase-session.js';
 export { seatLuaErrorOf, type SeatKeyKind, type SeatLuaError, type SeatLuaErrorCode, type SeatLuaScript } from './domain/lua-errors.js';
 export {
   HASH_SLOTS,
@@ -88,11 +137,13 @@ export {
 } from './domain/placement.js';
 export {
   HOLD_ATTEMPTS,
+  PURCHASE_SESSION_STORE,
   PURCHASE_SESSIONS,
   SEAT_EXPIRIES,
   SEAT_MAP,
   SEAT_SIGNALS,
   SEAT_STORE,
+  SESSION_STARTED_LOG,
   SWEEP_LEASES,
   noSeatSignals,
   type EventSeatConfig,
@@ -100,6 +151,7 @@ export {
   type HoldAttemptResult,
   type HoldAttempts,
   type PurchaseSessionInfo,
+  type PurchaseSessionStore,
   type PurchaseSessions,
   type SeatCallOptions,
   type SeatExpiries,
@@ -107,6 +159,7 @@ export {
   type SeatMapIndex,
   type SeatSignals,
   type SeatStore,
+  type SessionStartedLog,
   type SweepLeases,
 } from './domain/ports.js';
 export { HOLD_OPERATION, HoldHeaders, HoldParams, HoldRequest, HoldResponseBody, HoldsController, SeatLuaFailure, sanitizedStoreError } from './inbound/holds.controller.js';

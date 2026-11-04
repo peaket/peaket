@@ -16,6 +16,8 @@ export const MAX_SEATS = 10;
 export const IDEM_TTL_MS = HOLD_TTL_MS;
 /** 회차 키(비트맵·홀드·보유 수·fence·expiry·epoch)의 수명 = 판매 종료 + 1일 [가정](docs/data.md §3) */
 export const KEEP_AFTER_SALE_END_MS = 24 * 3600_000;
+/** 좌석 저장소 503의 problem 이름과 제목. 홀드 응답 대응표(HOLD_PROBLEMS의 NOT_READY·STORE_UNAVAILABLE)와 구매 세션 확인 경로(StoredPurchaseSessions)가 같이 쓴다 */
+export const SEAT_STORE_UNAVAILABLE_PROBLEM = { type: 'seat-store-unavailable', title: '좌석 정보를 잠시 쓸 수 없습니다' } as const;
 /** 좌석 저장소 503(seat-store-unavailable)의 Retry-After 2초 [가정](ADR-0121) */
 export const SEAT_STORE_RETRY_AFTER_SEC = 2;
 /**

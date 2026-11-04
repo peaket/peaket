@@ -2,13 +2,23 @@
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
 // 앱 포트(REST: 좌석 홀드 POST /v1/events/{eventId}/holds)·관리 포트(/metrics, /ready)는 서비스 뼈대가 연다.
 // 1초 만료 반복(ExpirySweeper, BUILD_ORDER PRF-135)을 듣기 시작한 뒤 켜고 SIGTERM 때 끈다. 좌석 Lua 지표(seat_lua_errors_total)를 /metrics에 붙인다.
-// 아직 운영 구매 세션 저장소(PRF-136)·좌석맵 판·HoldAttempt 보내기(BAS-030)가 없다. 그래서 이 조립은 구매 세션이 늘 없어 홀드가 모두 401이고,
+// 구매 세션은 좌석 Redis의 s:jti·s:session과 서버 고정 ECDH 개인키(PEAKET_PURCHASE_ECDH_KEY)로 확인한다(BUILD_ORDER PRF-136). 세션을 여는 스냅샷 API(입장 토큰의
+// 첫 사용, PRF-137)가 아직 없어 이 조립은 구매 세션이 열리지 않고, 홀드는 모두 401이다. 좌석맵 판(PRF-137)·HoldAttempt 보내기(BAS-030)도 아직 없다.
 // 좌석맵 판에 회차 설정이 없어 만료 반복은 회차마다 NO_CONFIG로 건너뛴다.
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
-import { createHotRedis, createService } from '@peaket/platform';
+import { createHotRedis, createService, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { ExpirySweeper, MemorySeatMap, PromSeatSignals, discardHoldAttempts, podIdFrom, unavailablePurchaseSessions } from './modules/inventory/index.js';
+import {
+  ExpirySweeper,
+  MemorySeatMap,
+  PromSeatSignals,
+  RedisPurchaseSessionStore,
+  ServerEcdhKey,
+  StoredPurchaseSessions,
+  discardHoldAttempts,
+  podIdFrom,
+} from './modules/inventory/index.js';
 
 const SERVICE = 'purchase-svc';
 
@@ -23,8 +33,11 @@ if (!url && clusterUrls.length === 0) throw new Error('PEAKET_SEAT_REDIS_URL이�
 // 만료 임대 값: {HOSTNAME 앞 57자}-{무작위 16진 6자리}. HOSTNAME이 없거나 키 조각 모양이 아니면 무작위 UUID(이 프로세스 안에서만 같다, L5)
 const podId = podIdFrom(process.env, (n) => randomBytes(n));
 
+// 서버 고정 ECDH 개인키: Secrets Manager에서 시작 때 메모리로만 읽는다(없거나 틀리면 시작하지 않는다, docs/security/secrets-and-keys.md)
+const ecdh = ServerEcdhKey.fromEnv(process.env);
+
 const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url });
-const sessions = unavailablePurchaseSessions;
+const sessions = new StoredPurchaseSessions({ store: new RedisPurchaseSessionStore(redis), ecdh, clock: systemClock });
 const signals = new PromSeatSignals();
 const service = await createService({
   name: SERVICE,
