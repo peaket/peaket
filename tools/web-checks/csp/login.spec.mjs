@@ -63,3 +63,36 @@ test('SCR-004 누른 버튼만 진행 중이고 나머지는 비활성이며, �
     { action: '/login/naver', connected: true, prevented: true },
   ]);
 });
+
+test('SCR-004 로그인 시작 폼은 누른 뒤 다시 그려도 기기 값(deviceId)을 싣는다(갈래 3 BOT-044 재현: 진행 중 표시로 다시 그리면 숨은 칸이 비었다)', async ({ page, browserName }) => {
+  test.skip(isBidiFirefox(browserName), 'BiDi Firefox는 보낸 요청의 본문을 주지 않는다(lib/firefox.mjs)');
+  const device = 'AbCdEfGhIjKlMnOpQrStUv';
+  await page.addInitScript((d) => localStorage.setItem('peaket.device', d), device);
+  const posts = [];
+  await page.route('**/login/kakao', async (route) => {
+    posts.push(route.request().postData());
+    await route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: 'started' });
+  });
+  await page.goto(`${WEB_BASE}/login`);
+  await hydrated(page);
+  await page.getByRole('button', { name: '카카오 로그인' }).click();
+  await page.waitForURL(/\/login\/kakao$/);
+  expect(posts).toHaveLength(1);
+  expect(new URLSearchParams(posts[0] ?? '').get('deviceId')).toBe(device);
+});
+
+test('SCR-004 로그인 시작 뒤 제공자로 가는 303을 막는 CSP가 막지 않는다(form-action, 갈래 3 BOT-044 재현)', async ({ page, browserName }) => {
+  test.skip(browserName === 'webkit', 'WebKit은 route.fulfill에 넘김 상태를 쓰지 못한다');
+  test.skip(isBidiFirefox(browserName), 'BiDi Firefox는 가로챈 넘김을 다루지 않는다');
+  const violations = [];
+  page.on('console', (m) => {
+    if (/form-action|Content Security Policy/i.test(m.text())) violations.push(m.text());
+  });
+  await page.route('**/login/naver', (route) => route.fulfill({ status: 303, headers: { location: 'https://nid.naver.com/oauth2.0/authorize?response_type=code&state=s' } }));
+  await page.route('https://nid.naver.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: 'provider' }));
+  await page.goto(`${WEB_BASE}/login`);
+  await hydrated(page);
+  await page.getByRole('button', { name: '네이버 로그인' }).click();
+  await page.waitForURL(/^https:\/\/nid\.naver\.com\/oauth2\.0\/authorize/, { timeout: 10_000 });
+  expect(violations).toEqual([]);
+});

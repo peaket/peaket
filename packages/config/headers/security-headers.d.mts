@@ -1,6 +1,6 @@
 // security-headers.mjs의 타입(앱의 TypeScript 코드가 가져다 쓴다, BUILD_ORDER HOT-290)
 export type CspBundle = 'A' | 'A′' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G';
-export type CspVariant = 'humanCheck' | 'identityForm' | 'partner';
+export type CspVariant = 'humanCheck' | 'identityForm' | 'partner' | 'socialLogin';
 export interface ProdOrigins {
   api: string;
   queue: string;
@@ -9,6 +9,11 @@ export interface ProdOrigins {
   opsApi: string;
   scannerApi: string;
   apiWs: string;
+  img: string;
+  kakaoAuth: string;
+  kakaoAccounts: string;
+  naverAuth: string;
+  googleAuth: string;
 }
 export const PROD_ORIGINS: Readonly<ProdOrigins>;
 export const CSP_VARIANTS: Readonly<Record<CspVariant, { add?: Record<string, string[]>; set?: Record<string, string[]> }>>;

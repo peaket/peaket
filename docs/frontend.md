@@ -1367,7 +1367,7 @@ worker-src 'self'; manifest-src 'self'; frame-src 'none'; form-action 'self';
 object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp
   + 파트너 콘솔: connect-src는 'self' https://partner-api.peaket.example
   + 본인확인을 여는 화면: form-action에 본인확인기관 출처(연동 계약 때 확정)
-  + 로그인 화면: form-action에 세 소셜 제공자 인가 출처(연동 때 제공자 문서로 확정)
+  + 로그인 화면(로그인 수단 잇기 확인 포함): form-action에 세 소셜 제공자 인가 출처 https://kauth.kakao.com https://accounts.kakao.com https://nid.naver.com https://accounts.google.com  ([가정], 연동 때 제공자 문서로 확정. 카카오는 인가 주소가 카카오계정 로그인으로 넘기고 form-action은 제출 뒤 넘김마다 본다. 로컬·CI에서 제공자 issuer를 모의 제공자로 바꾸면 그 출처, ADR-0215)
   + 재인증을 시작하는 화면(계정 설정의 탈퇴, 로그인 수단 화면의 해제·추가(추가는 `POST /link/{provider}`도 같은 form-action, 2026-11-04 BOT-041) 등, POST /reauth/{provider} 뒤 303으로 제공자로 간다): 로그인 화면과 같은 form-action(추천 적용 2026-11-04, BUILD_ORDER BOT-036)
 
 [E 결제 화면: 주문·결제, 굿즈 결제]  B에 더해

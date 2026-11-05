@@ -18,14 +18,25 @@ export const PROD_ORIGINS = {
   apiWs: 'wss://api.peaket.example',
   /** 공연 포스터·배너 파생본(ADR-0199 결정 4) [가정] */
   img: 'https://img.peaket.example',
+  /**
+   * 소셜 제공자 인가 출처(로그인·재인증·로그인 수단 추가 양식의 form-action, ADR-0215) [가정, 연동 때 제공자 문서로 확정].
+   * 카카오는 인가 주소(kauth)가 카카오계정 로그인(accounts)으로 넘기므로 둘 다 둔다(form-action은 제출 뒤 넘김마다 본다).
+   * 로컬·CI에서 제공자 issuer를 모의 제공자로 바꾸면 쓰는 곳이 그 출처로 덮는다(apps/web page-headers.ts socialAuthOrigins)
+   */
+  kakaoAuth: 'https://kauth.kakao.com',
+  kakaoAccounts: 'https://accounts.kakao.com',
+  naverAuth: 'https://nid.naver.com',
+  googleAuth: 'https://accounts.google.com',
 };
 
-/** 정본 글 상자의 '+' 줄(화면에 따라 더하거나 바꾸는 것). 로그인 화면의 소셜 제공자 form-action 출처는 연동 때 제공자 문서로 확정한다 */
+/** 정본 글 상자의 '+' 줄(화면에 따라 더하거나 바꾸는 것). 로그인 화면의 소셜 제공자 form-action 출처는 [가정]이고 연동 때 제공자 문서로 확정한다 */
 export const CSP_VARIANTS = {
   /** 사람 확인을 싣는 화면(공연 상세, 묶음 A) */
   humanCheck: { add: { 'script-src': ['https://challenges.cloudflare.com'], 'frame-src': ['https://challenges.cloudflare.com'] } },
   /** 본인확인을 여는 화면(공연 상세·월렛·스태프 초대 수락, 묶음 A·B) */
   identityForm: { add: { 'form-action': ['{identity}'] } },
+  /** 로그인·로그인 수단 잇기 확인·재인증·로그인 수단 추가 화면(묶음 B): POST /login·/reauth·/link/{제공자} 뒤 303으로 제공자로 간다(ADR-0215) */
+  socialLogin: { add: { 'form-action': ['{kakaoAuth}', '{kakaoAccounts}', '{naverAuth}', '{googleAuth}'] } },
   /** 파트너 콘솔(묶음 B): connect-src를 바꾼다 */
   partner: { set: { 'connect-src': ["'self'", '{partnerApi}'] } },
 };

@@ -61,16 +61,18 @@ export const ROUTES: readonly RouteRule[] = [
   req('/help/inquiries'),
   req('/help/inquiries/[id]'),
   req('/help/inquiries/new'),
-  req('/login'),
-  req('/login/link'),
+  // 로그인 시작(POST /login/{p})·로그인 수단 잇기 확인은 303으로 제공자로 간다: form-action에 제공자 인가 출처(ADR-0215)
+  req('/login', 'B', 'web', ['socialLogin']),
+  req('/login/link', 'B', 'web', ['socialLogin']),
   req('/my/appeals/[id]'),
   req('/my/compensations/[id]'),
   req('/my/likes'),
   req('/my/orders'),
   req('/my/orders/[orderId]'),
   req('/my/refunds/[refundId]/account'),
-  req('/my/settings'),
-  req('/my/settings/providers'),
+  // 탈퇴·원격 로그아웃의 재인증(POST /reauth/{p})과 로그인 수단 해제·추가(POST /reauth·/link/{p})도 제공자로 간다(ADR-0215)
+  req('/my/settings', 'B', 'web', ['socialLogin']),
+  req('/my/settings/providers', 'B', 'web', ['socialLogin']),
   req('/my/tickets/[ticketId]/addons'),
   req('/my/tickets/[ticketId]/cancel'),
   req('/my/tickets/[ticketId]/transfer'),
@@ -90,6 +92,32 @@ export const ROUTES: readonly RouteRule[] = [
   handler('/v1/identity/link-proposals/[proposalId]'),
   handler('/v1/identity/link-proposals/[proposalId]/separate-account'),
 ];
+
+/**
+ * 로컬·CI에서 제공자 issuer를 모의 제공자로 바꾸면(PEAKET_OIDC_{P}_ISSUER, social-login config가 local·ci에서만 받는다) 그 출처를
+ * 로그인·재인증 화면의 form-action에 넣을 출처로 돌려준다(ADR-0215). 없거나 꼴이 틀리면 넣지 않는다(운영 출처 그대로)
+ */
+export function socialAuthOrigins(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const out: Record<string, string> = {};
+  const originOf = (v: string | undefined): string | undefined => {
+    if (!v) return undefined;
+    try {
+      return new URL(v).origin;
+    } catch {
+      return undefined;
+    }
+  };
+  const kakao = originOf(env.PEAKET_OIDC_KAKAO_ISSUER);
+  if (kakao) {
+    out.kakaoAuth = kakao;
+    out.kakaoAccounts = kakao;
+  }
+  const naver = originOf(env.PEAKET_OIDC_NAVER_ISSUER);
+  if (naver) out.naverAuth = naver;
+  const google = originOf(env.PEAKET_OIDC_GOOGLE_ISSUER);
+  if (google) out.googleAuth = google;
+  return out;
+}
 
 const compiled = ROUTES.map((r) => ({
   rule: r,

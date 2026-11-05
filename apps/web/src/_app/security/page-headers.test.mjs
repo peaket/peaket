@@ -6,7 +6,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PAGE_HEADERS, REPORTING_ENDPOINTS, renderCsp } from '@peaket/config/headers/security-headers.mjs';
-import { NONCE_HEADER, ROUTES, cachedCsp, matchRoute, newNonce, pageHeaders } from './page-headers.ts';
+import { NONCE_HEADER, ROUTES, cachedCsp, matchRoute, newNonce, pageHeaders, socialAuthOrigins } from './page-headers.ts';
 import { CSP_TEMPLATE_HEADER, HASH_SENTINEL } from '../../../server/csp-template.mjs';
 
 const appDir = fileURLToPath(new URL('../../../app', import.meta.url));
@@ -61,6 +61,10 @@ test('[ASVS v5.0.0-3.4.3] 요청마다 그리는 화면의 묶음: 좌석 F, 주
   assert.equal(matchRoute('/my/settings').bundle, 'B');
   assert.equal(matchRoute('/login').bundle, 'B');
   assert.deepEqual(matchRoute('/queue/e-1/verify').variants, ['humanCheck']);
+  // 로그인 시작·재인증·로그인 수단 추가 양식이 제공자로 303하는 화면(ADR-0215, 갈래 3 BOT-044 재현)
+  for (const p of ['/login', '/login/link', '/my/settings', '/my/settings/providers']) assert.deepEqual(matchRoute(p).variants, ['socialLogin'], p);
+  for (const p of ['/my/likes', '/my/orders', '/signup/consent']) assert.equal(matchRoute(p).variants, undefined, p);
+  assert.ok(pageHeaders('/login', { nonce: newNonce() })['Content-Security-Policy'].includes("form-action 'self' https://kauth.kakao.com https://accounts.kakao.com https://nid.naver.com https://accounts.google.com;"));
   for (const r of ROUTES.filter((x) => x.group === 'cached' && x.kind === 'page')) assert.equal(r.bundle, 'A', r.pattern);
 });
 
@@ -128,4 +132,16 @@ test('[ASVS v5.0.0-3.4.3] 캐시 화면(A)은 해시 자리를 넣은 막는 CSP
   assert.equal(cachedCsp('/events/e-1')[CSP_TEMPLATE_HEADER], renderCsp('A', { variants: ['humanCheck'], hashes: [HASH_SENTINEL] }));
   assert.deepEqual(cachedCsp('/my/settings'), {}, '요청 화면에는 주지 않는다');
   assert.deepEqual(cachedCsp('/logout'), {});
+});
+
+test('[ASVS v5.0.0-3.4.3] 로컬·CI에서 바꾼 제공자 issuer(PEAKET_OIDC_*_ISSUER)는 그 출처를 form-action에 넣고, 없으면 운영 출처(ADR-0215)', () => {
+  assert.deepEqual(socialAuthOrigins({}), {});
+  assert.deepEqual(socialAuthOrigins({ PEAKET_OIDC_KAKAO_ISSUER: 'http://127.0.0.1:18911/kakao', PEAKET_OIDC_GOOGLE_ISSUER: 'http://127.0.0.1:18911/google/' }), {
+    kakaoAuth: 'http://127.0.0.1:18911',
+    kakaoAccounts: 'http://127.0.0.1:18911',
+    googleAuth: 'http://127.0.0.1:18911',
+  });
+  assert.deepEqual(socialAuthOrigins({ PEAKET_OIDC_NAVER_ISSUER: 'not a url' }), {}, '꼴이 틀리면 넣지 않는다(운영 출처 그대로)');
+  const csp = pageHeaders('/login', { nonce: newNonce(), origins: socialAuthOrigins({ PEAKET_OIDC_NAVER_ISSUER: 'http://localhost:4030' }) })['Content-Security-Policy'];
+  assert.ok(csp.includes("form-action 'self' https://kauth.kakao.com https://accounts.kakao.com http://localhost:4030 https://accounts.google.com;"), csp);
 });

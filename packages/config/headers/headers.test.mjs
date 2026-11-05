@@ -104,7 +104,17 @@ test("[ASVS v5.0.0-3.4.3] 정본 글 상자의 '+' 줄(사람 확인·본인확�
   const ttCanon = tt.replace('+ Content-Security-Policy-Report-Only: ', '').replace(/\s{2,}\(.*\)\s*$/, '');
   assert.equal(trustedTypesReportOnly(['x']).replace('peaket-webpack-x', 'peaket-webpack-{원격 이름…}'), ttCanon);
   assert.equal(staticAppHeaders('console')['Content-Security-Policy-Report-Only'], trustedTypesReportOnly(['queue', 'purchase']));
-  assert.deepEqual(Object.keys(CSP_VARIANTS).sort(), ['humanCheck', 'identityForm', 'partner']);
+  assert.deepEqual(Object.keys(CSP_VARIANTS).sort(), ['humanCheck', 'identityForm', 'partner', 'socialLogin']);
+});
+
+test("[ASVS v5.0.0-3.4.3] 로그인·재인증 화면의 form-action에 소셜 제공자 인가 출처가 든다(갈래 3 BOT-044 재현: 'self'만이면 POST /login/{p} 뒤 303이 막힌다, ADR-0215)", () => {
+  const plus = canon.B.plus.join('\n');
+  assert.ok(plus.includes('로그인 화면(로그인 수단 잇기 확인 포함): form-action에 세 소셜 제공자 인가 출처 https://kauth.kakao.com https://accounts.kakao.com https://nid.naver.com https://accounts.google.com'), plus);
+  assert.match(plus, /재인증을 시작하는 화면.*로그인 화면과 같은 form-action/);
+  assert.ok(renderCsp('B', { nonce: 'a'.repeat(22), variants: ['socialLogin'] }).includes("form-action 'self' https://kauth.kakao.com https://accounts.kakao.com https://nid.naver.com https://accounts.google.com;"));
+  // 로컬·CI에서 제공자 issuer를 모의 제공자로 바꾸면 그 출처로 채운다(꼴 검사는 같다)
+  const local = renderCsp('B', { nonce: 'a'.repeat(22), variants: ['socialLogin'], origins: { kakaoAuth: 'http://127.0.0.1:4030', kakaoAccounts: 'http://127.0.0.1:4030', naverAuth: 'http://127.0.0.1:4030', googleAuth: 'http://127.0.0.1:4030' } });
+  assert.ok(local.includes("form-action 'self' http://127.0.0.1:4030 http://127.0.0.1:4030 http://127.0.0.1:4030 http://127.0.0.1:4030;"));
 });
 
 test('채우지 않은 자리 표시(본인확인기관 출처)와 꼴이 틀린 출처는 만들지 않는다(새 맥락 리뷰 재현)', () => {
