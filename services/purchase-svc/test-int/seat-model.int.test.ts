@@ -26,7 +26,7 @@ import { ensureSeatHoldPartitions, migratePurchase } from '../scripts/migrate.mj
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { SPEC_ACTIONS } from './seat-model/actions.js';
 import { COMMANDS, commandArbs, pairArb, type World } from './seat-model/commands.js';
-import { readTrace, replay, scopeOf } from './seat-model/itf.js';
+import { readTrace, replay, scopeOf, traceOfMoves } from './seat-model/itf.js';
 import { type Scope, SeatSystem, type SystemOptions, settleAll } from './seat-model/system.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -304,7 +304,9 @@ test('경합 집중(스케줄러): 마감 초과 묶기 뒤의 실패 해제와 
   );
 }, 600_000);
 
-test('재현(결함 후보, PRF-160에 넘김): 실패 해제가 먼저 돌고 마감을 넘긴 묶기가 뒤에 닿으면 묶인 좌석이 실패한 시도에 남는다(만료되지 않는다)', async () => {
+// PRF-165 고침(실패 표시, payment §2 '실패 해제와 늦은 묶기', data.md §3 s:{event:E}:failed:{holdId}): 실패 해제가 표시를 남기고 묶기가 그것을 보면
+// 아무것도 쓰지 않고 FAILED_HOLD다. 그래서 늦은 묶기 재현은 이제 '누수 없음'을 단언한다(PRF-151이 넘긴 재현 시험을 BUILD_ORDER PRF-165 줄대로 바꿈).
+test('재현_늦은 묶기(PRF-165 고침): 실패 해제가 먼저 돌고 마감을 넘긴 묶기가 뒤에 닿아도 FAILED_HOLD라 실패한 시도에 좌석이 남지 않는다', async () => {
   const s = await make(TWO);
   await s.step('hold(11, [1,2])', () => s.hold(11, [1, 2]));
   await s.step('accept(11)', () => s.accept(11));
@@ -313,15 +315,63 @@ test('재현(결함 후보, PRF-160에 넘김): 실패 해제가 먼저 돌고 �
   s.att(11).phase = 'FAILED';
   await s.step('releaseFailed(11)', () => s.releaseFailed(11));
   const late = await s.lateRegrab(11);
-  expect(late).toBe('OK');
-  expect([s.obs.red.seats[1], s.obs.red.seats[2]]).toEqual([{ hid: 11, pinned: true }, { hid: 11, pinned: true }]);
-  // 묶인 좌석은 만료 인덱스에 없다: 시간이 다 돼도 만료 반복이 풀지 못한다
-  expect(await s.expire()).toBe(0);
-  // 소비자가 한 번 더 풀면 풀린다
-  await s.step('releaseFailed(11) 다시', () => s.releaseFailed(11));
+  expect(late).toBe('FAILED_HOLD');
+  // 늦은 묶기는 아무것도 쓰지 않았다: 두 좌석이 비어 있고 보유 수가 0이다
+  expect([s.obs.red.seats[1], s.obs.red.seats[2]]).toEqual([{ hid: 0, pinned: false }, { hid: 0, pinned: false }]);
+  expect(s.obs.red.quota[1]).toBe(0);
   expect(s.holding(11)).toBe(false);
+  // 다른 사람이 그 좌석을 바로 잡을 수 있다(누수가 없다)
+  await s.step('hold(21, [1,2])', () => s.hold(21, [1, 2]));
+  expect(s.att(21).phase).toBe('HELD');
   finish(s);
 });
+
+// V-T40 ④(docs/verification.md 시험 표 V-T40, §2.4): '재생 중 구현의 판매 확정에서 세대 확인을 빼 두면 재생이 처음 어긋나는 단계에서 실패하고 그 단계 번호를 남긴다'.
+// 하네스(seat-model/system.ts)의 saleStep은 운영 판매 예약 트랜잭션(ReserveTx = DrizzleSaga.reserve, seat_rebuild FOR SHARE 판 번호 대조 포함)을 부른다(PRF-165).
+// - 준비: manifest의 기록 12개에는 판 번호 대조가 쓰이는 걸음(묶은 뒤 다시 만들기가 있어 saleStep이 ACCEPTED로 돌아가는 걸음)이 없다(모두 다시 만들기 뒤에 접수하거나
+//   다시 만들기가 없다, 2026-11-05 구현 담당이 기록을 훑어 확인). 그래서 seat_proposed 기록의 첫 상태(quint init)에서 명세 다음 상태 계산(spec.ts specNext. 무작위 실행과
+//   12개 재생이 이 옮김을 함께 검사한다)으로 그 걸음을 지나는 기록을 만든다: 홀드 → 적재 → 접수 → 묶기 → 전체 유실 → 다시 만들기 → 판매 예약(판 번호 다름) → 묶기 → 판매 예약 → 승인.
+// - 변이: 하네스의 시험 전용 선택값 dropGenCheck(기본 꺼짐)가 ReserveTx에 지금 seat_rebuild 판 번호를 orderGen으로 넘겨 대조를 뺀다(운영 코드는 그대로다).
+// - 단언: 변이 없이는 모든 걸음이 명세와 같고, 변이를 켜면 기록에서 판 번호 대조가 처음 쓰이는 saleStep 걸음에서 멈추고 그 걸음 번호를 남긴다(replayed < steps).
+test('VT40_④_재생 중 판매 예약(운영 ReserveTx)에서 판 번호 대조를 빼면 재생이 처음 어긋난 걸음(번호를 남김)에서 실패한다', async () => {
+  const file = manifest.files.find((f) => /^seat_proposed_\d+\.itf\.json$/.test(f))!;
+  const { module, states: recorded } = readTrace(join(TRACES, file));
+  const scope = scopeOf(specText, module);
+  const states = traceOfMoves(scope, recorded[0]!, [
+    { a: 'hold', h: 11, l: [1] },
+    { a: 'relay', h: 11 },
+    { a: 'accept', h: 11 },
+    { a: 'pin', h: 11 },
+    { a: 'loseAll' },
+    { a: 'rebuild' },
+    { a: 'saleStep', h: 11 },
+    { a: 'pin', h: 11 },
+    { a: 'saleStep', h: 11 },
+    { a: 'approve', h: 11 },
+  ]);
+  // 기록에서 판 번호 대조가 처음 쓰이는 걸음: 앞 상태의 시도 판 번호가 DB 판 번호와 다른 saleStep(명세가 ACCEPTED로 되돌린다)
+  const first = states.findIndex((st, i) => i > 0 && st.action === 'saleStep' && states[i - 1]!.atts.get(st.picks.h as number)!.gen !== states[i - 1]!.db.gen);
+  expect(first).toBe(7);
+  expect(states[first]!.atts.get(11)!.phase).toBe('ACCEPTED');
+  expect(states.at(-1)!.atts.get(11)!.phase).toBe('SOLD');
+
+  // 변이 없이: 모든 걸음이 명세와 같다(운영 ReserveTx가 GEN_CHANGED로 되돌리고, 다시 묶어 판매 예약한다)
+  const good = new SeatSystem(redis, db, admin, scope);
+  await good.init();
+  const ok = await replay(good, states);
+  expect({ mismatch: ok.mismatch, known: ok.known, violations: good.violations }).toEqual({ mismatch: null, known: null, violations: [] });
+  expect(ok.replayed).toBe(ok.steps);
+
+  // 변이(판 번호 대조 뺌): 그 걸음에서 판매가 커밋돼 명세와 어긋나고, 재생이 거기서 멈추며 걸음 번호를 남긴다
+  const bad = new SeatSystem(redis, db, admin, scope, { dropGenCheck: true });
+  await bad.init();
+  const out = await replay(bad, states);
+  expect(out.mismatch).not.toBeNull();
+  expect(out.mismatch).toMatch(new RegExp(`^걸음 ${first} saleStep `));
+  expect(out.mismatch).toContain('att.11');
+  expect(out.replayed).toBe(first - 1);
+  expect(out.replayed).toBeLessThan(out.steps);
+}, 120_000);
 
 test('재현_K3(PRF-160에 넘김): 원장 행 없이 다시 만든 판매 좌석은 holdId가 주문 ID라, 승인 거절 뒤 그 홀드의 holdId로 부른 실패 해제가 풀지 못한다', async () => {
   const scope: Scope = { people: [1], seats: [1], limit: 2, attempts: [[1, 1]], requests: [[1]], maxFailovers: 1, fullLoss: true, promote: false, failRelease: true };

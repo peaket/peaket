@@ -114,6 +114,7 @@ export {
   type AdmissionRejectReason,
 } from './domain/admission-token.js';
 export {
+  FAILED_HOLD_MARK_TTL_MS,
   INITIAL_SEAT_GEN,
   RETIRE_AFTER_SALE_END_MS,
   assertPinInput,

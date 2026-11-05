@@ -50,6 +50,11 @@ const ITEM_TEXT_MAX = 64;
 const SEAT_ASSIGNMENTS: ReadonlySet<string> = new Set<SeatAssignment>(['PICK', 'AUTO']);
 
 const T1 = transitionById('T1')!;
+/**
+ * 결제 결과 반영 전이 가운데 결제 사건 순번 없이도 받는 것: T11(RESERVED → FAILED). Saga가 승인 기한을 넘겨 끝낼 때는 결제 사건이 없어
+ * 상태 조건만으로 바꾼다(payment §3 '주문 저장소의 첫 구현', 추천 적용 2026-11-05, BUILD_ORDER PRF-165)
+ */
+const SEQ_OPTIONAL_TRANSITIONS: ReadonlySet<string> = new Set(['T11']);
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
@@ -122,6 +127,8 @@ function transitionOf(input: TransitionInput): OrderTransition & { from: OrderSt
   assertUuid(input.orderId, 'orderId');
   const seq = input.paymentEventSeq;
   if (PAYMENT_RESULT_TRANSITIONS.has(t.id)) {
+    // T11은 순번 없이도 받는다(Saga가 승인 명령을 접수시키지 못한 채 승인 기한을 넘김, 결제 사건이 없다). 주면 다른 결제 결과 전이처럼 조건을 건다(PRF-165)
+    if (seq === undefined && SEQ_OPTIONAL_TRANSITIONS.has(t.id)) return t as OrderTransition & { from: OrderStatus };
     if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq < 1) throw new RangeError(`결제 결과 반영 전이(${t.id})에는 양의 정수 paymentEventSeq가 있어야 한다`);
   } else if (seq !== undefined) {
     throw new RangeError(`paymentEventSeq는 결제 결과 반영 전이(T9~T17·T21)에만 준다: ${t.id}`);
@@ -215,7 +222,8 @@ export class DrizzleOrderStore {
   /**
    * 전이 하나를 바깥 트랜잭션에서 한다: 조건부 UPDATE(출발 상태, 결제 결과면 순번) → order_event → Outbox(사건이 있는 전이만).
    * 조건이 맞지 않으면 STALE을 돌려준다(던지지 않는다).
-   * @throws RangeError 표에 없는 전이, 행위자 모양 틀림, 결제 결과 전이에 순번 없음·결제 결과가 아닌 전이에 순번 있음, T1(createOrder로 한다)
+   * T11은 순번 없이도 받는다(그때는 상태 조건만, PRF-165).
+   * @throws RangeError 표에 없는 전이, 행위자 모양 틀림, 결제 결과 전이에 순번 없음(T11은 빼고)·결제 결과가 아닌 전이에 순번 있음, T1(createOrder로 한다)
    */
   async transition(tx: DbTransaction, input: TransitionInput): Promise<TransitionResult> {
     const t = transitionOf(input);

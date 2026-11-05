@@ -65,7 +65,8 @@ export const TABLE: Readonly<Record<string, readonly [from: OrderStatus, to: Ord
 
 /**
  * 결제 결과 반영 전이(T9~T17과 T21 입금 되돌림): 결제 사건 순번이 있어야 하고 payment_event_seq < 순번일 때만 바꾼다(payment §3, ADR-0146 결정 2).
- * T21은 결제사가 입금 완료를 되돌린 결제 사건으로 오므로 같은 순번 조건을 건다(리뷰 2026-11-05)
+ * T21은 결제사가 입금 완료를 되돌린 결제 사건으로 오므로 같은 순번 조건을 건다(리뷰 2026-11-05).
+ * 예외: T11은 순번 없이도 받는다(Saga가 승인 명령을 접수시키지 못한 채 승인 기한을 넘김, 결제 사건이 없다. 순번을 주면 조건을 건다, payment §3, PRF-165)
  */
 export const PAYMENT_RESULT: ReadonlySet<string> = new Set(['T9', 'T10', 'T11', 'T12', 'T13', 'T14', 'T15', 'T16', 'T17', 'T21']);
 

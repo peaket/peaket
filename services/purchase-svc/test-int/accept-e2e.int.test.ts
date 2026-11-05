@@ -118,6 +118,8 @@ const orderLog: OrderLog = { identityFallback: () => {}, configError: () => {}, 
 /** 결제 시도 대조 실패 보안 로그 */
 const mismatchLines: Parameters<AcceptLog['attemptMismatch']>[0][] = [];
 const acceptLog: AcceptLog = { attemptMismatch: (e) => void mismatchLines.push(e) };
+/** 결제 접수 커밋 직후 깨운 주문(BookingModuleDeps.onAccepted → AcceptPayment, main.ts가 Saga 실행기의 kick을 넘기는 자리, PRF-165 리뷰 M2) */
+const kicked: string[] = [];
 
 let opener: OpenPurchaseSession;
 
@@ -172,6 +174,7 @@ beforeAll(async () => {
         acceptLog,
         consentVersion: CONSENT,
         clock,
+        onAccepted: (orderId) => void kicked.push(orderId),
       },
     }),
     purchaseSessions: sessions,
@@ -666,6 +669,25 @@ describe('POST …/payment-acceptance 결제 시도 대조(P-T28·P-T7, §4.2 18
 });
 
 // ───────────────────────────── 멱등 키(P-T45) ─────────────────────────────
+
+describe('POST …/payment-acceptance 커밋 직후 Saga 깨우기(onAccepted, PRF-165 리뷰 M2)', () => {
+  test('M2_BookingModule에 넘긴 onAccepted가 AcceptPayment까지 이어져, 202(이번에 커밋)에서 주문 ID로 한 번 불리고 같은 키 재생·409에서는 불리지 않는다', async () => {
+    const w = await world();
+    const f = await fan(w);
+    const { orderId, amount } = await placeOrder(f, [w.r[3]!]);
+    await putAttempt(orderId);
+    const body = tossBody(amount);
+    const idemKey = randomUUID();
+    kicked.length = 0;
+    expectAccepted(await accept(f, orderId, body, { idemKey }));
+    expect(kicked).toEqual([orderId]);
+    // 같은 키·같은 본문의 재생(처음 202)
+    expectAccepted(await accept(f, orderId, body, { idemKey }));
+    // 다른 키로 또 접수(409 payment-already-accepted)
+    expectProblem(await accept(f, orderId, body), 409, 'payment-already-accepted');
+    expect(kicked).toEqual([orderId]);
+  });
+});
 
 describe('POST …/payment-acceptance 멱등 키(P-T45 ③)', () => {
   test('PT45_③_같은 키·같은 본문을 다시 보내면 같은 202이고 새 이력·Outbox·Saga 작업이 없다 [ASVS v5.0.0-2.3.3]', async () => {

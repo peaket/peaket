@@ -22,6 +22,7 @@ import {
   assertPinInput,
   assertReleaseFailedInput,
   assertRetireInput,
+  FAILED_HOLD_MARK_TTL_MS,
   INITIAL_SEAT_GEN,
   type PinInput,
   type PinResult,
@@ -98,6 +99,11 @@ export class MemorySeatEvent {
   fence: string | undefined;
   /** 다시 만들기 시도의 판 번호 s:{event:E}:rebuild(시작이 쓴다, 코드 리뷰 PRF-143). 없으면 undefined */
   rebuildGen: number | undefined;
+  /**
+   * 실패 표시 s:{event:E}:failed:{holdId}(실패 해제가 남긴다, BUILD_ORDER PRF-165): holdId → 수명이 다하는 시각(epoch ms).
+   * 주입 Clock의 지금이 그 시각 이상이면 없는 것으로 본다
+   */
+  readonly failed = new Map<string, number>();
   /** Stream 항목(XADD 차례). 칸 이름·값은 docs/data.md §3 HELD 칸(모두 글) */
   readonly stream: Record<string, string>[] = [];
   /** 샤드 Pub/Sub(보낸 차례) */
@@ -305,7 +311,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
   }
 
   /**
-   * 좌석 묶기(BUILD_ORDER PRF-142): 묶기 Lua(pin-lua.ts PIN_LUA)와 같은 차례(세대 키 → 남의 좌석 → 낡은 판 번호 → 쓰기 전 지킴 → 한도 → 쓰기), 시각은 주입 Clock.
+   * 좌석 묶기(BUILD_ORDER PRF-142): 묶기 Lua(pin-lua.ts PIN_LUA)와 같은 차례(세대 키 → 실패 표시(PRF-165) → 남의 좌석 → 낡은 판 번호 → 쓰기 전 지킴 → 한도 → 쓰기), 시각은 주입 Clock.
    * 메모리는 키 형이 정해져 있어 형 검사는 없다. gen은 epoch.gen(없으면 1)이다
    */
   async pin(i: PinInput, _o?: SeatCallOptions): Promise<PinResult> {
@@ -317,6 +323,10 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     if (!ev.epoch) return { kind: 'NOT_READY' };
     const gen = ev.epoch.gen ?? INITIAL_SEAT_GEN;
     if (!Number.isSafeInteger(gen) || gen < 1 || gen >= 1e15) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.epoch(e)}`);
+
+    // 1′ 실패 표시(PRF-165): 실패 해제가 먼저 돌았다. 아무것도 쓰지 않는다
+    const mark = ev.failed.get(i.holdId);
+    if (mark !== undefined && mark > this.clock.now()) return { kind: 'FAILED_HOLD' };
 
     // 2 좌석마다 내 홀드(비트 1, holdId·owner 같음) · 빈 좌석(비트 0) · 남의 좌석(그 밖)
     const mine: MemoryHoldHash[] = [];
@@ -439,7 +449,15 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       if (ev.bits.has(s.index) && h && h.holdId === i.holdId && h.owner === i.accountId) freed.push({ seat: s, hash: h });
     }
     const k = freed.length;
-    if (k === 0) return { kind: 'OK', released: 0 };
+    // 실패 표시(PRF-165): 푼 좌석이 0이어도 남긴다(Lua와 같다. 지킴을 지난 뒤에만)
+    const markFailed = () => {
+      ev.failed.set(i.holdId, now + FAILED_HOLD_MARK_TTL_MS);
+      ev.expireAt.set(seatKeys.failed(e, i.holdId), now + FAILED_HOLD_MARK_TTL_MS);
+    };
+    if (k === 0) {
+      markFailed();
+      return { kind: 'OK', released: 0 };
+    }
     const quotaKey = seatKeys.quota(e, i.accountId);
     const quota = ev.quota.get(i.accountId);
     if (quota !== undefined && !isStandardInt(String(quota))) throw new Error(`PEAKET_CORRUPT_KEY ${quotaKey}`);
@@ -449,6 +467,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     }
 
     // 쓰기
+    markFailed();
     for (const { seat } of freed) {
       ev.bits.delete(seat.index);
       ev.holds.delete(seat.index);

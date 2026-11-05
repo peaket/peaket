@@ -169,6 +169,8 @@ export const seatKeys = {
   ctlEvents: () => 's:ctl:events',
   /** 다시 만들기 시도의 판 번호(값 = gen, 코드 리뷰 PRF-143. 시작 Lua가 쓰고 좌석·보유 수·끝내기 Lua가 대조한다) */
   rebuild: (e: string) => `s:{event:${e}}:rebuild`,
+  /** 실패 해제한 홀드의 표시(글 '1', 수명 10분 [가정], BUILD_ORDER PRF-165. 실패 해제 Lua가 남기고 묶기 Lua가 보면 FAILED_HOLD) */
+  failed: (e: string, holdId: string) => `s:{event:${e}}:failed:${holdId}`,
   /** 회차별 만료 임대(값 = 잡은 파드 ID, BUILD_ORDER PRF-135) */
   sweep: (e: string) => `s:{event:${e}}:sweep`,
   /** 구매 세션 정리 색인(정렬 집합, 멤버 jti, 점수 = 다음에 볼 시각, BUILD_ORDER PRF-138) */
@@ -318,6 +320,8 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
       seatKeys.secver(e),
       seatKeys.fence(e),
       ...i.seats.map((s) => seatKeys.hold(e, s.index)),
+      // 실패 표시(KEYS 끝, PRF-165)
+      seatKeys.failed(e, i.holdId),
     ];
     const args = [
       a,
@@ -347,6 +351,7 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
       }
       case 'NOT_READY':
       case 'QUOTA_EXCEEDED':
+      case 'FAILED_HOLD':
         return { kind };
       case 'TAKEN': {
         const seatIndex = count(r[1], '좌석 색인');
@@ -373,6 +378,8 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
       seatKeys.epoch(e),
       seatKeys.secver(e),
       ...i.seats.map((s) => seatKeys.hold(e, s.index)),
+      // 실패 표시(KEYS 끝, PRF-165)
+      seatKeys.failed(e, i.holdId),
     ];
     const args = [a, i.holdId, String(i.keepUntilMs), seatKeys.section(e, ''), ...seatArgsOf(i.seats)];
     const r = (await guard(this.redis.evalScript(RELEASE_FAILED, keys, args, deadlineOf(o)))) as unknown[];

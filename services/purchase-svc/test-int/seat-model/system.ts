@@ -6,10 +6,16 @@
 // - ttlPasses → 흉내(시각 흐름): 그 시도 홀드 Hash의 exp와 만료 인덱스 점수, 원장 seat_hold.expires_at, 아직 적재하지 않은 HELD 사건의 만료 시각을 과거로.
 //   복제본·복제되지 않은 사본에도 같게 한다(시간은 모든 노드에서 흐른다).
 // - expire → RedisSeatStore.dueExpiries + expire(만료 Lua). 명세처럼 그 시도의 좌석만 넘긴다.
-// - accept → 흉내(결제 접수 Saga는 PRF-160): 좌석마다 내 홀드이거나 비어 있는지 읽고, 세대 키의 판 번호 gen(없으면 1)을 시도에 적는다.
-// - pin → RedisSeatStore.pin(orderGen = 시도에 적은 판 번호). saleStep → DrizzleSeatSales.reserve: 명세는 좌석마다 한 걸음이지만 코드는 한 트랜잭션이라
-//   마지막 걸음에 reserve를 한 번 부르고 중간 걸음은 관측(그 좌석에 커밋된 활성 판매 행이 있는지)만 한다. 판 번호 대조(a.gen ≠ db.gen이면 묶기부터 다시)는
-//   코드에 없어(PRF-160) seat_rebuild.gen을 읽어 흉내 낸다.
+// - accept → 좌석 확인은 흉내(명세 accept는 접수 때 좌석을 보지만 운영 접수는 보지 않는다): 좌석마다 내 홀드이거나 비어 있는지 읽고, 세대 키의 판 번호 gen(없으면 1)을
+//   시도에 적는다. 받으면 운영 경로로 주문을 만든다(DrizzleOrderStore.createOrder → 결제 시도 READY → DrizzleOrderAccepts.accept, seat_gen = 그 판 번호, 작업 행 RESERVE).
+//   주문 행은 관측하지 않는다(명세 Db에 없다). 판매 예약 트랜잭션(ReserveTx)이 주문 T7까지 쓰려면 있어야 한다(BUILD_ORDER PRF-165, V-T40 ④).
+// - pin → RedisSeatStore.pin(orderGen = 시도에 적은 판 번호. 명세 saleStep은 판 번호가 바뀌어도 시도의 판 번호를 그대로 두고, 운영 Saga도 같다(리뷰 M1:
+//   GEN_CHANGED 뒤 주문 seat_gen을 고치지 않고, 묶기가 OK면 그 판 번호를 적는다)). FAILED_HOLD(실패 표시, PRF-165)는 아무것도 쓰지 않은 실패라 명세 pin의 실패 갈래와 같게 FAILED로 둔다. 명세에서는 releaseFailed가 FAILED 시도에만
+//   열리고 FAILED에서 ACCEPTED로 돌아가는 걸음이 없어 이 답이 나올 수 없다(나오면 명세가 OK를 내다본 걸음이라 어긋남으로 남는다).
+// - saleStep → 운영 판매 예약 트랜잭션 DrizzleSaga.reserve(ReserveTx: seat_rebuild 행 FOR SHARE로 판 번호 대조 → reserveIn → 작업 CONFIRM → T7, BUILD_ORDER PRF-165):
+//   명세는 좌석마다 한 걸음이지만 코드는 한 트랜잭션이라 마지막 걸음에 한 번 부르고 중간 걸음은 관측(그 좌석에 커밋된 활성 판매 행이 있는지)만 한다.
+//   GEN_CHANGED면 명세처럼 ACCEPTED로 돌아가 묶기부터 다시 한다. 시험 전용 변이(SystemOptions.dropGenCheck, 기본 꺼짐)는 판 번호 대조를 뺀다(V-T40 ④).
+//   겹치는 판매 예약 집중 시험(reserveTogether)은 손으로 만든 상태라 주문이 없어 DrizzleSeatSales.reserve를 그대로 부른다.
 // - approve → markSold, decline → releasePending, releaseFailed → RedisSeatStore.releaseFailed.
 // - relay → Kafka를 건너뛴 적재: 걸음마다 RedisSeatStreamSource.read → routeStreamEntry → toLedgerHoldEvent로 읽어 두고, 끝 사건(RELEASED·EXPIRED)은
 //   곧바로 DrizzleSeatHoldLedger.apply(명세 '해제·만료 사건은 제때 적재된다'), HELD는 명세 relay(h) 때 적용한다. 한 번 적재한 시도의 뒤 HELD(묶기의 다시 잡기)는
@@ -24,9 +30,22 @@
 // 명세와 운영이 다르다고 알려진 곳은 known에 남긴다(아래 KNOWN).
 import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
-import { type CallOptions, type Database, type DbTransaction, type HotRedis, type RedisScript, redisScript, systemClock, uuidv7 } from '@peaket/platform';
+import {
+  type CallOptions,
+  type Database,
+  type DbTransaction,
+  ensureOutboxPartitions,
+  type HotRedis,
+  type RedisScript,
+  redisScript,
+  requestFingerprint,
+  systemClock,
+  uuidv7,
+} from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import type { Scheduler } from 'fast-check';
+import { DrizzleOrderAccepts, DrizzleOrderStore, DrizzleSaga, ORDER_SAGA_ACTOR } from '../../src/modules/booking/index.js';
+import { accountActor, newOrderInput } from '../order-fixtures.js';
 import {
   DrizzleSeatHoldLedger,
   DrizzleSeatRebuildSource,
@@ -272,7 +291,15 @@ const copied = (k: string) => !k.endsWith(':stream') && !k.includes(':rel:') && 
 export interface SystemOptions {
   /** 경합 시험: 운영 코드의 Redis·DB 호출을 보내는 차례를 fast-check 스케줄러가 정한다(걸음마다 하네스가 스케줄러를 돌린다) */
   scheduler?: Scheduler;
+  /**
+   * 시험 전용 변이(V-T40 ④, 기본 꺼짐): 판매 예약 트랜잭션(ReserveTx)의 판 번호 대조를 뺀다. 하네스가 ReserveTx를 부르기 직전에 seat_rebuild의 지금 판 번호를 읽어
+   * orderGen으로 넘겨 대조가 늘 같다고 보게 한다(운영 코드는 그대로다). 재생이 처음 어긋나는 걸음에서 멈추는지 보는 데만 쓴다
+   */
+  dropGenCheck?: boolean;
 }
+
+/** Outbox 일 파티션은 관측·씨앗용 풀(곧 DB)마다 한 번 만든다(하네스가 운영 경로로 주문을 만들면 주문 사건이 Outbox에 들어간다) */
+const outboxReady = new WeakMap<Database, Promise<unknown>>();
 
 interface Buffered {
   h: number;
@@ -322,6 +349,12 @@ export class SeatSystem {
   readonly #flight: Flight = { n: 0 };
   readonly #store: RedisSeatStore;
   readonly #sales: DrizzleSeatSales;
+  /** 운영 판매 예약 트랜잭션(ReserveTx, 스케줄러 문을 지나는 풀) */
+  readonly #saga: DrizzleSaga;
+  /** 결제 접수(주문 만들기, 관측·씨앗용 풀. 명세 accept는 DB를 쓰지 않아 경합 차례에 넣지 않는다) */
+  readonly #orderStore: DrizzleOrderStore;
+  readonly #accepts: DrizzleOrderAccepts;
+  readonly #dropGenCheck: boolean;
   readonly #ledger: DrizzleSeatHoldLedger;
   readonly #rawLedger: DrizzleSeatHoldLedger;
   readonly #rawSource: RedisSeatStreamSource;
@@ -352,6 +385,10 @@ export class SeatSystem {
     const database = o.scheduler ? gatedDb(db, o.scheduler, this.#flight) : db;
     this.#store = new RedisSeatStore(this.#redis);
     this.#sales = new DrizzleSeatSales(database);
+    this.#orderStore = new DrizzleOrderStore({ clock: systemClock });
+    this.#saga = new DrizzleSaga({ database, store: this.#orderStore, sales: this.#sales, clock: systemClock });
+    this.#accepts = new DrizzleOrderAccepts({ database: admin, store: this.#orderStore, clock: systemClock });
+    this.#dropGenCheck = o.dropGenCheck === true;
     this.#ledger = new DrizzleSeatHoldLedger(database);
     this.#rawLedger = new DrizzleSeatHoldLedger(admin);
     this.#rawSource = new RedisSeatStreamSource(this.#raw);
@@ -389,6 +426,12 @@ export class SeatSystem {
 
   // ---- 준비 ----
   async init(): Promise<void> {
+    let ready = outboxReady.get(this.#admin);
+    if (!ready) {
+      ready = ensureOutboxPartitions(this.#admin, systemClock);
+      outboxReady.set(this.#admin, ready);
+    }
+    await ready;
     this.#seatMap.put(
       { eventId: this.eventId, layoutVersion: 'mbt', seatCount: this.#seatCount, perAccountLimit: this.scope.limit, saleEndsAtMs: this.#saleEndsAtMs },
       this.scope.seats.map((x) => this.#ref(x)),
@@ -756,7 +799,10 @@ export class SeatSystem {
     return released;
   }
 
-  /** 결제 접수 흉내(Saga는 PRF-160): 좌석마다 내 홀드이거나 비어 있으면 ACCEPTED, 아니면 DONE. 세대 키의 판 번호를 적는다 */
+  /**
+   * 결제 접수: 좌석마다 내 홀드이거나 비어 있으면 ACCEPTED, 아니면 DONE(좌석 확인은 흉내). 세대 키의 판 번호를 적는다.
+   * 받으면 운영 경로로 주문을 만든다(주문 T1 → 결제 시도 READY → DrizzleOrderAccepts.accept: T3·시도 ACCEPTED·seat_gen·작업 행 RESERVE·T4)
+   */
   async accept(h: number): Promise<string> {
     const a = this.att(h);
     const e = this.eventId;
@@ -766,8 +812,39 @@ export class SeatSystem {
     if (text(r[0]) === '') throw new Error(`accept(${h}): 세대 키가 없다(명세는 이때 결제 접수를 미룬다)`);
     const gen = text(r[1]) === '' ? 1 : Number(text(r[1]));
     const ok = (r.slice(2) as unknown[][]).every(([bit, id, owner]) => Number(bit) === 0 || (text(id) === ids.holdId && text(owner) === accountOf(personOf(h))));
+    if (ok) await this.#placeOrder(h, gen);
     Object.assign(a, { phase: ok ? 'ACCEPTED' : 'DONE', gen });
     return a.phase;
+  }
+
+  /** 시도 h의 주문을 운영 경로로 만들고 접수한다(주문 ID·holdId·구매 세션은 시도의 것, 좌석은 시도의 좌석, 판 번호 gen) */
+  async #placeOrder(h: number, gen: number): Promise<void> {
+    const ids = this.#ids.get(h)!;
+    const accountId = accountOf(personOf(h));
+    const items = [...this.att(h).seats].sort((x, y) => x - y).map((x) => ({ seatId: seatIdOf(x), tierId: 'R', sectionId: 'SEC-A', unitPrice: 10_000 }));
+    const order = newOrderInput(systemClock, {
+      id: ids.orderId,
+      eventId: this.eventId,
+      accountId,
+      holdId: ids.holdId,
+      purchaseSessionId: ids.psid,
+      items,
+      created: { purchaseSessionId: ids.psid, journeyId: uuidv7(systemClock), refMissing: true },
+    });
+    await this.#admin.transaction((tx) => this.#orderStore.createOrder(tx, order));
+    const attemptId = uuidv7(systemClock);
+    await this.#admin.db.execute(sql`
+      insert into payment_attempt (id, order_id, pg, pg_order_ref, status, created_at)
+      values (${attemptId}::uuid, ${ids.orderId}::uuid, 'SIMULATOR', ${ids.orderId}, 'READY', now())`);
+    const once = {
+      accountRef: accountId,
+      operation: 'ACCEPT_PAYMENT',
+      key: randomUUID(),
+      requestHash: requestFingerprint('POST', `/v1/orders/${ids.orderId}/payment-acceptance`, Buffer.from(ids.orderId, 'utf8')),
+    };
+    const refs = { pg: 'SIMULATOR' as const, paymentKey: `sim_${ids.orderId.replaceAll('-', '')}` };
+    const out = await this.#accepts.accept(once, { orderId: ids.orderId, attemptId, eventId: this.eventId, refs, seatGen: gen, actor: accountActor(accountId) });
+    if (out.status !== 'ACCEPTED') throw new Error(`accept(${h}): 주문 접수가 뜻밖의 결과 ${JSON.stringify(out)}`);
   }
 
   /** 묶기 Lua 한 번(시도에 적은 판 번호로). 시도 상태는 바꾸지 않는다 */
@@ -807,6 +884,8 @@ export class SeatSystem {
       Object.assign(a, { phase: 'PINNED', late: false, gen: r.gen });
       if (r.fencingToken !== undefined) this.#token(r.fencingToken, free, h);
     } else if (r.kind === 'TAKEN' || r.kind === 'STALE_GEN' || r.kind === 'QUOTA_EXCEEDED') a.phase = 'FAILED';
+    // 실패 표시(PRF-165): 이미 실패 해제한 홀드라 아무것도 쓰지 않았다. 명세 pin의 실패 갈래(redKeep, FAILED)와 같다(머리말 pin 줄)
+    else if (r.kind === 'FAILED_HOLD') a.phase = 'FAILED';
     else throw new Error(`pin(${h}): 뜻밖의 결과 ${r.kind}`);
     this.#expect(`pin(${h})`, ok ? 'OK' : 'FAILED', r.kind === 'OK' ? 'OK' : 'FAILED');
     return r.kind;
@@ -825,23 +904,50 @@ export class SeatSystem {
   #clearUnc(h: number): void {
     for (const [x, u] of this.unc) if (u === h) this.unc.delete(x);
   }
+  /** 교착(40P01)은 불변식 ⑤ 위반으로 적고 DEADLOCK, 그 밖의 오류는 그대로 던진다 */
+  #deadlockOf(err: unknown, h: number): 'DEADLOCK' {
+    const code = (err as { cause?: { code?: string }; code?: string }).cause?.code ?? (err as { code?: string }).code;
+    if (code !== '40P01') throw err;
+    this.#violate(`⑤ 판매 예약 트랜잭션 교착(40P01, 시도 ${h})`);
+    return 'DEADLOCK';
+  }
+  /** 판매 저장소의 예약만(겹치는 판매 예약 집중 시험: 주문이 없는 손으로 만든 상태라 판 번호 대조·T7 없이) */
   async #reserve(h: number): Promise<'RESERVED' | 'QUOTA_EXCEEDED' | 'SEAT_TAKEN' | 'DEADLOCK'> {
     const ids = this.#ids.get(h)!;
     try {
       const r = await this.#sales.reserve({ eventId: this.eventId, orderId: ids.orderId, accountId: accountOf(personOf(h)), seatIds: this.att(h).seats.map(seatIdOf), limit: this.scope.limit });
       return r.status;
     } catch (err) {
-      const code = (err as { cause?: { code?: string }; code?: string }).cause?.code ?? (err as { code?: string }).code;
-      if (code === '40P01') {
-        this.#violate(`⑤ 판매 예약 트랜잭션 교착(40P01, 시도 ${h})`);
-        return 'DEADLOCK';
-      }
-      throw err;
+      return this.#deadlockOf(err, h);
     }
   }
   /**
-   * 판매 예약 한 걸음(명세 saleStep): 중간 걸음은 관측만(그 좌석에 커밋된 활성 판매 행이 있으면 reserve를 불러 실패를 받는다), 마지막 걸음은
-   * 판 번호 대조 흉내 → reserve 한 번. 결과를 명세가 내다본 것과 견준다
+   * 운영 판매 예약 트랜잭션(ReserveTx: seat_rebuild FOR SHARE 판 번호 대조 → 판매 행·한도 → 작업 CONFIRM → T7) 한 번. orderGen은 시도의 판 번호다.
+   * 변이 dropGenCheck면 지금 seat_rebuild 판 번호(없으면 1)를 orderGen으로 넘겨 대조를 뺀다. ORDER_STATE(주문이 ACCEPTED가 아님)는 하네스 오류라 던진다
+   */
+  async #reserveTx(h: number): Promise<'RESERVED' | 'QUOTA_EXCEEDED' | 'SEAT_TAKEN' | 'GEN_CHANGED' | 'DEADLOCK'> {
+    const ids = this.#ids.get(h)!;
+    const a = this.att(h);
+    try {
+      const orderGen = this.#dropGenCheck ? await this.#dbGen() : a.gen;
+      const r = await this.#saga.reserve({
+        orderId: ids.orderId,
+        eventId: this.eventId,
+        accountId: accountOf(personOf(h)),
+        seatIds: a.seats.map(seatIdOf),
+        limit: this.scope.limit,
+        orderGen,
+        actor: ORDER_SAGA_ACTOR,
+      });
+      if (r.status === 'ORDER_STATE') throw new Error(`saleStep(${h}): 판매 예약 트랜잭션이 주문 상태에 막혔다(${r.current ?? '없음'}). 하네스가 주문을 ACCEPTED로 두지 않았다`);
+      return r.status;
+    } catch (err) {
+      return this.#deadlockOf(err, h);
+    }
+  }
+  /**
+   * 판매 예약 한 걸음(명세 saleStep): 중간 걸음은 관측만(그 좌석에 커밋된 활성 판매 행이 있으면 판매 예약 트랜잭션을 불러 실패를 받는다), 마지막 걸음은
+   * 운영 판매 예약 트랜잭션(판 번호 대조 포함) 한 번. 결과를 명세가 내다본 것과 견준다
    */
   async saleStep(h: number): Promise<string> {
     const a = this.att(h);
@@ -855,7 +961,7 @@ export class SeatSystem {
       this.#clearUnc(h);
     };
     if (conflict) {
-      const r = await this.#reserve(h);
+      const r = await this.#reserveTx(h);
       if (r === 'RESERVED') this.#violate(`saleStep(${h}): 좌석 ${x}에 활성 판매 행이 있는데 예약이 됐다`);
       fail();
       return r;
@@ -865,14 +971,17 @@ export class SeatSystem {
       a.ins += 1;
       return 'INSERTED';
     }
-    const dbGen = await this.#dbGen();
-    if (a.gen !== dbGen) {
+    // 명세가 내다본 결과: 판 번호가 다르면 묶기부터 다시(ACCEPTED), 아니면 한도 안이면 커밋
+    const quotaOk = this.obs.db.used[p]! + l.length <= this.scope.limit;
+    const predicted = a.gen !== this.obs.db.gen ? 'GEN_CHANGED' : quotaOk ? 'RESERVED' : 'FAILED';
+    const r = await this.#reserveTx(h);
+    if (r === 'GEN_CHANGED') {
+      // 다시 만들기 뒤라 운영 트랜잭션이 되돌렸다(주문 seat_gen은 새 번호가 됐다). 명세처럼 시도의 판 번호는 그대로 두고 묶기부터 다시 한다
       Object.assign(a, { phase: 'ACCEPTED', ins: 0 });
       this.#clearUnc(h);
+      this.#expect(`saleStep(${h}) 커밋`, predicted, 'GEN_CHANGED');
       return 'STALE_GEN';
     }
-    const quotaOk = this.obs.db.used[p]! + l.length <= this.scope.limit;
-    const r = await this.#reserve(h);
     if (r === 'RESERVED') {
       Object.assign(a, { phase: 'RESERVED', ins: 0 });
       this.#clearUnc(h);
@@ -883,7 +992,7 @@ export class SeatSystem {
         return n !== 0 && n !== h && live.includes(this.att(n).phase);
       })) this.ghost.stale += 1;
     } else fail();
-    this.#expect(`saleStep(${h}) 커밋`, quotaOk ? 'RESERVED' : 'FAILED', r === 'RESERVED' ? 'RESERVED' : 'FAILED');
+    this.#expect(`saleStep(${h}) 커밋`, predicted, r === 'RESERVED' ? 'RESERVED' : 'FAILED');
     return r;
   }
 

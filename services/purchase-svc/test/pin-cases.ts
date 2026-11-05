@@ -79,7 +79,7 @@ export interface PinHarness {
   gen(eventId: string): Promise<number | null>;
 }
 
-/** 주문 하나(결제 접수 때 정해진 계정·holdId·구매 세션·좌석). holdId·구매 세션은 UUID다 */
+/** 주문 하나(결제 접수 때 정해진 계정·holdId·구매 세션·좌석). holdId는 UUID, 구매 세션은 키 조각이다(기본값은 UUID) */
 interface Order {
   accountId: string;
   holdId: string;
@@ -633,7 +633,8 @@ export function pinCases(make: () => Promise<PinHarness>): void {
   const badUuids = ['hold-1', 'ps-a1', '', '0190f3a1-7c2e-7a00-8000'];
   const badKeepUntil = (k: number) => [k + 0.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53];
 
-  test(`pin_ assertPinInput은 키 조각이 아닌 회차·계정, UUID가 아닌 holdId·구매 세션, 좌석 0개·11개·정렬 안 됨·겹침, 한도 1 미만, orderGen 1 미만·정수 아님, keepUntil 안전한 정수 아님을 RangeError로 거절하고, pin도 같은 입력에 RangeError이며 아무것도 쓰지 않는다. 경계(한도 1·orderGen 1·좌석 10개)는 받는다 [ASVS v5.0.0-2.2.1]`, async () => {
+  // 구매 세션 ID는 UUID가 아니라 키 조각 모양으로 받는다(입장 토큰 jti, payment §2 '좌석 묶기 입력의 구매 세션 ID', PRF-165. 2026-11-05 구현 담당이 정본에 맞춰 고침)
+  test(`pin_ assertPinInput은 키 조각이 아닌 회차·계정·구매 세션, UUID가 아닌 holdId, 좌석 0개·11개·정렬 안 됨·겹침, 한도 1 미만, orderGen 1 미만·정수 아님, keepUntil 안전한 정수 아님을 RangeError로 거절하고, pin도 같은 입력에 RangeError이며 아무것도 쓰지 않는다. 경계(한도 1·orderGen 1·좌석 10개·UUID가 아닌 키 조각 구매 세션)는 받는다 [ASVS v5.0.0-2.2.1]`, async () => {
     const { h, e, keepUntilMs, order, hold, pinInput } = await world();
     const o = order(['A01']);
     await hold(o);
@@ -642,7 +643,7 @@ export function pinCases(make: () => Promise<PinHarness>): void {
       ...badKeyParts.map((v): [string, Partial<PinInput>] => [`회차 ${JSON.stringify(v)}`, { eventId: v }]),
       ...badKeyParts.map((v): [string, Partial<PinInput>] => [`계정 ${JSON.stringify(v)}`, { accountId: v }]),
       ...badUuids.map((v): [string, Partial<PinInput>] => [`holdId ${JSON.stringify(v)}`, { holdId: v }]),
-      ...badUuids.map((v): [string, Partial<PinInput>] => [`구매 세션 ${JSON.stringify(v)}`, { purchaseSessionId: v }]),
+      ...badKeyParts.map((v): [string, Partial<PinInput>] => [`구매 세션 ${JSON.stringify(v)}`, { purchaseSessionId: v }]),
       ...badSeats().map(([w, seats]): [string, Partial<PinInput>] => [w, { seats }]),
       ...[0, -1].map((v): [string, Partial<PinInput>] => [`한도 ${v}`, { limit: v }]),
       ...[0, -1, 1.5, Number.NaN].map((v): [string, Partial<PinInput>] => [`orderGen ${v}`, { orderGen: v }]),
@@ -659,6 +660,7 @@ export function pinCases(make: () => Promise<PinHarness>): void {
       ['한도 1', { limit: 1 }],
       ['orderGen 1', { orderGen: 1 }],
       ['좌석 10개', { seats: aSeats(10).map(ref) }],
+      ['구매 세션 jti 모양(UUID 아님)', { purchaseSessionId: 'jti_9f2c-AB' }],
       ['기본 입력', {}],
     ] as [string, Partial<PinInput>][]) {
       expect.soft(() => assertPinInput({ ...base, ...patch }), what).not.toThrow();

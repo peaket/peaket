@@ -3,11 +3,12 @@
 // 형이 틀린 키·값이면 쓰지 않고 'ERR PEAKET_CORRUPT_KEY {키}' 스크립트 오류. 메모리 구현(memory-seat-store.ts)이 같은 계약을 따른다.
 //
 // PIN_LUA
-// KEYS(좌석 수 n = #KEYS − 7): 1 bitmap  2 expiry  3 quota:{account}  4 stream  5 epoch  6 secver  7 fence  8.. hold:{좌석 색인}(ARGV 좌석 차례)
+// KEYS(좌석 수 n = #KEYS − 8): 1 bitmap  2 expiry  3 quota:{account}  4 stream  5 epoch  6 secver  7 fence  8.. hold:{좌석 색인}(ARGV 좌석 차례)  끝 failed:{holdId}
 // ARGV: 1 계정  2 구매 세션 ID  3 holdId  4 1인 한도  5 orderGen  6 홀드 TTL ms(420000)  7 keepUntil ms  8 구역 채널 앞머리('s:{event:E}:sec:')
 //       9 + 6(i − 1) ..: 좌석 i의 좌석 색인, 구역 색인, 구역 안 거리, 좌석 ID, 등급 ID, 구역 ID(hold-lua.ts와 같다)
 // 검사 차례
 //   1 HGET epoch 'epoch' 없음                                → {'NOT_READY'}
+//   1′ EXISTS failed:{holdId}(실패 표시, PRF-165)              → {'FAILED_HOLD'}(아무것도 쓰지 않는다. 표시의 수명도 늘리지 않는다)
 //   2 좌석마다 비트·홀드 Hash(holdId·owner): 내 홀드(둘 다 같음, 비트 1) · 빈 좌석(비트 0) · 남의 좌석(그 밖)
 //     남의 좌석이 있음                                        → {'TAKEN', 첫 남의 좌석 색인}
 //   3 빈 좌석이 있고 orderGen ≠ gen(HGET epoch 'gen', 없으면 '1') → {'STALE_GEN', gen}
@@ -27,6 +28,15 @@
 // - 키 수명: 빈 좌석이 있을 때만 bitmap·quota·stream·epoch·secver·fence에 extend(keepUntil), 새로 쓴 hold에 PEXPIREAT keepUntil. expiry는 빼기만 하므로 늘리지 않는다.
 //   모두 내 홀드인 묶기는 수명을 바꾸지 않는다(HSET pin과 ZREM만).
 // - 판매 정지 사본(ctl)과 방금 놓은 좌석(rel)은 보지 않는다(접수된 결제는 끝까지 처리한다).
+//
+// 실패 표시의 계약(추천 적용 2026-11-05, BUILD_ORDER PRF-165, docs/data.md §3 s:{event:E}:failed:{holdId}, docs/features/seat-hold.md §6 '실패 표시').
+// - 키: s:{event:E}:failed:{holdId}(회차 해시 태그 슬롯, 글 '1', 수명 FAILED_HOLD_MARK_TTL_MS 10분 [가정]). 두 Lua의 KEYS 끝에 하나를 더한다.
+//   수명은 Lua 원문에 박는다(ARGV 차례는 그대로 둔다. 값은 domain/pin.ts의 상수에서 가져온다).
+// - RELEASE_FAILED_LUA: 세대 키가 있을 때(NOT_READY가 아닐 때) 푼 좌석 수와 상관없이 같은 Lua 안에서 SET failed '1' PX 10분을 남긴다(0석이어도 남긴다:
+//   묶기가 아직 오지 않은 늦은 묶기를 막는 것이 목적이다). 쓰기 전 지킴을 모두 지난 뒤에 쓴다(지킴에 걸리면 표시도 남기지 않는다).
+// - PIN_LUA: 검사 1(세대 키) 바로 뒤에 EXISTS failed이면 아무것도 쓰지 않고 {'FAILED_HOLD'}. 그래서 실패 해제 뒤 늦게 실행된 묶기가 풀린 좌석을 다시 잡지 않는다.
+// - 메모리 구현(memory-seat-store.ts)과 좌석 모델 시험 하네스(test-int/seat-model/system.ts)가 같은 계약을 따른다.
+import { FAILED_HOLD_MARK_TTL_MS } from '../domain/pin.js';
 
 /** 큰 정수를 지수 표기 없이 10진 글로(hold-lua.ts와 같은 도우미) */
 const INT_TEXT = `
@@ -63,7 +73,7 @@ const MAX_SAFE = '9007199254740991';
 /** 묶기 Lua 원문(위 계약). 첫 줄이 #!lua다 */
 export const PIN_LUA = `#!lua
 ${INT_TEXT}${EXTEND}${GUARDS}
-local n = #KEYS - 7
+local n = #KEYS - 8
 if n < 1 or #ARGV ~= 8 + 6 * n then
   return redis.error_reply('ERR PEAKET_PIN_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV)
 end
@@ -77,6 +87,9 @@ local seatEpoch = ep[1]
 if not seatEpoch then return {'NOT_READY'} end
 local genText = ep[2] or '1'
 if #genText > 15 or not string.match(genText, '^[1-9]%d*$') then return corrupt(KEYS[5]) end
+
+-- 1′ 실패 표시(KEYS 끝): 실패 해제가 먼저 돌았다. 늦은 묶기는 아무것도 쓰지 않는다
+if redis.call('EXISTS', KEYS[#KEYS]) == 1 then return {'FAILED_HOLD'} end
 
 -- 2 좌석마다 내 홀드(비트 1, holdId·owner 같음) · 빈 좌석(비트 0) · 남의 좌석(그 밖). 좌석 차례로 첫 남의 좌석이면 TAKEN
 for i = 1, n do
@@ -211,9 +224,10 @@ return {'OK', genText, k, tokText}
 `;
 
 // RELEASE_FAILED_LUA
-// KEYS(좌석 수 n = #KEYS − 6): 1 bitmap  2 expiry  3 quota:{account}  4 stream  5 epoch  6 secver  7.. hold:{좌석 색인}
+// KEYS(좌석 수 n = #KEYS − 7): 1 bitmap  2 expiry  3 quota:{account}  4 stream  5 epoch  6 secver  7.. hold:{좌석 색인}  끝 failed:{holdId}
 // ARGV: 1 계정  2 holdId  3 keepUntil ms  4 구역 채널 앞머리  5 + 6(i − 1) ..: 좌석 i의 6칸(PIN_LUA와 같다)
-// 검사: 1 epoch 없음 → {'NOT_READY'}. 그다음 좌석마다 홀드 Hash의 holdId·owner가 ARGV와 같은 좌석만 푼다 → {'OK', 푼 수}
+// 검사: 1 epoch 없음 → {'NOT_READY'}(표시를 남기지 않는다). 그다음 좌석마다 홀드 Hash의 holdId·owner가 ARGV와 같은 좌석만 푼다 → {'OK', 푼 수}
+// 쓰기(늘): SET failed:{holdId} '1' PX FAILED_HOLD_MARK_TTL_MS(푼 좌석이 0이어도. 같은 호출을 다시 하면 수명이 다시 10분이 된다)
 // 쓰기(푼 좌석마다): BITFIELD SET u1 0, DEL hold, ZREM expiry, 보유 수 DECRBY(0 밑으로 내리지 않음), 바뀐 구역마다 HINCRBY secver,
 //       XADD stream RELEASED(만료 Lua의 EXPIRED와 같은 칸: holdKind = Hash kind, purchaseSessionId = Hash psid, fencingToken = Hash fence,
 //       expiresAtMs = Hash exp, occurredAtMs = now), 바뀐 구역마다 SPUBLISH(상태 0). rel(방금 놓은 좌석)에는 넣지 않는다.
@@ -230,9 +244,13 @@ return {'OK', genText, k, tokText}
 /** 결제 실패 해제 Lua 원문(위 계약). 첫 줄이 #!lua다 */
 export const RELEASE_FAILED_LUA = `#!lua
 ${INT_TEXT}${EXTEND}${GUARDS}
-local n = #KEYS - 6
+local n = #KEYS - 7
 if n < 1 or #ARGV ~= 4 + 6 * n then
   return redis.error_reply('ERR PEAKET_RELEASE_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV)
+end
+-- 실패 표시(KEYS 끝): 늦은 묶기가 이 홀드의 좌석을 다시 잡지 않게 남긴다(PRF-165)
+local function markFailed()
+  redis.call('SET', KEYS[#KEYS], '1', 'PX', '${FAILED_HOLD_MARK_TTL_MS}')
 end
 local function at(i, k)
   return ARGV[4 + 6 * (i - 1) + k]
@@ -278,7 +296,10 @@ for i = 1, n do
   end
 end
 local k = #freed
-if k == 0 then return {'OK', 0} end
+if k == 0 then
+  markFailed()
+  return {'OK', 0}
+end
 
 -- 보유 수(표준 10진 정수)와 바뀔 구역(푼 좌석의 구역 색인, 처음 나온 차례)의 secver 칸
 local heldText = redis.call('GET', KEYS[3]) or '0'
@@ -298,6 +319,7 @@ for j = 1, #sections do
 end
 
 -- 쓰기
+markFailed()
 local clear = {}
 local dels = {}
 local members = {}

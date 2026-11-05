@@ -1,6 +1,7 @@
 // booking 모듈의 포트(바깥 저장소·지표와 닿는 면, BUILD_ORDER PRF-160·PRF-161).
 import type { OrderEventMessage, OrderItem, OrderStatus, OrderRow, CreatedExtras, SeatAssignment, TransitionId } from './order.js';
 import type { FallbackReason, MisconfiguredReason, RecheckAnswer } from './recheck.js';
+import type { SagaFailTransition, SagaFailureReason, SagaStep } from './saga.js';
 
 /** 주문 사건을 Outbox 값 바이트로 바꾼다. Avro 인코더(BAS-030)가 오기 전까지 JSON 대역이다 */
 export interface OrderEventCodec {
@@ -36,7 +37,7 @@ export interface TransitionInput {
   readonly orderId: string;
   readonly transition: TransitionId;
   readonly actor: string;
-  /** 결제 결과 반영 전이(T9~T17·T21, PAYMENT_RESULT_TRANSITIONS)에만 준다. 양의 정수(payment_event.seq) */
+  /** 결제 결과 반영 전이(T9~T17·T21, PAYMENT_RESULT_TRANSITIONS)에만 준다. 양의 정수(payment_event.seq). T11은 없어도 된다(Saga의 승인 기한 넘김, PRF-165) */
   readonly paymentEventSeq?: number;
 }
 
@@ -452,4 +453,342 @@ export interface AcceptLog {
    * 금액 불일치는 까닭 amount_mismatch로 같은 줄을 쓴다(2026-11-05 정본 바로잡음)
    */
   attemptMismatch(e: { readonly accountId: string; readonly orderId: string; readonly reason: AttemptMismatchReason }): void;
+}
+
+// ---- Saga 1단계(docs/features/payment.md §2 'Saga 1단계의 첫 구현', docs/data.md §5 'Saga 1단계', BUILD_ORDER PRF-165) ----
+// 실행기(application/order-saga.ts)가 작업 행을 짧은 트랜잭션으로 집어 임대를 쓰고 커밋한 뒤 돈다(잠금을 쥔 채 바깥 호출을 하지 않는다).
+// RESERVE: 승인 기한 → OrderSeatPins.pin → ReserveTx.reserve(한 트랜잭션: seat_rebuild 대조 → 판매 예약 → 작업 CONFIRM → T7)
+// CONFIRM: (보내기 바로 전 SagaJobs.markConfirmSent) PaymentConfirms.confirm → ConfirmSent.done. 실패는 SagaFailures.fail(T8·T11, 작업 행 RELEASE)
+//   → OrderSeatPins.releaseFailed → 끝나면 작업 행 지우기(RELEASE 단계가 끝날 때까지 다시 한다, 리뷰 M4).
+// 주문 상태 SQL은 주문 전이 함수(drizzle-orders.ts의 transition)로만 바꾼다(test/order-status-sql.test.ts).
+
+/** 집은 Saga 작업 하나(order_saga_job 행) */
+export interface SagaJob {
+  readonly orderId: string;
+  readonly eventId: string;
+  readonly step: SagaStep;
+  /** 이 단계를 해 본 횟수(reschedule이 1 올리고, 단계가 바뀌면 0으로) */
+  readonly attempts: number;
+  /** 다음에 해 볼 시각(epoch ms) */
+  readonly nextAttemptAtMs: number;
+  /** 임대 끝 시각(epoch ms). 집은 작업은 늘 있다 */
+  readonly leaseUntilMs?: number;
+  /** 승인 명령을 처음 보내기 바로 전에 적은 시각(epoch ms, confirm_sent_at). 없으면 한 번도 보내지 않았다(리뷰 H1) */
+  readonly confirmSentAtMs?: number;
+}
+
+/** 자기 임대 조건: 주면 lease_until이 이 값인 행에만 쓴다(다른 실행이 임대를 이어 받았으면 0행). 없으면 조건을 걸지 않는다(손질·시험) */
+export type LeaseGuard = number | undefined;
+
+/** Saga 작업 행 저장소(운영은 adapters/db/drizzle-saga.ts DrizzleSaga) */
+export interface SagaJobs {
+  /**
+   * 짧은 트랜잭션 하나: next_attempt_at ≤ 지금이고 임대가 비었거나 지난 행을 next_attempt_at 차례로 FOR UPDATE SKIP LOCKED로 limit개까지 골라
+   * lease_until = 지금 + leaseMs를 쓰고 커밋한다. 집은 행들(임대 뒤 값)을 돌려준다. 없으면 [].
+   * @throws RangeError limit·leaseMs가 1 이상의 정수가 아님
+   */
+  claimDue(limit: number, leaseMs: number): Promise<SagaJob[]>;
+  /**
+   * 그 주문의 작업 하나를 같은 조건(기한이 됐고 임대가 비었거나 지남)으로 집는다(접수 직후 kick이 쓴다). 집지 못하면 undefined.
+   * 소문자 UUID가 아니면 DB에 가지 않고 undefined
+   */
+  claim(orderId: string, leaseMs: number): Promise<SagaJob | undefined>;
+  /** 작업 행 읽기(임대를 쓰지 않는다). 없으면 undefined */
+  get(orderId: string): Promise<SagaJob | undefined>;
+  /** 다시 하기로 미룬다: attempts + 1, next_attempt_at = nextAtMs, 임대를 비운다. 행이 없거나 자기 임대가 아니면 false */
+  reschedule(orderId: string, nextAtMs: number, lease?: LeaseGuard): Promise<boolean>;
+  /**
+   * 단계를 바꾼다(attempts 0, next_attempt_at = 지금, 임대 비움. 보낸 시각 confirm_sent_at은 그대로: 한 번 보낸 명령은 되돌릴 수 없다).
+   * 판매 예약 트랜잭션 밖에서 바꿀 일(손질·시험)에 쓴다. 행이 없거나 자기 임대가 아니면 false
+   */
+  setStep(orderId: string, step: SagaStep, lease?: LeaseGuard): Promise<boolean>;
+  /** 작업 행을 지운다(step을 주면 그 단계일 때만, 자기 임대 조건). 지운 행이 없으면 false */
+  delete(orderId: string, o?: { readonly step?: SagaStep; readonly leaseUntilMs?: number }): Promise<boolean>;
+  /**
+   * 승인 명령을 보내기 바로 전에 부른다(한 트랜잭션, 커밋한 뒤 보낸다, 리뷰 H1): CONFIRM 작업 행의 confirm_sent_at을 처음이면 지금으로 적는다(이미 있으면 그대로).
+   * CONFIRM 작업 행이 없거나 자기 임대가 아니면 false(보내지 않는다)
+   */
+  markConfirmSent(orderId: string, lease?: LeaseGuard): Promise<boolean>;
+  /** 임대만 놓는다(lease_until = null, 자기 임대일 때만. 다른 칸은 그대로). 다음 틱에 다시 집힌다. 놓은 행이 없으면 false */
+  release(orderId: string, leaseUntilMs: number): Promise<boolean>;
+  /**
+   * ORDER_STATE로 건너뛸 때(리뷰 M3) 한 트랜잭션: 그 단계의 작업 행(자기 임대)을 잠그고 주문 상태를 읽어, 주문이 그 단계를 지났으면(sagaStepPassed)
+   * 그 주문 ACCEPTED 시도의 결제 참조와 작업 행을 지운다(REMOVED). 지나지 않았으면 아무것도 바꾸지 않는다(KEPT, 부르는 쪽이 다시 하기로 미룬다).
+   * 그 단계의 행이 없거나 자기 임대가 아니면 GONE
+   */
+  abandon(orderId: string, step: SagaStep, lease?: LeaseGuard): Promise<'REMOVED' | 'KEPT' | 'GONE'>;
+}
+
+/** Saga가 보는 주문 좌석 하나(order_item, 줄 번호 차례) */
+export interface SagaSeat {
+  readonly seatId: string;
+  readonly tierId: string;
+  readonly sectionId: string;
+}
+
+/** Saga가 보는 결제 시도(그 주문의 ACCEPTED 시도) */
+export interface SagaAttemptView {
+  readonly attemptId: string;
+  readonly pg: PaymentPg;
+  /** 토스 orderId 또는 포트원 paymentId(pay-{orderId}). 포트원 승인 명령의 payment_id다 */
+  readonly pgOrderRef?: string;
+  /** 결제 참조. 승인 명령이 접수됐거나 과금 없이 끝나 지웠으면 undefined */
+  readonly refs?: PaymentRefs;
+  /** 결제창 인증 시각(epoch ms, 승인 기한의 기준). 비었으면 undefined */
+  readonly authenticatedAtMs?: number;
+}
+
+/** Saga가 보는 주문(주문 행·항목·ACCEPTED 결제 시도) */
+export interface SagaOrderView {
+  readonly orderId: string;
+  readonly accountId: string;
+  readonly eventId: string;
+  readonly status: OrderStatus;
+  /** 서버 금액(원). 승인 명령의 amount */
+  readonly amount: number;
+  readonly holdId: string;
+  readonly purchaseSessionId: string;
+  /** 결제 접수 때 적은 판 번호(purchase_order.seat_gen). 접수 전이면 undefined */
+  readonly seatGen?: number;
+  /** 줄 번호 차례 */
+  readonly seats: readonly SagaSeat[];
+  /** ACCEPTED 결제 시도. 없으면 undefined(코드 오류·손질) */
+  readonly attempt?: SagaAttemptView;
+}
+
+/** Saga 작업에 필요한 주문 읽기(트랜잭션 밖)와 판 번호 적기 */
+export interface SagaOrders {
+  /** 주문 하나. 없거나 소문자 UUID가 아니면 undefined */
+  read(orderId: string): Promise<SagaOrderView | undefined>;
+  /**
+   * 묶기가 OK인데 그 판 번호(pinned.gen)가 주문의 것과 다르면 주문 seat_gen을 그 번호로 적는다(명세 pin, 리뷰 M1).
+   * 주문이 ACCEPTED이고 seat_gen = fromGen일 때만 바꾼다(상태 칸은 건드리지 않는다). 바꾼 행이 없으면 false
+   */
+  recordPinnedGen(orderId: string, fromGen: number, toGen: number): Promise<boolean>;
+}
+
+/** 판매 예약 트랜잭션 입력 */
+export interface ReserveTxInput {
+  readonly orderId: string;
+  readonly eventId: string;
+  readonly accountId: string;
+  /** 주문 항목의 좌석 ID(소문자 UUID, 1~10개) */
+  readonly seatIds: readonly string[];
+  /** 그 회차의 1인 한도(좌석맵 판 perAccountLimit) */
+  readonly limit: number;
+  /** 주문의 판 번호(purchase_order.seat_gen, 1 이상 정수). seat_rebuild의 지금 번호와 견준다 */
+  readonly orderGen: number;
+  /** 행위자(ACTOR_PATTERN). Saga는 system:order-saga */
+  readonly actor: string;
+  /** 자기 임대 조건(작업 행을 CONFIRM으로 바꾸는 문장에 건다). 없으면 조건을 걸지 않는다 */
+  readonly leaseUntilMs?: number;
+}
+
+/**
+ * 판매 예약 트랜잭션 결과.
+ * - RESERVED: 판매 행 PENDING·한도·작업 CONFIRM·T7(RESERVED 사건 Outbox)을 커밋했다
+ * - GEN_CHANGED: seat_rebuild의 판 번호(gen)가 주문의 것과 달라 되돌렸다(아무것도 남지 않는다. 주문 seat_gen도 그대로다).
+ *   부르는 쪽은 그 판 번호 그대로 묶기부터 다시 한다(내 홀드가 남았을 때만 OK, OPEN[15], 명세 saleStep, 리뷰 M1)
+ * - SEAT_TAKEN·QUOTA_EXCEEDED: 판매 예약이 거절해 트랜잭션째 되돌렸다(아무것도 남지 않는다). 부르는 쪽이 따로 T8과 실패 해제를 한다
+ * - ORDER_STATE: T7이 0행(주문이 ACCEPTED가 아님. 다른 실행이 먼저 했거나 손질)이라 트랜잭션째 되돌렸다. current = 지금 상태
+ */
+export type ReserveTxOutcome =
+  | { readonly status: 'RESERVED' }
+  | { readonly status: 'GEN_CHANGED'; readonly gen: number }
+  | { readonly status: 'SEAT_TAKEN'; readonly seatIds: readonly string[] }
+  | { readonly status: 'QUOTA_EXCEEDED' }
+  | { readonly status: 'ORDER_STATE'; readonly current?: OrderStatus };
+
+/** 판매 예약 트랜잭션(운영은 DrizzleSaga, inventory DrizzleSeatSales.reserveIn을 같은 트랜잭션으로 부른다) */
+export interface ReserveTx {
+  /**
+   * 한 트랜잭션(READ COMMITTED): seat_rebuild 회차 행을 없으면 넣고(ON CONFLICT DO NOTHING, 판 번호 1) → 그 행의 gen을 FOR SHARE로 읽어 orderGen과 대조
+   * → 다르면 GEN_CHANGED(되돌린다) → 같으면 reserveIn(같은 트랜잭션) → 작업 step CONFIRM(attempts 0, next = 지금, 보낸 시각 비움, 임대는 그대로: 같은 실행이 승인 명령을 잇는다)
+   * → T7(Outbox가 업무 문장의 마지막).
+   * @throws RangeError 입력이 틀림(DB에 가지 않는다) · Error 그 밖의 DB 오류(되돌렸다. 실행기가 다시 한다)
+   */
+  reserve(input: ReserveTxInput): Promise<ReserveTxOutcome>;
+}
+
+/** T11 때 지울 판매 행(inventory SeatSaleRelease와 같은 모양) */
+export interface SagaSaleRelease {
+  readonly eventId: string;
+  readonly orderId: string;
+  readonly accountId: string;
+  readonly seatIds: readonly string[];
+}
+
+/** 실패 기록 입력 */
+export interface SagaFailInput {
+  readonly orderId: string;
+  /** T8(ACCEPTED → FAILED) 또는 T11(RESERVED → FAILED) */
+  readonly transition: SagaFailTransition;
+  readonly reason: SagaFailureReason;
+  /** 행위자(ACTOR_PATTERN). Saga는 system:order-saga */
+  readonly actor: string;
+  /** T11에만 준다: 판매 행 PENDING을 지우고 한도를 되돌린다(releasePendingIn, 같은 트랜잭션) */
+  readonly release?: SagaSaleRelease;
+  /** 자기 임대 조건(첫 문장인 작업 행 갱신에 건다). 없으면 조건을 걸지 않는다 */
+  readonly leaseUntilMs?: number;
+}
+
+/**
+ * 실패 기록 결과. STALE: 작업 행이 그 단계가 아니거나(다른 실행이 이미 끝냈다) 자기 임대가 아니거나, 주문이 그 전이의 출발 상태가 아니라
+ * 트랜잭션째 되돌렸다(아무것도 남지 않는다. 판매 행도 지우지 않는다). current = 주문의 지금 상태
+ */
+export type SagaFailOutcome = { readonly status: 'FAILED' } | { readonly status: 'STALE'; readonly current?: OrderStatus };
+
+/** 실패 기록(운영은 DrizzleSaga) */
+export interface SagaFailures {
+  /**
+   * 한 트랜잭션(READ COMMITTED, 잠금 차례 작업 행 → 주문 행 → 한도 행 → 좌석 행 → 결제 시도 행. 판매 예약과 같이 작업 행이 먼저다, 리뷰 H1 변형):
+   * 작업 행 step = 'RELEASE'(attempts 0, 기대 단계 T8 RESERVE·T11 CONFIRM일 때만, 자기 임대 조건. 0행이면 STALE) → 주문 행에 failure_reason(출발 상태일 때만,
+   * 상태 칸은 건드리지 않는다) → (T11이면) releasePendingIn → 결제 시도의 결제 키·거래 ID·토큰 지우기 → 전이 T8·T11(FAILED 사건 Outbox가 업무 문장의 마지막).
+   * 작업 행은 지우지 않는다: 실행기가 실패 해제를 마친 뒤 지운다(리뷰 M4). 전이가 0행이면 STALE로 되돌린다.
+   * T11인데 release가 없거나 T8인데 release가 있으면 RangeError(코드 오류)
+   * @throws Error 그 밖의 DB 오류(되돌렸다)
+   */
+  fail(input: SagaFailInput): Promise<SagaFailOutcome>;
+}
+
+/** 승인 명령 접수 뒤 정리(운영은 DrizzleSaga) */
+export interface ConfirmSent {
+  /**
+   * 한 트랜잭션: 그 주문의 CONFIRM 작업 행을 지우고(자기 임대 조건) 지웠으면 ACCEPTED 시도의 결제 키·거래 ID·토큰을 지운다.
+   * 작업 행이 없었으면 false(다른 실행이 먼저 끝냄, 아무것도 바꾸지 않는다)
+   */
+  done(orderId: string, lease?: LeaseGuard): Promise<boolean>;
+}
+
+/** 주문 모습의 좌석 묶기 입력(inventory PinInput에 좌석맵 판으로 좌석 색인을 붙여 넘긴다) */
+export interface OrderPinInput {
+  readonly eventId: string;
+  readonly accountId: string;
+  readonly holdId: string;
+  readonly purchaseSessionId: string;
+  /** 주문 항목의 좌석 ID(차례는 다리가 맞춘다) */
+  readonly seatIds: readonly string[];
+  /** 그 회차의 1인 한도 */
+  readonly limit: number;
+  /** 주문의 판 번호(seat_gen) */
+  readonly orderGen: number;
+  /** 회차 키 만료 시각(epoch ms) = 판매 종료 + 1일 */
+  readonly keepUntilMs: number;
+}
+
+/**
+ * 묶기 결과(inventory PinResult를 주문 모습으로).
+ * - OK: gen = 지금 판 번호. NOT_READY: 세대 키 없음(다시 한다. 회차 키 수명이 지났으면 실행기가 STORE_GONE으로 끝낸다)
+ * - TAKEN·QUOTA_EXCEEDED·STALE_GEN: 아무것도 쓰지 않았다(T8과 실패 해제)
+ * - FAILED_HOLD: 그 홀드의 실패 표시 s:{event:E}:failed:{holdId}가 있어 아무것도 쓰지 않았다(이미 실패 해제함. 늦은 묶기)
+ */
+export type OrderPinResult =
+  | { readonly status: 'OK'; readonly gen: number }
+  | { readonly status: 'NOT_READY' }
+  | { readonly status: 'TAKEN' }
+  | { readonly status: 'QUOTA_EXCEEDED' }
+  | { readonly status: 'STALE_GEN'; readonly gen: number }
+  | { readonly status: 'FAILED_HOLD' };
+
+/** 주문 모습의 실패 해제 입력 */
+export interface OrderReleaseInput {
+  readonly eventId: string;
+  readonly accountId: string;
+  readonly holdId: string;
+  readonly seatIds: readonly string[];
+  readonly keepUntilMs: number;
+}
+
+/** 실패 해제 결과. NOT_READY: 세대 키 없음(회차 키 수명이 지났으면 해제가 끝난 것으로 본다) */
+export type OrderReleaseResult = { readonly status: 'OK'; readonly released: number } | { readonly status: 'NOT_READY' };
+
+/**
+ * 좌석 묶기·실패 해제의 inventory 다리(운영은 adapters/inventory-bridges.ts InventoryOrderSeatPins: 좌석맵 판 resolve로 SeatRef를 만들어 SeatPins를 부른다).
+ * 실패 해제는 실패 표시(수명 10분 [가정])를 같은 Lua에서 남기고, 묶기는 그 표시가 있으면 FAILED_HOLD로 거절한다(구현은 inventory pin-lua.ts).
+ */
+export interface OrderSeatPins {
+  /**
+   * @throws OrderSeatStoreUnavailable 좌석 Redis 일시 장애(쓰였는지 모른다. 같은 입력으로 다시 부르면 모두 내 홀드라 OK)
+   * @throws Error 좌석맵 판에 없는 좌석·판 없음(설정 오류)·망가진 키
+   */
+  pin(input: OrderPinInput, o?: { deadlineMs?: number }): Promise<OrderPinResult>;
+  /** @throws OrderSeatStoreUnavailable 좌석 Redis 일시 장애(다시 부르면 남은 것만 푼다) · Error 좌석맵 판에 없는 좌석·망가진 키 */
+  releaseFailed(input: OrderReleaseInput, o?: { deadlineMs?: number }): Promise<OrderReleaseResult>;
+}
+
+/** Saga가 쓰는 회차 설정(좌석맵 판의 perAccountLimit·saleEndsAt) */
+export interface SagaEventConfig {
+  /** 1인 한도(1 이상 정수) */
+  readonly perAccountLimit: number;
+  /** 판매 종료 시각(epoch ms) */
+  readonly saleEndsAtMs: number;
+}
+
+/** 회차 설정 읽기(운영은 adapters/inventory-bridges.ts SeatMapSagaConfigs). 판이 없으면 undefined. 던지지 않는다 */
+export interface SagaEventConfigs {
+  get(eventId: string): Promise<SagaEventConfig | undefined>;
+}
+
+/** 승인 명령의 결제 참조(payment.proto ConfirmPaymentRequest.payment_ref oneof) */
+export type ConfirmRefs =
+  /** toss(TossPaymentRef.payment_key). 시뮬레이터도 이 칸을 쓴다 */
+  | { readonly pg: 'TOSS' | 'SIMULATOR'; readonly paymentKey: string }
+  /** portone(PortonePaymentRef: payment_id = pg_order_ref, tx_id, payment_token) */
+  | { readonly pg: 'PORTONE'; readonly paymentId: string; readonly txId: string; readonly paymentToken: string };
+
+/** 승인 명령 입력 */
+export interface ConfirmCommand {
+  readonly orderId: string;
+  readonly attemptId: string;
+  readonly pg: PaymentPg;
+  readonly refs: ConfirmRefs;
+  /** 서버 금액(원, Money.krw) */
+  readonly amount: number;
+  /** 이 호출의 데드라인(ms, 1 이상 정수). 실행기가 min(200ms, 승인 기한까지 남은 시간)으로 준다 */
+  readonly deadlineMs: number;
+}
+
+/** payment-svc가 답한 승인 결과(ConfirmResult 이름에서 CONFIRM_RESULT_를 뗀 것) */
+export type ConfirmResultName = 'APPROVED' | 'ALREADY_APPROVED' | 'IN_PROGRESS' | 'DECLINED' | 'WAITING_FOR_DEPOSIT' | 'UNKNOWN' | 'UNSPECIFIED';
+
+/** 다시 보낼 까닭: 데드라인 초과(DEADLINE_EXCEEDED 4)·UNAVAILABLE 14·차단기 열림 */
+export type ConfirmRetryReason = 'deadline' | 'unavailable' | 'circuit_open';
+
+/** 거절 까닭: 그 밖의 gRPC 상태(소문자 이름, 예 invalid_argument·failed_precondition·permission_denied·unimplemented)와 gRPC가 아닌 예외(unexpected) */
+export type ConfirmRejectReason = string;
+
+/**
+ * 승인 명령 결과. 던지지 않는다.
+ * - ACCEPTED: payment-svc가 답했다(APPROVED·ALREADY_APPROVED·IN_PROGRESS·DECLINED·WAITING_FOR_DEPOSIT. 명령을 받아 적은 것이다. 결과는 trade.payments로 받는다, PRF-163)
+ * - RETRYABLE: 같은 주문 ID로 다시 보낸다(payment-svc가 멱등으로 받는다)
+ * - REJECTED: 그 밖의 gRPC 오류(설정·코드 오류)와 답의 결과가 UNSPECIFIED·UNKNOWN(결제 참조를 지우지 않는다, 리뷰 낮음)
+ */
+export type ConfirmOutcome =
+  | { readonly status: 'ACCEPTED'; readonly result: ConfirmResultName }
+  | { readonly status: 'RETRYABLE'; readonly reason: ConfirmRetryReason }
+  | { readonly status: 'REJECTED'; readonly reason: ConfirmRejectReason };
+
+/** 승인 명령 호출 하나의 선택값 */
+export interface ConfirmCallOptions {
+  /**
+   * 차단기가 들여보낸 뒤, 명령을 실제로 보내기 바로 전에 한 번 부른다(실행기가 작업 행 confirm_sent_at을 적고 커밋한다, 리뷰 H1).
+   * 차단기 열림·남은 시간 없음처럼 보내지 않는 길에서는 부르지 않는다. 던지면 보내지 않고 그 오류를 그대로 던진다
+   */
+  readonly beforeSend?: () => Promise<void>;
+}
+
+/** 승인 명령 포트(운영은 adapters/grpc-payment-confirm.ts GrpcPaymentConfirms, local·ci는 늘 접수 대역) */
+export interface PaymentConfirms {
+  /** 던지지 않는다(beforeSend가 던진 것만 그대로 던진다) */
+  confirm(c: ConfirmCommand, o?: ConfirmCallOptions): Promise<ConfirmOutcome>;
+}
+
+/** Saga 로그(서비스 로그 한 줄. 결제 참조·토큰·금액은 싣지 않는다). 던지지 않는다 */
+export interface SagaLog {
+  /** 실패 해제가 좌석 Redis 장애 등으로 끝나지 못했다(warn. 주문은 이미 FAILED라 좌석 해제 사건 소비자가 뒤를 받는다) */
+  releaseFailed(e: { readonly orderId: string; readonly eventId: string; readonly why: string }): void;
+  /** 승인 명령이 REJECTED(error, SEV2 설정 오류) */
+  confirmRejected(e: { readonly orderId: string; readonly reason: ConfirmRejectReason }): void;
+  /** 단계가 예상 밖 오류로 끝나 다시 하기로 미뤘다(error. 오류 이름·글만) */
+  stepError(e: { readonly orderId: string; readonly step: SagaStep; readonly err: unknown }): void;
 }

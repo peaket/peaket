@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import type { SpecAction } from './actions.js';
-import { compareState, type MState, type SpecMove } from './spec.js';
+import { compareState, type MState, specNext, type SpecMove } from './spec.js';
 import type { Att, Red, Scope, SeatSystem } from './system.js';
 
 // ---- ITF 값 ----
@@ -173,6 +173,39 @@ export function stateOf(st: SpecState): MState {
     env: st.env,
     ghost: { stale: st.ghost.stale, newest: Object.fromEntries(st.ghost.newest) },
   };
+}
+
+/** 명세 상태(spec.ts MState) → 기록의 한 상태 꼴(replay가 받는 모양). 펜싱 카운터는 견주지 않아 counter 그대로 둔다 */
+function recordOf(m: MState, move: SpecMove, counter: number): SpecState {
+  const pairs = <V>(r: Record<number, V>): Pairs<V> =>
+    Object.entries(r)
+      .map(([k, v]) => [Number(k), structuredClone(v)] as [number, V])
+      .sort((a, b) => a[0] - b[0]);
+  const red = (r: Red): SpecRed => ({ ready: r.ready, gen: r.gen, counter, seats: pairs(r.seats), quota: pairs(r.quota) });
+  return {
+    action: move.a,
+    picks: { ...(move.h !== undefined ? { h: move.h } : {}), ...(move.l !== undefined ? { l: [...move.l] } : {}) },
+    atts: structuredClone(m.atts),
+    red: red(m.red),
+    redRep: red(m.rep),
+    db: { sale: pairs(m.db.sale), unc: pairs(m.db.unc), used: pairs(m.db.used), ledger: [...m.db.ledger], gen: m.db.gen },
+    env: { ...m.env },
+    ghost: { stale: m.ghost.stale, newest: pairs(m.ghost.newest) },
+  };
+}
+
+/**
+ * 기록의 첫 상태(quint init)에서 명세 다음 상태 계산(spec.ts specNext)으로 동작 차례 moves를 밟은 기록을 만든다(V-T40 ④, BUILD_ORDER PRF-165).
+ * quint가 낸 기록(manifest)에 없는 걸음 차례를 재생기로 돌릴 때 쓴다. 동작의 '할 수 있음'은 보지 않는다(부르는 쪽이 명세에서 열리는 차례를 고른다)
+ */
+export function traceOfMoves(sc: Scope, init: SpecState, moves: readonly SpecMove[]): SpecState[] {
+  const out: SpecState[] = [init];
+  let m = stateOf(init);
+  for (const move of moves) {
+    m = specNext(sc, m, move);
+    out.push(recordOf(m, move, init.red.counter));
+  }
+  return out;
 }
 
 export interface ReplayOutcome {

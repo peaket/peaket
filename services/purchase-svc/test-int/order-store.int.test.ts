@@ -1073,6 +1073,45 @@ describe('transition STALE(전이하지 않음, 던지지 않는다)', () => {
     expect(await traceOf(o)).toEqual(before);
   });
 
+  // T11 순번 예외(payment §3 '주문 저장소의 첫 구현', 추천 적용 2026-11-05, BUILD_ORDER PRF-165): Saga가 승인 명령을 접수시키지 못한 채 승인 기한을 넘기면
+  // 결제 사건이 없으므로 T11은 순번 없이 상태 조건만으로 바꾼다. 순번을 주면 다른 결제 결과 전이처럼 조건을 건다
+  test('T11은 결제 사건 순번 없이도 받는다: RESERVED 주문에 순번 없는 T11은 적용되고 payment_event_seq가 그대로이며 이력·Outbox FAILED가 하나씩이다 [ASVS v5.0.0-2.3.1]', async () => {
+    const s = fresh();
+    const { o, paymentSeq } = await placed(s, ['T3', 'T4', 'T7']);
+    const at = s.clock.now();
+
+    const r = applied(await transit(s, step(o.id, 'T11', SAGA)));
+
+    expect(r.seq).toBe(5);
+    expect(r.order).toEqual(rowOf(o, 'FAILED', 5, paymentSeq));
+    expect(await orderRowOf(o.id)).toMatchObject({ status: 'FAILED', event_seq: 5, payment_event_seq: String(paymentSeq) });
+    expect((await historyOf(o.id)).at(-1)).toEqual({ seq: 5, from_status: 'RESERVED', to_status: 'FAILED', cause: 'T11', actor: SAGA, occurred_at: new Date(at) });
+    expect((await outboxOf(o.eventId)).at(-1)!.event).toMatchObject(laterEvent(o, 'FAILED', 5, at, false));
+  });
+
+  test('T11에 순번을 주면 다른 결제 결과 전이처럼 조건을 건다: 이미 반영한 순번 이하면 STALE(PAYMENT_SEQ), 더 높으면 적용되고 그 순번이 된다 [ASVS v5.0.0-2.3.1] [ASVS v5.0.0-2.3.4]', async () => {
+    const s = fresh();
+    const { o } = await placed(s, ['T3', 'T4', 'T7']);
+    await q('update purchase_order set payment_event_seq = 5 where id = $1', [o.id]);
+    const before = await traceOf(o);
+    for (const seq of [5, 1]) {
+      expect(await transit(s, step(o.id, 'T11', SAGA, seq)), `순번 ${seq}`).toMatchObject({ status: 'STALE', reason: 'PAYMENT_SEQ' });
+    }
+    expect(await traceOf(o)).toEqual(before);
+    expect(applied(await transit(s, step(o.id, 'T11', SAGA, 6))).order).toEqual(rowOf(o, 'FAILED', 5, 6));
+  });
+
+  test('순번 없는 T11도 출발 상태 조건은 그대로다: ACCEPTED 주문에는 STALE(STATUS, current ACCEPTED)이고, 이미 FAILED가 된 주문에 다시 오면 STALE(STATUS, current FAILED)다 [ASVS v5.0.0-2.3.1]', async () => {
+    const s = fresh();
+    const { o } = await placed(s, ['T3', 'T4']);
+    const before = await traceOf(o);
+    expect(await transit(s, step(o.id, 'T11', SAGA))).toEqual({ status: 'STALE', reason: 'STATUS', current: 'ACCEPTED' });
+    expect(await traceOf(o)).toEqual(before);
+    applied(await transit(s, step(o.id, 'T7', SAGA)));
+    applied(await transit(s, step(o.id, 'T11', SAGA)));
+    expect(await transit(s, step(o.id, 'T11', SAGA))).toEqual({ status: 'STALE', reason: 'STATUS', current: 'FAILED' });
+  });
+
   test('까닭의 차례: 출발 상태가 아닌 주문에 이미 반영한 순번 이하의 결제 결과가 오면 PAYMENT_SEQ가 아니라 STATUS(current)다(T10 순번 3으로 입금 대기 뒤 T9 순번 2·3) [ASVS v5.0.0-2.3.1]', async () => {
     const s = fresh();
     const { o } = await placed(s, ['T3', 'T4', 'T7']);

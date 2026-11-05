@@ -111,6 +111,40 @@ describe('정상 202와 검사 차례', () => {
   });
 });
 
+// 결제 접수를 커밋한 직후 Saga 실행기를 깨우는 onAccepted(PRF-165, 2026-11-05 리뷰 M2): 이번에 커밋했을 때만 부르고, 던져도 202 그대로다
+describe('onAccepted(접수 커밋 직후 Saga 깨우기, PRF-165 리뷰 M2)', () => {
+  test('M2_이번에 접수를 커밋하면(ACCEPTED) 주문 ID로 한 번 부른다', async () => {
+    const kicked: string[] = [];
+    expect(await run(acceptCommand(), { onAccepted: (id) => void kicked.push(id) })).toEqual(ACCEPTED);
+    expect(kicked).toEqual([ORDER_ID]);
+  });
+
+  test('M2_트랜잭션 안의 재생(REPLAYED)·커밋된 기록의 재생·거절(STALE ORDER_STATE)에서는 부르지 않는다', async () => {
+    const kicked: string[] = [];
+    const onAccepted = (id: string) => void kicked.push(id);
+    fx.outcome = { status: 'REPLAYED' };
+    expect(await run(acceptCommand(), { onAccepted })).toEqual(REPLAYED);
+    fx.reset();
+    fx.committed = { status: 'COMMITTED', orderId: ORDER_ID };
+    expect(await run(acceptCommand(), { onAccepted })).toEqual(REPLAYED);
+    fx.reset();
+    fx.outcome = { status: 'STALE', reason: 'ORDER_STATE', current: 'ACCEPTED' };
+    expect((await run(acceptCommand(), { onAccepted })) as { status: string }).toMatchObject({ status: 'REJECTED' });
+    expect(kicked).toEqual([]);
+  });
+
+  test('M2_onAccepted가 던져도 202 그대로다(깨우기는 응답과 무관하다. 폴링이 줍는다)', async () => {
+    expect(
+      await run(acceptCommand(), {
+        onAccepted: () => {
+          throw new Error('kick failed');
+        },
+      }),
+    ).toEqual(ACCEPTED);
+    expect(fx.accepted).toHaveLength(1);
+  });
+});
+
 describe('accept 입력 칸(한 트랜잭션에 넘기는 값)', () => {
   test('FR011_토스: orderId·attemptId(대조한 시도)·eventId(주문의 회차)·refs {pg, paymentKey}·seatGen(슬롯 읽기의 gen)·actor account:<계정>이고 그 밖의 칸이 없다', async () => {
     await run();

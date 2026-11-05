@@ -197,6 +197,8 @@ describe('ORDER_TRANSITIONS: payment §3 전이 표와 같다', () => {
     }
   });
 
+  // T11은 이 목록에 남는다: 순번을 주면 다른 결제 결과 전이처럼 payment_event_seq 조건을 걸고, Saga가 승인 기한을 넘겨 결제 사건 없이 끝낼 때는
+  // 순번 없이 상태 조건만으로 받는다(payment §3 '주문 저장소의 첫 구현', PRF-165). 순번 없는 T11을 주문 전이 함수가 받는지는 test-int(주문 저장소 통합 시험)가 본다
   test('ADR0113_결제 결과 반영 전이(PAYMENT_RESULT_TRANSITIONS)는 정확히 T9~T17과 T21(입금 되돌림, 결제사 사건으로 온다)이다', () => {
     const num = (id: string) => Number(id.slice(1));
     expect([...PAYMENT_RESULT_TRANSITIONS].sort((a, b) => num(a) - num(b))).toEqual(['T9', 'T10', 'T11', 'T12', 'T13', 'T14', 'T15', 'T16', 'T17', 'T21']);

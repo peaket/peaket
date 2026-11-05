@@ -1,7 +1,7 @@
 // 주문 생성의 보안·설정 로그를 서비스 로거(platform PlatformLogger)에 한 줄씩 남기는 어댑터(OrderLog, ADR-0055, BUILD_ORDER PRF-161).
 // 번호 원문·토큰·pid는 싣지 않는다. 대체 판정은 warn(보안 로그), 설정 오류는 error(kind config, 재확인 설정 오류는 SEV2)다.
 import type { PlatformLogger } from '@peaket/platform';
-import type { AcceptLog, OrderLog } from '../domain/ports.js';
+import type { AcceptLog, OrderLog, SagaLog } from '../domain/ports.js';
 
 /**
  * - identityFallback: warn 한 줄 { kind: 'security', event: 'identity_recheck_fallback', accountId, reason, passed, idempotencyKey }
@@ -67,4 +67,52 @@ export class LoggerOrderLog implements OrderLog, AcceptLog {
       // 로그 실패는 응답을 바꾸지 않는다
     }
   }
+}
+
+/**
+ * Saga 1단계 로그(SagaLog, BUILD_ORDER PRF-165). 결제 참조·토큰·금액은 싣지 않는다. 로거가 던져도 삼킨다.
+ * - releaseFailed: warn 한 줄 { event: 'order_saga_release_failed', orderId, eventId, why }
+ * - confirmRejected: error 한 줄 { kind: 'config', event: 'order_saga_confirm_rejected', orderId, reason, severity: 'SEV2' }
+ * - stepError: error 한 줄 { event: 'order_saga_step_error', orderId, step, err }
+ */
+export class LoggerSagaLog implements SagaLog {
+  constructor(private readonly logger: Pick<PlatformLogger, 'warn' | 'error'>) {}
+
+  // 칸을 하나씩 골라 싣는다(받은 객체를 펼치지 않아 결제 참조·토큰·금액이 섞여 들지 않게)
+
+  releaseFailed(e: Parameters<SagaLog['releaseFailed']>[0]): void {
+    try {
+      this.logger.warn(
+        { event: 'order_saga_release_failed', orderId: e.orderId, eventId: e.eventId, why: e.why },
+        'Saga 실패 해제를 끝내지 못했다(주문은 FAILED다. 남은 묶음은 좌석 해제 사건 소비자가 받는다)',
+      );
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+
+  confirmRejected(e: Parameters<SagaLog['confirmRejected']>[0]): void {
+    try {
+      this.logger.error(
+        { kind: 'config', event: 'order_saga_confirm_rejected', orderId: e.orderId, reason: e.reason, severity: 'SEV2' },
+        '승인 명령이 정해진 거절로 끝났다(설정·코드 오류로 보고 작업을 1시간 [가정] 멈춘다. 결과 당기기가 맞춘다)',
+      );
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+
+  stepError(e: Parameters<SagaLog['stepError']>[0]): void {
+    try {
+      this.logger.error({ event: 'order_saga_step_error', orderId: e.orderId, step: e.step, err: errorSummaryOf(e.err) }, 'Saga 단계가 예상 밖 오류로 끝나 다시 하기로 미뤘다');
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+}
+
+/** 오류의 이름·글만(스택·원인·다른 칸은 싣지 않는다) */
+function errorSummaryOf(err: unknown): { name: string; message: string } | string {
+  if (err instanceof Error) return { name: err.name, message: err.message };
+  return typeof err === 'string' ? err : typeof err;
 }

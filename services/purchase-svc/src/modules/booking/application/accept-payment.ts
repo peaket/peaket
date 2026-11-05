@@ -24,7 +24,7 @@ import { seatCallOf, seatCallTooLate, transactionCallOf } from './call-budget.js
 export const ACCEPT_PAYMENT_OPERATION = 'ACCEPT_PAYMENT';
 /** READY 결제 시도를 받는 시간 40분 [가정](결제창 인증 유효 30분 + 승인 기한 10분, data.md payment_attempt.status, ADR-0107) */
 export const ATTEMPT_ACCEPT_WINDOW_MS = 40 * 60 * 1000;
-/** Saga 작업 행의 첫 단계(order_saga_job.step, data.md §4 여섯 번째 마이그레이션. 값 목록은 PRF-165가 정한다) */
+/** Saga 작업 행의 첫 단계(order_saga_job.step, data.md §4 여섯 번째 마이그레이션. 값 목록 RESERVE·CONFIRM은 domain/saga.ts SAGA_STEPS, 0006 CHECK) */
 export const SAGA_FIRST_STEP = 'RESERVE';
 
 /** 쓰임새가 쓰는 포트와 설정 */
@@ -37,6 +37,11 @@ export interface AcceptPaymentDeps {
   log: AcceptLog;
   /** 결제 시도 40분 비교의 시계 */
   clock: Clock;
+  /**
+   * 이번에 접수를 커밋한 직후(ACCEPTED, 재생은 아님) 한 번 부른다: Saga 실행기의 kick(orderId)(PRF-165). 선택 의존이다(없으면 폴링이 줍는다).
+   * 응답을 바꾸지 않는다: 던져도 삼키고 202 그대로
+   */
+  onAccepted?: (orderId: string) => void;
 }
 
 /** 쓰임새 입력 */
@@ -176,6 +181,12 @@ export class AcceptPayment {
     );
     switch (outcome.status) {
       case 'ACCEPTED':
+        // 커밋 직후 Saga를 한 번 깨운다(PRF-165). 실패해도 202는 그대로다(폴링이 1초 [가정] 안에 줍는다)
+        try {
+          d.onAccepted?.(order.orderId);
+        } catch {
+          // 삼킨다(깨우기는 응답과 무관하다)
+        }
         return ACCEPTED;
       case 'REPLAYED':
         return REPLAYED;

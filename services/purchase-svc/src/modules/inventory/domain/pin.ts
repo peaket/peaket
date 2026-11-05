@@ -12,7 +12,7 @@ export interface PinInput {
   eventId: string;
   /** 주문한 계정(홀드 Hash의 owner와 같아야 내 홀드다) */
   accountId: string;
-  /** 주문의 구매 세션 ID(빈 좌석을 다시 잡을 때 홀드 Hash psid에 쓴다) */
+  /** 주문의 구매 세션 ID(입장 토큰 jti, 키 조각 모양 1~64자 영문·숫자·_·-. 빈 좌석을 다시 잡을 때 홀드 Hash psid에 쓴다) */
   purchaseSessionId: string;
   /** 주문의 holdId(홀드 Hash의 holdId와 같아야 내 홀드다. 다시 잡을 때도 이 값을 쓴다) */
   holdId: string;
@@ -31,13 +31,19 @@ export interface PinInput {
  * - OK: gen은 지금 판 번호, regrabbed는 다시 잡은 빈 좌석 수(0이면 모두 내 홀드였다), fencingToken은 다시 잡았을 때의 새 토큰
  * - TAKEN: 남이 잡은 첫 좌석(좌석 차례)의 색인
  * - STALE_GEN: 빈 좌석이 있는데 orderGen이 지금 판 번호(gen)와 다르다
+ * - FAILED_HOLD: 그 홀드의 실패 표시 s:{event:E}:failed:{holdId}가 있다(실패 해제가 먼저 돌았다. 늦은 묶기가 풀린 좌석을 다시 잡지 않는다,
+ *   추천 적용 2026-11-05, BUILD_ORDER PRF-165). 세대 키 확인 바로 뒤에 본다(아무것도 쓰지 않는다. 표시의 수명도 늘리지 않는다)
  */
 export type PinResult =
   | { kind: 'OK'; gen: number; regrabbed: number; fencingToken?: number }
   | { kind: 'NOT_READY' }
   | { kind: 'TAKEN'; seatIndex: number }
   | { kind: 'STALE_GEN'; gen: number }
-  | { kind: 'QUOTA_EXCEEDED' };
+  | { kind: 'QUOTA_EXCEEDED' }
+  | { kind: 'FAILED_HOLD' };
+
+/** 실패 표시 s:{event:E}:failed:{holdId}의 수명 10분 [가정](docs/data.md §3, PRF-165). 승인 기한(인증 + 10분)보다 짧지 않게 */
+export const FAILED_HOLD_MARK_TTL_MS = 10 * 60_000;
 
 export interface ReleaseFailedInput {
   eventId: string;
@@ -94,7 +100,8 @@ export function assertPinInput(i: PinInput): void {
   if (!isKeyPart(i.eventId)) throw new RangeError('eventId가 키 조각 모양이 아니다');
   if (!isKeyPart(i.accountId)) throw new RangeError('accountId가 키 조각 모양이 아니다');
   if (!isUuid(i.holdId)) throw new RangeError('holdId가 UUID가 아니다');
-  if (!isUuid(i.purchaseSessionId)) throw new RangeError('purchaseSessionId가 UUID가 아니다');
+  // 구매 세션 ID는 입장 토큰 jti라 UUID가 아니라 키 조각 모양이다(payment §2 '좌석 묶기 입력의 구매 세션 ID', PRF-165)
+  if (!isKeyPart(i.purchaseSessionId)) throw new RangeError('purchaseSessionId가 키 조각 모양이 아니다');
   assertSeats(i.seats);
   if (!Number.isSafeInteger(i.limit) || i.limit < 1) throw new RangeError(`1인 한도는 1 이상의 정수다: ${i.limit}`);
   if (!Number.isSafeInteger(i.orderGen) || i.orderGen < 1) throw new RangeError(`orderGen은 1 이상의 정수다: ${i.orderGen}`);

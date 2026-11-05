@@ -169,7 +169,10 @@ describe('묶기·실패 해제 Lua의 모양(pin-lua.ts 계약, ADR-0086)', () 
       seatKeys.fence(e),
       seatKeys.hold(e, idx('A01')),
       seatKeys.hold(e, idx('B02')),
+      // 실패 표시 키(PRF-165, pin-lua.ts '실패 표시의 계약': 두 Lua의 KEYS 끝에 하나를 더한다)
+      `s:{event:${e}}:failed:${i.holdId}`,
     ]);
+    // 정본 모호: 표시 수명을 ARGV로 넘기는지 정본에 없다. 기존 ARGV 차례는 그대로라고 본다
     expect(p.args).toEqual([ACCOUNT_A, i.purchaseSessionId, i.holdId, '4', '1', String(HOLD_TTL_MS), String(keepUntilMs), seatKeys.section(e, ''), ...seatArgs]);
     rec.calls.splice(0);
     expect(await store.releaseFailed({ eventId: e, accountId: ACCOUNT_A, holdId: i.holdId, seats: i.seats, keepUntilMs })).toEqual({ kind: 'OK', released: 2 });
@@ -185,6 +188,7 @@ describe('묶기·실패 해제 Lua의 모양(pin-lua.ts 계약, ADR-0086)', () 
       seatKeys.secver(e),
       seatKeys.hold(e, idx('A01')),
       seatKeys.hold(e, idx('B02')),
+      `s:{event:${e}}:failed:${i.holdId}`,
     ]);
     expect(r.args).toEqual([ACCOUNT_A, i.holdId, String(keepUntilMs), seatKeys.section(e, ''), ...seatArgs]);
     expect(new Set([...p.keys, ...r.keys].map(slotOf)).size).toBe(1);

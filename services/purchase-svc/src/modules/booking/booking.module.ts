@@ -51,13 +51,19 @@ export interface BookingModuleDeps {
   consentVersion: string;
   /** 없으면 플랫폼 CLOCK */
   clock?: Clock;
+  /**
+   * 결제 접수를 커밋한 직후 부를 것(AcceptPaymentDeps.onAccepted, PRF-165). 운영은 Saga 실행기의 kick(OrderSagaRunner.kick)을 넘긴다.
+   * 없으면 부르지 않는다(지금 동작 그대로. 실행기가 켜지면 1초 폴링이 줍는다)
+   */
+  onAccepted?: (orderId: string) => void;
 }
 
 @Module({})
 export class BookingModule {
   /**
    * 컨트롤러 OrdersController와 쓰임새 CreateOrder·AcceptPayment(useFactory: deps + CLOCK + 로그)를 묶는다. 내보내는 것은 없다.
-   * AcceptPayment에는 { sessions, reads = accepts, writes = accepts, slots, log = acceptLog(위 기본값 규칙), clock }을 넘긴다.
+   * AcceptPayment에는 { sessions, reads = accepts, writes = accepts, slots, log = acceptLog(위 기본값 규칙), clock, onAccepted(있을 때만) }을 넘긴다.
+   * Saga 실행기(OrderSagaRunner, PRF-165)는 이 모듈이 만들지 않는다: main.ts가 만들어 시작·정지하고 kick을 onAccepted로 넘긴다(Nest 수명과 따로).
    * @throws Error consentVersion 모양이 틀림(시작 실패)
    */
   static register(deps: BookingModuleDeps): DynamicModule {
@@ -65,7 +71,7 @@ export class BookingModule {
     if (typeof deps.consentVersion !== 'string' || !CONSENT_VERSION_PATTERN.test(deps.consentVersion)) {
       throw new Error(`동의 문안 판(${CONSENT_VERSION_ENV})은 1~32자의 영문·숫자·._-여야 한다`);
     }
-    const { log, acceptLog, clock, accepts, slots, ...ports } = deps;
+    const { log, acceptLog, clock, accepts, slots, onAccepted, ...ports } = deps;
     const createOrder: Provider = {
       provide: CreateOrder,
       useFactory: (platformClock: Clock, logger?: PlatformLogger) => {
@@ -79,7 +85,15 @@ export class BookingModule {
       provide: AcceptPayment,
       useFactory: (platformClock: Clock, logger?: PlatformLogger) => {
         const securityLog = acceptLog ?? (isAcceptLog(log) ? log : logger ? new LoggerOrderLog(logger) : silentAcceptLog);
-        return new AcceptPayment({ sessions: ports.sessions, reads: accepts, writes: accepts, slots, log: securityLog, clock: clock ?? platformClock });
+        return new AcceptPayment({
+          sessions: ports.sessions,
+          reads: accepts,
+          writes: accepts,
+          slots,
+          log: securityLog,
+          clock: clock ?? platformClock,
+          ...(onAccepted ? { onAccepted } : {}),
+        });
       },
       inject: [CLOCK, { token: PLATFORM_LOGGER, optional: true }],
     };

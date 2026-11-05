@@ -62,7 +62,7 @@ const count = async (text: string, params: unknown[]): Promise<number> => Number
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
-  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 6(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 7(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)).rows.map((r) => r.relname);
     const before = await tables();
     // 0003이 만든 주문 표 다섯과 Outbox 부모 표(PRF-160), 0005가 만든 Saga 작업 표(PRF-162)가 있다
@@ -70,7 +70,30 @@ describe('마이그레이션과 표 모양', () => {
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(6);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(7);
+  });
+
+  test('0006(PRF-165, data.md §4 일곱 번째 마이그레이션): purchase_order.failure_reason은 널 허용 text이고 CHECK가 없으며, order_saga_job.confirm_sent_at은 널 허용 timestamptz(리뷰 H1)이고, order_saga_job.step은 RESERVE·CONFIRM·RELEASE만 받는다(RELEASE는 리뷰 M4) [ASVS v5.0.0-2.3.4]', async () => {
+    const col = await q<{ data_type: string; is_nullable: string }>(
+      `select data_type, is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'purchase_order' and column_name = 'failure_reason'`,
+    );
+    expect(col.rows).toEqual([{ data_type: 'text', is_nullable: 'YES' }]);
+    // failure_reason에 걸린 CHECK가 없다(값 목록이 PRF-163에서 늘어난다)
+    const checks = await q<{ def: string }>(
+      `select pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.purchase_order'::regclass and contype = 'c'`,
+    );
+    expect(checks.rows.filter((r) => r.def.includes('failure_reason'))).toEqual([]);
+    const sent = await q<{ data_type: string; is_nullable: string }>(
+      `select data_type, is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'order_saga_job' and column_name = 'confirm_sent_at'`,
+    );
+    expect(sent.rows).toEqual([{ data_type: 'timestamp with time zone', is_nullable: 'YES' }]);
+    const step = await q<{ def: string }>(
+      `select pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.order_saga_job'::regclass and conname = 'order_saga_job_step_check'`,
+    );
+    expect(step.rows).toHaveLength(1);
+    // 값 셋만(차례 RESERVE·CONFIRM·RELEASE). 실제 행 거절(23514)은 saga-db.int.test.ts의 setStep 시험이 본다
+    expect(step.rows[0]!.def).toMatch(/step.*'RESERVE'::text.*'CONFIRM'::text.*'RELEASE'::text/);
+    expect(step.rows[0]!.def.match(/'[A-Z_]+'::text/g)).toEqual(["'RESERVE'::text", "'CONFIRM'::text", "'RELEASE'::text"]);
   });
 
   test('0003: payment_attempt.order_id에 일반(유일 아님) 인덱스 payment_attempt_order_id_idx가 있다(주문으로 결제 시도 찾기, 주문 행을 지울 때 외래 키 검사) [ASVS v5.0.0-2.3.4]', async () => {

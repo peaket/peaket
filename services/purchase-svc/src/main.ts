@@ -4,6 +4,7 @@
 // 주문 생성 POST /v1/orders(BUILD_ORDER PRF-161)는 purchase DB(PEAKET_DATABASE_URL)가 있을 때만 연다. 그때는 PEAKET_ORDER_CONSENT_VERSION이 있어야 하고,
 // identity-svc(PEAKET_IDENTITY_GRPC_ADDR, host:port)가 없으면 로컬·CI만 재확인은 토큰 판정·가명은 비움으로 뜨고(시작 로그 경고), 그 밖의 환경은 시작하지 않는다.
 // 1초 만료 반복(ExpirySweeper, BUILD_ORDER PRF-135)과 구매 세션 정리 반복(SessionSweeper, PRF-138)을 듣기 시작한 뒤 켜고 SIGTERM 때 끈다. 좌석 Lua 지표(seat_lua_errors_total)를 /metrics에 붙인다.
+// purchase DB가 있으면 주문 Saga 1단계 실행기(OrderSagaRunner, PRF-165)도 같이 켜고 끈다. 승인 명령 주소는 PEAKET_PAYMENT_GRPC_ADDR(없으면 local·ci만 '늘 접수' 대역).
 // 구매 세션은 좌석 Redis의 s:jti·s:session과 서버 고정 ECDH 개인키(PEAKET_PURCHASE_ECDH_KEY)로 확인한다(BUILD_ORDER PRF-136). 입장 토큰은 공개키 묶음
 // (PEAKET_ADMISSION_JWKS)과 발급자(PEAKET_ADMISSION_ISSUER)로 확인하고, 스냅샷 API가 입장 토큰의 첫 사용에 구매 세션을 연다(PRF-137).
 // 좌석맵 판은 환경 값 PEAKET_SEATMAP_DIR 폴더의 {eventId}.json이다(docs/features/seat-hold.md §2 '운영 좌석맵 판'). 30초 [가정]마다 읽은 회차를 다시 읽는다.
@@ -19,13 +20,19 @@ import {
   DrizzleOrderAccepts,
   DrizzleOrderStore,
   DrizzleOrderWrites,
+  DrizzleSaga,
   type IdentityRecheck,
   identityClientsFromEnv,
+  InventoryOrderSeatPins,
   InventoryOrderSessions,
   InventorySeatSlots,
+  LoggerSagaLog,
   missingContactRefs,
+  OrderSagaRunner,
+  paymentConfirmsFromEnv,
   PromOrderSignals,
   RedisBookingRestrictions,
+  SeatMapSagaConfigs,
   SeatMapSaleConfigs,
   unavailableIdentityRecheck,
 } from './modules/booking/index.js';
@@ -38,6 +45,7 @@ import {
   RedisOrderHolds,
   RedisPurchaseSessionStore,
   RedisSeatSlots,
+  RedisSeatStore,
   RedisSessionEndedLog,
   RedisSessionIndex,
   RedisSessionStartedLog,
@@ -96,7 +104,9 @@ const seatMap = new LayoutSeatMap({ source: new FileSeatMapSource(seatMapDir), c
 const orderSignals = new PromOrderSignals();
 const identityLate: { recheck?: IdentityRecheck; contactRefs?: ContactRefs } = {};
 // - 결제 접수(POST /v1/orders/{orderId}/payment-acceptance, PRF-162)는 주문 생성과 같은 주문 전이 함수(DrizzleOrderStore)를 쓰고, 회차 슬롯 읽기는 좌석 Redis(RedisSeatSlots)다
+// - 접수를 커밋한 직후 Saga 실행기를 한 번 깨운다(onAccepted → OrderSagaRunner.kick, PRF-165). 실행기는 서비스 로거로 만들므로 늦게 묶는다(그 전이면 부르지 않는다)
 const orderStore = new DrizzleOrderStore({ clock: systemClock });
+let sagaRunner: OrderSagaRunner | undefined;
 const booking: BookingModuleDeps | undefined = database
   ? {
       writes: new DrizzleOrderWrites({ database, store: orderStore, clock: systemClock }),
@@ -110,6 +120,7 @@ const booking: BookingModuleDeps | undefined = database
       restrictions: new RedisBookingRestrictions(redis),
       signals: orderSignals,
       consentVersion: need(CONSENT_VERSION_ENV, '주문 동의 두 개에 보인 고지 문안의 판, 1~32자의 영문·숫자·._-'),
+      onAccepted: (orderId) => sagaRunner?.kick(orderId),
     }
   : undefined;
 const service = await createService({
@@ -153,9 +164,33 @@ if (booking) {
   identityLate.recheck = identity.recheck;
   identityLate.contactRefs = identity.contactRefs;
 }
+// 주문 Saga 1단계 실행기(OrderSagaRunner, BUILD_ORDER PRF-165): purchase DB가 있을 때(booking이 있을 때) 이 API 파드에서 켠다.
+// 승인 명령(payment-svc ConfirmPayment)은 차단기로 감싸고, 주소(PEAKET_PAYMENT_GRPC_ADDR)가 없으면 local·ci만 '늘 접수' 대역과 경고 한 줄이다.
+// 그 밖의 환경은 주소가 없으면 여기서 던진다(시작 실패, 듣기 전). 듣기 시작한 뒤 1초 반복을 켜고 SIGTERM 때 끈다
+let payment: ReturnType<typeof paymentConfirmsFromEnv> | undefined;
+let paymentBreaker: CircuitBreaker | undefined;
+if (booking && database) {
+  paymentBreaker = new CircuitBreaker({ service: SERVICE, dependency: 'payment-svc', registry: service.metrics.registry, logger: service.logger });
+  payment = paymentConfirmsFromEnv(process.env, { profile: service.config.grpcLbProfile, breaker: paymentBreaker });
+  for (const w of payment.warnings) service.logger.warn({ dep: 'payment-svc' }, w);
+  const saga = new DrizzleSaga({ database, store: orderStore, sales: new DrizzleSeatSales(database), clock: systemClock });
+  sagaRunner = new OrderSagaRunner({
+    jobs: saga,
+    orders: saga,
+    reserve: saga,
+    failures: saga,
+    confirmSent: saga,
+    pins: new InventoryOrderSeatPins({ pins: new RedisSeatStore(redis, service.logger), seatMap }),
+    confirms: payment.confirms,
+    configs: new SeatMapSagaConfigs(seatMap),
+    log: new LoggerSagaLog(service.logger),
+    clock: systemClock,
+  });
+}
 await service.listen();
 const sweeper = service.app.get(ExpirySweeper);
 sweeper.start();
+sagaRunner?.start();
 // 구매 세션 정리 반복(유휴·최대 체류, BUILD_ORDER PRF-138). 만료 반복과 같이 켜고 끈다
 const sessionSweeper = service.app.get(SessionSweeper);
 sessionSweeper.start();
@@ -165,16 +200,23 @@ seatMapRefresh.unref();
 process.once('SIGTERM', () => {
   // 좌석맵 판 다시 읽기를 멈추고, 만료 반복을 멈추고(돌던 틱을 기다린다) 서비스를 닫은 뒤 연결을 닫는다. 어느 단계가 실패해도 연결은 닫는다
   clearInterval(seatMapRefresh);
-  void Promise.all([sweeper.stop(), sessionSweeper.stop()])
+  // Saga 실행기도 함께 멈춘다(돌던 틱·kick을 기다린다. 멈춘 뒤의 접수 깨우기는 부르지 않고, 남은 작업은 다른 파드의 폴링이 줍는다)
+  void Promise.all([sweeper.stop(), sessionSweeper.stop(), sagaRunner?.stop()])
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err }, 'purchase-svc 종료 실패'))
     .finally(() => {
-      // 서비스를 닫은 뒤(새 요청이 없다) identity-svc 클라이언트와 차단기를 닫는다
+      // 서비스를 닫은 뒤(새 요청이 없다) identity-svc·payment-svc 클라이언트와 차단기를 닫는다
       try {
         identity?.close();
         for (const b of identityBreakers) b.shutdown();
       } catch (err) {
         service.logger.error({ err }, 'identity-svc 클라이언트 닫기 실패');
+      }
+      try {
+        payment?.close();
+        paymentBreaker?.shutdown();
+      } catch (err) {
+        service.logger.error({ err }, 'payment-svc 클라이언트 닫기 실패');
       }
       return Promise.all([redis.close(), database?.close()]);
     });

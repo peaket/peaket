@@ -48,49 +48,42 @@ export class DrizzleSeatSales implements SeatSales {
   constructor(private readonly database: Database) {}
 
   async reserve(input: ReserveInput): Promise<ReserveResult> {
-    assertReserveInput(input);
-    const seatIds = sortedSeatIds(input.seatIds);
-    const n = seatIds.length;
-    const pendingUntil = input.pendingUntilMs === undefined ? null : new Date(input.pendingUntilMs);
-    if (pendingUntil !== null && Number.isNaN(pendingUntil.getTime())) throw new RangeError('pendingUntilMs가 날짜 범위를 넘었다');
+    const checked = checkedReserve(input);
     // 좌석 수가 한도보다 크면 DB에 가지 않는다(행을 새로 넣는 길에서 CHECK 제약이 먼저 터지지 않게 하는 이유도 된다)
-    if (n > input.limit) return { status: 'QUOTA_EXCEEDED' };
-    const limit = Math.min(input.limit, INT4_MAX);
+    if (checked.n > input.limit) return { status: 'QUOTA_EXCEEDED' };
     try {
       return await this.database.transaction(async (tx) => {
-        // ⓪ 커밋 응답을 잃은 재시도: 같은 계정·주문의 활성 행이 그 좌석들에 모두 있으면 이미 반영된 것이다. 한도를 다시 올리지 않는다
-        const own = await tx.execute(sql`
-          select count(*)::int as n from seat_sale
-          where event_id = ${input.eventId}::uuid and order_id = ${input.orderId}::uuid and account_id = ${input.accountId}::uuid
-            and seat_id = any(${uuidArray(seatIds)}) and status in ('PENDING', 'SOLD')`);
-        if ((own.rows[0] as { n: number }).n === n) return { status: 'RESERVED' } as const;
-        // ① 한도 행을 조건부로 올린다(한 문장). 올리면 한도를 넘는 경우엔 갱신되지 않아 행이 돌아오지 않는다
-        const quota = await tx.execute(sql`
-          insert into purchase_quota (account_id, event_id, used, limit_count)
-          values (${input.accountId}::uuid, ${input.eventId}::uuid, ${n}::int, ${limit}::int)
-          on conflict (account_id, event_id) do update
-            set used = purchase_quota.used + ${n}::int, limit_count = excluded.limit_count
-            where purchase_quota.used + ${n}::int <= excluded.limit_count
-          returning used`);
-        if (quota.rows.length === 0) throw new Rollback({ status: 'QUOTA_EXCEEDED' });
-        // ② 좌석을 정렬 순서대로 한 문장으로 넣는다. 활성 판매 행이 있는 좌석은 돌아오지 않는다
-        const inserted = await tx.execute(sql`
-          insert into seat_sale (event_id, seat_id, order_id, account_id, status, reserved_at, pending_until)
-          select ${input.eventId}::uuid, t.seat_id, ${input.orderId}::uuid, ${input.accountId}::uuid, 'PENDING', now(), ${pendingUntil}::timestamptz
-          from unnest(${uuidArray(seatIds)}) with ordinality as t(seat_id, ord)
-          order by t.ord
-          on conflict (event_id, seat_id) where status in ('PENDING', 'SOLD') do nothing
-          returning seat_id`);
-        if (inserted.rows.length !== n) {
-          const got = new Set((inserted.rows as { seat_id: string }[]).map((r) => r.seat_id));
-          throw new Rollback({ status: 'SEAT_TAKEN', seatIds: input.seatIds.filter((id) => !got.has(id)) });
-        }
-        return { status: 'RESERVED' } as const;
+        const r = await reserveRows(tx, input, checked);
+        // RESERVED가 아니면 앞서 올린 한도와 넣은 행이 남지 않게 트랜잭션째 되돌린다
+        if (r.status !== 'RESERVED') throw new Rollback(r);
+        return r;
       }, TX);
     } catch (err) {
       if (err instanceof Rollback) return err.result;
       throw err;
     }
+  }
+
+  /**
+   * reserve와 같은 규칙(⓪ → ① 한도 행 → ② 좌석 행)을 부르는 쪽의 트랜잭션 안에서 한다(Saga 판매 예약 트랜잭션, BUILD_ORDER PRF-165).
+   * 트랜잭션을 열지도 끝내지도 않는다(격리 수준은 부르는 쪽이 READ COMMITTED로 고른다).
+   * RESERVED가 아니면(QUOTA_EXCEEDED·SEAT_TAKEN) 한도 행 올림이나 넣은 좌석 행이 남아 있을 수 있어 부르는 쪽이 그 트랜잭션째 되돌려야 한다.
+   * @throws RangeError 입력 모양이 틀림(assertReserveInput, DB에 가지 않는다) · DB 오류는 그대로
+   */
+  async reserveIn(tx: DbTransaction, input: ReserveInput): Promise<ReserveResult> {
+    const checked = checkedReserve(input);
+    if (checked.n > input.limit) return { status: 'QUOTA_EXCEEDED' };
+    return reserveRows(tx, input, checked);
+  }
+
+  /**
+   * releasePending과 같은 규칙(한도 행 잠금 → 좌석 ID 순 잠금 → PENDING 지우기 → 한도 줄이기)을 부르는 쪽의 트랜잭션 안에서 한다(Saga T11, PRF-165).
+   * 지운 행 수를 돌려준다(두 번째 호출은 0).
+   * @throws RangeError 입력 모양이 틀림(assertSeatSaleRelease) · DB 오류는 그대로
+   */
+  async releasePendingIn(tx: DbTransaction, release: SeatSaleRelease): Promise<number> {
+    assertSeatSaleRelease(release);
+    return settleIn(tx, release, deletePending(release));
   }
 
   async markSold(order: SeatSaleOrder): Promise<number> {
@@ -110,14 +103,7 @@ export class DrizzleSeatSales implements SeatSales {
 
   async releasePending(release: SeatSaleRelease): Promise<number> {
     assertSeatSaleRelease(release);
-    const seatIds = sortedSeatIds(release.seatIds);
-    return this.#settle(release, (tx) =>
-      tx.execute(sql`
-        with locked as (${lockedRows(release.eventId, release.orderId, seatIds, 'PENDING', release.accountId)})
-        delete from seat_sale s using locked l
-        where s.event_id = ${release.eventId}::uuid and s.order_id = ${release.orderId}::uuid and s.seat_id = l.seat_id and s.status = 'PENDING'
-        returning s.seat_id`),
-    );
+    return this.#settle(release, deletePending(release));
   }
 
   async returnSold(release: SeatSaleRelease): Promise<number> {
@@ -138,15 +124,81 @@ export class DrizzleSeatSales implements SeatSales {
    * 다른 계정을 넘기면 좌석 행이 잡히지 않아 0행이고 어느 한도 행도 줄지 않는다
    */
   #settle(release: SeatSaleRelease, change: (tx: DbTransaction) => Promise<{ rows: unknown[] }>): Promise<number> {
-    return this.database.transaction(async (tx) => {
-      await tx.execute(sql`select 1 from purchase_quota where account_id = ${release.accountId}::uuid and event_id = ${release.eventId}::uuid for update`);
-      const changed = (await change(tx)).rows.length;
-      if (changed > 0) {
-        await tx.execute(sql`
-          update purchase_quota set used = greatest(used - ${changed}::int, 0)
-          where account_id = ${release.accountId}::uuid and event_id = ${release.eventId}::uuid`);
-      }
-      return changed;
-    }, TX);
+    return this.database.transaction((tx) => settleIn(tx, release, change), TX);
   }
+}
+
+/** 판매 예약 입력 검사(DB에 가기 전)와 정렬한 좌석·한도·기한 */
+function checkedReserve(input: ReserveInput): { seatIds: string[]; n: number; limit: number; pendingUntil: Date | null } {
+  assertReserveInput(input);
+  const seatIds = sortedSeatIds(input.seatIds);
+  const pendingUntil = input.pendingUntilMs === undefined ? null : new Date(input.pendingUntilMs);
+  if (pendingUntil !== null && Number.isNaN(pendingUntil.getTime())) throw new RangeError('pendingUntilMs가 날짜 범위를 넘었다');
+  return { seatIds, n: seatIds.length, limit: Math.min(input.limit, INT4_MAX), pendingUntil };
+}
+
+/**
+ * 판매 예약의 문장들(⓪ → ① 한도 행 → ② 좌석 행)을 주어진 트랜잭션에서 한다. 되돌리지 않는다: RESERVED가 아니면 부르는 쪽이 트랜잭션째 되돌린다
+ * (reserve는 표지 오류로, Saga 판매 예약 트랜잭션은 자기 표지 오류로)
+ */
+async function reserveRows(
+  tx: DbTransaction,
+  input: ReserveInput,
+  c: { seatIds: string[]; n: number; limit: number; pendingUntil: Date | null },
+): Promise<ReserveResult> {
+  const { seatIds, n, limit, pendingUntil } = c;
+  // ⓪ 커밋 응답을 잃은 재시도: 같은 계정·주문의 활성 행이 그 좌석들에 모두 있으면 이미 반영된 것이다. 한도를 다시 올리지 않는다
+  const own = await tx.execute(sql`
+    select count(*)::int as n from seat_sale
+    where event_id = ${input.eventId}::uuid and order_id = ${input.orderId}::uuid and account_id = ${input.accountId}::uuid
+      and seat_id = any(${uuidArray(seatIds)}) and status in ('PENDING', 'SOLD')`);
+  if ((own.rows[0] as { n: number }).n === n) return { status: 'RESERVED' };
+  // ① 한도 행을 조건부로 올린다(한 문장). 올리면 한도를 넘는 경우엔 갱신되지 않아 행이 돌아오지 않는다
+  const quota = await tx.execute(sql`
+    insert into purchase_quota (account_id, event_id, used, limit_count)
+    values (${input.accountId}::uuid, ${input.eventId}::uuid, ${n}::int, ${limit}::int)
+    on conflict (account_id, event_id) do update
+      set used = purchase_quota.used + ${n}::int, limit_count = excluded.limit_count
+      where purchase_quota.used + ${n}::int <= excluded.limit_count
+    returning used`);
+  if (quota.rows.length === 0) return { status: 'QUOTA_EXCEEDED' };
+  // ② 좌석을 정렬 순서대로 한 문장으로 넣는다. 활성 판매 행이 있는 좌석은 돌아오지 않는다
+  const inserted = await tx.execute(sql`
+    insert into seat_sale (event_id, seat_id, order_id, account_id, status, reserved_at, pending_until)
+    select ${input.eventId}::uuid, t.seat_id, ${input.orderId}::uuid, ${input.accountId}::uuid, 'PENDING', now(), ${pendingUntil}::timestamptz
+    from unnest(${uuidArray(seatIds)}) with ordinality as t(seat_id, ord)
+    order by t.ord
+    on conflict (event_id, seat_id) where status in ('PENDING', 'SOLD') do nothing
+    returning seat_id`);
+  if (inserted.rows.length !== n) {
+    const got = new Set((inserted.rows as { seat_id: string }[]).map((r) => r.seat_id));
+    return { status: 'SEAT_TAKEN', seatIds: input.seatIds.filter((id) => !got.has(id)) };
+  }
+  return { status: 'RESERVED' };
+}
+
+/** 그 주문·계정의 PENDING 행을 좌석 ID 순으로 잠가 지우는 문장(releasePending·releasePendingIn) */
+function deletePending(release: SeatSaleRelease): (tx: DbTransaction) => Promise<{ rows: unknown[] }> {
+  const seatIds = sortedSeatIds(release.seatIds);
+  return (tx) =>
+    tx.execute(sql`
+      with locked as (${lockedRows(release.eventId, release.orderId, seatIds, 'PENDING', release.accountId)})
+      delete from seat_sale s using locked l
+      where s.event_id = ${release.eventId}::uuid and s.order_id = ${release.orderId}::uuid and s.seat_id = l.seat_id and s.status = 'PENDING'
+      returning s.seat_id`);
+}
+
+/**
+ * 한도를 되돌리는 연산의 공통 문장들(주어진 트랜잭션 안): 한도 행을 먼저 잠그고(reserve와 같은 차례) 그 계정이 넣은 좌석 행만 바꾼 뒤 바뀐 행 수만큼 줄인다.
+ * 다른 계정을 넘기면 좌석 행이 잡히지 않아 0행이고 어느 한도 행도 줄지 않는다
+ */
+async function settleIn(tx: DbTransaction, release: SeatSaleRelease, change: (tx: DbTransaction) => Promise<{ rows: unknown[] }>): Promise<number> {
+  await tx.execute(sql`select 1 from purchase_quota where account_id = ${release.accountId}::uuid and event_id = ${release.eventId}::uuid for update`);
+  const changed = (await change(tx)).rows.length;
+  if (changed > 0) {
+    await tx.execute(sql`
+      update purchase_quota set used = greatest(used - ${changed}::int, 0)
+      where account_id = ${release.accountId}::uuid and event_id = ${release.eventId}::uuid`);
+  }
+  return changed;
 }
