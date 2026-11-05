@@ -13,22 +13,24 @@ import {
   dayText,
   isMergeProposalId,
   type LinkedMethod,
+  leaveForReauth,
   linkForm,
-  markPending,
+  markMergedAway,
   mergeAfterConfirm,
   mergeAfterGet,
   mergeToOpen,
+  mergeUrlWithoutProposal,
   type MergeState,
   type MergeStep,
   PROVIDERS,
   type Provider,
-  reauthForm,
   submitForm,
   tabStore,
   takePending,
   unlinkResultText,
 } from '@/features/login-methods';
 import { WebShellModal } from '@peaket/ds/WebShell';
+import { REAUTH_START_UNAVAILABLE, reauthFailureText } from '@/shared/lib/reauth-failure';
 import { LiveMergeCard } from './LiveMergeCard';
 
 type Notice = { tone: 'success' | 'warning' | 'danger'; text: string };
@@ -65,7 +67,9 @@ export function LiveLoginMethods({ loginMethod, mergeProposal }: { loginMethod?:
       return true;
     }
     if (st.go) {
-      // 세션이 끝났으므로 새 문서로 연다(남은 화면 상태를 들고 가지 않게, 탈퇴 완료와 같다)
+      // 세션이 끝났으므로 새 문서로 연다(남은 화면 상태를 들고 가지 않게, 탈퇴 완료와 같다).
+      // 흡수 안내는 이 탭에만 보이게 떠나기 직전에 표시를 남긴다(주소만으로는 안내를 그리지 않는다, BOT-043이 넘긴 것)
+      if (st.mergedAway) markMergedAway(tabStore, Date.now());
       window.location.assign(st.go);
       return true;
     }
@@ -82,6 +86,9 @@ export function LiveLoginMethods({ loginMethod, mergeProposal }: { loginMethod?:
   };
 
   useEffect(() => {
+    // 병합 제안 ID와 추가 결과는 처음 그릴 때 읽었다. 주소창에서 지워, 카드를 닫은 뒤 새로 고쳐도 다시 뜨지 않고 그 방문 기록 항목에 남지 않게 한다(BOT-043이 넘긴 것)
+    const clean = mergeUrlWithoutProposal(location.pathname, location.search, location.hash);
+    if (clean) history.replaceState(null, '', clean);
     void (async () => {
       // 재인증에서 돌아왔으면(탭 저장소의 할 일) 토큰을 한 번 받아 그 일을 잇는다
       const p = takePending(tabStore, Date.now());
@@ -89,7 +96,8 @@ export function LiveLoginMethods({ loginMethod, mergeProposal }: { loginMethod?:
       if (p) {
         setBusy(true);
         t = await api.pickupReauth();
-        if (t.kind !== 'token') setNotice({ tone: 'danger', text: '다시 로그인하지 못했습니다. 다시 시도해 주세요' });
+        // 받지 못한 이유마다 문구가 다르다(오래된 인증·계정 불일치 등, 탈퇴 화면과 같다, BOT-041이 넘긴 것)
+        if (t.kind !== 'token') setNotice({ tone: 'danger', text: reauthFailureText(t.reason) });
         else if (p.action === 'add') {
           submitForm(linkForm(p.provider, t.token));
           return;
@@ -138,14 +146,26 @@ export function LiveLoginMethods({ loginMethod, mergeProposal }: { loginMethod?:
     return () => window.removeEventListener('pageshow', onShow);
   }, []);
 
-  /** 재인증으로 떠난다(떠나기 직전에 토큰을 갱신, 만료된 토큰이면 재인증 시작이 막다른 페이지가 된다) */
+  /**
+   * 재인증으로 떠난다(떠나기 직전에 토큰을 갱신, 만료된 토큰이면 재인증 시작이 막다른 페이지가 된다).
+   * 갱신이 401일 때만 로그인 화면이고, 일시 장애면 떠나지 않고 수단 고르기 창을 닫은 뒤 목록 위에 '잠시 뒤 다시'를 보인다(새 맥락 리뷰)
+   */
   const reauthWith = async (via: Provider, what: Plan | null = plan) => {
     if (!what || busy) return;
     setBusy(true);
-    if (!(await api.refresh())) return toLogin();
     const at = Date.now();
-    markPending(tabStore, what.action === 'merge' ? { action: 'merge', provider: via, proposalId: what.proposalId, at } : { ...what, at });
-    submitForm(reauthForm(via));
+    const r = await leaveForReauth({
+      api,
+      storage: tabStore,
+      pending: what.action === 'merge' ? { action: 'merge', provider: via, proposalId: what.proposalId, at } : { ...what, at },
+      provider: via,
+      submit: submitForm,
+    });
+    if (r === 'left') return;
+    if (r === 'login') return toLogin();
+    setBusy(false);
+    setPlan(null);
+    setNotice({ tone: 'danger', text: REAUTH_START_UNAVAILABLE });
   };
 
   const continueMerge = () => {

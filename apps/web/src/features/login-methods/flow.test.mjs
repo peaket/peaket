@@ -1,24 +1,36 @@
 // 로그인 수단 연결·해제 흐름(flow.ts) 시험(docs/features/identity.md §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BUILD_ORDER BOT-041, I-T33·I-T34). 가짜 fetch·저장소로 본다.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { createClock } from '../../shared/lib/clock.ts';
+import { reauthFailureText } from '../../shared/lib/reauth-failure.ts';
 import {
   addResultText,
   confirmMergeText,
   createLoginMethodsApi,
   dayText,
   isMergeProposalId,
+  leaveForReauth,
   linkForm,
+  markMergedAway,
   markPending,
+  MERGED_AWAY_KEY,
+  MERGED_AWAY_TTL_MS,
   mergeAfterConfirm,
   mergeAfterGet,
   mergeToOpen,
+  mergeUrlWithoutProposal,
   mergeView,
   PENDING_KEY,
   PENDING_TTL_MS,
   reauthForm,
+  takeMergedAway,
   takePending,
   unlinkResultText,
 } from './flow.ts';
+
+const LIVE = readFileSync(new URL('../../_pages/settings-providers/ui/LiveLoginMethods.tsx', import.meta.url), 'utf8');
+const PAGE = readFileSync(new URL('../../_pages/settings-providers/ui/SettingsProvidersPage.tsx', import.meta.url), 'utf8');
 
 const json = (status, body) => new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 function fakeFetch(handler) {
@@ -144,7 +156,7 @@ test('I-T32_병합확정은POST와X-Reauth-Token이고_202accepted_409merge-bloc
   assert.deepEqual(await ans(json(401)), { kind: 'login' });
   assert.deepEqual(await ans(json(500)), { kind: 'error' });
   for (const k of ['accepted', 'blocked', 'invariant', 'expired', 'reauth', 'unavailable', 'error']) assert.ok(confirmMergeText({ kind: k }).text, k);
-  assert.match(confirmMergeText({ kind: 'reauth' }).text, /5분/);
+  assert.match(confirmMergeText({ kind: 'reauth' }).text, /만료되었거나 이미 쓰였습니다/);
   assert.match(confirmMergeText({ kind: 'unavailable' }).text, /잠시 뒤 다시/);
   assert.match(confirmMergeText({ kind: 'invariant' }).text, /고객센터/);
 });
@@ -233,14 +245,14 @@ test('I-T31_제안을읽은뒤_PROPOSED는ready이고재인증토큰이있으면
 
 test('I-T32_확정결과마다_남는쪽은처리중과목록다시읽기_흡수되는쪽은세션이끝나흡수안내로_막힘은사유_만료_재인증만료는토큰버림_503은토큰을두고확인창에안내다', () => {
   assert.deepEqual(mergeAfterConfirm(ready(), { kind: 'accepted' }), { merge: { id: PID, view: view(), phase: 'merging' }, reload: true });
-  // 지금 계정이 흡수되는 쪽: 세션이 끝났으므로 새 문서로 흡수 안내(로그인 전 셸)
-  assert.deepEqual(mergeAfterConfirm(ready({ view: view({ requesterRole: 'MERGED' }) }), { kind: 'accepted' }), { go: '/my/settings/providers?ended=MERGED' });
+  // 지금 계정이 흡수되는 쪽: 세션이 끝났으므로 새 문서로 흡수 안내(로그인 전 셸). 떠나기 전에 이 탭에 흡수 표시를 남긴다(BOT-043이 넘긴 것)
+  assert.deepEqual(mergeAfterConfirm(ready({ view: view({ requesterRole: 'MERGED' }) }), { kind: 'accepted' }), { go: '/my/settings/providers?ended=MERGED', mergedAway: true });
   assert.deepEqual(mergeAfterConfirm(ready(), { kind: 'blocked', blockers: ['PENDING_PAYMENT'] }), { merge: { id: PID, view: view({ status: 'BLOCKED', blockers: ['PENDING_PAYMENT'] }), phase: 'blocked' } });
   assert.deepEqual(mergeAfterConfirm(ready(), { kind: 'invariant' }), { merge: { id: PID, view: view({ status: 'BLOCKED', blockers: [] }), phase: 'blocked' } });
   assert.deepEqual(mergeAfterConfirm(ready(), { kind: 'expired' }), { merge: { id: PID, view: view(), phase: 'expired' } });
   const re = mergeAfterConfirm(ready(), { kind: 'reauth' });
   assert.deepEqual(re.merge, { id: PID, view: view(), phase: 'ready' });
-  assert.match(re.notice.text, /5분/);
+  assert.match(re.notice.text, /만료되었거나 이미 쓰였습니다/);
   // 503: 서버는 토큰을 쓰지 않았다. 토큰과 확인 창을 두고 창 안에 '잠시 뒤 다시'를 보인다(새 맥락 리뷰 낮음 6)
   const un = mergeAfterConfirm(ready(), { kind: 'unavailable' });
   assert.deepEqual(un.merge, { id: PID, view: view(), phase: 'ready', token: TOKEN, error: confirmMergeText({ kind: 'unavailable' }).text });
@@ -263,4 +275,179 @@ test('시작할때열제안은_합치기할일이면그제안과받은토큰_그
   assert.deepEqual(mergeToOpen(null, URL_ID, null), { id: URL_ID });
   assert.equal(mergeToOpen(null, undefined, null), null);
   assert.equal(mergeToOpen({ action: 'unlink', provider: 'kakao', at: 1 }, undefined, { kind: 'token', token: 't' }), null);
+});
+
+// ── 구간 1 정리(BOT-041·BOT-043이 넘긴 것) ──
+
+test('I-T54②_로그인수단화면의재인증결과받기실패는이유를남기고_탈퇴화면과같은이유별문구를보인다(BOT-041이넘긴것)', async () => {
+  const problem = (status, type) => json(status, { type: `https://peaket.example/problems/${type}`, status });
+  for (const [res, reason] of [
+    [problem(409, 'reauth-stale'), 'stale'],
+    [problem(409, 'reauth-account-mismatch'), 'account-mismatch'],
+    [problem(409, 'reauth-reverify-required'), 'reverify-required'],
+    [problem(404, 'reauth-result-missing'), 'missing'],
+    [problem(409, 'reauth-failed'), 'failed'],
+    [problem(500, 'other'), 'failed'],
+    [json(200, { reauthToken: '' }), 'failed'],
+  ]) {
+    assert.deepEqual(await createLoginMethodsApi({ origin: '', fetch: fakeFetch(() => res) }).pickupReauth(), { kind: 'failed', reason }, reason);
+  }
+  assert.deepEqual(await createLoginMethodsApi({ origin: '', fetch: async () => Promise.reject(new TypeError('x')) }).pickupReauth(), { kind: 'failed', reason: 'failed' });
+  assert.deepEqual(await createLoginMethodsApi({ origin: '', fetch: fakeFetch(() => json(200, { reauthToken: 'tok' })) }).pickupReauth(), { kind: 'token', token: 'tok' });
+  // 화면은 이유별 문구를 쓴다(한 문구로 뭉치지 않는다)
+  assert.match(reauthFailureText('stale'), /로그아웃한 뒤 다시 시도/);
+  assert.match(reauthFailureText('account-mismatch'), /다른 계정으로 다시 로그인했습니다/);
+  assert.match(LIVE, /setNotice\(\{ tone: 'danger', text: reauthFailureText\(t\.reason\) \}\)/);
+});
+
+test('I-T31_합치기제안의끝시각은보정한시계로기기시계값으로옮긴다_기기시계가5분늦어도남은시간은서버대로10분이다(BOT-043이넘긴것)', async () => {
+  const SERVER_NOW = Date.parse('2026-11-04T03:00:00.000Z');
+  const SKEW = -5 * 60_000; // 기기 시계 = 서버 − 5분
+  let mono = 1_000;
+  const wall = () => SERVER_NOW + SKEW + (mono - 1_000);
+  const clock = createClock({ wall, mono: () => mono });
+  const f = async () => {
+    mono += 40; // 왕복 40ms
+    return new Response(JSON.stringify(proposalBody({ expiresAt: new Date(SERVER_NOW + 10 * 60_000).toISOString() })), {
+      status: 200,
+      headers: { 'content-type': 'application/json', date: new Date(SERVER_NOW).toUTCString() },
+    });
+  };
+  const r = await createLoginMethodsApi({ origin: '', fetch: f, clock, wall, mono: () => mono }).getMerge(PID);
+  assert.equal(r.kind, 'ok');
+  const left = (r.proposal.expiresAt - wall()) / 1000;
+  // Date는 초 단위라 ±1초 안(가운데 +500ms와 왕복 절반)
+  assert.ok(Math.abs(left - 600) <= 1, `남은 초 ${left}`);
+  assert.ok(mergeView(r.proposal, wall(), TITLES).remaining >= 599);
+  // Date를 읽지 못하면(교차 출처 비노출) 앞서 모은 보정값을 쓰고, 시계를 주지 않으면 서버 값 그대로다
+  const noDate = async () => json(200, proposalBody({ expiresAt: new Date(SERVER_NOW + 10 * 60_000).toISOString() }));
+  const r2 = await createLoginMethodsApi({ origin: '', fetch: noDate, clock, wall, mono: () => mono }).getMerge(PID);
+  assert.ok(Math.abs((r2.proposal.expiresAt - wall()) / 1000 - 600) <= 1);
+  const r3 = await createLoginMethodsApi({ origin: '', fetch: noDate }).getMerge(PID);
+  assert.equal(r3.proposal.expiresAt, SERVER_NOW + 10 * 60_000);
+  assert.match(readFileSync(new URL('./browser.ts', import.meta.url), 'utf8'), /clock: browserClock\(\)/);
+});
+
+test('I-T31_병합제안을읽으면주소창에서mergeProposal과함께온loginMethod를지운다_다른값은남긴다(BOT-043이넘긴것)', () => {
+  assert.equal(mergeUrlWithoutProposal('/my/settings/providers', `?loginMethod=other-account&mergeProposal=${PID}`, ''), '/my/settings/providers');
+  assert.equal(mergeUrlWithoutProposal('/my/settings/providers', `?mergeProposal=${PID}&theme=dark`, '#x'), '/my/settings/providers?theme=dark#x');
+  assert.equal(mergeUrlWithoutProposal('/my/settings/providers', '?loginMethod=linked', ''), '/my/settings/providers');
+  assert.equal(mergeUrlWithoutProposal('/my/settings/providers', '?theme=dark', ''), null, '지울 것이 없으면 그대로 둔다');
+  assert.equal(mergeUrlWithoutProposal('/my/settings/providers', '', ''), null);
+  // 화면이 처음 열릴 때 읽은 뒤 주소만 바꾼다(history.replaceState)
+  assert.match(LIVE, /mergeUrlWithoutProposal\(location\.pathname, location\.search, location\.hash\)/);
+  assert.match(LIVE, /history\.replaceState\(null, '', clean\)/);
+});
+
+test('I-T32_흡수안내는방금흡수확정을받은탭에만보인다_표시는1분안이고한번만믿으며_주소의ended=MERGED만으로는보이지않는다(BOT-043이넘긴것)', () => {
+  const st = memoryStore();
+  assert.equal(takeMergedAway(st, 1_000), false);
+  markMergedAway(st, 1_000);
+  assert.equal(st.m.get(MERGED_AWAY_KEY), '1000');
+  assert.equal(takeMergedAway(st, 1_000 + MERGED_AWAY_TTL_MS), true);
+  assert.equal(takeMergedAway(st, 1_000 + MERGED_AWAY_TTL_MS), false, '한 번만');
+  markMergedAway(st, 1_000);
+  assert.equal(takeMergedAway(st, 1_001 + MERGED_AWAY_TTL_MS), false, '1분이 지남');
+  markMergedAway(st, 2_000);
+  assert.equal(takeMergedAway(st, 1_000), false, '앞날');
+  st.set(MERGED_AWAY_KEY, 'junk');
+  assert.equal(takeMergedAway(st, 5), false);
+  assert.equal(st.m.has(MERGED_AWAY_KEY), false);
+  assert.ok(MERGED_AWAY_TTL_MS <= 60_000);
+  // 떠나기 직전에 표시를 남기고, 흡수 안내 주소는 그 표시를 보는 부품으로 그린다(서버가 주소만 믿고 안내를 그리지 않는다)
+  assert.match(LIVE, /if \(st\.mergedAway\) markMergedAway\(tabStore, Date\.now\(\)\);\s*\n\s*window\.location\.assign\(st\.go\);/);
+  assert.match(PAGE, /endedMerged \? <MergedAwayNotice \/>/);
+  assert.doesNotMatch(PAGE, /<Absorbed live=\{endedMerged\}/);
+  const notice = readFileSync(new URL('../../_pages/settings-providers/ui/MergedAwayNotice.tsx', import.meta.url), 'utf8');
+  assert.match(notice, /takeMergedAway\(tabStore, Date\.now\(\)\)/);
+  assert.match(notice, /window\.location\.replace\(PROVIDERS_PATH\)/);
+});
+
+// ── 새 맥락 리뷰(2026-11-05): 401과 토큰 갱신, 넓힌 403 문구, 시계 표본, 잠금 ──
+
+/** 차례로 응답을 주는 fetch(함수면 불러서, Error면 던진다) */
+const seq = (...rs) =>
+  fakeFetch((_u, _i, n) => {
+    const r = rs[n - 1];
+    if (!r) throw new Error('응답이 없다');
+    return typeof r === 'function' ? r() : r;
+  });
+
+test('I-T33·I-T32_목록·해제·제안조회·합치기확정은401뒤갱신이401일때만로그인이고_일시장애(연결끊김·5xx)는그화면의잠시뒤다시다(새맥락리뷰)', async () => {
+  const api = (f) => createLoginMethodsApi({ origin: '', fetch: f });
+  const down = () => seq(json(401), json(503));
+  const net = () => seq(json(401), () => Promise.reject(new TypeError('Failed to fetch')));
+  const gone = () => seq(json(401), json(401));
+  for (const f of [down, net]) {
+    assert.deepEqual(await api(f()).list(), { kind: 'error' }, '목록은 [다시 불러오기]');
+    assert.deepEqual(await api(f()).unlink('kakao', 't'), { kind: 'error' }, "해제는 '지금은 처리할 수 없습니다'");
+    assert.deepEqual(await api(f()).getMerge(PID), { kind: 'error' }, "제안 조회는 '불러오지 못했습니다'");
+    assert.deepEqual(await api(f()).confirmMerge(PID, 't'), { kind: 'unavailable' }, '확정은 토큰과 확인 창을 두고 창 안에 안내');
+  }
+  assert.deepEqual(await api(gone()).list(), { kind: 'login' });
+  assert.deepEqual(await api(gone()).unlink('kakao', 't'), { kind: 'login' });
+  assert.deepEqual(await api(gone()).getMerge(PID), { kind: 'login' });
+  assert.deepEqual(await api(gone()).confirmMerge(PID, 't'), { kind: 'login' });
+  // 확정 요청이 연결 끊김으로 끝나도 토큰을 둔다(서버가 처리했으면 다시 누를 때 404 만료)
+  assert.deepEqual(await api(seq(() => Promise.reject(new TypeError('x')))).confirmMerge(PID, 't'), { kind: 'unavailable' });
+  const un = mergeAfterConfirm(ready(), { kind: 'unavailable' });
+  assert.deepEqual(un.merge.token, TOKEN);
+});
+
+test('재인증으로떠나기전갱신은401일때만로그인이고_일시장애면떠나지않고할일도남기지않는다(새맥락리뷰)', async () => {
+  const run = async (refresh) => {
+    const st = memoryStore();
+    const submitted = [];
+    const out = await leaveForReauth({ api: { refresh: async () => refresh }, storage: st, pending: { action: 'unlink', provider: 'google', at: 9 }, provider: 'kakao', submit: (f) => submitted.push(f) });
+    return { out, pending: st.m.get(PENDING_KEY), submitted };
+  };
+  assert.deepEqual(await run('ok'), { out: 'left', pending: JSON.stringify({ action: 'unlink', provider: 'google', at: 9 }), submitted: [reauthForm('kakao')] });
+  assert.deepEqual(await run('rejected'), { out: 'login', pending: undefined, submitted: [] });
+  assert.deepEqual(await run('unavailable'), { out: 'retry', pending: undefined, submitted: [] });
+  const r = await createLoginMethodsApi({ origin: '', fetch: seq(json(503)) }).refresh();
+  assert.equal(r, 'unavailable');
+  // 화면은 이 흐름을 쓰고 갱신 실패를 곧바로 로그인으로 보내지 않는다
+  assert.match(LIVE, /await leaveForReauth\(/);
+  assert.doesNotMatch(LIVE, /if \(!\(await api\.refresh\(\)\)\) return toLogin\(\);/);
+});
+
+test('I-T33·I-T32_재인증토큰을쓰는요청의403은5분으로좁히지않고만료되었거나이미쓰였다고안내한다(BOT-036이넘긴것)', () => {
+  for (const t of [unlinkResultText({ kind: 'reauth' }).text, addResultText('reauth-required').text, confirmMergeText({ kind: 'reauth' }).text]) {
+    assert.equal(t, '다시 로그인한 확인이 만료되었거나 이미 쓰였습니다. 처음부터 다시 시도해 주세요');
+  }
+});
+
+test('I-T31_시계표본의보낸시각은실제로보낸요청마다잰다_401뒤갱신해다시보냈으면마지막으로보낸때다(새맥락리뷰)', async () => {
+  let mono = 0;
+  const samples = [];
+  const clock = { now: () => 0, addDateHeader: (date, sent, received) => (samples.push({ date, sent, received }), true) };
+  const f = seq(
+    () => ((mono += 300), json(401)), // 첫 요청 왕복 300
+    () => ((mono += 500), new Response(null, { status: 204 })), // 갱신 500
+    () => {
+      const sentAt = mono;
+      mono += 40; // 다시 보낸 요청 왕복 40
+      samples.sentAt = sentAt;
+      return new Response(JSON.stringify(proposalBody()), { status: 200, headers: { 'content-type': 'application/json', date: 'Wed, 04 Nov 2026 03:00:00 GMT' } });
+    },
+  );
+  const r = await createLoginMethodsApi({ origin: '', fetch: f, clock, wall: () => 0, mono: () => mono }).getMerge(PID);
+  assert.equal(r.kind, 'ok');
+  assert.equal(samples.length, 1);
+  assert.equal(samples[0].sent, 800, '마지막으로 보낸 때(첫 요청·갱신 뒤)');
+  assert.equal(samples[0].received - samples[0].sent, 40, '표본의 왕복은 그 요청 하나');
+});
+
+test('I-T33_토큰갱신은주입한잠금안에서돈다(잠금대역으로순서를본다)', async () => {
+  const order = [];
+  const lock = async (fn) => {
+    order.push('lock');
+    const out = await fn();
+    order.push('unlock');
+    return out;
+  };
+  const f = fakeFetch((u) => (order.push(`fetch ${new URL(u, 'https://x').pathname}`), u.endsWith('/access-tokens') ? new Response(null, { status: 204 }) : json(200, { providers: [] })));
+  const api = createLoginMethodsApi({ origin: 'https://api.test', fetch: f, lock });
+  assert.equal(await api.refresh(), 'ok');
+  assert.deepEqual(order, ['lock', 'fetch /v1/identity/access-tokens', 'unlock']);
 });

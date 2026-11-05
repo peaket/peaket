@@ -4,6 +4,12 @@
 // ③ 돌아오면 할 일이 있을 때만 POST /reauth/token으로 토큰을 받아 해제(DELETE /v1/identity/providers/{p})나 추가(POST /link/{p})를 한다
 // ④ 계정 합치기(SCR-040 ④~⑥, identity §2.1 '계정 병합의 첫 구현' 화면, BUILD_ORDER BOT-043): 제안 조회(GET /v1/identity/merge-proposals/{id}),
 //    재인증 뒤 확정(POST …/confirmation, X-Reauth-Token). 요약 글(mergeView)도 여기서 만든다
+import { REAUTH_EXPIRED, type ReauthFailure, reauthFailureOf } from '../../shared/lib/reauth-failure.ts';
+import { refreshOnce, type RefreshResult } from '../../shared/lib/token-refresh.ts';
+
+export type { RefreshResult };
+/** 재인증 토큰을 쓰는 요청의 403(해제·추가·합치기 확정): 5분이 지난 때 말고 이미 쓴 토큰에도 오므로 넓게 쓴다(BOT-036이 넘긴 것) */
+const REAUTH_EXPIRED_RETRY = `${REAUTH_EXPIRED}. 처음부터 다시 시도해 주세요`;
 
 export const PROVIDERS = ['kakao', 'naver', 'google'] as const;
 export type Provider = (typeof PROVIDERS)[number];
@@ -27,7 +33,8 @@ export interface LinkedMethod {
 }
 export type ListAnswer = { kind: 'ok'; methods: LinkedMethod[] } | { kind: 'login' } | { kind: 'error' };
 export type UnlinkAnswer = { kind: 'done' } | { kind: 'last' } | { kind: 'missing' } | { kind: 'reauth' } | { kind: 'login' } | { kind: 'error' };
-export type ReauthAnswer = { kind: 'token'; token: string } | { kind: 'failed' };
+/** 실패면 이유(오래된 인증·계정 불일치 등, 화면은 shared/lib/reauth-failure의 이유별 문구, BOT-041이 넘긴 것) */
+export type ReauthAnswer = { kind: 'token'; token: string } | { kind: 'failed'; reason: ReauthFailure };
 export type Pending =
   | { action: 'unlink' | 'add'; provider: Provider; at: number }
   /** 계정 합치기: provider는 다시 로그인한 제공자(확인 창의 '카카오로 다시 로그인했습니다') */
@@ -43,7 +50,7 @@ export interface MergeProposalView {
   status: 'PROPOSED' | 'BLOCKED';
   blockers: MergeBlocker[];
   moved: { providers: number; wishes: number; subscriptions: number; addresses: number; orders: number };
-  /** 유닉스 밀리초 */
+  /** 끝나는 시각을 기기 시계 값으로 옮긴 유닉스 밀리초(서버 시각 − 보정 시계 차). 남은 시간·만료 전환은 기기 시계(Date.now)와 견준다(BOT-043이 넘긴 것) */
   expiresAt: number;
   newProvider: Provider;
   requesterRole: 'PRIMARY' | 'MERGED';
@@ -76,40 +83,60 @@ async function problemType(r: Response): Promise<string> {
   }
 }
 
-/** origin: API 출처(gw-fan). 재인증 결과 받기(/reauth/token)는 이 화면과 같은 출처다(앱 서버) */
-export function createLoginMethodsApi(o: { origin: string; fetch: FetchLike; lock?: <T>(fn: () => Promise<T>) => Promise<T> }) {
+/** 보정 시계(shared/lib/clock Clock)의 쓰는 모양만 */
+export interface ClockLike {
+  now(): number;
+  addDateHeader(date: string | null | undefined, sentMono: number, receivedMono: number): boolean;
+}
+
+/**
+ * origin: API 출처(gw-fan). 재인증 결과 받기(/reauth/token)는 이 화면과 같은 출처다(앱 서버).
+ * clock: 보정 시계(docs/frontend.md §3.3). 주면 병합 제안 응답의 Date를 표본으로 더하고, 제안의 끝 시각을 기기 시계 값으로 옮긴다.
+ * wall·mono: 기기 벽시계와 단조 시계(시험이 바꾼다)
+ */
+export function createLoginMethodsApi(o: {
+  origin: string;
+  fetch: FetchLike;
+  lock?: <T>(fn: () => Promise<T>) => Promise<T>;
+  clock?: ClockLike;
+  wall?: () => number;
+  mono?: () => number;
+}) {
   const lock = o.lock ?? (<T>(fn: () => Promise<T>) => fn());
+  const wall = o.wall ?? (() => Date.now());
+  const mono = o.mono ?? (() => performance.now());
   const url = (p: string) => `${o.origin}${p}`;
-  function refresh(): Promise<boolean> {
-    return lock(async () => {
-      try {
-        const r = await o.fetch(url('/v1/identity/access-tokens'), { method: 'POST', credentials: 'include', cache: 'no-store' });
-        return r.status === 204 || r.ok;
-      } catch {
-        return false;
-      }
-    });
-  }
-  /** 보내고 401이면 갱신 뒤 한 번 더. 갱신도 안 되면 null(로그인) */
-  async function call(path: string, init: RequestInit): Promise<Response | null> {
-    const send = () => o.fetch(url(path), { credentials: 'include', cache: 'no-store', ...init });
+  /** 401만 거절(rejected)이고 연결 끊김·5xx는 일시 장애(unavailable)다(docs/frontend.md §4.1 '401', 새 맥락 리뷰) */
+  const refresh = (): Promise<RefreshResult> => lock(() => refreshOnce(o.fetch, url('/v1/identity/access-tokens')));
+  /**
+   * 보내고 401이면 갱신 뒤 한 번 더. 갱신이 401로 거절되거나 다시 401이면 login, 갱신이 일시 장애면 unavailable이다.
+   * onSend: 요청을 실제로 보낼 때마다(다시 보낸 것 포함) 부른다(시계 표본의 보낸 시각)
+   */
+  async function call(path: string, init: RequestInit, onSend?: () => void): Promise<Response | 'login' | 'unavailable'> {
+    const send = () => {
+      onSend?.();
+      return o.fetch(url(path), { credentials: 'include', cache: 'no-store', ...init });
+    };
     const first = await send();
     if (first.status !== 401) return first;
-    if (!(await refresh())) return null;
+    const refreshed = await refresh();
+    if (refreshed === 'rejected') return 'login';
+    if (refreshed !== 'ok') return 'unavailable';
     const second = await send();
-    return second.status === 401 ? null : second;
+    return second.status === 401 ? 'login' : second;
   }
   return {
     refresh,
     async list(): Promise<ListAnswer> {
-      let r: Response | null;
+      let r: Response | 'login' | 'unavailable';
       try {
         r = await call('/v1/identity/providers', { method: 'GET', headers: { accept: 'application/json' } });
       } catch {
         return { kind: 'error' };
       }
-      if (r === null) return { kind: 'login' };
-      if (r.status !== 200) return { kind: 'error' };
+      if (r === 'login') return { kind: 'login' };
+      // 일시 장애도 오류(화면은 안내와 [다시 불러오기])
+      if (r === 'unavailable' || r.status !== 200) return { kind: 'error' };
       try {
         const b = (await r.json()) as { providers?: unknown };
         const rows = Array.isArray(b.providers) ? b.providers : [];
@@ -123,13 +150,14 @@ export function createLoginMethodsApi(o: { origin: string; fetch: FetchLike; loc
       }
     },
     async unlink(provider: Provider, token: string): Promise<UnlinkAnswer> {
-      let r: Response | null;
+      let r: Response | 'login' | 'unavailable';
       try {
         r = await call(`/v1/identity/providers/${provider}`, { method: 'DELETE', headers: { accept: 'application/json', 'x-reauth-token': token } });
       } catch {
         return { kind: 'error' };
       }
-      if (r === null) return { kind: 'login' };
+      if (r === 'login') return { kind: 'login' };
+      if (r === 'unavailable') return { kind: 'error' };
       if (r.status === 204) return { kind: 'done' };
       if (r.status === 404) return { kind: 'missing' };
       if (r.status === 409 && (await problemType(r)) === 'last-login-method') return { kind: 'last' };
@@ -138,15 +166,22 @@ export function createLoginMethodsApi(o: { origin: string; fetch: FetchLike; loc
     },
     async getMerge(id: string): Promise<MergeAnswer> {
       if (!isMergeProposalId(id)) return { kind: 'expired' };
-      let r: Response | null;
+      let r: Response | 'login' | 'unavailable';
+      // 시계 표본의 보낸 시각은 실제로 보낸 요청마다 잰다(401 → 갱신 → 다시 보냈으면 마지막으로 보낸 때, 새 맥락 리뷰)
+      let sent = mono();
       try {
-        r = await call(`/v1/identity/merge-proposals/${id}`, { method: 'GET', headers: { accept: 'application/json' } });
+        r = await call(`/v1/identity/merge-proposals/${id}`, { method: 'GET', headers: { accept: 'application/json' } }, () => (sent = mono()));
       } catch {
         return { kind: 'error' };
       }
-      if (r === null) return { kind: 'login' };
+      if (r === 'login') return { kind: 'login' };
+      if (r === 'unavailable') return { kind: 'error' };
       if (r.status === 404) return { kind: 'expired' };
       if (r.status !== 200) return { kind: 'error' };
+      // 캐시하지 않는 응답의 Date를 보정 시계 표본으로 더한다(읽지 못하면 앞서 모은 보정값, 없으면 기기 시계 그대로, frontend §3.3)
+      o.clock?.addDateHeader(r.headers.get('date'), sent, mono());
+      /** 서버 시각 − 기기 시각 */
+      const skew = o.clock ? o.clock.now() - wall() : 0;
       try {
         const b = (await r.json()) as Record<string, unknown>;
         const moved = (b.moved ?? {}) as Record<string, unknown>;
@@ -162,7 +197,7 @@ export function createLoginMethodsApi(o: { origin: string; fetch: FetchLike; loc
             status: b.status,
             blockers,
             moved: { providers: count(moved.providers), wishes: count(moved.wishes), subscriptions: count(moved.subscriptions), addresses: count(moved.addresses), orders: count(moved.orders) },
-            expiresAt,
+            expiresAt: expiresAt - skew,
             newProvider: b.newProvider,
             requesterRole: b.requesterRole,
             primaryVerified: b.primaryVerified === true,
@@ -174,13 +209,15 @@ export function createLoginMethodsApi(o: { origin: string; fetch: FetchLike; loc
     },
     async confirmMerge(id: string, token: string): Promise<ConfirmMergeAnswer> {
       if (!isMergeProposalId(id)) return { kind: 'expired' };
-      let r: Response | null;
+      let r: Response | 'login' | 'unavailable';
       try {
         r = await call(`/v1/identity/merge-proposals/${id}/confirmation`, { method: 'POST', headers: { accept: 'application/json', 'x-reauth-token': token } });
       } catch {
-        return { kind: 'error' };
+        // 연결이 끊겨도 재인증 토큰과 확인 창을 둔다(서버가 처리했으면 다시 누를 때 404 만료, 새 맥락 리뷰)
+        return { kind: 'unavailable' };
       }
-      if (r === null) return { kind: 'login' };
+      if (r === 'login') return { kind: 'login' };
+      if (r === 'unavailable') return { kind: 'unavailable' };
       if (r.status === 202) return { kind: 'accepted' };
       if (r.status === 404) return { kind: 'expired' };
       if (r.status === 403) return { kind: 'reauth' };
@@ -200,11 +237,12 @@ export function createLoginMethodsApi(o: { origin: string; fetch: FetchLike; loc
     async pickupReauth(): Promise<ReauthAnswer> {
       try {
         const r = await o.fetch('/reauth/token', { method: 'POST', credentials: 'same-origin', cache: 'no-store' });
-        if (r.status !== 200) return { kind: 'failed' };
+        // 실패는 이유를 남긴다(탈퇴 화면과 같은 이유별 문구, identity §2.1, BOT-041이 넘긴 것)
+        if (r.status !== 200) return { kind: 'failed', reason: reauthFailureOf(await problemType(r)) };
         const b = (await r.json()) as { reauthToken?: unknown };
-        return typeof b.reauthToken === 'string' && b.reauthToken ? { kind: 'token', token: b.reauthToken } : { kind: 'failed' };
+        return typeof b.reauthToken === 'string' && b.reauthToken ? { kind: 'token', token: b.reauthToken } : { kind: 'failed', reason: 'failed' };
       } catch {
-        return { kind: 'failed' };
+        return { kind: 'failed', reason: 'failed' };
       }
     },
   };
@@ -237,6 +275,25 @@ export function reauthForm(provider: Provider): { action: string; fields: Record
   return { action: `/reauth/${provider}`, fields: { returnTo: RETURN_TO, purpose: '' } };
 }
 
+/**
+ * 재인증으로 떠난다: 액세스 토큰을 먼저 갱신하고(만료된 토큰이면 재인증 시작이 막다른 페이지가 된다), 할 일을 남긴 뒤 재인증 양식을 보낸다.
+ * 갱신이 401이면 login(로그인 화면), 일시 장애면 retry(떠나지 않고 할 일도 남기지 않는다, 화면은 '잠시 뒤 다시', identity §2.1, 새 맥락 리뷰)
+ */
+export async function leaveForReauth(o: {
+  api: { refresh(): Promise<RefreshResult> };
+  storage: StorageLike;
+  pending: Pending;
+  provider: Provider;
+  submit: (f: { action: string; fields: Record<string, string> }) => void;
+}): Promise<'left' | 'login' | 'retry'> {
+  const r = await o.api.refresh();
+  if (r === 'rejected') return 'login';
+  if (r !== 'ok') return 'retry';
+  markPending(o.storage, o.pending);
+  o.submit(reauthForm(o.provider));
+  return 'left';
+}
+
 /** 로그인 수단 추가 시작 양식(POST /link/{p}, 재인증 토큰을 싣는다) */
 export function linkForm(provider: Provider, token: string): { action: string; fields: Record<string, string> } {
   return { action: `/link/${provider}`, fields: { reauthToken: token, returnTo: RETURN_TO } };
@@ -259,7 +316,7 @@ export function addResultText(v: string | null, o: { merge?: boolean } = {}): { 
       if (o.merge === false) return { tone: 'warning', text: '그 소셜 계정은 이미 다른 PEAKET 계정의 로그인 수단입니다. 지금은 두 계정을 합칠 수 없으니 잠시 뒤 다시 추가해 주세요' };
       return { tone: 'warning', text: '그 소셜 계정은 이미 다른 PEAKET 계정의 로그인 수단입니다' };
     case 'reauth-required':
-      return { tone: 'danger', text: '다시 로그인한 지 5분이 지났습니다. 처음부터 다시 시도해 주세요' };
+      return { tone: 'danger', text: REAUTH_EXPIRED_RETRY };
     case 'failed':
       return { tone: 'danger', text: '지금은 처리할 수 없습니다. 잠시 뒤 다시 시도해 주세요' };
     default:
@@ -277,7 +334,7 @@ export function unlinkResultText(a: UnlinkAnswer): { tone: 'success' | 'warning'
     case 'missing':
       return { tone: 'warning', text: '이미 해제된 로그인 수단입니다' };
     case 'reauth':
-      return { tone: 'danger', text: '다시 로그인한 지 5분이 지났습니다. 처음부터 다시 시도해 주세요' };
+      return { tone: 'danger', text: REAUTH_EXPIRED_RETRY };
     default:
       return { tone: 'danger', text: '지금은 처리할 수 없습니다. 잠시 뒤 다시 시도해 주세요' };
   }
@@ -361,7 +418,7 @@ export function confirmMergeText(a: { kind: ConfirmMergeAnswer['kind'] }): { ton
     case 'expired':
       return { tone: 'warning', text: '합치기 제안 시간이 지났습니다. 다시 추가해 주세요' };
     case 'reauth':
-      return { tone: 'danger', text: '다시 로그인한 지 5분이 지났습니다. 처음부터 다시 시도해 주세요' };
+      return { tone: 'danger', text: REAUTH_EXPIRED_RETRY };
     case 'unavailable':
       return { tone: 'danger', text: '지금은 합칠 수 있는지 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요' };
     default:
@@ -382,11 +439,45 @@ export interface MergeState {
   token?: { token: string; via: Provider };
   error?: string;
 }
-/** 다음 상태. login이면 로그인으로, go면 그 주소를 새 문서로 연다, reload면 목록을 다시 읽는다 */
-export type MergeStep = { merge?: MergeState; notice?: Tone; reload?: boolean; go?: string; login?: boolean };
+/** 다음 상태. login이면 로그인으로, go면 그 주소를 새 문서로 연다(mergedAway면 그 전에 흡수 표시를 남긴다), reload면 목록을 다시 읽는다 */
+export type MergeStep = { merge?: MergeState; notice?: Tone; reload?: boolean; go?: string; mergedAway?: true; login?: boolean };
 
 /** 지금 계정이 흡수된 뒤 여는 주소(로그인 전 셸로 흡수 안내, d5 §5.22 '지금 계정이 흡수됨') */
 export const MERGED_AWAY_PATH = '/my/settings/providers?ended=MERGED';
+/** 흡수 안내를 방금 흡수 확정을 받은 이 탭에만 보이게 남기는 표시(값은 남긴 시각, docs/frontend.md §3.12, BOT-043이 넘긴 것) */
+export const MERGED_AWAY_KEY = 'peaket.providers.merged';
+/** 표시를 믿는 시간 1분 [가정]: 떠나자마자 새 문서가 읽는다 */
+export const MERGED_AWAY_TTL_MS = 60_000;
+
+/** 흡수 안내로 떠나기 직전에 남긴다(로그아웃 정리 루틴은 그 앞에 돈다, frontend §5.14.4) */
+export function markMergedAway(storage: StorageLike, now: number): void {
+  storage.set(MERGED_AWAY_KEY, String(now));
+}
+
+/**
+ * 흡수 안내 주소(?ended=MERGED)가 열릴 때: 1분 안의 표시가 있으면 true. 늘 지운다(한 번만).
+ * 서버는 세션 종료 사유를 화면에 알려 주지 않아(갱신 401은 사유 없음) 주소만으로는 안내를 그리지 않는다(identity §2.1 '계정 병합의 첫 구현' 화면)
+ */
+export function takeMergedAway(storage: StorageLike, now: number): boolean {
+  const v = storage.get(MERGED_AWAY_KEY);
+  storage.remove(MERGED_AWAY_KEY);
+  if (v === null || !/^\d+$/.test(v)) return false;
+  const at = Number(v);
+  return at <= now && now - at <= MERGED_AWAY_TTL_MS;
+}
+
+/**
+ * 병합 제안을 읽은 뒤 주소창에서 지울 값(?mergeProposal=과 함께 온 ?loginMethod=). 지울 것이 없으면 null.
+ * 카드를 닫은 뒤 새로 고쳐도 다시 뜨지 않고 그 방문 기록 항목에 남지 않게 한다(identity §2.1 '계정 병합의 첫 구현' 화면, BOT-043이 넘긴 것)
+ */
+export function mergeUrlWithoutProposal(pathname: string, search: string, hash: string): string | null {
+  const q = new URLSearchParams(search);
+  if (!q.has('mergeProposal') && !q.has('loginMethod')) return null;
+  q.delete('mergeProposal');
+  q.delete('loginMethod');
+  const rest = q.toString();
+  return `${pathname}${rest ? `?${rest}` : ''}${hash}`;
+}
 
 /** 제안을 읽은 뒤. 재인증 토큰은 PROPOSED일 때만 이어 받는다(그사이 막혔으면 확인 창을 열지 않는다) */
 export function mergeAfterGet(id: string, r: MergeAnswer, token?: MergeState['token']): MergeStep {
@@ -403,7 +494,7 @@ export function mergeAfterConfirm(m: MergeState, r: ConfirmMergeAnswer): MergeSt
   if (r.kind === 'login') return { login: true };
   if (r.kind === 'accepted') {
     // 지금 계정이 흡수되는 쪽이면 세션이 끝났다: 남은 화면 상태를 들고 가지 않게 새 문서로 흡수 안내를 연다
-    if (m.view?.requesterRole === 'MERGED') return { go: MERGED_AWAY_PATH };
+    if (m.view?.requesterRole === 'MERGED') return { go: MERGED_AWAY_PATH, mergedAway: true };
     return { merge: { ...base, phase: 'merging' }, reload: true };
   }
   if ((r.kind === 'blocked' || r.kind === 'invariant') && m.view) return { merge: { ...base, view: { ...m.view, status: 'BLOCKED', blockers: r.kind === 'blocked' ? r.blockers : [] }, phase: 'blocked' } };

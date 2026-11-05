@@ -1,7 +1,9 @@
 // 본인확인 창 흐름을 실제 브라우저에 잇는다(flow.ts의 환경 값을 window·BroadcastChannel·sessionStorage로 만든다).
 // 화면 컴포넌트(ui/VerifyFlow.tsx, _pages/verify-return)만 부른다. 규칙은 flow.ts와 docs/features/identity.md §5에 있다.
 import { ORIGINS } from '@/shared/config/origins';
-import { type AgencyWindow, type CallerEnv, type ChannelLike, createVerifyApi, REFRESH_LOCK, type ReturnEnv, type StorageLike, VERIFY_CHANNEL, type VerifyApi } from './flow';
+import { refreshLock } from '@/shared/lib/refresh-lock';
+import { sleep } from '@/shared/lib/sleep';
+import { type AgencyWindow, type CallerEnv, type ChannelLike, createVerifyApi, type ReturnEnv, type StorageLike, VERIFY_CHANNEL, type VerifyApi } from './flow';
 
 /**
  * 실제 흐름인가. 운영 빌드는 늘 실제 흐름이다(API 출처를 주지 않으면 운영 기본값). 시험 창이 운영에 나가 가짜 '완료'를 보이지 않게 한다.
@@ -9,14 +11,9 @@ import { type AgencyWindow, type CallerEnv, type ChannelLike, createVerifyApi, R
  */
 export const isLiveVerify = (): boolean => ORIGINS.api !== '';
 
-/** 토큰 갱신을 창끼리 하나씩(Web Locks). 잠금이 없는 브라우저는 그대로 부른다 */
-function refreshLock<T>(fn: () => Promise<T>): Promise<T> {
-  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
-  return locks ? (locks.request(REFRESH_LOCK, fn) as Promise<T>) : fn();
-}
-
+/** 토큰 갱신은 창끼리 하나씩(Web Locks `peaket.refresh`, shared/lib/refresh-lock) */
 export function browserVerifyApi(): VerifyApi {
-  return createVerifyApi({ origin: ORIGINS.api, fetch: (input, init) => fetch(input, init), lock: refreshLock });
+  return createVerifyApi({ origin: ORIGINS.api, fetch: (input, init) => fetch(input, init), lock: (fn) => refreshLock(fn) });
 }
 
 const sessionStore: StorageLike = {
@@ -61,8 +58,6 @@ export function submitAgencyForm(target: string, w: AgencyWindow): void {
   form.submit();
   form.remove();
 }
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** 같은 출처 BroadcastChannel('peaket.verify')을 흐름의 채널 모양으로 감싼다 */
 function browserChannel(): ChannelLike {
@@ -113,6 +108,7 @@ export function browserReturnEnv(api: VerifyApi = browserVerifyApi()): ReturnEnv
     replaceUrl: (p) => history.replaceState(null, '', p),
     closeWindow: () => window.close(),
     navigate: (p) => location.replace(p),
+    now: () => Date.now(),
     storage: sessionStore,
   };
 }

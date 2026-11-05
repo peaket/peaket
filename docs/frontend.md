@@ -600,15 +600,16 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | sessionStorage | `peaket.admission.{eventId}` | 입장 토큰, 서버 ECDH 공개키(JWK), 좌석맵 파일 경로, 받은 시각 | 구매 세션 | 세션 끝·로그아웃·만료 | P1(구매 세션 자격) |
 | IndexedDB `peaket-purchase` | `sessions/{jti}` | HMAC `CryptoKey`(위조 확인용 값을 만드는 비밀 키. 추출 불가), 일련번호, 만료 | 구매 세션 | 세션 끝·로그아웃·만료, 앱 시작 때 만료 항목 | P1 |
 | 메모리 | — | 재인증 토큰(로그인 수단 추가만 `POST /link/{provider}` 양식 칸으로 앱 서버에 넘겨 로그인 진행 쿠키에 봉인한다, 2026-11-04 BOT-041) | 5분, 한 번 | 쓴 뒤 | P1 |
-| sessionStorage | `peaket.withdraw.reauth` | 탈퇴 재인증으로 떠난 시각(밀리초. 토큰은 넣지 않는다, docs/features/identity.md §8 '탈퇴 화면 연결', 추천 적용 2026-11-04) | 10분 [가정] | 재인증에서 돌아왔을 때(늘 지운다) | 등급 밖(숫자) |
-| sessionStorage | `peaket.providers.pending` | 로그인 수단 해제·추가·계정 합치기로 재인증을 떠날 때의 할 일(종류 unlink·add·merge, 제공자, 합치기면 병합 제안 ID, 떠난 시각. 토큰은 넣지 않는다, docs/features/identity.md §2.1 '설정의 로그인 수단 연결·해제의 첫 구현'·'계정 병합의 첫 구현', 추천 적용 2026-11-04, BOT-043) | 10분 [가정] | 재인증에서 돌아왔을 때(늘 지운다) | 등급 밖 |
+| sessionStorage | `peaket.withdraw.reauth` | 탈퇴 재인증으로 떠난 시각(밀리초. 토큰은 넣지 않는다, docs/features/identity.md §8 '탈퇴 화면 연결', 추천 적용 2026-11-04) | 탭(남긴 지 10분 [가정] 안일 때만 믿는다) | 재인증에서 돌아왔을 때(늘 지운다), 로그아웃. 같은 탭에 다른 계정이 로그인해도 지난 계정의 재인증 실패 창이 뜨지 않게 한다(2026-11-05, BOT-036이 넘긴 것) | 등급 밖(숫자) |
+| sessionStorage | `peaket.providers.pending` | 로그인 수단 해제·추가·계정 합치기로 재인증을 떠날 때의 할 일(종류 unlink·add·merge, 제공자, 합치기면 병합 제안 ID, 떠난 시각. 토큰은 넣지 않는다, docs/features/identity.md §2.1 '설정의 로그인 수단 연결·해제의 첫 구현'·'계정 병합의 첫 구현', 추천 적용 2026-11-04, BOT-043) | 탭(남긴 지 10분 [가정] 안일 때만 믿는다) | 재인증에서 돌아왔을 때(늘 지운다), 로그아웃(위 줄과 같은 까닭, 2026-11-05, BOT-036이 넘긴 것) | 등급 밖 |
+| sessionStorage | `peaket.providers.merged` | 지금 계정이 계정 합치기로 흡수되어 흡수 안내로 떠난 시각(밀리초). 흡수 안내(`?ended=MERGED`)를 방금 흡수 확정을 받은 이 탭에만 보이려고 둔다(docs/features/identity.md §2.1 '계정 병합의 첫 구현' 화면, 2026-11-05, BOT-043이 넘긴 것) | 탭(남긴 지 1분 [가정] 안일 때만 믿는다) | 흡수 안내 화면이 열릴 때(늘 지운다). 로그아웃 정리는 이 표시를 남기기 전에 돈다 | 등급 밖(숫자) |
 | localStorage | `peaket.autoassign.{eventId}` | 희망 조건(등급 ID·매수·휠체어석·분리 허용) | 판매 종료까지 | 로그아웃, 배정 확정, 판매 종료 | 등급 밖 |
 | sessionStorage | `peaket.checkout.{holdId}` | 동의 체크, 고른 결제 수단(이름·전화는 없다) | 탭 | 결제 접수, 구매 세션 끝 | 등급 밖 |
 | sessionStorage | `peaket.accept.{orderId}` | 결제 접수를 보낸 시각과 그 멱등키(결제사 값은 넣지 않는다) | 탭 | 결과 확정, 구매 세션 끝 | 등급 밖 |
 | localStorage | `peaket.recentSearches` | 검색어 최대 10개 [가정] | 사용자가 지울 때까지 | 하나씩·전체 지우기. 로그아웃 때는 지우지 않는다(비로그인 상태에서도 쓴다) | 수집 안 함(data-classification) |
 | localStorage | `peaket.wishQueue` | 오프라인 찜·해제 대기(공연 ID, 동작, 시각. 같은 공연은 마지막 동작 하나만 남긴다, ADR-0093, 기술 검토 낮음-060) | 보낼 때까지 | 보낸 뒤, 로그아웃 | 등급 밖 |
 | sessionStorage | `peaket.staff.fragment` | 초대 토큰 또는 승인 코드(URL 조각에서 옮겨 온 값) | 10분 [가정] | 조회 성공, 탭 닫힘 | P1 |
-| sessionStorage | `peaket.verify.{verificationId}` | 목적, 시작 시각(결과 대조용) | 10분 [가정] | 결과를 받았을 때 | 등급 밖 |
+| sessionStorage | `peaket.verify.return` | 페이지 이동으로 돌아온 본인확인 건 ID와 남긴 시각, 복귀 화면이 토큰 갱신까지 마쳤는지(못 했으면 부르는 화면이 갱신한다, 2026-11-05)(결과 값은 넣지 않는다, docs/features/identity.md §5 '복귀 화면의 스크립트'). 앞 판의 `peaket.verify.{verificationId}`(목적·시작 시각) 줄은 구현이 쓰지 않아 이 줄로 바꿨다(2026-11-05, BOT-010이 넘긴 것) | 탭(남긴 지 1분 [가정] 안일 때만 믿는다. 복귀 화면은 남기자마자 `next`로 가므로 부르는 화면이 곧 읽는다) | 부르는 화면이 열려 읽을 때(늘 지운다), 로그아웃 | 등급 밖 |
 | IndexedDB `peaket-push`(웹 푸시 서비스 워커 `/push/sw.js`와 화면이 함께 쓴다, §5.4) | `pending` | '다시 등록 필요' 표시와 브라우저가 바꾼 새 구독(구독 주소, 암호화 키 `p256dh`·`auth`, `expirationTime`), 적은 시각. 서비스 워커의 `pushsubscriptionchange`가 적는다. 서비스 워커는 액세스 토큰을 새로 받지 못할 수 있어 직접 등록하지 않는다 | 다음에 화면이 열려 등록할 때까지 | 로그인한 화면이 `POST /v1/push-subscriptions`로 등록에 성공했을 때, 로그아웃 | P2(Web Push 구독 정보, data-classification). 추천 적용 2026-10-30, docs/features/notify.md §3.4 |
 | IndexedDB `peaket-wallet` | §3.7 | 오프라인 티켓 표시 값, 기기 키(추출 불가) | 공연 끝 + 7일 [가정] | 기본은 로그아웃해도 남긴다. '이 기기의 입장 키도 지우기'를 고르면 지운다. 키를 폐기·재발급할 때는 그 티켓 | P2 |
 | Cache Storage(월렛 서비스 워커) | `wallet-shell-{판}` | 월렛 셸 HTML·JS·CSS·글꼴 | 다음 판까지 | 새 판 활성화, 킬 스위치, 입장 키 지우기 선택 | 개인정보는 없다 |
@@ -620,7 +621,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 - **저장하지 않는 것**: 이름·전화·이메일·주소·계좌번호·카드 값·결제사 토큰(`paymentKey`·`paymentToken`)·인증 앱 코드·비밀번호·문의·신고·소명(예매 제한이나 양도 회수 대상이 된 팬이 사정을 설명하는 절차) 본문·본인확인 결과 값·서버 오류 원문. 결제창 복귀 주소의 값은 읽자마자 주소에서 지우고, 저장하지 않는다(asvs/payment).
 - **쿠키**: 프론트엔드 코드는 쿠키를 쓰지 않는다(`document.cookie` 쓰기를 금지하는 린트). 쿠키 이름과 속성은 identity §3이 정본이다.
 - **HTTP 캐시에 맡기는 것**: 좌석맵 파일(`SeatMapLayout`, 배치 버전이 이름에 든 `immutable` 파일)은 위 표의 저장소에 넣지 않고 브라우저 HTTP 캐시에 맡긴다. 대기 중에 미리 받아 두는 것도 HTTP 캐시다(§3.2·§5.2, 2026-11-02 정합 점검, docs/data.md §1 클라이언트 로컬 저장소 행).
-- **정리 루틴이 도는 때**: 앱 시작(만료 항목), 로그아웃(§5.14), 세션 만료 통지(`peaket.session` 채널), 구매 세션 끝, 판매 종료(대기실이 `ENDED`를 보면).
+- **정리 루틴이 도는 때**: 앱 시작(만료 항목), 로그아웃(§5.14), 세션 만료 통지(`peaket.session` 채널), 구매 세션 끝, 판매 종료(대기실이 `ENDED`를 보면). 탈퇴 완료(탈퇴 204·202)와 지금 계정의 흡수(병합 확정 202에 `requesterRole` MERGED)도 그 자리에서 세션이 끝나므로 로그아웃과 같은 정리를 한다(§5.14.4, 2026-11-05, BOT-036·BOT-043이 넘긴 것).
 - **용량**: localStorage는 한 출처에 몇 MB 수준이라 위 키만 둔다. 큰 데이터(월렛·스캐너 목록)는 IndexedDB에 둔다. `QuotaExceededError`가 나면 오래된 회차 키부터 지우고 다시 쓴다.
 
 ## 4. 인터페이스(I)
@@ -643,7 +644,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 자동 재시도 | 읽기와 멱등키가 있는 쓰기만 자동으로 다시 시도한다. 네트워크 오류·시간 초과·`Retry-After`가 붙은 503일 때 최대 2회 [가정] 다시 시도한다. 구매 세션 쓰기는 같은 멱등키로 1회 다시 보내되, 일련번호와 MAC은 새로 만든다. 멱등키가 없는 생성형 쓰기(소명, 부스 요청, 알림 신청 등)는 자동으로 다시 시도하지 않는다 |
 | 기다림 | 서버가 준 다시 시도 시각(`Retry-After`(초 또는 HTTP 날짜), 본문의 `retryAfterSeconds`·`pollHintMs`)은 하한이다. 기다림 = `하한 × (1 + U(0, 0.2))`로, 하한보다 이르게 보내지 않고 위쪽으로만 0~20% 퍼뜨린다(U는 0~0.2의 고른 무작위 값, guidelines §5, 추천 적용 2026-10-28, 기술 검토 중간-038). 하한으로 자르기만 하면 503을 같은 1초에 받은 사람들이 정확히 같은 때 다시 온다. 예외로 `NOT_YET`의 `retryAfterMs`는 사람마다 계산한 예상 도래 시각이라 지터 없이 그 시각에 보낸다(§5.1). 하한이 없으면 전체 지터(0부터 지금 상한 사이의 고른 무작위 값)를 쓰고, 시작 0.5초·상한 8초 [가정]로 한다. 한 페이지의 자동 재시도는 분당 60회를 넘지 않는다(guidelines §5의 재시도 예산) |
 | 오류 모양 | `application/problem+json`이면 `ApiError{status, type, title, detail, traceId, 확장 필드}`로 읽는다. `type`은 주소의 끝 경로(케밥 표기)다. 화면은 `type` → 문구 키 표(§5.12)로 문구를 고르고, 서버의 `title`·`detail` 원문은 보이지 않는다. 5xx 화면에는 문의용 `traceId`만 보인다 |
-| 401 | 팬: 갱신을 한 번만 한다(`POST /v1/identity/access-tokens`, Web Locks `token-refresh`로 탭 사이에서도 한 번만). 그 뒤 원래 요청을 한 번 다시 보낸다. 갱신 요청이 401이면 세션이 끝난다(SCR-004). 구매 경로의 401은 `type`으로 가른다(추천 적용 2026-11-05, BUILD_ORDER BAS-040, ADR-0194 결정 3): `about:blank`(팬 쿠키 없음·만료)는 위처럼 갱신 한 번 뒤 다시 보낸다. `purchase-seq-reused`는 IndexedDB의 일련번호가 서버보다 뒤로 간 것이라 번호를 1,000 [가정] 건너뛰어 같은 멱등 키로 한 번 다시 보낸다(서버는 마지막 번호보다 큰 번호만 받는다). `purchase-session-ended`·`admission-token-invalid`·`purchase-signature-invalid`(키가 없거나 어긋남)는 구매 세션이 끝난 것으로 본다(§5.3). 다시 보낸 뒤에도 401이면 끝난 것으로 본다. api-client의 `purchaseUnauthorizedAction`이 이 셋(`refresh`·`skip-seq-and-retry`·`session-ended`)으로 가른다(BAS-041). 구매 서비스가 스스로 내는 401(스냅샷 첫 사용의 입장 토큰 거절, 홀드의 세션 없음)은 PRF-190 전까지 `about:blank`라, 그때까지는 갱신 한 번 뒤에도 401이면 끝난 것으로 본다. 관리 계정: 결정 11의 사람 동작 조건을 지킨다 |
+| 401 | 팬: 갱신을 한 번만 한다(`POST /v1/identity/access-tokens`, Web Locks `peaket.refresh`로 탭 사이에서도 한 번만. 코드는 apps/web/src/shared/lib/refresh-lock.ts, 이름은 2026-11-05 코드에 맞춤). 그 뒤 원래 요청을 한 번 다시 보낸다. 갱신 요청이 401이면 세션이 끝난다(SCR-004). 갱신이 401이 아닌 이유(연결 끊김·5xx)로 실패하면 세션이 끝난 것으로 보지 않는다. 로그인 화면으로 보내지 않고 그 화면의 '잠시 뒤 다시' 안내를 보인다. 본인확인·탈퇴·로그인 수단 흐름과 공용 팬 API 클라이언트(`withFanRefresh`)가 모두 이 규칙을 따른다. 공용 클라이언트는 그때 401이 아닌 오류(503 `refresh-unavailable`)를 던진다. 홈·공연 상세의 찜·알림 버튼 동작은 비로그인으로 바꾸지 않고 '잠시 뒤 다시'를 보인다. 두 화면의 개인 값 첫 조회는 '다시 불러오기' 상태가 없어 그때도 비로그인 모양으로 둔다(남는 한계, 2026-11-05 새 맥락 마지막 검토)(2026-11-05, BOT-010·BOT-036·BOT-041 새 맥락 리뷰). 구매 경로의 401은 `type`으로 가른다(추천 적용 2026-11-05, BUILD_ORDER BAS-040, ADR-0194 결정 3): `about:blank`(팬 쿠키 없음·만료)는 위처럼 갱신 한 번 뒤 다시 보낸다. `purchase-seq-reused`는 IndexedDB의 일련번호가 서버보다 뒤로 간 것이라 번호를 1,000 [가정] 건너뛰어 같은 멱등 키로 한 번 다시 보낸다(서버는 마지막 번호보다 큰 번호만 받는다). `purchase-session-ended`·`admission-token-invalid`·`purchase-signature-invalid`(키가 없거나 어긋남)는 구매 세션이 끝난 것으로 본다(§5.3). 다시 보낸 뒤에도 401이면 끝난 것으로 본다. api-client의 `purchaseUnauthorizedAction`이 이 셋(`refresh`·`skip-seq-and-retry`·`session-ended`)으로 가른다(BAS-041). 구매 서비스가 스스로 내는 401(스냅샷 첫 사용의 입장 토큰 거절, 홀드의 세션 없음)은 PRF-190 전까지 `about:blank`라, 그때까지는 갱신 한 번 뒤에도 401이면 끝난 것으로 본다. 관리 계정: 결정 11의 사람 동작 조건을 지킨다 |
 | 추적 | `traceparent`는 같은 출처 요청(웹·파트너 앱 서버의 경로)에만 붙인다(observability §2·§11). API 호스트로 가는 요청에는 붙이지 않는다. 엣지 게이트웨이가 바깥에서 온 추적 문맥을 지우고 새 trace를 시작하므로, 붙여도 이어지지 않는다. 앱 서버도 받은 값을 부모로 쓰지 않고 span 링크로만 남긴다(observability §6, 추천 적용 2026-10-28, 기술 검토 중간-066). 그래서 브라우저 추적은 앱 서버 요청만 링크로 서버 추적과 이어지고, API 호출은 오류 응답의 `traceId`로 찾는다 |
 | 지표 | 실패를 `rum_api_fail_total{app, route, class}`로 센다(§5.16). 409 홀드 경합과 423은 실패로 세지 않는다(guidelines §2) |
 
@@ -942,7 +943,7 @@ export type HostView = Readonly<Pick<HostState, "scope" | "control" | "autoActio
 | `peaket.verify` | BroadcastChannel | 본인확인 결과 `{verificationId, status}` |
 | `queue-poll:{eventId}` | Web Locks | 그 회차 대기실 폴링 리더. 보이는 탭만 청하고, 리더가 숨겨지면 바로 놓는다(숨긴 탭은 청하지 않는다). 입장 확정도 이 잠금을 쥔 탭만 보낸다(추천 적용 2026-10-28, 기술 검토 중간-037, §5.1) |
 | `ps:{jti}` | Web Locks | 구매 세션 일련번호와 요청 직렬화(§5.3) |
-| `token-refresh` | Web Locks | 팬 토큰 갱신을 탭 사이에서 한 번만 하게 한다 |
+| `peaket.refresh` | Web Locks | 팬 토큰 갱신을 탭 사이에서 한 번만 하게 한다(이름은 2026-11-05 코드에 맞춤, shared/lib/refresh-lock) |
 
 **저장소 액션 이름 규칙**(추천 적용 2026-10-27, ADR-0092 결정 4): Zustand 동작 이름은 `슬라이스/동작`으로 짓는다. 사람이 한 동작은 동사(예: `seat/select`)로, 바깥에서 온 사건은 과거형(예: `alerts/received`)으로 짓고, `set`의 셋째 인자로 넘겨 개발 도구 기록에 남긴다. 상태는 저장소가 내보낸 동작으로만 바꾸고, 저장소 밖에서 `setState`를 부르지 않는다. XState 이벤트는 대문자 뱀 표기(예: `HOLD_SUCCEEDED`)로 짓는다. 원격 위젯 저장소의 이름은 `widgets/<원격 이름>`으로 시작한다.
 
@@ -1420,7 +1421,8 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 #### 5.14.4 로그아웃 정리 루틴(ADR-0079 결정 17)
 
 1. 화면이 로그아웃 확인 대화상자를 띄운다("로그아웃합니다", ☐ 이 기기의 입장 키도 지우기, 기본은 해제, docs/design/d5 §3).
-2. 서버 응답을 기다리지 않고, §3.12 표에서 지우는 때에 '로그아웃'이 있는 값을 지운다: 회차 대기 정보, 입장 토큰, 구매 세션 키, 희망 조건, 결제 초안, 오프라인 찜 대기열, 웹 푸시 '다시 등록 필요' 표시(`peaket-push`), 재인증 토큰, 텔레메트리 버퍼, 관제 콘솔의 `peaket.console.ui`.
+2. 서버 응답을 기다리지 않고, §3.12 표에서 지우는 때에 '로그아웃'이 있는 값을 지운다: 회차 대기 정보, 입장 토큰, 구매 세션 키, 희망 조건, 결제 초안, 오프라인 찜 대기열, 웹 푸시 '다시 등록 필요' 표시(`peaket-push`), 재인증 토큰, 재인증 뒤 할 일 표시(`peaket.withdraw.reauth`·`peaket.providers.pending`), 본인확인 복귀 건(`peaket.verify.return`), 텔레메트리 버퍼, 관제 콘솔의 `peaket.console.ui`(재인증 뒤 할 일 표시와 본인확인 복귀 건은 2026-11-05, BOT-010·BOT-036이 넘긴 것).
+   - **탈퇴 완료와 계정 흡수(2026-11-05, BOT-036·BOT-043이 넘긴 것)**: 서버가 그 자리에서 세션을 끝내므로 확인 대화상자 없이 이 2번과 4번을 한다(월렛 입장 키는 기본대로 남긴다). 탈퇴는 204·202를 받은 직후, 계정 합치기는 확정 202에 지금 계정이 흡수되는 쪽(`requesterRole` MERGED)일 때 흡수 안내로 떠나기 직전이다. 흡수면 정리를 마친 뒤에 흡수 표시(`peaket.providers.merged`)를 남긴다. 이 루틴은 BUILD_ORDER GAT-040이 붙이고, 그때 두 자리에서도 부른다.
    - **웹 푸시 구독 풀기(소비자 웹, 추천 적용 2026-10-30, docs/features/notify.md §3.4)**: 이 브라우저에 웹 푸시 구독이 있으면(`registration.pushManager.getSubscription()`), 로그아웃 요청보다 먼저 `DELETE /v1/push-subscriptions/{subscriptionKey}`를 보낸다. `subscriptionKey`는 구독 주소의 SHA-256을 base64url로 쓴 값이라 브라우저가 바로 계산한다. 로그아웃 뒤에는 쿠키가 없어 서버가 그 계정의 구독인지 확인할 수 없기 때문에 순서를 지킨다. 브라우저의 구독 자체(`unsubscribe()`)는 풀지 않는다. 다음에 로그인한 계정이 같은 구독을 다시 묶는다(§4.2.4). 해제 요청이 실패해도 로그아웃은 이어 간다. 남는 위험: 그때는 같은 기기에 다음 사람이 로그인하거나 푸시 서비스가 404·410을 줄 때까지 로그아웃한 계정의 알림이 그 브라우저로 갈 수 있다. 오픈·취소표 알림 본문에는 이름·연락처가 없다(notify §4.4). 기기 식별값과 최근 검색어는 남긴다. 화면 출처의 저장물은 이 루틴이 정본이다. 서버 응답의 `Clear-Site-Data`는 응답 주소의 출처에만 걸려 교차 출처 API 응답으로는 화면 출처를 지우지 못하기 때문이다(5번).
 3. 체크했다면 `peaket-wallet`을 지우고, 월렛 서비스 워커 등록(`/my/tickets/`)을 풀고, 캐시를 지운다. 웹 푸시 서비스 워커 등록(`/push/`)은 풀지 않는다. 풀면 브라우저의 구독이 사라져 다음에 로그인한 사람이 다시 묶을 수 없기 때문이다(§5.4, 추천 적용 2026-10-30).
 4. `BroadcastChannel('peaket.session')`으로 `logout`을 알린다. 다른 탭도 같은 정리를 하고 로그인 화면으로 간다.

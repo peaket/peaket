@@ -8,7 +8,7 @@
 import Link from 'next/link';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { alertFailureText, OpenAlertProvider, OpenAlertToggle } from '@/features/open-alert';
-import { isUnauthorizedError as isUnauthorized } from '@/shared/api/refresh';
+import { isRefreshUnavailableError, isUnauthorizedError as isUnauthorized } from '@/shared/api/refresh';
 import { ORIGINS } from '@/shared/config/origins';
 import { cx } from '@/shared/lib/cx';
 import { PicturePoster } from '@/shared/ui/PicturePoster';
@@ -67,8 +67,8 @@ export function HomePersonalProvider({ alertEventIds, children }: { alertEventId
         setStatus('ready');
       })
       .catch((e: unknown) => {
-        // 401(갱신 뒤에도)은 비로그인이다. 그 밖의 실패는 찜한 공연 줄만 숨긴다
-        if (live) setStatus(isUnauthorized(e) ? 'guest' : 'ready');
+        // 401(갱신 뒤에도)은 비로그인이다. 갱신이 일시 장애로 끝나도 '다시 불러오기' 상태가 없어 예전처럼 비로그인 모양이다. 그 밖의 실패는 찜한 공연 줄만 숨긴다
+        if (live) setStatus(isUnauthorized(e) || isRefreshUnavailableError(e) ? 'guest' : 'ready');
       });
     if (ids.length > 0) {
       api
@@ -79,7 +79,7 @@ export function HomePersonalProvider({ alertEventIds, children }: { alertEventId
           setAlertsKnown(true);
         })
         .catch((e: unknown) => {
-          if (live && isUnauthorized(e)) setStatus('guest');
+          if (live && (isUnauthorized(e) || isRefreshUnavailableError(e))) setStatus('guest');
         });
     }
     return () => {

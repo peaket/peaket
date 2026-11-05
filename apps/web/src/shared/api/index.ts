@@ -9,6 +9,8 @@
 //   팬 요청이 401이면 토큰을 한 번 갱신하고 다시 보낸다(§4.1 '401', withFanRefresh).
 import { createApiClient, setOrvalClient } from '@peaket/api-client';
 import { ORIGINS } from '@/shared/config/origins';
+import { refreshLock } from '@/shared/lib/refresh-lock';
+import { refreshOnce, type RefreshResult } from '@/shared/lib/token-refresh';
 import { isUnauthorizedError, retryOnceAfterRefresh } from './refresh';
 
 let serverReady = false;
@@ -52,24 +54,18 @@ export function ensureBrowserApi(): boolean {
 /** 팬 API를 부를 수 있는가(개발 서버에서 주소를 넣지 않았으면 개인 값은 비로그인처럼 둔다) */
 export const fanApiAvailable = (): boolean => ORIGINS.api !== '';
 
-/** 토큰 갱신을 창끼리 하나씩(Web Locks, 다른 기능과 같은 잠금 이름). 같은 리프레시 토큰으로 두 창이 갱신하면 재사용 탐지에 걸린다 */
-const REFRESH_LOCK = 'peaket.refresh';
-let refreshing: Promise<boolean> | null = null;
+/** 토큰 갱신은 창끼리 하나씩(Web Locks, 다른 기능과 같은 잠금 shared/lib/refresh-lock). 같은 리프레시 토큰으로 두 창이 갱신하면 재사용 탐지에 걸린다 */
+let refreshing: Promise<RefreshResult> | null = null;
 
-/** 팬 액세스 토큰 갱신(POST /v1/identity/access-tokens). 성공하면 true. 같은 창의 동시 갱신은 하나로 묶는다 */
-export function refreshFanToken(): Promise<boolean> {
+/**
+ * 팬 액세스 토큰 갱신(POST /v1/identity/access-tokens). 성공·거절(401)·일시 장애로 나뉜다(docs/frontend.md §4.1 '401').
+ * 같은 창의 동시 갱신은 하나로 묶는다
+ */
+export function refreshFanToken(): Promise<RefreshResult> {
   refreshing ??= (async () => {
-    const run = async () => {
-      try {
-        const r = await fetch(`${ORIGINS.api}/v1/identity/access-tokens`, { method: 'POST', credentials: 'include', cache: 'no-store' });
-        return r.ok;
-      } catch {
-        return false;
-      }
-    };
-    const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+    const run = () => refreshOnce((input, init) => fetch(input, init), `${ORIGINS.api}/v1/identity/access-tokens`);
     try {
-      return locks ? ((await locks.request(REFRESH_LOCK, run)) as boolean) : await run();
+      return await refreshLock(run);
     } finally {
       refreshing = null;
     }
@@ -79,7 +75,11 @@ export function refreshFanToken(): Promise<boolean> {
 
 const isUnauthorized = isUnauthorizedError;
 
-/** 팬 요청: 401이면 한 번 갱신하고 다시 보낸다. 갱신이 안 되거나 다시 401이면 그 401을 던진다(부르는 쪽이 비로그인으로 본다) */
+/**
+ * 팬 요청: 401이면 한 번 갱신하고 다시 보낸다. 갱신이 401로 거절되거나 다시 401이면 그 401을 던진다(부르는 쪽이 비로그인으로 본다).
+ * 갱신이 일시 장애면 401이 아닌 오류(503 refresh-unavailable, isRefreshUnavailableError)를 던진다. 버튼 동작은 비로그인으로 바꾸지 않고
+ * '잠시 뒤 다시'를 보인다. 홈·공연 상세의 개인 값 첫 조회는 '다시 불러오기' 상태가 없어 그때도 예전처럼 비로그인 모양으로 둔다(docs/frontend.md §4.1 '401')
+ */
 export function withFanRefresh<T>(call: () => Promise<T>): Promise<T> {
   return retryOnceAfterRefresh(call, isUnauthorized, refreshFanToken);
 }

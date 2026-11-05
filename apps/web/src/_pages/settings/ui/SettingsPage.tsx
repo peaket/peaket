@@ -44,11 +44,15 @@ export async function SettingsPage({ searchParams }: PageProps) {
   const provider = PROVIDER_INFO[ME.provider];
   const quote = withdrawQuote();
   const initial = v.overlay && v.overlay.kind !== 'logout' ? v.overlay : null;
+  // 목업 ME가 본인확인 완료라, 본인확인 전 갈래는 미리보기 상태 '본인확인 전'으로 본다(d5 §5.17 ①, BOT-020이 넘긴 것)
+  const verified = ME.verified && v.verified;
 
   return (
     // 탈퇴를 마치면 로그인 전 셸로 보인다(추천안). 접수(미룸)·결제 확정 대기는 계정이 남아 있다(보드 SCR-017-d '탈퇴 접수(미룸)')
     <AppShell dark={dark} guest={v.done === 'done'} defaultOpen={v.overlay?.kind === 'logout' ? 'logout' : null}>
+      {/* 미리보기 상태를 고르면(클라이언트 이동) 창·목적·토큰 상태를 새로 시작한다. 목업과 실제 흐름이 섞이지 않게(BOT-036이 넘긴 것) */}
       <SettingsFlows
+        key={state}
         initial={initial}
         devices={DEVICE_SESSIONS}
         removedIds={v.remoteLoggedOut ? [REMOTE_LOGGED_OUT_ID] : []}
@@ -62,7 +66,7 @@ export async function SettingsPage({ searchParams }: PageProps) {
         dark={dark}
       >
         <main className="page-main" id="main" tabIndex={-1}>
-          {v.done ? <DoneView done={v.done} quote={quote} /> : <AccountView restricted={v.restricted} providerLabel={provider.label} />}
+          {v.done ? <DoneView done={v.done} quote={quote} /> : <AccountView restricted={v.restricted} verified={verified} providerLabel={provider.label} />}
         </main>
       </SettingsFlows>
       <PreviewSwitcher path={SETTINGS_PATH} states={SCR017_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
@@ -74,10 +78,10 @@ function Gap() {
   return <div className="section-gap md:hidden" aria-hidden="true" />;
 }
 
-function AccountView({ restricted, providerLabel }: { restricted: boolean; providerLabel: string }) {
+function AccountView({ restricted, verified, providerLabel }: { restricted: boolean; verified: boolean; providerLabel: string }) {
   return (
     <div className="pb-10 md:px-6 md:pt-6 md:pb-12 lg:mx-auto lg:grid lg:w-full lg:max-w-[1040px] lg:grid-cols-12 lg:items-start lg:gap-x-6 lg:px-8 lg:pt-8 lg:pb-16">
-      <SideMenu />
+      <SideMenu verified={verified} />
       <div className="col md:gap-4 lg:col-span-9 lg:gap-5">
         <div className="col px-4 pt-5 pb-2 md:px-0 md:pt-0 lg:pb-0" style={{ gap: 4 }}>
           <h1 className="t-xl md:text-[32px] md:leading-[42px] md:tracking-[-.01em]">계정 설정</h1>
@@ -89,7 +93,7 @@ function AccountView({ restricted, providerLabel }: { restricted: boolean; provi
         <div className="col md:grid md:grid-cols-2 md:gap-4 lg:gap-5">
           <ProfileSection />
           <Gap />
-          <VerifySection />
+          <VerifySection verified={verified} />
           <Gap />
           <DevicesSection providerLabel={providerLabel} />
           <Gap />
@@ -109,7 +113,7 @@ function AccountView({ restricted, providerLabel }: { restricted: boolean; provi
 }
 
 /** 데스크톱 왼쪽: 프로필 요약 + 계정 설정 메뉴(섹션 바로가기) */
-function SideMenu() {
+function SideMenu({ verified }: { verified: boolean }) {
   const items = [
     { href: '#h-profile', icon: 'user', label: '프로필' },
     { href: '#h-verify', icon: 'shield', label: '휴대폰 본인확인' },
@@ -128,7 +132,7 @@ function SideMenu() {
         </span>
         <span className="col" style={{ gap: 4, alignItems: 'flex-start' }}>
           <strong className="t-md fw-b">{ME.name}</strong>
-          {ME.verified ? (
+          {verified ? (
             <span className="badge badge-success">
               <i className="ic ic-check" aria-hidden="true" />
               본인확인 완료
@@ -201,19 +205,19 @@ function ProfileSection() {
   );
 }
 
-function VerifySection() {
+function VerifySection({ verified }: { verified: boolean }) {
   return (
     <section className={cx('col gap-3 md:col-span-2', PAD, CARD)} aria-labelledby="h-verify">
       <div className="section-title">
         <h2 id="h-verify">휴대폰 본인확인</h2>
-        {ME.verified ? (
+        {verified ? (
           <span className="badge badge-success">
             <i className="ic ic-check" aria-hidden="true" />
             완료
           </span>
         ) : null}
       </div>
-      {ME.verified ? (
+      {verified ? (
         <>
           <dl className="kv md:hidden">
             <dt>인증한 날</dt>

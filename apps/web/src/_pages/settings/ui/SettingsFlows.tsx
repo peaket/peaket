@@ -17,7 +17,7 @@ import { WebShellModal } from '@peaket/ds/WebShell';
 import { BANKS } from '@/entities/account';
 import { withdrawFraudHoldText } from '@/entities/appeal';
 import { formatWon } from '@/entities/production';
-import { browserWithdrawApi, type FraudHold, markPending, type Provider as WithdrawProvider, reauthFailureText, submitReauthForm, tabStore, takePending, untilText } from '@/features/account-withdraw';
+import { afterWithdraw, browserWithdrawApi, type FraudHold, leaveForReauth, linkedProvidersQuietly, type Provider as WithdrawProvider, reauthFailureText, submitReauthForm, tabStore, takePending, untilText } from '@/features/account-withdraw';
 import { useToast } from '@/shared/ui/toast';
 import { PROVIDER_INFO, type WithdrawQuote } from '../model/account';
 import type { SettingsOverlay } from '../model/state';
@@ -76,7 +76,22 @@ export function SettingsFlows({
     const target = devices.find((d) => !d.current);
     return target ? { kind: 'device', session: target } : { kind: 'withdraw' };
   });
-  const close = () => setOverlay(null);
+  /** 재인증으로 떠나려고 갱신을 기다리는 중(버튼은 처리 중, 다시 눌러도 한 번만 떠난다, BOT-036이 넘긴 것) */
+  const [leaving, setLeaving] = useState(false);
+  const leaveRef = useRef<{ cancelled: boolean; cancel(): void } | null>(null);
+  /** 창을 닫은 횟수. 탈퇴 요청이 도는 동안 닫았는지 가른다(닫은 뒤 온 응답은 완료만 반영한다, 새 맥락 마지막 검토) */
+  const closedRef = useRef(0);
+  const close = () => {
+    closedRef.current += 1;
+    // 갱신을 기다리는 사이 창을 닫으면 갱신이 끝나도 제공자로 떠나지 않는다(identity §8 '탈퇴 화면 연결')
+    leaveRef.current?.cancel();
+    leaveRef.current = null;
+    setLeaving(false);
+    // 탈퇴 확인 창을 닫으면 메모리의 재인증 토큰과 보관 안내 상태도 지운다. 다시 열면 재인증부터 한다(새 맥락 재검토)
+    setToken(null);
+    setLiveHold(null);
+    setOverlay(null);
+  };
   // 실제 탈퇴(identity §8 '탈퇴 화면 연결'): 재인증할 제공자, 메모리에만 둔 재인증 토큰, 409 fraudHold, 완료
   const api = useMemo(() => (live ? browserWithdrawApi() : null), [live]);
   const [liveProvider, setLiveProvider] = useState<WithdrawProvider | null>(null);
@@ -110,6 +125,17 @@ export function SettingsFlows({
     return null;
   };
 
+  /**
+   * 탈퇴 확인 창이 열린 동안 제공자를 채운다. 목록이 실패해도(로그인 필요 포함) 화면을 떠나거나 안내를 띄우지 않고 비운 채로 둔다.
+   * 떠나면 메모리의 재인증 토큰을 잃는다(identity §8 '탈퇴 화면 연결', 새 맥락 리뷰). 403 뒤 재인증은 pickProvider가 다시 고른다
+   */
+  const fillProviderQuietly = async () => {
+    const list = await linkedProvidersQuietly(api!);
+    if (!list?.length) return;
+    setLiveProvider(list[0]!);
+    setLiveProviders(list);
+  };
+
   useEffect(() => {
     if (toastOnMount) toast(toastOnMount, 'ic-check');
     // 재인증에서 돌아왔으면(탭 저장소 표시) 토큰을 한 번 받아 탈퇴 확인 창을 연다. 실패면 재인증 창의 실패 문구
@@ -119,7 +145,9 @@ export function SettingsFlows({
         const r = await api.pickupReauth();
         setPurpose({ kind: 'withdraw' });
         if (r.kind === 'token') {
+          // 결과 응답에 제공자가 없으면 로그인 수단 목록의 첫 제공자로 채운다(확인 창의 '…로 다시 로그인했습니다'와 403 뒤 재인증, BOT-036이 넘긴 것)
           if (r.provider) setLiveProvider(r.provider);
+          else void fillProviderQuietly();
           setToken(r.token);
           setOverlay({ kind: 'withdraw', refund: 'none' });
           return;
@@ -131,20 +159,48 @@ export function SettingsFlows({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 재인증으로 떠난 뒤 뒤로 가기 캐시(bfcache)로 그대로 돌아오면 처리 중을 푼다(로그인 수단 화면과 같다)
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      leaveRef.current = null;
+      setLeaving(false);
+    };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, []);
+
   /** chosen: 연결한 수단이 둘 이상이라 재인증 창에서 고른 제공자(없으면 목록의 첫 제공자) */
   const confirmReauth = (chosen?: WithdrawProvider) => {
-    const via = chosen ?? liveProvider;
-    if (api && purpose.kind === 'withdraw' && via) {
-      const provider = via;
+    if (api && purpose.kind === 'withdraw') {
+      // 실제 탈퇴는 제공자를 몰라도 목록을 다시 읽어 실제 재인증으로 간다(목업 갈래로 빠지지 않는다, BOT-036이 넘긴 것).
+      // 연타는 다시 그리기 전에도 막도록 상태 대신 ref로 본다
+      if (leaveRef.current) return;
+      const ticket = {
+        cancelled: false,
+        cancel() {
+          this.cancelled = true;
+        },
+      };
+      leaveRef.current = ticket;
+      setLeaving(true);
       void (async () => {
-        // 떠나기 직전에 액세스 토큰을 갱신한다(만료된 토큰이면 재인증 시작이 401 막다른 페이지가 된다, 새 맥락 리뷰 중간 1)
-        if (!(await api.refresh())) {
-          toLogin();
-          return;
-        }
-        // 탭 저장소에 표시를 남기고 이 창을 제공자로 옮긴다. 돌아오면 위 효과가 이어 간다
-        markPending(tabStore, Date.now());
-        submitReauthForm(provider);
+        // 떠나기 직전에 액세스 토큰을 갱신한다(만료된 토큰이면 재인증 시작이 401 막다른 페이지가 된다, 새 맥락 리뷰 중간 1).
+        // 401이면 로그인 화면, 연결 끊김·5xx면 잠시 뒤 다시. 성공하면 탭 저장소에 표시를 남기고 이 창을 제공자로 옮긴다(돌아오면 위 효과가 잇는다)
+        const r = await leaveForReauth({
+          api,
+          storage: tabStore,
+          now: () => Date.now(),
+          provider: chosen ?? liveProvider,
+          pickProvider,
+          submit: submitReauthForm,
+          cancelled: () => ticket.cancelled,
+        });
+        if (r === 'left' || ticket.cancelled) return;
+        leaveRef.current = null;
+        setLeaving(false);
+        if (r === 'login') toLogin();
+        else if (r === 'retry') failWith(reauthFailureText('unavailable'));
       })();
       return;
     }
@@ -165,19 +221,22 @@ export function SettingsFlows({
         return;
       }
       setBusy(true);
+      const opened = closedRef.current;
       // 보관 안내(fraudHold)를 보인 뒤 다시 누르면 같은 토큰에 acknowledgeFraudHold를 싣는다(ADR-0173 결정 7)
       const r = await api.withdraw(token, liveHold !== null);
       setBusy(false);
-      if (r.kind === 'done' || r.kind === 'deferred') {
+      // 요청이 도는 동안 창을 닫았으면 완료만 반영하고 나머지는 버린다(닫은 창을 다시 열지 않는다)
+      const step = afterWithdraw(r, { closed: opened !== closedRef.current });
+      if (step === 'done' || step === 'deferred') {
         setToken(null);
         setOverlay(null);
-        setLiveDone(r.kind);
-      } else if (r.kind === 'fraudHold') setLiveHold({ state: r.state, until: r.until });
-      else if (r.kind === 'reauth') {
+        setLiveDone(step);
+      } else if (step === 'hold' && r.kind === 'fraudHold') setLiveHold({ state: r.state, until: r.until });
+      else if (step === 'reauth') {
         setToken(null);
         failWith(reauthFailureText('expired'));
-      } else if (r.kind === 'login') toLogin();
-      else sorry();
+      } else if (step === 'login') toLogin();
+      else if (step === 'error') sorry();
       return;
     }
     const next = refund === 'vb-later' ? '탈퇴 접수(미룸)' : '탈퇴 완료';
@@ -246,7 +305,11 @@ export function SettingsFlows({
                 key={p}
                 className={`btn ${PROVIDER_INFO[p].btn} btn-lg btn-block`}
                 type="button"
+                // 처리 중에도 초점이 버튼에 남게 disabled 대신 aria-disabled(누름은 confirmReauth가 막는다)
+                aria-disabled={leaving || undefined}
+                aria-busy={leaving || undefined}
                 onClick={() => {
+                  if (leaving) return;
                   setLiveProvider(p);
                   confirmReauth(p);
                 }}
@@ -256,7 +319,7 @@ export function SettingsFlows({
               </button>
             ))
           ) : (
-            <button className={`btn ${shown.btn} btn-lg btn-block`} type="button" onClick={() => confirmReauth()}>
+            <button className={`btn ${shown.btn} btn-lg btn-block`} type="button" aria-disabled={leaving || undefined} aria-busy={leaving || undefined} onClick={() => confirmReauth()}>
               <i className={`prov ${shown.prov}`} aria-hidden="true" />
               {shown.label}로 다시 로그인하고 계속
             </button>
@@ -279,7 +342,8 @@ export function SettingsFlows({
                 ? { state: overlay.fraudHold, untilText: fraudHoldUntil[overlay.fraudHold] }
                 : undefined
           }
-          provider={shown.label}
+          // 실제 탈퇴에서 제공자를 아직 모르면 이름 없이 '다시 로그인했습니다'(목업 제공자 이름을 보이지 않게)
+          provider={api && !liveProvider ? null : shown.label}
           quote={quote}
           live={api !== null}
           busy={busy}
@@ -351,7 +415,8 @@ function WithdrawSheet({
   busy?: boolean;
   /** 탈퇴 409 fraudHold(있으면 대조값 보관 안내를 보이고 '바로 다시 가입' 줄을 숨긴다, d5 §5.17, ADR-0173 결정 7) */
   fraudHold?: { state: 'RESTRICTED' | 'CASE_OPEN'; untilText: string };
-  provider: string;
+  /** 다시 로그인한 제공자 이름. null이면 이름 없이 보인다 */
+  provider: string | null;
   quote: WithdrawQuote;
   descId: string;
   onClose: () => void;
@@ -366,7 +431,7 @@ function WithdrawSheet({
       eyebrow={
         <p className="row t-sm tx-success" style={{ gap: 6 }}>
           <i className="ic ic-check-circle ic-16" aria-hidden="true" />
-          {provider}로 다시 로그인했습니다
+          {provider ? `${provider}로 다시 로그인했습니다` : '다시 로그인했습니다'}
         </p>
       }
       title="회원 탈퇴"

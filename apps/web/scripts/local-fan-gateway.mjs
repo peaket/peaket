@@ -88,7 +88,10 @@ export async function startLocalFanGateway(o) {
     const origin = req.headers.origin;
     const allowed = origin === webOrigin;
     /** @type {Record<string, string>} */
-    const cors = allowed ? { 'access-control-allow-origin': webOrigin, 'access-control-allow-credentials': 'true', vary: 'Origin' } : { vary: 'Origin' };
+    // Date는 gw-fan처럼 노출한다(화면의 보정 시계가 캐시하지 않는 응답의 Date를 표본으로 쓴다, docs/frontend.md §3.3)
+    const cors = allowed
+      ? { 'access-control-allow-origin': webOrigin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': 'Date, Retry-After', vary: 'Origin' }
+      : { vary: 'Origin' };
     const method = req.method ?? 'GET';
     if (method === 'OPTIONS') {
       if (!allowed) return problem(403, 'Forbidden', cors);

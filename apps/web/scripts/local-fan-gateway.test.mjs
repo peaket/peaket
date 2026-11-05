@@ -66,6 +66,8 @@ test('I-T45 맞는 팬 액세스 쿠키면 신원 머리를 실어 identity로 �
   assert.equal(r.status, 200);
   assert.equal(r.headers.get('access-control-allow-origin'), WEB);
   assert.equal(r.headers.get('access-control-allow-credentials'), 'true');
+  // gw-fan처럼 Date를 노출한다: 화면의 보정 시계가 캐시하지 않는 응답의 Date를 표본으로 쓴다(docs/frontend.md §3.3, BOT-043이 넘긴 것)
+  assert.match(r.headers.get('access-control-expose-headers') ?? '', /\bDate\b/);
   const h = last().headers;
   assert.equal(h['x-user-id'], 'acc-1');
   assert.equal(h['x-session-id'], 's-1');

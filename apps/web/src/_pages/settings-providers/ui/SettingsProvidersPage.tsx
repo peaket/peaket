@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
 import { ME } from '@/entities/me';
-import { LINKED_PROVIDERS, MERGE_PROPOSAL, PROVIDER_NAME, type LinkedProvider } from '@/entities/provider';
+import { LINKED_PROVIDERS, PROVIDER_NAME, type LinkedProvider } from '@/entities/provider';
 import { SCR040_STATES } from '@/shared/config/screens.account';
 import { cx } from '@/shared/lib/cx';
 import type { PageProps } from '@/shared/lib/page-props';
@@ -17,7 +17,9 @@ import { AppShell } from '@/widgets/app-shell';
 import { mergeContent, SETTINGS_MENU, SURVIVOR_PROVIDER } from '../model/content';
 import { providersView } from '../model/state';
 import { isLiveLoginMethods } from '@/features/login-methods';
+import { Absorbed } from './Absorbed';
 import { LiveLoginMethods } from './LiveLoginMethods';
+import { MergedAwayNotice } from './MergedAwayNotice';
 import { MergePanel } from './MergePanel';
 
 const LAST_ONE_ID = 'last-w';
@@ -33,7 +35,8 @@ export async function SettingsProvidersPage({ searchParams }: PageProps) {
   const live = isLiveLoginMethods() && state === '목록';
   const loginMethod = typeof sp.loginMethod === 'string' ? sp.loginMethod : undefined;
   const mergeProposal = typeof sp.mergeProposal === 'string' ? sp.mergeProposal : undefined;
-  // 실제 합치기에서 지금 계정이 흡수되어 세션이 끝난 뒤 여는 주소(features/login-methods MERGED_AWAY_PATH). 셸을 로그인 전 모양으로 그린다
+  // 실제 합치기에서 지금 계정이 흡수되어 세션이 끝난 뒤 여는 주소(features/login-methods MERGED_AWAY_PATH). 셸을 로그인 전 모양으로 그린다.
+  // 안내는 방금 흡수 확정을 받은 탭의 표시가 있을 때만 보인다(MergedAwayNotice, 없으면 로그인 수단 화면으로 간다, BOT-043이 넘긴 것)
   const endedMerged = sp.ended === 'MERGED';
   const absorbed = v.absorbed || endedMerged;
 
@@ -41,7 +44,7 @@ export async function SettingsProvidersPage({ searchParams }: PageProps) {
     <AppShell dark={dark} guest={absorbed}>
       <main className="page-main pb-10 md:pb-12 lg:pb-16" id="main" tabIndex={-1}>
         {absorbed ? (
-          <Absorbed live={endedMerged} />
+          endedMerged ? <MergedAwayNotice /> : <Absorbed live={false} />
         ) : (
           <div className="mx-auto w-full lg:grid lg:max-w-[1040px] lg:grid-cols-12 lg:items-start lg:gap-x-6 lg:px-8 lg:pt-8">
             <SettingsSideNav />
@@ -156,27 +159,6 @@ function SettingsSideNav() {
           );
         })}
       </nav>
-    </div>
-  );
-}
-
-/** 지금 계정이 대표 계정으로 흡수되어 세션이 끝났다(세션 종료 MERGED, 휴대폰 보드). live면 실제 흐름에서 왔다(목업의 제공자 이름 대신 일반 문장) */
-function Absorbed({ live }: { live: boolean }) {
-  return (
-    <div className="col mx-auto w-full max-w-[400px] gap-5 px-4 pt-14 pb-6">
-      <div className="state" role="alert" style={{ padding: 0 }}>
-        <span className="state-icon is-warning">
-          <i className="ic ic-logout" aria-hidden="true" />
-        </span>
-        <h1 className="t-xl">이 계정은 대표 계정으로 합쳐졌습니다</h1>
-        <p className="t-md muted">대표 계정으로 다시 로그인해 주세요</p>
-      </div>
-      <p className="t-sm muted" style={{ textAlign: 'center' }}>
-        {live ? '지금까지 쓰던 로그인 수단으로 로그인해도 대표 계정으로 들어갑니다.' : `${PROVIDER_NAME[MERGE_PROPOSAL.incoming]}로 로그인해도 대표 계정으로 들어갑니다.`}
-      </p>
-      <Link className="btn btn-primary btn-lg btn-block" href="/login">
-        로그인 화면으로 가기
-      </Link>
     </div>
   );
 }

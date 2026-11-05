@@ -335,7 +335,7 @@ S3(AWS의 파일·객체 저장소)는 화면이 CDN CloudFront로 받는 공개
 | sessionStorage `peaket.checkout.{holdId}` | 동의 체크, 고른 결제 수단(이름·전화 없음) | — | 탭. 결제 접수, 구매 세션 끝 | 결제 화면 | frontend §3.11·§3.12 |
 | sessionStorage `peaket.accept.{orderId}` | 결제 접수를 보낸 시각과 그 멱등키(결제사 값은 넣지 않는다) | — | 탭. 결과 확정, 구매 세션 끝 | 결제 결과 화면 | frontend §3.12 |
 | sessionStorage `peaket.staff.fragment` | 초대 토큰 또는 승인 코드(URL 조각에서 옮겨 온 값)(P1) | — | 10분 [가정]. 조회 성공, 탭 닫힘 | 스태프 초대 수락·스캐너 승인 화면 | frontend §3.12 |
-| sessionStorage `peaket.verify.{verificationId}` | 본인확인 목적, 시작 시각 | 본인확인 결과를 받았을 때 대조한다 | 10분 [가정]. 결과를 받았을 때 | 본인확인 창 관리자 | frontend §3.2·§3.12 |
+| sessionStorage `peaket.verify.return` | 페이지 이동으로 돌아온 본인확인 건 ID와 남긴 시각(결과 값은 넣지 않는다) | 복귀 화면이 남기고, 부르는 화면이 열리자마자 읽어 그 건의 결과 대화상자를 띄운다. 남긴 지 1분이 지난 값은 믿지 않는다(다른 화면에서 지난 결과가 뜨지 않게, 2026-11-05) | 탭(1분 [가정]). 부르는 화면이 읽을 때, 로그아웃 | 본인확인 복귀 화면 → 부르는 화면 | frontend §3.12, identity §5 |
 | 메모리(저장소 아님) | 재인증 토큰(P1) | — | 5분, 한 번 쓰면 끝 | 소비자 웹·콘솔 | frontend §3.12 |
 | HTTP 캐시(좌석맵 파일) | 회차 좌석맵 파일(배치 버전이 이름에 든다) | 대기 중에 미리 받아 두어 차례가 오면 좌석 화면을 바로 그린다. 판이 바뀌면 다시 받는다 | 정본에 없음 | 좌석 Worker | data §1 클라이언트 로컬 저장소 행, frontend §3.2·§3.12·§4.2.2·§5.1 |
 | 쿠키(브라우저가 사이트별로 저장했다가 요청마다 함께 보내는 작은 값) | 팬·파트너·운영자의 액세스·리프레시 토큰, 로그인 진행 `__Host-peaket_oidc`(10분 [가정]), 계정 연결 제안 `__Host-peaket_link`(10분), 도착 시각 `__Host-peaket_arr`, 최초 방문 `__Host-peaket_fv` | 모두 `Secure`·`HttpOnly`라 스크립트가 읽지 못한다. 프론트엔드 코드는 쿠키를 쓰지 않는다(`document.cookie` 쓰기를 린트로 막는다) | 쿠키마다 다르다(identity §3) | 앱 서버, 게이트웨이, 대기열 엣지 함수 | identity §3, frontend §3.12, queue-admission §7·§10 |

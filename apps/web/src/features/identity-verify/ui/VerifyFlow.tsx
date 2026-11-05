@@ -10,6 +10,7 @@
 import Link from 'next/link';
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { WebShellModal, webModalButtonClass } from '@peaket/ds/WebShell';
+import { sleep } from '@/shared/lib/sleep';
 import { useToast } from '@/shared/ui/toast';
 import { browserCallerEnv, browserSessionStore, browserVerifyApi, isLiveVerify } from '../browser';
 import { resumeReturnedResult, startCallerFlow } from '../flow';
@@ -130,7 +131,7 @@ export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/l
   useEffect(() => {
     if (!live || resumed.current) return;
     resumed.current = true;
-    void resumeReturnedResult({ api: browserVerifyApi(), storage: browserSessionStore }).then((o) => {
+    void resumeReturnedResult({ api: browserVerifyApi(), storage: browserSessionStore, now: () => Date.now(), sleep }).then((o) => {
       if (o === null) return;
       if (o === 'login') location.assign(`${loginHref}?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`);
       else pick(o);

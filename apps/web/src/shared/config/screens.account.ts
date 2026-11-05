@@ -60,6 +60,8 @@ export const SCR017_STATES = [
   /** d5 §5.17 탈퇴 단계의 대조값 보관 안내 두 줄(탈퇴 409 fraudHold, ADR-0173 결정 7). 상태 이름은 추천 적용 2026-10-31 */
   '탈퇴 확인 · 부정 예매 이용 제한 중',
   '탈퇴 확인 · 부정 예매 소명 요청 받음',
+  /** d5 §5.17 ①의 '또는 [ 지금 본인확인 ]'(보드와 목업 ME는 본인확인 완료라 그 갈래를 볼 상태가 없었다, 2026-11-05 BOT-020이 넘긴 것) */
+  '본인확인 전',
 ] as const;
 export type Scr017State = (typeof SCR017_STATES)[number];
 
@@ -203,7 +205,7 @@ export const ACCOUNT_SCREENS: readonly WebScreen[] = [
     group: 'request',
     owner: 'account',
     states: SCR017_STATES,
-    note: '로그아웃 확인은 셸의 대화상자. 기기 목록 로딩과 탈퇴 확인의 부정 예매 대조값 보관 안내 둘(ADR-0173)은 d5에서 더함',
+    note: '로그아웃 확인은 셸의 대화상자. 기기 목록 로딩, 탈퇴 확인의 부정 예매 대조값 보관 안내 둘(ADR-0173), 본인확인 전(d5 ①)은 d5에서 더함',
   },
   { id: 'SCR-039', name: '계정 연결 제안', path: '/login/link', group: 'request', owner: 'account', states: SCR039_STATES },
   {

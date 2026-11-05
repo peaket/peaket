@@ -7,7 +7,7 @@
 // - 본인확인·예매 제한·선예매 같은 다른 개인 상태는 HOT-321·340이 얹는다. api-client는 늦게 가져온다(첫 화면 JS 예산, §5.8).
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { alertFailureText, OpenAlertProvider } from '@/features/open-alert';
-import { isUnauthorizedError as isUnauthorized } from '@/shared/api/refresh';
+import { isRefreshUnavailableError, isUnauthorizedError as isUnauthorized } from '@/shared/api/refresh';
 import { ORIGINS } from '@/shared/config/origins';
 import { browserClock } from '@/shared/lib/clock';
 
@@ -57,8 +57,9 @@ export function DetailPersonalProvider({ eventId, productionId, loginHref, child
       return;
     }
     const api = loadApi();
+    // 첫 조회는 '다시 불러오기' 상태가 없어, 갱신이 일시 장애로 끝나도 예전처럼 비로그인 모양으로 둔다(버튼이 '불러오는 중'에 묶이지 않게)
     const guest = (e: unknown) => {
-      if (live && isUnauthorized(e)) setStatus('guest');
+      if (live && (isUnauthorized(e) || isRefreshUnavailableError(e))) setStatus('guest');
     };
     api
       .then(({ withFanRefresh, listSubscriptions }) => {
