@@ -7,12 +7,15 @@
 // 캐시 화면이라 서버는 상태를 정하지 않는다(첫 그리기는 뼈대, d5 §5.2 '로딩').
 // 개인 상태(ADR-0202 결정 3, HOT-321): 들어갈 수 있거나 곧 들어갈 수 있는 상태(로비 버튼 차례 기다림·로비 열림·오픈 뒤 진입)만 팬 계정 요약으로 덮는다.
 // 비로그인 [[ 로그인하고 입장 ]], 본인확인 전 [[ 휴대폰 본인확인 ]](이 화면 위 기관 창, SCR-006), 가입을 마치지 않음 [[ 가입을 마치고 입장 ]] [가정].
-// 요약을 받기 전은 뼈대, 모르면(5xx) 덮지 않는다(진입 경로가 다시 막는다). 예매 제한·선예매는 HOT-344가 얹는다.
+// 요약을 받기 전은 뼈대, 모르면(5xx) 덮지 않는다(진입 경로가 다시 막는다).
+// 예매 제한(ADR-0213 결정 2): 회원 팬이면 제한 상태를 받아, 살 수 있는 때(오픈 전·로비·대기열)의 ⑦을 "예매가 제한되어 있습니다 · 소명 기한" ( 소명하기 › )로 덮는다.
+// 가입 마무리·본인확인보다 먼저이고(제한된 팬은 그것을 해도 예매하지 못한다), 판매 종료·취소 회차가 제한보다 앞선다. 선예매·판매 정책 표시는 HOT-346.
 // 오픈 뒤 [대기열 들어가기]는 사전 검증 토큰을 거친다(Preverify.tsx, ADR-0211): 유효한 토큰이 있으면 바로, 없으면 사람 확인 뒤 대기실로 간다.
 import Link from 'next/link';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { RoundPicker } from '@peaket/ds/RoundPicker';
-import { personalCta, useFanSession } from '@/entities/me';
+import { personalCta, restrictionCta, restrictionGate, useFanSession, type FanSession } from '@/entities/me';
+import { appealHref, useBookingRestriction } from '@/entities/me/restriction';
 import { formatWon } from '@/entities/production';
 import { OpenAlertToggle } from '@/features/open-alert';
 import { queueRoomHref } from '@/shared/config/origins';
@@ -213,16 +216,35 @@ function otherRoundHref(data: BookingData, now: number | undefined): string {
   return next?.href ?? data.otherRoundFallbackHref;
 }
 
-function ctaModel(phase: BookingPhase | undefined, data: BookingData, now: number | undefined, personal: ReturnType<typeof personalCta>): CtaModel {
+/** ⑦을 예매 제한으로 덮을 값: 받는 중이면 'loading', 제한이면 글·소명 링크, 아니면 null */
+type RestrictedCta = 'loading' | { text: string; appealHref?: string } | null;
+
+function useRestrictedCta(phase: BookingPhase | undefined, session: FanSession, now: number | undefined): RestrictedCta {
+  const r = useBookingRestriction(session);
+  const at = now ?? Date.now();
+  const gate = restrictionGate(phase, session, r, at);
+  if (gate !== 'restricted') return gate;
+  return restrictionCta(r, at, appealHref);
+}
+
+function ctaModel(phase: BookingPhase | undefined, data: BookingData, now: number | undefined, personal: ReturnType<typeof personalCta>, restricted: RestrictedCta): CtaModel {
   const queue = queueRoomHref(data.eventId);
   const lobbyMeta = `${data.roundLabel}${data.lobbyText && phase !== 'queue' ? ` · 로비 ${data.lobbyText}부터` : ''}`;
   // 개인 상태가 먼저다(d5 §5.2 '비로그인'·'본인확인 필요'). 오픈 알림 토글은 오픈 전에만 둔다(오픈 뒤 진입 버튼에는 없다)
   const openAlert = phase === 'queue' ? undefined : {};
+  if (personal === 'loading') return { special: 'load', meta: data.roundLabel };
+  if (personal === 'login') return { meta: lobbyMeta, alert: openAlert, primary: { type: 'link', label: '로그인하고 입장', href: data.loginHref }, minW: 200 };
+  // 예매 제한은 가입 마무리·본인확인보다 먼저다(d5 §5.2 '예매 제한 중', 판매 종료 줄과 같은 모양: 글 + ( 소명하기 › ))
+  if (restricted === 'loading') return { special: 'load', meta: data.roundLabel };
+  if (restricted) {
+    return {
+      special: 'ended',
+      endedText: restricted.text,
+      meta: `${data.roundLabel} · ${restricted.text}`,
+      ...(restricted.appealHref ? { more: { label: '소명하기', href: restricted.appealHref } } : {}),
+    };
+  }
   switch (personal) {
-    case 'loading':
-      return { special: 'load', meta: data.roundLabel };
-    case 'login':
-      return { meta: lobbyMeta, alert: openAlert, primary: { type: 'link', label: '로그인하고 입장', href: data.loginHref }, minW: 200 };
     case 'signup':
       return { meta: lobbyMeta, alert: openAlert, primary: { type: 'link', label: '가입을 마치고 입장', href: data.signupHref }, minW: 200 };
     case 'verify':
@@ -322,7 +344,8 @@ function AlertToggle({ title, className, iconOnlyBelowMd }: { title: string; cla
 /** 휴대폰·태블릿 화면 아래 고정 띠(보드 SCR-002-m·t의 .bottom-bar). 데스크톱(lg)에서는 숨긴다 */
 export function BookingBar({ data }: { data: BookingData }) {
   const { phase, now, unlockAt } = useBooking();
-  const m = ctaModel(phase, data, now, personalCta(phase, useFanSession()));
+  const session = useFanSession();
+  const m = ctaModel(phase, data, now, personalCta(phase, session), useRestrictedCta(phase, session, now));
   const descId = m.desc ? `bar-${phase ?? 'load'}-why` : undefined;
   let body: ReactNode;
   if (m.special === 'load') {
@@ -388,7 +411,8 @@ export function BookingBar({ data }: { data: BookingData }) {
 /** 데스크톱 오른쪽 고정 예매 패널의 버튼 묶음(보드 SCR-002-d aside) */
 export function BookingPanelCta({ data }: { data: BookingData }) {
   const { phase, now, unlockAt } = useBooking();
-  const m = ctaModel(phase, data, now, personalCta(phase, useFanSession()));
+  const session = useFanSession();
+  const m = ctaModel(phase, data, now, personalCta(phase, session), useRestrictedCta(phase, session, now));
   const descId = m.desc ? `pnl-${phase ?? 'load'}-why` : undefined;
   if (m.special === 'load') {
     return (
@@ -435,8 +459,10 @@ function EnterButton({ label, className }: { label: string; className: string })
 export function BookingPreverifyCard({ className }: { className?: string }) {
   const { phase } = useBooking();
   const s = useFanSession();
+  // 제한된 팬에게는 보이지 않는다(받아도 입장 확정이 막는다, ADR-0213 결정 2). 제한을 받는 동안도 숨긴다
+  const restriction = useBookingRestriction(s);
   // 오픈 전 선착순은 개인 상태 버튼을 덮지 않으므로(personalCta는 들어갈 수 있는 상태만) 여기서 본인확인한 팬인지 본다
-  const ready = s.status === 'member' && s.me.signupCompleted && s.me.verified;
+  const ready = s.status === 'member' && s.me.signupCompleted && s.me.verified && restriction.status === 'none';
   if (phase !== 'fifo' || !ready) return null;
   return <PreverifyCard {...(className ? { className } : {})} />;
 }

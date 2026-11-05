@@ -6,6 +6,7 @@
 //   queueAdmit=normal|soon|verifying|restricted|unauthorized|duplicate|expired|expired-final|removed|sold-out|ended|down, queueAhead(처음 앞 인원)·queueRate(1초에 지나는 번호)·queueRemoved(빠진 번호 수)·queueBanner·queueSeats, queueReset=1
 //   로비(ADR-0208): queueOpenIn(오픈까지 남은 초, 정한 순간에 고정한다. 빈 값이면 고정 자료 일정), queueLobby=normal|verify|other-device|identity|human-fail|busy|down|unauthorized,
 //   queueShuffle=normal|late|never|missing, 사전 검증(ADR-0211) queuePreverify=normal|identity|not-found|down|unauthorized, 매진 등급(ADR-0212) queueSoldOutTiers=tier-r,…
+//   예매 제한(ADR-0213) restriction=none|active|overdue|fraud(GET /v1/booking-restrictions/me), 알림 신청 subscribe=normal|limit|busy|ended(422·429·410)
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
 // - 파생본 이미지 주소(/img/{이름}/{폭}.{avif|webp})에는 자리 그림(SVG)을 낸다
 // - 공연 상세(GET /v1/events/{eventId}, ADR-0200)는 고정 자료 카드의 모든 회차를 답하고 그 밖은 404다.
@@ -376,8 +377,27 @@ export function reviewSummary(eventId) {
 }
 
 /** 알림 신청 상태(openapi listSubscriptions 200) */
-export function subscriptionPage(eventIds, alerts) {
-  return { items: eventIds.map((eventId) => ({ eventId, open: alerts.has(eventId), cancellation: false, nightPush: false, cancellationStatus: null, endReason: null })), nextCursor: null };
+export function subscriptionPage(eventIds, alerts, cancels = new Set()) {
+  return { items: eventIds.map((eventId) => subscriptionState(eventId, alerts, cancels)), nextCursor: null };
+}
+
+function subscriptionState(eventId, alerts, cancels) {
+  const c = cancels.has(eventId);
+  return { eventId, open: alerts.has(eventId), cancellation: c, nightPush: false, cancellationStatus: c ? 'ACTIVE' : null, endReason: null, sentCount: 0 };
+}
+
+/** 내 예매 제한(openapi getMyBookingRestriction 200, ADR-0213). 시각은 지금 기준 */
+export function bookingRestriction(kind, nowMs) {
+  if (kind === 'none' || !kind) return { status: 'NONE' };
+  const at = (days) => new Date(nowMs + days * 86_400_000).toISOString();
+  return {
+    status: 'ACTIVE',
+    restrictionId: kind === 'fraud' ? 'rst-mock-fraud' : 'rst-mock-0001',
+    reasonCode: kind === 'fraud' ? 'FRAUD' : 'LIMIT_EVASION',
+    startsAt: at(-1),
+    endsAt: kind === 'overdue' ? at(30) : null,
+    appealDueAt: kind === 'overdue' ? at(-0.5) : at(2),
+  };
 }
 
 /** 자리 그림: 이름마다 다른 색과 이름 글자 */
@@ -512,7 +532,7 @@ export function startMockApi({
   now = Date.now,
 } = {}) {
   const origin = `http://127.0.0.1:${port}`;
-  const state = { home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
+  const state = { home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', restriction: 'none', subscribe: 'normal', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
   /** queueOpenIn을 정한 순간에 고정한 오픈 시각(밀리초). 없으면 고정 자료 일정 */
   let openAtOverride;
   const scheduleOf = (eventId) => {
@@ -545,6 +565,8 @@ export function startMockApi({
     return 'VERIFIED';
   };
   const alerts = new Set();
+  /** 취소표 알림 신청(회차 ID) */
+  const cancels = new Set();
   const wished = new Set(INITIAL_WISHES);
   const server = createServer((req, res) => {
     const host = (req.headers.host ?? '').split(':')[0];
@@ -572,7 +594,7 @@ export function startMockApi({
     const p = url.pathname;
     const unauthorized = () => send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
     if (p === '/__mock/state' && req.method === 'GET') {
-      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify', ...Object.keys(QUEUE_DEFAULTS)])) {
+      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify', 'restriction', 'subscribe', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
         if (v !== null && (v !== '' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers')) state[k] = v;
       }
@@ -746,17 +768,33 @@ export function startMockApi({
     if (p === '/v1/subscriptions' && req.method === 'GET') {
       if (state.fan === 'guest') return unauthorized();
       const ids = (url.searchParams.get('eventIds') ?? '').split(',').filter((x) => ID.test(x)).slice(0, 50);
-      return send(200, subscriptionPage(ids, alerts));
+      return send(200, subscriptionPage(ids, alerts, cancels));
+    }
+    if (p === '/v1/booking-restrictions/me' && req.method === 'GET') {
+      if (state.fan === 'guest') return unauthorized();
+      return send(200, bookingRestriction(state.restriction, now()), 'application/json; charset=utf-8', { 'cache-control': 'private, no-store' });
     }
     const sub = /^\/v1\/events\/([^/]+)\/subscriptions$/.exec(p);
     if (sub && ID.test(sub[1])) {
       if (state.fan === 'guest') return unauthorized();
       if (req.method === 'POST') {
-        alerts.add(sub[1]);
-        return send(200, subscriptionPage([sub[1]], alerts).items[0]);
+        void readJson(req).then((b) => {
+          const kind = b?.kind;
+          if (kind !== 'OPEN' && kind !== 'CANCELLATION') return badRequest();
+          if (state.subscribe === 'busy') return problem(429, 'too-many-requests', '요청이 너무 많습니다', { 'retry-after': '5' });
+          if (state.subscribe === 'limit') return problem(422, 'subscription-limit', '알림 신청 한도를 넘었습니다');
+          if (state.subscribe === 'ended' && kind === 'CANCELLATION') return problem(410, 'sale-ended', '판매가 끝난 회차입니다');
+          const set = kind === 'OPEN' ? alerts : cancels;
+          const existed = set.has(sub[1]);
+          set.add(sub[1]);
+          send(existed ? 200 : 201, subscriptionState(sub[1], alerts, cancels));
+        });
+        return;
       }
       if (req.method === 'DELETE') {
-        alerts.delete(sub[1]);
+        const kind = url.searchParams.get('kind');
+        if (kind === 'CANCELLATION') cancels.delete(sub[1]);
+        else alerts.delete(sub[1]);
         return send(204);
       }
     }

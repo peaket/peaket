@@ -1,5 +1,6 @@
 // 화면 함수들이 받는 문맥. 화면은 이 문맥으로만 상태를 바꾸고 시트·대화상자를 연다.
 import type { EventFixture, ProductFixture } from './fixtures';
+import type { CancelAlertApi } from './live/cancel-alert.ts';
 import type { QueueView } from './live/controller.ts';
 import type { EventMeta } from './live/meta.ts';
 import type { Preference, Tier } from './live/preference.ts';
@@ -64,6 +65,10 @@ export interface LiveCtx extends BaseCtx {
   ev: EventMeta;
   view: QueueView;
   pref: PrefApi | null;
+  /** SCR-018 [취소표 알림 받기](ADR-0213 결정 5). 매진 화면에서만 쓴다 */
+  cancelAlert: CancelAlertApi;
+  /** 다른 화면으로 전체 이동(로그인 등) */
+  navigate(url: string): void;
   actions: {
     /** 대기 취소(확인 대화상자 뒤). 실패하면 false */
     cancel(): Promise<boolean>;

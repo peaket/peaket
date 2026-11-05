@@ -17,9 +17,11 @@
   .q-jc { justify-content: center; } .q-center { text-align: center; } .q-top { align-items: flex-start; }
   .q-mt4 { margin-top: 4px; } .q-mt8 { margin-top: 8px; } .q-mh32 { min-height: 32px; } .q-indent { padding-left: 34px; }
   .q-btn-flush { padding: 0; }
+  /* 버튼 모양의 상태 표시(누를 것이 없다): SCR-018 '알림 신청됨' */
+  .q-btn-static { cursor: default; pointer-events: none; margin: 0; }
   .q-btn-wrap { height: auto; min-height: 52px; padding-top: 12px; padding-bottom: 12px; white-space: normal; }
   .q-icon-56 { width: 56px; height: 56px; }
-  .q-w136 { width: 136px; } .q-w160 { width: 160px; }
+  .q-w136 { width: 136px; } .q-w160 { width: 160px; } .q-w-full { width: 100%; }
   .spinner.q-spin-lg { width: 32px; height: 32px; }
   .q-center-block { align-items: center; text-align: center; padding: 8px; }
 
@@ -78,10 +80,10 @@
   .q-me-badge { position: absolute; top: 0; left: 0; transform: translateX(-50%); }
   .q-me-tick { position: absolute; top: 22px; left: -1px; width: 2px; height: 8px; background: var(--primary); }
 
-  /* 앞 인원 숫자가 굴러가듯 바뀌는 모션(base). 바뀐 자리만 굴린다 */
+  /* 앞 인원 숫자가 굴러가듯 바뀌는 모션(base: d2 토큰 --peaket-duration-base 200ms, --peaket-easing-enter). 바뀐 자리만 위에서 내려온다 */
   .q-roll { display: inline-flex; }
   .q-digit { display: inline-block; height: 60px; overflow: hidden; }
-  .q-digit-stack { display: block; animation: q-roll .8s ease-out both; }
+  .q-digit-stack { display: block; animation: q-roll 200ms cubic-bezier(0, 0, .15, 1) both; }
   .q-digit-stack > span { display: block; height: 60px; }
   .q-digit-old { opacity: .3; }
 

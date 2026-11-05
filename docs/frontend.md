@@ -448,7 +448,8 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | `cancelled-elsewhere` | 007·008 | 취소된 토큰으로 요청해 받은 거절 | "다른 기기에서 이 참가를 취소했습니다" | 공연 상세 화면으로 |
 | `already-admitted`, `duplicate` | 008 | 409 `ALREADY_ADMITTED`·`DUPLICATE_ADMISSION`, 또는 리더 탭의 입장 결과 방송(`duplicate`, §5.1 '여러 탭') | 정본 문구 | 끝 |
 | `expired` | 008 | 410 대기표 만료 | `rejoinAllowed`면 [다시 줄 서기], 아니면 버튼 없이 안내(ADR-0207) | 확인 → 저장소를 지우고 `enter` |
-| `sold-out` | 018 | 매진 | 폴링 바로 멈춤, 취소표 알림·다른 회차 | 끝 |
+| `restricted` | 008 '예매 제한' | 입장 확정 403 `booking-restricted` | 폴링 멈춤. 팬 API `GET /v1/booking-restrictions/me`로 제한 ID를 한 번 받아 소명 기한 전이면 ( 소명하기 › ) → SCR-042, 실패·NONE·기한 지남이면 ( 공연 상세 › ). 대기표는 지우지 않는다(ADR-0213 결정 4) | 끝 |
+| `sold-out` | 018 | 매진 | 폴링 바로 멈춤, 취소표 알림(처음 그릴 때 신청 상태 확인, 누르면 한 번 신청, ADR-0213 결정 5)·다른 회차 | 끝 |
 | `ended` | 008 '판매 시간이 끝났습니다' | `ENDED` 또는 410 `sale-ended` | 폴링 멈춤, 저장소 지움 | 끝 |
 | `login-expired` | 008 | 갱신 뒤에도 401 | 순번이 유지된다는 안내, 로그인 뒤 같은 주소로 | 로그인 → `boot` |
 | `offline` | 008 | `offline` 이벤트 | 오프라인 배너, 마지막 값 표시 | `online` → 바로 한 번 묻고 이전 상태로 |

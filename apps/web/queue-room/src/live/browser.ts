@@ -19,7 +19,7 @@ function storage(name: 'localStorage' | 'sessionStorage'): KV | null {
 }
 
 /** 팬 토큰 갱신 한 번(POST /v1/identity/access-tokens). 창끼리 하나씩(Web Locks peaket.refresh, docs/features/identity.md §3) */
-async function refresh(): Promise<'ok' | 'rejected' | 'unavailable'> {
+export async function refresh(): Promise<'ok' | 'rejected' | 'unavailable'> {
   const once = async () => {
     try {
       const r = await fetch(`${ORIGINS.api}/v1/identity/access-tokens`, { method: 'POST', credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(5000) });
@@ -60,7 +60,7 @@ export function browserEnv(eventId: string, schedule: () => Promise<Schedule | n
   const local = storage('localStorage');
   return {
     eventId,
-    urls: { queue: ORIGINS.queue, files: ORIGINS.files, event: links.event(eventId), seats: links.seats(eventId), verify: links.verify(eventId) },
+    urls: { queue: ORIGINS.queue, files: ORIGINS.files, api: ORIGINS.api, event: links.event(eventId), seats: links.seats(eventId), verify: links.verify(eventId) },
     net: createNet((u, i) => fetch(u, i), Date.now),
     store: createStore(eventId, local, storage('sessionStorage'), Date.now, (n) => crypto.getRandomValues(new Uint8Array(n))),
     clock: createClock(local, steadyNow),

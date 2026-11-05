@@ -17,10 +17,12 @@ import {
   CreateIdentityVerificationResultResponse,
   GetIdentityVerificationResultResponse,
   GetIdentityMeResponse,
+  CreateEventSubscriptionResponse,
   ListSubscriptionsResponse,
   ListWishesResponse,
 } from '@peaket/contracts/openapi/identity';
 import { GetEventReviewSummaryResponse } from '@peaket/contracts/openapi/reviews';
+import { GetMyBookingRestrictionResponse } from '@peaket/contracts/openapi/support';
 import { GetSearchSuggestionsResponse, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
 import { ARTISTS, INITIAL_WISHES, searchResults, suggestions, suggestQueryOk, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
 
@@ -414,6 +416,69 @@ test('휴대폰 본인확인(identity §5 모의 기관과 기관 창 흐름): �
     assert.equal((await result('00000000-0000-4000-8000-000000000000')).status, 404);
     assert.equal((await result('%E0%A4%A')).status, 404);
     assert.equal((await call('GET', '/v1/identity/me')).status, 200);
+  } finally {
+    server.close();
+  }
+});
+
+test('예매 제한(ADR-0213): restriction=none|active|overdue|fraud는 계약 모양 그대로(모르는 칸 없음), 비로그인은 401', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const read = async () => {
+      const r = await fetch(`${base}/v1/booking-restrictions/me`);
+      return { status: r.status, body: r.status === 200 ? await r.json() : null, cache: r.headers.get('cache-control') };
+    };
+    let r = await read();
+    assert.deepEqual(r.body, { status: 'NONE' });
+    assert.equal(r.cache, 'private, no-store');
+    for (const s of ['active', 'overdue', 'fraud']) {
+      await fetch(`${base}/__mock/state?restriction=${s}`);
+      r = await read();
+      assert.equal(r.body.status, 'ACTIVE', s);
+      assert.deepEqual(GetMyBookingRestrictionResponse.parse(r.body), r.body, s);
+      const due = Date.parse(r.body.appealDueAt);
+      assert.ok(s === 'overdue' ? due < Date.now() : due > Date.now(), `${s} 소명 기한`);
+    }
+    assert.equal(r.body.reasonCode, 'FRAUD');
+    await fetch(`${base}/__mock/state?fan=guest`);
+    assert.equal((await read()).status, 401);
+  } finally {
+    server.close();
+  }
+});
+
+test('취소표 알림 신청(ADR-0213 결정 5): 처음 201·다시 200, 목록에 ACTIVE로 남고, subscribe=limit|busy|ended는 422·429·410', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  const ev = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e04';
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const post = (kind) => fetch(`${base}/v1/events/${ev}/subscriptions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind, nightPush: false }) });
+    const list = async () => (await (await fetch(`${base}/v1/subscriptions?eventIds=${ev}`)).json()).items[0];
+    assert.equal((await list()).cancellation, false);
+    let r = await post('CANCELLATION');
+    assert.equal(r.status, 201);
+    const body = await r.json();
+    assert.deepEqual(CreateEventSubscriptionResponse.parse(body), body);
+    assert.equal(body.cancellationStatus, 'ACTIVE');
+    assert.equal((await post('CANCELLATION')).status, 200);
+    const item = await list();
+    assert.equal(item.cancellation, true);
+    assert.equal(item.cancellationStatus, 'ACTIVE');
+    assert.equal(item.open, false, '취소표 신청은 오픈 알림을 켜지 않는다');
+    ListSubscriptionsResponse.parse({ items: [item], nextCursor: null });
+    assert.equal((await fetch(`${base}/v1/events/${ev}/subscriptions?kind=CANCELLATION`, { method: 'DELETE' })).status, 204);
+    assert.equal((await list()).cancellation, false);
+    assert.equal((await post('BOGUS')).status, 400);
+    for (const [s, code, name] of [['limit', 422, 'subscription-limit'], ['busy', 429, null], ['ended', 410, 'sale-ended']]) {
+      await fetch(`${base}/__mock/state?subscribe=${s}`);
+      r = await post('CANCELLATION');
+      assert.equal(r.status, code, s);
+      if (name) assert.equal((await r.json()).type, `https://peaket.example/problems/${name}`);
+      if (code === 429) assert.ok(r.headers.get('retry-after'));
+    }
   } finally {
     server.close();
   }

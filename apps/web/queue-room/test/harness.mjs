@@ -8,7 +8,7 @@ import { createClock } from '../src/live/clock.ts';
 import { createTabs } from '../src/live/tabs.ts';
 
 export const EVENT = 'e1';
-export const URLS = { queue: 'https://q', files: 'https://f', event: '/events/e1', seats: '/booking/e1/seats', verify: '/queue/e1/verify' };
+export const URLS = { queue: 'https://q', files: 'https://f', api: 'https://api', event: '/events/e1', seats: '/booking/e1/seats', verify: '/queue/e1/verify' };
 export const START = 1_000_000;
 export const reply = (status, body, extra = {}) => ({ status, body, retryAfterMs: extra.retryAfterMs ?? null, problem: extra.problem ?? null });
 export const stateFile = (over = {}) => ({ serving: 1000, servingRate: 2, saleStatus: 'ON_SALE', removedUpToServing: 0, removedBeforeSegment: 0, removedBitmap: Buffer.alloc(125).toString('base64'), generatedAtMs: 0, pollHintMs: 0, ...over });
@@ -185,6 +185,7 @@ export function openTab(world, { handler, hidden = false, online = () => true, r
     send: async (url, method) => call({ m: method, url }),
     getFile: async (url, noStore) => call({ m: 'GET', url, noStore }),
     getPublic: async () => reply(404),
+    getFan: async (url) => call({ m: 'GETFAN', url }),
   };
   const channel = multi ? world.bus.channel(`peaket.queue.${EVENT}`) : null;
   const tabs = multi

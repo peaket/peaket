@@ -49,11 +49,15 @@ export interface QueueView {
   via?: 'lobby' | 'queue';
   /** 매진된 등급(대기 상태 파일 soldOutTiers, 자동 배정 희망 조건 줄의 경고에만, ADR-0212 결정 2) */
   soldOutTiers?: string[];
+  /** 예매 제한의 ( 소명하기 › ) 대상(제한 ID, 소명 기한 전일 때만, ADR-0213 결정 4) */
+  appealId?: string;
 }
 
 export interface Urls {
   queue: string;
   files: string;
+  /** 팬 API 출처(예매 제한 조회) */
+  api: string;
   event: string;
   seats: string;
   verify: string;
@@ -228,7 +232,27 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
     const via = extra.via ?? current.via;
     show({ state, ...extra });
     if (myKey) tabs.post({ t: 'result', k: myKey, state, ...(extra.rejoinAllowed !== undefined ? { rejoinAllowed: extra.rejoinAllowed } : {}), ...(via ? { via } : {}) });
+    if (state === 'restricted') void restrictedAppeal();
   };
+
+  /**
+   * 예매 제한(입장 확정 403)에는 제한 ID가 없어 팬 API로 한 번 받는다(ADR-0213 결정 4). 소명 기한 전이면 ( 소명하기 › )를 잇고,
+   * 실패·NONE(화면용 사본이 늦음)·기한 지남이면 공연 상세 링크 그대로다. 대기표는 지우지 않는다
+   */
+  async function restrictedAppeal(): Promise<void> {
+    let r: Reply | undefined;
+    try {
+      r = await net.getFan(`${urls.api}/v1/booking-restrictions/me`);
+    } catch {
+      return;
+    }
+    if (!r || r.status !== 200 || current.state !== 'restricted') return;
+    const b = r.body as { status?: unknown; restrictionId?: unknown; appealDueAt?: unknown } | undefined;
+    if (b?.status !== 'ACTIVE' || typeof b.restrictionId !== 'string' || b.restrictionId === '') return;
+    const due = typeof b.appealDueAt === 'string' ? Date.parse(b.appealDueAt) : Number.NaN;
+    if (!Number.isNaN(due) && due <= clock.now()) return;
+    show({ ...current, appealId: b.restrictionId });
+  }
 
   /** 저장한 뒤 다른 탭에 알린다(그 탭은 저장소에서 다시 시작한다) */
   const stored = () => {
@@ -863,6 +887,7 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
       run.abort();
       if (m.state === 'admitted') show({ state: 'duplicate' });
       else show({ state: m.state, ...(m.rejoinAllowed !== undefined ? { rejoinAllowed: m.rejoinAllowed } : {}), ...(m.via ? { via: m.via } : {}) });
+      if (m.state === 'restricted') void restrictedAppeal();
     }
   });
   const stopLeader = tabs.onLeader(() => nudge('leader'));

@@ -9,7 +9,8 @@ import { alertDue, titlePrefix } from './live/alert.ts';
 import { readPreference, writePreference } from './live/preference.ts';
 import { cx } from './dom';
 import { findProduct } from './fixtures';
-import { browserEnv } from './live/browser';
+import { browserEnv, refresh } from './live/browser';
+import { createCancelAlert } from './live/cancel-alert.ts';
 import { startQueue, type Controller, type QueueView, type Schedule } from './live/controller.ts';
 import { clearForLogout, serverLogout } from './live/logout.ts';
 import { emptyMeta, metaFromSummary, scheduleFromSummary, type EventMeta } from './live/meta.ts';
@@ -18,7 +19,7 @@ import { parseRoute } from './route';
 import { goodsQueueScreen } from './screens/goods';
 import { isLobbyView, lobbyScreen } from './screens/lobby';
 import { modalBuild, type ModalDeps } from './screens/modals';
-import { queueScreen, updateQueueNumbers } from './screens/queue';
+import { queueScreen, updateQueueNumbers, updateRestrictedLink } from './screens/queue';
 import { liveSoldOutScreen } from './screens/soldout';
 import { findState, GOODS_STATES, stateHref, type BoardState } from './states';
 import { closeModal, openModal } from './ui/modal';
@@ -231,6 +232,7 @@ function startLive(eventId: string): void {
     ]);
     if (nextShape === shape) {
       updateQueueNumbers(root, view);
+      updateRestrictedLink(root, view, eventId);
       return;
     }
     const firstPaint = shape === '';
@@ -269,6 +271,8 @@ function startLive(eventId: string): void {
       ev: meta,
       view,
       pref,
+      cancelAlert,
+      navigate: (u) => location.assign(u),
       actions: { cancel: () => ctl?.cancel() ?? Promise.resolve(false), rejoin: () => ctl?.rejoin(), retry: () => ctl?.retry(), admitNow: () => ctl?.admitNow() },
     };
     const lobby = isLobbyView(view);
@@ -284,6 +288,7 @@ function startLive(eventId: string): void {
 
   // 머리의 공연명·회차와 상태 기계의 일정(오픈·로비 개방)은 공연 공개 요약 하나에서 읽는다(ADR-0208 결정 2). 실패하면 다음에 다시 받는다
   const net = createNet((u, i) => fetch(u, i), Date.now);
+  const cancelAlert = createCancelAlert({ net, api: ORIGINS.api, eventId, refresh });
   let summary: Promise<unknown> | null = null;
   let loaded: unknown = null;
   const schedule = async (): Promise<Schedule | null> => {

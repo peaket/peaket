@@ -4,9 +4,10 @@
 import { links } from '../config';
 import type { LiveCtx } from '../ctx';
 import type { QueueView } from '../live/controller.ts';
-import { append, cx, h, ic, setVars } from '../dom';
+import { append, cx, h, ic, setVars, type Child } from '../dom';
 import { fmt, queueSentence } from '../queue-math';
 import { announceEveryMinute, countdown } from '../ui/timers';
+import { rollDigits } from '../ui/roll.ts';
 import { steadyNow } from '../live/steady.ts';
 import { clock } from '../queue-math';
 import { focusHeader, offlineStrip } from './shell';
@@ -116,12 +117,31 @@ export function queueScreen(c: LiveCtx): HTMLElement[] {
       h('button', { class: 'btn btn-secondary btn-lg btn-block q-cta q-mt8', type: 'button', onclick: () => location.assign(links.login(c.path)) }, '다시 로그인')));
   }
   if (st === 'ended') frame.append(statePage('', 'calendar', '판매 시간이 끝났습니다', null, linkBtn(links.event(ev.id), '다른 회차')));
-  // ( 소명하기 › )의 소명 건 ID는 403에 없어 공연 상세의 제한 표시(HOT-342)로 보낸다
-  if (st === 'restricted') frame.append(statePage('is-danger', 'ban', '예매가 제한되어 있어 입장할 수 없습니다', null, linkBtn(links.event(ev.id), '공연 상세')));
+  // ( 소명하기 › )는 팬 API로 받은 제한 ID로 SCR-042에 잇는다(ADR-0213 결정 4). 받기 전·실패·기한 지남이면 공연 상세로.
+  // 제한 ID는 이 화면을 그린 뒤에 오므로 링크만 제자리에서 바꾼다(updateRestrictedLink)
+  if (st === 'restricted') frame.append(statePage('is-danger', 'ban', '예매가 제한되어 있어 입장할 수 없습니다', null, restrictedLink(v, ev.id)));
   if (st === 'duplicate') frame.append(statePage('', 'device', '이미 다른 기기나 탭의 대기표로 입장했습니다', '처음 입장한 곳에서 계속하세요', null));
 
   const offline = st === 'offline' ? offlineStrip(v.lastSyncAt !== undefined ? `인터넷 연결이 없습니다 · 마지막 동기화 ${hhmm(v.lastSyncAt)}` : '인터넷 연결이 없습니다') : null;
   return [offline, focusHeader(c), main].filter((x): x is HTMLElement => x !== null);
+}
+
+function restrictedLink(v: QueueView, eventId: string): HTMLElement {
+  const a = v.appealId ? linkBtn(links.appeal(v.appealId), '소명하기') : linkBtn(links.event(eventId), '공연 상세');
+  a.setAttribute('data-q', 'restricted-link');
+  return a;
+}
+
+/** 예매 제한 화면의 링크만 바꾼다(제한 ID가 늦게 왔을 때). 초점이 그 링크에 있었으면 새 링크로 옮긴다 */
+export function updateRestrictedLink(root: HTMLElement, v: QueueView, eventId: string): void {
+  if (v.state !== 'restricted') return;
+  const old = root.querySelector<HTMLElement>('[data-q="restricted-link"]');
+  if (!old) return;
+  const next = restrictedLink(v, eventId);
+  if (old.getAttribute('href') === next.getAttribute('href')) return;
+  const focused = document.activeElement === old;
+  old.replaceWith(next);
+  if (focused) next.focus();
 }
 
 function linkBtn(href: string, text: string): HTMLElement {
@@ -178,6 +198,19 @@ function bar(pct: number, valueText: string, opts: { flow: boolean; dim: boolean
   }, fill);
 }
 
+/**
+ * ① 앞 인원: 낭독용 글 하나와 화면용 숫자(aria-hidden). 값이 바뀌면 바뀐 자리만 위에서 내려오게 굴린다(d5 §5.8 lg, 움직임 base).
+ * 움직임 줄이기·저전력이면 CSS가 효과를 꺼 새 값만 보인다. 숫자 자체에는 live를 두지 않는다(낭독은 1분 문장 하나)
+ */
+function aheadContent(now: string, before?: string): Child[] {
+  const digits = rollDigits(now, before).map((d) =>
+    d.old === undefined
+      ? d.ch
+      : h('span', { class: 'q-digit' }, h('span', { class: 'q-digit-stack' }, h('span', null, d.ch), h('span', { class: 'q-digit-old' }, d.old || '\u00a0'))),
+  );
+  return [h('span', { class: 'sr-only' }, `${now}명`), h('span', { class: 'q-roll', 'aria-hidden': 'true' }, digits, '명')];
+}
+
 function countBlock(c: LiveCtx, v: { ahead: number; pct: number; eta: string | null; sentence: string; stale: boolean; allHeld: boolean; paused: boolean }): HTMLElement {
   const tone = v.stale ? 'muted' : '';
   // 속도가 0이거나 일시정지면 숫자 대신 '잠시 멈춤'(frontend §3.4). 멈춘 동안 막대도 흐르지 않는다
@@ -188,7 +221,7 @@ function countBlock(c: LiveCtx, v: { ahead: number; pct: number; eta: string | n
   const block = h('div', { class: 'col q-count', 'data-sentence': v.sentence });
   c.onCleanup(announceEveryMinute(live, () => block.getAttribute('data-sentence') ?? v.sentence));
   append(block, [
-    h('p', { class: 'row q-ahead' }, h('span', { class: cx('t-lg fw-b q-ahead-l', tone) }, '앞에'), h('span', { class: cx('t-display num', tone), 'data-q': 'ahead' }, `${fmt(v.ahead)}명`)),
+    h('p', { class: 'row q-ahead' }, h('span', { class: cx('t-lg fw-b q-ahead-l', tone) }, '앞에'), h('span', { class: cx('t-display num', tone), 'data-q': 'ahead', 'data-v': fmt(v.ahead) }, aheadContent(fmt(v.ahead)))),
     h('div', { class: 'q-barwrap' }, meMarker(v.pct), bar(v.pct, v.sentence, { flow: !v.stale && !v.paused, dim: v.stale })),
     !v.allHeld && h('div', { class: 'col q-eta' }, h('span', { class: 't-sm muted' }, '예상 대기 시간'), h('strong', { class: cx('t-xl', v.eta && 'num', tone), 'data-q': 'eta' }, etaValue)),
     v.allHeld && h('p', { class: 'row t-md fw-b q-jc' }, h('span', { class: 'spinner muted', 'aria-hidden': 'true' }), '좌석이 풀리길 기다리는 중'),
@@ -209,7 +242,15 @@ export function updateQueueNumbers(root: HTMLElement, v: QueueView): boolean {
   const sentence = queueSentence(v.ahead, eta, v.state === 'all-held');
   block.setAttribute('data-sentence', sentence);
   const ahead = block.querySelector<HTMLElement>('[data-q="ahead"]');
-  if (ahead) ahead.textContent = `${fmt(v.ahead)}명`;
+  if (ahead) {
+    const now = fmt(v.ahead);
+    const before = ahead.getAttribute('data-v') ?? undefined;
+    if (now !== before) {
+      ahead.replaceChildren();
+      append(ahead, aheadContent(now, before));
+      ahead.setAttribute('data-v', now);
+    }
+  }
   const etaEl = block.querySelector<HTMLElement>('[data-q="eta"]');
   if (etaEl) {
     etaEl.textContent = eta ?? '잠시 멈춤';

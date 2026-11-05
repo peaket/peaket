@@ -71,6 +71,8 @@ export interface Net {
   getFile(url: string, noStore: boolean, signal?: AbortSignal): Promise<Reply>;
   /** 공개 GET(쿠키 없음, 공연 공개 요약) */
   getPublic(url: string, signal?: AbortSignal): Promise<Reply>;
+  /** 팬 API GET(쿠키를 싣고 브라우저 캐시를 건너뛴다, 예매 제한 조회 ADR-0213 결정 4) */
+  getFan(url: string, signal?: AbortSignal): Promise<Reply>;
 }
 
 export function createNet(fetchImpl: FetchLike, now: () => number): Net {
@@ -93,6 +95,10 @@ export function createNet(fetchImpl: FetchLike, now: () => number): Net {
     },
     async getPublic(url, signal) {
       const res = await fetchImpl(url, { credentials: 'omit', signal: withTimeout(signal) });
+      return read(res, now());
+    },
+    async getFan(url, signal) {
+      const res = await fetchImpl(url, { credentials: 'include', cache: 'no-store', signal: withTimeout(signal) });
       return read(res, now());
     },
   };

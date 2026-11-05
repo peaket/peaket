@@ -29,6 +29,9 @@ test('T=0 두 호출은 text/plain이고 사용자 헤더가 없으며 쿠키를
   assert.deepEqual([calls[1].init.credentials, calls[1].init.cache, calls[1].init.headers], ['omit', 'no-store', undefined]);
   await net.getFile('https://files/b.json', false);
   assert.equal(calls[2].init.cache, undefined);
+  // 팬 API GET(예매 제한·알림 신청 상태): 쿠키를 싣고 브라우저 캐시를 건너뛴다(ADR-0213 결정 4·5)
+  await net.getFan('https://api/v1/booking-restrictions/me');
+  assert.deepEqual([calls[3].init.credentials, calls[3].init.cache, calls[3].init.method, calls[3].init.headers], ['include', 'no-store', undefined, undefined]);
 });
 
 test('Retry-After는 0 이상 정수 초나 HTTP 날짜만', () => {
