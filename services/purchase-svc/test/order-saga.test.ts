@@ -938,7 +938,7 @@ describe('CONFIRM 승인 명령', () => {
     notCalled('confirmSent.done', 'jobs.reschedule', 'failures.fail');
   });
 
-  test(`H1_REJECTED(정해진 거절)면 SEV2 오류 로그(log.confirmRejected: 주문·까닭) 뒤 작업을 ${SAGA_CONFIRM_PARK_MS / 60_000}분 [가정] 멈춘다(실패로 끝내지 않는다. 결과 당기기 PRF-170이 맞춘다)`, async () => {
+  test(`H1_REJECTED(정해진 거절)면 SEV2 오류 로그(log.confirmRejected: 주문·까닭) 뒤 작업을 ${SAGA_CONFIRM_PARK_MS / 60_000}분 [가정] 멈춘다(실패로 끝내지 않는다. 결과 당기기 PRF-171이 맞춘다)`, async () => {
     const order = reserved();
     fx.put(order, confirmJob());
     fx.confirmQueue = [{ status: 'REJECTED', reason: 'failed_precondition' }];

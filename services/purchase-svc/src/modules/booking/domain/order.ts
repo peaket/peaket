@@ -4,8 +4,11 @@
 // (inventory 공개 면을 가져오면 Nest 모듈까지 끌려 온다, 리뷰 2026-11-05). 같은 값인지는 test/order-domain.test.ts가 견준다.
 import { createHash } from 'node:crypto';
 
-/** SHA-256(입력)의 앞 16바이트에 UUID 버전 8(RFC 9562 사용자 정의)·변형 비트를 맞춘 UUID 글 */
-function uuid8(input: string): string {
+/**
+ * SHA-256(입력)의 앞 16바이트에 UUID 버전 8(RFC 9562 사용자 정의)·변형 비트를 맞춘 UUID 글.
+ * 발권 쪽(ISSUE_DELAYED eventKey, '늘 발권' 대역의 티켓 ID, BUILD_ORDER PRF-170)도 같은 계산을 쓴다(booking 안에서만 쓴다. 공개 면 index.ts에는 내놓지 않는다)
+ */
+export function uuid8(input: string): string {
   const b = Buffer.from(createHash('sha256').update(input).digest().subarray(0, 16));
   b[6] = (b[6]! & 0x0f) | 0x80;
   b[8] = (b[8]! & 0x3f) | 0x80;

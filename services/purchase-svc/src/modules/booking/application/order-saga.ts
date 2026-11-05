@@ -17,7 +17,7 @@
 //   (어댑터의 beforeSend. 적지 못하면 보내지 않고 SKIPPED LEASED). 한 번이라도 보냈으면 기한이 지나도 혼자 T11을 하지 않고 같은 주문 ID로 계속 다시 보낸다
 //   (결과를 모르는 명령이 payment-svc에 적혔을 수 있다. 결과는 trade.payments로 온다, PRF-163).
 //   ACCEPTED면 ConfirmSent.done(작업 행·결제 참조 지우기) → DONE, RETRYABLE이면 다시 하기(1초에서 두 배, 최대 10초),
-//   REJECTED면 SEV2 오류 로그 뒤 작업을 SAGA_CONFIRM_PARK_MS(1시간 [가정]) 멈춘다(결과 당기기 PRF-170이 맞춘다)
+//   REJECTED면 SEV2 오류 로그 뒤 작업을 SAGA_CONFIRM_PARK_MS(1시간 [가정]) 멈춘다(결과 당기기 PRF-171이 맞춘다)
 // 단계 RELEASE(releaseStep, 리뷰 M4): 실패 기록 뒤 실패 해제가 끝나지 못한 작업. 해제가 OK이거나 회차 키 수명 뒤의 NOT_READY면 작업 행을 지우고, 아니면 다시 한다.
 // 실패의 차례: DB 실패 기록(SagaFailures.fail, 커밋. 작업 행 RELEASE) → 실패 해제(OrderSeatPins.releaseFailed) → 끝나면 작업 행 지우기, 못 끝나면 warn 한 줄과 다시 하기.
 //   실패 기록이 STALE(작업 행이 그 단계가 아니거나 주문이 그 사이 다른 상태로 감)이면 실패 해제를 하지 않고 그 자리에서 다시 하기로 미뤄 임대를 푼다(리뷰 M3).
@@ -346,7 +346,7 @@ export class OrderSagaRunner {
       case 'RETRYABLE':
         return this.#retry(job, 'confirm_retryable');
       case 'REJECTED':
-        // 정해진 거절(설정·코드 오류·모르는 답): SEV2 오류 로그 뒤 작업을 멈춘다(멀리 미룬다. 결과 당기기 PRF-170이 맞춘다, 리뷰 H1)
+        // 정해진 거절(설정·코드 오류·모르는 답): SEV2 오류 로그 뒤 작업을 멈춘다(멀리 미룬다. 결과 당기기 PRF-171이 맞춘다, 리뷰 H1)
         this.#safeLog(() => this.deps.log.confirmRejected({ orderId: order.orderId, reason: outcome.reason }));
         return this.#retry(job, 'confirm_rejected', { delayMs: SAGA_CONFIRM_PARK_MS });
     }

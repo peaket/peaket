@@ -1,7 +1,8 @@
 // 주문 생성의 보안·설정 로그를 서비스 로거(platform PlatformLogger)에 한 줄씩 남기는 어댑터(OrderLog, ADR-0055, BUILD_ORDER PRF-161).
 // 번호 원문·토큰·pid는 싣지 않는다. 대체 판정은 warn(보안 로그), 설정 오류는 error(kind config, 재확인 설정 오류는 SEV2)다.
-import type { PlatformLogger } from '@peaket/platform';
-import type { AcceptLog, OrderLog, PaymentResultLog, SagaLog } from '../domain/ports.js';
+import { errorSummary, type PlatformLogger } from '@peaket/platform';
+import type { AcceptLog, OrderLog, PaymentResultLog, SagaLog, TicketIssueLog } from '../domain/ports.js';
+import { TICKET_ISSUE_CS_CASE } from '../domain/ticket-issue.js';
 
 /**
  * - identityFallback: warn 한 줄 { kind: 'security', event: 'identity_recheck_fallback', accountId, reason, passed, idempotencyKey }
@@ -73,7 +74,8 @@ export class LoggerOrderLog implements OrderLog, AcceptLog {
  * Saga 1단계 로그(SagaLog, BUILD_ORDER PRF-165). 결제 참조·토큰·금액은 싣지 않는다. 로거가 던져도 삼킨다.
  * - releaseFailed: warn 한 줄 { event: 'order_saga_release_failed', orderId, eventId, why }
  * - confirmRejected: error 한 줄 { kind: 'config', event: 'order_saga_confirm_rejected', orderId, reason, severity: 'SEV2' }
- * - stepError: error 한 줄 { event: 'order_saga_step_error', orderId, step, err }
+ * - stepError: error 한 줄 { event: 'order_saga_step_error', orderId, step, err }. err는 플랫폼 errorSummary('이름: 글' 한 줄. Drizzle 쿼리 오류는
+ *   쿼리 틀과 SQLSTATE만 싣고 매개변수 값은 싣지 않는다, ASVS v5.0.0-16.2.5, 리뷰 고침 M2)
  */
 export class LoggerSagaLog implements SagaLog {
   constructor(private readonly logger: Pick<PlatformLogger, 'warn' | 'error'>) {}
@@ -104,7 +106,7 @@ export class LoggerSagaLog implements SagaLog {
 
   stepError(e: Parameters<SagaLog['stepError']>[0]): void {
     try {
-      this.logger.error({ event: 'order_saga_step_error', orderId: e.orderId, step: e.step, err: errorSummaryOf(e.err) }, 'Saga 단계가 예상 밖 오류로 끝나 다시 하기로 미뤘다');
+      this.logger.error({ event: 'order_saga_step_error', orderId: e.orderId, step: e.step, err: errorSummary(e.err) }, 'Saga 단계가 예상 밖 오류로 끝나 다시 하기로 미뤘다');
     } catch {
       // 로그 실패는 실행기를 막지 않는다
     }
@@ -144,8 +146,60 @@ export class LoggerPaymentResultLog implements PaymentResultLog {
   }
 }
 
-/** 오류의 이름·글만(스택·원인·다른 칸은 싣지 않는다) */
-function errorSummaryOf(err: unknown): { name: string; message: string } | string {
-  if (err instanceof Error) return { name: err.name, message: err.message };
-  return typeof err === 'string' ? err : typeof err;
+/**
+ * 발권 실행기 로그(TicketIssueLog, BUILD_ORDER PRF-170). 좌석·계정·티켓 ID는 싣지 않는다(받은 객체를 펼치지 않고 칸을 하나씩 고른다). 로거가 던져도 삼킨다.
+ * CS 건 요청 계약이 없어 csCase 표시로만 둔다(건 요청은 GAT-280).
+ * - stopped: error 한 줄 { kind: 'ticket-issue', severity: 'SEV2', orderId, code, csCase: 'TICKET_NOT_ISSUED' }
+ * - overdue: error 한 줄 { kind: 'ticket-issue-overdue', severity: 'SEV1', orderId, csCase: 'TICKET_NOT_ISSUED' }
+ * - staleAnswer: warn 한 줄 { kind: 'ticket-issue', event: 'stale_answer', orderId, current? }
+ * - runError: error 한 줄 { kind: 'ticket-issue', event: 'run_error', what, orderId?, err }. err는 플랫폼 errorSummary('이름: 글' 한 줄, 스택·원인 없음.
+ *   Drizzle 쿼리 오류는 쿼리 틀과 SQLSTATE만 싣고 매개변수 값(주문·좌석·티켓 ID)은 싣지 않는다, ASVS v5.0.0-16.2.5, 리뷰 고침 M2)
+ */
+export class LoggerTicketIssueLog implements TicketIssueLog {
+  constructor(private readonly logger: Pick<PlatformLogger, 'warn' | 'error'>) {}
+
+  // 칸을 하나씩 골라 싣는다(받은 객체를 펼치지 않아 좌석·결제자 계정·티켓 ID가 섞여 들지 않게)
+
+  stopped(e: Parameters<TicketIssueLog['stopped']>[0]): void {
+    try {
+      this.logger.error(
+        { kind: 'ticket-issue', severity: 'SEV2', orderId: e.orderId, code: e.code, csCase: TICKET_ISSUE_CS_CASE },
+        '발권이 다시 보내도 같은 결과일 오류로 끝나 자동 재시도를 멈췄다(결제 뒤 미발권, CS 처리함 건 요청은 GAT-280)',
+      );
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+
+  overdue(e: Parameters<TicketIssueLog['overdue']>[0]): void {
+    try {
+      this.logger.error(
+        { kind: 'ticket-issue-overdue', severity: 'SEV1', orderId: e.orderId, csCase: TICKET_ISSUE_CS_CASE },
+        '발권 기한(승인 + 30분 [가정])을 넘겼다(재시도는 최대 간격으로 이어 간다, ADR-0106 결정 2)',
+      );
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+
+  staleAnswer(e: Parameters<TicketIssueLog['staleAnswer']>[0]): void {
+    const line: Record<string, unknown> = { kind: 'ticket-issue', event: 'stale_answer', orderId: e.orderId };
+    if (e.current !== undefined) line.current = e.current;
+    try {
+      this.logger.warn(line, '늦게 온 발권 답: 주문이 APPROVED가 아니라 상태를 바꾸지 않고 발권 큐 행만 지웠다');
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+
+  runError(e: Parameters<TicketIssueLog['runError']>[0]): void {
+    const line: Record<string, unknown> = { kind: 'ticket-issue', event: 'run_error', what: e.what };
+    if (e.orderId !== undefined) line.orderId = e.orderId;
+    line.err = errorSummary(e.err);
+    try {
+      this.logger.error(line, '발권 실행기가 예상 밖 오류를 만났다(다음 틱이나 임대가 끝난 뒤 다시 한다)');
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
 }

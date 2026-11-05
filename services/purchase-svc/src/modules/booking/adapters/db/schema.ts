@@ -9,6 +9,8 @@
 //   (data.md §4 일곱 번째 마이그레이션, RELEASE·confirm_sent_at은 2026-11-05 리뷰 H1·M4).
 //   결제 결과 반영(PRF-163)은 0007로 발권 재시도 큐 ticket_issue_job을 더했다(data.md §4 여덟 번째 마이그레이션).
 //   주문 기준 되살리기(PRF-167)는 0008로 주문의 묶은 시각 pinned_at을 더했다(data.md §4 아홉 번째 마이그레이션).
+//   발권 호출과 재시도 큐(PRF-170)는 0009로 ticket_issue_job에 임대 lease_until, ISSUE_DELAYED를 낸 시각 delayed_at, 발권 기한 넘김 신호를 낸 시각 overdue_at을
+//   더했다(data.md §4 열 번째 마이그레이션). 셋 다 널 허용이고 새 인덱스는 두지 않는다(큐 행은 승인 뒤 발권까지만 남아 적다).
 // - drizzle-kit이 이 파일을 읽으므로 도메인 파일을 가져오지 않는다(도메인 → inventory 공개 면 → Nest 모듈까지 끌려 온다).
 //   상태 목록은 도메인 상수 ORDER_STATUSES와 같은 차례로 글로 적는다(inventory schema.ts의 seat_sale 상태 목록과 같은 방식).
 import { idempotencyRecordTable } from '@peaket/platform';
@@ -200,6 +202,7 @@ export const orderSagaJob = pgTable(
  * 발권 재시도 큐(0007, BUILD_ORDER PRF-163, data.md §2 ERD ticket_issue_job·§4 여덟 번째 마이그레이션, ADR-0106).
  * 결제 승인을 반영하는 트랜잭션(판매 행 SOLD, 주문 APPROVED)이 한 행을 넣고, 발권(CONFIRMED)·보상(COMPENSATED)과 같은 트랜잭션에서 지운다.
  * 발권 호출·다시 하기는 PRF-170이다. 주문 ID가 기본 키라 한 주문에 행은 하나뿐이다(order_saga_job과 같은 꼴).
+ * 발권 실행기(PRF-170)는 order_saga_job과 같이 짧은 트랜잭션에서 FOR UPDATE SKIP LOCKED로 골라 임대(lease_until)를 쓰고 커밋한 뒤, 잠금 밖에서 ticket-svc를 부른다(0009).
  */
 export const ticketIssueJob = pgTable(
   'ticket_issue_job',
@@ -219,6 +222,12 @@ export const ticketIssueJob = pgTable(
     lastError: text('last_error'),
     // 60초 [가정] 넘게 남으면 SEV2와 trade.orders ISSUE_DELAYED
     createdAt: at('created_at').notNull(),
+    // 잡은 발권 실행기의 임대 끝 시각(잡지 않았으면 비움). 잡기는 30초 [가정]를 쓰고, 성공·다시 보내기·멈추기가 비운다(0009, PRF-170)
+    leaseUntil: at('lease_until'),
+    // trade.orders ISSUE_DELAYED를 낸 시각. 비었으면 아직 내지 않았다(주문마다 한 번, 0009, PRF-170)
+    delayedAt: at('delayed_at'),
+    // 발권 기한(issue_due_at) 넘김 신호(SEV1 오류 로그·지표)를 낸 시각. 비었으면 아직 내지 않았다(주문마다 한 번, 0009, PRF-170)
+    overdueAt: at('overdue_at'),
   },
   (t) => [index('ticket_issue_job_next_attempt_idx').on(t.nextAttemptAt)],
 );

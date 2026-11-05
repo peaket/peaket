@@ -1,6 +1,6 @@
 // 결제 결과 반영의 값과 규칙(docs/features/payment.md §2 '결제 결과 반영의 첫 구현', §3 T9~T17, docs/data.md §5 '결제 결과 반영', BUILD_ORDER PRF-163).
 // trade.payments PaymentEvent 하나를 주문의 지금 상태와 견주어 '반영(APPLY) · 건너뜀(SKIP) · 보류(HOLD)' 가운데 하나로 정한다.
-// 키 단위 처리기(inbound/payment-result.handler.ts, 주문 ID, ADR-0142)와 결과 당기기(PRF-170)가 같은 쓰임새(application/apply-payment-result.ts)를 부른다.
+// 키 단위 처리기(inbound/payment-result.handler.ts, 주문 ID, ADR-0142)와 결과 당기기(PRF-171)가 같은 쓰임새(application/apply-payment-result.ts)를 부른다.
 // 프레임워크·저장소·계약 패키지를 모른다(순수 값과 함수). 사건 모양은 계약(asyncapi PaymentEvent)의 칸을 다시 적은 것이다(order.ts OrderEventMessage와 같은 방식).
 import type { OrderStatus } from './order.js';
 import type { PaymentPg } from './ports.js';
@@ -129,7 +129,7 @@ export type PaymentResultSkipReason = 'DUPLICATE' | 'ALREADY_THERE' | 'RECORD_ON
  * - NOT_YET_SUPPORTED: DEPOSIT_REVERSED(T21)·PARTIAL_CANCELED·CANCELED. 맡을 단계(가상계좌·취소)가 생기면 보류 표에서 다시 처리한다
  *   (건너뛰면 그 사건을 영영 잃는다, 리뷰 M3)
  * - CHARGED_ON_CLOSED_ORDER: 닫힌 주문(FAILED·EXPIRED·COMPENSATED)에 과금 사건(APPROVED·AWAITING_DEPOSIT) — 과금됐는데 주문이 닫혔다(SEV1, 리뷰 M2).
- *   CS 처리함 건과 환불로 닫는 길은 PRF-170이다(TICKET_NOT_ISSUED와 같은 꼴)
+ *   CS 처리함 건과 환불로 닫는 길은 보상 세 걸음(PRF-173) 무렵이다(TICKET_NOT_ISSUED와 같은 꼴, CS 건 요청 계약은 GAT-280, docs/features/payment.md §2)
  * - SOLD_MISMATCH: 승인 쓰기에서 SOLD로 바꾼 판매 행 수가 주문 좌석 수와 다름(판매 행이 없어졌다. 되돌렸다, SEV1, 리뷰 M4)
  */
 export type PaymentResultHoldReason = 'IMPOSSIBLE' | 'AMOUNT_MISMATCH' | 'PG_MISMATCH' | 'NOT_YET_SUPPORTED' | 'CHARGED_ON_CLOSED_ORDER' | 'SOLD_MISMATCH';

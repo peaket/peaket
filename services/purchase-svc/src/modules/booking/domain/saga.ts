@@ -43,7 +43,7 @@ export const CONFIRM_CALL_DEADLINE_MS = 200;
 export const SEAT_KEYS_KEEP_AFTER_SALE_END_MS = 24 * 3600_000;
 /** 판 번호가 바뀌어(GEN_CHANGED) 같은 실행 안에서 묶기부터 다시 하는 횟수 상한 3번 [가정]. 넘으면 다시 하기로 미룬다 */
 export const SAGA_GEN_RESTART_MAX = 3;
-/** 승인 명령이 정해진 거절(REJECTED)이면 작업을 멈추는 길이 1시간 [가정](next_attempt_at을 이만큼 미룬다. 결과 당기기 PRF-170이 맞춘다, 리뷰 H1) */
+/** 승인 명령이 정해진 거절(REJECTED)이면 작업을 멈추는 길이 1시간 [가정](next_attempt_at을 이만큼 미룬다. 결과 당기기 PRF-171이 맞춘다, 리뷰 H1) */
 export const SAGA_CONFIRM_PARK_MS = 60 * 60_000;
 /** 다음 작업을 시작하기 전에 남아 있어야 하는 임대 5초 [가정](모자라면 그 작업을 놓고 다음 틱으로 넘긴다, 리뷰 낮음) */
 export const SAGA_LEASE_MIN_REMAINING_MS = 5_000;

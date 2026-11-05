@@ -72,7 +72,20 @@ describe('마이그레이션과 표 모양', () => {
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(9);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(10);
+  });
+
+  test('0009(PRF-170, data.md §4 열 번째 마이그레이션·§2 ERD ticket_issue_job): lease_until·delayed_at·overdue_at은 널 허용 timestamptz이고 기본값이 없으며, 세 칸에 걸린 CHECK·인덱스가 없다(진행 중 행만 있는 작은 표, data.md §5.1) [ASVS v5.0.0-2.3.4]', async () => {
+    const cols = await q<{ column_name: string; data_type: string; is_nullable: string; column_default: string | null }>(
+      `select column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'ticket_issue_job' and column_name in ('lease_until', 'delayed_at', 'overdue_at') order by ordinal_position`,
+    );
+    expect(cols.rows).toEqual(
+      ['lease_until', 'delayed_at', 'overdue_at'].map((n) => ({ column_name: n, data_type: 'timestamp with time zone', is_nullable: 'YES', column_default: null })),
+    );
+    const checks = await q<{ def: string }>(`select pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.ticket_issue_job'::regclass and contype = 'c'`);
+    expect(checks.rows).toEqual([]);
+    const idx = await q<{ indexdef: string }>(`select indexdef from pg_indexes where schemaname = 'public' and tablename = 'ticket_issue_job'`);
+    expect(idx.rows.filter((r) => /lease_until|delayed_at|overdue_at/.test(r.indexdef))).toEqual([]);
   });
 
   test('0008(PRF-167, data.md §4 아홉 번째 마이그레이션): purchase_order.pinned_at은 널 허용 timestamptz이고 기본값이 없으며, 그 칸에 걸린 CHECK·인덱스가 없다(쓰기가 많은 표, data.md §5.1) [ASVS v5.0.0-2.3.4]', async () => {
@@ -90,7 +103,8 @@ describe('마이그레이션과 표 모양', () => {
     const cols = await q<{ column_name: string; data_type: string; is_nullable: string; column_default: string | null }>(
       `select column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'ticket_issue_job' order by ordinal_position`,
     );
-    expect(cols.rows.map((c) => [c.column_name, c.data_type, c.is_nullable])).toEqual([
+    // 0007이 만든 앞 일곱 칸(0009가 뒤에 세 칸을 더했다, 위 0009 시험)
+    expect(cols.rows.slice(0, 7).map((c) => [c.column_name, c.data_type, c.is_nullable])).toEqual([
       ['order_id', 'uuid', 'NO'],
       ['event_id', 'uuid', 'NO'],
       ['attempts', 'integer', 'NO'],

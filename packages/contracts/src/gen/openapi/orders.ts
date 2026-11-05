@@ -164,7 +164,7 @@ export const GetOrderPaymentStatusParams = zod.object({
 
 export const GetOrderPaymentStatusResponse = zod.object({
   "status": zod.enum(['ACCEPTED', 'RESERVED', 'AWAITING_DEPOSIT', 'APPROVED', 'CONFIRMED', 'FAILED', 'UNKNOWN', 'COMPENSATED']).optional(),
-  "issueDelayed": zod.boolean().optional().describe('APPROVED에서 승인 뒤 첫 발권 시도가 실패해 같은 주문 ID로 다시 발권하는 중. 화면은 \'결제 완료, 티켓 발급 중\'(payment §3, 추천 적용 2026-10-28, ADR-0106)'),
+  "issueDelayed": zod.boolean().optional().describe('APPROVED에서 승인 뒤 첫 발권 시도가 실패해 같은 주문 ID로 다시 발권하는 중이거나(발권 재시도 큐 행의 시도 수 1 이상이고 마지막 오류 있음), 그 큐 행을 만든 지(purchase가 승인을 반영한 때부터) 60초 [가정]가 지났을 때 참. 60초 조건은 trade.orders ISSUE_DELAYED를 내는 기준과 같다. 화면은 \'결제 완료, 티켓 발급 중\'(payment §2·§3, 추천 적용 2026-10-28, ADR-0106. 60초 조건은 BUILD_ORDER PRF-166, 그 뜻은 추천 적용 2026-11-05, BUILD_ORDER PRF-170)'),
   "virtualAccount": zod.object({
   "bank": zod.string().optional(),
   "accountNumber": zod.string().optional(),

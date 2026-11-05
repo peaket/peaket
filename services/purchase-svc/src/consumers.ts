@@ -1,8 +1,8 @@
 // purchase-svc API 파드의 Kafka 소비자 둘(BUILD_ORDER PRF-164, docs/features/seat-hold.md §6 '릴레이 프로세스와 조립의 첫 구현' 프로세스 둘·소비자 그룹,
 // docs/features/payment.md §2 '결제 결과 반영의 첫 구현', docs/streaming.md §2.6, ADR-0142).
 // - 홀드 원장 적재: trade.seats → SeatHoldLedgerHandler(그룹 peaket.purchase-svc-hold-ledger.<환경>)
-// - 결제 결과 반영(주문 Saga): trade.payments → PaymentResultHandler(그룹 peaket.purchase-svc-order-saga.<환경>). 같은 파드의 long polling 기다림 표를
-//   곧바로 깨워야 해서(ApplyPaymentResult의 onOrderChanged) API 파드에서 돈다. 소비자 그룹이 파티션을 나누므로 리더가 없어도 된다
+// - 결제 결과 반영(주문 Saga): trade.payments → PaymentResultHandler(그룹 peaket.purchase-svc-order-saga.<환경>). 같은 파드의 long polling 기다림 표와
+//   발권 실행기를 곧바로 깨워야 해서(ApplyPaymentResult의 onOrderChanged·onApproved, PRF-170) API 파드에서 돈다. 소비자 그룹이 파티션을 나누므로 리더가 없어도 된다
 // 둘 다 플랫폼 키 단위 소비자(runKeyedConsumer)이고, 처리 못 하는 사건은 purchase DB held_event로 보류한다. 커밋이 없을 때는 가장 이른 곳부터 읽는다(플랫폼 기본).
 // main.ts가 purchase DB가 있고 Kafka가 켜졌을 때(kafkaConsumersFromEnv) 듣기 시작한 뒤 켜고, SIGTERM에서 가장 먼저 멈춘다.
 // 구현에서 정한 것(정본에 없다): 두 소비자는 같은 clientId(purchase-svc-<환경>-<파드>, docs/streaming.md §2.6)를 쓴다(그룹 이름으로 가른다).
@@ -66,12 +66,17 @@ export interface PaymentResultApplyOptions {
    * 필수다: 빠뜨리면 그 파드의 기다림이 묶음 조회까지 늦게 깬다(리뷰 고침 변이 검토)
    */
   onOrderChanged: (orderId: string) => void;
+  /**
+   * 승인(T9·T13·T16)을 커밋한 뒤 부를 것(같은 파드의 발권 실행기 깨우기 TicketIssueRunner.kick, BUILD_ORDER PRF-170). 운영 main.ts는 늘 넘긴다.
+   * 선택 인자다 [구현에서 정한 것: 빠뜨려도 발권 실행기의 1초 틱이 큐 행을 잡아 발권이 1초 안팎 늦을 뿐이다. 소비자 시험은 발권 길을 보지 않는다]
+   */
+  onApproved?: (orderId: string) => void;
 }
 
 /**
  * 결제 결과 반영 쓰임새(trade.payments 소비자가 부른다)를 조립한다: new ApplyPaymentResult({ reads·writes: new DrizzlePaymentResults({ database, store,
- * sales: new DrizzleSeatSales(database), clock }), sessions: new InventoryPaymentResultSessions(sessions), saga, log: new LoggerPaymentResultLog(logger), clock, onOrderChanged }).
- * main.ts와 test-int/consumers.int.test.ts가 같은 함수를 쓴다(조립이 둘로 갈라지지 않게)
+ * sales: new DrizzleSeatSales(database), clock }), sessions: new InventoryPaymentResultSessions(sessions), saga, log: new LoggerPaymentResultLog(logger), clock, onOrderChanged,
+ * onApproved(있을 때만) }). main.ts와 test-int/consumers.int.test.ts가 같은 함수를 쓴다(조립이 둘로 갈라지지 않게)
  */
 export function paymentResultApply(o: PaymentResultApplyOptions): ApplyPaymentResult {
   const results = new DrizzlePaymentResults({ database: o.database, store: o.store, sales: new DrizzleSeatSales(o.database), clock: o.clock });
@@ -83,6 +88,7 @@ export function paymentResultApply(o: PaymentResultApplyOptions): ApplyPaymentRe
     log: new LoggerPaymentResultLog(o.logger),
     clock: o.clock,
     onOrderChanged: o.onOrderChanged,
+    ...(o.onApproved ? { onApproved: o.onApproved } : {}),
   });
 }
 

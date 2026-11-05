@@ -11,6 +11,7 @@ import type {
 import type { PaymentStatusBody, PaymentStatusView } from './payment-status.js';
 import type { FallbackReason, MisconfiguredReason, RecheckAnswer } from './recheck.js';
 import type { SagaFailTransition, SagaFailureReason, SagaStep } from './saga.js';
+import type { IssuedTicketRef, TicketIssueAttemptResult, TicketIssueFailureCode, TicketIssueRunStage } from './ticket-issue.js';
 
 /** 주문 사건을 Outbox 값 바이트로 바꾼다. Avro 인코더(BAS-030)가 오기 전까지 JSON 대역이다 */
 export interface OrderEventCodec {
@@ -1034,4 +1035,206 @@ export interface PaymentStatusSignals {
   paymentStatusWaiters(count: number): void;
   /** 묶음 조회 한 번(틱 하나)이 읽기 실패로 아무도 깨우지 못했다(카운터 purchase_payment_status_poll_failures_total, 이름표 없음, 리뷰 고침 L6) */
   paymentStatusPollFailed(): void;
+}
+
+// ---- 발권 호출과 재시도 큐(ADR-0106 결정 2, docs/features/payment.md §3 T18, docs/data.md §5, BUILD_ORDER PRF-170) ----
+// 실행기(application/ticket-issue.ts): 틱마다 TicketIssueJobs.markDelayed(ISSUE_DELAYED 한 번)·markOverdue(기한 넘김 한 번) → claimDue(빈자리만큼, 짧은 트랜잭션에서
+// FOR UPDATE SKIP LOCKED로 골라 임대를 쓰고 커밋) → 잠금 밖에서 TicketIssuer.issue(파드 동시 자리 8개 [가정], 자리는 그 뒤 쓰기까지 쥔다) → 성공 complete(한 트랜잭션:
+// T18·티켓 ID·큐 행 지우기·Outbox CONFIRMED) / 다시 보낼 실패 retry / 다시 보내지 않을 실패 stop. 10초 [가정]마다 gauges로 큐 게이지를 잰다.
+// 승인 반영 커밋 뒤에는 kick으로 그 주문을 곧바로 한 번 돈다(빈자리가 없으면 틱에 맡긴다). 운영 저장소는 실행기 전용 일반 풀을 쓴다(리뷰 고침 H1).
+// 잠금 차례는 Saga와 같이 작업 행(ticket_issue_job) → 주문 행 → 주문 항목이다. 주문 상태는 주문 전이 함수(DrizzleOrderStore.transition)로만 바꾼다.
+
+/** 잡은 발권 큐 행 하나(ticket_issue_job 행 + 발권 호출에 넘길 주문의 칸) */
+export interface TicketIssueJob {
+  readonly orderId: string;
+  /** 회차(ticket_issue_job.event_id, IssueTickets event_id) */
+  readonly eventId: string;
+  /** 결제자 계정(purchase_order.account_id, IssueTickets payer_account_id. 처음에는 결제자가 보유자다) */
+  readonly payerAccountId: string;
+  /** 주문 항목의 좌석 ID(줄 번호 차례, 1~10개. IssueTickets seat_ids) */
+  readonly seatIds: readonly string[];
+  /** 지금까지의 발권 시도 수(retry·stop이 1 올린다. 잡기는 바꾸지 않는다) */
+  readonly attempts: number;
+  /** 다음 시도 시각(epoch ms). 잡은 행은 늘 있다(멈춘 행은 잡히지 않는다) */
+  readonly nextAttemptAtMs: number;
+  /** 발권 기한(epoch ms, issue_due_at = 승인 + 30분 [가정]) */
+  readonly issueDueAtMs: number;
+  /** 큐 행을 넣은 시각(epoch ms, created_at = purchase가 승인을 반영한 시각) */
+  readonly createdAtMs: number;
+  /** 임대 끝 시각(epoch ms, 잡을 때 쓴 값). 자기 임대 조건으로 넘긴다 */
+  readonly leaseUntilMs: number;
+  /** 마지막 실패 코드(last_error). 없으면 아직 실패한 적이 없다 */
+  readonly lastError?: string;
+}
+
+/**
+ * 임대를 쓰지 않고 읽은 큐 행(TicketIssueJobs.get). 잡은 행(TicketIssueJob)과 칸이 같고, 잡지 않은 행·멈춘 행이면 두 칸이 비어 null이다:
+ * nextAttemptAtMs(멈춘 행), leaseUntilMs(잡지 않았거나 임대를 놓은 행).
+ * 구현에서 정한 것(뼈대는 get도 TicketIssueJob을 돌려줘 두 칸을 채울 값이 없었다): 두 칸을 number | null로 둔다.
+ * TicketIssueJob 자체를 바꾸지 않은 까닭은 잡은 행에서는 두 칸이 늘 있어 자기 임대 조건·늘려 쉬기에 그대로 쓰기 때문이다
+ */
+export type TicketIssueJobView = Omit<TicketIssueJob, 'nextAttemptAtMs' | 'leaseUntilMs'> & {
+  readonly nextAttemptAtMs: number | null;
+  readonly leaseUntilMs: number | null;
+};
+
+/** 발권 호출 입력(ticket.proto IssueTicketsRequest) */
+export interface TicketIssueCommand {
+  readonly orderId: string;
+  readonly eventId: string;
+  readonly payerAccountId: string;
+  /** 판매 확정(SOLD)된 좌석(주문 항목, 1~10개) */
+  readonly seatIds: readonly string[];
+  /** 이 호출의 데드라인(ms, 1 이상 정수). 실행기가 TICKET_ISSUE_CALL_DEADLINE_MS(2초 [가정])로 준다 */
+  readonly deadlineMs: number;
+}
+
+/**
+ * 발권 호출이 실패했다(TicketIssuer.issue가 던지는 하나뿐인 오류 형). code는 gRPC 상태 이름·CIRCUIT_OPEN·BAD_ANSWER이고
+ * ticket_issue_job.last_error에 그대로 적는다. 다시 보낼지는 ticketIssueFailureKind(code)가 정한다. 글에는 코드만 싣는다(좌석·계정은 싣지 않는다)
+ */
+export class TicketIssueCallError extends Error {
+  constructor(
+    readonly code: TicketIssueFailureCode,
+    cause?: unknown,
+  ) {
+    super(`발권 호출이 실패했다: ${code}`, cause === undefined ? undefined : { cause });
+    this.name = 'TicketIssueCallError';
+  }
+}
+
+/**
+ * 발권 호출 포트(ticket-svc TicketService.IssueTickets, 주문 ID로 멱등. 운영은 adapters/grpc-ticket-issue.ts GrpcTicketIssuer, local·ci는 '늘 발권' 대역).
+ * 차단기·데드라인·gRPC 상태 → 코드 바꾸기는 어댑터가 한다. 다시 묻지 않는다(다시 보내기는 실행기의 retry다)
+ */
+export interface TicketIssuer {
+  /**
+   * @returns 좌석별 티켓 ID와 상태(답의 tickets 그대로, 차례는 보장하지 않는다. 주문 좌석과 맞는지·상태가 ISSUED·ACTIVE인지는 실행기가 issuedTicketsMatch로 본다)
+   * @throws TicketIssueCallError 모든 실패(gRPC 오류는 상태 이름, 차단기 열림 CIRCUIT_OPEN, 남은 시간 없음 DEADLINE_EXCEEDED, 동시 호출 상한 RESOURCE_EXHAUSTED,
+   *   gRPC가 아닌 예외 UNKNOWN)
+   */
+  issue(c: TicketIssueCommand): Promise<readonly IssuedTicketRef[]>;
+}
+
+/** 성공 반영 입력 */
+export interface TicketIssueCompleteInput {
+  readonly orderId: string;
+  /** 좌석별 티켓 ID(issuedTicketsMatch를 지난 것: 주문 좌석마다 하나) */
+  readonly tickets: readonly IssuedTicketRef[];
+  /** 행위자(ACTOR_PATTERN). 발권 실행기는 system:ticket-issue(TICKET_ISSUE_ACTOR) */
+  readonly actor: string;
+  /** 자기 임대 조건(첫 문장인 큐 행 잠금에 건다). 없으면 조건을 걸지 않는다(손질·시험) */
+  readonly leaseUntilMs?: number;
+}
+
+/**
+ * 성공 반영 결과.
+ * - CONFIRMED: 한 트랜잭션에서 T18(APPROVED → CONFIRMED)·order_item.ticket_id·큐 행 지우기·Outbox CONFIRMED를 커밋했다
+ * - STALE: 주문이 APPROVED가 아니라(이미 CONFIRMED·보상 등, 늦게 온 발권 답) 상태·티켓 ID는 그대로 두고 큐 행만 지웠다(커밋). current = 지금 상태
+ * - LEASE_LOST: 큐 행이 없거나 자기 임대가 아니라 아무것도 바꾸지 않았다(되돌렸다)
+ */
+export type TicketIssueCompleteOutcome =
+  | { readonly status: 'CONFIRMED' }
+  | { readonly status: 'STALE'; readonly current?: OrderStatus }
+  | { readonly status: 'LEASE_LOST' };
+
+/** 다시 보내기 입력 */
+export interface TicketIssueRetryInput {
+  readonly orderId: string;
+  /** 다음 시도 시각(epoch ms) = 지금 + ticketIssueRetryDelayMs(attempts + 1, random()) */
+  readonly nextAtMs: number;
+  /** last_error에 적을 코드 */
+  readonly code: TicketIssueFailureCode;
+  /** 자기 임대 조건. 없으면 조건을 걸지 않는다 */
+  readonly leaseUntilMs?: number;
+}
+
+/** 멈추기 입력 */
+export interface TicketIssueStopInput {
+  readonly orderId: string;
+  /** last_error에 적을 코드(다시 보내지 않을 실패) */
+  readonly code: TicketIssueFailureCode;
+  /** 자기 임대 조건. 없으면 조건을 걸지 않는다 */
+  readonly leaseUntilMs?: number;
+}
+
+/** 큐 게이지(한 질의로 잰 값) */
+export interface TicketIssueGauges {
+  /** next_attempt_at이 있는 행 수(처음·다시 보낼 행, ticket_issue_jobs{state="pending"}) */
+  readonly pending: number;
+  /** next_attempt_at을 비운 행 수(다시 보내지 않을 실패로 멈춘 행, ticket_issue_jobs{state="stopped"}) */
+  readonly stopped: number;
+  /** 다시 보낼 행(next_attempt_at 있음) 가운데 가장 오래된 행의 나이(초, 지금 − created_at, 0 이상. 멈춘 행은 빼고, 그런 행이 없으면 0. ticket_issue_oldest_seconds, 리뷰 고침 M3) */
+  readonly oldestAgeSeconds: number;
+}
+
+/** 발권 큐 저장소(운영은 adapters/db/drizzle-ticket-issue.ts DrizzleTicketIssue). '지금'은 앱 시계다(Saga와 같다) */
+export interface TicketIssueJobs {
+  /**
+   * 짧은 트랜잭션 하나: next_attempt_at ≤ 지금이고 임대가 비었거나 지난(lease_until < 지금, docs/data.md §5.1 행과 같다. Saga 잡기의 ≤와 다르다) 행을 next_attempt_at 차례(같으면 주문 ID)로
+   * FOR UPDATE SKIP LOCKED로 limit개까지 골라 lease_until = 지금 + leaseMs를 쓰고 커밋한다. 주문의 결제자·좌석을 붙여 고른 차례로 돌려준다. 없으면 [].
+   * 멈춘 행(next_attempt_at 비움)은 잡지 않는다. attempts는 바꾸지 않는다.
+   * @throws RangeError limit·leaseMs가 1 이상의 정수가 아님
+   */
+  claimDue(limit: number, leaseMs: number): Promise<TicketIssueJob[]>;
+  /** 그 주문의 행 하나를 같은 조건으로 잡는다(승인 반영 직후 kick이 쓴다). 잡지 못하면 undefined. 소문자 UUID가 아니면 DB에 가지 않고 undefined */
+  claim(orderId: string, leaseMs: number): Promise<TicketIssueJob | undefined>;
+  /** 큐 행 읽기(임대를 쓰지 않는다. 잡지 않은 행·멈춘 행도 읽는다). 없거나 소문자 UUID가 아니면 undefined(kick의 NO_JOB·LEASED 가르기) */
+  get(orderId: string): Promise<TicketIssueJobView | undefined>;
+  /**
+   * 성공 반영 한 트랜잭션(READ COMMITTED, 잠금 차례 큐 행 → 주문 행 → 주문 항목): 큐 행 잠금(자기 임대. 0행이면 LEASE_LOST)
+   * → 주문 행 잠금·상태 확인(APPROVED가 아니면 상태·티켓 ID는 그대로 두고 큐 행만 지워 STALE) → order_item.ticket_id = 좌석별 티켓 ID → 큐 행 지우기
+   * → 주문 전이 T18(조건부: 출발 상태 APPROVED일 때만. Outbox CONFIRMED가 업무 문장의 마지막).
+   * @throws RangeError 입력이 틀림(티켓 묶음 모양·행위자·임대 값은 DB에 가기 전에 본다. 티켓이 주문 좌석과 맞지 않음은 주문 행을 잠근 뒤 항목과 견주어 보고 되돌린다
+   *   [구현에서 정한 것: 수가 같고 주문에 없는 좌석이 섞인 묶음은 주문 항목을 읽어야 가려진다]) · Error 그 밖의 DB 오류(되돌렸다)
+   */
+  complete(input: TicketIssueCompleteInput): Promise<TicketIssueCompleteOutcome>;
+  /**
+   * 다시 보내기: attempts + 1, last_error = code, next_attempt_at = nextAtMs, lease_until 비움(자기 임대일 때만). 주문 이력(T19)은 쓰지 않는다.
+   * 행이 없거나 자기 임대가 아니면 false
+   */
+  retry(input: TicketIssueRetryInput): Promise<boolean>;
+  /** 멈추기: attempts + 1, last_error = code, next_attempt_at 비움, lease_until 비움(자기 임대일 때만). 행이 없거나 자기 임대가 아니면 false */
+  stop(input: TicketIssueStopInput): Promise<boolean>;
+  /** 임대만 놓는다(lease_until = null, 자기 임대일 때만. 다른 칸은 그대로). 다음 틱에 다시 잡힌다. 놓은 행이 없으면 false */
+  release(orderId: string, leaseUntilMs: number): Promise<boolean>;
+  /**
+   * ISSUE_DELAYED 내기 한 트랜잭션: created_at ≤ 지금 − 60초 [가정]이고 delayed_at이 빈 행을 limit개까지(created_at 차례, SKIP LOCKED) 골라
+   * delayed_at = 지금을 쓰고 행마다 Outbox ISSUE_DELAYED(상태 전이·이력 없음, eventKey = issueDelayedEventKey)를 트랜잭션의 마지막에 한 번에 쓴다. 낸 주문 ID들(없으면 []).
+   * 멈춘 행·임대 중인 행도 대상이다(발권이 늦어지는 중인 것은 같다)
+   * @throws RangeError limit이 1 이상의 정수가 아님
+   */
+  markDelayed(limit: number): Promise<string[]>;
+  /**
+   * 발권 기한 넘김 표시 한 트랜잭션: issue_due_at ≤ 지금이고 overdue_at이 빈 행을 limit개까지(issue_due_at 차례, SKIP LOCKED) 골라 overdue_at = 지금을 쓴다.
+   * 표시한 주문 ID들(실행기가 SEV1 오류 로그를 행마다 한 줄 남긴다). 재시도는 그대로 이어 간다(next_attempt_at을 건드리지 않는다)
+   * @throws RangeError limit이 1 이상의 정수가 아님
+   */
+  markOverdue(limit: number): Promise<string[]>;
+  /** 큐 게이지 한 질의(잠그지 않는다) */
+  gauges(): Promise<TicketIssueGauges>;
+}
+
+/** 발권 실행기 로그(서비스 로그 한 줄. 좌석·계정·티켓 ID는 싣지 않는다). 던지지 않는다 */
+export interface TicketIssueLog {
+  /** 다시 보내지 않을 실패로 멈췄다(error 한 줄 { kind: 'ticket-issue', severity: 'SEV2', orderId, code, csCase: 'TICKET_NOT_ISSUED' }) */
+  stopped(e: { readonly orderId: string; readonly code: TicketIssueFailureCode }): void;
+  /** 발권 기한을 넘겼다(error 한 줄 { kind: 'ticket-issue-overdue', severity: 'SEV1', orderId, csCase: 'TICKET_NOT_ISSUED' }). 주문마다 한 번 */
+  overdue(e: { readonly orderId: string }): void;
+  /** 늦게 온 발권 답(warn 한 줄 { kind: 'ticket-issue', event: 'stale_answer', orderId, current? }): 주문이 APPROVED가 아니라 큐 행만 지웠다 */
+  staleAnswer(e: { readonly orderId: string; readonly current?: OrderStatus }): void;
+  /** 예상 밖 오류(error 한 줄, 플랫폼 errorSummary로 줄인 오류. 쿼리 매개변수 값은 싣지 않는다). orderId는 큐 행 하나의 오류일 때만 */
+  runError(e: { readonly what: TicketIssueRunStage; readonly orderId?: string; readonly err: unknown }): void;
+}
+
+/** 발권 실행기 지표(운영은 adapters/prom-ticket-issue-signals.ts PromTicketIssueSignals). 던지지 않는다 */
+export interface TicketIssueSignals {
+  /** 게이지 ticket_issue_jobs{state}(pending·stopped)와 ticket_issue_oldest_seconds를 둔다(10초 [가정]마다) */
+  jobs(g: TicketIssueGauges): void;
+  /** 카운터 ticket_issue_attempts_total{result}(issued·retry·stopped·stale)를 1 올린다(발권 호출을 마친 큐 행마다) */
+  attempt(result: TicketIssueAttemptResult): void;
+  /** 카운터 ticket_issue_delayed_total을 count만큼 올린다(ISSUE_DELAYED를 낸 주문 수, SEV2) */
+  delayed(count: number): void;
+  /** 카운터 ticket_issue_overdue_total을 count만큼 올린다(발권 기한을 넘긴 주문 수, SEV1) */
+  overdue(count: number): void;
 }

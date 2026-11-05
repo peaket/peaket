@@ -1,4 +1,4 @@
-// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161·PRF-162·PRF-165·PRF-163·PRF-166).
+// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161·PRF-162·PRF-165·PRF-163·PRF-166·PRF-170).
 import type { MaintenanceTask } from '@peaket/platform';
 import { checkOrderHistory } from './adapters/db/drizzle-orders.js';
 import { orderHistoryCheckTask as historyTaskOf, type OrderHistoryTaskDeps } from './application/order-history-check.js';
@@ -80,6 +80,62 @@ export {
   type GrpcPaymentConfirmOptions,
 } from './adapters/grpc-payment-confirm.js';
 export { ORDER_SAGA_ACTOR, OrderSagaRunner, type OrderSagaDeps, type SagaRunResult, type SagaTimer } from './application/order-saga.js';
+export { DrizzleTicketIssue, ticketIssueDatabaseOptions, type DrizzleTicketIssueOptions } from './adapters/db/drizzle-ticket-issue.js';
+export {
+  GrpcTicketIssuer,
+  issuedTicketsOf,
+  issuingTicketIssuer,
+  TICKET_DEPENDENCY,
+  TICKET_GRPC_ADDR_ENV,
+  TICKET_ISSUE_CAP_MS,
+  TICKET_STUB_ENVS,
+  ticketIssueCodeOf,
+  ticketIssuerFromEnv,
+  type GrpcTicketIssuerOptions,
+} from './adapters/grpc-ticket-issue.js';
+export { PromTicketIssueSignals } from './adapters/prom-ticket-issue-signals.js';
+export { TicketIssueRunner, type TicketIssueDeps, type TicketIssueTickResult, type TicketIssueTimer } from './application/ticket-issue.js';
+export {
+  buildIssueDelayedEvent,
+  GRPC_STATUS_NAMES,
+  isFinalTicketIssueWriteError,
+  ISSUED_TICKET_STATUSES,
+  issueDelayedEventKey,
+  issuedTicketsMatch,
+  TICKET_ISSUE_ACTOR,
+  TICKET_ISSUE_ATTEMPT_RESULTS,
+  TICKET_ISSUE_CALL_DEADLINE_MS,
+  TICKET_ISSUE_CLAIM_LIMIT,
+  TICKET_ISSUE_CONCURRENCY,
+  TICKET_ISSUE_CS_CASE,
+  TICKET_ISSUE_DELAYED_AFTER_MS,
+  TICKET_ISSUE_GAUGE_INTERVAL_MS,
+  TICKET_ISSUE_JITTER_RATIO,
+  TICKET_ISSUE_JOB_STATES,
+  TICKET_ISSUE_LEASE_MIN_REMAINING_MS,
+  TICKET_ISSUE_LEASE_MS,
+  TICKET_ISSUE_OK_STATUSES,
+  TICKET_ISSUE_POLL_INTERVAL_MS,
+  TICKET_ISSUE_RETRY_BASE_MS,
+  TICKET_ISSUE_RETRY_CODES,
+  TICKET_ISSUE_RETRY_FACTOR,
+  TICKET_ISSUE_RETRY_MAX_MS,
+  TICKET_ISSUE_SIGNAL_BATCH,
+  TICKET_ISSUE_STOP_CODES,
+  ticketIssueBackoffMs,
+  ticketIssueFailureKind,
+  ticketIssueRetryDelayMs,
+  type BuildIssueDelayedEventInput,
+  type GrpcStatusName,
+  type IssuedTicketRef,
+  type IssuedTicketStatus,
+  type TicketIssueAttemptResult,
+  type TicketIssueFailureCode,
+  type TicketIssueFailureKind,
+  type TicketIssueJobState,
+  type TicketIssueOutcome,
+  type TicketIssueRunStage,
+} from './domain/ticket-issue.js';
 export {
   ApplyPaymentResult,
   PAYMENT_RESULT_HELD_LOG_WINDOW_MS,
@@ -148,7 +204,7 @@ export {
   type SagaStepOutcome,
 } from './domain/saga.js';
 export { jsonOrderEventCodec, TRADE_ORDERS_TOPIC } from './adapters/order-events.js';
-export { LoggerOrderLog, LoggerPaymentResultLog, LoggerSagaLog } from './adapters/order-log.js';
+export { LoggerOrderLog, LoggerPaymentResultLog, LoggerSagaLog, LoggerTicketIssueLog } from './adapters/order-log.js';
 export { PromOrderSignals } from './adapters/prom-order-signals.js';
 export { bookingRestrictionKey, MemoryBookingRestrictions, RedisBookingRestrictions } from './adapters/redis-booking-restrictions.js';
 export {
@@ -243,7 +299,7 @@ export {
   type SeatAssignment,
   type TransitionId,
 } from './domain/order.js';
-export { OrderSeatStoreUnavailable } from './domain/ports.js';
+export { OrderSeatStoreUnavailable, TicketIssueCallError } from './domain/ports.js';
 export type {
   AcceptInput,
   AcceptLog,
@@ -334,6 +390,18 @@ export type {
   SaleConfigs,
   SeatSlotRead,
   SeatSlotReads,
+  TicketIssueCommand,
+  TicketIssueCompleteInput,
+  TicketIssueCompleteOutcome,
+  TicketIssueGauges,
+  TicketIssueJob,
+  TicketIssueJobs,
+  TicketIssueJobView,
+  TicketIssueLog,
+  TicketIssuer,
+  TicketIssueRetryInput,
+  TicketIssueSignals,
+  TicketIssueStopInput,
   TransactionCallOptions,
   TransitionInput,
   TransitionResult,

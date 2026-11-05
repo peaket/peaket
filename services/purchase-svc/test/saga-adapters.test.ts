@@ -1,6 +1,7 @@
 // Saga 1단계의 어댑터(BUILD_ORDER PRF-165): 좌석 묶기·실패 해제의 inventory 다리(InventoryOrderSeatPins), 회차 설정(SeatMapSagaConfigs),
 // Saga 로그(LoggerSagaLog). docs/features/payment.md §2 'Saga 1단계의 첫 구현'·'좌석 묶기 입력의 구매 세션 ID', docs/features/seat-hold.md §6.
 // 좌석 Redis의 Lua(실패 표시·FAILED_HOLD)는 test-int(다른 담당)가 본다. 여기서는 inventory 쪽을 모양만 맞춘 가짜로 둔다.
+import { DrizzleQueryError } from 'drizzle-orm';
 import { describe, expect, test } from 'vitest';
 import {
   InventoryOrderSeatPins,
@@ -161,6 +162,19 @@ describe('LoggerSagaLog', () => {
     expect(Object.keys(r.lines[0]!.obj).sort()).toEqual(['err', 'event', 'orderId', 'step']);
     expect(r.lines[0]!.obj).toMatchObject({ event: 'order_saga_step_error', orderId: 'o1', step: 'CONFIRM' });
     expect(JSON.stringify(r.lines)).not.toContain(PAYMENT_KEY);
+  });
+
+  test('FR011_리뷰 고침 M2_stepError의 err는 플랫폼 errorSummary다: Drizzle 쿼리 오류는 쿼리 틀과 SQLSTATE만 싣고 매개변수(params: …에 든 주문·좌석 UUID·결제 키)는 싣지 않는다 [ASVS v5.0.0-16.2.5]', () => {
+    const r = recording();
+    const query = 'update seat_sale set status = $1 where order_id = $2 and seat_id = any($3)';
+    const err = new DrizzleQueryError(query, ['SOLD', HOLD_ID, [SEAT_1, SEAT_2], PAYMENT_KEY], Object.assign(new Error('could not serialize access'), { code: '40001' }));
+    // 전제: 원래 오류 글에는 매개변수가 들어 있다
+    expect(err.message).toContain(SEAT_1);
+    r.log.stepError({ orderId: 'o1', step: 'RESERVE', err });
+    r.log.stepError({ orderId: 'o2', step: 'CONFIRM', err: new TypeError('x') });
+    expect(r.lines.map((l) => l.obj.err)).toEqual([`DrizzleQueryError: Failed query: ${query} (40001)`, 'TypeError: x']);
+    const text = JSON.stringify(r.lines);
+    for (const secret of [SEAT_1, SEAT_2, HOLD_ID, PAYMENT_KEY, 'params:']) expect(text, secret).not.toContain(secret);
   });
 
   test('FR011_로거가 던져도 삼킨다(부른 쪽을 막지 않는다)', () => {

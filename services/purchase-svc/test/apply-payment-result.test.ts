@@ -4,6 +4,7 @@
 // 던져도 결과는 그대로), DB 오류는 그대로 던짐. 끝에 커밋 뒤 구매 세션 일의 inventory 다리(InventoryPaymentResultSessions)를 본다.
 // 리뷰(2026-11-05) 반영: M2 닫힌 주문 과금 보류(CHARGED_ON_CLOSED_ORDER, SEV1), M3 취소류 보류(NOT_YET_SUPPORTED), M4 판매 행 어긋남 보류(SOLD_MISMATCH, SEV1),
 // L1 승인된 주문의 다시 온 사건은 구매 세션 끝내기만 다시, L5 같은 사건의 보류 로그는 한 번(시간 창 안), L6 금액·결제사 대조 실패는 보안 이벤트 표시.
+// PRF-170: 승인(T9·T13·T16)을 커밋한 뒤 발권 실행기 깨우기(onApproved)를 한 번 부르고, 실패·입금 대기·보류·건너뜀에는 부르지 않는다.
 // 실제 PostgreSQL로 도는 승인·실패 트랜잭션은 test-int(다른 담당)다.
 import { fakeClock, isTransientError } from '@peaket/platform';
 import { beforeEach, describe, expect, test } from 'vitest';
@@ -548,6 +549,106 @@ describe('결제 결과 long polling 깨우기(onOrderChanged, PRF-166 리뷰 �
       },
     });
     expect(r).toEqual({ status: 'APPLIED', transition: 'T11', write: 'FAIL' });
+  });
+});
+
+describe('발권 실행기 깨우기(onApproved, BUILD_ORDER PRF-170)', () => {
+  /** onApproved가 불린 주문과 그때까지의 포트 호출 */
+  const watch = () => {
+    const seen: { orderId: string; callsBefore: ResultCall[] }[] = [];
+    return { seen, onApproved: (orderId: string) => void seen.push({ orderId, callsBefore: [...fx.calls] }) };
+  };
+  /** 결과를 기다리고 던진 것은 삼킨다(보류·경합·DB 오류에도 onApproved를 부르지 않았는지 보려고) */
+  const settle = (p: Promise<unknown>) =>
+    p.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+  test.each([
+    ['RESERVED', 'T9'],
+    ['UNKNOWN', 'T13'],
+    ['AWAITING_DEPOSIT', 'T16'],
+  ] as const)('%s 주문의 승인 반영(%s, 큐 행을 넣는 커밋)은 커밋 뒤 일(구매 세션 끝내기)을 마친 뒤 onApproved(주문 ID)를 한 번 부른다(1초 틱을 기다리지 않고 발권, P-T39 ①, ADR0106)', async (status, transition) => {
+    fx.order = resultOrder({ status });
+    const w = watch();
+    expect(await run(paymentEvent(), { onApproved: w.onApproved })).toEqual({ status: 'APPLIED', transition, write: 'APPROVE' });
+    expect(w.seen.map((s) => s.orderId)).toEqual([ORDER_ID]);
+    expect(w.seen[0]!.callsBefore).toEqual(['reads.read', 'writes.approve', 'sessions.complete']);
+    expect(w.seen[0]!.callsBefore).toEqual(fx.calls);
+  });
+
+  test('STALE STATUS 뒤 다시 정해 T13으로 반영해도 onApproved는 커밋한 한 번만이다 (ADR0106)', async () => {
+    fx.readQueue = [resultOrder({ status: 'RESERVED' }), resultOrder({ status: 'UNKNOWN' })];
+    fx.outcomeQueue = [{ status: 'STALE', reason: 'STATUS', current: 'UNKNOWN' }, { status: 'APPLIED' }];
+    const w = watch();
+    expect(await run(paymentEvent(), { onApproved: w.onApproved })).toEqual({ status: 'APPLIED', transition: 'T13', write: 'APPROVE' });
+    expect(w.seen.map((s) => s.orderId)).toEqual([ORDER_ID]);
+  });
+
+  test('구매 세션 끝내기가 던져도(좌석 Redis 장애) 승인은 커밋했으므로 onApproved를 부른다 (ADR0106) [ASVS v5.0.0-16.5.2]', async () => {
+    fx.completeAnswer = new OrderSeatStoreUnavailable();
+    const w = watch();
+    expect(await run(paymentEvent(), { onApproved: w.onApproved })).toEqual({ status: 'APPLIED', transition: 'T9', write: 'APPROVE' });
+    expect(w.seen.map((s) => s.orderId)).toEqual([ORDER_ID]);
+    expect(fx.afterCommitLogs).toHaveLength(1);
+  });
+
+  test('onApproved가 던져도 반영 결과는 그대로다', async () => {
+    const r = await run(paymentEvent(), {
+      onApproved: () => {
+        throw new Error('boom');
+      },
+    });
+    expect(r).toEqual({ status: 'APPLIED', transition: 'T9', write: 'APPROVE' });
+  });
+
+  test('승인이 아닌 반영(실패 T11·T15·T17, 입금 대기 T10·T14, UNKNOWN T12)은 onApproved를 부르지 않는다', async () => {
+    const w = watch();
+    const cases: [PaymentResultOrder, PaymentResultEvent][] = [
+      [resultOrder({ status: 'RESERVED' }), paymentEvent({ type: 'FAILED', result: 'DECLINED', failureCategory: 'CARD_DECLINED' })],
+      [resultOrder({ status: 'UNKNOWN' }), paymentEvent({ type: 'FAILED', failureCategory: 'PG_ERROR' })],
+      [resultOrder({ status: 'AWAITING_DEPOSIT' }), paymentEvent({ type: 'FAILED', failureCategory: 'EXPIRED' })],
+      [resultOrder({ status: 'RESERVED' }), paymentEvent({ type: 'AWAITING_DEPOSIT', result: 'WAITING_FOR_DEPOSIT' })],
+      [resultOrder({ status: 'UNKNOWN' }), paymentEvent({ type: 'AWAITING_DEPOSIT', result: 'WAITING_FOR_DEPOSIT' })],
+      [resultOrder({ status: 'RESERVED' }), paymentEvent({ type: 'UNKNOWN', result: 'UNKNOWN' })],
+    ];
+    for (const [order, event] of cases) {
+      fx.reset();
+      fx.order = order;
+      expect(await run(event, { onApproved: w.onApproved }), `${order.status} × ${event.type}`).toMatchObject({ status: 'APPLIED' });
+    }
+    expect(w.seen).toEqual([]);
+  });
+
+  test('건너뛴 사건(다시 온 사건·이미 APPROVED·RESOLVED)은 승인된 주문이어도 onApproved를 부르지 않는다(큐 행을 넣은 커밋이 아니다)', async () => {
+    const w = watch();
+    fx.order = resultOrder({ status: 'APPROVED', paymentEventSeq: EVENT_SEQ });
+    expect(await run(paymentEvent(), { onApproved: w.onApproved })).toEqual({ status: 'SKIPPED', reason: 'DUPLICATE' });
+    fx.order = resultOrder({ status: 'APPROVED' });
+    expect(await run(paymentEvent(), { onApproved: w.onApproved })).toEqual({ status: 'SKIPPED', reason: 'ALREADY_THERE' });
+    expect(await run(paymentEvent({ type: 'RESOLVED', result: 'APPROVED' }), { onApproved: w.onApproved })).toEqual({ status: 'SKIPPED', reason: 'RECORD_ONLY' });
+    fx.order = resultOrder();
+    fx.outcome = { status: 'STALE', reason: 'PAYMENT_SEQ' };
+    expect(await run(paymentEvent(), { onApproved: w.onApproved })).toEqual({ status: 'SKIPPED', reason: 'DUPLICATE' });
+    expect(w.seen).toEqual([]);
+  });
+
+  test('보류(PaymentResultHeld)·판매 행 어긋남(SOLD_MISMATCH)·경합(PaymentResultConflict)·DB 오류로 커밋하지 않았으면 onApproved를 부르지 않는다', async () => {
+    const w = watch();
+    fx.order = resultOrder({ status: 'FAILED' });
+    expect(await settle(run(paymentEvent(), { onApproved: w.onApproved }))).toBeInstanceOf(PaymentResultHeld);
+    fx.reset();
+    fx.outcome = { status: 'SOLD_MISMATCH' };
+    expect(await settle(run(paymentEvent(), { onApproved: w.onApproved }))).toBeInstanceOf(PaymentResultHeld);
+    fx.reset();
+    fx.outcome = { status: 'STALE', reason: 'STATUS', current: 'RESERVED' };
+    expect(await settle(run(paymentEvent(), { onApproved: w.onApproved }))).toBeInstanceOf(PaymentResultConflict);
+    fx.reset();
+    const boom = PG_DOWN();
+    fx.outcome = boom;
+    expect(await settle(run(paymentEvent(), { onApproved: w.onApproved }))).toBe(boom);
+    expect(w.seen).toEqual([]);
   });
 });
 

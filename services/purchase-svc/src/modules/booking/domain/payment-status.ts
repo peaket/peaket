@@ -16,7 +16,10 @@ export const PAYMENT_STATUS_ANSWER_MARGIN_MS = 1_000;
  * 다른 경로는 플랫폼 기본 15초(DEFAULT_MAX_DEADLINE_MS) 그대로다. 처리기에 플랫폼 RouteDeadline으로 단다
  */
 export const PAYMENT_STATUS_MAX_DEADLINE_MS = 27_000;
-/** 발권 재시도 큐 행을 만든 때(= 승인)부터 이 시간이 지나면 issueDelayed가 참이다 60초 [가정](ISSUE_DELAYED 알림 기준, 발권 호출 PRF-170 전의 안전망) */
+/**
+ * 발권 재시도 큐 행을 만든 때(created_at = purchase가 승인을 반영한 시각)부터 이 시간이 지나면 issueDelayed가 참이다 60초 [가정].
+ * trade.orders ISSUE_DELAYED를 내는 기준과 같다(발권 실행기 TICKET_ISSUE_DELAYED_AFTER_MS가 이 값을 쓴다, BUILD_ORDER PRF-170)
+ */
 export const ISSUE_DELAYED_AFTER_MS = 60_000;
 /** 파드 안 기다림 표의 묶음 조회 간격 200ms [가정](payment §2 '알림 길') */
 export const PAYMENT_STATUS_POLL_INTERVAL_MS = 200;

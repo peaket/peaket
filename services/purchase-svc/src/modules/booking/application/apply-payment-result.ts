@@ -1,8 +1,9 @@
 // 결제 결과 반영 쓰임새(docs/features/payment.md §2 '결제 결과 반영의 첫 구현', §3 T9~T17, docs/data.md §5 '결제 결과 반영', BUILD_ORDER PRF-163).
 // trade.payments PaymentEvent 하나를 주문에 반영하는 함수 하나다. 키 단위 처리기(inbound/payment-result.handler.ts, 주문 ID, ADR-0142)와
-// 결과 당기기(PRF-170)가 같은 execute를 부른다. 처리기를 서비스에 붙이는 일은 PRF-164다.
+// 결과 당기기(PRF-171)가 같은 execute를 부른다. 처리기를 서비스에 붙이는 일은 PRF-164다.
 // 차례: PaymentResultReads.read → decidePaymentResult → (APPLY) PaymentResultWrites.approve·fail·mark(한 트랜잭션) → 커밋 뒤 일
-//   (승인·입금 대기면 구매 세션 끝내기, 실패면 Paying 풀기와 Saga 깨우기. 최선을 다할 뿐 실패해도 반영은 그대로다).
+//   (승인·입금 대기면 구매 세션 끝내기, 실패면 Paying 풀기와 Saga 깨우기. 최선을 다할 뿐 실패해도 반영은 그대로다)
+//   → 승인이면 발권 실행기 깨우기(onApproved → TicketIssueRunner.kick, BUILD_ORDER PRF-170).
 // 보류(HOLD)는 PaymentResultHeld를 던진다: 같은 결과일 실패라 키 단위 소비자가 5회 [가정] 해 본 뒤 held_event로 옮기고 같은 주문의 뒤 사건도 보류한다.
 // purchase DB 연결 실패·시간 초과는 그대로 던진다: 플랫폼 isTransientError가 일시 실패로 보고 파티션을 멈춰 기다린다(packages/platform keyed-consumer.ts).
 // 이 층은 어댑터·계약 패키지를 가져오지 않는다(포트로만 쓴다, architecture §3.1).
@@ -64,6 +65,12 @@ export interface ApplyPaymentResultDeps {
    * APPROVED로 가는 전이(T9·T13·T16)는 기다리는 상태라 부르지 않는다(리뷰 고침 L3). 없으면 부르지 않는다
    */
   onOrderChanged?: (orderId: string) => void;
+  /**
+   * 승인 전이(T9·T13·T16, ticket_issue_job 한 행을 넣는다)를 커밋한 뒤 부를 것(발권 실행기 깨우기, TicketIssueRunner.kick, BUILD_ORDER PRF-170).
+   * APPLIED이고 쓰기 갈래가 APPROVE일 때만, 커밋 뒤 일(구매 세션 끝내기)을 마치고 부른다. 던지지 않는다(던져도 반영 결과는 그대로다). 없으면 부르지 않는다.
+   * 건너뛴 사건(DUPLICATE·ALREADY_THERE 등)에는 부르지 않는다(큐 행을 넣은 커밋이 아니다. 남은 큐 행은 실행기의 틱이 줍는다)
+   */
+  onApproved?: (orderId: string) => void;
 }
 
 /**
@@ -114,7 +121,7 @@ export class ApplyPaymentResult {
    *   STALE PAYMENT_SEQ → SKIPPED DUPLICATE, STALE NOT_FOUND → HOLD IMPOSSIBLE, SOLD_MISMATCH → HOLD SOLD_MISMATCH(리뷰 M4),
    *   STALE STATUS → 다시 읽고 PAYMENT_RESULT_STALE_RETRIES번 더 정한다(그래도면 PaymentResultConflict)
    * - 커밋 뒤: APPROVE·MARK의 T10·T14(입금 대기)면 sessions.complete, FAIL이면 saga.kick과 sessions.unmarkPaying. T12(UNKNOWN)는 아무것도 하지 않는다 [정함: 결과가 정해지지 않았다].
-   *   구매 세션 일이 던지면 log.afterCommitFailed 한 줄만 남기고 결과는 그대로다
+   *   구매 세션 일이 던지면 log.afterCommitFailed 한 줄만 남기고 결과는 그대로다. 그 뒤 APPROVE(T9·T13·T16)면 onApproved(발권 실행기 깨우기, PRF-170)를 한 번 부른다
    * @throws PaymentResultHeld 보류(같은 결과일 실패) · PaymentResultConflict 경합이 풀리지 않음
    * @throws Error purchase DB 오류(연결 실패·시간 초과는 처리기가 일시 실패로 본다)
    */
@@ -141,6 +148,8 @@ export class ApplyPaymentResult {
         // (브라우저가 결과를 받고 움직일 때 세션이 정리돼 있게). APPROVED(T9·T13·T16)는 기다리는 상태라 깨우지 않는다(PRF-166 리뷰 고침 L3)
         const to = transitionById(d.transition)?.to;
         if (to !== undefined && PAYMENT_STATUS_IMMEDIATE.has(to)) this.#orderChanged(o.orderId);
+        // 승인(T9·T13·T16)은 같은 트랜잭션에서 발권 재시도 큐 행을 넣었다: 커밋 뒤 일을 마친 뒤 발권 실행기를 곧바로 한 번 깨운다(1초 틱을 기다리지 않는다, PRF-170)
+        if (d.write === 'APPROVE') this.#approved(o.orderId);
         return { status: 'APPLIED', transition: d.transition, write: d.write };
       }
       // 판매 행이 좌석 수만큼 SOLD가 되지 않았다(되돌렸다): 과금됐는데 좌석을 줄 수 없다
@@ -196,6 +205,15 @@ export class ApplyPaymentResult {
       this.deps.onOrderChanged?.(orderId);
     } catch {
       // 삼킨다(기다리는 요청은 묶음 조회·시간으로 깬다)
+    }
+  }
+
+  /** 승인 전이를 커밋한 뒤 부른다(onApproved가 있을 때만). 던지지 않기로 했지만, 던져도 반영 결과는 그대로다(큐 행은 틱이 줍는다) */
+  #approved(orderId: string): void {
+    try {
+      this.deps.onApproved?.(orderId);
+    } catch {
+      // 삼킨다(발권 실행기의 1초 틱이 큐 행을 잡는다)
     }
   }
 

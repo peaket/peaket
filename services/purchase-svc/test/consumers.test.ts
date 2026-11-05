@@ -3,6 +3,8 @@
 // 실제 Kafka로 두 소비자를 거는 것(startPurchaseConsumers)은 test-int/consumers.int.test.ts가 본다.
 // 여기서는 플랫폼 runKeyedConsumer를 대역으로 바꿔(vi.mock) 무엇을 넘기는지와 멈춤(하나가 던져도 다른 하나는 멈춘다)만 본다(변이 검토 PRF-164).
 // 결제 결과 반영 조립(paymentResultApply, 리뷰 고침)은 booking의 DrizzlePaymentResults만 메모리 가짜(ResultFakes)로 바꿔(vi.mock) 본다. 나머지는 실제 클래스다.
+// 발권 실행기 깨우기(onApproved, PRF-170 변이 검토)는 조립이 넘긴 것을 꽂는지와, 운영 main.ts가 그 자리에 kick을 넘기는지(소스 글)를 본다.
+import { readFileSync } from 'node:fs';
 import { type Database, fakeClock } from '@peaket/platform';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import {
@@ -145,6 +147,34 @@ describe('결제 결과 반영 조립(paymentResultApply, 리뷰 고침 변이 �
     expect(results.options).toHaveLength(1);
     expect(results.options[0]).toMatchObject({ database, store, clock });
     expect(results.options[0]!.sales).toBeInstanceOf(DrizzleSeatSales);
+  });
+
+  test('변이 검토 PRF-170_넘긴 onApproved(발권 실행기 kick)를 쓰임새에 꽂는다: 승인 반영(T9) 커밋 뒤 그 주문 ID로 한 번 불리고, 실패 반영(T11)에는 불리지 않는다 (ADR0106)', async () => {
+    const fx = new ResultFakes();
+    results.fake = fx;
+    const database = { tag: 'consumer-db' } as unknown as Database;
+    const store = { tag: 'order-store' } as unknown as DrizzleOrderStore;
+    const clock = fakeClock({ now: APPLY_NOW });
+    const kicked: string[] = [];
+    const apply = paymentResultApply({ database, store, sessions, saga: fx.saga, logger, clock, onOrderChanged: () => {}, onApproved: (id) => void kicked.push(id) });
+    expect(await apply.execute(paymentEvent())).toEqual({ status: 'APPLIED', transition: 'T9', write: 'APPROVE' });
+    expect(fx.approved).toHaveLength(1);
+    expect(kicked).toEqual([ORDER_ID]);
+    // 실패 반영은 큐 행을 넣지 않는다(깨우지 않는다)
+    fx.reset();
+    expect(await apply.execute(paymentEvent({ type: 'FAILED', result: 'DECLINED', failureCategory: 'CARD_DECLINED' }))).toEqual({ status: 'APPLIED', transition: 'T11', write: 'FAIL' });
+    expect(kicked).toEqual([ORDER_ID]);
+  });
+
+  test('변이 검토 PRF-170_운영 main.ts는 paymentResultApply에 onApproved로 이 파드의 발권 실행기 kick을 넘긴다(선택 인자라 빠뜨려도 형 오류가 없어 글로 본다) (ADR0106)', () => {
+    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+    // paymentResultApply({ … }) 호출 몸통(줄 주석은 뺀다: 주석으로 막은 줄이 통과하지 않게)
+    const call = /paymentResultApply\(\{([\s\S]*?)\n\s*\}\);/.exec(main)?.[1]?.replace(/\/\/.*$/gm, '');
+    expect(call, 'main.ts에 paymentResultApply({ … }) 호출이 있다').toBeDefined();
+    expect(call).toMatch(/\bonApproved:\s*\((\w+)\)\s*=>\s*issueRunner\.kick\(\1\)/);
+    // issueRunner는 같은 파드의 발권 실행기다
+    expect(main).toMatch(/\bconst issueRunner = ticketRunner;/);
+    expect(main).toMatch(/\bticketRunner = new TicketIssueRunner\(/);
   });
 
   test('PT2_리뷰 고침 변이 검토_onOrderChanged는 필수 인자다(빠뜨리면 형 오류, tsc --noEmit이 본다)', () => {
