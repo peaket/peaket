@@ -1,7 +1,9 @@
 // 좌석 Redis Stream 릴레이(BUILD_ORDER PRF-141, docs/features/seat-hold.md §6 '홀드 원장 적재의 첫 구현', docs/data.md §3 s:{event:E}:stream).
-// 회차마다 Stream 항목을 Stream ID 순으로 읽어 Kafka로 보내고, 확인받은 묶음만 지운다. 리더 하나만 돌린다(조립은 PRF-160의 relay.ts).
+// 회차마다 Stream 항목을 Stream ID 순으로 읽어 Kafka로 보내고, 확인받은 묶음만 지운다. 리더 하나만 돌린다(조립은 PRF-164의 relay-app.ts·relay.ts, 반복이 deps.leader로 틱마다 리더를 본다).
 // 묶음이 꽉 차면 한 틱 안에서 이어 읽고(회차마다 STREAM_RELAY_MAX_BATCHES 묶음까지), 상한에 닿으면 쉬지 않고 다음 틱을 돈다(코드 리뷰 2026-11-04: 초당 100항목에 묶이던 것).
 // 실패하면 그 회차를 확인하지 않고 다음 틱에 다시 보낸다(적어도 한 번). 보낼 수 없는 항목은 확인해 넘기고 지표를 올린다.
+// 반복(start)이 부른 틱은 회차 사이·묶음 사이마다 리더 확인과 멈춤 신호를 다시 보고, 리더가 아니거나 멈추면 그 틱을 끝낸다(보낸 묶음은 확인·지움까지 마친다,
+// 보내기 중간에 끊지 않는다). 그래서 옛 리더와 새 리더가 함께 보내는 것은 묶음 하나와 그 보내기 시간까지다(PRF-164 리뷰 고침 M2, docs/data.md §5 '릴레이 리더 넘김').
 import type { SeatStreamRelaySignals, SeatStreamSource, TradeEventCodec, TradeEventPublisher, TradeRecord } from '../domain/ports.js';
 import {
   routeStreamEntry,
@@ -29,6 +31,20 @@ export interface SeatStreamRelayDeps {
   batch?: number;
   /** 시험이 바꾸는 쉬기(기본 setTimeout). 틱 사이와 실패 뒤 늘려 쉬기에 쓴다 */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /**
+   * 리더 확인(BUILD_ORDER PRF-164, 릴레이 프로세스의 LeaderLoopContext.leader). 있으면 반복(start)이 틱마다 리더가 아니면 tick()을 부르지 않고
+   * STREAM_RELAY_TICK_MS 쉰다(늘려 쉬기도 0으로 돌린다). 반복이 부른 틱 안에서도 회차 사이·묶음 사이마다 다시 보고 리더가 아니면 그 틱을 끝낸다(리뷰 고침 M2).
+   * 직접 부르는 tick()은 리더를 보지 않는다(시험·도구용). 없으면 지금처럼 늘 돈다(멈춤 신호는 그래도 본다)
+   */
+  leader?: { isLeader(): boolean };
+}
+
+/**
+ * 반복(#run)이 tick에 넘기는 내부 인자(리뷰 고침 M2). 있으면 회차 사이·묶음 사이마다 signal과 리더 확인(deps.leader가 있을 때)을 다시 보고,
+ * 멈췄거나 리더가 아니면 그 틱을 끝낸다. 직접 부를 때는 넘기지 않는다(그때는 리더를 보지 않는다)
+ */
+export interface SeatStreamTickGuard {
+  signal: AbortSignal;
 }
 
 /** 회차 하나의 한 틱 결과 */
@@ -60,7 +76,13 @@ const defaultSleep = (ms: number, signal: AbortSignal): Promise<void> =>
     );
   });
 
+/**
+ * 좌석 Stream 릴레이. 플랫폼 LeaderLoop 모양(name·start·stop)을 맞춘다(플랫폼 형을 가져오지 않고 모양만, BUILD_ORDER PRF-164):
+ * 릴레이 프로세스의 leaderLoops가 그대로 돌린다
+ */
 export class SeatStreamRelay {
+  /** 리더 반복 이름(LeaderLoop.name) */
+  readonly name = 'seat-stream-relay';
   readonly #batch: number;
   readonly #sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   #abort: AbortController | undefined;
@@ -75,7 +97,12 @@ export class SeatStreamRelay {
     this.#sleep = deps.sleep ?? defaultSleep;
   }
 
-  async tick(): Promise<RelayTickReport> {
+  /**
+   * 한 번 돈다: 회차 목록 → 회차마다 묶음을 읽어 보내고 확인한다.
+   * @param guard 반복(#run)이 넘기는 내부 인자(SeatStreamTickGuard). 있으면 회차 사이·묶음 사이마다 멈춤 신호와 리더를 다시 보고, 멈췄거나 리더가 아니면
+   *   남은 회차·묶음을 보지 않고 그때까지의 보고를 돌려준다(돌던 묶음은 확인까지 마친다). 직접 부를 때는 넘기지 않는다(리더를 보지 않는다)
+   */
+  async tick(guard?: SeatStreamTickGuard): Promise<RelayTickReport> {
     this.#failed = new Set();
     this.#more = false;
     try {
@@ -88,17 +115,24 @@ export class SeatStreamRelay {
         return { events: [] };
       }
       const reports: RelayEventReport[] = [];
-      for (const eventId of events) reports.push(await this.#relay(eventId));
+      for (const eventId of events) {
+        if (!this.#mayContinue(guard)) break;
+        reports.push(await this.#relay(eventId, guard));
+      }
       return { events: reports };
     } finally {
       for (const stage of this.#failed) this.deps.signals?.failed(stage);
     }
   }
 
-  /** 회차 하나: 묶음이 꽉 차면 이어 읽는다. 한 묶음이라도 실패하면 거기서 멈추고(앞 묶음은 이미 확인받았다) 다음 틱에 다시 */
-  async #relay(eventId: string): Promise<RelayEventReport> {
+  /**
+   * 회차 하나: 묶음이 꽉 차면 이어 읽는다. 한 묶음이라도 실패하면 거기서 멈추고(앞 묶음은 이미 확인받았다) 다음 틱에 다시.
+   * guard가 있으면 둘째 묶음부터 읽기 전마다 멈춤 신호·리더를 다시 본다(첫 묶음 앞은 tick의 회차 사이 확인이 본다)
+   */
+  async #relay(eventId: string, guard: SeatStreamTickGuard | undefined): Promise<RelayEventReport> {
     const total: RelayEventReport = { eventId, sent: 0, dropped: 0, acked: 0 };
     for (let n = 0; n < STREAM_RELAY_MAX_BATCHES; n += 1) {
+      if (n > 0 && !this.#mayContinue(guard)) return total;
       const r = await this.#relayBatch(eventId);
       total.sent += r.sent;
       total.dropped += r.dropped;
@@ -108,6 +142,13 @@ export class SeatStreamRelay {
     }
     this.#more = true;
     return total;
+  }
+
+  /** 반복이 부른 틱이 다음 회차·묶음으로 가도 되나: 멈춤 신호가 없고, 리더 확인이 있으면 리더다(확인이 던지면 리더가 아니다). guard가 없으면(직접 부름) 늘 참 */
+  #mayContinue(guard: SeatStreamTickGuard | undefined): boolean {
+    if (!guard) return true;
+    if (guard.signal.aborted) return false;
+    return this.deps.leader === undefined || this.#isLeader();
   }
 
   async #relayBatch(eventId: string): Promise<{ read: number; sent: number; dropped: number; acked: number; failed?: 'read' | 'publish' | 'ack' }> {
@@ -184,10 +225,18 @@ export class SeatStreamRelay {
 
   async #run(signal: AbortSignal): Promise<void> {
     let backoff = 0;
+    const guard: SeatStreamTickGuard = { signal };
     while (!signal.aborted) {
+      // 리더가 아니면 회차 목록도 읽지 않고 한 틱 쉰다(늘려 쉬기도 0으로: 다시 리더가 되면 처음 실패부터 0.2초다). 틱마다 다시 본다
+      if (this.deps.leader && !this.#isLeader()) {
+        backoff = 0;
+        await this.#pause(STREAM_RELAY_TICK_MS, signal);
+        continue;
+      }
       let failed: boolean;
       try {
-        const report = await this.tick();
+        // 틱 안에서도 회차 사이·묶음 사이마다 리더·멈춤 신호를 다시 본다(리뷰 고침 M2)
+        const report = await this.tick(guard);
         failed = this.#failed.size > 0 || report.events.some((e) => e.failed !== undefined);
       } catch (err) {
         // 예상 밖 오류도 반복을 끝내지 않는다(처리되지 않은 거부로 프로세스가 죽지 않게)
@@ -196,7 +245,29 @@ export class SeatStreamRelay {
       }
       backoff = failed ? (backoff === 0 ? STREAM_RELAY_BACKOFF_MIN_MS : Math.min(backoff * 2, STREAM_RELAY_BACKOFF_MAX_MS)) : 0;
       if (signal.aborted) break;
-      await this.#sleep(backoff !== 0 ? backoff : this.#more ? 0 : STREAM_RELAY_TICK_MS, signal);
+      await this.#pause(backoff !== 0 ? backoff : this.#more ? 0 : STREAM_RELAY_TICK_MS, signal);
+    }
+  }
+
+  /** 쉬기. 바꿔 끼운 쉬기가 던져도 반복을 거부로 끝내지 않는다(삼킨다, 리뷰 고침 L8. SeatRebuildLoop와 같다). 멈춤 신호는 반복 조건이 본다 */
+  async #pause(ms: number, signal: AbortSignal): Promise<void> {
+    try {
+      await this.#sleep(ms, signal);
+    } catch {
+      // 기본 쉬기(setTimeout)는 던지지 않는다
+    }
+  }
+
+  /**
+   * 리더 확인. 구현에서 정한 것: 확인이 던지면 리더가 아닌 것으로 본다(확실하지 않으면 보내지 않는다. 두 파드가 같은 소비자 이름으로 읽으면 순서가 깨진다)
+   * 경고 한 줄을 남긴다
+   */
+  #isLeader(): boolean {
+    try {
+      return this.deps.leader?.isLeader() === true;
+    } catch (err) {
+      this.deps.logger?.warn({ err: errorName(err) }, '좌석 Stream 릴레이: 리더 확인이 던져 이 틱을 건너뛴다');
+      return false;
     }
   }
 }

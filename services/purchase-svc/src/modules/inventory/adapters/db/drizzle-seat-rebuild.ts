@@ -9,10 +9,12 @@
 // - sales: seat_sale PENDING·SOLD, holds: seat_hold HELD이고 expires_at > now(), saleHolds: seat_hold HELD이고 같은 회차·좌석·계정의 활성 판매(PENDING·SOLD)가 있는 행
 //   (만료 조건 없음). 토큰(bigint)은 안전한 정수로 바꾸고, 아니면 Error. 차례는 좌석 ID(와 토큰) 순.
 // - ledgerRows(BUILD_ORDER PRF-167 리뷰 고침 M2): 그 회차·그 좌석들의 seat_hold 행 전부(상태·holdId 상관없이 좌석·holdId·상태·토큰). 묶인 주문 좌석의 원장 대조용.
+// - 판매를 연 기록(SeatRebuildMarks, BUILD_ORDER PRF-164 리뷰 고침 M3): opened는 seat_rebuild에 행이 있는 회차(event_id = any(uuid[]) 한 문장, 빈 목록이면 DB를 부르지 않는다),
+//   markOpened는 INSERT (회차, 판 번호 1, holder·lease_until 비움) ON CONFLICT (event_id) DO NOTHING(이미 있는 행의 판 번호·임대를 되돌리지 않는다. 표의 gen 기본값·CHECK gen >= 1과 맞다).
 // - 회차 ID가 소문자 UUID가 아니거나 holder가 빈 글이면 DB를 부르기 전에 RangeError다.
 import type { Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
-import type { SeatRebuildSource } from '../../domain/ports.js';
+import type { SeatRebuildMarks, SeatRebuildSource } from '../../domain/ports.js';
 import { REBUILD_LEASE_MS, type RebuildHold, type RebuildLedgerRow, type RebuildSale } from '../../domain/rebuild.js';
 import { SALE_UUID_PATTERN } from '../../domain/seat-sale.js';
 
@@ -35,7 +37,7 @@ function safeIntOf(v: unknown, what: string): number {
 
 const msOf = (v: unknown): number => (v instanceof Date ? v.getTime() : new Date(String(v)).getTime());
 
-export class DrizzleSeatRebuildSource implements SeatRebuildSource {
+export class DrizzleSeatRebuildSource implements SeatRebuildSource, SeatRebuildMarks {
   readonly #leaseMs: number;
 
   constructor(
@@ -118,6 +120,26 @@ export class DrizzleSeatRebuildSource implements SeatRebuildSource {
       }
     }
     return out;
+  }
+
+  async opened(eventIds: readonly string[]): Promise<ReadonlySet<string>> {
+    for (const id of eventIds) assertEvent(id);
+    const ids = [...new Set(eventIds)];
+    if (ids.length === 0) return new Set();
+    // 회차 ID는 배열 글 하나(`{…}`::uuid[])로 묻는다(ledgerRows와 같은 방식). 기본 키(event_id)로 닿는다
+    const r = await this.database.db.execute(sql`
+      select event_id::text as event_id
+        from seat_rebuild
+       where event_id = any(${`{${ids.join(',')}}`}::uuid[])`);
+    return new Set(r.rows.map((x) => (x as { event_id: string }).event_id));
+  }
+
+  async markOpened(eventId: string): Promise<void> {
+    assertEvent(eventId);
+    await this.database.db.execute(sql`
+      insert into seat_rebuild (event_id, gen, holder, lease_until)
+      values (${eventId}::uuid, 1, null, null)
+      on conflict (event_id) do nothing`);
   }
 
   async release(eventId: string, holder: string, o?: { setGen?: number }): Promise<void> {

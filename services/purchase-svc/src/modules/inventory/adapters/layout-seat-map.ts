@@ -1,5 +1,5 @@
 // 운영 좌석맵 판(BUILD_ORDER PRF-137, docs/features/seat-hold.md §2 '운영 좌석맵 판'): 회차별 판 파일을 읽어 메모리에 두는 SeatMap·SeatMapIndex·SeatMapSections.
-import { readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Clock } from '@peaket/platform';
 import { KEY_PART, type SeatRef } from '../domain/hold.js';
@@ -44,6 +44,35 @@ export class FileSeatMapSource implements SeatMapSource {
       if (isFileMissing(err)) return undefined;
       throw err;
     }
+  }
+
+  /**
+   * 폴더에 판 파일이 있는 회차 ID들(BUILD_ORDER PRF-164, 다시 만들기 반복의 회차 목록 SeatMapEventCatalog가 쓴다).
+   * 폴더의 `{회차 ID}.json` 이름에서 `.json`을 뗀 값 가운데 KEY_PART 모양인 것만, 이름 오름차순(문자 코드 순)이다. 하위 폴더·다른 확장자는 뺀다.
+   * 파일 내용은 읽지 않는다(판이 틀린 회차를 거르는 것은 SeatMapEventCatalog가 seatMap.config로 한다).
+   * 확장자는 소문자 `.json`만 본다(load가 `{회차 ID}.json`만 읽으므로 `.JSON`은 읽히지 않는 파일이다).
+   * 구현에서 정한 것: 심볼릭 링크는 가리키는 것이 보통 파일일 때만 넣는다(쿠버네티스 ConfigMap 볼륨은 파일을 `..data/` 아래를 가리키는 링크로 둔다.
+   * load도 링크를 따라 읽는다). 가리키는 것을 읽지 못한 링크(끊긴 링크 등)는 뺀다
+   * @throws Error 폴더를 읽지 못함(없음 ENOENT 포함)
+   */
+  async list(): Promise<string[]> {
+    const entries = await readdir(this.dir, { withFileTypes: true });
+    const ids: string[] = [];
+    for (const d of entries) {
+      if (!d.name.endsWith('.json')) continue;
+      const id = d.name.slice(0, -'.json'.length);
+      if (!KEY_PART.test(id)) continue;
+      if (d.isFile()) ids.push(id);
+      else if (d.isSymbolicLink()) {
+        try {
+          if ((await stat(join(this.dir, d.name))).isFile()) ids.push(id);
+        } catch {
+          // 끊긴 링크·읽지 못하는 대상은 뺀다(load도 그 회차를 읽지 못한다)
+        }
+      }
+    }
+    // 문자 코드 순(KEY_PART는 ASCII뿐이라 UTF-16 단위 비교와 같다). localeCompare는 쓰지 않는다(환경마다 차례가 다르다)
+    return ids.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
 }
 

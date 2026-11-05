@@ -15,6 +15,7 @@ import {
   InventoryOrderSessions,
   InventorySeatSlots,
   LoggerOrderLog,
+  LoggerPaymentResultLog,
   OrderSeatStoreUnavailable,
   OrdersController,
   PromOrderSignals,
@@ -278,6 +279,64 @@ describe('LoggerOrderLog(보안·설정 로그)', () => {
     };
     const log = new LoggerOrderLog({ warn: boom, error: boom } as never);
     expect(() => log.attemptMismatch({ accountId: ACCOUNT, orderId: ORDER, reason: 'no_attempt' })).not.toThrow();
+  });
+});
+
+// ── 결제 결과 반영 로그(PaymentResultLog, BUILD_ORDER PRF-164가 trade.payments 소비자를 붙이며 만든다, docs/features/payment.md §2 '결제 결과 반영의 첫 구현') ──
+describe('LoggerPaymentResultLog(결제 결과 반영 로그)', () => {
+  function recorder() {
+    const lines: { level: 'warn' | 'error'; obj: Record<string, unknown>; msg: string }[] = [];
+    const logger = {
+      warn: (obj: object, msg: string) => void lines.push({ level: 'warn', obj: obj as Record<string, unknown>, msg }),
+      error: (obj: object, msg: string) => void lines.push({ level: 'error', obj: obj as Record<string, unknown>, msg }),
+    };
+    return { lines, log: new LoggerPaymentResultLog(logger as never) };
+  }
+  const ORDER = '0190f3a1-7c2e-7f00-8000-0000000000f3';
+
+  test('ADR0142_보류는 error 한 줄(kind payment-result-held, 주문 ID·사건 종류·결제사·까닭·수준, 표시가 있으면 holdKind)이다. 표시가 없으면 holdKind 칸이 없다 [ASVS v5.0.0-16.3.3]', () => {
+    const { lines, log } = recorder();
+    log.held({ orderId: ORDER, type: 'APPROVED', pg: 'TOSS', reason: 'AMOUNT_MISMATCH', severity: 'SEV2', kind: 'security' });
+    log.held({ orderId: ORDER, type: 'APPROVED', pg: 'PORTONE', reason: 'CHARGED_ON_CLOSED_ORDER', severity: 'SEV1', kind: 'payment-charged-closed' });
+    log.held({ orderId: ORDER, type: 'FAILED', pg: 'SIMULATOR', reason: 'IMPOSSIBLE', severity: 'SEV2' });
+    expect(lines.map((l) => [l.level, l.obj])).toEqual([
+      ['error', { kind: 'payment-result-held', orderId: ORDER, type: 'APPROVED', pg: 'TOSS', reason: 'AMOUNT_MISMATCH', severity: 'SEV2', holdKind: 'security' }],
+      ['error', { kind: 'payment-result-held', orderId: ORDER, type: 'APPROVED', pg: 'PORTONE', reason: 'CHARGED_ON_CLOSED_ORDER', severity: 'SEV1', holdKind: 'payment-charged-closed' }],
+      ['error', { kind: 'payment-result-held', orderId: ORDER, type: 'FAILED', pg: 'SIMULATOR', reason: 'IMPOSSIBLE', severity: 'SEV2' }],
+    ]);
+    expect(Object.keys(lines[2]!.obj)).not.toContain('holdKind');
+    for (const l of lines) expect(typeof l.msg).toBe('string');
+  });
+
+  test('ADR0142_정한 칸만 싣는다: 넘긴 값에 결제 참조·금액·토큰·사건 키가 섞여 와도 로그 줄에 나가지 않는다(받은 대로 한 줄씩, 같은 사건을 거르는 것은 ApplyPaymentResult 몫) [ASVS v5.0.0-16.2.5]', () => {
+    const { lines, log } = recorder();
+    const leaky = { paymentKey: 'PAYKEYSECRET', paymentToken: 'PAYTOKENSECRET', paymentId: 'pay-SECRET', amount: 123_456, eventKey: 'evk-SECRET', pseudonym: 'psn-SECRET' };
+    log.held({ orderId: ORDER, type: 'APPROVED', pg: 'TOSS', reason: 'PG_MISMATCH', severity: 'SEV2', kind: 'security', ...leaky } as never);
+    log.held({ orderId: ORDER, type: 'APPROVED', pg: 'TOSS', reason: 'PG_MISMATCH', severity: 'SEV2', kind: 'security', ...leaky } as never);
+    log.afterCommitFailed({ orderId: ORDER, what: 'complete_session', errorName: 'SeatStoreUnavailable', ...leaky } as never);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]!.obj).toEqual({ kind: 'payment-result-held', orderId: ORDER, type: 'APPROVED', pg: 'TOSS', reason: 'PG_MISMATCH', severity: 'SEV2', holdKind: 'security' });
+    const text = JSON.stringify(lines);
+    for (const v of ['PAYKEYSECRET', 'PAYTOKENSECRET', 'SECRET', '123456']) expect(text, v).not.toContain(v);
+  });
+
+  test('POL009_커밋 뒤 구매 세션 일 실패는 warn 한 줄(kind payment-result, event after_commit_failed, 주문 ID·what·오류 이름)이다', () => {
+    const { lines, log } = recorder();
+    log.afterCommitFailed({ orderId: ORDER, what: 'complete_session', errorName: 'SeatStoreUnavailable' });
+    log.afterCommitFailed({ orderId: ORDER, what: 'unmark_paying', errorName: 'TypeError' });
+    expect(lines.map((l) => [l.level, l.obj])).toEqual([
+      ['warn', { kind: 'payment-result', event: 'after_commit_failed', orderId: ORDER, what: 'complete_session', errorName: 'SeatStoreUnavailable' }],
+      ['warn', { kind: 'payment-result', event: 'after_commit_failed', orderId: ORDER, what: 'unmark_paying', errorName: 'TypeError' }],
+    ]);
+  });
+
+  test('ADR0142_로거가 던져도 삼킨다(결제 결과 처리기를 막지 않는다)', () => {
+    const boom = () => {
+      throw new Error('log down');
+    };
+    const log = new LoggerPaymentResultLog({ warn: boom, error: boom } as never);
+    expect(() => log.held({ orderId: ORDER, type: 'APPROVED', pg: 'TOSS', reason: 'SOLD_MISMATCH', severity: 'SEV1' })).not.toThrow();
+    expect(() => log.afterCommitFailed({ orderId: ORDER, what: 'unmark_paying', errorName: 'Error' })).not.toThrow();
   });
 });
 

@@ -59,7 +59,16 @@ export {
 } from './outbox.js';
 export { OUTBOX_RELAY_DEFAULTS, OutboxRelay, OutboxRelayMetrics, type LeaderState, type OutboxPublisher, type OutboxRecord, type OutboxRelayOptions } from './outbox-relay.js';
 export { LEASE_DEFAULTS, LeaseElector, inClusterLeaseApi, kubernetesLeaseApi, memoryLeaseApi, type KubernetesLeaseApiOptions, type LeaseApi, type LeaseElectorOptions, type LeaseRecord, type LeaseSpec } from './lease.js';
-export { RELAY_PROCESS_DEFAULTS, loadOutboxRelayProcessConfig, startOutboxRelayProcess, type OutboxRelayProcess, type OutboxRelayProcessConfig, type OutboxRelayProcessOptions } from './relay-process.js';
+export {
+  RELAY_PROCESS_DEFAULTS,
+  loadOutboxRelayProcessConfig,
+  startOutboxRelayProcess,
+  type LeaderLoop,
+  type LeaderLoopContext,
+  type OutboxRelayProcess,
+  type OutboxRelayProcessConfig,
+  type OutboxRelayProcessOptions,
+} from './relay-process.js';
 export { KAFKA_AUTH_LOCKED, KAFKA_CONSUMER_LOCKED, KAFKA_PRODUCER_LOCKED, KAFKA_REQUIRED, kafkaAdminConfig, kafkaConsumerConfig, kafkaProducerConfig, type KafkaClientBase, type KafkaClientConfig, type KafkaProducerKind } from './kafka-config.js';
 export { kafkaAuthFromEnv, mskIamTokenProvider, mskSessionName, type KafkaAuth, type KafkaMskIamAuth, type MskIamOptions, type OAuthBearerProvider, type OAuthBearerToken } from './msk-iam.js';
 export {

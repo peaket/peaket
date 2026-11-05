@@ -450,13 +450,13 @@ describe('SeatStreamRelay.start·stop', () => {
     await r.stop();
   });
 
-  test('stop은 돌던 틱(읽기·보내기·확인)이 끝날 때까지 기다리고, 그 뒤로 틱이 없다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('stop은 돌던 묶음(보내기·확인)이 끝날 때까지 기다리고, 그 뒤로 틱이 없다. 회차 목록을 읽는 중에 멈추면 묶음을 읽지 않고 끝난다(PRF-164 리뷰 고침 M2: 멈춤 신호를 회차 사이·묶음 사이마다 본다) [ASVS v5.0.0-16.5.2]', async () => {
     const w = world({ [EV_A]: [held('1762225200000-0', 1)] });
     const gate = deferred();
-    w.wait.events = () => gate.promise;
+    w.wait.publish = () => gate.promise;
     const r = w.relay();
     r.start();
-    await runUntil(w, () => w.calls.events >= 1);
+    await runUntil(w, () => w.calls.publish.length >= 1);
     let stopped = false;
     const p = r.stop().then(() => void (stopped = true));
     for (let i = 0; i < 10; i++) await flush();
@@ -470,6 +470,23 @@ describe('SeatStreamRelay.start·stop', () => {
       await flush();
     }
     expect(w.calls.events).toBe(1);
+
+    // 회차 목록을 읽는 중에 멈춤: 목록 읽기는 기다리고, 묶음은 읽지 않는다(남은 항목은 다음 리더가 보낸다)
+    const v = world({ [EV_A]: [held('1762225200000-0', 1)] });
+    const listGate = deferred();
+    v.wait.events = () => listGate.promise;
+    const rv = v.relay();
+    rv.start();
+    await runUntil(v, () => v.calls.events >= 1);
+    let vStopped = false;
+    const pv = rv.stop().then(() => void (vStopped = true));
+    for (let i = 0; i < 10; i++) await flush();
+    expect(vStopped).toBe(false);
+    listGate.resolve();
+    await pv;
+    expect(v.calls.read).toEqual([]);
+    expect(v.calls.ack).toEqual([]);
+    expect(v.pending.get(EV_A)).toHaveLength(1);
   });
 
   test('stop은 쉬는 중이면 쉬기를 끊고(signal을 끊는다) 바로 끝난다. 그 뒤로 틱이 없다', async () => {
@@ -613,5 +630,256 @@ describe('SeatStreamRelay.start·stop', () => {
     w.fail.publish = () => new Error('kafka down');
     await w.relay().tick();
     expect(w.failed).toEqual(['publish']);
+  });
+});
+
+// ── 리더 확인(BUILD_ORDER PRF-164, docs/features/seat-hold.md §6 '릴레이 프로세스와 조립의 첫 구현' 리더 반복, docs/data.md §5 '릴레이 리더 넘김') ──
+// 릴레이 프로세스의 leaderLoops가 LeaderLoopContext.leader를 deps.leader로 넘긴다. 반복(start)은 틱마다 리더를 다시 보고, 리더가 아니면 회차 목록도 읽지 않는다.
+describe('SeatStreamRelay: 리더 확인(PRF-164)', () => {
+  test('ST5_leader가 거짓이면 반복이 tick을 부르지 않고(회차 목록·Stream을 읽지 않는다) STREAM_RELAY_TICK_MS씩 쉬며, 참이 되면 다음 쉬기 뒤에 다시 돌아 밀린 항목을 보낸다 [ASVS v5.0.0-15.4.1]', async () => {
+    const w = world({ [EV_A]: [held('1762225200000-0', 1)] });
+    let leader = false;
+    let asked = 0;
+    const r = w.relay({
+      leader: {
+        isLeader: () => {
+          asked += 1;
+          return leader;
+        },
+      },
+    });
+    r.start();
+    for (let i = 0; i < 4; i++) {
+      await settle(() => w.pendingSleeps().length > 0);
+      w.pendingSleeps()[0]?.release();
+    }
+    await settle(() => w.pendingSleeps().length > 0);
+    expect(w.calls.events).toBe(0);
+    expect(w.calls.read).toEqual([]);
+    expect(w.calls.publish).toEqual([]);
+    expect(w.sleeps.length).toBeGreaterThanOrEqual(4);
+    expect(new Set(w.sleeps.map((s) => s.ms))).toEqual(new Set([STREAM_RELAY_TICK_MS]));
+    // 틱마다 다시 본다(처음 한 번만 보지 않는다)
+    expect(asked).toBeGreaterThanOrEqual(4);
+    leader = true;
+    await runUntil(w, () => w.calls.ack.length >= 1);
+    await r.stop();
+    expect(w.calls.ack).toEqual([[EV_A, ['1762225200000-0']]]);
+    expect(w.sentBy(SEAT_TOPIC)).toBe(1);
+  });
+
+  test('ST5_리더를 잃으면 실패 뒤 늘려 쉬기도 0으로 돌린다: 실패한 틱 뒤 0.2초 → 리더 아님 1초(0.4초가 아니다) → 다시 리더가 되어 실패하면 0.2초부터 [ASVS v5.0.0-15.4.1]', async () => {
+    const w = world({ [EV_A]: [held('1762225200000-0', 1)] });
+    w.fail.publish = () => new Error('kafka down');
+    let leader = true;
+    const r = w.relay({ leader: { isLeader: () => leader } });
+    r.start();
+    await settle(() => w.pendingSleeps().length > 0);
+    expect(w.sleeps.map((s) => s.ms)).toEqual([STREAM_RELAY_BACKOFF_MIN_MS]);
+    leader = false;
+    w.pendingSleeps()[0]!.release();
+    await settle(() => w.pendingSleeps().length > 0);
+    expect(w.sleeps.map((s) => s.ms)).toEqual([STREAM_RELAY_BACKOFF_MIN_MS, STREAM_RELAY_TICK_MS]);
+    expect(w.calls.events).toBe(1);
+    leader = true;
+    w.pendingSleeps()[0]!.release();
+    await settle(() => w.pendingSleeps().length > 0);
+    await r.stop();
+    expect(w.sleeps.map((s) => s.ms)).toEqual([STREAM_RELAY_BACKOFF_MIN_MS, STREAM_RELAY_TICK_MS, STREAM_RELAY_BACKOFF_MIN_MS]);
+    expect(w.calls.events).toBe(2);
+  });
+
+  test('ST5_리더가 아닌 동안 쉬는 중에 stop하면 쉬기를 끊고 바로 끝난다. 그 뒤로 틱이 없다', async () => {
+    const w = world({ [EV_A]: [held('1762225200000-0', 1)] });
+    const r = w.relay({ leader: { isLeader: () => false } });
+    r.start();
+    await settle(() => w.pendingSleeps().length > 0);
+    await r.stop();
+    expect(w.sleeps.every((s) => s.done)).toBe(true);
+    expect(w.sleeps.at(-1)!.signal.aborted).toBe(true);
+    for (let i = 0; i < 20; i++) await flush();
+    expect(w.calls.events).toBe(0);
+  });
+
+  test('ST5_리더 확인이 던지면 리더가 아닌 것으로 본다: 회차 목록·Stream을 읽지 않고 경고 한 줄(오류 이름만) 뒤 STREAM_RELAY_TICK_MS 쉬며 반복은 끝나지 않고, 확인이 다시 참이면 밀린 항목을 보낸다 [ASVS v5.0.0-15.4.1] [ASVS v5.0.0-16.5.2]', async () => {
+    // 변이 검토(PRF-164): 확인이 던질 때 리더로 보면 두 파드가 같은 소비자 이름으로 Stream을 읽어 순서가 깨질 수 있다
+    const w = world({ [EV_A]: [held('1762225200000-0', 1)] });
+    let broken = true;
+    const r = w.relay({
+      leader: {
+        isLeader: () => {
+          if (broken) throw Object.assign(new Error('lease api https://kube:SECRET'), { name: 'LeaseCheckError' });
+          return true;
+        },
+      },
+    });
+    r.start();
+    for (let i = 0; i < 3; i++) {
+      await settle(() => w.pendingSleeps().length > 0);
+      w.pendingSleeps()[0]?.release();
+    }
+    await settle(() => w.pendingSleeps().length > 0);
+    expect(w.calls.events).toBe(0);
+    expect(w.calls.read).toEqual([]);
+    expect(w.calls.publish).toEqual([]);
+    expect(new Set(w.sleeps.map((s) => s.ms))).toEqual(new Set([STREAM_RELAY_TICK_MS]));
+    expect(w.lines.length).toBeGreaterThanOrEqual(3);
+    expect(w.lines.every((l) => Object.values(l.obj).includes('LeaseCheckError'))).toBe(true);
+    expect(w.logText()).not.toContain('SECRET');
+    broken = false;
+    await runUntil(w, () => w.calls.ack.length >= 1);
+    await r.stop();
+    expect(w.calls.ack).toEqual([[EV_A, ['1762225200000-0']]]);
+  });
+
+  test('ST5_직접 부르는 tick()은 리더를 보지 않는다(시험·도구용): leader가 거짓이어도 보내고 확인한다', async () => {
+    const w = world({ [EV_A]: [held('1762225200000-0', 1)] });
+    let asked = 0;
+    const r = w.relay({
+      leader: {
+        isLeader: () => {
+          asked += 1;
+          return false;
+        },
+      },
+    });
+    expect((await r.tick()).events).toEqual([{ eventId: EV_A, sent: 1, dropped: 0, acked: 1 }]);
+    expect(asked).toBe(0);
+  });
+
+  test('ST5_leader가 없으면 지금처럼 늘 돈다(틱 사이 STREAM_RELAY_TICK_MS). 플랫폼 LeaderLoop 모양(name seat-stream-relay·start·stop)이다', async () => {
+    const w = world({ [EV_A]: [] });
+    const r = w.relay();
+    expect(r.name).toBe('seat-stream-relay');
+    expect(typeof r.start).toBe('function');
+    expect(typeof r.stop).toBe('function');
+    r.start();
+    await runUntil(w, () => w.calls.events >= 3);
+    await r.stop();
+    expect(w.calls.events).toBeGreaterThanOrEqual(3);
+    expect(w.sleeps.slice(0, 2).map((s) => s.ms)).toEqual([STREAM_RELAY_TICK_MS, STREAM_RELAY_TICK_MS]);
+  });
+});
+
+// ── 리더를 잃은 틱(PRF-164 리뷰 고침 M2·L8, docs/features/seat-hold.md §6 '릴레이 프로세스와 조립의 첫 구현' 리더를 잃은 틱, docs/data.md §5 '릴레이 리더 넘김') ──
+// 반복(start)이 부른 틱은 회차 사이·묶음 사이마다 리더 확인과 멈춤 신호를 다시 보고, 리더가 아니거나 멈추면 그 틱을 끝낸다.
+// 보낸 묶음은 확인·지움까지 마친다(보내기 중간에 끊지 않는다). 그래서 옛 리더와 새 리더가 함께 보내는 것은 묶음 하나와 그 보내기 시간까지다.
+describe('SeatStreamRelay: 리더를 잃은 틱(PRF-164 리뷰 고침)', () => {
+  const EV_C = '0190f3a1-7c2e-7a00-8000-0000000000e3';
+  const ids = { a: '1762225200000-0', b: '1762225200001-0', c: '1762225200002-0' };
+  /** 회차 셋, 회차마다 항목 하나(목록 차례 A·B·C) */
+  const three = () => ({ [EV_A]: [held(ids.a, 1)], [EV_B]: [held(ids.b, 2)], [EV_C]: [held(ids.c, 3)] });
+
+  test('ST5_리뷰 고침 M2_회차 셋 가운데 첫 회차를 보내는 동안 리더를 잃으면 반복의 틱은 그 묶음의 확인·지움까지 마치고 둘째·셋째 회차를 읽지 않는다. 직접 부르는 tick()은 같은 상황에서도 셋 다 보낸다 [ASVS v5.0.0-15.4.1]', async () => {
+    const w = world(three());
+    let leader = true;
+    // 첫 보내기 도중에 Lease를 잃는다(보내기는 끝까지 간다)
+    w.wait.publish = async () => {
+      leader = false;
+    };
+    const r = w.relay({ leader: { isLeader: () => leader } });
+    r.start();
+    await settle(() => w.calls.ack.length >= 1 && w.pendingSleeps().length > 0);
+    for (let i = 0; i < 10; i++) await flush();
+    expect(w.calls.read).toEqual([[EV_A, STREAM_RELAY_BATCH]]);
+    expect(w.calls.publish).toHaveLength(1);
+    expect(w.calls.ack).toEqual([[EV_A, [ids.a]]]);
+    expect(w.pending.get(EV_B)).toHaveLength(1);
+    expect(w.pending.get(EV_C)).toHaveLength(1);
+    await r.stop();
+
+    // 직접 부르는 tick()은 리더를 보지 않는다(시험·도구용)
+    const d = world(three());
+    let dLeader = true;
+    d.wait.publish = async () => {
+      dLeader = false;
+    };
+    const direct = d.relay({ leader: { isLeader: () => dLeader } });
+    expect((await direct.tick()).events.map((e) => [e.eventId, e.acked])).toEqual([
+      [EV_A, 1],
+      [EV_B, 1],
+      [EV_C, 1],
+    ]);
+  });
+
+  test('ST5_리뷰 고침 M2_한 회차의 묶음 사이에도 다시 본다: 꽉 찬 묶음(batch 1)을 보내는 동안 리더를 잃으면 다음 묶음을 읽지 않는다 [ASVS v5.0.0-15.4.1]', async () => {
+    const w = world({ [EV_A]: [held(ids.a, 1), held(ids.b, 2), held(ids.c, 3)] });
+    let leader = true;
+    w.wait.publish = async () => {
+      leader = false;
+    };
+    const r = w.relay({ batch: 1, leader: { isLeader: () => leader } });
+    r.start();
+    await settle(() => w.calls.ack.length >= 1 && w.pendingSleeps().length > 0);
+    for (let i = 0; i < 10; i++) await flush();
+    expect(w.calls.read).toEqual([[EV_A, 1]]);
+    expect(w.calls.ack).toEqual([[EV_A, [ids.a]]]);
+    expect(w.pending.get(EV_A)).toHaveLength(2);
+    await r.stop();
+  });
+
+  test('ST5_리뷰 고침 M2_리더 확인이 틱 도중에 던지면 리더가 아닌 것으로 보고 그 틱을 끝낸다(남은 회차를 읽지 않는다) [ASVS v5.0.0-15.4.1]', async () => {
+    const w = world(three());
+    let broken = false;
+    w.wait.publish = async () => {
+      broken = true;
+    };
+    const r = w.relay({
+      leader: {
+        isLeader: () => {
+          if (broken) throw Object.assign(new Error('lease api'), { name: 'LeaseCheckError' });
+          return true;
+        },
+      },
+    });
+    r.start();
+    await settle(() => w.calls.ack.length >= 1 && w.pendingSleeps().length > 0);
+    for (let i = 0; i < 10; i++) await flush();
+    expect(w.calls.read.map(([e]) => e)).toEqual([EV_A]);
+    expect(w.calls.ack).toEqual([[EV_A, [ids.a]]]);
+    await r.stop();
+  });
+
+  test('ST5_리뷰 고침 M2_멈춤 신호도 같다: 첫 회차를 보내는 동안 stop()을 부르면 그 묶음의 확인·지움까지 마치고 남은 회차를 읽지 않으며 stop()이 곧 끝난다(뒤 회차의 보내기를 기다리지 않는다) [ASVS v5.0.0-16.5.2]', async () => {
+    const w = world(three());
+    const gate = deferred();
+    let publishes = 0;
+    // 첫 보내기는 시험이 풀고, 그 뒤 보내기는 끝나지 않는다(고치기 전에는 stop이 둘째 회차의 보내기에 걸려 끝나지 않는다)
+    w.wait.publish = () => {
+      publishes += 1;
+      return publishes === 1 ? gate.promise : new Promise<void>(() => {});
+    };
+    const r = w.relay();
+    r.start();
+    await settle(() => w.calls.publish.length >= 1);
+    let stopped = false;
+    const p = r.stop().then(() => void (stopped = true));
+    gate.resolve();
+    await settle(() => stopped);
+    expect(stopped).toBe(true);
+    await p;
+    expect(w.calls.read.map(([e]) => e)).toEqual([EV_A]);
+    expect(w.calls.ack).toEqual([[EV_A, [ids.a]]]);
+    expect(w.pending.get(EV_B)).toHaveLength(1);
+    expect(w.pending.get(EV_C)).toHaveLength(1);
+  });
+
+  test('ST5_리뷰 고침 L8_끼운 쉬기가 던져도 반복은 거부로 끝나지 않고 이어 돈다(다음 틱이 돌고 stop이 거부 없이 끝난다)', async () => {
+    const w = world({ [EV_A]: [] });
+    let thrown = 0;
+    const r = w.relay({
+      sleep: (ms, signal) => {
+        if (thrown === 0) {
+          thrown += 1;
+          return Promise.reject(Object.assign(new Error('sleep boom'), { name: 'SleepError' }));
+        }
+        return w.sleep(ms, signal);
+      },
+    });
+    r.start();
+    await runUntil(w, () => w.calls.events >= 2);
+    expect(thrown).toBe(1);
+    expect(w.calls.events).toBeGreaterThanOrEqual(2);
+    await expect(r.stop()).resolves.toBeUndefined();
   });
 });

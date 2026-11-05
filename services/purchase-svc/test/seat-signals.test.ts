@@ -139,6 +139,57 @@ describe('PromSeatSignals(seat_hold_deferred_total, PRF-143)', () => {
   });
 });
 
+/** 노출 글에서 이름이 name인 카운터 표본을 '{이름표 이름들} {이름표 값들} {값}'으로(이름표 차례와 관계없이) */
+function namedSamples(text: string, name: string): string[] {
+  return text
+    .split('\n')
+    .filter((l) => l.startsWith(`${name}{`))
+    .map((l) => {
+      const labels = Object.fromEntries([...l.matchAll(/(\w+)="([^"]*)"/g)].map((m) => [m[1]!, m[2]!]));
+      const keys = Object.keys(labels).sort();
+      return `${keys.join(',')} ${keys.map((k) => labels[k]).join('/')} ${l.slice(l.lastIndexOf(' ') + 1)}`;
+    })
+    .sort();
+}
+
+describe('PromSeatSignals(좌석 Stream 릴레이 지표 seat_stream_relay_*, PRF-164)', () => {
+  test('ST5_ register가 릴레이 지표 셋도 붙인다: sent는 seat_stream_relay_sent_total{topic}을 n만큼, dropped는 seat_stream_relay_dropped_total{reason}을, failed는 seat_stream_relay_failures_total{stage}을 1씩 올린다(이름표는 그 하나뿐, 회차 이름표 없음) [ASVS v5.0.0-16.2.5]', async () => {
+    const metrics = new PlatformMetrics('purchase-svc');
+    const s = new PromSeatSignals().register(metrics.registry);
+    s.sent('trade.seats', 3);
+    s.sent('trade.seats', 2);
+    s.sent('trade.purchase-sessions', 1);
+    s.dropped('unmapped_seat');
+    s.dropped('unmapped_seat');
+    s.dropped('malformed');
+    s.dropped('unknown_type');
+    s.failed('read');
+    s.failed('publish');
+    s.failed('publish');
+    s.failed('ack');
+    const text = await metrics.registry.metrics();
+    expect(namedSamples(text, 'seat_stream_relay_sent_total')).toEqual(['topic trade.purchase-sessions 1', 'topic trade.seats 5']);
+    expect(namedSamples(text, 'seat_stream_relay_dropped_total')).toEqual(['reason malformed 1', 'reason unknown_type 1', 'reason unmapped_seat 2']);
+    expect(namedSamples(text, 'seat_stream_relay_failures_total')).toEqual(['stage ack 1', 'stage publish 2', 'stage read 1']);
+    for (const name of ['seat_stream_relay_sent_total', 'seat_stream_relay_dropped_total', 'seat_stream_relay_failures_total']) {
+      expect(text, name).toContain(`# TYPE ${name} counter`);
+    }
+  });
+
+  test('ST5_ 붙이기 전에도 sent·dropped·failed는 던지지 않고, 두 번 만든 신호가 서로의 레지스트리를 더럽히지 않는다', async () => {
+    const loose = new PromSeatSignals();
+    expect(() => loose.sent('trade.seats', 1)).not.toThrow();
+    expect(() => loose.dropped('malformed')).not.toThrow();
+    expect(() => loose.failed('read')).not.toThrow();
+    const m = new PlatformMetrics('purchase-svc');
+    const b = new PromSeatSignals().register(m.registry);
+    b.sent('trade.seats', 4);
+    const text = await m.registry.metrics();
+    expect(namedSamples(text, 'seat_stream_relay_sent_total')).toEqual(['topic trade.seats 4']);
+    expect(namedSamples(text, 'seat_stream_relay_failures_total')).toEqual([]);
+  });
+});
+
 // ---- HoldSeats가 503으로 미룰 때(hold-seats.test.ts의 조립을 줄여 옮김) ----
 
 const NOW = Date.parse('2026-11-04T03:00:00.000Z');

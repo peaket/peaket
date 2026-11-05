@@ -148,7 +148,7 @@ export {
   type SagaStepOutcome,
 } from './domain/saga.js';
 export { jsonOrderEventCodec, TRADE_ORDERS_TOPIC } from './adapters/order-events.js';
-export { LoggerOrderLog, LoggerSagaLog } from './adapters/order-log.js';
+export { LoggerOrderLog, LoggerPaymentResultLog, LoggerSagaLog } from './adapters/order-log.js';
 export { PromOrderSignals } from './adapters/prom-order-signals.js';
 export { bookingRestrictionKey, MemoryBookingRestrictions, RedisBookingRestrictions } from './adapters/redis-booking-restrictions.js';
 export {

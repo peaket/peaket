@@ -8,11 +8,17 @@
 // 구매 세션은 좌석 Redis의 s:jti·s:session과 서버 고정 ECDH 개인키(PEAKET_PURCHASE_ECDH_KEY)로 확인한다(BUILD_ORDER PRF-136). 입장 토큰은 공개키 묶음
 // (PEAKET_ADMISSION_JWKS)과 발급자(PEAKET_ADMISSION_ISSUER)로 확인하고, 스냅샷 API가 입장 토큰의 첫 사용에 구매 세션을 연다(PRF-137).
 // 좌석맵 판은 환경 값 PEAKET_SEATMAP_DIR 폴더의 {eventId}.json이다(docs/features/seat-hold.md §2 '운영 좌석맵 판'). 30초 [가정]마다 읽은 회차를 다시 읽는다.
+// purchase DB가 있으면 Kafka 소비자 둘(결제 결과 반영 trade.payments·홀드 원장 적재 trade.seats, BUILD_ORDER PRF-164, src/consumers.ts)을 듣기 시작한 뒤 켠다.
+// 두 소비자는 핫패스 풀과 따로 소비자 전용 일반 풀(연결 4개 [가정], purchase-svc-consumers)을 쓴다(밀린 사건을 한꺼번에 처리해도 홀드·주문 요청이 풀 대기 초과를 받지 않게).
+// 브로커 주소(PEAKET_KAFKA_BROKERS)가 없으면 local·ci만 소비자 없이 뜨고(시작 로그 경고), 그 밖의 환경은 시작하지 않는다. SIGTERM에서는 소비자를 가장 먼저 멈춘다.
+// 오류 로그에는 플랫폼 errorSummary(이름·글, 쿼리 매개변수 값은 뺀다)만 싣는다.
+// 좌석 Stream 릴레이·다시 만들기 반복·정비 일은 이 파일이 아니라 릴레이 프로세스(src/relay.ts, purchase-svc-outbox-relay 배포)가 돈다.
 // HoldAttempt 보내기(BAS-030)는 아직 없어 시도 기록은 버린다.
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
-import { CircuitBreaker, createDatabase, createHotRedis, createService, systemClock } from '@peaket/platform';
+import { CircuitBreaker, createDatabase, createHotRedis, createService, type Database, errorSummary, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
+import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
 import {
   type BookingModuleDeps,
   CONSENT_VERSION_ENV,
@@ -39,7 +45,9 @@ import {
   unavailableIdentityRecheck,
 } from './modules/booking/index.js';
 import {
+  DrizzleSeatHoldLedger,
   DrizzleSeatSales,
+  EndPurchaseSession,
   ExpirySweeper,
   FileSeatMapSource,
   LayoutSeatMap,
@@ -110,8 +118,8 @@ const identityLate: { recheck?: IdentityRecheck; contactRefs?: ContactRefs } = {
 const orderStore = new DrizzleOrderStore({ clock: systemClock });
 let sagaRunner: OrderSagaRunner | undefined;
 // - 결제 결과 long polling(GET /v1/orders/{orderId}/payment-status, PRF-166): 읽기는 같은 핫패스 풀(쓰기 인스턴스), 기다림 표는 이 파드 하나다.
-//   Saga 실행기의 onOrderChanged에 그 notify를 넘긴다(같은 파드가 주문을 바로 답할 상태로 바꾸면 곧바로 깨운다). 결제 결과 처리기(ApplyPaymentResult)는
-//   아직 이 시작 파일이 조립하지 않는다(trade.payments 소비자를 켤 때 같은 notify를 onOrderChanged로 넘긴다). 그 전에는 다른 파드의 반영처럼 묶음 조회가 깨운다.
+//   Saga 실행기와 결제 결과 처리기(ApplyPaymentResult, trade.payments 소비자, PRF-164)의 onOrderChanged에 그 notify를 넘긴다(같은 파드가 주문을 바로 답할 상태로
+//   바꾸면 곧바로 깨운다). 다른 파드가 반영한 주문은 묶음 조회가 깨운다.
 //   기다림 표는 듣기 시작한 뒤 200ms 반복을 켜고, SIGTERM에서 Saga 실행기와 함께 끈다(남은 기다림은 STOPPED로 깨어 다시 읽지 않고 마지막 본문으로 답한다)
 const paymentStatusReads = database ? new DrizzlePaymentStatus({ database }) : undefined;
 const paymentStatusWaiters = paymentStatusReads ? new PaymentStatusWaitTable({ reads: paymentStatusReads, clock: systemClock, signals: orderSignals }) : undefined;
@@ -197,6 +205,44 @@ if (booking && database) {
     ...(paymentStatusWaiters ? { onOrderChanged: (orderId: string) => paymentStatusWaiters.notify(orderId) } : {}),
   });
 }
+// Kafka 소비자 둘(BUILD_ORDER PRF-164, docs/features/seat-hold.md §6 '릴레이 프로세스와 조립의 첫 구현'): purchase DB(와 Saga 실행기·결제 결과 기다림 표)가 있을 때만
+// 설정을 읽는다(DB 없이 뜨는 동작은 그대로다). 브로커 주소가 없으면 local·ci만 경고 한 줄로 끄고, 그 밖의 환경은 여기서 던진다(시작 실패, 듣기 전).
+// 소비자를 켤 때만 소비자 전용 일반 풀(consumerDatabaseOptions)을 만들어 원장 적재·결제 결과 반영(결과·판매 저장소)·보류 표에 쓰고, 종료 때 닫는다(리뷰 고침 M4).
+// 결제 결과 반영은 paymentResultApply로 조립한다(test-int/consumers.int.test.ts와 같은 함수. onOrderChanged = 이 파드의 기다림 표 notify, 필수)
+let consumerOptions: PurchaseConsumersOptions | undefined;
+let consumerDatabase: Database | undefined;
+if (databaseUrl && database && sagaRunner && paymentStatusWaiters) {
+  const kafka = kafkaConsumersFromEnv(process.env, SERVICE);
+  if (!kafka.enabled) service.logger.warn({ dep: 'kafka' }, kafka.warning);
+  else {
+    const consumerDb = createDatabase(consumerDatabaseOptions(databaseUrl));
+    consumerDatabase = consumerDb;
+    const applyPaymentResult = paymentResultApply({
+      database: consumerDb,
+      store: orderStore,
+      sessions: {
+        end: new EndPurchaseSession({ store: sessionStore, ended: new RedisSessionEndedLog(redis), clock: systemClock, signals, logger: service.logger }),
+        store: sessionStore,
+      },
+      saga: sagaRunner,
+      logger: service.logger,
+      clock: systemClock,
+      onOrderChanged: (orderId) => paymentStatusWaiters.notify(orderId),
+    });
+    consumerOptions = {
+      env: kafka.env,
+      brokers: kafka.brokers,
+      // client.id는 <작업자>-<환경>-<파드>(docs/streaming.md §2.6). 파드는 만료 임대 값(HOSTNAME 앞 57자 + 무작위)이다
+      clientId: `${SERVICE}-${kafka.env}-${podId}`,
+      auth: kafka.auth,
+      database: consumerDb,
+      ledger: new DrizzleSeatHoldLedger(consumerDb),
+      applyPaymentResult,
+      registry: service.metrics.registry,
+      logger: service.logger,
+    };
+  }
+}
 await service.listen();
 const sweeper = service.app.get(ExpirySweeper);
 sweeper.start();
@@ -207,29 +253,45 @@ const sessionSweeper = service.app.get(SessionSweeper);
 sessionSweeper.start();
 const seatMapRefresh = setInterval(() => void seatMap.refresh(), SEATMAP_REFRESH_MS);
 seatMapRefresh.unref();
+// Kafka 소비자 둘(PRF-164)을 듣기 시작한 뒤 켠다. 연결·구독이 실패하면 오류 한 줄 뒤 SIGTERM과 같은 차례로 끝내고 종료 코드 1로 나간다
+// (구현에서 정한 것: 소비자 없이 준비 상태로 남지 않게. 쿠버네티스가 다시 띄운다)
+const consumers = consumerOptions ? startPurchaseConsumers(consumerOptions) : undefined;
+consumers?.started.catch((err: unknown) => {
+  service.logger.error({ dep: 'kafka', err: errorSummary(err) }, 'Kafka 소비자를 켜지 못해 purchase-svc를 끝낸다');
+  process.exitCode = 1;
+  shutdown();
+});
 
-process.once('SIGTERM', () => {
+let closing = false;
+function shutdown(): void {
+  if (closing) return;
+  closing = true;
   // 좌석맵 판 다시 읽기를 멈추고, 만료 반복을 멈추고(돌던 틱을 기다린다) 서비스를 닫은 뒤 연결을 닫는다. 어느 단계가 실패해도 연결은 닫는다
   clearInterval(seatMapRefresh);
+  // Kafka 소비자를 가장 먼저 멈춘다(받기를 멈추고 처리 중인 키를 마친 뒤 커밋하고 나간다). 그 뒤에 Saga 실행기·기다림 표를 멈춘다(처리 중인 결제 결과가 그 둘을 깨운다)
   // Saga 실행기도 함께 멈춘다(돌던 틱·kick을 기다린다. 멈춘 뒤의 접수 깨우기는 부르지 않고, 남은 작업은 다른 파드의 폴링이 줍는다)
   // 결제 결과 기다림 표도 멈춘다(돌던 묶음 조회를 기다리고 남은 기다림을 STOPPED로 깨운다. 그 요청들은 다시 읽지 않고 마지막 본문으로 곧바로 답한다)
-  void Promise.all([sweeper.stop(), sessionSweeper.stop(), sagaRunner?.stop(), paymentStatusWaiters?.stop()])
+  void (consumers?.stop() ?? Promise.resolve())
+    .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'))
+    .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), sagaRunner?.stop(), paymentStatusWaiters?.stop()]))
     .then(() => service.close())
-    .catch((err: unknown) => service.logger.error({ err }, 'purchase-svc 종료 실패'))
+    .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'purchase-svc 종료 실패'))
     .finally(() => {
       // 서비스를 닫은 뒤(새 요청이 없다) identity-svc·payment-svc 클라이언트와 차단기를 닫는다
       try {
         identity?.close();
         for (const b of identityBreakers) b.shutdown();
       } catch (err) {
-        service.logger.error({ err }, 'identity-svc 클라이언트 닫기 실패');
+        service.logger.error({ err: errorSummary(err) }, 'identity-svc 클라이언트 닫기 실패');
       }
       try {
         payment?.close();
         paymentBreaker?.shutdown();
       } catch (err) {
-        service.logger.error({ err }, 'payment-svc 클라이언트 닫기 실패');
+        service.logger.error({ err: errorSummary(err) }, 'payment-svc 클라이언트 닫기 실패');
       }
-      return Promise.all([redis.close(), database?.close()]);
+      // 소비자 전용 풀은 소비자를 멈춘 뒤라 쓰는 연결이 없다
+      return Promise.all([redis.close(), database?.close(), consumerDatabase?.close()]);
     });
-});
+}
+process.once('SIGTERM', shutdown);

@@ -641,6 +641,46 @@ export interface SeatEventRetire {
   retireEvent(input: { eventId: string; saleEndMs: number }): Promise<RetireResult>;
 }
 
+/** 판매 회차 목록의 회차 하나(BUILD_ORDER PRF-164, 다시 만들기 반복이 본다) */
+export interface SaleEvent {
+  /** 회차 ID(KEY_PART 모양) */
+  eventId: string;
+  /** 판매 종료 시각(epoch ms, 좌석맵 판의 saleEndsAt = EventSeatConfig.saleEndsAtMs) */
+  saleEndsAtMs: number;
+}
+
+/**
+ * 다시 만들기 반복(SeatRebuildLoop)이 볼 회차 목록(BUILD_ORDER PRF-164, docs/features/seat-hold.md §6 '릴레이 프로세스와 조립의 첫 구현' 다시 만들기 반복).
+ * 운영 구현은 SeatMapEventCatalog(좌석맵 판 폴더 PEAKET_SEATMAP_DIR의 회차와 그 판의 판매 종료)다. 판매 시작 시각은 아직 모른다(회차 설정은 LCH-080).
+ * 전체 유실 뒤에는 좌석 Redis의 회차 목록 s:ctl:events도 사라지므로 좌석 Redis가 아닌 곳에서 읽는다
+ */
+export interface SaleEventCatalog {
+  /**
+   * 회차들(겹침 없음). 판 파일을 읽지 못한 회차(없음·모양 틀림·입출력 오류)는 목록에 넣지 않는다(던지지 않는다).
+   * @throws Error 목록 자체를 읽지 못함(폴더를 읽지 못함 등)
+   */
+  list(): Promise<SaleEvent[]>;
+}
+
+/**
+ * 판매를 연 기록(BUILD_ORDER PRF-164 리뷰 고침 M3, docs/features/seat-hold.md §6 '릴레이 프로세스와 조립의 첫 구현' 다시 만들기 반복). 기록은 purchase DB
+ * seat_rebuild의 그 회차 행이다: 판매 열기를 부르는 쪽(LCH-080)이 판매 열기 전에 판 번호 1로 넣고, 다시 만들기가 한 번이라도 돈 회차도 행이 있다.
+ * 다시 만들기 반복은 기록이 있는 회차만 다시 만든다(판매 열기 전의 NOT_READY 막음을 지우지 않고, 세대 키의 node·비트맵 길이·판 번호 1을 판매 열기가 쓰게 둔다).
+ * 운영 구현은 DrizzleSeatRebuildSource다
+ */
+export interface SeatRebuildMarks {
+  /**
+   * 그 회차들 가운데 기록이 있는 회차(겹친 ID는 하나로). 빈 목록이면 DB를 부르지 않고 빈 모음이다
+   * @throws RangeError 회차 ID가 소문자 UUID가 아님(DB를 부르기 전) · Error purchase DB 오류
+   */
+  opened(eventIds: readonly string[]): Promise<ReadonlySet<string>>;
+  /**
+   * 기록을 넣는다(판 번호 1, 임대 없음). 이미 행이 있으면(다시 불렀거나 다시 만들기가 돌았음) 아무것도 바꾸지 않는다. 판매 열기 전에 부른다
+   * @throws RangeError 회차 ID가 소문자 UUID가 아님(DB를 부르기 전) · Error purchase DB 오류
+   */
+  markOpened(eventId: string): Promise<void>;
+}
+
 /** 다시 만들기의 purchase DB 쪽(BUILD_ORDER PRF-143). 운영 구현은 DrizzleSeatRebuildSource다 */
 export interface SeatRebuildSource {
   /** 임대를 잡으면서 판 번호를 올려 커밋한다(한 문장). 다른 파드가 임대 중이면 null. 돌려주는 값은 올린 판 번호 */

@@ -1,7 +1,7 @@
 // 좌석 Redis 다시 만들기 RB-06(BUILD_ORDER PRF-143, docs/features/seat-hold.md §6 '다시 만들기(RB-06)의 첫 구현', 명세 specs/seat.qnt rebuild).
 // 차례: 세대 키가 있으면 READY → purchase DB 임대를 잡으며 판 번호를 올려 커밋(못 잡으면 BUSY) → 시작 Lua(begin: 앞 시도의 bitmap·만료 인덱스를 지우고 rebuild 키 = gen) →
 // 판매·원장 홀드·판매 좌석 원장 행 읽기 → 좌석맵 판으로 색인 바꾸기 → 좌석 Lua(REBUILD_BATCH석씩) → 보유 수·펜싱 카운터와 세대 키를 마지막에 → 임대 비우기(실패해도 비운다).
-// 어느 Lua든 세대 키가 이미 있으면 READY, rebuild 키의 판 번호가 내 gen이 아니면 STALE로 멈춘다. 부르는 반복(세대 키 없는 판매 중 회차 찾기)과 런북 연결은 PRF-160이다.
+// 어느 Lua든 세대 키가 이미 있으면 READY, rebuild 키의 판 번호가 내 gen이 아니면 STALE로 멈춘다. 부르는 반복(세대 키 없는 판매 중 회차 찾기, SeatRebuildLoop)은 PRF-164이고 런북 RB-06은 그 반복의 지표·로그를 본다.
 //
 // 구현에서 정한 세부(PRF-143, 코드 리뷰로 고침):
 // - 임대를 잡은 뒤 세대 키가 이미 서 있으면(다른 곳이 막 끝내고 임대를 비운 틈) 시작·좌석·끝내기 Lua가 READY와 세대 키의 gen을 돌려준다. 이때 release에

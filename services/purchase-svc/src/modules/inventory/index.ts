@@ -12,6 +12,22 @@ export { BEGIN_REBUILD_LUA, BUMP_EPOCH_LUA, FINISH_REBUILD_LUA, REBUILD_QUOTAS_L
 export { DrizzleSeatRebuildSource } from './adapters/db/drizzle-seat-rebuild.js';
 export { SeatRebuilder, type SeatRebuilderDeps, type SeatRebuilderSignals } from './application/seat-rebuilder.js';
 export {
+  REBUILD_LOOK_AFTER_SALE_END_MS,
+  REBUILD_LOOP_TICK_MS,
+  SeatRebuildLoop,
+  type RebuildLoopReport,
+  type SeatRebuildLoopDeps,
+  type SeatRebuildLoopLogger,
+} from './application/seat-rebuild-loop.js';
+export {
+  RETIRE_SEAT_EVENTS_TASK,
+  retireSeatEventsTask,
+  type RetireSeatEventsDeps,
+  type RetireSeatEventsReport,
+  type RetireSeatEventsTask,
+} from './application/retire-seat-events.js';
+export { SeatMapEventCatalog, type SeatMapEventCatalogDeps } from './adapters/seat-map-event-catalog.js';
+export {
   maxTokenOf,
   REBUILD_BATCH,
   REBUILD_LEASE_MS,
@@ -54,7 +70,14 @@ export { RedisPurchaseSessionStore, RedisSessionEndedLog, RedisSessionIndex, Red
 export { RedisSeatStore, SEAT_REDIS, seatKeys } from './adapters/redis-seat-store.js';
 export { RedisSeatStreamSource } from './adapters/redis-seat-stream.js';
 export { KafkaTradeEventPublisher, jsonTradeEventCodec } from './adapters/trade-events.js';
-export { SeatStreamRelay, type RelayEventReport, type RelayTickReport, type SeatStreamRelayDeps, type SeatStreamRelayLogger } from './application/seat-stream-relay.js';
+export {
+  SeatStreamRelay,
+  type RelayEventReport,
+  type RelayTickReport,
+  type SeatStreamRelayDeps,
+  type SeatStreamRelayLogger,
+  type SeatStreamTickGuard,
+} from './application/seat-stream-relay.js';
 export { SNAPSHOT_LUA } from './adapters/snapshot-lua.js';
 export { RedisSweepLeases } from './adapters/redis-sweep-leases.js';
 export { PURCHASE_ECDH_KEY_ENV, ServerEcdhKey, type ServerEcdhJwk } from './adapters/server-ecdh.js';
@@ -297,6 +320,9 @@ export {
   type SeatHoldLedger,
   type SeatPins,
   type RebuildOrderSource,
+  type SaleEvent,
+  type SaleEventCatalog,
+  type SeatRebuildMarks,
   type SeatRebuildSource,
   type SeatRebuildTarget,
   type SeatSales,

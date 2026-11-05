@@ -773,6 +773,35 @@ describe('FileSeatMapSource: 폴더의 {eventId}.json을 읽는다', () => {
       expect(await src.load(bad), JSON.stringify(bad)).toBeUndefined();
     }
   });
+
+  // ── list(BUILD_ORDER PRF-164, 다시 만들기 반복의 회차 목록 SeatMapEventCatalog가 쓴다) ──
+  test('ST26_list는 폴더의 {회차 ID}.json에서 .json을 뗀 회차 ID들을 이름 오름차순(문자 코드 순)으로 준다. 파일 내용은 읽지 않는다(JSON이 아니어도 목록에 든다) [S-T26]', async () => {
+    const src = new FileSeatMapSource(dir);
+    const ids = ['b', 'a_1', 'a1', 'a-1', '0190f3a1-7c2e-7a00-8000-0000000000e1', 'x'.repeat(64)];
+    for (const id of ids) await writeFile(join(dir, `${id}.json`), JSON.stringify(validFile()), 'utf8');
+    await writeFile(join(dir, 'broken.json'), '{ not json', 'utf8');
+    // 문자 코드 순: '-'(45) < '1'(49) < '_'(95) < 'b'(98). localeCompare 차례가 아니다
+    expect(await src.list()).toEqual(['0190f3a1-7c2e-7a00-8000-0000000000e1', 'a-1', 'a1', 'a_1', 'b', 'broken', 'x'.repeat(64)]);
+  });
+
+  test('ST26_list는 KEY_PART 모양이 아닌 이름·다른 확장자(대문자 .JSON 포함)·하위 폴더(이름이 .json이어도)·하위 폴더 안 파일·폴더 밖 파일을 뺀다 [ASVS v5.0.0-1.2.4]', async () => {
+    const src = new FileSeatMapSource(dir);
+    const body = JSON.stringify(validFile());
+    await writeFile(join(dir, 'ev-1.json'), body, 'utf8');
+    await writeFile(join(root, 'outside.json'), body, 'utf8'); // 폴더 밖
+    await mkdir(join(dir, 'sub'));
+    await writeFile(join(dir, 'sub', 'nested.json'), body, 'utf8'); // 하위 폴더 안
+    await mkdir(join(dir, 'folder.json')); // 이름이 .json인 하위 폴더
+    for (const name of ['.json', `${'x'.repeat(65)}.json`, 'a.b.json', 'ev 1.json', 'é.json', 'ev-2.JSON', 'ev-3.Json', 'ev-4.json.bak', 'ev-5.txt', 'ev-6', 'README']) {
+      await writeFile(join(dir, name), body, 'utf8');
+    }
+    expect(await src.list()).toEqual(['ev-1']);
+  });
+
+  test('ST26_list는 빈 폴더면 []이고, 폴더가 없으면(ENOENT) 던진다 [ASVS v5.0.0-16.5.2]', async () => {
+    expect(await new FileSeatMapSource(dir).list()).toEqual([]);
+    await expect(new FileSeatMapSource(join(root, 'missing')).list()).rejects.toThrow();
+  });
 });
 
 // ── (d) MemorySeatMap.sections ─────────────────────────────────────────────────────────────────────────────────

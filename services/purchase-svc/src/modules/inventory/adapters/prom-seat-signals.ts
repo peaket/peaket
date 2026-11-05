@@ -4,8 +4,9 @@
 import { Counter, Gauge, type Registry } from '@peaket/platform';
 import type { SweepOutcome } from '../domain/expiry.js';
 import type { SeatLuaErrorCode, SeatLuaScript } from '../domain/lua-errors.js';
-import type { SeatSignals } from '../domain/ports.js';
+import type { SeatSignals, SeatStreamRelaySignals } from '../domain/ports.js';
 import type { SessionEndReason } from '../domain/purchase-session.js';
+import type { StreamDropReason, TradeTopic } from '../domain/seat-event.js';
 
 /**
  * SeatSignals(와 다시 만들기의 SeatRebuilderSignals)의 Prometheus 구현. 이름표에 회차 ID·계정 ID·키 이름을 달지 않는다.
@@ -16,8 +17,11 @@ import type { SessionEndReason } from '../domain/purchase-session.js';
  * - seat_hold_deferred_total{reason}(카운터, reason은 not_ready·store_unavailable): 홀드 요청을 503으로 미룰 때마다 1(BUILD_ORDER PRF-143)
  * - seat_rebuild_total{result}(카운터, result는 rebuilt·ready·busy·failed): 다시 만들기(RB-06) 한 회차의 결과마다 1(BUILD_ORDER PRF-143).
  *   rebuilt 메서드가 application/seat-rebuilder.ts의 SeatRebuilderSignals 모양이라 SeatRebuilder의 signals로 그대로 넘긴다(어댑터가 응용 층을 가져오지 않게 implements는 달지 않는다)
+ * - 좌석 Stream 릴레이(SeatStreamRelaySignals, BUILD_ORDER PRF-164: 릴레이 프로세스가 이 클래스를 relay 레지스트리에 붙여 SeatStreamRelay의 signals로 넘긴다):
+ *   seat_stream_relay_sent_total{topic}(카운터, topic은 TradeTopic의 값만), seat_stream_relay_dropped_total{reason}(카운터, reason은 StreamDropReason의 값만),
+ *   seat_stream_relay_failures_total{stage}(카운터, stage는 read·publish·ack). 이름·뜻은 docs/observability.md. register()가 다른 지표와 함께 붙인다
  */
-export class PromSeatSignals implements SeatSignals {
+export class PromSeatSignals implements SeatSignals, SeatStreamRelaySignals {
   readonly #luaErrors = new Counter({
     name: 'seat_lua_errors_total',
     help: '좌석 Lua 오류·NOT_READY 수(script: hold·expire, code: CORRUPT_KEY·KEEP_UNTIL_PAST·FENCE_OVERFLOW·OOM·NOT_READY·OTHER)',
@@ -31,9 +35,30 @@ export class PromSeatSignals implements SeatSignals {
   readonly #deferred = new Counter({ name: 'seat_hold_deferred_total', help: '503으로 미룬 홀드 요청 수(reason: not_ready·store_unavailable)', labelNames: ['reason'] as const, registers: [] });
   readonly #rebuilds = new Counter({ name: 'seat_rebuild_total', help: '좌석 Redis 다시 만들기(RB-06) 결과 수(result: rebuilt·ready·busy·failed)', labelNames: ['result'] as const, registers: [] });
 
-  /** 지표를 registry에 붙이고 자신을 돌려준다(main.ts가 service.metrics.registry로 한 번 부른다) */
+  readonly #relaySent = new Counter({
+    name: 'seat_stream_relay_sent_total',
+    help: '좌석 Redis Stream 릴레이가 Kafka 확인을 받아 지운 항목 수(topic: trade.seats·trade.purchase-sessions)',
+    labelNames: ['topic'] as const,
+    registers: [],
+  });
+  readonly #relayDropped = new Counter({
+    name: 'seat_stream_relay_dropped_total',
+    help: '보낼 수 없어 확인해 넘긴 좌석 Stream 항목 수(reason: unknown_type·malformed·unmapped_seat)',
+    labelNames: ['reason'] as const,
+    registers: [],
+  });
+  readonly #relayFailures = new Counter({
+    name: 'seat_stream_relay_failures_total',
+    help: '좌석 Stream 릴레이가 실패한 틱 수(stage: read·publish·ack)',
+    labelNames: ['stage'] as const,
+    registers: [],
+  });
+
+  /** 지표를 registry에 붙이고 자신을 돌려준다(main.ts가 service.metrics.registry로, 릴레이 프로세스가 relay 레지스트리로 한 번 부른다) */
   register(registry: Registry): this {
-    for (const m of [this.#luaErrors, this.#lag, this.#ticks, this.#sessionEnds, this.#deferred, this.#rebuilds]) registry.registerMetric(m);
+    for (const m of [this.#luaErrors, this.#lag, this.#ticks, this.#sessionEnds, this.#deferred, this.#rebuilds, this.#relaySent, this.#relayDropped, this.#relayFailures]) {
+      registry.registerMetric(m);
+    }
     return this;
   }
 
@@ -65,5 +90,20 @@ export class PromSeatSignals implements SeatSignals {
   /** seat_rebuild_total{result}을 1 올린다(SeatRebuilderSignals). 던지지 않는다 */
   rebuilt(result: 'rebuilt' | 'ready' | 'busy' | 'failed'): void {
     this.#rebuilds.inc({ result });
+  }
+
+  /** seat_stream_relay_sent_total{topic}을 n 올린다(SeatStreamRelaySignals). 던지지 않는다 */
+  sent(topic: TradeTopic, n: number): void {
+    this.#relaySent.inc({ topic }, n);
+  }
+
+  /** seat_stream_relay_dropped_total{reason}을 1 올린다(SeatStreamRelaySignals). 던지지 않는다 */
+  dropped(reason: StreamDropReason): void {
+    this.#relayDropped.inc({ reason });
+  }
+
+  /** seat_stream_relay_failures_total{stage}을 1 올린다(SeatStreamRelaySignals). 던지지 않는다 */
+  failed(stage: 'read' | 'publish' | 'ack'): void {
+    this.#relayFailures.inc({ stage });
   }
 }

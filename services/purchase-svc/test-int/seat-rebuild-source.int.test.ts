@@ -375,6 +375,41 @@ describe('코드 리뷰 재현(PRF-143)', () => {
   });
 });
 
+describe('판매를 연 기록 opened·markOpened(BUILD_ORDER PRF-164 리뷰 고침 M3, docs/features/seat-hold.md §6 다시 만들기 반복)', () => {
+  test('ST26_리뷰 고침 M3_markOpened는 그 회차 행을 판 번호 1·임대 없음으로 넣고, 다시 불러도(이미 행이 있어도) 아무것도 바꾸지 않는다. 그 뒤 다시 만들기의 임대는 판 번호 2를 받는다 [S-T26] [ASVS v5.0.0-15.4.2]', async () => {
+    const e = uuidv7(systemClock);
+    expect(await rebuildRow(e)).toBeNull();
+    await podA.markOpened(e);
+    expect(await rebuildRow(e)).toEqual({ gen: 1, holder: null, leaseUntilMs: null });
+    await podB.markOpened(e);
+    expect(await rebuildRow(e)).toEqual({ gen: 1, holder: null, leaseUntilMs: null });
+    // 판매 열기 뒤 전체 유실: 다시 만들기(acquire)가 판 번호를 2로 올린다(세대 키 판 번호 1의 다음)
+    expect(await podA.acquire(e, 'pod-a')).toBe(2);
+    // 다시 만들기가 돈 회차(임대 중·판 번호 2)에 늦게 온 markOpened는 판 번호·임대를 되돌리지 않는다
+    const leased = await rebuildRow(e);
+    await podB.markOpened(e);
+    expect(await rebuildRow(e)).toEqual(leased);
+  });
+
+  test('ST26_리뷰 고침 M3_opened는 행이 있는 회차만 모아 준다(겹친 ID는 하나로, 다시 만들기가 넣은 행도 기록이다). 빈 목록이면 DB를 부르지 않고 빈 모음이다. 회차 ID가 소문자 UUID가 아니면 DB를 부르기 전에 RangeError [S-T26]', async () => {
+    const [marked, rebuilt, none] = [uuidv7(systemClock), uuidv7(systemClock), uuidv7(systemClock)];
+    await podA.markOpened(marked);
+    // 판매를 연 기록 없이 다시 만들기만 돈 회차(이 단계 전의 행)도 행이 있으면 연 것으로 본다
+    expect(await podA.acquire(rebuilt, 'pod-a')).toBe(2);
+    await podA.release(rebuilt, 'pod-a');
+    const got = await podB.opened([marked, none, rebuilt, marked]);
+    expect([...got].sort()).toEqual([marked, rebuilt].sort());
+    expect(await podB.opened([none])).toEqual(new Set());
+
+    // 빈 목록·모양 틀림은 DB에 가지 않는다(부르면 던지는 DB로 본다)
+    const explode = { db: { execute: () => Promise.reject(new Error('DB를 불렀다')) } } as unknown as Database;
+    const offline = new DrizzleSeatRebuildSource(explode);
+    await expect(offline.opened([])).resolves.toEqual(new Set());
+    await expect(offline.opened([marked, 'EVT-1'])).rejects.toBeInstanceOf(RangeError);
+    await expect(offline.markOpened(marked.toUpperCase())).rejects.toBeInstanceOf(RangeError);
+  });
+});
+
 describe('ledgerRows: 그 회차·그 좌석들의 원장 행 전부(BUILD_ORDER PRF-167 리뷰 고침 M2)', () => {
   test('ST26_그 좌석들의 행을 상태·holdId·만료와 상관없이 좌석·holdId·상태·토큰으로 준다(좌석 ID 1,000개 넘게·겹친 ID도). 다른 좌석·다른 회차는 빠지고, 좌석 0개면 DB를 부르지 않고 []다 [S-T26]', async () => {
     const e = uuidv7(systemClock);

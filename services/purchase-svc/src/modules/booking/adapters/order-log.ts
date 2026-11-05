@@ -1,7 +1,7 @@
 // 주문 생성의 보안·설정 로그를 서비스 로거(platform PlatformLogger)에 한 줄씩 남기는 어댑터(OrderLog, ADR-0055, BUILD_ORDER PRF-161).
 // 번호 원문·토큰·pid는 싣지 않는다. 대체 판정은 warn(보안 로그), 설정 오류는 error(kind config, 재확인 설정 오류는 SEV2)다.
 import type { PlatformLogger } from '@peaket/platform';
-import type { AcceptLog, OrderLog, SagaLog } from '../domain/ports.js';
+import type { AcceptLog, OrderLog, PaymentResultLog, SagaLog } from '../domain/ports.js';
 
 /**
  * - identityFallback: warn 한 줄 { kind: 'security', event: 'identity_recheck_fallback', accountId, reason, passed, idempotencyKey }
@@ -107,6 +107,39 @@ export class LoggerSagaLog implements SagaLog {
       this.logger.error({ event: 'order_saga_step_error', orderId: e.orderId, step: e.step, err: errorSummaryOf(e.err) }, 'Saga 단계가 예상 밖 오류로 끝나 다시 하기로 미뤘다');
     } catch {
       // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+}
+
+/**
+ * 결제 결과 반영 로그(PaymentResultLog, BUILD_ORDER PRF-164가 trade.payments 소비자를 붙이며 만든다, docs/features/payment.md §2 '결제 결과 반영의 첫 구현').
+ * 결제 참조·금액·토큰은 싣지 않는다(받은 객체를 펼치지 않고 칸을 하나씩 고른다). 로거가 던져도 삼킨다(처리기를 막지 않는다).
+ * 같은 사건·까닭을 시간 창 안에서 한 번만 부르는 일은 ApplyPaymentResult가 한다(PAYMENT_RESULT_HELD_LOG_WINDOW_MS). 이 어댑터는 받은 대로 한 줄씩 남긴다.
+ * - held: error 한 줄 { kind: 'payment-result-held', orderId, type, pg, reason, severity, holdKind?(e.kind가 있을 때만) }
+ * - afterCommitFailed: warn 한 줄 { kind: 'payment-result', event: 'after_commit_failed', orderId, what, errorName }
+ */
+export class LoggerPaymentResultLog implements PaymentResultLog {
+  constructor(private readonly logger: Pick<PlatformLogger, 'warn' | 'error'>) {}
+
+  held(e: Parameters<PaymentResultLog['held']>[0]): void {
+    // 칸을 하나씩 골라 싣는다(받은 객체를 펼치지 않아 결제 참조·토큰·금액·사건 키가 섞여 들지 않게). 표시(kind)는 있을 때만 holdKind로
+    const line: Record<string, unknown> = { kind: 'payment-result-held', orderId: e.orderId, type: e.type, pg: e.pg, reason: e.reason, severity: e.severity };
+    if (e.kind !== undefined) line.holdKind = e.kind;
+    try {
+      this.logger.error(line, '결제 결과를 주문에 반영하지 않고 보류한다(RB-11로 원인을 본다)');
+    } catch {
+      // 로그 실패는 처리기를 막지 않는다
+    }
+  }
+
+  afterCommitFailed(e: Parameters<PaymentResultLog['afterCommitFailed']>[0]): void {
+    try {
+      this.logger.warn(
+        { kind: 'payment-result', event: 'after_commit_failed', orderId: e.orderId, what: e.what, errorName: e.errorName },
+        '결제 결과를 반영한 뒤 구매 세션 일을 하지 못했다(반영은 그대로다)',
+      );
+    } catch {
+      // 로그 실패는 처리기를 막지 않는다
     }
   }
 }
