@@ -45,7 +45,8 @@ module seat {
   // 내 홀드가 만료돼 좌석이 비었으면 새 펜싱 토큰으로 다시 잡고(보유 수도 다시 셈), 다른 사람이 잡았으면 승인하지 않고 끝낸다.
   // 다시 만들기 판 번호: RB-06이 DB와 세대 키에 함께 올리는 번호다. 결제 접수와 묶기는 그때의 판 번호를 적고, 묶기 Lua는 판 번호가 같을 때만
   // 빈 좌석을 다시 잡으며(다시 만든 뒤의 '빈 좌석'은 잃은 홀드일 수 있다), 판매 예약 커밋은 적은 판 번호가 DB의 지금 판 번호와 같을 때만 한다
-  // (다르면 묶기부터 다시). RB-06은 접수된 주문의 좌석을 묶지 않는다(판매 행과 원장 홀드만 되살린다)
+  // (다르면 묶기부터 다시). RB-06은 접수된 주문의 좌석을 묶음으로 되살리지 않는다: 판매 행은 묶음으로, 적재된 시도의 홀드(만료 전 원장 홀드와,
+  // 주문 pinned_at으로 DB에 남은 묶인 시도의 홀드, BUILD_ORDER PRF-167)는 묶이지 않은 홀드로 되살리고 Saga의 다음 묶기가 다시 묶는다
   const PIN_BEFORE_SALE: bool
   // 정본에 없음(PROGRESS OPEN[16]의 추천안): 펜싱 토큰 = max(카운터 + 1, Redis TIME 마이크로초). 장애 전환 뒤에도 앞서 낸 토큰보다 크다
   // (세대 올리기와 같은 시계 전제, ADR-0121 결정 5). 이 전제를 모형에 그대로 넣으므로, 켜면 토큰 값은 다른 걸음에 영향이 없어
@@ -138,13 +139,16 @@ module seat {
     }
   }
 
-  // 홀드의 만료 시각이 지남(시간이 흐름). 좌석 Redis에 그 홀드가 있거나, 다시 만들기를 기다리는데 원장에 있을 때만 본다
+  // 홀드의 만료 시각이 지남(시간이 흐름). 좌석 Redis에 그 홀드가 있거나, 다시 만들기를 기다리는데 원장에 있을 때만 본다.
+  // 다시 만들기를 기다리는 동안 원장 때문에 시간이 다 되는 갈래는 묶인 시도(PINNED)에 없다(BUILD_ORDER PRF-167, 주문 pinned_at): 묶음은 좌석 Redis만이
+  // 아니라 주문 pinned_at으로 DB에도 남아, 다시 만들기가 원장 만료 시각과 상관없이 그 시도의 좌석을 되살린다(docs/features/seat-hold.md §6 '주문 기준 되살리기').
+  // 좌석 Redis에 그 시도의 묶이지 않은 홀드가 있으면(승격이 묶기 쓰기를 잃었거나, 다시 만들기가 되살린 홀드) 묶인 시도여도 시간이 다 될 수 있다
   action ttlPasses(h: int): bool = {
     val a = att(h)
     val inRed = seatSet(a.seats).exists(x => red.seats.get(x).hid == h)
     all {
       a.seats.length() > 0, not(a.late), a.phase != "SOLD",
-      inRed or (not(red.ready) and db.ledger.contains(h)),
+      inRed or (not(red.ready) and db.ledger.contains(h) and a.phase != "PINNED"),
       not(seatSet(a.seats).exists(x => red.seats.get(x).hid == h and red.seats.get(x).pinned)),
       atts' = atts.set(h, a.with("late", true)),
       redKeep, db' = db, env' = env, ghost' = ghost,
@@ -176,8 +180,9 @@ module seat {
 
   // 묶기 Lua(추천안, OPEN[15]): Saga가 판매 예약 앞에서 부른다. 주문이 적은 판 번호를 받아 세대 키의 판 번호와 견주고, 같을 때만 빈 좌석을
   // 다시 잡는다. 성공하면 지금 판 번호를 돌려주고 Saga가 '묶음'과 함께 적는다. Lua와 그 기록은 실제로 두 걸음이지만 한 걸음으로 둔다:
-  // 그 사이에 전체 유실·다시 만들기가 끼면 기록되는 판 번호가 낡아 판매 예약 커밋의 판 번호 확인이 묶기부터 다시 하게 하고,
-  // 그 사이의 '접수됨' 상태를 읽는 걸음이 없어(다시 만들기는 접수된 주문을 보지 않는다) 빠지는 순서가 없다
+  // 그 사이에 전체 유실·다시 만들기가 끼면 기록되는 판 번호가 낡아 판매 예약 커밋의 판 번호 확인이 묶기부터 다시 하게 한다. 다시 만들기는 묶음 기록
+  // (주문 pinned_at, BUILD_ORDER PRF-167)을 읽으므로 그 사이에 끼면 그 시도는 아직 묶이지 않은 것으로 보인다: 원장 홀드가 만료 전이면 그것으로 되살아나고,
+  // 만료가 지났으면 되살아나지 않아 다음 묶기가 STALE_GEN으로 과금 없이 끝난다(이 모형은 이 갈래를 두지 않는다. 판매가 늘지 않는 쪽이다)
   action pin(h: int): bool = {
     val a = att(h)
     val p = personOf(h)
@@ -312,8 +317,9 @@ module seat {
     atts' = atts, db' = db, ghost' = ghost,
   }
 
-  // RB-06 다시 만들기(seat-hold §6의 5, ADR-0121 결정 6): ① 판매(PENDING·SOLD) ② 원장의 만료 전 HELD 홀드(빈 좌석에만) ③ 보유 수
-  // ④ 세대 키를 마지막에. 추천안(OPEN[15])은 그 앞에 DB의 다시 만들기 판 번호를 올리고 세대 키에 같은 번호를 둔다(정본 그대로의 모듈에서는
+  // RB-06 다시 만들기(seat-hold §6의 5, ADR-0121 결정 6): ① 판매(PENDING·SOLD) ② 적재된(원장에 HELD 사건이 있는) 시도 가운데 시간이 다 되지 않은
+  // 시도의 홀드(빈 좌석에만, 묶이지 않은 홀드로. 운영은 만료 전 원장 홀드와, 주문 pinned_at이 있는 결제 접수 주문의 원장 HELD 행을 만료 시각과 상관없이 본다,
+  // BUILD_ORDER PRF-167) ③ 보유 수 ④ 세대 키를 마지막에. 추천안(OPEN[15])은 그 앞에 DB의 다시 만들기 판 번호를 올리고 세대 키에 같은 번호를 둔다(정본 그대로의 모듈에서는
   // 그 번호를 읽는 걸음이 없어 결과가 같다). 펜싱 카운터는 정본이 다시 쓰지 않는다
   action rebuild: bool = {
     val live = db.ledger.filter(h => not(att(h).late) and Set("HELD", "ACCEPTED", "PINNED", "DONE").contains(att(h).phase))

@@ -5,7 +5,7 @@
 //    내다본 결과, 앞 상태에서 계산한 명세 다음 상태(seat-model/spec.ts, 칸마다)가 지켜진다.
 // ② 경합(fc.scheduler): 운영 코드의 Redis·DB 호출을 보내는 차례를 스케줄러가 섞는다(걸음마다 하네스가 스케줄러를 돌린다, system.ts). 서로 다른 두 시도의 걸음을
 //    함께 돌리는 무작위 순서 한 번(쌍 걸음 수를 단언), 상태를 손으로 만든 집중 시험 셋(시간이 다 된 홀드의 묶기와 만료 반복(갈래별 횟수 단언), 겹치는 두 판매 예약,
-//    마감 초과 묶기 뒤의 실패 해제)과 맞수가 이기는 차례를 고정한 시험. 재현 시험 둘(늦은 묶기, K3)은 PRF-160에 넘긴 것을 고정한다.
+//    마감 초과 묶기 뒤의 실패 해제)과 맞수가 이기는 차례를 고정한 시험. 재현 시험 둘(늦은 묶기, K3)은 PRF-160에 넘긴 것을 고정한다(K3는 PRF-167로 풀렸다).
 // ③ 동작 기록 재생: tools/spec-check traces가 낸 명세 기록을 같은 이름의 동작으로 다시 돌려, 걸음마다 시도·좌석 Redis(주 노드·복제본)·purchase DB가 명세와 같다.
 //    알려진 차이(system.ts KNOWN)가 설명하는 칸만 빼고 견주며, 모든 걸음을 재생해야 한다.
 // 이름 대조는 명령 모음(COMMANDS)의 열쇠와 SPEC_ACTIONS를 견준다(SPEC_ACTIONS와 명세 step의 대조는 CI 형식 검사 tools/spec-check가 한다).
@@ -87,8 +87,8 @@ const setup = (scope: Scope, o: SystemOptions = {}) => async () => {
   const w: World = { s: await make(scope, o) };
   return { model: w, real: w };
 };
-/** 무작위 실행에서 난 알려진 차이 수(K1~K3, 끝에 찍는다) */
-const knownCount: Record<string, number> = { K1: 0, K2: 0, K3: 0 };
+/** 무작위 실행에서 난 알려진 차이 수(K2만 남았다. K1·K3는 PRF-167로 위반 검사가 됐다, 끝에 찍는다) */
+const knownCount: Record<string, number> = { K2: 0 };
 const finish = (s: SeatSystem = last!) => {
   for (const k of s.known) knownCount[k.kind] = (knownCount[k.kind] ?? 0) + 1;
   if (s.violations.length > 0) throw new Error(`불변식 위반:\n${s.violations.join('\n')}`);
@@ -373,7 +373,7 @@ test('VT40_④_재생 중 판매 예약(운영 ReserveTx)에서 판 번호 대�
   expect(out.replayed).toBeLessThan(out.steps);
 }, 120_000);
 
-test('재현_K3(PRF-160에 넘김): 원장 행 없이 다시 만든 판매 좌석은 holdId가 주문 ID라, 승인 거절 뒤 그 홀드의 holdId로 부른 실패 해제가 풀지 못한다', async () => {
+test('재현_K3(PRF-167로 풀림): 원장 행 없이 다시 만든 판매 좌석도 holdId·psid가 그 주문의 것이라, 승인 거절 뒤 그 홀드의 holdId로 부른 실패 해제가 그 좌석을 푼다(알려진 차이 없음)', async () => {
   const scope: Scope = { people: [1], seats: [1], limit: 2, attempts: [[1, 1]], requests: [[1]], maxFailovers: 1, fullLoss: true, promote: false, failRelease: true };
   const s = await make(scope);
   await s.step('hold(11, [1])', () => s.hold(11, [1]));
@@ -392,14 +392,42 @@ test('재현_K3(PRF-160에 넘김): 원장 행 없이 다시 만든 판매 좌�
   await s.step('releaseFailed(11) holdId로', async () => {
     released = await s.releaseFailed(11, s.holdIdOf(11));
   });
-  // 그 홀드의 holdId로는 0석: 판매가 없는데 묶인 좌석이 남는다(만료 인덱스에도 없다)
-  expect(released).toBe(0);
-  expect(s.obs.red.seats[1]).toEqual({ hid: 11, pinned: true });
-  // 하네스의 맞춤(K3): 주문 ID로 한 번 더 부르면 풀린다
+  // 그 홀드의 holdId로 1석을 푼다(다시 만들기가 주문의 hold_id로 썼다). 주문 ID로 한 번 더 부르는 맞춤은 없다
   s.checking = true;
-  await s.step('releaseFailed(11)', () => s.releaseFailed(11));
-  expect(s.known.map((k) => k.kind)).toContain('K3');
+  expect(released).toBe(1);
+  expect(s.obs.red.seats[1]).toEqual({ hid: 0, pinned: false });
+  expect(s.known).toEqual([]);
   expect(s.holding(11)).toBe(false);
+  finish(s);
+});
+
+test('재현_장애 두 번(PRF-167 리뷰 고침 M2): A가 묶은 뒤 승격이 묶기를 잃고, A가 만료돼 EXPIRED가 적재되고 B의 HELD가 적재된 뒤 전체 유실 → 다시 만들기는 B를 되살리고 결제 접수·묶인 주문 A는 되살리지 않는다', async () => {
+  const scope: Scope = { people: [1, 2], seats: [1], limit: 2, attempts: [[1, 1], [2, 1]], requests: [[1]], maxFailovers: 2, fullLoss: true, promote: true, failRelease: true };
+  const s = await make(scope);
+  const fail = async (name: 'replicate' | 'promote' | 'loseAll', f: () => unknown) => {
+    const pre = s.modelState();
+    await f();
+    await s.note(name, pre, { a: name });
+  };
+  await s.step('hold(11, [1])', () => s.hold(11, [1]), undefined, { a: 'hold', h: 11, l: [1] });
+  await s.step('relay(11)', () => s.relay(11), undefined, { a: 'relay', h: 11 });
+  await s.step('accept(11)', () => s.accept(11), undefined, { a: 'accept', h: 11 });
+  await fail('replicate', () => s.replicate());
+  await s.step('pin(11)', () => s.pin(11), undefined, { a: 'pin', h: 11 });
+  expect(s.att(11).phase).toBe('PINNED');
+  // 승격이 묶기(복제 전 쓰기)를 잃었다: 좌석 1은 A의 묶이지 않은 홀드이고, A의 주문에는 pinned_at이 남아 있다
+  await fail('promote', () => s.promote());
+  expect(s.obs.red.seats[1]).toEqual({ hid: 11, pinned: false });
+  await s.step('ttlPasses(11)', () => s.ttlPasses(11), undefined, { a: 'ttlPasses', h: 11 });
+  await s.step('expire(11)', () => s.expire(11), undefined, { a: 'expire', h: 11 });
+  await s.step('hold(21, [1])', () => s.hold(21, [1]), undefined, { a: 'hold', h: 21, l: [1] });
+  // B의 적재가 스트림을 읽으며 A의 EXPIRED도 원장에 적는다
+  await s.step('relay(21)', () => s.relay(21), undefined, { a: 'relay', h: 21 });
+  await fail('loseAll', () => s.loseAll());
+  await s.step('rebuild', () => s.rebuild(), undefined, { a: 'rebuild' });
+  expect(s.obs.red.seats[1]).toEqual({ hid: 21, pinned: false });
+  expect(s.holding(11)).toBe(false);
+  expect(s.known).toEqual([]);
   finish(s);
 });
 
@@ -415,6 +443,6 @@ test.each(manifest.files)('V-T40 재생 %s: 걸음마다 운영 코드가 명세
 }, 120_000);
 
 afterAll(() => {
-  console.info(`이 파일의 실행에서 난 알려진 차이(재현 시험 포함): K1 ${knownCount.K1}번, K2 ${knownCount.K2}번, K3 ${knownCount.K3}번`);
+  console.info(`이 파일의 실행에서 난 알려진 차이(재현 시험 포함): K2 ${knownCount.K2}번`);
   if (lateRegrabs > 0) console.info(`마감 초과 묶기 뒤 실패 해제 하나로는 늦은 묶기가 좌석을 다시 잡은 횟수: ${lateRegrabs}(소비자의 다시 해제로 풀었다)`);
 });

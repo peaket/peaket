@@ -22,7 +22,8 @@
 //   곧바로 적용한다(명세의 원장은 시도 단위다).
 // - replicate·promote·loseAll → 회차 슬롯 키 사본(대기열 하네스의 DUMP/RESTORE 방식, 복제 지연 쓰기 하나). Stream·방금 놓은 좌석·멱등 기록은 사본에서 뺀다.
 //   loseAll은 회차 슬롯 키를 모두 지우고 회차 목록 s:ctl:events에서도 뺀다.
-// - rebuild → SeatRebuilder(DrizzleSeatRebuildSource, RedisSeatStore, MemorySeatMap).
+// - rebuild → SeatRebuilder(DrizzleSeatRebuildSource, RedisSeatStore, MemorySeatMap, 주문 근거 booking DrizzleRebuildOrders, BUILD_ORDER PRF-167).
+//   pin이 OK면 운영 Saga처럼 주문 pinned_at을 적는다(DrizzleSaga.recordPinned): 다시 만들기가 결제 접수했고 묶인 주문의 좌석을 되살리는 근거다.
 // '쓰기'(복제 지연을 하나 쓰는 걸음)는 명세 Red(준비·판 번호·좌석·보유 수)가 바뀐 걸음이다(재생은 기록의 앞뒤 red로 정한다).
 // 경합 시험(SystemOptions.scheduler)은 운영 코드의 Redis 호출(command·evalScript)과 DB 호출(db.execute, transaction의 시작·문장·커밋)을 fast-check 스케줄러의
 // 문으로 감싸고, 걸음마다 스케줄러를 직접 돌린다. 문은 호출을 보내기 전에 선다(DB 문장은 서버에서 다른 트랜잭션을 기다릴 수 있어 결과를 붙들면 멈춘다).
@@ -44,7 +45,7 @@ import {
 } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import type { Scheduler } from 'fast-check';
-import { DrizzleOrderAccepts, DrizzleOrderStore, DrizzleSaga, ORDER_SAGA_ACTOR } from '../../src/modules/booking/index.js';
+import { DrizzleOrderAccepts, DrizzleOrderStore, DrizzleRebuildOrders, DrizzleSaga, ORDER_SAGA_ACTOR } from '../../src/modules/booking/index.js';
 import { accountActor, newOrderInput } from '../order-fixtures.js';
 import {
   DrizzleSeatHoldLedger,
@@ -113,14 +114,12 @@ export interface DbObs {
 
 /**
  * 알려진 차이(명세를 바꾸지 않고 기록한다, BUILD_ORDER PRF-151 보고):
- * - K1 시간이 지난 뒤 묶인 홀드: 명세 pin은 late를 거짓으로 되돌려 다시 만들기가 그 시도의 홀드를 되살리지만, 운영 묶기는 내 홀드의 exp·원장 expires_at을
- *   바꾸지 않아 다시 만들기(원장의 만료 전 HELD만)가 되살리지 않는다(PRF-150 ①이 넘긴 것).
+ * - K1(시간이 지난 뒤 묶인 홀드)·K3(원장 행 없이 되살린 판매 좌석의 holdId가 주문 ID)는 다시 만들기가 주문 기준으로 되살리게 고쳐(BUILD_ORDER PRF-167)
+ *   알려진 차이에서 지웠다. 이제 둘 다 위반 검사(다시 만들기 뒤 명세 rebuild와 견줌, 실패 해제 푼 좌석 수)로 본다(docs/verification.md §2.4).
  * - K2 실패한 시도의 아직 풀지 않은 홀드: 명세 다시 만들기는 FAILED 시도를 되살리지 않지만, 원장은 실패를 모르므로(좌석 해제 사건 전) 되살린다.
  *   하네스는 다시 만들기 바로 뒤에 그 시도의 실패 해제를 다시 불러(좌석 해제 사건 소비자의 다시 시도) 명세 상태에 맞춘다.
- * - K3 원장 행 없이 되살린 판매 좌석: 다시 만들기가 holdId = 주문 ID로 쓴다. 승인 거절 뒤 실패 해제를 그 시도의 holdId로 부르면 풀리지 않아,
- *   하네스가 주문 ID로 한 번 더 부른다(PRF-160의 Saga가 정할 것).
  */
-export type Known = 'K1' | 'K2' | 'K3';
+export type Known = 'K2';
 
 export const hidOf = (k: readonly [number, number]) => k[0] * 10 + k[1];
 export const personOf = (h: number) => Math.floor(h / 10);
@@ -369,7 +368,6 @@ export class SeatSystem {
   /** 이번 걸음에 새로 낸 펜싱 토큰(④는 걸음 끝에 본다: 경합 걸음은 답이 오는 차례가 토큰 차례와 다를 수 있다) */
   #stepTokens: number[] = [];
   #rebuildExpect: Record<number, SeatR> | undefined;
-  #expiredHeld = new Set<string>();
 
   constructor(
     raw: HotRedis,
@@ -392,7 +390,13 @@ export class SeatSystem {
     this.#ledger = new DrizzleSeatHoldLedger(database);
     this.#rawLedger = new DrizzleSeatHoldLedger(admin);
     this.#rawSource = new RedisSeatStreamSource(this.#raw);
-    this.#rebuilder = new SeatRebuilder({ source: new DrizzleSeatRebuildSource(database), target: this.#store, seatMap: this.#seatMap, holder: HOLDER });
+    this.#rebuilder = new SeatRebuilder({
+      source: new DrizzleSeatRebuildSource(database),
+      target: this.#store,
+      seatMap: this.#seatMap,
+      holder: HOLDER,
+      orders: new DrizzleRebuildOrders(database),
+    });
     for (const k of scope.attempts) {
       const h = hidOf(k);
       const ids = { holdId: uuidv7(systemClock), orderId: uuidv7(systemClock), psid: uuidv7(systemClock) };
@@ -507,10 +511,6 @@ export class SeatSystem {
       quota[p] = q && q.t === 'string' ? Number(Buffer.from(q.v as string, 'hex').toString('utf8')) : 0;
     }
     return { ready, gen, seats, quota };
-  }
-  /** 좌석 x의 홀드 Hash holdId가 그 시도의 주문 ID인가(K3) */
-  #heldByOrder(x: number, h: number): boolean {
-    return this.#field(this.current, seatKeys.hold(this.eventId, x - 1), 'holdId') === this.#ids.get(h)!.orderId;
   }
   sameRed(a: Red, b: Red): boolean {
     return JSON.stringify(a) === JSON.stringify(b);
@@ -883,6 +883,8 @@ export class SeatSystem {
     if (r.kind === 'OK') {
       Object.assign(a, { phase: 'PINNED', late: false, gen: r.gen });
       if (r.fencingToken !== undefined) this.#token(r.fencingToken, free, h);
+      // 운영 Saga처럼 묶기 OK 뒤 주문 pinned_at을 적는다(PRF-167. 주문은 결제 접수 때 만든 그 시도의 주문이다)
+      await this.#recordPinned(h);
     } else if (r.kind === 'TAKEN' || r.kind === 'STALE_GEN' || r.kind === 'QUOTA_EXCEEDED') a.phase = 'FAILED';
     // 실패 표시(PRF-165): 이미 실패 해제한 홀드라 아무것도 쓰지 않았다. 명세 pin의 실패 갈래(redKeep, FAILED)와 같다(머리말 pin 줄)
     else if (r.kind === 'FAILED_HOLD') a.phase = 'FAILED';
@@ -1028,11 +1030,25 @@ export class SeatSystem {
     if (r.kind === 'OK') {
       Object.assign(a, { phase: 'PINNED', late: false, gen: r.gen });
       if (r.fencingToken !== undefined) this.#stepTokens.push(r.fencingToken);
+      await this.#recordPinned(h);
       return { saga: 'PINNED' };
     }
     a.phase = 'FAILED';
     await this.releaseFailed(h);
     return { saga: 'FAILED' };
+  }
+
+  /**
+   * 묶기 OK 뒤 주문 판 번호·pinned_at 적기(운영 DrizzleSaga.recordPinned, PRF-167, 리뷰 고침 L5로 한 UPDATE): 운영 Saga처럼 주문의 지금 seat_gen에서
+   * 묶기 결과의 판 번호(시도에 적은 gen)로. 결제 접수로 주문을 만든 시도만(집중 시험의 손으로 만든 시도는 주문이 없다)
+   */
+  async #recordPinned(h: number): Promise<void> {
+    const orderId = this.#ids.get(h)!.orderId;
+    const placed = await this.#admin.db.execute(sql`select seat_gen from purchase_order where id = ${orderId}::uuid`);
+    if (placed.rows.length === 0) return;
+    const fromGen = Number((placed.rows[0] as { seat_gen: unknown }).seat_gen);
+    if (!(await this.#saga.recordPinned(orderId, fromGen, this.att(h).gen)))
+      this.#violate(`pin(${h}): 묶기 OK 뒤 주문 판 번호·pinned_at을 적지 못했다(주문이 ACCEPTED가 아니거나 판 번호가 바뀜)`);
   }
 
   async approve(h: number): Promise<void> {
@@ -1050,17 +1066,11 @@ export class SeatSystem {
   async releaseFailed(h: number, holdId?: string): Promise<number> {
     const a = this.att(h);
     const mine = this.mine(h);
-    const byOrder = mine.filter((x) => this.#heldByOrder(x, h));
     const call = (id: string) =>
       this.#store.releaseFailed({ eventId: this.eventId, accountId: accountOf(personOf(h)), holdId: id, seats: this.#refs(a.seats), keepUntilMs: this.#keepUntilMs });
     const r = await call(holdId ?? this.holdIdOf(h));
     if (r.kind !== 'OK') throw new Error(`releaseFailed(${h}): 뜻밖의 결과 ${r.kind}`);
-    let released = r.released;
-    if (holdId === undefined && byOrder.length > 0) {
-      this.#knownDiff('K3', `시도 ${h}의 좌석 ${byOrder}: 다시 만들기가 holdId = 주문 ID로 써서 실패 해제를 주문 ID로 한 번 더 불렀다`);
-      const r2 = await call(this.#ids.get(h)!.orderId);
-      if (r2.kind === 'OK') released += r2.released;
-    }
+    const released = r.released;
     this.#clearNewest(mine, h);
     this.#expect(`releaseFailed(${h}) 푼 좌석 수`, mine.length, released);
     return released;
@@ -1116,13 +1126,6 @@ export class SeatSystem {
   }
   async rebuild(): Promise<string> {
     this.#rebuildExpect = this.#specRebuild();
-    // K1을 가르려고: 원장에서 HELD인데 만료 시각이 지난 (시도, 좌석)
-    const expired = await this.#admin.db.execute(
-      sql`select seat_id::text as seat_id, hold_id::text as hold_id from seat_hold where event_id = ${this.eventId}::uuid and status = 'HELD' and expires_at <= now()`,
-    );
-    this.#expiredHeld = new Set(
-      (expired.rows as Array<{ seat_id: string; hold_id: string | null }>).map((x) => `${this.#byHold.get(x.hold_id ?? '') ?? -1}:${this.scope.seats.find((s) => seatIdOf(s) === x.seat_id) ?? -1}`),
-    );
     const r = await this.#rebuilder.rebuild(this.eventId, { keepUntilMs: this.#keepUntilMs });
     if (r.result !== 'REBUILT') this.#violate(`rebuild: 세대 키가 없는데 결과가 ${r.result}`);
     // K2: 명세는 실패한 시도의 홀드를 되살리지 않는다. 운영이 되살린 그 좌석은 좌석 해제 사건 소비자가 다시 풀 몫이라 여기서 부른다
@@ -1137,7 +1140,7 @@ export class SeatSystem {
     }
     return r.result;
   }
-  /** 다시 만들기 걸음 뒤: 되살린 좌석을 명세 rebuild와 견준다(K1은 알려진 차이) */
+  /** 다시 만들기 걸음 뒤: 되살린 좌석을 명세 rebuild와 견준다(K1은 PRF-167로 알려진 차이에서 지웠다: 어긋나면 위반이다) */
   #afterRebuild(): void {
     const want = this.#rebuildExpect;
     if (!want) return;
@@ -1146,14 +1149,6 @@ export class SeatSystem {
       const got = this.obs.red.seats[x]!;
       const w = want[x]!;
       if (got.hid === w.hid && got.pinned === w.pinned) continue;
-      const h = w.hid;
-      if (got.hid === 0 && h > 0 && !w.pinned && this.#expiredHeld.has(`${h}:${x}`)) {
-        this.#knownDiff('K1', `좌석 ${x}: 시간이 지난 뒤 묶인 시도 ${h}(${this.att(h).phase})의 홀드를 명세는 되살리고 운영은 되살리지 않는다(원장 만료 시각이 지남)`, [
-          `red.seat.${x}`,
-          `red.quota.${personOf(h)}`,
-        ]);
-        continue;
-      }
       if (this.checking) this.#violate(`rebuild 좌석 ${x}: 명세 ${JSON.stringify(w)} ≠ 운영 ${JSON.stringify(got)}`);
     }
   }

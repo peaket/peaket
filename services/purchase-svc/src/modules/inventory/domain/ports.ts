@@ -10,7 +10,7 @@ import type { SectionRange } from './seat-layout.js';
 import type { ReserveInput, ReserveResult, SeatSaleOrder, SeatSaleRelease } from './seat-sale.js';
 import type { LedgerHoldEvent, SeatStreamEntry, StreamDropReason, TradeTopic } from './seat-event.js';
 import type { PinInput, PinResult, ReleaseFailedInput, ReleaseFailedResult, RetireResult } from './pin.js';
-import type { RebuildFinishInput, RebuildHold, RebuildSale, RebuildSeat, RebuildStep } from './rebuild.js';
+import type { RebuildFinishInput, RebuildHold, RebuildLedgerRow, RebuildPinnedOrder, RebuildSale, RebuildSaleOrder, RebuildSeat, RebuildStep } from './rebuild.js';
 
 /** 요청 처리 중 좌석 Redis 호출 하나의 선택값(BUILD_ORDER PRF-135, guidelines §5) */
 export interface SeatCallOptions {
@@ -655,10 +655,35 @@ export interface SeatRebuildSource {
    */
   saleHolds(eventId: string): Promise<RebuildHold[]>;
   /**
+   * 그 회차·그 좌석들의 원장 행 전부(상태·holdId 상관없이: 좌석·holdId·상태·토큰, BUILD_ORDER PRF-167 리뷰 고침 M2). 다시 만들기가 묶인 주문 좌석을
+   * 되살릴지(그 주문 holdId의 HELD 행이 있고 더 높은 토큰의 다른 홀드 행이 없는지)와 그 펜싱 토큰을 정한다. 좌석이 0개면 DB를 부르지 않고 []
+   * @throws RangeError 회차·좌석 ID가 소문자 UUID가 아님 · Error purchase DB 오류
+   */
+  ledgerRows(eventId: string, seatIds: readonly string[]): Promise<RebuildLedgerRow[]>;
+  /**
    * 임대를 비운다(그 holder일 때만). o.setGen이면 같은 문장에서 판 번호를 그 값으로 맞춘다: 임대를 잡은 뒤 세대 키가 이미 서 있던 경우(다른 곳이 먼저 끝냄)에
    * DB 판 번호를 세대 키의 gen과 같게 둔다(docs/features/seat-hold.md §6 '회차마다 하나와 판 번호')
    */
   release(eventId: string, holder: string, o?: { setGen?: number }): Promise<void>;
+}
+
+/**
+ * 다시 만들기의 주문 근거(BUILD_ORDER PRF-167, docs/features/seat-hold.md §6 '주문 기준 되살리기', K1·K3). inventory가 booking 표를 직접 읽지 않도록
+ * booking이 구현하고(운영 구현은 booking DrizzleRebuildOrders) 시작 파일이 SeatRebuilder에 꽂는다. 둘 다 트랜잭션 없이 읽기만 한다
+ */
+export interface RebuildOrderSource {
+  /**
+   * 주문 ID들(활성 판매 행의 order_id) → 그 주문의 holdId·psid(purchase_order.hold_id·purchase_session_id). 그 회차의 주문만 돌려주고, 없는 주문은 뺀다.
+   * 주문 ID가 0개면 DB를 부르지 않고 []다
+   * @throws RangeError 회차·주문 ID가 소문자 UUID가 아님 · Error purchase DB 오류
+   */
+  saleOrders(eventId: string, orderIds: readonly string[]): Promise<RebuildSaleOrder[]>;
+  /**
+   * 그 회차의 결제를 접수했고(status ACCEPTED) 묶인(pinned_at이 있음) 주문들과 그 좌석(주문 항목 전부, 줄 번호 차례). 원장은 보지 않는다:
+   * 원장 대조는 SeatRebuilder가 SeatRebuildSource.ledgerRows로 읽어 planRebuild가 한다(리뷰 고침 M2)
+   * @throws RangeError 회차 ID가 소문자 UUID가 아님 · Error purchase DB 오류
+   */
+  pinnedOrders(eventId: string): Promise<RebuildPinnedOrder[]>;
 }
 
 /**

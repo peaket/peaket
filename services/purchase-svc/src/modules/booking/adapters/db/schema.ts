@@ -8,6 +8,7 @@
 //   Saga 1단계(PRF-165)는 0006으로 주문의 실패 사유 failure_reason, order_saga_job.step CHECK(RESERVE·CONFIRM·RELEASE)와 승인 명령 보낸 시각 confirm_sent_at을 더했다
 //   (data.md §4 일곱 번째 마이그레이션, RELEASE·confirm_sent_at은 2026-11-05 리뷰 H1·M4).
 //   결제 결과 반영(PRF-163)은 0007로 발권 재시도 큐 ticket_issue_job을 더했다(data.md §4 여덟 번째 마이그레이션).
+//   주문 기준 되살리기(PRF-167)는 0008로 주문의 묶은 시각 pinned_at을 더했다(data.md §4 아홉 번째 마이그레이션).
 // - drizzle-kit이 이 파일을 읽으므로 도메인 파일을 가져오지 않는다(도메인 → inventory 공개 면 → Nest 모듈까지 끌려 온다).
 //   상태 목록은 도메인 상수 ORDER_STATUSES와 같은 차례로 글로 적는다(inventory schema.ts의 seat_sale 상태 목록과 같은 방식).
 import { idempotencyRecordTable } from '@peaket/platform';
@@ -53,6 +54,9 @@ export const purchaseOrder = pgTable(
     // FAILED일 때만 채우는 실패 사유(0006, PRF-165). Saga 1단계의 SEAT_TAKEN|QUOTA_EXCEEDED|STALE_GEN|EXPIRED|STORE_GONE과 결제 쪽 사유(PRF-163).
     // 값 목록이 PRF-163에서 늘어나므로 CHECK를 두지 않는다. 주문 결과 조회(PRF-163)가 화면 문구를 고르는 데 쓴다
     failureReason: text('failure_reason'),
+    // Saga 묶기가 OK인 뒤 적는 시각(0008, BUILD_ORDER PRF-167). 다시 만들기가 결제를 접수했고(ACCEPTED) 묶인 주문의 좌석을
+    // 원장 만료 시각과 상관없이 되살리는 근거다(docs/features/seat-hold.md §6 '주문 기준 되살리기', K1). 묶기 전이면 비어 있다
+    pinnedAt: at('pinned_at'),
   },
   (t) => [
     // 한 홀드에 주문 하나(docs/data.md §5 '주문 생성'). 뒤 쪽 트랜잭션은 유일 확인에서 앞 쪽 커밋을 기다리고 23505로 끝난다

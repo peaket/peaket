@@ -62,7 +62,7 @@ const count = async (text: string, params: unknown[]): Promise<number> => Number
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
-  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 8(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 9(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐, 0008 주문의 묶은 시각)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)).rows.map((r) => r.relname);
     const before = await tables();
     // 0003이 만든 주문 표 다섯과 Outbox 부모 표(PRF-160), 0005가 만든 Saga 작업 표(PRF-162), 0007이 만든 발권 재시도 큐(PRF-163)가 있다
@@ -72,7 +72,18 @@ describe('마이그레이션과 표 모양', () => {
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(8);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(9);
+  });
+
+  test('0008(PRF-167, data.md §4 아홉 번째 마이그레이션): purchase_order.pinned_at은 널 허용 timestamptz이고 기본값이 없으며, 그 칸에 걸린 CHECK·인덱스가 없다(쓰기가 많은 표, data.md §5.1) [ASVS v5.0.0-2.3.4]', async () => {
+    const col = await q<{ data_type: string; is_nullable: string; column_default: string | null }>(
+      `select data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'purchase_order' and column_name = 'pinned_at'`,
+    );
+    expect(col.rows).toEqual([{ data_type: 'timestamp with time zone', is_nullable: 'YES', column_default: null }]);
+    const checks = await q<{ def: string }>(`select pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.purchase_order'::regclass and contype = 'c'`);
+    expect(checks.rows.filter((r) => r.def.includes('pinned_at'))).toEqual([]);
+    const idx = await q<{ indexdef: string }>(`select indexdef from pg_indexes where schemaname = 'public' and tablename = 'purchase_order'`);
+    expect(idx.rows.filter((r) => r.indexdef.includes('pinned_at'))).toEqual([]);
   });
 
   test('0007(PRF-163, data.md §4 여덟 번째 마이그레이션·§2 ERD ticket_issue_job): 칸 일곱(order_id uuid 기본 키·주문 외래 키, event_id uuid, attempts int 기본 0, next_attempt_at 널 허용, issue_due_at·created_at 널 불허, last_error 널 허용 text)과 쓸기 색인 (next_attempt_at), 파티션 표가 아니다 [ASVS v5.0.0-2.3.4]', async () => {

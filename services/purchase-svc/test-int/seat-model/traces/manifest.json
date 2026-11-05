@@ -1,7 +1,7 @@
 {
   "$comment": "재생용 동작 기록(wbs 2.3.4, V-T40). node tools/spec-check/run-local.mjs traces --spec seat가 만든다. 손으로 고치지 않는다",
   "spec": "specs/seat.qnt",
-  "specSha256": "08101b7547f81ec957a3a44a571dcdfd3a12980bc031808592f0553f3d114ec1",
+  "specSha256": "99dbb599bbc9573d9d2306aa4403646bc73efe083c4e78d34328de5d3eccd6de",
   "quint": "0.33.1",
   "modules": [
     {

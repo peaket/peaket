@@ -359,13 +359,17 @@ export class DrizzleSaga implements SagaJobs, SagaOrders, ReserveTx, SagaFailure
     };
   }
 
-  async recordPinnedGen(orderId: string, fromGen: number, toGen: number): Promise<boolean> {
+  /**
+   * 묶기 OK 뒤 판 번호와 pinned_at을 한 UPDATE로(BUILD_ORDER PRF-167, 리뷰 고침 L5): 접수된 주문(ACCEPTED)이고 판 번호가 그대로(seat_gen = fromGen)일 때만
+   * seat_gen = toGen, pinned_at = coalesce(pinned_at, 지금)(이미 있으면 처음 값). 시각은 앱 시계다(confirm_sent_at과 같다). 상태 칸·이력은 건드리지 않는다.
+   * 소문자 UUID가 아니면 false
+   */
+  async recordPinned(orderId: string, fromGen: number, toGen: number): Promise<boolean> {
     if (!isUuid(orderId)) return false;
     if (!isPositiveInt(fromGen, INT4_MAX) || !isPositiveInt(toGen, INT4_MAX)) throw new RangeError(`판 번호는 1~${INT4_MAX}의 정수다: ${String(fromGen)} → ${String(toGen)}`);
-    // 접수된 주문(ACCEPTED)이고 판 번호가 그대로일 때만 바꾼다(상태 칸은 건드리지 않는다)
     const r = await this.#tx((tx) =>
       tx.execute(sql`
-        update purchase_order set seat_gen = ${toGen}::int
+        update purchase_order set seat_gen = ${toGen}::int, pinned_at = coalesce(pinned_at, ${new Date(this.o.clock.now())}::timestamptz)
         where id = ${orderId}::uuid and status = 'ACCEPTED' and seat_gen = ${fromGen}::int
         returning id`),
     );

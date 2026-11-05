@@ -13,8 +13,12 @@
 // - finish에는 되살린 원장 토큰의 최댓값(maxTokenOf, 판매 좌석의 원장 토큰 포함)을 싣는다(펜싱 카운터 되살리기).
 // - 오류가 나면 임대를 비우고(그 release의 오류는 버린다) 원래 오류를 던진다. 끝까지 간 뒤 release가 던지면 그 오류를 던진다(세대 키는 이미 섰으므로 다음 번은 READY).
 // - 지표 rebuilt(result)는 결과마다 한 번: rebuilt·ready·busy(STALE 포함)·failed(던질 때).
-import type { SeatMap, SeatRebuildSource, SeatRebuildTarget } from '../domain/ports.js';
-import { maxTokenOf, planRebuild, quotasOf, REBUILD_BATCH, type RebuildReport, type RebuildStep } from '../domain/rebuild.js';
+// 주문 기준 되살리기(BUILD_ORDER PRF-167, K1·K3): orders(RebuildOrderSource, booking이 구현하고 시작 파일이 꽂는다)가 있으면 판매 행의 주문 ID로 판매 주문의
+// holdId·psid와 결제 접수했고 묶인 주문들, 그 좌석들의 원장 행(source.ledgerRows, 리뷰 고침 M2)을 함께 읽어 planRebuild의 주문 근거로 넘긴다
+// (우선순위 판매 > 묶인 주문 > 원장 홀드). 묶인 주문의 좌석도 좌석맵 판으로 바꾼다.
+import { type Clock, systemClock } from '@peaket/platform';
+import type { RebuildOrderSource, SeatMap, SeatRebuildSource, SeatRebuildTarget } from '../domain/ports.js';
+import { maxTokenOf, planRebuild, quotasOf, REBUILD_BATCH, type RebuildOrderInputs, type RebuildReport, type RebuildSale, type RebuildStep } from '../domain/rebuild.js';
 import type { SeatRef } from '../domain/hold.js';
 
 export interface SeatRebuilderSignals {
@@ -25,6 +29,12 @@ export interface SeatRebuilderSignals {
 export interface SeatRebuilderDeps {
   source: SeatRebuildSource;
   target: SeatRebuildTarget;
+  /**
+   * 주문 근거(BUILD_ORDER PRF-167). 운영 조립은 늘 꽂는다(booking DrizzleRebuildOrders). 없으면 원장만 보는 옛 방식이다(K1·K3가 남는다, 옛 시험 대역용)
+   */
+  orders?: RebuildOrderSource;
+  /** 묶인 주문 홀드의 잡은 시각(지금)을 재는 시계(없으면 systemClock) */
+  clock?: Clock;
   seatMap: SeatMap;
   /** 임대의 holder이자 세대 키 node(이 파드·프로세스 표지) */
   holder: string;
@@ -88,14 +98,16 @@ export class SeatRebuilder {
     const begun = stop(await target.begin(eventId, gen, keepUntilMs));
     if (begun) return begun;
     const [sales, holds, saleHolds] = await Promise.all([source.sales(eventId), source.holds(eventId), source.saleHolds(eventId)]);
-    const ids = [...new Set([...sales.map((s) => s.seatId), ...holds.map((h) => h.seatId)])];
+    const orderSource = this.deps.orders;
+    const orders = orderSource !== undefined ? await this.#orderInputs(orderSource, eventId, sales) : undefined;
+    const ids = [...new Set([...sales.map((s) => s.seatId), ...(orders?.pinned.flatMap((o) => o.seatIds) ?? []), ...holds.map((h) => h.seatId)])];
     const refs = ids.length > 0 ? await seatMap.resolve(eventId, ids) : [];
     const byId = new Map<string, SeatRef>();
     ids.forEach((id, k) => {
       const ref = refs[k];
       if (ref !== undefined) byId.set(id, ref);
     });
-    const plan = planRebuild(sales, holds, (id) => byId.get(id), saleHolds);
+    const plan = planRebuild(sales, holds, (id) => byId.get(id), saleHolds, orders);
 
     for (let k = 0; k < plan.seats.length; k += REBUILD_BATCH) {
       const s = stop(await target.writeSeats(eventId, plan.seats.slice(k, k + REBUILD_BATCH), keepUntilMs, gen));
@@ -105,5 +117,18 @@ export class SeatRebuilder {
     if (f) return f;
     const sold = plan.seats.filter((s) => s.mode === 'SOLD').length;
     return { report: { result: 'REBUILT', gen, sold, held: plan.seats.length - sold, skipped: plan.skipped } };
+  }
+
+  /**
+   * 주문 근거 읽기(BUILD_ORDER PRF-167): 판매 행의 주문 ID들(겹치지 않게)로 orders.saleOrders, 회차로 orders.pinnedOrders를 함께 읽고, 묶인 주문이 있으면
+   * 그 좌석들(겹치지 않게)의 원장 행을 source.ledgerRows로 읽는다(리뷰 고침 M2: 원장 대조는 inventory가 한다. 없으면 부르지 않는다).
+   * nowMs = clock.now()는 읽기가 끝난 뒤에 잰다(묶인 주문 홀드의 잡은 시각, 만료 = nowMs + 7분)
+   */
+  async #orderInputs(orders: RebuildOrderSource, eventId: string, sales: readonly RebuildSale[]): Promise<RebuildOrderInputs> {
+    const orderIds = [...new Set(sales.map((s) => s.orderId))];
+    const [saleOrders, pinned] = await Promise.all([orders.saleOrders(eventId, orderIds), orders.pinnedOrders(eventId)]);
+    const seatIds = [...new Set(pinned.flatMap((o) => o.seatIds))];
+    const pinnedLedger = seatIds.length > 0 ? await this.deps.source.ledgerRows(eventId, seatIds) : [];
+    return { saleOrders, pinned, pinnedLedger, nowMs: (this.deps.clock ?? systemClock).now() };
   }
 }

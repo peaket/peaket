@@ -66,7 +66,7 @@ State 2: <seat_no_ready_check_seat_hold(11,<<1>>) line 465, col 3 to line 510, c
   used |-> <<0, 0>>,
   ledger |-> {} ]
 
-State 3: <seat_no_ready_check_seat_accept(11) line 638, col 3 to line 656, col 72 of module seat_no_ready_check>
+State 3: <seat_no_ready_check_seat_accept(11) line 639, col 3 to line 657, col 72 of module seat_no_ready_check>
 /\ seat_no_ready_check_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 0,
@@ -99,7 +99,7 @@ State 3: <seat_no_ready_check_seat_accept(11) line 638, col 3 to line 656, col 7
   used |-> <<0, 0>>,
   ledger |-> {} ]
 
-State 4: <seat_no_ready_check_seat_pin(11) line 723, col 3 to line 771, col 68 of module seat_no_ready_check>
+State 4: <seat_no_ready_check_seat_pin(11) line 724, col 3 to line 772, col 68 of module seat_no_ready_check>
 /\ seat_no_ready_check_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 0,
@@ -132,7 +132,7 @@ State 4: <seat_no_ready_check_seat_pin(11) line 723, col 3 to line 771, col 68 o
   used |-> <<0, 0>>,
   ledger |-> {} ]
 
-State 5: <seat_no_ready_check_seat_loseAll line 948, col 3 to line 969, col 72 of module seat_no_ready_check>
+State 5: <seat_no_ready_check_seat_loseAll line 949, col 3 to line 970, col 72 of module seat_no_ready_check>
 /\ seat_no_ready_check_seat_red = [ ready |-> FALSE,
   gen |-> 0,
   counter |-> 0,
@@ -198,7 +198,7 @@ State 6: <seat_no_ready_check_seat_hold(21,<<1>>) line 465, col 3 to line 510, c
   used |-> <<0, 0>>,
   ledger |-> {} ]
 
-State 7: <seat_no_ready_check_seat_accept(21) line 638, col 3 to line 656, col 72 of module seat_no_ready_check>
+State 7: <seat_no_ready_check_seat_accept(21) line 639, col 3 to line 657, col 72 of module seat_no_ready_check>
 /\ seat_no_ready_check_seat_red = [ ready |-> FALSE,
   gen |-> 0,
   counter |-> 0,
@@ -231,7 +231,7 @@ State 7: <seat_no_ready_check_seat_accept(21) line 638, col 3 to line 656, col 7
   used |-> <<0, 0>>,
   ledger |-> {} ]
 
-State 8: <seat_no_ready_check_seat_saleStep(11) line 1159, col 3 to line 1271, col 68 of module seat_no_ready_check>
+State 8: <seat_no_ready_check_seat_saleStep(11) line 1160, col 3 to line 1272, col 68 of module seat_no_ready_check>
 /\ seat_no_ready_check_seat_red = [ ready |-> FALSE,
   gen |-> 0,
   counter |-> 0,

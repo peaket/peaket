@@ -29,6 +29,52 @@ export interface RebuildHold {
 }
 
 /**
+ * 판매 주문의 holdId·구매 세션 ID(K3, BUILD_ORDER PRF-167). 활성 판매 행의 주문 ID로 주문 행(purchase_order.hold_id·purchase_session_id)에서 받는다.
+ * 원장 행이 없는 판매 좌석도 이 값으로 되살린다(전에는 holdId = 주문 ID, psid = 빈 글이라 실패 해제가 그 좌석을 풀지 못했다)
+ */
+export interface RebuildSaleOrder {
+  orderId: string;
+  holdId: string;
+  purchaseSessionId: string;
+}
+
+/**
+ * 결제를 접수했고(ACCEPTED) 묶인(purchase_order.pinned_at이 있음) 주문 하나(K1, BUILD_ORDER PRF-167). 좌석은 주문 항목의 좌석 ID 전부(줄 번호 차례)다.
+ * 다시 만들기는 그 가운데 원장에 그 주문 holdId의 HELD 행이 있는 좌석(적재된 홀드, RebuildOrderInputs.pinnedLedger로 본다)만, 원장 만료 시각과 상관없이
+ * 이 holdId·psid의 살아 있는 홀드(묶음 아님, 만료 = 지금 + 7분)로 되살린다(명세 rebuild)
+ */
+export interface RebuildPinnedOrder {
+  orderId: string;
+  accountId: string;
+  holdId: string;
+  purchaseSessionId: string;
+  seatIds: string[];
+}
+
+/**
+ * 묶인 주문 좌석의 원장 행 하나(seat_hold, 상태 상관없이, 리뷰 고침 M2). 묶인 주문 좌석을 되살릴지와 그 펜싱 토큰을 정한다
+ * (SeatRebuildSource.ledgerRows: 그 회차·그 좌석들의 행)
+ */
+export interface RebuildLedgerRow {
+  seatId: string;
+  holdId: string | null;
+  status: 'HELD' | 'RELEASED' | 'EXPIRED';
+  fencingToken: number;
+}
+
+/** planRebuild의 주문 근거(docs/features/seat-hold.md §6 '주문 기준 되살리기'). nowMs는 묶인 주문 홀드의 잡은 시각(만료 = nowMs + HOLD_TTL_MS)이다 */
+export interface RebuildOrderInputs {
+  /** 활성 판매 행의 주문들(판매 좌석의 holdId·psid). 없는 주문은 옛 방식(원장 행, 없으면 holdId = 주문 ID)으로 둔다 */
+  saleOrders: readonly RebuildSaleOrder[];
+  /** 결제 접수했고 묶인 주문들 */
+  pinned: readonly RebuildPinnedOrder[];
+  /** 묶인 주문 좌석들의 원장 행(상태·holdId 상관없이 그 좌석들의 모든 행) */
+  pinnedLedger: readonly RebuildLedgerRow[];
+  /** 지금(유닉스 밀리초) */
+  nowMs: number;
+}
+
+/**
  * 좌석 Redis에 쓸 좌석 하나. SOLD는 판매(묶음), HELD는 되살린 홀드.
  * SOLD의 fencingToken·heldAtMs·expiresAtMs는 대조한 원장 행의 값이고 셋이 함께 있거나 함께 없다(없으면 좌석 쓰기 Lua가 TIME으로 채운다, 코드 리뷰 PRF-143)
  */
@@ -47,6 +93,18 @@ export type RebuildReport =
  * STALE(rebuild 키의 판 번호가 내 gen이 아님 = 더 새 시도가 시작했거나 시작 표시가 사라졌다. 아무것도 쓰지 않았다)
  */
 export type RebuildStep = { result: 'OK' } | { result: 'READY'; gen: number } | { result: 'STALE' };
+
+/**
+ * 묶인 주문 좌석의 되살릴 펜싱 토큰(리뷰 고침 M2·L4): 그 좌석 원장 행 가운데 그 holdId의 HELD 행의 가장 큰 토큰. 그런 행이 없거나, 그 토큰보다 큰 다른 holdId의 행
+ * (상태 상관없이, holdId가 빈 옛 행 포함)이 있으면 undefined(되살리지 않는다: 더 새 홀드가 그 좌석을 잡았다)
+ */
+function pinnedTokenOf(rows: readonly RebuildLedgerRow[], holdId: string): number | undefined {
+  let mine: number | undefined;
+  for (const r of rows) if (r.holdId === holdId && r.status === 'HELD' && (mine === undefined || r.fencingToken > mine)) mine = r.fencingToken;
+  if (mine === undefined) return undefined;
+  const top = mine;
+  return rows.some((r) => r.holdId !== holdId && r.fencingToken > top) ? undefined : mine;
+}
 
 /** 토큰이 더 큰 원장 홀드(같으면 먼저 온 것) */
 const newer = (a: RebuildHold | undefined, b: RebuildHold): RebuildHold => (a === undefined || b.fencingToken > a.fencingToken ? b : a);
@@ -69,12 +127,27 @@ const heldAtOf = (h: RebuildHold): number => h.heldAtMs ?? h.expiresAtMs - HOLD_
  * - skipped = 좌석맵 판에 없는 판매 + 좌석맵 판에 없는 원장 홀드 + holdId가 null이라 되살리지 않은 좌석. 판매에 덮인 원장 홀드는 세지 않는다.
  * - 잡은 시각이 빈 원장 홀드(heldAtMs null)는 expiresAtMs − HOLD_TTL_MS(7분)로 둔다(연장하지 않은 홀드의 잡은 시각).
  * - 원장 행은 먼저 '좌석 ID|계정'·좌석 색인 키로 묶는다(O(판매 + 홀드)).
+ *
+ * 주문 근거(orders, BUILD_ORDER PRF-167 '주문 기준 되살리기', K1·K3)가 있으면:
+ * - 우선순위는 판매 > 묶인 주문 > 원장 홀드다(같은 좌석에 여러 근거가 있으면 앞의 것만 쓴다). 보유 수(quotasOf)는 세 근거를 합쳐 계정마다 센다.
+ * - 판매 좌석의 holdId·psid는 그 판매 주문(orders.saleOrders의 같은 주문 ID)의 것이다(원장 행이 없어도). 토큰·시각 칸은 원장 행이 있을 때만 싣는다.
+ * - 묶인 주문(orders.pinned)의 좌석은 판매가 없고, 원장(orders.pinnedLedger)에 그 좌석·그 주문 holdId의 HELD 행이 있고, 그 좌석에 그 HELD 행보다
+ *   토큰이 높은 다른 holdId의 행(상태 상관없이, holdId가 빈 옛 행 포함)이 없을 때만 HELD(묶음 아님, kind FAN)로 되살린다(리뷰 고침 M2·L3):
+ *   holdId·psid = 그 주문의 것, 펜싱 토큰 = 그 HELD 행의 토큰(여럿이면 가장 큰 것, 리뷰 고침 L4), 잡은 시각 = nowMs, 만료 = nowMs + HOLD_TTL_MS(7분).
+ *   원장 만료 시각과 상관없다. 조건에 맞지 않는 좌석은 그냥 되살리지 않는다(넘김으로 세지 않는다).
+ *
+ * 주문 근거에서 구현이 정한 세부(PRF-167, 정본에 없다):
+ * - 판매 주문 목록에 없는 판매(주문 행 없음)는 옛 방식이다(원장 행, 없으면 holdId = 주문 ID·psid = '').
+ * - 판매 좌석의 토큰·시각 칸은 옛 방식과 같은 원장 행(같은 좌석·계정의 토큰이 가장 큰 행, holdId가 null이면 없는 것)에서 온다.
+ * - 같은 좌석이 두 묶인 주문에 있으면 위 토큰 조건이 높은 쪽만 남긴다(둘 다 남으면 앞 주문의 것). 좌석맵 판에 없는 묶인 주문 좌석은 조건에 맞을 때 넘김 하나다.
+ * orders가 없으면 지금 방식 그대로다(원장만).
  */
 export function planRebuild(
   sales: readonly RebuildSale[],
   holds: readonly RebuildHold[],
   resolve: (seatId: string) => SeatRef | undefined,
   saleHolds: readonly RebuildHold[] = holds,
+  orders?: RebuildOrderInputs,
 ): { seats: RebuildSeat[]; skipped: number } {
   let skipped = 0;
   const mineBy = new Map<string, RebuildHold>();
@@ -82,6 +155,8 @@ export function planRebuild(
     const k = `${h.seatId}|${h.accountId}`;
     mineBy.set(k, newer(mineBy.get(k), h));
   }
+  const saleOrderBy = new Map<string, RebuildSaleOrder>();
+  for (const o of orders?.saleOrders ?? []) if (!saleOrderBy.has(o.orderId)) saleOrderBy.set(o.orderId, o);
   const sold = new Map<number, RebuildSeat>();
   for (const s of sales) {
     const seat = resolve(s.seatId);
@@ -91,23 +166,69 @@ export function planRebuild(
     }
     if (sold.has(seat.index)) continue;
     const mine = mineBy.get(`${s.seatId}|${s.accountId}`);
-    if (mine !== undefined && mine.holdId !== null) {
+    const ledger = mine !== undefined && mine.holdId !== null ? mine : undefined;
+    const order = saleOrderBy.get(s.orderId);
+    if (order !== undefined) {
+      // K3: holdId·psid는 판매 주문의 것, 토큰·시각 칸은 원장 행이 있을 때만
       sold.set(seat.index, {
         mode: 'SOLD',
         seat,
         accountId: s.accountId,
-        holdId: mine.holdId,
-        purchaseSessionId: mine.purchaseSessionId ?? '',
-        fencingToken: mine.fencingToken,
-        heldAtMs: heldAtOf(mine),
-        expiresAtMs: mine.expiresAtMs,
+        holdId: order.holdId,
+        purchaseSessionId: order.purchaseSessionId,
+        ...(ledger !== undefined ? { fencingToken: ledger.fencingToken, heldAtMs: heldAtOf(ledger), expiresAtMs: ledger.expiresAtMs } : {}),
+      });
+    } else if (ledger !== undefined && ledger.holdId !== null) {
+      sold.set(seat.index, {
+        mode: 'SOLD',
+        seat,
+        accountId: s.accountId,
+        holdId: ledger.holdId,
+        purchaseSessionId: ledger.purchaseSessionId ?? '',
+        fencingToken: ledger.fencingToken,
+        heldAtMs: heldAtOf(ledger),
+        expiresAtMs: ledger.expiresAtMs,
       });
     } else {
       sold.set(seat.index, { mode: 'SOLD', seat, accountId: s.accountId, holdId: s.orderId, purchaseSessionId: '' });
     }
   }
 
-  // 판매가 없는 좌석마다 토큰이 가장 큰 원장 홀드
+  // K1: 판매가 없는 좌석의 묶인 주문(원장에 그 holdId의 HELD 행이 있고 더 새 다른 홀드의 행이 없을 때, 살아 있는 홀드, 만료 = 지금 + 7분)
+  const pinnedSeats = new Map<number, RebuildSeat>();
+  if (orders !== undefined && orders.pinned.length > 0) {
+    const rowsBy = new Map<string, RebuildLedgerRow[]>();
+    for (const r of orders.pinnedLedger) {
+      const list = rowsBy.get(r.seatId);
+      if (list === undefined) rowsBy.set(r.seatId, [r]);
+      else list.push(r);
+    }
+    for (const o of orders.pinned) {
+      for (const seatId of o.seatIds) {
+        const token = pinnedTokenOf(rowsBy.get(seatId) ?? [], o.holdId);
+        if (token === undefined) continue;
+        const seat = resolve(seatId);
+        if (seat === undefined) {
+          skipped += 1;
+          continue;
+        }
+        if (sold.has(seat.index) || pinnedSeats.has(seat.index)) continue;
+        pinnedSeats.set(seat.index, {
+          mode: 'HELD',
+          seat,
+          accountId: o.accountId,
+          holdId: o.holdId,
+          purchaseSessionId: o.purchaseSessionId,
+          fencingToken: token,
+          heldAtMs: orders.nowMs,
+          expiresAtMs: orders.nowMs + HOLD_TTL_MS,
+          kind: 'FAN',
+        });
+      }
+    }
+  }
+
+  // 판매·묶인 주문이 없는 좌석마다 토큰이 가장 큰 원장 홀드
   const latest = new Map<number, { seat: SeatRef; hold: RebuildHold }>();
   for (const h of holds) {
     const seat = resolve(h.seatId);
@@ -115,7 +236,7 @@ export function planRebuild(
       skipped += 1;
       continue;
     }
-    if (sold.has(seat.index)) continue;
+    if (sold.has(seat.index) || pinnedSeats.has(seat.index)) continue;
     const cur = latest.get(seat.index);
     if (cur === undefined || h.fencingToken > cur.hold.fencingToken) latest.set(seat.index, { seat, hold: h });
   }
@@ -137,7 +258,7 @@ export function planRebuild(
       kind: h.kind,
     });
   }
-  const seats = [...sold.values(), ...held].sort((a, b) => a.seat.index - b.seat.index);
+  const seats = [...sold.values(), ...pinnedSeats.values(), ...held].sort((a, b) => a.seat.index - b.seat.index);
   return { seats, skipped };
 }
 

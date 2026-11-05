@@ -50,7 +50,8 @@ export const ENABLED: Partial<Record<SpecAction, (s: SeatSystem, h: number) => b
       a.seats.length > 0 &&
       !a.late &&
       a.phase !== 'SOLD' &&
-      (s.holding(h) || (!ready(s) && s.relayed.has(h))) &&
+      // 명세 ttlPasses: 다시 만들기를 기다리는 동안 원장 때문에 시간이 다 되는 갈래는 묶인 시도에 없다(PRF-167, 주문 pinned_at, 리뷰 고침 M1)
+      (s.holding(h) || (!ready(s) && s.relayed.has(h) && a.phase !== 'PINNED')) &&
       !a.seats.some((x) => s.obs.red.seats[x]!.hid === h && s.obs.red.seats[x]!.pinned)
     );
   },

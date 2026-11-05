@@ -8,12 +8,16 @@
 // - release: 그 holder일 때만 holder·lease_until을 비운다. setGen이면 같은 문장에서 gen = setGen(세대 키의 gen에 맞춘다, 코드 리뷰로 revertGen 대신).
 // - sales: seat_sale PENDING·SOLD, holds: seat_hold HELD이고 expires_at > now(), saleHolds: seat_hold HELD이고 같은 회차·좌석·계정의 활성 판매(PENDING·SOLD)가 있는 행
 //   (만료 조건 없음). 토큰(bigint)은 안전한 정수로 바꾸고, 아니면 Error. 차례는 좌석 ID(와 토큰) 순.
+// - ledgerRows(BUILD_ORDER PRF-167 리뷰 고침 M2): 그 회차·그 좌석들의 seat_hold 행 전부(상태·holdId 상관없이 좌석·holdId·상태·토큰). 묶인 주문 좌석의 원장 대조용.
 // - 회차 ID가 소문자 UUID가 아니거나 holder가 빈 글이면 DB를 부르기 전에 RangeError다.
 import type { Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import type { SeatRebuildSource } from '../../domain/ports.js';
-import { REBUILD_LEASE_MS, type RebuildHold, type RebuildSale } from '../../domain/rebuild.js';
+import { REBUILD_LEASE_MS, type RebuildHold, type RebuildLedgerRow, type RebuildSale } from '../../domain/rebuild.js';
 import { SALE_UUID_PATTERN } from '../../domain/seat-sale.js';
+
+/** ledgerRows 한 질의의 좌석 ID 수 [가정] */
+const LEDGER_SEAT_CHUNK = 1_000;
 
 const assertEvent = (eventId: string): void => {
   if (!SALE_UUID_PATTERN.test(eventId)) throw new RangeError('회차 ID가 소문자 UUID가 아니다');
@@ -92,6 +96,28 @@ export class DrizzleSeatRebuildSource implements SeatRebuildSource {
                       where s.event_id = h.event_id and s.seat_id = h.seat_id and s.account_id = h.account_id and s.status in ('PENDING', 'SOLD'))
        order by h.seat_id, h.fencing_token`);
     return r.rows.map(holdOf);
+  }
+
+  async ledgerRows(eventId: string, seatIds: readonly string[]): Promise<RebuildLedgerRow[]> {
+    assertEvent(eventId);
+    for (const id of seatIds) if (!SALE_UUID_PATTERN.test(id)) throw new RangeError('좌석 ID가 소문자 UUID가 아니다');
+    const ids = [...new Set(seatIds)];
+    const out: RebuildLedgerRow[] = [];
+    // 좌석 ID는 배열 글 하나(`{…}`::uuid[])로, 1,000개씩 [가정] 나눠 묻는다. 기본 키(event_id, seat_id, fencing_token)의 앞 두 칸으로 닿는다
+    for (let k = 0; k < ids.length; k += LEDGER_SEAT_CHUNK) {
+      const chunk = ids.slice(k, k + LEDGER_SEAT_CHUNK);
+      const r = await this.database.db.execute(sql`
+        select seat_id::text as seat_id, hold_id::text as hold_id, status, fencing_token::text as fencing_token
+          from seat_hold
+         where event_id = ${eventId}::uuid and seat_id = any(${`{${chunk.join(',')}}`}::uuid[])
+         order by seat_id, fencing_token`);
+      for (const x of r.rows) {
+        const row = x as { seat_id: string; hold_id: string | null; status: string; fencing_token: unknown };
+        if (row.status !== 'HELD' && row.status !== 'RELEASED' && row.status !== 'EXPIRED') throw new Error(`원장 행 상태가 HELD·RELEASED·EXPIRED가 아니다: ${row.status}`);
+        out.push({ seatId: row.seat_id, holdId: row.hold_id, status: row.status, fencingToken: safeIntOf(row.fencing_token, '펜싱 토큰') });
+      }
+    }
+    return out;
   }
 
   async release(eventId: string, holder: string, o?: { setGen?: number }): Promise<void> {

@@ -570,10 +570,43 @@ export interface SagaOrders {
   /** 주문 하나. 없거나 소문자 UUID가 아니면 undefined */
   read(orderId: string): Promise<SagaOrderView | undefined>;
   /**
-   * 묶기가 OK인데 그 판 번호(pinned.gen)가 주문의 것과 다르면 주문 seat_gen을 그 번호로 적는다(명세 pin, 리뷰 M1).
-   * 주문이 ACCEPTED이고 seat_gen = fromGen일 때만 바꾼다(상태 칸은 건드리지 않는다). 바꾼 행이 없으면 false
+   * 묶기가 OK인 뒤(판매 예약 전) 주문 seat_gen을 묶기 결과의 판 번호(toGen)로, pinned_at을 지금으로 한 UPDATE에서 적는다(명세 pin·리뷰 M1, 마이그레이션 0008,
+   * BUILD_ORDER PRF-167 리뷰 고침 L5: 옛 recordPinnedGen을 합쳤다, docs/features/seat-hold.md §6 '주문 기준 되살리기' K1). 판 번호가 같아도(fromGen = toGen) 부른다.
+   * 주문이 ACCEPTED이고 seat_gen = fromGen일 때만 쓰고, pinned_at이 이미 있으면 처음 값을 둔다(상태 칸·이력은 건드리지 않는다). 바꾼 행이 없으면 false.
+   * 다시 만들기는 결제 접수했고 묶인 주문의 좌석을 원장 만료 시각과 상관없이 되살린다
+   * @throws RangeError 판 번호가 1 ~ int4 최댓값의 정수가 아님
    */
-  recordPinnedGen(orderId: string, fromGen: number, toGen: number): Promise<boolean>;
+  recordPinned(orderId: string, fromGen: number, toGen: number): Promise<boolean>;
+}
+
+/** 다시 만들기가 읽는 판매 주문의 holdId·구매 세션 ID(inventory RebuildSaleOrder와 같은 모양, BUILD_ORDER PRF-167 K3) */
+export interface RebuildOrderHold {
+  readonly orderId: string;
+  readonly holdId: string;
+  readonly purchaseSessionId: string;
+}
+
+/** 다시 만들기가 읽는 결제 접수했고 묶인 주문(inventory RebuildPinnedOrder와 같은 모양, BUILD_ORDER PRF-167 K1). 좌석은 줄 번호 차례 */
+export interface RebuildPinnedOrderView {
+  readonly orderId: string;
+  readonly accountId: string;
+  readonly holdId: string;
+  readonly purchaseSessionId: string;
+  readonly seatIds: string[];
+}
+
+/**
+ * 다시 만들기의 주문 근거를 주는 쪽(inventory RebuildOrderSource를 모양으로 채운다. booking은 inventory를 가져오지 않는다, BUILD_ORDER PRF-167).
+ * 운영 구현은 DrizzleRebuildOrders이고 시작 파일이 SeatRebuilder의 orders로 넘긴다
+ */
+export interface RebuildOrderReads {
+  /** 주문 ID들 → 그 회차 주문의 holdId·psid(없는 주문은 뺀다, 0개면 DB를 부르지 않고 []) */
+  saleOrders(eventId: string, orderIds: readonly string[]): Promise<RebuildOrderHold[]>;
+  /**
+   * 그 회차의 ACCEPTED이고 pinned_at이 있는 주문들과 그 좌석(주문 항목 전부, 줄 번호 차례). 진행 중 주문만 있는 작업 표 order_saga_job(RESERVE)에서 출발한다
+   * (리뷰 고침 H1). 원장(seat_hold)은 읽지 않는다: 원장 대조는 inventory가 한다(리뷰 고침 M2)
+   */
+  pinnedOrders(eventId: string): Promise<RebuildPinnedOrderView[]>;
 }
 
 /** 판매 예약 트랜잭션 입력 */

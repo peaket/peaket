@@ -57,6 +57,13 @@
       "when": 1793843421237,
       "tag": "0007_ticket_issue_job",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793853032370,
+      "tag": "0008_order_pinned_at",
+      "breakpoints": true
     }
   ]
 }

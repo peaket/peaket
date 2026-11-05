@@ -1038,14 +1038,24 @@ describe('DrizzleSaga 보낸 시각·임대·건너뛰기·판 번호 적기', (
     expect(await s.saga.abandon(a.o.id, 'RESERVE', held!.leaseUntilMs)).toBe('REMOVED');
   });
 
-  test('M1_recordPinnedGen: ACCEPTED이고 seat_gen이 그대로일 때만 새 판 번호로 적는다(상태 칸·이력은 그대로)', async () => {
+  test('M1_recordPinned(리뷰 고침 L5, PRF-167): ACCEPTED이고 seat_gen이 그대로일 때만 새 판 번호와 pinned_at을 한 UPDATE로 적고, pinned_at은 처음 값을 둔다(상태 칸·이력은 그대로)', async () => {
     const s = fresh();
     const a = await accepted(s, { seatGen: 1 });
-    expect(await s.saga.recordPinnedGen(a.o.id, 2, 3)).toBe(false);
-    expect(await s.saga.recordPinnedGen(a.o.id, 1, 3)).toBe(true);
+    const pinnedAt = async () => (await admin.pool.query<{ pinned_at: Date | null }>('select pinned_at from purchase_order where id = $1', [a.o.id])).rows[0]!.pinned_at;
+    expect(await s.saga.recordPinned(a.o.id, 2, 3)).toBe(false);
+    expect(await pinnedAt()).toBeNull();
+    expect(await s.saga.recordPinned(a.o.id, 1, 3)).toBe(true);
     expect(await orderRow(a.o.id)).toMatchObject({ status: 'ACCEPTED', seat_gen: 3, event_seq: 3 });
+    const first = await pinnedAt();
+    expect(first).not.toBeNull();
+    // 같은 판 번호로 다시(다시 묶기 OK): 판 번호 그대로, pinned_at은 처음 값
+    expect(await s.saga.recordPinned(a.o.id, 3, 3)).toBe(true);
+    expect(await pinnedAt()).toEqual(first);
     await walk(s, a.o, ['T7']);
-    expect(await s.saga.recordPinnedGen(a.o.id, 3, 4)).toBe(false);
+    expect(await s.saga.recordPinned(a.o.id, 3, 4)).toBe(false);
     expect((await orderRow(a.o.id))?.seat_gen).toBe(3);
+    // 소문자 UUID가 아닌 주문 ID는 false, 판 번호 모양이 틀리면 RangeError
+    expect(await s.saga.recordPinned('NOT-A-UUID', 1, 1)).toBe(false);
+    await expect(s.saga.recordPinned(a.o.id, 0, 1)).rejects.toThrow(RangeError);
   });
 });

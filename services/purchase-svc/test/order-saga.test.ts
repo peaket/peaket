@@ -93,7 +93,7 @@ type Call =
   | 'jobs.release'
   | 'jobs.abandon'
   | 'orders.read'
-  | 'orders.recordPinnedGen'
+  | 'orders.recordPinned'
   | 'reserve.reserve'
   | 'failures.fail'
   | 'confirmSent.done'
@@ -281,6 +281,9 @@ class SagaFakes {
     },
   };
 
+  /** recordPinned를 부른 주문 ID(차례대로) */
+  readonly pinnedOrders: string[] = [];
+
   readonly orders = {
     read: async (orderId: string): Promise<SagaOrderView | undefined> => {
       this.calls.push('orders.read');
@@ -288,9 +291,13 @@ class SagaFakes {
       if (err) throw err;
       return this.orderRows.get(orderId);
     },
-    /** 묶기가 OK인데 판 번호가 다르면 실행기가 주문 seat_gen을 그 번호로 적는다(ACCEPTED이고 seat_gen = from일 때만) */
-    recordPinnedGen: async (orderId: string, fromGen: number, toGen: number): Promise<boolean> => {
-      this.calls.push('orders.recordPinnedGen');
+    /**
+     * 묶기 OK 뒤 실행기가 주문 seat_gen(묶기 결과의 판 번호)과 pinned_at을 한 번에 적는다(ACCEPTED이고 seat_gen = from일 때만 true,
+     * BUILD_ORDER PRF-167, 리뷰 고침 L5: 옛 recordPinnedGen을 합쳤다)
+     */
+    recordPinned: async (orderId: string, fromGen: number, toGen: number): Promise<boolean> => {
+      this.calls.push('orders.recordPinned');
+      this.pinnedOrders.push(orderId);
       this.pinnedGens.push({ orderId, fromGen, toGen });
       const o = this.orderRows.get(orderId);
       if (!o || o.status !== 'ACCEPTED' || o.seatGen !== fromGen) return false;
@@ -604,9 +611,38 @@ describe('RESERVE ② 좌석 묶기', () => {
   });
 });
 
+describe('RESERVE ② 묶기 OK 뒤 pinned_at 적기(PRF-167, K1)', () => {
+  test('ST26_④_묶기가 OK면 판매 예약 전에 주문 판 번호와 pinned_at을 한 번에 적고(recordPinned(주문, 주문 판 번호, 묶기 판 번호), 판 번호가 같아도 부른다), 묶기가 실패하면 적지 않는다', async () => {
+    const order = sagaOrder();
+    fx.put(order);
+    fx.pinQueue = [{ status: 'OK', gen: SEAT_GEN }];
+    expect(await runner().reserveStep(sagaJob(), order)).toEqual({ kind: 'ADVANCED', next: 'CONFIRM' });
+    expect(fx.pinnedOrders).toEqual([ORDER_ID]);
+    expect(fx.pinnedGens).toEqual([{ orderId: ORDER_ID, fromGen: SEAT_GEN, toGen: SEAT_GEN }]);
+    expectInOrder(fx.calls, ['pins.pin', 'orders.recordPinned', 'reserve.reserve']);
+  });
+
+  test('ST26_④_묶기가 TAKEN이면 pinned_at을 적지 않는다', async () => {
+    const order = sagaOrder();
+    fx.put(order);
+    fx.pinQueue = [{ status: 'TAKEN' }];
+    await runner().reserveStep(sagaJob(), order);
+    notCalled('orders.recordPinned');
+  });
+
+  test('ST26_④_pinned_at을 적지 못하면(주문이 그 사이 ACCEPTED가 아님) 판매 예약을 부르지 않고 건너뛴다', async () => {
+    const order = sagaOrder();
+    fx.put({ ...order, status: 'FAILED' });
+    fx.pinQueue = [{ status: 'OK', gen: SEAT_GEN }];
+    const out = await runner().reserveStep(sagaJob(), order);
+    expect(out).toMatchObject({ kind: 'SKIPPED', reason: 'ORDER_STATE' });
+    notCalled('reserve.reserve');
+  });
+});
+
 describe('RESERVE ③ 판매 예약 트랜잭션', () => {
   // 리뷰 고침 M1(2026-11-05, 명세 pin·saleStep): GEN_CHANGED 뒤에는 주문 seat_gen을 새 번호로 고치지 않고 그 번호 그대로 다시 묶는다
-  // (내 홀드가 남았을 때만 OK, 빈 좌석이면 STALE_GEN). 묶기가 OK면 그 결과의 판 번호를 주문 seat_gen에 적고(recordPinnedGen) 그 번호로 판매 예약한다
+  // (내 홀드가 남았을 때만 OK, 빈 좌석이면 STALE_GEN). 묶기가 OK면 그 결과의 판 번호를 주문 seat_gen에 적고(recordPinned, 리뷰 고침 L5로 pinned_at과 합침) 그 번호로 판매 예약한다
   test('M1_OPEN15_판매 예약이 GEN_CHANGED면 주문 판 번호를 고치지 않고 그 번호 그대로 다시 묶는다. 묶기가 OK(새 판 번호)면 그 번호를 주문에 적고 그 번호로 판매 예약한다', async () => {
     const order = sagaOrder();
     fx.put(order);
@@ -619,9 +655,13 @@ describe('RESERVE ③ 판매 예약 트랜잭션', () => {
     const out = await runner().reserveStep(sagaJob(), order);
     expect(out).toEqual({ kind: 'ADVANCED', next: 'CONFIRM' });
     expect(fx.pinInputs.map((p) => p.orderGen)).toEqual([SEAT_GEN, SEAT_GEN]);
-    expect(fx.pinnedGens).toEqual([{ orderId: ORDER_ID, fromGen: SEAT_GEN, toGen: SEAT_GEN + 2 }]);
+    // 묶기가 OK일 때마다 한 번(리뷰 고침 L5): 처음은 같은 판 번호, 다시 묶기는 새 판 번호
+    expect(fx.pinnedGens).toEqual([
+      { orderId: ORDER_ID, fromGen: SEAT_GEN, toGen: SEAT_GEN },
+      { orderId: ORDER_ID, fromGen: SEAT_GEN, toGen: SEAT_GEN + 2 },
+    ]);
     expect(fx.reserveInputs.map((r) => r.orderGen)).toEqual([SEAT_GEN, SEAT_GEN + 2]);
-    expectInOrder(fx.calls, ['pins.pin', 'reserve.reserve', 'pins.pin', 'orders.recordPinnedGen', 'reserve.reserve']);
+    expectInOrder(fx.calls, ['pins.pin', 'orders.recordPinned', 'reserve.reserve', 'pins.pin', 'orders.recordPinned', 'reserve.reserve']);
     notCalled('failures.fail', 'jobs.reschedule');
   });
 
@@ -636,7 +676,8 @@ describe('RESERVE ③ 판매 예약 트랜잭션', () => {
     expect(await runner().reserveStep(sagaJob(), order)).toEqual({ kind: 'FAILED', transition: 'T8', reason: 'STALE_GEN' });
     expect(fx.pinInputs.map((p) => p.orderGen)).toEqual([SEAT_GEN, SEAT_GEN]);
     expect(fx.orderRows.get(ORDER_ID)?.seatGen).toBe(SEAT_GEN);
-    notCalled('orders.recordPinnedGen');
+    // 처음 묶기(OK)만 적었다. 두 번째 묶기(STALE_GEN)는 적지 않는다
+    expect(fx.pinnedGens).toEqual([{ orderId: ORDER_ID, fromGen: SEAT_GEN, toGen: SEAT_GEN }]);
   });
 
   test(`FR011_OPEN15_판 번호가 SAGA_GEN_RESTART_MAX(${SAGA_GEN_RESTART_MAX})번 바뀌어도 같은 실행에서 묶기부터 다시 해 RESERVED면 ADVANCED다`, async () => {

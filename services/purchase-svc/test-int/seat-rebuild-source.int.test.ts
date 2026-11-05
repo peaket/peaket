@@ -374,3 +374,34 @@ describe('코드 리뷰 재현(PRF-143)', () => {
     for (const bad of [0, -1, 1.5, Number.NaN]) await expect(podA.release(e, 'pod-a', { setGen: bad })).rejects.toBeInstanceOf(RangeError);
   });
 });
+
+describe('ledgerRows: 그 회차·그 좌석들의 원장 행 전부(BUILD_ORDER PRF-167 리뷰 고침 M2)', () => {
+  test('ST26_그 좌석들의 행을 상태·holdId·만료와 상관없이 좌석·holdId·상태·토큰으로 준다(좌석 ID 1,000개 넘게·겹친 ID도). 다른 좌석·다른 회차는 빠지고, 좌석 0개면 DB를 부르지 않고 []다 [S-T26]', async () => {
+    const e = uuidv7(systemClock);
+    const other = uuidv7(systemClock);
+    const now = Date.now();
+    const [s1, s2, s3] = [randomUUID(), randomUUID(), randomUUID()];
+    const base = { accountId: randomUUID(), kind: 'FAN' as const, heldAtMs: now - MIN, purchaseSessionId: randomUUID() };
+    const h1 = randomUUID();
+    const rows: HoldSeed[] = [
+      { ...base, seatId: s1, token: T1, status: 'EXPIRED', expiresAtMs: now - 10 * MIN, holdId: h1 },
+      { ...base, seatId: s1, token: T1 + 5, status: 'HELD', expiresAtMs: now - 5 * MIN, holdId: randomUUID() },
+      { ...base, seatId: s2, token: T1 + 1, status: 'RELEASED', expiresAtMs: now + MIN, holdId: null, purchaseSessionId: null },
+    ];
+    for (const h of rows) await putHold(e, h);
+    // 고르지 않은 좌석·다른 회차의 같은 좌석
+    await putHold(e, { ...base, seatId: s3, token: T1, status: 'HELD', expiresAtMs: now + MIN, holdId: randomUUID() });
+    await putHold(other, { ...base, seatId: s1, token: T1, status: 'HELD', expiresAtMs: now + MIN, holdId: randomUUID() });
+    const filler = Array.from({ length: 1_100 }, () => randomUUID());
+    const got = await podA.ledgerRows(e, [s1, ...filler, s2, s1]);
+    expect(got).toHaveLength(3);
+    const key = (r: { seatId: string; fencingToken: number }) => `${r.seatId}|${r.fencingToken}`;
+    expect([...got].sort((a, b) => (key(a) < key(b) ? -1 : 1))).toEqual(
+      rows.map((h) => ({ seatId: h.seatId, holdId: h.holdId, status: h.status, fencingToken: h.token })).sort((a, b) => (key(a) < key(b) ? -1 : 1)),
+    );
+    for (const r of got) expect(Number.isSafeInteger(r.fencingToken)).toBe(true);
+    expect(await podA.ledgerRows(e, [])).toEqual([]);
+    await expect(podA.ledgerRows(e, ['A01'])).rejects.toBeInstanceOf(RangeError);
+    await expect(podA.ledgerRows('evt', [s1])).rejects.toBeInstanceOf(RangeError);
+  });
+});

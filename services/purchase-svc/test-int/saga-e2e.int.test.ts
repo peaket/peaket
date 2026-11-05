@@ -20,13 +20,16 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { createDatabase, createHotRedis, type Database, ensureOutboxPartitions, fakeClock, type HotRedis, requestFingerprint, uuidv7 } from '@peaket/platform';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { migratePurchase } from '../scripts/migrate.mjs';
+import { ensureSeatHoldPartitions, migratePurchase } from '../scripts/migrate.mjs';
 import {
   type ConfirmCommand,
   type ConfirmOutcome,
   DrizzleOrderAccepts,
   DrizzleOrderStore,
+  DrizzleRebuildOrders,
   DrizzleSaga,
   InventoryOrderSeatPins,
   InventorySeatSlots,
@@ -37,6 +40,7 @@ import {
   type PaymentConfirms,
   type PaymentRefs,
   type SagaLog,
+  type SagaOrders,
   SeatMapSagaConfigs,
 } from '../src/modules/booking/index.js';
 import {
@@ -87,6 +91,8 @@ beforeAll(async () => {
   }
   clock = fakeClock({ now: Date.now() + samples.sort((a, b) => a - b)[2]! });
   await migratePurchase(pgServer!.url);
+  // 홀드 원장(seat_hold) 월 파티션(PRF-167 시험이 원장 HELD 행을 넣는다)
+  await ensureSeatHoldPartitions(pgServer!.url);
   database = createDatabase({ url: pgServer!.url, profile: 'general', max: 10, applicationName: 'saga-e2e' });
   admin = createDatabase({ url: pgServer!.url, profile: 'general', max: 4, applicationName: 'saga-e2e-admin' });
   await ensureOutboxPartitions(admin, clock);
@@ -128,13 +134,26 @@ function recordingLog(): SagaLog & { lines: { kind: string; e: unknown }[] } {
 }
 const manualTimer = { setInterval: () => 1, clearInterval: () => {} };
 
-function assemble(confirms = recordingConfirms(), o: { pins?: OrderSeatPins } = {}) {
+/** afterPinned: 실행기가 주문 pinned_at을 적은(recordPinned가 true) 바로 뒤에 부른다(PRF-167, 묶은 뒤 판매 예약 전의 틈) */
+function assemble(confirms = recordingConfirms(), o: { pins?: OrderSeatPins; afterPinned?: (orderId: string) => Promise<void> } = {}) {
   const store = new DrizzleOrderStore({ clock });
   const saga = new DrizzleSaga({ database, store, sales: new DrizzleSeatSales(database), clock });
   const log = recordingLog();
+  const afterPinned = o.afterPinned;
+  const orders: SagaOrders =
+    afterPinned === undefined
+      ? saga
+      : {
+          read: (id) => saga.read(id),
+          recordPinned: async (id, from, to) => {
+            const ok = await saga.recordPinned(id, from, to);
+            if (ok) await afterPinned(id);
+            return ok;
+          },
+        };
   const runner = new OrderSagaRunner({
     jobs: saga,
-    orders: saga,
+    orders,
     reserve: saga,
     failures: saga,
     confirmSent: saga,
@@ -157,9 +176,12 @@ interface World {
   refs: SeatRef[];
   keepUntilMs: number;
 }
-/** 회차 하나: 좌석맵 판(구역 A 등급 R 6석, 구역 B 등급 S 4석, 1인 한도 4)과 좌석 Redis 판매 열기(세대 키 gen 1) */
-async function world(): Promise<World> {
-  const eventId = randomUUID();
+/**
+ * 회차 하나: 좌석맵 판(구역 A 등급 R 6석, 구역 B 등급 S 4석, 1인 한도 4)과 좌석 Redis 판매 열기(세대 키 gen 1).
+ * 홀드 원장(seat_hold, 회차 ID UUIDv7 범위 월 파티션)에 행을 넣는 시험은 eventId로 uuidv7을 준다(PRF-167)
+ */
+async function world(o: { eventId?: string } = {}): Promise<World> {
+  const eventId = o.eventId ?? randomUUID();
   const r = Array.from({ length: 6 }, () => randomUUID()).sort();
   const s = Array.from({ length: 4 }, () => randomUUID()).sort();
   const refs: SeatRef[] = [
@@ -591,5 +613,303 @@ describe('다시 만들기와 겹친 묶기(리뷰 고침 M1, 명세 pin·saleSt
     expect(await salesOf(w.eventId)).toEqual([]);
     for (const s of p.hold.seats) expect(await bit(w.eventId, s.index), `좌석 ${s.index}`).toBe(0);
     expect(await jobOf(p.o.id)).toBeUndefined();
+  });
+});
+
+// ───────────────────────────── 주문 기준 되살리기(BUILD_ORDER PRF-167, K1·K3) ─────────────────────────────
+
+/** 전체 유실 뒤 주문 근거까지 읽어 다시 만든다(SeatRebuilder + DrizzleRebuildOrders). 다시 만든 판 번호 */
+async function loseAndRebuildByOrders(w: World): Promise<number> {
+  const keys: string[] = [];
+  let cursor = '0';
+  do {
+    const [next, items] = (await cmd(seatKeys.epoch(w.eventId), ['SCAN', cursor, 'MATCH', `s:{event:${w.eventId}}:*`, 'COUNT', '1000'])) as [unknown, unknown[]];
+    for (const x of items) keys.push(String(x));
+    cursor = String(next);
+  } while (cursor !== '0');
+  for (const k of keys) await cmd(k, ['DEL', k]);
+  await cmd(seatKeys.ctlEvents(), ['SREM', seatKeys.ctlEvents(), w.eventId]);
+  const r = await new SeatRebuilder({
+    source: new DrizzleSeatRebuildSource(database),
+    target: new RedisSeatStore(redis),
+    seatMap,
+    holder: 'saga-e2e-rebuild-orders',
+    orders: new DrizzleRebuildOrders(database),
+    clock,
+  }).rebuild(w.eventId, { keepUntilMs: w.keepUntilMs });
+  expect(r.result).toBe('REBUILT');
+  return (await q<{ gen: number }>('select gen from seat_rebuild where event_id = $1', [w.eventId]))[0]!.gen;
+}
+const pinnedAtOf = async (id: string) => (await q<{ pinned_at: Date | null }>('select pinned_at from purchase_order where id = $1', [id]))[0]?.pinned_at ?? null;
+/** 원장 행 하나(seat_hold, 회차 ID가 UUIDv7인 세계에서만. 상태 기본 HELD) */
+const putLedgerHeld = (
+  eventId: string,
+  r: { seatId: string; accountId: string; token: number; heldAtMs: number; expiresAtMs: number; holdId: string; psid: string; status?: 'HELD' | 'RELEASED' | 'EXPIRED' },
+) =>
+  q(
+    `insert into seat_hold (event_id, seat_id, account_id, fencing_token, status, kind, held_at, expires_at, hold_id, purchase_session_id)
+     values ($1, $2, $3, $4, $9, 'FAN', $5, $6, $7, $8)`,
+    [eventId, r.seatId, r.accountId, r.token, new Date(r.heldAtMs), new Date(r.expiresAtMs), r.holdId, r.psid, r.status ?? 'HELD'],
+  );
+/**
+ * 홀드 원장 적재 흉내(PRF-167): 그 홀드의 좌석마다 홀드 Hash의 토큰·잡은 시각·만료 시각으로 원장 HELD 행을 넣는다(묶기 전에 부른다). 넣은 토큰(좌석 차례).
+ * expiresAtMs를 주면 원장 만료 시각을 그 값으로 둔다(묶인 채 홀드 시간이 지남). seats를 주면 그 좌석만, status를 주면 그 상태로 넣는다
+ */
+async function relayHeld(p: Placed, o: { expiresAtMs?: number; seats?: SeatRef[]; status?: 'HELD' | 'RELEASED' | 'EXPIRED' } = {}): Promise<number[]> {
+  const tokens: number[] = [];
+  for (const s of o.seats ?? p.hold.seats) {
+    const h = await holdHash(p.w.eventId, s.index);
+    expect(h, `좌석 ${s.index}의 홀드 Hash`).not.toBeNull();
+    tokens.push(Number(h!.fence));
+    await putLedgerHeld(p.w.eventId, {
+      seatId: s.seatId,
+      accountId: p.o.accountId,
+      token: Number(h!.fence),
+      heldAtMs: Number(h!.heldAt),
+      expiresAtMs: o.expiresAtMs ?? Number(h!.exp),
+      holdId: p.hold.holdId,
+      psid: p.hold.purchaseSessionId,
+      ...(o.status !== undefined ? { status: o.status } : {}),
+    });
+  }
+  return tokens;
+}
+/** DrizzleRebuildOrders에 넘겨 DB 문장을 엿보는 대역(문장마다 sqls에 쌓고 실제 DB로 보낸다) */
+function spyDatabase(): { db: Database; sqls: SQL[] } {
+  const sqls: SQL[] = [];
+  const db = {
+    db: {
+      execute: (x: SQL) => {
+        sqls.push(x);
+        return database.db.execute(x);
+      },
+    },
+  } as unknown as Database;
+  return { db, sqls };
+}
+/** EXPLAIN(FORMAT JSON) 계획의 노드들(평평하게) */
+function planNodes(plan: Record<string, unknown>): Record<string, unknown>[] {
+  const kids = (plan.Plans as Record<string, unknown>[] | undefined) ?? [];
+  return [plan, ...kids.flatMap(planNodes)];
+}
+
+describe('주문 기준 되살리기(PRF-167, K1·K3)', () => {
+  test('ST26_④_recordPinned(리뷰 고침 L5): ACCEPTED이고 seat_gen이 그대로인 주문에만 판 번호와 pinned_at을 한 번에 적고(true), 다시 불러도 pinned_at은 처음 값 그대로이며, 없는 주문·ACCEPTED가 아닌 주문·판 번호가 다른 주문은 false다(상태 칸은 그대로) [ASVS v5.0.0-2.3.4]', async () => {
+    const w = await world();
+    const a = assemble();
+    const p = await placeAndAccept(a, w);
+    expect(await pinnedAtOf(p.o.id)).toBeNull();
+    expect(await a.saga.recordPinned(p.o.id, 2, 3)).toBe(false);
+    expect(await pinnedAtOf(p.o.id)).toBeNull();
+    expect(await a.saga.recordPinned(p.o.id, 1, 1)).toBe(true);
+    const first = await pinnedAtOf(p.o.id);
+    expect(first).not.toBeNull();
+    clock.advance(5_000);
+    expect(await a.saga.recordPinned(p.o.id, 1, 2)).toBe(true);
+    expect(await pinnedAtOf(p.o.id)).toEqual(first);
+    expect(await orderRow(p.o.id)).toMatchObject({ status: 'ACCEPTED', seat_gen: 2 });
+    expect(await a.saga.recordPinned(randomUUID(), 1, 1)).toBe(false);
+    // ACCEPTED가 아닌 주문(Saga가 판매 예약까지 간 주문)
+    const q2 = await placeAndAccept(a, w, { seats: [w.refs[3]!] });
+    expect(await a.runner.runOne(q2.o.id)).toEqual({ kind: 'DONE' });
+    await q('update purchase_order set pinned_at = null where id = $1', [q2.o.id]);
+    expect(await a.saga.recordPinned(q2.o.id, 1, 1)).toBe(false);
+    expect(await pinnedAtOf(q2.o.id)).toBeNull();
+  });
+
+  test('ST26_④_Saga가 묶기 OK 뒤 주문 pinned_at을 적는다(판매 예약 RESERVED까지 간 주문에 남는다) [ASVS v5.0.0-2.3.4]', async () => {
+    const w = await world();
+    const a = assemble();
+    const p = await placeAndAccept(a, w);
+    expect(await a.runner.runOne(p.o.id)).toEqual({ kind: 'DONE' });
+    expect((await orderRow(p.o.id))!.status).toBe('RESERVED');
+    expect(await pinnedAtOf(p.o.id)).not.toBeNull();
+  });
+
+  test('ST26_④_K1: 묶어 pinned_at을 적은 뒤 판매 예약 전에 전체 유실이 나도(원장에 그 홀드의 HELD 행이 있고 만료 시각은 지남) 다시 만들기가 그 주문의 좌석을 holdId·psid 그대로 살아 있는 홀드(묶음 아님, 만료 = 지금 + 7분, 만료 인덱스에 있음)로 되살리고, Saga의 다음 묶기가 내 홀드로 OK라 RESERVED까지 간다 [ASVS v5.0.0-15.4.1]', async () => {
+    const w = await world({ eventId: uuidv7(clock) });
+    let first = true;
+    const gens: number[] = [];
+    const restored: Array<Record<string, string> | null> = [];
+    const expiry: boolean[] = [];
+    let rebuiltAt = 0;
+    let fenceAfter = 0;
+    // 첫 묶기 뒤 실행기가 pinned_at을 적은 바로 뒤(판매 예약 전)에 전체 유실과 다시 만들기
+    const a = assemble(recordingConfirms(), {
+      afterPinned: async () => {
+        if (!first) return;
+        first = false;
+        rebuiltAt = clock.now();
+        gens.push(await loseAndRebuildByOrders(w));
+        for (const s of [w.refs[0]!, w.refs[1]!]) {
+          restored.push(await holdHash(w.eventId, s.index));
+          expiry.push(await inExpiry(w.eventId, s.index));
+        }
+        fenceAfter = Number(await cmd(seatKeys.fence(w.eventId), ['GET', seatKeys.fence(w.eventId)]));
+      },
+    });
+    const p = await placeAndAccept(a, w);
+    // 원장 적재(묶기 전 HELD 사건). 원장 만료 시각은 이미 지났다(묶인 채 홀드 시간이 지남): 만료 전 원장 홀드로는 되살아나지 않는다
+    const tokens = await relayHeld(p, { expiresAtMs: Math.min(clock.now(), Date.now()) - MIN });
+    expect(await a.runner.runOne(p.o.id)).toEqual({ kind: 'DONE' });
+    expect(gens).toEqual([2]);
+    expect(restored).toHaveLength(2);
+    for (const h of restored) {
+      expect(h).toMatchObject({ holdId: p.hold.holdId, owner: p.o.accountId, psid: p.hold.purchaseSessionId, kind: 'FAN' });
+      expect(h!.pin === '1').toBe(false);
+      expect(Number(h!.exp)).toBe(rebuiltAt + 420_000);
+    }
+    // 되살린 홀드의 펜싱 토큰은 그 원장 HELD 행의 토큰이고(리뷰 고침 L4), 끝내기가 펜싱 카운터를 그 이상으로 되살렸다
+    expect(restored.map((h) => h!.fence)).toEqual(tokens.map(String));
+    expect(fenceAfter).toBeGreaterThanOrEqual(Math.max(...tokens));
+    expect(expiry).toEqual([true, true]);
+    expect(await orderRow(p.o.id)).toEqual({ status: 'RESERVED', failure_reason: null, seat_gen: 2 });
+    expect((await salesOf(w.eventId)).map((x) => x.status)).toEqual(['PENDING', 'PENDING']);
+  });
+
+  test('ST26_④_K3: 원장 행이 없는 판매 좌석을 다시 만들면 holdId·psid가 그 주문의 것이라, 승인 거절 뒤 그 시도의 holdId로 부른 실패 해제가 그 좌석을 푼다 [ASVS v5.0.0-15.4.2]', async () => {
+    const w = await world();
+    const a = assemble();
+    const p = await placeAndAccept(a, w);
+    expect(await a.runner.runOne(p.o.id)).toEqual({ kind: 'DONE' });
+    await loseAndRebuildByOrders(w);
+    for (const s of p.hold.seats) {
+      expect(await holdHash(w.eventId, s.index)).toMatchObject({ holdId: p.hold.holdId, owner: p.o.accountId, psid: p.hold.purchaseSessionId, pin: '1' });
+    }
+    const r = await new RedisSeatStore(redis).releaseFailed({ eventId: w.eventId, accountId: p.o.accountId, holdId: p.hold.holdId, seats: p.hold.seats, keepUntilMs: w.keepUntilMs });
+    expect(r).toMatchObject({ kind: 'OK', released: p.hold.seats.length });
+    for (const s of p.hold.seats) expect(await bit(w.eventId, s.index)).toBe(0);
+  });
+
+  test('ST26_④_우선순위: 같은 좌석에 활성 판매와 다른 계정의 묶인 주문(원장 HELD 행 있음)이 있으면 판매가 이기고(묶음·판매 계정·판매 주문의 holdId), 묶인 주문의 나머지 좌석은 살아 있는 홀드다. 보유 수는 근거를 합쳐 센다 [ASVS v5.0.0-15.4.1]', async () => {
+    const w = await world({ eventId: uuidv7(clock) });
+    const a = assemble();
+    const sold = await placeAndAccept(a, w);
+    expect(await a.runner.runOne(sold.o.id)).toEqual({ kind: 'DONE' });
+    const other = await placeAndAccept(a, w, { seats: [w.refs[2]!] });
+    // 묶인 주문(ACCEPTED·pinned_at)의 원장 HELD 행(그 홀드의 좌석)
+    await relayHeld(other);
+    // 묶인 주문의 항목과 원장에 판매 좌석 하나를 더 넣는다(손으로 만든 겹침. 판매 주문의 홀드는 원장에 없어 좌석마다 HELD 하나 제약에 걸리지 않는다)
+    const s0 = w.refs[0]!;
+    await q('insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price) values ($1, 2, $2, $3, $4, $5)', [other.o.id, s0.seatId, s0.tierId, s0.sectionId, PRICES.R]);
+    await putLedgerHeld(w.eventId, {
+      seatId: s0.seatId,
+      accountId: other.o.accountId,
+      token: 1,
+      heldAtMs: clock.now(),
+      expiresAtMs: clock.now() + 7 * MIN,
+      holdId: other.hold.holdId,
+      psid: other.hold.purchaseSessionId,
+    });
+    await q('update purchase_order set pinned_at = now() where id = $1', [other.o.id]);
+    await loseAndRebuildByOrders(w);
+    expect(await holdHash(w.eventId, s0.index)).toMatchObject({ holdId: sold.hold.holdId, owner: sold.o.accountId, pin: '1' });
+    const h2 = await holdHash(w.eventId, w.refs[2]!.index);
+    expect(h2).toMatchObject({ holdId: other.hold.holdId, owner: other.o.accountId, psid: other.hold.purchaseSessionId });
+    expect(h2!.pin === '1').toBe(false);
+    const quota = async (acc: string) => Number(await cmd(seatKeys.quota(w.eventId, acc), ['GET', seatKeys.quota(w.eventId, acc)]));
+    expect([await quota(sold.o.accountId), await quota(other.o.accountId)]).toEqual([2, 1]);
+  });
+
+  test('ST26_④_K1(리뷰 B①): 결제 접수·묶인 주문의 세 좌석 가운데 원장 행이 RELEASED인 좌석·원장 행이 없는 좌석은 되살리지 않고, HELD 행이 있는 셋째 좌석만 되살린다(보유 수 1) [ASVS v5.0.0-15.4.1]', async () => {
+    const w = await world({ eventId: uuidv7(clock) });
+    const a = assemble();
+    const [s1, s2, s3] = [w.refs[0]!, w.refs[1]!, w.refs[2]!];
+    const p = await placeAndAccept(a, w, { seats: [s1, s2, s3] });
+    await relayHeld(p, { seats: [s1], status: 'RELEASED' });
+    await relayHeld(p, { seats: [s3] });
+    expect(await a.saga.recordPinned(p.o.id, 1, 1)).toBe(true);
+    await loseAndRebuildByOrders(w);
+    expect([await bit(w.eventId, s1.index), await bit(w.eventId, s2.index), await bit(w.eventId, s3.index)]).toEqual([0, 0, 1]);
+    expect(await holdHash(w.eventId, s3.index)).toMatchObject({ holdId: p.hold.holdId, owner: p.o.accountId, psid: p.hold.purchaseSessionId });
+    expect(Number(await cmd(seatKeys.quota(w.eventId, p.o.accountId), ['GET', seatKeys.quota(w.eventId, p.o.accountId)]))).toBe(1);
+  });
+
+  test('ST26_④_K1(리뷰 B②): pinned_at이 있고 원장 HELD 행이 남았어도 주문이 ACCEPTED가 아니면(FAILED) 되살리지 않는다 [ASVS v5.0.0-15.4.1]', async () => {
+    const w = await world({ eventId: uuidv7(clock) });
+    const a = assemble();
+    const p = await placeAndAccept(a, w);
+    // 원장 행은 만료된 HELD(원장 홀드 길로는 되살아나지 않아 주문 근거만 본다). 앞 시험이 가짜 시계를 앞으로 돌렸을 수 있어
+    // DB의 now()와 견주는 만료 시각은 실제 시각 기준으로도 지난 값으로 둔다
+    await relayHeld(p, { expiresAtMs: Math.min(clock.now(), Date.now()) - MIN });
+    expect(await a.saga.recordPinned(p.o.id, 1, 1)).toBe(true);
+    // 손으로 만든 어긋남: 작업 행(RESERVE)은 그대로 두고 주문만 FAILED로(상태 조건만 이 주문을 거른다).
+    // 상태 이력 지연 제약(order_status_has_event)이 이력 행 없는 상태 쓰기를 막으므로 같은 문장에서 이력 행도 넣는다
+    await q(
+      `with e as (insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at)
+                  select id, event_seq + 1, status, 'FAILED', 'TEST', 'test', now() from purchase_order where id = $1)
+       update purchase_order set status = 'FAILED', event_seq = event_seq + 1 where id = $1`,
+      [p.o.id],
+    );
+    await loseAndRebuildByOrders(w);
+    for (const s of p.hold.seats) expect(await bit(w.eventId, s.index)).toBe(0);
+  });
+
+  test('리뷰 고침 H1: 묶인 주문 읽기(pinnedOrders)는 작업 표 order_saga_job에서 출발해 purchase_order·order_item을 색인 조건으로만 읽는다(EXPLAIN에 purchase_order 통째 읽기가 없다) [ASVS v5.0.0-15.4.1]', async () => {
+    const w = await world();
+    const a = assemble();
+    const p = await placeAndAccept(a, w);
+    expect(await a.saga.recordPinned(p.o.id, 1, 1)).toBe(true);
+    const spy = spyDatabase();
+    const got = await new DrizzleRebuildOrders(spy.db).pinnedOrders(w.eventId);
+    expect(got).toEqual([{ orderId: p.o.id, accountId: p.o.accountId, holdId: p.hold.holdId, purchaseSessionId: p.hold.purchaseSessionId, seatIds: p.hold.seats.map((s) => s.seatId) }]);
+    expect(spy.sqls).toHaveLength(1);
+    const { sql: text, params } = new PgDialect().sqlToQuery(spy.sqls[0]!);
+    // 시험 DB는 주문·항목 표가 작아 계획기가 그 표를 기본 키 차례로 통째 읽는 편(정렬을 아낌)을 고른다. 운영처럼 두 표가 작업 표보다 훨씬 크게
+    // 다른 회차 주문 2만 건(항목 하나씩)을 같은 트랜잭션에 넣고 통계를 새로 낸 뒤(되돌려 남기지 않는다), 통째 읽기·해시·병합 조인을 꺼서 색인으로 닿는 길을 본다
+    const client = await admin.pool.connect();
+    let nodes: Record<string, unknown>[];
+    try {
+      await client.query('begin');
+      await client.query(
+        `with o as (insert into purchase_order (id, account_id, event_id, status, amount, event_seq, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
+                    select gen_random_uuid(), gen_random_uuid(), $1::uuid, 'CONFIRMED', 0, 1, 'k', 'v1', 'PICK', now(), gen_random_uuid(), 'ps' from generate_series(1, 20000)
+                    returning id),
+              e as (insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) select id, 1, null, 'CONFIRMED', 'TEST', 'test', now() from o)
+         insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price) select id, 1, gen_random_uuid(), 'R', 'A', 0 from o`,
+        [uuidv7(clock)],
+      );
+      for (const t of ['purchase_order', 'order_item', 'order_saga_job']) await client.query(`analyze ${t}`);
+      await client.query('set local enable_seqscan = off');
+      await client.query('set local enable_hashjoin = off');
+      await client.query('set local enable_mergejoin = off');
+      const r = await client.query<{ 'QUERY PLAN': [{ Plan: Record<string, unknown> }] }>(`explain (format json) ${text}`, params);
+      nodes = planNodes(r.rows[0]!['QUERY PLAN'][0].Plan);
+      await client.query('rollback');
+    } finally {
+      client.release();
+    }
+    const on = (rel: string) => nodes.filter((n) => n['Relation Name'] === rel);
+    expect(on('order_saga_job').length).toBeGreaterThan(0);
+    for (const rel of ['purchase_order', 'order_item']) {
+      expect(on(rel).length, rel).toBeGreaterThan(0);
+      for (const n of on(rel)) {
+        expect(n['Node Type'], `${rel} ${JSON.stringify(n)}`).not.toBe('Seq Scan');
+        expect(n['Index Cond'] ?? n['Recheck Cond'], `${rel}는 색인 조건으로 읽는다: ${JSON.stringify(n)}`).toBeDefined();
+      }
+    }
+  });
+
+  test('saleOrders: 주문 ID가 1,000개를 넘으면(겹친 ID 포함) 겹치지 않게 나눠 묻고(두 문장) 그 회차에 있는 주문만 한 번씩 돌려준다. 0개면 DB를 부르지 않고 [], 소문자 UUID가 아니면 RangeError [ASVS v5.0.0-2.3.4]', async () => {
+    const w = await world();
+    const a = assemble();
+    const p1 = await placeAndAccept(a, w);
+    const p2 = await placeAndAccept(a, w, { seats: [w.refs[2]!] });
+    const ids = [p1.o.id, ...Array.from({ length: 1_200 }, () => randomUUID()), p2.o.id, p1.o.id, p2.o.id];
+    const spy = spyDatabase();
+    const got = await new DrizzleRebuildOrders(spy.db).saleOrders(w.eventId, ids);
+    expect(spy.sqls).toHaveLength(2);
+    expect([...got].sort((x, y) => (x.orderId < y.orderId ? -1 : 1))).toEqual(
+      [p1, p2]
+        .map((p) => ({ orderId: p.o.id, holdId: p.hold.holdId, purchaseSessionId: p.hold.purchaseSessionId }))
+        .sort((x, y) => (x.orderId < y.orderId ? -1 : 1)),
+    );
+    // 다른 회차로 물으면 없다
+    expect(await new DrizzleRebuildOrders(database).saleOrders(randomUUID(), [p1.o.id])).toEqual([]);
+    const none = spyDatabase();
+    expect(await new DrizzleRebuildOrders(none.db).saleOrders(w.eventId, [])).toEqual([]);
+    expect(none.sqls).toHaveLength(0);
+    await expect(new DrizzleRebuildOrders(database).saleOrders(w.eventId, [p1.o.id.toUpperCase()])).rejects.toThrow(RangeError);
+    await expect(new DrizzleRebuildOrders(database).pinnedOrders('evt')).rejects.toThrow(RangeError);
   });
 });

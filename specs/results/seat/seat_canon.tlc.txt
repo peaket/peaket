@@ -78,7 +78,7 @@ State 2: <seat_canon_seat_hold(11,<<1>>) line 414, col 3 to line 452, col 50 of 
          [hid |-> 0, pinned |-> FALSE] >>,
   quota |-> <<0, 0>> ]
 
-State 3: <seat_canon_seat_ttlPasses(11) line 473, col 3 to line 494, col 54 of module seat_canon>
+State 3: <seat_canon_seat_ttlPasses(11) line 473, col 3 to line 495, col 54 of module seat_canon>
 /\ seat_canon_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 1,
@@ -117,7 +117,7 @@ State 3: <seat_canon_seat_ttlPasses(11) line 473, col 3 to line 494, col 54 of m
          [hid |-> 0, pinned |-> FALSE] >>,
   quota |-> <<0, 0>> ]
 
-State 4: <seat_canon_seat_expire(11) line 517, col 3 to line 536, col 28 of module seat_canon>
+State 4: <seat_canon_seat_expire(11) line 518, col 3 to line 537, col 28 of module seat_canon>
 /\ seat_canon_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 1,
@@ -156,7 +156,7 @@ State 4: <seat_canon_seat_expire(11) line 517, col 3 to line 536, col 28 of modu
          [hid |-> 0, pinned |-> FALSE] >>,
   quota |-> <<1, 0>> ]
 
-State 5: <seat_canon_seat_accept(11) line 558, col 3 to line 575, col 54 of module seat_canon>
+State 5: <seat_canon_seat_accept(11) line 559, col 3 to line 576, col 54 of module seat_canon>
 /\ seat_canon_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 1,
@@ -234,7 +234,7 @@ State 6: <seat_canon_seat_hold(12,<<1>>) line 414, col 3 to line 452, col 50 of 
          [hid |-> 0, pinned |-> FALSE] >>,
   quota |-> <<0, 0>> ]
 
-State 7: <seat_canon_seat_accept(12) line 558, col 3 to line 575, col 54 of module seat_canon>
+State 7: <seat_canon_seat_accept(12) line 559, col 3 to line 576, col 54 of module seat_canon>
 /\ seat_canon_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 2,
@@ -273,7 +273,7 @@ State 7: <seat_canon_seat_accept(12) line 558, col 3 to line 575, col 54 of modu
          [hid |-> 0, pinned |-> FALSE] >>,
   quota |-> <<0, 0>> ]
 
-State 8: <seat_canon_seat_saleStep(11) line 1015, col 3 to line 1116, col 50 of module seat_canon>
+State 8: <seat_canon_seat_saleStep(11) line 1016, col 3 to line 1117, col 50 of module seat_canon>
 /\ seat_canon_seat_red = [ ready |-> TRUE,
   gen |-> 1,
   counter |-> 2,

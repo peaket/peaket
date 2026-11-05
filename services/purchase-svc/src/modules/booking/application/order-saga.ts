@@ -5,7 +5,7 @@
 //
 // 단계 RESERVE(reserveStep):
 //   ① 승인 기한(인증 + 10분)을 넘겼으면 묶지 않고 T8(EXPIRED)과 실패 해제
-//   ② 좌석 묶기 pin(holdId·psid·좌석·1인 한도·주문 seat_gen): OK면 ③(그 판 번호가 주문의 것과 다르면 주문 seat_gen에 적는다, 명세 pin),
+//   ② 좌석 묶기 pin(holdId·psid·좌석·1인 한도·주문 seat_gen): OK면 주문 seat_gen(그 판 번호, 명세 pin)과 pinned_at(PRF-167)을 한 UPDATE로 적고 ③,
 //      TAKEN·QUOTA_EXCEEDED·STALE_GEN이면 T8(같은 이름의 사유)과 실패 해제, NOT_READY면 다시 하기(회차 키 수명(판매 종료 + 1일)이 지났으면 T8 STORE_GONE),
 //      FAILED_HOLD면 이미 실패 해제한 홀드라 SKIPPED
 //   ③ 판매 예약 트랜잭션(ReserveTx): RESERVED면 ADVANCED(같은 실행에서 CONFIRM을 이어 돈다), GEN_CHANGED면 주문 판 번호를 고치지 않고 그대로 ②부터 다시
@@ -270,11 +270,11 @@ export class OrderSagaRunner {
           // 이미 실패 해제한 홀드다(다른 실행이 실패로 끝냈다. 늦은 묶기). 아무것도 하지 않는다
           return { kind: 'SKIPPED', reason: 'FAILED_HOLD' };
       }
-      // 모두 내 홀드라 판 번호가 달라도 묶였다: 그 판 번호를 주문에 적는다(ACCEPTED이고 seat_gen이 그대로일 때만, 리뷰 M1)
-      if (pinned.gen !== orderGen) {
-        if (!(await this.deps.orders.recordPinnedGen(order.orderId, orderGen, pinned.gen))) return this.#skipOrderState(job);
-        orderGen = pinned.gen;
-      }
+      // 묶었다고 주문에 적는다(한 UPDATE, 리뷰 고침 L5): 모두 내 홀드라 판 번호가 달라도 묶였으니 그 판 번호를 주문 seat_gen에(리뷰 M1), 그리고 pinned_at을
+      // (BUILD_ORDER PRF-167 K1: 다시 만들기가 결제 접수했고 묶인 주문의 좌석을 원장 만료 시각과 상관없이 되살리는 근거다). 판 번호가 같아도 부른다.
+      // ACCEPTED가 아니거나 seat_gen이 바뀌었으면(다른 실행이 주문을 옮겼다) 건너뛴다
+      if (!(await this.deps.orders.recordPinned(order.orderId, orderGen, pinned.gen))) return this.#skipOrderState(job);
+      orderGen = pinned.gen;
       // ③ 판매 예약 트랜잭션(판 번호 대조 → 판매 행 PENDING·한도 → 작업 CONFIRM → T7)
       const reserved = await this.deps.reserve.reserve({
         orderId: order.orderId,

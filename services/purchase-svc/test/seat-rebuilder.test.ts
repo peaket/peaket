@@ -66,6 +66,11 @@ function fakeSource(log: Log, o: SourceOptions = {}): SeatRebuildSource & { erro
       log.push(`saleHolds ${e}`);
       return o.saleHolds ?? o.holds ?? [];
     },
+    // 주문 근거(orders)를 꽂지 않는 이 시험들에서는 부르지 않는다(PRF-167 리뷰 고침 M2)
+    ledgerRows: async (e) => {
+      log.push(`ledgerRows ${e}`);
+      return [];
+    },
     release: async (e, h, opt) => {
       const setGen = (opt as { setGen?: number } | undefined)?.setGen;
       log.push(`release ${e} ${h}${setGen !== undefined ? ` setGen ${setGen}` : ''}`);
