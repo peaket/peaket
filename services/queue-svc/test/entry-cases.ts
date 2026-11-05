@@ -26,6 +26,10 @@ export interface EntryWorld {
   /** 장애 전환으로 복제되지 못한 쓰기를 잃은 것을 흉내 낸다: 카운터를 그 값으로 되돌린다 */
   lose(eventId: string, seq: number): Promise<void>;
   skipped(eventId: string): Promise<string[]>;
+  /** q:{event:E}:notice의 회차 판매 상태(saleState)를 쓴다(HOT-010, ADR-0214) */
+  setSaleState?(eventId: string, state: string): Promise<void>;
+  /** 사람 키 q:dup의 값(없으면 null) */
+  dupValue?(pid: string, eventId: string): Promise<string | null>;
 }
 
 type Body = { preverifyToken: string; deviceId?: string; entryRequestId?: string };
@@ -87,6 +91,30 @@ export function entryCases(label: string, make: () => Promise<EntryWorld>) {
         ticketOf(await enter(store).run({ accountId: who.accountId ?? ACCOUNT, pid: who.pid ?? PID, eventId, body: b }));
       return { w, eventId, enter, body, run };
     };
+
+    test('Q-T51②_매진(notice saleState SOLD_OUT)이면_진입은SOLD_OUT이고_번호를내지않으며_선점을푼다', async () => {
+      const { w, eventId, body, run } = await setup();
+      await w.setSaleState!(eventId, 'SOLD_OUT');
+      expect(await code(run(body()))).toBe('SOLD_OUT');
+      expect(await w.counter(eventId)).toBe(0);
+      expect(await w.dupValue!(PID, eventId)).toBeNull();
+    });
+
+    test('Q-T51_판매상태가ENDED면_진입은SALE_ENDED이고_번호를내지않는다', async () => {
+      const { w, eventId, body, run } = await setup();
+      await w.setSaleState!(eventId, 'ENDED');
+      expect(await code(run(body()))).toBe('SALE_ENDED');
+      expect(await w.counter(eventId)).toBe(0);
+      expect(await w.dupValue!(PID, eventId)).toBeNull();
+    });
+
+    test('Q-T51①_일시매진(ALL_HELD)과_매진풀림(ON_SALE)에는_번호를준다', async () => {
+      const { w, eventId, body, run } = await setup();
+      await w.setSaleState!(eventId, 'ALL_HELD');
+      expect((await run(body())).seq).toBe(1);
+      await w.setSaleState!(eventId, 'ON_SALE');
+      expect((await run(body({ preverifyToken: preverifyToken(w.clock, eventId, { a: OTHER_ACCOUNT }) }), undefined, { accountId: OTHER_ACCOUNT, pid: 'pid-other' })).seq).toBe(2);
+    });
 
     test('Q-T4_같은pid가여러요청ID로동시에진입하면_번호는하나만나가고나머지는409이며번호를쓰지않는다', async () => {
       const { w, eventId, body, run } = await setup();

@@ -28,7 +28,7 @@ export interface ConfirmInput {
 
 /** 200 본문(openapi AdmissionResult) */
 export type ConfirmResult =
-  | { status: 'ADMITTED'; admissionToken: string; serverTimeMs: number; verificationReason: null; serverEcdhPublicKey?: Record<string, string> }
+  | { status: 'ADMITTED'; admissionToken: string; purchaseSessionExpiresAt: string; serverTimeMs: number; verificationReason: null; serverEcdhPublicKey?: Record<string, string> }
   | { status: 'SOON'; retryAfterSeconds: number; serverTimeMs: number; verificationReason: null }
   | { status: 'NOT_YET'; retryAfterMs: number; serverTimeMs: number; verificationReason: null }
   | { status: 'VERIFYING'; verificationReason: string | null; serverTimeMs: number };
@@ -120,13 +120,21 @@ export class ConfirmAdmission {
         if (t.s > r.serving) this.signals.admittedBeforeTurn();
         if (r.soonWaitMs !== undefined) this.signals.soonWait(r.soonWaitMs / 1000);
         if (r.firstSlot) this.#eta(b, pre.turnAtMs, now);
-        const { token } = this.signer.sign({ jti: r.jti, accountId: i.accountId, sessionId: i.sessionId, eventId: i.eventId, jny: t.jny, nowMs: now });
+        const { token, expiresAtMs } = this.signer.sign({ jti: r.jti, accountId: i.accountId, sessionId: i.sessionId, eventId: i.eventId, jny: t.jny, nowMs: now, ...(r.issuedAtMs !== undefined ? { firstIssuedAtMs: r.issuedAtMs } : {}) });
         const ecdh = this.signer.serverEcdhPublicKey();
-        return { status: 'ADMITTED', admissionToken: token, serverTimeMs: now, verificationReason: null, ...(ecdh ? { serverEcdhPublicKey: ecdh } : {}) };
+        // 입장 토큰의 exp(구매 세션이 끝나는 가장 늦은 때)를 화면이 토큰을 읽지 않고 알게 싣는다(BAS-042, ADR-0214 결정 8)
+        const purchaseSessionExpiresAt = new Date(expiresAtMs).toISOString();
+        return { status: 'ADMITTED', admissionToken: token, purchaseSessionExpiresAt, serverTimeMs: now, verificationReason: null, ...(ecdh ? { serverEcdhPublicKey: ecdh } : {}) };
       }
       await this.#release(i, claimed, hash, fresh, saleEnd);
       claimed = [];
       if (r.kind === 'SOON') return { status: 'SOON', retryAfterSeconds: r.retryAfterSeconds, serverTimeMs: now, verificationReason: null };
+      if (r.kind === 'EXPIRED') {
+        // 같은 자리를 다시 줄 수 있지만 첫 발급 + 최대 체류가 지났다: exp < iat 토큰을 내지 않고 만료로 답한다(만료 410과 같은 꼴, HOT-010 리뷰)
+        let admittedBefore = false;
+        for (const pid of persons) admittedBefore = (await this.store.expire({ pid, eventId: i.eventId, seq: t.s, gen: t.g })).admittedBefore || admittedBefore;
+        throw new AdmissionError('EXPIRED', '첫 발급 뒤 최대 체류가 지났다', !admittedBefore && now < saleEnd);
+      }
       // 확인과 입장 사이에 빠진 번호가 됐거나 serving이 모자라다(장애 전환으로 serving이 되돌아감)
       if (r.kind === 'REMOVED') throw new AdmissionError('REMOVED', '확인 뒤 빠진 번호가 됐다');
       return { status: 'NOT_YET', retryAfterMs: 1_000, serverTimeMs: now, verificationReason: null };

@@ -55,6 +55,11 @@ const valkeyWorld = async (): Promise<PidWorld> => {
     failover: async (eventId) => void (await cmd(keys.epoch(eventId), ['HSET', keys.epoch(eventId), 'node', 'old-primary'])),
     skipped: async (eventId) => ((await cmd(keys.skipped(eventId), ['LRANGE', keys.skipped(eventId), '0', '-1'])) as unknown[]).map(String),
     lose: async (eventId: string, seq: number) => void (await cmd(keys.seq(eventId), ['SET', keys.seq(eventId), String(seq), 'KEEPTTL'])),
+    setSaleState: async (eventId: string, state: string) => void (await cmd(keys.notice(eventId), ['HSET', keys.notice(eventId), 'saleState', state])),
+    dupValue: async (pid: string, eventId: string) => {
+      const v = await cmd(keys.dup(pid, eventId), ['GET', keys.dup(pid, eventId)]);
+      return v === null ? null : String(v);
+    },
     dupOf: async (pid: string, eventId: string) => {
       const k = keys.dup(pid, eventId);
       const value = await cmd(k, ['GET', k]);

@@ -37,6 +37,8 @@ export class MemoryEntryStore implements EntryStore {
   readonly #results = new Map<string, string>();
   /** 세대 키(회차 → 노드 표지 '{ID}:{설정 세대}')와 지금 노드 표지. 시험이 failoverForTest로 지금 노드를 바꾼다(ADR-0181) */
   readonly #epoch = new Map<string, string>();
+  /** notice의 회차 판매 상태(saleState, ADR-0214) */
+  readonly #saleState = new Map<string, string>();
   #node = 'node-1:1';
   /** RB-05가 건너뛰었고 복제 확인 전인 회차(세대 키의 pend, ADR-0186). 복제본이 없는 메모리 저장소라 확인은 곧바로 되고, 시험이 blockConfirmForTest로 막는다 */
   readonly #pend = new Set<string>();
@@ -90,6 +92,8 @@ export class MemoryEntryStore implements EntryStore {
     if (this.#pend.has(i.eventId)) return i.items.map(() => ({ kind: 'RECOVERING' }));
     const now = this.clock.now();
     if (i.opensAtMs !== undefined && now < i.opensAtMs) return i.items.map(() => ({ kind: 'EARLY' }));
+    const sale = this.#saleState.get(i.eventId);
+    if (sale === 'SOLD_OUT' || sale === 'ENDED') return i.items.map(() => ({ kind: sale }));
     const gen = (this.#skipped.get(i.eventId)?.length ?? 0) + 1;
     const done = this.#doneOf(i.eventId);
     const seqOf = () => this.#seq.get(i.eventId) ?? 0;
@@ -324,6 +328,11 @@ export class MemoryEntryStore implements EntryStore {
     if (value === null) this.#dup.delete(k);
     else this.#dup.set(k, { v: value, until: expireAtMs ?? this.clock.now() + 86_400_000 });
   }
+  /** notice의 saleState를 쓴다(판매 상태 처리기가 쓴 것 흉내) */
+  setSaleStateForTest(eventId: string, state: string): void {
+    this.#saleState.set(eventId, state);
+  }
+
   dupForTest(pid: string, eventId: string): { value: string | null; expireAtMs: number | null } {
     const k = `${pid}|${eventId}`;
     const value = this.#dupOf(k);

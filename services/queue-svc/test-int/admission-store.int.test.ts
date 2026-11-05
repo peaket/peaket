@@ -74,6 +74,7 @@ function harness() {
     dup: async (p: string, e: string) => str(await cmd(k.dup(p, e), ['GET', k.dup(p, e)])),
     adm: async (p: string, e: string) => str(await cmd(k.adm(p, e), ['GET', k.adm(p, e)])),
     setAdm: async (p: string, e: string, v: string) => void (await cmd(k.adm(p, e), ['SET', k.adm(p, e), v])),
+    setIssuedAt: async (e: string, h: string, at: number) => void (await cmd(k.slotOf(e), ['HSET', k.slotOf(e), `${h}:at`, String(at)])),
   };
 }
 

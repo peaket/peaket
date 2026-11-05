@@ -50,6 +50,7 @@ function memoryHarness(): AdmissionHarness {
     dup: async (p, e) => db.dup.get(`${p}|${e}`) ?? null,
     adm: async (p, e) => db.adm.get(`${p}|${e}`) ?? null,
     setAdm: async (p, e, v) => void db.adm.set(`${p}|${e}`, v),
+    setIssuedAt: async (e, h, at) => store.setIssuedAtForTest(e, h, at),
   };
 }
 
@@ -157,6 +158,29 @@ describe('받는 층: POST /v1/queues/{eventId}/admission', () => {
     expect(body.verificationReason).toBeNull();
     expect(Math.abs(body.serverTimeMs - Date.now())).toBeLessThan(5_000);
     expect(readAdmissionToken(body.admissionToken).claims).toMatchObject({ event: eventId, sid: 's-1', sub: ACCOUNT });
+  });
+
+  test('BAS-042 ADMITTED 응답에 입장 토큰의 만료(exp)를 purchaseSessionExpiresAt(ISO 시각)으로 싣는다(ADR-0214 결정 8)', async () => {
+    const { eventId, ticket } = await world();
+    const res = await post(eventId, JSON.stringify({ queueTicket: ticket(151) }));
+    const body = JSON.parse(res.payload) as { status: string; admissionToken: string; purchaseSessionExpiresAt: string };
+    expect(body.status).toBe('ADMITTED');
+    expect(body.purchaseSessionExpiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(Date.parse(body.purchaseSessionExpiresAt)).toBe(Number(readAdmissionToken(body.admissionToken).claims.exp) * 1000);
+  });
+
+  test('BAS-042 같은 대기표로 다시 받은 입장 토큰도 첫 발급의 만료(exp)를 지키고 purchaseSessionExpiresAt도 그 시각이다(HOT-010 리뷰)', async () => {
+    const { eventId, ticket } = await world();
+    const t = ticket(152);
+    const first = JSON.parse((await post(eventId, JSON.stringify({ queueTicket: t }))).payload) as { admissionToken: string; purchaseSessionExpiresAt: string };
+    await new Promise((r) => setTimeout(r, 1_100));
+    const again = JSON.parse((await post(eventId, JSON.stringify({ queueTicket: t }))).payload) as { admissionToken: string; purchaseSessionExpiresAt: string };
+    const c1 = readAdmissionToken(first.admissionToken).claims;
+    const c2 = readAdmissionToken(again.admissionToken).claims;
+    expect(c2.jti).toBe(c1.jti);
+    expect(Number(c2.iat)).toBeGreaterThan(Number(c1.iat));
+    expect(c2.exp).toBe(c1.exp);
+    expect(again.purchaseSessionExpiresAt).toBe(first.purchaseSessionExpiresAt);
   });
 
   test('[ASVS v5.0.0-3.5.2] 입장 확정은 application/json도 받고 그 밖의 형식은 415다', async () => {

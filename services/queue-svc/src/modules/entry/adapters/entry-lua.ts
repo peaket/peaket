@@ -64,8 +64,10 @@ return 0
 // 몫마다 한 번만 전진한다(중간-028). 참가자 목록(토큰 해시)은 판매 종료까지만 둔다.
 // 맨 앞에서 세대 키(KEYS[6])의 주 노드 ID를 지금 노드 ID와 견준다. 없으면 쓰고, 다르면 장애 전환 뒤 RB-05 전이라 아무것도 쓰지 않는다(ADR-0181).
 // RB-05가 건너뛰었지만 복제 확인 전(pend)이어도 쓰지 않는다(ADR-0186).
+// 오픈 뒤 번호를 내기 전에 notice의 회차 판매 상태를 본다: SOLD_OUT·ENDED면 아무것도 쓰지 않는다(확인과 번호 내기가 한 Lua라 매진 판이 선 뒤에는 번호가 나가지 않는다, HOT-010, ADR-0214).
+// KEYS: 1 seq, 2 skipped, 3 batch_done, 4 batch_members:1, 5 lobby_members, 6 epoch, 7 notice
 // ARGV: 1 회차 키 수명, 2 오픈 시각, 3 묶음 구간 끝, 4 로비 셔플, 5 묶음, 6 참가자 목록 수명, 7 요청 수 n, 그 뒤 요청마다 (묶음 대상 여부, 토큰 해시).
-// 돌려주는 값: 장애 전환 뒤 RB-05 전이면 {'RB05'}, 서버 시각으로 오픈 전이면 {'EARLY'}, 아니면 {'OK', 세대, 요청마다 (종류, 값)}. 종류 N = 번호(값), B = 묶음에 넣음, W = 기다림(값 = Retry-After 초)
+// 돌려주는 값: 장애 전환 뒤 RB-05 전이면 {'RB05'}, 서버 시각으로 오픈 전이면 {'EARLY'}, 매진·판매 종료면 {'SOLD_OUT'}·{'ENDED'}, 아니면 {'OK', 세대, 요청마다 (종류, 값)}. 종류 N = 번호(값), B = 묶음에 넣음, W = 기다림(값 = Retry-After 초)
 export const NUMBER_BATCH_LUA = `${EXTEND}${NODE_ID}
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
@@ -84,6 +86,8 @@ elseif not (id ~= 'standalone' and ep[2] == sec and string.sub(held, 1, #id + 1)
   if id ~= 'standalone' then redis.call('HSET', KEYS[6], 'chk', sec) end
 end
 if now < tonumber(ARGV[2]) then return {'EARLY'} end
+local sale = redis.call('HGET', KEYS[7], 'saleState')
+if sale == 'SOLD_OUT' or sale == 'ENDED' then return {sale} end
 local gen = redis.call('LLEN', KEYS[2]) + 1
 local n = tonumber(ARGV[7])
 local out = {'OK', gen}

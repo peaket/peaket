@@ -182,6 +182,8 @@ export interface KeyedConsumerRunOptions<T> extends KafkaClientBase {
   commitEveryMs?: number;
   /** 동시에 받는 파티션 수 [가정] */
   partitionsConcurrently?: number;
+  /** 보류 수를 재는 주기(기본 30초 [가정], 시험이 줄인다) */
+  measureHeldEveryMs?: number;
   /** 커밋이 없을 때 처음부터(기본) 또는 끝부터 */
   startAt?: 'earliest' | 'latest';
 }
@@ -373,7 +375,7 @@ export function runKeyedConsumer<T>(o: KeyedConsumerRunOptions<T>): KeyedConsume
         }
       };
       void measure();
-      timers.push(setInterval(() => void measure(), KEYED_CONSUMER_DEFAULTS.measureHeldEveryMs));
+      timers.push(setInterval(() => void measure(), o.measureHeldEveryMs ?? KEYED_CONSUMER_DEFAULTS.measureHeldEveryMs));
     }
   })();
 

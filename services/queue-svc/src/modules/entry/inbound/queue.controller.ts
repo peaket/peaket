@@ -34,6 +34,8 @@ const PROBLEM: Record<EntryError['code'], { status: number; type: string; title:
   NOT_FOUND: { status: 404, type: 'queue-not-found', title: '이 회차의 대기열이 열리지 않았습니다' },
   NOT_OPEN: { status: 409, type: 'queue-not-open', title: '아직 예매가 열리지 않았습니다' },
   SALE_ENDED: { status: 410, type: 'sale-ended', title: '판매 시간이 끝났습니다' },
+  // 엣지 응답이 퍼지기 전에 원본에 온 진입(HOT-010, ADR-0122·0214)
+  SOLD_OUT: { status: 410, type: 'sold-out', title: '매진되었습니다' },
   BATCHING: { status: 503, type: 'batching', title: '순서를 정하는 중입니다. 잠시 뒤 다시 시도해 주세요' },
   QUEUE_RECOVERING: { status: 503, type: 'queue-recovering', title: '대기열을 다시 맞추는 중입니다. 잠시 뒤 다시 시도해 주세요' },
   PREVERIFY_INVALID: { status: 403, type: 'preverify-invalid', title: '사람 확인을 다시 해 주세요' },

@@ -100,3 +100,6 @@ export const saleEndOf = (s: EventSchedule): number => s.startsAtMs - SALE_END_B
 export const batchCloseAtOf = (s: EventSchedule): number => s.opensAtMs + (s.batchWindowMs ?? OPEN_BATCH_MS);
 /** 회차 단위 키의 만료 시각 */
 export const keepUntilOf = (s: EventSchedule): number => saleEndOf(s) + KEEP_AFTER_SALE_END_MS;
+
+/** 전체 범위 제어 상태의 회차 자리(q:{event:PLATFORM}:notice, docs/data.md §3) */
+export const PLATFORM_SCOPE = 'PLATFORM';

@@ -103,6 +103,7 @@
 - PRF-168: 쓰는 Lua가 올린 세대는 감시 반복이 bumps 차이로만 센다. 릴레이 리더가 바뀐 뒤 첫 확인은 기준만 잡아 그 사이 올린 수를 지표에서 놓친다(seat-epoch-watch.ts).
 
 ## 미해결
+OPEN[24]: 엣지 매진 응답 켜고 끄기(BUILD_ORDER HOT-011, ADR-0122, docs/features/queue-admission.md §8)는 queue-svc가 엣지 함수가 읽는 CloudFront KeyValueStore(엣지 함수가 읽는 키·값 저장소) 값을 바꿔야 합니다. 그런데 저장소의 AWS SDK는 KMS 클라이언트(`@aws-sdk/client-kms`)뿐입니다. KeyValueStore를 부르려면 새 패키지(`@aws-sdk/client-cloudfront-keyvaluestore`와, AWS 문서상 그 API가 요구하는 SigV4A 서명 모듈)를 받아야 하고, 받는 일은 소유자 허락이 필요합니다(2026-11-06 갈래 3). 고를 수 있는 것: (가) 지금은 켜고 끄는 포트와 시험 대역만 만들고, 실제 어댑터와 패키지 받기는 AWS 계정이 생겨 배포하는 단계에서 다시 묻는다(추천. 지금은 AWS 계정이 없어 실제로 부를 곳이 없고, 미리 받으면 공급망 규칙의 3일·신뢰 증거 검사와 판 올리기 부담만 는다) (나) 지금 두 패키지를 출처 증명 있는 판으로 고정해 queue-svc에만 더하고 실제 어댑터까지 만든다(시험은 대역 서버로) (다) 엣지 켜고 끄기를 빼고 원본 410만 둔다(ADR-0122를 고친다). 답이 오기 전에는 (가)의 몫(포트·대역·좌석 수 칸)만 하고 실제 어댑터는 하지 않습니다.
 
 ## 진행 로그
 - 2026-11-04 전의 진행 로그와 그날 앞쪽 줄은 docs/progress-archive.md로 옮겼다(ADR-0190 결정 3).

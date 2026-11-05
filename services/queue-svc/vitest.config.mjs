@@ -7,7 +7,11 @@ const src = (p) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
   resolve: {
-    alias: [{ find: /^@peaket\/platform$/, replacement: src('../../packages/platform/src/index.ts') }],
+    alias: [
+      // Kafka 소비자 시작(src/consumers/start.ts)과 통합 시험이 쓰는 하위 내보내기
+      { find: /^@peaket\/platform\/stream-worker$/, replacement: src('../../packages/platform/src/stream-worker.ts') },
+      { find: /^@peaket\/platform$/, replacement: src('../../packages/platform/src/index.ts') },
+    ],
   },
   test: {
     // CI가 PEAKET_TEST_REPORT를 주면 JSON 보고서도 남긴다(ASVS 태그 리포트, BOT-162)

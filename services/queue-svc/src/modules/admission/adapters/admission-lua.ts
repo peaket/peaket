@@ -100,9 +100,11 @@ return 'DUP'
 // 아니면 곧 입장 대기열에 넣는다(ADR-0104 결정 5). 한 대기표의 요청이 동시에 와도 이 Lua 하나가 가르므로 자리는 하나다(ADR-0183 결정 2)
 // KEYS: 1 serving, 2 removed, 3 slots, 4 soon, 5 soon_at, 6 soon_first, 7 admitted, 8 calls, 9 call_req, 10 ctl, 11 admits, 12 slot_of, 13 req
 // ARGV: 1 번호, 2 해시, 3 새 jti, 4 차례 시각(없으면 -1), 5 건너뛴 구간 1/0, 6 첫 사용 기한(ms), 7 지금 목표가 없을 때의 목표,
-//       8 회차 키 수명, 9 곧 입장 키·처음 요청 키 수명(판매 종료), 10·11 다시 시도 하한·상한(초), 12 속도 창(초)
-// 돌려주는 값: {'ADMITTED', jti, 다시 줌 1/0, serving, 도착 지연(없으면 -1), 곧 입장 대기(없으면 -1), 이 대기표의 첫 자리 1/0}
+//       8 회차 키 수명, 9 곧 입장 키·처음 요청 키 수명(판매 종료), 10·11 다시 시도 하한·상한(초), 12 속도 창(초), 13 최대 체류(ms)
+// 자리를 처음 잡을 때 그 시각을 slot_of의 '<해시>:at' 칸에 둔다. 같은 jti를 다시 줄 때 그 시각을 돌려줘 입장 토큰의 만료(exp)를 첫 발급과 같게 한다(HOT-010 리뷰).
+// 돌려주는 값: {'ADMITTED', jti, 다시 줌 1/0, serving, 도착 지연(없으면 -1), 곧 입장 대기(없으면 -1), 이 대기표의 첫 자리 1/0, 첫 발급 시각(ms, 모르면 -1)}
 //             {'SOON', 다시 시도 초, 도착 지연} {'REMOVED'} {'NOT_YET'}
+//             {'EXPIRED'}: 같은 jti를 다시 줄 자리지만 첫 발급 + 최대 체류가 지났다(exp < iat 토큰을 내지 않는다, HOT-010 리뷰)
 export const ADMIT_LUA = `${EXTEND}${NOW}
 local seq = tonumber(ARGV[1])
 local serving = tonumber(redis.call('GET', KEYS[1]) or '0')
@@ -113,8 +115,10 @@ local prev = redis.call('HGET', KEYS[12], ARGV[2])
 if prev then
   local sc = tonumber(redis.call('ZSCORE', KEYS[3], prev) or '')
   if sc and sc > now then
+    local at = tonumber(redis.call('HGET', KEYS[12], ARGV[2] .. ':at') or '')
+    if at and now >= at + tonumber(ARGV[13]) then return {'EXPIRED'} end
     redis.call('ZADD', KEYS[3], 'XX', 'GT', now + tonumber(ARGV[6]), prev)
-    return {'ADMITTED', prev, 1, serving, -1, -1, 0}
+    return {'ADMITTED', prev, 1, serving, -1, -1, 0, tonumber(redis.call('HGET', KEYS[12], ARGV[2] .. ':at') or '-1')}
   end
 end
 local inSoon = redis.call('ZSCORE', KEYS[4], ARGV[2])
@@ -141,7 +145,7 @@ local ahead = redis.call('ZCOUNT', KEYS[4], '-inf', '(' .. seq)
 local sec = math.floor(now / 1000)
 if free > ahead then
   redis.call('ZADD', KEYS[3], now + tonumber(ARGV[6]), ARGV[3])
-  redis.call('HSET', KEYS[12], ARGV[2], ARGV[3])
+  redis.call('HSET', KEYS[12], ARGV[2], ARGV[3], ARGV[2] .. ':at', now)
   redis.call('INCR', KEYS[7])
   -- 최근 입장 속도: 1초 칸 16개를 돌려 쓴다(값 {초}:{수})
   local f = tostring(sec % 16)
@@ -163,7 +167,7 @@ if free > ahead then
   extend(KEYS[12], ARGV[8])
   local firstSlot = 1
   if prev then firstSlot = 0 end
-  return {'ADMITTED', ARGV[3], 0, serving, delay, wait, firstSlot}
+  return {'ADMITTED', ARGV[3], 0, serving, delay, wait, firstSlot, now}
 end
 redis.call('ZADD', KEYS[4], seq, ARGV[2])
 redis.call('ZADD', KEYS[5], now, ARGV[2])

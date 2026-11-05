@@ -36,9 +36,43 @@ export interface StateSnapshot {
   servingLog: { slot: number; serving: number }[];
   /** calls의 끝: 전진 시각(밀리초)과 그 전진의 마지막 번호 */
   calls: { atMs: number; last: number }[];
+  /** q:{event:E}:notice의 판매 상태 칸(HOT-010, ADR-0214). 없으면 판매 중이고 일시정지·공지가 없다 */
+  notice?: NoticeFields;
+  /** q:{event:E}:ctl의 입장 일시정지(admitPaused가 1)와 그 만료(admitPausedUntil, 없으면 null). 리더와 같은 규칙으로 읽는다 */
+  admit?: { paused: boolean; untilMs: number | null };
 }
 
-export type SaleStatus = 'ON_SALE' | 'ENDED';
+/** notice의 칸 가운데 파일이 쓰는 것(docs/data.md §3) */
+export interface NoticeFields {
+  /** 회차 판매 상태(ON_SALE·ALL_HELD·SOLD_OUT·ENDED, EventSaleChanged 처리기가 쓴다) */
+  saleState?: string;
+  /** 매진 등급(등급 ID) */
+  soldOutTiers?: string[];
+  /** 판매 일시정지(명령 3)·판매 중지(제어 받는 쪽이 쓴다) */
+  paused?: boolean;
+  suspended?: boolean;
+  /** 공지 배너 글(명령 7) */
+  banner?: string;
+}
+
+/** 전체 범위 q:{event:PLATFORM}:notice(일시정지·판매 중지·공지 배너) */
+export type PlatformNotice = Pick<NoticeFields, 'paused' | 'suspended' | 'banner'>;
+
+export type SaleStatus = 'ON_SALE' | 'PAUSED' | 'ALL_HELD' | 'TIER_SOLD_OUT' | 'SOLD_OUT' | 'ENDED';
+
+/**
+ * 파일의 판매 상태: 판매 종료(생성 시각이나 saleState) > SOLD_OUT > PAUSED(회차·전체 범위의 paused·suspended) > ALL_HELD > TIER_SOLD_OUT(매진 등급이 있음) > ON_SALE
+ * (ADR-0122·0214 결정 4). 모르는 saleState는 판매 중으로 본다(리더는 전진하지 않는다)
+ */
+export function saleStatusOf(o: { saleEnded: boolean; notice: NoticeFields; platform: PlatformNotice }): SaleStatus {
+  const n = o.notice;
+  if (o.saleEnded || n.saleState === 'ENDED') return 'ENDED';
+  if (n.saleState === 'SOLD_OUT') return 'SOLD_OUT';
+  if (n.paused || n.suspended || o.platform.paused || o.platform.suspended) return 'PAUSED';
+  if (n.saleState === 'ALL_HELD') return 'ALL_HELD';
+  if ((n.soldOutTiers?.length ?? 0) > 0) return 'TIER_SOLD_OUT';
+  return 'ON_SALE';
+}
 
 /** openapi QueueState */
 export interface QueueStateBody {
@@ -46,6 +80,10 @@ export interface QueueStateBody {
   servingRate: number;
   saleStatus: SaleStatus;
   soldOutTiers: string[];
+  /** 입장 일시정지(명령 2, BAS-042) */
+  admissionPaused: boolean;
+  /** 공지 배너 글(있을 때만) */
+  banner?: string;
   removedUpToServing: number;
   removedBeforeSegment: number;
   removedBitmap: string;
@@ -145,7 +183,7 @@ function rateOf(s: StateSnapshot, removed: Removed, generatedAtMs: number): numb
 }
 
 /** 회차의 모든 구간 파일. 구간 0부터 seq가 든 구간(seq가 0이면 구간 0) 뒤 AHEAD_SEGMENTS 구간까지 */
-export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, generatedAtMs: number): StateFile[] {
+export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, generatedAtMs: number, platform: PlatformNotice = {}): StateFile[] {
   const lastSegment = s.seq >= 1 ? segmentOf(s.seq) : 0;
   const maxSegment = lastSegment + AHEAD_SEGMENTS;
   const removed = new Removed(s, lastSegment);
@@ -154,7 +192,11 @@ export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, gener
   // 다음에 부를 번호(serving + 1)의 구간. serving이 구간 끝이면 그다음 구간이다
   const nextSegment = Math.min(segmentOf(s.serving + 1), maxSegment);
   const removedUpToServing = removed.upTo(s.serving);
-  const saleStatus: SaleStatus = generatedAtMs >= saleEndOf(schedule) ? 'ENDED' : 'ON_SALE';
+  const notice = s.notice ?? {};
+  const saleStatus = saleStatusOf({ saleEnded: generatedAtMs >= saleEndOf(schedule), notice, platform });
+  const soldOutTiers = [...(notice.soldOutTiers ?? [])];
+  const banner = notice.banner || platform.banner;
+  const admissionPaused = s.admit?.paused === true && (s.admit.untilMs === null || generatedAtMs < s.admit.untilMs);
   const steps = s.calls
     // 경계 뒤 읽기 전에 일어난 전진도 serving에 들어 있으므로 위쪽은 자르지 않는다
     .filter((c) => c.atMs >= generatedAtMs - STEPS_WINDOW_MS)
@@ -179,7 +221,9 @@ export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, gener
       serving: s.serving,
       servingRate: rate,
       saleStatus,
-      soldOutTiers: [],
+      soldOutTiers,
+      admissionPaused,
+      ...(banner ? { banner } : {}),
       removedUpToServing,
       removedBeforeSegment: removed.before(seg),
       removedBitmap: Buffer.from(removed.bitsOf(seg)).toString('base64'),

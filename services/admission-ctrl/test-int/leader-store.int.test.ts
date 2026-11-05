@@ -244,6 +244,21 @@ test('전진기록은판매종료까지_차례시각기록과serving은판매종
   expect(await at(keys.serving(e))).toBe(keep);
 });
 
+test('리더주기는notice(회차판매상태)의수명을회차키수명으로늘리고_없는notice는만들지않는다(연기된회차의판매상태를잃지않게,HOT-010리뷰)', async () => {
+  const e = newEvent();
+  const keep = Date.now() + 3 * DAY;
+  await seqTo(e, 1);
+  await cmd(keys.notice(e), ['HSET', keys.notice(e), 'saleState', 'SOLD_OUT', 'soldOutLastSeq', '1']);
+  await cmd(keys.notice(e), ['PEXPIREAT', keys.notice(e), String(Date.now() + DAY)]);
+  await store.bump(e, 1, keep);
+  await store.tick(tickOf(e, 1, { keepUntilMs: keep }));
+  expect(Number(await cmd(keys.notice(e), ['PEXPIRETIME', keys.notice(e)]))).toBe(keep);
+  const none = newEvent();
+  await store.bump(none, 1, keep);
+  await store.tick(tickOf(none, 1, { keepUntilMs: keep }));
+  expect(Number(await cmd(keys.notice(none), ['EXISTS', keys.notice(none)]))).toBe(0);
+});
+
 test('닫기는인원이0이면카운터를떼지않고표시만쓰며_할일이없어도리더키수명을둔다', async () => {
   const e = newEvent();
   const now = Date.now();

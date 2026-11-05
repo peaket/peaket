@@ -43,7 +43,8 @@ export interface AdmissionStore {
 export const ADMISSION_TOKENS = Symbol('queue.AdmissionTokens');
 /** 입장 토큰 서명(ES256, typ admission+jwt, aud purchase). exp = iat + 최대 체류 */
 export interface AdmissionTokens {
-  sign(c: { jti: string; accountId: string; sessionId: string; eventId: string; jny: string; nowMs: number }): { token: string; expiresAtMs: number };
+  /** firstIssuedAtMs: 같은 jti를 다시 줄 때 첫 발급 시각. exp를 그 시각 + 최대 체류로 둔다(없으면 nowMs 기준). iat는 늘 nowMs다 */
+  sign(c: { jti: string; accountId: string; sessionId: string; eventId: string; jny: string; nowMs: number; firstIssuedAtMs?: number }): { token: string; expiresAtMs: number };
   /** 입장 확정 응답의 서버 ECDH 공개키(설정이 없으면 undefined, BOT-100) */
   serverEcdhPublicKey(): Record<string, string> | undefined;
 }

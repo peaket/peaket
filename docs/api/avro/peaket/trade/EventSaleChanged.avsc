@@ -63,8 +63,16 @@
       "type": "long"
     },
     {
+      "name": "soldOutTiers",
+      "doc": "판정 때 매진인 등급 ID(좌석맵 판의 tierId) 전체. 없으면 빈 배열. 등급의 가용·홀드·결제 중이 모두 0이면 그 등급은 매진이다. 등급 매진은 회차 판매 상태가 아니라 덧씌우는 표시라, status가 그대로여도 이 목록이 바뀌면 판 번호를 올려 다시 낸다. queue-svc가 대기 상태 파일의 soldOutTiers·TIER_SOLD_OUT으로 쓴다(추천 적용 2026-11-05, BUILD_ORDER HOT-010, ADR-0214 결정 3)",
+      "type": {
+        "type": "array",
+        "items": "string"
+      }
+    },
+    {
       "name": "version",
-      "doc": "판 번호. 회차마다 늘어나기만 하고, 받는 쪽은 지금 값보다 클 때만 적용한다",
+      "doc": "판 번호. 회차마다 늘어나기만 하고, 받는 쪽은 지금 값보다 클 때만 적용한다. 매진 등급만 바뀌어도 오른다",
       "type": "long"
     },
     {

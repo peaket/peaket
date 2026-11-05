@@ -102,6 +102,8 @@ export function batchCases(label: string, make: () => Promise<BatchWorld>) {
       const pod = new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, rb05SkipBase: SKIP });
       const go = () => pod.run({ accountId: ACCOUNT, pid: PID, eventId, body: { preverifyToken: preverifyToken(w.clock, eventId), deviceId: DEVICE, entryRequestId: newRequest() } });
       expect((await failure(go())).code).toBe('QUEUE_RECOVERING');
+      // RB-05의 복제 확인은 뒤에서 돈다(ADR-0186). 진입 사례처럼 끝나기를 기다린 뒤 다시 보낸다(부하가 크면 다음 진입이 확인 전에 와 RECOVERING을 한 번 더 받는다)
+      await pod.confirmsSettled();
       expect(await w.skipped(eventId)).toEqual([`1:${SKIP + 3}:1`]);
       const t = ticket(await go());
       // 다음 진입이 묶음을 닫는다: 묶음 몫 3을 뗀 뒤 번호
@@ -120,6 +122,8 @@ export function batchCases(label: string, make: () => Promise<BatchWorld>) {
       const pod = new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, rb05SkipBase: SKIP });
       const go = () => pod.run({ accountId: ACCOUNT2, pid: PID2, eventId, body: { preverifyToken: preverifyToken(w.clock, eventId, { a: ACCOUNT2 }), deviceId: DEVICE, entryRequestId: newRequest() } });
       expect((await failure(go())).code).toBe('QUEUE_RECOVERING');
+      // RB-05의 복제 확인은 뒤에서 돈다(ADR-0186). 진입 사례처럼 끝나기를 기다린 뒤 다시 보낸다(부하가 크면 다음 진입이 확인 전에 와 RECOVERING을 한 번 더 받는다)
+      await pod.confirmsSettled();
       expect(await w.skipped(eventId)).toEqual([`5:${4 + SKIP}:1`]);
     });
 
@@ -132,6 +136,8 @@ export function batchCases(label: string, make: () => Promise<BatchWorld>) {
       const pod = new EnterQueue(w.store, w.schedules, tokens, w.clock, { pendingTtlMs: w.pendingTtlMs, rb05SkipBase: SKIP });
       const go = () => pod.run({ accountId: ACCOUNT, pid: PID, eventId, body: { preverifyToken: preverifyToken(w.clock, eventId), deviceId: DEVICE, entryRequestId: newRequest() } });
       expect((await failure(go())).code).toBe('QUEUE_RECOVERING');
+      // RB-05의 복제 확인은 뒤에서 돈다(ADR-0186). 진입 사례처럼 끝나기를 기다린 뒤 다시 보낸다(부하가 크면 다음 진입이 확인 전에 와 RECOVERING을 한 번 더 받는다)
+      await pod.confirmsSettled();
       expect(await w.skipped(eventId)).toEqual([`1:${SKIP + 4}:1`]);
       const t = ticket(await go());
       expect(await w.marker(eventId, 'lobby')).toBe(`${SKIP + 5}:4:2`);

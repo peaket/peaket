@@ -119,6 +119,8 @@ end
 local soon = redis.call('ZCARD', KEYS[10])
 redis.call('HSET', KEYS[14], 'targetNow', ARGV[2])
 extend(KEYS[14], keep)
+-- 판매 상태 칸(queue-svc가 쓴 notice)의 수명도 회차 키 수명으로 늘린다(연기된 회차가 옛 판매 종료 + 1일에 saleState·soldOutLastSeq를 잃지 않게, HOT-010 리뷰). 없는 키는 만들지 않는다
+if redis.call('EXISTS', KEYS[13]) == 1 then extend(KEYS[13], keep) end
 -- 전진 기록을 한 번 훑어: 보관 시간이 지난 기록은 지우고, 입장 비율 창 안 기록으로 비율을, 최근 W초 기록으로 오는 중을 센다
 local W = tonumber(ARGV[4])
 local wmin = tonumber(ARGV[17])

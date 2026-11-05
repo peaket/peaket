@@ -196,6 +196,12 @@ export class EnterQueue {
       await this.#rb05(c);
       throw new EntryError('QUEUE_RECOVERING', '대기열 장애 전환 뒤 건너뛸 번호를 적는 중이다', RECOVERING_RETRY_SEC);
     }
+    if (num.kind === 'SOLD_OUT' || num.kind === 'ENDED') {
+      // 매진·판매 종료 판이 섰다(원본 410, 엣지 응답이 퍼지기 전에 온 진입, ADR-0122·0214). 번호를 받지 않았으니 선점을 푼다
+      await this.#release(c);
+      if (num.kind === 'SOLD_OUT') throw new EntryError('SOLD_OUT', '매진되었다');
+      throw new EntryError('SALE_ENDED', '판매가 끝났다(회차 판매 상태)');
+    }
     if (num.kind === 'EARLY' || num.kind === 'WAIT') {
       // 번호를 받지 않았으니 선점을 푼다. 남기면 새 요청 ID로 다시 온 같은 사람이 선점 수명(10초) 동안 409를 받는다
       await this.#release(c);

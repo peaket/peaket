@@ -46,6 +46,10 @@ export const keys = {
   serving: (e: string) => `q:{event:${e}}:serving`,
   servingLog: (e: string) => `q:{event:${e}}:serving_log`,
   calls: (e: string) => `q:{event:${e}}:calls`,
+  /** 대기 화면에 싣는 제어 상태와 회차 판매 상태(ADR-0103·0214, docs/data.md §3). 범위가 전체면 회차 자리에 PLATFORM */
+  notice: (e: string) => `q:{event:${e}}:notice`,
+  /** 리더 상태(입장 일시정지 admitPaused 등, admission-ctrl이 쓴다) */
+  ctl: (e: string) => `q:{event:${e}}:ctl`,
   /** 묶음 결과(회차 태그 없이 토큰 해시로 흩어 둔다, q:lobby:{hash}와 같음) */
   batchResult: (tokenHash: string) => `q:batch:{${tokenHash}}`,
 };
@@ -164,10 +168,11 @@ export class RedisEntryStore implements EntryStore {
       String(i.items.length),
       ...i.items.flatMap((it) => [it.eligible ? '1' : '0', it.tokenHash ?? '']),
     ];
-    const r = (await guard(this.redis.evalScript(NUMBER_BATCH, [keys.seq(e), keys.skipped(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e), keys.epoch(e)], args))) as unknown[];
+    const r = (await guard(this.redis.evalScript(NUMBER_BATCH, [keys.seq(e), keys.skipped(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e), keys.epoch(e), keys.notice(e)], args))) as unknown[];
     const head = str(r[0]);
     if (head === 'RB05') return i.items.map(() => ({ kind: 'RECOVERING' }));
     if (head === 'EARLY') return i.items.map(() => ({ kind: 'EARLY' }));
+    if (head === 'SOLD_OUT' || head === 'ENDED') return i.items.map(() => ({ kind: head }));
     if (head !== 'OK') throw new Error(`번호 Lua가 모르는 값을 돌려줬다: ${head}`);
     const gen = Number(r[1]);
     return i.items.map((_, k): NumberResult => {

@@ -28,6 +28,8 @@ const memoryWorld = async (): Promise<PidWorld> => {
     failover: async (eventId) => store.failoverForTest(eventId),
     lose: async (eventId, seq) => store.rollbackForTest(eventId, { seq, skipped: store.skippedOf(eventId), epoch: store.epochOf(eventId)! }),
     skipped: async (eventId) => store.skippedOf(eventId),
+    setSaleState: async (eventId, state) => store.setSaleStateForTest(eventId, state),
+    dupValue: async (pid, eventId) => store.dupForTest(pid, eventId).value,
     dupOf: async (pid: string, eventId: string) => store.dupForTest(pid, eventId),
     setDup: async (pid: string, eventId: string, value: string | null, expireAtMs?: number) => store.setDupForTest(pid, eventId, value, expireAtMs),
   };

@@ -3,7 +3,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type HotRedis, redisScript } from '@peaket/platform';
 import { guard, keys, QUEUE_REDIS } from '../../entry/index.js';
-import { DEFAULT_TARGET, FIRST_USE_MS, NOT_YET_MAX_MS, NOT_YET_MIN_MS, RATE_WINDOW_SEC, SOON_RETRY_MAX_SEC, SOON_RETRY_MIN_SEC, TURN_GRACE_MS, type AdmitResult, type Claim, type Precheck } from '../domain/admission.js';
+import { DEFAULT_TARGET, FIRST_USE_MS, MAX_STAY_MS, NOT_YET_MAX_MS, NOT_YET_MIN_MS, RATE_WINDOW_SEC, SOON_RETRY_MAX_SEC, SOON_RETRY_MIN_SEC, TURN_GRACE_MS, type AdmitResult, type Claim, type Precheck } from '../domain/admission.js';
 import type { AdmissionStore } from '../domain/ports.js';
 import { ADMIT_LUA, CLAIM_LUA, EXPIRE_LUA, MARK_REMOVED_LUA, PRECHECK_LUA, SETTLE_LUA } from './admission-lua.js';
 
@@ -92,19 +92,30 @@ export class RedisAdmissionStore implements AdmissionStore {
       SOON_RETRY_MIN_SEC,
       SOON_RETRY_MAX_SEC,
       RATE_WINDOW_SEC,
+      MAX_STAY_MS,
     ].map(String);
     const r = (await guard(this.redis.evalScript(ADMIT, ks, args))) as unknown[];
     const kind = str(r[0]);
     if (kind === 'ADMITTED') {
       const arrivalDelayMs = opt(r[4]);
       const soonWaitMs = opt(r[5]);
-      return { kind, jti: str(r[1]), again: str(r[2]) === '1', firstSlot: str(r[6]) === '1', serving: Number(str(r[3])), ...(arrivalDelayMs !== undefined ? { arrivalDelayMs } : {}), ...(soonWaitMs !== undefined ? { soonWaitMs } : {}) };
+      const issuedAtMs = opt(r[7]);
+      return {
+        kind,
+        jti: str(r[1]),
+        again: str(r[2]) === '1',
+        firstSlot: str(r[6]) === '1',
+        serving: Number(str(r[3])),
+        ...(arrivalDelayMs !== undefined ? { arrivalDelayMs } : {}),
+        ...(soonWaitMs !== undefined ? { soonWaitMs } : {}),
+        ...(issuedAtMs !== undefined ? { issuedAtMs } : {}),
+      };
     }
     if (kind === 'SOON') {
       const arrivalDelayMs = opt(r[2]);
       return { kind, retryAfterSeconds: Number(str(r[1])), ...(arrivalDelayMs !== undefined ? { arrivalDelayMs } : {}) };
     }
-    if (kind === 'REMOVED' || kind === 'NOT_YET') return { kind };
+    if (kind === 'REMOVED' || kind === 'NOT_YET' || kind === 'EXPIRED') return { kind };
     throw new Error(`입장 Lua가 모르는 값을 돌려줬다: ${kind}`);
   }
 

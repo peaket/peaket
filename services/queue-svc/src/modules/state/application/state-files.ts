@@ -5,7 +5,7 @@ import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit, Optional }
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { type EventSchedule, type EventSchedules, QueueStoreUnavailable } from '../../entry/index.js';
 import { STATE_OPTIONS, STATE_SCHEDULES, STATE_SNAPSHOTS, type StateOptions, type StateSnapshots } from '../domain/ports.js';
-import { ACTIVE_FOR_MS, boundaryOf, buildStateFiles, MAX_ACTIVE_EVENTS, type StateFile, TICK_CONCURRENCY } from '../domain/state.js';
+import { ACTIVE_FOR_MS, boundaryOf, buildStateFiles, MAX_ACTIVE_EVENTS, type PlatformNotice, type StateFile, TICK_CONCURRENCY } from '../domain/state.js';
 
 interface Active {
   schedule: EventSchedule;
@@ -35,6 +35,8 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
   #timer: NodeJS.Timeout | undefined;
   #ticking = false;
   #lastBoundary: number | undefined;
+  /** 마지막으로 읽은 전체 범위 공지(못 읽으면 이 값으로 만든다, ADR-0214) */
+  #platform: PlatformNotice = {};
 
   constructor(
     @Inject(STATE_SNAPSHOTS) private readonly snapshots: StateSnapshots,
@@ -83,7 +85,8 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
       const schedule = await this.schedules.get(eventId);
       if (!schedule) return null;
       const boundaryMs = boundaryOf(this.clock.now());
-      const files = buildStateFiles(await this.snapshots.read(eventId), schedule, boundaryMs);
+      const platform = await this.#readPlatform();
+      const files = buildStateFiles(await this.snapshots.read(eventId), schedule, boundaryMs, platform);
       const a: Active = { schedule, askedAt: this.clock.now(), files };
       this.#active.set(eventId, a);
       return a;
@@ -103,6 +106,7 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
         if (boundaryMs - a.askedAt > ACTIVE_FOR_MS) this.#active.delete(eventId);
         else work.push([eventId, a]);
       }
+      const platform = work.length > 0 ? await this.#readPlatform() : this.#platform;
       let next = 0;
       const lane = async () => {
         while (next < work.length) {
@@ -110,7 +114,7 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
           try {
             const schedule = await this.schedules.get(eventId).catch(() => a.schedule);
             if (schedule) a.schedule = schedule;
-            const files = buildStateFiles(await this.snapshots.read(eventId), a.schedule, boundaryMs);
+            const files = buildStateFiles(await this.snapshots.read(eventId), a.schedule, boundaryMs, platform);
             // 늦게 끝난 생성이 그 사이 만든 더 새 파일을 덮지 않게 한다
             if (a.files[0]!.generatedAtMs < boundaryMs) a.files = files;
           } catch (err) {
@@ -122,6 +126,16 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.#ticking = false;
     }
+  }
+
+  /** 전체 범위 공지를 읽는다. 못 읽으면 마지막 값을 쓴다(일시 장애가 아닌 오류는 남긴다) */
+  async #readPlatform(): Promise<PlatformNotice> {
+    try {
+      this.#platform = await this.snapshots.readPlatform();
+    } catch (err) {
+      if (!(err instanceof QueueStoreUnavailable)) this.logger?.error({ err }, '전체 범위 공지를 읽지 못했다');
+    }
+    return this.#platform;
   }
 
   activeForTest(): number {

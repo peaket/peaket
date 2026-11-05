@@ -3,6 +3,7 @@ export type EntryErrorCode =
   | 'NOT_FOUND'
   | 'NOT_OPEN'
   | 'SALE_ENDED'
+  | 'SOLD_OUT'
   | 'BATCHING'
   | 'QUEUE_RECOVERING'
   | 'PREVERIFY_INVALID'

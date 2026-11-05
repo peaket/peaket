@@ -128,7 +128,87 @@ describe('파일 만들기', () => {
     expect(parse(buildStateFiles(snap({ seq: 1 }), schedule, saleEnd - 1)[0]!.body).saleStatus).toBe('ON_SALE');
     expect(parse(buildStateFiles(snap({ seq: 1 }), schedule, saleEnd)[0]!.body).saleStatus).toBe('ENDED');
     expect(Object.keys(parse(buildStateFiles(snap({ seq: 1 }), schedule, T)[0]!.body)).sort()).toEqual(
-      ['generatedAtMs', 'pollHintMs', 'removedBeforeSegment', 'removedBitmap', 'removedUpToServing', 'saleStatus', 'serving', 'servingRate', 'servingSteps', 'soldOutTiers'].sort(),
+      ['admissionPaused', 'generatedAtMs', 'pollHintMs', 'removedBeforeSegment', 'removedBitmap', 'removedUpToServing', 'saleStatus', 'serving', 'servingRate', 'servingSteps', 'soldOutTiers'].sort(),
+    );
+  });
+});
+
+describe('판매 상태(HOT-010, ADR-0214)', () => {
+  const statusOf = (s: StateSnapshot, at = T, platform?: Parameters<typeof buildStateFiles>[3]) => parse(buildStateFiles(s, schedule, at, platform)[0]!.body);
+
+  test('Q-T51_파일의판매상태는_판매종료>SOLD_OUT>PAUSED>ALL_HELD>TIER_SOLD_OUT>ON_SALE차례로덧씌운다', () => {
+    const saleEnd = schedule.startsAtMs - 24 * 3600_000;
+    const cases: [StateSnapshot['notice'], string, number?][] = [
+      [undefined, 'ON_SALE'],
+      [{ saleState: 'ON_SALE' }, 'ON_SALE'],
+      [{ saleState: 'ALL_HELD' }, 'ALL_HELD'],
+      [{ saleState: 'SOLD_OUT' }, 'SOLD_OUT'],
+      [{ saleState: 'ENDED' }, 'ENDED'],
+      [{ saleState: 'ON_SALE', soldOutTiers: ['R'] }, 'TIER_SOLD_OUT'],
+      [{ saleState: 'ALL_HELD', soldOutTiers: ['R'] }, 'ALL_HELD'],
+      [{ saleState: 'ALL_HELD', paused: true }, 'PAUSED'],
+      [{ saleState: 'ON_SALE', suspended: true, soldOutTiers: ['R'] }, 'PAUSED'],
+      [{ saleState: 'SOLD_OUT', paused: true }, 'SOLD_OUT'],
+      [{ saleState: 'SOLD_OUT' }, 'ENDED', saleEnd],
+      [{ saleState: 'ON_SALE', paused: true }, 'ENDED', saleEnd],
+    ];
+    for (const [notice, want, at] of cases) expect(statusOf(snap({ seq: 1, notice }), at).saleStatus, JSON.stringify({ notice, at })).toBe(want);
+  });
+
+  test('Q-T51_전체범위공지의일시정지(paused·suspended)도_PAUSED이고_매진·판매종료는그보다앞선다', () => {
+    expect(statusOf(snap({ seq: 1 }), T, { paused: true }).saleStatus).toBe('PAUSED');
+    expect(statusOf(snap({ seq: 1, notice: { saleState: 'ALL_HELD' } }), T, { suspended: true }).saleStatus).toBe('PAUSED');
+    expect(statusOf(snap({ seq: 1, notice: { saleState: 'SOLD_OUT' } }), T, { paused: true }).saleStatus).toBe('SOLD_OUT');
+  });
+
+  test('Q-T54③_등급매진이면_대기는이어지고(TIER_SOLD_OUT)_soldOutTiers에그등급만든다', () => {
+    const f = statusOf(snap({ seq: 3, serving: 1, notice: { saleState: 'ON_SALE', soldOutTiers: ['R'] } }));
+    expect(f.saleStatus).toBe('TIER_SOLD_OUT');
+    expect(f.soldOutTiers).toEqual(['R']);
+    expect(f.serving).toBe(1);
+    expect(statusOf(snap({ seq: 1, notice: { saleState: 'SOLD_OUT', soldOutTiers: ['R', 'S'] } })).soldOutTiers).toEqual(['R', 'S']);
+  });
+
+  test('공지배너는_회차공지가먼저이고_없으면전체범위공지이며_둘다없으면칸을싣지않는다', () => {
+    expect(statusOf(snap({ seq: 1, notice: { banner: '회차 공지' } }), T, { banner: '전체 공지' }).banner).toBe('회차 공지');
+    expect(statusOf(snap({ seq: 1 }), T, { banner: '전체 공지' }).banner).toBe('전체 공지');
+    expect('banner' in statusOf(snap({ seq: 1 }))).toBe(false);
+  });
+
+  test('BAS-042_admissionPaused는_ctl의admitPaused가켜졌고만료전일때만참이다(리더와같은규칙)', () => {
+    expect(statusOf(snap({ seq: 1 })).admissionPaused).toBe(false);
+    expect(statusOf(snap({ seq: 1, admit: { paused: true, untilMs: null } })).admissionPaused).toBe(true);
+    expect(statusOf(snap({ seq: 1, admit: { paused: true, untilMs: T + 1 } })).admissionPaused).toBe(true);
+    expect(statusOf(snap({ seq: 1, admit: { paused: true, untilMs: T } })).admissionPaused).toBe(false);
+    expect(statusOf(snap({ seq: 1, admit: { paused: false, untilMs: null } })).admissionPaused).toBe(false);
+  });
+
+  test('전체범위공지는_켤때와매초생성때한번씩읽고_못읽으면앞값을쓴다', async () => {
+    const clock = fakeClock({ now: T + 400 });
+    const snapshots = new MemoryStateSnapshots();
+    const schedules = new MemoryEventSchedules();
+    await schedules.set('ev1', schedule);
+    await schedules.set('ev2', schedule);
+    snapshots.setPlatform({ paused: true, banner: '전체 공지' });
+    const files = new StateFiles(snapshots, schedules, clock, { webOrigin: 'https://www.peaket.example', autoTick: false });
+    expect(parse((await files.file('ev1', 0))!.body)).toMatchObject({ saleStatus: 'PAUSED', banner: '전체 공지' });
+    await files.file('ev2', 0);
+    const before = snapshots.platformReads;
+    snapshots.setPlatform({});
+    await files.tick(T + 1000);
+    expect(snapshots.platformReads - before).toBe(1);
+    expect(parse((await files.file('ev2', 0))!.body).saleStatus).toBe('ON_SALE');
+    snapshots.setPlatform({ suspended: true });
+    snapshots.failPlatformNext = new QueueStoreUnavailable(new Error('잠시 안 됨'));
+    await files.tick(T + 2000);
+    // 못 읽은 초는 앞 값(전체 범위 공지 없음)으로 만든다
+    expect(parse((await files.file('ev1', 0))!.body)).toMatchObject({ saleStatus: 'ON_SALE', generatedAtMs: T + 2000 });
+  });
+
+  test('[ASVS v5.0.0-14.3.2] 판매상태·매진등급·공지·입장일시정지를더해도_공개파일은회차값만싣는다', () => {
+    const f = statusOf(snap({ seq: 1, notice: { saleState: 'ON_SALE', soldOutTiers: ['R'], banner: '안내' }, admit: { paused: true, untilMs: null } }));
+    expect(Object.keys(f).sort()).toEqual(
+      ['admissionPaused', 'banner', 'generatedAtMs', 'pollHintMs', 'removedBeforeSegment', 'removedBitmap', 'removedUpToServing', 'saleStatus', 'serving', 'servingRate', 'servingSteps', 'soldOutTiers'].sort(),
     );
   });
 });
@@ -202,7 +282,7 @@ describe('켜기·매초 다시 만들기', () => {
     let release!: () => void;
     const slow = new Promise<void>((r) => (release = r));
     let n = 0;
-    const gated = { read: async (id: string) => (n++ === 0 ? (await slow, { ...(await snapshots.read(id)), serving: 1 }) : { ...(await snapshots.read(id)), serving: 2 }) };
+    const gated = { readPlatform: async () => ({}), read: async (id: string) => (n++ === 0 ? (await slow, { ...(await snapshots.read(id)), serving: 1 }) : { ...(await snapshots.read(id)), serving: 2 }) };
     const f = new StateFiles(gated, schedules, fakeClock({ now: T + 400 }), { webOrigin: 'x', autoTick: false });
     const first = f.file('ev1', 0);
     await new Promise((r) => setImmediate(r));
@@ -242,7 +322,7 @@ describe('켜기·매초 다시 만들기', () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     let slowReads = 0;
-    const s = { read: async (id: string) => (id === 'slow' && slowReads++ > 0 ? (await gate, snapshots.read(id)) : snapshots.read(id)) };
+    const s = { readPlatform: async () => ({}), read: async (id: string) => (id === 'slow' && slowReads++ > 0 ? (await gate, snapshots.read(id)) : snapshots.read(id)) };
     const f = new StateFiles(s, schedules, fakeClock({ now: T + 400 }), { webOrigin: 'x', autoTick: false });
     await f.file('slow', 0);
     await f.file('ev1', 0);

@@ -4,9 +4,11 @@ import { createHotRedis, fakeClock, type HotRedis } from '@peaket/platform';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { keys, RedisEntryStore } from '../src/modules/entry/adapters/redis-entry-store.js';
 import { EVENTS_KEY } from '../src/modules/entry/adapters/redis-event-schedules.js';
+import { RedisWithdrawnDue, wdrKeys } from '../src/modules/entry/adapters/redis-withdrawn-due.js';
 import { RedisWithdrawnKeys } from '../src/modules/entry/adapters/redis-withdrawn-keys.js';
 import { PurgeWithdrawnKeys } from '../src/modules/entry/application/purge-withdrawn-keys.js';
 import { newEvent } from '../test/support.js';
+import { withdrawnDueCases } from '../test/withdrawn-due-cases.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
 let valkey: ValkeyContainer;
@@ -110,4 +112,10 @@ test('I-T27_Valkey에서_진행중인회차가한번에읽는수보다많아도_
   const purge = new PurgeWithdrawnKeys(new RedisWithdrawnKeys(redis), fakeClock({ now }));
   expect((await purge.run({ pids: [p], purgeBy: now + 4 * DAY })).events).toBeGreaterThanOrEqual(many.length);
   expect(await expireTime(keys.dup(p, last))).toBe(now + 4 * DAY);
+});
+
+// 처리할 때 집합은 지금 시각을 앱 시계로 넘긴다(Lua의 TIME을 쓰지 않는다). 값의 만료(PXAT purgeBy)는 실제 시각이라, 기한이 지난 값은 앱이 purgeBy로도 거른다
+withdrawnDueCases('Valkey Lua', async () => {
+  const clock = fakeClock({ now: Date.now() });
+  return { due: new RedisWithdrawnDue(redis, clock), clock, dropValue: async (k) => void (await redis.command(['DEL', wdrKeys.value(k)], { key: wdrKeys.value(k) })) };
 });

@@ -66,6 +66,8 @@ export interface AdmissionHarness {
   dup(pid: string, eventId: string): Promise<string | null>;
   adm(pid: string, eventId: string): Promise<string | null>;
   setAdm(pid: string, eventId: string, v: string): Promise<void>;
+  /** 자리를 처음 잡은 시각(slot_of의 '<해시>:at')을 바꾼다 */
+  setIssuedAt(eventId: string, ticketHash: string, atMs: number): Promise<void>;
 }
 
 let pidN = 0;
@@ -138,6 +140,25 @@ export function admissionCases(name: string, setup: () => Promise<AdmissionHarne
     expect(jc).not.toBe(ja);
     expect([...(await h.slots(eventId)).keys()]).toEqual([jc]);
     expect((await h.adm(PID, eventId))?.startsWith(`${tokens.hash(t)}:`)).toBe(true);
+  });
+
+  test(`[${name}] BAS-042 같은 대기표로 다시 받는 입장 토큰은 첫 발급 + 최대 체류를 exp로 두고, 그 시각이 지났으면 다시 주지 않고 410 만료(rejoinAllowed 거짓)다(exp < iat 토큰을 내지 않는다, HOT-010 리뷰)`, async () => {
+    const { h, eventId, ticket, confirm } = await world();
+    const t = ticket(150);
+    const a = await confirm(t);
+    if (a.status !== 'ADMITTED') throw new Error('ADMITTED가 아니다');
+    const near = h.clock.now() - MAX_STAY_MS + 60_000;
+    await h.setIssuedAt(eventId, tokens.hash(t), near);
+    const b = await confirm(t);
+    if (b.status !== 'ADMITTED') throw new Error('ADMITTED가 아니다');
+    const cb = readAdmissionToken(b.admissionToken).claims;
+    expect(cb.exp).toBe(Math.floor(near / 1000) + MAX_STAY_MS / 1000);
+    expect(cb.exp as number).toBeGreaterThan(cb.iat as number);
+    expect(Date.parse(b.purchaseSessionExpiresAt)).toBe((cb.exp as number) * 1000);
+    await h.setIssuedAt(eventId, tokens.hash(t), h.clock.now() - MAX_STAY_MS);
+    const e = await rejects(confirm(t), 'EXPIRED');
+    expect(e.rejoinAllowed).toBe(false);
+    expect(await h.admitted(eventId)).toBe(1);
   });
 
   test(`[${name}] 같은 대기표의 요청 둘이 동시에 와도 자리·입장 수는 하나이고 같은 jti를 받는다(ADR-0183 결정 2)`, async () => {

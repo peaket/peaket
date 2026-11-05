@@ -53,7 +53,16 @@ test('회차슬롯Lua하나로_seq·serving·빠진번호비트맵(바이트)·�
   expect(files[0]!.removedUpToServing).toBe(3);
 });
 
-test('아무것도없는회차는_seq·serving0과빈비트맵이다', async () => {
+test('아무것도없는회차는_seq·serving0과빈비트맵이고_판매상태칸·입장일시정지도없다', async () => {
   const s = await new RedisStateSnapshots(redis).read(newEvent());
-  expect(s).toEqual({ seq: 0, serving: 0, removed: new Uint8Array(0), skipped: [], servingLog: [], calls: [] });
+  expect(s).toEqual({
+    seq: 0,
+    serving: 0,
+    removed: new Uint8Array(0),
+    skipped: [],
+    servingLog: [],
+    calls: [],
+    notice: { soldOutTiers: [], paused: false, suspended: false },
+    admit: { paused: false, untilMs: null },
+  });
 });
