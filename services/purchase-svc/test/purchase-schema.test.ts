@@ -4,11 +4,13 @@
 // ② 마이그레이션 SQL 파일(0000 좌석 표, 0002 다시 만들기 표·원장 칸)을 글로 읽어 파티션 선언(seat_hold만, DEFAULT 파티션 없음)과 표 정의 ↔ SQL 일치를 보고,
 // ③ 마이그레이션 기록(meta)이 맞물리는지 본다. 네 번째 마이그레이션(0003 주문 표·Outbox, BUILD_ORDER PRF-160), 다섯 번째(0004 주문의 홀드·구매 세션 칸과
 // hold_id 유일 인덱스, BUILD_ORDER PRF-161), 여섯 번째(0005 결제 접수의 결제 참조 칸·seat_gen·order_saga_job, BUILD_ORDER PRF-162),
-// 일곱 번째(0006 Saga 1단계의 purchase_order.failure_reason·order_saga_job.confirm_sent_at·step CHECK, BUILD_ORDER PRF-165)도 기록·파일 목록에 있고,
-// 마지막 스냅샷(0006)의 주문 표 여섯(booking schema.ts)이 표 정의와 같은지 본다.
+// 일곱 번째(0006 Saga 1단계의 purchase_order.failure_reason·order_saga_job.confirm_sent_at·step CHECK, BUILD_ORDER PRF-165),
+// 여덟 번째(0007 발권 재시도 큐 ticket_issue_job, BUILD_ORDER PRF-163)도 기록·파일 목록에 있고,
+// 마지막 스냅샷(0007)의 주문 표 일곱(booking schema.ts)이 표 정의와 같은지 본다.
 // ④ 0004 SQL의 칸(hold_id·purchase_session_id)과 유일 인덱스(purchase_order_hold_key)가 schema.ts와 같은지 본다.
 // ⑤ 0005 SQL의 칸(payment_attempt 다섯·purchase_order.seat_gen)과 order_saga_job 표·외래 키·색인이 schema.ts와 같은지 본다.
 // ⑥ 0006 SQL의 칸(purchase_order.failure_reason·order_saga_job.confirm_sent_at)과 order_saga_job_step_check가 schema.ts·도메인 SAGA_STEPS와 같은지 본다.
+// ⑦ 0007 SQL의 ticket_issue_job 표(칸·기본 키·기본값)·외래 키·쓸기 색인이 schema.ts와 같은지 본다(data.md §2 ERD ticket_issue_job·§4 여덟 번째 마이그레이션).
 // 실제 PostgreSQL에서 돌려 보는 것은 test-int/purchase-migration.int.test.ts(주문 표는 test-int/order-store.int.test.ts)다.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import type { SQL } from 'drizzle-orm';
 import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { describe, expect, test } from 'vitest';
-import { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder } from '../src/modules/booking/adapters/db/schema.js';
+import { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob } from '../src/modules/booking/adapters/db/schema.js';
 import { SAGA_STEPS } from '../src/modules/booking/domain/saga.js';
 import { purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
 import { SEAT_SALE_STATUSES } from '../src/modules/inventory/domain/seat-sale.js';
@@ -35,6 +37,8 @@ const ORDER_HOLD_TAG = '0004_order_hold_and_session';
 const PAY_TAG = '0005_payment_acceptance';
 /** Saga 1단계의 주문 실패 사유 칸과 작업 단계 CHECK(BUILD_ORDER PRF-165) */
 const SAGA_TAG = '0006_saga_step_one';
+/** 발권 재시도 큐 ticket_issue_job(BUILD_ORDER PRF-163) */
+const TICKET_TAG = '0007_ticket_issue_job';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
 
@@ -345,7 +349,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
   };
 
-  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141)·0002(다시 만들기 표·원장 칸, PRF-143)·0003(주문 표·Outbox, PRF-160)·0004(주문의 홀드·구매 세션 칸, PRF-161)·0005(결제 접수, PRF-162)·0006(Saga 1단계, PRF-165) 차례이고 tag가 SQL 파일 이름과 맞으며 when이 차례대로 커진다 [ASVS v5.0.0-2.3.4]', () => {
+  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141)·0002(다시 만들기 표·원장 칸, PRF-143)·0003(주문 표·Outbox, PRF-160)·0004(주문의 홀드·구매 세션 칸, PRF-161)·0005(결제 접수, PRF-162)·0006(Saga 1단계, PRF-165)·0007(발권 재시도 큐, PRF-163) 차례이고 tag가 SQL 파일 이름과 맞으며 when이 차례대로 커진다 [ASVS v5.0.0-2.3.4]', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
@@ -355,6 +359,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [4, ORDER_HOLD_TAG],
       [5, PAY_TAG],
       [6, SAGA_TAG],
+      [7, TICKET_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -374,6 +379,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       `${ORDER_HOLD_TAG}.sql`,
       `${PAY_TAG}.sql`,
       `${SAGA_TAG}.sql`,
+      `${TICKET_TAG}.sql`,
     ]);
   });
 
@@ -396,7 +402,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     .sort();
   const snapshotOf = (f: string) => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', f), 'utf8')) as Snapshot;
 
-  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003 → 0004 → 0005 → 0006)', () => {
+  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007)', () => {
     expect(snapshotFiles).toEqual(journal.entries.map((e) => `${String(e.idx).padStart(4, '0')}_snapshot.json`));
     let prev = '00000000-0000-0000-0000-000000000000';
     for (const f of snapshotFiles) {
@@ -406,12 +412,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     }
   });
 
-  /** booking schema.ts의 주문 표 여섯(PRF-160 다섯 + PRF-162 order_saga_job). Outbox 부모 표는 손으로 쓴 SQL이라 스냅샷에 없다 */
-  const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt, orderSagaJob];
+  /** booking schema.ts의 주문 표 일곱(PRF-160 다섯 + PRF-162 order_saga_job + PRF-163 ticket_issue_job). Outbox 부모 표는 손으로 쓴 SQL이라 스냅샷에 없다 */
+  const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt, orderSagaJob, ticketIssueJob];
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
 
-  test('마지막 스냅샷(0006_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 주문 표 여섯)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0006_snapshot.json');
+  test('마지막 스냅샷(0007_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 주문 표 일곱)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0007_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
     expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, ...ORDER_SHAPES].map((s) => `public.${s.name}`).sort());
     for (const s of [...SHAPES, ...ORDER_SHAPES]) {
@@ -422,9 +428,9 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     }
   });
 
-  test('마지막 스냅샷(0006)의 주문 표 여섯은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160, 0004의 purchase_order_hold_key는 PRF-161, 0005의 order_saga_job은 PRF-162) [ASVS v5.0.0-2.3.4]', () => {
-    const snap = snapshotOf('0006_snapshot.json');
-    expect(ORDER_SHAPES.map((s) => s.name)).toEqual(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'order_saga_job']);
+  test('마지막 스냅샷(0007)의 주문 표 일곱은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160, 0004의 purchase_order_hold_key는 PRF-161, 0005의 order_saga_job은 PRF-162, 0007의 ticket_issue_job은 PRF-163) [ASVS v5.0.0-2.3.4]', () => {
+    const snap = snapshotOf('0007_snapshot.json');
+    expect(ORDER_SHAPES.map((s) => s.name)).toEqual(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'order_saga_job', 'ticket_issue_job']);
     ORDER_TABLES.forEach((table, i) => {
       const s = ORDER_SHAPES[i]!;
       const t = snap.tables[`public.${s.name}`]!;
@@ -496,6 +502,19 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(Object.keys(job.a.columns).filter((c) => !(c in job.b.columns))).toEqual(['confirm_sent_at']);
     expect(job.a.columns['confirm_sent_at']).toMatchObject({ type: TZ, notNull: false });
     expect(Object.keys(job.a.checkConstraints ?? {}).filter((k) => !(k in (job.b.checkConstraints ?? {})))).toEqual(['order_saga_job_step_check']);
+  });
+
+  test('0006 → 0007 스냅샷(PRF-163): ticket_issue_job 표 하나만 새로 생기고 다른 표는 모두 같다(purchase_order.failure_reason은 0006 칸 그대로, CHECK 없음) [ASVS v5.0.0-2.3.4]', () => {
+    const before = snapshotOf('0006_snapshot.json');
+    const after = snapshotOf('0007_snapshot.json');
+    expect(Object.keys(after.tables).filter((n) => !(n in before.tables))).toEqual(['public.ticket_issue_job']);
+    expect(Object.keys(before.tables).filter((n) => !(n in after.tables))).toEqual([]);
+    for (const name of Object.keys(before.tables)) expect(after.tables[name], name).toEqual(before.tables[name]);
+    const t = after.tables['public.ticket_issue_job']!;
+    expect(Object.keys(t.foreignKeys ?? {})).toEqual(['ticket_issue_job_order_id_purchase_order_id_fk']);
+    expect(Object.entries(t.indexes ?? {}).map(([n, x]) => [n, x.isUnique])).toEqual([['ticket_issue_job_next_attempt_idx', false]]);
+    expect(t.checkConstraints ?? {}).toEqual({});
+    expect(Object.values(t.compositePrimaryKeys ?? {})).toEqual([]);
   });
 });
 
@@ -695,5 +714,78 @@ describe('마이그레이션 SQL 파일(0006_saga_step_one.sql, PRF-165)', () =>
     // canon은 표 한정자("order_saga_job".)와 따옴표를 지운다
     expect(canon(sagaStatements[2]!).replace(/;$/, '')).toBe(`alter table order_saga_job add constraint order_saga_job_step_check check(${sagaShape.checks[0]!.expr})`);
     expect(literalsOf(sagaShape.checks[0]!.expr)).toEqual([...SAGA_STEPS]);
+  });
+});
+
+/** 0007(결제 결과 반영, PRF-163): 발권 재시도 큐 ticket_issue_job */
+const ticketShape = shapeOf(ticketIssueJob);
+const ticketFile = readFileSync(join(MIGRATIONS, `${TICKET_TAG}.sql`), 'utf8');
+const ticketBody = ticketFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const ticketStatements = statementsOf(ticketFile);
+
+describe('마이그레이션 SQL 파일(0007_ticket_issue_job.sql, PRF-163)', () => {
+  test('문 셋뿐이다: ticket_issue_job을 만들고, 외래 키 하나와 쓸기 색인 하나를 더한다(다른 표를 바꾸거나 지우는 문·CHECK가 없다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(ticketStatements).toHaveLength(3);
+    expect(ticketStatements[0]).toMatch(/^CREATE TABLE "ticket_issue_job" /);
+    expect(ticketStatements[1]).toMatch(/^ALTER TABLE "ticket_issue_job" ADD CONSTRAINT "ticket_issue_job_order_id_purchase_order_id_fk" FOREIGN KEY /);
+    expect(ticketStatements[2]).toMatch(/^CREATE INDEX "ticket_issue_job_next_attempt_idx" /);
+    expect(ticketBody).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b(?! no action)/i);
+    expect(ticketBody).not.toMatch(/ALTER\s+COLUMN|ADD\s+COLUMN|SET\s+NOT\s+NULL|USING\s+\(|\bCHECK\b|PARTITION/i);
+    expect(ticketBody).not.toMatch(/ALTER TABLE "(?!ticket_issue_job")/);
+    expect(ticketBody.split(BREAKPOINT)).toHaveLength(3);
+  });
+
+  test('ticket_issue_job의 열 이름·종류·널 허용이 정본 ERD(data.md §2)·schema.ts와 같고 SQL의 만드는 문도 같은 차례다(next_attempt_at·last_error만 비울 수 있다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(cols(ticketShape)).toEqual([
+      ['order_id', 'uuid', true],
+      ['event_id', 'uuid', true],
+      ['attempts', 'integer', true],
+      ['next_attempt_at', TZ, false],
+      ['issue_due_at', TZ, true],
+      ['last_error', 'text', false],
+      ['created_at', TZ, true],
+    ]);
+    const body = ticketStatements[0]!;
+    expect([...body.matchAll(/^\t"([a-z_]+)" /gm)].map((m) => m[1])).toEqual(ticketShape.columns.map((c) => c.name));
+    const c = canon(body);
+    for (const col of ticketShape.columns) expect(c, col.name).toContain(`${col.name} ${col.type}`);
+    for (const col of ticketShape.columns.filter((x) => x.notNull && !x.primary)) expect(c, `${col.name} not null`).toMatch(new RegExp(`${col.name} ${col.type}( default \\d+)? not null`));
+    for (const col of ticketShape.columns.filter((x) => !x.notNull)) expect(c, `${col.name} 널 허용`).not.toMatch(new RegExp(`${col.name} ${col.type}[^,]*not null`));
+  });
+
+  test('ticket_issue_job은 order_id 하나의 기본 키(한 주문에 행 하나)이고, 기본값은 attempts의 0 하나다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(ticketShape.columns.filter((x) => x.primary).map((x) => x.name)).toEqual(['order_id']);
+    expect(ticketShape.primaryKeys).toEqual([]);
+    const c = canon(ticketStatements[0]!);
+    expect(c).toContain('order_id uuid primary key not null');
+    expect((c.match(/primary key/g) ?? []).length).toBe(1);
+    expect(ticketShape.columns.filter((x) => x.hasDefault).map((x) => x.name)).toEqual(['attempts']);
+    expect(getTableConfig(ticketIssueJob).columns.find((x) => x.name === 'attempts')!.default).toBe(0);
+    expect(c).toContain('attempts integer default 0 not null');
+    expect([...ticketBody.matchAll(/\bDEFAULT\b/gi)]).toHaveLength(1);
+    expect(ticketShape.checks).toEqual([]);
+  });
+
+  test('ticket_issue_job.order_id는 purchase_order.id를 가리키는 외래 키 하나이고, 이름·SQL이 schema.ts와 같다 [ASVS v5.0.0-2.3.4]', () => {
+    const fks = getTableConfig(ticketIssueJob).foreignKeys;
+    expect(fks.map((f) => f.getName())).toEqual(['ticket_issue_job_order_id_purchase_order_id_fk']);
+    const ref = fks[0]!.reference();
+    expect({ from: ref.columns.map((x) => x.name), to: getTableConfig(ref.foreignTable).name, toCols: ref.foreignColumns.map((x) => x.name) }).toEqual({
+      from: ['order_id'],
+      to: 'purchase_order',
+      toCols: ['id'],
+    });
+    expect(canon(ticketStatements[1]!).replace(/;$/, '')).toBe(
+      'alter table ticket_issue_job add constraint ticket_issue_job_order_id_purchase_order_id_fk foreign key(order_id)references purchase_order(id)on delete no action on update no action',
+    );
+    expect(ticketStatements[1]).toContain('REFERENCES "public"."purchase_order"("id")');
+  });
+
+  test('쓸기 색인: ticket_issue_job_next_attempt_idx는 ticket_issue_job (next_attempt_at)의 btree 일반 색인이고 WHERE가 없다. 이 표의 색인은 이것 하나다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(ticketShape.indexes).toEqual([{ name: 'ticket_issue_job_next_attempt_idx', unique: false, columns: ['next_attempt_at'], where: undefined }]);
+    expect(canon(ticketStatements[2]!).replace(/;$/, '')).toBe('create index ticket_issue_job_next_attempt_idx on ticket_issue_job using btree(next_attempt_at)');
   });
 });

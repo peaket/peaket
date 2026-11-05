@@ -7,7 +7,7 @@
 // - 결제 접수(PRF-162)는 0005로 결제 시도의 결제 참조 칸 다섯, 주문의 판 번호 seat_gen, Saga 작업 표 order_saga_job을 더했다(data.md §4 여섯 번째 마이그레이션).
 //   Saga 1단계(PRF-165)는 0006으로 주문의 실패 사유 failure_reason, order_saga_job.step CHECK(RESERVE·CONFIRM·RELEASE)와 승인 명령 보낸 시각 confirm_sent_at을 더했다
 //   (data.md §4 일곱 번째 마이그레이션, RELEASE·confirm_sent_at은 2026-11-05 리뷰 H1·M4).
-//   발권 재시도 큐 ticket_issue_job은 PRF-163이 더한다.
+//   결제 결과 반영(PRF-163)은 0007로 발권 재시도 큐 ticket_issue_job을 더했다(data.md §4 여덟 번째 마이그레이션).
 // - drizzle-kit이 이 파일을 읽으므로 도메인 파일을 가져오지 않는다(도메인 → inventory 공개 면 → Nest 모듈까지 끌려 온다).
 //   상태 목록은 도메인 상수 ORDER_STATUSES와 같은 차례로 글로 적는다(inventory schema.ts의 seat_sale 상태 목록과 같은 방식).
 import { idempotencyRecordTable } from '@peaket/platform';
@@ -190,4 +190,31 @@ export const orderSagaJob = pgTable(
     // 단계 값 셋(0006, PRF-165). 도메인 SAGA_STEPS와 같은 값·차례
     check('order_saga_job_step_check', sql`${t.step} in ('RESERVE', 'CONFIRM', 'RELEASE')`),
   ],
+);
+
+/**
+ * 발권 재시도 큐(0007, BUILD_ORDER PRF-163, data.md §2 ERD ticket_issue_job·§4 여덟 번째 마이그레이션, ADR-0106).
+ * 결제 승인을 반영하는 트랜잭션(판매 행 SOLD, 주문 APPROVED)이 한 행을 넣고, 발권(CONFIRMED)·보상(COMPENSATED)과 같은 트랜잭션에서 지운다.
+ * 발권 호출·다시 하기는 PRF-170이다. 주문 ID가 기본 키라 한 주문에 행은 하나뿐이다(order_saga_job과 같은 꼴).
+ */
+export const ticketIssueJob = pgTable(
+  'ticket_issue_job',
+  {
+    orderId: uuid('order_id')
+      .primaryKey()
+      .references(() => purchaseOrder.id),
+    // 회차(쓸기·Kafka 키를 회차로 묶는다)
+    eventId: uuid('event_id').notNull(),
+    // 발권 시도 수
+    attempts: integer('attempts').notNull().default(0),
+    // 다음 시도 시각(1초에서 두 배씩 최대 60초 간격 [가정]). 다시 보내도 결과가 같은 오류면 비워 자동 재시도를 멈춘다(그래서 널 허용)
+    nextAttemptAt: at('next_attempt_at'),
+    // 발권 기한 = 결제 승인 + 30분 [가정]. 넘기면 SEV1과 CS 처리함 TICKET_NOT_ISSUED
+    issueDueAt: at('issue_due_at').notNull(),
+    // 마지막 gRPC 상태 코드
+    lastError: text('last_error'),
+    // 60초 [가정] 넘게 남으면 SEV2와 trade.orders ISSUE_DELAYED
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [index('ticket_issue_job_next_attempt_idx').on(t.nextAttemptAt)],
 );

@@ -50,6 +50,13 @@
       "when": 1793840708028,
       "tag": "0006_saga_step_one",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793843421237,
+      "tag": "0007_ticket_issue_job",
+      "breakpoints": true
     }
   ]
 }

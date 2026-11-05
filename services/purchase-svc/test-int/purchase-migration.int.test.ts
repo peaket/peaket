@@ -62,15 +62,48 @@ const count = async (text: string, params: unknown[]): Promise<number> => Number
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
-  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 7(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 8(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)).rows.map((r) => r.relname);
     const before = await tables();
-    // 0003이 만든 주문 표 다섯과 Outbox 부모 표(PRF-160), 0005가 만든 Saga 작업 표(PRF-162)가 있다
-    expect(before).toEqual(expect.arrayContaining(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'outbox', 'order_saga_job']));
+    // 0003이 만든 주문 표 다섯과 Outbox 부모 표(PRF-160), 0005가 만든 Saga 작업 표(PRF-162), 0007이 만든 발권 재시도 큐(PRF-163)가 있다
+    expect(before).toEqual(
+      expect.arrayContaining(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'outbox', 'order_saga_job', 'ticket_issue_job']),
+    );
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(7);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(8);
+  });
+
+  test('0007(PRF-163, data.md §4 여덟 번째 마이그레이션·§2 ERD ticket_issue_job): 칸 일곱(order_id uuid 기본 키·주문 외래 키, event_id uuid, attempts int 기본 0, next_attempt_at 널 허용, issue_due_at·created_at 널 불허, last_error 널 허용 text)과 쓸기 색인 (next_attempt_at), 파티션 표가 아니다 [ASVS v5.0.0-2.3.4]', async () => {
+    const cols = await q<{ column_name: string; data_type: string; is_nullable: string; column_default: string | null }>(
+      `select column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'ticket_issue_job' order by ordinal_position`,
+    );
+    expect(cols.rows.map((c) => [c.column_name, c.data_type, c.is_nullable])).toEqual([
+      ['order_id', 'uuid', 'NO'],
+      ['event_id', 'uuid', 'NO'],
+      ['attempts', 'integer', 'NO'],
+      ['next_attempt_at', 'timestamp with time zone', 'YES'],
+      ['issue_due_at', 'timestamp with time zone', 'NO'],
+      ['last_error', 'text', 'YES'],
+      ['created_at', 'timestamp with time zone', 'NO'],
+    ]);
+    expect(cols.rows.find((c) => c.column_name === 'attempts')?.column_default).toBe('0');
+    // 널 불허 제약(contype n, PostgreSQL 18)은 위 칸 표가 본다. CHECK·유일 제약은 없다
+    const cons = await q<{ contype: string; def: string }>(
+      `select contype, pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.ticket_issue_job'::regclass and contype <> 'n' order by contype`,
+    );
+    expect(cons.rows).toEqual([
+      { contype: 'f', def: 'FOREIGN KEY (order_id) REFERENCES purchase_order(id)' },
+      { contype: 'p', def: 'PRIMARY KEY (order_id)' },
+    ]);
+    const idx = await q<{ indexdef: string }>(`select indexdef from pg_indexes where schemaname = 'public' and tablename = 'ticket_issue_job' and indexname = 'ticket_issue_job_next_attempt_idx'`);
+    expect(idx.rows.map((r) => r.indexdef)).toEqual(['CREATE INDEX ticket_issue_job_next_attempt_idx ON public.ticket_issue_job USING btree (next_attempt_at)']);
+    const kind = await q<{ relkind: string }>(`select relkind from pg_class where relnamespace = 'public'::regnamespace and relname = 'ticket_issue_job'`);
+    expect(kind.rows).toEqual([{ relkind: 'r' }]);
+    // 한 주문에 행은 하나뿐이고, 없는 주문의 행은 넣지 못한다
+    const order = randomUUID();
+    await expect(q(`insert into ticket_issue_job (order_id, event_id, issue_due_at, created_at) values ($1, $2, now(), now())`, [order, id()])).rejects.toMatchObject({ code: '23503' });
   });
 
   test('0006(PRF-165, data.md §4 일곱 번째 마이그레이션): purchase_order.failure_reason은 널 허용 text이고 CHECK가 없으며, order_saga_job.confirm_sent_at은 널 허용 timestamptz(리뷰 H1)이고, order_saga_job.step은 RESERVE·CONFIRM·RELEASE만 받는다(RELEASE는 리뷰 M4) [ASVS v5.0.0-2.3.4]', async () => {

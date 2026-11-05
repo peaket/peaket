@@ -9,6 +9,7 @@ import {
   type OrderSeatPins,
   type OrderSessions,
   type OrderSessionView,
+  type PaymentResultSessions,
   type SagaEventConfig,
   type SagaEventConfigs,
   type SaleConfig,
@@ -222,6 +223,39 @@ export class SeatMapSagaConfigs implements SagaEventConfigs {
     } catch {
       // 판을 읽지 못했으면 판이 없는 것과 같게 본다(실행기가 설정 오류로 보고 다시 한다)
       return undefined;
+    }
+  }
+}
+
+// ---- 결제 결과 반영의 커밋 뒤 구매 세션 일(BUILD_ORDER PRF-163) ----
+
+/** inventory의 구매 세션 끝내기(EndPurchaseSession.execute)와 저장소(PurchaseSessionStore.setPaying, 운영 RedisPurchaseSessionStore)의 모양 */
+export interface PaymentSessionSource {
+  end: { execute(c: { sessionId: string; reason: 'LEFT' | 'COMPLETED'; expectEventId?: string }): Promise<boolean> };
+  store: { setPaying(jti: string, paying: boolean, o?: { deadlineMs?: number }): Promise<boolean> };
+}
+
+/**
+ * PaymentResultSessions의 inventory 구현: complete는 source.end.execute({ sessionId, reason: 'COMPLETED' }) 그대로,
+ * unmarkPaying은 source.store.setPaying(jti, false). inventory가 던지는 좌석 Redis 장애(SeatStoreUnavailable, 이름으로 가른다)는
+ * OrderSeatStoreUnavailable로 바꿔 던지고, 그 밖(RangeError 등)은 그대로 던진다
+ */
+export class InventoryPaymentResultSessions implements PaymentResultSessions {
+  constructor(private readonly source: PaymentSessionSource) {}
+
+  async complete(purchaseSessionId: string): Promise<boolean> {
+    try {
+      return await this.source.end.execute({ sessionId: purchaseSessionId, reason: 'COMPLETED' });
+    } catch (e) {
+      throw seatStoreErrorOf(e);
+    }
+  }
+
+  async unmarkPaying(purchaseSessionId: string): Promise<boolean> {
+    try {
+      return await this.source.store.setPaying(purchaseSessionId, false);
+    } catch (e) {
+      throw seatStoreErrorOf(e);
     }
   }
 }

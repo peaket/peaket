@@ -1,4 +1,4 @@
-// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161·PRF-162).
+// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161·PRF-162·PRF-165·PRF-163).
 import type { MaintenanceTask } from '@peaket/platform';
 import { checkOrderHistory } from './adapters/db/drizzle-orders.js';
 import { orderHistoryCheckTask as historyTaskOf, type OrderHistoryTaskDeps } from './application/order-history-check.js';
@@ -6,7 +6,13 @@ import { orderHistoryCheckTask as historyTaskOf, type OrderHistoryTaskDeps } fro
 export { DrizzleOrderStore, checkOrderHistory, type DrizzleOrderStoreOptions } from './adapters/db/drizzle-orders.js';
 export { DrizzleOrderAccepts, type DrizzleOrderAcceptsOptions } from './adapters/db/drizzle-order-accepts.js';
 export { DrizzleOrderWrites, ORDER_HOLD_KEY, type DrizzleOrderWritesOptions } from './adapters/db/drizzle-order-writes.js';
-export { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder } from './adapters/db/schema.js';
+export { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob } from './adapters/db/schema.js';
+export {
+  DrizzlePaymentResults,
+  PaymentResultRollback,
+  type DrizzlePaymentResultsOptions,
+  type PaymentResultSeatSales,
+} from './adapters/db/drizzle-payment-results.js';
 export {
   GrpcContactRefs,
   GrpcIdentityRecheck,
@@ -21,9 +27,11 @@ export {
 export {
   InventoryOrderSeatPins,
   InventoryOrderSessions,
+  InventoryPaymentResultSessions,
   InventorySeatSlots,
   SeatMapSagaConfigs,
   SeatMapSaleConfigs,
+  type PaymentSessionSource,
   type PinResultShape,
   type PurchaseSessionSource,
   type SagaConfigSource,
@@ -43,6 +51,47 @@ export {
   type GrpcPaymentConfirmOptions,
 } from './adapters/grpc-payment-confirm.js';
 export { ORDER_SAGA_ACTOR, OrderSagaRunner, type OrderSagaDeps, type SagaRunResult, type SagaTimer } from './application/order-saga.js';
+export {
+  ApplyPaymentResult,
+  PAYMENT_RESULT_HELD_LOG_WINDOW_MS,
+  PAYMENT_RESULT_STALE_RETRIES,
+  PaymentResultConflict,
+  PaymentResultHeld,
+  type ApplyPaymentResultDeps,
+  type ApplyPaymentResultOutcome,
+} from './application/apply-payment-result.js';
+export { PaymentResultHandler, TRADE_PAYMENTS_TOPIC, type PaymentResultRecord } from './inbound/payment-result.handler.js';
+export {
+  decidePaymentResult,
+  PAYMENT_EVENT_TYPES,
+  PAYMENT_FAILURE_CATEGORIES,
+  PAYMENT_FAILURE_FALLBACK,
+  PAYMENT_RESULT_ACTOR,
+  PAYMENT_RESULT_ARRIVAL,
+  PAYMENT_RESULT_CHARGE_TYPES,
+  PAYMENT_RESULT_CLOSED_STATUSES,
+  PAYMENT_RESULT_HOLD_LOG,
+  PAYMENT_RESULT_NAMES,
+  PAYMENT_RESULT_SESSION_DONE_STATUSES,
+  PAYMENT_RESULT_TABLE,
+  PAYMENT_RESULT_WRITES,
+  TICKET_ISSUE_WINDOW_MS,
+  ticketIssueDueAtMs,
+  type AppliedPaymentEventType,
+  type PayMethodCategory,
+  type PaymentEventType,
+  type PaymentFailureCategory,
+  type PaymentResultDecision,
+  type PaymentResultEvent,
+  type PaymentResultHoldKind,
+  type PaymentResultHoldReason,
+  type PaymentResultHoldSeverity,
+  type PaymentResultName,
+  type PaymentResultOrderView,
+  type PaymentResultSkipReason,
+  type PaymentResultTransition,
+  type PaymentResultWrite,
+} from './domain/payment-result.js';
 export {
   CONFIRM_CALL_DEADLINE_MS,
   CONFIRM_WINDOW_MS,
@@ -213,9 +262,19 @@ export type {
   OrderView,
   OrderWrites,
   PaymentAcceptBody,
+  PaymentApproveInput,
   PaymentConfirms,
+  PaymentFailInput,
+  PaymentMarkInput,
   PaymentPg,
   PaymentRefs,
+  PaymentResultLog,
+  PaymentResultOrder,
+  PaymentResultReads,
+  PaymentResultSessions,
+  PaymentResultWriteBase,
+  PaymentResultWriteOutcome,
+  PaymentResultWrites,
   ReserveTx,
   ReserveTxInput,
   ReserveTxOutcome,
@@ -232,6 +291,7 @@ export type {
   SagaOrderView,
   SagaSaleRelease,
   SagaSeat,
+  SagaWake,
   SaleConfig,
   SaleConfigs,
   SeatSlotRead,

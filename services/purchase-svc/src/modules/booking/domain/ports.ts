@@ -1,5 +1,13 @@
 // booking 모듈의 포트(바깥 저장소·지표와 닿는 면, BUILD_ORDER PRF-160·PRF-161).
 import type { OrderEventMessage, OrderItem, OrderStatus, OrderRow, CreatedExtras, SeatAssignment, TransitionId } from './order.js';
+import type {
+  PaymentEventType,
+  PaymentFailureCategory,
+  PaymentResultHoldKind,
+  PaymentResultHoldReason,
+  PaymentResultHoldSeverity,
+  PaymentResultOrderView,
+} from './payment-result.js';
 import type { FallbackReason, MisconfiguredReason, RecheckAnswer } from './recheck.js';
 import type { SagaFailTransition, SagaFailureReason, SagaStep } from './saga.js';
 
@@ -791,4 +799,143 @@ export interface SagaLog {
   confirmRejected(e: { readonly orderId: string; readonly reason: ConfirmRejectReason }): void;
   /** 단계가 예상 밖 오류로 끝나 다시 하기로 미뤘다(error. 오류 이름·글만) */
   stepError(e: { readonly orderId: string; readonly step: SagaStep; readonly err: unknown }): void;
+}
+
+// ---- 결제 결과 반영(docs/features/payment.md §2 '결제 결과 반영의 첫 구현', docs/data.md §5 '결제 결과 반영', BUILD_ORDER PRF-163) ----
+// 쓰임새(application/apply-payment-result.ts): PaymentResultReads.read → decidePaymentResult(domain/payment-result.ts) → PaymentResultWrites.approve·fail·mark(한 트랜잭션)
+// → 커밋 뒤 일(PaymentResultSessions.complete·unmarkPaying, SagaWake.kick). 보류는 쓰임새가 PaymentResultHeld를 던져 키 단위 처리기의 보류 규칙에 맡긴다.
+// 잠금 차례는 Saga와 같다: 작업 행(order_saga_job) → 주문 행 → 한도 행 → 좌석 행 → 결제 시도 행. 주문 상태는 주문 전이 함수(DrizzleOrderStore.transition)로만 바꾼다.
+
+/** 반영이 보는 주문(결정에 쓰는 칸 + 쓰기에 넘길 회차·계정·좌석·구매 세션) */
+export interface PaymentResultOrder extends PaymentResultOrderView {
+  readonly eventId: string;
+  readonly accountId: string;
+  /** 주문을 만든 구매 세션(purchase_order.purchase_session_id = 입장 토큰 jti). 커밋 뒤 구매 세션 끝내기·Paying 풀기에 쓴다 */
+  readonly purchaseSessionId: string;
+  /** 주문 항목의 좌석 ID(줄 번호 차례, 1~10개). 판매 행 SOLD·PENDING 지우기에 쓴다 */
+  readonly seatIds: readonly string[];
+}
+
+/** 결제 결과 반영의 읽기(트랜잭션 밖, 운영은 adapters/db/drizzle-payment-results.ts). 아무것도 쓰지 않는다 */
+export interface PaymentResultReads {
+  /**
+   * 주문 행(status·amount·payment_event_seq·event_id·account_id·purchase_session_id) + 항목의 좌석 ID + ACCEPTED 결제 시도의 결제사.
+   * 없거나 orderId가 소문자 UUID가 아니면 undefined
+   */
+  read(orderId: string): Promise<PaymentResultOrder | undefined>;
+}
+
+/** 쓰기 공통 입력 */
+export interface PaymentResultWriteBase {
+  readonly orderId: string;
+  /** 사건의 eventSeq(양의 정수). 전이 UPDATE에 payment_event_seq < 이 값 조건을 걸고 이 값으로 바꾼다(ADR-0146 결정 2) */
+  readonly paymentEventSeq: number;
+  /** 행위자(ACTOR_PATTERN). 결제 결과 반영은 system:payment-result(PAYMENT_RESULT_ACTOR) */
+  readonly actor: string;
+}
+
+/** 승인 쓰기 입력(T9·T13·T16) */
+export interface PaymentApproveInput extends PaymentResultWriteBase {
+  readonly transition: 'T9' | 'T13' | 'T16';
+  /** 회차(판매 행·ticket_issue_job.event_id) */
+  readonly eventId: string;
+  /** 판매 행 PENDING → SOLD로 바꿀 좌석(주문 항목) */
+  readonly seatIds: readonly string[];
+  /** 발권 기한(epoch ms, ticket_issue_job.issue_due_at = 승인 + 30분 [가정]) */
+  readonly issueDueAtMs: number;
+}
+
+/** 실패 쓰기 입력(T11·T15·T17) */
+export interface PaymentFailInput extends PaymentResultWriteBase {
+  readonly transition: 'T11' | 'T15' | 'T17';
+  /** 주문 failure_reason에 적을 값(사건의 failureCategory, 없으면 PAYMENT_FAILURE_FALLBACK) */
+  readonly failureReason: PaymentFailureCategory;
+  /** 작업 행이 없을 때 넣는 RELEASE 행의 event_id */
+  readonly eventId: string;
+  /** 판매 행 PENDING을 지우고 한도를 되돌린다(releasePendingIn, 같은 트랜잭션) */
+  readonly release: SagaSaleRelease;
+}
+
+/** 상태만 바꾸는 쓰기 입력(T10·T12·T14) */
+export interface PaymentMarkInput extends PaymentResultWriteBase {
+  readonly transition: 'T10' | 'T12' | 'T14';
+}
+
+/**
+ * 쓰기 결과. STALE이면 트랜잭션째 되돌렸다(아무것도 남지 않는다): 주문이 출발 상태가 아니었다.
+ * reason은 주문 전이 함수의 까닭과 같은 규칙이다(NOT_FOUND: 주문 없음, STATUS: 지금 상태가 출발이 아님, PAYMENT_SEQ: 그 순번 이상을 이미 반영함). current = 지금 상태(STATUS일 때만).
+ * SOLD_MISMATCH(승인만)면 SOLD로 바꾼 판매 행 수가 좌석 수와 달라 트랜잭션째 되돌렸다(리뷰 M4)
+ */
+export type PaymentResultWriteOutcome =
+  | { readonly status: 'APPLIED' }
+  | { readonly status: 'STALE'; readonly reason: 'NOT_FOUND' | 'STATUS' | 'PAYMENT_SEQ'; readonly current?: OrderStatus }
+  | { readonly status: 'SOLD_MISMATCH' };
+
+/** 결제 결과 반영 쓰기(운영은 adapters/db/drizzle-payment-results.ts. 트랜잭션은 모두 READ COMMITTED·문장 시간 한도 5초 [가정]를 직접 고른다) */
+export interface PaymentResultWrites {
+  /**
+   * 승인 한 트랜잭션: 작업 행 정리(그 주문의 order_saga_job이 있으면 지운다) → 주문 행 잠금(상태·순번이 출발이 아니면 바로 STALE, 권고1)
+   * → 남은 결제 참조 지우기 → 판매 행 PENDING → SOLD(inventory markSoldIn, 같은 트랜잭션. 바꾼 수가 좌석 수와 다르면 되돌리고 SOLD_MISMATCH, 리뷰 M4)
+   * → ticket_issue_job 한 행(attempts 0, next_attempt_at = 지금, issue_due_at, created_at = 지금)
+   * → 주문 T9·T13·T16(APPROVED 사건 Outbox가 업무 문장의 마지막). 좌석 Redis의 묶인 홀드는 그대로 둔다.
+   * 겹친 Saga CONFIRM 실행은 작업 행이 없어져 0행이 되고 물러난다.
+   * @throws RangeError 입력이 틀림(DB에 가지 않는다) · Error 그 밖의 DB 오류(되돌렸다)
+   */
+  approve(input: PaymentApproveInput): Promise<PaymentResultWriteOutcome>;
+  /**
+   * 실패 한 트랜잭션: 작업 행을 RELEASE로(없으면 넣는다. attempts 0, next_attempt_at = 지금, 임대 비움 [정함: 커밋 뒤 kick이 곧바로 집게]. 잠금 차례 작업 행 → 주문 행)
+   * → 주문 failure_reason(출발 상태일 때만, 상태 칸은 건드리지 않는다) → 판매 행 PENDING 지우기(inventory releasePendingIn, 한도 되돌림)
+   * → 남은 결제 참조 지우기 → 주문 T11·T15·T17(FAILED 사건 Outbox가 마지막). 좌석 Redis의 실패 해제는 Saga RELEASE 단계가 한다.
+   * @throws RangeError 입력이 틀림(release.orderId가 주문과 다름 포함, DB에 가지 않는다) · Error 그 밖의 DB 오류(되돌렸다)
+   */
+  fail(input: PaymentFailInput): Promise<PaymentResultWriteOutcome>;
+  /**
+   * 상태만 바꾸는 한 트랜잭션(T12 UNKNOWN, T10·T14 입금 대기): 작업 행 지우기(있으면. 결과는 payment-svc 조회·가상계좌 단계가 정한다)
+   * → 주문 행 잠금(상태·순번이 출발이 아니면 바로 STALE) → 남은 결제 참조 지우기(이 사건이 왔다는 것은 승인 명령이 접수됐다는 뜻, 리뷰 M1)
+   * → 주문 T10·T12·T14(T12는 사건 없이 이력만, T10·T14는 AWAITING_DEPOSIT 사건). 판매 행 PENDING은 그대로 둔다.
+   * @throws RangeError 입력이 틀림 · Error 그 밖의 DB 오류(되돌렸다)
+   */
+  mark(input: PaymentMarkInput): Promise<PaymentResultWriteOutcome>;
+}
+
+/**
+ * 커밋 뒤 구매 세션 일(운영은 adapters/inventory-bridges.ts InventoryPaymentResultSessions: inventory EndPurchaseSession·PurchaseSessionStore.setPaying을 잇는다).
+ * 최선을 다할 뿐이다: 쓰임새는 실패해도 반영 결과를 바꾸지 않고 로그만 남긴다
+ */
+export interface PaymentResultSessions {
+  /**
+   * 승인·입금 대기 뒤 구매 세션을 끝낸다(사유 COMPLETED). 끝냈으면 true, 이미 없었으면 false.
+   * @throws OrderSeatStoreUnavailable 좌석 Redis 일시 장애
+   */
+  complete(purchaseSessionId: string): Promise<boolean>;
+  /**
+   * 실패 뒤 Paying 표시를 푼다(setPaying(jti, false). 좌석맵으로 돌아가 다시 고를 수 있다). 세션이 있으면 true, 없으면 false.
+   * @throws OrderSeatStoreUnavailable 좌석 Redis 일시 장애
+   */
+  unmarkPaying(purchaseSessionId: string): Promise<boolean>;
+}
+
+/** 커밋 뒤 Saga 실행기 깨우기(운영은 OrderSagaRunner.kick. 실패 반영 뒤 RELEASE 작업을 곧바로 돌린다). 던지지 않는다 */
+export interface SagaWake {
+  kick(orderId: string): void;
+}
+
+/** 결제 결과 반영 로그(서비스 로그 한 줄. 결제 참조·금액은 싣지 않는다). 던지지 않는다. 건너뛴 사건(DUPLICATE·ALREADY_THERE·RECORD_ONLY)은 남기지 않는다 [정함] */
+export interface PaymentResultLog {
+  /**
+   * 보류(error. RB-11로 원인을 본다). 주문 ID·사건 종류·결제사와 까닭·수준·표시만 싣는다(domain PAYMENT_RESULT_HOLD_LOG:
+   * CHARGED_ON_CLOSED_ORDER는 SEV1·payment-charged-closed, SOLD_MISMATCH는 SEV1, AMOUNT_MISMATCH·PG_MISMATCH는 SEV2·security(ASVS v5.0.0-16.3.3), 그 밖 SEV2).
+   * 같은 사건(eventKey)·같은 까닭은 시간 창(PAYMENT_RESULT_HELD_LOG_WINDOW_MS) 안에서 한 번만 부른다: 키 단위 소비자가 5회 해 보는 동안 한 줄이고,
+   * 보류 확정은 플랫폼 키 단위 소비자의 onHeld(consumer-held 로그)·consumer_held_total 지표가 한 번 남긴다(리뷰 L5)
+   */
+  held(e: {
+    readonly orderId: string;
+    readonly type: PaymentEventType;
+    readonly pg: PaymentPg;
+    readonly reason: PaymentResultHoldReason;
+    readonly severity: PaymentResultHoldSeverity;
+    readonly kind?: PaymentResultHoldKind;
+  }): void;
+  /** 커밋 뒤 구매 세션 일이 실패했다(warn, 오류 이름만) */
+  afterCommitFailed(e: { readonly orderId: string; readonly what: 'complete_session' | 'unmark_paying'; readonly errorName: string }): void;
 }

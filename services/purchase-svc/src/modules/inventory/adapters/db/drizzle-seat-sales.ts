@@ -86,19 +86,22 @@ export class DrizzleSeatSales implements SeatSales {
     return settleIn(tx, release, deletePending(release));
   }
 
+  /**
+   * markSold와 같은 규칙(그 주문의 PENDING 행을 좌석 ID 순으로 잠가 SOLD로, pending_until 비움)을 부르는 쪽의 트랜잭션 안에서 한다
+   * (결제 결과 반영의 승인 트랜잭션, BUILD_ORDER PRF-163). 트랜잭션을 열지도 끝내지도 않는다(격리 수준은 부르는 쪽이 READ COMMITTED로 고른다).
+   * 바꾼 행 수를 돌려준다(두 번째 호출은 0).
+   * @throws RangeError 입력 모양이 틀림(assertSeatSaleOrder, DB에 가지 않는다) · DB 오류는 그대로
+   */
+  async markSoldIn(tx: DbTransaction, order: SeatSaleOrder): Promise<number> {
+    assertSeatSaleOrder(order);
+    return markSoldRows(tx, order, sortedSeatIds(order.seatIds));
+  }
+
   async markSold(order: SeatSaleOrder): Promise<number> {
     assertSeatSaleOrder(order);
     const seatIds = sortedSeatIds(order.seatIds);
     // 트랜잭션으로 부른다: 풀 대기 초과가 다른 연산과 같은 모양(429 ProblemError 그대로)으로 나온다
-    return this.database.transaction(async (tx) => {
-      const done = await tx.execute(sql`
-        with locked as (${lockedRows(order.eventId, order.orderId, seatIds, 'PENDING')})
-        update seat_sale s set status = 'SOLD', pending_until = null
-        from locked l
-        where s.event_id = ${order.eventId}::uuid and s.order_id = ${order.orderId}::uuid and s.seat_id = l.seat_id and s.status = 'PENDING'
-        returning s.seat_id`);
-      return done.rows.length;
-    }, TX);
+    return this.database.transaction((tx) => markSoldRows(tx, order, seatIds), TX);
   }
 
   async releasePending(release: SeatSaleRelease): Promise<number> {
@@ -175,6 +178,17 @@ async function reserveRows(
     return { status: 'SEAT_TAKEN', seatIds: input.seatIds.filter((id) => !got.has(id)) };
   }
   return { status: 'RESERVED' };
+}
+
+/** 그 주문의 PENDING 행을 좌석 ID 순으로 잠가 SOLD로 바꾸는 문장(pending_until 비움, markSold·markSoldIn). 바꾼 행 수 */
+async function markSoldRows(tx: DbTransaction, order: SeatSaleOrder, seatIds: readonly string[]): Promise<number> {
+  const done = await tx.execute(sql`
+    with locked as (${lockedRows(order.eventId, order.orderId, seatIds, 'PENDING')})
+    update seat_sale s set status = 'SOLD', pending_until = null
+    from locked l
+    where s.event_id = ${order.eventId}::uuid and s.order_id = ${order.orderId}::uuid and s.seat_id = l.seat_id and s.status = 'PENDING'
+    returning s.seat_id`);
+  return done.rows.length;
 }
 
 /** 그 주문·계정의 PENDING 행을 좌석 ID 순으로 잠가 지우는 문장(releasePending·releasePendingIn) */
