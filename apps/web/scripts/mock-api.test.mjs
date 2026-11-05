@@ -7,8 +7,8 @@ import { readFileSync } from 'node:fs';
 import { GetEventResponse, GetHomeRankingsResponse, GetHomeResponse } from '@peaket/contracts/openapi/catalog';
 import { ListSubscriptionsResponse, ListWishesResponse } from '@peaket/contracts/openapi/identity';
 import { GetEventReviewSummaryResponse } from '@peaket/contracts/openapi/reviews';
-import { ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
-import { ARTISTS, INITIAL_WISHES, searchResults, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
+import { GetSearchSuggestionsResponse, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
+import { ARTISTS, INITIAL_WISHES, searchResults, suggestions, suggestQueryOk, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
 
 const ORIGIN = 'http://127.0.0.1:4010';
 const NOW = new Date('2026-11-05T03:00:00Z');
@@ -192,4 +192,31 @@ test('가짜 API의 검색 결과가 계약 Zod를 모르는 칸 없이 지나�
   assert.deepEqual([p2.items.length, p2.totalPages, p2.limit], [0, 1, 20]);
   // 인기순은 정해진 순위
   assert.equal(searchResults(ORIGIN, { sort: 'POPULAR' }).items[0].title, '뮤지컬 별빛 정원');
+});
+
+test('가짜 API의 자동완성이 계약 Zod를 모르는 칸 없이 지나고, 다른 이름·초성·한/영 변환·종류별 몫·굵게 위치를 따른다(HOT-313)', () => {
+  const parse = (x) => assert.deepEqual(GetSearchSuggestionsResponse.parse(x), x);
+  const lumen = suggestions(ORIGIN, '루멘');
+  parse(lumen);
+  const prod = lumen.items.find((i) => i.label === 'LUMEN 콘서트 2026 서울');
+  assert.deepEqual(prod.matches, [{ start: 0, length: 5 }], '다른 이름으로 맞으면 원래 이름의 대응 부분');
+  assert.deepEqual(lumen.items.find((i) => i.kind === 'ARTIST'), { kind: 'ARTIST', label: 'LUMEN', matches: [{ start: 0, length: 5 }], artistId: ARTISTS[0].artistId });
+  // 초성(호환 자모, NFKC 뒤 되돌림)
+  const cho = suggestions(ORIGIN, 'ㄹㅁ');
+  parse(cho);
+  assert.equal(cho.query, 'ㄹㅁ');
+  assert.ok(cho.items.some((i) => i.kind === 'ARTIST' && i.label === 'LUMEN'));
+  // 한/영 변환
+  assert.deepEqual(suggestions(ORIGIN, 'fnaps').items.map((i) => i.label), lumen.items.map((i) => i.label));
+  // 공연장·아티스트가 함께 맞고 위치는 UTF-16
+  const picket = suggestions(ORIGIN, '피켓');
+  parse(picket);
+  assert.ok(picket.items.length <= 8);
+  assert.deepEqual(picket.items.find((i) => i.kind === 'PLACE')?.matches, [{ start: 0, length: 2 }]);
+  // 공연(아티스트로 맞음) 2·아티스트 1뿐이라 빈 몫을 공연장으로 채운다. 몫 안의 공연장 하나가 넘친 공연장보다 앞이다
+  assert.deepEqual(picket.items.map((i) => i.kind), ['PRODUCTION', 'PRODUCTION', 'ARTIST', 'PLACE', 'PLACE']);
+  // 최소 길이: 한글 음절은 1자, 로마자는 2자
+  assert.equal(suggestQueryOk('루'), true);
+  assert.equal(suggestQueryOk('l'), false);
+  assert.deepEqual(suggestions(ORIGIN, '없는말').items, []);
 });

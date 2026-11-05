@@ -8,6 +8,7 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SEARCH_QUERY_SYNC_EVENT } from '@peaket/ds/WebShell';
 import { cx } from '@/shared/lib/cx';
 import { PicturePoster } from '@/shared/ui/PicturePoster';
 import { hasFilters, josa, NO_FILTERS, pageNumbers, readQuery, searchUrl, toApiParams, toResultView, type CardStatus, type ResultCard, type ResultView, type SearchQuery } from '../model/search';
@@ -56,6 +57,10 @@ export function SearchResults() {
   const key = params.toString();
   const query = useMemo(() => readQuery(new URLSearchParams(key)), [key]);
   const [retry, setRetry] = useState(0);
+  // 같은 검색 화면 안의 이동(링크·필터)은 popstate가 없어 머리 입력이 주소의 q를 다시 읽게 알린다(ds WebSearchBox queryFromUrl)
+  useEffect(() => {
+    window.dispatchEvent(new Event(SEARCH_QUERY_SYNC_EVENT));
+  }, [key]);
   const state = useSearch(query, key, retry);
   const router = useRouter();
   const heading = useRef<HTMLHeadingElement>(null);

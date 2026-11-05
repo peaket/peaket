@@ -268,6 +268,79 @@ export function searchResults(origin, p) {
   );
 }
 
+const CHO = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
+/** 호환 자모 94자의 NFKC 역표(search.md §3.1) */
+const COMPAT = (() => {
+  const m = new Map();
+  for (let c = 0x3131; c <= 0x318e; c += 1) {
+    const ch = String.fromCharCode(c);
+    const n = ch.normalize('NFKC');
+    if (n !== ch && n.length === 1 && !m.has(n)) m.set(n, ch);
+  }
+  return m;
+})();
+/** NFKC가 바꾼 조합용 자모를 호환 자모로 되돌린다(search.md §3.1) */
+const compatJamo = (s) => [...s].map((ch) => COMPAT.get(ch) ?? ch).join('');
+const normSuggest = (s) => compatJamo(String(s ?? '').normalize('NFKC').replace(/[\u115f\u1160]/g, '')).toLowerCase().replace(/[\u200b-\u200d\u2060\ufeff\u3164]/g, '').replace(/\s+/g, ' ').trim();
+const choOf = (s) => [...s].map((ch) => (ch >= '가' && ch <= '힣' ? CHO[Math.floor((ch.charCodeAt(0) - 0xac00) / 588)] : ch)).join('');
+const isChosung = (q) => /^[\u3131-\u314e\s]+$/.test(q);
+/** 자동완성 요청 최소 길이: 한글 음절이 있으면 1자, 아니면 2자 [가정](계약 q 설명) */
+export const suggestQueryOk = (q) => Boolean(q) && (/[가-힣]/.test(q) || [...q].length >= 2);
+
+/** 이름에서 q가 맞는 위치(UTF-16). 초성 입력이면 이름의 초성에서 찾는다 */
+function findIn(label, q) {
+  const hay = isChosung(q) ? choOf(label.toLowerCase()) : label.toLowerCase();
+  const at = hay.indexOf(q);
+  return at >= 0 ? { start: at, length: q.length } : null;
+}
+
+/**
+ * 자동완성(openapi getSearchSuggestions 200 SuggestResult). 고정 자료의 공연·아티스트·공연장에서 고른다.
+ * 종류별 몫 공연 5·아티스트 2·공연장 1 [가정], 빈 몫은 다른 종류로 채워 8개까지. 다른 이름으로 맞으면 원래 이름의 대응 부분(아티스트 이름)을 굵게 한다.
+ * 로마자만인 입력이 0건이면 한/영 변환 값으로 다시 찾는다(search.md §3.2 ④, 고정 자료의 규칙).
+ */
+export function suggestions(origin, rawQ) {
+  const q = normSuggest(rawQ);
+  const find = (query) => {
+    const productions = [];
+    for (const [key, c] of Object.entries(CARDS)) {
+      if (c.saleStatus === 'ENDED') continue;
+      let m = findIn(c.title, query);
+      if (!m) {
+        // 아티스트 이름·다른 이름으로 맞으면 공연명 안의 아티스트 이름을 굵게(없으면 이름 전체)
+        const a = cardArtists(key).find((x) => [x.name, ...x.aliases].some((n) => findIn(n, query)));
+        if (!a) continue;
+        const at = c.title.toLowerCase().indexOf(a.name.toLowerCase());
+        m = at >= 0 ? { start: at, length: a.name.length } : null;
+      }
+      productions.push({ c, matches: m ? [m] : [] });
+    }
+    const artists = ARTISTS.flatMap((a) => {
+      const own = findIn(a.name, query);
+      if (own) return [{ a, matches: [own] }];
+      return a.aliases.some((n) => findIn(n, query)) ? [{ a, matches: [{ start: 0, length: a.name.length }] }] : [];
+    });
+    const places = Object.entries(PLACES).flatMap(([name, v]) => {
+      const m = findIn(name, query);
+      return m ? [{ name, placeId: v.placeId, matches: [m] }] : [];
+    });
+    return { productions, artists, places };
+  };
+  let found = find(q);
+  const total = (f) => f.productions.length + f.artists.length + f.places.length;
+  if (total(found) === 0 && /^[a-z]+$/.test(q) && CONVERT[q]) found = find(normSuggest(CONVERT[q]));
+  const prod = found.productions
+    .sort((x, y) => STATUS_RANK[x.c.saleStatus] - STATUS_RANK[y.c.saleStatus] || x.c.title.localeCompare(y.c.title))
+    .map(({ c, matches }) => ({ kind: 'PRODUCTION', label: c.title, matches, productionId: c.productionId, eventId: c.eventId, posterUrl: c.posterUrl, nextOpenAt: c.nextOpenAt, saleStatus: c.saleStatus }));
+  const art = found.artists.map(({ a, matches }) => ({ kind: 'ARTIST', label: a.name, matches, artistId: a.artistId }));
+  const plc = found.places.map(({ name, placeId, matches }) => ({ kind: 'PLACE', label: name, matches, placeId }));
+  // 종류별 몫(공연 5·아티스트 2·공연장 1), 남은 자리는 다른 종류로 채운다
+  const take = [prod.slice(0, 5), art.slice(0, 2), plc.slice(0, 1)];
+  const rest = [...prod.slice(5), ...art.slice(2), ...plc.slice(1)];
+  const items = [...take.flat(), ...rest].slice(0, 8);
+  return withOrigin({ query: q, items }, origin);
+}
+
 /** 처음 찜한 공연(가짜 API를 띄울 때) */
 export const INITIAL_WISHES = ['musical', 'lumen', 'orchestra'].map((k) => CARDS[k].productionId);
 
@@ -362,6 +435,13 @@ export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_O
       const raw = url.searchParams.get('productionIds');
       const ids = raw === null ? undefined : raw.split(',').filter((x) => ID.test(x)).slice(0, 50);
       return send(200, wishPage(origin, wished, ids));
+    }
+    if (p === '/v1/search/suggestions' && req.method === 'GET') {
+      const raw = url.searchParams.get('q') ?? '';
+      const q = normSuggest(raw);
+      if (q.length > 50) return send(400, { type: 'https://peaket.example/problems/validation-failed', title: '요청 값이 맞지 않습니다', status: 400 }, 'application/problem+json');
+      if (!suggestQueryOk(q)) return send(400, { type: 'https://peaket.example/problems/query-too-short', title: '검색어가 짧습니다', status: 400 }, 'application/problem+json');
+      return send(200, suggestions(origin, raw), undefined, { 'cache-control': 'public, max-age=60' });
     }
     if (p === '/v1/search' && req.method === 'GET') {
       const sp = url.searchParams;

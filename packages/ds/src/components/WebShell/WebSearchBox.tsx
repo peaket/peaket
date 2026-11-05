@@ -9,10 +9,14 @@
 // - ARIA combobox: aria-expanded·aria-controls·aria-activedescendant·aria-autocomplete="list", 창은 listbox, 후보는 option.
 //   ↑↓ 이동 · Enter 고르기(고른 줄이 없으면 검색 화면으로) · Esc 창 닫기. 한글 조합 중(isComposing·keyCode 229)에는 키를 처리하지 않는다.
 // - 일치 표시: 맞은 부분만 굵게. 후보가 highlight를 주면 그 범위, 맞는 곳이 없으면 이름 전체를 굵게 한다(d5 §5.3).
-// - 후보는 props로 받는다(데이터 연결 단계에서 자동완성 API로 바꾼다). 최근 검색어는 퍼블리싱에서 브라우저 저장소에 남기지 않는다.
+// - 후보: 동기 함수(getSuggestions, 이야기·퍼블리싱)나 비동기 출처(loadSuggestions, 자동완성 API)를 받는다. 비동기 출처는 입력이 바뀐 뒤
+//   300ms [가정] 기다렸다 부르고 이전 요청은 취소한다. 기다리는 동안 뼈대를 보이고, 실패하면 창을 띄우지 않는다(Enter는 결과 화면으로, d5 §5.3).
+//   출처가 null을 주면(요청 최소 길이 미만) 창을 띄우지 않는다.
+// - 최근 검색어는 앱이 저장한다(onRecentChange로 알리고, recent가 바뀌면 따라간다). queryFromUrl이면 주소의 q를 입력에 채운다(검색 화면).
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { cx } from "../../lib/cx";
 import { useOutsidePress } from "./focus-trap";
+import { searchPopupMode } from "./search-mode";
 
 export type WebSearchSuggestionKind = "production" | "artist" | "venue";
 
@@ -27,10 +31,15 @@ export interface WebSearchSuggestion {
   thumbnail?: ReactNode;
   /** 굵게 보일 [시작, 끝). 없으면 검색어와 맞는 부분, null이거나 맞는 곳이 없으면 이름 전체 */
   highlight?: readonly [number, number] | null;
+  /** 굵게 보일 범위 여럿(서버가 준 위치). 주면 highlight보다 앞서고, 빈 목록이면 이름 전체 */
+  highlights?: readonly (readonly [number, number])[];
 }
 
 /** 자동완성 창 모양(보드 SCR-003 상태): 닫힘 · 최근 검색어 · 후보 · 후보 없음 · 불러오는 중 */
 export type WebSearchPopup = "closed" | "recent" | "suggest" | "none" | "loading";
+
+/** 앱이 같은 화면 안에서 주소를 바꿨을 때 보내는 사건 이름(popstate가 없는 앱 이동). queryFromUrl이면 이 사건에도 주소의 q를 다시 읽는다 */
+export const SEARCH_QUERY_SYNC_EVENT = "peaket:search-query-sync";
 
 const kindText: Record<WebSearchSuggestionKind, string> = { production: "공연", artist: "아티스트", venue: "공연장" };
 const kindIcon: Record<WebSearchSuggestionKind, string> = { production: "ic-ticket", artist: "ic-user", venue: "ic-genre-venue" };
@@ -52,6 +61,16 @@ export interface WebSearchBoxProps {
   suggestions?: readonly WebSearchSuggestion[];
   /** 검색어 → 후보(별칭·초성 등 앱 규칙). 주면 suggestions 대신 쓴다 */
   getSuggestions?: (query: string) => readonly WebSearchSuggestion[];
+  /** 검색어 → 후보를 비동기로(자동완성 API). 주면 getSuggestions·suggestions 대신 쓴다. null이면 창을 띄우지 않는다 */
+  loadSuggestions?: (query: string, signal: AbortSignal) => Promise<readonly WebSearchSuggestion[] | null>;
+  /** 기다리지 않고 바로 답할 수 있으면 그 답(후보·null 창 없음), 요청해야 하면 undefined. 뼈대가 깜빡이지 않게 한다 */
+  peekSuggestions?: (query: string) => readonly WebSearchSuggestion[] | null | undefined;
+  /** 비동기 출처를 부르기 전에 기다리는 시간(ms, 기본 300 [가정]) */
+  debounceMs?: number;
+  /** 최근 검색어가 바뀌었을 때(앱이 저장한다) */
+  onRecentChange?: (recent: string[]) => void;
+  /** 주소의 q를 입력에 채운다(처음과 뒤로·앞으로 갈 때, 검색 화면) */
+  queryFromUrl?: boolean;
   /** 최근 검색어(처음 값) */
   recent?: readonly string[];
   /** 후보를 골랐을 때·검색할 때 이동. 없으면 브라우저 이동 */
@@ -63,6 +82,21 @@ export interface WebSearchBoxProps {
 }
 
 function Marked({ s, q }: { s: WebSearchSuggestion; q: string }) {
+  if (s.highlights) {
+    if (s.highlights.length === 0) return <strong>{s.label}</strong>;
+    const parts: ReactNode[] = [];
+    let at = 0;
+    [...s.highlights].sort((x, y) => x[0] - y[0]).forEach(([a0, b0], i) => {
+      const a = Math.max(a0, at);
+      const b = Math.min(b0, s.label.length);
+      if (b <= a) return;
+      if (a > at) parts.push(s.label.slice(at, a));
+      parts.push(<strong key={i}>{s.label.slice(a, b)}</strong>);
+      at = b;
+    });
+    if (at < s.label.length) parts.push(s.label.slice(at));
+    return <>{parts}</>;
+  }
   let range: readonly [number, number] | null = null;
   if (s.highlight !== undefined) range = s.highlight;
   else if (q) {
@@ -91,6 +125,11 @@ export function WebSearchBox({
   defaultActiveIndex = -1,
   suggestions = [],
   getSuggestions,
+  loadSuggestions,
+  peekSuggestions,
+  debounceMs = 300,
+  onRecentChange,
+  queryFromUrl = false,
   recent: recentProp = [],
   onNavigate,
   autoFocus = false,
@@ -105,8 +144,32 @@ export function WebSearchBox({
   const [preview, setPreview] = useState<WebSearchPopup | null>(popup === "closed" ? null : popup);
   const [open, setOpen] = useState(popup !== "closed");
   const [active, setActive] = useState(popup === "closed" ? -1 : defaultActiveIndex);
-  const [recent, setRecent] = useState<string[]>([...recentProp]);
+  const [recent, setRecentState] = useState<string[]>([...recentProp]);
   const bar = layout === "bar";
+  /** 비동기 출처의 마지막 답(어느 검색어의 것인지 함께) */
+  const [remote, setRemote] = useState<{ q: string; status: "loading" | "ready" | "error" | "off"; items: readonly WebSearchSuggestion[] } | null>(null);
+  const recentKey = recentProp.join("\n");
+  // 앱이 저장소에서 읽은 최근 검색어가 늦게 오면 따라간다
+  useEffect(() => {
+    setRecentState(recentKey ? recentKey.split("\n") : []);
+  }, [recentKey]);
+  function setRecent(next: (r: string[]) => string[]) {
+    const v = next(recent);
+    setRecentState(v);
+    onRecentChange?.(v);
+  }
+  // 검색 화면: 주소의 q를 입력에 채운다(처음과 뒤로·앞으로 갈 때)
+  useEffect(() => {
+    if (!queryFromUrl) return;
+    const read = () => setValue(new URLSearchParams(window.location.search).get("q") ?? "");
+    read();
+    window.addEventListener("popstate", read);
+    window.addEventListener(SEARCH_QUERY_SYNC_EVENT, read);
+    return () => {
+      window.removeEventListener("popstate", read);
+      window.removeEventListener(SEARCH_QUERY_SYNC_EVENT, read);
+    };
+  }, [queryFromUrl]);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -120,12 +183,69 @@ export function WebSearchBox({
   });
 
   const q = value.trim();
+  // 비동기 출처: 기다렸다 부르고, 입력이 바뀌면 이전 요청을 취소한다
+  // 출처 함수는 ref에 담는다(그릴 때마다 새 함수를 넘겨도 효과가 되풀이되지 않게)
+  const remoteRef = useRef(remote);
+  remoteRef.current = remote;
+  const loadRef = useRef(loadSuggestions);
+  const peekRef = useRef(peekSuggestions);
+  loadRef.current = loadSuggestions;
+  peekRef.current = peekSuggestions;
+  const async = Boolean(loadSuggestions);
+  useEffect(() => {
+    const load = loadRef.current;
+    if (!load || preview || !q) {
+      setRemote(null);
+      return;
+    }
+    // 창을 열기 전(주소의 q를 채운 직후 등)에는 부르지 않는다. 초점·입력으로 창이 열리면 부른다
+    if (!open) return;
+    // 바로 답할 수 있으면(최소 길이 미만·받은 후보 안에서 거르기) 기다리지 않는다
+    const quick = peekRef.current?.(q);
+    if (quick !== undefined) {
+      setRemote({ q, status: quick === null ? "off" : "ready", items: (quick ?? []).slice(0, limit) });
+      return;
+    }
+    // 같은 검색어의 답이 이미 있으면(창을 다시 연 때) 다시 부르지 않는다. 지금 값은 ref로 본다(갱신 함수는 늦게 돌 수 있다)
+    const r = remoteRef.current;
+    if (r && r.q === q && r.status === "ready") return;
+    if (!(r && r.q === q)) setRemote({ q, status: "loading", items: [] });
+    const ctrl = new AbortController();
+    const t = setTimeout(() => {
+      load(q, ctrl.signal).then(
+        (items) => {
+          if (!ctrl.signal.aborted) setRemote({ q, status: items === null ? "off" : "ready", items: (items ?? []).slice(0, limit) });
+        },
+        () => {
+          if (!ctrl.signal.aborted) setRemote({ q, status: "error", items: [] });
+        },
+      );
+    }, debounceMs);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [q, open, preview, async, debounceMs, limit]);
+  // 바로 답할 수 있으면(최소 길이 미만·받은 후보 안에서 거르기) 그리는 중에 쓴다(효과를 기다리면 뼈대가 한 번 깜빡인다)
+  const quick = useMemo(
+    () => (async && open && q && !preview ? peekSuggestions?.(q) : undefined),
+    [async, open, q, preview, peekSuggestions],
+  );
+  const answer = quick !== undefined ? { q, status: quick === null ? ("off" as const) : ("ready" as const), items: (quick ?? []).slice(0, limit) } : remote;
   const live = useMemo(() => {
     if (!q) return [];
+    if (loadSuggestions) return answer && answer.q === q ? answer.items : [];
     const found = getSuggestions ? getSuggestions(q) : suggestions.filter((s) => s.label.toLowerCase().includes(q.toLowerCase()));
     return found.slice(0, limit);
-  }, [q, getSuggestions, suggestions, limit]);
-  const mode: WebSearchPopup = preview ?? (!q ? (recent.length ? "recent" : "closed") : live.length ? "suggest" : "none");
+  }, [q, getSuggestions, suggestions, limit, loadSuggestions, answer]);
+  const mode: WebSearchPopup = searchPopupMode({
+    preview,
+    q,
+    recentCount: recent.length,
+    async,
+    remote: answer ? { q: answer.q, status: answer.status, count: answer.items.length } : null,
+    syncCount: live.length,
+  });
   const shown = preview === "suggest" && popupSuggestions ? popupSuggestions : live;
   const rows: Row[] =
     mode === "recent"
@@ -223,6 +343,7 @@ export function WebSearchBox({
           type="search"
           name="q"
           enterKeyHint="search"
+          maxLength={50}
           autoComplete="off"
           autoCapitalize="off"
           spellCheck={false}
@@ -312,7 +433,7 @@ export function WebSearchBox({
               className={cx("btn btn-text btn-sm", tall)}
               type="button"
               onClick={() => {
-                setRecent([]);
+                setRecent(() => []);
                 setActive(-1);
                 inputRef.current?.focus();
               }}
@@ -325,9 +446,6 @@ export function WebSearchBox({
 
       {expanded && mode === "loading" ? (
         <div className={menu} onMouseDown={(e) => e.preventDefault()}>
-          <p className="sr-only" role="status">
-            자동완성을 불러오는 중
-          </p>
           <ul id={listId} role="listbox" aria-label="자동완성" aria-busy="true" />
           <ul className="col" style={{ gap: 2 }} aria-hidden="true">
             {[72, 56, 64].map((w, i) => (
@@ -346,15 +464,11 @@ export function WebSearchBox({
       {expanded && (mode === "suggest" || mode === "none") ? (
         <div className={menu} onMouseDown={(e) => e.preventDefault()}>
           {mode === "none" ? (
-            <p className="row t-sm muted" role="status" style={{ gap: 8, padding: "12px 10px" }}>
+            <p className="row t-sm muted" style={{ gap: 8, padding: "12px 10px" }}>
               <i className="ic ic-info ic-16" aria-hidden="true" />
               맞는 공연·아티스트·공연장이 없습니다
             </p>
-          ) : (
-            <p className="sr-only" role="status">
-              검색어 후보 {shown.length}개
-            </p>
-          )}
+          ) : null}
           <ul id={listId} role="listbox" aria-label="자동완성" className="col" style={{ gap: 2 }}>
             {rows.map((row, i) =>
               row.kind === "suggestion" ? (
@@ -397,6 +511,10 @@ export function WebSearchBox({
           {mode === "suggest" ? kbdHint : null}
         </div>
       ) : null}
+      {/* 늘 있는 알림 영역 하나(조건 덩어리 안에 두면 바뀔 때마다 새로 생겨 화면 낭독기가 읽지 않는다). 불러오는 중은 알리지 않는다 */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {expanded && mode === "suggest" ? `검색어 후보 ${shown.length}개` : expanded && mode === "none" ? "맞는 공연·아티스트·공연장이 없습니다" : ""}
+      </p>
     </form>
   );
 }

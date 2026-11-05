@@ -122,6 +122,8 @@ export interface WebShellSearch {
   recent?: readonly string[];
   /** 휴대폰·태블릿 머리를 처음부터 검색 모드로 그린다(SCR-003 검색 화면) */
   barOpen?: boolean;
+  /** 주소의 q를 입력에 채운다(SCR-003 검색 화면은 정적 셸이라 서버가 주소를 읽지 않는다) */
+  queryFromUrl?: boolean;
 }
 
 export interface WebShellProps {
@@ -139,6 +141,12 @@ export interface WebShellProps {
   searchSuggestions?: readonly WebSearchSuggestion[];
   /** 검색어 → 후보(별칭 등 앱 규칙). 주면 searchSuggestions 대신 쓴다 */
   getSearchSuggestions?: (query: string) => readonly WebSearchSuggestion[];
+  /** 검색어 → 후보를 비동기로(자동완성 API). 주면 getSearchSuggestions 대신 쓴다 */
+  loadSearchSuggestions?: (query: string, signal: AbortSignal) => Promise<readonly WebSearchSuggestion[] | null>;
+  /** 기다리지 않고 바로 답할 수 있으면 그 답(후보·null), 요청해야 하면 undefined */
+  peekSearchSuggestions?: (query: string) => readonly WebSearchSuggestion[] | null | undefined;
+  /** 최근 검색어가 바뀌었을 때(앱이 저장한다) */
+  onRecentSearchesChange?: (recent: string[]) => void;
   /** 머리 검색창의 처음 모양 */
   search?: WebShellSearch;
   /** 검색 모드 머리의 [취소]. 없으면 일반 머리로 돌아간다 */
@@ -175,6 +183,9 @@ export function WebShell({
   genres = [],
   searchSuggestions,
   getSearchSuggestions,
+  loadSearchSuggestions,
+  peekSearchSuggestions,
+  onRecentSearchesChange,
   search,
   onSearchCancel,
   focus,
@@ -214,6 +225,10 @@ export function WebShell({
       action={hrefs.search}
       suggestions={searchSuggestions}
       getSuggestions={getSearchSuggestions}
+      {...(loadSearchSuggestions ? { loadSuggestions: loadSearchSuggestions } : {})}
+      {...(peekSearchSuggestions ? { peekSuggestions: peekSearchSuggestions } : {})}
+      {...(onRecentSearchesChange ? { onRecentChange: onRecentSearchesChange } : {})}
+      queryFromUrl={search?.queryFromUrl ?? false}
       defaultValue={search?.defaultValue}
       popup={search?.popup}
       popupSuggestions={search?.popupSuggestions}
