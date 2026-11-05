@@ -1,6 +1,7 @@
 // 화면 목록(`/preview`, 개발 서버에서만 — 운영 빌드 입력에 넣지 않는다). ds PreviewCatalog와 같은 모양을 DOM으로 그린다.
 import '@peaket/ds/queue-room.css';
-import './styles/app.css';
+import './styles/page.css';
+import '@peaket/ds/queue-room-screens.css';
 import './dev/dev.css';
 import './styles/preview.css';
 import { h } from './dom';

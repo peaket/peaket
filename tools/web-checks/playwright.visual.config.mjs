@@ -1,7 +1,7 @@
 // 시각 회귀 FE-T40(docs/frontend.md §5.17, docs/design/d2 §1 '버전 관리 및 시각 회귀 테스트', BUILD_ORDER BAS-170).
 // 기준 이미지는 판을 고정한 Playwright 컨테이너(lib/docker.mjs의 IMAGE, CI 화면 잡과 같다)에서만 찍고 견준다.
 // 다른 OS에서 돌리면 그리기가 달라 실패하므로 막는다(PEAKET_VISUAL_ANY_OS=1이면 연습으로만 돌린다).
-// 대기실 경량 페이지 셸 네 상태와 @peaket/ds Storybook 이야기(BAS-180, visual/ds-stories.spec.mjs)다. 같은 상태의 React 대기 화면(HOT-340)을 같은 틀에 더한다.
+// 대기실 경량 페이지 셸 네 상태와 @peaket/ds Storybook 이야기(BAS-180, visual/ds-stories.spec.mjs), React 대기 패널과 셸의 같은 상태 비교(HOT-349, visual/queue-panel.spec.mjs)다.
 import { defineConfig, devices } from '@playwright/test';
 import { STORYBOOK_PORT } from './ds/stories.mjs';
 

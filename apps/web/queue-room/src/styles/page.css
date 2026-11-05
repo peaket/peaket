@@ -1,0 +1,26 @@
+/*
+ * 대기실 경량 페이지의 페이지 규칙(본문 여백·숨김·스크롤 잠금·건너뛰기 링크·스피너와 진행 표시 움직임). 화면 규칙(@peaket/ds/queue-room-screens.css)과
+ * 나눴다: 그 파일은 React 대기 패널을 그리는 다른 앱에도 실리므로 페이지 전체에 걸리는 규칙을 두지 않는다(ADR-0220 결정 2).
+ * 싣는 차례: 키트(queue-room.css) → 이 파일 → 화면 규칙(옮기기 전 한 파일일 때와 같은 차례).
+ */
+@layer utilities {
+  body { margin: 0; }
+  .q-page { min-height: 100dvh; }
+  .pk [hidden] { display: none !important; }
+  .q-lock { overflow: hidden; }
+  .q-boot { padding: 24px 16px; }
+  .q-skip:focus { position: fixed; left: 8px; top: 8px; z-index: 1000; width: auto; height: auto; margin: 0; padding: 8px 12px; overflow: visible; clip: auto; white-space: nowrap; border-radius: var(--r-md); background: var(--surface); color: var(--link); box-shadow: var(--shadow-md); }
+
+  /* 움직임: 스피너 회전, 진행 표시(사람 확인 중) */
+  .spinner { animation: q-spin .8s linear infinite; }
+  .progress.indet > span { animation: q-indet 1.4s ease-in-out infinite; }
+
+  /* 움직임 줄이기·저전력: 효과 없이 값만 바꾼다(d5 §5.8, d3 SCR-007) */
+  @media (prefers-reduced-motion: reduce) {
+    .spinner, .progress.indet > span { animation: none; }
+  }
+  .q-still .spinner, .q-still .progress.indet > span { animation: none; }
+}
+
+@keyframes q-spin { to { transform: rotate(360deg); } }
+@keyframes q-indet { from { transform: translateX(-110%); } to { transform: translateX(160%); } }

@@ -2,7 +2,8 @@
 // 로비·대기열·매진(SCR-007·008·018)은 데이터에 이었다(ADR-0207·0208): 상태 기계(src/live/controller.ts)가 실제 응답으로 화면 값을 낸다.
 // 굿즈 대기(SCR-015)는 아직 퍼블리싱이라 목업(fixtures)과 `?state=`로 그린다(굿즈 단계). 다크는 `?theme=dark`.
 import '@peaket/ds/queue-room.css';
-import './styles/app.css';
+import './styles/page.css';
+import '@peaket/ds/queue-room-screens.css';
 import { links, ORIGINS } from './config';
 import type { AlertApi, AlertResult, BaseCtx, Ctx, LiveCtx, ModalKey, PrefApi } from './ctx';
 import { alertDue, titlePrefix } from './live/alert.ts';

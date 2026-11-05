@@ -1,5 +1,5 @@
 // SCR-007 로비(오픈 전 대기실). 캔버스 SCR-007 m·t·d 보드를 한 페이지의 반응형으로 옮겼다(d5 §5.7).
-// 휴대폰은 화면 전체, 태블릿은 가운데 520px 열, 데스크톱(lg)은 바탕 위 가운데 480px 카드 하나다(배치는 app.css).
+// 휴대폰은 화면 전체, 태블릿은 가운데 520px 열, 데스크톱(lg)은 바탕 위 가운데 480px 카드 하나다(배치는 @peaket/ds/queue-room-screens.css).
 // 화면 값은 상태 기계(src/live/controller.ts)가 낸다(ADR-0208): lobby-join(not-yet·checking·failed), lobby(countdown·reveal·calculating·delayed),
 // 로비 참가의 다른 기기·다른 기기에서 취소됨, ⑧ 희망 조건(자동 배정 공연)과 ⑩ [차례 알림 받기](ADR-0212). ⑤ 운영 공지는 OPS-410이 잇는다(ADR-0208 결정 8).
 import { KEEP_LOBBY, LEGAL_POL024, LOBBY_PRINCIPLE, ORDERING_TEXT, AUTO_ASSIGN_TEXT, REVEAL_GUIDE } from '../copy';

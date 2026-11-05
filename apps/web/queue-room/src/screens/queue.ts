@@ -203,11 +203,19 @@ function bar(pct: number, valueText: string, opts: { flow: boolean; dim: boolean
  * 움직임 줄이기·저전력이면 CSS가 효과를 꺼 새 값만 보인다. 숫자 자체에는 live를 두지 않는다(낭독은 1분 문장 하나)
  */
 function aheadContent(now: string, before?: string): Child[] {
-  const digits = rollDigits(now, before).map((d) =>
-    d.old === undefined
-      ? d.ch
-      : h('span', { class: 'q-digit' }, h('span', { class: 'q-digit-stack' }, h('span', null, d.ch), h('span', { class: 'q-digit-old' }, d.old || '\u00a0'))),
-  );
+  // 바뀌지 않은 글자는 이어 붙여 글 하나로 둔다(inline-flex 안에서 글자마다 따로 놓이면 자간이 달라진다, React QueuePanel과 같은 그림)
+  const digits: Child[] = [];
+  let run = '';
+  for (const d of rollDigits(now, before)) {
+    if (d.old === undefined) {
+      run += d.ch;
+      continue;
+    }
+    if (run) digits.push(run);
+    run = '';
+    digits.push(h('span', { class: 'q-digit' }, h('span', { class: 'q-digit-stack' }, h('span', null, d.ch), h('span', { class: 'q-digit-old' }, d.old || '\u00a0'))));
+  }
+  if (run) digits.push(run);
   return [h('span', { class: 'sr-only' }, `${now}명`), h('span', { class: 'q-roll', 'aria-hidden': 'true' }, digits, '명')];
 }
 

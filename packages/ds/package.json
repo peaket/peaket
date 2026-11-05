@@ -10,6 +10,7 @@
   "exports": {
     "./styles.css": "./src/styles/index.css",
     "./queue-room.css": "./src/styles/queue-room.css",
+    "./queue-room-screens.css": "./src/styles/queue-room-screens.css",
     "./tokens": "./src/gen/tokens.ts",
     "./icons": "./src/icons/index.tsx",
     "./poc/seed-layer-probe": "./src/poc/SeedLayerProbe.tsx",

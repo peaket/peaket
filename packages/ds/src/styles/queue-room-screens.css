@@ -1,16 +1,11 @@
 /*
- * 대기실 경량 페이지 전용 규칙(키트에 없는 배치·움직임). 색은 키트의 의미 변수만 쓴다.
+ * 대기실 화면 규칙(키트에 없는 배치·움직임). 색은 키트의 의미 변수만 쓴다. 대기실 경량 페이지(apps/web/queue-room)가 키트(queue-room.css)와
+ * 페이지 규칙(대기실 src/styles/page.css) 뒤에 싣고, React 대기 패널(CMP-015 QueuePanel)을 그리는 곳도 키트 위에 이 파일을 싣는다
+ * (한 곳, ADR-0220 결정 2. 2026-11-06 apps/web/queue-room/src/styles/app.css에서 옮김). 페이지 전체에 걸리는 규칙(body·스피너 움직임 등)은 여기 두지 않는다.
  * 보드의 인라인 style 값을 클래스로 옮겼다(CSP 묶음 A′는 인라인 스타일을 막는다, docs/frontend.md §5.1).
  * 중단점: md 768(태블릿 보드), lg 1280(데스크톱 보드). 휴대폰(360)이 먼저다.
  */
 @layer utilities {
-  body { margin: 0; }
-  .q-page { min-height: 100dvh; }
-  .pk [hidden] { display: none !important; }
-  .q-lock { overflow: hidden; }
-  .q-boot { padding: 24px 16px; }
-  .q-skip:focus { position: fixed; left: 8px; top: 8px; z-index: 1000; width: auto; height: auto; margin: 0; padding: 8px 12px; overflow: visible; clip: auto; white-space: nowrap; border-radius: var(--r-md); background: var(--surface); color: var(--link); box-shadow: var(--shadow-md); }
-
   /* 배치 도우미(보드 인라인 값) */
   .q-g4 { gap: 4px; } .q-g6 { gap: 6px; } .q-g8 { gap: 8px; } .q-g10 { gap: 10px; } .q-g12 { gap: 12px; } .q-g16 { gap: 16px; } .q-g20 { gap: 20px; }
   .q-self-start { align-self: flex-start; } .q-self-center { align-self: center; } .q-ai-center { align-items: center; }
@@ -99,10 +94,6 @@
   .q-goods-card { gap: 12px; padding: 24px 20px; }
   .q-langs { gap: 4px 12px; }
 
-  /* 움직임: 스피너 회전, 진행 표시(사람 확인 중) */
-  .spinner { animation: q-spin .8s linear infinite; }
-  .progress.indet > span { animation: q-indet 1.4s ease-in-out infinite; }
-
   /* 태블릿(md 768) */
   @media (min-width: 768px) {
     .q-fh { padding: 0 16px 0 12px; }
@@ -149,14 +140,12 @@
 
   /* 움직임 줄이기·저전력: 효과 없이 값만 바꾼다(d5 §5.8, d3 SCR-007) */
   @media (prefers-reduced-motion: reduce) {
-    .spinner, .progress.indet > span, .q-flow::before, .q-digit-stack { animation: none; }
+    .q-flow::before, .q-digit-stack { animation: none; }
     .q-bar > .q-fill, .q-me { transition: none; }
   }
-  .q-still .spinner, .q-still .progress.indet > span, .q-still .q-flow::before, .q-still .q-digit-stack { animation: none; }
+  .q-still .q-flow::before, .q-still .q-digit-stack { animation: none; }
   .q-still .q-bar > .q-fill, .q-still .q-me { transition: none; }
 }
 
-@keyframes q-spin { to { transform: rotate(360deg); } }
-@keyframes q-indet { from { transform: translateX(-110%); } to { transform: translateX(160%); } }
 @keyframes q-flow { to { transform: translateX(28.28px); } }
 @keyframes q-roll { from { transform: translateY(-60px); } to { transform: translateY(0); } }

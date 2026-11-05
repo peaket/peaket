@@ -7,6 +7,7 @@ PEAKET 디자인 시스템 패키지다. 디자인 토큰(`docs/design/tokens.js
 - 제3자 고지: `THIRD-PARTY-NOTICES.txt`는 붙인 SEED 판의 NOTICE·LICENSE를 그대로 옮긴 고지 파일이다(ADR-0040 결정 7). `notices`로 만들고 `notices:check`(시험에도 있다)로 판과 같은지 본다. SEED 판을 올리면 다시 만든다. 앱 배포에 함께 싣는 일은 HOT-390이 한다.
 - 토큰 검사: `pnpm --filter @peaket/ds test`가 생성물 차이(`tokens:check`), 토큰 형식 검사(FE-T45: DTCG 이름·형식·별칭·확장 키, SEED 대응 이름과 중단점, SEED 색 모드 선택자), d2 §5 대비표 계산(FE-T44)을 돈다. 문제 목록만 보려면 `tokens:lint`. 규칙은 `scripts/token-rules.mjs`, 정본 읽기는 `scripts/token-canon.mjs`다.
 - 스타일 파일: `styles/index.css`가 SEED base 층 판(`@seed-design/css/base.layered.css`, 스스로 `seed-base` 층에 든다) → tokens.css → theme.css → kit-tokens.css → kit.css → ds.css 순서로 싣는다. 피켓 토큰이 `components` 층이라 같은 이름의 `--seed-*` 변수를 덮는다. 붙인 SEED 판은 `@seed-design/css` 3.1.0이다(BAS-170). `ds.css`는 키트에 없는 ds 보조 규칙(`pk-skip-link` 등)이다. 대기실 경량 페이지는 `@peaket/ds/queue-room.css` 하나만 싣는다(키트 부분집합, 맨 앞에서 queue-room-tokens.css를 싣는다).
+- 대기실 화면 규칙: `styles/queue-room-screens.css`(`@peaket/ds/queue-room-screens.css`)는 대기실 경량 페이지의 배치·움직임 규칙이다. 대기실은 `queue-room.css`(키트 부분집합) 뒤에 싣고, React 대기 패널(CMP-015 QueuePanel)을 그리는 곳도 키트 위에 함께 싣는다(ADR-0220). 페이지 전체 규칙(본문 여백·스피너 움직임)은 대기실 앱에 둔다.
 
 ## CSS 싣기
 
