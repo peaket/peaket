@@ -5,7 +5,10 @@
 // - 진행 중: 보내기를 창(window)에서 막아(React 처리 뒤) 화면에 머물게 하고 누른 버튼만 진행 중인지, 그때 폼이 문서에 붙어 있는지 본다.
 //   이동을 붙잡아 두는 방법은 쓰지 않는다(Chromium은 이동이 걸린 동안 문서를 읽지 못한다).
 import { test, expect } from '@playwright/test';
-import { WEB_BASE } from './pages.mjs';
+import { WEB_BASE, stubFanApi } from './pages.mjs';
+import { isBidiFirefox } from '../lib/firefox.mjs';
+
+test.beforeEach(({ page }) => stubFanApi(page));
 
 /** 하이드레이션 뒤에 누른다(그 전에는 '진행 중' 표시 없이 보낸다) */
 const hydrated = (page) =>
@@ -14,14 +17,14 @@ const hydrated = (page) =>
     return !!f && Object.keys(f).some((k) => k.startsWith('__react'));
   });
 
-test('SCR-004 제공자 버튼을 누르면 POST /login/{provider}가 돌아갈 주소와 함께 실제로 나간다(form-action, 폼이 빠져 취소되지 않는다)', async ({ page }) => {
+test('SCR-004 제공자 버튼을 누르면 POST /login/{provider}가 돌아갈 주소와 함께 실제로 나간다(form-action, 폼이 빠져 취소되지 않는다)', async ({ page, browserName }) => {
   const canceled = [];
   page.on('console', (m) => {
     if (/Form submission canceled/i.test(m.text())) canceled.push(m.text());
   });
   const posts = [];
   await page.route('**/login/naver', async (route) => {
-    posts.push({ method: route.request().method(), body: route.request().postData() ?? '' });
+    posts.push({ method: route.request().method(), body: route.request().postData() });
     await route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: 'started' });
   });
   await page.goto(`${WEB_BASE}/login?next=%2Fevents%2Fx%3Fround%3D2`);
@@ -30,7 +33,11 @@ test('SCR-004 제공자 버튼을 누르면 POST /login/{provider}가 돌아갈 
   await page.waitForURL(/\/login\/naver$/);
   expect(posts).toHaveLength(1);
   expect(posts[0].method).toBe('POST');
-  expect(new URLSearchParams(posts[0].body).get('returnTo')).toBe('/events/x?round=2');
+  if (isBidiFirefox(browserName)) {
+    // BiDi Firefox는 보낸 요청의 본문을 주지 않는다(lib/firefox.mjs). 보낸 것과 이동만 보고 returnTo는 다른 엔진이 본다
+    expect(posts[0].body).toBeNull();
+    test.info().annotations.push({ type: 'BiDi 한계', description: '요청 본문(returnTo)은 보지 못했다' });
+  } else expect(new URLSearchParams(posts[0].body ?? '').get('returnTo')).toBe('/events/x?round=2');
   expect(canceled).toEqual([]);
 });
 

@@ -99,6 +99,9 @@ function Fields({ group, p, apply, idPrefix }: { group: Group; p: FiltersProps; 
   }
 }
 
+/** 날짜 칸의 최댓값. 없으면 Chrome이 여섯 자리 연도를 받아 키보드로 20261201을 치면 연도가 202612가 된다(2026-11-05 Chrome 확인) */
+const DATE_MAX = '9999-12-31';
+
 /**
  * 공연 일정: 공연 기간이 고른 범위와 겹치는 공연(KST 날짜, search.md §5.2). 날짜 칸은 칸 안에서만 바꾸고 칸을 떠날 때·Enter 때 주소에 반영한다
  * (값마다 주소를 바꾸면 입력 중 칸이 옛 값으로 되돌고 중간 날짜마다 검색이 일어난다). 시작일이 종료일보다 늦으면 반영하지 않는다.
@@ -140,11 +143,11 @@ function DateFields({ f, apply, name, legend }: { f: SearchFilters; apply: (f: S
           <div className="row wrap" style={{ gap: 8 }}>
             <label className="col t-sm" style={{ gap: 4 }} htmlFor={`${name}-from`}>
               시작일
-              <input className="input" id={`${name}-from`} type="date" value={draft.from} onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))} onBlur={commit} onKeyDown={onKey} aria-invalid={invalid || undefined} aria-describedby={invalid ? `${name}-err` : undefined} />
+              <input className="input" id={`${name}-from`} type="date" max={DATE_MAX} value={draft.from} onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))} onBlur={commit} onKeyDown={onKey} aria-invalid={invalid || undefined} aria-describedby={invalid ? `${name}-err` : undefined} />
             </label>
             <label className="col t-sm" style={{ gap: 4 }} htmlFor={`${name}-to`}>
               종료일
-              <input className="input" id={`${name}-to`} type="date" value={draft.to} onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))} onBlur={commit} onKeyDown={onKey} aria-invalid={invalid || undefined} aria-describedby={invalid ? `${name}-err` : undefined} />
+              <input className="input" id={`${name}-to`} type="date" max={DATE_MAX} value={draft.to} onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))} onBlur={commit} onKeyDown={onKey} aria-invalid={invalid || undefined} aria-describedby={invalid ? `${name}-err` : undefined} />
             </label>
           </div>
           {invalid ? (

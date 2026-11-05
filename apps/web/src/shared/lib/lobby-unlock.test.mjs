@@ -32,3 +32,10 @@ test('기기 ID가 없으면(저장소를 못 씀) 이 페이지에서만 쓰는
   const ms = await lobbyUnlockDelayMs('e1', undefined);
   assert.ok(ms >= 0 && ms < 60_000);
 });
+
+test('보안 맥락이 아니어서 crypto.subtle이 없거나 계산이 실패하면 퍼뜨림 끝(가장 늦은 시각)에 연다(서버보다 일찍 열지 않는다)', async () => {
+  assert.equal(await lobbyUnlockDelayMs('e1', 'd1', 60, null), 59_999);
+  assert.equal(await lobbyUnlockDelayMs('e1', undefined, 60, null), 59_999, '기기 ID가 없어도 crypto.randomUUID(보안 맥락 전용)를 부르지 않는다');
+  const failing = { digest: () => Promise.reject(new Error('NotSupportedError')) };
+  assert.equal(await lobbyUnlockDelayMs('e1', 'd1', 30, failing), 29_999);
+});

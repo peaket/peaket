@@ -17,9 +17,13 @@ pnpm run seed-css                           # FE-T36(서버는 설정이 띄운�
 pnpm --filter @peaket/queue-room build      # (뿌리에서) 대기실 셸 빌드
 node lib/docker.mjs visual                  # FE-T40을 컨테이너에서. 기준 이미지를 바꿀 때만 --update-snapshots
 node lib/docker.mjs seatmap                 # K5 PoC를 컨테이너의 세 엔진으로(이 PC Chromium만: pnpm exec playwright test -c playwright.seatmap.config.mjs)
+node lib/docker.mjs rich-text               # FE-T41을 컨테이너의 세 엔진으로(파트너 PoC 서버 4122를 이 PC에서 먼저, rich-text/RESULT.md)
 ```
 
-- 이 PC(Windows)의 Firefox는 Playwright 1.64.1 판이 side-by-side 구성 오류로 뜨지 않는다(2026-11-04). 그때는 `node seed-css/serve-all.mjs`로 서버를 띄워 두고 `node lib/docker.mjs layers`로 컨테이너 안 세 엔진이 `host.docker.internal`의 서버를 보게 한다.
+- 이 PC(Windows)의 Firefox는 Playwright 1.64.1 판이 side-by-side 구성 오류(`mozglue` 어셈블리를 찾지 못함)로 뜨지 않는다(2026-11-04). 길이 둘이다.
+  - ① CI와 같은 판: `node seed-css/serve-all.mjs`로 서버를 띄워 두고 `node lib/docker.mjs layers`처럼 컨테이너 안 세 엔진이 `host.docker.internal`의 서버를 보게 한다.
+  - ② 설치한 정식 Firefox: `PEAKET_FIREFOX=system`을 주면 Firefox 프로젝트가 정식 Firefox를 WebDriver BiDi(표준 원격 조종)로 띄운다(`lib/firefox.mjs`, 2026-11-05). Playwright 1.64.1의 BiDi는 다크 모드 흉내(`colorScheme`)와 보낸 요청의 본문(`postData`)을 주지 않아, 그 단언만 건너뛰고 시험에 까닭을 남긴다.
+  - 결과를 적을 때는 어느 길로 쟀는지 적는다. Docker 디스크가 차서 컨테이너를 못 띄울 때도 ②로 본다.
 - 리눅스 Docker Engine에서는 `host.docker.internal`이 다리 주소라 127.0.0.1에 붙은 정적 서버에 닿지 않는다. `node seed-css/serve-all.mjs --host 0.0.0.0`(또는 `PEAKET_SERVE_HOST=0.0.0.0`)으로 띄운다(Docker Desktop은 기본값으로 닿는다). 서버를 끌 때(Ctrl+C) 셸 아래 서버까지 끈다(Windows `taskkill /T /F`, 그 밖은 프로세스 묶음).
 - 성능 예산 기록의 표: `node budgets/report.mjs [--reports <폴더>]`(첫 JS·Lighthouse, Markdown을 표준 출력으로).
 - 시각 회귀 설정은 리눅스가 아니면 멈춘다(그리기가 달라 늘 실패한다). 연습으로만 돌릴 때는 `PEAKET_VISUAL_ANY_OS=1`.
@@ -36,5 +40,6 @@ node lib/docker.mjs seatmap                 # K5 PoC를 컨테이너의 세 엔�
 | `lib/canon.mjs` | 정본에서 읽는 값(§5.8 CSS 예산, tokens.json 의미 색) |
 | `lib/serve.mjs` | 의존성 없는 정적 서버(대기실 배포 흉내 `--preset queue-room`, 단일 페이지 대체, 붙을 주소 `--host`·`PEAKET_SERVE_HOST`, 미리 압축한 `<파일>.br` 전송, `--cache-control`) |
 | `lib/docker.mjs` | 판을 고정한 Playwright 컨테이너에서 검사 돌리기(pnpm 판은 이 패키지 `packageManager`에서 읽는다) |
+| `lib/firefox.mjs` | 설정들의 Firefox 프로젝트 값(기본은 Playwright 판, `PEAKET_FIREFOX=system`이면 설치한 정식 Firefox를 BiDi로, BiDi 한계 판정) |
 | `budgets/report.mjs` | 성능 예산 기록(`reports/sizes-js/`·`reports/lighthouse/`)을 Markdown 표로 |
 | `seatmap/judge.mjs` | K5 PoC 판정 어림(CPU 느리게 하기가 걸리지 않는 Worker 몫에 배수 곱하기) |

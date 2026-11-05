@@ -94,14 +94,17 @@ for (const editor of ['lexical', 'tiptap']) {
     await expect(box).toHaveAttribute('aria-multiline', 'true');
     await expect(page.getByRole('toolbar', { name: '서식' })).toBeVisible();
 
-    // 붙여넣기(Word HTML + 글자판)
+    // 붙여넣기(Word HTML + 글자판). Firefox는 ClipboardEvent를 만들 때 넘긴 clipboardData를 빈 것으로 바꾸므로,
+    // 만든 이벤트에 clipboardData를 직접 달아 세 엔진에 같은 값을 넘긴다
     await box.click();
     await page.evaluate((html) => {
       const el = document.querySelector('[data-testid="editor"]');
       const dt = new DataTransfer();
       dt.setData('text/html', html);
       dt.setData('text/plain', '공연 소개');
-      el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      const ev = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, 'clipboardData', { value: dt });
+      el.dispatchEvent(ev);
     }, WORD_HTML);
     await expect(box).toContainText('그림 뒤 글');
     const editorText = norm(await box.innerText());

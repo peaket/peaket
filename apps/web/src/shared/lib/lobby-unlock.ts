@@ -8,9 +8,24 @@ export const LOBBY_SPREAD_SEC = 60;
 
 let pageFallback: string | undefined;
 
-/** 로비 개방 뒤 이 기기의 [로비 입장]이 열리기까지의 밀리초. 기기 ID가 없으면(저장소를 못 씀) 이 페이지에서만 쓰는 무작위 값으로 정한다 */
-export async function lobbyUnlockDelayMs(eventId: string, deviceId: string | undefined, spreadSec: number = LOBBY_SPREAD_SEC): Promise<number> {
-  const device = deviceId ?? (pageFallback ??= crypto.randomUUID());
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`PEAKET-lobby-open-v1${eventId}${device}`));
-  return new DataView(digest).getUint32(0, false) % (spreadSec * 1000);
+/**
+ * 로비 개방 뒤 이 기기의 [로비 입장]이 열리기까지의 밀리초. 기기 ID가 없으면(저장소를 못 씀) 이 페이지에서만 쓰는 무작위 값으로 정한다.
+ * 보안 맥락이 아니라 `crypto.subtle`이 없거나(https·localhost가 아닌 http 주소, 2026-11-05 컨테이너 검사에서 찾음) 계산이 실패하면
+ * 퍼뜨림 끝(가장 늦은 시각)에 연다. 서버보다 일찍 열지 않고, 버튼이 뼈대로 남지도 않는다
+ */
+export async function lobbyUnlockDelayMs(
+  eventId: string,
+  deviceId: string | undefined,
+  spreadSec: number = LOBBY_SPREAD_SEC,
+  subtle: Pick<SubtleCrypto, 'digest'> | null | undefined = globalThis.crypto?.subtle,
+): Promise<number> {
+  const last = spreadSec * 1000 - 1;
+  if (!subtle) return last;
+  try {
+    const device = deviceId ?? (pageFallback ??= crypto.randomUUID());
+    const digest = await subtle.digest('SHA-256', new TextEncoder().encode(`PEAKET-lobby-open-v1${eventId}${device}`));
+    return new DataView(digest).getUint32(0, false) % (spreadSec * 1000);
+  } catch {
+    return last;
+  }
 }

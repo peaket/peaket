@@ -5,7 +5,9 @@
 - 헤더: `apps/partner/proxy.ts`가 그 경로에만 묶음 B CSP와 Trusted Types 보고 모드(`require-trusted-types-for 'script'`)를 단다.
   - 묶음 B CSP: 요청마다 nonce, `'strict-dynamic'`, 파트너 변형
 - 판: lexical·@lexical/* 0.53.0, @tiptap/* 3.32.2
-- 엔진: Chromium·WebKit(Playwright 1.64.1). Firefox는 이 PC에서 뜨지 않아(spawn UNKNOWN) 재지 못했다. CI 잡은 아직 없다(HOT-180이 실제 위저드로 옮길 때 올린다).
+- 엔진: Chromium·WebKit(Playwright 1.64.1)과 Firefox 157(이 PC에 설치한 정식 판, WebDriver BiDi, `PEAKET_FIREFOX=system`, 2026-11-05 더 잼). 세 엔진의 값이 같다.
+  - 같은 날 판을 고정한 컨테이너(CI와 같은 이미지, `node lib/docker.mjs rich-text`)의 Chromium·WebKit·Firefox로도 재서 값이 같았다(6 통과). 이 PC에서는 Playwright 판 Firefox가 side-by-side 구성 오류로 뜨지 않는다.
+  - 이 시험의 CI 잡은 아직 없다(HOT-180이 실제 위저드로 옮길 때 올린다).
 - 다시 재기: 검사 패키지 폴더에서 아래 두 명령을 차례로 돌린다. 잰 값은 `reports/rich-text.json`에 남는다.
 
 ```bash
@@ -15,6 +17,10 @@ node rich-text/build.mjs
 ```bash
 pnpm run rich-text
 ```
+
+- 이 PC(Windows)에서는 `PEAKET_FIREFOX=system`을 꼭 앞에 붙인다. 설정에 Firefox 프로젝트가 늘 있어, 붙이지 않으면 Playwright 판 Firefox가 뜨지 않아 실패한다(tools/web-checks/README.md).
+- CI와 같은 판의 세 엔진으로 재려면 이 PC에서 파트너 PoC 서버(`PEAKET_NEXT_DIST=.next-rich-text`로 `next start -p 4122`)를 띄워 두고 `node lib/docker.mjs rich-text`를 돌린다.
+- 붙여넣기는 만든 `ClipboardEvent`에 `clipboardData`를 직접 달아 보낸다. Firefox는 생성자에 넘긴 `clipboardData`를 빈 것으로 바꾸기 때문이다(세 엔진에 같은 값을 넘긴다).
 
 | 기준(FE-T41) | Lexical | Tiptap |
 | --- | --- | --- |

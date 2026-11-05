@@ -1,14 +1,18 @@
 // 계약 모양 가짜 API(ADR-0199 결정 2, BUILD_ORDER HOT-300). 로컬 개발·브라우저 확인 전용이다. 운영·CI 배포에는 쓰지 않는다.
 // 서버가 아직 없는 화면 경로를 고정 자료(scripts/mock-api/cards.json)로 답한다. 응답이 계약 Zod를 지나는지는 mock-api.test.mjs가 본다.
 // - 127.0.0.1에만 묶는다. 소비자 웹 출처 하나에만 자격 증명 포함 CORS를 연다(PEAKET_WEB_ORIGIN, 기본 http://localhost:3000)
-// - 상태 바꾸기: GET /__mock/state?home=normal|empty&ranking=normal|stale|old|missing&fan=member|unverified|pending|guest&detail=normal|suspended (화면 상태를 보려고)
-//   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
+// - 상태 바꾸기: GET /__mock/state?home=normal|empty&ranking=normal|stale|old|missing&fan=member|unverified|pending|closing|guest&detail=normal|suspended&verify=popup|redirect|down (화면 상태를 보려고)
+//   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
 // - 파생본 이미지 주소(/img/{이름}/{폭}.{avif|webp})에는 자리 그림(SVG)을 낸다
 // - 공연 상세(GET /v1/events/{eventId}, ADR-0200)는 고정 자료 카드의 모든 회차를 답하고 그 밖은 404다.
 //   detail=suspended면 모두 410 event-suspended(한 번 공개된 뒤 판매 중지, ADR-0200 결정 3)
+// - 휴대폰 본인확인(/v1/identity/verifications*)의 기관 창은 정본의 모의 기관(services/identity-svc/scripts/mock-idv.mjs)이다.
+//   창 주소는 PEAKET_TEST_VERIFICATION_URL(기본 http://127.0.0.1:4020/verify), 모의 기관은 PEAKET_ENV=local
+//   PEAKET_TEST_VERIFICATION_RETURN_URL=http://localhost:3000/verify/return node services/identity-svc/scripts/mock-idv.mjs 4020으로 띄운다
 // 실행: node scripts/mock-api.mjs [포트, 기본 4010]
 //   소비자 웹은 PEAKET_API_ORIGIN·NEXT_PUBLIC_API_ORIGIN=http://127.0.0.1:4010, PEAKET_DEV_STATIC_ORIGIN=http://127.0.0.1:4010,
 //   PEAKET_CSP_ORIGINS='{"api":"http://127.0.0.1:4010","img":"http://127.0.0.1:4010"}'로 띄운다(apps/README.md)
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
@@ -385,7 +389,7 @@ const ID = /^[A-Za-z0-9-]{1,64}$/;
 /** 팬 계정 요약(FanAccountSummary). 이름은 d5 §10.3 표본 '지민' */
 export function fanSummary(fan, nickname = '지민') {
   if (fan === 'pending') return { nickname: null, signupCompleted: false, verified: false, hasStaffAssignment: false };
-  return { nickname, signupCompleted: true, verified: fan !== 'unverified', hasStaffAssignment: false };
+  return { nickname, signupCompleted: true, verified: fan === 'member', hasStaffAssignment: false };
 }
 
 // 가입 마무리(ADR-0203): 닉네임 규칙 결정 2와 같다(화면 apps/web signup.ts nicknameProblem). 쓰는 닉네임은 고정 셋
@@ -401,6 +405,76 @@ function nicknameInvalid(raw) {
   return gs.length < 2 || gs.length > 12;
 }
 const PHONE = /^(010[0-9]{8}|01[16789][0-9]{7,8})$/;
+
+// 휴대폰 본인확인(openapi /v1/identity/verifications*, docs/features/identity.md §5 '모의 기관과 기관 창 흐름').
+// 기관 창은 정본의 모의 기관(services/identity-svc/scripts/mock-idv.mjs)이 그린다. 가짜 API는 그 결과 값을 identity-svc와 같은 규칙으로 읽는다:
+// 시험 어댑터(openTestAgencyResult·TestVerificationProvider: 꼴·서명·건 ID·만든 지 10분·이름표), 유스케이스(confirm-verification.ts: 정리 중
+// 계정, 기록 없는 REVERIFY, 만 나이 ageOnKst, 본인확인한 계정은 같은 사람만), 조회 기간(처리 중 10분, 확정 뒤 1일).
+// 가짜 API만의 흉내: 다른 계정의 본인(409)은 이름표 'duplicate'다. 이 계정의 기록 이름표는 fan=member면 'tester-1'이다
+const IDV_LABEL = 'peaket-test-idv-result:v1:';
+const IDV_DEV_SECRET = 'peaket-test-verification-secret-v1';
+const IDV_TTL_MS = 10 * 60_000;
+/** 확정한 건의 결과를 다시 주는 기간(identity-svc RESULT_TTL_MS) */
+const IDV_RESULT_TTL_MS = 24 * 3_600_000;
+const IDV_FUTURE_SKEW_MS = 60_000;
+const IDV_B64U = /^[A-Za-z0-9_-]+$/;
+const IDV_MAC = /^[A-Za-z0-9_-]{43}$/;
+const IDV_BIRTH = /^(\d{4})-(\d{2})-(\d{2})$/;
+const IDV_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IDV_OUTCOMES = ['VERIFIED', 'CANCELLED', 'FAILED', 'DOWN'];
+/** fan=member 계정의 본인확인 기록 이름표(같은 이름표 = 같은 사람) */
+const MEMBER_PERSON = 'tester-1';
+/** openapi createIdentityVerification의 next 규칙(docs/frontend.md §5.14.3 safeNext와 같다) */
+const NEXT_RULE = /^(?!.*%(?:2[fF]%2[fF]|5[cC]))\/(?!\/)[^\\\u0000-\u001f\u007f]*$/;
+const isText = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
+
+/** 모의 기관과 같은 비밀(PEAKET_TEST_VERIFICATION_SECRET, base64). 없으면 개발용 값 */
+export function idvSecretFromEnv(raw = process.env.PEAKET_TEST_VERIFICATION_SECRET) {
+  return raw ? Buffer.from(raw, 'base64') : Buffer.from(IDV_DEV_SECRET);
+}
+
+/**
+ * 기관이 돌려준 값(verificationId·result·mac)을 시험 어댑터와 같은 규칙으로 읽는다. 어긋나면 FAILED
+ * @param {Record<string, string>} f @param {string} id @param {number} now @param {Uint8Array} secret
+ * @returns {{ outcome: 'VERIFIED' | 'CANCELLED' | 'FAILED' | 'DOWN', person?: string, birth?: string }}
+ */
+export function readAgencyResult(f, id, now, secret) {
+  const failed = { outcome: 'FAILED' };
+  const result = f?.result;
+  const mac = f?.mac;
+  if (f?.verificationId !== id || typeof result !== 'string' || result.length > 2048 || !IDV_B64U.test(result) || typeof mac !== 'string' || !IDV_MAC.test(mac)) return failed;
+  const want = createHmac('sha256', secret).update(IDV_LABEL + result).digest();
+  const got = Buffer.from(mac, 'base64url');
+  if (got.length !== want.length || !timingSafeEqual(got, want)) return failed;
+  let b;
+  try {
+    b = JSON.parse(Buffer.from(result, 'base64url').toString('utf8'));
+  } catch {
+    return failed;
+  }
+  if (typeof b !== 'object' || b === null || b.v !== 1 || !isText(b.tx, 64) || !IDV_OUTCOMES.includes(b.outcome)) return failed;
+  if (typeof b.iat !== 'number' || !Number.isFinite(b.iat)) return failed;
+  if ((b.person !== undefined && typeof b.person !== 'string') || (b.birth !== undefined && !(typeof b.birth === 'string' && IDV_BIRTH.test(b.birth))) || (b.phone !== undefined && !isText(b.phone, 32))) return failed;
+  if (b.tx !== id) return failed;
+  const age = now - b.iat;
+  if (age > IDV_TTL_MS || age < -IDV_FUTURE_SKEW_MS) return failed;
+  if (b.outcome !== 'VERIFIED') return { outcome: b.outcome };
+  if (!isText(b.person, 64)) return failed;
+  return { outcome: 'VERIFIED', person: b.person, ...(b.birth === undefined ? {} : { birth: b.birth }) };
+}
+
+/** 생년월일로 now의 한국 날짜 기준 만 나이. 있을 수 없는 날(달력에 없는 날, 1900년 전, 오늘 뒤)이면 null(identity-svc ageOnKst와 같다) */
+export function ageOnKst(birth, now) {
+  const m = birth === undefined ? null : IDV_BIRTH.exec(birth);
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d || y < 1900) return null;
+  const today = new Date(now + KST);
+  const [ty, tm, td] = [today.getUTCFullYear(), today.getUTCMonth() + 1, today.getUTCDate()];
+  if (y > ty || (y === ty && (mo > tm || (mo === tm && d > td)))) return null;
+  return ty - y - (tm < mo || (tm === mo && td < d) ? 1 : 0);
+}
 
 /** JSON 본문(64KB까지). 깨졌으면 undefined */
 function readJson(req) {
@@ -422,9 +496,39 @@ function readJson(req) {
   });
 }
 
-export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_ORIGIN || 'http://localhost:3000' } = {}) {
+export function startMockApi({
+  port = 4010,
+  webOrigin = process.env.PEAKET_WEB_ORIGIN || 'http://localhost:3000',
+  idvUrl = process.env.PEAKET_TEST_VERIFICATION_URL || 'http://127.0.0.1:4020/verify',
+  idvSecret = idvSecretFromEnv(),
+  now = Date.now,
+} = {}) {
   const origin = `http://127.0.0.1:${port}`;
-  const state = { home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal' };
+  const state = { home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', person: MEMBER_PERSON };
+  /** 본인확인 건(건 ID → 목적·돌아갈 주소·상태) */
+  const attempts = new Map();
+  /** 결과 확정(identity-svc confirm-verification.ts의 차례): 정리 중 → 기관 값 → 기록 없는 REVERIFY → 만 나이 → 다른 계정 → 같은 사람 */
+  const settle = (a, f, id, t) => {
+    if (state.fan === 'closing') return 'UNDER_14';
+    const r = readAgencyResult(f, id, t, idvSecret);
+    if (r.outcome === 'DOWN') return 'PROVIDER_DOWN';
+    if (r.outcome !== 'VERIFIED') return r.outcome;
+    const verified = state.fan === 'member';
+    if (a.purpose === 'REVERIFY' && !verified) return 'FAILED';
+    const age = ageOnKst(r.birth, t);
+    if (age === null) return 'FAILED';
+    if (age < 14) {
+      // 이미 본인확인한 계정의 기록은 만 14세 이상이었던 사람이라, 지금 미만이면 다른 사람이다(정리하지 않는다)
+      if (verified) return 'FAILED';
+      state.fan = 'closing';
+      return 'UNDER_14';
+    }
+    if (r.person === 'duplicate') return 'DUPLICATE_ACCOUNT';
+    if (verified) return r.person === state.person ? 'VERIFIED' : 'FAILED';
+    state.fan = 'member';
+    state.person = r.person;
+    return 'VERIFIED';
+  };
   const alerts = new Set();
   const wished = new Set(INITIAL_WISHES);
   const server = createServer((req, res) => {
@@ -451,11 +555,14 @@ export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_O
     const p = url.pathname;
     const unauthorized = () => send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
     if (p === '/__mock/state' && req.method === 'GET') {
-      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail'])) {
+      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify'])) {
         const v = url.searchParams.get(k);
         if (v) state[k] = v;
       }
-      if (url.searchParams.get('fan')) state.nickname = undefined;
+      if (url.searchParams.get('fan')) {
+        state.nickname = undefined;
+        state.person = state.fan === 'member' ? MEMBER_PERSON : undefined;
+      }
       send(200, state);
       return;
     }
@@ -521,6 +628,52 @@ export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_O
         // 팬 쿠키 둘을 지운다(가짜 API는 쿠키를 주지 않지만 계약 모양대로 머리를 싣는다)
         res.setHeader('set-cookie', ['__Secure-peaket_at=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict', '__Secure-peaket_rt=; Path=/v1/identity/access-tokens; Max-Age=0; Secure; HttpOnly; SameSite=Strict']);
         return send(204, undefined);
+      });
+      return;
+    }
+    // 휴대폰 본인확인 시작·결과 확정·결과 조회(위 readAgencyResult). verify=popup|redirect는 기관 창 방식, down은 기관 장애(503).
+    // fan=closing은 만 14세 미만 결과로 정리 중인 계정이다: 결과 대화상자를 보이도록 세션은 살아 있고, 시작·확정은 403 under-14다(identity §5)
+    const underFourteen = () => problem(403, 'under-14', '만 14세 미만은 피켓을 이용할 수 없습니다');
+    const providerDown = () => send(503, { type: 'https://peaket.example/problems/provider-down', title: '지금은 본인확인을 할 수 없습니다', status: 503 }, 'application/problem+json', { 'retry-after': '30' });
+    if (p === '/v1/identity/verifications' && req.method === 'POST') {
+      void readJson(req).then((b) => {
+        if (state.fan === 'guest') return unauthorized();
+        const purpose = b?.purpose ?? 'FIRST';
+        const keys = b && typeof b === 'object' ? Object.keys(b) : [];
+        if (!b || keys.some((k) => k !== 'purpose' && k !== 'next') || typeof b.next !== 'string' || b.next.length > 512 || !['FIRST', 'REVERIFY', 'MINOR_CONTRACT'].includes(purpose)) return badRequest();
+        if (!NEXT_RULE.test(b.next)) return problem(400, 'next-invalid', '돌아갈 주소가 같은 출처 경로가 아닙니다');
+        if (purpose === 'MINOR_CONTRACT') return problem(400, 'purpose-not-supported', '아직 받지 않는 본인확인 목적입니다');
+        if (state.fan === 'closing') return underFourteen();
+        if (purpose === 'FIRST' && state.fan === 'member') return problem(409, 'already-verified', '이미 본인확인을 마친 계정입니다');
+        if (state.verify === 'down') return providerDown();
+        const id = randomUUID();
+        const createdAt = now();
+        attempts.set(id, { purpose, next: b.next, status: 'PENDING', createdAt, completedAt: null });
+        return send(201, { verificationId: id, window: { url: idvUrl, method: 'POST', fields: { verificationId: id }, mode: state.verify === 'redirect' ? 'REDIRECT' : 'POPUP' }, expiresAt: new Date(createdAt + IDV_TTL_MS).toISOString() });
+      });
+      return;
+    }
+    const vr = /^\/v1\/identity\/verifications\/([^/]+)\/result$/.exec(p);
+    if (vr && (req.method === 'POST' || req.method === 'GET')) {
+      if (state.fan === 'guest') return unauthorized();
+      // 건 ID는 UUID다. 꼴이 다르면 풀지 않고 없는 건으로 답한다(잘못된 퍼센트 인코딩으로 프로세스가 죽지 않게)
+      const id = IDV_UUID.test(vr[1]) ? vr[1].toLowerCase() : '';
+      const a = attempts.get(id);
+      const t = now();
+      if (!a || (a.completedAt === null ? t > a.createdAt + IDV_TTL_MS : t > a.completedAt + IDV_RESULT_TTL_MS)) return problem(404, 'verification-not-found', '본인확인 건을 찾을 수 없습니다');
+      const view = () => send(200, { verificationId: id, purpose: a.purpose, status: a.status, next: a.next, restrictedUntil: null });
+      if (req.method === 'GET') return view();
+      void readJson(req).then((b) => {
+        const f = b?.providerResult;
+        if (!b || Object.keys(b).length !== 1 || !f || typeof f !== 'object' || Array.isArray(f) || Object.values(f).some((v) => typeof v !== 'string')) return badRequest();
+        if (a.status === 'PENDING') {
+          a.status = settle(a, f, id, t);
+          a.completedAt = t;
+        }
+        if (a.status === 'DUPLICATE_ACCOUNT') return problem(409, 'duplicate-account', '이미 다른 계정에서 본인확인한 분입니다. 그 계정으로 로그인해 주세요');
+        if (a.status === 'PROVIDER_DOWN') return providerDown();
+        if (a.status === 'UNDER_14') return underFourteen();
+        return view();
       });
       return;
     }

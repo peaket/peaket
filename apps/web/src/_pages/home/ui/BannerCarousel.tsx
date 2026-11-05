@@ -122,11 +122,12 @@ export function BannerCarousel({ slides }: { slides: readonly BannerSlide[] }) {
                 />
                 {slide.title ? (
                   // 휴대폰(배너 높이 약 106)은 그림 아래에, 태블릿·데스크톱은 그림 아래쪽에 얹는다(d5 §5.1 '이미지 위나 아래에').
-                  // 그림 위 글자는 색 모드와 상관없이 흰색이다(다크 토큰 --on-inverse는 어두운 글자라 막 위에서 읽히지 않는다).
+                  // 그림 위 글자는 색 모드와 상관없이 흰색이다(다크 토큰 --on-inverse는 어두운 글자라 막 위에서 읽히지 않는다). 두 모드 모두 흰색인
+                  // --text-on-primary를 쓴다(테마가 색 이름을 비워 text-white는 CSS를 만들지 않는다, 2026-11-05 Chrome 확인)
                   // 대체 텍스트가 같은 내용(일시·장소 포함)을 이미 말하므로 화면 낭독에서는 숨긴다(링크 이름이 두 번 읽히지 않게)
-                  <span aria-hidden="true" className="col gap-0.5 pt-2 md:absolute md:inset-x-0 md:bottom-0 md:bg-(--scrim) md:px-8 md:py-6 md:text-white lg:px-14 lg:py-10">
+                  <span aria-hidden="true" className="col gap-0.5 pt-2 md:absolute md:inset-x-0 md:bottom-0 md:bg-(--scrim) md:px-8 md:py-6 md:text-(--text-on-primary) lg:px-14 lg:py-10">
                     <span className="t-md fw-b md:text-[28px] md:leading-[34px]">{slide.title}</span>
-                    {slide.subtitle ? <span className="t-xs muted md:text-sm md:text-white">{slide.subtitle}</span> : null}
+                    {slide.subtitle ? <span className="t-xs muted md:text-sm md:text-(--text-on-primary)">{slide.subtitle}</span> : null}
                   </span>
                 ) : null}
               </Link>

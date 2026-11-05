@@ -2,6 +2,7 @@
 // Storybook 정적 빌드(tools/storybook/storybook-static)로 세 엔진에서 본다(docs/frontend.md §5.17, BUILD_ORDER BAS-180).
 // 컨테이너: node lib/docker.mjs ds. 이 PC에서 연습: pnpm exec playwright test -c playwright.ds.config.mjs
 import { defineConfig, devices } from '@playwright/test';
+import { firefoxUse } from './lib/firefox.mjs';
 import { STORYBOOK_PORT } from './ds/stories.mjs';
 
 export default defineConfig({
@@ -16,7 +17,7 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 800, height: 600 } } },
     { name: 'webkit', use: { ...devices['Desktop Safari'], viewport: { width: 800, height: 600 } }, testIgnore: /a11y\.spec/ },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'], viewport: { width: 800, height: 600 } }, testIgnore: /a11y\.spec/ },
+    { name: 'firefox', use: firefoxUse({ viewport: { width: 800, height: 600 } }), testIgnore: /a11y\.spec/ },
   ],
   webServer: {
     command: `node lib/serve.mjs --root ../storybook/storybook-static --port ${STORYBOOK_PORT} --cache-control no-store`,

@@ -11,6 +11,11 @@ import {
   CreateIdentitySignupCancellationBody,
   CreateIdentitySignupCompletionBody,
   CreateIdentitySignupCompletionResponse,
+  CreateIdentityVerificationBody,
+  CreateIdentityVerificationResponse,
+  CreateIdentityVerificationResultBody,
+  CreateIdentityVerificationResultResponse,
+  GetIdentityVerificationResultResponse,
   GetIdentityMeResponse,
   ListSubscriptionsResponse,
   ListWishesResponse,
@@ -298,6 +303,117 @@ test('가입 마무리·닉네임 확인·가입 취소(ADR-0203): 계약 Zod �
     assert.equal(cancel.status, 204);
     assert.ok(cancel.cookies.some((c) => /^__Secure-peaket_at=;.*Max-Age=0/.test(c)));
     assert.equal((await fetch(`${base}/v1/identity/me`)).status, 401);
+  } finally {
+    server.close();
+  }
+});
+
+test('휴대폰 본인확인(identity §5 모의 기관과 기관 창 흐름): 계약 Zod 그대로, 정본 모의 기관이 봉한 결과를 identity-svc와 같은 규칙으로 읽는다', async () => {
+  const { sealResult } = await import('../../../services/identity-svc/scripts/mock-idv.mjs');
+  // 환경 변수의 비밀과 상관없이 같은 비밀을 준다(개발 PC에 PEAKET_TEST_VERIFICATION_SECRET가 있어도 시험이 흔들리지 않게)
+  const secret = Buffer.from('mock-api-test-secret-0123456789');
+  let clock = Date.parse('2026-11-05T03:00:00Z');
+  const server = await startMockApi({ port: 0, idvUrl: 'http://127.0.0.1:4020/verify', idvSecret: secret, now: () => clock });
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const call = async (method, path, body) => {
+    const r = await fetch(`${base}${path}`, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: r.status, body: r.headers.get('content-type')?.includes('json') ? await r.json() : undefined, retryAfter: r.headers.get('retry-after') };
+  };
+  const state = (q) => fetch(`${base}/__mock/state?${q}`);
+  const me = async () => (await call('GET', '/v1/identity/me')).body;
+  const start = (next = '/events/x?round=2', purpose) => call('POST', '/v1/identity/verifications', CreateIdentityVerificationBody.parse({ next, ...(purpose ? { purpose } : {}) }));
+  const seal = (id, outcome, extra = {}) => sealResult(secret, { v: 1, tx: id, outcome, iat: clock, ...extra });
+  const confirm = (id, providerResult) => call('POST', `/v1/identity/verifications/${id}/result`, CreateIdentityVerificationResultBody.parse({ providerResult }));
+  const result = (id) => call('GET', `/v1/identity/verifications/${id}/result`);
+  const adult = { person: 'tester-1', birth: '2000-01-01' };
+  const fresh = async (purpose) => (await start('/events/x?round=2', purpose)).body.verificationId;
+  try {
+    await state('fan=guest');
+    assert.equal((await start()).status, 401);
+    await state('fan=member');
+    assert.match((await start()).body.type, /already-verified$/, '이미 본인확인한 계정의 FIRST');
+    await state('fan=unverified');
+    assert.match((await call('POST', '/v1/identity/verifications', { next: '//evil.example' })).body.type, /next-invalid$/);
+    assert.match((await start('/x', 'MINOR_CONTRACT')).body.type, /purpose-not-supported$/);
+
+    // 완료: 창 값은 모의 기관 주소, 확정하면 계정 요약이 본인확인 완료로 바뀐다. 다시 보내면 같은 결과
+    const s1 = await start();
+    assert.equal(s1.status, 201);
+    assert.deepEqual(CreateIdentityVerificationResponse.parse(s1.body), s1.body);
+    const id = s1.body.verificationId;
+    assert.deepEqual(s1.body.window, { url: 'http://127.0.0.1:4020/verify', method: 'POST', fields: { verificationId: id }, mode: 'POPUP' });
+    assert.equal(GetIdentityVerificationResultResponse.parse((await result(id)).body).status, 'PENDING');
+    const done = await confirm(id, seal(id, 'VERIFIED', adult));
+    assert.equal(done.status, 200);
+    assert.deepEqual(CreateIdentityVerificationResultResponse.parse(done.body), { verificationId: id, purpose: 'FIRST', status: 'VERIFIED', next: '/events/x?round=2', restrictedUntil: null });
+    assert.equal((await me()).verified, true);
+    assert.equal((await confirm(id, seal(id, 'CANCELLED'))).body.status, 'VERIFIED', '확정된 건은 같은 결과');
+    // 조회 기간: 확정한 건은 1일 동안 같은 결과(만든 지 10분이 지나도), 처리 중인 건은 10분
+    await state('fan=unverified');
+    const pending = await fresh();
+    clock += 11 * 60_000;
+    assert.equal((await result(id)).body.status, 'VERIFIED');
+    assert.equal((await result(pending)).status, 404);
+    clock += 24 * 3_600_000;
+    assert.equal((await result(id)).status, 404);
+
+    // 기관 값 규칙(시험 어댑터와 같다): 서명·다른 건·10분·이름표 없음·이름표 64자 넘음은 FAILED
+    const failedWith = async (make) => {
+      const v = await fresh();
+      return (await confirm(v, make(v))).body.status;
+    };
+    assert.equal(await failedWith((v) => ({ ...seal(v, 'VERIFIED', adult), mac: 'x'.repeat(43) })), 'FAILED');
+    const other = await fresh();
+    assert.equal(await failedWith(() => seal(other, 'VERIFIED', adult)), 'FAILED');
+    assert.equal(await failedWith((v) => sealResult(secret, { v: 1, tx: v, outcome: 'VERIFIED', ...adult, iat: clock - 11 * 60_000 })), 'FAILED', '10분 지난 값');
+    assert.equal(await failedWith((v) => seal(v, 'VERIFIED', { birth: '2000-01-01' })), 'FAILED', '이름표 없음');
+    assert.equal(await failedWith((v) => seal(v, 'VERIFIED', { person: 'p'.repeat(65), birth: '2000-01-01' })), 'FAILED', '이름표 64자 넘음');
+    // 만 나이를 확인할 수 없는 날(ageOnKst): 생년월일 없음·오늘 뒤·달력에 없는 날·1900년 전
+    for (const birth of [undefined, '2099-01-01', '2000-02-30', '1899-12-31']) {
+      assert.equal(await failedWith((v) => seal(v, 'VERIFIED', { person: 'p', ...(birth ? { birth } : {}) })), 'FAILED', String(birth));
+    }
+    assert.equal((await me()).verified, false, '실패한 결과는 계정을 바꾸지 않는다');
+    assert.equal(await failedWith((v) => seal(v, 'CANCELLED')), 'CANCELLED');
+    // 기관 장애: 503, 결과 조회는 PROVIDER_DOWN, 다시 보내도 503
+    const down = await fresh();
+    const d1 = await confirm(down, seal(down, 'DOWN'));
+    assert.deepEqual([d1.status, d1.retryAfter], [503, '30']);
+    assert.equal((await result(down)).body.status, 'PROVIDER_DOWN');
+    assert.equal((await confirm(down, seal(down, 'VERIFIED', adult))).status, 503);
+    // 다른 계정의 본인(가짜 API는 이름표 duplicate로 흉내 낸다)
+    const dup = await fresh();
+    assert.match((await confirm(dup, seal(dup, 'VERIFIED', { person: 'duplicate', birth: '2000-01-01' }))).body.type, /duplicate-account$/);
+
+    // 다시 본인확인(REVERIFY): 기록이 없는 계정은 FAILED, 본인확인한 계정은 같은 사람만 VERIFIED이고 미성년이 나오면 정리하지 않고 FAILED
+    const noRecord = await fresh('REVERIFY');
+    assert.equal((await confirm(noRecord, seal(noRecord, 'VERIFIED', adult))).body.status, 'FAILED');
+    assert.equal((await me()).verified, false);
+    await state('fan=member');
+    const same = await fresh('REVERIFY');
+    assert.equal((await confirm(same, seal(same, 'VERIFIED', adult))).body.status, 'VERIFIED');
+    const otherPerson = await fresh('REVERIFY');
+    assert.equal((await confirm(otherPerson, seal(otherPerson, 'VERIFIED', { person: 'other', birth: '2000-01-01' }))).body.status, 'FAILED');
+    const young = new Date(clock - 13 * 365 * 86_400_000).toISOString().slice(0, 10);
+    const minorReverify = await fresh('REVERIFY');
+    assert.equal((await confirm(minorReverify, seal(minorReverify, 'VERIFIED', { person: 'tester-1', birth: young }))).body.status, 'FAILED');
+    assert.equal((await me()).verified, true, '본인확인한 계정은 정리하지 않는다');
+
+    // 만 14세 미만(FIRST): 403, 계정은 정리 중(세션은 살아 있어 결과 조회·계정 요약은 된다), 다시 시작·확정은 403 under-14
+    await state('fan=unverified');
+    const minor = await fresh();
+    assert.match((await confirm(minor, seal(minor, 'VERIFIED', { person: 'kid', birth: young }))).body.type, /under-14$/);
+    assert.equal((await result(minor)).body.status, 'UNDER_14');
+    assert.deepEqual(await me(), { nickname: '지민', signupCompleted: true, verified: false, hasStaffAssignment: false });
+    assert.match((await start()).body.type, /under-14$/);
+    // 기관 창 방식·기관 장애 바꾸기, 없는 건·꼴이 틀린 건 ID(잘못된 퍼센트 인코딩 포함)는 404이고 서버는 계속 답한다
+    await state('fan=unverified&verify=redirect');
+    assert.equal((await start()).body.window.mode, 'REDIRECT');
+    await state('verify=down');
+    assert.equal((await start()).status, 503);
+    assert.equal((await result('00000000-0000-4000-8000-000000000000')).status, 404);
+    assert.equal((await result('%E0%A4%A')).status, 404);
+    assert.equal((await call('GET', '/v1/identity/me')).status, 200);
   } finally {
     server.close();
   }

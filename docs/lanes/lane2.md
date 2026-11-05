@@ -20,9 +20,11 @@
 - HOT-312: 캐시 화면 HTML의 Cache-Control이 Next.js 기본값이다(`/search` `s-maxage=31536000`, 홈·상세도 docs/frontend.md §2.5 표와 다르다). 표의 값을 어느 단계가 다는지 정하고 단다(proxy·앞 서버·CDN 설정 가운데 한 곳, apps/web)
 - HOT-312: 검색 필터의 라디오를 화살표 키로 옮기면 키마다 주소가 바뀌고 검색이 일어난다(장르·예매 상태). 키로 옮길 때는 늦춰 반영하거나 시트 안에서는 [적용]으로 바꿀지 본다(apps/web search Filters.tsx)
 - HOT-291: SEED 색 모드 스크립트가 데스크톱에도 data-seed-platform="ios"를 달아 SEED 글자 확대 상한이 1.35가 된다(d2 §1 '글자 확대'의 1.5와 다름, 지금은 SEED 부품을 모양 없이 써 영향이 거의 없다). 문서에 적거나 토큰에서 상한을 되돌린다
-- HOT-321: 개발 서버(`next dev`, Turbopack)에서 로그인 경로 파일(`app/(request)/login/[provider]`·`logout`·`reauth` 등)이 `packages/contracts/src/gen/proto/index.ts`의 `.js` 가져오기(`./peaket-common-v1-common.js`)를 풀지 못해 500이다(운영 빌드는 된다). 개발 서버에서 로그인·로그아웃을 눌러 보려면 contracts proto 생성물의 가져오기 확장자를 고치거나 Turbopack 확장자 별칭을 둔다(apps/web next.config.ts, packages/contracts scripts/generate.mjs)
+- HOT-321: 개발 서버(`next dev`, Turbopack)에서 로그인 경로 파일(`app/(request)/login/[provider]`·`logout`·`reauth` 등)이 `packages/contracts/src/gen/proto/index.ts`의 `.js` 가져오기(`./peaket-common-v1-common.js`)를 풀지 못해 500이다(운영 빌드는 된다). 개발 서버에서 로그인·로그아웃을 눌러 보려면 contracts proto 생성물의 가져오기 확장자를 고치거나 Turbopack 확장자 별칭을 둔다(apps/web next.config.ts, packages/contracts scripts/generate.mjs). 2026-11-05: `transpilePackages`에 `@peaket/contracts`를 넣어도 풀리지 않았다. 한 번 그 경로를 부르면 개발 서버의 오류 덮개가 모든 화면을 덮어 서버를 다시 띄워야 한다
 - HOT-321: 셸 머리의 로그아웃이 실제 `POST /logout` 폼이 되어, identity가 실패하면 앱 서버가 정본대로(identity §2 '쿠키를 지우고 503으로 알린다') 글자만 있는 503 페이지를 보인다. 로그인 경로처럼 화면 안내로 돌려보낼지(예: 홈에 '로그아웃을 마치지 못했습니다' 안내) 정본과 함께 정한다(apps/web social-login handlers.ts logout)
 - HOT-321: 홈 Lighthouse LCP 가운데 값이 6.16~6.25초로 한도 5,953ms(기준선 + 10%)를 넘는다. 셸의 세션 받기를 끈 빌드도 6.25초라 이 단계 전부터다(홈 피드 잇기 HOT-300 뒤로 Lighthouse를 돌리지 않았다). LCP 요소와 배너 이미지 받기 차례를 보고 줄이거나 wbs 7.5.2에서 기준선을 다시 정한다(tools/web-checks/budgets/lighthouse-baseline.json)
+- HOT-323: 가입 화면 머리가 가입을 마치지 않은 로그인 계정에도 [로그인]을 보인다(퍼블리싱 그대로 `<AppShell guest>`). d5 §5.5는 셸을 '일반(머리만)'으로만 정했다. 공연 상세처럼 '계정 메뉴 회원'으로 보일지 정본과 함께 정한다(apps/web signup-consent SignupConsentPage.tsx)
+- HOT-311·312·313: 가짜 API에 로비 열림·판매 종료·취소 회차와 검색·자동완성의 실패·지연 상태가 없어 그 화면 상태를 브라우저로 보지 못했다(2026-11-05 Chrome 다시 확인에서도 남음). 가짜 API 상태 바꾸기에 더해 본다(apps/web scripts/mock-api.mjs)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3). 지난 병렬 세션 기록(PRF-010~120)은 [docs/progress-archive.md](../progress-archive.md)에 있다.
@@ -51,3 +53,4 @@
 - 2026-11-05 HOT-321 로그인 화면·셸 로그인 표시(wbs 2.10.1 ④, ADR-0202): 팬 계정 요약 `GET /v1/identity/me`를 계약에 더하고 화면 스크립트가 문서마다 한 번 받아 셸 머리·상세 예매 버튼(비로그인·본인확인 전·가입 전)·③ 줄이 나눠 쓴다. 로그인 실패는 로그인 화면 상태로 303, 로그인 화면은 `?state=`를 걷었다. 가입 완료는 HOT-323, 서버 몫은 BOT-047. 자세한 것은 커밋 본문.
 - 2026-11-05 HOT-323 가입 완료·동의(wbs 2.10.1 ④, ADR-0203): 가입 마무리·닉네임 확인·만 14세 미만 가입 취소 계약을 더하고 SCR-005를 이었다(동의는 꺼진 채, 닉네임 300ms 확인, [지금 본인확인]은 창을 먼저 열고 가입 뒤 시작). 복귀 화면의 미리보기·목업을 걷었다. 자세한 것은 커밋 본문.
 - 2026-11-05 HOT-322 서식 글 편집기 PoC(FE-T41, ADR-0204): 파트너 콘솔 PoC 빌드에서 Lexical·Tiptap을 묶음 B CSP·Trusted Types 보고 모드로 견줘 Lexical을 골랐다(편집기 위반 0, 덩어리 88.5kB, 예산 90KB 확정). 붙여넣은 HTML은 해석 전에 걷는다. 자세한 것은 커밋 본문과 tools/web-checks/rich-text/RESULT.md.
+- 2026-11-05 Chrome·Firefox 다시 확인: 갈래 2 화면 기록 9개를 Chrome으로 다시 눌렀다. 가짜 API에 본인확인 경로를 더해 모의 기관 창 흐름을 끝까지 봤다. 홈 배너 글자 대비, 검색 날짜 칸 연도, 보안 맥락 밖 로비 버튼 계산을 고쳤다. Firefox는 정식 판(BiDi)과 컨테이너로 FE-T41·CSP를 돌렸다.

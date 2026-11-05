@@ -6,6 +6,7 @@
 //   node lib/docker.mjs seatmap                       5만 석 좌석맵 PoC(K5) 네 프로젝트
 //   node lib/docker.mjs budgets                       성능 예산(첫 JS·Lighthouse). 서버는 이 PC에서 `node seed-css/serve-all.mjs --budgets`로 먼저 띄운다
 //   node lib/docker.mjs seatmap-pkg                   @peaket/seatmap 세 엔진 검사(HOT-120). 시연 페이지는 먼저 `pnpm --filter @peaket/seatmap demo:build`
+//   node lib/docker.mjs rich-text                     서식 글 편집기 PoC(FE-T41, HOT-322) 세 엔진. 파트너 PoC 서버(4122)는 이 PC에서 먼저 띄운다(README)
 // 기준 이미지는 CI와 같은 이 이미지에서만 찍는다(브라우저 그리기는 OS·판·글꼴에 따라 다르다, d2 §1).
 // 컨테이너는 이 패키지를 node_modules 없이 옮겨 리눅스용으로 다시 설치한다. 결과는 reports/docker-<mode>/에 둔다.
 import { spawnSync } from 'node:child_process';
@@ -35,8 +36,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 
 function main() {
   const [mode, ...rest] = process.argv.slice(2);
-  if (!['visual', 'layers', 'seatmap', 'budgets', 'seatmap-pkg', 'ds', 'csp'].includes(mode)) {
-    console.error('쓰는 법: node lib/docker.mjs visual [--update-snapshots] | layers | seatmap | budgets | seatmap-pkg | ds | csp');
+  if (!['visual', 'layers', 'seatmap', 'budgets', 'seatmap-pkg', 'ds', 'csp', 'rich-text'].includes(mode)) {
+    console.error('쓰는 법: node lib/docker.mjs visual [--update-snapshots] | layers | seatmap | budgets | seatmap-pkg | ds | csp | rich-text');
     process.exit(2);
   }
   // --update-snapshots(모두 다시) 또는 --update-snapshots=missing(새 이야기처럼 없는 것만 만들고 나머지는 견준다)
@@ -93,6 +94,8 @@ function main() {
     ds: 'pnpm exec playwright test -c playwright.ds.config.mjs',
     // 소비자 웹 CSP(HOT-290): 서버는 이 PC의 웹 운영 빌드(4101)
     csp: 'PEAKET_WEB_CHECKS_HOST=host.docker.internal PEAKET_WEB_CHECKS_SERVERS=external pnpm exec playwright test -c playwright.csp.config.mjs',
+    // 서식 글 편집기 PoC(FE-T41): 서버는 이 PC의 파트너 PoC 빌드(4122)
+    'rich-text': 'PEAKET_WEB_CHECKS_HOST=host.docker.internal PEAKET_WEB_CHECKS_SERVERS=external pnpm exec playwright test -c playwright.rich-text.config.mjs',
   }[mode];
   const script = [
     'set -e',

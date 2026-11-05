@@ -11,7 +11,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderCsp } from '../../../packages/config/headers/security-headers.mjs';
 import { HOST, MOCK_API } from '../seed-css/apps.mjs';
-import { WEB_BASE, WEB_BUILD_DIR } from './pages.mjs';
+import { WEB_BASE, WEB_BUILD_DIR, stubFanApi } from './pages.mjs';
+
+// 팬 API는 일시 장애(503)로 답한다(없는 주소로 요청을 내보내지 않는다, pages.mjs)
+test.beforeEach(({ page }) => stubFanApi(page));
 
 const EVENT = 'evt-lumen-1025';
 /** 공연 상세는 가짜 API 고정 자료의 회차(HOT-311) */

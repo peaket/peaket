@@ -45,7 +45,7 @@
 - Lexical 붙여넣기는 우리 처리기(`PASTE_COMMAND`, 높은 우선순위)가 맡는다.
   - Lexical 판을 올릴 때 이 처리기와 `$generateNodesFromDOM`·`$insertGeneratedNodes`가 그대로인지 시험으로 다시 본다.
   - 지금 시험 명령은 `node rich-text/build.mjs` 뒤 `pnpm run rich-text`다. HOT-180이 이 시험을 실제 위저드 화면으로 옮긴다.
-- Firefox는 이 PC에서 Playwright가 뜨지 않아 재지 못했다. 이 시험의 CI 잡은 아직 없고, HOT-180이 시험을 옮길 때 Firefox와 함께 올린다.
+- Firefox는 2026-11-05에 두 길로 재서 다른 두 엔진과 같았다(편집기 위반, 덩어리, 블록 차례): 이 PC에 설치한 정식 Firefox 157(WebDriver BiDi)과 판을 고정한 Playwright 컨테이너(CI와 같은 이미지, `node lib/docker.mjs rich-text`). 이 시험의 CI 잡은 HOT-180이 시험을 옮길 때 올린다.
 
 ## 다른 선택지
 

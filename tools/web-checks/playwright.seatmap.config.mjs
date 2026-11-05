@@ -2,6 +2,7 @@
 // 판정은 K5 랩 조건(중급 모바일 412×915·배율 2.625, Chromium CPU 4배 느리게, docs/verification.md §3.10 K5)에서만 하고
 // 나머지 엔진(느리게 하지 않음)은 기록만 남긴다. iOS 실기기 확인은 소유자 몫이라 확인 목록만 둔다(seatmap/RESULT.md).
 import { defineConfig, devices } from '@playwright/test';
+import { firefoxUse } from './lib/firefox.mjs';
 
 const PORT = 4120;
 const K5 = { viewport: { width: 412, height: 915 }, deviceScaleFactor: 2.625 };
@@ -21,7 +22,7 @@ export default defineConfig({
     { name: 'chromium-k5', use: { ...devices['Desktop Chrome'], ...K5, isMobile: true, hasTouch: true }, metadata: { throttle: 4, judge: true } },
     { name: 'chromium', use: { ...devices['Desktop Chrome'], ...K5 } },
     { name: 'webkit', use: { ...devices['Desktop Safari'], ...K5 } },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'], ...K5 } },
+    { name: 'firefox', use: firefoxUse(K5) },
   ],
   webServer: {
     // 캐시하게 두고(대기 중에 미리 받아 둔 HTTP 캐시 길), 배치 파일은 미리 압축한 layout.json.br을 Content-Encoding: br로 준다
