@@ -489,6 +489,68 @@ describe('DB 오류는 그대로 던진다(처리기가 일시 실패로 보고 
   });
 });
 
+describe('결제 결과 long polling 깨우기(onOrderChanged, PRF-166 리뷰 고침 L3)', () => {
+  /** onOrderChanged가 불린 주문과 그때까지의 포트 호출 */
+  const watch = () => {
+    const seen: { orderId: string; callsBefore: ResultCall[] }[] = [];
+    return { seen, onOrderChanged: (orderId: string) => void seen.push({ orderId, callsBefore: [...fx.calls] }) };
+  };
+
+  test.each([
+    ['RESERVED', 'T11'],
+    ['UNKNOWN', 'T15'],
+    ['AWAITING_DEPOSIT', 'T17'],
+  ] as const)('L3_%s 주문의 FAILED 반영(%s)은 커밋 뒤 일(Saga 깨우기·Paying 풀기)을 마친 뒤 한 번 깨운다', async (status, transition) => {
+    fx.order = resultOrder({ status });
+    const w = watch();
+    expect(await run(paymentEvent({ type: 'FAILED', result: 'DECLINED', failureCategory: 'CARD_DECLINED' }), { onOrderChanged: w.onOrderChanged })).toMatchObject({ transition });
+    expect(w.seen).toHaveLength(1);
+    expect(w.seen[0]!.orderId).toBe(ORDER_ID);
+    expect(w.seen[0]!.callsBefore).toEqual(fx.calls);
+    expect(w.seen[0]!.callsBefore).toEqual(expect.arrayContaining(['writes.fail', 'saga.kick', 'sessions.unmarkPaying']));
+  });
+
+  test.each([
+    ['AWAITING_DEPOSIT', 'RESERVED', 'WAITING_FOR_DEPOSIT', 'T10'],
+    ['AWAITING_DEPOSIT', 'UNKNOWN', 'WAITING_FOR_DEPOSIT', 'T14'],
+    ['UNKNOWN', 'RESERVED', 'UNKNOWN', 'T12'],
+  ] as const)('L3_%s 사건 × %s 주문(%s → %s, 바로 답할 상태)은 커밋 뒤 일을 마친 뒤 한 번 깨운다', async (type, status, result, transition) => {
+    fx.order = resultOrder({ status });
+    const w = watch();
+    expect(await run(paymentEvent({ type, result }), { onOrderChanged: w.onOrderChanged })).toMatchObject({ transition });
+    expect(w.seen.map((s) => s.orderId)).toEqual([ORDER_ID]);
+    expect(w.seen[0]!.callsBefore).toEqual(fx.calls);
+  });
+
+  test.each([
+    ['RESERVED', 'T9'],
+    ['UNKNOWN', 'T13'],
+    ['AWAITING_DEPOSIT', 'T16'],
+  ] as const)('L3_%s 주문의 승인 반영(%s → APPROVED, 기다리는 상태)은 깨우지 않는다', async (status, transition) => {
+    fx.order = resultOrder({ status });
+    const w = watch();
+    expect(await run(paymentEvent(), { onOrderChanged: w.onOrderChanged })).toMatchObject({ transition });
+    expect(w.seen).toEqual([]);
+  });
+
+  test('L3_반영하지 않은 사건(다시 온 사건·이미 도착 상태)은 깨우지 않는다', async () => {
+    const w = watch();
+    expect(await run(paymentEvent({ eventSeq: ORDER_PAYMENT_SEQ }), { onOrderChanged: w.onOrderChanged })).toEqual({ status: 'SKIPPED', reason: 'DUPLICATE' });
+    fx.order = resultOrder({ status: 'UNKNOWN' });
+    expect(await run(paymentEvent({ type: 'UNKNOWN' }), { onOrderChanged: w.onOrderChanged })).toEqual({ status: 'SKIPPED', reason: 'ALREADY_THERE' });
+    expect(w.seen).toEqual([]);
+  });
+
+  test('L3_onOrderChanged가 던져도 반영 결과는 그대로다', async () => {
+    const r = await run(paymentEvent({ type: 'FAILED', result: 'DECLINED', failureCategory: 'CARD_DECLINED' }), {
+      onOrderChanged: () => {
+        throw new Error('boom');
+      },
+    });
+    expect(r).toEqual({ status: 'APPLIED', transition: 'T11', write: 'FAIL' });
+  });
+});
+
 describe('InventoryPaymentResultSessions(커밋 뒤 구매 세션 일의 inventory 다리)', () => {
   const sourceOf = (o: { end?: () => Promise<boolean>; setPaying?: () => Promise<boolean> } = {}) => {
     const ends: unknown[] = [];

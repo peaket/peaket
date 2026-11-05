@@ -20,6 +20,7 @@ import {
   DrizzleOrderAccepts,
   DrizzleOrderStore,
   DrizzleOrderWrites,
+  DrizzlePaymentStatus,
   DrizzleSaga,
   type IdentityRecheck,
   identityClientsFromEnv,
@@ -30,6 +31,7 @@ import {
   missingContactRefs,
   OrderSagaRunner,
   paymentConfirmsFromEnv,
+  PaymentStatusWaitTable,
   PromOrderSignals,
   RedisBookingRestrictions,
   SeatMapSagaConfigs,
@@ -107,6 +109,12 @@ const identityLate: { recheck?: IdentityRecheck; contactRefs?: ContactRefs } = {
 // - 접수를 커밋한 직후 Saga 실행기를 한 번 깨운다(onAccepted → OrderSagaRunner.kick, PRF-165). 실행기는 서비스 로거로 만들므로 늦게 묶는다(그 전이면 부르지 않는다)
 const orderStore = new DrizzleOrderStore({ clock: systemClock });
 let sagaRunner: OrderSagaRunner | undefined;
+// - 결제 결과 long polling(GET /v1/orders/{orderId}/payment-status, PRF-166): 읽기는 같은 핫패스 풀(쓰기 인스턴스), 기다림 표는 이 파드 하나다.
+//   Saga 실행기의 onOrderChanged에 그 notify를 넘긴다(같은 파드가 주문을 바로 답할 상태로 바꾸면 곧바로 깨운다). 결제 결과 처리기(ApplyPaymentResult)는
+//   아직 이 시작 파일이 조립하지 않는다(trade.payments 소비자를 켤 때 같은 notify를 onOrderChanged로 넘긴다). 그 전에는 다른 파드의 반영처럼 묶음 조회가 깨운다.
+//   기다림 표는 듣기 시작한 뒤 200ms 반복을 켜고, SIGTERM에서 Saga 실행기와 함께 끈다(남은 기다림은 STOPPED로 깨어 다시 읽지 않고 마지막 본문으로 답한다)
+const paymentStatusReads = database ? new DrizzlePaymentStatus({ database }) : undefined;
+const paymentStatusWaiters = paymentStatusReads ? new PaymentStatusWaitTable({ reads: paymentStatusReads, clock: systemClock, signals: orderSignals }) : undefined;
 const booking: BookingModuleDeps | undefined = database
   ? {
       writes: new DrizzleOrderWrites({ database, store: orderStore, clock: systemClock }),
@@ -121,6 +129,7 @@ const booking: BookingModuleDeps | undefined = database
       signals: orderSignals,
       consentVersion: need(CONSENT_VERSION_ENV, '주문 동의 두 개에 보인 고지 문안의 판, 1~32자의 영문·숫자·._-'),
       onAccepted: (orderId) => sagaRunner?.kick(orderId),
+      ...(paymentStatusReads && paymentStatusWaiters ? { paymentStatus: { reads: paymentStatusReads, waiters: paymentStatusWaiters } } : {}),
     }
   : undefined;
 const service = await createService({
@@ -185,12 +194,14 @@ if (booking && database) {
     configs: new SeatMapSagaConfigs(seatMap),
     log: new LoggerSagaLog(service.logger),
     clock: systemClock,
+    ...(paymentStatusWaiters ? { onOrderChanged: (orderId: string) => paymentStatusWaiters.notify(orderId) } : {}),
   });
 }
 await service.listen();
 const sweeper = service.app.get(ExpirySweeper);
 sweeper.start();
 sagaRunner?.start();
+paymentStatusWaiters?.start();
 // 구매 세션 정리 반복(유휴·최대 체류, BUILD_ORDER PRF-138). 만료 반복과 같이 켜고 끈다
 const sessionSweeper = service.app.get(SessionSweeper);
 sessionSweeper.start();
@@ -201,7 +212,8 @@ process.once('SIGTERM', () => {
   // 좌석맵 판 다시 읽기를 멈추고, 만료 반복을 멈추고(돌던 틱을 기다린다) 서비스를 닫은 뒤 연결을 닫는다. 어느 단계가 실패해도 연결은 닫는다
   clearInterval(seatMapRefresh);
   // Saga 실행기도 함께 멈춘다(돌던 틱·kick을 기다린다. 멈춘 뒤의 접수 깨우기는 부르지 않고, 남은 작업은 다른 파드의 폴링이 줍는다)
-  void Promise.all([sweeper.stop(), sessionSweeper.stop(), sagaRunner?.stop()])
+  // 결제 결과 기다림 표도 멈춘다(돌던 묶음 조회를 기다리고 남은 기다림을 STOPPED로 깨운다. 그 요청들은 다시 읽지 않고 마지막 본문으로 곧바로 답한다)
+  void Promise.all([sweeper.stop(), sessionSweeper.stop(), sagaRunner?.stop(), paymentStatusWaiters?.stop()])
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err }, 'purchase-svc 종료 실패'))
     .finally(() => {

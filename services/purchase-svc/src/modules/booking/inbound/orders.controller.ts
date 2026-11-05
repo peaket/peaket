@@ -1,8 +1,9 @@
-// 받는 층: 주문 생성(openapi POST /v1/orders, docs/features/payment.md §2 '주문 생성의 첫 구현', BUILD_ORDER PRF-161). 팬 경로라 게이트웨이가 넘긴 신원(계정)과
+// 받는 층: 주문 생성(openapi POST /v1/orders, docs/features/payment.md §2 '주문 생성의 첫 구현', BUILD_ORDER PRF-161), 결제 접수(PRF-162),
+// 결제 결과 long polling(GET /v1/orders/{orderId}/payment-status, PRF-166). 팬 경로라 게이트웨이가 넘긴 신원(계정)과
 // 구매 권한(ticket:buy)을 쓰고, 계정은 플랫폼 인증 가드의 신원으로만 정한다. 응답은 캐시하지 않는다(Cache-Control: no-store, 오류 응답도).
 // 검사 차례(플랫폼 인증 가드): 신원 → 역할·스코프 → 멱등 키 형식(400 idempotency-key-invalid) → 구매 요청 서명(401) → 경로 스키마(400) → 처리기.
 // 좌석 홀드(inventory holds.controller.ts)와 같은 장식자 묶음이다. 경로 스키마(@ContractRouteSchema, 미리 만든 Ajv 검사기)로 보고 Zod 파이프를 함께 달지 않는다(ADR-0176 결정 4).
-import { Body, Controller, HttpCode, Inject, Param, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Optional, Param, Post, Res } from '@nestjs/common';
 import {
   ContractRouteSchema,
   COOKIE_CHALLENGE,
@@ -13,15 +14,19 @@ import {
   type Principal,
   ProblemError,
   PurchaseSigned,
+  LogPolicy,
   RequestValidationError,
   Roles,
+  RouteDeadline,
   requestContext,
 } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { ACCEPT_PAYMENT_OPERATION, AcceptPayment, type AcceptPaymentRejection } from '../application/accept-payment.js';
 import { CREATE_ORDER_OPERATION, CreateOrder, type CreateOrderRejection } from '../application/create-order.js';
+import { GetPaymentStatus } from '../application/get-payment-status.js';
 import { ORDER_STATUSES } from '../domain/order.js';
+import { PAYMENT_STATUS_MAX_DEADLINE_MS, PAYMENT_STATUS_VALUES, type PaymentStatusProblem } from '../domain/payment-status.js';
 import type { OrderView } from '../domain/ports.js';
 
 // openapi 모양을 여기 둔다(좌석 홀드·queue-svc와 같은 방식). 요청 본문은 계약처럼 모든 층을 닫는다(.strict(), docs/api/guidelines.md §1 '요청은 닫고 응답은 연다').
@@ -217,11 +222,78 @@ export function throwAcceptProblem(reason: AcceptPaymentRejection, reply: { head
   });
 }
 
+// ---- 결제 결과 long polling GET /v1/orders/{orderId}/payment-status(docs/features/payment.md §2 '결제 결과 long polling의 첫 구현', BUILD_ORDER PRF-166) ----
+
+/** 경로 값(결제 접수와 같다. 모양은 보지 않는다: 소문자 UUID가 아니면 쓰임새가 없는 주문과 같은 404로 답한다) */
+export const PaymentStatusParams = z.object({ orderId: z.string() }).strict();
+
+/**
+ * 200 응답 PaymentStatus(직렬화 스키마. 스키마에 없는 칸은 내보내지 않는다, packages/contracts GetOrderPaymentStatusResponse와 같은 모양).
+ * 계약은 모든 칸이 선택이지만 서버는 status·issueDelayed를 늘 싣는다(domain PaymentStatusBody)
+ */
+export const PaymentStatusResponseBody = z.object({
+  status: z.enum(PAYMENT_STATUS_VALUES),
+  issueDelayed: z.boolean().optional(),
+  virtualAccount: z.object({ bank: z.string().optional(), accountNumber: z.string().optional(), dueAt: z.iso.datetime({ offset: true }).optional() }).optional(),
+  reason: z.string().optional(),
+  pg: z.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional(),
+});
+export type PaymentStatusResponse = z.output<typeof PaymentStatusResponseBody>;
+
+/** long polling 거절(쓰임새 결과 404·409를 한 이름으로) */
+export type PaymentStatusRejection = 'NOT_FOUND' | PaymentStatusProblem;
+
+/**
+ * 거절 → HTTP 문제 상세 대응표(openapi GET /v1/orders/{orderId}/payment-status 응답 설명과 x-peaket-problem-types의 status·title).
+ * 남의 주문과 없는 주문은 같은 404 not-found다. [정함] 409 둘은 정상 분기로 세지 않는다(결제 접수의 order-expired와 같다)
+ */
+export const PAYMENT_STATUS_PROBLEMS: Readonly<Record<PaymentStatusRejection, OrderProblemSpec>> = {
+  NOT_FOUND: { status: 404, type: 'not-found', title: '찾을 수 없습니다' },
+  NOT_ACCEPTED: { status: 409, type: 'payment-not-accepted', title: '아직 결제를 접수하지 않은 주문입니다' },
+  ORDER_EXPIRED: { status: 409, type: 'order-expired', title: '결제하지 않아 끝난 주문입니다' },
+};
+
+/** long polling 거절을 대응표대로 ProblemError로 바꿔 던진다(돌아오지 않는다). 응답의 Cache-Control은 처리기가 이미 no-store로 달았다 */
+export function throwPaymentStatusProblem(reason: PaymentStatusRejection): never {
+  const spec = PAYMENT_STATUS_PROBLEMS[reason];
+  throw new ProblemError({ type: spec.type, status: spec.status, title: spec.title });
+}
+
+/**
+ * 이 경로의 정규 로그 SLO 26초 [가정](@LogPolicy sloLatencyMs, 리뷰 고침 M5). 서비스 기본 SLO로 재면 기다렸다 답한 응답이 모두 'SLO 초과'로 남는다.
+ * 기다림 상한 25초 + 답 몫 1초다
+ */
+export const PAYMENT_STATUS_LOG_SLO_MS = 26_000;
+
+/** clientGoneSignal이 보는 응답 모양(FastifyReply의 일부) */
+export interface ClientGoneReply {
+  readonly raw: { readonly destroyed?: boolean; once(event: 'close', listener: () => void): unknown };
+  readonly request?: { readonly raw: { readonly socket?: { readonly destroyed?: boolean } | null } };
+}
+
+/**
+ * 브라우저가 연결을 닫으면 끊기는 신호(응답 객체 reply.raw의 close. 응답을 다 보낸 뒤의 close는 상관없다).
+ * 만들 때 이미 응답 객체나 요청 소켓이 부서졌으면(destroyed) 곧바로 끊긴 신호다(close를 놓쳤을 수 있다, 리뷰 고침 L2).
+ * 쓰임새가 기다림을 곧바로 그만두는 데 쓴다(기다리는 표에 끊긴 요청이 남지 않게)
+ */
+export function clientGoneSignal(reply: ClientGoneReply): AbortSignal {
+  const ac = new AbortController();
+  if (reply.raw.destroyed === true || reply.request?.raw.socket?.destroyed === true) {
+    ac.abort();
+    return ac.signal;
+  }
+  // 응답을 다 보낸 뒤에도 close가 오지만, 그때는 기다림이 이미 끝나 아무 일도 없다
+  reply.raw.once('close', () => ac.abort());
+  return ac.signal;
+}
+
 @Controller('v1/orders')
 export class OrdersController {
   constructor(
     @Inject(CreateOrder) private readonly createOrder: CreateOrder,
     @Inject(AcceptPayment) private readonly acceptPayment: AcceptPayment,
+    /** 결제 결과 long polling(PRF-166). BookingModuleDeps.paymentStatus가 없으면 조립하지 않아 undefined다 */
+    @Optional() @Inject(GetPaymentStatus) private readonly getPaymentStatus?: GetPaymentStatus,
   ) {}
 
   /**
@@ -288,5 +360,38 @@ export class OrdersController {
     });
     if (r.status === 202) return;
     throwAcceptProblem(r.reason, reply);
+  }
+
+  /**
+   * 결제 결과 long polling(200 PaymentStatus). 처리는 GetPaymentStatus.execute 하나다: 200이면 body, 404면 throwPaymentStatusProblem('NOT_FOUND'),
+   * 409면 throwPaymentStatusProblem(r.reason). 그 밖의 오류는 그대로(500·플랫폼 Problem).
+   * execute에 넘기는 값: accountId = me.accountId, orderId(경로 값 그대로), deadline = requestContext()?.deadline(있을 때만.
+   * 이 경로만 서비스 상한 27초 [가정], @RouteDeadline), signal = clientGoneSignal(reply).
+   * 정규 로그 SLO는 26초 [가정](@LogPolicy, 기다린 응답이 SLO 초과로 전부 남지 않게, 리뷰 고침 M5).
+   * 멱등 키·구매 세션 서명은 받지 않는다(GET이고, 결제창에서 돌아온 탭이 묻는다. 팬 쿠키만). 응답 머리: Cache-Control: no-store(오류 응답도).
+   * [정함] 쓰임새가 조립되지 않았으면(this.getPaymentStatus 없음) 404 not-found로 답한다(경로가 없는 것과 같은 본문)
+   */
+  @Get(':orderId/payment-status')
+  @Roles(['fan'])
+  @RouteDeadline(PAYMENT_STATUS_MAX_DEADLINE_MS)
+  @LogPolicy({ sloLatencyMs: PAYMENT_STATUS_LOG_SLO_MS })
+  @ContractRouteSchema({ params: PaymentStatusParams, responses: { 200: PaymentStatusResponseBody } })
+  async paymentStatus(
+    @Param('orderId') orderId: string,
+    @CurrentPrincipal() me: Principal,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<PaymentStatusResponse> {
+    void reply.header('cache-control', 'no-store');
+    // [정함] 쓰임새를 조립하지 않은 앱은 경로가 없는 것과 같은 404다
+    if (!this.getPaymentStatus) throwPaymentStatusProblem('NOT_FOUND');
+    const deadline = requestContext()?.deadline;
+    const r = await this.getPaymentStatus.execute({
+      accountId: me.accountId,
+      orderId,
+      ...(deadline ? { deadline } : {}),
+      signal: clientGoneSignal(reply),
+    });
+    if (r.status === 200) return r.body;
+    throwPaymentStatusProblem(r.status === 404 ? 'NOT_FOUND' : r.reason);
   }
 }

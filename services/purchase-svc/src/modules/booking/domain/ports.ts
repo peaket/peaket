@@ -8,6 +8,7 @@ import type {
   PaymentResultHoldSeverity,
   PaymentResultOrderView,
 } from './payment-result.js';
+import type { PaymentStatusBody, PaymentStatusView } from './payment-status.js';
 import type { FallbackReason, MisconfiguredReason, RecheckAnswer } from './recheck.js';
 import type { SagaFailTransition, SagaFailureReason, SagaStep } from './saga.js';
 
@@ -938,4 +939,66 @@ export interface PaymentResultLog {
   }): void;
   /** 커밋 뒤 구매 세션 일이 실패했다(warn, 오류 이름만) */
   afterCommitFailed(e: { readonly orderId: string; readonly what: 'complete_session' | 'unmark_paying'; readonly errorName: string }): void;
+}
+
+// ---- 결제 결과 long polling GET /v1/orders/{orderId}/payment-status(docs/features/payment.md §2 '결제 결과 long polling의 첫 구현', BUILD_ORDER PRF-166) ----
+// 쓰임새(application/get-payment-status.ts): PaymentStatusReads.read → 계정 대조(다르면 없는 주문과 같은 404) → decidePaymentStatus(domain/payment-status.ts)
+// → WAIT면 PaymentStatusWaiters.wait(기다리는 동안 DB 연결을 쥐지 않는다) → 깨면 넘겨받은 모습이나 read로 다시 읽어 정한다 → 200 본문.
+// 깨우는 길은 둘이다: 파드 안 기다림 표의 200ms [가정] 묶음 조회(readMany, 쓰기 인스턴스, 한 번에 최대 500건 [가정], 기다린 지 5초가 넘은 주문은 1초마다)와
+// 같은 파드의 결제 결과 처리기·Saga가 그 주문을 바로 답할 상태로 바꾼 뒤 부르는 notify. Redis Pub/Sub은 두지 않는다.
+
+/** long polling의 주문 읽기(트랜잭션 밖 한 질의, 운영은 adapters/db/drizzle-payment-status.ts). 아무것도 쓰지 않는다 */
+export interface PaymentStatusReads {
+  /** 주문 하나(기본 키). 없거나 orderId가 소문자 UUID가 아니면 undefined(DB에 가지 않는다) */
+  read(orderId: string): Promise<PaymentStatusView | undefined>;
+  /**
+   * 여러 주문을 한 질의로(기본 키 = any(배열)). 없는 주문·소문자 UUID가 아닌 ID는 결과에서 빠진다(차례는 보장하지 않는다).
+   * 빈 배열이면 DB에 가지 않고 [].
+   * @throws RangeError PAYMENT_STATUS_BATCH_MAX(500)건을 넘음(부르는 쪽이 나눠 부른다)
+   */
+  readMany(orderIds: readonly string[]): Promise<PaymentStatusView[]>;
+}
+
+/**
+ * 기다림이 끝난 까닭.
+ * - CHANGED: 묶음 조회가 깨울 모습을 봤거나(paymentStatusWakes, 그때 읽은 모습을 함께 준다) notify가 불렸다(모습 없음: 쓰임새가 한 건 다시 읽는다)
+ * - TIMEOUT: 기다릴 시간이 다 됐다(다시 읽어 그때의 상태로 답한다). 표가 멈춘 뒤의 wait()도 곧바로 TIMEOUT이다(리뷰 고침 L1)
+ * - ABORTED: 부른 쪽이 끊었다(signal. 브라우저가 연결을 닫았다. 다시 읽지 않는다)
+ * - STOPPED: 파드가 멈추며 표를 껐다(stop(). 다시 읽지 않고 마지막 본문으로 답한다, 리뷰 고침 M4)
+ * - FULL: 파드의 기다림 상한(PAYMENT_STATUS_WAITERS_MAX 2,000건 [가정])에 차서 기다리지 않았다(다시 읽지 않고 지금 상태로 200, 리뷰 고침 M3)
+ */
+export type PaymentStatusWake = 'CHANGED' | 'TIMEOUT' | 'ABORTED' | 'STOPPED' | 'FULL';
+
+/** 기다림의 결과. view는 묶음 조회가 깨웠을 때(CHANGED)만 있다: 그때 읽은 주문 모습(깨어난 요청이 다시 읽지 않게, 리뷰 고침 M4) */
+export interface PaymentStatusWakeUp {
+  readonly wake: PaymentStatusWake;
+  readonly view?: PaymentStatusView;
+}
+
+/** wait()의 선택 칸 */
+export interface PaymentStatusWaitOptions {
+  /** 이미 끊겼으면 바로 ABORTED */
+  readonly signal?: AbortSignal;
+  /** 기다림 시작 때 본문(깨울지 견줄 기준, paymentStatusWakes). 없으면 issueDelayed 거짓에서 시작한 것으로 본다 */
+  readonly since?: PaymentStatusBody;
+}
+
+/** 파드 안 기다리는 주문 표(운영은 application/payment-status-waiters.ts PaymentStatusWaitTable) */
+export interface PaymentStatusWaiters {
+  /**
+   * 그 주문이 깨울 모습이 되거나(CHANGED) 시간이 다 되거나(TIMEOUT) 끊기거나(ABORTED) 표가 멈출 때(STOPPED)까지 기다린다.
+   * 표가 가득 찼으면 곧바로 FULL. 던지지 않는다. 같은 주문을 여러 요청이 함께 기다릴 수 있다(탭 둘). 끝나면 표에서 빠진다.
+   * @param deadlineMs 기다릴 최대 시간(ms, 1 이상 정수. 쓰임새가 paymentStatusWaitMs로 준다)
+   */
+  wait(orderId: string, deadlineMs: number, o?: PaymentStatusWaitOptions): Promise<PaymentStatusWakeUp>;
+  /** 그 주문을 기다리는 요청을 모두 곧바로 깨운다(CHANGED, 모습 없음). 기다리는 요청이 없으면 아무것도 하지 않는다. 던지지 않는다 */
+  notify(orderId: string): void;
+}
+
+/** long polling 지표(운영은 PromOrderSignals). 던지지 않는다 */
+export interface PaymentStatusSignals {
+  /** 지금 이 파드에서 기다리는 요청 수(게이지 purchase_payment_status_waiters, 이름표 없음, verification §4.1 long polling 행) */
+  paymentStatusWaiters(count: number): void;
+  /** 묶음 조회 한 번(틱 하나)이 읽기 실패로 아무도 깨우지 못했다(카운터 purchase_payment_status_poll_failures_total, 이름표 없음, 리뷰 고침 L6) */
+  paymentStatusPollFailed(): void;
 }

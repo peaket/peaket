@@ -6,6 +6,7 @@ import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket
 import { LoggerOrderLog } from './adapters/order-log.js';
 import { AcceptPayment } from './application/accept-payment.js';
 import { CreateOrder } from './application/create-order.js';
+import { GetPaymentStatus } from './application/get-payment-status.js';
 import type {
   AcceptLog,
   BookingRestrictions,
@@ -18,6 +19,8 @@ import type {
   OrderSessions,
   OrderSignals,
   OrderWrites,
+  PaymentStatusReads,
+  PaymentStatusWaiters,
   SaleConfigs,
   SeatSlotReads,
 } from './domain/ports.js';
@@ -56,6 +59,12 @@ export interface BookingModuleDeps {
    * 없으면 부르지 않는다(지금 동작 그대로. 실행기가 켜지면 1초 폴링이 줍는다)
    */
   onAccepted?: (orderId: string) => void;
+  /**
+   * 결제 결과 long polling GET /v1/orders/{orderId}/payment-status(PRF-166). 운영(main.ts)은 reads = DrizzlePaymentStatus(purchase DB 쓰기 인스턴스),
+   * waiters = PaymentStatusWaitTable(시작 파일이 만들어 켜고 끈다. Saga 실행기·결제 결과 처리기의 onOrderChanged에도 그 notify를 넘긴다)을 넘긴다.
+   * 없으면 GetPaymentStatus를 조립하지 않는다(처리기가 404 not-found로 답한다 [정함])
+   */
+  paymentStatus?: { reads: PaymentStatusReads; waiters: PaymentStatusWaiters };
 }
 
 @Module({})
@@ -64,6 +73,8 @@ export class BookingModule {
    * 컨트롤러 OrdersController와 쓰임새 CreateOrder·AcceptPayment(useFactory: deps + CLOCK + 로그)를 묶는다. 내보내는 것은 없다.
    * AcceptPayment에는 { sessions, reads = accepts, writes = accepts, slots, log = acceptLog(위 기본값 규칙), clock, onAccepted(있을 때만) }을 넘긴다.
    * Saga 실행기(OrderSagaRunner, PRF-165)는 이 모듈이 만들지 않는다: main.ts가 만들어 시작·정지하고 kick을 onAccepted로 넘긴다(Nest 수명과 따로).
+   * 결제 결과 long polling의 GetPaymentStatus(PRF-166)는 paymentStatus가 있을 때만 { reads, waiters, clock }으로 만든다. 기다림 표(PaymentStatusWaitTable)도
+   * Saga 실행기처럼 main.ts가 만들어 시작·정지한다.
    * @throws Error consentVersion 모양이 틀림(시작 실패)
    */
   static register(deps: BookingModuleDeps): DynamicModule {
@@ -71,7 +82,7 @@ export class BookingModule {
     if (typeof deps.consentVersion !== 'string' || !CONSENT_VERSION_PATTERN.test(deps.consentVersion)) {
       throw new Error(`동의 문안 판(${CONSENT_VERSION_ENV})은 1~32자의 영문·숫자·._-여야 한다`);
     }
-    const { log, acceptLog, clock, accepts, slots, onAccepted, ...ports } = deps;
+    const { log, acceptLog, clock, accepts, slots, onAccepted, paymentStatus, ...ports } = deps;
     const createOrder: Provider = {
       provide: CreateOrder,
       useFactory: (platformClock: Clock, logger?: PlatformLogger) => {
@@ -97,7 +108,17 @@ export class BookingModule {
       },
       inject: [CLOCK, { token: PLATFORM_LOGGER, optional: true }],
     };
-    return { module: BookingModule, controllers: [OrdersController], providers: [createOrder, acceptPayment], exports: [] };
+    // 결제 결과 long polling(PRF-166). 넘긴 것이 있을 때만 조립한다(처리기는 @Optional로 받는다)
+    const getPaymentStatus: Provider[] = paymentStatus
+      ? [
+          {
+            provide: GetPaymentStatus,
+            useFactory: (platformClock: Clock) => new GetPaymentStatus({ reads: paymentStatus.reads, waiters: paymentStatus.waiters, clock: clock ?? platformClock }),
+            inject: [CLOCK],
+          },
+        ]
+      : [];
+    return { module: BookingModule, controllers: [OrdersController], providers: [createOrder, acceptPayment, ...getPaymentStatus], exports: [] };
   }
 }
 

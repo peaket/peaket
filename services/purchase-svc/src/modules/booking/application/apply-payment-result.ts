@@ -7,6 +7,8 @@
 // purchase DB 연결 실패·시간 초과는 그대로 던진다: 플랫폼 isTransientError가 일시 실패로 보고 파티션을 멈춰 기다린다(packages/platform keyed-consumer.ts).
 // 이 층은 어댑터·계약 패키지를 가져오지 않는다(포트로만 쓴다, architecture §3.1).
 import type { Clock } from '@peaket/platform';
+import { transitionById } from '../domain/order.js';
+import { PAYMENT_STATUS_IMMEDIATE } from '../domain/payment-status.js';
 import {
   decidePaymentResult,
   PAYMENT_RESULT_ACTOR,
@@ -56,6 +58,12 @@ export interface ApplyPaymentResultDeps {
   log: PaymentResultLog;
   /** 보류 로그를 다시 남기지 않는 시간 창의 '지금'. 발권 기한 계산에는 쓰지 않는다(사건의 occurredAt을 쓴다) */
   clock: Clock;
+  /**
+   * 전이를 커밋한 뒤 부를 것(결제 결과 long polling의 기다림 깨우기, PaymentStatusWaiters.notify, BUILD_ORDER PRF-166). 던지지 않는다.
+   * APPLIED이고 바로 답할 상태로 간 전이(T10·T11·T12·T14·T15·T17)일 때만, 커밋 뒤 일(구매 세션 끝내기·Paying 풀기)을 마치고 부른다.
+   * APPROVED로 가는 전이(T9·T13·T16)는 기다리는 상태라 부르지 않는다(리뷰 고침 L3). 없으면 부르지 않는다
+   */
+  onOrderChanged?: (orderId: string) => void;
 }
 
 /**
@@ -129,6 +137,10 @@ export class ApplyPaymentResult {
       const out = await this.#write(d, event, o);
       if (out.status === 'APPLIED') {
         await this.#afterCommit(d, o);
+        // 바로 답할 상태로 갔으면(실패·입금 대기·UNKNOWN) 구매 세션 일(끝내기·Paying 풀기)을 마친 뒤 이 주문을 기다리는 long polling을 깨운다
+        // (브라우저가 결과를 받고 움직일 때 세션이 정리돼 있게). APPROVED(T9·T13·T16)는 기다리는 상태라 깨우지 않는다(PRF-166 리뷰 고침 L3)
+        const to = transitionById(d.transition)?.to;
+        if (to !== undefined && PAYMENT_STATUS_IMMEDIATE.has(to)) this.#orderChanged(o.orderId);
         return { status: 'APPLIED', transition: d.transition, write: d.write };
       }
       // 판매 행이 좌석 수만큼 SOLD가 되지 않았다(되돌렸다): 과금됐는데 좌석을 줄 수 없다
@@ -175,6 +187,15 @@ export class ApplyPaymentResult {
     }
     if (d.write === 'APPROVE' || d.transition === 'T10' || d.transition === 'T14') {
       await this.#bestEffort(o.orderId, 'complete_session', () => this.deps.sessions.complete(o.purchaseSessionId));
+    }
+  }
+
+  /** 전이를 커밋한 뒤 부른다(onOrderChanged가 있을 때만). 던지지 않기로 했지만, 던져도 반영 결과는 그대로다 */
+  #orderChanged(orderId: string): void {
+    try {
+      this.deps.onOrderChanged?.(orderId);
+    } catch {
+      // 삼킨다(기다리는 요청은 묶음 조회·시간으로 깬다)
     }
   }
 

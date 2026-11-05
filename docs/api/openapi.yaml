@@ -115,6 +115,7 @@ x-peaket-problem-types:
     open-too-close: { status: 409, title: "다른 공연과 오픈 시각이 5분 안입니다" }
     order-expired: { status: 409, title: "결제하지 않아 끝난 주문입니다" }
     payment-already-accepted: { status: 409, title: "이 주문의 결제를 이미 접수했습니다" }
+    payment-not-accepted: { status: 409, title: "아직 결제를 접수하지 않은 주문입니다" }
     payment-attempt-mismatch: { status: 409, title: "결제 시도와 맞지 않습니다. 결제를 다시 시작해 주세요" }
     other-partner-device: { status: 403, title: "다른 파트너사의 기기입니다" }
     outside-staff-hours: { status: 403, title: "근무 시간이 아닙니다" }
@@ -2098,7 +2099,7 @@ paths:
       description: "FR-011, NFR-006 확정 p99 3초(Degraded 60초). UNKNOWN은 조회 API로 확정 후 알림. 서버는 결과가 정해지면 바로, 아니면 25초 [가정]에 그때의 상태로 답한다. api 배포의 CloudFront 원본 응답 시간 초과(기본 30초)보다 짧게 두어, CloudFront가 같은 GET을 원본에 다시 보내지 않게 한다. gw-fan 경로 시간 초과 27초 [가정], 브라우저 시간 초과 30초 [가정](docs/infra.md §4.1). 처음 상한 30초는 추천 적용 2026-10-09"
       security: [{ fanCookie: [] }]
       parameters: [{ name: orderId, in: path, required: true, schema: { type: string } }]
-      responses: { '200': { description: 상태, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentStatus' } } } } }
+      responses: { '200': { description: 상태, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentStatus' } } } }, '404': { $ref: '#/components/responses/Problem', description: "그 계정의 주문이 아니거나 없는 주문(같은 404, not-found, 추천 적용 2026-11-05, docs/features/payment.md §2 '결제 결과 long polling의 첫 구현')" }, '409': { $ref: '#/components/responses/Problem', description: "결제를 아직 접수하지 않은 주문(payment-not-accepted: CREATED·AUTHENTICATED), 결제하지 않아 만료된 주문(order-expired)" }, '401': { $ref: '#/components/responses/Unauthorized', description: 팬 쿠키 없음·만료 }, '429': { $ref: '#/components/responses/TooManyRequests', description: "게이트웨이 로컬 한도 초과, 또는 purchase-svc 파드의 자기 과부하(server-busy, docs/architecture.md §5)" }, '504': { $ref: '#/components/responses/Problem', description: "게이트웨이 경로 시간 초과 27초 [가정](서버가 답하지 못함, P-T44 ④)" } }
   /v1/tickets:
     get:
       operationId: listTickets

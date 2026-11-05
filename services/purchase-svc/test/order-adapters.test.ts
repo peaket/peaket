@@ -152,6 +152,24 @@ describe('PromOrderSignals.identityFallback(purchase_identity_recheck_fallback_t
   });
 });
 
+describe('PromOrderSignals의 결제 결과 long polling 지표(PRF-166, 리뷰 고침 L6)', () => {
+  test('FR011_L6_purchase_payment_status_waiters(게이지)·purchase_payment_status_poll_failures_total(카운터)은 이름표가 없고, 붙이기 전에도 던지지 않는다', async () => {
+    expect(() => new PromOrderSignals().paymentStatusWaiters(3)).not.toThrow();
+    expect(() => new PromOrderSignals().paymentStatusPollFailed()).not.toThrow();
+    const metrics = new PlatformMetrics('purchase-svc');
+    const prom = new PromOrderSignals().register(metrics.registry);
+    expect(await sampleLines(metrics.registry, 'purchase_payment_status_poll_failures_total')).toEqual(['purchase_payment_status_poll_failures_total 0']);
+    prom.paymentStatusWaiters(7);
+    prom.paymentStatusPollFailed();
+    prom.paymentStatusPollFailed();
+    expect(await sampleLines(metrics.registry, 'purchase_payment_status_waiters')).toEqual(['purchase_payment_status_waiters 7']);
+    expect(await sampleLines(metrics.registry, 'purchase_payment_status_poll_failures_total')).toEqual(['purchase_payment_status_poll_failures_total 2']);
+    const text = await metrics.registry.metrics();
+    expect(text).toContain('# TYPE purchase_payment_status_waiters gauge');
+    expect(text).toContain('# TYPE purchase_payment_status_poll_failures_total counter');
+  });
+});
+
 describe('M3 PromOrderSignals.payingMarkFailed(purchase_order_paying_mark_failed_total)', () => {
   const NAME = 'purchase_order_paying_mark_failed_total';
 

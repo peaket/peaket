@@ -1265,3 +1265,53 @@ describe('행위자와 로그에 싣는 것', () => {
     expect(logged).not.toContain(String(AMOUNT));
   });
 });
+
+describe('결제 결과 long polling 깨우기(onOrderChanged, PRF-166 리뷰 고침 L3)', () => {
+  /** onOrderChanged가 불린 주문과 그때까지의 포트 호출 */
+  const watch = () => {
+    const seen: { orderId: string; callsBefore: string[] }[] = [];
+    return { seen, onOrderChanged: (orderId: string) => void seen.push({ orderId, callsBefore: [...fx.calls] }) };
+  };
+
+  test('L3_T8 실패 기록(FAILED, 바로 답할 상태)은 커밋 뒤 일(실패 해제·작업 행 지우기)을 마친 뒤 한 번 깨운다', async () => {
+    const order = sagaOrder();
+    fx.put(order);
+    fx.pinQueue = [{ status: 'TAKEN' }];
+    const w = watch();
+    expect(await runner({ onOrderChanged: w.onOrderChanged }).reserveStep(sagaJob(), order)).toEqual({ kind: 'FAILED', transition: 'T8', reason: 'SEAT_TAKEN' });
+    expect(w.seen.map((s) => s.orderId)).toEqual([ORDER_ID]);
+    expectInOrder(w.seen[0]!.callsBefore, ['failures.fail', 'pins.releaseFailed', 'jobs.delete']);
+    expect(w.seen[0]!.callsBefore).toEqual(fx.calls);
+  });
+
+  test('L3_실패 해제가 끝나지 못해 다시 하기로 미뤄도(주문은 이미 FAILED) 미룬 뒤 한 번 깨운다', async () => {
+    const order = sagaOrder();
+    fx.put(order);
+    fx.pinQueue = [{ status: 'TAKEN' }];
+    fx.releaseResult = new OrderSeatStoreUnavailable(new Error('ECONNRESET'));
+    const w = watch();
+    expect(await runner({ onOrderChanged: w.onOrderChanged }).reserveStep(sagaJob(), order)).toMatchObject({ kind: 'FAILED' });
+    expect(w.seen.map((s) => s.orderId)).toEqual([ORDER_ID]);
+    expectInOrder(w.seen[0]!.callsBefore, ['failures.fail', 'pins.releaseFailed', 'jobs.reschedule']);
+  });
+
+  test('L3_T7 판매 예약(RESERVED, 기다리는 상태)은 깨우지 않는다', async () => {
+    const order = sagaOrder();
+    fx.put(order);
+    const w = watch();
+    expect(await runner({ onOrderChanged: w.onOrderChanged }).reserveStep(sagaJob(), order)).toEqual({ kind: 'ADVANCED', next: 'CONFIRM' });
+    expect(w.seen).toEqual([]);
+  });
+
+  test('L3_onOrderChanged가 던져도 실패 결과는 그대로다', async () => {
+    const order = sagaOrder();
+    fx.put(order);
+    fx.pinQueue = [{ status: 'TAKEN' }];
+    const r = await runner({
+      onOrderChanged: () => {
+        throw new Error('boom');
+      },
+    }).reserveStep(sagaJob(), order);
+    expect(r).toEqual({ kind: 'FAILED', transition: 'T8', reason: 'SEAT_TAKEN' });
+  });
+});

@@ -95,6 +95,12 @@ export interface OrderSagaDeps {
   claimLimit?: number;
   /** 임대 길이(기본 SAGA_LEASE_MS 30초 [가정]) */
   leaseMs?: number;
+  /**
+   * 주문을 바로 답할 상태로 바꾼 뒤(T8·T11 실패 기록을 커밋하고 실패 해제·작업 행 정리를 마친 뒤) 부를 것(결제 결과 long polling의 기다림 깨우기,
+   * PaymentStatusWaiters.notify, BUILD_ORDER PRF-166). T7(RESERVED)은 기다리는 상태라 부르지 않는다(리뷰 고침 L3).
+   * 던지지 않는다(던져도 실행기는 삼킨다). 없으면 부르지 않는다
+   */
+  onOrderChanged?: (orderId: string) => void;
 }
 
 /** runOne의 결과: 집지 못했으면 SKIPPED(NO_JOB·LEASED), 아니면 마지막 단계의 결과 */
@@ -282,6 +288,7 @@ export class OrderSagaRunner {
       });
       switch (reserved.status) {
         case 'RESERVED':
+          // T7(RESERVED)은 기다리는 상태라 long polling을 깨우지 않는다(PRF-166 리뷰 고침 L3)
           return { kind: 'ADVANCED', next: 'CONFIRM' };
         case 'GEN_CHANGED':
           // 다시 만들기가 판 번호를 올렸다: 주문 판 번호는 그대로 두고 묶기부터 다시 한다(그 판의 좌석 Redis에 내 홀드가 남았는지 본다)
@@ -432,6 +439,8 @@ export class OrderSagaRunner {
       this.#stepError(order.orderId, 'RELEASE', err);
       await this.#retry(releaseJob, 'error', { quiet: true });
     }
+    // T8·T11(FAILED, 바로 답할 상태)을 커밋하고 커밋 뒤 일(실패 해제·작업 행 정리)을 마쳤다: 이 주문을 기다리는 long polling을 깨운다(PRF-166 리뷰 고침 L3)
+    this.#orderChanged(order.orderId);
     return { kind: 'FAILED', transition, reason };
   }
 
@@ -469,6 +478,11 @@ export class OrderSagaRunner {
 
   #stepError(orderId: string, step: SagaStep, err: unknown): void {
     this.#safeLog(() => this.deps.log.stepError({ orderId, step, err }));
+  }
+
+  /** 주문 상태를 바꾼 커밋 뒤 부른다(onOrderChanged가 있을 때만). 던지지 않기로 했지만, 던져도 실행기를 막지 않는다 */
+  #orderChanged(orderId: string): void {
+    this.#safeLog(() => this.deps.onOrderChanged?.(orderId));
   }
 
   /** 로그 포트는 던지지 않기로 했지만, 던져도 실행기를 막지 않는다 */

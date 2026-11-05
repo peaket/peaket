@@ -502,10 +502,37 @@ export const useCreateOrderPaymentAcceptance = <TError = ErrorType<ProblemRespon
   status: 200
 }
 
+export type getOrderPaymentStatusResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getOrderPaymentStatusResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOrderPaymentStatusResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type getOrderPaymentStatusResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type getOrderPaymentStatusResponse504 = {
+  data: ProblemResponse
+  status: 504
+}
+
 export type getOrderPaymentStatusResponseSuccess = (getOrderPaymentStatusResponse200) & {
   headers: Headers;
 };
-;
+export type getOrderPaymentStatusResponseError = (getOrderPaymentStatusResponse401 | getOrderPaymentStatusResponse404 | getOrderPaymentStatusResponse409 | getOrderPaymentStatusResponse429 | getOrderPaymentStatusResponse504) & {
+  headers: Headers;
+};
 
 export const getGetOrderPaymentStatusUrl = (orderId: string,) => {
 
@@ -541,7 +568,7 @@ export const getGetOrderPaymentStatusQueryKey = (orderId: string,) => {
     }
 
 
-export const getGetOrderPaymentStatusQueryOptions = <TData = Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError = ErrorType<unknown>>(orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+export const getGetOrderPaymentStatusQueryOptions = <TData = Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse>>(orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -560,10 +587,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetOrderPaymentStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getOrderPaymentStatus>>>
-export type GetOrderPaymentStatusQueryError = ErrorType<unknown>
+export type GetOrderPaymentStatusQueryError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse>
 
 
-export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError = ErrorType<unknown>>(
+export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse>>(
  orderId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getOrderPaymentStatus>>,
@@ -573,7 +600,7 @@ export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOr
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError = ErrorType<unknown>>(
+export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse>>(
  orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getOrderPaymentStatus>>,
@@ -583,7 +610,7 @@ export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOr
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError = ErrorType<unknown>>(
+export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse>>(
  orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -591,7 +618,7 @@ export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOr
  * @summary 결제 결과 long polling(최대 25초 [가정] 대기, 추천 적용 2026-10-28, 기술 검토 중간-047)
  */
 
-export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError = ErrorType<unknown>>(
+export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse>>(
  orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrderPaymentStatus>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {

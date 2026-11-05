@@ -5,7 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { clientFamily } from './client-family.js';
 import type { Clock } from './clock.js';
 import { type RequestContext, activeTrace, runInRequestContext } from './context.js';
-import { DEADLINE_HEADER, Deadline } from './deadline.js';
+import { DEADLINE_HEADER, Deadline, routeDeadlineMaxOf } from './deadline.js';
 import { type PlatformMetrics, routeLabel, statusClass } from './metrics.js';
 import { type CanonicalLog, type ErrorInfo, type LineInput, type RouteLogPolicy, routePolicyOf } from './request-log.js';
 import { sampleKeep } from './sampling.js';
@@ -122,7 +122,8 @@ export function installHttpHooks(
     const ctx: RequestContext = {
       traceId: at.traceId,
       spanId: at.spanId,
-      deadline: Deadline.fromHeader(request.headers[DEADLINE_HEADER], { clock, maxMs: o.maxDeadlineMs }),
+      // @RouteDeadline을 단 경로는 그 상한이, 아니면 서비스 상한(PEAKET_MAX_DEADLINE_MS)이 남은 시간의 상한이다(PRF-166)
+      deadline: Deadline.fromHeader(request.headers[DEADLINE_HEADER], { clock, maxMs: routeDeadlineMaxOf(request.routeOptions?.config, o.maxDeadlineMs) }),
       route,
       method,
       log: canonical.newState(),

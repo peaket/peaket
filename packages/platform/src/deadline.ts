@@ -1,6 +1,9 @@
 // 남은 시간(deadline) 전파(docs/api/guidelines.md §5, ADR-0009 결정 4, openspec 변경 add-service-template 결정 4).
 // 게이트웨이가 경로마다 정한 최대 허용 시간(밀리초)을 x-peaket-deadline-ms에 덮어써 넣는다.
 // 서비스는 받은 때부터 min(헤더 값, 서비스 상한)을 남은 시간으로 두고, 이 시간은 줄어들기만 한다.
+// 경로 하나만 서비스 상한을 따로 두려면 처리기에 @RouteDeadline(ms)를 단다(그 경로는 min(헤더 값, 경로 상한), BUILD_ORDER PRF-166).
+import 'reflect-metadata';
+import { FASTIFY_ROUTE_CONFIG_METADATA } from '@nestjs/platform-fastify/constants.js';
 import type { Clock } from './clock.js';
 import { deadlineExceeded } from './problem.js';
 
@@ -13,6 +16,33 @@ const POSITIVE_INT = /^[1-9][0-9]{0,8}$/;
 function positiveInt(ms: number, what: string): number {
   if (!Number.isSafeInteger(ms) || ms <= 0) throw new Error(`${what}은(는) 양의 정수(밀리초)여야 한다: ${ms}`);
   return ms;
+}
+
+/** Fastify 경로 설정(config)에서 이 경로만의 서비스 상한(ms)을 담는 칸(purchase-svc 결제 결과 long polling, BUILD_ORDER PRF-166) */
+export const ROUTE_DEADLINE_KEY = 'peaketDeadline';
+
+/**
+ * 처리기에 단다: @RouteDeadline(27_000). 이 경로만 서비스 상한(PEAKET_MAX_DEADLINE_MS, 기본 15초) 대신 maxMs로 남은 시간을 연다
+ * (서비스 상한보다 길어도 된다. 머리 값이 더 짧으면 그 값이다). 다른 경로는 그대로다.
+ * LogPolicy(request-log.ts)처럼 Fastify 경로 설정(FASTIFY_ROUTE_CONFIG_METADATA)의 ROUTE_DEADLINE_KEY 칸에 maxMs를 넣는다(다른 칸은 그대로 둔다).
+ * installHttpHooks가 routeDeadlineMaxOf로 그 값을 꺼내 쓴다.
+ * @throws RangeError maxMs가 양의 정수(밀리초)가 아님(장식자를 만들 때)
+ */
+export function RouteDeadline(maxMs: number): MethodDecorator {
+  if (!Number.isSafeInteger(maxMs) || maxMs <= 0) throw new RangeError(`경로 남은 시간 상한은 양의 정수(밀리초)여야 한다: ${maxMs}`);
+  return (_target, _key, descriptor) => {
+    const fn = descriptor.value as object;
+    const prev = (Reflect.getMetadata(FASTIFY_ROUTE_CONFIG_METADATA, fn) as Record<string, unknown> | undefined) ?? {};
+    Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [ROUTE_DEADLINE_KEY]: maxMs }, fn);
+    return descriptor;
+  };
+}
+
+/** 경로 설정에서 이 경로의 서비스 상한(ms)을 꺼낸다. 칸이 없거나 양의 정수가 아니면 fallbackMs(서비스 상한) */
+export function routeDeadlineMaxOf(config: unknown, fallbackMs: number): number {
+  if (config === null || typeof config !== 'object') return fallbackMs;
+  const v = (config as Record<string, unknown>)[ROUTE_DEADLINE_KEY];
+  return typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : fallbackMs;
 }
 
 export class Deadline {

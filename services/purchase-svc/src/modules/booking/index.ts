@@ -1,4 +1,4 @@
-// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161·PRF-162·PRF-165·PRF-163).
+// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161·PRF-162·PRF-165·PRF-163·PRF-166).
 import type { MaintenanceTask } from '@peaket/platform';
 import { checkOrderHistory } from './adapters/db/drizzle-orders.js';
 import { orderHistoryCheckTask as historyTaskOf, type OrderHistoryTaskDeps } from './application/order-history-check.js';
@@ -41,6 +41,34 @@ export {
   type SeatSlotSource,
 } from './adapters/inventory-bridges.js';
 export { DrizzleSaga, SagaRollback, type DrizzleSagaOptions, type SagaSeatSales } from './adapters/db/drizzle-saga.js';
+export { DrizzlePaymentStatus, type DrizzlePaymentStatusOptions } from './adapters/db/drizzle-payment-status.js';
+export { GetPaymentStatus, type GetPaymentStatusCommand, type GetPaymentStatusDeps, type GetPaymentStatusResult } from './application/get-payment-status.js';
+export { PaymentStatusWaitTable, type PaymentStatusWaitTableDeps, type WaitTableTimer } from './application/payment-status-waiters.js';
+export {
+  decidePaymentStatus,
+  ISSUE_DELAYED_AFTER_MS,
+  isIssueDelayed,
+  PAYMENT_STATUS_ANSWER_MARGIN_MS,
+  PAYMENT_STATUS_BATCH_MAX,
+  PAYMENT_STATUS_IMMEDIATE,
+  PAYMENT_STATUS_MAX_DEADLINE_MS,
+  PAYMENT_STATUS_POLL_INTERVAL_MS,
+  PAYMENT_STATUS_SLOW_AFTER_MS,
+  PAYMENT_STATUS_SLOW_POLL_INTERVAL_MS,
+  PAYMENT_STATUS_VALUES,
+  PAYMENT_STATUS_WAIT_MAX_MS,
+  PAYMENT_STATUS_WAITERS_MAX,
+  PAYMENT_STATUS_WAITING,
+  paymentStatusWaitMs,
+  paymentStatusWakes,
+  type IssueJobView,
+  type PaymentStatusBody,
+  type PaymentStatusDecision,
+  type PaymentStatusProblem,
+  type PaymentStatusValue,
+  type PaymentStatusView,
+  type PaymentStatusVirtualAccount,
+} from './domain/payment-status.js';
 export {
   acceptingPaymentConfirms,
   CONFIRM_CAP_MS,
@@ -275,6 +303,12 @@ export type {
   PaymentResultWriteBase,
   PaymentResultWriteOutcome,
   PaymentResultWrites,
+  PaymentStatusReads,
+  PaymentStatusSignals,
+  PaymentStatusWaiters,
+  PaymentStatusWaitOptions,
+  PaymentStatusWake,
+  PaymentStatusWakeUp,
   ReserveTx,
   ReserveTxInput,
   ReserveTxOutcome,
