@@ -69,7 +69,7 @@ describe('반복(결정 9)', () => {
     expect(h.sleeps).toEqual([100, 100]);
   });
 
-  test('ASVS_13_1_3_FND080_실패하면0_1초에서5초까지늘려쉬고_성공하면처음으로돌린다 [ASVS v5.0.0-13.1.3]', async () => {
+  test('FND080_실패하면0_1초에서5초까지늘려쉬고_성공하면처음으로돌린다 [ASVS v5.0.0-13.1.3]', async () => {
     const e = new Error('브로커 없음');
     const h = harness([e, e, e, e, e, e, e, e, 1, e], { maxSleeps: 10 });
     await h.relay.runLoop(h.stop.signal);

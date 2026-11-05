@@ -78,7 +78,7 @@ describe('시작 사건 유예(SESSION_STARTED_GRACE_MS)', () => {
 });
 
 describe('키 이름', () => {
-  test('ST28_ASVS8.2.1_표지 s:jti:{jti}와 세션 상태 s:session:{jti}는 해시 태그가 같아 같은 슬롯이다(열기가 Lua 한 번). 회차 Stream과는 다른 슬롯이다 [ASVS v5.0.0-8.2.1]', () => {
+  test('ST28_표지 s:jti:{jti}와 세션 상태 s:session:{jti}는 해시 태그가 같아 같은 슬롯이다(열기가 Lua 한 번). 회차 Stream과는 다른 슬롯이다 [ASVS v5.0.0-8.2.1]', () => {
     for (const jti of ['a', '0190f3a1-7c2e-7a00-8000-0000000000a1', 'jti-123-abc', 'x'.repeat(64)]) {
       expect(sessionKeys.marker(jti)).toBe(`s:jti:{${jti}}`);
       expect(sessionKeys.session(jti)).toBe(`s:session:{${jti}}`);
@@ -161,7 +161,7 @@ async function opened(w: World, over: { accountId?: string; loginSessionId?: str
 }
 
 describe('StoredPurchaseSessions.resolve (구매 요청 인증 포트)', () => {
-  test('ASVS8.2.1_ST16_세션이 있고 계정·로그인 세션이 맞으면 { ref: jti, key }를 주고 key는 클라이언트가 따로 계산한 요청 인증 키와 같다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST16_세션이 있고 계정·로그인 세션이 맞으면 { ref: jti, key }를 주고 key는 클라이언트가 따로 계산한 요청 인증 키와 같다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = world();
     const s = await opened(w);
     const r = await w.sessions.resolve(tokenReq(s.jti), principal());
@@ -169,7 +169,7 @@ describe('StoredPurchaseSessions.resolve (구매 요청 인증 포트)', () => {
     expect(Buffer.from(r!.key as Uint8Array).equals(s.key)).toBe(true);
   });
 
-  test('ASVS8.2.1_resolve는 구매 세션 상태를 한 번 읽을 뿐 일련번호를 올리지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('resolve는 구매 세션 상태를 한 번 읽을 뿐 일련번호를 올리지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = world();
     const s = await opened(w);
     await w.sessions.resolve(tokenReq(s.jti), principal());
@@ -178,7 +178,7 @@ describe('StoredPurchaseSessions.resolve (구매 요청 인증 포트)', () => {
     expect((await w.mem.read(s.jti))?.lastSeq).toBe(0);
   });
 
-  test('ASVS8.2.1_입장 토큰 머리가 없거나 하나가 아니거나 모양이 틀리거나 jti가 키 조각 모양이 아니면 undefined이고 저장소를 읽지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('입장 토큰 머리가 없거나 하나가 아니거나 모양이 틀리거나 jti가 키 조각 모양이 아니면 undefined이고 저장소를 읽지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = world();
     const ok = admissionHeader('a-jti');
     const bad: Array<Record<string, string | string[] | undefined>> = [
@@ -206,7 +206,7 @@ describe('StoredPurchaseSessions.resolve (구매 요청 인증 포트)', () => {
     expect(KEY_PART.test('a-jti')).toBe(true);
   });
 
-  test('ASVS8.2.1_ASVS8.2.2_남의 jti로는 세션을 못 찾는다: 계정이나 로그인 세션이 구매 세션 상태와 다르면 undefined다(헤더의 jti는 조회 손잡이일 뿐이다) [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
+  test('남의 jti로는 세션을 못 찾는다: 계정이나 로그인 세션이 구매 세션 상태와 다르면 undefined다(헤더의 jti는 조회 손잡이일 뿐이다) [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
     const w = world();
     const s = await opened(w);
     expect(await w.sessions.resolve(tokenReq(s.jti), principal({ accountId: 'acct-2' }))).toBeUndefined();
@@ -214,7 +214,7 @@ describe('StoredPurchaseSessions.resolve (구매 요청 인증 포트)', () => {
     expect(await w.sessions.resolve(tokenReq('unknown-jti'), principal())).toBeUndefined();
   });
 
-  test('ASVS9.2.1_최대 체류가 지났거나 세션이 끝났으면 undefined다 [ASVS v5.0.0-9.2.1]', async () => {
+  test('최대 체류가 지났거나 세션이 끝났으면 undefined다 [ASVS v5.0.0-9.2.1]', async () => {
     const w = world();
     const s = await opened(w);
     expect(await w.sessions.resolve(tokenReq(s.jti), principal())).toBeDefined();
@@ -227,7 +227,7 @@ describe('StoredPurchaseSessions.resolve (구매 요청 인증 포트)', () => {
     expect(await w.sessions.resolve(tokenReq(t.jti), principal())).toBeUndefined();
   });
 
-  test('ASVS8.2.1_저장된 임시 공개키가 망가졌으면(곡선 위의 점이 아님) 세션이 없는 것으로 본다. 던지지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('저장된 임시 공개키가 망가졌으면(곡선 위의 점이 아님) 세션이 없는 것으로 본다. 던지지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = world();
     const jti = newJti();
     // 저장소 계약은 점 검증을 하지 않는다. 운영에서는 열기 유스케이스가 거르지만, 저장소가 망가져도 resolve가 500을 내지 않는다
@@ -238,7 +238,7 @@ describe('StoredPurchaseSessions.resolve (구매 요청 인증 포트)', () => {
 });
 
 describe('StoredPurchaseSessions.advance / get', () => {
-  test('ASVS9.1.1_advance는 저장소의 일련번호 올리기를 그대로 따른다: 클 때만 true. 모양이 틀린 참조·번호는 저장소를 부르지 않고 false다 [ASVS v5.0.0-9.1.1]', async () => {
+  test('advance는 저장소의 일련번호 올리기를 그대로 따른다: 클 때만 true. 모양이 틀린 참조·번호는 저장소를 부르지 않고 false다 [ASVS v5.0.0-9.1.1]', async () => {
     const w = world();
     const s = await opened(w);
     expect(await w.sessions.advance(s.jti, 1)).toBe(true);
@@ -489,7 +489,7 @@ describe('RedisPurchaseSessionStore.end·sweep·setPaying의 Lua 호출 (가짜 
     await expect(f.store.setPaying('jti-1', true)).rejects.toThrow();
   });
 
-  test('ASVS1.2.4_end·sweep·setPaying는 jti가 키 조각 모양이 아니면 Redis를 부르지 않고 RangeError다 [ASVS v5.0.0-1.2.4]', async () => {
+  test('end·sweep·setPaying는 jti가 키 조각 모양이 아니면 Redis를 부르지 않고 RangeError다 [ASVS v5.0.0-1.2.4]', async () => {
     const f = fake([]);
     for (const bad of ['', 'a}b', '{x}', 'a:b', 'x'.repeat(65)]) {
       await expect(f.store.end(bad), bad).rejects.toThrow(RangeError);

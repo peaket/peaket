@@ -1,4 +1,4 @@
-// 시험 기록(NDJSON) 읽기(docs/verification.md §2.5 '기록', ASVS v5.0.0-2.1.1·2.2.1).
+// 시험 기록(NDJSON) 읽기(docs/verification.md §2.5 '기록', [ASVS v5.0.0-2.1.1]·[ASVS v5.0.0-2.2.1]).
 import { describe, expect, it } from 'vitest';
 import { RecordFormatError, parseRecords } from '../src/records.js';
 

@@ -18,7 +18,7 @@ const point = (x: Buffer, y: Buffer) => Buffer.concat([Buffer.from([4]), x, y]).
 const serverJwk = (over: Record<string, unknown> = {}) => ({ kty: 'EC', crv: 'P-256', x: I_X.toString('base64url'), y: I_Y.toString('base64url'), d: I_PRIV.toString('base64url'), kid: 'ecdh-1', ...over });
 
 describe('클라이언트 임시 공개키 읽기', () => {
-  test('ASVS8.2.1_비압축 점 65바이트의 base64url이고 곡선 위의 점이면 받는다. 저장하는 글은 받은 글 그대로다 [ASVS v5.0.0-8.2.1]', () => {
+  test('비압축 점 65바이트의 base64url이고 곡선 위의 점이면 받는다. 저장하는 글은 받은 글 그대로다 [ASVS v5.0.0-8.2.1]', () => {
     const text = point(R_X, R_Y);
     expect(text).toHaveLength(87);
     const k = parseClientEphemeralKey(text);
@@ -26,7 +26,7 @@ describe('클라이언트 임시 공개키 읽기', () => {
     expect(k?.key.type).toBe('public');
   });
 
-  test('ASVS8.2.1_모양이 틀리거나 곡선 위의 점이 아니면 undefined다: 문자열 아님, 길이, 채움, 허용 밖 글자, 앞 바이트, 비정규 표기, 곡선 밖, 무한원점, 좌표가 소수 p 이상 [ASVS v5.0.0-8.2.1]', () => {
+  test('모양이 틀리거나 곡선 위의 점이 아니면 undefined다: 문자열 아님, 길이, 채움, 허용 밖 글자, 앞 바이트, 비정규 표기, 곡선 밖, 무한원점, 좌표가 소수 p 이상 [ASVS v5.0.0-8.2.1]', () => {
     const ok = point(R_X, R_Y);
     const bad: unknown[] = [
       undefined,
@@ -59,13 +59,13 @@ describe('클라이언트 임시 공개키 읽기', () => {
 });
 
 describe('서버 고정 ECDH 키', () => {
-  test('ASVS8.2.1_RFC 5903 §8.1 벡터: 서버 개인키 i와 상대 공개점 (g^r)의 공유 비밀은 x 좌표 32바이트다 [ASVS v5.0.0-8.2.1]', () => {
+  test('RFC 5903 §8.1 벡터: 서버 개인키 i와 상대 공개점 (g^r)의 공유 비밀은 x 좌표 32바이트다 [ASVS v5.0.0-8.2.1]', () => {
     const server = new ServerEcdhKey(serverJwk());
     const client = parseClientEphemeralKey(point(R_X, R_Y))!;
     expect(server.sharedSecret(client.key).toString('hex')).toBe(SHARED);
   });
 
-  test('ASVS8.2.1_클라이언트가 따로 계산한 요청 인증 키와 서버가 계산한 키가 같다(HKDF salt = jti, info = PEAKET-purchase-v1) [ASVS v5.0.0-8.2.1]', () => {
+  test('클라이언트가 따로 계산한 요청 인증 키와 서버가 계산한 키가 같다(HKDF salt = jti, info = PEAKET-purchase-v1) [ASVS v5.0.0-8.2.1]', () => {
     const { privateKey: sPriv, publicKey: sPub } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
     const sj = sPriv.export({ format: 'jwk' }) as Record<string, string>;
     const server = new ServerEcdhKey({ kty: 'EC', crv: 'P-256', x: sj.x!, y: sj.y!, d: sj.d!, kid: 'k' });
@@ -80,13 +80,13 @@ describe('서버 고정 ECDH 키', () => {
     expect(Buffer.from(purchaseRequestKey(server.sharedSecret(parseClientEphemeralKey(text)!.key), `${jti}x`)).equals(Buffer.from(serverKey))).toBe(false);
   });
 
-  test('ASVS8.2.1_공개 JWK에는 개인 성분이 없고 kid와 좌표만 있다 [ASVS v5.0.0-8.2.1]', () => {
+  test('공개 JWK에는 개인 성분이 없고 kid와 좌표만 있다 [ASVS v5.0.0-8.2.1]', () => {
     const pub = new ServerEcdhKey(serverJwk()).publicJwk();
     expect(pub).toEqual({ kty: 'EC', crv: 'P-256', x: I_X.toString('base64url'), y: I_Y.toString('base64url'), kid: 'ecdh-1' });
     expect(new ServerEcdhKey(serverJwk()).kid).toBe('ecdh-1');
   });
 
-  test('ASVS8.2.1_개인 JWK가 아니거나 P-256이 아니거나 kid가 없거나 모양이 틀리면 만들지 않는다. 오류 문구에 개인 성분을 싣지 않는다 [ASVS v5.0.0-8.2.1]', () => {
+  test('개인 JWK가 아니거나 P-256이 아니거나 kid가 없거나 모양이 틀리면 만들지 않는다. 오류 문구에 개인 성분을 싣지 않는다 [ASVS v5.0.0-8.2.1]', () => {
     const d = I_PRIV.toString('base64url');
     // 마지막 항목은 곡선 위의 점이지만 d의 짝이 아닌 공개 좌표(입장 확정 응답의 공개키와 어긋나 모든 요청이 401이 되는 설정 실수)
     for (const over of [{ d: undefined }, { kty: 'RSA' }, { crv: 'P-384' }, { kid: undefined }, { kid: 'a b' }, { x: undefined }, { y: Buffer.alloc(32, 1).toString('base64url') }, { x: R_X.toString('base64url'), y: R_Y.toString('base64url') }]) {
@@ -101,7 +101,7 @@ describe('서버 고정 ECDH 키', () => {
     }
   });
 
-  test('ASVS8.2.1_환경 값 PEAKET_PURCHASE_ECDH_KEY에서 읽는다: 없으면 이름이 든 오류, JSON이 아니면 오류(값은 싣지 않는다) [ASVS v5.0.0-8.2.1]', () => {
+  test('환경 값 PEAKET_PURCHASE_ECDH_KEY에서 읽는다: 없으면 이름이 든 오류, JSON이 아니면 오류(값은 싣지 않는다) [ASVS v5.0.0-8.2.1]', () => {
     expect(() => ServerEcdhKey.fromEnv({})).toThrow(PURCHASE_ECDH_KEY_ENV);
     expect(() => ServerEcdhKey.fromEnv({ [PURCHASE_ECDH_KEY_ENV]: 'not json' })).toThrow(PURCHASE_ECDH_KEY_ENV);
     const k = ServerEcdhKey.fromEnv({ [PURCHASE_ECDH_KEY_ENV]: JSON.stringify(serverJwk()) });

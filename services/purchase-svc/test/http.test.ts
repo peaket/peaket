@@ -28,7 +28,7 @@ import { account, DAY, newEvent, ref, type ReplayInput, type ReplayPort, replayO
 
 const NOW = Date.parse('2026-11-04T03:00:00.000Z');
 const KEY = Buffer.alloc(32, 9);
-/** 서비스 로그(한 줄에 JSON 하나). 계정 ID가 든 키 이름이 로그에 남지 않는지 본다(ASVS 16.2.5) */
+/** 서비스 로그(한 줄에 JSON 하나). 계정 ID가 든 키 이름이 로그에 남지 않는지 본다([ASVS v5.0.0-16.2.5]) */
 const logLines: string[] = [];
 const quiet = new Writable({
   write: (c, _e, cb) => {

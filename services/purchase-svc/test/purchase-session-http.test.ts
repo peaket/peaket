@@ -1,4 +1,4 @@
-// 실제 구매 세션 저장소(StoredPurchaseSessions)와 열기 유스케이스(OpenPurchaseSession)로 홀드 경로를 끝까지 돌린다(BUILD_ORDER PRF-136, S-T28 ③, S-T35, ASVS 8.2.1·9.1.1).
+// 실제 구매 세션 저장소(StoredPurchaseSessions)와 열기 유스케이스(OpenPurchaseSession)로 홀드 경로를 끝까지 돌린다(BUILD_ORDER PRF-136, S-T28 ③, S-T35, [ASVS v5.0.0-8.2.1]·[ASVS v5.0.0-9.1.1]).
 // 시험 대역 MemoryPurchaseSessions 대신 입장 토큰을 서명해 열고, 클라이언트 임시 키로 요청 인증 키를 따로 계산해 홀드 요청에 서명한다.
 import 'reflect-metadata';
 import { createPublicKey, diffieHellman, generateKeyPairSync, randomUUID } from 'node:crypto';
@@ -131,7 +131,7 @@ function post(eventId: string, f: Fan, o: { macKey?: Buffer; token?: string | nu
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 
 describe('실제 구매 세션으로 홀드', () => {
-  test('ST28_ST35_ASVS8.2.1_ASVS9.1.1_입장 토큰으로 연 구매 세션의 요청 인증 키로 서명한 홀드는 201이고, 홀드 시도 기록의 여정 ID는 입장 토큰의 jny이며 Stream의 구매 세션 ID는 jti다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-9.1.1]', async () => {
+  test('ST28_ST35_입장 토큰으로 연 구매 세션의 요청 인증 키로 서명한 홀드는 201이고, 홀드 시도 기록의 여정 ID는 입장 토큰의 jny이며 Stream의 구매 세션 ID는 jti다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-9.1.1]', async () => {
     const w = await world();
     const f = await w.fan(1);
     const r = await post(w.eventId, f, { seq: 7 });
@@ -142,7 +142,7 @@ describe('실제 구매 세션으로 홀드', () => {
     expect((await mem.read(f.jti))?.lastSeq).toBe(7);
   });
 
-  test('ST28_③_ASVS8.2.2_게이트웨이를 거치지 않고 다른 회차 주소를 바로 넣으면 구매 세션 상태의 회차와 달라 403이다. 그 회차 좌석에 변화가 없다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('ST28_③_게이트웨이를 거치지 않고 다른 회차 주소를 바로 넣으면 구매 세션 상태의 회차와 달라 403이다. 그 회차 좌석에 변화가 없다 [ASVS v5.0.0-8.2.2]', async () => {
     const a = await world();
     const b = await world();
     const f = await a.fan(2);
@@ -155,7 +155,7 @@ describe('실제 구매 세션으로 홀드', () => {
     expect(b.ev().stream).toHaveLength(0);
   });
 
-  test('ST28_ASVS8.2.1_다른 회차의 토큰으로는 구매 세션을 열 수 없다: 회차 B 주소로 연 시도는 EVENT_MISMATCH이고 세션이 생기지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_다른 회차의 토큰으로는 구매 세션을 열 수 없다: 회차 B 주소로 연 시도는 EVENT_MISMATCH이고 세션이 생기지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
     const a = await world();
     const jti = randomUUID();
     const token = signAdmission(admissionKey, claimsOf({ nowMs: NOW, jti, eventId: a.eventId }));
@@ -163,7 +163,7 @@ describe('실제 구매 세션으로 홀드', () => {
     expect(await mem.read(jti)).toBeUndefined();
   });
 
-  test('ASVS8.2.1_ASVS9.1.1_입장 토큰 머리가 없거나 남의 계정·로그인 세션이면 401이고 일련번호를 올리지 않으며 좌석에 변화가 없다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-9.1.1]', async () => {
+  test('입장 토큰 머리가 없거나 남의 계정·로그인 세션이면 401이고 일련번호를 올리지 않으며 좌석에 변화가 없다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-9.1.1]', async () => {
     const w = await world();
     const f = await w.fan(3);
     const stranger = await w.fan(4);
@@ -180,7 +180,7 @@ describe('실제 구매 세션으로 홀드', () => {
     expect(w.ev().bits.size).toBe(0);
   });
 
-  test('ASVS9.1.1_다른 키로 서명하면 401이고 일련번호를 올리지 않는다. 같은 일련번호를 다시 보내면 401(재전송)이다 [ASVS v5.0.0-9.1.1]', async () => {
+  test('다른 키로 서명하면 401이고 일련번호를 올리지 않는다. 같은 일련번호를 다시 보내면 401(재전송)이다 [ASVS v5.0.0-9.1.1]', async () => {
     const w = await world();
     const f = await w.fan(5);
     const wrong = await post(w.eventId, f, { macKey: Buffer.alloc(32, 3), seq: 4 });
@@ -192,7 +192,7 @@ describe('실제 구매 세션으로 홀드', () => {
     expect((await mem.read(f.jti))?.lastSeq).toBe(4);
   });
 
-  test('ASVS9.2.1_최대 체류(입장 토큰 exp)가 지난 구매 세션은 401이다 [ASVS v5.0.0-9.2.1]', async () => {
+  test('최대 체류(입장 토큰 exp)가 지난 구매 세션은 401이다 [ASVS v5.0.0-9.2.1]', async () => {
     const w = await world();
     const f = await w.fan(6);
     expect((await post(w.eventId, f)).statusCode).toBe(201);
@@ -262,7 +262,7 @@ describe('좌석 Redis 장애면 구매 세션 확인이 500이 아니라 503이
     }
   });
 
-  test('ASVS16.2.5_저장소의 쓰기 전 지킴 오류(PEAKET_CORRUPT_KEY)는 키 이름(구매 세션 ID가 든다)을 싣지 않은 채 500으로 나간다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('저장소의 쓰기 전 지킴 오류(PEAKET_CORRUPT_KEY)는 키 이름(구매 세션 ID가 든다)을 싣지 않은 채 500으로 나간다 [ASVS v5.0.0-16.2.5]', async () => {
     const w = await world();
     const f = await w.fan(10);
     flaky.advance = new Error(`ERR PEAKET_CORRUPT_KEY s:session:{${f.jti}}`);

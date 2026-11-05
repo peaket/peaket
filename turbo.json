@@ -37,7 +37,14 @@
         "$TURBO_ROOT$/docs/design/d2-design-system.md",
         "$TURBO_ROOT$/docs/frontend.md"
       ],
-      "outputs": [],
+      "outputs": [
+        "test-report.json",
+        "test-report.xml"
+      ],
+      "env": [
+        "PEAKET_TEST_REPORT",
+        "NODE_OPTIONS"
+      ],
       "dependsOn": [
         "^build"
       ]

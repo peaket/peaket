@@ -213,7 +213,7 @@ describe('RedisOrderHolds.check: 남의 것·없는 것·끝난 것은 가리지
     ['칸 구분자 :', 'h:1'],
     ['65자', 'a'.repeat(65)],
     ['빈칸', 'a b'],
-  ])('ASVS1.2.4_holdId 모양이 키 조각이 아니면(%s) 좌석 Redis를 부르지 않고 NOT_FOUND다 [ASVS v5.0.0-1.2.4]', async (_label, holdId) => {
+  ])('holdId 모양이 키 조각이 아니면(%s) 좌석 Redis를 부르지 않고 NOT_FOUND다 [ASVS v5.0.0-1.2.4]', async (_label, holdId) => {
     const w = await heldWorld();
     const rec = recording(redis);
     const holds = new RedisOrderHolds(rec.redis, seatMapWith(w.eventId));
@@ -225,7 +225,7 @@ describe('RedisOrderHolds.check: 남의 것·없는 것·끝난 것은 가리지
   test.each([
     ['회차 ID', { eventId: 'e}v' }],
     ['구매 세션 ID', { purchaseSessionId: 'j}ti' }],
-  ])('ASVS1.2.4_%s 모양이 키 조각이 아니면 좌석 Redis를 부르지 않고 NOT_FOUND다 [ASVS v5.0.0-1.2.4]', async (_label, over) => {
+  ])('%s 모양이 키 조각이 아니면 좌석 Redis를 부르지 않고 NOT_FOUND다 [ASVS v5.0.0-1.2.4]', async (_label, over) => {
     const w = await heldWorld();
     const rec = recording(redis);
     const holds = new RedisOrderHolds(rec.redis, seatMapWith(w.eventId));

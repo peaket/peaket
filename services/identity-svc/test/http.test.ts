@@ -167,7 +167,7 @@ describe('본인확인 경로(시험 어댑터)', () => {
     expect(typeof claims.pid).toBe('string');
   });
 
-  test('I-T6_ASVS v5.0.0-3.7.2_다른계정의같은사람은409이고_다른출처next는400이다', async () => {
+  test('I-T6_[ASVS v5.0.0-3.7.2]_다른계정의같은사람은409이고_다른출처next는400이다', async () => {
     const a = await login();
     const b = await login();
     const go = async (s: { accountId: string; sessionId: string }) => {
@@ -185,7 +185,7 @@ describe('본인확인 경로(시험 어댑터)', () => {
 });
 
 describe('기관 결과 값과 로그', () => {
-  test('I-T45_ASVS v5.0.0-16.2.5_결과경로에보낸기관값(result·mac)은_서비스로그에0건이다', async () => {
+  test('I-T45_[ASVS v5.0.0-16.2.5]_결과경로에보낸기관값(result·mac)은_서비스로그에0건이다', async () => {
     const s = await login();
     const h = { 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'content-type': 'application/json' };
     const st = await svc.http.inject({ method: 'POST', url: '/v1/identity/verifications', headers: h, payload: JSON.stringify({ next: '/' }) });
@@ -208,7 +208,7 @@ describe('기관 결과 값과 로그', () => {
 });
 
 describe('만 14세 미만과 로그(BOT-020)', () => {
-  test('I-T42_ASVS v5.0.0-16.2.5_만14세미만이면_403under-14이고_생년월일은서비스로그에0건이다', async () => {
+  test('I-T42_[ASVS v5.0.0-16.2.5]_만14세미만이면_403under-14이고_생년월일은서비스로그에0건이다', async () => {
     const s = await login();
     const h = { 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'content-type': 'application/json' };
     const st = await svc.http.inject({ method: 'POST', url: '/v1/identity/verifications', headers: h, payload: JSON.stringify({ next: '/' }) });

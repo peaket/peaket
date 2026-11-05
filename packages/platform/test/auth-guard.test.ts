@@ -181,7 +181,7 @@ describe('신원과 종료 세션 목록', () => {
     expect(JSON.parse(noScope.payload)).toMatchObject({ type: 'about:blank', title: 'Forbidden', status: 403 });
   });
 
-  test('ASVS_7_4_1_I_T48_끝난세션은_401이고_종료시각15분뒤목록에서지운다 [ASVS v5.0.0-7.4.1]', async () => {
+  test('I_T48_끝난세션은_401이고_종료시각15분뒤목록에서지운다 [ASVS v5.0.0-7.4.1]', async () => {
     const { svc, clock, get } = await boot();
     svc.auth.terminateSession({ sessionId: 's-1', terminatedAt: new Date(clock.now()).toISOString() });
     const r = await get('/v1/a/fan', fan('s-1'));

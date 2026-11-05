@@ -87,7 +87,7 @@ describe('RedisPurchaseSessionStore (저장소 계약 사례, 실제 Valkey 8.1)
 });
 
 describe('RedisPurchaseSessionStore (키와 수명)', () => {
-  test('ST28_ASVS8.2.1_열면 표지 s:jti:{jti}(값 = 연 시각)와 세션 상태 s:session:{jti}가 정해진 칸으로 생긴다. 세션 상태의 수명은 exp + 60초 [가정], 표지는 같은 jti로 다시 받을 수 있는 가장 늦은 토큰의 exp + 60초다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_열면 표지 s:jti:{jti}(값 = 연 시각)와 세션 상태 s:session:{jti}가 정해진 칸으로 생긴다. 세션 상태의 수명은 exp + 60초 [가정], 표지는 같은 jti로 다시 받을 수 있는 가장 늦은 토큰의 exp + 60초다 [ASVS v5.0.0-8.2.1]', async () => {
     const h = harness();
     const jti = newJti();
     const i = openInput(h, jti, { priorityGrantId: 'grant-1' });
@@ -148,7 +148,7 @@ describe('RedisPurchaseSessionStore (키와 수명)', () => {
     expect(await pexpireTime(redis, marker)).toBe(b.reissueUntilMs + SESSION_KEY_GRACE_MS);
   });
 
-  test('ST28_ASVS8.2.1_markStarted는 세션 상태에 sev 칸 하나만 쓰고 수명·다른 칸은 그대로다. 세션이 없으면 키를 만들지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_markStarted는 세션 상태에 sev 칸 하나만 쓰고 수명·다른 칸은 그대로다. 세션이 없으면 키를 만들지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
     const h = harness();
     const jti = newJti();
     const session = sessionKeys.session(jti);
@@ -163,7 +163,7 @@ describe('RedisPurchaseSessionStore (키와 수명)', () => {
     expect(await pexpireTime(redis, session)).toBe(ttl);
   });
 
-  test('ASVS9.1.1_일련번호를 올려도 세션 키의 수명은 그대로이고 seq·idle 칸만 바뀐다 [ASVS v5.0.0-9.1.1]', async () => {
+  test('일련번호를 올려도 세션 키의 수명은 그대로이고 seq·idle 칸만 바뀐다 [ASVS v5.0.0-9.1.1]', async () => {
     const h = harness();
     const jti = newJti();
     const i = openInput(h, jti);
@@ -179,7 +179,7 @@ describe('RedisPurchaseSessionStore (키와 수명)', () => {
     expect(await pexpireTime(redis, session)).toBe(i.expiresAtMs + SESSION_KEY_GRACE_MS);
   });
 
-  test('ASVS9.1.1_seq 칸이 망가졌으면(10진 정수가 아님) 일련번호를 올리는 Lua가 PEAKET_CORRUPT_KEY로 거절한다: 일시 장애가 아닌 오류다 [ASVS v5.0.0-9.1.1]', async () => {
+  test('seq 칸이 망가졌으면(10진 정수가 아님) 일련번호를 올리는 Lua가 PEAKET_CORRUPT_KEY로 거절한다: 일시 장애가 아닌 오류다 [ASVS v5.0.0-9.1.1]', async () => {
     const h = harness();
     const jti = newJti();
     await h.store.open(openInput(h, jti));
@@ -215,7 +215,7 @@ describe('RedisPurchaseSessionStore (키와 수명)', () => {
 });
 
 describe('Lua 모양 (노드 하나짜리 클러스터 모드)', () => {
-  test('ST28_ASVS8.2.1_네 Lua는 #!lua로 시작하고, 표지와 세션 키는 같은 해시 슬롯이며 회차 Stream과는 다른 슬롯이다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_네 Lua는 #!lua로 시작하고, 표지와 세션 키는 같은 해시 슬롯이며 회차 Stream과는 다른 슬롯이다 [ASVS v5.0.0-8.2.1]', async () => {
     for (const lua of [OPEN_SESSION_LUA, ADVANCE_SESSION_LUA, APPEND_SESSION_STARTED_LUA, MARK_SESSION_STARTED_LUA]) expect(lua.startsWith('#!lua\n')).toBe(true);
     const jti = newJti();
     const slot = async (key: string) => Number(await clusterRedis.command(['CLUSTER', 'KEYSLOT', key], { key: 'x' }));
@@ -282,7 +282,7 @@ describe('RedisSessionStartedLog (SESSION_STARTED Stream 항목)', () => {
     expect(await pexpireTime(redis, earlyKey)).toBe(e.maxStayUntilMs + SESSION_STARTED_KEEP_MS);
   });
 
-  test('ASVS1.2.4_회차 ID가 키 조각 모양이 아니면 RangeError이고 Stream을 만들지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
+  test('회차 ID가 키 조각 모양이 아니면 RangeError이고 Stream을 만들지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
     const log = new RedisSessionStartedLog(redis);
     await expect(log.appendStarted(entryOf('a}b', newJti()))).rejects.toThrow(RangeError);
     await expect(log.appendStarted({ ...entryOf('ev-ok', newJti()), journeyId: 'nope' })).rejects.toThrow(RangeError);
@@ -339,7 +339,7 @@ describe('RedisPurchaseSessionStore.recordHold (홀드 기록 계약 사례, 실
     expect(await pexpireTime(redis, session)).toBe(life);
   });
 
-  test('ASVS8.2.2_세션이 없으면 세션 키도 재사용 차단 표지도 만들지 않는다(null) [ASVS v5.0.0-8.2.2]', async () => {
+  test('세션이 없으면 세션 키도 재사용 차단 표지도 만들지 않는다(null) [ASVS v5.0.0-8.2.2]', async () => {
     const h = recordHarness();
     const jti = newJti();
     expect(await h.store.recordHold(jti, 'hold-1', ['A01'])).toBeNull();
@@ -398,7 +398,7 @@ const eventOf = () => `ev-${newJti()}`;
 describe('RedisPurchaseSessionStore.end·sweep·setPaying (종료·정리 계약 사례, 실제 Valkey 8.1)', () => {
   sessionEndCases(() => endHarness());
 
-  test('QT11_ASVS8.2.1_end는 세션 상태 키만 지운다: 재사용 차단 표지 s:jti는 값·수명 그대로 남고, 회차 Stream·정리 색인은 만들지도 건드리지도 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('QT11_end는 세션 상태 키만 지운다: 재사용 차단 표지 s:jti는 값·수명 그대로 남고, 회차 Stream·정리 색인은 만들지도 건드리지도 않는다 [ASVS v5.0.0-8.2.1]', async () => {
     const h = endHarness();
     const jti = newJti();
     const eventId = eventOf();
@@ -420,7 +420,7 @@ describe('RedisPurchaseSessionStore.end·sweep·setPaying (종료·정리 계약
     expect(await exists(redis, sessionKeys.marker(ghost))).toBe(false);
   });
 
-  test('QT11_ASVS9.2.1_sweep: LIVE는 칸도 키 수명도 바꾸지 않고, 끝낼 때(MAX_STAY·IDLE)는 세션 상태 키만 지운다(표지 그대로, 회차 Stream·정리 색인은 건드리지 않는다: 사건은 appendEnded가 따로 더한다) [ASVS v5.0.0-9.2.1]', async () => {
+  test('QT11_sweep: LIVE는 칸도 키 수명도 바꾸지 않고, 끝낼 때(MAX_STAY·IDLE)는 세션 상태 키만 지운다(표지 그대로, 회차 Stream·정리 색인은 건드리지 않는다: 사건은 appendEnded가 따로 더한다) [ASVS v5.0.0-9.2.1]', async () => {
     const h = endHarness();
     const eventId = eventOf();
     const live = newJti();
@@ -566,7 +566,7 @@ describe('종료·정리 Lua: 망가진 칸과 경계(PRF-138 시험 검토)', (
     expect(await exists(redis, session(gone))).toBe(true);
   });
 
-  test('ASVS16.2.5_event만 있고 jny·max·idle이 빠진 해시에 sweep을 부르면 PEAKET_CORRUPT_KEY로 거절하고 키를 그대로 둔다. Paying(pay=1)이어도 idle이 10진 정수가 아니면 같다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('event만 있고 jny·max·idle이 빠진 해시에 sweep을 부르면 PEAKET_CORRUPT_KEY로 거절하고 키를 그대로 둔다. Paying(pay=1)이어도 idle이 10진 정수가 아니면 같다 [ASVS v5.0.0-16.2.5]', async () => {
     const h = endHarness();
     const half = newJti();
     await redis.command(['HSET', session(half), 'event', 'ev-1'], { key: session(half) });

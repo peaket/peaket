@@ -261,14 +261,14 @@ describe('거절 → 문제 상세(ORDER_PROBLEMS 전부)', () => {
     expect(json(r)).toMatchObject({ type: problem('purchase-session-ended'), status: 401, title: '예매 시간이 끝났습니다' });
   });
 
-  test('FR011_ASVS16.2.5_예매자 400은 어느 칸이 틀렸는지·받은 번호를 싣지 않는다(detail 없음) [ASVS v5.0.0-16.2.5]', async () => {
+  test('FR011_예매자 400은 어느 칸이 틀렸는지·받은 번호를 싣지 않는다(detail 없음) [ASVS v5.0.0-16.2.5]', async () => {
     const r = await post(REJECTIONS.BUYER_INVALID.body!());
     expect(r.statusCode).toBe(400);
     expect(r.payload).not.toContain('SECRETPHONE');
     expect(json(r).detail).toBeUndefined();
   });
 
-  test('FR011_ASVS2.2.1_예매자 성명·번호에 제어 문자(C0·C1)가 있으면 400(about:blank)이고 주문이 없다 [ASVS v5.0.0-2.2.1]', async () => {
+  test('FR011_예매자 성명·번호에 제어 문자(C0·C1)가 있으면 400(about:blank)이고 주문이 없다 [ASVS v5.0.0-2.2.1]', async () => {
     for (const buyer of [{ name: '홍\u0000길동', phone: '010-1234-5678' }, { name: '홍길동\u0085', phone: '010-1234-5678' }, { name: '홍길동', phone: '010-1234-5678\n' }]) {
       fx.reset();
       const r = await post(okBody({ buyer }));
@@ -277,14 +277,14 @@ describe('거절 → 문제 상세(ORDER_PROBLEMS 전부)', () => {
     }
   });
 
-  test('FR011_ASVS16.2.5_가격 없는 등급의 500은 등급 ID를 응답에 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('FR011_가격 없는 등급의 500은 등급 ID를 응답에 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
     REJECTIONS.PRICE_MISSING.arrange!();
     const r = await post(okBody());
     expect(r.statusCode).toBe(500);
     expect(r.payload).not.toContain('TIERSECRET');
   });
 
-  test('PT35_ASVS16.5.3_재확인 실패가 정본 목록 밖(unexpected: UNIMPLEMENTED·UNAUTHENTICATED 등, gRPC가 아닌 예외)이면 토큰이 있어도 503 dependency-unavailable(Retry-After 2)이다 [ASVS v5.0.0-16.5.3]', async () => {
+  test('PT35_재확인 실패가 정본 목록 밖(unexpected: UNIMPLEMENTED·UNAUTHENTICATED 등, gRPC가 아닌 예외)이면 토큰이 있어도 503 dependency-unavailable(Retry-After 2)이다 [ASVS v5.0.0-16.5.3]', async () => {
     fx.recheck = { status: 'FAILED', reason: 'unexpected' };
     const r = await post(okBody());
     expect(r.statusCode).toBe(503);
@@ -302,7 +302,7 @@ describe('거절 → 문제 상세(ORDER_PROBLEMS 전부)', () => {
     expect(json(r)).toMatchObject({ type: problem('idempotency-request-in-progress'), status: 409 });
   });
 
-  test('FR011_ASVS16.2.5_쓰기의 DB 오류는 500 about:blank이고 오류 글을 응답에 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('FR011_쓰기의 DB 오류는 500 about:blank이고 오류 글을 응답에 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
     fx.outcome = new Error('DBSECRET connection terminated');
     const r = await post(okBody());
     expect(r.statusCode).toBe(500);
@@ -349,7 +349,7 @@ describe('플랫폼 가드(쓰임새에 닿기 전)', () => {
     expect(fx.calls).toEqual([]);
   });
 
-  test('FR011_ASVS1.3.3_본문 모양이 틀리면 400(about:blank)이고 쓰임새를 부르지 않는다: holdId 없음·글 아님, buyer 없음, 모르는 칸(맨 위·buyer·consents), 동의 형 틀림, 판 모양 틀림(빈칸·33자), JSON 아님 [ASVS v5.0.0-1.3.3]', async () => {
+  test('FR011_본문 모양이 틀리면 400(about:blank)이고 쓰임새를 부르지 않는다: holdId 없음·글 아님, buyer 없음, 모르는 칸(맨 위·buyer·consents), 동의 형 틀림, 판 모양 틀림(빈칸·33자), JSON 아님 [ASVS v5.0.0-1.3.3]', async () => {
     const good = okBody() as unknown as Record<string, unknown>;
     const bodies: unknown[] = [
       { buyer: good.buyer, consents: good.consents },

@@ -48,7 +48,7 @@ test('낮음008_뼈대의Drizzle어댑터가_마이그레이션한표에쓰고_�
   expect(other.statusCode).toBe(404);
 });
 
-test('ASVS_2_3_4_FND080_뼈대의쓰기는_멱등기록과메모와Outbox를한트랜잭션에쓰고_다시보내면같은메모다 [ASVS v5.0.0-2.3.4]', async () => {
+test('FND080_뼈대의쓰기는_멱등기록과메모와Outbox를한트랜잭션에쓰고_다시보내면같은메모다 [ASVS v5.0.0-2.3.4]', async () => {
   const me = { 'x-user-id': 'acc-7', 'x-session-id': 's-7', 'x-user-aud': 'fan', 'content-type': 'application/json', 'idempotency-key': randomUUID() };
   const body = JSON.stringify({ title: '한 번만' });
   const [a, b] = await Promise.all([

@@ -32,7 +32,7 @@ const reasonOf = (t: string, nowMs = NOW): string | undefined => {
 };
 
 describe('입장 토큰 확인', () => {
-  test('ADR0183_8_ASVS9.1.1_ASVS9.2.2 서명·typ·iss·aud·exp가 맞으면 클레임을 돌려준다 [ASVS v5.0.0-9.1.1] [ASVS v5.0.0-9.2.2] [ASVS v5.0.0-9.2.3]', () => {
+  test('ADR0183_8 서명·typ·iss·aud·exp가 맞으면 클레임을 돌려준다 [ASVS v5.0.0-9.1.1] [ASVS v5.0.0-9.2.2] [ASVS v5.0.0-9.2.3]', () => {
     const c = verify(token());
     expect(c).toEqual({
       jti: JTI,
@@ -49,7 +49,7 @@ describe('입장 토큰 확인', () => {
     expect(verify(token({ claims: claimsOf({ prio: 'grant-1' }) })).priorityGrantId).toBe('grant-1');
   });
 
-  test('ASVS9.1.3_kid로 고른 공개키로만 확인한다: 다른 kid의 키로 서명하거나 모르는 kid·kid 없음은 거절한다 [ASVS v5.0.0-9.1.3]', () => {
+  test('kid로 고른 공개키로만 확인한다: 다른 kid의 키로 서명하거나 모르는 kid·kid 없음은 거절한다 [ASVS v5.0.0-9.1.3]', () => {
     expect(reasonOf(token({ signWith: K2.priv }))).toBe('signature'); // kid k1인데 k2 개인키로 서명
     expect(verify(token({ header: { kid: 'k2' }, signWith: K2.priv })).jti).toBe(JTI);
     expect(reasonOf(token({ header: { kid: 'k9' } }))).toBe('kid');
@@ -62,13 +62,13 @@ describe('입장 토큰 확인', () => {
     expect(reasonOf(noKid)).toBe('kid');
   });
 
-  test('ASVS9.1.3_머리의 jku·x5u·jwk·x5c 같은 키 출처는 읽지 않는다: 공격자 키를 jwk로 실어도 설정한 키로만 확인해 서명 불일치다 [ASVS v5.0.0-9.1.3]', () => {
+  test('머리의 jku·x5u·jwk·x5c 같은 키 출처는 읽지 않는다: 공격자 키를 jwk로 실어도 설정한 키로만 확인해 서명 불일치다 [ASVS v5.0.0-9.1.3]', () => {
     const attacker = newKey('k1');
     const t = token({ header: { jwk: attacker.publicJwk, jku: 'https://evil.example/jwks.json', x5u: 'https://evil.example/c', x5c: ['AAAA'] }, signWith: attacker.priv });
     expect(reasonOf(t)).toBe('signature');
   });
 
-  test('ASVS9.1.2_ES256만 허용한다: none·HS256·RS256·alg 없음은 서명이 맞아 보여도 alg 거절이다 [ASVS v5.0.0-9.1.2]', () => {
+  test('ES256만 허용한다: none·HS256·RS256·alg 없음은 서명이 맞아 보여도 alg 거절이다 [ASVS v5.0.0-9.1.2]', () => {
     for (const alg of ['none', 'HS256', 'RS256', 'ES384', 'es256', undefined]) {
       const head = b64(alg === undefined ? { typ: 'admission+jwt', kid: 'k1' } : { alg, typ: 'admission+jwt', kid: 'k1' });
       const body = b64(claimsOf());
@@ -79,35 +79,35 @@ describe('입장 토큰 확인', () => {
     expect(reasonOf(`${head}.${b64(claimsOf())}.${Buffer.alloc(32, 7).toString('base64url')}`)).toBe('alg');
   });
 
-  test('ASVS9.2.2_typ가 admission+jwt가 아니면(액세스 토큰 at+jwt 등) 서명이 맞아도 거절한다 [ASVS v5.0.0-9.2.2]', () => {
+  test('typ가 admission+jwt가 아니면(액세스 토큰 at+jwt 등) 서명이 맞아도 거절한다 [ASVS v5.0.0-9.2.2]', () => {
     for (const typ of ['at+jwt', 'JWT', 'reauth+jwt', 'admission+JWT']) expect(reasonOf(token({ header: { typ } }))).toBe('typ');
     expect(reasonOf(token({ header: { typ: undefined } }))).toBe('typ');
   });
 
-  test('ASVS9.2.2_iss가 설정한 발급자와 다르거나 없으면 거절한다 [ASVS v5.0.0-9.2.2]', () => {
+  test('iss가 설정한 발급자와 다르거나 없으면 거절한다 [ASVS v5.0.0-9.2.2]', () => {
     expect(reasonOf(token({ claims: claimsOf({ iss: 'https://other.example' }) }))).toBe('iss');
     expect(reasonOf(token({ claims: claimsOf({ iss: undefined }) }))).toBe('iss');
   });
 
-  test('ASVS9.2.3_aud가 purchase가 아니면 거절한다: 배열·다른 값·없음 [ASVS v5.0.0-9.2.3]', () => {
+  test('aud가 purchase가 아니면 거절한다: 배열·다른 값·없음 [ASVS v5.0.0-9.2.3]', () => {
     for (const aud of ['fan', 'purchase ', ['purchase'], ['purchase', 'fan'], undefined]) expect(reasonOf(token({ claims: claimsOf({ aud }) }))).toBe('aud');
   });
 
-  test('ASVS9.2.1_exp: 지금이 exp 이상이면 expired다(exp 정각도 거절). 바로 앞 1ms는 받는다 [ASVS v5.0.0-9.2.1]', () => {
+  test('exp: 지금이 exp 이상이면 expired다(exp 정각도 거절). 바로 앞 1ms는 받는다 [ASVS v5.0.0-9.2.1]', () => {
     const exp = Math.floor(NOW / 1000) + 45 * 60;
     expect(reasonOf(token(), exp * 1000)).toBe('expired');
     expect(reasonOf(token(), exp * 1000 + 1)).toBe('expired');
     expect(reasonOf(token(), exp * 1000 - 1)).toBeUndefined();
   });
 
-  test('ASVS9.2.1_iat가 지금보다 60초를 넘게 미래이면 not_yet이다(시계 오차 60초 안은 받는다) [ASVS v5.0.0-9.2.1]', () => {
+  test('iat가 지금보다 60초를 넘게 미래이면 not_yet이다(시계 오차 60초 안은 받는다) [ASVS v5.0.0-9.2.1]', () => {
     const iat = Math.floor(NOW / 1000);
     expect(IAT_SKEW_MS).toBe(60_000);
     expect(reasonOf(token({ claims: claimsOf({ iat: iat + 61, exp: iat + 3600 }) }))).toBe('not_yet');
     expect(reasonOf(token({ claims: claimsOf({ iat: iat + 60, exp: iat + 3600 }) }))).toBeUndefined();
   });
 
-  test('ASVS9.2.1_exp와 iat가 정수 초가 아니거나 exp가 iat 이하이면 claims 거절이다 [ASVS v5.0.0-9.2.1]', () => {
+  test('exp와 iat가 정수 초가 아니거나 exp가 iat 이하이면 claims 거절이다 [ASVS v5.0.0-9.2.1]', () => {
     const iat = Math.floor(NOW / 1000);
     for (const over of [{ exp: undefined }, { exp: '9999999999' }, { exp: iat + 0.5 }, { iat: undefined }, { iat: '1' }, { exp: iat }, { exp: iat - 1 }, { iat: Number.NaN }]) {
       expect(reasonOf(token({ claims: claimsOf(over) }))).toBe('claims');
@@ -136,7 +136,7 @@ describe('입장 토큰 확인', () => {
     expect(reasonOf(token({ claims: claimsOf({ jny: JNY.toUpperCase() }) }))).toBeUndefined();
   });
 
-  test('ASVS9.1.1_서명 한 바이트만 바꾸거나 본문을 바꾸면 signature 거절이고, 서명 길이가 64바이트가 아니면 format이다 [ASVS v5.0.0-9.1.1]', () => {
+  test('서명 한 바이트만 바꾸거나 본문을 바꾸면 signature 거절이고, 서명 길이가 64바이트가 아니면 format이다 [ASVS v5.0.0-9.1.1]', () => {
     const t = token();
     const [h, p, s] = t.split('.') as [string, string, string];
     const flipped = Buffer.from(s, 'base64url');
@@ -147,7 +147,7 @@ describe('입장 토큰 확인', () => {
     expect(reasonOf(`${h}.${p}.${Buffer.alloc(65, 1).toString('base64url')}`)).toBe('format');
   });
 
-  test('ASVS9.1.1_모양이 틀린 토큰은 format이다: 조각 수, 채움 문자, 허용 밖 글자, 비정규 base64url, JSON 아님, 길이 상한 [ASVS v5.0.0-9.1.1]', () => {
+  test('모양이 틀린 토큰은 format이다: 조각 수, 채움 문자, 허용 밖 글자, 비정규 base64url, JSON 아님, 길이 상한 [ASVS v5.0.0-9.1.1]', () => {
     const t = token();
     const [h, p, s] = t.split('.') as [string, string, string];
     for (const bad of ['', 'a', 'a.b', `${t}.x`, `${h}.${p}.`, `.${p}.${s}`, `${h}..${s}`, `${h}=.${p}.${s}`, `${h}+.${p}.${s}`, `${h} .${p}.${s}`, `${h}.${p}.${s}\n`]) {
@@ -182,14 +182,14 @@ describe('입장 토큰 확인', () => {
 describe('공개키 묶음 읽기 (PEAKET_ADMISSION_JWKS)', () => {
   const jwks = (keysArr: unknown[]) => JSON.stringify({ keys: keysArr });
 
-  test('ASVS9.1.3_공개 P-256 키를 kid로 담는다: use sig·alg ES256 표시는 받는다 [ASVS v5.0.0-9.1.3]', () => {
+  test('공개 P-256 키를 kid로 담는다: use sig·alg ES256 표시는 받는다 [ASVS v5.0.0-9.1.3]', () => {
     const m = parseAdmissionJwks(jwks([{ ...K1.publicJwk, use: 'sig', alg: 'ES256' }, K2.publicJwk]));
     expect([...m.keys()].sort()).toEqual(['k1', 'k2']);
     // 읽은 키로 실제 확인이 된다
     expect(verifyAdmissionToken(token(), { keys: m, issuer: ISS, nowMs: NOW }).jti).toBe(JTI);
   });
 
-  test('ASVS9.1.3_개인 성분(d)이 섞이면 시작하지 않는다. 오류 문구에 키 값을 싣지 않는다 [ASVS v5.0.0-9.1.3]', () => {
+  test('개인 성분(d)이 섞이면 시작하지 않는다. 오류 문구에 키 값을 싣지 않는다 [ASVS v5.0.0-9.1.3]', () => {
     const priv = (K1.priv.export({ format: 'jwk' }) as Record<string, string>).d!;
     let msg = '';
     try {
@@ -201,7 +201,7 @@ describe('공개키 묶음 읽기 (PEAKET_ADMISSION_JWKS)', () => {
     expect(msg).not.toContain(priv);
   });
 
-  test('ASVS9.1.3_모양이 틀리면 던진다: JSON 아님, keys 없음·빔, EC가 아님, P-256이 아님, kid 없음·모양 틀림·중복, 곡선 위의 점이 아님, use·alg가 맞지 않음', () => {
+  test('[ASVS v5.0.0-9.1.3]_모양이 틀리면 던진다: JSON 아님, keys 없음·빔, EC가 아님, P-256이 아님, kid 없음·모양 틀림·중복, 곡선 위의 점이 아님, use·alg가 맞지 않음', () => {
     const k = K1.publicJwk;
     const bad: Array<[string, string]> = [
       ['json', 'nope'],
@@ -221,7 +221,7 @@ describe('공개키 묶음 읽기 (PEAKET_ADMISSION_JWKS)', () => {
     for (const [name, raw] of bad) expect(() => parseAdmissionJwks(raw), name).toThrow();
   });
 
-  test('ASVS9.1.3_담긴 키는 공개키 객체다(서명에 쓸 수 없다)', () => {
+  test('[ASVS v5.0.0-9.1.3]_담긴 키는 공개키 객체다(서명에 쓸 수 없다)', () => {
     const m = parseAdmissionJwks(jwks([K1.publicJwk]));
     expect(m.get('k1')!.type).toBe('public');
   });

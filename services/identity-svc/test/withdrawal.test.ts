@@ -1,4 +1,4 @@
-// 탈퇴의 첫 구현(docs/features/identity.md §8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030, I-T16·I-T27·I-T8, POL-033, ASVS v5.0.0-7.4.2).
+// 탈퇴의 첫 구현(docs/features/identity.md §8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030, I-T16·I-T27·I-T8, POL-033, [ASVS v5.0.0-7.4.2]).
 // 메모리 저장소로 재인증 토큰 1회 사용, 계정·본인확인 기록 파기, 세션 종료, 만 14세 미만 정리 마무리, 리프레시 토큰 해시 지우기를 본다. PostgreSQL은 test-int/withdrawal.int.test.ts.
 import { fakeClock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';

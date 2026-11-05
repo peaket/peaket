@@ -206,7 +206,7 @@ describe('SeatStreamRelay.tick: 읽은 묶음을 차례대로 보내고 확인�
     expect(t).toEqual({ events: [{ eventId: EV_A, sent: 5, dropped: 0, acked: 5 }] });
   });
 
-  test('ASVS16.5.2_publish가 끝나기(Kafka 확인) 전에는 ack하지 않고 sent 지표도 올리지 않는다. 끝난 뒤 그 묶음의 모든 ID를 Stream ID 순으로 ack하고 topic별 수만큼 sent를 올린다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('publish가 끝나기(Kafka 확인) 전에는 ack하지 않고 sent 지표도 올리지 않는다. 끝난 뒤 그 묶음의 모든 ID를 Stream ID 순으로 ack하고 topic별 수만큼 sent를 올린다 [ASVS v5.0.0-16.5.2]', async () => {
     const entries = [held('1762225200000-0', 1), started('1762225200000-1'), held('1762225200001-0', 2), ended('1762225200001-1')];
     const w = world({ [EV_A]: entries });
     const gate = deferred();
@@ -226,7 +226,7 @@ describe('SeatStreamRelay.tick: 읽은 묶음을 차례대로 보내고 확인�
     expect(w.pending.get(EV_A)).toEqual([]);
   });
 
-  test('ASVS16.5.2_보낼 수 없는 항목(좌석맵 판에 없는 좌석·모르는 type·모양 틀림)은 레코드에 없고 dropped(reason)이 오르며, 확인은 넘긴 항목까지 묶음의 모든 ID를 Stream ID 순으로 한다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('보낼 수 없는 항목(좌석맵 판에 없는 좌석·모르는 type·모양 틀림)은 레코드에 없고 dropped(reason)이 오르며, 확인은 넘긴 항목까지 묶음의 모든 ID를 Stream ID 순으로 한다 [ASVS v5.0.0-16.5.2]', async () => {
     const ok1 = held('1762225200000-0', 1);
     const um = unmapped('1762225200000-1', 9);
     const unknown: SeatStreamEntry = { id: '1762225200001-0', fields: { ...holdFields('HELD', 4), type: 'BOGUS' } };
@@ -243,7 +243,7 @@ describe('SeatStreamRelay.tick: 읽은 묶음을 차례대로 보내고 확인�
     expect(w.pending.get(EV_A)).toEqual([]);
   });
 
-  test('ASVS16.2.5_넘긴 항목은 경고 로그에 항목 ID와 type만 남기고 값 칸(계정·구매 세션·홀드·좌석 ID)은 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('넘긴 항목은 경고 로그에 항목 ID와 type만 남기고 값 칸(계정·구매 세션·홀드·좌석 ID)은 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
     const secret = (n: number) => ({
       accountId: `acct-secret-${n}`,
       purchaseSessionId: `psid-secret-${n}`,
@@ -338,7 +338,7 @@ describe('SeatStreamRelay.tick: 읽은 묶음을 차례대로 보내고 확인�
 });
 
 describe('SeatStreamRelay.tick: 실패', () => {
-  test('ASVS16.5.2_publish가 던지면 ack하지 않고 failed(publish)이며, 다음 틱에 같은 항목을 다시 읽어 같은 레코드로 보낸 뒤에야 ack한다(적어도 한 번) [ASVS v5.0.0-16.5.2]', async () => {
+  test('publish가 던지면 ack하지 않고 failed(publish)이며, 다음 틱에 같은 항목을 다시 읽어 같은 레코드로 보낸 뒤에야 ack한다(적어도 한 번) [ASVS v5.0.0-16.5.2]', async () => {
     const entries = [held('1762225200000-0', 1), started('1762225200000-1')];
     const w = world({ [EV_A]: entries });
     const r = w.relay();
@@ -366,7 +366,7 @@ describe('SeatStreamRelay.tick: 실패', () => {
     expect(w.sentBy(PURCHASE_SESSION_TOPIC)).toBe(1);
   });
 
-  test('ASVS16.5.2_read 실패는 failed(read)이고 그 회차만 건너뛴다: 다른 회차는 보내고 확인한다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('read 실패는 failed(read)이고 그 회차만 건너뛴다: 다른 회차는 보내고 확인한다 [ASVS v5.0.0-16.5.2]', async () => {
     const b = [held('1762225200005-0', 3)];
     const w = world({ [EV_A]: [held('1762225200000-0', 1)], [EV_B]: b });
     w.fail.read = (e) => (e === EV_A ? new Error('redis down') : undefined);
@@ -380,7 +380,7 @@ describe('SeatStreamRelay.tick: 실패', () => {
     expect(w.pending.get(EV_A)).toHaveLength(1);
   });
 
-  test('ASVS16.5.2_한 회차의 publish 실패는 다른 회차의 보내기·확인을 막지 않는다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('한 회차의 publish 실패는 다른 회차의 보내기·확인을 막지 않는다 [ASVS v5.0.0-16.5.2]', async () => {
     const w = world({ [EV_A]: [held('1762225200000-0', 1)], [EV_B]: [held('1762225200005-0', 3)] });
     w.fail.publish = (records) => (records.some((r) => r.key === EV_A) ? new Error('kafka down') : undefined);
     const t = await w.relay().tick();
@@ -392,7 +392,7 @@ describe('SeatStreamRelay.tick: 실패', () => {
     expect(w.pending.get(EV_B)).toEqual([]);
   });
 
-  test('ASVS16.5.2_ack가 던지면 failed(ack)이고 acked 0이다. 확인되지 않은 항목은 다음 틱에 다시 읽어 다시 보낸다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('ack가 던지면 failed(ack)이고 acked 0이다. 확인되지 않은 항목은 다음 틱에 다시 읽어 다시 보낸다 [ASVS v5.0.0-16.5.2]', async () => {
     const entries = [held('1762225200000-0', 1)];
     const w = world({ [EV_A]: entries });
     const r = w.relay();
@@ -450,7 +450,7 @@ describe('SeatStreamRelay.start·stop', () => {
     await r.stop();
   });
 
-  test('ASVS16.5.2_stop은 돌던 틱(읽기·보내기·확인)이 끝날 때까지 기다리고, 그 뒤로 틱이 없다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('stop은 돌던 틱(읽기·보내기·확인)이 끝날 때까지 기다리고, 그 뒤로 틱이 없다 [ASVS v5.0.0-16.5.2]', async () => {
     const w = world({ [EV_A]: [held('1762225200000-0', 1)] });
     const gate = deferred();
     w.wait.events = () => gate.promise;

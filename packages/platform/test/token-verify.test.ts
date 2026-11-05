@@ -139,7 +139,7 @@ describe('공개키 묶음 다시 읽기(새 맥락 리뷰 2026-11-03)', () => {
     expect(await reason(v.verifyAccess(await sign(await key('fan-y')), { keySet: 'fan', audience: 'fan' }))).toBe('kid');
   });
 
-  test('ASVS v5.0.0-9.2.1_exp가없는토큰은_거절한다', async () => {
+  test('[ASVS v5.0.0-9.2.1]_exp가없는토큰은_거절한다', async () => {
     const noExp = await new SignJWT({ sid: 's-1', act: 'FAN_SENSITIVE', jti: 'j' })
       .setProtectedHeader({ alg: 'ES256', typ: 'reauth+jwt', kid: fan.kid })
       .setIssuer(ISS)

@@ -104,7 +104,7 @@ describe('RedisBookingRestrictions.read', () => {
     ['rid만', { rid: randomUUID() }],
     ['ver만', { ver: '3' }],
     ['until만', { until: String(UNTIL) }],
-  ])('ASVS16.5.3_st 칸이 없고 다른 칸(%s)만 있으면 망가진 사본이라 Error다(제한 없음으로 숨기지 않는다) [ASVS v5.0.0-16.5.3]', async (_label, fields) => {
+  ])('st 칸이 없고 다른 칸(%s)만 있으면 망가진 사본이라 Error다(제한 없음으로 숨기지 않는다) [ASVS v5.0.0-16.5.3]', async (_label, fields) => {
     const a = randomUUID();
     await put(a, fields);
     const err = await new RedisBookingRestrictions(redis).read(a).catch((e: unknown) => e);
@@ -160,7 +160,7 @@ describe('RedisBookingRestrictions.read', () => {
     ['UUID가 아님', 'acct-1'],
     ['해시 태그를 여는 {', '{x}'],
     ['빈 글', ''],
-  ])('ASVS1.2.4_계정 ID가 소문자 UUID가 아니면(%s) RangeError이고 좌석 Redis를 부르지 않는다 [ASVS v5.0.0-1.2.4]', async (_label, accountId) => {
+  ])('계정 ID가 소문자 UUID가 아니면(%s) RangeError이고 좌석 Redis를 부르지 않는다 [ASVS v5.0.0-1.2.4]', async (_label, accountId) => {
     const c = counting(redis);
     await expect(new RedisBookingRestrictions(c.redis).read(accountId)).rejects.toThrow(RangeError);
     expect(c.calls).toEqual([]);

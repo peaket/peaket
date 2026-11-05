@@ -1,5 +1,5 @@
 // 구매 세션 끝내기 유스케이스(EndPurchaseSession, BUILD_ORDER PRF-138, docs/features/seat-hold.md §2 '구매 세션 종료와 정리', 상태 기계 docs/planning/03 §2.2 T9·T11,
-// Q-T11(자리 즉시 비움), S-T33 ⑥(LEFT 뒤 같은 대기표 재입장), ASVS 16.2.5). 나가기(LEFT)와 결제 확정(COMPLETED)이 부르고, 정리 반복은 recordEnded로 IDLE·MAX_STAY의 사건을 더한다.
+// Q-T11(자리 즉시 비움), S-T33 ⑥(LEFT 뒤 같은 대기표 재입장), [ASVS v5.0.0-16.2.5]). 나가기(LEFT)와 결제 확정(COMPLETED)이 부르고, 정리 반복은 recordEnded로 IDLE·MAX_STAY의 사건을 더한다.
 // 차례: 세션 상태 지우기(store.end) → SESSION_ENDED 더하기(실패해도 끝난 것은 그대로, 로그 한 줄) → 지표.
 // 저장소는 메모리 구현(MemoryPurchaseSessionStore·RecordingSessionStartedLog), 시각은 주입한 가짜 시계다(고정 sleep 없음).
 import { inspect } from 'node:util';
@@ -131,7 +131,7 @@ describe('EndPurchaseSession.execute: 끝내기', () => {
 });
 
 describe('EndPurchaseSession.execute: 회차 확인(expectEventId, 받는 층이 403으로 바꾼다)', () => {
-  test('QT11_ASVS8.2.2_세션의 회차가 기대한 회차와 다르면 EndSessionError(EVENT_MISMATCH)로 거절하고 세션·정리 색인은 그대로이며 사건도 지표도 없다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('QT11_세션의 회차가 기대한 회차와 다르면 EndSessionError(EVENT_MISMATCH)로 거절하고 세션·정리 색인은 그대로이며 사건도 지표도 없다 [ASVS v5.0.0-8.2.2]', async () => {
     const w = await world();
     const jti = await w.open(EVENT_A);
     const p = w.uc.execute({ sessionId: jti, reason: 'LEFT', expectEventId: EVENT_B });
@@ -144,7 +144,7 @@ describe('EndPurchaseSession.execute: 회차 확인(expectEventId, 받는 층이
     expect(w.metrics).toEqual([]);
   });
 
-  test('QT11_ASVS8.2.2_기대한 회차가 세션의 회차와 같으면 끝낸다(true). 거절 뒤에도 같은 세션을 맞는 회차로 끝낼 수 있다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('QT11_기대한 회차가 세션의 회차와 같으면 끝낸다(true). 거절 뒤에도 같은 세션을 맞는 회차로 끝낼 수 있다 [ASVS v5.0.0-8.2.2]', async () => {
     const w = await world();
     const jti = await w.open(EVENT_A);
     await expect(w.uc.execute({ sessionId: jti, reason: 'LEFT', expectEventId: EVENT_B })).rejects.toBeInstanceOf(EndSessionError);
@@ -175,7 +175,7 @@ describe('EndPurchaseSession.execute: 사건 더하기가 실패해도 끝낸 �
     ['unavailable', undefined],
     ['oom', 'oom'],
   ] as const)(
-    'QT11_ST33_ASVS16.2.5_SESSION_ENDED 더하기가 좌석 Redis 장애(%s)로 실패해도 던지지 않고 true이며 세션은 이미 끝났다. warn 한 줄에는 오류 이름만 있고 세션 ID·키 이름·오류 글은 없고 지표는 한 번이다 [ASVS v5.0.0-16.2.5]',
+    'QT11_ST33_SESSION_ENDED 더하기가 좌석 Redis 장애(%s)로 실패해도 던지지 않고 true이며 세션은 이미 끝났다. warn 한 줄에는 오류 이름만 있고 세션 ID·키 이름·오류 글은 없고 지표는 한 번이다 [ASVS v5.0.0-16.2.5]',
     async (_what, reason) => {
       const w = await world();
       const jti = await w.open(EVENT_A);
@@ -266,7 +266,7 @@ describe('EndPurchaseSession.execute: 지표 purchase_sessions_ended_total{reaso
 });
 
 describe('EndPurchaseSession.execute: 입력 모양', () => {
-  test.each(['', 'a b', 'a}b', 'a:b', 'x'.repeat(65), 'a\nb'])('QT11_ASVS2.1.1_sessionId %j 가 키 조각 모양이 아니면 RangeError이고 저장소·사건·지표를 건드리지 않는다 [ASVS v5.0.0-2.1.1]', async (bad) => {
+  test.each(['', 'a b', 'a}b', 'a:b', 'x'.repeat(65), 'a\nb'])('QT11_sessionId %j 가 키 조각 모양이 아니면 RangeError이고 저장소·사건·지표를 건드리지 않는다 [ASVS v5.0.0-2.1.1]', async (bad) => {
     const w = await world();
     const jti = await w.open();
     await expect(w.uc.execute({ sessionId: bad, reason: 'LEFT' })).rejects.toBeInstanceOf(RangeError);
@@ -293,7 +293,7 @@ describe('EndPurchaseSession.recordEnded: 정리 반복이 끝낸 세션의 사�
     expect(w.warns).toEqual([]);
   });
 
-  test('QT11_ASVS16.2.5_recordEnded는 사건 더하기가 실패해도 던지지 않고 warn 한 줄(오류 이름만)을 남기며 지표는 한 번이다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('QT11_recordEnded는 사건 더하기가 실패해도 던지지 않고 warn 한 줄(오류 이름만)을 남기며 지표는 한 번이다 [ASVS v5.0.0-16.2.5]', async () => {
     const w = await world();
     const jti = await w.open(EVENT_A);
     w.log.failEndedWith = new SeatStoreUnavailable(new Error(`down s:{event:${EVENT_A}}:stream ${jti}`));

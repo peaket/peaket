@@ -93,7 +93,7 @@ function deferred() {
 }
 
 describe('다시 보냄과 다른 본문', () => {
-  test('ASVS_2_3_4_FND080_같은키같은본문은_업무를한번만하고_처음결과를돌려준다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('FND080_같은키같은본문은_업무를한번만하고_처음결과를돌려준다 [ASVS v5.0.0-2.3.4]', async () => {
     const a = await run(req('{"v":1}'));
     const b = await run(req('{"v":1}'));
     expect(a).toEqual({ id: 'item-' + seq, replayed: false, executed: true });
@@ -133,7 +133,7 @@ describe('다시 보냄과 다른 본문', () => {
 });
 
 describe('처리 중(lock_timeout)', () => {
-  test('ASVS_2_3_4_FND080_처리중인첫요청이_기다림안에커밋하면_뒤요청은그결과를받는다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('FND080_처리중인첫요청이_기다림안에커밋하면_뒤요청은그결과를받는다 [ASVS v5.0.0-2.3.4]', async () => {
     const entered = deferred();
     const release = deferred();
     const first = run(req('{"v":1}'), {
@@ -150,7 +150,7 @@ describe('처리 중(lock_timeout)', () => {
     expect(await items()).toBe(1);
   });
 
-  test('ASVS_13_1_3_FND080_첫요청이기다림을넘기면_409와RetryAfter1이다 [ASVS v5.0.0-13.1.3]', async () => {
+  test('FND080_첫요청이기다림을넘기면_409와RetryAfter1이다 [ASVS v5.0.0-13.1.3]', async () => {
     const entered = deferred();
     const release = deferred();
     const first = run(req('{"v":1}'), {

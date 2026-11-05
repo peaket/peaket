@@ -123,7 +123,7 @@ export function sessionIndexCases(make: () => Promise<IndexHarness> | IndexHarne
     expect((await h.startedItems(e2)).map((x) => x.purchaseSessionId)).toEqual([b]);
   });
 
-  test('ASVS1.2.4_appendStarted의 항목 모양이 틀리면 RangeError이고 Stream도 색인도 쓰지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
+  test('appendStarted의 항목 모양이 틀리면 RangeError이고 Stream도 색인도 쓰지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
     const h = await make();
     const eventId = newEvent();
     const jti = newMember();
@@ -196,7 +196,7 @@ export function sessionIndexCases(make: () => Promise<IndexHarness> | IndexHarne
     expect(await h.index.due(e2, 9_000_000, 10)).toEqual([b]);
   });
 
-  test('ASVS1.2.4_due의 limit이 1 이상의 정수가 아니거나 nowMs가 0 이상의 안전한 정수가 아니거나 회차 ID가 키 조각 모양이 아니면 RangeError다 [ASVS v5.0.0-1.2.4]', async () => {
+  test('due의 limit이 1 이상의 정수가 아니거나 nowMs가 0 이상의 안전한 정수가 아니거나 회차 ID가 키 조각 모양이 아니면 RangeError다 [ASVS v5.0.0-1.2.4]', async () => {
     const h = await make();
     const eventId = newEvent();
     await h.seed(eventId, newMember(), 1_000);
@@ -254,7 +254,7 @@ export function sessionIndexCases(make: () => Promise<IndexHarness> | IndexHarne
     expect((await h.members(eventId)).size).toBe(0);
   });
 
-  test('ASVS1.2.4_requeue의 회차 ID·jti가 키 조각 모양이 아니거나 점수가 0 이상의 안전한 정수가 아니면 RangeError이고 색인을 바꾸지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
+  test('requeue의 회차 ID·jti가 키 조각 모양이 아니거나 점수가 0 이상의 안전한 정수가 아니면 RangeError이고 색인을 바꾸지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
     const h = await make();
     const eventId = newEvent();
     const a = newMember();
@@ -295,7 +295,7 @@ export function sessionIndexCases(make: () => Promise<IndexHarness> | IndexHarne
     expect(await h.index.due(e1, 9_000_000, 10)).toEqual([]);
   });
 
-  test('ASVS1.2.4_drop의 회차 ID·jti가 키 조각 모양이 아니면 RangeError이고 색인을 바꾸지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
+  test('drop의 회차 ID·jti가 키 조각 모양이 아니면 RangeError이고 색인을 바꾸지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
     const h = await make();
     const eventId = newEvent();
     const a = newMember();
@@ -375,7 +375,7 @@ export function sessionIndexCases(make: () => Promise<IndexHarness> | IndexHarne
     expect(await h.endedItems(eventId)).toEqual([e]);
   });
 
-  test('ASVS1.2.4_appendEnded의 항목 모양이 틀리면 RangeError이고 Stream도 색인도 바꾸지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
+  test('appendEnded의 항목 모양이 틀리면 RangeError이고 Stream도 색인도 바꾸지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
     const h = await make();
     const eventId = newEvent();
     const jti = newMember();

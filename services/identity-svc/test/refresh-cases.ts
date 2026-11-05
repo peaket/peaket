@@ -1,4 +1,4 @@
-// 리프레시 토큰 회전·재시도 유예·재사용 탐지와 세션 종료 사건(docs/features/identity.md §3 '토큰 수명주기 구현', I-T4, I-T3의 발행 쪽, ASVS v5.0.0-7.2.4·7.4.1).
+// 리프레시 토큰 회전·재시도 유예·재사용 탐지와 세션 종료 사건(docs/features/identity.md §3 '토큰 수명주기 구현', I-T4, I-T3의 발행 쪽, [ASVS v5.0.0-7.2.4]·[ASVS v5.0.0-7.4.1]).
 // 메모리 저장소(단위)와 PostgreSQL 저장소(통합)에 같은 시험을 돌린다.
 import { describe, expect, test } from 'vitest';
 import type { CreateSessionInput } from '../src/modules/session/application/create-session.js';

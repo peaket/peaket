@@ -227,7 +227,7 @@ describe('구매 세션(401 purchase-session-ended)', () => {
     expect(fx.calls).toEqual(['sessions.get']);
   });
 
-  test('FR011_ASVS8.2.2_구매 세션의 계정이 요청 계정과 다르면 SESSION_ENDED이고 그 뒤를 부르지 않는다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('FR011_구매 세션의 계정이 요청 계정과 다르면 SESSION_ENDED이고 그 뒤를 부르지 않는다 [ASVS v5.0.0-8.2.2]', async () => {
     fx.session = { sessionId: PSID, accountId: OTHER_ACCOUNT, eventId: EVENT, journeyId: JOURNEY };
     expect(await run()).toEqual(rejected('SESSION_ENDED'));
     expect(fx.calls).toEqual(['sessions.get']);
@@ -317,14 +317,14 @@ describe('주문 읽기(404 not-found, S-T29 ⑥)', () => {
     expect(fx.calls).toEqual(['sessions.get', 'reads.findCommitted', 'reads.order']);
   });
 
-  test('ST29_⑥_ASVS8.2.2_남의 계정의 주문이면 NOT_FOUND이고 그 주문의 시도를 읽지도 쓰지도 않는다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('ST29_⑥_남의 계정의 주문이면 NOT_FOUND이고 그 주문의 시도를 읽지도 쓰지도 않는다 [ASVS v5.0.0-8.2.2]', async () => {
     fx.order = okOrder({ accountId: OTHER_ACCOUNT });
     expect(await run()).toEqual(rejected('NOT_FOUND'));
     expect(fx.calls).toEqual(['sessions.get', 'reads.findCommitted', 'reads.order']);
     expect(fx.mismatchLogs).toEqual([]);
   });
 
-  test('ST29_③_ASVS8.2.2_같은 계정이라도 다른 구매 세션(다른 탭)에서 만든 주문이면 NOT_FOUND다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('ST29_③_같은 계정이라도 다른 구매 세션(다른 탭)에서 만든 주문이면 NOT_FOUND다 [ASVS v5.0.0-8.2.2]', async () => {
     fx.order = okOrder({ purchaseSessionId: OTHER_PSID });
     expect(await run()).toEqual(rejected('NOT_FOUND'));
     expect(fx.calls).toEqual(['sessions.get', 'reads.findCommitted', 'reads.order']);
@@ -395,7 +395,7 @@ describe('PT28 활성 결제 시도 대조(409 payment-attempt-mismatch, 보안 
     noAccept();
   }
 
-  test('PT28_ASVS16.3.2_활성 시도가 없으면 ATTEMPT_MISMATCH이고 보안 로그(no_attempt) 한 줄이다 [ASVS v5.0.0-16.3.2]', async () => {
+  test('PT28_활성 시도가 없으면 ATTEMPT_MISMATCH이고 보안 로그(no_attempt) 한 줄이다 [ASVS v5.0.0-16.3.2]', async () => {
     fx.attempt = undefined;
     expect(await run()).toEqual(rejected('ATTEMPT_MISMATCH'));
     mismatched('no_attempt');
@@ -442,13 +442,13 @@ describe('PT28 활성 결제 시도 대조(409 payment-attempt-mismatch, 보안 
     ['포트원 시도에 토스 본문', 'PORTONE', () => tossBody()],
     ['토스 시도에 시뮬레이터 본문', 'TOSS', () => tossBody({ pg: 'SIMULATOR' })],
     ['시뮬레이터 시도에 토스 본문', 'SIMULATOR', () => tossBody()],
-  ])('PT28_ASVS2.2.3_본문 pg가 시도의 결제사와 다르면(%s) ATTEMPT_MISMATCH이고 pg_mismatch다 [ASVS v5.0.0-2.2.3]', async (_label, pg, body) => {
+  ])('PT28_본문 pg가 시도의 결제사와 다르면(%s) ATTEMPT_MISMATCH이고 pg_mismatch다 [ASVS v5.0.0-2.2.3]', async (_label, pg, body) => {
     fx.attempt = okAttempt({ pg });
     expect(await run(acceptCommand({ body: body() }))).toEqual(rejected('ATTEMPT_MISMATCH'));
     mismatched('pg_mismatch');
   });
 
-  test('PT28_ASVS2.2.3_포트원 본문 paymentId가 시도의 pg_order_ref와 다르면 payment_id_mismatch다 [ASVS v5.0.0-2.2.3]', async () => {
+  test('PT28_포트원 본문 paymentId가 시도의 pg_order_ref와 다르면 payment_id_mismatch다 [ASVS v5.0.0-2.2.3]', async () => {
     fx.attempt = okAttempt({ pg: 'PORTONE' });
     expect(await run(acceptCommand({ body: portoneBody({ paymentId: `pay-${OTHER_PSID}` }) }))).toEqual(rejected('ATTEMPT_MISMATCH'));
     mismatched('payment_id_mismatch');
@@ -502,7 +502,7 @@ describe('PT28 활성 결제 시도 대조(409 payment-attempt-mismatch, 보안 
 
 describe('PT7 금액 대조(400, 토스·시뮬레이터)', () => {
   test.each([[AMOUNT + 1], [AMOUNT - 1], [0], [AMOUNT * 2]])(
-    'PT7_ASVS2.2.3_ASVS16.3.3_토스 본문 amount %d가 주문 금액과 다르면 AMOUNT_MISMATCH이고 보안 로그 한 줄(계정·주문·amount_mismatch, 금액 없음)을 남기며 슬롯·쓰기를 부르지 않는다 [ASVS v5.0.0-2.2.3] [ASVS v5.0.0-16.3.3]',
+    'PT7_토스 본문 amount %d가 주문 금액과 다르면 AMOUNT_MISMATCH이고 보안 로그 한 줄(계정·주문·amount_mismatch, 금액 없음)을 남기며 슬롯·쓰기를 부르지 않는다 [ASVS v5.0.0-2.2.3] [ASVS v5.0.0-16.3.3]',
     async (amount) => {
       expect(await run(acceptCommand({ body: tossBody({ amount }) }))).toEqual(rejected('AMOUNT_MISMATCH'));
       // 금액 변조도 보안 사건이라 대조 실패와 같은 꼴의 로그 한 줄을 남긴다(payment §2 '활성 결제 시도 대조', 2026-11-05 정본 바로잡음)
@@ -563,7 +563,7 @@ describe('회차 슬롯 읽기(423 sale-paused·503 seat-store-unavailable)', ()
     noAccept();
   });
 
-  test('ASVS16.5.3_망가진 세대 키(어댑터의 Error)는 그대로 던지고 쓰기를 부르지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
+  test('망가진 세대 키(어댑터의 Error)는 그대로 던지고 쓰기를 부르지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
     const corrupt = new Error('PEAKET_CORRUPT_KEY s:{event:x}:epoch');
     fx.slot = corrupt;
     await expect(run()).rejects.toBe(corrupt);

@@ -82,7 +82,7 @@ function errorOf(raw: unknown): SeatMapFileError {
 // ── (a) parseEventSeatMapFile ───────────────────────────────────────────────────────────────────────────────────
 
 describe('parseEventSeatMapFile: 정상 판', () => {
-  test('ST30_ASVS2.1.2_구역 둘의 판을 해석한다: 구역 색인 = 배열 차례, 구역 안 거리 = 색인 − from, 등급 = 좌석 tierId ?? 구역 tierId, 판매 제외석은 byId에 없고 byIndex에만 있다 [ASVS v5.0.0-2.1.2]', () => {
+  test('ST30_구역 둘의 판을 해석한다: 구역 색인 = 배열 차례, 구역 안 거리 = 색인 − from, 등급 = 좌석 tierId ?? 구역 tierId, 판매 제외석은 byId에 없고 byIndex에만 있다 [ASVS v5.0.0-2.1.2]', () => {
     const p = parseEventSeatMapFile(EVENT, validFile());
     expect(p.sections).toEqual([
       { sectionIndex: 0, sectionId: 'SEC-A', from: 0, to: 2 },
@@ -149,13 +149,13 @@ describe('parseEventSeatMapFile: 정상 판', () => {
 });
 
 describe('parseEventSeatMapFile: 크기 한도(재검토 2026-11-04)', () => {
-  test('ASVS2.1.1_구역이 65,535개를 넘으면(구역 표 sectionCount가 u16이라 전체 스냅샷을 만들 수 없다) 받지 않는다. 65,535개는 받는다', () => {
+  test('[ASVS v5.0.0-2.1.1]_구역이 65,535개를 넘으면(구역 표 sectionCount가 u16이라 전체 스냅샷을 만들 수 없다) 받지 않는다. 65,535개는 받는다', () => {
     const sections = (n: number) => Array.from({ length: n }, (_, i) => section(`S${i}`, i, i, [seat(`Z${i}`, i)]));
     expect(codeOf(file(sections(65_535)))).toBe('ok');
     expect(codeOf(file(sections(65_536)))).toBe('BAD_SECTION_RANGE');
   });
 
-  test('ASVS2.1.1_회차 좌석 수(가장 큰 to + 1)가 1,000,000 [가정]을 넘거나 비트 오프셋 한도를 넘는 범위는 받지 않는다. 한도 정확히는 받는다', () => {
+  test('[ASVS v5.0.0-2.1.1]_회차 좌석 수(가장 큰 to + 1)가 1,000,000 [가정]을 넘거나 비트 오프셋 한도를 넘는 범위는 받지 않는다. 한도 정확히는 받는다', () => {
     const big = (to: number) => file([section('SEC-A', 0, to, [seat('A01', 0)])]);
     expect(codeOf(big(999_999))).toBe('ok');
     for (const to of [1_000_000, 2 ** 32, Number.MAX_SAFE_INTEGER]) expect(codeOf(big(to)), String(to)).toBe('BAD_SECTION_RANGE');
@@ -221,7 +221,7 @@ describe('parseEventSeatMapFile: 오류 코드(하나라도 어기면 그 파일
     }
   });
 
-  test('ASVS1.2.4_BAD_SEAT: 좌석 ID가 좌석 ID 모양(영문·숫자·_·-, 1~64자)이 아니다 [ASVS v5.0.0-1.2.4]', () => {
+  test('BAD_SEAT: 좌석 ID가 좌석 ID 모양(영문·숫자·_·-, 1~64자)이 아니다 [ASVS v5.0.0-1.2.4]', () => {
     for (const seatId of ['', 'a b', 'x'.repeat(65), 'a/b', 'a}b', 'é', 7, undefined, null]) {
       expect(codeOf(file([section('SEC-A', 0, 1, [seat(seatId, 0)])])), JSON.stringify(seatId) ?? 'undefined').toBe('BAD_SEAT');
     }
@@ -262,7 +262,7 @@ describe('parseEventSeatMapFile: 오류 코드(하나라도 어기면 그 파일
     for (const sectionId of [undefined, '', 7, null]) expect(codeOf(file([section(sectionId, 0, 1, [seat('A01', 0)])])), JSON.stringify(sectionId) ?? 'undefined').toBe('BAD_SECTION_ID');
   });
 
-  test('ASVS16.2.5_오류 글과 객체에 좌석 ID가 들어가지 않는다: 좌석 ID가 틀렸든 겹쳤든 범위 밖이든 이유 코드만 알린다 [ASVS v5.0.0-16.2.5]', () => {
+  test('오류 글과 객체에 좌석 ID가 들어가지 않는다: 좌석 ID가 틀렸든 겹쳤든 범위 밖이든 이유 코드만 알린다 [ASVS v5.0.0-16.2.5]', () => {
     const cases: Array<[SeatMapFileErrorCode, unknown, string]> = [
       ['BAD_SEAT', file([section('SEC-A', 0, 1, [seat('SECRET SEAT/ID-1', 0)])]), 'SECRET SEAT/ID-1'],
       ['SEAT_ID_DUPLICATE', file([section('SEC-A', 0, 3, [seat('DUPSEAT-77', 0), seat('DUPSEAT-77', 1)])]), 'DUPSEAT-77'],
@@ -441,7 +441,7 @@ describe('LayoutSeatMap: 없음·틀림·읽기 실패는 missingTtlMs 동안 �
     expect(source.loads).toHaveLength(2);
   });
 
-  test('ASVS16.2.5_틀린 판 파일은 없는 것으로 보고(config·sections undefined, resolve·byIndex 모두 undefined) logger.warn 한 줄만 남긴다: 회차 ID와 이유 코드만, 좌석 ID·파일 내용은 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('틀린 판 파일은 없는 것으로 보고(config·sections undefined, resolve·byIndex 모두 undefined) logger.warn 한 줄만 남긴다: 회차 ID와 이유 코드만, 좌석 ID·파일 내용은 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
     const { source, warns, map } = setup();
     source.files.set(EVENT, file([section('SEC-A', 0, 1, [seat('SEATSECRET-1', 0), seat('SEATSECRET-1', 1)])], { perAccountLimit: 9 }));
     expect(await map.config(EVENT)).toBeUndefined();
@@ -461,7 +461,7 @@ describe('LayoutSeatMap: 없음·틀림·읽기 실패는 missingTtlMs 동안 �
     expect(warns).toHaveLength(1);
   });
 
-  test('ASVS16.2.5_틀린 판 파일의 이유 코드는 판 해석의 코드 그대로 한 줄에 싣는다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('틀린 판 파일의 이유 코드는 판 해석의 코드 그대로 한 줄에 싣는다 [ASVS v5.0.0-16.2.5]', async () => {
     const { source, warns, map } = setup();
     source.files.set(EVENT, file([section('SEC-A', 0, 1, [seat('A01', 0), seat('A01', 1)])]));
     await map.config(EVENT);
@@ -583,7 +583,7 @@ describe('LayoutSeatMap.refresh: 읽은 회차를 다시 읽어 바꾼다', () =
     expect([...source.loads].sort()).toEqual([EVENT, 'ev-2']);
   });
 
-  test('ASVS16.2.5_다시 읽기가 실패하면(읽기 오류) 이전 판을 그대로 두고 던지지 않으며 warn 한 줄(회차 ID만)을 남긴다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('다시 읽기가 실패하면(읽기 오류) 이전 판을 그대로 두고 던지지 않으며 warn 한 줄(회차 ID만)을 남긴다 [ASVS v5.0.0-16.2.5]', async () => {
     const { source, warns, map } = setup();
     const before = await map.config(EVENT);
     source.failures.set(EVENT, new Error('EIO /secret/dir/ev-1.json 내용SECRET'));
@@ -600,7 +600,7 @@ describe('LayoutSeatMap.refresh: 읽은 회차를 다시 읽어 바꾼다', () =
     expect((await map.config(EVENT))?.layoutVersion).toBe('8');
   });
 
-  test('ASVS16.2.5_다시 읽은 파일이 틀렸으면(검사 실패) 이전 판을 그대로 두고 던지지 않으며 warn 한 줄(회차 ID와 이유 코드)을 남긴다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('다시 읽은 파일이 틀렸으면(검사 실패) 이전 판을 그대로 두고 던지지 않으며 warn 한 줄(회차 ID와 이유 코드)을 남긴다 [ASVS v5.0.0-16.2.5]', async () => {
     const { source, warns, map } = setup();
     const before = await map.config(EVENT);
     source.files.set(EVENT, file([section('SEC-A', 0, 1, [seat('SEATSECRET-2', 0), seat('SEATSECRET-2', 1)])], {}, { layoutVersion: 9 }));
@@ -759,7 +759,7 @@ describe('FileSeatMapSource: 폴더의 {eventId}.json을 읽는다', () => {
     await expect(src.load('empty')).rejects.toThrow();
   });
 
-  test('ASVS1.2.4_회차 ID가 KEY_PART 모양이 아니면(../x, a/b, 빈 글, 65자 …) 파일에 닿지 않고 undefined다. 폴더 밖의 파일을 읽지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
+  test('회차 ID가 KEY_PART 모양이 아니면(../x, a/b, 빈 글, 65자 …) 파일에 닿지 않고 undefined다. 폴더 밖의 파일을 읽지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
     const src = new FileSeatMapSource(dir);
     const secret = JSON.stringify({ secret: true });
     await writeFile(join(root, 'x.json'), secret, 'utf8'); // 폴더 밖
@@ -854,7 +854,7 @@ describe('parseTierPrices: 판 파일의 선택 칸 tierPrices', () => {
     expect(parseTierPrices({ R: 1, NOT_IN_LAYOUT: 2 })).toEqual({ R: 1, NOT_IN_LAYOUT: 2 });
   });
 
-  test('FR011_ASVS1.3.3_결과는 얼린 새 객체이고 프로토타입이 없다: 받은 값을 고쳐도 결과가 바뀌지 않는다 [ASVS v5.0.0-1.3.3]', () => {
+  test('FR011_결과는 얼린 새 객체이고 프로토타입이 없다: 받은 값을 고쳐도 결과가 바뀌지 않는다 [ASVS v5.0.0-1.3.3]', () => {
     const raw: Record<string, number> = { R: 1_000 };
     const p = parseTierPrices(raw)!;
     expect(p).not.toBe(raw);
@@ -886,7 +886,7 @@ describe('parseTierPrices: 판 파일의 선택 칸 tierPrices', () => {
     expect(priceCodeOf({ ['T'.repeat(64)]: 1 })).toBe('ok');
   });
 
-  test('FR011_ASVS1.3.3_JSON에서 온 __proto__ 칸도 자기 속성으로 검사한다: 값이 객체면 BAD_TIER_PRICES이고 결과 객체의 프로토타입을 바꾸지 않는다 [ASVS v5.0.0-1.3.3]', () => {
+  test('FR011_JSON에서 온 __proto__ 칸도 자기 속성으로 검사한다: 값이 객체면 BAD_TIER_PRICES이고 결과 객체의 프로토타입을 바꾸지 않는다 [ASVS v5.0.0-1.3.3]', () => {
     expect(priceCodeOf(JSON.parse('{"R": 1, "__proto__": {"polluted": 1}}'))).toBe('BAD_TIER_PRICES');
     const ok = parseTierPrices(JSON.parse('{"R": 1}'))!;
     expect(Object.getPrototypeOf(ok)).toBeNull();
@@ -943,7 +943,7 @@ describe('LayoutSeatMap: 가격만 바뀐 판 파일도 새 판으로 본다', (
     expect((await map.resolve(EVENT, ['A01']))[0]).toBe(a1);
   });
 
-  test('FR011_ASVS16.2.5_다시 읽은 파일의 tierPrices가 틀리면 이전 판(이전 가격)을 그대로 두고 warn 한 줄(이유 코드 BAD_TIER_PRICES)을 남긴다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('FR011_다시 읽은 파일의 tierPrices가 틀리면 이전 판(이전 가격)을 그대로 두고 warn 한 줄(이유 코드 BAD_TIER_PRICES)을 남긴다 [ASVS v5.0.0-16.2.5]', async () => {
     const { source, warns, map } = setup();
     source.files.set(EVENT, file([secA(), secB()], { tierPrices: { R: 1_000 } }));
     expect((await map.config(EVENT))?.tierPrices).toEqual({ R: 1_000 });

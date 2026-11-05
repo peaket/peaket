@@ -65,7 +65,7 @@ function safeJson(s: string): unknown {
   }
 }
 
-describe('설정(ASVS v5.0.0-13.3.1·13.4.2·13.4.5)', () => {
+describe('설정([ASVS v5.0.0-13.3.1]·[ASVS v5.0.0-13.4.2]·[ASVS v5.0.0-13.4.5])', () => {
   it('운영이거나 환경 값이 없으면 시작하지 않는다', () => {
     expect(() => loadSimulatorConfig({ PG_SIMULATOR_SECRET_KEY: KEY })).toThrow(/PEAKET_ENV/);
     expect(() => loadSimulatorConfig({ PEAKET_ENV: 'prod', PG_SIMULATOR_SECRET_KEY: KEY })).toThrow(/PEAKET_ENV/);
@@ -91,7 +91,7 @@ describe('설정(ASVS v5.0.0-13.3.1·13.4.2·13.4.5)', () => {
   });
 });
 
-describe('기본 인증(ASVS v5.0.0-8.2.1)', () => {
+describe('기본 인증([ASVS v5.0.0-8.2.1])', () => {
   it('키가 다르거나 없으면 401 UNAUTHORIZED_KEY이고 상태가 바뀌지 않는다', async () => {
     const s = make();
     const key = await s.authenticate();

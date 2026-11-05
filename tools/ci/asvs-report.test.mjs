@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { buildReport, readAsvsDocs, scanTaggedSources } from './asvs-report.mjs';
+import { buildReport, readAsvsDocs, scanTaggedSources, summaryMarkdown } from './asvs-report.mjs';
 
 const TOOL = fileURLToPath(new URL('./asvs-report.mjs', import.meta.url));
 const HEADER = '| ASVS ID | 레벨 | 요구사항 요약 | 적용 여부 | 구현 위치 | 테스트 결과 | 미적용 사유 |\n| --- | --- | --- | --- | --- | --- | --- |\n';
@@ -119,4 +119,42 @@ test('재검토_부분적용행도적용으로세고_설계검사행은따로세
   assert.deepEqual(r.looseTags, ['대괄호 없이 ASVS v5.0.0-2.3.4']);
   // 원본에서 본 꼴이 다른 태그도 알린다(파일과 꼴)
   assert.deepEqual(r.looseSources.map((x) => x.tag).sort(), ['ASVS v5.0.0-2.3.4', 'ASVS-v5.0.0-2.3.4']);
+});
+
+test('재검토2_판번호없는꼴(ASVS2.1.1_·ASVS-6.1.2·ASVS 14.3.2)도읽어꼴이다르다고알리고_요약에보고서수를적는다', () => {
+  const f = fixture();
+  writeFileSync(join(f.src, 'test', 'nover.test.mjs'), "test('ASVS-6.2.1_길이', () => {});\ntest('ASVS7.2.4_회전', () => {});\ndescribe('묶음(ASVS 7.3.9)', () => {});\ntest('ASVS v5.0.0 L2 기준선 문장', () => {});\n");
+  const r = buildReport({ docsDir: f.docs, reports: [f.report], scan: [f.src] });
+  assert.deepEqual(r.looseSources.filter((x) => x.file.endsWith('nover.test.mjs')).map((x) => x.tag), ['ASVS-6.2.1', 'ASVS7.2.4', 'ASVS 7.3.9']);
+  assert.ok(!r.unknownIds.includes('v5.0.0-5.0.0'));
+  assert.equal(r.reportCount, 1);
+  assert.match(summaryMarkdown(r), /보고서 1개/);
+});
+
+test('재검토3_이름하나안의같은태그는한번세고_옛판표기(4.0.3)는태그가아니며_문장끝마침표·v없는판표기도읽는다', () => {
+  const f = fixture();
+  writeFileSync(join(f.src, 'test', 'r3.test.mjs'), "test('두 번 [ASVS v5.0.0-6.2.1] 다시 [ASVS v5.0.0-6.2.1]', () => {});\n// OWASP ASVS 4.0.3 기준\n// 끝 (ASVS 7.3.9.)\n// 판 ASVS 5.0.0-7.2.4 표기\n");
+  const report = join(f.root, 'r3.json');
+  writeFileSync(report, JSON.stringify({ testResults: [{ assertionResults: [{ fullName: '두 번 [ASVS v5.0.0-6.2.1] 다시 [ASVS v5.0.0-6.2.1]', status: 'passed' }] }] }));
+  const r = buildReport({ docsDir: f.docs, reports: [report], scan: [f.src] });
+  assert.equal(r.rows.find((x) => x.doc === 'auth.md' && x.id === 'v5.0.0-6.2.1').passed, 1);
+  assert.ok(!r.unknownIds.includes('v5.0.0-4.0.3'));
+  const tags = r.looseSources.filter((x) => x.file.endsWith('r3.test.mjs')).map((x) => x.tag);
+  assert.ok(tags.includes('ASVS 7.3.9'));
+  assert.ok(tags.includes('ASVS 5.0.0-7.2.4'));
+});
+
+test('재검토4_밑줄꼴(ASVS8_2_3_·ASVS_16_2_5_)도읽고_꼴알림은겹침을지우기전에보며_뒤에붙은빼기표도읽는다', () => {
+  const f = fixture();
+  writeFileSync(join(f.src, 'test', 'r4.test.mjs'), "test('ASVS6_2_1_길이', () => {});\ntest('ASVS_7_2_4_회전', () => {});\n// 범위 ASVS 7.3.9-7.3.10\n// 판 ASVS_5_0_0_ 표기\n");
+  const report = join(f.root, 'r4.json');
+  const names = ['앞 ASVS v5.0.0-6.2.1 끝 [ASVS v5.0.0-6.2.1]', '앞 [ASVS v5.0.0-7.2.4] 끝 ASVS v5.0.0-7.2.4', '정본만 [ASVS v5.0.0-7.3.9]'];
+  writeFileSync(report, JSON.stringify({ testResults: [{ assertionResults: names.map((fullName) => ({ fullName, status: 'passed' })) }] }));
+  const r = buildReport({ docsDir: f.docs, reports: [report], scan: [f.src] });
+  const tags = r.looseSources.filter((x) => x.file.endsWith('r4.test.mjs')).map((x) => x.tag);
+  assert.deepEqual(tags.sort(), ['ASVS 7.3.9', 'ASVS6_2_1', 'ASVS_7_2_4']);
+  assert.ok(!r.unknownIds.includes('v5.0.0-5.0.0'));
+  // 같은 ID가 겹친 이름은 순서와 관계없이 꼴 알림이 나고, 정본 꼴만 있는 이름은 알리지 않는다
+  assert.deepEqual(r.looseTags, names.slice(0, 2).sort());
+  assert.equal(r.rows.find((x) => x.doc === 'auth.md' && x.id === 'v5.0.0-6.2.1').passed, 1);
 });

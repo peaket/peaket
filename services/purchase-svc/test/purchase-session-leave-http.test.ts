@@ -1,5 +1,5 @@
 // 받는 층: 구매 세션 나가기 DELETE /v1/events/{eventId}/purchase-session(PurchaseSessionController, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'의 '구매 화면을 나갈 때(LEFT)',
-// BUILD_ORDER PRF-138, 상태 기계 T9·T11, Q-T11, S-T33 ⑥, ASVS 8.2.1·8.2.2). AppModule을 메모리 조립으로 띄워 fastify inject로 부른다.
+// BUILD_ORDER PRF-138, 상태 기계 T9·T11, Q-T11, S-T33 ⑥, [ASVS v5.0.0-8.2.1]·[ASVS v5.0.0-8.2.2]). AppModule을 메모리 조립으로 띄워 fastify inject로 부른다.
 // 실제 구매 세션 저장소(StoredPurchaseSessions)와 열기 유스케이스(OpenPurchaseSession)로 입장 토큰을 서명해 열고, 클라이언트 임시 키로 요청 인증 키를 따로 계산해 요청에 서명한다.
 import 'reflect-metadata';
 import { createPublicKey, diffieHellman, generateKeyPairSync, randomUUID } from 'node:crypto';
@@ -27,7 +27,7 @@ import { account, DAY, newEvent, SEAT_COUNT, SEAT_DEFS } from './hold-cases.js';
 import { clientKeyOf } from './session-fixtures.js';
 
 const NOW = Date.parse('2026-11-04T03:00:00.000Z');
-/** 서비스 로그(한 줄에 JSON 하나). 입장 토큰·jti가 로그에 남지 않는지 본다(ASVS 16.2.5) */
+/** 서비스 로그(한 줄에 JSON 하나). 입장 토큰·jti가 로그에 남지 않는지 본다([ASVS v5.0.0-16.2.5]) */
 const logs: string[] = [];
 const quiet = new Writable({
   write: (c, _e, cb) => {
@@ -173,7 +173,7 @@ const startedFor = (jti: string) => log.entries.filter((e) => e.purchaseSessionI
 const inIndex = (eventId: string, jti: string) => log.index.get(eventId)?.has(jti) ?? false;
 
 describe('DELETE /v1/events/{eventId}/purchase-session: 나가기(LEFT)', () => {
-  test('QT11_ST33_ASVS8.2.1_ 서명한 나가기는 204·no-store·빈 본문이고 구매 세션이 끝난다(상태 지워짐·SESSION_ENDED(LEFT) 한 건·정리 색인에서 빠짐·지표 한 번). 다른 팬의 세션은 그대로다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('QT11_ST33_ 서명한 나가기는 204·no-store·빈 본문이고 구매 세션이 끝난다(상태 지워짐·SESSION_ENDED(LEFT) 한 건·정리 색인에서 빠짐·지표 한 번). 다른 팬의 세션은 그대로다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = await world();
     const f = await w.fan(1);
     const other = await w.fan(2);
@@ -204,7 +204,7 @@ describe('DELETE /v1/events/{eventId}/purchase-session: 나가기(LEFT)', () => 
     expect(endedMetric).toEqual([]);
   });
 
-  test('QT11_ST33_ASVS9.1.1_ 서명 머리가 없거나 다른 키로 서명했거나 입장 토큰 머리가 없으면 401이고 세션은 그대로이며 일련번호도 올리지 않는다 [ASVS v5.0.0-9.1.1]', async () => {
+  test('QT11_ST33_ 서명 머리가 없거나 다른 키로 서명했거나 입장 토큰 머리가 없으면 401이고 세션은 그대로이며 일련번호도 올리지 않는다 [ASVS v5.0.0-9.1.1]', async () => {
     const w = await world();
     const f = await w.fan(4);
     const rs = {
@@ -217,7 +217,7 @@ describe('DELETE /v1/events/{eventId}/purchase-session: 나가기(LEFT)', () => 
     expect(endedFor(f.jti)).toEqual([]);
   });
 
-  test('QT11_ST33_ASVS8.2.1_ 남의 입장 토큰·다른 로그인 세션의 신원으로는 나가기가 401이고 그 세션을 끝내지 못한다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('QT11_ST33_ 남의 입장 토큰·다른 로그인 세션의 신원으로는 나가기가 401이고 그 세션을 끝내지 못한다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = await world();
     const f = await w.fan(5);
     const stranger = await w.fan(6);
@@ -230,7 +230,7 @@ describe('DELETE /v1/events/{eventId}/purchase-session: 나가기(LEFT)', () => 
     expect(log.endedEntries.filter((e) => e.purchaseSessionId === f.jti || e.purchaseSessionId === stranger.jti)).toEqual([]);
   });
 
-  test('QT11_ST33_ASVS8.2.2_ 구매 세션의 회차와 주소의 회차가 다르면 403·no-store이고 세션은 그대로이며 사건도 지표도 없다. 맞는 주소로 다시 보내면 204다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('QT11_ST33_ 구매 세션의 회차와 주소의 회차가 다르면 403·no-store이고 세션은 그대로이며 사건도 지표도 없다. 맞는 주소로 다시 보내면 204다 [ASVS v5.0.0-8.2.2]', async () => {
     const a = await world();
     const b = await world();
     const f = await a.fan(7);
@@ -276,7 +276,7 @@ describe('DELETE /v1/events/{eventId}/purchase-session: 나가기(LEFT)', () => 
     },
   );
 
-  test('QT11_ST33_ASVS8.1.1_ 팬이 아닌 역할(ops·partner·scanner)의 신원은 이 팬 경로를 못 쓴다: 플랫폼 가드가 401로 거절하고 세션은 그대로다 [ASVS v5.0.0-8.1.1]', async () => {
+  test('QT11_ST33_ 팬이 아닌 역할(ops·partner·scanner)의 신원은 이 팬 경로를 못 쓴다: 플랫폼 가드가 401로 거절하고 세션은 그대로다 [ASVS v5.0.0-8.1.1]', async () => {
     const w = await world();
     const f = await w.fan(9);
     for (const aud of ['ops', 'partner', 'scanner']) {
@@ -287,7 +287,7 @@ describe('DELETE /v1/events/{eventId}/purchase-session: 나가기(LEFT)', () => 
     expect(endedFor(f.jti)).toEqual([]);
   });
 
-  test('QT11_ASVS16.2.5_ 나가기를 처리해도 서비스 로그에 입장 토큰·구매 세션 ID가 남지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('QT11_ 나가기를 처리해도 서비스 로그에 입장 토큰·구매 세션 ID가 남지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
     const w = await world();
     const f = await w.fan(10);
     logs.length = 0;

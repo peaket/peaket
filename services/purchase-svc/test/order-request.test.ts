@@ -81,12 +81,12 @@ describe('buyerOf: 예매자 성명·번호(400)', () => {
   // 리뷰 고침 L1(2026-11-05): C0(U+0000~001F)·C1(U+007F~009F) 제어 문자가 든 성명·번호는 받지 않는다(빈칸 U+0020은 제어 문자가 아니다)
   const CONTROLS = ['\u0000', '\u0007', '\t', '\n', '\r', '\u001f', '\u007f', '\u0085', '\u009f'];
 
-  test.each(CONTROLS.map((ch) => [JSON.stringify(ch), ch]))('ASVS2.2.1_성명에 제어 문자 %s가 있으면 undefined다 [ASVS v5.0.0-2.2.1]', (_label, ch) => {
+  test.each(CONTROLS.map((ch) => [JSON.stringify(ch), ch]))('성명에 제어 문자 %s가 있으면 undefined다 [ASVS v5.0.0-2.2.1]', (_label, ch) => {
     expect(buyerOf({ name: `홍${ch}길동`, phone: '010-1234-5678' })).toBeUndefined();
     expect(buyerOf({ name: `홍길동${ch}`, phone: '010-1234-5678' })).toBeUndefined();
   });
 
-  test.each(CONTROLS.map((ch) => [JSON.stringify(ch), ch]))('ASVS2.2.1_번호에 제어 문자 %s가 있으면(빈칸처럼 빼지 않고) undefined다 [ASVS v5.0.0-2.2.1]', (_label, ch) => {
+  test.each(CONTROLS.map((ch) => [JSON.stringify(ch), ch]))('번호에 제어 문자 %s가 있으면(빈칸처럼 빼지 않고) undefined다 [ASVS v5.0.0-2.2.1]', (_label, ch) => {
     expect(buyerOf({ name: '홍길동', phone: `010-1234${ch}5678` })).toBeUndefined();
   });
 

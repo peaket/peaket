@@ -95,7 +95,7 @@ describe('열기', () => {
     expect(late.log.entries).toHaveLength(0);
   });
 
-  test('ASVS9.2.1_exp가 지난 입장 토큰은 TOKEN_EXPIRED다(열린 세션의 재시도도 같다) [ASVS v5.0.0-9.2.1]', async () => {
+  test('exp가 지난 입장 토큰은 TOKEN_EXPIRED다(열린 세션의 재시도도 같다) [ASVS v5.0.0-9.2.1]', async () => {
     const { uc, clock } = setup();
     const { cmd } = command();
     await uc.execute(cmd);
@@ -121,7 +121,7 @@ describe('열기', () => {
 });
 
 describe('거절', () => {
-  test('ASVS9.1.1_ASVS16.3.1_서명·typ·aud·iss·kid·모양이 틀린 입장 토큰은 TOKEN_INVALID이고 아무것도 열지 않는다. 이유는 로그에만 남고 토큰·계정은 싣지 않는다 [ASVS v5.0.0-9.1.1] [ASVS v5.0.0-16.3.1]', async () => {
+  test('서명·typ·aud·iss·kid·모양이 틀린 입장 토큰은 TOKEN_INVALID이고 아무것도 열지 않는다. 이유는 로그에만 남고 토큰·계정은 싣지 않는다 [ASVS v5.0.0-9.1.1] [ASVS v5.0.0-16.3.1]', async () => {
     const other = newKey('k1');
     const claims = (jti: string, over: Record<string, unknown> = {}) => claimsOf({ nowMs: NOW, jti }, over);
     const cases: Array<[string, string, string | undefined]> = [
@@ -152,14 +152,14 @@ describe('거절', () => {
     }
   });
 
-  test('ASVS16.3.1_토큰 거절 로그는 이유와 회차만 싣고 한 번에 한 줄이다 [ASVS v5.0.0-16.3.1]', async () => {
+  test('토큰 거절 로그는 이유와 회차만 싣고 한 번에 한 줄이다 [ASVS v5.0.0-16.3.1]', async () => {
     const { uc, warnings } = setup();
     const { cmd } = command({ token: 'x.y.z' });
     await codeOf(uc.execute(cmd));
     expect(warnings).toEqual([{ obj: { reason: 'format', code: 'TOKEN_INVALID', eventId: 'ev-1' }, msg: '구매 세션 열기 거절' }]);
   });
 
-  test('ASVS9.2.1_exp가 지난 토큰은 TOKEN_EXPIRED로 가른다 [ASVS v5.0.0-9.2.1]', async () => {
+  test('exp가 지난 토큰은 TOKEN_EXPIRED로 가른다 [ASVS v5.0.0-9.2.1]', async () => {
     const { uc, clock, warnings } = setup();
     const { cmd } = command();
     clock.advance(45 * 60_000);
@@ -167,7 +167,7 @@ describe('거절', () => {
     expect(warnings[0]!.obj).toMatchObject({ reason: 'expired', code: 'TOKEN_EXPIRED' });
   });
 
-  test('ASVS8.2.1_ASVS8.2.2_토큰의 계정·로그인 세션이 요청과 다르면 TOKEN_MISMATCH다(남의 토큰). 아무것도 열지 않는다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
+  test('토큰의 계정·로그인 세션이 요청과 다르면 TOKEN_MISMATCH다(남의 토큰). 아무것도 열지 않는다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
     for (const over of [{ accountId: 'acct-2' }, { loginSessionId: 'login-2' }]) {
       const { uc, store, log } = setup();
       const { jti, cmd } = command(over);
@@ -186,7 +186,7 @@ describe('거절', () => {
     expect(warnings[0]!.obj).toMatchObject({ code: 'EVENT_MISMATCH', eventId: 'ev-2' });
   });
 
-  test('ASVS8.2.1_토큰 검사가 임시 공개키 검사보다 먼저다(인증 실패가 입력 오류보다 먼저 드러난다). 토큰이 맞으면 임시 공개키가 틀린 것은 CLIENT_KEY_INVALID(400)이고 아무것도 열지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('토큰 검사가 임시 공개키 검사보다 먼저다(인증 실패가 입력 오류보다 먼저 드러난다). 토큰이 맞으면 임시 공개키가 틀린 것은 CLIENT_KEY_INVALID(400)이고 아무것도 열지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
     const both = setup();
     expect(await codeOf(both.uc.execute(command({ token: 'bad', clientKey: 'zzz' }).cmd))).toBe('TOKEN_INVALID');
     for (const clientKey of [undefined, '', 'AAAA', OTHER_CLIENT_KEY.slice(0, -1), Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString('base64url')]) {
@@ -298,7 +298,7 @@ describe('응답을 잃은 재시도와 다시 받은 입장 토큰(PRF-136 리�
     expect(log.entries).toHaveLength(1);
   });
 
-  test('ASVS16.2.5_열기 저장소의 쓰기 전 지킴 오류(PEAKET_CORRUPT_KEY s:session:{jti})는 키 이름 없이 코드만 담은 SessionStoreFailure로 던진다. 좌석 Redis 장애는 그대로 던진다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('열기 저장소의 쓰기 전 지킴 오류(PEAKET_CORRUPT_KEY s:session:{jti})는 키 이름 없이 코드만 담은 SessionStoreFailure로 던진다. 좌석 Redis 장애는 그대로 던진다 [ASVS v5.0.0-16.2.5]', async () => {
     const { uc, store } = setup();
     const { jti, cmd } = command();
     store.open = async () => {
@@ -388,7 +388,7 @@ describe('키 없는 재요청(BUILD_ORDER PRF-137: 세션이 열린 뒤에는 X
     expect(await late.store.read(b.jti)).toBeUndefined();
   });
 
-  test('ASVS9.2.1_키 없는 재요청도 exp가 지났으면 TOKEN_EXPIRED다 [ASVS v5.0.0-9.2.1]', async () => {
+  test('키 없는 재요청도 exp가 지났으면 TOKEN_EXPIRED다 [ASVS v5.0.0-9.2.1]', async () => {
     const { uc, clock } = setup();
     const { cmd } = command();
     await uc.execute(cmd);
@@ -396,7 +396,7 @@ describe('키 없는 재요청(BUILD_ORDER PRF-137: 세션이 열린 뒤에는 X
     expect(await codeOf(uc.execute(keyless({ cmd })))).toBe('TOKEN_EXPIRED');
   });
 
-  test('ASVS8.2.1_ASVS8.2.2_키 없는 재요청도 입장 토큰 검사가 먼저다: 남의 토큰은 TOKEN_MISMATCH, 다른 회차는 EVENT_MISMATCH, 서명이 틀리면 TOKEN_INVALID이고 열린 세션은 그대로다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
+  test('키 없는 재요청도 입장 토큰 검사가 먼저다: 남의 토큰은 TOKEN_MISMATCH, 다른 회차는 EVENT_MISMATCH, 서명이 틀리면 TOKEN_INVALID이고 열린 세션은 그대로다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
     const { uc, store } = setup();
     const { jti, cmd } = command();
     await uc.execute(cmd);
@@ -418,7 +418,7 @@ describe('키 없는 재요청(BUILD_ORDER PRF-137: 세션이 열린 뒤에는 X
     expect(log.entries).toHaveLength(1);
   });
 
-  test('ST28_ASVS8.2.1_열린 뒤 clientKey를 보냈는데 곡선 위의 점이 아니면(87자 base64url 모양이어도) CLIENT_KEY_INVALID(400)이고 세션은 그대로다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_열린 뒤 clientKey를 보냈는데 곡선 위의 점이 아니면(87자 base64url 모양이어도) CLIENT_KEY_INVALID(400)이고 세션은 그대로다 [ASVS v5.0.0-8.2.1]', async () => {
     const { uc, store, log } = setup();
     const { jti, cmd } = command();
     await uc.execute(cmd);

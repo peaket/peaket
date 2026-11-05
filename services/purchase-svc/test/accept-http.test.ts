@@ -244,7 +244,7 @@ describe('거절 → 문제 상세(ACCEPT_PROBLEMS 전부)', () => {
     expect(json(r)).toMatchObject({ type: problem('purchase-session-ended'), status: 401, title: '예매 시간이 끝났습니다' });
   });
 
-  test('PT7_ASVS16.2.5_금액 400은 받은 금액·주문 금액을 싣지 않는다(detail 없음) [ASVS v5.0.0-16.2.5]', async () => {
+  test('PT7_금액 400은 받은 금액·주문 금액을 싣지 않는다(detail 없음) [ASVS v5.0.0-16.2.5]', async () => {
     const r = await post(toss({ amount: 987_654_321 }));
     expect(r.statusCode).toBe(400);
     expect(json(r).detail).toBeUndefined();
@@ -252,7 +252,7 @@ describe('거절 → 문제 상세(ACCEPT_PROBLEMS 전부)', () => {
     expect(r.payload).not.toContain(String(AMOUNT));
   });
 
-  test('PT28_ASVS16.3.2_결제사가 다르면 409 payment-attempt-mismatch이고 보안 로그 한 줄(계정·주문·까닭)을 acceptLog에 남긴다 [ASVS v5.0.0-16.3.2]', async () => {
+  test('PT28_결제사가 다르면 409 payment-attempt-mismatch이고 보안 로그 한 줄(계정·주문·까닭)을 acceptLog에 남긴다 [ASVS v5.0.0-16.3.2]', async () => {
     fx.attempt = okAttempt({ pg: 'PORTONE' });
     const r = await post(toss());
     expect(r.statusCode).toBe(409);
@@ -292,7 +292,7 @@ describe('거절 → 문제 상세(ACCEPT_PROBLEMS 전부)', () => {
     expect(json(r)).toMatchObject({ type: problem('idempotency-request-in-progress'), status: 409 });
   });
 
-  test('FR011_ASVS16.2.5_트랜잭션의 DB 오류는 500 about:blank이고 오류 글을 응답에 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('FR011_트랜잭션의 DB 오류는 500 about:blank이고 오류 글을 응답에 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
     fx.outcome = new Error('DBSECRET connection terminated');
     const r = await post(toss());
     expect(r.statusCode).toBe(500);
@@ -376,7 +376,7 @@ describe('플랫폼 가드와 본문 모양(쓰임새에 닿기 전)', () => {
     expect(fx.calls).toEqual([]);
   });
 
-  test('PT28_ASVS15.3.3_허용 밖 칸은 400(about:blank)이고 쓰임새를 부르지 않는다: 토스에 orderId·포트원 칸, 포트원에 amount·paymentKey [ASVS v5.0.0-15.3.3]', async () => {
+  test('PT28_허용 밖 칸은 400(about:blank)이고 쓰임새를 부르지 않는다: 토스에 orderId·포트원 칸, 포트원에 amount·paymentKey [ASVS v5.0.0-15.3.3]', async () => {
     const bodies: unknown[] = [
       toss({ orderId: ORDER_ID }),
       toss({ paymentId: PORTONE_PAYMENT_ID }),
@@ -393,7 +393,7 @@ describe('플랫폼 가드와 본문 모양(쓰임새에 닿기 전)', () => {
     }
   });
 
-  test('PT28_ASVS2.2.1_pg가 모르는 값이거나 없으면 400이고 쓰임새를 부르지 않는다 [ASVS v5.0.0-2.2.1]', async () => {
+  test('PT28_pg가 모르는 값이거나 없으면 400이고 쓰임새를 부르지 않는다 [ASVS v5.0.0-2.2.1]', async () => {
     const { pg: _pg, ...noPg } = toss();
     for (const body of [toss({ pg: 'KAKAO' }), toss({ pg: 'toss' }), portone({ pg: 'PORTONE_V1' }), noPg]) {
       fx.reset();
@@ -403,7 +403,7 @@ describe('플랫폼 가드와 본문 모양(쓰임새에 닿기 전)', () => {
     }
   });
 
-  test('ASVS2.2.1_갈래의 필수 칸이 없거나 형이 틀리면 400이다: 토스 paymentKey·amount 없음, amount 글·소수, 포트원 paymentToken·txId·paymentId 없음, JSON 아님 [ASVS v5.0.0-2.2.1]', async () => {
+  test('갈래의 필수 칸이 없거나 형이 틀리면 400이다: 토스 paymentKey·amount 없음, amount 글·소수, 포트원 paymentToken·txId·paymentId 없음, JSON 아님 [ASVS v5.0.0-2.2.1]', async () => {
     const { paymentKey: _k, ...noKey } = toss();
     const { amount: _a, ...noAmount } = toss();
     const { paymentToken: _t, ...noToken } = portone();
@@ -437,7 +437,7 @@ describe('플랫폼 가드와 본문 모양(쓰임새에 닿기 전)', () => {
     ['포트원 txId', (v) => portone({ txId: v })],
   ];
 
-  test.each(REF_FIELDS)('ASVS2.2.1_%s가 1~200자의 보이는 ASCII가 아니면 400(about:blank)이고 쓰임새를 부르지 않으며 받은 값을 응답에 싣지 않는다 [ASVS v5.0.0-2.2.1]', async (_field, bodyOf) => {
+  test.each(REF_FIELDS)('%s가 1~200자의 보이는 ASCII가 아니면 400(about:blank)이고 쓰임새를 부르지 않으며 받은 값을 응답에 싣지 않는다 [ASVS v5.0.0-2.2.1]', async (_field, bodyOf) => {
     for (const [label, value] of BAD_REFS) {
       fx.reset();
       fx.attempt = okAttempt({ pg: 'PORTONE' });
@@ -448,7 +448,7 @@ describe('플랫폼 가드와 본문 모양(쓰임새에 닿기 전)', () => {
     }
   });
 
-  test('ASVS2.2.1_결제 참조 칸의 경계: 200자의 보이는 ASCII(! ~ ~ 포함)는 받는 층을 지난다', async () => {
+  test('[ASVS v5.0.0-2.2.1]_결제 참조 칸의 경계: 200자의 보이는 ASCII(! ~ ~ 포함)는 받는 층을 지난다', async () => {
     const edge = `!~${'k'.repeat(198)}`;
     fx.attempt = okAttempt({ pg: 'TOSS' });
     expect((await post(toss({ paymentKey: edge }))).statusCode).toBe(202);

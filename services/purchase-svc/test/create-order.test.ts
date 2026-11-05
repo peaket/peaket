@@ -503,7 +503,7 @@ describe('PT35 본인확인 재확인(403·대체 판정·503)', () => {
   });
 
   test.each(FALLBACK_REASONS.map((r) => [r]))(
-    'PT35_ASVS16.5.2_답이 없고(%s) 토큰에 ticket:buy·pid가 있으면 대체 판정으로 201이고, 지표 한 번(그 까닭)과 보안 로그 한 줄(계정·까닭·통과·멱등 키)을 남긴다 [ASVS v5.0.0-16.5.2]',
+    'PT35_답이 없고(%s) 토큰에 ticket:buy·pid가 있으면 대체 판정으로 201이고, 지표 한 번(그 까닭)과 보안 로그 한 줄(계정·까닭·통과·멱등 키)을 남긴다 [ASVS v5.0.0-16.5.2]',
     async (reason) => {
       fx.recheck = { status: 'FAILED', reason };
       expect(await run()).toMatchObject({ status: 201, replayed: false });
@@ -514,7 +514,7 @@ describe('PT35 본인확인 재확인(403·대체 판정·503)', () => {
   );
 
   test.each(FALLBACK_REASONS.map((r) => [r]))(
-    'PT35_ASVS16.5.3_답이 없고(%s) 토큰에 pid가 없으면 IDENTITY_DENIED이고, 거부도 지표 한 번과 보안 로그 한 줄(통과 거짓)을 남긴다 [ASVS v5.0.0-16.5.3]',
+    'PT35_답이 없고(%s) 토큰에 pid가 없으면 IDENTITY_DENIED이고, 거부도 지표 한 번과 보안 로그 한 줄(통과 거짓)을 남긴다 [ASVS v5.0.0-16.5.3]',
     async (reason) => {
       fx.recheck = { status: 'FAILED', reason };
       expect(await run(okCommand({ token: { scopes: ['ticket:buy'] } }))).toEqual({ status: 'REJECTED', reason: 'IDENTITY_DENIED' });
@@ -524,14 +524,14 @@ describe('PT35 본인확인 재확인(403·대체 판정·503)', () => {
     },
   );
 
-  test('PT35_ASVS16.5.3_답이 없고 토큰에 ticket:buy가 없으면 IDENTITY_DENIED [ASVS v5.0.0-16.5.3]', async () => {
+  test('PT35_답이 없고 토큰에 ticket:buy가 없으면 IDENTITY_DENIED [ASVS v5.0.0-16.5.3]', async () => {
     fx.recheck = { status: 'FAILED', reason: 'deadline' };
     expect(await run(okCommand({ token: { pid: 'pid-0001', scopes: [] } }))).toEqual({ status: 'REJECTED', reason: 'IDENTITY_DENIED' });
     expect(fx.fallbackLogs).toEqual([{ accountId: ACCOUNT, reason: 'deadline', passed: false, idempotencyKey: IDEM_KEY }]);
   });
 
   test.each<['permission_denied' | 'invalid_argument']>([['permission_denied'], ['invalid_argument']])(
-    'PT35_ASVS16.5.3_재확인이 %s면 대체 판정 없이 IDENTITY_MISCONFIGURED(503)이고 설정 오류 로그 한 줄을 남긴다. 대체 판정 지표·로그는 없다 [ASVS v5.0.0-16.5.3]',
+    'PT35_재확인이 %s면 대체 판정 없이 IDENTITY_MISCONFIGURED(503)이고 설정 오류 로그 한 줄을 남긴다. 대체 판정 지표·로그는 없다 [ASVS v5.0.0-16.5.3]',
     async (reason) => {
       fx.recheck = { status: 'FAILED', reason };
       expect(await run()).toEqual({ status: 'REJECTED', reason: 'IDENTITY_MISCONFIGURED' });
@@ -613,7 +613,7 @@ describe('PT49 예매 제한(403 booking-restricted)', () => {
     noOrder();
   });
 
-  test('PT49_ASVS16.5.3_망가진 사본(어댑터의 Error)은 제한 없음으로 보지 않고 그대로 던진다: 주문을 만들지 않는다(정본 모호: 쓰임새가 잡지 않는다고 가정) [ASVS v5.0.0-16.5.3]', async () => {
+  test('PT49_망가진 사본(어댑터의 Error)은 제한 없음으로 보지 않고 그대로 던진다: 주문을 만들지 않는다(정본 모호: 쓰임새가 잡지 않는다고 가정) [ASVS v5.0.0-16.5.3]', async () => {
     const broken = new Error('예매 제한 사본이 망가졌다');
     fx.restriction = broken;
     await expect(run()).rejects.toBe(broken);
@@ -698,7 +698,7 @@ describe('커밋 뒤 Paying 표시(POL-009)', () => {
 // ── 리뷰 고침(2026-11-05): M2 정본 목록 밖의 실패는 설정 오류, M3 Paying 표시 다시 부르기·기록, M4 재확인이 답 없음이면 가명 건너뛰기 ──
 
 describe('M2 재확인: 정본 목록 밖의 실패(unexpected)는 대체 판정 없이 503', () => {
-  test('PT35_ASVS16.5.3_재확인 실패 까닭이 unexpected(그 밖의 gRPC 코드·gRPC가 아닌 예외)면 토큰에 ticket:buy·pid가 있어도 IDENTITY_MISCONFIGURED이고 설정 오류 로그 한 줄, 대체 판정 지표·로그는 없다 [ASVS v5.0.0-16.5.3]', async () => {
+  test('PT35_재확인 실패 까닭이 unexpected(그 밖의 gRPC 코드·gRPC가 아닌 예외)면 토큰에 ticket:buy·pid가 있어도 IDENTITY_MISCONFIGURED이고 설정 오류 로그 한 줄, 대체 판정 지표·로그는 없다 [ASVS v5.0.0-16.5.3]', async () => {
     fx.recheck = { status: 'FAILED', reason: 'unexpected' };
     expect(await run()).toEqual({ status: 'REJECTED', reason: 'IDENTITY_MISCONFIGURED' });
     expect(fx.configErrors).toEqual([{ what: 'identity_misconfigured', reason: 'unexpected' }]);

@@ -191,7 +191,7 @@ describe('스냅샷 읽기 Lua의 모양(seat-hold.md §2 스냅샷 읽기 Lua)'
 describe('망가진 키와 키 형(PEAKET_CORRUPT_KEY, WRONGTYPE)', () => {
   const setHash = (key: string, field: string, value: string) => redis.command(['HSET', key, field, value], { key });
 
-  test('ST4_ASVS16.5.3_ 구역 일련번호 칸이 표준 10진 정수가 아니거나 2^32 이상이면 PEAKET_CORRUPT_KEY(일시 장애가 아닌 오류, 지표 갈래 CORRUPT_KEY)이고 아무것도 쓰지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
+  test('ST4_ 구역 일련번호 칸이 표준 10진 정수가 아니거나 2^32 이상이면 PEAKET_CORRUPT_KEY(일시 장애가 아닌 오류, 지표 갈래 CORRUPT_KEY)이고 아무것도 쓰지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
     const { store, eventId } = await opened(redis);
     const bads = ['007', '-1', '1.5', ' 5', '5 ', '', 'abc', '1e3', '+5', '0x10', '4294967296', '99999999999999999999', '18446744073709551616'];
     for (const bad of bads) {
@@ -223,7 +223,7 @@ describe('망가진 키와 키 형(PEAKET_CORRUPT_KEY, WRONGTYPE)', () => {
     await expect(store.read({ eventId, firstBit: 0, bitCount: 8, sectionIndexes: [5] })).rejects.toThrow(/PEAKET_CORRUPT_KEY/);
   });
 
-  test('ST26_ASVS16.5.3_ 세대가 0 ~ 2^32 − 1의 표준 10진 정수가 아니면(2^32·음수·소수·앞 0·글자·빈 글) 같은 PEAKET_CORRUPT_KEY다(일시 장애가 아님). 끝값 0과 4294967295는 받는다 [ASVS v5.0.0-16.5.3]', async () => {
+  test('ST26_ 세대가 0 ~ 2^32 − 1의 표준 10진 정수가 아니면(2^32·음수·소수·앞 0·글자·빈 글) 같은 PEAKET_CORRUPT_KEY다(일시 장애가 아님). 끝값 0과 4294967295는 받는다 [ASVS v5.0.0-16.5.3]', async () => {
     const { store, eventId } = await opened(redis);
     const epochOf = async () => okOf(await store.read({ eventId, firstBit: 0, bitCount: 8, sectionIndexes: [0] })).seatEpoch;
     for (const [text, value] of [['0', 0], ['4294967295', 4294967295], ['1762226400', 1762226400]] as const) {

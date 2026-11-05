@@ -125,7 +125,7 @@ describe('정책 판정(auth-controls §4.3, I-T14, AC-T6)', () => {
     expect(judgePassword('f00tball12345678', { email: 'ops@peaket.example' }, lists, cfg)).toEqual({ ok: false, reason: 'COMMON' });
   });
 
-  test('ASVS-6.1.2_서비스맥락말은목록파일에서읽고_배포가더한파일의말도막는다', async () => {
+  test('[ASVS v5.0.0-6.1.2]_서비스맥락말은목록파일에서읽고_배포가더한파일의말도막는다', async () => {
     const { mkdtempSync, writeFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const { tmpdir } = await import('node:os');

@@ -1,4 +1,4 @@
-// 결과 파일(invariants.csv·invariants-detail.ndjson)과 종료 코드(docs/verification.md §2.5, docs/perf-ledger.md, ASVS v5.0.0-14.2.4).
+// 결과 파일(invariants.csv·invariants-detail.ndjson)과 종료 코드(docs/verification.md §2.5, docs/perf-ledger.md, [ASVS v5.0.0-14.2.4]).
 import { describe, expect, it } from 'vitest';
 import { parseCliArgs } from '../src/cli-args.js';
 import { DETAIL_LIMIT, exitCode, kstIso, toCsv, toDetailNdjson, type InvariantResult } from '../src/report.js';
@@ -45,7 +45,7 @@ describe('종료 코드', () => {
   });
 });
 
-describe('명령줄(ASVS v5.0.0-13.3.1)', () => {
+describe('명령줄([ASVS v5.0.0-13.3.1])', () => {
   const env = { INVARIANT_CHECK_DB_URL: 'postgres://c', INVARIANT_PURCHASE_DB_URL: 'postgres://p' };
 
   it('DB 주소는 환경 값으로만 받는다', () => {

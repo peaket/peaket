@@ -267,7 +267,7 @@ describe('SeatStreamRelay: 읽기·보내기·지우기', () => {
 });
 
 describe('SeatStreamRelay: 실패와 다시 보내기(적어도 한 번)', () => {
-  test('ASVS16.5.2_보내기가 확인 전에 실패하면 확인하지 않고(XPENDING에 남음), 리더가 바뀌어 새 RedisSeatStreamSource가 같은 이름으로 이어 받아 다시 보낸다. 두 번 나간 항목의 값·eventKey가 같다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('보내기가 확인 전에 실패하면 확인하지 않고(XPENDING에 남음), 리더가 바뀌어 새 RedisSeatStreamSource가 같은 이름으로 이어 받아 다시 보낸다. 두 번 나간 항목의 값·eventKey가 같다 [ASVS v5.0.0-16.5.2]', async () => {
     const eventId = newEventId();
     await openSale(store, eventId);
     const h = await holdSeats(store, eventId, seatRefs(1));

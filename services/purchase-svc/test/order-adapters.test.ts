@@ -199,7 +199,7 @@ describe('LoggerOrderLog(보안·설정 로그)', () => {
     ]);
   });
 
-  test('PT52_ASVS16.2.5_정한 칸만 싣는다: 넘긴 값에 번호·성명·pid가 섞여 와도 로그 줄에 나가지 않는다 [ASVS v5.0.0-16.2.5]', () => {
+  test('PT52_정한 칸만 싣는다: 넘긴 값에 번호·성명·pid가 섞여 와도 로그 줄에 나가지 않는다 [ASVS v5.0.0-16.2.5]', () => {
     const { lines, log } = recorder();
     const leaky = { buyerPhone: '010-1234-5678', phoneE164: '+821012345678', buyerName: '홍길동', pid: 'pid-secret' };
     log.identityFallback({ accountId: ACCOUNT, reason: 'unavailable', passed: true, idempotencyKey: KEY, ...leaky } as never);
@@ -230,10 +230,10 @@ describe('LoggerOrderLog(보안·설정 로그)', () => {
   // ── 결제 접수의 보안 로그(AcceptLog.attemptMismatch, payment §4.2 18, BUILD_ORDER PRF-162) ──
   const ORDER = '0190f3a1-7c2e-7f00-8000-0000000000f2';
 
-  // 금액 불일치(400)도 같은 줄이다(까닭 amount_mismatch, payment §2 '활성 결제 시도 대조', ASVS 16.3.3, 2026-11-05 정본 바로잡음)
+  // 금액 불일치(400)도 같은 줄이다(까닭 amount_mismatch, payment §2 '활성 결제 시도 대조', [ASVS v5.0.0-16.3.3], 2026-11-05 정본 바로잡음)
   const MISMATCH_REASONS = ['no_attempt', 'attempt_expired', 'pg_mismatch', 'payment_id_mismatch', 'amount_mismatch'] as const;
 
-  test('PT28_PT7_ASVS16.3.2_결제 시도 대조 실패·금액 불일치는 warn 한 줄(kind security, event payment_attempt_mismatch, 계정·주문·까닭)이다 [ASVS v5.0.0-16.3.2] [ASVS v5.0.0-16.3.3]', () => {
+  test('PT28_PT7_결제 시도 대조 실패·금액 불일치는 warn 한 줄(kind security, event payment_attempt_mismatch, 계정·주문·까닭)이다 [ASVS v5.0.0-16.3.2] [ASVS v5.0.0-16.3.3]', () => {
     const { lines, log } = recorder();
     for (const reason of MISMATCH_REASONS) log.attemptMismatch({ accountId: ACCOUNT, orderId: ORDER, reason });
     expect(lines.map((l) => [l.level, l.obj])).toEqual(
@@ -244,7 +244,7 @@ describe('LoggerOrderLog(보안·설정 로그)', () => {
     );
   });
 
-  test('PT28_ADR0053_ASVS16.2.5_결제 참조·토큰·본문 값이 섞여 와도 로그 줄은 계정·주문·까닭 세 칸뿐이다 [ASVS v5.0.0-16.2.5]', () => {
+  test('PT28_ADR0053_결제 참조·토큰·본문 값이 섞여 와도 로그 줄은 계정·주문·까닭 세 칸뿐이다 [ASVS v5.0.0-16.2.5]', () => {
     const { lines, log } = recorder();
     const leaky = { paymentKey: 'PAYKEYSECRET', paymentToken: 'PAYTOKENSECRET', txId: 'TXIDSECRET', paymentId: 'pay-x', amount: 123_456, pg: 'TOSS' };
     log.attemptMismatch({ accountId: ACCOUNT, orderId: ORDER, reason: 'pg_mismatch', ...leaky } as never);
@@ -298,7 +298,7 @@ describe('InventorySeatSlots(회차 슬롯 읽기 다리, PRF-162)', () => {
     await expect(new InventorySeatSlots(src).read(EVENT)).rejects.toBeInstanceOf(OrderSeatStoreUnavailable);
   });
 
-  test('ASVS16.5.3_그 밖의 오류(망가진 세대 키·WRONGTYPE·RangeError)는 같은 객체 그대로 던진다 [ASVS v5.0.0-16.5.3]', async () => {
+  test('그 밖의 오류(망가진 세대 키·WRONGTYPE·RangeError)는 같은 객체 그대로 던진다 [ASVS v5.0.0-16.5.3]', async () => {
     for (const e of [new Error('PEAKET_CORRUPT_KEY s:{event:x}:epoch'), new Error('WRONGTYPE Operation against a key'), new RangeError('eventId')]) {
       const { src } = source(e);
       const err = await new InventorySeatSlots(src).read(EVENT).catch((x: unknown) => x);

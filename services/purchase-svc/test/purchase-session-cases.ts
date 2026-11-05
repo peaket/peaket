@@ -47,7 +47,7 @@ export function openInput(h: { now(): number }, jti: string, over: Partial<OpenS
 const near = (a: number, b: number, skew: number) => Math.abs(a - b) <= skew;
 
 export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | SessionHarness): void {
-  test('ST28_ASVS8.2.1_① 표지가 없으면 CREATED이고 세션 상태에 계정·로그인 세션·회차·여정·임시 공개키·일련번호 0·유휴 시한·최대 체류가 적힌다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_① 표지가 없으면 CREATED이고 세션 상태에 계정·로그인 세션·회차·여정·임시 공개키·일련번호 0·유휴 시한·최대 체류가 적힌다 [ASVS v5.0.0-8.2.1]', async () => {
     const h = await make();
     const jti = newJti();
     const i = openInput(h, jti);
@@ -94,7 +94,7 @@ export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | 
     expect((await h.store.read(jti))?.lastSeq).toBe(3);
   });
 
-  test('ST28_ASVS8.2.1_③ 계정·로그인 세션·회차·임시 공개키 가운데 하나라도 다르면 MISMATCH이고 세션 상태는 그대로다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
+  test('ST28_③ 계정·로그인 세션·회차·임시 공개키 가운데 하나라도 다르면 MISMATCH이고 세션 상태는 그대로다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
     const h = await make();
     const jti = newJti();
     await h.store.open(openInput(h, jti));
@@ -113,7 +113,7 @@ export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | 
     expect((await h.store.open(openInput(h, jti))).kind).toBe('CREATED');
   });
 
-  test('ASVS9.2.1_최대 체류(exp)가 지난 첫 열기는 TOKEN_EXPIRED이고 아무것도 쓰지 않는다 [ASVS v5.0.0-9.2.1]', async () => {
+  test('최대 체류(exp)가 지난 첫 열기는 TOKEN_EXPIRED이고 아무것도 쓰지 않는다 [ASVS v5.0.0-9.2.1]', async () => {
     const h = await make();
     const jti = newJti();
     expect(await h.store.open(openInput(h, jti, { expiresAtMs: h.now() - 10_000 }))).toEqual({ kind: 'TOKEN_EXPIRED' });
@@ -165,7 +165,7 @@ export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | 
     expect(keys).toContain(won);
   });
 
-  test('ASVS9.1.1_일련번호는 마지막 번호보다 클 때만 올라간다: 같은 번호·작은 번호·0은 false이고 번호는 그대로다 [ASVS v5.0.0-9.1.1]', async () => {
+  test('일련번호는 마지막 번호보다 클 때만 올라간다: 같은 번호·작은 번호·0은 false이고 번호는 그대로다 [ASVS v5.0.0-9.1.1]', async () => {
     const h = await make();
     const jti = newJti();
     await h.store.open(openInput(h, jti));
@@ -183,7 +183,7 @@ export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | 
     expect((await h.store.read(jti))?.lastSeq).toBe(Number.MAX_SAFE_INTEGER);
   });
 
-  test('ASVS9.1.1_같은 번호를 동시에 보내면 하나만 true이고, 서로 다른 번호를 동시에 보내도 끝 번호는 가장 큰 번호다 [ASVS v5.0.0-9.1.1]', async () => {
+  test('같은 번호를 동시에 보내면 하나만 true이고, 서로 다른 번호를 동시에 보내도 끝 번호는 가장 큰 번호다 [ASVS v5.0.0-9.1.1]', async () => {
     const h = await make();
     const jti = newJti();
     await h.store.open(openInput(h, jti));
@@ -194,7 +194,7 @@ export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | 
     expect((await h.store.read(jti))?.lastSeq).toBe(31);
   });
 
-  test('ASVS1.2.4_모양이 틀린 입력은 RangeError이고 아무것도 쓰지 않는다: jti는 키 조각 모양(해시 태그를 깨는 글자 금지), 계정·로그인 세션·회차·prio도 키 조각 모양, 여정 ID는 UUID, 임시 공개키는 87자 base64url, 시각은 안전한 정수, 일련번호는 1 이상의 안전한 정수 [ASVS v5.0.0-1.2.4]', async () => {
+  test('모양이 틀린 입력은 RangeError이고 아무것도 쓰지 않는다: jti는 키 조각 모양(해시 태그를 깨는 글자 금지), 계정·로그인 세션·회차·prio도 키 조각 모양, 여정 ID는 UUID, 임시 공개키는 87자 base64url, 시각은 안전한 정수, 일련번호는 1 이상의 안전한 정수 [ASVS v5.0.0-1.2.4]', async () => {
     const h = await make();
     const jti = newJti();
     for (const bad of ['', 'a}b', '{x}', 'a:b', 'a b', 'x'.repeat(65), 'é']) {
@@ -229,7 +229,7 @@ export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | 
     expect((await h.store.read(jti))?.lastSeq).toBe(0);
   });
 
-  test('ASVS9.1.1_없는 세션은 읽으면 undefined이고 일련번호를 올릴 수 없다(세션 상태를 만들어 주지 않는다)', async () => {
+  test('[ASVS v5.0.0-9.1.1]_없는 세션은 읽으면 undefined이고 일련번호를 올릴 수 없다(세션 상태를 만들어 주지 않는다)', async () => {
     const h = await make();
     const jti = newJti();
     expect(await h.store.read(jti)).toBeUndefined();
@@ -296,7 +296,7 @@ export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | 
     expect(await h.store.open(openInput(h, jti))).toEqual({ kind: 'ENDED' });
   });
 
-  test('ASVS1.2.4_markStarted의 jti가 키 조각 모양이 아니면 RangeError이고 아무것도 쓰지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
+  test('markStarted의 jti가 키 조각 모양이 아니면 RangeError이고 아무것도 쓰지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
     const h = await make();
     for (const bad of ['', 'a}b', '{x}', 'a:b', 'x'.repeat(65)]) await expect(h.store.markStarted(bad), bad).rejects.toThrow(RangeError);
   });
@@ -326,7 +326,7 @@ export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | 
     expect((await h.store.open(openInput(h, jti))).kind).toBe('CREATED');
   });
 
-  test('ASVS9.2.1_키 없는 열기: 최대 체류(exp)가 지났으면 맨 먼저 TOKEN_EXPIRED다(기한·키 없음보다 앞). 열린 세션도 처음 최대 체류가 지나면 TOKEN_EXPIRED다 [ASVS v5.0.0-9.2.1]', async () => {
+  test('키 없는 열기: 최대 체류(exp)가 지났으면 맨 먼저 TOKEN_EXPIRED다(기한·키 없음보다 앞). 열린 세션도 처음 최대 체류가 지나면 TOKEN_EXPIRED다 [ASVS v5.0.0-9.2.1]', async () => {
     const h = await make();
     const jti = newJti();
     expect(await h.store.open(openInput(h, jti, { clientKey: undefined, expiresAtMs: h.now() - 10_000, firstUseDeadlineMs: h.now() - 20_000 }))).toEqual({ kind: 'TOKEN_EXPIRED' });
@@ -382,7 +382,7 @@ export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | 
     expect((await h.store.open({ ...i, clientKey: undefined })).kind).toBe('REPLAY');
   });
 
-  test('ST28_ASVS8.2.1_ASVS8.2.2_키 없는 열기: 계정·로그인 세션·회차 가운데 하나라도 다르면 MISMATCH이고 세션 상태는 그대로다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
+  test('ST28_키 없는 열기: 계정·로그인 세션·회차 가운데 하나라도 다르면 MISMATCH이고 세션 상태는 그대로다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', async () => {
     const h = await make();
     const jti = newJti();
     await h.store.open(openInput(h, jti));

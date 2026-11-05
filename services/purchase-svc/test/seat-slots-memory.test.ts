@@ -74,7 +74,7 @@ describe('MemorySeatSlots.read', () => {
   });
 
   test.each([[0], [-1], [1.5], [2 ** 31], [1e15 - 1], [1e15], [Number.NaN]])(
-    'ASVS16.5.3_세대 키의 gen 칸이 %s면 망가진 키라 PEAKET_CORRUPT_KEY {epoch 키} Error를 던진다(위 끝은 int4, 리뷰 고침 L5) [ASVS v5.0.0-16.5.3]',
+    '세대 키의 gen 칸이 %s면 망가진 키라 PEAKET_CORRUPT_KEY {epoch 키} Error를 던진다(위 끝은 int4, 리뷰 고침 L5) [ASVS v5.0.0-16.5.3]',
     async (gen) => {
       const e = await opened();
       seats.db.peek(e)!.epoch!.gen = gen;

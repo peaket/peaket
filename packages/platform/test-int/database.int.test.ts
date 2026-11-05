@@ -95,7 +95,7 @@ describe('Drizzle 설정', () => {
     expect(q.params).toEqual(['x']);
   });
 
-  test('ASVS_13_1_2_FND070_풀대기가한도를넘으면_기다리지않고429_server_busy다 [ASVS v5.0.0-13.1.2]', async () => {
+  test('FND070_풀대기가한도를넘으면_기다리지않고429_server_busy다 [ASVS v5.0.0-13.1.2]', async () => {
     const d = open({ url: pgc.url, max: 1, profile: 'hot' });
     let release!: () => void;
     const held = new Promise<void>((r) => (release = r));
@@ -139,7 +139,7 @@ describe('서비스 안의 DB 오류', () => {
     }
   }
 
-  test('ASVS_16_2_5_FND070_쿼리오류의줄에는_매개변수값이없고_풀대기초과는429다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('FND070_쿼리오류의줄에는_매개변수값이없고_풀대기초과는429다 [ASVS v5.0.0-16.2.5]', async () => {
     const d = open({ url: pgc.url, max: 1, profile: 'hot' });
     @Module({ imports: [databaseModule(d)], controllers: [DbController] })
     class DbModule {}

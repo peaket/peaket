@@ -1,4 +1,4 @@
-// 받는 층: 사전 검증·진입 경로(openapi /v1/queues/{eventId}/pre-verifications·entries, ADR-0065 결정 6, ASVS v5.0.0-3.5.2)
+// 받는 층: 사전 검증·진입 경로(openapi /v1/queues/{eventId}/pre-verifications·entries, ADR-0065 결정 6, [ASVS v5.0.0-3.5.2])
 import 'reflect-metadata';
 import { createService, fakeClock } from '@peaket/platform';
 import { Writable } from 'node:stream';

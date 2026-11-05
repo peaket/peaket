@@ -102,7 +102,7 @@ describe('본인확인(시험 어댑터)', () => {
     expect(await code(t.start.run({ accountId: s.accountId, purpose: 'FIRST', next: '/' }))).toBe('ALREADY_VERIFIED');
   });
 
-  test('ASVS v5.0.0-3.7.2_I-T45_⑤돌아갈주소가같은출처경로가아니면_시작하지않는다', async () => {
+  test('[ASVS v5.0.0-3.7.2]_I-T45_⑤돌아갈주소가같은출처경로가아니면_시작하지않는다', async () => {
     const t = await setup();
     for (const next of ['//evil.example', 'https://evil.example', '/%2f%2fevil', '/a\\b']) {
       expect(await code(t.start.run({ accountId: '0190f3a1-7c2e-7a00-8000-000000000001', purpose: 'FIRST', next }))).toBe('NEXT_INVALID');

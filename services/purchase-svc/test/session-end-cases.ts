@@ -81,7 +81,7 @@ export function sessionEndCases(make: () => Promise<EndHarness> | EndHarness): v
     expect(rs.filter((r) => r === null)).toHaveLength(19);
   });
 
-  test('QT11_ASVS8.2.2_세션이 없으면 end는 null이고 아무것도 만들지 않는다: 읽으면 undefined이고, 같은 jti로 열면 ENDED가 아니라 CREATED다(재사용 차단 표지도 만들지 않았다) [ASVS v5.0.0-8.2.2]', async () => {
+  test('QT11_세션이 없으면 end는 null이고 아무것도 만들지 않는다: 읽으면 undefined이고, 같은 jti로 열면 ENDED가 아니라 CREATED다(재사용 차단 표지도 만들지 않았다) [ASVS v5.0.0-8.2.2]', async () => {
     const h = await make();
     const jti = newJti();
     expect(await h.store.end(jti)).toBeNull();
@@ -113,7 +113,7 @@ export function sessionEndCases(make: () => Promise<EndHarness> | EndHarness): v
     expect(await h.store.sweep(b.jti)).toMatchObject({ kind: 'LIVE' });
   });
 
-  test('ASVS1.2.4_end·sweep·setPaying의 jti가 키 조각 모양이 아니면 RangeError이고 아무것도 쓰지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
+  test('end·sweep·setPaying의 jti가 키 조각 모양이 아니면 RangeError이고 아무것도 쓰지 않는다 [ASVS v5.0.0-1.2.4]', async () => {
     const h = await make();
     for (const bad of BAD_JTI) {
       await expect(h.store.end(bad), `end ${bad}`).rejects.toThrow(RangeError);
@@ -156,7 +156,7 @@ export function sessionEndCases(make: () => Promise<EndHarness> | EndHarness): v
     expect(await h.store.advance(b.jti, 1)).toBe(true);
   });
 
-  test('QT11_ADR0183_11_ASVS9.2.1_sweep: 최대 체류에 닿으면 ENDED(MAX_STAY)로 회차·여정·끝낸 시각을 주고 세션 상태를 지운다. 재사용 차단 표지는 남는다 [ASVS v5.0.0-9.2.1]', async () => {
+  test('QT11_ADR0183_11_sweep: 최대 체류에 닿으면 ENDED(MAX_STAY)로 회차·여정·끝낸 시각을 주고 세션 상태를 지운다. 재사용 차단 표지는 남는다 [ASVS v5.0.0-9.2.1]', async () => {
     const h = await make();
     const { jti, i } = await opened(h, { eventId: 'ev-sw-1', journeyId: OTHER_JOURNEY, expiresAtMs: h.now() + 1_500 });
     expect(await h.store.sweep(jti)).toMatchObject({ kind: 'LIVE' });
@@ -235,7 +235,7 @@ export function sessionEndCases(make: () => Promise<EndHarness> | EndHarness): v
     expect(await h.store.advance(jti, 1)).toBe(true);
   });
 
-  test('QT11_POL009_ASVS9.2.1_sweep: Paying이어도 최대 체류에 닿으면 MAX_STAY로 끝난다(안전장치, T10) [ASVS v5.0.0-9.2.1]', async () => {
+  test('QT11_POL009_sweep: Paying이어도 최대 체류에 닿으면 MAX_STAY로 끝난다(안전장치, T10) [ASVS v5.0.0-9.2.1]', async () => {
     const h = await make();
     const { jti, i } = await opened(h, { eventId: 'ev-sw-4', expiresAtMs: h.now() + 1_500 });
     expect(await h.store.setPaying(jti, true)).toBe(true);
@@ -288,7 +288,7 @@ export function sessionEndCases(make: () => Promise<EndHarness> | EndHarness): v
     expect((await h.store.read(jti))?.lastSeq).toBe(3);
   });
 
-  test('POL009_ASVS8.2.2_setPaying: 세션이 없으면 true·false 모두 false이고 아무것도 만들지 않는다(그 뒤 새로 연 세션이 Paying 표시를 물려받지 않는다) [ASVS v5.0.0-8.2.2]', async () => {
+  test('POL009_setPaying: 세션이 없으면 true·false 모두 false이고 아무것도 만들지 않는다(그 뒤 새로 연 세션이 Paying 표시를 물려받지 않는다) [ASVS v5.0.0-8.2.2]', async () => {
     const h = await make();
     const jti = newJti();
     expect(await h.store.setPaying(jti, true)).toBe(false);

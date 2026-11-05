@@ -162,7 +162,7 @@ describe('PurchaseSessionHandler (PRF-136 리뷰: 대기열 Redis 장애와 회�
     expect(isTransientError(err)).toBe(false);
   });
 
-  test('ADR0183_11_ASVS1.2.4_회차 ID가 키 조각 모양(영문·숫자·_-, 1~64자)이 아니면 decode가 던진다: 해시 태그를 깨는 값이 Redis 키로 가지 않게 [ASVS v5.0.0-1.2.4]', async () => {
+  test('ADR0183_11_회차 ID가 키 조각 모양(영문·숫자·_-, 1~64자)이 아니면 decode가 던진다: 해시 태그를 깨는 값이 Redis 키로 가지 않게 [ASVS v5.0.0-1.2.4]', async () => {
     const { handler } = setup();
     const at = new Date(Date.now() + 60_000).toISOString();
     for (const bad of ['a}b', '{x}', 'a:b', 'a b', 'x'.repeat(65), 'é', '']) {

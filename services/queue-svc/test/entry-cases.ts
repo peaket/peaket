@@ -1,4 +1,4 @@
-// 진입 규칙 사례(docs/features/queue-admission.md §3, Q-T4·Q-T53·Q-T60, ASVS v5.0.0-9.2.3). 메모리 저장소(test/entry.test.ts)와
+// 진입 규칙 사례(docs/features/queue-admission.md §3, Q-T4·Q-T53·Q-T60, [ASVS v5.0.0-9.2.3]). 메모리 저장소(test/entry.test.ts)와
 // 실제 Valkey의 Lua(test-int/entry-store.int.test.ts)에 같은 사례를 돌린다.
 import type { Clock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';

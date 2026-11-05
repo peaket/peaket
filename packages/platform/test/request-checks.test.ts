@@ -205,7 +205,7 @@ describe('문자열 값 바꾸기(Zod 파이프)', () => {
     expect(json(r)).toEqual({ query: { ids: ['a', 'b'], flag: true, n: -150 } });
   });
 
-  test('ASVS_15_3_7_FND070_같은이름이겹친쿼리는_형과관계없이400이다 [ASVS v5.0.0-15.3.7]', async () => {
+  test('FND070_같은이름이겹친쿼리는_형과관계없이400이다 [ASVS v5.0.0-15.3.7]', async () => {
     for (const url of ['/v1/t/events/e1/seatmap/snapshot?section=1&section=2', '/v1/t/list?ids=a&ids=b']) {
       const r = await call({ method: 'GET', url });
       expect(r.statusCode).toBe(400);

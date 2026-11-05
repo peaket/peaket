@@ -67,7 +67,7 @@ describe('MemoryOrderHolds.check: 맞는 홀드', () => {
     expect(w.heldAtMs).toBe(NOW);
   });
 
-  test('ASVS2.3.3_읽기만 한다: 확인 전후로 홀드 Hash·구매 세션의 홀드 목록이 같다 [ASVS v5.0.0-2.3.3]', async () => {
+  test('읽기만 한다: 확인 전후로 홀드 Hash·구매 세션의 홀드 목록이 같다 [ASVS v5.0.0-2.3.3]', async () => {
     const w = await heldWorld();
     const before = JSON.stringify({ a: holdHash(w, 'A01'), b: holdHash(w, 'B01'), list: [...sessions.holdsOf(w.jti)!] });
     await holds.check(query(w));
@@ -98,7 +98,7 @@ describe('MemoryOrderHolds.check: NOT_FOUND(가리지 않는다)', () => {
     ['holdId 65자', { holdId: 'a'.repeat(65) }],
     ['회차 ID에 }', { eventId: 'e}v' }],
     ['구매 세션 ID에 {', { purchaseSessionId: '{x' }],
-  ])('ASVS1.2.4_%s처럼 키 조각 모양이 아니면 저장소 장애 흉내보다 먼저 NOT_FOUND다 [ASVS v5.0.0-1.2.4]', async (_label, over) => {
+  ])('%s처럼 키 조각 모양이 아니면 저장소 장애 흉내보다 먼저 NOT_FOUND다 [ASVS v5.0.0-1.2.4]', async (_label, over) => {
     const w = await heldWorld();
     down = true;
     expect(await holds.check(query(w, over))).toEqual(NOT_FOUND);

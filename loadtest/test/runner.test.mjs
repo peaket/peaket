@@ -124,7 +124,7 @@ const UUID_A = '0b5a3f9e-1c2d-4e5f-8a9b-0c1d2e3f4a5b';
 // args.mjs: parseArgs
 // ---------------------------------------------------------------------------------------------
 
-test('ASVS v5.0.0-2.2.1 UsageError는 Error이고 이름이 UsageError, SCENARIOS는 시나리오 다섯의 파일이다', () => {
+test('[ASVS v5.0.0-2.2.1] UsageError는 Error이고 이름이 UsageError, SCENARIOS는 시나리오 다섯의 파일이다', () => {
   const e = new UsageError('틀림');
   assert.ok(e instanceof Error);
   assert.equal(e.name, 'UsageError');
@@ -175,13 +175,13 @@ test('NFR-013 ADR-0057 parseArgs calibrate --record는 --run-id 없이 받고(�
   assert.equal(parseArgs(['calibrate']).runId, undefined);
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs calibrate는 --run-id를 --record와 함께든 홀로든 받지 않는다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs calibrate는 --run-id를 --record와 함께든 홀로든 받지 않는다', () => {
   expectUsage(cal({ record: true, 'run-id': '2026-11-03-gen-calib-c4-r1000' }));
   expectUsage(cal({ 'run-id': '2026-11-03-gen-calib-c4-r1000' }));
   expectUsage(cal({ profile: 'local-gen' }));
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs는 --이름=값 꼴을 모르는 인자로 거부한다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs는 --이름=값 꼴을 모르는 인자로 거부한다', () => {
   expectUsage(['v0', 'queue', '--users=1000', '--entry-rate', '500', '--admit-per-second', '28']);
   expectUsage([...q(), '--warm=10']);
   expectUsage([...q(), '--invariants=true']);
@@ -192,7 +192,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs는 --이름=값 꼴을 모르는 인자로 거
   expectUsage([...sh(), '--mode=hot']);
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs 정수 인자와 --rates의 각 수는 앞의 0을 받는다(값은 10진수로 읽는다)', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs 정수 인자와 --rates의 각 수는 앞의 0을 받는다(값은 10진수로 읽는다)', () => {
   assert.deepStrictEqual(parseArgs(cal({ rates: '0100,0200,08000' })).rates, [100, 200, 8000]);
   assert.equal(parseArgs(cal({ cpus: '04' })).cpus, 4);
   assert.equal(parseArgs(sh({ 'release-ms': '000' })).releaseMs, 0);
@@ -206,7 +206,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs 정수 인자와 --rates의 각 수는 앞의 
   expectUsage(cal({ rates: '0100,100' })); // 같은 수(엄격한 오름차순 아님)
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs --rates는 1~20개·각 1~100,000·엄격한 오름차순만 받는다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs --rates는 1~20개·각 1~100,000·엄격한 오름차순만 받는다', () => {
   assert.deepStrictEqual(parseArgs(cal({ rates: '1000' })).rates, [1000]);
   assert.deepStrictEqual(parseArgs(cal({ rates: '1,100000' })).rates, [1, 100000]);
   const twenty = Array.from({ length: 20 }, (_, i) => i + 1);
@@ -232,7 +232,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs --rates는 1~20개·각 1~100,000·엄격한 �
   expectUsage(['calibrate', '--rates', '']);
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs calibrate의 범위: cpus·target-cpus 1~16, memory-mi 256~32,768, warm 1~3,600, main 5~7,200', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs calibrate의 범위: cpus·target-cpus 1~16, memory-mi 256~32,768, warm 1~3,600, main 5~7,200', () => {
   const ok = [
     ['cpus', 1, 'cpus'], ['cpus', 16, 'cpus'], ['target-cpus', 1, 'targetCpus'], ['target-cpus', 16, 'targetCpus'],
     ['memory-mi', 256, 'memoryMi'], ['memory-mi', 32768, 'memoryMi'], ['warm', 1, 'warmS'], ['warm', 3600, 'warmS'],
@@ -245,7 +245,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs calibrate의 범위: cpus·target-cpus 1~16, m
   for (const [flag, v] of bad) expectUsage(cal({ [flag]: v }));
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs calibrate에 없는 인자(v0 전용·기록 ID·불변식)는 거부한다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs calibrate에 없는 인자(v0 전용·기록 ID·불변식)는 거부한다', () => {
   for (const extra of [{ users: 10 }, { rate: 5 }, { 'entry-rate': 5 }, { 'admit-per-second': 5 }, { mode: 'hot' },
     { 'seats-per-order': 2 }, { 'hold-size': 2 }, { invariants: true }, { record: true, 'run-id': '2026-11-03-cal' },
     { record: true, profile: 'local-gen' }]) {
@@ -396,7 +396,7 @@ test('NFR-013 ADR-0057 parseArgs v0 payment 기본값: seats-per-order 2, 결제
   });
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs v0 범위 경계: users 1~131,072, 도착률 1~100,000, warm 1~3,600, main 5~7,200, cpus 1~16, memory-mi 256~32,768', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs v0 범위 경계: users 1~131,072, 도착률 1~100,000, warm 1~3,600, main 5~7,200, cpus 1~16, memory-mi 256~32,768', () => {
   const ok = [
     [q, 'users', 1, 'users'], [q, 'users', 131072, 'users'],
     [q, 'entry-rate', 1, 'entryRate'], [q, 'entry-rate', 100000, 'entryRate'],
@@ -416,12 +416,12 @@ test('ASVS v5.0.0-2.2.1 parseArgs v0 범위 경계: users 1~131,072, 도착률 1
   for (const [mk, flag, v] of bad) expectUsage(mk({ [flag]: v }));
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs 범위 오류 메시지는 어느 인자가 틀렸는지 적는다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs 범위 오류 메시지는 어느 인자가 틀렸는지 적는다', () => {
   expectUsage(q({ users: 0 }), /users/);
   expectUsage(q({ 'entry-rate': 100001 }), /entry-rate/);
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs seat-hold 범위: hold-size 1~4, hot-count 1~1,000, pairs 1~1,000, release-ms 0~600,000', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs seat-hold 범위: hold-size 1~4, hot-count 1~1,000, pairs 1~1,000, release-ms 0~600,000', () => {
   const ok = [['hold-size', 1, 'holdSize'], ['hold-size', 4, 'holdSize'], ['hot-count', 1, 'hotCount'], ['hot-count', 1000, 'hotCount'],
     ['pairs', 1, 'pairs'], ['pairs', 1000, 'pairs'], ['release-ms', 0, 'releaseMs'], ['release-ms', 600000, 'releaseMs']];
   for (const [flag, v, key] of ok) assert.equal(parseArgs(sh({ [flag]: v }))[key], v, `--${flag} ${v}`);
@@ -430,14 +430,14 @@ test('ASVS v5.0.0-2.2.1 parseArgs seat-hold 범위: hold-size 1~4, hot-count 1~1
   for (const [flag, v] of bad) expectUsage(sh({ [flag]: v }));
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs payment seats-per-order는 1~4', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs payment seats-per-order는 1~4', () => {
   assert.equal(parseArgs(pay({ 'seats-per-order': 1 })).seatsPerOrder, 1);
   assert.equal(parseArgs(pay({ 'seats-per-order': 4 })).seatsPerOrder, 4);
   expectUsage(pay({ 'seats-per-order': 0 }));
   expectUsage(pay({ 'seats-per-order': 5 }));
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs 정수는 10진수 숫자만 받는다(부호·소수점·지수·공백·16진·자리 구분 거부, 앞의 0은 숫자라 받음)', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs 정수는 10진수 숫자만 받는다(부호·소수점·지수·공백·16진·자리 구분 거부, 앞의 0은 숫자라 받음)', () => {
   for (const v of ['1e3', '+5', '-1', '1.0', '1.', '.5', ' 5', '5 ', '\t5', '', '0x10', '0b11', '1_000', '1,000', 'Infinity', 'NaN',
     '٥', '５', '5\n']) {
     expectUsage(q({ users: v }));
@@ -446,11 +446,11 @@ test('ASVS v5.0.0-2.2.1 parseArgs 정수는 10진수 숫자만 받는다(부호�
   assert.equal(parseArgs(q({ users: '0100' })).users, 100);
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs --mode는 spread·hot·crossed만', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs --mode는 spread·hot·crossed만', () => {
   for (const mode of ['HOT', 'Spread', 'random', 'hot ', '']) expectUsage(sh({ mode }));
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs 그 시나리오에 없는 인자는 거부한다(queue의 --rate, payment의 --mode, seat-hold의 --entry-rate 등)', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs 그 시나리오에 없는 인자는 거부한다(queue의 --rate, payment의 --mode, seat-hold의 --entry-rate 등)', () => {
   const cases = [
     q({ rate: 100 }), q({ mode: 'hot' }), q({ 'seats-per-order': 2 }), q({ 'hold-size': 2 }), q({ 'hot-count': 2 }),
     q({ pairs: 2 }), q({ 'release-ms': 5 }),
@@ -462,7 +462,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs 그 시나리오에 없는 인자는 거부한
   for (const a of cases) expectUsage(a);
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs 시나리오의 필수 인자가 없으면 거부한다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs 시나리오의 필수 인자가 없으면 거부한다', () => {
   for (const a of [q({ users: undefined }), q({ 'entry-rate': undefined }), q({ 'admit-per-second': undefined }),
     sh({ users: undefined }), sh({ rate: undefined }), pay({ users: undefined }), pay({ rate: undefined }),
     ['v0', 'queue'], ['v0', 'seat-hold'], ['v0', 'payment']]) {
@@ -470,7 +470,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs 시나리오의 필수 인자가 없으면 거
   }
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs 모르는 인자·남는 위치 인자·객체 원형 이름 인자는 거부한다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs 모르는 인자·남는 위치 인자·객체 원형 이름 인자는 거부한다', () => {
   for (const a of [
     q({ bogus: 1 }),
     [...q(), '-users', '5'],
@@ -487,7 +487,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs 모르는 인자·남는 위치 인자·객체
   }
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs 같은 인자를 두 번 주면 거부한다(값이 같아도, 값 없는 인자도)', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs 같은 인자를 두 번 주면 거부한다(값이 같아도, 값 없는 인자도)', () => {
   expectUsage([...q(), '--users', '1000']);
   expectUsage([...q(), '--users', '2000']);
   expectUsage([...q({ invariants: true }), '--invariants']);
@@ -496,7 +496,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs 같은 인자를 두 번 주면 거부한다(�
   expectUsage([...cal({ record: true }), '--record']);
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs 값이 없는 인자(다음이 --로 시작하거나 끝)는 거부한다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs 값이 없는 인자(다음이 --로 시작하거나 끝)는 거부한다', () => {
   expectUsage(['v0', 'queue', '--users', '--entry-rate', '500', '--admit-per-second', '28']);
   expectUsage(['v0', 'queue', '--users', '1000', '--entry-rate', '500', '--admit-per-second']);
   expectUsage([...q(), '--out']);
@@ -506,7 +506,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs 값이 없는 인자(다음이 --로 시작하
   expectUsage([...sh(), '--mode', '--pairs', '2']);
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs 모르는 명령·시나리오는 거부한다(객체 원형 이름 포함)', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs 모르는 명령·시나리오는 거부한다(객체 원형 이름 포함)', () => {
   for (const a of [[], ['v1', 'queue'], ['V0', 'queue'], ['Calibrate'], ['run'], ['v0'], ['v0', 'queues'], ['v0', 'Queue'],
     ['v0', 'v0-queue.js'], ['v0', 'toString'], ['v0', '__proto__'], ['v0', 'constructor'], ['v0', 'hasOwnProperty'],
     ['v0', '--users', '5'], ['v0', 'calibrate'], ['--users', '5']]) {
@@ -514,7 +514,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs 모르는 명령·시나리오는 거부한다
   }
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs v0 --record는 --run-id가 있어야 하고 --run-id·--profile은 --record 없이 줄 수 없다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs v0 --record는 --run-id가 있어야 하고 --run-id·--profile은 --record 없이 줄 수 없다', () => {
   expectUsage(q({ record: true }));
   expectUsage(q({ 'run-id': '2026-11-03-k1' }));
   expectUsage(q({ profile: 'local-gen' }));
@@ -524,7 +524,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs v0 --record는 --run-id가 있어야 하고 --
   assert.equal(r.runId, '2026-11-03-k1');
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs --run-id는 YYYY-MM-DD- 뒤 소문자·숫자로 시작하는 1~81자만 받는다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs --run-id는 YYYY-MM-DD- 뒤 소문자·숫자로 시작하는 1~81자만 받는다', () => {
   const rid = (id) => q({ record: true, 'run-id': id });
   for (const id of ['2026-11-03-k1', '2026-11-03-0', '2026-11-03-k1-v0-local-10k', `2026-11-03-a${'b'.repeat(80)}`]) {
     assert.equal(parseArgs(rid(id)).runId, id);
@@ -536,7 +536,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs --run-id는 YYYY-MM-DD- 뒤 소문자·숫자�
   }
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs --profile은 local- 뒤 소문자·숫자·- 1~20자만 받는다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs --profile은 local- 뒤 소문자·숫자·- 1~20자만 받는다', () => {
   const prof = (p) => q({ record: true, 'run-id': '2026-11-03-k1', profile: p });
   for (const p of ['local-gen', 'local-1k', `local-${'a'.repeat(20)}`, 'local--']) assert.equal(parseArgs(prof(p)).profile, p);
   for (const p of ['local-', `local-${'a'.repeat(21)}`, 'cloud-1k', 'local-1K', 'local_1k', 'local-1k\n', 'local-1k/..', 'Local-1k',
@@ -555,7 +555,7 @@ test('NFR-013 ADR-0057 parseArgs --record에서 --profile 기본은 사용자 �
   assert.equal(parseArgs(pay({ record: true, 'run-id': '2026-11-03-k7' })).profile, 'local-10k');
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs payment는 users × seats-per-order ≤ 100,000이어야 한다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs payment는 users × seats-per-order ≤ 100,000이어야 한다', () => {
   assert.equal(parseArgs(pay({ users: 50000, rate: 1 })).users, 50000); // 50,000 × 2 = 100,000
   expectUsage(pay({ users: 50001, rate: 1 }));
   assert.equal(parseArgs(pay({ users: 25000, rate: 1, 'seats-per-order': 4 })).users, 25000);
@@ -565,7 +565,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs payment는 users × seats-per-order ≤ 100,00
   expectUsage(pay({ users: 131072, rate: 1, 'seats-per-order': 1 }));
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs payment는 결제 시작 수의 상한 rate × (warm + main) + 2가 users 이하여야 한다(같으면 받고 하나 모자라면 거부)', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs payment는 결제 시작 수의 상한 rate × (warm + main) + 2가 users 이하여야 한다(같으면 받고 하나 모자라면 거부)', () => {
   // 도착률 실행기는 구간(예열·본구간)마다 '도착률 × 시간 + 1'번까지 시작할 수 있어 두 구간이면 + 2다
   const small = { rate: 5, warm: 2, main: 10 }; // 5 × 12 + 2 = 62
   assert.equal(parseArgs(pay({ ...small, users: 62 })).users, 62);
@@ -585,7 +585,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs payment는 결제 시작 수의 상한 rate ×
   expectUsage(pay({ users: 7, rate: 1, warm: 1, main: 5 }));
 });
 
-test('ASVS v5.0.0-2.2.1 parseArgs --out은 비지 않은 경로만 받고 그대로 둔다', () => {
+test('[ASVS v5.0.0-2.2.1] parseArgs --out은 비지 않은 경로만 받고 그대로 둔다', () => {
   expectUsage(q({ out: '' }));
   expectUsage(cal({ out: '' }));
   for (const out of ['out', '.cache/peaket-loadtest/r1', 'C:\\Users\\x\\My Runs\\r 1', '/tmp/a b/c']) {
@@ -597,7 +597,7 @@ test('ASVS v5.0.0-2.2.1 parseArgs --out은 비지 않은 경로만 받고 그대
 // manifests.mjs: 상수와 고정 스크립트
 // ---------------------------------------------------------------------------------------------
 
-test('ASVS v5.0.0-13.2.2 이미지는 태그와 sha256 다이제스트로 고정하고 k6는 PoC 스택과 같은 다이제스트다', () => {
+test('[ASVS v5.0.0-13.2.2] 이미지는 태그와 sha256 다이제스트로 고정하고 k6는 PoC 스택과 같은 다이제스트다', () => {
   assert.match(K6_IMAGE, /^grafana\/k6:1\.4\.2@sha256:[0-9a-f]{64}$/);
   assert.match(NULL_TARGET_IMAGE, /^nginxinc\/nginx-unprivileged:[^@\s]+@sha256:[0-9a-f]{64}$/);
   assert.ok(readFileSync(join(REPO, 'loadtest', 'poc', 'stack.mjs'), 'utf8').includes(K6_IMAGE));
@@ -624,7 +624,7 @@ test('NFR-013 ADR-0057 SAMPLER_COMMAND는 1초마다 유닉스 초·가동 초·
   assert.match(s, /echo "\$\(date \+%s\) \$up \$\(awk [^)]*usage_usec[^)]*\) \$\(cat \/sys\/fs\/cgroup\/memory\.current\)"/);
 });
 
-test('ASVS v5.0.0-1.2.5 RUN_SCRIPT는 고정 글로 /work/run.env를 내보내기 변수로 읽고 k6를 돌린 뒤 종료 코드를 out/exit에 쓴다', () => {
+test('[ASVS v5.0.0-1.2.5] RUN_SCRIPT는 고정 글로 /work/run.env를 내보내기 변수로 읽고 k6를 돌린 뒤 종료 코드를 out/exit에 쓴다', () => {
   assert.ok(RUN_SCRIPT.startsWith('#!/bin/sh\n'));
   const at = (s) => {
     const i = RUN_SCRIPT.indexOf(s);
@@ -642,7 +642,7 @@ test('ASVS v5.0.0-1.2.5 RUN_SCRIPT는 고정 글로 /work/run.env를 내보내�
   assert.ok(k6Line.includes('"loadtest/scenarios/$SCENARIO"'), '시나리오 경로는 따옴표로 감싼다');
 });
 
-test('ASVS v5.0.0-16.2.5 RUN_SCRIPT·SAMPLER_COMMAND는 환경 값(시험 키)을 로그에 펼치지 않는다(set -x·env·printenv 없음)', () => {
+test('[ASVS v5.0.0-16.2.5] RUN_SCRIPT·SAMPLER_COMMAND는 환경 값(시험 키)을 로그에 펼치지 않는다(set -x·env·printenv 없음)', () => {
   for (const s of [RUN_SCRIPT, SAMPLER_COMMAND[2]]) {
     assert.doesNotMatch(s, /set\s+-[a-z]*x/);
     assert.doesNotMatch(s, /(^|[;&|(]\s*)(env|printenv)\b/m);
@@ -722,7 +722,7 @@ test('NFR-013 ADR-0057 KIND_NODE는 kind 클러스터(deploy/local/kind.yaml)의
   assert.deepStrictEqual([...kindYaml.matchAll(/^\s*-\s*role:\s*(\S+)/gm)].map((m) => m[1]), ['control-plane']);
 });
 
-test('ASVS v5.0.0-13.2.2 generatorPod 최소 권한: 토큰·서비스 링크 없음, 루트 아닌 12345, seccomp RuntimeDefault, 권한 상승 금지·읽기 전용 루트·모든 권한 버림', () => {
+test('[ASVS v5.0.0-13.2.2] generatorPod 최소 권한: 토큰·서비스 링크 없음, 루트 아닌 12345, seccomp RuntimeDefault, 권한 상승 금지·읽기 전용 루트·모든 권한 버림', () => {
   const pod = gpod({ name: 'loadgen-r1', cpus: 4, memoryMi: 4096, simKey: true });
   assert.equal(pod.spec.automountServiceAccountToken, false);
   assert.equal(pod.spec.enableServiceLinks, false);
@@ -746,7 +746,7 @@ test('ASVS v5.0.0-13.2.2 generatorPod 최소 권한: 토큰·서비스 링크 �
   assert.ok(pod.spec.containers.every((c) => (c.volumeMounts ?? []).every((m) => !m.subPath && !m.subPathExpr)), 'hostPath를 subPath로 넓히지 않는다');
 });
 
-test('ASVS v5.0.0-13.3.1 generatorPod simKey면 PG_SIMULATOR_SECRET_KEY를 Secret 참조로만 싣고, 아니면 싣지 않는다', () => {
+test('[ASVS v5.0.0-13.3.1] generatorPod simKey면 PG_SIMULATOR_SECRET_KEY를 Secret 참조로만 싣고, 아니면 싣지 않는다', () => {
   const withKey = gpod({ name: 'loadgen-r1', cpus: 4, memoryMi: 4096, simKey: true });
   const env = envByName(withKey.spec.containers[0]);
   assert.deepStrictEqual(Object.keys(env).sort(), ['GOMAXPROCS', 'K6_NO_USAGE_REPORT', 'PG_SIMULATOR_SECRET_KEY', 'SSL_CERT_FILE']);
@@ -764,7 +764,7 @@ test('ASVS v5.0.0-13.3.1 generatorPod simKey면 PG_SIMULATOR_SECRET_KEY를 Secre
   }
 });
 
-test('ASVS v5.0.0-2.2.1 generatorPod 이름·CPU·메모리가 규칙 밖이면 RangeError', () => {
+test('[ASVS v5.0.0-2.2.1] generatorPod 이름·CPU·메모리가 규칙 밖이면 RangeError', () => {
   for (const name of ['a', '0', 'ab', 'loadgen-r1', `a${'b'.repeat(40)}c`]) {
     assert.equal(gpod({ name, cpus: 4, memoryMi: 4096 }).metadata.name, name);
   }
@@ -779,7 +779,7 @@ test('ASVS v5.0.0-2.2.1 generatorPod 이름·CPU·메모리가 규칙 밖이면 
   }
 });
 
-test('ASVS v5.0.0-2.2.1 ASVS v5.0.0-13.2.2 generatorPod hostDir는 <NODE_ROOT>/<영소문자·숫자 1~16자>만 받는다(노드의 다른 경로 거절)', () => {
+test('[ASVS v5.0.0-2.2.1] [ASVS v5.0.0-13.2.2] generatorPod hostDir는 <NODE_ROOT>/<영소문자·숫자 1~16자>만 받는다(노드의 다른 경로 거절)', () => {
   for (const tag of ['a', '0', 'r1', 'abcdefghij012345']) {
     const hostDir = `${NODE_ROOT}/${tag}`;
     assert.equal(generatorPod({ name: 'g', cpus: 1, memoryMi: 256, hostDir }).spec.volumes.find((v) => v.name === 'work').hostPath.path, hostDir);
@@ -865,7 +865,7 @@ test('NFR-013 ADR-0057 nullTargetManifests nginx.conf: 작업자 수 = cpus, TLS
   assert.match(nullTarget(16).conf, /^\s*worker_processes\s+16;/m);
 });
 
-test('ASVS v5.0.0-13.2.2 nullTargetManifests Deployment: 복제 1, 토큰 없음, 사용자 101, 읽기 전용 루트, 모든 권한 버림, 요청=한도, 이미지 고정', () => {
+test('[ASVS v5.0.0-13.2.2] nullTargetManifests Deployment: 복제 1, 토큰 없음, 사용자 101, 읽기 전용 루트, 모든 권한 버림, 요청=한도, 이미지 고정', () => {
   const { dep, pod, c } = nullTarget(4);
   assert.equal(dep.spec.replicas, 1);
   assert.equal(pod.automountServiceAccountToken, false);
@@ -917,7 +917,7 @@ test('NFR-013 ADR-0057 nullTargetManifests Service: 8443 → 8443이고 선택�
   for (const [k, v] of Object.entries(svc.spec.selector)) assert.equal(dep.spec.template.metadata.labels[k], v);
 });
 
-test('ASVS v5.0.0-2.2.1 nullTargetManifests cpus가 1~16 정수가 아니면 RangeError', () => {
+test('[ASVS v5.0.0-2.2.1] nullTargetManifests cpus가 1~16 정수가 아니면 RangeError', () => {
   for (const cpus of [0, 17, 2.5, -4, NaN, '2', null, undefined]) {
     assert.throws(() => nullTargetManifests({ cpus }), RangeError, `cpus=${String(cpus)}`);
   }
@@ -928,7 +928,7 @@ const { privateKey: EC_KEY } = generateKeyPairSync('ec', { namedCurve: 'P-256' }
 const PEM_KEY_PKCS8 = EC_KEY.export({ type: 'pkcs8', format: 'pem' });
 const PEM_KEY_SEC1 = EC_KEY.export({ type: 'sec1', format: 'pem' });
 
-test('ASVS v5.0.0-13.3.1 nullTargetSecret TLS Secret(kubernetes.io/tls)에 인증서와 키를 그대로 담는다', () => {
+test('[ASVS v5.0.0-13.3.1] nullTargetSecret TLS Secret(kubernetes.io/tls)에 인증서와 키를 그대로 담는다', () => {
   for (const key of [PEM_KEY_PKCS8, PEM_KEY_SEC1]) {
     const s = nullTargetSecret({ cert: PEM_CERT, key });
     assert.equal(s.apiVersion, 'v1');
@@ -940,7 +940,7 @@ test('ASVS v5.0.0-13.3.1 nullTargetSecret TLS Secret(kubernetes.io/tls)에 인�
   }
 });
 
-test('ASVS v5.0.0-2.2.1 nullTargetSecret PEM 꼴이 아니면 Error', () => {
+test('[ASVS v5.0.0-2.2.1] nullTargetSecret PEM 꼴이 아니면 Error', () => {
   assert.equal(nullTargetSecret({ cert: PEM_CERT, key: PEM_KEY_PKCS8 }).type, 'kubernetes.io/tls'); // 기준: 바른 PEM은 받는다
   const bad = [
     { cert: 'not a cert', key: PEM_KEY_PKCS8 },
@@ -955,7 +955,7 @@ test('ASVS v5.0.0-2.2.1 nullTargetSecret PEM 꼴이 아니면 Error', () => {
   for (const o of bad) assert.throws(() => nullTargetSecret(o), Error, JSON.stringify(o).slice(0, 80));
 });
 
-test('ASVS v5.0.0-16.2.5 nullTargetSecret 오류 메시지에 키 글을 싣지 않는다', () => {
+test('[ASVS v5.0.0-16.2.5] nullTargetSecret 오류 메시지에 키 글을 싣지 않는다', () => {
   assert.equal(nullTargetSecret({ cert: PEM_CERT, key: PEM_KEY_SEC1 }).stringData['tls.key'], PEM_KEY_SEC1);
   const key = 'PRIVATE-MATERIAL-7f3a9c2e1b';
   assert.throws(
@@ -981,7 +981,7 @@ test('NFR-013 ADR-0057 nullTargetCertArgs: 자체 서명 EC P-256, 1일, SAN 세
   assert.ok(args.includes('-subj') || args.includes('-batch'), '이름을 묻지 않는다(-subj/-batch)');
 });
 
-test('ASVS v5.0.0-1.2.5 nullTargetCertArgs 파일 경로는 공백·셸 글자가 있어도 인자 하나로 그대로 들어간다', () => {
+test('[ASVS v5.0.0-1.2.5] nullTargetCertArgs 파일 경로는 공백·셸 글자가 있어도 인자 하나로 그대로 들어간다', () => {
   const key = 'C:\\Users\\me\\My Temp\\$(id);k.pem';
   const cert = "/tmp/a b/`c`'.pem";
   const args = nullTargetCertArgs(key, cert);
@@ -992,7 +992,7 @@ test('ASVS v5.0.0-1.2.5 nullTargetCertArgs 파일 경로는 공백·셸 글자�
 
 const SIM_KEY = 'sim_sk_test_0000000000000000';
 
-test('ASVS v5.0.0-13.3.1 simKeySecret loadtest 네임스페이스의 loadgen-sim Secret에 PG_SIMULATOR_SECRET_KEY로 담는다', () => {
+test('[ASVS v5.0.0-13.3.1] simKeySecret loadtest 네임스페이스의 loadgen-sim Secret에 PG_SIMULATOR_SECRET_KEY로 담는다', () => {
   const s = simKeySecret(SIM_KEY);
   assert.equal(s.apiVersion, 'v1');
   assert.equal(s.kind, 'Secret');
@@ -1006,7 +1006,7 @@ test('ASVS v5.0.0-13.3.1 simKeySecret loadtest 네임스페이스의 loadgen-sim
   assert.equal(simKeySecret(long).stringData[SIM_KEY_NAME], long);
 });
 
-test('ASVS v5.0.0-13.3.1 simKeySecret 키가 sim_sk_ + [A-Za-z0-9_-] 16자 이상이 아니면 Error', () => {
+test('[ASVS v5.0.0-13.3.1] simKeySecret 키가 sim_sk_ + [A-Za-z0-9_-] 16자 이상이 아니면 Error', () => {
   const k16 = `sim_sk_${'a'.repeat(16)}`;
   assert.equal(simKeySecret(k16).stringData[SIM_KEY_NAME], k16); // 기준: 정확히 16자는 받는다
   for (const key of [`sim_sk_${'a'.repeat(15)}`, 'sk_live_0000000000000000', 'sk_test_0000000000000000', `SIM_SK_${'a'.repeat(16)}`,
@@ -1016,7 +1016,7 @@ test('ASVS v5.0.0-13.3.1 simKeySecret 키가 sim_sk_ + [A-Za-z0-9_-] 16자 이�
   }
 });
 
-test('ASVS v5.0.0-16.2.5 simKeySecret 오류 메시지에 키(일부도)를 싣지 않는다', () => {
+test('[ASVS v5.0.0-16.2.5] simKeySecret 오류 메시지에 키(일부도)를 싣지 않는다', () => {
   assert.equal(simKeySecret(SIM_KEY).kind, 'Secret');
   for (const key of ['sim_sk_TOPSECRETvalue12345!', 'sim_sk_short9Q', 'sk_live_REALSECRET0123456789']) {
     assert.throws(
@@ -1038,7 +1038,7 @@ test('ASVS v5.0.0-16.2.5 simKeySecret 오류 메시지에 키(일부도)를 싣�
 
 const SAFE_LINE = /^[A-Z][A-Z0-9_]{0,63}=[A-Za-z0-9_.:/,-]{0,512}$/;
 
-test('ASVS v5.0.0-1.2.5 runEnvFile 한 줄에 KEY=VALUE, 끝에 줄바꿈, 정수는 10진 글로 쓴다', () => {
+test('[ASVS v5.0.0-1.2.5] runEnvFile 한 줄에 KEY=VALUE, 끝에 줄바꿈, 정수는 10진 글로 쓴다', () => {
   const text = runEnvFile({
     ADMIT_PER_SECOND: 28,
     BASE_URL: 'https://v0-gateway.v0.svc.cluster.local:8443',
@@ -1055,7 +1055,7 @@ test('ASVS v5.0.0-1.2.5 runEnvFile 한 줄에 KEY=VALUE, 끝에 줄바꿈, 정�
   );
 });
 
-test('ASVS v5.0.0-1.2.5 runEnvFile 줄은 넣은 차례대로(이름순이 아니다)이고 SCENARIO 하나만 있어도 된다', () => {
+test('[ASVS v5.0.0-1.2.5] runEnvFile 줄은 넣은 차례대로(이름순이 아니다)이고 SCENARIO 하나만 있어도 된다', () => {
   assert.equal(runEnvFile({ SCENARIO: 'calibrate.js' }), 'SCENARIO=calibrate.js\n');
   assert.equal(
     runEnvFile({ USERS: 131072, SCENARIO: 'v0-seat-hold.js', MODE: 'crossed', RUN: '2026-11-03-k2', NEG: -5 }),
@@ -1093,14 +1093,14 @@ const SCENARIO_ENV = {
   PREP_RATE: 200,
 };
 
-test('ASVS v5.0.0-1.2.5 runEnvFile 시나리오가 읽는 환경 이름과 값은 모두 쓸 수 있다', () => {
+test('[ASVS v5.0.0-1.2.5] runEnvFile 시나리오가 읽는 환경 이름과 값은 모두 쓸 수 있다', () => {
   const text = runEnvFile({ SCENARIO: 'v0-payment.js', ...SCENARIO_ENV });
   const lines = text.slice(0, -1).split('\n');
   assert.deepStrictEqual(lines, ['SCENARIO=v0-payment.js', ...Object.entries(SCENARIO_ENV).map(([k, v]) => `${k}=${v}`)]);
   for (const l of lines) assert.match(l, SAFE_LINE);
 });
 
-test('ASVS v5.0.0-13.3.1 ASVS v5.0.0-1.2.5 runEnvFile 파드가 정한 환경을 덮는 키(PATH·HOME·SHELL·IFS·ENV·발생기 파드 env·LD_*)는 거부한다', () => {
+test('[ASVS v5.0.0-13.3.1] [ASVS v5.0.0-1.2.5] runEnvFile 파드가 정한 환경을 덮는 키(PATH·HOME·SHELL·IFS·ENV·발생기 파드 env·LD_*)는 거부한다', () => {
   assert.equal(runEnvFile({ SCENARIO: 'v0-queue.js', LDX: 1, PATHS: 'x' }), 'SCENARIO=v0-queue.js\nLDX=1\nPATHS=x\n'); // 기준: 이름이 같지 않으면 받는다
   // 발생기 파드가 env로 정하는 이름 전부(시험 키 포함)
   const podEnv = generatorPod({ name: 'g', cpus: 4, memoryMi: 4096, hostDir: `${NODE_ROOT}/r1`, simKey: true }).spec.containers[0].env.map((e) => e.name);
@@ -1115,14 +1115,14 @@ test('ASVS v5.0.0-13.3.1 ASVS v5.0.0-1.2.5 runEnvFile 파드가 정한 환경을
   assert.throws(() => runEnvFile({ SCENARIO: 'v0-payment.js', PG_SIMULATOR_SECRET_KEY: 'sim_sk_test_0000000000000000' }), Error);
 });
 
-test('ASVS v5.0.0-1.2.5 runEnvFile 셸이 해석할 글자가 든 값은 거부한다', () => {
+test('[ASVS v5.0.0-1.2.5] runEnvFile 셸이 해석할 글자가 든 값은 거부한다', () => {
   const bad = ['$HOME', '${X}', '`id`', '$(id)', 'a;b', 'a b', "a'b", 'a"b', 'a\nb', 'a\rb', 'a\tb', '*', 'a?', '[a]', 'a|b', 'a&b',
     'a<b', 'a>b', 'a\\b', '~', '#x', 'a=b', '!x', '%x', '{a,b}', '(a)', 'a+b', 'ä', '가', 'a\u0000b', 'x'.repeat(513)];
   for (const v of bad) assert.throws(() => runEnvFile({ SCENARIO: 'v0-queue.js', X: v }), Error, JSON.stringify(v));
   assert.equal(runEnvFile({ SCENARIO: 'v0-queue.js', X: 'x'.repeat(512) }), `SCENARIO=v0-queue.js\nX=${'x'.repeat(512)}\n`);
 });
 
-test('ASVS v5.0.0-1.2.5 runEnvFile 키는 대문자로 시작하는 A-Z0-9_ 64자까지', () => {
+test('[ASVS v5.0.0-1.2.5] runEnvFile 키는 대문자로 시작하는 A-Z0-9_ 64자까지', () => {
   const k64 = `A${'B'.repeat(63)}`;
   assert.equal(runEnvFile({ SCENARIO: 'v0-queue.js', [k64]: 1 }), `SCENARIO=v0-queue.js\n${k64}=1\n`);
   for (const k of [`A${'B'.repeat(64)}`, 'a', 'Abc', '1A', '_A', 'A-B', 'A B', 'A.B', 'A$', 'A=B', 'A\nB', '']) {
@@ -1130,7 +1130,7 @@ test('ASVS v5.0.0-1.2.5 runEnvFile 키는 대문자로 시작하는 A-Z0-9_ 64�
   }
 });
 
-test('ASVS v5.0.0-1.2.5 runEnvFile 값은 문자열·정수만(소수·NaN·Infinity·불·null·객체 거부)', () => {
+test('[ASVS v5.0.0-1.2.5] runEnvFile 값은 문자열·정수만(소수·NaN·Infinity·불·null·객체 거부)', () => {
   assert.equal(runEnvFile({ SCENARIO: 'v0-queue.js', X: 7 }), 'SCENARIO=v0-queue.js\nX=7\n');
   assert.equal(runEnvFile({ SCENARIO: 'v0-queue.js', X: '7.5' }), 'SCENARIO=v0-queue.js\nX=7.5\n'); // 소수는 문자열로 넘긴다
   for (const v of [1.5, NaN, Infinity, -Infinity, true, false, null, undefined, {}, [], ['a']]) {
@@ -1138,7 +1138,7 @@ test('ASVS v5.0.0-1.2.5 runEnvFile 값은 문자열·정수만(소수·NaN·Infi
   }
 });
 
-test('ASVS v5.0.0-1.2.5 runEnvFile SCENARIO는 꼭 있고 소문자·숫자·- 이름의 .js 파일이어야 한다', () => {
+test('[ASVS v5.0.0-1.2.5] runEnvFile SCENARIO는 꼭 있고 소문자·숫자·- 이름의 .js 파일이어야 한다', () => {
   for (const vars of [{}, { USERS: 5 }]) assert.throws(() => runEnvFile(vars), Error);
   for (const s of ['v0-queue', 'V0-queue.js', 'v0_queue.js', '../v0-queue.js', 'a/b.js', '.js', 'v0-queue.js.bak', 'v0-queue.mjs',
     'v0-queue.JS', 5]) {
@@ -1147,7 +1147,7 @@ test('ASVS v5.0.0-1.2.5 runEnvFile SCENARIO는 꼭 있고 소문자·숫자·- �
   for (const s of ['v0-queue.js', 'calibrate.js', 'v0-seat-hold.js', '1.js']) assert.equal(runEnvFile({ SCENARIO: s }), `SCENARIO=${s}\n`);
 });
 
-test('ASVS v5.0.0-1.2.5 runEnvFile 결과를 POSIX 셸이 읽어도 실행할 것이 없다(모든 줄이 허용 글자뿐인 KEY=VALUE)', () => {
+test('[ASVS v5.0.0-1.2.5] runEnvFile 결과를 POSIX 셸이 읽어도 실행할 것이 없다(모든 줄이 허용 글자뿐인 KEY=VALUE)', () => {
   const text = runEnvFile({
     SCENARIO: 'v0-payment.js',
     BASE_URL: 'https://v0-gateway.v0.svc.cluster.local:8443',
@@ -1196,7 +1196,7 @@ test('NFR-013 ADR-0057 parseCgroupLog 가동 초·사용 시간이 같으면 받
   assert.deepStrictEqual(parseCgroupLog(text).map((s) => s.memBytes), [900, 500, 100]);
 });
 
-test('ASVS v5.0.0-2.2.1 parseCgroupLog 꼴이 틀린 줄(칸 수·숫자 아님·가동 초나 사용 시간 감소)은 줄 번호와 함께 Error', () => {
+test('[ASVS v5.0.0-2.2.1] parseCgroupLog 꼴이 틀린 줄(칸 수·숫자 아님·가동 초나 사용 시간 감소)은 줄 번호와 함께 Error', () => {
   const six = goodLines(6).join('\n');
   const bad = [
     '1793649476 1006.00 6000000', // 세 칸
@@ -1485,7 +1485,7 @@ test('NFR-013 ADR-0057 calibrationCapacity 빈 목록은 용량 null·topReached
   assert.deepStrictEqual(calibrationCapacity([]), { capacityRps: null, topReached: false, limitedBy: null });
 });
 
-test('ASVS v5.0.0-2.2.1 calibrationCapacity 단계가 오름차순이 아니거나 겹치면 Error', () => {
+test('[ASVS v5.0.0-2.2.1] calibrationCapacity 단계가 오름차순이 아니거나 겹치면 Error', () => {
   assert.equal(calibrationCapacity([pass(1000), pass(1001)]).capacityRps, 1001); // 기준: 1 차이도 오름차순
   assert.throws(() => calibrationCapacity([pass(2000), pass(1000)]), Error);
   assert.throws(() => calibrationCapacity([pass(1000), pass(1000)]), Error);
@@ -1501,7 +1501,7 @@ test('NFR-013 ADR-0057 perVuBytes = memMaxBytes ÷ vusMax를 정수로 올림', 
   assert.equal(perVuBytes({ memMaxBytes: 0, vusMax: 7 }), 0);
 });
 
-test('ASVS v5.0.0-2.2.1 perVuBytes vusMax가 1 이상 정수가 아니면 RangeError', () => {
+test('[ASVS v5.0.0-2.2.1] perVuBytes vusMax가 1 이상 정수가 아니면 RangeError', () => {
   for (const vusMax of [0, -1, 1.5, NaN, Infinity, '3', null, undefined]) {
     assert.throws(() => perVuBytes({ memMaxBytes: 1000, vusMax }), RangeError, String(vusMax));
   }
@@ -1546,7 +1546,7 @@ test('K1 Q-T2 splitConsole 빈 글·표시 없음·한쪽 표시·줄바꿈 없�
   assert.deepStrictEqual(norm(splitConsole(mark('main_end', Number.MAX_SAFE_INTEGER)).marks), { main_end: Number.MAX_SAFE_INTEGER });
 });
 
-test('ASVS v5.0.0-2.2.1 splitConsole 모르는 표시 이름·at_ms가 0 이상 안전한 정수가 아닌 표시는 줄 번호(빈 줄 포함 1부터)와 함께 Error', () => {
+test('[ASVS v5.0.0-2.2.1] splitConsole 모르는 표시 이름·at_ms가 0 이상 안전한 정수가 아닌 표시는 줄 번호(빈 줄 포함 1부터)와 함께 Error', () => {
   assert.deepStrictEqual(norm(splitConsole(`${ENTRY}\n\n${mark('main_start', 1)}\n`).marks), { main_start: 1 }); // 기준
   const bad = [
     mark('warm_start', 1),
@@ -1578,14 +1578,14 @@ test('ASVS v5.0.0-2.2.1 splitConsole 모르는 표시 이름·at_ms가 0 이상 
   }
 });
 
-test('ASVS v5.0.0-2.2.1 splitConsole main_end가 main_start보다 작으면 줄 차례와 상관없이 Error', () => {
+test('[ASVS v5.0.0-2.2.1] splitConsole main_end가 main_start보다 작으면 줄 차례와 상관없이 Error', () => {
   assert.throws(() => splitConsole(`${mark('main_start', 1000)}\n${mark('main_end', 999)}\n`), Error);
   // 끝 표시가 먼저 나와도 값으로 견준다
   assert.throws(() => splitConsole(`${mark('main_end', 999)}\n${mark('main_start', 1000)}\n`), Error);
   assert.deepStrictEqual(norm(splitConsole(`${mark('main_end', 1000)}\n${mark('main_start', 999)}\n`).marks), { main_start: 999, main_end: 1000 });
 });
 
-test('ASVS v5.0.0-2.2.1 splitConsole JSON 객체가 아닌 줄·모르는 kind·같은 표시 두 번·끝이 시작보다 앞이면 줄 번호와 함께 Error', () => {
+test('[ASVS v5.0.0-2.2.1] splitConsole JSON 객체가 아닌 줄·모르는 kind·같은 표시 두 번·끝이 시작보다 앞이면 줄 번호와 함께 Error', () => {
   const four = [ENTRY, mark('main_start', 1000), ADMIT_SPACED, ENTRY2];
   const bad = [
     'not json',
@@ -1623,14 +1623,14 @@ test('ASVS v5.0.0-2.2.1 splitConsole JSON 객체가 아닌 줄·모르는 kind·
   assert.throws(() => splitConsole([mark('main_start', 1), mark('main_end', 2), mark('main_end', 3)].join('\n')), Error);
 });
 
-test('ASVS v5.0.0-2.2.1 splitConsole 줄 번호는 빈 줄을 포함한 실제 줄 번호다', () => {
+test('[ASVS v5.0.0-2.2.1] splitConsole 줄 번호는 빈 줄을 포함한 실제 줄 번호다', () => {
   assert.throws(
     () => splitConsole(`${ENTRY}\n\n\n\n\n\nnot json\n`),
     (e) => e instanceof Error && mentionsNumber(e.message, 7),
   );
 });
 
-test('ASVS v5.0.0-16.2.5 splitConsole 오류 메시지에 그 줄의 내용(토큰처럼 보이는 글)을 싣지 않는다', () => {
+test('[ASVS v5.0.0-16.2.5] splitConsole 오류 메시지에 그 줄의 내용(토큰처럼 보이는 글)을 싣지 않는다', () => {
   const secret = 'tok_SECRET_9f8e7d6c5b4a3921';
   assert.deepStrictEqual(splitConsole(`${ENTRY}\n`).records, [ENTRY]); // 기준: 바른 줄은 받는다
   const lines = [
@@ -1716,7 +1716,7 @@ test('K1 Q-T2 servingRecords eventId는 대문자 UUID도 받고 검사기가 �
   assert.equal(servingRecords('0B5A3F9E-1c2d-4E5F-8a9b-0C1D2E3F4A5B', [{ serving: 1, called: 1, atMs: 1 }]).length, 1); // 섞인 대소문자
 });
 
-test('ASVS v5.0.0-2.2.1 servingRecords eventId가 UUID가 아니면 Error, serving·시각이 틀려도 Error', () => {
+test('[ASVS v5.0.0-2.2.1] servingRecords eventId가 UUID가 아니면 Error, serving·시각이 틀려도 Error', () => {
   const log = [{ serving: 1, called: 1, atMs: 1 }];
   assert.equal(servingRecords(UUID_A, log).length, 1); // 기준: 바른 UUID는 받는다
   for (const id of ['not-a-uuid', '', `${UUID_A}\n`, ` ${UUID_A}`, `${UUID_A}0`, UUID_A.replaceAll('-', ''),
@@ -1785,7 +1785,7 @@ const MINIMAL = Object.freeze({
   notes: '보정',
 });
 
-test('ASVS v5.0.0-1.2.5 collectArgs 모든 칸을 주면 늘 쓰는 인자 뒤에 users·rps·start·end·invalid-reason·invariants·extra를 붙인다', () => {
+test('[ASVS v5.0.0-1.2.5] collectArgs 모든 칸을 주면 늘 쓰는 인자 뒤에 users·rps·start·end·invalid-reason·invariants·extra를 붙인다', () => {
   assert.deepStrictEqual(collectArgs(FULL), [
     'tools/perf-ledger/collect.py',
     '--run-id', FULL.runId,
@@ -1810,7 +1810,7 @@ test('ASVS v5.0.0-1.2.5 collectArgs 모든 칸을 주면 늘 쓰는 인자 뒤�
   ]);
 });
 
-test('ASVS v5.0.0-1.2.5 collectArgs 선택 칸이 없으면 늘 쓰는 인자만, 빈 extra는 아무것도 붙이지 않는다', () => {
+test('[ASVS v5.0.0-1.2.5] collectArgs 선택 칸이 없으면 늘 쓰는 인자만, 빈 extra는 아무것도 붙이지 않는다', () => {
   const expected = [
     'tools/perf-ledger/collect.py',
     '--run-id', MINIMAL.runId,
@@ -1829,7 +1829,7 @@ test('ASVS v5.0.0-1.2.5 collectArgs 선택 칸이 없으면 늘 쓰는 인자만
   assert.deepStrictEqual(collectArgs({ ...MINIMAL, extra: [] }), expected);
 });
 
-test('ASVS v5.0.0-1.2.5 collectArgs 셸 없이 부르는 인자 목록: 모든 원소가 문자열이고 공백·따옴표·$( )가 든 값도 원소 하나다', () => {
+test('[ASVS v5.0.0-1.2.5] collectArgs 셸 없이 부르는 인자 목록: 모든 원소가 문자열이고 공백·따옴표·$( )가 든 값도 원소 하나다', () => {
   const args = collectArgs(FULL);
   assert.ok(args.every((a) => typeof a === 'string'));
   assert.equal(args.filter((a) => a === FULL.notes).length, 1);
@@ -1838,7 +1838,7 @@ test('ASVS v5.0.0-1.2.5 collectArgs 셸 없이 부르는 인자 목록: 모든 �
   assert.equal(collectArgs({ ...FULL, rps: 28.3 })[args.indexOf('--rps') + 1], '28.3');
 });
 
-test('ASVS v5.0.0-1.2.5 collectArgs start·end는 둘 다 있을 때만 싣는다', () => {
+test('[ASVS v5.0.0-1.2.5] collectArgs start·end는 둘 다 있을 때만 싣는다', () => {
   const base = collectArgs(MINIMAL);
   assert.deepStrictEqual(collectArgs({ ...MINIMAL, start: '2026-11-03T01:00:00Z' }), base);
   assert.deepStrictEqual(collectArgs({ ...MINIMAL, end: '2026-11-03T01:01:30Z' }), base);
@@ -1849,7 +1849,7 @@ test('ASVS v5.0.0-1.2.5 collectArgs start·end는 둘 다 있을 때만 싣는�
     [...base, '--users', '5', '--invariants', '/tmp/i.csv']);
 });
 
-test('ASVS v5.0.0-1.2.5 collectArgs 문자열 값이 비었거나 -로 시작하면(argparse가 인자로 읽는다) Error', () => {
+test('[ASVS v5.0.0-1.2.5] collectArgs 문자열 값이 비었거나 -로 시작하면(argparse가 인자로 읽는다) Error', () => {
   assert.equal(collectArgs({ ...MINIMAL, notes: 'a -b --c' })[collectArgs(MINIMAL).indexOf('--notes') + 1], 'a -b --c'); // 기준: 가운데의 -는 된다
   const bad = [
     { notes: '' },
@@ -1873,7 +1873,7 @@ test('ASVS v5.0.0-1.2.5 collectArgs 문자열 값이 비었거나 -로 시작하
   for (const over of bad) assert.throws(() => collectArgs({ ...MINIMAL, ...over }), Error, JSON.stringify(over));
 });
 
-test('ASVS v5.0.0-1.2.5 collectArgs가 내는 인자는 모두 collect.py가 선언한 인자다', () => {
+test('[ASVS v5.0.0-1.2.5] collectArgs가 내는 인자는 모두 collect.py가 선언한 인자다', () => {
   const src = readFileSync(join(REPO, 'tools', 'perf-ledger', 'collect.py'), 'utf8');
   const declared = new Set([...src.matchAll(/add_argument\('(--[a-z0-9-]+)'/g)].map((m) => m[1]));
   assert.ok(declared.has('--run-id') && declared.has('--invalid-reason'));

@@ -1,5 +1,5 @@
 // 좌석 Lua 오류 갈래(seatLuaErrorOf)와 지표 seat_lua_errors_total{script,code}(PromSeatSignals), docs/observability.md §5 '좌석 Lua 오류 신호',
-// seat-hold.md §3 '쓰기 전 지킴'·§9, BUILD_ORDER PRF-135 'PRF-130 리뷰 낮음 4'. 로그·지표에는 키 종류만 남긴다(ASVS 16.2.5).
+// seat-hold.md §3 '쓰기 전 지킴'·§9, BUILD_ORDER PRF-135 'PRF-130 리뷰 낮음 4'. 로그·지표에는 키 종류만 남긴다([ASVS v5.0.0-16.2.5]).
 // 홀드 미룸 지표 seat_hold_deferred_total{reason}(BUILD_ORDER PRF-143, seat-hold.md §6 '다시 만들기(RB-06)의 첫 구현' 미룸 지표, observability 행)도 여기서 본다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';

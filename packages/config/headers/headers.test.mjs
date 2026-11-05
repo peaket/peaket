@@ -1,4 +1,4 @@
-// 화면 묶음별 보안 헤더가 정본(docs/frontend.md §5.14.1 글 상자·헤더 표)과 같은지 본다(BUILD_ORDER BAS-220, ASVS 3.4.3·3.4.5·3.4.6·3.4.7·3.4.8).
+// 화면 묶음별 보안 헤더가 정본(docs/frontend.md §5.14.1 글 상자·헤더 표)과 같은지 본다(BUILD_ORDER BAS-220, [ASVS v5.0.0-3.4.3]·[ASVS v5.0.0-3.4.5]·[ASVS v5.0.0-3.4.6]·[ASVS v5.0.0-3.4.7]·[ASVS v5.0.0-3.4.8]).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

@@ -80,7 +80,7 @@ function fakeProducer() {
 const flush = () => new Promise<void>((r) => setImmediate(r));
 
 describe('jsonTradeEventCodec: JSON 대역 값', () => {
-  test('ASVS2.2.1_값은 UTF-8 JSON 바이트다: 받는 쪽처럼 JSON.parse(value.toString("utf8"))하면 같은 객체이고 한글도 깨지지 않는다(두 토픽 모두) [ASVS v5.0.0-2.2.1]', () => {
+  test('값은 UTF-8 JSON 바이트다: 받는 쪽처럼 JSON.parse(value.toString("utf8"))하면 같은 객체이고 한글도 깨지지 않는다(두 토픽 모두) [ASVS v5.0.0-2.2.1]', () => {
     const seat = heldMessage();
     const v = jsonTradeEventCodec.encode(SEAT_TOPIC, seat);
     expect(Buffer.isBuffer(v)).toBe(true);
@@ -126,7 +126,7 @@ describe('KafkaTradeEventPublisher: 준 차례대로, 연이은 같은 토픽끼
     expect(sends).toEqual([]);
   });
 
-  test('ASVS16.5.2_send가 던지면 publish도 그 오류로 던진다(릴레이가 확인하지 않게). 뒤 묶음의 send가 던져도 같다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('send가 던지면 publish도 그 오류로 던진다(릴레이가 확인하지 않게). 뒤 묶음의 send가 던져도 같다 [ASVS v5.0.0-16.5.2]', async () => {
     const boom = new Error('kafka down');
     const one = fakeProducer();
     one.o.fail = () => boom;
@@ -136,7 +136,7 @@ describe('KafkaTradeEventPublisher: 준 차례대로, 연이은 같은 토픽끼
     await expect(two.publisher.publish([record(SEAT_TOPIC, 1), record(PURCHASE_SESSION_TOPIC, 2)])).rejects.toBe(boom);
   });
 
-  test('ASVS16.5.2_publish는 send의 확인을 받기 전에 끝나지 않는다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('publish는 send의 확인을 받기 전에 끝나지 않는다 [ASVS v5.0.0-16.5.2]', async () => {
     const { o, publisher, sends } = fakeProducer();
     let release: (() => void) | undefined;
     o.wait = () =>
@@ -219,7 +219,7 @@ describe('SeatHoldLedgerHandler.decode: 홀드 사건만 원장 사건으로 읽
     expect(handler.decode(consumed(jsonValue({ eventId: EV, status: 'ON_SALE', version: 3 }), null))).toEqual({ kind: 'skip', key: 'skip:' });
   });
 
-  test('ASVS2.2.1_값이 없거나(null) JSON이 아니거나 모양이 틀린 홀드 사건은 decode가 던지지 않고 bad로 돌려주며(업무 키를 회차 키로 잃지 않게), handle이 RangeError로 던진다(같은 결과일 실패라 키 단위 소비자가 보류한다) [ASVS v5.0.0-2.2.1]', async () => {
+  test('값이 없거나(null) JSON이 아니거나 모양이 틀린 홀드 사건은 decode가 던지지 않고 bad로 돌려주며(업무 키를 회차 키로 잃지 않게), handle이 RangeError로 던진다(같은 결과일 실패라 키 단위 소비자가 보류한다) [ASVS v5.0.0-2.2.1]', async () => {
     const { handler, applied } = fakeLedger();
     const noAccount: Record<string, unknown> = { ...heldMessage() };
     delete noAccount.accountId;

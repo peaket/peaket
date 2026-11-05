@@ -37,7 +37,7 @@ describe('M1 identityClientsFromEnv: 주소가 없을 때', () => {
     }
   });
 
-  test.each(['prod', 'demo', 'staging', undefined, ''])('ASVS16.5.3_PEAKET_ENV=%j(값이 없으면 플랫폼처럼 prod)면 주소 없이 대역으로 뜨지 않고 던진다(시작 실패) [ASVS v5.0.0-16.5.3]', (env) => {
+  test.each(['prod', 'demo', 'staging', undefined, ''])('PEAKET_ENV=%j(값이 없으면 플랫폼처럼 prod)면 주소 없이 대역으로 뜨지 않고 던진다(시작 실패) [ASVS v5.0.0-16.5.3]', (env) => {
     for (const addr of [undefined, '']) {
       expect(() => identityClientsFromEnv({ ...(env === undefined ? {} : { PEAKET_ENV: env }), [IDENTITY_GRPC_ADDR_ENV]: addr })).toThrow(new RegExp(IDENTITY_GRPC_ADDR_ENV));
     }
@@ -88,7 +88,7 @@ describe('M2 recheckFailureOf(gRPC 상태 코드 → 까닭) 대응 표', () => 
     expect(recheckFailureOf(code)).toBe(reason);
   });
 
-  test('PT35_ASVS16.5.3_대체 판정(토큰 판정)으로 가는 것은 차단기 열림·4·14(바로)와 8·13·2(다시 물은 뒤)뿐이고, 7·3·그 밖의 코드는 토큰이 있어도 MISCONFIGURED다 [ASVS v5.0.0-16.5.3]', () => {
+  test('PT35_대체 판정(토큰 판정)으로 가는 것은 차단기 열림·4·14(바로)와 8·13·2(다시 물은 뒤)뿐이고, 7·3·그 밖의 코드는 토큰이 있어도 MISCONFIGURED다 [ASVS v5.0.0-16.5.3]', () => {
     const token = { pid: 'pid-1', scopes: ['ticket:buy'] };
     for (const [code, name, reason] of TABLE) {
       const kind = judgeRecheck({ status: 'FAILED', reason }, token).kind;

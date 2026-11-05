@@ -156,7 +156,7 @@ describe('records.mjs — 시험 기록 줄', () => {
     }
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: kstIso는 0~253,402,268,399,999(KST 9999-12-31T23:59:59.999) 정수가 아니면 RangeError', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: kstIso는 0~253,402,268,399,999(KST 9999-12-31T23:59:59.999) 정수가 아니면 RangeError', () => {
     assert.equal(kstIso(0), '1970-01-01T09:00:00.000+09:00');
     // 위 끝은 받고(네 자리 해의 마지막 순간), 1ms 뒤부터는 해가 다섯 자리(+010000)가 되어 거절한다
     assert.equal(KST_MAX_MS, Date.UTC(9999, 11, 31, 14, 59, 59, 999));
@@ -216,12 +216,12 @@ describe('records.mjs — 시험 기록 줄', () => {
     assert.equal(resultOf(999, [999]), 'ok');
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: resultOf는 기대 상태 목록이 비었거나 정수 목록이 아니면 TypeError', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: resultOf는 기대 상태 목록이 비었거나 정수 목록이 아니면 TypeError', () => {
     assert.equal(resultOf(200, [200]), 'ok');
     throwsFor([[], undefined, null, 200, '200', ['200'], [200, '201'], {}, [null], [200.5], [NaN], [Infinity], [200, 1.5]], (e) => resultOf(200, e), TypeError, 'resultOf expected');
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: resultOf는 status가 0~999 정수가 아니면 기대 목록에 있어도 TypeError', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: resultOf는 status가 0~999 정수가 아니면 기대 목록에 있어도 TypeError', () => {
     assert.equal(resultOf(0, [200]), 'unknown');
     assert.equal(resultOf(999, [200]), 'unknown');
     throwsFor([-1, 1000, 1.5, NaN, Infinity, -Infinity, '200', null, undefined, true, [200]], (s) => resultOf(s, [200]), TypeError, 'resultOf status');
@@ -269,7 +269,7 @@ describe('records.mjs — 시험 기록 줄', () => {
     for (const [status, body, want] of table) assert.equal(admitResult(status, body), want, `status=${status}, body=${show(body)}`);
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: admitResult는 status가 0~999 정수가 아니면 TypeError', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: admitResult는 status가 0~999 정수가 아니면 TypeError', () => {
     assert.equal(admitResult(999, undefined), 'unknown');
     assert.equal(admitResult(0, undefined), 'unknown');
     throwsFor([-1, 1000, 1.5, NaN, Infinity, '200', null, undefined, true], (s) => admitResult(s, 'ADMITTED'), TypeError, 'admitResult status');
@@ -324,13 +324,13 @@ describe('records.mjs — 시험 기록 줄', () => {
     assert.equal(failWithSeq.generation, 2);
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: queueOpRecord는 종류·결과가 정한 값 밖이면 던진다', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: queueOpRecord는 종류·결과가 정한 값 밖이면 던진다', () => {
     assert.equal(queueOpRecord('queue_entry', opInput()).kind, 'queue_entry');
     throwsFor(['queue_serving', 'mark', 'pg_charge', 'QUEUE_ENTRY', '', undefined, null], (k) => queueOpRecord(k, opInput()), Error, 'kind');
     throwsFor(['OK', 'timeout', 'success', '', undefined, null, 1], (r) => queueOpRecord('queue_entry', opInput({ result: r, seq: 1, generation: 1 })), Error, 'result');
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: queueOpRecord는 result가 ok인데 seq나 generation이 없으면 던진다', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: queueOpRecord는 result가 ok인데 seq나 generation이 없으면 던진다', () => {
     assert.equal(queueOpRecord('queue_admit', opInput({ result: 'ok', seq: 3, generation: 1 })).result, 'ok');
     assert.throws(() => queueOpRecord('queue_admit', opInput({ seq: null })), Error);
     assert.throws(() => queueOpRecord('queue_admit', opInput({ seq: undefined })), Error);
@@ -341,7 +341,7 @@ describe('records.mjs — 시험 기록 줄', () => {
     assert.throws(() => queueOpRecord('queue_entry', noSeq), Error);
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: queueOpRecord는 seq·generation이 0 이상 정수도 null도 아니면 결과와 상관없이 던진다', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: queueOpRecord는 seq·generation이 0 이상 정수도 null도 아니면 결과와 상관없이 던진다', () => {
     assert.equal(queueOpRecord('queue_entry', opInput({ result: 'fail', seq: 7, generation: 7 })).seq, 7);
     const bad = [-1, 1.5, NaN, Infinity, '1', true, {}];
     for (const result of ['ok', 'fail', 'unknown']) {
@@ -350,7 +350,7 @@ describe('records.mjs — 시험 기록 줄', () => {
     }
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: queueOpRecord는 끝 시각이 시작보다 앞이면 던지고 같으면 받으며 시각이 틀리면 던진다', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: queueOpRecord는 끝 시각이 시작보다 앞이면 던지고 같으면 받으며 시각이 틀리면 던진다', () => {
     const same = queueOpRecord('queue_entry', opInput({ startedMs: T0, endedMs: T0 }));
     assert.equal(same.started_at, T0_KST);
     assert.equal(same.ended_at, T0_KST);
@@ -364,7 +364,7 @@ describe('records.mjs — 시험 기록 줄', () => {
     throwsFor([NaN, 1.5, Infinity, KST_MAX_MS + 1, undefined, String(T1)], (v) => queueOpRecord('queue_entry', opInput({ startedMs: T0, endedMs: v })), Error, 'endedMs');
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: queueOpRecord는 eventId가 UUID가 아니면 던진다', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: queueOpRecord는 eventId가 UUID가 아니면 던진다', () => {
     assert.equal(queueOpRecord('queue_entry', opInput()).event_id, EVENT);
     throwsFor(
       ['', 'not-a-uuid', EVENT.replaceAll('-', ''), `${EVENT}0`, EVENT.slice(1), ` ${EVENT}`, `${EVENT}\n`, `{${EVENT}}`, '5f0c6a2e-8a1b-4c3d-9e4f-0a1b2c3d4e5g', undefined, null, 123],
@@ -374,7 +374,7 @@ describe('records.mjs — 시험 기록 줄', () => {
     );
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: queueOpRecord는 accountRef·requestId가 출력 가능 ASCII 1~200자가 아니면 던진다', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: queueOpRecord는 accountRef·requestId가 출력 가능 ASCII 1~200자가 아니면 던진다', () => {
     // 경계: 1자, 200자, 출력 가능 ASCII 양 끝 글자(! ~)는 받는다
     const ok = queueOpRecord('queue_admit', opInput({ accountRef: REF_200, requestId: '!' }));
     assert.equal(ok.account_ref, REF_200);
@@ -398,7 +398,7 @@ describe('records.mjs — 시험 기록 줄', () => {
     assert.equal(queueServingRecord({ eventId: EVENT, serving: 1, atMs: DAY_EDGE }).observed_at, '2026-11-03T00:00:00.000+09:00');
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: queueServingRecord는 serving이 0 이상 정수가 아니거나 시각이 틀리면 RangeError', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: queueServingRecord는 serving이 0 이상 정수가 아니거나 시각이 틀리면 RangeError', () => {
     assert.equal(queueServingRecord({ eventId: EVENT, serving: 3, atMs: T0 }).serving, 3);
     throwsFor([-1, 1.5, NaN, Infinity, '3', null, undefined], (v) => queueServingRecord({ eventId: EVENT, serving: v, atMs: T0 }), RangeError, 'serving');
     throwsFor([-1, 1.5, NaN, '0', undefined], (v) => queueServingRecord({ eventId: EVENT, serving: 3, atMs: v }), RangeError, 'atMs');
@@ -412,7 +412,7 @@ describe('records.mjs — 시험 기록 줄', () => {
     for (const name of MARK_NAMES) assert.equal(markRecord(name, T1).name, name);
   });
 
-  test('NFR-013 ASVS v5.0.0-2.2.1: markRecord는 이름이 MARK_NAMES 밖이거나 시각이 0 이상 정수가 아니면 던진다', () => {
+  test('NFR-013 [ASVS v5.0.0-2.2.1]: markRecord는 이름이 MARK_NAMES 밖이거나 시각이 0 이상 정수가 아니면 던진다', () => {
     assert.equal(markRecord('main_start', T0).at_ms, T0);
     throwsFor(['main', 'warm_start', 'prep_start', 'MAIN_START', 'main_start ', '', undefined, null], (n) => markRecord(n, T0), Error, 'name');
     throwsFor([-1, 1.5, NaN, Infinity, '0', null, undefined], (v) => markRecord('main_end', v), Error, 'atMs');
@@ -484,7 +484,7 @@ describe('users.mjs — 가상 사용자 신원', () => {
     assert.equal(seen.size, MAX_USERS);
   });
 
-  test('NFR-013 ASVS v5.0.0-2.2.1: userIp는 0 ≤ i < MAX_USERS 정수가 아니면 RangeError', () => {
+  test('NFR-013 [ASVS v5.0.0-2.2.1]: userIp는 0 ≤ i < MAX_USERS 정수가 아니면 RangeError', () => {
     assert.equal(userIp(0), '198.18.0.0');
     throwsFor([MAX_USERS, 131073, -1, 1.5, NaN, Infinity, 2 ** 53, '1', null, undefined], userIp, RangeError, 'userIp');
   });
@@ -493,7 +493,7 @@ describe('users.mjs — 가상 사용자 신원', () => {
     for (const tag of ['a', '0', 'r1', 'run20261103', 'abcdefghij012345']) assert.equal(assertRunTag(tag), tag);
   });
 
-  test('NFR-013 ASVS v5.0.0-2.2.1: assertRunTag는 규칙 밖 꼬리표(대문자·기호·17자·줄바꿈·문자열 아님)를 거절한다', () => {
+  test('NFR-013 [ASVS v5.0.0-2.2.1]: assertRunTag는 규칙 밖 꼬리표(대문자·기호·17자·줄바꿈·문자열 아님)를 거절한다', () => {
     assert.equal(assertRunTag('r1'), 'r1');
     throwsFor(
       ['', 'abcdefghij0123456', 'A', 'Run1', 'r-1', 'r_1', 'r 1', 'r1\n', '\nr1', 'r1 ', 'ｒ1', '가', 'r.1', 'r/1', 123, null, undefined, ['r1']],
@@ -515,7 +515,7 @@ describe('users.mjs — 가상 사용자 신원', () => {
     assert.match(accountRef('abcdefghij012345', MAX_USERS - 1), /^[\x21-\x7e]{1,200}$/);
   });
 
-  test('NFR-013 ASVS v5.0.0-2.2.1: accountRef·pidOf·sidOf는 번호가 틀리면 RangeError, 꼬리표가 틀리면 던진다', () => {
+  test('NFR-013 [ASVS v5.0.0-2.2.1]: accountRef·pidOf·sidOf는 번호가 틀리면 RangeError, 꼬리표가 틀리면 던진다', () => {
     for (const [name, fn] of [
       ['accountRef', accountRef],
       ['pidOf', pidOf],
@@ -570,7 +570,7 @@ describe('users.mjs — 가상 사용자 신원', () => {
     }
   });
 
-  test('NFR-013 ASVS v5.0.0-2.2.1: fanHeaders는 빈 토큰, 공백 글자(\\s 전부)·;·,가 든 토큰, 문자열 아닌 토큰, origin 없는 쓰기를 거절한다', () => {
+  test('NFR-013 [ASVS v5.0.0-2.2.1]: fanHeaders는 빈 토큰, 공백 글자(\\s 전부)·;·,가 든 토큰, 문자열 아닌 토큰, origin 없는 쓰기를 거절한다', () => {
     const ip = '198.18.0.1';
     assert.equal(fanHeaders({ token: 'tok', ip }).cookie, `${ACCESS_COOKIE}=tok`);
     throwsFor(
@@ -590,7 +590,7 @@ describe('users.mjs — 가상 사용자 신원', () => {
     assert.throws(() => fanHeaders({ token: 'tok', ip, write: true, origin: undefined }), Error);
   });
 
-  test('NFR-013 ASVS v5.0.0-2.2.1: fanHeaders는 ip가 점 넷 IPv4(각 0~255)가 아니면 던진다(머리 주입 포함)', () => {
+  test('NFR-013 [ASVS v5.0.0-2.2.1]: fanHeaders는 ip가 점 넷 IPv4(각 0~255)가 아니면 던진다(머리 주입 포함)', () => {
     assert.equal(fanHeaders({ token: 'tok', ip: '198.18.0.1' })['x-forwarded-for'], '198.18.0.1');
     throwsFor(
       [
@@ -604,7 +604,7 @@ describe('users.mjs — 가상 사용자 신원', () => {
     );
   });
 
-  test('NFR-013 ASVS v5.0.0-16.2.5: fanHeaders 오류 메시지에 토큰(일부도)을 싣지 않는다', () => {
+  test('NFR-013 [ASVS v5.0.0-16.2.5]: fanHeaders 오류 메시지에 토큰(일부도)을 싣지 않는다', () => {
     const good = 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJTRUNSRVRQQVlMT0FEIn0.SIGsecretSIG';
     assert.equal(fanHeaders({ token: good, ip: '198.18.0.1' }).cookie, `${ACCESS_COOKIE}=${good}`);
     const cases = [
@@ -698,7 +698,7 @@ describe('seats.mjs — 좌석 고르기', () => {
     assert.equal(seatCount({ sections: ['A', 'B', 'C', 'D'], rows: 250, perRow: 100 }), MAX_SEATS);
   });
 
-  test('K2 K7 ASVS v5.0.0-2.2.1: seatCount는 틀린 격자(구역 비거나 겹침·이름 규칙 밖·rows·perRow 범위 밖·합계 초과)를 RangeError로 거절한다', () => {
+  test('K2 K7 [ASVS v5.0.0-2.2.1]: seatCount는 틀린 격자(구역 비거나 겹침·이름 규칙 밖·rows·perRow 범위 밖·합계 초과)를 RangeError로 거절한다', () => {
     assert.equal(seatCount(G), 12);
     throwsFor(BAD_GRIDS, seatCount, RangeError, 'seatCount');
   });
@@ -736,7 +736,7 @@ describe('seats.mjs — 좌석 고르기', () => {
     }
   });
 
-  test('K2 K7 ASVS v5.0.0-2.2.1: seatIdAt는 0 ≤ k < 좌석 수 정수가 아니면 RangeError', () => {
+  test('K2 K7 [ASVS v5.0.0-2.2.1]: seatIdAt는 0 ≤ k < 좌석 수 정수가 아니면 RangeError', () => {
     assert.equal(seatIdAt(G, 11), 'B-2-3');
     throwsFor([12, 13, -1, 1.5, NaN, Infinity, '0', null, undefined], (k) => seatIdAt(G, k), RangeError, 'seatIdAt k');
     throwsFor(BAD_GRIDS, (g) => seatIdAt(g, 0), RangeError, 'seatIdAt grid');
@@ -783,7 +783,7 @@ describe('seats.mjs — 좌석 고르기', () => {
     }
   });
 
-  test('K7 ASVS v5.0.0-2.2.1: userSeats는 n이 1~4 정수가 아니거나 i가 0 이상 정수가 아니면 RangeError', () => {
+  test('K7 [ASVS v5.0.0-2.2.1]: userSeats는 n이 1~4 정수가 아니거나 i가 0 이상 정수가 아니면 RangeError', () => {
     assert.deepEqual(userSeats(G, 0, 1), ['A-1-1']);
     throwsFor([0, 5, -1, 1.5, NaN, '2', null, undefined], (n) => userSeats(G, 0, n), RangeError, 'userSeats n');
     throwsFor([-1, 1.5, NaN, Infinity, '0', null, undefined], (i) => userSeats(G, i, 1), RangeError, 'userSeats i');
@@ -844,7 +844,7 @@ describe('seats.mjs — 좌석 고르기', () => {
     }
   });
 
-  test('K2 ASVS v5.0.0-2.2.1: pickHoldSeats spread는 size가 1~4 정수가 아니거나 perRow보다 크면 RangeError', () => {
+  test('K2 [ASVS v5.0.0-2.2.1]: pickHoldSeats spread는 size가 1~4 정수가 아니거나 perRow보다 크면 RangeError', () => {
     assert.equal(pickHoldSeats(G, { mode: 'spread', size: 3, u1: 0, u2: 0 }).length, 3);
     throwsFor([0, 5, -1, 1.5, NaN, '2', null, undefined], (size) => pickHoldSeats(G2, { mode: 'spread', size, u1: 0, u2: 0 }), RangeError, 'spread size');
     assert.throws(() => pickHoldSeats(G, { mode: 'spread', size: 4, u1: 0, u2: 0 }), RangeError, 'perRow 3에 4석');
@@ -869,7 +869,7 @@ describe('seats.mjs — 좌석 고르기', () => {
     }
   });
 
-  test('S-T1 ASVS v5.0.0-2.2.1: pickHoldSeats hot은 hotCount가 1 이상 정수가 아니거나 좌석 수보다 크면 RangeError', () => {
+  test('S-T1 [ASVS v5.0.0-2.2.1]: pickHoldSeats hot은 hotCount가 1 이상 정수가 아니거나 좌석 수보다 크면 RangeError', () => {
     assert.deepEqual(pickHoldSeats(G, { mode: 'hot', hotCount: 12, u1: 0, u2: 0 }), ['A-1-1']);
     throwsFor([13, 0, -1, 1.5, NaN, '4', null, undefined], (hotCount) => pickHoldSeats(G, { mode: 'hot', hotCount, u1: 0, u2: 0 }), RangeError, 'hotCount');
   });
@@ -903,12 +903,12 @@ describe('seats.mjs — 좌석 고르기', () => {
     }
   });
 
-  test('K3 S-T10 ASVS v5.0.0-2.2.1: pickHoldSeats crossed는 pairs가 1 이상 정수가 아니거나 2 × pairs가 좌석 수보다 크면 RangeError', () => {
+  test('K3 S-T10 [ASVS v5.0.0-2.2.1]: pickHoldSeats crossed는 pairs가 1 이상 정수가 아니거나 2 × pairs가 좌석 수보다 크면 RangeError', () => {
     assert.equal(pickHoldSeats(G, { mode: 'crossed', pairs: 6, u1: 0, u2: 0 }).length, 2);
     throwsFor([7, 0, -1, 1.5, NaN, '3', null, undefined], (pairs) => pickHoldSeats(G, { mode: 'crossed', pairs, u1: 0, u2: 0 }), RangeError, 'pairs');
   });
 
-  test('K2 S-T1 S-T10 ASVS v5.0.0-2.2.1: pickHoldSeats는 모르는 방식, [0, 1) 밖의 u, 틀린 격자를 RangeError로 거절한다', () => {
+  test('K2 S-T1 S-T10 [ASVS v5.0.0-2.2.1]: pickHoldSeats는 모르는 방식, [0, 1) 밖의 u, 틀린 격자를 RangeError로 거절한다', () => {
     const ok = { spread: { size: 2 }, hot: { hotCount: 4 }, crossed: { pairs: 3 } };
     assert.deepEqual(HOLD_MODES, ['spread', 'hot', 'crossed']);
     for (const mode of HOLD_MODES) assert.ok(Array.isArray(pickHoldSeats(G, { mode, ...ok[mode], u1: 0, u2: 0 })), mode);
@@ -1036,7 +1036,7 @@ describe('model.mjs — 오픈 모델과 대기자 조회 도착률', () => {
     );
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: pollAfterMs는 ahead가 0 이상 정수가 아니거나 속도가 0 이상 유한수가 아니면 RangeError', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: pollAfterMs는 ahead가 0 이상 정수가 아니거나 속도가 0 이상 유한수가 아니면 RangeError', () => {
     assert.equal(pollAfterMs(1, 1), 500);
     throwsFor([-1, 1.5, NaN, Infinity, '1', null, undefined], (a) => pollAfterMs(a, 1), RangeError, 'ahead');
     throwsFor([-0.001, -1, NaN, Infinity, -Infinity, '1', null, undefined], (r) => pollAfterMs(1, r), RangeError, 'ratePerS');
@@ -1097,7 +1097,7 @@ describe('model.mjs — 오픈 모델과 대기자 조회 도착률', () => {
     }
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: enteredAt·servingAt·pollGroups·pollStages는 users·entryRate·admitPerSecond가 1 이상 정수가 아니면 RangeError', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: enteredAt·servingAt·pollGroups·pollStages는 users·entryRate·admitPerSecond가 1 이상 정수가 아니면 RangeError', () => {
     assert.equal(enteredAt(1, O), 1000);
     throwsFor(BAD_MODELS, (o) => enteredAt(1, o), RangeError, 'enteredAt');
     throwsFor(BAD_MODELS, (o) => servingAt(1, o), RangeError, 'servingAt');
@@ -1105,7 +1105,7 @@ describe('model.mjs — 오픈 모델과 대기자 조회 도착률', () => {
     throwsFor(BAD_MODELS, (o) => pollStages({ ...o, startS: 0, durationS: 10, stepS: 10 }), RangeError, 'pollStages');
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: enteredAt·servingAt·pollGroups는 tS가 유한수가 아니면 RangeError(−Infinity도 0이 아니다)', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: enteredAt·servingAt·pollGroups는 tS가 유한수가 아니면 RangeError(−Infinity도 0이 아니다)', () => {
     // 기준: 유한한 음수는 0, 아주 큰 유한수는 상한
     assert.equal(enteredAt(-1e9, O), 0);
     assert.equal(servingAt(-1e9, O), 0);
@@ -1277,7 +1277,7 @@ describe('model.mjs — 오픈 모델과 대기자 조회 도착률', () => {
     assert.equal(pickPollUser([far20, near5], 0, 0.5), 600);
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: pickPollUser는 u1·u2가 [0, 1) 밖이면 묶음이 없어도 RangeError', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: pickPollUser는 u1·u2가 [0, 1) 밖이면 묶음이 없어도 RangeError', () => {
     const one = [{ from: 0, to: 10, intervalMs: 500 }];
     assert.equal(pickPollUser(one, 0, 0), 0);
     assert.equal(pickPollUser([], U_MAX, U_MAX), -1);
@@ -1352,7 +1352,7 @@ describe('model.mjs — 오픈 모델과 대기자 조회 도착률', () => {
     }
   });
 
-  test('K1 Q-T2 ASVS v5.0.0-2.2.1: pollStages는 startS·durationS·stepS가 범위 밖이면 RangeError', () => {
+  test('K1 Q-T2 [ASVS v5.0.0-2.2.1]: pollStages는 startS·durationS·stepS가 범위 밖이면 RangeError', () => {
     assert.equal(pollStages({ ...O, startS: 0, durationS: 1, stepS: 1 }).stages.length, 1);
     throwsFor([-1, 1.5, NaN, '0', undefined], (startS) => pollStages({ ...O, startS, durationS: 10, stepS: 10 }), RangeError, 'startS');
     throwsFor([0, -1, 1.5, NaN, '10', undefined], (durationS) => pollStages({ ...O, startS: 0, durationS, stepS: 10 }), RangeError, 'durationS');
@@ -1383,7 +1383,7 @@ describe('model.mjs — 오픈 모델과 대기자 조회 도착률', () => {
     assert.equal(openPhases(noStart).main.startTime, '30s');
   });
 
-  test('NFR-013 ASVS v5.0.0-2.2.1: openPhases는 rate·구간 길이·VU·startS·exec가 틀리면 RangeError', () => {
+  test('NFR-013 [ASVS v5.0.0-2.2.1]: openPhases는 rate·구간 길이·VU·startS·exec가 틀리면 RangeError', () => {
     assert.equal(openPhases(PHASE_IN).main.exec, 'status');
     const bad = [
       { rate: 0 },
@@ -1456,7 +1456,7 @@ describe('model.mjs — 오픈 모델과 대기자 조회 도착률', () => {
     assert.deepEqual(out.main.tags, { phase: 'main' });
   });
 
-  test('K1 Q-T2 NFR-013 ASVS v5.0.0-2.2.1: rampingPhases는 stages 길이 합이 warmS·mainS와 다르면 RangeError', () => {
+  test('K1 Q-T2 NFR-013 [ASVS v5.0.0-2.2.1]: rampingPhases는 stages 길이 합이 warmS·mainS와 다르면 RangeError', () => {
     assert.equal(rampingPhases(RAMP_IN).main.startTime, '30s');
     assert.throws(() => rampingPhases({ ...RAMP_IN, warmS: 30 }), RangeError);
     assert.throws(() => rampingPhases({ ...RAMP_IN, warmS: 19 }), RangeError);
@@ -1474,7 +1474,7 @@ describe('model.mjs — 오픈 모델과 대기자 조회 도착률', () => {
     assert.equal(out.main.startTime, '20s');
   });
 
-  test('K1 Q-T2 NFR-013 ASVS v5.0.0-2.2.1: rampingPhases는 duration이 <정수>s가 아니거나 target·startRate가 0 이상 정수가 아니면 길이 합이 맞아도 RangeError', () => {
+  test('K1 Q-T2 NFR-013 [ASVS v5.0.0-2.2.1]: rampingPhases는 duration이 <정수>s가 아니거나 target·startRate가 0 이상 정수가 아니면 길이 합이 맞아도 RangeError', () => {
     assert.equal(rampingPhases(RAMP_IN).warm.stages.length, 2);
     // 너그럽게 읽으면 10초로 읽히는 글(합이 그대로 맞는다)도 '<정수>s'가 아니면 거절한다
     for (const duration of ['10', '10.0s', '1e1s', '+10s', ' 10s', '10s ', '10S', '10 s', '10000ms', 10]) {
@@ -1497,7 +1497,7 @@ describe('model.mjs — 오픈 모델과 대기자 조회 도착률', () => {
     }
   });
 
-  test('K1 Q-T2 NFR-013 ASVS v5.0.0-2.2.1: rampingPhases는 exec·startS·warmS·mainS·preVUs·maxVUs를 openPhases와 같이 검사한다', () => {
+  test('K1 Q-T2 NFR-013 [ASVS v5.0.0-2.2.1]: rampingPhases는 exec·startS·warmS·mainS·preVUs·maxVUs를 openPhases와 같이 검사한다', () => {
     assert.equal(rampingPhases(RAMP_IN).main.exec, 'status');
     const bad = [
       { exec: '' },
@@ -1542,7 +1542,7 @@ describe('model.mjs — 오픈 모델과 대기자 조회 도착률', () => {
     assert.deepEqual(phaseThresholds([longest])[`http_reqs{phase:main,route:${longest}}`], ['count>=0']);
   });
 
-  test('NFR-013 ASVS v5.0.0-2.2.1: phaseThresholds는 ROUTE_PATTERN에 맞지 않거나 겹치는 경로 이름을 RangeError로 거절한다', () => {
+  test('NFR-013 [ASVS v5.0.0-2.2.1]: phaseThresholds는 ROUTE_PATTERN에 맞지 않거나 겹치는 경로 이름을 RangeError로 거절한다', () => {
     assert.equal(Object.keys(phaseThresholds(['entry'])).length, 7);
     const bad = ['Entry', '1abc', '_a', 'a-b', 'a b', '', 'a:b', 'a,b', 'a}', 'a{', 'é', 'a' + 'b'.repeat(32), null, undefined, 5];
     throwsFor(bad, (r) => phaseThresholds(['entry', r]), RangeError, 'route');
@@ -1550,7 +1550,7 @@ describe('model.mjs — 오픈 모델과 대기자 조회 도착률', () => {
     assert.throws(() => phaseThresholds(['entry', 'status', 'entry']), RangeError);
   });
 
-  test('NFR-013 ASVS v5.0.0-2.2.1: phaseThresholds는 경로 목록이 배열이 아니면 RangeError', () => {
+  test('NFR-013 [ASVS v5.0.0-2.2.1]: phaseThresholds는 경로 목록이 배열이 아니면 RangeError', () => {
     assert.equal(Object.keys(phaseThresholds([])).length, 4);
     throwsFor(['entry', undefined, null, 5, {}, { 0: 'entry', length: 1 }, new Set(['entry'])], phaseThresholds, RangeError, 'routes');
   });

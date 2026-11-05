@@ -1,5 +1,5 @@
 // 구매 세션 종료 지표 purchase_sessions_ended_total{reason}(PromSeatSignals.sessionEnded, BUILD_ORDER PRF-138, docs/observability.md, docs/features/seat-hold.md §2 '구매 세션 종료와 정리').
-// 이름표는 값이 몇 개뿐인 reason(COMPLETED·LEFT·IDLE·MAX_STAY)만 단다. 회차 ID·구매 세션 ID·계정 ID는 달지 않는다(ASVS 16.2.5, observability §8).
+// 이름표는 값이 몇 개뿐인 reason(COMPLETED·LEFT·IDLE·MAX_STAY)만 단다. 회차 ID·구매 세션 ID·계정 ID는 달지 않는다([ASVS v5.0.0-16.2.5], observability §8).
 // test/seat-signals.test.ts(Lua 오류 지표)와 같은 방식이다.
 import { fakeClock, PlatformMetrics } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';

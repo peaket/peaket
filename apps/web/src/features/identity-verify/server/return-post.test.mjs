@@ -38,7 +38,7 @@ test('I-T45 내부 머리 값은 모양을 다시 보고, 틀리면 열지 않�
   assert.deepEqual(decodeAgencyFields(Buffer.from('{"verificationId":"x"}').toString('base64url')), { verificationId: 'x' });
 });
 
-test('I-T45 ASVS v5.0.0-14.2.1 가로채기: POST는 값을 화면 서버 쪽 머리로만 넘기고 주소는 그대로이며, 바깥에서 온 같은 머리는 지운다', async () => {
+test('I-T45 [ASVS v5.0.0-14.2.1] 가로채기: POST는 값을 화면 서버 쪽 머리로만 넘기고 주소는 그대로이며, 바깥에서 온 같은 머리는 지운다', async () => {
   const forged = encodeAgencyFields({ verificationId: ID, result: 'forged', mac: 'x' });
   const ok = await verifyReturnProxy(post(new URLSearchParams(FIELDS).toString(), undefined, { [RETURN_HEADER]: forged, 'next-action': 'abc' }));
   assert.equal(ok.kind, 'next');

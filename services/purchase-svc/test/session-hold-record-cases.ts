@@ -72,7 +72,7 @@ export function sessionHoldRecordCases(make: () => Promise<HoldRecordHarness> | 
     expect((await h.holds(b))!.size).toBe(2);
   });
 
-  test('ASVS8.2.2_세션이 없으면 null이고 아무것도 만들지 않는다: 읽으면 undefined, 기록도 키도 없고, 같은 jti로 열면 CREATED다(재사용 차단 표지도 만들지 않았다) [ASVS v5.0.0-8.2.2]', async () => {
+  test('세션이 없으면 null이고 아무것도 만들지 않는다: 읽으면 undefined, 기록도 키도 없고, 같은 jti로 열면 CREATED다(재사용 차단 표지도 만들지 않았다) [ASVS v5.0.0-8.2.2]', async () => {
     const h = await make();
     const jti = newJti();
     expect(await h.store.recordHold(jti, holdIdOf(), ['A01'])).toBeNull();
@@ -85,7 +85,7 @@ export function sessionHoldRecordCases(make: () => Promise<HoldRecordHarness> | 
     expect(await h.store.recordHold(jti, holdIdOf(), ['A03'])).toBe(true);
   });
 
-  test('ASVS8.2.2_세션이 끝난 뒤(키가 사라진 뒤)의 기록도 null이고 키를 되살리지 않는다: 같은 입장 토큰은 여전히 ENDED다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('세션이 끝난 뒤(키가 사라진 뒤)의 기록도 null이고 키를 되살리지 않는다: 같은 입장 토큰은 여전히 ENDED다 [ASVS v5.0.0-8.2.2]', async () => {
     const h = await make();
     const jti = await opened(h);
     expect(await h.store.recordHold(jti, holdIdOf(), ['A01'])).toBe(true);
@@ -99,7 +99,7 @@ export function sessionHoldRecordCases(make: () => Promise<HoldRecordHarness> | 
     expect(await h.exists(jti)).toBe(false);
   });
 
-  test('ASVS1.2.4_모양이 틀린 입력은 RangeError이고 아무것도 쓰지 않는다: jti·holdId는 키 조각 모양, seatIds는 1~10개이고 좌석 ID는 ^[A-Za-z0-9_-]{1,64}$ (쉼표 금지) [ASVS v5.0.0-1.2.4]', async () => {
+  test('모양이 틀린 입력은 RangeError이고 아무것도 쓰지 않는다: jti·holdId는 키 조각 모양, seatIds는 1~10개이고 좌석 ID는 ^[A-Za-z0-9_-]{1,64}$ (쉼표 금지) [ASVS v5.0.0-1.2.4]', async () => {
     const h = await make();
     const jti = await opened(h);
     const ok = holdIdOf();
@@ -138,7 +138,7 @@ export function sessionHoldRecordCases(make: () => Promise<HoldRecordHarness> | 
     expect(got!.get(id)).toEqual(['A02', 'A03']);
   });
 
-  test('ASVS9.1.1_기록은 세션 상태를 바꾸지 않는다: 일련번호·유휴 시한·최대 체류 등 read가 주는 값과 열기의 REPLAY 결과, 키 수명이 그대로다 [ASVS v5.0.0-9.1.1]', async () => {
+  test('기록은 세션 상태를 바꾸지 않는다: 일련번호·유휴 시한·최대 체류 등 read가 주는 값과 열기의 REPLAY 결과, 키 수명이 그대로다 [ASVS v5.0.0-9.1.1]', async () => {
     const h = await make();
     const jti = newJti();
     const i = openInput(h, jti);

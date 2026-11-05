@@ -247,7 +247,7 @@ describe('RedisSeatSlots.read: 입력과 키 형', () => {
     ['점', 'e.1'],
     ['65자', 'a'.repeat(65)],
     ['빈칸', 'a b'],
-  ])('ASVS1.2.4_회차 ID가 키 조각 모양이 아니면(%s) 좌석 Redis를 부르지 않고 RangeError다 [ASVS v5.0.0-1.2.4]', async (_label, eventId) => {
+  ])('회차 ID가 키 조각 모양이 아니면(%s) 좌석 Redis를 부르지 않고 RangeError다 [ASVS v5.0.0-1.2.4]', async (_label, eventId) => {
     // 맞는 회차 ID는 읽힌다(아무 입력이나 RangeError로 막는 구현이 통과하지 않게)
     const good = newEvent();
     await ready(good, { gen: '2' });

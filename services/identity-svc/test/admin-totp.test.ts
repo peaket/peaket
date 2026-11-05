@@ -175,7 +175,7 @@ describe('로그인 2단계(I-T10)', () => {
     expect((await t.step2.run({ aud: 'partner', loginStep: await t.pass1(), code: c, ip: '203.0.113.10', deviceId: 'dev-a' })).kind).toBe('DONE');
     expect((await t.step2.run({ aud: 'partner', loginStep: await t.pass1(), code: c, ip: '203.0.113.10', deviceId: 'dev-a' })).kind).toBe('CODE_INVALID');
     t.clock.advance(90_000);
-    // 코드 하나는 그 30초 칸에서만 맞는다(ASVS 6.5.5 '최대 30초', 재리뷰 2026-11-05)
+    // 코드 하나는 그 30초 칸에서만 맞는다([ASVS v5.0.0-6.5.5] '최대 30초', 재리뷰 2026-11-05)
     expect((await t.step2.run({ aud: 'partner', loginStep: await t.pass1(), code: t.code(seed, 1), ip: '203.0.113.10', deviceId: 'dev-a' })).kind).toBe('CODE_INVALID');
     expect((await t.step2.run({ aud: 'partner', loginStep: await t.pass1(), code: t.code(seed, -1), ip: '203.0.113.10', deviceId: 'dev-a' })).kind).toBe('CODE_INVALID');
     // 인증 앱 화면대로 띄어 쓴 코드도 받는다

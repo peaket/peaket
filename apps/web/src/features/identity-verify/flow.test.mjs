@@ -1,4 +1,4 @@
-// 본인확인 창 흐름의 브라우저 쪽(docs/features/identity.md §5 '모의 기관과 기관 창 흐름', BUILD_ORDER BOT-010, I-T45, ASVS v5.0.0-3.5.5).
+// 본인확인 창 흐름의 브라우저 쪽(docs/features/identity.md §5 '모의 기관과 기관 창 흐름', BUILD_ORDER BOT-010, I-T45, [ASVS v5.0.0-3.5.5]).
 // 창·BroadcastChannel·시계·API를 대역으로 바꿔 부르는 화면과 복귀 화면의 흐름을 처음부터 끝까지 돌린다(실제 브라우저 E2E는 화면 묶음 뒤, docs/architecture.md §8.6).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -244,7 +244,7 @@ test('I-T45 시작이 막히면 미리 연 창을 닫는다: 401은 로그인(�
   }
 });
 
-test('ASVS v5.0.0-3.7.2 I-T45 ⑤시작 요청의 next는 safeNext()를 거친 같은 출처 경로다', async () => {
+test('[ASVS v5.0.0-3.7.2] I-T45 ⑤시작 요청의 next는 safeNext()를 거친 같은 출처 경로다', async () => {
   for (const [path, want] of [
     ['/events/e-1?x=1', '/events/e-1?x=1'],
     ['//evil.example/a', '/'],
@@ -343,7 +343,7 @@ test('I-T45 결과 경로가 409·503이면 결과 조회로 next를 받아 같�
   }
 });
 
-test('ASVS v5.0.0-3.7.2 I-T45 기관 값이 없거나 건 ID 모양이 틀리거나 next가 다른 출처면 첫 화면으로 간다', async () => {
+test('[ASVS v5.0.0-3.7.2] I-T45 기관 값이 없거나 건 ID 모양이 틀리거나 next가 다른 출처면 첫 화면으로 간다', async () => {
   const none = returnEnv({ api: fakeApi({}) });
   await runReturnFlow(none.env, null);
   assert.deepEqual(none.log.navigated, ['/']);

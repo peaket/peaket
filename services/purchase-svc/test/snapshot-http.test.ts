@@ -29,7 +29,7 @@ import { clientKeyOf } from './session-fixtures.js';
 
 const NOW = Date.parse('2026-11-04T03:00:00.000Z');
 const HEADER = 12;
-/** 서비스 로그(한 줄에 JSON 하나). 입장 토큰·jti·키 이름이 로그에 남지 않는지 본다(ASVS 16.2.5) */
+/** 서비스 로그(한 줄에 JSON 하나). 입장 토큰·jti·키 이름이 로그에 남지 않는지 본다([ASVS v5.0.0-16.2.5]) */
 const logs: string[] = [];
 const quiet = new Writable({
   write: (c, _e, cb) => {
@@ -158,7 +158,7 @@ const startedFor = (jti: string) => startedLog.entries.filter((e) => e.purchaseS
 const everything = (r: { payload: string; headers: Record<string, unknown> }) => `${JSON.stringify(r.headers)}\n${r.payload}`;
 
 describe('200 스냅샷', () => {
-  test('FR009_ST28_ASVS3.2.1_ASVS14.3.2_ 입장 토큰 첫 사용 요청은 200 application/octet-stream·no-store이고 본문은 decodeSnapshot으로 읽힌다(판 번호·세대·구역 표·비트맵 40비트) [ASVS v5.0.0-14.3.2]', async () => {
+  test('FR009_ST28_[ASVS v5.0.0-3.2.1]_ 입장 토큰 첫 사용 요청은 200 application/octet-stream·no-store이고 본문은 decodeSnapshot으로 읽힌다(판 번호·세대·구역 표·비트맵 40비트) [ASVS v5.0.0-14.3.2]', async () => {
     const w = await world();
     const f = w.fan(1);
     const r = await get(w.eventId, f);
@@ -179,7 +179,7 @@ describe('200 스냅샷', () => {
     expect(r.rawPayload.length).toBe(HEADER + 18 + 5);
   });
 
-  test('ST28_ST35_ASVS8.2.1_ 첫 사용 요청이 구매 세션을 열고(입장 토큰의 회차·계정·로그인 세션에 묶임) SESSION_STARTED를 한 번 더한다. 서명 머리(x-purchase-seq·x-purchase-mac)는 없다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_ST35_ 첫 사용 요청이 구매 세션을 열고(입장 토큰의 회차·계정·로그인 세션에 묶임) SESSION_STARTED를 한 번 더한다. 서명 머리(x-purchase-seq·x-purchase-mac)는 없다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = await world();
     const f = w.fan(2);
     expect(await mem.read(f.jti)).toBeUndefined();
@@ -203,7 +203,7 @@ describe('200 스냅샷', () => {
     expect(startedFor(f.jti)).toBe(1);
   });
 
-  test('ST28_ASVS8.2.1_ 세션이 열린 뒤 다른 임시 공개키를 보내면 401(TOKEN_USED)이고 응답에 까닭이 없다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_ 세션이 열린 뒤 다른 임시 공개키를 보내면 401(TOKEN_USED)이고 응답에 까닭이 없다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = await world();
     const f = w.fan(4);
     expect((await get(w.eventId, f)).statusCode).toBe(200);
@@ -263,7 +263,7 @@ describe('200 스냅샷', () => {
 });
 
 describe('입장 토큰·신원 거절', () => {
-  test('ST28_ASVS8.2.1_ASVS16.3.1_ 입장 토큰 없음·서명 틀림·만료·첫 사용 기한 지남·남의 계정 토큰은 모두 401이고 WWW-Authenticate Cookie realm="peaket"·이름 없는 본문이며 구매 세션이 생기지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_[ASVS v5.0.0-16.3.1]_ 입장 토큰 없음·서명 틀림·만료·첫 사용 기한 지남·남의 계정 토큰은 모두 401이고 WWW-Authenticate Cookie realm="peaket"·이름 없는 본문이며 구매 세션이 생기지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = await world();
     const base = w.fan(1);
     const cases: [string, Fan, Parameters<typeof get>[2]][] = [
@@ -288,7 +288,7 @@ describe('입장 토큰·신원 거절', () => {
     expect(w.ev().bits.size).toBe(0);
   });
 
-  test('ASVS16.3.1_ 거절 이유는 서비스 로그에만 남고 로그에도 입장 토큰·jti·임시 공개키가 없다', async () => {
+  test('[ASVS v5.0.0-16.3.1]_ 거절 이유는 서비스 로그에만 남고 로그에도 입장 토큰·jti·임시 공개키가 없다', async () => {
     const w = await world();
     const f = w.fan(1, { tokenEvent: 'ev-other' });
     logs.length = 0;
@@ -299,7 +299,7 @@ describe('입장 토큰·신원 거절', () => {
     for (const secret of [f.token, f.jti, f.clientKey]) expect(text.includes(secret)).toBe(false);
   });
 
-  test('ST28_③_ASVS8.2.2_ 입장 토큰의 회차와 주소의 회차가 다르면(게이트웨이를 거치지 않고 바로 넣음) 403·이름 없는 본문이고 구매 세션이 생기지 않으며 좌석에 변화가 없다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('ST28_③_ 입장 토큰의 회차와 주소의 회차가 다르면(게이트웨이를 거치지 않고 바로 넣음) 403·이름 없는 본문이고 구매 세션이 생기지 않으며 좌석에 변화가 없다 [ASVS v5.0.0-8.2.2]', async () => {
     const a = await world();
     const b = await world();
     const f = a.fan(1);
@@ -342,7 +342,7 @@ describe('입장 토큰·신원 거절', () => {
     expect((await get(w.eventId, f)).statusCode).toBe(200);
   });
 
-  test('ASVS8.1.1_ 팬 신원이 없으면 401(WWW-Authenticate)이고 구매 세션을 열지 않는다. 신원 머리가 일부만 있어도 같다', async () => {
+  test('[ASVS v5.0.0-8.1.1]_ 팬 신원이 없으면 401(WWW-Authenticate)이고 구매 세션을 열지 않는다. 신원 머리가 일부만 있어도 같다', async () => {
     const w = await world();
     const f = w.fan(1);
     const none = await get(w.eventId, f, { identity: null });
@@ -354,7 +354,7 @@ describe('입장 토큰·신원 거절', () => {
     expect(await mem.read(f.jti)).toBeUndefined();
   });
 
-  test('ASVS8.1.1_ 팬이 아닌 역할(ops·partner·scanner)의 신원은 이 팬 경로를 못 쓴다: 플랫폼 가드가 401로 거절하고(역할이 맞지 않으면 신원을 인정하지 않는다) 구매 세션을 열지 않는다', async () => {
+  test('[ASVS v5.0.0-8.1.1]_ 팬이 아닌 역할(ops·partner·scanner)의 신원은 이 팬 경로를 못 쓴다: 플랫폼 가드가 401로 거절하고(역할이 맞지 않으면 신원을 인정하지 않는다) 구매 세션을 열지 않는다', async () => {
     const w = await world();
     const f = w.fan(1);
     for (const aud of ['ops', 'partner', 'scanner']) {
@@ -365,10 +365,10 @@ describe('입장 토큰·신원 거절', () => {
   });
 });
 
-describe('section 검사(경로·쿼리 스키마, ASVS 2.1.1·15.3.7)', () => {
+describe('section 검사(경로·쿼리 스키마, [ASVS v5.0.0-2.1.1]·[ASVS v5.0.0-15.3.7])', () => {
   const bad = ['?section=abc', '?section=-1', '?section=65536', '?section=1.5', '?section=1&section=2', '?section=1&section=1', '?section=3', '?section=100', '?section=65535'];
 
-  test('ASVS2.1.1_ASVS15.3.7_ section이 정수가 아니거나(abc·1.5) 0 ~ 65535 밖이거나 두 번 오거나 판의 구역 수 밖이면 400·이름 없는 본문이고 구매 세션을 열지 않는다 [ASVS v5.0.0-2.1.1] [ASVS v5.0.0-15.3.7]', async () => {
+  test('section이 정수가 아니거나(abc·1.5) 0 ~ 65535 밖이거나 두 번 오거나 판의 구역 수 밖이면 400·이름 없는 본문이고 구매 세션을 열지 않는다 [ASVS v5.0.0-2.1.1] [ASVS v5.0.0-15.3.7]', async () => {
     const w = await world();
     const f = w.fan(1);
     for (const query of bad) {
@@ -382,7 +382,7 @@ describe('section 검사(경로·쿼리 스키마, ASVS 2.1.1·15.3.7)', () => {
     expect(startedFor(f.jti)).toBe(0);
   });
 
-  test('ASVS2.1.1_ 구역 수 안의 section(0·1·2)은 200이고, 주소의 회차 ID가 키 조각 모양이 아니면 400이다', async () => {
+  test('[ASVS v5.0.0-2.1.1]_ 구역 수 안의 section(0·1·2)은 200이고, 주소의 회차 ID가 키 조각 모양이 아니면 400이다', async () => {
     const w = await world();
     const f = w.fan(1);
     for (const section of [0, 1, 2]) {
@@ -461,7 +461,7 @@ describe('503 seat-store-unavailable', () => {
     expect(Object.keys(oom.headers).filter((h) => /reason/i.test(h))).toEqual([]);
   });
 
-  test('ASVS16.2.5_ 저장소의 쓰기 전 지킴 오류(PEAKET_CORRUPT_KEY)는 키 이름을 싣지 않은 채 500으로 나간다(응답·로그에 s:{event: 같은 키 이름이 없다)', async () => {
+  test('[ASVS v5.0.0-16.2.5]_ 저장소의 쓰기 전 지킴 오류(PEAKET_CORRUPT_KEY)는 키 이름을 싣지 않은 채 500으로 나간다(응답·로그에 s:{event: 같은 키 이름이 없다)', async () => {
     const w = await world();
     const f = w.fan(6);
     faults.read = new Error(`ERR PEAKET_CORRUPT_KEY s:{event:${w.eventId}}:secver`);
@@ -488,8 +488,8 @@ describe('503 seat-store-unavailable', () => {
   });
 });
 
-describe('오류 응답도 캐시하지 않는다(ASVS 14.3.2)', () => {
-  test('ASVS14.3.2_FR009_ 처리기가 내는 오류(section이 구역 수 밖 400·임시 공개키 400·입장 토큰 401·회차 403·503)는 모두 Cache-Control no-store다 [ASVS v5.0.0-14.3.2]', async () => {
+describe('오류 응답도 캐시하지 않는다([ASVS v5.0.0-14.3.2])', () => {
+  test('FR009_ 처리기가 내는 오류(section이 구역 수 밖 400·임시 공개키 400·입장 토큰 401·회차 403·503)는 모두 Cache-Control no-store다 [ASVS v5.0.0-14.3.2]', async () => {
     const w = await world();
     const other = await world();
     const missing = await world({ map: false, open: false });
@@ -504,7 +504,7 @@ describe('오류 응답도 캐시하지 않는다(ASVS 14.3.2)', () => {
     for (const [what, r] of Object.entries(rs)) expect.soft({ what, cache: r.headers['cache-control'] }).toEqual({ what, cache: 'no-store' });
   });
 
-  test('ASVS14.3.2_FR009_ 가드 단계의 거절(신원 없음 401·팬 아닌 역할 401·경로 스키마 400)도 no-store다 [ASVS v5.0.0-14.3.2]', async () => {
+  test('FR009_ 가드 단계의 거절(신원 없음 401·팬 아닌 역할 401·경로 스키마 400)도 no-store다 [ASVS v5.0.0-14.3.2]', async () => {
     const w = await world();
     const f = w.fan(1);
     const rs = {

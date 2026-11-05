@@ -153,7 +153,7 @@ test('I-T71_③ state를 바꾸거나 진행 쿠키를 고치거나 다시 쓴 �
   assert.deepEqual(failures().map((l) => l.reason), ['state', 'progress', 'id_token']);
 });
 
-test('I-T71_③ 다른 제공자의 콜백 주소로 보낸 콜백은 코드를 교환하지 않고 거절한다(혼동 공격, ASVS v5.0.0-10.2.2)', async () => {
+test('I-T71_③ 다른 제공자의 콜백 주소로 보낸 콜백은 코드를 교환하지 않고 거절한다(혼동 공격, [ASVS v5.0.0-10.2.2])', async () => {
   const b = new Browser();
   const cb = await stopAtCallback(b, 'kakao');
   const mixed = new URL(`/login/callback/google${cb.search}`, web.url);

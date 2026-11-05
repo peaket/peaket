@@ -564,7 +564,7 @@ describe('SessionSweeper.tick: 실패', () => {
     }
   });
 
-  test('QT11_ASVS16.2.5_일시 장애가 아닌 점검 오류(세션 상태가 망가짐)는 그 멤버만 뒤로 미루고(회차는 DRAINED) logger.error 한 줄을 남기되 세션 ID·키 이름·오류 글은 싣지 않는다. 멤버는 색인에 남는다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('QT11_일시 장애가 아닌 점검 오류(세션 상태가 망가짐)는 그 멤버만 뒤로 미루고(회차는 DRAINED) logger.error 한 줄을 남기되 세션 ID·키 이름·오류 글은 싣지 않는다. 멤버는 색인에 남는다 [ASVS v5.0.0-16.2.5]', async () => {
     const w = world();
     const eventId = w.addEvent();
     const jti = await w.openSession(eventId);
@@ -796,7 +796,7 @@ describe('SessionSweeper: Paying에서 Active로 돌아온 세션과 점검이 �
     expect(endedOf(w, jti)[0]).toMatchObject({ reason: 'IDLE' });
   });
 
-  test('QT11_ASVS16.2.5_점검이 계속 일시 장애가 아닌 오류로 실패하는 멤버(망가진 세션 상태) 하나가 같은 회차의 다른 세션 정리를 막지 않는다: 그 멤버는 60초 [가정] 뒤로 미루고 같은 틱에서 나머지를 끝낸다. 로그는 오류 갈래만 싣는다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('QT11_점검이 계속 일시 장애가 아닌 오류로 실패하는 멤버(망가진 세션 상태) 하나가 같은 회차의 다른 세션 정리를 막지 않는다: 그 멤버는 60초 [가정] 뒤로 미루고 같은 틱에서 나머지를 끝낸다. 로그는 오류 갈래만 싣는다 [ASVS v5.0.0-16.2.5]', async () => {
     const w = world();
     const eventId = w.addEvent();
     const bad = await w.openSession(eventId, { indexAt: NOW }); // 점수가 가장 이르다(맨 앞)

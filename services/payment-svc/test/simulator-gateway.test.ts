@@ -19,7 +19,7 @@ interface Sim {
 async function startSim(): Promise<Sim> {
   let t = Date.parse('2026-11-02T01:00:00.000Z');
   const clock = { now: () => t, advance: (ms: number) => void (t += ms) };
-  // 실행마다 새 시험 키(ASVS v5.0.0-13.3.1)
+  // 실행마다 새 시험 키([ASVS v5.0.0-13.3.1])
   const key = `sim_sk_${randomBytes(16).toString('hex')}`;
   const app = buildSimulatorApp({ secretKey: key, clock, confirmLatency: { kind: 'none' } });
   const url = await app.listen({ host: '127.0.0.1', port: 0 });

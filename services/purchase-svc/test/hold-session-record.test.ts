@@ -190,7 +190,7 @@ describe('HoldSeats: 새 홀드의 구매 세션 기록', () => {
     expect(w.ev().bits.has(ref('A01').index)).toBe(true);
   });
 
-  test('ST35_ASVS16.2.5_recordHold가 SeatStoreUnavailable(일시 장애·메모리 부족)을 던져도 홀드는 201로 성공하고 던지지 않으며, 시도 기록 HELD에는 firstHeldInSession 칸이 없다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('ST35_recordHold가 SeatStoreUnavailable(일시 장애·메모리 부족)을 던져도 홀드는 201로 성공하고 던지지 않으며, 시도 기록 HELD에는 firstHeldInSession 칸이 없다 [ASVS v5.0.0-16.2.5]', async () => {
     for (const reason of ['unavailable', 'oom'] as const) {
       const w = await world({
         recordHold: async () => {
@@ -252,7 +252,7 @@ describe('HoldSeats: 새 홀드의 구매 세션 기록', () => {
 });
 
 describe('기록 실패의 경고 로그(구매 세션 ID·키 이름을 싣지 않는다)', () => {
-  test('ST35_ASVS16.2.5_recordHold가 던지면 서비스 로그 warn 한 줄(errorName만)을 남기고 구매 세션 ID·키 이름·오류 글은 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
+  test('ST35_recordHold가 던지면 서비스 로그 warn 한 줄(errorName만)을 남기고 구매 세션 ID·키 이름·오류 글은 싣지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
     const downs: Array<[unknown, string]> = [
       [new SeatStoreUnavailable(new Error('down s:session:{ps-a}'), 'oom'), 'SeatStoreUnavailable'],
       [new Error('ERR PEAKET_CORRUPT_KEY s:session:{ps-a}'), 'Error'],

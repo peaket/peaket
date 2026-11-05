@@ -13,8 +13,27 @@ import { ReportError, readReport } from './test-reports.mjs';
 class UsageError extends Error {}
 
 /** 태그: 정본 꼴은 `[ASVS v5.0.0-x.y.z]`. 대괄호 없는 `ASVS v5.0.0-…`·`ASVS-v5.0.0-…`도 읽되 꼴이 다르다고 알린다(재검토 2026-11-05) */
-const TAG = /\[?ASVS[ -](v5\.0\.0-\d+\.\d+\.\d+)\]?/g;
+const TAG = /\[?ASVS[ -]v?(5\.0\.0-\d+\.\d+\.\d+)\]?/g;
+/**
+ * 판 번호가 없는 꼴(`ASVS2.1.1_`·`ASVS-6.1.2`·`ASVS 14.3.2`, 문장 끝 마침표 포함)도 v5.0.0으로 읽고 꼴이 다르다고 알린다(재검토 2026-11-05).
+ * 둘째 칸이 0인 값(`ASVS 4.0.3`·`ASVS 5.0.0` 같은 판 표기)은 태그가 아니다: ASVS v5에는 0번 절이 없다. 뒤에 `-`가 붙은 범위(`ASVS 6.1.2-6.1.4`)는 앞 ID를 읽는다
+ */
+const NO_VERSION = /ASVS[ -]?(\d+\.(\d+)\.\d+)(?!\d|\.\d)/g;
+/** 밑줄로 나눈 꼴(`ASVS8_2_3_`·`ASVS_16_2_5_`)도 같다(재검토 2026-11-05) */
+const UNDERSCORE = /ASVS_?(\d+)_(\d+)_(\d+)(?!\d)/g;
 const CANONICAL = /^\[ASVS v5\.0\.0-\d+\.\d+\.\d+\]$/;
+
+/** 글 하나의 태그: [{ id, raw, canonical }] */
+export function tagsIn(text) {
+  const out = [];
+  for (const m of text.matchAll(TAG)) out.push({ id: `v${m[1]}`, raw: m[0], canonical: CANONICAL.test(m[0]) });
+  for (const m of text.matchAll(NO_VERSION)) if (m[2] !== '0') out.push({ id: `v5.0.0-${m[1]}`, raw: m[0], canonical: false });
+  for (const m of text.matchAll(UNDERSCORE)) if (m[2] !== '0') out.push({ id: `v5.0.0-${m[1]}.${m[2]}.${m[3]}`, raw: m[0], canonical: false });
+  return out;
+}
+
+/** 이름 하나 안에서는 같은 ID를 한 번만 센다(앞머리와 끝에 같은 태그를 단 이름) */
+const uniqueById = (tags) => [...new Map(tags.map((t) => [t.id, t])).values()];
 const ROW = /^\| (v5\.0\.0-\d+\.\d+\.\d+) \| (L\d) \|/;
 /** 시험 파일과 시험이 읽는 사례 파일(`*-cases.*`) */
 const TEST_FILE = /(\.(test|spec)|-cases)\.(m?[jt]sx?|cjs)$/;
@@ -54,9 +73,9 @@ export function scanTaggedSources(dirs, loose = []) {
     for (const f of walk(d)) {
       const text = readFileSync(f, 'utf8');
       if (IGNORE.test(text) && /(^|[\\/])tools[\\/]ci[\\/]/.test(f)) continue;
-      for (const m of text.matchAll(TAG)) {
-        count.set(m[1], (count.get(m[1]) ?? 0) + 1);
-        if (!CANONICAL.test(m[0])) loose.push({ file: f, tag: m[0] });
+      for (const t of tagsIn(text)) {
+        count.set(t.id, (count.get(t.id) ?? 0) + 1);
+        if (!t.canonical) loose.push({ file: f, tag: t.raw });
       }
     }
   }
@@ -72,12 +91,16 @@ export function buildReport({ docsDir, reports = [], scan = [] }) {
   const tests = reports.flatMap(readReport);
   const ran = new Map();
   const loose = new Set();
-  for (const t of tests) for (const m of t.name.matchAll(TAG)) {
-    if (!CANONICAL.test(m[0])) loose.add(t.name);
-    const r = ran.get(m[1]) ?? { passed: 0, failed: 0, skipped: 0, failedNames: [] };
-    r[t.status]++;
-    if (t.status === 'failed') r.failedNames.push(t.name);
-    ran.set(m[1], r);
+  for (const t of tests) {
+    const tags = tagsIn(t.name);
+    // 꼴 알림은 겹친 것을 지우기 전의 태그 모두로 본다(어느 쪽이 남는지에 달리지 않게, 재검토 2026-11-05)
+    if (tags.some((x) => !x.canonical)) loose.add(t.name);
+    for (const tag of uniqueById(tags)) {
+      const r = ran.get(tag.id) ?? { passed: 0, failed: 0, skipped: 0, failedNames: [] };
+      r[t.status]++;
+      if (t.status === 'failed') r.failedNames.push(t.name);
+      ran.set(tag.id, r);
+    }
   }
   const looseSources = [];
   const tagged = scanTaggedSources(scan, looseSources);
@@ -101,6 +124,7 @@ export function buildReport({ docsDir, reports = [], scan = [] }) {
     unknownIds: [...new Set([...ran.keys(), ...tagged.keys()])].filter((id) => !known.has(id)).sort(),
     looseTags: [...loose].sort(),
     looseSources,
+    reportCount: reports.length,
     totals: { rows: out.length, applied: out.filter((r) => isApplied(r.applied)).length, passed: count('통과'), failed: count('실패'), notRun: count('미실행'), untagged: count('태그 없음'), designCheck: count('설계 검사') },
   };
 }
@@ -112,6 +136,9 @@ export function summaryMarkdown(r) {
     '## ASVS 추적 시험 태그',
     '',
     `표 ${t.rows}행 가운데 적용 ${t.applied}행: 통과 ${t.passed}, 실패 ${t.failed}, 미실행 ${t.notRun}, 태그 없음 ${t.untagged}, 설계 검사 ${t.designCheck}(통과로 세지 않는다)`,
+    '',
+    // 바뀐 패키지만 돈 실행이면 돌지 않은 패키지의 행은 '미실행'으로 보인다(재검토 2026-11-05)
+    `시험 보고서 ${r.reportCount}개를 읽었다. 이번에 돌지 않은 패키지(바뀐 패키지만 돈 실행, 다른 워크플로의 시험)의 행은 '미실행'으로 보인다.`,
     '',
     '| 문서 | 적용 | 통과 | 실패 | 미실행 | 태그 없음 |',
     '| --- | --- | --- | --- | --- | --- |',

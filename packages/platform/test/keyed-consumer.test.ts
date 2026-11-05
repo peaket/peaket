@@ -394,7 +394,7 @@ describe('코드 리뷰 2026-11-01 둘째 재현', () => {
     expect(isTransientError(new DrizzleQueryError('select 1', [], new Error('Connection terminated unexpectedly')))).toBe(true);
   });
 
-  test('ASVS_16_2_5_오류요약은Drizzle쿼리의매개변수값을남기지않는다', () => {
+  test('[ASVS v5.0.0-16.2.5]_오류요약은Drizzle쿼리의매개변수값을남기지않는다', () => {
     const e = new DrizzleQueryError('insert into payment (phone) values ($1)', ['010-1234-5678'], Object.assign(new Error('dup'), { code: '23505' }));
     const s = errorSummary(e);
     expect(s).not.toContain('010-1234-5678');

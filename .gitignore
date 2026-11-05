@@ -1,3 +1,7 @@
+# 시험 보고서(CI가 PEAKET_TEST_REPORT·NODE_OPTIONS로 남긴다, ASVS 태그 리포트 BOT-162)
+test-report*.json
+test-report*.xml
+
 # 파이썬 실행 부산물
 __pycache__/
 *.pyc

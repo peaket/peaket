@@ -735,7 +735,7 @@ describe('POST /v1/orders 본인확인 재확인(P-T35 일부)', () => {
   test.each<[string, grpc.status]>([
     ['UNIMPLEMENTED', grpc.status.UNIMPLEMENTED],
     ['UNAUTHENTICATED', grpc.status.UNAUTHENTICATED],
-  ])('PT35_ASVS16.5.3_identity가 %s(정본 목록 밖)로 답하면 토큰이 있어도 대체 판정 없이 503 dependency-unavailable이고 설정 오류 로그(unexpected)를 남긴다 [ASVS v5.0.0-16.5.3]', async (_label, code) => {
+  ])('PT35_identity가 %s(정본 목록 밖)로 답하면 토큰이 있어도 대체 판정 없이 503 dependency-unavailable이고 설정 오류 로그(unexpected)를 남긴다 [ASVS v5.0.0-16.5.3]', async (_label, code) => {
     const w = await world();
     const f = await fan(w);
     identityPlan.set(f.accountId, { code });

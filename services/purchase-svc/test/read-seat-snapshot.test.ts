@@ -138,7 +138,7 @@ describe('차례', () => {
     expect(w.log.entries).toHaveLength(0);
   });
 
-  test('ASVS2.1.1_ section이 판의 구역 수 밖이면 SnapshotError SECTION_OUT_OF_RANGE이고 구매 세션을 열지 않는다(입장 토큰이 쓰이지 않는다)', async () => {
+  test('[ASVS v5.0.0-2.1.1]_ section이 판의 구역 수 밖이면 SnapshotError SECTION_OUT_OF_RANGE이고 구매 세션을 열지 않는다(입장 토큰이 쓰이지 않는다)', async () => {
     const w = await world();
     const f = w.fan(1);
     for (const section of [3, 4, 100, 65535]) {
@@ -157,7 +157,7 @@ describe('차례', () => {
     expect(await w.sessionStore.read(f.jti)).toBeDefined();
   });
 
-  test('ASVS15.3.7_ASVS2.1.1_ 주소의 회차 ID가 키 조각 모양이 아니면 RangeError이고 아무것도 부르지 않는다', async () => {
+  test('[ASVS v5.0.0-15.3.7]_[ASVS v5.0.0-2.1.1]_ 주소의 회차 ID가 키 조각 모양이 아니면 RangeError이고 아무것도 부르지 않는다', async () => {
     const w = await world();
     const f = w.fan(1);
     for (const bad of ['', 'a}b', '{x}', 'a b', 'x'.repeat(65)]) {
@@ -330,7 +330,7 @@ describe('본문', () => {
 });
 
 describe('구매 세션 열기(입장 토큰의 첫 사용)', () => {
-  test('ST28_ASVS8.2.1_ 입장 토큰 거절은 OpenSessionError가 그대로 나가고(code) 스냅샷을 읽지 않는다: 서명 틀림 TOKEN_INVALID, 만료 TOKEN_EXPIRED, 남의 계정 TOKEN_MISMATCH, 다른 회차 EVENT_MISMATCH [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_ 입장 토큰 거절은 OpenSessionError가 그대로 나가고(code) 스냅샷을 읽지 않는다: 서명 틀림 TOKEN_INVALID, 만료 TOKEN_EXPIRED, 남의 계정 TOKEN_MISMATCH, 다른 회차 EVENT_MISMATCH [ASVS v5.0.0-8.2.1]', async () => {
     const w = await world();
     const bad = w.fan(1);
     const forged = bad.cmd({ token: `${bad.token.slice(0, -4)}AAAA` });
@@ -372,7 +372,7 @@ describe('구매 세션 열기(입장 토큰의 첫 사용)', () => {
     expect(w.order.filter((x) => x === 'read')).toHaveLength(4);
   });
 
-  test('ST28_ASVS8.2.1_ 세션이 열린 뒤 다른 임시 공개키를 보내면 TOKEN_USED이고 스냅샷을 읽지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_ 세션이 열린 뒤 다른 임시 공개키를 보내면 TOKEN_USED이고 스냅샷을 읽지 않는다 [ASVS v5.0.0-8.2.1]', async () => {
     const w = await world();
     const f = w.fan(1);
     await w.uc.execute(f.cmd());
@@ -448,7 +448,7 @@ describe('좌석 Redis 장애와 호출 마감', () => {
 });
 
 describe('읽기는 아무것도 쓰지 않는다', () => {
-  test('FR009_ASVS15.3.1_ 스냅샷을 읽어도 좌석 키(비트·홀드·보유 수·Stream·Pub/Sub·세대·구역 일련번호)가 바뀌지 않는다', async () => {
+  test('FR009_[ASVS v5.0.0-15.3.1]_ 스냅샷을 읽어도 좌석 키(비트·홀드·보유 수·Stream·Pub/Sub·세대·구역 일련번호)가 바뀌지 않는다', async () => {
     const w = await world();
     await w.hold(['A01', 'B01']);
     const ev = w.store.db.event(w.eventId);

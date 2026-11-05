@@ -179,14 +179,14 @@ export function seatSnapshotCases(name: string, make: () => Promise<SnapshotHarn
 
   // ---- 인자 오류 ----
 
-  test(`[${name}] ASVS2.1.1_ 인자 오류는 RangeError다: eventId가 KEY_PART가 아님, bitCount 1 미만·소수·NaN, firstBit 음수·소수·NaN·안전한 정수 밖`, async () => {
+  test(`[${name}] [ASVS v5.0.0-2.1.1]_ 인자 오류는 RangeError다: eventId가 KEY_PART가 아님, bitCount 1 미만·소수·NaN, firstBit 음수·소수·NaN·안전한 정수 밖`, async () => {
     const w = await world();
     for (const bad of ['', 'a b', 'a}b', '{x}', 'a:b', 'x'.repeat(65), '한글']) await expect(w.read({}, bad), `eventId '${bad}'`).rejects.toBeInstanceOf(RangeError);
     for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) await expect(w.read({ bitCount: bad }), `bitCount ${bad}`).rejects.toBeInstanceOf(RangeError);
     for (const bad of [-1, 1.5, Number.NaN, 2 ** 53]) await expect(w.read({ firstBit: bad }), `firstBit ${bad}`).rejects.toBeInstanceOf(RangeError);
   });
 
-  test(`[${name}] ASVS2.1.1_ sectionIndexes가 비었거나 겹치거나 0 ~ 65535의 정수가 아니면 RangeError다(65536·−1·소수·NaN, 겹침은 떨어져 있어도)`, async () => {
+  test(`[${name}] [ASVS v5.0.0-2.1.1]_ sectionIndexes가 비었거나 겹치거나 0 ~ 65535의 정수가 아니면 RangeError다(65536·−1·소수·NaN, 겹침은 떨어져 있어도)`, async () => {
     const w = await world();
     const bads: number[][] = [[], [0, 0], [1, 0, 1], [-1], [65536], [1.5], [Number.NaN], [0, 65536], [0, 1, 2, 3, 3]];
     for (const sectionIndexes of bads) await expect(w.read({ sectionIndexes }), `sectionIndexes ${JSON.stringify(sectionIndexes)}`).rejects.toBeInstanceOf(RangeError);

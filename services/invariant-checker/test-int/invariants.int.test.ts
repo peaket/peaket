@@ -85,7 +85,7 @@ describe('원본·기록이 없을 때', () => {
   });
 });
 
-describe('원본을 바꾸지 않는다(ASVS v5.0.0-13.2.2·14.2.6)', () => {
+describe('원본을 바꾸지 않는다([ASVS v5.0.0-13.2.2]·[ASVS v5.0.0-14.2.6])', () => {
   it('purchase DB를 검사 DB로 써도 원본 행이 그대로이고 임시 표가 남지 않으며 개인정보 칸을 읽지 않는다', async () => {
     const acct = randomUUID();
     const o1 = await order({ account: acct });

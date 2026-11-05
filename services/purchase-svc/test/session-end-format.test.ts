@@ -64,7 +64,7 @@ describe('SESSION_ENDED 항목의 모양 검사 assertEndedEntry', () => {
     expect(() => assertEndedEntry({ ...entry, endedAtMs: Number.MAX_SAFE_INTEGER })).not.toThrow();
   });
 
-  test('ASVS1.2.4_회차 ID·구매 세션 ID·입장 토큰 jti가 키 조각 모양이 아니면 RangeError다 [ASVS v5.0.0-1.2.4]', () => {
+  test('회차 ID·구매 세션 ID·입장 토큰 jti가 키 조각 모양이 아니면 RangeError다 [ASVS v5.0.0-1.2.4]', () => {
     for (const bad of BAD_PARTS) {
       expect(() => assertEndedEntry({ ...entry, eventId: bad }), `eventId ${bad}`).toThrow(RangeError);
       expect(() => assertEndedEntry({ ...entry, purchaseSessionId: bad }), `purchaseSessionId ${bad}`).toThrow(RangeError);
@@ -74,13 +74,13 @@ describe('SESSION_ENDED 항목의 모양 검사 assertEndedEntry', () => {
     expect(() => assertEndedEntry({ ...entry, purchaseSessionId: 7 as unknown as string })).toThrow(RangeError);
   });
 
-  test('ASVS1.2.4_reason이 네 값이 아니면 RangeError다: UNRECOGNIZED(Avro의 모르는 값 자리)도, 소문자·빈 글·빠진 값도 거절한다 [ASVS v5.0.0-1.2.4]', () => {
+  test('reason이 네 값이 아니면 RangeError다: UNRECOGNIZED(Avro의 모르는 값 자리)도, 소문자·빈 글·빠진 값도 거절한다 [ASVS v5.0.0-1.2.4]', () => {
     for (const reason of ['UNRECOGNIZED', 'idle', 'Idle', '', ' IDLE', 'COMPLETED ', 'TIMEOUT', undefined, null, 1]) {
       expect(() => assertEndedEntry({ ...entry, reason: reason as unknown as SessionEndReason }), String(reason)).toThrow(RangeError);
     }
   });
 
-  test('ASVS1.2.4_끝낸 시각이 0 이상의 안전한 정수가 아니면 RangeError다 [ASVS v5.0.0-1.2.4]', () => {
+  test('끝낸 시각이 0 이상의 안전한 정수가 아니면 RangeError다 [ASVS v5.0.0-1.2.4]', () => {
     for (const ms of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1, '5', undefined, null]) {
       expect(() => assertEndedEntry({ ...entry, endedAtMs: ms as unknown as number }), String(ms)).toThrow(RangeError);
     }

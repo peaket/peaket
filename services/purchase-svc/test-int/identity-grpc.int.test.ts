@@ -322,7 +322,7 @@ describe('identityClientsFromEnv', () => {
   });
 
   // 정본 모호: 빈 글 주소를 '없음'으로 볼지 적혀 있지 않다. 비밀 관리가 빈 값을 넣는 경우도 대역으로 간다고 가정한다
-  test('ASVS16.5.3_운영·데모·스테이징(그리고 PEAKET_ENV 없음)에서 주소가 없거나 빈 글이면 대역으로 뜨지 않고 던진다(시작 실패) [ASVS v5.0.0-16.5.3]', () => {
+  test('운영·데모·스테이징(그리고 PEAKET_ENV 없음)에서 주소가 없거나 빈 글이면 대역으로 뜨지 않고 던진다(시작 실패) [ASVS v5.0.0-16.5.3]', () => {
     for (const env of [{ PEAKET_ENV: 'prod' }, { PEAKET_ENV: 'demo' }, { PEAKET_ENV: 'staging' }, {}]) {
       expect(() => identityClientsFromEnv(env)).toThrow(new RegExp(IDENTITY_GRPC_ADDR_ENV));
       expect(() => identityClientsFromEnv({ ...env, [IDENTITY_GRPC_ADDR_ENV]: '' })).toThrow(new RegExp(IDENTITY_GRPC_ADDR_ENV));
