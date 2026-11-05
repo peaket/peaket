@@ -1,6 +1,6 @@
 // 세션 컨텍스트의 포트: 저장소(트랜잭션 하나에서 쓰는 일), 토큰 서명, 기기 가명, 운영 신호.
 import type { InvRefLabel } from './inv-ref.js';
-import type { ActiveSession, LoginVerdict, Provider, ReauthPurpose, ReauthStrength, TerminationReason } from './session.js';
+import type { ActiveSession, LiveSession, LoginVerdict, Provider, ReauthPurpose, ReauthStrength, TerminationReason } from './session.js';
 
 export interface CreateKeyRecord {
   provider: Provider;
@@ -39,6 +39,8 @@ export interface NewSession {
   /** 로그인 판정(identity §7). trust-svc가 생기기 전에는 UNKNOWN(판정을 받지 못함, identity §2 '첫 구현') */
   loginVerdict: LoginVerdict;
   createdAt: number;
+  /** 화면용 기기 이름(application/device-label.ts, ADR-0209). 마지막 활동은 createdAt으로 시작한다 */
+  deviceLabel: string | null;
 }
 
 /** 갱신에 쓰려고 리프레시 토큰 해시로 찾은 세션(쓰기 잠금) */
@@ -108,8 +110,16 @@ export interface SessionTx {
   activeSessions(accountId: string, now: number): Promise<ActiveSession[]>;
   /** 끝나지 않은 그 계정의 세션 ID(만료와 상관없이, 쓰기 잠금). 탈퇴가 모두 끝낸다(만료 경계에서 갱신과 겹쳐도 남지 않게) */
   unterminatedSessions(accountId: string): Promise<string[]>;
-  /** 세션을 끝내고 그 세션들의 리프레시 토큰 해시를 지우며, 같은 트랜잭션에 세션 종료 사건(control.sessions-terminated)을 적는다(ADR-0143 결정 3, R-255) */
+  /**
+   * 세션을 끝내고 그 세션들의 리프레시 토큰 해시와 화면용 기기 이름을 지우며, 같은 트랜잭션에 세션 종료 사건(control.sessions-terminated)을 적는다
+   * (ADR-0143 결정 3, R-255, ADR-0209 결정 1)
+   */
   terminateSessions(ids: readonly string[], reason: TerminationReason, now: number): Promise<void>;
+  /**
+   * 사유가 다른 세션들을 한 번에 끝낸다(terminateSessions와 같은 일). 세션 상태를 모두 고친 뒤 사건을 적으므로, 한 트랜잭션에서 사유가 둘인 끝내기도
+   * 사건 쓰기가 마지막에 온다(ADR-0116 결정 3, 병합 확정의 MERGED와 LOGIN_METHOD_CHANGED, 새 맥락 리뷰 낮음 3)
+   */
+  endSessions(items: ReadonlyArray<{ id: string; reason: TerminationReason }>, now: number): Promise<void>;
   /** 탈퇴 사건(pid를 실음)을 이 트랜잭션의 Outbox에 적는다. 세션 종료 사건 뒤, 트랜잭션의 마지막 쓰기다(identity §8 '탈퇴 계정의 대기열 키 지우기', BOT-037) */
   recordWithdrawn(i: { accountId: string; pids: readonly string[]; withdrawnAt: number }): Promise<void>;
   /** ACTIVE 계정을 WITHDRAWAL_PENDING과 정리 사유·시작 시각으로 둔다. 이미 정리 중이거나 다른 상태면 그대로 둔다(멱등) */
@@ -142,7 +152,7 @@ export interface SessionTx {
   getSessionForUpdate(id: string): Promise<SessionRow | null>;
   /** 지금 리프레시 토큰만 바꾼다(CreateSession 다시 보내기, 갱신 재시도). 앞 토큰·회전 시각은 그대로 */
   setRefreshHash(sessionId: string, hash: Uint8Array): Promise<void>;
-  /** 회전: 지금 토큰을 앞 토큰으로 옮기고 새 토큰을 둔다. rotated_at = now, refresh_used = false, 유휴 만료를 고친다 */
+  /** 회전: 지금 토큰을 앞 토큰으로 옮기고 새 토큰을 둔다. rotated_at = now, last_active_at = now(마지막 활동, ADR-0209 결정 2), refresh_used = false, 유휴 만료를 고친다 */
   rotateRefresh(sessionId: string, hash: Uint8Array, now: number, idleExpiresAt: number): Promise<void>;
   /** 발급한 리프레시 토큰 해시를 그 세션의 절대 만료까지 남긴다(재사용 탐지) */
   recordRefreshHash(r: { hash: Uint8Array; sessionId: string; refreshFamily: string; issuedAt: number; expiresAt: number }): Promise<void>;
@@ -166,6 +176,10 @@ export interface SessionStore {
   refreshOwner(hash: Uint8Array): Promise<string | null>;
   /** 세션 한 줄을 잠그지 않고 읽는다(읽기만 하는 확인, GetVerificationStatus, BOT-025가 넘긴 것) */
   sessionOf(id: string): Promise<SessionRow | null>;
+  /** 그 계정의 살아 있는 세션(끝나지 않았고 만료 전)을 잠그지 않고 읽는다. 로그인한 기기 목록(GET /v1/identity/sessions, ADR-0209) */
+  liveSessionsOf(accountId: string, now: number): Promise<LiveSession[]>;
+  /** 절대 만료가 지났는데 화면용 기기 이름이 남은 세션의 그 칸을 비우고 비운 줄 수(정비 session-label-expired, ADR-0209 결정 1) */
+  clearEndedDeviceLabels(now: number, signal?: AbortSignal): Promise<number>;
   /**
    * 조사 적재가 읽는 연결 값(BatchGetInvestigationRefs, identity §9.1). 있는 계정만, 받은 순서대로. 탈퇴한 계정은 빈 값이다.
    * identityConflicts는 since 뒤의 같은 본인확인 시도 기록(본인확인 컨텍스트의 표를 읽는다. 표를 보지 못하는 저장소는 빈 목록)
@@ -244,6 +258,8 @@ export interface SessionSignals {
   invRefMissing(label: InvRefLabel, reason: 'THROTTLED' | 'KMS_ERROR'): void;
   /** 병합 불변식 위반: 흡수 계정에 티켓·후기가 있다(SEV3, I-T32, BOT-042) */
   mergeInvariantViolated(): void;
+  /** 다른 기기의 세션을 끝냈다: 원격 로그아웃, 로그인 수단을 바꾼 뒤(identity_other_sessions_ended_total, ADR-0209 결정 6) */
+  othersEnded(cause: 'remote_logout' | 'login_method_changed', count: number): void;
 }
 
 export const PUBLIC_KEYS = Symbol('identity.PublicKeys');

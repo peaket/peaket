@@ -45,6 +45,7 @@ import type {
   DeviceApprovalView,
   FanAccountSummary,
   GetIdentityProviders200,
+  GetIdentitySessions200,
   LinkProposal,
   ListSubscriptions200,
   ListWishes200,
@@ -88,6 +89,8 @@ export const getCreateIdentityVerificationResponseMock = (overrideResponse: Part
 export const getCreateIdentityVerificationResultResponseMock = (overrideResponse: Partial<Extract<VerificationResult, object>> = {}): VerificationResult => ({verificationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), purpose: faker.helpers.arrayElement([faker.helpers.arrayElement(['FIRST','REVERIFY','BOOTH','MINOR_CONTRACT'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['PENDING','VERIFIED','CANCELLED','FAILED','PROVIDER_DOWN','DUPLICATE_ACCOUNT','UNDER_14','BOOTH_MISMATCH'] as const), undefined]), next: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), resultToken: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), restrictedUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
 
 export const getGetIdentityVerificationResultResponseMock = (overrideResponse: Partial<Extract<VerificationResult, object>> = {}): VerificationResult => ({verificationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), purpose: faker.helpers.arrayElement([faker.helpers.arrayElement(['FIRST','REVERIFY','BOOTH','MINOR_CONTRACT'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['PENDING','VERIFIED','CANCELLED','FAILED','PROVIDER_DOWN','DUPLICATE_ACCOUNT','UNDER_14','BOOTH_MISMATCH'] as const), undefined]), next: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), resultToken: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), restrictedUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
+
+export const getGetIdentitySessionsResponseMock = (overrideResponse: Partial<Extract<GetIdentitySessions200, object>> = {}): GetIdentitySessions200 => ({items: Array.from({ length: faker.number.int({min: 1, max: 5}) }, (_, i) => i + 1).map(() => ({sessionId: faker.string.uuid(), deviceName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 40}}), null]), lastActiveAt: faker.date.past().toISOString().slice(0, 19) + 'Z', current: faker.datatype.boolean(), otherSessions: faker.number.int({min: 0})})), ...overrideResponse})
 
 export const getCreateIdentitySignupCompletionResponseMock = (overrideResponse: Partial<Extract<FanAccountSummary, object>> = {}): FanAccountSummary => ({nickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 64}}), null]), signupCompleted: faker.datatype.boolean(), verified: faker.datatype.boolean(), hasStaffAssignment: faker.datatype.boolean(), ...overrideResponse})
 
@@ -318,11 +321,13 @@ export const getCreateIdentityAccessTokenMockHandler = (overrideResponse?: void 
   }, options)
 }
 
-export const getGetIdentitySessionsMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+export const getGetIdentitySessionsMockHandler = (overrideResponse?: GetIdentitySessions200 | ((info: Parameters<HttpResponseResolver>[0]) => Promise<GetIdentitySessions200> | GetIdentitySessions200), options?: RequestHandlerOptions) => {
   return http.get('*/v1/identity/sessions', async (info: Parameters<HttpResponseResolver>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetIdentitySessionsResponseMock(),
       { status: 200
       })
   }, options)

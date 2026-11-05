@@ -31,6 +31,7 @@
   - 직접 쓴 검사(asyncapi를 YAML로 읽어 avsc와 견줌)로 19개 파일이 JSON으로 읽히고, 이름 붙은 타입 68개가 겹치지 않으며, 열거 40개마다 맨 앞 `UNRECOGNIZED`와 기본값이 있고, 필드 이름·순서, 필수 목록, null 첫 갈래와 기본값 null, 기본값 false, `x-present-when`(값이 그 열거의 기호인지, 조건부 칸을 가리키면 그 칸의 조건을 품는지), 열거 기호, uuid·시각 형식이 asyncapi와 어긋남 0건임을 확인했다. Avro 라이브러리 검사는 하지 못했다(wbs 0.2.2의 CI가 한다).
 - **바꿈(2026-11-04, BUILD_ORDER BOT-037)**: 탈퇴 사건 `identity/AccountWithdrawn.avsc`(토픽 `identity.accounts-withdrawn`, 레코드 하나, 칸 다섯 모두 필수)를 더했다. 파일 20개(identity 2), 이름 붙은 타입 69개(레코드 29개, 열거 40개)다. 처음 등록 전이라 §6 규칙대로 늘 있는 칸은 필수로 두었다. `pids`는 문자열 배열이다(1~2개는 asyncapi `minItems`·`maxItems`가 적고, Avro에는 그 제약이 없어 받는 쪽이 본다). 직접 견준 검사로 asyncapi와 필드 이름·순서·필수 목록·형식(uuid·시각)이 같음을 확인했다(Avro 라이브러리 검사는 wbs 0.2.2의 CI가 한다).
 - **바꿈(2026-11-04, BUILD_ORDER BOT-041)**: 로그인 수단 연결·해제 `identity/LoginMethodChanged.avsc`(토픽 `identity.login-methods-changed`, 레코드 하나, 열거 둘 `LoginMethodChange`·`LoginMethodProvider`, 칸 다섯 모두 필수)를 더했다. 파일 21개(identity 3), 이름 붙은 타입 72개(레코드 30개, 열거 42개)다. 열거마다 맨 앞 `UNRECOGNIZED`와 기본값을 두었다(§2).
+- **바꿈(2026-11-05, BUILD_ORDER BOT-044, ADR-0209)**: `SessionTerminatedReason` 끝에 `LOGIN_METHOD_CHANGED`(팬 계정의 로그인 수단이 바뀌어 다른 세션을 끝냄, ASVS 7.4.3)를 더했다. 2026-10-30과 같이 열거 끝에 더해 기존 기호의 순서는 그대로이고, 새 기호를 모르는 옛 읽는 쪽은 기본값 `UNRECOGNIZED`로 읽는다. 파일·타입 수는 그대로다.
 
 ## 2. 옮긴 규칙(추천 적용 2026-10-22)
 

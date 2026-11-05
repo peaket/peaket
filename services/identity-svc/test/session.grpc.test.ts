@@ -19,10 +19,12 @@ type Client = grpc.Client & Record<'CreateSession' | 'EndSession' | 'IssueReauth
 let server: Awaited<ReturnType<typeof startGrpcServer>>;
 let client: Client;
 let kitRef: Awaited<ReturnType<typeof kit>>;
+let storeRef: MemorySessionStore;
 const errors: string[] = [];
 
 beforeAll(async () => {
   const store = new MemorySessionStore();
+  storeRef = store;
   const k0 = await kit(store);
   const links = new MemoryLinkProposals(k0.clock);
   const k = await kit(store, { clock: k0.clock, links });
@@ -122,6 +124,17 @@ describe('SessionService(gRPC)', () => {
     expect(await call('AddProvider', { ...base, reauth_token: 'nope' })).toEqual({ result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED', merge_proposal_id: '' });
     expect(await call('AddProvider', { ...base, reauth_token: tok })).toEqual({ result: 'ADD_PROVIDER_RESULT_LINKED', merge_proposal_id: '' });
     expect(await call('AddProvider', { ...base, reauth_token: tok })).toEqual({ result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED', merge_proposal_id: '' });
+  });
+
+  test('I-T76_CreateSession·SeparateAccount의user_agent에서화면용기기이름만뽑아세션에둔다(원문은두지않는다)', async () => {
+    const ua = 'Mozilla/5.0 (Linux; Android 15; SM-S928N) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/28.0 Chrome/130.0.0.0 Mobile Safari/537.36';
+    const r = await create({ provider_user_id: 'grpc-ua-1', email: '', user_agent: ua });
+    expect(storeRef.peekSession(r.session.session_id)).toMatchObject({ deviceLabel: 'Samsung Internet · Android' });
+    expect(JSON.stringify(storeRef.peekSession(r.session.session_id))).not.toContain('SM-S928N');
+    await create({ provider_user_id: 'grpc-ua-k', email: 'ua@peaket.test' });
+    const q = await create({ provider: 'PROVIDER_GOOGLE', provider_user_id: 'grpc-ua-g', email: 'ua@peaket.test' });
+    const sep = await call('SeparateAccount', { link_proposal_id: q.link_proposal_id, link_binding: q.link_binding, idempotency_key: newKey(), device_id: 'dev-U', user_agent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1' });
+    expect(storeRef.peekSession(sep.session.session_id)).toMatchObject({ deviceLabel: 'Safari · iPhone' });
   });
 
   test('I-T50_④_EndSession은멱등이다', async () => {

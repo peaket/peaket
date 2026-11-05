@@ -5,7 +5,7 @@
 import { AccountLinkPrompt, type AccountLinkProvider, type AccountLinkStatus } from '@peaket/ds/AccountLinkPrompt';
 import { Toast } from '@peaket/ds/Toast';
 import { useEffect, useRef, useState } from 'react';
-import { PROVIDER_LOGIN_LABEL, PROVIDER_NAME } from '@/entities/provider';
+import { linkedText, PROVIDER_LOGIN_LABEL, PROVIDER_NAME } from '@/entities/provider';
 import { DeviceIdInput } from '@/features/social-login';
 import { deviceId } from '@/shared/lib/device-id';
 import { renderNextLink } from '@/shared/lib/next-link';
@@ -53,7 +53,7 @@ function Linked({ provider, next }: { provider: Provider; next: string }) {
         <span className="skel" style={{ height: 16, width: '48%' }} />
       </div>
       <div className="center fixed inset-x-4 bottom-6 z-[90]">
-        <Toast tone="success">{PROVIDER_NAME[provider]} 계정을 연결했습니다</Toast>
+        <Toast tone="success">{linkedText(PROVIDER_NAME[provider])}</Toast>
       </div>
     </>
   );

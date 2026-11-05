@@ -7,7 +7,7 @@ import { accountWithdrawnMessage } from '../account-withdrawn-message.js';
 import { loginMethodChangedMessage } from '../login-method-message.js';
 import { accountMergedMessage } from '../account-merged-message.js';
 import type { AccountStatus, ContactKind, CreateKeyRecord, InvestigationRefsRow, RefreshRow, SessionRow, SessionStore, SessionTx } from '../../domain/ports.js';
-import { CREATE_KEY_TTL_MS, type LoginVerdict, type Provider } from '../../domain/session.js';
+import { CREATE_KEY_TTL_MS, type LiveSession, type LoginVerdict, type Provider, type TerminationReason } from '../../domain/session.js';
 import { account, accountContactRef, accountHold, accountMerge, accountProvider, device, reauthTokenUse, refreshTokenHash, session, sessionCreateKey } from './schema.js';
 
 /** 연락처 행을 다시 쓸 때의 옛 판 값(domain/inv-ref.ts nextRefPrev와 같은 규칙, BOT-046) */
@@ -82,6 +82,28 @@ export class DrizzleSessionStore implements SessionStore {
   async sessionOf(id: string): Promise<SessionRow | null> {
     const [r] = await this.database.db.select().from(session).where(eq(session.id, id));
     return r ? rowOf(r) : null;
+  }
+
+  async liveSessionsOf(accountId: string, now: number): Promise<LiveSession[]> {
+    // 끝나지 않은 그 계정의 세션 부분 인덱스(session_account_active_idx)로 찾는다. 마지막 활동이 비었으면(마이그레이션 0028 전) 회전 시각, 없으면 로그인 시각(ADR-0209 결정 2)
+    const rows = await this.database.db
+      .select({ id: session.id, deviceId: session.deviceId, label: session.deviceLabel, active: sql<Date>`coalesce(${session.lastActiveAt}, ${session.rotatedAt}, ${session.loginVerdictAt})` })
+      .from(session)
+      .where(and(eq(session.accountId, accountId), isNull(session.terminatedAt), gt(session.absoluteExpiresAt, date(now)), gt(session.idleExpiresAt, date(now))));
+    return rows.map((r) => ({ sessionId: r.id, deviceId: r.deviceId, deviceLabel: r.label, lastActiveAt: r.active === null ? 0 : new Date(r.active).getTime() }));
+  }
+
+  async clearEndedDeviceLabels(now: number, signal?: AbortSignal): Promise<number> {
+    // 절대 만료가 지난 세션의 기기 이름을 1,000줄 [가정]씩 비운다(부분 인덱스 session_device_label_expiry_idx를 앞에서부터 읽는다, ADR-0209 결정 1)
+    let total = 0;
+    for (;;) {
+      const r = await this.database.db.execute(sql`
+        update session set device_label = null where id in (
+          select id from session where device_label is not null and absolute_expires_at <= ${date(now)} order by absolute_expires_at limit 1000)`);
+      const n = r.rowCount ?? 0;
+      total += n;
+      if (n < 1000 || signal?.aborted) return total;
+    }
   }
 
   async purgeReauthUses(now: number): Promise<number> {
@@ -167,6 +189,38 @@ export class DrizzleSessionStore implements SessionStore {
   }
 
   #tx(tx: DbTransaction): SessionTx {
+    /**
+     * 세션 끝내기(사유가 섞여도 한 번): 끝난 시각과 기기 이름을 고치고 리프레시 토큰 해시를 지운 뒤, 마지막 쓰기로 세션 종료 사건을 적는다
+     * (ADR-0143 결정 3, ADR-0116 결정 3, R-255, ADR-0209)
+     */
+    const endIn = async (items: ReadonlyArray<{ id: string; reason: TerminationReason }>, now: number): Promise<void> => {
+      if (items.length === 0) return;
+      const at = date(now);
+      const ids = [...new Set(items.map((x) => x.id))];
+      const reasonOf = new Map(items.map((x) => [x.id, x.reason]));
+      const ended = await tx
+        .update(session)
+        // 끝난 세션의 화면용 기기 이름은 같은 트랜잭션에서 지운다(ADR-0209 결정 1)
+        .set({ terminatedAt: at, deviceLabel: null })
+        .where(and(inArray(session.id, ids), isNull(session.terminatedAt)))
+        .returning({ id: session.id, accountId: session.accountId });
+      // 끝난 세션의 리프레시 토큰 해시는 같은 트랜잭션에서 지운다(R-255, docs/data.md refresh_token_hash)
+      await tx.delete(refreshTokenHash).where(inArray(refreshTokenHash.sessionId, ids));
+      // 같은 트랜잭션의 마지막 쓰기로 세션 종료 사건을 적는다(ADR-0143 결정 3). 값은 공용 Avro 인코더(BUILD_ORDER BAS-030) 전까지 JSON이다
+      const terminatedAt = at.toISOString();
+      await writeOutbox(
+        tx,
+        this.clock,
+        ended
+          .sort((a, b) => (a.id < b.id ? -1 : 1))
+          .map((e) => ({
+            topic: CONTROL_TOPICS.sessionsTerminated,
+            // asyncapi control.sessions-terminated: 키 = accountId(같은 계정의 사건은 같은 파티션에 순서대로)
+            key: e.accountId,
+            payload: Buffer.from(JSON.stringify({ accountId: e.accountId, sessionId: e.id, reason: reasonOf.get(e.id), terminatedAt })),
+          })),
+      );
+    };
     return {
       lockCreateKey: async (key, now): Promise<CreateKeyRecord | null> => {
         // 같은 키는 커밋·되돌림까지 기다린다(키 문자열의 64비트 해시로 잠근다. 해시가 겹치면 서로 기다릴 뿐 결과는 같다)
@@ -427,30 +481,8 @@ export class DrizzleSessionStore implements SessionStore {
           .returning({ jti: reauthTokenUse.jti });
         return made.length > 0;
       },
-      terminateSessions: async (ids, reason, now) => {
-        if (ids.length === 0) return;
-        const ended = await tx
-          .update(session)
-          .set({ terminatedAt: date(now) })
-          .where(and(inArray(session.id, [...ids]), isNull(session.terminatedAt)))
-          .returning({ id: session.id, accountId: session.accountId });
-        // 끝난 세션의 리프레시 토큰 해시는 같은 트랜잭션에서 지운다(R-255, docs/data.md refresh_token_hash)
-        await tx.delete(refreshTokenHash).where(inArray(refreshTokenHash.sessionId, [...ids]));
-        // 같은 트랜잭션의 마지막 쓰기로 세션 종료 사건을 적는다(ADR-0143 결정 3). 값은 공용 Avro 인코더(BUILD_ORDER BAS-030) 전까지 JSON이다
-        const terminatedAt = date(now).toISOString();
-        await writeOutbox(
-          tx,
-          this.clock,
-          ended
-            .sort((a, b) => (a.id < b.id ? -1 : 1))
-            .map((e) => ({
-              topic: CONTROL_TOPICS.sessionsTerminated,
-              // asyncapi control.sessions-terminated: 키 = accountId(같은 계정의 사건은 같은 파티션에 순서대로)
-              key: e.accountId,
-              payload: Buffer.from(JSON.stringify({ accountId: e.accountId, sessionId: e.id, reason, terminatedAt })),
-            })),
-        );
-      },
+      terminateSessions: (ids, reason, now) => endIn(ids.map((id) => ({ id, reason })), now),
+      endSessions: (items, now) => endIn(items, now),
       recordWithdrawn: async (i) => {
         // 세션 종료 사건 뒤, 트랜잭션의 마지막 쓰기로 탈퇴 사건을 적는다(BOT-037, ADR-0143 결정 3)
         await writeOutbox(tx, this.clock, [accountWithdrawnMessage({ eventKey: uuidv7(this.clock), ...i })]);
@@ -466,6 +498,8 @@ export class DrizzleSessionStore implements SessionStore {
           idleExpiresAt: date(r.idleExpiresAt),
           loginVerdict: r.loginVerdict,
           loginVerdictAt: date(r.createdAt),
+          deviceLabel: r.deviceLabel,
+          lastActiveAt: date(r.createdAt),
         });
       },
       getSessionForUpdate: async (id): Promise<SessionRow | null> => {
@@ -478,7 +512,7 @@ export class DrizzleSessionStore implements SessionStore {
       rotateRefresh: async (sessionId, hash, now, idleExpiresAt) => {
         await tx
           .update(session)
-          .set({ prevRefreshHash: sql`${session.refreshHash}`, refreshHash: Buffer.from(hash), rotatedAt: date(now), refreshUsed: false, idleExpiresAt: date(idleExpiresAt) })
+          .set({ prevRefreshHash: sql`${session.refreshHash}`, refreshHash: Buffer.from(hash), rotatedAt: date(now), lastActiveAt: date(now), refreshUsed: false, idleExpiresAt: date(idleExpiresAt) })
           .where(eq(session.id, sessionId));
       },
       recordRefreshHash: async (r) => {

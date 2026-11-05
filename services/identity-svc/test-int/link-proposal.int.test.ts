@@ -134,3 +134,20 @@ test('I-T30_리뷰재현_PostgreSQL에서_대상계정의탈퇴가끝나기전�
   // 탈퇴한 계정에 구글이 붙지 않았고, 아무 계정에도 붙지 않았다
   expect(await q("select account_id from account_provider where provider = 'google' and provider_user_id = 'pg-g-9'")).toEqual([]);
 });
+
+test('I-T75_PostgreSQL·Valkey에서_가입때연결제안으로새수단을이으면_그로그인세션만남기고대상계정의다른세션을끝내며_세션종료사건을연결사건보다먼저적는다 [ASVS v5.0.0-7.4.3]', async () => {
+  const t = await setup();
+  const phone = await t.login('kakao', 'pg-k-75', 'pg75@peaket.test', true);
+  if (phone.kind !== 'session') throw new Error(phone.kind);
+  const p = await t.login('google', 'pg-g-75', 'pg75@peaket.test', true);
+  if (p.kind !== 'link-proposed') throw new Error(p.kind);
+  const r = await t.k.create.outcome({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-k-75', email: null, deviceId: 'dev-75-pc', link: { proposalId: p.proposalId, binding: p.binding } });
+  if (r.kind !== 'session') throw new Error(r.kind);
+  expect(r.linkedProvider).toBe('google');
+  const rows = await q<{ topic: string; payload: Buffer }>("select topic, payload from outbox where msg_key = $1 and topic in ('control.sessions-terminated', 'identity.login-methods-changed') order by seq", [r.accountId]);
+  expect(rows.map((x) => [x.topic, (JSON.parse(x.payload.toString()) as { sessionId?: string }).sessionId ?? null, (JSON.parse(x.payload.toString()) as { reason?: string; change?: string }).reason ?? (JSON.parse(x.payload.toString()) as { change?: string }).change])).toEqual([
+    ['control.sessions-terminated', phone.sessionId, 'LOGIN_METHOD_CHANGED'],
+    ['identity.login-methods-changed', null, 'LINKED'],
+  ]);
+  expect(await q('select terminated_at is null as alive from session where id = $1', [r.sessionId])).toEqual([{ alive: true }]);
+});

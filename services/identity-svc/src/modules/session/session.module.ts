@@ -30,6 +30,9 @@ import { SetAccountHold } from './application/set-account-hold.js';
 import { MemoryMergeProposals } from './adapters/memory-merge-proposals.js';
 import { noBlockChecker } from './adapters/grpc-merge-checkers.js';
 import { MergeProposalsController } from './inbound/merge.controller.js';
+import { SessionsController } from './inbound/sessions.controller.js';
+import { EndDeviceSession } from './application/end-device-session.js';
+import { ListSessions } from './application/list-sessions.js';
 import { COOKIE_DOMAIN, TokenController } from './inbound/token.controller.js';
 
 export interface SessionModuleOptions {
@@ -61,7 +64,7 @@ export class SessionModule {
       module: SessionModule,
       // 본인확인 컨텍스트가 계정 정리(ACCOUNT_CLOSURE)를 쓰므로 전역으로 내준다
       global: true,
-      controllers: [TokenController, AccountController, ProvidersController, MergeProposalsController],
+      controllers: [TokenController, AccountController, ProvidersController, MergeProposalsController, SessionsController],
       providers: [
         CloseAccount,
         { provide: ACCOUNT_CLOSURE, useExisting: CloseAccount },
@@ -74,6 +77,8 @@ export class SessionModule {
         RefreshSession,
         WithdrawAccount,
         ListProviders,
+        ListSessions,
+        EndDeviceSession,
         AddProvider,
         UnlinkProvider,
         MergePlanner,

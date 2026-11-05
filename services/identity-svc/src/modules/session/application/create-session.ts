@@ -4,9 +4,11 @@
 // - (제공자, sub) 계정이 없으면: 검증 이메일이 같은 활성 계정이 정확히 하나면 연결 제안, 아니면 새 계정(identity §2.1 '가입 때 연결 제안의 첫 구현', BOT-040)
 // - 연결 제안을 따라 온 로그인은 제안의 대상 계정일 때만 새 제공자를 잇고 세션을 만든다. 아니면 실패 횟수를 올린다(I-T30)
 // 기기 한도를 넘으면 오래 쉰 기기의 세션을 끝낸다
+// - 세션에는 User-Agent에서 뽑은 화면용 기기 이름만 둔다(원문은 두지 않는다, ADR-0209 결정 1). 연결 제안으로 새 수단을 이으면 그 로그인 세션 말고 대상 계정의 세션을 끝낸다(ASVS 7.4.3)
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
+import { deviceLabelOf } from './device-label.js';
 import { contactEmail } from '../domain/inv-ref.js';
 import {
   ACCOUNT_CLAIMS,
@@ -47,6 +49,8 @@ export interface CreateSessionInput {
   /** 제공자가 준 이메일 검증 여부(네이버는 늘 false). 없으면 false */
   emailVerified?: boolean;
   deviceId: string | null;
+  /** 앱 서버가 받은 User-Agent(512자까지). 화면용 기기 이름만 뽑아 세션에 두고 원문은 저장하지 않는다(ADR-0209 결정 1) */
+  userAgent?: string | null;
   /** 연결 제안을 따라 다시 로그인할 때만(identity §2.1) */
   link?: { proposalId: string; binding: string };
 }
@@ -124,6 +128,8 @@ interface Opened {
   newAccount: boolean;
   replayed: boolean;
   ended: string[];
+  /** ended를 끝낸 까닭: 기기 한도, 또는 연결 제안으로 새 수단을 이어 다른 세션을 모두 끝냄 */
+  endedReason: 'DEVICE_LIMIT' | 'LOGIN_METHOD_CHANGED';
 }
 
 @Injectable()
@@ -269,8 +275,10 @@ export class CreateSession {
         await tx.linkProvider(account.id, p.newProvider, p.newProviderUserId, now);
         linked = p.newProvider;
       }
-      const opened = await this.#open(tx, i, account.id, false, now, refresh);
-      // 연결 사건은 세션 쓰기 뒤, 트랜잭션의 마지막 쓰기로 적는다(I-T34, BOT-041)
+      // 새 수단을 이었으면 인증 요소가 바뀌었다: 이 로그인으로 만든 세션 말고 대상 계정의 세션을 모두 끝낸다(ASVS 7.4.3, BOT-044, ADR-0209 결정 5).
+      // 어차피 모두 끝나므로 기기 한도로 따로 고르지 않고 한 번에 LOGIN_METHOD_CHANGED로 끝낸다(새 맥락 리뷰 낮음 3)
+      const opened = await this.#open(tx, i, account.id, false, now, refresh, linked !== null);
+      // 연결 사건은 세션 쓰기와 세션 종료 사건 뒤, 트랜잭션의 마지막 쓰기로 적는다(I-T34, BOT-041)
       if (linked) await tx.recordLoginMethodChanged({ accountId: account.id, change: 'LINKED', provider: linked, occurredAt: now });
       return { ...opened, linked };
     });
@@ -308,11 +316,14 @@ export class CreateSession {
     // identity에는 해시만 있어 앞서 준 값을 다시 줄 수 없다. 새 값으로 바꿔 앞서 준 리프레시 토큰은 쓸 수 없게 한다
     await tx.setRefreshHash(s.id, refresh.hash);
     await tx.recordRefreshHash({ hash: refresh.hash, sessionId: s.id, refreshFamily: s.refreshFamily, issuedAt: now, expiresAt: s.absoluteExpiresAt });
-    return { accountId: s.accountId, sessionId: s.id, idleExpiresAt: s.idleExpiresAt, absoluteExpiresAt: s.absoluteExpiresAt, newAccount: seen.newAccount, replayed: true, ended: [] };
+    return { accountId: s.accountId, sessionId: s.id, idleExpiresAt: s.idleExpiresAt, absoluteExpiresAt: s.absoluteExpiresAt, newAccount: seen.newAccount, replayed: true, ended: [], endedReason: 'DEVICE_LIMIT' };
   }
 
-  /** 계정을 잠그고 기기·세션을 만든다(같은 트랜잭션) */
-  async #open(tx: SessionTx, i: CreateSessionInput, found: string, isNew: boolean, now: number, refresh: { hash: Uint8Array }): Promise<Opened> {
+  /**
+   * 계정을 잠그고 기기·세션을 만든다(같은 트랜잭션). endAllOthers: 연결 제안으로 새 수단을 이은 로그인이라 그 계정의 다른 살아 있는 세션을 모두
+   * LOGIN_METHOD_CHANGED로 끝낸다(기기 한도 정리 대신). 세션 종료 사건은 이 함수의 마지막 쓰기다
+   */
+  async #open(tx: SessionTx, i: CreateSessionInput, found: string, isNew: boolean, now: number, refresh: { hash: Uint8Array }, endAllOthers = false): Promise<Opened> {
     let accountId = found;
     let newAccount = isNew;
     // 같은 계정의 로그인이 겹쳐도 기기 수는 한 번에 하나씩 센다(POL-019)
@@ -342,7 +353,9 @@ export class CreateSession {
     await tx.touchProviderLogin(i.provider, i.providerUserId, now);
     const ref = i.deviceId === null ? undefined : this.devices.ref(i.deviceId);
     const deviceId = ref === undefined || i.deviceId === null ? null : await tx.bindDevice(accountId, ref, now, this.devices.prevRef?.(i.deviceId));
-    const ended = sessionsOverDeviceLimit(await tx.activeSessions(accountId, now), deviceId);
+    const active = await tx.activeSessions(accountId, now);
+    const endedReason = endAllOthers ? 'LOGIN_METHOD_CHANGED' : 'DEVICE_LIMIT';
+    const ended = endAllOthers ? active.map((s) => s.sessionId) : sessionsOverDeviceLimit(active, deviceId);
 
     const sessionId = uuidv7(this.clock);
     const refreshFamily = uuidv7(this.clock);
@@ -358,18 +371,20 @@ export class CreateSession {
       idleExpiresAt,
       loginVerdict: 'UNKNOWN',
       createdAt: now,
+      deviceLabel: deviceLabelOf(i.userAgent),
     });
     await tx.recordRefreshHash({ hash: refresh.hash, sessionId, refreshFamily, issuedAt: now, expiresAt: absoluteExpiresAt });
     await tx.saveCreateKey(i.idempotencyKey, { provider: i.provider, providerUserId: i.providerUserId, sessionId, newAccount }, now);
-    // 기기 한도 정리는 세션 종료 사건(Outbox)을 적으므로 트랜잭션의 마지막 쓰기로 둔다(ADR-0116 결정 3)
-    if (ended.length) await tx.terminateSessions(ended, 'DEVICE_LIMIT', now);
-    return { accountId, sessionId, idleExpiresAt, absoluteExpiresAt, newAccount, replayed: false, ended };
+    // 기기 한도 정리(또는 로그인 수단 변경의 끝내기)는 세션 종료 사건(Outbox)을 적으므로 트랜잭션의 마지막 쓰기로 둔다(ADR-0116 결정 3)
+    if (ended.length) await tx.terminateSessions(ended, endedReason, now);
+    return { accountId, sessionId, idleExpiresAt, absoluteExpiresAt, newAccount, replayed: false, ended, endedReason };
   }
 
   async #tokens(i: CreateSessionInput, r: Opened, refresh: { token: string }, now: number, linkedProvider: Provider | null): Promise<LoginOutcome> {
     if (r.replayed) this.signals.replayed(i.provider);
     else this.signals.created(i.provider, r.newAccount);
-    if (r.ended.length) this.signals.terminated('DEVICE_LIMIT', r.ended.length);
+    if (r.ended.length && r.endedReason === 'DEVICE_LIMIT') this.signals.terminated('DEVICE_LIMIT', r.ended.length);
+    if (r.ended.length && r.endedReason === 'LOGIN_METHOD_CHANGED') this.signals.othersEnded('login_method_changed', r.ended.length);
     const access = await this.signer.access({ accountId: r.accountId, sessionId: r.sessionId, ...(await this.claims.of(r.accountId)) }, now);
     return {
       kind: 'session',

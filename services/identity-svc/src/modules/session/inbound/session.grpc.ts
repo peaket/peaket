@@ -141,7 +141,8 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
       const provider = providerOf(r.provider);
       // 연결 제안을 따라 온 로그인이면 제안 ID와 묶음 값을 함께 받는다(identity §2.1 '가입 때 연결 제안의 첫 구현')
       const proposalId = text(r.link_proposal_id);
-      // client_ip·user_agent는 법정 접속기록 줄(FR-045)에만, auth_methods·asn은 로그인 판정(trust-svc)에 쓴다. 그 둘이 생기기 전에는 받기만 한다
+      // client_ip·user_agent 원문은 법정 접속기록 줄(FR-045)에만, auth_methods·asn은 로그인 판정(trust-svc)에 쓴다. 그 둘이 생기기 전에는 받기만 한다.
+      // user_agent에서는 화면용 기기 이름('브라우저 · 운영체제')만 뽑아 세션에 둔다(ADR-0209 결정 1)
       const out = await uc.create.outcome({
         idempotencyKey: text(r.idempotency_key),
         provider,
@@ -149,6 +150,7 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
         email: text(r.email) || null,
         emailVerified: r.email_verified === true,
         deviceId: text(r.device_id) || null,
+        userAgent: text(r.user_agent) || null,
         ...(proposalId ? { link: { proposalId, binding: text(r.link_binding) } } : {}),
       });
       return responseOf(out);
@@ -171,7 +173,7 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
     }),
     SeparateAccount: unary('SeparateAccount', async (r) => {
       if (!uc.separate) throw new SessionError('UNAVAILABLE', '연결 제안 저장소가 없다');
-      const out = await uc.separate.run({ proposalId: text(r.link_proposal_id), binding: text(r.link_binding), idempotencyKey: text(r.idempotency_key), deviceId: text(r.device_id) || null });
+      const out = await uc.separate.run({ proposalId: text(r.link_proposal_id), binding: text(r.link_binding), idempotencyKey: text(r.idempotency_key), deviceId: text(r.device_id) || null, userAgent: text(r.user_agent) || null });
       return { session: sessionOf(out), new_account: out.newAccount, linked_provider: 'PROVIDER_UNSPECIFIED' };
     }),
     EndSession: unary('EndSession', async (r) => uc.end.run({ sessionId: text(r.session_id), accountId: text(r.account_id) })),

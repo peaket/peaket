@@ -6,6 +6,7 @@
 //    재인증 뒤 확정(POST …/confirmation, X-Reauth-Token). 요약 글(mergeView)도 여기서 만든다
 import { REAUTH_EXPIRED, type ReauthFailure, reauthFailureOf } from '../../shared/lib/reauth-failure.ts';
 import { refreshOnce, type RefreshResult } from '../../shared/lib/token-refresh.ts';
+import { OTHER_DEVICES_LOGGED_OUT } from '../../entities/provider/model.ts';
 
 export type { RefreshResult };
 /** 재인증 토큰을 쓰는 요청의 403(해제·추가·합치기 확정): 5분이 지난 때 말고 이미 쓴 토큰에도 오므로 넓게 쓴다(BOT-036이 넘긴 것) */
@@ -314,7 +315,8 @@ export function linkForm(provider: Provider, token: string): { action: string; f
 export function addResultText(v: string | null, o: { merge?: boolean } = {}): { tone: 'success' | 'warning' | 'danger'; text: string } | null {
   switch (v) {
     case 'linked':
-      return { tone: 'success', text: '로그인 수단을 연결했습니다' };
+      // 이 세션 말고 다른 세션을 모두 끝냈다(ASVS 7.4.3, d5 §5.22, BOT-044)
+      return { tone: 'success', text: `로그인 수단을 연결했습니다. ${OTHER_DEVICES_LOGGED_OUT}` };
     case 'already-linked':
       return { tone: 'success', text: '이미 이 계정에 연결된 로그인 수단입니다' };
     case 'type-taken':
@@ -336,7 +338,7 @@ export function addResultText(v: string | null, o: { merge?: boolean } = {}): { 
 export function unlinkResultText(a: UnlinkAnswer): { tone: 'success' | 'warning' | 'danger'; text: string } {
   switch (a.kind) {
     case 'done':
-      return { tone: 'success', text: '로그인 수단을 해제했습니다' };
+      return { tone: 'success', text: `로그인 수단을 해제했습니다. ${OTHER_DEVICES_LOGGED_OUT}` };
     case 'last':
       return { tone: 'warning', text: '마지막 로그인 수단은 해제할 수 없습니다' };
     case 'missing':
@@ -419,7 +421,8 @@ export function mergeView(p: MergeProposalView, now: number, titles: Record<Merg
     blockedReason: first ? text(first).banner : '지금은 두 계정을 합칠 수 없습니다. 고객센터로 문의해 주세요.',
     checks,
     merging: {
-      message: '처리 중입니다. 완료되면 알림으로 안내해 드립니다',
+      // 대표 계정의 다른 세션도 끝냈다(ASVS 7.4.3, d5 §5.22 merging, BOT-044)
+      message: `처리 중입니다. ${OTHER_DEVICES_LOGGED_OUT}. 완료되면 알림으로 안내해 드립니다`,
       progressLabel: '계정 합치기 진행',
       steps: [
         { label: '흡수 계정 잠금·로그아웃', state: 'done' as const },

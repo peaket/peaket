@@ -16,6 +16,8 @@ export { accountHoldHandlers } from './inbound/session.grpc.js';
 export { SeparateAccount } from './application/separate-account.js';
 export { RedisLinkProposals } from './adapters/redis-link-proposals.js';
 export { EndSession } from './application/end-session.js';
+export { EndDeviceSession } from './application/end-device-session.js';
+export { ListSessions } from './application/list-sessions.js';
 export { IssueReauthToken } from './application/issue-reauth-token.js';
 export { identityPackage, identityServiceHandlers, sessionServiceHandlers } from './inbound/session.grpc.js';
 export { GetVerificationStatus } from './application/get-verification-status.js';

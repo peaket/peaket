@@ -73,6 +73,14 @@ test('I-T33_해제는DELETE와X-Reauth-Token머리이고_204완료_409last-login
   assert.equal(unlinkResultText({ kind: 'last' }).text, '마지막 로그인 수단은 해제할 수 없습니다');
 });
 
+test('I-T75_연결·해제를마치면다른기기에서는모두로그아웃했다고함께알린다(d5 §5.22, BOT-044) [ASVS v5.0.0-7.4.3]', () => {
+  assert.deepEqual(addResultText('linked'), { tone: 'success', text: '로그인 수단을 연결했습니다. 다른 기기에서는 모두 로그아웃했습니다' });
+  assert.deepEqual(unlinkResultText({ kind: 'done' }), { tone: 'success', text: '로그인 수단을 해제했습니다. 다른 기기에서는 모두 로그아웃했습니다' });
+  // 바뀐 것이 없으면 그 말을 붙이지 않는다
+  assert.doesNotMatch(addResultText('already-linked').text, /로그아웃/);
+  assert.doesNotMatch(unlinkResultText({ kind: 'last' }).text, /로그아웃/);
+});
+
 test('재인증뒤할일은10분안이고한번만믿으며_모양이틀리면버린다_재인증·추가양식은돌아올곳과토큰을싣는다', () => {
   const s = memoryStore();
   markPending(s, { action: 'add', provider: 'google', at: 1_000 });
@@ -485,4 +493,8 @@ test('I-T33_토큰갱신은주입한잠금안에서돈다(잠금대역으로순�
   const api = createLoginMethodsApi({ origin: 'https://api.test', fetch: f, lock });
   assert.equal(await api.refresh(), 'ok');
   assert.deepEqual(order, ['lock', 'fetch /v1/identity/access-tokens', 'unlock']);
+});
+
+test('I-T75_계정합치기를확정하면처리중안내에다른기기에서는모두로그아웃했다고함께알린다(새맥락리뷰낮음6) [ASVS v5.0.0-7.4.3]', () => {
+  assert.equal(mergeView(view(), 0, TITLES).merging.message, '처리 중입니다. 다른 기기에서는 모두 로그아웃했습니다. 완료되면 알림으로 안내해 드립니다');
 });

@@ -152,13 +152,18 @@ export function markPending(storage: StorageLike, now: number): void {
   storage.set(PENDING_KEY, String(now));
 }
 
-/** 돌아왔을 때 표시가 10분 안이면 true. 늘 지운다(한 번만) */
-export function takePending(storage: StorageLike, now: number): boolean {
+/** 돌아왔을 때 표시가 10분 안이면 남긴 시각, 아니면 null. 늘 지운다(한 번만). 원격 로그아웃 표시와 견줄 때 쓴다(나중에 남긴 쪽만 잇는다, BOT-044) */
+export function takePendingAt(storage: StorageLike, now: number): number | null {
   const v = storage.get(PENDING_KEY);
   storage.remove(PENDING_KEY);
-  if (v === null) return false;
+  if (v === null) return null;
   const at = Number(v);
-  return Number.isFinite(at) && at <= now && now - at <= PENDING_TTL_MS;
+  return Number.isFinite(at) && at <= now && now - at <= PENDING_TTL_MS ? at : null;
+}
+
+/** 돌아왔을 때 표시가 10분 안이면 true. 늘 지운다(한 번만) */
+export function takePending(storage: StorageLike, now: number): boolean {
+  return takePendingAt(storage, now) !== null;
 }
 
 /** 떠나기의 결과: left 제공자로 떠남, login 로그인 화면으로, retry 잠시 뒤 다시, cancelled 그사이 창을 닫음, no-provider 제공자를 정하지 못함 */

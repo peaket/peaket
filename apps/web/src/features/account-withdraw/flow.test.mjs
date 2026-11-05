@@ -1,7 +1,7 @@
 // 탈퇴 흐름(flow.ts) 시험(docs/features/identity.md §8 '탈퇴 화면 연결', BUILD_ORDER BOT-036, I-T16·I-T68 ⑨). 가짜 fetch·저장소로 본다.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { afterWithdraw, createWithdrawApi, leaveForReauth, linkedProvidersQuietly, markPending, PENDING_KEY, PENDING_TTL_MS, reauthFailureText, reauthForm, takePending, untilText } from './flow.ts';
+import { afterWithdraw, createWithdrawApi, leaveForReauth, linkedProvidersQuietly, markPending, PENDING_KEY, PENDING_TTL_MS, reauthFailureText, reauthForm, takePending, takePendingAt, untilText } from './flow.ts';
 
 const json = (status, body) => new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const problem = (status, type, extra = {}) => json(status, { type: `https://peaket.example/problems/${type}`, status, ...extra });
@@ -195,4 +195,14 @@ test('I-T16_탈퇴요청이도는동안창을닫았으면늦게온응답가운�
     assert.equal(afterWithdraw(r, { closed: false }), open, r.kind);
     assert.equal(afterWithdraw(r, { closed: true }), closed, `${r.kind}(닫은 뒤)`);
   }
+});
+
+test('I-T74_탈퇴재인증표시의남긴시각을한번만돌려준다(원격로그아웃표시와견준다, BOT-044)', () => {
+  const s = memoryStore();
+  markPending(s, 1000);
+  assert.equal(takePendingAt(s, 1000 + PENDING_TTL_MS), 1000);
+  assert.equal(takePendingAt(s, 2000), null, '한 번만');
+  markPending(s, 1000);
+  assert.equal(takePendingAt(s, 1001 + PENDING_TTL_MS), null, '10분이 지남');
+  assert.equal(s.m.size, 0);
 });

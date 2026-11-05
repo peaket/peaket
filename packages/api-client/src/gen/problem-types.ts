@@ -151,6 +151,7 @@ export type ProblemType =
   | 'seatmap-replace-required'
   | 'self-target-forbidden'
   | 'server-busy'
+  | 'session-not-found'
   | 'signup-already-completed'
   | 'sold-out'
   | 'staff-assignment-missing'
@@ -320,6 +321,7 @@ export const PROBLEM_TYPES = {
   'seatmap-replace-required': { status: 409, title: "좌석이 있는 좌석맵은 바꾸기로만 가져올 수 있습니다" },
   'self-target-forbidden': { status: 403, title: "자기 계정에는 할 수 없습니다" },
   'server-busy': { status: 429, title: "요청이 많아 잠시 처리하지 못했습니다" },
+  'session-not-found': { status: 404, title: "로그인한 기기가 아니거나 이미 로그아웃했습니다" },
   'signup-already-completed': { status: 409, title: "이미 가입을 마친 계정입니다" },
   'sold-out': { status: 410, title: "매진되었습니다" },
   'staff-assignment-missing': { status: 403, title: "이 회차의 스태프 배정이 없습니다" },

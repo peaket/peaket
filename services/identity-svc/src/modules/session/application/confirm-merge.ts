@@ -1,12 +1,14 @@
 // 병합 확정(POST /v1/identity/merge-proposals/{proposalId}/confirmation, identity §2.1 '계정 병합의 첫 구현', BUILD_ORDER BOT-042, I-T32·I-T34, POL-034).
 // 재인증(제안한 세션, 한 번) → 대표 계정 다시 고르기(바뀌었으면 NOT_FOUND) → 세 서비스 다시 확인(답이 없으면 UNAVAILABLE) → 막는 사유면 BLOCKED, 불변식 위반이면 INVARIANT →
 // 한 트랜잭션: 추가하려던 제공자와 두 계정(ID 순)을 잠그고 끝난 계정이 없는지(먼저) → 세션·재인증 토큰 → 그 수단이 아직 다른 계정의 것인지·본인확인으로 고른 대표가 그대로인지 →
-// 탈퇴 유예·같은 종류의 로그인 수단(SAME_PROVIDER_KIND, OPEN[21]) → 로그인 수단·기기 행 이전(OPEN[22])·MERGED·이메일 지우기·사슬 고치기·account_merge → 흡수 계정 세션 끝내기(MERGED) → 병합 사건.
-import { Inject, Injectable } from '@nestjs/common';
+// 탈퇴 유예·같은 종류의 로그인 수단(SAME_PROVIDER_KIND, OPEN[21]) → 로그인 수단·기기 행 이전(OPEN[22])·MERGED·이메일 지우기·사슬 고치기·account_merge → 흡수 계정 세션 끝내기(MERGED) →
+// 대표 계정의 다른 세션 끝내기(LOGIN_METHOD_CHANGED: 흡수 계정의 수단이 옮겨 와 인증 요소가 바뀌었다. 제안한 세션이 대표 계정의 것이면 그 세션만 남긴다, ASVS 7.4.3, BOT-044, ADR-0209 결정 5) → 병합 사건.
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
-import { MERGE_PROPOSALS, type MergeProposals, MergeCheckUnavailable, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_STORE, type SessionStore } from '../domain/ports.js';
+import { MERGE_PROPOSALS, type MergeProposals, MergeCheckUnavailable, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore } from '../domain/ports.js';
 import { choosePrimary, sharedProviderKinds } from '../domain/merge.js';
 import { sessionAlive, WITHDRAWAL_REAUTH_ACT } from '../domain/session.js';
+import { otherLiveSessions } from './end-other-sessions.js';
 import { MergeError } from './merge-error.js';
 import { MergePlanner } from './plan-merge.js';
 
@@ -20,6 +22,7 @@ export class ConfirmMerge {
     @Inject(MergePlanner) private readonly planner: Pick<MergePlanner, 'assessPair' | 'roles'>,
     @Inject(MERGE_PROPOSALS) private readonly proposals: MergeProposals,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Optional() @Inject(SESSION_SIGNALS) private readonly signals?: Pick<SessionSignals, 'othersEnded'>,
   ) {}
 
   /** @throws MergeError NOT_FOUND·REAUTH_REQUIRED·BLOCKED·INVARIANT·UNAVAILABLE */
@@ -58,6 +61,7 @@ export class ConfirmMerge {
     }
     const now = this.clock.now();
     const mergeId = uuidv7(this.clock);
+    let ended = 0;
     try {
       await this.store.transaction(async (tx) => {
         // 추가하려던 제공자 계정을 먼저 잠근다(로그인·로그인 수단 추가와 같은 순서: 제공자 → 계정 → 세션)
@@ -88,9 +92,12 @@ export class ConfirmMerge {
         const same = sharedProviderKinds((await tx.providersOf(p.primaryAccountId)).map((x) => x.provider), (await tx.providersOf(p.absorbedAccountId)).map((x) => x.provider));
         if (same.length > 0) throw new MergeError('BLOCKED', '두 계정에 같은 종류의 다른 로그인 수단이 있다', ['SAME_PROVIDER_KIND'], same);
         const open = await tx.unterminatedSessions(p.absorbedAccountId);
+        // 대표 계정에 흡수 계정의 로그인 수단이 옮겨 온다: 제안한 세션(대표 계정의 것일 때) 말고 대표 계정의 세션을 모두 끝낸다(쓰기 잠금은 여기서 잡는다)
+        const primaryOthers = await otherLiveSessions(tx, p.primaryAccountId, accountId === p.primaryAccountId ? sessionId : null, now);
         await tx.mergeAccounts({ mergeId, primaryAccountId: p.primaryAccountId, absorbedAccountId: p.absorbedAccountId, mergedProvider: p.newProvider, moved: { ...plan.moved }, requestedAt: p.createdAt, now });
-        // 흡수 계정의 모든 세션을 끝낸다(세션 종료 사건 MERGED), 그다음 마지막 쓰기로 병합 사건
-        await tx.terminateSessions(open, 'MERGED', now);
+        // 흡수 계정의 모든 세션(MERGED)과 대표 계정의 다른 세션(LOGIN_METHOD_CHANGED)을 한 번에 끝내고(세션 종료 사건), 그다음 마지막 쓰기로 병합 사건
+        await tx.endSessions([...open.map((id) => ({ id, reason: 'MERGED' as const })), ...primaryOthers.map((id) => ({ id, reason: 'LOGIN_METHOD_CHANGED' as const }))], now);
+        ended = primaryOthers.length;
         await tx.recordAccountMerged({ mergeId, primaryAccountId: p.primaryAccountId, mergedAccountId: p.absorbedAccountId, confirmedAt: now });
       });
     } catch (e) {
@@ -98,6 +105,7 @@ export class ConfirmMerge {
       if (e instanceof MergeError && e.code === 'NOT_FOUND') await this.#stale(p.id, e.message);
       throw e;
     }
+    if (ended) this.signals?.othersEnded('login_method_changed', ended);
     // 한 번만 쓴다. 지우지 못해도 다시 오면 흡수 계정이 MERGED라 NOT_FOUND다
     await this.proposals.remove(p.id).catch(() => undefined);
     return { mergeId };

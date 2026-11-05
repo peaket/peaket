@@ -4,7 +4,7 @@ import { createService, fakeClock } from '@peaket/platform';
 import { Writable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
-import { AddProvider, CreateSession, JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
+import { AddProvider, CreateSession, EndSession, JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
 import { MergeCheckUnavailable } from '../src/modules/session/domain/ports.js';
 import { HmacIdentityHashers, SetRestrictedCiHold } from '../src/modules/verification/index.js';
 import { ConfirmVerification } from '../src/modules/verification/application/confirm-verification.js';
@@ -269,6 +269,62 @@ describe('로그인 수단 해제 경로(BOT-041, I-T33)', () => {
     const ok = await unlink('google', { ...fan(s), 'x-reauth-token': await reauthOf(s) });
     expect(ok.statusCode).toBe(204);
     expect(ok.headers['cache-control']).toBe('no-store');
+  });
+});
+
+describe('로그인한 기기 경로(BOT-044, I-T74, ADR-0209)', () => {
+  const fan = (s: { accountId: string; sessionId: string }) => ({ 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '' });
+  const reauthOf = async (s: { accountId: string; sessionId: string }) => (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, svc.clock.now())).token;
+  const loginOn = (sub: string, deviceId: string, userAgent: string) => svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: sub, email: null, deviceId, userAgent });
+  const list = (headers: Record<string, string>) => svc.http.inject({ method: 'GET', url: '/v1/identity/sessions', headers });
+  const off = (id: string, headers: Record<string, string>) => svc.http.inject({ method: 'DELETE', url: `/v1/identity/sessions/${id}`, headers });
+  const CHROME_WIN = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+  const SAFARI_IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1';
+
+  test('I-T74_GET은200·no-store와기기마다한줄(지금이기기먼저)이고_끝난세션으로부르면401이다 [ASVS v5.0.0-7.5.2] [ASVS v5.0.0-14.3.2]', async () => {
+    const sub = `u-${newKey().slice(0, 8)}`;
+    const phone = await loginOn(sub, 'dev-http-phone', SAFARI_IPHONE);
+    clock.advance(1_000);
+    const me = await loginOn(sub, 'dev-http-pc', CHROME_WIN);
+    const r = await list(fan(me));
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(r.payload)).toEqual({
+      items: [
+        { sessionId: me.sessionId, deviceName: 'Chrome · Windows', lastActiveAt: new Date(svc.clock.now()).toISOString(), current: true, otherSessions: 0 },
+        { sessionId: phone.sessionId, deviceName: 'Safari · iPhone', lastActiveAt: new Date(svc.clock.now() - 1_000).toISOString(), current: false, otherSessions: 0 },
+      ],
+    });
+    await svc.app.get(EndSession).run({ sessionId: phone.sessionId, accountId: phone.accountId });
+    const ended = await list(fan(phone));
+    expect(ended.statusCode).toBe(401);
+    expect(ended.headers['www-authenticate']).toBe('Cookie realm="peaket"');
+  });
+
+  test('I-T74_DELETE는재인증없으면403·남의세션과없는ID와다른로그인없는지금기기는404session-not-found·맞으면204no-store다 [ASVS v5.0.0-7.5.2] [ASVS v5.0.0-8.2.2]', async () => {
+    const sub = `u-${newKey().slice(0, 8)}`;
+    const phone = await loginOn(sub, 'dev-del-phone', SAFARI_IPHONE);
+    const me = await loginOn(sub, 'dev-del-pc', CHROME_WIN);
+    const stranger = await loginOn(`u-${newKey().slice(0, 8)}`, 'dev-del-x', CHROME_WIN);
+    const no = await off(phone.sessionId, fan(me));
+    expect(no.statusCode).toBe(403);
+    expect(JSON.parse(no.payload)).toMatchObject({ type: 'https://peaket.example/problems/reauth-required', status: 403 });
+    const tok = await reauthOf(me);
+    for (const id of [stranger.sessionId, '0190f3a1-7c2e-7a00-8000-0000000000fe', 'nope']) {
+      const r = await off(id, { ...fan(me), 'x-reauth-token': tok });
+      expect(r.statusCode, id).toBe(404);
+      expect(JSON.parse(r.payload)).toMatchObject({ type: 'https://peaket.example/problems/session-not-found', status: 404, title: '로그인한 기기가 아니거나 이미 로그아웃했습니다' });
+    }
+    // 지금 기기에 끝낼 다른 로그인이 없으면 같은 404다(새 맥락 리뷰 중간 1)
+    const cur = await off(me.sessionId, { ...fan(me), 'x-reauth-token': tok });
+    expect(cur.statusCode).toBe(404);
+    expect(JSON.parse(cur.payload)).toMatchObject({ type: 'https://peaket.example/problems/session-not-found', status: 404 });
+    // 404는 토큰을 쓰지 않았으니 같은 토큰으로 끈다
+    const ok = await off(phone.sessionId, { ...fan(me), 'x-reauth-token': tok });
+    expect(ok.statusCode).toBe(204);
+    expect(ok.headers['cache-control']).toBe('no-store');
+    expect((await refresh(`__Secure-peaket_rt=${phone.refreshToken}`)).statusCode).toBe(401);
+    expect((await list(fan(stranger))).statusCode).toBe(200);
   });
 });
 

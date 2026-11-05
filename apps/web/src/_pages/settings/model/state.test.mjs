@@ -6,6 +6,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { SCR017_STATES } from '../../../shared/config/screens.account.ts';
 import { settingsView } from './state.ts';
+import { returnOnMount, resumeDeviceLogout } from './devices.ts';
+import { markPending as markDevicePending } from '../../../features/device-sessions/flow.ts';
+import { markPending as markWithdrawPending } from '../../../features/account-withdraw/flow.ts';
 
 const PAGE = readFileSync(new URL('../ui/SettingsPage.tsx', import.meta.url), 'utf8');
 const FLOWS = readFileSync(new URL('../ui/SettingsFlows.tsx', import.meta.url), 'utf8');
@@ -57,4 +60,58 @@ test('창을 닫으면 메모리의 재인증 토큰과 보관 안내 상태를 
 test('탈퇴 확인 창의 확정은 닫힘을 세어 늦게 온 응답을 afterWithdraw로 가른다(닫은 뒤의 보관 안내·재인증 창을 다시 열지 않는다, 새 맥락 마지막 검토)', () => {
   assert.match(FLOWS, /closedRef\.current \+= 1;/);
   assert.match(FLOWS, /afterWithdraw\(r, \{ closed: opened !== closedRef\.current \}\)/);
+});
+
+const memoryStore = () => {
+  const m = new Map();
+  return { get: (k) => m.get(k) ?? null, set: (k, v) => void m.set(k, v), remove: (k) => void m.delete(k), m };
+};
+const TARGET = { sessionId: '0190f3a1-7c2e-7a00-8000-0000000000b1', name: 'Safari · iPhone', scope: 'device', at: 1000 };
+
+test('I-T74_재인증에서돌아오면원격로그아웃·탈퇴표시를둘다지우고_나중에남긴쪽만잇는다(새맥락리뷰낮음7)', () => {
+  const s = memoryStore();
+  markDevicePending(s, TARGET);
+  markWithdrawPending(s, 900);
+  assert.deepEqual(returnOnMount(s, 2000, { devices: true, withdraw: true }), { kind: 'device', pending: TARGET });
+  assert.equal(s.m.size, 0);
+  markDevicePending(s, TARGET);
+  markWithdrawPending(s, 1500);
+  assert.deepEqual(returnOnMount(s, 2000, { devices: true, withdraw: true }), { kind: 'withdraw' });
+  assert.equal(s.m.size, 0);
+  assert.equal(returnOnMount(s, 2000, { devices: true, withdraw: true }), null);
+  // 목업 흐름(실제 API 없음)이면 표시를 건드리지 않는다
+  markDevicePending(s, TARGET);
+  assert.equal(returnOnMount(s, 2000, { devices: false, withdraw: false }), null);
+  assert.equal(s.m.size, 1);
+});
+
+test('I-T74_돌아와받은재인증토큰으로그기기를끄고결과를고른다_토큰을못받거나403이면그기기의재인증창_401뒤갱신도401이면로그인(새맥락리뷰낮음7) [ASVS v5.0.0-7.5.2]', async () => {
+  const calls = [];
+  const run = (pickup, end) => resumeDeviceLogout({ pending: TARGET, pickup: async () => pickup, end: async (id, tok) => (calls.push([id, tok]), end) });
+  assert.deepEqual(await run({ kind: 'token', token: 'tok-1' }, { kind: 'done' }), { kind: 'toast', text: 'Safari · iPhone에서 로그아웃했습니다', icon: 'ic-check' });
+  assert.deepEqual(calls, [[TARGET.sessionId, 'tok-1']]);
+  assert.deepEqual(await run({ kind: 'token', token: 't' }, { kind: 'gone' }), { kind: 'toast', text: '이미 로그아웃된 기기입니다', icon: 'ic-info' });
+  assert.deepEqual(await run({ kind: 'token', token: 't' }, { kind: 'error' }), { kind: 'toast', text: '지금은 로그아웃할 수 없습니다. 잠시 뒤 다시 시도해 주세요', icon: 'ic-alert-circle' });
+  assert.deepEqual(await run({ kind: 'token', token: 't' }, { kind: 'login' }), { kind: 'login' });
+  assert.deepEqual(await run({ kind: 'token', token: 't' }, { kind: 'reauth' }), { kind: 'reauth-failed', text: '다시 로그인한 확인이 만료되었거나 이미 쓰였습니다. 다시 로그인해 주세요', target: TARGET });
+  const before = calls.length;
+  assert.deepEqual(await run({ kind: 'failed', reason: 'stale' }, { kind: 'done' }), { kind: 'reauth-failed', text: '제공자 계정에서 로그아웃한 뒤 다시 시도해 주세요', target: TARGET });
+  assert.equal(calls.length, before, '토큰이 없으면 끄지 않는다');
+  // 지금 기기의 다른 로그인 끝내기는 문구가 다르다
+  assert.deepEqual(await resumeDeviceLogout({ pending: { ...TARGET, scope: 'others' }, pickup: async () => ({ kind: 'token', token: 't' }), end: async () => ({ kind: 'done' }) }), {
+    kind: 'toast',
+    text: '이 기기의 다른 로그인을 끝냈습니다',
+    icon: 'ic-check',
+  });
+});
+
+test('I-T74_설정화면은돌아오기·원격로그아웃을위모델로잇고_지금이기기줄에다른로그인이있을때만[이기기의다른로그인끝내기]를보인다(BOT-044, d5 §5.17)', () => {
+  assert.match(FLOWS, /returnOnMount\(tabStore, /);
+  assert.match(FLOWS, /resumeDeviceLogout\(\{/);
+  assert.match(FLOWS, /leaveForDeviceReauth\(/);
+  assert.match(FLOWS, /otherLoginsOf\(liveRows\)/);
+  assert.match(FLOWS, /이 기기의 다른 로그인 끝내기/);
+  assert.match(FLOWS, /로그인한 기기를 불러오지 못했습니다/);
+  // 실제 흐름에는 현장 스캐너 안내 띠가 없다(스캐너 세션은 이 API에 없다, BUILD_ORDER GAT-230)
+  assert.match(PAGE, /live \? null : \(\s*<div className="banner banner-info"/);
 });

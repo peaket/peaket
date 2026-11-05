@@ -88,6 +88,8 @@ message CreateSessionRequest {
   // 기기 바인딩 값. 저장할 때는 가명으로 바꾼다.
   string device_id = 7;
   // 법정 접속기록 줄에만 싣는 원문 IP와 단말 정보. 일반 로그에는 남기지 않는다(docs/observability.md §7).
+  // identity는 user_agent에서 정해진 낱말의 '브라우저 · 운영체제'만 뽑아 세션의 화면용 기기 이름으로 두고 원문은 저장하지 않는다
+  // (로그인한 기기 목록, docs/features/identity.md §8 '로그인한 기기와 다른 세션 끝내기의 첫 구현', 추천 적용 2026-11-05, ADR-0209).
   string client_ip = 8;
   string user_agent = 9;
   // 제공자가 준 acr·amr. 없으면 단일 요소 인증으로 본다(ASVS 6.8.4, ADR-0001).
@@ -172,6 +174,7 @@ message SeparateAccountRequest {
   // CreateSession과 같은 규칙의 멱등 키(앱 서버가 이 요청마다 만든다)
   string idempotency_key = 3;
   string device_id = 4;
+  // CreateSession의 user_agent와 같다(화면용 기기 이름만 뽑아 세션에 둔다, ADR-0209)
   string user_agent = 5;
   repeated string auth_methods = 6;
 }

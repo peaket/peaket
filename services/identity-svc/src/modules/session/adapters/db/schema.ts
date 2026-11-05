@@ -92,9 +92,16 @@ export const session = pgTable(
     loginVerdict: text('login_verdict').notNull(),
     loginVerdictReason: text('login_verdict_reason'),
     loginVerdictAt: at('login_verdict_at'),
+    // 화면용 기기 이름 '브라우저 · 운영체제'(로그인한 기기 목록, ADR-0209 결정 1). User-Agent 원문은 두지 않는다. 세션이 끝나면 비운다
+    deviceLabel: text('device_label'),
+    // 마지막 활동: 로그인과 토큰 갱신(회전) 때(ADR-0209 결정 2). 마이그레이션 0028 전의 세션은 비어 있어 rotated_at·login_verdict_at으로 대신한다
+    lastActiveAt: at('last_active_at'),
   },
   (t) => [
     index('session_account_active_idx').on(t.accountId).where(sql`${t.terminatedAt} is null`),
+    // 정비 session-label-expired: 절대 만료가 지났는데 기기 이름이 남은 세션을 앞에서부터 찾는다(이름이 있는 세션만 담는다)
+    index('session_device_label_expiry_idx').on(t.absoluteExpiresAt).where(sql`${t.deviceLabel} is not null`),
+    check('session_device_label_length_check', sql`${t.deviceLabel} is null or char_length(${t.deviceLabel}) between 1 and 40`),
     // 리프레시 토큰은 256비트 난수의 해시라 겹치지 않는다. 겹치면 쓰기가 실패해 다른 세션으로 잘못 이어지지 않는다
     uniqueIndex('session_refresh_hash_key').on(t.refreshHash),
     index('session_prev_refresh_hash_idx').on(t.prevRefreshHash).where(sql`${t.prevRefreshHash} is not null`),

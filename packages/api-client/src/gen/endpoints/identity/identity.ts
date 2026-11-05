@@ -48,6 +48,7 @@ import type {
   DeviceApprovalView,
   FanAccountSummary,
   GetIdentityProviders200,
+  GetIdentitySessions200,
   LinkProposal,
   ListSubscriptions200,
   ListSubscriptionsParams,
@@ -2211,14 +2212,21 @@ export const useCreateIdentityAccessToken = <TError = ErrorType<UnauthorizedResp
       return useMutation(getCreateIdentityAccessTokenMutationOptions(options), queryClient);
     }
     export type getIdentitySessionsResponse200 = {
-  data: void
+  data: GetIdentitySessions200
   status: 200
+}
+
+export type getIdentitySessionsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
 }
 
 export type getIdentitySessionsResponseSuccess = (getIdentitySessionsResponse200) & {
   headers: Headers;
 };
-;
+export type getIdentitySessionsResponseError = (getIdentitySessionsResponse401) & {
+  headers: Headers;
+};
 
 export const getGetIdentitySessionsUrl = () => {
 
@@ -2229,8 +2237,8 @@ export const getGetIdentitySessionsUrl = () => {
 }
 
 /**
- * FR-017, POL-019
- * @summary 로그인한 기기 목록
+ * FR-017, POL-019(추천 적용 2026-11-05, ADR-0209, BUILD_ORDER BOT-044). 이 계정의 살아 있는 세션을 기기 행으로 묶어 기기마다 한 줄을 준다. 기기 행이 없는 세션은 혼자 한 줄이다. 기기 한도(5대)와 같은 묶음이라 나누지 않는다(guidelines §3). 지금 이 기기가 맨 앞이고 나머지는 마지막 활동이 늦은 순이다. 부른 세션이 이미 끝났으면 401이다. Cache-Control: no-store
+ * @summary 로그인한 기기 목록(기기마다 한 줄: 화면용 기기 이름, 마지막 활동, 지금 이 기기)
  */
 export const getIdentitySessions = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<getIdentitySessionsResponseSuccess> => {
 
@@ -2254,7 +2262,7 @@ export const getGetIdentitySessionsQueryKey = () => {
     }
 
 
-export const getGetIdentitySessionsQueryOptions = <TData = Awaited<ReturnType<typeof getIdentitySessions>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentitySessions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+export const getGetIdentitySessionsQueryOptions = <TData = Awaited<ReturnType<typeof getIdentitySessions>>, TError = ErrorType<UnauthorizedResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentitySessions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -2273,10 +2281,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetIdentitySessionsQueryResult = NonNullable<Awaited<ReturnType<typeof getIdentitySessions>>>
-export type GetIdentitySessionsQueryError = ErrorType<unknown>
+export type GetIdentitySessionsQueryError = ErrorType<UnauthorizedResponse>
 
 
-export function useGetIdentitySessions<TData = Awaited<ReturnType<typeof getIdentitySessions>>, TError = ErrorType<unknown>>(
+export function useGetIdentitySessions<TData = Awaited<ReturnType<typeof getIdentitySessions>>, TError = ErrorType<UnauthorizedResponse>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentitySessions>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getIdentitySessions>>,
@@ -2286,7 +2294,7 @@ export function useGetIdentitySessions<TData = Awaited<ReturnType<typeof getIden
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetIdentitySessions<TData = Awaited<ReturnType<typeof getIdentitySessions>>, TError = ErrorType<unknown>>(
+export function useGetIdentitySessions<TData = Awaited<ReturnType<typeof getIdentitySessions>>, TError = ErrorType<UnauthorizedResponse>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentitySessions>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getIdentitySessions>>,
@@ -2296,15 +2304,15 @@ export function useGetIdentitySessions<TData = Awaited<ReturnType<typeof getIden
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetIdentitySessions<TData = Awaited<ReturnType<typeof getIdentitySessions>>, TError = ErrorType<unknown>>(
+export function useGetIdentitySessions<TData = Awaited<ReturnType<typeof getIdentitySessions>>, TError = ErrorType<UnauthorizedResponse>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentitySessions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary 로그인한 기기 목록
+ * @summary 로그인한 기기 목록(기기마다 한 줄: 화면용 기기 이름, 마지막 활동, 지금 이 기기)
  */
 
-export function useGetIdentitySessions<TData = Awaited<ReturnType<typeof getIdentitySessions>>, TError = ErrorType<unknown>>(
+export function useGetIdentitySessions<TData = Awaited<ReturnType<typeof getIdentitySessions>>, TError = ErrorType<UnauthorizedResponse>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentitySessions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -2326,10 +2334,27 @@ export type deleteIdentitySessionResponse204 = {
   status: 204
 }
 
+export type deleteIdentitySessionResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type deleteIdentitySessionResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type deleteIdentitySessionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
 export type deleteIdentitySessionResponseSuccess = (deleteIdentitySessionResponse204) & {
   headers: Headers;
 };
-;
+export type deleteIdentitySessionResponseError = (deleteIdentitySessionResponse401 | deleteIdentitySessionResponse403 | deleteIdentitySessionResponse404) & {
+  headers: Headers;
+};
 
 export const getDeleteIdentitySessionUrl = (sessionId: string,) => {
 
@@ -2340,8 +2365,8 @@ export const getDeleteIdentitySessionUrl = (sessionId: string,) => {
 }
 
 /**
- * FR-017
- * @summary 세션 끄기(세션 종료 이벤트 → 수 초 안 거부)
+ * FR-017, POL-019(추천 적용 2026-11-05, ADR-0209, BUILD_ORDER BOT-044). sessionId는 목록의 sessionId다. 그 세션과 같은 기기의 살아 있는 세션을 모두 끝낸다. 지금 세션은 끝내지 않는다: 지금 이 기기 줄이면 지금 세션만 남기고 같은 기기의 다른 로그인을 끝낸다(지금 세션은 앱 서버 POST /logout으로 끝낸다). 끝낸 세션마다 세션 종료 사건(asyncapi control.sessions-terminated, reason LOGOUT)을 같은 트랜잭션에 적는다. 게이트웨이와 서비스는 그 사건으로 수 초 안에 그 세션의 요청을 거부한다. 소셜 재인증 토큰(작업 묶음 FAN_SENSITIVE, 5분 한 번)이 있어야 한다. 404는 토큰을 쓰지 않는다. Cache-Control: no-store
+ * @summary 다른 기기 로그아웃(재인증 토큰 필요, 그 기기의 세션을 모두 끝냄. 지금 기기 줄이면 이 기기의 다른 로그인만 끝냄)
  */
 export const deleteIdentitySession = async (sessionId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<deleteIdentitySessionResponseSuccess> => {
 
@@ -2360,7 +2385,7 @@ export const deleteIdentitySession = async (sessionId: string, options?: Paramet
 
 export const getDeleteIdentitySessionMutationKey = () => ['deleteIdentitySession'] as const;
 
-export const getDeleteIdentitySessionMutationOptions = <TError = ErrorType<unknown>,
+export const getDeleteIdentitySessionMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIdentitySession>>, TError,DeleteIdentitySessionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteIdentitySession>>, TError,DeleteIdentitySessionMutationVariables, TContext> => {
 
@@ -2389,13 +2414,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteIdentitySessionMutationResult = NonNullable<Awaited<ReturnType<typeof deleteIdentitySession>>>
 
-    export type DeleteIdentitySessionMutationError = ErrorType<unknown>
+    export type DeleteIdentitySessionMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
     export type DeleteIdentitySessionMutationVariables = {sessionId: string}
 
     /**
- * @summary 세션 끄기(세션 종료 이벤트 → 수 초 안 거부)
+ * @summary 다른 기기 로그아웃(재인증 토큰 필요, 그 기기의 세션을 모두 끝냄. 지금 기기 줄이면 이 기기의 다른 로그인만 끝냄)
  */
-export const useDeleteIdentitySession = <TError = ErrorType<unknown>,
+export const useDeleteIdentitySession = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIdentitySession>>, TError,DeleteIdentitySessionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteIdentitySession>>,

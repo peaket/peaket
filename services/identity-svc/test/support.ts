@@ -35,6 +35,7 @@ export function recordingSignals(): SessionSignals & { seen: string[] } {
     refreshed: (aud, result) => seen.push(`refresh:${aud}:${result}`),
     mergeInvariantViolated: () => seen.push('merge-invariant'),
     invRefMissing: (l, r) => seen.push(`inv-ref-missing:${l}:${r}`),
+    othersEnded: (c, n) => seen.push(`others-ended:${c}:${n}`),
   };
 }
 

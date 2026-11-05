@@ -19,8 +19,8 @@ test('로그인 경로가 돌려보낸 실패: error=failed는 카드 위 에러
   assert.deepEqual(loginView(sp('error=%3Cscript%3E')), { error: false, down: null, sessionEnd: null, next: '/' });
 });
 
-test('세션 종료 사유는 팬 사유 여섯만 받고 모르는 값은 무시한다', () => {
-  for (const r of ['LOGOUT', 'ADMIN_FORCE', 'REFRESH_REUSE', 'DEVICE_LIMIT', 'MERGED', 'DELETE']) assert.equal(loginView(sp(`ended=${r}`)).sessionEnd, r);
+test('세션 종료 사유는 팬 사유 일곱만 받고 모르는 값은 무시한다(LOGIN_METHOD_CHANGED는 2026-11-05 BOT-044, ADR-0209)', () => {
+  for (const r of ['LOGOUT', 'ADMIN_FORCE', 'REFRESH_REUSE', 'DEVICE_LIMIT', 'MERGED', 'DELETE', 'LOGIN_METHOD_CHANGED']) assert.equal(loginView(sp(`ended=${r}`)).sessionEnd, r);
   for (const r of ['ROLE_CHANGED', 'logout', '', 'PASSWORD_CHANGED']) assert.equal(loginView(sp(`ended=${r}`)).sessionEnd, null, r);
 });
 

@@ -46,6 +46,8 @@ export async function SettingsPage({ searchParams }: PageProps) {
   const initial = v.overlay && v.overlay.kind !== 'logout' ? v.overlay : null;
   // 목업 ME가 본인확인 완료라, 본인확인 전 갈래는 미리보기 상태 '본인확인 전'으로 본다(d5 §5.17 ①, BOT-020이 넘긴 것)
   const verified = ME.verified && v.verified;
+  // 실제 탈퇴·로그인한 기기는 미리보기 상태가 '기본'일 때만(?state= 미리보기는 목업 흐름, 새 맥락 리뷰 중간 4, BOT-044)
+  const live = isLiveWithdraw() && state === '기본';
 
   return (
     // 탈퇴를 마치면 로그인 전 셸로 보인다(추천안). 접수(미룸)·결제 확정 대기는 계정이 남아 있다(보드 SCR-017-d '탈퇴 접수(미룸)')
@@ -61,12 +63,11 @@ export async function SettingsPage({ searchParams }: PageProps) {
         provider={provider}
         quote={quote}
         fraudHoldUntil={FRAUD_HOLD_UNTIL}
-        // 실제 탈퇴는 미리보기 상태가 '기본'일 때만(?state= 미리보기는 목업 흐름, 새 맥락 리뷰 중간 4)
-        live={isLiveWithdraw() && state === '기본'}
+        live={live}
         dark={dark}
       >
         <main className="page-main" id="main" tabIndex={-1}>
-          {v.done ? <DoneView done={v.done} quote={quote} /> : <AccountView restricted={v.restricted} verified={verified} providerLabel={provider.label} />}
+          {v.done ? <DoneView done={v.done} quote={quote} /> : <AccountView restricted={v.restricted} verified={verified} providerLabel={provider.label} live={live} />}
         </main>
       </SettingsFlows>
       <PreviewSwitcher path={SETTINGS_PATH} states={SCR017_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
@@ -78,7 +79,7 @@ function Gap() {
   return <div className="section-gap md:hidden" aria-hidden="true" />;
 }
 
-function AccountView({ restricted, verified, providerLabel }: { restricted: boolean; verified: boolean; providerLabel: string }) {
+function AccountView({ restricted, verified, providerLabel, live }: { restricted: boolean; verified: boolean; providerLabel: string; live: boolean }) {
   return (
     <div className="pb-10 md:px-6 md:pt-6 md:pb-12 lg:mx-auto lg:grid lg:w-full lg:max-w-[1040px] lg:grid-cols-12 lg:items-start lg:gap-x-6 lg:px-8 lg:pt-8 lg:pb-16">
       <SideMenu verified={verified} />
@@ -95,7 +96,7 @@ function AccountView({ restricted, verified, providerLabel }: { restricted: bool
           <Gap />
           <VerifySection verified={verified} />
           <Gap />
-          <DevicesSection providerLabel={providerLabel} />
+          <DevicesSection providerLabel={providerLabel} live={live} />
           <Gap />
           <ProvidersSection />
           <Gap />
@@ -246,7 +247,8 @@ function VerifySection({ verified }: { verified: boolean }) {
   );
 }
 
-function DevicesSection({ providerLabel }: { providerLabel: string }) {
+/** live: 실제 흐름(목록은 API). 현장 스캐너 세션은 이 API에 없어 그 안내 띠를 보이지 않는다(BUILD_ORDER GAT-230) */
+function DevicesSection({ providerLabel, live }: { providerLabel: string; live: boolean }) {
   return (
     <section className={cx('col gap-2 md:col-span-2', PAD, CARD)} aria-labelledby="h-dev">
       <div className="section-title">
@@ -254,13 +256,15 @@ function DevicesSection({ providerLabel }: { providerLabel: string }) {
         <span className="t-sm muted">최대 5대</span>
       </div>
       <SettingsDevices />
-      <div className="banner banner-info" style={{ marginTop: 8 }}>
-        <i className="ic ic-info" aria-hidden="true" />
-        <div className="banner-body">휴대폰에서 로그아웃해도 스캐너 세션은 따로 끝내야 합니다</div>
-      </div>
+      {live ? null : (
+        <div className="banner banner-info" style={{ marginTop: 8 }}>
+          <i className="ic ic-info" aria-hidden="true" />
+          <div className="banner-body">휴대폰에서 로그아웃해도 스캐너 세션은 따로 끝내야 합니다</div>
+        </div>
+      )}
       <p className="t-xs muted row" style={{ gap: 6 }}>
         <i className="ic ic-shield ic-14" aria-hidden="true" />
-        다른 기기 로그아웃·스캐너 세션 끝내기 전에 {providerLabel}로 다시 로그인합니다
+        {live ? '다른 기기에서 로그아웃하기 전에 한 번 더 로그인해 확인합니다' : `다른 기기 로그아웃·스캐너 세션 끝내기 전에 ${providerLabel}로 다시 로그인합니다`}
       </p>
     </section>
   );

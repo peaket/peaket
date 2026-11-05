@@ -60,7 +60,7 @@ export function mergeContent(): MergeContent {
     blockedReason: `${title}의 보유 매수가 한도 ${limit}매를 넘어 합칠 수 없습니다. 보유 매수를 한도 안으로 줄인 뒤 다시 추가해 주세요.`,
     checks,
     merging: {
-      message: '처리 중입니다. 완료되면 알림으로 안내해 드립니다',
+      message: '처리 중입니다. 다른 기기에서는 모두 로그아웃했습니다. 완료되면 알림으로 안내해 드립니다',
       progressLabel: '계정 합치기 진행',
       steps: [
         { label: `${incoming} 계정 잠금·로그아웃`, state: 'done' },

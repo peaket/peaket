@@ -24,6 +24,8 @@ export function identityMaintenanceTasks(database: Database, clock: Clock, invRe
     { name: 'withdrawal-finish', when: 'daily', run: (signal) => finish.run(signal) },
     { name: 'refresh-hash-expired', when: 'daily', run: (signal) => sessions.purgeExpiredRefreshHashes(clock.now(), signal) },
     { name: 'reauth-use-expired', when: 'daily', run: () => sessions.purgeReauthUses(clock.now()) },
+    // 유휴 만료로 끝난 세션의 화면용 기기 이름은 그 세션의 절대 만료 뒤 비운다(끝낸 세션은 끝낼 때 비운다, docs/data.md session.device_label, BOT-044, ADR-0209)
+    { name: 'session-label-expired', when: 'daily', run: (signal) => sessions.clearEndedDeviceLabels(clock.now(), signal) },
     { name: 'conflict-attempt-purge', when: 'window', run: () => verifications.purgeConflictAttempts(clock.now() - CONFLICT_ATTEMPT_KEEP_MS) },
     { name: 'verification-record-purge', when: 'window', run: () => verifications.purgeVerificationRecords(clock.now()) },
     { name: 'restricted-hold-expired', when: 'daily', run: () => verifications.purgeExpiredHolds(clock.now()) },

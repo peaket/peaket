@@ -1,9 +1,11 @@
 // 계정 설정의 로그인 수단 추가(SCR-040 ②, SessionService.AddProvider, identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BUILD_ORDER BOT-041, I-T34).
 // 재인증 토큰(같은 세션·FAN_SENSITIVE)을 한 번 쓰고, 계정을 잠근 뒤 새 제공자 (제공자, sub)를 이 계정에 잇는다. 결과는 오류가 아니라 값으로 돌려준다.
+// 이었으면(LINKED) 이 세션 말고 그 계정의 살아 있는 세션을 모두 끝낸다(ASVS 7.4.3, BUILD_ORDER BOT-044, ADR-0209 결정 5).
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
-import { REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_STORE, type SessionStore } from '../domain/ports.js';
+import { REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore } from '../domain/ports.js';
 import { type Provider, sessionAlive, WITHDRAWAL_REAUTH_ACT } from '../domain/session.js';
+import { otherLiveSessions } from './end-other-sessions.js';
 import { MergePlanner } from './plan-merge.js';
 
 export type AddProviderResult = 'LINKED' | 'ALREADY_LINKED' | 'PROVIDER_TYPE_TAKEN' | 'OTHER_ACCOUNT' | 'REAUTH_REQUIRED';
@@ -24,6 +26,7 @@ export class AddProvider {
     @Inject(CLOCK) private readonly clock: Clock,
     /** 다른 계정이면 병합 제안을 만든다(BOT-042). 없으면 OTHER_ACCOUNT만(시험) */
     @Optional() @Inject(MergePlanner) private readonly planner?: Pick<MergePlanner, 'plan'>,
+    @Optional() @Inject(SESSION_SIGNALS) private readonly signals?: Pick<SessionSignals, 'othersEnded'>,
   ) {}
 
   async run(i: AddProviderInput): Promise<AddProviderResult> {
@@ -51,7 +54,8 @@ export class AddProvider {
     }
     if (token.accountId.toLowerCase() !== accountId) return { result: 'REAUTH_REQUIRED' };
     const now = this.clock.now();
-    return this.store.transaction(async (tx): Promise<{ result: AddProviderResult; otherAccountId?: string }> => {
+    let ended = 0;
+    const out = await this.store.transaction(async (tx): Promise<{ result: AddProviderResult; otherAccountId?: string }> => {
       // 같은 제공자 계정의 로그인·연결과 겹치지 않게 제공자, 계정, 세션 차례로 잠근다(CreateSession·탈퇴와 같은 순서, 다시 검토 낮음)
       await tx.lockProvider(i.provider, i.providerUserId);
       await tx.lockAccount(accountId);
@@ -66,8 +70,14 @@ export class AddProvider {
       if ((await tx.providersOf(accountId)).some((p) => p.provider === i.provider)) return { result: 'PROVIDER_TYPE_TAKEN' };
       if (owner) return { result: 'OTHER_ACCOUNT', otherAccountId: owner.id };
       await tx.linkProvider(accountId, i.provider, i.providerUserId, now);
+      // 인증 요소가 바뀌었다: 이 세션 말고 다른 세션을 끝낸다. 세션 종료 사건을 연결 사건보다 먼저 적는다(둘 다 트랜잭션 끝)
+      const others = await otherLiveSessions(tx, accountId, sessionId, now);
+      await tx.terminateSessions(others, 'LOGIN_METHOD_CHANGED', now);
+      ended = others.length;
       await tx.recordLoginMethodChanged({ accountId, change: 'LINKED', provider: i.provider, occurredAt: now });
       return { result: 'LINKED' };
     });
+    if (ended) this.signals?.othersEnded('login_method_changed', ended);
+    return out;
   }
 }

@@ -1,17 +1,17 @@
 // 메모리 저장소(시험·로컬 시제품용). PostgreSQL 저장소와 같은 규칙을 지킨다: 트랜잭션은 한 번에 하나씩 돌고(직렬),
 // 실패하면 그 트랜잭션의 변경을 모두 되돌린다. 세션 종료 사건은 Outbox 대신 목록에 모은다.
 import { randomUUID } from 'node:crypto';
-import { type OutboxMessage, uuidv7 } from '@peaket/platform';
+import { CONTROL_TOPICS, type OutboxMessage, uuidv7 } from '@peaket/platform';
 import type { AccountRow, ContactKind, CreateKeyRecord, InvestigationRefsRow, NewSession, RefreshRow, SessionRow, SessionStore, SessionTx } from '../domain/ports.js';
 import { nextRefPrev } from '../domain/inv-ref.js';
-import { type ActiveSession, CREATE_KEY_TTL_MS, normalizeEmail, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
+import { type ActiveSession, CREATE_KEY_TTL_MS, type LiveSession, normalizeEmail, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
 import { accountWithdrawnMessage } from './account-withdrawn-message.js';
 import { loginMethodChangedMessage } from './login-method-message.js';
 import { accountMergedMessage } from './account-merged-message.js';
 
 type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; mergedInto?: string; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number };
 
-type StoredSession = NewSession & { terminatedAt: number | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean };
+type StoredSession = NewSession & { terminatedAt: number | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean; lastActiveAt: number };
 
 interface State {
   accounts: Map<string, StoredAccount>;
@@ -59,6 +59,27 @@ const row = (x: StoredSession): SessionRow => ({
   loginVerdict: x.loginVerdict,
   refreshFamily: x.refreshFamily,
 });
+
+/** 세션 끝내기: 끝난 시각·기기 이름·해시를 모두 고친 뒤 사건을 적는다(PostgreSQL 저장소와 같은 차례, ADR-0116 결정 3) */
+function endIn(s: State, items: ReadonlyArray<{ id: string; reason: TerminationReason }>, now: number): void {
+  const ended: Array<{ x: StoredSession; reason: TerminationReason }> = [];
+  for (const { id, reason } of items) {
+    const x = s.sessions.get(id);
+    if (x && x.terminatedAt === null) {
+      x.terminatedAt = now;
+      // 끝난 세션의 화면용 기기 이름은 같은 트랜잭션에서 지운다(ADR-0209 결정 1)
+      x.deviceLabel = null;
+      ended.push({ x, reason });
+    }
+    // 끝난 세션의 리프레시 토큰 해시는 같은 트랜잭션에서 지운다(R-255)
+    for (const [k, h] of s.hashes) if (h.sessionId === id) s.hashes.delete(k);
+  }
+  for (const { x, reason } of ended) {
+    s.events.push({ sessionId: x.id, accountId: x.accountId, reason, at: now });
+    // PostgreSQL 저장소처럼 Outbox에도 적는다(다른 사건과의 차례를 시험이 본다)
+    s.outbox.push({ topic: CONTROL_TOPICS.sessionsTerminated, key: x.accountId, payload: Buffer.from(JSON.stringify({ accountId: x.accountId, sessionId: x.id, reason, terminatedAt: new Date(now).toISOString() })) });
+  }
+}
 
 export class MemorySessionStore implements SessionStore {
   #state = empty();
@@ -235,6 +256,26 @@ export class MemorySessionStore implements SessionStore {
       const h = hex(hash);
       for (const x of this.#state.sessions.values()) if (hex(x.refreshHash) === h || (x.prevRefreshHash && hex(x.prevRefreshHash) === h)) return x.accountId;
       return null;
+    });
+  }
+
+  async liveSessionsOf(accountId: string, now: number): Promise<LiveSession[]> {
+    return this.#serial(() =>
+      [...this.#state.sessions.values()]
+        .filter((x) => x.accountId === accountId.toLowerCase() && sessionAlive(x, now))
+        .map((x) => ({ sessionId: x.id, deviceId: x.deviceId, deviceLabel: x.deviceLabel, lastActiveAt: x.lastActiveAt })),
+    );
+  }
+
+  async clearEndedDeviceLabels(now: number): Promise<number> {
+    return this.#serial(() => {
+      let n = 0;
+      for (const x of this.#state.sessions.values())
+        if (x.deviceLabel !== null && x.absoluteExpiresAt <= now) {
+          x.deviceLabel = null;
+          n++;
+        }
+      return n;
     });
   }
 
@@ -461,22 +502,13 @@ export class MemorySessionStore implements SessionStore {
         s.reauthUses.set(r.jti, { accountId: r.accountId, usedAt: r.usedAt, expiresAt: r.expiresAt });
         return true;
       },
-      terminateSessions: async (ids, reason, now) => {
-        for (const id of ids) {
-          const x = s.sessions.get(id);
-          if (x && x.terminatedAt === null) {
-            x.terminatedAt = now;
-            s.events.push({ sessionId: x.id, accountId: x.accountId, reason, at: now });
-          }
-          // 끝난 세션의 리프레시 토큰 해시는 같은 트랜잭션에서 지운다(R-255)
-          for (const [k, h] of s.hashes) if (h.sessionId === id) s.hashes.delete(k);
-        }
-      },
+      terminateSessions: async (ids, reason, now) => endIn(s, ids.map((id) => ({ id, reason })), now),
+      endSessions: async (items, now) => endIn(s, items, now),
       recordWithdrawn: async (i) => {
         s.outbox.push(accountWithdrawnMessage({ eventKey: randomUUID(), ...i }));
       },
       insertSession: async (r) => {
-        s.sessions.set(r.id, { ...r, terminatedAt: null, prevRefreshHash: null, rotatedAt: null, refreshUsed: false });
+        s.sessions.set(r.id, { ...r, terminatedAt: null, prevRefreshHash: null, rotatedAt: null, refreshUsed: false, lastActiveAt: r.createdAt });
       },
       getSessionForUpdate: async (id) => {
         const x = s.sessions.get(id.toLowerCase());
@@ -492,6 +524,7 @@ export class MemorySessionStore implements SessionStore {
         x.prevRefreshHash = x.refreshHash;
         x.refreshHash = hash;
         x.rotatedAt = now;
+        x.lastActiveAt = now;
         x.refreshUsed = false;
         x.idleExpiresAt = idleExpiresAt;
       },

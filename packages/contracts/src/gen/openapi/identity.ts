@@ -393,17 +393,37 @@ export const GetIdentityVerificationResultResponse = zod.object({
 export const CreateIdentityAccessTokenResponse = zod.void()
 
 /**
- * FR-017, POL-019
- * @summary 로그인한 기기 목록
+ * FR-017, POL-019(추천 적용 2026-11-05, ADR-0209, BUILD_ORDER BOT-044). 이 계정의 살아 있는 세션을 기기 행으로 묶어 기기마다 한 줄을 준다. 기기 행이 없는 세션은 혼자 한 줄이다. 기기 한도(5대)와 같은 묶음이라 나누지 않는다(guidelines §3). 지금 이 기기가 맨 앞이고 나머지는 마지막 활동이 늦은 순이다. 부른 세션이 이미 끝났으면 401이다. Cache-Control: no-store
+ * @summary 로그인한 기기 목록(기기마다 한 줄: 화면용 기기 이름, 마지막 활동, 지금 이 기기)
  */
-export const GetIdentitySessionsResponse = zod.unknown()
+export const getIdentitySessionsResponseItemsItemDeviceNameMax = 40;
+
+export const getIdentitySessionsResponseItemsItemOtherSessionsMin = 0;
+
+export const getIdentitySessionsResponseItemsMax = 5;
+
+
+
+export const GetIdentitySessionsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "sessionId": zod.uuid().describe('대표 세션. 지금 세션이 들어 있으면 지금 세션, 아니면 마지막 활동이 가장 늦은 세션이다. 원격 로그아웃(DELETE /v1/identity/sessions/{sessionId})에 쓴다'),
+  "deviceName": zod.string().max(getIdentitySessionsResponseItemsItemDeviceNameMax).nullable().describe('화면용 기기 이름 \'브라우저 · 운영체제\'(예: \'Chrome · Windows\'). 로그인 때 identity가 User-Agent에서 정해진 낱말만 뽑는다(docs/features/identity.md §8 \'로그인한 기기와 다른 세션 끝내기의 첫 구현\'). 모르면 null이고 화면은 \'알 수 없는 기기\'로 보인다'),
+  "lastActiveAt": zod.iso.datetime({"offset":true}).describe('그 기기 세션들의 마지막 활동(로그인·토큰 갱신 시각 가운데 가장 늦은 값). 실제 활동과 최대 15분(액세스 토큰 수명) 차이 난다'),
+  "current": zod.boolean().describe('이 요청의 세션이 들어 있다(지금 이 기기). 이 줄에는 로그아웃 버튼 대신 \'지금 이 기기\'를 보인다'),
+  "otherSessions": zod.int().min(getIdentitySessionsResponseItemsItemOtherSessionsMin).describe('그 줄에서 대표 세션 말고 살아 있는 세션 수(같은 기기의 다른 로그인. 같은 브라우저에서 다시 로그인하면 앞 세션이 남는다). 지금 이 기기 줄에서 0보다 크면 화면이 [이 기기의 다른 로그인 끝내기]를 보인다(DELETE에 그 줄의 sessionId를 보낸다, 새 맥락 리뷰 중간 1)')
+}).describe('로그인한 기기 한 줄(GET /v1/identity/sessions, 추천 적용 2026-11-05, ADR-0209, BUILD_ORDER BOT-044). 같은 기기의 살아 있는 세션을 묶은 것이다. 기기 가명·User-Agent 원문은 싣지 않는다')).max(getIdentitySessionsResponseItemsMax)
+})
 
 /**
- * FR-017
- * @summary 세션 끄기(세션 종료 이벤트 → 수 초 안 거부)
+ * FR-017, POL-019(추천 적용 2026-11-05, ADR-0209, BUILD_ORDER BOT-044). sessionId는 목록의 sessionId다. 그 세션과 같은 기기의 살아 있는 세션을 모두 끝낸다. 지금 세션은 끝내지 않는다: 지금 이 기기 줄이면 지금 세션만 남기고 같은 기기의 다른 로그인을 끝낸다(지금 세션은 앱 서버 POST /logout으로 끝낸다). 끝낸 세션마다 세션 종료 사건(asyncapi control.sessions-terminated, reason LOGOUT)을 같은 트랜잭션에 적는다. 게이트웨이와 서비스는 그 사건으로 수 초 안에 그 세션의 요청을 거부한다. 소셜 재인증 토큰(작업 묶음 FAN_SENSITIVE, 5분 한 번)이 있어야 한다. 404는 토큰을 쓰지 않는다. Cache-Control: no-store
+ * @summary 다른 기기 로그아웃(재인증 토큰 필요, 그 기기의 세션을 모두 끝냄. 지금 기기 줄이면 이 기기의 다른 로그인만 끝냄)
  */
 export const DeleteIdentitySessionParams = zod.object({
-  "sessionId": zod.string()
+  "sessionId": zod.uuid()
+})
+
+export const DeleteIdentitySessionHeader = zod.object({
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
 })
 
 export const DeleteIdentitySessionResponse = zod.void()

@@ -12,6 +12,8 @@ export interface SeparateAccountInput {
   binding: string;
   idempotencyKey: string;
   deviceId: string | null;
+  /** CreateSession과 같다(화면용 기기 이름만 뽑는다, ADR-0209) */
+  userAgent?: string | null;
 }
 
 @Injectable()
@@ -33,6 +35,7 @@ export class SeparateAccount {
       email: p.email,
       emailVerified: true,
       deviceId: i.deviceId,
+      userAgent: i.userAgent,
     });
     // 한 번만 쓴다: 지우지 않고 쓴 키를 적어 같은 키의 다시 보내기(멱등 재생)만 받는다. 적지 못해도 10분 뒤 사라지고,
     // 그사이 다른 키로 다시 와도 그 제공자 계정으로 로그인할 뿐이다

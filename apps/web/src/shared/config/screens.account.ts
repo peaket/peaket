@@ -6,7 +6,7 @@ import type { WebScreen } from './screens.types';
 // ── SCR-004 로그인 ──
 /**
  * 데이터 단계(HOT-321)에서 ?state=를 걷어 냈다. 상태는 주소로 본다(ADR-0202 결정 5): 에러 /login?error=failed,
- * 제공자 장애 /login?error=down&provider=kakao, 세션 종료 /login?ended=ADMIN_FORCE(팬 사유 여섯), 진행 중은 버튼을 누를 때
+ * 제공자 장애 /login?error=down&provider=kakao, 세션 종료 /login?ended=ADMIN_FORCE(팬 사유 일곱), 진행 중은 버튼을 누를 때
  */
 export const SCR004_STATES = ['기본'] as const;
 export type Scr004State = (typeof SCR004_STATES)[number];

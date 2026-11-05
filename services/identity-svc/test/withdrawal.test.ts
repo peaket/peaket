@@ -230,6 +230,8 @@ describe('탈퇴와 겹치는 로그인·갱신·본인확인(새 맥락 리뷰 
       closeInvRefBridge: (label, prefix) => t.sessions.closeInvRefBridge(label, prefix),
       refreshOwner: (h) => t.sessions.refreshOwner(h),
       sessionOf: (id) => t.sessions.sessionOf(id),
+      liveSessionsOf: (a, n) => t.sessions.liveSessionsOf(a, n),
+      clearEndedDeviceLabels: (n) => t.sessions.clearEndedDeviceLabels(n),
     };
     const create = new CreateSession(racing, t.k.signer, testDeviceRefs(), recordingSignals(), noClaims, t.clock);
     const b = await create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'race-1', email: null, deviceId: 'dev-2' });

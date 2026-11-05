@@ -5,7 +5,9 @@
 // - 로그아웃 확인은 셸의 대화상자(AppShell defaultOpen="logout")를 쓴다.
 // 재인증 창의 '회원 탈퇴' 문구는 보드에 없어 다른 기기 로그아웃 문구를 바꿔 썼다(추천안).
 // 탈퇴는 실제 모드(API 출처가 있음)면 재인증(POST /reauth/{provider} → POST /reauth/token)과 DELETE /v1/identity/account에 잇는다
-// (docs/features/identity.md §8 '탈퇴 화면 연결', BUILD_ORDER BOT-036). 퍼블리싱 미리보기와 출처 없는 개발 서버는 목업 흐름이다. 다른 기기 로그아웃은 아직 목업이다.
+// (docs/features/identity.md §8 '탈퇴 화면 연결', BUILD_ORDER BOT-036). 퍼블리싱 미리보기와 출처 없는 개발 서버는 목업 흐름이다.
+// 로그인한 기기도 실제 모드면 GET /v1/identity/sessions로 그리고, [로그아웃]은 재인증 뒤 DELETE /v1/identity/sessions/{sessionId}에 잇는다
+// (docs/features/identity.md §8 '로그인한 기기와 다른 세션 끝내기의 첫 구현', BUILD_ORDER BOT-044, ADR-0209). 재인증 결과 받기·양식 제출은 탈퇴 흐름의 것을 쓴다.
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -17,22 +19,33 @@ import { WebShellModal } from '@peaket/ds/WebShell';
 import { BANKS } from '@/entities/account';
 import { withdrawFraudHoldText } from '@/entities/appeal';
 import { formatWon } from '@/entities/production';
-import { afterWithdraw, browserWithdrawApi, type FraudHold, leaveForReauth, linkedProvidersQuietly, type Provider as WithdrawProvider, reauthFailureText, submitReauthForm, tabStore, takePending, untilText } from '@/features/account-withdraw';
+import { afterWithdraw, browserWithdrawApi, type FraudHold, leaveForReauth, linkedProvidersQuietly, type Provider as WithdrawProvider, reauthFailureText, submitReauthForm, tabStore, untilText } from '@/features/account-withdraw';
+import { browserDevicesApi, type DeviceRow, endResultText, leaveForDeviceReauth, type LogoutScope, otherLoginsOf, type PendingLogout, toDeviceSessions } from '@/features/device-sessions';
 import { useToast } from '@/shared/ui/toast';
 import { PROVIDER_INFO, type WithdrawQuote } from '../model/account';
+import { resumeDeviceLogout, returnOnMount } from '../model/devices';
 import type { SettingsOverlay } from '../model/state';
 
 type Overlay = Exclude<SettingsOverlay, { kind: 'logout' }>;
-type ReauthPurpose = { kind: 'device'; session: DeviceSession } | { kind: 'withdraw' };
+/** 재인증 창의 목적. 원격 로그아웃의 scope는 그 기기(device)·이 기기의 다른 로그인(others, 지금 이 기기 줄) */
+type ReauthPurpose = { kind: 'device'; session: DeviceSession; scope: LogoutScope } | { kind: 'withdraw' };
+/** 돌아온 할 일 → 그 기기의 재인증 창 목적 */
+const devicePurpose = (p: PendingLogout): ReauthPurpose => ({ kind: 'device', session: { id: p.sessionId, name: p.name, icon: 'device' }, scope: p.scope });
 
 interface FlowsContextValue {
   devices: readonly DeviceSession[];
+  /** 지금 이 기기 줄의 같은 기기 다른 로그인 수(실제 흐름만, 0보다 크면 [이 기기의 다른 로그인 끝내기], d5 §5.17) */
+  otherLogins: number;
+  onEndOtherLogins: () => void;
   devicesLoading: boolean;
+  /** 실제 흐름의 목록을 불러오지 못했다([다시 불러오기], d5 §5.17) */
+  devicesFailed: boolean;
+  reloadDevices: () => void;
   onDeviceLogout: (s: DeviceSession) => void;
   startWithdraw: () => void;
 }
 
-const FlowsContext = createContext<FlowsContextValue>({ devices: [], devicesLoading: false, onDeviceLogout: () => {}, startWithdraw: () => {} });
+const FlowsContext = createContext<FlowsContextValue>({ devices: [], otherLogins: 0, onEndOtherLogins: () => {}, devicesLoading: false, devicesFailed: false, reloadDevices: () => {}, onDeviceLogout: () => {}, startWithdraw: () => {} });
 
 export interface SettingsFlowsProps {
   /** 처음 열린 채로 그릴 창(상태 미리보기) */
@@ -74,7 +87,7 @@ export function SettingsFlows({
   // 미리보기 상태의 재인증 창은 '다른 기기 로그아웃' 대상(Safari · iPhone)으로 연다
   const [purpose, setPurpose] = useState<ReauthPurpose>(() => {
     const target = devices.find((d) => !d.current);
-    return target ? { kind: 'device', session: target } : { kind: 'withdraw' };
+    return target ? { kind: 'device', session: target, scope: 'device' } : { kind: 'withdraw' };
   });
   /** 재인증으로 떠나려고 갱신을 기다리는 중(버튼은 처리 중, 다시 눌러도 한 번만 떠난다, BOT-036이 넘긴 것) */
   const [leaving, setLeaving] = useState(false);
@@ -103,17 +116,36 @@ export function SettingsFlows({
   const [busy, setBusy] = useState(false);
   /** 재인증 실패 문구(이유마다, 없으면 기본 문구) */
   const [failText, setFailText] = useState<string | null>(null);
-  const failWith = (text: string) => {
+  /** forPurpose: 실패를 보일 재인증 창의 목적(기본 탈퇴. 원격 로그아웃이면 그 기기) */
+  const failWith = (text: string, forPurpose: ReauthPurpose = { kind: 'withdraw' }) => {
     setFailText(text);
-    setPurpose({ kind: 'withdraw' });
+    setPurpose(forPurpose);
     setOverlay({ kind: 'reauth', failed: true });
   };
+  // 실제 로그인한 기기(identity §8 '로그인한 기기와 다른 세션 끝내기의 첫 구현'): 목록과 불러오기 상태
+  const devicesApi = useMemo(() => (live ? browserDevicesApi() : null), [live]);
+  const [liveRows, setLiveRows] = useState<DeviceRow[]>([]);
+  const [devicesState, setDevicesState] = useState<'loading' | 'ok' | 'error'>('loading');
+  const loadDevices = async () => {
+    if (!devicesApi) return;
+    setDevicesState('loading');
+    const r = await devicesApi.list();
+    if (r.kind === 'ok') {
+      setLiveRows(r.items);
+      setDevicesState('ok');
+    } else if (r.kind === 'login') toLogin();
+    else setDevicesState('error');
+  };
   const shown = live && liveProvider ? PROVIDER_INFO[liveProvider] : provider;
-  const toLogin = () => window.location.assign(`/login?next=${encodeURIComponent('/my/settings')}`);
+  function toLogin() {
+    window.location.assign(`/login?next=${encodeURIComponent('/my/settings')}`);
+  }
   const sorry = () => toast('지금은 탈퇴를 진행할 수 없습니다. 잠시 뒤 다시 시도해 주세요', 'ic-alert-circle');
+  /** 원격 로그아웃의 '잠시 뒤 다시'(d5 §5.17 '원격 로그아웃 못 함') */
+  const sorryDevice = () => toast(endResultText({ kind: 'error' }, { name: '', scope: 'device' })!.text, 'ic-alert-circle');
 
-  /** 재인증할 제공자를 로그인 수단 목록에서 고른다(연결한 순서의 첫 제공자) */
-  const pickProvider = async (): Promise<WithdrawProvider | null> => {
+  /** 재인증할 제공자를 로그인 수단 목록에서 고른다(연결한 순서의 첫 제공자). onError: 목록이 실패했을 때의 안내(기본 탈퇴) */
+  const pickProvider = async (onError: () => void = sorry): Promise<WithdrawProvider | null> => {
     const r = await api!.providers();
     if (r.kind === 'ok') {
       setLiveProvider(r.providers[0]!);
@@ -121,8 +153,28 @@ export function SettingsFlows({
       return r.providers[0]!;
     }
     if (r.kind === 'login') toLogin();
-    else sorry();
+    else onError();
     return null;
+  };
+
+  /** 재인증에서 돌아와 그 기기를 끈다(규칙은 model/devices resumeDeviceLogout). 결과는 토스트, 실패면 그 기기의 재인증 창, 로그인 필요면 로그인 화면. 끝나면 목록을 다시 불러온다 */
+  const resumeDevice = async (pending: PendingLogout) => {
+    const step = await resumeDeviceLogout({
+      pending,
+      pickup: async () => {
+        const r = await api!.pickupReauth();
+        if (r.kind === 'token' && r.provider) setLiveProvider(r.provider);
+        return r;
+      },
+      end: (sessionId, reauthToken) => devicesApi!.end(sessionId, reauthToken),
+    });
+    if (step.kind === 'login') {
+      toLogin();
+      return;
+    }
+    if (step.kind === 'toast') toast(step.text, step.icon);
+    else if (await pickProvider(sorryDevice)) failWith(step.text, devicePurpose(step.target));
+    await loadDevices();
   };
 
   /**
@@ -138,8 +190,12 @@ export function SettingsFlows({
 
   useEffect(() => {
     if (toastOnMount) toast(toastOnMount, 'ic-check');
-    // 재인증에서 돌아왔으면(탭 저장소 표시) 토큰을 한 번 받아 탈퇴 확인 창을 연다. 실패면 재인증 창의 실패 문구
-    if (api && takePending(tabStore, Date.now())) {
+    // 재인증에서 돌아왔으면(탭 저장소 표시) 토큰을 한 번 받아, 원격 로그아웃이면 그 기기를 끄고 탈퇴면 탈퇴 확인 창을 연다. 실패면 재인증 창의 실패 문구.
+    // 두 표시가 함께 있으면 나중에 남긴 쪽만 잇는다(둘 다 지운다, BOT-044)
+    const back = returnOnMount(tabStore, Date.now(), { devices: api !== null && devicesApi !== null, withdraw: api !== null });
+    if (back?.kind === 'device') void resumeDevice(back.pending);
+    else if (devicesApi) void loadDevices();
+    if (api && back?.kind === 'withdraw') {
       void (async () => {
         // 재인증 결과를 먼저 받는다(그 응답의 제공자를 쓰고, 목록은 실패해서 재인증 창을 다시 보일 때만 부른다)
         const r = await api.pickupReauth();
@@ -172,6 +228,38 @@ export function SettingsFlows({
 
   /** chosen: 연결한 수단이 둘 이상이라 재인증 창에서 고른 제공자(없으면 목록의 첫 제공자) */
   const confirmReauth = (chosen?: WithdrawProvider) => {
+    if (api && devicesApi && purpose.kind === 'device') {
+      // 실제 원격 로그아웃: 탈퇴와 같이 갱신 뒤 표시를 남기고 제공자로 떠난다(돌아오면 위 효과가 그 기기를 끈다, BOT-044)
+      if (leaveRef.current) return;
+      const ticket = {
+        cancelled: false,
+        cancel() {
+          this.cancelled = true;
+        },
+      };
+      leaveRef.current = ticket;
+      setLeaving(true);
+      const target = { sessionId: purpose.session.id, name: purpose.session.name, scope: purpose.scope };
+      const forPurpose = purpose;
+      void (async () => {
+        const r = await leaveForDeviceReauth({
+          api: devicesApi,
+          storage: tabStore,
+          now: () => Date.now(),
+          provider: chosen ?? liveProvider,
+          pickProvider: () => pickProvider(sorryDevice),
+          target,
+          submit: submitReauthForm,
+          cancelled: () => ticket.cancelled,
+        });
+        if (r === 'left' || ticket.cancelled) return;
+        leaveRef.current = null;
+        setLeaving(false);
+        if (r === 'login') toLogin();
+        else if (r === 'retry') failWith(reauthFailureText('unavailable'), forPurpose);
+      })();
+      return;
+    }
     if (api && purpose.kind === 'withdraw') {
       // 실제 탈퇴는 제공자를 몰라도 목록을 다시 읽어 실제 재인증으로 간다(목업 갈래로 빠지지 않는다, BOT-036이 넘긴 것).
       // 연타는 다시 그리기 전에도 막도록 상태 대신 ref로 본다
@@ -244,10 +332,27 @@ export function SettingsFlows({
   };
 
   const ctx: FlowsContextValue = {
-    devices: devices.filter((d) => !removed.includes(d.id)),
-    devicesLoading,
+    // 실제 흐름은 API의 목록, 그 밖은 목업 목록(identity §8 '로그인한 기기와 다른 세션 끝내기의 첫 구현')
+    devices: devicesApi ? toDeviceSessions(liveRows) : devices.filter((d) => !removed.includes(d.id)),
+    otherLogins: devicesApi ? otherLoginsOf(liveRows) : 0,
+    onEndOtherLogins: () => {
+      // 지금 이 기기 줄을 보낸다: 서버가 지금 세션만 남기고 같은 기기의 다른 로그인을 끝낸다(ADR-0209 결정 4)
+      const me = liveRows.find((r) => r.current);
+      if (!me || !api || !devicesApi) return;
+      setPurpose({ kind: 'device', session: { id: me.sessionId, name: '이 기기의 다른 로그인', icon: 'device' }, scope: 'others' });
+      setFailText(null);
+      void pickProvider(sorryDevice).then((p) => p && setOverlay({ kind: 'reauth', failed: false }));
+    },
+    devicesLoading: devicesApi ? devicesState === 'loading' : devicesLoading,
+    devicesFailed: devicesApi !== null && devicesState === 'error',
+    reloadDevices: () => void loadDevices(),
     onDeviceLogout: (session) => {
-      setPurpose({ kind: 'device', session });
+      setPurpose({ kind: 'device', session, scope: 'device' });
+      if (api && devicesApi) {
+        setFailText(null);
+        void pickProvider(sorryDevice).then((p) => p && setOverlay({ kind: 'reauth', failed: false }));
+        return;
+      }
       setOverlay({ kind: 'reauth', failed: false });
     },
     startWithdraw: () => {
@@ -291,14 +396,14 @@ export function SettingsFlows({
         <p className="t-sm" id={`${ids}-ra`}>
           {reauthWhat}
           {purpose.kind === 'device' ? '은 되돌리기 어려운' : '는 되돌릴 수 없는'} 작업이라 로그인한 분이 맞는지 한 번 더 확인합니다.{' '}
-          {live && purpose.kind === 'withdraw' && liveProviders.length > 1 ? '이 계정에 연결된 로그인 수단 가운데 하나로 다시 로그인해 주세요.' : `지금 로그인한 ${shown.label} 계정으로 다시 로그인해 주세요.`}
+          {live && liveProviders.length > 1 ? '이 계정에 연결된 로그인 수단 가운데 하나로 다시 로그인해 주세요.' : `지금 로그인한 ${shown.label} 계정으로 다시 로그인해 주세요.`}
         </p>
         <p className="t-sm muted">
           다시 로그인한 뒤 5분 안에 {reauthWhat}
           {purpose.kind === 'device' ? '을' : '를'} 마쳐야 합니다.
         </p>
         <div className="col" style={{ gap: 8 }}>
-          {live && purpose.kind === 'withdraw' && liveProviders.length > 1 ? (
+          {live && liveProviders.length > 1 ? (
             // 연결한 로그인 수단이 둘 이상이면 고른다(고른 수단으로 재인증 양식을 보낸다)
             liveProviders.map((p) => (
               <button
@@ -356,10 +461,35 @@ export function SettingsFlows({
   );
 }
 
-/** ② 로그인한 기기 목록(CMP-052). 로그아웃 버튼은 재인증 창을 연다 */
+/** ② 로그인한 기기 목록(CMP-052). 로그아웃 버튼은 재인증 창을 연다. 실제 흐름에서 목록을 못 불러오면 [다시 불러오기](d5 §5.17) */
 export function SettingsDevices() {
-  const { devices, devicesLoading, onDeviceLogout } = useContext(FlowsContext);
-  return <DeviceSessionList label="로그인한 기기 목록" sessions={devices} loading={devicesLoading} onLogout={onDeviceLogout} />;
+  const { devices, otherLogins, onEndOtherLogins, devicesLoading, devicesFailed, reloadDevices, onDeviceLogout } = useContext(FlowsContext);
+  if (devicesFailed) {
+    return (
+      <div className="col" style={{ gap: 8, alignItems: 'flex-start' }}>
+        <p className="t-sm muted" role="status">
+          로그인한 기기를 불러오지 못했습니다
+        </p>
+        <button className="btn btn-outline btn-sm" type="button" onClick={reloadDevices}>
+          다시 불러오기
+        </button>
+      </div>
+    );
+  }
+  return (
+    <>
+      <DeviceSessionList label="로그인한 기기 목록" sessions={devices} loading={devicesLoading} onLogout={onDeviceLogout} />
+      {/* 같은 브라우저에서 다시 로그인해 앞 세션이 지금 이 기기 줄에 남았을 때만(otherSessions > 0, 새 맥락 리뷰 중간 1) */}
+      {!devicesLoading && otherLogins > 0 ? (
+        <div className="row between wrap" style={{ gap: 8, marginTop: 4 }}>
+          <p className="t-sm muted">이 기기에 다른 로그인이 {otherLogins}개 남아 있습니다</p>
+          <button className="btn btn-outline btn-sm" type="button" aria-haspopup="dialog" onClick={onEndOtherLogins}>
+            이 기기의 다른 로그인 끝내기
+          </button>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 /** ⑥ ( 회원 탈퇴 › ) — 재인증부터 연다 */

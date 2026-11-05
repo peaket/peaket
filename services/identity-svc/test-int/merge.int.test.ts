@@ -454,3 +454,29 @@ test('BOT-042넘김_PostgreSQL에서_마이그레이션0026은없는계정의acc
     [...fks].sort().map((conname) => ({ conname, convalidated: true })),
   );
 });
+
+test('I-T75_PostgreSQL에서_병합확정은대표계정의다른세션을LOGIN_METHOD_CHANGED로끝내고_세션종료사건을병합사건보다먼저Outbox에적는다 [ASVS v5.0.0-7.4.3]', async () => {
+  const t = await setup();
+  const phone = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-m75-k', email: null, deviceId: 'dev-m75-phone' });
+  const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-m75-k', email: null, deviceId: 'dev-m75-pc' });
+  const b = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-m75-g', email: null, deviceId: 'dev-m75-b' });
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-m75-g' });
+  expect(r.result).toBe('OTHER_ACCOUNT');
+  // 병합 제안으로 갔을 뿐이라 아직 아무 세션도 끝내지 않는다
+  expect(await q('select 1 from session where id = any($1::uuid[]) and terminated_at is not null', [[phone.sessionId, b.sessionId]])).toHaveLength(0);
+  await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) });
+  const rows = await q<{ topic: string; msg_key: string; payload: Buffer }>(
+    "select topic, msg_key, payload from outbox where msg_key = any($1::text[]) and topic in ('control.sessions-terminated', 'identity.accounts-merged') order by seq",
+    [[a.accountId, b.accountId]],
+  );
+  expect(rows.map((x) => [x.topic, (JSON.parse(x.payload.toString()) as { sessionId?: string; reason?: string }).reason ?? null, (JSON.parse(x.payload.toString()) as { sessionId?: string }).sessionId ?? null]).sort((x, y) => (x[0] === y[0] ? 0 : x[0]! < y[0]! ? -1 : 1))).toEqual(
+    [
+      ['control.sessions-terminated', 'MERGED', b.sessionId],
+      ['control.sessions-terminated', 'LOGIN_METHOD_CHANGED', phone.sessionId],
+      ['identity.accounts-merged', null, null],
+    ].sort((x, y) => (x[0] === y[0] ? 0 : x[0]! < y[0]! ? -1 : 1)),
+  );
+  // 병합 사건이 마지막이다
+  expect(rows.at(-1)!.topic).toBe('identity.accounts-merged');
+  expect(await q('select terminated_at is null as alive from session where id = $1', [a.sessionId])).toEqual([{ alive: true }]);
+});

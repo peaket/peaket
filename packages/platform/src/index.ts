@@ -13,7 +13,7 @@ export { PROBLEM_CONTENT_TYPE, PROBLEM_TYPE_BASE, ProblemError, deadlineExceeded
 export { DATABASE, POOL_DEFAULTS, createDatabase, databaseModule, type Database, type DatabaseOptions, type DatabaseProfile, type DbTransaction, type TransactionOptions } from './database.js';
 export { ProblemFilter } from './problem-filter.js';
 export { createService, type CreateServiceOptions, type PlatformService } from './service.js';
-export { clientFamily } from './client-family.js';
+export { browserFamily, type BrowserFamily, clientFamily } from './client-family.js';
 export { LOG_PSEUDONYM_KEY_ENV, LogPseudonymizer, ipPrefix, loadLogPseudonymizer } from './pseudonym.js';
 export { sampleKeep, sampleThreshold } from './sampling.js';
 export { APP_HEADER, APPS } from './http-hooks.js';
