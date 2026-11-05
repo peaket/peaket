@@ -368,6 +368,23 @@ export class MemorySessionStore implements SessionStore {
       },
       mergeAccounts: async (i) => {
         for (const [k, v] of s.providers) if (v.accountId === i.absorbedAccountId) s.providers.set(k, { ...v, accountId: i.primaryAccountId });
+        // 기기 행을 대표 계정으로 옮긴다(OPEN[22], PostgreSQL 저장소와 같은 세 단계).
+        const absorbedDevices = [...s.devices.values()].filter((d) => d.accountId === i.absorbedAccountId);
+        const primaryDevices = () => [...s.devices.values()].filter((d) => d.accountId === i.primaryAccountId);
+        // ① 흡수 행만 새 판이면(흡수 행의 옛 판 값이 대표 행의 device_ref) 대표 행이 행 ID 그대로 새 판 짝을 이어받는다. 대표 계정에 새 판 값의 행이 따로 있으면 바꾸지 않는다
+        for (const d of absorbedDevices) {
+          const old = d.prevRef && !primaryDevices().some((p) => p.ref === d.ref) ? primaryDevices().find((p) => p.ref === d.prevRef) : undefined;
+          if (old) s.devices.set(old.id, { ...old, ref: d.ref, prevRef: d.prevRef });
+        }
+        // ② 대표 계정에 같은 기기(device_ref·device_ref_prev 가운데 하나라도 같음, 빈 값 빼고)가 있으면 흡수 쪽 행을 지운다.
+        //    지운 행을 가리키던 세션의 기기 칸은 PostgreSQL의 ON DELETE SET NULL처럼 비운다. ③ 남은 행을 옮긴다
+        const primaryRefs = new Set(primaryDevices().flatMap((d) => [d.ref, ...(d.prevRef ? [d.prevRef] : [])]));
+        for (const d of absorbedDevices) {
+          if (primaryRefs.has(d.ref) || (d.prevRef && primaryRefs.has(d.prevRef))) {
+            s.devices.delete(d.id);
+            for (const x of s.sessions.values()) if (x.deviceId === d.id) x.deviceId = null;
+          } else s.devices.set(d.id, { ...d, accountId: i.primaryAccountId });
+        }
         const a = s.accounts.get(i.absorbedAccountId);
         if (a) s.accounts.set(i.absorbedAccountId, { ...a, status: 'MERGED', mergedInto: i.primaryAccountId, email: null, emailVerified: false });
         for (const [k, x] of s.accounts) if (x.mergedInto === i.absorbedAccountId) s.accounts.set(k, { ...x, mergedInto: i.primaryAccountId });

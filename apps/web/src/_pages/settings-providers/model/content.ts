@@ -40,6 +40,7 @@ export function mergeContent(): MergeContent {
     BOTH_VERIFIED: '해당 없음 · 지금 계정만 본인확인',
     WITHDRAWAL_OR_APPEAL: '해당 없음',
     ENTRY_STARTED: '해당 없음',
+    SAME_PROVIDER_KIND: '해당 없음',
   };
   const checks: MergeCheck[] = (Object.keys(MERGE_CHECK_TITLES) as MergeBlockerCode[]).map((code) => ({
     title: MERGE_CHECK_TITLES[code],

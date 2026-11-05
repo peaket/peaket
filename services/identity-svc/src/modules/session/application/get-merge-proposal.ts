@@ -22,6 +22,8 @@ export interface MergeProposalView {
   /** 지금 로그인한 계정이 남는 쪽인지 */
   requesterRole: 'PRIMARY' | 'MERGED';
   primaryVerified: boolean;
+  /** SAME_PROVIDER_KIND로 막혔을 때만: 두 계정에 함께 있는 종류(OPEN[21]) */
+  sameKindProviders?: Provider[];
 }
 
 @Injectable()
@@ -53,6 +55,7 @@ export class GetMergeProposal {
       newProvider: p.newProvider,
       requesterRole: p.primaryAccountId === p.requesterAccountId ? 'PRIMARY' : 'MERGED',
       primaryVerified: p.primaryVerified === true,
+      ...(p.blockers.includes('SAME_PROVIDER_KIND') && p.sameKindProviders?.length ? { sameKindProviders: p.sameKindProviders } : {}),
     };
   }
 }

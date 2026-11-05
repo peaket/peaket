@@ -12,7 +12,8 @@ import { GetMergeProposal } from '../src/modules/session/application/get-merge-p
 import { MergeError } from '../src/modules/session/application/merge-error.js';
 import { MergePlanner } from '../src/modules/session/application/plan-merge.js';
 import { SetAccountHold } from '../src/modules/session/application/set-account-hold.js';
-import type { CheckResult } from '../src/modules/session/domain/merge.js';
+import { BLOCKER_ORDER, type CheckResult } from '../src/modules/session/domain/merge.js';
+import { MergeProposal } from '@peaket/contracts/openapi/model';
 import { type AccountEraser, type AccountRow, type MergeChecker, MergeCheckUnavailable } from '../src/modules/session/domain/ports.js';
 import { ISSUER, kit, newKey } from './support.js';
 
@@ -230,6 +231,174 @@ describe('병합 확정(I-T32·I-T34)', () => {
     expect(t.sessions.accountOf(x.accountId)).toMatchObject({ status: 'MERGED', mergedInto: y.accountId });
     expect(t.sessions.activeCount(x.accountId)).toBe(0);
     expect((await t.login('kakao', 'k-x2')).accountId).toBe(y.accountId);
+  });
+});
+
+/** 그 계정에 로그인 수단을 바로 잇는다(시험 준비) */
+const linkTo = (t: Awaited<ReturnType<typeof setup>>, accountId: string, provider: 'kakao' | 'naver' | 'google', sub: string) => t.sessions.transaction((tx) => tx.linkProvider(accountId, provider, sub, t.clock.now()));
+/** 그 계정의 로그인 수단 종류(이름 순) */
+const kindsOf = (t: Awaited<ReturnType<typeof setup>>, accountId: string) => t.sessions.transaction(async (tx) => (await tx.providersOf(accountId)).map((p) => p.provider).sort());
+
+describe('같은 종류의 로그인 수단(OPEN[21], 소유자 결정 2026-11-05)', () => {
+  test('OPEN21_막는사유순서BLOCKER_ORDER는openapiMergeProposal.blockers열거와같고_SAME_PROVIDER_KIND가끝이다', () => {
+    expect(BLOCKER_ORDER).toEqual(MergeProposal.shape.blockers.unwrap().element.options);
+    expect(BLOCKER_ORDER.at(-1)).toBe('SAME_PROVIDER_KIND');
+  });
+
+  test('I-T31_OPEN21_두계정에같은종류의다른로그인수단이있으면제안은BLOCKED(SAME_PROVIDER_KIND)와겹친종류이고_확정은BLOCKED이며아무것도옮기지않는다', async () => {
+    const t = await setup();
+    const a = await t.login('kakao', 'k-s1a');
+    const b = await t.login('google', 'g-s1b');
+    await linkTo(t, a.accountId, 'naver', 'n-s1a');
+    await linkTo(t, b.accountId, 'naver', 'n-s1b');
+    const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'g-s1b' });
+    expect(r.result).toBe('OTHER_ACCOUNT');
+    const v = await t.view.run({ accountId: a.accountId, proposalId: r.mergeProposalId! });
+    expect(v).toMatchObject({ status: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['naver'] });
+    expect(MergeProposal.safeParse(v).success).toBe(true);
+    const e = await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) }).catch((x: unknown) => x);
+    expect(e instanceof MergeError && [e.code, e.blockers, e.sameKindProviders]).toEqual(['BLOCKED', ['SAME_PROVIDER_KIND'], ['naver']]);
+    expect(t.sessions.accountOf(b.accountId)?.status).toBe('ACTIVE');
+    expect(await kindsOf(t, a.accountId)).toEqual(['kakao', 'naver']);
+    expect(await kindsOf(t, b.accountId)).toEqual(['google', 'naver']);
+    // 한쪽(흡수될 계정)에서 그 수단을 해제한 뒤 다시 추가하면 새 제안으로 합친다. 대표 계정에는 종류마다 하나다
+    await t.sessions.transaction((tx) => tx.unlinkProvider(b.accountId, 'naver'));
+    const r2 = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'g-s1b' });
+    expect(await t.view.run({ accountId: a.accountId, proposalId: r2.mergeProposalId! })).toMatchObject({ status: 'PROPOSED', blockers: [] });
+    await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r2.mergeProposalId!, reauthToken: await t.token(a) });
+    expect(await kindsOf(t, a.accountId)).toEqual(['google', 'kakao', 'naver']);
+  });
+
+  test('I-T31_OPEN21_추가하려던종류는로그인수단추가가지금계정에그종류가없을때만제안하므로겹친종류에들지않고_다른종류가겹치면그종류만준다', async () => {
+    const t = await setup();
+    const a = await t.login('kakao', 'k-s2a');
+    const b = await t.login('kakao', 'k-s2b');
+    await linkTo(t, b.accountId, 'google', 'g-s2b');
+    // 추가하려던 종류(카카오)가 지금 계정에 있으면 다른 계정의 것이라도 제안하지 않는다(PROVIDER_TYPE_TAKEN, BOT-042 새 맥락 리뷰 중간 3)
+    expect(await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'kakao', providerUserId: 'k-s2b' })).toEqual({ result: 'PROVIDER_TYPE_TAKEN' });
+    // 구글을 추가하면 제안은 만들되, 겹친 종류는 두 계정 모두 가진 카카오뿐이다(추가하려던 구글은 다른 계정에만 있다)
+    const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'g-s2b' });
+    expect(r.result).toBe('OTHER_ACCOUNT');
+    expect(await t.view.run({ accountId: a.accountId, proposalId: r.mergeProposalId! })).toMatchObject({ newProvider: 'google', status: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['kakao'] });
+    // 겹치지 않으면 sameKindProviders를 싣지 않는다
+    const { a: x, r: rx } = await t.propose();
+    expect(await t.view.run({ accountId: x.accountId, proposalId: rx.mergeProposalId! })).not.toHaveProperty('sameKindProviders');
+  });
+
+  test('I-T31_OPEN21_다른막는사유와함께면BLOCKER_ORDER순서로끝에오고_겹친종류는카카오·네이버·구글순이다', async () => {
+    const t = await setup();
+    t.results.ticket = { blocks: [{ service: 'ticket', reason: 'TICKET_IN_ENTRY_WINDOW' }], counts: {} };
+    const a = await t.login('google', 'g-s3a');
+    const b = await t.login('naver', 'n-s3b');
+    await linkTo(t, b.accountId, 'google', 'g-s3b');
+    await linkTo(t, a.accountId, 'kakao', 'k-s3a');
+    await linkTo(t, b.accountId, 'kakao', 'k-s3b');
+    const p = await t.planner.plan({ requesterAccountId: a.accountId, requesterSessionId: a.sessionId, otherAccountId: b.accountId, newProvider: 'naver', newProviderUserId: 'n-s3b' });
+    expect(await t.view.run({ accountId: a.accountId, proposalId: p! })).toMatchObject({ blockers: ['ENTRY_STARTED', 'SAME_PROVIDER_KIND'], sameKindProviders: ['kakao', 'google'] });
+  });
+
+  test('I-T31_OPEN21_제안뒤확정직전확인과트랜잭션사이에지금계정에같은종류가생기면_잠근뒤다시보고BLOCKED(SAME_PROVIDER_KIND)이며재인증토큰을쓰지않고제안은남는다', async () => {
+    const t = await setup();
+    const { a, b, r } = await t.propose();
+    const id = r.mergeProposalId!;
+    // 확정 직전 확인(트랜잭션 밖)은 지나가고, 그 뒤 트랜잭션 전에 지금 계정 a가 다른 구글 계정을 잇는다
+    const assess = t.planner.assessPair.bind(t.planner);
+    t.planner.assessPair = async (...args) => {
+      const plan = await assess(...args);
+      await linkTo(t, a.accountId, 'google', 'g-late');
+      return plan;
+    };
+    const token = await t.token(a);
+    const e = await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: id, reauthToken: token }).catch((x: unknown) => x);
+    t.planner.assessPair = assess;
+    expect(e instanceof MergeError && [e.code, e.blockers, e.sameKindProviders]).toEqual(['BLOCKED', ['SAME_PROVIDER_KIND'], ['google']]);
+    expect(t.sessions.accountOf(b.accountId)?.status).toBe('ACTIVE');
+    expect(await kindsOf(t, b.accountId)).toEqual(['google']);
+    expect(await t.proposals.get(id)).not.toBeNull();
+    // 트랜잭션을 되돌려 재인증 토큰을 쓰지 않았다: 늦게 이은 구글을 해제하면 같은 토큰으로 확정된다
+    await t.sessions.transaction((tx) => tx.unlinkProvider(a.accountId, 'google'));
+    await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: id, reauthToken: token });
+    expect(t.sessions.accountOf(b.accountId)?.status).toBe('MERGED');
+    expect(await kindsOf(t, a.accountId)).toEqual(['google', 'kakao']);
+  });
+});
+
+describe('병합 때 기기 행(OPEN[22], 소유자 결정 2026-11-05)', () => {
+  test('I-T32·I-T67_OPEN22_확정하면흡수계정의기기행을대표계정으로옮기고_같은기기(device_ref·device_ref_prev)면흡수쪽행을지우며_조사연결값은대표계정에서나온다', async () => {
+    const t = await setup();
+    const a = await t.login('kakao', 'k-d1a');
+    const gsub = 'g-d1b';
+    const b = await t.login('google', gsub);
+    const now = t.clock.now();
+    const aRef = t.sessions.devicesOf(a.accountId)[0]!;
+    const bRef = t.sessions.devicesOf(b.accountId)[0]!;
+    // 흡수 계정의 기기: 대표와 같은 기기(같은 device_ref), 키 회전 이음 기간에 흡수 계정만 다시 로그인해 흡수 쪽만 새 판인 같은 기기(흡수 행의 옛 판 값이 대표의 device_ref),
+    // 대표만 새 판인 같은 기기(흡수 행의 device_ref가 대표의 옛 판 값), 따로 쓰던 기기(옛 판 값을 가짐)
+    let rotId = '';
+    await t.sessions.transaction(async (tx) => {
+      rotId = await tx.bindDevice(a.accountId, 'k1.rot-a', now);
+      await tx.bindDevice(a.accountId, 'k2.prev-a', now, 'k1.prev-a');
+      await tx.bindDevice(b.accountId, 'k2.rot-a', now, 'k1.rot-a');
+      await tx.bindDevice(b.accountId, 'k1.prev-a', now);
+      await tx.bindDevice(b.accountId, 'k2.only-b', now, 'k1.only-b');
+    });
+    // 흡수 계정이 대표와 같은 기기로 로그인한 세션(그 기기 행은 지워진다)
+    const bSame = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: gsub, email: null, deviceId: 'dev-k-d1a' });
+    expect(t.sessions.devicesOf(b.accountId).sort()).toEqual([bRef, 'k2.rot-a', 'k1.prev-a', 'k2.only-b', aRef].sort());
+    const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: gsub });
+    await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) });
+    expect(t.sessions.devicesOf(b.accountId)).toEqual([]);
+    // 흡수 쪽만 새 판이던 기기는 대표 행이 새 판 짝(device_ref k2·device_ref_prev k1)을 이어받는다. 대표 쪽이 새 판이면 대표 행 그대로다
+    expect(t.sessions.devicesOf(a.accountId).sort()).toEqual([aRef, 'k2.rot-a', 'k2.prev-a', bRef, 'k2.only-b'].sort());
+    expect(t.sessions.devicePrevsOf(a.accountId).sort()).toEqual(['k1.only-b', 'k1.prev-a', 'k1.rot-a'].sort());
+    // 대표 행은 행 ID 그대로 값만 바뀐다(대표 계정 세션의 device_id가 그대로 이어진다)
+    expect(await t.sessions.transaction((tx) => tx.bindDevice(a.accountId, 'k2.rot-a', t.clock.now()))).toBe(rotId);
+    // 지운 기기 행을 가리키던 흡수 계정 세션은 기기 칸이 비고(ON DELETE SET NULL), 옮긴 행을 가리키던 세션은 그대로다. 둘 다 MERGED로 끝났다
+    expect(t.sessions.peekSession(bSame.sessionId)).toMatchObject({ deviceId: null, terminatedAt: expect.any(Number) });
+    const bDevice = t.sessions.peekSession(b.sessionId)!.deviceId;
+    expect(bDevice).not.toBeNull();
+    expect(t.sessions.peekSession(b.sessionId)!.terminatedAt).not.toBeNull();
+    // 조사 적재의 연결 값: 흡수 계정 ID로는 기기 가명이 없고, 대표 계정 ID로 함께 나온다(옛 판 값 포함)
+    const [ra, rb] = await t.sessions.investigationRefsOf([a.accountId, b.accountId], 0);
+    expect(rb!.deviceRefs).toEqual([]);
+    expect(ra!.deviceRefs).toEqual(expect.arrayContaining([bRef, 'k2.only-b', 'k1.only-b', 'k2.rot-a', 'k1.rot-a']));
+    // 옮긴 기기로 다시 로그인하면 대표 계정이고 같은 기기 행이다(새 기기로 세지 않는다)
+    const again = await t.login('google', gsub);
+    expect(again.accountId).toBe(a.accountId);
+    expect(t.sessions.peekSession(again.sessionId)!.deviceId).toBe(bDevice);
+    expect(t.sessions.deviceCount(a.accountId)).toBe(5);
+    // 이음이 끝나 옛 판(k1.)만 남은 행을 지워도 새 판 짝을 이어받은 기기 행은 남는다(그 기기의 다음 로그인에 새 기기 알림이 가지 않는다)
+    await t.sessions.closeInvRefBridge('device', 'k1.');
+    expect(t.sessions.devicesOf(a.accountId).sort()).toEqual(['k2.only-b', 'k2.prev-a', 'k2.rot-a']);
+    // 대표 계정이 탈퇴하면 옮겨 온 기기 행도 함께 지운다
+    await t.sessions.transaction((tx) => tx.eraseAccount(a.accountId, t.clock.now()));
+    expect(t.sessions.deviceCount(a.accountId)).toBe(0);
+    expect(t.sessions.deviceCount(b.accountId)).toBe(0);
+  });
+
+  // 재검토(2026-11-05) 시험 빈틈: 둘 다 새 판인 같은 기기, 대표 계정에 새 판 값의 행이 따로 있어 이어받기를 건너뛰는 경우
+  test('I-T32_OPEN22_둘다새판인같은기기는흡수행만지우고_대표계정에새판값의행이따로있으면이어받지않고흡수행만지운다', async () => {
+    const t = await setup();
+    const a = await t.login('kakao', 'k-d2a');
+    const gsub = 'g-d2b';
+    const b = await t.login('google', gsub);
+    const now = t.clock.now();
+    const aRef = t.sessions.devicesOf(a.accountId)[0]!;
+    const bRef = t.sessions.devicesOf(b.accountId)[0]!;
+    await t.sessions.transaction(async (tx) => {
+      // 둘 다 새 판
+      await tx.bindDevice(a.accountId, 'k2.both', now, 'k1.both');
+      await tx.bindDevice(b.accountId, 'k2.both', now, 'k1.both');
+      // 대표 계정에 옛 판 행과 (옛 판 값 없이 묶인) 새 판 값의 행이 따로 있고, 흡수 쪽은 새 판
+      await tx.bindDevice(a.accountId, 'k1.skip', now);
+      await tx.bindDevice(a.accountId, 'k2.skip', now);
+      await tx.bindDevice(b.accountId, 'k2.skip', now, 'k1.skip');
+    });
+    const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: gsub });
+    await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) });
+    expect(t.sessions.devicesOf(b.accountId)).toEqual([]);
+    expect(t.sessions.devicesOf(a.accountId).sort()).toEqual([aRef, bRef, 'k2.both', 'k1.skip', 'k2.skip'].sort());
+    expect(t.sessions.devicePrevsOf(a.accountId)).toEqual(['k1.both']);
   });
 });
 

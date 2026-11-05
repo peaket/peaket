@@ -325,6 +325,106 @@ test('BOT-042넘김_PostgreSQL에서_병합도중로그인이흡수계정X를잠
   expect(await q('select 1 from session where account_id = $1 and terminated_at is null', [x.accountId])).toHaveLength(0);
 });
 
+test('I-T31_OPEN21_PostgreSQL에서_두계정에같은종류의다른로그인수단이있으면제안은BLOCKED(SAME_PROVIDER_KIND)이고_확정트랜잭션이잠근뒤다시보면409이며재인증토큰을쓰지않고로그인수단을옮기지않는다', async () => {
+  const t = await setup();
+  const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-sk-k', email: null, deviceId: null });
+  const b = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-sk-g', email: null, deviceId: null });
+  // 제안 때 이미 겹치면(두 계정에 서로 다른 네이버) BLOCKED와 겹친 종류를 Redis 제안에 둔다
+  await t.sessions.transaction(async (tx) => {
+    await tx.linkProvider(a.accountId, 'naver', 'pg-sk-na', clock.now());
+    await tx.linkProvider(b.accountId, 'naver', 'pg-sk-nb', clock.now());
+  });
+  const r1 = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-sk-g' });
+  expect(await t.proposals.get(r1.mergeProposalId!)).toMatchObject({ status: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['naver'] });
+  // 흡수될 계정에서 네이버를 해제하면 새 제안은 PROPOSED다
+  await t.sessions.transaction((tx) => tx.unlinkProvider(b.accountId, 'naver'));
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-sk-g' });
+  expect(await t.proposals.get(r.mergeProposalId!)).toMatchObject({ status: 'PROPOSED', blockers: [] });
+  // 확정 직전 확인 뒤, 확정 트랜잭션이 계정을 잠그기 전에 대표 계정 a가 다른 구글 계정을 잇는다(다른 연결에서 끝냄)
+  let armed = true;
+  const store = gated(t.sessions, {
+    before: async (k) => {
+      if (k !== 'lockAccount' || !armed) return;
+      armed = false;
+      await q("insert into account_provider (account_id, provider, provider_user_id, linked_at) values ($1, 'google', 'pg-sk-late', now())", [a.accountId]);
+    },
+  });
+  const reauth = new JoseReauthVerifier(t.k.keys, ISSUER, clock);
+  const planner = new MergePlanner(store, { pidsOf: async () => [] }, (['purchase', 'ticket', 'core'] as const).map(noBlockChecker), t.proposals, clock);
+  const confirm = new ConfirmMerge(store, reauth, planner, t.proposals, clock);
+  const used = async () => (await q<{ n: number }>('select count(*)::int as n from reauth_token_use where account_id = $1', [a.accountId]))[0]!.n;
+  const before = await used();
+  const e = await confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) }).catch((x: unknown) => x);
+  expect(armed).toBe(false);
+  expect(e).toMatchObject({ code: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['google'] });
+  expect(await used()).toBe(before);
+  expect(await q('select status from account where id = $1', [b.accountId])).toEqual([{ status: 'ACTIVE' }]);
+  expect(await q("select account_id from account_provider where provider = 'google' and provider_user_id = 'pg-sk-g'")).toEqual([{ account_id: b.accountId }]);
+  expect(await q('select 1 from account_merge where merged_account_id = $1', [b.accountId])).toHaveLength(0);
+  expect(await t.proposals.get(r.mergeProposalId!)).not.toBeNull();
+});
+
+test('I-T32·I-T67_OPEN22_PostgreSQL에서_확정은흡수계정의기기행을대표계정으로옮기고_같은기기(device_ref·device_ref_prev)면흡수쪽행을지우며_지운행의흡수세션device_id는비고옮긴행의세션은그대로다', async () => {
+  const t = await setup();
+  const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-dv-k', email: null, deviceId: 'pg-dv-shared' });
+  // 흡수될 계정 b: 따로 쓰던 기기로 한 번, 대표와 같은 기기로 한 번 로그인했다
+  const b = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-dv-g', email: null, deviceId: 'pg-dv-b' });
+  const bSame = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-dv-g', email: null, deviceId: 'pg-dv-shared' });
+  const refOf = async (sessionId: string) => (await q<{ device_ref: string }>('select d.device_ref from session s join device d on d.id = s.device_id where s.id = $1', [sessionId]))[0]!.device_ref;
+  const [shared, onlyB] = [await refOf(a.sessionId), await refOf(b.sessionId)];
+  expect(await refOf(bSame.sessionId)).toBe(shared);
+  // 키 회전 이음 기간에 흡수 계정만 다시 로그인해 흡수 쪽만 새 판인 같은 기기(흡수 행의 옛 판 값이 대표의 device_ref), 대표만 새 판인 같은 기기(흡수 행의 device_ref가 대표의 옛 판 값),
+  // 따로 쓰던 기기(옛 판 값을 가짐)
+  const ids = await t.sessions.transaction(async (tx) => {
+    const rot = await tx.bindDevice(a.accountId, 'k1.pg-rot', clock.now());
+    await tx.bindDevice(a.accountId, 'k2.pg-prev', clock.now(), 'k1.pg-prev');
+    const bRot = await tx.bindDevice(b.accountId, 'k2.pg-rot', clock.now(), 'k1.pg-rot');
+    await tx.bindDevice(b.accountId, 'k1.pg-prev', clock.now());
+    await tx.bindDevice(b.accountId, 'k2.pg-only', clock.now(), 'k1.pg-only');
+    return { rot, bRot };
+  });
+  // 그 기기를 가리키는 대표 계정 세션과 흡수 계정 세션
+  const aRot = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-dv-k', email: null, deviceId: null });
+  const bRot = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-dv-g', email: null, deviceId: null });
+  await q('update session set device_id = $1 where id = $2', [ids.rot, aRot.sessionId]);
+  await q('update session set device_id = $1 where id = $2', [ids.bRot, bRot.sessionId]);
+  const movedId = (await q<{ device_id: string }>('select device_id from session where id = $1', [b.sessionId]))[0]!.device_id;
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-dv-g' });
+  await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) });
+  expect(await q('select 1 from device where account_id = $1', [b.accountId])).toHaveLength(0);
+  const rows = await q<{ device_ref: string; device_ref_prev: string | null }>('select device_ref, device_ref_prev from device where account_id = $1', [a.accountId]);
+  const sort = (x: { device_ref: string; device_ref_prev: string | null }[]) => [...x].sort((p, n) => (p.device_ref < n.device_ref ? -1 : 1));
+  expect(sort(rows)).toEqual(
+    sort([
+      { device_ref: shared, device_ref_prev: null },
+      { device_ref: 'k2.pg-rot', device_ref_prev: 'k1.pg-rot' },
+      { device_ref: 'k2.pg-prev', device_ref_prev: 'k1.pg-prev' },
+      { device_ref: onlyB, device_ref_prev: null },
+      { device_ref: 'k2.pg-only', device_ref_prev: 'k1.pg-only' },
+    ]),
+  );
+  // 흡수 쪽만 새 판이던 기기: 대표 행이 행 ID 그대로 새 판 짝을 이어받아 대표 세션의 device_id가 그대로 이어지고, 지운 흡수 행을 가리키던 흡수 세션은 기기 칸이 빈다
+  expect(await q("select id from device where account_id = $1 and device_ref = 'k2.pg-rot'", [a.accountId])).toEqual([{ id: ids.rot }]);
+  expect(await q('select device_id from session where id = $1', [aRot.sessionId])).toEqual([{ device_id: ids.rot }]);
+  expect(await q('select device_id from session where id = $1', [bRot.sessionId])).toEqual([{ device_id: null }]);
+  // 지운 행을 가리키던 흡수 세션은 기기 칸이 비고(ON DELETE SET NULL), 옮긴 행은 행 ID 그대로 대표 계정의 것이 된다. 두 세션 모두 MERGED로 끝났다
+  expect(await q('select device_id, terminated_at is not null as ended from session where id = $1', [bSame.sessionId])).toEqual([{ device_id: null, ended: true }]);
+  expect(await q('select device_id, terminated_at is not null as ended from session where id = $1', [b.sessionId])).toEqual([{ device_id: movedId, ended: true }]);
+  expect(await q('select account_id from device where id = $1', [movedId])).toEqual([{ account_id: a.accountId }]);
+  // 조사 적재의 연결 값: 흡수 계정 ID로는 기기 가명이 없고, 대표 계정 ID로 함께 나온다(옛 판 값 포함)
+  const refs = await t.sessions.investigationRefsOf([a.accountId, b.accountId], 0);
+  expect(refs.find((x) => x.accountId === b.accountId)?.deviceRefs).toEqual([]);
+  expect(refs.find((x) => x.accountId === a.accountId)?.deviceRefs).toEqual(expect.arrayContaining([onlyB, 'k2.pg-only', 'k1.pg-only', 'k2.pg-rot', 'k1.pg-rot']));
+  // 옮긴 기기로 다시 로그인하면 대표 계정의 같은 기기 행이다(새 기기 행을 만들지 않는다)
+  const again = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-dv-g', email: null, deviceId: 'pg-dv-b' });
+  expect(again.accountId).toBe(a.accountId);
+  expect(await q('select device_id from session where id = $1', [again.sessionId])).toEqual([{ device_id: movedId }]);
+  expect(await q('select 1 from device where account_id = $1', [a.accountId])).toHaveLength(5);
+  // 대표 계정이 탈퇴하면 옮겨 온 기기 행도 함께 지운다
+  await t.sessions.transaction((tx) => tx.eraseAccount(a.accountId, clock.now()));
+  expect(await q('select 1 from device where account_id = any($1::uuid[])', [[a.accountId, b.accountId]])).toHaveLength(0);
+});
+
 test('BOT-042넘김_PostgreSQL에서_마이그레이션0026은없는계정의account_hold행만지우고_있는계정의행과병합이력은남긴뒤외래키를검증한다', async () => {
   const t = await setup();
   const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-or-k', email: null, deviceId: null });

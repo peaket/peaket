@@ -1,10 +1,11 @@
 // 병합 확정(POST /v1/identity/merge-proposals/{proposalId}/confirmation, identity §2.1 '계정 병합의 첫 구현', BUILD_ORDER BOT-042, I-T32·I-T34, POL-034).
 // 재인증(제안한 세션, 한 번) → 대표 계정 다시 고르기(바뀌었으면 NOT_FOUND) → 세 서비스 다시 확인(답이 없으면 UNAVAILABLE) → 막는 사유면 BLOCKED, 불변식 위반이면 INVARIANT →
-// 한 트랜잭션: 추가하려던 제공자와 두 계정(ID 순)을 잠그고 끝난 계정이 없는지(먼저) → 세션·재인증 토큰 → 그 수단이 아직 다른 계정의 것인지·본인확인으로 고른 대표가 그대로인지 → 로그인 수단 이전·MERGED·이메일 지우기·사슬 고치기·account_merge → 흡수 계정 세션 끝내기(MERGED) → 병합 사건.
+// 한 트랜잭션: 추가하려던 제공자와 두 계정(ID 순)을 잠그고 끝난 계정이 없는지(먼저) → 세션·재인증 토큰 → 그 수단이 아직 다른 계정의 것인지·본인확인으로 고른 대표가 그대로인지 →
+// 탈퇴 유예·같은 종류의 로그인 수단(SAME_PROVIDER_KIND, OPEN[21]) → 로그인 수단·기기 행 이전(OPEN[22])·MERGED·이메일 지우기·사슬 고치기·account_merge → 흡수 계정 세션 끝내기(MERGED) → 병합 사건.
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import { MERGE_PROPOSALS, type MergeProposals, MergeCheckUnavailable, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_STORE, type SessionStore } from '../domain/ports.js';
-import { choosePrimary } from '../domain/merge.js';
+import { choosePrimary, sharedProviderKinds } from '../domain/merge.js';
 import { sessionAlive, WITHDRAWAL_REAUTH_ACT } from '../domain/session.js';
 import { MergeError } from './merge-error.js';
 import { MergePlanner } from './plan-merge.js';
@@ -53,7 +54,7 @@ export class ConfirmMerge {
     if (plan.blockers.length > 0) {
       // 끝난 계정(탈퇴·병합됨)이 있으면 막는 사유보다 먼저 없는 제안이다(트랜잭션 안의 차례와 같게, 재검토 2026-11-05)
       if (await this.#ended(p.primaryAccountId, p.absorbedAccountId)) await this.#stale(p.id, '병합할 수 있는 계정이 아니다');
-      throw new MergeError('BLOCKED', '병합을 막는 사유가 있다', plan.blockers);
+      throw new MergeError('BLOCKED', '병합을 막는 사유가 있다', plan.blockers, plan.sameKindProviders);
     }
     const now = this.clock.now();
     const mergeId = uuidv7(this.clock);
@@ -83,6 +84,9 @@ export class ConfirmMerge {
         }
         // 잠근 뒤에 탈퇴 유예에 들어간 계정은 막는 사유다(409, 제안은 남는다, BOT-042가 넘긴 것)
         if (statuses.includes('WITHDRAWAL_PENDING')) throw new MergeError('BLOCKED', '탈퇴 정리 중인 계정이 있다', ['WITHDRAWAL_IN_PROGRESS']);
+        // 잠근 뒤 두 계정의 로그인 수단 종류를 다시 견준다: 확정 직전 확인 뒤에 한쪽이 같은 종류를 이었으면 막는 사유다(409, 제안은 남고 토큰은 되돌린다, OPEN[21])
+        const same = sharedProviderKinds((await tx.providersOf(p.primaryAccountId)).map((x) => x.provider), (await tx.providersOf(p.absorbedAccountId)).map((x) => x.provider));
+        if (same.length > 0) throw new MergeError('BLOCKED', '두 계정에 같은 종류의 다른 로그인 수단이 있다', ['SAME_PROVIDER_KIND'], same);
         const open = await tx.unterminatedSessions(p.absorbedAccountId);
         await tx.mergeAccounts({ mergeId, primaryAccountId: p.primaryAccountId, absorbedAccountId: p.absorbedAccountId, mergedProvider: p.newProvider, moved: { ...plan.moved }, requestedAt: p.createdAt, now });
         // 흡수 계정의 모든 세션을 끝낸다(세션 종료 사건 MERGED), 그다음 마지막 쓰기로 병합 사건

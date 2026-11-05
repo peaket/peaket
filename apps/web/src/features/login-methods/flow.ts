@@ -40,15 +40,17 @@ export type Pending =
   /** 계정 합치기: provider는 다시 로그인한 제공자(확인 창의 '카카오로 다시 로그인했습니다') */
   | { action: 'merge'; provider: Provider; proposalId: string; at: number };
 
-/** openapi MergeProposal.blockers */
-export const MERGE_BLOCKERS = ['ACTIVE_PURCHASE_SESSION', 'PENDING_PAYMENT', 'QUOTA_EXCEEDED', 'BOTH_VERIFIED', 'WITHDRAWAL_IN_PROGRESS', 'APPEAL_PENDING', 'ENTRY_STARTED'] as const;
+/** openapi MergeProposal.blockers(SAME_PROVIDER_KIND는 소유자 결정 2026-11-05, OPEN[21] 추천 적용) */
+export const MERGE_BLOCKERS = ['ACTIVE_PURCHASE_SESSION', 'PENDING_PAYMENT', 'QUOTA_EXCEEDED', 'BOTH_VERIFIED', 'WITHDRAWAL_IN_PROGRESS', 'APPEAL_PENDING', 'ENTRY_STARTED', 'SAME_PROVIDER_KIND'] as const;
 export type MergeBlocker = (typeof MERGE_BLOCKERS)[number];
-/** 화면의 다섯 범주(d5 §5.22 blocked, entities/provider MergeBlockerCode와 같은 이름) */
-export type MergeCategory = 'ACTIVE_PURCHASE' | 'QUOTA_EXCEEDED' | 'BOTH_VERIFIED' | 'WITHDRAWAL_OR_APPEAL' | 'ENTRY_STARTED';
+/** 화면의 여섯 범주(d5 §5.22 blocked, entities/provider MergeBlockerCode와 같은 이름) */
+export type MergeCategory = 'ACTIVE_PURCHASE' | 'QUOTA_EXCEEDED' | 'BOTH_VERIFIED' | 'WITHDRAWAL_OR_APPEAL' | 'ENTRY_STARTED' | 'SAME_PROVIDER_KIND';
 export interface MergeProposalView {
   id: string;
   status: 'PROPOSED' | 'BLOCKED';
   blockers: MergeBlocker[];
+  /** SAME_PROVIDER_KIND로 막혔을 때 두 계정에 함께 있는 종류(openapi MergeProposal.sameKindProviders). 서버가 주지 않으면 없다 */
+  sameKindProviders?: Provider[];
   moved: { providers: number; wishes: number; subscriptions: number; addresses: number; orders: number };
   /** 끝나는 시각을 기기 시계 값으로 옮긴 유닉스 밀리초(서버 시각 − 보정 시계 차). 남은 시간·만료 전환은 기기 시계(Date.now)와 견준다(BOT-043이 넘긴 것) */
   expiresAt: number;
@@ -59,7 +61,7 @@ export interface MergeProposalView {
 export type MergeAnswer = { kind: 'ok'; proposal: MergeProposalView } | { kind: 'expired' } | { kind: 'login' } | { kind: 'error' };
 export type ConfirmMergeAnswer =
   | { kind: 'accepted' }
-  | { kind: 'blocked'; blockers: MergeBlocker[] }
+  | { kind: 'blocked'; blockers: MergeBlocker[]; sameKindProviders?: Provider[] }
   | { kind: 'invariant' }
   | { kind: 'expired' }
   | { kind: 'reauth' }
@@ -73,6 +75,11 @@ const isBlocker = (v: unknown): v is MergeBlocker => typeof v === 'string' && (M
 const count = (v: unknown): number => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : 0);
 
 export const isProvider = (v: unknown): v is Provider => typeof v === 'string' && (PROVIDERS as readonly string[]).includes(v);
+/** 응답의 sameKindProviders(아는 종류만, 없거나 비면 칸을 두지 않는다) */
+const sameKindsOf = (v: unknown): { sameKindProviders?: Provider[] } => {
+  const kinds = Array.isArray(v) ? v.filter(isProvider) : [];
+  return kinds.length > 0 ? { sameKindProviders: kinds } : {};
+};
 
 async function problemType(r: Response): Promise<string> {
   try {
@@ -196,6 +203,7 @@ export function createLoginMethodsApi(o: {
             id,
             status: b.status,
             blockers,
+            ...sameKindsOf(b.sameKindProviders),
             moved: { providers: count(moved.providers), wishes: count(moved.wishes), subscriptions: count(moved.subscriptions), addresses: count(moved.addresses), orders: count(moved.orders) },
             expiresAt: expiresAt - skew,
             newProvider: b.newProvider,
@@ -224,10 +232,10 @@ export function createLoginMethodsApi(o: {
       if (r.status === 503) return { kind: 'unavailable' };
       if (r.status === 409) {
         try {
-          const b = (await r.json()) as { type?: unknown; blockers?: unknown };
+          const b = (await r.json()) as { type?: unknown; blockers?: unknown; sameKindProviders?: unknown };
           const type = typeof b.type === 'string' ? (b.type.split('/').pop() ?? '') : '';
           if (type === 'merge-invariant-violated') return { kind: 'invariant' };
-          if (type === 'merge-blocked') return { kind: 'blocked', blockers: (Array.isArray(b.blockers) ? b.blockers : []).filter(isBlocker) };
+          if (type === 'merge-blocked') return { kind: 'blocked', blockers: (Array.isArray(b.blockers) ? b.blockers : []).filter(isBlocker), ...sameKindsOf(b.sameKindProviders) };
         } catch {
           return { kind: 'error' };
         }
@@ -351,8 +359,9 @@ export function dayText(iso: string | null): string | null {
 
 const PROVIDER_LABEL: Record<Provider, string> = { kakao: '카카오', naver: '네이버', google: '구글' };
 
-/** 사유 → 범주와 그 줄의 글(d5 §5.22 blocked) */
-const BLOCKER_TEXT: Record<MergeBlocker, { category: MergeCategory; detail: string; banner: string }> = {
+type BlockerText = { category: MergeCategory; detail: string; banner: string };
+/** 사유 → 범주와 그 줄의 글(d5 §5.22 blocked). SAME_PROVIDER_KIND는 겹친 종류로 글을 만든다(sameKindText) */
+const BLOCKER_TEXT: Record<Exclude<MergeBlocker, 'SAME_PROVIDER_KIND'>, BlockerText> = {
   ACTIVE_PURCHASE_SESSION: { category: 'ACTIVE_PURCHASE', detail: '해당 · 진행 중인 좌석 홀드나 구매가 있습니다', banner: '진행 중인 구매가 있어 합칠 수 없습니다. 구매를 마치거나 취소한 뒤 다시 추가해 주세요.' },
   PENDING_PAYMENT: { category: 'ACTIVE_PURCHASE', detail: '해당 · 결제를 기다리는 주문이 있습니다', banner: '결제를 기다리는 주문이 있어 합칠 수 없습니다. 결제를 마치거나 취소한 뒤 다시 추가해 주세요.' },
   QUOTA_EXCEEDED: { category: 'QUOTA_EXCEEDED', detail: '해당 · 두 계정의 보유 매수를 합치면 한도를 넘습니다', banner: '두 계정의 보유 매수를 합치면 한도를 넘어 합칠 수 없습니다. 보유 매수를 한도 안으로 줄인 뒤 다시 추가해 주세요.' },
@@ -361,21 +370,38 @@ const BLOCKER_TEXT: Record<MergeBlocker, { category: MergeCategory; detail: stri
   APPEAL_PENDING: { category: 'WITHDRAWAL_OR_APPEAL', detail: '해당 · 흡수될 계정의 이의 제기를 처리하고 있습니다', banner: '흡수될 계정의 이의 제기를 처리하고 있어 합칠 수 없습니다. 처리가 끝난 뒤 다시 추가해 주세요.' },
   ENTRY_STARTED: { category: 'ENTRY_STARTED', detail: '해당 · 입장이 시작된 회차의 티켓이 있습니다', banner: '입장 중인 회차의 티켓이 있어 합칠 수 없습니다. 입장 기록이 마감된 뒤 다시 추가해 주세요.' },
 };
-const CATEGORY_ORDER: readonly MergeCategory[] = ['ACTIVE_PURCHASE', 'QUOTA_EXCEEDED', 'BOTH_VERIFIED', 'WITHDRAWAL_OR_APPEAL', 'ENTRY_STARTED'];
+/** 두 계정에 같은 종류의 다른 로그인 수단(d5 §5.22 blocked 여섯째 줄, 소유자 결정 2026-11-05, OPEN[21] 추천 적용). 종류를 모르면 '같은 종류의 다른 로그인 수단' */
+function sameKindText(kinds: readonly Provider[] = []): BlockerText {
+  if (kinds.length === 0) {
+    return {
+      category: 'SAME_PROVIDER_KIND',
+      detail: '해당 · 두 계정에 같은 종류의 다른 로그인 수단이 연결되어 있습니다',
+      banner: '두 계정에 같은 종류의 다른 로그인 수단이 연결되어 있어 합칠 수 없습니다. 한쪽 계정에서 그 수단의 연결을 해제한 뒤 다시 추가해 주세요.',
+    };
+  }
+  const names = kinds.map((k) => PROVIDER_LABEL[k]).join('·');
+  return {
+    category: 'SAME_PROVIDER_KIND',
+    detail: `해당 · 두 계정에 서로 다른 ${names} 계정이 연결되어 있습니다`,
+    banner: `두 계정에 서로 다른 ${names} 계정이 연결되어 있어 합칠 수 없습니다. 한쪽 계정에서 ${names} 연결을 해제한 뒤 다시 추가해 주세요.`,
+  };
+}
+const CATEGORY_ORDER: readonly MergeCategory[] = ['ACTIVE_PURCHASE', 'QUOTA_EXCEEDED', 'BOTH_VERIFIED', 'WITHDRAWAL_OR_APPEAL', 'ENTRY_STARTED', 'SAME_PROVIDER_KIND'];
 
-/** 합치기 카드(ds MergeSummary)에 넘길 글. titles는 다섯 범주의 줄 이름(entities/provider MERGE_CHECK_TITLES) */
+/** 합치기 카드(ds MergeSummary)에 넘길 글. titles는 여섯 범주의 줄 이름(entities/provider MERGE_CHECK_TITLES) */
 export function mergeView(p: MergeProposalView, now: number, titles: Record<MergeCategory, string>) {
   const name = PROVIDER_LABEL[p.newProvider];
   const theirs = `${name}로 로그인하는 계정`;
   const verified = p.primaryVerified ? ' · 본인확인 완료' : '';
+  const text = (b: MergeBlocker): BlockerText => (b === 'SAME_PROVIDER_KIND' ? sameKindText(p.sameKindProviders) : BLOCKER_TEXT[b]);
   const checks =
     p.status === 'BLOCKED' && p.blockers.length > 0
       ? CATEGORY_ORDER.map((c) => {
-          const hit = p.blockers.filter((b) => BLOCKER_TEXT[b].category === c);
-          return { title: titles[c], detail: hit.length ? hit.map((b) => BLOCKER_TEXT[b].detail).join(' / ') : '해당 없음', blocked: hit.length > 0 };
+          const hit = p.blockers.filter((b) => text(b).category === c);
+          return { title: titles[c], detail: hit.length ? hit.map((b) => text(b).detail).join(' / ') : '해당 없음', blocked: hit.length > 0 };
         })
       : [];
-  const first = CATEGORY_ORDER.flatMap((c) => p.blockers.filter((b) => BLOCKER_TEXT[b].category === c))[0];
+  const first = CATEGORY_ORDER.flatMap((c) => p.blockers.filter((b) => text(b).category === c))[0];
   return {
     question: `${name} 계정은 이미 다른 PEAKET 계정입니다. 두 계정을 합칠까요? 합치면 되돌릴 수 없습니다`,
     blockedQuestion: `${name} 계정은 이미 다른 PEAKET 계정입니다`,
@@ -390,7 +416,7 @@ export function mergeView(p: MergeProposalView, now: number, titles: Record<Merg
     movesNote: p.moved.orders > 0 ? `흡수 계정의 주문 ${p.moved.orders}건은 원래 기록 그대로 두고 대표 계정의 '내 주문'에 함께 보입니다` : undefined,
     keeps: '닉네임 · 동의 내역',
     remaining: Math.max(0, Math.ceil((p.expiresAt - now) / 1000)),
-    blockedReason: first ? BLOCKER_TEXT[first].banner : '지금은 두 계정을 합칠 수 없습니다. 고객센터로 문의해 주세요.',
+    blockedReason: first ? text(first).banner : '지금은 두 계정을 합칠 수 없습니다. 고객센터로 문의해 주세요.',
     checks,
     merging: {
       message: '처리 중입니다. 완료되면 알림으로 안내해 드립니다',
@@ -497,7 +523,11 @@ export function mergeAfterConfirm(m: MergeState, r: ConfirmMergeAnswer): MergeSt
     if (m.view?.requesterRole === 'MERGED') return { go: MERGED_AWAY_PATH, mergedAway: true };
     return { merge: { ...base, phase: 'merging' }, reload: true };
   }
-  if ((r.kind === 'blocked' || r.kind === 'invariant') && m.view) return { merge: { ...base, view: { ...m.view, status: 'BLOCKED', blockers: r.kind === 'blocked' ? r.blockers : [] }, phase: 'blocked' } };
+  if ((r.kind === 'blocked' || r.kind === 'invariant') && m.view) {
+    // 같은 종류의 로그인 수단으로 막혔으면 409가 준 종류로 글을 만든다(주지 않았으면 제안의 값, OPEN[21])
+    const kinds = r.kind === 'blocked' && r.sameKindProviders ? { sameKindProviders: r.sameKindProviders } : {};
+    return { merge: { ...base, view: { ...m.view, status: 'BLOCKED', blockers: r.kind === 'blocked' ? r.blockers : [], ...kinds }, phase: 'blocked' } };
+  }
   if (r.kind === 'expired') return { merge: { ...base, phase: 'expired' } };
   if (r.kind === 'unavailable') return { merge: { ...base, token: m.token, error: confirmMergeText(r).text } };
   // 재인증 만료·그 밖: 토큰을 버리고 목록 위에 안내(카드는 그대로라 다시 로그인하고 계속할 수 있다)

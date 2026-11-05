@@ -173,7 +173,7 @@ test('합치기로재인증을떠날때의할일은제안ID를싣고_돌아오�
   assert.equal(isMergeProposalId(undefined), false);
 });
 
-const TITLES = { ACTIVE_PURCHASE: '진행', QUOTA_EXCEEDED: '한도', BOTH_VERIFIED: '둘다', WITHDRAWAL_OR_APPEAL: '탈퇴', ENTRY_STARTED: '입장' };
+const TITLES = { ACTIVE_PURCHASE: '진행', QUOTA_EXCEEDED: '한도', BOTH_VERIFIED: '둘다', WITHDRAWAL_OR_APPEAL: '탈퇴', ENTRY_STARTED: '입장', SAME_PROVIDER_KIND: '같은종류' };
 const view = (o) => ({ id: PID, status: 'PROPOSED', blockers: [], moved: { providers: 1, wishes: 5, subscriptions: 2, addresses: 1, orders: 3 }, expiresAt: 600_000, newProvider: 'google', requesterRole: 'PRIMARY', primaryVerified: true, ...o });
 
 test('I-T31_합치기요약은남는계정·옮겨오는것과개수·주문안내·남은초를싣고_지금계정이흡수되는쪽이면남는계정은새제공자쪽이다', () => {
@@ -197,7 +197,7 @@ test('I-T31_합치기요약은남는계정·옮겨오는것과개수·주문안�
   assert.equal(mergeView(view({ primaryVerified: false }), 0, TITLES).survivor, '지금 계정');
 });
 
-test('I-T31_막는사유는다섯범주로모아줄마다해당없음이나사유를보이고_첫사유를알림으로_불변식위반은고객센터안내만이다', () => {
+test('I-T31_막는사유는여섯범주로모아줄마다해당없음이나사유를보이고_첫사유를알림으로_불변식위반은고객센터안내만이다', () => {
   const v = mergeView(view({ status: 'BLOCKED', blockers: ['PENDING_PAYMENT', 'APPEAL_PENDING'] }), 0, TITLES);
   assert.deepEqual(
     v.checks.map((c) => [c.title, c.blocked]),
@@ -207,6 +207,7 @@ test('I-T31_막는사유는다섯범주로모아줄마다해당없음이나사�
       ['둘다', false],
       ['탈퇴', true],
       ['입장', false],
+      ['같은종류', false],
     ],
   );
   assert.equal(v.checks[1].detail, '해당 없음');
@@ -216,6 +217,40 @@ test('I-T31_막는사유는다섯범주로모아줄마다해당없음이나사�
   const inv = mergeView(view({ status: 'BLOCKED', blockers: [] }), 0, TITLES);
   assert.deepEqual(inv.checks, []);
   assert.match(inv.blockedReason, /고객센터/);
+});
+
+test('I-T31_OPEN21_같은종류의로그인수단으로막히면여섯째줄과알림이그종류이름을말하고_둘이면가운뎃점으로잇고_종류를모르면같은종류의다른로그인수단이다', () => {
+  const v = mergeView(view({ status: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['kakao'] }), 0, TITLES);
+  assert.deepEqual(v.checks.at(-1), { title: '같은종류', detail: '해당 · 두 계정에 서로 다른 카카오 계정이 연결되어 있습니다', blocked: true });
+  assert.deepEqual(
+    v.checks.slice(0, 5).map((c) => c.blocked),
+    [false, false, false, false, false],
+  );
+  assert.equal(v.blockedReason, '두 계정에 서로 다른 카카오 계정이 연결되어 있어 합칠 수 없습니다. 한쪽 계정에서 카카오 연결을 해제한 뒤 다시 추가해 주세요.');
+  const two = mergeView(view({ status: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['kakao', 'naver'] }), 0, TITLES);
+  assert.match(two.blockedReason, /서로 다른 카카오·네이버 계정이 연결되어 있어.*카카오·네이버 연결을 해제한 뒤/);
+  const unknown = mergeView(view({ status: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'] }), 0, TITLES);
+  assert.equal(unknown.checks.at(-1).detail, '해당 · 두 계정에 같은 종류의 다른 로그인 수단이 연결되어 있습니다');
+  assert.equal(unknown.blockedReason, '두 계정에 같은 종류의 다른 로그인 수단이 연결되어 있어 합칠 수 없습니다. 한쪽 계정에서 그 수단의 연결을 해제한 뒤 다시 추가해 주세요.');
+  // 다른 사유와 함께면 알림은 앞 범주의 사유다(여섯째 범주는 마지막)
+  assert.match(mergeView(view({ status: 'BLOCKED', blockers: ['ENTRY_STARTED', 'SAME_PROVIDER_KIND'], sameKindProviders: ['google'] }), 0, TITLES).blockedReason, /입장 중인 회차/);
+});
+
+test('I-T31·I-T32_OPEN21_제안조회와확정409는sameKindProviders를옮기고_모르는종류는버리며_없거나비면칸을두지않고_막힌확정은그종류로카드를바꾼다', async () => {
+  const got = async (body) => createLoginMethodsApi({ origin: '', fetch: fakeFetch(() => json(200, body)) }).getMerge(PID);
+  const r = await got(proposalBody({ status: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['naver', 'apple'] }));
+  assert.equal(r.kind, 'ok');
+  assert.deepEqual([r.proposal.blockers, r.proposal.sameKindProviders], [['SAME_PROVIDER_KIND'], ['naver']]);
+  assert.equal('sameKindProviders' in (await got(proposalBody({ sameKindProviders: [] }))).proposal, false);
+  assert.equal('sameKindProviders' in (await got(proposalBody())).proposal, false);
+  const ans = async (res) => createLoginMethodsApi({ origin: '', fetch: fakeFetch(() => res) }).confirmMerge(PID, 't');
+  const blocked = await ans(json(409, { type: 'https://peaket.example/problems/merge-blocked', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['google'] }));
+  assert.deepEqual(blocked, { kind: 'blocked', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['google'] });
+  // 확정 트랜잭션이 잠근 뒤 찾은 겹침: 카드는 409가 준 종류로 막힘이 된다
+  const m = mergeAfterConfirm({ id: PID, view: view(), phase: 'ready', token: { token: 'tok', via: 'kakao' } }, blocked);
+  assert.deepEqual(m.merge.view, view({ status: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['google'] }));
+  assert.equal(m.merge.phase, 'blocked');
+  assert.match(mergeView(m.merge.view, 0, TITLES).blockedReason, /서로 다른 구글 계정/);
 });
 
 test('I-T34_다른계정의로그인수단인데병합제안이없으면_잠시뒤다시추가하라고안내한다', () => {

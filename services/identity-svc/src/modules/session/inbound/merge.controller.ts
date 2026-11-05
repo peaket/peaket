@@ -17,7 +17,13 @@ function problemOf(e: MergeError): ProblemError {
     case 'REAUTH_REQUIRED':
       return new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
     case 'BLOCKED':
-      return new ProblemError({ type: 'merge-blocked', status: 409, title: '지금은 두 계정을 합칠 수 없습니다', extensions: { blockers: e.blockers ?? [] } });
+      // 같은 종류의 로그인 수단으로 막았으면 그 종류도 싣는다(화면 문구, openapi MergeProposal.sameKindProviders, OPEN[21])
+      return new ProblemError({
+        type: 'merge-blocked',
+        status: 409,
+        title: '지금은 두 계정을 합칠 수 없습니다',
+        extensions: { blockers: e.blockers ?? [], ...(e.sameKindProviders?.length ? { sameKindProviders: e.sameKindProviders } : {}) },
+      });
     case 'INVARIANT':
       return new ProblemError({ type: 'merge-invariant-violated', status: 409, title: '지금은 두 계정을 합칠 수 없습니다. 고객센터로 문의해 주세요' });
     case 'UNAVAILABLE':

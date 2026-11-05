@@ -90,8 +90,10 @@ export interface SessionTx {
   /** before 전에 닫힌 account_hold 행을 지운다. 지운 수 */
   purgeClosedHolds(before: number): Promise<number>;
   /**
-   * 병합 확정의 계정 쓰기(identity §2.1 '계정 병합의 첫 구현'): 흡수 계정의 로그인 수단을 대표 계정으로 옮기고, 흡수 계정을 MERGED로 바꾸며 이메일·닉네임을 지우고,
-   * 흡수 계정을 가리키던 계정도 대표 계정을 가리키게 고친 뒤 account_merge 행을 남긴다. 세션 끝내기와 사건은 부르는 쪽이 한다
+   * 병합 확정의 계정 쓰기(identity §2.1 '계정 병합의 첫 구현'): 흡수 계정의 로그인 수단을 대표 계정으로 옮기고, 흡수 계정의 기기 행도 대표 계정으로 옮긴다
+   * (흡수 행의 device_ref·device_ref_prev가 대표 계정 행의 device_ref·device_ref_prev(빈 값 빼고)와 같으면 같은 기기라 흡수 쪽 행을 지운다. 그 행을 가리키던 세션의 기기 칸은 빈다.
+   * 흡수 행만 새 판이면(흡수 행의 device_ref_prev가 대표 행의 device_ref) 대표 행이 행 ID 그대로 흡수 행의 두 값을 이어받은 뒤 흡수 행을 지운다, identity §9.1 '병합 때 기기 행', OPEN[22]). 흡수 계정을 MERGED로 바꾸며 이메일·닉네임을 지우고, 흡수 계정을 가리키던 계정도 대표 계정을 가리키게 고친 뒤
+   * account_merge 행을 남긴다. 세션 끝내기와 사건은 부르는 쪽이 한다
    */
   mergeAccounts(i: { mergeId: string; primaryAccountId: string; absorbedAccountId: string; mergedProvider: Provider; moved: Record<string, number>; requestedAt: number; now: number }): Promise<void>;
   /** 병합 사건(identity.accounts-merged)을 Outbox에 적는다. 트랜잭션의 마지막 쓰기다 */

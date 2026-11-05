@@ -4,7 +4,7 @@
 //   ready: p.t-md.fw-b 질문 → dl.kv(남는 계정·합쳐지는 계정) → '옮겨 오는 것'(h3 + ul 두 칸 그리드 + 주문 안내 p.t-xs)
 //          → '대표 계정 것을 그대로 쓰는 것' → [카카오로 다시 로그인하고 계속] [합치지 않고 닫기]
 //          휴대폰은 위에서 아래로 쌓고 사이에 .divider, 태블릿은 dl | 옮겨 오는 것 두 칸, 데스크톱은 (dl+그대로 쓰는 것) | .card-flat(옮겨 오는 것).
-//   blocked: 질문 → .banner.banner-danger role=alert(막는 사유) → '합치기 전에 확인하는 다섯 가지'(줄마다 확인·막음 아이콘, 줄이 없으면 빼고 안내만) → [합치지 않고 닫기].
+//   blocked: 질문 → .banner.banner-danger role=alert(막는 사유) → '합치기 전에 확인하는 여섯 가지'(줄마다 확인·막음 아이콘, 줄이 없으면 빼고 안내만. 보드는 다섯 가지이고 여섯째 '두 계정에 같은 종류의 로그인 수단'은 d5 §5.22, 2026-11-05 OPEN[21]) → [합치지 않고 닫기].
 //   merging: role=status 문장 + .progress(단계 수) → ol.timeline(완료·진행 중·대기) → 닫아도 계속된다는 안내.
 //   expired: .banner.banner-warning role=alert → [닫기]. loading: 요약 스켈레톤(aria-busy).
 // - 옮겨지는 자산은 ul, 막는 사유는 role="alert", 최종 확인 버튼은 요약 아래(d2 CMP-056). 문구는 부르는 화면이 넘기고, 고정 이름은 labels로 바꾼다.
@@ -44,7 +44,7 @@ export const MERGE_SUMMARY_LABELS: MergeSummaryLabels = {
   timer: "합치기 제안 남은 시간",
   blockedBadge: "합칠 수 없음",
   mergingBadge: "처리 중",
-  checks: "합치기 전에 확인하는 다섯 가지",
+  checks: "합치기 전에 확인하는 여섯 가지",
   dismiss: "합치지 않고 닫기",
   close: "닫기",
   loading: "합칠 내용을 계산하는 중",
@@ -86,7 +86,7 @@ export interface MergeSummaryProps {
   deadline?: number;
   /** blocked: 막는 사유(role=alert) */
   blockedReason?: ReactNode;
-  /** blocked: 다섯 범주 */
+  /** blocked: 여섯 범주(d5 §5.22) */
   checks?: readonly MergeCheck[];
   /** merging */
   merging?: { message: ReactNode; progressLabel: string; steps: readonly MergeStep[]; note?: ReactNode };

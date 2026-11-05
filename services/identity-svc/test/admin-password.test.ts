@@ -1,6 +1,7 @@
 // 관리 계정 비밀번호 저장과 정책(docs/features/identity.md §6 '관리 계정 비밀번호 저장과 정책의 첫 구현', docs/security/auth-controls.md §4·§5, BUILD_ORDER BOT-110).
 // 시험: I-T14(길이·맥락·유출·긴 암호문), AC-T6(금칙어 대조 예 아홉), AC-T7 ①②(시험 유출 목록 서버), AC-T10(설정 범위). 메모리 저장소와 로컬 페퍼 키로 본다.
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import { fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -9,7 +10,7 @@ import { KmsPepper, type PepperMacClient } from '../src/modules/admin/adapters/k
 import { LocalPepper } from '../src/modules/admin/adapters/local-pepper.js';
 import { MemoryAdminAccountStore } from '../src/modules/admin/adapters/memory-admin-account-store.js';
 import { Pbkdf2AdminPasswords } from '../src/modules/admin/adapters/pbkdf2-admin-passwords.js';
-import { loadPolicyLists } from '../src/modules/admin/adapters/word-list-files.js';
+import { COMMON_PASSWORDS_FILE, loadPolicyLists } from '../src/modules/admin/adapters/word-list-files.js';
 import { AdminPasswordError, PASSWORD_ADVICE, REJECTION_TEXT } from '../src/modules/admin/application/admin-password-error.js';
 import { SetAdminPassword } from '../src/modules/admin/application/set-admin-password.js';
 import { adminAuthConfigFromEnv, DEFAULT_ADMIN_AUTH_CONFIG } from '../src/modules/admin/domain/auth-config.js';
@@ -108,10 +109,11 @@ describe('정책 판정(auth-controls §4.3, I-T14, AC-T6)', () => {
     expect(judgePassword('aaaaaaaaaaaaaaaa', ctx, lists, cfg)).toEqual({ ok: false, reason: 'COMMON' });
     expect(judgePassword('ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ1234567', ctx, lists, cfg)).toEqual({ ok: false, reason: 'COMMON' });
     expect(judgePassword('9876543210987654', ctx, lists, cfg)).toEqual({ ok: false, reason: 'COMMON' });
-    // 흔한 목록 파일에 든 것
+    // 흔한 목록 파일에 든 것(공개 목록에서 거른 줄, OPEN[19] 추천 적용)
     expect(lists.common.size).toBeGreaterThan(0);
-    const listed = 'football12345678';
+    const listed = 'welcometomyworld';
     expect(judgePassword(listed, ctx, lists, cfg)).toEqual({ ok: false, reason: 'COMMON' });
+    expect(judgePassword('Mailcreated5240', ctx, lists, cfg)).toEqual({ ok: false, reason: 'COMMON' });
     // 맥락 말이 들어 있기만 한 긴 문장은 받는다
     expect(judgePassword('administrator라는말이들어간긴문장입니다아주길게', ctx, lists, cfg)).toEqual({ ok: true });
   });
@@ -141,7 +143,27 @@ describe('정책 판정(auth-controls §4.3, I-T14, AC-T6)', () => {
   });
 
   test('I-T14_흔한목록은바꿈꼴로도대조한다', () => {
-    expect(judgePassword('f00tball12345678', { email: 'ops@peaket.example' }, lists, cfg)).toEqual({ ok: false, reason: 'COMMON' });
+    expect(judgePassword('w3lc0m3t0myw0rld', { email: 'ops@peaket.example' }, lists, cfg)).toEqual({ ok: false, reason: 'COMMON' });
+  });
+
+  test('[ASVS v5.0.0-6.2.4]_흔한비밀번호목록은공개목록의판을고정해적고_15자이상인것만3000개이상이다(OPEN[19])', () => {
+    const text = readFileSync(COMMON_PASSWORDS_FILE, 'utf8');
+    const header = text.split('\n').filter((l) => l.startsWith('#')).join('\n');
+    // 출처(저장소·파일)와 고정한 판(커밋 40자), 받은 파일의 SHA-256을 머리에 적는다(auth-controls §4.1 L1)
+    expect(header).toMatch(/danielmiessler\/SecLists/);
+    expect(header).toMatch(/\b[0-9a-f]{40}\b/);
+    expect(header).toMatch(/sha256 [0-9a-f]{64}/);
+    const entries = text.split('\n').filter((l) => l !== '' && !l.startsWith('#'));
+    // 정책 길이(15자)를 채우는 흔한 비밀번호가 3,000개 이상이고, 머리에 적은 개수가 실제 줄 수와 같다
+    expect(entries.filter((e) => [...e].length >= 15).length).toBeGreaterThanOrEqual(3000);
+    expect(header).toContain(`모두 ${entries.length}개`);
+    expect(new Set(entries).size).toBe(entries.length);
+  });
+
+  // 새 맥락 리뷰(2026-11-05) 재현: 대조는 기본 사본(소문자, 공백·-·_·. 지움)으로 하므로, 짧은 흔한 비밀번호에 구분 글자를 끼워 15자를 채운 것도 막아야 한다
+  test('[ASVS v5.0.0-6.2.4]_I-T14_짧은흔한비밀번호에구분글자를끼워15자를채워도COMMON이다', () => {
+    const ctx: PasswordContext = { email: 'ops@peaket.example' };
+    for (const pw of ['p.a.s.s.w.o.r.d', 'i love you baby', 'i-l-o-v-e-y-o-u']) expect([pw, judgePassword(pw, ctx, lists, cfg)]).toEqual([pw, { ok: false, reason: 'COMMON' }]);
   });
 
   test('[ASVS v5.0.0-6.1.2]_서비스맥락말은목록파일에서읽고_배포가더한파일의말도막는다', async () => {

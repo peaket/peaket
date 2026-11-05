@@ -13,6 +13,7 @@ import type { MergeProposalBlockersItem } from './mergeProposalBlockersItem';
 import type { MergeProposalMoved } from './mergeProposalMoved';
 import type { MergeProposalNewProvider } from './mergeProposalNewProvider';
 import type { MergeProposalRequesterRole } from './mergeProposalRequesterRole';
+import type { MergeProposalSameKindProvidersItem } from './mergeProposalSameKindProvidersItem';
 import type { MergeProposalStatus } from './mergeProposalStatus';
 
 export interface MergeProposal {
@@ -21,7 +22,10 @@ export interface MergeProposal {
   mergedAccountId?: string;
   status?: MergeProposalStatus;
   moved?: MergeProposalMoved;
+  /** 막는 사유(docs/features/identity.md §2.1). SAME_PROVIDER_KIND는 두 계정에 같은 종류의 다른 로그인 수단이 있다는 뜻이다(예: 두 계정이 서로 다른 카카오 계정을 가짐). 합치면 로그인 수단 '종류마다 하나' 규칙이 깨지므로 막고, 사용자가 한쪽 계정에서 그 수단을 해제한 뒤 다시 합친다(소유자 결정 2026-11-05, OPEN[21] 추천 적용) */
   blockers?: MergeProposalBlockersItem[];
+  /** blockers에 SAME_PROVIDER_KIND가 있을 때만 준다: 두 계정에 함께 있는 로그인 수단 종류(카카오·네이버·구글 순). 화면이 '두 계정에 서로 다른 카카오 계정이 연결되어 있습니다'처럼 어느 종류인지 말하는 데 쓴다(소유자 결정 2026-11-05, OPEN[21] 추천 적용) */
+  sameKindProviders?: MergeProposalSameKindProvidersItem[];
   expiresAt?: string;
   /** 추가하려던 로그인 수단의 종류(다른 계정의 것). 화면의 '구글 계정은 이미 다른 PEAKET 계정입니다' 문구에 쓴다(추천 적용 2026-11-04, BOT-043) */
   newProvider?: MergeProposalNewProvider;

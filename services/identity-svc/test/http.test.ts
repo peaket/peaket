@@ -295,6 +295,21 @@ describe('계정 병합 경로(BOT-042, I-T31·I-T32)', () => {
     expect((await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: { ...fan(a), 'x-reauth-token': await reauthOf(a) } })).statusCode).toBe(404);
   });
 
+  test('I-T31_OPEN21_두계정에같은종류의다른로그인수단이있으면_조회는BLOCKED와SAME_PROVIDER_KIND·sameKindProviders이고_확정은409merge-blocked와같은두칸이다', async () => {
+    const a = await login();
+    const gsub = `g-${newKey().slice(0, 8)}`;
+    const b = await svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'google', providerUserId: gsub, email: null, deviceId: null });
+    // 두 계정에 서로 다른 네이버 계정을 잇는다
+    for (const s of [a, b]) expect(await svc.app.get(AddProvider).run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: await reauthOf(s), provider: 'naver', providerUserId: `n-${newKey().slice(0, 8)}` })).toBe('LINKED');
+    const r = await svc.app.get(AddProvider).add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await reauthOf(a), provider: 'google', providerUserId: gsub });
+    const url = `/v1/identity/merge-proposals/${r.mergeProposalId}`;
+    const got = await svc.http.inject({ method: 'GET', url, headers: fan(a) });
+    expect(JSON.parse(got.payload)).toMatchObject({ status: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['naver'] });
+    const blocked = await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: { ...fan(a), 'x-reauth-token': await reauthOf(a) } });
+    expect(blocked.statusCode).toBe(409);
+    expect(JSON.parse(blocked.payload)).toMatchObject({ type: expect.stringMatching(/merge-blocked$/), blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['naver'] });
+  });
+
   test('새맥락리뷰낮음9_확정의막는사유는409merge-blocked와blockers_불변식위반은409merge-invariant-violated_세서비스가답하지않으면503과Retry-After다', async () => {
     let mode: 'ok' | 'blocked' | 'invariant' | 'down' = 'ok';
     const checkers = (['purchase', 'ticket', 'core'] as const).map((service) => ({
@@ -328,6 +343,8 @@ describe('계정 병합 경로(BOT-042, I-T31·I-T32)', () => {
       const blocked = await post();
       expect(blocked.statusCode).toBe(409);
       expect(JSON.parse(blocked.payload)).toMatchObject({ type: expect.stringMatching(/merge-blocked$/), blockers: ['ACTIVE_PURCHASE_SESSION'] });
+      // 같은 종류의 로그인 수단으로 막은 것이 아니면 sameKindProviders를 싣지 않는다
+      expect(JSON.parse(blocked.payload)).not.toHaveProperty('sameKindProviders');
       mode = 'invariant';
       const inv = await post();
       expect(inv.statusCode).toBe(409);

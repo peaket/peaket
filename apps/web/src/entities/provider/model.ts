@@ -67,8 +67,8 @@ export const MERGE_PROPOSAL = {
   blockedHeld: { mine: 2, absorbed: 3 },
 } as const;
 
-/** 합치기 전에 확인하는 다섯 가지(openapi MergeProposal.blockers 코드 순서, d5 §5.22 blocked) */
-export type MergeBlockerCode = 'ACTIVE_PURCHASE' | 'QUOTA_EXCEEDED' | 'BOTH_VERIFIED' | 'WITHDRAWAL_OR_APPEAL' | 'ENTRY_STARTED';
+/** 합치기 전에 확인하는 여섯 가지(openapi MergeProposal.blockers 코드 순서, d5 §5.22 blocked. 여섯째는 소유자 결정 2026-11-05, OPEN[21] 추천 적용) */
+export type MergeBlockerCode = 'ACTIVE_PURCHASE' | 'QUOTA_EXCEEDED' | 'BOTH_VERIFIED' | 'WITHDRAWAL_OR_APPEAL' | 'ENTRY_STARTED' | 'SAME_PROVIDER_KIND';
 
 export const MERGE_CHECK_TITLES: Record<MergeBlockerCode, string> = {
   ACTIVE_PURCHASE: '진행 중인 홀드·구매 세션·결제 대기',
@@ -76,6 +76,7 @@ export const MERGE_CHECK_TITLES: Record<MergeBlockerCode, string> = {
   BOTH_VERIFIED: '두 계정 모두 본인확인',
   WITHDRAWAL_OR_APPEAL: '흡수될 계정의 탈퇴·이의 제기 처리 중',
   ENTRY_STARTED: '입장 중인 회차의 티켓',
+  SAME_PROVIDER_KIND: '두 계정에 같은 종류의 로그인 수단',
 };
 
 /** 세션 종료 사유(asyncapi SessionTerminated, d5 §3.5 표의 팬 문구) */

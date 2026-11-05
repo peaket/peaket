@@ -560,6 +560,7 @@ export * from './mergeProposalBlockersItem';
 export * from './mergeProposalMoved';
 export * from './mergeProposalNewProvider';
 export * from './mergeProposalRequesterRole';
+export * from './mergeProposalSameKindProvidersItem';
 export * from './mergeProposalStatus';
 export * from './nicknameCheckResult';
 export * from './nicknameCheckResultReason';

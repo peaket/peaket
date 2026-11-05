@@ -280,6 +280,22 @@ export class DrizzleSessionStore implements SessionStore {
         (await tx.delete(accountHold).where(and(eq(accountHold.state, 'CLOSED'), lte(accountHold.updatedAt, date(before)))).returning({ r: accountHold.sourceRef })).length,
       mergeAccounts: async (i) => {
         await tx.update(accountProvider).set({ accountId: i.primaryAccountId }).where(eq(accountProvider.accountId, i.absorbedAccountId));
+        // 기기 행을 대표 계정으로 옮긴다(identity §9.1 '병합 때 기기 행', 소유자 결정 2026-11-05, OPEN[22] 추천 적용).
+        // ① 키 회전의 이음 기간에 흡수 계정만 그 기기로 다시 로그인했으면 흡수 행이 새 판이다(흡수 행의 device_ref_prev가 대표 행의 device_ref). 대표 행이 그 새 판 짝을
+        //    이어받는다(행 ID 그대로라 대표 계정 세션의 device_id가 이어진다). 대표 계정에 그 새 판 값의 행이 따로 있으면 바꾸지 않는다(UNIQUE (account_id, device_ref))
+        await tx.execute(sql`
+          update device p set device_ref = a.device_ref, device_ref_prev = a.device_ref_prev
+          from device a
+          where p.account_id = ${i.primaryAccountId} and a.account_id = ${i.absorbedAccountId} and a.device_ref_prev = p.device_ref
+            and not exists (select 1 from device q where q.account_id = ${i.primaryAccountId} and q.device_ref = a.device_ref)`);
+        // ② 대표 계정에 같은 기기가 있으면(옛 판 값까지 견준다. NULL은 IN에서 맞지 않는다) 흡수 쪽 행을 지운다: UNIQUE (account_id, device_ref)를 지키고 한 기기를 두 줄로 세지 않는다.
+        //    대표 행이 같은 판이거나 더 새 판이면 대표 행 그대로다. 지운 행을 가리키던 흡수 계정 세션의 device_id는 외래키 ON DELETE SET NULL로 빈다(그 세션들은 이 트랜잭션에서 MERGED로 끝난다)
+        await tx.execute(sql`
+          delete from device a where a.account_id = ${i.absorbedAccountId} and exists (
+            select 1 from device p where p.account_id = ${i.primaryAccountId}
+              and (p.device_ref in (a.device_ref, a.device_ref_prev) or p.device_ref_prev in (a.device_ref, a.device_ref_prev)))`);
+        // ③ 남은(대표 계정에 없는) 기기 행을 옮긴다
+        await tx.update(device).set({ accountId: i.primaryAccountId }).where(eq(device.accountId, i.absorbedAccountId));
         await tx
           .update(account)
           // 흡수 계정의 프로필은 병합 즉시 파기한다(POL-034, data-classification, 새 맥락 리뷰 중간 2). 회원 코드도 비운다(UNIQUE)

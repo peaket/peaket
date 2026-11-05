@@ -578,7 +578,8 @@ export const GetIdentityMergeProposalResponse = zod.object({
   "addresses": zod.int().optional(),
   "providers": zod.int().optional()
 }).optional(),
-  "blockers": zod.array(zod.enum(['ACTIVE_PURCHASE_SESSION', 'PENDING_PAYMENT', 'QUOTA_EXCEEDED', 'BOTH_VERIFIED', 'WITHDRAWAL_IN_PROGRESS', 'APPEAL_PENDING', 'ENTRY_STARTED'])).optional(),
+  "blockers": zod.array(zod.enum(['ACTIVE_PURCHASE_SESSION', 'PENDING_PAYMENT', 'QUOTA_EXCEEDED', 'BOTH_VERIFIED', 'WITHDRAWAL_IN_PROGRESS', 'APPEAL_PENDING', 'ENTRY_STARTED', 'SAME_PROVIDER_KIND'])).optional().describe('막는 사유(docs/features/identity.md §2.1). SAME_PROVIDER_KIND는 두 계정에 같은 종류의 다른 로그인 수단이 있다는 뜻이다(예: 두 계정이 서로 다른 카카오 계정을 가짐). 합치면 로그인 수단 \'종류마다 하나\' 규칙이 깨지므로 막고, 사용자가 한쪽 계정에서 그 수단을 해제한 뒤 다시 합친다(소유자 결정 2026-11-05, OPEN[21] 추천 적용)'),
+  "sameKindProviders": zod.array(zod.enum(['kakao', 'naver', 'google'])).optional().describe('blockers에 SAME_PROVIDER_KIND가 있을 때만 준다: 두 계정에 함께 있는 로그인 수단 종류(카카오·네이버·구글 순). 화면이 \'두 계정에 서로 다른 카카오 계정이 연결되어 있습니다\'처럼 어느 종류인지 말하는 데 쓴다(소유자 결정 2026-11-05, OPEN[21] 추천 적용)'),
   "expiresAt": zod.iso.datetime({"offset":true}).optional(),
   "newProvider": zod.enum(['kakao', 'naver', 'google']).optional().describe('추가하려던 로그인 수단의 종류(다른 계정의 것). 화면의 \'구글 계정은 이미 다른 PEAKET 계정입니다\' 문구에 쓴다(추천 적용 2026-11-04, BOT-043)'),
   "requesterRole": zod.enum(['PRIMARY', 'MERGED']).optional().describe('지금 로그인한 계정이 남는 쪽(PRIMARY)인지 흡수되는 쪽(MERGED)인지. MERGED면 확정 뒤 지금 세션이 끝난다(SCR-040 \'지금 계정이 흡수됨\', 추천 적용 2026-11-04, BOT-043)'),
@@ -586,7 +587,7 @@ export const GetIdentityMergeProposalResponse = zod.object({
 })
 
 /**
- * FR-048, POL-034. 막는 사유가 있으면 409(type merge-blocked, 본문 blockers), 흡수 계정에 티켓·후기가 있으면 409(type merge-invariant-violated, SEV3). 세 서비스 확인이 답하지 않으면 503과 Retry-After. 되돌리기 없음, 두 계정에 알림(docs/features/identity.md §2.1 '계정 병합의 첫 구현', 추천 적용 2026-11-04)
+ * FR-048, POL-034. 막는 사유가 있으면 409(type merge-blocked, 본문 blockers. 두 계정에 같은 종류의 다른 로그인 수단이 있어 막으면 본문 sameKindProviders도 준다, 소유자 결정 2026-11-05, OPEN[21] 추천 적용), 흡수 계정에 티켓·후기가 있으면 409(type merge-invariant-violated, SEV3). 세 서비스 확인이 답하지 않으면 503과 Retry-After. 되돌리기 없음, 두 계정에 알림(docs/features/identity.md §2.1 '계정 병합의 첫 구현', 추천 적용 2026-11-04)
  * @summary 병합 확인(재인증 토큰 필요). 흡수 계정 잠금·세션 종료 뒤 데이터 이동 시작
  */
 export const CreateIdentityMergeProposalConfirmationParams = zod.object({

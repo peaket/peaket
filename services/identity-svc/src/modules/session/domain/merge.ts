@@ -1,6 +1,6 @@
 // 계정 병합의 규칙(docs/features/identity.md §2.1 '계정 병합의 첫 구현', BUILD_ORDER BOT-042, POL-034, I-T31·I-T32).
 // 대표 계정 고르기, 세 서비스의 막는 사유를 openapi MergeProposal.blockers 코드로 옮기기, 요약 만들기. 저장소·호출은 모른다.
-import type { Provider } from './session.js';
+import { type Provider, PROVIDERS } from './session.js';
 
 /** 병합 제안의 수명 10분(docs/data.md id:merge) */
 export const MERGE_PROPOSAL_TTL_MS = 10 * 60_000;
@@ -9,9 +9,18 @@ export const MERGE_CHECK_DEADLINE_MS = 1_000;
 /** CLOSED account_hold 행을 남기는 기간 [가정](늦게 온 열림을 무시하려고) */
 export const ACCOUNT_HOLD_CLOSED_KEEP_MS = 30 * 86_400_000;
 
-/** openapi MergeProposal.blockers */
-export type MergeBlocker = 'ACTIVE_PURCHASE_SESSION' | 'PENDING_PAYMENT' | 'QUOTA_EXCEEDED' | 'BOTH_VERIFIED' | 'WITHDRAWAL_IN_PROGRESS' | 'APPEAL_PENDING' | 'ENTRY_STARTED';
-export const BLOCKER_ORDER: readonly MergeBlocker[] = ['ACTIVE_PURCHASE_SESSION', 'PENDING_PAYMENT', 'QUOTA_EXCEEDED', 'BOTH_VERIFIED', 'WITHDRAWAL_IN_PROGRESS', 'APPEAL_PENDING', 'ENTRY_STARTED'];
+/** openapi MergeProposal.blockers. SAME_PROVIDER_KIND: 두 계정에 같은 종류의 다른 로그인 수단(소유자 결정 2026-11-05, OPEN[21] 추천 적용) */
+export type MergeBlocker = 'ACTIVE_PURCHASE_SESSION' | 'PENDING_PAYMENT' | 'QUOTA_EXCEEDED' | 'BOTH_VERIFIED' | 'WITHDRAWAL_IN_PROGRESS' | 'APPEAL_PENDING' | 'ENTRY_STARTED' | 'SAME_PROVIDER_KIND';
+/** openapi 열거 순서와 같다(시험이 생성 Zod와 견준다) */
+export const BLOCKER_ORDER: readonly MergeBlocker[] = ['ACTIVE_PURCHASE_SESSION', 'PENDING_PAYMENT', 'QUOTA_EXCEEDED', 'BOTH_VERIFIED', 'WITHDRAWAL_IN_PROGRESS', 'APPEAL_PENDING', 'ENTRY_STARTED', 'SAME_PROVIDER_KIND'];
+
+/**
+ * 두 계정에 함께 있는 로그인 수단 종류(카카오·네이버·구글 순). 있으면 병합을 SAME_PROVIDER_KIND로 막는다:
+ * 둘 다 옮기면 대표 계정에 그 종류가 둘이 되어 '종류마다 하나'가 깨지고 종류 단위 해제가 어느 쪽을 지울지 모호해진다(identity §2.1, OPEN[21])
+ */
+export function sharedProviderKinds(a: readonly Provider[], b: readonly Provider[]): Provider[] {
+  return PROVIDERS.filter((p) => a.includes(p) && b.includes(p));
+}
 
 /** 세 서비스의 CheckAccountMerge가 돌려준 사유(proto enum 이름에서 접두어를 뗀 값) */
 export type CheckBlock =
@@ -49,6 +58,8 @@ export interface StoredMergeProposal {
   newProviderUserId: string;
   status: 'PROPOSED' | 'BLOCKED';
   blockers: MergeBlocker[];
+  /** blockers에 SAME_PROVIDER_KIND가 있을 때만: 두 계정에 함께 있는 종류(화면 문구, openapi MergeProposal.sameKindProviders). 이 칸을 두기 전에 저장한 제안에는 없다 */
+  sameKindProviders?: Provider[];
   /** 남는 계정이 본인확인을 마쳤는가(제안을 만든 때, 화면 문구 '본인확인한 계정', BOT-043) */
   primaryVerified: boolean;
   /** 흡수 계정에 티켓·후기가 있다(불변식 위반, SEV3) */
