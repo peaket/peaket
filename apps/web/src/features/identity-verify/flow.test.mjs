@@ -832,3 +832,28 @@ test('I-T45 복귀 화면의 VERIFIED 뒤 갱신이 401이면(세션이 끝남) 
   assert.deepEqual(JSON.parse(r.log.storage.get(RETURN_STORAGE_KEY)), { id: ID, at: 5_000, refreshed: false });
   assert.deepEqual(r.log.navigated, ['/events/e-7']);
 });
+
+test('SCR-005 [지금 본인확인]: 창을 먼저 연 뒤 앞일(가입 마무리)을 하고, 성공하면 정한 돌아갈 주소로 시작한다. 실패하면 창을 닫고 시작하지 않는다(ADR-0203 결정 5)', async () => {
+  const api = fakeApi({ start: [{ kind: 'started', id: ID, window: AGENCY }] });
+  const c = callerEnv({ api, path: '/signup/consent?next=%2Fevents%2Fe-1' });
+  const order = [];
+  startCallerFlow(c.env, {
+    purpose: 'FIRST',
+    next: '/events/e-1',
+    before: async () => (order.push(['before', c.log.opened.length]), true),
+    onWaiting() {},
+    onDone() {},
+  });
+  await c.time.advance(0);
+  assert.deepEqual(order, [['before', 1]], '창을 연 다음에 앞일');
+  assert.deepEqual(api.calls[0], ['start', '/events/e-1', 'FIRST'], '돌아갈 주소는 정한 값');
+
+  const api2 = fakeApi({});
+  const c2 = callerEnv({ api: api2 });
+  const done = [];
+  startCallerFlow(c2.env, { purpose: 'FIRST', before: async () => false, onWaiting() {}, onDone: (o) => done.push(o) });
+  await c2.time.advance(0);
+  assert.equal(c2.win.closed, true, '창을 닫는다');
+  assert.deepEqual(api2.calls, [], '본인확인을 시작하지 않는다');
+  assert.deepEqual(done, [], '결과 대화상자도 없다(부르는 화면이 오류를 보인다)');
+});

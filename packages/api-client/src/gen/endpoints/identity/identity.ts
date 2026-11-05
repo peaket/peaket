@@ -36,6 +36,8 @@ import type {
   CreateIdentityLinkProposalSeparateAccount201,
   CreateIdentityMinorContractCheck200,
   CreateIdentityMinorContractCheckBody,
+  CreateIdentityNicknameCheckBody,
+  CreateIdentitySignupCancellationBody,
   CreateIdentityVerificationBody,
   CreateIdentityVerificationResultBody,
   CreateStaffInvitationAcceptanceBody,
@@ -52,11 +54,13 @@ import type {
   ListWishes200,
   ListWishesParams,
   MergeProposal,
+  NicknameCheckResult,
   Problem,
   ProblemResponse,
   PushSubscriptionCreate,
   PushSubscriptionRegistered,
   ServiceUnavailableResponse,
+  SignupCompletionInput,
   StaffAssignment,
   StaffInvitationView,
   SubscriptionState,
@@ -2400,6 +2404,341 @@ export const useDeleteIdentitySession = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteIdentitySessionMutationOptions(options), queryClient);
+    }
+    export type createIdentitySignupCompletionResponse200 = {
+  data: FanAccountSummary
+  status: 200
+}
+
+export type createIdentitySignupCompletionResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createIdentitySignupCompletionResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createIdentitySignupCompletionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createIdentitySignupCompletionResponseSuccess = (createIdentitySignupCompletionResponse200) & {
+  headers: Headers;
+};
+export type createIdentitySignupCompletionResponseError = (createIdentitySignupCompletionResponse400 | createIdentitySignupCompletionResponse401 | createIdentitySignupCompletionResponse409) & {
+  headers: Headers;
+};
+
+export const getCreateIdentitySignupCompletionUrl = () => {
+
+
+
+
+  return `/v1/identity/signup-completions`
+}
+
+/**
+ * FR-001, POL-023(추천 적용 2026-11-05, ADR-0203). 처음 로그인 때 만든 계정의 가입을 마친다. 고지 문안의 판과 동의 일시는 서버가 정해 consent에 남긴다(data.md). 마케팅 수신 채널은 docs/planning/03 §1.2의 기본값 [가정]. 휴대폰 번호는 휴대폰 번호 수집 동의가 있을 때만 받는다. 닉네임 규칙(ADR-0203 결정 2): NFC, 앞뒤 공백 제거, 문자소 2~12개, 글자·숫자·가운데 공백 한 칸·_·.·-만, 중복은 NFKC·대소문자 접기 키. 성공하면 새 팬 계정 요약. Cache-Control: no-store
+ * @summary 가입 마무리(SCR-005): 만 14세 이상 확인·필수·선택 동의·닉네임·휴대폰 번호(선택)
+ */
+export const createIdentitySignupCompletion = async (signupCompletionInput: SignupCompletionInput, options?: Parameters<typeof orvalFetch>[1]): Promise<createIdentitySignupCompletionResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createIdentitySignupCompletionResponseSuccess>(getCreateIdentitySignupCompletionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(signupCompletionInput)
+  }
+);}
+
+
+
+
+
+export const getCreateIdentitySignupCompletionMutationKey = () => ['createIdentitySignupCompletion'] as const;
+
+export const getCreateIdentitySignupCompletionMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIdentitySignupCompletion>>, TError,CreateIdentitySignupCompletionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createIdentitySignupCompletion>>, TError,CreateIdentitySignupCompletionMutationVariables, TContext> => {
+
+const mutationKey = getCreateIdentitySignupCompletionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createIdentitySignupCompletion>>, CreateIdentitySignupCompletionMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createIdentitySignupCompletion(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateIdentitySignupCompletionMutationResult = NonNullable<Awaited<ReturnType<typeof createIdentitySignupCompletion>>>
+    export type CreateIdentitySignupCompletionMutationBody = BodyType<SignupCompletionInput>
+    export type CreateIdentitySignupCompletionMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreateIdentitySignupCompletionMutationVariables = {data: BodyType<SignupCompletionInput>}
+
+    /**
+ * @summary 가입 마무리(SCR-005): 만 14세 이상 확인·필수·선택 동의·닉네임·휴대폰 번호(선택)
+ */
+export const useCreateIdentitySignupCompletion = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIdentitySignupCompletion>>, TError,CreateIdentitySignupCompletionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createIdentitySignupCompletion>>,
+        TError,
+        CreateIdentitySignupCompletionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateIdentitySignupCompletionMutationOptions(options), queryClient);
+    }
+    export type createIdentityNicknameCheckResponse200 = {
+  data: NicknameCheckResult
+  status: 200
+}
+
+export type createIdentityNicknameCheckResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createIdentityNicknameCheckResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createIdentityNicknameCheckResponseSuccess = (createIdentityNicknameCheckResponse200) & {
+  headers: Headers;
+};
+export type createIdentityNicknameCheckResponseError = (createIdentityNicknameCheckResponse401 | createIdentityNicknameCheckResponse429) & {
+  headers: Headers;
+};
+
+export const getCreateIdentityNicknameCheckUrl = () => {
+
+
+
+
+  return `/v1/identity/nickname-checks`
+}
+
+/**
+ * FR-001(추천 적용 2026-11-05, ADR-0203 결정 3). 닉네임을 주소에 두지 않으려고 POST로 한다(guidelines §9). 참고용이고 확정은 가입 마무리의 409(nickname-taken)다. 세션마다 요청 한도 [가정], 넘으면 429와 Retry-After. Cache-Control: no-store
+ * @summary 닉네임 확인(가입 완료 화면의 실시간 중복 검사)
+ */
+export const createIdentityNicknameCheck = async (createIdentityNicknameCheckBody: CreateIdentityNicknameCheckBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createIdentityNicknameCheckResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createIdentityNicknameCheckResponseSuccess>(getCreateIdentityNicknameCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createIdentityNicknameCheckBody)
+  }
+);}
+
+
+
+
+
+export const getCreateIdentityNicknameCheckMutationKey = () => ['createIdentityNicknameCheck'] as const;
+
+export const getCreateIdentityNicknameCheckMutationOptions = <TError = ErrorType<UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIdentityNicknameCheck>>, TError,CreateIdentityNicknameCheckMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createIdentityNicknameCheck>>, TError,CreateIdentityNicknameCheckMutationVariables, TContext> => {
+
+const mutationKey = getCreateIdentityNicknameCheckMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createIdentityNicknameCheck>>, CreateIdentityNicknameCheckMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createIdentityNicknameCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateIdentityNicknameCheckMutationResult = NonNullable<Awaited<ReturnType<typeof createIdentityNicknameCheck>>>
+    export type CreateIdentityNicknameCheckMutationBody = BodyType<CreateIdentityNicknameCheckBody>
+    export type CreateIdentityNicknameCheckMutationError = ErrorType<UnauthorizedResponse | TooManyRequestsResponse>
+    export type CreateIdentityNicknameCheckMutationVariables = {data: BodyType<CreateIdentityNicknameCheckBody>}
+
+    /**
+ * @summary 닉네임 확인(가입 완료 화면의 실시간 중복 검사)
+ */
+export const useCreateIdentityNicknameCheck = <TError = ErrorType<UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIdentityNicknameCheck>>, TError,CreateIdentityNicknameCheckMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createIdentityNicknameCheck>>,
+        TError,
+        CreateIdentityNicknameCheckMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateIdentityNicknameCheckMutationOptions(options), queryClient);
+    }
+    export type createIdentitySignupCancellationResponse204 = {
+  data: void
+  status: 204
+}
+
+export type createIdentitySignupCancellationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createIdentitySignupCancellationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createIdentitySignupCancellationResponseSuccess = (createIdentitySignupCancellationResponse204) & {
+  headers: Headers;
+};
+export type createIdentitySignupCancellationResponseError = (createIdentitySignupCancellationResponse401 | createIdentitySignupCancellationResponse409) & {
+  headers: Headers;
+};
+
+export const getCreateIdentitySignupCancellationUrl = () => {
+
+
+
+
+  return `/v1/identity/signup-cancellations`
+}
+
+/**
+ * FR-001, POL-023(추천 적용 2026-11-05, ADR-0203 결정 4). 가입을 마치기 전 계정만 받는다. 계정을 본인확인 결과 만 14세 미만과 같은 정리(WITHDRAWAL_PENDING, 사유 UNDER_14, 탈퇴 절차)로 넘기고 세션을 바로 끝낸다. 응답은 팬 쿠키 둘(__Secure-peaket_at·__Secure-peaket_rt)을 같은 이름·Domain·Path에 Max-Age=0으로 지운다. 생년월일은 받지 않는다(자기 확인)
+ * @summary 가입 취소(가입 완료 화면의 '만 14세 미만입니다')
+ */
+export const createIdentitySignupCancellation = async (createIdentitySignupCancellationBody: CreateIdentitySignupCancellationBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createIdentitySignupCancellationResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createIdentitySignupCancellationResponseSuccess>(getCreateIdentitySignupCancellationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createIdentitySignupCancellationBody)
+  }
+);}
+
+
+
+
+
+export const getCreateIdentitySignupCancellationMutationKey = () => ['createIdentitySignupCancellation'] as const;
+
+export const getCreateIdentitySignupCancellationMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIdentitySignupCancellation>>, TError,CreateIdentitySignupCancellationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createIdentitySignupCancellation>>, TError,CreateIdentitySignupCancellationMutationVariables, TContext> => {
+
+const mutationKey = getCreateIdentitySignupCancellationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createIdentitySignupCancellation>>, CreateIdentitySignupCancellationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createIdentitySignupCancellation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateIdentitySignupCancellationMutationResult = NonNullable<Awaited<ReturnType<typeof createIdentitySignupCancellation>>>
+    export type CreateIdentitySignupCancellationMutationBody = BodyType<CreateIdentitySignupCancellationBody>
+    export type CreateIdentitySignupCancellationMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type CreateIdentitySignupCancellationMutationVariables = {data: BodyType<CreateIdentitySignupCancellationBody>}
+
+    /**
+ * @summary 가입 취소(가입 완료 화면의 '만 14세 미만입니다')
+ */
+export const useCreateIdentitySignupCancellation = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIdentitySignupCancellation>>, TError,CreateIdentitySignupCancellationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createIdentitySignupCancellation>>,
+        TError,
+        CreateIdentitySignupCancellationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateIdentitySignupCancellationMutationOptions(options), queryClient);
     }
     export type getIdentityMeResponse200 = {
   data: FanAccountSummary

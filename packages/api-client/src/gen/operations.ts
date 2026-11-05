@@ -18,6 +18,9 @@ export type OperationId =
   | 'createIdentityLinkProposalSeparateAccount'
   | 'createIdentityMergeProposalConfirmation'
   | 'createIdentityMinorContractCheck'
+  | 'createIdentityNicknameCheck'
+  | 'createIdentitySignupCancellation'
+  | 'createIdentitySignupCompletion'
   | 'createIdentityVerification'
   | 'createIdentityVerificationResult'
   | 'createInquiry'
@@ -295,6 +298,9 @@ export const OPERATIONS = {
   createIdentityLinkProposalSeparateAccount: {operationId: "createIdentityLinkProposalSeparateAccount",method: "POST",path: "/v1/identity/link-proposals/{proposalId}/separate-account",host: "www",kind: "write",cookie: true},
   createIdentityMergeProposalConfirmation: {operationId: "createIdentityMergeProposalConfirmation",method: "POST",path: "/v1/identity/merge-proposals/{proposalId}/confirmation",host: "api",kind: "write",cookie: true},
   createIdentityMinorContractCheck: {operationId: "createIdentityMinorContractCheck",method: "POST",path: "/v1/identity/minor-contract-checks",host: "api",kind: "write",cookie: true},
+  createIdentityNicknameCheck: {operationId: "createIdentityNicknameCheck",method: "POST",path: "/v1/identity/nickname-checks",host: "api",kind: "write",cookie: true},
+  createIdentitySignupCancellation: {operationId: "createIdentitySignupCancellation",method: "POST",path: "/v1/identity/signup-cancellations",host: "api",kind: "write",cookie: true},
+  createIdentitySignupCompletion: {operationId: "createIdentitySignupCompletion",method: "POST",path: "/v1/identity/signup-completions",host: "api",kind: "write",cookie: true},
   createIdentityVerification: {operationId: "createIdentityVerification",method: "POST",path: "/v1/identity/verifications",host: "api",kind: "write",cookie: true},
   createIdentityVerificationResult: {operationId: "createIdentityVerificationResult",method: "POST",path: "/v1/identity/verifications/{verificationId}/result",host: "api",kind: "write",cookie: true},
   createInquiry: {operationId: "createInquiry",method: "POST",path: "/v1/inquiries",host: "api",kind: "write",idempotent: true,cookie: true},

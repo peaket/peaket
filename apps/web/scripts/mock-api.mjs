@@ -383,9 +383,43 @@ export function placeholderSvg(name, width) {
 const ID = /^[A-Za-z0-9-]{1,64}$/;
 
 /** 팬 계정 요약(FanAccountSummary). 이름은 d5 §10.3 표본 '지민' */
-export function fanSummary(fan) {
+export function fanSummary(fan, nickname = '지민') {
   if (fan === 'pending') return { nickname: null, signupCompleted: false, verified: false, hasStaffAssignment: false };
-  return { nickname: '지민', signupCompleted: true, verified: fan !== 'unverified', hasStaffAssignment: false };
+  return { nickname, signupCompleted: true, verified: fan !== 'unverified', hasStaffAssignment: false };
+}
+
+// 가입 마무리(ADR-0203): 닉네임 규칙 결정 2와 같다(화면 apps/web signup.ts nicknameProblem). 쓰는 닉네임은 고정 셋
+const nickKey = (v) => v.normalize('NFC').trim().normalize('NFKC').toLowerCase();
+const TAKEN_NICKNAMES = new Set(['지민', '피켓', 'peaket'].map(nickKey));
+function nicknameInvalid(raw) {
+  const v = typeof raw === 'string' ? raw.normalize('NFC').trim() : '';
+  if (v.length === 0 || v.length > 64) return true;
+  if (!/^[\p{L}\p{M}\p{N}_.\-]+(?: [\p{L}\p{M}\p{N}_.\-]+)*$/u.test(v)) return true;
+  if (/[\u200D\uFE0E\uFE0F\u20E3]|\p{Extended_Pictographic}/u.test(v)) return true;
+  const gs = [...new Intl.Segmenter('ko', { granularity: 'grapheme' }).segment(v)].map((x) => x.segment);
+  if (gs.some((g) => (g.match(/\p{M}/gu)?.length ?? 0) > 3)) return true;
+  return gs.length < 2 || gs.length > 12;
+}
+const PHONE = /^(010[0-9]{8}|01[16789][0-9]{7,8})$/;
+
+/** JSON 본문(64KB까지). 깨졌으면 undefined */
+function readJson(req) {
+  return new Promise((resolve) => {
+    let raw = '';
+    req.setEncoding('utf8');
+    req.on('data', (c) => {
+      raw += c;
+      if (raw.length > 65_536) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        resolve(undefined);
+      }
+    });
+    req.on('error', () => resolve(undefined));
+  });
 }
 
 export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_ORIGIN || 'http://localhost:3000' } = {}) {
@@ -421,6 +455,7 @@ export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_O
         const v = url.searchParams.get(k);
         if (v) state[k] = v;
       }
+      if (url.searchParams.get('fan')) state.nickname = undefined;
       send(200, state);
       return;
     }
@@ -439,7 +474,55 @@ export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_O
     }
     if (p === '/v1/identity/me' && req.method === 'GET') {
       if (state.fan === 'guest') return unauthorized();
-      return send(200, fanSummary(state.fan));
+      return send(200, fanSummary(state.fan, state.nickname));
+    }
+    // 토큰 갱신(POST /v1/identity/access-tokens): 비로그인이면 401(갱신 거절 → 화면은 비로그인), 아니면 204. 없으면 404가 일시 장애로 읽혀
+    // 화면이 비로그인 대신 '모름'으로 남는다(docs/frontend.md §4.1 '401', HOT-323)
+    if (p === '/v1/identity/access-tokens' && req.method === 'POST') return state.fan === 'guest' ? unauthorized() : send(204, undefined);
+    const problem = (status, name, title) => send(status, { type: `https://peaket.example/problems/${name}`, title, status }, 'application/problem+json');
+    const badRequest = () => send(400, { type: 'about:blank', title: 'Bad Request', status: 400 }, 'application/problem+json');
+    if (p === '/v1/identity/nickname-checks' && req.method === 'POST') {
+      void readJson(req).then((b) => {
+        if (state.fan === 'guest') return unauthorized();
+        if (!b || typeof b.nickname !== 'string') return badRequest();
+        if (nicknameInvalid(b.nickname)) return send(200, { available: false, reason: 'invalid' });
+        return send(200, TAKEN_NICKNAMES.has(nickKey(b.nickname)) ? { available: false, reason: 'taken' } : { available: true });
+      });
+      return;
+    }
+    if (p === '/v1/identity/signup-completions' && req.method === 'POST') {
+      void readJson(req).then((b) => {
+        if (state.fan === 'guest') return unauthorized();
+        if (state.fan !== 'pending') return problem(409, 'signup-already-completed', '이미 가입을 마친 계정입니다');
+        const c = b?.consents;
+        const shapeOk =
+          b?.ageOver14 === true &&
+          c?.terms === true &&
+          c?.privacy === true &&
+          typeof c?.marketing === 'boolean' &&
+          typeof c?.phone === 'boolean' &&
+          typeof b?.nickname === 'string' &&
+          (b.phone === undefined ? true : c.phone === true && PHONE.test(b.phone));
+        if (!shapeOk) return badRequest();
+        if (nicknameInvalid(b.nickname)) return problem(400, 'nickname-invalid', '닉네임 꼴이 맞지 않습니다');
+        if (TAKEN_NICKNAMES.has(nickKey(b.nickname))) return problem(409, 'nickname-taken', '이미 사용 중인 닉네임입니다');
+        state.fan = 'unverified';
+        state.nickname = b.nickname.normalize('NFC').trim();
+        return send(200, fanSummary(state.fan, state.nickname));
+      });
+      return;
+    }
+    if (p === '/v1/identity/signup-cancellations' && req.method === 'POST') {
+      void readJson(req).then((b) => {
+        if (state.fan === 'guest') return unauthorized();
+        if (state.fan !== 'pending') return problem(409, 'signup-already-completed', '이미 가입을 마친 계정입니다');
+        if (b?.reason !== 'UNDER_14') return badRequest();
+        state.fan = 'guest';
+        // 팬 쿠키 둘을 지운다(가짜 API는 쿠키를 주지 않지만 계약 모양대로 머리를 싣는다)
+        res.setHeader('set-cookie', ['__Secure-peaket_at=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict', '__Secure-peaket_rt=; Path=/v1/identity/access-tokens; Max-Age=0; Secure; HttpOnly; SameSite=Strict']);
+        return send(204, undefined);
+      });
+      return;
     }
     if (p === '/v1/wishes' && req.method === 'GET') {
       if (state.fan === 'guest') return unauthorized();

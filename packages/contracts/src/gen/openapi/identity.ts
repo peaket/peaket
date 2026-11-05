@@ -409,15 +409,74 @@ export const DeleteIdentitySessionParams = zod.object({
 export const DeleteIdentitySessionResponse = zod.void()
 
 /**
+ * FR-001, POL-023(추천 적용 2026-11-05, ADR-0203). 처음 로그인 때 만든 계정의 가입을 마친다. 고지 문안의 판과 동의 일시는 서버가 정해 consent에 남긴다(data.md). 마케팅 수신 채널은 docs/planning/03 §1.2의 기본값 [가정]. 휴대폰 번호는 휴대폰 번호 수집 동의가 있을 때만 받는다. 닉네임 규칙(ADR-0203 결정 2): NFC, 앞뒤 공백 제거, 문자소 2~12개, 글자·숫자·가운데 공백 한 칸·_·.·-만, 중복은 NFKC·대소문자 접기 키. 성공하면 새 팬 계정 요약. Cache-Control: no-store
+ * @summary 가입 마무리(SCR-005): 만 14세 이상 확인·필수·선택 동의·닉네임·휴대폰 번호(선택)
+ */
+export const createIdentitySignupCompletionBodyNicknameMax = 64;
+
+export const createIdentitySignupCompletionBodyPhoneRegExp = new RegExp('^(010[0-9]{8}|01[16789][0-9]{7,8})$');
+
+
+export const CreateIdentitySignupCompletionBody = zod.object({
+  "ageOver14": zod.literal(true).describe('만 14세 이상 자기 확인(생년월일은 받지 않는다, ADR-0062)'),
+  "consents": zod.object({
+  "terms": zod.literal(true).describe('이용약관(TERMS)'),
+  "privacy": zod.literal(true).describe('개인정보 수집·이용(PRIVACY_REQUIRED)'),
+  "marketing": zod.boolean().describe('마케팅 알림(MARKETING, 선택)'),
+  "phone": zod.boolean().describe('휴대폰 번호 수집(PRIVACY_PHONE, 선택)')
+}).strict(),
+  "nickname": zod.string().min(1).max(createIdentitySignupCompletionBodyNicknameMax).describe('닉네임(규칙은 ADR-0203 결정 2, 서버가 다시 본다)'),
+  "phone": zod.string().regex(createIdentitySignupCompletionBodyPhoneRegExp).optional().describe('휴대폰 번호(숫자만, 010은 11자리). consents.phone이 true일 때만')
+}).strict().describe('가입 마무리 본문(SCR-005, ADR-0203 결정 1). 동의는 화면이 미리 켜 두지 않는다(d1 §3)')
+
+export const createIdentitySignupCompletionResponseNicknameMax = 64;
+
+
+
+export const CreateIdentitySignupCompletionResponse = zod.object({
+  "nickname": zod.string().max(createIdentitySignupCompletionResponseNicknameMax).nullable().describe('닉네임. 가입 완료 화면(SCR-005)을 마치기 전이면 null(길이는 가입 마무리 입력과 같다, ADR-0203 결정 2)'),
+  "signupCompleted": zod.boolean().describe('만 14세 이상 확인과 필수 동의(TERMS·PRIVACY_REQUIRED)를 마쳤다(SCR-005, identity §2)'),
+  "verified": zod.boolean().describe('휴대폰 본인확인 기록이 있다. 액세스 토큰의 ticket:buy와 같은 출처다(identity §5)'),
+  "hasStaffAssignment": zod.boolean().describe('지금 ASSIGNED인 현장 스태프 배정이 있다(계정 메뉴의 \'현장 근무\', SCR-061)')
+}).describe('로그인한 팬의 계정 요약(GET /v1/identity/me, 추천 적용 2026-11-05, ADR-0202). 화면이 셸 머리와 예매 버튼을 고르는 데 필요한 값만 둔다')
+
+/**
+ * FR-001(추천 적용 2026-11-05, ADR-0203 결정 3). 닉네임을 주소에 두지 않으려고 POST로 한다(guidelines §9). 참고용이고 확정은 가입 마무리의 409(nickname-taken)다. 세션마다 요청 한도 [가정], 넘으면 429와 Retry-After. Cache-Control: no-store
+ * @summary 닉네임 확인(가입 완료 화면의 실시간 중복 검사)
+ */
+export const createIdentityNicknameCheckBodyNicknameMax = 64;
+
+
+
+export const CreateIdentityNicknameCheckBody = zod.object({
+  "nickname": zod.string().max(createIdentityNicknameCheckBodyNicknameMax)
+}).strict()
+
+export const CreateIdentityNicknameCheckResponse = zod.object({
+  "available": zod.boolean(),
+  "reason": zod.enum(['taken', 'invalid']).optional().describe('쓸 수 없는 까닭(available이 false일 때만)')
+}).describe('닉네임 확인 결과(ADR-0203 결정 3)')
+
+/**
+ * FR-001, POL-023(추천 적용 2026-11-05, ADR-0203 결정 4). 가입을 마치기 전 계정만 받는다. 계정을 본인확인 결과 만 14세 미만과 같은 정리(WITHDRAWAL_PENDING, 사유 UNDER_14, 탈퇴 절차)로 넘기고 세션을 바로 끝낸다. 응답은 팬 쿠키 둘(__Secure-peaket_at·__Secure-peaket_rt)을 같은 이름·Domain·Path에 Max-Age=0으로 지운다. 생년월일은 받지 않는다(자기 확인)
+ * @summary 가입 취소(가입 완료 화면의 '만 14세 미만입니다')
+ */
+export const CreateIdentitySignupCancellationBody = zod.object({
+  "reason": zod.enum(['UNDER_14'])
+}).strict()
+
+export const CreateIdentitySignupCancellationResponse = zod.void()
+
+/**
  * FR-001, FR-002, POL-019(추천 적용 2026-11-05, ADR-0202). 캐시 화면과 다른 사이트에서 온 첫 이동은 서버가 쿠키로 로그인 여부를 정하지 않으므로 화면 스크립트가 페이지마다 한 번 부른다(docs/frontend.md §2.5 '알림·외부 링크 착지 규칙'). 이메일·휴대폰 번호·회원 코드는 싣지 않는다. 401이면 갱신을 한 번 거친 뒤 비로그인으로 그린다. Cache-Control: no-store
  * @summary 로그인한 팬의 계정 요약(셸 머리의 계정 메뉴와 공연 상세 예매 버튼이 로그인·본인확인 상태를 고른다)
  */
-export const getIdentityMeResponseNicknameMax = 40;
+export const getIdentityMeResponseNicknameMax = 64;
 
 
 
 export const GetIdentityMeResponse = zod.object({
-  "nickname": zod.string().max(getIdentityMeResponseNicknameMax).nullable().describe('닉네임. 가입 완료 화면(SCR-005)을 마치기 전이면 null'),
+  "nickname": zod.string().max(getIdentityMeResponseNicknameMax).nullable().describe('닉네임. 가입 완료 화면(SCR-005)을 마치기 전이면 null(길이는 가입 마무리 입력과 같다, ADR-0203 결정 2)'),
   "signupCompleted": zod.boolean().describe('만 14세 이상 확인과 필수 동의(TERMS·PRIVACY_REQUIRED)를 마쳤다(SCR-005, identity §2)'),
   "verified": zod.boolean().describe('휴대폰 본인확인 기록이 있다. 액세스 토큰의 ticket:buy와 같은 출처다(identity §5)'),
   "hasStaffAssignment": zod.boolean().describe('지금 ASSIGNED인 현장 스태프 배정이 있다(계정 메뉴의 \'현장 근무\', SCR-061)')

@@ -66,11 +66,22 @@ export interface VerifyFlowProviderProps {
   initial?: VerifyFlowInitial;
   /** '다른 계정의 본인'의 [로그인] 주소 */
   loginHref?: string;
+  /** 결과를 보인 뒤 돌아갈 주소(없으면 지금 화면). 가입 완료 화면은 가입 뒤 갈 주소를 준다(ADR-0203 결정 5) */
+  next?: string;
+  /** 창을 열기 전 동기 확인(가입 완료 화면의 입력 검사). false면 창을 열지 않는다(부르는 화면이 오류를 보인다) */
+  canStart?: () => boolean;
+  /** 창을 연 뒤 본인확인을 시작하기 전에 할 일(가입 마무리). false면 창을 닫고 시작하지 않는다(실제 흐름만) */
+  beforeStart?: () => Promise<boolean>;
+  /** 결과를 다 보였다: 완료(토스트를 띄운 뒤)거나 결과 대화상자를 닫았다. 가입 완료 화면은 이때 돌아갈 주소로 간다 */
+  onSettled?: (outcome: VerifyOutcome) => void;
   children: ReactNode;
 }
 
-export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/login', children }: VerifyFlowProviderProps) {
+export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/login', next, canStart, beforeStart, onSettled, children }: VerifyFlowProviderProps) {
   const toast = useToast();
+  // 부르는 화면이 그릴 때마다 새 함수를 넘겨도 흐름을 다시 만들지 않게 지금 값만 본다
+  const hooks = useRef({ canStart, beforeStart, onSettled });
+  hooks.current = { canStart, beforeStart, onSettled };
   // 미리보기로 연 기관 창은 보드 그대로(시험 버튼 없음), 사용자가 연 창은 시험용 결과 고르기를 둔다. live는 진짜 기관 창이 열려 있다
   const [popup, setPopup] = useState<'none' | 'preview' | 'demo' | 'live'>(initial?.waiting ? 'preview' : 'none');
   // 실제 흐름: 상태 미리보기가 아니고 팬 API 출처가 있을 때(부스 대조는 아직 시험 창). 출처는 빌드 때 정해지는 값이라 서버·브라우저가 같다
@@ -116,6 +127,7 @@ export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/l
           const scope = triggerRef.current?.closest<HTMLElement>('[data-verify-scope]') ?? null;
           void refreshFanSession().then(() => returnFocus(scope));
         } else returnFocus();
+        hooks.current.onSettled?.(o);
       } else setOutcome(o);
     },
     [toast, returnFocus, live],
@@ -123,19 +135,23 @@ export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/l
 
   // 실제 흐름은 누른 동작 안에서 시작해야 한다(창을 먼저 열어 팝업 차단을 피한다, identity §5)
   const openWindow = useCallback(() => {
+    if (hooks.current.canStart && !hooks.current.canStart()) return;
     setOutcome(null);
     if (!live) {
       setPopup('demo');
       return;
     }
     flowRef.current?.cancel();
+    const before = hooks.current.beforeStart;
     flowRef.current = startCallerFlow(browserCallerEnv(), {
       purpose: purpose === 'reverify' ? 'REVERIFY' : 'FIRST',
+      ...(next ? { next } : {}),
+      ...(before ? { before } : {}),
       onWaiting: () => setPopup('live'),
       // 흐름은 다음 시도나 화면을 떠날 때 끝낸다(창이 닫힌 뒤에도 늦은 메시지를 들을 수 있다)
       onDone: (o) => pick(o),
     });
-  }, [live, purpose, pick]);
+  }, [live, purpose, pick, next]);
 
   // 페이지 이동으로 돌아왔으면(복귀 화면 → next) 그 건의 결과 대화상자를 띄운다. 저장소 값은 처음 읽을 때 지우므로,
   // 개발 모드 StrictMode가 효과를 두 번 돌려도 한 번만 읽고 그 결과를 그대로 쓴다(새 맥락 리뷰 낮음 L1)
@@ -189,8 +205,10 @@ export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/l
           outcome={outcome}
           loginHref={loginHref}
           onClose={() => {
+            const closed = outcome;
             setOutcome(null);
             returnFocus();
+            hooks.current.onSettled?.(closed);
           }}
           onRetry={openWindow}
         />

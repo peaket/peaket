@@ -15,8 +15,8 @@
  */
 export interface FanAccountSummary {
   /**
-     * 닉네임. 가입 완료 화면(SCR-005)을 마치기 전이면 null
-     * @maxLength 40
+     * 닉네임. 가입 완료 화면(SCR-005)을 마치기 전이면 null(길이는 가입 마무리 입력과 같다, ADR-0203 결정 2)
+     * @maxLength 64
      * @nullable
      */
   nickname: string | null;

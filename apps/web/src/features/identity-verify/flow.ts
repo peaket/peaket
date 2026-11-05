@@ -307,6 +307,13 @@ export interface CallerEnv {
 
 export interface CallerHandlers {
   purpose: Purpose;
+  /** 결과를 보인 뒤 돌아갈 주소(없으면 지금 화면). 가입 완료 화면은 가입 뒤 갈 주소를 준다(ADR-0203 결정 5) */
+  next?: string;
+  /**
+   * 창을 연 뒤, 본인확인을 시작하기 전에 할 일(가입 완료 화면의 가입 마무리). false면 창을 닫고 시작하지 않는다(결과 대화상자 없음,
+   * 부르는 화면이 자기 오류를 보인다). 창은 누른 동작 안에서 먼저 열어야 팝업 차단을 피한다
+   */
+  before?: () => Promise<boolean>;
   /** 기관 창이 열려 기다리는 중 */
   onWaiting(): void;
   /** 결과 대화상자(완료면 토스트). 지금 창이 기관으로 넘어가면 부르지 않는다 */
@@ -335,7 +342,13 @@ export function startCallerFlow(env: CallerEnv, h: CallerHandlers): { cancel(): 
   };
 
   void (async () => {
-    const next = safeNext(env.currentPath());
+    const next = safeNext(h.next ?? env.currentPath());
+    if (h.before && !(await h.before().catch(() => false))) {
+      win?.close();
+      stop();
+      return;
+    }
+    if (stopped) return;
     const s = await env.api.start(next, h.purpose);
     if (stopped) return;
     if (s.kind !== 'started') {

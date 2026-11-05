@@ -34,6 +34,8 @@ import type {
   CreateIdentityLinkProposalSeparateAccount201,
   CreateIdentityMinorContractCheck200,
   CreateIdentityMinorContractCheckBody,
+  CreateIdentityNicknameCheckBody,
+  CreateIdentitySignupCancellationBody,
   CreateIdentityVerificationBody,
   CreateIdentityVerificationResultBody,
   CreateStaffInvitationAcceptanceBody,
@@ -47,8 +49,10 @@ import type {
   ListSubscriptions200,
   ListWishes200,
   MergeProposal,
+  NicknameCheckResult,
   PushSubscriptionCreate,
   PushSubscriptionRegistered,
+  SignupCompletionInput,
   StaffAssignment,
   StaffInvitationView,
   SubscriptionState,
@@ -85,7 +89,11 @@ export const getCreateIdentityVerificationResultResponseMock = (overrideResponse
 
 export const getGetIdentityVerificationResultResponseMock = (overrideResponse: Partial<Extract<VerificationResult, object>> = {}): VerificationResult => ({verificationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), purpose: faker.helpers.arrayElement([faker.helpers.arrayElement(['FIRST','REVERIFY','BOOTH','MINOR_CONTRACT'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['PENDING','VERIFIED','CANCELLED','FAILED','PROVIDER_DOWN','DUPLICATE_ACCOUNT','UNDER_14','BOOTH_MISMATCH'] as const), undefined]), next: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), resultToken: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), restrictedUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
 
-export const getGetIdentityMeResponseMock = (overrideResponse: Partial<Extract<FanAccountSummary, object>> = {}): FanAccountSummary => ({nickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 40}}), null]), signupCompleted: faker.datatype.boolean(), verified: faker.datatype.boolean(), hasStaffAssignment: faker.datatype.boolean(), ...overrideResponse})
+export const getCreateIdentitySignupCompletionResponseMock = (overrideResponse: Partial<Extract<FanAccountSummary, object>> = {}): FanAccountSummary => ({nickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 64}}), null]), signupCompleted: faker.datatype.boolean(), verified: faker.datatype.boolean(), hasStaffAssignment: faker.datatype.boolean(), ...overrideResponse})
+
+export const getCreateIdentityNicknameCheckResponseMock = (overrideResponse: Partial<Extract<NicknameCheckResult, object>> = {}): NicknameCheckResult => ({available: faker.datatype.boolean(), reason: faker.helpers.arrayElement([faker.helpers.arrayElement(['taken','invalid'] as const), undefined]), ...overrideResponse})
+
+export const getGetIdentityMeResponseMock = (overrideResponse: Partial<Extract<FanAccountSummary, object>> = {}): FanAccountSummary => ({nickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 64}}), null]), signupCompleted: faker.datatype.boolean(), verified: faker.datatype.boolean(), hasStaffAssignment: faker.datatype.boolean(), ...overrideResponse})
 
 export const getGetIdentityProvidersResponseMock = (overrideResponse: Partial<Extract<GetIdentityProviders200, object>> = {}): GetIdentityProviders200 => ({providers: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({provider: faker.helpers.arrayElement(['kakao','naver','google'] as const), linkedAt: faker.date.past().toISOString().slice(0, 19) + 'Z', lastLoginAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null])})), ...overrideResponse})
 
@@ -330,6 +338,40 @@ export const getDeleteIdentitySessionMockHandler = (overrideResponse?: void | ((
   }, options)
 }
 
+export const getCreateIdentitySignupCompletionMockHandler = (overrideResponse?: FanAccountSummary | ((info: Parameters<HttpResponseResolver<PathParams, SignupCompletionInput>>[0]) => Promise<FanAccountSummary> | FanAccountSummary), options?: RequestHandlerOptions) => {
+  return http.post<PathParams, SignupCompletionInput>('*/v1/identity/signup-completions', async (info: Parameters<HttpResponseResolver<PathParams, SignupCompletionInput>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateIdentitySignupCompletionResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateIdentityNicknameCheckMockHandler = (overrideResponse?: NicknameCheckResult | ((info: Parameters<HttpResponseResolver<PathParams, CreateIdentityNicknameCheckBody>>[0]) => Promise<NicknameCheckResult> | NicknameCheckResult), options?: RequestHandlerOptions) => {
+  return http.post<PathParams, CreateIdentityNicknameCheckBody>('*/v1/identity/nickname-checks', async (info: Parameters<HttpResponseResolver<PathParams, CreateIdentityNicknameCheckBody>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateIdentityNicknameCheckResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateIdentitySignupCancellationMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<PathParams, CreateIdentitySignupCancellationBody>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.post<PathParams, CreateIdentitySignupCancellationBody>('*/v1/identity/signup-cancellations', async (info: Parameters<HttpResponseResolver<PathParams, CreateIdentitySignupCancellationBody>>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
+
 export const getGetIdentityMeMockHandler = (overrideResponse?: FanAccountSummary | ((info: Parameters<HttpResponseResolver>[0]) => Promise<FanAccountSummary> | FanAccountSummary), options?: RequestHandlerOptions) => {
   return http.get('*/v1/identity/me', async (info: Parameters<HttpResponseResolver>[0]) => {
 
@@ -441,6 +483,9 @@ export const getIdentityMock = () => [
   getCreateIdentityAccessTokenMockHandler(),
   getGetIdentitySessionsMockHandler(),
   getDeleteIdentitySessionMockHandler(),
+  getCreateIdentitySignupCompletionMockHandler(),
+  getCreateIdentityNicknameCheckMockHandler(),
+  getCreateIdentitySignupCancellationMockHandler(),
   getGetIdentityMeMockHandler(),
   getDeleteIdentityAccountMockHandler(),
   getGetIdentityProvidersMockHandler(),

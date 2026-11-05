@@ -11,11 +11,11 @@
  */
 import * as zod from 'zod';
 
-export const fanAccountSummaryNicknameMax = 40;
+export const fanAccountSummaryNicknameMax = 64;
 
 
 export const FanAccountSummary = zod.object({
-  "nickname": zod.string().max(fanAccountSummaryNicknameMax).nullable().describe('닉네임. 가입 완료 화면(SCR-005)을 마치기 전이면 null'),
+  "nickname": zod.string().max(fanAccountSummaryNicknameMax).nullable().describe('닉네임. 가입 완료 화면(SCR-005)을 마치기 전이면 null(길이는 가입 마무리 입력과 같다, ADR-0203 결정 2)'),
   "signupCompleted": zod.boolean().describe('만 14세 이상 확인과 필수 동의(TERMS·PRIVACY_REQUIRED)를 마쳤다(SCR-005, identity §2)'),
   "verified": zod.boolean().describe('휴대폰 본인확인 기록이 있다. 액세스 토큰의 ticket:buy와 같은 출처다(identity §5)'),
   "hasStaffAssignment": zod.boolean().describe('지금 ASSIGNED인 현장 스태프 배정이 있다(계정 메뉴의 \'현장 근무\', SCR-061)')

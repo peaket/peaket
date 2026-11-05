@@ -73,6 +73,8 @@ export type ProblemType =
   | 'merge-invariant-violated'
   | 'merge-proposal-not-found'
   | 'next-invalid'
+  | 'nickname-invalid'
+  | 'nickname-taken'
   | 'no-placement'
   | 'not-found'
   | 'not-payer'
@@ -140,6 +142,7 @@ export type ProblemType =
   | 'seatmap-replace-required'
   | 'self-target-forbidden'
   | 'server-busy'
+  | 'signup-already-completed'
   | 'sold-out'
   | 'staff-assignment-missing'
   | 'subscription-limit'
@@ -230,6 +233,8 @@ export const PROBLEM_TYPES = {
   'merge-invariant-violated': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다. 고객센터로 문의해 주세요" },
   'merge-proposal-not-found': { status: 404, title: "병합 제안이 없거나 시간이 지났습니다" },
   'next-invalid': { status: 400, title: "돌아갈 주소가 같은 출처 경로가 아닙니다" },
+  'nickname-invalid': { status: 400, title: "닉네임 꼴이 맞지 않습니다" },
+  'nickname-taken': { status: 409, title: "이미 사용 중인 닉네임입니다" },
   'no-placement': { status: 409, title: "배치되지 않은 기기입니다" },
   'not-found': { status: 404, title: "찾을 수 없습니다" },
   'not-payer': { status: 403, title: "결제한 분만 할 수 있습니다" },
@@ -297,6 +302,7 @@ export const PROBLEM_TYPES = {
   'seatmap-replace-required': { status: 409, title: "좌석이 있는 좌석맵은 바꾸기로만 가져올 수 있습니다" },
   'self-target-forbidden': { status: 403, title: "자기 계정에는 할 수 없습니다" },
   'server-busy': { status: 429, title: "요청이 많아 잠시 처리하지 못했습니다" },
+  'signup-already-completed': { status: 409, title: "이미 가입을 마친 계정입니다" },
   'sold-out': { status: 410, title: "매진되었습니다" },
   'staff-assignment-missing': { status: 403, title: "이 회차의 스태프 배정이 없습니다" },
   'subscription-limit': { status: 422, title: "알림 신청 수를 넘었습니다" },

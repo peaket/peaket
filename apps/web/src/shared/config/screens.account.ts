@@ -12,25 +12,17 @@ export const SCR004_STATES = ['기본'] as const;
 export type Scr004State = (typeof SCR004_STATES)[number];
 
 // ── SCR-005 가입 완료·동의 ──
-export const SCR005_STATES = ['기본', '닉네임 확인 중', '입력 오류', '만 14세 미만'] as const;
+/**
+ * 데이터 단계(HOT-323)에서 ?state=를 걷어 냈다. 닉네임 확인 중·입력 오류·만 14세 미만은 화면에서 직접 만든다(가짜 API `fan=pending`,
+ * 쓰는 닉네임 '지민'·'피켓', ADR-0203)
+ */
+export const SCR005_STATES = ['기본'] as const;
 export type Scr005State = (typeof SCR005_STATES)[number];
 
 // ── SCR-006 본인확인 흐름(기관 창·결과 대화상자·복귀 화면) ──
 /** 보드 순서 그대로. /verify/return 경로의 기본은 '복귀 화면'(나머지는 부르는 화면 위 창·대화상자를 그린다) */
-export const SCR006_STATES = [
-  '기관 응답 대기',
-  '창을 닫음·실패',
-  '기관 장애',
-  '다른 계정의 본인',
-  '재확인 목적',
-  '부스 대조 목적',
-  '부스 대조 불일치',
-  '만 14세 미만',
-  '완료 토스트',
-  '팝업 차단',
-  '부스 대조 동의 없음',
-  '복귀 화면',
-] as const;
+/** 데이터 단계(HOT-323)에서 ?state=와 목업 부르는 화면을 걷어 냈다. 기관 창·결과 대화상자는 부르는 화면(공연 상세·가입 완료 등) 위에서 실제로 본다 */
+export const SCR006_STATES = ['복귀 화면'] as const;
 export type Scr006State = (typeof SCR006_STATES)[number];
 
 // ── SCR-017 계정 설정 ──
@@ -188,7 +180,7 @@ export const ACCOUNT_SCREENS: readonly WebScreen[] = [
     group: 'cached',
     owner: 'account',
     states: SCR006_STATES,
-    note: '기관 창·결과 대화상자는 부르는 화면(공연 상세 등) 위. 이 경로의 기본 상태는 복귀 화면',
+    note: '기관 창·결과 대화상자는 부르는 화면(공연 상세·가입 완료 등) 위에서 실제로 본다. 이 경로는 복귀 화면 하나',
   },
   {
     id: 'SCR-017',

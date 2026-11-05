@@ -5,7 +5,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { GetEventResponse, GetHomeRankingsResponse, GetHomeResponse } from '@peaket/contracts/openapi/catalog';
-import { GetIdentityMeResponse, ListSubscriptionsResponse, ListWishesResponse } from '@peaket/contracts/openapi/identity';
+import {
+  CreateIdentityNicknameCheckBody,
+  CreateIdentityNicknameCheckResponse,
+  CreateIdentitySignupCancellationBody,
+  CreateIdentitySignupCompletionBody,
+  CreateIdentitySignupCompletionResponse,
+  GetIdentityMeResponse,
+  ListSubscriptionsResponse,
+  ListWishesResponse,
+} from '@peaket/contracts/openapi/identity';
 import { GetEventReviewSummaryResponse } from '@peaket/contracts/openapi/reviews';
 import { GetSearchSuggestionsResponse, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
 import { ARTISTS, INITIAL_WISHES, searchResults, suggestions, suggestQueryOk, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
@@ -243,9 +252,52 @@ test('팬 계정 요약(GET /v1/identity/me, ADR-0202): 상태 fan=member·unver
     assert.deepEqual(pending, { nickname: null, signupCompleted: false, verified: false, hasStaffAssignment: false });
     await fetch(`${base}/__mock/state?fan=guest`);
     assert.equal((await me()).status, 401);
+    // 토큰 갱신도 비로그인이면 401(거절), 로그인이면 204
+    assert.equal((await fetch(`${base}/v1/identity/access-tokens`, { method: 'POST' })).status, 401);
     // 찜·알림은 로그인한 팬이면 상태와 상관없이 답한다
     await fetch(`${base}/__mock/state?fan=unverified`);
     assert.equal((await fetch(`${base}/v1/wishes`)).status, 200);
+  } finally {
+    server.close();
+  }
+});
+
+test('가입 마무리·닉네임 확인·가입 취소(ADR-0203): 계약 Zod 그대로, 가입 전 계정만 받고 마치면 계정 요약이 바뀐다', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const post = async (path, body) => {
+    const r = await fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: r.status, body: r.headers.get('content-type')?.includes('json') ? await r.json() : undefined, cookies: r.headers.getSetCookie() };
+  };
+  const input = { ageOver14: true, consents: { terms: true, privacy: true, marketing: false, phone: true }, nickname: '피켓팬', phone: '01012345678' };
+  try {
+    await fetch(`${base}/__mock/state?fan=pending`);
+    // 닉네임 확인
+    const check = async (nickname) => (await post('/v1/identity/nickname-checks', CreateIdentityNicknameCheckBody.parse({ nickname }))).body;
+    assert.deepEqual(CreateIdentityNicknameCheckResponse.parse(await check('피켓팬')), { available: true });
+    assert.deepEqual(await check('지민'), { available: false, reason: 'taken' });
+    assert.deepEqual(await check('PEAKET'), { available: false, reason: 'taken' }, '대소문자 접기');
+    assert.deepEqual(await check('루멘🎤'), { available: false, reason: 'invalid' });
+    // 가입 마무리
+    assert.equal((await post('/v1/identity/signup-completions', { ...input, nickname: '지민' })).status, 409);
+    assert.equal((await post('/v1/identity/signup-completions', { ...input, consents: { ...input.consents, terms: false } })).status, 400);
+    assert.equal((await post('/v1/identity/signup-completions', { ...input, consents: { ...input.consents, phone: false } })).status, 400, '동의 없는 휴대폰 번호');
+    const done = await post('/v1/identity/signup-completions', CreateIdentitySignupCompletionBody.parse(input));
+    assert.equal(done.status, 200);
+    assert.deepEqual(CreateIdentitySignupCompletionResponse.parse(done.body), done.body);
+    assert.deepEqual(done.body, { nickname: '피켓팬', signupCompleted: true, verified: false, hasStaffAssignment: false });
+    assert.equal((await (await fetch(`${base}/v1/identity/me`)).json()).nickname, '피켓팬');
+    const again = await post('/v1/identity/signup-completions', input);
+    assert.equal(again.status, 409);
+    assert.match(again.body.type, /signup-already-completed$/);
+    // 가입 취소: 마친 뒤에는 409, 가입 전이면 204와 쿠키 지우기, 그 뒤 401
+    assert.equal((await post('/v1/identity/signup-cancellations', { reason: 'UNDER_14' })).status, 409);
+    await fetch(`${base}/__mock/state?fan=pending`);
+    const cancel = await post('/v1/identity/signup-cancellations', CreateIdentitySignupCancellationBody.parse({ reason: 'UNDER_14' }));
+    assert.equal(cancel.status, 204);
+    assert.ok(cancel.cookies.some((c) => /^__Secure-peaket_at=;.*Max-Age=0/.test(c)));
+    assert.equal((await fetch(`${base}/v1/identity/me`)).status, 401);
   } finally {
     server.close();
   }
