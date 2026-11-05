@@ -1,7 +1,9 @@
 // 대기실의 시트·대화상자 내용. 휴대폰은 아래 시트(.sheet), md 이상은 대화상자(.dialog)로 보드 SCR-008 m·t·d를 따른다.
 import { AUTO_ASSIGN_TEXT, KEEP_QUEUE, LEGAL_POL024, LOGOUT_TEXT, ORDERING_TEXT } from '../copy';
 import { links } from '../config';
-import type { ModalKey } from '../ctx';
+import type { AlertApi, AlertResult, ModalKey, PrefApi } from '../ctx';
+import { defaultPreference } from '../live/preference.ts';
+import { prefEditor } from './preference';
 import { cx, h, ic, type Child } from '../dom';
 import { ACCOUNT, type EventFixture, type Ordering } from '../fixtures';
 import type { ModalBuild, ModalCtx } from '../ui/modal';
@@ -98,6 +100,10 @@ export interface ModalDeps {
   onRejoin?: () => void;
   /** 메뉴 시트에서 로그아웃을 고르면 로그아웃 확인으로 바꾼다 */
   openLogout?: () => void;
+  /** 희망 조건(자동 배정 공연, ADR-0212). 있으면 'pref' 시트가 실제 값을 고치고 저장한 뒤 onSaved를 부른다 */
+  pref?: PrefApi & { onSaved(): void };
+  /** [차례 알림 받기](ADR-0212 결정 4). 있으면 'notify' 시트가 실제로 켠다 */
+  alerts?: AlertApi;
   /** 로그아웃(데이터 연결 화면, ADR-0208 결정 7). wallet은 '이 기기의 입장 키도 지우기'. 성공하면 홈으로 가고, 실패면 'failed' */
   logout?: (wallet: boolean) => Promise<'ok' | 'failed'>;
 }
@@ -137,6 +143,7 @@ export function modalBuild(key: ModalKey, d: ModalDeps): ModalBuild {
         );
       };
     case 'notify':
+      if (d.alerts) return notifySheet(d.alerts);
       // CMP-068 push. 보드가 없어 SCR-001 '알림 권한 안내' 시트 모양에 차례 알림 문장을 넣었다(추천안). 권한 요청은 데이터 연결 단계에서 붙인다
       return (m) => box(m, 'np-t', {},
         h('span', { class: 'state-icon is-primary q-icon-56' }, ic('bell')),
@@ -198,6 +205,7 @@ export function modalBuild(key: ModalKey, d: ModalDeps): ModalBuild {
         );
       };
     case 'pref':
+      if (d.pref) return prefSheet(d.pref);
       return (m) => {
         const ev = d.ev as EventFixture;
         const save = h('button', { class: 'btn btn-primary btn-lg btn-block', type: 'button', onclick: m.close }, '희망 조건 저장하기');
@@ -257,4 +265,84 @@ export function modalBuild(key: ModalKey, d: ModalDeps): ModalBuild {
         );
       };
   }
+}
+
+const ALERT_TEXT: Record<AlertResult, string> = {
+  granted: '차례가 가까워지면 알림과 알림음으로 알려 드립니다',
+  denied: '알림 권한이 없어 탭 제목과 알림음으로 알려 드립니다',
+  unsupported: '이 브라우저는 알림을 지원하지 않아 탭 제목과 알림음으로 알려 드립니다',
+  'ios-install': 'iPhone·iPad는 홈 화면에 추가한 앱에서만 알림을 받을 수 있습니다. 공유 버튼의 [홈 화면에 추가]로 추가한 뒤 그 앱에서 다시 켜 주세요. 지금은 탭 제목과 알림음으로 알려 드립니다',
+};
+
+/**
+ * CMP-068 push(ADR-0212 결정 4): 왜 필요한지 먼저 말하고, [알림 켜기]를 누른 뒤에만 오디오를 열고 권한을 묻는다.
+ * 상태(idle·requesting·granted·denied·unsupported)는 role="status"로 알린다. iOS·iPadOS의 홈 화면 앱이 아니면 추가 방법을 먼저 안내한다
+ */
+function notifySheet(a: AlertApi): ModalBuild {
+  return (m) => {
+    const last = a.last();
+    const status = h('p', { class: 't-sm', role: 'status' }, last ? ALERT_TEXT[last] : '');
+    const done = (btn: HTMLElement) => {
+      // 초점이 있는 버튼이라 disabled 대신 aria-disabled로 둔다(초점이 body로 빠지지 않게)
+      btn.setAttribute('aria-disabled', 'true');
+      btn.textContent = '알림 켜짐';
+    };
+    const on = h('button', {
+      class: 'btn btn-primary btn-lg btn-block',
+      type: 'button',
+      onclick: () => {
+        if (on.getAttribute('aria-disabled') === 'true') return;
+        on.setAttribute('aria-busy', 'true');
+        status.textContent = '알림 권한을 묻는 중입니다';
+        void a
+          .enable()
+          .catch((): AlertResult => 'unsupported')
+          .then((r) => {
+            on.removeAttribute('aria-busy');
+            done(on);
+            status.textContent = ALERT_TEXT[r];
+          });
+      },
+    }, '알림 켜기');
+    if (a.on()) done(on);
+    return box(m, 'np-t', { describedBy: 'np-d' },
+      h('span', { class: 'state-icon is-primary q-icon-56' }, ic('bell')),
+      title(m, 'np-t', '차례 알림을 이 기기로 받습니다'),
+      a.iosInstall() && h('p', { class: 't-sm' }, ALERT_TEXT['ios-install']),
+      h('p', { class: 't-sm muted', id: 'np-d' }, '차례가 가까워지면 알림음을 내고, 다른 탭을 보고 있으면 알림을 띄웁니다. 아래 버튼을 누른 뒤에만 브라우저가 알림 권한을 묻습니다.'),
+      h('p', { class: 't-sm muted' }, '권한을 거부하거나 지원하지 않는 브라우저라면 탭 제목과 알림음으로 알려 드립니다. 창을 닫으면 알림이 오지 않습니다.'),
+      status,
+      actions(m, on, h('button', { class: 'btn btn-ghost btn-block', type: 'button', onclick: m.close }, '닫기')),
+    );
+  };
+}
+
+/** CMP-057 preference 시트(대기열 ⑧ [바꾸기], ADR-0212 결정 1): 고친 값은 [희망 조건 저장하기]를 눌러야 저장된다 */
+function prefSheet(p: PrefApi & { onSaved(): void }): ModalBuild {
+  return (m) => {
+    let value = p.read() ?? defaultPreference(p.tiers);
+    const err = h('p', { class: 't-sm tx-danger', role: 'alert', hidden: true }, '이 브라우저에 저장하지 못했습니다. 다시 시도해 주세요');
+    const save = h('button', {
+      class: 'btn btn-primary btn-lg btn-block',
+      type: 'button',
+      onclick: () => {
+        if (!p.save(value)) {
+          err.hidden = false;
+          return;
+        }
+        m.close();
+        p.onSaved();
+      },
+    }, '희망 조건 저장하기');
+    const hint = h('p', { class: 'hint' }, '차례 전까지 바꿀 수 있고 이 기기에만 저장됩니다');
+    return box(m, 'pf-t', { wideClass: 'q-dlg-480' },
+      h('div', { class: 'row between' },
+        title(m, 'pf-t', '희망 조건'),
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': m.wide ? '희망 조건 창 닫기' : '희망 조건 시트 닫기', onclick: m.close }, ic('close')),
+      ),
+      prefEditor({ idp: 'pfs', tiers: p.tiers, max: p.max, value, wide: m.wide, onChange: (v) => (value = v) }),
+      err,
+      m.wide ? [hint, actions(m, save)] : [save, hint],
+    );
+  };
 }

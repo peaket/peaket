@@ -28,6 +28,8 @@ export const QUEUE_DEFAULTS = Object.freeze({
   queueOpenIn: '',
   /** 사전 검증(공연 상세): normal|identity|not-found|down|unauthorized. queue-svc는 사람 확인 실패·위험 판정 장애에도 토큰을 준다(ADR-0211 결정 4) */
   queuePreverify: 'normal',
+  /** 매진된 등급 ID(쉼표, 대기 상태 파일 soldOutTiers, 자동 배정 희망 조건 경고, ADR-0212) */
+  queueSoldOutTiers: '',
 });
 
 /**
@@ -263,7 +265,7 @@ export function createQueueMock({ now, state, schedule = () => null }) {
             serving,
             servingRate: status === 'ON_SALE' ? Math.round(num('queueRate') * 1000) / 1000 : 0,
             saleStatus: status,
-            soldOutTiers: [],
+            soldOutTiers: state.queueSoldOutTiers ? state.queueSoldOutTiers.split(',').filter(Boolean) : [],
             removedUpToServing: 0,
             removedBeforeSegment: 0,
             removedBitmap: bitmap.toString('base64'),

@@ -118,6 +118,8 @@ export interface Store {
   /** 이 탭의 입장 값(입장 토큰·구매 세션 만료). 없거나 꼴이 틀리면 null */
   readAdmission(): Admission | null;
   deviceId(): string | undefined;
+  /** 이 회차의 희망 조건(peaket.autoassign.{eventId})을 지운다(판매 종료) */
+  clearAutoAssign(): void;
 }
 
 export function createStore(eventId: string, local: KV | null, session: KV | null, now: () => number, randomBytes: (n: number) => Uint8Array): Store {
@@ -178,6 +180,9 @@ export function createStore(eventId: string, local: KV | null, session: KV | nul
         const v = JSON.parse(session?.getItem(`peaket.admission.${eventId}`) ?? 'null') as Admission | null;
         return v && typeof v.admissionToken === 'string' && typeof v.receivedAt === 'number' ? v : null;
       }, null);
+    },
+    clearAutoAssign() {
+      safe(() => local?.removeItem(`peaket.autoassign.${eventId}`), undefined);
     },
     deviceId() {
       const v = safe(() => local?.getItem('peaket.device') ?? null, null);

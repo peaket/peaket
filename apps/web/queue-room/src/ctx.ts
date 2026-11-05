@@ -2,6 +2,7 @@
 import type { EventFixture, ProductFixture } from './fixtures';
 import type { QueueView } from './live/controller.ts';
 import type { EventMeta } from './live/meta.ts';
+import type { Preference, Tier } from './live/preference.ts';
 import type { BoardState } from './states';
 
 export type ModalKey = 'logout' | 'notify' | 'cancel' | 'info' | 'pref' | 'rejoin' | 'menu';
@@ -38,10 +39,31 @@ export interface HeaderEvent {
   when: string;
 }
 
+/** 자동 배정 공연의 희망 조건(ADR-0212 결정 1). 직접 선택 공연이면 없다 */
+export interface PrefApi {
+  tiers: readonly Tier[];
+  max: number;
+  read(): Preference | null;
+  save(p: Preference): boolean;
+}
+
+/** [차례 알림 받기](ADR-0212 결정 4) */
+export type AlertResult = 'granted' | 'denied' | 'unsupported' | 'ios-install';
+export interface AlertApi {
+  on(): boolean;
+  /** 마지막으로 켠 결과(다시 연 시트가 그대로 보인다) */
+  last(): AlertResult | null;
+  /** iOS·iPadOS에서 홈 화면 앱이 아니다(누르기 전에 추가 방법을 먼저 안내한다) */
+  iosInstall(): boolean;
+  /** 누른 동작 안에서 오디오를 열고 알림 권한을 묻는다 */
+  enable(): Promise<AlertResult>;
+}
+
 /** 대기열·매진 화면(데이터 연결, ADR-0207): 상태 기계가 낸 화면 값과 동작 */
 export interface LiveCtx extends BaseCtx {
   ev: EventMeta;
   view: QueueView;
+  pref: PrefApi | null;
   actions: {
     /** 대기 취소(확인 대화상자 뒤). 실패하면 false */
     cancel(): Promise<boolean>;

@@ -10,6 +10,8 @@ import { announceEveryMinute, countdown } from '../ui/timers';
 import { steadyNow } from '../live/steady.ts';
 import { clock } from '../queue-math';
 import { focusHeader, offlineStrip } from './shell';
+import { prefSummary } from './preference';
+import { defaultPreference } from '../live/preference.ts';
 
 /** 예상 대기 글(분으로 반올림, 1분 미만도 약 1분, 60분부터 시간, ADR-0207 결정 9). null이면 숨김 */
 export function etaLabel(sec: number | null | undefined): string | null {
@@ -55,6 +57,8 @@ export function queueScreen(c: LiveCtx): HTMLElement[] {
     if (v.purchaseUnlikely) {
       inQueue.append(h('div', { class: 'banner banner-warning', role: 'status' }, ic('alert'), h('div', { class: 'banner-body' }, '현재 순번으로는 구매가 어려울 수 있습니다')));
     }
+    // ⑧ 희망 조건 한 줄(자동 배정 공연만, ADR-0212 결정 1·2). 1순위 등급이 매진되면 2순위를 고르라고 알린다
+    if (c.pref && hasCount) inQueue.append(prefLine(c, v.soldOutTiers ?? []));
 
     const region = h('section', { class: 'col q-region', role: 'region', 'aria-label': '대기 상태' });
     inQueue.append(region);
@@ -85,10 +89,13 @@ export function queueScreen(c: LiveCtx): HTMLElement[] {
       region.append(cancel);
     }
 
-    // ⑨ 순번 안내 ›. ⑥ [차례 알림 받기](알림 권한·알림음·웹 푸시)는 HOT-343이 잇기 전까지 보이지 않는다(ADR-0208 결정 1)
+    // ⑨ 순번 안내 ›
     const info = h('button', { class: 'btn btn-text btn-sm q-mh32', type: 'button', 'aria-haspopup': 'dialog', 'data-opens': 'info' }, '순번 안내', ic('chevron-right', 'ic-16'));
     info.addEventListener('click', () => c.open('info', info));
-    inQueue.append(h('div', { class: 'col q-queue-foot' }, info));
+    // ⑥ [차례 알림 받기](CMP-068): 알림음을 쓰려면 사용자 동작이 있어야 해 늘 둔다(d5 §5.8, ADR-0212 결정 4)
+    const notify = h('button', { class: 'btn btn-secondary btn-block q-cta', type: 'button', 'aria-haspopup': 'dialog', 'data-opens': 'notify' }, ic('bell'), '차례 알림 받기');
+    notify.addEventListener('click', () => c.open('notify', notify));
+    inQueue.append(h('div', { class: 'col q-queue-foot' }, notify, info));
   }
 
   if (st === 'expired') {
@@ -253,4 +260,24 @@ function graceBlock(c: LiveCtx, until: number): HTMLElement {
     h('p', { class: 't-md', 'aria-hidden': 'true' }, remain, ' 안에 입장하세요'),
     go,
   );
+}
+
+/** ⑧ 희망 조건 한 줄: '희망 R석 2매 [바꾸기]', 1순위 등급이 매진이면 경고(d5 §5.8 tier-sold-out) */
+function prefLine(c: LiveCtx, soldOut: readonly string[]): HTMLElement {
+  const pref = c.pref!;
+  const p = pref.read() ?? defaultPreference(pref.tiers);
+  const out = soldOut.includes(p.firstTierId);
+  const id = out ? 'pf-out' : 'pf-sum';
+  const change = h('button', { class: 'btn btn-outline btn-sm', type: 'button', 'aria-haspopup': 'dialog', 'aria-describedby': id, 'data-opens': 'pref' }, '바꾸기');
+  change.addEventListener('click', () => c.open('pref', change));
+  return out
+    ? h('div', { class: 'card-flat row between q-pref-row' },
+        // 낭독 영역에는 글만 둔다(버튼은 밖)
+        h('p', { class: 't-sm row q-pref-text q-top', id, role: 'status' }, ic('alert', 'tx-warning'), h('span', null, '1순위 등급이 매진되었습니다. 2순위 등급을 골라 두세요')),
+        change,
+      )
+    : h('div', { class: 'card-flat row between q-pref-row' },
+        h('p', { class: 't-sm q-pref-text', id }, h('span', { class: 'muted' }, '희망'), ' ', h('strong', null, prefSummary(p, pref.tiers))),
+        change,
+      );
 }

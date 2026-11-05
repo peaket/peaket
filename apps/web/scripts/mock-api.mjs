@@ -5,7 +5,7 @@
 //   대기열(ADR-0207): queue=on-sale|paused|all-held|sold-out|ended, queueEntry=normal|batching|busy|down|other-device|already-admitted|not-open|preverify-invalid|sold-out|ended|verify,
 //   queueAdmit=normal|soon|verifying|restricted|unauthorized|duplicate|expired|expired-final|removed|sold-out|ended|down, queueAhead(처음 앞 인원)·queueRate(1초에 지나는 번호)·queueRemoved(빠진 번호 수)·queueBanner·queueSeats, queueReset=1
 //   로비(ADR-0208): queueOpenIn(오픈까지 남은 초, 정한 순간에 고정한다. 빈 값이면 고정 자료 일정), queueLobby=normal|verify|other-device|identity|human-fail|busy|down|unauthorized,
-//   queueShuffle=normal|late|never|missing, 사전 검증(ADR-0211) queuePreverify=normal|identity|not-found|down|unauthorized
+//   queueShuffle=normal|late|never|missing, 사전 검증(ADR-0211) queuePreverify=normal|identity|not-found|down|unauthorized, 매진 등급(ADR-0212) queueSoldOutTiers=tier-r,…
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
 // - 파생본 이미지 주소(/img/{이름}/{폭}.{avif|webp})에는 자리 그림(SVG)을 낸다
 // - 공연 상세(GET /v1/events/{eventId}, ADR-0200)는 고정 자료 카드의 모든 회차를 답하고 그 밖은 404다.
@@ -574,7 +574,7 @@ export function startMockApi({
     if (p === '/__mock/state' && req.method === 'GET') {
       for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
-        if (v !== null && (v !== '' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn')) state[k] = v;
+        if (v !== null && (v !== '' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers')) state[k] = v;
       }
       if (url.searchParams.has('queueOpenIn')) {
         const sec = Number(state.queueOpenIn);

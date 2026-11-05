@@ -1,7 +1,7 @@
 // SCR-007 로비(오픈 전 대기실). 캔버스 SCR-007 m·t·d 보드를 한 페이지의 반응형으로 옮겼다(d5 §5.7).
 // 휴대폰은 화면 전체, 태블릿은 가운데 520px 열, 데스크톱(lg)은 바탕 위 가운데 480px 카드 하나다(배치는 app.css).
 // 화면 값은 상태 기계(src/live/controller.ts)가 낸다(ADR-0208): lobby-join(not-yet·checking·failed), lobby(countdown·reveal·calculating·delayed),
-// 로비 참가의 다른 기기·다른 기기에서 취소됨. ⑧ 희망 조건과 ⑩ [차례 알림 받기]는 HOT-343, ⑤ 운영 공지는 OPS-410이 잇는다(ADR-0208 결정 1·8).
+// 로비 참가의 다른 기기·다른 기기에서 취소됨, ⑧ 희망 조건(자동 배정 공연)과 ⑩ [차례 알림 받기](ADR-0212). ⑤ 운영 공지는 OPS-410이 잇는다(ADR-0208 결정 8).
 import { KEEP_LOBBY, LEGAL_POL024, LOBBY_PRINCIPLE, ORDERING_TEXT, AUTO_ASSIGN_TEXT, REVEAL_GUIDE } from '../copy';
 import { links } from '../config';
 import type { LiveCtx } from '../ctx';
@@ -10,6 +10,8 @@ import { clock } from '../queue-math';
 import { countdown, milestoneAnnouncer } from '../ui/timers';
 import { steadyNow } from '../live/steady.ts';
 import { focusHeader, offlineStrip } from './shell';
+import { prefEditor } from './preference';
+import { defaultPreference } from '../live/preference.ts';
 
 const hhmm = (ms: number): string => {
   const d = new Date(ms + 9 * 3600_000);
@@ -130,6 +132,9 @@ export function lobbyScreen(c: LiveCtx): HTMLElement[] {
     );
   }
 
+  // ⑧ 희망 조건(CMP-057 preference, 자동 배정 공연만). 바꿀 때마다 이 기기에 저장한다(ADR-0212 결정 1)
+  if (c.pref) frame.append(prefCard(c));
+
   // ④ 법정 고지(POL-024 라목)
   frame.append(h('div', { class: 'banner banner-legal' }, ic('scale'), h('div', { class: 'banner-body' }, h('span', { class: 'legal-tag' }, '법정 고지'), LEGAL_POL024)));
 
@@ -157,8 +162,10 @@ export function lobbyScreen(c: LiveCtx): HTMLElement[] {
     );
   }
 
-  // "창을 닫아도 참가는 유지됩니다"(참가 토큰을 받은 뒤에만). ⑩ [차례 알림 받기]는 HOT-343이 잇는다
-  if (joined) frame.append(h('div', { class: 'col q-lobby-cta' }, h('p', { class: 't-sm muted q-center' }, KEEP_LOBBY)));
+  // ⑩ [차례 알림 받기](CMP-068) · "창을 닫아도 참가는 유지됩니다"(참가 토큰을 받은 뒤에만)
+  const notify = h('button', { class: 'btn btn-secondary btn-lg btn-block q-cta', type: 'button', 'aria-haspopup': 'dialog', 'data-opens': 'notify' }, ic('bell'), '차례 알림 받기');
+  notify.addEventListener('click', () => c.open('notify', notify));
+  frame.append(h('div', { class: 'col q-lobby-cta' }, notify, joined && h('p', { class: 't-sm muted q-center' }, KEEP_LOBBY)));
 
   const offline = v.offline
     ? offlineStrip(`인터넷 연결이 없습니다${v.lastSyncAt !== undefined ? ` · 마지막 동기화 ${hhmm(v.lastSyncAt)}` : ''} · 카운트다운은 이 기기 시계로 계속합니다`)
@@ -205,5 +212,31 @@ function notYetCard(c: LiveCtx, joinAt: number): HTMLElement {
       h('h2', { class: 't-md fw-b grow', id: 'ny-h' }, '곧 들어갈 수 있습니다', h('span', { 'aria-hidden': 'true' }, ' · ', remain)),
     ),
     h('p', { class: 't-sm muted q-indent', id: 'ny-d' }, '로비 안에서는 언제 들어와도 순번이 같습니다'),
+  );
+}
+
+/** ⑧ 희망 조건 카드: 처음에는 기본값이고, 바꾸면 바로 저장해 '저장됨'을 보인다 */
+function prefCard(c: LiveCtx): HTMLElement {
+  const pref = c.pref!;
+  const stored = pref.read();
+  const badge = h('span', { class: 'badge badge-success', role: 'status', hidden: stored === null }, ic('check'), '저장됨');
+  const err = h('p', { class: 't-sm tx-danger', role: 'alert', hidden: true }, '이 브라우저에 저장하지 못했습니다');
+  return h('section', { class: 'card col q-pref', 'aria-labelledby': 'pf-h' },
+    h('div', { class: 'row between' }, h('h2', { class: 't-md fw-b', id: 'pf-h' }, '희망 조건'), badge),
+    prefEditor({
+      idp: 'pfl',
+      tiers: pref.tiers,
+      max: pref.max,
+      value: stored ?? defaultPreference(pref.tiers),
+      onChange: (p) => {
+        const ok = pref.save(p);
+        err.hidden = ok;
+        // 바꿀 때마다 '저장됨'을 다시 읽게 비웠다가 넣는다(CMP-057 '텍스트로 함께 알림')
+        badge.hidden = true;
+        if (ok) requestAnimationFrame(() => (badge.hidden = false));
+      },
+    }),
+    err,
+    h('p', { class: 'hint' }, '차례 전까지 바꿀 수 있고 이 기기에만 저장됩니다'),
   );
 }

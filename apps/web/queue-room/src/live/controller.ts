@@ -47,6 +47,8 @@ export interface QueueView {
   graceUntil?: number;
   /** other-device·cancelled-elsewhere: 로비 참가인지 대기인지(문구가 다르다) */
   via?: 'lobby' | 'queue';
+  /** 매진된 등급(대기 상태 파일 soldOutTiers, 자동 배정 희망 조건 줄의 경고에만, ADR-0212 결정 2) */
+  soldOutTiers?: string[];
 }
 
 export interface Urls {
@@ -61,6 +63,8 @@ export interface Urls {
 export interface Schedule {
   openAtMs: number;
   lobbyOpensAtMs: number | null;
+  /** 좌석 자동 배정 공연(seatAssignment AUTO): 차례 직전 직접 확인을 한다(ADR-0212 결정 3) */
+  autoAssign?: boolean;
 }
 
 export interface Env {
@@ -112,6 +116,8 @@ const LOBBY_SPREAD_SEC = 60;
 const SHUFFLE_DELAYED_MS = 60_000;
 /** 차례가 온 뒤의 입장 유예(POL-008) */
 const GRACE_MS = 15 * 60_000;
+/** 자동 배정 공연의 차례 직전 직접 확인 창(10초 [가정], ADR-0043, Q-T25) */
+const DIRECT_WINDOW_SEC = 10;
 /** 다른 탭이 다른 대기표를 저장했어도 다시 시작하지 않는 상태(입장 확정 중·떠나는 중) */
 const BUSY: readonly LiveState[] = ['admitted', 'leaving', 'turn', 'soon'];
 
@@ -289,6 +295,7 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
       }
       if (reply?.status === 410) {
         clearAllMine();
+        if (reply.problem !== 'sold-out') store.clearAutoAssign();
         return end(reply.problem === 'sold-out' ? 'sold-out' : 'ended');
       }
       if (reply?.status === 429 || reply?.status === 503) {
@@ -503,6 +510,28 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
     let lastPeerAt: number | null = null;
     let nextTickAt = 0;
     let interval = 0;
+    /** 자동 배정 공연: 예상 도래 시각(이 기기 시계). 직접 확인을 그때 보낸다 */
+    let directAt: number | null = null;
+    // 직접 확인에 쓸 일정(좌석 배정 방식)을 아직 모르면 받아 둔다(대기열 경로를 막지 않는다). 못 받으면 늘려 가며 다시
+    let scheduleTries = 0;
+    let scheduleAt = 0;
+    let scheduleBusy = false;
+    const fetchSchedule = () => {
+      if (schedule || scheduleBusy || env.deviceNow() < scheduleAt) return;
+      scheduleBusy = true;
+      void env.schedule().then(
+        (x) => {
+          scheduleBusy = false;
+          if (x) schedule = x;
+          else scheduleAt = env.deviceNow() + 1000 + backoff(++scheduleTries);
+        },
+        () => {
+          scheduleBusy = false;
+          scheduleAt = env.deviceNow() + 1000 + backoff(++scheduleTries);
+        },
+      );
+    };
+    fetchSchedule();
     const accept = (f: QueueState) => {
       reader.accept(f, env.deviceNow());
       const cur = reader.current;
@@ -529,6 +558,7 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
         }
         const tick = env.deviceNow() >= nextTickAt;
         if (tick) {
+          fetchSchedule();
           const leader = tabs.leader() && !env.hidden();
           const peerFresh = lastPeerAt !== null && env.deviceNow() - lastPeerAt < 2 * interval;
           if (leader || !peerFresh || !reader.current) {
@@ -566,12 +596,20 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
             turnAt = saved ?? turnAtOf(t.seq, f, lastBeforeAt);
             if (saved === undefined && storeKey() === ticketKey(t)) store.write({ turnAtMs: turnAt });
           }
+          // 자동 배정 공연은 예상 대기가 10초 안이면 예상 도래 시각에 직접 확인한다(리더만, ADR-0212 결정 3)
+          const eta = view.etaSec;
+          if (schedule?.autoAssign === true && !turn && view.state === 'waiting' && typeof eta === 'number' && eta <= DIRECT_WINDOW_SEC) {
+            directAt ??= env.deviceNow() + eta * 1000;
+          } else if (!turn) directAt = null;
+          const directReady = directAt !== null && env.deviceNow() >= directAt;
           const floored = env.deviceNow() < floorUntil;
-          const canSend = turn && !floored && (forceAdmit || (tabs.leader() && !env.hidden() && env.deviceNow() >= retryAt));
+          const leaderNow = tabs.leader() && !env.hidden();
+          const canSend = !floored && ((turn && (forceAdmit || (leaderNow && env.deviceNow() >= retryAt))) || (!turn && directReady && leaderNow && env.deviceNow() >= retryAt));
           // [지금 입장]은 이번 판단에 한 번만 쓴다(서버 하한 중에 누른 것은 버린다)
           forceAdmit = false;
           if (canSend) {
-            const r = await admission(sig, t, admitFailures);
+            // 차례 전 직접 확인은 화면을 '입장 중'으로 바꾸지 않는다(ADMITTED·SOON이 오면 그때 바뀐다)
+            const r = await admission(sig, t, admitFailures, !turn);
             if (r === 'done' || stopped(sig)) return;
             admitFailures = r.failures;
             // NOT_YET은 서버 하한, 일시 실패는 전체 지터 뒤 다시(폴링은 이어 간다)
@@ -598,7 +636,7 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
           nextTickAt = env.deviceNow() + interval;
         }
         const nowD = env.deviceNow();
-        const untilTurn = Math.min(floorUntil > nowD ? floorUntil - nowD : Infinity, retryAt > nowD ? retryAt - nowD : Infinity);
+        const untilTurn = Math.min(floorUntil > nowD ? floorUntil - nowD : Infinity, retryAt > nowD ? retryAt - nowD : Infinity, directAt !== null && directAt > nowD ? directAt - nowD : Infinity);
         // 503 Retry-After가 하한이면 보이기·연결 사건으로 깨우지 않는다. 방송·리더 바뀜·[지금 입장]은 늘 깨운다(다시 그리기만 하고 묻기는 nextTickAt을 지킨다)
         const why = await wait(Math.min(nextTickAt - env.deviceNow(), untilTurn), sig, retryAfterMs === null, true);
         if ((why === 'wake' || why === 'leader') && retryAfterMs === null) nextTickAt = 0;
@@ -624,6 +662,7 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
     const state: LiveState = stale ? 'stale' : f.saleStatus === 'PAUSED' || f.admissionPaused ? 'paused' : f.saleStatus === 'ALL_HELD' ? 'all-held' : 'waiting';
     const v: QueueView = { state, ahead, progress, etaSec: eta, purchaseUnlikely: purchaseUnlikely(ahead, f) };
     if (f.banner) v.banner = f.banner;
+    if (f.soldOutTiers.length > 0) v.soldOutTiers = f.soldOutTiers;
     return v;
   }
 
@@ -633,7 +672,7 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
    * 'done'(끝났거나 떠남), 아니면 다시 보내지 않을 밀리초와 그 종류: floor(NOT_YET 서버 하한, 지터 없음)·retry(일시 실패, 전체 지터).
    * 실패 수는 부를 때마다 이어 받아 기다림이 늘어난다(분당 재시도 예산, §4.1)
    */
-  async function admission(sig: AbortSignal, t: Ticket, priorFailures: number): Promise<'done' | AdmitWait> {
+  async function admission(sig: AbortSignal, t: Ticket, priorFailures: number, direct = false): Promise<'done' | AdmitWait> {
     let refreshed = false;
     let failures = priorFailures;
     let tries = 0;
@@ -641,7 +680,7 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
     const retry = (): AdmitWait => ({ kind: 'retry', delayMs: backoff(failures), failures });
     while (!stopped(sig)) {
       // SOON 뒤 다시 보낼 때는 '곧 입장' 화면을 그대로 둔다(깜박임·다시 낭독 없음)
-      if (!soon) show({ ...current, state: 'turn' });
+      if (!soon && !direct) show({ ...current, state: 'turn' });
       const firstEta = store.read()?.firstEta;
       const body = { ...(t.queueTicket ? { queueTicket: t.queueTicket } : { lobbyToken: t.lobbyToken }), ...(firstEta ? { firstEtaSec: firstEta.sec, firstEtaAtMs: firstEta.atMs } : {}) };
       const { reply, sentAt, receivedAt } = await timed(() => net.postText(`${urls.queue}${base}/admission`, body, sig));
@@ -688,7 +727,8 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
       }
       if (reply.status === 200 && status === 'NOT_YET') {
         const ms = field(reply, 'retryAfterMs');
-        return { kind: 'floor', delayMs: typeof ms === 'number' && ms > 0 ? ms : 1000, failures: 0 };
+        // 시도 간격은 1초 이상이다(queue-admission §4, 게이트웨이 레이트 리밋): 차례에 가까울수록 1초보다 작은 값이 오는 게 정상이다
+        return { kind: 'floor', delayMs: Math.max(1000, typeof ms === 'number' && ms > 0 ? ms : 1000), failures: 0 };
       }
       if (reply.status === 200 && status === 'VERIFYING') {
         leave(urls.verify, sig);
@@ -744,6 +784,8 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
 
   function finish(state: 'sold-out' | 'ended', clear: boolean): void {
     if (clear) clearAllMine();
+    // 판매가 끝나면 희망 조건도 지운다(§3.12, ADR-0212 결정 1)
+    if (state === 'ended') store.clearAutoAssign();
     end(state);
   }
 

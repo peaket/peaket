@@ -607,7 +607,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | sessionStorage | `peaket.withdraw.reauth` | 탈퇴 재인증으로 떠난 시각(밀리초. 토큰은 넣지 않는다, docs/features/identity.md §8 '탈퇴 화면 연결', 추천 적용 2026-11-04) | 탭(남긴 지 10분 [가정] 안일 때만 믿는다) | 재인증에서 돌아왔을 때(늘 지운다), 로그아웃. 같은 탭에 다른 계정이 로그인해도 지난 계정의 재인증 실패 창이 뜨지 않게 한다(2026-11-05, BOT-036이 넘긴 것) | 등급 밖(숫자) |
 | sessionStorage | `peaket.providers.pending` | 로그인 수단 해제·추가·계정 합치기로 재인증을 떠날 때의 할 일(종류 unlink·add·merge, 제공자, 합치기면 병합 제안 ID, 떠난 시각. 토큰은 넣지 않는다, docs/features/identity.md §2.1 '설정의 로그인 수단 연결·해제의 첫 구현'·'계정 병합의 첫 구현', 추천 적용 2026-11-04, BOT-043) | 탭(남긴 지 10분 [가정] 안일 때만 믿는다) | 재인증에서 돌아왔을 때(늘 지운다), 로그아웃(위 줄과 같은 까닭, 2026-11-05, BOT-036이 넘긴 것) | 등급 밖 |
 | sessionStorage | `peaket.providers.merged` | 지금 계정이 계정 합치기로 흡수되어 흡수 안내로 떠난 시각(밀리초). 흡수 안내(`?ended=MERGED`)를 방금 흡수 확정을 받은 이 탭에만 보이려고 둔다(docs/features/identity.md §2.1 '계정 병합의 첫 구현' 화면, 2026-11-05, BOT-043이 넘긴 것) | 탭(남긴 지 1분 [가정] 안일 때만 믿는다) | 흡수 안내 화면이 열릴 때(늘 지운다). 로그아웃 정리는 이 표시를 남기기 전에 돈다 | 등급 밖(숫자) |
-| localStorage | `peaket.autoassign.{eventId}` | 희망 조건(등급 ID·매수·휠체어석·분리 허용) | 판매 종료까지 | 로그아웃, 배정 확정, 판매 종료 | 등급 밖 |
+| localStorage | `peaket.autoassign.{eventId}` | 희망 조건 `{v: 1, firstTierId, count, wheelchair, secondTierId?, allowSplit, savedAt}`(등급 ID는 공개 요약 `priceTiers`, 매수 상한은 `perPersonLimit`, ADR-0212) | 판매 종료까지 | 로그아웃, 배정 확정, 판매 종료 | 등급 밖 |
 | sessionStorage | `peaket.checkout.{holdId}` | 동의 체크, 고른 결제 수단(이름·전화는 없다) | 탭 | 결제 접수, 구매 세션 끝 | 등급 밖 |
 | sessionStorage | `peaket.accept.{orderId}` | 결제 접수를 보낸 시각과 그 멱등키(결제사 값은 넣지 않는다) | 탭 | 결과 확정, 구매 세션 끝 | 등급 밖 |
 | localStorage | `peaket.recentSearches` | 검색어 최대 10개 [가정] | 사용자가 지울 때까지 | 하나씩·전체 지우기. 로그아웃 때는 지우지 않는다(비로그인 상태에서도 쓴다) | 수집 안 함(data-classification) |
@@ -1041,6 +1041,7 @@ function nextDelayMs(s: QueueView, net: NetState, vis: DocumentVisibilityState):
 - serving ≥ 내 순번이면 리더 탭(보이는 탭)이 바로 입장 확정을 보낸다(위 '여러 탭'). 자동 배정 공연은 예상 대기가 10초 [가정] 안으로 들어오면, 차례가 올 예상 시각에 맞춰 직접 확인을 보낸다. `NOT_YET`이면 `retryAfterMs` 뒤 지터 없이 다시 보낸다(정본, 시도 간격 1초 이상, §4.1). `SOON`의 `retryAfterSeconds`는 하한이라 위쪽으로만 0~20% 흔든다(§4.1).
 - 차례 1분 [가정] 전에 팬 토큰을 미리 갱신한다. 좌석 화면 자원(좌석맵 파일과 좌석 화면 자산 목록 `/_q/seat-preload.json`의 파일)은 `fetch(…, {priority: "low"})`로 미리 받는다. 좌석맵 파일 경로는 대기 상태 파일의 `seatmapLayoutPath`다(미리 받기는 HOT-342, ADR-0207). Safari는 `<link rel="prefetch">`를 지원하지 않으므로 `fetch`로 HTTP 캐시를 미리 채운다.
 - 차례가 가까울 때의 알림: 탭 제목 카운트다운, 짧은 효과음(사용자가 [차례 알림 받기]를 누른 동작으로 오디오를 열어 둔다), 웹 푸시(권한이 있을 때 서버가 보낸다). 백그라운드 탭은 타이머가 제한되어 늦게 알아챌 수 있다. 그래서 15분 유예가 있다(POL-008).
+  - 정한 값(ADR-0212 결정 4): 탭 제목은 숨긴 탭이고 예상 대기 5분 [가정] 안이면 `(약 N분)`·`(N초)`를 앞에 붙인다(버튼과 관계없이). 알림음·브라우저 알림은 켠 뒤 예상 대기 60초 [가정] 안이거나 차례 도래 유예·곧 입장이 되면 한 번이고, 브라우저 알림은 탭이 숨겨져 있고 권한이 있을 때만 띄운다. 켠 상태는 저장하지 않는다. 웹 푸시 구독은 GAT-250(알림 서비스) 뒤에 잇는다.
 
 **인앱 브라우저**: 대기실과 입장용 등록 전에, 사용자 에이전트 문자열(카카오톡·네이버·인스타그램·페이스북·라인 등의 인앱 표지)로 인앱 브라우저를 감지해 SCR-058로 보낸다 [가정, 표지 목록은 wbs 2.10.6에서 실기로 확정]. 감지는 안내용이고, 서버 판정에는 쓰지 않는다.
 

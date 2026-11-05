@@ -117,6 +117,10 @@ test('상태 바꾸기: 판매 상태·진입 오류·입장 확정 오류가 �
       assert.equal(f.saleStatus, sale, q);
       assert.equal(f.servingRate === 0, rate0, `${q} 속도`);
     }
+    await m.state('queueSoldOutTiers=tier-r,tier-s');
+    m.tick(1000);
+    assert.deepEqual((await file(m, t.segment)).body.soldOutTiers, ['tier-r', 'tier-s']);
+    await m.state('queueSoldOutTiers=');
     await m.state('queueBanner=점검 안내&queueSeats=1');
     m.tick(1000);
     const f = (await file(m, t.segment)).body;
