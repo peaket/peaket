@@ -33,19 +33,53 @@ const problemName = (b: unknown): string | null => {
   return i < 0 ? type : type.slice(i + 1);
 };
 
-function withTimeout(signal: AbortSignal | undefined): AbortSignal {
+/**
+ * 화면 신호와 5초 시간 초과를 합친다. AbortSignal.any가 없는 엔진의 대체 경로는 요청이 끝나면 release로 두 신호에 단 듣기를 지운다
+ * (끝난 뒤 남은 사건 듣기 0, FE-T15, ADR-0216 결정 6. api-client signal.ts와 같은 규칙)
+ */
+function withTimeout(signal: AbortSignal | undefined): { signal: AbortSignal; release(): void } {
   const t = AbortSignal.timeout(TIMEOUT_MS);
-  if (!signal) return t;
-  if (typeof AbortSignal.any === 'function') return AbortSignal.any([signal, t]);
+  const none = () => undefined;
+  if (!signal) return { signal: t, release: none };
+  if (typeof AbortSignal.any === 'function') return { signal: AbortSignal.any([signal, t]), release: none };
   const c = new AbortController();
-  const stop = (s: AbortSignal) => c.abort(s.reason);
-  if (signal.aborted) stop(signal);
-  else if (t.aborted) stop(t);
-  else {
-    signal.addEventListener('abort', () => stop(signal), { once: true });
-    t.addEventListener('abort', () => stop(t), { once: true });
+  if (signal.aborted) {
+    c.abort(signal.reason);
+    return { signal: c.signal, release: none };
   }
-  return c.signal;
+  if (t.aborted) {
+    c.abort(t.reason);
+    return { signal: c.signal, release: none };
+  }
+  const fromScreen = () => {
+    release();
+    c.abort(signal.reason);
+  };
+  const fromTimer = () => {
+    release();
+    c.abort(t.reason);
+  };
+  let released = false;
+  function release(): void {
+    if (released) return;
+    released = true;
+    signal!.removeEventListener('abort', fromScreen);
+    t.removeEventListener('abort', fromTimer);
+  }
+  signal.addEventListener('abort', fromScreen, { once: true });
+  t.addEventListener('abort', fromTimer, { once: true });
+  return { signal: c.signal, release };
+}
+
+/** 합친 신호로 요청하고, 끝나면(성공·실패·끊김) 듣기를 지운다 */
+async function guarded(fetchImpl: FetchLike, url: string, init: RequestInit, signal: AbortSignal | undefined, nowMs: () => number): Promise<Reply> {
+  const s = withTimeout(signal);
+  try {
+    const res = await fetchImpl(url, { ...init, signal: s.signal });
+    return await read(res, nowMs());
+  } finally {
+    s.release();
+  }
 }
 
 async function read(res: Response, nowMs: number): Promise<Reply> {
@@ -77,30 +111,14 @@ export interface Net {
 
 export function createNet(fetchImpl: FetchLike, now: () => number): Net {
   return {
-    async postText(url, body, signal) {
-      const res = await fetchImpl(url, { method: 'POST', credentials: 'include', headers: { 'content-type': 'text/plain;charset=UTF-8' }, body: JSON.stringify(body), signal: withTimeout(signal) });
-      return read(res, now());
-    },
-    async postJson(url, body, signal) {
-      const res = await fetchImpl(url, { method: 'POST', credentials: 'include', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: withTimeout(signal) });
-      return read(res, now());
-    },
-    async send(url, method, signal) {
-      const res = await fetchImpl(url, { method, credentials: 'include', cache: 'no-store', signal: withTimeout(signal) });
-      return read(res, now());
-    },
-    async getFile(url, noStore, signal) {
-      const res = await fetchImpl(url, { credentials: 'omit', ...(noStore ? { cache: 'no-store' as const } : {}), signal: withTimeout(signal) });
-      return read(res, now());
-    },
-    async getPublic(url, signal) {
-      const res = await fetchImpl(url, { credentials: 'omit', signal: withTimeout(signal) });
-      return read(res, now());
-    },
-    async getFan(url, signal) {
-      const res = await fetchImpl(url, { credentials: 'include', cache: 'no-store', signal: withTimeout(signal) });
-      return read(res, now());
-    },
+    postText: (url, body, signal) =>
+      guarded(fetchImpl, url, { method: 'POST', credentials: 'include', headers: { 'content-type': 'text/plain;charset=UTF-8' }, body: JSON.stringify(body) }, signal, now),
+    postJson: (url, body, signal) =>
+      guarded(fetchImpl, url, { method: 'POST', credentials: 'include', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, signal, now),
+    send: (url, method, signal) => guarded(fetchImpl, url, { method, credentials: 'include', cache: 'no-store' }, signal, now),
+    getFile: (url, noStore, signal) => guarded(fetchImpl, url, { credentials: 'omit', ...(noStore ? { cache: 'no-store' as const } : {}) }, signal, now),
+    getPublic: (url, signal) => guarded(fetchImpl, url, { credentials: 'omit' }, signal, now),
+    getFan: (url, signal) => guarded(fetchImpl, url, { credentials: 'include', cache: 'no-store' }, signal, now),
   };
 }
 

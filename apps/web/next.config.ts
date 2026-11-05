@@ -46,6 +46,8 @@ const config: NextConfig = {
     const queueRoom = process.env.PEAKET_DEV_QUEUE_ROOM_ORIGIN || 'http://localhost:3004';
     return [
       ...(mock ? [{ source: '/v1/home/rankings.json', destination: `${mock}/v1/home/rankings.json` }] : []),
+      // 좌석맵 파일(www 출처 정적 파일, 대기실이 차례 전에 미리 받는다, ADR-0216)
+      ...(mock ? [{ source: '/v1/events/:eventId/seatmap-layouts/:file', destination: `${mock}/v1/events/:eventId/seatmap-layouts/:file` }] : []),
       { source: '/queue/:eventId', destination: `${queueRoom}/queue/:eventId` },
       { source: '/shop/:productId/queue', destination: `${queueRoom}/shop/:productId/queue` },
       { source: '/_q/:path*', destination: `${queueRoom}/_q/:path*` },

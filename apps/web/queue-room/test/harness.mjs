@@ -173,6 +173,7 @@ export function openTab(world, { handler, hidden = false, online = () => true, r
   const calls = [];
   const views = [];
   const navs = [];
+  const preloads = [];
   let hcCalls = 0;
   let refreshes = 0;
   const call = (c) => {
@@ -216,6 +217,7 @@ export function openTab(world, { handler, hidden = false, online = () => true, r
       return () => wakers.delete(cb);
     },
     navigate: (u) => navs.push(u),
+    preload: (p) => preloads.push(p),
     sha256: async (s) => sha(s),
     refresh: async () => {
       refreshes++;
@@ -237,6 +239,7 @@ export function openTab(world, { handler, hidden = false, online = () => true, r
     calls,
     views,
     navs,
+    preloads,
     session,
     channel,
     refreshResult: undefined,

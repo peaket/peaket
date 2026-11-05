@@ -8,6 +8,7 @@
 import type { Clock } from './clock.ts';
 import type { Net, Reply } from './net.ts';
 import { resultRetryDelayMs, spreadDelayMs } from './net.ts';
+import { seatmapPath } from './preload.ts';
 import { aheadCount, etaSeconds, MonotonicReader, nextDelayMs, parseQueueState, purchaseUnlikely, segmentOf, turnAtOf, type QueueState } from './queue-file.ts';
 import type { Batching, Lobby, Store, Ticket } from './store.ts';
 import { singleTab, type ResultState, type TabMessage, type Tabs } from './tabs.ts';
@@ -96,6 +97,8 @@ export interface Env {
   humanCheck(signal: AbortSignal): Promise<string | null>;
   /** 같은 회차 탭 조정. 없으면 한 탭 */
   tabs?: Tabs;
+  /** 좌석 자원 미리 받기(낮은 우선순위, 결과를 기다리지 않는다, ADR-0216). 없으면 받지 않는다 */
+  preload?(seatmapLayoutPath: string): void;
 }
 
 export interface Controller {
@@ -228,6 +231,9 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
   };
 
   /** 끝 상태를 보이고 다른 탭에 알린다 */
+  /** 마지막으로 미리 받은 좌석맵 경로. 페이지마다 한 번이라 대기 루프를 다시 돌아도(다시 줄 서기·다른 탭의 대기표) 비우지 않는다(ADR-0216 결정 2) */
+  let preloadedPath: string | null = null;
+
   const end = (state: ResultState, extra: Partial<QueueView> = {}) => {
     const via = extra.via ?? current.via;
     show({ state, ...extra });
@@ -612,6 +618,13 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
           if (!preRefreshed && view.etaSec !== null && view.etaSec !== undefined && view.etaSec <= PRE_REFRESH_ETA_SEC) {
             preRefreshed = true;
             void env.refresh();
+          }
+          // 좌석 자원은 예상 60초 안에 리더(보이는 탭)만 받는다. HTTP 캐시는 탭끼리 나눠 쓴다(ADR-0216 결정 2·4)
+          const layout = seatmapPath(env.eventId, f.seatmapLayoutPath);
+          // 차례가 온 뒤(serving ≥ 내 순번)에는 받지 않는다: 입장 확정·좌석 화면 이동과 대역폭을 다투지 않게
+          if (layout && layout !== preloadedPath && f.serving < t.seq && view.state === 'waiting' && typeof view.etaSec === 'number' && view.etaSec <= PRE_REFRESH_ETA_SEC && tabs.leader() && !env.hidden()) {
+            preloadedPath = layout;
+            env.preload?.(layout);
           }
           const turn = f.serving >= t.seq && view.state === 'waiting';
           if (turn && turnAt === null) {

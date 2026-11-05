@@ -34,6 +34,50 @@ test('T=0 두 호출은 text/plain이고 사용자 헤더가 없으며 쿠키를
   assert.deepEqual([calls[3].init.credentials, calls[3].init.cache, calls[3].init.method, calls[3].init.headers], ['include', 'no-store', undefined, undefined]);
 });
 
+test('FE-T15 AbortSignal.any가 없는 엔진: 요청이 끝나면 화면 신호에 단 듣기를 지운다(끝난 뒤 남은 사건 듣기 0)', async () => {
+  const any = AbortSignal.any;
+  try {
+    // @ts-expect-error 옛 엔진 흉내
+    delete AbortSignal.any;
+    const c = new AbortController();
+    let live = 0;
+    const add = c.signal.addEventListener.bind(c.signal);
+    const remove = c.signal.removeEventListener.bind(c.signal);
+    c.signal.addEventListener = (t, f, o) => (live++, add(t, f, o));
+    c.signal.removeEventListener = (t, f, o) => (live--, remove(t, f, o));
+    const net = createNet(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }), () => 0);
+    await net.postText('https://queue/x', {}, c.signal);
+    await net.getFan('https://api/x', c.signal);
+    assert.equal(live, 0, '요청마다 단 abort 듣기를 지웠다');
+    // 화면을 떠나면(화면 신호 끊김) 진행 중 요청이 AbortError로 끝난다
+    const hang = createNet((_u, init) => new Promise((_r, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))), () => 0);
+    const p = hang.getFan('https://api/y', c.signal);
+    c.abort(new DOMException('left', 'AbortError'));
+    await assert.rejects(p, (e) => e.name === 'AbortError');
+    assert.equal(live, 0, '끊긴 뒤에도 남은 듣기 없음');
+    // 시간 초과(리뷰 낮음): 타이머 신호가 끊기면 TimeoutError로 끝나고 화면 신호·타이머 신호의 듣기가 모두 남지 않는다
+    const timeout = AbortSignal.timeout;
+    const timer = new AbortController();
+    let timerLive = 0;
+    const tAdd = timer.signal.addEventListener.bind(timer.signal);
+    const tRemove = timer.signal.removeEventListener.bind(timer.signal);
+    timer.signal.addEventListener = (t, f, o) => (timerLive++, tAdd(t, f, o));
+    timer.signal.removeEventListener = (t, f, o) => (timerLive--, tRemove(t, f, o));
+    AbortSignal.timeout = () => timer.signal;
+    try {
+      const screen = new AbortController();
+      const q = hang.getFan('https://api/z', screen.signal);
+      timer.abort(new DOMException('slow', 'TimeoutError'));
+      await assert.rejects(q, (e) => e.name === 'TimeoutError');
+      assert.equal(timerLive, 0, '타이머 신호의 듣기도 지웠다');
+    } finally {
+      AbortSignal.timeout = timeout;
+    }
+  } finally {
+    AbortSignal.any = any;
+  }
+});
+
 test('Retry-After는 0 이상 정수 초나 HTTP 날짜만', () => {
   assert.equal(parseRetryAfter('2', 0), 2000);
   assert.equal(parseRetryAfter('0', 0), 0);

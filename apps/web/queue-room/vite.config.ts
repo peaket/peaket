@@ -44,7 +44,13 @@ export default defineConfig(() => ({
   // 대기실 경로·`/_q/*`를 넘겨 같은 출처로 흉내 낸다(ADR-0211 결정 5). 변경 반영(HMR)은 대기실 포트로 바로 잇는다
   base: '/_q/',
   appType: 'mpa',
-  server: { port: 3004, strictPort: true, hmr: { host: 'localhost', clientPort: 3004 } },
+  server: {
+    port: 3004,
+    strictPort: true,
+    hmr: { host: 'localhost', clientPort: 3004 },
+    // 좌석맵 파일(www 출처 정적 파일)은 개발에서 계약 모양 가짜 API가 낸다(대기실이 차례 전에 미리 받는다, ADR-0216)
+    proxy: { '^/v1/events/[^/]+/seatmap-layouts/': { target: process.env.PEAKET_DEV_STATIC_ORIGIN || 'http://127.0.0.1:4010', changeOrigin: true } },
+  },
   preview: { port: 3004, strictPort: true },
   plugins: [cloudFrontShellRewrite()],
   build: {

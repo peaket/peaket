@@ -23,6 +23,7 @@ import {
 } from '@peaket/contracts/openapi/identity';
 import { GetEventReviewSummaryResponse } from '@peaket/contracts/openapi/reviews';
 import { GetMyBookingRestrictionResponse } from '@peaket/contracts/openapi/support';
+import { GetEventSeatmapLayoutResponse } from '@peaket/contracts/openapi/seats';
 import { GetSearchSuggestionsResponse, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
 import { ARTISTS, INITIAL_WISHES, searchResults, suggestions, suggestQueryOk, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
 
@@ -479,6 +480,24 @@ test('취소표 알림 신청(ADR-0213 결정 5): 처음 201·다시 200, 목록
       if (name) assert.equal((await r.json()).type, `https://peaket.example/problems/${name}`);
       if (code === 429) assert.ok(r.headers.get('retry-after'));
     }
+  } finally {
+    server.close();
+  }
+});
+
+test('좌석맵 파일(ADR-0216 결정 7): 대기 상태 파일이 주는 경로에 계약 모양 자리 파일을 immutable로 낸다(모르는 칸 없음), 틀린 경로는 404', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const r = await fetch(`${base}/v1/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e04/seatmap-layouts/1.json`);
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get('cache-control') ?? '', /immutable/);
+    const body = await r.json();
+    assert.deepEqual(GetEventSeatmapLayoutResponse.parse(body), body);
+    assert.equal(body.layoutVersion, 1);
+    assert.equal((await fetch(`${base}/v1/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e04/seatmap-layouts/0.json`)).status, 404);
+    assert.equal((await fetch(`${base}/v1/events/no-such/seatmap-layouts/1.json`)).status, 404);
   } finally {
     server.close();
   }

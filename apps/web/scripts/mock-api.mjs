@@ -6,6 +6,7 @@
 //   queueAdmit=normal|soon|verifying|restricted|unauthorized|duplicate|expired|expired-final|removed|sold-out|ended|down, queueAhead(처음 앞 인원)·queueRate(1초에 지나는 번호)·queueRemoved(빠진 번호 수)·queueBanner·queueSeats, queueReset=1
 //   로비(ADR-0208): queueOpenIn(오픈까지 남은 초, 정한 순간에 고정한다. 빈 값이면 고정 자료 일정), queueLobby=normal|verify|other-device|identity|human-fail|busy|down|unauthorized,
 //   queueShuffle=normal|late|never|missing, 사전 검증(ADR-0211) queuePreverify=normal|identity|not-found|down|unauthorized, 매진 등급(ADR-0212) queueSoldOutTiers=tier-r,…
+//   좌석맵 자리 파일(ADR-0216) GET /v1/events/{회차}/seatmap-layouts/1.json(대기 상태 파일의 seatmapLayoutPath)
 //   예매 제한(ADR-0213) restriction=none|active|overdue|fraud(GET /v1/booking-restrictions/me), 알림 신청 subscribe=normal|limit|busy|ended(422·429·410)
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
 // - 파생본 이미지 주소(/img/{이름}/{폭}.{avif|webp})에는 자리 그림(SVG)을 낸다
@@ -400,6 +401,40 @@ export function bookingRestriction(kind, nowMs) {
   };
 }
 
+/**
+ * 좌석맵 자리 파일(openapi getEventSeatmapLayout 200, ADR-0216 결정 7). 대기실의 좌석 자원 미리 받기를 보려는 작은 판(구역 하나, 8석)이다.
+ * 실제 좌석맵(파트너가 게시한 배치)은 좌석 화면을 잇는 HOT-350이 낸다
+ */
+export function seatmapLayout() {
+  const xs = [350, 450, 550, 650];
+  return {
+    format: 'peaket.seatmap.columns.v1',
+    layoutVersion: 1,
+    canvas: { minX: 0, minY: 0, width: 1000, height: 800 },
+    stage: [{ kind: 'RECT', points: [[300, 50], [700, 50], [700, 150], [300, 150]], name: '무대' }],
+    tiers: ['tier-r', 'tier-s'],
+    seatCount: 8,
+    sections: [
+      {
+        sectionId: 'A',
+        name: 'A구역',
+        shape: { kind: 'RECT', points: [[300, 300], [700, 300], [700, 600], [300, 600]] },
+        label: { x: 500, y: 280 },
+        seatIndexRange: { from: 0, to: 7 },
+        seats: {
+          seatId: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `A-${n <= 4 ? 1 : 2}-${((n - 1) % 4) + 1}`),
+          row: ['1', '1', '1', '1', '2', '2', '2', '2'],
+          number: ['1', '2', '3', '4', '1', '2', '3', '4'],
+          x: [...xs, ...xs],
+          y: [400, 400, 400, 400, 500, 500, 500, 500],
+          tier: [0, 0, 0, 0, 1, 1, 1, 1],
+          flags: [0, 0, 0, 1, 0, 0, 0, 0],
+        },
+      },
+    ],
+  };
+}
+
 /** 자리 그림: 이름마다 다른 색과 이름 글자 */
 export function placeholderSvg(name, width) {
   const banner = name.startsWith('banner-');
@@ -614,6 +649,13 @@ export function startMockApi({
     if (p === '/v1/home/rankings.json' && req.method === 'GET') {
       if (state.ranking === 'missing') return send(404, { type: 'about:blank', title: 'Not Found', status: 404 }, 'application/problem+json');
       return send(200, rankingFile(origin, state.ranking));
+    }
+    // 좌석맵 파일(www 출처의 S3 정적 파일, docs/frontend.md §2.5): 고정 자료 회차의 판 1만, 바뀌지 않는다
+    const layout = /^\/v1\/events\/([^/]+)\/seatmap-layouts\/(\d+)\.json$/.exec(p);
+    if (layout && req.method === 'GET') {
+      const known = ID.test(layout[1]) && eventDetail(origin, layout[1], new Date(now()), openAtOverride) !== undefined;
+      if (!known || layout[2] !== '1') return send(404, { type: 'about:blank', title: 'Not Found', status: 404 }, 'application/problem+json');
+      return send(200, seatmapLayout(), 'application/json; charset=utf-8', { 'cache-control': 'public, max-age=31536000, immutable' });
     }
     const ev = /^\/v1\/events\/([^/]+)$/.exec(p);
     if (ev && req.method === 'GET') {

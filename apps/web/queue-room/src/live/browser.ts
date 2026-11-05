@@ -6,6 +6,7 @@ import { humanCheck } from './human-check';
 import { steadyNow } from './steady.ts';
 import { createTabs, type ChannelLike, type LocksLike } from './tabs.ts';
 import { createNet, tokenHash } from './net.ts';
+import { preloadSeat } from './preload.ts';
 import { createStore, type KV } from './store.ts';
 
 function storage(name: 'localStorage' | 'sessionStorage'): KV | null {
@@ -92,6 +93,7 @@ export function browserEnv(eventId: string, schedule: () => Promise<Schedule | n
       };
     },
     navigate: (u) => location.assign(u),
+    preload: (p) => void preloadSeat((u, i) => fetch(u, i), p),
     sha256: tokenHash,
     refresh,
     schedule,
