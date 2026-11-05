@@ -527,7 +527,7 @@ export const OPERATIONS = {
   listPartnerWebhookDeliveries: {operationId: "listPartnerWebhookDeliveries",method: "GET",path: "/v1/partner/webhooks/{endpointId}/deliveries",host: "partner-api",kind: "read",cookie: true,query: ["cursor","limit","status"]},
   listPartnerWebhooks: {operationId: "listPartnerWebhooks",method: "GET",path: "/v1/partner/webhooks",host: "partner-api",kind: "read",cookie: true,query: ["cursor","limit"]},
   listScannerEventFlags: {operationId: "listScannerEventFlags",method: "GET",path: "/v1/scanner/events/{eventId}/flags",host: "scanner-api",kind: "read",cookie: false,query: ["cursor","limit"]},
-  listSearchResults: {operationId: "listSearchResults",method: "GET",path: "/v1/search",host: "api",kind: "read",cookie: false,query: ["artistId","dateFrom","dateTo","genre","includePast","limit","page","placeId","q","sort","status"]},
+  listSearchResults: {operationId: "listSearchResults",method: "GET",path: "/v1/search",host: "api",kind: "read",cookie: false,query: ["artistId","dateFrom","dateTo","genre","includePast","limit","noConvert","page","placeId","q","sort","status"]},
   listShopProducts: {operationId: "listShopProducts",method: "GET",path: "/v1/shop/products",host: "api",kind: "read",cookie: false,query: ["cursor","limit"]},
   listSubscriptions: {operationId: "listSubscriptions",method: "GET",path: "/v1/subscriptions",host: "api",kind: "read",cookie: true,query: ["cursor","eventIds","limit"]},
   listTickets: {operationId: "listTickets",method: "GET",path: "/v1/tickets",host: "api",kind: "read",cookie: true,query: ["cursor","limit"]},

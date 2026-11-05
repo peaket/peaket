@@ -42,6 +42,10 @@ status?: ListSearchResultsStatus;
  */
 includePast?: boolean;
 /**
+ * 한/영 변환을 하지 않는다. 바꿔 찾은 결과 위의 '{입력}(으)로 찾기'가 원래 값으로 찾을 때 쓴다(추천 적용 2026-11-05, HOT-312)
+ */
+noConvert?: boolean;
+/**
  * 없으면 q가 있을 때 RELEVANCE, 없을 때 OPEN_SOON
  */
 sort?: ListSearchResultsSort;

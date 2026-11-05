@@ -18,20 +18,11 @@ export type Scr001State = (typeof SCR001_STATES)[number];
 export const SCR002_STATES = ['기본'] as const;
 export type Scr002State = (typeof SCR002_STATES)[number];
 
-/** SCR-003 검색: 보드 상태 11(첫 값 '결과'가 기본). 경로에 검색 값을 넣지 않는다(previewHref가 ?state=를 덧붙이므로) */
-export const SCR003_STATES = [
-  '결과',
-  '자동완성',
-  '자동완성 불러오는 중',
-  '빈 결과',
-  '에러',
-  '로딩',
-  '최근 검색어',
-  '자동완성 없음',
-  '바꿔 찾음',
-  '아티스트로 맞음',
-  '빈 결과(필터)',
-] as const;
+/**
+ * SCR-003 검색: 데이터 단계(HOT-312)에서 목업과 ?state=를 걷어 냈다. 결과·빈 결과·바꿔 찾음·필터 빈 결과·관련 공연은 계약 모양 가짜 API
+ * (apps/web/scripts/mock-api.mjs)의 검색어(루멘·루맨·fnaps 등)로 본다. 자동완성 창 상태는 HOT-313이 잇는다
+ */
+export const SCR003_STATES = ['기본'] as const;
 export type Scr003State = (typeof SCR003_STATES)[number];
 
 /** SCR-016 후기 모달: 보드 상태 25 + planning/04의 '로딩'(SCR-002 '로딩'과 겹치지 않게 '목록 불러오는 중').

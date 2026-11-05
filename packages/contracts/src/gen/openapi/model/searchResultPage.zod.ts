@@ -47,6 +47,10 @@ export const SearchResultPage = zod.object({
 }).optional().describe('검색어 해석'),
   "didYouMean": zod.string().nullish().describe('결과가 0건일 때 낱자 단위로 가장 가까운 이름 하나(없으면 null)'),
   "relaxedTotal": zod.int().nullish().describe('결과가 0건이고 필터가 걸려 있을 때 필터를 뺀 결과 수'),
+  "filterNames": zod.object({
+  "placeName": zod.string().nullish(),
+  "artistName": zod.string().nullish()
+}).optional().describe('주소로 받은 공연장·아티스트 필터의 화면 이름(필터 칩에 보인다. 홈 공연장 줄·자동완성 후보가 ID로만 연다, 추천 적용 2026-11-05, HOT-312). 없는 ID면 null'),
   "related": zod.object({
   "basis": zod.object({
   "kind": zod.enum(['ARTIST', 'PLACE', 'UPCOMING_POPULAR']).optional(),

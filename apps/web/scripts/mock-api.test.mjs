@@ -7,7 +7,8 @@ import { readFileSync } from 'node:fs';
 import { GetEventResponse, GetHomeRankingsResponse, GetHomeResponse } from '@peaket/contracts/openapi/catalog';
 import { ListSubscriptionsResponse, ListWishesResponse } from '@peaket/contracts/openapi/identity';
 import { GetEventReviewSummaryResponse } from '@peaket/contracts/openapi/reviews';
-import { INITIAL_WISHES, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
+import { ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
+import { ARTISTS, INITIAL_WISHES, searchResults, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
 
 const ORIGIN = 'http://127.0.0.1:4010';
 const NOW = new Date('2026-11-05T03:00:00Z');
@@ -144,4 +145,51 @@ test('가짜 API의 찜 목록은 productionIds로 고르고(HOT-311), 찜 저�
   } finally {
     server.close();
   }
+});
+
+test('가짜 API의 검색 결과가 계약 Zod를 모르는 칸 없이 지나고, 0건 제안·바꿔 찾기·필터·관련 공연·쪽 규칙을 따른다(HOT-312)', () => {
+  const parse = (x) => assert.deepEqual(ListSearchResultsResponse.parse(x), x);
+  const titles = (r) => r.items.map((c) => c.title);
+  // 아티스트 다른 이름으로 맞는다(관련 공연 없음: 필터가 없어 빠진 공연이 없다)
+  const lumen = searchResults(ORIGIN, { q: '루멘' });
+  parse(lumen);
+  assert.deepEqual(new Set(titles(lumen)), new Set(['LUMEN 콘서트 2026 서울', '봄날 팬미팅']));
+  assert.equal(lumen.related, null);
+  // 필터로 빠진 그 아티스트의 공연이 있으면 관련 공연(ARTIST)
+  const lumenConcert = searchResults(ORIGIN, { q: '루멘', genre: '콘서트' });
+  parse(lumenConcert);
+  assert.deepEqual(titles(lumenConcert), ['LUMEN 콘서트 2026 서울']);
+  assert.equal(lumenConcert.related.basis.kind, 'ARTIST');
+  assert.deepEqual(lumenConcert.related.items.map((c) => c.title), ['봄날 팬미팅']);
+  // 로마자만인 입력이 0건이면 한/영 변환 값으로 찾고, noConvert면 바꾸지 않는다
+  const conv = searchResults(ORIGIN, { q: 'fnaps' });
+  parse(conv);
+  assert.deepEqual(conv.query.converted, { from: 'fnaps', to: '루멘' });
+  assert.equal(conv.total, 2);
+  assert.equal(searchResults(ORIGIN, { q: 'fnaps', noConvert: true }).total, 0);
+  // 0건: 비슷한 이름과 오픈 예정 인기 공연, 필터가 있으면 필터를 뺀 수
+  const typo = searchResults(ORIGIN, { q: '루맨' });
+  parse(typo);
+  assert.equal(typo.didYouMean, '루멘');
+  assert.equal(typo.related.basis.kind, 'UPCOMING_POPULAR');
+  assert.equal(typo.relaxedTotal, null);
+  const filtered = searchResults(ORIGIN, { q: '뮤지컬', status: 'UPCOMING' });
+  parse(filtered);
+  assert.equal(filtered.total, 0);
+  assert.equal(filtered.relaxedTotal, 1);
+  // 검색어 없이 필터만: 오픈 임박 순(오픈 예정이 앞), 공연장·아티스트 필터 이름
+  const all = searchResults(ORIGIN, {});
+  parse(all);
+  assert.equal(all.total, 7);
+  assert.equal(all.items[0].title, 'LUMEN 콘서트 2026 서울');
+  const placeId = 'a1d2c3b4-0000-4000-8000-000000000001';
+  const arena = searchResults(ORIGIN, { placeId, artistId: ARTISTS[1].artistId });
+  parse(arena);
+  assert.deepEqual(arena.filterNames, { placeName: '피켓 아레나', artistName: '피켓밴드' });
+  assert.deepEqual(titles(arena), ['가을 야외 페스티벌']);
+  // 쪽: 20개 고정, 없는 쪽은 빈 목록과 전체 쪽 수
+  const p2 = searchResults(ORIGIN, { page: 2 });
+  assert.deepEqual([p2.items.length, p2.totalPages, p2.limit], [0, 1, 20]);
+  // 인기순은 정해진 순위
+  assert.equal(searchResults(ORIGIN, { sort: 'POPULAR' }).items[0].title, '뮤지컬 별빛 정원');
 });

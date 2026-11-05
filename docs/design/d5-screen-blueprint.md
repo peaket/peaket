@@ -894,7 +894,7 @@ sm 360 · 일반 셸
 
 | 경로 | 셸 | 쓰는 사람 | 들어옴 | 나감 | 우선순위 |
 | --- | --- | --- | --- | --- | --- |
-| `/search?q=&page=` (필터 `genre`·`status`·`placeId`·`artistId`·`dateFrom`·`dateTo`·`includePast`, 정렬 `sort`) | 일반 | 누구나 | 셸 머리 검색창(자동완성 후보 고르기·Enter·전체 결과 보기), 홈의 전체보기·장르·공연장, 주 메뉴 '공연'·'오픈 예정'·'전체 장르' | SCR-002(대표 회차) | P1 |
+| `/search?q=&page=` (필터 `genre`·`status`·`placeId`·`artistId`·`dateFrom`·`dateTo`·`includePast`, 정렬 `sort`, 한/영 변환 끄기 `noConvert`) | 일반 | 누구나 | 셸 머리 검색창(자동완성 후보 고르기·Enter·전체 결과 보기), 홈의 전체보기·장르·공연장, 주 메뉴 '공연'·'오픈 예정'·'전체 장르' | SCR-002(대표 회차) | P1 |
 
 근거: 검색 입력은 셸 머리의 통합 검색창 하나다. 이 화면 본문에는 검색창을 두지 않는다(소유자 결정 2026-10-14, ADR-0063). 입력 중 후보 창의 이름은 '자동완성'이다(소유자 결정 2026-10-27, ADR-0094). 동작 규칙(정규화, 조합 중 글자·초성·한/영 변환, 순서, 몫, 일치 표시, 결과 0건, 관련 공연)의 정본은 docs/features/search.md다. 수치는 추천 적용이다.
 
@@ -948,6 +948,7 @@ sm 360 · 결과 0건과 바꿔 찾기
 - 최근 검색어는 원문 §11에 있던 요소를 되살린 것이다(§1.4). 자동완성 창에서 하나씩 지우기와 전체 지우기를 할 수 있다.
 - 자동완성 창은 ARIA combobox다: 머리 입력은 `role="combobox"`·`aria-expanded`·`aria-controls`·`aria-activedescendant`이고, 창은 `listbox`, 후보는 `option`이다(구분 아이콘은 `aria-hidden`이고, '공연'·'아티스트'·'공연장' 글자를 후보 이름에 넣는다). ↑↓로 이동하고, Enter로 고르고(공연이면 대표 회차의 SCR-002, 아티스트·공연장이면 `?artistId=`·`?placeId=` 결과), Esc로 창을 닫는다. 한글을 조합하는 중(keydown의 `isComposing`이 참이거나 `keyCode`가 229)에는 Enter·↑↓·Esc를 처리하지 않는다(docs/features/search.md §3.4).
 - 페이지를 바꾸면 결과 목록 맨 위로 스크롤하고, 초점을 '검색 결과 n개' 제목으로 옮긴다.
+- 필터는 묶음마다 하나씩 고른다(장르·예매 상태는 '전체'를 둔 단일 선택, 공연 일정은 시작일·종료일, 검색 API가 필터마다 값 하나를 받는다). 공연장·아티스트는 홈의 공연장 줄과 자동완성 후보가 ID로 열고, 필터 칩은 고른 이름(응답 `filterNames`)을 보이며 풀기만 한다(목록 경로가 없다). '{입력}(으)로 찾기'는 한/영 변환 없이 찾는다(`noConvert`). 추천 적용 2026-11-05, BUILD_ORDER HOT-312
 - 일치 표시: 서버가 준 위치(`matches`)만 굵게 한다. 조합 중 글자·초성으로 맞으면 그 음절을, 다른 이름으로 맞으면 원래 이름에서 대응하는 부분(예: '루멘' → 'LUMEN 콘서트 2026 서울'의 'LUMEN')을, 대응이 없으면 이름 전체를 굵게 한다(추천 적용 2026-10-14, ADR-0063, 2026-10-27 ADR-0094).
 - 이 화면은 캐시되는 정적 셸이고, 결과는 브라우저가 검색 API(CDN 캐시)를 불러 그린다. 검색 엔진 색인에서 뺀다(`noindex, follow`, docs/frontend.md §2.5·§5.15).
 - 입력 요소: `type="search"`, `enterkeyhint="search"`, `autocomplete="off"`, `autocapitalize="off"`, `spellcheck="false"`. 바깥은 `<form role="search">`다.

@@ -157,6 +157,7 @@ export const GetHomeRankingsResponse = zod.object({
 export const listSearchResultsQueryQMax = 50;
 
 export const listSearchResultsQueryIncludePastDefault = false;
+export const listSearchResultsQueryNoConvertDefault = false;
 export const listSearchResultsQueryPageDefault = 1;
 
 export const listSearchResultsQueryLimitDefault = 20;
@@ -170,6 +171,7 @@ export const ListSearchResultsQueryParams = zod.object({
   "dateTo": zod.iso.date().optional(),
   "status": zod.enum(['UPCOMING', 'ON_SALE', 'SOLD_OUT', 'ENDED']).optional().describe('예매 상태. ENDED면 끝난 공연만'),
   "includePast": zod.boolean().default(listSearchResultsQueryIncludePastDefault).describe('끝난 공연도 넣기'),
+  "noConvert": zod.boolean().default(listSearchResultsQueryNoConvertDefault).describe('한/영 변환을 하지 않는다. 바꿔 찾은 결과 위의 \'{입력}(으)로 찾기\'가 원래 값으로 찾을 때 쓴다(추천 적용 2026-11-05, HOT-312)'),
   "sort": zod.enum(['RELEVANCE', 'OPEN_SOON', 'POPULAR']).optional().describe('없으면 q가 있을 때 RELEVANCE, 없을 때 OPEN_SOON'),
   "page": zod.int().min(1).default(listSearchResultsQueryPageDefault),
   "limit": zod.literal(20).default(listSearchResultsQueryLimitDefault).describe('한 쪽 20개 [가정] 고정. 캐시 키가 갈리지 않게 다른 값은 받지 않는다')
@@ -212,6 +214,10 @@ export const ListSearchResultsResponse = zod.object({
 }).optional().describe('검색어 해석'),
   "didYouMean": zod.string().nullish().describe('결과가 0건일 때 낱자 단위로 가장 가까운 이름 하나(없으면 null)'),
   "relaxedTotal": zod.int().nullish().describe('결과가 0건이고 필터가 걸려 있을 때 필터를 뺀 결과 수'),
+  "filterNames": zod.object({
+  "placeName": zod.string().nullish(),
+  "artistName": zod.string().nullish()
+}).optional().describe('주소로 받은 공연장·아티스트 필터의 화면 이름(필터 칩에 보인다. 홈 공연장 줄·자동완성 후보가 ID로만 연다, 추천 적용 2026-11-05, HOT-312). 없는 ID면 null'),
   "related": zod.object({
   "basis": zod.object({
   "kind": zod.enum(['ARTIST', 'PLACE', 'UPCOMING_POPULAR']).optional(),

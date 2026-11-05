@@ -133,7 +133,7 @@ export function eventDetail(origin, eventId, now = new Date()) {
         posterAlt: c.posterAlt,
         descriptionText: `${c.title} 공연 안내입니다.\n출연진과 관람 유의사항은 이 글에 함께 적습니다.`,
         detailImages: [{ url: c.posterUrl, alt: `${c.title} 상세 안내 이미지` }],
-        artists: [{ artistId: 'b1d2c3b4-0000-4000-8000-000000000001', name: '피켓밴드' }],
+        artists: cardArtists(Object.keys(CARDS).find((k) => CARDS[k] === c)).map((a) => ({ artistId: a.artistId, name: a.name })),
         placeId: place.placeId,
         placeName: c.placeName,
         placeAddress: place.placeAddress,
@@ -162,6 +162,110 @@ export function eventDetail(origin, eventId, now = new Date()) {
     );
   }
   return undefined;
+}
+
+/** 고정 자료의 아티스트(검색·상세가 함께 쓴다). 다른 이름은 검색에만 쓴다(POL-045) */
+export const ARTISTS = [
+  { artistId: 'b1d2c3b4-0000-4000-8000-000000000001', name: 'LUMEN', aliases: ['루멘'], cards: ['lumen', 'fanmeet'] },
+  { artistId: 'b1d2c3b4-0000-4000-8000-000000000002', name: '피켓밴드', aliases: [], cards: ['jazz', 'fest'] },
+  { artistId: 'b1d2c3b4-0000-4000-8000-000000000003', name: '별빛 앙상블', aliases: [], cards: ['musical', 'orchestra'] },
+];
+const cardArtists = (key) => ARTISTS.filter((a) => a.cards.includes(key));
+
+/** 한/영 키를 잘못 둔 입력 → 바꾼 값, 오타 → 비슷한 이름(고정 자료의 규칙. 실제 규칙은 docs/features/search.md §3.2·§5.5) */
+const CONVERT = { fnaps: '루멘' };
+const SIMILAR = { 루맨: '루멘' };
+/** 인기순(최근 7일 판매 매수 순위 흉내) */
+const POPULAR_ORDER = ['musical', 'fest', 'orchestra', 'play', 'lumen', 'jazz', 'fanmeet'];
+const STATUS_RANK = { ON_SALE: 0, UPCOMING: 1, SOLD_OUT: 2, ENDED: 3 };
+const SEARCH_PAGE = 20;
+
+/** 정규화(docs/features/search.md §3.1의 줄인 꼴): NFKC·소문자·제로폭 지움·공백 정리 */
+const norm = (s) => String(s ?? '').normalize('NFKC').toLowerCase().replace(/[\u200b-\u200d\u2060\ufeff\u3164]/g, '').replace(/\s+/g, ' ').trim();
+
+/** 일치 등급(작을수록 앞): 공연명 0, 아티스트 1, 공연장 2. 맞지 않으면 -1 */
+function matchRank(key, c, q) {
+  if (!q) return 0;
+  if (norm(c.title).includes(q)) return 0;
+  if (cardArtists(key).some((a) => [a.name, ...a.aliases].some((n) => norm(n).includes(q)))) return 1;
+  if (norm(c.placeName).includes(q)) return 2;
+  return -1;
+}
+
+/**
+ * 검색 결과(openapi listSearchResults 200 SearchResultPage). 고정 자료 카드 7장에서 찾는다.
+ * p: { q, genre(정본 이름), status, placeId, artistId, dateFrom, dateTo, includePast, noConvert, sort, page }
+ */
+export function searchResults(origin, p) {
+  const q = norm(p.q);
+  const entries = Object.entries(CARDS);
+  const placeIdOf = (c) => PLACES[c.placeName]?.placeId;
+  const filtersOn = Boolean(p.genre || p.status || p.placeId || p.artistId || p.dateFrom || p.dateTo || p.includePast);
+  const inScope = ([k, c], withFilters) => {
+    if (withFilters && p.genre && c.genre !== p.genre) return false;
+    if (withFilters && p.status) {
+      if (c.saleStatus !== p.status) return false;
+    } else if (!(withFilters && p.includePast) && c.saleStatus === 'ENDED') return false;
+    if (withFilters && p.placeId && placeIdOf(c) !== p.placeId) return false;
+    if (withFilters && p.dateFrom && c.periodEnd < p.dateFrom) return false;
+    if (withFilters && p.dateTo && c.periodStart > p.dateTo) return false;
+    if (withFilters && p.artistId && !cardArtists(k).some((a) => a.artistId === p.artistId)) return false;
+    return true;
+  };
+  const run = (query, withFilters = true) => entries.filter((e) => matchRank(e[0], e[1], query) >= 0 && inScope(e, withFilters));
+  let used = q;
+  let found = run(q);
+  let converted = null;
+  if (q && found.length === 0 && !p.noConvert && /^[a-z]+$/.test(q) && CONVERT[q]) {
+    const again = run(norm(CONVERT[q]));
+    if (again.length > 0) {
+      found = again;
+      used = norm(CONVERT[q]);
+      converted = { from: q, to: CONVERT[q] };
+    }
+  }
+  const sort = p.sort ?? (q ? 'RELEVANCE' : 'OPEN_SOON');
+  const byId = (a, b) => a[1].productionId.localeCompare(b[1].productionId);
+  const time = (iso) => (iso ? Date.parse(iso) : Number.POSITIVE_INFINITY);
+  const sorted = [...found].sort((a, b) => {
+    if (sort === 'RELEVANCE') return matchRank(a[0], a[1], used) - matchRank(b[0], b[1], used) || STATUS_RANK[a[1].saleStatus] - STATUS_RANK[b[1].saleStatus] || byId(a, b);
+    if (sort === 'POPULAR') return POPULAR_ORDER.indexOf(a[0]) - POPULAR_ORDER.indexOf(b[0]) || byId(a, b);
+    return time(a[1].nextOpenAt) - time(b[1].nextOpenAt) || Date.parse(a[1].saleEndsAt) - Date.parse(b[1].saleEndsAt) || byId(a, b);
+  });
+  const total = sorted.length;
+  const totalPages = Math.ceil(total / SEARCH_PAGE);
+  const page = Math.max(1, Number(p.page) || 1);
+  const items = sorted.slice((page - 1) * SEARCH_PAGE, page * SEARCH_PAGE).map(([, c]) => c);
+  let related = null;
+  if (total === 0) {
+    related = { basis: { kind: 'UPCOMING_POPULAR', id: null, name: null }, items: entries.filter(([, c]) => c.saleStatus === 'UPCOMING').slice(0, 6).map(([, c]) => c) };
+  } else if (used) {
+    // 맨 위 결과가 아티스트로 맞았고, 필터로 빠진 그 아티스트의 공연이 있으면(docs/features/search.md §6)
+    const [topKey, top] = sorted[0];
+    if (matchRank(topKey, top, used) === 1) {
+      const artist = cardArtists(topKey).find((a) => [a.name, ...a.aliases].some((n) => norm(n).includes(used)));
+      const others = artist ? artist.cards.filter((k) => !found.some(([fk]) => fk === k) && CARDS[k].saleStatus !== 'ENDED').map((k) => CARDS[k]) : [];
+      if (artist && others.length > 0) related = { basis: { kind: 'ARTIST', id: artist.artistId, name: artist.name }, items: others.slice(0, 6) };
+    }
+  }
+  const place = p.placeId ? Object.entries(PLACES).find(([, v]) => v.placeId === p.placeId)?.[0] ?? null : null;
+  const artist = p.artistId ? ARTISTS.find((a) => a.artistId === p.artistId)?.name ?? null : null;
+  return withOrigin(
+    {
+      items,
+      page,
+      limit: SEARCH_PAGE,
+      total,
+      totalCapped: false,
+      totalPages,
+      query: { normalized: q, converted },
+      didYouMean: total === 0 ? SIMILAR[q] ?? null : null,
+      relaxedTotal: total === 0 && filtersOn ? run(used, false).length : null,
+      related,
+      filterNames: { placeName: place, artistName: artist },
+    },
+    origin,
+  );
 }
 
 /** 처음 찜한 공연(가짜 API를 띄울 때) */
@@ -258,6 +362,30 @@ export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_O
       const raw = url.searchParams.get('productionIds');
       const ids = raw === null ? undefined : raw.split(',').filter((x) => ID.test(x)).slice(0, 50);
       return send(200, wishPage(origin, wished, ids));
+    }
+    if (p === '/v1/search' && req.method === 'GET') {
+      const sp = url.searchParams;
+      // 계약: limit는 20만, page × 20은 1,000까지(넘으면 400)
+      const askedPage = Number(sp.get('page') ?? '1');
+      if ((sp.get('limit') ?? '20') !== '20' || !Number.isInteger(askedPage) || askedPage < 1 || askedPage * 20 > 1000) {
+        return send(400, { type: 'https://peaket.example/problems/validation-failed', title: '요청 값이 맞지 않습니다', status: 400 }, 'application/problem+json');
+      }
+      const status = sp.get('status');
+      const sort = sp.get('sort');
+      const body = searchResults(origin, {
+        q: (sp.get('q') ?? '').slice(0, 50),
+        genre: sp.get('genre') ?? undefined,
+        status: ['UPCOMING', 'ON_SALE', 'SOLD_OUT', 'ENDED'].includes(status ?? '') ? status : undefined,
+        placeId: sp.get('placeId') ?? undefined,
+        artistId: sp.get('artistId') ?? undefined,
+        dateFrom: sp.get('dateFrom') ?? undefined,
+        dateTo: sp.get('dateTo') ?? undefined,
+        includePast: sp.get('includePast') === 'true',
+        noConvert: sp.get('noConvert') === 'true',
+        sort: ['RELEVANCE', 'OPEN_SOON', 'POPULAR'].includes(sort ?? '') ? sort : undefined,
+        page: sp.get('page') ?? 1,
+      });
+      return send(200, body, undefined, { 'cache-control': 'public, max-age=30, stale-while-revalidate=30, stale-if-error=600' });
     }
     const rs = /^\/v1\/events\/([^/]+)\/review-summary$/.exec(p);
     if (rs && req.method === 'GET') {

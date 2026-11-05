@@ -25,6 +25,12 @@ export const ORIGINS = {
   queueFiles: process.env.NEXT_PUBLIC_QUEUE_FILES_ORIGIN || (DEV ? '' : 'https://queue-files.peaket.example'),
 } as const;
 
+/**
+ * 소비자 웹의 공개 출처(docs/frontend.md §1 `www.peaket.example`). 정규 주소·구조화 데이터의 절대 주소에 쓴다(서버에서 읽는다).
+ * 환경마다 다르면 PEAKET_SITE_ORIGIN으로 넣는다
+ */
+export const SITE_ORIGIN = (process.env.PEAKET_SITE_ORIGIN || 'https://www.peaket.example').replace(/\/+$/, '');
+
 /** 대기실(로비·대기열, SCR-007·008·018) 주소. 대기실 경량 페이지는 별도 빌드(apps/web/queue-room)이고 운영에서는 같은 출처의 `/queue/{id}`다 */
 export function queueRoomHref(eventId: string): string {
   return `${ORIGINS.queueRoom}/queue/${encodeURIComponent(eventId)}`;

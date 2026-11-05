@@ -223,3 +223,18 @@ export function roundBadge(r: DetailRound, nowMs: number): { text: string; tone:
   if (r.openAtMs !== undefined && nowMs < r.openAtMs) return { text: '오픈 예정', tone: 'primary' };
   return { text: '판매 중', tone: 'success' };
 }
+
+/** JSON-LD 글: `<`·U+2028·U+2029를 JSON 이스케이프(역빗금 u 네 자리)로 바꿔 스크립트 블록을 끝내거나 HTML 주석을 열지 못하게 한다(JSON으로 읽으면 같은 값, asvs/catalog-review 1.2.3) */
+export function jsonLdText(data: unknown): string {
+  return JSON.stringify(data).replace(/[<\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
+/**
+ * 구조화 데이터의 판매 상태(schema.org Offer availability, docs/frontend.md '회차 상세의 정규 주소'의 '판매 상태'). 그린 때(ISR, 300초)의 시각으로
+ * 정한다: 오픈 전 PreOrder, 판매 중 InStock, 판매 종료·취소 뒤 Discontinued. 등급별 실시간 매진은 HOT-010의 출처가 정해지면 SoldOut을 더한다.
+ */
+export function offerAvailability(d: Pick<EventDetail, 'status' | 'openAtMs' | 'saleEndsAtMs'>, nowMs: number): string {
+  if (d.status === 'CANCELLED' || nowMs >= d.saleEndsAtMs) return 'https://schema.org/Discontinued';
+  if (nowMs < d.openAtMs) return 'https://schema.org/PreOrder';
+  return 'https://schema.org/InStock';
+}

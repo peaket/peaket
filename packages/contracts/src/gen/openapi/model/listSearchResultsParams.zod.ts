@@ -14,6 +14,7 @@ import * as zod from 'zod';
 export const listSearchResultsParamsQMax = 50;
 
 export const listSearchResultsParamsIncludePastDefault = false;
+export const listSearchResultsParamsNoConvertDefault = false;
 export const listSearchResultsParamsPageDefault = 1;
 
 export const listSearchResultsParamsLimitDefault = 20;
@@ -26,6 +27,7 @@ export const ListSearchResultsParams = zod.object({
   "dateTo": zod.iso.date().optional(),
   "status": zod.enum(['UPCOMING', 'ON_SALE', 'SOLD_OUT', 'ENDED']).optional(),
   "includePast": zod.boolean().default(listSearchResultsParamsIncludePastDefault),
+  "noConvert": zod.boolean().default(listSearchResultsParamsNoConvertDefault),
   "sort": zod.enum(['RELEVANCE', 'OPEN_SOON', 'POPULAR']).optional(),
   "page": zod.int().min(1).default(listSearchResultsParamsPageDefault),
   "limit": zod.literal(20).default(listSearchResultsParamsLimitDefault)

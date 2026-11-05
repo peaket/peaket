@@ -11,12 +11,14 @@ import type { ReactNode } from 'react';
 import { SEAT_MODE_LABEL, SORT_MODE_LABEL } from '@/entities/production';
 import { CopyTextButton, ShareButton } from '@/features/copy-share';
 import { GENRES, searchHref } from '@/shared/config/genres';
+import { SITE_ORIGIN } from '@/shared/config/origins';
 import { cx } from '@/shared/lib/cx';
+import { derivativeUrl } from '@/shared/lib/image-loader';
 import { PicturePoster } from '@/shared/ui/PicturePoster';
 import { AppShell } from '@/widgets/app-shell';
 import { loadEvent, popularEventIds } from '../api/load-event';
 import { AUTO_SEAT_NOTE, brokerNotice, LEGAL_RESALE_NOTICE, SORT_NOTICE } from '../model/content';
-import type { EventDetail } from '../model/detail';
+import { jsonLdText, offerAvailability, type EventDetail } from '../model/detail';
 import { BookingBar, BookingFacts, BookingPanelCta, BookingProvider, type BookingData } from './Booking';
 import { DetailCollapse, DetailImage, SectionTabs, WishButton } from './DetailClient';
 import { DetailModalsProvider, DetailModalTrigger } from './DetailModals';
@@ -36,7 +38,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (r.kind === 'missing') return { title: '페이지를 찾을 수 없습니다', robots: { index: false, follow: false } };
   const d = r.detail;
   // 회차마다 자기 주소가 정규 주소다(ADR-0153). 제목에 회차 일시를 넣어 같은 공연의 회차끼리 비슷한 페이지로 묶이지 않게 한다
-  return { title: `${d.title} ${d.roundLabel}`, alternates: { canonical: `/events/${d.eventId}` } };
+  return { title: `${d.title} ${d.roundLabel}`, alternates: { canonical: `${SITE_ORIGIN}/events/${d.eventId}` } };
 }
 
 /** 섹션 사이: 휴대폰·태블릿은 8px 바탕 띠, 데스크톱은 1px 선 */
@@ -83,6 +85,7 @@ export async function EventDetailPage({ params }: Props) {
       <BookingProvider data={booking}>
         <ReviewSummaryProvider eventId={d.eventId}>
           <AppShell variant="default" guest bottomBar={<BookingBar data={booking} />}>
+            <EventJsonLd d={d} />
             <DetailModalsProvider initial={null} sellerName={d.sellerName} seller={d.seller} sortText={sort.body} perPerson={d.perPersonLimit} loginHref={loginHref}>
               <main className="page-main pb-6 lg:pb-0" id="main" tabIndex={-1}>
                 <div className="mx-auto w-full max-w-[1280px] lg:grid lg:grid-cols-12 lg:items-start lg:gap-x-6 lg:px-8 lg:pt-8 lg:pb-16">
@@ -322,6 +325,41 @@ function Hero({ d, booking, loginHref }: { d: EventDetail; booking: BookingData;
       </div>
     </div>
   );
+}
+
+/**
+ * 회차 하나의 schema.org Event(ADR-0153: 회차마다 자기 주소와 Event 하나, docs/frontend.md '회차 상세의 정규 주소', HOT-311이 넘김).
+ * 실행되지 않는 데이터 블록이라 CSP가 보지 않는다. `dangerouslySetInnerHTML`을 쓰지 않고(asvs/frontend.md 1.2.1) 글자 자식으로 싣는다:
+ * `<`를 미리 JSON 이스케이프(역빗금 u003c)로 바꿔 스크립트 블록을 끝내지 못하게 하고, React도 `</script`를 바꿔 쓴다(2026-11-05 react-dom/server로 확인).
+ */
+function EventJsonLd({ d }: { d: EventDetail }) {
+  const minPrice = d.tiers.length > 0 ? Math.min(...d.tiers.map((t) => t.price)) : undefined;
+  const data = {
+    '@context': 'https://schema.org',
+    '@type': 'Event',
+    name: `${d.title} ${d.roundLabel}`,
+    startDate: new Date(d.startsAtMs).toISOString(),
+    eventStatus:
+      d.status === 'CANCELLED' ? 'https://schema.org/EventCancelled' : d.status === 'POSTPONED' ? 'https://schema.org/EventPostponed' : 'https://schema.org/EventScheduled',
+    eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+    location: { '@type': 'Place', name: d.place.name, ...(d.place.address ? { address: d.place.address } : {}) },
+    ...(d.posterUrl ? { image: [derivativeUrl(d.posterUrl, 1280, 'webp')] } : {}),
+    organizer: { '@type': 'Organization', name: d.sellerName },
+    ...(d.artists.length > 0 ? { performer: d.artists.map((name) => ({ '@type': 'PerformingGroup', name })) } : {}),
+    ...(minPrice !== undefined
+      ? {
+          offers: {
+            '@type': 'Offer',
+            price: minPrice,
+            priceCurrency: 'KRW',
+            url: `${SITE_ORIGIN}/events/${d.eventId}`,
+            validFrom: new Date(d.openAtMs).toISOString(),
+            availability: offerAvailability(d, Date.now()),
+          },
+        }
+      : {}),
+  };
+  return <script type="application/ld+json">{jsonLdText(data)}</script>;
 }
 
 /** 판매 중지(d5 §5.2 '판매 중지'): CMP-046 안내만. 예매 버튼·잔여석·후기는 없고 사유는 보이지 않는다. 상태 표시로 앞 서버가 410을 단다(ADR-0201) */

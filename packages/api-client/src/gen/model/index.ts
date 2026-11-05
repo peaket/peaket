@@ -689,6 +689,7 @@ export * from './scannerPlacementMode';
 export * from './scannerShift';
 export * from './scannerShiftRole';
 export * from './searchResultPage';
+export * from './searchResultPageFilterNames';
 export * from './searchResultPageLimit';
 export * from './searchResultPageQuery';
 export * from './searchResultPageQueryConverted';

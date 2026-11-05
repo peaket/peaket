@@ -41,7 +41,9 @@ const fulfillHtml = (route, res, html, extra = {}) => {
   return route.fulfill({ status: res.status(), headers, body: Buffer.from(html, 'utf8') });
 };
 
-const inlineScripts = (html) => [...html.matchAll(/<script\b(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+/** 실행되는 인라인 스크립트(src 없음). 데이터 블록(application/json·ld+json, 공연 상세 JSON-LD)은 CSP가 보지 않아 해시하지 않는다 */
+const inlineScripts = (html) =>
+  [...html.matchAll(/<script\b(?![^>]*\ssrc=)([^>]*)>([\s\S]*?)<\/script>/g)].filter((m) => !/\stype="application\/(?:ld\+)?json"/i.test(m[1])).map((m) => m[2]);
 const sha256 = (s) => `'sha256-${createHash('sha256').update(s).digest('base64')}'`;
 
 test.describe('FE-T35 (request) 묶음: 정적 셸 없음·응답마다 nonce', () => {

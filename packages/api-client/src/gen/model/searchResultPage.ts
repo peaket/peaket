@@ -10,6 +10,7 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ProductionCard } from './productionCard';
+import type { SearchResultPageFilterNames } from './searchResultPageFilterNames';
 import type { SearchResultPageLimit } from './searchResultPageLimit';
 import type { SearchResultPageQuery } from './searchResultPageQuery';
 import type { SearchResultPageRelated } from './searchResultPageRelated';
@@ -38,6 +39,8 @@ export interface SearchResultPage {
      * @nullable
      */
   relaxedTotal?: number | null;
+  /** 주소로 받은 공연장·아티스트 필터의 화면 이름(필터 칩에 보인다. 홈 공연장 줄·자동완성 후보가 ID로만 연다, 추천 적용 2026-11-05, HOT-312). 없는 ID면 null */
+  filterNames?: SearchResultPageFilterNames;
   /**
      * 관련 공연. 맨 위 결과가 아티스트·공연장으로 맞았으면 그 아티스트의 다른 공연이나 그 공연장의 오픈 예정 공연, 결과가 0건이면 오픈 예정 인기 공연. 검색 기록은 쓰지 않는다
      * @nullable

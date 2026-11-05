@@ -133,3 +133,20 @@ test('회차 칩 배지는 회차마다 그 회차의 오픈·판매 종료로 �
   assert.deepEqual(roundBadge(a, T('2026-12-23T10:00:00Z')), { text: '판매 종료', tone: 'neutral' });
   assert.deepEqual(roundBadge({ ...a, status: 'CANCELLED' }, T('2026-11-20T12:00:00Z')), { text: '취소', tone: 'neutral' });
 });
+
+test('[ASVS v5.0.0-1.2.3] JSON-LD 글은 < 와 줄 구분 문자(U+2028·U+2029)를 JSON 이스케이프로 바꿔 스크립트 블록을 끝내지 못하고, JSON으로 읽으면 같은 값이다', async () => {
+  const { jsonLdText } = await import('./detail.ts');
+  const data = { name: '</script><script>alert(1)</script><!-- & "q"' + String.fromCharCode(0x2028) + String.fromCharCode(0x2029) };
+  const text = jsonLdText(data);
+  assert.ok(!text.includes('<'));
+  assert.ok(!text.includes(String.fromCharCode(0x2028)) && !text.includes(String.fromCharCode(0x2029)));
+  assert.deepEqual(JSON.parse(text), data);
+});
+
+test('구조화 데이터의 판매 상태: 오픈 전 PreOrder, 판매 중 InStock, 판매 종료·취소 뒤 Discontinued', async () => {
+  const { offerAvailability } = await import('./detail.ts');
+  assert.equal(offerAvailability(D, T('2026-11-20T10:00:00Z')), 'https://schema.org/PreOrder');
+  assert.equal(offerAvailability(D, T('2026-11-20T11:00:00Z')), 'https://schema.org/InStock');
+  assert.equal(offerAvailability(D, T('2026-12-23T10:00:00Z')), 'https://schema.org/Discontinued');
+  assert.equal(offerAvailability({ ...D, status: 'CANCELLED' }, T('2026-11-20T11:00:00Z')), 'https://schema.org/Discontinued');
+});
