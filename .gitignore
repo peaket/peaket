@@ -24,6 +24,7 @@ crash.log
 .next-*/
 dist/
 dist-poc/
+dist-check/
 storybook-static/
 .turbo/
 *.tsbuildinfo

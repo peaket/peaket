@@ -77,6 +77,11 @@ async function guarded(fetchImpl: FetchLike, url: string, init: RequestInit, sig
   try {
     const res = await fetchImpl(url, { ...init, signal: s.signal });
     return await read(res, nowMs());
+  } catch (e) {
+    // 끊긴 요청은 신호의 이유로 끝낸다: 시간 초과 TimeoutError, 화면 떠남 AbortError(FE-T15).
+    // WebKit의 fetch는 이유를 넘기지 않고 늘 AbortError로 거절한다
+    if (s.signal.aborted && s.signal.reason !== undefined) throw s.signal.reason;
+    throw e;
   } finally {
     s.release();
   }

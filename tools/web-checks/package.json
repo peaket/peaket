@@ -17,7 +17,9 @@
     "ds": "playwright test -c playwright.ds.config.mjs",
     "csp": "playwright test -c playwright.csp.config.mjs",
     "rich-text:build": "node rich-text/build.mjs",
-    "rich-text": "playwright test -c playwright.rich-text.config.mjs"
+    "rich-text": "playwright test -c playwright.rich-text.config.mjs",
+    "queue-room:build": "node queue-room/build.mjs",
+    "queue-room": "playwright test -c playwright.queue-room.config.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",

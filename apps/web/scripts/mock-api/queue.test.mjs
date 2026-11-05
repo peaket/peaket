@@ -281,3 +281,53 @@ test('사전 검증(ADR-0211): 계약 Zod 본문 → 201(15분), 갱신이면 �
     m.server.close();
   }
 });
+
+test('검사 기록(ADR-0217): 받은 요청을 메서드·경로·출처·시각으로 남기고(CORS 사전 요청 OPTIONS 포함) logReset으로 비운다', async () => {
+  const m = await boot();
+  try {
+    await m.state('logReset=1');
+    await fetch(`${m.base}/v1/queues/${EVENT}/entries`, { method: 'OPTIONS', headers: { origin: 'http://localhost:3004', 'access-control-request-method': 'POST' } });
+    await enter(m, { preverifyToken: 'pv' });
+    const log = await (await fetch(`${m.base}/__mock/requests`)).json();
+    const mine = log.items.filter((x) => x.path === `/v1/queues/${EVENT}/entries`);
+    assert.deepEqual(mine.map((x) => x.m), ['OPTIONS', 'POST']);
+    assert.equal(mine[0].origin, 'http://localhost:3004');
+    assert.equal(typeof mine[1].at, 'number');
+    assert.ok(!log.items.some((x) => x.path.startsWith('/__mock/')), '검사 경로는 남기지 않는다');
+    await m.state('logReset=1');
+    assert.deepEqual((await (await fetch(`${m.base}/__mock/requests`)).json()).items, []);
+  } finally {
+    m.server.close();
+  }
+});
+
+test('진입 멈춤(queueEntry=hang, ADR-0217): 답하지 않고, 손님이 끊으면 끊은 시각을 기록한다(FE-T15 브라우저 시간 초과 확인)', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueEntry=hang&logReset=1');
+    const started = Date.now();
+    await assert.rejects(fetch(`${m.base}/v1/queues/${EVENT}/entries`, { method: 'POST', headers: { 'content-type': 'text/plain;charset=UTF-8' }, body: JSON.stringify({ preverifyToken: 'pv' }), signal: AbortSignal.timeout(300) }));
+    await new Promise((r) => setTimeout(r, 100));
+    const log = (await (await fetch(`${m.base}/__mock/requests`)).json()).items;
+    const e = log.find((x) => x.m === 'POST');
+    assert.ok(e && typeof e.abortedAt === 'number', JSON.stringify(log));
+    assert.ok(e.abortedAt - started >= 250 && e.abortedAt - started < 2000, `${e.abortedAt - started}ms`);
+  } finally {
+    m.server.close();
+  }
+});
+
+test('200 대기 상태 파일의 Retry-After(queueStateRetryAfter, ADR-0217): 브라우저가 무시해야 하는 머리를 싣는다(FE-T4)', async () => {
+  const m = await boot();
+  try {
+    const r = await enter(m, { preverifyToken: 'pv' });
+    await m.state('queueStateRetryAfter=30');
+    const f = await fetch(`${m.base}/v1/queues/${EVENT}/segment-states/${r.body.segment}.json`);
+    assert.equal(f.status, 200);
+    assert.equal(f.headers.get('retry-after'), '30');
+    await m.state('queueStateRetryAfter=');
+    assert.equal((await fetch(`${m.base}/v1/queues/${EVENT}/segment-states/${r.body.segment}.json`)).headers.get('retry-after'), null);
+  } finally {
+    m.server.close();
+  }
+});

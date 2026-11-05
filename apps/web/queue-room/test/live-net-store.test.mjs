@@ -78,6 +78,26 @@ test('FE-T15 AbortSignal.any가 없는 엔진: 요청이 끝나면 화면 신호
   }
 });
 
+test('FE-T15 끊긴 요청은 엔진과 관계없이 신호의 이유로 끝난다(WebKit fetch는 이유 대신 AbortError로 거절한다): 시간 초과 TimeoutError, 화면 떠남 AbortError', async () => {
+  const timeout = AbortSignal.timeout;
+  const timer = new AbortController();
+  AbortSignal.timeout = () => timer.signal;
+  try {
+    // WebKit처럼 이유를 버리고 늘 AbortError로 거절하는 fetch
+    const webkitLike = createNet((_u, init) => new Promise((_r, reject) => init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))), () => 0);
+    const p = webkitLike.getFan('https://api/x');
+    timer.abort(new DOMException('slow', 'TimeoutError'));
+    await assert.rejects(p, (e) => e.name === 'TimeoutError');
+  } finally {
+    AbortSignal.timeout = timeout;
+  }
+  const screen = new AbortController();
+  const net = createNet((_u, init) => new Promise((_r, reject) => init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))), () => 0);
+  const q = net.getFan('https://api/y', screen.signal);
+  screen.abort();
+  await assert.rejects(q, (e) => e.name === 'AbortError');
+});
+
 test('Retry-After는 0 이상 정수 초나 HTTP 날짜만', () => {
   assert.equal(parseRetryAfter('2', 0), 2000);
   assert.equal(parseRetryAfter('0', 0), 0);

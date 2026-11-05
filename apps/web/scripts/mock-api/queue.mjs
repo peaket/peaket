@@ -30,6 +30,8 @@ export const QUEUE_DEFAULTS = Object.freeze({
   queuePreverify: 'normal',
   /** 매진된 등급 ID(쉼표, 대기 상태 파일 soldOutTiers, 자동 배정 희망 조건 경고, ADR-0212) */
   queueSoldOutTiers: '',
+  /** 200 대기 상태 파일에 실을 Retry-After 초(브라우저는 무시해야 한다, FE-T4, ADR-0217). 빈 값이면 싣지 않는다 */
+  queueStateRetryAfter: '',
 });
 
 /**
@@ -190,6 +192,8 @@ export function createQueueMock({ now, state, schedule = () => null }) {
           if (!b || typeof b.preverifyToken !== 'string' || b.preverifyToken.length === 0 || keys.some((k) => !['preverifyToken', 'deviceId', 'entryRequestId'].includes(k)) || (b.entryRequestId !== undefined && !UUID.test(b.entryRequestId))) return io.badRequest();
           const id = b.entryRequestId ?? randomUUID();
           const mode = state.queueEntry;
+          // 멈춤: 답하지 않는다(화면의 5초 시간 초과·화면 떠남을 보려고, FE-T15, ADR-0217). 손님이 끊으면 검사 기록에 남는다
+          if (mode === 'hang') return;
           // 혼잡·장애는 요청 ID마다 한 번만(다시 보내면 지나간다)
           if ((mode === 'busy' || mode === 'down') && !e.once.has(`entry:${id}`)) {
             e.once.add(`entry:${id}`);
@@ -276,7 +280,7 @@ export function createQueueMock({ now, state, schedule = () => null }) {
             seatmapLayoutPath: `/v1/events/${eventId}/seatmap-layouts/1.json`,
           },
           undefined,
-          { 'cache-control': 'public, max-age=1, stale-while-revalidate=2' },
+          { 'cache-control': 'public, max-age=1, stale-while-revalidate=2', ...(state.queueStateRetryAfter ? { 'retry-after': state.queueStateRetryAfter } : {}) },
         );
         return true;
       }

@@ -65,7 +65,11 @@ test('FE-T4 폴링 주기: 거리별 0.5·5·20초, 실패 늘림(상한 60초),
   assert.equal(nextDelayMs(at(1000, 2), 0, false, null, mid), 20_000);
   assert.equal(nextDelayMs(at(100, 2), 3, false, null, mid), 4000);
   assert.equal(nextDelayMs(at(1000, 2), 5, false, null, mid), 60_000);
-  assert.equal(nextDelayMs(at(100, 2), 0, true, null, mid), 5000);
+  assert.equal(nextDelayMs(at(100, 2), 0, true, null, mid), 5500, '숨긴 탭 5초 바닥 + 위로 10%');
+  // 숨긴 탭은 최소 5초(§5.9): 바닥에 걸리면 위로만 0~20% 흔든다(리뷰 HOT-347: −20% 지터로 4초까지 내려갔다)
+  assert.equal(nextDelayMs(at(100, 2), 0, true, null, () => 0), 5000, '숨긴 탭 바닥 아래로 가지 않는다');
+  assert.equal(nextDelayMs(at(100, 2), 0, true, null, () => 0.999), 5000 * (1 + 0.999 * 0.2));
+  assert.equal(nextDelayMs(at(1000, 2), 0, true, null, () => 0), 16_000, '먼 대기는 바닥보다 길어 보통 지터');
   assert.equal(nextDelayMs(at(100, 2, { pollHintMs: 1000 }), 0, false, null, () => 0), 1000, '하한 아래로 가지 않는다');
   assert.equal(nextDelayMs(at(100, 2, { pollHintMs: 1000 }), 0, false, null, () => 0.999), 1000 * (1 + 0.999 * 0.2));
   assert.equal(nextDelayMs(at(100, 2), 1, false, 3000, () => 0), 3000, '503 Retry-After');

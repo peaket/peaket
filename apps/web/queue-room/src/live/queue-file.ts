@@ -180,8 +180,9 @@ export function nextDelayMs(s: PollInput, failures: number, hidden: boolean, ret
     base = eta <= 60 ? 500 : eta <= 300 ? 5000 : 20_000;
   }
   if (failures > 0) base = Math.min(base * 2 ** failures, 60_000);
-  if (hidden) base = Math.max(base, 5000);
-  const floor = Math.max(s.pollHintMs, retryAfterMs ?? 0);
+  // 숨긴 탭은 최소 5초(§5.9). 바닥은 하한처럼 위로만 흔든다(아래로 흔들면 4초까지 내려간다)
+  const hiddenFloor = hidden && base <= 5000 ? 5000 : 0;
+  const floor = Math.max(s.pollHintMs, retryAfterMs ?? 0, hiddenFloor);
   if (floor > 0) return Math.max(base, floor) * (1 + random() * 0.2);
   return base * (0.8 + random() * 0.4);
 }

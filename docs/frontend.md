@@ -1016,9 +1016,10 @@ function nextDelayMs(s: QueueView, net: NetState, vis: DocumentVisibilityState):
   const eta = s.aheadCount / Math.max(s.servingRate, 0.001);      // 초
   let base = eta <= 60 ? 500 : eta <= 300 ? 5000 : 20000;          // 정본 0.5·5·20초(ADR-0110)
   if (net.consecutiveFailures > 0) base = Math.min(base * 2 ** net.consecutiveFailures, 60000); // [가정] 상한 60초
-  if (vis === "hidden") base = Math.max(base, 5000);               // [가정] 숨긴 탭 최소 5초
+  // [가정] 숨긴 탭 최소 5초: 바닥에 걸리면 하한처럼 위로만 흔든다(아래로 흔들면 4초까지 내려간다, ADR-0217 결정 4)
+  const hiddenFloor = vis === "hidden" && base <= 5000 ? 5000 : 0;
   // 서버 하한: 본문 pollHintMs(중간-032)와 503의 Retry-After. retryAfterMs는 503에서만 채우고 200을 받으면 지운다
-  const floor = Math.max(s.pollHintMs ?? 0, net.retryAfterMs ?? 0);
+  const floor = Math.max(s.pollHintMs ?? 0, net.retryAfterMs ?? 0, hiddenFloor);
   if (floor > 0) return Math.max(base, floor) * (1 + Math.random() * 0.2); // 하한 위로만 0~20%(중간-038)
   return base * (0.8 + Math.random() * 0.4);                        // 하한이 없으면 ±20%
 }
@@ -1547,6 +1548,8 @@ allowBuilds:
 | 시각 회귀 | Playwright `toHaveScreenshot`(판을 고정한 같은 컨테이너 이미지), Storybook 정적 빌드. 유료 서비스는 쓰지 않는다(docs/design/d2 §1, 기술 검토 낮음-100) | FE-T40 |
 | 토큰 검사 | Node 내장 시험 실행기(`node --test`)로 도는 `packages/ds`의 검사 스크립트. tokens.json과 d2 §5 대비표를 읽는다(추천 적용 2026-11-04) | FE-T44·FE-T45 |
 | CSS 층 검사 | 빌드 산출물의 CSS를 읽는 검사 스크립트와 Playwright 3엔진의 계산된 스타일(`tools/web-checks/seed-css/`, 추천 적용 2026-11-04) | FE-T36 |
+
+대기실 경량 페이지(React 밖)의 FE-T3·FE-T4·FE-T15 브라우저 칸은 Playwright 세 엔진 검사(`tools/web-checks/queue-room/`)가 맡는다. 운영 빌드에 출처만 검사용 가짜 API로 바꾼 대기실 빌드를 같은 출처 검사 틀로 띄우고, 사전 요청·폴링 간격·끊긴 시각은 가짜 API의 검사 기록으로 센다(Playwright가 가로챈 경로의 사전 요청에 스스로 답하기 때문이다). 위 표의 jsdom(FE-T4)·Vitest 브라우저 모드(FE-T15) 칸은 React 앱 쪽 시험이고, 대기실 상태 기계·fetch 층의 단위 시험은 node 시험(`apps/web/queue-room/test`)이다(추천 적용 2026-11-06, ADR-0217).
 
 - 단언과 가짜 함수는 Vitest 하나(`expect`, `vi.fn`, `vi.useFakeTimers`)로 쓴다. 원문 ADR-0018의 `@web/test-runner` + mocha + chai + sinon은 쓰지 않는다. 같은 시험 파일을 jsdom과 실제 브라우저에서 같은 러너로 돌리기 때문이다.
 - 지금 있는 것(2026-11-01, openspec 변경 `add-contracts-package`): Vitest 5.0.5를 `packages/contracts`가 처음 쓴다(설정도 그 패키지에 있고, 함께 쓸 패키지가 생기면 `@peaket/config`로 올린다). 뿌리 `pnpm test`가 Turborepo `test` 작업으로 모든 패키지의 시험을 돌린다. 퍼블리싱 화면(ADR-0170)의 목업 시험은 Node 내장 시험 실행기(`node --test`)로 돌고, 그 화면에 데이터를 잇는 단계에서 Vitest로 옮긴다(추천 적용 2026-11-01).

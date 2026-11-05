@@ -6,6 +6,7 @@
 //   queueAdmit=normal|soon|verifying|restricted|unauthorized|duplicate|expired|expired-final|removed|sold-out|ended|down, queueAhead(처음 앞 인원)·queueRate(1초에 지나는 번호)·queueRemoved(빠진 번호 수)·queueBanner·queueSeats, queueReset=1
 //   로비(ADR-0208): queueOpenIn(오픈까지 남은 초, 정한 순간에 고정한다. 빈 값이면 고정 자료 일정), queueLobby=normal|verify|other-device|identity|human-fail|busy|down|unauthorized,
 //   queueShuffle=normal|late|never|missing, 사전 검증(ADR-0211) queuePreverify=normal|identity|not-found|down|unauthorized, 매진 등급(ADR-0212) queueSoldOutTiers=tier-r,…
+//   검사 기록(ADR-0217): GET /__mock/requests(메서드·경로·출처·시각·끊긴 시각), logReset=1, 진입 멈춤 queueEntry=hang, 200 상태 파일 Retry-After queueStateRetryAfter=<초>
 //   좌석맵 자리 파일(ADR-0216) GET /v1/events/{회차}/seatmap-layouts/1.json(대기 상태 파일의 seatmapLayoutPath)
 //   예매 제한(ADR-0213) restriction=none|active|overdue|fraud(GET /v1/booking-restrictions/me), 알림 신청 subscribe=normal|limit|busy|ended(422·429·410)
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
@@ -26,6 +27,8 @@ import { createQueueMock, QUEUE_DEFAULTS } from './mock-api/queue.mjs';
 
 const CARDS = JSON.parse(readFileSync(new URL('./mock-api/cards.json', import.meta.url), 'utf8'));
 const KST = 9 * 60 * 60_000;
+/** 검사 기록에 남기는 요청 수 */
+const REQUEST_LOG_MAX = 5000;
 const DAY = 24 * 60 * 60_000;
 
 /** 고정 자료의 {MOCK} 자리를 가짜 API 주소로 */
@@ -603,6 +606,8 @@ export function startMockApi({
   /** 취소표 알림 신청(회차 ID) */
   const cancels = new Set();
   const wished = new Set(INITIAL_WISHES);
+  /** 검사 기록(가장 최근 REQUEST_LOG_MAX건) */
+  const requestLog = [];
   const server = createServer((req, res) => {
     const host = (req.headers.host ?? '').split(':')[0];
     if (host !== '127.0.0.1' && host !== 'localhost') {
@@ -610,6 +615,21 @@ export function startMockApi({
       return;
     }
     const url = new URL(req.url ?? '/', origin);
+    // 검사 기록(ADR-0217): 브라우저 검사가 CORS 사전 요청(OPTIONS)·요청 간격·끊긴 시각을 서버에서 센다(Playwright는 가로챈 경로의 사전 요청에 스스로 답한다).
+    // 시각은 벽시계(브라우저와 같은 시계)다. 검사 경로(/__mock/)는 남기지 않는다
+    if (!url.pathname.startsWith('/__mock/')) {
+      const entry = { m: req.method ?? 'GET', path: url.pathname, origin: req.headers.origin ?? null, at: Date.now() };
+      requestLog.push(entry);
+      if (requestLog.length > REQUEST_LOG_MAX) requestLog.splice(0, requestLog.length - REQUEST_LOG_MAX);
+      res.on('close', () => {
+        if (!res.writableEnded) entry.abortedAt = Date.now();
+      });
+    }
+    if (url.pathname === '/__mock/requests' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ items: requestLog }));
+      return;
+    }
     // Date는 캐시하지 않는 api 응답처럼 공개한다(화면 시계 보정 표본, docs/frontend.md §3.3)
     // 소비자 웹과 대기실(개발에서는 다른 포트) 두 출처에만 자격 증명 포함 CORS를 연다
     const allowed = req.headers.origin === webOrigin || req.headers.origin === queueRoomOrigin;
@@ -631,13 +651,14 @@ export function startMockApi({
     if (p === '/__mock/state' && req.method === 'GET') {
       for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify', 'restriction', 'subscribe', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
-        if (v !== null && (v !== '' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers')) state[k] = v;
+        if (v !== null && (v !== '' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers' || k === 'queueStateRetryAfter')) state[k] = v;
       }
       if (url.searchParams.has('queueOpenIn')) {
         const sec = Number(state.queueOpenIn);
         openAtOverride = state.queueOpenIn !== '' && Number.isFinite(sec) ? now() + sec * 1000 : undefined;
       }
       if (url.searchParams.get('queueReset')) queue.reset();
+      if (url.searchParams.get('logReset')) requestLog.length = 0;
       if (url.searchParams.get('fan')) {
         state.nickname = undefined;
         state.person = state.fan === 'member' ? MEMBER_PERSON : undefined;
