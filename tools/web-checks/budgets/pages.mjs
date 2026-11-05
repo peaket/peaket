@@ -3,10 +3,14 @@
 // row는 §5.8 표의 경로 묶음 이름이다(체감 목표를 그 행에서 읽는다).
 import { APPS, portOf } from '../seed-css/apps.mjs';
 
-/** 대기실 경량 페이지 셸(별도 빌드 apps/web/queue-room/dist)을 띄우는 정적 서버. 시각 회귀(playwright.visual.config.mjs)와 같은 preset */
+/**
+ * 대기실 경량 페이지 셸(별도 빌드 apps/web/queue-room/dist)을 띄우는 정적 서버. 시각 회귀(playwright.visual.config.mjs)와 같은 preset.
+ * 대기열 화면은 데이터에 이어(ADR-0207) 사전 검증 토큰이 없으면 공연 상세로 넘어가고, Lighthouse는 저장소를 비우고 연다.
+ * 그래서 같은 셸·같은 JS·CSS 묶음을 쓰고 네트워크 없이 그려지는 굿즈 대기 주소로 잰다
+ */
 export const QUEUE_ROOM = {
   port: 4106,
-  path: '/queue/evt-lumen-2026',
+  path: '/shop/md-lumen-lightstick/queue',
   command: 'node lib/serve.mjs --root ../../apps/web/queue-room/dist --port 4106 --preset queue-room',
 };
 

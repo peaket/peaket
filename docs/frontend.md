@@ -389,10 +389,10 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 랭킹 파일 `RankingFile` | www 정적 JSON | `basisDate`, `overall`, `genres` | 홈 랭킹 섹션(클라이언트) | `basisDate`가 2일 [가정] 넘게 지나면 섹션을 숨긴다(정본) |
 | 공연 상세 `EventPublicSummary`(ADR-0200) | `GET /v1/events/{eventId}`(CDN 300초, 태그 `event:{eventId}`·`production:{productionId}`, 판매 중지 410) | 공연·회차 칸, 회차 목록 `rounds`, 등급별 정가 `priceTiers`, 판매자 정보 `seller`. 등급별 판매 상태(HOT-010)·후기 요약·개인 값·판매 정책 요약(HOT-250)·셔플 커밋·좌석맵 판은 각자 출처 | 상세 서버 컴포넌트 | ISR(`cacheTag('event:{id}')`, 300초) |
 | 참가 토큰 `LobbyToken` | `POST …/lobby-participants` 201 | `lobbyToken`, `seedHash`, `drand*`, `shuffleResultAt`, `shuffleSpreadSec`, `verification`(ADR-0079 결정 4) | 대기실 상태표 | localStorage(§3.12) |
-| 사전 검증 토큰 | `POST …/pre-verifications` 201 | 토큰, 만료 시각(계약에 없다, wbs 0.2.3) | 공연 상세 진입 도우미 | localStorage, 만료 2분 [가정] 전에 갱신 |
+| 사전 검증 토큰 `PreverifyResult` | `POST …/pre-verifications` 201 | `preverifyToken`, `expiresAt`, `serverTimeMs` | 공연 상세 진입 도우미 | localStorage, 만료 2분 [가정] 전에 갱신 |
 | 대기표 `QueueTicket` | `POST …/entries` 201 | `queueTicket`, `seq`, `generation`, `segment`, `verification` | 대기실 상태표 | localStorage |
-| 묶음 응답 `BatchingResponse` | `POST …/entries` 202 | `resultPath`, `resultAt`, `spreadSec` | 대기실 상태표 | 메모리 |
-| 대기 상태 `QueueState` | `queue-files` 파일(1초) | `serving`, `servingRate`, `saleStatus`, `soldOutTiers`, `removedUpToServing`, `removedBeforeSegment`, `removedBitmap`, `banner` | 대기실 상태표 | 메모리(마지막 값) |
+| 묶음 응답 `BatchingResponse` | `POST …/entries` 202 | `entryRequestId`, `resultPath`, `resultAt`, `spreadSec`, `serverTimeMs` | 대기실 상태표 | localStorage(그때 보낸 사전 검증 토큰과 함께, ADR-0207) |
+| 대기 상태 `QueueState` | `queue-files` 파일(1초) | `serving`, `servingRate`, `saleStatus`, `soldOutTiers`, `removedUpToServing`, `removedBeforeSegment`, `removedBitmap`, `banner`, `generatedAtMs`, `pollHintMs`, `servingSteps`, `admissionPaused`, `remainingSeats`, `avgTicketsPerOrder`, `seatmapLayoutPath` | 대기실 상태표 | 메모리(마지막 값) |
 | 셔플·묶음 결과 파일 | `queue-files` 파일(60초 [가정]) | 키 → 순번 지도(§4.2 초안) | 대기실 상태표 | 받은 순번만 localStorage에 둔다 |
 | 입장 결과 `AdmissionResult` | `POST …/admission` 200 | `status`, `admissionToken`, `retryAfterSeconds`·`retryAfterMs`, `serverEcdhPublicKey`, `seatmapLayoutPath` | 대기실 상태표 → 좌석 화면 | 입장 토큰·공개키는 sessionStorage에 둔다 |
 | 좌석맵 파일 `SeatMapLayout` | www 정적 JSON(`immutable`) | 캔버스, 무대, 구역(도형·라벨·등급·게이트·`seatIndexRange`), 좌석(색인·열·번호·좌표·등급·휠체어석·판매 제외) | 좌석 Worker | HTTP 캐시 |
@@ -429,24 +429,24 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 | 상태 | 화면(SCR) | 들어오는 조건 | 하는 일 | 나가는 조건 → 다음 상태 |
 | --- | --- | --- | --- | --- |
-| `boot` | — | 페이지 열림 | 저장소에서 회차 표 읽기, 시계 보정, 다른 탭 확인(§5.9) | 참가 토큰만 있으면 → `lobby` / 대기표가 있으면 → `waiting` / 둘 다 없고 오픈 전 → `lobby-join` / 오픈 뒤 → `enter` |
+| `boot` | — | 페이지 열림 | 저장소에서 회차 표 읽기, 시계 보정, 다른 탭 확인(§5.9) | 참가 토큰만 있으면 → `lobby` / 대기표가 있으면 → `waiting` / 진입 요청 ID와 묶음 응답만 있으면 → `batching`(ADR-0207) / 둘 다 없고 오픈 전 → `lobby-join` / 오픈 뒤 → `enter`(사전 검증 토큰이 없으면 공연 상세로) |
 | `lobby-join` | 007 | 참가 전 | 이 기기의 로비 버튼 열리는 시각(§5.9 '로비 버튼은 기기마다 고정된 지연') 전이면 "곧 들어갈 수 있습니다"와 남은 초를 보이며 기다린다. 그 뒤 본인확인 여부 확인(없으면 [휴대폰 본인확인]), 사람 확인 위젯을 필요할 때 불러오기, `POST …/lobby-participants` | 201 → `lobby` / `verification: REQUIRED` → `verify-redirect` / 409 → `other-device` |
 | `lobby` | 007 | 참가 토큰이 있다 | 오픈까지 카운트다운(남은 5분·1분·10초에 낭독, §4.8), 공시 값 표시 | 셔플 공개 시각 + 분산 지연 → `shuffle-fetch` |
 | `shuffle-fetch` | 007 '순서 계산 중' | 공개 시각이 지났다 | 결과 파일 받기, 404면 간격을 2초→20초로 두 배씩 늘리며 다시 받기(정본) | 순번 받음 → `waiting` / 60초 넘음 → `shuffle-delayed`(SEV1 화면 안내. 장애 심각도 등급은 숫자가 작을수록 심각하다) |
-| `enter` | 008 | 오픈 뒤 첫 진입 | `POST …/entries`(`text/plain`) | 201 → `waiting` / 202 → `batching` / 409 → `other-device` 또는 `already-admitted` / 410 → `sold-out` 또는 `ended` / 503 → `Retry-After` 뒤 다시 보내기 |
+| `enter` | 008 | 오픈 뒤 첫 진입 | `POST …/entries`(`text/plain`) | 201 → `waiting` / 202 → `batching` / 409 → `other-device` 또는 `already-admitted` / 410 → `sold-out` 또는 `ended` / 429·503 → `Retry-After` 뒤 같은 요청 ID로 다시 보내기 / 403 `preverify-invalid`·`identity-verification-required`, 404, 409 `queue-not-open` → 공연 상세(ADR-0207) |
 | `batching` | 008 '순서를 정하는 중' | 202 | 묶음 결과 파일을 같은 규칙으로 받기 | 순번 받음 → `waiting` |
 | `waiting` | 008 | 순번이 있다 | 내 대기 상태 파일 폴링(§5.1), 앞 인원·진행 막대·예상 시간 표시, 차례 1분 전 토큰 갱신, 좌석 자원 미리 받기 | serving ≥ 순번 → `turn` / `PAUSED` → `paused` / `ALL_HELD` → `all-held` / `SOLD_OUT` → `sold-out` / `ENDED` → `ended` / 연속 실패 → `stale` |
 | `stale` | 008 '연결 확인 중' | 연속 3회 [가정] 실패 또는 30초 [가정] 무응답 | 마지막 값을 그대로 두기, 실패 뒤 대기 간격 늘리기 | 성공 → 이전 상태 |
 | `paused` | 008 '판매가 잠시 멈췄습니다' | `saleStatus=PAUSED` | 폴링 계속 | `ON_SALE` → `waiting` |
 | `all-held` | 008 '남은 좌석이 모두 결제 중입니다' | `saleStatus=ALL_HELD`(일시 매진, 추천 적용 2026-10-28, ADR-0122) | 폴링 계속. 앞 인원은 그대로 보이고 예상 시간은 숨긴다. "결제되지 않은 좌석이 풀리면 차례대로 이어집니다" | `ON_SALE` → `waiting` / `SOLD_OUT` → `sold-out` / `ENDED` → `ended` |
-| `turn` | 008 '입장 중' | 차례가 왔다 | `POST …/admission`(`text/plain`) | `ADMITTED` → `admitted` / `SOON` → `soon` / `NOT_YET` → `waiting`(자동 배정의 이른 확인) / `VERIFYING` → `verify-redirect` / 409 → `duplicate` / 410 → `expired` 또는 `ended` |
-| `soon` | 008 '곧 입장합니다' | `SOON` | 남은 초 표시, 지터를 넣어 다시 `turn` | — |
+| `turn` | 008 '입장 중' | 차례가 왔다 | `POST …/admission`(`text/plain`) | `ADMITTED` → `admitted` / `SOON` → `soon` / `NOT_YET` → `waiting`(`retryAfterMs` 전에는 다시 보내지 않는다) / `VERIFYING` → `verify-redirect` / 409 → `duplicate` / 410 → `expired` 또는 `ended` / 401 → 갱신 한 번 뒤 다시, 또 401이면 `login-expired` / 403 `booking-restricted` → `restricted`, `queue-ticket-invalid` → `duplicate`, `identity-verification-required` → 공연 상세 / 410 `sold-out` → `sold-out`, `queue-ticket-removed` → `cancelled-elsewhere` / 503 → `Retry-After` 뒤 같은 대기표로(ADR-0207) |
+| `soon` | 008 '곧 입장합니다' | `SOON` | 남은 초 표시, 지터를 넣어 다시 `turn` | `retryAfterSeconds` × (1 + U(0, 0.2)) 뒤 → `turn` |
 | `admitted` | → 010 | 입장 토큰을 받았다 | 토큰을 sessionStorage에 두고 좌석 화면으로 전체 이동 | — |
 | `verify-redirect` | → 009 | 추가 검증 필요 | `/queue/[eventId]/verify`로 이동 | — |
 | `other-device` | 007·008 | 409 다른 기기·탭 | "처음 기기에서 계속하세요" + ( 이 기기에서 다시 참가 › ) | 확인 → 기존 참가·대기를 취소한 뒤 `lobby-join` 또는 `enter` |
 | `cancelled-elsewhere` | 007·008 | 취소된 토큰으로 요청해 받은 거절 | "다른 기기에서 이 참가를 취소했습니다" | 공연 상세 화면으로 |
 | `already-admitted`, `duplicate` | 008 | 409 `ALREADY_ADMITTED`·`DUPLICATE_ADMISSION`, 또는 리더 탭의 입장 결과 방송(`duplicate`, §5.1 '여러 탭') | 정본 문구 | 끝 |
-| `expired` | 008 | 410 대기표 만료 | `rejoinAllowed`면 [다시 줄 서기] | 확인 → 저장소를 지우고 `enter` |
+| `expired` | 008 | 410 대기표 만료 | `rejoinAllowed`면 [다시 줄 서기], 아니면 버튼 없이 안내(ADR-0207) | 확인 → 저장소를 지우고 `enter` |
 | `sold-out` | 018 | 매진 | 폴링 바로 멈춤, 취소표 알림·다른 회차 | 끝 |
 | `ended` | 008 '판매 시간이 끝났습니다' | `ENDED` 또는 410 `sale-ended` | 폴링 멈춤, 저장소 지움 | 끝 |
 | `login-expired` | 008 | 갱신 뒤에도 401 | 순번이 유지된다는 안내, 로그인 뒤 같은 주소로 | 로그인 → `boot` |
@@ -456,6 +456,9 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 - **오래된 파일 버리기(단조 읽기, 추천 적용 2026-10-28, 기술 검토 낮음-105)**: 폴러는 마지막으로 반영한 파일의 `generatedAtMs`와 serving을 기억한다. 받은 파일의 `generatedAtMs`가 그보다 늦지 않으면 버린다. 생성 시각은 새롭지만 serving이 작으면 `saleStatus`·공지·`pollHintMs`만 반영하고 앞 인원·진행 막대·예상 시간은 그대로 둔다. 그런 파일만 10초 [가정] 넘게 이어지면(대기열 Redis 장애 조치로 serving이 정말 되돌아간 경우) 새 값을 받는다(queue-admission §4, Q-T37).
 - **진행 막대**: `(처음 앞 인원 − 지금 앞 인원) ÷ 처음 앞 인원`을 0~100% 범위로 자른다. 처음 값이 0이면 100%다. 처음 앞 인원은 sessionStorage에 둔다(정본).
 - **예상 대기**: 앞 인원 ÷ `servingRate`로 구한다. 속도가 0이거나 일시정지면 숫자를 보이지 않고 '잠시 멈춤'으로 표시한다.
+  - 표기는 분으로 반올림하고 1분 미만도 '약 1분'이다. 60분부터 '약 N시간 M분'이다(ADR-0207).
+  - 처음 보인 예상 대기(초)와 그때의 보정된 서버 시각을 `peaket.queue.{eventId}`에 두고, 입장 확정 본문의 `firstEtaSec`·`firstEtaAtMs`로 보낸다(ADR-0183 결정 10).
+- **구매가 어려울 수 있음**: 앞 인원 × `avgTicketsPerOrder` > `remainingSeats`이면 '현재 순번으로는 구매가 어려울 수 있습니다'를 띄운다(queue-admission §4). 두 값이 파일에 없으면 띄우지 않는다.
 
 ### 3.5 좌석맵 데이터와 연결 상태
 
@@ -594,10 +597,10 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 저장소 | 키 | 값 | 수명 | 지우는 때 | 등급 |
 | --- | --- | --- | --- | --- | --- |
 | localStorage | `peaket.device` | `deviceId`(CSPRNG 128비트, base64url 22자) | 사용자가 지울 때까지 | 사이트 데이터 삭제 | P2(기기 식별값) |
-| localStorage | `peaket.queue.{eventId}` | 참가 토큰, 사전 검증 토큰과 발급 시각, 진행 중인 진입의 요청 ID와 묶음 응답(202 본문, 추천 적용 2026-11-03), 대기표, 순번·구간, 저장 시각 | 회차 판매 종료까지 | 로그아웃, 대기 취소, 410, 판매 종료, 앱 시작 때 2일 [가정]이 지난 항목 | P2 |
+| localStorage | `peaket.queue.{eventId}` | 참가 토큰, 사전 검증 토큰과 발급 시각, 진행 중인 진입의 요청 ID와 묶음 응답(202 본문, 추천 적용 2026-11-03)과 그때 보낸 사전 검증 토큰, 대기표, 순번·구간, 처음 예상 대기(`firstEtaSec`·`firstEtaAtMs`), 저장 시각 | 회차 판매 종료까지 | 로그아웃, 대기 취소, 410(`rejoinAllowed`인 대기표 만료는 다시 줄 서기에 쓸 사전 검증 토큰만 남긴다), 판매 종료, 입장(`ADMITTED`면 모두, ADR-0207), 앱 시작 때 2일 [가정]이 지난 항목 | P2 |
 | sessionStorage | `peaket.queue.{eventId}.firstAhead` | 처음 앞 인원 | 탭 | 탭 닫힘 | 등급 밖(숫자) |
 | localStorage | `peaket.clock` | 서버 시각 보정값(밀리초 차), 표본 시각, 왕복(§3.3, ADR-0110) | 30분 [가정] | 앱 시작 때 30분이 지난 값, 로그아웃 | 등급 밖(숫자) |
-| sessionStorage | `peaket.admission.{eventId}` | 입장 토큰, 서버 ECDH 공개키(JWK), 좌석맵 파일 경로, 받은 시각 | 구매 세션 | 세션 끝·로그아웃·만료 | P1(구매 세션 자격) |
+| sessionStorage | `peaket.admission.{eventId}` | 입장 토큰, 서버 ECDH 공개키(JWK), 좌석맵 파일 경로, 구매 세션 만료 시각(`purchaseSessionExpiresAt`, ADR-0207), 받은 시각 | 구매 세션 | 세션 끝·로그아웃·만료 | P1(구매 세션 자격) |
 | IndexedDB `peaket-purchase` | `sessions/{jti}` | HMAC `CryptoKey`(위조 확인용 값을 만드는 비밀 키. 추출 불가), 일련번호, 만료 | 구매 세션 | 세션 끝·로그아웃·만료, 앱 시작 때 만료 항목 | P1 |
 | 메모리 | — | 재인증 토큰(로그인 수단 추가만 `POST /link/{provider}` 양식 칸으로 앱 서버에 넘겨 로그인 진행 쿠키에 봉인한다, 2026-11-04 BOT-041) | 5분, 한 번 | 쓴 뒤 | P1 |
 | sessionStorage | `peaket.withdraw.reauth` | 탈퇴 재인증으로 떠난 시각(밀리초. 토큰은 넣지 않는다, docs/features/identity.md §8 '탈퇴 화면 연결', 추천 적용 2026-11-04) | 탭(남긴 지 10분 [가정] 안일 때만 믿는다) | 재인증에서 돌아왔을 때(늘 지운다), 로그아웃. 같은 탭에 다른 계정이 로그인해도 지난 계정의 재인증 실패 창이 뜨지 않게 한다(2026-11-05, BOT-036이 넘긴 것) | 등급 밖(숫자) |
@@ -659,7 +662,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 3 | 사전 검증(공연 상세에서) `POST …/pre-verifications` | JSON `{humanCheckToken, deviceId, behaviorSummary}` | 201 토큰(만료 2분 [가정] 전, 사람 확인을 보이지 않는 모드로 다시 실행해 갱신한다. 조작이 필요하면 위젯을 보인다) |
 | 4 | 진입 `POST https://queue…/v1/queues/{eventId}/entries` | `text/plain` JSON 문자열 `{preverifyToken, deviceId, entryRequestId}`. `entryRequestId`는 진입 시도 하나에 `crypto.randomUUID()`로 만들고, 응답을 못 받아 다시 보낼 때와 묶음 결과 뒤 다시 보낼 때 같은 값을 쓴다(헤더가 아니라 본문이라 사전 요청이 생기지 않는다, 기술 검토 중간-035). 보내기 전에 localStorage에 두어 새로 고침·탭을 다시 열어도 같은 값으로 잇는다(서버는 진입 시도를 이 값으로만 가른다, 추천 적용 2026-11-03) | 201 대기표(같은 `entryRequestId`로 다시 보내면 같은 번호의 대기표) / 202 묶음(`entryRequestId`를 함께 준다) / 409 / 410 / 503 `Retry-After` |
 | 5 | 대기 상태 파일 `GET https://queue-files…/v1/queues/{eventId}/segment-states/{segment}.json` | 쿠키·사용자 헤더가 없다. `cache: "no-store"`(ADR-0110) | 주기·지터·본문 `pollHintMs`(503이면 `Retry-After`, 기술 검토 중간-032, §5.1). `segment = floor((순번 − 1) ÷ 1000)` [가정, 순번은 1부터]. 입장 임박 구간 파일의 `servingSteps`로 차례 반영 지연을 잰다(§3.3) |
-| 6 | 입장 확정 `POST https://queue…/v1/queues/{eventId}/admission` | `text/plain` JSON 문자열 `{queueTicket}` 또는 `{lobbyToken}` | `ADMITTED`·`SOON`·`NOT_YET`·`VERIFYING` / 409 / 410 |
+| 6 | 입장 확정 `POST https://queue…/v1/queues/{eventId}/admission` | `text/plain` JSON 문자열 `{queueTicket}` 또는 `{lobbyToken}`(선택 칸 `firstEtaSec`·`firstEtaAtMs`) | `ADMITTED`·`SOON`·`NOT_YET`·`VERIFYING` / 401 / 403 / 409 / 410 / 503(§3.4 `turn`) |
 | 7 | 대기 취소 `DELETE …/entries/me`, 로비 취소 `DELETE …/lobby-participants/me` | 쿠키 | 204 → 저장소를 지운다 |
 
 **셔플·묶음 결과 파일**(2026-11-05 BAS-042에서 openapi `QueueResultFile`로 계약에 올렸다. 형식은 정본 docs/features/queue-admission.md §3 '결과 게시'와 그 구현을 따른다. 처음 적은 초안의 10비트 파일 번호·22자 키·`seqs` 감싸기는 정본·구현과 달라 버렸다(BAS-042 새 맥락 리뷰))
@@ -667,7 +670,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 - `h = SHA-256(UTF-8(참가 토큰))`의 소문자 16진 64자(묶음 결과 파일에서는 사전 검증 토큰을 쓴다).
 - 파일 이름의 `hashPrefix`는 `h`의 앞 세 자리다(`000`~`fff`, 파일 4,096개 [가정]). 100만 명이면 파일마다 약 250건이다.
 - 본문은 `{"<h 64자>": <순번>, …}` 평평한 표다. 내 `h`를 키로 찾는다.
-- 받는 시각은 결과 공개 시각 뒤 응답의 분산 창(`shuffleSpreadSec`·`spreadSec`) 안에서 `h`로 정한 지연만큼 늦춘다. 지연 = `u32be(h의 바이트 2..6) mod (분산 창 × 1000)` 밀리초 [가정]
+- 받는 시각은 결과 공개 시각 뒤 응답의 분산 창(`shuffleSpreadSec`·`spreadSec`) 안에서 `h`로 정한 지연만큼 늦춘다. 지연 = `u32be(h의 바이트 2~5) mod (분산 창 × 1000)` 밀리초 [가정]. 파일 이름의 앞 세 자리(바이트 0~1.5)와 겹치지 않는 네 바이트다(ADR-0207)
 
 #### 4.2.2 좌석·홀드
 
@@ -1018,6 +1021,7 @@ function nextDelayMs(s: QueueView, net: NetState, vis: DocumentVisibilityState):
 }
 ```
 
+- **속도가 0이면(ADR-0207)**: `servingRate`가 0이면 예상 대기를 셀 수 없다. 이때 내 구간이 serving의 구간이나 바로 다음 구간이면 기본 0.5초, 아니면 20초다. 서버의 입장 임박 정의(queue-admission §4)와 맞춰, 묶음 첫 전진을 기다리는 동안 차례가 가까운 사람이 20초마다 묻지 않게 한다.
 - **폴링 힌트는 본문으로 온다(추천 적용 2026-10-28, 기술 검토 중간-032)**: 서버가 폴링을 늦추라고 주는 값은 대기 상태 파일 본문의 `pollHintMs`(다음 폴링까지의 최소 간격, 밀리초)다. 상태 조회 Degraded 때 queue-svc의 파일 생성 작업과 S3 사본이 같은 값(그 구간 거리별 주기의 2배)을 싣는다. 그래서 원본이 S3 사본으로 넘어가도 모든 클라이언트의 주기가 두 배가 된다. S3 객체 메타데이터로는 `Retry-After`를 줄 수 없다(queue-admission §4). `Retry-After` 헤더는 503 응답에서만 읽고(`queue-files`가 노출한다, guidelines §9), 200 응답에 헤더가 있어도 읽지 않는다. 본문 값이 늘 앞선다.
 - **하한이 있으면 위쪽으로만 흔든다(추천 적용 2026-10-28, 기술 검토 중간-038)**: `Math.max(지터 값, 하한)`으로 자르면 `Retry-After`가 기본 간격보다 클 때 지터가 사라져, T=0에 같은 1초 안에 503을 받은 사람들이 정확히 N초 뒤 한꺼번에 다시 온다. 그래서 하한이 있으면 하한~1.2배 사이에 고르게 퍼뜨린다. 하한이 없는 보통 폴링은 지금처럼 ±20%라, 입장 임박 구간은 0.4~0.6초 간격이고 ADR-0110의 지연 예산(다음 폴링까지 0~0.6초)이 그대로다.
 - **브라우저 캐시를 건너뛴다(추천 적용 2026-10-28, ADR-0110)**: 폴링은 `fetch(주소, {cache: "no-store"})`로 보낸다. 입장 임박 구간 파일은 `Expires`(다음 생성 시각)로 캐시되는데, 브라우저는 그 수명을 초 단위 `Date`로 계산해 같은 파일을 생성 뒤 최대 1초 더 내줄 수 있기 때문이다. 이때 브라우저가 스스로 붙이는 `Cache-Control: no-cache`·`Pragma: no-cache`는 사전 요청을 만들지 않고(Fetch 표준은 사전 요청 여부를 정한 뒤 이 두 헤더를 붙인다), CloudFront는 시청자 요청의 두 헤더를 무시해 엣지 캐시로 답한다(AWS 개발자 안내서, 2026-10-28 확인). 쿼리 문자열로 캐시를 깨는 방식은 CDN 캐시 키가 갈라져 쓰지 않는다.
@@ -1032,7 +1036,7 @@ function nextDelayMs(s: QueueView, net: NetState, vis: DocumentVisibilityState):
 **차례와 입장**
 
 - serving ≥ 내 순번이면 리더 탭(보이는 탭)이 바로 입장 확정을 보낸다(위 '여러 탭'). 자동 배정 공연은 예상 대기가 10초 [가정] 안으로 들어오면, 차례가 올 예상 시각에 맞춰 직접 확인을 보낸다. `NOT_YET`이면 `retryAfterMs` 뒤 지터 없이 다시 보낸다(정본, 시도 간격 1초 이상, §4.1). `SOON`의 `retryAfterSeconds`는 하한이라 위쪽으로만 0~20% 흔든다(§4.1).
-- 차례 1분 [가정] 전에 팬 토큰을 미리 갱신한다. 좌석 화면 자원(좌석맵 파일과 좌석 화면 자산 목록 `/_q/seat-preload.json`의 파일)은 `fetch(…, {priority: "low"})`로 미리 받는다. 좌석맵 파일 경로는 아직 대기 상태 파일에 없어서 wbs 0.2.3에서 더한다(§6.2). Safari는 `<link rel="prefetch">`를 지원하지 않으므로 `fetch`로 HTTP 캐시를 미리 채운다.
+- 차례 1분 [가정] 전에 팬 토큰을 미리 갱신한다. 좌석 화면 자원(좌석맵 파일과 좌석 화면 자산 목록 `/_q/seat-preload.json`의 파일)은 `fetch(…, {priority: "low"})`로 미리 받는다. 좌석맵 파일 경로는 대기 상태 파일의 `seatmapLayoutPath`다(미리 받기는 HOT-342, ADR-0207). Safari는 `<link rel="prefetch">`를 지원하지 않으므로 `fetch`로 HTTP 캐시를 미리 채운다.
 - 차례가 가까울 때의 알림: 탭 제목 카운트다운, 짧은 효과음(사용자가 [차례 알림 받기]를 누른 동작으로 오디오를 열어 둔다), 웹 푸시(권한이 있을 때 서버가 보낸다). 백그라운드 탭은 타이머가 제한되어 늦게 알아챌 수 있다. 그래서 15분 유예가 있다(POL-008).
 
 **인앱 브라우저**: 대기실과 입장용 등록 전에, 사용자 에이전트 문자열(카카오톡·네이버·인스타그램·페이스북·라인 등의 인앱 표지)로 인앱 브라우저를 감지해 SCR-058로 보낸다 [가정, 표지 목록은 wbs 2.10.6에서 실기로 확정]. 감지는 안내용이고, 서버 판정에는 쓰지 않는다.

@@ -1,7 +1,7 @@
 // 합성 목업(고정 값). 공연·회사·공연장 이름은 docs/design/d5에 나온 지어낸 이름이다.
 // 폴링·진입 API는 붙이지 않는다. 대기 상태 파일(queue-admission §4)의 모양만 흉내 내 고정 값으로 읽는다.
 
-export type Ordering = 'HYBRID' | 'FIFO';
+export type Ordering = 'HYBRID' | 'PREQUEUE_SHUFFLE' | 'FIFO';
 export type SaleStatus = 'ON_SALE' | 'PAUSED' | 'ALL_HELD' | 'SOLD_OUT' | 'ENDED';
 
 /** 대기 상태 파일 목업. 앞 인원은 브라우저가 계산한다(docs/frontend.md §2.6·§3.4) */

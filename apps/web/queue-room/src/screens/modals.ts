@@ -3,7 +3,7 @@ import { AUTO_ASSIGN_TEXT, KEEP_QUEUE, LEGAL_POL024, LOGOUT_TEXT, ORDERING_TEXT 
 import { links } from '../config';
 import type { ModalKey } from '../ctx';
 import { cx, h, ic, type Child } from '../dom';
-import { ACCOUNT, type EventFixture } from '../fixtures';
+import { ACCOUNT, type EventFixture, type Ordering } from '../fixtures';
 import type { ModalBuild, ModalCtx } from '../ui/modal';
 
 /** 시트·대화상자 겉모양. 제목 id로 이름을 잇는다 */
@@ -88,7 +88,10 @@ export function prefFields(ev: EventFixture, idp: string, wide = false): HTMLEle
 }
 
 export interface ModalDeps {
-  ev?: EventFixture;
+  /** 순번 안내(정렬 방식·자동 배정)와 희망 조건(목업 공연만 pref가 있다)이 읽는 공연 값 */
+  ev?: { ordering: Ordering; autoAssign: boolean; pref?: EventFixture['pref'] };
+  /** 대기 취소 API(데이터 연결 화면, ADR-0207). 없으면 목업처럼 cancelTo로 간다 */
+  cancel?: () => Promise<boolean>;
   /** 대기 취소를 확인하면 가는 곳(공연 상세 SCR-002, 굿즈는 상품 상세) */
   cancelTo: string;
   /** 다른 기기 참가: 이 기기에서 다시 참가를 고른 뒤(시연은 사람 확인 중으로) */
@@ -126,12 +129,30 @@ export function modalBuild(key: ModalKey, d: ModalDeps): ModalBuild {
       );
     case 'cancel':
       return (m) => {
-        const yes = h('button', { class: 'btn btn-danger btn-lg btn-block', type: 'button', onclick: () => location.assign(d.cancelTo) }, '대기를 취소합니다');
+        const err = h('p', { class: 't-sm tx-danger', role: 'alert', hidden: true }, '대기를 취소하지 못했습니다. 다시 시도해 주세요');
+        const yes = h('button', {
+          class: 'btn btn-danger btn-lg btn-block',
+          type: 'button',
+          onclick: () => {
+            if (!d.cancel) return location.assign(d.cancelTo);
+            // 취소가 끝날 때까지 다시 누르지 못하게 하고, 실패하면 대화상자 안에 알린다(성공하면 공연 상세로 간다)
+            yes.setAttribute('aria-busy', 'true');
+            (yes as HTMLButtonElement).disabled = true;
+            err.hidden = true;
+            void d.cancel().then((ok) => {
+              if (ok) return;
+              yes.removeAttribute('aria-busy');
+              (yes as HTMLButtonElement).disabled = false;
+              err.hidden = false;
+            });
+          },
+        }, '대기를 취소합니다');
         const no = h('button', { class: 'btn btn-ghost btn-block', type: 'button', onclick: m.close, 'data-autofocus': true }, '계속 기다리기');
         if (m.wide) yes.classList.remove('btn-lg');
         return box(m, 'cx-t', {},
           h('span', { class: cx('state-icon is-danger q-icon-56', !m.wide && 'q-self-start') }, ic('alert')),
           title(m, 'cx-t', '대기를 취소하면 이 순번은 사라집니다'),
+          err,
           actions(m, yes, no),
         );
       };
@@ -157,7 +178,7 @@ export function modalBuild(key: ModalKey, d: ModalDeps): ModalBuild {
       };
     case 'pref':
       return (m) => {
-        const ev = d.ev!;
+        const ev = d.ev as EventFixture;
         const save = h('button', { class: 'btn btn-primary btn-lg btn-block', type: 'button', onclick: m.close }, '희망 조건 저장하기');
         const hint = h('p', { class: 'hint' }, '차례 전까지 바꿀 수 있고 이 기기에만 저장됩니다');
         return box(m, 'pf-t', { wideClass: 'q-dlg-480' },

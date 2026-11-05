@@ -5,7 +5,10 @@ import './dev/dev.css';
 import './styles/preview.css';
 import { h } from './dom';
 import { DEFAULT_EVENT_ID, DEFAULT_PRODUCT_ID } from './fixtures';
-import { GOODS_STATES, LOBBY_STATES, QUEUE_STATES, SOLDOUT_STATES, stateHref, type BoardState } from './states';
+
+/** 가짜 API 고정 자료의 회차(뮤지컬 별빛 정원) */
+const LIVE_EVENT_ID = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e04';
+import { GOODS_STATES, LOBBY_STATES, stateHref, type BoardState } from './states';
 
 interface Row {
   id: string;
@@ -17,8 +20,8 @@ interface Row {
 
 const ROWS: Row[] = [
   { id: 'SCR-007', name: '로비(오픈 전 대기실)', path: `/queue/${DEFAULT_EVENT_ID}`, states: LOBBY_STATES, note: '같은 주소가 오픈 전에는 로비, 오픈 뒤에는 대기열, 매진이면 매진 화면을 그린다(§3.4)' },
-  { id: 'SCR-008', name: '대기열(오픈 후)', path: `/queue/${DEFAULT_EVENT_ID}`, states: QUEUE_STATES, note: '자동 배정·선착순 상태는 가을 야외 페스티벌(evt-autumn-fest)로 연다' },
-  { id: 'SCR-018', name: '매진', path: '/queue/evt-musical-small', states: SOLDOUT_STATES, note: '운영에서는 엣지 정적 410 응답으로도 열린다' },
+  { id: 'SCR-008', name: '대기열(오픈 후, 데이터 연결)', path: `/queue/${LIVE_EVENT_ID}`, states: [], note: '가짜 API(127.0.0.1:4010)에 사전 검증 토큰을 둔 뒤 연다. 상태는 /__mock/state의 queue·queueEntry·queueAdmit로 바꾼다(apps/README.md, ADR-0207)' },
+  { id: 'SCR-018', name: '매진(데이터 연결)', path: `/queue/${LIVE_EVENT_ID}`, states: [], note: '가짜 API 상태 queue=sold-out. 운영에서는 엣지 정적 410 응답으로도 열린다' },
   { id: 'SCR-015', name: '굿즈 대기(인기 MD 대기열)', path: `/shop/${DEFAULT_PRODUCT_ID}/queue`, states: GOODS_STATES, note: '굿즈 스토어의 나머지 화면은 소비자 웹(3000)에 있다' },
 ];
 

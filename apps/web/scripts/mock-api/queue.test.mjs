@@ -1,0 +1,168 @@
+// 가짜 API 대기열(ADR-0207): 진입·묶음 결과·대기 상태 파일·입장 확정·대기 취소가 계약 Zod를 지나고, 상태 바꾸기대로 답하는지
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import {
+  CreateQueueAdmissionBody,
+  CreateQueueAdmissionResponse,
+  CreateQueueEntryBody,
+  CreateQueueEntryResponse,
+  GetQueueBatchResultResponse,
+  GetQueueSegmentStateResponse,
+} from '@peaket/contracts/openapi/queue';
+import { startMockApi } from '../mock-api.mjs';
+
+const EVENT = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e04';
+const sha = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
+
+async function boot() {
+  let clock = Date.parse('2026-11-05T11:00:00Z');
+  const server = await startMockApi({ port: 0, now: () => clock });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const text = async (method, path, body) => {
+    const r = await fetch(`${base}${path}`, { method, headers: { 'content-type': 'text/plain;charset=UTF-8' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: r.status, retryAfter: r.headers.get('retry-after'), body: r.headers.get('content-type')?.includes('json') ? await r.json() : undefined };
+  };
+  const get = async (path) => {
+    const r = await fetch(`${base}${path}`);
+    return { status: r.status, body: r.headers.get('content-type')?.includes('json') ? await r.json() : undefined };
+  };
+  const state = (q) => fetch(`${base}/__mock/state?${q}`);
+  return { server, base, text, get, state, tick: (ms) => (clock += ms), now: () => clock };
+}
+
+const enter = (m, body) => m.text('POST', `/v1/queues/${EVENT}/entries`, body);
+const admit = (m, body) => m.text('POST', `/v1/queues/${EVENT}/admission`, body);
+const file = (m, segment) => m.get(`/v1/queues/${EVENT}/segment-states/${segment}.json`);
+
+test('진입 201 → 대기 상태 파일의 serving이 속도대로 나아가고, 차례가 오면 입장 확정이 ADMITTED다(계약 Zod 그대로)', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueAhead=30&queueRate=2');
+    const body = CreateQueueEntryBody.parse({ preverifyToken: 'pv-1', deviceId: 'dev-1', entryRequestId: '11111111-1111-4111-8111-111111111111' });
+    const e = await enter(m, body);
+    assert.equal(e.status, 201);
+    assert.deepEqual(CreateQueueEntryResponse.parse(e.body), e.body);
+    assert.equal(e.body.segment, Math.floor((e.body.seq - 1) / 1000));
+    assert.equal(typeof e.body.serverTimeMs, 'number');
+    // 같은 요청 ID로 다시 보내면 같은 대기표
+    assert.equal((await enter(m, body)).body.queueTicket, e.body.queueTicket);
+    const f0 = await file(m, e.body.segment);
+    assert.equal(f0.status, 200);
+    assert.deepEqual(GetQueueSegmentStateResponse.parse(f0.body), f0.body);
+    assert.equal(e.body.seq - f0.body.serving - 1, 30, '앞 인원 30');
+    assert.equal(Buffer.from(f0.body.removedBitmap, 'base64').length, 125);
+    assert.equal(f0.body.generatedAtMs % 1000, 0, '매초 경계');
+    // 차례 전 입장 확정은 NOT_YET(retryAfterMs)
+    const early = await admit(m, CreateQueueAdmissionBody.parse({ queueTicket: e.body.queueTicket, firstEtaSec: 15, firstEtaAtMs: m.now() }));
+    assert.deepEqual([early.status, early.body.status], [200, 'NOT_YET']);
+    assert.ok(early.body.retryAfterMs >= 1000 && early.body.retryAfterMs <= 60_000);
+    m.tick(16_000);
+    const f1 = await file(m, e.body.segment);
+    assert.ok(f1.body.serving >= e.body.seq, `serving ${f1.body.serving} ≥ ${e.body.seq}`);
+    assert.ok(f1.body.generatedAtMs > f0.body.generatedAtMs);
+    const ok = await admit(m, { queueTicket: e.body.queueTicket });
+    assert.equal(ok.body.status, 'ADMITTED');
+    assert.deepEqual(CreateQueueAdmissionResponse.parse(ok.body), ok.body);
+    assert.ok(ok.body.admissionToken && ok.body.purchaseSessionExpiresAt && ok.body.serverEcdhPublicKey?.kty === 'EC' && ok.body.seatmapLayoutPath);
+    assert.equal((await admit(m, { queueTicket: e.body.queueTicket })).body.status, 'ADMITTED', '응답을 잃고 같은 대기표로 다시 보내면 ADMITTED를 다시 준다(queue-svc와 같다)');
+    assert.match((await admit(m, { queueTicket: 'nope' })).body.type, /queue-ticket-invalid$/);
+    assert.equal((await enter(m, { preverifyToken: 'x', extra: 1 })).status, 400, '정의 밖 칸');
+  } finally {
+    m.server.close();
+  }
+});
+
+test('묶음 진입: 202 본문 → 공개 전 결과 파일 404 → 공개 뒤 {SHA-256(토큰): 순번} → 같은 요청 ID로 다시 진입하면 그 순번의 대기표', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueEntry=batching');
+    const token = 'pv-batch';
+    const id = '22222222-2222-4222-8222-222222222222';
+    const b = await enter(m, { preverifyToken: token, deviceId: 'dev-2', entryRequestId: id });
+    assert.equal(b.status, 202);
+    assert.equal(b.body.entryRequestId, id);
+    assert.equal(b.body.resultPath, `/v1/queues/${EVENT}/batch-results/${sha(token).slice(0, 3)}.json`);
+    assert.ok(Date.parse(b.body.resultAt) > m.now());
+    assert.ok(Number.isInteger(b.body.spreadSec) && b.body.spreadSec > 0);
+    assert.equal((await m.get(b.body.resultPath)).status, 404, '공개 전');
+    assert.equal((await enter(m, { preverifyToken: token, entryRequestId: id })).status, 202, '공개 전 다시 진입은 202');
+    m.tick(Date.parse(b.body.resultAt) - m.now() + 1);
+    const r = await m.get(b.body.resultPath);
+    assert.equal(r.status, 200);
+    GetQueueBatchResultResponse.parse(r.body);
+    const seq = r.body[sha(token)];
+    assert.ok(seq >= 1);
+    const t = await enter(m, { preverifyToken: token, entryRequestId: id });
+    assert.deepEqual([t.status, t.body.seq], [201, seq]);
+  } finally {
+    m.server.close();
+  }
+});
+
+test('상태 바꾸기: 판매 상태·진입 오류·입장 확정 오류가 계약의 problem type과 Retry-After로 나온다', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1');
+    const t = (await enter(m, { preverifyToken: 'pv-3', entryRequestId: '33333333-3333-4333-8333-333333333333' })).body;
+    for (const [q, sale, rate0] of [['paused', 'PAUSED', true], ['all-held', 'ALL_HELD', true], ['sold-out', 'SOLD_OUT', true], ['ended', 'ENDED', true], ['on-sale', 'ON_SALE', false]]) {
+      await m.state(`queue=${q}`);
+      m.tick(1000);
+      const f = (await file(m, t.segment)).body;
+      assert.equal(f.saleStatus, sale, q);
+      assert.equal(f.servingRate === 0, rate0, `${q} 속도`);
+    }
+    await m.state('queueBanner=점검 안내&queueSeats=1');
+    m.tick(1000);
+    const f = (await file(m, t.segment)).body;
+    assert.deepEqual([f.banner, f.remainingSeats, typeof f.avgTicketsPerOrder], ['점검 안내', 1, 'number']);
+    const fresh = async (mode, i) => {
+      await m.state(`queueEntry=${mode}`);
+      return enter(m, { preverifyToken: `pv-${mode}`, entryRequestId: `44444444-4444-4444-8444-44444444444${i}` });
+    };
+    const busy = await fresh('busy', 1);
+    assert.deepEqual([busy.status, busy.retryAfter], [429, '2']);
+    const down = await fresh('down', 2);
+    assert.deepEqual([down.status, down.retryAfter], [503, '1']);
+    assert.match((await fresh('other-device', 3)).body.type, /already-waiting$/);
+    assert.match((await fresh('already-admitted', 4)).body.type, /already-admitted$/);
+    assert.match((await fresh('not-open', 5)).body.type, /queue-not-open$/);
+    assert.match((await fresh('preverify-invalid', 6)).body.type, /preverify-invalid$/);
+    assert.match((await fresh('sold-out', 7)).body.type, /sold-out$/);
+    assert.match((await fresh('ended', 8)).body.type, /sale-ended$/);
+    assert.equal((await fresh('verify', 9)).body.verification, 'REQUIRED');
+    await m.state('queueEntry=normal&queueReset=1&queueAhead=0');
+    const t2 = (await enter(m, { preverifyToken: 'pv-5', entryRequestId: '55555555-5555-4555-8555-555555555555' })).body;
+    m.tick(1000); // 앞 인원 0이면 serving이 한 번호 더 나아가야 차례다
+    const tries = { soon: [200, 'SOON'], verifying: [200, 'VERIFYING'], restricted: [403, 'booking-restricted'], unauthorized: [401, undefined], duplicate: [409, 'duplicate-admission'], expired: [410, 'queue-ticket-expired'], removed: [410, 'queue-ticket-removed'], 'sold-out': [410, 'sold-out'], ended: [410, 'sale-ended'], down: [503, 'dependency-unavailable'] };
+    for (const [mode, [status, kind]] of Object.entries(tries)) {
+      await m.state(`queueAdmit=${mode}`);
+      const a = await admit(m, { queueTicket: t2.queueTicket });
+      assert.equal(a.status, status, mode);
+      if (status === 200) assert.equal(a.body.status, kind, mode);
+      else if (kind) assert.match(a.body.type, new RegExp(`${kind}$`), mode);
+      if (mode === 'soon') assert.ok(a.body.retryAfterSeconds >= 1 && a.body.retryAfterSeconds <= 5);
+    }
+    await m.state('queueAdmit=expired-final');
+    assert.equal((await admit(m, { queueTicket: t2.queueTicket })).body.rejoinAllowed, false);
+    await m.state('queueAdmit=expired');
+    assert.equal((await admit(m, { queueTicket: t2.queueTicket })).body.rejoinAllowed, true);
+    // 대기 취소
+    const del = await fetch(`${m.base}/v1/queues/${EVENT}/entries/me`, { method: 'DELETE' });
+    assert.equal(del.status, 204);
+    assert.equal((await file(m, 999)).status, 404, '마지막 구간 뒤 100구간보다 먼 파일');
+  } finally {
+    m.server.close();
+  }
+});
+
+test('대기실 개발 출처에도 자격 증명 포함 CORS를 연다(text/plain 진입은 사전 요청이 없다)', async () => {
+  const m = await boot();
+  try {
+    const r = await fetch(`${m.base}/v1/queues/${EVENT}/entries`, { method: 'POST', headers: { origin: 'http://localhost:3004', 'content-type': 'text/plain;charset=UTF-8' }, body: JSON.stringify({ preverifyToken: 'pv-cors' }) });
+    assert.equal(r.headers.get('access-control-allow-origin'), 'http://localhost:3004');
+    assert.equal(r.headers.get('access-control-allow-credentials'), 'true');
+  } finally {
+    m.server.close();
+  }
+});

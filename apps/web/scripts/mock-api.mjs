@@ -2,6 +2,8 @@
 // 서버가 아직 없는 화면 경로를 고정 자료(scripts/mock-api/cards.json)로 답한다. 응답이 계약 Zod를 지나는지는 mock-api.test.mjs가 본다.
 // - 127.0.0.1에만 묶는다. 소비자 웹 출처 하나에만 자격 증명 포함 CORS를 연다(PEAKET_WEB_ORIGIN, 기본 http://localhost:3000)
 // - 상태 바꾸기: GET /__mock/state?home=normal|empty&ranking=normal|stale|old|missing&fan=member|unverified|pending|closing|guest&detail=normal|suspended&verify=popup|redirect|down (화면 상태를 보려고)
+//   대기열(ADR-0207): queue=on-sale|paused|all-held|sold-out|ended, queueEntry=normal|batching|busy|down|other-device|already-admitted|not-open|preverify-invalid|sold-out|ended|verify,
+//   queueAdmit=normal|soon|verifying|restricted|unauthorized|duplicate|expired|expired-final|removed|sold-out|ended|down, queueAhead(처음 앞 인원)·queueRate(1초에 지나는 번호)·queueRemoved(빠진 번호 수)·queueBanner·queueSeats, queueReset=1
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
 // - 파생본 이미지 주소(/img/{이름}/{폭}.{avif|webp})에는 자리 그림(SVG)을 낸다
 // - 공연 상세(GET /v1/events/{eventId}, ADR-0200)는 고정 자료 카드의 모든 회차를 답하고 그 밖은 404다.
@@ -16,6 +18,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { createQueueMock, QUEUE_DEFAULTS } from './mock-api/queue.mjs';
 
 const CARDS = JSON.parse(readFileSync(new URL('./mock-api/cards.json', import.meta.url), 'utf8'));
 const KST = 9 * 60 * 60_000;
@@ -499,12 +502,14 @@ function readJson(req) {
 export function startMockApi({
   port = 4010,
   webOrigin = process.env.PEAKET_WEB_ORIGIN || 'http://localhost:3000',
+  queueRoomOrigin = process.env.PEAKET_QUEUE_ROOM_ORIGIN || 'http://localhost:3004',
   idvUrl = process.env.PEAKET_TEST_VERIFICATION_URL || 'http://127.0.0.1:4020/verify',
   idvSecret = idvSecretFromEnv(),
   now = Date.now,
 } = {}) {
   const origin = `http://127.0.0.1:${port}`;
-  const state = { home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', person: MEMBER_PERSON };
+  const state = { home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
+  const queue = createQueueMock({ now, state });
   /** 본인확인 건(건 ID → 목적·돌아갈 주소·상태) */
   const attempts = new Map();
   /** 결과 확정(identity-svc confirm-verification.ts의 차례): 정리 중 → 기관 값 → 기록 없는 REVERIFY → 만 나이 → 다른 계정 → 같은 사람 */
@@ -539,7 +544,9 @@ export function startMockApi({
     }
     const url = new URL(req.url ?? '/', origin);
     // Date는 캐시하지 않는 api 응답처럼 공개한다(화면 시계 보정 표본, docs/frontend.md §3.3)
-    const cors = req.headers.origin === webOrigin ? { 'access-control-allow-origin': webOrigin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': 'Date, Retry-After', vary: 'Origin' } : {};
+    // 소비자 웹과 대기실(개발에서는 다른 포트) 두 출처에만 자격 증명 포함 CORS를 연다
+    const allowed = req.headers.origin === webOrigin || req.headers.origin === queueRoomOrigin;
+    const cors = allowed ? { 'access-control-allow-origin': req.headers.origin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': 'Date, Retry-After', vary: 'Origin' } : {};
     const send = (status, body, type = 'application/json; charset=utf-8', extra = {}) => {
       res.writeHead(status, { ...cors, 'cache-control': 'no-store', ...(body === undefined ? {} : { 'content-type': type }), ...extra });
       res.end(body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body));
@@ -555,10 +562,11 @@ export function startMockApi({
     const p = url.pathname;
     const unauthorized = () => send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
     if (p === '/__mock/state' && req.method === 'GET') {
-      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify'])) {
+      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
-        if (v) state[k] = v;
+        if (v !== null && (v !== '' || k === 'queueBanner' || k === 'queueSeats')) state[k] = v;
       }
+      if (url.searchParams.get('queueReset')) queue.reset();
       if (url.searchParams.get('fan')) {
         state.nickname = undefined;
         state.person = state.fan === 'member' ? MEMBER_PERSON : undefined;
@@ -586,7 +594,7 @@ export function startMockApi({
     // 토큰 갱신(POST /v1/identity/access-tokens): 비로그인이면 401(갱신 거절 → 화면은 비로그인), 아니면 204. 없으면 404가 일시 장애로 읽혀
     // 화면이 비로그인 대신 '모름'으로 남는다(docs/frontend.md §4.1 '401', HOT-323)
     if (p === '/v1/identity/access-tokens' && req.method === 'POST') return state.fan === 'guest' ? unauthorized() : send(204, undefined);
-    const problem = (status, name, title) => send(status, { type: `https://peaket.example/problems/${name}`, title, status }, 'application/problem+json');
+    const problem = (status, name, title, extra = {}, ext = {}) => send(status, { type: `https://peaket.example/problems/${name}`, title, status, ...ext }, 'application/problem+json', extra);
     const badRequest = () => send(400, { type: 'about:blank', title: 'Bad Request', status: 400 }, 'application/problem+json');
     if (p === '/v1/identity/nickname-checks' && req.method === 'POST') {
       void readJson(req).then((b) => {
@@ -677,6 +685,8 @@ export function startMockApi({
       });
       return;
     }
+    // 대기열(진입·묶음 결과·대기 상태 파일·입장 확정·대기 취소, scripts/mock-api/queue.mjs)
+    if (queue.handle(req, p, { send, problem, readJson, badRequest })) return;
     if (p === '/v1/wishes' && req.method === 'GET') {
       if (state.fan === 'guest') return unauthorized();
       const raw = url.searchParams.get('productionIds');

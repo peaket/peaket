@@ -1,7 +1,7 @@
 // SCR-018 매진. 캔버스 SCR-018 m·t·d 보드(d5 §5.18). 같은 주소(/queue/[eventId])의 매진 상태이고, 운영에서는 엣지 정적 410 응답으로도 열린다.
 // 이 화면에서는 대기 상태 폴링을 멈춘다(⑤, 화면에는 안 보임). 처음부터 이 화면을 열면 h1로 초점을 옮긴다(낮음-108).
 import { links } from '../config';
-import type { EventCtx } from '../ctx';
+import type { EventCtx, LiveCtx } from '../ctx';
 import { append, h, ic } from '../dom';
 import { focusHeader } from './shell';
 
@@ -65,4 +65,33 @@ export function soldOutScreen(c: EventCtx): HTMLElement[] {
 
   const toast = failed ? h('div', { class: 'toast q-toast', role: 'status' }, ic('alert-circle'), '알림을 신청하지 못했습니다') : null;
   return [focusHeader(c, '닫고 공연 상세로 가기'), main, toast].filter((x): x is HTMLElement => x !== null);
+}
+
+/**
+ * 매진(데이터 연결, ADR-0207). 대기 상태 파일·입장 확정이 매진이면 폴링을 멈추고 이 화면을 그린다.
+ * [취소표 알림 받기]는 알림 신청 API를 잇는 HOT-342까지 보이지 않는다. 다른 회차는 공연 공개 요약의 회차 목록이다(회차마다 자기 공연 상세).
+ */
+export function liveSoldOutScreen(c: LiveCtx): HTMLElement[] {
+  const ev = c.ev;
+  const main = h('main', { class: 'page-main q-main q-soldout', id: 'main' });
+  const frame = h('div', { class: 'col q-frame q-soldout-frame' });
+  main.append(frame);
+  frame.append(
+    h('section', { class: 'col q-center-block q-g16', role: 'region', 'aria-label': '대기 상태' },
+      h('span', { class: 'state-icon' }, ic('ticket')),
+      h('h1', { class: 't-xl', id: 'so-h', tabindex: '-1' }, '매진되었습니다'),
+    ),
+  );
+  const others = ev.rounds.filter((r) => r.id !== ev.id);
+  if (others.length > 0) {
+    frame.append(h('nav', { class: 'col q-g10 q-ai-center', 'aria-labelledby': 'rd-h' },
+      h('h2', { class: 't-sm fw-b', id: 'rd-h' }, '같은 공연 다른 회차'),
+      h('ul', { class: 'row wrap q-jc' },
+        // 공개 요약의 회차 상태는 공연 상태(SCHEDULED·POSTPONED)라 판매 배지는 달지 않는다(취소 회차는 뺐다)
+        others.map((r) => h('li', null, h('a', { class: 'chip', href: links.event(r.id) }, r.label))),
+      ),
+    ));
+  }
+  frame.append(h('a', { class: 'link-more q-self-center', href: links.shop() }, ic('bag'), '공식 굿즈 스토어', ic('chevron-right')));
+  return [focusHeader(c, '닫고 공연 상세로 가기'), main];
 }
