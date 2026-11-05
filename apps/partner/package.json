@@ -11,19 +11,30 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@peaket/ds": "workspace:*",
     "next": "^16.4.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "@peaket/ds": "workspace:*",
     "zustand": "^5.0.16"
   },
   "devDependencies": {
+    "@lexical/clipboard": "0.53.0",
+    "@lexical/html": "0.53.0",
+    "@lexical/list": "0.53.0",
+    "@lexical/react": "0.53.0",
+    "@lexical/rich-text": "0.53.0",
+    "@lexical/selection": "0.53.0",
     "@peaket/config": "workspace:*",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@tiptap/core": "3.32.2",
+    "@tiptap/pm": "3.32.2",
+    "@tiptap/react": "3.32.2",
+    "@tiptap/starter-kit": "3.32.2",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@types/node": "^24.0.0",
+    "lexical": "0.53.0",
     "tailwindcss": "^4.3.3",
-    "@tailwindcss/postcss": "^4.3.3",
     "typescript": "^7.0.2"
   }
 }
