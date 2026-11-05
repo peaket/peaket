@@ -1,8 +1,8 @@
 // 관리 계정 비밀번호 바꾸기(openapi POST /v1/partner/auth/password-changes·/v1/ops/auth/password-changes, docs/security/auth-controls.md §3.5·§4, identity §6 '관리 계정 비밀번호만 맞은 로그인 알림과 비밀번호 바꾸기의 첫 구현', BUILD_ORDER BOT-123, AC-T4).
 // 지금 비밀번호가 틀리면 로그인 실패처럼 센다. 맞으면 SetAdminPassword(정책·유출 목록)로 정하고, 그 계정의 다른 관리 세션을 모두 끝내며(PASSWORD_CHANGED),
 // 이 세션이 비밀번호 바꾸기 필요 세션(scope password:change)이었으면 스코프 없는 새 액세스 토큰을 준다.
-import { Inject, Injectable } from '@nestjs/common';
-import { CLOCK, type Clock, PASSWORD_CHANGE_SCOPE } from '@peaket/platform';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { CLOCK, type Clock, PASSWORD_CHANGE_SCOPE, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import type { AdminAuthConfig } from '../domain/auth-config.js';
 import { activeLock, nextTimedLockMs, onPasswordFailure } from '../domain/login-rules.js';
 import {
@@ -53,7 +53,14 @@ export class ChangeAdminPassword {
     @Inject(ADMIN_LOGIN_SIGNALS) private readonly signals: AdminLoginSignals,
     @Inject(ADMIN_AUTH_CONFIG) private readonly cfg: AdminAuthConfig,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: Pick<PlatformLogger, 'warn'>,
   ) {}
+
+  /** 같은 비밀번호 거절의 보안 이벤트(정책·유출 거절은 SetAdminPassword가 남긴다, auth-controls §4.3 10, BOT-110이 넘긴 것) */
+  #rejected(accountId: string, reason: AdminPasswordRejection): ChangePasswordOutcome {
+    this.logger?.warn({ kind: 'security', event: 'admin_password_rejected', accountId, reason }, '관리 계정 새 비밀번호를 거절했다');
+    return { kind: 'REJECTED', reason };
+  }
 
   /** @throws AdminPasswordError UNAVAILABLE(유출 목록·페퍼, 받는 층이 503)·LoginCountersUnavailable */
   async run(i: { aud: AdminAud; accountId: string; sessionId: string; scopes: readonly string[]; currentPassword: string; newPassword: string; ip: string }): Promise<ChangePasswordOutcome> {
@@ -84,7 +91,7 @@ export class ChangeAdminPassword {
     if (until > now) return this.#locked(i.aud, { kind: 'LOCKED', retryAfterSeconds: secondsUntil(until, now) });
     if (!(await this.passwords.verify(account.id, i.currentPassword, account.passwordPhc))) return this.#currentFailed(c, now);
     // 같은 비밀번호로 바꾸기 필요 표시를 끄지 않는다(NFC로 견준다: 저장과 같은 정규화, 새 맥락 리뷰 2026-11-05)
-    if (i.newPassword.normalize('NFC') === i.currentPassword.normalize('NFC')) return { kind: 'REJECTED', reason: 'SAME_AS_CURRENT' };
+    if (i.newPassword.normalize('NFC') === i.currentPassword.normalize('NFC')) return this.#rejected(account.id, 'SAME_AS_CURRENT');
     try {
       // 파트너 상호·번호(L4)는 판매자 정보가 core-svc에 있어 아직 싣지 않는다: 업무 이메일 도메인의 앞 이름만 본다(identity §6 남는 한계)
       await this.setPassword.run({ accountId: account.id, password: i.newPassword, ...(ROLES_OF_AUD.partner.includes(account.role) ? { partner: { names: [], numbers: [] } } : {}) });

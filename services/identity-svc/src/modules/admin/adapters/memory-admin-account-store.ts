@@ -2,7 +2,7 @@
 import { FRESH_LOGIN_STATE, type AccountLoginState, type NoticeKind } from '../domain/login-rules.js';
 import { randomUUID } from 'node:crypto';
 import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
-import { DESIGNATION_KINDS } from '../domain/ports.js';
+import { DESIGNATION_KINDS, type SecondStepUse } from '../domain/ports.js';
 
 type Row = AdminAccountRow &
   AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null; inviteTokenHash: Buffer | null; inviteExpiresAt: number | null; removedAt: number | null; version: number };
@@ -242,10 +242,30 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return true;
   }
 
+  async finishSecondStep(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number }, limit: number, use: SecondStepUse): Promise<{ kind: 'DONE'; evicted: string[] } | { kind: 'CODE_USED' } | { kind: 'STEP_USED' }> {
+    // 모두 되는지 먼저 보고 한꺼번에 쓴다(사이에 await가 없어 한 트랜잭션과 같다)
+    const at = i.createdAt;
+    const r = this.#rows.get(i.accountId);
+    if (r?.status !== 'ACTIVE') return { kind: 'STEP_USED' };
+    const code = use.code;
+    const rc = code.kind === 'recovery' ? this.#recovery.findIndex((c) => c.id === code.rowId) : -1;
+    if (code.kind === 'totp' ? !r || (r.totpLastStep !== null && r.totpLastStep >= code.step) : rc < 0) return { kind: 'CODE_USED' };
+    const s = this.#steps.find((x) => x.id === use.stepId);
+    if (!s || s.usedAt !== null || s.passwordOnlyNoticedAt !== null || s.expiresAt <= at) return { kind: 'STEP_USED' };
+    if (code.kind === 'totp') Object.assign(r!, { totpLastStep: code.step, updatedAt: at });
+    else this.#recovery.splice(rc, 1);
+    s.usedAt = at;
+    return { kind: 'DONE', ...this.#openSession(i, limit) };
+  }
+
   async createSession(
     i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number },
     limit: number,
   ): Promise<{ evicted: string[] }> {
+    return this.#openSession(i, limit);
+  }
+
+  #openSession(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number }, limit: number): { evicted: string[] } {
     const now = i.createdAt;
     const live = this.#sessions.filter((s) => s.accountId === i.accountId && s.terminatedAt === null && s.idleExpiresAt > now && s.absoluteExpiresAt > now).sort((a, b) => a.idleExpiresAt - b.idleExpiresAt);
     const evicted: string[] = [];
@@ -669,9 +689,15 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return n;
   }
 
-  async findPasswordOnlySteps(createdBefore: number, limit: number): Promise<{ id: string; accountId: string }[]> {
+  async purgeLoginSteps(before: number): Promise<number> {
+    let n = 0;
+    for (let i = this.#steps.length - 1; i >= 0; i--) if (this.#steps[i]!.createdAt < before) (this.#steps.splice(i, 1), n++);
+    return n;
+  }
+
+  async findPasswordOnlySteps(createdBefore: number, createdAfter: number, limit: number): Promise<{ id: string; accountId: string }[]> {
     return this.#steps
-      .filter((s) => s.createdAt <= createdBefore && s.usedAt === null && !s.knownSource && s.passwordOnlyNoticedAt === null)
+      .filter((s) => s.createdAt <= createdBefore && s.createdAt > createdAfter && s.usedAt === null && !s.knownSource && s.passwordOnlyNoticedAt === null)
       .slice(0, limit)
       .map((s) => ({ id: s.id, accountId: s.accountId }));
   }

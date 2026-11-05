@@ -79,6 +79,25 @@ describe('정책 판정(auth-controls §4.3, I-T14, AC-T6)', () => {
     }
   });
 
+  test('AC-T6_남은글자수는NFC원문글자로센다_사본에서둘로늘어나는글자(㎏·İ)로덧붙임을부풀리지못한다(BOT-110이넘긴것) [ASVS v5.0.0-6.2.11]', () => {
+    expect(judgePassword('Peaket2026!!㎏㎏!!!!', partnerCtx, lists, cfg)).toEqual({ ok: false, reason: 'CONTEXT' });
+    expect(judgePassword('Peaket2026!!İİİ!!!!', partnerCtx, lists, cfg)).toEqual({ ok: false, reason: 'CONTEXT' });
+    // 원문에서 네 글자면 받는다(기준 4자)
+    expect(judgePassword('Peaket2026!!kgzw!!!!', partnerCtx, lists, cfg)).toEqual({ ok: true });
+    // 4바이트 글자(이모지·𝄞)는 기호라 글자로 세지 않는다: 바꿈 사본으로만 맞아도 막는다(재검토 2026-11-05)
+    expect(judgePassword('P3aket2026!!😀😀😀😀', partnerCtx, lists, cfg)).toEqual({ ok: false, reason: 'CONTEXT' });
+    expect(judgePassword('P3aket2026!!𝄞𝄞𝄞𝄞', partnerCtx, lists, cfg)).toEqual({ ok: false, reason: 'CONTEXT' });
+    // 사본이 이웃 글자와 함께 바뀌는 끝 시그마도 원문 글자로 센다
+    expect(judgePassword('Peaket2026!!!㎏ΑΣ', partnerCtx, lists, cfg)).toEqual({ ok: false, reason: 'CONTEXT' });
+    // 자판 사본으로만 맞는 한글 음절은 원문 한 글자, 결합 문자는 앞 글자와 한 글자
+    expect(judgePassword('godhfmadpsxj2026!!가나', partnerCtx, lists, cfg)).toEqual({ ok: false, reason: 'CONTEXT' });
+    expect(judgePassword('Peaket2026!!!q\u0300\u0301\u0302', partnerCtx, lists, cfg)).toEqual({ ok: false, reason: 'CONTEXT' });
+    // 따로 쓴 자모는 합치지 않아 두 글자이고, 이모지 표시 문자(FE0F·키캡·ZWJ)가 붙어도 문자가 없으면 글자가 아니다(재검토 2026-11-05)
+    expect(judgePassword('Peaketㄱㅏ㎏㎏2026!!!', partnerCtx, lists, cfg)).toEqual({ ok: false, reason: 'CONTEXT' });
+    expect(judgePassword('Peaket2026!!1\ufe0f\u20e33\ufe0f\u20e35\ufe0f\u20e37\ufe0f\u20e3', partnerCtx, lists, cfg)).toEqual({ ok: false, reason: 'CONTEXT' });
+    expect(judgePassword('Peaket2026!!\u2764\ufe0f\u{1f468}\u200d\u{1f469}\u2764\ufe0f\u{1f468}\u200d\u{1f469}', partnerCtx, lists, cfg)).toEqual({ ok: false, reason: 'CONTEXT' });
+  });
+
   test('I-T14_15자미만은TOO_SHORT_64자넘는긴암호문은받고_256자를넘으면TOO_LONG이며_꼴규칙은COMMON이다', () => {
     const ctx: PasswordContext = { email: 'ops@peaket.example' };
     expect(judgePassword('짧은비밀번호입니다', ctx, lists, cfg)).toEqual({ ok: false, reason: 'TOO_SHORT' });

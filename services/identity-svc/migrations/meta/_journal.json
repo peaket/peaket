@@ -169,6 +169,13 @@
       "when": 1793830318254,
       "tag": "0023_admin_designation",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793840977317,
+      "tag": "0024_admin_login_step_password_only",
+      "breakpoints": true
     }
   ]
 }

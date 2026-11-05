@@ -120,3 +120,40 @@ test('PostgreSQL에서_로그인단계는한번만쓰고_세번째세션은유�
   const events = await q<{ payload: Buffer }>("select payload from outbox where topic = 'control.sessions-terminated' and msg_key = $1", [B]);
   expect(events.map((e) => JSON.parse(e.payload.toString('utf8')))).toEqual([{ accountId: B, sessionId: ids[0], reason: 'DEVICE_LIMIT', terminatedAt: new Date(clock.now()).toISOString() }]);
 });
+
+test('PostgreSQL에서_같은계정의세션만들기네개가동시에와도살아있는세션은2개이고_2단계마치기는코드·단계·세션을한트랜잭션으로써서단계를이미썼으면복구코드를남긴다(BOT-120이넘긴것)', async () => {
+  const store = new DrizzleAdminAccountStore(database, clock);
+  const C = '0190f3a1-7c2e-7a00-8000-0000000005a3';
+  await store.create({ id: C, role: 'partner_admin', email: 'totp.c@haeoreum.example', status: 'ACTIVE', promoterId: '0190f3a1-7c2e-7a00-8000-000000000001', now: clock.now() });
+  const now = clock.now();
+  const ids = [1, 2, 3, 4].map((k) => `0190f3a1-7c2e-7a00-8000-0000000005d${k}`);
+  await Promise.all(ids.map((id, k) => store.createSession({ id, accountId: C, aud: 'partner', refreshHash: Buffer.alloc(32, 40 + k), refreshFamily: id, pairRef: 'p'.repeat(32), createdAt: now, absoluteExpiresAt: now + 86_400_000, idleExpiresAt: now + 3_600_000 + k }, 2)));
+  expect(await q('select 1 from admin_session where admin_account_id = $1 and terminated_at is null', [C])).toHaveLength(2);
+  // 복구 코드 하나와 이미 쓴 단계: 마치기는 STEP_USED이고 복구 코드·세션을 쓰지 않는다
+  await q("insert into admin_recovery_code (id, admin_account_id, code_phc, created_at) values ('0190f3a1-7c2e-7a00-8000-0000000005e1', $1, 'phc', now())", [C]);
+  const stepId = '0190f3a1-7c2e-7a00-8000-0000000005e2';
+  await store.createLoginStep({ id: stepId, accountId: C, tokenHash: Buffer.alloc(32, 50), aud: 'partner', pairRef: 'p'.repeat(32), createdAt: now, expiresAt: now + 300_000 });
+  expect(await store.useLoginStep(stepId, now)).toBe(true);
+  const sid = '0190f3a1-7c2e-7a00-8000-0000000005e3';
+  const r = await store.finishSecondStep({ id: sid, accountId: C, aud: 'partner', refreshHash: Buffer.alloc(32, 51), refreshFamily: sid, pairRef: 'p'.repeat(32), createdAt: now, absoluteExpiresAt: now + 86_400_000, idleExpiresAt: now + 3_600_000 }, 2, { stepId, code: { kind: 'recovery', rowId: '0190f3a1-7c2e-7a00-8000-0000000005e1' } });
+  expect(r).toEqual({ kind: 'STEP_USED' });
+  expect(await q('select 1 from admin_recovery_code where admin_account_id = $1', [C])).toHaveLength(1);
+  expect(await q('select 1 from admin_session where id = $1', [sid])).toHaveLength(0);
+  // 새 단계와 TOTP 시간 칸: 마치면 시간 칸·단계·세션을 함께 쓰고, 같은 시간 칸으로 다시 마치면 CODE_USED이고 단계는 쓰지 않는다
+  const s2 = '0190f3a1-7c2e-7a00-8000-0000000005e4';
+  await store.createLoginStep({ id: s2, accountId: C, tokenHash: Buffer.alloc(32, 52), aud: 'partner', pairRef: 'p'.repeat(32), createdAt: now, expiresAt: now + 300_000 });
+  const ok = '0190f3a1-7c2e-7a00-8000-0000000005e5';
+  const done = await store.finishSecondStep({ id: ok, accountId: C, aud: 'partner', refreshHash: Buffer.alloc(32, 53), refreshFamily: ok, pairRef: 'p'.repeat(32), createdAt: now, absoluteExpiresAt: now + 86_400_000, idleExpiresAt: now + 7_200_000 }, 2, { stepId: s2, code: { kind: 'totp', step: 999_999_999 } });
+  expect(done).toMatchObject({ kind: 'DONE', evicted: [expect.any(String)] });
+  expect(await q('select totp_last_step from admin_account where id = $1', [C])).toEqual([{ totp_last_step: '999999999' }]);
+  expect(await q<{ used_at: Date | null }>('select used_at from admin_login_step where id = $1', [s2])).toEqual([{ used_at: new Date(now) }]);
+  const s3 = '0190f3a1-7c2e-7a00-8000-0000000005e6';
+  await store.createLoginStep({ id: s3, accountId: C, tokenHash: Buffer.alloc(32, 54), aud: 'partner', pairRef: 'p'.repeat(32), createdAt: now, expiresAt: now + 300_000 });
+  const again = '0190f3a1-7c2e-7a00-8000-0000000005e7';
+  expect(await store.finishSecondStep({ id: again, accountId: C, aud: 'partner', refreshHash: Buffer.alloc(32, 55), refreshFamily: again, pairRef: 'p'.repeat(32), createdAt: now, absoluteExpiresAt: now + 86_400_000, idleExpiresAt: now + 7_200_000 }, 2, { stepId: s3, code: { kind: 'totp', step: 999_999_999 } })).toEqual({ kind: 'CODE_USED' });
+  expect(await q<{ used_at: Date | null }>('select used_at from admin_login_step where id = $1', [s3])).toEqual([{ used_at: null }]);
+  // 계정이 활성이 아니면(그 사이 재초대 정리·삭제) 단계·코드를 쓰지 않는다
+  await q("update admin_account set status = 'REMOVED' where id = $1", [C]);
+  expect(await store.finishSecondStep({ id: again, accountId: C, aud: 'partner', refreshHash: Buffer.alloc(32, 56), refreshFamily: again, pairRef: 'p'.repeat(32), createdAt: now, absoluteExpiresAt: now + 86_400_000, idleExpiresAt: now + 7_200_000 }, 2, { stepId: s3, code: { kind: 'totp', step: 1_000_000_000 } })).toEqual({ kind: 'STEP_USED' });
+  expect(await q<{ used_at: Date | null }>('select used_at from admin_login_step where id = $1', [s3])).toEqual([{ used_at: null }]);
+});

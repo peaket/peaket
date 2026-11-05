@@ -165,5 +165,9 @@ describe('파트너 팀 계정 REST(GET /v1/partner/team-accounts)', () => {
     expect(two.nextCursor).toBeNull();
     expect((await get('s-pm', pm)).statusCode).toBe(403);
     expect((await get('s-pa', pa, '?cursor=bad')).statusCode).toBe(400);
+    // 비밀번호 바꾸기가 필요한 세션(scope password:change)은 비밀번호 바꾸기·로그아웃 말고 다른 관리 경로를 못 쓴다(AC-T4, BOT-123이 넘긴 것)
+    const limited = await svc.http.inject({ method: 'GET', url: '/v1/partner/team-accounts', headers: { 'x-user-id': pa, 'x-session-id': 's-pa', 'x-user-aud': 'partner', 'x-user-scope': 'password:change' } });
+    expect(limited.statusCode).toBe(403);
+    expect(JSON.parse(limited.payload)).toMatchObject({ type: expect.stringMatching(/password-change-required$/) });
   });
 });

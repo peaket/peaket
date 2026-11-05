@@ -25,6 +25,7 @@ import {
   TOTP_SEED_CIPHER,
   type TotpSeedCipher,
   TotpSeedUnreadable,
+  type SecondStepUse,
 } from '../domain/ports.js';
 import { matchTotp, normalizeRecoveryCode } from '../domain/totp.js';
 import { emailKeyOf, shortHash, sourceAddressOf } from './login-password-step.js';
@@ -99,16 +100,17 @@ export class LoginSecondStep {
     const sessionId = randomUUID();
     // 비밀번호 바꾸기가 필요하면 그 세션은 비밀번호 바꾸기·로그아웃만(scope password:change, auth-controls §3.5, BOT-123)
     const at = await this.signer.access({ accountId, sessionId, aud: i.aud, ...(account.passwordChangeRequired ? { scopes: [PASSWORD_CHANGE_SCOPE] } : {}) }, now);
-    // 코드를 쓴 것으로 적는다(같은 시간 칸·같은 복구 코드는 한 번만). 그 사이 다른 요청이 썼으면 틀린 코드로 센다
-    if (!(await check.commit())) return this.#failed(accountId, emailKeyOf(account.email), pair, ipHash, i.aud, now);
-    // 한 번만: 그 사이 같은 단계를 다른 요청이 썼으면 처음부터
-    if (!(await this.store.useLoginStep(stepId, now))) return { kind: 'STEP_INVALID' };
+    // 코드(같은 시간 칸·같은 복구 코드는 한 번만)·단계(한 번만)·세션을 한 트랜잭션에 쓴다(BOT-120이 넘긴 것: 코드만 쓰이고 단계에서 실패하는 일이 없다).
+    // 그 사이 다른 요청이 코드를 썼으면 틀린 코드로 세고, 단계를 썼으면 처음부터다
     const refreshToken = randomBytes(32).toString('base64url');
     const absoluteExpiresAt = now + ADMIN_SESSION_ABSOLUTE_MS;
-    await this.store.createSession(
+    const done = await this.store.finishSecondStep(
       { id: sessionId, accountId, aud: i.aud, refreshHash: createHash('sha256').update(refreshToken).digest(), refreshFamily: randomUUID(), pairRef: pair, createdAt: now, absoluteExpiresAt, idleExpiresAt: now + ADMIN_SESSION_IDLE_MS },
       ADMIN_SESSION_LIMIT,
+      { stepId, code: check.use },
     );
+    if (done.kind === 'CODE_USED') return this.#failed(accountId, emailKeyOf(account.email), pair, ipHash, i.aud, now);
+    if (done.kind === 'STEP_USED') return { kind: 'STEP_INVALID' };
     // 세션을 만든 뒤 셈을 0으로(묶음 지우기가 셈 저장소 장애로 실패해도 로그인은 막지 않는다)
     await this.success.run({ accountId, pair });
     // 익숙한 출발지로 적는다(BOT-123)
@@ -117,10 +119,10 @@ export class LoginSecondStep {
   }
 
   /**
-   * 숫자 6자리(띄어 쓴 꼴도)는 TOTP, 아니면 복구 코드. 맞으면 쓴 것으로 적는 commit을 돌려준다(적기는 토큰 서명 뒤).
+   * 숫자 6자리(띄어 쓴 꼴도)는 TOTP, 아니면 복구 코드. 맞으면 쓸 코드(시간 칸 또는 복구 코드 행)를 돌려준다(적기는 토큰 서명 뒤 finishSecondStep 한 트랜잭션).
    * 시드를 그 계정으로 풀 수 없으면 UNREADABLE(보안 경보, 세지 않는다: 어떤 코드로도 통과하지 못한다)
    */
-  async #checkCode(accountId: string, raw: string, now: number): Promise<{ commit: () => Promise<boolean> } | 'BAD' | 'UNREADABLE'> {
+  async #checkCode(accountId: string, raw: string, now: number): Promise<{ use: SecondStepUse['code'] } | 'BAD' | 'UNREADABLE'> {
     const code = raw.replace(/\s/g, '');
     if (/^\d{6}$/.test(code)) {
       const t = await this.store.getTotp(accountId);
@@ -137,12 +139,12 @@ export class LoginSecondStep {
       }
       const step = matchTotp(seed, code, now, t.lastStep);
       seed.fill(0);
-      return step === null ? 'BAD' : { commit: () => this.store.recordTotpStep(accountId, step, now) };
+      return step === null ? 'BAD' : { use: { kind: 'totp', step } };
     }
     const normalized = normalizeRecoveryCode(raw);
     if (!normalized) return 'BAD';
     for (const row of await this.store.listRecoveryCodes(accountId)) {
-      if (await this.recovery.verify(accountId, normalized, row.phc)) return { commit: () => this.store.useRecoveryCode(row.id) };
+      if (await this.recovery.verify(accountId, normalized, row.phc)) return { use: { kind: 'recovery', rowId: row.id } };
     }
     return 'BAD';
   }

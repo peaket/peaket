@@ -136,9 +136,34 @@ function contextWords(ctx: PasswordContext, serviceWords: readonly string[]): st
 
 /** 남은 부분이 '쉬운 덧붙임'인가: 숫자(모든 숫자 글자)·기호·공백을 뺀 글자가 (기준 - 1)자 이하이거나 꼴 규칙뿐 */
 const lettersOf = (s: string) => s.replace(/[\p{N}\s\p{P}\p{S}]/gu, '');
-function easyRest(rest: string, minRemaining: number, shapesToo?: string): boolean {
+function easyRest(rest: string, minRemaining: number, shapesToo?: string, letterCount?: number): boolean {
   const letters = lettersOf(rest);
-  return [...letters].length < minRemaining || onlyShapes(letters) || (shapesToo !== undefined && onlyShapes(lettersOf(shapesToo)));
+  return (letterCount ?? [...letters].length) < minRemaining || onlyShapes(letters) || (shapesToo !== undefined && onlyShapes(lettersOf(shapesToo)));
+}
+
+const GRAPHEMES = new Intl.Segmenter('und', { granularity: 'grapheme' });
+
+/**
+ * 기본 사본을 원문 글자(NFC의 문자소, 사람이 한 글자로 보는 단위)마다 만들어 잇고, 기본·키보드 사본의 UTF-16 자리마다 그 원문 글자의 순번과
+ * 그 원문 글자에 문자(\p{L})가 있는지를 준다. 남은 글자 수를 원문 글자로 센다(㎏ → kg, 한 음절 → 자판 키 2~3자도 한 글자, 문자가 없는 ㎏·이모지·키캡 숫자는
+ * 글자가 아니다, auth-controls §4.3 4, BOT-110이 넘긴 것). 글자마다 만들므로 따로 쓴 자모(ㄱㅏ)를 합치지 않아 자리가 늘 맞는다
+ */
+function unitsOf(nfc: string): { base: string; letter: boolean[]; baseAt: number[]; keysAt: number[] } {
+  let base = '';
+  const letter: boolean[] = [];
+  const baseAt: number[] = [];
+  const keysAt: number[] = [];
+  let k = 0;
+  for (const { segment } of GRAPHEMES.segment(nfc)) {
+    const b = baseCopy(segment);
+    base += b;
+    letter.push(/\p{L}/u.test(segment));
+    for (let j = 0; j < b.length; j++) baseAt.push(k);
+    // 키보드 사본은 글자마다 바꾸므로(keyboardCopy) 조각의 길이로 자리를 잇는다
+    for (let j = 0; j < keyboardCopy(b).length; j++) keysAt.push(k);
+    k++;
+  }
+  return { base, letter, baseAt, keysAt };
 }
 
 /**
@@ -176,7 +201,9 @@ export function judgePassword(raw: string, ctx: PasswordContext, lists: PolicyLi
   const n = [...nfc].length;
   if (n < cfg.passwordMinLength) return { ok: false, reason: 'TOO_SHORT' };
   if (n > cfg.passwordMaxLength) return { ok: false, reason: 'TOO_LONG' };
-  const base = baseCopy(nfc);
+  // 기본 사본은 원문 글자마다 만들어 잇는다(남은 글자를 원문 글자로 세려고. 보통 글은 한꺼번에 만든 것과 같다)
+  const units = unitsOf(nfc);
+  const base = units.base;
   const leet = leetCopy(base);
   const keys = keyboardCopy(base);
   // L1: 목록과 같거나 사본 전체가 꼴 규칙 조각뿐
@@ -187,17 +214,19 @@ export function judgePassword(raw: string, ctx: PasswordContext, lists: PolicyLi
   // 바꿈 사본은 기본 사본과 한 글자씩 대응한다: 지울 자리는 바꿈 사본에서 찾고, 남은 글자 수는 기본 사본의 같은 자리에서 센다.
   // 꼴 규칙은 바꿈 사본 쪽 남은 글자로도 본다(qw3rty 같은 바꿈 꼴 키보드 줄)
   // (새 맥락 리뷰 2026-11-05: 바꿈 사본의 0·1·3·4·5·7이 글자로 세어져 덧붙인 날짜가 '글자 4자 이상'이 되었다)
-  const pairs: [copy: string, ws: string[], countOn: string, shapesToo?: string][] = [
-    [base, words, base],
-    [leet, words.map(leetCopy), base, leet],
-    [keys, words.map(keyboardCopy), keys],
+  // 남은 글자 수는 원문 글자로 센다: 기본·바꿈 사본은 기본 사본의 자리, 키보드 사본은 그 사본의 자리에서 원문 글자를 찾는다
+  const pairs: [copy: string, ws: string[], countOn: string, shapesToo: string | undefined, origin: number[]][] = [
+    [base, words, base, undefined, units.baseAt],
+    [leet, words.map(leetCopy), base, leet, units.baseAt],
+    [keys, words.map(keyboardCopy), keys, undefined, units.keysAt],
   ];
-  for (const [copy, ws, countOn, shapesToo] of pairs) {
+  for (const [copy, ws, countOn, shapesToo, origin] of pairs) {
     const at = stripWords(copy, ws);
     if (at === null) continue;
     const rest = at.map((i) => countOn[i]!).join('');
     const alt = shapesToo === undefined ? undefined : at.map((i) => shapesToo[i]!).join('');
-    if (easyRest(rest, cfg.contextMinRemainingLetters, alt)) return { ok: false, reason: 'CONTEXT' };
+    const count = new Set(at.map((i) => origin[i]!).filter((u) => units.letter[u])).size;
+    if (easyRest(rest, cfg.contextMinRemainingLetters, alt, count)) return { ok: false, reason: 'CONTEXT' };
   }
   return { ok: true };
 }

@@ -227,7 +227,7 @@ export class LoginPasswordStep {
 
   async #failed(account: AdminLoginAccount | null, subject: string, ghostKey: string, emailHash: string, pair: string, ipHash: string, before: AccountLoginState, aud: AdminAud, now: number): Promise<LoginStepOutcome> {
     // ④ 계정에 묶인 값: 있는 계정은 행 잠금 트랜잭션(알림도 같은 트랜잭션), 없는 계정은 가짜 상태
-    let next: AccountLoginState;
+    let next: AccountLoginState | null = null;
     let notices: NoticeKind[] = [];
     if (account) {
       const box: { d?: ReturnType<typeof onPasswordFailure> } = {};
@@ -237,17 +237,22 @@ export class LoginPasswordStep {
         box.d = onPasswordFailure(cur, now, this.cfg);
         return { next: box.d.next, notices: box.d.notices };
       });
-      // 그 사이 계정이 지워졌다: 없는 계정처럼 답한다
-      if (!written) return { kind: 'FAILED', remainingAttempts: this.cfg.lockAfterFailures - 1, humanCheckRequired: false };
-      if (!box.d) {
+      // 그 사이 계정이 지워졌으면(written null) 아래에서 없는 계정처럼 그 이메일의 가짜 상태로 센다(같은 이메일의 다음 시도와 셈이 이어진다, BOT-111이 넘긴 것)
+      if (written && !box.d) {
         const l = activeLock(written, now);
         if (l?.kind === 'PROTECT') return this.#locked(aud, { kind: 'LOCKED', lock: 'PROTECT' });
         return this.#locked(aud, { kind: 'LOCKED', lock: 'TIMED', retryAfterSeconds: secondsUntil(l?.kind === 'TIMED' ? l.until : now, now) });
       }
-      next = written;
-      notices = box.d.notices;
-    } else {
-      const d = onPasswordFailure(before, now, this.cfg);
+      if (written && box.d) {
+        next = written;
+        notices = box.d.notices;
+      }
+    }
+    const asGhost = next === null;
+    // 가짜 상태로 세면 출발지 셈·경보의 대상도 없는 계정과 같은 키다(지워진 계정의 키에 쌓지 않는다, 재검토 2026-11-05)
+    const target = asGhost ? `g:${ghostKey}` : subject;
+    if (next === null) {
+      const d = onPasswordFailure(account ? await this.counters.ghostState(ghostKey, now) : before, now, this.cfg);
       next = d.next;
       await this.counters.setGhostState(ghostKey, next, now);
     }
@@ -255,7 +260,7 @@ export class LoginPasswordStep {
     // 출발지가 든 값(Redis)
     const limits = failureLimitsOf(this.cfg);
     const rec = await this.counters.recordFailure({
-      subject,
+      subject: target,
       pair,
       ipHash,
       emailHash,
@@ -264,13 +269,13 @@ export class LoginPasswordStep {
       pairLockMs: nextTimedLockMs(next, now, this.cfg),
       limits,
     });
-    await signalPasswordFailure(this.signals, this.store, { accountId: account ? account.id : null, aud, notices, rec, now });
+    await signalPasswordFailure(this.signals, this.store, { accountId: account && !asGhost ? account.id : null, aud, notices, rec, now });
     // 응답: 이번에 잠겼으면 423, 아니면 401과 남은 수·다음 사람 확인
     if (accountLock?.kind === 'PROTECT') return { kind: 'LOCKED', lock: 'PROTECT' };
     const lockedUntil = Math.max(accountLock?.kind === 'TIMED' ? accountLock.until : 0, rec.pairLockedUntil ?? 0);
     if (lockedUntil > now) return { kind: 'LOCKED', lock: 'TIMED', retryAfterSeconds: secondsUntil(lockedUntil, now) };
     const remainingAttempts = Math.max(0, Math.min(this.cfg.lockAfterFailures - next.failedAttempts, this.cfg.pairLockAfterFailures - rec.pairFailures));
-    const humanCheckRequired = accountNeedsHumanCheck(next, now, this.cfg) || rec.newAccountAlert || rec.newSourceAlert || rec.newGlobalAlert || (await this.#alertsActive(subject, pair, ipHash, now));
+    const humanCheckRequired = accountNeedsHumanCheck(next, now, this.cfg) || rec.newAccountAlert || rec.newSourceAlert || rec.newGlobalAlert || (await this.#alertsActive(target, pair, ipHash, now));
     return { kind: 'FAILED', remainingAttempts, humanCheckRequired };
   }
 

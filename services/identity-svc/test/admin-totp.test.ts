@@ -220,6 +220,37 @@ describe('로그인 2단계(I-T10)', () => {
     expect(t.store.notices(PARTNER)).toContain('SESSION_LIMIT');
   });
 
+  test('코드를확인한뒤그사이같은단계를다른요청이썼으면_복구코드를쓰지않고STEP_INVALID다(단계·코드·세션은한트랜잭션, BOT-120이넘긴것)', async () => {
+    const t = await harness();
+    const { recoveryCodes } = await t.enroll(PARTNER);
+    const ls = await t.pass1();
+    // 서명(코드 확인과 쓰기 사이)하는 동안 같은 단계를 다른 요청이 쓴다
+    const racing = new LoginSecondStep(t.store, t.counters, t.cipher, t.recovery, t.success, {
+      access: async (...x: Parameters<typeof t.signer.access>) => {
+        for (const st of t.store.loginSteps(PARTNER)) await t.store.useLoginStep(st.id, t.clock.now());
+        return t.signer.access(...x);
+      },
+    }, t.signals, cfg, t.clock);
+    expect((await racing.run({ aud: 'partner', loginStep: ls, code: recoveryCodes[0]!, ip: '203.0.113.10', deviceId: 'dev-a' })).kind).toBe('STEP_INVALID');
+    expect(t.store.recoveryCodes(PARTNER)).toHaveLength(10);
+    expect(t.store.sessions(PARTNER)).toHaveLength(0);
+  });
+
+  test('코드를확인한뒤그사이계정이활성이아니게되면_코드도단계도쓰지않고STEP_INVALID다(재검토 2026-11-05)', async () => {
+    const t = await harness();
+    const { recoveryCodes } = await t.enroll(PARTNER);
+    const ls = await t.pass1();
+    const racing = new LoginSecondStep(t.store, t.counters, t.cipher, t.recovery, t.success, {
+      access: async (...x: Parameters<typeof t.signer.access>) => {
+        t.store.remove(PARTNER);
+        return t.signer.access(...x);
+      },
+    }, t.signals, cfg, t.clock);
+    expect((await racing.run({ aud: 'partner', loginStep: ls, code: recoveryCodes[0]!, ip: '203.0.113.10', deviceId: 'dev-a' })).kind).toBe('STEP_INVALID');
+    expect(t.store.recoveryCodes(PARTNER)).toHaveLength(10);
+    expect(t.store.loginSteps(PARTNER).every((x) => x.usedAt === null)).toBe(true);
+  });
+
   // 새 맥락 리뷰(2026-11-05) 재현: 토큰 서명을 맨 끝에 하면 키가 없을 때 되돌릴 수 없는 일(단계·시간 칸 소비, 셈 0, 세션·종료 사건)이 먼저 일어났다
   test('관리토큰키가없으면503이고_로그인단계·시간칸·셈·세션을그대로두어같은loginStep으로다시할수있다', async () => {
     const t = await harness();

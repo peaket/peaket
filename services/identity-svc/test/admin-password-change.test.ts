@@ -54,7 +54,9 @@ async function harness() {
   const step2 = new LoginSecondStep(store, counters, cipher, recovery, success, signer, signals, cfg, clock);
   const passwordOnly = new CheckPasswordOnlyLogins(store, cfg, clock);
   const setPassword = new SetAdminPassword(store, passwords, breaches, loadPolicyLists({}), cfg, clock);
-  const change = new ChangeAdminPassword(store, counters, passwords, setPassword, signer, signals, cfg, clock);
+  const securityLog: { line: Record<string, unknown>; msg: string }[] = [];
+  const logger = { warn: ((line: Record<string, unknown>, msg: string) => void securityLog.push({ line, msg })) as never };
+  const change = new ChangeAdminPassword(store, counters, passwords, new SetAdminPassword(store, passwords, breaches, loadPolicyLists({}), cfg, clock, logger), signer, signals, cfg, clock, logger);
   const authz = new GetAdminAuthz(store, store, clock);
   const { otpauthUri } = await new BeginTotpEnrollment(store, cipher).run({ accountId: PARTNER });
   const seed = base32Decode(new URL(otpauthUri).searchParams.get('secret')!);
@@ -69,7 +71,7 @@ async function harness() {
     if (s2.kind !== 'DONE') throw new Error(s2.kind);
     return s2;
   };
-  return { clock, store, counters, step1, step2, passwordOnly, change, authz, login, breaches, seen, seed };
+  return { clock, store, counters, step1, step2, passwordOnly, change, authz, login, breaches, seen, seed, securityLog };
 }
 
 describe('비밀번호만 맞은 로그인(auth-controls §2.1 C7, AC-T4)', () => {
@@ -88,6 +90,20 @@ describe('비밀번호만 맞은 로그인(auth-controls §2.1 C7, AC-T4)', () =
     expect(t.store.peek(PARTNER)!.passwordChangeRequired).toBe(true);
     // 한 행에 한 번
     expect(await t.passwordOnly.run()).toBe(0);
+  });
+
+  test('AC-T4_비밀번호만맞은로그인찾기는만든지1일10분안의행만보고_그보다옛행(0020전에만든행)은알리지않는다(BOT-123이넘긴것)', async () => {
+    const t = await harness();
+    await t.login('203.0.113.10', 'dev-a');
+    await t.step1.run({ aud: 'partner', email: EMAIL, password: PW, ip: '198.51.100.71', deviceId: 'dev-y', humanCheckToken: 'ok' });
+    // 찾기가 1일 10분 넘게 돌지 않았다
+    t.clock.advance(24 * 60 * M + 11 * M);
+    expect(await t.passwordOnly.run()).toBe(0);
+    expect(t.store.notices(PARTNER)).toEqual([]);
+    // 정비는 만든 지 2일 지난 단계 행을 지운다
+    expect(await t.store.purgeLoginSteps(t.clock.now() - 48 * 60 * M)).toBe(0);
+    t.clock.advance(24 * 60 * M);
+    expect(await t.store.purgeLoginSteps(t.clock.now() - 48 * 60 * M)).toBeGreaterThan(0);
   });
 
   test('AC-T4_다음로그인세션은password_change스코프하나이고_비밀번호를바꾸면다른세션이모두끝나고스코프없는새토큰을준다', async () => {
@@ -128,6 +144,14 @@ describe('비밀번호 바꾸기(auth-controls §3.5·§4)', () => {
     expect(t.store.peek(PARTNER)).toMatchObject({ failedAttempts: 1, passwordFailureTotal: 1 });
     const weak = await t.change.run({ aud: 'partner', accountId: PARTNER, sessionId: s.sessionId, scopes: [], currentPassword: PW, newPassword: 'Peaket2026!!!!!!', ip: '203.0.113.10' });
     expect(weak).toEqual({ kind: 'REJECTED', reason: 'CONTEXT' });
+    // 거절 이유의 종류와 계정 ID만 보안 이벤트로 남긴다(auth-controls §4.3 10, BOT-110이 넘긴 것). 비밀번호·사본은 싣지 않는다
+    const same = await t.change.run({ aud: 'partner', accountId: PARTNER, sessionId: s.sessionId, scopes: [], currentPassword: PW, newPassword: PW, ip: '203.0.113.10' });
+    expect(same).toEqual({ kind: 'REJECTED', reason: 'SAME_AS_CURRENT' });
+    expect(t.securityLog.map((x) => x.line)).toEqual([
+      { kind: 'security', event: 'admin_password_rejected', accountId: PARTNER, reason: 'CONTEXT' },
+      { kind: 'security', event: 'admin_password_rejected', accountId: PARTNER, reason: 'SAME_AS_CURRENT' },
+    ]);
+    expect(JSON.stringify(t.securityLog)).not.toContain('Peaket2026');
     // 스코프 없는 보통 세션은 새 토큰을 주지 않는다
     const ok = await t.change.run({ aud: 'partner', accountId: PARTNER, sessionId: s.sessionId, scopes: [], currentPassword: PW, newPassword: NEW_PW, ip: '203.0.113.10' });
     expect(ok).toEqual({ kind: 'CHANGED' });
@@ -210,7 +234,7 @@ describe('저장소의 경계(재검토 2026-11-05)', () => {
     await t.store.createLoginStep({ id: '0190f3a1-7c2e-7a00-8000-0000000008e2', accountId: PARTNER, tokenHash: Buffer.alloc(32, 2), aud: 'partner', pairRef: 'q'.repeat(32), createdAt: now, expiresAt: now + 5 * M, knownSource: false });
     t.store.remove(PARTNER);
     expect(await t.store.markPasswordOnly('0190f3a1-7c2e-7a00-8000-0000000008e2', PARTNER, now + M)).toBe(false);
-    expect(await t.store.findPasswordOnlySteps(now + M, 20)).toEqual([]);
+    expect(await t.store.findPasswordOnlySteps(now + M, now - M, 20)).toEqual([]);
   });
 
   test('비밀번호바꾸기는임대안에서세션을다시본다_끝난세션이면바꾸지않는다', async () => {

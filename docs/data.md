@@ -278,7 +278,7 @@ erDiagram
         timestamptz expires_at "만든 때 + 5분 [가정]"
         timestamptz used_at "2단계에서 쓴 때(한 번만)"
         bool known_source "1단계 통과 때 그 묶음이 30일 [가정] 안에 성공한 익숙한 출발지였는지(BOT-123)"
-        timestamptz password_only_noticed_at "비밀번호만 맞은 로그인으로 알린 때(BOT-123)"
+        timestamptz password_only_noticed_at "비밀번호만 맞은 로그인으로 알린 때(BOT-123). 알림 찾기는 만든 지 10분~1일 10분 [가정]의 쓰이지 않은 익숙하지 않은 행만 본다(부분 색인 admin_login_step_password_only_idx). 정비 admin-login-step-expired가 만든 지 2일 [가정] 지난 행을 지운다(2026-11-05)"
     }
     admin_refresh_token_hash {
         bytea hash PK "발급한 관리 리프레시 토큰의 SHA-256(로그인 때 준 첫 토큰 포함). 예전 토큰이 다시 오면 그 패밀리를 끝낸다(docs/features/identity.md §6 BOT-130)"

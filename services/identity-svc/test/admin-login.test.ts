@@ -76,6 +76,37 @@ async function harness(o: { writeVersion?: number } = {}) {
 }
 
 describe('잠금 규칙(auth-controls §3, I-T11)', () => {
+  test('BOT-111넘김_임대를쥔뒤계정이지워졌으면_그시도도없는계정의가짜상태로세어_다음시도의남은수가이어진다', async () => {
+    const t = await harness();
+    const update = t.store.updateLoginState.bind(t.store);
+    // 비밀번호를 확인한 뒤 실패를 적기 전에 계정이 지워진다
+    t.store.updateLoginState = async (id, now, fn) => {
+      t.store.remove(id);
+      return update(id, now, fn);
+    };
+    expect(await t.attempt()).toMatchObject({ kind: 'FAILED', remainingAttempts: 4 });
+    t.store.updateLoginState = update;
+    // 이제 없는 계정이다: 앞 시도까지 센 가짜 상태로 답한다(같은 이메일의 없는 계정과 같은 셈)
+    expect(await t.attempt()).toMatchObject({ kind: 'FAILED', remainingAttempts: 3 });
+  });
+
+  test('BOT-111넘김_재검토_같은묶음에서앞서틀린뒤임대안에서계정이지워져도_출발지셈은없는계정의키로세어남은수가뛰지않는다', async () => {
+    const t = await harness();
+    // 없는 계정(같은 이메일)으로 같은 묶음에서 두 번 틀린 셈을 흉내 내려고, 있는 계정으로 두 번 틀린 뒤 세 번째에 지워진다
+    expect(await t.attempt()).toMatchObject({ kind: 'FAILED', remainingAttempts: 4 });
+    expect(await t.attempt()).toMatchObject({ kind: 'FAILED', remainingAttempts: 3 });
+    const update = t.store.updateLoginState.bind(t.store);
+    t.store.updateLoginState = async (id, now, fn) => {
+      t.store.remove(id);
+      return update(id, now, fn);
+    };
+    const gone = await t.attempt();
+    t.store.updateLoginState = update;
+    const next = await t.attempt();
+    // 지운 뒤의 두 시도는 같은 가짜 대상 키로 세어 남은 수가 하나씩 준다
+    expect(gone.kind === 'FAILED' && next.kind === 'FAILED' && gone.remainingAttempts - next.remainingAttempts).toBe(1);
+  });
+
   test('I-T11①_한출발지에서5회틀리면계정과묶음이15분잠기고_3회뒤부터사람확인이며_잠긴동안은비밀번호를보지않고세지않는다 [ASVS v5.0.0-6.3.1]', async () => {
     const t = await harness();
     expect(await t.attempt()).toMatchObject({ kind: 'FAILED', remainingAttempts: 4, humanCheckRequired: false });

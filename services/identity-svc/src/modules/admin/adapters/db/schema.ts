@@ -72,6 +72,10 @@ export const adminLoginStep = pgTable(
   (t) => [
     uniqueIndex('admin_login_step_token_key').on(t.tokenHash),
     index('admin_login_step_account_idx').on(t.adminAccountId, t.createdAt),
+    // 비밀번호만 맞은 로그인 찾기(쓰이지 않은 익숙하지 않은 알리지 않은 행만, BOT-123이 넘긴 것)
+    index('admin_login_step_password_only_idx')
+      .on(t.createdAt)
+      .where(sql`${t.usedAt} is null and ${t.knownSource} = false and ${t.passwordOnlyNoticedAt} is null`),
     check('admin_login_step_aud_check', sql`${t.aud} in ('partner', 'ops')`),
   ],
 );

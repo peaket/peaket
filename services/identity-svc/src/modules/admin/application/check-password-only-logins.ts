@@ -8,6 +8,11 @@ import { ADMIN_AUTH_CONFIG } from './set-admin-password.js';
 
 /** 한 번에 보는 단계 수 [가정] */
 const BATCH = 20;
+/**
+ * 알림 기준이 지난 뒤 이만큼 안의 행만 본다 [가정]: 마이그레이션 0020 전에 만든 옛 행(known_source가 false로 채워짐)을 잡지 않는다(BOT-123이 넘긴 것).
+ * 찾기가 하루 넘게 멈추면 그 사이 알림은 늦게라도 가지 않는다(정비가 2일 뒤 지운다)
+ */
+const LOOKBACK_MS = 24 * 60 * 60_000;
 
 @Injectable()
 export class CheckPasswordOnlyLogins {
@@ -21,7 +26,8 @@ export class CheckPasswordOnlyLogins {
   async run(): Promise<number> {
     const now = this.clock.now();
     let n = 0;
-    for (const s of await this.store.findPasswordOnlySteps(now - this.cfg.passwordOnlyNoticeAfterMs, BATCH)) {
+    const before = now - this.cfg.passwordOnlyNoticeAfterMs;
+    for (const s of await this.store.findPasswordOnlySteps(before, before - LOOKBACK_MS, BATCH)) {
       if (await this.store.markPasswordOnly(s.id, s.accountId, now)) n++;
     }
     return n;

@@ -7,7 +7,14 @@ import { and, asc, eq, gt, gte, inArray, isNull, lt, lte, ne, notInArray, or } f
 import { type AccountLoginState, FRESH_LOGIN_STATE, type LockKind, type LockReason, type NoticeKind } from '../../domain/login-rules.js';
 import { sql as rawSql } from 'drizzle-orm';
 import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
-import { DESIGNATION_KINDS } from '../../domain/ports.js';
+import { DESIGNATION_KINDS, type SecondStepUse } from '../../domain/ports.js';
+
+/** finishSecondStep의 되돌리기(코드나 단계를 그 사이 다른 요청이 썼다) */
+class SecondStepAbort extends Error {
+  constructor(readonly kind: 'CODE_USED' | 'STEP_USED') {
+    super(kind);
+  }
+}
 import { adminAccount, adminAccountRequest, adminDesignation, adminKnownSource, adminLoginStep, adminRecoveryCode, adminRefreshTokenHash, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
 
 type AccountRow = typeof adminAccount.$inferSelect;
@@ -240,6 +247,46 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
     return this.database.transaction(async (tx) => {
       // 계정 행을 잠가 같은 계정의 세션 만들기를 차례로 한다(동시 로그인이 한도를 넘지 않게)
       await tx.select({ id: adminAccount.id }).from(adminAccount).where(eq(adminAccount.id, i.accountId)).for('update');
+      return this.#openSession(tx, i, limit);
+    });
+  }
+
+  async finishSecondStep(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number }, limit: number, use: SecondStepUse): Promise<{ kind: 'DONE'; evicted: string[] } | { kind: 'CODE_USED' } | { kind: 'STEP_USED' }> {
+    try {
+      return await this.database.transaction(async (tx) => {
+        const [acc] = await tx.select({ status: adminAccount.status }).from(adminAccount).where(eq(adminAccount.id, i.accountId)).for('update');
+        // 잠근 뒤 계정이 활성이 아니면(그 사이 재초대 정리·삭제) 처음부터다(재검토 2026-11-05)
+        if (acc?.status !== 'ACTIVE') throw new SecondStepAbort('STEP_USED');
+        const now = new Date(i.createdAt);
+        // 코드 먼저(다른 요청이 같은 코드를 썼으면 틀린 코드로 센다), 그다음 단계, 세션. 하나라도 안 되면 모두 되돌린다
+        const code =
+          use.code.kind === 'totp'
+            ? await tx
+                .update(adminAccount)
+                .set({ totpLastStep: use.code.step, updatedAt: now })
+                .where(and(eq(adminAccount.id, i.accountId), or(isNull(adminAccount.totpLastStep), lt(adminAccount.totpLastStep, use.code.step))))
+                .returning({ id: adminAccount.id })
+            : await tx
+                .delete(adminRecoveryCode)
+                .where(and(eq(adminRecoveryCode.id, use.code.rowId), eq(adminRecoveryCode.adminAccountId, i.accountId)))
+                .returning({ id: adminRecoveryCode.id });
+        if (code.length === 0) throw new SecondStepAbort('CODE_USED');
+        const step = await tx
+          .update(adminLoginStep)
+          .set({ usedAt: now })
+          .where(and(eq(adminLoginStep.id, use.stepId), isNull(adminLoginStep.usedAt), isNull(adminLoginStep.passwordOnlyNoticedAt), gt(adminLoginStep.expiresAt, now)))
+          .returning({ id: adminLoginStep.id });
+        if (step.length === 0) throw new SecondStepAbort('STEP_USED');
+        return { kind: 'DONE' as const, ...(await this.#openSession(tx, i, limit)) };
+      });
+    } catch (e) {
+      if (e instanceof SecondStepAbort) return { kind: e.kind };
+      throw e;
+    }
+  }
+
+  /** 계정 행을 잠근 트랜잭션에서 세션을 만든다(createSession·finishSecondStep) */
+  async #openSession(tx: DbTransaction, i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number }, limit: number): Promise<{ evicted: string[] }> {
       const now = new Date(i.createdAt);
       const live = await tx
         .select({ id: adminSession.id })
@@ -278,7 +325,6 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
         );
       }
       return { evicted };
-    });
   }
 
   // ── 본인 해제 링크와 알림 발송(BOT-121) ──
@@ -748,11 +794,17 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
     return done.length;
   }
 
-  async findPasswordOnlySteps(createdBefore: number, limit: number): Promise<{ id: string; accountId: string }[]> {
+  async purgeLoginSteps(before: number): Promise<number> {
+    const done = await this.database.db.delete(adminLoginStep).where(lt(adminLoginStep.createdAt, new Date(before))).returning({ id: adminLoginStep.id });
+    return done.length;
+  }
+
+  async findPasswordOnlySteps(createdBefore: number, createdAfter: number, limit: number): Promise<{ id: string; accountId: string }[]> {
+    // 부분 색인 admin_login_step_password_only_idx(쓰이지 않은 익숙하지 않은 알리지 않은 행의 만든 때)로 찾는다
     return this.database.db
       .select({ id: adminLoginStep.id, accountId: adminLoginStep.adminAccountId })
       .from(adminLoginStep)
-      .where(and(lte(adminLoginStep.createdAt, new Date(createdBefore)), isNull(adminLoginStep.usedAt), eq(adminLoginStep.knownSource, false), isNull(adminLoginStep.passwordOnlyNoticedAt)))
+      .where(and(lte(adminLoginStep.createdAt, new Date(createdBefore)), gt(adminLoginStep.createdAt, new Date(createdAfter)), isNull(adminLoginStep.usedAt), eq(adminLoginStep.knownSource, false), isNull(adminLoginStep.passwordOnlyNoticedAt)))
       .orderBy(asc(adminLoginStep.createdAt))
       .limit(limit);
   }

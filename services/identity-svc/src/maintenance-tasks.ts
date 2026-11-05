@@ -26,6 +26,8 @@ export function identityMaintenanceTasks(database: Database, clock: Clock, invRe
     { name: 'restricted-hold-expired', when: 'daily', run: () => verifications.purgeExpiredHolds(clock.now()) },
     // 관리 계정 익숙한 출발지는 마지막 성공에서 30일 [가정] 지나면 지운다(docs/data.md admin_known_source, BOT-123)
     { name: 'admin-known-source-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).purgeKnownSources(clock.now() - knownSourceWindowMs) },
+    // 관리 계정 로그인 단계 행은 만든 지 2일 [가정] 지나면 지운다(5분 수명, 비밀번호만 맞은 로그인 찾기는 만든 지 1일 10분 안, docs/data.md admin_login_step)
+    { name: 'admin-login-step-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).purgeLoginSteps(clock.now() - 2 * 24 * 60 * 60_000) },
     // 관리 리프레시 토큰 발급 해시는 그 세션의 절대 만료가 지나면 지운다(docs/data.md admin_refresh_token_hash, BOT-130)
     { name: 'admin-refresh-hash-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).purgeRefreshHashes(clock.now()) },
     // 관리 계정 초대는 보낸 때부터 24시간 지나면 만료로 바꾸고 토큰 해시를 지운다(docs/data.md admin_account.invite_expires_at, BOT-150)

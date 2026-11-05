@@ -235,6 +235,17 @@ export interface AdminSecondStepStore {
     i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number },
     limit: number,
   ): Promise<{ evicted: string[] }>;
+  /**
+   * 로그인 2단계를 마친다(한 트랜잭션, BOT-120이 넘긴 것): 계정 행을 잠그고 코드를 쓴 것으로 적고(시간 칸은 recordTotpStep, 복구 코드는 useRecoveryCode와 같은 조건)
+   * 로그인 단계를 쓴 것으로 적고(useLoginStep과 같은 조건) createSession과 같이 세션을 만든다. 그 사이 다른 요청이 코드를 썼으면 CODE_USED, 단계를 썼으면 STEP_USED이고 아무것도 쓰지 않는다
+   */
+  finishSecondStep(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number }, limit: number, use: SecondStepUse): Promise<{ kind: 'DONE'; evicted: string[] } | { kind: 'CODE_USED' } | { kind: 'STEP_USED' }>;
+}
+
+/** 2단계에서 쓸 것: 로그인 단계와 코드(TOTP 시간 칸 또는 복구 코드 행) */
+export interface SecondStepUse {
+  stepId: string;
+  code: { kind: 'totp'; step: number } | { kind: 'recovery'; rowId: string };
 }
 
 // ── 본인 해제 링크와 알림 발송(BUILD_ORDER BOT-121) ──
@@ -297,8 +308,10 @@ export interface AdminSessionStore {
   /** 비밀번호와 2단계를 모두 통과한 묶음의 마지막 성공 시각 */
   touchKnownSource(accountId: string, pairRef: string, at: number): Promise<void>;
   purgeKnownSources(before: number): Promise<number>;
-  /** 만든 때가 createdBefore 이전이고, 쓰이지 않았고, 익숙하지 않은 출발지이며, 아직 알리지 않은 로그인 단계 */
-  findPasswordOnlySteps(createdBefore: number, limit: number): Promise<{ id: string; accountId: string }[]>;
+  /** 만든 때가 createdAfter 뒤 createdBefore 이전이고, 쓰이지 않았고, 익숙하지 않은 출발지이며, 아직 알리지 않은 로그인 단계 */
+  findPasswordOnlySteps(createdBefore: number, createdAfter: number, limit: number): Promise<{ id: string; accountId: string }[]>;
+  /** 만든 때가 before 이전인 로그인 단계 행을 지우고 지운 수(정비 admin-login-step-expired, docs/data.md admin_login_step) */
+  purgeLoginSteps(before: number): Promise<number>;
   /**
    * 한 트랜잭션: 그 단계에 본 시각을 적고(아직이면), 계정의 비밀번호 바꾸기 필요를 켜고, PASSWORD_ONLY_LOGIN 알림을 적는다. 알렸으면 true.
    * 그 단계를 만든 뒤 같은 묶음에서 2단계까지 끝낸 기록(익숙한 출발지)이 있으면 본 시각만 적고 알리지 않는다(false)
