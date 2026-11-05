@@ -78,7 +78,7 @@ jobs:
           retention-days: 7
 
   # 대기실 T=0 세 엔진 검사(HOT-347, ADR-0217): 운영 빌드에 출처만 검사용 가짜 API로 바꾼 대기실 빌드를 같은 출처 검사 틀로 띄워
-  # FE-T3(사전 요청 0)·FE-T15(AbortSignal.any 없는 페이지)·FE-T4(폴링 간격·셔플 고정 지연)를 Chromium·WebKit·Firefox로 본다(tools/web-checks/queue-room/)
+  # FE-T3(사전 요청 0)·FE-T15(AbortSignal.any 없는 페이지)·FE-T4(폴링 간격·셔플 고정 지연)·FE-T6(여러 탭, HOT-348)을 Chromium·WebKit·Firefox로 본다(tools/web-checks/queue-room/)
   queue-room:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

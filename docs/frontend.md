@@ -1550,7 +1550,7 @@ allowBuilds:
 | 토큰 검사 | Node 내장 시험 실행기(`node --test`)로 도는 `packages/ds`의 검사 스크립트. tokens.json과 d2 §5 대비표를 읽는다(추천 적용 2026-11-04) | FE-T44·FE-T45 |
 | CSS 층 검사 | 빌드 산출물의 CSS를 읽는 검사 스크립트와 Playwright 3엔진의 계산된 스타일(`tools/web-checks/seed-css/`, 추천 적용 2026-11-04) | FE-T36 |
 
-대기실 경량 페이지(React 밖)의 FE-T3·FE-T4·FE-T15 브라우저 칸은 Playwright 세 엔진 검사(`tools/web-checks/queue-room/`)가 맡는다. 운영 빌드에 출처만 검사용 가짜 API로 바꾼 대기실 빌드를 같은 출처 검사 틀로 띄우고, 사전 요청·폴링 간격·끊긴 시각은 가짜 API의 검사 기록으로 센다(Playwright가 가로챈 경로의 사전 요청에 스스로 답하기 때문이다). 위 표의 jsdom(FE-T4)·Vitest 브라우저 모드(FE-T15) 칸은 React 앱 쪽 시험이고, 대기실 상태 기계·fetch 층의 단위 시험은 node 시험(`apps/web/queue-room/test`)이다(추천 적용 2026-11-06, ADR-0217).
+대기실 경량 페이지(React 밖)의 FE-T3·FE-T4·FE-T6·FE-T15 브라우저 칸은 Playwright 세 엔진 검사(`tools/web-checks/queue-room/`)가 맡는다. 여러 탭(FE-T6)은 한 브라우저 문맥의 탭 셋으로 보고 탭마다 자기 요청을 센다(ADR-0218). 운영 빌드에 출처만 검사용 가짜 API로 바꾼 대기실 빌드를 같은 출처 검사 틀로 띄우고, 사전 요청·폴링 간격·끊긴 시각은 가짜 API의 검사 기록으로 센다(Playwright가 가로챈 경로의 사전 요청에 스스로 답하기 때문이다). 위 표의 jsdom(FE-T4)·Vitest 브라우저 모드(FE-T15) 칸은 React 앱 쪽 시험이고, 대기실 상태 기계·fetch 층의 단위 시험은 node 시험(`apps/web/queue-room/test`)이다(추천 적용 2026-11-06, ADR-0217).
 
 - 단언과 가짜 함수는 Vitest 하나(`expect`, `vi.fn`, `vi.useFakeTimers`)로 쓴다. 원문 ADR-0018의 `@web/test-runner` + mocha + chai + sinon은 쓰지 않는다. 같은 시험 파일을 jsdom과 실제 브라우저에서 같은 러너로 돌리기 때문이다.
 - 지금 있는 것(2026-11-01, openspec 변경 `add-contracts-package`): Vitest 5.0.5를 `packages/contracts`가 처음 쓴다(설정도 그 패키지에 있고, 함께 쓸 패키지가 생기면 `@peaket/config`로 올린다). 뿌리 `pnpm test`가 Turborepo `test` 작업으로 모든 패키지의 시험을 돌린다. 퍼블리싱 화면(ADR-0170)의 목업 시험은 Node 내장 시험 실행기(`node --test`)로 돌고, 그 화면에 데이터를 잇는 단계에서 Vitest로 옮긴다(추천 적용 2026-11-01).
