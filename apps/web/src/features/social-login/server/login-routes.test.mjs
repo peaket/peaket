@@ -45,7 +45,7 @@ after(async () => {
 });
 
 beforeEach(() => {
-  Object.assign(op.mode, { kakaoUnverified: false, kakaoUserinfoFails: false, wrongIss: false, wrongAud: false, naverIdMismatch: false, badSignature: false, otherNonce: false, expired: false, discoveryIssuer: false, staleAuthTime: false, googleAuthTime: true });
+  Object.assign(op.mode, { tokenStatus: 0, tokenDelayMs: 0, onToken: null, kakaoUnverified: false, kakaoUserinfoFails: false, wrongIss: false, wrongAud: false, naverIdMismatch: false, badSignature: false, otherNonce: false, expired: false, discoveryIssuer: false, staleAuthTime: false, googleAuthTime: true });
   Object.assign(identity.mode, { endFails: false, createFails: false, proposeFor: null, addResult: null, addFails: false });
   op.users.kakao.sub = '4000001';
   clock.offset = 0;
@@ -752,5 +752,128 @@ test('I-T31 로그인 수단이 다른 계정의 것이고 병합 제안이 있�
     assert.equal(new URL(r2.trail.at(-1).url).searchParams.get('mergeProposal'), null);
   } finally {
     identity.mode.mergeProposalId = undefined;
+  }
+});
+
+// 공급자 호출 보호(docs/architecture.md §5 '소셜 로그인 공급자 HTTP', identity §10 ①~③, ADR-0180, BUILD_ORDER HOT-320)
+/** 공급자 보호 값을 줄인 앱 하나를 띄운다. prepare는 콜백 직전까지 간다 */
+async function guardedApp(providerGuard) {
+  let guarded;
+  const server = await serve((req) => guarded.dispatch(req));
+  guarded = createSocialLogin(config(server.url), { log: (event, fields) => logs.push({ event, ...fields }), providerGuard });
+  const start = (b, provider = 'kakao') => b.go(`${server.url}/login/${provider}`, { ...formPost(server.url, { returnTo: '/' }), follow: false });
+  const prepare = async (provider = 'kakao') => {
+    const b = new Browser();
+    const s = await start(b, provider);
+    assert.equal(s.res.status, 303, `${provider} 로그인 시작`);
+    const back = await fetch(s.res.headers.get('location'), { redirect: 'manual' });
+    const cb = new URL(back.headers.get('location'));
+    return () => b.go(`${server.url}${cb.pathname}${cb.search}`, { follow: false });
+  };
+  return { start, prepare, close: async () => (guarded.close(), server.close()) };
+}
+
+/** 토큰 요청이 닿은 횟수를 세고, n번째가 닿을 때를 기다릴 수 있게 한다 */
+function tokenArrivals() {
+  const seen = [];
+  let waiters = [];
+  op.mode.onToken = (p) => {
+    seen.push(p);
+    const w = waiters;
+    waiters = [];
+    for (const f of w) f();
+  };
+  const reach = (n) =>
+    new Promise((r) => {
+      const check = () => (seen.length >= n ? r() : waiters.push(check));
+      check();
+    });
+  return { count: () => seen.length, reach };
+}
+
+test('I-T71_공급자 토큰 교환이 시간 상한을 넘으면 같은 인가 코드로 다시 보내지 않고 진행 쿠키를 지워 처음부터 다시 하게 한다', async () => {
+  const g = await guardedApp({ timeoutMs: 100 });
+  try {
+    const go = await g.prepare();
+    const arrivals = tokenArrivals();
+    op.mode.tokenDelayMs = 400;
+    const r = await go();
+    assert.equal(r.res.status, 400);
+    assert.equal(r.text, GENERIC);
+    assert.ok(failures().some((l) => l.reason === 'timeout'), JSON.stringify(failures()));
+    assert.match(r.res.headers.get('set-cookie') ?? '', /Max-Age=0/, '진행 쿠키를 지운다');
+    // 늦은 응답이 끝날 때까지 기다려도 토큰 요청은 한 번뿐이다
+    await new Promise((res) => setTimeout(res, 450));
+    assert.equal(arrivals.count(), 1, '같은 인가 코드로 다시 보내지 않는다');
+  } finally {
+    op.mode.tokenDelayMs = 0;
+    await g.close();
+  }
+});
+
+test('I-T71_공급자가 토큰 교환에 429·403을 몰아 주면 그 공급자를 잠시 끊어 새 로그인을 시작부터 503으로 막고, 다른 공급자는 그대로다', async () => {
+  const g = await guardedApp({ minCalls: 2, rejectRatio: 0.5, openMs: 60_000 });
+  try {
+    // 끊기기 전에 시작해 공급자에서 돌아오는 중인 로그인
+    const inFlight = await g.prepare();
+    op.mode.tokenStatus = 429;
+    for (let i = 0; i < 2; i++) assert.equal((await (await g.prepare())()).res.status, 400, '거절 응답 자체는 로그인 실패');
+    op.mode.tokenStatus = 0;
+    // 돌아온 콜백은 503이고 진행 쿠키를 지운다(공급자를 부르지 않는다)
+    const arrivals = tokenArrivals();
+    const back = await inFlight();
+    assert.equal(back.res.status, 503, JSON.stringify(failures()));
+    assert.match(back.res.headers.get('set-cookie') ?? '', /Max-Age=0/);
+    assert.equal(arrivals.count(), 0, '끊긴 동안은 공급자를 부르지 않는다');
+    // 새 로그인은 공급자로 보내기 전에 막는다. Retry-After는 남은 끊김 시간이다
+    const fresh = new Browser();
+    const blocked = await g.start(fresh);
+    assert.equal(blocked.res.status, 503);
+    assert.match(blocked.text, /다른 로그인 수단/);
+    const retry = Number(blocked.res.headers.get('retry-after'));
+    assert.ok(retry >= 1 && retry <= 60, String(retry));
+    assert.deepEqual(fresh.names(), [], '진행 쿠키를 주지 않는다');
+    assert.ok(failures().filter((l) => l.reason === 'open' && l.provider === 'kakao').length >= 2);
+    assert.equal((await (await g.prepare('google'))()).res.status, 303, '다른 공급자는 그대로 로그인된다');
+  } finally {
+    op.mode.tokenStatus = 0;
+    await g.close();
+  }
+});
+
+test('I-T71_없어도 되는 카카오 사용자 정보가 429로 거절되어도 서킷을 열지 않고 로그인은 이어진다', async () => {
+  // 모든 호출을 센다면 두 번째 로그인 뒤 거절 비율이 2/6(발견 문서·공개키·토큰 교환 성공과 사용자 정보 거절)으로 기준 0.3을 넘는다
+  const g = await guardedApp({ minCalls: 2, rejectRatio: 0.3, openMs: 60_000 });
+  op.mode.kakaoUserinfoFails = 429;
+  try {
+    for (let i = 0; i < 3; i++) assert.equal((await (await g.prepare())()).res.status, 303, `로그인 ${i + 1}`);
+    assert.ok(logs.filter((l) => l.event === 'login.userinfo-fallback').length >= 3);
+    assert.equal((await g.start(new Browser())).res.status, 303, '카카오를 끊지 않았다');
+  } finally {
+    op.mode.kakaoUserinfoFails = false;
+    await g.close();
+  }
+});
+
+test('I-T71_공급자 동시 호출 상한을 넘으면 기다리지 않고 429 server-busy와 Retry-After로 답한다', async () => {
+  const g = await guardedApp({ maxConcurrent: 1 });
+  try {
+    const first = await g.prepare();
+    const second = await g.prepare();
+    const arrivals = tokenArrivals();
+    op.mode.tokenDelayMs = 300;
+    const slow = first();
+    // 첫 로그인의 토큰 요청이 공급자에 닿을 때까지 기다린다(그동안 자리를 쥐고 있다)
+    await arrivals.reach(1);
+    const r = await second();
+    assert.equal(r.res.status, 429, JSON.stringify(failures()));
+    assert.equal(r.res.headers.get('retry-after'), '2');
+    assert.match(r.res.headers.get('set-cookie') ?? '', /Max-Age=0/, '진행 쿠키를 지운다');
+    assert.ok(failures().some((l) => l.reason === 'busy'));
+    assert.equal(arrivals.count(), 1, '상한을 넘은 호출은 공급자에 보내지 않는다');
+    assert.equal((await slow).res.status, 303, '먼저 온 로그인은 끝난다');
+  } finally {
+    op.mode.tokenDelayMs = 0;
+    await g.close();
   }
 });

@@ -54,7 +54,9 @@ export async function startMockOP(port = 0) {
   const users = { kakao: { sub: '4000001', email: 'fan@kakao.test' }, naver: { sub: 'nv-SUB-77', email: 'fan@naver.test' }, google: { sub: '1100223344', email: 'fan@gmail.test' } };
   // 시험이 바꾸는 동작: wrongIss·wrongAud·badSignature·otherNonce·expired(ID 토큰), naverIdMismatch(사용자 정보 id가 sub와 다름),
   // discoveryIssuer(발견 문서 issuer가 다름), staleAuthTime(다시 묻지 않고 통과), googleAuthTime(구글 콘솔에서 auth_time을 켬)
-  const mode = { wrongIss: false, wrongAud: false, naverIdMismatch: false, badSignature: false, otherNonce: false, expired: false, discoveryIssuer: false, staleAuthTime: false, googleAuthTime: true, kakaoUnverified: false, kakaoUserinfoFails: false };
+  // tokenStatus: 토큰 교환을 그 상태로 거절(429·403 한도·차단 흉내), tokenDelayMs: 토큰 응답을 늦춤(시간 초과 흉내),
+  // onToken: 토큰 요청이 닿은 순간 부른다(시험이 순서를 기다리고 횟수를 센다), kakaoUserinfoFails: true면 500, 숫자면 그 상태
+  const mode = { wrongIss: false, wrongAud: false, naverIdMismatch: false, badSignature: false, otherNonce: false, expired: false, discoveryIssuer: false, staleAuthTime: false, googleAuthTime: true, kakaoUnverified: false, kakaoUserinfoFails: false, tokenStatus: 0, tokenDelayMs: 0, onToken: null };
   /** 제공자마다 마지막 인가 요청의 매개변수(시험이 prompt·claims를 본다) */
   const lastAuthorize = {};
   const rogue = await generateKeyPair('RS256');
@@ -98,6 +100,9 @@ export async function startMockOP(port = 0) {
       return new Response(null, { status: 302, headers: { location: back.toString() } });
     }
     if (path === 'token' && req.method === 'POST') {
+      mode.onToken?.(p);
+      if (mode.tokenDelayMs) await new Promise((r) => setTimeout(r, mode.tokenDelayMs));
+      if (mode.tokenStatus) return json({ error: mode.tokenStatus === 429 ? 'too_many_requests' : 'access_denied' }, mode.tokenStatus);
       const f = new URLSearchParams(await req.text());
       let cid = f.get('client_id');
       let secret = f.get('client_secret');
@@ -136,7 +141,7 @@ export async function startMockOP(port = 0) {
       const t = tokens.get((req.headers.get('authorization') ?? '').replace(/^Bearer /, ''));
       if (!t || t.p !== p) return json({ error: 'invalid_token' }, 401);
       if (p === 'naver') return json({ resultcode: '00', message: 'success', response: { id: mode.naverIdMismatch ? 'nv-OTHER-1' : t.user.sub, email: t.user.email } });
-      if (p === 'kakao' && mode.kakaoUserinfoFails) return json({ error: 'server_error' }, 500);
+      if (p === 'kakao' && mode.kakaoUserinfoFails) return json({ error: 'server_error' }, mode.kakaoUserinfoFails === true ? 500 : mode.kakaoUserinfoFails);
       return json({ sub: t.user.sub, email: t.user.email, email_verified: !(p === 'kakao' && mode.kakaoUnverified) });
     }
     return new Response('없음', { status: 404 });

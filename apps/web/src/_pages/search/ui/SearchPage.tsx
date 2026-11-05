@@ -16,7 +16,7 @@ export const searchMetadata: Metadata = { title: '검색', robots: { index: fals
 
 export function SearchPage() {
   return (
-    // 캐시 화면이라 셸은 비로그인 모양으로 그린다(로그인 표시는 HOT-320)
+    // 캐시 화면이라 셸은 비로그인 모양으로 그린다(로그인 표시는 HOT-321)
     <AppShell variant="default" current="events" guest search={{ barOpen: true, queryFromUrl: true }}>
       <main className="page-main pb-10 md:px-6 md:pt-4 md:pb-12 lg:px-8 lg:pt-8 lg:pb-16" id="main" tabIndex={-1}>
         <h1 className="sr-only">공연 검색</h1>

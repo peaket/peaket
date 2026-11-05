@@ -27,6 +27,7 @@ import { FanTokenVerifier } from './fan-token.ts';
 import { IdentityClient } from './identity-client.ts';
 import { deriveLoginKeys, idempotencyKeyOf, separateKeyOf } from './keys.ts';
 import { OidcProviders } from './oidc.ts';
+import { BUSY_RETRY_AFTER_SEC, createProviderGuard, ProviderBusyError, ProviderOpenError, tokenExchangeOnly, type ProviderGuardOptions } from './provider-guard.ts';
 import { isProvider, type Provider } from './providers.ts';
 import { reauthPrompt, reauthStrength } from './reauth-strength.ts';
 import { safeReturnTo } from './return-to.ts';
@@ -38,6 +39,8 @@ export interface SocialLoginDeps {
   now?: () => number;
   log?: LoginLog;
   identity?: IdentityClient;
+  /** 공급자 보호 값(시험이 줄여 쓴다). 없으면 설정의 동시 상한과 기본값(provider-guard DEFAULT_GUARD) */
+  providerGuard?: Partial<ProviderGuardOptions>;
 }
 
 /** 로그인 진행 쿠키 안의 값(identity §3) */
@@ -101,6 +104,22 @@ function respond(status: number, body: string | null, cookies: string[] = [], he
   return new Response(body, { status, headers: h });
 }
 const redirect = (to: string, cookies: string[] = []) => respond(303, null, cookies, { location: to });
+
+/** 공급자 동시 상한을 넘었을 때(429 server-busy). 로그인을 처음부터 다시 하게 한다 */
+const BUSY_TEXT = '요청이 많아 잠시 처리하지 못했습니다. 잠시 뒤 처음부터 다시 로그인해 주세요';
+/** 공급자를 잠시 끊었을 때(429·403이 몰림, 그 공급자의 새 로그인만 막힌다) */
+const OPEN_TEXT = '지금은 그 로그인을 쓸 수 없습니다. 잠시 뒤 다시 시도하거나 다른 로그인 수단을 써 주세요';
+
+/** 공급자 보호가 막은 이유(로그의 reason): 동시 상한·끊긴 공급자·시간 초과 */
+/** openid-client는 customFetch가 던진 오류를 cause로 감싸 넘긴다. 그래서 감싼 오류와 그 cause를 함께 본다 */
+function guardReason(e: unknown): 'busy' | 'open' | 'timeout' | undefined {
+  for (const x of [e, (e as { cause?: unknown } | null)?.cause]) {
+    if (x instanceof ProviderBusyError) return 'busy';
+    if (x instanceof ProviderOpenError) return 'open';
+    if (x instanceof DOMException && x.name === 'TimeoutError') return 'timeout';
+  }
+  return undefined;
+}
 const json = (status: number, v: object, cookies: string[] = [], type = 'application/json') => respond(status, JSON.stringify(v), cookies, { 'content-type': type });
 const problem = (p: { status: number; type: string; title: string }, cookies: string[] = []) => json(p.status, { type: p.type, title: p.title }, cookies, 'application/problem+json');
 
@@ -130,7 +149,8 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     const l = unseal<LinkSeal>(linkKeys, LINK_COOKIE, cookieOf(req, LINK_COOKIE), now());
     return l && l.proposalId === id ? l : null;
   };
-  const oidc = new OidcProviders(config.providers, allowsMockProviders(config.env));
+  const guard = createProviderGuard({ counts: tokenExchangeOnly, ...(config.oidcMaxConcurrent ? { maxConcurrent: config.oidcMaxConcurrent } : {}), ...deps.providerGuard });
+  const oidc = new OidcProviders(config.providers, allowsMockProviders(config.env), guard);
   const identity = deps.identity ?? new IdentityClient(config.identityAddress);
   if (!config.fanJwksUrl && !config.fanJwks) throw new Error('팬 토큰 공개키 묶음 주소나 값이 있어야 한다');
   const fanTokens = new FanTokenVerifier(config.fanJwksUrl ? new URL(config.fanJwksUrl) : (config.fanJwks as NonNullable<SocialLoginConfig['fanJwks']>), config.tokenIssuer);
@@ -142,14 +162,33 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
   };
   const forbidden = () => respond(403, '다른 출처의 요청입니다');
   const unavailable = () => respond(503, '지금은 그 로그인을 쓸 수 없습니다. 잠시 뒤 다시 시도해 주세요');
+  // 로그인 경로는 화면 이동(폼 보내기·공급자에서 돌아오기)이라 Problem JSON이 아니라 글자로 답한다. 로그인 화면 상태로 돌려보내는 일은 HOT-321
+  /** 공급자 동시 상한을 넘었다: 기다리지 않고 429 server-busy(docs/architecture.md §5 '소셜 로그인 공급자 HTTP') */
+  const busy = (cookies: string[] = []) => respond(429, BUSY_TEXT, cookies, { 'retry-after': String(BUSY_RETRY_AFTER_SEC) });
+  /** 공급자를 잠시 끊었다: 그 공급자의 새 로그인만 503, 다시 해 볼 때까지는 남은 끊김 시간(docs/api/guidelines.md 503 Retry-After) */
+  const providerOpen = (retryAfterSec: number, cookies: string[] = []) => respond(503, OPEN_TEXT, cookies, { 'retry-after': String(retryAfterSec) });
+  /** 보호가 막은 오류의 Retry-After(끊긴 공급자) */
+  const openRetry = (e: unknown): number => {
+    for (const x of [e, (e as { cause?: unknown } | null)?.cause]) if (x instanceof ProviderOpenError) return x.retryAfterSec;
+    return BUSY_RETRY_AFTER_SEC;
+  };
+  /** 보호가 막은 콜백의 답: 동시 상한이면 429, 끊긴 공급자면 503. 진행 쿠키를 지워 처음부터 다시 하게 한다(인가 코드는 한 번만 쓴다) */
+  const guarded = (g: 'busy' | 'open', e: unknown) => (g === 'busy' ? busy([clearProgressCookie()]) : providerOpen(openRetry(e), [clearProgressCookie()]));
 
   async function startFlow(p: Provider, progress: Progress, extra?: Record<string, string>): Promise<Response> {
+    // 끊긴 공급자로는 보내지 않는다. 발견 문서는 기억해 두어 시작 단계는 공급자를 부르지 않으므로 여기서 먼저 본다(identity §10 ②)
+    const openMs = guard.openFor(p);
+    if (openMs > 0) {
+      log(progress.purpose === 'reauth' ? 'reauth.failed' : 'login.failed', { provider: p, reason: 'open', code: 'provider-open' });
+      return providerOpen(Math.max(1, Math.ceil(openMs / 1000)));
+    }
     let url: string;
     try {
       url = await oidc.authorizationUrl(p, { redirectUri: callbackUrl(p), state: progress.state, nonce: progress.nonce, verifier: progress.verifier, extra });
     } catch (e) {
-      log(progress.purpose === 'reauth' ? 'reauth.failed' : 'login.failed', { provider: p, reason: 'discovery', code: codeOf(e) });
-      return unavailable();
+      log(progress.purpose === 'reauth' ? 'reauth.failed' : 'login.failed', { provider: p, reason: guardReason(e) ?? 'discovery', code: codeOf(e) });
+      const g = guardReason(e);
+      return g === 'busy' ? busy() : g === 'open' ? providerOpen(openRetry(e)) : unavailable();
     }
     return redirect(url, [progressCookie(seal(keys.progress, PROGRESS_COOKIE, progress, now() + PROGRESS_TTL_MS))]);
   }
@@ -247,7 +286,15 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     try {
       login = await oidc.callback(provider, here, prog);
     } catch (e) {
-      return fail('id_token', codeOf(e));
+      // 공급자 보호(HOT-320): 동시 상한이면 429 server-busy, 끊긴 공급자면 503. 시간 초과는 같은 인가 코드로 다시 보내지 않고
+      // 진행 쿠키를 지워 로그인을 처음부터 다시 하게 한다(identity §10 ③)
+      const g = guardReason(e);
+      if ((g === 'busy' || g === 'open') && prog.purpose === 'login') {
+        log('login.failed', { provider, reason: g, code: codeOf(e) });
+        return guarded(g, e);
+      }
+      // 재인증·로그인 수단 추가는 그 결과 화면으로 돌려보낸다(fail이 사건을 한 번 남긴다)
+      return fail(g ?? 'id_token', codeOf(e));
     }
     const sub = login.claims.sub;
     const userAgent = (req.headers.get('user-agent') ?? '').slice(0, 512);
@@ -303,7 +350,13 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
         // 네이버는 이메일 검증 여부를 주지 않는다(identity §2.1: 자동 연결 제안 대상에서 뺀다)
         profile = { email: (await oidc.naverProfile(login)).email, emailVerified: false };
       } catch (e) {
-        return fail('userinfo', codeOf(e));
+        // 사용자 정보 단계도 보호가 막았으면 그 이유로 답한다(동시 상한 429·끊긴 공급자 503, 시간 초과는 일반 실패)
+        const g = guardReason(e);
+        if (g === 'busy' || g === 'open') {
+          log('login.failed', { provider, reason: g, code: codeOf(e) });
+          return guarded(g, e);
+        }
+        return fail(g ?? 'userinfo', codeOf(e));
       }
     } else if (login.claims.email_verified === undefined && !prog.linkProposalId) {
       // 카카오처럼 ID 토큰에 검증 여부가 없으면 사용자 정보로 읽는다(새 맥락 리뷰 중간 2). 검증 여부는 가입 때 연결 제안에만 쓰므로,

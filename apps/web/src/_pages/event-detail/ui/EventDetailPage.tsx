@@ -80,7 +80,7 @@ export async function EventDetailPage({ params }: Props) {
   ];
 
   return (
-    // 캐시 화면이라 셸은 비로그인 모양으로 그린다(서버는 쿠키로 로그인 여부를 정하지 않는다). 로그인 표시는 HOT-320이 화면 스크립트로 바꾼다
+    // 캐시 화면이라 셸은 비로그인 모양으로 그린다(서버는 쿠키로 로그인 여부를 정하지 않는다). 로그인 표시는 HOT-321이 화면 스크립트로 바꾼다
     <DetailPersonalProvider eventId={d.eventId} productionId={d.productionId} loginHref={loginHref}>
       <BookingProvider data={booking}>
         <ReviewSummaryProvider eventId={d.eventId}>

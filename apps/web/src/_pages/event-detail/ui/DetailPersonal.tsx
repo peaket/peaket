@@ -4,7 +4,7 @@
 // - 찜 상태: `GET /v1/wishes?productionIds=`(찜한 것만), 알림 상태: `GET /v1/subscriptions?eventIds=`. 401(갱신 뒤에도)이면 비로그인이다.
 // - 상태를 받기 전·못 받았으면 토글을 누를 수 없다(모르는 상태에서 켜면 이미 있던 신청을 덮어쓴다, HOT-300과 같다).
 // - 알림 상태 응답(캐시하지 않음)의 Date로 서버 시각 보정 표본을 더한다(docs/frontend.md §3.3 '그 밖의 화면').
-// - 본인확인·예매 제한·선예매 같은 다른 개인 상태는 HOT-320이 얹는다. api-client는 늦게 가져온다(첫 화면 JS 예산, §5.8).
+// - 본인확인·예매 제한·선예매 같은 다른 개인 상태는 HOT-321·340이 얹는다. api-client는 늦게 가져온다(첫 화면 JS 예산, §5.8).
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { alertFailureText, OpenAlertProvider } from '@/features/open-alert';
 import { isUnauthorizedError as isUnauthorized } from '@/shared/api/refresh';

@@ -4,7 +4,7 @@
 // 같은 묶음을 두 곳에 그리므로(한쪽은 display:none) id에 prefix를 붙여 겹치지 않게 한다.
 // 버튼 상태는 브라우저가 시각으로 고른다(BUILD_ORDER HOT-311): 서버 시각으로 보정한 시계(docs/frontend.md §3.3)로 로비 개방·이 기기의
 // [로비 입장] 열리는 시각(로비 개방 + 0~60초, queue-admission §2 '로비 참가 퍼뜨리기')·오픈·판매 종료를 견주고, 다음에 바뀔 때 다시 고른다.
-// 캐시 화면이라 서버는 상태를 정하지 않는다(첫 그리기는 뼈대, d5 §5.2 '로딩'). 개인 상태(비로그인·본인확인·예매 제한·선예매)는 HOT-320이 얹는다.
+// 캐시 화면이라 서버는 상태를 정하지 않는다(첫 그리기는 뼈대, d5 §5.2 '로딩'). 개인 상태(비로그인·본인확인·예매 제한·선예매)는 HOT-321·340이 얹는다.
 import Link from 'next/link';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { RoundPicker } from '@peaket/ds/RoundPicker';

@@ -182,7 +182,7 @@ export function toEventDetail(e: EventPublicSummary): EventDetail | undefined {
   };
 }
 
-/** 예매 버튼 상태(d5 §5.2 상태 표). 개인 상태(비로그인·본인확인·예매 제한·선예매)는 HOT-320·340이 얹는다 */
+/** 예매 버튼 상태(d5 §5.2 상태 표). 개인 상태(비로그인·본인확인·예매 제한·선예매)는 HOT-321·340이 얹는다 */
 export type BookingPhase = 'closed' | 'pending' | 'notYet' | 'lobby' | 'fifo' | 'queue' | 'ended' | 'cancelled';
 
 /**
