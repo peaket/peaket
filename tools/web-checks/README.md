@@ -29,7 +29,7 @@ node lib/docker.mjs seatmap                 # K5 PoC를 컨테이너의 세 엔�
 | 파일 | 하는 일 |
 | --- | --- |
 | `seed-css/check-css.mjs` | CSS 층 검사기(층 이름과 규칙마다 든 층 읽기, ①②③, gzip 크기, 크기 한도) |
-| `seed-css/apps.mjs` | 앱 다섯의 포트·탐침·경로와 §5.8 경로 묶음 이름, 서버 명령, 스타일시트 링크 뽑기 |
+| `seed-css/apps.mjs` | 앱 다섯의 포트·탐침·경로와 §5.8 경로 묶음 이름, 서버 명령, 스타일시트 링크 뽑기. 소비자 웹 서버는 계약 모양 가짜 API(`MOCK_API`, 127.0.0.1:4010, ADR-0199 결정 2)를 서버 쪽 원본으로 부르고(홈 피드·공연 상세, HOT-311), 설정들이 가짜 API를 먼저 띄운다 |
 | `seed-css/build.mjs`·`serve-all.mjs`·`report.mjs` | PoC 빌드, 서버 다섯 띄우기, 크기 표(`--baseline`이면 기준선 다시 쓰기) |
 | `seed-css/css.spec.mjs`·`layers.spec.mjs` | FE-T36 ①②③·크기(브라우저 없이), ④(세 엔진) |
 | `visual/queue-room.spec.mjs` | FE-T40 대기실 셸 |

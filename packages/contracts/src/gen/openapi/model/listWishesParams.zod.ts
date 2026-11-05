@@ -15,6 +15,7 @@ export const listWishesParamsLimitMax = 100;
 
 
 export const ListWishesParams = zod.object({
+  "productionIds": zod.string().optional(),
   "cursor": zod.string().optional(),
   "limit": zod.int().min(1).max(listWishesParamsLimitMax).optional()
 })

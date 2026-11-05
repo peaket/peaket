@@ -11,7 +11,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { APPS, BUILDS, portOf, readyPath, serverCommand } from './apps.mjs';
+import { APPS, BUILDS, MOCK_API, portOf, readyPath, serverCommand } from './apps.mjs';
 import { QUEUE_ROOM } from '../budgets/pages.mjs';
 import { DEFAULT_HOST } from '../lib/serve.mjs';
 
@@ -51,11 +51,12 @@ async function main() {
   const { budgets, host } = parseServeAllArgs(process.argv.slice(2));
   const here = new URL('..', import.meta.url);
   const queueRoom = { name: 'queue-room', command: QUEUE_ROOM.command, port: QUEUE_ROOM.port, path: QUEUE_ROOM.path };
+  // 가짜 API(소비자 웹 검사 서버가 서버 쪽으로 부른다, HOT-311)를 먼저 띄운다
   const servers = budgets
-    ? [...APPS.map((app) => [app, 'prod']), [queueRoom, 'prod']]
-    : APPS.flatMap((app) => Object.keys(BUILDS).map((build) => [app, build]));
+    ? [[MOCK_API, 'prod'], ...APPS.map((app) => [app, 'prod']), [queueRoom, 'prod']]
+    : [[MOCK_API, 'prod'], ...APPS.flatMap((app) => Object.keys(BUILDS).map((build) => [app, build]))];
   const children = servers.map(([app, build]) => {
-    const { command, env } = app === queueRoom ? { command: queueRoom.command, env: {} } : serverCommand(app, build);
+    const { command, env } = app === queueRoom || app === MOCK_API ? { command: app.command, env: {} } : serverCommand(app, build);
     const child = spawn(command, { cwd: here, env: childEnv(process.env, env, host), ...spawnOptions(process.platform) });
     child.on('exit', (code) => console.log(`${app.name}(${build}) 서버가 끝났다(${code})`));
     return child;
@@ -63,7 +64,7 @@ async function main() {
 
   const h = readyHost(host);
   async function ready([app, build]) {
-    const url = app === queueRoom ? `http://${h}:${queueRoom.port}${queueRoom.path}` : `http://${h}:${portOf(app, build)}${readyPath(app, build)}`;
+    const url = app === queueRoom || app === MOCK_API ? `http://${app === MOCK_API ? '127.0.0.1' : h}:${app.port}${app.path}` : `http://${h}:${portOf(app, build)}${readyPath(app, build)}`;
     for (let i = 0; i < 240; i++) {
       try {
         if ((await fetch(url)).ok) return console.log(`준비: ${app.name}(${build}) ${url}`);

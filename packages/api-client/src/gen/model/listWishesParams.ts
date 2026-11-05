@@ -14,6 +14,10 @@ import type { LimitParameter } from './limitParameter';
 
 export type ListWishesParams = {
 /**
+ * 쉼표로 이은 공연 ID, 최대 50개. 주면 cursor·limit는 보지 않는다
+ */
+productionIds?: string;
+/**
  * 불투명 커서(이전 응답의 nextCursor, guidelines §3)
  */
 cursor?: CursorParameter;

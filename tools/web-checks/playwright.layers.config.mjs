@@ -2,7 +2,7 @@
 // 프로젝트 css: 첫 화면 HTML이 싣는 CSS를 받아 ①②③와 크기를 본다(브라우저를 띄우지 않는다).
 // 프로젝트 layers-*: 탐침 화면의 계산된 스타일로 ④를 세 엔진에서 본다.
 import { defineConfig, devices } from '@playwright/test';
-import { APPS, BUILDS, EXTERNAL_SERVERS, portOf, readyPath, serverCommand } from './seed-css/apps.mjs';
+import { APPS, BUILDS, EXTERNAL_SERVERS, mockApiServer, portOf, readyPath, serverCommand } from './seed-css/apps.mjs';
 
 export default defineConfig({
   testDir: './seed-css',
@@ -23,11 +23,14 @@ export default defineConfig({
   // 앱마다 서버 둘(운영 빌드 4101~4105, PoC 빌드 4111~4115)
   webServer: EXTERNAL_SERVERS
     ? undefined
-    : APPS.flatMap((app) =>
-        Object.keys(BUILDS).map((build) => {
-          const { command, env } = serverCommand(app, build);
-          const url = `http://127.0.0.1:${portOf(app, build)}${readyPath(app, build)}`;
-          return { command, env, url, reuseExistingServer: !process.env.CI, timeout: 120_000, stdout: 'ignore', stderr: 'pipe' };
-        }),
-      ),
+    : [
+        mockApiServer(),
+        ...APPS.flatMap((app) =>
+          Object.keys(BUILDS).map((build) => {
+            const { command, env } = serverCommand(app, build);
+            const url = `http://127.0.0.1:${portOf(app, build)}${readyPath(app, build)}`;
+            return { command, env, url, reuseExistingServer: !process.env.CI, timeout: 120_000, stdout: 'ignore', stderr: 'pipe' };
+          }),
+        ),
+      ],
 });

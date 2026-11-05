@@ -7,15 +7,20 @@
 import Link from 'next/link';
 import { createContext, useContext, useId, useState, type CSSProperties, type ReactNode } from 'react';
 import { WebShellModal, webModalButtonClass } from '@peaket/ds/WebShell';
-import type { Seller } from '@/entities/seller';
+import type { DetailSeller } from '../model/detail';
 import { CANCEL_FEES, FRAUD_INVESTIGATION_NOTICE, LEGAL_RESALE_NOTICE, brokerNotice } from '../model/content';
-import type { DetailModal } from '../model/view';
+
+/** 상세 위 겹침 창 이름 */
+export type DetailModal = 'dup' | 'rejoin' | 'guide' | 'refund' | 'seller' | 'revNo' | 'revGuest';
 
 const OpenContext = createContext<(m: DetailModal) => void>(() => {});
 
 export interface DetailModalsProps {
   initial: DetailModal | null;
-  seller: Seller;
+  /** 판매자 상호(중개자 고지) */
+  sellerName: string;
+  /** 판매자 신원정보 7항목(판매 승인이 다 확인한 공연만, ADR-0200 결정 4) */
+  seller: DetailSeller | undefined;
   /** 대기실과 순번(정렬 방식 표준 문구) */
   sortText: string;
   perPerson: number;
@@ -23,7 +28,7 @@ export interface DetailModalsProps {
   children: ReactNode;
 }
 
-export function DetailModalsProvider({ initial, seller, sortText, perPerson, loginHref, children }: DetailModalsProps) {
+export function DetailModalsProvider({ initial, sellerName, seller, sortText, perPerson, loginHref, children }: DetailModalsProps) {
   const [open, setOpen] = useState<DetailModal | null>(initial);
   const close = () => setOpen(null);
   const ids = useId();
@@ -191,27 +196,41 @@ export function DetailModalsProvider({ initial, seller, sortText, perPerson, log
           </button>
         }
       >
-        <dl className="kv card" style={{ padding: 16, columnGap: 12, fontSize: 13, lineHeight: '18px' }}>
-          <dt>상호</dt>
-          <dd>{seller.name}</dd>
-          <dt>대표자</dt>
-          <dd>{seller.representative}</dd>
-          <dt>주소</dt>
-          <dd>{seller.address}</dd>
-          <dt>전화</dt>
-          <dd>{seller.phone}</dd>
-          <dt>전자우편</dt>
-          <dd>{seller.email}</dd>
-          <dt>사업자등록번호</dt>
-          <dd>{seller.businessNo}</dd>
-          <dt>통신판매업 신고번호</dt>
-          <dd>{seller.mailOrderNo}</dd>
-        </dl>
+        {seller ? (
+          <dl className="kv card" style={{ padding: 16, columnGap: 12, fontSize: 13, lineHeight: '18px' }}>
+            <dt>상호</dt>
+            <dd>{seller.legalName}</dd>
+            <dt>대표자</dt>
+            <dd>{seller.representative}</dd>
+            <dt>주소</dt>
+            <dd>{seller.address}</dd>
+            <dt>전화</dt>
+            <dd>{seller.phone}</dd>
+            <dt>전자우편</dt>
+            <dd>{seller.email}</dd>
+            <dt>사업자등록번호</dt>
+            <dd>{seller.businessRegNo}</dd>
+            {seller.mailOrderReportNo ? (
+              <>
+                <dt>통신판매업 신고번호</dt>
+                <dd>{seller.mailOrderReportNo}</dd>
+              </>
+            ) : (
+              <>
+                <dt>통신판매업 신고 면제</dt>
+                <dd>{seller.exemptionBasis}</dd>
+              </>
+            )}
+          </dl>
+        ) : (
+          // 판매 승인이 7항목을 다 확인하기 전(공개 전이라 보통 오지 않는다): 상호만 보이고 결제 직전 화면(SCR-011)이 7항목을 다시 보인다
+          <p className="t-sm muted">판매자: {sellerName}. 판매자 신원정보는 결제 직전 화면에서 확인할 수 있습니다</p>
+        )}
         <div className="banner banner-legal">
           <i className="ic ic-building" aria-hidden="true" />
           <div className="banner-body">
             <span className="legal-tag">법정 고지</span>
-            {brokerNotice(seller.name)}
+            {brokerNotice(sellerName)}
           </div>
         </div>
       </WebShellModal>

@@ -531,7 +531,7 @@ export const OPERATIONS = {
   listShopProducts: {operationId: "listShopProducts",method: "GET",path: "/v1/shop/products",host: "api",kind: "read",cookie: false,query: ["cursor","limit"]},
   listSubscriptions: {operationId: "listSubscriptions",method: "GET",path: "/v1/subscriptions",host: "api",kind: "read",cookie: true,query: ["cursor","eventIds","limit"]},
   listTickets: {operationId: "listTickets",method: "GET",path: "/v1/tickets",host: "api",kind: "read",cookie: true,query: ["cursor","limit"]},
-  listWishes: {operationId: "listWishes",method: "GET",path: "/v1/wishes",host: "api",kind: "read",cookie: true,query: ["cursor","limit"]},
+  listWishes: {operationId: "listWishes",method: "GET",path: "/v1/wishes",host: "api",kind: "read",cookie: true,query: ["cursor","limit","productionIds"]},
   putOpsAdminAccountRole: {operationId: "putOpsAdminAccountRole",method: "PUT",path: "/v1/ops/admin-accounts/{adminAccountId}/role",host: "ops-api",kind: "write",cookie: true,ifMatch: true},
   putOpsArtistAliases: {operationId: "putOpsArtistAliases",method: "PUT",path: "/v1/ops/artists/{artistId}/aliases",host: "ops-api",kind: "write",cookie: true,ifMatch: true},
   putOpsHomeLayout: {operationId: "putOpsHomeLayout",method: "PUT",path: "/v1/ops/home-layout",host: "ops-api",kind: "write",cookie: true,ifMatch: true},

@@ -7,8 +7,8 @@
 // api-client(실행부·작업 서술 표·호출 함수)는 늦게 가져온다(첫 화면 JS 예산, §5.8).
 import Link from 'next/link';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { OpenAlertProvider, OpenAlertToggle } from '@/features/open-alert';
-import { isUnauthorizedError as isUnauthorized, problemName } from '@/shared/api/refresh';
+import { alertFailureText, OpenAlertProvider, OpenAlertToggle } from '@/features/open-alert';
+import { isUnauthorizedError as isUnauthorized } from '@/shared/api/refresh';
 import { ORIGINS } from '@/shared/config/origins';
 import { cx } from '@/shared/lib/cx';
 import { PicturePoster } from '@/shared/ui/PicturePoster';
@@ -41,14 +41,6 @@ async function loadApi() {
   const [identity, api] = await Promise.all([import('@peaket/api-client/endpoints/identity'), import('@/shared/api')]);
   api.ensureBrowserApi();
   return { ...identity, withFanRefresh: api.withFanRefresh };
-}
-
-/** 실패 문구: 오류 이름(type)으로 고른다(§4.1 '오류 모양') */
-function alertFailure(e: unknown, on: boolean): string {
-  const type = problemName(e);
-  if (type === 'open-passed') return '오픈 시각이 지나 오픈 알림을 신청할 수 없습니다';
-  if (type === 'subscription-limit') return '알림 신청 수를 넘었습니다. 관심 공연에서 쓰지 않는 알림을 꺼 주세요';
-  return on ? '오픈 알림을 신청하지 못했습니다. 잠시 뒤 다시 해 주세요' : '오픈 알림을 끄지 못했습니다. 잠시 뒤 다시 해 주세요';
 }
 
 export function HomePersonalProvider({ alertEventIds, children }: { alertEventIds: readonly string[]; children: ReactNode }) {
@@ -108,7 +100,7 @@ export function HomePersonalProvider({ alertEventIds, children }: { alertEventId
       return true;
     } catch (e) {
       if (isUnauthorized(e)) setStatus('guest');
-      return alertFailure(e, on);
+      return alertFailureText(e, on);
     }
   }, []);
 

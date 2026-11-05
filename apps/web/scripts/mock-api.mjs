@@ -164,9 +164,26 @@ export function eventDetail(origin, eventId, now = new Date()) {
   return undefined;
 }
 
-/** 찜 목록(openapi listWishes 200) */
-export function wishPage(origin) {
-  return withOrigin({ items: cards(['musical', 'lumen', 'orchestra']), nextCursor: null }, origin);
+/** 처음 찜한 공연(가짜 API를 띄울 때) */
+export const INITIAL_WISHES = ['musical', 'lumen', 'orchestra'].map((k) => CARDS[k].productionId);
+
+/** 찜 목록(openapi listWishes 200). productionIds를 주면 그 가운데 찜한 것만(최대 50개, HOT-311) */
+export function wishPage(origin, wished = new Set(INITIAL_WISHES), productionIds = undefined) {
+  const all = Object.values(CARDS).filter((c) => wished.has(c.productionId));
+  const items = productionIds ? all.filter((c) => productionIds.includes(c.productionId)) : all;
+  return withOrigin({ items, nextCursor: null }, origin);
+}
+
+/** 후기 요약(openapi getEventReviewSummary 200, 공연의 모든 회차 후기를 모은 값). 고정 자료 카드의 회차만, 오케스트라는 후기 없음 */
+export function reviewSummary(eventId) {
+  const card = Object.values(CARDS).find((c) => eventDetail('', eventId, new Date(0))?.productionId === c.productionId);
+  if (!card) return undefined;
+  if (card.title === '겨울 오케스트라') return { averageRating: null, count: 0, recent: [] };
+  const recent = [
+    { reviewId: 'c1d2c3b4-0000-4000-8000-000000000001', eventId, authorDisplay: '김**', attendedStartsAt: '2026-10-25T09:00:00Z', rating: 4, body: '무대 연출과 음향이 좋았습니다. 입장 줄이 길었지만 안내가 잘 되어 있었습니다.', createdAt: '2026-10-25T13:00:00Z', edited: false, mine: false, reportedByMe: false, images: [], status: 'VISIBLE' },
+    { reviewId: 'c1d2c3b4-0000-4000-8000-000000000002', eventId, authorDisplay: '이**', attendedStartsAt: '2026-10-25T09:00:00Z', rating: 5, body: '좌석에서 무대가 잘 보였습니다.', createdAt: '2026-10-25T14:00:00Z', edited: false, mine: false, reportedByMe: false, images: [], status: 'VISIBLE' },
+  ];
+  return { averageRating: 4.6, count: 128, recent };
 }
 
 /** 알림 신청 상태(openapi listSubscriptions 200) */
@@ -191,6 +208,7 @@ export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_O
   const origin = `http://127.0.0.1:${port}`;
   const state = { home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal' };
   const alerts = new Set();
+  const wished = new Set(INITIAL_WISHES);
   const server = createServer((req, res) => {
     const host = (req.headers.host ?? '').split(':')[0];
     if (host !== '127.0.0.1' && host !== 'localhost') {
@@ -198,7 +216,8 @@ export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_O
       return;
     }
     const url = new URL(req.url ?? '/', origin);
-    const cors = req.headers.origin === webOrigin ? { 'access-control-allow-origin': webOrigin, 'access-control-allow-credentials': 'true', vary: 'Origin' } : {};
+    // Date는 캐시하지 않는 api 응답처럼 공개한다(화면 시계 보정 표본, docs/frontend.md §3.3)
+    const cors = req.headers.origin === webOrigin ? { 'access-control-allow-origin': webOrigin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': 'Date, Retry-After', vary: 'Origin' } : {};
     const send = (status, body, type = 'application/json; charset=utf-8', extra = {}) => {
       res.writeHead(status, { ...cors, 'cache-control': 'no-store', ...(body === undefined ? {} : { 'content-type': type }), ...extra });
       res.end(body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body));
@@ -234,7 +253,17 @@ export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_O
       const tags = d ? `event:${d.eventId.toLowerCase()},production:${d.productionId.toLowerCase()}` : '';
       return d ? send(200, d, undefined, { 'cache-control': 'public, max-age=300, stale-if-error=86400', 'x-peaket-cache-tag': tags }) : send(404, { type: 'https://peaket.example/problems/not-found', title: '찾을 수 없습니다', status: 404 }, 'application/problem+json');
     }
-    if (p === '/v1/wishes' && req.method === 'GET') return state.fan === 'guest' ? unauthorized() : send(200, wishPage(origin));
+    if (p === '/v1/wishes' && req.method === 'GET') {
+      if (state.fan === 'guest') return unauthorized();
+      const raw = url.searchParams.get('productionIds');
+      const ids = raw === null ? undefined : raw.split(',').filter((x) => ID.test(x)).slice(0, 50);
+      return send(200, wishPage(origin, wished, ids));
+    }
+    const rs = /^\/v1\/events\/([^/]+)\/review-summary$/.exec(p);
+    if (rs && req.method === 'GET') {
+      const body = ID.test(rs[1]) ? reviewSummary(rs[1]) : undefined;
+      return body ? send(200, body, undefined, { 'cache-control': 'public, max-age=60' }) : send(404, { type: 'https://peaket.example/problems/not-found', title: '찾을 수 없습니다', status: 404 }, 'application/problem+json');
+    }
     if (p === '/v1/subscriptions' && req.method === 'GET') {
       if (state.fan === 'guest') return unauthorized();
       const ids = (url.searchParams.get('eventIds') ?? '').split(',').filter((x) => ID.test(x)).slice(0, 50);
@@ -253,7 +282,12 @@ export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_O
       }
     }
     const wish = /^\/v1\/productions\/([^/]+)\/wish$/.exec(p);
-    if (wish && ID.test(wish[1]) && (req.method === 'PUT' || req.method === 'DELETE')) return state.fan === 'guest' ? unauthorized() : send(204);
+    if (wish && ID.test(wish[1]) && (req.method === 'PUT' || req.method === 'DELETE')) {
+      if (state.fan === 'guest') return unauthorized();
+      if (req.method === 'PUT') wished.add(wish[1]);
+      else wished.delete(wish[1]);
+      return send(204);
+    }
     const img = /^\/img\/([a-z0-9-]{1,40})\/(\d{3,4})\.(avif|webp)$/.exec(p);
     if (img && req.method === 'GET') return send(200, placeholderSvg(img[1], Math.min(Number(img[2]), 1280)), 'image/svg+xml', { 'cache-control': 'public, max-age=60' });
     send(404, { type: 'about:blank', title: 'Not Found', status: 404 }, 'application/problem+json');

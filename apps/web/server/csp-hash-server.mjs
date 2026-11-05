@@ -5,6 +5,7 @@
 // - 정책 문자열은 proxy.ts가 packages/config/headers/security-headers.mjs 한 곳에서 만들어 안쪽 머리 x-peaket-csp-template에
 //   해시 자리(HASH_SENTINEL)를 넣어 보낸다. 이 서버는 그 머리가 있는 HTML 응답만 끝까지 모아 해시를 채워 막는 CSP로 단다.
 //   CDN은 본문과 그 CSP를 함께 캐시하므로 둘이 어긋나지 않는다. 그 밖의 응답은 그대로 흘려 보낸다.
+// - 모은 HTML에 화면이 그린 상태 표시(404·410)가 있으면 상태 코드를 맞춘다(ADR-0201, markedStatus).
 // - 해시는 Next.js·React가 넣는 모양의 인라인 스크립트에만 낸다(isFrameworkScript). HTML에 끼워 넣은 스크립트는 모양을 흉내 내도
 //   해시를 받지 못해 막힌다(새 맥락 리뷰 2026-11-04: 모든 인라인 스크립트를 해시하면 주입된 스크립트도 허용 목록에 든다).
 //   React 스트리밍 도우미 정의는 설치된 Next.js 운영 실행 파일에서 글자 그대로 읽은 것(reactRuntimeScripts)과 같아야 한다.
@@ -161,6 +162,24 @@ function copyHeaders(upstream, drop) {
 const CSP_INTERNAL = [CSP_TEMPLATE_HEADER, 'content-security-policy-report-only'];
 
 /**
+ * 화면이 그린 상태 표시(ADR-0201): 캐시 화면은 Cache Components가 본문을 먼저 흘려 응답 상태를 바꾸지 못한다. 그래서 not-found 화면은 404,
+ * 공연 상세의 판매 중지 안내는 410 표시 태그를 그리고, 이 서버가 모은 HTML에서 처음 나온 태그를 읽어 상태를 맞춘다.
+ * 화면 글은 이 태그를 만들 수 없다(본문 글은 React가 <를 바꿔 쓰고, 인라인 화면 데이터는 Next.js가 <로 싣는다).
+ */
+const STATUS_MARK = /<meta name="peaket-status" content="(\d{3})"\s*\/?>/;
+const MARKED_STATUS = new Set([404, 410]);
+/** 표시로 바꾼 응답의 캐시 [가정]: 공개가 시작되거나 판매가 다시 열리면 1분 안에 보이게, CDN도 같은 시간만 담는다 */
+export const MARKED_CACHE_CONTROL = 'public, max-age=60';
+
+/** 위 서버가 200일 때만, 허용한 표시 값이면 그 상태 */
+export function markedStatus(html, upstreamStatus) {
+  if (upstreamStatus !== 200) return undefined;
+  const m = STATUS_MARK.exec(html);
+  const code = m ? Number(m[1]) : undefined;
+  return code !== undefined && MARKED_STATUS.has(code) ? code : undefined;
+}
+
+/**
  * @param {{ upstream: string, runtime?: string[] }} o upstream: Next.js 서버 주소(예: http://127.0.0.1:3001). runtime: reactRuntimeScripts 결과
  */
 export function createCspHashServer({ upstream, runtime = [] }) {
@@ -205,10 +224,13 @@ export function createCspHashServer({ upstream, runtime = [] }) {
       const onEnd = () => {
         if (streaming) return;
         const body = Buffer.concat(chunks);
+        const text = body.toString('utf8');
         const out = copyHeaders(ur.headers, [...CSP_INTERNAL, 'content-length', 'transfer-encoding']);
-        out['content-security-policy'] = fill(template, inlineScriptHashes(body.toString('utf8'), runtime));
+        out['content-security-policy'] = fill(template, inlineScriptHashes(text, runtime));
         out['content-length'] = String(body.length);
-        res.writeHead(ur.statusCode ?? 200, out);
+        const marked = markedStatus(text, ur.statusCode);
+        if (marked) out['cache-control'] = MARKED_CACHE_CONTROL;
+        res.writeHead(marked ?? ur.statusCode ?? 200, out);
         res.end(body);
       };
       ur.on('data', onData);

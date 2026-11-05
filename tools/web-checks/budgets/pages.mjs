@@ -21,7 +21,7 @@ export function lighthousePages(host) {
   const at = (name, path) => `http://${host}:${portOf(app(name), 'prod')}${path}`;
   return [
     { name: '홈', url: at('web', '/'), row: '홈·공연 상세·굿즈(ISR)' },
-    { name: '공연 상세', url: at('web', '/events/evt-lumen-1025'), row: '홈·공연 상세·굿즈(ISR)' },
+    { name: '공연 상세', url: at('web', '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01'), row: '홈·공연 상세·굿즈(ISR)' },
     { name: '대기실 셸', url: `http://${host}:${QUEUE_ROOM.port}${QUEUE_ROOM.path}`, row: '대기실 경량 페이지' },
     { name: '좌석 화면 데모', url: at('web', '/booking/evt-lumen-1025/seats'), row: '좌석 화면' },
     { name: '결제 데모', url: at('web', '/booking/evt-lumen-1025/checkout'), row: '결제 화면' },

@@ -3,7 +3,7 @@
 // 프로젝트 lighthouse: 대표 주소를 Lighthouse 모바일 기본값(화면 412×823, CPU 4배 느림, 왕복 150ms·1.6Mbps)으로 세 번 재고
 // 가운데 값의 LCP·CLS·총 차단 시간을 §5.8 체감 목표와 견준다. 판을 고정한 Playwright 컨테이너의 Chromium으로 돈다(lib/docker.mjs budgets).
 import { defineConfig } from '@playwright/test';
-import { APPS, EXTERNAL_SERVERS, portOf, readyPath, serverCommand } from './seed-css/apps.mjs';
+import { APPS, EXTERNAL_SERVERS, mockApiServer, portOf, readyPath, serverCommand } from './seed-css/apps.mjs';
 import { QUEUE_ROOM } from './budgets/pages.mjs';
 
 export default defineConfig({
@@ -22,6 +22,7 @@ export default defineConfig({
   webServer: EXTERNAL_SERVERS
     ? undefined
     : [
+        mockApiServer(),
         ...APPS.map((app) => {
           const { command, env } = serverCommand(app, 'prod');
           return { command, env, url: `http://127.0.0.1:${portOf(app, 'prod')}${readyPath(app, 'prod')}`, reuseExistingServer: !process.env.CI, timeout: 120_000, stdout: 'ignore', stderr: 'pipe' };

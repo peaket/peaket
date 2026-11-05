@@ -13,7 +13,8 @@ export const APPS = [
     probe: '/poc/seed-css',
     pages: [
       { path: '/', row: '홈·공연 상세·굿즈(ISR)' },
-      { path: '/events/evt-lumen-1025', row: '홈·공연 상세·굿즈(ISR)' },
+      // 공연 상세는 가짜 API 고정 자료의 회차(HOT-311). 서버가 가짜 API를 부른다(MOCK_API)
+      { path: '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01', row: '홈·공연 상세·굿즈(ISR)' },
       { path: '/booking/evt-lumen-1025/seats', row: '좌석 화면' },
       { path: '/booking/evt-lumen-1025/checkout', row: '결제 화면' },
       { path: '/my/tickets', row: '월렛' },
@@ -72,6 +73,16 @@ export const BUILDS = {
 /** 그 빌드의 서버 포트(운영 빌드 4101~4105, PoC 빌드 4111~4115) */
 export const portOf = (app, build) => app.port + BUILDS[build].portOffset;
 
+/**
+ * 계약 모양 가짜 API(apps/web/scripts/mock-api.mjs, ADR-0199 결정 2). 소비자 웹 검사 서버가 서버 쪽으로 부른다(홈 피드·공연 상세, HOT-311).
+ * 소비자 웹 서버보다 먼저 띄운다(공연 상세가 처음 그릴 때 부른다). 브라우저 쪽 개인 값은 빌드에 팬 API 주소가 없어 비로그인으로 그린다
+ */
+export const MOCK_API = { name: 'mock-api', port: 4010, command: 'node ../../apps/web/scripts/mock-api.mjs 4010', path: '/v1/home' };
+export const MOCK_API_ORIGIN = `http://127.0.0.1:${MOCK_API.port}`;
+
+/** Playwright webServer 항목 하나(가짜 API) */
+export const mockApiServer = () => ({ command: MOCK_API.command, url: `${MOCK_API_ORIGIN}${MOCK_API.path}`, reuseExistingServer: !process.env.CI, timeout: 30_000, stdout: 'ignore', stderr: 'pipe' });
+
 /** 검사용 서버의 서버 액션 암호화 키(32바이트, 띄울 때마다 새로) */
 const CHECK_KEY = randomBytes(32).toString('base64');
 
@@ -84,7 +95,9 @@ export function serverCommand(app, build) {
   // 소비자 웹은 운영처럼 캐시 화면 응답 때 해시 서버(apps/web/server/start.mjs)를 앞에 두고 Next.js를 안쪽 포트(+1000)에 띄운다(ADR-0193)
   if (app.kind === 'next') {
     const env = { PEAKET_NEXT_DIST: b.nextDist, NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: CHECK_KEY };
-    if (app.name === 'web') return { command: `node ../../${app.dir}/server/start.mjs --port ${port} --inner-port ${port + 1000}`, env };
+    // 소비자 웹은 가짜 API를 서버 쪽 원본으로 부르고, 가짜 API의 이미지 주소를 CSP img-src에 넣는다. 브라우저의 팬 API는 빌드에 넣은 운영 기본 출처라
+    // connect-src(api)는 바꾸지 않는다(검사 브라우저의 개인 값 요청은 닿지 않아 비로그인으로 그린다)
+    if (app.name === 'web') return { command: `node ../../${app.dir}/server/start.mjs --port ${port} --inner-port ${port + 1000}`, env: { ...env, PEAKET_API_ORIGIN: MOCK_API_ORIGIN, PEAKET_CSP_ORIGINS: JSON.stringify({ img: MOCK_API_ORIGIN }) } };
     return { command: `pnpm --dir ../../${app.dir} exec next start -p ${port}`, env };
   }
   // 없는 경로에 줄 대체 파일: 운영 빌드는 index.html, Vite·webpack PoC 빌드(dist-poc)는 탐침 페이지 하나만 있으므로 탐침 페이지다

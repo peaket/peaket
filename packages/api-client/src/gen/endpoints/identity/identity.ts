@@ -994,6 +994,11 @@ export const useDeleteEventSubscriptions = <TError = ErrorType<UnauthorizedRespo
   status: 200
 }
 
+export type listWishesResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type listWishesResponse401 = {
   data: UnauthorizedResponse
   status: 401
@@ -1002,7 +1007,7 @@ export type listWishesResponse401 = {
 export type listWishesResponseSuccess = (listWishesResponse200) & {
   headers: Headers;
 };
-export type listWishesResponseError = (listWishesResponse401) & {
+export type listWishesResponseError = (listWishesResponse400 | listWishesResponse401) & {
   headers: Headers;
 };
 
@@ -1022,7 +1027,7 @@ export const getListWishesUrl = (params?: ListWishesParams,) => {
 }
 
 /**
- * FR-019, SCR-001 ③·SCR-054(추천 적용 2026-10-14, ADR-0063). 찜은 공연 단위다(ADR-0093). 홈 피드는 개인 값을 싣지 않으므로 로그인한 브라우저가 따로 부른다. 찜한 최근 순. 판매 승인이 취소된 공연은 빠진다. Cache-Control: private, no-store
+ * FR-019, SCR-001 ③·SCR-054(추천 적용 2026-10-14, ADR-0063). 찜은 공연 단위다(ADR-0093). 홈 피드는 개인 값을 싣지 않으므로 로그인한 브라우저가 따로 부른다. 찜한 최근 순. 판매 승인이 취소된 공연은 빠진다. productionIds를 주면 그 공연들 가운데 찜한 것만 준다(최대 50개, 커서 없음. 공연 상세의 찜 토글 상태, 추천 적용 2026-11-05, HOT-311). Cache-Control: private, no-store
  * @summary 찜한 공연 목록(홈 찜한 공연 줄, 관심 공연 화면)
  */
 export const listWishes = async (params?: ListWishesParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listWishesResponseSuccess> => {
@@ -1047,7 +1052,7 @@ export const getListWishesQueryKey = (params?: ListWishesParams,) => {
     }
 
 
-export const getListWishesQueryOptions = <TData = Awaited<ReturnType<typeof listWishes>>, TError = ErrorType<UnauthorizedResponse>>(params?: ListWishesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWishes>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+export const getListWishesQueryOptions = <TData = Awaited<ReturnType<typeof listWishes>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListWishesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWishes>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -1066,10 +1071,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListWishesQueryResult = NonNullable<Awaited<ReturnType<typeof listWishes>>>
-export type ListWishesQueryError = ErrorType<UnauthorizedResponse>
+export type ListWishesQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
 
 
-export function useListWishes<TData = Awaited<ReturnType<typeof listWishes>>, TError = ErrorType<UnauthorizedResponse>>(
+export function useListWishes<TData = Awaited<ReturnType<typeof listWishes>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
  params: undefined |  ListWishesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWishes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listWishes>>,
@@ -1079,7 +1084,7 @@ export function useListWishes<TData = Awaited<ReturnType<typeof listWishes>>, TE
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListWishes<TData = Awaited<ReturnType<typeof listWishes>>, TError = ErrorType<UnauthorizedResponse>>(
+export function useListWishes<TData = Awaited<ReturnType<typeof listWishes>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
  params?: ListWishesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWishes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listWishes>>,
@@ -1089,7 +1094,7 @@ export function useListWishes<TData = Awaited<ReturnType<typeof listWishes>>, TE
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListWishes<TData = Awaited<ReturnType<typeof listWishes>>, TError = ErrorType<UnauthorizedResponse>>(
+export function useListWishes<TData = Awaited<ReturnType<typeof listWishes>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
  params?: ListWishesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWishes>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -1097,7 +1102,7 @@ export function useListWishes<TData = Awaited<ReturnType<typeof listWishes>>, TE
  * @summary 찜한 공연 목록(홈 찜한 공연 줄, 관심 공연 화면)
  */
 
-export function useListWishes<TData = Awaited<ReturnType<typeof listWishes>>, TError = ErrorType<UnauthorizedResponse>>(
+export function useListWishes<TData = Awaited<ReturnType<typeof listWishes>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
  params?: ListWishesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listWishes>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {

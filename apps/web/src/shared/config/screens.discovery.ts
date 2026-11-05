@@ -11,38 +11,11 @@ import type { WebScreen } from './screens.types';
 export const SCR001_STATES = ['기본'] as const;
 export type Scr001State = (typeof SCR001_STATES)[number];
 
-/** SCR-002 공연 상세: 보드 상태 29(첫 값 '로비 열림'이 기본) */
-export const SCR002_STATES = [
-  '로비 열림',
-  '오픈 전(로비 닫힘)',
-  '오픈 뒤 진입',
-  '다른 기기에서 대기 중',
-  '다시 참가 확인',
-  '본인확인 필요',
-  '매진',
-  '선예매 대상',
-  '선예매 대상 아님',
-  '예매 안내사항 모달',
-  '취소·환불 안내사항 모달',
-  '판매자 정보 모달',
-  '상세정보 펼침',
-  '후기 없음',
-  '바로가기 탭 붙음',
-  '선착순 공연(사전 사람 확인)',
-  '진입 혼잡',
-  '예매 제한 중',
-  '비로그인',
-  '판매 종료',
-  '판매 승인 전·반려',
-  '판매 중지',
-  '잔여석 조회 실패',
-  '로딩',
-  '후기 쓰기 자격 없음',
-  '후기 쓰기(비로그인)',
-  '상세 이미지 실패',
-  '상세정보 없음',
-  '로비 열림, 이 기기의 버튼은 아직',
-] as const;
+/**
+ * SCR-002 공연 상세: 데이터 단계(HOT-311)에서 목업과 ?state=를 걷어 냈다. 예매 버튼 상태는 시각으로, 판매 중지·후기 없음·비로그인 등은
+ * 계약 모양 가짜 API(apps/web/scripts/mock-api.mjs, /__mock/state)의 응답으로 본다(ADR-0199 결정 2, ADR-0200)
+ */
+export const SCR002_STATES = ['기본'] as const;
 export type Scr002State = (typeof SCR002_STATES)[number];
 
 /** SCR-003 검색: 보드 상태 11(첫 값 '결과'가 기본). 경로에 검색 값을 넣지 않는다(previewHref가 ?state=를 덧붙이므로) */
@@ -122,12 +95,13 @@ export type Scr059State = (typeof SCR059_STATES)[number];
 
 export const DISCOVERY_SCREENS: readonly WebScreen[] = [
   { id: 'SCR-001', name: '홈', path: '/', group: 'cached', owner: 'skeleton', states: SCR001_STATES },
-  { id: 'SCR-002', name: '공연 상세', path: '/events/evt-lumen-1025', group: 'cached', owner: 'skeleton', states: SCR002_STATES },
+  { id: 'SCR-002', name: '공연 상세', path: '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01', group: 'cached', owner: 'skeleton', states: SCR002_STATES },
   { id: 'SCR-003', name: '검색', path: '/search', group: 'cached', owner: 'discovery', states: SCR003_STATES, note: '실제 주소는 /search?q=&page=' },
   {
     id: 'SCR-016',
     name: '후기(전체 모달·쓰기 모달·신고)',
-    path: '/events/evt-lumen-1025',
+    // 공연 상세가 데이터에 이어져(HOT-311) 가짜 API 고정 자료의 회차로 연다. 상태 고르기(?state=)는 개발 빌드에서만 읽는다
+    path: '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01',
     group: 'cached',
     owner: 'discovery',
     states: SCR016_STATES,

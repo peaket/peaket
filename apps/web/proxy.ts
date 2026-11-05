@@ -6,7 +6,11 @@
 //    채워 단다(응답 때 해시, ADR-0193). CDN은 본문과 그 CSP를 함께 캐시한다.
 //    개발 서버(next dev)는 HMR이 인라인·eval 스크립트를 쓰므로 CSP를 보고 모드로만 단다.
 // ② 본인확인 복귀 화면의 서버 처리기(docs/features/identity.md §5 '복귀 화면의 서버 처리기', BUILD_ORDER BOT-010).
+// ③ 공연 상세(`/events/{id}`)의 없는 회차를 그리기 전에 거른다(ADR-0201 결정 3, BUILD_ORDER HOT-311, src/_app/routing/event-gate.ts):
+//    어느 경로에도 맞지 않는 내부 주소로 재작성해 Next.js의 404 화면을 낸다. 회차 주소마다 ISR 항목이 생기지 않는다.
+//    판매 중지(410)는 화면이 안내와 상태 표시를 그리고 앞 서버가 상태를 맞춘다(server/csp-hash-server.mjs).
 import { NextResponse, type NextRequest } from 'next/server';
+import { canonicalEventPath, createEventGate, eventCacheTags, eventIdFromPath } from './src/_app/routing/event-gate.ts';
 import { NONCE_HEADER, cachedCsp, matchRoute, newNonce, pageHeaders } from './src/_app/security/page-headers.ts';
 import { verifyReturnProxy } from './src/features/identity-verify/server/return-post.ts';
 
@@ -21,6 +25,13 @@ function cspOrigins(): Record<string, string> | undefined {
   return o as Record<string, string>;
 }
 const origins = cspOrigins();
+
+/** 서버 API(gw-fan)에 묻는 앞 거르기. 주소가 없으면(개발·CI) 모양이 틀린 ID만 거른다 */
+const eventGate = createEventGate({ apiOrigin: process.env.PEAKET_API_ORIGIN?.trim() || undefined });
+/** 어느 경로에도 맞지 않는 내부 주소. 재작성하면 Next.js가 맞는 경로가 없는 주소의 404 화면을 낸다 */
+const NOT_FOUND_PATH = '/_peaket/not-found';
+/** CDN 태그 머리(docs/infra.md §4.1: ISR 태그와 같은 값을 쉼표로, 공연 상세 `event:{id}`·`production:{id}`, 홈 `home`) */
+const CACHE_TAG_HEADER = 'x-peaket-cache-tag';
 
 /**
  * 손님이 실어 보낸 CSP·nonce 요청 머리를 지운다. Next.js는 요청 CSP의 nonce를 스크립트에 붙이므로, 남겨 두면 손님이 고른 값이
@@ -66,7 +77,26 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
   // 경로 표에 없는 주소(없는 화면의 404 등)는 캐시 화면처럼 헤더와 CSP 틀을 단다(page-headers.ts FALLBACK)
   if (!rule || rule.group === 'cached') {
     const requestHeaders = stripSpoofed(new Headers(req.headers));
-    return applyHeaders(NextResponse.next({ request: { headers: requestHeaders } }), { ...pageHeaders(pathname, { origins })!, ...cachedCsp(pathname, { origins }) });
+    const headers: Record<string, string> = { ...pageHeaders(pathname, { origins })!, ...cachedCsp(pathname, { origins }) };
+    const eventId = req.method === 'GET' || req.method === 'HEAD' ? eventIdFromPath(pathname) : undefined;
+    if (eventId !== undefined) {
+      // 대소문자 변형마다 CDN·ISR 항목과 원본 호출이 생기지 않게 소문자 주소 하나로 모은다
+      const canonical = canonicalEventPath(pathname);
+      if (canonical) {
+        const url = req.nextUrl.clone();
+        url.pathname = canonical;
+        return applyHeaders(NextResponse.redirect(url, 308), headers);
+      }
+      const gate = await eventGate.check(eventId);
+      if (gate.kind === 'missing') {
+        const url = req.nextUrl.clone();
+        url.pathname = NOT_FOUND_PATH;
+        url.search = '';
+        return applyHeaders(NextResponse.rewrite(url, { request: { headers: requestHeaders } }), headers);
+      }
+      headers[CACHE_TAG_HEADER] = eventCacheTags(eventId, gate.productionId);
+    } else if (pathname === '/') headers[CACHE_TAG_HEADER] = 'home';
+    return applyHeaders(NextResponse.next({ request: { headers: requestHeaders } }), headers);
   }
 
   const nonce = newNonce();
@@ -78,7 +108,8 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
 }
 
 // 정적 자산·텔레메트리 입구(/_t/*, 게이트웨이 수집기로 간다)·public/의 자산 확장자 파일만 건너뛴다.
-// 마지막 조각에 점이 든 화면 주소(/events/a.b 등)와 없는 주소의 404도 헤더를 받게, 확장자는 자산 종류로만 좁힌다
+// 마지막 조각에 점이 든 화면 주소(/events/a.b 등)와 없는 주소의 404도 헤더를 받게, 확장자는 자산 종류로만 좁힌다.
+// 공연 상세(`/events/…`)는 확장자와 상관없이 늘 거친다(`/events/x.json`이 앞 거르기를 건너뛰어 주소마다 ISR 항목을 만들지 않게, HOT-311 리뷰)
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|_t/|.*\\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|txt|json|webmanifest|xml)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|_t/|.*\\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|txt|json|webmanifest|xml)$).*)', '/events/:path*'],
 };

@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { GetEventResponse, GetHomeRankingsResponse, GetHomeResponse } from '@peaket/contracts/openapi/catalog';
 import { ListSubscriptionsResponse, ListWishesResponse } from '@peaket/contracts/openapi/identity';
-import { eventDetail, homeFeed, placeholderSvg, rankingFile, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
+import { GetEventReviewSummaryResponse } from '@peaket/contracts/openapi/reviews';
+import { INITIAL_WISHES, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
 
 const ORIGIN = 'http://127.0.0.1:4010';
 const NOW = new Date('2026-11-05T03:00:00Z');
@@ -113,6 +114,33 @@ test('가짜 API의 공연 상세 경로는 회차·공연 소문자 태그를 �
     assert.equal(gone.status, 410);
     assert.equal((await gone.json()).type, 'https://peaket.example/problems/event-suspended');
     assert.equal((await fetch(`${base}/v1/events/no-such-event`)).status, 404, '없는 회차는 판매 중지 상태에서도 404');
+  } finally {
+    server.close();
+  }
+});
+
+test('가짜 API의 찜 목록은 productionIds로 고르고(HOT-311), 찜 저장·해제가 목록에 남으며, 후기 요약이 계약 Zod를 지난다', async () => {
+  const [a, b] = INITIAL_WISHES;
+  assert.deepEqual(wishPage(ORIGIN, new Set(INITIAL_WISHES), [a, 'x']).items.map((c) => c.productionId), [a]);
+  ListWishesResponse.parse(wishPage(ORIGIN, new Set(INITIAL_WISHES), [a]));
+  const { eventId } = homeFeed(ORIGIN, 'normal', NOW).upcoming[0];
+  const sum = reviewSummary(eventId);
+  assert.deepEqual(GetEventReviewSummaryResponse.parse(sum), sum);
+  assert.equal(sum.recent.length, 2);
+  assert.equal(reviewSummary('no-such-event'), undefined);
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const list = async (ids) => (await (await fetch(`${base}/v1/wishes?productionIds=${ids.join(',')}`)).json()).items.map((c) => c.productionId);
+    assert.deepEqual(new Set(await list([a, b, 'x'])), new Set([a, b]));
+    assert.equal((await fetch(`${base}/v1/productions/${a}/wish`, { method: 'DELETE' })).status, 204);
+    assert.deepEqual(await list([a]), []);
+    assert.equal((await fetch(`${base}/v1/productions/${a}/wish`, { method: 'PUT' })).status, 204);
+    assert.deepEqual(await list([a]), [a]);
+    const r = await fetch(`${base}/v1/events/${eventId}/review-summary`);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('cache-control'), 'public, max-age=60');
   } finally {
     server.close();
   }

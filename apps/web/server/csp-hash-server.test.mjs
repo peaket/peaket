@@ -308,3 +308,47 @@ test('손님이 위 서버의 답보다 먼저 끊어도 앞 서버는 죽지 �
     await p.close();
   }
 });
+
+// ADR-0201: 캐시 화면은 응답 상태를 바꾸지 못해(Cache Components가 본문을 먼저 흘린다) 화면이 상태 표시를 그리고 앞 서버가 맞춘다
+const statusPage = (code, extra = '') => `<html><head><meta name="peaket-status" content="${code}"/></head><body>${extra}<script>${FLIGHT0}</script></body></html>`;
+
+test('화면의 상태 표시(404·410)를 읽어 상태 코드와 짧은 캐시로 맞추고, 해시도 그대로 채운다(ADR-0201)', async () => {
+  for (const code of [404, 410]) {
+    const p = await pair((_q, r) => {
+      r.writeHead(200, { 'content-type': 'text/html; charset=utf-8', [CSP_TEMPLATE_HEADER]: TEMPLATE, 'cache-control': 's-maxage=31536000' });
+      r.end(statusPage(code));
+    });
+    try {
+      const res = await p.get('/events/x');
+      assert.equal(res.status, code);
+      assert.equal(res.headers['cache-control'], 'public, max-age=60');
+      assert.ok(res.headers['content-security-policy'].includes(sha(FLIGHT0)));
+    } finally {
+      await p.close();
+    }
+  }
+});
+
+test('상태 표시가 없거나, 허용 밖 값이거나, 위 서버가 200이 아니거나, 글로 쓰인 표시면 상태를 바꾸지 않는다(ADR-0201)', async () => {
+  const cases = [
+    { body: HTML, upstream: 200, want: 200 },
+    { body: statusPage(500), upstream: 200, want: 200 },
+    { body: statusPage(301), upstream: 200, want: 200 },
+    { body: statusPage(410), upstream: 503, want: 503 },
+    // 본문 글은 React가 < 를 바꿔 쓰고, 인라인 화면 데이터는 <로 싣는다: 그 꼴은 표시가 아니다
+    { body: `<html><head></head><body><p>&lt;meta name="peaket-status" content="410"/&gt;</p><script>self.__next_f.push([1,"\u003cmeta name=\\"peaket-status\\" content=\\"410\\"/\u003e"])</script></body></html>`, upstream: 200, want: 200 },
+  ];
+  for (const c of cases) {
+    const p = await pair((_q, r) => {
+      r.writeHead(c.upstream, { 'content-type': 'text/html; charset=utf-8', [CSP_TEMPLATE_HEADER]: TEMPLATE, 'cache-control': 's-maxage=300' });
+      r.end(c.body);
+    });
+    try {
+      const res = await p.get('/x');
+      assert.equal(res.status, c.want, c.body.slice(0, 80));
+      if (c.want === 200) assert.equal(res.headers['cache-control'], 's-maxage=300');
+    } finally {
+      await p.close();
+    }
+  }
+});

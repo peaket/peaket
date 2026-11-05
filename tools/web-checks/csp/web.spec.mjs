@@ -10,9 +10,14 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderCsp } from '../../../packages/config/headers/security-headers.mjs';
+import { HOST, MOCK_API } from '../seed-css/apps.mjs';
 import { WEB_BASE, WEB_BUILD_DIR } from './pages.mjs';
 
 const EVENT = 'evt-lumen-1025';
+/** 공연 상세는 가짜 API 고정 자료의 회차(HOT-311) */
+// 판매 중지 시험은 다른 시험이 그리지 않은 회차를 쓴다(ISR이 그린 화면을 300초 기억한다)
+const SUSPENDED_EVENT = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e02';
+const DETAIL_EVENT = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
 /** (request) 묶음 화면: 묶음 B·E·F, 사람 확인 변형 */
 const REQUEST_PAGES = ['/my/settings', '/login', `/booking/${EVENT}/seats`, `/booking/${EVENT}/checkout`, `/queue/${EVENT}/verify`, '/shop/checkout', '/signup/consent'];
 /** (request) 묶음의 사전 렌더 목록 이름(빌드 산출물의 정적 셸 검사) */
@@ -174,7 +179,7 @@ test.describe('SRI PoC: 캐시 화면(A)의 인라인 스크립트', () => {
 });
 
 test.describe('캐시 화면(A) 응답 때 해시(ADR-0193)', () => {
-  const CACHED_PAGES = ['/', `/events/${EVENT}`, '/search', '/system-notice', '/my/tickets', '/policy/terms'];
+  const CACHED_PAGES = ['/', `/events/${DETAIL_EVENT}`, '/search', '/system-notice', '/my/tickets', '/policy/terms'];
   for (const path of CACHED_PAGES) {
     test(`[ASVS v5.0.0-3.4.3] ${path}: 앞 서버가 HTML의 인라인 스크립트 해시로 막는 CSP를 달고, 세 엔진에서 위반 0`, async ({ page, request, browserName }) => {
       if (browserName === 'chromium') {
@@ -249,6 +254,37 @@ test.describe('빠진 화면 없이 헤더·상태 코드(HOT-290 새 맥락 리
     const req = await request.get(`${WEB_BASE}/my/orders/ord.1`);
     expect(req.status()).not.toBe(500);
     expect(req.headers()['content-security-policy'] ?? '').toContain("'strict-dynamic'");
+  });
+});
+
+test.describe('공연 상세의 404·410 상태 코드(ADR-0201, HOT-311)', () => {
+  /** 가짜 API는 127.0.0.1 이름에만 답한다. 컨테이너에서 돌면(HOST가 host.docker.internal) 상태를 바꿀 수 없어 건너뛴다 */
+  const MOCK = `http://127.0.0.1:${MOCK_API.port}`;
+  test('없는 회차·모양이 틀린 ID·확장자 붙은 주소는 404, 대문자 ID는 소문자로 308, 판매 중지된 회차는 410이고 판매 중지 안내를 그린다', async ({ request, browserName }) => {
+    test.skip(browserName !== 'chromium', 'HTTP 응답 검사는 엔진과 상관없다');
+    test.skip(HOST !== '127.0.0.1', '가짜 API 상태 바꾸기는 이 PC에서만');
+    // 확장자가 붙은 주소도 proxy를 거쳐 걸러진다(자산 확장자 범위 밖, HOT-311 리뷰)
+    for (const id of ['00000000-0000-4000-8000-0000000000aa', 'not-a-uuid', 'zz.json', 'zz.png']) {
+      const res = await request.get(`${WEB_BASE}/events/${id}`);
+      expect(res.status(), id).toBe(404);
+      expect(res.headers()['content-security-policy'] ?? '', id).toMatch(/^default-src 'self'; script-src 'self'/);
+    }
+    // 대문자 ID는 소문자 주소로 옮기고, 상세·홈 응답은 ISR 태그와 같은 CDN 태그 머리를 싣는다(docs/infra.md §4.1)
+    const upper = await request.get(`${WEB_BASE}/events/${DETAIL_EVENT.toUpperCase()}`, { maxRedirects: 0 });
+    expect(upper.status()).toBe(308);
+    expect(upper.headers().location ?? '').toContain(`/events/${DETAIL_EVENT}`);
+    const detail = await request.get(`${WEB_BASE}/events/${DETAIL_EVENT}`);
+    expect(detail.headers()['x-peaket-cache-tag']).toBe(`event:${DETAIL_EVENT},production:0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4d01`);
+    expect((await request.get(`${WEB_BASE}/`)).headers()['x-peaket-cache-tag']).toBe('home');
+    await request.get(`${MOCK}/__mock/state?detail=suspended`);
+    try {
+      const gone = await request.get(`${WEB_BASE}/events/${SUSPENDED_EVENT}`);
+      expect(gone.status()).toBe(410);
+      expect(gone.headers()['cache-control']).toBe('public, max-age=60');
+      expect(await gone.text()).toContain('판매가 중지된 공연입니다');
+    } finally {
+      await request.get(`${MOCK}/__mock/state?detail=normal`);
+    }
   });
 });
 

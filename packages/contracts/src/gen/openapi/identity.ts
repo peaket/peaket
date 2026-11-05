@@ -183,7 +183,7 @@ export const DeleteEventSubscriptionsQueryParams = zod.object({
 export const DeleteEventSubscriptionsResponse = zod.void()
 
 /**
- * FR-019, SCR-001 ③·SCR-054(추천 적용 2026-10-14, ADR-0063). 찜은 공연 단위다(ADR-0093). 홈 피드는 개인 값을 싣지 않으므로 로그인한 브라우저가 따로 부른다. 찜한 최근 순. 판매 승인이 취소된 공연은 빠진다. Cache-Control: private, no-store
+ * FR-019, SCR-001 ③·SCR-054(추천 적용 2026-10-14, ADR-0063). 찜은 공연 단위다(ADR-0093). 홈 피드는 개인 값을 싣지 않으므로 로그인한 브라우저가 따로 부른다. 찜한 최근 순. 판매 승인이 취소된 공연은 빠진다. productionIds를 주면 그 공연들 가운데 찜한 것만 준다(최대 50개, 커서 없음. 공연 상세의 찜 토글 상태, 추천 적용 2026-11-05, HOT-311). Cache-Control: private, no-store
  * @summary 찜한 공연 목록(홈 찜한 공연 줄, 관심 공연 화면)
  */
 export const listWishesQueryLimitMax = 100;
@@ -191,6 +191,7 @@ export const listWishesQueryLimitMax = 100;
 
 
 export const ListWishesQueryParams = zod.object({
+  "productionIds": zod.string().optional().describe('쉼표로 이은 공연 ID, 최대 50개. 주면 cursor·limit는 보지 않는다'),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
   "limit": zod.int().min(1).max(listWishesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
