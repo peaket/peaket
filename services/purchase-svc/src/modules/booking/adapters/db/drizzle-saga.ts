@@ -6,7 +6,12 @@
 //   잠금 차례: seat_rebuild 행 → 한도 행 → 좌석 행 → 작업 행 → 주문 행. GEN_CHANGED는 되돌리기만 한다(주문 seat_gen을 고치지 않는다, 리뷰 M1).
 // - 실패 기록(fail, READ COMMITTED): 작업 행 step RELEASE(기대 단계·자기 임대, 0행이면 STALE) → 주문 failure_reason → (T11) releasePendingIn → 결제 참조 지우기 → T8·T11.
 //   잠금 차례: 작업 행 → 주문 행 → 한도 행 → 좌석 행 → 결제 시도 행(판매 예약과 같이 작업 행이 주문 행보다 먼저다, 리뷰 H1 변형). 작업 행은 실행기가 해제 뒤 지운다(리뷰 M4).
-// - 승인 명령 뒤(done): CONFIRM 작업 지우기(자기 임대) → 결제 참조 지우기(한 트랜잭션, 잠금 차례 작업 행 → 결제 시도 행).
+// - 승인 명령 뒤(done): CONFIRM 작업 행을 지우지 않고 AWAIT로(자기 임대, confirm_sent_at 그대로, next_attempt_at = 'infinity') → 결제 참조 지우기
+//   (한 트랜잭션, 잠금 차례 작업 행 → 결제 시도 행). AWAIT 행은 결제 결과 당기기(drizzle-payment-pull.ts)가 찾고 결과 반영(drizzle-payment-results.ts)이 끝낸다
+//   (BUILD_ORDER PRF-171 설계 1, ADR-0140). next_attempt_at을 무한대로 두어 며칠 남을 수 있는 AWAIT 행이 Saga 잡기의 쓸기 색인(next_attempt_at) 차례 앞을
+//   막지 않게 한다(docs/data.md §5.1 '결과 당기기 대상', 2026-11-06 코드 리뷰 M1).
+// - Saga 잡기(claimDue·claim)는 AWAIT 행을 고르지 않는다(step <> 'AWAIT', PRF-171 설계 2). setStep·reschedule도 AWAIT 행을 바꾸지 않는다(모르는 단계로 다룬다.
+//   reschedule이 바꾸면 무한대가 되돌아간다, 리뷰 고침 M1). 행 읽기(get 등)는 무한대를 Infinity로 읽는다(던지지 않는다).
 // - 건너뛰기(abandon, 리뷰 M3): 그 단계의 작업 행 잠금 → 주문 상태 → 그 단계를 지났으면 결제 참조·작업 행 지우기.
 // 주문 상태는 주문 전이 함수(DrizzleOrderStore.transition)로만 바꾼다(상태 SQL은 drizzle-orders.ts에만, test/order-status-sql.test.ts). 결제 참조·토큰은 로그·오류 글에 싣지 않는다.
 // inventory를 가져오지 않는다: 판매 예약·PENDING 지우기는 필요한 메서드 모양(SagaSeatSales)만 받는다(조립은 main.ts가 DrizzleSeatSales를 넘긴다).
@@ -136,14 +141,24 @@ type JobRow = {
   event_id: string;
   step: string;
   attempts: number | string;
-  next_attempt_at: Date | string;
+  /** AWAIT 행은 무한대다(드라이버가 'infinity' 글이나 Infinity 수로 넘긴다) */
+  next_attempt_at: Date | string | number;
   lease_until: Date | string | null;
   confirm_sent_at: Date | string | null;
 };
 const JOB_COLUMNS = sql.raw('order_id, event_id, step, attempts, next_attempt_at, lease_until, confirm_sent_at');
 const JOB_COLUMNS_J = sql.raw('j.order_id, j.event_id, j.step, j.attempts, j.next_attempt_at, j.lease_until, j.confirm_sent_at');
 
-const msOf = (v: Date | string): number => new Date(v).getTime();
+/**
+ * timestamptz 칸 → epoch ms. 무한대('infinity'·'-infinity' 글, node-postgres가 바꾼 ±Infinity 수)는 ±Infinity다
+ * (new Date('infinity')는 NaN이고 toISOString은 던진다. AWAIT 행의 next_attempt_at, 리뷰 고침 M1)
+ */
+const msOf = (v: Date | string | number): number => {
+  if (typeof v === 'number') return v;
+  if (v === 'infinity') return Number.POSITIVE_INFINITY;
+  if (v === '-infinity') return Number.NEGATIVE_INFINITY;
+  return new Date(v).getTime();
+};
 
 function jobOf(r: JobRow): SagaJob {
   return {
@@ -187,11 +202,12 @@ export class DrizzleSaga implements SagaJobs, SagaOrders, ReserveTx, SagaFailure
     const now = this.o.clock.now();
     const at = new Date(now);
     const until = new Date(now + leaseMs);
+    // AWAIT(승인 명령 접수 뒤 결과 기다림) 행은 고르지 않는다(결과 당기기가 고른다, PRF-171 설계 2)
     const r = await this.#tx((tx) =>
       tx.execute(sql`
         with picked as (
           select order_id from order_saga_job
-          where next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until <= ${at}::timestamptz)
+          where step <> 'AWAIT' and next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until <= ${at}::timestamptz)
           order by next_attempt_at, order_id
           limit ${limit}::int
           for update skip locked)
@@ -210,12 +226,12 @@ export class DrizzleSaga implements SagaJobs, SagaOrders, ReserveTx, SagaFailure
     const now = this.o.clock.now();
     const at = new Date(now);
     const until = new Date(now + leaseMs);
-    // claimDue와 같은 조건, 행 잠금을 쥔 다른 실행(판매 예약 트랜잭션 등)이 있으면 기다리지 않고 집지 않는다
+    // claimDue와 같은 조건(AWAIT 행 빼기 포함: 접수 뒤 kick·runOne이 승인 명령을 다시 보내지 않게), 행 잠금을 쥔 다른 실행(판매 예약 트랜잭션 등)이 있으면 기다리지 않고 집지 않는다
     const r = await this.#tx((tx) =>
       tx.execute(sql`
         with picked as (
           select order_id from order_saga_job
-          where order_id = ${orderId}::uuid and next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until <= ${at}::timestamptz)
+          where order_id = ${orderId}::uuid and step <> 'AWAIT' and next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until <= ${at}::timestamptz)
           for update skip locked)
         update order_saga_job j set lease_until = ${until}::timestamptz
         from picked p
@@ -238,10 +254,11 @@ export class DrizzleSaga implements SagaJobs, SagaOrders, ReserveTx, SagaFailure
     const next = new Date(nextAtMs);
     if (typeof nextAtMs !== 'number' || Number.isNaN(next.getTime())) throw new RangeError(`nextAtMs가 날짜(유닉스 밀리초)가 아니다: ${String(nextAtMs)}`);
     assertLease(lease);
+    // AWAIT 행(결과 기다림)은 바꾸지 않는다: 무한대 next_attempt_at을 되돌리지 않는다(Saga가 쥔 CONFIRM 행을 그사이 결과 반영이 AWAIT로 바꾼 경우, 리뷰 고침 M1)
     const r = await this.#tx((tx) =>
       tx.execute(sql`
         update order_saga_job set attempts = attempts + 1, next_attempt_at = ${next}::timestamptz, lease_until = null
-        where order_id = ${orderId}::uuid${leaseCond(lease)}
+        where order_id = ${orderId}::uuid and step <> 'AWAIT'${leaseCond(lease)}
         returning order_id`),
     );
     return r.rows.length > 0;
@@ -250,11 +267,12 @@ export class DrizzleSaga implements SagaJobs, SagaOrders, ReserveTx, SagaFailure
   async setStep(orderId: string, step: SagaStep, lease?: LeaseGuard): Promise<boolean> {
     if (!isUuid(orderId)) return false;
     assertLease(lease);
-    // 단계 값은 표의 CHECK(RESERVE·CONFIRM·RELEASE, 0006)가 막는다. 보낸 시각은 그대로 둔다(한 번 보낸 명령은 되돌릴 수 없다)
+    // 단계 값은 표의 CHECK(RESERVE·CONFIRM·RELEASE 0006, AWAIT 0010)가 막는다. 보낸 시각은 그대로 둔다(한 번 보낸 명령은 되돌릴 수 없다).
+    // AWAIT 행(결과 기다림)은 바꾸지 않는다(Saga가 모르는 단계로 다룬다, PRF-171 설계 2)
     const r = await this.#tx((tx) =>
       tx.execute(sql`
         update order_saga_job set step = ${step}, attempts = 0, next_attempt_at = ${new Date(this.o.clock.now())}::timestamptz, lease_until = null
-        where order_id = ${orderId}::uuid${leaseCond(lease)}
+        where order_id = ${orderId}::uuid and step <> 'AWAIT'${leaseCond(lease)}
         returning order_id`),
     );
     return r.rows.length > 0;
@@ -457,8 +475,13 @@ export class DrizzleSaga implements SagaJobs, SagaOrders, ReserveTx, SagaFailure
     if (!isUuid(orderId)) return false;
     assertLease(lease);
     return this.#tx(async (tx) => {
-      // 승인 명령이 접수됐다: CONFIRM 작업 행을 지우고(자기 임대) 결제 참조를 지운다(결과는 trade.payments). 잠금 차례 작업 행 → 결제 시도 행
-      const r = await tx.execute(sql`delete from order_saga_job where order_id = ${orderId}::uuid and step = 'CONFIRM'${leaseCond(lease)} returning order_id`);
+      // 승인 명령이 접수됐다: CONFIRM 작업 행을 지우지 않고 AWAIT로 바꾸고(자기 임대. confirm_sent_at은 그대로 둬 당기기가 '접수 뒤 5초'·'기록 없음 10분'을 잰다,
+      // pull_next_at은 비워 그 기준으로 잡히게 하고, next_attempt_at은 무한대로 둬 Saga 쓸기 색인의 차례 앞을 막지 않는다, 리뷰 고침 M1) 결제 참조를 지운다.
+      // 결과는 trade.payments로 받고, 늦으면 결과 당기기가 이 행으로 찾는다(PRF-171 설계 1). 잠금 차례 작업 행 → 결제 시도 행
+      const r = await tx.execute(sql`
+        update order_saga_job set step = 'AWAIT', pull_next_at = null, next_attempt_at = 'infinity'::timestamptz
+        where order_id = ${orderId}::uuid and step = 'CONFIRM'${leaseCond(lease)}
+        returning order_id`);
       if (r.rows.length === 0) return false;
       await clearRefs(tx, orderId);
       return true;

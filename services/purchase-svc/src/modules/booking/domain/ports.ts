@@ -1,6 +1,8 @@
 // booking 모듈의 포트(바깥 저장소·지표와 닿는 면, BUILD_ORDER PRF-160·PRF-161).
 import type { OrderEventMessage, OrderItem, OrderStatus, OrderRow, CreatedExtras, SeatAssignment, TransitionId } from './order.js';
+import type { OrderPaymentState, PaymentLedgerStatus, PaymentPullFailureCode, PaymentPullIgnoreReason, PaymentPullRunStage } from './payment-pull.js';
 import type {
+  AppliedPaymentEventType,
   PaymentEventType,
   PaymentFailureCategory,
   PaymentResultHoldKind,
@@ -479,7 +481,7 @@ export interface SagaJob {
   readonly step: SagaStep;
   /** 이 단계를 해 본 횟수(reschedule이 1 올리고, 단계가 바뀌면 0으로) */
   readonly attempts: number;
-  /** 다음에 해 볼 시각(epoch ms) */
+  /** 다음에 해 볼 시각(epoch ms). AWAIT 행은 Infinity다(next_attempt_at = 'infinity', Saga 쓸기 색인의 차례 앞을 막지 않게, 2026-11-06 코드 리뷰 M1) */
   readonly nextAttemptAtMs: number;
   /** 임대 끝 시각(epoch ms). 집은 작업은 늘 있다 */
   readonly leaseUntilMs?: number;
@@ -493,23 +495,27 @@ export type LeaseGuard = number | undefined;
 /** Saga 작업 행 저장소(운영은 adapters/db/drizzle-saga.ts DrizzleSaga) */
 export interface SagaJobs {
   /**
-   * 짧은 트랜잭션 하나: next_attempt_at ≤ 지금이고 임대가 비었거나 지난 행을 next_attempt_at 차례로 FOR UPDATE SKIP LOCKED로 limit개까지 골라
-   * lease_until = 지금 + leaseMs를 쓰고 커밋한다. 집은 행들(임대 뒤 값)을 돌려준다. 없으면 [].
+   * 짧은 트랜잭션 하나: 단계가 AWAIT가 아니고(AWAIT 행은 결제 결과 당기기가 고른다, PRF-171 설계 2) next_attempt_at ≤ 지금이고 임대가 비었거나 지난 행을
+   * next_attempt_at 차례로 FOR UPDATE SKIP LOCKED로 limit개까지 골라 lease_until = 지금 + leaseMs를 쓰고 커밋한다. 집은 행들(임대 뒤 값)을 돌려준다. 없으면 [].
    * @throws RangeError limit·leaseMs가 1 이상의 정수가 아님
    */
   claimDue(limit: number, leaseMs: number): Promise<SagaJob[]>;
   /**
-   * 그 주문의 작업 하나를 같은 조건(기한이 됐고 임대가 비었거나 지남)으로 집는다(접수 직후 kick이 쓴다). 집지 못하면 undefined.
+   * 그 주문의 작업 하나를 같은 조건(AWAIT가 아니고 기한이 됐고 임대가 비었거나 지남)으로 집는다(접수 직후 kick이 쓴다). 집지 못하면 undefined.
    * 소문자 UUID가 아니면 DB에 가지 않고 undefined
    */
   claim(orderId: string, leaseMs: number): Promise<SagaJob | undefined>;
   /** 작업 행 읽기(임대를 쓰지 않는다). 없으면 undefined */
   get(orderId: string): Promise<SagaJob | undefined>;
-  /** 다시 하기로 미룬다: attempts + 1, next_attempt_at = nextAtMs, 임대를 비운다. 행이 없거나 자기 임대가 아니면 false */
+  /**
+   * 다시 하기로 미룬다: attempts + 1, next_attempt_at = nextAtMs, 임대를 비운다. 행이 없거나 자기 임대가 아니거나 AWAIT 행이면 false
+   * (AWAIT는 Saga가 모르는 단계로 다루고 바꾸지 않는다. 쥔 CONFIRM 행을 그사이 결과 반영이 AWAIT로 바꿨어도 무한대 next_attempt_at을 되돌리지 않는다, 리뷰 고침 M1)
+   */
   reschedule(orderId: string, nextAtMs: number, lease?: LeaseGuard): Promise<boolean>;
   /**
    * 단계를 바꾼다(attempts 0, next_attempt_at = 지금, 임대 비움. 보낸 시각 confirm_sent_at은 그대로: 한 번 보낸 명령은 되돌릴 수 없다).
-   * 판매 예약 트랜잭션 밖에서 바꿀 일(손질·시험)에 쓴다. 행이 없거나 자기 임대가 아니면 false
+   * 판매 예약 트랜잭션 밖에서 바꿀 일(손질·시험)에 쓴다. 행이 없거나 자기 임대가 아니거나 AWAIT 행이면 false
+   * (AWAIT는 Saga가 모르는 단계로 다루고 바꾸지 않는다, PRF-171 설계 2)
    */
   setStep(orderId: string, step: SagaStep, lease?: LeaseGuard): Promise<boolean>;
   /** 작업 행을 지운다(step을 주면 그 단계일 때만, 자기 임대 조건). 지운 행이 없으면 false */
@@ -697,8 +703,10 @@ export interface SagaFailures {
 /** 승인 명령 접수 뒤 정리(운영은 DrizzleSaga) */
 export interface ConfirmSent {
   /**
-   * 한 트랜잭션: 그 주문의 CONFIRM 작업 행을 지우고(자기 임대 조건) 지웠으면 ACCEPTED 시도의 결제 키·거래 ID·토큰을 지운다.
-   * 작업 행이 없었으면 false(다른 실행이 먼저 끝냄, 아무것도 바꾸지 않는다)
+   * 한 트랜잭션: 그 주문의 CONFIRM 작업 행을 지우지 않고 step = AWAIT(결과 기다림)로 바꾸고(자기 임대 조건. confirm_sent_at은 그대로, pull_next_at은 비우고,
+   * next_attempt_at은 무한대로 둔다: Saga 쓸기 색인의 차례 앞을 막지 않게, 리뷰 고침 M1)
+   * 바꿨으면 ACCEPTED 시도의 결제 키·거래 ID·토큰을 지운다. AWAIT 행은 결제 결과 당기기가 찾고 결과 반영이 끝낸다(BUILD_ORDER PRF-171 설계 1, ADR-0140).
+   * CONFIRM 행이 없었으면 false(다른 실행이 먼저 끝냈거나 결과 반영이 먼저 바꿨다, 아무것도 바꾸지 않는다)
    */
   done(orderId: string, lease?: LeaseGuard): Promise<boolean>;
 }
@@ -909,7 +917,7 @@ export type PaymentResultWriteOutcome =
 /** 결제 결과 반영 쓰기(운영은 adapters/db/drizzle-payment-results.ts. 트랜잭션은 모두 READ COMMITTED·문장 시간 한도 5초 [가정]를 직접 고른다) */
 export interface PaymentResultWrites {
   /**
-   * 승인 한 트랜잭션: 작업 행 정리(그 주문의 order_saga_job이 있으면 지운다) → 주문 행 잠금(상태·순번이 출발이 아니면 바로 STALE, 권고1)
+   * 승인 한 트랜잭션: 작업 행 정리(그 주문의 order_saga_job이 있으면 단계와 상관없이 지운다. 결과를 기다리던 AWAIT 행도 같다, PRF-171) → 주문 행 잠금(상태·순번이 출발이 아니면 바로 STALE, 권고1)
    * → 남은 결제 참조 지우기 → 판매 행 PENDING → SOLD(inventory markSoldIn, 같은 트랜잭션. 바꾼 수가 좌석 수와 다르면 되돌리고 SOLD_MISMATCH, 리뷰 M4)
    * → ticket_issue_job 한 행(attempts 0, next_attempt_at = 지금, issue_due_at, created_at = 지금)
    * → 주문 T9·T13·T16(APPROVED 사건 Outbox가 업무 문장의 마지막). 좌석 Redis의 묶인 홀드는 그대로 둔다.
@@ -925,8 +933,11 @@ export interface PaymentResultWrites {
    */
   fail(input: PaymentFailInput): Promise<PaymentResultWriteOutcome>;
   /**
-   * 상태만 바꾸는 한 트랜잭션(T12 UNKNOWN, T10·T14 입금 대기): 작업 행 지우기(있으면. 결과는 payment-svc 조회·가상계좌 단계가 정한다)
-   * → 주문 행 잠금(상태·순번이 출발이 아니면 바로 STALE) → 남은 결제 참조 지우기(이 사건이 왔다는 것은 승인 명령이 접수됐다는 뜻, 리뷰 M1)
+   * 상태만 바꾸는 한 트랜잭션(T12 UNKNOWN, T10·T14 입금 대기, 중간 결과): 작업 행을 지우지 않고 AWAIT로 남긴다(있으면. 단계와 상관없이 step = AWAIT,
+   * pull_next_at = 지금 + 30초 [가정](T12)·60초 [가정](T10·T14), next_attempt_at = 무한대(리뷰 고침 M1), confirm_sent_at은 그대로.
+   * 뒤따르는 최종 결과를 결과 당기기가 받는다, PRF-171.
+   * 행이 없으면 넣지 않는다 [정함: 손질·옛 행의 길이다])
+   * → 주문 행 잠금(상태·순번이 출발이 아니면 바로 STALE. 되돌리므로 작업 행도 그대로다) → 남은 결제 참조 지우기(이 사건이 왔다는 것은 승인 명령이 접수됐다는 뜻, 리뷰 M1)
    * → 주문 T10·T12·T14(T12는 사건 없이 이력만, T10·T14는 AWAITING_DEPOSIT 사건). 판매 행 PENDING은 그대로 둔다.
    * @throws RangeError 입력이 틀림 · Error 그 밖의 DB 오류(되돌렸다)
    */
@@ -1237,4 +1248,107 @@ export interface TicketIssueSignals {
   delayed(count: number): void;
   /** 카운터 ticket_issue_overdue_total을 count만큼 올린다(발권 기한을 넘긴 주문 수, SEV1) */
   overdue(count: number): void;
+}
+
+// ---- 결제 결과 당기기(ADR-0140 결정 1~4, docs/features/payment.md §2, docs/data.md order_saga_job·§5.1, BUILD_ORDER PRF-171) ----
+// 실행기(application/payment-result-pull.ts): 틱마다 PaymentPullTargets.claimDue(짧은 트랜잭션에서 FOR UPDATE SKIP LOCKED로 골라 pull_next_at = 지금 + 5초 [가정]을 쓰고 커밋)
+// → 잠금 밖에서 PaymentResultReader.batchGet(100건 [가정]씩, 파드마다 동시 4개 [가정], 데드라인 500ms [가정]) → 답마다 paymentStateToResultEvent(domain/payment-pull.ts)
+// → 사건 길과 같은 ApplyPaymentResult.execute → 다음 점검을 PaymentPullTargets.defer로 미룬다(답이 UNKNOWN 30초·입금 대기 60초·취소 상태·모양 틀림 60초·
+// 보류·오래 기록 없음 10분·payment-svc가 답하지 못한 묶음 30초 [가정], docs/features/payment.md §2 '기록 없음이 길어질 때').
+// 대상은 승인 명령을 보낸 작업 행(order_saga_job step CONFIRM·AWAIT, confirm_sent_at 있음)이고 trade.payments 보류 사건이 있는 주문은 뺀다(설계 1·3,
+// 2026-11-06 코드 리뷰 M4). 운영 저장소는 당기기 전용 일반 풀(연결 2개 [가정])을 쓴다.
+
+/** 당기기 대상 하나(order_saga_job의 CONFIRM·AWAIT 행 + 그 주문 ACCEPTED 결제 시도의 순번) */
+export interface PaymentPullTarget {
+  readonly orderId: string;
+  /** 회차(order_saga_job.event_id). 만든 결제 사건의 eventId */
+  readonly eventId: string;
+  /**
+   * 그 주문 ACCEPTED 결제 시도의 순번(그 주문의 결제 시도를 만든 차례로 몇 번째인가, 1부터). 만든 사건의 attemptNo 칸을 채울 뿐 반영에는 쓰지 않는다
+   * (결정 함수·쓰기가 보지 않는다. 사건 길의 값과 같다는 보장이 없다, docs/features/payment.md §2 '기록 없음이 길어질 때').
+   * ACCEPTED 시도가 없으면 0(코드 오류·손질. 이때 반영의 결정은 이 값이 아니라 주문의 접수한 결제 시도가 없음을 보고 PG_MISMATCH로 보류한다)
+   * [정함: payment_attempt에 순번 칸이 없어 저장소가 센다]
+   */
+  readonly attemptNo: number;
+  /** 승인 명령을 처음 보내기 바로 전에 적은 시각(epoch ms, confirm_sent_at). 대상은 늘 있다. 기록 없음이 길어졌는지(10분 [가정]) 본다 */
+  readonly confirmSentAtMs: number;
+}
+
+/** 당기기 대상 저장소(운영은 adapters/db/drizzle-payment-pull.ts DrizzlePaymentPull). '지금'은 앱 시계다. Saga 실행기의 칸은 쓰지 않는다 */
+export interface PaymentPullTargets {
+  /**
+   * 짧은 트랜잭션 하나: step이 CONFIRM·AWAIT이고 confirm_sent_at ≤ 지금 − 5초 [가정]이며 pull_next_at이 비었거나 ≤ 지금인 order_saga_job 행을
+   * FOR UPDATE SKIP LOCKED로 limit개까지 골라 pull_next_at = 지금 + 5초 [가정]을 쓰고 커밋한다(파드 여럿이어도 같은 주문은 5초에 한 번, ADR-0140 결정 1).
+   * 그 주문의 trade.payments 보류 사건(held_event, 다시 처리 전)이 있으면 고르지 않는다(당기기가 앞지르면 보류 사건이 다시 처리될 때 버려진다, 리뷰 고침 M4).
+   * 고른 차례로 돌려준다. 없으면 [].
+   * @throws RangeError limit이 1 ~ PAYMENT_PULL_BATCH(100)의 정수가 아님
+   */
+  claimDue(limit: number): Promise<PaymentPullTarget[]>;
+  /**
+   * 그 주문들의 다음 점검을 untilMs로 미룬다(pull_next_at = untilMs, step이 CONFIRM·AWAIT인 행만, 한 문장). 미룬 행 수(행이 없어진 주문은 세지 않는다).
+   * 소문자 UUID가 아닌 ID는 빼고, 남은 것이 없으면 DB에 가지 않고 0
+   * @throws RangeError untilMs가 날짜(유닉스 밀리초)가 아님
+   */
+  defer(orderIds: readonly string[], untilMs: number): Promise<number>;
+}
+
+/**
+ * BatchGetPayments가 실패했다(PaymentResultReader.batchGet이 던지는 하나뿐인 오류 형). code는 gRPC 상태 이름·CIRCUIT_OPEN·BAD_ANSWER다.
+ * 글에는 코드만 싣는다(주문 ID·금액은 싣지 않는다). 원인(cause)에는 받은 오류를 그대로 단다
+ */
+export class PaymentPullCallError extends Error {
+  constructor(
+    readonly code: PaymentPullFailureCode,
+    cause?: unknown,
+  ) {
+    super(`결제 결과 당기기 호출이 실패했다: ${code}`, cause === undefined ? undefined : { cause });
+    this.name = 'PaymentPullCallError';
+  }
+}
+
+/**
+ * 결제 결과 당기기 클라이언트(payment-svc PaymentService.BatchGetPayments, 읽기만 하고 결제사는 부르지 않는다, ADR-0140 결정 3).
+ * 운영은 adapters/grpc-payment-results.ts GrpcPaymentResultReader(차단기 payment-svc-batch), local·ci는 '기록 없음' 대역이다.
+ * 다시 묻지 않는다(다시 묻기는 실행기의 다음 점검이다)
+ */
+export interface PaymentResultReader {
+  /**
+   * @param orderIds 묻는 주문 ID(1 ~ PAYMENT_PULL_BATCH(100)건). 빈 배열이면 부르지 않고 []
+   * @param o.deadlineMs 이 호출의 데드라인(ms, 1 이상 정수). 실행기가 PAYMENT_PULL_DEADLINE_MS(500ms [가정])로 주고, 어댑터가 상한 500ms로 자른다
+   * @returns 결제 기록이 있는 주문의 상태(답의 payments 그대로, 차례는 보장하지 않는다). 기록 없는 주문(승인 명령이 아직 적히지 않음)은 빠진다
+   * @throws PaymentPullCallError 모든 호출 실패(gRPC 오류는 상태 이름, 차단기 열림 CIRCUIT_OPEN, 남은 시간 없음 DEADLINE_EXCEEDED, 동시 호출 상한 RESOURCE_EXHAUSTED,
+   *   답 모양이 틀림 BAD_ANSWER, gRPC가 아닌 예외 UNKNOWN)
+   * @throws RangeError orderIds가 100건을 넘음(부르는 쪽이 나눠 부른다, 코드 오류. 부르지 않는다)
+   */
+  batchGet(orderIds: readonly string[], o?: { readonly deadlineMs?: number }): Promise<OrderPaymentState[]>;
+}
+
+/**
+ * 결제 결과 당기기 로그(서비스 로그 한 줄. 금액·결제 참조는 싣지 않는다). 던지지 않는다.
+ * 반영이 보류(HOLD)로 끝난 줄은 ApplyPaymentResult가 PaymentResultLog.held로 남긴다(같은 사건·까닭은 창 안에서 한 번, 설계 6). 호출 실패는 지표만 센다(발권 재시도와 같다)
+ */
+export interface PaymentPullLog {
+  /**
+   * 승인 명령을 보낸 지 10분 [가정]이 지나도 답에 없다(error 한 줄 { kind: 'payment-result-missing', severity: 'SEV2', orderId }, 설계 7).
+   * 실행기가 그 주문의 다음 점검을 10분 [가정] 미루고(파드가 많아도 주문마다 10분에 한 줄, 리뷰 고침 M3) 파드 메모리 창 10분 [가정](PAYMENT_PULL_MISSING_LOG_WINDOW_MS)
+   * 안에서 한 번만 부른다. 주문을 실패로 단정하지 않는다(명령 기한 넘김 처리는 PRF-180)
+   */
+  missing(e: { readonly orderId: string }): void;
+  /**
+   * 반영하지 않는 답(warn 한 줄 { kind: 'payment-result-pull', event: 'ignored', orderId, reason, status }). CANCELED는 취소 흐름(PRF-173·환불 단계) 몫,
+   * MALFORMED는 반영할 수 없는 모양의 답이다 [정함]. 실행기가 그 주문의 다음 점검을 60초 [가정] 미룬다
+   */
+  ignored(e: { readonly orderId: string; readonly reason: PaymentPullIgnoreReason; readonly status: PaymentLedgerStatus }): void;
+  /** 예상 밖 오류(error 한 줄, 플랫폼 errorSummary로 줄인 오류. 쿼리 매개변수 값은 싣지 않는다). orderId는 주문 하나의 오류일 때만 */
+  runError(e: { readonly what: PaymentPullRunStage; readonly orderId?: string; readonly err: unknown }): void;
+}
+
+/** 결제 결과 당기기 지표(운영은 adapters/prom-payment-pull-signals.ts PromPaymentPullSignals, 이름은 설계 8). 던지지 않는다 */
+export interface PaymentPullSignals {
+  /** 카운터 payment_result_pulled_total{type}을 1 올린다(당기기로 반영한 주문: execute가 APPLIED. 1분 동안 0보다 크면 SEV3, ADR-0140 결정 4) */
+  pulled(type: AppliedPaymentEventType): void;
+  /** 카운터 payment_result_pull_batches_total을 1 올린다(BatchGetPayments를 부른 수, 성패와 상관없이) */
+  batch(): void;
+  /** 카운터 payment_result_pull_failures_total을 1 올린다(BatchGetPayments 실패. 1분 이어지면 SEV2, ADR-0140 결정 4) */
+  failure(): void;
 }

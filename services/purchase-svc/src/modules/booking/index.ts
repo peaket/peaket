@@ -1,4 +1,4 @@
-// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161·PRF-162·PRF-165·PRF-163·PRF-166·PRF-170).
+// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161·PRF-162·PRF-165·PRF-163·PRF-166·PRF-170·PRF-171).
 import type { MaintenanceTask } from '@peaket/platform';
 import { checkOrderHistory } from './adapters/db/drizzle-orders.js';
 import { orderHistoryCheckTask as historyTaskOf, type OrderHistoryTaskDeps } from './application/order-history-check.js';
@@ -95,6 +95,49 @@ export {
 } from './adapters/grpc-ticket-issue.js';
 export { PromTicketIssueSignals } from './adapters/prom-ticket-issue-signals.js';
 export { TicketIssueRunner, type TicketIssueDeps, type TicketIssueTickResult, type TicketIssueTimer } from './application/ticket-issue.js';
+export { DrizzlePaymentPull, paymentPullDatabaseOptions, type DrizzlePaymentPullOptions } from './adapters/db/drizzle-payment-pull.js';
+export {
+  emptyPaymentResultReader,
+  GrpcPaymentResultReader,
+  orderPaymentStatesOf,
+  PAYMENT_PULL_BREAKER,
+  PAYMENT_PULL_CAP_MS,
+  PAYMENT_PULL_STUB_ENVS,
+  paymentPullCodeOf,
+  paymentResultReaderFromEnv,
+  type GrpcPaymentResultReaderOptions,
+} from './adapters/grpc-payment-results.js';
+export { PromPaymentPullSignals } from './adapters/prom-payment-pull-signals.js';
+export { PaymentResultPuller, type PaymentPullTickResult, type PaymentPullTimer, type PaymentResultPullDeps } from './application/payment-result-pull.js';
+export {
+  isPaymentResultMissingLong,
+  PAYMENT_LEDGER_STATUSES,
+  PAYMENT_PULL_AFTER_DEPOSIT_MS,
+  PAYMENT_PULL_AFTER_SENT_MS,
+  PAYMENT_PULL_AFTER_UNKNOWN_MS,
+  PAYMENT_PULL_BATCH,
+  PAYMENT_PULL_CONCURRENCY,
+  PAYMENT_PULL_DB_MAX,
+  PAYMENT_PULL_DEADLINE_MS,
+  PAYMENT_PULL_HELD_TOPIC,
+  PAYMENT_PULL_INTERVAL_MS,
+  PAYMENT_PULL_LONG_REPEAT_MS,
+  PAYMENT_PULL_MISSING_AFTER_MS,
+  PAYMENT_PULL_MISSING_LOG_WINDOW_MS,
+  PAYMENT_PULL_OUTAGE_CODES,
+  PAYMENT_PULL_OUTAGE_REPEAT_MS,
+  PAYMENT_PULL_REPEAT_MS,
+  PAYMENT_PULL_SLOW_REPEAT_MS,
+  PAYMENT_PULL_TYPES,
+  paymentStateToResultEvent,
+  type OrderPaymentState,
+  type PaymentLedgerStatus,
+  type PaymentPullContext,
+  type PaymentPullDecision,
+  type PaymentPullFailureCode,
+  type PaymentPullIgnoreReason,
+  type PaymentPullRunStage,
+} from './domain/payment-pull.js';
 export {
   buildIssueDelayedEvent,
   GRPC_STATUS_NAMES,
@@ -204,7 +247,7 @@ export {
   type SagaStepOutcome,
 } from './domain/saga.js';
 export { jsonOrderEventCodec, TRADE_ORDERS_TOPIC } from './adapters/order-events.js';
-export { LoggerOrderLog, LoggerPaymentResultLog, LoggerSagaLog, LoggerTicketIssueLog } from './adapters/order-log.js';
+export { LoggerOrderLog, LoggerPaymentPullLog, LoggerPaymentResultLog, LoggerSagaLog, LoggerTicketIssueLog } from './adapters/order-log.js';
 export { PromOrderSignals } from './adapters/prom-order-signals.js';
 export { bookingRestrictionKey, MemoryBookingRestrictions, RedisBookingRestrictions } from './adapters/redis-booking-restrictions.js';
 export {
@@ -299,7 +342,7 @@ export {
   type SeatAssignment,
   type TransitionId,
 } from './domain/order.js';
-export { OrderSeatStoreUnavailable, TicketIssueCallError } from './domain/ports.js';
+export { OrderSeatStoreUnavailable, PaymentPullCallError, TicketIssueCallError } from './domain/ports.js';
 export type {
   AcceptInput,
   AcceptLog,
@@ -352,9 +395,14 @@ export type {
   PaymentFailInput,
   PaymentMarkInput,
   PaymentPg,
+  PaymentPullLog,
+  PaymentPullSignals,
+  PaymentPullTarget,
+  PaymentPullTargets,
   PaymentRefs,
   PaymentResultLog,
   PaymentResultOrder,
+  PaymentResultReader,
   PaymentResultReads,
   PaymentResultSessions,
   PaymentResultWriteBase,

@@ -1,9 +1,12 @@
 // 주문 Saga 1단계 실행기(booking application/order-saga.ts OrderSagaRunner, docs/features/payment.md §2 'Saga 1단계의 첫 구현',
 // docs/features/seat-hold.md §6 '좌석 묶기와 실패 해제', docs/data.md §5 'Saga 1단계', BUILD_ORDER PRF-165)를 메모리 가짜 포트로 본다.
 // - RESERVE: 승인 기한 → 좌석 묶기 → 판매 예약(판 번호가 바뀌면 묶기부터 다시) → CONFIRM을 같은 실행에서 이어 돈다
-// - CONFIRM: 승인 명령 → 결제 참조·작업 지우기, 다시 보내기, 기한을 넘기면 T11과 실패 해제
+// - CONFIRM: 승인 명령 → 결제 참조 지우기·작업 행 AWAIT(지우지 않는다, PRF-171), 다시 보내기, 기한을 넘기면 T11과 실패 해제
 // - 실패의 차례(DB 실패 기록을 먼저 커밋 → 실패 해제), 다시 하기 간격, pollOnce·runOne·kick·start/stop, 행위자, 로그에 결제 참조·금액이 없음
-// 가짜는 DB가 할 일을 흉내 낸다: 판매 예약 RESERVED면 주문 RESERVED·작업 CONFIRM, GEN_CHANGED면 주문 seat_gen을 새 번호로, 실패 기록 FAILED면 주문 FAILED·작업 지움.
+// - 승인 명령 접수 뒤(PRF-171, ADR-0140): 작업 행이 AWAIT(confirm_sent_at 그대로)로 남고 Saga 잡기가 그 행을 다시 집지 않는다
+// 가짜는 DB가 할 일을 흉내 낸다: 판매 예약 RESERVED면 주문 RESERVED·작업 CONFIRM, GEN_CHANGED면 주문 seat_gen을 새 번호로, 실패 기록 FAILED면 주문 FAILED·작업 RELEASE,
+// 승인 명령 접수 뒤 정리(ConfirmSent.done)면 CONFIRM 작업 행을 AWAIT로(지우지 않는다), 잡기(claimDue·claim)는 AWAIT 행을 고르지 않는다(BUILD_ORDER PRF-171 설계 1·2).
+// DrizzleSaga가 실제로 그렇게 쓰는지는 test/order-saga-await.test.ts(SQL)와 test-int(다른 담당)가 본다.
 // 실제 PostgreSQL·Valkey로 도는 것(작업 임대, 판매 예약 트랜잭션, 늦은 묶기 재현 V-T40 ④)은 test-int(다른 담당)다.
 import { CircuitBreaker, Deadline, fakeClock, type FakeClock, type RequestContext, requestContext, runInRequestContext } from '@peaket/platform';
 import { beforeEach, describe, expect, test } from 'vitest';
@@ -202,19 +205,20 @@ class SagaFakes {
   }
 
   readonly jobs = {
+    /** DB가 할 일: Saga 잡기는 AWAIT(승인 명령 접수 뒤 결과 기다림) 행을 고르지 않는다(결과 당기기가 고른다, PRF-171 설계 2) */
     claimDue: async (limit: number, leaseMs: number): Promise<SagaJob[]> => {
       this.calls.push('jobs.claimDue');
       this.claimDueArgs.push([limit, leaseMs]);
       if (this.dueGate) await this.dueGate;
       if (this.due instanceof Error) throw this.due;
-      return this.due.map((j) => ({ ...j }));
+      return this.due.filter((j) => j.step !== 'AWAIT').map((j) => ({ ...j }));
     },
     claim: async (orderId: string, leaseMs: number): Promise<SagaJob | undefined> => {
       this.calls.push('jobs.claim');
       this.claimArgs.push([orderId, leaseMs]);
       if (this.claimError) throw this.claimError;
       const j = this.jobRows.get(orderId);
-      if (!j || this.leased.has(orderId)) return undefined;
+      if (!j || j.step === 'AWAIT' || this.leased.has(orderId)) return undefined;
       this.leased.add(orderId);
       return { ...j, leaseUntilMs: this.clock.now() + leaseMs };
     },
@@ -338,12 +342,21 @@ class SagaFakes {
     },
   };
 
+  /**
+   * DB가 할 일(PRF-171 설계 1): 한 트랜잭션에서 그 주문의 CONFIRM 작업 행을 지우지 않고 step = AWAIT로 바꾸고(confirm_sent_at 그대로) 결제 참조를 지운다.
+   * CONFIRM 행이 없으면 false(아무것도 바꾸지 않는다)
+   */
   readonly confirmSent = {
     done: async (orderId: string, leaseUntilMs?: number): Promise<boolean> => {
       this.calls.push('confirmSent.done');
       this.leaseArgs.push({ call: 'confirmSent.done', leaseUntilMs });
       this.doneOrders.push(orderId);
-      return this.jobRows.delete(orderId);
+      const j = this.jobRows.get(orderId);
+      if (!j || j.step !== 'CONFIRM') return false;
+      this.jobRows.set(orderId, { ...j, step: 'AWAIT' });
+      const o = this.orderRows.get(orderId);
+      if (o?.attempt) this.orderRows.set(orderId, { ...o, attempt: { ...o.attempt, refs: undefined } });
+      return true;
     },
   };
 
@@ -823,7 +836,7 @@ describe('CONFIRM 승인 명령', () => {
   const reserved = (over: Partial<SagaOrderView> = {}) => sagaOrder({ status: 'RESERVED', ...over });
   const confirmJob = (over: Partial<SagaJob> = {}) => sagaJob({ step: 'CONFIRM', ...over });
 
-  test('FR011_토스 승인 명령: 주문·시도·결제사·결제 참조{TOSS, paymentKey}·서버 금액·데드라인 200ms. ACCEPTED면 ConfirmSent.done(결제 참조·작업 지우기) 뒤 DONE', async () => {
+  test('FR011_토스 승인 명령: 주문·시도·결제사·결제 참조{TOSS, paymentKey}·서버 금액·데드라인 200ms. ACCEPTED면 ConfirmSent.done(결제 참조 지우기·작업 행 AWAIT, PRF-171) 뒤 DONE', async () => {
     const order = reserved();
     fx.put(order, confirmJob());
     const out = await runner().confirmStep(confirmJob(), order);
@@ -831,7 +844,8 @@ describe('CONFIRM 승인 명령', () => {
     expect(fx.confirmCommands).toEqual([{ orderId: ORDER_ID, attemptId: ATTEMPT_ID, pg: 'TOSS', refs: { pg: 'TOSS', paymentKey: PAYMENT_KEY }, amount: AMOUNT, deadlineMs: 200 }]);
     expectInOrder(fx.calls, ['confirms.confirm', 'confirmSent.done']);
     expect(fx.doneOrders).toEqual([ORDER_ID]);
-    notCalled('failures.fail', 'pins.releaseFailed', 'jobs.reschedule', 'pins.pin', 'reserve.reserve');
+    expect(fx.jobRows.get(ORDER_ID)?.step).toBe('AWAIT');
+    notCalled('failures.fail', 'pins.releaseFailed', 'jobs.reschedule', 'pins.pin', 'reserve.reserve', 'jobs.delete');
   });
 
   test('FR011_시뮬레이터는 토스 칸(paymentKey)을 쓴다', async () => {
@@ -991,12 +1005,12 @@ describe('CONFIRM 승인 명령', () => {
 });
 
 describe('runJob: 한 작업을 끝까지', () => {
-  test('FR011_RESERVE 작업은 주문을 읽고 묶기 → 판매 예약 → (같은 실행에서) 승인 명령 → 정리까지 돌아 DONE이다', async () => {
+  test('FR011_RESERVE 작업은 주문을 읽고 묶기 → 판매 예약 → (같은 실행에서) 승인 명령 → 정리까지 돌아 DONE이다. 작업 행은 지우지 않고 AWAIT로 남는다(결과 당기기가 찾는다, PRF-171) (ADR0140)', async () => {
     fx.put(sagaOrder());
     expect(await runner().runJob(sagaJob())).toEqual({ kind: 'DONE' });
     expectInOrder(fx.calls, ['orders.read', 'pins.pin', 'reserve.reserve', 'confirms.confirm', 'confirmSent.done']);
     expect(fx.confirmCommands).toHaveLength(1);
-    expect(fx.jobRows.has(ORDER_ID)).toBe(false);
+    expect(fx.jobRows.get(ORDER_ID)).toMatchObject({ step: 'AWAIT', confirmSentAtMs: NOW });
   });
 
   test('FR011_RESERVE가 ADVANCED여도 승인 명령이 RETRYABLE이면 결과는 그 다시 하기이고(CONFIRM 단계, attempts 0 → 1초), 작업은 남는다', async () => {
@@ -1084,6 +1098,45 @@ describe('runOne·pollOnce·kick', () => {
     expect(() => r.kick(ORDER_ID)).not.toThrow();
     await flush();
     expect(fx.claimArgs).toHaveLength(1);
+  });
+});
+
+// BUILD_ORDER PRF-171 설계 1·2(docs/features/payment.md §2 '결제 결과 당기기의 첫 구현' 결과를 기다리는 주문 찾기·Saga 실행기와 갈림, ADR-0140):
+// 승인 명령이 접수되면 작업 행을 지우지 않고 AWAIT로 남겨 결과 당기기가 '접수했는데 결과가 아직 없는 주문'을 작은 작업 표에서 찾는다
+describe('승인 명령 접수 뒤 작업 행 AWAIT(PRF-171)', () => {
+  test('ADR0140_ACCEPTED 뒤 작업 행은 지우지 않고 AWAIT로 남는다: confirm_sent_at은 보내기 바로 전에 적은 시각 그대로이고 결제 참조는 지웠으며, 주문은 RESERVED 그대로다(long polling이 보는 상태를 바꾸지 않는다) [ASVS v5.0.0-2.3.3]', async () => {
+    fx.put(sagaOrder());
+    expect(await runner().runJob(sagaJob())).toEqual({ kind: 'DONE' });
+    expect(fx.jobRows.get(ORDER_ID)).toMatchObject({ orderId: ORDER_ID, eventId: EVENT, step: 'AWAIT', confirmSentAtMs: NOW });
+    expect(fx.orderRows.get(ORDER_ID)?.status).toBe('RESERVED');
+    expect(fx.orderRows.get(ORDER_ID)?.attempt?.refs).toBeUndefined();
+    // 정리는 집은 작업의 자기 임대 조건으로 한 번(작업 행 지우기가 아니다)
+    expect(fx.leaseArgs.filter((x) => x.call === 'confirmSent.done')).toEqual([{ call: 'confirmSent.done', leaseUntilMs: NOW + 30_000 }]);
+    notCalled('jobs.delete', 'jobs.abandon');
+  });
+
+  test('ADR0140_Saga 잡기는 AWAIT 행을 고르지 않는다: 접수 뒤 kick·runOne·틱이 와도 승인 명령을 다시 보내지 않고 작업 행은 AWAIT 그대로다 [ASVS v5.0.0-2.3.4]', async () => {
+    fx.put(sagaOrder());
+    const r = runner();
+    expect(await r.runOne(ORDER_ID)).toEqual({ kind: 'DONE' });
+    expect(fx.sentCommands).toHaveLength(1);
+    const awaiting = fx.jobRows.get(ORDER_ID)!;
+    expect((await r.runOne(ORDER_ID)).kind).toBe('SKIPPED');
+    r.kick(ORDER_ID);
+    await flush();
+    fx.due = [{ ...awaiting, nextAttemptAtMs: NOW, leaseUntilMs: NOW + 30_000 }];
+    expect(await r.pollOnce()).toBe(0);
+    expect(fx.sentCommands).toHaveLength(1);
+    expect(fx.jobRows.get(ORDER_ID)).toEqual(awaiting);
+    notCalled('jobs.reschedule', 'jobs.abandon', 'jobs.setStep', 'failures.fail', 'pins.releaseFailed');
+  });
+
+  test('ADR0140_정해진 거절(REJECTED)로 1시간 미뤄진 작업은 CONFIRM 그대로 남는다(confirm_sent_at 있음: 결과 당기기가 CONFIRM 행도 대상으로 맞춘다, PRF-165가 넘긴 것)', async () => {
+    fx.put(sagaOrder({ status: 'RESERVED' }), sagaJob({ step: 'CONFIRM' }));
+    fx.confirmQueue = [{ status: 'REJECTED', reason: 'invalid_argument' }];
+    expect(await runner().runJob(sagaJob({ step: 'CONFIRM' }))).toEqual({ kind: 'RETRY', reason: 'confirm_rejected', nextAtMs: NOW + SAGA_CONFIRM_PARK_MS });
+    expect(fx.jobRows.get(ORDER_ID)).toMatchObject({ step: 'CONFIRM', confirmSentAtMs: NOW, nextAttemptAtMs: NOW + SAGA_CONFIRM_PARK_MS });
+    notCalled('confirmSent.done', 'failures.fail');
   });
 });
 

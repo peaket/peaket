@@ -1,7 +1,7 @@
 // 주문 생성의 보안·설정 로그를 서비스 로거(platform PlatformLogger)에 한 줄씩 남기는 어댑터(OrderLog, ADR-0055, BUILD_ORDER PRF-161).
 // 번호 원문·토큰·pid는 싣지 않는다. 대체 판정은 warn(보안 로그), 설정 오류는 error(kind config, 재확인 설정 오류는 SEV2)다.
 import { errorSummary, type PlatformLogger } from '@peaket/platform';
-import type { AcceptLog, OrderLog, PaymentResultLog, SagaLog, TicketIssueLog } from '../domain/ports.js';
+import type { AcceptLog, OrderLog, PaymentPullLog, PaymentResultLog, SagaLog, TicketIssueLog } from '../domain/ports.js';
 import { TICKET_ISSUE_CS_CASE } from '../domain/ticket-issue.js';
 
 /**
@@ -198,6 +198,54 @@ export class LoggerTicketIssueLog implements TicketIssueLog {
     line.err = errorSummary(e.err);
     try {
       this.logger.error(line, '발권 실행기가 예상 밖 오류를 만났다(다음 틱이나 임대가 끝난 뒤 다시 한다)');
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+}
+
+/**
+ * 결제 결과 당기기 로그(PaymentPullLog, BUILD_ORDER PRF-171, ADR-0140, docs/features/payment.md §2 '결제 결과 당기기의 첫 구현').
+ * 금액·결제 참조·사건 키·결제 원장 ID는 싣지 않는다(받은 객체를 펼치지 않고 칸을 하나씩 고른다). 로거가 던져도 삼킨다(실행기를 막지 않는다).
+ * 같은 주문의 기록 없음 줄을 창 안에서 한 번만 부르는 일은 실행기(PaymentResultPuller)가 한다. 이 어댑터는 받은 대로 한 줄씩 남긴다.
+ * - missing: error 한 줄 { kind: 'payment-result-missing', severity: 'SEV2', orderId }(주문 ID만)
+ * - ignored: warn 한 줄 { kind: 'payment-result-pull', event: 'ignored', orderId, reason, status }
+ * - runError: error 한 줄 { kind: 'payment-result-pull', event: 'run_error', what, orderId?, err }. err는 플랫폼 errorSummary('이름: 글' 한 줄, 스택·원인 없음.
+ *   Drizzle 쿼리 오류는 쿼리 틀과 SQLSTATE만 싣고 매개변수 값(주문 ID)은 싣지 않는다, ASVS v5.0.0-16.2.5)
+ */
+export class LoggerPaymentPullLog implements PaymentPullLog {
+  constructor(private readonly logger: Pick<PlatformLogger, 'warn' | 'error'>) {}
+
+  missing(e: Parameters<PaymentPullLog['missing']>[0]): void {
+    try {
+      this.logger.error(
+        { kind: 'payment-result-missing', severity: 'SEV2', orderId: e.orderId },
+        '승인 명령을 보낸 지 10분 [가정]이 지나도 payment-svc에 결제 기록이 없다(주문을 실패로 단정하지 않는다. 명령 기한 넘김 처리는 PRF-180)',
+      );
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+
+  ignored(e: Parameters<PaymentPullLog['ignored']>[0]): void {
+    try {
+      this.logger.warn(
+        { kind: 'payment-result-pull', event: 'ignored', orderId: e.orderId, reason: e.reason, status: e.status },
+        e.reason === 'CANCELED'
+          ? '당긴 결제 결과가 취소 상태라 반영하지 않았다(취소 흐름은 PRF-173·환불 단계. 다음 점검을 60초 [가정] 미룬다)'
+          : '당긴 결제 결과가 반영할 수 없는 모양이라 반영하지 않았다(다음 점검을 60초 [가정] 미룬다)',
+      );
+    } catch {
+      // 로그 실패는 실행기를 막지 않는다
+    }
+  }
+
+  runError(e: Parameters<PaymentPullLog['runError']>[0]): void {
+    const line: Record<string, unknown> = { kind: 'payment-result-pull', event: 'run_error', what: e.what };
+    if (e.orderId !== undefined) line.orderId = e.orderId;
+    line.err = errorSummary(e.err);
+    try {
+      this.logger.error(line, '결제 결과 당기기가 예상 밖 오류를 만났다(다음 틱이나 다음 점검에 다시 묻는다)');
     } catch {
       // 로그 실패는 실행기를 막지 않는다
     }

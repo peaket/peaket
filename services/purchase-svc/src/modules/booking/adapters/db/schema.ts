@@ -11,6 +11,8 @@
 //   주문 기준 되살리기(PRF-167)는 0008로 주문의 묶은 시각 pinned_at을 더했다(data.md §4 아홉 번째 마이그레이션).
 //   발권 호출과 재시도 큐(PRF-170)는 0009로 ticket_issue_job에 임대 lease_until, ISSUE_DELAYED를 낸 시각 delayed_at, 발권 기한 넘김 신호를 낸 시각 overdue_at을
 //   더했다(data.md §4 열 번째 마이그레이션). 셋 다 널 허용이고 새 인덱스는 두지 않는다(큐 행은 승인 뒤 발권까지만 남아 적다).
+//   결제 결과 당기기(PRF-171, ADR-0140)는 0010으로 order_saga_job.step CHECK에 AWAIT(승인 명령 접수 뒤 결과 기다림)를 더하고 다음 점검 시각 pull_next_at을
+//   더했다(널 허용, 새 인덱스 없음. 작업 표는 진행 중 주문만 남아 작다, data.md §5.1).
 // - drizzle-kit이 이 파일을 읽으므로 도메인 파일을 가져오지 않는다(도메인 → inventory 공개 면 → Nest 모듈까지 끌려 온다).
 //   상태 목록은 도메인 상수 ORDER_STATUSES와 같은 차례로 글로 적는다(inventory schema.ts의 seat_sale 상태 목록과 같은 방식).
 import { idempotencyRecordTable } from '@peaket/platform';
@@ -168,8 +170,10 @@ export const paymentAttempt = pgTable(
  * 주문 Saga 작업 표(0005, BUILD_ORDER PRF-162, data.md §4 여섯 번째 마이그레이션. ticket_issue_job과 같은 꼴).
  * 결제 접수가 같은 트랜잭션에서 한 행을 넣고(step 'RESERVE'), Saga 실행기(PRF-165)가 next_attempt_at이 지난 행을 임대(lease_until)로 잡아 돈다.
  * 주문 ID가 기본 키라 한 주문에 작업 행은 하나뿐이다(두 탭이 겹쳐도 둘이 될 수 없다, data.md §5 '결제 접수').
- * step 값은 RESERVE(묶기·판 번호 대조·판매 예약)·CONFIRM(승인 명령)·RELEASE(실패 기록 뒤 좌석 Redis 실패 해제) 셋이다(CHECK, 0006, PRF-165).
- * confirm_sent_at은 승인 명령을 처음 보내기 바로 전에 적고 커밋한 시각이다(있으면 purchase는 혼자 T11을 하지 않는다, 2026-11-05 리뷰 H1)
+ * step 값은 RESERVE(묶기·판 번호 대조·판매 예약)·CONFIRM(승인 명령)·RELEASE(실패 기록 뒤 좌석 Redis 실패 해제) 셋(CHECK, 0006, PRF-165)과
+ * AWAIT(승인 명령이 접수돼 결과를 기다림. 결제 결과 당기기가 찾는다, 0010, PRF-171)이다.
+ * confirm_sent_at은 승인 명령을 처음 보내기 바로 전에 적고 커밋한 시각이다(있으면 purchase는 혼자 T11을 하지 않는다, 2026-11-05 리뷰 H1).
+ * pull_next_at은 결제 결과 당기기의 다음 점검 시각이다(비었으면 아직 묻지 않았다. 당기기가 잡을 때 지금 + 5초 [가정]을 쓴다, 0010, PRF-171)
  */
 export const orderSagaJob = pgTable(
   'order_saga_job',
@@ -190,11 +194,14 @@ export const orderSagaJob = pgTable(
     createdAt: at('created_at').notNull(),
     // 승인 명령을 처음 보내기 바로 전에 적은 시각(커밋한 뒤 보낸다). 비었으면 한 번도 보내지 않았다(0006, PRF-165 리뷰 H1)
     confirmSentAt: at('confirm_sent_at'),
+    // 결제 결과 당기기의 다음 점검 시각(0010, PRF-171, ADR-0140 결정 1). 비었으면 아직 묻지 않았다. 당기기가 잡을 때 지금 + 5초 [가정],
+    // 결과가 오래 없거나 보류·취소 상태면 지금 + 60초 [가정]를 쓴다. Saga 실행기는 이 칸을 읽거나 쓰지 않는다
+    pullNextAt: at('pull_next_at'),
   },
   (t) => [
     index('order_saga_job_next_attempt_idx').on(t.nextAttemptAt),
-    // 단계 값 셋(0006, PRF-165). 도메인 SAGA_STEPS와 같은 값·차례
-    check('order_saga_job_step_check', sql`${t.step} in ('RESERVE', 'CONFIRM', 'RELEASE')`),
+    // 단계 값 넷(RESERVE·CONFIRM·RELEASE는 0006, AWAIT는 0010). 도메인 SAGA_STEPS와 같은 값·차례
+    check('order_saga_job_step_check', sql`${t.step} in ('RESERVE', 'CONFIRM', 'RELEASE', 'AWAIT')`),
   ],
 );
 

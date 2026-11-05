@@ -289,7 +289,7 @@ async function placeAndAccept(a: Assembled, w: World, x: { seats?: SeatRef[] } =
   expect(await a.accepts.accept(once, { orderId: o.id, attemptId, eventId: w.eventId, refs, seatGen, actor: accountActor(accountId) })).toEqual({ status: 'ACCEPTED' });
   return { w, o, hold, attemptId, refs, psid };
 }
-/** 접수 뒤 Saga를 한 번 돌려 RESERVED(승인 명령 대역이 접수, 작업 행·결제 참조 지움)까지 */
+/** 접수 뒤 Saga를 한 번 돌려 RESERVED(승인 명령 대역이 접수, 결제 참조 지움·작업 행 AWAIT, PRF-171)까지 */
 async function reservedBySaga(a: Assembled, w: World, x: { seats?: SeatRef[] } = {}): Promise<Placed> {
   const p = await placeAndAccept(a, w, x);
   expect(await a.runner.runOne(p.o.id)).toEqual({ kind: 'DONE' });
@@ -404,7 +404,9 @@ describe('APPROVED 사건 → 주문 APPROVED', () => {
 });
 
 describe('AWAITING_DEPOSIT 사건 → 주문 AWAITING_DEPOSIT(리뷰 M1)', () => {
-  test('M1_Saga가 승인 명령 RETRYABLE로 다시 하기를 기다리는 사이(작업 CONFIRM·결제 참조 남음) AWAITING_DEPOSIT이 오면 T10 뒤 결제 참조가 비고 작업 행이 없어 승인 명령을 다시 보내지 않는다. 판매 행은 PENDING, 구매 세션은 끝난다 [ASVS v5.0.0-14.2.4]', async () => {
+  // PRF-171(추천 적용 2026-11-06, payment §2 '중간 결과 뒤에도 당긴다'): 입금 대기 반영은 작업 행을 지우지 않고 AWAIT로 남겨 pull_next_at = 지금 + 60초 [가정]으로 둔다.
+  // AWAIT 행은 Saga 잡기가 고르지 않으므로 승인 명령을 다시 보내지 않는다
+  test('M1_Saga가 승인 명령 RETRYABLE로 다시 하기를 기다리는 사이(작업 CONFIRM·결제 참조 남음) AWAITING_DEPOSIT이 오면 T10 뒤 결제 참조가 비고 작업 행이 AWAIT(다음 당기기 점검 60초 뒤)로 바뀌어 승인 명령을 다시 보내지 않는다. 판매 행은 PENDING, 구매 세션은 끝난다 [ASVS v5.0.0-14.2.4]', async () => {
     const a = assemble({ confirm: () => ({ status: 'RETRYABLE', reason: 'unavailable' }) });
     const w = await world();
     const p = await placeAndAccept(a, w);
@@ -421,12 +423,13 @@ describe('AWAITING_DEPOSIT 사건 → 주문 AWAITING_DEPOSIT(리뷰 M1)', () =>
     expect(await heldOf(p.o.id)).toEqual([]);
     expect(await orderRow(p.o.id)).toEqual({ status: 'AWAITING_DEPOSIT', failure_reason: null, payment_event_seq: '1' });
     expect(await attemptRefs(p.attemptId)).toEqual({ pg_payment_key: null, pg_tx_id: null, pg_payment_token: null });
-    expect(await jobOf(p.o.id)).toBeUndefined();
+    expect(await jobOf(p.o.id)).toMatchObject({ step: 'AWAIT' });
+    expect((await q<{ pull_next_at: Date | null }>('select pull_next_at from order_saga_job where order_id = $1', [p.o.id]))[0]?.pull_next_at).toEqual(new Date(clock.now() + 60_000));
     expect((await salesOf(w.eventId)).map((x) => x.status)).toEqual(['PENDING', 'PENDING']);
     expect(await sessionOf(p.psid)).toBeNull();
-    // 다시 하기 기한이 지나도 집을 작업이 없다(승인 명령 1번 그대로)
+    // 다시 하기 기한이 지나도 Saga가 집지 않는다(승인 명령 1번 그대로. 집지 못한 까닭은 정본에 없어 SKIPPED만 본다)
     clock.advance(30_000);
-    expect(await a.runner.runOne(p.o.id)).toEqual({ kind: 'SKIPPED', reason: 'NO_JOB' });
+    expect((await a.runner.runOne(p.o.id)).kind).toBe('SKIPPED');
     expect(a.confirms.calls).toHaveLength(1);
   });
 });

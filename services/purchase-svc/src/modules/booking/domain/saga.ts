@@ -1,14 +1,18 @@
 // 주문 Saga 1단계의 값과 규칙(docs/features/payment.md §2 'Saga 1단계의 첫 구현', docs/data.md §5 'Saga 1단계', BUILD_ORDER PRF-165).
-// 결제 접수(PRF-162)가 넣은 order_saga_job 행을 실행기가 돈다: RESERVE(좌석 묶기 → 판 번호 대조 → 판매 예약 → T7) → CONFIRM(승인 명령 → 결제 참조·작업 지우기).
+// 결제 접수(PRF-162)가 넣은 order_saga_job 행을 실행기가 돈다: RESERVE(좌석 묶기 → 판 번호 대조 → 판매 예약 → T7) → CONFIRM(승인 명령 → 결제 참조 지우기·작업 행 AWAIT, PRF-171).
 // 실패면 T8(ACCEPTED → FAILED)·T11(RESERVED → FAILED)과 실패 해제다. 프레임워크·저장소를 모른다(순수 값과 함수).
 // 2026-11-05 리뷰 고침: 승인 명령을 한 번이라도 보냈으면 혼자 T11을 하지 않는다(H1), 실패 해제가 끝날 때까지 작업 행을 RELEASE로 남긴다(M4).
 import type { OrderStatus } from './order.js';
 
 /**
- * 작업 단계(order_saga_job.step의 CHECK 값, 0006). 이 차례로 지난다.
+ * 작업 단계(order_saga_job.step의 CHECK 값. 앞 셋은 0006, AWAIT는 0010). 차례는 CHECK 목록과 같다(RESERVE → CONFIRM 뒤는 AWAIT 또는 RELEASE).
  * RELEASE: 실패 기록(T8·T11) 뒤 좌석 Redis 실패 해제가 끝날 때까지 남는 단계(실패 기록 트랜잭션이 바꾸고, 해제가 끝나면 실행기가 작업 행을 지운다, 2026-11-05 리뷰 M4)
+ * AWAIT: 승인 명령이 접수돼(ConfirmPayment ACCEPTED) 결제 결과를 기다리는 단계(BUILD_ORDER PRF-171 설계 1, ADR-0140). 접수 뒤 작업 행을 지우지 않고 이 값으로 남겨
+ *   결제 결과 당기기(application/payment-result-pull.ts)가 찾는다. 최종 결과 반영(승인은 지우고 실패는 RELEASE로)이 끝내고,
+ *   중간 결과(UNKNOWN·입금 대기)는 AWAIT로 남겨 다음 점검 시각만 미룬다. Saga 실행기(OrderSagaRunner)의 잡기는 AWAIT 행을 고르지 않고(설계 2),
+ *   다른 Saga 길(abandon·fail·setStep)도 AWAIT를 모르는 단계로 다루고 바꾸지 않는다
  */
-export const SAGA_STEPS = ['RESERVE', 'CONFIRM', 'RELEASE'] as const;
+export const SAGA_STEPS = ['RESERVE', 'CONFIRM', 'RELEASE', 'AWAIT'] as const;
 export type SagaStep = (typeof SAGA_STEPS)[number];
 
 /**
@@ -57,9 +61,10 @@ const NOT_PASSED: ReadonlySet<OrderStatus> = new Set<OrderStatus>(['CREATED', 'A
  * 주문이 작업 단계 step을 지났나(리뷰 M3): 지났으면 그 작업 행과 결제 참조를 지워도 된다.
  * RESERVE·CONFIRM: 주문이 RESERVED까지의 상태가 아니면 지났다(RESERVE 작업인데 RESERVED인 주문은 손질이 필요해 지난 것으로 보지 않는다).
  * RELEASE: 실패 해제는 주문 상태와 상관없이 끝까지 하므로 지난 것으로 보지 않는다
+ * AWAIT: Saga가 모르는 단계로 다루고 바꾸지 않으므로 지난 것으로 보지 않는다(작업 행은 결과 반영이 끝낸다, BUILD_ORDER PRF-171 설계 2)
  */
 export function sagaStepPassed(step: SagaStep, status: OrderStatus): boolean {
-  if (step === 'RELEASE') return false;
+  if (step === 'RELEASE' || step === 'AWAIT') return false;
   return !NOT_PASSED.has(status);
 }
 

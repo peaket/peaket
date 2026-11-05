@@ -276,6 +276,12 @@ const jobOf = async (orderId: string) =>
       [orderId],
     )
   )[0];
+/** 작업 행의 결과 당기기 쪽 칸(0010, PRF-171): 승인 명령 보낸 시각·다음 당기기 점검 시각 */
+const pullColsOf = async (orderId: string) =>
+  (await q<{ confirm_sent_at: Date | null; pull_next_at: Date | null }>('select confirm_sent_at, pull_next_at from order_saga_job where order_id = $1', [orderId]))[0];
+/** UNKNOWN(T12) 반영 뒤 다음 당기기 점검 30초 [가정], 입금 대기(T10·T14) 반영 뒤 60초 [가정](payment §2 '중간 결과 뒤에도 당긴다', PRF-171) */
+const AFTER_UNKNOWN_MS = 30_000;
+const AFTER_DEPOSIT_MS = 60_000;
 const salesOf = (eventId: string) =>
   q<{ seat_id: string; order_id: string; account_id: string; status: string; pending_until: Date | null }>(
     'select seat_id, order_id, account_id, status, pending_until from seat_sale where event_id = $1 order by seat_id',
@@ -427,10 +433,11 @@ describe('DrizzlePaymentResults.approve(한 트랜잭션: 작업 행 정리 → 
     expect(await attemptRefs(a.attemptId)).toEqual(NO_REFS);
   });
 
-  test('Saga done이 먼저 끝나 작업 행·결제 참조가 없어도 승인한다(작업 행 정리는 있으면만)', async () => {
+  test('Saga done이 먼저 끝나 결제 참조가 없고 작업 행이 AWAIT(PRF-171)여도 승인하고, 그 행을 단계와 상관없이 지운다', async () => {
     const s = fresh();
     const a = await reserved(s);
     expect(await s.saga.done(a.o.id)).toBe(true);
+    expect((await jobOf(a.o.id))?.step).toBe('AWAIT');
     expect(await s.results.approve(approveOf(s, a))).toEqual({ status: 'APPLIED' });
     expect(await orderRow(a.o.id)).toMatchObject({ status: 'APPROVED', payment_event_seq: '1' });
     expect((await salesOf(a.o.eventId)).map((x) => x.status)).toEqual(['SOLD', 'SOLD']);
@@ -445,8 +452,8 @@ describe('DrizzlePaymentResults.approve(한 트랜잭션: 작업 행 정리 → 
     const s = fresh();
     const a = await reserved(s);
     await walk(s, a.o, path);
-    // mark(T12·T10)가 지운 작업 행을 손으로 지운다
-    await q('delete from order_saga_job where order_id = $1', [a.o.id]);
+    // mark(T12·T10)가 남기는 AWAIT 행을 손으로 만든다(PRF-171: 중간 결과 뒤에도 당긴다. 승인은 작업 행을 단계와 상관없이 지운다)
+    await q(`update order_saga_job set step = 'AWAIT' where order_id = $1`, [a.o.id]);
     s.clock.advance(1_000);
     const at = s.clock.now();
 
@@ -626,7 +633,7 @@ describe('DrizzlePaymentResults.fail(한 트랜잭션: 작업 행 RELEASE → fa
     const s = fresh();
     const a = await reserved(s);
     await walk(s, a.o, [[mark, 1]]);
-    // mark(T12·T10)가 지운 작업 행을 손으로 지운다
+    // 작업 행이 없는 경우를 손으로 만든다(PRF-171 뒤로 mark는 작업 행을 AWAIT로 남기므로 손질·옛 행의 길이다)
     await q('delete from order_saga_job where order_id = $1', [a.o.id]);
     s.clock.advance(2_000);
     const at = s.clock.now();
@@ -698,8 +705,10 @@ describe('DrizzlePaymentResults.fail(한 트랜잭션: 작업 행 RELEASE → fa
 
 // ───────────────────────────── mark ─────────────────────────────
 
-describe('DrizzlePaymentResults.mark(한 트랜잭션: 작업 행 지우기 → T10·T12·T14, 판매 행 PENDING 그대로)', () => {
-  test('T12(RESERVED → UNKNOWN): 작업 행을 지우고 주문만 바꾼다(사건 없이 이력만). 판매 행 PENDING·한도 그대로, ticket_issue_job 없음 [ASVS v5.0.0-2.3.1]', async () => {
+// PRF-171(추천 적용 2026-11-06, payment §2 '중간 결과 뒤에도 당긴다'): T12·T10·T14는 작업 행을 지우지 않고 AWAIT로 남겨(confirm_sent_at 그대로)
+// pull_next_at을 UNKNOWN이면 지금 + 30초 [가정], 입금 대기면 지금 + 60초 [가정]로 둔다. 첫 문장은 그대로 작업 행이다(잠금 차례 작업 행 → 주문 행)
+describe('DrizzlePaymentResults.mark(한 트랜잭션: 작업 행 AWAIT·다음 당기기 점검 → T10·T12·T14, 판매 행 PENDING 그대로)', () => {
+  test('T12(RESERVED → UNKNOWN): 작업 행을 AWAIT로 남기고(pull_next_at = 지금 + 30초) 주문만 바꾼다(사건 없이 이력만). 판매 행 PENDING·한도 그대로, ticket_issue_job 없음 [ASVS v5.0.0-2.3.1] [ASVS v5.0.0-2.3.3]', async () => {
     const s = fresh();
     const a = await reserved(s);
     s.clock.advance(1_000);
@@ -711,16 +720,17 @@ describe('DrizzlePaymentResults.mark(한 트랜잭션: 작업 행 지우기 → 
     expect(await orderRow(a.o.id)).toEqual({ status: 'UNKNOWN', event_seq: 5, failure_reason: null, payment_event_seq: '4' });
     expect((await historyOf(a.o.id)).at(-1)).toEqual({ seq: 5, from_status: 'RESERVED', to_status: 'UNKNOWN', cause: 'T12', actor: PAYMENT_ACTOR, occurred_at: new Date(at) });
     expect((await outboxOf(a.o.eventId)).map((x) => x.event.type)).toEqual(outboxBefore);
-    expect(await jobOf(a.o.id)).toBeUndefined();
+    expect(await jobOf(a.o.id)).toMatchObject({ event_id: a.o.eventId, step: 'AWAIT' });
+    expect((await pullColsOf(a.o.id))?.pull_next_at).toEqual(new Date(at + AFTER_UNKNOWN_MS));
     expect((await salesOf(a.o.eventId)).map((x) => x.status)).toEqual(['PENDING', 'PENDING']);
     expect(await quotaOf(a.o.accountId, a.o.eventId)).toEqual({ used: 2, limit_count: LIMIT });
     expect(await issueJobOf(a.o.id)).toBeUndefined();
     // 남은 결제 참조도 지운다(리뷰 M1: UNKNOWN 사건은 승인 명령이 접수됐다는 뜻)
     expect(await attemptRefs(a.attemptId)).toEqual(NO_REFS);
-    expect(await writesOfTx(a.o.id, 'T12')).toEqual(['DELETE order_saga_job', 'UPDATE payment_attempt', 'UPDATE purchase_order', 'INSERT order_event']);
+    expect(await writesOfTx(a.o.id, 'T12')).toEqual(['UPDATE order_saga_job', 'UPDATE payment_attempt', 'UPDATE purchase_order', 'INSERT order_event']);
   });
 
-  test('T10(RESERVED → AWAITING_DEPOSIT): 작업 행을 지우고 AWAITING_DEPOSIT 사건이 Outbox 마지막이며 판매 행 PENDING은 그대로다 [ASVS v5.0.0-2.3.1]', async () => {
+  test('T10(RESERVED → AWAITING_DEPOSIT): 작업 행을 AWAIT로 남기고(pull_next_at = 지금 + 60초) AWAITING_DEPOSIT 사건이 Outbox 마지막이며 판매 행 PENDING은 그대로다 [ASVS v5.0.0-2.3.1] [ASVS v5.0.0-2.3.3]', async () => {
     const s = fresh();
     const a = await reserved(s);
     const at = s.clock.now();
@@ -729,17 +739,19 @@ describe('DrizzlePaymentResults.mark(한 트랜잭션: 작업 행 지우기 → 
     const outbox = await outboxOf(a.o.eventId);
     expect(outbox.at(-1)!.event).toMatchObject(laterEvent(a.o, 'AWAITING_DEPOSIT', 5, at, false));
     expect(contractIssues(outbox.at(-1)!.event)).toEqual([]);
-    expect(await jobOf(a.o.id)).toBeUndefined();
+    expect(await jobOf(a.o.id)).toMatchObject({ event_id: a.o.eventId, step: 'AWAIT' });
+    expect((await pullColsOf(a.o.id))?.pull_next_at).toEqual(new Date(at + AFTER_DEPOSIT_MS));
     expect((await salesOf(a.o.eventId)).map((x) => x.status)).toEqual(['PENDING', 'PENDING']);
     expect(await attemptRefs(a.attemptId)).toEqual(NO_REFS);
-    expect(await writesOfTx(a.o.id, 'T10')).toEqual(['DELETE order_saga_job', 'UPDATE payment_attempt', 'UPDATE purchase_order', 'INSERT order_event', 'INSERT outbox']);
+    expect(await writesOfTx(a.o.id, 'T10')).toEqual(['UPDATE order_saga_job', 'UPDATE payment_attempt', 'UPDATE purchase_order', 'INSERT order_event', 'INSERT outbox']);
   });
 
-  test('M1_Saga가 승인 명령 RETRYABLE로 다시 하기를 기다리는 사이(작업 CONFIRM·보낸 시각 있음·결제 참조 남음) AWAITING_DEPOSIT이 오면 T10 뒤 작업 행이 없고 결제 참조가 비어 있다 [ASVS v5.0.0-14.2.4]', async () => {
+  test('M1_Saga가 승인 명령 RETRYABLE로 다시 하기를 기다리는 사이(작업 CONFIRM·보낸 시각 있음·결제 참조 남음) AWAITING_DEPOSIT이 오면 T10 뒤 작업 행이 AWAIT(보낸 시각 그대로)이고 결제 참조가 비어 있다 [ASVS v5.0.0-14.2.4]', async () => {
     const s = fresh();
     const a = await reserved(s, { refs: portoneRefs() });
     const held = await s.saga.claim(a.o.id, LEASE);
     expect(await s.saga.markConfirmSent(a.o.id, held!.leaseUntilMs)).toBe(true);
+    const sentAt = s.clock.now();
     expect(await s.saga.reschedule(a.o.id, s.clock.now() + 2_000, held!.leaseUntilMs)).toBe(true);
     expect(await jobOf(a.o.id)).toMatchObject({ step: 'CONFIRM', attempts: 1, lease_until: null });
     expect(await attemptRefs(a.attemptId)).not.toEqual(NO_REFS);
@@ -747,7 +759,8 @@ describe('DrizzlePaymentResults.mark(한 트랜잭션: 작업 행 지우기 → 
     expect(await s.results.mark(markOf(a, { transition: 'T10' }))).toEqual({ status: 'APPLIED' });
 
     expect(await orderRow(a.o.id)).toMatchObject({ status: 'AWAITING_DEPOSIT', payment_event_seq: '1' });
-    expect(await jobOf(a.o.id)).toBeUndefined();
+    expect((await jobOf(a.o.id))?.step).toBe('AWAIT');
+    expect(await pullColsOf(a.o.id)).toEqual({ confirm_sent_at: new Date(sentAt), pull_next_at: new Date(s.clock.now() + AFTER_DEPOSIT_MS) });
     expect(await attemptRefs(a.attemptId)).toEqual(NO_REFS);
     // 다시 하기 기한이 와도 집을 작업이 없다(승인 명령을 다시 보내지 않는다)
     s.clock.advance(3_000);
@@ -764,14 +777,20 @@ describe('DrizzlePaymentResults.mark(한 트랜잭션: 작업 행 지우기 → 
     expect(await traceOf(a)).toEqual(before);
   });
 
-  test('T14(UNKNOWN → AWAITING_DEPOSIT): 작업 행이 없어도 바꾼다(순번이 더 커야 한다)', async () => {
+  test('T14(UNKNOWN → AWAITING_DEPOSIT): T12가 남긴 AWAIT 행을 그대로 두고 다음 점검을 입금 대기 간격(지금 + 60초)으로 바꾼다(순번이 더 커야 한다)', async () => {
     const s = fresh();
     const a = await reserved(s);
     expect(await s.results.mark(markOf(a, { transition: 'T12', paymentEventSeq: 1 }))).toEqual({ status: 'APPLIED' });
+    expect((await pullColsOf(a.o.id))?.pull_next_at).toEqual(new Date(s.clock.now() + AFTER_UNKNOWN_MS));
     expect(await s.results.mark(markOf(a, { transition: 'T14', paymentEventSeq: 1 }))).toMatchObject({ status: 'STALE', reason: 'PAYMENT_SEQ' });
+    // 되돌린 쓰기는 다음 점검 시각도 남기지 않는다
+    expect((await pullColsOf(a.o.id))?.pull_next_at).toEqual(new Date(s.clock.now() + AFTER_UNKNOWN_MS));
+    s.clock.advance(1_000);
     expect(await s.results.mark(markOf(a, { transition: 'T14', paymentEventSeq: 2 }))).toEqual({ status: 'APPLIED' });
     expect(await orderRow(a.o.id)).toMatchObject({ status: 'AWAITING_DEPOSIT', payment_event_seq: '2' });
     expect((await historyOf(a.o.id)).slice(-2).map((h) => h.cause)).toEqual(['T12', 'T14']);
+    expect((await jobOf(a.o.id))?.step).toBe('AWAIT');
+    expect((await pullColsOf(a.o.id))?.pull_next_at).toEqual(new Date(s.clock.now() + AFTER_DEPOSIT_MS));
   });
 
   test('STALE STATUS(ACCEPTED 주문에 T12): 되돌려 작업 행 RESERVE가 그대로다. 입력이 틀리면(상태만 갈래가 아닌 전이·순번 0) RangeError [ASVS v5.0.0-2.2.1] [ASVS v5.0.0-15.4.1]', async () => {

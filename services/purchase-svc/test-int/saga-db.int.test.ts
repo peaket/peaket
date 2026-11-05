@@ -314,6 +314,18 @@ describe('DrizzleSaga SagaJobs.claimDue(짧은 트랜잭션: 기한·임대 조�
     expect((await s.saga.claimDue(3, LEASE)).map((j) => j.orderId)).toEqual(jobs.slice(3).map((o) => o.id));
   });
 
+  test('변이 검토 PRF-171_AWAIT 행(승인 명령 접수 뒤 결과 기다림)은 기한이 됐고 임대가 비었어도 claimDue·claim이 집지 않고 임대도 쓰지 않는다(결과 당기기가 고른다, PRF-171 설계 2) [ASVS v5.0.0-15.4.1]', async () => {
+    const s = fresh();
+    const now = s.clock.now();
+    const waiting = await putJob(s, { nextAtMs: now - 9_000, step: 'AWAIT' });
+    const confirm = await putJob(s, { nextAtMs: now - 1_000, step: 'CONFIRM' });
+
+    expect((await s.saga.claimDue(10, LEASE)).map((j) => j.orderId)).toEqual([confirm.id]);
+    expect(await s.saga.claim(waiting.id, LEASE)).toBeUndefined();
+    expect((await jobOf(waiting.id))?.lease_until).toBeNull();
+    expect((await jobOf(waiting.id))?.step).toBe('AWAIT');
+  });
+
   test('다른 연결이 행 잠금을 쥔 행은 기다리지 않고 건너뛴다(SKIP LOCKED) [ASVS v5.0.0-15.4.1]', async () => {
     const s = fresh();
     const now = s.clock.now();
@@ -854,9 +866,9 @@ describe('DrizzleSaga SagaFailures.fail(한 트랜잭션: 작업 행 RELEASE →
     expect(await s.saga.fail(failOf(a))).toEqual({ status: 'FAILED' });
   });
 
-  // 리뷰 고침 H1 변형·④(2026-11-05): fail의 첫 문장은 작업 행(WHERE step = 기대 단계, 자기 임대)이다. 다른 실행이 승인을 접수시키고 작업을 지운 뒤
+  // 리뷰 고침 H1 변형·④(2026-11-05): fail의 첫 문장은 작업 행(WHERE step = 기대 단계, 자기 임대)이다. 다른 실행이 승인을 접수시키고 작업을 AWAIT로 바꾼 뒤(PRF-171)
   // 늦은 실행이 T11을 쓰는 길이 막히고, 판매 예약과 잠금 차례(작업 행 → 주문 행)가 같아진다
-  test('H1변형_④_A가 CONFIRM 작업을 쥐고 있다가 임대가 지난 사이 B가 집어 승인 뒤 정리(done)로 작업 행을 지우면, A의 늦은 T11은 STALE이고 주문·판매 행·한도가 그대로다 [ASVS v5.0.0-15.4.1]', async () => {
+  test('H1변형_④_A가 CONFIRM 작업을 쥐고 있다가 임대가 지난 사이 B가 집어 승인 뒤 정리(done)로 작업 행을 AWAIT로 바꾸면(PRF-171), A의 늦은 T11은 STALE이고 주문·판매 행·한도가 그대로다 [ASVS v5.0.0-15.4.1]', async () => {
     const s = fresh();
     const a = await accepted(s);
     await reservedByHand(s, a);
@@ -902,23 +914,31 @@ describe('DrizzleSaga SagaFailures.fail(한 트랜잭션: 작업 행 RELEASE →
 
 // ───────────────────────────── ConfirmSent ─────────────────────────────
 
-describe('DrizzleSaga ConfirmSent.done(한 트랜잭션: 결제 참조 지우기 → 작업 지우기)', () => {
+// PRF-171(추천 적용 2026-11-06, payment §2 단계 CONFIRM): 승인 명령이 접수되면 작업 행을 지우지 않고 AWAIT로 남긴다(confirm_sent_at 그대로, 결과 당기기가 찾는다)
+describe('DrizzleSaga ConfirmSent.done(한 트랜잭션: 결제 참조 지우기 → 작업 행 AWAIT)', () => {
   test.each<[string, () => PaymentRefs]>([
     ['토스', tossRefs],
     ['포트원', portoneRefs],
-  ])('%s: 결제 키·거래 ID·토큰을 비우고 작업 행을 지워 true, 다시 부르면 false이며 주문 상태는 그대로 RESERVED다 [ASVS v5.0.0-14.2.4]', async (_label, refsOf) => {
+  ])('%s: 결제 키·거래 ID·토큰을 비우고 작업 행을 지우지 않고 AWAIT로 남겨(confirm_sent_at 그대로) true, 다시 부르면 false이며 주문 상태는 그대로 RESERVED다 [ASVS v5.0.0-14.2.4] [ASVS v5.0.0-2.3.3]', async (_label, refsOf) => {
     const s = fresh();
     const a = await accepted(s, { refs: refsOf() });
     await reservedByHand(s, a);
+    expect(await s.saga.markConfirmSent(a.o.id)).toBe(true);
+    const sentAt = await sentAtOf(a.o.id);
+    expect(sentAt).toEqual(new Date(s.clock.now()));
     const before = await traceOf(a);
     expect(before.refs).not.toEqual({ pg_payment_key: null, pg_tx_id: null, pg_payment_token: null });
+    s.clock.advance(1_000);
 
     expect(await s.saga.done(a.o.id)).toBe(true);
 
     expect(await attemptRefs(a.attemptId)).toEqual({ pg_payment_key: null, pg_tx_id: null, pg_payment_token: null });
-    expect(await jobOf(a.o.id)).toBeUndefined();
-    expect(await traceOf(a)).toEqual({ ...before, job: undefined, refs: { pg_payment_key: null, pg_tx_id: null, pg_payment_token: null } });
+    expect((await jobOf(a.o.id))?.step).toBe('AWAIT');
+    expect(await sentAtOf(a.o.id)).toEqual(sentAt);
+    // AWAIT 행의 attempts·next_attempt_at·임대는 정본에 없어 보지 않는다
+    expect({ ...(await traceOf(a)), job: undefined }).toEqual({ ...before, job: undefined, refs: { pg_payment_key: null, pg_tx_id: null, pg_payment_token: null } });
     expect(await s.saga.done(a.o.id)).toBe(false);
+    expect((await jobOf(a.o.id))?.step).toBe('AWAIT');
   });
 
   test('작업 행이 없으면(다른 실행이 먼저 끝냄) false이고 결제 참조를 지우지 않는다', async () => {
@@ -939,7 +959,7 @@ describe('DrizzleSaga ConfirmSent.done(한 트랜잭션: 결제 참조 지우기
     expect(await s.saga.done(a.o.id, held!.leaseUntilMs! + 1)).toBe(false);
     expect(await traceOf(a)).toEqual(before);
     expect(await s.saga.done(a.o.id, held!.leaseUntilMs)).toBe(true);
-    expect(await jobOf(a.o.id)).toBeUndefined();
+    expect((await jobOf(a.o.id))?.step).toBe('AWAIT');
   });
 });
 

@@ -1,6 +1,7 @@
 // 주문 Saga 1단계를 처음부터 끝까지 돈다: 실제 PostgreSQL 18·실제 Valkey 8.1, 승인 명령만 대역(BUILD_ORDER PRF-165).
 // 홀드(홀드 Lua) → 주문 생성(DrizzleOrderStore.createOrder) → 결제 시도 READY 직접 넣기 → 결제 접수(DrizzleOrderAccepts.accept, 판 번호는 회차 슬롯 읽기)
-// → 실행기(OrderSagaRunner.runOne·kick: 묶기 Lua → 판매 예약 트랜잭션 → 승인 명령 대역 → 결제 참조·작업 지우기).
+// → 실행기(OrderSagaRunner.runOne·kick: 묶기 Lua → 판매 예약 트랜잭션 → 승인 명령 대역 → 결제 참조 지우기·작업 행 AWAIT).
+// 승인 명령이 접수되면 작업 행을 지우지 않고 AWAIT로 남긴다(결과 당기기가 찾는다, payment §2 단계 CONFIRM, 추천 적용 2026-11-06, BUILD_ORDER PRF-171).
 // 정본: docs/features/payment.md §2 'Saga 1단계의 첫 구현'(실행기·RESERVE ①~③·CONFIRM·실패 해제와 늦은 묶기·좌석 묶기 입력의 구매 세션 ID·실패 사유)·
 // '결제 접수의 첫 구현'(결제 참조의 자리), 시험 표 P-T10(홀드 만료 후 결제 접수)·seat-hold.md S-T7, docs/data.md §5 'Saga 1단계'·§3 실패 표시 키.
 //
@@ -318,8 +319,8 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs: number): Promis
 
 // ───────────────────────────── 행복 길 ─────────────────────────────
 
-describe('Saga 1단계 행복 길(묶기 → 판매 예약 → 승인 명령 → 결제 참조·작업 지우기)', () => {
-  test('토스: runOne이 DONE이고 주문 RESERVED·판매 행 PENDING·좌석 묶음(만료 인덱스 밖), 승인 명령 한 번(결제 키·서버 금액), 결제 참조 비움·작업 행 없음 [ASVS v5.0.0-2.3.1] [ASVS v5.0.0-14.2.4]', async () => {
+describe('Saga 1단계 행복 길(묶기 → 판매 예약 → 승인 명령 → 결제 참조 지우기·작업 행 AWAIT)', () => {
+  test('토스: runOne이 DONE이고 주문 RESERVED·판매 행 PENDING·좌석 묶음(만료 인덱스 밖), 승인 명령 한 번(결제 키·서버 금액), 결제 참조 비움·작업 행 AWAIT(PRF-171) [ASVS v5.0.0-2.3.1] [ASVS v5.0.0-14.2.4]', async () => {
     const a = assemble();
     const w = await world();
     const p = await placeAndAccept(a, w);
@@ -341,10 +342,10 @@ describe('Saga 1단계 행복 길(묶기 → 판매 예약 → 승인 명령 →
     expect(c.deadlineMs).toBeGreaterThanOrEqual(1);
     expect(c.deadlineMs).toBeLessThanOrEqual(200);
     expect(await attemptRefs(p.attemptId)).toEqual(NO_REFS);
-    expect(await jobOf(p.o.id)).toBeUndefined();
+    expect(await jobOf(p.o.id)).toMatchObject({ step: 'AWAIT' });
     expect(a.log.lines).toEqual([]);
-    // 끝난 작업을 다시 부르면 집을 행이 없다
-    expect(await a.runner.runOne(p.o.id)).toEqual({ kind: 'SKIPPED', reason: 'NO_JOB' });
+    // 끝난 작업을 다시 부르면 집지 않는다(AWAIT 행은 Saga 잡기가 고르지 않는다. 집지 못한 까닭은 정본에 없어 SKIPPED만 본다)
+    expect((await a.runner.runOne(p.o.id)).kind).toBe('SKIPPED');
     expect(a.confirms.calls).toHaveLength(1);
   });
 
@@ -358,12 +359,12 @@ describe('Saga 1단계 행복 길(묶기 → 판매 예약 → 승인 명령 →
     expect(await attemptRefs(p.attemptId)).toEqual(NO_REFS);
   });
 
-  test('kick: 접수 직후 깨우면 기다리지 않고 비동기로 한 번 돌아 작업 행이 사라지고 RESERVED다. stop은 돌던 kick을 기다린다', async () => {
+  test('kick: 접수 직후 깨우면 기다리지 않고 비동기로 한 번 돌아 작업 행이 AWAIT가 되고 RESERVED다. stop은 돌던 kick을 기다린다', async () => {
     const a = assemble();
     const w = await world();
     const p = await placeAndAccept(a, w);
     expect(() => a.runner.kick(p.o.id)).not.toThrow();
-    expect(await waitFor(async () => (await jobOf(p.o.id)) === undefined, 10_000)).toBe(true);
+    expect(await waitFor(async () => (await jobOf(p.o.id))?.step === 'AWAIT', 10_000)).toBe(true);
     await a.runner.stop();
     expect((await orderRow(p.o.id))?.status).toBe('RESERVED');
     expect(a.confirms.calls.map((c) => c.orderId)).toEqual([p.o.id]);
@@ -375,7 +376,7 @@ describe('Saga 1단계 행복 길(묶기 → 판매 예약 → 승인 명령 →
     const p = await placeAndAccept(a, w);
     expect(await a.runner.pollOnce()).toBeGreaterThanOrEqual(1);
     expect((await orderRow(p.o.id))?.status).toBe('RESERVED');
-    expect(await jobOf(p.o.id)).toBeUndefined();
+    expect(await jobOf(p.o.id)).toMatchObject({ step: 'AWAIT' });
   });
 
   test('구매 세션 ID가 UUID가 아닌 입장 토큰 jti 모양이어도 묶기·판매 예약·승인까지 간다(payment §2 좌석 묶기 입력의 구매 세션 ID)', async () => {

@@ -16,7 +16,8 @@
 //   그 밖에는 ConfirmPayment(데드라인 min(200ms, 기한까지 남은 시간), 기한이 지났으면 200ms)를 보낸다. 보내기 바로 전에 confirm_sent_at을 적고 커밋한다
 //   (어댑터의 beforeSend. 적지 못하면 보내지 않고 SKIPPED LEASED). 한 번이라도 보냈으면 기한이 지나도 혼자 T11을 하지 않고 같은 주문 ID로 계속 다시 보낸다
 //   (결과를 모르는 명령이 payment-svc에 적혔을 수 있다. 결과는 trade.payments로 온다, PRF-163).
-//   ACCEPTED면 ConfirmSent.done(작업 행·결제 참조 지우기) → DONE, RETRYABLE이면 다시 하기(1초에서 두 배, 최대 10초),
+//   ACCEPTED면 ConfirmSent.done(결제 참조 지우기, 작업 행은 지우지 않고 AWAIT로 남긴다. 결과 당기기가 찾는다, PRF-171) → DONE,
+//   RETRYABLE이면 다시 하기(1초에서 두 배, 최대 10초),
 //   REJECTED면 SEV2 오류 로그 뒤 작업을 SAGA_CONFIRM_PARK_MS(1시간 [가정]) 멈춘다(결과 당기기 PRF-171이 맞춘다)
 // 단계 RELEASE(releaseStep, 리뷰 M4): 실패 기록 뒤 실패 해제가 끝나지 못한 작업. 해제가 OK이거나 회차 키 수명 뒤의 NOT_READY면 작업 행을 지우고, 아니면 다시 한다.
 // 실패의 차례: DB 실패 기록(SagaFailures.fail, 커밋. 작업 행 RELEASE) → 실패 해제(OrderSeatPins.releaseFailed) → 끝나면 작업 행 지우기, 못 끝나면 warn 한 줄과 다시 하기.
@@ -340,7 +341,8 @@ export class OrderSagaRunner {
     }
     switch (outcome.status) {
       case 'ACCEPTED':
-        // 명령이 접수됐다: 작업 행과 결제 참조를 지운다(결과는 trade.payments로 받는다, PRF-163). 행이 이미 없으면 다른 실행이 먼저 끝냈다
+        // 명령이 접수됐다: 결제 참조를 지우고 작업 행을 AWAIT로 남긴다(결과는 trade.payments로 받고, 늦으면 결과 당기기가 이 행으로 찾는다, PRF-163·PRF-171).
+        // CONFIRM 행이 이미 없으면 다른 실행이 먼저 끝냈거나 결과 반영이 먼저 바꿨다. Saga 잡기는 AWAIT 행을 다시 집지 않는다
         await this.deps.confirmSent.done(order.orderId, job.leaseUntilMs);
         return { kind: 'DONE' };
       case 'RETRYABLE':

@@ -1,9 +1,11 @@
 // 결제 결과 반영의 purchase DB 쪽(PaymentResultReads·PaymentResultWrites, docs/features/payment.md §2 '결제 결과 반영의 첫 구현',
 // docs/data.md §5 '결제 결과 반영', BUILD_ORDER PRF-163).
-// - 승인(approve, READ COMMITTED): 작업 행 정리(있으면 지우기) → 주문 행 잠금·상태·순번 확인 → 결제 참조 지우기 → 판매 행 PENDING → SOLD(inventory markSoldIn,
-//   바꾼 수 = 좌석 수여야 한다) → ticket_issue_job 한 행 → T9·T13·T16.
-// - 실패(fail, READ COMMITTED): 작업 행 RELEASE(없으면 넣기) → 주문 failure_reason → 판매 행 PENDING 지우기(inventory releasePendingIn) → 결제 참조 지우기 → T11·T15·T17.
-// - 상태만(mark): 작업 행 지우기(있으면) → 주문 행 잠금·상태·순번 확인 → 결제 참조 지우기(리뷰 M1) → T10·T12·T14. 판매 행 PENDING은 그대로 둔다.
+// - 승인(approve, READ COMMITTED): 작업 행 정리(있으면 단계와 상관없이 지우기. 결과를 기다리던 AWAIT 행도 같다, PRF-171) → 주문 행 잠금·상태·순번 확인
+//   → 결제 참조 지우기 → 판매 행 PENDING → SOLD(inventory markSoldIn, 바꾼 수 = 좌석 수여야 한다) → ticket_issue_job 한 행 → T9·T13·T16.
+// - 실패(fail, READ COMMITTED): 작업 행 RELEASE(단계와 상관없이, 없으면 넣기) → 주문 failure_reason → 판매 행 PENDING 지우기(inventory releasePendingIn) → 결제 참조 지우기 → T11·T15·T17.
+// - 상태만(mark, 중간 결과): 작업 행을 지우지 않고 AWAIT로 남기기(있으면. pull_next_at = 지금 + 30초 [가정](T12)·60초 [가정](T10·T14), PRF-171 '중간 결과 뒤에도 당긴다')
+//   → 주문 행 잠금·상태·순번 확인 → 결제 참조 지우기(리뷰 M1) → T10·T12·T14. 판매 행 PENDING은 그대로 둔다.
+//   최종 결과(승인·실패)만 작업 행을 지우거나 RELEASE로 바꾼다. 그래서 사건 길이 멈춘 동안에도 결과 당기기가 뒤따르는 최종 결과를 받는다.
 // 잠금 차례는 Saga(drizzle-saga.ts)와 같이 작업 행 → 주문 행이 먼저다. 그 뒤 실패는 한도 행 → 좌석 행 → 결제 시도 행, 승인은 결제 시도 행 → 좌석 행이다
 // (쓰기 차례 시험이 정한 차례. 주문 행을 먼저 쥐므로 엇갈려도 교착하지 않는다). 겹친 Saga CONFIRM 실행은 작업 행이 바뀌어 0행이 되고 물러난다.
 // 주문 상태는 주문 전이 함수(DrizzleOrderStore.transition, 결제 사건 순번 조건)로만 바꾼다(상태 SQL은 drizzle-orders.ts에만, test/order-status-sql.test.ts).
@@ -20,9 +22,14 @@
 // - 승인·실패·상태만의 결제 참조 지우기는 남은 칸이 있을 때만 행을 쓴다(Saga done이 먼저 지웠으면 그대로).
 // - 실패의 작업 행은 단계·임대와 상관없이 RELEASE(attempts 0, 다음 시각 지금, 임대 비움)로 바꾼다. 승인 명령 보낸 시각은 그대로 둔다.
 // - 실패 사유 쓰기는 출발 상태이고 순번이 더 클 때만 한다. 0행이면 주문 전이 함수와 같은 규칙(NOT_FOUND·STATUS·PAYMENT_SEQ)으로 까닭을 가른다.
+// - 상태만의 작업 행은 단계·임대와 상관없이 AWAIT로 바꾸고 pull_next_at과 next_attempt_at = 'infinity'를 쓴다(며칠 남을 수 있는 AWAIT 행이 Saga 쓸기 색인의
+//   차례 앞을 막지 않게, 2026-11-06 코드 리뷰 M1. Saga 칸 attempts·lease_until·confirm_sent_at은 그대로다. Saga 잡기가 AWAIT 행을 고르지 않고,
+//   겹친 Saga CONFIRM 실행의 정리(done)는 CONFIRM 조건이라, 다시 하기(reschedule)는 AWAIT 행을 빼므로 0행이 된다). 작업 행이 없으면 넣지 않는다
+//   (접수 뒤에는 늘 작업 행이 있다. 없는 것은 손질·옛 행의 길이라 당기기 대상이 되지 않을 뿐이다).
 import type { Clock, Database, DbTransaction } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import { ACTOR_PATTERN, transitionById, type OrderStatus } from '../../domain/order.js';
+import { PAYMENT_PULL_AFTER_DEPOSIT_MS, PAYMENT_PULL_AFTER_UNKNOWN_MS } from '../../domain/payment-pull.js';
 import { PAYMENT_FAILURE_CATEGORIES } from '../../domain/payment-result.js';
 import type {
   PaymentApproveInput,
@@ -243,7 +250,8 @@ export class DrizzlePaymentResults implements PaymentResultReads, PaymentResultW
         where order_id = ${input.orderId}::uuid
         returning order_id`);
       if (job.rows.length === 0) {
-        // 작업 행이 없다(T12·T10이 지웠다): 주문 행이 있을 때만 RELEASE 행을 넣는다(없는 주문을 외래 키 위반으로 던지지 않는다)
+        // 작업 행이 없다(손질·PRF-171 전의 옛 길. 지금은 T12·T10·T14도 작업 행을 AWAIT로 남긴다): 주문 행이 있을 때만 RELEASE 행을 넣는다
+        // (없는 주문을 외래 키 위반으로 던지지 않는다)
         if (!(await orderExists(tx, input.orderId))) throw new PaymentResultRollback({ status: 'STALE', reason: 'NOT_FOUND' });
         await tx.execute(sql`
           insert into order_saga_job (order_id, event_id, step, attempts, next_attempt_at, lease_until, created_at)
@@ -271,8 +279,13 @@ export class DrizzlePaymentResults implements PaymentResultReads, PaymentResultW
     assertMark(input);
     const from = fromOf(input.transition);
     return this.#tx(async (tx) => {
-      // 첫 문장: 작업 행 지우기(있으면. 결과는 payment-svc 조회·가상계좌 단계가 정한다). 판매 행 PENDING은 그대로다
-      await tx.execute(sql`delete from order_saga_job where order_id = ${input.orderId}::uuid`);
+      // 첫 문장: 작업 행을 지우지 않고 AWAIT로 남겨 다음 당기기 점검을 둔다(있으면, 잠금 차례 작업 행 → 주문 행. 중간 결과라 최종 결과를 당겨 받는다, PRF-171).
+      // Saga의 next_attempt_at은 무한대로 둔다(Saga 쓸기 색인의 차례 앞을 막지 않게, 리뷰 고침 M1). 판매 행 PENDING은 그대로다.
+      // STALE이면 트랜잭션째 되돌리므로 작업 행도 그대로 남는다
+      const pullNextAt = new Date(this.o.clock.now() + (input.transition === 'T12' ? PAYMENT_PULL_AFTER_UNKNOWN_MS : PAYMENT_PULL_AFTER_DEPOSIT_MS));
+      await tx.execute(sql`
+        update order_saga_job set step = 'AWAIT', pull_next_at = ${pullNextAt}::timestamptz, next_attempt_at = 'infinity'::timestamptz
+        where order_id = ${input.orderId}::uuid`);
       // 둘째: 주문 행을 잠그고 상태·순번을 본다(잠금 차례 작업 행 → 주문 행 → 결제 시도 행)
       const stale = await lockSource(tx, input.orderId, from, input.paymentEventSeq);
       if (stale) throw new PaymentResultRollback(stale);

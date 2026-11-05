@@ -9,13 +9,18 @@
 // 발권 주소는 PEAKET_TICKET_GRPC_ADDR(차단기 ticket-svc, 없으면 local·ci만 '늘 발권' 대역과 경고 한 줄, 그 밖은 시작 실패)이고, 지표 ticket_issue_*를 /metrics에 붙인다.
 // 발권 큐 쓰기는 실행기 전용 일반 풀(연결 4개 [가정], purchase-svc-ticket-issue)을 쓴다(ticket-svc가 멈춰 실패가 몰려도 핫패스 풀을 잠그지 않게, 리뷰 고침 H1).
 // 결제 결과 반영이 승인을 커밋하면 그 주문을 곧바로 깨우고(onApproved → kick), 발권해 CONFIRMED가 되면 이 파드의 결제 결과 기다림을 깨운다(onOrderChanged → notify).
+// purchase DB가 있으면 결제 결과 당기기(PaymentResultPuller, PRF-171, ADR-0140)도 이 API 파드에서 켜고 끈다. 결과 사건이 늦은 주문(order_saga_job CONFIRM·AWAIT 행)을
+// payment-svc BatchGetPayments(주소 PEAKET_PAYMENT_GRPC_ADDR, 차단기 payment-svc-batch, 없으면 local·ci만 '기록 없음' 대역과 경고 한 줄)로 묻고, trade.payments 소비자와
+// 같은 결제 결과 반영 쓰임새(ApplyPaymentResult)로 반영한다. 그래서 그 쓰임새와 소비자 전용 풀은 소비자를 켜지 않은 local·ci에서도 만든다.
+// 잡기·미루기는 당기기 전용 일반 풀(연결 2개 [가정], purchase-svc-payment-pull)을 쓰고, 지표 payment_result_pull*를 /metrics에 붙인다.
 // 구매 세션은 좌석 Redis의 s:jti·s:session과 서버 고정 ECDH 개인키(PEAKET_PURCHASE_ECDH_KEY)로 확인한다(BUILD_ORDER PRF-136). 입장 토큰은 공개키 묶음
 // (PEAKET_ADMISSION_JWKS)과 발급자(PEAKET_ADMISSION_ISSUER)로 확인하고, 스냅샷 API가 입장 토큰의 첫 사용에 구매 세션을 연다(PRF-137).
 // 좌석맵 판은 환경 값 PEAKET_SEATMAP_DIR 폴더의 {eventId}.json이다(docs/features/seat-hold.md §2 '운영 좌석맵 판'). 30초 [가정]마다 읽은 회차를 다시 읽는다.
 // purchase DB가 있으면 Kafka 소비자 둘(결제 결과 반영 trade.payments·홀드 원장 적재 trade.seats, BUILD_ORDER PRF-164, src/consumers.ts)을 듣기 시작한 뒤 켠다.
 // 두 소비자는 핫패스 풀과 따로 소비자 전용 일반 풀(연결 4개 [가정], purchase-svc-consumers)을 쓴다(밀린 사건을 한꺼번에 처리해도 홀드·주문 요청이 풀 대기 초과를 받지 않게).
-// 브로커 주소(PEAKET_KAFKA_BROKERS)가 없으면 local·ci만 소비자 없이 뜨고(시작 로그 경고), 그 밖의 환경은 시작하지 않는다. SIGTERM에서는 소비자를 가장 먼저 멈추고,
-// 그다음 Saga·발권 실행기·기다림 표(돌던 호출과 그 뒤 쓰기를 기다린다)를, 서비스를 닫은 뒤 gRPC 클라이언트·차단기와 연결을 닫는다.
+// 브로커 주소(PEAKET_KAFKA_BROKERS)가 없으면 local·ci만 소비자 없이 뜨고(시작 로그 경고), 그 밖의 환경은 시작하지 않는다. SIGTERM에서는 소비자와 결과 당기기 실행기를
+// 가장 먼저 멈추고(둘 다 결제 결과를 반영해 뒤의 셋을 깨운다), 그다음 Saga·발권 실행기·기다림 표(돌던 호출과 그 뒤 쓰기를 기다린다)를, 서비스를 닫은 뒤
+// gRPC 클라이언트·차단기와 연결을 닫는다.
 // 오류 로그에는 플랫폼 errorSummary(이름·글, 쿼리 매개변수 값은 뺀다)만 싣는다.
 // 좌석 Stream 릴레이·다시 만들기 반복·정비 일은 이 파일이 아니라 릴레이 프로세스(src/relay.ts, purchase-svc-outbox-relay 배포)가 돈다.
 // HoldAttempt 보내기(BAS-030)는 아직 없어 시도 기록은 버린다.
@@ -31,6 +36,7 @@ import {
   DrizzleOrderAccepts,
   DrizzleOrderStore,
   DrizzleOrderWrites,
+  DrizzlePaymentPull,
   DrizzlePaymentStatus,
   DrizzleSaga,
   DrizzleTicketIssue,
@@ -39,13 +45,19 @@ import {
   InventoryOrderSeatPins,
   InventoryOrderSessions,
   InventorySeatSlots,
+  LoggerPaymentPullLog,
   LoggerSagaLog,
   LoggerTicketIssueLog,
   missingContactRefs,
   OrderSagaRunner,
+  PAYMENT_PULL_BREAKER,
   paymentConfirmsFromEnv,
+  paymentPullDatabaseOptions,
+  paymentResultReaderFromEnv,
+  PaymentResultPuller,
   PaymentStatusWaitTable,
   PromOrderSignals,
+  PromPaymentPullSignals,
   PromTicketIssueSignals,
   RedisBookingRestrictions,
   SeatMapSagaConfigs,
@@ -243,31 +255,33 @@ if (booking && database && databaseUrl) {
 }
 // Kafka 소비자 둘(BUILD_ORDER PRF-164, docs/features/seat-hold.md §6 '릴레이 프로세스와 조립의 첫 구현'): purchase DB(와 Saga·발권 실행기·결제 결과 기다림 표)가 있을 때만
 // 설정을 읽는다(DB 없이 뜨는 동작은 그대로다). 브로커 주소가 없으면 local·ci만 경고 한 줄로 끄고, 그 밖의 환경은 여기서 던진다(시작 실패, 듣기 전).
-// 소비자를 켤 때만 소비자 전용 일반 풀(consumerDatabaseOptions)을 만들어 원장 적재·결제 결과 반영(결과·판매 저장소)·보류 표에 쓰고, 종료 때 닫는다(리뷰 고침 M4).
+// 결제 결과 반영 쓰임새는 소비자와 결제 결과 당기기(PRF-171)가 함께 쓰므로 소비자를 켜는지와 상관없이 만든다: 소비자 전용 일반 풀(consumerDatabaseOptions)을 만들어
+// 결제 결과 반영(결과·판매 저장소)에 쓰고, 소비자를 켜면 원장 적재·보류 표도 같은 풀을 쓴다. 종료 때 닫는다(리뷰 고침 M4).
 // 결제 결과 반영은 paymentResultApply로 조립한다(test-int/consumers.int.test.ts와 같은 함수. onOrderChanged = 이 파드의 기다림 표 notify, 필수.
 // onApproved = 이 파드의 발권 실행기 kick: 승인 커밋 뒤 그 주문을 곧바로 발권한다, PRF-170)
 let consumerOptions: PurchaseConsumersOptions | undefined;
 let consumerDatabase: Database | undefined;
+let applyPaymentResult: ReturnType<typeof paymentResultApply> | undefined;
 if (databaseUrl && database && sagaRunner && ticketRunner && paymentStatusWaiters) {
   const issueRunner = ticketRunner;
   const kafka = kafkaConsumersFromEnv(process.env, SERVICE);
   if (!kafka.enabled) service.logger.warn({ dep: 'kafka' }, kafka.warning);
-  else {
-    const consumerDb = createDatabase(consumerDatabaseOptions(databaseUrl));
-    consumerDatabase = consumerDb;
-    const applyPaymentResult = paymentResultApply({
-      database: consumerDb,
-      store: orderStore,
-      sessions: {
-        end: new EndPurchaseSession({ store: sessionStore, ended: new RedisSessionEndedLog(redis), clock: systemClock, signals, logger: service.logger }),
-        store: sessionStore,
-      },
-      saga: sagaRunner,
-      logger: service.logger,
-      clock: systemClock,
-      onOrderChanged: (orderId) => paymentStatusWaiters.notify(orderId),
-      onApproved: (orderId) => issueRunner.kick(orderId),
-    });
+  const consumerDb = createDatabase(consumerDatabaseOptions(databaseUrl));
+  consumerDatabase = consumerDb;
+  applyPaymentResult = paymentResultApply({
+    database: consumerDb,
+    store: orderStore,
+    sessions: {
+      end: new EndPurchaseSession({ store: sessionStore, ended: new RedisSessionEndedLog(redis), clock: systemClock, signals, logger: service.logger }),
+      store: sessionStore,
+    },
+    saga: sagaRunner,
+    logger: service.logger,
+    clock: systemClock,
+    onOrderChanged: (orderId) => paymentStatusWaiters.notify(orderId),
+    onApproved: (orderId) => issueRunner.kick(orderId),
+  });
+  if (kafka.enabled) {
     consumerOptions = {
       env: kafka.env,
       brokers: kafka.brokers,
@@ -282,11 +296,36 @@ if (databaseUrl && database && sagaRunner && ticketRunner && paymentStatusWaiter
     };
   }
 }
+// 결제 결과 당기기(PaymentResultPuller, BUILD_ORDER PRF-171, ADR-0140, docs/features/payment.md §2 '결제 결과 당기기의 첫 구현'): purchase DB가 있을 때 이 API 파드에서 켠다.
+// 소비자를 켜지 않은 local·ci에서도 켠다(사건 길과 같은 반영 쓰임새 applyPaymentResult를 쓴다. 이미 반영한 순번은 건너뛰므로 두 길이 겹쳐도 한 번만 반영된다).
+// BatchGetPayments는 승인 명령과 따로인 차단기(payment-svc-batch)로 감싸고, 주소(PEAKET_PAYMENT_GRPC_ADDR)가 없으면 local·ci만 '기록 없음' 대역과 경고 한 줄이다.
+// 그 밖의 환경은 주소가 없으면 여기서 던진다(시작 실패, 듣기 전). 잡기·미루기는 당기기 전용 일반 풀(paymentPullDatabaseOptions, 연결 2개 [가정])이고 종료 때 닫는다.
+// 지표(payment_result_pull*)는 서비스 레지스트리에 붙인다. 듣기 시작한 뒤 1초 반복을 켜고 SIGTERM 때 소비자와 함께 가장 먼저 끈다(Saga·발권 실행기·기다림 표보다 먼저)
+let paymentPull: ReturnType<typeof paymentResultReaderFromEnv> | undefined;
+let paymentPullBreaker: CircuitBreaker | undefined;
+let paymentPuller: PaymentResultPuller | undefined;
+let paymentPullDatabase: Database | undefined;
+if (databaseUrl && applyPaymentResult) {
+  paymentPullBreaker = new CircuitBreaker({ service: SERVICE, dependency: PAYMENT_PULL_BREAKER, registry: service.metrics.registry, logger: service.logger });
+  paymentPull = paymentResultReaderFromEnv(process.env, { profile: service.config.grpcLbProfile, breaker: paymentPullBreaker });
+  for (const w of paymentPull.warnings) service.logger.warn({ dep: PAYMENT_PULL_BREAKER }, w);
+  const pullDb = createDatabase(paymentPullDatabaseOptions(databaseUrl));
+  paymentPullDatabase = pullDb;
+  paymentPuller = new PaymentResultPuller({
+    targets: new DrizzlePaymentPull({ database: pullDb, clock: systemClock }),
+    reader: paymentPull.reader,
+    apply: applyPaymentResult,
+    log: new LoggerPaymentPullLog(service.logger),
+    signals: new PromPaymentPullSignals().register(service.metrics.registry),
+    clock: systemClock,
+  });
+}
 await service.listen();
 const sweeper = service.app.get(ExpirySweeper);
 sweeper.start();
 sagaRunner?.start();
 ticketRunner?.start();
+paymentPuller?.start();
 paymentStatusWaiters?.start();
 // 구매 세션 정리 반복(유휴·최대 체류, BUILD_ORDER PRF-138). 만료 반복과 같이 켜고 끈다
 const sessionSweeper = service.app.get(SessionSweeper);
@@ -308,13 +347,17 @@ function shutdown(): void {
   closing = true;
   // 좌석맵 판 다시 읽기를 멈추고, 만료 반복을 멈추고(돌던 틱을 기다린다) 서비스를 닫은 뒤 연결을 닫는다. 어느 단계가 실패해도 연결은 닫는다
   clearInterval(seatMapRefresh);
-  // Kafka 소비자를 가장 먼저 멈춘다(받기를 멈추고 처리 중인 키를 마친 뒤 커밋하고 나간다). 그 뒤에 Saga 실행기·기다림 표를 멈춘다(처리 중인 결제 결과가 그 둘을 깨운다)
-  // Saga 실행기도 함께 멈춘다(돌던 틱·kick을 기다린다. 멈춘 뒤의 접수 깨우기는 부르지 않고, 남은 작업은 다른 파드의 폴링이 줍는다)
-  // 발권 실행기도 함께 멈춘다(부르던 발권 호출과 그 뒤 쓰기를 기다리고, 잡았지만 부르지 않은 큐 행은 임대를 놓는다. 남은 행은 다른 파드의 틱이 줍는다).
+  // Kafka 소비자와 결제 결과 당기기 실행기를 가장 먼저 함께 멈춘다(소비자는 받기를 멈추고 처리 중인 키를 마친 뒤 커밋하고 나간다. 당기기는 부르던
+  // BatchGetPayments와 그 뒤 반영·미루기를 기다린다. 남은 대상은 다음 점검 시각이 지나면 다른 파드가 잡는다). 둘 다 결제 결과를 반영해 Saga·발권 실행기·
+  // 기다림 표를 깨우므로 그 셋보다 먼저 멈춘다(2026-11-06 코드 리뷰 L1). 그 뒤에 나머지를 멈춘다:
+  // Saga 실행기(돌던 틱·kick을 기다린다. 멈춘 뒤의 접수 깨우기는 부르지 않고, 남은 작업은 다른 파드의 폴링이 줍는다),
+  // 발권 실행기(부르던 발권 호출과 그 뒤 쓰기를 기다리고, 잡았지만 부르지 않은 큐 행은 임대를 놓는다. 남은 행은 다른 파드의 틱이 줍는다),
+  // 결제 결과 기다림 표(돌던 묶음 조회를 기다리고 남은 기다림을 STOPPED로 깨운다. 그 요청들은 다시 읽지 않고 마지막 본문으로 곧바로 답한다).
   // 실행기 전용 풀은 실행기를 멈춘 뒤 아래에서 닫는다
-  // 결제 결과 기다림 표도 멈춘다(돌던 묶음 조회를 기다리고 남은 기다림을 STOPPED로 깨운다. 그 요청들은 다시 읽지 않고 마지막 본문으로 곧바로 답한다)
-  void (consumers?.stop() ?? Promise.resolve())
-    .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'))
+  void Promise.all([
+    (consumers?.stop() ?? Promise.resolve()).catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)')),
+    paymentPuller?.stop(),
+  ])
     .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), sagaRunner?.stop(), ticketRunner?.stop(), paymentStatusWaiters?.stop()]))
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'purchase-svc 종료 실패'))
@@ -338,8 +381,14 @@ function shutdown(): void {
       } catch (err) {
         service.logger.error({ err: errorSummary(err) }, 'ticket-svc 클라이언트 닫기 실패');
       }
-      // 소비자 전용 풀은 소비자를 멈춘 뒤라, 발권 실행기 전용 풀은 실행기를 멈춘 뒤라 쓰는 연결이 없다
-      return Promise.all([redis.close(), database?.close(), consumerDatabase?.close(), ticketIssueDatabase?.close()]);
+      try {
+        paymentPull?.close();
+        paymentPullBreaker?.shutdown();
+      } catch (err) {
+        service.logger.error({ err: errorSummary(err) }, 'payment-svc 결과 당기기 클라이언트 닫기 실패');
+      }
+      // 소비자 전용 풀(결제 결과 반영도 쓴다)은 소비자와 당기기를 멈춘 뒤라, 발권·당기기 실행기 전용 풀은 실행기를 멈춘 뒤라 쓰는 연결이 없다
+      return Promise.all([redis.close(), database?.close(), consumerDatabase?.close(), ticketIssueDatabase?.close(), paymentPullDatabase?.close()]);
     });
 }
 process.once('SIGTERM', shutdown);

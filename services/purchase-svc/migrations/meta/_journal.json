@@ -71,6 +71,13 @@
       "when": 1793886376017,
       "tag": "0009_ticket_issue_lease",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793893140607,
+      "tag": "0010_saga_await_pull",
+      "breakpoints": true
     }
   ]
 }

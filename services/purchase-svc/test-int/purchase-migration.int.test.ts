@@ -62,7 +62,7 @@ const count = async (text: string, params: unknown[]): Promise<number> => Number
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
-  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 9(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐, 0008 주문의 묶은 시각)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 11(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐, 0008 주문의 묶은 시각, 0009 발권 큐 임대·표시 칸, 0010 작업 단계 AWAIT·다음 당기기 점검 시각)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)).rows.map((r) => r.relname);
     const before = await tables();
     // 0003이 만든 주문 표 다섯과 Outbox 부모 표(PRF-160), 0005가 만든 Saga 작업 표(PRF-162), 0007이 만든 발권 재시도 큐(PRF-163)가 있다
@@ -72,7 +72,22 @@ describe('마이그레이션과 표 모양', () => {
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(10);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(11);
+  });
+
+  test('0010(PRF-171, data.md §4 열한 번째 마이그레이션·§2 ERD order_saga_job): pull_next_at은 널 허용 timestamptz이고 기본값이 없으며 그 칸에 걸린 인덱스가 없고(작은 작업 표, data.md §5.1), step CHECK는 RESERVE·CONFIRM·RELEASE·AWAIT를 받는다 [ASVS v5.0.0-2.3.4]', async () => {
+    const col = await q<{ data_type: string; is_nullable: string; column_default: string | null }>(
+      `select data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'order_saga_job' and column_name = 'pull_next_at'`,
+    );
+    expect(col.rows).toEqual([{ data_type: 'timestamp with time zone', is_nullable: 'YES', column_default: null }]);
+    const idx = await q<{ indexdef: string }>(`select indexdef from pg_indexes where schemaname = 'public' and tablename = 'order_saga_job'`);
+    expect(idx.rows.filter((r) => r.indexdef.includes('pull_next_at'))).toEqual([]);
+    const step = await q<{ def: string }>(
+      `select pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.order_saga_job'::regclass and conname = 'order_saga_job_step_check'`,
+    );
+    expect(step.rows).toHaveLength(1);
+    // 값 넷(차례 RESERVE·CONFIRM·RELEASE·AWAIT, 0010이 AWAIT를 더했다). 실제 행 거절(23514)은 saga-db.int.test.ts의 setStep 시험이 본다
+    expect(step.rows[0]!.def.match(/'[A-Z_]+'::text/g)).toEqual(["'RESERVE'::text", "'CONFIRM'::text", "'RELEASE'::text", "'AWAIT'::text"]);
   });
 
   test('0009(PRF-170, data.md §4 열 번째 마이그레이션·§2 ERD ticket_issue_job): lease_until·delayed_at·overdue_at은 널 허용 timestamptz이고 기본값이 없으며, 세 칸에 걸린 CHECK·인덱스가 없다(진행 중 행만 있는 작은 표, data.md §5.1) [ASVS v5.0.0-2.3.4]', async () => {
@@ -131,7 +146,7 @@ describe('마이그레이션과 표 모양', () => {
     await expect(q(`insert into ticket_issue_job (order_id, event_id, issue_due_at, created_at) values ($1, $2, now(), now())`, [order, id()])).rejects.toMatchObject({ code: '23503' });
   });
 
-  test('0006(PRF-165, data.md §4 일곱 번째 마이그레이션): purchase_order.failure_reason은 널 허용 text이고 CHECK가 없으며, order_saga_job.confirm_sent_at은 널 허용 timestamptz(리뷰 H1)이고, order_saga_job.step은 RESERVE·CONFIRM·RELEASE만 받는다(RELEASE는 리뷰 M4) [ASVS v5.0.0-2.3.4]', async () => {
+  test('0006(PRF-165, data.md §4 일곱 번째 마이그레이션): purchase_order.failure_reason은 널 허용 text이고 CHECK가 없으며, order_saga_job.confirm_sent_at은 널 허용 timestamptz(리뷰 H1)이고, order_saga_job.step CHECK는 RESERVE·CONFIRM·RELEASE를 받는다(RELEASE는 리뷰 M4. 0010이 AWAIT를 뒤에 더했다) [ASVS v5.0.0-2.3.4]', async () => {
     const col = await q<{ data_type: string; is_nullable: string }>(
       `select data_type, is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'purchase_order' and column_name = 'failure_reason'`,
     );
@@ -149,9 +164,9 @@ describe('마이그레이션과 표 모양', () => {
       `select pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.order_saga_job'::regclass and conname = 'order_saga_job_step_check'`,
     );
     expect(step.rows).toHaveLength(1);
-    // 값 셋만(차례 RESERVE·CONFIRM·RELEASE). 실제 행 거절(23514)은 saga-db.int.test.ts의 setStep 시험이 본다
+    // 0006의 값 셋(차례 RESERVE·CONFIRM·RELEASE)이 앞에 그대로 있다. 값 목록 전체는 위 0010 시험이 본다
     expect(step.rows[0]!.def).toMatch(/step.*'RESERVE'::text.*'CONFIRM'::text.*'RELEASE'::text/);
-    expect(step.rows[0]!.def.match(/'[A-Z_]+'::text/g)).toEqual(["'RESERVE'::text", "'CONFIRM'::text", "'RELEASE'::text"]);
+    expect(step.rows[0]!.def.match(/'[A-Z_]+'::text/g)?.slice(0, 3)).toEqual(["'RESERVE'::text", "'CONFIRM'::text", "'RELEASE'::text"]);
   });
 
   test('0003: payment_attempt.order_id에 일반(유일 아님) 인덱스 payment_attempt_order_id_idx가 있다(주문으로 결제 시도 찾기, 주문 행을 지울 때 외래 키 검사) [ASVS v5.0.0-2.3.4]', async () => {
