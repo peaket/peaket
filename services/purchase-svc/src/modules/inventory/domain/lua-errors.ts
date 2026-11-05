@@ -9,11 +9,13 @@ export type SeatLuaScript = 'hold' | 'expire';
 /**
  * 지표 이름표 code의 값(docs/observability.md, 라벨 값이 늘지 않게 이 일곱 개만).
  * - CORRUPT_KEY·KEEP_UNTIL_PAST·FENCE_OVERFLOW: Lua(또는 메모리 구현)의 쓰기 전 지킴 오류 글 PEAKET_{code}
+ * - NODE_ID: Lua가 주 노드 표지를 구하지 못함(스크립트 안 CLUSTER MYID·CLUSTER INFO가 권한 등으로 막힘, 오류 글 PEAKET_NODE_ID. 아무것도 쓰지 않았다,
+ *   ADR-0210 결과·BUILD_ORDER PRF-168 리뷰 고침 중간 2. 좌석 Redis 사용자의 접근 문자열을 고친다, docs/infra.md 저장소 인증 계층)
  * - OOM: 좌석 Redis 메모리 부족(SeatStoreUnavailable reason 'oom')
  * - NOT_READY: 세대 키가 없어 결과 NOT_READY(오류가 아니라 결과지만 같은 지표로 센다)
  * - OTHER: 그 밖의 스크립트 오류·모르는 결과 값 같은 버그
  */
-export type SeatLuaErrorCode = 'CORRUPT_KEY' | 'KEEP_UNTIL_PAST' | 'FENCE_OVERFLOW' | 'OOM' | 'NOT_READY' | 'OTHER';
+export type SeatLuaErrorCode = 'CORRUPT_KEY' | 'KEEP_UNTIL_PAST' | 'FENCE_OVERFLOW' | 'NODE_ID' | 'OOM' | 'NOT_READY' | 'OTHER';
 
 /**
  * 좌석 키의 종류(docs/data.md §3 키 이름 s:{event:E}:{종류}… 의 첫 조각). 로그에는 키 이름 대신 이것만 싣는다.
@@ -50,7 +52,7 @@ export interface SeatLuaError {
  * 2. SeatStoreUnavailable이고 reason이 'unavailable' → undefined(일시 장애는 Lua 오류로 세지 않는다)
  * 3. Error이고 message 안에 PEAKET_CORRUPT_KEY가 있음 → { code: 'CORRUPT_KEY', keyKind }. keyKind는 그 뒤 첫 키 이름
  *    s:{…}:{종류}[:…]의 {종류}(SeatKeyKind에 있는 것만, 없거나 모양이 다르면 'unknown'). s:ctl:events는 'ctl:events'
- * 4. Error이고 message 안에 PEAKET_KEEP_UNTIL_PAST·PEAKET_FENCE_OVERFLOW가 있음 → 그 code(keyKind 없음)
+ * 4. Error이고 message 안에 PEAKET_KEEP_UNTIL_PAST·PEAKET_FENCE_OVERFLOW·PEAKET_NODE_ID가 있음 → 그 code(keyKind 없음)
  * 5. 그 밖의 값(다른 Error·Error가 아닌 값) → { code: 'OTHER' }
  *
  * 예: Error('ERR PEAKET_CORRUPT_KEY s:{event:ev-1}:quota:0190…') → { code: 'CORRUPT_KEY', keyKind: 'quota' },
@@ -65,6 +67,7 @@ export function seatLuaErrorOf(err: unknown): SeatLuaError | undefined {
   if (corrupt) return { code: 'CORRUPT_KEY', keyKind: keyKindOf(corrupt[1] ?? '') };
   if (m.includes('PEAKET_KEEP_UNTIL_PAST')) return { code: 'KEEP_UNTIL_PAST' };
   if (m.includes('PEAKET_FENCE_OVERFLOW')) return { code: 'FENCE_OVERFLOW' };
+  if (m.includes('PEAKET_NODE_ID')) return { code: 'NODE_ID' };
   return { code: 'OTHER' };
 }
 

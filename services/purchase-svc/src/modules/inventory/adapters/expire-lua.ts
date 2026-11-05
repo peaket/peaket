@@ -1,6 +1,6 @@
 // 운영 만료 Lua와 만료 임대 Lua의 계약(docs/features/seat-hold.md §5 '운영 만료 Lua와 1초 반복'·'방금 놓은 좌석', docs/data.md §3 좌석 키 표(stream의 EXPIRED 칸),
-// BUILD_ORDER PRF-135, ADR-0086 결정 9·0109·0121·0161·0176 결정 3). 키·칸 이름의 정본은 docs/data.md §3이다. 문자열만 두고 아무것도 가져오지 않는다
-// (측정 도구 loadtest/poc/seat-lua.mjs가 형 지우기만으로 읽는다. 그래서 홀드 Lua의 작은 도우미 int·extend를 여기에도 둔다).
+// BUILD_ORDER PRF-135, ADR-0086 결정 9·0109·0121·0161·0176 결정 3·0210). 키·칸 이름의 정본은 docs/data.md §3이다. 문자열만 두고 아무것도 가져오지 않는다
+// (측정 도구 loadtest/poc/seat-lua.mjs가 형 지우기만으로 읽는다. 그래서 홀드 Lua의 작은 도우미 int·extend와 세대 확인 도우미 ENSURE_EPOCH를 여기에도 둔다).
 // 메모리 구현(memory-seat-store.ts의 expire, memory-sweep-leases.ts)이 같은 계약을 따른다. 결과의 뜻은 domain/ports.ts SeatExpiries.expire·SweepLeases.acquire.
 //
 // ── 만료 Lua(EXPIRE_LUA) ───────────────────────────────────────────────────────────────────────────────────────
@@ -8,7 +8,7 @@
 // - 원문 첫 줄은 `#!lua`(ADR-0086). 쓰거나 읽는 키는 모두 KEYS로 받는다. 키는 모두 회차 해시 태그 {event:E} 하나의 슬롯이다.
 // - 서버 시각은 Redis TIME을 한 번만 읽는다: µs = 초 × 1,000,000 + 마이크로초, now = floor(µs / 1000)(ms). keepUntil 비교·펜싱 확인의 exp 비교·rel 점수·사건 시각에
 //   같은 값을 쓴다.
-// - 검사를 모두 마친 뒤에만 쓴다(홀드 Lua와 같은 '검사 뒤 쓰기'). 큰 정수는 string.format('%.0f', x)로 글로 바꾼다.
+// - 검사를 모두 마친 뒤에만 쓴다(홀드 Lua와 같은 '검사 뒤 쓰기'. 세대 확인은 오류로 끝나는 3a 뒤의 첫 쓰기다). 큰 정수는 string.format('%.0f', x)로 글로 바꾼다.
 // - XADD에 길이 상한을 두지 않는다(지우기는 릴레이의 XTRIM … MINID). 메모리가 차도 돌게 하는 표시를 쓰지 않는다(메모리 부족이면 시작 전에 거절되고 RB-06을 따른다).
 // - 구매 세션의 홀드 목록(s:session)·fence·멱등 기록·ordered·paused는 건드리지 않는다.
 // - 한 번에 좌석 n ≤ 100(EXPIRY_BATCH_SIZE)이라 SLOWLOG에 남지 않게 한다(S-T27, ASVS 15.4.4).
@@ -38,8 +38,10 @@
 //   (정상 운영의 보유 수는 한도 이하라 망가진 값에서만 생긴다. 고치지 않는다).
 //
 // 차례(seat-hold.md §5 '검사' 1~4, 망가진 키 격리는 추천 적용 2026-11-04 M2)
-//   1 HGET epoch 'epoch'이 없음                                  → {'NOT_READY'}(아무것도 쓰지 않는다)
-//   2 TIME 한 번(now, µs)
+//   2 TIME 한 번(now, µs). 1의 세대 확인보다 먼저 읽는다(같은 초를 쓴다)
+//   1 세대 키 readEpoch(epoch): epoch 칸이 없음      → {'NOT_READY'}(아무것도 쓰지 않는다). epoch 칸이 u32가 아니거나 bumps 칸이 망가짐 → 'PEAKET_CORRUPT_KEY {세대 키}'
+//     세대 확인 ensureEpoch(TIME 초)는 3a 뒤(첫 쓰기)에 돈다: 지금 노드 표지와 견줘 다르면 그 자리에서 올린다(hold-lua.ts ENSURE_EPOCH, ADR-0210 결정 1.
+//     3a 오류면 세대 키도 바꾸지 않는다(리뷰 고침 결함 1). 건너뜀·0석으로 끝나도 올린 것은 남는다)
 //   3a 묶음 전체 오류(걸리면 고아 ZREM을 포함해 아무것도 쓰지 않고 스크립트 오류)
 //       keepUntil ≤ now                                           → 'ERR PEAKET_KEEP_UNTIL_PAST keepUntil … now …'
 //       키 형: bitmap string(L1) · expiry zset · stream stream · secver hash(키가 없으면 통과)  → 'ERR PEAKET_CORRUPT_KEY {키}'
@@ -78,6 +80,56 @@
 //   그 밖(다른 파드 값)  → 아무것도 하지 않고 0
 // allow-oom 표시가 없어 메모리 부족이면 시작 전에 거절된다(앱이 SeatStoreUnavailable reason 'oom'으로 바꾼다).
 
+// 세대 확인 도우미(hold-lua.ts NODE_ID·ENSURE_EPOCH와 글자 하나 다르지 않은 사본, ADR-0210 결정 1·2·4. 뜻은 hold-lua.ts의 주석).
+// 이 파일은 아무것도 가져오지 않아야 해서(loadtest/poc/seat-lua.mjs가 형 지우기만으로 읽는다) 같은 글을 여기에도 둔다. 같은지는 test/seat-epoch-bump.test.ts가 본다
+const NODE_ID = `
+local function myId()
+  local id = redis.pcall('CLUSTER', 'MYID')
+  if type(id) == 'table' and id.err then
+    if string.find(id.err, 'cluster support disabled', 1, true) then return 'standalone' end
+    error('PEAKET_NODE_ID ' .. id.err)
+  end
+  return id
+end
+local function valueOf(id)
+  if id == 'standalone' then return id end
+  local info = redis.pcall('CLUSTER', 'INFO')
+  if type(info) == 'table' and info.err then error('PEAKET_NODE_ID ' .. info.err) end
+  return id .. ':' .. (string.match(info, 'cluster_my_epoch:(%d+)') or '0')
+end
+local function nodeId()
+  return valueOf(myId())
+end
+`;
+const ENSURE_EPOCH = `${NODE_ID}
+local function readEpoch(key)
+  local ep = redis.call('HMGET', key, 'epoch', 'node', 'chk', 'bumps')
+  local v = ep[1]
+  if not v then return nil end
+  local u32 = #v <= 10 and string.match(v, '^%d+$') ~= nil and (#v == 1 or string.sub(v, 1, 1) ~= '0') and tonumber(v) <= 4294967295
+  local b = ep[4]
+  if not u32 or (b and not (b == '0' or (#b <= 18 and string.match(b, '^[1-9]%d*$')))) then error('PEAKET_CORRUPT_KEY ' .. key) end
+  return { key = key, epoch = v, node = ep[2] or '', chk = tonumber(ep[3]) or 0, bumps = b or '0' }
+end
+local function ensureEpoch(ep, sec)
+  local id = myId()
+  local held = ep.node
+  local cut = string.find(held, ':', 1, true)
+  local heldId = held
+  if cut then heldId = string.sub(held, 1, cut - 1) end
+  if heldId == id and ep.chk == sec then return ep.epoch, false, ep.bumps end
+  local node = valueOf(id)
+  local secText = string.format('%.0f', sec)
+  if node == held then
+    redis.call('HSET', ep.key, 'chk', secText)
+    return ep.epoch, false, ep.bumps
+  end
+  local nextText = string.format('%.0f', math.max(tonumber(ep.epoch) + 1, sec))
+  redis.call('HSET', ep.key, 'epoch', nextText, 'node', node, 'chk', secText)
+  return nextText, true, string.format('%.0f', redis.call('HINCRBY', ep.key, 'bumps', 1))
+end
+`;
+
 /** 만료 Lua 원문(위 계약). 첫 줄이 #!lua다 */
 export const EXPIRE_LUA = `#!lua
 local function int(x)
@@ -86,7 +138,7 @@ end
 local function extend(key, ms)
   if redis.call('PEXPIRETIME', key) < ms then redis.call('PEXPIREAT', key, int(ms)) end
 end
-
+${ENSURE_EPOCH}
 local m = tonumber(ARGV[4])
 local n = m and (#ARGV - 4 - m) / 9 or 0
 if not m or m < 0 or n < 1 or n ~= math.floor(n) or #KEYS ~= 5 + n + 2 * m then
@@ -117,14 +169,14 @@ local function safeFence(v)
   return #v < 16 or (#v == 16 and v <= '9007199254740991')
 end
 
--- 1 세대 키
-local seatEpoch = redis.call('HGET', KEYS[4], 'epoch')
-if not seatEpoch then return {'NOT_READY'} end
-
--- 2 서버 시각은 여기서 한 번만 읽는다
+-- 2 서버 시각은 여기서 한 번만 읽는다(1의 세대 확인에도 같은 값)
 local t = redis.call('TIME')
 local us = tonumber(t[1]) * 1000000 + tonumber(t[2])
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+
+-- 1 세대 키(읽기만. 망가진 세대 칸은 여기서 오류)
+local ep = readEpoch(KEYS[4])
+if not ep then return {'NOT_READY'} end
 
 -- 3a 묶음 전체 오류: 지난 keepUntil, 키 전체의 형(여기까지 아무것도 쓰지 않았다)
 local keep = tonumber(ARGV[3])
@@ -133,6 +185,10 @@ for _, kt in ipairs({{KEYS[1], 'string'}, {KEYS[2], 'zset'}, {KEYS[3], 'stream'}
   local ty = typeOf(kt[1])
   if ty ~= 'none' and ty ~= kt[2] then return corrupt(kt[1]) end
 end
+
+-- 1 세대 확인(첫 쓰기, 오류로 끝나는 3a 뒤): 장애 조치 뒤면 그 자리에서 올린다(ADR-0210). 아래 EXPIRED·델타는 이 세대를 싣는다.
+-- 3b·4는 오류로 끝나지 않는다(망가진 좌석은 c로 두고 건드리지 않는다)
+local seatEpoch = ensureEpoch(ep, tonumber(t[1]))
 
 -- 3b 계정 몫: 보유 수는 MGET 한 번(문자열이 아닌 키는 nil이라 그 계정만 TYPE으로 없음·형 틀림을 가른다), rel은 TYPE
 local held = {}

@@ -84,6 +84,17 @@ describe('seatLuaErrorOf(저장소 오류 → 지표·로그 갈래)', () => {
       expect({ x: String(x), r: seatLuaErrorOf(x) }).toEqual({ x: String(x), r: { code: 'OTHER' } });
     }
   });
+
+  test('ST26_리뷰 고침 중간 2_ PEAKET_NODE_ID(Lua가 노드 표지를 구하지 못함: CLUSTER MYID·CLUSTER INFO가 권한 등으로 막힘)는 NODE_ID이고 키 종류가 없다. 오류 글(사용자 이름 등)은 결과에 없다 [ASVS v5.0.0-16.5.3] [ASVS v5.0.0-16.2.5] [S-T26]', () => {
+    for (const msg of [
+      "ERR user_script:12: PEAKET_NODE_ID ERR ACL failure in script: User nocluster has no permissions to run the 'cluster|myid' command script: 3f2a…, on @user_script:12.",
+      'PEAKET_NODE_ID NOPERM',
+    ]) {
+      const r = seatLuaErrorOf(new Error(msg));
+      expect({ msg, r }).toStrictEqual({ msg, r: { code: 'NODE_ID' } });
+      expect(JSON.stringify(r)).not.toContain('nocluster');
+    }
+  });
 });
 
 describe('PromSeatSignals(seat_lua_errors_total)', () => {
@@ -95,8 +106,9 @@ describe('PromSeatSignals(seat_lua_errors_total)', () => {
     s.luaError('expire', 'OOM');
     s.luaError('hold', 'CORRUPT_KEY');
     s.luaError('expire', 'NOT_READY');
+    s.luaError('hold', 'NODE_ID');
     const text = await metrics.registry.metrics();
-    expect(samples(text)).toEqual(['code,script expire/NOT_READY 1', 'code,script expire/OOM 2', 'code,script hold/CORRUPT_KEY 1']);
+    expect(samples(text)).toEqual(['code,script expire/NOT_READY 1', 'code,script expire/OOM 2', 'code,script hold/CORRUPT_KEY 1', 'code,script hold/NODE_ID 1']);
     expect(text).toContain('# TYPE seat_lua_errors_total counter');
   });
 
@@ -187,6 +199,31 @@ describe('PromSeatSignals(좌석 Stream 릴레이 지표 seat_stream_relay_*, PR
     const text = await m.registry.metrics();
     expect(namedSamples(text, 'seat_stream_relay_sent_total')).toEqual(['topic trade.seats 4']);
     expect(namedSamples(text, 'seat_stream_relay_failures_total')).toEqual([]);
+  });
+});
+
+/** 노출 글에서 이름표 없는 지표 name의 표본 줄(HELP·TYPE 줄 빼고) */
+const plainSamples = (text: string, name: string) => text.split('\n').filter((l) => l.startsWith(`${name} `) || l.startsWith(`${name}{`));
+
+describe('PromSeatSignals(세대 올리기 감시 지표 seat_epoch_bumps_total, PRF-168)', () => {
+  test('ST26_ register가 seat_epoch_bumps_total(카운터, 이름표 없음)도 붙이고 epochBumped(n)이 n씩 올린다(회차 이름표 없음, 리뷰 고침 중간 1: 쓰는 Lua가 올린 수의 차이) [S-T26] [ASVS v5.0.0-16.2.5]', async () => {
+    const metrics = new PlatformMetrics('purchase-svc');
+    const s = new PromSeatSignals().register(metrics.registry);
+    s.epochBumped(1);
+    s.epochBumped(1);
+    s.epochBumped(3);
+    const text = await metrics.registry.metrics();
+    expect(text).toContain('# TYPE seat_epoch_bumps_total counter');
+    expect(plainSamples(text, 'seat_epoch_bumps_total')).toEqual(['seat_epoch_bumps_total 5']);
+  });
+
+  test('ST26_ 붙이기 전에도 epochBumped는 던지지 않고, 두 번 만든 신호가 서로의 레지스트리를 더럽히지 않는다 [S-T26]', async () => {
+    const loose = new PromSeatSignals();
+    expect(() => loose.epochBumped(1)).not.toThrow();
+    const m = new PlatformMetrics('purchase-svc');
+    const b = new PromSeatSignals().register(m.registry);
+    b.epochBumped(1);
+    expect(plainSamples(await m.registry.metrics(), 'seat_epoch_bumps_total')).toEqual(['seat_epoch_bumps_total 1']);
   });
 });
 

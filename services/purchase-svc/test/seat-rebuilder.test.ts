@@ -90,7 +90,7 @@ interface TargetHooks {
 /** MemorySeatStore를 감싸 부른 차례와 묶음을 적는다 */
 function recordingTarget(store: MemorySeatStore, log: Log, hooks: TargetHooks = {}) {
   const batches: RebuildSeat[][] = [];
-  const finishes: { quotas: ReadonlyMap<string, number>; gen: number; node: string; keepUntilMs: number; maxToken?: number }[] = [];
+  const finishes: { quotas: ReadonlyMap<string, number>; gen: number; keepUntilMs: number; maxToken?: number }[] = [];
   const error = new Error('좌석 Redis 스크립트 오류');
   let writes = 0;
   const target: SeatRebuildTarget = {
@@ -117,7 +117,7 @@ function recordingTarget(store: MemorySeatStore, log: Log, hooks: TargetHooks = 
       if (hooks.failFinish) throw error;
       return store.finish(e, input);
     },
-    bumpEpoch: async (e, node) => store.bumpEpoch(e, node),
+    bumpEpoch: async (e) => store.bumpEpoch(e),
   };
   return { target, batches, finishes, error };
 }
@@ -134,9 +134,9 @@ function layout(eventId: string, defs: readonly MemorySeatDef[] = SEAT_DEFS, sea
   return m;
 }
 
-function world(o: SourceOptions & TargetHooks & { defs?: MemorySeatDef[]; seatCount?: number; clock?: FakeClock } = {}) {
+function world(o: SourceOptions & TargetHooks & { defs?: MemorySeatDef[]; seatCount?: number; clock?: FakeClock; nodeId?: string } = {}) {
   const clock = o.clock ?? fakeClock({ now: NOW });
-  const store = new MemorySeatStore(clock);
+  const store = new MemorySeatStore(clock, undefined, o.nodeId === undefined ? {} : { nodeId: o.nodeId });
   const eventId = newEvent();
   const log: Log = [];
   const source = fakeSource(log, o);
@@ -178,7 +178,7 @@ describe('SeatRebuilder: 차례', () => {
     expect(w.ev().bits.size).toBe(0);
   });
 
-  test('ST26_ 차례: isReady → acquire(회차, holder) → begin(회차, gen) → 판매·원장·판매 좌석 원장 읽기 → writeSeats(좌석 색인 차례) → finish(보유 수, gen = acquire가 준 값, node = holder, keepUntil, maxToken) → release(회차, holder) [S-T26]', async () => {
+  test('ST26_ 차례: isReady → acquire(회차, holder) → begin(회차, gen) → 판매·원장·판매 좌석 원장 읽기 → writeSeats(좌석 색인 차례) → finish(보유 수, gen = acquire가 준 값, keepUntil, maxToken. node는 넘기지 않는다) → release(회차, holder) [S-T26]', async () => {
     const w = world({
       gen: 7,
       sales: [
@@ -193,7 +193,8 @@ describe('SeatRebuilder: 차례', () => {
     expect(reads).toEqual([`holds ${e}`, `saleHolds ${e}`, `sales ${e}`]);
     expect([...w.log.slice(0, 3), ...w.log.slice(6)]).toEqual([`isReady ${e}`, `acquire ${e} ${HOLDER}`, `begin ${e} 7`, `writeSeats ${e} 3`, `finish ${e}`, `release ${e} ${HOLDER}`]);
     expect(w.batches[0]!.map((s) => s.seat.index)).toEqual([0, 1, 4]);
-    expect(w.finishes).toEqual([{ quotas: new Map([[ACCOUNT_A, 2], [ACCOUNT_B, 1]]), gen: 7, node: HOLDER, keepUntilMs: KEEP, maxToken: tok(1) }]);
+    expect(w.finishes).toEqual([{ quotas: new Map([[ACCOUNT_A, 2], [ACCOUNT_B, 1]]), gen: 7, keepUntilMs: KEEP, maxToken: tok(1) }]);
+    expect('node' in w.finishes[0]!).toBe(false);
     expect(w.signals.calls).toEqual(['rebuilt']);
   });
 
@@ -217,12 +218,21 @@ describe('SeatRebuilder: 차례', () => {
     expect(w.log.at(-1)).toBe(`release ${w.eventId} ${HOLDER}`);
   });
 
-  test('ST26_ 판매도 원장 홀드도 없는 회차도 finish로 세대 키를 쓴다(빈 보유 수, writeSeats는 부르지 않는다) [S-T26]', async () => {
+  test('ST26_ 판매도 원장 홀드도 없는 회차도 finish로 세대 키를 쓴다(빈 보유 수, writeSeats는 부르지 않는다. node = 저장소 표지 standalone) [S-T26]', async () => {
     const w = world({ gen: 3 });
     await expect(w.run()).resolves.toEqual({ result: 'REBUILT', gen: 3, sold: 0, held: 0, skipped: 0 });
     expect(w.batches).toEqual([]);
-    expect(w.finishes).toEqual([{ quotas: new Map(), gen: 3, node: HOLDER, keepUntilMs: KEEP, maxToken: 0 }]);
-    expect(w.ev().epoch).toEqual({ epoch: Math.floor(NOW / 1000), node: HOLDER, gen: 3 });
+    expect(w.finishes).toEqual([{ quotas: new Map(), gen: 3, keepUntilMs: KEEP, maxToken: 0 }]);
+    expect(w.ev().epoch).toEqual({ epoch: Math.floor(NOW / 1000), node: 'standalone', gen: 3, chk: Math.floor(NOW / 1000) });
+  });
+
+  test('ST26_ 세대 키 node는 임대 holder(파드 이름)가 아니라 좌석 저장소가 구한 주 노드 표지다: 판매 열기와 같은 뜻이라 다시 만든 회차에 세대 올리기를 불러도 SAME이다(BUILD_ORDER PRF-168) [S-T26]', async () => {
+    const NODE = '5e6f708192a3b4c5d6e7f809123a4b5c6d7e8f90:3';
+    const w = world({ gen: 4, nodeId: NODE, sales: [{ seatId: 'A01', accountId: ACCOUNT_A, orderId: 'o-1' }] });
+    await expect(w.run()).resolves.toMatchObject({ result: 'REBUILT', gen: 4 });
+    expect(w.ev().epoch).toEqual({ epoch: Math.floor(NOW / 1000), node: NODE, gen: 4, chk: Math.floor(NOW / 1000) });
+    expect(w.ev().epoch?.node).not.toBe(HOLDER);
+    await expect(w.store.bumpEpoch(w.eventId)).resolves.toEqual({ result: 'SAME', epoch: Math.floor(NOW / 1000), bumps: 0 });
   });
 
   test('ST26_ 넘긴 좌석(좌석맵 판에 없는 좌석, holdId 없는 원장 홀드)은 skipped로 센다 [S-T26]', async () => {
@@ -300,7 +310,7 @@ describe('SeatRebuilder: 먼저 끝낸 곳(READY)과 실패', () => {
 });
 
 describe('SeatRebuilder: 메모리 좌석 Redis에 남는 것', () => {
-  test('ST26_ 다시 만든 회차: 판매·되살린 홀드 좌석의 비트, 홀드 Hash(판매는 pin 1·대조한 원장 행의 토큰·시각, 홀드는 원장 값·ext 0), 만료 인덱스는 홀드만, 보유 수, 세대 키(epoch = 지금 초·node = holder·gen), 회차 목록 [S-T26] [S-T5]', async () => {
+  test('ST26_ 다시 만든 회차: 판매·되살린 홀드 좌석의 비트, 홀드 Hash(판매는 pin 1·대조한 원장 행의 토큰·시각, 홀드는 원장 값·ext 0), 만료 인덱스는 홀드만, 보유 수, 세대 키(epoch = 지금 초·node = 저장소 표지 standalone·gen), 회차 목록 [S-T26] [S-T5]', async () => {
     const hb = ledger('A05', ACCOUNT_B, tok(7), { holdId: 'h-b', purchaseSessionId: 'ps-b' });
     const w = world({
       gen: 4,
@@ -322,7 +332,7 @@ describe('SeatRebuilder: 메모리 좌석 Redis에 남는 것', () => {
     expect(ev.holds.get(4)!.pin).toBeUndefined();
     expect(Object.fromEntries(ev.expiry)).toEqual({ 4: hb.expiresAtMs });
     expect(Object.fromEntries(ev.quota)).toEqual({ [ACCOUNT_A]: 2, [ACCOUNT_B]: 1 });
-    expect(ev.epoch).toEqual({ epoch: Math.floor(NOW / 1000), node: HOLDER, gen: 4 });
+    expect(ev.epoch).toEqual({ epoch: Math.floor(NOW / 1000), node: 'standalone', gen: 4, chk: Math.floor(NOW / 1000) });
     expect(w.store.db.ctlEvents.has(w.eventId)).toBe(true);
     // 펜싱 카운터는 되살린 토큰의 최댓값으로 되살리고(코드 리뷰로 고침), Stream·Pub/Sub·구역 일련번호는 쓰지 않는다
     expect(ev.fence).toBe(String(tok(7)));
@@ -446,7 +456,8 @@ describe('코드 리뷰 재현(PRF-143)', () => {
     const ev = store.db.event(eventId);
     expect(ev.bits).toEqual(new Set([1]));
     expect(ev.holds.has(0)).toBe(false);
-    expect(ev.epoch).toMatchObject({ node: 'pod-b', gen: 3 });
+    // 세대 키를 쓴 것은 B(판 번호 3)다. node는 파드가 아니라 저장소 표지라 판 번호로 가린다(PRF-168)
+    expect(ev.epoch).toMatchObject({ gen: 3 });
     // A는 판 번호를 되돌리지 않고 임대만 비운다
     expect(logA.at(-1)).toBe(`release ${eventId} pod-a`);
   });

@@ -1,6 +1,6 @@
 // inventory 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다).
 export { EXPIRE_LUA, SWEEP_LEASE_LUA } from './adapters/expire-lua.js';
-export { HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
+export { ENSURE_EPOCH, HOLD_LUA, OPEN_SALE_LUA } from './adapters/hold-lua.js';
 export { ORDER_HOLD_LUA } from './adapters/order-hold-lua.js';
 export { MemoryOrderHolds, type MemoryOrderHoldsDeps } from './adapters/memory-order-holds.js';
 export { RedisOrderHolds } from './adapters/redis-order-holds.js';
@@ -19,6 +19,14 @@ export {
   type SeatRebuildLoopDeps,
   type SeatRebuildLoopLogger,
 } from './application/seat-rebuild-loop.js';
+export {
+  EPOCH_WATCH_TICK_MS,
+  SeatEpochWatch,
+  type EpochWatchReport,
+  type SeatEpochWatchDeps,
+  type SeatEpochWatchLogger,
+  type SeatEpochWatchSignals,
+} from './application/seat-epoch-watch.js';
 export {
   RETIRE_SEAT_EVENTS_TASK,
   retireSeatEventsTask,
@@ -51,7 +59,15 @@ export { DrizzleSeatSales } from './adapters/db/drizzle-seat-sales.js';
 export { purchaseQuota, seatHold, seatRebuild, seatSale } from './adapters/db/schema.js';
 export { FileSeatMapSource, LayoutSeatMap, type LayoutSeatMapOptions, type SeatMapSource } from './adapters/layout-seat-map.js';
 export { MemorySeatMap, type MemorySeatDef } from './adapters/memory-seat-map.js';
-export { MemorySeatDb, MemorySeatEvent, MemorySeatStore, type MemoryHoldHash, type MemoryIdemRecord, type MemoryPublished } from './adapters/memory-seat-store.js';
+export {
+  MemorySeatDb,
+  MemorySeatEvent,
+  MemorySeatStore,
+  type MemoryHoldHash,
+  type MemoryIdemRecord,
+  type MemoryPublished,
+  type MemorySeatStoreOptions,
+} from './adapters/memory-seat-store.js';
 export { MemorySweepLeases } from './adapters/memory-sweep-leases.js';
 export { PromSeatSignals } from './adapters/prom-seat-signals.js';
 export {

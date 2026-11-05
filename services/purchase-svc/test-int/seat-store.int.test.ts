@@ -6,6 +6,7 @@ import {
   createHotRedis,
   fakeClock,
   type HotRedis,
+  PlatformMetrics,
   RedisConnectError,
   RedisDeadlineError,
   type RedisScript,
@@ -13,9 +14,25 @@ import {
   uuidv7,
 } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { EXPIRE_LUA, ExpirySweeper, HOLD_LUA, HOLD_TTL_MS, MemorySeatMap, OPEN_SALE_LUA, RedisSeatStore, RedisSweepLeases, SeatStoreUnavailable, seatKeys, slotOf } from '../src/modules/inventory/index.js';
+import {
+  EXPIRE_LUA,
+  ExpirySweeper,
+  HOLD_LUA,
+  HOLD_TTL_MS,
+  MemorySeatMap,
+  OPEN_SALE_LUA,
+  PromSeatSignals,
+  RedisSeatStore,
+  RedisSweepLeases,
+  SeatEpochWatch,
+  SeatStoreUnavailable,
+  seatKeys,
+  seatLuaErrorOf,
+  slotOf,
+} from '../src/modules/inventory/index.js';
+import { type EpochBumpHarness, epochBumpCases, OLD_PRIMARY } from '../test/epoch-bump-cases.js';
 import { bugOf, type ExpiryHarness, expireSeatsOf, expiryCases, okOf } from '../test/expiry-cases.js';
-import { ACCOUNT_A, ACCOUNT_B, ACCOUNT_C, ACCOUNT_D, DAY, expectBug, fingerprintOf, held, holdCases, holdInput, idx, newEvent, SEAT_COUNT, SEAT_DEFS, type SeatHarness } from '../test/hold-cases.js';
+import { ACCOUNT_A, ACCOUNT_B, ACCOUNT_C, ACCOUNT_D, DAY, expectBug, fingerprintOf, held, holdCases, holdInput, idx, newEvent, ref as refOf, SEAT_COUNT, SEAT_DEFS, type SeatHarness } from '../test/hold-cases.js';
 import { type ShardSubscriber, shardSubscriber, startValkey, type ValkeyContainer } from './valkey.js';
 
 const CONFIG_EPOCH = 3;
@@ -24,6 +41,8 @@ let cluster: ValkeyContainer | undefined;
 let redis: HotRedis;
 let clusterRedis: HotRedis;
 let sub: ShardSubscriber | undefined;
+/** 클러스터 모드 컨테이너의 샤드 Pub/Sub 구독 연결(세대 올리기 사례의 델타, PRF-168 리뷰 고침 H1) */
+let clusterSub: ShardSubscriber | undefined;
 let myId: string;
 
 beforeAll(async () => {
@@ -32,12 +51,18 @@ beforeAll(async () => {
   if (a.status === 'fulfilled') valkey = a.value;
   if (b.status === 'fulfilled') cluster = b.value;
   if (!valkey || !cluster) throw (a.status === 'rejected' ? a.reason : (b as PromiseRejectedResult).reason) as Error;
-  [redis, clusterRedis, sub] = await Promise.all([createHotRedis({ url: valkey.url }), createHotRedis({ url: cluster.url }), shardSubscriber(valkey.url)]);
+  [redis, clusterRedis, sub, clusterSub] = await Promise.all([
+    createHotRedis({ url: valkey.url }),
+    createHotRedis({ url: cluster.url }),
+    shardSubscriber(valkey.url),
+    shardSubscriber(cluster.url),
+  ]);
   myId = String(await clusterRedis.command(['CLUSTER', 'MYID'], { key: 'x' }));
 });
 
 afterAll(async () => {
   sub?.close();
+  clusterSub?.close();
   await Promise.all([redis?.close(), clusterRedis?.close()]);
   valkey?.stop();
   cluster?.stop();
@@ -129,6 +154,172 @@ function harness(r: HotRedis = redis): SeatHarness {
 
 holdCases('Valkey Lua', async () => harness());
 
+/** INFO commandstats의 cmdstat_cluster|info calls(스크립트 안에서 부른 것도 센다). 없으면 0 */
+async function clusterInfoCalls(r: HotRedis): Promise<number> {
+  const text = String(await r.command(['INFO', 'commandstats'], { key: 'x' }));
+  return Number(/cmdstat_cluster\|info:calls=(\d+)/.exec(text)?.[1] ?? '0');
+}
+
+/**
+ * 세대 올리기 사례용 Valkey 도구(쓰는 Lua가 그 자리에서 세대를 올림, BUILD_ORDER PRF-168 리뷰 고침 H1, ADR-0210).
+ * 클러스터 모드(노드 하나)는 표지가 '{CLUSTER MYID}:{설정 세대 3}'이고, CLUSTER INFO를 부른 수로 견주기 비용을 본다
+ */
+function epochHarness(r: HotRedis, s: () => ShardSubscriber | undefined, me: () => string, o: { cluster: boolean }): EpochBumpHarness {
+  const cmd = (key: string, args: string[]) => r.command(args, { key });
+  const subscriber = () => {
+    const x = s();
+    if (!x) throw new Error('구독 연결이 없다');
+    return x;
+  };
+  return {
+    store: new RedisSeatStore(r),
+    clock: systemClock,
+    me,
+    serverSec: async () => Number(((await r.command(['TIME'], { key: 'x' })) as unknown[])[0]),
+    setEpoch: async (e, f) => {
+      const k = seatKeys.epoch(e);
+      const pairs = Object.entries(f).flatMap(([field, v]) => (v === undefined ? [] : [field, v]));
+      await cmd(k, ['HSET', k, ...pairs]);
+    },
+    epoch: async (e) => {
+      const h = hash(await cmd(seatKeys.epoch(e), ['HGETALL', seatKeys.epoch(e)]));
+      return h.epoch === undefined ? null : { epoch: Number(h.epoch), node: String(h.node), chk: h.chk === undefined ? null : Number(h.chk) };
+    },
+    epochRaw: async (e) => {
+      const h = hash(await cmd(seatKeys.epoch(e), ['HGETALL', seatKeys.epoch(e)]));
+      return Object.keys(h).length ? h : null;
+    },
+    stream: async (e) => ((await cmd(seatKeys.stream(e), ['XRANGE', seatKeys.stream(e), '-', '+'])) as unknown[]).map((x) => hash((x as unknown[])[1])),
+    prepare: async (e) => subscriber().subscribe(SECTIONS.map((x) => seatKeys.section(e, String(x)))),
+    published: async (e) => {
+      const x = subscriber();
+      await x.sync();
+      return x.messages.filter((m) => m.channel.startsWith(seatKeys.section(e, ''))).map((m) => ({ ...m }));
+    },
+    backdate: async (e, i, at) => {
+      await cmd(seatKeys.hold(e, i), ['HSET', seatKeys.hold(e, i), 'exp', String(at)]);
+      await cmd(seatKeys.expiry(e), ['ZADD', seatKeys.expiry(e), String(at), String(i)]);
+    },
+    pause: async (e) => void (await cmd(seatKeys.ctl(e), ['HSET', seatKeys.ctl(e), 'paused', '1'])),
+    corrupt: async (e, what, a) => {
+      const k = what === 'fence' ? seatKeys.fence(e) : seatKeys.quota(e, a);
+      await cmd(k, ['SET', k, what === 'fence' ? 'x1' : '1.5', 'KEEPTTL']);
+    },
+    ...(o.cluster ? { fullChecks: () => clusterInfoCalls(r) } : {}),
+  };
+}
+
+epochBumpCases('Valkey 단일 노드', async () => epochHarness(redis, () => sub, () => 'standalone', { cluster: false }), { configPart: false });
+epochBumpCases('Valkey 클러스터 모드(노드 하나)', async () => epochHarness(clusterRedis, () => clusterSub, () => `${myId}:${CONFIG_EPOCH}`, { cluster: true }), { configPart: true });
+
+describe('노드 표지를 구하지 못하면 아무것도 쓰지 않고 NODE_ID로 끝난다(PRF-168 리뷰 고침 중간 2·낮음 b, ADR-0210 결과, docs/infra.md 저장소 인증 계층)', () => {
+  /** ACL로 cluster 명령을 뺀 사용자의 연결(queue-svc test-int/entry-store.int.test.ts와 같은 방식) */
+  async function noClusterRedis(user: string, r: HotRedis, url: string, deny: string): Promise<HotRedis> {
+    await r.command(['ACL', 'SETUSER', user, 'reset', 'on', '>pw-test-only', '~*', '&*', '+@all', deny], { key: 'x' });
+    return createHotRedis({ url: url.replace('redis://', `redis://${user}:pw-test-only@`) });
+  }
+  /** 저장소 호출이 일시 장애가 아닌 Error로 끝나고 글에 PEAKET_NODE_ID가 있으며 지표 갈래가 NODE_ID인지 본다 */
+  async function expectNodeIdError(what: string, p: Promise<unknown>): Promise<void> {
+    const err = await bugOf(p, { what });
+    expect.soft({ what, msg: err.message }).toMatchObject({ what, msg: expect.stringContaining('PEAKET_NODE_ID') });
+    expect.soft({ what, code: seatLuaErrorOf(err)?.code }).toEqual({ what, code: 'NODE_ID' });
+  }
+
+  test('ST26_리뷰 고침 중간 2_ 단일 노드 Valkey에서도 cluster 명령을 뺀 사용자의 스크립트 안 CLUSTER MYID는 권한 오류다(cluster support disabled가 아니다). 그 사용자로 부르면 홀드·만료·묶기·실패 해제·세대 올리기가 회차 키를 하나도 바꾸지 않고(세대 키의 chk 포함) PEAKET_NODE_ID(지표 갈래 NODE_ID)로 끝나고, 판매 열기는 비트맵도 만들지 않는다(낮음 b) [ASVS v5.0.0-16.5.3] [ASVS v5.0.0-13.2.2] [S-T26]', async () => {
+    const limited = await noClusterRedis('seat-nocluster', redis, valkey!.url, '-cluster');
+    try {
+      // 먼저 확인: 권한 오류(NOPERM 갈래)다. standalone으로 넘어가지 않는다
+      const probe = await limited.command(['EVAL', "return redis.pcall('CLUSTER', 'MYID')", '0'], { key: 'x' }).then(
+        (v) => `풀렸다: ${String(v)}`,
+        (x: unknown) => String((x as Error).message),
+      );
+      expect(probe).toContain('cluster|myid');
+      expect(probe).not.toContain('cluster support disabled');
+
+      const store = new RedisSeatStore(redis);
+      const denied = new RedisSeatStore(limited);
+      const e = newEvent();
+      const keepUntilMs = Date.now() + 2 * DAY;
+      await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+      const holdId = uuidv7(systemClock);
+      held(await store.hold(holdInput(e, ['A01'], { holdId, purchaseSessionId: 'ps-a', keepUntilMs })));
+      held(await store.hold(holdInput(e, ['B01'], { accountId: ACCOUNT_B, keepUntilMs })));
+      await backdate(redis, e, ['B01']);
+      const due = expireSeatsOf(await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: 100 }));
+      // 지난 chk: 세대 확인이 쓰기 전에 실패하는지(chk도 쓰지 않는지) 본다
+      await redis.command(['HSET', seatKeys.epoch(e), 'chk', '1'], { key: seatKeys.epoch(e) });
+      const before = await rawState(redis, e);
+      const pinIn = { eventId: e, accountId: ACCOUNT_A, purchaseSessionId: 'ps-a', holdId, seats: ['A01', 'A03'].map(refOf), limit: 4, orderGen: 1, keepUntilMs };
+      await expectNodeIdError('홀드', denied.hold(holdInput(e, ['A02'], { keepUntilMs })));
+      await expectNodeIdError('홀드 거절(이미 잡힌 좌석)', denied.hold(holdInput(e, ['B01'], { keepUntilMs })));
+      await expectNodeIdError('만료', denied.expire({ eventId: e, keepUntilMs, seats: due }));
+      await expectNodeIdError('묶기', denied.pin(pinIn));
+      await expectNodeIdError('실패 해제', denied.releaseFailed({ eventId: e, accountId: ACCOUNT_A, holdId, seats: [refOf('A01')], keepUntilMs }));
+      await expectNodeIdError('세대 올리기', denied.bumpEpoch(e));
+      expect(await rawState(redis, e)).toEqual(before);
+
+      // 판매 열기(낮음 b): 표지를 비트맵보다 먼저 구한다. 회차 슬롯의 키를 하나도 만들지 않는다(회차 목록 s:ctl:events는 다른 슬롯이라 Lua 앞에서 넣는다)
+      const fresh = newEvent();
+      await expectNodeIdError('판매 열기', denied.openSale({ eventId: fresh, seatCount: SEAT_COUNT, keepUntilMs }));
+      expect(await rawState(redis, fresh)).toEqual({});
+    } finally {
+      await limited.close();
+      await redis.command(['ACL', 'DELUSER', 'seat-nocluster'], { key: 'x' });
+    }
+  });
+
+  test('ST26_리뷰 고침 중간 2_ 클러스터 모드에서 CLUSTER INFO만 막힌 사용자도 설정 세대를 견주는 때(지난 chk) 아무것도 쓰지 않고 PEAKET_NODE_ID로 끝난다(권한 오류가 갈래 OTHER로 새지 않는다) [ASVS v5.0.0-16.5.3] [S-T26]', async () => {
+    const limited = await noClusterRedis('seat-noinfo', clusterRedis, cluster!.url, '-cluster|info');
+    try {
+      const store = new RedisSeatStore(clusterRedis);
+      const denied = new RedisSeatStore(limited);
+      const e = newEvent();
+      const keepUntilMs = Date.now() + 2 * DAY;
+      await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+      await clusterRedis.command(['HSET', seatKeys.epoch(e), 'chk', '1'], { key: seatKeys.epoch(e) });
+      const before = await rawState(clusterRedis, e);
+      await expectNodeIdError('홀드', denied.hold(holdInput(e, ['A02'], { keepUntilMs })));
+      await expectNodeIdError('세대 올리기', denied.bumpEpoch(e));
+      expect(await rawState(clusterRedis, e)).toEqual(before);
+    } finally {
+      await limited.close();
+      await clusterRedis.command(['ACL', 'DELUSER', 'seat-noinfo'], { key: 'x' });
+    }
+  });
+});
+
+describe('세대 올리기 감시가 쓰는 Lua의 올리기를 센다(PRF-168 리뷰 고침 중간 1, docs/observability.md seat_epoch_bumps_total)', () => {
+  test('ST26_리뷰 고침 중간 1_ 승격 흉내 뒤 홀드 Lua가 그 자리에서 세대를 올리면(bumps 1) 다음 감시 틱은 올리지 않지만(SAME) 그 한 번을 세어 seat_epoch_bumps_total이 1이고 info 한 줄(회차 ID·새 세대·올린 수)이다. 그 뒤 틱은 다시 세지 않는다 [S-T26] [ASVS v5.0.0-16.2.5]', async () => {
+    const store = new RedisSeatStore(redis);
+    const e = newEvent();
+    const keepUntilMs = Date.now() + 2 * DAY;
+    await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+    const metrics = new PlatformMetrics('purchase-svc');
+    const signals = new PromSeatSignals().register(metrics.registry);
+    const infos: object[] = [];
+    // 이 회차만 본다(같은 Valkey의 다른 시험 회차가 지표를 바꾸지 않게)
+    const watch = new SeatEpochWatch({
+      store: { saleEvents: async () => [e], bumpEpoch: (id) => store.bumpEpoch(id) },
+      leader: { isLeader: () => true },
+      signals,
+      logger: { warn: () => undefined, info: (o) => void infos.push(o) },
+    });
+    const counter = async () => Number(/^seat_epoch_bumps_total (\S+)$/m.exec(await metrics.registry.metrics())?.[1] ?? 'NaN');
+    expect(await watch.tick()).toEqual({ checked: 1, bumped: [], notReady: [], failed: [] });
+    expect(await counter()).toBe(0);
+
+    await redis.command(['HSET', seatKeys.epoch(e), 'node', OLD_PRIMARY], { key: seatKeys.epoch(e) });
+    held(await store.hold(holdInput(e, ['A01'], { keepUntilMs })));
+    const ep = hash(await redis.command(['HGETALL', seatKeys.epoch(e)], { key: seatKeys.epoch(e) }));
+    expect(ep).toMatchObject({ node: 'standalone', bumps: '1' });
+    expect(await watch.tick()).toEqual({ checked: 1, bumped: [], notReady: [], failed: [] });
+    expect(await counter()).toBe(1);
+    expect(infos).toEqual([{ kind: 'seat-epoch-watch', eventId: e, epoch: Number(ep.epoch), bumps: 1 }]);
+    await watch.tick();
+    expect(await counter()).toBe(1);
+  });
+});
+
 /** ZRANGE … WITHSCORES 응답(RESP2 평평한 배열, RESP3 짝 배열·Map)을 멤버 → 점수로 */
 function scores(v: unknown): Record<string, number> {
   if (v instanceof Map) return Object.fromEntries([...v].map(([k, x]) => [String(k), Number(x)]));
@@ -172,7 +363,10 @@ function expiryHarness(r: HotRedis = redis): ExpiryHarness {
 
 expiryCases('Valkey Lua', async () => expiryHarness());
 
-/** 그 회차 슬롯의 키 전부(형·만료 시각·값). 형이 틀린 키도 읽는다 */
+/**
+ * 그 회차 슬롯의 키 전부(형·만료 시각·값). 형이 틀린 키도 읽는다. 세대 키의 chk·bumps 칸도 본다: 좌석을 쓰는 Lua의 세대 확인은 오류로 끝나는 검사를
+ * 모두 지난 뒤에 쓰므로(BUILD_ORDER PRF-168 리뷰 고침 결함 1) 오류로 끝난 호출은 chk도 바꾸지 않는다
+ */
 async function rawState(r: HotRedis, e: string) {
   const cmd = (key: string, args: string[], binary = false) => r.command(args, { key, binary });
   const keys = ((await cmd(seatKeys.bitmap(e), ['KEYS', `s:{event:${e}}:*`])) as unknown[]).map(String).sort();
@@ -451,7 +645,7 @@ describe('홀드 Lua의 모양(ADR-0086, seat-hold.md §3 키 목록·입력값)
 describe('망가진 키는 쓰기 전에 거절한다(전부 안 됨, 추천 적용 2026-11-04)', () => {
   const cmd = (key: string, args: string[], binary = false) => redis.command(args, { key, binary });
 
-  /** 그 회차 슬롯의 키 전부(형·만료 시각·값)와 받은 샤드 Pub/Sub 수. 형이 틀린 키도 읽는다 */
+  /** 그 회차 슬롯의 키 전부(형·만료 시각·값, 세대 키의 chk·bumps 칸까지)와 받은 샤드 Pub/Sub 수. 형이 틀린 키도 읽는다 */
   async function raw(h: SeatHarness, e: string) {
     const keys = ((await cmd(seatKeys.bitmap(e), ['KEYS', `s:{event:${e}}:*`])) as unknown[]).map(String).sort();
     const out: Record<string, unknown> = {};

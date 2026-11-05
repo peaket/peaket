@@ -20,11 +20,14 @@ import type { StreamDropReason, TradeTopic } from '../domain/seat-event.js';
  * - 좌석 Stream 릴레이(SeatStreamRelaySignals, BUILD_ORDER PRF-164: 릴레이 프로세스가 이 클래스를 relay 레지스트리에 붙여 SeatStreamRelay의 signals로 넘긴다):
  *   seat_stream_relay_sent_total{topic}(카운터, topic은 TradeTopic의 값만), seat_stream_relay_dropped_total{reason}(카운터, reason은 StreamDropReason의 값만),
  *   seat_stream_relay_failures_total{stage}(카운터, stage는 read·publish·ack). 이름·뜻은 docs/observability.md. register()가 다른 지표와 함께 붙인다
+ * - seat_epoch_bumps_total(카운터, 이름표 없음): 장애 조치 뒤 회차 세대를 올린 수(BUILD_ORDER PRF-168). 좌석을 쓰는 Lua와 세대 올리기 Lua가 올린 것을 모두 센다:
+ *   세대 올리기 감시(SeatEpochWatch)가 회차마다 세대 키 bumps 칸의 지난번 값과의 차이 n으로 epochBumped(n)을 부른다(ADR-0210, 리뷰 고침 중간 1).
+ *   epochBumped 메서드가 application/seat-epoch-watch.ts의 SeatEpochWatchSignals 모양이라 감시의 signals로 그대로 넘긴다
  */
 export class PromSeatSignals implements SeatSignals, SeatStreamRelaySignals {
   readonly #luaErrors = new Counter({
     name: 'seat_lua_errors_total',
-    help: '좌석 Lua 오류·NOT_READY 수(script: hold·expire, code: CORRUPT_KEY·KEEP_UNTIL_PAST·FENCE_OVERFLOW·OOM·NOT_READY·OTHER)',
+    help: '좌석 Lua 오류·NOT_READY 수(script: hold·expire, code: CORRUPT_KEY·KEEP_UNTIL_PAST·FENCE_OVERFLOW·NODE_ID·OOM·NOT_READY·OTHER)',
     labelNames: ['script', 'code'] as const,
     registers: [],
   });
@@ -53,10 +56,26 @@ export class PromSeatSignals implements SeatSignals, SeatStreamRelaySignals {
     labelNames: ['stage'] as const,
     registers: [],
   });
+  readonly #epochBumps = new Counter({
+    name: 'seat_epoch_bumps_total',
+    help: '장애 조치 뒤 회차 세대를 올린 수(좌석을 쓰는 Lua와 세대 올리기 감시가 올린 것 모두, 세대 키 bumps의 차이. 장애 조치 한 번에 많아야 그 샤드(주 노드)의 회차 수만큼)',
+    registers: [],
+  });
 
   /** 지표를 registry에 붙이고 자신을 돌려준다(main.ts가 service.metrics.registry로, 릴레이 프로세스가 relay 레지스트리로 한 번 부른다) */
   register(registry: Registry): this {
-    for (const m of [this.#luaErrors, this.#lag, this.#ticks, this.#sessionEnds, this.#deferred, this.#rebuilds, this.#relaySent, this.#relayDropped, this.#relayFailures]) {
+    for (const m of [
+      this.#luaErrors,
+      this.#lag,
+      this.#ticks,
+      this.#sessionEnds,
+      this.#deferred,
+      this.#rebuilds,
+      this.#relaySent,
+      this.#relayDropped,
+      this.#relayFailures,
+      this.#epochBumps,
+    ]) {
       registry.registerMetric(m);
     }
     return this;
@@ -105,5 +124,10 @@ export class PromSeatSignals implements SeatSignals, SeatStreamRelaySignals {
   /** seat_stream_relay_failures_total{stage}을 1 올린다(SeatStreamRelaySignals). 던지지 않는다 */
   failed(stage: 'read' | 'publish' | 'ack'): void {
     this.#relayFailures.inc({ stage });
+  }
+
+  /** seat_epoch_bumps_total을 n(1 이상의 정수, 감시가 본 bumps 차이) 올린다(SeatEpochWatchSignals, BUILD_ORDER PRF-168). 던지지 않는다(붙이기 전에도 센다) */
+  epochBumped(n: number): void {
+    this.#epochBumps.inc(n);
   }
 }

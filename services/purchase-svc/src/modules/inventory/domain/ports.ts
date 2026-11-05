@@ -741,9 +741,15 @@ export interface SeatRebuildTarget {
   writeSeats(eventId: string, seats: readonly RebuildSeat[], keepUntilMs: number, gen: number): Promise<RebuildStep>;
   /**
    * 회차 목록에 회차를 먼저 넣고(결과와 관계없이), 계정마다 보유 수를 쓰고, 펜싱 카운터를 max(fence, maxToken)로 되살린 뒤 세대 키(epoch = TIME 초, node, gen)를 마지막에 쓴다.
+   * node는 그 회차 슬롯 주 노드의 표지(판매 열기와 같은 모양, 단일 노드는 'standalone')이고 저장소가 구한다(BUILD_ORDER PRF-168).
    * 세대 키가 이미 있으면 READY, rebuild 키 ≠ gen이면 STALE
    */
   finish(eventId: string, input: RebuildFinishInput): Promise<RebuildStep>;
-  /** 장애 조치 뒤 세대 올리기: node가 다를 때만 epoch = max(epoch + 1, TIME 초). 세대 키가 없으면 NOT_READY */
-  bumpEpoch(eventId: string, node: string): Promise<{ result: 'BUMPED' | 'SAME'; epoch: number } | { result: 'NOT_READY' }>;
+  /**
+   * 장애 조치 뒤 세대 올리기(BUILD_ORDER PRF-168): 저장소가 지금 주 노드의 표지를 구해 세대 키의 node와 다를 때만 epoch = max(epoch + 1, TIME 초)와 node = 그 표지(BUMPED).
+   * 같으면 SAME, 세대 키가 없으면 NOT_READY. 여러 곳이 함께 불러도 한 번만 오른다.
+   * bumps = 세대 키 bumps 칸(장애 조치 뒤 세대를 올린 누적 수, 좌석을 쓰는 Lua가 올린 것 포함, 없으면 0. 감시가 차이로 지표를 낸다, ADR-0210·리뷰 고침 중간 1)
+   * @throws RangeError eventId가 KEY_PART가 아님(부르지 않는다) · SeatStoreUnavailable 일시 장애 · Error 스크립트 오류(망가진 세대 키 PEAKET_CORRUPT_KEY, 표지를 구하지 못함 PEAKET_NODE_ID)
+   */
+  bumpEpoch(eventId: string): Promise<{ result: 'BUMPED' | 'SAME'; epoch: number; bumps: number } | { result: 'NOT_READY' }>;
 }

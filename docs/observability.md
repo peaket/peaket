@@ -383,7 +383,7 @@ flowchart LR
 
 | 지표 | 종류 | 라벨 | 뜻 |
 | --- | --- | --- | --- |
-| `seat_lua_errors_total` | 카운터 | `script`·`code` | 좌석 Lua가 오류로 끝난 수. `script`는 Lua 이름(`hold`·`expire`. 해제·연장 같은 뒤 단계의 Lua가 더한다)이고, `code`는 `CORRUPT_KEY`·`KEEP_UNTIL_PAST`·`FENCE_OVERFLOW`·`OOM`·`NOT_READY`이며 그 밖의 오류는 `OTHER` 하나로 묶는다(라벨 값이 늘지 않게, §8). 만료의 `CORRUPT_KEY`는 망가진 좌석이 여럿이어도 묶음마다 한 번만 올린다. 로그에는 키 종류(`quota`·`secver`처럼 키 이름에서 회차·계정을 뺀 부분)만 남기고, 계정 ID가 든 키 이름은 남기지 않는다 |
+| `seat_lua_errors_total` | 카운터 | `script`·`code` | 좌석 Lua가 오류로 끝난 수. `script`는 Lua 이름(`hold`·`expire`. 해제·연장 같은 뒤 단계의 Lua가 더한다)이고, `code`는 `CORRUPT_KEY`·`KEEP_UNTIL_PAST`·`FENCE_OVERFLOW`·`OOM`·`NOT_READY`·`NODE_ID`(스크립트 안 `CLUSTER MYID`·`CLUSTER INFO`가 막힘, 접근 문자열을 본다, ADR-0210)이며 그 밖의 오류는 `OTHER` 하나로 묶는다(라벨 값이 늘지 않게, §8). 만료의 `CORRUPT_KEY`는 망가진 좌석이 여럿이어도 묶음마다 한 번만 올린다. 로그에는 키 종류(`quota`·`secver`처럼 키 이름에서 회차·계정을 뺀 부분)만 남기고, 계정 ID가 든 키 이름은 남기지 않는다 |
 | `seat_expiry_lag_seconds` | 게이지 | 없음 | 만료가 밀린 정도(초): 틱마다 회차의 만료 인덱스 맨 앞 좌석이 만료 시각을 넘긴 시간(지금 − 맨 앞 점수. 지난 것이 없으면 0). 그 파드가 맡은 회차 가운데 가장 큰 값이다(추천 적용 2026-11-04) |
 | `seat_expiry_ticks_total` | 카운터 | `outcome` | 회차 하나를 한 틱에 돈 결과의 수. `outcome`은 `DRAINED`(다 풂)·`BATCH_LIMIT`(20묶음 상한)·`NO_PROGRESS`(더 풀지 못함)·`NOT_LEASED`(임대 없음)·`NO_CONFIG`(회차 설정 없음)·`NOT_READY`(준비 안 됨)·`UNAVAILABLE`(일시 장애)·`ERROR`(오류)·`BACKOFF`(일시 장애·오류 뒤 5초 [가정] 건너뜀)·`STOPPED`(멈춤 신호(stop)로 남은 묶음을 돌지 않고 멈춘 회차)다(추천 적용 2026-11-04) |
 | `purchase_sessions_ended_total` | 카운터 | `reason` | 끝낸 구매 세션 수(추천 적용 2026-11-04, BUILD_ORDER PRF-138). `reason`은 `COMPLETED`·`LEFT`·`IDLE`·`MAX_STAY` 넷뿐이다(과금 없는 결제 실패는 구매 세션을 끝내지 않는다). 끝내는 연산이 지운 세션마다 하나이고, 이미 끝난 세션을 다시 끝내려는 호출은 세지 않는다. `IDLE`·`MAX_STAY`는 1초 [가정] 정리 반복이 올린다. 입장 자리가 안 비워지는 문제를 볼 때 `rate(...{reason="LEFT"})`와 입장 자리 수를 함께 본다. 파드 단위라 합쳐 본다 |
@@ -392,6 +392,7 @@ flowchart LR
 | `seat_stream_relay_failures_total` | 카운터 | `stage` | 릴레이가 실패한 틱 수. `stage`는 `read`(좌석 Redis)·`publish`(Kafka)·`ack`다. 온세일 중 1분에 3번 [가정] 넘으면 SEV2(원장 적재와 관제·분석 사건이 늦는다) |
 | `seat_hold_deferred_total` | 카운터 | `reason` | 홀드 요청을 503으로 미룬 수(추천 적용 2026-11-04, BUILD_ORDER PRF-143, ADR-0121). `reason`은 `not_ready`(세대 키 없음: 다시 만들기 전)·`store_unavailable`(좌석 Redis 일시 장애)다. 온세일 중 1분에 100번 [가정] 넘으면 SEV2 |
 | `seat_rebuild_total` | 카운터 | `result` | 다시 만들기 결과 수. `result`는 `rebuilt`·`ready`(이미 세대 키가 있음)·`busy`(다른 파드가 임대 중)·`failed`다. `failed`가 0보다 크면 SEV2(RB-06) |
+| `seat_epoch_bumps_total` | 카운터 | 없음 | 세대 올리기 감시(PRF-168)가 장애 조치 뒤 회차 세대를 올린 수(추천 적용 2026-11-05). 쓰는 Lua와 감시 반복이 올린 것을 모두 센다: 올릴 때 세대 키의 `bumps` 칸을 1씩 더하고, 감시 반복이 회차마다 지난번에 본 값과의 차이만큼 올린다(리더가 바뀐 뒤 첫 확인은 기준만 잡는다, ADR-0210). 장애 조치 없이 오르면(SEV3) 리샤딩·설정 세대 충돌 해소가 있었는지, 세대 키 `node` 칸을 쓰는 곳이 서로 다른 표지를 쓰는지 본다 |
 
 - 좌석 Lua 오류 경보: `code`가 `CORRUPT_KEY`·`KEEP_UNTIL_PAST`·`FENCE_OVERFLOW`인 수가 5분 안에 1이라도 늘면 SEV3(`kind` cause, `dependency` 좌석 클러스터 이름) [가정, wbs 4.1.4에서 확정]이다. 이 셋은 다시 보내도 낫지 않고 데이터나 코드를 고쳐야 한다. `OOM`은 위 Redis 메모리 신호, `NOT_READY`는 좌석 장애 조치·다시 만들기 신호(seat-hold §9, RB-06)가 맡아 이 경보에 넣지 않는다. 런북은 wbs 4.1.4에서 정한다.
 - 좌석 만료 밀림 경보(추천 적용 2026-11-04): `seat_expiry_lag_seconds`가 3초 [가정]를 넘은 채 5분 이어지면 SEV3(`kind` cause, `dependency` 좌석 클러스터 이름) [가정, wbs 4.1.4에서 확정]이다. 기준 3초는 만료 좌석이 p99 3초 안에 다시 보여야 한다는 NFR-025에 맞춘 것이다. 함께 볼 것은 `seat_expiry_ticks_total`의 20묶음 상한·일시 장애·오류·BACKOFF 수와 위 좌석 Lua 오류다. 런북은 wbs 4.1.4에서 정한다.

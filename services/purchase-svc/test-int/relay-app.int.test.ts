@@ -5,8 +5,10 @@
 // docs/data.md §5 '릴레이 리더 넘김', 플랫폼 packages/platform/test-int/relay-process.int.test.ts(FND110, V-T28 로컬 부분).
 //
 // 약속:
-// - 시험 시간을 줄인다: Lease 2초·갱신 한도 1.5초·다시 시도 0.1초, 다시 만들기 반복 틱 0.2초, 좌석 Stream 릴레이 쉬기는 0.05초 위를 자른다,
-//   끝낼 때 한도 3초. 기다림은 조건이 될 때까지 다시 보는 until이다(고정 쉬기는 쓰지 않는다).
+// - 시험 시간을 줄인다: Lease 2초·갱신 한도 1.5초·다시 시도 0.1초, 다시 만들기 반복 틱 0.2초, 세대 올리기 감시 틱 0.1초(PRF-168),
+//   좌석 Stream 릴레이 쉬기는 0.05초 위를 자른다, 끝낼 때 한도 3초. 기다림은 조건이 될 때까지 다시 보는 until이다(고정 쉬기는 쓰지 않는다).
+// - 세대 키 node는 Lua가 구한 노드 표지다(단일 노드 Valkey는 'standalone', 파드 이름이 아니다, PRF-168). 장애 조치(복제본 승격)는
+//   세대 키 node를 HSET으로 옛 주 노드 표지로 바꿔 흉내 낸다(클러스터 승격은 S-T26 측정의 몫).
 // - 좌석맵 판은 MemorySeatMap(+ refresh 대역), 회차 목록은 시험이 고치는 배열 대역이다. 목록을 읽은 수(calls)가 '다시 만들기 반복이 일했다'는 대역 신호다.
 // - 앞 describe(프로세스 하나)는 시험 다섯이 같은 프로세스를 나눠 쓰고 차례대로 돈다(/metrics 시험은 앞 시험이 보낸 수·다시 만든 수를 본다).
 // - 다시 만들기 반복은 판매를 연 기록(seat_rebuild 행)이 있는 회차만 다시 만든다(리뷰 고침 M3). saleWorld가 판매 열기 전에 그 기록을 넣는다(판매 열기를 부르는 쪽의 차례).
@@ -62,6 +64,12 @@ const TRADE_ORDERS = 'trade.orders';
 const LEASE = { leaseDurationMs: 2_000, renewDeadlineMs: 1_500, retryPeriodMs: 100 } as const;
 /** 다시 만들기 반복 틱(기본 5초를 줄인다) */
 const REBUILD_TICK_MS = 200;
+/** 세대 올리기 감시 틱(기본 1초를 줄인다, PRF-168) */
+const EPOCH_WATCH_TICK_MS = 100;
+/** 단일 노드 Valkey의 주 노드 표지(hold-lua.ts NODE_ID) */
+const STANDALONE = 'standalone';
+/** 승격 전 주 노드의 표지 흉내(클러스터 모양 '{CLUSTER MYID}:{cluster_my_epoch}') */
+const OLD_PRIMARY = '1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d:3';
 /** 좌석 Stream 릴레이 쉬기의 상한(기본 1초 틱·늘려 쉬기를 이 값으로 자른다) */
 const STREAM_SLEEP_CAP_MS = 50;
 /** 끝낼 때 정비 일·반복을 기다리는 한도 */
@@ -195,7 +203,7 @@ function shortSleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/** 프로세스 하나를 띄운다(파드 이름 = Lease 보유자 = 다시 만들기 holder·세대 키 node). 관리 포트는 0(빈 포트) */
+/** 프로세스 하나를 띄운다(파드 이름 = Lease 보유자 = 다시 만들기 holder. 세대 키 node는 아니다). 관리 포트는 0(빈 포트) */
 async function startRelay(o: {
   pod: string;
   lease: LeaseApi;
@@ -225,6 +233,7 @@ async function startRelay(o: {
     lease: LEASE,
     holder: o.pod,
     rebuildTickMs: REBUILD_TICK_MS,
+    epochWatchTickMs: EPOCH_WATCH_TICK_MS,
     streamSleep: shortSleep,
     seatMapRefreshMs: 60_000,
     stopTimeoutMs: STOP_TIMEOUT_MS,
@@ -259,6 +268,7 @@ const quota = async (e: string, a: string) => {
   return v === null || v === undefined ? null : Number(v);
 };
 const inCtlEvents = async (e: string) => Number(await cmd(redis, seatKeys.ctlEvents(), ['SISMEMBER', seatKeys.ctlEvents(), e])) === 1;
+const expireAtOf = async (key: string) => Number(await cmd(redis, key, ['PEXPIRETIME', key]));
 const rebuildRow = async (e: string) => (await q<{ gen: number }>('select gen from seat_rebuild where event_id = $1', [e]))[0];
 
 /** 전체 유실 흉내: 그 회차의 좌석 Redis 키를 모두 지우고 s:ctl:events에서도 뺀다(saga-e2e.int.test.ts와 같은 방식) */
@@ -352,6 +362,11 @@ async function putPinnedOrder(w: SaleWorld, seat: SeatRef): Promise<SeededOrder 
 
 /** 지표 글에서 이름이 name인 표본 줄(HELP·TYPE 줄 빼고) */
 const samples = (text: string, name: string) => text.split('\n').filter((l) => l.startsWith(`${name}{`) || l.startsWith(`${name} `));
+/** 이름표 없는 카운터 name의 값(표본이 없으면 0) */
+const counterOf = (text: string, name: string) => Number(samples(text, name).find((l) => l.startsWith(`${name} `))?.split(' ').at(-1) ?? 0);
+
+/** 승격 흉내: 세대 키 node를 옛 주 노드 표지로 바꾼다(epoch·gen·수명은 그대로) */
+const pretendFailover = (e: string) => cmd(redis, seatKeys.epoch(e), ['HSET', seatKeys.epoch(e), 'node', OLD_PRIMARY]);
 
 // ───────────────────────────── 프로세스 하나 ─────────────────────────────
 
@@ -401,7 +416,7 @@ describe('릴레이 프로세스 하나(리더)', () => {
     await until(async () => (await xlen(redis, eventId)) === 0, 'Stream 항목 지움', 10_000);
   }, 60_000);
 
-  test('ST26_판매 중 회차의 좌석 Redis 키를 모두 지우면(전체 유실) 다시 만들기 반복이 몇 틱 안에 세대 키(gen 2, node = 이 프로세스)를 되살리고, 판매 좌석은 그 주문의 holdId로 묶음(K3), 묶인 주문 좌석은 holdId·psid 그대로 살아 있는 홀드(만료 = 지금 + 7분, K1)로 돌아오며 빈 좌석은 비어 있다 [ASVS v5.0.0-16.5.2] [ASVS v5.0.0-15.4.1]', async () => {
+  test('ST26_판매 중 회차의 좌석 Redis 키를 모두 지우면(전체 유실) 다시 만들기 반복이 몇 틱 안에 세대 키(gen 2, node = 노드 표지 standalone, 파드 이름 아님)를 되살리고, 판매 좌석은 그 주문의 holdId로 묶음(K3), 묶인 주문 좌석은 holdId·psid 그대로 살아 있는 홀드(만료 = 지금 + 7분, K1)로 돌아오며 빈 좌석은 비어 있다 [ASVS v5.0.0-16.5.2] [ASVS v5.0.0-15.4.1]', async () => {
     const w = await saleWorld();
     const [soldSeat, pinnedSeat, emptySeat] = [w.refs[0]!, w.refs[1]!, w.refs[2]!];
     const sold = await putSoldOrder(w, soldSeat);
@@ -420,7 +435,7 @@ describe('릴레이 프로세스 하나(리더)', () => {
     await until(async () => (await epochHash(w.eventId)) !== null, '다시 만든 세대 키', 20_000, 50);
     const doneAt = Date.now();
 
-    expect(await epochHash(w.eventId)).toMatchObject({ node: 'relay-it-0', gen: '2' });
+    expect(await epochHash(w.eventId)).toMatchObject({ node: STANDALONE, gen: '2' });
     expect((await rebuildRow(w.eventId))?.gen).toBe(2);
     expect(await inCtlEvents(w.eventId)).toBe(true);
     // 판매 좌석: 묶음, 판매 계정, 그 주문의 holdId·psid(K3)
@@ -465,7 +480,38 @@ describe('릴레이 프로세스 하나(리더)', () => {
     expect((await rebuildRow(marked.eventId))?.gen).toBe(2);
   }, 60_000);
 
-  test('FND110_관리 포트 /metrics에 좌석 Stream 릴레이(seat_stream_relay_sent_total{topic="trade.seats"})·다시 만들기(seat_rebuild_total{result="rebuilt"})·Outbox 릴레이·정비 지표(retire-seat-events 마지막 성공, 주문 이력 검사)가 보인다', async () => {
+  test('ST26_세대 올리기 감시가 리더에서 돌아, 세대 키 node를 옛 주 노드 표지로 바꿔 둔(승격 흉내) 판매 회차를 몇 틱 안에 BUMPED로 올린다(epoch ≥ 이전 + 1, node = standalone, gen 그대로). 그 뒤로 다시 오르지 않고, 표지가 같은 회차(판매 열기·다시 만든 회차)는 오르지 않아 seat_epoch_bumps_total은 1이다 [ASVS v5.0.0-16.5.2] [ASVS v5.0.0-15.4.1] [ASVS v5.0.0-15.4.2]', async () => {
+    const w = await saleWorld();
+    const other = await saleWorld();
+    const relay = await sharedRelay();
+    const e0 = Number((await epochHash(w.eventId))!.epoch);
+    const otherBefore = await epochHash(other.eventId);
+    expect(otherBefore).toMatchObject({ node: STANDALONE, gen: '1' });
+
+    await pretendFailover(w.eventId);
+    await until(async () => (await epochHash(w.eventId))?.node === STANDALONE, '감시가 올린 세대(node = standalone)', 10_000, 25);
+    const bumped = (await epochHash(w.eventId))!;
+    expect(Number(bumped.epoch)).toBeGreaterThanOrEqual(e0 + 1);
+    expect(bumped.gen).toBe('1');
+    // 올린 누적 수(리뷰 고침 중간 1)
+    expect(bumped.bumps).toBe('1');
+    expect(await expireAtOf(seatKeys.epoch(w.eventId))).toBe(w.keepUntilMs);
+
+    // 다시 만들기 반복 세 틱(0.6초, 감시는 그사이 여러 틱) 뒤에도 다시 오르지 않고, 표지가 같은 회차는 그대로다.
+    // chk(표지를 견준 초)는 그사이 초가 바뀌면 감시가 그 초로 고쳐 쓰므로 견주지 않는다(ADR-0210 결정 2)
+    const noChk = (h: Record<string, string> | null) => {
+      const { chk: _chk, ...rest } = h ?? {};
+      return rest;
+    };
+    const before = sharedCatalog.calls;
+    await until(() => sharedCatalog.calls >= before + 3, '다시 만들기 반복 세 틱', 10_000, 20);
+    expect(noChk(await epochHash(w.eventId))).toEqual(noChk(bumped));
+    expect(noChk(await epochHash(other.eventId))).toEqual(noChk(otherBefore));
+    // 이 프로세스가 본 회차 가운데 표지를 바꾼 회차는 이것뿐이다(앞 시험이 다시 만든 회차도 표지가 standalone이라 오르지 않는다)
+    expect(counterOf(await relay.registry.metrics(), 'seat_epoch_bumps_total')).toBe(1);
+  }, 60_000);
+
+  test('FND110_관리 포트 /metrics에 좌석 Stream 릴레이(seat_stream_relay_sent_total{topic="trade.seats"})·다시 만들기(seat_rebuild_total{result="rebuilt"})·세대 올리기 감시(seat_epoch_bumps_total, PRF-168)·Outbox 릴레이·정비 지표(retire-seat-events 마지막 성공, 주문 이력 검사)가 보인다', async () => {
     const relay = await sharedRelay();
     const { managementPort } = await relay.listen('127.0.0.1');
     expect(managementPort).toBeGreaterThan(0);
@@ -485,9 +531,11 @@ describe('릴레이 프로세스 하나(리더)', () => {
       15_000,
       100,
     );
-    // 앞 시험이 보낸 HELD 하나·다시 만든 회차 하나·보낸 Outbox 행 하나
+    // 앞 시험이 보낸 HELD 하나·다시 만든 회차 하나·올린 세대 하나·보낸 Outbox 행 하나
     expect(samples(text, 'seat_stream_relay_sent_total').find((l) => l.includes('topic="trade.seats"'))).toMatch(/ [1-9]\d*$/);
     expect(samples(text, 'seat_rebuild_total').find((l) => l.includes('result="rebuilt"'))).toMatch(/ [1-9]\d*$/);
+    expect(text).toMatch(/^# TYPE seat_epoch_bumps_total counter$/m);
+    expect(counterOf(text, 'seat_epoch_bumps_total')).toBeGreaterThanOrEqual(1);
     expect(samples(text, 'outbox_relay_published_total').find((l) => l.includes('service="purchase-svc"'))).toMatch(/ [1-9]\d*$/);
     expect(samples(text, 'outbox_relay_is_leader').find((l) => l.includes('service="purchase-svc"'))).toMatch(/ 1$/);
     // 주문 이력 검사(정비 시간 창 일)의 지표는 돌기 전에도 레지스트리에 붙어 있다
@@ -506,7 +554,7 @@ describe('두 프로세스가 같은 Lease를 다툰다(리더 넘김)', () => {
     await p?.stop();
   });
 
-  test('FND110_리더가 아닌 쪽은 다시 만들기 반복·좌석 Stream 릴레이·Outbox 릴레이를 돌지 않고(회차 목록·보내기를 부르지 않고 보낸 수 지표가 없다), 리더를 멈추면 다른 쪽이 이어받아 다시 만들기(node = 이어받은 파드)·좌석 Stream 릴레이·Outbox 릴레이를 하며 멈춘 쪽은 더 일하지 않는다 [ASVS v5.0.0-15.4.1] [ASVS v5.0.0-16.5.2]', async () => {
+  test('FND110_리더가 아닌 쪽은 다시 만들기 반복·세대 올리기 감시·좌석 Stream 릴레이·Outbox 릴레이를 돌지 않고(회차 목록·보내기를 부르지 않고 보낸 수·올린 수 지표가 없다), 리더를 멈추면 다른 쪽이 이어받아 다시 만들기(node = 노드 표지 standalone)·좌석 Stream 릴레이·Outbox 릴레이를 하며 멈춘 쪽은 더 일하지 않는다 [ASVS v5.0.0-15.4.1] [ASVS v5.0.0-16.5.2]', async () => {
     const w = await saleWorld();
     const beforeEvent = uuidv7(systemClock);
     const afterEvent = uuidv7(systemClock);
@@ -543,15 +591,21 @@ describe('두 프로세스가 같은 Lease를 다툰다(리더 넘김)', () => {
     expect(samples(followerText, 'outbox_relay_is_leader').find((l) => l.includes('service="purchase-svc"'))).toMatch(/ 0$/);
     expect(samples(await leader.registry.metrics(), 'seat_stream_relay_sent_total').find((l) => l.includes('topic="trade.seats"'))).toMatch(/ [1-9]\d*$/);
 
+    // 세대 올리기 감시도 리더에서만 돈다(PRF-168): 승격 흉내 회차를 리더가 올리고, 대기 쪽의 올린 수는 0이다
+    await pretendFailover(w.eventId);
+    await until(async () => (await epochHash(w.eventId))?.node === STANDALONE, '리더의 감시가 올린 세대', 10_000, 25);
+    expect(counterOf(await leader.registry.metrics(), 'seat_epoch_bumps_total')).toBe(1);
+    expect(counterOf(await follower.registry.metrics(), 'seat_epoch_bumps_total')).toBe(0);
+
     // 리더를 멈춘다: 반복을 멈춘 뒤 Lease를 놓아 다른 쪽이 Lease 기간을 기다리지 않고 잡는다
     await leader.stop();
     const stopped = { catalog: L.catalog.calls, trade: L.trade.calls, outbox: L.outbox.calls };
     await until(() => follower.isLeader(), '대기 프로세스가 Lease를 이어받음', 10_000, 25);
 
-    // 이어받은 쪽이 다시 만든다(세대 키 node = 이어받은 파드)
+    // 이어받은 쪽이 다시 만든다(세대 키 node = 노드 표지, 파드 이름이 아니다)
     await loseAll(w.eventId);
     await until(async () => (await epochHash(w.eventId)) !== null, '이어받은 쪽이 다시 만든 세대 키', 20_000, 50);
-    expect(await epochHash(w.eventId)).toMatchObject({ node: F.pod, gen: '2' });
+    expect(await epochHash(w.eventId)).toMatchObject({ node: STANDALONE, gen: '2' });
     expect(F.catalog.calls).toBeGreaterThan(0);
 
     // 이어받은 쪽이 좌석 Stream 릴레이·Outbox 릴레이를 한다

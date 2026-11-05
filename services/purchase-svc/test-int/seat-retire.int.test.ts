@@ -85,6 +85,16 @@ async function epochHash(eventId: string): Promise<Record<string, string>> {
   return hash(await cmd(redis, k, ['HGETALL', k]));
 }
 
+/** Valkey TIME의 초(Lua가 쓰는 시계. 이 PC 시계와 다를 수 있다) */
+const serverSec = async () => Number(((await redis.command(['TIME'], { key: 'x' })) as unknown[])[0]);
+
+/** 세대 키의 chk 칸(표지를 견준 초, ADR-0210)이 [from, to] 초 안의 10진 글인지 본다 */
+function expectChkWithin(chk: string | undefined, from: number, to: number): void {
+  expect(chk).toMatch(/^[1-9][0-9]*$/);
+  expect(Number(chk), 'chk ≥ 부르기 전 TIME 초').toBeGreaterThanOrEqual(from);
+  expect(Number(chk), 'chk ≤ 부른 뒤 TIME 초').toBeLessThanOrEqual(to);
+}
+
 /** gen 칸이 없는 옛 세대 키의 회차(비트맵과 epoch·node만 손으로 쓴다. 판매 열기를 거치지 않는다) */
 async function legacyEvent(): Promise<{ eventId: string; seatEpoch: string }> {
   const eventId = newEventId();
@@ -225,12 +235,14 @@ const after = async <T>(ms: number, f: () => Promise<T>): Promise<T> => {
 // ───────────────────────────── 판 번호 gen ─────────────────────────────
 
 describe('판 번호 gen(세대 키 s:{event:E}:epoch의 칸, 판매 열기가 처음 쓸 때 1)', () => {
-  test('판매를 새로 열면 세대 키에 epoch·node와 함께 gen = 1(INITIAL_SEAT_GEN)을 쓴다. 다른 칸은 없다', async () => {
+  test('판매를 새로 열면 세대 키에 epoch·node와 함께 gen = 1(INITIAL_SEAT_GEN)과 표지를 견준 초 chk(세대와 같은 TIME 초, ADR-0210)를 쓴다. 다른 칸은 없다', async () => {
     const eventId = newEventId();
+    const s0 = await serverSec();
     const r = await open(eventId);
     expect(r.created).toBe(true);
     expect(INITIAL_SEAT_GEN).toBe(1);
-    expect(await epochHash(eventId)).toEqual({ epoch: String(r.seatEpoch), node: 'standalone', gen: '1' });
+    expect(await epochHash(eventId)).toEqual({ epoch: String(r.seatEpoch), node: 'standalone', gen: '1', chk: String(r.seatEpoch) });
+    expectChkWithin((await epochHash(eventId)).chk, s0, await serverSec());
   });
 
   test('이미 열린 회차를 다시 열면 gen을 바꾸지 않는다: 다시 만들기가 올린 gen 3은 3 그대로이고, gen 칸이 없는 옛 세대 키에는 칸을 더하지 않는다', async () => {
@@ -241,7 +253,8 @@ describe('판 번호 gen(세대 키 s:{event:E}:epoch의 칸, 판매 열기가 �
     await cmd(redis, seatKeys.epoch(eventId), ['HSET', seatKeys.epoch(eventId), 'gen', '3']);
     const again = await open(eventId);
     expect(again).toEqual({ created: false, seatEpoch: first.seatEpoch });
-    expect(await epochHash(eventId)).toEqual({ epoch: String(first.seatEpoch), node: 'standalone', gen: '3' });
+    // chk는 처음 판매 열기가 쓴 그 초 그대로다(다시 열기는 세대 키를 바꾸지 않는다)
+    expect(await epochHash(eventId)).toEqual({ epoch: String(first.seatEpoch), node: 'standalone', gen: '3', chk: String(first.seatEpoch) });
 
     // 옛 세대 키(gen 칸 없음): 다시 열어도 아무것도 바꾸지 않는다(칸이 없으면 1로 본다는 규칙이라 쓸 까닭이 없다)
     const legacy = await legacyEvent();
@@ -256,7 +269,9 @@ describe('판 번호 gen(세대 키 s:{event:E}:epoch의 칸, 판매 열기가 �
     const seatA = seatAt(3);
     const me = randomUUID();
     const inputA: PinInput = { eventId: a.eventId, accountId: me, purchaseSessionId: randomUUID(), holdId: uuidv7(systemClock), seats: [seatA], limit: 4, orderGen: 1, keepUntilMs: keepUntil() };
+    const sA = await serverSec();
     const ok = await store.pin(inputA);
+    const sA1 = await serverSec();
     expect(ok).toEqual({ kind: 'OK', gen: 1, regrabbed: 1, fencingToken: expect.any(Number) });
     const token = (ok as PinOk).fencingToken!;
     const st = await seatState(a.eventId, seatA.index);
@@ -280,19 +295,25 @@ describe('판 번호 gen(세대 키 s:{event:E}:epoch의 칸, 판매 열기가 �
     expect(items.map((it) => it.fields)).toEqual([
       expect.objectContaining({ type: 'HELD', seatIdx: String(seatA.index), seatId: seatA.seatId, holdId: inputA.holdId, holdKind: 'FAN', accountId: me, fencingToken: String(token), seatEpoch: a.seatEpoch }),
     ]);
-    // 묶기는 gen 칸을 쓰지 않는다(판 번호를 올리는 것은 다시 만들기뿐이다)
-    expect(await epochHash(a.eventId)).toEqual({ epoch: a.seatEpoch, node: 'standalone' });
+    // 묶기는 gen 칸을 쓰지 않는다(판 번호를 올리는 것은 다시 만들기뿐이다). chk가 없는 옛 세대 키라 세대 확인이 표지를 견주고 chk = 그 초를 쓴다(ADR-0210)
+    const epA = await epochHash(a.eventId);
+    expect(epA).toEqual({ epoch: a.seatEpoch, node: 'standalone', chk: expect.any(String) });
+    expectChkWithin(epA.chk, sA, sA1);
 
-    // orderGen 2 → STALE_GEN, 아무것도 쓰지 않는다
+    // orderGen 2 → STALE_GEN, 세대 키의 chk(표지를 견준 초) 말고는 아무것도 쓰지 않는다(정상 거절도 세대 확인은 한다, ADR-0210 결정 1)
     const b = await legacyEvent();
     const seatB = seatAt(3);
     const inputB: PinInput = { ...inputA, eventId: b.eventId, holdId: uuidv7(systemClock), seats: [seatB], orderGen: 2 };
+    const sB = await serverSec();
     expect(await store.pin(inputB)).toEqual({ kind: 'STALE_GEN', gen: 1 });
+    const sB1 = await serverSec();
     expect(await seatState(b.eventId, seatB.index)).toEqual({ bit: 0, hold: null, expiry: null });
     for (const k of [seatKeys.quota(b.eventId, me), seatKeys.fence(b.eventId), seatKeys.stream(b.eventId), seatKeys.secver(b.eventId), seatKeys.expiry(b.eventId)]) {
       expect(await exists(redis, k), `${k}가 생겼다`).toBe(0);
     }
-    expect(await epochHash(b.eventId)).toEqual({ epoch: b.seatEpoch, node: 'standalone' });
+    const epB = await epochHash(b.eventId);
+    expect(epB).toEqual({ epoch: b.seatEpoch, node: 'standalone', chk: expect.any(String) });
+    expectChkWithin(epB.chk, sB, sB1);
     // 수명도 걸지 않는다(옛 키는 수명이 없었다)
     expect(Number(await cmd(redis, seatKeys.bitmap(b.eventId), ['PEXPIRETIME', seatKeys.bitmap(b.eventId)]))).toBe(-1);
   });

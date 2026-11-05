@@ -6,6 +6,8 @@
 // - 시험마다 새 회차 ID(이번 달 UUIDv7, seat_hold 파티션에 들어간다)를 쓴다. 좌석 Redis에 그 회차 키가 하나도 없는 것이 '전체 유실'과 같다.
 // - 씨앗(판매·원장 행)은 admin 풀의 직접 SQL로 넣고, 결과는 Redis 명령·직접 SQL로 읽어 단언한다.
 // - 좌석맵은 seat_sale.seat_id가 uuid라 UUID 좌석 ID의 MemorySeatMap이다.
+// - 세대 키 node(BUILD_ORDER PRF-168, seat-hold.md §6 '세대 올리기 감시의 첫 구현'): 판매 열기·끝내기·세대 올리기 Lua가 모두 그 노드의 표지를 Lua 안에서 구한다.
+//   이 Valkey는 단일 노드라 표지가 'standalone'이다. 장애 조치(복제본 승격)는 세대 키 node를 HSET으로 다른 표지로 바꿔 흉내 낸다(클러스터 승격은 S-T26 측정의 몫).
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { createDatabase, createHotRedis, type Database, type HotRedis, type RedisScript, systemClock, uuidv7 } from '@peaket/platform';
@@ -203,6 +205,10 @@ async function rebuildRow(eventId: string) {
 
 /** Docker 엔진 VM의 시계와 이 PC 시계의 차이(초 단위 세대 견주기) */
 const SKEW_S = 5;
+/** 단일 노드 Valkey의 주 노드 표지(hold-lua.ts NODE_ID) */
+const STANDALONE = 'standalone';
+/** 승격 전 주 노드의 표지 흉내(클러스터 모양 '{CLUSTER MYID}:{cluster_my_epoch}') */
+const OLD_PRIMARY = '1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d:3';
 
 // ───────────────────────────── 홀드 입력 ─────────────────────────────
 
@@ -225,7 +231,7 @@ const rebuilderOf = (w: { seatMap: MemorySeatMap }, holder = 'pod-a', db: Databa
   new SeatRebuilder({ source: new DrizzleSeatRebuildSource(db), target: store, seatMap: w.seatMap, holder, ...(signals ? { signals } : {}) });
 
 /** 다시 만든 뒤 기본 세계의 좌석 Redis 모습(한 번 다시 만든 것과 같아야 하는 끝 상태) */
-async function expectRebuilt(w: World, o: { node: string; keepUntilMs: number; before: number; after: number }): Promise<void> {
+async function expectRebuilt(w: World, o: { keepUntilMs: number; before: number; after: number }): Promise<void> {
   const e = w.eventId;
   // 비트: 판매 좌석과 되살린 홀드만 1
   expect(await bits(e)).toEqual(Array.from({ length: SEAT_COUNT }, (_, i) => (LIT.includes(i) ? 1 : 0)));
@@ -268,9 +274,9 @@ async function expectRebuilt(w: World, o: { node: string; keepUntilMs: number; b
   }
   // 보유 수 = 판매 + 되살린 홀드(판에 없는 좌석·넘긴 홀드는 세지 않는다)
   expect([await quota(e, w.A), await quota(e, w.B), await quota(e, w.C), await quota(e, w.D)]).toEqual([2, 2, 1, null]);
-  // 세대 키: epoch = Redis TIME 초, node = 다시 만든 파드, gen = 올린 판 번호(2)
+  // 세대 키: epoch = Redis TIME 초, node = 그 노드의 표지(단일 노드 standalone, 판매 열기와 같은 뜻. 다시 만든 파드 이름이 아니다, PRF-168), gen = 올린 판 번호(2)
   const ep = await epochHash(e);
-  expect(ep).toMatchObject({ node: o.node, gen: '2' });
+  expect(ep).toMatchObject({ node: STANDALONE, gen: '2' });
   expect(Number(ep!.epoch)).toBeGreaterThanOrEqual(Math.floor(o.before / 1000) - SKEW_S);
   expect(Number(ep!.epoch)).toBeLessThanOrEqual(Math.ceil(o.after / 1000) + SKEW_S);
   // 회차 목록에 다시 들어가고, 펜싱 카운터는 되살린 토큰의 최댓값(색인 9의 T0 + 9)이다
@@ -302,14 +308,14 @@ describe('다시 만들기 전: 세대 키가 없는 회차(전체 유실)', () 
 });
 
 describe('다시 만들기(RB-06): 판매·원장 홀드를 좌석 Redis에 다시 쓴다', () => {
-  test('ST26_판매 좌석은 비트 1·묶음 Hash(pin 1, owner 판매 계정), 만료 전 원장 홀드는 비트·Hash(원장 값)·만료 인덱스, 만료·hold_id 없는 원장 홀드는 빈 좌석, 보유 수·세대 키(gen 2)·회차 목록, 결과 REBUILT [ASVS v5.0.0-2.3.4] [S-T26]', async () => {
+  test('ST26_판매 좌석은 비트 1·묶음 Hash(pin 1, owner 판매 계정), 만료 전 원장 홀드는 비트·Hash(원장 값)·만료 인덱스, 만료·hold_id 없는 원장 홀드는 빈 좌석, 보유 수·세대 키(gen 2, node = 노드 표지 standalone)·회차 목록, 결과 REBUILT [ASVS v5.0.0-2.3.4] [S-T26]', async () => {
     const w = await seedWorld();
     const keepUntilMs = Date.now() + 2 * DAY;
     const before = Date.now();
     const report = await rebuilderOf(w).rebuild(w.eventId, { keepUntilMs });
     const after = Date.now();
     expect(report).toEqual<RebuildReport>({ result: 'REBUILT', gen: 2, sold: 3, held: 2, skipped: 3 });
-    await expectRebuilt(w, { node: 'pod-a', keepUntilMs, before, after });
+    await expectRebuilt(w, { keepUntilMs, before, after });
     // 판 번호는 purchase DB에 커밋되어 있고 임대는 비었다
     expect(await rebuildRow(w.eventId)).toMatchObject({ gen: 2, leaseUntil: null });
   });
@@ -416,9 +422,8 @@ describe('다시 만들기(RB-06): 판매·원장 홀드를 좌석 Redis에 다�
       const results = [a.result, b.result];
       expect(results.filter((r) => r === 'REBUILT'), `라운드 ${round}: ${results.join(', ')}`).toHaveLength(1);
       expect(['BUSY', 'READY'], `라운드 ${round}`).toContain(results.find((r) => r !== 'REBUILT'));
-      const winner = a.result === 'REBUILT' ? 'pod-a' : 'pod-b';
       expect(a.result === 'REBUILT' ? a : b).toEqual({ result: 'REBUILT', gen: 2, sold: 3, held: 2, skipped: 3 });
-      await expectRebuilt(w, { node: winner, keepUntilMs, before, after });
+      await expectRebuilt(w, { keepUntilMs, before, after });
       expect(await rebuildRow(w.eventId), `라운드 ${round}`).toMatchObject({ gen: 2, leaseUntil: null });
     }
   });
@@ -480,12 +485,13 @@ describe('다시 만들기 Lua의 모양(rebuild-lua.ts 계약, ADR-0086)', () =
       expect(c.args.slice(2)).toEqual(c.keys.slice(2).map(() => '2'));
     }
     expect(new Set(quotaCalls.flatMap((c) => c.keys.slice(2)))).toEqual(new Set(accounts.map((a) => seatKeys.quota(eventId, a))));
-    // 끝내기 Lua: 마지막 한 번, 세대 키·rebuild·펜싱 카운터만(원장 토큰이 없어 최댓값 '0')
+    // 끝내기 Lua: 마지막 한 번, 세대 키·rebuild·펜싱 카운터만(원장 토큰이 없어 최댓값 '0'). ARGV에 node가 없다(Lua가 그 노드의 표지를 구한다, PRF-168)
     const finish = calls.filter((c) => c.script.source === FINISH_REBUILD_LUA);
     expect(finish).toHaveLength(1);
     expect(calls.at(-1)?.script.source).toBe(FINISH_REBUILD_LUA);
     expect(finish[0]!.keys).toEqual([seatKeys.epoch(eventId), seatKeys.rebuild(eventId), seatKeys.fence(eventId)]);
-    expect(finish[0]!.args).toEqual(['2', 'pod-a', String(keepUntilMs), '0']);
+    expect(finish[0]!.args).toEqual(['2', String(keepUntilMs), '0']);
+    expect(await epochHash(eventId)).toMatchObject({ node: STANDALONE, gen: '2' });
     expect(calls.map((c) => c.script.source)).toEqual([BEGIN_REBUILD_LUA, ...seatCalls.map(() => REBUILD_SEATS_LUA), ...quotaCalls.map(() => REBUILD_QUOTAS_LUA), FINISH_REBUILD_LUA]);
     expect(new Set(calls.flatMap((c) => c.keys).map(slotOf)).size).toBe(1);
 
@@ -497,39 +503,87 @@ describe('다시 만들기 Lua의 모양(rebuild-lua.ts 계약, ADR-0086)', () =
   });
 });
 
-describe('세대 올리기(장애 조치 뒤, ADR-0121 결정 5)', () => {
-  test('ST26_같은 node면 SAME(세대 그대로), 다른 node면 BUMPED(epoch > 이전, node 바뀜, gen 그대로), 그 node로 다시 부르면 SAME [ASVS v5.0.0-15.4.2] [S-T26]', async () => {
+describe('세대 올리기(장애 조치 뒤, ADR-0121 결정 5, BUILD_ORDER PRF-168)', () => {
+  /** 승격 흉내: 세대 키 node를 옛 주 노드 표지로 바꾼다(epoch·gen·수명은 그대로) */
+  const pretendFailover = (e: string) => cmd(seatKeys.epoch(e), ['HSET', seatKeys.epoch(e), 'node', OLD_PRIMARY]);
+
+  test('ST26_판매 열기 뒤 세대 키 node가 지금 노드 표지(standalone)와 같으면 SAME이고 세대 키를 바꾸지 않는다(장애 조치가 없으면 오르지 않는다) [ASVS v5.0.0-15.4.2] [S-T26]', async () => {
+    const e = uuidv7(systemClock);
+    const keepUntilMs = Date.now() + 2 * DAY;
+    const o = await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+    // chk = 표지를 견준 초(판매 열기가 세대와 같은 TIME 초로 둔다, 세대 올리기는 견줄 때마다 그 초로 둔다, ADR-0210)
+    expect(await epochHash(e)).toEqual({ epoch: String(o.seatEpoch), node: STANDALONE, gen: '1', chk: String(o.seatEpoch) });
+    expect(await store.bumpEpoch(e)).toEqual({ result: 'SAME', epoch: o.seatEpoch, bumps: 0 });
+    expect(await store.bumpEpoch(e)).toEqual({ result: 'SAME', epoch: o.seatEpoch, bumps: 0 });
+    expect(await epochHash(e)).toMatchObject({ epoch: String(o.seatEpoch), node: STANDALONE, gen: '1' });
+    expect(await expireAt(seatKeys.epoch(e))).toBe(keepUntilMs);
+  });
+
+  test('ST26_다시 만들기 끝내기와 판매 열기가 세대 키 node에 같은 표지(standalone, 파드 이름 아님)를 적어, 다시 만든 회차에 세대 올리기를 불러도 SAME이다 [ASVS v5.0.0-15.4.2] [S-T26]', async () => {
+    const w = await seedWorld();
+    expect((await rebuilderOf(w, 'pod-a').rebuild(w.eventId, { keepUntilMs: Date.now() + 2 * DAY })).result).toBe('REBUILT');
+    const opened = uuidv7(systemClock);
+    await store.openSale({ eventId: opened, seatCount: SEAT_COUNT, keepUntilMs: Date.now() + 2 * DAY });
+    const rebuiltEp = (await epochHash(w.eventId))!;
+    expect(rebuiltEp.node).toBe(STANDALONE);
+    expect(rebuiltEp.node).toBe((await epochHash(opened))!.node);
+    expect(await store.bumpEpoch(w.eventId)).toEqual({ result: 'SAME', epoch: Number(rebuiltEp.epoch), bumps: 0 });
+  });
+
+  test('ST26_세대 키 node를 다른 표지로 바꿔 두면(승격 흉내) BUMPED 한 번(epoch ≥ 이전 + 1, node = standalone, gen·수명 그대로), 다시 부르면 SAME이다. 좌석은 그대로다 [ASVS v5.0.0-15.4.2] [S-T26]', async () => {
     const w = await seedWorld();
     const keepUntilMs = Date.now() + 2 * DAY;
     expect((await rebuilderOf(w, 'pod-a').rebuild(w.eventId, { keepUntilMs })).result).toBe('REBUILT');
     const e0 = Number((await epochHash(w.eventId))!.epoch);
-    expect(await store.bumpEpoch(w.eventId, 'pod-a')).toEqual({ result: 'SAME', epoch: e0 });
-    expect(await epochHash(w.eventId)).toEqual({ epoch: String(e0), node: 'pod-a', gen: '2' });
+    await pretendFailover(w.eventId);
 
-    const bumped = await store.bumpEpoch(w.eventId, 'node-2');
-    expect(bumped.result).toBe('BUMPED');
+    const bumped = await store.bumpEpoch(w.eventId);
+    expect(bumped).toMatchObject({ result: 'BUMPED', bumps: 1 });
     const e1 = (bumped as { epoch: number }).epoch;
-    expect(e1).toBeGreaterThan(e0);
-    expect(await epochHash(w.eventId)).toEqual({ epoch: String(e1), node: 'node-2', gen: '2' });
-    expect(await store.bumpEpoch(w.eventId, 'node-2')).toEqual({ result: 'SAME', epoch: e1 });
-    // 좌석은 그대로
+    expect(e1).toBeGreaterThanOrEqual(e0 + 1);
+    expect(await epochHash(w.eventId)).toMatchObject({ epoch: String(e1), node: STANDALONE, gen: '2', bumps: '1' });
+    expect(await expireAt(seatKeys.epoch(w.eventId))).toBe(keepUntilMs);
+    expect(await store.bumpEpoch(w.eventId)).toEqual({ result: 'SAME', epoch: e1, bumps: 1 });
     expect(await bits(w.eventId)).toEqual(Array.from({ length: SEAT_COUNT }, (_, i) => (LIT.includes(i) ? 1 : 0)));
   });
 
-  test('ST26_같은 회차에 새 주 노드로 세대 올리기를 여럿이 동시에 부르면 세대는 한 번만 오른다(BUMPED 하나, 나머지 SAME과 같은 epoch) [ASVS v5.0.0-15.4.2] [S-T26]', async () => {
+  test('ST26_승격 흉내 뒤 같은 회차에 세대 올리기를 여럿이 동시에 부르면 세대는 한 번만 오른다(BUMPED 하나, 나머지 SAME과 같은 epoch) [ASVS v5.0.0-15.4.2] [S-T26]', async () => {
     const w = await seedWorld();
     expect((await rebuilderOf(w, 'pod-a').rebuild(w.eventId, { keepUntilMs: Date.now() + 2 * DAY })).result).toBe('REBUILT');
-    const rs = await Promise.all(Array.from({ length: 6 }, () => store.bumpEpoch(w.eventId, 'node-3')));
+    await pretendFailover(w.eventId);
+    const rs = await Promise.all(Array.from({ length: 6 }, () => store.bumpEpoch(w.eventId)));
     expect(rs.filter((r) => r.result === 'BUMPED')).toHaveLength(1);
+    expect(rs.filter((r) => r.result === 'SAME')).toHaveLength(5);
     const epochs = new Set(rs.map((r) => (r as { epoch: number }).epoch));
     expect(epochs.size).toBe(1);
-    expect(await epochHash(w.eventId)).toMatchObject({ epoch: String([...epochs][0]), node: 'node-3', gen: '2' });
+    expect(await epochHash(w.eventId)).toMatchObject({ epoch: String([...epochs][0]), node: STANDALONE, gen: '2' });
   });
 
   test('ST26_세대 키가 없는 회차는 NOT_READY이고 세대 키를 만들지 않는다 [S-T26]', async () => {
     const e = uuidv7(systemClock);
-    expect(await store.bumpEpoch(e, 'node-2')).toEqual({ result: 'NOT_READY' });
+    expect(await store.bumpEpoch(e)).toEqual({ result: 'NOT_READY' });
     expect(await exists(seatKeys.epoch(e))).toBe(false);
+  });
+
+  test('ST26_세대 올리기 Lua는 KEYS 세대 키 하나에 ARGV가 없다(지금 노드의 표지는 Lua가 구한다) [ASVS v5.0.0-15.4.2] [S-T26]', async () => {
+    const e = uuidv7(systemClock);
+    await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs: Date.now() + 2 * DAY });
+    const calls: { script: RedisScript; keys: string[]; args: string[] }[] = [];
+    const rec: HotRedis = {
+      command: (a, o) => redis.command(a, o),
+      sendCommand: (a) => redis.sendCommand(a),
+      evalScript: (s, k, a, o) => {
+        calls.push({ script: s, keys: [...k], args: [...a] });
+        return redis.evalScript(s, k, a, o);
+      },
+      close: () => redis.close(),
+    };
+    const r = await new RedisSeatStore(rec).bumpEpoch(e);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.script.source).toBe(BUMP_EPOCH_LUA);
+    expect(calls[0]!.keys).toEqual([seatKeys.epoch(e)]);
+    expect(calls[0]!.args).toEqual([]);
+    expect(r.result).toBe('SAME');
   });
 });
 
@@ -578,13 +632,208 @@ describe('시험 검토 B가 더한 경계', () => {
   test('ST26_세대 올리기는 옛 세대가 지금 초보다 한참 작아도 지금 초 이상으로 올린다(max(epoch + 1, TIME 초)) [S-T26]', async () => {
     const w = await seedWorld();
     expect((await rebuilderOf(w, 'pod-a').rebuild(w.eventId, { keepUntilMs: Date.now() + 2 * DAY })).result).toBe('REBUILT');
-    await cmd(seatKeys.epoch(w.eventId), ['HSET', seatKeys.epoch(w.eventId), 'epoch', '100']);
+    // 옛 세대와 승격 흉내(옛 주 노드 표지)
+    await cmd(seatKeys.epoch(w.eventId), ['HSET', seatKeys.epoch(w.eventId), 'epoch', '100', 'node', OLD_PRIMARY]);
     const nowSec = Math.floor(Date.now() / 1000);
 
-    const b = await store.bumpEpoch(w.eventId, 'node-2');
+    const b = await store.bumpEpoch(w.eventId);
 
     expect(b.result).toBe('BUMPED');
     expect((b as { epoch: number }).epoch).toBeGreaterThanOrEqual(nowSec - 5);
+  });
+
+  test('ST26_세대 올리기는 옛 세대가 지금 초보다 커도 꼭 하나 올린다(max(epoch + 1, TIME 초)의 + 1. 같은 초 안에 부르는 시험만으로는 + 1을 빠뜨린 구현이 가끔 지나간다) [ASVS v5.0.0-15.4.2] [S-T26]', async () => {
+    const e = uuidv7(systemClock);
+    await store.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs: Date.now() + 2 * DAY });
+    // 지금 초보다 한참 큰 옛 세대와 승격 흉내(옛 주 노드 표지)
+    const ahead = Math.floor(Date.now() / 1000) + 100_000;
+    await cmd(seatKeys.epoch(e), ['HSET', seatKeys.epoch(e), 'epoch', String(ahead), 'node', OLD_PRIMARY]);
+
+    expect(await store.bumpEpoch(e)).toEqual({ result: 'BUMPED', epoch: ahead + 1, bumps: 1 });
+    expect(await epochHash(e)).toMatchObject({ epoch: String(ahead + 1), node: STANDALONE, gen: '1' });
+  });
+});
+
+describe('시험 검토 B가 더한 경계(PRF-168): 클러스터 모드(노드 하나)의 표지', () => {
+  // 단일 노드 Valkey는 표지가 'standalone'이라 Lua가 nodeId()를 부르지 않고 글자 'standalone'을 박아 두어도 위 시험이 모두 지나간다.
+  // 클러스터 모드(노드 하나, 설정 세대 3)에서는 표지가 '{CLUSTER MYID}:3'이라 세 Lua가 모두 nodeId()로 같은 표지를 구하는지 가린다
+  const CONFIG_EPOCH = 3;
+  let cluster: ValkeyContainer | undefined;
+  let clusterRedis: HotRedis | undefined;
+  let clusterStore: RedisSeatStore;
+  let me: string;
+
+  beforeAll(async () => {
+    cluster = await startValkey({ cluster: true, configEpoch: CONFIG_EPOCH });
+    clusterRedis = await createHotRedis({ url: cluster.url });
+    clusterStore = new RedisSeatStore(clusterRedis);
+    me = `${String(await clusterRedis.command(['CLUSTER', 'MYID'], { key: 'x' }))}:${CONFIG_EPOCH}`;
+  });
+
+  afterAll(async () => {
+    await clusterRedis?.close();
+    cluster?.stop();
+  });
+
+  const clusterEpoch = async (e: string) => hash(await clusterRedis!.command(['HGETALL', seatKeys.epoch(e)], { key: seatKeys.epoch(e) }));
+
+  test('ST26_클러스터 모드에서는 판매 열기·끝내기·세대 올리기가 모두 Lua가 구한 {CLUSTER MYID}:{cluster_my_epoch}를 세대 키 node에 쓰고 견준다: 연 회차·다시 만든 회차는 SAME, node를 옛 표지로 바꾸면 BUMPED 한 번 뒤 node = 그 표지다 [ASVS v5.0.0-15.4.2] [S-T26]', async () => {
+    const keepUntilMs = Date.now() + 2 * DAY;
+    // 판매 열기
+    const opened = uuidv7(systemClock);
+    const o = await clusterStore.openSale({ eventId: opened, seatCount: SEAT_COUNT, keepUntilMs });
+    // chk = 표지를 견준 초(판매 열기가 세대와 같은 TIME 초로 둔다, ADR-0210)
+    expect(await clusterEpoch(opened)).toEqual({ epoch: String(o.seatEpoch), node: me, gen: '1', chk: String(o.seatEpoch) });
+    expect(await clusterStore.bumpEpoch(opened)).toEqual({ result: 'SAME', epoch: o.seatEpoch, bumps: 0 });
+
+    // 다시 만들기 끝내기
+    const w = await seedWorld();
+    const rebuilder = new SeatRebuilder({ source: new DrizzleSeatRebuildSource(dbA), target: clusterStore, seatMap: w.seatMap, holder: 'pod-a' });
+    expect((await rebuilder.rebuild(w.eventId, { keepUntilMs })).result).toBe('REBUILT');
+    const rebuilt = await clusterEpoch(w.eventId);
+    expect(rebuilt).toMatchObject({ node: me, gen: '2', chk: rebuilt.epoch });
+    expect(await clusterStore.bumpEpoch(w.eventId)).toEqual({ result: 'SAME', epoch: Number(rebuilt.epoch), bumps: 0 });
+
+    // 승격 흉내: 옛 주 노드 표지로 바꾸면 한 번 오르고 node = 지금 표지
+    await clusterRedis!.command(['HSET', seatKeys.epoch(w.eventId), 'node', OLD_PRIMARY], { key: seatKeys.epoch(w.eventId) });
+    const b = await clusterStore.bumpEpoch(w.eventId);
+    expect(b).toMatchObject({ result: 'BUMPED', bumps: 1 });
+    expect(await clusterEpoch(w.eventId)).toMatchObject({ epoch: String((b as { epoch: number }).epoch), node: me, gen: '2' });
+    expect(await clusterStore.bumpEpoch(w.eventId)).toEqual({ result: 'SAME', epoch: (b as { epoch: number }).epoch, bumps: 1 });
+  });
+
+  const setEpochFields = (e: string, fields: string[]) => clusterRedis!.command(['HSET', seatKeys.epoch(e), ...fields], { key: seatKeys.epoch(e) });
+  /** 시계가 뒤로 가 남은 미래의 chk(먼 앞 초, 리뷰 고침 낮음 d) */
+  const FAR_CHK = '9999999999';
+
+  test('ST26_리뷰 고침 H1_ 세대 올리기 Lua도 쓰는 Lua와 같은 도우미 규칙이다: 노드 ID가 같고 설정 세대만 다르면 chk가 이번 초인 동안 SAME(CLUSTER INFO 0번), chk가 지난 초면 BUMPED 한 번(CLUSTER INFO 1번, node = 지금 표지, chk = 그 초)이다. 미래의 chk는 이번 초로 보지 않고(리뷰 고침 낮음 d), 다른 노드 ID는 chk와 관계없이 BUMPED다 [ASVS v5.0.0-15.4.2] [S-T26]', async () => {
+    const r = clusterRedis!;
+    const e = uuidv7(systemClock);
+    const o = await clusterStore.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs: Date.now() + 2 * DAY });
+    const stale = `${me.split(':')[0]}:${CONFIG_EPOCH - 1}`;
+
+    // 같은 초 안(chk = 지금 초): 노드 ID만 견준다
+    const same = await inOneSecond(r, (sec) => setEpochFields(e, ['node', stale, 'chk', String(sec)]), async () => ({ before: await clusterEpoch(e), b: await clusterStore.bumpEpoch(e) }));
+    expect(same.out.b).toMatchObject({ result: 'SAME', epoch: Number(same.out.before.epoch) });
+    expect(same.infoCalls, '같은 초 안의 CLUSTER INFO').toBe(0);
+    expect(await clusterEpoch(e)).toMatchObject({ node: stale, chk: String(same.sec) });
+
+    await setEpochFields(e, ['node', stale, 'chk', '1']);
+    const sec0 = await timeSec(r);
+    const c1 = await infoCalls(r);
+    const b = await clusterStore.bumpEpoch(e);
+    expect((await infoCalls(r)) - c1, '지난 초의 CLUSTER INFO').toBe(1);
+    expect(b.result).toBe('BUMPED');
+    const ep = await clusterEpoch(e);
+    expect(ep).toMatchObject({ epoch: String((b as { epoch: number }).epoch), node: me, gen: '1' });
+    expect(Number(ep.chk)).toBeGreaterThanOrEqual(sec0);
+    expect(Number(ep.epoch)).toBeGreaterThanOrEqual(o.seatEpoch + 1);
+
+    // 감시가 같은 초 안에 다시 불러도 설정 세대를 다시 견주지 않는다
+    const again = await inOneSecond(r, (sec) => setEpochFields(e, ['chk', String(sec)]), () => clusterStore.bumpEpoch(e));
+    expect(again.out).toMatchObject({ result: 'SAME', epoch: (b as { epoch: number }).epoch });
+    expect(again.infoCalls).toBe(0);
+
+    // 미래의 chk(시계가 뒤로 감)는 이번 초로 보지 않는다: 설정 세대까지 견줘 올린다
+    await setEpochFields(e, ['node', stale, 'chk', FAR_CHK]);
+    const c3 = await infoCalls(r);
+    const b3 = await clusterStore.bumpEpoch(e);
+    expect((await infoCalls(r)) - c3, '미래 chk의 CLUSTER INFO').toBe(1);
+    expect(b3.result).toBe('BUMPED');
+    expect(Number((await clusterEpoch(e)).chk)).toBeLessThanOrEqual(await timeSec(r));
+
+    // 다른 노드 ID는 chk가 이번 초여도 올린다(노드 ID는 매번 견준다)
+    await setEpochFields(e, ['node', OLD_PRIMARY, 'chk', String(await timeSec(r))]);
+    const b2 = await clusterStore.bumpEpoch(e);
+    expect(b2.result).toBe('BUMPED');
+    expect((b2 as { epoch: number }).epoch).toBeGreaterThan((b3 as { epoch: number }).epoch);
+    expect(await clusterEpoch(e)).toMatchObject({ node: me });
+  });
+});
+
+/** Valkey TIME의 초(Lua가 쓰는 시계) */
+const timeSec = async (r: HotRedis) => Number(((await r.command(['TIME'], { key: 'x' })) as unknown[])[0]);
+/** INFO commandstats의 cmdstat_cluster|info calls(스크립트 안에서 부른 것도 센다). 없으면 0 */
+const infoCalls = async (r: HotRedis) => Number(/cmdstat_cluster\|info:calls=(\d+)/.exec(String(await r.command(['INFO', 'commandstats'], { key: 'x' })))?.[1] ?? '0');
+
+/**
+ * '같은 초 안'(chk = 지금 TIME 초, ADR-0210 결정 2·리뷰 고침 낮음 d: chk가 지금 초와 같을 때만 설정 세대 견주기를 건너뛴다).
+ * set(초)로 세대 키를 맞추고 call을 부른 뒤 TIME 초가 그대로면(그 Lua가 그 초에 돌았다) 결과와 그사이 CLUSTER INFO 수를 돌려준다.
+ * 초가 바뀌었으면 다시 맞춰 부른다(5번까지, 고정 sleep 없음)
+ */
+async function inOneSecond<T>(r: HotRedis, set: (sec: number) => Promise<unknown>, call: () => Promise<T>): Promise<{ out: T; sec: number; infoCalls: number }> {
+  for (let k = 0; k < 5; k++) {
+    const sec = await timeSec(r);
+    await set(sec);
+    const c0 = await infoCalls(r);
+    const out = await call();
+    const c1 = await infoCalls(r);
+    if ((await timeSec(r)) === sec) return { out, sec, infoCalls: c1 - c0 };
+  }
+  throw new Error("TIME 초가 다섯 번 모두 바뀌어 '같은 초 안'을 만들지 못했다");
+}
+
+describe('리뷰 고침 시험 더하기(PRF-168): 실제 설정 세대를 바꾼 노드 하나짜리 클러스터(CLUSTER BUMPEPOCH)', () => {
+  // 설정 세대 0으로 띄운다(설정 세대가 이미 가장 큰 노드 하나짜리 클러스터에서는 CLUSTER BUMPEPOCH가 STILL이라 0 → 1 한 번만 오른다)
+  let c: ValkeyContainer | undefined;
+  let cr: HotRedis | undefined;
+  let cs: RedisSeatStore;
+  let id: string;
+
+  beforeAll(async () => {
+    c = await startValkey({ cluster: true });
+    cr = await createHotRedis({ url: c.url });
+    cs = new RedisSeatStore(cr);
+    id = String(await cr.command(['CLUSTER', 'MYID'], { key: 'x' }));
+  });
+
+  afterAll(async () => {
+    await cr?.close();
+    c?.stop();
+  });
+
+  const epochOf = async (e: string) => hash(await cr!.command(['HGETALL', seatKeys.epoch(e)], { key: seatKeys.epoch(e) }));
+  const setChk = (e: string, chk: string) => cr!.command(['HSET', seatKeys.epoch(e), 'chk', chk], { key: seatKeys.epoch(e) });
+
+  test('ST26_리뷰 고침 시험 더하기_ CLUSTER BUMPEPOCH로 그 노드의 설정 세대가 0에서 1로 바뀌면, 같은 초(chk = 그 초) 안의 세대 올리기·홀드는 노드 ID가 같아 오르지 않고(CLUSTER INFO 0번), 다음 초(chk = 지난 초로 흉내)의 홀드가 한 번 올려 node = {MYID}:1·HELD의 seatEpoch = 새 세대이며, 그 뒤 세대 올리기는 SAME이다 [ASVS v5.0.0-15.4.2] [S-T26]', async () => {
+    const r = cr!;
+    const e = uuidv7(systemClock);
+    const keepUntilMs = Date.now() + 2 * DAY;
+    const o = await cs.openSale({ eventId: e, seatCount: SEAT_COUNT, keepUntilMs });
+    expect(await epochOf(e)).toMatchObject({ epoch: String(o.seatEpoch), node: `${id}:0` });
+
+    expect(String(await r.command(['CLUSTER', 'BUMPEPOCH'], { key: 'x' }))).toBe('BUMPED 1');
+    expect(String(await r.command(['CLUSTER', 'INFO'], { key: 'x' }))).toMatch(/cluster_my_epoch:1\r?\n/);
+
+    // 같은 초 안: 노드 ID만 견주므로 바뀐 설정 세대를 아직 보지 않는다(세대 올리기도, 홀드도). 초가 바뀌어 다시 하면 옛 표지로 되돌리고 다음 좌석을 잡는다
+    let seat = 0;
+    const same = await inOneSecond(
+      r,
+      (sec) => r.command(['HSET', seatKeys.epoch(e), 'node', `${id}:0`, 'chk', String(sec)], { key: seatKeys.epoch(e) }),
+      async () => ({ before: await epochOf(e), b: await cs.bumpEpoch(e), h: await cs.hold(holdOf(e, [seat++], randomUUID(), keepUntilMs)) }),
+    );
+    expect(same.out.b).toEqual({ result: 'SAME', epoch: Number(same.out.before.epoch), bumps: Number(same.out.before.bumps ?? 0) });
+    expect(same.out.h.kind).toBe('OK');
+    expect(same.infoCalls, '같은 초 안의 CLUSTER INFO').toBe(0);
+    expect(await epochOf(e)).toMatchObject({ epoch: same.out.before.epoch, node: `${id}:0`, chk: String(same.sec) });
+
+    // 다음 초(chk를 지난 초로 고쳐 흉내): 홀드가 설정 세대까지 견줘 한 번 올린다
+    const before = await epochOf(e);
+    await setChk(e, String(same.sec - 1));
+    const c0 = await infoCalls(r);
+    const h = await cs.hold(holdOf(e, [seat], randomUUID(), keepUntilMs));
+    expect(h.kind).toBe('OK');
+    expect((await infoCalls(r)) - c0, '다음 초의 CLUSTER INFO').toBe(1);
+    const ep = await epochOf(e);
+    expect(ep).toMatchObject({ node: `${id}:1`, gen: '1', bumps: String(Number(before.bumps ?? 0) + 1) });
+    expect(Number(ep.epoch)).toBeGreaterThanOrEqual(Number(before.epoch) + 1);
+    const items = (await r.command(['XRANGE', seatKeys.stream(e), '-', '+'], { key: seatKeys.stream(e) })) as unknown[];
+    expect(hash((items.at(-1) as unknown[])[1])).toMatchObject({ type: 'HELD', seatIdx: String(seat), seatEpoch: ep.epoch });
+
+    // 그 뒤로는 오르지 않는다(지난 chk여도 표지가 같다)
+    expect(await cs.bumpEpoch(e)).toEqual({ result: 'SAME', epoch: Number(ep.epoch), bumps: Number(ep.bumps) });
+    await setChk(e, '1');
+    expect(await cs.bumpEpoch(e)).toEqual({ result: 'SAME', epoch: Number(ep.epoch), bumps: Number(ep.bumps) });
   });
 });
 
@@ -647,7 +896,7 @@ describe('코드 리뷰 재현(PRF-143)', () => {
     const before = Date.now();
     expect(await rebuilderOf(w).rebuild(w.eventId, { keepUntilMs })).toMatchObject({ result: 'REBUILT', gen: 3 });
     expect(await inCtlEvents(w.eventId)).toBe(true);
-    expect(await epochHash(w.eventId)).toMatchObject({ node: 'pod-a', gen: '3' });
+    expect(await epochHash(w.eventId)).toMatchObject({ node: STANDALONE, gen: '3' });
     expect(Number((await epochHash(w.eventId))!.epoch)).toBeGreaterThanOrEqual(Math.floor(before / 1000) - SKEW_S);
   });
 
@@ -679,13 +928,13 @@ describe('코드 리뷰 재현(PRF-143)', () => {
     expect(await expireAt(seatKeys.rebuild(eventId))).toBe(keepUntilMs);
     expect(await store.begin(eventId, 2, keepUntilMs)).toEqual({ result: 'STALE' });
     expect(await store.writeSeats(eventId, [seat], keepUntilMs, 2)).toEqual({ result: 'STALE' });
-    expect(await store.finish(eventId, { quotas: new Map([[seat.accountId, 1]]), gen: 2, node: 'pod-old', keepUntilMs })).toEqual({ result: 'STALE' });
+    expect(await store.finish(eventId, { quotas: new Map([[seat.accountId, 1]]), gen: 2, keepUntilMs })).toEqual({ result: 'STALE' });
     expect(await bit(eventId, 3)).toBe(0);
     expect(await quota(eventId, seat.accountId)).toBeNull();
     expect(await epochHash(eventId)).toBeNull();
     // 내 판 번호는 쓴다
     expect(await store.writeSeats(eventId, [seat], keepUntilMs, 3)).toEqual({ result: 'OK' });
-    expect(await store.finish(eventId, { quotas: new Map([[seat.accountId, 1]]), gen: 3, node: 'pod-new', keepUntilMs, maxToken: 0 })).toEqual({ result: 'OK' });
+    expect(await store.finish(eventId, { quotas: new Map([[seat.accountId, 1]]), gen: 3, keepUntilMs, maxToken: 0 })).toEqual({ result: 'OK' });
     expect(await quota(eventId, seat.accountId)).toBe(1);
     // 세대 키가 선 뒤는 어느 판 번호든 READY와 세대 키의 gen
     for (const g of [2, 3, 4]) {

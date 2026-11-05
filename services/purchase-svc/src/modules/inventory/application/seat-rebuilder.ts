@@ -36,7 +36,7 @@ export interface SeatRebuilderDeps {
   /** 묶인 주문 홀드의 잡은 시각(지금)을 재는 시계(없으면 systemClock) */
   clock?: Clock;
   seatMap: SeatMap;
-  /** 임대의 holder이자 세대 키 node(이 파드·프로세스 표지) */
+  /** 임대의 holder(이 파드·프로세스 표지). 세대 키 node는 좌석 Redis가 구한 주 노드 표지라 넘기지 않는다(BUILD_ORDER PRF-168) */
   holder: string;
   signals?: SeatRebuilderSignals;
 }
@@ -91,7 +91,7 @@ export class SeatRebuilder {
 
   /** 임대를 잡은 뒤: 시작 Lua → 읽기 → 계획 → 좌석 Lua 묶음들 → 끝내기. 어느 Lua든 READY(세대 키의 gen으로 판 번호를 맞춘다)·STALE(BUSY)면 멈춘다 */
   async #write(eventId: string, gen: number, keepUntilMs: number): Promise<{ report: RebuildReport; setGen?: number }> {
-    const { source, target, seatMap, holder } = this.deps;
+    const { source, target, seatMap } = this.deps;
     const stop = (step: RebuildStep): { report: RebuildReport; setGen?: number } | undefined =>
       step.result === 'READY' ? { report: { result: 'READY' }, setGen: step.gen } : step.result === 'STALE' ? { report: { result: 'BUSY' } } : undefined;
 
@@ -113,7 +113,7 @@ export class SeatRebuilder {
       const s = stop(await target.writeSeats(eventId, plan.seats.slice(k, k + REBUILD_BATCH), keepUntilMs, gen));
       if (s) return s;
     }
-    const f = stop(await target.finish(eventId, { quotas: quotasOf(plan.seats), gen, node: holder, keepUntilMs, maxToken: maxTokenOf(plan.seats) }));
+    const f = stop(await target.finish(eventId, { quotas: quotasOf(plan.seats), gen, keepUntilMs, maxToken: maxTokenOf(plan.seats) }));
     if (f) return f;
     const sold = plan.seats.filter((s) => s.mode === 'SOLD').length;
     return { report: { result: 'REBUILT', gen, sold, held: plan.seats.length - sold, skipped: plan.skipped } };

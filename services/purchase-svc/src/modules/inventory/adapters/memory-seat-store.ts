@@ -70,13 +70,22 @@ export interface MemoryPublished {
   message: string;
 }
 
+/**
+ * 세대 키 s:{event:E}:epoch의 칸 epoch(세대)·node(주 노드 표지)·gen(다시 만들기 판 번호, 판매 열기가 1로 둔다. 없으면 1로 본다, BUILD_ORDER PRF-142)·
+ * chk(표지의 설정 세대까지 마지막으로 견준 초. 없으면 0으로 본다, ADR-0210)·bumps(장애 조치 뒤 세대를 올린 누적 수. 없으면 0, PRF-168 리뷰 고침 중간 1)
+ */
+export interface MemoryEpoch {
+  epoch: number;
+  node: string;
+  gen?: number;
+  chk?: number;
+  bumps?: number;
+}
+
 /** 회차 하나의 좌석 키(시험이 직접 채우고 읽는다). 이름은 docs/data.md §3의 키와 같다 */
 export class MemorySeatEvent {
-  /**
-   * 세대 키 s:{event:E}:epoch의 칸 epoch(세대)·node(주 노드 표지)·gen(다시 만들기 판 번호, 판매 열기가 1로 둔다. 없으면 1로 본다, BUILD_ORDER PRF-142).
-   * 없으면 NOT_READY
-   */
-  epoch: { epoch: number; node: string; gen?: number } | undefined;
+  /** 세대 키(MemoryEpoch). 없으면 NOT_READY */
+  epoch: MemoryEpoch | undefined;
   /** 비트맵 크기(openSale의 seatCount). 없으면 비트맵이 없다 */
   seatCount: number | undefined;
   /** 비트맵에서 1인 색인 */
@@ -119,6 +128,26 @@ export class MemorySeatEvent {
   sessionSweep: { owner: string; expiresAtMs: number } | undefined;
 }
 
+/** MemorySeatStore 생성자 선택(BUILD_ORDER PRF-168) */
+export interface MemorySeatStoreOptions {
+  /** 주 노드 표지(Lua의 nodeId() 대신: 클러스터 '{CLUSTER MYID}:{cluster_my_epoch}', 단일 노드 'standalone'). 기본 'standalone' */
+  nodeId?: string;
+}
+
+/** 단일 노드의 주 노드 표지(hold-lua.ts NODE_ID가 'cluster support disabled'일 때 쓰는 값). MemorySeatStore의 기본 표지 */
+const STANDALONE_NODE = 'standalone';
+
+/** 주 노드 표지의 모양: 빈 글이 아닌 글 */
+function assertNodeId(id: unknown): asserts id is string {
+  if (typeof id !== 'string' || id.length === 0) throw new RangeError('주 노드 표지(nodeId)가 비었다');
+}
+
+/** 표지의 노드 ID 부분(':' 앞, Lua ensureEpoch가 매번 견주는 CLUSTER MYID 몫). ':'이 없으면 표지 그대로('standalone') */
+const nodeIdPart = (node: string): string => {
+  const cut = node.indexOf(':');
+  return cut < 0 ? node : node.slice(0, cut);
+};
+
 /** 좌석 저장소 전체의 메모리 모양 */
 export class MemorySeatDb {
   /** 좌석 비트맵이 있는 회차 목록 s:ctl:events */
@@ -143,25 +172,79 @@ export class MemorySeatDb {
 
 /**
  * SeatStore·SeatExpiries의 메모리 구현. 계약은 domain/ports.ts SeatStore·SeatExpiries와 hold-lua.ts·expire-lua.ts이고, 결과는 RedisSeatStore와 같다.
- * Redis와 다른 점: 시각은 주입 Clock(µs = now × 1000이라 같은 ms 안의 두 홀드는 fence + 1로 갈린다), openSale의 epoch = floor(now / 1000)·node 'standalone',
+ * Redis와 다른 점: 시각은 주입 Clock(µs = now × 1000이라 같은 ms 안의 두 홀드는 fence + 1로 갈린다), openSale의 epoch = floor(now / 1000)·node = 생성자 nodeId(기본 'standalone', PRF-168),
  * 키 만료는 expireAt에 적기만 한다. 일시 장애·메모리 부족(SeatStoreUnavailable)은 내지 않는다. 호출 마감(SeatCallOptions)은 보지 않는다.
  * 만료(PRF-135): saleEvents = db.ctlEvents(KEY_PART 모양만), dueExpiries·expire는 MemorySeatEvent의 expiry·holds·bits·quota·rel·secver·stream·published·expireAt을
  * ports.ts SeatExpiries의 차례대로 바꾼다(만료 Lua와 같은 결과. 보유 수가 0 이하가 되면 quota에서 지우고 expireAt의 그 키도 지운다)
  * 묶기·실패 해제·회차 목록 빼기(PRF-142): pin-lua.ts의 계약과 RedisSeatStore.retireEvent의 차례를 같은 키 모형에 둔다. openSale은 epoch.gen = 1을 함께 쓴다
+ * 세대 확인(PRF-168 리뷰 고침 H1·결함 1, ADR-0210): hold·expire·pin·releaseFailed·bumpEpoch는 hold-lua.ts ENSURE_EPOCH와 같은 규칙(#readEpoch·#ensureEpoch)이다.
+ * 세대 키는 맨 앞에서 읽고(망가진 세대 칸은 오류), 세대 확인(올리기)은 Lua와 같은 자리(오류로 끝나는 검사 뒤, 거절 결과를 돌려주기 직전과 쓰기 앞)에서 한 번 한다.
+ * 표지는 생성자 nodeId(시험은 setNodeId로 승격을 흉내), chk는 그 메서드가 읽은 주입 시계의 초다
  */
 export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, SeatPins, SeatEventRetire, SeatRebuildTarget {
   readonly db = new MemorySeatDb();
   readonly #filterWarnGate: LogGate;
+  /** 이 저장소가 흉내 내는 주 노드의 표지(Lua의 nodeId() 대신). openSale·finish·bumpEpoch와 쓰는 메서드(hold·expire·pin·releaseFailed)가 세대 키 node에 쓰고 견준다 */
+  #nodeId: string;
 
   /**
    * @param clock 저장소 시각(Lua의 TIME 대신)
    * @param logger 서비스 로거(선택). saleEvents가 거른 값의 수를 남긴다(L8, 파드마다 60초에 한 줄까지, C3)
+   * @param options nodeId = 이 저장소가 흉내 내는 주 노드의 표지(Lua의 nodeId() 대신, 기본 'standalone'). openSale·finish·bumpEpoch가 쓴다(BUILD_ORDER PRF-168)
+   * @throws RangeError options.nodeId가 빈 글
    */
   constructor(
     private readonly clock: Clock,
     private readonly logger?: PlatformLogger,
+    options: MemorySeatStoreOptions = {},
   ) {
     this.#filterWarnGate = saleEventsWarnGate(clock);
+    const nodeId = options.nodeId ?? STANDALONE_NODE;
+    assertNodeId(nodeId);
+    this.#nodeId = nodeId;
+  }
+
+  /**
+   * 시험용: 주 노드 표지를 바꾼다(장애 조치로 복제본이 승격되어 그 슬롯의 Lua가 다른 노드에서 도는 것을 흉내, BUILD_ORDER PRF-168). 세대 키는 바꾸지 않는다
+   * @throws RangeError id가 빈 글
+   */
+  setNodeId(id: string): void {
+    assertNodeId(id);
+    this.#nodeId = id;
+  }
+
+  /**
+   * 세대 키 읽기(hold-lua.ts ENSURE_EPOCH readEpoch의 쌍둥이, 쓰지 않는다): 세대 키가 없으면 undefined(부른 쪽이 NOT_READY).
+   * epoch가 u32(0 ~ 4294967295의 안전한 정수)가 아니거나 bumps가 있는데 0 이상의 안전한 정수가 아니면 PEAKET_CORRUPT_KEY {세대 키}를 던진다(리뷰 고침 낮음 a)
+   */
+  #readEpoch(eventId: string, ev: MemorySeatEvent): MemoryEpoch | undefined {
+    const ep = ev.epoch;
+    if (!ep) return undefined;
+    const u32 = Number.isSafeInteger(ep.epoch) && ep.epoch >= 0 && ep.epoch <= 0xffff_ffff;
+    const bumpsOk = ep.bumps === undefined || (Number.isSafeInteger(ep.bumps) && ep.bumps >= 0);
+    if (!u32 || !bumpsOk) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.epoch(eventId)}`);
+    return ep;
+  }
+
+  /**
+   * 세대 확인과 그 자리 올리기(hold-lua.ts ENSURE_EPOCH ensureEpoch의 쌍둥이, ADR-0210 결정 1·2): 부른 메서드의 첫 쓰기다(오류로 끝나는 검사를 모두 지난 뒤, 리뷰 고침 결함 1).
+   * 표지의 노드 ID 부분(':' 앞)은 매번, 전체 표지는 노드 ID가 다르거나 chk가 지금 초 sec와 다를 때(없거나, 시계가 뒤로 가 미래의 chk여도, 리뷰 고침 낮음 d)만
+   * 이 저장소의 표지(nodeId)와 견준다. 견줬으면 chk = sec, 다르면 epoch = max(epoch + 1, sec)·node = 이 저장소의 표지·bumps + 1.
+   * 지금 세대(올렸으면 새 값), 올렸는지, 올린 누적 수를 돌려준다
+   * @param sec 부른 메서드가 읽은 주입 시계의 초(Lua의 TIME 초, 리뷰 고침 낮음 c)
+   */
+  #ensureEpoch(ep: MemoryEpoch, sec: number): { epoch: number; bumped: boolean; bumps: number } {
+    const node = this.#nodeId;
+    if (nodeIdPart(ep.node) === nodeIdPart(node) && ep.chk === sec) return { epoch: ep.epoch, bumped: false, bumps: ep.bumps ?? 0 };
+    if (ep.node === node) {
+      ep.chk = sec;
+      return { epoch: ep.epoch, bumped: false, bumps: ep.bumps ?? 0 };
+    }
+    ep.epoch = Math.max(ep.epoch + 1, sec);
+    ep.node = node;
+    ep.chk = sec;
+    ep.bumps = (ep.bumps ?? 0) + 1;
+    return { epoch: ep.epoch, bumped: true, bumps: ep.bumps };
   }
 
   // 메서드 모두 본문에 await가 없어 한 번에 끝난다(Lua가 샤드에서 하나씩 도는 것과 같다. 동시 호출이 서로 끼어들지 않는다)
@@ -169,26 +252,33 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     const e = i.eventId;
     const ev = this.db.event(e);
     const now = this.clock.now();
+    const sec = Math.floor(now / 1000);
 
-    // 1 세대 키
-    if (!ev.epoch) return { kind: 'NOT_READY' };
+    // 1 세대 키(읽기만. 망가진 세대 칸은 오류)
+    const ep = this.#readEpoch(e, ev);
+    if (!ep) return { kind: 'NOT_READY' };
+    // 거절 결과를 돌려주기 직전의 세대 확인(장애 조치 뒤면 그 자리에서 올린다, ADR-0210. 오류로 끝나는 검사는 부르지 않는다)
+    const decided = (r: HoldResult): HoldResult => {
+      this.#ensureEpoch(ep, sec);
+      return r;
+    };
 
     // 2 멱등 기록(지난 것은 Redis의 키 만료처럼 없앤다)
     const idemKey = `${i.accountId}:${i.idempotencyKey}`;
     const replayed = this.#replay(ev, idemKey, i.fingerprint, now);
-    if (replayed) return replayed;
+    if (replayed) return decided(replayed);
 
     // 3 판매 정지 사본
-    if (STOP_FIELDS.some((f) => ev.ctl.get(f) === '1')) return { kind: 'PAUSED' };
+    if (STOP_FIELDS.some((f) => ev.ctl.get(f) === '1')) return decided({ kind: 'PAUSED' });
 
     // 4 경합(seats 차례의 첫 충돌)
     const taken = i.seats.find((s) => ev.bits.has(s.index));
-    if (taken) return { kind: 'CONFLICT', seatId: taken.seatId };
+    if (taken) return decided({ kind: 'CONFLICT', seatId: taken.seatId });
 
     // 5 방금 놓은 좌석(점수가 지금보다 큰 것만)
     const rel = ev.rel.get(i.accountId);
     const waits = rel ? i.seats.filter((s) => (rel.get(s.index) ?? -Infinity) > now) : [];
-    if (waits.length > 0) return { kind: 'REHOLD_WAIT', seatIds: waits.map((s) => s.seatId), availableAtMs: Math.max(...waits.map((s) => rel!.get(s.index)!)) };
+    if (waits.length > 0) return decided({ kind: 'REHOLD_WAIT', seatIds: waits.map((s) => s.seatId), availableAtMs: Math.max(...waits.map((s) => rel!.get(s.index)!)) });
 
     // 쓰기 전 지킴(Lua와 같다): 지난 keepUntil, 표준 10진 정수가 아닌 보유 수(INCRBY가 받는 값, A1)·10진 정수 글이 아닌 fence(SET만 하는 값이라 앞 0은 받는다).
     // 메모리는 키 형이 정해져 있어 형 검사는 없다
@@ -207,11 +297,13 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     const n = i.seats.length;
     // 시험이 글로 넣은 값('5' 같은)이 글 이어 붙이기가 되지 않게 수로 바꿔 쓴다(지킴을 지난 값이라 표준 10진 정수다)
     const held = quota === undefined ? 0 : Number(quota);
-    if (held + n > i.limit) return { kind: 'QUOTA_EXCEEDED' };
+    if (held + n > i.limit) return decided({ kind: 'QUOTA_EXCEEDED' });
 
-    // 7 쓰기(여기까지 아무것도 쓰지 않았다). 토큰이 안전한 정수를 넘으면 쓰지 않고 던진다(Lua의 PEAKET_FENCE_OVERFLOW)
+    // 7 쓰기(여기까지 아무것도 쓰지 않았다). 토큰이 안전한 정수를 넘으면 쓰지 않고 던진다(Lua의 PEAKET_FENCE_OVERFLOW, 세대 확인보다 앞)
     const token = Math.max(Number(ev.fence ?? '0') + 1, now * 1000);
     if (!Number.isSafeInteger(token)) throw new Error(`PEAKET_FENCE_OVERFLOW 펜싱 토큰이 안전한 정수를 넘는다(fence ${ev.fence})`);
+    // 첫 쓰기: 세대 확인(아래 Stream·델타는 이 세대를 싣는다)
+    const cur = this.#ensureEpoch(ep, sec);
     const tok = String(token);
     const exp = now + HOLD_TTL_MS;
     const extend = (key: string) => {
@@ -244,7 +336,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       }
       deltas.get(s.sectionIndex)!.push(`${s.seatOffset}:${SEAT_STATE_HELD}`);
     }
-    const seatEpoch = String(ev.epoch.epoch);
+    const seatEpoch = String(cur.epoch);
     for (const s of i.seats) {
       ev.stream.push({
         type: 'HELD',
@@ -318,15 +410,23 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     assertPinInput(i);
     const e = i.eventId;
     const ev = this.db.event(e);
+    const clockNow = this.clock.now();
+    const sec = Math.floor(clockNow / 1000);
 
-    // 1 세대 키(gen 칸 값이 앞 0 없는 양의 10진 정수 15자리 이하가 아니면 망가진 키)
-    if (!ev.epoch) return { kind: 'NOT_READY' };
-    const gen = ev.epoch.gen ?? INITIAL_SEAT_GEN;
+    // 1 세대 키(읽기만. 망가진 세대 칸은 오류. gen 칸 값이 앞 0 없는 양의 10진 정수 15자리 이하가 아니면 망가진 키)
+    const ep = this.#readEpoch(e, ev);
+    if (!ep) return { kind: 'NOT_READY' };
+    const gen = ep.gen ?? INITIAL_SEAT_GEN;
     if (!Number.isSafeInteger(gen) || gen < 1 || gen >= 1e15) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.epoch(e)}`);
+    // 거절 결과를 돌려주기 직전의 세대 확인(장애 조치 뒤면 그 자리에서 올린다, ADR-0210. 오류로 끝나는 검사는 부르지 않는다)
+    const decided = (r: PinResult): PinResult => {
+      this.#ensureEpoch(ep, sec);
+      return r;
+    };
 
-    // 1′ 실패 표시(PRF-165): 실패 해제가 먼저 돌았다. 아무것도 쓰지 않는다
+    // 1′ 실패 표시(PRF-165): 실패 해제가 먼저 돌았다. 아무것도 쓰지 않는다(세대 확인만)
     const mark = ev.failed.get(i.holdId);
-    if (mark !== undefined && mark > this.clock.now()) return { kind: 'FAILED_HOLD' };
+    if (mark !== undefined && mark > clockNow) return decided({ kind: 'FAILED_HOLD' });
 
     // 2 좌석마다 내 홀드(비트 1, holdId·owner 같음) · 빈 좌석(비트 0) · 남의 좌석(그 밖)
     const mine: MemoryHoldHash[] = [];
@@ -334,7 +434,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     for (const s of i.seats) {
       if (ev.bits.has(s.index)) {
         const h = ev.holds.get(s.index);
-        if (!h || h.holdId !== i.holdId || h.owner !== i.accountId) return { kind: 'TAKEN', seatIndex: s.index };
+        if (!h || h.holdId !== i.holdId || h.owner !== i.accountId) return decided({ kind: 'TAKEN', seatIndex: s.index });
         mine.push(h);
       } else {
         empty.push(s);
@@ -343,7 +443,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     const k = empty.length;
 
     // 3 낡은 판 번호(빈 좌석이 있을 때만)
-    if (k > 0 && i.orderGen !== gen) return { kind: 'STALE_GEN', gen };
+    if (k > 0 && i.orderGen !== gen) return decided({ kind: 'STALE_GEN', gen });
 
     // 쓰기 전 지킴과 4 한도(빈 좌석이 있을 때만. Lua와 같다)
     const quotaKey = seatKeys.quota(e, i.accountId);
@@ -351,7 +451,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     let held = 0;
     let token = 0;
     if (k > 0) {
-      now = this.clock.now();
+      now = clockNow;
       if (!(i.keepUntilMs > now)) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${i.keepUntilMs} now ${now}`);
       const quota = ev.quota.get(i.accountId);
       if (quota !== undefined && !isStandardInt(String(quota))) throw new Error(`PEAKET_CORRUPT_KEY ${quotaKey}`);
@@ -361,10 +461,13 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
         if (v !== undefined && !isStandardInt(String(v))) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.secver(e)}`);
       }
       held = quota === undefined ? 0 : Number(quota);
-      if (held + k > i.limit) return { kind: 'QUOTA_EXCEEDED' };
+      if (held + k > i.limit) return decided({ kind: 'QUOTA_EXCEEDED' });
       token = Math.max(Number(ev.fence ?? '0') + 1, now * 1000);
       if (!Number.isSafeInteger(token)) throw new Error(`PEAKET_FENCE_OVERFLOW 펜싱 토큰이 안전한 정수를 넘는다(fence ${ev.fence})`);
     }
+
+    // 첫 쓰기: 세대 확인(아래 HELD·델타는 이 세대를 싣는다)
+    const cur = this.#ensureEpoch(ep, sec);
 
     // 5 쓰기
     const tok = String(token);
@@ -404,7 +507,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       }
       deltas.get(s.sectionIndex)!.push(`${s.seatOffset}:${SEAT_STATE_HELD}`);
     }
-    const seatEpoch = String(ev.epoch.epoch);
+    const seatEpoch = String(cur.epoch);
     for (const s of empty) {
       ev.stream.push({
         type: 'HELD',
@@ -439,8 +542,11 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     assertReleaseFailedInput(i);
     const e = i.eventId;
     const ev = this.db.event(e);
-    if (!ev.epoch) return { kind: 'NOT_READY' };
     const now = this.clock.now();
+    const sec = Math.floor(now / 1000);
+    // 세대 키(읽기만. 망가진 세대 칸은 오류). 세대 확인은 쓰기 전 지킴을 모두 지난 뒤의 첫 쓰기다(ADR-0210, 리뷰 고침 결함 1)
+    const ep = this.#readEpoch(e, ev);
+    if (!ep) return { kind: 'NOT_READY' };
     if (!(i.keepUntilMs > now)) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${i.keepUntilMs} now ${now}`);
 
     const freed: { seat: SeatRef; hash: MemoryHoldHash }[] = [];
@@ -455,6 +561,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       ev.expireAt.set(seatKeys.failed(e, i.holdId), now + FAILED_HOLD_MARK_TTL_MS);
     };
     if (k === 0) {
+      this.#ensureEpoch(ep, sec);
       markFailed();
       return { kind: 'OK', released: 0 };
     }
@@ -466,7 +573,8 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       if (v !== undefined && !isStandardInt(String(v))) throw new Error(`PEAKET_CORRUPT_KEY ${seatKeys.secver(e)}`);
     }
 
-    // 쓰기
+    // 첫 쓰기: 세대 확인(아래 RELEASED·델타는 이 세대를 싣는다), 그다음 쓰기
+    const cur = this.#ensureEpoch(ep, sec);
     markFailed();
     for (const { seat } of freed) {
       ev.bits.delete(seat.index);
@@ -493,7 +601,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       }
       deltas.get(seat.sectionIndex)!.push(`${seat.seatOffset}:${SEAT_STATE_AVAILABLE}`);
     }
-    const seatEpoch = String(ev.epoch.epoch);
+    const seatEpoch = String(cur.epoch);
     for (const { seat, hash: h } of freed) {
       ev.stream.push({
         type: 'RELEASED',
@@ -612,7 +720,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
   /**
    * 다시 만들기 끝(RedisSeatStore.finish의 차례: 회차 목록 → REBUILD_QUOTAS_LUA들 → FINISH_REBUILD_LUA. 메모리는 한 번에 한다): 입력 검사 → 회차 목록에 넣기(결과와 관계없이) →
    * 세대 키가 있으면 READY(gen) → rebuild 판 번호 ≠ gen이면 STALE → 시각 한 번·keepUntil 지킴 → 계정마다 보유 수를 그 값으로(수명 keepUntil) →
-   * 펜싱 카운터 = max(fence, maxToken)(바뀌면 수명은 더 늦은 쪽 keepUntil) → 세대 키(epoch = floor(now / 1000), node, gen, 수명 keepUntil)
+   * 펜싱 카운터 = max(fence, maxToken)(바뀌면 수명은 더 늦은 쪽 keepUntil) → 세대 키(epoch = floor(now / 1000), node = 이 저장소의 표지, gen, 수명 keepUntil)
    */
   async finish(eventId: string, input: RebuildFinishInput): Promise<RebuildStep> {
     assertRebuildFinish(eventId, input);
@@ -634,21 +742,24 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
       const cur = ev.expireAt.get(seatKeys.fence(e));
       if (cur === undefined || cur < input.keepUntilMs) ev.expireAt.set(seatKeys.fence(e), input.keepUntilMs);
     }
-    ev.epoch = { epoch: Math.floor(now / 1000), node: input.node, gen: input.gen };
+    // node는 끝내기 Lua의 nodeId()처럼 이 저장소의 표지다(판매 열기와 같은 뜻, 파드 이름이 아니다. PRF-168). chk = 표지를 견준 초(ADR-0210)
+    ev.epoch = { epoch: Math.floor(now / 1000), node: this.#nodeId, gen: input.gen, chk: Math.floor(now / 1000) };
     ev.expireAt.set(seatKeys.epoch(e), input.keepUntilMs);
     return { result: 'OK' };
   }
 
-  /** 장애 조치 뒤 세대 올리기(BUMP_EPOCH_LUA): 세대 키가 없으면 NOT_READY, node가 같으면 SAME, 다르면 epoch = max(epoch + 1, 지금 초)와 node(gen·수명 그대로) */
-  async bumpEpoch(eventId: string, node: string): Promise<{ result: 'BUMPED' | 'SAME'; epoch: number } | { result: 'NOT_READY' }> {
+  /**
+   * 장애 조치 뒤 세대 올리기(BUMP_EPOCH_LUA, BUILD_ORDER PRF-168, ADR-0210): 쓰는 Lua와 같은 세대 키 읽기(#readEpoch, 망가진 세대 칸을 먼저 거른다)와 세대 확인(#ensureEpoch)이다.
+   * 세대 키가 없으면 NOT_READY, 올렸으면 BUMPED(epoch = max(epoch + 1, 지금 초), node = 이 저장소의 표지, chk = 지금 초, bumps + 1), 아니면 SAME(gen·수명 그대로).
+   * 둘 다 bumps(올린 누적 수, 없으면 0)를 싣는다
+   */
+  async bumpEpoch(eventId: string): Promise<{ result: 'BUMPED' | 'SAME'; epoch: number; bumps: number } | { result: 'NOT_READY' }> {
     if (!KEY_PART.test(eventId)) throw new RangeError('회차 ID가 키 조각 모양이 아니다');
-    if (typeof node !== 'string' || node.length === 0) throw new RangeError('node가 비었다');
-    const ep = this.db.peek(eventId)?.epoch;
+    const ev = this.db.peek(eventId);
+    const ep = ev && this.#readEpoch(eventId, ev);
     if (!ep) return { result: 'NOT_READY' };
-    if (ep.node === node) return { result: 'SAME', epoch: ep.epoch };
-    ep.epoch = Math.max(ep.epoch + 1, Math.floor(this.clock.now() / 1000));
-    ep.node = node;
-    return { result: 'BUMPED', epoch: ep.epoch };
+    const cur = this.#ensureEpoch(ep, Math.floor(this.clock.now() / 1000));
+    return { result: cur.bumped ? 'BUMPED' : 'SAME', epoch: cur.epoch, bumps: cur.bumps };
   }
 
   async openSale(i: { eventId: string; seatCount: number; keepUntilMs: number }): Promise<{ created: boolean; seatEpoch: number }> {
@@ -658,7 +769,9 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     if (ev.epoch) return { created: false, seatEpoch: ev.epoch.epoch };
     // 비트맵은 모자랄 때만 늘린다(있는 비트는 그대로). 세대 키는 마지막에
     ev.seatCount = Math.max(ev.seatCount ?? 0, i.seatCount);
-    ev.epoch = { epoch: Math.floor(this.clock.now() / 1000), node: 'standalone', gen: INITIAL_SEAT_GEN };
+    // chk = 표지를 견준 초(판매 열기 Lua와 같다, ADR-0210)
+    const sec = Math.floor(this.clock.now() / 1000);
+    ev.epoch = { epoch: sec, node: this.#nodeId, gen: INITIAL_SEAT_GEN, chk: sec };
     for (const key of [seatKeys.bitmap(i.eventId), seatKeys.epoch(i.eventId)]) {
       const cur = ev.expireAt.get(key);
       if (cur === undefined || cur < i.keepUntilMs) ev.expireAt.set(key, i.keepUntilMs);
@@ -705,12 +818,15 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     const e = i.eventId;
     const ev = this.db.event(e);
 
-    // 1 세대 키, 2 시각 한 번
-    if (!ev.epoch) return { kind: 'NOT_READY' };
+    // 2 시각 한 번, 1 세대 키(읽기만. 망가진 세대 칸은 오류)
     const now = this.clock.now();
+    const ep = this.#readEpoch(e, ev);
+    if (!ep) return { kind: 'NOT_READY' };
 
     // 3a 묶음 전체 오류(지난 keepUntil)
     if (!(i.keepUntilMs > now)) throw new Error(`PEAKET_KEEP_UNTIL_PAST keepUntil ${i.keepUntilMs} now ${now}`);
+    // 첫 쓰기: 세대 확인(장애 조치 뒤면 그 자리에서 올린다, ADR-0210. 3b·4는 오류로 끝나지 않는다)
+    const cur = this.#ensureEpoch(ep, Math.floor(now / 1000));
     // 3b 계정·구역 몫의 망가짐
     const badAccount = new Set<string>();
     for (const s of i.seats) {
@@ -787,7 +903,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
         }
         deltas.get(sec)!.push(`${s.seat.seatOffset}:${SEAT_STATE_AVAILABLE}`);
       });
-      const seatEpoch = String(ev.epoch.epoch);
+      const seatEpoch = String(cur.epoch);
       i.seats.forEach((s, k) => {
         if (kinds[k] !== 'r') return;
         const h = hashes.get(s.index)!;

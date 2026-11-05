@@ -1,4 +1,4 @@
-// 다시 만들기(RB-06)·세대 올리기 Lua의 계약(BUILD_ORDER PRF-143, docs/features/seat-hold.md §6 '다시 만들기(RB-06)의 첫 구현', docs/data.md §3 좌석 키 표).
+// 다시 만들기(RB-06)·세대 올리기 Lua의 계약(BUILD_ORDER PRF-143·PRF-168, docs/features/seat-hold.md §6 '다시 만들기(RB-06)의 첫 구현'·'세대 올리기 감시의 첫 구현', docs/data.md §3 좌석 키 표).
 // 규칙은 hold-lua.ts와 같다(`#!lua`, 키는 모두 KEYS로 회차 해시 태그 하나의 슬롯, TIME 한 번, 큰 정수는 string.format('%.0f'), 검사 뒤 쓰기, 형이 틀린 키는 'ERR PEAKET_CORRUPT_KEY {키}').
 // 메모리 구현(memory-seat-store.ts)이 같은 계약을 따른다.
 //
@@ -40,23 +40,34 @@
 //   quota:{계정}이 string이 아니면 PEAKET_CORRUPT_KEY.
 //
 // FINISH_REBUILD_LUA: 펜싱 카운터와 세대 키(마지막)
-// KEYS: 1 epoch  2 rebuild  3 fence   ARGV: 1 gen  2 node  3 keepUntil ms  4 되살린 토큰 최댓값(표준 10진 글, 없으면 '0')
+// KEYS: 1 epoch  2 rebuild  3 fence   ARGV: 1 gen  2 keepUntil ms  3 되살린 토큰 최댓값(표준 10진 글, 없으면 '0')
 // 검사: 세대 키 → {'READY', gen}, rebuild 키 ≠ gen → {'STALE'}
-// 쓰기: fence = max(fence, 최댓값)(SET … KEEPTTL, 수명은 더 늦은 쪽으로 keepUntil), 마지막에 HSET epoch epoch = TIME 초 · node · gen, PEXPIREAT keepUntil → {'OK', epoch}
+// 쓰기: fence = max(fence, 최댓값)(SET … KEEPTTL, 수명은 더 늦은 쪽으로 keepUntil), 마지막에 HSET epoch epoch = TIME 초 · node = nodeId() · gen · chk = TIME 초,
+//       PEXPIREAT keepUntil → {'OK', epoch}
+// node는 이 Lua가 도는 노드의 표지다(hold-lua.ts NODE_ID: 클러스터 '{CLUSTER MYID}:{cluster_my_epoch}', 단일 노드 'standalone'). 판매 열기와 같은 표지라
+// 장애 조치가 없으면 세대 올리기가 SAME이다(BUILD_ORDER PRF-168, docs/features/seat-hold.md §6 '세대 올리기 감시의 첫 구현'. 전에는 ARGV로 받은 파드 이름이었다)
 //
-// 구현에서 정한 세부(PRF-143)
-// - 인자 수가 맞지 않거나(#KEYS ≠ 3 또는 #ARGV ≠ 4) gen이 앞 0 없는 양의 10진 정수(15자리 이하)가 아니거나 최댓값이 표준 10진 정수가 아니면 'ERR PEAKET_FINISH_ARGS …'.
+// 구현에서 정한 세부(PRF-143, PRF-168)
+// - 인자 수가 맞지 않거나(#KEYS ≠ 3 또는 #ARGV ≠ 3) gen이 앞 0 없는 양의 10진 정수(15자리 이하)가 아니거나 최댓값이 표준 10진 정수가 아니면 'ERR PEAKET_FINISH_ARGS …'.
 // - epoch가 hash가 아니면 PEAKET_CORRUPT_KEY(READY 판정보다 앞). TIME 한 번 뒤 keepUntil ≤ now면 PEAKET_KEEP_UNTIL_PAST, fence가 string이 아니거나 값이 ^%d+$가 아니면
 //   PEAKET_CORRUPT_KEY(hold-lua.ts와 같은 글). rebuild 키는 지우지 않는다(수명 keepUntil, 세대 키가 선 뒤에는 READY가 먼저다).
+// - 표지(nodeId())는 쓰기 전 지킴 끝에 구한다(CLUSTER 명령이 권한 등으로 실패하면 아무것도 쓰지 않고 'PEAKET_NODE_ID …' 스크립트 오류. READY·STALE이면 구하지 않는다).
 // - 회차 목록 s:ctl:events는 다른 슬롯이라 앱(RedisSeatStore.finish)이 이 Lua들 앞에 SADD한다(여러 번 해도 같다).
 //
-// BUMP_EPOCH_LUA: 장애 조치 뒤 세대 올리기(ADR-0121 결정 5)
-// KEYS: 1 epoch   ARGV: 1 node(지금 주 노드 표지)
-// epoch 칸이 없으면 {'NOT_READY'}, node가 같으면 {'SAME', epoch}, 다르면 epoch = max(epoch + 1, TIME 초)와 node를 쓰고 {'BUMPED', epoch}(gen은 그대로)
+// BUMP_EPOCH_LUA: 장애 조치 뒤 세대 올리기(ADR-0121 결정 5, ADR-0210 결정 3, BUILD_ORDER PRF-168 세대 올리기 감시가 쓰기가 없는 조용한 회차를 받치려고 부른다)
+// KEYS: 1 epoch   ARGV: 없음(지금 노드의 표지는 이 Lua가 구한다. 앱은 토폴로지를 읽지 않는다)
+// 좌석을 쓰는 Lua와 같은 도우미(hold-lua.ts ENSURE_EPOCH의 readEpoch·ensureEpoch)로 견준다: epoch 칸이 없으면 {'NOT_READY'}, 올렸으면 {'BUMPED', 새 epoch, bumps}
+// (epoch = max(epoch + 1, TIME 초), node = 지금 표지, chk = TIME 초, bumps + 1, gen은 그대로), 아니면 {'SAME', epoch, bumps}(설정 세대까지 견줬으면 chk = TIME 초만 쓴다).
+// bumps는 세대 키 bumps 칸(올린 누적 수, 쓰는 Lua가 올린 것 포함, 없으면 '0')이다: 감시 반복이 회차마다 지난번 값과의 차이로 지표를 낸다(리뷰 고침 중간 1).
+// 노드 ID는 매번, 설정 세대(CLUSTER INFO)까지는 chk가 지금 초와 다를 때만 견준다(회차마다 1초에 한 번). 여러 곳이 함께 불러도 한 번만 오른다
 //
-// 구현에서 정한 세부(PRF-143)
-// - 인자 수가 맞지 않으면(#KEYS ≠ 1 또는 #ARGV ≠ 1) 'ERR PEAKET_BUMP_ARGS …'. epoch가 hash가 아니거나 epoch 칸이 표준 10진 정수가 아니면 PEAKET_CORRUPT_KEY.
-// - TIME은 node가 다를 때만 한 번 읽는다. 키 수명은 바꾸지 않는다(HSET은 수명을 두고 칸만 바꾼다).
+// 구현에서 정한 세부(PRF-143, PRF-168)
+// - 인자 수가 맞지 않으면(#KEYS ≠ 1 또는 #ARGV ≠ 0) 'ERR PEAKET_BUMP_ARGS …'. epoch가 hash가 아니거나 epoch 칸이 u32가 아니거나 bumps 칸이 망가졌으면 PEAKET_CORRUPT_KEY.
+// - 표지는 그 검사를 지난 뒤에만 구한다(NOT_READY·CORRUPT는 CLUSTER 명령을 부르지 않는다). 구하지 못하면(권한 등) 아무것도 쓰지 않고 'PEAKET_NODE_ID …' 스크립트 오류.
+// - TIME은 세대 키를 읽은 뒤 한 번 읽는다. 키 수명은 바꾸지 않는다(HSET·HINCRBY는 수명을 두고 칸만 바꾼다).
+
+// 지금 노드 표지 nodeId()와 세대 확인 ensureEpoch()는 판매 열기·쓰는 Lua와 같은 글을 쓴다(따로 적으면 표지가 어긋나 장애 조치 없이 세대가 오른다)
+import { ENSURE_EPOCH, NODE_ID } from './hold-lua.js';
 
 /** 큰 정수를 지수 표기 없이 10진 글로(hold-lua.ts와 같은 도우미) */
 const INT_TEXT = `
@@ -266,13 +277,13 @@ return {'OK', m}
 
 /** 다시 만들기 끝내기 Lua 원문(위 계약). 첫 줄이 #!lua다 */
 export const FINISH_REBUILD_LUA = `#!lua
-${INT_TEXT}${EXTEND}${GUARDS}${GEN_FENCE}
-if #KEYS ~= 3 or #ARGV ~= 4 then
+${INT_TEXT}${EXTEND}${GUARDS}${GEN_FENCE}${NODE_ID}
+if #KEYS ~= 3 or #ARGV ~= 3 then
   return redis.error_reply('ERR PEAKET_FINISH_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV)
 end
 local genText = ARGV[1]
 if not genOk(genText) then return redis.error_reply('ERR PEAKET_FINISH_ARGS gen ' .. tostring(genText)) end
-if not canon(ARGV[4]) then return redis.error_reply('ERR PEAKET_FINISH_ARGS maxToken ' .. ARGV[4]) end
+if not canon(ARGV[3]) then return redis.error_reply('ERR PEAKET_FINISH_ARGS maxToken ' .. ARGV[3]) end
 
 -- 1 세대 키(있으면 다른 곳이 이미 끝냈다)와 판 번호
 local stop = fenced(KEYS[1], KEYS[2], genText)
@@ -280,36 +291,38 @@ if stop then return stop end
 
 -- 쓰기 전 지킴. 서버 시각은 여기서 한 번만 읽는다
 local now, sec = nowMs()
-local keep = tonumber(ARGV[3])
-if not keep or keep <= now then return redis.error_reply('ERR PEAKET_KEEP_UNTIL_PAST keepUntil ' .. ARGV[3] .. ' now ' .. int(now)) end
+local keep = tonumber(ARGV[2])
+if not keep or keep <= now then return redis.error_reply('ERR PEAKET_KEEP_UNTIL_PAST keepUntil ' .. ARGV[2] .. ' now ' .. int(now)) end
 if not typed(KEYS[3], 'string') then return corrupt(KEYS[3]) end
 local cur = redis.call('GET', KEYS[3])
 if cur and not string.match(cur, '^%d+$') then return corrupt(KEYS[3]) end
+-- 세대 키 node = 이 Lua가 도는 노드의 표지(판매 열기와 같다). 구하지 못하면 여기서 실패해 아무것도 쓰지 않는다
+local node = nodeId()
 
 -- 2 쓰기: 펜싱 카운터 되살리기(더 클 때만, 걸린 수명은 두고) → 세대 키(마지막)
-local maxTok = tonumber(ARGV[4])
-if maxTok > 0 and (not cur or tonumber(cur) < maxTok) then redis.call('SET', KEYS[3], ARGV[4], 'KEEPTTL') end
+local maxTok = tonumber(ARGV[3])
+if maxTok > 0 and (not cur or tonumber(cur) < maxTok) then redis.call('SET', KEYS[3], ARGV[3], 'KEEPTTL') end
 extend(KEYS[3], keep)
 local keepText = int(keep)
-redis.call('HSET', KEYS[1], 'epoch', sec, 'node', ARGV[2], 'gen', genText)
+-- chk = 표지를 견준 초(이 초에는 쓰는 Lua가 설정 세대까지 다시 견주지 않는다, ADR-0210 결정 2)
+redis.call('HSET', KEYS[1], 'epoch', sec, 'node', node, 'gen', genText, 'chk', sec)
 redis.call('PEXPIREAT', KEYS[1], keepText)
 return {'OK', sec}
 `;
 
 /** 세대 올리기 Lua 원문(위 계약). 첫 줄이 #!lua다 */
 export const BUMP_EPOCH_LUA = `#!lua
-${INT_TEXT}${GUARDS}
-if #KEYS ~= 1 or #ARGV ~= 1 then
+${INT_TEXT}${GUARDS}${ENSURE_EPOCH}
+if #KEYS ~= 1 or #ARGV ~= 0 then
   return redis.error_reply('ERR PEAKET_BUMP_ARGS KEYS ' .. #KEYS .. ' ARGV ' .. #ARGV)
 end
 if not typed(KEYS[1], 'hash') then return corrupt(KEYS[1]) end
-local ep = redis.call('HMGET', KEYS[1], 'epoch', 'node')
-if not ep[1] then return {'NOT_READY'} end
-if not canon(ep[1]) then return corrupt(KEYS[1]) end
-if ep[2] == ARGV[1] then return {'SAME', ep[1]} end
+-- 망가진 세대 칸은 CLUSTER 명령 전에 거른다(SAME으로 끝날 때도 PEAKET_CORRUPT_KEY, readEpoch)
+local ep = readEpoch(KEYS[1])
+if not ep then return {'NOT_READY'} end
+-- 쓰는 Lua와 같은 도우미로 지금 노드의 표지와 견준다(장애 조치로 복제본이 승격되면 이 슬롯의 Lua가 새 주 노드에서 돌아 값이 바뀐다, ADR-0210 결정 2·3)
 local _, sec = nowMs()
-local nextEpoch = math.max(tonumber(ep[1]) + 1, tonumber(sec))
-local text = int(nextEpoch)
-redis.call('HSET', KEYS[1], 'epoch', text, 'node', ARGV[1])
-return {'BUMPED', text}
+local epoch, bumped, bumps = ensureEpoch(ep, tonumber(sec))
+if bumped then return {'BUMPED', epoch, bumps} end
+return {'SAME', epoch, bumps}
 `;

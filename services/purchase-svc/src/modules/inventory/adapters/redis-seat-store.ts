@@ -473,7 +473,8 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
   /**
    * 다시 만들기 끝: assertRebuildFinish 뒤 회차 목록 s:ctl:events에 SADD를 먼저 따로 한 번(다른 슬롯, 여러 번 해도 같다. Lua 뒤에 두면 SADD가 실패했을 때
    * 세대 키만 서고 목록에서 빠진 회차가 READY로 굳는다) → 보유 수 Lua(REBUILD_QUOTAS_LUA)를 REBUILD_BATCH계정씩(KEYS·ARGV의 계정 차례는 quotas의 차례)
-   * → 끝내기 Lua(FINISH_REBUILD_LUA: 펜싱 카운터 = max(fence, maxToken), 세대 키) 한 번. 어느 Lua든 READY·STALE이면 거기서 멈춘다
+   * → 끝내기 Lua(FINISH_REBUILD_LUA: 펜싱 카운터 = max(fence, maxToken), 세대 키. ARGV는 gen·keepUntil·maxToken이고 node는 Lua가 구한다) 한 번.
+   * 어느 Lua든 READY·STALE이면 거기서 멈춘다
    */
   async finish(eventId: string, input: RebuildFinishInput): Promise<RebuildStep> {
     assertRebuildFinish(eventId, input);
@@ -492,20 +493,23 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
       if (count(raw[1], '쓴 수') !== batch.length) throw new Error(`다시 만들기 보유 수 Lua의 쓴 수가 넘긴 계정 수(${batch.length})와 다르다`);
     }
     const keys = [seatKeys.epoch(e), seatKeys.rebuild(e), seatKeys.fence(e)];
-    const { step, raw } = rebuildStepOf(await guard(this.redis.evalScript(FINISH_REBUILD, keys, [gen, input.node, keep, String(input.maxToken ?? 0)])), '다시 만들기 끝내기');
+    // 세대 키 node는 넘기지 않는다: 끝내기 Lua가 그 노드의 표지를 구해 쓴다(판매 열기와 같은 뜻, BUILD_ORDER PRF-168)
+    const { step, raw } = rebuildStepOf(await guard(this.redis.evalScript(FINISH_REBUILD, keys, [gen, keep, String(input.maxToken ?? 0)])), '다시 만들기 끝내기');
     if (step.result === 'OK') int(raw[1], '세대');
     return step;
   }
 
-  /** 장애 조치 뒤 세대 올리기(BUMP_EPOCH_LUA): Lua 한 번. eventId가 KEY_PART가 아니거나 node가 비었으면 RangeError(부르지 않는다) */
-  async bumpEpoch(eventId: string, node: string): Promise<{ result: 'BUMPED' | 'SAME'; epoch: number } | { result: 'NOT_READY' }> {
+  /**
+   * 장애 조치 뒤 세대 올리기(BUMP_EPOCH_LUA, BUILD_ORDER PRF-168): Lua 한 번(KEYS 세대 키 하나, ARGV 없음. 지금 노드의 표지는 Lua가 구한다).
+   * BUMPED·SAME의 bumps는 세대 키 bumps 칸(올린 누적 수, 없으면 0. 리뷰 고침 중간 1)이다. eventId가 KEY_PART가 아니면 RangeError(부르지 않는다)
+   */
+  async bumpEpoch(eventId: string): Promise<{ result: 'BUMPED' | 'SAME'; epoch: number; bumps: number } | { result: 'NOT_READY' }> {
     if (!KEY_PART.test(eventId)) throw new RangeError('회차 ID가 키 조각 모양이 아니다');
-    if (typeof node !== 'string' || node.length === 0) throw new RangeError('node가 비었다');
-    const r = (await guard(this.redis.evalScript(BUMP_EPOCH, [seatKeys.epoch(eventId)], [node]))) as unknown[];
+    const r = (await guard(this.redis.evalScript(BUMP_EPOCH, [seatKeys.epoch(eventId)], []))) as unknown[];
     if (!Array.isArray(r)) throw new Error(`세대 올리기 Lua가 모르는 값을 돌려줬다: ${String(r)}`);
     const kind = str(r[0]);
     if (kind === 'NOT_READY') return { result: kind };
-    if (kind === 'SAME' || kind === 'BUMPED') return { result: kind, epoch: count(r[1], '세대') };
+    if (kind === 'SAME' || kind === 'BUMPED') return { result: kind, epoch: count(r[1], '세대'), bumps: count(r[2], '올린 수') };
     throw new Error(`세대 올리기 Lua가 모르는 값을 돌려줬다: ${kind}`);
   }
 

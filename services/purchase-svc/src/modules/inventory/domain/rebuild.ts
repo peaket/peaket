@@ -322,25 +322,26 @@ export function assertRebuildSeats(eventId: string, seats: readonly RebuildSeat[
   }
 }
 
-/** 끝내기(SeatRebuildTarget.finish) 입력. maxToken은 되살린 원장 토큰의 최댓값(없으면 0으로 본다) */
+/**
+ * 끝내기(SeatRebuildTarget.finish) 입력. maxToken은 되살린 원장 토큰의 최댓값(없으면 0으로 본다).
+ * 세대 키의 node는 넘기지 않는다: 끝내기 Lua가 그 노드의 표지(판매 열기와 같은 nodeId())를 구해 쓴다(BUILD_ORDER PRF-168, 전에는 다시 만든 파드 이름이었다)
+ */
 export interface RebuildFinishInput {
   quotas: ReadonlyMap<string, number>;
   gen: number;
-  node: string;
   keepUntilMs: number;
   maxToken?: number;
 }
 
 /**
  * 끝내기(SeatRebuildTarget.finish) 입력의 모양: eventId·계정은 KEY_PART, 보유 수는 1 이상의 안전한 정수, gen은 assertGen,
- * node는 빈 글이 아님, keepUntilMs는 양의 안전한 정수, maxToken은 있으면 0 이상의 안전한 정수
+ * keepUntilMs는 양의 안전한 정수, maxToken은 있으면 0 이상의 안전한 정수
  * @throws RangeError 위 모양이 아님
  */
 export function assertRebuildFinish(eventId: string, input: RebuildFinishInput): void {
   if (!KEY_PART.test(eventId)) throw new RangeError('회차 ID가 키 조각 모양이 아니다');
   assertGen(input.gen);
   if (input.maxToken !== undefined && !isNonNegativeInt(input.maxToken)) throw new RangeError(`maxToken이 0 이상의 안전한 정수가 아니다: ${input.maxToken}`);
-  if (typeof input.node !== 'string' || input.node.length === 0) throw new RangeError('node가 비었다');
   if (!Number.isSafeInteger(input.keepUntilMs) || input.keepUntilMs < 1) throw new RangeError(`keepUntilMs가 양의 정수가 아니다: ${input.keepUntilMs}`);
   for (const [a, n] of input.quotas) {
     if (!KEY_PART.test(a)) throw new RangeError('계정 ID가 키 조각 모양이 아니다');

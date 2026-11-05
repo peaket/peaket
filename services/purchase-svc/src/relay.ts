@@ -1,7 +1,7 @@
 // purchase-svc의 릴레이 프로세스 시작(BUILD_ORDER PRF-164, docs/features/seat-hold.md §6 '릴레이 프로세스와 조립의 첫 구현', ADR-0116 결정 1·2).
 // 서비스와 같은 이미지를 다른 시작 명령으로 띄운다: node --import @peaket/platform/telemetry/register dist/relay.js
 // 배포는 `purchase-svc-outbox-relay` Deployment(복제 2, deploy/charts/peaket-service의 outboxRelay)다. Lease 리더 하나가 Outbox 릴레이·좌석 Stream 릴레이·
-// 다시 만들기 반복·정비 일(공용 일, 주문 이력 검사, 회차 목록 빼기)을 함께 돈다. 조립은 relay-app.ts의 startPurchaseRelay이고, 이 파일은 연결을 만들고 닫는다.
+// 다시 만들기 반복·세대 올리기 감시(PRF-168)·정비 일(공용 일, 주문 이력 검사, 회차 목록 빼기)을 함께 돈다. 조립은 relay-app.ts의 startPurchaseRelay이고, 이 파일은 연결을 만들고 닫는다.
 // - DB 셋: 릴레이 역할(PEAKET_OUTBOX_DATABASE_URL)·정비 역할(PEAKET_MAINTENANCE_DATABASE_URL) 각 연결 2개, 서비스 역할(PEAKET_DATABASE_URL, 다시 만들기)은
 //   relay-app.ts relayServiceDatabaseOptions(일반 풀 모양·연결 4개 [가정], 다시 만들기가 세 읽기를 함께 보낸다, 리뷰 고침 H1)
 // - 좌석 Redis·좌석맵 판 폴더는 API(main.ts)와 같은 환경 값(PEAKET_SEAT_REDIS_URL 또는 PEAKET_SEAT_REDIS_CLUSTER_URLS, PEAKET_SEATMAP_DIR)
