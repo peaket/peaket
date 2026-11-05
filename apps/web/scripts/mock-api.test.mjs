@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { GetEventResponse, GetHomeRankingsResponse, GetHomeResponse } from '@peaket/contracts/openapi/catalog';
-import { ListSubscriptionsResponse, ListWishesResponse } from '@peaket/contracts/openapi/identity';
+import { GetIdentityMeResponse, ListSubscriptionsResponse, ListWishesResponse } from '@peaket/contracts/openapi/identity';
 import { GetEventReviewSummaryResponse } from '@peaket/contracts/openapi/reviews';
 import { GetSearchSuggestionsResponse, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
 import { ARTISTS, INITIAL_WISHES, searchResults, suggestions, suggestQueryOk, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
@@ -219,4 +219,34 @@ test('가짜 API의 자동완성이 계약 Zod를 모르는 칸 없이 지나고
   assert.equal(suggestQueryOk('루'), true);
   assert.equal(suggestQueryOk('l'), false);
   assert.deepEqual(suggestions(ORIGIN, '없는말').items, []);
+});
+
+test('팬 계정 요약(GET /v1/identity/me, ADR-0202): 상태 fan=member·unverified·pending은 계약 모양 그대로, guest는 401', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const me = async () => {
+    const r = await fetch(`${base}/v1/identity/me`);
+    return { status: r.status, cache: r.headers.get('cache-control'), body: r.status === 200 ? await r.json() : undefined };
+  };
+  try {
+    const member = await me();
+    assert.equal(member.status, 200);
+    assert.equal(member.cache, 'no-store');
+    assert.deepEqual(GetIdentityMeResponse.parse(member.body), member.body, '모르는 칸이 없다');
+    assert.deepEqual(member.body, { nickname: '지민', signupCompleted: true, verified: true, hasStaffAssignment: false });
+    await fetch(`${base}/__mock/state?fan=unverified`);
+    assert.deepEqual((await me()).body, { nickname: '지민', signupCompleted: true, verified: false, hasStaffAssignment: false });
+    await fetch(`${base}/__mock/state?fan=pending`);
+    const pending = (await me()).body;
+    assert.deepEqual(GetIdentityMeResponse.parse(pending), pending);
+    assert.deepEqual(pending, { nickname: null, signupCompleted: false, verified: false, hasStaffAssignment: false });
+    await fetch(`${base}/__mock/state?fan=guest`);
+    assert.equal((await me()).status, 401);
+    // 찜·알림은 로그인한 팬이면 상태와 상관없이 답한다
+    await fetch(`${base}/__mock/state?fan=unverified`);
+    assert.equal((await fetch(`${base}/v1/wishes`)).status, 200);
+  } finally {
+    server.close();
+  }
 });

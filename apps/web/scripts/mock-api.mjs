@@ -1,7 +1,8 @@
 // 계약 모양 가짜 API(ADR-0199 결정 2, BUILD_ORDER HOT-300). 로컬 개발·브라우저 확인 전용이다. 운영·CI 배포에는 쓰지 않는다.
 // 서버가 아직 없는 화면 경로를 고정 자료(scripts/mock-api/cards.json)로 답한다. 응답이 계약 Zod를 지나는지는 mock-api.test.mjs가 본다.
 // - 127.0.0.1에만 묶는다. 소비자 웹 출처 하나에만 자격 증명 포함 CORS를 연다(PEAKET_WEB_ORIGIN, 기본 http://localhost:3000)
-// - 상태 바꾸기: GET /__mock/state?home=normal|empty&ranking=normal|stale|old|missing&fan=member|guest&detail=normal|suspended (화면 상태를 보려고)
+// - 상태 바꾸기: GET /__mock/state?home=normal|empty&ranking=normal|stale|old|missing&fan=member|unverified|pending|guest&detail=normal|suspended (화면 상태를 보려고)
+//   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
 // - 파생본 이미지 주소(/img/{이름}/{폭}.{avif|webp})에는 자리 그림(SVG)을 낸다
 // - 공연 상세(GET /v1/events/{eventId}, ADR-0200)는 고정 자료 카드의 모든 회차를 답하고 그 밖은 404다.
 //   detail=suspended면 모두 410 event-suspended(한 번 공개된 뒤 판매 중지, ADR-0200 결정 3)
@@ -381,6 +382,12 @@ export function placeholderSvg(name, width) {
 
 const ID = /^[A-Za-z0-9-]{1,64}$/;
 
+/** 팬 계정 요약(FanAccountSummary). 이름은 d5 §10.3 표본 '지민' */
+export function fanSummary(fan) {
+  if (fan === 'pending') return { nickname: null, signupCompleted: false, verified: false, hasStaffAssignment: false };
+  return { nickname: '지민', signupCompleted: true, verified: fan !== 'unverified', hasStaffAssignment: false };
+}
+
 export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_ORIGIN || 'http://localhost:3000' } = {}) {
   const origin = `http://127.0.0.1:${port}`;
   const state = { home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal' };
@@ -429,6 +436,10 @@ export function startMockApi({ port = 4010, webOrigin = process.env.PEAKET_WEB_O
       // 캐시 태그는 회차·공연 둘이고 소문자다(core-svc event-summary.controller.ts와 같다, ADR-0200 결정 5)
       const tags = d ? `event:${d.eventId.toLowerCase()},production:${d.productionId.toLowerCase()}` : '';
       return d ? send(200, d, undefined, { 'cache-control': 'public, max-age=300, stale-if-error=86400', 'x-peaket-cache-tag': tags }) : send(404, { type: 'https://peaket.example/problems/not-found', title: '찾을 수 없습니다', status: 404 }, 'application/problem+json');
+    }
+    if (p === '/v1/identity/me' && req.method === 'GET') {
+      if (state.fan === 'guest') return unauthorized();
+      return send(200, fanSummary(state.fan));
     }
     if (p === '/v1/wishes' && req.method === 'GET') {
       if (state.fan === 'guest') return unauthorized();

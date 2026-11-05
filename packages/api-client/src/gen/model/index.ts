@@ -346,6 +346,7 @@ export * from './externalPostCreateSource';
 export * from './externalPostPage';
 export * from './externalPostScanStatus';
 export * from './externalPostSource';
+export * from './fanAccountSummary';
 export * from './fraudActionRequestCreate';
 export * from './fraudActionRequestCreateFraudAction';
 export * from './fraudAppealRequest';

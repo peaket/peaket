@@ -132,6 +132,11 @@ export interface WebShellProps {
   dark?: boolean;
   /** 로그인한 팬. null이면 로그인 전 모양 */
   user?: WebShellUser | null;
+  /**
+   * 로그인 여부를 아직 모른다(화면 스크립트가 확인하는 중, 소비자 웹 ADR-0202 결정 2). 머리의 계정 자리를 같은 크기의 빈자리로 둔다:
+   * 로그인한 사람에게 [로그인]이 잠깐 비치지 않게 한다
+   */
+  userPending?: boolean;
   /** 주 메뉴에서 지금 화면(aria-current) */
   current?: WebNavKey | null;
   hrefs?: Partial<WebShellHrefs>;
@@ -178,6 +183,7 @@ export function WebShell({
   variant = "default",
   dark = false,
   user = null,
+  userPending = false,
   current = null,
   hrefs: hrefsProp,
   genres = [],
@@ -334,6 +340,8 @@ export function WebShell({
                     defaultOpen={defaultOpen === "account"}
                     trigger="acct"
                   />
+                ) : userPending ? (
+                  <span className="skel ml-1 h-8 w-[76px] rounded-full" data-testid="account-pending" aria-hidden="true" />
                 ) : (
                   link({ href: hrefs.login, className: "btn btn-outline btn-sm ml-1", children: "로그인" })
                 )}
@@ -354,6 +362,7 @@ export function WebShell({
             open={menuOpen}
             onClose={() => setMenuOpen(false)}
             user={user}
+            userPending={userPending}
             hrefs={hrefs}
             current={current}
             onLogout={askLogout}
@@ -733,6 +742,7 @@ function MenuSheet({
   open,
   onClose,
   user,
+  userPending,
   hrefs,
   current,
   onLogout,
@@ -741,6 +751,7 @@ function MenuSheet({
   open: boolean;
   onClose: () => void;
   user: WebShellUser | null;
+  userPending: boolean;
   hrefs: WebShellHrefs;
   current: WebNavKey | null;
   onLogout: () => void;
@@ -782,6 +793,8 @@ function MenuSheet({
               <span className="badge badge-warning">본인확인 전</span>
             )}
           </div>
+        ) : userPending ? (
+          <span className="skel h-[52px] rounded-[12px]" aria-hidden="true" />
         ) : (
           renderLinkOrAnchor(renderLink, { href: hrefs.login, className: "btn btn-primary btn-lg btn-block", children: "로그인" })
         )}

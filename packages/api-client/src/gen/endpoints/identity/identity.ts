@@ -44,6 +44,7 @@ import type {
   DeleteEventSubscriptionsParams,
   DeleteIdentityAccountBody,
   DeviceApprovalView,
+  FanAccountSummary,
   GetIdentityProviders200,
   LinkProposal,
   ListSubscriptions200,
@@ -2400,7 +2401,125 @@ export const useDeleteIdentitySession = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getDeleteIdentitySessionMutationOptions(options), queryClient);
     }
-    export type deleteIdentityAccountResponse202 = {
+    export type getIdentityMeResponse200 = {
+  data: FanAccountSummary
+  status: 200
+}
+
+export type getIdentityMeResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getIdentityMeResponseSuccess = (getIdentityMeResponse200) & {
+  headers: Headers;
+};
+export type getIdentityMeResponseError = (getIdentityMeResponse401) & {
+  headers: Headers;
+};
+
+export const getGetIdentityMeUrl = () => {
+
+
+
+
+  return `/v1/identity/me`
+}
+
+/**
+ * FR-001, FR-002, POL-019(추천 적용 2026-11-05, ADR-0202). 캐시 화면과 다른 사이트에서 온 첫 이동은 서버가 쿠키로 로그인 여부를 정하지 않으므로 화면 스크립트가 페이지마다 한 번 부른다(docs/frontend.md §2.5 '알림·외부 링크 착지 규칙'). 이메일·휴대폰 번호·회원 코드는 싣지 않는다. 401이면 갱신을 한 번 거친 뒤 비로그인으로 그린다. Cache-Control: no-store
+ * @summary 로그인한 팬의 계정 요약(셸 머리의 계정 메뉴와 공연 상세 예매 버튼이 로그인·본인확인 상태를 고른다)
+ */
+export const getIdentityMe = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<getIdentityMeResponseSuccess> => {
+
+  return orvalFetch<getIdentityMeResponseSuccess>(getGetIdentityMeUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetIdentityMeQueryKey = () => {
+    return [
+    `/v1/identity/me`
+    ] as const;
+    }
+
+
+export const getGetIdentityMeQueryOptions = <TData = Awaited<ReturnType<typeof getIdentityMe>>, TError = ErrorType<UnauthorizedResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityMe>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIdentityMeQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIdentityMe>>> = ({ signal }) => getIdentityMe({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getIdentityMe>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetIdentityMeQueryResult = NonNullable<Awaited<ReturnType<typeof getIdentityMe>>>
+export type GetIdentityMeQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useGetIdentityMe<TData = Awaited<ReturnType<typeof getIdentityMe>>, TError = ErrorType<UnauthorizedResponse>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityMe>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIdentityMe>>,
+          TError,
+          Awaited<ReturnType<typeof getIdentityMe>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIdentityMe<TData = Awaited<ReturnType<typeof getIdentityMe>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityMe>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIdentityMe>>,
+          TError,
+          Awaited<ReturnType<typeof getIdentityMe>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIdentityMe<TData = Awaited<ReturnType<typeof getIdentityMe>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityMe>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 로그인한 팬의 계정 요약(셸 머리의 계정 메뉴와 공연 상세 예매 버튼이 로그인·본인확인 상태를 고른다)
+ */
+
+export function useGetIdentityMe<TData = Awaited<ReturnType<typeof getIdentityMe>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityMe>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetIdentityMeQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type deleteIdentityAccountResponse202 = {
   data: void
   status: 202
 }

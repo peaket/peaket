@@ -24,13 +24,13 @@
 
 1. 가짜 API: `PEAKET_WEB_ORIGIN=http://localhost:3000 pnpm --filter @peaket/web mock-api`(127.0.0.1:4010).
 2. 소비자 웹: `PEAKET_API_ORIGIN=http://127.0.0.1:4010 NEXT_PUBLIC_API_ORIGIN=http://127.0.0.1:4010 PEAKET_DEV_STATIC_ORIGIN=http://127.0.0.1:4010 PEAKET_CSP_ORIGINS='{"api":"http://127.0.0.1:4010","img":"http://127.0.0.1:4010"}' pnpm --filter @peaket/web dev`.
-3. 화면 상태 바꾸기: `http://127.0.0.1:4010/__mock/state?home=empty|normal&ranking=normal|stale|old|missing&fan=member|guest&detail=normal|suspended`. 홈 피드는 서버 캐시(60초) 뒤에 바뀐다. 공연 상세(`/v1/events/{eventId}`)는 고정 자료 카드의 모든 회차를 답하고, `detail=suspended`면 410 `event-suspended`다(ADR-0200). 찜 목록은 `productionIds`로 고를 수 있고 찜 저장·해제가 띄운 동안 남는다. 후기 요약(`…/review-summary`)도 낸다(HOT-311). 공연 상세 화면은 `http://localhost:3000/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01`처럼 고정 자료의 회차 ID로 연다. 개발 서버는 앞 서버가 없어 404·410 화면도 200으로 나간다(ADR-0201 결정 4).
+3. 화면 상태 바꾸기: `http://127.0.0.1:4010/__mock/state?home=empty|normal&ranking=normal|stale|old|missing&fan=member|unverified|pending|guest&detail=normal|suspended`. `fan`은 팬 계정 요약(`GET /v1/identity/me`, ADR-0202)과 팬 경로를 바꾼다: member 본인확인 완료, unverified 본인확인 전, pending 가입 완료 화면 전, guest 비로그인(401). 셸 머리와 공연 상세 예매 버튼이 이것을 따른다. 홈 피드는 서버 캐시(60초) 뒤에 바뀐다. 공연 상세(`/v1/events/{eventId}`)는 고정 자료 카드의 모든 회차를 답하고, `detail=suspended`면 410 `event-suspended`다(ADR-0200). 찜 목록은 `productionIds`로 고를 수 있고 찜 저장·해제가 띄운 동안 남는다. 후기 요약(`…/review-summary`)도 낸다(HOT-311). 공연 상세 화면은 `http://localhost:3000/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01`처럼 고정 자료의 회차 ID로 연다. 개발 서버는 앞 서버가 없어 404·410 화면도 200으로 나간다(ADR-0201 결정 4).
 4. 고정 자료(`apps/web/scripts/mock-api/cards.json`)가 계약 Zod를 지나는지는 `pnpm --filter @peaket/web test`가 본다. 계약을 바꾸면 고정 자료도 고친다.
 
 | 환경값 | 뜻 |
 | --- | --- |
 | `PEAKET_API_ORIGIN` | 앱 서버가 공개 API(홈 피드 등)를 빌드·ISR 때 부르는 주소. 없으면 부르지 않고 빈 피드로 그린다 |
-| `NEXT_PUBLIC_API_ORIGIN` | 브라우저가 개인 값(찜·알림)을 부르는 팬 API 주소. 개발 서버에서 없으면 비로그인처럼 둔다 |
+| `NEXT_PUBLIC_API_ORIGIN` | 브라우저가 개인 값(로그인·본인확인 상태, 찜·알림)을 부르는 팬 API 주소. 개발 서버에서 없으면 비로그인처럼 둔다 |
 | `PEAKET_DEV_STATIC_ORIGIN` | 개발 서버에서만: 같은 출처 정적 파일(랭킹 파일)을 넘길 곳 |
 | `NEXT_PUBLIC_QUEUE_ORIGIN`·`NEXT_PUBLIC_QUEUE_FILES_ORIGIN` | 브라우저 api-client가 함께 담는 대기열 API·파일 출처(개발 서버에서 없으면 비워 둔다) |
 | `PEAKET_CSP_ORIGINS` | CSP 자리 출처 바꾸기(JSON). 이미지 파생본 출처는 `img`(운영 기본 `https://img.peaket.example` [가정]) |

@@ -41,6 +41,7 @@ import type {
   CreateSubscriptionOptOutBody,
   DeleteIdentityAccountBody,
   DeviceApprovalView,
+  FanAccountSummary,
   GetIdentityProviders200,
   LinkProposal,
   ListSubscriptions200,
@@ -83,6 +84,8 @@ export const getCreateIdentityVerificationResponseMock = (overrideResponse: Part
 export const getCreateIdentityVerificationResultResponseMock = (overrideResponse: Partial<Extract<VerificationResult, object>> = {}): VerificationResult => ({verificationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), purpose: faker.helpers.arrayElement([faker.helpers.arrayElement(['FIRST','REVERIFY','BOOTH','MINOR_CONTRACT'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['PENDING','VERIFIED','CANCELLED','FAILED','PROVIDER_DOWN','DUPLICATE_ACCOUNT','UNDER_14','BOOTH_MISMATCH'] as const), undefined]), next: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), resultToken: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), restrictedUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
 
 export const getGetIdentityVerificationResultResponseMock = (overrideResponse: Partial<Extract<VerificationResult, object>> = {}): VerificationResult => ({verificationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), purpose: faker.helpers.arrayElement([faker.helpers.arrayElement(['FIRST','REVERIFY','BOOTH','MINOR_CONTRACT'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['PENDING','VERIFIED','CANCELLED','FAILED','PROVIDER_DOWN','DUPLICATE_ACCOUNT','UNDER_14','BOOTH_MISMATCH'] as const), undefined]), next: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), resultToken: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), restrictedUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
+
+export const getGetIdentityMeResponseMock = (overrideResponse: Partial<Extract<FanAccountSummary, object>> = {}): FanAccountSummary => ({nickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 40}}), null]), signupCompleted: faker.datatype.boolean(), verified: faker.datatype.boolean(), hasStaffAssignment: faker.datatype.boolean(), ...overrideResponse})
 
 export const getGetIdentityProvidersResponseMock = (overrideResponse: Partial<Extract<GetIdentityProviders200, object>> = {}): GetIdentityProviders200 => ({providers: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({provider: faker.helpers.arrayElement(['kakao','naver','google'] as const), linkedAt: faker.date.past().toISOString().slice(0, 19) + 'Z', lastLoginAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null])})), ...overrideResponse})
 
@@ -327,6 +330,18 @@ export const getDeleteIdentitySessionMockHandler = (overrideResponse?: void | ((
   }, options)
 }
 
+export const getGetIdentityMeMockHandler = (overrideResponse?: FanAccountSummary | ((info: Parameters<HttpResponseResolver>[0]) => Promise<FanAccountSummary> | FanAccountSummary), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/identity/me', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetIdentityMeResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
 export const getDeleteIdentityAccountMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<PathParams, DeleteIdentityAccountBody>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
   return http.delete<PathParams, DeleteIdentityAccountBody>('*/v1/identity/account', async (info: Parameters<HttpResponseResolver<PathParams, DeleteIdentityAccountBody>>[0]) => {
   if (typeof overrideResponse === 'function') {await overrideResponse(info); }
@@ -426,6 +441,7 @@ export const getIdentityMock = () => [
   getCreateIdentityAccessTokenMockHandler(),
   getGetIdentitySessionsMockHandler(),
   getDeleteIdentitySessionMockHandler(),
+  getGetIdentityMeMockHandler(),
   getDeleteIdentityAccountMockHandler(),
   getGetIdentityProvidersMockHandler(),
   getDeleteIdentityProviderMockHandler(),

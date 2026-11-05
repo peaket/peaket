@@ -1,6 +1,9 @@
 'use client';
-// 소비자 웹 셸 감싸개: ds WebShell(CMP-065 web-default·web-focus·web-staff·로고만)에 Next.js Link·라우터, 목업 사용자(entities/me),
+// 소비자 웹 셸 감싸개: ds WebShell(CMP-065 web-default·web-focus·web-staff·로고만)에 Next.js Link·라우터, 로그인 상태,
 // 장르 목록, 자동완성 출처·최근 검색어(search-source, HOT-313), 토스트를 넣는다. 서버 페이지는 직렬화되는 값(문자열·불리언·객체·ReactNode)만 넘긴다.
+// 로그인 상태(ADR-0202 결정 2, HOT-321): guest·user를 넘기지 않으면 화면 스크립트가 팬 계정 요약(GET /v1/identity/me)을 받아 고른다.
+// 받기 전에는 머리의 계정 자리가 빈자리다. guest(로그인 화면처럼 늘 로그인 전 모양)와 user(아직 데이터에 잇지 않은 화면의 목업)는 그대로 따른다.
+// 로그아웃은 확인 뒤 같은 출처 폼 POST /logout이다(앱 서버가 Origin을 보고 쿠키를 지운 뒤 홈으로, identity §2, ADR-0202 결정 6).
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, type ReactNode } from 'react';
@@ -13,7 +16,7 @@ import {
   type WebShellOverlay,
   type WebShellStaffInfo,
 } from '@peaket/ds/WebShell';
-import { ME, type MeSummary } from '@/entities/me';
+import { shellUserOf, useFanSession, type MeSummary } from '@/entities/me';
 import { GENRES, searchHref } from '@/shared/config/genres';
 import { ToastProvider } from '@/shared/ui/toast';
 import { useRecentSearches, useSuggestionSource } from './search-source';
@@ -41,9 +44,9 @@ export interface AppShellProps {
   variant?: 'default' | 'focus' | 'staff' | 'minimal';
   /** ?theme=dark */
   dark?: boolean;
-  /** 로그인 전 모양(상태 '비로그인' 등) */
+  /** 늘 로그인 전 모양(로그인 화면, 상태 미리보기 '비로그인' 등) */
   guest?: boolean;
-  /** 셸에 보일 사용자. 없으면 목업 ME(지민) */
+  /** 셸에 보일 목업 사용자(아직 데이터에 잇지 않은 화면). 없으면 실제 로그인 상태 */
   user?: MeSummary;
   current?: WebNavKey | null;
   /** 위쪽 오프라인 띠(띠의 id는 'off-msg') */
@@ -64,7 +67,7 @@ export function AppShell({
   variant = 'default',
   dark = false,
   guest = false,
-  user = ME,
+  user,
   current = null,
   offline = null,
   focus,
@@ -80,16 +83,27 @@ export function AppShell({
   const backOrHome = useCallback(() => (window.history.length > 1 ? router.back() : router.push('/')), [router]);
   const suggestSource = useSuggestionSource();
   const { recent, save } = useRecentSearches();
+  const session = useFanSession({ enabled: !guest && !user });
+  const live = shellUserOf(session);
+  const shellUser = guest
+    ? null
+    : user
+      ? { name: user.name, avatarText: user.avatarText, verified: user.verified, hasStaffAssignment: user.hasStaffAssignment }
+      : (live ?? null);
+  const logout = useCallback(() => {
+    const f = document.createElement('form');
+    f.method = 'post';
+    f.action = '/logout';
+    document.body.appendChild(f);
+    f.submit();
+  }, []);
   return (
     <ToastProvider>
       <WebShell
         variant={variant}
         dark={dark}
-        user={
-          guest
-            ? null
-            : { name: user.name, avatarText: user.avatarText, verified: user.verified, hasStaffAssignment: user.hasStaffAssignment }
-        }
+        user={shellUser}
+        userPending={!guest && !user && live === undefined}
         current={current}
         genres={SHELL_GENRES}
         loadSearchSuggestions={suggestSource.load}
@@ -111,7 +125,7 @@ export function AppShell({
         bottomBar={bottomBar}
         updateAvailable={updateAvailable}
         onNavigate={(href) => router.push(href)}
-        onLogout={() => router.push('/')}
+        onLogout={logout}
         renderLink={(p) => <Link {...p} />}
       >
         {children}

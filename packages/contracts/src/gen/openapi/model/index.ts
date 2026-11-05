@@ -284,6 +284,7 @@ export * from './evidenceExportCreate.zod.js';
 export * from './externalPost.zod.js';
 export * from './externalPostCreate.zod.js';
 export * from './externalPostPage.zod.js';
+export * from './fanAccountSummary.zod.js';
 export * from './fraudActionRequestCreate.zod.js';
 export * from './fraudAppealRequest.zod.js';
 export * from './fraudAppealRequestCreate.zod.js';

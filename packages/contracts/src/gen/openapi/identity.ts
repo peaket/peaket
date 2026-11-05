@@ -409,6 +409,21 @@ export const DeleteIdentitySessionParams = zod.object({
 export const DeleteIdentitySessionResponse = zod.void()
 
 /**
+ * FR-001, FR-002, POL-019(추천 적용 2026-11-05, ADR-0202). 캐시 화면과 다른 사이트에서 온 첫 이동은 서버가 쿠키로 로그인 여부를 정하지 않으므로 화면 스크립트가 페이지마다 한 번 부른다(docs/frontend.md §2.5 '알림·외부 링크 착지 규칙'). 이메일·휴대폰 번호·회원 코드는 싣지 않는다. 401이면 갱신을 한 번 거친 뒤 비로그인으로 그린다. Cache-Control: no-store
+ * @summary 로그인한 팬의 계정 요약(셸 머리의 계정 메뉴와 공연 상세 예매 버튼이 로그인·본인확인 상태를 고른다)
+ */
+export const getIdentityMeResponseNicknameMax = 40;
+
+
+
+export const GetIdentityMeResponse = zod.object({
+  "nickname": zod.string().max(getIdentityMeResponseNicknameMax).nullable().describe('닉네임. 가입 완료 화면(SCR-005)을 마치기 전이면 null'),
+  "signupCompleted": zod.boolean().describe('만 14세 이상 확인과 필수 동의(TERMS·PRIVACY_REQUIRED)를 마쳤다(SCR-005, identity §2)'),
+  "verified": zod.boolean().describe('휴대폰 본인확인 기록이 있다. 액세스 토큰의 ticket:buy와 같은 출처다(identity §5)'),
+  "hasStaffAssignment": zod.boolean().describe('지금 ASSIGNED인 현장 스태프 배정이 있다(계정 메뉴의 \'현장 근무\', SCR-061)')
+}).describe('로그인한 팬의 계정 요약(GET /v1/identity/me, 추천 적용 2026-11-05, ADR-0202). 화면이 셸 머리와 예매 버튼을 고르는 데 필요한 값만 둔다')
+
+/**
  * FR-017, POL-019, POL-023, POL-033. 소셜 제공자 재인증 토큰 필요(403 REAUTH_REQUIRED). 미사용 티켓이 있으면 confirmCancelUnusedTickets=true가 있어야 하고 티켓을 취소·환급한 뒤 탈퇴. 결제 확정 대기 주문이 있으면 202 후 처리. 받은 티켓·양도 요청·가상계좌 결제·입금 대기·양도 완료 티켓·굿즈 주문은 docs/planning/03 §1.5대로 처리하고, 가상계좌 결제 티켓을 지금 환급할 수 없으면 환급을 실행할 때까지 탈퇴를 미룬다(202, 추천 적용 2026-10-14, ADR-0062)
  * @summary 탈퇴(모든 세션 종료, 계정 정보·연계정보 HMAC 파기, 거래 기록 분리 보관, 바로 재가입 가능)
  */

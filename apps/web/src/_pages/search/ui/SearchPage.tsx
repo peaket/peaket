@@ -16,8 +16,8 @@ export const searchMetadata: Metadata = { title: '검색', robots: { index: fals
 
 export function SearchPage() {
   return (
-    // 캐시 화면이라 셸은 비로그인 모양으로 그린다(로그인 표시는 HOT-321)
-    <AppShell variant="default" current="events" guest search={{ barOpen: true, queryFromUrl: true }}>
+    // 캐시 화면이라 서버는 쿠키로 로그인 여부를 정하지 않는다. 셸 머리는 화면 스크립트가 팬 계정 요약으로 고른다(ADR-0202 결정 2)
+    <AppShell variant="default" current="events" search={{ barOpen: true, queryFromUrl: true }}>
       <main className="page-main pb-10 md:px-6 md:pt-4 md:pb-12 lg:px-8 lg:pt-8 lg:pb-16" id="main" tabIndex={-1}>
         <h1 className="sr-only">공연 검색</h1>
         <Suspense fallback={<SearchShellSkeleton />}>

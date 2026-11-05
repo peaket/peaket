@@ -10,6 +10,7 @@
 import Link from 'next/link';
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { WebShellModal, webModalButtonClass } from '@peaket/ds/WebShell';
+import { refreshFanSession } from '@/entities/me';
 import { sleep } from '@/shared/lib/sleep';
 import { useToast } from '@/shared/ui/toast';
 import { browserCallerEnv, browserSessionStore, browserVerifyApi, isLiveVerify } from '../browser';
@@ -82,14 +83,21 @@ export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/l
   const [staticToast, setStaticToast] = useState(!!initial?.done);
   const triggerRef = useRef<HTMLElement | null>(null);
 
-  // 결과 대화상자·기관 창을 닫으면 초점을 본인확인 버튼 자리로 돌린다(d3 SCR-006). 연 버튼이 없으면(상태 미리보기) 보이는 첫 트리거
-  const returnFocus = useCallback(() => {
+  // 결과 대화상자·기관 창을 닫으면 초점을 본인확인 버튼 자리로 돌린다(d3 SCR-006). 연 버튼이 없으면(상태 미리보기) 보이는 첫 트리거.
+  // 본인확인을 마쳐 버튼 자체가 다른 것으로 바뀌었으면(공연 상세의 [[ 대기열 들어가기 ]]·'완료' 줄, HOT-321) 버튼이 있던 자리 묶음
+  // (data-verify-scope)의 새 자리(data-verify-return, 없으면 첫 링크·버튼)로 옮긴다
+  const returnFocus = useCallback((scope?: HTMLElement | null) => {
     requestAnimationFrame(() => {
+      const visible = (el: HTMLElement | null | undefined): el is HTMLElement => !!el && el.isConnected && el.getClientRects().length > 0;
       const remembered = triggerRef.current;
-      const target =
-        remembered && remembered.isConnected && remembered.getClientRects().length > 0
-          ? remembered
-          : Array.from(document.querySelectorAll<HTMLElement>('[data-verify-trigger]')).find((el) => el.getClientRects().length > 0);
+      const inScope = scope?.isConnected
+        ? (scope.querySelector<HTMLElement>('[data-verify-return]') ?? scope.querySelector<HTMLElement>('a[href],button:not([disabled])'))
+        : null;
+      const target = visible(remembered)
+        ? remembered
+        : visible(inScope)
+          ? inScope
+          : Array.from(document.querySelectorAll<HTMLElement>('[data-verify-trigger]')).find((el) => visible(el));
       target?.focus();
     });
   }, []);
@@ -103,10 +111,14 @@ export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/l
         setDone(true);
         setStaticToast(false);
         toast(VERIFY_DONE_TOAST);
-        returnFocus();
+        // 머리·예매 버튼·③ 줄이 본인확인 완료를 따라가게 계정 요약을 다시 받고, 버튼이 바뀐 뒤 초점을 옮긴다(ADR-0202 결정 2)
+        if (live) {
+          const scope = triggerRef.current?.closest<HTMLElement>('[data-verify-scope]') ?? null;
+          void refreshFanSession().then(() => returnFocus(scope));
+        } else returnFocus();
       } else setOutcome(o);
     },
-    [toast, returnFocus],
+    [toast, returnFocus, live],
   );
 
   // 실제 흐름은 누른 동작 안에서 시작해야 한다(창을 먼저 열어 팝업 차단을 피한다, identity §5)
@@ -133,7 +145,12 @@ export function VerifyFlowProvider({ purpose = 'first', initial, loginHref = '/l
     resumed.current = true;
     void resumeReturnedResult({ api: browserVerifyApi(), storage: browserSessionStore, now: () => Date.now(), sleep }).then((o) => {
       if (o === null) return;
-      if (o === 'login') location.assign(`${loginHref}?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`);
+      if (o === 'login') {
+        // loginHref에 이미 next가 있으면 그대로(공연 상세는 /login?next=<이 회차>를 넘긴다), 없으면 지금 주소를 싣는다
+        const u = new URL(loginHref, location.origin);
+        if (!u.searchParams.has('next')) u.searchParams.set('next', `${location.pathname}${location.search}`);
+        location.assign(`${u.pathname}${u.search}`);
+      }
       else pick(o);
     });
   }, [live, loginHref, pick]);

@@ -9,7 +9,8 @@ import { cacheLife, cacheTag } from 'next/cache';
 import { ensureServerApi } from '@/shared/api';
 import { toEventDetail, type EventDetail } from '../model/detail';
 
-export type LoadedEvent = { kind: 'found'; detail: EventDetail } | { kind: 'missing' } | { kind: 'suspended' };
+/** fetchedAtMs: 이 캐시 항목을 만든 시각. 캐시 화면 안의 시각 판정(JSON-LD 판매 상태)은 이 값을 쓴다(캐시 밖 Date.now()는 Cache Components의 미리 그리기를 깬다) */
+export type LoadedEvent = { kind: 'found'; detail: EventDetail; fetchedAtMs: number } | { kind: 'missing' } | { kind: 'suspended' };
 
 const ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -28,7 +29,7 @@ export async function loadEvent(id: string): Promise<LoadedEvent> {
     const detail = toEventDetail(r.data);
     if (!detail) return { kind: 'missing' };
     cacheTag(`production:${detail.productionId.toLowerCase()}`);
-    return { kind: 'found', detail };
+    return { kind: 'found', detail, fetchedAtMs: Date.now() };
   } catch (e) {
     const s = statusOf(e);
     if (s === 404) return { kind: 'missing' };

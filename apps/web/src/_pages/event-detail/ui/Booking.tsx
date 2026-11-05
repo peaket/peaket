@@ -4,10 +4,14 @@
 // 같은 묶음을 두 곳에 그리므로(한쪽은 display:none) id에 prefix를 붙여 겹치지 않게 한다.
 // 버튼 상태는 브라우저가 시각으로 고른다(BUILD_ORDER HOT-311): 서버 시각으로 보정한 시계(docs/frontend.md §3.3)로 로비 개방·이 기기의
 // [로비 입장] 열리는 시각(로비 개방 + 0~60초, queue-admission §2 '로비 참가 퍼뜨리기')·오픈·판매 종료를 견주고, 다음에 바뀔 때 다시 고른다.
-// 캐시 화면이라 서버는 상태를 정하지 않는다(첫 그리기는 뼈대, d5 §5.2 '로딩'). 개인 상태(비로그인·본인확인·예매 제한·선예매)는 HOT-321·340이 얹는다.
+// 캐시 화면이라 서버는 상태를 정하지 않는다(첫 그리기는 뼈대, d5 §5.2 '로딩').
+// 개인 상태(ADR-0202 결정 3, HOT-321): 들어갈 수 있거나 곧 들어갈 수 있는 상태(로비 버튼 차례 기다림·로비 열림·오픈 뒤 진입)만 팬 계정 요약으로 덮는다.
+// 비로그인 [[ 로그인하고 입장 ]], 본인확인 전 [[ 휴대폰 본인확인 ]](이 화면 위 기관 창, SCR-006), 가입을 마치지 않음 [[ 가입을 마치고 입장 ]] [가정].
+// 요약을 받기 전은 뼈대, 모르면(5xx) 덮지 않는다(진입 경로가 다시 막는다). 예매 제한·선예매는 HOT-340이 얹는다.
 import Link from 'next/link';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { RoundPicker } from '@peaket/ds/RoundPicker';
+import { personalCta, useFanSession } from '@/entities/me';
 import { formatWon } from '@/entities/production';
 import { OpenAlertToggle } from '@/features/open-alert';
 import { queueRoomHref } from '@/shared/config/origins';
@@ -16,14 +20,22 @@ import { cx } from '@/shared/lib/cx';
 import { deviceId } from '@/shared/lib/device-id';
 import { lobbyUnlockDelayMs } from '@/shared/lib/lobby-unlock';
 import { renderNextLink } from '@/shared/lib/next-link';
+import { VERIFY_PURPOSE } from '../model/content';
 import { bookingPhase, roundBadge, tierBadge, type BookingPhase, type DetailRound, type EventDetail } from '../model/detail';
 import { useDetailPersonal } from './DetailPersonal';
+import { VerifyButtonLazy } from './VerifyButtonLazy';
 
 /** 브라우저로 넘기는 값(서버 → 클라이언트, 평평한 값만) */
 export type BookingData = Pick<
   EventDetail,
   'eventId' | 'title' | 'roundLabel' | 'status' | 'openAtMs' | 'lobbyOpensAtMs' | 'saleEndsAtMs' | 'openText' | 'lobbyText' | 'openTimeText' | 'rounds' | 'tiers'
-> & { otherRoundFallbackHref: string };
+> & {
+  otherRoundFallbackHref: string;
+  /** 로그인 화면(돌아갈 주소는 이 회차) */
+  loginHref: string;
+  /** 가입 완료 화면(SCR-005, 돌아갈 주소는 이 회차) */
+  signupHref: string;
+};
 
 interface BookingState {
   phase?: BookingPhase;
@@ -179,7 +191,7 @@ function LobbyCountdown({ unlockAt, describedBy, className }: { unlockAt: number
   );
 }
 
-type Primary = { type: 'link'; label: string; href: string } | { type: 'disabled'; label: string } | { type: 'countdown' };
+type Primary = { type: 'link'; label: string; href: string } | { type: 'disabled'; label: string } | { type: 'countdown' } | { type: 'verify'; label: string };
 
 interface CtaModel {
   desc?: ReactNode;
@@ -199,8 +211,23 @@ function otherRoundHref(data: BookingData, now: number | undefined): string {
   return next?.href ?? data.otherRoundFallbackHref;
 }
 
-function ctaModel(phase: BookingPhase | undefined, data: BookingData, now: number | undefined): CtaModel {
+function ctaModel(phase: BookingPhase | undefined, data: BookingData, now: number | undefined, personal: ReturnType<typeof personalCta>): CtaModel {
   const queue = queueRoomHref(data.eventId);
+  const lobbyMeta = `${data.roundLabel}${data.lobbyText && phase !== 'queue' ? ` · 로비 ${data.lobbyText}부터` : ''}`;
+  // 개인 상태가 먼저다(d5 §5.2 '비로그인'·'본인확인 필요'). 오픈 알림 토글은 오픈 전에만 둔다(오픈 뒤 진입 버튼에는 없다)
+  const openAlert = phase === 'queue' ? undefined : {};
+  switch (personal) {
+    case 'loading':
+      return { special: 'load', meta: data.roundLabel };
+    case 'login':
+      return { meta: lobbyMeta, alert: openAlert, primary: { type: 'link', label: '로그인하고 입장', href: data.loginHref }, minW: 200 };
+    case 'signup':
+      return { meta: lobbyMeta, alert: openAlert, primary: { type: 'link', label: '가입을 마치고 입장', href: data.signupHref }, minW: 200 };
+    case 'verify':
+      return { desc: VERIFY_PURPOSE, alert: openAlert && { iconOnlyBelowMd: true }, primary: { type: 'verify', label: '휴대폰 본인확인' }, minW: 200 };
+    default:
+      break;
+  }
   switch (phase) {
     case 'closed':
       return { desc: `로비는 ${data.lobbyText ?? ''}에 열립니다`, alert: {}, primary: { type: 'disabled', label: '로비 입장' }, minW: 200 };
@@ -223,12 +250,35 @@ function ctaModel(phase: BookingPhase | undefined, data: BookingData, now: numbe
 
 const MIN_W: Record<NonNullable<CtaModel['minW']>, string> = { 160: 'md:min-w-[160px]', 200: 'md:min-w-[200px]', 240: 'md:min-w-[240px]' };
 
-function PrimaryButton({ p, className, descId, unlockAt }: { p: Primary; className: string; descId: string | undefined; unlockAt: number | undefined }) {
+function PrimaryButton({
+  p,
+  className,
+  descId,
+  unlockAt,
+  verifyStatus = false,
+  loginHref,
+}: {
+  p: Primary;
+  className: string;
+  descId: string | undefined;
+  unlockAt: number | undefined;
+  verifyStatus?: boolean;
+  loginHref: string;
+}) {
+  if (p.type === 'verify') {
+    // 누르면 본인확인 기관 창이 바로 열리고 결과는 이 화면 위 대화상자다(SCR-006). 아래 고정 띠는 한 줄이라 진행 글을 버튼 아래에 두지 않는다
+    return (
+      <VerifyButtonLazy className={cx('btn btn-primary', className)} describedBy={descId} showStatus={verifyStatus} loginHref={loginHref}>
+        <i className="ic ic-phone" aria-hidden="true" />
+        {p.label}
+      </VerifyButtonLazy>
+    );
+  }
   if (p.type === 'countdown') return <LobbyCountdown unlockAt={unlockAt} describedBy={descId} className={className} />;
   if (p.type === 'link') {
     // 대기실(로비·대기열)은 별도 빌드라 전체 이동이다
     return (
-      <a className={cx('btn btn-primary', className)} href={p.href}>
+      <a className={cx('btn btn-primary', className)} href={p.href} data-verify-return>
         {p.label}
       </a>
     );
@@ -269,7 +319,7 @@ function AlertToggle({ title, className, iconOnlyBelowMd }: { title: string; cla
 /** 휴대폰·태블릿 화면 아래 고정 띠(보드 SCR-002-m·t의 .bottom-bar). 데스크톱(lg)에서는 숨긴다 */
 export function BookingBar({ data }: { data: BookingData }) {
   const { phase, now, unlockAt } = useBooking();
-  const m = ctaModel(phase, data, now);
+  const m = ctaModel(phase, data, now, personalCta(phase, useFanSession()));
   const descId = m.desc ? `bar-${phase ?? 'load'}-why` : undefined;
   let body: ReactNode;
   if (m.special === 'load') {
@@ -312,13 +362,21 @@ export function BookingBar({ data }: { data: BookingData }) {
         ) : null}
         <div className="row gap-2 md:gap-3">
           {m.alert ? <AlertToggle title={data.title} iconOnlyBelowMd={m.alert.iconOnlyBelowMd} className={cx('btn-lg', !m.primary && 'grow md:grow-0')} /> : null}
-          {m.primary ? <PrimaryButton p={m.primary} descId={descId} unlockAt={unlockAt} className={cx('btn-lg grow md:flex-none md:grow-0', m.minW ? MIN_W[m.minW] : '')} /> : null}
+          {m.primary ? (
+            <PrimaryButton
+              p={m.primary}
+              descId={descId}
+              unlockAt={unlockAt}
+              loginHref={data.loginHref}
+              className={cx('btn-lg grow md:flex-none md:grow-0', m.minW ? MIN_W[m.minW] : '')}
+            />
+          ) : null}
         </div>
       </div>
     );
   }
   return (
-    <div className="bottom-bar sticky bottom-0 z-10 md:px-6 lg:hidden">
+    <div className="bottom-bar sticky bottom-0 z-10 md:px-6 lg:hidden" data-verify-scope>
       <div className="w-full">{body}</div>
     </div>
   );
@@ -327,7 +385,7 @@ export function BookingBar({ data }: { data: BookingData }) {
 /** 데스크톱 오른쪽 고정 예매 패널의 버튼 묶음(보드 SCR-002-d aside) */
 export function BookingPanelCta({ data }: { data: BookingData }) {
   const { phase, now, unlockAt } = useBooking();
-  const m = ctaModel(phase, data, now);
+  const m = ctaModel(phase, data, now, personalCta(phase, useFanSession()));
   const descId = m.desc ? `pnl-${phase ?? 'load'}-why` : undefined;
   if (m.special === 'load') {
     return (
@@ -347,14 +405,14 @@ export function BookingPanelCta({ data }: { data: BookingData }) {
     );
   }
   return (
-    <div className="col" style={{ gap: 8 }}>
+    <div className="col" style={{ gap: 8 }} data-verify-scope>
       {m.desc ? (
         <p className="t-sm muted" id={descId}>
           {m.desc}
         </p>
       ) : null}
       {m.alert ? <AlertToggle title={data.title} className="btn-block" /> : null}
-      {m.primary ? <PrimaryButton p={m.primary} descId={descId} unlockAt={unlockAt} className="btn-lg btn-block" /> : null}
+      {m.primary ? <PrimaryButton p={m.primary} descId={descId} unlockAt={unlockAt} loginHref={data.loginHref} className="btn-lg btn-block" verifyStatus /> : null}
     </div>
   );
 }

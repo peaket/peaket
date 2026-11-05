@@ -24,6 +24,8 @@ import { DetailCollapse, DetailImage, SectionTabs, WishButton } from './DetailCl
 import { DetailModalsProvider, DetailModalTrigger } from './DetailModals';
 import { DetailPersonalProvider } from './DetailPersonal';
 import { DetailReviewModals, HeroRating, ReviewSection, ReviewSummaryProvider } from './DetailReviews';
+import { VerifyStatusRow } from './DetailVerify';
+import { VerifyReturnResume } from './VerifyReturnResume';
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -70,6 +72,8 @@ export async function EventDetailPage({ params }: Props) {
     rounds: d.rounds,
     tiers: d.tiers,
     otherRoundFallbackHref: genreKey ? searchHref.genre(genreKey) : '/search',
+    loginHref,
+    signupHref: `/signup/consent?next=${encodeURIComponent(path)}`,
   };
   const tabs = [
     { id: 'sec-info', label: '공연 정보' },
@@ -80,12 +84,13 @@ export async function EventDetailPage({ params }: Props) {
   ];
 
   return (
-    // 캐시 화면이라 셸은 비로그인 모양으로 그린다(서버는 쿠키로 로그인 여부를 정하지 않는다). 로그인 표시는 HOT-321이 화면 스크립트로 바꾼다
+    // 캐시 화면이라 서버는 쿠키로 로그인 여부를 정하지 않는다. 셸 머리는 화면 스크립트가 팬 계정 요약으로 고른다(ADR-0202 결정 2)
     <DetailPersonalProvider eventId={d.eventId} productionId={d.productionId} loginHref={loginHref}>
       <BookingProvider data={booking}>
         <ReviewSummaryProvider eventId={d.eventId}>
-          <AppShell variant="default" guest bottomBar={<BookingBar data={booking} />}>
-            <EventJsonLd d={d} />
+          <AppShell variant="default" bottomBar={<BookingBar data={booking} />}>
+            <EventJsonLd d={d} atMs={r.fetchedAtMs} />
+            <VerifyReturnResume loginHref={loginHref} />
             <DetailModalsProvider initial={null} sellerName={d.sellerName} seller={d.seller} sortText={sort.body} perPerson={d.perPersonLimit} loginHref={loginHref}>
               <main className="page-main pb-6 lg:pb-0" id="main" tabIndex={-1}>
                 <div className="mx-auto w-full max-w-[1280px] lg:grid lg:grid-cols-12 lg:items-start lg:gap-x-6 lg:px-8 lg:pt-8 lg:pb-16">
@@ -97,6 +102,9 @@ export async function EventDetailPage({ params }: Props) {
                       <h2 className="t-lg" id="h-info">
                         공연 정보
                       </h2>
+                      <div data-verify-scope>
+                        <VerifyStatusRow loginHref={loginHref} />
+                      </div>
                       {d.artists.length > 0 ? (
                         <p className="t-sm">
                           <span className="fw-b">출연</span> <span className="muted">{d.artists.join(', ')}</span>
@@ -332,7 +340,8 @@ function Hero({ d, booking, loginHref }: { d: EventDetail; booking: BookingData;
  * 실행되지 않는 데이터 블록이라 CSP가 보지 않는다. `dangerouslySetInnerHTML`을 쓰지 않고(asvs/frontend.md 1.2.1) 글자 자식으로 싣는다:
  * `<`를 미리 JSON 이스케이프(역빗금 u003c)로 바꿔 스크립트 블록을 끝내지 못하게 하고, React도 `</script`를 바꿔 쓴다(2026-11-05 react-dom/server로 확인).
  */
-function EventJsonLd({ d }: { d: EventDetail }) {
+/** atMs: 상세를 받은 시각(캐시 항목과 함께 다시 만든다, 300초). 판매 상태가 그만큼 늦을 수 있다 */
+function EventJsonLd({ d, atMs }: { d: EventDetail; atMs: number }) {
   const minPrice = d.tiers.length > 0 ? Math.min(...d.tiers.map((t) => t.price)) : undefined;
   const data = {
     '@context': 'https://schema.org',
@@ -354,7 +363,7 @@ function EventJsonLd({ d }: { d: EventDetail }) {
             priceCurrency: 'KRW',
             url: `${SITE_ORIGIN}/events/${d.eventId}`,
             validFrom: new Date(d.openAtMs).toISOString(),
-            availability: offerAvailability(d, Date.now()),
+            availability: offerAvailability(d, atMs),
           },
         }
       : {}),
@@ -365,7 +374,7 @@ function EventJsonLd({ d }: { d: EventDetail }) {
 /** 판매 중지(d5 §5.2 '판매 중지'): CMP-046 안내만. 예매 버튼·잔여석·후기는 없고 사유는 보이지 않는다. 상태 표시로 앞 서버가 410을 단다(ADR-0201) */
 function SuspendedNotice() {
   return (
-    <AppShell variant="default" guest>
+    <AppShell variant="default">
       <meta name="peaket-status" content="410" />
       <main className="page-main" id="main" tabIndex={-1}>
         <div className="state" style={{ padding: '120px 24px 160px' }}>

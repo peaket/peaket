@@ -31,8 +31,8 @@ export async function HomePage() {
   const alertEventIds = home.upcoming.flatMap((c) => (c.nextOpenEventId ? [c.nextOpenEventId] : []));
 
   return (
-    // 캐시 화면이라 셸은 비로그인 모양으로 그린다(서버는 쿠키로 로그인 여부를 정하지 않는다). 로그인 표시는 HOT-321이 화면 스크립트로 바꾼다
-    <AppShell variant="default" current="home" guest>
+    // 캐시 화면이라 서버는 쿠키로 로그인 여부를 정하지 않는다. 셸 머리는 화면 스크립트가 팬 계정 요약으로 고른다(ADR-0202 결정 2)
+    <AppShell variant="default" current="home">
       <HomePersonalProvider alertEventIds={alertEventIds}>
         <HomeOpenAlertProvider>
           <main className="page-main gap-8 pt-3 pb-10 md:gap-10 md:pt-4 md:pb-12 lg:gap-12 lg:pt-6 lg:pb-16" id="main" tabIndex={-1}>

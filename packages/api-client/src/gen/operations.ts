@@ -171,6 +171,7 @@ export type OperationId =
   | 'getHome'
   | 'getHomeRankings'
   | 'getIdentityLinkProposal'
+  | 'getIdentityMe'
   | 'getIdentityMergeProposal'
   | 'getIdentityProviders'
   | 'getIdentitySessions'
@@ -447,6 +448,7 @@ export const OPERATIONS = {
   getHome: {operationId: "getHome",method: "GET",path: "/v1/home",host: "api",kind: "read",cookie: false},
   getHomeRankings: {operationId: "getHomeRankings",method: "GET",path: "/v1/home/rankings.json",host: "www",kind: "read",cookie: false},
   getIdentityLinkProposal: {operationId: "getIdentityLinkProposal",method: "GET",path: "/v1/identity/link-proposals/{proposalId}",host: "www",kind: "read",cookie: true},
+  getIdentityMe: {operationId: "getIdentityMe",method: "GET",path: "/v1/identity/me",host: "api",kind: "read",cookie: true},
   getIdentityMergeProposal: {operationId: "getIdentityMergeProposal",method: "GET",path: "/v1/identity/merge-proposals/{proposalId}",host: "api",kind: "read",cookie: true},
   getIdentityProviders: {operationId: "getIdentityProviders",method: "GET",path: "/v1/identity/providers",host: "api",kind: "read",cookie: true},
   getIdentitySessions: {operationId: "getIdentitySessions",method: "GET",path: "/v1/identity/sessions",host: "api",kind: "read",cookie: true},

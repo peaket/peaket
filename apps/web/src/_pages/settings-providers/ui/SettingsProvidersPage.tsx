@@ -35,13 +35,15 @@ export async function SettingsProvidersPage({ searchParams }: PageProps) {
   const live = isLiveLoginMethods() && state === '목록';
   const loginMethod = typeof sp.loginMethod === 'string' ? sp.loginMethod : undefined;
   const mergeProposal = typeof sp.mergeProposal === 'string' ? sp.mergeProposal : undefined;
-  // 실제 합치기에서 지금 계정이 흡수되어 세션이 끝난 뒤 여는 주소(features/login-methods MERGED_AWAY_PATH). 셸을 로그인 전 모양으로 그린다.
+  // 실제 합치기에서 지금 계정이 흡수되어 세션이 끝난 뒤 여는 주소(features/login-methods MERGED_AWAY_PATH). 본문은 흡수 안내다(셸은 아래).
   // 안내는 방금 흡수 확정을 받은 탭의 표시가 있을 때만 보인다(MergedAwayNotice, 없으면 로그인 수단 화면으로 간다, BOT-043이 넘긴 것)
   const endedMerged = sp.ended === 'MERGED';
   const absorbed = v.absorbed || endedMerged;
 
   return (
-    <AppShell dark={dark} guest={absorbed}>
+    // ?ended=MERGED는 셸을 로그인 전으로 고정하지 않는다: 셸이 팬 계정 요약으로 고른다(흡수된 계정은 세션이 끝나 401 → 로그인 전, ADR-0202 결정 2).
+    // 로그인한 사람이 이 주소를 열어도 로그인 전 셸이 잠깐 보이지 않는다(BOT-043이 넘긴 것, HOT-321). 상태 미리보기 '흡수됨'만 고정한다
+    <AppShell dark={dark} guest={v.absorbed}>
       <main className="page-main pb-10 md:pb-12 lg:pb-16" id="main" tabIndex={-1}>
         {absorbed ? (
           endedMerged ? <MergedAwayNotice /> : <Absorbed live={false} />

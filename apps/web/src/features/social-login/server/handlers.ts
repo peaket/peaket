@@ -74,7 +74,6 @@ interface LinkSeal {
 /** 재인증 결과 쿠키 안의 값(identity §7.1 ⑤) */
 type ReauthResult = { token: string; provider: Provider; strength: 'verified' | 'requested'; expiresAt: number } | { error: 'stale' | 'account-mismatch' | 'reverify-required' | 'failed' };
 
-export const GENERIC_FAILURE = '로그인하지 못했습니다. 처음부터 다시 시도해 주세요';
 const DEVICE_ID = /^[A-Za-z0-9_-]{22}$/;
 const PROPOSAL_ID = /^[A-Za-z0-9_-]{22}$/;
 /** grpc 상태 코드 NOT_FOUND(연결 제안이 없거나 만료) */
@@ -162,7 +161,16 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
   };
   const forbidden = () => respond(403, '다른 출처의 요청입니다');
   const unavailable = () => respond(503, '지금은 그 로그인을 쓸 수 없습니다. 잠시 뒤 다시 시도해 주세요');
-  // 로그인 경로는 화면 이동(폼 보내기·공급자에서 돌아오기)이라 Problem JSON이 아니라 글자로 답한다. 로그인 화면 상태로 돌려보내는 일은 HOT-321
+  /**
+   * 로그인 목적의 실패는 로그인 화면(SCR-004)의 상태로 돌려보낸다(ADR-0202 결정 4, d5 §5.4). 로그인 경로는 화면 이동이라 상태 코드보다
+   * 그 화면의 안내가 사람에게 닿는다. failed는 '에러'(공급자 동시 상한도), down은 그 버튼 아래 '제공자 장애'다. 이유 범주는 로그에만 남긴다
+   */
+  const toLoginScreen = (returnTo: string, error: 'failed' | 'down', provider?: Provider, cookies: string[] = []) => {
+    const q = new URLSearchParams({ next: returnTo, error });
+    if (error === 'down' && provider) q.set('provider', provider);
+    return redirect(`/login?${q}`, cookies);
+  };
+  // 재인증·로그인 수단 추가의 시작은 설정 화면의 폼이라 지금처럼 상태 코드와 글자로 답한다(그 화면이 결과를 안내한다)
   /** 공급자 동시 상한을 넘었다: 기다리지 않고 429 server-busy(docs/architecture.md §5 '소셜 로그인 공급자 HTTP') */
   const busy = (cookies: string[] = []) => respond(429, BUSY_TEXT, cookies, { 'retry-after': String(BUSY_RETRY_AFTER_SEC) });
   /** 공급자를 잠시 끊었다: 그 공급자의 새 로그인만 503, 다시 해 볼 때까지는 남은 끊김 시간(docs/api/guidelines.md 503 Retry-After) */
@@ -172,15 +180,15 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     for (const x of [e, (e as { cause?: unknown } | null)?.cause]) if (x instanceof ProviderOpenError) return x.retryAfterSec;
     return BUSY_RETRY_AFTER_SEC;
   };
-  /** 보호가 막은 콜백의 답: 동시 상한이면 429, 끊긴 공급자면 503. 진행 쿠키를 지워 처음부터 다시 하게 한다(인가 코드는 한 번만 쓴다) */
-  const guarded = (g: 'busy' | 'open', e: unknown) => (g === 'busy' ? busy([clearProgressCookie()]) : providerOpen(openRetry(e), [clearProgressCookie()]));
+  /** 보호가 막은 로그인 콜백: 동시 상한이면 '에러', 끊긴 공급자면 '제공자 장애'. 진행 쿠키를 지워 처음부터 다시 하게 한다(인가 코드는 한 번만 쓴다) */
+  const guardedLogin = (g: 'busy' | 'open', p: Provider, returnTo: string) => toLoginScreen(returnTo, g === 'busy' ? 'failed' : 'down', p, [clearProgressCookie()]);
 
   async function startFlow(p: Provider, progress: Progress, extra?: Record<string, string>): Promise<Response> {
     // 끊긴 공급자로는 보내지 않는다. 발견 문서는 기억해 두어 시작 단계는 공급자를 부르지 않으므로 여기서 먼저 본다(identity §10 ②)
     const openMs = guard.openFor(p);
     if (openMs > 0) {
       log(progress.purpose === 'reauth' ? 'reauth.failed' : 'login.failed', { provider: p, reason: 'open', code: 'provider-open' });
-      return providerOpen(Math.max(1, Math.ceil(openMs / 1000)));
+      return progress.purpose === 'login' ? toLoginScreen(progress.returnTo, 'down', p) : providerOpen(Math.max(1, Math.ceil(openMs / 1000)));
     }
     let url: string;
     try {
@@ -188,6 +196,8 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     } catch (e) {
       log(progress.purpose === 'reauth' ? 'reauth.failed' : 'login.failed', { provider: p, reason: guardReason(e) ?? 'discovery', code: codeOf(e) });
       const g = guardReason(e);
+      // 로그인: 동시 상한은 '에러', 끊긴 공급자·발견 문서를 못 읽음(공급자 장애)은 '제공자 장애'
+      if (progress.purpose === 'login') return toLoginScreen(progress.returnTo, g === 'busy' ? 'failed' : 'down', p);
       return g === 'busy' ? busy() : g === 'open' ? providerOpen(openRetry(e)) : unavailable();
     }
     return redirect(url, [progressCookie(seal(keys.progress, PROGRESS_COOKIE, progress, now() + PROGRESS_TTL_MS))]);
@@ -264,16 +274,17 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     const prog = unseal<Progress>(progressKeys, PROGRESS_COOKIE, cookieOf(req, PROGRESS_COOKIE), now());
     if (!prog || !isProvider(provider) || prog.p !== provider) {
       log('login.failed', { provider, reason: 'progress' });
-      return respond(400, GENERIC_FAILURE, [clearProgressCookie()]);
+      // 진행 쿠키가 없으면 돌아갈 주소도 모른다: 홈으로 돌아가는 로그인을 처음부터
+      return toLoginScreen('/', 'failed', undefined, [clearProgressCookie()]);
     }
     // 진행 쿠키는 한 번만 쓴다: 성공·실패 모두 지운다. 재인증은 실패해도 돌아갈 주소로 보내고 실패 종류만 넘긴다(identity §7.1 ⑤)
     const reauthDone = (r: ReauthResult) => redirect(prog.returnTo, [clearProgressCookie(), reauthCookie(seal(keys.reauthResult, REAUTH_COOKIE, r, now() + REAUTH_RESULT_TTL_MS))]);
-    const fail = (reason: string, code?: string, status = 400) => {
+    const fail = (reason: string, code?: string) => {
       log(prog.purpose === 'reauth' ? 'reauth.failed' : prog.purpose === 'link' ? 'link-add.failed' : 'login.failed', { provider, reason, code });
       if (prog.purpose === 'reauth') return reauthDone({ error: 'failed' });
       // 로그인 수단 추가는 실패해도 설정 화면으로 돌려보내 결과를 안내한다(막다른 페이지가 되지 않게, 새 맥락 리뷰 중간 3)
       if (prog.purpose === 'link') return redirect(withResult(prog.returnTo, 'loginMethod', 'failed'), [clearProgressCookie()]);
-      return respond(status, GENERIC_FAILURE, [clearProgressCookie()]);
+      return toLoginScreen(prog.returnTo, 'failed', undefined, [clearProgressCookie()]);
     };
     const u = new URL(req.url);
     // 제공자가 돌려준 오류(사용자 취소 등)와 다른 state는 코드 교환 전에 나눠 남긴다(운영 확인의 이유 범주, identity §10.1)
@@ -291,7 +302,7 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
       const g = guardReason(e);
       if ((g === 'busy' || g === 'open') && prog.purpose === 'login') {
         log('login.failed', { provider, reason: g, code: codeOf(e) });
-        return guarded(g, e);
+        return guardedLogin(g, provider, prog.returnTo);
       }
       // 재인증·로그인 수단 추가는 그 결과 화면으로 돌려보낸다(fail이 사건을 한 번 남긴다)
       return fail(g ?? 'id_token', codeOf(e));
@@ -354,7 +365,7 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
         const g = guardReason(e);
         if (g === 'busy' || g === 'open') {
           log('login.failed', { provider, reason: g, code: codeOf(e) });
-          return guarded(g, e);
+          return guardedLogin(g, provider, prog.returnTo);
         }
         return fail(g ?? 'userinfo', codeOf(e));
       }
@@ -414,7 +425,7 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
         log('link.expired', { provider, reason: 'identity' });
         return redirect(LINK_EXPIRED, [clearProgressCookie(), clearLinkCookie()]);
       }
-      return fail('identity', codeOf(e), 503);
+      return fail('identity', codeOf(e));
     }
   }
 

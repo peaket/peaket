@@ -8,13 +8,15 @@
 import { safeNext } from '../../shared/lib/safe-next.ts';
 import { refreshOnce, type RefreshResult } from '../../shared/lib/token-refresh.ts';
 import type { VerifyOutcome } from './model.ts';
+import { RETURN_STORAGE_KEY } from './keys.ts';
+
+/** 페이지 이동으로 돌아온 건 ID와 남긴 시각(탭 세션 저장소, docs/frontend.md §3.12) */
+export { RETURN_STORAGE_KEY };
 
 export const VERIFY_CHANNEL = 'peaket.verify';
 export const VERIFY_WINDOW_NAME = 'peaket-verify';
 /** 기관 창 크기 480×720 [가정] */
 export const VERIFY_WINDOW_FEATURES = 'popup,width=480,height=720';
-/** 페이지 이동으로 돌아온 건 ID와 남긴 시각(탭 세션 저장소, docs/frontend.md §3.12) */
-export const RETURN_STORAGE_KEY = 'peaket.verify.return';
 /** 부르는 화면이 복귀 건을 믿는 시간 1분 [가정]. 복귀 화면은 남기자마자 next로 가므로 부르는 화면이 곧 읽는다(BOT-010이 넘긴 것) */
 export const RETURN_TTL_MS = 60_000;
 /** 복귀 화면이 받은 표시를 기다리는 시간 1초 [가정] */

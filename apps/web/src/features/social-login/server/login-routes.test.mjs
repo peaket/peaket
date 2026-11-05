@@ -57,7 +57,18 @@ const login = (b, provider = 'kakao', fields = {}, origin = web.url) => b.go(`${
 /** 실패 사건만(성공 사건 login.completed 등은 뺀다) */
 const failures = () => logs.filter((l) => l.event.endsWith('.failed'));
 const lastCall = (method) => identity.calls.filter((c) => c.method === method).at(-1)?.request;
-const GENERIC = '로그인하지 못했습니다. 처음부터 다시 시도해 주세요';
+/**
+ * 로그인 목적의 실패는 로그인 화면(SCR-004)의 상태로 303이다(ADR-0202 결정 4): '에러'는 error=failed, 끊긴 공급자는 error=down&provider=.
+ * 이유 범주는 서버 로그에만 남고 주소에는 싣지 않는다. 그 이동 한 번을 돌려준다
+ */
+function toLoginScreen(r, { error = 'failed', provider, next = '/' } = {}, m = '') {
+  const trail = r.trail ?? [{ status: r.status, location: r.headers.get('location'), setCookie: r.headers.getSetCookie() }];
+  const hop = trail.find((t) => t.location?.startsWith('/login?'));
+  assert.ok(hop, `로그인 화면으로 가지 않았다 ${m} ${JSON.stringify(trail.map((t) => [t.status, t.location]))}`);
+  assert.equal(hop.status, 303, m);
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(hop.location.slice('/login?'.length))), { next, error, ...(provider ? { provider } : {}) }, m);
+  return hop;
+}
 
 /** 콜백 직전에서 멈춘 로그인(코드·state를 손에 쥔다) */
 async function stopAtCallback(b, provider = 'kakao') {
@@ -119,8 +130,7 @@ test('I-T71_② 진행 쿠키 없는 다른 브라우저의 콜백은 거절한�
   const cb = await stopAtCallback(new Browser());
   const other = new Browser();
   const r = await other.go(cb.toString());
-  assert.equal(r.res.status, 400);
-  assert.equal(r.text, GENERIC);
+  toLoginScreen(r);
   assert.deepEqual(other.names(), []);
   assert.equal(lastCall('CreateSession'), undefined);
   assert.deepEqual(logs.map((l) => [l.event, l.reason]), [['login.failed', 'progress']]);
@@ -133,14 +143,14 @@ test('I-T71_③ state를 바꾸거나 진행 쿠키를 고치거나 다시 쓴 �
   changed.searchParams.set('state', 'other-state');
   const saved = b.get(OIDC).value;
   const r1 = await b.go(changed.toString());
-  assert.equal(r1.res.status, 400);
+  toLoginScreen(r1);
   // 실패해도 진행 쿠키는 지운다(한 번만 쓴다)
   assert.equal(b.get(OIDC), undefined);
 
   // 떠 둔 쿠키를 한 글자 바꿔 다시 넣는다
   const tampered = new Browser();
   tampered.store(web.url, [`${OIDC}=${saved.slice(0, -2)}${saved.at(-2) === 'A' ? 'B' : 'A'}${saved.at(-1)}; Path=/`]);
-  assert.equal((await tampered.go(cb.toString())).res.status, 400);
+  toLoginScreen(await tampered.go(cb.toString()));
 
   // 정상 콜백 뒤 떠 둔 쿠키로 같은 콜백을 다시 보낸다(코드는 이미 쓰였다)
   const ok = new Browser();
@@ -149,7 +159,7 @@ test('I-T71_③ state를 바꾸거나 진행 쿠키를 고치거나 다시 쓴 �
   assert.equal((await ok.go(cb2.toString())).trail[0].status, 303);
   const replay = new Browser();
   replay.store(web.url, [`${OIDC}=${kept}; Path=/`]);
-  assert.equal((await replay.go(cb2.toString())).res.status, 400);
+  toLoginScreen(await replay.go(cb2.toString()));
   assert.deepEqual(failures().map((l) => l.reason), ['state', 'progress', 'id_token']);
 });
 
@@ -158,7 +168,7 @@ test('I-T71_③ 다른 제공자의 콜백 주소로 보낸 콜백은 코드를 
   const cb = await stopAtCallback(b, 'kakao');
   const mixed = new URL(`/login/callback/google${cb.search}`, web.url);
   const r = await b.go(mixed.toString());
-  assert.equal(r.res.status, 400);
+  toLoginScreen(r);
   assert.deepEqual(failures().map((l) => [l.provider, l.reason]), [['google', 'progress']]);
   assert.equal(b.get(OIDC), undefined);
 });
@@ -169,8 +179,7 @@ test('I-T71_③④ 다른 nonce·만료·다른 issuer·다른 aud·JWKS에 없�
     const b = new Browser();
     const r = await login(b);
     op.mode[m] = false;
-    assert.equal(r.res.status, 400, m);
-    assert.equal(r.text, GENERIC, m);
+    toLoginScreen(r, { next: '/my/tickets' }, m);
     assert.deepEqual(b.names(), [], m);
   }
   assert.equal(lastCall('CreateSession'), undefined);
@@ -184,12 +193,13 @@ test('I-T71_④ 발견 문서의 issuer가 다르면 로그인 시작에서 막�
   try {
     op.mode.discoveryIssuer = true;
     const r = await start();
-    assert.equal(r.status, 503);
+    // 공급자를 쓸 수 없다: 그 버튼 아래 '제공자 장애' 상태
+    toLoginScreen(r, { error: 'down', provider: 'google' });
     assert.deepEqual(r.headers.getSetCookie(), []);
     assert.deepEqual(logs.map((l) => [l.event, l.reason]), [['login.failed', 'discovery']]);
     // 실패한 발견 문서는 기억하지 않는다: 고쳐지면 바로 된다
     op.mode.discoveryIssuer = false;
-    assert.equal((await start()).status, 303);
+    assert.match((await start()).headers.get('location') ?? '', /^http:\/\/127\.0\.0\.1:\d+\/google\/authorize\?/);
   } finally {
     fresh.close();
   }
@@ -232,7 +242,7 @@ test('I-T71_⑥ 네이버 사용자 정보 id가 ID 토큰 sub와 다르면 막�
   op.mode.naverIdMismatch = true;
   const b = new Browser();
   const r = await login(b, 'naver');
-  assert.equal(r.res.status, 400);
+  toLoginScreen(r, { next: '/my/tickets' });
   assert.deepEqual(b.names(), []);
   assert.deepEqual(logs.map((l) => l.reason), ['userinfo']);
 });
@@ -270,9 +280,9 @@ test('I-T71_identity 세션 생성이 실패하면 이유 없이 실패하고 �
   identity.mode.createFails = true;
   const b = new Browser();
   const r = await login(b);
-  assert.equal(r.res.status, 503);
+  // 이유를 싣지 않는다(주소는 next·error뿐)
+  toLoginScreen(r, { next: '/my/tickets' });
   assert.deepEqual(b.names(), []);
-  assert.ok(!r.text.includes('대역'));
   assert.deepEqual(logs.map((l) => [l.event, l.reason]), [['login.failed', 'identity']]);
 });
 
@@ -505,8 +515,8 @@ test('secrets-and-keys_앱 서버 비밀을 바꾸면 옛 비밀로 봉인한 �
   const rotated = createSocialLogin({ ...config(web.url), secret: Buffer.alloc(32, 1), previousSecret: SECRET }, { log: () => {} });
   const forgot = createSocialLogin({ ...config(web.url), secret: Buffer.alloc(32, 1) }, { log: () => {} });
   try {
-    assert.equal((await forgot.dispatch(req())).status, 400);
-    assert.equal((await rotated.dispatch(req())).status, 303);
+    toLoginScreen(await forgot.dispatch(req()));
+    assert.equal((await rotated.dispatch(req())).headers.get('location'), '/');
   } finally {
     rotated.close();
     forgot.close();
@@ -770,7 +780,8 @@ async function guardedApp(providerGuard) {
     const cb = new URL(back.headers.get('location'));
     return () => b.go(`${server.url}${cb.pathname}${cb.search}`, { follow: false });
   };
-  return { start, prepare, close: async () => (guarded.close(), server.close()) };
+  const post = (path, fields) => guarded.dispatch(new Request(`${server.url}${path}`, formPost(server.url, fields)));
+  return { start, prepare, post, close: async () => (guarded.close(), server.close()) };
 }
 
 /** 토큰 요청이 닿은 횟수를 세고, n번째가 닿을 때를 기다릴 수 있게 한다 */
@@ -791,17 +802,16 @@ function tokenArrivals() {
   return { count: () => seen.length, reach };
 }
 
-test('I-T71_공급자 토큰 교환이 시간 상한을 넘으면 같은 인가 코드로 다시 보내지 않고 진행 쿠키를 지워 처음부터 다시 하게 한다', async () => {
+test('I-T71_공급자 토큰 교환이 시간 상한을 넘으면 같은 인가 코드로 다시 보내지 않고 진행 쿠키를 지워 로그인 화면에서 처음부터 다시 하게 한다', async () => {
   const g = await guardedApp({ timeoutMs: 100 });
   try {
     const go = await g.prepare();
     const arrivals = tokenArrivals();
     op.mode.tokenDelayMs = 400;
     const r = await go();
-    assert.equal(r.res.status, 400);
-    assert.equal(r.text, GENERIC);
+    const hop = toLoginScreen(r);
     assert.ok(failures().some((l) => l.reason === 'timeout'), JSON.stringify(failures()));
-    assert.match(r.res.headers.get('set-cookie') ?? '', /Max-Age=0/, '진행 쿠키를 지운다');
+    assert.ok(hop.setCookie.some((c) => /Max-Age=0/.test(c)), '진행 쿠키를 지운다');
     // 늦은 응답이 끝날 때까지 기다려도 토큰 요청은 한 번뿐이다
     await new Promise((res) => setTimeout(res, 450));
     assert.equal(arrivals.count(), 1, '같은 인가 코드로 다시 보내지 않는다');
@@ -811,27 +821,22 @@ test('I-T71_공급자 토큰 교환이 시간 상한을 넘으면 같은 인가 
   }
 });
 
-test('I-T71_공급자가 토큰 교환에 429·403을 몰아 주면 그 공급자를 잠시 끊어 새 로그인을 시작부터 503으로 막고, 다른 공급자는 그대로다', async () => {
+test('I-T71_공급자가 토큰 교환에 429·403을 몰아 주면 그 공급자를 잠시 끊어 새 로그인을 시작부터 로그인 화면의 제공자 장애로 돌려보내고, 다른 공급자는 그대로다', async () => {
   const g = await guardedApp({ minCalls: 2, rejectRatio: 0.5, openMs: 60_000 });
   try {
     // 끊기기 전에 시작해 공급자에서 돌아오는 중인 로그인
     const inFlight = await g.prepare();
     op.mode.tokenStatus = 429;
-    for (let i = 0; i < 2; i++) assert.equal((await (await g.prepare())()).res.status, 400, '거절 응답 자체는 로그인 실패');
+    for (let i = 0; i < 2; i++) toLoginScreen(await (await g.prepare())(), {}, '거절 응답 자체는 로그인 실패');
     op.mode.tokenStatus = 0;
-    // 돌아온 콜백은 503이고 진행 쿠키를 지운다(공급자를 부르지 않는다)
+    // 돌아온 콜백은 '제공자 장애' 상태로 가고 진행 쿠키를 지운다(공급자를 부르지 않는다)
     const arrivals = tokenArrivals();
     const back = await inFlight();
-    assert.equal(back.res.status, 503, JSON.stringify(failures()));
-    assert.match(back.res.headers.get('set-cookie') ?? '', /Max-Age=0/);
+    assert.ok(toLoginScreen(back, { error: 'down', provider: 'kakao' }).setCookie.some((c) => /Max-Age=0/.test(c)));
     assert.equal(arrivals.count(), 0, '끊긴 동안은 공급자를 부르지 않는다');
-    // 새 로그인은 공급자로 보내기 전에 막는다. Retry-After는 남은 끊김 시간이다
+    // 새 로그인은 공급자로 보내기 전에 막는다
     const fresh = new Browser();
-    const blocked = await g.start(fresh);
-    assert.equal(blocked.res.status, 503);
-    assert.match(blocked.text, /다른 로그인 수단/);
-    const retry = Number(blocked.res.headers.get('retry-after'));
-    assert.ok(retry >= 1 && retry <= 60, String(retry));
+    toLoginScreen(await g.start(fresh), { error: 'down', provider: 'kakao' });
     assert.deepEqual(fresh.names(), [], '진행 쿠키를 주지 않는다');
     assert.ok(failures().filter((l) => l.reason === 'open' && l.provider === 'kakao').length >= 2);
     assert.equal((await (await g.prepare('google'))()).res.status, 303, '다른 공급자는 그대로 로그인된다');
@@ -855,7 +860,7 @@ test('I-T71_없어도 되는 카카오 사용자 정보가 429로 거절되어�
   }
 });
 
-test('I-T71_공급자 동시 호출 상한을 넘으면 기다리지 않고 429 server-busy와 Retry-After로 답한다', async () => {
+test('I-T71_공급자 동시 호출 상한을 넘으면 기다리지 않고 바로 로그인 화면의 에러 상태로 돌려보낸다', async () => {
   const g = await guardedApp({ maxConcurrent: 1 });
   try {
     const first = await g.prepare();
@@ -866,14 +871,24 @@ test('I-T71_공급자 동시 호출 상한을 넘으면 기다리지 않고 429 
     // 첫 로그인의 토큰 요청이 공급자에 닿을 때까지 기다린다(그동안 자리를 쥐고 있다)
     await arrivals.reach(1);
     const r = await second();
-    assert.equal(r.res.status, 429, JSON.stringify(failures()));
-    assert.equal(r.res.headers.get('retry-after'), '2');
-    assert.match(r.res.headers.get('set-cookie') ?? '', /Max-Age=0/, '진행 쿠키를 지운다');
+    // 기다리지 않고 바로 '에러' 상태로 돌려보낸다(다시 누르면 처음부터)
+    assert.ok(toLoginScreen(r).setCookie.some((c) => /Max-Age=0/.test(c)), '진행 쿠키를 지운다');
     assert.ok(failures().some((l) => l.reason === 'busy'));
     assert.equal(arrivals.count(), 1, '상한을 넘은 호출은 공급자에 보내지 않는다');
     assert.equal((await slow).res.status, 303, '먼저 온 로그인은 끝난다');
   } finally {
     op.mode.tokenDelayMs = 0;
     await g.close();
+  }
+});
+
+test('I-T71_로그인 실패를 로그인 화면으로 돌려보낼 때 쿼리가 있는 돌아갈 주소도 그대로 한 번만 싣는다(ADR-0202 결정 4)', async () => {
+  op.mode.wrongIss = true;
+  try {
+    const r = await login(new Browser(), 'kakao', { returnTo: '/events/0b8f?round=2&x=%ED%95%9C' });
+    const hop = toLoginScreen(r, { next: '/events/0b8f?round=2&x=%ED%95%9C' });
+    assert.equal(hop.location.split('next=').length, 2, 'next는 하나');
+  } finally {
+    op.mode.wrongIss = false;
   }
 });

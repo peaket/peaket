@@ -4,19 +4,11 @@
 import type { WebScreen } from './screens.types';
 
 // ── SCR-004 로그인 ──
-/** 보드 다섯 값 + d5 §3.5 세션 종료 사유 표의 나머지 팬 사유 다섯('세션 종료 안내'는 보드의 원격 로그아웃) */
-export const SCR004_STATES = [
-  '기본',
-  '진행 중',
-  '에러',
-  '제공자 장애',
-  '세션 종료 안내',
-  '세션 종료 · 운영자 강제 종료',
-  '세션 종료 · 재사용 탐지',
-  '세션 종료 · 기기 5대 초과',
-  '세션 종료 · 계정 병합',
-  '세션 종료 · 탈퇴',
-] as const;
+/**
+ * 데이터 단계(HOT-321)에서 ?state=를 걷어 냈다. 상태는 주소로 본다(ADR-0202 결정 5): 에러 /login?error=failed,
+ * 제공자 장애 /login?error=down&provider=kakao, 세션 종료 /login?ended=ADMIN_FORCE(팬 사유 여섯), 진행 중은 버튼을 누를 때
+ */
+export const SCR004_STATES = ['기본'] as const;
 export type Scr004State = (typeof SCR004_STATES)[number];
 
 // ── SCR-005 가입 완료·동의 ──
@@ -186,7 +178,7 @@ export const ACCOUNT_SCREENS: readonly WebScreen[] = [
     group: 'request',
     owner: 'account',
     states: SCR004_STATES,
-    note: '세션 종료 사유 다섯은 d5 §3.5 표에서 더했다(보드는 원격 로그아웃 하나)',
+    note: '상태는 주소로 본다: ?error=failed · ?error=down&provider=kakao · ?ended=ADMIN_FORCE(ADR-0202)',
   },
   { id: 'SCR-005', name: '가입 완료·동의', path: '/signup/consent', group: 'request', owner: 'account', states: SCR005_STATES },
   {
