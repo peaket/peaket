@@ -36,10 +36,20 @@ const config: NextConfig = {
   agentRules: false,
   // 이미지는 image-worker가 만든 파생본을 CDN에서 바로 받는다. /_next/image는 쓰지 않고, 폭 목록은 파생본 단계와 같다(ADR-0199 결정 4)
   images: { loader: 'custom', loaderFile: './src/shared/lib/image-loader.ts', deviceSizes: [320, 640, 960, 1280], imageSizes: [] },
-  // 개발 서버에서만: 같은 출처 정적 파일(랭킹 파일)을 계약 모양 가짜 API(scripts/mock-api.mjs)로 넘긴다(ADR-0199 결정 2)
+  // 개발 서버에서만:
+  // - 같은 출처 정적 파일(랭킹 파일)을 계약 모양 가짜 API(scripts/mock-api.mjs)로 넘긴다(ADR-0199 결정 2)
+  // - 대기실 경로(`/queue/{id}`·`/shop/{id}/queue`)와 대기실 자산(`/_q/*`)을 대기실 개발 서버로 넘긴다. 운영의 CloudFront 경로 나눔처럼
+  //   같은 출처가 되어 공연 상세가 쓴 사전 검증 토큰을 대기실이 읽는다(ADR-0211 결정 5). `/queue/{id}/verify`(추가 검증)는 이 앱의 화면이다
   async rewrites() {
-    const mock = process.env.NODE_ENV === 'development' ? process.env.PEAKET_DEV_STATIC_ORIGIN : undefined;
-    return mock ? [{ source: '/v1/home/rankings.json', destination: `${mock}/v1/home/rankings.json` }] : [];
+    if (process.env.NODE_ENV !== 'development') return [];
+    const mock = process.env.PEAKET_DEV_STATIC_ORIGIN;
+    const queueRoom = process.env.PEAKET_DEV_QUEUE_ROOM_ORIGIN || 'http://localhost:3004';
+    return [
+      ...(mock ? [{ source: '/v1/home/rankings.json', destination: `${mock}/v1/home/rankings.json` }] : []),
+      { source: '/queue/:eventId', destination: `${queueRoom}/queue/:eventId` },
+      { source: '/shop/:productId/queue', destination: `${queueRoom}/shop/:productId/queue` },
+      { source: '/_q/:path*', destination: `${queueRoom}/_q/:path*` },
+    ];
   },
 };
 

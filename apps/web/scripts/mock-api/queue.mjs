@@ -1,4 +1,4 @@
-// 가짜 API의 대기열(openapi /v1/queues/{eventId}/*, ADR-0207·0208): 로비 참가·참가 취소·셔플 결과 파일, 진입·묶음 결과 파일·대기 상태 파일·입장 확정·대기 취소.
+// 가짜 API의 대기열(openapi /v1/queues/{eventId}/*, ADR-0207·0208·0211): 사전 검증(공연 상세), 로비 참가·참가 취소·셔플 결과 파일, 진입·묶음 결과 파일·대기 상태 파일·입장 확정·대기 취소.
 // queue-svc를 단순하게 흉내 낸 모형이다: 진입한 차례대로 순번을 주고, serving은 판매 중일 때만 queueRate(1초에 지나는 번호)로 나아간다.
 // 운영·CI에서는 쓰지 않는다(ADR-0199 결정 2). 상태 바꾸기는 /__mock/state의 queue* 칸이다(scripts/mock-api.mjs 머리 주석).
 import { createHash, randomUUID } from 'node:crypto';
@@ -26,6 +26,8 @@ export const QUEUE_DEFAULTS = Object.freeze({
   queueShuffle: 'normal',
   /** 오픈까지 남은 초(공연 공개 요약의 openAt을 지금 + 이 값으로 바꾼다. 빈 값이면 고정 자료 그대로) */
   queueOpenIn: '',
+  /** 사전 검증(공연 상세): normal|identity|not-found|down|unauthorized. queue-svc는 사람 확인 실패·위험 판정 장애에도 토큰을 준다(ADR-0211 결정 4) */
+  queuePreverify: 'normal',
 });
 
 /**
@@ -82,7 +84,7 @@ export function createQueueMock({ now, state, schedule = () => null }) {
      * @param {{ send: Function, problem: Function, readJson: (req: any) => Promise<any>, badRequest: () => void }} io
      */
     handle(req, p, io) {
-      const m = /^\/v1\/queues\/([A-Za-z0-9-]{1,64})\/(entries|entries\/me|admission|lobby-participants|lobby-participants\/me|segment-states\/(\d{1,6})\.json|batch-results\/([0-9a-f]{3})\.json|shuffle-results\/([0-9a-f]{3})\.json)$/.exec(p);
+      const m = /^\/v1\/queues\/([A-Za-z0-9-]{1,64})\/(entries|entries\/me|admission|pre-verifications|lobby-participants|lobby-participants\/me|segment-states\/(\d{1,6})\.json|batch-results\/([0-9a-f]{3})\.json|shuffle-results\/([0-9a-f]{3})\.json)$/.exec(p);
       if (!m) return false;
       const e = ev(m[1]);
       const [, eventId, kind, segment, prefix, shufflePrefix] = m;
@@ -90,6 +92,31 @@ export function createQueueMock({ now, state, schedule = () => null }) {
       const sched = schedule(eventId);
       // 로비가 닫힌 뒤(오픈 지남)의 로비 요청: 계약의 409에 type이 없어 about:blank로 답한다
       const lobbyClosed = () => send(409, { type: 'about:blank', title: '로비가 닫혔습니다', status: 409 }, 'application/problem+json');
+
+      if (kind === 'pre-verifications' && req.method === 'POST') {
+        void io.readJson(req).then((b) => {
+          const keys = b && typeof b === 'object' ? Object.keys(b) : [];
+          // humanCheckToken은 계약에서 선택이다(없으면 위험 판정이 높게 본다)
+          if (!b || typeof b !== 'object' || (b.humanCheckToken !== undefined && typeof b.humanCheckToken !== 'string') || keys.some((k) => !['humanCheckToken', 'deviceId', 'preverifyToken', 'behaviorSummary'].includes(k))) return io.badRequest();
+          const s = b.behaviorSummary;
+          if (s !== undefined && (typeof s !== 'object' || s === null || s.v !== 1 || !Number.isInteger(s.windowMs) || s.windowMs < 0 || s.windowMs > 3_600_000)) return io.badRequest();
+          const mode = state.queuePreverify;
+          if (mode === 'unauthorized') return send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
+          if (mode === 'identity') return problem(403, 'identity-verification-required', '휴대폰 본인확인을 먼저 해 주세요');
+          if (mode === 'not-found' || !sched) return problem(404, 'queue-not-found', '대기열이 열리지 않았습니다');
+          // 장애는 회차마다 한 번만(화면은 다시 보낼 때 새 사람 확인 토큰을 받으므로 토큰마다가 아니다)
+          if (mode === 'down' && !e.once.has('pv:down')) {
+            e.once.add('pv:down');
+            // 게이트웨이 차단기·대기열 저장소 장애 꼴(guidelines §2)
+            return problem(503, 'dependency-unavailable', '잠시 뒤 다시 시도해 주세요', { 'retry-after': '3' });
+          }
+          // 갱신이면 최초 발급 시각을 잇는다(토큰 원문에 담은 것처럼 흉내 낸다)
+          const prev = typeof b.preverifyToken === 'string' ? /^pv\.(\d+)\./.exec(b.preverifyToken) : null;
+          const first = prev ? Number(prev[1]) : now();
+          return send(201, { preverifyToken: `pv.${first}.${randomUUID()}`, expiresAt: new Date(now() + 15 * 60_000).toISOString(), serverTimeMs: now() });
+        });
+        return true;
+      }
 
       if (kind === 'lobby-participants' && req.method === 'POST') {
         void io.readJson(req).then((b) => {

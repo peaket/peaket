@@ -300,6 +300,8 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
       if (reply && reply.status >= 400 && reply.status < 500) {
         // 403·404 등과 꼴이 틀린 요청(400·415): 공연 상세가 상태(사람 확인·본인확인·오픈 전)를 다시 그린다
         clearEntryMine();
+        // 사전 검증 토큰이 맞지 않으면 그 토큰도 지운다. 남기면 공연 상세가 그 토큰으로 다시 보내 두 화면을 오간다(ADR-0211 결정 4)
+        if (reply.problem === 'preverify-invalid') store.write({ preverifyToken: undefined, preverifyIssuedAt: undefined, preverifyExpiresAt: undefined });
         return leave(urls.event, sig);
       }
       failures++;

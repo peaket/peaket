@@ -19,10 +19,11 @@ import { AppShell } from '@/widgets/app-shell';
 import { loadEvent, popularEventIds } from '../api/load-event';
 import { AUTO_SEAT_NOTE, brokerNotice, LEGAL_RESALE_NOTICE, SORT_NOTICE } from '../model/content';
 import { jsonLdText, offerAvailability, type EventDetail } from '../model/detail';
-import { BookingBar, BookingFacts, BookingPanelCta, BookingProvider, type BookingData } from './Booking';
+import { BookingBar, BookingFacts, BookingPanelCta, BookingPreverifyCard, BookingProvider, type BookingData } from './Booking';
 import { DetailCollapse, DetailImage, SectionTabs, WishButton } from './DetailClient';
 import { DetailModalsProvider, DetailModalTrigger } from './DetailModals';
 import { DetailPersonalProvider } from './DetailPersonal';
+import { PreverifyProvider } from './Preverify';
 import { DetailReviewModals, HeroRating, ReviewSection, ReviewSummaryProvider } from './DetailReviews';
 import { VerifyStatusRow } from './DetailVerify';
 import { VerifyReturnResume } from './VerifyReturnResume';
@@ -87,6 +88,7 @@ export async function EventDetailPage({ params }: Props) {
     // 캐시 화면이라 서버는 쿠키로 로그인 여부를 정하지 않는다. 셸 머리는 화면 스크립트가 팬 계정 요약으로 고른다(ADR-0202 결정 2)
     <DetailPersonalProvider eventId={d.eventId} productionId={d.productionId} loginHref={loginHref}>
       <BookingProvider data={booking}>
+        <PreverifyProvider eventId={d.eventId} loginHref={loginHref}>
         <ReviewSummaryProvider eventId={d.eventId}>
           <AppShell variant="default" bottomBar={<BookingBar data={booking} />}>
             <EventJsonLd d={d} atMs={r.fetchedAtMs} />
@@ -265,6 +267,7 @@ export async function EventDetailPage({ params }: Props) {
                   <aside className="hidden lg:col-span-4 lg:sticky lg:top-6 lg:block" aria-label="회차와 예매">
                     <div className="card col" style={{ padding: 20, gap: 18, boxShadow: 'var(--shadow-sm)' }}>
                       <BookingFacts prefix="as" data={booking} dividers />
+                      <BookingPreverifyCard />
                       <BookingPanelCta data={booking} />
                     </div>
                   </aside>
@@ -273,6 +276,7 @@ export async function EventDetailPage({ params }: Props) {
             </DetailModalsProvider>
           </AppShell>
         </ReviewSummaryProvider>
+        </PreverifyProvider>
       </BookingProvider>
     </DetailPersonalProvider>
   );
@@ -330,6 +334,7 @@ function Hero({ d, booking, loginHref }: { d: EventDetail; booking: BookingData;
         </div>
         <div className="divider hidden md:block lg:hidden" />
         <BookingFacts prefix="in" data={booking} className="px-4 py-6 md:p-0 lg:hidden" />
+        <BookingPreverifyCard className="mx-4 mb-6 md:mx-0 lg:hidden" />
       </div>
     </div>
   );

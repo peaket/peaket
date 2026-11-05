@@ -598,7 +598,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 저장소 | 키 | 값 | 수명 | 지우는 때 | 등급 |
 | --- | --- | --- | --- | --- | --- |
 | localStorage | `peaket.device` | `deviceId`(CSPRNG 128비트, base64url 22자) | 사용자가 지울 때까지 | 사이트 데이터 삭제 | P2(기기 식별값) |
-| localStorage | `peaket.queue.{eventId}` | 참가 토큰과 그 응답의 시드 해시·drand 체인과 라운드·결과 공개 시각·분산 창, 사전 검증 토큰과 발급 시각, 진행 중인 진입의 요청 ID와 묶음 응답(202 본문, 추천 적용 2026-11-03)과 그때 보낸 사전 검증 토큰, 대기표(또는 참가 토큰과 셔플 순번), 순번·구간, 처음 예상 대기(`firstEtaSec`·`firstEtaAtMs`), 차례가 온 시각(브라우저 추정, ADR-0208 결정 6), 저장 시각 | 회차 판매 종료까지 | 로그아웃, 대기 취소, 410(`rejoinAllowed`인 대기표 만료는 다시 줄 서기에 쓸 사전 검증 토큰만 남긴다), 판매 종료, 입장(`ADMITTED`면 모두, ADR-0207), 앱 시작 때 2일 [가정]이 지난 항목 | P2 |
+| localStorage | `peaket.queue.{eventId}` | 참가 토큰과 그 응답의 시드 해시·drand 체인과 라운드·결과 공개 시각·분산 창, 사전 검증 토큰과 발급 시각·만료 시각(공연 상세가 쓴다, ADR-0211), 진행 중인 진입의 요청 ID와 묶음 응답(202 본문, 추천 적용 2026-11-03)과 그때 보낸 사전 검증 토큰, 대기표(또는 참가 토큰과 셔플 순번), 순번·구간, 처음 예상 대기(`firstEtaSec`·`firstEtaAtMs`), 차례가 온 시각(브라우저 추정, ADR-0208 결정 6), 저장 시각 | 회차 판매 종료까지 | 로그아웃, 대기 취소, 410(`rejoinAllowed`인 대기표 만료는 다시 줄 서기에 쓸 사전 검증 토큰만 남긴다), 진입 403 `preverify-invalid`(사전 검증 칸, ADR-0211), 판매 종료, 입장(`ADMITTED`면 모두, ADR-0207), 앱 시작 때 2일 [가정]이 지난 항목 | P2 |
 | sessionStorage | `peaket.queue.{eventId}.firstAhead` | 처음 앞 인원 | 탭 | 탭 닫힘 | 등급 밖(숫자) |
 | localStorage | `peaket.clock` | 서버 시각 보정값(밀리초 차), 표본 시각, 왕복(§3.3, ADR-0110) | 30분 [가정] | 앱 시작 때 30분이 지난 값, 로그아웃 | 등급 밖(숫자) |
 | sessionStorage | `peaket.admission.{eventId}` | 입장 토큰, 서버 ECDH 공개키(JWK), 좌석맵 파일 경로, 구매 세션 만료 시각(`purchaseSessionExpiresAt`, ADR-0207), 받은 시각 | 구매 세션 | 세션 끝·로그아웃·만료 | P1(구매 세션 자격) |
@@ -660,7 +660,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | --- | --- | --- | --- |
 | 1 | `POST https://queue…/v1/queues/{eventId}/lobby-participants` | JSON `{humanCheckToken, deviceId}`, 쿠키, 사전 요청이 있다(T=0 전) | 201 참가 토큰(`verification`이 `REQUIRED`면 SCR-009) / 403 본인확인 전 / 409 다른 기기. 응답별 동작은 §3.4 `lobby-join`(ADR-0208 결정 3) |
 | 2 | 셔플 결과 파일 `GET https://queue-files…/v1/queues/{eventId}/shuffle-results/{hashPrefix}.json` | 쿠키는 없고, 사용자 헤더도 없다 | `shuffleResultAt` + 지연이 지난 뒤 한 번 받는다. 404면 간격을 2초부터 두 배씩 늘리고(최대 20초), 간격 안의 무작위 시각에 다시 받는다. 200인데 내 해시가 두 번 연달아 없으면 다른 기기에서 취소된 참가다(ADR-0208 결정 4) |
-| 3 | 사전 검증(공연 상세에서) `POST …/pre-verifications` | JSON `{humanCheckToken, deviceId, behaviorSummary}` | 201 토큰(만료 2분 [가정] 전, 사람 확인을 보이지 않는 모드로 다시 실행해 갱신한다. 조작이 필요하면 위젯을 보인다) |
+| 3 | 사전 검증(공연 상세에서) `POST …/pre-verifications` | JSON `{humanCheckToken, deviceId, behaviorSummary}`(갱신이면 지금 `preverifyToken`도) | 201 토큰(만료 2분 [가정] 전, 사람 확인을 보이지 않는 모드로 다시 실행해 갱신한다. 조작이 필요하면 위젯을 보인다). 카드가 보이는 때·응답별 동작·저장은 ADR-0211 결정 2·4 |
 | 4 | 진입 `POST https://queue…/v1/queues/{eventId}/entries` | `text/plain` JSON 문자열 `{preverifyToken, deviceId, entryRequestId}`. `entryRequestId`는 진입 시도 하나에 `crypto.randomUUID()`로 만들고, 응답을 못 받아 다시 보낼 때와 묶음 결과 뒤 다시 보낼 때 같은 값을 쓴다(헤더가 아니라 본문이라 사전 요청이 생기지 않는다, 기술 검토 중간-035). 보내기 전에 localStorage에 두어 새로 고침·탭을 다시 열어도 같은 값으로 잇는다(서버는 진입 시도를 이 값으로만 가른다, 추천 적용 2026-11-03) | 201 대기표(같은 `entryRequestId`로 다시 보내면 같은 번호의 대기표) / 202 묶음(`entryRequestId`를 함께 준다) / 409 / 410 / 503 `Retry-After` |
 | 5 | 대기 상태 파일 `GET https://queue-files…/v1/queues/{eventId}/segment-states/{segment}.json` | 쿠키·사용자 헤더가 없다. `cache: "no-store"`(ADR-0110) | 주기·지터·본문 `pollHintMs`(503이면 `Retry-After`, 기술 검토 중간-032, §5.1). `segment = floor((순번 − 1) ÷ 1000)` [가정, 순번은 1부터]. 입장 임박 구간 파일의 `servingSteps`로 차례 반영 지연을 잰다(§3.3) |
 | 6 | 입장 확정 `POST https://queue…/v1/queues/{eventId}/admission` | `text/plain` JSON 문자열 `{queueTicket}` 또는 `{lobbyToken}`(선택 칸 `firstEtaSec`·`firstEtaAtMs`) | `ADMITTED`·`SOON`·`NOT_YET`·`VERIFYING` / 401 / 403 / 409 / 410 / 503(§3.4 `turn`) |
@@ -964,7 +964,7 @@ RADIO의 컴포넌트 API 분류(데이터·이벤트·설정·스타일·렌더
 | `Countdown`(CMP-014) | `deadline`(보정한 벽시계) | `onExpire` | `announce: "milestones" \| "threshold"`, `milestonesSec`(기본 `[300, 60, 10]`), `thresholdSec` | — |
 | `RotatingQR`(CMP-029) | `ticketId` | `onStale`, `onError` | `rotateMs: 15000` | — |
 | `PaymentWidgetFrame`(CMP-027) | `attempt: PaymentAttempt` | `onReady`, `onRedirecting`, `onError` | `pg` | — |
-| `HumanCheckBox`(CMP-047) | `siteKey` | `onToken(token)`, `onExpire`, `onError` | `mode: "managed" \| "invisible"` | — |
+| `HumanCheckBox`(CMP-047) | `siteKey` | `onToken(token)`, `onExpire`, `onError` | `mode: "managed" \| "invisible"`(Turnstile `appearance`의 `always`·`interaction-only`. 공연 상세는 대화상자에서 managed, 조용한 갱신은 숨긴 자리에서 invisible이고 조작이 필요하면 멈춘다, ADR-0211) | — |
 | `ReauthPrompt`(CMP-064) | `provider` 또는 관리 계정 | `onVerified(token)`, `onCancel` | `variant: "fan-social" \| "admin"` | — |
 | `ScanResult`(CMP-041) | `verdict`, `reason`, `seat` | `onDismiss` | `holdMs: 2000`(정본 2초 [가정]) | — |
 | `CameraView`(CMP-042) | — | `onFrame(bitmap)`, `onPermission(state)` | `fps: 15`, `facing: "environment"` | — |
@@ -1000,7 +1000,7 @@ React 런타임만으로도 JS 예산을 넘고, SEED CSS 전체는 CSS 예산�
 | `shell.{ko,en,ja,zh}.html` | 집중 셸 머리, 문구가 들어간 화면 뼈대, CSS·JS 링크(인라인 스크립트·스타일은 없다) | 각 3KB 이하 [가정] |
 | `queue-room.{해시}.js` | 상태표, 폴러, 시계, 저장소, 탭 조정, 대기열 API 부분, 텔레메트리 lite | gzip 15KB 이하 [가정](예산 50KB) |
 | `queue-room.{해시}.css` | `@peaket/ds`의 토큰 부분집합(색·간격·글자·움직임) + 버튼·진행 막대·배너 몇 개 | gzip 8KB 이하 [가정](예산 10KB) |
-| 사람 확인 위젯 | Cloudflare Turnstile `api.js` | 제3자 것이라 예산 밖이다. 로비에서 필요할 때만 늦게 싣는다 |
+| 사람 확인 위젯 | Cloudflare Turnstile `api.js` | 제3자 것이라 예산 밖이다. 로비 참가와 공연 상세 사전 검증(ADR-0211)에서 필요할 때만 늦게 싣는다 |
 
 - CSP는 CloudFront 응답 헤더 정책에 넣은 고정 문자열이다(빌드마다 바뀌는 해시를 넣지 않으려고). 그래서 인라인 스크립트·스타일을 쓰지 않고, 묶음 A′의 `script-src`는 `'self'`와 사람 확인 출처뿐이다(§5.14).
 - 글꼴은 싣지 않고 시스템 글꼴을 쓴다(토큰 글꼴 스택의 앞쪽). 핵심 숫자(앞 인원)는 display 48px다(docs/design/d2).

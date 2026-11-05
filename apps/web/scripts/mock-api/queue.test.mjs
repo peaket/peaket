@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
+  CreateQueuePreVerificationBody,
+  CreateQueuePreVerificationResponse,
   CreateQueueLobbyParticipantBody,
   CreateQueueLobbyParticipantResponse,
   GetQueueShuffleResultResponse,
@@ -240,6 +242,37 @@ test('로비 상태 바꾸기: 본인확인 전 403·사람 확인 실패 428·�
     const r = await m.get(`/v1/queues/${EVENT}/shuffle-results/${sha(v.body.lobbyToken).slice(0, 3)}.json`);
     assert.equal(r.status, 200);
     assert.equal(r.body[sha(v.body.lobbyToken)], undefined);
+  } finally {
+    m.server.close();
+  }
+});
+
+test('사전 검증(ADR-0211): 계약 Zod 본문 → 201(15분), 갱신이면 최초 발급 시각을 잇고, 상태 바꾸기대로 403·404·428·503(한 번)·401', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queuePreverify=normal');
+    const body = CreateQueuePreVerificationBody.parse({ humanCheckToken: 'sim.preverify.1', deviceId: 'dev-p', behaviorSummary: { v: 1, windowMs: 1200, pointerMoves: 3, pointerEntropy: 1.5, scrollEvents: 0, scrollDistancePx: 0 } });
+    const r = await json(m, 'POST', `/v1/queues/${EVENT}/pre-verifications`, body);
+    assert.equal(r.status, 201);
+    assert.deepEqual(CreateQueuePreVerificationResponse.parse(r.body), r.body);
+    assert.equal(Date.parse(r.body.expiresAt), m.now() + 15 * 60_000);
+    m.tick(60_000);
+    const again = await json(m, 'POST', `/v1/queues/${EVENT}/pre-verifications`, { humanCheckToken: 'sim.preverify.2', preverifyToken: r.body.preverifyToken });
+    assert.equal(again.body.preverifyToken.split('.')[1], r.body.preverifyToken.split('.')[1], '갱신은 최초 발급 시각을 잇는다');
+    assert.equal((await json(m, 'POST', `/v1/queues/${EVENT}/pre-verifications`, { humanCheckToken: 'x', extra: 1 })).status, 400);
+    assert.equal((await json(m, 'POST', `/v1/queues/${EVENT}/pre-verifications`, { humanCheckToken: 'x', behaviorSummary: { v: 2, windowMs: 0 } })).status, 400);
+    assert.equal((await json(m, 'POST', `/v1/queues/${EVENT}/pre-verifications`, { deviceId: 'no-human' })).status, 201, '사람 확인 토큰은 계약에서 선택이다');
+    for (const [mode, status, type] of [['identity', 403, /identity-verification-required$/], ['not-found', 404, /queue-not-found$/], ['unauthorized', 401, /about:blank/]]) {
+      await m.state(`queuePreverify=${mode}`);
+      const x = await json(m, 'POST', `/v1/queues/${EVENT}/pre-verifications`, { humanCheckToken: 'h' });
+      assert.equal(x.status, status, mode);
+      assert.match(x.body.type, type);
+    }
+    await m.state('queuePreverify=down');
+    const down = await fetch(`${m.base}/v1/queues/${EVENT}/pre-verifications`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ humanCheckToken: 'd1' }) });
+    assert.deepEqual([down.status, down.headers.get('retry-after')], [503, '3']);
+    assert.equal((await json(m, 'POST', `/v1/queues/${EVENT}/pre-verifications`, { humanCheckToken: 'd2' })).status, 201, '회차마다 한 번(새 사람 확인 토큰으로 다시 보내면 지나간다)');
+    assert.equal((await json(m, 'POST', `/v1/queues/nope-event/pre-verifications`, { humanCheckToken: 'x' })).status, 404, '모르는 회차');
   } finally {
     m.server.close();
   }

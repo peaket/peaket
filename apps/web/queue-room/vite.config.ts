@@ -31,19 +31,20 @@ function cloudFrontShellRewrite(): Plugin {
           res.end();
           return;
         }
-        if (SHELL_PATHS.some((re) => re.test(path))) req.url = `/shell.ko.html${search}`;
-        else if (path === '/preview' || path === '/preview/') req.url = `/preview.html${search}`;
+        if (SHELL_PATHS.some((re) => re.test(path))) req.url = `/_q/shell.ko.html${search}`;
+        else if (path === '/preview' || path === '/preview/') req.url = `/_q/preview.html${search}`;
         next();
       });
     },
   };
 }
 
-export default defineConfig(({ command }) => ({
-  // 운영 배포에서 셸과 자산은 `/_q/` 아래에 있다(§2.5 `/_q/assets/*`, §5.1 `/_q/shell.{locale}.html`)
-  base: command === 'build' ? '/_q/' : '/',
+export default defineConfig(() => ({
+  // 셸과 자산은 `/_q/` 아래에 있다(§2.5 `/_q/assets/*`, §5.1 `/_q/shell.{locale}.html`). 개발 서버도 같게 두어 소비자 웹 개발 서버가
+  // 대기실 경로·`/_q/*`를 넘겨 같은 출처로 흉내 낸다(ADR-0211 결정 5). 변경 반영(HMR)은 대기실 포트로 바로 잇는다
+  base: '/_q/',
   appType: 'mpa',
-  server: { port: 3004, strictPort: true },
+  server: { port: 3004, strictPort: true, hmr: { host: 'localhost', clientPort: 3004 } },
   preview: { port: 3004, strictPort: true },
   plugins: [cloudFrontShellRewrite()],
   build: {

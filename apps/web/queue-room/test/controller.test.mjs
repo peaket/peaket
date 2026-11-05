@@ -330,3 +330,15 @@ test('SCR-008 입장 뒤 [뒤로]로 돌아와 구매 세션이 남았으면 좌
   await y.start();
   assert.deepEqual([y.store.read().ticket, y.store.read().preverifyToken], [undefined, 'pv'], '다시 줄 서기에 쓸 토큰만 남긴다');
 });
+
+test('SCR-008 진입 403 preverify-invalid면 사전 검증 토큰을 지우고 공연 상세로 간다(공연 상세가 그 토큰으로 다시 보내 오가지 않게, 새 맥락 리뷰 2026-11-05)', async () => {
+  const h = harness({
+    rec: { preverifyToken: 'pv-bad', preverifyIssuedAt: 1, preverifyExpiresAt: 9_999_999_999_999 },
+    handler: ({ m }) => (m === 'POST' ? reply(403, {}, { problem: 'preverify-invalid' }) : reply(500)),
+  });
+  await h.start();
+  assert.deepEqual(h.navs, ['/events/e1']);
+  const rec = h.store.read();
+  assert.equal(rec?.preverifyToken, undefined);
+  assert.equal(rec?.preverifyExpiresAt, undefined);
+});

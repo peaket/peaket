@@ -13,7 +13,8 @@ export const ORIGINS = {
   partner: process.env.NEXT_PUBLIC_PARTNER_ORIGIN || (DEV ? dev(3001) : 'https://partner.peaket.example'),
   console: process.env.NEXT_PUBLIC_CONSOLE_ORIGIN || (DEV ? dev(3002) : 'https://console.peaket.example'),
   scanner: process.env.NEXT_PUBLIC_SCANNER_ORIGIN || (DEV ? dev(3003) : 'https://scanner.peaket.example'),
-  queueRoom: DEV ? dev(3004) : '',
+  // 대기실은 운영처럼 같은 출처의 상대 경로다. 개발 서버는 next.config.ts가 대기실 개발 서버로 넘긴다(ADR-0211 결정 5)
+  queueRoom: '',
   forensics: process.env.NEXT_PUBLIC_FORENSICS_ORIGIN || (DEV ? dev(3005) : 'https://console.peaket.example/forensics'),
   /**
    * 팬 API(gw-fan) 출처(docs/frontend.md §2.1 `api`). 개발 서버에서 값이 없으면 비워 두고, 그때 본인확인 버튼은 퍼블리싱용 시험 창을 연다.

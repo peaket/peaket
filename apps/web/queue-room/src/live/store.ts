@@ -35,6 +35,8 @@ export interface QueueRecord {
   lobby?: Lobby;
   preverifyToken?: string;
   preverifyIssuedAt?: number;
+  /** 공연 상세가 쓴 만료 시각(ADR-0211). 대기실은 쓰지 않고 그대로 옮긴다 */
+  preverifyExpiresAt?: number;
   /** 진행 중인 진입. 보내기 전에 요청 ID와 보낼 토큰을 두고, 202를 받으면 batching을 더한다 */
   entry?: { entryRequestId: string; token: string; batching?: Batching };
   ticket?: Ticket;
@@ -77,6 +79,7 @@ function parseRecord(raw: string | null): QueueRecord | null {
   if (str(r.preverifyToken)) {
     out.preverifyToken = r.preverifyToken;
     if (nat(r.preverifyIssuedAt)) out.preverifyIssuedAt = r.preverifyIssuedAt;
+    if (nat(r.preverifyExpiresAt)) out.preverifyExpiresAt = r.preverifyExpiresAt;
   }
   const e = r.entry as Record<string, unknown> | undefined;
   if (e && str(e.entryRequestId) && str(e.token)) {

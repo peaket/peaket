@@ -7,7 +7,8 @@
 // 캐시 화면이라 서버는 상태를 정하지 않는다(첫 그리기는 뼈대, d5 §5.2 '로딩').
 // 개인 상태(ADR-0202 결정 3, HOT-321): 들어갈 수 있거나 곧 들어갈 수 있는 상태(로비 버튼 차례 기다림·로비 열림·오픈 뒤 진입)만 팬 계정 요약으로 덮는다.
 // 비로그인 [[ 로그인하고 입장 ]], 본인확인 전 [[ 휴대폰 본인확인 ]](이 화면 위 기관 창, SCR-006), 가입을 마치지 않음 [[ 가입을 마치고 입장 ]] [가정].
-// 요약을 받기 전은 뼈대, 모르면(5xx) 덮지 않는다(진입 경로가 다시 막는다). 예매 제한·선예매는 HOT-340이 얹는다.
+// 요약을 받기 전은 뼈대, 모르면(5xx) 덮지 않는다(진입 경로가 다시 막는다). 예매 제한·선예매는 HOT-344가 얹는다.
+// 오픈 뒤 [대기열 들어가기]는 사전 검증 토큰을 거친다(Preverify.tsx, ADR-0211): 유효한 토큰이 있으면 바로, 없으면 사람 확인 뒤 대기실로 간다.
 import Link from 'next/link';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { RoundPicker } from '@peaket/ds/RoundPicker';
@@ -23,6 +24,7 @@ import { renderNextLink } from '@/shared/lib/next-link';
 import { VERIFY_PURPOSE } from '../model/content';
 import { bookingPhase, roundBadge, tierBadge, type BookingPhase, type DetailRound, type EventDetail } from '../model/detail';
 import { useDetailPersonal } from './DetailPersonal';
+import { PreverifyCard, usePreverify } from './Preverify';
 import { VerifyButtonLazy } from './VerifyButtonLazy';
 
 /** 브라우저로 넘기는 값(서버 → 클라이언트, 평평한 값만) */
@@ -191,7 +193,7 @@ function LobbyCountdown({ unlockAt, describedBy, className }: { unlockAt: number
   );
 }
 
-type Primary = { type: 'link'; label: string; href: string } | { type: 'disabled'; label: string } | { type: 'countdown' } | { type: 'verify'; label: string };
+type Primary = { type: 'link'; label: string; href: string } | { type: 'enter'; label: string } | { type: 'disabled'; label: string } | { type: 'countdown' } | { type: 'verify'; label: string };
 
 interface CtaModel {
   desc?: ReactNode;
@@ -238,7 +240,7 @@ function ctaModel(phase: BookingPhase | undefined, data: BookingData, now: numbe
     case 'fifo':
       return { desc: `대기열은 ${data.openTimeText}에 열립니다`, alert: {}, primary: { type: 'disabled', label: '대기열 들어가기' }, minW: 200 };
     case 'queue':
-      return { meta: `${data.roundLabel} · 판매 중`, primary: { type: 'link', label: '대기열 들어가기', href: queue }, minW: 240 };
+      return { meta: `${data.roundLabel} · 판매 중`, primary: { type: 'enter', label: '대기열 들어가기' }, minW: 240 };
     case 'ended':
       return { special: 'ended', endedText: '판매가 끝난 회차입니다', meta: `${data.roundLabel} · 판매가 끝난 회차입니다`, more: { label: '다른 회차', href: otherRoundHref(data, now) } };
     case 'cancelled':
@@ -275,6 +277,7 @@ function PrimaryButton({
     );
   }
   if (p.type === 'countdown') return <LobbyCountdown unlockAt={unlockAt} describedBy={descId} className={className} />;
+  if (p.type === 'enter') return <EnterButton label={p.label} className={className} />;
   if (p.type === 'link') {
     // 대기실(로비·대기열)은 별도 빌드라 전체 이동이다
     return (
@@ -415,4 +418,25 @@ export function BookingPanelCta({ data }: { data: BookingData }) {
       {m.primary ? <PrimaryButton p={m.primary} descId={descId} unlockAt={unlockAt} loginHref={data.loginHref} className="btn-lg btn-block" verifyStatus /> : null}
     </div>
   );
+}
+
+/** 오픈 뒤 [대기열 들어가기]: 사전 검증 토큰이 유효하면 대기실로, 없으면 사람 확인 대화상자(ADR-0211 결정 2) */
+function EnterButton({ label, className }: { label: string; className: string }) {
+  const { enter, view } = usePreverify();
+  const busy = view.step === 'checking' || view.step === 'sending';
+  return (
+    <button className={cx('btn btn-primary', className)} type="button" aria-haspopup="dialog" aria-busy={busy || undefined} onClick={enter} data-verify-return>
+      {label}
+    </button>
+  );
+}
+
+/** 선착순 공연의 오픈 전: 사전 사람 확인 카드(d5 §5.2 '사전 사람 확인'). 개인 상태(로그인·가입·본인확인)가 먼저다 */
+export function BookingPreverifyCard({ className }: { className?: string }) {
+  const { phase } = useBooking();
+  const s = useFanSession();
+  // 오픈 전 선착순은 개인 상태 버튼을 덮지 않으므로(personalCta는 들어갈 수 있는 상태만) 여기서 본인확인한 팬인지 본다
+  const ready = s.status === 'member' && s.me.signupCompleted && s.me.verified;
+  if (phase !== 'fifo' || !ready) return null;
+  return <PreverifyCard {...(className ? { className } : {})} />;
 }
