@@ -89,6 +89,27 @@
         "type": "string",
         "logicalType": "uuid"
       }
+    },
+    {
+      "name": "countedAt",
+      "doc": "available·held·paying·avgTicketsPerOrder를 센 시각. 셈을 실은 사건(판이 바뀔 때와 같은 판의 다시 내기)에만 싣는다. queue-svc는 이 칸이 없거나 자기 시계보다 5초 [가정] 넘게 앞서면 셈을 대기 상태 파일에 쓰지 않는다. 이 칸이나 avgTicketsPerOrder의 모양만 틀리면 셈 칸만 버리고 판매 상태는 받는다(추천 적용 2026-11-06, ADR-0219 결정 5)",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "avgTicketsPerOrder",
+      "doc": "그 회차의 이번 판매에서 결제가 끝난 주문의 평균 좌석 수(좌석 수 ÷ 주문 수, 소수 둘째 자리). 그런 주문이 100건 [가정] 이상일 때만 싣는다. queue-svc는 없거나 1~10 밖이면 기본값 2 [가정]를 쓴다(POL-015, 추천 적용 2026-11-06, ADR-0219 결정 6)",
+      "type": [
+        "null",
+        "double"
+      ],
+      "default": null
     }
   ]
 }

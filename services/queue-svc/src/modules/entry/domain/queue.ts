@@ -83,6 +83,8 @@ export interface EventSchedule {
   openBatch: boolean;
   /** 오픈 직후 묶음 구간 길이(밀리초, 없으면 OPEN_BATCH_MS) */
   batchWindowMs?: number;
+  /** 그 회차의 지금 좌석맵 판 번호(게시한 판, 1 ~ 2^32 − 1). 대기 상태 파일의 seatmapLayoutPath를 만든다. 없으면 그 칸을 뺀다(HOT-011, ADR-0219 결정 7) */
+  layoutVersion?: number;
 }
 
 /** 대기열 Redis를 잠시 쓸 수 없다(마감 초과·연결 끊김·클러스터 재구성·장애 전환 중). 받는 층이 503과 Retry-After로 답한다 */

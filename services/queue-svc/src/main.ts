@@ -9,7 +9,7 @@ import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
 import { Es256AdmissionTokens, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots } from './modules/admission/index.js';
 import { AccountWithdrawnHandler, HmacQueueTokens, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
-import { ApplySaleChange, EventSaleChangedHandler, RedisSaleStates } from './modules/sale/index.js';
+import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates } from './modules/sale/index.js';
 
 const SERVICE = 'queue-svc';
 
@@ -40,6 +40,7 @@ await service.listen();
 // Kafka 소비자(ADR-0214 결정 1): 듣기 시작한 뒤 켠다. 연결·구독이 실패하면 오류 한 줄 뒤 SIGTERM과 같은 차례로 끝내고 종료 코드 1로 나간다(쿠버네티스가 다시 띄운다)
 let consumers: QueueConsumers | undefined;
 let dueWorker: WithdrawnDueWorker | undefined;
+let edgeSync: EdgeFlagSync | undefined;
 if (!kafka.enabled) service.logger.warn({ dep: 'kafka' }, kafka.warning);
 else {
   const pod = (process.env.PEAKET_POD ?? process.env.HOSTNAME ?? 'local').slice(0, 64);
@@ -56,6 +57,23 @@ else {
     signals: { lag: (sec) => lag.set(sec), failed: (stage) => failed.inc({ stage }), expired: (n) => expired.inc(n) },
   });
   dueWorker.start();
+  // 엣지 매진 표시(ADR-0219): 실제 KeyValueStore 어댑터는 HOT-012(OPEN[24]·OPEN[25] 대기)라 아직 없다. 그동안 엣지 410 없이 원본 410만 낸다.
+  // 지표는 지금 만들어 둔다(엣지 포트가 없으면 늘 0, docs/observability.md §5). 멈춤 스위치 PEAKET_EDGE_SYNC(off·false·0이면 멈춤)는 엣지를 손으로 바꾸는 런북이 쓴다(바꾸면 다시 시작)
+  const edgeSyncOff = edgeSyncPausedFromEnv(process.env);
+  service.logger.warn({ dep: 'edge-kvs', paused: edgeSyncOff }, '엣지 매진 표시 저장소가 없어 엣지 410을 켜지 않는다(원본 410만, BUILD_ORDER HOT-012)');
+  const edgeFailed = new Counter({ name: 'queue_edge_flag_failures_total', help: '엣지 매진 표시(키 값 저장소 sale:{회차}) 쓰기 실패', registers });
+  const edgeUnsynced = new Gauge({ name: 'queue_edge_flag_unsynced_events', help: '마지막 쓰기가 실패해 notice와 맞추지 못한 회차 수(want: 바라는 값 on·off)', labelNames: ['want'] as const, registers });
+  const edgeAhead = new Gauge({ name: 'queue_edge_flag_ahead_events', help: 'notice보다 큰 판의 엣지 매진 표시가 있어 바꾸지 못한 회차 수(꾸민 값이거나 notice를 잃었다)', registers });
+  const edgeSignals = { failed: () => edgeFailed.inc(), unsynced: (want: 'on' | 'off', n: number) => edgeUnsynced.set({ want }, n), ahead: (n: number) => edgeAhead.set(n) };
+  const applySale = new ApplySaleChange(new RedisSaleStates(redis), new RedisEventSchedules(redis, systemClock), systemClock, {
+    logger: service.logger,
+    signals: edgeSignals,
+    paused: () => edgeSyncOff,
+    registry: service.metrics.registry,
+  });
+  // 엣지 포트가 생기면(HOT-012) 파드 안 다시 맞추기(5초 [가정])를 돌린다
+  edgeSync = applySale.edgeSync;
+  edgeSync?.start();
   consumers = startQueueConsumers({
     env: kafka.env,
     brokers: kafka.brokers,
@@ -66,7 +84,7 @@ else {
       purchaseSessions: new PurchaseSessionHandler(service.app.get(PurchaseSessionSlots)),
       // 종료 세션 목록으로 탈퇴 전 토큰을 막기 전에는 withdrawnAt + 15분 뒤에 처리한다(기본 미루기, ADR-0214 결정 7)
       accountsWithdrawn: new AccountWithdrawnHandler(purge, undefined, { due, logger: service.logger }),
-      saleChanged: new EventSaleChangedHandler(new ApplySaleChange(new RedisSaleStates(redis), new RedisEventSchedules(redis, systemClock), systemClock)),
+      saleChanged: new EventSaleChangedHandler(applySale),
     },
     registry: service.metrics.registry,
     logger: service.logger,
@@ -85,6 +103,7 @@ function shutdown(): void {
   // Kafka 소비자를 먼저 멈추고(받기를 멈추고 처리 중인 키를 마친 뒤 커밋), 서비스를 닫은 뒤 연결을 닫는다. 어느 단계가 실패해도 연결은 닫는다
   void (consumers?.stop() ?? Promise.resolve())
     .then(() => dueWorker?.stop())
+    .then(() => edgeSync?.stop())
     .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'))
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err }, 'queue-svc 종료 실패'))

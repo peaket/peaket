@@ -24,6 +24,8 @@ function fieldsOf(raw: unknown): Record<string, string> {
   return {};
 }
 
+/** 좌석맵 판 번호의 위 끝(purchase-svc 좌석맵 판과 같은 u32) */
+const U32_MAX = 4_294_967_295;
 const int = (v: string | undefined): number | null => (v !== undefined && /^\d{1,16}$/.test(v) ? Number(v) : null);
 const flag = (v: string | undefined): boolean | null => (v === '1' ? true : v === '0' ? false : null);
 
@@ -40,7 +42,11 @@ export function parseSchedule(raw: unknown): EventSchedule | null {
   // 묶음 구간 길이는 선택 칸이다(없으면 2초 [가정], 있으면 1~60초만 받는다)
   const windowMs = f.batchWindowMs === undefined ? undefined : int(f.batchWindowMs);
   if (windowMs === null || (windowMs !== undefined && (windowMs < 1 || windowMs > 60_000))) return null;
-  return { opensAtMs, startsAtMs, lobbyShuffle, openBatch, ...(windowMs !== undefined ? { batchWindowMs: windowMs } : {}) };
+  // 좌석맵 판 번호는 선택 칸이다. 게시한 판은 1부터다(openapi SeatMapLayout.layoutVersion, 0은 게시하지 않는 초안).
+  // 모양이 틀리면 그 칸만 버린다(좌석맵 미리 받기만 쉬고 대기열은 연다, ADR-0219 결정 7)
+  const layout = f.layoutVersion !== undefined && /^[1-9][0-9]{0,9}$/.test(f.layoutVersion) ? Number(f.layoutVersion) : undefined;
+  const layoutVersion = layout !== undefined && layout <= U32_MAX ? layout : undefined;
+  return { opensAtMs, startsAtMs, lobbyShuffle, openBatch, ...(windowMs !== undefined ? { batchWindowMs: windowMs } : {}), ...(layoutVersion !== undefined ? { layoutVersion } : {}) };
 }
 
 @Injectable()

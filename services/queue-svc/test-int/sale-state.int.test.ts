@@ -7,6 +7,7 @@ import { RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-s
 import { type EventSchedule, keepUntilOf, PLATFORM_SCOPE } from '../src/modules/entry/domain/queue.js';
 import { ApplySaleChange, RedisSaleStates } from '../src/modules/sale/index.js';
 import { RedisStateSnapshots } from '../src/modules/state/adapters/redis-state-snapshots.js';
+import { buildStateFiles, type QueueStateBody } from '../src/modules/state/domain/state.js';
 import { saleEvent, saleStateCases } from '../test/sale-state-cases.js';
 import { newEvent, openSchedule } from '../test/support.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
@@ -92,4 +93,38 @@ test('대기상태파일읽기는_notice의제어칸(paused·suspended·banner)�
   await cmd(pk, ['HSET', pk, 'suspended', '1', 'banner', '전체 공지']);
   expect(await r.readPlatform()).toEqual({ paused: false, suspended: true, banner: '전체 공지' });
   await cmd(pk, ['DEL', pk]);
+});
+
+test('Q-T64①②_판매상태Lua가쓴셈칸을_대기상태파일읽기Lua가같은회차슬롯에서읽어_30초안이면파일에싣는다', async () => {
+  const eventId = newEvent();
+  const s = openSchedule(Date.now());
+  await writeSchedule(eventId, s);
+  const apply = new ApplySaleChange(new RedisSaleStates(redis), new RedisEventSchedules(redis, systemClock), systemClock);
+  const countedAt = Date.now();
+  await apply.run(saleEvent(eventId, { version: 2, available: 37, countedAt: new Date(countedAt).toISOString(), avgTicketsPerOrder: 1.5 }));
+  const snap = await new RedisStateSnapshots(redis).read(eventId);
+  expect(snap.notice).toMatchObject({ remainingSeats: 37, seatsAtMs: countedAt, avgTicketsPerOrder: 1.5 });
+  const f = JSON.parse(buildStateFiles(snap, s, Math.floor(Date.now() / 1000) * 1000, {}, eventId)[0]!.body) as QueueStateBody;
+  expect([f.remainingSeats, f.avgTicketsPerOrder]).toEqual([37, 1.5]);
+});
+
+test('Q-T64④_일정사본의layoutVersion은정수글(1~2^32−1,0은게시하지않는초안)일때만읽고_모양이틀리면그칸만빼며일정은그대로연다', async () => {
+  const schedules = new RedisEventSchedules(redis, systemClock);
+  const cases: [string, number | undefined][] = [
+    ['7', 7],
+    ['0', undefined],
+    ['1', 1],
+    ['4294967295', 4294967295],
+    ['4294967296', undefined],
+    ['07', undefined],
+    ['v1', undefined],
+  ];
+  for (const [raw, want] of cases) {
+    const eventId = newEvent();
+    await writeSchedule(eventId, openSchedule(Date.now()));
+    await cmd(keys.cfg(eventId), ['HSET', keys.cfg(eventId), 'layoutVersion', raw]);
+    const got = await schedules.get(eventId);
+    expect(got, raw).not.toBeNull();
+    expect(got!.layoutVersion, raw).toBe(want);
+  }
 });

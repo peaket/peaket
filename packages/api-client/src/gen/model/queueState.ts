@@ -17,15 +17,15 @@ import type { QueueStateSaleStatus } from './queueStateSaleStatus';
 export interface QueueState {
   /** 입장 일시정지(관제 명령 2 ADMISSION_PAUSE)가 걸려 있다. 대기열은 그대로이고 차례 반영만 멈춘다. 안내 문구와 화면 동작(예상 시간 숨기기, 정지 중 앞 인원 갱신)은 docs/design/d5와 docs/features/queue-admission.md §4를 따르고, 이 칸은 그 판단의 재료다(BAS-042) */
   admissionPaused?: boolean;
-  /** 그 회차 팬 좌석맵 파일의 경로(GET /v1/events/{eventId}/seatmap-layouts/{layoutVersion}.json). 대기 중에 미리 받아 두고, 입장 확정 응답의 seatmapLayoutPath와 다르면 다시 받는다(docs/frontend.md §4.2.2, BAS-042) */
+  /** 그 회차 팬 좌석맵 파일의 경로(GET /v1/events/{eventId}/seatmap-layouts/{layoutVersion}.json). 대기 중에 미리 받아 두고, 입장 확정 응답의 seatmapLayoutPath와 다르면 다시 받는다(docs/frontend.md §4.2.2, BAS-042). 회차 일정 사본(q:{event:E}:cfg)의 layoutVersion으로 만들고, 그 값이 없으면 이 칸을 싣지 않는다(추천 적용 2026-11-06, HOT-011, ADR-0219 결정 7) */
   seatmapLayoutPath?: string;
   /**
-     * 그 회차의 남은(판매 가능) 좌석 수. 파일을 만들 때 좌석 원장에서 받은 값이라 몇 초 늦을 수 있다. 남은 앞 인원 × avgTicketsPerOrder > remainingSeats이면 화면이 '현재 순번으로는 구매가 어려울 수 있습니다'를 띄운다(POL-015, queue-admission §4, BAS-042)
+     * 그 회차의 남은(판매 가능) 좌석 수. 파일을 만들 때 좌석 원장에서 받은 값이라 몇 초 늦을 수 있다. 남은 앞 인원 × avgTicketsPerOrder > remainingSeats이면 화면이 '현재 순번으로는 구매가 어려울 수 있습니다'를 띄운다(POL-015, queue-admission §4, BAS-042). 값은 purchase-svc가 판매 상태 사건(EventSaleChanged)의 다시 내기에 싣는 가용 좌석(available)이다. 그 셈이 파일 생성 시각에서 30초 [가정] 안일 때만 avgTicketsPerOrder와 함께 싣고, 아니면 두 칸 모두 싣지 않는다(추천 적용 2026-11-06, HOT-011, ADR-0219 결정 5)
      * @minimum 0
      */
   remainingSeats?: number;
   /**
-     * 공연 평균 구매 매수(POL-015, queue-admission §4의 '공연 평균 구매 매수'). 값을 정하는 법(같은 공연의 지난 판매, 없으면 정한 기본값)은 이 칸을 채우는 단계(HOT-010)가 정한다(BAS-042)
+     * 공연 평균 구매 매수(POL-015, queue-admission §4의 '공연 평균 구매 매수', BAS-042). 그 회차의 이번 판매에서 결제가 끝난 주문이 100건 [가정] 이상이면 그 주문들의 좌석 수 ÷ 주문 수(purchase-svc가 판매 상태 사건에 싣는다)이고, 그 전이나 값이 1~10 밖이면 2 [가정]다. remainingSeats와 함께 싣거나 함께 뺀다(추천 적용 2026-11-06, HOT-011, ADR-0219 결정 6)
      * @minimum 0
      */
   avgTicketsPerOrder?: number;

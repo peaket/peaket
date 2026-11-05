@@ -86,7 +86,7 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
       if (!schedule) return null;
       const boundaryMs = boundaryOf(this.clock.now());
       const platform = await this.#readPlatform();
-      const files = buildStateFiles(await this.snapshots.read(eventId), schedule, boundaryMs, platform);
+      const files = buildStateFiles(await this.snapshots.read(eventId), schedule, boundaryMs, platform, eventId);
       const a: Active = { schedule, askedAt: this.clock.now(), files };
       this.#active.set(eventId, a);
       return a;
@@ -114,7 +114,7 @@ export class StateFiles implements OnModuleInit, OnModuleDestroy {
           try {
             const schedule = await this.schedules.get(eventId).catch(() => a.schedule);
             if (schedule) a.schedule = schedule;
-            const files = buildStateFiles(await this.snapshots.read(eventId), a.schedule, boundaryMs, platform);
+            const files = buildStateFiles(await this.snapshots.read(eventId), a.schedule, boundaryMs, platform, eventId);
             // 늦게 끝난 생성이 그 사이 만든 더 새 파일을 덮지 않게 한다
             if (a.files[0]!.generatedAtMs < boundaryMs) a.files = files;
           } catch (err) {

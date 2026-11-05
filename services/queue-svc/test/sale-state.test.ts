@@ -80,6 +80,20 @@ describe('EventSaleChanged 처리기', () => {
     }
   });
 
+  test('Q-T64①_셈칸의모양이틀리면(countedAt이시각이아님·평균이수가아님)_셈칸만버리고판매상태는쓴다(사건전체를보류하지않는다)', async () => {
+    const { states, handler } = make();
+    const e = { ...saleEvent('ev-1', { status: 'SOLD_OUT', version: 2 }), countedAt: 'not-a-date', avgTicketsPerOrder: 'x' };
+    const r = handler.decode(msg(e));
+    expect(handler.keyOf(r)).toBe('ev-1');
+    await handler.handle(r);
+    const n = states.noticeOf('ev-1');
+    expect(n).toMatchObject({ saleState: 'SOLD_OUT', saleVersion: '2' });
+    expect(n.remainingSeats).toBeUndefined();
+    // 셈 칸이 아닌 칸이 틀리면 지금처럼 사건 전체를 bad: 키로 보류한다
+    const bad = handler.decode(msg({ ...saleEvent('ev-1', { version: 3 }), version: 'x', countedAt: 'not-a-date' }));
+    expect(handler.keyOf(bad)).toBe('bad:ev-1');
+  });
+
   test('대기열Redis일시장애는_일시실패(TransientError)로다시한다', async () => {
     const states = new MemorySaleStates();
     states.failNext = new QueueStoreUnavailable(new Error('잠시 안 됨'));

@@ -213,6 +213,57 @@ describe('판매 상태(HOT-010, ADR-0214)', () => {
   });
 });
 
+describe('좌석 수 칸(HOT-011, ADR-0219)', () => {
+  const fileOf = (s: StateSnapshot, o: { at?: number; sched?: typeof schedule; eventId?: string } = {}) =>
+    parse(buildStateFiles(s, o.sched ?? schedule, o.at ?? T, {}, o.eventId ?? 'ev-1')[0]!.body);
+
+  test('Q-T64②_셈시각이생성시각에서30초[가정]안이면_remainingSeats와avgTicketsPerOrder를함께싣고_아니면둘다뺀다', () => {
+    const fresh = fileOf(snap({ seq: 1, notice: { remainingSeats: 40, seatsAtMs: T - 30_000, avgTicketsPerOrder: 1.75 } }));
+    expect([fresh.remainingSeats, fresh.avgTicketsPerOrder]).toEqual([40, 1.75]);
+    const stale = fileOf(snap({ seq: 1, notice: { remainingSeats: 40, seatsAtMs: T - 30_001, avgTicketsPerOrder: 1.75 } }));
+    expect('remainingSeats' in stale || 'avgTicketsPerOrder' in stale).toBe(false);
+    // 셈이 없으면(내는 쪽이 생기기 전) 두 칸 모두 없다
+    const none = fileOf(snap({ seq: 1 }));
+    expect('remainingSeats' in none || 'avgTicketsPerOrder' in none).toBe(false);
+    // 셈 시각이 생성 시각보다 5초 [가정] 넘게 앞서면(시계가 어긋난 셈) 뺀다. 앞선 셈이 신선도를 늘리지 않게(리뷰 9)
+    expect('remainingSeats' in fileOf(snap({ seq: 1, notice: { remainingSeats: 40, seatsAtMs: T + 5_001 } }))).toBe(false);
+    expect(fileOf(snap({ seq: 1, notice: { remainingSeats: 40, seatsAtMs: T + 5_000 } })).remainingSeats).toBe(40);
+    // 남은 좌석 0(일시 매진)도 싣는다
+    expect(fileOf(snap({ seq: 1, notice: { remainingSeats: 0, seatsAtMs: T } })).remainingSeats).toBe(0);
+  });
+
+  test('Q-T64③_평균구매매수가없거나1~10밖이면_기본값2[가정]를싣는다', () => {
+    const avg = (v: number | undefined) => fileOf(snap({ seq: 1, notice: { remainingSeats: 5, seatsAtMs: T, ...(v === undefined ? {} : { avgTicketsPerOrder: v }) } })).avgTicketsPerOrder;
+    expect([avg(undefined), avg(0.9), avg(10.5), avg(Number.NaN), avg(1), avg(10), avg(3.25)]).toEqual([2, 2, 2, 2, 1, 10, 3.25]);
+  });
+
+  test('Q-T64④_일정사본에좌석맵판(layoutVersion)이있으면_seatmapLayoutPath가그회차의좌석맵파일경로이고_없으면그칸만뺀다', () => {
+    const withLayout = fileOf(snap({ seq: 1 }), { sched: { ...schedule, layoutVersion: 7 }, eventId: 'ev-abc' });
+    expect(withLayout.seatmapLayoutPath).toBe('/v1/events/ev-abc/seatmap-layouts/7.json');
+    const without = fileOf(snap({ seq: 1 }));
+    expect('seatmapLayoutPath' in without).toBe(false);
+    expect(without.saleStatus).toBe('ON_SALE');
+  });
+
+  test('[ASVS v5.0.0-14.3.2] Q-T64_좌석수칸·좌석맵경로를더해도_공개파일은회차값만싣는다', () => {
+    const f = fileOf(snap({ seq: 1, notice: { remainingSeats: 5, seatsAtMs: T } }), { sched: { ...schedule, layoutVersion: 1 } });
+    expect(Object.keys(f).sort()).toEqual(
+      ['admissionPaused', 'avgTicketsPerOrder', 'generatedAtMs', 'pollHintMs', 'remainingSeats', 'removedBeforeSegment', 'removedBitmap', 'removedUpToServing', 'saleStatus', 'seatmapLayoutPath', 'serving', 'servingRate', 'servingSteps', 'soldOutTiers'].sort(),
+    );
+  });
+
+  test('Q-T64④_켠회차의파일은그회차ID로좌석맵경로를만든다(StateFiles)', async () => {
+    const clock = fakeClock({ now: T + 400 });
+    const snapshots = new MemoryStateSnapshots();
+    const schedules = new MemoryEventSchedules();
+    await schedules.set('ev-xyz', { ...schedule, layoutVersion: 12 });
+    const files = new StateFiles(snapshots, schedules, clock, { webOrigin: 'https://www.peaket.example', autoTick: false });
+    expect(parse((await files.file('ev-xyz', 0))!.body).seatmapLayoutPath).toBe('/v1/events/ev-xyz/seatmap-layouts/12.json');
+    await files.tick(T + 1000);
+    expect(parse((await files.file('ev-xyz', 0))!.body).seatmapLayoutPath).toBe('/v1/events/ev-xyz/seatmap-layouts/12.json');
+  });
+});
+
 describe('켜기·매초 다시 만들기', () => {
   const setup = async () => {
     const clock = fakeClock({ now: T + 400 });

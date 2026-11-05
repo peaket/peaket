@@ -172,6 +172,7 @@ sequenceDiagram
   - 판매 중인 회차마다 1초 [가정]마다 센다. 가용은 판매 대상 좌석 수 − 비트맵의 켜진 비트 수, 홀드는 만료 인덱스(`s:{event:E}:expiry`)의 수다. 둘은 같은 샤드에서 한 번에 읽는다. 결제 중은 승인 결과를 기다리는 `seat_sale` PENDING의 수이고, 입금 대기·결과 모름의 PENDING은 팔린 쪽으로 센다.
   - ON_SALE → ALL_HELD는 가용 0이 5초 [가정] 이어질 때, ALL_HELD → ON_SALE은 가용이 생기면 바로, → SOLD_OUT은 가용·홀드·결제 중 0이 1초 간격 [가정] 두 번 이어질 때다. 매진 뒤 판매 종료 전에 좌석이 돌아오면 ON_SALE로 되돌린다(매진 풀림).
   - 상태가 바뀌면 purchase DB `event_sale`을 판 번호 조건으로 바꾸고, 같은 트랜잭션의 Outbox로 `trade.seats`에 `EventSaleChanged`를 낸다. 키가 회차라 그 회차의 좌석 사건과 같은 파티션에 온다. 판매 사건(`seat_sale` Outbox)과는 같은 Outbox 릴레이가 `seq` 순서로 보내지만, 홀드 사건(좌석 Redis Stream 릴레이)과의 순서는 보장하지 않는다. 그래서 받는 쪽은 도착 순서에 기대지 않고 판 번호(`version`)로 거른다(docs/api/asyncapi.yaml `EventSaleChanged`, 기술 검토 낮음-025). 판정 작업은 회차마다 한 파드만 돌도록 홀드 만료 작업과 같은 방식으로 나눈다 [가정, wbs 2.5.3].
+  - **다시 내기와 셈(추천 적용 2026-11-06, ADR-0219 결정 5·6, BUILD_ORDER HOT-011)**: 판매 중·일시 매진·매진 회차는 상태가 그대로여도 같은 판(`version`·`eventKey` 그대로)을 5초 [가정]마다 그때의 셈(`available`·`held`·`paying`, 셈 시각 `countedAt`)으로 다시 낸다. 대기열이 남은 좌석 수(대기 상태 파일의 `remainingSeats`)로 쓰고, 엣지 매진 표시를 다시 맞추며, 대기열 Redis 장애 전환으로 잃은 판매 상태를 되찾는다(ADR-0214 결정 2). 그 회차에서 결제가 끝난 주문이 100건 [가정] 이상이면 그 주문들의 좌석 수 ÷ 주문 수(소수 둘째 자리)를 `avgTicketsPerOrder`로 함께 싣는다(POL-015의 평균 구매 매수). 판정이 바뀐 사건에도 같은 셈 칸을 싣는다. 만드는 단계는 PRF-144다.
   - 시험은 S-T25다.
 
 ## 5. 홀드 TTL·연장·만료·재노출(POL-012, FR-042)

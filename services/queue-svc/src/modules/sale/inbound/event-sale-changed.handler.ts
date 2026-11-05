@@ -47,7 +47,15 @@ export class EventSaleChangedHandler implements KeyedHandler<SaleRecord> {
     // 좌석 사건(홀드·판매)은 type 칸이 있다. 판매 상태 사건에는 없다
     if ('type' in o) return { kind: 'skip', key: `skip:${msgKey}` };
     const id = typeof o.eventId === 'string' && KEY_PART.test(o.eventId) ? o.eventId : undefined;
-    const r = EventSaleChanged.safeParse(o);
+    let r = EventSaleChanged.safeParse(o);
+    // 셈 칸(countedAt·avgTicketsPerOrder)은 대기 상태 파일의 참고 값이다. 그 칸만 틀리면 셈 칸을 버리고 판매 상태는 받는다
+    // (선택 칸 하나 때문에 매진 판을 보류하지 않게, ADR-0219 결정 5, HOT-011 리뷰)
+    if (!r.success && ('countedAt' in o || 'avgTicketsPerOrder' in o)) {
+      const rest: Record<string, unknown> = { ...o };
+      delete rest.countedAt;
+      delete rest.avgTicketsPerOrder;
+      r = EventSaleChanged.safeParse(rest);
+    }
     if (!r.success) return bad(`bad:${id ?? msgKey}`, 'EventSaleChanged 계약 모양이 아니다');
     if (!id) return bad(`bad:${msgKey}`, 'EventSaleChanged의 회차 ID가 키 조각 모양이 아니다');
     return { kind: 'sale', event: r.data };

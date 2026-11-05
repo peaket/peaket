@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { Clock, FakeClock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import type { EventSchedule } from '../src/modules/entry/domain/queue.js';
-import { ApplySaleChange, type SaleChangedEvent, type SaleStates, SALE_STATE_FALLBACK_TTL_MS } from '../src/modules/sale/index.js';
+import { ApplySaleChange, MemoryEdgeSaleFlags, type SaleChangedEvent, type SaleStates, SALE_STATE_FALLBACK_TTL_MS } from '../src/modules/sale/index.js';
 import { newEvent, openSchedule } from './support.js';
 
 export interface SaleWorld {
@@ -136,6 +136,74 @@ export function saleStateCases(label: string, make: () => Promise<SaleWorld>) {
       const at = (await none.w.expireAt(none.eventId))!;
       expect(at).toBeGreaterThanOrEqual(before + SALE_STATE_FALLBACK_TTL_MS - 5);
       expect(at).toBeLessThanOrEqual(none.w.clock.now() + SALE_STATE_FALLBACK_TTL_MS + 5);
+    });
+
+    // 남은 좌석 수 칸(HOT-011, ADR-0219 결정 5·6). 셈 시각은 시험 시작 시각에서 조금 앞으로 둔다(시계 허용 1분 안. 실제 Valkey 쪽은 시스템 시계라 시작 시각을 고정해 쓴다)
+    const iso = (ms: number) => new Date(ms).toISOString();
+
+    test('[ASVS v5.0.0-15.4.2] Q-T64①_셈은판번호가지금판이상이고셈시각이더늦을때만쓰고_같은판의다시내기(STALE)도더늦은셈이면고친다', async () => {
+      const { w, eventId, apply } = await setup();
+      const t0 = w.clock.now();
+      const at = (d: number) => iso(t0 + d);
+      expect(await apply.run(saleEvent(eventId, { version: 2, available: 50, countedAt: at(0), avgTicketsPerOrder: 1.75 }))).toEqual({ kind: 'APPLIED' });
+      expect(await w.notice(eventId)).toMatchObject({ remainingSeats: '50', seatsAtMs: String(t0), avgTicketsPerOrder: '1.75' });
+      // 같은 판의 다시 내기: 판은 그대로 STALE이지만 더 늦은 셈으로 고친다(평균이 없으면 칸을 지운다)
+      expect(await apply.run(saleEvent(eventId, { version: 2, available: 40, countedAt: at(2_000) }))).toEqual({ kind: 'STALE' });
+      const n = await w.notice(eventId);
+      expect(n).toMatchObject({ remainingSeats: '40', seatsAtMs: String(t0 + 2_000), saleVersion: '2' });
+      expect(n.avgTicketsPerOrder).toBeUndefined();
+      // 같은 판의 더 이른 셈(늦게 온 다시 내기)은 쓰지 않는다
+      await apply.run(saleEvent(eventId, { version: 2, available: 45, countedAt: at(1_000) }));
+      expect((await w.notice(eventId)).remainingSeats).toBe('40');
+      // 옛 판의 셈은 시각이 늦어도 쓰지 않는다
+      await apply.run(saleEvent(eventId, { version: 1, available: 99, countedAt: at(4_000) }));
+      expect((await w.notice(eventId)).remainingSeats).toBe('40');
+      // 새 판은 판매 상태와 셈을 함께 쓴다
+      await apply.run(saleEvent(eventId, { status: 'ALL_HELD', version: 3, available: 0, countedAt: at(3_000), avgTicketsPerOrder: 2.5 }));
+      expect(await w.notice(eventId)).toMatchObject({ saleState: 'ALL_HELD', remainingSeats: '0', seatsAtMs: String(t0 + 3_000), avgTicketsPerOrder: '2.5' });
+    });
+
+    test('Q-T64①_셈시각이없거나_지금보다5초[가정]넘게앞서면셈을쓰지않고_평균이1~10밖이면평균칸만지운다', async () => {
+      const { w, eventId, apply } = await setup();
+      const t0 = w.clock.now();
+      const at = (d: number) => iso(t0 + d);
+      await apply.run(saleEvent(eventId, { version: 1, available: 50 }));
+      expect((await w.notice(eventId)).remainingSeats).toBeUndefined();
+      await apply.run(saleEvent(eventId, { version: 2, available: 50, countedAt: at(6_000) }));
+      expect((await w.notice(eventId)).remainingSeats).toBeUndefined();
+      await apply.run(saleEvent(eventId, { version: 3, available: 30, countedAt: at(0), avgTicketsPerOrder: 11 }));
+      const n = await w.notice(eventId);
+      expect(n.remainingSeats).toBe('30');
+      expect(n.avgTicketsPerOrder).toBeUndefined();
+      await apply.run(saleEvent(eventId, { version: 4, available: 20, countedAt: at(1_000), avgTicketsPerOrder: 0.5 }));
+      expect((await w.notice(eventId)).avgTicketsPerOrder).toBeUndefined();
+    });
+
+    test('Q-T63④_엣지다시맞추기가읽는notice의지금판매상태와판번호는_쓴판이고_notice가없으면null이다', async () => {
+      const { w, eventId, apply } = await setup();
+      expect(await w.states.current(eventId)).toBeNull();
+      await apply.run(saleEvent(eventId, { status: 'SOLD_OUT', version: 4 }));
+      await apply.run(saleEvent(eventId, { status: 'ON_SALE', version: 3 }));
+      expect(await w.states.current(eventId)).toEqual({ state: 'SOLD_OUT', version: 4 });
+    });
+
+    test('Q-T63③_판이같거나작아쓰지않을때(STALE)도_notice의지금판매상태와판번호를돌려줘_엣지를그판으로되돌린다', async () => {
+      const w = await make();
+      const eventId = newEvent();
+      await w.schedules.set(eventId, openSchedule(w.clock.now()));
+      const edge = new MemoryEdgeSaleFlags();
+      const apply = new ApplySaleChange(w.states, w.schedules, w.clock, { edge });
+      await apply.run(saleEvent(eventId, { status: 'ON_SALE', previousStatus: 'SOLD_OUT', version: 5 }));
+      expect(edge.flagOf(eventId)).toMatchObject({ soldOut: false, version: 5 });
+      // 늦게 온 옛 매진 판: 엣지를 먼저 켜려 하지만 저장된 판(5)보다 작아 바뀌지 않고, notice의 지금 판(ON_SALE 5)으로 남는다
+      expect(await apply.run(saleEvent(eventId, { status: 'SOLD_OUT', version: 4 }))).toEqual({ kind: 'STALE' });
+      expect(edge.flagOf(eventId)).toMatchObject({ soldOut: false, version: 5 });
+      // 엣지 저장소를 잃은 뒤(새 저장소) 옛 매진 판을 다시 받아도 notice의 지금 판으로 되돌린다
+      const fresh = new MemoryEdgeSaleFlags();
+      const again = new ApplySaleChange(w.states, w.schedules, w.clock, { edge: fresh });
+      await again.run(saleEvent(eventId, { status: 'SOLD_OUT', version: 4 }));
+      expect(fresh.flagOf(eventId)).toMatchObject({ soldOut: false, version: 5 });
+      expect(fresh.writes.map((x) => JSON.parse(x.value).soldOut)).toEqual([true, false]);
     });
   });
 }

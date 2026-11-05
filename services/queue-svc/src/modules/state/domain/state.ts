@@ -1,6 +1,7 @@
 // 대기 상태 파일의 규칙 값과 만들기(docs/features/queue-admission.md §4 '대기 상태 파일의 첫 구현', openapi QueueState, ADR-0110).
 // 파일 하나가 구간 하나(번호 1,000개)다. 같은 구간의 대기자가 같은 파일을 받으므로 사람별 값은 없다.
 import { type EventSchedule, saleEndOf, SEGMENT_SIZE, segmentOf } from '../../entry/index.js';
+import { AVG_TICKETS_MAX, AVG_TICKETS_MIN, SEAT_COUNT_CLOCK_SKEW_MS } from '../../sale/index.js';
 
 /** 차례 진행 속도를 내는 창(1초 칸 수) [가정] */
 export const RATE_SLOTS = 10;
@@ -8,6 +9,10 @@ export const RATE_SLOTS = 10;
 export const STEPS_WINDOW_MS = 5_000;
 /** 입장 임박 구간: 그 구간의 첫 번호까지 예상 대기가 이 초 이내(ADR-0110) */
 export const IMMINENT_WAIT_S = 60;
+/** 남은 좌석 수 칸을 싣는 셈의 신선도 [가정]: 셈 시각이 생성 시각에서 이 안일 때만 싣는다(ADR-0219 결정 5) */
+export const SEAT_COUNT_FRESH_MS = 30_000;
+/** 평균 구매 매수가 없거나 1~10 밖일 때의 기본값 [가정](ADR-0219 결정 6) */
+export const DEFAULT_AVG_TICKETS_PER_ORDER = 2;
 /** 마지막 요청 뒤 회차를 켜 두는 시간 [가정] */
 export const ACTIVE_FOR_MS = 60_000;
 /** 파드 하나가 켜 두는 회차 수의 상한 [가정] */
@@ -53,6 +58,10 @@ export interface NoticeFields {
   suspended?: boolean;
   /** 공지 배너 글(명령 7) */
   banner?: string;
+  /** 남은 좌석 수와 그 셈 시각(유닉스 밀리초), 평균 구매 매수(판매 상태 사건의 셈, HOT-011, ADR-0219) */
+  remainingSeats?: number;
+  seatsAtMs?: number;
+  avgTicketsPerOrder?: number;
 }
 
 /** 전체 범위 q:{event:PLATFORM}:notice(일시정지·판매 중지·공지 배너) */
@@ -82,6 +91,11 @@ export interface QueueStateBody {
   soldOutTiers: string[];
   /** 입장 일시정지(명령 2, BAS-042) */
   admissionPaused: boolean;
+  /** 그 회차 좌석맵 파일의 경로(일정 사본에 좌석맵 판이 있을 때만, BAS-042·HOT-011) */
+  seatmapLayoutPath?: string;
+  /** 남은 좌석 수와 평균 구매 매수(셈이 30초 [가정] 안일 때만 함께, POL-015) */
+  remainingSeats?: number;
+  avgTicketsPerOrder?: number;
   /** 공지 배너 글(있을 때만) */
   banner?: string;
   removedUpToServing: number;
@@ -182,8 +196,25 @@ function rateOf(s: StateSnapshot, removed: Removed, generatedAtMs: number): numb
   return Math.round(rate * 1000) / 1000;
 }
 
-/** 회차의 모든 구간 파일. 구간 0부터 seq가 든 구간(seq가 0이면 구간 0) 뒤 AHEAD_SEGMENTS 구간까지 */
-export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, generatedAtMs: number, platform: PlatformNotice = {}): StateFile[] {
+/**
+ * 남은 좌석 수 칸: 셈이 생성 시각에서 30초 [가정] 안이면 남은 좌석 수와 평균 구매 매수(없거나 1~10 밖이면 2 [가정])를 함께, 아니면 둘 다 뺀다.
+ * 셈 시각이 생성 시각보다 5초 [가정] 넘게 앞서면(시계가 어긋난 셈) 뺀다. 앞선 시각이 신선도를 늘리지 않게 한다
+ */
+function seatCountsOf(n: NoticeFields, generatedAtMs: number): Pick<QueueStateBody, 'remainingSeats' | 'avgTicketsPerOrder'> {
+  const { remainingSeats: left, seatsAtMs: at, avgTicketsPerOrder: avg } = n;
+  if (left === undefined || at === undefined || !Number.isSafeInteger(left) || left < 0) return {};
+  const age = generatedAtMs - at;
+  if (age > SEAT_COUNT_FRESH_MS || age < -SEAT_COUNT_CLOCK_SKEW_MS) return {};
+  const ok = avg !== undefined && Number.isFinite(avg) && avg >= AVG_TICKETS_MIN && avg <= AVG_TICKETS_MAX;
+  return { remainingSeats: left, avgTicketsPerOrder: ok ? avg : DEFAULT_AVG_TICKETS_PER_ORDER };
+}
+
+/** 그 회차 좌석맵 파일의 경로(docs/frontend.md §4.2.2). 회차 ID나 판 번호가 없으면 없다 */
+const seatmapPathOf = (eventId: string | undefined, schedule: EventSchedule): string | undefined =>
+  eventId !== undefined && schedule.layoutVersion !== undefined ? `/v1/events/${encodeURIComponent(eventId)}/seatmap-layouts/${schedule.layoutVersion}.json` : undefined;
+
+/** 회차의 모든 구간 파일. 구간 0부터 seq가 든 구간(seq가 0이면 구간 0) 뒤 AHEAD_SEGMENTS 구간까지. eventId는 좌석맵 경로에 쓴다(없으면 그 칸을 뺀다) */
+export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, generatedAtMs: number, platform: PlatformNotice = {}, eventId?: string): StateFile[] {
   const lastSegment = s.seq >= 1 ? segmentOf(s.seq) : 0;
   const maxSegment = lastSegment + AHEAD_SEGMENTS;
   const removed = new Removed(s, lastSegment);
@@ -197,6 +228,8 @@ export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, gener
   const soldOutTiers = [...(notice.soldOutTiers ?? [])];
   const banner = notice.banner || platform.banner;
   const admissionPaused = s.admit?.paused === true && (s.admit.untilMs === null || generatedAtMs < s.admit.untilMs);
+  const seatmapLayoutPath = seatmapPathOf(eventId, schedule);
+  const seatCounts = seatCountsOf(notice, generatedAtMs);
   const steps = s.calls
     // 경계 뒤 읽기 전에 일어난 전진도 serving에 들어 있으므로 위쪽은 자르지 않는다
     .filter((c) => c.atMs >= generatedAtMs - STEPS_WINDOW_MS)
@@ -223,6 +256,8 @@ export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, gener
       saleStatus,
       soldOutTiers,
       admissionPaused,
+      ...(seatmapLayoutPath ? { seatmapLayoutPath } : {}),
+      ...seatCounts,
       ...(banner ? { banner } : {}),
       removedUpToServing,
       removedBeforeSegment: removed.before(seg),
