@@ -12,6 +12,8 @@ import { ConfirmVerification } from '../src/modules/verification/application/con
 import { GetVerificationResult } from '../src/modules/verification/application/get-verification-result.js';
 import { StartVerification } from '../src/modules/verification/application/start-verification.js';
 import { VerificationError } from '../src/modules/verification/application/verification-error.js';
+import type { VerificationStore } from '../src/modules/verification/domain/ports.js';
+import { CiAlreadyLinked } from '../src/modules/verification/domain/verification.js';
 import { AGENCY_SECRET, AGENCY_URL, agencyResult, kit, newKey, noClosure, testAgency } from './support.js';
 
 async function setup(mode: 'POPUP' | 'REDIRECT' = 'POPUP') {
@@ -273,4 +275,38 @@ describe('모의 기관과 기관 창 흐름(BOT-010)', () => {
     const secret = AGENCY_SECRET.toString('base64');
     expect(TestVerificationProvider.fromEnv({ ...base, PEAKET_ENV: 'demo', PEAKET_TEST_VERIFICATION_SECRET: secret }).window('w')).toEqual({ url: AGENCY_URL, method: 'POST', fields: { verificationId: 'w' }, mode: 'POPUP' });
   });
+});
+
+test('탈퇴한주인의남은기록지우기는다시하기횟수를쓰지않는다_지운뒤pid계산과동시저장충돌(CiAlreadyLinked)이와도본인확인을마친다(재검토 2026-11-05)', async () => {
+  const t = await setup();
+  const a = (await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'gone-a', email: null, deviceId: null })).accountId;
+  const sa = await t.start.run({ accountId: a, sessionId: null, purpose: 'FIRST', next: '/' });
+  await t.confirm.run({ accountId: a, verificationId: sa.verificationId, providerResult: t.agency(sa.verificationId, { person: 'gone-person' }) });
+  // 메모리 저장소는 계정을 보지 못한다: a를 탈퇴한 계정으로 보이게 하고, 첫 저장에 다른 계정의 동시 저장 충돌을 한 번 넣는다
+  let conflicts = 1;
+  const store = t.verifications;
+  const wrapped = new Proxy(store, {
+    get(o, k) {
+      if (k === 'transaction')
+        return <T,>(fn: Parameters<VerificationStore['transaction']>[0]) =>
+          o.transaction((tx) =>
+            (fn as (x: typeof tx) => Promise<T>)({
+              ...tx,
+              accountStatusOf: async (id: string) => (id === a ? 'DELETED' : null),
+              saveVerification: async (v) => {
+                if (conflicts-- > 0) throw new CiAlreadyLinked();
+                return tx.saveVerification(v);
+              },
+            }),
+          );
+      const v = Reflect.get(o, k) as unknown;
+      return typeof v === 'function' ? (v as (...x: unknown[]) => unknown).bind(o) : v;
+    },
+  }) as VerificationStore;
+  const confirm = new ConfirmVerification(wrapped, t.provider, HmacIdentityHashers.single(Buffer.alloc(32, 4), Buffer.alloc(32, 5)), noClosure, t.k.clock);
+  const b = (await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'gone-b', email: null, deviceId: null })).accountId;
+  const sb = await new StartVerification(wrapped, t.provider, noClosure, t.k.clock).run({ accountId: b, sessionId: null, purpose: 'FIRST', next: '/' });
+  // 지우기(0) → pid 계산(0) → 충돌(1) → 저장(2). 지우기가 한 바퀴를 쓰면 충돌이 마지막 바퀴라 DUPLICATE_ACCOUNT다
+  expect(await confirm.run({ accountId: b, verificationId: sb.verificationId, providerResult: t.agency(sb.verificationId, { person: 'gone-person' }) })).toMatchObject({ status: 'VERIFIED' });
+  expect(conflicts).toBe(-1);
 });

@@ -3,6 +3,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database, type DbTransaction } from '@peaket/platform';
 import { and, asc, count, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
+import { writeContactRef } from '../../../session/index.js';
 import type { HoldRow, PidRotationRecord, PidRotationStore, VerificationStore, VerificationTx } from '../../domain/ports.js';
 import { type Attempt, CiAlreadyLinked, plusOneYear, VerificationRaced } from '../../domain/verification.js';
 import { identityConflictAttempt, identityVerification, pidKeyRotation, restrictedCiHold, verificationAttempt, verificationRecord } from './schema.js';
@@ -40,13 +41,8 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
 
   #tx(tx: DbTransaction): VerificationTx {
     return {
-      setPhoneRef: async (i) => {
-        // 조사용 연락처 가명 표는 세션 컨텍스트의 표다(같은 DB, 같은 트랜잭션). 원문 번호는 두지 않는다(BOT-045)
-        await tx.execute(sql`
-          insert into account_contact_ref (account_id, kind, ref, ref_prev, updated_at) values (${i.accountId}, 'PHONE', ${i.ref}, ${i.refPrev ?? null}, ${new Date(i.now)})
-          on conflict (account_id, kind) do update set ref = excluded.ref, updated_at = excluded.updated_at,
-            ref_prev = ${typeof i.refPrev === 'string' ? sql`excluded.ref_prev` : i.refPrev === null ? sql`account_contact_ref.ref_prev` : sql`case when split_part(account_contact_ref.ref, '.', 1) <> split_part(excluded.ref, '.', 1) then account_contact_ref.ref else account_contact_ref.ref_prev end`}`);
-      },
+      // 조사용 연락처 가명 표는 세션 컨텍스트의 표다(같은 DB, 같은 트랜잭션). 세션 컨텍스트가 내주는 쓰기로 쓴다. 원문 번호는 두지 않는다(BOT-045)
+      setPhoneRef: (i) => writeContactRef(tx, { ...i, kind: 'PHONE' }),
       insertAttempt: async (a) => {
         await tx.insert(verificationAttempt).values({
           id: a.id,
@@ -108,6 +104,11 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
       lockAccountForShare: async (accountId) => {
         // 계정 표는 세션 컨텍스트의 표다. 같은 DB의 같은 트랜잭션에서 상태만 읽고 공유 잠금을 건다(탈퇴의 FOR UPDATE와 순서를 맞춘다)
         const r = await tx.execute(sql`select status from account where id = ${accountId} for share`);
+        const row = r.rows[0] as { status?: unknown } | undefined;
+        return typeof row?.status === 'string' ? row.status : null;
+      },
+      accountStatusOf: async (accountId) => {
+        const r = await tx.execute(sql`select status from account where id = ${accountId}`);
         const row = r.rows[0] as { status?: unknown } | undefined;
         return typeof row?.status === 'string' ? row.status : null;
       },

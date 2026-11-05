@@ -52,12 +52,14 @@ export class MergePlanner {
     const both = bothVerified ?? (await Promise.all([this.verifications.pidsOf(primary), this.verifications.pidsOf(absorbed)])).every((x) => x.length > 0);
     const facts = await this.store.transaction(async (tx) => ({
       status: await tx.accountStatusOf(absorbed),
+      primaryStatus: await tx.accountStatusOf(primary),
       holds: await tx.openHoldsOf(absorbed),
       providers: (await tx.providersOf(absorbed)).length,
     }));
     const identityBlockers: MergeBlocker[] = [];
     if (both) identityBlockers.push('BOTH_VERIFIED');
-    if (facts.status === 'WITHDRAWAL_PENDING') identityBlockers.push('WITHDRAWAL_IN_PROGRESS');
+    // 대표 계정이 탈퇴 유예 중이어도 막는다(곧 지워질 계정에 옮기지 않는다, identity §2.1, BOT-042가 넘긴 것)
+    if (facts.status === 'WITHDRAWAL_PENDING' || facts.primaryStatus === 'WITHDRAWAL_PENDING') identityBlockers.push('WITHDRAWAL_IN_PROGRESS');
     if (facts.holds > 0) identityBlockers.push('APPEAL_PENDING');
     // 세 서비스를 함께 부른다(각 1초 기한은 어댑터가 건다). 하나라도 답하지 않으면 그 오류를 던진다
     const checks = await Promise.all(this.checkers.map((c) => c.check({ primaryAccountId: primary, absorbedAccountId: absorbed })));

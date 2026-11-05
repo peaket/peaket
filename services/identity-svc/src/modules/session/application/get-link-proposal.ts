@@ -31,7 +31,8 @@ export class GetLinkProposal {
       if (err instanceof LinkStoreUnavailable) throw new SessionError('UNAVAILABLE', '연결 제안 저장소에 닿지 못했다');
       throw err;
     }
-    if (!p || p.expiresAt <= this.clock.now() || !bindingMatches(p, i.binding)) throw new SessionError('NOT_FOUND', '연결 제안이 없거나 만료됐다');
+    // 새 계정 만들기에 쓴 제안은 없는 제안이다(BOT-040이 넘긴 것)
+    if (!p || p.usedKey !== undefined || p.expiresAt <= this.clock.now() || !bindingMatches(p, i.binding)) throw new SessionError('NOT_FOUND', '연결 제안이 없거나 만료됐다');
     return { existingProvider: p.existingProvider, newProvider: p.newProvider, expiresAt: p.expiresAt, attemptsLeft: Math.max(0, LINK_MAX_ATTEMPTS - p.attempts) };
   }
 }

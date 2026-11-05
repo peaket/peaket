@@ -4,7 +4,7 @@ export { ACCESS_TOKEN_TTL_MS, decideRefresh, REFRESH_RETRY_GRACE_MS, sessionAliv
 export { ACCOUNT_HOLD_CLOSED_KEEP_MS } from './domain/merge.js';
 export { ACCOUNT_CLAIMS, ACCOUNT_CLOSURE, ACCOUNT_ERASER, type AccountClaims, type AccountClosure, type AccountEraser, FRAUD_HOLDS, type FraudHolds, REVERIFICATIONS, type Reverifications } from './domain/ports.js';
 export { FinishWithdrawals } from './application/finish-withdrawals.js';
-export { DrizzleSessionStore } from './adapters/db/drizzle-session-store.js';
+export { DrizzleSessionStore, writeContactRef } from './adapters/db/drizzle-session-store.js';
 export { CreateSession } from './application/create-session.js';
 export { GetLinkProposal } from './application/get-link-proposal.js';
 export { AddProvider, type AddProviderResult } from './application/add-provider.js';

@@ -1,6 +1,7 @@
 // 연계정보·pid HMAC의 KMS 어댑터를 AWS 흉내 서버(moto 5.2.5, docs/infra.md '로컬 클러스터')의 KMS HMAC 키로 시험한다
 // (docs/features/identity.md §5 '키 판·만 14세…', BUILD_ORDER BOT-020, ADR-0050 결정 5). 실제 AWS 계정·비용 없이 같은 GenerateMac 호출을 돈다.
 import { execFileSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { CreateKeyCommand, KMSClient } from '@aws-sdk/client-kms';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { KmsIdentityHashers, kmsMacClient } from '../src/modules/verification/adapters/kms-identity-hashers.js';
@@ -70,3 +71,18 @@ test('ADR0050_KMS키목록설정은_판번호JSON과pid키가있어야하고_흉
   expect(() => KmsIdentityHashers.fromEnv({ PEAKET_CI_HMAC_KMS_KEYS: base.PEAKET_CI_HMAC_KMS_KEYS, PEAKET_ENV: 'ci' })).toThrow(/PEAKET_PID_HMAC_KMS_KEY/);
   expect(() => KmsIdentityHashers.fromEnv({ ...base, PEAKET_CI_HMAC_KMS_KEYS: JSON.stringify({ 1: keys.pid }), PEAKET_ENV: 'ci' })).toThrow();
 });
+
+test('identity§10_연결만받고답하지않는KMS면_요청시간한도(2초×2번)에끊고_KeyServiceUnavailable이다(BOT-131이넘긴것) [ASVS v5.0.0-16.5.2]', async () => {
+  // 연결은 받고 답하지 않는 KMS: SDK 판이 throwOnRequestTimeout 없이는 요청 시간 한도를 넘겨도 끊지 않는다
+  const silent = createServer(() => {});
+  await new Promise<void>((r) => silent.listen(0, '127.0.0.1', () => r()));
+  try {
+    const ep = `http://127.0.0.1:${(silent.address() as { port: number }).port}`;
+    const started = Date.now();
+    await expect(hashers(new Map([[1, keys.v1]]), ep).ciAll('x')).rejects.toBeInstanceOf(KeyServiceUnavailable);
+    expect(Date.now() - started).toBeLessThan(9_000);
+  } finally {
+    silent.closeAllConnections();
+    silent.close();
+  }
+}, 15_000);

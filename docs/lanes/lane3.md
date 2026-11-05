@@ -13,14 +13,10 @@
 - 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
 - BOT-010: 복귀 화면의 결과 확정이 401이고 갱신도 안 되면 `/login?next=/verify/return`으로 가 기관 값을 잃고 그 건은 처리 중으로 남는다. 로그인 next를 첫 화면으로 하거나 실패를 알리고 [다시 시도]로 안내한다(apps/web/src/features/identity-verify/flow.ts `runReturnFlow`)
 - BOT-010: 결과의 `next`가 본인확인 부품이 없는 화면이면 탭 저장소 `peaket.verify.return`이 남아, 1일 안에 다른 화면에서 지난 결과 대화상자가 뜰 수 있다. 저장 시각과 짧은 기한을 둔다(flow.ts)
-- BOT-010: 마이그레이션 0005의 '따로 트랜잭션' 주석은 운영 실행기(BAS-060)에서만 맞고, 로컬 Drizzle 실행기는 0004·0005를 한 트랜잭션으로 돌린다. 주석을 고치거나 검증 파일을 정비 시간 묶음으로 옮긴다(services/identity-svc/migrations/0005_verification_provider_down_validate.sql)
 - BOT-010: demo에서 쓸 기관이 없다. 시험 어댑터는 demo에서 켜지는데(비밀 필수) 모의 기관은 local·ci에서만 돈다. 정본에 demo 기관을 정하거나 어댑터의 demo 허용을 뺀다(docs/features/identity.md §5, services/identity-svc/scripts/mock-idv.mjs)
 - BOT-010: 쿼리로 돌려주는 기관이면 결과 값이 CDN·Envoy 접근 로그의 요청 줄에 남을 수 있다. `/verify/return`의 쿼리를 접근 로그에서 지우는 규칙을 정본에 적는다(docs/infra.md 접근 로그, HOT-290과 맞춘다)
 - BOT-020: SCR-017에 '본인확인 전' 상태 미리보기가 없어 [지금 본인확인] 갈래를 화면에서 보지 못했다(퍼블리싱 목업 `ME`가 본인확인 완료). d5 §5.17 ①의 그 상태를 미리보기에 더한다(apps/web/src/shared/config/screens.account.ts `SCR017_STATES`, apps/web/src/_pages/settings)
-- BOT-025: `GetVerificationStatus`가 읽기만 하는데 세션 줄을 잠근다(`getSessionForUpdate`). 잠그지 않는 세션 조회를 세션 저장소에 더한다(services/identity-svc/src/modules/session/application/get-verification-status.ts)
-- BOT-025: pid 키 전환 작업이 KMS 호출 속도를 조절하지 않는다(100건씩 쉬지 않고). 운영 본인확인·관리자 로그인의 KMS 몫을 깎지 않게 초당 상한 선택지를 둔다(services/identity-svc/src/modules/verification/application/pid-rotation.ts)
 - BOT-025: 두 pid 진입에서 옛 키가 다른 요청 값(대기 중·입장)으로 409일 때 그 값을 새 키에 최선 노력으로 옮겨 쓰는 변형 Lua를 둘지 본다(절차 규칙 '다 옮긴 뒤 15분 전에는 새 회차를 열지 않는다'를 어긴 경우의 덤, services/queue-svc/src/modules/entry/application/enter-queue.ts)
-- BOT-030: 탈퇴 뒤 본인확인 기록 파기(둘째 트랜잭션)가 실패해 남은 기록이 있으면, 정비가 돌기 전에 같은 사람이 새 계정으로 본인확인할 때 409와 다른 계정 시도 기록이 잘못 남는다. 중복 판정에서 주인이 탈퇴한 계정이면 그 자리에서 지우고 다시 판정한다(services/identity-svc/src/modules/verification/application/confirm-verification.ts)
 - BOT-030: 정비 withdrawal-finish가 매일 `account` 표 전체를 읽는다. 정리 중·탈퇴한 계정의 부분 인덱스를 트랜잭션 밖 `CREATE INDEX CONCURRENTLY` 파일로 더한다(운영 실행기 BAS-060 뒤, docs/devops.md §7.2)
 - BOT-010: 늦은 메시지를 듣는 10분 타이머를 `cancel()` 때 지우지 않는다(해는 없고 메모리를 잠깐 잡는다), 브라우저의 Web Locks 연결(`refreshLock`)을 직접 보는 시험이 없다(flow.ts, browser.ts)
 - BOT-036: 재인증 버튼이 토큰 갱신을 기다리는 동안 처리 중 표시·연타 막기가 없고, 그사이 창을 닫아도 갱신이 끝나면 제공자로 넘어간다. 처리 중 상태와 `aria-disabled`를 두고 닫으면 이동을 취소한다(apps/web/src/_pages/settings/ui/SettingsFlows.tsx `confirmReauth`)
@@ -29,19 +25,16 @@
 - BOT-036: 403 `reauth-required`는 만료 말고 이미 쓴 토큰·계정 불일치·탈퇴할 수 없는 상태에서도 오는데 늘 '5분이 지났습니다'를 보인다. 문구를 '확인이 만료되었거나 이미 쓰였습니다'처럼 넓히고, `reverify-required` 전용 문구를 정본에 적거나 하나로 합친다(flow.ts `reauthFailureText`, docs/features/identity.md §8)
 - BOT-036: 저장소 표의 `peaket.withdraw.reauth` 줄 '지우는 때'에 로그아웃이 없고(§5.14.4 정리 루틴이 지우지 않아 같은 탭의 다른 계정에 묻지 않은 재인증 실패 창이 뜰 수 있다) 수명은 '탭(믿는 시간 10분)'이다(docs/frontend.md §3.12, 로그아웃 정리 루틴)
 - BOT-036: 미리보기 상태 고르기가 클라이언트 이동이라 `SettingsFlows` 상태(창·목적·토큰)가 남아 목업과 실제 흐름이 섞인다(개발 서버만). `key={state}`를 붙인다(apps/web/src/_pages/settings/ui/SettingsPage.tsx)
-- BOT-040: '새 계정 만들기'의 응답을 잃고 같은 멱등 키로 다시 보내면 제안이 이미 지워져 404다. 다시 보내기를 받으려면 제안을 지우기 전에 만든 세션을 멱등 키로 찾아 같은 세션을 돌려주거나, 제안을 '쓴 것'으로 표시해 잠시 남긴다(services/identity-svc/src/modules/session/application/separate-account.ts, apps/web keys.ts `separateKeyOf` 주석)
 - BOT-041: 로그인 수단 화면의 재인증 실패는 사유(오래된 인증·계정 불일치)를 버리고 한 문구만 보인다. 탈퇴 화면처럼 사유별 문구로 맞춘다(apps/web/src/features/login-methods/flow.ts `pickupReauth`)
 - BOT-041: ASVS 7.4.3(인증 요소를 바꾼 뒤 다른 세션 끝내기)을 팬에게 줄 로그인한 기기 API(`/v1/identity/sessions`, SCR-017 로그인한 기기)를 붙일 단계가 BUILD_ORDER에 없다. 단계를 정하거나 소유자에게 묻는다(docs/security/asvs/auth.md 7.4.3)
 - BOT-042: 두 계정에 같은 종류의 다른 로그인 수단이 있으면(추가하는 종류가 아닌 종류) 병합 뒤 대표 계정에 그 종류가 둘이 되어 '종류마다 하나'가 깨지고 종류 단위 해제가 모호해진다. 막는 사유를 하나 더할지(openapi `blockers`·d5 §5.22 다섯 줄을 고침) 둘 다 둘지 정한다(services/identity-svc/src/modules/session/application/plan-merge.ts, adapters/db/drizzle-session-store.ts `mergeAccounts`)
 - BOT-042: POL-034 '두 계정 이메일로 완료 통지'를 받을 길이 없다. 흡수 계정 이메일은 확정 트랜잭션에서 지우고 `identity.accounts-merged`에는 주소가 없다. 알림 쪽 단계(GAT-250 등)가 연락처 가명이나 통지 대상을 정하게 넘긴다(docs/features/identity.md §2.1 '남는 한계')
-- BOT-042: 대표가 될 계정이 탈퇴 정리 중이어도 제안은 PROPOSED로 보이고 확정하면 404다. 확정 트랜잭션 안에서 흡수 계정의 정리 중을 발견하면 409 `WITHDRAWAL_IN_PROGRESS`가 아니라 404다(services/identity-svc/src/modules/session/application/plan-merge.ts `assessPair`, confirm-merge.ts)
 - BOT-042: 같은 제안을 동시에 두 번 확정하는 PostgreSQL 시험이 없다. 병합 도중 로그인이 계정을 X → P(대표) 순서로 잠가 ID 순 규칙을 벗어나므로 같은 쌍의 확정과 겹치면 교착(40P01)으로 한쪽이 끝날 수 있다(드묾, create-session.ts `#open`)
 - BOT-042: 로그인 수단 추가 콜백의 앱 서버 기한(2초) 안에 병합 확인(세 서비스 1초)이 더해져 빠듯하다. 세 서비스 클라이언트에 차단기(`createCircuitBreaker`)도 아직 없다(grpc-merge-checkers.ts)
 - BOT-042: 마이그레이션 0013의 `account_merge`(대표·흡수 계정)·`account_hold`(계정)에 외래키가 없다. docs/data.md 그림은 FK로 적는다(services/identity-svc/src/modules/session/adapters/db/schema.ts)
 - BOT-045: `ComputeContactRef`의 파드마다 초당 상한 기본값 2,000 [가정]이 정본의 '주문 설계 피크의 2배'와 맞는지 근거가 없다. 1초 고정 창이라 경계에서 두 배까지 몰리고, 전체 상한이 파드 수에 비례해 휴대폰 번호 대입을 충분히 늦추지 못할 수 있다. 피크 값과 파드 수로 정하거나 신원별 전역 상한(게이트웨이·메시)을 둔다(services/identity-svc/src/modules/session/application/compute-contact-ref.ts)
 - BOT-045: 병합된 흡수 계정의 기기 행은 병합 때 옮기지도 지우지도 않아 `BatchGetInvestigationRefs`가 그 계정의 기기 가명을 돌려준다. 흡수 계정의 기기를 대표 계정으로 옮길지, 지울지, 조사용으로 둘지 정본이 정하지 않았다(docs/features/identity.md §9.1)
 - BOT-045: demo는 클라우드 계정이 없어 KMS 키가 없고 라벨 키 값 설정은 local·ci만 받으므로 기기 행이 늘 비고 새 기기 알림이 늘 간다. 본인확인 키처럼 demo에도 라벨 키 값을 허용할지 정한다(services/identity-svc/src/modules/session/adapters/inv-ref-key-ring.ts `fromEnv`)
-- BOT-045: 본인확인 저장소가 세션 컨텍스트의 표 `account_contact_ref`에 원시 SQL로 쓴다(정본이 같은 트랜잭션 쓰기를 허용). 세션 쪽 스키마가 바뀌면 형 검사가 잡지 못하니, 세션 컨텍스트가 내주는 쓰기 함수로 바꾸거나 시험으로 묶는다(drizzle-verification-store.ts `setPhoneRef`)
 - BOT-043: 합치기 제안의 남은 시간과 만료 전환이 서버의 절대 시각(`expiresAt`)을 브라우저 시계와 견준다. 기기 시계가 크게 틀리면 받자마자 만료로 보이거나 늦게 바뀐다. 서버가 남은 초를 함께 주거나 응답 시각으로 맞춘다(apps/web/src/features/login-methods/flow.ts `mergeView`, ds MergeSummary `deadline`)
 - BOT-043: 병합 제안 ID가 주소(`?mergeProposal=`)에 남아 방문 기록에 남고, 카드를 닫은 뒤 새로 고치면 다시 뜬다. 읽은 뒤 주소창에서 지울지 정한다(apps/web/src/_pages/settings-providers/ui/SettingsProvidersPage.tsx)
 - BOT-043: `?ended=MERGED`를 서버가 세션 상태를 보지 않고 믿어, 로그인한 사람이 그 주소를 열어도 로그인 전 셸과 '대표 계정으로 합쳐졌습니다'를 본다(버튼은 /login이라 혼동뿐). 세션 종료 사유가 MERGED일 때만 보이게 한다(apps/web/src/_pages/settings-providers/ui/SettingsProvidersPage.tsx)
@@ -58,8 +51,6 @@
 - BOT-123: 마이그레이션 0020 앞에 만든 `admin_login_step` 행은 `known_source`가 false로 채워져, 0020을 올린 뒤 10분 안의 옛 단계가 비밀번호만 맞은 로그인으로 잡힐 수 있다. 찾는 조건에 아래 한도(예: 0020 뒤에 만든 행, 또는 만든 지 1시간 안)를 두고, 찾기용 부분 색인(`used_at is null and known_source = false and password_only_noticed_at is null`)을 더한다. `admin_login_step`을 지우는 정비가 없다(services/identity-svc/migrations/0020_admin_known_source.sql, drizzle-admin-account-store.ts `findPasswordOnlySteps`)
 - BOT-123: 알림 메일의 시각이 발송 시각이고 사건(멈춘 로그인) 시각이 아니다. auth-controls §3.4는 알림에 출발지를 싣는다고 하는데 identity §6은 해시뿐이라 싣지 않는다고 한다: 둘을 맞춘다(services/identity-svc/src/modules/admin/application/dispatch-admin-notices.ts, docs/security/auth-controls.md §3.4)
 - BOT-123: identity에는 비밀번호 바꾸기 말고 관리 경로가 없어, '다른 경로는 403 password-change-required'(AC-T4)는 공용 가드 시험으로만 본다. 관리 경로가 생기는 BOT-150에서 HTTP 시험 하나를 더한다(test/admin-login-http.test.ts)
-- BOT-130: 팬 토큰 갱신(`RefreshSession`)은 회전을 커밋한 뒤에 액세스 토큰을 서명한다. 서명이 실패하면 30초 뒤 같은 쿠키가 탈취로 보여 로그인이 끊긴다. 관리 갱신처럼 트랜잭션 안, 쓰기 전에 서명한다(services/identity-svc/src/modules/session/application/refresh-session.ts)
-- BOT-131: 연계정보·pid KMS 클라이언트도 `requestHandler`에 `throwOnRequestTimeout: true`가 없어, 연결만 받고 답하지 않는 KMS에서 요청 시간 한도(2초)에 끊지 않고 기다린다(services/identity-svc/src/modules/verification/adapters/kms-identity-hashers.ts:30)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
@@ -87,3 +78,4 @@
 - 2026-11-05 BOT-151 관리 계정 지정(R-317, I-T66의 identity 쪽): `admin_designation`(마이그레이션 0023, 살아 있는 행 부분 고유 색인), 주기(활성 commander 요청, 대상 행 잠금, 대상 역할·같은 종류·조사관과 가명정보 취급자 함께 두지 않음·90일 냉각)·거두기(자기 지정도), 역할 변경·삭제 때 거두기, gRPC `GetAdminDesignations`(쿼리 둘), 목록·상세 designations. `GET /v1/ops/auth/sessions/me`는 ops-svc 몫이라 BOT-152로 옮겼다. 새 맥락 리뷰 중간 3·낮음 4와 재검토 낮음 3을 모두 고쳤다.
 - 2026-11-05 BOT-160 ASVS 추적 시험 태그 수집 리포트(R-319): BOT-160을 셋으로 나눴다(DAST·보안 게이트 판정 검토 BOT-161은 BAS-010·BAS-140·ZAP 이미지 허락 뒤, CI 연결 BOT-162). `tools/ci/asvs-report.mjs`(보고서와 원본의 태그를 적용·부분 적용 행마다 통과·실패·미실행·태그 없음·설계 검사(운영 설계만)로, 표에 없는 ID·꼴이 다른 태그, markdown·JSON, 뿌리 `pnpm asvs:report`), 보고서 읽기 공용화 `tools/ci/test-reports.mjs`(trace-check 동작 그대로), 권한 매트릭스 구현 상태. 새 맥락 리뷰 중간 3·낮음 3과 재검토 높음 1(설계 검사 표시는 구현 위치 칸)·낮음 2를 고쳤다.
 - 2026-11-05 BOT-162 ASVS 태그 리포트 CI 연결(R-322): vitest 설정 27개가 `PEAKET_TEST_REPORT`로 JSON 보고서를, node --test는 `NODE_OPTIONS`의 JUnit 리포터로 XML을 남기고(turbo outputs·env), ci-node 끝의 막지 않는 단계가 모아 작업 요약에 쓴다(읽은 보고서 수와 '미실행'의 뜻). vitest 설정 가드 시험은 늘 돈다. 도구가 대괄호 없는 꼴·판 번호 없는 꼴·밑줄 꼴도 읽고, 저장소 시험 이름의 꼴이 다른 태그를 정본 꼴로 고쳤다(시험 파일 84개, 겹친 앞머리 지움). 새 맥락 리뷰 중간 2·낮음 2, 재검토 중간 1·낮음 3, 재재검토 중간 1·낮음 3을 모두 고쳤다. 다른 갈래가 새로 쓰는 시험에도 정본 꼴 `[ASVS v5.0.0-x.y.z]`를 쓴다(docs/architecture.md §8.2 4번).
+- 2026-11-05 구간 1 정리 A1 identity 세션·본인확인(R-323): 정리 목록 아홉 줄을 고쳤다(BOT-010 마이그레이션 0005 주석, BOT-025 상태 조회 잠금·전환 KMS 초당 상한, BOT-030 탈퇴 주인의 남은 기록, BOT-040 새 계정 만들기 다시 보내기, BOT-042 탈퇴 유예 병합 409, BOT-045 연락처 가명 쓰기 공용화, BOT-130 팬 갱신 서명 차례, BOT-131 연계정보 KMS 요청 시간 한도). 대표 계정의 탈퇴 유예도 WITHDRAWAL_IN_PROGRESS로 막는다(POL-034 T9·identity §2.1에 적음). 새 맥락 리뷰 낮음 5와 재검토 낮음 3을 모두 고쳤다.

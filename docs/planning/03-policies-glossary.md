@@ -678,7 +678,7 @@ stateDiagram-v2
 | T6 | Proposed | Separate | '새 계정 만들기' 선택(팬) |
 | T7 | Proposed | Expired | 10분 경과 또는 닫음(시스템) |
 | T8 | (시작) | MergeProposed | 설정에서 인증한 제공자 계정이 이미 다른 계정(시스템) |
-| T9 | MergeProposed | Blocked | 진행 중 홀드·구매 세션(`ACTIVE_PURCHASE_SESSION`)·결제 대기(`PENDING_PAYMENT`), 합산 한도 초과(`QUOTA_EXCEEDED`), 둘 다 본인확인(`BOTH_VERIFIED`), 흡수 계정의 탈퇴(`WITHDRAWAL_IN_PROGRESS`)·이의 제기 계류(`APPEAL_PENDING`), 입장 중인 회차의 티켓(`ENTRY_STARTED`). 시스템이 판정한다(POL-034, 괄호 안은 openapi `MergeProposal.blockers`) |
+| T9 | MergeProposed | Blocked | 진행 중 홀드·구매 세션(`ACTIVE_PURCHASE_SESSION`)·결제 대기(`PENDING_PAYMENT`), 합산 한도 초과(`QUOTA_EXCEEDED`), 둘 다 본인확인(`BOTH_VERIFIED`), 흡수 계정의 탈퇴·대표 계정의 탈퇴 유예(`WITHDRAWAL_IN_PROGRESS`)·이의 제기 계류(`APPEAL_PENDING`), 입장 중인 회차의 티켓(`ENTRY_STARTED`). 시스템이 판정한다(POL-034, 괄호 안은 openapi `MergeProposal.blockers`) |
 | T10 | MergeProposed | MergeConfirmed | 요약 확인 + 재인증(팬) |
 | T11 | MergeProposed | MergeCancelled | 취소 또는 10분 경과 |
 | T12 | MergeConfirmed | Merging | 흡수 계정 잠금, 세션 종료(시스템) |

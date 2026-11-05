@@ -155,6 +155,13 @@ export interface SessionStore {
   /** 토큰 만료가 지난 재인증 토큰 사용 기록을 지우고 지운 줄 수(정비) */
   purgeReauthUses(now: number): Promise<number>;
   /**
+   * 지금·바로 앞 리프레시 토큰 해시의 계정 ID. 잠그지 않는다. 갱신이 트랜잭션 앞에서 토큰에 실을 계정 값을 읽는 데 쓴다
+   * (트랜잭션 안에서 다른 저장소 연결을 잡지 않고 쓰기 전에 서명하려고, BOT-130이 넘긴 것). 지난 토큰(이력)은 보지 않는다
+   */
+  refreshOwner(hash: Uint8Array): Promise<string | null>;
+  /** 세션 한 줄을 잠그지 않고 읽는다(읽기만 하는 확인, GetVerificationStatus, BOT-025가 넘긴 것) */
+  sessionOf(id: string): Promise<SessionRow | null>;
+  /**
    * 조사 적재가 읽는 연결 값(BatchGetInvestigationRefs, identity §9.1). 있는 계정만, 받은 순서대로. 탈퇴한 계정은 빈 값이다.
    * identityConflicts는 since 뒤의 같은 본인확인 시도 기록(본인확인 컨텍스트의 표를 읽는다. 표를 보지 못하는 저장소는 빈 목록)
    */
@@ -311,6 +318,8 @@ export interface StoredLinkProposal {
   attempts: number;
   createdAt: number;
   expiresAt: number;
+  /** 새 계정 만들기에 쓴 멱등 키(쓴 뒤에만). 쓴 제안은 그 키의 다시 보내기만 받고, 연결·조회·다른 키에는 없는 제안이다(identity §2.1, BOT-040이 넘긴 것) */
+  usedKey?: string;
 }
 
 /** 모든 메서드: @throws LinkStoreUnavailable 저장소에 닿지 못함 */
@@ -321,6 +330,8 @@ export interface LinkProposals {
   /** 실패 횟수를 하나 올린다. LINK_MAX_ATTEMPTS에 닿으면 지운다. 올린 뒤 횟수(제안이 없으면 null) */
   fail(id: string): Promise<number | null>;
   remove(id: string): Promise<void>;
+  /** 새 계정 만들기에 쓴 것으로 적는다. 남은 수명은 그대로이고, 없거나 만료된 제안이면 아무것도 하지 않는다 */
+  markUsed(id: string, idempotencyKey: string): Promise<void>;
 }
 
 /** 제안 저장소(세션·캐시 Redis)에 닿지 못했다 */

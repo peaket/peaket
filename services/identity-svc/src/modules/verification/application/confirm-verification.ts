@@ -55,6 +55,13 @@ type Checked =
 /** 트랜잭션 안에서 새로 저장해야 하는데 아직 pid가 없다: 트랜잭션을 되돌리고 pid를 계산해(KMS는 트랜잭션 밖) 한 번 더 한다 */
 class NeedPid extends Error {}
 
+/** 같은 연계정보 기록의 주인이 탈퇴한 계정이다(탈퇴 뒤 기록 파기가 실패해 남았다): 그 자리에서 지우고 다시 판정한다(BOT-030이 넘긴 것) */
+class OwnerWithdrawn extends Error {
+  constructor(readonly accountId: string) {
+    super('같은 연계정보 기록의 주인이 탈퇴한 계정이다');
+  }
+}
+
 @Injectable()
 export class ConfirmVerification {
   constructor(
@@ -113,10 +120,19 @@ export class ConfirmVerification {
 
   async #confirm(verificationId: string, checked: Extract<Checked, { outcome: 'VERIFIED' }>, now: number): Promise<Attempt> {
     let c = checked;
+    let erased = false;
     for (let round = 0; ; round++) {
       try {
         return await this.#apply(verificationId, c, now);
       } catch (e) {
+        if (e instanceof OwnerWithdrawn && !erased) {
+          // 정비(withdrawal-finish)가 지울 것을 먼저 지운다: 지우지 않으면 409와 다른 계정 시도 기록이 잘못 남는다(탈퇴 파기와 같은 일, 여러 번 불러도 된다).
+          // 한 번뿐이고 다시 하기 횟수를 쓰지 않는다(동시 확정의 여유 바퀴를 남긴다, 재검토 2026-11-05)
+          erased = true;
+          await this.store.eraseAccount(e.accountId, now);
+          round--;
+          continue;
+        }
         if (round >= 2) {
           if (e instanceof CiAlreadyLinked) throw new VerificationError('DUPLICATE_ACCOUNT', '이미 다른 계정에서 본인확인한 분이다');
           throw e;
@@ -149,6 +165,9 @@ export class ConfirmVerification {
       const owner = await tx.accountByCiHmac(checked.hmacs.map((h) => h.hmac), a.accountId);
       const mine = await tx.verificationOf(a.accountId);
       let status: Exclude<AttemptStatus, 'PENDING'>;
+      // 주인이 탈퇴한 계정이면 남은 기록이다(파기가 실패해 정비를 기다린다). DELETED는 되돌아가지 않아 잠그지 않고 읽는다
+      // (공유 잠금이면 두 계정을 ID 순으로 쓰기 잠금하는 병합 확정과 교착할 수 있다, 재검토 2026-11-05)
+      if (owner && owner !== a.accountId && (await tx.accountStatusOf(owner)) === 'DELETED') throw new OwnerWithdrawn(owner);
       if (owner && owner !== a.accountId) {
         status = 'DUPLICATE_ACCOUNT';
         // 부정 예매 후보 묶음의 연결 신호(identity §9.1). 연계정보와 HMAC은 싣지 않는다

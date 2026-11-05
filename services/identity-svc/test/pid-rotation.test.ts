@@ -245,6 +245,50 @@ describe('pid 키 전환(I-T49)', () => {
     expect((await t.rotation(hashers(2)).finish()).cleared).toBe(5);
   });
 
+  test('I-T49_전환작업은KMS호출을초당상한아래로두고_묶음마다모자란시간만큼쉰다(BOT-025가넘긴것)', async () => {
+    const t = await setup();
+    for (let i = 0; i < 5; i++) await t.verify((await t.login(`rate-${i}`)).accountId, `rate-person-${i}`);
+    const waits: number[] = [];
+    // 묶음 2줄, 초당 2건: 묶음마다 1초가 되게 쉰다(시계는 쉰 만큼 간다)
+    const sleep = async (ms: number) => {
+      waits.push(ms);
+      t.clock.advance(ms);
+    };
+    const started = t.clock.now();
+    await new PidRotation(t.verifications, hashers(2), t.clock, { batch: 2, kmsPerSecond: 2, sleep }).start({ until: t.clock.now() + 2 * DAY });
+    expect(waits).toEqual([1_000, 1_000, 500]);
+    expect(t.clock.now() - started).toBe(2_500);
+    // 묶음이 상한보다 커도 한 번에 상한까지만 보낸다(평균이 아니라 어느 1초에도, 재검토 2026-11-05)
+    const t2 = await setup();
+    for (let i = 0; i < 5; i++) await t2.verify((await t2.login(`burst-${i}`)).accountId, `burst-person-${i}`);
+    const waits2: number[] = [];
+    await new PidRotation(t2.verifications, hashers(2), t2.clock, { batch: 10, kmsPerSecond: 2, sleep: async (ms) => { waits2.push(ms); t2.clock.advance(ms); } }).start({ until: t2.clock.now() + 2 * DAY });
+    expect(waits2).toEqual([1_000, 1_000, 500]);
+    // 줄 읽기에 걸린 시간은 쉬는 시간으로 치지 않는다: 시간은 KMS에 보내기 직전부터 잰다(재검토 2026-11-05)
+    const t3 = await setup();
+    for (let i = 0; i < 4; i++) await t3.verify((await t3.login(`slow-${i}`)).accountId, `slow-person-${i}`);
+    let slowFirst = true;
+    const slowStore = new Proxy(t3.verifications, {
+      get(o, k) {
+        const v = Reflect.get(o, k) as unknown;
+        if (k === 'pidRowsToMove')
+          return async (...x: Parameters<typeof o.pidRowsToMove>) => {
+            const rows = await o.pidRowsToMove(...x);
+            if (slowFirst) {
+              slowFirst = false;
+              t3.clock.advance(900);
+            }
+            return rows;
+          };
+        return typeof v === 'function' ? (v as (...y: unknown[]) => unknown).bind(o) : v;
+      },
+    });
+    const waits3: number[] = [];
+    await new PidRotation(slowStore, hashers(2), t3.clock, { batch: 2, kmsPerSecond: 2, sleep: async (ms) => { waits3.push(ms); t3.clock.advance(ms); } }).start({ until: t3.clock.now() + 2 * DAY });
+    expect(waits3).toEqual([1_000, 1_000]);
+    expect(() => new PidRotation(t.verifications, hashers(2), t.clock, { kmsPerSecond: 0 })).toThrow(RangeError);
+  });
+
   test('I-T49_전환작업의명령줄은_start(--until 시간대있는ISO시각)·finish·status만받는다', () => {
     expect(parsePidRotationArgs(['start', '--until', '2026-12-01T00:00:00+09:00'])).toEqual({ command: 'start', until: Date.parse('2026-11-30T15:00:00Z') });
     expect(parsePidRotationArgs(['start'])).toEqual({ command: 'start' });

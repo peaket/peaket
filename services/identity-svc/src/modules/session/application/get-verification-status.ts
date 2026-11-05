@@ -29,11 +29,9 @@ export class GetVerificationStatus {
     checkIds(i.sessionId, i.accountId);
     const accountId = i.accountId.toLowerCase();
     const now = this.clock.now();
-    const alive = await this.store.transaction(async (tx) => {
-      const s = await tx.getSessionForUpdate(i.sessionId.toLowerCase());
-      return s !== null && s.accountId === accountId && sessionAlive(s, now);
-    });
-    if (!alive) return NONE;
+    // 읽기만 하므로 세션 줄을 잠그지 않는다(주문 생성이 결제 직전마다 부른다, BOT-025가 넘긴 것)
+    const s = await this.store.sessionOf(i.sessionId.toLowerCase());
+    if (s === null || s.accountId !== accountId || !sessionAlive(s, now)) return NONE;
     const c = await this.claims.of(accountId);
     if (!c.pid) return NONE;
     return { verified: true, pid: c.pid, previousPid: c.pidPrev ?? '' };

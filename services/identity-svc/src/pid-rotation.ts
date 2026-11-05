@@ -17,7 +17,10 @@ const url = process.env.PEAKET_DATABASE_URL;
 if (!url) throw new Error('PEAKET_DATABASE_URL이 없다(비밀 관리에서 넣는다)');
 const hashers = KmsIdentityHashers.fromEnv(process.env) ?? HmacIdentityHashers.fromEnv(process.env);
 const database = createDatabase({ url, applicationName: 'identity-svc-pid-rotation', max: 2 });
-const rotation = new PidRotation(new DrizzleVerificationStore(database), hashers, systemClock);
+// KMS 호출 초당 상한(없으면 기본 200 [가정], identity §5 'pid 키 전환의 첫 구현')
+const rps = process.env.PEAKET_PID_ROTATION_KMS_RPS;
+if (rps !== undefined && !/^[1-9]\d{0,5}$/.test(rps)) throw new Error('PEAKET_PID_ROTATION_KMS_RPS는 1 이상의 정수다');
+const rotation = new PidRotation(new DrizzleVerificationStore(database), hashers, systemClock, rps === undefined ? {} : { kmsPerSecond: Number(rps) });
 const iso = (ms: number | null | undefined) => (ms === null || ms === undefined ? null : new Date(ms).toISOString());
 
 try {

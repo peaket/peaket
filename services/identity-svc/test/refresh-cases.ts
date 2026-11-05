@@ -36,6 +36,23 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       expect(k.signals.seen.at(-1)).toBe('refresh:fan:rotated');
     });
 
+    test('I-T4_서명이실패하면_회전을쓰지않아_30초가지나도옛토큰으로다시갱신되고_탈취로보지않는다(BOT-130이넘긴것) [ASVS v5.0.0-7.2.4]', async () => {
+      const t = await make();
+      const k = await kit(t.store);
+      const s = await login(k);
+      const access = k.signer.access.bind(k.signer);
+      k.signer.access = async () => {
+        throw new Error('서명 키를 읽지 못했다');
+      };
+      await expect(k.refresh.run({ refreshToken: s.refreshToken })).rejects.toThrow('서명 키');
+      k.signer.access = access;
+      k.clock.advance(31_000);
+      const r = ok(await k.refresh.run({ refreshToken: s.refreshToken }));
+      expect(r.sessionId).toBe(s.sessionId);
+      expect(k.signals.seen.at(-1)).toBe('refresh:fan:rotated');
+      expect(await t.isTerminated(s.sessionId)).toBe(false);
+    });
+
     test('I-T4_②_응답을잃고30초안에바로앞토큰으로다시갱신하면_새쌍을한번더주고세션이이어진다', async () => {
       const t = await make();
       const k = await kit(t.store);

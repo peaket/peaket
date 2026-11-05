@@ -83,6 +83,8 @@ export interface VerificationTx {
   carryHolds(ciHmacs: readonly Buffer[], accountId: string, now: number): Promise<void>;
   /** 그 계정 행을 공유 잠금으로 읽은 상태(탈퇴의 쓰기 잠금과 순서를 맞춘다, identity §8 '탈퇴의 첫 구현'). 계정을 보지 못하는 저장소는 null */
   lockAccountForShare(accountId: string): Promise<string | null>;
+  /** 그 계정의 상태를 잠그지 않고 읽는다(되돌아가지 않는 DELETED를 보는 데만 쓴다: 병합의 쓰기 잠금과 교착하지 않게, 재검토 2026-11-05). 계정을 보지 못하는 저장소는 null */
+  accountStatusOf(accountId: string): Promise<string | null>;
 }
 
 /** pid 키 전환 기록 한 줄(docs/data.md pid_key_rotation) */

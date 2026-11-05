@@ -20,6 +20,13 @@ if n >= tonumber(ARGV[1]) then redis.call('DEL', KEYS[1]) end
 return n
 `);
 
+/** 있는 제안에만 쓴 키를 적는다(HSET은 남은 수명을 바꾸지 않는다. 없는 키에 쓰면 수명 없는 키가 생기므로 먼저 본다) */
+const MARK_USED = redisScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+redis.call('HSET', KEYS[1], 'usedKey', ARGV[1])
+return 1
+`);
+
 const PROVIDERS = new Set<Provider>(['kakao', 'naver', 'google']);
 const str = (v: unknown) => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v ?? ''));
 
@@ -52,7 +59,7 @@ function parse(id: string, f: Record<string, string>, now: number): StoredLinkPr
   if (createdAt === null || expiresAt === null || attempts === null || !PROVIDERS.has(np) || !PROVIDERS.has(ep)) return null;
   if (!f.bindingHash || !f.newProviderUserId || !f.email || !f.targetAccountId) return null;
   if (expiresAt <= now) return null;
-  return { id, bindingHash: f.bindingHash, newProvider: np, newProviderUserId: f.newProviderUserId, email: f.email, targetAccountId: f.targetAccountId, existingProvider: ep, attempts, createdAt, expiresAt };
+  return { id, bindingHash: f.bindingHash, newProvider: np, newProviderUserId: f.newProviderUserId, email: f.email, targetAccountId: f.targetAccountId, existingProvider: ep, attempts, createdAt, expiresAt, ...(f.usedKey ? { usedKey: f.usedKey } : {}) };
 }
 
 export class RedisLinkProposals implements LinkProposals {
@@ -90,5 +97,9 @@ export class RedisLinkProposals implements LinkProposals {
   async remove(id: string): Promise<void> {
     const k = linkKey(id);
     await guard(this.redis.command(['DEL', k], { key: k }));
+  }
+
+  async markUsed(id: string, idempotencyKey: string): Promise<void> {
+    await guard(this.redis.evalScript(MARK_USED, [linkKey(id)], [idempotencyKey]));
   }
 }

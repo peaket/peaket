@@ -31,8 +31,13 @@ export class RefreshSession {
     }
     const now = this.clock.now();
     const next = newRefreshToken();
+    const hash = refreshHash(i.refreshToken);
+    // 토큰에 실을 계정 값(본인확인 뒤 첫 갱신부터 ticket:buy·pid, identity §5 '즉시 갱신')은 트랜잭션 앞에서 잠그지 않고 읽는다:
+    // 다른 저장소를 읽으므로 세션 줄을 잠근 채 두 번째 연결을 잡지 않는다. 모르는 토큰이면 읽지 않는다
+    const owner = await this.store.refreshOwner(hash);
+    const claims = owner ? await this.claims.of(owner) : null;
     const r = await this.store.transaction(async (tx) => {
-      const s = await tx.findByRefreshHash(refreshHash(i.refreshToken));
+      const s = await tx.findByRefreshHash(hash);
       if (!s) return { kind: 'invalid' as const };
       const decision = decideRefresh({ match: s.match, rotatedAt: s.rotatedAt, refreshUsed: s.refreshUsed, alive: sessionAlive(s, now) }, now);
       if (decision === 'invalid') return { kind: 'invalid' as const };
@@ -48,11 +53,16 @@ export class RefreshSession {
         return { kind: 'reuse' as const };
       }
       const idleExpiresAt = Math.min(now + SESSION_IDLE_MS, s.absoluteExpiresAt);
+      // 되돌릴 수 없는 쓰기 전에 액세스 토큰부터 서명한다: 서명이 실패하면 트랜잭션이 되돌아가 브라우저의 옛 쿠키가 그대로 지금 토큰이다
+      // (커밋 뒤에 서명하면 30초 뒤 같은 쿠키가 탈취로 보여 로그인이 끊긴다, 관리 갱신과 같은 차례, BOT-130이 넘긴 것).
+      // 앞에서 읽은 주인과 다르면(그 사이 해시가 다른 세션으로 갔다는 뜻이라 생기지 않는다) 그 계정으로 다시 읽는다
+      const c = s.accountId === owner && claims ? claims : await this.claims.of(s.accountId);
+      const access = await this.signer.access({ accountId: s.accountId, sessionId: s.id, ...c }, now);
       if (decision === 'rotate') await tx.rotateRefresh(s.id, next.hash, now, idleExpiresAt);
       // 재시도: 먼저 준(받지 못한) 토큰을 새 토큰으로 바꿔 폐기한다. 앞 토큰·회전 시각은 그대로라 유예가 늘지 않는다
       else await tx.setRefreshHash(s.id, next.hash);
       await tx.recordRefreshHash({ hash: next.hash, sessionId: s.id, refreshFamily: s.refreshFamily, issuedAt: now, expiresAt: s.absoluteExpiresAt });
-      return { kind: decision, accountId: s.accountId, sessionId: s.id, refreshExpiresAt: decision === 'rotate' ? idleExpiresAt : Math.min(s.idleExpiresAt, s.absoluteExpiresAt) };
+      return { kind: decision, accountId: s.accountId, sessionId: s.id, access, refreshExpiresAt: decision === 'rotate' ? idleExpiresAt : Math.min(s.idleExpiresAt, s.absoluteExpiresAt) };
     });
     if (r.kind === 'invalid') {
       this.signals.refreshed('fan', 'invalid');
@@ -63,8 +73,7 @@ export class RefreshSession {
       return { result: 'REUSED' };
     }
     this.signals.refreshed('fan', r.kind === 'rotate' ? 'rotated' : 'retried');
-    // 본인확인 뒤 첫 갱신부터 ticket:buy·pid가 실린다(identity §5 '즉시 갱신')
-    const access = await this.signer.access({ accountId: r.accountId, sessionId: r.sessionId, ...(await this.claims.of(r.accountId)) }, now);
+    const { access } = r;
     return {
       result: 'OK',
       accountId: r.accountId,

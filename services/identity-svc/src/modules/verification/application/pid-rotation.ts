@@ -8,6 +8,8 @@ import { KeyServiceUnavailable } from '../domain/verification.js';
 
 /** 한 번에 계산하는 줄 수 [가정](KMS 대칭·HMAC 연산은 계정 전체가 초당 10,000건을 나눠 쓴다, identity §5) */
 export const PID_ROTATION_BATCH = 100;
+/** 전환 작업의 KMS 호출 초당 상한 [가정](운영 본인확인·관리자 로그인의 KMS 몫을 깎지 않게, identity §5, BOT-025가 넘긴 것) */
+export const PID_ROTATION_KMS_RPS = 200;
 /** 한 번에 지우는 pid_prev 줄 수 [가정] */
 const CLEAR_BATCH = 1_000;
 /** 전환 끝 시각은 적어도 지금 + 1일이다(가장 늦은 판매 종료 + 1일, identity §5 pid 키 교체 2) */
@@ -55,14 +57,20 @@ const safeToOpenAtOf = (movedAt: number | null): number | null => (movedAt === n
 
 export class PidRotation {
   readonly #batch: number;
+  readonly #kmsPerSecond: number;
+  readonly #sleep: (ms: number) => Promise<void>;
 
   constructor(
     private readonly store: PidRotationStore,
     private readonly hashers: IdentityHashers,
     private readonly clock: Clock,
-    o: { batch?: number } = {},
+    o: { batch?: number; kmsPerSecond?: number; sleep?: (ms: number) => Promise<void> } = {},
   ) {
-    this.#batch = o.batch ?? PID_ROTATION_BATCH;
+    this.#kmsPerSecond = o.kmsPerSecond ?? PID_ROTATION_KMS_RPS;
+    if (!Number.isFinite(this.#kmsPerSecond) || this.#kmsPerSecond <= 0) throw new RangeError('KMS 초당 상한은 0보다 큰 수다');
+    // 한 묶음은 함께 보내므로 묶음 크기를 초당 상한 이하로 둔다: 평균이 아니라 어느 1초에도 상한을 넘지 않게(재검토 2026-11-05)
+    this.#batch = Math.max(1, Math.min(o.batch ?? PID_ROTATION_BATCH, Math.floor(this.#kmsPerSecond)));
+    this.#sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
   /** 전환을 시작하거나(until 필요) 닫지 않은 같은 판의 전환을 이어 한다(until은 없거나 처음 값) */
@@ -131,6 +139,8 @@ export class PidRotation {
     for (;;) {
       const rows = await this.store.pidRowsToMove(target, after, this.#batch);
       if (rows.length === 0) return moved;
+      // 시간은 KMS에 보내기 직전부터 잰다(줄 읽기에 걸린 시간을 쉬는 시간으로 치면 두 묶음이 1초 안에 몰린다, 재검토 2026-11-05)
+      const started = this.clock.now();
       after = rows[rows.length - 1]!.accountId;
       const pids = await Promise.allSettled(rows.map((r) => this.hashers.pid(r.ciHmac)));
       let failure: unknown;
@@ -150,6 +160,9 @@ export class PidRotation {
         }
         throw failure;
       }
+      // 초당 상한: 이 묶음의 KMS 호출 수가 상한에 맞는 시간보다 빨리 끝났으면 모자란 만큼 쉰다
+      const short = (rows.length * 1000) / this.#kmsPerSecond - (this.clock.now() - started);
+      if (short > 0) await this.#sleep(short);
     }
   }
 }

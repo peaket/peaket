@@ -216,7 +216,8 @@ export class CreateSession {
   async #viaLink(i: CreateSessionInput, link: { proposalId: string; binding: string }): Promise<LoginOutcome> {
     if (!proposalIdOk(link.proposalId)) throw new SessionError('NOT_FOUND', '연결 제안이 없다');
     const p = await this.#links().get(link.proposalId).catch(unavailable);
-    if (!p || !bindingMatches(p, link.binding)) throw new SessionError('NOT_FOUND', '연결 제안이 없거나 만료됐다');
+    // 새 계정 만들기에 쓴 제안으로는 잇지 않는다(BOT-040이 넘긴 것)
+    if (!p || p.usedKey !== undefined || !bindingMatches(p, link.binding)) throw new SessionError('NOT_FOUND', '연결 제안이 없거나 만료됐다');
     const now = this.clock.now();
     const refresh = newRefreshToken();
     const r = await this.store.transaction(async (tx): Promise<(Opened & { linked: Provider | null }) | { mismatch: true } | { gone: true }> => {

@@ -230,6 +230,21 @@ export class MemorySessionStore implements SessionStore {
     });
   }
 
+  async refreshOwner(hash: Uint8Array): Promise<string | null> {
+    return this.#serial(() => {
+      const h = hex(hash);
+      for (const x of this.#state.sessions.values()) if (hex(x.refreshHash) === h || (x.prevRefreshHash && hex(x.prevRefreshHash) === h)) return x.accountId;
+      return null;
+    });
+  }
+
+  async sessionOf(id: string): Promise<SessionRow | null> {
+    return this.#serial(() => {
+      const x = this.#state.sessions.get(id.toLowerCase());
+      return x ? row(x) : null;
+    });
+  }
+
   async purgeReauthUses(now: number): Promise<number> {
     return this.#serial(() => {
       let n = 0;

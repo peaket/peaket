@@ -27,7 +27,8 @@ export function kmsMacClient(o: { region: string; endpoint?: string; credentials
     ...(o.endpoint ? { endpoint: o.endpoint } : {}),
     ...(o.credentials ? { credentials: o.credentials } : {}),
     maxAttempts: MAX_ATTEMPTS,
-    requestHandler: { connectionTimeout: CONNECTION_TIMEOUT_MS, requestTimeout: REQUEST_TIMEOUT_MS },
+    // throwOnRequestTimeout: 이 SDK 판은 이것이 없으면 요청 시간 한도를 넘겨도 끊지 않는다(연결만 받고 답하지 않는 KMS에서 멈춘다, BOT-131이 넘긴 것)
+    requestHandler: { connectionTimeout: CONNECTION_TIMEOUT_MS, requestTimeout: REQUEST_TIMEOUT_MS, throwOnRequestTimeout: true },
   });
   return {
     async mac(keyId, message) {

@@ -97,6 +97,7 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
         },
         // 메모리 저장소는 계정 표를 보지 못한다(시험은 유스케이스의 앞선 확인으로 본다)
         lockAccountForShare: async () => null,
+        accountStatusOf: async () => null,
         holdBySource: async (accountId, caseId) => {
           const h = s.holds.get(holdKey(accountId, caseId));
           return h ? { ...h } : null;

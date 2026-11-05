@@ -50,7 +50,11 @@ export class ConfirmMerge {
       throw e;
     }
     if (plan.invariantViolated) throw new MergeError('INVARIANT', '흡수 계정에 티켓이나 후기가 있다');
-    if (plan.blockers.length > 0) throw new MergeError('BLOCKED', '병합을 막는 사유가 있다', plan.blockers);
+    if (plan.blockers.length > 0) {
+      // 끝난 계정(탈퇴·병합됨)이 있으면 막는 사유보다 먼저 없는 제안이다(트랜잭션 안의 차례와 같게, 재검토 2026-11-05)
+      if (await this.#ended(p.primaryAccountId, p.absorbedAccountId)) await this.#stale(p.id, '병합할 수 있는 계정이 아니다');
+      throw new MergeError('BLOCKED', '병합을 막는 사유가 있다', plan.blockers);
+    }
     const now = this.clock.now();
     const mergeId = uuidv7(this.clock);
     try {
@@ -64,9 +68,9 @@ export class ConfirmMerge {
         const s = await tx.getSessionForUpdate(sessionId);
         if (!s || s.accountId !== accountId || !sessionAlive(s, now)) throw new MergeError('REAUTH_REQUIRED', '세션이 끝났다');
         if (!(await tx.useReauth({ jti: token.jti, accountId, usedAt: now, expiresAt: token.expiresAt }))) throw new MergeError('REAUTH_REQUIRED', '이미 쓴 재인증 토큰이다');
-        if ((await tx.accountStatusOf(p.primaryAccountId)) !== 'ACTIVE' || (await tx.accountStatusOf(p.absorbedAccountId)) !== 'ACTIVE') {
-          throw new MergeError('NOT_FOUND', '병합할 수 있는 계정이 아니다');
-        }
+        const statuses = [await tx.accountStatusOf(p.primaryAccountId), await tx.accountStatusOf(p.absorbedAccountId)];
+        // 끝난 계정(탈퇴·병합됨)이 있으면 없는 제안이다. 없는 제안(404)은 막는 사유(409)보다 먼저 본다: 다시 와도 이룰 수 없다(재검토 2026-11-05)
+        if (statuses.some((x) => x !== 'ACTIVE' && x !== 'WITHDRAWAL_PENDING')) throw new MergeError('NOT_FOUND', '병합할 수 있는 계정이 아니다');
         // 추가하려던 로그인 수단이 아직 다른 계정(제안하지 않은 쪽)의 것이어야 한다(그 제공자로 로그인한 것이 그 계정 쪽 동의다, 새 맥락 리뷰 낮음 12)
         if ((await tx.findAccountByProvider(p.newProvider, p.newProviderUserId))?.id !== other) throw new MergeError('NOT_FOUND', '추가하려던 로그인 수단이 다른 계정에 없다');
         // 잠근 뒤 본인확인 기록으로 대표 계정을 다시 고른다(잠그기 전 확인과 이 사이에 끝난 본인확인, 새 맥락 리뷰 높음 1). 표를 보지 못하는 저장소는 앞의 확인만
@@ -76,6 +80,8 @@ export class ConfirmMerge {
           if (c.bothVerified) throw new MergeError('BLOCKED', '두 계정 모두 본인확인을 마쳤다', ['BOTH_VERIFIED']);
           if (c.primary !== p.primaryAccountId) throw new MergeError('NOT_FOUND', '제안 뒤 본인확인으로 대표 계정이 바뀌었다');
         }
+        // 잠근 뒤에 탈퇴 유예에 들어간 계정은 막는 사유다(409, 제안은 남는다, BOT-042가 넘긴 것)
+        if (statuses.includes('WITHDRAWAL_PENDING')) throw new MergeError('BLOCKED', '탈퇴 정리 중인 계정이 있다', ['WITHDRAWAL_IN_PROGRESS']);
         const open = await tx.unterminatedSessions(p.absorbedAccountId);
         await tx.mergeAccounts({ mergeId, primaryAccountId: p.primaryAccountId, absorbedAccountId: p.absorbedAccountId, mergedProvider: p.newProvider, moved: { ...plan.moved }, requestedAt: p.createdAt, now });
         // 흡수 계정의 모든 세션을 끝낸다(세션 종료 사건 MERGED), 그다음 마지막 쓰기로 병합 사건
@@ -90,6 +96,11 @@ export class ConfirmMerge {
     // 한 번만 쓴다. 지우지 못해도 다시 오면 흡수 계정이 MERGED라 NOT_FOUND다
     await this.proposals.remove(p.id).catch(() => undefined);
     return { mergeId };
+  }
+
+  /** 두 계정 가운데 끝난(탈퇴·병합된) 계정이 있는가 */
+  #ended(primary: string, absorbed: string): Promise<boolean> {
+    return this.store.transaction(async (tx) => [await tx.accountStatusOf(primary), await tx.accountStatusOf(absorbed)].some((x) => x !== 'ACTIVE' && x !== 'WITHDRAWAL_PENDING'));
   }
 
   /** 제안을 지우고 NOT_FOUND를 던진다 */

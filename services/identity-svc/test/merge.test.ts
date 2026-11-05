@@ -169,6 +169,51 @@ describe('병합 확정(I-T32·I-T34)', () => {
     expect(t.sessions.accountOf(b.accountId)?.status).toBe('ACTIVE');
   });
 
+  test('대표나흡수계정이탈퇴유예중이면_확정은404가아니라BLOCKED(WITHDRAWAL_IN_PROGRESS)이고_제안을지우지않으며병합하지않는다(BOT-042가넘긴것)', async () => {
+    const t = await setup();
+    const { a, b, r } = await t.propose();
+    const id = r.mergeProposalId!;
+    const blockersOf = async () => {
+      const e = await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: id, reauthToken: await t.token(a) }).catch((x: unknown) => x);
+      return e instanceof MergeError ? [e.code, e.blockers] : e;
+    };
+    // 대표 계정(지금 계정 a)이 탈퇴 유예 중
+    t.sessions.setStatus(a.accountId, 'WITHDRAWAL_PENDING');
+    expect(await blockersOf()).toEqual(['BLOCKED', ['WITHDRAWAL_IN_PROGRESS']]);
+    t.sessions.setStatus(a.accountId, 'ACTIVE');
+    // 확정 직전 확인 뒤, 트랜잭션 전에 흡수 계정이 탈퇴 유예에 들어갔다
+    const assess = t.planner.assessPair.bind(t.planner);
+    t.planner.assessPair = async (...args) => {
+      const plan = await assess(...args);
+      t.sessions.setStatus(b.accountId, 'WITHDRAWAL_PENDING');
+      return plan;
+    };
+    expect(await blockersOf()).toEqual(['BLOCKED', ['WITHDRAWAL_IN_PROGRESS']]);
+    t.planner.assessPair = assess;
+    t.sessions.setStatus(b.accountId, 'ACTIVE');
+    // 흡수 계정이 그사이 끝났으면(MERGED) 대표가 탈퇴 유예 중이어도 이룰 수 없는 제안이라 NOT_FOUND다(재검토 2026-11-05).
+    // 확정 직전 확인 전에 그렇게 됐어도(트랜잭션 밖의 막는 사유) 같다
+    const stale = await t.proposals.get(id);
+    t.sessions.setStatus(a.accountId, 'WITHDRAWAL_PENDING');
+    t.sessions.setStatus(b.accountId, 'MERGED');
+    expect(await blockersOf()).toEqual(['NOT_FOUND', undefined]);
+    await t.proposals.save(stale!);
+    t.planner.assessPair = async (...args) => {
+      const plan = await assess(...args);
+      t.sessions.setStatus(a.accountId, 'WITHDRAWAL_PENDING');
+      t.sessions.setStatus(b.accountId, 'MERGED');
+      return plan;
+    };
+    expect(await blockersOf()).toEqual(['NOT_FOUND', undefined]);
+    t.planner.assessPair = assess;
+    t.sessions.setStatus(a.accountId, 'ACTIVE');
+    t.sessions.setStatus(b.accountId, 'ACTIVE');
+    await t.proposals.save(stale!);
+    // 제안이 남아 있어 사유가 풀리면 확정된다
+    expect(await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: id, reauthToken: await t.token(a) })).toMatchObject({ mergeId: expect.any(String) });
+    expect(t.sessions.accountOf(b.accountId)?.status).toBe('MERGED');
+  });
+
   test('다른계정은제안을확정할수없다(제안한계정만)', async () => {
     const t = await setup();
     const { b, r } = await t.propose();

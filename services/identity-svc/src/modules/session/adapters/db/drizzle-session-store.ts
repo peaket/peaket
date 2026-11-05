@@ -18,6 +18,17 @@ const refPrevSql = (given: string | null | undefined) =>
       ? sql`account_contact_ref.ref_prev`
       : sql`case when split_part(account_contact_ref.ref, '.', 1) <> split_part(excluded.ref, '.', 1) then account_contact_ref.ref else account_contact_ref.ref_prev end`;
 const date = (ms: number) => new Date(ms);
+
+/**
+ * 조사용 연락처 가명 행(account_contact_ref, 세션 컨텍스트의 표)을 그 트랜잭션에서 쓴다. 본인확인 저장소도 번호 가명을 이것으로 쓴다
+ * (같은 DB·같은 트랜잭션. 표가 바뀌면 형 검사가 잡는다, BOT-045가 넘긴 것). refPrev: 문자면 그 값, null이면 그대로, 없으면 판이 바뀔 때 옛 값
+ */
+export async function writeContactRef(tx: DbTransaction, i: { accountId: string; kind: ContactKind; ref: string; refPrev?: string | null; now: number }): Promise<void> {
+  await tx
+    .insert(accountContactRef)
+    .values({ accountId: i.accountId, kind: i.kind, ref: i.ref, refPrev: i.refPrev ?? null, updatedAt: date(i.now) })
+    .onConflictDoUpdate({ target: [accountContactRef.accountId, accountContactRef.kind], set: { ref: i.ref, refPrev: refPrevSql(i.refPrev), updatedAt: date(i.now) } });
+}
 const ms = (d: Date | null) => (d === null ? null : d.getTime());
 type SessionRecord = typeof session.$inferSelect;
 const rowOf = (r: SessionRecord): SessionRow => ({
@@ -56,6 +67,21 @@ export class DrizzleSessionStore implements SessionStore {
       total += n;
       if (n < 1000 || signal?.aborted) return total;
     }
+  }
+
+  async refreshOwner(hash: Uint8Array): Promise<string | null> {
+    const h = Buffer.from(hash);
+    const [r] = await this.database.db
+      .select({ accountId: session.accountId })
+      .from(session)
+      .where(or(eq(session.refreshHash, h), eq(session.prevRefreshHash, h)))
+      .limit(1);
+    return r?.accountId ?? null;
+  }
+
+  async sessionOf(id: string): Promise<SessionRow | null> {
+    const [r] = await this.database.db.select().from(session).where(eq(session.id, id));
+    return r ? rowOf(r) : null;
   }
 
   async purgeReauthUses(now: number): Promise<number> {
@@ -358,12 +384,7 @@ export class DrizzleSessionStore implements SessionStore {
             .orderBy(asc(account.id))
             .limit(limit)
         ).map((r) => r.id),
-      setContactRef: async (i) => {
-        await tx
-          .insert(accountContactRef)
-          .values({ accountId: i.accountId, kind: i.kind, ref: i.ref, refPrev: i.refPrev ?? null, updatedAt: date(i.now) })
-          .onConflictDoUpdate({ target: [accountContactRef.accountId, accountContactRef.kind], set: { ref: i.ref, refPrev: refPrevSql(i.refPrev), updatedAt: date(i.now) } });
-      },
+      setContactRef: (i) => writeContactRef(tx, i),
       verifiedOf: async (accountId) => {
         // 본인확인 기록 표는 본인확인 컨텍스트의 표다. 같은 트랜잭션에서 있는지만 본다(activeHoldOf와 같은 방식)
         const r = await tx.execute(sql`select 1 from identity_verification where account_id = ${accountId}`);

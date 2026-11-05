@@ -185,4 +185,22 @@ describe('연결하지 않고 새 계정 만들기(FR-048)', () => {
     expect(t.sessions.accountOf(s.accountId)).toMatchObject({ email: 'fan@peaket.test', emailVerified: true });
     expect(await code(t.separate.run({ proposalId: p.proposalId, binding: p.binding, idempotencyKey: newKey(), deviceId: null }))).toBe('NOT_FOUND');
   });
+
+  test('새계정만들기의응답을잃고같은멱등키로다시보내면_같은세션을돌려주고_쓴제안은다른키·연결로그인·조회에없는제안이다(BOT-040이넘긴것)', async () => {
+    const t = await setup();
+    sessionOf(await t.login('kakao', 'k-1', 'fan@peaket.test', true));
+    const p = proposalOf(await t.login('google', 'g-1', 'fan@peaket.test', true));
+    const key = newKey();
+    const s = await t.separate.run({ proposalId: p.proposalId, binding: p.binding, idempotencyKey: key, deviceId: 'dev-2' });
+    const again = await t.separate.run({ proposalId: p.proposalId, binding: p.binding, idempotencyKey: key, deviceId: 'dev-2' });
+    expect(again).toMatchObject({ accountId: s.accountId, sessionId: s.sessionId, newAccount: true });
+    expect(again.refreshToken).not.toBe(s.refreshToken);
+    // 묶음 값이 다르면 같은 키여도 없는 제안이다
+    expect(await code(t.separate.run({ proposalId: p.proposalId, binding: 'y'.repeat(43), idempotencyKey: key, deviceId: null }))).toBe('NOT_FOUND');
+    expect(await code(t.view.run({ proposalId: p.proposalId, binding: p.binding }))).toBe('NOT_FOUND');
+    expect(await code(t.login('kakao', 'k-1', null, false, { proposalId: p.proposalId, binding: p.binding }))).toBe('NOT_FOUND');
+    // 수명이 지나면 같은 키도 없는 제안이다
+    t.clock.advance(LINK_PROPOSAL_TTL_MS + 1);
+    expect(await code(t.separate.run({ proposalId: p.proposalId, binding: p.binding, idempotencyKey: key, deviceId: null }))).toBe('NOT_FOUND');
+  });
 });

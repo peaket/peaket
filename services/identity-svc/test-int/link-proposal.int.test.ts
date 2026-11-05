@@ -86,15 +86,23 @@ test('I-T30_PostgreSQL·Valkey에서_다른계정은세번까지만받고키를�
   expect(Number(await cmd(linkKey(p2.proposalId), ['EXISTS', linkKey(p2.proposalId)]))).toBe(0);
 });
 
-test('PostgreSQL·Valkey에서_새계정만들기는_제안의새제공자로검증이메일계정을만들고제안을지운다', async () => {
+test('PostgreSQL·Valkey에서_새계정만들기는_제안의새제공자로검증이메일계정을만들고_제안은쓴것으로남아같은키의다시보내기만받는다', async () => {
   const t = await setup();
   await t.login('kakao', 'pg-k-3', 'pg3@peaket.test', true);
   const p = await t.login('google', 'pg-g-4', 'pg3@peaket.test', true);
   if (p.kind !== 'link-proposed') throw new Error(p.kind);
-  const s = await t.separate.run({ proposalId: p.proposalId, binding: p.binding, idempotencyKey: newKey(), deviceId: null });
+  const key = newKey();
+  const s = await t.separate.run({ proposalId: p.proposalId, binding: p.binding, idempotencyKey: key, deviceId: null });
   expect(s.newAccount).toBe(true);
   expect(await q('select email, email_verified from account where id = $1', [s.accountId])).toEqual([{ email: 'pg3@peaket.test', email_verified: true }]);
-  expect(Number(await cmd(linkKey(p.proposalId), ['EXISTS', linkKey(p.proposalId)]))).toBe(0);
+  // 지우지 않고 쓴 멱등 키를 적어 남은 수명 동안 둔다(같은 키의 다시 보내기만 받는다, BOT-040이 넘긴 것)
+  const ttl = Number(await cmd(linkKey(p.proposalId), ['PTTL', linkKey(p.proposalId)]));
+  expect(ttl).toBeGreaterThan(0);
+  expect(ttl).toBeLessThanOrEqual(10 * 60_000);
+  const again = await t.separate.run({ proposalId: p.proposalId, binding: p.binding, idempotencyKey: key, deviceId: null });
+  expect(again).toMatchObject({ accountId: s.accountId, sessionId: s.sessionId });
+  await expect(t.separate.run({ proposalId: p.proposalId, binding: p.binding, idempotencyKey: newKey(), deviceId: null })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(t.view.run({ proposalId: p.proposalId, binding: p.binding })).rejects.toMatchObject({ code: 'NOT_FOUND' });
 });
 
 test('I-T30_리뷰재현_PostgreSQL에서_대상계정의탈퇴가끝나기전에연결로그인이오면_계정을잠근뒤상태를보고_탈퇴한계정에새제공자를잇지않는다', async () => {

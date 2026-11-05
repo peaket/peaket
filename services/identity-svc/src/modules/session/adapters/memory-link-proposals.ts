@@ -50,6 +50,12 @@ export class MemoryLinkProposals implements LinkProposals {
     this.#m.delete(id);
   }
 
+  async markUsed(id: string, idempotencyKey: string): Promise<void> {
+    this.#up();
+    const p = this.#live(id);
+    if (p) p.usedKey = idempotencyKey;
+  }
+
   /** 시험용: 남은 제안(만료 전) */
   dump(): StoredLinkProposal[] {
     return [...this.#m.keys()].map((id) => this.#live(id)).filter((p): p is StoredLinkProposal => p !== null);

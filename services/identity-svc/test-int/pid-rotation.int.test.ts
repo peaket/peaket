@@ -88,3 +88,23 @@ test('I-T49_PostgreSQL에서_전환은묶음마다이어하고_KMS장애뒤다�
   expect(await status.run({ accountId: s0.accountId, sessionId: s0.sessionId })).toMatchObject({ verified: true, previousPid: '' });
   expect((await rot.status()).open).toBeNull();
 });
+
+test('I-T49_GetVerificationStatus는읽기만하므로_다른트랜잭션이세션줄을잠그고있어도기다리지않고답한다(BOT-025가넘긴것)', async () => {
+  const verifications = new DrizzleVerificationStore(database);
+  const sessions = new DrizzleSessionStore(database, clock);
+  const claims = new VerificationClaims(verifications);
+  const k = await kit(sessions, { claims, clock });
+  const s = await k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'lock-read', email: null, deviceId: null });
+  const holder = await database.pool.connect();
+  try {
+    await holder.query('begin');
+    await holder.query('select 1 from session where id = $1 for update', [s.sessionId]);
+    const status = new GetVerificationStatus(sessions, claims, clock);
+    const answer = status.run({ accountId: s.accountId, sessionId: s.sessionId });
+    const late = new Promise<'blocked'>((r) => setTimeout(() => r('blocked'), 2_000));
+    expect(await Promise.race([answer, late])).toMatchObject({ verified: false });
+  } finally {
+    await holder.query('rollback');
+    holder.release();
+  }
+});

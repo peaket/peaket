@@ -160,3 +160,40 @@ test('I-T27_PostgreSQL에서_탈퇴트랜잭션이_pid와옛pid를실은탈퇴�
   expect(await q('select 1 from identity_verification where account_id = $1', [a.accountId])).toHaveLength(0);
   expect(await q("select 1 from outbox where topic = 'identity.accounts-withdrawn' and msg_key = $1", [a.accountId])).toHaveLength(1);
 });
+
+test('BOT-030넘김_PostgreSQL에서_탈퇴뒤본인확인기록파기가실패해남은기록이있어도_같은사람의새계정본인확인은중복이아니고_남은기록을그자리에서지운다', async () => {
+  const t = await setup();
+  const a = await t.login('pg-dup-a');
+  await t.verify(a.accountId, 'pg-dup-person');
+  const token = await t.reauth(a);
+  const real = new VerificationEraser(t.verifications);
+  const failing = { erase: async () => { throw new Error('주입한 DB 장애'); }, pidsOf: (id: string) => real.pidsOf(id) };
+  await new WithdrawAccount(t.sessions, new JoseReauthVerifier(t.k.keys, ISSUER, clock), failing, clock).run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: {} });
+  expect(await q('select 1 from identity_verification where account_id = $1', [a.accountId])).toHaveLength(1);
+  // 정비가 돌기 전에 같은 사람이 새 계정으로 본인확인한다
+  const b = await t.login('pg-dup-b');
+  const r = await t.verify(b.accountId, 'pg-dup-person');
+  expect(r).toMatchObject({ status: 'VERIFIED' });
+  expect(await q('select 1 from identity_verification where account_id = $1', [a.accountId])).toHaveLength(0);
+  expect(await q('select 1 from identity_verification where account_id = $1', [b.accountId])).toHaveLength(1);
+  // 다른 계정 시도 기록(부정 예매 후보 묶음의 신호)을 남기지 않는다
+  expect(await q('select 1 from identity_conflict_attempt where attempted_account_id = $1', [b.accountId])).toHaveLength(0);
+});
+
+test('재검토_PostgreSQL에서_중복판정은주인계정을잠그지않아_다른트랜잭션이주인계정을쓰기잠금하고있어도기다리지않는다(병합확정과교착하지않게)', async () => {
+  const t = await setup();
+  const a = await t.login('pg-nolock-a');
+  await t.verify(a.accountId, 'pg-nolock-person');
+  const b = await t.login('pg-nolock-b');
+  const holder = await database.pool.connect();
+  try {
+    await holder.query('begin');
+    await holder.query('select 1 from account where id = $1 for update', [a.accountId]);
+    const late = new Promise<'blocked'>((r) => setTimeout(() => r('blocked'), 2_000));
+    const r = await Promise.race([t.verify(b.accountId, 'pg-nolock-person'), late]);
+    expect(r).toMatchObject({ code: 'DUPLICATE_ACCOUNT' });
+  } finally {
+    await holder.query('rollback');
+    holder.release();
+  }
+});
