@@ -3,6 +3,7 @@
 // ① GET /v1/identity/sessions로 기기마다 한 줄을 받는다 ② [로그아웃]은 토큰을 갱신하고 탭 저장소에 할 일을 남긴 뒤 재인증으로 떠난다
 // ③ 돌아오면 할 일이 있을 때만 재인증 토큰을 한 번 받아 DELETE /v1/identity/sessions/{sessionId}(X-Reauth-Token)를 보낸다(재인증 결과 받기는 탈퇴 흐름과 같다)
 import type { DeviceSession } from '@peaket/ds/DeviceSessionList';
+import { fetchOnce } from '../../shared/lib/timed-fetch.ts';
 import { refreshOnce, type RefreshResult } from '../../shared/lib/token-refresh.ts';
 
 export type Provider = 'kakao' | 'naver' | 'google';
@@ -69,50 +70,56 @@ export function createDevicesApi(o: { origin: string; fetch: FetchLike; lock?: <
   /** 401만 거절(rejected)이다. 연결이 끊기거나 5xx는 unavailable(로그인 화면으로 보내지 않는다) */
   const refresh = (): Promise<RefreshResult> => lock(() => refreshOnce(o.fetch, url('/v1/identity/access-tokens')));
 
-  /** 보내고 401이면 갱신 뒤 한 번 더. 갱신이 401로 거절되거나 다시 401이면 login, 갱신이 일시 장애면 unavailable */
-  async function call(path: string, init: RequestInit): Promise<Response | 'login' | 'unavailable'> {
-    const send = () => o.fetch(url(path), { credentials: 'include', cache: 'no-store', ...init });
+  /**
+   * 보내고 401이면 갱신 뒤 한 번 더. 갱신이 401로 거절되거나 다시 401이면 login, 갱신이 일시 장애면 unavailable.
+   * 401이 아닌 응답은 read가 읽는다. 시간 초과(읽기 10초·쓰기 15초)는 본문을 다 읽을 때까지 세고, 읽지 않은 본문(401 포함)은 버린다
+   * (docs/frontend.md §4.1 'api-client 밖의 호출'. 읽지 않은 응답은 Chromium이 끝내지 않아 화면이 도는 동안 요청이 남는다, 2026-11-06 BOT-044 뒤처리)
+   */
+  async function call<T>(path: string, init: RequestInit, read: (r: Response) => Promise<T>): Promise<T | 'login' | 'unavailable'> {
+    const UNAUTHORIZED = Symbol('401');
+    const readOr401 = async (r: Response): Promise<T | typeof UNAUTHORIZED> => (r.status === 401 ? UNAUTHORIZED : read(r));
+    const send = () => fetchOnce(o.fetch, url(path), { credentials: 'include', cache: 'no-store', ...init }, readOr401);
     const first = await send();
-    if (first.status !== 401) return first;
+    if (first !== UNAUTHORIZED) return first;
     const refreshed = await refresh();
     if (refreshed === 'rejected') return 'login';
     if (refreshed !== 'ok') return 'unavailable';
     const second = await send();
-    return second.status === 401 ? 'login' : second;
+    return second === UNAUTHORIZED ? 'login' : second;
   }
 
   return {
     refresh,
     async list() {
-      let r: Response | 'login' | 'unavailable';
+      let r: ListAnswer | 'login' | 'unavailable';
       try {
-        r = await call('/v1/identity/sessions', { method: 'GET', headers: { accept: 'application/json' } });
+        r = await call('/v1/identity/sessions', { method: 'GET', headers: { accept: 'application/json' } }, async (res): Promise<ListAnswer> => {
+          if (res.status !== 200) return { kind: 'error' };
+          const b = (await res.json()) as { items?: unknown };
+          return Array.isArray(b.items) && b.items.every(isRow) ? { kind: 'ok', items: b.items } : { kind: 'error' };
+        });
       } catch {
+        // 연결 실패·시간 초과·본문이 JSON이 아님
         return { kind: 'error' };
       }
       if (r === 'login') return { kind: 'login' };
-      if (r === 'unavailable' || r.status !== 200) return { kind: 'error' };
-      try {
-        const b = (await r.json()) as { items?: unknown };
-        return Array.isArray(b.items) && b.items.every(isRow) ? { kind: 'ok', items: b.items } : { kind: 'error' };
-      } catch {
-        return { kind: 'error' };
-      }
+      return r === 'unavailable' ? { kind: 'error' } : r;
     },
     async end(sessionId, reauthToken) {
-      let r: Response | 'login' | 'unavailable';
+      let r: EndAnswer | 'login' | 'unavailable';
       try {
-        r = await call(`/v1/identity/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE', headers: { accept: 'application/json', 'x-reauth-token': reauthToken } });
+        r = await call(`/v1/identity/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE', headers: { accept: 'application/json', 'x-reauth-token': reauthToken } }, async (res): Promise<EndAnswer> => {
+          if (res.status === 204) return { kind: 'done' };
+          const type = await problemType(res);
+          if (res.status === 404 && type === 'session-not-found') return { kind: 'gone' };
+          if (res.status === 403 && type === 'reauth-required') return { kind: 'reauth' };
+          return { kind: 'error' };
+        });
       } catch {
         return { kind: 'error' };
       }
       if (r === 'login') return { kind: 'login' };
-      if (r === 'unavailable') return { kind: 'error' };
-      if (r.status === 204) return { kind: 'done' };
-      const type = await problemType(r);
-      if (r.status === 404 && type === 'session-not-found') return { kind: 'gone' };
-      if (r.status === 403 && type === 'reauth-required') return { kind: 'reauth' };
-      return { kind: 'error' };
+      return r === 'unavailable' ? { kind: 'error' } : r;
     },
   };
 }

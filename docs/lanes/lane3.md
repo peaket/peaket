@@ -11,7 +11,7 @@
 
 ## 구간 끝 정리 목록
 - 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
-- BOT-044: 브라우저 확인의 실패 둘(HOT-290 CSP form-action, HOT-321 deviceId 빈 값)은 갈래 2가 8da58374(R-350, ADR-0215)로 고쳤다. 그 해시를 docs/review/browser-check/BOT-044.md에 적고 '이 기기의 다른 로그인'을 실제 클릭으로 다시 누른다. 갈래 2가 알린 것: CSP 검사(tools/web-checks/csp)의 /my/settings를 여는 6개(theme.spec FE-T35 셋, web.spec FE-T35 둘·FE-T30)가 60초 시간 초과다. BOT-044의 `GET /v1/identity/sessions`가 stubFanApi 대역에서 끝나지 않는다(HOT-010 합친 바로 뒤 고침).
+- BOT-044 뒤처리: 본인확인 복귀·탈퇴·로그인 수단 흐름의 손으로 쓴 fetch도 `fetchOnce`(시간 한도, 쓰지 않는 본문 버리기)로 바꾼다(docs/frontend.md §4.1 'api-client 밖의 호출'의 남는 한계, apps/web features/identity-verify·account-withdraw·login-methods).
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
@@ -47,3 +47,4 @@
 - 2026-11-05 BOT-122 관리 계정 패스키(R-343, I-T53·I-T10, ADR-0206): openapi에 파트너·관제 같은 꼴 작업 10개(재인증 두 단계, 패스키 등록·목록·지우기), admin_passkey·admin_reauth(0027), 챌린지 Valkey 5분 한 번, RP ID는 콘솔 출처의 호스트, factors는 확인한 요소만, ACCOUNT_SECURITY 묶음, 재초대·삭제 때 패스키 지우기. @simplewebauthn/server 14.0.3(OPEN[20] 소유자 결정, 규칙에 막히지 않음). 서브에이전트가 구현, 새 맥락 리뷰 낮음 8을 고침. 넘김: BAS-043·LCH-120·LCH-050·BOT-152·OPS-260·BOT-132·OPS-390·BOT-140·OPS-070.
 - 2026-11-05 BOT-044 팬의 로그인한 기기(R-347, I-T74·I-T75·I-T76, ADR-0209): GET·DELETE /v1/identity/sessions(기기마다 한 줄, 화면용 기기 이름은 낱말만, 지금 이 기기 줄은 같은 기기의 다른 로그인을 끝냄), 로그인 수단 추가·해제·병합 확정·연결 제안 뒤 다른 세션을 LOGIN_METHOD_CHANGED로 끝냄(ASVS 7.4.3), SCR-017 실제 흐름, 0028. 서브에이전트가 구현, 새 맥락 리뷰 중간 2·낮음 8과 재검토 낮음 1을 고침. 브라우저 확인(Playwright)에서 이 단계 밖 결함 둘(HOT-290 CSP form-action이 제공자 이동을 막음, HOT-321 로그인 폼이 deviceId를 빈 값으로 보냄)을 찾아 갈래 2에 재현과 함께 넘겼다.
 - 2026-11-06 HOT-010 대기열 판매 상태(R-352, Q-T51·Q-T54·I-T27·ST-T18·ST-T19, ADR-0214): 셋으로 나눔(HOT-010 ①-①, HOT-011 ①-②, 공연 상세는 HOT-346으로). EventSaleChanged → notice(판 번호 Lua, soldOutLastSeq·soldOutTiers), 상태 파일 판매 상태·배너·admissionPaused, 진입 매진 410, 첫 발급 기준 purchaseSessionExpiresAt, 소비자 그룹 하나·대기열 Redis 보류·탈퇴 처리할 때 집합. 빈칸 PRF-144(판정 작업, 갈래 1)를 더함. 서브에이전트가 구현, 새 맥락 리뷰 중간 5·낮음 8과 재검토 낮음 8을 고침. HOT-011의 엣지 어댑터 패키지는 OPEN[24]로 물음.
+- 2026-11-06 BOT-044 뒤처리(R-355): CSP 검사의 /my/settings 6개 시간 초과는 기기 목록 흐름이 503·401 응답 본문을 읽지도 버리지도 않아 Chromium이 요청을 끝나지 않은 것으로 본 앱 결함이었다(시간 한도도 없었음). 공용 `fetchOnce`(frontend §4.1 시간 한도, 쓰지 않는 본문 버리기)로 기기 목록·원격 로그아웃·토큰 갱신을 고쳤다. 갈래 2가 고친 두 결함(8da58374) 위에서 BOT-044 브라우저 확인을 CSP를 켠 채 실제 클릭으로 다시 눌러 다시 누른 시나리오가 모두 통과했다(확인 17개).

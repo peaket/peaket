@@ -71,6 +71,82 @@ test('I-T74_원격로그아웃은DELETE와X-Reauth-Token머리로보내고_204�
   assert.deepEqual(await createDevicesApi({ origin: '', fetch: down }).end('x', 't'), { kind: 'error' });
 });
 
+/** 가짜 fetch가 내준 응답 가운데 본문이 있는 것을 모아, 흐름이 끝난 뒤 다 읽거나 버리지 않은 것을 돌려준다 */
+function tracking(handler) {
+  const handed = [];
+  const f = fakeFetch(async (u, init, n) => {
+    const r = await handler(u, init, n);
+    if (r.body) handed.push({ what: `${init.method ?? 'GET'} ${u} ${r.status}`, r });
+    return r;
+  });
+  f.unread = () => handed.filter((h) => !h.r.bodyUsed).map((h) => h.what);
+  return f;
+}
+/** 신호가 끊길 때까지 답하지 않는 fetch(끊기면 그 까닭으로 거절한다). stallBody면 머리(200)는 바로 주고 본문을 끊길 때까지 미룬다 */
+function hangingFetch({ stallBody = false } = {}) {
+  return fakeFetch(
+    (u, init) =>
+      new Promise((resolve, reject) => {
+        const signal = init.signal;
+        if (!signal) return; // 신호가 없으면 영영 답하지 않는다
+        if (!stallBody) return signal.addEventListener('abort', () => reject(signal.reason));
+        const body = new ReadableStream({ start: (c) => signal.addEventListener('abort', () => c.error(signal.reason)) });
+        resolve(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }));
+      }),
+  );
+}
+/** 약속이 끝났으면 그 값, 아니면 'pending'(가짜 시계를 돌린 뒤 미세 작업을 비우고 본다) */
+async function settled(p) {
+  let out = 'pending';
+  p.then((v) => (out = v));
+  for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  return out;
+}
+
+test('I-T74_목록·원격로그아웃·그사이토큰갱신은받은응답본문을모두읽거나버린다_읽지않은본문은Chromium이요청을끝내지않는다(BOT-044뒤처리, CSP검사시간초과)', async () => {
+  const refreshed = (rest) => (u, i, n) => (u.endsWith('/access-tokens') ? rest.refresh() : n === 1 ? problem(401, 'unauthorized') : rest.then());
+  const cases = [
+    ['목록 503', (f) => createDevicesApi({ origin: '', fetch: f }).list(), () => problem(503, 'service-unavailable'), { kind: 'error' }],
+    ['목록 401 → 갱신 → 200', (f) => createDevicesApi({ origin: '', fetch: f }).list(), refreshed({ refresh: () => new Response(null, { status: 204 }), then: () => json(200, { items: [ME] }) }), { kind: 'ok', items: [ME] }],
+    ['목록 401 → 갱신 401', (f) => createDevicesApi({ origin: '', fetch: f }).list(), refreshed({ refresh: () => problem(401, 'unauthorized') }), { kind: 'login' }],
+    ['목록 401 → 갱신 503', (f) => createDevicesApi({ origin: '', fetch: f }).list(), refreshed({ refresh: () => problem(503, 'service-unavailable') }), { kind: 'error' }],
+    ['목록 401 → 갱신 → 다시 401', (f) => createDevicesApi({ origin: '', fetch: f }).list(), (u) => (u.endsWith('/access-tokens') ? new Response(null, { status: 204 }) : problem(401, 'unauthorized')), { kind: 'login' }],
+    ['원격 로그아웃 401 → 갱신 → 204', (f) => createDevicesApi({ origin: '', fetch: f }).end('x', 't'), refreshed({ refresh: () => new Response(null, { status: 204 }), then: () => new Response(null, { status: 204 }) }), { kind: 'done' }],
+    ['원격 로그아웃 502(본문이 문제 상세가 아님)', (f) => createDevicesApi({ origin: '', fetch: f }).end('x', 't'), () => new Response('<html>bad gateway</html>', { status: 502, headers: { 'content-type': 'text/html' } }), { kind: 'error' }],
+  ];
+  for (const [name, run, handler, expected] of cases) {
+    const f = tracking(handler);
+    assert.deepEqual(await run(f), expected, name);
+    assert.deepEqual(f.unread(), [], `${name}: 읽지도 버리지도 않은 응답`);
+  }
+});
+
+test('I-T74_목록은10초·원격로그아웃은15초가지나면오류로끝낸다_머리가온뒤본문이늦어도같다(docs/frontend.md §4.1 시간 초과, BOT-044뒤처리)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const stallBody of [false, true]) {
+    const list = createDevicesApi({ origin: '', fetch: hangingFetch({ stallBody }) }).list();
+    assert.equal(await settled(list), 'pending');
+    t.mock.timers.tick(9_999);
+    assert.equal(await settled(list), 'pending', `목록 9.999초(본문 늦음 ${stallBody})`);
+    t.mock.timers.tick(1);
+    assert.deepEqual(await settled(list), { kind: 'error' }, `목록 10초(본문 늦음 ${stallBody})`);
+  }
+  const end = createDevicesApi({ origin: '', fetch: hangingFetch() }).end('x', 't');
+  assert.equal(await settled(end), 'pending');
+  t.mock.timers.tick(14_999);
+  assert.equal(await settled(end), 'pending', '원격 로그아웃 14.999초');
+  t.mock.timers.tick(1);
+  assert.deepEqual(await settled(end), { kind: 'error' }, '원격 로그아웃 15초');
+  // 401 뒤 토큰 갱신이 답하지 않으면 갱신의 쓰기 한도(15초) 뒤 일시 장애(오류)다. 잠금(peaket.refresh)을 쥔 채 멈추지 않는다
+  const stuck = fakeFetch((u, init) => (u.endsWith('/access-tokens') ? hangingFetch()(u, init) : problem(401, 'unauthorized')));
+  const viaRefresh = createDevicesApi({ origin: '', fetch: stuck }).list();
+  assert.equal(await settled(viaRefresh), 'pending');
+  t.mock.timers.tick(14_999);
+  assert.equal(await settled(viaRefresh), 'pending', '갱신 14.999초');
+  t.mock.timers.tick(1);
+  assert.deepEqual(await settled(viaRefresh), { kind: 'error' }, '갱신 15초');
+});
+
 test('I-T74_줄을화면부품의기기로바꾼다_이름이없으면알수없는기기이고_지금이기기밖에는마지막활동날짜를단다', () => {
   assert.deepEqual(toDeviceSessions([ME, ROW, { sessionId: 's3', deviceName: null, lastActiveAt: '2026-10-31T16:00:00.000Z', current: false }, { sessionId: 's4', deviceName: 'Safari · iPad', lastActiveAt: 'x', current: false }]), [
     { id: ME.sessionId, name: 'Chrome · Windows', icon: 'monitor', current: true },
