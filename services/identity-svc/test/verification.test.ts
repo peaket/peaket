@@ -275,6 +275,16 @@ describe('모의 기관과 기관 창 흐름(BOT-010)', () => {
     const secret = AGENCY_SECRET.toString('base64');
     expect(TestVerificationProvider.fromEnv({ ...base, PEAKET_ENV: 'demo', PEAKET_TEST_VERIFICATION_SECRET: secret }).window('w')).toEqual({ url: AGENCY_URL, method: 'POST', fields: { verificationId: 'w' }, mode: 'POPUP' });
   });
+
+  test('BOT-010넘김_시험기관비밀이base64가아니거나풀어서16바이트보다짧으면시작하지않는다(빈키·잘린키로돌지않게)', () => {
+    const base = { PEAKET_VERIFICATION_PROVIDER: 'test', PEAKET_TEST_VERIFICATION_URL: AGENCY_URL, PEAKET_ENV: 'demo' };
+    for (const bad of ['!!!!not-base64!!!!', 'peaket test secret with spaces', '%%%%', AGENCY_SECRET.toString('hex').slice(0, 30) + '*']) {
+      expect(() => TestVerificationProvider.fromEnv({ ...base, PEAKET_TEST_VERIFICATION_SECRET: bad })).toThrow(/PEAKET_TEST_VERIFICATION_SECRET/);
+    }
+    expect(() => TestVerificationProvider.fromEnv({ ...base, PEAKET_TEST_VERIFICATION_SECRET: Buffer.alloc(8, 1).toString('base64') })).toThrow(/16바이트/);
+    // 채움(=)이 없는 base64도 받는다
+    expect(TestVerificationProvider.fromEnv({ ...base, PEAKET_TEST_VERIFICATION_SECRET: Buffer.alloc(17, 2).toString('base64').replace(/=+$/, '') }).window('w').url).toBe(AGENCY_URL);
+  });
 });
 
 test('탈퇴한주인의남은기록지우기는다시하기횟수를쓰지않는다_지운뒤pid계산과동시저장충돌(CiAlreadyLinked)이와도본인확인을마친다(재검토 2026-11-05)', async () => {

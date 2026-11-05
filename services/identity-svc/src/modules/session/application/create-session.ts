@@ -75,6 +75,16 @@ export type LoginOutcome =
 const KEY = /^[A-Za-z0-9_-]{16,128}$/;
 const PROPOSAL_ID = /^[A-Za-z0-9_-]{22}$/;
 const BINDING = /^[A-Za-z0-9_-]{43}$/;
+/** 로그인 트랜잭션을 처음부터 다시 하는 최대 횟수(병합 두 번이 겹치는 일은 드물어 세 번까지) */
+const MAX_LOGIN_MOVES = 3;
+
+/** 계정을 잠근 뒤 그 수단이 다른 계정으로 옮겨진 것을 봤다(트랜잭션을 되돌려 다시 한다, 밖으로 나가지 않는다) */
+class AccountMoved extends Error {
+  constructor() {
+    super('잠근 뒤 로그인 수단이 다른 계정으로 옮겨졌다');
+    this.name = 'AccountMoved';
+  }
+}
 
 /** 리프레시 토큰: 256비트 난수(asvs/auth.md 7.2.3). identity에는 SHA-256만 둔다 */
 export function newRefreshToken(): { token: string; hash: Uint8Array } {
@@ -163,10 +173,25 @@ export class CreateSession {
     return s;
   }
 
+  /**
+   * 로그인 트랜잭션. 계정을 잠근 뒤 그 수단이 다른 계정으로 옮겨진 것을 보면(#open의 AccountMoved) 되돌려 잠금을 모두 놓고 처음부터 다시 한다.
+   * 잡은 계정을 쥔 채 옮겨 간 계정을 잠그면 ID 순 규칙(병합 확정)을 벗어나 같은 쌍의 확정과 교착(40P01)한다(BOT-042가 넘긴 것). 세 번 넘게 옮겨지면 UNAVAILABLE
+   */
+  async #moveSafe<T>(fn: (tx: SessionTx) => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.store.transaction(fn);
+      } catch (e) {
+        if (!(e instanceof AccountMoved)) throw e;
+        if (attempt >= MAX_LOGIN_MOVES) throw new SessionError('UNAVAILABLE', '로그인하는 동안 로그인 수단이 계속 옮겨졌다');
+      }
+    }
+  }
+
   async #login(i: CreateSessionInput, propose: boolean): Promise<LoginOutcome> {
     const now = this.clock.now();
     const refresh = newRefreshToken();
-    const r = await this.store.transaction(async (tx): Promise<Opened | { proposal: Omit<StoredLinkProposal, 'id' | 'bindingHash'> }> => {
+    const r = await this.#moveSafe(async (tx): Promise<Opened | { proposal: Omit<StoredLinkProposal, 'id' | 'bindingHash'> }> => {
       const replay = await this.#replay(tx, i, now, refresh);
       if (replay) return replay;
       // 다른 멱등 키로 같은 제공자 계정의 로그인이 겹쳐 와도 계정은 하나만 만든다
@@ -220,7 +245,7 @@ export class CreateSession {
     if (!p || p.usedKey !== undefined || !bindingMatches(p, link.binding)) throw new SessionError('NOT_FOUND', '연결 제안이 없거나 만료됐다');
     const now = this.clock.now();
     const refresh = newRefreshToken();
-    const r = await this.store.transaction(async (tx): Promise<(Opened & { linked: Provider | null }) | { mismatch: true } | { gone: true }> => {
+    const r = await this.#moveSafe(async (tx): Promise<(Opened & { linked: Provider | null }) | { mismatch: true } | { gone: true }> => {
       const replay = await this.#replay(tx, i, now, refresh);
       if (replay) return { ...replay, linked: null };
       // 두 제공자 계정을 늘 같은 순서로 잠근다(같은 둘을 거꾸로 잡는 로그인과 서로 기다리지 않게)
@@ -295,20 +320,12 @@ export class CreateSession {
     // 잠근 뒤 그 (제공자, sub)의 계정을 다시 찾는다(BOT-030이 넘긴 것, BOT-042): 잠그기 전에 병합으로 다른 계정에 옮겨졌으면 그 계정으로 간다(흡수된 계정에 세션·기기를 만들지 않게).
     // 해제·탈퇴로 사라졌으면 아래 새 계정 길로 간다. 제공자 잠금을 잡고 있어 같은 제공자 계정의 다른 로그인과 겹치지 않는다
     // 옮겨 간 계정의 상태(탈퇴 정리 중 등)는 처음 찾은 계정과 같게 다룬다(그 수단은 그 계정 것이라 새 계정을 만들면 수단을 빼앗는다, 새 맥락 리뷰 중간 4).
-    // 그 계정을 잠그는 사이 또 옮겨졌을 수 있어 자리를 잡을 때까지 다시 찾는다(병합 두 번이 겹치는 일은 드물어 세 번까지)
+    // 옮겨졌으면 잡은 계정을 쥔 채 옮겨 간 계정을 잠그지 않고 트랜잭션을 처음부터 다시 한다(#moveSafe, 교착을 막는다. BOT-042가 넘긴 것)
     let gone = false;
     if (!newAccount) {
-      for (let hop = 0; ; hop++) {
-        const again = await tx.findAccountByProvider(i.provider, i.providerUserId);
-        if (!again) {
-          gone = true;
-          break;
-        }
-        if (again.id === accountId) break;
-        if (hop >= 2) throw new SessionError('UNAVAILABLE', '로그인하는 동안 로그인 수단이 계속 옮겨졌다');
-        accountId = again.id;
-        await tx.lockAccount(accountId);
-      }
+      const again = await tx.findAccountByProvider(i.provider, i.providerUserId);
+      if (!again) gone = true;
+      else if (again.id !== accountId) throw new AccountMoved();
     }
     // 계정을 찾은 뒤 잠그기 전에 탈퇴가 끝났을 수 있다(새 맥락 리뷰 M1): 잠근 뒤 상태를 다시 본다. 탈퇴로 로그인 수단 연결도 지워졌으니
     // 그 계정에 세션·기기를 만들지 않고 새 계정으로 간다(바로 재가입, identity §8)

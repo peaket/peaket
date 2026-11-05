@@ -98,7 +98,7 @@ describe('라벨 키 링(10분 캐시와 축소 동작)', () => {
     expect(ring.ref('contact', 'x')).toBeDefined();
   });
 
-  test('로컬·CI는라벨키값을바로받고_KMS주소는local·ci에서만_설정이없는라벨은늘비며세지않고경고한다', () => {
+  test('로컬·CI·demo는라벨키값을바로받고_KMS주소는local·ci에서만_설정이없는라벨은늘비며세지않고경고한다', () => {
     const { ring, warnings } = InvRefKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_INV_REF_DEVICE_KEY: DEVICE_KEY.toString('base64') }, fakeClock({ now: 0 }));
     const missing: string[] = [];
     ring.onMissing((l, r) => missing.push(`${l}:${r}`));
@@ -106,7 +106,13 @@ describe('라벨 키 링(10분 캐시와 축소 동작)', () => {
     expect(ring.ref('contact', 'x')).toBeUndefined();
     expect(missing).toEqual([]);
     expect(warnings.join(' ')).toMatch(/PEAKET_INV_REF_CONTACT/);
-    expect(() => InvRefKeyRing.fromEnv({ PEAKET_ENV: 'prod', PEAKET_INV_REF_DEVICE_KEY: DEVICE_KEY.toString('base64') }, fakeClock({ now: 0 }))).toThrow(/local·ci/);
+    // demo는 클라우드 계정이 없어 라벨 키 값을 받는다(본인확인 키와 같다, BOT-045가 넘긴 것). 운영·스테이징·값 없는 환경은 받지 않는다
+    expect(InvRefKeyRing.fromEnv({ PEAKET_ENV: 'demo', PEAKET_INV_REF_DEVICE_KEY: DEVICE_KEY.toString('base64') }, fakeClock({ now: 0 })).ring.ref('device', 'd1')).toBe(expectRef(DEVICE_KEY, 1, 'd1'));
+    for (const PEAKET_ENV of ['prod', 'staging', undefined]) {
+      expect(() => InvRefKeyRing.fromEnv({ PEAKET_ENV, PEAKET_INV_REF_DEVICE_KEY: DEVICE_KEY.toString('base64') }, fakeClock({ now: 0 }))).toThrow(/local·ci·demo/);
+    }
+    // KMS 흉내 서버 주소는 demo에서도 받지 않는다
+    expect(() => InvRefKeyRing.fromEnv({ PEAKET_ENV: 'demo', PEAKET_INV_REF_DEVICE_KMS_KEY: 'k', PEAKET_KMS_ENDPOINT: 'http://x' }, fakeClock({ now: 0 }))).toThrow(/PEAKET_KMS_ENDPOINT/);
     expect(() => InvRefKeyRing.fromEnv({ PEAKET_ENV: 'prod', PEAKET_INV_REF_DEVICE_KMS_KEY: 'k', PEAKET_KMS_ENDPOINT: 'http://x' }, fakeClock({ now: 0 }))).toThrow(/PEAKET_KMS_ENDPOINT/);
     expect(() => InvRefKeyRing.fromEnv({ PEAKET_ENV: 'prod', PEAKET_INV_REF_DEVICE_KMS_KEY: 'alias/x' }, fakeClock({ now: 0 }))).toThrow(/별칭/);
     // 라벨마다 다른 KMS 키다(같으면 두 라벨 값이 이어진다, 새 맥락 리뷰 낮음 6)

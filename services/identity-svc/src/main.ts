@@ -3,10 +3,10 @@
 // 앱 포트(REST: 팬 토큰 갱신 POST /v1/identity/access-tokens, 공개키 묶음 GET /internal/jwks/{set}.json)·관리 포트(/metrics, /ready)는
 // 서비스 뼈대가, 업무 gRPC 포트는 이 파일이 연다.
 import 'reflect-metadata';
-import { type AdminAuthzPort, createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { KMSClient } from '@aws-sdk/client-kms';
-import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, totpSeedCipherFromEnv, turnstileFromEnv } from './modules/admin/index.js';
+import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, totpSeedCipherFromEnv, TURNSTILE_BREAKER, turnstileFromEnv } from './modules/admin/index.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
   AddProvider,
@@ -27,6 +27,7 @@ import {
   JoseTokenSigner,
   PromSessionSignals,
   accountHoldHandlers,
+  MERGE_CHECK_BREAKER,
   mergeCheckersFromEnv,
   RedisLinkProposals,
   RedisMergeProposals,
@@ -60,6 +61,21 @@ if (!url) throw new Error('PEAKET_DATABASE_URL이 없다(비밀 관리에서 넣
 const grpcPort = Number(process.env.PEAKET_GRPC_PORT ?? DEFAULT_GRPC_PORT);
 if (!(Number.isInteger(grpcPort) && grpcPort > 0 && grpcPort <= 65535)) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${process.env.PEAKET_GRPC_PORT}`);
 
+// 의존성 차단기(docs/architecture.md §5 '2차 서비스 내부 차단', BOT-042·BOT-111이 넘긴 것): 세 서비스 병합 확인과 사람 확인에 의존성마다 하나.
+// 지표는 서비스 지표 저장소에 싣는데 저장소는 서비스가 선 뒤에 생긴다. 그래서 어댑터에는 늦게 잇는 차단기를 넣고 서비스가 선 뒤 진짜 차단기를 단다
+// (그 전에는 요청을 받지 않아 부르지 않는다). 설정 [가정]은 MERGE_CHECK_BREAKER·TURNSTILE_BREAKER다
+const breakerSettings = new Map<string, Pick<CircuitBreakerOptions, 'minCalls' | 'maxConcurrent'>>();
+const breakers = new Map<string, CircuitBreaker>();
+const lateBreaker = (dependency: string, settings: Pick<CircuitBreakerOptions, 'minCalls' | 'maxConcurrent'>): Pick<CircuitBreaker, 'run'> => {
+  breakerSettings.set(dependency, settings);
+  return {
+    run: <T>(action: () => Promise<T>): Promise<T> => {
+      const b = breakers.get(dependency);
+      return b ? b.run(action) : action();
+    },
+  };
+};
+
 // 관리 계정 인증 통제 설정의 범위 검사와 페퍼 키 설정(docs/security/auth-controls.md §5 AC-T10, identity §6): 범위를 벗어나면 시작하지 않는다
 // 대조 목록 파일(L1·L3, 배포가 더한 L3 파일 포함), 유출 목록 주소, 사람 확인 주소도 여기서 본다. local·ci 밖은 페퍼가 필수다(identity §6 BOT-111)
 const adminAuth = adminAuthConfigFromEnv(process.env);
@@ -74,7 +90,7 @@ const adminPepper = adminPepperFromEnv(process.env, (endpoint, region) => kmsPep
 if (!adminPepper && !['local', 'ci'].includes(process.env.PEAKET_ENV ?? 'prod')) throw new Error('관리자 비밀번호 페퍼 설정(PEAKET_ADMIN_PEPPER_KMS_KEYS)이 없다');
 const adminLists = loadPolicyLists(process.env);
 const adminBreaches = hibpBreachListFromEnv(process.env, adminAuth);
-const adminHumanCheck = turnstileFromEnv(process.env);
+const adminHumanCheck = turnstileFromEnv(process.env, lateBreaker('turnstile', TURNSTILE_BREAKER));
 // 관리 토큰 갱신은 팬과 같은 갱신 지표(aud partner·ops)로 낸다: 재사용 탐지 SEV3 경보가 함께 본다(identity §10.1, BOT-130). adminSignals는 위(KMS 넘기기 앞)에서 만든다
 // 계정 주인 메일(해제 링크 등): 운영 발송 대행은 정본에 없다 [가정]. local·ci는 PEAKET_ADMIN_MAIL_DIR 파일 대역(BOT-121)
 const adminMailer = adminMailerFromEnv(process.env);
@@ -84,7 +100,7 @@ const adminTotpCipher = totpSeedCipherFromEnv(process.env, (endpoint, region) =>
 if (adminPepper && !adminTotpCipher && !['local', 'ci'].includes(process.env.PEAKET_ENV ?? 'prod')) throw new Error('TOTP 시드 키 설정(PEAKET_ADMIN_TOTP_KMS_KEY)이 없다');
 const keys = await TokenKeyRing.fromEnv(process.env);
 const signer = new JoseTokenSigner(keys, tokenIssuerFromEnv(process.env));
-// 조사용 가명 라벨 키 링(identity §9.1 '조사용 값의 첫 구현'): 라벨마다 KMS GenerateMac(로컬·CI는 라벨 키 값), 10분 [가정] 수명. 시작은 기다리지 않는다
+// 조사용 가명 라벨 키 링(identity §9.1 '조사용 값의 첫 구현'): 라벨마다 KMS GenerateMac(로컬·CI·demo는 라벨 키 값), 10분 [가정] 수명. 시작은 기다리지 않는다
 const invRefs = InvRefKeyRing.fromEnv(process.env, systemClock, (endpoint) => kmsMacClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }));
 const devices = deviceRefsOf(invRefs.ring);
 // 본인확인기관: 계약 전에는 시험 어댑터만 있다(local·ci·demo). 켜지 않으면 본인확인 시작이 503 PROVIDER_DOWN이다(identity §5)
@@ -109,7 +125,7 @@ const env = process.env.PEAKET_ENV ?? 'local';
 if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTITY_REDIS_URL이 없다(세션·캐시 Redis, 비밀 관리에서 넣는다)');
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
 // 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
-const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile);
+const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile, (dependency) => lateBreaker(dependency, MERGE_CHECK_BREAKER));
 // identity 자신의 관리 경로 역할 판정(ADR-0172): 같은 프로세스의 GetAdminAuthz를 가드 포트로 넣는다. 앱이 선 뒤에 잇는다(BOT-123)
 const adminAuthzHolder: { port?: AdminAuthzPort } = {};
 const adminAuthz: AdminAuthzPort = { getAdminAuthz: (q, o) => (adminAuthzHolder.port ? adminAuthzHolder.port.getAdminAuthz(q, o) : Promise.reject(new Error('관리 역할 판정이 아직 준비되지 않았다'))) };
@@ -117,6 +133,7 @@ const adminAuthz: AdminAuthzPort = { getAdminAuthz: (q, o) => (adminAuthzHolder.
 const service = await createService({ name: SERVICE, ...(adminPepper ? { adminAuthz } : {}), module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
 adminSignals.register(service.metrics.registry);
+for (const [dependency, settings] of breakerSettings) breakers.set(dependency, new CircuitBreaker({ service: SERVICE, dependency, registry: service.metrics.registry, logger: service.logger, ...settings }));
 kmsFailoverLog.warn = (use, error) => service.logger.warn({ use, error }, '서울 KMS가 응답하지 않아 복제 키로 넘겼다(ADR-0102)');
 if (!adminPepper) service.logger.warn('관리자 비밀번호 페퍼 설정이 없어 관리 계정 로그인 경로를 싣지 않았다(local·ci만)');
 if (adminPepper) adminAuthzHolder.port = service.app.get(GetAdminAuthz);
@@ -231,6 +248,10 @@ process.once('SIGTERM', () => {
     .close()
     .then(() => Promise.all([stopAdminNotices(), stopPasswordOnly()]))
     .then(() => service.close())
+    .then(() => {
+      // 처리 중인 요청이 끝난 뒤 차단기를 끈다(끈 뒤에는 부르지 않는다)
+      for (const b of breakers.values()) b.shutdown();
+    })
     .catch((err: unknown) => service.logger.error({ err }, 'identity-svc 종료 실패'))
     .finally(() => {
       stopInvRefs();

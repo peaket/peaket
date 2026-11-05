@@ -349,6 +349,8 @@ export class MemorySessionStore implements SessionStore {
       },
       openHoldsOf: async (accountId) => [...s.holds.values()].filter((h) => h.accountId === accountId && h.state === 'OPEN').length,
       setAccountHold: async (i) => {
+        // 외래키처럼 없는 계정의 건은 쓰지 않는다(BOT-042가 넘긴 것)
+        if (!s.accounts.has(i.accountId)) return 'NOT_FOUND';
         const h = s.holds.get(i.sourceRef);
         if (h && (h.accountId !== i.accountId || h.kind !== i.kind)) return 'CONFLICT';
         if (h && i.sourceVersion <= h.sourceVersion) return 'STALE';

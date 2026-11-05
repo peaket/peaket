@@ -11,7 +11,7 @@ export { AddProvider, type AddProviderResult } from './application/add-provider.
 export { UnlinkProvider } from './application/unlink-provider.js';
 export { SetAccountHold } from './application/set-account-hold.js';
 export { RedisMergeProposals } from './adapters/redis-merge-proposals.js';
-export { mergeCheckersFromEnv } from './adapters/grpc-merge-checkers.js';
+export { MERGE_CHECK_BREAKER, mergeCheckersFromEnv } from './adapters/grpc-merge-checkers.js';
 export { accountHoldHandlers } from './inbound/session.grpc.js';
 export { SeparateAccount } from './application/separate-account.js';
 export { RedisLinkProposals } from './adapters/redis-link-proposals.js';

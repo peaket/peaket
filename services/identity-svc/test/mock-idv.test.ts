@@ -2,7 +2,7 @@
 // 모의 기관을 실제 포트로 띄우고, 브라우저가 하는 대로 기관 창 양식 → 기관 화면의 버튼 → 돌아올 주소로 가는 값을 받아 시험 어댑터에 넘긴다.
 import { fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { startMockIdv } from '../scripts/mock-idv.mjs';
+import { secretFromEnv, startMockIdv } from '../scripts/mock-idv.mjs';
 import { ProviderUnavailable } from '../src/modules/verification/domain/verification.js';
 import { AGENCY_SECRET, testAgency } from './support.js';
 
@@ -92,13 +92,33 @@ describe('모의 기관', () => {
     expect((await post('/verify/complete', { ...base, birth: '' })).status).toBe(200);
   });
 
-  test('I-T45_모의기관은local·ci에서만돌고_127.0.0.1에만묶는다', async () => {
+  test('I-T45_모의기관은local·ci·demo에서만돌고_127.0.0.1에만묶는다', async () => {
     expect(new URL(agency.url).hostname).toBe('127.0.0.1');
-    for (const env of [{ PEAKET_ENV: 'prod' }, { PEAKET_ENV: 'demo' }, {}]) {
-      await expect(startMockIdv({ port: 0, returnUrl: RETURN_URL, secret: AGENCY_SECRET, env })).rejects.toThrow(/local·ci/);
+    for (const env of [{ PEAKET_ENV: 'prod' }, { PEAKET_ENV: 'staging' }, {}]) {
+      await expect(startMockIdv({ port: 0, returnUrl: RETURN_URL, secret: AGENCY_SECRET, env })).rejects.toThrow(/local·ci·demo/);
     }
     await expect(startMockIdv({ port: 0, returnUrl: 'javascript:alert(1)', secret: AGENCY_SECRET, env: { PEAKET_ENV: 'ci' } })).rejects.toThrow();
   });
+});
+
+test('BOT-010넘김_demo도모의기관을쓰고_시험기관비밀이없으면개발용값으로돌지않고시작하지않는다', async () => {
+  await expect(startMockIdv({ port: 0, returnUrl: RETURN_URL, env: { PEAKET_ENV: 'demo' } })).rejects.toThrow(/PEAKET_TEST_VERIFICATION_SECRET/);
+  const demo = await startMockIdv({ port: 0, returnUrl: RETURN_URL, secret: AGENCY_SECRET, env: { PEAKET_ENV: 'demo' } });
+  try {
+    expect(new URL(demo.url).hostname).toBe('127.0.0.1');
+    const r = await fetch(new URL('/verify', demo.url), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form({ verificationId: ID }) });
+    expect(r.status).toBe(200);
+  } finally {
+    await demo.close();
+  }
+});
+
+test('BOT-010넘김_모의기관의시험기관비밀은base64여야하고_풀어서16바이트이상이어야한다(빈키로서명하지않게)', async () => {
+  expect(secretFromEnv(undefined)).toBeUndefined();
+  expect(secretFromEnv(AGENCY_SECRET.toString('base64'))).toEqual(Buffer.from(AGENCY_SECRET));
+  for (const bad of ['!!!!not-base64!!!!', 'peaket test secret with spaces', '%%%%']) expect(() => secretFromEnv(bad)).toThrow(/PEAKET_TEST_VERIFICATION_SECRET/);
+  expect(() => secretFromEnv(Buffer.alloc(8, 1).toString('base64'))).toThrow(/16바이트/);
+  await expect(startMockIdv({ port: 0, returnUrl: RETURN_URL, secret: Buffer.alloc(0), env: { PEAKET_ENV: 'ci' } })).rejects.toThrow(/16바이트/);
 });
 
 test('I-T45_모의기관은_Host가루프백이름이아니면421이다(DNS리바인딩, 새맥락리뷰L7)', async () => {

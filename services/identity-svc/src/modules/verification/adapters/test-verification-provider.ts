@@ -14,6 +14,16 @@ export const TEST_VERIFICATION_URL_ENV = 'PEAKET_TEST_VERIFICATION_URL';
 export const TEST_VERIFICATION_MODE_ENV = 'PEAKET_TEST_VERIFICATION_MODE';
 /** 비밀을 주지 않았을 때 쓰는 개발용 값(모의 기관 scripts/mock-idv.mjs와 같다) */
 export const DEV_TEST_VERIFICATION_SECRET = 'peaket-test-verification-secret-v1';
+
+/**
+ * 설정의 시험 기관 비밀(base64)을 푼다. base64가 아닌 글자가 있으면 던진다: Buffer.from(…, 'base64')는 틀린 글자를 건너뛰어 빈 키·잘린 키가 된다(BOT-010이 넘긴 것).
+ * 채움(=)은 없어도 된다. 길이(16바이트 이상)는 생성자가 본다. 모의 기관(scripts/mock-idv.mjs secretFromEnv)과 같은 규칙이다
+ */
+export function decodeTestSecret(raw: string): Buffer {
+  const key = Buffer.from(raw, 'base64');
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw) || key.toString('base64').replace(/=+$/, '') !== raw.replace(/=+$/, '')) throw new Error(`${TEST_VERIFICATION_SECRET_ENV}는 base64여야 한다`);
+  return key;
+}
 const ALLOWED_ENVS = ['local', 'ci', 'demo'];
 const MODES = ['POPUP', 'REDIRECT'] as const;
 type Mode = (typeof MODES)[number];
@@ -61,7 +71,7 @@ export class TestVerificationProvider implements VerificationProvider {
     const raw = env[TEST_VERIFICATION_SECRET_ENV];
     // 개발용 값은 공개 저장소에 있어 누구나 결과 값을 서명할 수 있다. 바깥에서 닿는 demo에서는 쓰지 않는다
     if (!raw && peaketEnv === 'demo') throw new Error(`demo에서는 ${TEST_VERIFICATION_SECRET_ENV}가 있어야 한다(개발용 값을 쓰지 않는다)`);
-    return new TestVerificationProvider({ secret: raw ? Buffer.from(raw, 'base64') : Buffer.from(DEV_TEST_VERIFICATION_SECRET), agencyUrl, mode: mode as Mode, clock });
+    return new TestVerificationProvider({ secret: raw ? decodeTestSecret(raw) : Buffer.from(DEV_TEST_VERIFICATION_SECRET), agencyUrl, mode: mode as Mode, clock });
   }
 
   window(attemptId: string) {

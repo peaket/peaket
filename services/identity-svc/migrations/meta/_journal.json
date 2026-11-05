@@ -176,6 +176,20 @@
       "when": 1793840977317,
       "tag": "0024_admin_login_step_password_only",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793848290553,
+      "tag": "0025_account_merge_hold_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793848308571,
+      "tag": "0026_account_merge_hold_fk_validate",
+      "breakpoints": true
     }
   ]
 }

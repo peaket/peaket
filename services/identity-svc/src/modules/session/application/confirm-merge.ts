@@ -1,6 +1,6 @@
 // 병합 확정(POST /v1/identity/merge-proposals/{proposalId}/confirmation, identity §2.1 '계정 병합의 첫 구현', BUILD_ORDER BOT-042, I-T32·I-T34, POL-034).
 // 재인증(제안한 세션, 한 번) → 대표 계정 다시 고르기(바뀌었으면 NOT_FOUND) → 세 서비스 다시 확인(답이 없으면 UNAVAILABLE) → 막는 사유면 BLOCKED, 불변식 위반이면 INVARIANT →
-// 한 트랜잭션: 추가하려던 제공자와 두 계정(ID 순)을 잠그고 둘 다 ACTIVE인지·그 수단이 아직 다른 계정의 것인지·본인확인으로 고른 대표가 그대로인지 → 로그인 수단 이전·MERGED·이메일 지우기·사슬 고치기·account_merge → 흡수 계정 세션 끝내기(MERGED) → 병합 사건.
+// 한 트랜잭션: 추가하려던 제공자와 두 계정(ID 순)을 잠그고 끝난 계정이 없는지(먼저) → 세션·재인증 토큰 → 그 수단이 아직 다른 계정의 것인지·본인확인으로 고른 대표가 그대로인지 → 로그인 수단 이전·MERGED·이메일 지우기·사슬 고치기·account_merge → 흡수 계정 세션 끝내기(MERGED) → 병합 사건.
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import { MERGE_PROPOSALS, type MergeProposals, MergeCheckUnavailable, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_STORE, type SessionStore } from '../domain/ports.js';
@@ -65,12 +65,13 @@ export class ConfirmMerge {
         const [first, second] = [p.primaryAccountId, p.absorbedAccountId].sort();
         await tx.lockAccount(first!);
         await tx.lockAccount(second!);
+        const statuses = [await tx.accountStatusOf(p.primaryAccountId), await tx.accountStatusOf(p.absorbedAccountId)];
+        // 끝난 계정(탈퇴·병합됨)이 있으면 없는 제안이다. 없는 제안(404)은 막는 사유(409)보다 먼저 본다: 다시 와도 이룰 수 없다(재검토 2026-11-05).
+        // 세션·재인증 토큰보다도 먼저 본다: 같은 제안을 두 번 보내면(같은 토큰, 흡수된 쪽이면 세션도 끝남) 늦은 쪽이 403이 아니라 404다(BOT-042가 넘긴 것). 되돌리므로 토큰은 쓰지 않는다
+        if (statuses.some((x) => x !== 'ACTIVE' && x !== 'WITHDRAWAL_PENDING')) throw new MergeError('NOT_FOUND', '병합할 수 있는 계정이 아니다');
         const s = await tx.getSessionForUpdate(sessionId);
         if (!s || s.accountId !== accountId || !sessionAlive(s, now)) throw new MergeError('REAUTH_REQUIRED', '세션이 끝났다');
         if (!(await tx.useReauth({ jti: token.jti, accountId, usedAt: now, expiresAt: token.expiresAt }))) throw new MergeError('REAUTH_REQUIRED', '이미 쓴 재인증 토큰이다');
-        const statuses = [await tx.accountStatusOf(p.primaryAccountId), await tx.accountStatusOf(p.absorbedAccountId)];
-        // 끝난 계정(탈퇴·병합됨)이 있으면 없는 제안이다. 없는 제안(404)은 막는 사유(409)보다 먼저 본다: 다시 와도 이룰 수 없다(재검토 2026-11-05)
-        if (statuses.some((x) => x !== 'ACTIVE' && x !== 'WITHDRAWAL_PENDING')) throw new MergeError('NOT_FOUND', '병합할 수 있는 계정이 아니다');
         // 추가하려던 로그인 수단이 아직 다른 계정(제안하지 않은 쪽)의 것이어야 한다(그 제공자로 로그인한 것이 그 계정 쪽 동의다, 새 맥락 리뷰 낮음 12)
         if ((await tx.findAccountByProvider(p.newProvider, p.newProviderUserId))?.id !== other) throw new MergeError('NOT_FOUND', '추가하려던 로그인 수단이 다른 계정에 없다');
         // 잠근 뒤 본인확인 기록으로 대표 계정을 다시 고른다(잠그기 전 확인과 이 사이에 끝난 본인확인, 새 맥락 리뷰 높음 1). 표를 보지 못하는 저장소는 앞의 확인만

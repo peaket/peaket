@@ -246,6 +246,15 @@ describe('이의 제기 계류 account_hold(SetAccountHold)', () => {
     t.clock.advance(30 * 86_400_000 + 1);
     expect(await t.sessions.transaction((tx) => tx.purgeClosedHolds(t.clock.now() - 30 * 86_400_000))).toBe(1);
   });
+
+  test('BOT-042넘김_identity에없는계정의건이면_쓰지않고NOT_FOUND다(account_hold의외래키)', async () => {
+    const t = await setup();
+    const ref = '0190f3a1-7c2e-7a00-8000-0000000000b2';
+    expect(await t.holds.run({ sourceRef: ref, accountId: '0190f3a1-7c2e-7a00-8000-0000000000ff', kind: 'DISPUTE', state: 'OPEN', sourceVersion: 1 })).toBe('NOT_FOUND');
+    // 없는 계정의 건은 남기지 않아, 그 뒤 진짜 계정의 같은 건은 처음 쓰기다
+    const a = await t.login('kakao', 'k-h2');
+    expect(await t.holds.run({ sourceRef: ref, accountId: a.accountId, kind: 'DISPUTE', state: 'OPEN', sourceVersion: 1 })).toBe('APPLIED');
+  });
 });
 
 describe('AccountHoldService 받는 층', () => {
@@ -260,6 +269,8 @@ describe('AccountHoldService 받는 층', () => {
     expect((await call(base)).v).toEqual({ changed: false });
     expect(((await call({ ...base, kind: 'ACCOUNT_HOLD_KIND_APPEAL', source_version: 2 })).e as { code: number }).code).toBe(6);
     expect(((await call({ ...base, source_ref: 'nope', source_version: 3 })).e as { code: number }).code).toBe(3);
+    // identity에 없는 계정이면 NOT_FOUND(다시 보내도 같다, BOT-042가 넘긴 외래키)
+    expect(((await call({ ...base, account_id: '0190f3a1-7c2e-7a00-8000-0000000000fe', source_ref: '0190f3a1-7c2e-7a00-8000-0000000000d2' })).e as { code: number }).code).toBe(5);
   });
 });
 
@@ -440,5 +451,46 @@ describe('세 서비스 CheckAccountMerge 클라이언트(gRPC)', () => {
       dead.close();
     }
     expect(() => new GrpcMergeChecker('purchase', 'no-port')).toThrow();
+  });
+
+  test('BOT-042·BOT-111넘김_서비스가잇달아실패해차단기가열리면_부르지않고MergeCheckUnavailable이다', async () => {
+    const protoLoader = await import('@grpc/proto-loader');
+    const { coreV1Core } = await import('@peaket/contracts/proto');
+    const { createCircuitBreaker, fakeClock } = await import('@peaket/platform');
+    const { startGrpcServer } = await import('../src/grpc-server.js');
+    const { GrpcMergeChecker } = await import('../src/modules/session/adapters/grpc-merge-checkers.js');
+    const def = protoLoader.fromJSON(coreV1Core as Parameters<typeof protoLoader.fromJSON>[0], { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true });
+    const pkg = grpc.loadPackageDefinition(def) as unknown as { peaket: { core: { v1: { AccountMergeCheckService: grpc.ServiceClientConstructor } } } };
+    let calls = 0;
+    let answer: 'down' | 'ok' = 'down';
+    const server = await startGrpcServer({
+      host: '127.0.0.1',
+      port: 0,
+      services: [
+        {
+          definition: pkg.peaket.core.v1.AccountMergeCheckService.service,
+          handlers: {
+            CheckAccountMerge: (_call: unknown, cb: (e: { code: number; details: string } | null, v?: object) => void) => {
+              calls++;
+              if (answer === 'down') cb({ code: grpc.status.UNAVAILABLE, details: '내려감' });
+              else cb(null, { blocks: [] });
+            },
+          },
+        },
+      ],
+    });
+    const breaker = createCircuitBreaker({ service: 'identity-svc', dependency: 'core-svc', minCalls: 2, failureRatePercent: 50, clock: fakeClock() });
+    const c = new GrpcMergeChecker('core', `127.0.0.1:${server.port}`, 'service', breaker);
+    try {
+      for (let i = 0; i < 2; i++) await expect(c.check({ primaryAccountId: 'p', absorbedAccountId: 'b' })).rejects.toBeInstanceOf(MergeCheckUnavailable);
+      expect(breaker.state).toBe('open');
+      answer = 'ok';
+      // 열린 동안은 부르지 않고 답하지 않음과 같은 결과(제안은 만들지 않고 확정은 503)
+      await expect(c.check({ primaryAccountId: 'p', absorbedAccountId: 'b' })).rejects.toBeInstanceOf(MergeCheckUnavailable);
+      expect(calls).toBe(2);
+    } finally {
+      c.close();
+      await server.close();
+    }
   });
 });

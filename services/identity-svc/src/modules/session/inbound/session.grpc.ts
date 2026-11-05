@@ -209,7 +209,7 @@ export function accountHoldHandlers(uc: { hold: Pick<SetAccountHold, 'run'> }, o
       const kind = HOLD_KIND[String(r.kind)];
       const state = HOLD_STATE[String(r.state)];
       if (!kind || !state) throw new SessionError('INVALID_ARGUMENT', 'kind·state가 없다');
-      let out: 'APPLIED' | 'STALE' | 'CONFLICT';
+      let out: 'APPLIED' | 'STALE' | 'CONFLICT' | 'NOT_FOUND';
       try {
         out = await uc.hold.run({ sourceRef: text(r.source_ref), accountId: text(r.account_id), kind, state, sourceVersion: Number(r.source_version ?? 0) });
       } catch (e) {
@@ -217,6 +217,7 @@ export function accountHoldHandlers(uc: { hold: Pick<SetAccountHold, 'run'> }, o
         throw e;
       }
       if (out === 'CONFLICT') throw new SessionError('ALREADY_EXISTS', '같은 건에 다른 계정·종류가 왔다');
+      if (out === 'NOT_FOUND') throw new SessionError('NOT_FOUND', '그 계정이 없다');
       return { changed: out === 'APPLIED' };
     }),
   };

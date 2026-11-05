@@ -151,7 +151,10 @@ export const accountHold = pgTable(
   'account_hold',
   {
     sourceRef: uuid('source_ref').primaryKey(),
-    accountId: uuid('account_id').notNull(),
+    // 계정 행은 지우지 않으므로(탈퇴도 DELETED로 남긴다, docs/data.md §6) ON DELETE는 기본(NO ACTION)이다(마이그레이션 0025·0026, BOT-042가 넘긴 것)
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => account.id),
     kind: text('kind').notNull(),
     state: text('state').notNull(),
     sourceVersion: bigint('source_version', { mode: 'number' }).notNull(),
@@ -169,8 +172,14 @@ export const accountMerge = pgTable(
   'account_merge',
   {
     id: uuid('id').primaryKey(),
-    primaryAccountId: uuid('primary_account_id').notNull(),
-    mergedAccountId: uuid('merged_account_id').notNull().unique(),
+    // 두 계정 모두 account를 가리킨다(ON DELETE 기본, account_hold와 같은 까닭, 마이그레이션 0025·0026)
+    primaryAccountId: uuid('primary_account_id')
+      .notNull()
+      .references(() => account.id),
+    mergedAccountId: uuid('merged_account_id')
+      .notNull()
+      .unique()
+      .references(() => account.id),
     mergedProvider: text('merged_provider').notNull(),
     movedSummary: jsonb('moved_summary').notNull(),
     requestedAt: at('requested_at').notNull(),

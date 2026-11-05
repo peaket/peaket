@@ -1,4 +1,5 @@
-// 모의 본인확인기관(docs/features/identity.md §5 '모의 기관과 기관 창 흐름', BUILD_ORDER BOT-010, I-T45). local·ci 전용 시험 서버다.
+// 모의 본인확인기관(docs/features/identity.md §5 '모의 기관과 기관 창 흐름', BUILD_ORDER BOT-010, I-T45). local·ci·demo 전용 시험 서버다.
+// demo도 클라우드 계정·실제 기관 계약이 없어 이것을 쓴다(로컬 kind 데모 오버레이와 같은 기계에서 띄운다). demo는 시험 기관 비밀이 꼭 있어야 한다(BOT-010이 넘긴 것).
 // 실제 기관 없이 기관 창 흐름(팝업·페이지 이동·POST 본문 복귀·쿼리 복귀)을 끝까지 돌리려고, 공개된 연동 방식을 흉내 낸다.
 // - POST /verify(기관 창 양식, 칸 verificationId): 결과를 고르는 '모의 본인확인기관' 화면을 그린다
 // - POST /verify/complete(그 화면의 버튼): 서명한 결과 값(verificationId·result·mac)을 돌아올 주소로 보낸다.
@@ -7,7 +8,7 @@
 // - 127.0.0.1에만 묶고, Host가 루프백 이름이 아니면 421(DNS 리바인딩)
 // - 결과 값 형식은 시험 어댑터(src/modules/verification/adapters/test-agency.ts)와 같다. 바깥 기관이라 따로 구현하고, 시험이 두 쪽이 맞는지 본다
 // 실행: PEAKET_ENV=local PEAKET_TEST_VERIFICATION_RETURN_URL=http://localhost:3000/verify/return node scripts/mock-idv.mjs [포트]
-//   비밀은 PEAKET_TEST_VERIFICATION_SECRET(base64, identity-svc와 같은 값), 없으면 개발용 값
+//   비밀은 PEAKET_TEST_VERIFICATION_SECRET(base64, identity-svc와 같은 값), 없으면 개발용 값(demo는 없으면 시작하지 않는다)
 import { createHmac, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +19,22 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BIRTH = /^\d{4}-\d{2}-\d{2}$/;
 const ACTIONS = /** @type {const} */ ({ complete: 'VERIFIED', cancel: 'CANCELLED', fail: 'FAILED', down: 'DOWN' });
 const MAX_BODY = 8 * 1024;
+/** 시험 기관 비밀의 최소 길이(시험 어댑터와 같다, docs/security/secrets-and-keys.md) */
+const MIN_SECRET_BYTES = 16;
+
+/**
+ * 설정의 시험 기관 비밀(base64)을 푼다. 없으면 undefined(개발용 값). base64가 아닌 글자가 있거나 풀어서 16바이트보다 짧으면 던진다
+ * (Buffer.from(…, 'base64')는 틀린 글자를 건너뛰어 빈 키가 된다, BOT-010이 넘긴 것). 시험 어댑터(decodeTestSecret)와 같은 규칙이다
+ * @param {string | undefined} raw
+ * @returns {Buffer | undefined}
+ */
+export function secretFromEnv(raw) {
+  if (!raw) return undefined;
+  const key = Buffer.from(raw, 'base64');
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw) || key.toString('base64').replace(/=+$/, '') !== raw.replace(/=+$/, '')) throw new Error('PEAKET_TEST_VERIFICATION_SECRET는 base64여야 한다');
+  if (key.length < MIN_SECRET_BYTES) throw new Error(`시험 기관 비밀은 ${MIN_SECRET_BYTES}바이트 이상이다`);
+  return key;
+}
 
 /** @param {string} s */
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -104,7 +121,10 @@ async function formOf(req) {
  */
 export async function startMockIdv(o) {
   const peaketEnv = o.env?.PEAKET_ENV;
-  if (peaketEnv !== 'local' && peaketEnv !== 'ci') throw new Error(`모의 기관은 PEAKET_ENV가 local·ci일 때만 돈다(지금 ${peaketEnv ?? '없음'})`);
+  if (peaketEnv !== 'local' && peaketEnv !== 'ci' && peaketEnv !== 'demo') throw new Error(`모의 기관은 PEAKET_ENV가 local·ci·demo일 때만 돈다(지금 ${peaketEnv ?? '없음'})`);
+  // 개발용 값은 공개 저장소에 있어 누구나 결과 값을 서명할 수 있다. demo에서는 쓰지 않는다(시험 어댑터와 같다)
+  if (peaketEnv === 'demo' && !o.secret) throw new Error('demo에서는 PEAKET_TEST_VERIFICATION_SECRET가 있어야 한다(개발용 값을 쓰지 않는다)');
+  if (o.secret && o.secret.length < MIN_SECRET_BYTES) throw new Error(`시험 기관 비밀은 ${MIN_SECRET_BYTES}바이트 이상이다`);
   const ret = new URL(o.returnUrl);
   if (ret.protocol !== 'http:' && ret.protocol !== 'https:') throw new Error(`돌아올 주소는 http·https만 받는다: ${o.returnUrl}`);
   const returnUrl = ret.toString();
@@ -182,11 +202,10 @@ export async function startMockIdv(o) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const returnUrl = process.env.PEAKET_TEST_VERIFICATION_RETURN_URL;
   if (!returnUrl) throw new Error('PEAKET_TEST_VERIFICATION_RETURN_URL이 없다(예: http://localhost:3000/verify/return)');
-  const raw = process.env.PEAKET_TEST_VERIFICATION_SECRET;
   const started = await startMockIdv({
     port: Number(process.argv[2] ?? 18920),
     returnUrl,
-    secret: raw ? Buffer.from(raw, 'base64') : undefined,
+    secret: secretFromEnv(process.env.PEAKET_TEST_VERIFICATION_SECRET),
     env: process.env,
   });
   // identity-svc의 PEAKET_TEST_VERIFICATION_URL에 이 값을 넣는다

@@ -6,29 +6,11 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
-- 구간 1 정리 목록 비우기(아래 목록을 묶음별로 고치거나 정본·OPEN·다른 단계로 넘기기). 그 뒤 한 번 보고하고 구간 2로 간다. BOT-122(패스키)는 OPEN[20], BOT-132·140·152·161은 다른 갈래 앞선 단계(HOT-400·OPS-260·BAS-010·BAS-140·AWS 계정·wbs 0.2.3 초대 수락 계약, ZAP 이미지 허락) 대기라 건너뛴다.
-- 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 그 단계에 닿으면 하지 않고 docs/PROGRESS.md '미해결'에 OPEN 줄로 소유자에게 묻는다.
+- 구간 2: BOT-044(팬의 로그인한 기기, ASVS 7.4.3) → HOT-010 → HOT-020 → HOT-030 → HOT-040 → HOT-050 → HOT-060 차례(BAS-250은 OPEN[23] 대기라 건너뛴다). 구간 1의 갈래 3 단계와 정리 목록은 2026-11-05에 끝냈다. 건너뛴 구간 1 단계: BOT-122(패스키)는 OPEN[20], BOT-132·140·152·161은 다른 갈래 앞선 단계(HOT-400·OPS-260·BAS-010·BAS-140·AWS 계정·wbs 0.2.3 초대 수락 계약, ZAP 이미지 허락) 대기.
+- 봇 시뮬레이터(BAS-250, 구간 2)는 이 세션이 만들 수 없을 수 있다(2026-11-03 안전 분류기에 막힘). 하지 않고 docs/PROGRESS.md '미해결' OPEN[23]으로 소유자에게 물었다(2026-11-05). 답이 오기 전에는 건너뛴다.
 
 ## 구간 끝 정리 목록
 - 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
-- BOT-010: demo에서 쓸 기관이 없다. 시험 어댑터는 demo에서 켜지는데(비밀 필수) 모의 기관은 local·ci에서만 돈다. 정본에 demo 기관을 정하거나 어댑터의 demo 허용을 뺀다(docs/features/identity.md §5, services/identity-svc/scripts/mock-idv.mjs)
-- BOT-010: 쿼리로 돌려주는 기관이면 결과 값이 CDN·Envoy 접근 로그의 요청 줄에 남을 수 있다. `/verify/return`의 쿼리를 접근 로그에서 지우는 규칙을 정본에 적는다(docs/infra.md 접근 로그, HOT-290과 맞춘다)
-- BOT-025: 두 pid 진입에서 옛 키가 다른 요청 값(대기 중·입장)으로 409일 때 그 값을 새 키에 최선 노력으로 옮겨 쓰는 변형 Lua를 둘지 본다(절차 규칙 '다 옮긴 뒤 15분 전에는 새 회차를 열지 않는다'를 어긴 경우의 덤, services/queue-svc/src/modules/entry/application/enter-queue.ts)
-- BOT-030: 정비 withdrawal-finish가 매일 `account` 표 전체를 읽는다. 정리 중·탈퇴한 계정의 부분 인덱스를 트랜잭션 밖 `CREATE INDEX CONCURRENTLY` 파일로 더한다(운영 실행기 BAS-060 뒤, docs/devops.md §7.2)
-- BOT-041: ASVS 7.4.3(인증 요소를 바꾼 뒤 다른 세션 끝내기)을 팬에게 줄 로그인한 기기 API(`/v1/identity/sessions`, SCR-017 로그인한 기기)를 붙일 단계가 BUILD_ORDER에 없다. 단계를 정하거나 소유자에게 묻는다(docs/security/asvs/auth.md 7.4.3)
-- BOT-042: 두 계정에 같은 종류의 다른 로그인 수단이 있으면(추가하는 종류가 아닌 종류) 병합 뒤 대표 계정에 그 종류가 둘이 되어 '종류마다 하나'가 깨지고 종류 단위 해제가 모호해진다. 막는 사유를 하나 더할지(openapi `blockers`·d5 §5.22 다섯 줄을 고침) 둘 다 둘지 정한다(services/identity-svc/src/modules/session/application/plan-merge.ts, adapters/db/drizzle-session-store.ts `mergeAccounts`)
-- BOT-042: POL-034 '두 계정 이메일로 완료 통지'를 받을 길이 없다. 흡수 계정 이메일은 확정 트랜잭션에서 지우고 `identity.accounts-merged`에는 주소가 없다. 알림 쪽 단계(GAT-250 등)가 연락처 가명이나 통지 대상을 정하게 넘긴다(docs/features/identity.md §2.1 '남는 한계')
-- BOT-042: 같은 제안을 동시에 두 번 확정하는 PostgreSQL 시험이 없다. 병합 도중 로그인이 계정을 X → P(대표) 순서로 잠가 ID 순 규칙을 벗어나므로 같은 쌍의 확정과 겹치면 교착(40P01)으로 한쪽이 끝날 수 있다(드묾, create-session.ts `#open`)
-- BOT-042: 로그인 수단 추가 콜백의 앱 서버 기한(2초) 안에 병합 확인(세 서비스 1초)이 더해져 빠듯하다. 세 서비스 클라이언트에 차단기(`createCircuitBreaker`)도 아직 없다(grpc-merge-checkers.ts)
-- BOT-042: 마이그레이션 0013의 `account_merge`(대표·흡수 계정)·`account_hold`(계정)에 외래키가 없다. docs/data.md 그림은 FK로 적는다(services/identity-svc/src/modules/session/adapters/db/schema.ts)
-- BOT-045: `ComputeContactRef`의 파드마다 초당 상한 기본값 2,000 [가정]이 정본의 '주문 설계 피크의 2배'와 맞는지 근거가 없다. 1초 고정 창이라 경계에서 두 배까지 몰리고, 전체 상한이 파드 수에 비례해 휴대폰 번호 대입을 충분히 늦추지 못할 수 있다. 피크 값과 파드 수로 정하거나 신원별 전역 상한(게이트웨이·메시)을 둔다(services/identity-svc/src/modules/session/application/compute-contact-ref.ts)
-- BOT-045: 병합된 흡수 계정의 기기 행은 병합 때 옮기지도 지우지도 않아 `BatchGetInvestigationRefs`가 그 계정의 기기 가명을 돌려준다. 흡수 계정의 기기를 대표 계정으로 옮길지, 지울지, 조사용으로 둘지 정본이 정하지 않았다(docs/features/identity.md §9.1)
-- BOT-045: demo는 클라우드 계정이 없어 KMS 키가 없고 라벨 키 값 설정은 local·ci만 받으므로 기기 행이 늘 비고 새 기기 알림이 늘 간다. 본인확인 키처럼 demo에도 라벨 키 값을 허용할지 정한다(services/identity-svc/src/modules/session/adapters/inv-ref-key-ring.ts `fromEnv`)
-- BOT-111: Turnstile 검증 호출에 서킷 브레이커(opossum, docs/architecture.md '2차 서비스 내부 차단')가 없다. `@peaket/platform` `createCircuitBreaker`를 쓰는 서비스가 아직 없어 BOT-042의 세 서비스 확인과 함께 붙인다(services/identity-svc/src/modules/admin/adapters/turnstile-human-check.ts)
-- BOT-111: `sourceAddressOf`가 IPv4 번역·호환 꼴(`::ffff:0:a.b.c.d`, `::a.b.c.d`, `64:ff9b::a.b.c.d`)을 IPv4로 바꾸지 않아 `::1`·`::`와 한 /64로 묶거나, NAT64 앞단이면 모든 IPv4 손님을 한 출발지로 센다. 영역 표시(`%eth0`)가 붙은 주소는 원문 그대로다. 게이트웨이가 넘기는 꼴(HOT-400)을 정한 뒤 맞춘다(services/identity-svc/src/modules/admin/application/login-password-step.ts)
-- BOT-111: 없는 계정의 가짜 상태는 Redis에만 있어 장애 조치·30일 뒤 처음부터 다시 센다. 진짜 계정은 DB에 남아 그때를 노리면 가입 여부를 가를 수 있다(남는 위험으로 적음). 가짜 상태를 DB에 둘지(무작위 이메일로 표를 채우는 공격과 맞바꿈) 정한다(docs/features/identity.md §6)
-- BOT-110: AC-T7의 '로그·트레이스에 SHA-1과 그 앞 5자가 0건'은 오류 객체만 시험했다. 요청 경로가 생기는 단계(BOT-111 로그인 때 다시 보기, BOT-150)에서 요청 로그·스팬 속성까지 본다(test/admin-password.test.ts)
-- BOT-123: 알림 메일의 시각이 발송 시각이고 사건(멈춘 로그인) 시각이 아니다. auth-controls §3.4는 알림에 출발지를 싣는다고 하는데 identity §6은 해시뿐이라 싣지 않는다고 한다: 둘을 맞춘다(services/identity-svc/src/modules/admin/application/dispatch-admin-notices.ts, docs/security/auth-controls.md §3.4)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3).
@@ -59,3 +41,4 @@
 - 2026-11-05 구간 1 정리 A1 identity 세션·본인확인(R-323): 정리 목록 아홉 줄을 고쳤다(BOT-010 마이그레이션 0005 주석, BOT-025 상태 조회 잠금·전환 KMS 초당 상한, BOT-030 탈퇴 주인의 남은 기록, BOT-040 새 계정 만들기 다시 보내기, BOT-042 탈퇴 유예 병합 409, BOT-045 연락처 가명 쓰기 공용화, BOT-130 팬 갱신 서명 차례, BOT-131 연계정보 KMS 요청 시간 한도). 대표 계정의 탈퇴 유예도 WITHDRAWAL_IN_PROGRESS로 막는다(POL-034 T9·identity §2.1에 적음). 새 맥락 리뷰 낮음 5와 재검토 낮음 3을 모두 고쳤다.
 - 2026-11-05 구간 1 정리 A2 identity 관리 계정(R-326): 정리 목록 일곱 줄을 고쳤다(BOT-110 거절 보안 이벤트·남은 글자를 NFC 문자소로, BOT-111 임대 뒤 지워진 계정을 가짜 상태·가짜 대상 키로, BOT-120 2단계 코드·단계·세션 한 트랜잭션과 세션 2개 동시 시험, BOT-123 비밀번호만 맞은 로그인 찾기 1일 10분 안·부분 색인 0024·정비 admin-login-step-expired, 다른 관리 경로 403 HTTP 시험). 새 맥락 리뷰 중간 1·낮음 6과 재검토 중간 2·낮음 3을 모두 고쳤다.
 - 2026-11-05 구간 1 정리 B 웹 화면(R-330): 정리 목록 열다섯 줄을 고쳤다(BOT-010 복귀 화면 셋, BOT-020 미리보기, BOT-036 여섯, BOT-041 사유별 문구, BOT-043 넷). 토큰 갱신은 성공·401 거절·일시 장애로 나눠 401일 때만 로그인 화면(공용 팬 API 클라이언트 포함). 로그아웃 정리 루틴 호출은 GAT-040, 다른 화면의 403 문구는 GAT-055·090·100·130, 셸 깜박임은 HOT-321 줄에 넘겼다. 구현은 서브에이전트가 하고 새 맥락 리뷰 세 바퀴(중간 3·낮음 6, 중간 1·낮음 5, 낮음 4)를 모두 고쳤다.
+- 2026-11-05 구간 1 정리 마무리(R-332): 남은 항목을 고치거나 넘겨 목록을 비웠다. 외래키 0025·0026, 병합 확인·Turnstile 차단기, 유출 비밀번호 조회·Turnstile을 바깥 호출 클라이언트로(추적 머리가 바깥 제공자에 실리던 결함을 고침), 같은 제안 동시 확정·로그인 잠금 교착, demo 모의 기관·라벨 키. 넘김: BAS-060·GAT-250·HOT-400·HOT-450·HOT-460·OPS-020. 새 단계 BOT-044(구간 2 첫 자리). OPEN[21]~[23]. 구현은 서브에이전트, 새 맥락 리뷰 중간 2·낮음 7을 모두 고쳤다.

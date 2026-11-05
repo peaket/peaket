@@ -2,7 +2,7 @@
 // (docs/features/identity.md §6 '관리 계정 로그인 1단계와 실패 제한의 첫 구현', BUILD_ORDER BOT-111).
 import 'reflect-metadata';
 import { createServer } from 'node:http';
-import { type AdminAuthzPort, createService, fakeClock } from '@peaket/platform';
+import { type AdminAuthzPort, createCircuitBreaker, createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { JoseAdminTokenSigner } from '../src/modules/admin/adapters/jose-admin-token-signer.js';
@@ -134,7 +134,7 @@ describe('REST 꼴(openapi AdminLoginPasswordStep·AdminLoginStep)', () => {
 
 describe('사람 확인 검증(Turnstile siteverify 흉내 서버, auth-controls §2.3)', () => {
   type Seen = Record<string, string>;
-  async function fakeSiteverify(reply: (form: Seen, n: number) => object | 'HANG') {
+  async function fakeSiteverify(reply: (form: Seen, n: number) => object | 'HANG' | 'FAIL') {
     const seen: Seen[] = [];
     const server = createServer((req, res) => {
       let raw = '';
@@ -144,6 +144,11 @@ describe('사람 확인 검증(Turnstile siteverify 흉내 서버, auth-controls
         seen.push(form);
         const out = reply(form, seen.length);
         if (out === 'HANG') return;
+        if (out === 'FAIL') {
+          res.statusCode = 503;
+          res.end();
+          return;
+        }
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify(out));
       });
@@ -187,6 +192,68 @@ describe('사람 확인 검증(Turnstile siteverify 흉내 서버, auth-controls
     expect(await new TurnstileHumanCheck({ url: dead.url, secret: 'test-secret', hostnames, timeoutMs: 150 }).verify('t', { aud: 'ops', remoteIp: '198.51.100.1' })).toBe('UNAVAILABLE');
     await dead.close();
     expect(await new TurnstileHumanCheck({ url: 'http://127.0.0.1:9', secret: undefined, hostnames }).verify('t', { aud: 'ops', remoteIp: '198.51.100.1' })).toBe('UNAVAILABLE');
+  });
+
+  test('BOT-111넘김_검증호출이잇달아실패해차단기가열리면_부르지않고UNAVAILABLE이며_실패가아닌답(FAILED)은세지않는다', async () => {
+    const down = await fakeSiteverify(() => 'FAIL');
+    const breaker = createCircuitBreaker({ service: 'identity-svc', dependency: 'turnstile', minCalls: 2, failureRatePercent: 50, clock: fakeClock() });
+    const h = new TurnstileHumanCheck({ url: down.url, secret: 'test-secret', hostnames, breaker });
+    // 5xx 두 번(처음 + 같은 멱등 키로 한 번 더)으로 열린다
+    expect(await h.verify('t', { aud: 'ops', remoteIp: '198.51.100.1' })).toBe('UNAVAILABLE');
+    expect(down.seen).toHaveLength(2);
+    expect(breaker.state).toBe('open');
+    // 열린 동안은 사람 확인 서비스를 부르지 않고 답하지 않음과 같은 결과다(다시 묻지도 않는다)
+    expect(await h.verify('t', { aud: 'ops', remoteIp: '198.51.100.1' })).toBe('UNAVAILABLE');
+    expect(down.seen).toHaveLength(2);
+    await down.close();
+    // 토큰이 틀린 답(200, success false)은 사람 확인 서비스가 답한 것이라 실패로 세지 않는다
+    const no = await fakeSiteverify(() => ({ success: false }));
+    const b2 = createCircuitBreaker({ service: 'identity-svc', dependency: 'turnstile', minCalls: 2, failureRatePercent: 50, clock: fakeClock() });
+    const h2 = new TurnstileHumanCheck({ url: no.url, secret: 'test-secret', hostnames, breaker: b2 });
+    for (let i = 0; i < 3; i++) expect(await h2.verify('t', { aud: 'ops', remoteIp: '198.51.100.1' })).toBe('FAILED');
+    expect(b2.state).toBe('closed');
+    expect(no.seen).toHaveLength(3);
+    await no.close();
+  });
+
+  test('BOT-111넘김_검증은리디렉트를따르지않아비밀을다른호스트로보내지않고_응답본문이상한을넘으면받지않는다', async () => {
+    // 다른 호스트(리디렉트가 가리키는 곳): 요청이 하나라도 오면 비밀이 새어 나간 것이다
+    const other: string[] = [];
+    const elsewhere = createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => (raw += String(c)));
+      req.on('end', () => {
+        other.push(raw);
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ success: true, hostname: 'console.peaket.example', action: 'login' }));
+      });
+    });
+    await new Promise<void>((r) => elsewhere.listen(0, '127.0.0.1', r));
+    const to = `http://127.0.0.1:${(elsewhere.address() as { port: number }).port}/siteverify`;
+    let hits = 0;
+    const redirecting = createServer((req, res) => {
+      hits++;
+      req.resume();
+      req.on('end', () => {
+        // 307·308은 본문(비밀 포함)을 그대로 다시 보내게 하는 리디렉트다
+        res.statusCode = hits === 1 ? 307 : 308;
+        res.setHeader('location', to);
+        res.end();
+      });
+    });
+    await new Promise<void>((r) => redirecting.listen(0, '127.0.0.1', r));
+    const from = `http://127.0.0.1:${(redirecting.address() as { port: number }).port}/siteverify`;
+    expect(await new TurnstileHumanCheck({ url: from, secret: 'test-secret', hostnames }).verify('t', { aud: 'ops', remoteIp: '198.51.100.1' })).toBe('UNAVAILABLE');
+    expect(hits).toBe(2);
+    expect(other).toEqual([]);
+    redirecting.closeAllConnections();
+    await new Promise<void>((r) => redirecting.close(() => r()));
+    elsewhere.closeAllConnections();
+    await new Promise<void>((r) => elsewhere.close(() => r()));
+    // 맞는 답이라도 본문이 상한(64KiB [가정])을 넘으면 닿지 못한 것으로 본다(메모리에 끝없이 쌓지 않는다)
+    const big = await fakeSiteverify(() => ({ success: true, hostname: 'console.peaket.example', action: 'login', pad: 'x'.repeat(200 * 1024) }));
+    expect(await new TurnstileHumanCheck({ url: big.url, secret: 'test-secret', hostnames }).verify('t', { aud: 'ops', remoteIp: '198.51.100.1' })).toBe('UNAVAILABLE');
+    await big.close();
   });
 });
 

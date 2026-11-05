@@ -254,6 +254,9 @@ export class DrizzleSessionStore implements SessionStore {
         return r?.n ?? 0;
       },
       setAccountHold: async (i) => {
+        // 없는 계정의 건은 외래키가 막는다. 쓰기 전에 보고 NOT_FOUND로 답한다(계정 행은 지우지 않으므로 본 뒤 사라지지 않는다, BOT-042가 넘긴 것)
+        const [owner] = await tx.select({ id: account.id }).from(account).where(eq(account.id, i.accountId));
+        if (!owner) return 'NOT_FOUND';
         const [h] = await tx.select().from(accountHold).where(eq(accountHold.sourceRef, i.sourceRef)).for('update');
         if (h && (h.accountId !== i.accountId || h.kind !== i.kind)) return 'CONFLICT';
         if (h && i.sourceVersion <= h.sourceVersion) return 'STALE';

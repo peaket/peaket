@@ -1,6 +1,6 @@
 // 조사용 가명의 라벨 키 링(docs/features/identity.md §9.1 '조사용 값의 첫 구현'·'조사용 가명 키 회전 이음의 첫 구현', docs/security/secrets-and-keys.md '조사용 가명 키', BUILD_ORDER BOT-045·BOT-046).
 // 라벨마다 KMS GenerateMac으로 라벨 키를 받아 메모리에만 두고 5분 [가정]마다 다시 받는다. 받은 지 10분이 지나면 쓰지 않는다(칸을 비우고 까닭을 센다).
-// 로컬·CI는 라벨 키 값 자체를 설정으로 받을 수 있다(그 키는 늘 쓴다). 키 회전의 이음 기간에는 라벨마다 옛 판 라벨 키도 받아, 이음 끝까지 옛 판 값(prevRef)을 함께 준다.
+// 로컬·CI·demo는 라벨 키 값 자체를 설정으로 받을 수 있다(그 키는 늘 쓴다. demo는 클라우드 계정이 없어 KMS 키가 없다, BOT-045가 넘긴 것). 키 회전의 이음 기간에는 라벨마다 옛 판 라벨 키도 받아, 이음 끝까지 옛 판 값(prevRef)을 함께 준다.
 import { type Clock } from '@peaket/platform';
 import { INV_REF_KEY_TTL_MS, INV_REF_LABELS, invRef, type InvRefLabel, labelKeyMessage } from '../domain/inv-ref.js';
 import type { InvRefBridge, InvRefBridges, InvRefs } from '../domain/ports.js';
@@ -17,7 +17,10 @@ export type MissingReason = 'THROTTLED' | 'KMS_ERROR';
 
 const ENV: Record<InvRefLabel, string> = { device: 'PEAKET_INV_REF_DEVICE', contact: 'PEAKET_INV_REF_CONTACT' };
 export const KMS_ENDPOINT_ENV = 'PEAKET_KMS_ENDPOINT';
+/** KMS 흉내 서버 주소를 받는 환경 */
 const LOCAL_ENVS = ['local', 'ci'];
+/** 라벨 키 값 설정을 받는 환경(본인확인 설정값 키와 같다, identity §5·§9.1). 운영·스테이징은 KMS 키만 */
+const KEY_VALUE_ENVS = ['local', 'ci', 'demo'];
 const THROTTLE_NAMES = ['ThrottlingException', 'LimitExceededException', 'TooManyRequestsException'];
 
 interface Held {
@@ -28,13 +31,13 @@ interface Held {
 const slot = (label: InvRefLabel, version: number) => `${label}|${version}`;
 const keyIdOf = (x: string) => x.slice(x.lastIndexOf('key/') >= 0 ? x.lastIndexOf('key/') + 4 : 0);
 
-/** 설정의 키 하나(KMS 키 ID 또는 local·ci의 라벨 키 값) */
-function keySourceOf(env: Record<string, string | undefined>, prefix: string, version: number, local: boolean): KeySource | null {
+/** 설정의 키 하나(KMS 키 ID 또는 local·ci·demo의 라벨 키 값) */
+function keySourceOf(env: Record<string, string | undefined>, prefix: string, version: number, valuesAllowed: boolean): KeySource | null {
   const kms = env[`${prefix}_KMS_KEY`];
   const raw = env[`${prefix}_KEY`];
   if (kms) return { version, kmsKeyId: kms };
   if (!raw) return null;
-  if (!local) throw new Error(`${prefix}_KEY(라벨 키 값)는 ${LOCAL_ENVS.join('·')}에서만 쓴다. 운영은 ${prefix}_KMS_KEY`);
+  if (!valuesAllowed) throw new Error(`${prefix}_KEY(라벨 키 값)는 ${KEY_VALUE_ENVS.join('·')}에서만 쓴다. 운영은 ${prefix}_KMS_KEY`);
   return { version, key: Buffer.from(raw, 'base64') };
 }
 
@@ -75,7 +78,7 @@ export class InvRefKeyRing implements InvRefs {
   }
 
   /**
-   * 설정에서 만든다. client는 KMS 키가 하나라도 있을 때 쓴다(main이 kmsMacClient로 만든다). 라벨마다 `PEAKET_INV_REF_<라벨>_KMS_KEY`(local·ci는 `…_KEY`)와 판 `…_KEY_VERSION`,
+   * 설정에서 만든다. client는 KMS 키가 하나라도 있을 때 쓴다(main이 kmsMacClient로 만든다). 라벨마다 `PEAKET_INV_REF_<라벨>_KMS_KEY`(local·ci·demo는 `…_KEY`)와 판 `…_KEY_VERSION`,
    * 이음 기간이면 옛 판 `…_PREVIOUS_KMS_KEY`(`…_PREVIOUS_KEY`)·`…_PREVIOUS_KEY_VERSION`과 이음 끝 `…_BRIDGE_UNTIL`(ISO 시각)
    */
   static fromEnv(
@@ -89,18 +92,19 @@ export class InvRefKeyRing implements InvRefs {
   ): { ring: InvRefKeyRing; warnings: string[] } {
     const peaketEnv = env.PEAKET_ENV ?? 'prod';
     const local = LOCAL_ENVS.includes(peaketEnv);
+    const values = KEY_VALUE_ENVS.includes(peaketEnv);
     const endpoint = env[KMS_ENDPOINT_ENV];
     if (endpoint && !local) throw new Error(`${KMS_ENDPOINT_ENV}는 ${LOCAL_ENVS.join('·')}에서만 쓴다(지금 ${peaketEnv})`);
     const sources: LabelSource[] = [];
     const warnings: string[] = [];
     for (const label of labels) {
       const p = ENV[label];
-      const current = keySourceOf(env, p, Number(env[`${p}_KEY_VERSION`] ?? '1'), local);
+      const current = keySourceOf(env, p, Number(env[`${p}_KEY_VERSION`] ?? '1'), values);
       if (!current) {
         warnings.push(`${p}_KMS_KEY·${p}_KEY가 없어 ${label} 조사용 가명 칸을 늘 비운다(identity §9.1)`);
         continue;
       }
-      const previous = o.previous === false ? null : keySourceOf(env, `${p}_PREVIOUS`, Number(env[`${p}_PREVIOUS_KEY_VERSION`] ?? '0'), local);
+      const previous = o.previous === false ? null : keySourceOf(env, `${p}_PREVIOUS`, Number(env[`${p}_PREVIOUS_KEY_VERSION`] ?? '0'), values);
       const untilRaw = env[`${p}_BRIDGE_UNTIL`];
       const until = untilRaw ? Date.parse(untilRaw) : undefined;
       if (untilRaw && Number.isNaN(until)) throw new Error(`${p}_BRIDGE_UNTIL이 ISO 시각이 아니다: ${untilRaw}`);

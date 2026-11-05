@@ -7,7 +7,11 @@ const src = (p) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
   resolve: {
-    alias: [{ find: /^@peaket\/platform$/, replacement: src('../../packages/platform/src/index.ts') }],
+    alias: [
+      { find: /^@peaket\/platform$/, replacement: src('../../packages/platform/src/index.ts') },
+      // OTel SDK 시작(추적 시험, test/outbound-trace.test.ts)도 원본으로 잇는다
+      { find: /^@peaket\/platform\/telemetry$/, replacement: src('../../packages/platform/src/telemetry.ts') },
+    ],
   },
   test: {
     // CI가 PEAKET_TEST_REPORT를 주면 JSON 보고서도 남긴다(ASVS 태그 리포트, BOT-162)

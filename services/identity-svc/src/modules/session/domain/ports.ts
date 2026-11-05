@@ -82,8 +82,11 @@ export interface SessionTx {
   verifiedOf(accountId: string): Promise<boolean | null>;
   /** 그 계정의 열린(OPEN) 이의 제기·소명 계류 행 수(account_hold, 병합의 APPEAL_PENDING, BOT-042) */
   openHoldsOf(accountId: string): Promise<number>;
-  /** account_hold 쓰기: 판 번호가 저장한 판보다 클 때만(같은 source_ref에 다른 계정·종류면 'CONFLICT'). 반영했으면 'APPLIED', 아니면 'STALE' */
-  setAccountHold(i: { sourceRef: string; accountId: string; kind: 'VERIFICATION_APPEAL' | 'DISPUTE' | 'APPEAL'; state: 'OPEN' | 'CLOSED'; sourceVersion: number; now: number }): Promise<'APPLIED' | 'STALE' | 'CONFLICT'>;
+  /**
+   * account_hold 쓰기: 판 번호가 저장한 판보다 클 때만(같은 source_ref에 다른 계정·종류면 'CONFLICT'). 반영했으면 'APPLIED', 아니면 'STALE'.
+   * 그 계정이 identity에 없으면 쓰지 않고 'NOT_FOUND'(account_hold.account_id는 account를 가리키는 외래키다, BOT-042가 넘긴 것)
+   */
+  setAccountHold(i: { sourceRef: string; accountId: string; kind: 'VERIFICATION_APPEAL' | 'DISPUTE' | 'APPEAL'; state: 'OPEN' | 'CLOSED'; sourceVersion: number; now: number }): Promise<'APPLIED' | 'STALE' | 'CONFLICT' | 'NOT_FOUND'>;
   /** before 전에 닫힌 account_hold 행을 지운다. 지운 수 */
   purgeClosedHolds(before: number): Promise<number>;
   /**
