@@ -18,7 +18,7 @@ export async function startValkey(): Promise<ValkeyContainer> {
     url: `redis://127.0.0.1:${port}`,
     stop: () => {
       try {
-        docker(['rm', '-f', id]);
+        docker(['rm', '-f', '-v', id]);
       } catch {
         // 이미 없다
       }

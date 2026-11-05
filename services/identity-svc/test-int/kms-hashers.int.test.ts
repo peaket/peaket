@@ -32,7 +32,7 @@ beforeAll(async () => {
   }
 });
 afterAll(() => {
-  if (id) docker(['rm', '-f', id]);
+  if (id) docker(['rm', '-f', '-v', id]);
 });
 
 const hashers = (ciKeys: Map<number, string>, ep = endpoint) =>

@@ -114,7 +114,7 @@ export async function startKafka(o: { oauth?: boolean } = {}): Promise<KafkaCont
   const brokers = [`127.0.0.1:${port}`];
   const stop = () => {
     try {
-      docker(['rm', '-f', id]);
+      docker(['rm', '-f', '-v', id]);
     } catch {
       // 이미 없다
     }
@@ -174,7 +174,7 @@ export async function startValkey(): Promise<ValkeyContainer> {
     url: `redis://127.0.0.1:${port}`,
     stop: () => {
       try {
-        docker(['rm', '-f', id]);
+        docker(['rm', '-f', '-v', id]);
       } catch {
         // 이미 없다
       }
@@ -197,7 +197,7 @@ export async function startPasswordCluster(password: string): Promise<PasswordCl
   const id = docker(['run', '-d', '--rm', '-p', `127.0.0.1:${port}:${port}`, VALKEY_IMAGE, 'valkey-server', '--port', String(port), '--cluster-enabled', 'yes', '--cluster-port', '16379', '--cluster-announce-ip', '127.0.0.1', '--requirepass', password, '--masterauth', password, '--save', '', '--appendonly', 'no']);
   const stop = () => {
     try {
-      docker(['rm', '-f', id]);
+      docker(['rm', '-f', '-v', id]);
     } catch {
       // 이미 없다
     }

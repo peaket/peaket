@@ -21,7 +21,7 @@ export async function startPostgres(): Promise<PostgresServer> {
   const url = (db: string) => `postgres://postgres:peaket-test@127.0.0.1:${port}/${db}`;
   const stop = () => {
     try {
-      docker(['rm', '-f', id]);
+      docker(['rm', '-f', '-v', id]);
     } catch {
       // 이미 멈췄다
     }

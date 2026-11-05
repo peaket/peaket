@@ -32,7 +32,7 @@ export interface SimCluster {
 }
 
 export function simDown(): void {
-  for (const n of NAMES) tryDocker('rm', '-f', n);
+  for (const n of NAMES) tryDocker('rm', '-f', '-v', n);
   tryDocker('network', 'rm', SIM_NET);
 }
 

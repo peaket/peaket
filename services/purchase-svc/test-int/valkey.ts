@@ -34,7 +34,7 @@ export async function startValkey(o: { cluster?: boolean; configEpoch?: number }
   const id = docker(['run', '-d', '--rm', '-p', '127.0.0.1::6379', VALKEY_IMAGE, ...(o.cluster ? ['valkey-server', '--cluster-enabled', 'yes'] : [])]);
   const stop = () => {
     try {
-      docker(['rm', '-f', id]);
+      docker(['rm', '-f', '-v', id]);
     } catch {
       // 이미 없다
     }

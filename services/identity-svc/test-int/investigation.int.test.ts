@@ -57,7 +57,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await database?.close();
   pg?.stop();
-  if (moto) docker(['rm', '-f', moto]);
+  if (moto) docker(['rm', '-f', '-v', moto]);
 });
 
 const q = async <R>(sql: string, params: unknown[] = []): Promise<R[]> => (await database.pool.query(sql, params)).rows as R[];

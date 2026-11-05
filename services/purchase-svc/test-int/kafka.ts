@@ -78,7 +78,7 @@ export async function startKafka(): Promise<KafkaContainer> {
   const brokers = [`127.0.0.1:${port}`];
   const stop = () => {
     try {
-      docker(['rm', '-f', id]);
+      docker(['rm', '-f', '-v', id]);
     } catch {
       // 이미 없다
     }

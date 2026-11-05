@@ -49,7 +49,7 @@ beforeAll(async () => {
 afterAll(() => {
   silent?.closeAllConnections();
   silent?.close();
-  if (moto) docker(['rm', '-f', moto]);
+  if (moto) docker(['rm', '-f', '-v', moto]);
 });
 
 /** main.ts와 같은 꼴: 서울 클라이언트는 설정 끝점(여기선 응답 없음), 넘길 리전 클라이언트는 넘김 끝점 */
