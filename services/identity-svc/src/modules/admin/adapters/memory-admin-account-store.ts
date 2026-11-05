@@ -1,15 +1,18 @@
 // 관리 계정 저장소의 메모리 구현(시험·로컬, BUILD_ORDER BOT-110·BOT-111). 계정을 만드는 길(초대)은 BOT-150이라 시험은 create로 바로 만든다.
 import { FRESH_LOGIN_STATE, type AccountLoginState, type NoticeKind } from '../domain/login-rules.js';
 import { randomUUID } from 'node:crypto';
-import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
+import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminPasskeyRow, AdminPasskeyStore, AdminReauthRecord, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
 import { DESIGNATION_KINDS, type SecondStepUse } from '../domain/ports.js';
+import type { ReauthAct, ReauthFactor } from '../domain/passkey.js';
 
 type Row = AdminAccountRow &
   AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null; inviteTokenHash: Buffer | null; inviteExpiresAt: number | null; removedAt: number | null; version: number };
 type SessionRow = { id: string; accountId: string; aud: AdminAud; refreshHash: string; prevRefreshHash: string | null; rotatedAt: number | null; refreshUsed: boolean; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; terminatedAt: number | null; terminationReason: string | null };
+/** 패스키 행 복사(structuredClone은 Buffer를 평범한 Uint8Array로 바꾸므로 쓰지 않는다) */
+const clonePasskey = (p: AdminPasskeyRow): AdminPasskeyRow => ({ ...p, credentialId: Buffer.from(p.credentialId), publicKey: Buffer.from(p.publicKey), transports: [...p.transports] });
 type Step = { id: string; accountId: string; tokenHash: string; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; usedAt: number | null; knownSource: boolean; passwordOnlyNoticedAt: number | null };
 
-export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore, AdminRefreshStore, AdminManagementStore {
+export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore, AdminRefreshStore, AdminManagementStore, AdminPasskeyStore {
   readonly #rows = new Map<string, Row>();
   readonly #notices: { id: string; accountId: string; kind: NoticeKind; at: number; sentAt: number | null; attempts?: number; nextAttemptAt?: number }[] = [];
   readonly #links: (UnlockLinkRow & { tokenHash: string })[] = [];
@@ -24,6 +27,9 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
   readonly #designations: { id: string; accountId: string; kind: DesignationKind; basis: string; by: string; at: number; revokedAt: number | null }[] = [];
   /** 관리 호출의 멱등 기록(BOT-150) */
   readonly #requests = new Map<string, { kind: AdminAccountRequestKind; accountId: string; result: string; at: number }>();
+  /** 패스키와 재인증 기록(BOT-122) */
+  readonly #passkeys: AdminPasskeyRow[] = [];
+  readonly #reauths: (AdminReauthRecord & { usedAt: number | null })[] = [];
 
   /** 시험용: 계정을 만든다(이메일은 소문자·앞뒤 빈칸 제거, 삭제하지 않은 계정 사이에서 하나) */
   create(i: { id: string; role: AdminRole; email: string; status?: AdminStatus; promoterId?: string | null; displayName?: string | null; now: number }): void {
@@ -358,6 +364,71 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return ended;
   }
 
+  // ── 패스키와 재인증 기록(BOT-122) ──
+  /** 시험용: 그 계정의 재인증 기록(발급 차례) */
+  reauthRecords(accountId: string): (AdminReauthRecord & { usedAt: number | null })[] {
+    return this.#reauths.filter((r) => r.accountId === accountId).map((r) => ({ ...r, factors: [...r.factors] }));
+  }
+
+  async listPasskeys(accountId: string): Promise<AdminPasskeyRow[]> {
+    return this.#passkeys.filter((p) => p.accountId === accountId).map(clonePasskey);
+  }
+
+  async findPasskeyByCredential(credentialId: Buffer): Promise<AdminPasskeyRow | null> {
+    const p = this.#passkeys.find((x) => x.credentialId.equals(credentialId));
+    return p ? clonePasskey(p) : null;
+  }
+
+  async addPasskey(row: AdminPasskeyRow, limit: number, now: number): Promise<'ADDED' | 'LIMIT' | 'EXISTS' | 'NOT_ACTIVE'> {
+    const r = this.#rows.get(row.accountId);
+    if (!r || r.status !== 'ACTIVE') return 'NOT_ACTIVE';
+    if (this.#passkeys.filter((p) => p.accountId === row.accountId).length >= limit) return 'LIMIT';
+    if (this.#passkeys.some((p) => p.credentialId.equals(row.credentialId))) return 'EXISTS';
+    this.#passkeys.push(clonePasskey(row));
+    this.#notices.push({ id: randomUUID(), accountId: row.accountId, kind: 'PASSKEY_ADDED', at: now, sentAt: null });
+    return 'ADDED';
+  }
+
+  async removePasskey(accountId: string, passkeyId: string, keepOne: readonly AdminRole[], now: number): Promise<'REMOVED' | 'NOT_FOUND' | 'LAST'> {
+    // PostgreSQL 저장소와 같게: 계정 행이 없거나 그 계정의 패스키가 아니면 NOT_FOUND
+    const account = this.#rows.get(accountId);
+    const k = this.#passkeys.findIndex((p) => p.id === passkeyId && p.accountId === accountId);
+    if (!account || k < 0) return 'NOT_FOUND';
+    if (keepOne.includes(account.role) && this.#passkeys.filter((p) => p.accountId === accountId).length <= 1) return 'LAST';
+    this.#passkeys.splice(k, 1);
+    this.#notices.push({ id: randomUUID(), accountId, kind: 'PASSKEY_REMOVED', at: now, sentAt: null });
+    return 'REMOVED';
+  }
+
+  async recordPasskeyUse(id: string, expected: number, next: number, backedUp: boolean, at: number): Promise<boolean> {
+    const p = this.#passkeys.find((x) => x.id === id);
+    if (!p || p.signCount !== expected) return false;
+    Object.assign(p, { signCount: next, backedUp, lastUsedAt: at });
+    return true;
+  }
+
+  async recordReauth(r: AdminReauthRecord): Promise<void> {
+    this.#reauths.push({ ...r, factors: [...r.factors], usedAt: null });
+  }
+
+  async useReauth(jti: string, accountId: string, sessionId: string, act: ReauthAct, now: number): Promise<ReauthFactor[] | null> {
+    const r = this.#reauths.find((x) => x.jti === jti && x.accountId === accountId && x.sessionId === sessionId && x.act === act);
+    if (!r || r.usedAt !== null || r.expiresAt <= now) return null;
+    r.usedAt = now;
+    return [...r.factors];
+  }
+
+  async purgeReauths(before: number): Promise<number> {
+    let n = 0;
+    for (let k = this.#reauths.length - 1; k >= 0; k--) {
+      if (this.#reauths[k]!.issuedAt < before) {
+        this.#reauths.splice(k, 1);
+        n++;
+      }
+    }
+    return n;
+  }
+
   // ── 관리 계정 관리(BOT-150) ──
   #managed(r: Row): ManagedAccount {
     return {
@@ -376,6 +447,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       lockReason: r.lockReason,
       lockedUntil: r.lockedUntil,
       designations: this.#liveDesignations(r.id),
+      passkeyCount: this.#passkeys.filter((p) => p.accountId === r.id).length,
     };
   }
 
@@ -464,6 +536,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       wipeCredentials: async (id, now) => {
         patch(id, { status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, ...structuredClone(FRESH_LOGIN_STATE) }, now);
         drop(this.#recovery, (c) => c.accountId !== id);
+        // 패스키도 지운다(수락 때 새로 등록한다, ASVS 6.4.4, BOT-122)
+        drop(this.#passkeys, (p) => p.accountId !== id);
       },
       markRemoved: async (id, now) => {
         patch(
@@ -487,6 +561,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
           now,
         );
         drop(this.#recovery, (c) => c.accountId !== id);
+        drop(this.#passkeys, (p) => p.accountId !== id);
         drop(this.#links, (l) => l.accountId !== id);
         drop(this.#steps, (x) => x.accountId !== id);
         const known = [...this.#known.entries()].filter(([k]) => k.startsWith(`${id}|`));

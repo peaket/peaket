@@ -1,5 +1,5 @@
 // 관리 계정 컨텍스트의 표(docs/data.md admin_account, identity §6, BUILD_ORDER BOT-110). 칸은 data.md 그대로이고, 쓰는 길은 단계마다 붙인다
-// (비밀번호 BOT-110, 로그인 실패 제한 BOT-111, TOTP BOT-120, 해제 링크 BOT-121, 초대·역할·삭제 BOT-150).
+// (비밀번호 BOT-110, 로그인 실패 제한 BOT-111, TOTP BOT-120, 해제 링크 BOT-121, 초대·역할·삭제 BOT-150, 패스키·재인증 기록 BOT-122).
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
@@ -97,7 +97,7 @@ export const adminSecurityNotice = pgTable(
   },
   (t) => [
     index('admin_security_notice_unsent_idx').on(t.createdAt).where(sql`${t.sentAt} is null`),
-    check('admin_security_notice_kind_check', sql`${t.kind} in ('TIMED_LOCK', 'PASSWORD_FAILURE_NOTICE', 'MULTI_SOURCE_ALERT', 'PROTECT_LOCK', 'SESSION_LIMIT', 'UNLOCK_LINK', 'UNLOCKED', 'PASSWORD_ONLY_LOGIN', 'INVITATION')`),
+    check('admin_security_notice_kind_check', sql`${t.kind} in ('TIMED_LOCK', 'PASSWORD_FAILURE_NOTICE', 'MULTI_SOURCE_ALERT', 'PROTECT_LOCK', 'SESSION_LIMIT', 'UNLOCK_LINK', 'UNLOCKED', 'PASSWORD_ONLY_LOGIN', 'INVITATION', 'PASSKEY_ADDED', 'PASSKEY_REMOVED')`),
   ],
 );
 
@@ -212,6 +212,63 @@ export const adminUnlockLink = pgTable(
     revokedAt: at('revoked_at'),
   },
   (t) => [uniqueIndex('admin_unlock_link_token_key').on(t.tokenHash), index('admin_unlock_link_live_idx').on(t.adminAccountId).where(sql`${t.usedAt} is null and ${t.revokedAt} is null`)],
+);
+
+/** 관리 계정 패스키(docs/data.md admin_passkey, BOT-122, ADR-0206). 자격 ID는 모든 계정 사이에서 하나다. 삭제·재초대 트랜잭션이 지운다 */
+export const adminPasskey = pgTable(
+  'admin_passkey',
+  {
+    id: uuid('id').primaryKey(),
+    adminAccountId: uuid('admin_account_id')
+      .notNull()
+      .references(() => adminAccount.id, { onDelete: 'cascade' }),
+    credentialId: bytea('credential_id').notNull(),
+    // COSE 꼴 공개키(평문, 무결성만 지킨다)
+    publicKey: bytea('public_key').notNull(),
+    signCount: bigint('sign_count', { mode: 'number' }).notNull().default(0),
+    transports: text('transports').array().notNull().default(sql`'{}'::text[]`),
+    deviceType: text('device_type').notNull(),
+    backedUp: boolean('backed_up').notNull().default(false),
+    aaguid: uuid('aaguid').notNull(),
+    name: text('name').notNull(),
+    createdAt: at('created_at').notNull(),
+    lastUsedAt: at('last_used_at'),
+  },
+  (t) => [
+    uniqueIndex('admin_passkey_credential_key').on(t.credentialId),
+    index('admin_passkey_account_idx').on(t.adminAccountId, t.createdAt),
+    check('admin_passkey_device_type_check', sql`${t.deviceType} in ('singleDevice', 'multiDevice')`),
+    check('admin_passkey_credential_len_check', sql`octet_length(${t.credentialId}) between 1 and 1023`),
+    check('admin_passkey_sign_count_check', sql`${t.signCount} >= 0`),
+  ],
+);
+
+/** 발급한 관리 재인증 토큰의 기록(docs/data.md admin_reauth, BOT-122). factors가 남고(I-T53 ③), ACCOUNT_SECURITY는 used_at으로 한 번만 받는다. 90일 [가정] 뒤 정비가 지운다 */
+export const adminReauth = pgTable(
+  'admin_reauth',
+  {
+    jti: uuid('jti').primaryKey(),
+    adminAccountId: uuid('admin_account_id')
+      .notNull()
+      .references(() => adminAccount.id, { onDelete: 'cascade' }),
+    adminSessionId: uuid('admin_session_id')
+      .notNull()
+      .references(() => adminSession.id, { onDelete: 'cascade' }),
+    aud: text('aud').notNull(),
+    act: text('act').notNull(),
+    factors: text('factors').array().notNull(),
+    // 외래키 없음: 패스키를 지워도 기록은 남는다
+    passkeyId: uuid('passkey_id'),
+    issuedAt: at('issued_at').notNull(),
+    expiresAt: at('expires_at').notNull(),
+    usedAt: at('used_at'),
+  },
+  (t) => [
+    index('admin_reauth_issued_idx').on(t.issuedAt),
+    index('admin_reauth_account_idx').on(t.adminAccountId, t.issuedAt),
+    check('admin_reauth_aud_check', sql`${t.aud} in ('partner', 'ops')`),
+    check('admin_reauth_act_check', sql`${t.act} in ('OPS_COMMAND', 'APPROVAL', 'PERMISSION_CHANGE', 'PAYOUT_ACCOUNT', 'BOOKER_EXPORT', 'AUTHORITY_DATA', 'ACCOUNT_SECURITY')`),
+  ],
 );
 
 /** 익숙한 출발지(docs/data.md admin_known_source, auth-controls §3.1, BOT-123). 30일 [가정] 지나면 매일 정비가 지운다 */

@@ -1,6 +1,7 @@
 // 관리 계정 컨텍스트의 포트: 비밀번호 해시·확인, 페퍼, 유출 목록, 관리 계정 저장소(identity §6, BUILD_ORDER BOT-110),
 // 로그인 1단계의 저장소·실패 셈·사람 확인·운영 신호(BUILD_ORDER BOT-111).
 import type { AccountLoginState, NoticeKind } from './login-rules.js';
+import type { ReauthAct, ReauthFactor, RelyingParty } from './passkey.js';
 
 export type AdminRole = 'partner_admin' | 'partner_member' | 'viewer' | 'operator' | 'commander' | 'cs_agent' | 'cs_lead';
 export type AdminStatus = 'INVITED' | 'ACTIVE' | 'INVITE_EXPIRED' | 'REMOVED';
@@ -156,14 +157,17 @@ export interface HumanCheck {
 }
 
 export const ADMIN_LOGIN_SIGNALS = Symbol('identity.AdminLoginSignals');
-export type AdminLoginFailureReason = 'password' | 'second_factor' | 'locked' | 'human_check';
-export type AdminSecurityAlertKind = 'password_failure_notice' | 'multi_source' | 'protect_lock' | 'source' | 'global' | 'totp_seed_unreadable';
+/** passkey는 재인증의 패스키 서명 확인 실패(로그인 실패 수에는 세지 않는다, BOT-122) */
+export type AdminLoginFailureReason = 'password' | 'second_factor' | 'locked' | 'human_check' | 'passkey';
+export type AdminSecurityAlertKind = 'password_failure_notice' | 'multi_source' | 'protect_lock' | 'source' | 'global' | 'totp_seed_unreadable' | 'passkey_counter_regression';
 export interface AdminLoginSignals {
   failure(aud: AdminAud, reason: AdminLoginFailureReason): void;
   /** SEV3 보안 경보(관측 단계가 경보 규칙을 붙인다) */
   alert(kind: AdminSecurityAlertKind): void;
   /** 관리 토큰 갱신 결과(팬과 같은 identity_refresh_total 등에 aud partner·ops로, BOT-130). 시험 대역은 빼도 된다 */
   refreshed?(aud: AdminAud, result: 'rotated' | 'retried' | 'reused' | 'invalid'): void;
+  /** 관리 재인증 토큰을 줬다(identity_admin_reauth_issued_total{aud,factors}, BOT-122). 시험 대역은 빼도 된다 */
+  reauthIssued?(aud: AdminAud, factors: 'password_totp' | 'password_totp_passkey'): void;
 }
 
 // ── TOTP와 로그인 2단계(BUILD_ORDER BOT-120) ──
@@ -194,6 +198,11 @@ export const ADMIN_TOKEN_SIGNER = Symbol('identity.AdminTokenSigner');
 export interface AdminTokenSigner {
   /** scopes: 비밀번호 바꾸기 필요 세션이면 ['password:change'](BOT-123), 보통은 비운다 */
   access(c: { accountId: string; sessionId: string; aud: AdminAud; scopes?: readonly string[] }, now: number): Promise<{ token: string; expiresAt: number }>;
+}
+/** 관리 재인증 토큰 서명(같은 관리 토큰 키, BOT-122). JoseAdminTokenSigner가 함께 구현하고 같은 ADMIN_TOKEN_SIGNER로 넣는다 */
+export interface AdminReauthSigner {
+  /** typ reauth+jwt, 5분, sid·act·factors. jti를 함께 돌려준다(재인증 기록 admin_reauth) */
+  reauth(c: { accountId: string; sessionId: string; aud: AdminAud; act: ReauthAct; factors: readonly ReauthFactor[] }, now: number): Promise<{ token: string; jti: string; expiresAt: number }>;
 }
 
 export interface AdminTotpState {
@@ -382,9 +391,11 @@ export interface ManagedAccount {
   lockedUntil: number | null;
   /** 살아 있는 지정(종류 차례, BOT-151) */
   designations: DesignationKind[];
+  /** 그 계정의 패스키 수(BOT-122) */
+  passkeyCount: number;
 }
-/** 트랜잭션 안에서 읽은 계정(지정은 싣지 않는다: designationsFor로 따로 읽는다, 재검토 2026-11-05) */
-export type LockedAccount = Omit<ManagedAccount, 'designations'>;
+/** 트랜잭션 안에서 읽은 계정(지정·패스키 수는 싣지 않는다: 지정은 designationsFor로 따로 읽는다, 재검토 2026-11-05) */
+export type LockedAccount = Omit<ManagedAccount, 'designations' | 'passkeyCount'>;
 export type AdminAccountRequestKind = 'INVITE' | 'CHANGE_ROLE' | 'REINVITE' | 'REMOVE' | 'DESIGNATE' | 'REVOKE_DESIGNATION';
 /** 관리 호출 한 번의 트랜잭션 안에서 쓰는 것 */
 export interface AdminManagementTx {
@@ -430,4 +441,129 @@ export interface AdminManagementStore {
   purgeRequests(before: number): Promise<number>;
   /** 조회(GetAdminDesignations): 계정 상태(없으면 null)와 살아 있는 지정, since 뒤에 거둔 지정 */
   designationsOf(accountId: string, since: number): Promise<{ status: AdminStatus | null; live: DesignationKind[]; revoked: { kind: DesignationKind; revokedAt: number }[] }>;
+}
+
+// ── 패스키와 재인증(identity §6 '관리 계정 패스키의 첫 구현', BUILD_ORDER BOT-122, ADR-0206) ──
+/** 패스키 한 행(docs/data.md admin_passkey). 공개키는 COSE 꼴 */
+export interface AdminPasskeyRow {
+  id: string;
+  accountId: string;
+  credentialId: Buffer;
+  publicKey: Buffer;
+  signCount: number;
+  transports: string[];
+  deviceType: 'singleDevice' | 'multiDevice';
+  backedUp: boolean;
+  aaguid: string;
+  name: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+}
+
+/** 재인증 기록 한 행(docs/data.md admin_reauth) */
+export interface AdminReauthRecord {
+  jti: string;
+  accountId: string;
+  sessionId: string;
+  aud: AdminAud;
+  act: ReauthAct;
+  factors: ReauthFactor[];
+  passkeyId: string | null;
+  issuedAt: number;
+  expiresAt: number;
+}
+
+export const ADMIN_PASSKEY_STORE = Symbol('identity.AdminPasskeyStore');
+export interface AdminPasskeyStore {
+  /** 그 계정의 패스키(만든 차례) */
+  listPasskeys(accountId: string): Promise<AdminPasskeyRow[]>;
+  findPasskeyByCredential(credentialId: Buffer): Promise<AdminPasskeyRow | null>;
+  /**
+   * 한 트랜잭션: 계정 행을 잠그고 활성 계정이 아니면 NOT_ACTIVE, 그 계정의 패스키가 limit개면 LIMIT,
+   * 같은 자격 ID가 어느 계정에든 있으면 EXISTS(고유 색인이 동시 넣기도 막는다). 넣으면 같은 트랜잭션에 PASSKEY_ADDED 알림을 적는다
+   */
+  addPasskey(row: AdminPasskeyRow, limit: number, now: number): Promise<'ADDED' | 'LIMIT' | 'EXISTS' | 'NOT_ACTIVE'>;
+  /**
+   * 한 트랜잭션: 계정 행을 잠그고 그 계정의 그 패스키가 없으면 NOT_FOUND, 계정 역할이 keepOne에 있고 그것이 마지막 하나면 LAST.
+   * 지우면 같은 트랜잭션에 PASSKEY_REMOVED 알림을 적는다
+   */
+  removePasskey(accountId: string, passkeyId: string, keepOne: readonly AdminRole[], now: number): Promise<'REMOVED' | 'NOT_FOUND' | 'LAST'>;
+  /** 서명 횟수를 읽은 값(expected)과 같을 때만 고치고 마지막 사용·백업 상태를 적는다(같은 서명을 동시에 두 번 내도 하나만). 고쳤으면 true */
+  recordPasskeyUse(id: string, expected: number, next: number, backedUp: boolean, at: number): Promise<boolean>;
+  /** 재인증 토큰을 줄 때마다 적는다 */
+  recordReauth(r: AdminReauthRecord): Promise<void>;
+  /**
+   * identity가 직접 받는 재인증 토큰(ACCOUNT_SECURITY)을 한 번만 쓴다: 그 계정·세션·작업 묶음의 그 jti 행이 있고 아직 쓰지 않았고
+   * 만료 전이면 used_at을 적고 기록의 factors를 돌려준다. 아니면 null
+   */
+  useReauth(jti: string, accountId: string, sessionId: string, act: ReauthAct, now: number): Promise<ReauthFactor[] | null>;
+  /** 발급이 before보다 이른 재인증 기록을 지운다(정비 admin-reauth-expired, 90일 [가정]) */
+  purgeReauths(before: number): Promise<number>;
+}
+
+/** 챌린지 한 건(세션·캐시 Redis id:wa:*). REG는 등록, REAUTH는 재인증 2단계 */
+export interface PasskeyChallenge {
+  kind: 'REG' | 'REAUTH';
+  accountId: string;
+  sessionId: string;
+  aud: AdminAud;
+  /** 챌린지(32바이트)의 base64url */
+  challenge: string;
+  expiresAt: number;
+  /** REAUTH만: 작업 묶음, 1단계에서 확인한 요소, 허용한 패스키 ID */
+  act?: ReauthAct;
+  factors?: ReauthFactor[];
+  allow?: string[];
+}
+export const PASSKEY_CHALLENGES = Symbol('identity.PasskeyChallenges');
+export interface PasskeyChallenges {
+  /** handleHash: 등록 ID·재인증 단계 값의 SHA-256(16진수). 원문은 두지 않는다 */
+  put(kind: PasskeyChallenge['kind'], handleHash: string, c: PasskeyChallenge, ttlMs: number): Promise<void>;
+  /** 꺼내며 지운다(맞든 틀리든 한 번). 없거나 now에 지났으면 null */
+  take(kind: PasskeyChallenge['kind'], handleHash: string, now: number): Promise<PasskeyChallenge | null>;
+}
+/** 챌린지 저장소(세션·캐시 Redis)에 닿지 못했다(받는 층이 503) */
+export class PasskeyChallengesUnavailable extends Error {
+  constructor(cause?: unknown) {
+    super('패스키 챌린지 저장소에 닿지 못했다', { cause });
+    this.name = 'PasskeyChallengesUnavailable';
+  }
+}
+
+/** 등록 확인이 돌려준 새 패스키 */
+export interface VerifiedNewPasskey {
+  credentialId: Buffer;
+  publicKey: Buffer;
+  signCount: number;
+  transports: string[];
+  deviceType: 'singleDevice' | 'multiDevice';
+  backedUp: boolean;
+  aaguid: string;
+}
+/** 콘솔마다의 RP(RP ID·출처, relyingPartiesOf가 시작 때 만든다) */
+export const WEBAUTHN_RPS = Symbol('identity.WebAuthnRps');
+export const WEBAUTHN = Symbol('identity.WebAuthn');
+/** WebAuthn 의식(등록·확인)의 옵션 만들기와 확인. 확인은 검증된 라이브러리에 맡긴다(ADR-0205 결정 2, ADR-0206 결정 1) */
+export interface WebAuthnCeremonies {
+  creationOptions(i: { rp: RelyingParty; challenge: Buffer; userId: Buffer; userName: string; userDisplayName: string; exclude: { id: Buffer; transports: string[] }[]; timeoutMs: number }): Promise<Record<string, unknown>>;
+  /** 출처·RP ID·챌린지·사용자 확인·서명 방식이 맞으면 새 패스키, 아니면 null(이유는 밖에 내지 않는다) */
+  verifyCreation(i: { rp: RelyingParty; challenge: string; response: unknown }): Promise<VerifiedNewPasskey | null>;
+  requestOptions(i: { rp: RelyingParty; challenge: Buffer; allow: { id: Buffer; transports: string[] }[]; timeoutMs: number }): Promise<Record<string, unknown>>;
+  /**
+   * 출처·RP ID·챌린지·사용자 확인·서명이 맞으면 받은 서명 횟수와 백업 상태, 아니면 null.
+   * 서명 횟수 퇴행은 보지 않는다: 부르는 쪽이 서명이 맞은 뒤 signCountAccepted로 본다(위조한 응답으로 경보를 울리지 못하게)
+   */
+  verifyRequest(i: { rp: RelyingParty; challenge: string; response: unknown; credential: { id: Buffer; publicKey: Buffer; transports: string[] } }): Promise<{ signCount: number; backedUp: boolean } | null>;
+}
+
+export const ADMIN_REAUTH_VERIFIER = Symbol('identity.AdminReauthVerifier');
+/** 관리 재인증 토큰 확인(관리 키 셋, typ reauth+jwt, aud 그 콘솔, sid, act). 맞지 않으면 AdminReauthRejected */
+export interface AdminReauthVerifier {
+  verify(token: string, o: { aud: AdminAud; sessionId: string; act: ReauthAct }): Promise<{ jti: string; accountId: string; factors: string[] }>;
+}
+export class AdminReauthRejected extends Error {
+  constructor(reason: string) {
+    super(`관리 재인증 토큰 거절: ${reason}`);
+    this.name = 'AdminReauthRejected';
+  }
 }

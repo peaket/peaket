@@ -6,7 +6,7 @@ import 'reflect-metadata';
 import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createHotRedis, createService, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { KMSClient } from '@aws-sdk/client-kms';
-import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, totpSeedCipherFromEnv, TURNSTILE_BREAKER, turnstileFromEnv } from './modules/admin/index.js';
+import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, JoseAdminReauthVerifier, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, RedisPasskeyChallenges, relyingPartiesOf, totpSeedCipherFromEnv, TURNSTILE_BREAKER, turnstileFromEnv } from './modules/admin/index.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
   AddProvider,
@@ -95,6 +95,9 @@ const adminHumanCheck = turnstileFromEnv(process.env, lateBreaker('turnstile', T
 // 계정 주인 메일(해제 링크 등): 운영 발송 대행은 정본에 없다 [가정]. local·ci는 PEAKET_ADMIN_MAIL_DIR 파일 대역(BOT-121)
 const adminMailer = adminMailerFromEnv(process.env);
 const consoleOrigins = { partner: process.env.PEAKET_PARTNER_CONSOLE_ORIGIN || 'https://partner.peaket.example', ops: process.env.PEAKET_OPS_CONSOLE_ORIGIN || 'https://console.peaket.example' };
+// 관리 계정 패스키의 RP ID·출처(identity §6 '관리 계정 패스키의 첫 구현', ADR-0206): RP ID는 콘솔 출처의 호스트다. 경로가 있거나 https가 아니면(local·ci는 localhost만 http) 시작하지 않는다
+// 환경 이름이 없거나 비면 운영(prod)으로 본다(플랫폼 설정 loadPlatformConfig와 같은 닫힌 쪽 기본값, 새 맥락 리뷰 2026-11-05)
+const relyingParties = relyingPartiesOf(consoleOrigins, { env: process.env.PEAKET_ENV || 'prod' });
 // TOTP 시드 봉투 암호화(KMS 키, 로컬·CI는 키 값). local·ci에서 없으면 2단계가 503이고, 그 밖에서는 시작하지 않는다(identity §6 BOT-120)
 const adminTotpCipher = totpSeedCipherFromEnv(process.env, (endpoint, region) => new KMSClient({ region, ...(endpoint ? { endpoint } : {}), maxAttempts: 2, requestHandler: { connectionTimeout: 1_000, requestTimeout: 2_000, throwOnRequestTimeout: true } }), onKmsFailover);
 if (adminPepper && !adminTotpCipher && !['local', 'ci'].includes(process.env.PEAKET_ENV ?? 'prod')) throw new Error('TOTP 시드 키 설정(PEAKET_ADMIN_TOTP_KMS_KEY)이 없다');
@@ -121,7 +124,8 @@ if (contactRefRps !== undefined && !(Number.isInteger(contactRefRps) && contactR
 const database = createDatabase({ url, applicationName: SERVICE });
 // 세션·캐시 Redis: 가입 때 연결 제안(id:link, identity §2.1). 운영·데모는 반드시 둔다. 로컬·CI만 없으면 프로세스 메모리로 대신한다(파드가 여럿이면 제안을 잃는다)
 const cacheUrl = process.env.PEAKET_IDENTITY_REDIS_URL;
-const env = process.env.PEAKET_ENV ?? 'local';
+// 없거나 비면 운영으로 본다(위 RP 검사·플랫폼 설정과 같다). 로컬에서 Redis 없이 띄우려면 PEAKET_ENV=local을 준다
+const env = process.env.PEAKET_ENV || 'prod';
 if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTITY_REDIS_URL이 없다(세션·캐시 Redis, 비밀 관리에서 넣는다)');
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;
 // 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
@@ -130,7 +134,7 @@ const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).
 const adminAuthzHolder: { port?: AdminAuthzPort } = {};
 const adminAuthz: AdminAuthzPort = { getAdminAuthz: (q, o) => (adminAuthzHolder.port ? adminAuthzHolder.port.getAdminAuthz(q, o) : Promise.reject(new Error('관리 역할 판정이 아직 준비되지 않았다'))) };
 // 관리 경로(페퍼가 있을 때만 싣는다)가 없으면 판정 포트도 넘기지 않는다: 시작 확인이 관리 역할 처리기 없음을 그대로 본다(새 맥락 리뷰 2026-11-05)
-const service = await createService({ name: SERVICE, ...(adminPepper ? { adminAuthz } : {}), module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache) } : {}) } } : {}) }) });
+const service = await createService({ name: SERVICE, ...(adminPepper ? { adminAuthz } : {}), module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(contactRefRps ? { contactRefRps } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
 adminSignals.register(service.metrics.registry);
 for (const [dependency, settings] of breakerSettings) breakers.set(dependency, new CircuitBreaker({ service: SERVICE, dependency, registry: service.metrics.registry, logger: service.logger, ...settings }));

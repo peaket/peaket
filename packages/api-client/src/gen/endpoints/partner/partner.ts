@@ -33,7 +33,14 @@ import type {
   AdminLoginPasswordStep,
   AdminLoginSecondStep,
   AdminLoginStep,
+  AdminPasskey,
+  AdminPasskeyCreate,
+  AdminPasskeyList,
+  AdminPasskeyRegistration,
   AdminPasswordChangeCreate,
+  AdminReauthDone,
+  AdminReauthPasskeyChallenge,
+  AdminReauthPasskeyStep,
   AdminUnlockCreate,
   AdminUnlockLinkCreate,
   AttendeeExportPage,
@@ -72,6 +79,7 @@ import type {
   PartnerEventCreated,
   PartnerProductionCreate,
   PartnerProductionCreated,
+  PartnerReauthPasswordStep,
   PartnerSalesReport,
   PartnerTeamAccountPage,
   PayoutAccountChange,
@@ -814,6 +822,621 @@ export const useCreatePartnerAuthPasswordChange = <TError = ErrorType<ProblemRes
         TContext
       > => {
       return useMutation(getCreatePartnerAuthPasswordChangeMutationOptions(options), queryClient);
+    }
+    export type createPartnerAuthReauthenticationResponse200 = {
+  data: AdminReauthPasskeyChallenge | AdminReauthDone
+  status: 200
+}
+
+export type createPartnerAuthReauthenticationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerAuthReauthenticationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerAuthReauthenticationResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createPartnerAuthReauthenticationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerAuthReauthenticationResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createPartnerAuthReauthenticationResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerAuthReauthenticationResponse423 = {
+  data: ProblemResponse
+  status: 423
+}
+
+export type createPartnerAuthReauthenticationResponse429 = {
+  data: ProblemResponse
+  status: 429
+}
+
+export type createPartnerAuthReauthenticationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthReauthenticationResponseSuccess = (createPartnerAuthReauthenticationResponse200) & {
+  headers: Headers;
+};
+export type createPartnerAuthReauthenticationResponseError = (createPartnerAuthReauthenticationResponse400 | createPartnerAuthReauthenticationResponse401 | createPartnerAuthReauthenticationResponse403 | createPartnerAuthReauthenticationResponse409 | createPartnerAuthReauthenticationResponse410 | createPartnerAuthReauthenticationResponse422 | createPartnerAuthReauthenticationResponse423 | createPartnerAuthReauthenticationResponse429 | createPartnerAuthReauthenticationResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthReauthenticationUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/reauthentications`
+}
+
+/**
+ * FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 정산 계좌 변경·명단 내려받기·내 패스키 등록과 지우기 직전에 부른다. 1단계(PartnerReauthPasswordStep)는 비밀번호와 인증 앱 코드(TOTP)를 확인하고, 틀리면 로그인 실패처럼 센다(docs/security/auth-controls.md §3.1). withPasskey가 거짓이면 바로 재인증 토큰을 준다(factors password·totp). 참이면 패스키 확인 옵션과 reauthStep을 주고, 2단계(AdminReauthPasskeyStep)에서 그 계정 패스키의 서명이 맞으면 factors password·totp·passkey 토큰을 준다. 서명은 사용자 확인 표시가 있어야 하고, RP ID는 partner.peaket.example, 출처는 파트너 콘솔 출처 하나다. 토큰(typ reauth+jwt, 5분 한 번, 그 세션 sid와 작업 묶음 act에 묶임)은 본문에 있고 화면이 X-Reauth-Token으로 보낸다(guidelines §7). 그 작업에 패스키가 필요한지는 받는 서비스가 본다(docs/security/authz-matrix.md §6). Cache-Control: no-store. 쿠키로 인증하는 쓰기라 gw-partner가 Origin을 확인한다. 정본은 docs/features/identity.md §6 '관리 계정 패스키의 첫 구현'
+ * @summary 파트너 관리 계정 재인증(비밀번호·인증 앱 코드, 요청하면 패스키 확인까지) → 재인증 토큰
+ */
+export const createPartnerAuthReauthentication = async (partnerReauthPasswordStepAdminReauthPasskeyStep: PartnerReauthPasswordStep | AdminReauthPasskeyStep, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthReauthenticationResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerAuthReauthenticationResponseSuccess>(getCreatePartnerAuthReauthenticationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerReauthPasswordStepAdminReauthPasskeyStep)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthReauthenticationMutationKey = () => ['createPartnerAuthReauthentication'] as const;
+
+export const getCreatePartnerAuthReauthenticationMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthReauthentication>>, TError,CreatePartnerAuthReauthenticationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthReauthentication>>, TError,CreatePartnerAuthReauthenticationMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerAuthReauthenticationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthReauthentication>>, CreatePartnerAuthReauthenticationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerAuthReauthentication(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthReauthenticationMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthReauthentication>>>
+    export type CreatePartnerAuthReauthenticationMutationBody = BodyType<PartnerReauthPasswordStep | AdminReauthPasskeyStep>
+    export type CreatePartnerAuthReauthenticationMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthReauthenticationMutationVariables = {data: BodyType<PartnerReauthPasswordStep | AdminReauthPasskeyStep>}
+
+    /**
+ * @summary 파트너 관리 계정 재인증(비밀번호·인증 앱 코드, 요청하면 패스키 확인까지) → 재인증 토큰
+ */
+export const useCreatePartnerAuthReauthentication = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthReauthentication>>, TError,CreatePartnerAuthReauthenticationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthReauthentication>>,
+        TError,
+        CreatePartnerAuthReauthenticationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthReauthenticationMutationOptions(options), queryClient);
+    }
+    export type createPartnerAuthPasskeyRegistrationResponse201 = {
+  data: AdminPasskeyRegistration
+  status: 201
+}
+
+export type createPartnerAuthPasskeyRegistrationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerAuthPasskeyRegistrationResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createPartnerAuthPasskeyRegistrationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerAuthPasskeyRegistrationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthPasskeyRegistrationResponseSuccess = (createPartnerAuthPasskeyRegistrationResponse201) & {
+  headers: Headers;
+};
+export type createPartnerAuthPasskeyRegistrationResponseError = (createPartnerAuthPasskeyRegistrationResponse401 | createPartnerAuthPasskeyRegistrationResponse403 | createPartnerAuthPasskeyRegistrationResponse409 | createPartnerAuthPasskeyRegistrationResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthPasskeyRegistrationUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/passkey-registrations`
+}
+
+/**
+ * FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 작업 묶음 ACCOUNT_SECURITY의 재인증 토큰을 X-Reauth-Token으로 받는다. factors에 password·totp가 있어야 하고, 이미 패스키가 있으면 passkey도 있어야 한다(비밀번호·TOTP만 가로챈 사람이 자기 패스키를 더하지 못하게). 토큰은 여기서 한 번 쓴다. 화면은 응답의 publicKey를 navigator.credentials.create()에 넘기고, 결과를 POST /v1/partner/auth/passkeys로 보낸다. registrationId와 챌린지(32바이트)는 이 세션에서 5분 [가정] 한 번이다. RP ID는 partner.peaket.example이고 사용자 확인 필수다. Cache-Control: no-store. gw-partner가 Origin을 확인한다
+ * @summary 내 패스키 등록 시작(등록 옵션, 재인증 토큰 필요)
+ */
+export const createPartnerAuthPasskeyRegistration = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthPasskeyRegistrationResponseSuccess> => {
+
+  return orvalFetch<createPartnerAuthPasskeyRegistrationResponseSuccess>(getCreatePartnerAuthPasskeyRegistrationUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthPasskeyRegistrationMutationKey = () => ['createPartnerAuthPasskeyRegistration'] as const;
+
+export const getCreatePartnerAuthPasskeyRegistrationMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthPasskeyRegistration>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthPasskeyRegistration>>, TError,void, TContext> => {
+
+const mutationKey = getCreatePartnerAuthPasskeyRegistrationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthPasskeyRegistration>>, void> = () => {
+
+
+          return  createPartnerAuthPasskeyRegistration(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthPasskeyRegistrationMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthPasskeyRegistration>>>
+
+    export type CreatePartnerAuthPasskeyRegistrationMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
+
+
+    /**
+ * @summary 내 패스키 등록 시작(등록 옵션, 재인증 토큰 필요)
+ */
+export const useCreatePartnerAuthPasskeyRegistration = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthPasskeyRegistration>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthPasskeyRegistration>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthPasskeyRegistrationMutationOptions(options), queryClient);
+    }
+    export type getPartnerAuthPasskeysResponse200 = {
+  data: AdminPasskeyList
+  status: 200
+}
+
+export type getPartnerAuthPasskeysResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getPartnerAuthPasskeysResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getPartnerAuthPasskeysResponseSuccess = (getPartnerAuthPasskeysResponse200) & {
+  headers: Headers;
+};
+export type getPartnerAuthPasskeysResponseError = (getPartnerAuthPasskeysResponse401 | getPartnerAuthPasskeysResponse403) & {
+  headers: Headers;
+};
+
+export const getGetPartnerAuthPasskeysUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/passkeys`
+}
+
+/**
+ * FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 내 계정의 패스키를 만든 차례로 준다(10개 [가정]까지라 페이지를 나누지 않는다). 공개키와 자격 ID 원문은 싣지 않는다. 화면은 docs/design/d5 SCR-020 '내 계정'의 패스키 줄이다. Cache-Control: no-store
+ * @summary 내 패스키 목록
+ */
+export const getPartnerAuthPasskeys = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerAuthPasskeysResponseSuccess> => {
+
+  return orvalFetch<getPartnerAuthPasskeysResponseSuccess>(getGetPartnerAuthPasskeysUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPartnerAuthPasskeysQueryKey = () => {
+    return [
+    `/v1/partner/auth/passkeys`
+    ] as const;
+    }
+
+
+export const getGetPartnerAuthPasskeysQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerAuthPasskeys>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthPasskeys>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPartnerAuthPasskeysQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPartnerAuthPasskeys>>> = ({ signal }) => getPartnerAuthPasskeys({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthPasskeys>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPartnerAuthPasskeysQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerAuthPasskeys>>>
+export type GetPartnerAuthPasskeysQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetPartnerAuthPasskeys<TData = Awaited<ReturnType<typeof getPartnerAuthPasskeys>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthPasskeys>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerAuthPasskeys>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerAuthPasskeys>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerAuthPasskeys<TData = Awaited<ReturnType<typeof getPartnerAuthPasskeys>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthPasskeys>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerAuthPasskeys>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerAuthPasskeys>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerAuthPasskeys<TData = Awaited<ReturnType<typeof getPartnerAuthPasskeys>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthPasskeys>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 패스키 목록
+ */
+
+export function useGetPartnerAuthPasskeys<TData = Awaited<ReturnType<typeof getPartnerAuthPasskeys>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthPasskeys>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPartnerAuthPasskeysQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createPartnerAuthPasskeyResponse201 = {
+  data: AdminPasskey
+  status: 201
+}
+
+export type createPartnerAuthPasskeyResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerAuthPasskeyResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerAuthPasskeyResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createPartnerAuthPasskeyResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerAuthPasskeyResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createPartnerAuthPasskeyResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerAuthPasskeyResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthPasskeyResponseSuccess = (createPartnerAuthPasskeyResponse201) & {
+  headers: Headers;
+};
+export type createPartnerAuthPasskeyResponseError = (createPartnerAuthPasskeyResponse400 | createPartnerAuthPasskeyResponse401 | createPartnerAuthPasskeyResponse403 | createPartnerAuthPasskeyResponse409 | createPartnerAuthPasskeyResponse410 | createPartnerAuthPasskeyResponse422 | createPartnerAuthPasskeyResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthPasskeyUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/passkeys`
+}
+
+/**
+ * FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 등록 시작(POST /v1/partner/auth/passkey-registrations)의 registrationId와 navigator.credentials.create()의 결과를 받는다. 출처(파트너 콘솔), RP ID(partner.peaket.example), 챌린지, 사용자 확인 표시, 서명 방식(ES256·EdDSA·RS256)을 @simplewebauthn/server로 확인한다. 증명(attestation)은 받지 않는다(none). 계정 행을 잠근 트랜잭션에서 10개 [가정] 상한을 다시 보고 넣으며, 계정 주인 업무 이메일로 등록 알림(PASSKEY_ADDED)을 보낸다. Cache-Control: no-store. gw-partner가 Origin을 확인한다
+ * @summary 내 패스키 등록 마치기(브라우저가 만든 자격 확인)
+ */
+export const createPartnerAuthPasskey = async (adminPasskeyCreate: AdminPasskeyCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthPasskeyResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerAuthPasskeyResponseSuccess>(getCreatePartnerAuthPasskeyUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminPasskeyCreate)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthPasskeyMutationKey = () => ['createPartnerAuthPasskey'] as const;
+
+export const getCreatePartnerAuthPasskeyMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthPasskey>>, TError,CreatePartnerAuthPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthPasskey>>, TError,CreatePartnerAuthPasskeyMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerAuthPasskeyMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthPasskey>>, CreatePartnerAuthPasskeyMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerAuthPasskey(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthPasskeyMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthPasskey>>>
+    export type CreatePartnerAuthPasskeyMutationBody = BodyType<AdminPasskeyCreate>
+    export type CreatePartnerAuthPasskeyMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthPasskeyMutationVariables = {data: BodyType<AdminPasskeyCreate>}
+
+    /**
+ * @summary 내 패스키 등록 마치기(브라우저가 만든 자격 확인)
+ */
+export const useCreatePartnerAuthPasskey = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthPasskey>>, TError,CreatePartnerAuthPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthPasskey>>,
+        TError,
+        CreatePartnerAuthPasskeyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthPasskeyMutationOptions(options), queryClient);
+    }
+    export type deletePartnerAuthPasskeyResponse204 = {
+  data: void
+  status: 204
+}
+
+export type deletePartnerAuthPasskeyResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type deletePartnerAuthPasskeyResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type deletePartnerAuthPasskeyResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type deletePartnerAuthPasskeyResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type deletePartnerAuthPasskeyResponseSuccess = (deletePartnerAuthPasskeyResponse204) & {
+  headers: Headers;
+};
+export type deletePartnerAuthPasskeyResponseError = (deletePartnerAuthPasskeyResponse401 | deletePartnerAuthPasskeyResponse403 | deletePartnerAuthPasskeyResponse404 | deletePartnerAuthPasskeyResponse409) & {
+  headers: Headers;
+};
+
+export const getDeletePartnerAuthPasskeyUrl = (passkeyId: string,) => {
+
+
+
+
+  return `/v1/partner/auth/passkeys/${encodeURIComponent(String(passkeyId))}`
+}
+
+/**
+ * FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 작업 묶음 ACCOUNT_SECURITY의 재인증 토큰을 받는다. 패스키가 있는 계정이라 factors에 passkey가 있어야 한다. 다른 패스키를 잃었을 때 남은 패스키로 재인증하고 잃은 것을 지우는 길이다(ASVS 6.4.4). partner_admin은 마지막 하나를 지우지 못한다(docs/design/d5 SCR-020 '패스키 줄'). 지우면 계정 주인 업무 이메일로 알린다(PASSKEY_REMOVED). gw-partner가 Origin을 확인한다
+ * @summary 내 패스키 지우기(재인증 토큰 필요, 필수 역할의 마지막 하나는 409)
+ */
+export const deletePartnerAuthPasskey = async (passkeyId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<deletePartnerAuthPasskeyResponseSuccess> => {
+
+  return orvalFetch<deletePartnerAuthPasskeyResponseSuccess>(getDeletePartnerAuthPasskeyUrl(passkeyId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeletePartnerAuthPasskeyMutationKey = () => ['deletePartnerAuthPasskey'] as const;
+
+export const getDeletePartnerAuthPasskeyMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePartnerAuthPasskey>>, TError,DeletePartnerAuthPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deletePartnerAuthPasskey>>, TError,DeletePartnerAuthPasskeyMutationVariables, TContext> => {
+
+const mutationKey = getDeletePartnerAuthPasskeyMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deletePartnerAuthPasskey>>, DeletePartnerAuthPasskeyMutationVariables> = (props) => {
+          const {passkeyId} = props ?? {};
+
+          return  deletePartnerAuthPasskey(passkeyId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeletePartnerAuthPasskeyMutationResult = NonNullable<Awaited<ReturnType<typeof deletePartnerAuthPasskey>>>
+
+    export type DeletePartnerAuthPasskeyMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type DeletePartnerAuthPasskeyMutationVariables = {passkeyId: string}
+
+    /**
+ * @summary 내 패스키 지우기(재인증 토큰 필요, 필수 역할의 마지막 하나는 409)
+ */
+export const useDeletePartnerAuthPasskey = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePartnerAuthPasskey>>, TError,DeletePartnerAuthPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deletePartnerAuthPasskey>>,
+        TError,
+        DeletePartnerAuthPasskeyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeletePartnerAuthPasskeyMutationOptions(options), queryClient);
     }
     export type listPartnerTeamAccountsResponse200 = {
   data: PartnerTeamAccountPage

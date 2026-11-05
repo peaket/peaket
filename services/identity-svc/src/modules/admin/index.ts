@@ -27,3 +27,6 @@ export { adminAuthzHandlers } from './inbound/admin-authz.grpc.js';
 export { adminAccountHandlers, adminDesignationHandlers } from './inbound/admin-account.grpc.js';
 export { ManageAdminAccounts } from './application/manage-admin-accounts.js';
 export { DrizzleAdminAccountStore as AdminAccountStoreForMaintenance } from './adapters/db/drizzle-admin-account-store.js';
+export { relyingPartiesOf, type RelyingParties } from './domain/passkey.js';
+export { RedisPasskeyChallenges } from './adapters/redis-passkey-challenges.js';
+export { JoseAdminReauthVerifier } from './adapters/jose-admin-reauth-verifier.js';

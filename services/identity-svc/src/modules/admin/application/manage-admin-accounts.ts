@@ -119,7 +119,7 @@ export function viewOf(a: ManagedAccount, now: number): AdminAccountView {
     lockReason: lock === 'NONE' ? null : a.lockReason,
     lockedUntil: lock === 'TIMED' ? a.lockedUntil : null,
     totpEnrolled: !removed && a.totpEnrolled,
-    passkeyCount: 0,
+    passkeyCount: removed ? 0 : a.passkeyCount,
     designations: removed ? [] : a.designations,
     inviteExpiresAt: status === 'INVITED' ? a.inviteExpiresAt : null,
     lastLoginAt: removed ? null : a.lastLoginAt,

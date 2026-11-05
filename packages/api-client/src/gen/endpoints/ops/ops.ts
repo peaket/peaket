@@ -39,8 +39,15 @@ import type {
   AdminLoginPasswordStep,
   AdminLoginSecondStep,
   AdminLoginStep,
+  AdminPasskey,
+  AdminPasskeyCreate,
+  AdminPasskeyList,
+  AdminPasskeyRegistration,
   AdminPasswordChangeCreate,
   AdminPermissionChangePage,
+  AdminReauthDone,
+  AdminReauthPasskeyChallenge,
+  AdminReauthPasskeyStep,
   AdminReinvitationCreate,
   AdminRemovalCreate,
   AdminRoleChange,
@@ -130,6 +137,7 @@ import type {
   ListOpsScannerDevices200,
   ListOpsScannerDevicesParams,
   ListOpsSettlementsParams,
+  OpsReauthPasswordStep,
   PayoutBatch,
   ProblemResponse,
   PutOpsArtistAliasesBody,
@@ -984,6 +992,621 @@ export const useCreateOpsAuthPasswordChange = <TError = ErrorType<ProblemRespons
         TContext
       > => {
       return useMutation(getCreateOpsAuthPasswordChangeMutationOptions(options), queryClient);
+    }
+    export type createOpsAuthReauthenticationResponse200 = {
+  data: AdminReauthPasskeyChallenge | AdminReauthDone
+  status: 200
+}
+
+export type createOpsAuthReauthenticationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsAuthReauthenticationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsAuthReauthenticationResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsAuthReauthenticationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsAuthReauthenticationResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsAuthReauthenticationResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsAuthReauthenticationResponse423 = {
+  data: ProblemResponse
+  status: 423
+}
+
+export type createOpsAuthReauthenticationResponse429 = {
+  data: ProblemResponse
+  status: 429
+}
+
+export type createOpsAuthReauthenticationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createOpsAuthReauthenticationResponseSuccess = (createOpsAuthReauthenticationResponse200) & {
+  headers: Headers;
+};
+export type createOpsAuthReauthenticationResponseError = (createOpsAuthReauthenticationResponse400 | createOpsAuthReauthenticationResponse401 | createOpsAuthReauthenticationResponse403 | createOpsAuthReauthenticationResponse409 | createOpsAuthReauthenticationResponse410 | createOpsAuthReauthenticationResponse422 | createOpsAuthReauthenticationResponse423 | createOpsAuthReauthenticationResponse429 | createOpsAuthReauthenticationResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuthReauthenticationUrl = () => {
+
+
+
+
+  return `/v1/ops/auth/reauthentications`
+}
+
+/**
+ * FR-028, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 위험 운영 명령과 그 승인, 승인 업무, 권한·역할 변경, 수사기관 자료, 내 패스키 등록과 지우기 직전에 부른다. 파트너 재인증(POST /v1/partner/auth/reauthentications)과 같은 두 단계이고, 1단계 본문은 OpsReauthPasswordStep이다. 패스키 서명의 RP ID는 console.peaket.example, 출처는 관제 콘솔 출처 하나다. 그 작업에 패스키가 필요한지는 받는 서비스가 본다(commander가 하는 승인은 패스키까지, cs_lead는 비밀번호·인증 앱 코드까지, docs/security/authz-matrix.md §6). Cache-Control: no-store. gw-ops가 Origin을 확인한다. 정본은 docs/features/identity.md §6 '관리 계정 패스키의 첫 구현'
+ * @summary 운영자·CS 관리 계정 재인증(비밀번호·인증 앱 코드, 요청하면 패스키 확인까지) → 재인증 토큰
+ */
+export const createOpsAuthReauthentication = async (opsReauthPasswordStepAdminReauthPasskeyStep: OpsReauthPasswordStep | AdminReauthPasskeyStep, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuthReauthenticationResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsAuthReauthenticationResponseSuccess>(getCreateOpsAuthReauthenticationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(opsReauthPasswordStepAdminReauthPasskeyStep)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuthReauthenticationMutationKey = () => ['createOpsAuthReauthentication'] as const;
+
+export const getCreateOpsAuthReauthenticationMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthReauthentication>>, TError,CreateOpsAuthReauthenticationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthReauthentication>>, TError,CreateOpsAuthReauthenticationMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsAuthReauthenticationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuthReauthentication>>, CreateOpsAuthReauthenticationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsAuthReauthentication(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuthReauthenticationMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuthReauthentication>>>
+    export type CreateOpsAuthReauthenticationMutationBody = BodyType<OpsReauthPasswordStep | AdminReauthPasskeyStep>
+    export type CreateOpsAuthReauthenticationMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
+    export type CreateOpsAuthReauthenticationMutationVariables = {data: BodyType<OpsReauthPasswordStep | AdminReauthPasskeyStep>}
+
+    /**
+ * @summary 운영자·CS 관리 계정 재인증(비밀번호·인증 앱 코드, 요청하면 패스키 확인까지) → 재인증 토큰
+ */
+export const useCreateOpsAuthReauthentication = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthReauthentication>>, TError,CreateOpsAuthReauthenticationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuthReauthentication>>,
+        TError,
+        CreateOpsAuthReauthenticationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuthReauthenticationMutationOptions(options), queryClient);
+    }
+    export type createOpsAuthPasskeyRegistrationResponse201 = {
+  data: AdminPasskeyRegistration
+  status: 201
+}
+
+export type createOpsAuthPasskeyRegistrationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsAuthPasskeyRegistrationResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsAuthPasskeyRegistrationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsAuthPasskeyRegistrationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createOpsAuthPasskeyRegistrationResponseSuccess = (createOpsAuthPasskeyRegistrationResponse201) & {
+  headers: Headers;
+};
+export type createOpsAuthPasskeyRegistrationResponseError = (createOpsAuthPasskeyRegistrationResponse401 | createOpsAuthPasskeyRegistrationResponse403 | createOpsAuthPasskeyRegistrationResponse409 | createOpsAuthPasskeyRegistrationResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuthPasskeyRegistrationUrl = () => {
+
+
+
+
+  return `/v1/ops/auth/passkey-registrations`
+}
+
+/**
+ * FR-028, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 파트너 등록 시작(POST /v1/partner/auth/passkey-registrations)과 같은 규칙이다. RP ID는 console.peaket.example이다. 결과는 POST /v1/ops/auth/passkeys로 보낸다. Cache-Control: no-store. gw-ops가 Origin을 확인한다
+ * @summary 내 패스키 등록 시작(등록 옵션, 재인증 토큰 필요)
+ */
+export const createOpsAuthPasskeyRegistration = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuthPasskeyRegistrationResponseSuccess> => {
+
+  return orvalFetch<createOpsAuthPasskeyRegistrationResponseSuccess>(getCreateOpsAuthPasskeyRegistrationUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuthPasskeyRegistrationMutationKey = () => ['createOpsAuthPasskeyRegistration'] as const;
+
+export const getCreateOpsAuthPasskeyRegistrationMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthPasskeyRegistration>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthPasskeyRegistration>>, TError,void, TContext> => {
+
+const mutationKey = getCreateOpsAuthPasskeyRegistrationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuthPasskeyRegistration>>, void> = () => {
+
+
+          return  createOpsAuthPasskeyRegistration(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuthPasskeyRegistrationMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuthPasskeyRegistration>>>
+
+    export type CreateOpsAuthPasskeyRegistrationMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
+
+
+    /**
+ * @summary 내 패스키 등록 시작(등록 옵션, 재인증 토큰 필요)
+ */
+export const useCreateOpsAuthPasskeyRegistration = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthPasskeyRegistration>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuthPasskeyRegistration>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuthPasskeyRegistrationMutationOptions(options), queryClient);
+    }
+    export type getOpsAuthPasskeysResponse200 = {
+  data: AdminPasskeyList
+  status: 200
+}
+
+export type getOpsAuthPasskeysResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getOpsAuthPasskeysResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsAuthPasskeysResponseSuccess = (getOpsAuthPasskeysResponse200) & {
+  headers: Headers;
+};
+export type getOpsAuthPasskeysResponseError = (getOpsAuthPasskeysResponse401 | getOpsAuthPasskeysResponse403) & {
+  headers: Headers;
+};
+
+export const getGetOpsAuthPasskeysUrl = () => {
+
+
+
+
+  return `/v1/ops/auth/passkeys`
+}
+
+/**
+ * FR-028, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 파트너 목록(GET /v1/partner/auth/passkeys)과 같다. 화면은 docs/design/d5 SCR-028 `/me`의 패스키 줄이다. Cache-Control: no-store
+ * @summary 내 패스키 목록
+ */
+export const getOpsAuthPasskeys = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsAuthPasskeysResponseSuccess> => {
+
+  return orvalFetch<getOpsAuthPasskeysResponseSuccess>(getGetOpsAuthPasskeysUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsAuthPasskeysQueryKey = () => {
+    return [
+    `/v1/ops/auth/passkeys`
+    ] as const;
+    }
+
+
+export const getGetOpsAuthPasskeysQueryOptions = <TData = Awaited<ReturnType<typeof getOpsAuthPasskeys>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuthPasskeys>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsAuthPasskeysQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsAuthPasskeys>>> = ({ signal }) => getOpsAuthPasskeys({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsAuthPasskeys>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsAuthPasskeysQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsAuthPasskeys>>>
+export type GetOpsAuthPasskeysQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetOpsAuthPasskeys<TData = Awaited<ReturnType<typeof getOpsAuthPasskeys>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuthPasskeys>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsAuthPasskeys>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsAuthPasskeys>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsAuthPasskeys<TData = Awaited<ReturnType<typeof getOpsAuthPasskeys>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuthPasskeys>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsAuthPasskeys>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsAuthPasskeys>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsAuthPasskeys<TData = Awaited<ReturnType<typeof getOpsAuthPasskeys>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuthPasskeys>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 패스키 목록
+ */
+
+export function useGetOpsAuthPasskeys<TData = Awaited<ReturnType<typeof getOpsAuthPasskeys>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsAuthPasskeys>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsAuthPasskeysQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsAuthPasskeyResponse201 = {
+  data: AdminPasskey
+  status: 201
+}
+
+export type createOpsAuthPasskeyResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsAuthPasskeyResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsAuthPasskeyResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsAuthPasskeyResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsAuthPasskeyResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsAuthPasskeyResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsAuthPasskeyResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createOpsAuthPasskeyResponseSuccess = (createOpsAuthPasskeyResponse201) & {
+  headers: Headers;
+};
+export type createOpsAuthPasskeyResponseError = (createOpsAuthPasskeyResponse400 | createOpsAuthPasskeyResponse401 | createOpsAuthPasskeyResponse403 | createOpsAuthPasskeyResponse409 | createOpsAuthPasskeyResponse410 | createOpsAuthPasskeyResponse422 | createOpsAuthPasskeyResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuthPasskeyUrl = () => {
+
+
+
+
+  return `/v1/ops/auth/passkeys`
+}
+
+/**
+ * FR-028, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 파트너 등록 마치기(POST /v1/partner/auth/passkeys)와 같은 규칙이다. 출처는 관제 콘솔, RP ID는 console.peaket.example이다. Cache-Control: no-store. gw-ops가 Origin을 확인한다
+ * @summary 내 패스키 등록 마치기(브라우저가 만든 자격 확인)
+ */
+export const createOpsAuthPasskey = async (adminPasskeyCreate: AdminPasskeyCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuthPasskeyResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsAuthPasskeyResponseSuccess>(getCreateOpsAuthPasskeyUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminPasskeyCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuthPasskeyMutationKey = () => ['createOpsAuthPasskey'] as const;
+
+export const getCreateOpsAuthPasskeyMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthPasskey>>, TError,CreateOpsAuthPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthPasskey>>, TError,CreateOpsAuthPasskeyMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsAuthPasskeyMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuthPasskey>>, CreateOpsAuthPasskeyMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsAuthPasskey(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuthPasskeyMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuthPasskey>>>
+    export type CreateOpsAuthPasskeyMutationBody = BodyType<AdminPasskeyCreate>
+    export type CreateOpsAuthPasskeyMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
+    export type CreateOpsAuthPasskeyMutationVariables = {data: BodyType<AdminPasskeyCreate>}
+
+    /**
+ * @summary 내 패스키 등록 마치기(브라우저가 만든 자격 확인)
+ */
+export const useCreateOpsAuthPasskey = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthPasskey>>, TError,CreateOpsAuthPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuthPasskey>>,
+        TError,
+        CreateOpsAuthPasskeyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuthPasskeyMutationOptions(options), queryClient);
+    }
+    export type deleteOpsAuthPasskeyResponse204 = {
+  data: void
+  status: 204
+}
+
+export type deleteOpsAuthPasskeyResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type deleteOpsAuthPasskeyResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type deleteOpsAuthPasskeyResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type deleteOpsAuthPasskeyResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type deleteOpsAuthPasskeyResponseSuccess = (deleteOpsAuthPasskeyResponse204) & {
+  headers: Headers;
+};
+export type deleteOpsAuthPasskeyResponseError = (deleteOpsAuthPasskeyResponse401 | deleteOpsAuthPasskeyResponse403 | deleteOpsAuthPasskeyResponse404 | deleteOpsAuthPasskeyResponse409) & {
+  headers: Headers;
+};
+
+export const getDeleteOpsAuthPasskeyUrl = (passkeyId: string,) => {
+
+
+
+
+  return `/v1/ops/auth/passkeys/${encodeURIComponent(String(passkeyId))}`
+}
+
+/**
+ * FR-028, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 파트너 지우기(DELETE /v1/partner/auth/passkeys/{passkeyId})와 같은 규칙이다. operator·commander는 마지막 하나를 지우지 못한다(docs/design/d5 SCR-028 '패스키 줄'). gw-ops가 Origin을 확인한다
+ * @summary 내 패스키 지우기(재인증 토큰 필요, 필수 역할의 마지막 하나는 409)
+ */
+export const deleteOpsAuthPasskey = async (passkeyId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<deleteOpsAuthPasskeyResponseSuccess> => {
+
+  return orvalFetch<deleteOpsAuthPasskeyResponseSuccess>(getDeleteOpsAuthPasskeyUrl(passkeyId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteOpsAuthPasskeyMutationKey = () => ['deleteOpsAuthPasskey'] as const;
+
+export const getDeleteOpsAuthPasskeyMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteOpsAuthPasskey>>, TError,DeleteOpsAuthPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteOpsAuthPasskey>>, TError,DeleteOpsAuthPasskeyMutationVariables, TContext> => {
+
+const mutationKey = getDeleteOpsAuthPasskeyMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteOpsAuthPasskey>>, DeleteOpsAuthPasskeyMutationVariables> = (props) => {
+          const {passkeyId} = props ?? {};
+
+          return  deleteOpsAuthPasskey(passkeyId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteOpsAuthPasskeyMutationResult = NonNullable<Awaited<ReturnType<typeof deleteOpsAuthPasskey>>>
+
+    export type DeleteOpsAuthPasskeyMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type DeleteOpsAuthPasskeyMutationVariables = {passkeyId: string}
+
+    /**
+ * @summary 내 패스키 지우기(재인증 토큰 필요, 필수 역할의 마지막 하나는 409)
+ */
+export const useDeleteOpsAuthPasskey = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteOpsAuthPasskey>>, TError,DeleteOpsAuthPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteOpsAuthPasskey>>,
+        TError,
+        DeleteOpsAuthPasskeyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteOpsAuthPasskeyMutationOptions(options), queryClient);
     }
     export type listOpsAdminAccountsResponse200 = {
   data: AdminAccountPage

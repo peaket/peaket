@@ -6,8 +6,9 @@ import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, type DbTran
 import { and, asc, eq, gt, gte, inArray, isNull, lt, lte, ne, notInArray, or } from 'drizzle-orm';
 import { type AccountLoginState, FRESH_LOGIN_STATE, type LockKind, type LockReason, type NoticeKind } from '../../domain/login-rules.js';
 import { sql as rawSql } from 'drizzle-orm';
-import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
+import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminPasskeyRow, AdminPasskeyStore, AdminReauthRecord, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
 import { DESIGNATION_KINDS, type SecondStepUse } from '../../domain/ports.js';
+import type { ReauthAct, ReauthFactor } from '../../domain/passkey.js';
 
 /** finishSecondStep의 되돌리기(코드나 단계를 그 사이 다른 요청이 썼다) */
 class SecondStepAbort extends Error {
@@ -15,7 +16,7 @@ class SecondStepAbort extends Error {
     super(kind);
   }
 }
-import { adminAccount, adminAccountRequest, adminDesignation, adminKnownSource, adminLoginStep, adminRecoveryCode, adminRefreshTokenHash, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
+import { adminAccount, adminAccountRequest, adminDesignation, adminKnownSource, adminLoginStep, adminPasskey, adminReauth, adminRecoveryCode, adminRefreshTokenHash, adminSecurityNotice, adminSession, adminUnlockLink } from './schema.js';
 
 type AccountRow = typeof adminAccount.$inferSelect;
 /** 알림을 보내지 못했을 때 다음 시도까지(1분부터 두 배씩, 최대 1시간 [가정]) */
@@ -51,7 +52,7 @@ function stateColumns(s: AccountLoginState) {
 }
 
 @Injectable()
-export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore {
+export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore, AdminPasskeyStore {
   constructor(
     @Inject(DATABASE) private readonly database: Database,
     /** Outbox 행 ID(UUIDv7)의 시계 */
@@ -462,8 +463,117 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
     });
   }
 
+  // ── 패스키와 재인증 기록(BOT-122) ──
+  #passkeyOf(r: typeof adminPasskey.$inferSelect): AdminPasskeyRow {
+    return {
+      id: r.id,
+      accountId: r.adminAccountId,
+      credentialId: Buffer.from(r.credentialId),
+      publicKey: Buffer.from(r.publicKey),
+      signCount: r.signCount,
+      transports: [...r.transports],
+      deviceType: r.deviceType as AdminPasskeyRow['deviceType'],
+      backedUp: r.backedUp,
+      aaguid: r.aaguid,
+      name: r.name,
+      createdAt: r.createdAt.getTime(),
+      lastUsedAt: ms(r.lastUsedAt),
+    };
+  }
+
+  async listPasskeys(accountId: string): Promise<AdminPasskeyRow[]> {
+    const rows = await this.database.db.select().from(adminPasskey).where(eq(adminPasskey.adminAccountId, accountId)).orderBy(asc(adminPasskey.createdAt), asc(adminPasskey.id));
+    return rows.map((r) => this.#passkeyOf(r));
+  }
+
+  async findPasskeyByCredential(credentialId: Buffer): Promise<AdminPasskeyRow | null> {
+    const [r] = await this.database.db.select().from(adminPasskey).where(eq(adminPasskey.credentialId, credentialId));
+    return r ? this.#passkeyOf(r) : null;
+  }
+
+  async addPasskey(row: AdminPasskeyRow, limit: number, now: number): Promise<'ADDED' | 'LIMIT' | 'EXISTS' | 'NOT_ACTIVE'> {
+    return this.database.transaction(async (tx) => {
+      // 계정 행을 잠그고 센다: 동시에 온 등록이 상한을 함께 넘기지 못한다
+      const [acc] = await tx.select({ status: adminAccount.status }).from(adminAccount).where(eq(adminAccount.id, row.accountId)).for('update');
+      if (!acc || acc.status !== 'ACTIVE') return 'NOT_ACTIVE';
+      const [n] = await tx.select({ n: rawSql<number>`count(*)::int` }).from(adminPasskey).where(eq(adminPasskey.adminAccountId, row.accountId));
+      if ((n?.n ?? 0) >= limit) return 'LIMIT';
+      // 자격 ID 고유 색인으로 가린다(다른 계정의 것도, 동시에 와도 하나만)
+      const done = await tx
+        .insert(adminPasskey)
+        .values({
+          id: row.id,
+          adminAccountId: row.accountId,
+          credentialId: row.credentialId,
+          publicKey: row.publicKey,
+          signCount: row.signCount,
+          transports: row.transports,
+          deviceType: row.deviceType,
+          backedUp: row.backedUp,
+          aaguid: row.aaguid,
+          name: row.name,
+          createdAt: new Date(row.createdAt),
+        })
+        .onConflictDoNothing({ target: adminPasskey.credentialId })
+        .returning({ id: adminPasskey.id });
+      if (done.length === 0) return 'EXISTS';
+      await tx.insert(adminSecurityNotice).values({ id: randomUUID(), adminAccountId: row.accountId, kind: 'PASSKEY_ADDED', createdAt: new Date(now) });
+      return 'ADDED';
+    });
+  }
+
+  async removePasskey(accountId: string, passkeyId: string, keepOne: readonly AdminRole[], now: number): Promise<'REMOVED' | 'NOT_FOUND' | 'LAST'> {
+    return this.database.transaction(async (tx) => {
+      // 계정 행을 잠근 뒤 '마지막 하나'를 센다(동시에 둘을 지워 0개가 되지 않게)
+      const [acc] = await tx.select({ role: adminAccount.role }).from(adminAccount).where(eq(adminAccount.id, accountId)).for('update');
+      const mine = await tx.select({ id: adminPasskey.id }).from(adminPasskey).where(eq(adminPasskey.adminAccountId, accountId));
+      if (!acc || !mine.some((p) => p.id === passkeyId)) return 'NOT_FOUND';
+      if (keepOne.includes(acc.role as AdminRole) && mine.length <= 1) return 'LAST';
+      await tx.delete(adminPasskey).where(and(eq(adminPasskey.id, passkeyId), eq(adminPasskey.adminAccountId, accountId)));
+      await tx.insert(adminSecurityNotice).values({ id: randomUUID(), adminAccountId: accountId, kind: 'PASSKEY_REMOVED', createdAt: new Date(now) });
+      return 'REMOVED';
+    });
+  }
+
+  async recordPasskeyUse(id: string, expected: number, next: number, backedUp: boolean, at: number): Promise<boolean> {
+    const done = await this.database.db
+      .update(adminPasskey)
+      .set({ signCount: next, backedUp, lastUsedAt: new Date(at) })
+      .where(and(eq(adminPasskey.id, id), eq(adminPasskey.signCount, expected)))
+      .returning({ id: adminPasskey.id });
+    return done.length > 0;
+  }
+
+  async recordReauth(r: AdminReauthRecord): Promise<void> {
+    await this.database.db.insert(adminReauth).values({
+      jti: r.jti,
+      adminAccountId: r.accountId,
+      adminSessionId: r.sessionId,
+      aud: r.aud,
+      act: r.act,
+      factors: [...r.factors],
+      passkeyId: r.passkeyId,
+      issuedAt: new Date(r.issuedAt),
+      expiresAt: new Date(r.expiresAt),
+    });
+  }
+
+  async useReauth(jti: string, accountId: string, sessionId: string, act: ReauthAct, now: number): Promise<ReauthFactor[] | null> {
+    const [r] = await this.database.db
+      .update(adminReauth)
+      .set({ usedAt: new Date(now) })
+      .where(and(eq(adminReauth.jti, jti), eq(adminReauth.adminAccountId, accountId), eq(adminReauth.adminSessionId, sessionId), eq(adminReauth.act, act), isNull(adminReauth.usedAt), gt(adminReauth.expiresAt, new Date(now))))
+      .returning({ factors: adminReauth.factors });
+    return r ? (r.factors as ReauthFactor[]) : null;
+  }
+
+  async purgeReauths(before: number): Promise<number> {
+    const done = await this.database.db.delete(adminReauth).where(lt(adminReauth.issuedAt, new Date(before))).returning({ jti: adminReauth.jti });
+    return done.length;
+  }
+
   // ── 관리 계정 관리(BOT-150) ──
-  #managed(r: AccountRow, designations: DesignationKind[]): ManagedAccount {
+  #managed(r: AccountRow, designations: DesignationKind[], passkeyCount = 0): ManagedAccount {
     return {
       id: r.id,
       role: r.role as AdminRole,
@@ -480,6 +590,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
       lockReason: (r.lockReason as LockReason | null) ?? null,
       lockedUntil: ms(r.lockedUntil),
       designations,
+      passkeyCount,
     };
   }
 
@@ -495,9 +606,24 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
     return out;
   }
 
-  async #withDesignations(db: Pick<DbTransaction, 'select'>, rows: AccountRow[]): Promise<ManagedAccount[]> {
-    const d = await this.#liveDesignations(db, rows.map((r) => r.id));
-    return rows.map((r) => this.#managed(r, d.get(r.id) ?? []));
+  async #withDesignations(db: Pick<DbTransaction, 'select'>, rows: AccountRow[], designations = true): Promise<ManagedAccount[]> {
+    const ids = rows.map((r) => r.id);
+    const d = designations ? await this.#liveDesignations(db, ids) : new Map<string, DesignationKind[]>();
+    const n = await this.#passkeyCounts(db, ids);
+    return rows.map((r) => this.#managed(r, d.get(r.id) ?? [], n.get(r.id) ?? 0));
+  }
+
+  /** 계정들의 패스키 수(BOT-122). 질의 하나 */
+  async #passkeyCounts(db: Pick<DbTransaction, 'select'>, ids: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (ids.length === 0) return out;
+    const rows = await db
+      .select({ id: adminPasskey.adminAccountId, n: rawSql<number>`count(*)::int` })
+      .from(adminPasskey)
+      .where(inArray(adminPasskey.adminAccountId, ids))
+      .groupBy(adminPasskey.adminAccountId);
+    for (const r of rows) out.set(r.id, Number(r.n));
+    return out;
   }
 
   /** 살아 있는 지정과 since 뒤에 거둔 지정을 쿼리 한 번으로 */
@@ -572,6 +698,8 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
             .set({ status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, ...stateColumns(FRESH_LOGIN_STATE), ...bump, updatedAt: new Date(now) })
             .where(eq(adminAccount.id, id));
           await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, id));
+          // 패스키도 지운다(수락 때 새로 등록한다, ASVS 6.4.4, BOT-122)
+          await tx.delete(adminPasskey).where(eq(adminPasskey.adminAccountId, id));
         },
         markRemoved: async (id, now) => {
           await tx
@@ -597,6 +725,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
             })
             .where(eq(adminAccount.id, id));
           await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, id));
+          await tx.delete(adminPasskey).where(eq(adminPasskey.adminAccountId, id));
           await tx.delete(adminKnownSource).where(eq(adminKnownSource.adminAccountId, id));
           await tx.delete(adminUnlockLink).where(eq(adminUnlockLink.adminAccountId, id));
           await tx.delete(adminLoginStep).where(eq(adminLoginStep.adminAccountId, id));
@@ -657,7 +786,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
       .limit(q.limit)
       .offset(q.offset ?? 0);
     // 지정은 관제 역할에만 붙는다: 파트너 목록이면 읽지 않는다
-    if (q.roles.every((r) => r === 'partner_admin' || r === 'partner_member')) return rows.map((r) => this.#managed(r, []));
+    if (q.roles.every((r) => r === 'partner_admin' || r === 'partner_member')) return this.#withDesignations(this.database.db as unknown as DbTransaction, rows, false);
     return this.#withDesignations(this.database.db as unknown as DbTransaction, rows);
   }
 

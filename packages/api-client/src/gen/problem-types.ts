@@ -66,6 +66,7 @@ export type ProblemType =
   | 'jwks-not-found'
   | 'last-login-method'
   | 'last-partner-admin'
+  | 'last-passkey'
   | 'login-provider-not-linked'
   | 'manual-selection-required'
   | 'merge-blocked'
@@ -86,6 +87,12 @@ export type ProblemType =
   | 'other-partner-device'
   | 'outside-staff-hours'
   | 'partner-admin-required'
+  | 'passkey-assertion-invalid'
+  | 'passkey-attestation-invalid'
+  | 'passkey-exists'
+  | 'passkey-limit'
+  | 'passkey-not-registered'
+  | 'passkey-registration-invalid'
   | 'password-change-required'
   | 'password-rejected'
   | 'payment-already-accepted'
@@ -119,7 +126,9 @@ export type ProblemType =
   | 'queue-ticket-expired'
   | 'queue-ticket-invalid'
   | 'queue-ticket-removed'
+  | 'reauth-code-invalid'
   | 'reauth-required'
+  | 'reauth-step-invalid'
   | 'refresh-token-invalid'
   | 'research-export-not-ready'
   | 'restriction-too-long'
@@ -226,6 +235,7 @@ export const PROBLEM_TYPES = {
   'jwks-not-found': { status: 404, title: "없는 공개키 묶음입니다" },
   'last-login-method': { status: 409, title: "마지막 로그인 수단은 해제할 수 없습니다" },
   'last-partner-admin': { status: 409, title: "마지막 파트너 관리자는 바꿀 수 없습니다" },
+  'last-passkey': { status: 409, title: "마지막 패스키는 지울 수 없습니다" },
   'login-provider-not-linked': { status: 404, title: "연결된 로그인 수단이 아닙니다" },
   'manual-selection-required': { status: 409, title: "좌석을 직접 골라 주세요" },
   'merge-blocked': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다" },
@@ -246,6 +256,12 @@ export const PROBLEM_TYPES = {
   'other-partner-device': { status: 403, title: "다른 파트너사의 기기입니다" },
   'outside-staff-hours': { status: 403, title: "근무 시간이 아닙니다" },
   'partner-admin-required': { status: 403, title: "파트너 관리자만 할 수 있습니다" },
+  'passkey-assertion-invalid': { status: 422, title: "패스키를 확인하지 못했습니다" },
+  'passkey-attestation-invalid': { status: 422, title: "패스키를 등록하지 못했습니다" },
+  'passkey-exists': { status: 409, title: "이미 등록한 패스키입니다" },
+  'passkey-limit': { status: 409, title: "패스키는 10개까지 등록할 수 있습니다" },
+  'passkey-not-registered': { status: 409, title: "등록한 패스키가 없습니다" },
+  'passkey-registration-invalid': { status: 410, title: "처음부터 다시 등록해 주세요" },
   'password-change-required': { status: 403, title: "비밀번호를 먼저 바꿔 주세요" },
   'password-rejected': { status: 422, title: "쓸 수 없는 비밀번호입니다" },
   'payment-already-accepted': { status: 409, title: "이 주문의 결제를 이미 접수했습니다" },
@@ -279,7 +295,9 @@ export const PROBLEM_TYPES = {
   'queue-ticket-expired': { status: 410, title: "입장 시간이 지났습니다" },
   'queue-ticket-invalid': { status: 403, title: "대기표를 확인할 수 없습니다" },
   'queue-ticket-removed': { status: 410, title: "이 대기표는 더 쓸 수 없습니다" },
+  'reauth-code-invalid': { status: 422, title: "인증 앱 코드가 맞지 않습니다" },
   'reauth-required': { status: 403, title: "다시 인증해 주세요" },
+  'reauth-step-invalid': { status: 410, title: "처음부터 다시 인증해 주세요" },
   'refresh-token-invalid': { status: 401, title: "다시 로그인해 주세요" },
   'research-export-not-ready': { status: 409, title: "연구용 내보내기를 아직 만드는 중입니다" },
   'restriction-too-long': { status: 422, title: "이용 제한은 1년을 넘길 수 없습니다" },

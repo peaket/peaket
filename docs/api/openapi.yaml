@@ -99,6 +99,7 @@ x-peaket-problem-types:
     jwks-not-found: { status: 404, title: "없는 공개키 묶음입니다" }
     last-login-method: { status: 409, title: "마지막 로그인 수단은 해제할 수 없습니다" }
     last-partner-admin: { status: 409, title: "마지막 파트너 관리자는 바꿀 수 없습니다" }
+    last-passkey: { status: 409, title: "마지막 패스키는 지울 수 없습니다" }
     login-provider-not-linked: { status: 404, title: "연결된 로그인 수단이 아닙니다" }
     manual-selection-required: { status: 409, title: "좌석을 직접 골라 주세요" }
     merge-blocked: { status: 409, title: "지금은 두 계정을 합칠 수 없습니다" }
@@ -122,6 +123,12 @@ x-peaket-problem-types:
     other-partner-device: { status: 403, title: "다른 파트너사의 기기입니다" }
     outside-staff-hours: { status: 403, title: "근무 시간이 아닙니다" }
     partner-admin-required: { status: 403, title: "파트너 관리자만 할 수 있습니다" }
+    passkey-assertion-invalid: { status: 422, title: "패스키를 확인하지 못했습니다" }
+    passkey-attestation-invalid: { status: 422, title: "패스키를 등록하지 못했습니다" }
+    passkey-exists: { status: 409, title: "이미 등록한 패스키입니다" }
+    passkey-limit: { status: 409, title: "패스키는 10개까지 등록할 수 있습니다" }
+    passkey-not-registered: { status: 409, title: "등록한 패스키가 없습니다" }
+    passkey-registration-invalid: { status: 410, title: "처음부터 다시 등록해 주세요" }
     password-change-required: { status: 403, title: "비밀번호를 먼저 바꿔 주세요" }
     password-rejected: { status: 422, title: "쓸 수 없는 비밀번호입니다" }
     payment-attempts-exceeded: { status: 409, title: "결제 시도 횟수를 넘었습니다" }
@@ -152,7 +159,9 @@ x-peaket-problem-types:
     queue-ticket-expired: { status: 410, title: "입장 시간이 지났습니다" }
     queue-ticket-invalid: { status: 403, title: "대기표를 확인할 수 없습니다" }
     queue-ticket-removed: { status: 410, title: "이 대기표는 더 쓸 수 없습니다" }
+    reauth-code-invalid: { status: 422, title: "인증 앱 코드가 맞지 않습니다" }
     reauth-required: { status: 403, title: "다시 인증해 주세요" }
+    reauth-step-invalid: { status: 410, title: "처음부터 다시 인증해 주세요" }
     refresh-token-invalid: { status: 401, title: "다시 로그인해 주세요" }
     research-export-not-ready: { status: 409, title: "연구용 내보내기를 아직 만드는 중입니다" }
     restriction-too-long: { status: 422, title: "이용 제한은 1년을 넘길 수 없습니다" }
@@ -572,6 +581,147 @@ components:
       properties:
         currentPassword: { type: string, minLength: 1, maxLength: 256 }
         newPassword: { type: string, minLength: 15, maxLength: 256 }
+    PartnerReauthPasswordStep:
+      type: object
+      additionalProperties: false
+      description: "파트너 관리 계정 재인증 1단계 본문(POST /v1/partner/auth/reauthentications). 작업 묶음 act는 파트너 콘솔이 받는 셋이다(docs/security/authz-matrix.md §6). withPasskey가 참이면 다음 단계에서 패스키를 확인한다. 정본은 docs/features/identity.md §6 '관리 계정 패스키의 첫 구현'(추천 적용 2026-11-05, BUILD_ORDER BOT-122, ADR-0206)"
+      required: [act, password, code]
+      properties:
+        act: { type: string, enum: [PAYOUT_ACCOUNT, BOOKER_EXPORT, ACCOUNT_SECURITY], description: "정산 계좌, 명단 내려받기, 계정 보안 설정(내 패스키 등록·지우기)" }
+        password: { type: string, minLength: 1, maxLength: 1024, description: "원문. 서버가 NFC로 맞춘다" }
+        code: { type: string, pattern: '^[0-9]{3} ?[0-9]{3}$', description: "인증 앱 코드(TOTP 6자리, 가운데를 띄어 써도 된다). 복구 코드는 받지 않는다" }
+        withPasskey: { type: boolean, description: "참이면 패스키 확인 옵션을 받고 2단계로 간다. 없으면 거짓이다" }
+    OpsReauthPasswordStep:
+      type: object
+      additionalProperties: false
+      description: "운영자·CS 관리 계정 재인증 1단계 본문(POST /v1/ops/auth/reauthentications). 파트너 본문과 같고 act만 관제 콘솔이 받는 다섯이다(docs/security/authz-matrix.md §6, 추천 적용 2026-11-05, BUILD_ORDER BOT-122)"
+      required: [act, password, code]
+      properties:
+        act: { type: string, enum: [OPS_COMMAND, APPROVAL, PERMISSION_CHANGE, AUTHORITY_DATA, ACCOUNT_SECURITY], description: "운영 명령, 승인 업무, 권한 변경, 수사기관 자료, 계정 보안 설정(내 패스키 등록·지우기)" }
+        password: { type: string, minLength: 1, maxLength: 1024, description: "원문. 서버가 NFC로 맞춘다" }
+        code: { type: string, pattern: '^[0-9]{3} ?[0-9]{3}$', description: "인증 앱 코드(TOTP 6자리, 가운데를 띄어 써도 된다). 복구 코드는 받지 않는다" }
+        withPasskey: { type: boolean, description: "참이면 패스키 확인 옵션을 받고 2단계로 간다. 없으면 거짓이다" }
+    AdminReauthPasskeyStep:
+      type: object
+      additionalProperties: false
+      description: "관리 계정 재인증 2단계 본문(파트너·관제 같은 꼴). 1단계 응답의 reauthStep과 브라우저 navigator.credentials.get()의 결과(PublicKeyCredential.toJSON())를 보낸다(추천 적용 2026-11-05, BUILD_ORDER BOT-122)"
+      required: [reauthStep, credential]
+      properties:
+        reauthStep: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+        credential: { $ref: '#/components/schemas/WebAuthnAssertion' }
+    WebAuthnAssertion:
+      type: object
+      additionalProperties: false
+      description: "패스키 확인 결과(W3C WebAuthn Level 3 AuthenticationResponseJSON). 이진 값은 모두 채움 없는 base64url이다"
+      required: [id, rawId, type, response, clientExtensionResults]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 1366, pattern: '^[A-Za-z0-9_-]+$', description: "자격 ID(1~1023바이트)" }
+        rawId: { type: string, minLength: 1, maxLength: 1366, pattern: '^[A-Za-z0-9_-]+$' }
+        type: { type: string, enum: [public-key] }
+        authenticatorAttachment: { type: string, maxLength: 32 }
+        clientExtensionResults: { type: object, x-peaket-open-object: "확장마다 다른 모양의 결과를 브라우저가 싣는다. 서버는 읽지 않는다(추천 적용 2026-11-05)" }
+        response:
+          type: object
+          additionalProperties: false
+          required: [clientDataJSON, authenticatorData, signature]
+          properties:
+            clientDataJSON: { type: string, minLength: 1, maxLength: 4096, pattern: '^[A-Za-z0-9_-]+$' }
+            authenticatorData: { type: string, minLength: 1, maxLength: 4096, pattern: '^[A-Za-z0-9_-]+$' }
+            signature: { type: string, minLength: 1, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' }
+            userHandle: { type: string, maxLength: 128, pattern: '^[A-Za-z0-9_-]*$' }
+    WebAuthnAttestation:
+      type: object
+      additionalProperties: false
+      description: "패스키 등록 결과(W3C WebAuthn Level 3 RegistrationResponseJSON, navigator.credentials.create()의 PublicKeyCredential.toJSON()). 이진 값은 모두 채움 없는 base64url이다"
+      required: [id, rawId, type, response, clientExtensionResults]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 1366, pattern: '^[A-Za-z0-9_-]+$', description: "자격 ID(1~1023바이트)" }
+        rawId: { type: string, minLength: 1, maxLength: 1366, pattern: '^[A-Za-z0-9_-]+$' }
+        type: { type: string, enum: [public-key] }
+        authenticatorAttachment: { type: string, maxLength: 32 }
+        clientExtensionResults: { type: object, x-peaket-open-object: "확장마다 다른 모양의 결과를 브라우저가 싣는다. 서버는 읽지 않는다(추천 적용 2026-11-05)" }
+        response:
+          type: object
+          additionalProperties: false
+          required: [clientDataJSON, attestationObject]
+          properties:
+            clientDataJSON: { type: string, minLength: 1, maxLength: 4096, pattern: '^[A-Za-z0-9_-]+$' }
+            attestationObject: { type: string, minLength: 1, maxLength: 16384, pattern: '^[A-Za-z0-9_-]+$' }
+            authenticatorData: { type: string, maxLength: 8192, pattern: '^[A-Za-z0-9_-]*$' }
+            publicKey: { type: string, maxLength: 4096, pattern: '^[A-Za-z0-9_-]*$' }
+            publicKeyAlgorithm: { type: integer }
+            transports: { type: array, maxItems: 8, items: { type: string, pattern: '^[a-z-]{1,32}$' }, description: "인증기가 알린 전송 방식(internal·hybrid·usb·nfc·ble 등)" }
+    AdminPasskeyCreate:
+      type: object
+      additionalProperties: false
+      description: "내 패스키 등록 마치기 본문(POST /v1/partner/auth/passkeys·/v1/ops/auth/passkeys). 등록 시작 응답의 registrationId와 브라우저가 만든 자격을 보낸다(추천 적용 2026-11-05, BUILD_ORDER BOT-122)"
+      required: [registrationId, credential]
+      properties:
+        registrationId: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+        credential: { $ref: '#/components/schemas/WebAuthnAttestation' }
+        name: { type: string, minLength: 1, maxLength: 30, description: "이름표(예: 사무실 노트북). 앞뒤 빈칸과 제어 문자를 지운 1~30자 [가정]. 없으면 '패스키'" }
+    WebAuthnCredentialDescriptor: { type: object, description: "패스키 하나를 가리키는 값(PublicKeyCredentialDescriptorJSON)", properties: { id: { type: string }, type: { type: string, enum: [public-key] }, transports: { type: array, items: { type: string } } } }
+    WebAuthnRequestOptions:
+      type: object
+      description: "패스키 확인 옵션(W3C WebAuthn Level 3 PublicKeyCredentialRequestOptionsJSON). 화면은 PublicKeyCredential.parseRequestOptionsFromJSON()으로 바꿔 navigator.credentials.get()에 넘긴다"
+      properties:
+        challenge: { type: string, description: "32바이트 난수의 base64url. 5분 [가정] 한 번" }
+        rpId: { type: string, description: "그 콘솔 호스트(partner.peaket.example 또는 console.peaket.example)" }
+        timeout: { type: integer, description: "밀리초" }
+        userVerification: { type: string, enum: [required] }
+        allowCredentials: { type: array, items: { $ref: '#/components/schemas/WebAuthnCredentialDescriptor' }, description: "그 계정의 패스키만" }
+    WebAuthnCreationOptions:
+      type: object
+      description: "패스키 등록 옵션(W3C WebAuthn Level 3 PublicKeyCredentialCreationOptionsJSON). 화면은 PublicKeyCredential.parseCreationOptionsFromJSON()으로 바꿔 navigator.credentials.create()에 넘긴다"
+      properties:
+        rp: { type: object, properties: { id: { type: string, description: "그 콘솔 호스트" }, name: { type: string } } }
+        user: { type: object, properties: { id: { type: string, description: "관리 계정 ID 16바이트의 base64url" }, name: { type: string, description: "업무 이메일" }, displayName: { type: string } } }
+        challenge: { type: string, description: "32바이트 난수의 base64url. 5분 [가정] 한 번" }
+        pubKeyCredParams: { type: array, items: { type: object, properties: { type: { type: string }, alg: { type: integer, description: "COSE 알고리즘(-7 ES256, -8 EdDSA, -257 RS256)" } } } }
+        timeout: { type: integer, description: "밀리초" }
+        excludeCredentials: { type: array, items: { $ref: '#/components/schemas/WebAuthnCredentialDescriptor' }, description: "이미 등록한 패스키(다시 등록하지 않게)" }
+        authenticatorSelection: { type: object, properties: { residentKey: { type: string }, userVerification: { type: string, enum: [required] } } }
+        attestation: { type: string, enum: [none] }
+        extensions: { type: object }
+        hints: { type: array, items: { type: string } }
+    AdminReauthPasskeyChallenge:
+      type: object
+      required: [next, reauthStep, publicKey, expiresInSeconds]
+      description: "재인증 1단계 통과(비밀번호·인증 앱 코드가 맞았다). 2단계에 reauthStep과 패스키 확인 결과를 보낸다(추천 적용 2026-11-05, BUILD_ORDER BOT-122)"
+      properties:
+        next: { type: string, enum: [PASSKEY] }
+        reauthStep: { type: string, pattern: '^[A-Za-z0-9_-]{43}$', description: "32바이트 난수의 채움 없는 base64url. 서버는 SHA-256만 둔다. 5분 [가정] 한 번" }
+        publicKey: { $ref: '#/components/schemas/WebAuthnRequestOptions' }
+        expiresInSeconds: { type: integer }
+    AdminReauthDone:
+      type: object
+      required: [next, reauthToken, factors, expiresInSeconds]
+      description: "재인증 토큰(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 화면이 명령 API의 X-Reauth-Token으로 보낸다(guidelines §7)"
+      properties:
+        next: { type: string, enum: [DONE] }
+        reauthToken: { type: string, description: "typ reauth+jwt, 관리 토큰 키 ES256, 5분 한 번. 그 세션 sid와 작업 묶음 act에 묶인다" }
+        factors: { type: array, items: { type: string, enum: [password, totp, passkey] }, description: "확인한 요소(토큰의 factors와 같다)" }
+        expiresInSeconds: { type: integer }
+    AdminPasskeyRegistration:
+      type: object
+      required: [registrationId, publicKey, expiresInSeconds]
+      description: "내 패스키 등록 시작 응답(추천 적용 2026-11-05, BUILD_ORDER BOT-122)"
+      properties:
+        registrationId: { type: string, pattern: '^[A-Za-z0-9_-]{43}$', description: "32바이트 난수의 채움 없는 base64url. 그 세션에서 5분 [가정] 한 번" }
+        publicKey: { $ref: '#/components/schemas/WebAuthnCreationOptions' }
+        expiresInSeconds: { type: integer }
+    AdminPasskey:
+      type: object
+      description: "내 패스키 한 줄(docs/data.md admin_passkey). 공개키와 자격 ID 원문은 싣지 않는다(추천 적용 2026-11-05, BUILD_ORDER BOT-122)"
+      properties:
+        passkeyId: { type: string, format: uuid }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: [string, 'null'], format: date-time }
+        backedUp: { type: boolean, description: "백업 상태(여러 기기에 동기화되어 있는지)" }
+        deviceType: { type: string, enum: [singleDevice, multiDevice] }
+        transports: { type: array, items: { type: string } }
+    AdminPasskeyList: { type: object, description: "내 패스키 목록(만든 차례, 10개 [가정]까지)", properties: { items: { type: array, items: { $ref: '#/components/schemas/AdminPasskey' } } } }
     AdminRole: { type: string, enum: [viewer, operator, commander, cs_agent, cs_lead, partner_admin, partner_member], description: "관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다" }
     AdminAccount:
       type: object
@@ -2481,6 +2631,15 @@ paths:
     post: { operationId: createPartnerAuthUnlockLink, tags: [partner], x-peaket-roles: [public], security: [], summary: "파트너 계정 해제 링크 다시 받기", description: "FR-021, POL-020, docs/security/auth-controls.md §3.3. 계정이 있는지, 잠겨 있는지와 상관없이 같은 202를 준다(계정 유무를 알리지 않는다, auth-controls §2.2). 시간 잠금 중인 계정에만 업무 이메일로 새 링크를 보내고, 새 링크를 보내면 옛 링크는 무효다. 보호 잠금 중이면 보내지 않는다. 다시 받기는 이메일마다 1시간에 3번 [가정]까지이고 없는 이메일도 같은 수로 센다(추천 적용 2026-10-30, ADR-0157 결정 5·6)", requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AdminUnlockLinkCreate' } } } }, responses: { '202': { description: "받았다(보냈는지는 알리지 않는다)" }, '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류" }, '429': { $ref: '#/components/responses/TooManyRequests', description: "그 이메일의 다시 받기가 1시간에 3번 [가정]을 넘었다(unlock-link-resend-limit). 메일은 나가지 않는다(AC-T5 ⑤)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "admin-login-unavailable(셈 저장소에 닿지 못함). Retry-After" } } }
   /v1/partner/auth/password-changes:
     post: { operationId: createPartnerAuthPasswordChange, tags: [partner], x-peaket-roles: [partner_admin, partner_member], x-peaket-trace-rare: true, summary: "파트너 계정 비밀번호 바꾸기", description: "FR-021, POL-020, docs/security/auth-controls.md §3.5·§4. 지금 비밀번호가 틀리면 로그인 실패와 같이 계정 실패 수와 비밀번호 연속 실패 누계에 센다(auth-controls §3.1 '비밀번호가 틀릴 때'). 바꾸면 이 세션은 이어지고 그 계정의 다른 세션을 모두 끝낸다(asyncapi control.sessions-terminated, reason PASSWORD_CHANGED). 비밀번호만 맞은 로그인이나 유출 목록 재확인 때문에 비밀번호 바꾸기와 로그아웃만 허용된 세션(scope 제한)이면, 응답이 제한을 푼 새 액세스 토큰 쿠키를 준다. 그 세션으로 다른 관리 경로를 부르면 403 password-change-required다(AC-T4). 쿠키로 인증하는 쓰기라 gw-partner가 Origin을 확인한다(추천 적용 2026-10-30, ADR-0157 결정 4)", security: [{ partnerCookie: [] }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AdminPasswordChangeCreate' } } } }, responses: { '204': { description: "바꿨다. scope 제한 세션이었으면 새 쿠키(__Secure-peaket_partner_at)를 준다" }, '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류(길이 밖)" }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }, '404': { $ref: '#/components/responses/Problem', description: "그 사이 관리 계정이 지워졌거나 쓸 수 없게 됐다(not-found)" }, '422': { $ref: '#/components/responses/Problem', description: "지금 비밀번호가 틀렸다(current-password-invalid), 또는 새 비밀번호가 지금 것과 같거나 흔한 비밀번호·맥락 말·유출 목록에 걸렸다(password-rejected: 걸린 이유 종류 reason과 안내 문구를 싣는다, AC-T6·AC-T7)" }, '423': { $ref: '#/components/responses/Problem', description: "잠김(admin-account-locked): 보호 잠금(운영자 재초대)이거나 시간 잠금·묶음 잠금(Retry-After). 잠긴 동안은 지금 비밀번호를 보지 않고 세지 않는다" }, '429': { $ref: '#/components/responses/Problem', description: "같은 계정의 로그인·비밀번호 바꾸기가 처리 중이다(admin-login-busy, Retry-After)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "유출 목록 조회에 닿지 못했다. 새 비밀번호를 저장하지 않는다(AC-T7 ②)" } } }
+  /v1/partner/auth/reauthentications:
+    post: { operationId: createPartnerAuthReauthentication, tags: [partner], x-peaket-roles: [partner_admin, partner_member], summary: "파트너 관리 계정 재인증(비밀번호·인증 앱 코드, 요청하면 패스키 확인까지) → 재인증 토큰", description: "FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 정산 계좌 변경·명단 내려받기·내 패스키 등록과 지우기 직전에 부른다. 1단계(PartnerReauthPasswordStep)는 비밀번호와 인증 앱 코드(TOTP)를 확인하고, 틀리면 로그인 실패처럼 센다(docs/security/auth-controls.md §3.1). withPasskey가 거짓이면 바로 재인증 토큰을 준다(factors password·totp). 참이면 패스키 확인 옵션과 reauthStep을 주고, 2단계(AdminReauthPasskeyStep)에서 그 계정 패스키의 서명이 맞으면 factors password·totp·passkey 토큰을 준다. 서명은 사용자 확인 표시가 있어야 하고, RP ID는 partner.peaket.example, 출처는 파트너 콘솔 출처 하나다. 토큰(typ reauth+jwt, 5분 한 번, 그 세션 sid와 작업 묶음 act에 묶임)은 본문에 있고 화면이 X-Reauth-Token으로 보낸다(guidelines §7). 그 작업에 패스키가 필요한지는 받는 서비스가 본다(docs/security/authz-matrix.md §6). Cache-Control: no-store. 쿠키로 인증하는 쓰기라 gw-partner가 Origin을 확인한다. 정본은 docs/features/identity.md §6 '관리 계정 패스키의 첫 구현'", security: [{ partnerCookie: [] }], requestBody: { required: true, content: { application/json: { schema: { oneOf: [{ $ref: '#/components/schemas/PartnerReauthPasswordStep' }, { $ref: '#/components/schemas/AdminReauthPasskeyStep' }] } } } }, responses: { '200': { description: "패스키 확인이 필요함(AdminReauthPasskeyChallenge), 또는 재인증 토큰(AdminReauthDone)", content: { application/json: { schema: { oneOf: [{ $ref: '#/components/schemas/AdminReauthPasskeyChallenge' }, { $ref: '#/components/schemas/AdminReauthDone' }] } } } }, '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류(이 콘솔이 받지 않는 작업 묶음 포함)" }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료, 또는 그 사이 끝난 세션" }, '403': { $ref: '#/components/responses/Problem', description: "비밀번호 바꾸기 필요 세션(password-change-required)" }, '409': { $ref: '#/components/responses/Problem', description: "withPasskey인데 등록한 패스키가 없다(passkey-not-registered). 비밀번호를 보기 전에 답한다" }, '410': { $ref: '#/components/responses/Problem', description: "2단계: reauthStep이 없거나 썼거나 지났거나 다른 세션의 것이다(reauth-step-invalid, 1단계부터 다시)" }, '422': { $ref: '#/components/responses/Problem', description: "비밀번호가 틀렸다(current-password-invalid), 인증 앱 코드가 틀렸다(reauth-code-invalid, remainingAttempts), 패스키 서명을 받지 못했다(passkey-assertion-invalid: 남의 자격, 다른 출처, 다른 RP ID, 사용자 확인 없음, 서명 횟수 퇴행. 이유는 싣지 않는다, I-T53 ④)" }, '423': { $ref: '#/components/responses/Problem', description: "잠김(admin-account-locked). 보호 잠금이면 재인증 토큰을 주지 않는다(docs/security/auth-controls.md §3.2)" }, '429': { $ref: '#/components/responses/Problem', description: "같은 계정의 다른 로그인·재인증이 처리 중이다(admin-login-busy, Retry-After)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "admin-login-unavailable(실패 셈 저장소·페퍼·TOTP 시드 키·챌린지 저장소에 닿지 못함, 관리 토큰 키 없음). Retry-After" } } }
+  /v1/partner/auth/passkey-registrations:
+    post: { operationId: createPartnerAuthPasskeyRegistration, tags: [partner], x-peaket-roles: [partner_admin, partner_member], summary: "내 패스키 등록 시작(등록 옵션, 재인증 토큰 필요)", description: "FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 작업 묶음 ACCOUNT_SECURITY의 재인증 토큰을 X-Reauth-Token으로 받는다. factors에 password·totp가 있어야 하고, 이미 패스키가 있으면 passkey도 있어야 한다(비밀번호·TOTP만 가로챈 사람이 자기 패스키를 더하지 못하게). 토큰은 여기서 한 번 쓴다. 화면은 응답의 publicKey를 navigator.credentials.create()에 넘기고, 결과를 POST /v1/partner/auth/passkeys로 보낸다. registrationId와 챌린지(32바이트)는 이 세션에서 5분 [가정] 한 번이다. RP ID는 partner.peaket.example이고 사용자 확인 필수다. Cache-Control: no-store. gw-partner가 Origin을 확인한다", security: [{ partnerCookie: [] }], parameters: [{ $ref: '#/components/parameters/ReauthToken' }], responses: { '201': { description: "등록 옵션", content: { application/json: { schema: { $ref: '#/components/schemas/AdminPasskeyRegistration' } } } }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료, 또는 그 사이 끝난 세션" }, '403': { $ref: '#/components/responses/Problem', description: "재인증 토큰이 없거나 만료·재사용이거나 세션·작업 묶음·요소가 맞지 않는다(reauth-required). 비밀번호 바꾸기 필요 세션(password-change-required)" }, '409': { $ref: '#/components/responses/Problem', description: "패스키가 이미 10개 [가정]다(passkey-limit)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "admin-login-unavailable(챌린지 저장소에 닿지 못함). Retry-After" } } }
+  /v1/partner/auth/passkeys:
+    get: { operationId: getPartnerAuthPasskeys, tags: [partner], x-peaket-roles: [partner_admin, partner_member], summary: "내 패스키 목록", description: "FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 내 계정의 패스키를 만든 차례로 준다(10개 [가정]까지라 페이지를 나누지 않는다). 공개키와 자격 ID 원문은 싣지 않는다. 화면은 docs/design/d5 SCR-020 '내 계정'의 패스키 줄이다. Cache-Control: no-store", security: [{ partnerCookie: [] }], responses: { '200': { description: 목록, content: { application/json: { schema: { $ref: '#/components/schemas/AdminPasskeyList' } } } }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }, '403': { $ref: '#/components/responses/Problem', description: "비밀번호 바꾸기 필요 세션(password-change-required)" } } }
+    post: { operationId: createPartnerAuthPasskey, tags: [partner], x-peaket-roles: [partner_admin, partner_member], x-peaket-trace-rare: true, summary: "내 패스키 등록 마치기(브라우저가 만든 자격 확인)", description: "FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 등록 시작(POST /v1/partner/auth/passkey-registrations)의 registrationId와 navigator.credentials.create()의 결과를 받는다. 출처(파트너 콘솔), RP ID(partner.peaket.example), 챌린지, 사용자 확인 표시, 서명 방식(ES256·EdDSA·RS256)을 @simplewebauthn/server로 확인한다. 증명(attestation)은 받지 않는다(none). 계정 행을 잠근 트랜잭션에서 10개 [가정] 상한을 다시 보고 넣으며, 계정 주인 업무 이메일로 등록 알림(PASSKEY_ADDED)을 보낸다. Cache-Control: no-store. gw-partner가 Origin을 확인한다", security: [{ partnerCookie: [] }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AdminPasskeyCreate' } } } }, responses: { '201': { description: "등록한 패스키", content: { application/json: { schema: { $ref: '#/components/schemas/AdminPasskey' } } } }, '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류" }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료, 또는 그 사이 끝난 세션" }, '403': { $ref: '#/components/responses/Problem', description: "비밀번호 바꾸기 필요 세션(password-change-required)" }, '409': { $ref: '#/components/responses/Problem', description: "같은 자격 ID가 이미 있다(passkey-exists, 다른 계정의 것도 같다), 또는 그 사이 10개가 찼다(passkey-limit)" }, '410': { $ref: '#/components/responses/Problem', description: "registrationId가 없거나 썼거나 지났거나 다른 세션의 것이다(passkey-registration-invalid, 등록 시작부터 다시)" }, '422': { $ref: '#/components/responses/Problem', description: "자격을 받지 못했다(passkey-attestation-invalid: 다른 출처·RP ID·챌린지, 사용자 확인 없음, 받지 않는 서명 방식. 이유는 싣지 않는다)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "admin-login-unavailable(챌린지 저장소에 닿지 못함). Retry-After" } } }
+  /v1/partner/auth/passkeys/{passkeyId}:
+    delete: { operationId: deletePartnerAuthPasskey, tags: [partner], x-peaket-roles: [partner_admin, partner_member], x-peaket-trace-rare: true, summary: "내 패스키 지우기(재인증 토큰 필요, 필수 역할의 마지막 하나는 409)", description: "FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 작업 묶음 ACCOUNT_SECURITY의 재인증 토큰을 받는다. 패스키가 있는 계정이라 factors에 passkey가 있어야 한다. 다른 패스키를 잃었을 때 남은 패스키로 재인증하고 잃은 것을 지우는 길이다(ASVS 6.4.4). partner_admin은 마지막 하나를 지우지 못한다(docs/design/d5 SCR-020 '패스키 줄'). 지우면 계정 주인 업무 이메일로 알린다(PASSKEY_REMOVED). gw-partner가 Origin을 확인한다", security: [{ partnerCookie: [] }], parameters: [{ name: passkeyId, in: path, required: true, schema: { type: string, format: uuid } }, { $ref: '#/components/parameters/ReauthToken' }], responses: { '204': { description: "지웠다" }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료, 또는 그 사이 끝난 세션" }, '403': { $ref: '#/components/responses/Problem', description: "재인증 토큰이 없거나 만료·재사용이거나 세션·작업 묶음·요소가 맞지 않는다(reauth-required). 비밀번호 바꾸기 필요 세션(password-change-required)" }, '404': { $ref: '#/components/responses/Problem', description: "내 패스키가 아니다(not-found)" }, '409': { $ref: '#/components/responses/Problem', description: "패스키가 필수인 역할의 마지막 하나다(last-passkey)" } } }
   /v1/partner/team-accounts:
     get: { operationId: listPartnerTeamAccounts, tags: [partner], x-peaket-roles: [partner_admin], summary: "팀 계정 목록(SCR-020 ⑨, 파트너 관리자만, 보기만)", description: "FR-021, POL-020, docs/planning/03 §3 '파트너 계정 초대·역할 변경·잠금 해제' 행의 파트너 칸 'R(관리자: 소속 계정 목록)'(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). 소속 파트너사(요청마다 판정한 요청 테넌트, ADR-0172)의 삭제하지 않은 관리 계정만 준다(docs/security/authz-matrix.md §3.3). 초대·역할 변경·삭제·재초대는 파트너 콘솔에 없고 PEAKET 운영자가 관제 콘솔(SCR-064, /v1/ops/admin-accounts)에서 한다(docs/design/d5 SCR-020 ⑨). 이메일은 가린 값만, 잠금은 걸렸는지만 싣고 계정 ID는 싣지 않는다. partner_member는 403이다. gw-partner가 identity-svc로 넘긴다. 최근 접속 순, 커서 페이징(guidelines §3). Cache-Control: no-store", security: [{ partnerCookie: [] }], parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }], responses: { '200': { description: 팀 계정 한 페이지, content: { application/json: { schema: { $ref: '#/components/schemas/PartnerTeamAccountPage' } } } }, '403': { $ref: '#/components/responses/Problem', description: "파트너 관리자가 아님(partner_member)" } } }
   /v1/partner/productions:
@@ -2594,6 +2753,15 @@ paths:
     post: { operationId: createOpsAuthUnlockLink, tags: [ops], x-peaket-roles: [public], security: [], summary: "운영자·CS 계정 해제 링크 다시 받기", description: "FR-028, POL-020. 파트너 다시 받기(POST /v1/partner/auth/unlock-links)와 같은 규칙이다: 계정 유무와 상관없이 같은 202, 시간 잠금 중인 계정에만 새 링크, 이메일마다 1시간에 3번 [가정]. 관제 배포의 허용 IP에서만 받는다(추천 적용 2026-10-30, docs/security/auth-controls.md §2.2·§3.3)", requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AdminUnlockLinkCreate' } } } }, responses: { '202': { description: "받았다(보냈는지는 알리지 않는다)" }, '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류" }, '429': { $ref: '#/components/responses/TooManyRequests', description: "그 이메일의 다시 받기 한도를 넘었다(unlock-link-resend-limit). 메일은 나가지 않는다" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "admin-login-unavailable(셈 저장소에 닿지 못함). Retry-After" } } }
   /v1/ops/auth/password-changes:
     post: { operationId: createOpsAuthPasswordChange, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], x-peaket-trace-rare: true, summary: "운영자·CS 계정 비밀번호 바꾸기", description: "FR-028, POL-020. 파트너 비밀번호 바꾸기(POST /v1/partner/auth/password-changes)와 같은 규칙이다. 바꾸면 이 세션은 이어지고 다른 세션을 모두 끝낸다(reason PASSWORD_CHANGED). scope 제한 세션이면 제한을 푼 새 운영자 액세스 토큰 쿠키(__Host-peaket_ops_at)를 준다. gw-ops가 Origin을 확인한다(추천 적용 2026-10-30, docs/security/auth-controls.md §3.5·§4)", security: [{ opsCookie: [] }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AdminPasswordChangeCreate' } } } }, responses: { '204': { description: "바꿨다" }, '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류(길이 밖)" }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }, '404': { $ref: '#/components/responses/Problem', description: "그 사이 관리 계정이 지워졌거나 쓸 수 없게 됐다(not-found)" }, '422': { $ref: '#/components/responses/Problem', description: "지금 비밀번호가 틀렸다(current-password-invalid), 또는 새 비밀번호가 지금 것과 같거나 흔한 비밀번호·맥락 말·유출 목록에 걸렸다(password-rejected: 걸린 이유 종류 reason과 안내 문구를 싣는다)" }, '423': { $ref: '#/components/responses/Problem', description: "잠김(admin-account-locked): 보호 잠금(commander 재초대)이거나 시간 잠금·묶음 잠금(Retry-After). 잠긴 동안은 지금 비밀번호를 보지 않고 세지 않는다" }, '429': { $ref: '#/components/responses/Problem', description: "같은 계정의 로그인·비밀번호 바꾸기가 처리 중이다(admin-login-busy, Retry-After)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "유출 목록 조회에 닿지 못했다. 새 비밀번호를 저장하지 않는다" } } }
+  /v1/ops/auth/reauthentications:
+    post: { operationId: createOpsAuthReauthentication, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], summary: "운영자·CS 관리 계정 재인증(비밀번호·인증 앱 코드, 요청하면 패스키 확인까지) → 재인증 토큰", description: "FR-028, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 위험 운영 명령과 그 승인, 승인 업무, 권한·역할 변경, 수사기관 자료, 내 패스키 등록과 지우기 직전에 부른다. 파트너 재인증(POST /v1/partner/auth/reauthentications)과 같은 두 단계이고, 1단계 본문은 OpsReauthPasswordStep이다. 패스키 서명의 RP ID는 console.peaket.example, 출처는 관제 콘솔 출처 하나다. 그 작업에 패스키가 필요한지는 받는 서비스가 본다(commander가 하는 승인은 패스키까지, cs_lead는 비밀번호·인증 앱 코드까지, docs/security/authz-matrix.md §6). Cache-Control: no-store. gw-ops가 Origin을 확인한다. 정본은 docs/features/identity.md §6 '관리 계정 패스키의 첫 구현'", security: [{ opsCookie: [] }], requestBody: { required: true, content: { application/json: { schema: { oneOf: [{ $ref: '#/components/schemas/OpsReauthPasswordStep' }, { $ref: '#/components/schemas/AdminReauthPasskeyStep' }] } } } }, responses: { '200': { description: "패스키 확인이 필요함(AdminReauthPasskeyChallenge), 또는 재인증 토큰(AdminReauthDone)", content: { application/json: { schema: { oneOf: [{ $ref: '#/components/schemas/AdminReauthPasskeyChallenge' }, { $ref: '#/components/schemas/AdminReauthDone' }] } } } }, '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류(이 콘솔이 받지 않는 작업 묶음 포함)" }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료, 또는 그 사이 끝난 세션" }, '403': { $ref: '#/components/responses/Problem', description: "비밀번호 바꾸기 필요 세션(password-change-required)" }, '409': { $ref: '#/components/responses/Problem', description: "withPasskey인데 등록한 패스키가 없다(passkey-not-registered). 비밀번호를 보기 전에 답한다" }, '410': { $ref: '#/components/responses/Problem', description: "2단계: reauthStep이 없거나 썼거나 지났거나 다른 세션의 것이다(reauth-step-invalid, 1단계부터 다시)" }, '422': { $ref: '#/components/responses/Problem', description: "비밀번호가 틀렸다(current-password-invalid), 인증 앱 코드가 틀렸다(reauth-code-invalid, remainingAttempts), 패스키 서명을 받지 못했다(passkey-assertion-invalid: 남의 자격, 다른 출처, 다른 RP ID, 사용자 확인 없음, 서명 횟수 퇴행. 이유는 싣지 않는다, I-T53 ④)" }, '423': { $ref: '#/components/responses/Problem', description: "잠김(admin-account-locked). 보호 잠금이면 재인증 토큰을 주지 않는다(docs/security/auth-controls.md §3.2)" }, '429': { $ref: '#/components/responses/Problem', description: "같은 계정의 다른 로그인·재인증이 처리 중이다(admin-login-busy, Retry-After)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "admin-login-unavailable(실패 셈 저장소·페퍼·TOTP 시드 키·챌린지 저장소에 닿지 못함, 관리 토큰 키 없음). Retry-After" } } }
+  /v1/ops/auth/passkey-registrations:
+    post: { operationId: createOpsAuthPasskeyRegistration, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], summary: "내 패스키 등록 시작(등록 옵션, 재인증 토큰 필요)", description: "FR-028, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 파트너 등록 시작(POST /v1/partner/auth/passkey-registrations)과 같은 규칙이다. RP ID는 console.peaket.example이다. 결과는 POST /v1/ops/auth/passkeys로 보낸다. Cache-Control: no-store. gw-ops가 Origin을 확인한다", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/ReauthToken' }], responses: { '201': { description: "등록 옵션", content: { application/json: { schema: { $ref: '#/components/schemas/AdminPasskeyRegistration' } } } }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료, 또는 그 사이 끝난 세션" }, '403': { $ref: '#/components/responses/Problem', description: "재인증 토큰이 없거나 만료·재사용이거나 세션·작업 묶음·요소가 맞지 않는다(reauth-required). 비밀번호 바꾸기 필요 세션(password-change-required)" }, '409': { $ref: '#/components/responses/Problem', description: "패스키가 이미 10개 [가정]다(passkey-limit)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "admin-login-unavailable(챌린지 저장소에 닿지 못함). Retry-After" } } }
+  /v1/ops/auth/passkeys:
+    get: { operationId: getOpsAuthPasskeys, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], summary: "내 패스키 목록", description: "FR-028, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 파트너 목록(GET /v1/partner/auth/passkeys)과 같다. 화면은 docs/design/d5 SCR-028 `/me`의 패스키 줄이다. Cache-Control: no-store", security: [{ opsCookie: [] }], responses: { '200': { description: 목록, content: { application/json: { schema: { $ref: '#/components/schemas/AdminPasskeyList' } } } }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }, '403': { $ref: '#/components/responses/Problem', description: "비밀번호 바꾸기 필요 세션(password-change-required)" } } }
+    post: { operationId: createOpsAuthPasskey, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], x-peaket-trace-rare: true, summary: "내 패스키 등록 마치기(브라우저가 만든 자격 확인)", description: "FR-028, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 파트너 등록 마치기(POST /v1/partner/auth/passkeys)와 같은 규칙이다. 출처는 관제 콘솔, RP ID는 console.peaket.example이다. Cache-Control: no-store. gw-ops가 Origin을 확인한다", security: [{ opsCookie: [] }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AdminPasskeyCreate' } } } }, responses: { '201': { description: "등록한 패스키", content: { application/json: { schema: { $ref: '#/components/schemas/AdminPasskey' } } } }, '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류" }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료, 또는 그 사이 끝난 세션" }, '403': { $ref: '#/components/responses/Problem', description: "비밀번호 바꾸기 필요 세션(password-change-required)" }, '409': { $ref: '#/components/responses/Problem', description: "같은 자격 ID가 이미 있다(passkey-exists, 다른 계정의 것도 같다), 또는 그 사이 10개가 찼다(passkey-limit)" }, '410': { $ref: '#/components/responses/Problem', description: "registrationId가 없거나 썼거나 지났거나 다른 세션의 것이다(passkey-registration-invalid, 등록 시작부터 다시)" }, '422': { $ref: '#/components/responses/Problem', description: "자격을 받지 못했다(passkey-attestation-invalid: 다른 출처·RP ID·챌린지, 사용자 확인 없음, 받지 않는 서명 방식. 이유는 싣지 않는다)" }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "admin-login-unavailable(챌린지 저장소에 닿지 못함). Retry-After" } } }
+  /v1/ops/auth/passkeys/{passkeyId}:
+    delete: { operationId: deleteOpsAuthPasskey, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], x-peaket-trace-rare: true, summary: "내 패스키 지우기(재인증 토큰 필요, 필수 역할의 마지막 하나는 409)", description: "FR-028, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 파트너 지우기(DELETE /v1/partner/auth/passkeys/{passkeyId})와 같은 규칙이다. operator·commander는 마지막 하나를 지우지 못한다(docs/design/d5 SCR-028 '패스키 줄'). gw-ops가 Origin을 확인한다", security: [{ opsCookie: [] }], parameters: [{ name: passkeyId, in: path, required: true, schema: { type: string, format: uuid } }, { $ref: '#/components/parameters/ReauthToken' }], responses: { '204': { description: "지웠다" }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료, 또는 그 사이 끝난 세션" }, '403': { $ref: '#/components/responses/Problem', description: "재인증 토큰이 없거나 만료·재사용이거나 세션·작업 묶음·요소가 맞지 않는다(reauth-required). 비밀번호 바꾸기 필요 세션(password-change-required)" }, '404': { $ref: '#/components/responses/Problem', description: "내 패스키가 아니다(not-found)" }, '409': { $ref: '#/components/responses/Problem', description: "패스키가 필수인 역할의 마지막 하나다(last-passkey)" } } }
   /v1/ops/admin-accounts:
     get: { operationId: listOpsAdminAccounts, tags: [ops], x-peaket-roles: [operator, commander], summary: "관리 계정 목록(SCR-064 탭: 운영자·CS, 파트너 계정)", description: "FR-021, FR-028, POL-020, docs/planning/03 §3 '파트너 계정 초대·역할 변경·잠금 해제' 행과 '관리 계정(운영자·CS)' 행(소유자 결정 2026-10-30, open-items 73번. 경로 모양과 이 경로들의 세부 규칙은 추천 적용 2026-10-30). operator·commander만 본다. viewer·CS는 403이다. 이메일은 가린 값만 싣는다. gw-ops → ops-svc가 역할을 보고 identity-svc AdminAccountService.ListAdminAccounts로 읽는다(docs/api/proto/README.md §3). 커서 페이징(guidelines §3). Cache-Control: no-store", security: [{ opsCookie: [] }], parameters: [{ name: group, in: query, required: true, description: "OPS는 운영자·CS 탭, PARTNER는 파트너 계정 탭", schema: { type: string, enum: [OPS, PARTNER] } }, { name: promoterId, in: query, required: false, description: "PARTNER 탭에서 파트너사로 거른다", schema: { type: string } }, { name: status, in: query, required: false, schema: { type: string, enum: [INVITED, ACTIVE, INVITE_EXPIRED, REMOVED] } }, { $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }], responses: { '200': { description: 계정 한 페이지, content: { application/json: { schema: { $ref: '#/components/schemas/AdminAccountPage' } } } }, '400': { $ref: '#/components/responses/Problem', description: "group이 없음, OPS 탭에 promoterId를 넣음" }, '403': { $ref: '#/components/responses/Problem', description: "operator·commander가 아님" } } }
     post: { operationId: createOpsAdminAccount, tags: [ops], x-peaket-roles: [operator, commander], x-peaket-trace-rare: true, summary: "관리 계정 초대(업무 이메일, 역할, 파트너 계정이면 파트너사). 24시간 1회용 링크, 재인증", description: "FR-021, FR-028, POL-020, docs/planning/03 §2.7 A1·§3, docs/features/identity.md §6 '계정 발급 절차'(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). 누가: operator는 파트너 역할(partner_admin·partner_member)만, commander는 파트너 역할과 viewer·operator·cs_agent·cs_lead를 초대한다(그 밖은 403 admin-role-not-allowed). commander로는 초대하지 않는다. commander는 다른 역할로 초대해 활성화한 뒤 역할 변경의 2인 승인으로만 준다(POL-038 ⑨). 파트너사 조건: 파트너 역할이면 promoterId가 필수이고 관제 역할이면 넣지 않는다(422 promoter-mismatch). promoterId는 파트너사·계약 관리(SCR-065)에 등록된 파트너사여야 한다(422 unknown-promoter). 그 파트너사에 활성이거나 초대 중인 partner_admin이 없으면 partner_admin으로만 초대한다(422 first-partner-account-must-be-admin. 파트너사마다 활성 관리자 1명 이상, identity §6). 같은 업무 이메일의 삭제하지 않은 계정이 있으면 409 admin-email-in-use다(한 사람에 계정 하나, 고시 제5조 제4항). 재인증: 비밀번호·TOTP와 패스키를 거친 재인증 토큰(factors에 passkey, 작업 묶음 act는 권한 변경)이 있어야 한다(docs/security/authz-matrix.md §6). 처리: ops-svc가 역할·재인증을 보고 권한 부여 내역을 감사 기록에 남긴 뒤(3년, 고시 제5조 제3항) identity-svc InviteAdminAccount를 부른다. identity-svc는 요청자의 지금 역할을 DB로 다시 보고, 32바이트 난수 초대 토큰의 SHA-256만 저장한 뒤 업무 이메일로 링크를 보낸다(토큰은 URL 조각 #token=에만, docs/features/identity.md §6.1 'URL 조각의 비밀 처리'와 같다). 초대 수락 경로(비밀번호·TOTP·패스키·복구 코드 등록)는 패스키 등록 경로와 함께 wbs 0.2.3에서 더한다(identity §13)", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }, { $ref: '#/components/parameters/ReauthToken' }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AdminInvitationCreate' } } } }, responses: { '201': { description: "초대함(상태 INVITED, inviteExpiresAt)", headers: { Location: { $ref: '#/components/headers/Location' } }, content: { application/json: { schema: { $ref: '#/components/schemas/AdminAccount' } } } }, '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류" }, '403': { $ref: '#/components/responses/Problem', description: "reauth-required(재인증 없음·만료·재사용·패스키 요소 없음), admin-role-not-allowed(부른 역할이 그 역할을 초대할 수 없음)" }, '409': { $ref: '#/components/responses/Problem', description: "admin-email-in-use" }, '422': { $ref: '#/components/responses/Problem', description: "promoter-mismatch, unknown-promoter, first-partner-account-must-be-admin" } } }

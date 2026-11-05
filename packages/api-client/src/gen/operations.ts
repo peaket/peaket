@@ -35,7 +35,10 @@ export type OperationId =
   | 'createOpsApprovalRequestWithdrawal'
   | 'createOpsArtist'
   | 'createOpsAuthAccessToken'
+  | 'createOpsAuthPasskey'
+  | 'createOpsAuthPasskeyRegistration'
   | 'createOpsAuthPasswordChange'
+  | 'createOpsAuthReauthentication'
   | 'createOpsAuthSession'
   | 'createOpsAuthUnlock'
   | 'createOpsAuthUnlockLink'
@@ -98,7 +101,10 @@ export type OperationId =
   | 'createOrderPayment'
   | 'createOrderPaymentAcceptance'
   | 'createPartnerAuthAccessToken'
+  | 'createPartnerAuthPasskey'
+  | 'createPartnerAuthPasskeyRegistration'
   | 'createPartnerAuthPasswordChange'
+  | 'createPartnerAuthReauthentication'
   | 'createPartnerAuthSession'
   | 'createPartnerAuthUnlock'
   | 'createPartnerAuthUnlockLink'
@@ -159,6 +165,8 @@ export type OperationId =
   | 'deleteOpsAdminAccountDesignation'
   | 'deleteOpsAdminAccountSession'
   | 'deleteOpsAdminAccountSessions'
+  | 'deleteOpsAuthPasskey'
+  | 'deletePartnerAuthPasskey'
   | 'deletePartnerProductionImage'
   | 'deletePartnerProductionSaleReview'
   | 'deletePartnerStaff'
@@ -184,6 +192,7 @@ export type OperationId =
   | 'getMyOpsAuthSession'
   | 'getOpsAdminAccount'
   | 'getOpsApprovalRequest'
+  | 'getOpsAuthPasskeys'
   | 'getOpsCase'
   | 'getOpsComplianceDataRequest'
   | 'getOpsComplianceDocument'
@@ -204,6 +213,7 @@ export type OperationId =
   | 'getOpsResearchExport'
   | 'getOpsWidget'
   | 'getOrderPaymentStatus'
+  | 'getPartnerAuthPasskeys'
   | 'getPartnerEventFraudReport'
   | 'getPartnerEventGateStatus'
   | 'getPartnerEventLiveSnapshot'
@@ -315,7 +325,10 @@ export const OPERATIONS = {
   createOpsApprovalRequestWithdrawal: {operationId: "createOpsApprovalRequestWithdrawal",method: "POST",path: "/v1/ops/approval-requests/{approvalId}/withdrawals",host: "ops-api",kind: "write",cookie: true},
   createOpsArtist: {operationId: "createOpsArtist",method: "POST",path: "/v1/ops/artists",host: "ops-api",kind: "write",cookie: true},
   createOpsAuthAccessToken: {operationId: "createOpsAuthAccessToken",method: "POST",path: "/v1/ops/auth/access-tokens",host: "ops-api",kind: "write",cookie: true},
+  createOpsAuthPasskey: {operationId: "createOpsAuthPasskey",method: "POST",path: "/v1/ops/auth/passkeys",host: "ops-api",kind: "write",cookie: true},
+  createOpsAuthPasskeyRegistration: {operationId: "createOpsAuthPasskeyRegistration",method: "POST",path: "/v1/ops/auth/passkey-registrations",host: "ops-api",kind: "write",cookie: true},
   createOpsAuthPasswordChange: {operationId: "createOpsAuthPasswordChange",method: "POST",path: "/v1/ops/auth/password-changes",host: "ops-api",kind: "write",cookie: true},
+  createOpsAuthReauthentication: {operationId: "createOpsAuthReauthentication",method: "POST",path: "/v1/ops/auth/reauthentications",host: "ops-api",kind: "write",cookie: true},
   createOpsAuthSession: {operationId: "createOpsAuthSession",method: "POST",path: "/v1/ops/auth/sessions",host: "ops-api",kind: "write",cookie: true},
   createOpsAuthUnlock: {operationId: "createOpsAuthUnlock",method: "POST",path: "/v1/ops/auth/unlocks",host: "ops-api",kind: "write",cookie: false},
   createOpsAuthUnlockLink: {operationId: "createOpsAuthUnlockLink",method: "POST",path: "/v1/ops/auth/unlock-links",host: "ops-api",kind: "write",cookie: false},
@@ -378,7 +391,10 @@ export const OPERATIONS = {
   createOrderPayment: {operationId: "createOrderPayment",method: "POST",path: "/v1/orders/{orderId}/payments",host: "api",kind: "write",idempotent: true,cookie: true},
   createOrderPaymentAcceptance: {operationId: "createOrderPaymentAcceptance",method: "POST",path: "/v1/orders/{orderId}/payment-acceptance",host: "api",kind: "write",idempotent: true,cookie: true},
   createPartnerAuthAccessToken: {operationId: "createPartnerAuthAccessToken",method: "POST",path: "/v1/partner/auth/access-tokens",host: "partner-api",kind: "write",cookie: true},
+  createPartnerAuthPasskey: {operationId: "createPartnerAuthPasskey",method: "POST",path: "/v1/partner/auth/passkeys",host: "partner-api",kind: "write",cookie: true},
+  createPartnerAuthPasskeyRegistration: {operationId: "createPartnerAuthPasskeyRegistration",method: "POST",path: "/v1/partner/auth/passkey-registrations",host: "partner-api",kind: "write",cookie: true},
   createPartnerAuthPasswordChange: {operationId: "createPartnerAuthPasswordChange",method: "POST",path: "/v1/partner/auth/password-changes",host: "partner-api",kind: "write",cookie: true},
+  createPartnerAuthReauthentication: {operationId: "createPartnerAuthReauthentication",method: "POST",path: "/v1/partner/auth/reauthentications",host: "partner-api",kind: "write",cookie: true},
   createPartnerAuthSession: {operationId: "createPartnerAuthSession",method: "POST",path: "/v1/partner/auth/sessions",host: "partner-api",kind: "write",cookie: true},
   createPartnerAuthUnlock: {operationId: "createPartnerAuthUnlock",method: "POST",path: "/v1/partner/auth/unlocks",host: "partner-api",kind: "write",cookie: false},
   createPartnerAuthUnlockLink: {operationId: "createPartnerAuthUnlockLink",method: "POST",path: "/v1/partner/auth/unlock-links",host: "partner-api",kind: "write",cookie: false},
@@ -439,6 +455,8 @@ export const OPERATIONS = {
   deleteOpsAdminAccountDesignation: {operationId: "deleteOpsAdminAccountDesignation",method: "DELETE",path: "/v1/ops/admin-accounts/{adminAccountId}/designations/{kind}",host: "ops-api",kind: "write",cookie: true},
   deleteOpsAdminAccountSession: {operationId: "deleteOpsAdminAccountSession",method: "DELETE",path: "/v1/ops/admin-accounts/{adminAccountId}/sessions/{sessionId}",host: "ops-api",kind: "write",cookie: true},
   deleteOpsAdminAccountSessions: {operationId: "deleteOpsAdminAccountSessions",method: "DELETE",path: "/v1/ops/admin-accounts/{adminAccountId}/sessions",host: "ops-api",kind: "write",cookie: true},
+  deleteOpsAuthPasskey: {operationId: "deleteOpsAuthPasskey",method: "DELETE",path: "/v1/ops/auth/passkeys/{passkeyId}",host: "ops-api",kind: "write",cookie: true},
+  deletePartnerAuthPasskey: {operationId: "deletePartnerAuthPasskey",method: "DELETE",path: "/v1/partner/auth/passkeys/{passkeyId}",host: "partner-api",kind: "write",cookie: true},
   deletePartnerProductionImage: {operationId: "deletePartnerProductionImage",method: "DELETE",path: "/v1/partner/productions/{productionId}/images/{imageId}",host: "partner-api",kind: "write",cookie: true},
   deletePartnerProductionSaleReview: {operationId: "deletePartnerProductionSaleReview",method: "DELETE",path: "/v1/partner/productions/{productionId}/sale-review",host: "partner-api",kind: "write",cookie: true},
   deletePartnerStaff: {operationId: "deletePartnerStaff",method: "DELETE",path: "/v1/partner/staff/{assignmentId}",host: "partner-api",kind: "write",cookie: true},
@@ -464,6 +482,7 @@ export const OPERATIONS = {
   getMyOpsAuthSession: {operationId: "getMyOpsAuthSession",method: "GET",path: "/v1/ops/auth/sessions/me",host: "ops-api",kind: "read",cookie: true},
   getOpsAdminAccount: {operationId: "getOpsAdminAccount",method: "GET",path: "/v1/ops/admin-accounts/{adminAccountId}",host: "ops-api",kind: "read",cookie: true},
   getOpsApprovalRequest: {operationId: "getOpsApprovalRequest",method: "GET",path: "/v1/ops/approval-requests/{approvalId}",host: "ops-api",kind: "read",cookie: true},
+  getOpsAuthPasskeys: {operationId: "getOpsAuthPasskeys",method: "GET",path: "/v1/ops/auth/passkeys",host: "ops-api",kind: "read",cookie: true},
   getOpsCase: {operationId: "getOpsCase",method: "GET",path: "/v1/ops/cases/{caseId}",host: "ops-api",kind: "read",cookie: true},
   getOpsComplianceDataRequest: {operationId: "getOpsComplianceDataRequest",method: "GET",path: "/v1/ops/compliance/data-requests/{requestId}",host: "ops-api",kind: "read",cookie: true},
   getOpsComplianceDocument: {operationId: "getOpsComplianceDocument",method: "GET",path: "/v1/ops/compliance/documents/{documentId}",host: "ops-api",kind: "read",cookie: true},
@@ -484,6 +503,7 @@ export const OPERATIONS = {
   getOpsResearchExport: {operationId: "getOpsResearchExport",method: "GET",path: "/v1/ops/research-exports/{exportId}",host: "ops-api",kind: "read",cookie: true},
   getOpsWidget: {operationId: "getOpsWidget",method: "GET",path: "/v1/ops/widgets/{widgetKey}",host: "ops-api",kind: "read",cookie: true,query: ["eventId","from","to"]},
   getOrderPaymentStatus: {operationId: "getOrderPaymentStatus",method: "GET",path: "/v1/orders/{orderId}/payment-status",host: "api",kind: "longpoll",cookie: true},
+  getPartnerAuthPasskeys: {operationId: "getPartnerAuthPasskeys",method: "GET",path: "/v1/partner/auth/passkeys",host: "partner-api",kind: "read",cookie: true},
   getPartnerEventFraudReport: {operationId: "getPartnerEventFraudReport",method: "GET",path: "/v1/partner/events/{eventId}/fraud-report",host: "partner-api",kind: "read",cookie: true},
   getPartnerEventGateStatus: {operationId: "getPartnerEventGateStatus",method: "GET",path: "/v1/partner/events/{eventId}/gate-status",host: "partner-api",kind: "read",cookie: true},
   getPartnerEventLiveSnapshot: {operationId: "getPartnerEventLiveSnapshot",method: "GET",path: "/v1/partner/events/{eventId}/live-snapshot",host: "partner-api",kind: "read",cookie: true},

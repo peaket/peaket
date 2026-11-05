@@ -28,7 +28,14 @@ import type {
   AdminLoginPasswordStep,
   AdminLoginSecondStep,
   AdminLoginStep,
+  AdminPasskey,
+  AdminPasskeyCreate,
+  AdminPasskeyList,
+  AdminPasskeyRegistration,
   AdminPasswordChangeCreate,
+  AdminReauthDone,
+  AdminReauthPasskeyChallenge,
+  AdminReauthPasskeyStep,
   AdminUnlockCreate,
   AdminUnlockLinkCreate,
   AttendeeExportPage,
@@ -57,6 +64,7 @@ import type {
   PartnerEventCreated,
   PartnerProductionCreate,
   PartnerProductionCreated,
+  PartnerReauthPasswordStep,
   PartnerSalesReport,
   PartnerTeamAccountPage,
   PayoutAccountChange,
@@ -86,6 +94,18 @@ export const getCreatePartnerAuthSessionResponseAdminLoginStepMock = (overrideRe
 export const getCreatePartnerAuthSessionResponseAdminLoginDoneMock = (overrideResponse: Partial<AdminLoginDone> = {}): AdminLoginDone => ({...{next: faker.helpers.arrayElement(['DONE'] as const)}, ...overrideResponse});
 
 export const getCreatePartnerAuthSessionResponseMock = (): AdminLoginStep | AdminLoginDone => (faker.helpers.arrayElement([{...getCreatePartnerAuthSessionResponseAdminLoginStepMock()},{...getCreatePartnerAuthSessionResponseAdminLoginDoneMock()},]))
+
+export const getCreatePartnerAuthReauthenticationResponseAdminReauthPasskeyChallengeMock = (overrideResponse: Partial<AdminReauthPasskeyChallenge> = {}): AdminReauthPasskeyChallenge => ({...{next: faker.helpers.arrayElement(['PASSKEY'] as const), reauthStep: faker.helpers.fromRegExp("^[A-Za-z0-9_-]{43}$"), publicKey: {challenge: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), rpId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), timeout: faker.helpers.arrayElement([faker.number.int(), undefined]), userVerification: faker.helpers.arrayElement([faker.helpers.arrayElement(['required'] as const), undefined]), allowCredentials: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({id: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), type: faker.helpers.arrayElement([faker.helpers.arrayElement(['public-key'] as const), undefined]), transports: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined])})), undefined])}, expiresInSeconds: faker.number.int()}, ...overrideResponse});
+
+export const getCreatePartnerAuthReauthenticationResponseAdminReauthDoneMock = (overrideResponse: Partial<AdminReauthDone> = {}): AdminReauthDone => ({...{next: faker.helpers.arrayElement(['DONE'] as const), reauthToken: faker.string.alpha({length: {min: 10, max: 20}}), factors: faker.helpers.arrayElements(['password','totp','passkey'] as const), expiresInSeconds: faker.number.int()}, ...overrideResponse});
+
+export const getCreatePartnerAuthReauthenticationResponseMock = (): AdminReauthPasskeyChallenge | AdminReauthDone => (faker.helpers.arrayElement([{...getCreatePartnerAuthReauthenticationResponseAdminReauthPasskeyChallengeMock()},{...getCreatePartnerAuthReauthenticationResponseAdminReauthDoneMock()},]))
+
+export const getCreatePartnerAuthPasskeyRegistrationResponseMock = (overrideResponse: Partial<Extract<AdminPasskeyRegistration, object>> = {}): AdminPasskeyRegistration => ({registrationId: faker.helpers.fromRegExp("^[A-Za-z0-9_-]{43}$"), publicKey: {rp: faker.helpers.arrayElement([{id: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined]), user: faker.helpers.arrayElement([{id: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), displayName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined]), challenge: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), pubKeyCredParams: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({type: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), alg: faker.helpers.arrayElement([faker.number.int(), undefined])})), undefined]), timeout: faker.helpers.arrayElement([faker.number.int(), undefined]), excludeCredentials: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({id: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), type: faker.helpers.arrayElement([faker.helpers.arrayElement(['public-key'] as const), undefined]), transports: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined])})), undefined]), authenticatorSelection: faker.helpers.arrayElement([{residentKey: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), userVerification: faker.helpers.arrayElement([faker.helpers.arrayElement(['required'] as const), undefined])}, undefined]), attestation: faker.helpers.arrayElement([faker.helpers.arrayElement(['none'] as const), undefined]), extensions: faker.helpers.arrayElement([{}, undefined]), hints: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined])}, expiresInSeconds: faker.number.int(), ...overrideResponse})
+
+export const getGetPartnerAuthPasskeysResponseMock = (overrideResponse: Partial<Extract<AdminPasskeyList, object>> = {}): AdminPasskeyList => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({passkeyId: faker.helpers.arrayElement([faker.string.uuid(), undefined]), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), lastUsedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), backedUp: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), deviceType: faker.helpers.arrayElement([faker.helpers.arrayElement(['singleDevice','multiDevice'] as const), undefined]), transports: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined])})), undefined]), ...overrideResponse})
+
+export const getCreatePartnerAuthPasskeyResponseMock = (overrideResponse: Partial<Extract<AdminPasskey, object>> = {}): AdminPasskey => ({passkeyId: faker.helpers.arrayElement([faker.string.uuid(), undefined]), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), lastUsedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), backedUp: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), deviceType: faker.helpers.arrayElement([faker.helpers.arrayElement(['singleDevice','multiDevice'] as const), undefined]), transports: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), ...overrideResponse})
 
 export const getListPartnerTeamAccountsResponseMock = (overrideResponse: Partial<Extract<PartnerTeamAccountPage, object>> = {}): PartnerTeamAccountPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({displayName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), emailMasked: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), role: faker.helpers.arrayElement([faker.helpers.arrayElement(['partner_admin','partner_member'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['INVITED','ACTIVE','INVITE_EXPIRED'] as const), undefined]), locked: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), lastLoginAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
 
@@ -216,6 +236,64 @@ export const getCreatePartnerAuthUnlockLinkMockHandler = (overrideResponse?: voi
 
 export const getCreatePartnerAuthPasswordChangeMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<PathParams, AdminPasswordChangeCreate>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
   return http.post<PathParams, AdminPasswordChangeCreate>('*/v1/partner/auth/password-changes', async (info: Parameters<HttpResponseResolver<PathParams, AdminPasswordChangeCreate>>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
+
+export const getCreatePartnerAuthReauthenticationMockHandler = (overrideResponse?: AdminReauthPasskeyChallenge | AdminReauthDone | ((info: Parameters<HttpResponseResolver<PathParams, PartnerReauthPasswordStep | AdminReauthPasskeyStep>>[0]) => Promise<AdminReauthPasskeyChallenge | AdminReauthDone> | AdminReauthPasskeyChallenge | AdminReauthDone), options?: RequestHandlerOptions) => {
+  return http.post<PathParams, PartnerReauthPasswordStep | AdminReauthPasskeyStep>('*/v1/partner/auth/reauthentications', async (info: Parameters<HttpResponseResolver<PathParams, PartnerReauthPasswordStep | AdminReauthPasskeyStep>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreatePartnerAuthReauthenticationResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreatePartnerAuthPasskeyRegistrationMockHandler = (overrideResponse?: AdminPasskeyRegistration | ((info: Parameters<HttpResponseResolver>[0]) => Promise<AdminPasskeyRegistration> | AdminPasskeyRegistration), options?: RequestHandlerOptions) => {
+  return http.post('*/v1/partner/auth/passkey-registrations', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreatePartnerAuthPasskeyRegistrationResponseMock(),
+      { status: 201
+      })
+  }, options)
+}
+
+export const getGetPartnerAuthPasskeysMockHandler = (overrideResponse?: AdminPasskeyList | ((info: Parameters<HttpResponseResolver>[0]) => Promise<AdminPasskeyList> | AdminPasskeyList), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/partner/auth/passkeys', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetPartnerAuthPasskeysResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreatePartnerAuthPasskeyMockHandler = (overrideResponse?: AdminPasskey | ((info: Parameters<HttpResponseResolver<PathParams, AdminPasskeyCreate>>[0]) => Promise<AdminPasskey> | AdminPasskey), options?: RequestHandlerOptions) => {
+  return http.post<PathParams, AdminPasskeyCreate>('*/v1/partner/auth/passkeys', async (info: Parameters<HttpResponseResolver<PathParams, AdminPasskeyCreate>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreatePartnerAuthPasskeyResponseMock(),
+      { status: 201
+      })
+  }, options)
+}
+
+export const getDeletePartnerAuthPasskeyMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ passkeyId: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.delete<{ passkeyId: string }>('*/v1/partner/auth/passkeys/:passkeyId', async (info: Parameters<HttpResponseResolver<{ passkeyId: string }>>[0]) => {
   if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
     return new HttpResponse(null,
@@ -724,6 +802,11 @@ export const getPartnerMock = () => [
   getCreatePartnerAuthUnlockMockHandler(),
   getCreatePartnerAuthUnlockLinkMockHandler(),
   getCreatePartnerAuthPasswordChangeMockHandler(),
+  getCreatePartnerAuthReauthenticationMockHandler(),
+  getCreatePartnerAuthPasskeyRegistrationMockHandler(),
+  getGetPartnerAuthPasskeysMockHandler(),
+  getCreatePartnerAuthPasskeyMockHandler(),
+  getDeletePartnerAuthPasskeyMockHandler(),
   getListPartnerTeamAccountsMockHandler(),
   getCreatePartnerProductionMockHandler(),
   getCreatePartnerProductionEventMockHandler(),

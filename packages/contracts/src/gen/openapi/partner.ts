@@ -113,6 +113,238 @@ export const CreatePartnerAuthPasswordChangeBody = zod.object({
 export const CreatePartnerAuthPasswordChangeResponse = zod.void()
 
 /**
+ * FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 정산 계좌 변경·명단 내려받기·내 패스키 등록과 지우기 직전에 부른다. 1단계(PartnerReauthPasswordStep)는 비밀번호와 인증 앱 코드(TOTP)를 확인하고, 틀리면 로그인 실패처럼 센다(docs/security/auth-controls.md §3.1). withPasskey가 거짓이면 바로 재인증 토큰을 준다(factors password·totp). 참이면 패스키 확인 옵션과 reauthStep을 주고, 2단계(AdminReauthPasskeyStep)에서 그 계정 패스키의 서명이 맞으면 factors password·totp·passkey 토큰을 준다. 서명은 사용자 확인 표시가 있어야 하고, RP ID는 partner.peaket.example, 출처는 파트너 콘솔 출처 하나다. 토큰(typ reauth+jwt, 5분 한 번, 그 세션 sid와 작업 묶음 act에 묶임)은 본문에 있고 화면이 X-Reauth-Token으로 보낸다(guidelines §7). 그 작업에 패스키가 필요한지는 받는 서비스가 본다(docs/security/authz-matrix.md §6). Cache-Control: no-store. 쿠키로 인증하는 쓰기라 gw-partner가 Origin을 확인한다. 정본은 docs/features/identity.md §6 '관리 계정 패스키의 첫 구현'
+ * @summary 파트너 관리 계정 재인증(비밀번호·인증 앱 코드, 요청하면 패스키 확인까지) → 재인증 토큰
+ */
+export const createPartnerAuthReauthenticationBodyOnePasswordMax = 1024;
+
+export const createPartnerAuthReauthenticationBodyOneCodeRegExp = new RegExp('^[0-9]{3} ?[0-9]{3}$');
+export const createPartnerAuthReauthenticationBodyTwoReauthStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const createPartnerAuthReauthenticationBodyTwoCredentialIdMax = 1366;
+
+
+export const createPartnerAuthReauthenticationBodyTwoCredentialIdRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const createPartnerAuthReauthenticationBodyTwoCredentialRawIdMax = 1366;
+
+
+export const createPartnerAuthReauthenticationBodyTwoCredentialRawIdRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const createPartnerAuthReauthenticationBodyTwoCredentialAuthenticatorAttachmentMax = 32;
+
+export const createPartnerAuthReauthenticationBodyTwoCredentialResponseClientDataJSONMax = 4096;
+
+
+export const createPartnerAuthReauthenticationBodyTwoCredentialResponseClientDataJSONRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const createPartnerAuthReauthenticationBodyTwoCredentialResponseAuthenticatorDataMax = 4096;
+
+
+export const createPartnerAuthReauthenticationBodyTwoCredentialResponseAuthenticatorDataRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const createPartnerAuthReauthenticationBodyTwoCredentialResponseSignatureMax = 1024;
+
+
+export const createPartnerAuthReauthenticationBodyTwoCredentialResponseSignatureRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const createPartnerAuthReauthenticationBodyTwoCredentialResponseUserHandleMax = 128;
+
+
+export const createPartnerAuthReauthenticationBodyTwoCredentialResponseUserHandleRegExp = new RegExp('^[A-Za-z0-9_-]*$');
+
+
+export const CreatePartnerAuthReauthenticationBody = zod.union([zod.object({
+  "act": zod.enum(['PAYOUT_ACCOUNT', 'BOOKER_EXPORT', 'ACCOUNT_SECURITY']).describe('정산 계좌, 명단 내려받기, 계정 보안 설정(내 패스키 등록·지우기)'),
+  "password": zod.string().min(1).max(createPartnerAuthReauthenticationBodyOnePasswordMax).describe('원문. 서버가 NFC로 맞춘다'),
+  "code": zod.string().regex(createPartnerAuthReauthenticationBodyOneCodeRegExp).describe('인증 앱 코드(TOTP 6자리, 가운데를 띄어 써도 된다). 복구 코드는 받지 않는다'),
+  "withPasskey": zod.boolean().optional().describe('참이면 패스키 확인 옵션을 받고 2단계로 간다. 없으면 거짓이다')
+}).strict().describe('파트너 관리 계정 재인증 1단계 본문(POST /v1/partner/auth/reauthentications). 작업 묶음 act는 파트너 콘솔이 받는 셋이다(docs/security/authz-matrix.md §6). withPasskey가 참이면 다음 단계에서 패스키를 확인한다. 정본은 docs/features/identity.md §6 \'관리 계정 패스키의 첫 구현\'(추천 적용 2026-11-05, BUILD_ORDER BOT-122, ADR-0206)'),zod.object({
+  "reauthStep": zod.string().regex(createPartnerAuthReauthenticationBodyTwoReauthStepRegExp),
+  "credential": zod.object({
+  "id": zod.string().min(1).max(createPartnerAuthReauthenticationBodyTwoCredentialIdMax).regex(createPartnerAuthReauthenticationBodyTwoCredentialIdRegExp).describe('자격 ID(1~1023바이트)'),
+  "rawId": zod.string().min(1).max(createPartnerAuthReauthenticationBodyTwoCredentialRawIdMax).regex(createPartnerAuthReauthenticationBodyTwoCredentialRawIdRegExp),
+  "type": zod.enum(['public-key']),
+  "authenticatorAttachment": zod.string().max(createPartnerAuthReauthenticationBodyTwoCredentialAuthenticatorAttachmentMax).optional(),
+  "clientExtensionResults": zod.looseObject({
+
+}),
+  "response": zod.object({
+  "clientDataJSON": zod.string().min(1).max(createPartnerAuthReauthenticationBodyTwoCredentialResponseClientDataJSONMax).regex(createPartnerAuthReauthenticationBodyTwoCredentialResponseClientDataJSONRegExp),
+  "authenticatorData": zod.string().min(1).max(createPartnerAuthReauthenticationBodyTwoCredentialResponseAuthenticatorDataMax).regex(createPartnerAuthReauthenticationBodyTwoCredentialResponseAuthenticatorDataRegExp),
+  "signature": zod.string().min(1).max(createPartnerAuthReauthenticationBodyTwoCredentialResponseSignatureMax).regex(createPartnerAuthReauthenticationBodyTwoCredentialResponseSignatureRegExp),
+  "userHandle": zod.string().max(createPartnerAuthReauthenticationBodyTwoCredentialResponseUserHandleMax).regex(createPartnerAuthReauthenticationBodyTwoCredentialResponseUserHandleRegExp).optional()
+}).strict()
+}).strict().describe('패스키 확인 결과(W3C WebAuthn Level 3 AuthenticationResponseJSON). 이진 값은 모두 채움 없는 base64url이다')
+}).strict().describe('관리 계정 재인증 2단계 본문(파트너·관제 같은 꼴). 1단계 응답의 reauthStep과 브라우저 navigator.credentials.get()의 결과(PublicKeyCredential.toJSON())를 보낸다(추천 적용 2026-11-05, BUILD_ORDER BOT-122)')])
+
+export const createPartnerAuthReauthenticationResponseOneReauthStepRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+
+
+export const CreatePartnerAuthReauthenticationResponse = zod.union([zod.object({
+  "next": zod.enum(['PASSKEY']),
+  "reauthStep": zod.string().regex(createPartnerAuthReauthenticationResponseOneReauthStepRegExp).describe('32바이트 난수의 채움 없는 base64url. 서버는 SHA-256만 둔다. 5분 [가정] 한 번'),
+  "publicKey": zod.object({
+  "challenge": zod.string().optional().describe('32바이트 난수의 base64url. 5분 [가정] 한 번'),
+  "rpId": zod.string().optional().describe('그 콘솔 호스트(partner.peaket.example 또는 console.peaket.example)'),
+  "timeout": zod.int().optional().describe('밀리초'),
+  "userVerification": zod.enum(['required']).optional(),
+  "allowCredentials": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "type": zod.enum(['public-key']).optional(),
+  "transports": zod.array(zod.string()).optional()
+}).describe('패스키 하나를 가리키는 값(PublicKeyCredentialDescriptorJSON)')).optional().describe('그 계정의 패스키만')
+}).describe('패스키 확인 옵션(W3C WebAuthn Level 3 PublicKeyCredentialRequestOptionsJSON). 화면은 PublicKeyCredential.parseRequestOptionsFromJSON()으로 바꿔 navigator.credentials.get()에 넘긴다'),
+  "expiresInSeconds": zod.int()
+}).describe('재인증 1단계 통과(비밀번호·인증 앱 코드가 맞았다). 2단계에 reauthStep과 패스키 확인 결과를 보낸다(추천 적용 2026-11-05, BUILD_ORDER BOT-122)'),zod.object({
+  "next": zod.enum(['DONE']),
+  "reauthToken": zod.string().describe('typ reauth+jwt, 관리 토큰 키 ES256, 5분 한 번. 그 세션 sid와 작업 묶음 act에 묶인다'),
+  "factors": zod.array(zod.enum(['password', 'totp', 'passkey'])).describe('확인한 요소(토큰의 factors와 같다)'),
+  "expiresInSeconds": zod.int()
+}).describe('재인증 토큰(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 화면이 명령 API의 X-Reauth-Token으로 보낸다(guidelines §7)')])
+
+/**
+ * FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 작업 묶음 ACCOUNT_SECURITY의 재인증 토큰을 X-Reauth-Token으로 받는다. factors에 password·totp가 있어야 하고, 이미 패스키가 있으면 passkey도 있어야 한다(비밀번호·TOTP만 가로챈 사람이 자기 패스키를 더하지 못하게). 토큰은 여기서 한 번 쓴다. 화면은 응답의 publicKey를 navigator.credentials.create()에 넘기고, 결과를 POST /v1/partner/auth/passkeys로 보낸다. registrationId와 챌린지(32바이트)는 이 세션에서 5분 [가정] 한 번이다. RP ID는 partner.peaket.example이고 사용자 확인 필수다. Cache-Control: no-store. gw-partner가 Origin을 확인한다
+ * @summary 내 패스키 등록 시작(등록 옵션, 재인증 토큰 필요)
+ */
+export const CreatePartnerAuthPasskeyRegistrationHeader = zod.object({
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+})
+
+export const createPartnerAuthPasskeyRegistrationResponseRegistrationIdRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+
+
+export const CreatePartnerAuthPasskeyRegistrationResponse = zod.object({
+  "registrationId": zod.string().regex(createPartnerAuthPasskeyRegistrationResponseRegistrationIdRegExp).describe('32바이트 난수의 채움 없는 base64url. 그 세션에서 5분 [가정] 한 번'),
+  "publicKey": zod.object({
+  "rp": zod.object({
+  "id": zod.string().optional().describe('그 콘솔 호스트'),
+  "name": zod.string().optional()
+}).optional(),
+  "user": zod.object({
+  "id": zod.string().optional().describe('관리 계정 ID 16바이트의 base64url'),
+  "name": zod.string().optional().describe('업무 이메일'),
+  "displayName": zod.string().optional()
+}).optional(),
+  "challenge": zod.string().optional().describe('32바이트 난수의 base64url. 5분 [가정] 한 번'),
+  "pubKeyCredParams": zod.array(zod.object({
+  "type": zod.string().optional(),
+  "alg": zod.int().optional().describe('COSE 알고리즘(-7 ES256, -8 EdDSA, -257 RS256)')
+})).optional(),
+  "timeout": zod.int().optional().describe('밀리초'),
+  "excludeCredentials": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "type": zod.enum(['public-key']).optional(),
+  "transports": zod.array(zod.string()).optional()
+}).describe('패스키 하나를 가리키는 값(PublicKeyCredentialDescriptorJSON)')).optional().describe('이미 등록한 패스키(다시 등록하지 않게)'),
+  "authenticatorSelection": zod.object({
+  "residentKey": zod.string().optional(),
+  "userVerification": zod.enum(['required']).optional()
+}).optional(),
+  "attestation": zod.enum(['none']).optional(),
+  "extensions": zod.looseObject({
+
+}).optional(),
+  "hints": zod.array(zod.string()).optional()
+}).describe('패스키 등록 옵션(W3C WebAuthn Level 3 PublicKeyCredentialCreationOptionsJSON). 화면은 PublicKeyCredential.parseCreationOptionsFromJSON()으로 바꿔 navigator.credentials.create()에 넘긴다'),
+  "expiresInSeconds": zod.int()
+}).describe('내 패스키 등록 시작 응답(추천 적용 2026-11-05, BUILD_ORDER BOT-122)')
+
+/**
+ * FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 내 계정의 패스키를 만든 차례로 준다(10개 [가정]까지라 페이지를 나누지 않는다). 공개키와 자격 ID 원문은 싣지 않는다. 화면은 docs/design/d5 SCR-020 '내 계정'의 패스키 줄이다. Cache-Control: no-store
+ * @summary 내 패스키 목록
+ */
+export const GetPartnerAuthPasskeysResponse = zod.object({
+  "items": zod.array(zod.object({
+  "passkeyId": zod.uuid().optional(),
+  "name": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "lastUsedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "backedUp": zod.boolean().optional().describe('백업 상태(여러 기기에 동기화되어 있는지)'),
+  "deviceType": zod.enum(['singleDevice', 'multiDevice']).optional(),
+  "transports": zod.array(zod.string()).optional()
+}).describe('내 패스키 한 줄(docs/data.md admin_passkey). 공개키와 자격 ID 원문은 싣지 않는다(추천 적용 2026-11-05, BUILD_ORDER BOT-122)')).optional()
+}).describe('내 패스키 목록(만든 차례, 10개 [가정]까지)')
+
+/**
+ * FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 등록 시작(POST /v1/partner/auth/passkey-registrations)의 registrationId와 navigator.credentials.create()의 결과를 받는다. 출처(파트너 콘솔), RP ID(partner.peaket.example), 챌린지, 사용자 확인 표시, 서명 방식(ES256·EdDSA·RS256)을 @simplewebauthn/server로 확인한다. 증명(attestation)은 받지 않는다(none). 계정 행을 잠근 트랜잭션에서 10개 [가정] 상한을 다시 보고 넣으며, 계정 주인 업무 이메일로 등록 알림(PASSKEY_ADDED)을 보낸다. Cache-Control: no-store. gw-partner가 Origin을 확인한다
+ * @summary 내 패스키 등록 마치기(브라우저가 만든 자격 확인)
+ */
+export const createPartnerAuthPasskeyBodyRegistrationIdRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const createPartnerAuthPasskeyBodyCredentialIdMax = 1366;
+
+
+export const createPartnerAuthPasskeyBodyCredentialIdRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const createPartnerAuthPasskeyBodyCredentialRawIdMax = 1366;
+
+
+export const createPartnerAuthPasskeyBodyCredentialRawIdRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const createPartnerAuthPasskeyBodyCredentialAuthenticatorAttachmentMax = 32;
+
+export const createPartnerAuthPasskeyBodyCredentialResponseClientDataJSONMax = 4096;
+
+
+export const createPartnerAuthPasskeyBodyCredentialResponseClientDataJSONRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const createPartnerAuthPasskeyBodyCredentialResponseAttestationObjectMax = 16384;
+
+
+export const createPartnerAuthPasskeyBodyCredentialResponseAttestationObjectRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const createPartnerAuthPasskeyBodyCredentialResponseAuthenticatorDataMax = 8192;
+
+
+export const createPartnerAuthPasskeyBodyCredentialResponseAuthenticatorDataRegExp = new RegExp('^[A-Za-z0-9_-]*$');
+export const createPartnerAuthPasskeyBodyCredentialResponsePublicKeyMax = 4096;
+
+
+export const createPartnerAuthPasskeyBodyCredentialResponsePublicKeyRegExp = new RegExp('^[A-Za-z0-9_-]*$');
+export const createPartnerAuthPasskeyBodyCredentialResponseTransportsItemRegExp = new RegExp('^[a-z-]{1,32}$');
+export const createPartnerAuthPasskeyBodyCredentialResponseTransportsMax = 8;
+
+export const createPartnerAuthPasskeyBodyNameMax = 30;
+
+
+
+export const CreatePartnerAuthPasskeyBody = zod.object({
+  "registrationId": zod.string().regex(createPartnerAuthPasskeyBodyRegistrationIdRegExp),
+  "credential": zod.object({
+  "id": zod.string().min(1).max(createPartnerAuthPasskeyBodyCredentialIdMax).regex(createPartnerAuthPasskeyBodyCredentialIdRegExp).describe('자격 ID(1~1023바이트)'),
+  "rawId": zod.string().min(1).max(createPartnerAuthPasskeyBodyCredentialRawIdMax).regex(createPartnerAuthPasskeyBodyCredentialRawIdRegExp),
+  "type": zod.enum(['public-key']),
+  "authenticatorAttachment": zod.string().max(createPartnerAuthPasskeyBodyCredentialAuthenticatorAttachmentMax).optional(),
+  "clientExtensionResults": zod.looseObject({
+
+}),
+  "response": zod.object({
+  "clientDataJSON": zod.string().min(1).max(createPartnerAuthPasskeyBodyCredentialResponseClientDataJSONMax).regex(createPartnerAuthPasskeyBodyCredentialResponseClientDataJSONRegExp),
+  "attestationObject": zod.string().min(1).max(createPartnerAuthPasskeyBodyCredentialResponseAttestationObjectMax).regex(createPartnerAuthPasskeyBodyCredentialResponseAttestationObjectRegExp),
+  "authenticatorData": zod.string().max(createPartnerAuthPasskeyBodyCredentialResponseAuthenticatorDataMax).regex(createPartnerAuthPasskeyBodyCredentialResponseAuthenticatorDataRegExp).optional(),
+  "publicKey": zod.string().max(createPartnerAuthPasskeyBodyCredentialResponsePublicKeyMax).regex(createPartnerAuthPasskeyBodyCredentialResponsePublicKeyRegExp).optional(),
+  "publicKeyAlgorithm": zod.int().optional(),
+  "transports": zod.array(zod.string().regex(createPartnerAuthPasskeyBodyCredentialResponseTransportsItemRegExp)).max(createPartnerAuthPasskeyBodyCredentialResponseTransportsMax).optional().describe('인증기가 알린 전송 방식(internal·hybrid·usb·nfc·ble 등)')
+}).strict()
+}).strict().describe('패스키 등록 결과(W3C WebAuthn Level 3 RegistrationResponseJSON, navigator.credentials.create()의 PublicKeyCredential.toJSON()). 이진 값은 모두 채움 없는 base64url이다'),
+  "name": zod.string().min(1).max(createPartnerAuthPasskeyBodyNameMax).optional().describe('이름표(예: 사무실 노트북). 앞뒤 빈칸과 제어 문자를 지운 1~30자 [가정]. 없으면 \'패스키\'')
+}).strict().describe('내 패스키 등록 마치기 본문(POST /v1/partner/auth/passkeys·/v1/ops/auth/passkeys). 등록 시작 응답의 registrationId와 브라우저가 만든 자격을 보낸다(추천 적용 2026-11-05, BUILD_ORDER BOT-122)')
+
+export const CreatePartnerAuthPasskeyResponse = zod.object({
+  "passkeyId": zod.uuid().optional(),
+  "name": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "lastUsedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "backedUp": zod.boolean().optional().describe('백업 상태(여러 기기에 동기화되어 있는지)'),
+  "deviceType": zod.enum(['singleDevice', 'multiDevice']).optional(),
+  "transports": zod.array(zod.string()).optional()
+}).describe('내 패스키 한 줄(docs/data.md admin_passkey). 공개키와 자격 ID 원문은 싣지 않는다(추천 적용 2026-11-05, BUILD_ORDER BOT-122)')
+
+/**
+ * FR-021, POL-020, ADR-0206(추천 적용 2026-11-05, BUILD_ORDER BOT-122). 작업 묶음 ACCOUNT_SECURITY의 재인증 토큰을 받는다. 패스키가 있는 계정이라 factors에 passkey가 있어야 한다. 다른 패스키를 잃었을 때 남은 패스키로 재인증하고 잃은 것을 지우는 길이다(ASVS 6.4.4). partner_admin은 마지막 하나를 지우지 못한다(docs/design/d5 SCR-020 '패스키 줄'). 지우면 계정 주인 업무 이메일로 알린다(PASSKEY_REMOVED). gw-partner가 Origin을 확인한다
+ * @summary 내 패스키 지우기(재인증 토큰 필요, 필수 역할의 마지막 하나는 409)
+ */
+export const DeletePartnerAuthPasskeyParams = zod.object({
+  "passkeyId": zod.uuid()
+})
+
+export const DeletePartnerAuthPasskeyHeader = zod.object({
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+})
+
+export const DeletePartnerAuthPasskeyResponse = zod.void()
+
+/**
  * FR-021, POL-020, docs/planning/03 §3 '파트너 계정 초대·역할 변경·잠금 해제' 행의 파트너 칸 'R(관리자: 소속 계정 목록)'(소유자 결정 2026-10-30, open-items 73번. 세부는 추천 적용 2026-10-30). 소속 파트너사(요청마다 판정한 요청 테넌트, ADR-0172)의 삭제하지 않은 관리 계정만 준다(docs/security/authz-matrix.md §3.3). 초대·역할 변경·삭제·재초대는 파트너 콘솔에 없고 PEAKET 운영자가 관제 콘솔(SCR-064, /v1/ops/admin-accounts)에서 한다(docs/design/d5 SCR-020 ⑨). 이메일은 가린 값만, 잠금은 걸렸는지만 싣고 계정 ID는 싣지 않는다. partner_member는 403이다. gw-partner가 identity-svc로 넘긴다. 최근 접속 순, 커서 페이징(guidelines §3). Cache-Control: no-store
  * @summary 팀 계정 목록(SCR-020 ⑨, 파트너 관리자만, 보기만)
  */

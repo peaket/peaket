@@ -88,6 +88,7 @@ erDiagram
     admin_account ||--o{ admin_known_source : "익숙한 출발지(추천 적용 2026-11-05)"
     admin_account ||--o{ admin_account_request : "관리 계정 관리 호출의 멱등 기록(추천 적용 2026-11-05)"
     admin_session ||--o{ admin_refresh_token_hash : "발급한 관리 리프레시 토큰 해시(추천 적용 2026-11-05)"
+    admin_session ||--o{ admin_reauth : "발급한 관리 재인증 토큰(추천 적용 2026-11-05, BOT-122)"
     account ||--o{ booth_reverification : "부스 본인확인 대조"
     account ||--o{ staff_assignment : "회차 역할"
     event ||--o{ staff_assignment : ""
@@ -328,18 +329,37 @@ erDiagram
     admin_security_notice {
         uuid id PK
         uuid admin_account_id FK
-        text kind "TIMED_LOCK|PASSWORD_FAILURE_NOTICE|MULTI_SOURCE_ALERT|PROTECT_LOCK(docs/security/auth-controls.md §3.4)|SESSION_LIMIT(동시 세션 2개를 넘어 가장 오래 쓰지 않은 세션을 끝냄, POL-019, BOT-120)|UNLOCK_LINK(해제 링크 다시 받기)|UNLOCKED(본인 해제, BOT-121)|PASSWORD_ONLY_LOGIN(비밀번호만 맞은 로그인, BOT-123)|INVITATION(초대·재초대 링크, 보낼 때 토큰을 만든다, BOT-150)"
+        text kind "TIMED_LOCK|PASSWORD_FAILURE_NOTICE|MULTI_SOURCE_ALERT|PROTECT_LOCK(docs/security/auth-controls.md §3.4)|SESSION_LIMIT(동시 세션 2개를 넘어 가장 오래 쓰지 않은 세션을 끝냄, POL-019, BOT-120)|UNLOCK_LINK(해제 링크 다시 받기)|UNLOCKED(본인 해제, BOT-121)|PASSWORD_ONLY_LOGIN(비밀번호만 맞은 로그인, BOT-123)|INVITATION(초대·재초대 링크, 보낼 때 토큰을 만든다, BOT-150)|PASSKEY_ADDED·PASSKEY_REMOVED(패스키를 등록·지움, BOT-122)"
         timestamptz created_at "사건 시각. 셈과 같은 트랜잭션으로 적는다"
         timestamptz sent_at "업무 이메일로 보낸 때(또는 보낼 것이 없어 닫은 때). identity의 발송 고리가 메일 포트로 보낸다(BOT-121, 발송 대행은 [가정])"
         int attempts "보내지 못한 횟수(BOT-121)"
         timestamptz next_attempt_at "다음에 해 볼 때(1분부터 두 배씩, 최대 1시간 [가정]). 앞의 실패 행이 뒤의 알림을 막지 않게 한다"
     }
     admin_passkey {
-        bytea credential_id PK "WebAuthn 자격 ID"
-        uuid admin_account_id FK
-        bytea public_key "공개키라 평문, 무결성만 지킨다. 등록 해제 때 지운다(P3)"
-        bigint sign_count "인증기가 알린 서명 횟수(동기화 패스키는 0일 수 있다)"
+        uuid id PK "경로의 passkeyId(자격 ID는 길어 경로에 쓰지 않는다, 추천 적용 2026-11-05, BUILD_ORDER BOT-122, ADR-0206)"
+        uuid admin_account_id FK "계정 행을 지우는 일은 없다. 삭제·재초대(CREDENTIAL_LOST·PROTECT_LOCK) 트랜잭션이 행을 지운다"
+        bytea credential_id "WebAuthn 자격 ID(1~1023바이트). 모든 계정 사이에서 UNIQUE(남의 자격을 다시 등록하지 못한다)"
+        bytea public_key "COSE 꼴 공개키(COSE: 키를 CBOR라는 이진 꼴로 적는 표준, RFC 9052. 인증기가 등록 때 이 꼴로 보낸다). 공개키라 평문, 무결성만 지킨다. 등록 해제 때 지운다(P3)"
+        bigint sign_count "인증기가 알린 서명 횟수(동기화 패스키는 0일 수 있다). 둘 다 0이면 받고, 받은 값이 크면 받아 적고, 그 밖은 거절한다(읽은 값과 같을 때만 고친다, docs/features/identity.md §6 '관리 계정 패스키의 첫 구현')"
+        text_array transports "인증기가 알린 전송 방식(internal·hybrid·usb·nfc·ble 등). 확인 옵션의 allowCredentials에 싣는다"
+        text device_type "singleDevice|multiDevice(여러 기기에 동기화되는 패스키인지)"
+        bool backed_up "백업 상태(BS 표시). 확인할 때마다 고친다"
+        uuid aaguid "인증기 모델 번호. 표시·감사용(증명은 받지 않는다, ADR-0206 결정 1)"
+        text name "이름표(1~30자 [가정], 사용자가 정한다. 없으면 '패스키')"
         timestamptz created_at
+        timestamptz last_used_at "마지막으로 재인증에 쓴 때"
+    }
+    admin_reauth {
+        uuid jti PK "발급한 관리 재인증 토큰의 jti(docs/features/identity.md §6 '관리 계정 패스키의 첫 구현', 추천 적용 2026-11-05, BUILD_ORDER BOT-122)"
+        uuid admin_account_id FK
+        uuid admin_session_id FK "토큰의 sid"
+        text aud "partner|ops"
+        text act "작업 묶음(docs/security/authz-matrix.md §6 '작업 묶음 act의 값')"
+        text_array factors "확인한 요소(password·totp·passkey 차례). 재인증 기록(I-T53 ③)"
+        uuid passkey_id "passkey로 확인했으면 쓴 패스키(외래키 없음: 패스키를 지워도 기록은 남는다)"
+        timestamptz issued_at "90일 [가정] 지나면 매일 정비 admin-reauth-expired가 지운다. 법정 접속기록은 접속기록 저장소 단계(FR-045)가 따로 옮긴다"
+        timestamptz expires_at "발급 + 5분"
+        timestamptz used_at "identity가 직접 받는 묶음(ACCOUNT_SECURITY)에 쓴 때(한 번만). 다른 묶음의 한 번 쓰기는 받는 서비스가 본다"
     }
     admin_recovery_code {
         uuid id PK
@@ -2204,6 +2224,7 @@ erDiagram
 | `tr:vb:{pid}:E` | 문자열 | 판정 근거 키. `CHALLENGE` 판정과 재평가 격리에만 쓴다. 값은 판정 키(`TrustVerdict.eventKey`), 기기 가명, 확정 신호 근거(차단 목록·허니팟), 사유 범주, 프로필 판, 판정 시각이다 | 세션·캐시 클러스터에 두고 trust-svc가 쓴다. 수명 30일 [가정]이다. 이의 처리(CS 화면의 사유 범주·확정 신호 여부)와 이의 인정 때 지울 차단 기기 키를 찾는 데 쓴다. 해시 태그는 pid다. 추가 검증으로 보낸 판정만 남기므로 대형 온세일에서도 많아야 수만 건 [추정]이다(추천 적용 2026-10-30, bot-defense §3.2·§12) |
 | `id:link:{proposal_id}` [보완] | Hash | 소셜 가입 때 기존 계정에 연결하자고 제안하는 임시 세션(새 제공자, sub, 검증 이메일, 대상 계정 ID, 보일 기존 제공자, 브라우저 묶음 값의 SHA-256(2026-11-04 '브라우저 지문'을 이렇게 정함), 인증 실패 횟수, 만든 시각, 새 계정 만들기에 쓴 멱등 키(`usedKey`, 쓴 뒤에만). docs/features/identity.md §2.1 '가입 때 연결 제안의 첫 구현') | 세션·캐시 클러스터에 저장한다. 유효 수명은 10분이다. 1회성 토큰으로 한 번만 쓰이고, 연결을 마치거나 만료되면 바로 지운다(POL-034). 새 계정 만들기는 지우지 않고 `usedKey`를 적어 남은 수명 동안 같은 키의 다시 보내기만 받는다(2026-11-05). |
 | `id:merge:{proposal_id}` [보완] | Hash | 본인인증으로 확인한 계정 병합 제안 세션(대표 계정 ID, 흡수 계정 ID, 옮길 항목의 통계 요약, 병합을 막는 사유(같은 종류의 로그인 수단으로 막으면 겹친 종류도, 소유자 결정 2026-11-05, OPEN[21] 추천 적용). 제안한 계정·세션, 추가하려던 제공자와 sub, 남는 계정의 본인확인 여부(화면 문구, BOT-043), 상태 PROPOSED·BLOCKED, 불변식 위반 표시, 만든 시각도, 2026-11-04 BOT-042, docs/features/identity.md §2.1 '계정 병합의 첫 구현') | 세션·캐시 클러스터에 저장한다. 유효 수명은 10분이며, 사용자의 최종 승인을 확인한 직후 지운다(POL-034). |
+| `id:wa:reg:{등록 ID의 SHA-256}`·`id:wa:rea:{재인증 단계의 SHA-256}` | 문자열(JSON) | 관리 계정 패스키 챌린지(32바이트 난수). 등록은 계정·세션·콘솔, 재인증은 여기에 작업 묶음·확인한 요소(password·totp)와 허용한 패스키 ID 목록을 함께 둔다(추천 적용 2026-11-05, BUILD_ORDER BOT-122, docs/features/identity.md §6 '관리 계정 패스키의 첫 구현', ADR-0206) | 세션·캐시 클러스터에 둔다. 수명은 5분 [가정]이다. 확인할 때 `GETDEL`로 꺼내며 지워 맞든 틀리든 한 번만 쓴다. 한 키만 다뤄 해시 태그를 두지 않는다. 값은 1KB [가정] 안팎이다 |
 
 - 클러스터 환경에서 표준 Pub/Sub을 쓰면 발행한 모든 메시지가 전체 클러스터 노드(클러스터를 이루는 각 서버)로 복제되어 네트워크 부담이 크게 늘어난다. 그래서 Redis 7.0의 샤드 Pub/Sub(`SPUBLISH`)을 필수로 쓰고, 트래픽을 대상 샤드 노드에만 가둔다. 앱의 Redis 클라이언트는 샤드 Pub/Sub 구독을 지원해야 한다. 기본안 node-redis는 `sSubscribe`·`sPublish`를 쓰고 슬롯이 옮겨지면 `sharded-channel-moved` 사건을 낸다. ioredis는 클러스터 연결에 `shardedSubscribers: true`를 켜야 `ssubscribe`를 쓸 수 있다(각 문서, 2026-10-28 확인). 클라이언트는 docs/architecture.md §9.4 PoC(V-T33)로 정한다(추천 적용 2026-10-28, 기술 검토 중간-026).
 - Redis의 마스터-복제본 동기화는 기본이 비동기다. 그래서 장애 조치(Failover) 때 아직 복제되지 못한 쓰기가 사라질 수 있다(Redis Cluster 아키텍처의 한계). 대기열 순번 발급은 세대 번호 체계로 이 오차를 흡수한다(1인 1순번은 입장 확정 때 사람별 입장 키로 다시 확인한다, ADR-0056). 좌석 홀드가 빠지는 경우는 관계형 데이터베이스의 마지막 트랜잭션 검증 단계에서 무결성을 지키도록 설계한다. 좌석 샤드가 장애 조치 중이면 그 회차의 구매 요청을 503으로 미루고(PostgreSQL로 홀드를 주는 비상 경로는 없다), 되돌아갔을 수 있는 구역별 일련번호는 회차 세대(`s:{event:E}:epoch`)로 가른다(추천 적용 2026-10-28, ADR-0121).
@@ -2228,6 +2249,7 @@ erDiagram
 | catalog 읽기 모델 캐시, 웹 앱 서버의 ISR·데이터 캐시 | A 다시 만든다 | 원본을 다시 읽는다 | 원본 DB와 원 서버 | 캐시가 없는 것으로 보고 원본을 읽는다. 화면은 그대로다 |
 | identity 사용자 세션 | B 사람이 다시 한다 | 리프레시 토큰으로 다시 받는다 | identity DB의 세션 참조와 리프레시 토큰 | 새 로그인은 Problem 503과 `Retry-After`로 다시 하게 한다 |
 | 계정 연결·병합 제안(`id:link:*`·`id:merge:*`, 10분) | B | 처음부터 다시 한다 | — | 다시 하라고 알린다 |
+| 관리 계정 패스키 챌린지(`id:wa:*`, 5분 [가정], 추천 적용 2026-11-05, BOT-122) | B | 패스키 등록이나 재인증을 처음부터 다시 한다 | 확인은 챌린지가 있어야만 통과하므로, 잃으면 막히는 쪽이다 | 503 `admin-login-unavailable`과 `Retry-After`로 다시 하게 한다 |
 | 관리 계정 로그인의 출발지가 든 값: 계정 × 출발지 묶음 실패 수와 묶음 잠금, 계정의 출발지 수, 출발지의 계정 수와 출발지 경보(identity, docs/security/auth-controls.md §3.1, 기술 검토 중간-052). 계정에 묶인 값(계정 실패 수·2단계 실패 수·비밀번호 연속 실패 누계)은 여기 두지 않고 identity DB `admin_account`에 둔다(추천 적용 2026-10-30, auth-controls §3.1). 키는 `id:alf:*`이고 이름과 TTL은 docs/features/identity.md §6 '관리 계정 로그인 1단계와 실패 제한의 첫 구현'에 있다(추천 적용 2026-11-05, BUILD_ORDER BOT-111). 없는 이메일의 가짜 상태(`id:alf:{a:g:…}:state`, 30일 [가정])와 한 대상의 처리 중 임대(`…:busy`, 10초)도 여기 든다 | C 다른 층이 지킨다 | 묶음 실패 수와 출발지 계수가 처음부터 다시 세어지고 묶음 잠금·출발지 경보가 풀린다. 그동안 출발지 단위 통제가 잠시 약해진다(auth-controls §3.7) | identity DB `admin_account`의 계정 실패 수·2단계 실패 수·비밀번호 연속 실패 누계와 잠금(`lock_kind`·`locked_until`), 24시간 안 잠금 기록, 전체 실패율 경보 | 실패를 세지 못하면 그 로그인 시도를 받지 않고 Problem 503과 `Retry-After`로 다시 하게 한다 [가정] |
 | 스캐너 기기 승인·등록 코드(`id:devauth:*`·`scanner:enroll:*`) | B | 코드를 다시 받는다 | 기기 등록·배정 원장(DB) | 다시 받으라고 알린다 |
 | 스캐너 DPoP 증명 `jti`(`scanner:dpop:*`) | C | 10분 안의 같은 증명을 다시 받을 수 있다 | `iat` ±5분 창, TLS, 요청마다 하는 기기·세션 상태 확인, 업로드의 클라이언트 ID 멱등 | 키가 없는 것으로 보고 받는다(경보 없음) |
@@ -2340,6 +2362,7 @@ erDiagram
 | 좌석 스냅샷을 읽는 동안 홀드·해제·만료가 비트맵과 구역 일련번호를 바꿔, 비트맵은 새것인데 번호는 옛것(또는 반대)인 스냅샷이 나감(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-137) | 스냅샷은 읽기 Lua 한 번(`SNAPSHOT_LUA`)으로 세대 키·비트맵 바이트·구역 일련번호를 한 원자 연산에서 읽는다. 홀드·해제·만료 Lua가 같은 슬롯에서 차례로 돌므로 읽는 중간 상태가 없다. 클라이언트는 받은 구역 일련번호보다 큰 델타만 적용한다(docs/features/seat-hold.md §7) | S-T13(갭 자가 치유), S-T26 ③(스냅샷), PRF-137의 스냅샷 읽기 시험 |
 | 구매 세션 종료(나가기·결제 확정·유휴·최대 체류)가 같은 세션의 요청 확인·일련번호 올리기·주문 생성(Paying 표시)과 겹침, 같은 세션을 정리 반복이 둘 이상의 파드에서 점검(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-138) | 끝내는 연산·유휴/최대 체류 점검·Paying 표시는 모두 jti 슬롯의 Lua 한 번이라 세션 상태를 읽고 바꾸는 사이가 없다. 일련번호 올리기 Lua는 세션이 없으면 거짓이라 끝난 세션의 요청은 401이다. 정리 점검은 회차별 임대(`s:{event:E}:sesweep`)를 잡은 파드 하나만 돌고, 임대가 겹쳐도 점검이 멱등이다(이미 없으면 GONE). 끝낸 뒤 사건을 더하지 못하면 최대 체류 시각의 입장 자리 정리가 덮는다 | S-T33 ⑥(LEFT 뒤 같은 대기표 재입장), Q-T11(자리 즉시 비움), PRF-138의 종료·점검 시험 |
 | 계정 병합 처리 도중 해당 계정의 동시 로그인 및 신규 주문 인입 | 흡수 대상 계정의 행을 비관적으로 잠그고(`FOR UPDATE`) MERGED 상태를 확인한다. 진행 중인 활성 구매 세션이나 결제 대기 주문이 있으면 병합 요청을 거부한다. 서비스별 데이터 이전은 고유 `merge_id` 멱등키로 제어한다 | identity 통합 테스트 (I-T31·I-T32) |
+| 관리 계정 패스키: 같은 챌린지·같은 서명을 두 요청이 동시에 내거나, 같은 계정에 패스키 등록이 동시에 오거나, 재인증 토큰 하나로 패스키 등록·지우기를 동시에 부름(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER BOT-122) | 챌린지는 Redis `GETDEL`로 꺼내 하나만 받는다. 서명 횟수는 읽은 값과 같을 때만 고친다(`UPDATE … WHERE sign_count = 읽은 값`). 동기화 패스키처럼 0인 채면 챌린지가 한 번만 쓰여 막는다. 등록은 `admin_account` 행을 `FOR UPDATE`로 잠근 뒤 10개 상한을 세고 넣으며, 자격 ID는 고유 색인이 둘째 넣기를 막는다. 재인증 토큰은 `admin_reauth.used_at`을 조건부로 적어 한 번만 받는다. 지우기도 계정 행을 잠근 뒤 '마지막 하나'를 센다 | identity 단위·통합 시험(`admin-passkey.test.ts`·`admin-passkey.int.test.ts`, I-T53) |
 | 남은 좌석 수를 숫자 하나에 두고 예매마다 1씩 빼면, 모든 예매가 그 한 칸 앞에 줄 서고, 동시에 고칠 때 두 장이 팔렸는데 하나만 줄어드는 갱신 유실이 생긴다(추천 적용 2026-11-03, ADR-0180) | 그런 숫자를 두지 않는다. 남은 좌석은 판매 대상 좌석 수에서 좌석 비트맵의 켜진 비트 수(잡히거나 팔린 좌석)를 빼서 그때그때 센다. 회차 판매 상태(`event_sale`)는 예매마다 빼는 값이 아니라 1초 [가정]마다 한 파드가 세어 판 번호 조건으로 쓴다(§2, docs/features/seat-hold.md §4). 좌석맵에는 구역마다 숫자 대신 대략의 남은 상태(많음·적음·매진)를 보인다(FR-009) | 회차 판매 상태 판정 S-T25, 좌석 샤드 처리량 S-T27, K2 불변식 자동 검사 |
 | 동일 사용자가 여러 브라우저 탭 및 기기에서 동시 홀드를 시도하여 1인 예매 한도 초과 | 같은 Lua 스크립트 트랜잭션 안에서 현재 보유 수와 요청 수량의 합을 검사, 판매 확정(Hard Sale) 때 쿼터 원장 행을 조건부로 갱신(`used + qty <= limit_count`, 칸 이름은 §2 `purchase_quota`, 2026-11-01 정합 점검) | K2 카오스 검증 ('1인 예매 한도 초과 0건' 달성) |
 | 오픈 직후 대기열 순번 발급 트래픽 초당 20만 건 폭주 | Redis 키 하나를 queue-svc 파드마다 2ms [가정]·500건 [가정]까지 요청을 모아 진입 Lua 한 번으로 `INCRBY`해 올린다(2026-11-03, ADR-0179). 순수 `INCR`은 묶음 없이도 기준 안이었지만, 표시 확인까지 하는 진입 Lua를 요청마다 부르면 샤드 스레드가 찼다 | K1 벤치마크, PoC(본 개발 전에 위험한 부분만 먼저 만들어 확인하는 시험) 실측 평가(2026-11-01 실측(PC): 순수 `INCR`은 묶음 없이 기준 안, ADR-0176 결정 1. 2026-11-03 실측(PC): 진입 Lua 직접 호출은 초당 약 8만~9만 건에서 샤드 엔진 스레드 94~99%라 묶음으로 바꿈, ADR-0179. 묶음 진입 Lua는 BUILD_ORDER PRF-085에서 잰다) |

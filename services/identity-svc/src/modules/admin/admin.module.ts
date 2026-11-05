@@ -3,12 +3,16 @@ import { type DynamicModule, Module } from '@nestjs/common';
 import { DrizzleAdminAccountStore } from './adapters/db/drizzle-admin-account-store.js';
 import { MemoryAdminAccountStore } from './adapters/memory-admin-account-store.js';
 import { MemoryLoginCounters } from './adapters/memory-login-counters.js';
+import { MemoryPasskeyChallenges } from './adapters/memory-passkey-challenges.js';
+import { SimpleWebAuthnCeremonies } from './adapters/simple-webauthn.js';
 import { Pbkdf2AdminPasswords, RECOVERY_CODE_ITERATIONS } from './adapters/pbkdf2-admin-passwords.js';
 import { LoginPasswordStep } from './application/login-password-step.js';
 import { CONSOLE_ORIGINS, type ConsoleOrigins, DispatchAdminNotices } from './application/dispatch-admin-notices.js';
 import { ChangeAdminPassword } from './application/change-admin-password.js';
 import { EndAdminSession } from './application/end-admin-session.js';
 import { ManageAdminAccounts } from './application/manage-admin-accounts.js';
+import { ManagePasskeys } from './application/manage-passkeys.js';
+import { ReauthenticateAdmin } from './application/reauthenticate-admin.js';
 import { RefreshAdminSession } from './application/refresh-admin-session.js';
 import { CheckPasswordOnlyLogins } from './application/check-password-only-logins.js';
 import { GetAdminAuthz } from './application/get-admin-authz.js';
@@ -18,6 +22,7 @@ import { RecordAdminLoginSuccess } from './application/record-login-success.js';
 import { BeginTotpEnrollment, ConfirmTotpEnrollment } from './application/totp-enrollment.js';
 import { ADMIN_AUTH_CONFIG, POLICY_LISTS, SetAdminPassword } from './application/set-admin-password.js';
 import type { AdminAuthConfig } from './domain/auth-config.js';
+import { type RelyingParties, relyingPartiesOf } from './domain/passkey.js';
 import type { PolicyLists } from './domain/password-policy.js';
 import {
   ADMIN_ACCOUNT_STORE,
@@ -27,6 +32,15 @@ import {
   ADMIN_MAILER,
   ADMIN_SECOND_STEP_STORE,
   ADMIN_MANAGEMENT_STORE,
+  ADMIN_PASSKEY_STORE,
+  ADMIN_REAUTH_VERIFIER,
+  AdminReauthRejected,
+  type AdminReauthSigner,
+  type AdminReauthVerifier,
+  PASSKEY_CHALLENGES,
+  type PasskeyChallenges,
+  WEBAUTHN,
+  WEBAUTHN_RPS,
   ADMIN_REFRESH_STORE,
   ADMIN_SESSION_STORE,
   ADMIN_TOKEN_SIGNER,
@@ -48,6 +62,7 @@ import {
 } from './domain/ports.js';
 import { ADMIN_COOKIE_DOMAIN } from './inbound/admin-cookies.js';
 import { AdminLoginController } from './inbound/admin-login.controller.js';
+import { AdminPasskeyController } from './inbound/admin-passkey.controller.js';
 import { AdminPasswordChangeController } from './inbound/admin-password-change.controller.js';
 import { AdminTokenController } from './inbound/admin-token.controller.js';
 import { PartnerTeamAccountsController } from './inbound/partner-team-accounts.controller.js';
@@ -67,8 +82,14 @@ export interface AdminModuleOptions {
   iterations?: number;
   /** TOTP 시드 봉투 암호화. 없으면 2단계는 503(키가 없다) */
   totpCipher: TotpSeedCipher | null;
-  /** 관리 액세스 토큰 서명. 없으면 2단계는 503 */
-  signer: AdminTokenSigner | null;
+  /** 관리 액세스·재인증 토큰 서명. 없으면 2단계·재인증은 503 */
+  signer: (AdminTokenSigner & AdminReauthSigner) | null;
+  /** 관리 재인증 토큰 확인(내 패스키 등록·지우기의 ACCOUNT_SECURITY). 없으면 그 경로는 늘 403 reauth-required */
+  reauthVerifier?: AdminReauthVerifier | null;
+  /** 패스키 챌린지(세션·캐시 Redis id:wa:*). 없으면 메모리(local·ci만, 파드가 여럿이면 챌린지가 나뉜다) */
+  passkeyChallenges?: PasskeyChallenges;
+  /** 콘솔마다의 RP ID·출처(main.ts가 시작 검사로 만든다). 없으면 consoleOrigins에서 만든다 */
+  relyingParties?: RelyingParties;
   /** 파트너 쿠키의 Domain(운영 peaket.example). 없으면 그 호스트만 */
   cookieDomain?: string;
   /** 계정 주인 메일. 없으면 발송 고리를 돌리지 않는다(알림 행은 쌓인다, BOT-121) */
@@ -91,11 +112,20 @@ const unavailableCipher: TotpSeedCipher = {
     throw new TotpKeyUnavailable('not-configured');
   },
 };
-const unavailableSigner: AdminTokenSigner = {
+const unavailableSigner: AdminTokenSigner & AdminReauthSigner = {
   access: async () => {
     throw new TotpKeyUnavailable('admin-token-key-not-configured');
   },
+  reauth: async () => {
+    throw new TotpKeyUnavailable('admin-token-key-not-configured');
+  },
 };
+const rejectingVerifier: AdminReauthVerifier = {
+  verify: async () => {
+    throw new AdminReauthRejected('verifier-not-configured');
+  },
+};
+const DEFAULT_CONSOLE_ORIGINS = { partner: 'https://partner.peaket.example', ops: 'https://console.peaket.example' };
 
 @Module({})
 export class AdminModule {
@@ -103,7 +133,7 @@ export class AdminModule {
     const store = o.storage === 'database' ? { provide: DrizzleAdminAccountStore, useClass: DrizzleAdminAccountStore } : { provide: DrizzleAdminAccountStore, useValue: new MemoryAdminAccountStore() };
     return {
       module: AdminModule,
-      controllers: [AdminLoginController, AdminUnlockController, AdminPasswordChangeController, AdminTokenController, PartnerTeamAccountsController],
+      controllers: [AdminLoginController, AdminUnlockController, AdminPasswordChangeController, AdminTokenController, PartnerTeamAccountsController, AdminPasskeyController],
       providers: [
         store,
         { provide: ADMIN_ACCOUNT_STORE, useExisting: DrizzleAdminAccountStore },
@@ -113,8 +143,13 @@ export class AdminModule {
         { provide: ADMIN_SESSION_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_REFRESH_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_MANAGEMENT_STORE, useExisting: DrizzleAdminAccountStore },
+        { provide: ADMIN_PASSKEY_STORE, useExisting: DrizzleAdminAccountStore },
+        { provide: PASSKEY_CHALLENGES, useValue: o.passkeyChallenges ?? new MemoryPasskeyChallenges() },
+        { provide: WEBAUTHN, useValue: new SimpleWebAuthnCeremonies() },
+        { provide: WEBAUTHN_RPS, useValue: o.relyingParties ?? relyingPartiesOf(o.consoleOrigins ?? DEFAULT_CONSOLE_ORIGINS, { env: 'ci' }) },
+        { provide: ADMIN_REAUTH_VERIFIER, useValue: o.reauthVerifier ?? rejectingVerifier },
         { provide: ADMIN_MAILER, useValue: o.mailer ?? noMailer },
-        { provide: CONSOLE_ORIGINS, useValue: o.consoleOrigins ?? { partner: 'https://partner.peaket.example', ops: 'https://console.peaket.example' } },
+        { provide: CONSOLE_ORIGINS, useValue: o.consoleOrigins ?? DEFAULT_CONSOLE_ORIGINS },
         { provide: TOTP_SEED_CIPHER, useValue: o.totpCipher ?? unavailableCipher },
         { provide: ADMIN_TOKEN_SIGNER, useValue: o.signer ?? unavailableSigner },
         { provide: ADMIN_COOKIE_DOMAIN, useValue: o.cookieDomain },
@@ -141,8 +176,10 @@ export class AdminModule {
         RefreshAdminSession,
         EndAdminSession,
         ManageAdminAccounts,
+        ReauthenticateAdmin,
+        ManagePasskeys,
       ],
-      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, UnlockWithLink, RequestUnlockLink, DispatchAdminNotices, CheckPasswordOnlyLogins, ChangeAdminPassword, GetAdminAuthz, RefreshAdminSession, EndAdminSession, ManageAdminAccounts, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE],
+      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, UnlockWithLink, RequestUnlockLink, DispatchAdminNotices, CheckPasswordOnlyLogins, ChangeAdminPassword, GetAdminAuthz, RefreshAdminSession, EndAdminSession, ManageAdminAccounts, ReauthenticateAdmin, ManagePasskeys, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE, ADMIN_PASSKEY_STORE],
     };
   }
 }

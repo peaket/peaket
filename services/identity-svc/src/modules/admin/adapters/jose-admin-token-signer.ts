@@ -3,12 +3,13 @@
 import { randomUUID } from 'node:crypto';
 import { SignJWT } from 'jose';
 import type { TokenKeyRing } from '../../session/index.js';
-import type { AdminAud, AdminTokenSigner } from '../domain/ports.js';
+import { ADMIN_REAUTH_TTL_MS, type ReauthAct, type ReauthFactor } from '../domain/passkey.js';
+import type { AdminAud, AdminReauthSigner, AdminTokenSigner } from '../domain/ports.js';
 
 export const ADMIN_ACCESS_TOKEN_TTL_MS = 15 * 60_000;
 const seconds = (ms: number) => Math.floor(ms / 1000);
 
-export class JoseAdminTokenSigner implements AdminTokenSigner {
+export class JoseAdminTokenSigner implements AdminTokenSigner, AdminReauthSigner {
   constructor(
     private readonly keys: Pick<TokenKeyRing, 'signingKey'>,
     private readonly issuer: string,
@@ -30,5 +31,22 @@ export class JoseAdminTokenSigner implements AdminTokenSigner {
       .setJti(randomUUID())
       .sign(key);
     return { token, expiresAt: exp * 1000 };
+  }
+
+  /** 관리 재인증 토큰(typ reauth+jwt, 5분 한 번, sid·act·factors, identity §6 '관리 계정 패스키의 첫 구현', BOT-122). factors는 확인한 요소만 */
+  async reauth(c: { accountId: string; sessionId: string; aud: AdminAud; act: ReauthAct; factors: readonly ReauthFactor[] }, now: number): Promise<{ token: string; jti: string; expiresAt: number }> {
+    const { kid, key } = this.keys.signingKey('admin');
+    const exp = seconds(now + ADMIN_REAUTH_TTL_MS);
+    const jti = randomUUID();
+    const token = await new SignJWT({ sid: c.sessionId, act: c.act, factors: [...c.factors] })
+      .setProtectedHeader({ alg: 'ES256', typ: 'reauth+jwt', kid })
+      .setIssuer(this.issuer)
+      .setSubject(c.accountId)
+      .setAudience(c.aud)
+      .setIssuedAt(seconds(now))
+      .setExpirationTime(exp)
+      .setJti(jti)
+      .sign(key);
+    return { token, jti, expiresAt: exp * 1000 };
   }
 }

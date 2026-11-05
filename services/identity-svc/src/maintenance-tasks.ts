@@ -6,6 +6,9 @@ import { AdminAccountStoreForMaintenance, DEFAULT_ADMIN_AUTH_CONFIG } from './mo
 import { ACCOUNT_HOLD_CLOSED_KEEP_MS, BackfillContactRefs, CloseInvRefBridge, DrizzleSessionStore, FinishWithdrawals, InvRefKeyRing, RotateContactRefs } from './modules/session/index.js';
 import { DrizzleVerificationStore, VerificationEraser } from './modules/verification/index.js';
 
+/** 관리 재인증 기록을 남기는 기간 [가정](docs/data.md admin_reauth, BOT-122) */
+const ADMIN_REAUTH_KEEP_MS = 90 * 86_400_000;
+
 /** 다른 계정 시도 기록을 남기는 기간 [가정](docs/data.md identity_conflict_attempt) */
 const CONFLICT_ATTEMPT_KEEP_MS = 365 * 86_400_000;
 
@@ -34,6 +37,8 @@ export function identityMaintenanceTasks(database: Database, clock: Clock, invRe
     { name: 'admin-invite-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).expireInvites(clock.now()) },
     // 관리 계정 관리 호출의 멱등 기록은 30일 [가정] 뒤 지운다(docs/data.md admin_account_request, BOT-150)
     { name: 'admin-account-request-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).purgeRequests(clock.now() - 30 * 24 * 60 * 60_000) },
+    // 관리 재인증 기록은 발급에서 90일 [가정] 뒤 지운다(docs/data.md admin_reauth, BOT-122. 법정 접속기록은 접속기록 저장소 단계가 옮긴다)
+    { name: 'admin-reauth-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).purgeReauths(clock.now() - ADMIN_REAUTH_KEEP_MS) },
     // 닫힌 이의 제기·소명 계류 행은 30일 [가정] 뒤 지운다(docs/data.md account_hold, BOT-042)
     { name: 'account-hold-closed', when: 'daily', run: () => sessions.transaction((tx) => tx.purgeClosedHolds(clock.now() - ACCOUNT_HOLD_CLOSED_KEEP_MS)) },
     // 라벨 키가 없어 가입 때 쓰지 못한 EMAIL 연락처 가명을 account.email로 채운다(identity §9.1 '조사용 값의 첫 구현', BOT-045)

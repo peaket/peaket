@@ -190,6 +190,13 @@
       "when": 1793848308571,
       "tag": "0026_account_merge_hold_fk_validate",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1793873165682,
+      "tag": "0027_admin_passkey",
+      "breakpoints": true
     }
   ]
 }

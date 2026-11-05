@@ -324,6 +324,13 @@ describe('서비스 로거', () => {
     expect(line).toMatchObject({ pid: '[REDACTED]', sessionId: '[REDACTED]', accountId: '[REDACTED]', ip: '[REDACTED]', nested: { clientIp: '[REDACTED]' } });
   });
 
+  test('관리계정로그인·해제·재인증·패스키등록의1회용값도가린다(BOT-120·121·122)', async () => {
+    s = await start();
+    s.svc.logger.info({ loginStep: 'l-1', unlockToken: 'u-1', humanCheckToken: 'h-1', reauthStep: 'r-1', reauthToken: 't-1', nested: { registrationId: 'g-1' } }, 'one-time values');
+    const line = s.lines.find((l) => l.msg === 'one-time values');
+    expect(line).toMatchObject({ loginStep: '[REDACTED]', unlockToken: '[REDACTED]', humanCheckToken: '[REDACTED]', reauthStep: '[REDACTED]', reauthToken: '[REDACTED]', nested: { registrationId: '[REDACTED]' } });
+  });
+
   test('ADR0069_NestJS자체기록도_같은모양의JSON한줄이다', () => {
     const c = collector();
     const logger = new NestPinoLogger(
