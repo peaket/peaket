@@ -98,20 +98,41 @@ export interface ModalDeps {
   onRejoin?: () => void;
   /** 메뉴 시트에서 로그아웃을 고르면 로그아웃 확인으로 바꾼다 */
   openLogout?: () => void;
+  /** 로그아웃(데이터 연결 화면, ADR-0208 결정 7). wallet은 '이 기기의 입장 키도 지우기'. 성공하면 홈으로 가고, 실패면 'failed' */
+  logout?: (wallet: boolean) => Promise<'ok' | 'failed'>;
 }
 
 export function modalBuild(key: ModalKey, d: ModalDeps): ModalBuild {
   switch (key) {
     case 'logout':
       return (m) => {
-        const go = h('button', { class: 'btn btn-primary btn-lg btn-block', type: 'button', onclick: () => location.assign(links.home()) }, '로그아웃');
+        const key = h('input', { class: 'cb', id: 'lo-key', type: 'checkbox' }) as HTMLInputElement;
+        const err = h('p', { class: 't-sm tx-danger', role: 'alert', hidden: true }, '로그아웃을 마치지 못했습니다. 다시 시도해 주세요');
+        const go = h('button', {
+          class: 'btn btn-primary btn-lg btn-block',
+          type: 'button',
+          onclick: () => {
+            if (!d.logout) return location.assign(links.home());
+            // 끝날 때까지 다시 누르지 못하게 하고, 실패하면 대화상자 안에 알린다(성공하면 홈으로 간다)
+            go.setAttribute('aria-busy', 'true');
+            (go as HTMLButtonElement).disabled = true;
+            err.hidden = true;
+            void d.logout(key.checked).then((r) => {
+              if (r === 'ok') return;
+              go.removeAttribute('aria-busy');
+              (go as HTMLButtonElement).disabled = false;
+              err.hidden = false;
+            });
+          },
+        }, '로그아웃');
         const cancel = h('button', { class: 'btn btn-ghost btn-block', type: 'button', onclick: m.close }, '취소');
         if (m.wide) go.classList.remove('btn-lg');
         return box(m, 'lo-t', { describedBy: 'lo-d', wideClass: 'q-dlg-480' },
           title(m, 'lo-t', LOGOUT_TEXT.title),
           h('p', { class: 't-sm', id: 'lo-d' }, LOGOUT_TEXT.body),
-          h('label', { class: 'check-row', for: 'lo-key' }, h('input', { class: 'cb', id: 'lo-key', type: 'checkbox' }), LOGOUT_TEXT.check),
+          h('label', { class: 'check-row', for: 'lo-key' }, key, LOGOUT_TEXT.check),
           h('p', { class: 't-xs muted' }, LOGOUT_TEXT.checkHint),
+          err,
           actions(m, go, cancel),
         );
       };

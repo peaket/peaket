@@ -63,6 +63,8 @@ async function read(res: Response, nowMs: number): Promise<Reply> {
 export interface Net {
   /** T=0 쓰기(진입·입장 확정). 연결이 끊기거나 시간이 넘으면 던진다 */
   postText(url: string, body: unknown, signal?: AbortSignal): Promise<Reply>;
+  /** 쿠키를 싣는 JSON 쓰기(로비 참가, T=0 전이라 사전 요청이 있어도 된다, §4.2.1 1번) */
+  postJson(url: string, body: unknown, signal?: AbortSignal): Promise<Reply>;
   /** 쿠키를 싣는 쓰기·지우기(대기 취소, 토큰 갱신) */
   send(url: string, method: 'POST' | 'DELETE', signal?: AbortSignal): Promise<Reply>;
   /** 대기열 파일(쿠키 없음). noStore면 브라우저 캐시를 건너뛴다 */
@@ -75,6 +77,10 @@ export function createNet(fetchImpl: FetchLike, now: () => number): Net {
   return {
     async postText(url, body, signal) {
       const res = await fetchImpl(url, { method: 'POST', credentials: 'include', headers: { 'content-type': 'text/plain;charset=UTF-8' }, body: JSON.stringify(body), signal: withTimeout(signal) });
+      return read(res, now());
+    },
+    async postJson(url, body, signal) {
+      const res = await fetchImpl(url, { method: 'POST', credentials: 'include', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: withTimeout(signal) });
       return read(res, now());
     },
     async send(url, method, signal) {

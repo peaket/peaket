@@ -13,6 +13,8 @@ export interface EventMeta {
   currentRound: string;
   /** 매진 화면의 등급별 안내(없으면 띄우지 않는다) */
   tierStatus: string | null;
+  /** 로비 카운트다운 아래 '… 오픈'(KST, 없으면 빈 글) */
+  openLabel: string;
 }
 
 const KST_MS = 9 * 3600_000;
@@ -28,7 +30,7 @@ export function kstLabel(iso: string): string | null {
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${DAYS[d.getUTCDay()]}) ${hh}:${mm}`;
 }
 
-export const emptyMeta = (id: string): EventMeta => ({ id, title: '', when: '', ordering: 'HYBRID', autoAssign: false, rounds: [], currentRound: id, tierStatus: null });
+export const emptyMeta = (id: string): EventMeta => ({ id, title: '', when: '', ordering: 'HYBRID', autoAssign: false, rounds: [], currentRound: id, tierStatus: null, openLabel: '' });
 
 /** 공개 요약을 읽는다. 꼴이 틀리면 null(빈 머리) */
 export function metaFromSummary(id: string, raw: unknown): EventMeta | null {
@@ -53,5 +55,16 @@ export function metaFromSummary(id: string, raw: unknown): EventMeta | null {
     rounds,
     currentRound: id,
     tierStatus: null,
+    openLabel: typeof r.openAt === 'string' ? (kstLabel(r.openAt) ?? '') : '',
   };
+}
+
+/** 공개 요약의 일정(오픈·로비 개방, ADR-0208 결정 2). openAt이 없거나 꼴이 틀리면 null */
+export function scheduleFromSummary(raw: unknown): { openAtMs: number; lobbyOpensAtMs: number | null } | null {
+  const r = raw as Record<string, unknown> | null;
+  if (!r || typeof r.openAt !== 'string') return null;
+  const openAtMs = Date.parse(r.openAt);
+  if (Number.isNaN(openAtMs)) return null;
+  const lobby = typeof r.lobbyOpensAt === 'string' ? Date.parse(r.lobbyOpensAt) : NaN;
+  return { openAtMs, lobbyOpensAtMs: Number.isNaN(lobby) ? null : lobby };
 }

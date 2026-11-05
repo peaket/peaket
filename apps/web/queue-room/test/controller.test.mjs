@@ -1,128 +1,7 @@
-// 대기실 상태 기계(오픈 뒤 경로, docs/frontend.md §3.4, ADR-0207)를 가짜 시계·가짜 응답으로 끝까지 돌린다
+// 대기실 상태 기계(오픈 뒤 경로, docs/frontend.md §3.4, ADR-0207)를 가짜 시계·가짜 응답으로 끝까지 돌린다(틀은 test/harness.mjs)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { startQueue } from '../src/live/controller.ts';
-import { createStore } from '../src/live/store.ts';
-import { createClock } from '../src/live/clock.ts';
-
-const memory = () => {
-  const m = new Map();
-  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
-};
-const EVENT = 'e1';
-const URLS = { queue: 'https://q', files: 'https://f', event: '/events/e1', seats: '/booking/e1/seats', verify: '/queue/e1/verify' };
-const reply = (status, body, extra = {}) => ({ status, body, retryAfterMs: extra.retryAfterMs ?? null, problem: extra.problem ?? null });
-const stateFile = (over = {}) => ({ serving: 1000, servingRate: 2, saleStatus: 'ON_SALE', removedUpToServing: 0, removedBeforeSegment: 0, removedBitmap: Buffer.alloc(125).toString('base64'), generatedAtMs: 0, pollHintMs: 0, ...over });
-
-/** 가짜 시계: sleep은 시각이 되면 풀린다. run(ms)이 시각을 옮기며 차례로 푼다 */
-function harness({ handler, hidden = () => false, online = () => true, rec } = {}) {
-  let now = 1_000_000;
-  const timers = [];
-  const wakers = new Set();
-  const local = memory();
-  const session = memory();
-  const store = createStore(EVENT, local, session, () => now, (n) => new Uint8Array(n).fill(1));
-  if (rec) store.write(rec);
-  const calls = [];
-  const views = [];
-  const navs = [];
-  const net = {
-    async postText(url, body) {
-      calls.push({ m: 'POST', url, body });
-      return handler({ m: 'POST', url, body, now });
-    },
-    async send(url, method) {
-      calls.push({ m: method, url });
-      return handler({ m: method, url, now });
-    },
-    async getFile(url, noStore) {
-      calls.push({ m: 'GET', url, noStore });
-      return handler({ m: 'GET', url, now });
-    },
-    async getPublic() {
-      return reply(404);
-    },
-  };
-  let refreshes = 0;
-  const env = {
-    eventId: EVENT,
-    urls: URLS,
-    net,
-    store,
-    clock: createClock(null, () => now),
-    deviceNow: () => now,
-    random: () => 0.5,
-    sleep: (ms, signal) =>
-      new Promise((resolve) => {
-        if (signal.aborted) return resolve();
-        const t = { at: now + ms, resolve };
-        timers.push(t);
-        signal.addEventListener('abort', () => {
-          const i = timers.indexOf(t);
-          if (i >= 0) timers.splice(i, 1);
-          resolve();
-        }, { once: true });
-      }),
-    hidden,
-    online,
-    onWake: (cb) => {
-      wakers.add(cb);
-      return () => wakers.delete(cb);
-    },
-    navigate: (u) => navs.push(u),
-    sha256: async (s) => createHash('sha256').update(s).digest('hex'),
-    refresh: async () => {
-      refreshes++;
-      return h.refreshResult ?? 'ok';
-    },
-  };
-  const flush = async () => {
-    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
-  };
-  const h = {
-    env,
-    store,
-    calls,
-    views,
-    navs,
-    session,
-    get now() {
-      return now;
-    },
-    get refreshes() {
-      return refreshes;
-    },
-    refreshResult: undefined,
-    ctl: null,
-    start() {
-      h.ctl = startQueue(env, (v) => views.push(v));
-      return flush();
-    },
-    async run(ms) {
-      const end = now + ms;
-      await flush();
-      for (;;) {
-        timers.sort((a, b) => a.at - b.at);
-        const t = timers[0];
-        if (!t || t.at > end) break;
-        timers.shift();
-        now = Math.max(now, t.at);
-        t.resolve();
-        await flush();
-      }
-      now = end;
-      await flush();
-    },
-    wake() {
-      for (const cb of [...wakers]) cb();
-      return flush();
-    },
-    last: () => views[views.length - 1],
-    states: () => views.map((v) => v.state),
-  };
-  return h;
-}
+import { harness, reply, sha, stateFile } from './harness.mjs';
 
 test('SCR-008 사전 검증 토큰이 없으면 공연 상세로 간다', async () => {
   const h = harness({ handler: () => reply(500) });
@@ -185,7 +64,7 @@ test('SCR-008 묶음 진입: 202를 저장하고, 결과 공개 + 분산 지연 
       }
       if (m === 'GET' && url.includes('batch-results')) {
         assert.equal(url, 'https://f/v1/queues/e1/batch-results/abc.json');
-        return published ? reply(200, { [createHash('sha256').update('pv-b').digest('hex')]: 1001 }) : reply(404);
+        return published ? reply(200, { [sha('pv-b')]: 1001 }) : reply(404);
       }
       if (m === 'GET') return reply(200, stateFile({ serving: 900, generatedAtMs: Math.floor(now / 1000) * 1000 }));
       return reply(500);

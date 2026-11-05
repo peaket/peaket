@@ -1,7 +1,10 @@
-// 브라우저에서 상태 기계(controller.ts)에 넘길 바깥 값을 만든다(ADR-0207). 시험은 이 파일 대신 가짜 값을 넘긴다.
+// 브라우저에서 상태 기계(controller.ts)에 넘길 바깥 값을 만든다(ADR-0207·0208). 시험은 이 파일 대신 가짜 값을 넘긴다.
 import { links, ORIGINS } from '../config';
 import { createClock } from './clock.ts';
-import type { Env } from './controller.ts';
+import type { Env, Schedule } from './controller.ts';
+import { humanCheck } from './human-check';
+import { steadyNow } from './steady.ts';
+import { createTabs, type ChannelLike, type LocksLike } from './tabs.ts';
 import { createNet, tokenHash } from './net.ts';
 import { createStore, type KV } from './store.ts';
 
@@ -29,15 +32,40 @@ async function refresh(): Promise<'ok' | 'rejected' | 'unavailable'> {
   return navigator.locks ? navigator.locks.request('peaket.refresh', once) : once();
 }
 
-export function browserEnv(eventId: string): Env {
+/** 같은 회차 탭 조정(Web Locks queue-poll:{eventId}·BroadcastChannel peaket.queue.{eventId}, ADR-0208 결정 5) */
+function browserTabs(eventId: string) {
+  let channel: ChannelLike | null = null;
+  try {
+    channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel(`peaket.queue.${eventId}`) : null;
+  } catch {
+    channel = null;
+  }
+  // Web Locks는 보안 맥락에만 있다. 없으면 보이는 탭이 저마다 리더다
+  const locks = (navigator.locks as unknown as LocksLike | undefined) ?? null;
+  const tabs = createTabs({
+    eventId,
+    locks,
+    channel,
+    hidden: () => document.visibilityState === 'hidden',
+    onVisibility: (cb) => {
+      document.addEventListener('visibilitychange', cb);
+      return () => document.removeEventListener('visibilitychange', cb);
+    },
+  });
+  window.addEventListener('pagehide', () => tabs.close(), { once: true });
+  return tabs;
+}
+
+export function browserEnv(eventId: string, schedule: () => Promise<Schedule | null>): Env {
   const local = storage('localStorage');
   return {
     eventId,
     urls: { queue: ORIGINS.queue, files: ORIGINS.files, event: links.event(eventId), seats: links.seats(eventId), verify: links.verify(eventId) },
     net: createNet((u, i) => fetch(u, i), Date.now),
     store: createStore(eventId, local, storage('sessionStorage'), Date.now, (n) => crypto.getRandomValues(new Uint8Array(n))),
-    clock: createClock(local, Date.now),
-    deviceNow: Date.now,
+    clock: createClock(local, steadyNow),
+    // 페이지를 연 뒤에는 단조 시계로 잰다(기기 시계가 바뀌어도 기다림이 흔들리지 않는다, §3.3)
+    deviceNow: steadyNow,
     random: Math.random,
     sleep: (ms, signal) =>
       new Promise<void>((resolve) => {
@@ -66,5 +94,8 @@ export function browserEnv(eventId: string): Env {
     navigate: (u) => location.assign(u),
     sha256: tokenHash,
     refresh,
+    schedule,
+    humanCheck,
+    tabs: browserTabs(eventId),
   };
 }

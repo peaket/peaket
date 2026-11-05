@@ -1,12 +1,14 @@
 // SCR-008 대기열(오픈 후). 캔버스 SCR-008 m·t·d 보드를 한 페이지의 반응형으로 옮겼다(d5 §5.8).
 // 화면 값은 상태 기계(src/live/controller.ts)가 실제 응답으로 낸다(ADR-0207). 기본 네 가지: ① 앞 인원 ③ 진행 막대 ② 남은 예상 시간 ⑦ [대기 취소].
-// 나머지는 생길 때만 뜬다(ADR-0063). 자동 배정 희망 조건·차례 도래 유예는 HOT-341이 잇는다.
+// 나머지는 생길 때만 뜬다(ADR-0063). 차례 도래 유예는 ADR-0208 결정 6, 자동 배정 희망 조건(⑧)과 [차례 알림 받기](⑥)는 HOT-343이 잇는다.
 import { links } from '../config';
 import type { LiveCtx } from '../ctx';
 import type { QueueView } from '../live/controller.ts';
 import { append, cx, h, ic, setVars } from '../dom';
 import { fmt, queueSentence } from '../queue-math';
 import { announceEveryMinute, countdown } from '../ui/timers';
+import { steadyNow } from '../live/steady.ts';
+import { clock } from '../queue-math';
 import { focusHeader, offlineStrip } from './shell';
 
 /** 예상 대기 글(분으로 반올림, 1분 미만도 약 1분, 60분부터 시간, ADR-0207 결정 9). null이면 숨김 */
@@ -67,7 +69,8 @@ export function queueScreen(c: LiveCtx): HTMLElement[] {
       region.append(countBlock(c, { ahead: v.ahead!, pct: Math.round(v.progress ?? 0), eta, sentence: queueSentence(v.ahead!, eta, allHeld), stale: st === 'stale', allHeld, paused: st === 'paused' }));
     }
     if (st === 'batching') region.append(spinnerBlock('tx-link', h('p', { class: 't-lg', role: 'status' }, '순서를 정하는 중입니다. 이 동안에는 순번이 보이지 않습니다')));
-    if (st === 'soon') region.append(soonBlock(c, v.retryAt ?? Date.now()));
+    if (st === 'soon') region.append(soonBlock(c, v.retryAt ?? steadyNow()));
+    if (st === 'grace') region.append(graceBlock(c, v.graceUntil ?? steadyNow()));
     if (st === 'verify-redirect') {
       region.append(h('div', { class: 'col q-center-block q-g16' },
         h('span', { class: 'state-icon is-primary' }, ic('shield')),
@@ -82,7 +85,7 @@ export function queueScreen(c: LiveCtx): HTMLElement[] {
       region.append(cancel);
     }
 
-    // ⑨ 순번 안내 ›. ⑥ [차례 알림 받기](알림 권한·알림음·웹 푸시)는 HOT-341이 잇기 전까지 보이지 않는다(ADR-0207 결정 12)
+    // ⑨ 순번 안내 ›. ⑥ [차례 알림 받기](알림 권한·알림음·웹 푸시)는 HOT-343이 잇기 전까지 보이지 않는다(ADR-0208 결정 1)
     const info = h('button', { class: 'btn btn-text btn-sm q-mh32', type: 'button', 'aria-haspopup': 'dialog', 'data-opens': 'info' }, '순번 안내', ic('chevron-right', 'ic-16'));
     info.addEventListener('click', () => c.open('info', info));
     inQueue.append(h('div', { class: 'col q-queue-foot' }, info));
@@ -134,7 +137,7 @@ function spinnerBlock(tone: string, text: HTMLElement): HTMLElement {
 
 /** 진입 혼잡(429): "요청이 많아 잠시 기다려야 합니다. N초 뒤 자동으로 다시 시도합니다"(d5 '진입 혼잡') */
 function busyLine(c: LiveCtx, until: number): HTMLElement {
-  const secs = h('span', { class: 'num fw-b' }, `${Math.max(1, Math.ceil((until - Date.now()) / 1000))}초`);
+  const secs = h('span', { class: 'num fw-b' }, `${Math.max(1, Math.ceil((until - steadyNow()) / 1000))}초`);
   c.onCleanup(countdown(until, (sec) => (secs.textContent = `${sec}초`), () => undefined));
   // 남은 초는 매초 바뀌므로 낭독 영역 밖에 두고, 낭독은 한 번만 한다(숫자에 live를 두지 않는다, ADR-0063)
   return h('p', { class: 't-sm muted q-jc' },
@@ -217,7 +220,7 @@ export function updateQueueNumbers(root: HTMLElement, v: QueueView): boolean {
 
 /** soon: "곧 입장합니다" + 자동 재시도까지 남은 초. 탭 제목에도 남은 초를 보인다(d5 §5.8) */
 function soonBlock(c: LiveCtx, retryAt: number): HTMLElement {
-  const secs = h('span', { class: 'num fw-b' }, `${Math.max(1, Math.ceil((retryAt - Date.now()) / 1000))}초`);
+  const secs = h('span', { class: 'num fw-b' }, `${Math.max(1, Math.ceil((retryAt - steadyNow()) / 1000))}초`);
   const baseTitle = document.title;
   const stop = countdown(retryAt, (sec) => {
     secs.textContent = `${sec}초`;
@@ -232,5 +235,22 @@ function soonBlock(c: LiveCtx, retryAt: number): HTMLElement {
     h('p', { class: 't-2xl', role: 'alert' }, '곧 입장합니다'),
     h('p', { class: 't-md' }, secs, ' 뒤 자동으로 다시 시도합니다'),
     h('p', { class: 't-sm muted' }, '다른 탭을 보고 있어도 탭 제목에 남은 초가 보입니다'),
+  );
+}
+
+/**
+ * 차례 도래 유예(d5 §5.8 '차례 도래 유예', ADR-0208 결정 6): "차례가 되었습니다. m:ss 안에 입장하세요" + [[ 지금 입장 ]].
+ * 남은 시간은 매초 숫자만 바꾸고 낭독하지 않는다(처음 한 번 알린다). 0이 되어도 버튼은 두고 만료는 서버가 정한다
+ */
+function graceBlock(c: LiveCtx, until: number): HTMLElement {
+  const remain = h('span', { class: 'num fw-b' }, clock(Math.ceil((until - steadyNow()) / 1000)));
+  c.onCleanup(countdown(until, (sec) => (remain.textContent = clock(sec))));
+  const go = h('button', { class: 'btn btn-primary btn-lg btn-block q-cta', type: 'button', onclick: () => c.actions.admitNow() }, '지금 입장');
+  return h('div', { class: 'col q-center-block q-g12' },
+    h('span', { class: 'state-icon is-primary' }, ic('bell')),
+    h('h2', { class: 't-2xl', tabindex: '-1' }, '차례가 되었습니다'),
+    h('p', { class: 'sr-only', role: 'alert' }, `차례가 되었습니다. ${Math.max(1, Math.ceil((until - steadyNow()) / 60_000))}분 안에 입장하세요`),
+    h('p', { class: 't-md', 'aria-hidden': 'true' }, remain, ' 안에 입장하세요'),
+    go,
   );
 }

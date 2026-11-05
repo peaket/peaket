@@ -1,8 +1,11 @@
-// 가짜 API 대기열(ADR-0207): 진입·묶음 결과·대기 상태 파일·입장 확정·대기 취소가 계약 Zod를 지나고, 상태 바꾸기대로 답하는지
+// 가짜 API 대기열(ADR-0207·0208): 로비 참가·셔플 결과, 진입·묶음 결과·대기 상태 파일·입장 확정·대기 취소가 계약 Zod를 지나고, 상태 바꾸기대로 답하는지
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
+  CreateQueueLobbyParticipantBody,
+  CreateQueueLobbyParticipantResponse,
+  GetQueueShuffleResultResponse,
   CreateQueueAdmissionBody,
   CreateQueueAdmissionResponse,
   CreateQueueEntryBody,
@@ -162,6 +165,81 @@ test('대기실 개발 출처에도 자격 증명 포함 CORS를 연다(text/pla
     const r = await fetch(`${m.base}/v1/queues/${EVENT}/entries`, { method: 'POST', headers: { origin: 'http://localhost:3004', 'content-type': 'text/plain;charset=UTF-8' }, body: JSON.stringify({ preverifyToken: 'pv-cors' }) });
     assert.equal(r.headers.get('access-control-allow-origin'), 'http://localhost:3004');
     assert.equal(r.headers.get('access-control-allow-credentials'), 'true');
+  } finally {
+    m.server.close();
+  }
+});
+
+const json = (m, method, path, body) =>
+  fetch(`${m.base}${path}`, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }).then(async (r) => ({
+    status: r.status,
+    body: r.headers.get('content-type')?.includes('json') ? await r.json() : undefined,
+  }));
+const join = (m, body = { humanCheckToken: 'sim.lobby.1', deviceId: 'dev-l' }) => json(m, 'POST', `/v1/queues/${EVENT}/lobby-participants`, CreateQueueLobbyParticipantBody.parse(body));
+
+test('로비(ADR-0208): queueOpenIn으로 오픈 전 회차 → 참가 201(계약 Zod) → 두 번째는 409 → 오픈 + 3초에 셔플 결과 게시 → 참가 토큰으로 입장 확정', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueOpenIn=300&queueAhead=10&queueRate=5');
+    const d = await m.get(`/v1/events/${EVENT}`);
+    const openAt = Date.parse(d.body.openAt);
+    assert.equal(openAt, m.now() + 300_000);
+    assert.equal(Date.parse(d.body.lobbyOpensAt), openAt - 10 * 60_000);
+    const j = await join(m);
+    assert.equal(j.status, 201);
+    assert.deepEqual(CreateQueueLobbyParticipantResponse.parse(j.body), j.body);
+    assert.equal(Date.parse(j.body.shuffleResultAt), openAt + 3000);
+    assert.equal(j.body.seedHash.length, 64);
+    assert.equal((await join(m)).status, 409, 'pid당 1장');
+    const prefix = sha(j.body.lobbyToken).slice(0, 3);
+    m.tick(300_000 + 2000);
+    assert.equal((await m.get(`/v1/queues/${EVENT}/shuffle-results/${prefix}.json`)).status, 404, '게시 전');
+    assert.equal((await join(m)).status, 409, '오픈 뒤에는 로비가 닫힌다');
+    m.tick(1000);
+    const r = await m.get(`/v1/queues/${EVENT}/shuffle-results/${prefix}.json`);
+    assert.equal(r.status, 200);
+    GetQueueShuffleResultResponse.parse(r.body);
+    const seq = r.body[sha(j.body.lobbyToken)];
+    assert.ok(seq >= 1);
+    const f = await file(m, Math.floor((seq - 1) / 1000));
+    assert.equal(seq - f.body.serving - 1, 10 - 15, '오픈 뒤 3초 동안 5 × 3 = 15번 나아갔다(앞 인원이 음수면 차례)');
+    const ok = await admit(m, CreateQueueAdmissionBody.parse({ lobbyToken: j.body.lobbyToken }));
+    assert.equal(ok.body.status, 'ADMITTED');
+    assert.equal((await admit(m, { lobbyToken: j.body.lobbyToken, queueTicket: 'x' })).status, 400, '둘 중 하나만');
+  } finally {
+    m.server.close();
+  }
+});
+
+test('로비 상태 바꾸기: 본인확인 전 403·사람 확인 실패 428·혼잡 429(한 번)·다른 기기 409(로비 취소 뒤 지나감)·고위험 REQUIRED, 취소한 참가 토큰은 410 queue-ticket-removed, missing이면 셔플 파일에 내 토큰이 없다', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueOpenIn=120');
+    for (const [mode, status, type] of [['identity', 403, /identity-verification-required$/], ['human-fail', 428, /human-check-required$/], ['unauthorized', 401, /about:blank/]]) {
+      await m.state(`queueLobby=${mode}`);
+      const r = await join(m);
+      assert.equal(r.status, status, mode);
+      assert.match(r.body.type, type);
+    }
+    await m.state('queueLobby=busy');
+    assert.equal((await join(m, { humanCheckToken: 'busy-1' })).status, 429);
+    assert.equal((await join(m, { humanCheckToken: 'busy-1' })).status, 201, '같은 토큰으로 다시 보내면 지나간다');
+    assert.equal((await json(m, 'DELETE', `/v1/queues/${EVENT}/lobby-participants/me`)).status, 204);
+    await m.state('queueLobby=other-device');
+    assert.equal((await join(m)).status, 409);
+    assert.equal((await json(m, 'DELETE', `/v1/queues/${EVENT}/lobby-participants/me`)).status, 204, '다른 기기의 참가 토큰을 취소한다');
+    const fresh = await join(m);
+    assert.equal(fresh.status, 201, '로비 참가 취소 뒤에는 다시 참가한다');
+    assert.equal((await json(m, 'DELETE', `/v1/queues/${EVENT}/lobby-participants/me`)).status, 204);
+    m.tick(120_000 + 5000);
+    assert.match((await admit(m, { lobbyToken: fresh.body.lobbyToken })).body.type, /queue-ticket-removed$/);
+    await m.state('queueReset=1&queueOpenIn=60&queueLobby=verify&queueShuffle=missing');
+    const v = await join(m);
+    assert.deepEqual([v.status, v.body.verification], [201, 'REQUIRED']);
+    m.tick(60_000 + 3000);
+    const r = await m.get(`/v1/queues/${EVENT}/shuffle-results/${sha(v.body.lobbyToken).slice(0, 3)}.json`);
+    assert.equal(r.status, 200);
+    assert.equal(r.body[sha(v.body.lobbyToken)], undefined);
   } finally {
     m.server.close();
   }

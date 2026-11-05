@@ -75,8 +75,8 @@ export function focusHeader(c: BaseCtx & { ev: HeaderEvent }, closeLabel = '닫�
       h('span', { class: 'logo logo-sm q-lg' }, logoMark(), 'PEAKET'),
       h('span', { class: 'vdivider q-lg q-fh-div', 'aria-hidden': 'true' }),
       h('div', { class: 'fh-title' }, h('strong', null, c.ev.title), h('span', null, c.ev.when)),
-      // 로그아웃은 대기실 CSP의 form-action이 웹 /logout 보내기를 막아 HOT-341이 잇는다. 그때까지 데이터 연결 화면은 계정 메뉴를 그리지 않는다(ADR-0207 결정 12)
-      'state' in c ? accountControls(c) : null,
+      // 로그아웃은 같은 출처 fetch POST /logout이다(대기실 CSP의 form-action을 바꾸지 않는다, ADR-0208 결정 7)
+      accountControls(c),
     ),
   );
 }

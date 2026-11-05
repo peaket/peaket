@@ -6,7 +6,7 @@ import { defineConfig, type Plugin } from 'vite';
 /** 운영에서 CloudFront Function이 셸로 바꿔 읽는 경로(§2.5·§5.1). 회차·상품 ID는 페이지 스크립트가 주소에서 읽는다 */
 const SHELL_PATHS = [/^\/(?:(?:en|ja|zh)\/)?queue\/[^/]+\/?$/, /^\/shop\/[^/]+\/queue\/?$/];
 
-/** 개발 서버에서 CloudFront Function을 흉내 낸다: 대기실 경로 → 셸 HTML, `/preview` → 화면 목록(개발에서만) */
+/** 개발 서버에서 CloudFront Function을 흉내 낸다: 대기실 경로 → 셸 HTML, `/preview` → 화면 목록(개발에서만), `/logout` → 웹 앱 서버 흉내 */
 function cloudFrontShellRewrite(): Plugin {
   return {
     name: 'peaket-queue-room-shell-rewrite',
@@ -19,6 +19,15 @@ function cloudFrontShellRewrite(): Plugin {
         if (path === '/') {
           res.statusCode = 302;
           res.setHeader('Location', '/preview');
+          res.end();
+          return;
+        }
+        // 로그아웃 흉내(ADR-0208 결정 7): 운영에서는 같은 출처 웹 앱 서버가 받는다. 같은 출처 POST만 303으로 홈(웹 개발 서버)에 보낸다
+        if (path === '/logout') {
+          const sameOrigin = req.method === 'POST' && (req.headers.origin === `http://${req.headers.host}` || req.headers['sec-fetch-site'] === 'same-origin');
+          res.statusCode = sameOrigin ? 303 : 403;
+          res.setHeader('Cache-Control', 'no-store');
+          if (sameOrigin) res.setHeader('Location', 'http://localhost:3000/');
           res.end();
           return;
         }

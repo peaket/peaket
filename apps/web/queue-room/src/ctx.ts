@@ -47,5 +47,9 @@ export interface LiveCtx extends BaseCtx {
     cancel(): Promise<boolean>;
     /** 다시 줄 서기·이 기기에서 다시 참가 */
     rejoin(): void;
+    /** 사람 확인 실패 뒤 [다시 시도] */
+    retry(): void;
+    /** 차례 도래 유예의 [지금 입장] */
+    admitNow(): void;
   };
 }

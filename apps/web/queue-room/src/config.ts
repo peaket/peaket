@@ -15,8 +15,19 @@ export const ORIGINS = {
   api: pick('VITE_PEAKET_API_ORIGIN', MOCK, 'https://api.peaket.example'),
 } as const;
 
+/**
+ * 사람 확인 위젯(ADR-0208 결정 3). 운영은 Cloudflare Turnstile(사이트 키는 공개 값 VITE_PEAKET_TURNSTILE_SITEKEY),
+ * 개발 서버는 같은 함수 모양의 시뮬레이터(src/dev/human-check-sim.ts)다. 개발에서도 VITE_PEAKET_HUMAN_CHECK=turnstile이면 실제 위젯을 싣는다
+ */
+export const HUMAN_CHECK = {
+  mode: import.meta.env.DEV && env.VITE_PEAKET_HUMAN_CHECK !== 'turnstile' ? ('simulator' as const) : ('turnstile' as const),
+  siteKey: typeof env.VITE_PEAKET_TURNSTILE_SITEKEY === 'string' ? env.VITE_PEAKET_TURNSTILE_SITEKEY : '',
+};
+
 export const links = {
   home: () => `${WEB}/`,
+  /** 로그아웃 처리기(웹 앱 서버, 같은 출처). 개발 서버는 vite.config.ts가 흉내 낸다(ADR-0208 결정 7) */
+  logout: () => '/logout',
   event: (eventId: string, round?: string) => `${WEB}/events/${encodeURIComponent(eventId)}${round ? `?round=${encodeURIComponent(round)}` : ''}`,
   shuffleProof: (eventId: string) => `${WEB}/events/${encodeURIComponent(eventId)}/shuffle-proof`,
   /** 입장 확정 뒤 좌석 화면(SCR-010). 대기실 → 좌석은 페이지 전체를 다시 불러오는 이동이다(§2.7) */

@@ -1,4 +1,4 @@
-// 가짜 API의 대기열(openapi /v1/queues/{eventId}/*, ADR-0207). 오픈 뒤 경로만 흉내 낸다: 진입·묶음 결과 파일·대기 상태 파일·입장 확정·대기 취소.
+// 가짜 API의 대기열(openapi /v1/queues/{eventId}/*, ADR-0207·0208): 로비 참가·참가 취소·셔플 결과 파일, 진입·묶음 결과 파일·대기 상태 파일·입장 확정·대기 취소.
 // queue-svc를 단순하게 흉내 낸 모형이다: 진입한 차례대로 순번을 주고, serving은 판매 중일 때만 queueRate(1초에 지나는 번호)로 나아간다.
 // 운영·CI에서는 쓰지 않는다(ADR-0199 결정 2). 상태 바꾸기는 /__mock/state의 queue* 칸이다(scripts/mock-api.mjs 머리 주석).
 import { createHash, randomUUID } from 'node:crypto';
@@ -20,18 +20,25 @@ export const QUEUE_DEFAULTS = Object.freeze({
   queueRemoved: '0',
   queueBanner: '',
   queueSeats: '',
+  /** 로비 참가: normal|verify|other-device|identity|human-fail|busy|down|unauthorized */
+  queueLobby: 'normal',
+  /** 셔플 결과 파일: normal(오픈 3초 뒤 게시)|late(43초 뒤)|never|missing(내 참가 토큰이 목록에 없음) */
+  queueShuffle: 'normal',
+  /** 오픈까지 남은 초(공연 공개 요약의 openAt을 지금 + 이 값으로 바꾼다. 빈 값이면 고정 자료 그대로) */
+  queueOpenIn: '',
 });
 
 /**
- * @param {{ now: () => number, state: Record<string, string> }} o
+ * @param {{ now: () => number, state: Record<string, string>, schedule?: (eventId: string) => ({ openAtMs: number, lobbyOpensAtMs: number | null } | null) }} o
  */
-export function createQueueMock({ now, state }) {
+export function createQueueMock({ now, state, schedule = () => null }) {
   /** 회차 → { nextSeq, serving(소수), lastT, tickets: Map(대기표 → {seq, admitted, soonShown}), entries: Map(요청 ID → {token, seq?, publishAt?, ticket?}), once: Set } */
   const events = new Map();
   const ev = (id) => {
     let e = events.get(id);
     if (!e) {
-      e = { nextSeq: 1001, serving: null, lastT: now(), tickets: new Map(), entries: new Map(), once: new Set() };
+      // tickets에는 대기표와 로비 참가 토큰이 함께 든다(참가 토큰이 대기표 역할, queue-admission §2)
+      e = { id, nextSeq: 1001, serving: null, lastT: now(), tickets: new Map(), entries: new Map(), once: new Set(), lobby: null, removed: new Set(), otherCleared: false };
       events.set(id, e);
     }
     return e;
@@ -41,11 +48,12 @@ export function createQueueMock({ now, state }) {
     return Number.isFinite(v) && v >= 0 ? v : Number(QUEUE_DEFAULTS[k]);
   };
   const sale = () => SALE[state.queue] ?? 'ON_SALE';
-  /** 판매 중일 때만 serving이 나아간다(일시정지·일시 매진은 멈춤) */
+  /** 판매 중이고 오픈이 지났을 때만 serving이 나아간다(일시정지·일시 매진은 멈춤) */
   const advance = (e) => {
     const t = now();
     if (e.serving === null) e.serving = e.nextSeq - 1 - num('queueAhead');
-    if (sale() === 'ON_SALE') e.serving += (num('queueRate') * (t - e.lastT)) / 1000;
+    const s = schedule(e.id);
+    if (sale() === 'ON_SALE' && (!s || t >= s.openAtMs)) e.serving += (num('queueRate') * (t - Math.max(e.lastT, s?.openAtMs ?? 0))) / 1000;
     e.lastT = t;
     return Math.max(0, Math.floor(e.serving));
   };
@@ -74,11 +82,78 @@ export function createQueueMock({ now, state }) {
      * @param {{ send: Function, problem: Function, readJson: (req: any) => Promise<any>, badRequest: () => void }} io
      */
     handle(req, p, io) {
-      const m = /^\/v1\/queues\/([A-Za-z0-9-]{1,64})\/(entries|entries\/me|admission|segment-states\/(\d{1,6})\.json|batch-results\/([0-9a-f]{3})\.json)$/.exec(p);
+      const m = /^\/v1\/queues\/([A-Za-z0-9-]{1,64})\/(entries|entries\/me|admission|lobby-participants|lobby-participants\/me|segment-states\/(\d{1,6})\.json|batch-results\/([0-9a-f]{3})\.json|shuffle-results\/([0-9a-f]{3})\.json)$/.exec(p);
       if (!m) return false;
       const e = ev(m[1]);
-      const [, eventId, kind, segment, prefix] = m;
+      const [, eventId, kind, segment, prefix, shufflePrefix] = m;
       const { send, problem } = io;
+      const sched = schedule(eventId);
+      // 로비가 닫힌 뒤(오픈 지남)의 로비 요청: 계약의 409에 type이 없어 about:blank로 답한다
+      const lobbyClosed = () => send(409, { type: 'about:blank', title: '로비가 닫혔습니다', status: 409 }, 'application/problem+json');
+
+      if (kind === 'lobby-participants' && req.method === 'POST') {
+        void io.readJson(req).then((b) => {
+          const keys = b && typeof b === 'object' ? Object.keys(b) : [];
+          if (!b || typeof b.humanCheckToken !== 'string' || b.humanCheckToken.length === 0 || keys.some((k) => !['humanCheckToken', 'deviceId'].includes(k))) return io.badRequest();
+          if (!sched || sched.lobbyOpensAtMs === null || now() < sched.lobbyOpensAtMs) return problem(409, 'queue-not-open', '아직 로비가 열리지 않았습니다');
+          if (now() >= sched.openAtMs) return lobbyClosed();
+          const mode = state.queueLobby;
+          if (mode === 'unauthorized') return send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
+          if (mode === 'identity') return problem(403, 'identity-verification-required', '휴대폰 본인확인을 먼저 해 주세요');
+          if (mode === 'human-fail') return problem(428, 'human-check-required', '사람 확인을 마친 뒤 다시 시도해 주세요');
+          // 혼잡·장애는 사람 확인 토큰마다 한 번만(다시 보내면 지나간다)
+          if ((mode === 'busy' || mode === 'down') && !e.once.has(`lobby:${b.humanCheckToken}`)) {
+            e.once.add(`lobby:${b.humanCheckToken}`);
+            return mode === 'busy'
+              ? problem(429, 'server-busy', '요청이 많아 잠시 기다려야 합니다', { 'retry-after': '2' })
+              : problem(503, 'dependency-unavailable', '잠시 후 다시 시도해 주세요', { 'retry-after': '1' });
+          }
+          // 다른 기기가 먼저 참가했다(로비 참가 취소 뒤에는 지나간다). 이 기기·다른 탭이 이미 받은 참가 토큰도 409다(pid당 1장)
+          if ((mode === 'other-device' && !e.otherCleared) || e.lobby) return problem(409, 'already-waiting', '이미 다른 곳에서 로비에 들어와 있습니다');
+          advance(e);
+          const token = `lt.${randomUUID()}`;
+          e.lobby = token;
+          e.tickets.set(token, { seq: e.nextSeq++, admitted: false, soonShown: false });
+          return send(201, {
+            lobbyToken: token,
+            seedHash: sha(`PEAKET-shuffle-v1${eventId}mock-seed`),
+            drandChain: 'quicknet',
+            drandRound: 1234567,
+            algorithmVersion: 'v1',
+            lobbyOpenedAt: new Date(sched.lobbyOpensAtMs).toISOString(),
+            shuffleResultAt: new Date(sched.openAtMs + 3000).toISOString(),
+            shuffleSpreadSec: 2,
+            ...(mode === 'verify' ? { verification: 'REQUIRED', verificationReason: 'NETWORK' } : { verificationReason: null }),
+            serverTimeMs: now(),
+          });
+        });
+        return true;
+      }
+
+      if (kind === 'lobby-participants/me' && req.method === 'DELETE') {
+        if (sched && now() >= sched.openAtMs) return lobbyClosed(), true;
+        // 팬 쿠키로 부르므로 다른 기기의 참가 토큰도 취소한다(ADR-0060)
+        if (state.queueLobby === 'other-device' && !e.otherCleared && !e.lobby) {
+          e.otherCleared = true;
+          return send(204, undefined), true;
+        }
+        if (!e.lobby) return problem(404, 'not-found', '참가 토큰이 없습니다'), true;
+        e.tickets.delete(e.lobby);
+        e.removed.add(e.lobby);
+        e.lobby = null;
+        send(204, undefined);
+        return true;
+      }
+
+      if (shufflePrefix && req.method === 'GET') {
+        const publishAt = sched ? sched.openAtMs + (state.queueShuffle === 'late' ? 43_000 : 3000) : Infinity;
+        if (state.queueShuffle === 'never' || now() < publishAt) return send(404, { type: 'about:blank', title: 'Not Found', status: 404 }, 'application/problem+json', { 'cache-control': 'public, max-age=1' }), true;
+        // 목록을 고정한 뒤의 파일: 아직 취소되지 않은 참가 토큰만 든다(missing이면 다른 기기에서 취소된 것처럼 내 토큰을 뺀다)
+        const table = { [sha(`decoy-${shufflePrefix}`)]: 1 };
+        if (e.lobby && state.queueShuffle !== 'missing' && sha(e.lobby).startsWith(shufflePrefix)) table[sha(e.lobby)] = e.tickets.get(e.lobby).seq;
+        send(200, table, undefined, { 'cache-control': 'public, max-age=60' });
+        return true;
+      }
 
       if (kind === 'entries' && req.method === 'POST') {
         void io.readJson(req).then((b) => {
@@ -120,8 +195,10 @@ export function createQueueMock({ now, state }) {
       }
 
       if (kind === 'entries/me' && req.method === 'DELETE') {
+        for (const t of e.tickets.keys()) e.removed.add(t);
         e.tickets.clear();
         e.entries.clear();
+        e.lobby = null;
         send(204, undefined);
         return true;
       }
@@ -178,8 +255,11 @@ export function createQueueMock({ now, state }) {
       if (kind === 'admission' && req.method === 'POST') {
         void io.readJson(req).then((b) => {
           const keys = b && typeof b === 'object' ? Object.keys(b) : [];
-          if (!b || typeof b.queueTicket !== 'string' || keys.some((k) => !['queueTicket', 'lobbyToken', 'priorityGrantId', 'firstEtaSec', 'firstEtaAtMs'].includes(k))) return io.badRequest();
-          const t = e.tickets.get(b.queueTicket);
+          const key = typeof b?.queueTicket === 'string' ? b.queueTicket : typeof b?.lobbyToken === 'string' ? b.lobbyToken : null;
+          if (!b || key === null || (b.queueTicket !== undefined && b.lobbyToken !== undefined) || keys.some((k) => !['queueTicket', 'lobbyToken', 'priorityGrantId', 'firstEtaSec', 'firstEtaAtMs'].includes(k))) return io.badRequest();
+          // 취소된 참가 토큰·대기표(다른 기기에서 취소)
+          if (e.removed.has(key)) return problem(410, 'queue-ticket-removed', '대기가 취소됐습니다');
+          const t = e.tickets.get(key);
           if (!t) return problem(403, 'queue-ticket-invalid', '대기표가 맞지 않습니다');
           const mode = state.queueAdmit;
           if (mode === 'unauthorized') return send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');

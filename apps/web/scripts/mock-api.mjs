@@ -4,6 +4,8 @@
 // - 상태 바꾸기: GET /__mock/state?home=normal|empty&ranking=normal|stale|old|missing&fan=member|unverified|pending|closing|guest&detail=normal|suspended&verify=popup|redirect|down (화면 상태를 보려고)
 //   대기열(ADR-0207): queue=on-sale|paused|all-held|sold-out|ended, queueEntry=normal|batching|busy|down|other-device|already-admitted|not-open|preverify-invalid|sold-out|ended|verify,
 //   queueAdmit=normal|soon|verifying|restricted|unauthorized|duplicate|expired|expired-final|removed|sold-out|ended|down, queueAhead(처음 앞 인원)·queueRate(1초에 지나는 번호)·queueRemoved(빠진 번호 수)·queueBanner·queueSeats, queueReset=1
+//   로비(ADR-0208): queueOpenIn(오픈까지 남은 초, 정한 순간에 고정한다. 빈 값이면 고정 자료 일정), queueLobby=normal|verify|other-device|identity|human-fail|busy|down|unauthorized,
+//   queueShuffle=normal|late|never|missing
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
 // - 파생본 이미지 주소(/img/{이름}/{폭}.{avif|webp})에는 자리 그림(SVG)을 낸다
 // - 공연 상세(GET /v1/events/{eventId}, ADR-0200)는 고정 자료 카드의 모든 회차를 답하고 그 밖은 404다.
@@ -119,11 +121,13 @@ const iso = (ms) => new Date(ms).toISOString();
  * 공연 상세(openapi getEvent 200, EventPublicSummary + ADR-0200 칸). 고정 자료 카드의 모든 회차가 있고 그 밖은 없음(404).
  * 회차 목록은 판매 종료가 지난 회차를 빼되 이 회차는 늘 넣는다(ADR-0200 결정 1).
  */
-export function eventDetail(origin, eventId, now = new Date()) {
+export function eventDetail(origin, eventId, now = new Date(), openAtOverride = undefined) {
   for (const c of Object.values(CARDS)) {
     const rounds = cardRounds(c);
     const r = rounds.find((x) => x.eventId === eventId);
     if (!r) continue;
+    // 상태 바꾸기 queueOpenIn: 이 회차의 오픈을 정한 시각으로 옮긴다(로비·오픈 전 화면을 보려고, ADR-0208)
+    if (openAtOverride !== undefined) r.openAt = openAtOverride;
     const order = (c.badges ?? []).find((b) => QUEUE_ORDERS.includes(b)) ?? 'HYBRID';
     const place = PLACES[c.placeName] ?? { placeId: 'a1d2c3b4-0000-4000-8000-000000000009', placeAddress: '서울 어딘가' };
     const tierBase = c.minPrice ?? 0;
@@ -509,7 +513,13 @@ export function startMockApi({
 } = {}) {
   const origin = `http://127.0.0.1:${port}`;
   const state = { home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
-  const queue = createQueueMock({ now, state });
+  /** queueOpenIn을 정한 순간에 고정한 오픈 시각(밀리초). 없으면 고정 자료 일정 */
+  let openAtOverride;
+  const scheduleOf = (eventId) => {
+    const d = ID.test(eventId) ? eventDetail(origin, eventId, new Date(now()), openAtOverride) : undefined;
+    return d ? { openAtMs: Date.parse(d.openAt), lobbyOpensAtMs: d.lobbyOpensAt ? Date.parse(d.lobbyOpensAt) : null } : null;
+  };
+  const queue = createQueueMock({ now, state, schedule: scheduleOf });
   /** 본인확인 건(건 ID → 목적·돌아갈 주소·상태) */
   const attempts = new Map();
   /** 결과 확정(identity-svc confirm-verification.ts의 차례): 정리 중 → 기관 값 → 기록 없는 REVERIFY → 만 나이 → 다른 계정 → 같은 사람 */
@@ -564,7 +574,11 @@ export function startMockApi({
     if (p === '/__mock/state' && req.method === 'GET') {
       for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
-        if (v !== null && (v !== '' || k === 'queueBanner' || k === 'queueSeats')) state[k] = v;
+        if (v !== null && (v !== '' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn')) state[k] = v;
+      }
+      if (url.searchParams.has('queueOpenIn')) {
+        const sec = Number(state.queueOpenIn);
+        openAtOverride = state.queueOpenIn !== '' && Number.isFinite(sec) ? now() + sec * 1000 : undefined;
       }
       if (url.searchParams.get('queueReset')) queue.reset();
       if (url.searchParams.get('fan')) {
@@ -581,7 +595,7 @@ export function startMockApi({
     }
     const ev = /^\/v1\/events\/([^/]+)$/.exec(p);
     if (ev && req.method === 'GET') {
-      const d = ID.test(ev[1]) ? eventDetail(origin, ev[1]) : undefined;
+      const d = ID.test(ev[1]) ? eventDetail(origin, ev[1], new Date(now()), openAtOverride) : undefined;
       if (d && state.detail === 'suspended') return send(410, { type: 'https://peaket.example/problems/event-suspended', title: '판매가 중지된 공연입니다', status: 410 }, 'application/problem+json');
       // 캐시 태그는 회차·공연 둘이고 소문자다(core-svc event-summary.controller.ts와 같다, ADR-0200 결정 5)
       const tags = d ? `event:${d.eventId.toLowerCase()},production:${d.productionId.toLowerCase()}` : '';

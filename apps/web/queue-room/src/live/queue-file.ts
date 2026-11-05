@@ -20,6 +20,8 @@ export interface QueueState {
   remainingSeats?: number;
   avgTicketsPerOrder?: number;
   seatmapLayoutPath?: string;
+  /** 입장 임박 구간 파일만: 최근 serving 전진 기록 [시각(밀리초), 그때의 serving](시각 순) */
+  servingSteps?: [number, number][];
 }
 
 export const SEGMENT_SIZE = 1000;
@@ -66,6 +68,10 @@ export function parseQueueState(raw: unknown): QueueState | null {
   if (seats !== undefined) s.remainingSeats = seats;
   if (avg !== undefined) s.avgTicketsPerOrder = avg;
   if (typeof r.seatmapLayoutPath === 'string') s.seatmapLayoutPath = r.seatmapLayoutPath;
+  if (Array.isArray(r.servingSteps)) {
+    const steps = r.servingSteps.filter((x): x is [number, number] => Array.isArray(x) && x.length === 2 && int(x[0]) && int(x[1]));
+    if (steps.length) s.servingSteps = steps.sort((a, b) => a[0] - b[0]);
+  }
   return s;
 }
 
@@ -178,4 +184,17 @@ export function nextDelayMs(s: PollInput, failures: number, hidden: boolean, ret
   const floor = Math.max(s.pollHintMs, retryAfterMs ?? 0);
   if (floor > 0) return Math.max(base, floor) * (1 + random() * 0.2);
   return base * (0.8 + random() * 0.4);
+}
+
+/**
+ * 차례가 온 시각(보정 시계 밀리초, ADR-0208 결정 6). 서버가 주지 않으므로 브라우저가 정한다:
+ * ① servingSteps에 내 번호를 넘은 전진이 있으면 그 시각, ② 차례 전이던 마지막 파일의 생성 시각(실제보다 이르다),
+ * ③ 생성 시각 − (serving − 순번 + 1) ÷ servingRate(속도 0이면 생성 시각)
+ */
+export function turnAtOf(seq: number, f: QueueState, lastBeforeAt: number | null): number {
+  const steps = f.servingSteps ?? [];
+  for (let k = 1; k < steps.length; k++) if (steps[k - 1]![1] < seq && steps[k]![1] >= seq) return steps[k]![0];
+  if (lastBeforeAt !== null) return lastBeforeAt;
+  if (f.servingRate > 0) return Math.round(f.generatedAtMs - ((f.serving - seq + 1) / f.servingRate) * 1000);
+  return f.generatedAtMs;
 }

@@ -429,21 +429,22 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 | 상태 | 화면(SCR) | 들어오는 조건 | 하는 일 | 나가는 조건 → 다음 상태 |
 | --- | --- | --- | --- | --- |
-| `boot` | — | 페이지 열림 | 저장소에서 회차 표 읽기, 시계 보정, 다른 탭 확인(§5.9) | 참가 토큰만 있으면 → `lobby` / 대기표가 있으면 → `waiting` / 진입 요청 ID와 묶음 응답만 있으면 → `batching`(ADR-0207) / 둘 다 없고 오픈 전 → `lobby-join` / 오픈 뒤 → `enter`(사전 검증 토큰이 없으면 공연 상세로) |
-| `lobby-join` | 007 | 참가 전 | 이 기기의 로비 버튼 열리는 시각(§5.9 '로비 버튼은 기기마다 고정된 지연') 전이면 "곧 들어갈 수 있습니다"와 남은 초를 보이며 기다린다. 그 뒤 본인확인 여부 확인(없으면 [휴대폰 본인확인]), 사람 확인 위젯을 필요할 때 불러오기, `POST …/lobby-participants` | 201 → `lobby` / `verification: REQUIRED` → `verify-redirect` / 409 → `other-device` |
+| `boot` | — | 페이지 열림 | 저장소에서 회차 표 읽기, 시계 보정, 다른 탭 확인(§5.9) | 참가 토큰만 있으면 → `lobby` / 대기표(참가 토큰과 셔플 순번 포함)가 있으면 → `waiting` / 진입 요청 ID와 묶음 응답만 있으면 → `batching`(ADR-0207) / 둘 다 없고 오픈 전이며 로비가 열렸으면 → `lobby-join` / 오픈 뒤 → `enter`(사전 검증 토큰이 없으면 공연 상세로). 오픈 시각·로비 개방 시각은 공연 공개 요약의 `openAt`·`lobbyOpensAt`이다(참가 토큰 응답에는 오픈 시각이 없다). 사전 검증 토큰이 있는데 오픈 전이고 로비가 없으면 진입을 보내 서버의 409 `queue-not-open`으로 공연 상세에 간다. 로비 개방 전이면 공연 상세로 간다(ADR-0208 결정 2) |
+| `lobby-join` | 007 | 참가 전 | 이 기기의 로비 버튼 열리는 시각(§5.9 '로비 버튼은 기기마다 고정된 지연') 전이면 "곧 들어갈 수 있습니다"와 남은 초를 보이며 기다린다. 그 뒤 사람 확인 위젯을 카드 안에 늦게 싣고(`action` `lobby`), 토큰을 받으면 `POST …/lobby-participants`(JSON) | 201 → `lobby` / `verification: REQUIRED` → 참가 토큰을 저장한 뒤 `verify-redirect` / 401 → 갱신 한 번 뒤 같은 토큰으로, 또 401이면 `login-expired` / 403 `identity-verification-required` → 공연 상세(본인확인 흐름은 공연 상세가 갖는다) / 그 밖 403·428 → '사람 확인 실패'와 [다시 시도] / 409 → 다른 탭이 받은 참가 토큰이 저장소에 있으면 `lobby`, 없으면 `other-device` / 429 → `Retry-After` 뒤 같은 토큰으로 / 503·연결 실패 → 기다린 뒤 새 사람 확인 토큰으로(ADR-0208 결정 3) |
 | `lobby` | 007 | 참가 토큰이 있다 | 오픈까지 카운트다운(남은 5분·1분·10초에 낭독, §4.8), 공시 값 표시 | 셔플 공개 시각 + 분산 지연 → `shuffle-fetch` |
-| `shuffle-fetch` | 007 '순서 계산 중' | 공개 시각이 지났다 | 결과 파일 받기, 404면 간격을 2초→20초로 두 배씩 늘리며 다시 받기(정본) | 순번 받음 → `waiting` / 60초 넘음 → `shuffle-delayed`(SEV1 화면 안내. 장애 심각도 등급은 숫자가 작을수록 심각하다) |
+| `shuffle-fetch` | 007 '순서 계산 중' | 공개 시각이 지났다 | 결과 파일 받기, 404면 간격을 2초→20초로 두 배씩 늘리며 다시 받기(정본) | 순번 받음 → `waiting` / 60초 넘음 → `shuffle-delayed`(SEV1 화면 안내. 장애 심각도 등급은 숫자가 작을수록 심각하다) / 200인데 내 해시가 두 번 연달아 없음 → `cancelled-elsewhere`(목록 고정 뒤 파일은 바뀌지 않는다, ADR-0208 결정 4) |
 | `enter` | 008 | 오픈 뒤 첫 진입 | `POST …/entries`(`text/plain`) | 201 → `waiting` / 202 → `batching` / 409 → `other-device` 또는 `already-admitted` / 410 → `sold-out` 또는 `ended` / 429·503 → `Retry-After` 뒤 같은 요청 ID로 다시 보내기 / 403 `preverify-invalid`·`identity-verification-required`, 404, 409 `queue-not-open` → 공연 상세(ADR-0207) |
 | `batching` | 008 '순서를 정하는 중' | 202 | 묶음 결과 파일을 같은 규칙으로 받기 | 순번 받음 → `waiting` |
-| `waiting` | 008 | 순번이 있다 | 내 대기 상태 파일 폴링(§5.1), 앞 인원·진행 막대·예상 시간 표시, 차례 1분 전 토큰 갱신, 좌석 자원 미리 받기 | serving ≥ 순번 → `turn` / `PAUSED` → `paused` / `ALL_HELD` → `all-held` / `SOLD_OUT` → `sold-out` / `ENDED` → `ended` / 연속 실패 → `stale` |
+| `waiting` | 008 | 순번이 있다 | 내 대기 상태 파일 폴링(§5.1), 앞 인원·진행 막대·예상 시간 표시, 차례 1분 전 토큰 갱신, 좌석 자원 미리 받기 | serving ≥ 순번 → 리더 탭이면 `turn`, 아니면 `grace`(ADR-0208 결정 6) / `PAUSED` → `paused` / `ALL_HELD` → `all-held` / `SOLD_OUT` → `sold-out` / `ENDED` → `ended` / 연속 실패 → `stale` |
 | `stale` | 008 '연결 확인 중' | 연속 3회 [가정] 실패 또는 30초 [가정] 무응답 | 마지막 값을 그대로 두기, 실패 뒤 대기 간격 늘리기 | 성공 → 이전 상태 |
 | `paused` | 008 '판매가 잠시 멈췄습니다' | `saleStatus=PAUSED` | 폴링 계속 | `ON_SALE` → `waiting` |
 | `all-held` | 008 '남은 좌석이 모두 결제 중입니다' | `saleStatus=ALL_HELD`(일시 매진, 추천 적용 2026-10-28, ADR-0122) | 폴링 계속. 앞 인원은 그대로 보이고 예상 시간은 숨긴다. "결제되지 않은 좌석이 풀리면 차례대로 이어집니다" | `ON_SALE` → `waiting` / `SOLD_OUT` → `sold-out` / `ENDED` → `ended` |
 | `turn` | 008 '입장 중' | 차례가 왔다 | `POST …/admission`(`text/plain`) | `ADMITTED` → `admitted` / `SOON` → `soon` / `NOT_YET` → `waiting`(`retryAfterMs` 전에는 다시 보내지 않는다) / `VERIFYING` → `verify-redirect` / 409 → `duplicate` / 410 → `expired` 또는 `ended` / 401 → 갱신 한 번 뒤 다시, 또 401이면 `login-expired` / 403 `booking-restricted` → `restricted`, `queue-ticket-invalid` → `duplicate`, `identity-verification-required` → 공연 상세 / 410 `sold-out` → `sold-out`, `queue-ticket-removed` → `cancelled-elsewhere` / 503 → `Retry-After` 뒤 같은 대기표로(ADR-0207) |
 | `soon` | 008 '곧 입장합니다' | `SOON` | 남은 초 표시, 지터를 넣어 다시 `turn` | `retryAfterSeconds` × (1 + U(0, 0.2)) 뒤 → `turn` |
+| `grace` | 008 '차례 도래 유예' | 차례가 왔는데 이 탭이 지금 입장 확정을 보내지 않는다(숨김·리더 아님·실패 뒤 기다림. `NOT_YET`의 서버 하한 동안은 `waiting`이고 [지금 입장]도 그 하한을 깨지 않는다) | "차례가 되었습니다. m:ss 안에 입장하세요" + [[ 지금 입장 ]], 탭 제목 바꾸기. 남은 시간 = 차례가 온 시각 + 15분 − 보정 시계. 차례가 온 시각은 브라우저가 정한다: `servingSteps`의 내 번호를 넘은 전진 시각, 없으면 차례 전이던 마지막 파일의 생성 시각, 그것도 없으면 생성 시각 − (serving − 순번 + 1) ÷ `servingRate`(ADR-0208 결정 6) | 리더가 되거나 [지금 입장] → `turn` |
 | `admitted` | → 010 | 입장 토큰을 받았다 | 토큰을 sessionStorage에 두고 좌석 화면으로 전체 이동 | — |
 | `verify-redirect` | → 009 | 추가 검증 필요 | `/queue/[eventId]/verify`로 이동 | — |
-| `other-device` | 007·008 | 409 다른 기기·탭 | "처음 기기에서 계속하세요" + ( 이 기기에서 다시 참가 › ) | 확인 → 기존 참가·대기를 취소한 뒤 `lobby-join` 또는 `enter` |
+| `other-device` | 007·008 | 409 다른 기기·탭(같은 기기의 다른 탭이 받은 값이 저장소에 있으면 그 값을 쓰고 여기 오지 않는다, ADR-0208 결정 5) | "처음 기기에서 계속하세요" + ( 이 기기에서 다시 참가 › ) | 확인 → 오픈 전이면 `DELETE …/lobby-participants/me` 뒤 `lobby-join`, 오픈 뒤(또는 그 취소가 409)면 `DELETE …/entries/me` 뒤 `enter` |
 | `cancelled-elsewhere` | 007·008 | 취소된 토큰으로 요청해 받은 거절 | "다른 기기에서 이 참가를 취소했습니다" | 공연 상세 화면으로 |
 | `already-admitted`, `duplicate` | 008 | 409 `ALREADY_ADMITTED`·`DUPLICATE_ADMISSION`, 또는 리더 탭의 입장 결과 방송(`duplicate`, §5.1 '여러 탭') | 정본 문구 | 끝 |
 | `expired` | 008 | 410 대기표 만료 | `rejoinAllowed`면 [다시 줄 서기], 아니면 버튼 없이 안내(ADR-0207) | 확인 → 저장소를 지우고 `enter` |
@@ -597,7 +598,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 저장소 | 키 | 값 | 수명 | 지우는 때 | 등급 |
 | --- | --- | --- | --- | --- | --- |
 | localStorage | `peaket.device` | `deviceId`(CSPRNG 128비트, base64url 22자) | 사용자가 지울 때까지 | 사이트 데이터 삭제 | P2(기기 식별값) |
-| localStorage | `peaket.queue.{eventId}` | 참가 토큰, 사전 검증 토큰과 발급 시각, 진행 중인 진입의 요청 ID와 묶음 응답(202 본문, 추천 적용 2026-11-03)과 그때 보낸 사전 검증 토큰, 대기표, 순번·구간, 처음 예상 대기(`firstEtaSec`·`firstEtaAtMs`), 저장 시각 | 회차 판매 종료까지 | 로그아웃, 대기 취소, 410(`rejoinAllowed`인 대기표 만료는 다시 줄 서기에 쓸 사전 검증 토큰만 남긴다), 판매 종료, 입장(`ADMITTED`면 모두, ADR-0207), 앱 시작 때 2일 [가정]이 지난 항목 | P2 |
+| localStorage | `peaket.queue.{eventId}` | 참가 토큰과 그 응답의 시드 해시·drand 체인과 라운드·결과 공개 시각·분산 창, 사전 검증 토큰과 발급 시각, 진행 중인 진입의 요청 ID와 묶음 응답(202 본문, 추천 적용 2026-11-03)과 그때 보낸 사전 검증 토큰, 대기표(또는 참가 토큰과 셔플 순번), 순번·구간, 처음 예상 대기(`firstEtaSec`·`firstEtaAtMs`), 차례가 온 시각(브라우저 추정, ADR-0208 결정 6), 저장 시각 | 회차 판매 종료까지 | 로그아웃, 대기 취소, 410(`rejoinAllowed`인 대기표 만료는 다시 줄 서기에 쓸 사전 검증 토큰만 남긴다), 판매 종료, 입장(`ADMITTED`면 모두, ADR-0207), 앱 시작 때 2일 [가정]이 지난 항목 | P2 |
 | sessionStorage | `peaket.queue.{eventId}.firstAhead` | 처음 앞 인원 | 탭 | 탭 닫힘 | 등급 밖(숫자) |
 | localStorage | `peaket.clock` | 서버 시각 보정값(밀리초 차), 표본 시각, 왕복(§3.3, ADR-0110) | 30분 [가정] | 앱 시작 때 30분이 지난 값, 로그아웃 | 등급 밖(숫자) |
 | sessionStorage | `peaket.admission.{eventId}` | 입장 토큰, 서버 ECDH 공개키(JWK), 좌석맵 파일 경로, 구매 세션 만료 시각(`purchaseSessionExpiresAt`, ADR-0207), 받은 시각 | 구매 세션 | 세션 끝·로그아웃·만료 | P1(구매 세션 자격) |
@@ -657,8 +658,8 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 | 순서 | 호출 | 본문·헤더 | 응답과 처리 |
 | --- | --- | --- | --- |
-| 1 | `POST https://queue…/v1/queues/{eventId}/lobby-participants` | JSON `{humanCheckToken, deviceId}`, 쿠키, 사전 요청이 있다(T=0 전) | 201 참가 토큰(`verification`이 `REQUIRED`면 SCR-009) / 403 본인확인 전 / 409 다른 기기 |
-| 2 | 셔플 결과 파일 `GET https://queue-files…/v1/queues/{eventId}/shuffle-results/{hashPrefix}.json` | 쿠키는 없고, 사용자 헤더도 없다 | `shuffleResultAt` + 지연이 지난 뒤 한 번 받는다. 404면 간격을 2초부터 두 배씩 늘리고(최대 20초), 간격 안의 무작위 시각에 다시 받는다 |
+| 1 | `POST https://queue…/v1/queues/{eventId}/lobby-participants` | JSON `{humanCheckToken, deviceId}`, 쿠키, 사전 요청이 있다(T=0 전) | 201 참가 토큰(`verification`이 `REQUIRED`면 SCR-009) / 403 본인확인 전 / 409 다른 기기. 응답별 동작은 §3.4 `lobby-join`(ADR-0208 결정 3) |
+| 2 | 셔플 결과 파일 `GET https://queue-files…/v1/queues/{eventId}/shuffle-results/{hashPrefix}.json` | 쿠키는 없고, 사용자 헤더도 없다 | `shuffleResultAt` + 지연이 지난 뒤 한 번 받는다. 404면 간격을 2초부터 두 배씩 늘리고(최대 20초), 간격 안의 무작위 시각에 다시 받는다. 200인데 내 해시가 두 번 연달아 없으면 다른 기기에서 취소된 참가다(ADR-0208 결정 4) |
 | 3 | 사전 검증(공연 상세에서) `POST …/pre-verifications` | JSON `{humanCheckToken, deviceId, behaviorSummary}` | 201 토큰(만료 2분 [가정] 전, 사람 확인을 보이지 않는 모드로 다시 실행해 갱신한다. 조작이 필요하면 위젯을 보인다) |
 | 4 | 진입 `POST https://queue…/v1/queues/{eventId}/entries` | `text/plain` JSON 문자열 `{preverifyToken, deviceId, entryRequestId}`. `entryRequestId`는 진입 시도 하나에 `crypto.randomUUID()`로 만들고, 응답을 못 받아 다시 보낼 때와 묶음 결과 뒤 다시 보낼 때 같은 값을 쓴다(헤더가 아니라 본문이라 사전 요청이 생기지 않는다, 기술 검토 중간-035). 보내기 전에 localStorage에 두어 새로 고침·탭을 다시 열어도 같은 값으로 잇는다(서버는 진입 시도를 이 값으로만 가른다, 추천 적용 2026-11-03) | 201 대기표(같은 `entryRequestId`로 다시 보내면 같은 번호의 대기표) / 202 묶음(`entryRequestId`를 함께 준다) / 409 / 410 / 503 `Retry-After` |
 | 5 | 대기 상태 파일 `GET https://queue-files…/v1/queues/{eventId}/segment-states/{segment}.json` | 쿠키·사용자 헤더가 없다. `cache: "no-store"`(ADR-0110) | 주기·지터·본문 `pollHintMs`(503이면 `Retry-After`, 기술 검토 중간-032, §5.1). `segment = floor((순번 − 1) ÷ 1000)` [가정, 순번은 1부터]. 입장 임박 구간 파일의 `servingSteps`로 차례 반영 지연을 잰다(§3.3) |
@@ -942,9 +943,9 @@ export type HostView = Readonly<Pick<HostState, "scope" | "control" | "autoActio
 | 이름 | 종류 | 쓰임 |
 | --- | --- | --- |
 | `peaket.session` | BroadcastChannel | `logout`, `session-ended{reason}`, `token-refreshed` |
-| `peaket.queue.{eventId}` | BroadcastChannel | 폴링 리더가 받은 `QueueState`·상태 전이(입장 확정 결과 포함)를 다른 탭에 나눠 준다. 리더가 없을 때 폴링한 숨긴 탭도 같은 채널로 나눈다(§5.1) |
+| `peaket.queue.{eventId}` | BroadcastChannel | 폴링 리더가 받은 `QueueState`·상태 전이(입장 확정 결과 포함)를 다른 탭에 나눠 준다. 리더가 없을 때 폴링한 숨긴 탭도 같은 채널로 나눈다(§5.1). 메시지는 셋이다: `{t: 'file', file}`(대기 상태 파일 원문, 받는 탭이 다시 검사하고 틀리면 버린다), `{t: 'stored'}`(참가 토큰·대기표를 저장소에 썼다, 자기 값과 다른 탭은 끝 상태에서도 저장소에서 다시 시작한다), `{t: 'result', state}`(끝 상태 이름과 로비·대기 구분. `admitted`를 받은 탭은 `duplicate`, 대기 취소도 알린다). 셋 모두 그 탭이 쓰는 대기표·참가 토큰의 지문 `k`를 싣고, 받는 탭은 `file`·`result`를 자기 지문과 같을 때만 쓴다(원문 토큰은 싣지 않는다, ADR-0208 결정 5) |
 | `peaket.verify` | BroadcastChannel | 본인확인 결과 `{verificationId, status}` |
-| `queue-poll:{eventId}` | Web Locks | 그 회차 대기실 폴링 리더. 보이는 탭만 청하고, 리더가 숨겨지면 바로 놓는다(숨긴 탭은 청하지 않는다). 입장 확정도 이 잠금을 쥔 탭만 보낸다(추천 적용 2026-10-28, 기술 검토 중간-037, §5.1) |
+| `queue-poll:{eventId}` | Web Locks | 그 회차 대기실 폴링 리더. 대기 중이고 보이는 탭만 청하고, 리더가 숨겨지거나 대기가 끝나면 바로 놓는다(숨긴 탭·끝 상태 탭은 청하지 않는다, ADR-0208 결정 5). 입장 확정도 이 잠금을 쥔 탭만 보낸다(추천 적용 2026-10-28, 기술 검토 중간-037, §5.1) |
 | `ps:{jti}` | Web Locks | 구매 세션 일련번호와 요청 직렬화(§5.3) |
 | `peaket.refresh` | Web Locks | 팬 토큰 갱신을 탭 사이에서 한 번만 하게 한다(이름은 2026-11-05 코드에 맞춤, shared/lib/refresh-lock) |
 
@@ -1031,6 +1032,8 @@ function nextDelayMs(s: QueueView, net: NetState, vis: DocumentVisibilityState):
   - 리더가 아닌 보이는 탭은 리더의 마지막 방송이 자기 간격의 2배보다 오래되면 스스로 한 번 묻고 방송한다(리더가 멈췄거나 잠금 넘김이 늦은 경우).
   - 보이는 탭이 하나도 없으면 리더도 없다. 숨긴 탭은 각자 숨긴 간격(최소 5초)으로 묻되, 다른 탭의 방송이 자기 간격의 2배 안에 있었으면 묻지 않는다. 그래서 숨긴 탭이 여럿이어도 대개 한 탭만 묻는다.
   - 차례가 오면 입장 확정은 리더(보이는 탭)만 보낸다. 자동 배정 공연의 차례 직전 직접 확인도 같다. 보이는 탭이 없으면 숨긴 탭은 입장 확정을 보내지 않고 탭 제목·소리·웹 푸시로 알린다. 탭이 보이면 그 탭이 리더가 되어 바로 보낸다. 보는 사람이 없는 동안 입장 자리(첫 사용 기한 5분)를 잡아 두지 않으려는 것이고, 늦게 와도 15분 유예가 있다(POL-008). 다른 탭은 리더의 입장 결과 방송을 받으면 `duplicate` 상태(화면 invalid, "이미 다른 기기나 탭의 대기표로 입장했습니다. 처음 입장한 곳에서 계속하세요", docs/design/d5 §5.8)로 끝낸다.
+  - 두 탭이 동시에 진입·로비 참가를 보내 한쪽이 409(`already-waiting`·이미 참가)를 받으면, 그 탭은 저장소를 다시 읽어 다른 탭이 받은 대기표나 참가 토큰을 쓴다. 다른 기기라고 잘못 알리지 않게 하려는 것이다. 차례가 왔는데 입장 확정을 보내지 않는 탭(숨김·리더 아님)은 '차례 도래 유예' 화면과 남은 시간을 보인다(§3.4 `grace`, ADR-0208 결정 5·6).
+  - Web Locks가 없는 맥락(보안 맥락이 아닌 주소)에서는 보이는 탭이 저마다 리더다. 지원 범위에는 늘 있다(§1.5).
   - 남는 한계: 리더가 바뀌는 순간에는 묻기가 한 번 겹치거나 한 간격만큼 빌 수 있다. 모든 탭이 숨겨진 동안은 지금처럼 차례를 늦게 알아챌 수 있고, 15분 유예가 받는다.
 
 **차례와 입장**
@@ -1430,6 +1433,7 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'
    - **웹 푸시 구독 풀기(소비자 웹, 추천 적용 2026-10-30, docs/features/notify.md §3.4)**: 이 브라우저에 웹 푸시 구독이 있으면(`registration.pushManager.getSubscription()`), 로그아웃 요청보다 먼저 `DELETE /v1/push-subscriptions/{subscriptionKey}`를 보낸다. `subscriptionKey`는 구독 주소의 SHA-256을 base64url로 쓴 값이라 브라우저가 바로 계산한다. 로그아웃 뒤에는 쿠키가 없어 서버가 그 계정의 구독인지 확인할 수 없기 때문에 순서를 지킨다. 브라우저의 구독 자체(`unsubscribe()`)는 풀지 않는다. 다음에 로그인한 계정이 같은 구독을 다시 묶는다(§4.2.4). 해제 요청이 실패해도 로그아웃은 이어 간다. 남는 위험: 그때는 같은 기기에 다음 사람이 로그인하거나 푸시 서비스가 404·410을 줄 때까지 로그아웃한 계정의 알림이 그 브라우저로 갈 수 있다. 오픈·취소표 알림 본문에는 이름·연락처가 없다(notify §4.4). 기기 식별값과 최근 검색어는 남긴다. 화면 출처의 저장물은 이 루틴이 정본이다. 서버 응답의 `Clear-Site-Data`는 응답 주소의 출처에만 걸려 교차 출처 API 응답으로는 화면 출처를 지우지 못하기 때문이다(5번).
 3. 체크했다면 `peaket-wallet`을 지우고, 월렛 서비스 워커 등록(`/my/tickets/`)을 풀고, 캐시를 지운다. 웹 푸시 서비스 워커 등록(`/push/`)은 풀지 않는다. 풀면 브라우저의 구독이 사라져 다음에 로그인한 사람이 다시 묶을 수 없기 때문이다(§5.4, 추천 적용 2026-10-30).
 4. `BroadcastChannel('peaket.session')`으로 `logout`을 알린다. 다른 탭도 같은 정리를 하고 로그인 화면으로 간다.
+   - **대기실 경량 페이지(2026-11-05, ADR-0208 결정 7)**: 대기실의 계정 메뉴도 같은 확인 대화상자를 띄우고 2~4번을 한다. 2번은 이름으로 지울 수 있는 값(위 저장소 키와 IndexedDB `peaket-purchase`·`peaket-push`)이고, 웹 푸시 구독 풀기는 등록이 아직 없어 GAT-040에서 함께 쓴다. 서버 로그아웃은 폼 보내기 대신 같은 출처 `POST /logout`을 `fetch`(`redirect: 'manual'`)로 보낸다. 대기실 CSP(A′)의 `form-action`에는 `'self'`가 없고, `connect-src 'self'`는 이미 있기 때문이다. 응답이 이동이나 2xx면 홈으로 가고, 503·연결 실패면 대화상자 안에 다시 시도를 안내한다.
 5. 로그아웃 응답은 그 앱이 준 쿠키만 `Set-Cookie`(같은 이름·`Domain`·`Path`, `Max-Age=0`)로 지운다(docs/features/identity.md §3, 추천 적용 2026-10-28, 기술 검토 중간-067). `Clear-Site-Data`에는 `"cookies"`를 넣지 않는다. 이 값은 응답 출처의 등록 도메인(`peaket.example`) 전체 쿠키를 지워, 같은 브라우저의 다른 앱 로그인과 도착 시각·최초 방문 쿠키까지 지우기 때문이다(W3C Clear Site Data 명세, 2026-10-28 확인). `"cache"`·`"storage"`는 응답 주소의 출처에만 걸리므로 화면과 같은 출처에서 응답할 때만 보낸다. 소비자 웹 앱 서버는 `"cache"`만 보낸다(월렛 입장 키를 기본으로 남기려고 `"storage"`는 넣지 않는다, 결정 17). 파트너 콘솔은 로그인·갱신과 같이 로그아웃 응답도 `gw-partner`(`partner-api`, 교차 출처)가 주고(ADR-0119), 관제 콘솔은 앱 서버가 없어 `ops-api`(교차 출처)가 준다. 둘은 `Clear-Site-Data`를 보내지 않고, 화면 출처는 2번이 지운다. 스캐너는 업로드를 비운 뒤 Dexie `session`만 지운다. 시험은 FE-T34다.
 
 #### 5.14.5 공급망과 위험 구성 요소(ADR-0079 결정 22)

@@ -3,16 +3,15 @@
 import './dev.css';
 import { h } from '../dom';
 import type { Route } from '../route';
-import { GOODS_STATES, LOBBY_STATES, stateHref, type BoardState } from '../states';
+import { GOODS_STATES, stateHref, type BoardState } from '../states';
 
 // 휴대폰 폭에서는 화면을 가리지 않게 접은 채로 시작한다
 let open = window.matchMedia('(min-width: 768px)').matches;
 
 export function mountStatePanel(o: { route: Route; current: BoardState; dark: boolean }): void {
   document.getElementById('q-dev')?.remove();
-  const groups: [string, readonly BoardState[]][] = o.route.kind === 'goods'
-    ? [['SCR-015 굿즈 대기', GOODS_STATES]]
-    : [['SCR-007 로비(퍼블리싱, HOT-341)', LOBBY_STATES]];
+  // 로비·대기열·매진은 데이터에 이어 퍼블리싱 상태가 굿즈 대기만 남았다(ADR-0208 결정 8)
+  const groups: [string, readonly BoardState[]][] = [['SCR-015 굿즈 대기', GOODS_STATES]];
   const theme = o.dark ? 'dark' : undefined;
   const pathFor = (st: BoardState): string => (o.route.kind === 'event' && st.eventId ? `/queue/${st.eventId}` : location.pathname);
 
