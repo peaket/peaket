@@ -2,6 +2,7 @@
 // 리더 상태를 읽은 뒤 전진한다. FENCED를 받으면 그 세대로는 더 쓰지 않는다. 로비·묶음 닫기와 게시를 필요할 때 부른다.
 // 저장소(Lua)의 뜻은 test-int/leader-store.int.test.ts가 실제 Valkey로 본다.
 import { fakeClock } from '@peaket/platform';
+import { drandRoundAfter, drandRoundTimeMs } from '@peaket/shuffle';
 import { describe, expect, test } from 'vitest';
 import { AdmissionLeader } from '../src/modules/leader/application/admission-leader.js';
 import type { ArrivalCloseResult, CloseInput, Control, ControlInputsReader, EventPlan, LeaderStore, Rb05Result, TickInput, TickResult } from '../src/modules/leader/domain/ports.js';
@@ -80,6 +81,7 @@ function world(o: { ids?: string[]; reader?: ControlInputsReader; plan?: Partial
     fenced: () => undefined,
     leaseFailure: () => undefined,
     publish: (status: string) => void seen.push(`publish:${status}`),
+    beaconStopped: (reason: string) => void seen.push(`beacon-stopped:${reason}`),
     forget: (e: string) => void seen.push(`forget:${e}`),
   };
   const warned: string[] = [];
@@ -255,6 +257,60 @@ describe('닫기와 게시', () => {
     w.state.gen = 1;
     await w.leader.tick();
     expect(w.calls.some((c) => c.startsWith('close'))).toBe(false);
+  });
+
+  test('Q-T6 로비 표시가 섰고 게시 전이거나 다시쓰기 표시가 있으면 구간 lobby를 게시하고, 게시 뒤에는 부르지 않는다', async () => {
+    const groups = async (tick: Record<string, unknown>) => {
+      const w = world({ plan: { lobbyShuffle: true }, tick: { lobbyMarked: 1, batchMarked: 0, ...tick } });
+      w.state.gen = 1;
+      const seen: unknown[] = [];
+      w.publish.run = async (i) => (seen.push((i as { group?: unknown }).group), { status: 'PUBLISHED' });
+      await w.leader.tick();
+      await Promise.resolve();
+      return seen;
+    };
+    expect(await groups({ lobbyPublished: 0, lobbyRepair: 0 })).toEqual(['lobby']);
+    expect(await groups({ lobbyPublished: 1, lobbyRepair: 1 })).toEqual(['lobby']);
+    expect(await groups({ lobbyPublished: 1, lobbyRepair: 0 })).toEqual([]);
+  });
+
+  test('[ASVS v5.0.0-16.5.2] Q-T27 비콘 대기 상한으로 멈추면 지표를 멈춘 호출에서 한 번만 낸다', async () => {
+    const w = world({ tick: { batchPublished: 0 } });
+    w.state.gen = 1;
+    w.publish.run = async () => ({ status: 'BEACON_STOPPED', reason: 'beacon', first: true });
+    await w.leader.tick();
+    await new Promise((r) => setImmediate(r));
+    w.publish.run = async () => ({ status: 'BEACON_STOPPED', reason: 'beacon', first: false });
+    await w.leader.tick();
+    await new Promise((r) => setImmediate(r));
+    expect(w.seen.filter((x) => x.startsWith('beacon-stopped'))).toEqual(['beacon-stopped:beacon']);
+  });
+
+  test('[Q-T42] 첫 전진 문이 닫힌 회차의 몫은 다른 회차로 가고 목표를 늘리지 않는다', async () => {
+    const shareOf = async (gatedEvent: string | null) => {
+      const w = world({ ids: ['e1', 'e2'], tick: { waiting: 500 } });
+      w.state.gen = 1;
+      const tick = w.store.tick.bind(w.store);
+      w.store.tick = async (i) => ({ ...(await tick(i)), ...(i.eventId === gatedEvent ? { gated: 1 as const } : {}) }) as TickResult;
+      await w.leader.tick();
+      await w.leader.tick();
+      return w.ticks.filter((t) => t.eventId === 'e2').at(-1)!.target;
+    };
+    // 두 회차 모두 줄 선 사람을 부를 수 있으면 합산 상한을 똑같이 나눈다
+    expect(await shareOf(null)).toBe(2_500);
+    // e1의 첫 전진 문이 닫혀 있으면 부를 사람이 없어 e2가 합산 상한을 다 쓴다
+    expect(await shareOf('e1')).toBe(5_000);
+  });
+
+  test('Q-T6 공시 라운드가 있으면 묶음 결과 공개 예정(구간 끝까지의 여유)을 라운드 시각 + 5초로 넘긴다', async () => {
+    const w = world();
+    w.state.gen = 1;
+    const plan = await w.store.schedule('e1');
+    const closeAt = plan!.opensAtMs + (plan!.batchWindowMs ?? 2_000);
+    plan!.batchRound = drandRoundAfter(closeAt);
+    w.clock.advance(2_000);
+    await w.leader.tick();
+    expect(w.ticks.at(-1)?.batchResultDelayMs).toBe(drandRoundTimeMs(drandRoundAfter(closeAt)) + 5_000 - closeAt);
   });
 
   test('묶음이닫혔고게시전이거나다시쓰기표시가있으면게시를부르고_게시뒤에는부르지않는다', async () => {

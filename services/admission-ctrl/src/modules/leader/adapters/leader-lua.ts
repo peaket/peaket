@@ -168,7 +168,7 @@ if state ~= 'ON_SALE' then adv = 0 end
 -- 첫 전진 문(ADR-0058 결정 4): 표시가 있는데 게시 + 분산 창이 지나지 않았으면 그 구간의 첫 번호 - 1을 넘지 않는다
 local cap = tonumber(redis.call('GET', KEYS[3]) or '0')
 local issued = cap
-local bd = redis.call('HMGET', KEYS[12], 'lobby', 'pub:lobby', '1', 'pub:1', 'repair:1')
+local bd = redis.call('HMGET', KEYS[12], 'lobby', 'pub:lobby', '1', 'pub:1', 'repair:1', 'repair:lobby')
 local function gate(marker, pub, late)
   if not marker then return end
   local first = tonumber(string.match(marker, '^(%d+):'))
@@ -221,7 +221,7 @@ if n > s then
 end
 extend(KEYS[1], keep)
 local function has(v) if v then return 1 end return 0 end
-return {'OK', n, valid, slots, soon, inflight, #stale, has(bd[1]), has(bd[3]), has(bd[4]), has(bd[5]), math.floor(ratio * 1000 + 0.5), state, math.max(0, issued - n)}
+return {'OK', n, valid, slots, soon, inflight, #stale, has(bd[1]), has(bd[3]), has(bd[4]), has(bd[5]), math.floor(ratio * 1000 + 0.5), state, math.max(0, issued - n), has(bd[2]), has(bd[6]), (issued > cap and n >= cap) and 1 or 0}
 `;
 
 // 진입 Degraded의 도착 시각 칸 닫기(ADR-0223 결정 7). 칸 끝 + 20초 [가정]이 지난 칸을 닫고 쓰지 않은 번호를 빠진 번호 비트맵에 켠다(온전한 바이트는 SETRANGE로).

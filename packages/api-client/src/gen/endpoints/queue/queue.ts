@@ -80,15 +80,25 @@ export type createQueueLobbyParticipantResponse403 = {
   status: 403
 }
 
+export type createQueueLobbyParticipantResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
 export type createQueueLobbyParticipantResponse409 = {
   data: ProblemResponse
   status: 409
 }
 
+export type createQueueLobbyParticipantResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createQueueLobbyParticipantResponseSuccess = (createQueueLobbyParticipantResponse201) & {
   headers: Headers;
 };
-export type createQueueLobbyParticipantResponseError = (createQueueLobbyParticipantResponse403 | createQueueLobbyParticipantResponse409) & {
+export type createQueueLobbyParticipantResponseError = (createQueueLobbyParticipantResponse403 | createQueueLobbyParticipantResponse404 | createQueueLobbyParticipantResponse409 | createQueueLobbyParticipantResponse503) & {
   headers: Headers;
 };
 
@@ -136,7 +146,7 @@ return orvalFetch<createQueueLobbyParticipantResponseSuccess>(getCreateQueueLobb
 
 export const getCreateQueueLobbyParticipantMutationKey = () => ['createQueueLobbyParticipant'] as const;
 
-export const getCreateQueueLobbyParticipantMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreateQueueLobbyParticipantMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createQueueLobbyParticipant>>, TError,CreateQueueLobbyParticipantMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createQueueLobbyParticipant>>, TError,CreateQueueLobbyParticipantMutationVariables, TContext> => {
 
@@ -165,13 +175,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateQueueLobbyParticipantMutationResult = NonNullable<Awaited<ReturnType<typeof createQueueLobbyParticipant>>>
     export type CreateQueueLobbyParticipantMutationBody = BodyType<CreateQueueLobbyParticipantBody> | undefined
-    export type CreateQueueLobbyParticipantMutationError = ErrorType<ProblemResponse>
+    export type CreateQueueLobbyParticipantMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
     export type CreateQueueLobbyParticipantMutationVariables = {eventId: string;data?: BodyType<CreateQueueLobbyParticipantBody>}
 
     /**
  * @summary 로비 입장(참가 토큰 발급)
  */
-export const useCreateQueueLobbyParticipant = <TError = ErrorType<ProblemResponse>,
+export const useCreateQueueLobbyParticipant = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createQueueLobbyParticipant>>, TError,CreateQueueLobbyParticipantMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createQueueLobbyParticipant>>,

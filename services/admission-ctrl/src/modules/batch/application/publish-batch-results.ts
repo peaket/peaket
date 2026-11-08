@@ -5,13 +5,17 @@
 // 리더(Lease, BUILD_ORDER PRF-090)가 구간이 닫히고 비콘 라운드가 나온 뒤, 그리고 다시 쓰기 표시를 보면 부른다.
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
-import { combinedKey, commitment, merkleRoot, shuffle, sortHashes } from '@peaket/shuffle';
-import { BATCH_STORE, type BatchStore, BEACON, type Beacon, RESULT_FILES, type ResultFiles, SEED_SOURCE, type SeedSource } from '../domain/ports.js';
+import { combinedKey, commitment, drandRoundAfter, drandRoundTimeMs, merkleRoot, shuffle, sortHashes } from '@peaket/shuffle';
+import { BATCH_STORE, type BatchSchedule, type BatchStore, BEACON, type Beacon, type BeaconStopReason, type ClosedBatch, RESULT_FILES, type ResultFiles, SEED_SOURCE, type SeedSource, SHUFFLE_RECORDS, type ShuffleGroup, type ShuffleRecord, type ShuffleRecords } from '../domain/ports.js';
 
 /** 결과 파일을 고르는 토큰 해시 앞자리 수(queue-svc의 202 resultPath와 같다) */
 export const RESULT_PREFIX_LEN = 3;
 /** 판매 종료는 공연 시작 24시간 전, 회차 키는 그 뒤 1일 더 남긴다(docs/data.md §3) */
 const DAY_MS = 24 * 3600_000;
+/** 비콘 대기 상한 60초 [가정, Phase 2 2.4.1에서 확정](ADR-0050 결정 7, ADR-0231 결정 12) */
+export const BEACON_WAIT_LIMIT_MS = 60_000;
+/** 묶음 구간 길이의 처음 값(리더와 같다) */
+const BATCH_WINDOW_DEFAULT_MS = 2_000;
 
 export type PublishResult =
   | { status: 'PUBLISHED'; count: number; merkleRoot: string; commitment: string }
@@ -20,11 +24,13 @@ export type PublishResult =
   | { status: 'NOT_CLOSED' }
   | { status: 'WAITING_BEACON' }
   | { status: 'WAITING_REPLICA' }
-  | { status: 'NO_SCHEDULE' };
+  | { status: 'NO_SCHEDULE' }
+  /** 비콘 대기 상한을 넘겼거나 공시 기록이 믿을 수 없어 멈췄다. first는 이번 호출이 멈춤을 쓴 때만 참(SEV1은 한 번만 낸다, RB-35) */
+  | { status: 'BEACON_STOPPED'; reason: BeaconStopReason; first: boolean };
 
 /** 게시 뒤 참가자가 바뀌어 같은 결과를 다시 만들 수 없다. 리더는 멈추고 알린다(사람이 결과 파일로 되살린다) */
 export class BatchMembersChanged extends Error {
-  constructor(eventId: string, batchNo: number) {
+  constructor(eventId: string, batchNo: ShuffleGroup) {
     super(`묶음 참가자가 게시 뒤 바뀌었다(${eventId} 묶음 ${batchNo}): 머클 루트가 게시 때와 다르다`);
     this.name = 'BatchMembersChanged';
   }
@@ -34,23 +40,38 @@ export class BatchMembersChanged extends Error {
 export class PublishBatchResults {
   constructor(
     @Inject(BATCH_STORE) private readonly store: BatchStore,
+    @Inject(SHUFFLE_RECORDS) private readonly records: ShuffleRecords,
     @Inject(SEED_SOURCE) private readonly seeds: SeedSource,
     @Inject(BEACON) private readonly beacons: Beacon,
     @Inject(RESULT_FILES) private readonly files: ResultFiles,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  async run(i: { eventId: string; batchNo?: number }): Promise<PublishResult> {
-    const n = i.batchNo ?? 1;
+  /** group: 동시 도착 묶음(1, 기본)이나 로비('lobby'). 구간마다 시드·라운드·결과 키가 따로다(ADR-0231 결정 9) */
+  async run(i: { eventId: string; group?: ShuffleGroup }): Promise<PublishResult> {
+    const n = i.group ?? 1;
     const pub = await this.store.published(i.eventId, n);
     const repairAt = pub?.repairAtMs ?? null;
     if (pub !== null && repairAt === null) return { status: 'ALREADY' };
     const closed = await this.store.closed(i.eventId, n);
     if (!closed) return { status: 'NOT_CLOSED' };
-    const startsAt = await this.store.startsAtOf(i.eventId);
-    if (startsAt === null) return { status: 'NO_SCHEDULE' };
+    const schedule = await this.store.scheduleOf(i.eventId);
+    if (schedule === null) return { status: 'NO_SCHEDULE' };
+    const startsAt = schedule.startsAtMs;
+    // 참가자가 0명이면 공개할 결과가 없어 공시 기록·비콘과 상관없이 빈 게시를 한다(늦은 커밋이어도 회차 전체를 멈추지 않는다, ADR-0231 결정 12)
+    if (closed.size === 0 && pub === null) return this.#publishEmpty(i.eventId, n, closed);
+    const rec = await this.records.read(i.eventId, n);
+    if (rec === null) return this.#stop(i.eventId, n, 'no_commit', startsAt);
+    // 다시 쓰기(이미 공개한 결과를 같은 입력으로 다시 씀)는 멈춤·라운드 검사를 하지 않는다
+    if (pub === null) {
+      const blocked = await this.#check(i.eventId, n, rec, schedule);
+      if (blocked) return blocked;
+    }
     const beacon = await this.beacons.value(i.eventId, n);
-    if (!beacon) return { status: 'WAITING_BEACON' };
+    if (!beacon) {
+      if (pub === null && this.clock.now() >= drandRoundTimeMs(rec.round) + BEACON_WAIT_LIMIT_MS) return this.#stop(i.eventId, n, 'beacon', startsAt);
+      return { status: 'WAITING_BEACON' };
+    }
     // 장애 전환으로 묶음 표시를 잃은 뒤 이미 공개한 결과를 새 번호로 덮어쓰지 않게, 표시까지의 쓰기가 복제됐는지 먼저 본다(ADR-0181 결정 5)
     if (!(await this.store.confirmReplicated(i.eventId, n, `${closed.first}:${closed.size}:${closed.gen}`))) return { status: 'WAITING_REPLICA' };
 
@@ -64,10 +85,16 @@ export class PublishBatchResults {
     const entries = order.map((tokenHash, rank) => ({ tokenHash, seq: closed.first + rank }));
 
     const saleEnd = startsAt - DAY_MS;
-    await this.store.writeResults(entries, closed.gen, saleEnd);
+    await this.store.writeResults(n, entries, closed.gen, saleEnd);
     // 장애 전환으로 SADD를 잃으면 닫힌 크기보다 참가자가 적다. 남는 자리는 아무도 갖지 않으므로 빠진 번호로 돌린다
     const orphans = Array.from({ length: closed.size - members.length }, (_, k) => closed.first + members.length + k);
     if (orphans.length > 0) await this.store.markRemoved(i.eventId, orphans, saleEnd + DAY_MS);
+    // 로비는 게시 때 추가 검증 중(VERIFYING)인 참가자와 주인 없는 자리(ORPHAN)의 번호를 빠진 번호로 돌린다(§7, ADR-0231 결정 3). 셔플 전에 통과한 사람은 돌리지 않는다
+    if (n === 'lobby') {
+      const removed = new Set(await this.store.toRemoveAmong(i.eventId, members));
+      const seqs = entries.filter((e) => removed.has(e.tokenHash)).map((e) => e.seq);
+      if (seqs.length > 0) await this.store.markRemoved(i.eventId, seqs, saleEnd + DAY_MS);
+    }
     if (pub !== null && repairAt !== null) {
       // 다시 쓰기: 결과 파일은 대기열 Redis 밖이라 그대로 두고, 게시 시각도 처음 값을 둔다
       await this.store.clearRepair(i.eventId, n, repairAt);
@@ -83,5 +110,32 @@ export class PublishBatchResults {
     await this.files.write(i.eventId, n, byPrefix);
     await this.store.markPublished(i.eventId, n, this.clock.now(), rootHex);
     return { status: 'PUBLISHED', count: entries.length, merkleRoot: rootHex, commitment: commitment(i.eventId, seed).toString('hex') };
+  }
+
+  /** 이미 멈췄거나, 공시 기록을 믿을 수 없으면(목록 고정 뒤에 쓴 커밋, 고정 시각 + 3초보다 앞선 라운드) 멈춘다 */
+  async #check(eventId: string, n: ShuffleGroup, rec: ShuffleRecord, schedule: BatchSchedule): Promise<PublishResult | null> {
+    if (rec.stopped) return { status: 'BEACON_STOPPED', reason: rec.stopped.reason, first: false };
+    const fixAt = n === 'lobby' ? schedule.opensAtMs : schedule.opensAtMs + (schedule.batchWindowMs ?? BATCH_WINDOW_DEFAULT_MS);
+    if (rec.atMs > fixAt) return this.#stop(eventId, n, 'late_commit', schedule.startsAtMs);
+    // 앞이든 뒤든 지금 일정으로 계산한 라운드와 달라지면(오픈 시각이 커밋 뒤에 바뀜) 공시와 어긋나므로 멈춘다
+    if (rec.round !== drandRoundAfter(fixAt)) return this.#stop(eventId, n, 'stale_round', schedule.startsAtMs);
+    return null;
+  }
+
+  /** expireAtMs: 회차 키 수명(판매 종료 + 1일 = 공연 시작) */
+  async #stop(eventId: string, n: ShuffleGroup, reason: BeaconStopReason, expireAtMs: number): Promise<PublishResult> {
+    const first = await this.records.stop(eventId, n, this.clock.now(), reason, expireAtMs);
+    return { status: 'BEACON_STOPPED', reason, first };
+  }
+
+  /** 참가자 0명: 복제 확인 뒤 빈 결과와 게시 표시만 쓴다 */
+  async #publishEmpty(eventId: string, n: ShuffleGroup, closed: ClosedBatch): Promise<PublishResult> {
+    const members = await this.store.members(eventId, n);
+    if (members.length > 0) throw new Error(`묶음 참가자(${members.length})가 닫힌 크기(0)보다 많다(닫힘 뒤 SADD는 없어야 한다)`);
+    if (!(await this.store.confirmReplicated(eventId, n, `${closed.first}:0:${closed.gen}`))) return { status: 'WAITING_REPLICA' };
+    const rootHex = merkleRoot([]).toString('hex');
+    await this.files.write(eventId, n, new Map());
+    await this.store.markPublished(eventId, n, this.clock.now(), rootHex);
+    return { status: 'PUBLISHED', count: 0, merkleRoot: rootHex, commitment: '' };
   }
 }

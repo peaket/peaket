@@ -1172,6 +1172,9 @@ importers:
       '@peaket/platform':
         specifier: workspace:*
         version: link:../../packages/platform
+      '@peaket/shuffle':
+        specifier: workspace:*
+        version: link:../../packages/shuffle
       fastify:
         specifier: ^5.12.7
         version: 5.12.7

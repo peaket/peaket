@@ -18,7 +18,7 @@ export interface BatchingResponse {
   entryRequestId?: string;
   /** queue-files의 묶음 결과 파일 경로(/v1/queues/{eventId}/batch-results/{hashPrefix}.json) */
   resultPath?: string;
-  /** 결과 공개 예정 시각 */
+  /** 결과 공개 예정 시각(공시 drand 라운드의 예정 시각 + 게시 목표 5초 [가정], ADR-0231) */
   resultAt?: string;
   /** 분산 창(초, 8 [가정]) */
   spreadSec?: number;

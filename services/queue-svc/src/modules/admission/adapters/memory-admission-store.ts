@@ -1,7 +1,7 @@
 // 시험용 입장 저장소. Valkey의 Lua(admission-lua.ts)와 같은 규칙을 메모리로 둔다(같은 사례를 test/admission-cases.ts가 둘 다에 돈다).
 // 서버 시각은 주입한 시계다(Lua는 Redis TIME을 쓴다). 사람 키(q:adm·q:dup)는 진입 메모리 저장소와 나누지 않는다(진입과 함께 보는 시험은 Valkey로 한다).
 import type { Clock } from '@peaket/platform';
-import { DEFAULT_TARGET, FIRST_USE_MS, NOT_YET_MAX_MS, NOT_YET_MIN_MS, RATE_WINDOW_SEC, SOON_RETRY_MAX_SEC, SOON_RETRY_MIN_SEC, TURN_GRACE_MS, type AdmitResult, type Claim, type Precheck, MAX_STAY_MS } from '../domain/admission.js';
+import { DEFAULT_TARGET, FIRST_USE_MS, NOT_YET_MAX_MS, NOT_YET_MIN_MS, RATE_WINDOW_SEC, SOON_RETRY_MAX_SEC, SOON_RETRY_MIN_SEC, TURN_GRACE_MS, type AdmitResult, type Claim, type LobbySeat, type Precheck, MAX_STAY_MS } from '../domain/admission.js';
 import type { AdmissionStore } from '../domain/ports.js';
 
 /** 회차 키들의 메모리 모양(시험이 직접 채운다) */
@@ -36,6 +36,10 @@ export class MemoryAdmissionDb {
   slotOf = (e: string) => this.#of('slotOf', e, () => new Map<string, string>());
   /** 처음 요청을 센 번호 */
   req = (e: string) => this.#of('req', e, () => new Set<number>());
+  /** 로비 셔플 결과 q:lobby:{토큰 해시} */
+  readonly lobbyResults = new Map<string, string>();
+  lobbyMembers = (e: string) => this.#of('lobbyMembers', e, () => new Set<string>());
+  batchDone = (e: string) => this.#of('batchDone', e, () => new Map<string, string>());
 }
 
 /** 정렬 집합의 순서(점수, 같으면 멤버 문자열) */
@@ -187,9 +191,19 @@ export class MemoryAdmissionStore implements AdmissionStore {
     if (v === mine) this.db.adm.delete(key);
   }
 
-  async expire(i: { pid: string; eventId: string; seq: number; gen: number }): Promise<{ admittedBefore: boolean }> {
+  async lobbySeat(i: { eventId: string; tokenHash: string; nowMs: number }): Promise<LobbySeat> {
+    const v = this.db.lobbyResults.get(i.tokenHash);
+    const m = v === undefined ? null : /^(\d+):(\d+)$/.exec(v);
+    if (m) return { kind: 'SEAT', seq: Number(m[1]), gen: Number(m[2]) };
+    if (!this.db.batchDone(i.eventId).has('pub:lobby')) return { kind: 'PENDING' };
+    if (!this.db.lobbyMembers(i.eventId).has(i.tokenHash)) return { kind: 'GONE' };
+    if (!this.db.batchDone(i.eventId).has('repair:lobby')) this.db.batchDone(i.eventId).set('repair:lobby', String(i.nowMs));
+    return { kind: 'REPAIRING' };
+  }
+
+  async expire(i: { pid: string; eventId: string; seq: number; gen: number; dupPrefix?: string }): Promise<{ admittedBefore: boolean }> {
     const key = `${i.pid}|${i.eventId}`;
-    if (this.db.dup.get(key)?.startsWith(`${i.seq}:${i.gen}:`)) this.db.dup.delete(key);
+    if (this.db.dup.get(key)?.startsWith(i.dupPrefix ?? `${i.seq}:${i.gen}:`)) this.db.dup.delete(key);
     return { admittedBefore: this.db.adm.has(key) };
   }
 

@@ -46,7 +46,9 @@ export function parseSchedule(raw: unknown): EventSchedule | null {
   // 모양이 틀리면 그 칸만 버린다(좌석맵 미리 받기만 쉬고 대기열은 연다, ADR-0219 결정 7)
   const layout = f.layoutVersion !== undefined && /^[1-9][0-9]{0,9}$/.test(f.layoutVersion) ? Number(f.layoutVersion) : undefined;
   const layoutVersion = layout !== undefined && layout <= U32_MAX ? layout : undefined;
-  return { opensAtMs, startsAtMs, lobbyShuffle, openBatch, ...(windowMs !== undefined ? { batchWindowMs: windowMs } : {}), ...(layoutVersion !== undefined ? { layoutVersion } : {}) };
+  // 로비 분은 선택 칸이다(없으면 10분 [가정]). 0~60만 받고 틀리면 그 칸을 버린다(ADR-0231 결정 4, core-svc의 lobby_minutes 범위)
+  const lobbyMinutes = int(f.lobbyMinutes);
+  return { opensAtMs, startsAtMs, lobbyShuffle, openBatch, ...(windowMs !== undefined ? { batchWindowMs: windowMs } : {}), ...(layoutVersion !== undefined ? { layoutVersion } : {}), ...(lobbyMinutes !== null && lobbyMinutes <= 60 ? { lobbyMinutes } : {}) };
 }
 
 @Injectable()

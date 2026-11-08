@@ -440,6 +440,67 @@ return 1
 `;
 
 // 빠진 번호 비트맵은 회차 일정 사본처럼(판매 종료 + 1일), q:{event:E}:verify는 q:dup처럼(판매 종료) 지운다(docs/data.md §3)
+// 로비 참가 ③(ADR-0231 결정 3): 서버 시각과 로비 표시를 같은 Lua에서 본 뒤 참가자에 넣는다. 표시가 선 뒤에는 넣지 않아 고정한 목록이 바뀌지 않는다(Q-T52⑤).
+// 추가 검증이면 verify에 VERIFYING 값을 쓴다(이미 있으면 그대로).
+// KEYS: 1 batch_done, 2 lobby_members, 3 verify. ARGV: 1 오픈 시각, 2 로비 개방 시각, 3 토큰 해시, 4 참가자 목록 수명, 5 verify 값(없으면 빈 글자), 6 verify 수명
+export const ADD_LOBBY_MEMBER_LUA = `${EXTEND}
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if now >= tonumber(ARGV[1]) or redis.call('HEXISTS', KEYS[1], 'lobby') == 1 then return 'CLOSED' end
+if now < tonumber(ARGV[2]) then return 'NOT_OPEN' end
+redis.call('SADD', KEYS[2], ARGV[3])
+extend(KEYS[2], ARGV[4])
+if ARGV[5] ~= '' then
+  redis.call('HSETNX', KEYS[3], ARGV[3], ARGV[5])
+  extend(KEYS[3], ARGV[6])
+end
+return 'ADDED'
+`;
+// 로비 창 보기(읽기만, ADR-0231 결정 3): 공시 기록을 만들거나 위험 판정을 부르기 전에 서버 시각으로 창을 본다. KEYS: 1 batch_done. ARGV: 1 오픈 시각, 2 로비 개방 시각
+export const LOBBY_WINDOW_LUA = `
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if now >= tonumber(ARGV[1]) or redis.call('HEXISTS', KEYS[1], 'lobby') == 1 then return 'CLOSED' end
+if now < tonumber(ARGV[2]) then return 'NOT_OPEN' end
+return 'OPEN'
+`;
+// 되돌리기: 표시가 선 뒤에는 고정한 목록을 바꾸지 않는다(§3 '표시가 선 뒤에는'). 대신 주인 없는 자리임을 verify에 ORPHAN으로 적어 게시 때 빠진 번호가 되게 한다(추가 검증 값이 있으면 그대로 둔다. 그 값도 게시 때 빠진 번호가 된다).
+// KEYS: 1 batch_done, 2 lobby_members, 3 verify. ARGV: 1 토큰 해시, 2 verify 수명(판매 종료)
+export const REMOVE_LOBBY_MEMBER_LUA = `${EXTEND}
+if redis.call('HEXISTS', KEYS[1], 'lobby') == 1 then
+  local t = redis.call('TIME')
+  redis.call('HSETNX', KEYS[3], ARGV[1], 'ORPHAN:' .. string.format('%.0f', tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)))
+  extend(KEYS[3], ARGV[2])
+  return 0
+end
+redis.call('SREM', KEYS[2], ARGV[1])
+redis.call('HDEL', KEYS[3], ARGV[1])
+return 1
+`;
+// 로비 참가 ④: q:dup이 내 PENDING이거나 비었을 때만 LOBBY 기록으로 바꾼다. KEYS: 1 q:dup, 2 q:adm. ARGV: 1 새 값, 2 요청 ID, 3 수명(판매 종료)
+export const RECORD_LOBBY_LUA = `
+if redis.call('EXISTS', KEYS[2]) == 1 then return 'ADMITTED' end
+local v = redis.call('GET', KEYS[1])
+if v and v ~= 'PENDING:' .. ARGV[2] then return 'TAKEN' end
+redis.call('SET', KEYS[1], ARGV[1], 'PXAT', ARGV[3])
+return 'RECORDED'
+`;
+export const DROP_LOBBY_LUA = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('DEL', KEYS[1]) return 1 end
+return 0
+`;
+// 셔플 공시 기록 쓰기(ADR-0231 결정 6): 구간의 칸이 비어 있을 때만 쓰고 수명을 늘린다. 공시 시각은 파드 시계가 아니라 Redis 시각이다. 지금 값을 돌려준다.
+// KEYS: 1 shuffle. ARGV: 1 구간, 2 커밋, 3 라운드, 4 봉인 시드, 5 체인, 6 알고리즘 판, 7 수명
+export const WRITE_COMMIT_LUA = `${EXTEND}
+local g = ARGV[1]
+if redis.call('HEXISTS', KEYS[1], 'commit:' .. g) == 0 then
+  local t = redis.call('TIME')
+  local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+  redis.call('HSET', KEYS[1], 'commit:' .. g, ARGV[2], 'round:' .. g, ARGV[3], 'sealed:' .. g, ARGV[4], 'at:' .. g, string.format('%.0f', now), 'chain', ARGV[5], 'algo', ARGV[6])
+  extend(KEYS[1], ARGV[7])
+end
+return redis.call('HMGET', KEYS[1], 'commit:' .. g, 'round:' .. g, 'sealed:' .. g, 'at:' .. g)
+`;
 export const MARK_VERIFYING_LUA = `${EXTEND}
 redis.call('SETBIT', KEYS[1], ARGV[1], 1)
 redis.call('HSETNX', KEYS[2], ARGV[2], ARGV[3])

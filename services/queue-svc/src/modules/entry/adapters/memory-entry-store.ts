@@ -1,7 +1,8 @@
 // 시험용 진입 저장소와 회차 일정 사본. Valkey의 Lua(redis-entry-store.ts)와 같은 규칙을 메모리로 둔다(같은 사례를 test/entry-cases.ts·batch-cases.ts가 둘 다에 돈다).
 // 서버 시각은 주입한 시계다(Lua는 Redis TIME을 쓴다).
 import type { Clock } from '@peaket/platform';
-import type { BatchedEntry, BatchOutcome, EntryStore, EventSchedules, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
+import type { ShuffleGroup } from '@peaket/shuffle';
+import type { BatchedEntry, BatchOutcome, CommitRecord, EntryStore, EventSchedules, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult, ShuffleCommitStore } from '../domain/ports.js';
 import { ARRIVAL_CARVE_MAX, ARRIVAL_CLOSE_AFTER_MS, ARRIVAL_FUTURE_MS, ARRIVAL_SLOT_INITIAL, ARRIVAL_SLOT_MS, ARRIVAL_WINDOW_SLOTS, BATCH_NO, type EventSchedule, type ReasonCategory, REASONS } from '../domain/queue.js';
 
 const RECORDED = /^(\d+):(\d+):([^:]+):([^:]*):([^:]*)$/;
@@ -354,6 +355,60 @@ export class MemoryEntryStore implements EntryStore {
     this.#verify.set(i.eventId, m);
   }
 
+  async addLobbyMember(i: { eventId: string; tokenHash: string; opensAtMs: number; lobbyOpensAtMs: number; verify?: { value: string; expireAtMs: number } }): Promise<'ADDED' | 'NOT_OPEN' | 'CLOSED'> {
+    const now = this.clock.now();
+    if (now >= i.opensAtMs || this.#doneOf(i.eventId).has('lobby')) return 'CLOSED';
+    if (now < i.lobbyOpensAtMs) return 'NOT_OPEN';
+    const s = this.#lobby.get(i.eventId) ?? new Set<string>();
+    s.add(i.tokenHash);
+    this.#lobby.set(i.eventId, s);
+    if (i.verify) {
+      const m = this.#verify.get(i.eventId) ?? new Map<string, string>();
+      if (!m.has(i.tokenHash)) m.set(i.tokenHash, i.verify.value);
+      this.#verify.set(i.eventId, m);
+    }
+    return 'ADDED';
+  }
+
+  async lobbyWindow(i: { eventId: string; opensAtMs: number; lobbyOpensAtMs: number }): Promise<'OPEN' | 'NOT_OPEN' | 'CLOSED'> {
+    const now = this.clock.now();
+    if (now >= i.opensAtMs || this.#doneOf(i.eventId).has('lobby')) return 'CLOSED';
+    return now < i.lobbyOpensAtMs ? 'NOT_OPEN' : 'OPEN';
+  }
+
+  async removeLobbyMember(i: { eventId: string; tokenHash: string; expireAtMs: number }): Promise<void> {
+    // 표시가 선 뒤에는 고정한 목록을 바꾸지 않고, 주인 없는 자리로 적어 게시 때 빠진 번호가 되게 한다
+    if (this.#doneOf(i.eventId).has('lobby')) {
+      const m = this.#verify.get(i.eventId) ?? new Map<string, string>();
+      if (!m.has(i.tokenHash)) m.set(i.tokenHash, `ORPHAN:${this.clock.now()}`);
+      this.#verify.set(i.eventId, m);
+      return;
+    }
+    this.#lobby.get(i.eventId)?.delete(i.tokenHash);
+    this.#verify.get(i.eventId)?.delete(i.tokenHash);
+  }
+
+  async recordLobby(i: { pid: string; eventId: string; requestId: string; tokenHash: string; expireAtMs: number }): Promise<'RECORDED' | 'ADMITTED' | 'TAKEN'> {
+    const k = `${i.pid}|${i.eventId}`;
+    if (this.#adm.has(k)) return 'ADMITTED';
+    const v = this.#dupOf(k);
+    if (v !== null && v !== `PENDING:${i.requestId}`) return 'TAKEN';
+    this.#dup.set(k, { v: `LOBBY:${i.tokenHash}:${i.requestId}`, until: i.expireAtMs });
+    return 'RECORDED';
+  }
+
+  async dropLobbyRecord(i: { pid: string; eventId: string; requestId: string; tokenHash: string }): Promise<void> {
+    const k = `${i.pid}|${i.eventId}`;
+    if (this.#dupOf(k) === `LOBBY:${i.tokenHash}:${i.requestId}`) this.#dup.delete(k);
+  }
+
+  closeLobbyForTest(eventId: string): void {
+    this.#doneOf(eventId).set('lobby', '1:0:1');
+  }
+  lobbyMembersForTest(eventId: string): string[] {
+    return [...(this.#lobby.get(eventId) ?? [])];
+  }
+
   // 시험 도구
   admitForTest(pid: string, eventId: string, ticketHash: string): void {
     this.#adm.set(`${pid}|${eventId}`, ticketHash);
@@ -432,6 +487,32 @@ export class MemoryEntryStore implements EntryStore {
     const k = `${pid}|${eventId}`;
     const value = this.#dupOf(k);
     return { value, expireAtMs: value === null ? null : (this.#dup.get(k)?.until ?? null) };
+  }
+}
+
+/** 시험용 셔플 공시 기록(한 번 쓰면 안 바뀐다) */
+export class MemoryShuffleCommits implements ShuffleCommitStore {
+  readonly #m = new Map<string, CommitRecord>();
+
+  /** clock: 저장소 시각을 흉내 낸다(운영은 Redis TIME) */
+  constructor(private readonly clock: Pick<Clock, 'now'> = { now: () => Date.now() }) {}
+
+  async read(eventId: string, group: ShuffleGroup): Promise<CommitRecord | null> {
+    return this.#m.get(`${eventId}|${group}`) ?? null;
+  }
+
+  async write(eventId: string, group: ShuffleGroup, rec: Omit<CommitRecord, 'atMs'>, _expireAtMs?: number): Promise<CommitRecord> {
+    const k = `${eventId}|${group}`;
+    const hit = this.#m.get(k);
+    if (hit) return hit;
+    const saved = { ...rec, atMs: this.clock.now() };
+    this.#m.set(k, saved);
+    return saved;
+  }
+
+  /** 기록을 잃고 다시 쓰인 것을 흉내 낸다 */
+  replaceForTest(eventId: string, group: ShuffleGroup, rec: CommitRecord): void {
+    this.#m.set(`${eventId}|${group}`, rec);
   }
 }
 

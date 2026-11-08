@@ -11,6 +11,8 @@ export interface EventPlan {
   /** 결제사 묶음 이름과 승인 상한(초당 건수). 둘 다 있을 때만 쓴다(ADR-0226 결정 9) */
   pgKey?: string;
   pgTps?: number;
+  /** 묶음 구간의 공시 라운드(q:{event:E}:shuffle의 round:1). 있으면 결과 공개 예정 시각을 정하고, 없으면 구간 끝 + 11초 [가정](ADR-0231 결정 8) */
+  batchRound?: number;
 }
 
 /** 리더 상태 q:{event:E}:ctl에서 읽는 값: 운영자 목표(고정 중일 때만 `target`), 일시정지 묶음, 운영자 칸과 자동 제어 기억(ADR-0226) */
@@ -50,6 +52,8 @@ export interface TickInput {
   closeAtMs: number;
   /** ctl에 함께 쓸 자동 제어 칸(바뀐 칸만, 세대 확인 안에서 쓴다, ADR-0226 결정 2) */
   fields?: Record<string, string>;
+  /** 묶음 결과 공개 예정 = 구간 끝 + 이 값(ms). 공시 라운드에서 정한다(없으면 11초 [가정], ADR-0231 결정 8) */
+  batchResultDelayMs?: number;
 }
 
 export type TickResult =
@@ -70,6 +74,11 @@ export type TickResult =
       batchMarked: 0 | 1;
       batchPublished: 0 | 1;
       repair: 0 | 1;
+      /** 로비 결과를 게시했는가(pub:lobby)와 다시 쓰기 표시(repair:lobby) */
+      lobbyPublished?: 0 | 1;
+      lobbyRepair?: 0 | 1;
+      /** 첫 전진 문이 닫혀 이번 주기에 부를 번호가 없다(발급한 번호는 있는데 serving이 문까지 왔다, ADR-0231 결정 14) */
+      gated?: 0 | 1;
       /** 이번 주기의 입장 비율(0~1, 표본이 없으면 1) */
       ratio: number;
       /** 이번 주기에 쓴 판매 상태 */
@@ -152,8 +161,8 @@ export interface Elector {
   generation(): number | undefined;
 }
 
-/** 묶음 게시(PublishBatchResults.run). 리더가 주기마다 부른다 */
+/** 게시(PublishBatchResults.run). 리더가 구간(묶음·로비)마다 부른다 */
 export interface Publisher {
-  run(i: { eventId: string }): Promise<{ status: string }>;
+  run(i: { eventId: string; group?: 'lobby' | number }): Promise<{ status: string; reason?: string; first?: boolean }>;
 }
 export const PUBLISHER = Symbol('admission.Publisher');

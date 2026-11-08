@@ -266,7 +266,7 @@ test('로비셔플회차는로비표시가있는데로비게시가없으면_로�
   await seqTo(e, 50);
   await cmd(keys.batchDone(e), ['HSET', keys.batchDone(e), 'lobby', '1:40:1']);
   await store.bump(e, 1, Date.now() + DAY);
-  expect(await store.tick(tickOf(e, 1, { lobbyShuffle: true }))).toMatchObject({ serving: 0, lobbyMarked: 1 });
+  expect(await store.tick(tickOf(e, 1, { lobbyShuffle: true }))).toMatchObject({ serving: 0, lobbyMarked: 1, gated: 1, lobbyPublished: 0 });
   await cmd(keys.batchDone(e), ['HSET', keys.batchDone(e), 'pub:lobby', String(Date.now() - 9_000)]);
   expect(await store.tick(tickOf(e, 1, { lobbyShuffle: true }))).toMatchObject({ serving: 50 });
 });

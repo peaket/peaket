@@ -3,7 +3,8 @@
 import 'reflect-metadata';
 import { createHotRedis, createService, inClusterLeaseApi, LeaseElector, type LeaseApi, memoryLeaseApi, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { LocalResultFiles, minReplicasOf, TestRandomness } from './modules/batch/index.js';
+import { TestSeedSealer } from '@peaket/shuffle';
+import { CommittedSeedSource, LocalResultFiles, minReplicasOf, RedisShuffleRecords, TestRandomness } from './modules/batch/index.js';
 import { AdmissionLeader, LeaderMetrics, PrometheusControlInputs } from './modules/leader/index.js';
 
 const SERVICE = 'admission-ctrl';
@@ -17,8 +18,10 @@ const url = process.env.PEAKET_QUEUE_REDIS_URL;
 if (!url && clusterUrls.length === 0) throw new Error('PEAKET_QUEUE_REDIS_URL이나 PEAKET_QUEUE_REDIS_CLUSTER_URLS가 없다(비밀 관리에서 넣는다)');
 // 게시 전 복제 확인의 최소 복제본 수(운영 1, 로컬·CI 0 [가정], ADR-0182 결정 7)
 const minReplicas = minReplicasOf(process.env.PEAKET_QUEUE_REDIS_MIN_REPLICAS, clusterUrls.length > 0);
-// 시드·비콘: 운영의 KMS 시드와 drand 비콘은 BUILD_ORDER HOT-040이다. 그전에는 local·ci·demo의 시험 값만 받는다
+// 시드·비콘: 운영의 KMS 봉인과 drand 비콘(BLS 검증)은 BUILD_ORDER HOT-041이다. 그전에는 local·ci·demo의 시험 값만 받는다.
+// 시드는 queue-svc 공시 일꾼이 쓴 봉인을 풀어 받는다(같은 PEAKET_TEST_BATCH_RANDOMNESS를 넘긴다, ADR-0231 결정 6)
 const randomness = TestRandomness.fromEnv(process.env);
+const sealer = TestSeedSealer.fromEnv(process.env);
 const resultDir = process.env.PEAKET_BATCH_RESULT_DIR;
 if (!resultDir) throw new Error('PEAKET_BATCH_RESULT_DIR가 없다(묶음 결과 파일을 쓸 곳. 운영의 회차별 S3 결과 파일은 BUILD_ORDER HOT-050)');
 
@@ -41,7 +44,7 @@ const elector = new LeaseElector({ api: leaseApi, identity: process.env.HOSTNAME
 
 const service = await createService({
   name: SERVICE,
-  module: AppModule.register({ redis, elector, metrics, ...(controlInputs ? { controlInputs } : {}), batch: { seeds: randomness, beacon: randomness, files: new LocalResultFiles(resultDir), minReplicas, ...(waitRedis ? { waitRedis } : {}) } }),
+  module: AppModule.register({ redis, elector, metrics, ...(controlInputs ? { controlInputs } : {}), batch: { seeds: new CommittedSeedSource(new RedisShuffleRecords(redis), sealer), beacon: randomness, files: new LocalResultFiles(resultDir), minReplicas, ...(waitRedis ? { waitRedis } : {}) } }),
 });
 metrics.register(service.metrics.registry);
 if (!controlInputs) service.logger.warn({}, '자동 제어 입력이 없어(PEAKET_PROMETHEUS_URL) AIMD를 끈 채 돈다(로컬·CI)');

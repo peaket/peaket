@@ -23,6 +23,7 @@ export class LeaderMetrics {
   readonly #leader = new Gauge({ name: 'admission_leader', help: '이 파드가 Lease 리더인가(1/0)', registers: [] });
   readonly #fenced = new Counter({ name: 'admission_fenced_total', help: '더 새 리더 세대가 있어 거절된 리더 쓰기 수', registers: [] });
   readonly #leaseFailures = new Counter({ name: 'admission_lease_renew_failures_total', help: 'Lease 읽기·만들기·고치기 실패 수', registers: [] });
+  readonly #beaconStopped = new Counter({ name: 'queue_shuffle_beacon_stopped_total', help: '셔플 게시를 멈춘 수(reason: beacon 비콘 대기 상한 넘김, stale_round 공시 라운드 어긋남, late_commit 고정 뒤 커밋, no_commit 공시 기록 없음, unknown). 1건이면 SEV1(RB-35)', labelNames: ['reason'] as const, registers: [] });
   readonly #publish = new Counter({ name: 'admission_batch_publish_total', help: '묶음 게시 호출 결과(PUBLISHED·REPAIRED·ALREADY·NOT_CLOSED·WAITING_BEACON·WAITING_REPLICA·NO_SCHEDULE)', labelNames: ['status'] as const, registers: [] });
 
   readonly #arrivalSlots = new Counter({ name: 'admission_arrival_slots_closed_total', help: '진입 Degraded의 도착 시각 칸을 닫은 수', registers: [] });
@@ -37,7 +38,7 @@ export class LeaderMetrics {
   readonly #openGaps = new Gauge({ name: 'admission_open_gap_violations', help: '진행 중인 회차끼리 오픈 시각이 5분 [가정]보다 가까운 쌍의 수', registers: [] });
 
   register(registry: Registry): this {
-    for (const m of [this.#inFlight, this.#ratio, this.#soon, this.#dropped, this.#loop, this.#leader, this.#fenced, this.#leaseFailures, this.#publish, this.#arrivalSlots, this.#arrivalNumbers, this.#slots, this.#target, this.#stale, this.#decrease, this.#suppressed, this.#ignored, this.#openGaps]) registry.registerMetric(m);
+    for (const m of [this.#inFlight, this.#ratio, this.#soon, this.#dropped, this.#loop, this.#leader, this.#fenced, this.#leaseFailures, this.#publish, this.#beaconStopped, this.#arrivalSlots, this.#arrivalNumbers, this.#slots, this.#target, this.#stale, this.#decrease, this.#suppressed, this.#ignored, this.#openGaps]) registry.registerMetric(m);
     return this;
   }
 
@@ -49,6 +50,11 @@ export class LeaderMetrics {
     for (const d of e.decreases) this.#decrease.inc({ reason: d.reason, journey: d.journey ?? '' });
     if (e.suppressed > 0) this.#suppressed.inc(e.suppressed);
     for (const journey of e.ignored) this.#ignored.inc({ journey });
+  }
+
+  /** 비콘 대기 상한을 넘겨 셔플을 멈춘 수(reason은 beacon·stale_round·late_commit·no_commit·unknown, ADR-0231 결정 12). 1건이면 SEV1(RB-35) */
+  beaconStopped(reason: string): void {
+    this.#beaconStopped.inc({ reason });
   }
 
   openGaps(n: number): void {

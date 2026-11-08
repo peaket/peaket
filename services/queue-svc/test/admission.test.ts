@@ -46,6 +46,10 @@ function memoryHarness(): AdmissionHarness {
       db.soonFirst(e).delete(h);
     },
     admitted: async (e) => db.ev(e).get('admitted') ?? 0,
+    setLobbyResult: async (h, s, g) => void db.lobbyResults.set(h, `${s}:${g}`),
+    addLobbyMember: async (e, h) => void db.lobbyMembers(e).add(h),
+    setLobbyPublished: async (e, at) => void db.batchDone(e).set('pub:lobby', String(at)),
+    lobbyRepair: async (e) => db.batchDone(e).get('repair:lobby') ?? null,
     setDup: async (p, e, v) => void db.dup.set(`${p}|${e}`, v),
     dup: async (p, e) => db.dup.get(`${p}|${e}`) ?? null,
     adm: async (p, e) => db.adm.get(`${p}|${e}`) ?? null,

@@ -92,3 +92,34 @@ describe('설정', () => {
     }
   });
 });
+
+describe('참가 토큰(HOT-040, ADR-0231)', () => {
+  const NOW = 1_780_000_000_000;
+  const claims = { e: 'ev-1', a: pre.a, d: 'dev-1', iat: NOW, jny: pre.jny };
+
+  test('[ASVS v5.0.0-9.1.1] Q-T55_참가토큰은_MAC이맞을때만_본문을돌려준다', () => {
+    const t = tokens.lobby(claims);
+    expect(t.split('.')).toHaveLength(4);
+    expect(tokens.readLobby(t)).toEqual(claims);
+    const parts = t.split('.');
+    parts[3] = Buffer.alloc(32, 1).toString('base64url');
+    expect(tokens.readLobby(parts.join('.'))).toBeNull();
+  });
+
+  test('[ASVS v5.0.0-9.1.1] Q-T60_jny만바꾼참가토큰은_서명불일치로거절한다', () => {
+    const t = tokens.lobby(claims);
+    const parts = t.split('.');
+    const body = JSON.parse(Buffer.from(parts[2]!, 'base64url').toString()) as Record<string, unknown>;
+    body.jny = '0190f3a1-7c2e-7a00-8000-0000000000bb';
+    parts[2] = Buffer.from(JSON.stringify(body)).toString('base64url');
+    expect(tokens.readLobby(parts.join('.'))).toBeNull();
+  });
+
+  test('[ASVS v5.0.0-9.2.2] 대기표·사전검증토큰을_참가토큰자리에넣으면_거절하고_반대도같다', () => {
+    const lobby = tokens.lobby(claims);
+    const queueTicket = tokens.ticket(ticket);
+    expect(tokens.readLobby(queueTicket)).toBeNull();
+    expect(tokens.readTicket(lobby)).toBeNull();
+    expect(tokens.readPreverify(lobby)).toBeNull();
+  });
+});

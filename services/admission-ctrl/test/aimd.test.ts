@@ -106,6 +106,13 @@ describe('증액 주기', () => {
     expect(run(m, T0, inputs(T0, { p99: 9 }), { paused: true }).target).toBe(2_500);
   });
 
+  test('[Q-T42] 첫전진문이닫힌회차(게시전·비콘멈춤)는_증액하지않고_감축은그대로다', () => {
+    const m = initialMemory(5_000, T0 - 60_000);
+    expect(run(m, T0, inputs(T0), { gated: true }).target).toBe(5_000);
+    expect(run(m, T0, inputs(T0, { p99: 9 }), { gated: true }).target).toBe(2_500);
+    expect(run(m, T0, inputs(T0), { gated: false }).target).toBe(5_100);
+  });
+
   test('[Q-T67] 증액은안전상한을넘지않고_명령11로멈춘동안은판단하지않는다', () => {
     const m = initialMemory(7_950, T0 - 60_000);
     expect(run(m, T0, inputs(T0)).target).toBe(8_000);
@@ -328,6 +335,9 @@ describe('안전 한계와 나누기', () => {
     expect(demandOf(5_000, undefined)).toBe(5_000);
     expect(demandOf(5_000, { waiting: 3, slots: 0, soon: 0, inFlight: 0 })).toBe(5_000);
     expect(demandOf(5_000, { waiting: 0, slots: 7, soon: 2, inFlight: 1 })).toBe(10);
+    // 첫 전진 문이 닫힌 회차(게시 전·비콘 멈춤)는 줄 선 사람이 있어도 부를 수 없어 지금 쓰는 인원만 수요다(아무도 없으면 0)
+    expect(demandOf(5_000, { waiting: 900, slots: 0, soon: 0, inFlight: 0, gated: true })).toBe(0);
+    expect(demandOf(5_000, { waiting: 900, slots: 4, soon: 0, inFlight: 1, gated: true })).toBe(5);
   });
 
   test('[Q-T67] 같은결제사회차끼리_전진속도합이상한안이다', () => {

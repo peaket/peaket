@@ -34,6 +34,7 @@ const PROBLEM: Record<AdmissionError['code'], { status: number; type: string; ti
   SOLD_OUT: { status: 410, type: 'sold-out', title: '매진되었습니다' },
   EXPIRED: { status: 410, type: 'queue-ticket-expired', title: '입장 시간이 지났습니다' },
   REMOVED: { status: 410, type: 'queue-ticket-removed', title: '이 대기표는 더 쓸 수 없습니다' },
+  LOBBY_REPAIRING: { status: 503, type: 'batching', title: '순서를 정하는 중입니다. 잠시 뒤 다시 시도해 주세요' },
 };
 
 @Controller('v1/queues/:eventId')
@@ -55,7 +56,7 @@ export class AdmissionController {
       return await this.confirmAdmission.run({ accountId: me.accountId, pid: me.pid, ...pidPrev, sessionId: me.sessionId, eventId, body });
     } catch (e) {
       if (e instanceof AdmissionError) {
-        throw new ProblemError({ ...PROBLEM[e.code], ...(e.code === 'EXPIRED' ? { extensions: { rejoinAllowed: e.rejoinAllowed ?? false } } : {}) });
+        throw new ProblemError({ ...PROBLEM[e.code], ...(e.code === 'EXPIRED' ? { extensions: { rejoinAllowed: e.rejoinAllowed ?? false } } : {}), ...(e.code === 'LOBBY_REPAIRING' ? { retryAfterSeconds: 2 } : {}) });
       }
       // 대기열 Redis 일시 장애는 503과 짧은 Retry-After(1초 [가정])로 답한다(진입과 같다). 화면은 같은 대기표로 다시 보낸다
       if (e instanceof QueueStoreUnavailable) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '대기열을 잠시 쓸 수 없습니다', retryAfterSeconds: 1, cause: e });

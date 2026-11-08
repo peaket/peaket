@@ -3,9 +3,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type HotRedis, redisScript } from '@peaket/platform';
 import { guard, keys, QUEUE_REDIS } from '../../entry/index.js';
-import { DEFAULT_TARGET, FIRST_USE_MS, MAX_STAY_MS, NOT_YET_MAX_MS, NOT_YET_MIN_MS, RATE_WINDOW_SEC, SOON_RETRY_MAX_SEC, SOON_RETRY_MIN_SEC, TURN_GRACE_MS, type AdmitResult, type Claim, type Precheck } from '../domain/admission.js';
+import { DEFAULT_TARGET, FIRST_USE_MS, MAX_STAY_MS, NOT_YET_MAX_MS, NOT_YET_MIN_MS, RATE_WINDOW_SEC, SOON_RETRY_MAX_SEC, SOON_RETRY_MIN_SEC, TURN_GRACE_MS, type AdmitResult, type Claim, type LobbySeat, type Precheck } from '../domain/admission.js';
 import type { AdmissionStore } from '../domain/ports.js';
-import { ADMIT_LUA, CLAIM_LUA, EXPIRE_LUA, MARK_REMOVED_LUA, PRECHECK_LUA, SETTLE_LUA } from './admission-lua.js';
+import { ADMIT_LUA, CLAIM_LUA, EXPIRE_LUA, LOBBY_STATE_LUA, MARK_REMOVED_LUA, PRECHECK_LUA, SETTLE_LUA } from './admission-lua.js';
 
 export const admissionKeys = {
   ...keys,
@@ -31,6 +31,7 @@ const CLAIM = redisScript(CLAIM_LUA);
 const ADMIT = redisScript(ADMIT_LUA);
 const SETTLE = redisScript(SETTLE_LUA);
 const EXPIRE = redisScript(EXPIRE_LUA);
+const LOBBY_STATE = redisScript(LOBBY_STATE_LUA);
 const MARK_REMOVED = redisScript(MARK_REMOVED_LUA);
 
 const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
@@ -123,9 +124,25 @@ export class RedisAdmissionStore implements AdmissionStore {
     await guard(this.redis.evalScript(SETTLE, [k.adm(i.pid, i.eventId), k.dup(i.pid, i.eventId)], [i.outcome, i.ticketHash, i.nonce, String(i.expireAtMs)]));
   }
 
-  async expire(i: { pid: string; eventId: string; seq: number; gen: number }): Promise<{ admittedBefore: boolean }> {
-    const r = await guard(this.redis.evalScript(EXPIRE, [k.dup(i.pid, i.eventId), k.adm(i.pid, i.eventId)], [`${i.seq}:${i.gen}:`]));
+  async expire(i: { pid: string; eventId: string; seq: number; gen: number; dupPrefix?: string }): Promise<{ admittedBefore: boolean }> {
+    const r = await guard(this.redis.evalScript(EXPIRE, [k.dup(i.pid, i.eventId), k.adm(i.pid, i.eventId)], [i.dupPrefix ?? `${i.seq}:${i.gen}:`]));
     return { admittedBefore: Number(str(r)) === 1 };
+  }
+
+  async lobbySeat(i: { eventId: string; tokenHash: string; nowMs: number }): Promise<LobbySeat> {
+    const key = k.lobbyResult(i.tokenHash);
+    const readSeat = async (): Promise<LobbySeat | null> => {
+      const v = await guard(this.redis.command(['GET', key], { key }));
+      const m = v === null || v === undefined ? null : /^(\d+):(\d+)$/.exec(str(v));
+      return m ? { kind: 'SEAT', seq: Number(m[1]), gen: Number(m[2]) } : null;
+    };
+    const seat = await readSeat();
+    if (seat) return seat;
+    const r = str(await guard(this.redis.evalScript(LOBBY_STATE, [k.batchDone(i.eventId), k.lobbyMembers(i.eventId)], [i.tokenHash, String(i.nowMs)])));
+    if (r === 'PENDING') return { kind: 'PENDING' };
+    if (r === 'GONE') return { kind: 'GONE' };
+    // 게시가 끝나 가는 사이에 결과 키를 놓쳤을 수 있어 한 번 더 본다(표시가 남아도 같은 값을 다시 쓸 뿐이다)
+    return (await readSeat()) ?? { kind: 'REPAIRING' };
   }
 
   async markRemoved(i: { eventId: string; seq: number; expireAtMs: number }): Promise<void> {

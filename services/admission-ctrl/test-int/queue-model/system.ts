@@ -11,7 +11,7 @@
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { type CallOptions, type Clock, type HotRedis, type RedisScript, redisScript, systemClock } from '@peaket/platform';
-import { combinedKey, merkleRoot, shuffle, sortHashes } from '@peaket/shuffle';
+import { combinedKey, drandRoundAfter, merkleRoot, shuffle, sortHashes } from '@peaket/shuffle';
 import type { Scheduler } from 'fast-check';
 import { Es256AdmissionTokens } from '../../../queue-svc/src/modules/admission/adapters/es256-admission-tokens.js';
 import { RedisAdmissionStore } from '../../../queue-svc/src/modules/admission/adapters/redis-admission-store.js';
@@ -251,16 +251,25 @@ export class QueueSystem {
     const real = new RedisBatchStore(this.#redis);
     // 게시 전 복제 확인: 구현의 표시 확인(WAIT 앞 Lua) + 복제본 사본에 같은 표시가 있는가(WAIT 흉내)
     const batches: BatchStore = Object.assign(Object.create(real) as BatchStore, {
-      confirmReplicated: async (e: string, n: number, marker: string) => (await real.confirmReplicated(e, n, marker)) && this.replicaMarker() === marker,
+      confirmReplicated: async (e: string, n: number | 'lobby', marker: string) => (await real.confirmReplicated(e, n, marker)) && this.replicaMarker() === marker,
     });
     const secret = createHash('sha256').update(`mbt-randomness-${run}`).digest();
     const beacon = async () => createHash('sha256').update(`beacon\0${secret.toString('hex')}`).digest();
     const seeds: SeedSource = o.specRanks
-      ? { seed: async (e, n) => this.#seedForSpecOrder(real, e, n, await beacon()) }
+      ? { seed: async (e, n) => this.#seedForSpecOrder(real, e, n as number, await beacon()) }
       : { seed: async (e, n) => createHash('sha256').update(`seed\0${secret.toString('hex')}\0${e}\0${n}`).digest() };
     // 게시 시각을 분산 창(8초)과 늦은 게시 창보다 앞으로 둔다: 명세는 '게시 뒤 첫 전진 문이 열림'을 한 걸음으로 줄였다
     const pastClock: Clock = { now: () => Date.now() - 600_000, monotonicMs: () => systemClock.monotonicMs() };
-    this.#publisher = new PublishBatchResults(batches, seeds, { value: beacon }, { write: async () => undefined }, pastClock);
+    // 공시 기록은 모델 밖이다: 언제나 있고 멈추지 않는다(명세는 공정성 공시를 뺀다)
+    const records = {
+      read: async (e: string, g: number | 'lobby') => {
+        const s = await real.scheduleOf(e);
+        const fixAt = g === 'lobby' ? s!.opensAtMs : s!.opensAtMs + (s!.batchWindowMs ?? 2_000);
+        return { commit: '00'.repeat(32), round: drandRoundAfter(fixAt), sealed: 'x', atMs: 0 };
+      },
+      stop: async () => true,
+    };
+    this.#publisher = new PublishBatchResults(batches, records, seeds, { value: beacon }, { write: async () => undefined }, pastClock);
   }
 
   persons(): number[] {

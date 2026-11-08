@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { type EventSchedules, keepUntilOf, type QueueTokens, QueueStoreUnavailable, REASONS, saleEndOf, seatmapLayoutPathOf } from '../../entry/index.js';
-import { ETA_MAX_AGE_MS, ETA_MAX_SEC } from '../domain/admission.js';
+import { ETA_MAX_AGE_MS, ETA_MAX_SEC, LOBBY_PENDING_RETRY_MS } from '../domain/admission.js';
 import { ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, type AdmissionSignals, type AdmissionStore, type AdmissionTokens } from '../domain/ports.js';
 import { AdmissionError } from './admission-error.js';
 
@@ -47,16 +47,33 @@ export class ConfirmAdmission {
   async run(i: ConfirmInput): Promise<ConfirmResult> {
     const now = this.clock.now();
     const b = i.body;
-    // 우선 구매 권리(GAT-135)와 참가 토큰(HOT-040)은 아직 받지 않는다. 사본·발급이 없으니 정본의 '없음'과 같은 응답이다
+    // 우선 구매 권리(GAT-135)는 아직 받지 않는다. 사본이 없으니 정본의 '없음'과 같은 응답이다
     if (b.priorityGrantId) throw new AdmissionError('PRIORITY_GRANT_NOT_FOUND', '우선 구매 권리 사본이 없다(GAT-135 전)');
-    if (!b.queueTicket) throw new AdmissionError('TICKET_INVALID', '대기표가 없다(참가 토큰 입장 확정은 HOT-040)');
-    const t = this.tickets.readTicket(b.queueTicket);
-    if (!t || t.e !== i.eventId || t.a !== i.accountId) throw new AdmissionError('TICKET_INVALID', '대기표의 MAC·회차·계정이 맞지 않는다');
+    const presented = b.queueTicket ?? b.lobbyToken;
+    if (!presented) throw new AdmissionError('TICKET_INVALID', '대기표도 참가 토큰도 없다');
+    const hash = this.tickets.hash(presented);
+    // MAC·회차·계정을 먼저 보고, 일정·판매 종료를 본 뒤에 번호를 읽는다(판매 종료 뒤 참가 토큰이 NOT_YET을 끝없이 받지 않게)
+    const ticket = b.queueTicket ? this.tickets.readTicket(b.queueTicket) : null;
+    const lobby = b.queueTicket ? null : this.tickets.readLobby(b.lobbyToken!);
+    if (b.queueTicket ? !ticket || ticket.e !== i.eventId || ticket.a !== i.accountId : !lobby || lobby.e !== i.eventId || lobby.a !== i.accountId) {
+      throw new AdmissionError('TICKET_INVALID', '대기표·참가 토큰의 MAC·회차·계정이 맞지 않는다');
+    }
     const schedule = await this.schedules.get(i.eventId);
     if (!schedule) throw new AdmissionError('NOT_FOUND', '회차 일정 사본이 없다');
     const saleEnd = saleEndOf(schedule);
     if (now >= saleEnd) throw new AdmissionError('SALE_ENDED', '판매 종료 뒤의 입장 확정');
-    const hash = this.tickets.hash(b.queueTicket);
+    // 대기표는 번호·세대를 스스로 지니고, 참가 토큰은 셔플 결과에서 번호를 읽는다(ADR-0231 결정 10). 만료 때 지울 q:dup 값의 앞머리도 다르다
+    let subject: { s: number; g: number; jny: string; dupPrefix?: string };
+    if (ticket) {
+      subject = { s: ticket.s, g: ticket.g, jny: ticket.jny };
+    } else {
+      const seat = await this.store.lobbySeat({ eventId: i.eventId, tokenHash: hash, nowMs: now });
+      if (seat.kind === 'PENDING') return { status: 'NOT_YET', retryAfterMs: LOBBY_PENDING_RETRY_MS, serverTimeMs: now, verificationReason: null };
+      if (seat.kind === 'REPAIRING') throw new AdmissionError('LOBBY_REPAIRING', '셔플 결과 키를 잃어 다시 쓰기를 기다린다');
+      if (seat.kind === 'GONE') throw new AdmissionError('TICKET_INVALID', '이 회차 로비 참가자가 아니다');
+      subject = { s: seat.seq, g: seat.gen, jny: lobby!.jny, dupPrefix: `LOBBY:${hash}:` };
+    }
+    const t = subject;
     const keepUntil = keepUntilOf(schedule);
     // 사람 키를 부를 pid들(옛 pid부터, 교체 직전 토큰과 두 pid 토큰이 옛 키에서 만나게)
     const persons = i.pidPrev && i.pidPrev !== i.pid ? [i.pidPrev, i.pid] : [i.pid];
@@ -77,7 +94,7 @@ export class ConfirmAdmission {
         return { status: 'NOT_YET', retryAfterMs: pre.retryAfterMs, serverTimeMs: now, verificationReason: null };
       case 'EXPIRED': {
         let admittedBefore = false;
-        for (const pid of persons) admittedBefore = (await this.store.expire({ pid, eventId: i.eventId, seq: t.s, gen: t.g })).admittedBefore || admittedBefore;
+        for (const pid of persons) admittedBefore = (await this.store.expire({ pid, eventId: i.eventId, seq: t.s, gen: t.g, ...(t.dupPrefix ? { dupPrefix: t.dupPrefix } : {}) })).admittedBefore || admittedBefore;
         this.signals.turnEntryFailed('user');
         throw new AdmissionError('EXPIRED', '차례 뒤 15분이 지났다', !admittedBefore && now < saleEnd);
       }
@@ -133,7 +150,7 @@ export class ConfirmAdmission {
       if (r.kind === 'EXPIRED') {
         // 같은 자리를 다시 줄 수 있지만 첫 발급 + 최대 체류가 지났다: exp < iat 토큰을 내지 않고 만료로 답한다(만료 410과 같은 꼴, HOT-010 리뷰)
         let admittedBefore = false;
-        for (const pid of persons) admittedBefore = (await this.store.expire({ pid, eventId: i.eventId, seq: t.s, gen: t.g })).admittedBefore || admittedBefore;
+        for (const pid of persons) admittedBefore = (await this.store.expire({ pid, eventId: i.eventId, seq: t.s, gen: t.g, ...(t.dupPrefix ? { dupPrefix: t.dupPrefix } : {}) })).admittedBefore || admittedBefore;
         throw new AdmissionError('EXPIRED', '첫 발급 뒤 최대 체류가 지났다', !admittedBefore && now < saleEnd);
       }
       // 확인과 입장 사이에 빠진 번호가 됐거나 serving이 모자라다(장애 전환으로 serving이 되돌아감)

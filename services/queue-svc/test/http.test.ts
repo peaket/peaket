@@ -3,10 +3,12 @@ import 'reflect-metadata';
 import { createService, fakeClock } from '@peaket/platform';
 import { createHmac } from 'node:crypto';
 import { Writable } from 'node:stream';
+import { TestSeedSealer } from '@peaket/shuffle';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { HmacArrivalCookies } from '../src/modules/entry/adapters/arrival-cookie.js';
 import { MemoryEventSchedules } from '../src/modules/entry/adapters/memory-entry-store.js';
+import type { EventSchedule } from '../src/modules/entry/domain/queue.js';
 import { ACCOUNT, DEVICE, newEvent, newRequest, openSchedule, PID, preverifyToken, recordingRisk, tokens } from './support.js';
 
 let svc: Awaited<ReturnType<typeof createService>>;
@@ -17,7 +19,7 @@ const NOW = Date.parse('2026-11-03T03:00:00Z');
 beforeAll(async () => {
   svc = await createService({
     name: 'queue-svc',
-    module: AppModule.register({ memory: true, schedules, tokens, risk: recordingRisk() }),
+    module: AppModule.register({ memory: true, schedules, tokens, risk: recordingRisk(), sealer: new TestSeedSealer(Buffer.alloc(32, 4)) }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet,
@@ -254,5 +256,49 @@ describe('도착 시각 쿠키(받는 층, ADR-0223)', () => {
     const r = await post(id, { 'x-peaket-arrival': 'unsigned' });
     expect(r.statusCode).toBe(201);
     expect(signals.cookie).toEqual(['absent']);
+  });
+});
+
+describe('로비 참가 경로(HOT-040, ADR-0231)', () => {
+  const lobbySchedule = (o: Partial<EventSchedule> = {}): EventSchedule => ({ opensAtMs: NOW + 5 * 60_000, startsAtMs: NOW + 3 * 24 * 3600_000, lobbyShuffle: true, openBatch: true, lobbyMinutes: 10, ...o });
+  const join = (eventId: string, contentType = 'application/json', headers = fan(), payload: unknown = { deviceId: DEVICE, humanCheckToken: 't' }) =>
+    svc.http.inject({ method: 'POST', url: `/v1/queues/${eventId}/lobby-participants`, headers: { ...headers, 'content-type': contentType }, payload: JSON.stringify(payload) });
+
+  test('Q-T55 팬이 창 안에서 부르면 201과 참가 토큰, 공시 칸을 주고 응답은 저장하지 않는다', async () => {
+    const id = newEvent();
+    await schedules.set(id, lobbySchedule());
+    const r = await join(id, 'application/json', fan({ pid: 'pid-lobby-1' }));
+    expect(r.statusCode).toBe(201);
+    expect(r.headers['cache-control']).toBe('no-store');
+    const body = JSON.parse(r.payload);
+    expect(tokens.readLobby(body.lobbyToken)).toMatchObject({ e: id, a: ACCOUNT, d: DEVICE });
+    expect(body).toMatchObject({ drandChain: 'quicknet', algorithmVersion: 'v1', shuffleSpreadSec: 8, serverTimeMs: NOW });
+  });
+
+  test('Q-T55 같은 사람이 다시 오면 409 already-waiting이고, 창 앞은 queue-not-open, 지나면 lobby-closed, 로비가 없는 회차는 404다', async () => {
+    const id = newEvent();
+    await schedules.set(id, lobbySchedule());
+    const again = fan({ pid: 'pid-lobby-2' });
+    expect((await join(id, 'application/json', again)).statusCode).toBe(201);
+    const second = await join(id, 'application/json', again);
+    expect(second.statusCode).toBe(409);
+    expect(JSON.parse(second.payload).type).toContain('already-waiting');
+    const early = newEvent();
+    await schedules.set(early, lobbySchedule({ opensAtMs: NOW + 30 * 60_000 }));
+    expect(JSON.parse((await join(early, 'application/json', fan({ pid: 'pid-lobby-3' }))).payload).type).toContain('queue-not-open');
+    const past = newEvent();
+    await schedules.set(past, lobbySchedule({ opensAtMs: NOW - 1 }));
+    expect(JSON.parse((await join(past, 'application/json', fan({ pid: 'pid-lobby-4' }))).payload).type).toContain('lobby-closed');
+    const none = newEvent();
+    await schedules.set(none, lobbySchedule({ lobbyShuffle: false }));
+    expect((await join(none, 'application/json', fan({ pid: 'pid-lobby-5' }))).statusCode).toBe(404);
+  });
+
+  test('[ASVS v5.0.0-3.5.2] 로비 입장은 text/plain을 받지 않고(사전 요청이 생기는 경로), 정하지 않은 본문 칸은 400이며 본인확인 전은 403이다', async () => {
+    const id = newEvent();
+    await schedules.set(id, lobbySchedule());
+    expect((await join(id, 'text/plain;charset=UTF-8')).statusCode).toBe(415);
+    expect((await join(id, 'application/json', fan({ pid: 'pid-lobby-6' }), { deviceId: DEVICE, extra: 1 })).statusCode).toBe(400);
+    expect((await join(id, 'application/json', fan({ pid: null }))).statusCode).toBe(403);
   });
 });

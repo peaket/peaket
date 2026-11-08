@@ -59,6 +59,21 @@ def shuffle_with(items, g):
     return a
 
 
+# drand quicknet 라운드 규칙(ADR-0231 결정 7): 정수 계산만 쓴다
+DRAND_GENESIS_MS = 1692803367000
+DRAND_PERIOD_MS = 3000
+BEACON_MIN_DELAY_MS = 3000
+
+
+def drand_round_time_ms(round_no):
+    return DRAND_GENESIS_MS + (round_no - 1) * DRAND_PERIOD_MS
+
+
+def drand_round_after(at_ms, min_delay_ms=BEACON_MIN_DELAY_MS):
+    # at_ms + min_delay_ms 이후(같아도 된다)의 첫 라운드. 올림 나눗셈은 음수 몫의 내림으로 쓴다
+    return -((-(at_ms + min_delay_ms - DRAND_GENESIS_MS)) // DRAND_PERIOD_MS) + 1
+
+
 def h(s):
     return hashlib.sha256(s.encode()).digest()
 
@@ -84,5 +99,13 @@ print(json.dumps({
     # 블록 번호는 0부터: 처음 열 단어(두 블록에 걸친다)
     'firstWords': [w for w, _ in zip(words(key), range(10))],
     # 거부 표본추출: 셋을 섞을 때 첫 단어 0xFFFFFFFF는 한도 floor(2^32/3)*3 이상이라 버린다
+    'drand': {
+        'genesisMs': DRAND_GENESIS_MS,
+        'periodMs': DRAND_PERIOD_MS,
+        'minDelayMs': BEACON_MIN_DELAY_MS,
+        'cases': [{'atMs': at, 'round': drand_round_after(at), 'timeMs': drand_round_time_ms(drand_round_after(at))}
+                  for at in [DRAND_GENESIS_MS, DRAND_GENESIS_MS + 1, DRAND_GENESIS_MS + 2999, DRAND_GENESIS_MS + 3000,
+                             1794000000000, 1794000000001, 1794000002999, 1794000003000]],
+    },
     'rejection': {'items': [0, 1, 2], 'words': [0xFFFFFFFF, 1, 0], 'out': shuffle_with([0, 1, 2], iter([0xFFFFFFFF, 1, 0]))},
 }, indent=1))

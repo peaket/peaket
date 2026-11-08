@@ -7,12 +7,12 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { QueueTokens } from '../domain/ports.js';
-import { type PreverifyClaims, REASONS, type TicketClaims } from '../domain/queue.js';
+import { type LobbyClaims, type PreverifyClaims, REASONS, type TicketClaims } from '../domain/queue.js';
 
 export const QUEUE_TOKEN_KEY_ENV = 'PEAKET_QUEUE_TOKEN_KEY';
 export const QUEUE_TOKEN_KEY_PREVIOUS_ENV = 'PEAKET_QUEUE_TOKEN_KEY_PREVIOUS';
 const VERSION = 'v1';
-const KIND = { preverify: 'PEAKET-preverify-v1', queue: 'PEAKET-queue-v1' } as const;
+const KIND = { preverify: 'PEAKET-preverify-v1', queue: 'PEAKET-queue-v1', lobby: 'PEAKET-lobby-v1' } as const;
 const KID = /^[A-Za-z0-9_-]{1,32}$/;
 const MIN_KEY_BYTES = 32;
 
@@ -21,6 +21,7 @@ const ms = z.number().int().nonnegative();
 const PreverifySchema = z
   .object({ e: id, a: id, d: z.string().max(128), i0: ms, iat: ms, exp: ms, jny: z.uuid(), vr: z.enum(REASONS).optional(), hd: z.literal(true).optional() })
   .strict();
+const LobbySchema = z.object({ e: id, a: id, d: z.string().max(128), iat: ms, jny: z.uuid(), vr: z.enum(REASONS).optional(), hd: z.literal(true).optional() }).strict();
 const TicketSchema = z
   .object({ e: id, a: id, d: z.string().max(128), s: z.number().int().positive(), g: z.number().int().positive(), seg: z.number().int().nonnegative(), rq: z.string().min(1).max(64), jny: z.uuid(), vr: z.enum(REASONS).optional() })
   .strict();
@@ -66,6 +67,14 @@ export class HmacQueueTokens implements QueueTokens {
 
   readTicket(token: string): TicketClaims | null {
     return this.#read(KIND.queue, token, TicketSchema) as TicketClaims | null;
+  }
+
+  lobby(c: LobbyClaims): string {
+    return this.#sign(KIND.lobby, c);
+  }
+
+  readLobby(token: string): LobbyClaims | null {
+    return this.#read(KIND.lobby, token, LobbySchema) as LobbyClaims | null;
   }
 
   hash(token: string): string {

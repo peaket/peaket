@@ -9,6 +9,7 @@ export type EntryErrorCode =
   | 'PREVERIFY_INVALID'
   | 'ALREADY_ADMITTED'
   | 'ALREADY_WAITING'
+  | 'LOBBY_CLOSED'
   | 'IDENTITY_VERIFICATION_REQUIRED';
 
 export class EntryError extends Error {

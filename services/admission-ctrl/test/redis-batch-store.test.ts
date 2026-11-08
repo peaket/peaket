@@ -44,7 +44,7 @@ describe('결과 쓰기', () => {
         return 'OK';
       }),
     );
-    await store.writeResults(entries, 2, 1);
+    await store.writeResults(1, entries, 2, 1);
     expect(failed).toBe(true);
     expect(written.size).toBe(entries.length);
     expect(written.get(keys.batchResult(entries[1_500]!.tokenHash))).toBe('1501:2');
@@ -59,7 +59,7 @@ describe('결과 쓰기', () => {
         throw bug;
       }),
     );
-    await expect(store.writeResults(entries.slice(0, 10), 1, 1)).rejects.toBe(bug);
+    await expect(store.writeResults(1, entries.slice(0, 10), 1, 1)).rejects.toBe(bug);
     expect(calls).toBe(10);
   });
 });

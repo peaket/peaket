@@ -23,9 +23,11 @@ import {
   RB05_CHECK_MS,
   RB05_SKIP_BASE,
   saleEndOf,
+  SHUFFLE_PUBLISH_MS,
   TICK_MS,
 } from '../domain/plan.js';
 import { CONTROL_INPUTS, type Control, type ControlInputsReader, type ControlSnapshot, ELECTOR, type Elector, type EventPlan, LEADER_STORE, type LeaderStore, PUBLISHER, type Publisher } from '../domain/ports.js';
+import { drandRoundTimeMs } from '@peaket/shuffle';
 import { type ControlEvent, LEADER_METRICS, type LeaderMetrics } from './leader-metrics.js';
 
 /** 회차 목록·일정 사본을 파드 메모리에 두는 시간 1초 [가정](queue-svc 일정 캐시와 같다) */
@@ -73,12 +75,12 @@ export class AdmissionLeader {
   /** 회차마다 RB-05를 마지막으로 부른 시각(리더 시계) */
   readonly #rb05At = new Map<string, number>();
   readonly #loggedAt = new Map<string, number>();
-  /** 뒤에서 도는 게시(회차마다 하나) */
+  /** 뒤에서 도는 게시(구간마다 하나) */
   readonly #publishing = new Map<string, Promise<void>>();
   /** 회차마다 하나씩 뒤에서 도는 RB-05 복제 확인(WAIT가 0.5초까지 걸려 다른 회차의 전진을 막지 않게, ADR-0186) */
   readonly #confirming = new Map<string, Promise<void>>();
   /** 직전 주기의 값(나누기의 수요와 감축 확인의 예매 단계 인원, ADR-0226 결정 10) */
-  readonly #last = new Map<string, { waiting: number; slots: number; soon: number; inFlight: number; saleState: string }>();
+  readonly #last = new Map<string, { waiting: number; slots: number; soon: number; inFlight: number; saleState: string; gated: boolean }>();
   /** 회차마다 마지막으로 쓴 목표(준비가 실패한 회차의 몫으로 합산에 남긴다) */
   readonly #lastTargets = new Map<string, number>();
   /** 회차마다 아직 쓰지 못한 전진 몫(소수 몫을 주기마다 쌓는다, ADR-0226 결정 10) */
@@ -184,7 +186,7 @@ export class AdmissionLeader {
       }
       // 시작 값은 범위로 깎지 않고 넘긴다: 판단이 깎아야 결제사 상한 감축으로 세어진다. targetNow는 시작 값으로 쓰지 않는다(나눈 값이 자기 목표로 굳는다, ADR-0226 결정 3)
       const memory = memoryFromFields(raw, DEFAULT_TARGET, now);
-      const result = decideAimd({ nowMs: now, memory, inputs: this.#snapshot.forEvent(eventId), slotsUsed: this.#last.get(eventId)?.slots, paused: ctl.paused, autoStopped, operator: ctl.operator ?? { value: ctl.target ?? null, untilMs: null, resumeAtMs: null }, upper, lower, pgLimited: pg !== undefined });
+      const result = decideAimd({ nowMs: now, memory, inputs: this.#snapshot.forEvent(eventId), slotsUsed: this.#last.get(eventId)?.slots, gated: this.#last.get(eventId)?.gated ?? false, paused: ctl.paused, autoStopped, operator: ctl.operator ?? { value: ctl.target ?? null, untilMs: null, resumeAtMs: null }, upper, lower, pgLimited: pg !== undefined });
       for (const d of result.decreases) this.logger?.warn({ eventId, reason: d.reason, journey: d.journey, exposure: d.exposure, from: d.from, to: d.to }, 'admission-ctrl 리더: 동시 입장 목표를 줄였다');
       // 저장된 칸 원문과 견준다: 칸이 없는 새 회차는 처음에 모두 쓰고, 그래야 '시작 때 지금으로 채운 값'이 다음 주기에 그대로 읽힌다
       return { eventId, plan, ctl, want: result.target, fields: changedFields(raw, memoryToFields(result.memory)), control: { decreases: result.decreases, suppressed: result.suppressed, ignored: result.ignored, staleKinds: result.staleKinds }, ...(pg ? { pg } : {}) };
@@ -239,10 +241,11 @@ export class AdmissionLeader {
         lobbyShuffle: plan.lobbyShuffle,
         openBatch: plan.openBatch,
         closeAtMs,
+        ...(plan.batchRound !== undefined ? { batchResultDelayMs: Math.max(0, drandRoundTimeMs(plan.batchRound) + SHUFFLE_PUBLISH_MS - closeAtMs) } : {}),
         fields: p.fields,
       });
       if (r.kind === 'FENCED') return this.#fence(gen, eventId);
-      this.#last.set(eventId, { waiting: r.waiting, slots: r.slots, soon: r.soon, inFlight: r.inFlight, saleState: r.saleState });
+      this.#last.set(eventId, { waiting: r.waiting, slots: r.slots, soon: r.soon, inFlight: r.inFlight, saleState: r.saleState, gated: r.gated === 1 });
       this.#lastTargets.set(eventId, share.target);
       this.#saleStates.set(eventId, r.saleState);
       // 모르는 판매 상태는 전진 0이 된다. 조용히 멈추지 않게 남긴다
@@ -265,10 +268,9 @@ export class AdmissionLeader {
       if (arrival.kind === 'OK') this.metrics?.arrival(arrival.slots, arrival.returned);
       // 묶음이 닫혔고 게시 전이거나 다시 쓰기 표시가 있으면 게시를 부른다(비콘이 아직이면 다음 주기에 다시). 큰 묶음의 게시는 몇 초 걸리므로
       // 뒤에서 돌려 다른 회차의 전진을 막지 않는다. 게시는 세대를 확인하지 않으므로 지금도 같은 세대의 리더일 때만 시작한다
-      if (plan.openBatch && r.batchMarked === 1 && (r.batchPublished === 0 || r.repair === 1) && !this.#stopped.has(eventId) && !this.#publishing.has(eventId)) {
-        if (this.elector.generation() !== gen || this.#fencedGen === gen) return;
-        this.#publishing.set(eventId, this.#publish(eventId).finally(() => this.#publishing.delete(eventId)));
-      }
+      if (plan.openBatch && r.batchMarked === 1 && (r.batchPublished === 0 || r.repair === 1)) this.#startPublish(eventId, 1, gen);
+      // 로비 결과도 같은 조건으로 게시한다(HOT-040, ADR-0231 결정 9). 구간마다 따로 돌아 로비 셔플이 묶음 게시를 막지 않는다
+      if (plan.lobbyShuffle && r.lobbyMarked === 1 && (r.lobbyPublished === 0 || r.lobbyRepair === 1)) this.#startPublish(eventId, 'lobby', gen);
     } catch (err) {
       this.#logError(eventId, now, err, 'admission-ctrl 리더: 회차 주기 실패(같은 회차는 10초에 한 번 남긴다)');
     }
@@ -345,10 +347,22 @@ export class AdmissionLeader {
     }
   }
 
-  async #publish(eventId: string): Promise<void> {
+  #startPublish(eventId: string, group: 'lobby' | number, gen: number): void {
+    const key = `${eventId}:${group}`;
+    if (this.#stopped.has(eventId) || this.#publishing.has(key)) return;
+    if (this.elector.generation() !== gen || this.#fencedGen === gen) return;
+    this.#publishing.set(key, this.#publish(eventId, group).finally(() => this.#publishing.delete(key)));
+  }
+
+  async #publish(eventId: string, group: 'lobby' | number): Promise<void> {
     try {
-      const r = await this.publish.run({ eventId });
+      const r = await this.publish.run({ eventId, group });
       this.metrics?.publish(r.status);
+      // 비콘 대기 상한을 넘겨 멈췄다: SEV1(RB-35). 지표는 멈춤을 처음 쓴 호출에서 한 번만 낸다(ADR-0231 결정 12)
+      if (r.status === 'BEACON_STOPPED' && r.first) {
+        this.metrics?.beaconStopped(r.reason ?? 'beacon');
+        this.logger?.error({ eventId, group, reason: r.reason }, '셔플 비콘 대기 상한을 넘겨 게시를 멈췄다(RB-35)');
+      }
       // 복제본이 계속 없으면 serving이 묶음 첫 번호 - 1에 머문다. 조용히 멈추지 않게 남긴다
       if (r.status === 'WAITING_REPLICA') this.#logError(`${eventId}:replica`, this.clock.now(), undefined, '묶음 게시 전 복제 확인이 안 돼 게시를 미뤘다(복제본 수 확인)');
     } catch (err) {

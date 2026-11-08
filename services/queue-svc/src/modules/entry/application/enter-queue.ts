@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
+import { drandRoundTimeMs } from '@peaket/shuffle';
 import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, type BatchedEntry, ENTRY_STORE, EVENT_SCHEDULES, type EntryStore, type EventSchedules, type PreemptResult, QUEUE_TOKENS, type QueueTokens } from '../domain/ports.js';
 import {
   ARRIVAL_COOKIE_TTL_MS,
@@ -12,12 +13,14 @@ import {
   ARRIVAL_SLOT_INITIAL,
   arrivalSlotOf,
   BATCH_REPAIR_RETRY_SEC,
+  BATCH_NO,
   BATCH_RESULT_DELAY_MS,
   BATCH_SPREAD_SEC,
   batchCloseAtOf,
   type EventSchedule,
   keepUntilOf,
   NUMBER_BATCH_MAX,
+  SHUFFLE_PUBLISH_MS,
   RB05_SKIP_BASE,
   RECOVERING_RETRY_SEC,
   NUMBER_BATCH_WINDOW_MS,
@@ -29,6 +32,7 @@ import {
   segmentOf,
 } from '../domain/queue.js';
 import { EntryError } from './entry-error.js';
+import { ShuffleCommits } from './shuffle-commits.js';
 import { NumberBatcher } from './number-batcher.js';
 
 export const ENTRY_OPTIONS = Symbol('queue.EntryOptions');
@@ -112,6 +116,7 @@ export class EnterQueue {
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
     @Optional() @Inject(ARRIVAL_COOKIES) private readonly arrivals?: ArrivalCookies,
     @Optional() @Inject(ARRIVAL_SIGNALS) private readonly signals?: ArrivalSignals,
+    @Optional() private readonly commits?: ShuffleCommits,
   ) {
     this.#numbers = new NumberBatcher(store, options.batchWindowMs ?? NUMBER_BATCH_WINDOW_MS, options.batchMax ?? NUMBER_BATCH_MAX);
   }
@@ -362,15 +367,21 @@ export class EnterQueue {
     }
   }
 
-  #batching(c: Ctx, tokenHash: string): BatchingResult {
+  async #batching(c: Ctx, tokenHash: string): Promise<BatchingResult> {
     return {
       kind: 'BATCHING',
       entryRequestId: c.requestId,
       resultPath: `/v1/queues/${c.i.eventId}/batch-results/${tokenHash.slice(0, RESULT_PREFIX_LEN)}.json`,
-      resultAt: new Date(batchCloseAtOf(c.schedule) + BATCH_RESULT_DELAY_MS).toISOString(),
+      resultAt: new Date(await this.#resultAt(c)).toISOString(),
       spreadSec: BATCH_SPREAD_SEC,
       serverTimeMs: this.clock.now(),
     };
+  }
+
+  /** 202의 결과 공개 예정 시각: 공시 라운드의 예정 시각 + 게시 목표. 기록을 읽지 못하면 지금까지의 추정(구간 끝 + 11초 [가정])이다(T=0 진입이라 KMS를 부르지 않는다, ADR-0231 결정 8) */
+  async #resultAt(c: Ctx): Promise<number> {
+    const rec = await this.commits?.peek(c.i.eventId, BATCH_NO).catch(() => null);
+    return rec ? drandRoundTimeMs(rec.round) + SHUFFLE_PUBLISH_MS : batchCloseAtOf(c.schedule) + BATCH_RESULT_DELAY_MS;
   }
 
   async #issue(c: Ctx, seq: number, gen: number, jny: string, vr: ReasonCategory | undefined): Promise<EnterResult> {

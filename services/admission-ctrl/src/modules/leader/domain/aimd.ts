@@ -67,6 +67,8 @@ export interface AimdContext {
   slotsUsed: number | undefined;
   /** 입장 일시정지·판매 일시정지·판매 중지(증액 멈춤, 감축 허용) */
   paused: boolean;
+  /** 첫 전진 문이 닫혀 부를 수 있는 번호가 없다(게시 전·비콘 멈춤, ADR-0231 결정 14). 증액하지 않는다 */
+  gated?: boolean;
   /** 명령 11(자동화 정지) */
   autoStopped: boolean;
   operator: OperatorState;
@@ -259,7 +261,7 @@ export function decideAimd(ctx: AimdContext): AimdResult {
         const setAt = setAtOf(operator);
         const budgetHold = m.budgetHoldAt !== null && !(setAt !== null && setAt > m.budgetHoldAt);
         // 좌석 저장소가 안 되는 동안에는 늘리지 않는다('회복 뒤에', ADR-0121 결정 3)
-        if (!ctx.paused && !needConfirm && !budgetHold && !m.seatStoreDown) {
+        if (!ctx.paused && !ctx.gated && !needConfirm && !budgetHold && !m.seatStoreDown) {
           m.target = Math.min(upper, m.target + INCREASE_STEP);
           m.changeAt = at;
         }
@@ -411,11 +413,12 @@ const inUseOf = (last: { slots: number; soon: number; inFlight: number }): numbe
  * 나누기에 쓰는 수요(ADR-0226 결정 10). 처음 보는 회차는 목표 전체다.
  * 매진·판매 종료는 0이다(부를 사람이 없고, 들어온 사람도 살 좌석이 없다). 일시 매진은 지금 쓰는 인원이다(들어온 사람이 홀드와 결제로 부하를 낸다, ADR-0122)
  */
-export function demandOf(want: number, last: { waiting: number; slots: number; soon: number; inFlight: number; saleState?: string } | undefined): number {
+export function demandOf(want: number, last: { waiting: number; slots: number; soon: number; inFlight: number; saleState?: string; gated?: boolean } | undefined): number {
   if (!last) return want;
   const state = last.saleState ?? 'ON_SALE';
   if (state === 'SOLD_OUT' || state === 'ENDED') return 0;
-  if (state !== 'ON_SALE' || last.waiting === 0) return Math.min(want, inUseOf(last));
+  // 첫 전진 문이 닫힌 회차(게시 전·비콘 멈춤)는 줄 선 사람을 부를 수 없어 지금 쓰는 인원만 수요다(ADR-0231 결정 14)
+  if (state !== 'ON_SALE' || last.waiting === 0 || last.gated) return Math.min(want, inUseOf(last));
   return want;
 }
 

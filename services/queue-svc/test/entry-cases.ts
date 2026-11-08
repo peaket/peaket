@@ -58,6 +58,11 @@ function pausing(store: EntryStore, hooks: { beforeNumber?: () => Promise<void>;
     batchResult: (i) => store.batchResult(i),
     convertBatch: (i) => store.convertBatch(i),
     dropBatch: (i) => store.dropBatch(i),
+    addLobbyMember: (i) => store.addLobbyMember(i),
+    lobbyWindow: (i) => store.lobbyWindow(i),
+    removeLobbyMember: (i) => store.removeLobbyMember(i),
+    recordLobby: (i) => store.recordLobby(i),
+    dropLobbyRecord: (i) => store.dropLobbyRecord(i),
     number: async (i) => {
       await hooks.beforeNumber?.();
       return store.number(i);

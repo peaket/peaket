@@ -1,11 +1,12 @@
 // 진입 규칙을 메모리 저장소로 돈다(같은 사례를 test-int가 실제 Valkey Lua로 돈다)
 import { fakeClock } from '@peaket/platform';
 import { expect, test } from 'vitest';
-import { MemoryEntryStore, MemoryEventSchedules } from '../src/modules/entry/adapters/memory-entry-store.js';
+import { MemoryEntryStore, MemoryEventSchedules, MemoryShuffleCommits } from '../src/modules/entry/adapters/memory-entry-store.js';
 import { EnterQueue } from '../src/modules/entry/application/enter-queue.js';
 import { segmentOf } from '../src/modules/entry/domain/queue.js';
 import { arrivalSlotCases } from './arrival-slot-cases.js';
 import { batchCases } from './batch-cases.js';
+import { lobbyCases } from './lobby-cases.js';
 import { entryCases } from './entry-cases.js';
 import { type PidWorld, pidTransitionEntryCases } from './pid-transition-cases.js';
 import { DEVICE, ACCOUNT, newEvent, newRequest, openSchedule, preverifyToken, tokens } from './support.js';
@@ -43,6 +44,21 @@ arrivalSlotCases('메모리', async () => {
   return { store, now: () => clock.now(), counter: async (e) => store.counterOf(e), failover: async (e) => store.failoverForTest(e), setUsed: async (e, slot, used) => store.setArrivalUsedForTest(e, slot, used) };
 });
 pidTransitionEntryCases('메모리', memoryWorld);
+lobbyCases('메모리', async () => {
+  const clock = fakeClock({ now: Date.UTC(2026, 10, 9, 3, 0, 0) });
+  const store = new MemoryEntryStore(clock);
+  return {
+    store,
+    commits: new MemoryShuffleCommits(clock),
+    schedules: new MemoryEventSchedules(),
+    clock,
+    admit: async (pid, eventId, hash) => store.admitForTest(pid, eventId, hash),
+    closeLobby: async (eventId) => store.closeLobbyForTest(eventId),
+    members: async (eventId) => store.lobbyMembersForTest(eventId),
+    dupValue: async (pid, eventId) => store.dupForTest(pid, eventId).value,
+    verifying: async (eventId, hash) => store.verifyOf(eventId, hash),
+  };
+});
 
 batchCases('메모리', async () => {
   const clock = fakeClock({ now: Date.UTC(2026, 10, 3, 1, 0, 0) });

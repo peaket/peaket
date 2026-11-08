@@ -85,7 +85,37 @@ export interface EventSchedule {
   batchWindowMs?: number;
   /** 그 회차의 지금 좌석맵 판 번호(게시한 판, 1 ~ 2^32 − 1). 대기 상태 파일의 seatmapLayoutPath를 만든다. 없으면 그 칸을 뺀다(HOT-011, ADR-0219 결정 7) */
   layoutVersion?: number;
+  /** 오픈 전 로비를 여는 분(0~60, 없으면 LOBBY_DEFAULT_MINUTES [가정]) */
+  lobbyMinutes?: number;
 }
+
+/** 참가 토큰 클레임(종류 문자열 PEAKET-lobby-v1, ADR-0231 결정 2). 만료 칸은 두지 않는다(q:dup과 셔플 결과가 판매 종료까지 남는다) */
+export interface LobbyClaims {
+  e: string;
+  a: string;
+  d: string;
+  iat: number;
+  jny: string;
+  vr?: ReasonCategory;
+  hd?: true;
+}
+
+/** 로비를 여는 분의 처음 값 10분 [가정](POL-003, ADR-0231 결정 4) */
+export const LOBBY_DEFAULT_MINUTES = 10;
+/** 셔플 결과 게시 목표 5초 [가정, Q-T6에서 확정](ADR-0231 결정 8) */
+export const SHUFFLE_PUBLISH_MS = 5_000;
+/** 묶음 커밋을 공시해 두는 시각: 오픈 10분 전(§3 '동시 도착 구간 묶음') */
+export const COMMIT_BATCH_LEAD_MS = 10 * 60_000;
+/** 공시 일꾼이 때보다 앞서 쓰는 여유 30초와 도는 간격 5초 [가정](ADR-0231 결정 6) */
+export const COMMIT_EARLY_MS = 30_000;
+export const COMMIT_SWEEP_MS = 5_000;
+/** 로비 입장 버튼 퍼뜨리기 창 60초(§2 '로비 참가 퍼뜨리기') */
+export const LOBBY_UNLOCK_SPREAD_MS = 60_000;
+
+export const lobbyOpensAtOf = (s: Pick<EventSchedule, 'opensAtMs' | 'lobbyMinutes'>): number => s.opensAtMs - (s.lobbyMinutes ?? LOBBY_DEFAULT_MINUTES) * 60_000;
+/** 공시 일꾼이 그 회차의 구간을 만들기 시작하는 시각 */
+export const commitDueAtOf = (s: Pick<EventSchedule, 'opensAtMs' | 'lobbyMinutes'>): number =>
+  s.opensAtMs - Math.max((s.lobbyMinutes ?? LOBBY_DEFAULT_MINUTES) * 60_000, COMMIT_BATCH_LEAD_MS) - COMMIT_EARLY_MS;
 
 /** 그 회차 좌석맵 파일의 경로(docs/frontend.md §4.2.2, 대기 상태 파일과 입장 확정 응답이 같은 값을 쓴다). 판 번호가 없으면 없다 */
 export const seatmapLayoutPathOf = (eventId: string, schedule: Pick<EventSchedule, 'layoutVersion'>): string | undefined =>
@@ -104,6 +134,8 @@ export const segmentOf = (seq: number): number => Math.floor((seq - 1) / SEGMENT
 export const saleEndOf = (s: EventSchedule): number => s.startsAtMs - SALE_END_BEFORE_START_MS;
 /** 묶음 구간 끝 */
 export const batchCloseAtOf = (s: EventSchedule): number => s.opensAtMs + (s.batchWindowMs ?? OPEN_BATCH_MS);
+/** 구간의 목록을 고정하는 시각: 로비는 오픈, 묶음은 구간 끝(ADR-0231 결정 7) */
+export const fixAtOf = (s: EventSchedule, group: 'lobby' | number): number => (group === 'lobby' ? s.opensAtMs : batchCloseAtOf(s));
 /** 회차 단위 키의 만료 시각 */
 export const keepUntilOf = (s: EventSchedule): number => saleEndOf(s) + KEEP_AFTER_SALE_END_MS;
 

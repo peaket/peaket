@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { EnterQueue } from '../application/enter-queue.js';
 import { EntryError } from '../application/entry-error.js';
 import { IssuePreverification } from '../application/issue-preverification.js';
+import { JoinLobby } from '../application/join-lobby.js';
 import { ARRIVAL_COOKIE_NAME, ARRIVAL_UNSIGNED_HEADER, cookieValue, QueueStoreUnavailable } from '../domain/queue.js';
 
 // openapi 요청 본문 모양(계약 생성물의 작업별 스키마 이름이 operationId 정리(wbs 0.2.3) 뒤 바뀌므로 여기 같은 모양으로 둔다)
@@ -25,6 +26,7 @@ const BehaviorSummary = z
   .strict();
 // 요청 본문은 계약처럼 닫는다(정하지 않은 칸은 400, docs/api/guidelines.md §1 '요청은 닫고 응답은 연다', BAS-040)
 const PreverifyBody = z.object({ humanCheckToken: z.string().max(4096).optional(), deviceId: z.string().max(128).optional(), preverifyToken: z.string().max(4096).optional(), behaviorSummary: BehaviorSummary.optional() }).strict();
+const LobbyBody = z.object({ humanCheckToken: z.string().max(4096).optional(), deviceId: z.string().max(128).optional() }).strict();
 const EntryBody = z.object({ preverifyToken: z.string().max(4096), deviceId: z.string().max(128).optional(), entryRequestId: z.uuid().optional() }).strict();
 
 /** Redis 키의 해시 태그 안에 들어가는 값(회차 ID·pid)의 모양 */
@@ -41,6 +43,7 @@ const PROBLEM: Record<EntryError['code'], { status: number; type: string; title:
   PREVERIFY_INVALID: { status: 403, type: 'preverify-invalid', title: '사람 확인을 다시 해 주세요' },
   ALREADY_ADMITTED: { status: 409, type: 'already-admitted', title: '이 회차에 이미 입장했습니다' },
   ALREADY_WAITING: { status: 409, type: 'already-waiting', title: '이미 다른 곳에서 대기 중입니다' },
+  LOBBY_CLOSED: { status: 409, type: 'lobby-closed', title: '로비가 닫혔습니다' },
   IDENTITY_VERIFICATION_REQUIRED: { status: 403, type: 'identity-verification-required', title: '휴대폰 본인확인을 먼저 해 주세요' },
 };
 
@@ -69,7 +72,16 @@ export class QueueController {
   constructor(
     private readonly issuePreverification: IssuePreverification,
     private readonly enterQueue: EnterQueue,
+    private readonly joinLobby: JoinLobby,
   ) {}
+
+  @Post('lobby-participants')
+  @Roles(['fan'], { scopes: ['ticket:buy'] })
+  @HttpCode(201)
+  async lobby(@Param('eventId') eventId: string, @ContractBody(LobbyBody) body: z.output<typeof LobbyBody>, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply) {
+    void reply.header('cache-control', 'no-store');
+    return problem((async () => this.joinLobby.run({ accountId: me.accountId, eventId, body, ...who(eventId, me) }))());
+  }
 
   @Post('pre-verifications')
   @Roles(['fan'], { scopes: ['ticket:buy'] })

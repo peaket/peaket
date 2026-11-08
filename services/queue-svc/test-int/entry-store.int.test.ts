@@ -1,11 +1,12 @@
 // 진입 3단계 Lua를 실제 Valkey 8.1로 돈다(test/entry-cases.ts의 사례를 메모리 저장소와 똑같이). 선점 수명은 300ms로 줄여 실제로 기다린다.
 import { createHotRedis, type HotRedis, systemClock } from '@peaket/platform';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { RedisEntryStore, keys } from '../src/modules/entry/adapters/redis-entry-store.js';
+import { RedisEntryStore, RedisShuffleCommits, keys } from '../src/modules/entry/adapters/redis-entry-store.js';
 import { RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-schedules.js';
 import { type EventSchedule, QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
 import { arrivalSlotCases } from '../test/arrival-slot-cases.js';
 import { batchCases } from '../test/batch-cases.js';
+import { lobbyCases } from '../test/lobby-cases.js';
 import { entryCases } from '../test/entry-cases.js';
 import { type PidWorld, pidTransitionEntryCases } from '../test/pid-transition-cases.js';
 import { newEvent, openSchedule } from '../test/support.js';
@@ -30,7 +31,7 @@ const cmd = (key: string, args: string[]) => redis.command(args, { key });
 
 async function writeSchedule(eventId: string, s: EventSchedule): Promise<void> {
   const key = keys.cfg(eventId);
-  const window = s.batchWindowMs === undefined ? [] : ['batchWindowMs', String(s.batchWindowMs)];
+  const window = [...(s.batchWindowMs === undefined ? [] : ['batchWindowMs', String(s.batchWindowMs)]), ...(s.lobbyMinutes === undefined ? [] : ['lobbyMinutes', String(s.lobbyMinutes)])];
   await cmd(key, ['HSET', key, 'opensAtMs', String(s.opensAtMs), 'startsAtMs', String(s.startsAtMs), 'lobbyShuffle', s.lobbyShuffle ? '1' : '0', 'openBatch', s.openBatch ? '1' : '0', 'rev', '1', ...window]);
 }
 
@@ -98,6 +99,20 @@ test('[Q-T16] 칸떼기를다시시작하면_건너뛴빈칸의범위를적어_�
 });
 
 pidTransitionEntryCases('Valkey Lua', valkeyWorld);
+lobbyCases('Valkey Lua', async () => {
+  const schedules = new RedisEventSchedules(redis, systemClock);
+  return {
+    store: new RedisEntryStore(redis),
+    commits: new RedisShuffleCommits(redis),
+    schedules: Object.assign(schedules, { set: writeSchedule }),
+    clock: systemClock,
+    admit: async (pid, eventId, hash) => void (await cmd(keys.adm(pid, eventId), ['SET', keys.adm(pid, eventId), hash])),
+    closeLobby: async (eventId) => void (await cmd(keys.batchDone(eventId), ['HSET', keys.batchDone(eventId), 'lobby', '1:0:1'])),
+    members: async (eventId) => (await cmd(keys.lobbyMembers(eventId), ['SMEMBERS', keys.lobbyMembers(eventId)])) as string[],
+    dupValue: async (pid, eventId) => (await cmd(keys.dup(pid, eventId), ['GET', keys.dup(pid, eventId)])) as string | null,
+    verifying: async (eventId, hash) => (await cmd(keys.verify(eventId), ['HGET', keys.verify(eventId), hash])) as string | null,
+  };
+});
 
 batchCases('Valkey Lua', async () => {
   const schedules = new RedisEventSchedules(redis, systemClock);

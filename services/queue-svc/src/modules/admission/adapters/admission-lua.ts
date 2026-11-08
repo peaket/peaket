@@ -210,6 +210,14 @@ return 1
 
 // 15분 만료: q:dup 값이 이 대기표의 {번호}:{세대}:로 시작하면 지운다. 이 회차에 입장한 적이 있는지(q:adm)를 돌려준다(ADR-0062)
 // KEYS: 1 q:dup, 2 q:adm   ARGV: 1 '{번호}:{세대}:'
+// 로비 셔플 결과 키가 없을 때(ADR-0231 결정 10): 게시 전이면 PENDING, 참가자가 아니면 GONE, 참가자인데 결과 키가 없으면 repair:lobby를 비어 있을 때만 쓴다.
+// KEYS: 1 batch_done, 2 lobby_members. ARGV: 1 토큰 해시, 2 지금(ms)
+export const LOBBY_STATE_LUA = `
+if redis.call('HEXISTS', KEYS[1], 'pub:lobby') == 0 then return 'PENDING' end
+if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 0 then return 'GONE' end
+redis.call('HSETNX', KEYS[1], 'repair:lobby', ARGV[2])
+return 'REPAIRING'
+`;
 export const EXPIRE_LUA = `
 local v = redis.call('GET', KEYS[1])
 if v and string.sub(v, 1, #ARGV[1]) == ARGV[1] then redis.call('DEL', KEYS[1]) end

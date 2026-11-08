@@ -67,6 +67,7 @@ export type ProblemType =
   | 'last-login-method'
   | 'last-partner-admin'
   | 'last-passkey'
+  | 'lobby-closed'
   | 'login-provider-not-linked'
   | 'manual-selection-required'
   | 'merge-blocked'
@@ -237,6 +238,7 @@ export const PROBLEM_TYPES = {
   'last-login-method': { status: 409, title: "마지막 로그인 수단은 해제할 수 없습니다" },
   'last-partner-admin': { status: 409, title: "마지막 파트너 관리자는 바꿀 수 없습니다" },
   'last-passkey': { status: 409, title: "마지막 패스키는 지울 수 없습니다" },
+  'lobby-closed': { status: 409, title: "로비가 닫혔습니다" },
   'login-provider-not-linked': { status: 404, title: "연결된 로그인 수단이 아닙니다" },
   'manual-selection-required': { status: 409, title: "좌석을 직접 골라 주세요" },
   'merge-blocked': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다" },

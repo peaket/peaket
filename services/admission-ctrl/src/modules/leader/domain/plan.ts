@@ -59,7 +59,9 @@ export const CALLS_KEEP_MS = 60_000;
 /** 분산 창 8초 [가정], 게시가 늦었을 때 max(분산 창, 재시도 최대 간격 20초) + 404 캐시 1초 = 21초(ADR-0058) */
 export const DISPERSAL_MS = 8_000;
 export const LATE_DISPERSAL_MS = 21_000;
-/** 묶음 결과 공개 예정 = 구간 끝 + 11초 [가정](queue-svc BATCH_RESULT_DELAY_MS와 같다) */
+/** 결과 게시 목표 5초 [가정](queue-svc SHUFFLE_PUBLISH_MS와 같다, ADR-0231 결정 8) */
+export const SHUFFLE_PUBLISH_MS = 5_000;
+/** 묶음 결과 공개 예정의 처음 값 = 구간 끝 + 11초 [가정](queue-svc BATCH_RESULT_DELAY_MS와 같다) */
 export const BATCH_RESULT_DELAY_MS = 11_000;
 /** 리더가 회차를 보기 시작하는 때: 오픈 1분 전 [가정] */
 export const PRE_OPEN_MS = 60_000;

@@ -27,6 +27,7 @@ export const keys = {
   batchDone: (e: string) => `q:{event:${e}}:batch_done`,
   batchMembers: (e: string) => `q:{event:${e}}:batch_members:1`,
   lobbyMembers: (e: string) => `q:{event:${e}}:lobby_members`,
+  shuffle: (e: string) => `q:{event:${e}}:shuffle`,
   epoch: (e: string) => `q:{event:${e}}:epoch`,
   /** 진입 Degraded의 도착 시각 칸(진입 Lua가 떼고 리더가 닫는다, ADR-0223) */
   arrSlots: (e: string) => `q:{event:${e}}:arr_slots`,
@@ -91,7 +92,9 @@ export class RedisLeaderStore implements LeaderStore {
     const window = f.batchWindowMs === undefined ? undefined : int(f.batchWindowMs);
     if (window === null || (window !== undefined && (window < 1 || window > 60_000))) return null;
     const pg = pgOf(f.pgKey ?? null, f.pgTps ?? null);
-    return { opensAtMs, startsAtMs, lobbyShuffle: f.lobbyShuffle === '1', openBatch: f.openBatch === '1', ...(window !== undefined ? { batchWindowMs: window } : {}), ...pg };
+    const shuffleKey = keys.shuffle(eventId);
+    const batchRound = int(str(await this.redis.command(['HGET', shuffleKey, 'round:1'], { key: shuffleKey })) ?? undefined);
+    return { opensAtMs, startsAtMs, lobbyShuffle: f.lobbyShuffle === '1', openBatch: f.openBatch === '1', ...(window !== undefined ? { batchWindowMs: window } : {}), ...(batchRound !== null ? { batchRound } : {}), ...pg };
   }
 
   async control(eventId: string, nowMs: number): Promise<Control> {
@@ -136,7 +139,7 @@ export class RedisLeaderStore implements LeaderStore {
       CALLS_KEEP_MS,
       DISPERSAL_MS,
       LATE_DISPERSAL_MS,
-      BATCH_RESULT_DELAY_MS,
+      i.batchResultDelayMs ?? BATCH_RESULT_DELAY_MS,
       SCAN_BUDGET,
       i.saleEndMs,
       RATIO_WINDOW_MIN_MS,
@@ -147,7 +150,7 @@ export class RedisLeaderStore implements LeaderStore {
     const r = (await this.redis.evalScript(TICK, ks, args)) as unknown[];
     if (str(r[0]) === 'FENCED') return { kind: 'FENCED' };
     const n = (k: number) => Number(r[k]);
-    return { kind: 'OK', serving: n(1), advanced: n(2), slots: n(3), soon: n(4), inFlight: n(5), dropped: n(6), lobbyMarked: bit(r[7]), batchMarked: bit(r[8]), batchPublished: bit(r[9]), repair: bit(r[10]), ratio: n(11) / 1000, saleState: str(r[12])!, waiting: n(13) };
+    return { kind: 'OK', serving: n(1), advanced: n(2), slots: n(3), soon: n(4), inFlight: n(5), dropped: n(6), lobbyMarked: bit(r[7]), batchMarked: bit(r[8]), batchPublished: bit(r[9]), repair: bit(r[10]), lobbyPublished: bit(r[14]), lobbyRepair: bit(r[15]), gated: bit(r[16]), ratio: n(11) / 1000, saleState: str(r[12])!, waiting: n(13) };
   }
 
   async close(i: CloseInput): Promise<CloseResult> {

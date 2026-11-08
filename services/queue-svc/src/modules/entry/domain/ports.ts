@@ -1,13 +1,16 @@
 // 진입 컨텍스트의 포트: 토큰 코덱, 회차 일정 사본, 위험 판정, 진입 저장소(대기열 Redis).
-import type { EventSchedule, PreverifyClaims, ReasonCategory, TicketClaims } from './queue.js';
+import type { SeedSealer, ShuffleGroup } from '@peaket/shuffle';
+import type { EventSchedule, LobbyClaims, PreverifyClaims, ReasonCategory, TicketClaims } from './queue.js';
 
 export const QUEUE_TOKENS = Symbol('queue.QueueTokens');
-/** 사전 검증 토큰·대기표의 HMAC 코덱. 읽기는 MAC·형식이 맞을 때만 클레임을 주고 아니면 null(만료는 부르는 쪽이 본다) */
+/** 사전 검증 토큰·대기표·참가 토큰의 HMAC 코덱. 읽기는 MAC·형식이 맞을 때만 클레임을 주고 아니면 null(만료는 부르는 쪽이 본다) */
 export interface QueueTokens {
   preverify(c: PreverifyClaims): string;
   readPreverify(token: string): PreverifyClaims | null;
   ticket(c: TicketClaims): string;
   readTicket(token: string): TicketClaims | null;
+  lobby(c: LobbyClaims): string;
+  readLobby(token: string): LobbyClaims | null;
   /** 대기표 해시(q:adm 값, q:{event:E}:verify 필드): SHA-256 16진 */
   hash(token: string): string;
 }
@@ -80,8 +83,39 @@ export interface EventSchedules {
   get(eventId: string): Promise<EventSchedule | null>;
 }
 
+/** 구간(로비·묶음 1)의 공시 기록(q:{event:E}:shuffle, ADR-0231 결정 6). 한 번 쓰면 바뀌지 않는다 */
+export interface CommitRecord {
+  commit: string;
+  round: number;
+  sealed: string;
+  atMs: number;
+}
+export const SHUFFLE_COMMIT_STORE = Symbol('queue.ShuffleCommitStore');
+export interface ShuffleCommitStore {
+  read(eventId: string, group: ShuffleGroup): Promise<CommitRecord | null>;
+  /** 칸이 비어 있을 때만 쓰고(Lua 한 번, 공시 시각은 저장소 시각), 있으면 그대로 둔 값을 돌려준다. 수명은 회차 키와 같게 늦은 쪽으로만 늘린다 */
+  write(eventId: string, group: ShuffleGroup, rec: Omit<CommitRecord, 'atMs'>, expireAtMs: number): Promise<CommitRecord>;
+}
+export const SEED_SEALER = Symbol('queue.SeedSealer');
+export type { SeedSealer, ShuffleGroup };
+/** 지금 환경에 봉인이 없음(운영 KMS 어댑터 전, BUILD_ORDER HOT-041) */
+export const noSealer: SeedSealer = {
+  seal: () => Promise.reject(new Error('시드 봉인이 없다(운영 KMS 어댑터는 BUILD_ORDER HOT-041)')),
+  open: () => Promise.reject(new Error('시드 봉인이 없다(운영 KMS 어댑터는 BUILD_ORDER HOT-041)')),
+};
+
+export const LOBBY_SIGNALS = Symbol('queue.LobbySignals');
+/** 로비 참가 지표(docs/observability.md §5) */
+export interface LobbySignals {
+  /** 그 기기의 입장 버튼이 열리는 시각보다 먼저 온 참가 */
+  joinedBeforeUnlock(eventId: string): void;
+  /** 공시 때가 지나서 그 자리에서 만든 커밋 */
+  commitLate(): void;
+}
+export const noLobbySignals: LobbySignals = { joinedBeforeUnlock: () => undefined, commitLate: () => undefined };
+
 export interface RiskInput {
-  context: 'PREVERIFY';
+  context: 'PREVERIFY' | 'LOBBY';
   eventId: string;
   accountId: string;
   pid: string;
@@ -242,4 +276,14 @@ export interface EntryStore {
   markRemoved(i: { eventId: string; seq: number; expireAtMs: number }): Promise<void>;
   /** 고위험 진입: 빠진 번호 비트를 켜고 q:{event:E}:verify에 대기표 해시를 VERIFYING으로 쓴다(이미 있으면 그대로). 비트맵 수명은 expireAtMs, verify는 verifyExpireAtMs(판매 종료) */
   markVerifying(i: { eventId: string; seq: number; ticketHash: string; atMs: number; reason: ReasonCategory; expireAtMs: number; verifyExpireAtMs: number }): Promise<void>;
+  /** 로비 참가 ③: 서버 시각과 로비 표시를 같은 Lua에서 본 뒤 참가자에 넣는다(추가 검증이면 verify에 값을 쓴다). 표시가 섰거나 오픈이 지났으면 CLOSED, 로비 개방 전이면 NOT_OPEN */
+  addLobbyMember(i: { eventId: string; tokenHash: string; opensAtMs: number; lobbyOpensAtMs: number; expireAtMs: number; verify?: { value: string; expireAtMs: number } }): Promise<'ADDED' | 'NOT_OPEN' | 'CLOSED'>;
+  /** 로비 창 보기(읽기만): 서버 시각과 로비 표시로 OPEN·NOT_OPEN·CLOSED를 준다. 공시 기록·위험 판정 전에 부른다 */
+  lobbyWindow(i: { eventId: string; opensAtMs: number; lobbyOpensAtMs: number }): Promise<'OPEN' | 'NOT_OPEN' | 'CLOSED'>;
+  /** 로비 참가 되돌리기: 참가자와 verify 기록을 뺀다. 로비 표시가 선 뒤에는 목록을 바꾸지 않고 verify에 ORPHAN을 적어 게시 때 빠진 번호가 되게 한다(수명 = 판매 종료) */
+  removeLobbyMember(i: { eventId: string; tokenHash: string; expireAtMs: number }): Promise<void>;
+  /** 로비 참가 ④: q:dup이 내 PENDING이거나 비었으면 LOBBY:{토큰 해시}:{요청 ID}로 바꾸고 수명을 판매 종료로. 다른 요청의 값이면 TAKEN, q:adm이 있으면 ADMITTED */
+  recordLobby(i: { pid: string; eventId: string; requestId: string; tokenHash: string; expireAtMs: number }): Promise<'RECORDED' | 'ADMITTED' | 'TAKEN'>;
+  /** 값이 이 요청의 LOBBY 기록일 때만 지운다(두 키 처리의 되돌리기) */
+  dropLobbyRecord(i: { pid: string; eventId: string; requestId: string; tokenHash: string }): Promise<void>;
 }

@@ -8,7 +8,11 @@ export { guard, keys, QUEUE_REDIS } from './adapters/redis-entry-store.js';
 export { RedisEventSchedules } from './adapters/redis-event-schedules.js';
 export { type EventSchedule, keepUntilOf, PLATFORM_SCOPE, QueueStoreUnavailable, REASONS, saleEndOf, seatmapLayoutPathOf, SEGMENT_SIZE, segmentOf } from './domain/queue.js';
 export { unavailableRisk } from './adapters/unavailable-risk.js';
-export type { EventSchedules, QueueTokens, RiskPort } from './domain/ports.js';
+export type { EventSchedules, LobbySignals, QueueTokens, RiskPort, SeedSealer } from './domain/ports.js';
+export { ShuffleCommits, ShuffleCommitWorker } from './application/shuffle-commits.js';
+export { RedisShuffleCommits } from './adapters/redis-entry-store.js';
+export { RedisWithdrawnKeys } from './adapters/redis-withdrawn-keys.js';
+export { PromLobbySignals } from './adapters/prom-lobby-signals.js';
 export { EntryModule, type EntryModuleOptions } from './entry.module.js';
 export { PurgeWithdrawnKeys } from './application/purge-withdrawn-keys.js';
 export {

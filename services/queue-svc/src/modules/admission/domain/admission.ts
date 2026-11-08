@@ -31,6 +31,11 @@ export type Precheck =
   /** 차례가 왔고 15분 안(또는 곧 입장 대기열에 있음). turnAtMs는 serving_log 칸(없으면 undefined), skipped는 건너뛴 구간 안의 옛 세대 번호 */
   | { kind: 'OK'; serving: number; turnAtMs?: number; inSoon: boolean; skipped: boolean };
 
+/** 로비 셔플 결과 읽기(HOT-040, ADR-0231 결정 10) */
+export type LobbySeat = { kind: 'SEAT'; seq: number; gen: number } | { kind: 'PENDING' } | { kind: 'REPAIRING' } | { kind: 'GONE' };
+/** 셔플 결과 게시 전 입장 확정의 NOT_YET 다시 시도 2초 [가정](ADR-0231 결정 10) */
+export const LOBBY_PENDING_RETRY_MS = 2_000;
+
 /** 사람 슬롯 q:adm: 비어 채움(NEW), 같은 대기표(SAME), 다른 대기표(DUP) */
 export type Claim = { kind: 'NEW' } | { kind: 'SAME' } | { kind: 'DUP' };
 
