@@ -62,6 +62,8 @@ export function operationsOf(spec) {
       const setsCookie = responses.some((r) => Object.keys(r?.headers ?? {}).some((h) => h.toLowerCase() === 'set-cookie'));
       d.cookie = setsCookie || sec.some((req) => Object.keys(req ?? {}).some(cookieScheme));
       if (params.some((p) => refName(p) === 'IfMatch')) d.ifMatch = true;
+      // 구매 세션 요청 서명(X-Purchase-Seq·X-Purchase-Mac): 서명기 없이 보내지 않고 시도마다 서명한다(ADR-0221 결정 5)
+      if (params.some((p) => refName(p) === 'PurchaseSeq')) d.purchaseSigned = true;
       if ('text/plain' in content) d.t0 = true;
       if (op['x-peaket-fetch-cache']) d.cache = op['x-peaket-fetch-cache'];
       // SSE 흐름은 EventSource로 연다(생성 함수·훅으로 부르지 않는다)

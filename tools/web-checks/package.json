@@ -19,7 +19,8 @@
     "rich-text:build": "node rich-text/build.mjs",
     "rich-text": "playwright test -c playwright.rich-text.config.mjs",
     "queue-room:build": "node queue-room/build.mjs",
-    "queue-room": "playwright test -c playwright.queue-room.config.mjs"
+    "queue-room": "playwright test -c playwright.queue-room.config.mjs",
+    "purchase": "playwright test -c playwright.purchase.config.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",

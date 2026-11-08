@@ -38,21 +38,21 @@ describe('matchOperation', () => {
 
 describe('orvalFetch', () => {
   test('작업을 찾아 같은 실행 정책으로 보내고 { data, status, headers }를 돌려준다', async () => {
-    const f = fakeFetch([json(201, { holdId: 'h1' }, { etag: '"3"' })]);
+    const f = fakeFetch([json(201, { reviewId: 'r1' }, { etag: '"3"' })]);
     setOrvalClient(createApiClient({ fetch: f.fetch, baseUrls: BASES }));
-    const r = await orvalFetch<{ data: unknown; status: number; headers: Headers }>('/v1/events/evt-1/holds', {
+    const r = await orvalFetch<{ data: unknown; status: number; headers: Headers }>('/v1/events/evt-1/reviews', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': '0190f3a1-7c2e-4a00-8000-000000000001', 'X-Purchase-Seq': '7' },
-      body: JSON.stringify({ seatIds: ['A01'] }),
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': '0190f3a1-7c2e-4a00-8000-000000000001', 'X-Peaket-Note': '7' },
+      body: JSON.stringify({ rating: 5 }),
     });
-    expect(r).toMatchObject({ data: { holdId: 'h1' }, status: 201 });
+    expect(r).toMatchObject({ data: { reviewId: 'r1' }, status: 201 });
     expect(r.headers.get('etag')).toBe('"3"');
-    expect(f.calls[0]!.url).toBe('https://api.peaket.example/v1/events/evt-1/holds');
+    expect(f.calls[0]!.url).toBe('https://api.peaket.example/v1/events/evt-1/reviews');
     const h = new Headers(f.calls[0]!.init.headers);
-    // 화면이 준 멱등 키를 그대로 쓰고(새로 만들지 않는다), 구매 세션 머리는 지나간다
+    // 화면이 준 멱등 키를 그대로 쓰고(새로 만들지 않는다), 다른 머리는 지나간다
     expect(h.get('idempotency-key')).toBe('0190f3a1-7c2e-4a00-8000-000000000001');
-    expect(h.get('x-purchase-seq')).toBe('7');
-    expect(f.calls[0]!.init.body).toBe('{"seatIds":["A01"]}');
+    expect(h.get('x-peaket-note')).toBe('7');
+    expect(f.calls[0]!.init.body).toBe('{"rating":5}');
     expect(f.calls[0]!.init.credentials).toBe('include');
   });
 
@@ -63,6 +63,13 @@ describe('orvalFetch', () => {
     expect(f.calls[0]!.url).toBe('https://api.peaket.example/v1/search?q=%EA%B3%B5%EC%97%B0&genre=a&genre=b');
     await orvalFetch('/v1/queues/e1/segment-states/0.json', { method: 'GET' });
     expect(f.calls[1]!.init).toMatchObject({ cache: 'no-store', credentials: 'omit' });
+  });
+
+  test('구매 세션 쓰기는 생성 함수로 부르지 않는다(시도마다 서명해야 해서 client.send에 purchase를 넘겨 부른다, ADR-0221 결정 5)', async () => {
+    const f = fakeFetch([json(201, { holdId: 'h1' })]);
+    setOrvalClient(createApiClient({ fetch: f.fetch, baseUrls: BASES }));
+    await expect(orvalFetch('/v1/events/evt-1/holds', { method: 'POST', headers: { 'X-Purchase-Seq': '7', 'X-Purchase-Mac': 'm' }, body: JSON.stringify({ seatIds: ['A01'] }) })).rejects.toThrow(/구매 세션 쓰기/);
+    expect(f.calls).toHaveLength(0);
   });
 
   test('T=0 두 호출은 text/plain으로 보내고 safelisted가 아닌 머리를 붙이지 않는다(FE-T3)', async () => {
@@ -125,11 +132,10 @@ describe('동시 수정(If-Match·412, docs/api/guidelines.md §12, 기술 검�
   });
 });
 
-test('구매 경로 401은 type으로 가른다(docs/frontend.md §4.1 401)', () => {
+test('구매 경로 401은 type으로 가른다: 일련번호 재사용은 send가 이미 한 번 다시 보냈으므로 화면에서는 세션 끝이다(docs/frontend.md §4.1 401·§5.3)', () => {
   const p = (type: string) => new ApiError(401, { type: `https://peaket.example/problems/${type}`, status: 401 }, null);
   expect(purchaseUnauthorizedAction(new ApiError(401, { type: 'about:blank', status: 401 }, null))).toBe('refresh');
-  expect(purchaseUnauthorizedAction(p('purchase-seq-reused'))).toBe('skip-seq-and-retry');
-  for (const t of ['purchase-session-ended', 'admission-token-invalid', 'purchase-signature-invalid']) expect(purchaseUnauthorizedAction(p(t))).toBe('session-ended');
+  for (const t of ['purchase-seq-reused', 'purchase-session-ended', 'admission-token-invalid', 'purchase-signature-invalid']) expect(purchaseUnauthorizedAction(p(t))).toBe('session-ended');
   expect(purchaseUnauthorizedAction(new ApiError(403, null, null))).toBeUndefined();
 });
 

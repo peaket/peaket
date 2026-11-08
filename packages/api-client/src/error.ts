@@ -60,9 +60,9 @@ export function isPreconditionFailed(e: unknown): e is ApiError {
  * 'refresh'는 팬 쿠키 401(이름 없음)이라 토큰을 한 번 갱신하고 다시 보낸다. 'skip-seq-and-retry'는 일련번호가 서버보다 뒤라
  * 번호를 건너뛰어 같은 멱등 키로 한 번 다시 보낸다(서명기, wbs 2.10.7). 'session-ended'는 구매 세션이 끝난 것이다(키를 지우고 SCR-010)
  */
-export function purchaseUnauthorizedAction(e: unknown): 'refresh' | 'skip-seq-and-retry' | 'session-ended' | undefined {
+export function purchaseUnauthorizedAction(e: unknown): 'refresh' | 'session-ended' | undefined {
   if (!(e instanceof ApiError) || e.status !== 401) return undefined;
-  if (e.type === 'purchase-seq-reused') return 'skip-seq-and-retry';
-  if (e.type === 'purchase-session-ended' || e.type === 'admission-token-invalid' || e.type === 'purchase-signature-invalid') return 'session-ended';
+  // 일련번호 재사용은 send가 이미 새 번호로 한 번 다시 보냈다. 여기까지 올라오면 세션이 끝난 것이다(docs/frontend.md §5.3 '401', ADR-0221 결정 5)
+  if (e.type === 'purchase-seq-reused' || e.type === 'purchase-session-ended' || e.type === 'admission-token-invalid' || e.type === 'purchase-signature-invalid') return 'session-ended';
   return 'refresh';
 }

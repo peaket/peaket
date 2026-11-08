@@ -5,6 +5,7 @@ import { parseJsonSafe } from '@peaket/validation/safe-json';
 import { ApiError } from './error';
 import { anySignal } from './signal';
 import { RetryBudget, retryDelayMs, type Random } from './retry';
+import type { PurchaseSigner } from './purchase/signer';
 
 /** API 호스트(openapi x-peaket-gateways·경로 servers, docs/api/guidelines.md §10) */
 export type Host = 'api' | 'queue' | 'partner-api' | 'ops-api' | 'scanner-api' | 'queue-files' | 'www';
@@ -36,6 +37,11 @@ export interface Operation {
   sse?: boolean;
   /** 계약이 정한 쿼리 이름(생성 함수의 주소에 그 밖의 쿼리가 있으면 orvalFetch가 거절한다) */
   query?: readonly string[];
+  /**
+   * 구매 세션 요청 서명 작업(openapi 매개변수에 PurchaseSeq가 있다, ADR-0221 결정 5). 서명기(RequestOptions.purchase) 없이 보내지 않고,
+   * 시도마다 X-Admission-Token·X-Purchase-Seq·X-Purchase-Mac을 새로 단다
+   */
+  purchaseSigned?: boolean;
 }
 
 /**
@@ -76,6 +82,8 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   /** 고칠 자원의 판(읽은 응답의 ETag 그대로, 예 '"7"'). ifMatch 작업에 필수(docs/api/guidelines.md §12) */
   ifMatch?: string;
+  /** 구매 세션 서명기(@peaket/api-client/purchase의 openPurchaseSession). purchaseSigned 작업에 필수이고, 그 밖의 작업에는 넘기지 않는다 */
+  purchase?: PurchaseSigner;
 }
 
 /** 응답 상태·머리와 읽은 본문(orval 생성 함수의 반환 모양, ETag는 headers.get('etag')) */
@@ -131,6 +139,15 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     signal?.addEventListener('abort', onAbort, { once: true });
   });
 
+/** 구매 세션 쓰기의 자동 재시도에서 잠금을 쥔 채 기다릴 수 있는 최대 시간 [가정] */
+const SIGNED_RETRY_WAIT_MAX_MS = 10_000;
+
+/** 서명 머리를 그 시도의 머리에 단다 */
+function applySigned(h: Headers, signed: Record<string, string>): Headers {
+  for (const [k, v] of Object.entries(signed)) h.set(k, v);
+  return h;
+}
+
 export function createApiClient(opts: ClientOptions) {
   const doFetch = opts.fetch ?? ((u: string, i: RequestInit) => fetch(u, i));
   const random = opts.random ?? Math.random;
@@ -153,6 +170,9 @@ export function createApiClient(opts: ClientOptions) {
     if (op.sse) throw new TypeError(`SSE 흐름은 fetch로 부르지 않고 EventSource로 연다: ${opKey(op)}`);
     // 동시 수정: 판 없이 보내면 서버가 428로 거절한다. 보내기 전에 막는다(docs/api/guidelines.md §12)
     if (op.ifMatch && !o.ifMatch) throw new TypeError(`If-Match(읽은 응답의 ETag)가 있어야 한다: ${opKey(op)}`);
+    // 구매 세션 쓰기는 서명기 없이 보내지 않는다(빠뜨리면 401이 아니라 개발 중에 바로 드러나게, ADR-0221 결정 5)
+    if (op.purchaseSigned && !o.purchase) throw new TypeError(`구매 세션 서명기(purchase)가 있어야 한다: ${opKey(op)}`);
+    if (!op.purchaseSigned && o.purchase) throw new TypeError(`서명하지 않는 작업에 구매 세션 서명기를 넘겼다: ${opKey(op)}`);
     const base = opts.baseUrls[op.host];
     if (!base) throw new TypeError(`호스트 ${op.host}의 기본 주소가 없다`);
     const url = buildUrl(base, op, o);
@@ -177,55 +197,79 @@ export function createApiClient(opts: ClientOptions) {
       if (o.ifMatch) headers.set('if-match', o.ifMatch);
     }
     const retryable = op.method === 'GET' || Boolean(op.idempotent);
+    // 구매 세션 쓰기의 자동 재시도는 같은 멱등 키로 1회만(§4.1 '자동 재시도')
+    const limit = op.purchaseSigned ? Math.min(maxRetries, 1) : maxRetries;
+    if (o.purchase) {
+      // MAC 입력: 보낸 주소의 경로와 쿼리(호스트 없이), 처음 한 번 만든 본문 바이트(§5.3 '서명')
+      const target = new URL(url);
+      const pathAndQuery = target.pathname + target.search;
+      const bytes = body === undefined ? new Uint8Array() : typeof body === 'string' ? new TextEncoder().encode(body) : new Uint8Array(body);
+      // 요청 하나 전체(자동 재시도 포함)를 ps:{jti} 잠금 안에서 보낸다(§5.3 '순서 보장')
+      return o.purchase.run((sign) => attempts((h) => sign(op.method, pathAndQuery, bytes).then((x) => applySigned(h, x))), o.signal);
+    }
+    return attempts();
 
-    for (let attempt = 0; ; attempt++) {
-      // 시간 초과 신호: AbortSignal.timeout과 같은 TimeoutError를 내되, 요청이 끝나면 타이머를 지운다(가짜 시계로 시험할 수 있다)
-      const timeout = new AbortController();
-      const timer = setTimeout(() => timeout.abort(new DOMException('시간 초과', 'TimeoutError')), TIMEOUT_MS[op.kind]);
-      const signals = [timeout.signal];
-      if (o.signal) signals.push(o.signal);
-      const signal = anySignal(signals);
-      // 요청이 끝나면(성공·실패 모두) 시간 초과 신호를 끊어 anySignal 대체가 화면 신호에 붙인 듣기를 지우게 한다(FE-T15)
-      const release = () => {
-        clearTimeout(timer);
-        if (!timeout.signal.aborted) timeout.abort(new DOMException('요청 끝남', 'AbortError'));
-      };
-      let res: Response;
-      try {
-        res = await doFetch(url, { method: op.method, headers, body, credentials: credentialsFor(op.host, op), redirect: 'error', signal, ...(op.cache ? { cache: op.cache } : {}) });
-      } catch (err) {
-        release();
-        // 화면을 떠나 끊긴 것은 다시 보내지 않는다. 네트워크 오류·시간 초과는 다시 보낼 수 있다
-        if (o.signal?.aborted || !retryable || attempt >= maxRetries || !budget.take()) throw err;
-        await sleep(retryDelayMs({ attempt, random, nowMs: now() }), o.signal);
-        continue;
-      }
-      // 본문을 다 읽을 때까지 시간 초과를 둔다(머리만 오고 본문이 늦는 경우)
-      let error: ApiError;
-      try {
-        if (res.ok) {
-          const done = (data: unknown): ApiResponse<T> => ({ data: data as T, status: res.status, headers: res.headers });
-          if (res.status === 204) return done(undefined);
-          const ct = res.headers.get('content-type') ?? '';
-          // JSON은 공용 안전 파서로 읽는다(__proto__·constructor·prototype 키 거절, ASVS 15.3.6). 글자(text/*)는 글자, 그 밖의 이진
-          // (좌석 스냅샷 octet-stream, pdf·xlsx·arrow 내보내기)은 Blob(생성 형과 같다, 좌석 스냅샷은 blob.arrayBuffer()로 읽는다)
-          if (ct.includes('json')) return done(parseJsonSafe(await res.text()));
-          if (ct.startsWith('text/') || ct === '') return done(await res.text());
-          return done(await res.blob());
+    async function attempts(signAttempt?: (h: Headers) => Promise<Headers>): Promise<ApiResponse<T>> {
+      let seqResent = false;
+      for (let attempt = 0; ; attempt++) {
+        // 시도마다 일련번호·MAC을 새로 단다(같은 멱등 키·같은 본문)
+        const sent = signAttempt ? await signAttempt(new Headers(headers)) : headers;
+        // 시간 초과 신호: AbortSignal.timeout과 같은 TimeoutError를 내되, 요청이 끝나면 타이머를 지운다(가짜 시계로 시험할 수 있다)
+        const timeout = new AbortController();
+        const timer = setTimeout(() => timeout.abort(new DOMException('시간 초과', 'TimeoutError')), TIMEOUT_MS[op.kind]);
+        const signals = [timeout.signal];
+        if (o.signal) signals.push(o.signal);
+        const signal = anySignal(signals);
+        // 요청이 끝나면(성공·실패 모두) 시간 초과 신호를 끊어 anySignal 대체가 화면 신호에 붙인 듣기를 지우게 한다(FE-T15)
+        const release = () => {
+          clearTimeout(timer);
+          if (!timeout.signal.aborted) timeout.abort(new DOMException('요청 끝남', 'AbortError'));
+        };
+        let res: Response;
+        try {
+          res = await doFetch(url, { method: op.method, headers: sent, body, credentials: credentialsFor(op.host, op), redirect: 'error', signal, ...(op.cache ? { cache: op.cache } : {}) });
+        } catch (err) {
+          release();
+          // 화면을 떠나 끊긴 것은 다시 보내지 않는다. 네트워크 오류·시간 초과는 다시 보낼 수 있다
+          if (o.signal?.aborted || !retryable || attempt >= limit || !budget.take()) throw err;
+          await sleep(retryDelayMs({ attempt, random, nowMs: now() }), o.signal);
+          continue;
         }
-        error = await ApiError.from(res);
-      } finally {
-        release();
+        // 본문을 다 읽을 때까지 시간 초과를 둔다(머리만 오고 본문이 늦는 경우)
+        let error: ApiError;
+        try {
+          if (res.ok) {
+            const done = (data: unknown): ApiResponse<T> => ({ data: data as T, status: res.status, headers: res.headers });
+            if (res.status === 204) return done(undefined);
+            const ct = res.headers.get('content-type') ?? '';
+            // JSON은 공용 안전 파서로 읽는다(__proto__·constructor·prototype 키 거절, ASVS 15.3.6). 글자(text/*)는 글자, 그 밖의 이진
+            // (좌석 스냅샷 octet-stream, pdf·xlsx·arrow 내보내기)은 Blob(생성 형과 같다, 좌석 스냅샷은 blob.arrayBuffer()로 읽는다)
+            if (ct.includes('json')) return done(parseJsonSafe(await res.text()));
+            if (ct.startsWith('text/') || ct === '') return done(await res.text());
+            return done(await res.blob());
+          }
+          error = await ApiError.from(res);
+        } finally {
+          release();
+        }
+        if (error.status === 422 && error.type === 'idempotency-key-reused') {
+          opts.onBug?.(error); // 버그로 보고 다시 보내지 않는다
+          throw error;
+        }
+        // 일련번호 재사용(다른 탭과 번호가 엇갈림)만 번호를 건너뛰어 한 번 다시 보낸다. 자동 재시도 횟수와 따로 센다(§5.3 '401')
+        if (signAttempt && !seqResent && error.status === 401 && error.type === 'purchase-seq-reused') {
+          seqResent = true;
+          attempt -= 1;
+          continue;
+        }
+        const inProgress = error.status === 409 && error.type === 'idempotency-request-in-progress';
+        const unavailable = error.status === 503 && error.retryAfter !== null;
+        if (!(inProgress || unavailable) || !retryable || attempt >= limit || !budget.take()) throw error;
+        const delay = retryDelayMs({ retryAfterHeader: error.retryAfter, dateHeader: error.date, body: error.body as never, attempt, random, nowMs: now() });
+        // 구매 세션 쓰기는 ps:{jti} 잠금을 쥔 채 기다리므로 오래 기다리지 않고 화면에 올린다(그동안 모든 탭의 서명 요청이 막힌다, ADR-0221 결정 5)
+        if (signAttempt && delay > SIGNED_RETRY_WAIT_MAX_MS) throw error;
+        await sleep(delay, o.signal);
       }
-      if (error.status === 422 && error.type === 'idempotency-key-reused') {
-        opts.onBug?.(error); // 버그로 보고 다시 보내지 않는다
-        throw error;
-      }
-      const inProgress = error.status === 409 && error.type === 'idempotency-request-in-progress';
-      const unavailable = error.status === 503 && error.retryAfter !== null;
-      if (!(inProgress || unavailable) || !retryable || attempt >= maxRetries || !budget.take()) throw error;
-      const delay = retryDelayMs({ retryAfterHeader: error.retryAfter, dateHeader: error.date, body: error.body as never, attempt, random, nowMs: now() });
-      await sleep(delay, o.signal);
     }
   }
 

@@ -72,6 +72,8 @@ export async function orvalFetch<T>(url: string, init: RequestInit): Promise<T> 
   const hit = matchOperation(method, u.pathname);
   if (!hit) throw new TypeError(`계약에 없는 작업이다: ${method} ${u.pathname}`);
   if (hit.op.sse) throw new TypeError(`SSE 흐름은 생성 함수로 부르지 않고 EventSource로 연다: ${method} ${u.pathname}`);
+  // 구매 세션 쓰기는 시도마다 일련번호·MAC을 새로 만들어야 해서 생성 함수(머리를 한 번 만든다)로 보내지 않는다(ADR-0221 결정 5)
+  if (hit.op.purchaseSigned) throw new TypeError(`구매 세션 쓰기는 생성 함수로 부르지 않고 client.send(OPERATIONS.…, { purchase })로 보낸다: ${method} ${u.pathname}`);
   const headers = headerRecord(init.headers);
   const idempotencyKey = headers['idempotency-key'];
   const ifMatch = headers['if-match'];

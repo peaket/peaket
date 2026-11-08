@@ -53,6 +53,9 @@ describe('작업 서술 표(src/gen/operations.ts)', () => {
       Object.entries(spec.paths).flatMap(([, item]) => METHODS.filter((m) => item[m]?.parameters?.some((p) => p.$ref?.endsWith(`/${name}`))).map((m) => item[m]!.operationId)).sort();
     expect(ops.filter((o) => 'idempotent' in o && o.idempotent).map((o) => o.operationId).sort()).toEqual(withParam('IdempotencyKey'));
     expect(ops.filter((o) => 'ifMatch' in o && o.ifMatch).map((o) => o.operationId).sort()).toEqual(withParam('IfMatch'));
+    // 구매 세션 서명 작업: 매개변수에 PurchaseSeq가 있는 작업(ADR-0221 결정 5)
+    expect(ops.filter((o) => 'purchaseSigned' in o && o.purchaseSigned).map((o) => o.operationId).sort()).toEqual(withParam('PurchaseSeq'));
+    expect(withParam('PurchaseSeq').length).toBeGreaterThan(0);
     expect(OPERATIONS.getHome.cookie).toBe(false); // security: []
     expect(OPERATIONS.listTickets.cookie).toBe(true); // 전역 fanCookie
     expect(OPERATIONS.createScannerScan.cookie).toBe(false); // DPoP 머리

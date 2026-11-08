@@ -8,7 +8,8 @@
     ".": "./src/index.ts",
     "./endpoints/*": "./src/gen/endpoints/*/*.ts",
     "./mocks": "./src/mocks.ts",
-    "./model": "./src/gen/model/index.ts"
+    "./model": "./src/gen/model/index.ts",
+    "./purchase": "./src/purchase/index.ts"
   },
   "scripts": {
     "gen": "node scripts/generate.mjs",

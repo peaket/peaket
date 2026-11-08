@@ -36,7 +36,7 @@ interface VectorCase {
   macInput: string;
   mac: string;
 }
-const V = JSON.parse(readFileSync(new URL('./vectors/purchase-request-mac.v1.json', import.meta.url), 'utf8')) as {
+const V = JSON.parse(readFileSync(new URL('../../../docs/api/vectors/purchase-request-mac.v1.json', import.meta.url), 'utf8')) as {
   sharedSecretHex: string;
   jti: string;
   keyHex: string;

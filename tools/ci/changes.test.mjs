@@ -372,6 +372,14 @@ test('BAS170_화면앱·화면용패키지·토큰과대비표·화면예산표�
   }
 });
 
+// 구매 세션 서명기 세 엔진 검사(purchase 잡, HOT-360 ①, ADR-0221 결정 7): 서명기 원본과 서버와 같은 시험 벡터가 바뀌면 화면 잡을 돌린다
+test('HOT360_구매세션서명기원본이나시험벡터를바꾸면_web을고르고_api-client의다른곳은_고르지않는다', () => {
+  for (const f of ['packages/api-client/src/purchase/signer.ts', 'docs/api/vectors/purchase-request-mac.v1.json']) {
+    assert.ok(scopes({ [f]: '바꿈\n' }).includes('web'), f);
+  }
+  assert.ok(!scopes({ 'packages/api-client/src/client.ts': '바꿈\n' }).includes('web'));
+});
+
 test('BAS170_서비스·플랫폼·다른문서·다른도구만바꾸면_web을고르지않는다', () => {
   for (const f of ['services/queue-svc/src/main.ts', 'packages/platform/x.ts', 'docs/design/d5-screen-blueprint.md', 'docs/a.md', 'tools/ci/x.mjs', 'tools/poc/login-compare/x.mjs']) {
     assert.ok(!scopes({ [f]: '바꿈\n' }).includes('web'), f);
