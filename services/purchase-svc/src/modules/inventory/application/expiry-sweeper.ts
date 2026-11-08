@@ -86,13 +86,18 @@ export interface ExpirySweeperDeps {
   logger?: PlatformLogger;
   /** 메모리 부족 경고 문(파드마다 1초에 한 줄, L6). 기본은 clock으로 만든 이 반복만의 문이다(운영은 받는 층과 나눈다) */
   oomWarnGate?: LogGate;
+  /**
+   * 만료로 푼 홀드를 알리는 고리(BUILD_ORDER PRF-172 설계 2, booking OrderExpiry.onHoldsExpired를 잇는다, docs/features/seat-hold.md §5). 만료 Lua 묶음마다 푼 좌석이 있을 때 한 번 부른다. 던져도 만료 반복은 그대로다(경고 한 줄). 없으면 부르지 않는다.
+   * holdIds는 같은 holdId를 한 번만 싣는다. 만료 Lua 답(ExpiredHold)에는 holdId가 없어, 푼 좌석의 색인으로 넘긴 ExpireSeat.expected.holdId에서 얻는다
+   */
+  onHoldsExpired?: (e: { readonly eventId: string; readonly holdIds: readonly string[] }) => void;
 }
 
 /** 로그 한 줄의 첫 인자(계정 ID가 든 키 이름·오류 글은 싣지 않는다) */
 export interface SweepLogFields {
   /** 회차 목록 읽기에서 났으면 없다 */
   eventId?: string;
-  /** 어디서 났는가: 회차 목록·임대·좌석맵 판(config·byIndex)·1단계 읽기·만료 Lua, 'loop'는 타이머가 부른 반복이 틱 밖에서 거부된 것(C2) */
+  /** 어디서 났는가: 회차 목록·임대·좌석맵 판(config·byIndex)·1단계 읽기·만료 Lua, 'loop'는 타이머가 부른 반복이 틱 밖에서 거부된 것(C2), 'hook'은 주문 만료 고리가 던진 것 */
   step: SweepStep;
   /** 오류의 갈래(seatLuaErrorOf(err)?.code). 판에 없는 색인 기록에는 없다 */
   code?: SeatLuaErrorCode;
@@ -106,7 +111,7 @@ export interface SweepLogFields {
   seatStoreReason?: 'oom';
 }
 
-type SweepStep = 'list' | 'lease' | 'seatmap' | 'due' | 'expire' | 'loop';
+type SweepStep = 'list' | 'lease' | 'seatmap' | 'due' | 'expire' | 'loop' | 'hook';
 
 /** 회차 ID 문자 코드 순(Array.prototype.sort 기본과 같다) */
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -319,6 +324,7 @@ export class ExpirySweeper {
           report.skipped += r.skipped;
           report.orphans += r.orphans;
           corrupt += r.corrupt;
+          this.#notifyHoldsExpired(eventId, seats, r);
         }
         this.#countCorrupt(report, eventId, corrupt, signals);
         if (!r || r.released + r.orphans === 0) return done('NO_PROGRESS');
@@ -337,6 +343,24 @@ export class ExpirySweeper {
       this.#log('error', { eventId, step, ...info }, '만료 반복이 그 회차를 이번 틱에서 멈췄다');
       if (step === 'expire') signals.luaError('expire', info.code);
       return done('ERROR');
+    }
+  }
+
+  /**
+   * 그 묶음에서 푼 좌석의 holdId(같은 holdId는 한 번)를 주문 만료 고리로 넘긴다. 고리가 던져도 반복은 그대로다(경고 한 줄).
+   * 구현에서 정한 것: 만료 Lua 묶음마다 부른다(틱 끝까지 모으지 않는다. 한 홀드의 좌석이 두 묶음에 나뉘면 두 번 불리지만 판정은 멱등이고 뒤의 부름이 만료를 끝낸다)
+   */
+  #notifyHoldsExpired(eventId: string, seats: readonly ExpireSeat[], r: Extract<ExpireResult, { kind: 'OK' }>): void {
+    const hook = this.deps.onHoldsExpired;
+    if (!hook || r.expired.length === 0) return;
+    const released = new Set(r.expired.map((x) => x.index));
+    const holdIds = new Set<string>();
+    for (const s of seats) if (s.expected && released.has(s.index)) holdIds.add(s.expected.holdId);
+    if (holdIds.size === 0) return;
+    try {
+      hook({ eventId, holdIds: [...holdIds] });
+    } catch (err) {
+      this.#log('warn', { eventId, step: 'hook', ...this.#codeOf(err) }, '주문 만료 고리 실패(안전망이 받친다)');
     }
   }
 

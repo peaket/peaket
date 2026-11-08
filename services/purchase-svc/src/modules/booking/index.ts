@@ -1,10 +1,34 @@
-// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161·PRF-162·PRF-165·PRF-163·PRF-166·PRF-170·PRF-171).
+// booking 컨텍스트의 공개 면(다른 모듈·시작 파일은 이 파일로만 들어온다, BUILD_ORDER PRF-160·PRF-161·PRF-162·PRF-165·PRF-163·PRF-166·PRF-170·PRF-171·PRF-172).
 import type { MaintenanceTask } from '@peaket/platform';
 import { checkOrderHistory } from './adapters/db/drizzle-orders.js';
 import { orderHistoryCheckTask as historyTaskOf, type OrderHistoryTaskDeps } from './application/order-history-check.js';
 
 export { DrizzleOrderStore, checkOrderHistory, type DrizzleOrderStoreOptions } from './adapters/db/drizzle-orders.js';
 export { DrizzleOrderAccepts, type DrizzleOrderAcceptsOptions } from './adapters/db/drizzle-order-accepts.js';
+export { DrizzleOrderExpiry, orderExpiryDatabaseOptions, type DrizzleOrderExpiryOptions } from './adapters/db/drizzle-order-expiry.js';
+export { PromOrderExpirySignals } from './adapters/prom-order-expiry-signals.js';
+export { OrderExpiry, type OrderExpiryDeps } from './application/order-expiry.js';
+export { OrderExpirySweep, type OrderExpirySweepDeps, type OrderExpirySweepReport } from './application/order-expiry-sweep.js';
+export { ORDER_EXPIRY_STALE_TASK, orderExpiryStaleTask, type OrderExpiryStaleReport, type OrderExpiryStaleTaskDeps } from './application/order-expiry-stale.js';
+export {
+  expiryDecision,
+  ORDER_EXPIRY_ACTOR,
+  ORDER_EXPIRY_ATTEMPT_TTL_MS,
+  ORDER_EXPIRY_BATCH,
+  ORDER_EXPIRY_CONCURRENCY,
+  ORDER_EXPIRY_LOOKBACK_MS,
+  ORDER_EXPIRY_QUEUE_LIMIT,
+  ORDER_EXPIRY_STAGES,
+  ORDER_EXPIRY_SWEEP_AGE_MS,
+  ORDER_EXPIRY_SWEEP_INTERVAL_MS,
+  ORDER_EXPIRY_TRIGGERS,
+  type OrderExpiryDecision,
+  type OrderExpiryNotYetReason,
+  type OrderExpiryStage,
+  type OrderExpiryTransition,
+  type OrderExpiryTrigger,
+  type OrderExpiryView,
+} from './domain/order-expiry.js';
 export { DrizzleOrderWrites, ORDER_HOLD_KEY, type DrizzleOrderWritesOptions } from './adapters/db/drizzle-order-writes.js';
 export { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob } from './adapters/db/schema.js';
 export {
@@ -25,12 +49,14 @@ export {
   type GrpcIdentityOptions,
 } from './adapters/grpc-identity.js';
 export {
+  InventoryOrderExpiry,
   InventoryOrderSeatPins,
   InventoryOrderSessions,
   InventoryPaymentResultSessions,
   InventorySeatSlots,
   SeatMapSagaConfigs,
   SeatMapSaleConfigs,
+  type OrderExpirySource,
   type PaymentSessionSource,
   type PinResultShape,
   type PurchaseSessionSource,
@@ -372,6 +398,17 @@ export type {
   OrderAcceptWrites,
   OrderCreateOutcome,
   OrderEventCodec,
+  OrderExpiredAttempt,
+  OrderExpiryHoldsExpired,
+  OrderExpiryInput,
+  OrderExpiryInventory,
+  OrderExpiryLogger,
+  OrderExpiryOrder,
+  OrderExpiryOutcome,
+  OrderExpiryRange,
+  OrderExpirySessionEnded,
+  OrderExpirySignals,
+  OrderExpiryStore,
   OrderHistoryMismatch,
   OrderHistoryReport,
   OrderHoldCheck,

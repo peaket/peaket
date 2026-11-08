@@ -3,7 +3,7 @@ import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { CLOCK, type Clock, type HotRedis, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import type { PurchaseSessionAccess } from './adapters/memory-purchase-sessions.js';
 import { OpenPurchaseSession } from './application/open-purchase-session.js';
-import { EndPurchaseSession } from './application/end-purchase-session.js';
+import { EndPurchaseSession, type EndPurchaseSessionDeps } from './application/end-purchase-session.js';
 import { ReadSeatSnapshot } from './application/read-seat-snapshot.js';
 import { SessionSweeper } from './application/session-sweeper.js';
 import type { AdmissionKeys } from './domain/admission-token.js';
@@ -12,7 +12,7 @@ import { MemorySeatStore } from './adapters/memory-seat-store.js';
 import { RecordingHoldAttempts } from './adapters/recording-hold-attempts.js';
 import { RedisSeatStore, SEAT_REDIS } from './adapters/redis-seat-store.js';
 import { RedisSweepLeases } from './adapters/redis-sweep-leases.js';
-import { ExpirySweeper } from './application/expiry-sweeper.js';
+import { ExpirySweeper, type ExpirySweeperDeps } from './application/expiry-sweeper.js';
 import { HoldSeats } from './application/hold-seats.js';
 import { LogGate, OOM_WARN_GATE } from './application/log-gate.js';
 import {
@@ -62,14 +62,17 @@ export interface AdmissionOptions {
   keys: AdmissionKeys;
   /** 입장 토큰 발급자(PEAKET_ADMISSION_ISSUER) */
   issuer: string;
+  /** 구매 세션을 끝낸 뒤 부를 고리(EndPurchaseSession onEnded, BUILD_ORDER PRF-172). 운영은 purchase DB가 있을 때 booking OrderExpiry.onSessionEnded를 잇는다 */
+  onSessionEnded?: EndPurchaseSessionDeps['onEnded'];
 }
 
 export type InventoryModuleOptions = (
   /**
    * 운영: 좌석 Redis. 좌석맵 판과 시도 기록은 꼭 넘긴다(운영 좌석맵 판·HoldAttempt 보내기가 아직 없어 main.ts가 빈 메모리 판·버리는 기록을 넘긴다).
-   * 1초 만료 반복(ExpirySweeper)을 만들어 내보낸다(RedisSeatStore·RedisSweepLeases, 임대 값 podId). 켜고 끄는 것은 main.ts다(시작 때 start, SIGTERM 때 stop)
+   * 1초 만료 반복(ExpirySweeper)을 만들어 내보낸다(RedisSeatStore·RedisSweepLeases, 임대 값 podId). 켜고 끄는 것은 main.ts다(시작 때 start, SIGTERM 때 stop).
+   * onHoldsExpired는 만료로 푼 홀드를 알리는 고리다(BUILD_ORDER PRF-172. 운영은 purchase DB가 있을 때 booking OrderExpiry.onHoldsExpired를 잇는다)
    */
-  | { storage: 'redis'; redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals }
+  | { storage: 'redis'; redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired'] }
   /**
    * 시험: 넘기지 않은 것은 새로 만든다(저장소 MemorySeatStore(주입 Clock), 좌석맵 MemorySeatMap, 시도 기록 RecordingHoldAttempts, 지표 버림).
    * 만료 반복은 만들지 않는다(시험은 ExpirySweeper를 직접 만들어 손으로 tick한다)
@@ -107,7 +110,7 @@ export class InventoryModule {
             {
               provide: ExpirySweeper,
               useFactory: (store: RedisSeatStore, seatMap: SeatMap & SeatMapIndex, leases: SweepLeases, clock: Clock, s: SeatSignals, gate: LogGate, logger?: PlatformLogger) =>
-                new ExpirySweeper({ expiries: store, seatMap, leases, clock, podId: o.podId, signals: s, oomWarnGate: gate, ...(logger ? { logger } : {}) }),
+                new ExpirySweeper({ expiries: store, seatMap, leases, clock, podId: o.podId, signals: s, oomWarnGate: gate, ...(logger ? { logger } : {}), ...(o.onHoldsExpired ? { onHoldsExpired: o.onHoldsExpired } : {}) }),
               inject: [SEAT_STORE, SEAT_MAP, SWEEP_LEASES, CLOCK, SEAT_SIGNALS, OOM_WARN_GATE, optionalLogger],
             },
           ]
@@ -135,7 +138,7 @@ export class InventoryModule {
                 {
                   provide: EndPurchaseSession,
                   useFactory: (clock: Clock, signals: SeatSignals, logger?: PlatformLogger) =>
-                    new EndPurchaseSession({ store: o.admission!.store, ended: o.admission!.endedLog!, clock, signals, ...(logger ? { logger } : {}) }),
+                    new EndPurchaseSession({ store: o.admission!.store, ended: o.admission!.endedLog!, clock, signals, ...(logger ? { logger } : {}), ...(o.admission!.onSessionEnded ? { onEnded: o.admission!.onSessionEnded } : {}) }),
                   inject: [CLOCK, SEAT_SIGNALS, optionalLoggerToken],
                 } satisfies Provider,
               ]

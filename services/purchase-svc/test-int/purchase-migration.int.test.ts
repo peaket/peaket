@@ -62,7 +62,7 @@ const count = async (text: string, params: unknown[]): Promise<number> => Number
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
-  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 11(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐, 0008 주문의 묶은 시각, 0009 발권 큐 임대·표시 칸, 0010 작업 단계 AWAIT·다음 당기기 점검 시각)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 12(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐, 0008 주문의 묶은 시각, 0009 발권 큐 임대·표시 칸, 0010 작업 단계 AWAIT·다음 당기기 점검 시각, 0011 열린 주문 부분 인덱스)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)).rows.map((r) => r.relname);
     const before = await tables();
     // 0003이 만든 주문 표 다섯과 Outbox 부모 표(PRF-160), 0005가 만든 Saga 작업 표(PRF-162), 0007이 만든 발권 재시도 큐(PRF-163)가 있다
@@ -72,7 +72,13 @@ describe('마이그레이션과 표 모양', () => {
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(11);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(12);
+  });
+
+  test('PT41_ADR0107_리뷰 고침 M1: 0011(PRF-172, data.md §4 열두 번째 마이그레이션·§5.1): purchase_order_session_idx는 purchase_order (purchase_session_id)의 유일이 아닌 조건 없는 인덱스다(status를 조건에 넣으면 상태를 바꾸는 UPDATE가 모두 HOT 갱신에서 빠진다) [ASVS v5.0.0-2.3.4]', async () => {
+    const idx = await q<{ indexdef: string }>(`select indexdef from pg_indexes where schemaname = 'public' and tablename = 'purchase_order' and indexname = 'purchase_order_session_idx'`);
+    expect(idx.rows).toHaveLength(1);
+    expect(idx.rows[0]!.indexdef).toBe('CREATE INDEX purchase_order_session_idx ON public.purchase_order USING btree (purchase_session_id)');
   });
 
   test('0010(PRF-171, data.md §4 열한 번째 마이그레이션·§2 ERD order_saga_job): pull_next_at은 널 허용 timestamptz이고 기본값이 없으며 그 칸에 걸린 인덱스가 없고(작은 작업 표, data.md §5.1), step CHECK는 RESERVE·CONFIRM·RELEASE·AWAIT를 받는다 [ASVS v5.0.0-2.3.4]', async () => {

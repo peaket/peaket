@@ -1,7 +1,7 @@
 // purchase DB의 주문 표(docs/data.md §2 ERD purchase_order·order_item·order_event·order_idempotency·payment_attempt와 §4 '주문 표 마이그레이션',
 // docs/features/payment.md §3 '주문 저장소의 첫 구현', BUILD_ORDER PRF-160, ADR-0113·0114). 마이그레이션은 0003_order_tables.sql이다.
 // - 주문 표는 나누지 않는다(ADR-0114). 쓰기가 많은 purchase_order에는 새 인덱스를 두지 않는다(data.md §5.1). 예외는 0004의 hold_id 유일 인덱스
-//   (한 홀드에 주문 하나를 DB가 정한다, BUILD_ORDER PRF-161)다.
+//   (한 홀드에 주문 하나를 DB가 정한다, BUILD_ORDER PRF-161)와 0011의 열린 주문 부분 인덱스(구매 세션이 끝났을 때 그 세션의 열린 주문을 찾는다, BUILD_ORDER PRF-172)다.
 // - order_event의 occurred_at BRIN 인덱스(매일 검사가 '전날 이력'을 찾는다, autosummarize = on), 상태 이력 지연 제약 트리거(order_status_has_event)와
 //   Outbox 부모 표는 마이그레이션 SQL에만 손으로 적었다(Drizzle 표 정의로 적을 수 없다).
 // - 결제 접수(PRF-162)는 0005로 결제 시도의 결제 참조 칸 다섯, 주문의 판 번호 seat_gen, Saga 작업 표 order_saga_job을 더했다(data.md §4 여섯 번째 마이그레이션).
@@ -65,6 +65,9 @@ export const purchaseOrder = pgTable(
   (t) => [
     // 한 홀드에 주문 하나(docs/data.md §5 '주문 생성'). 뒤 쪽 트랜잭션은 유일 확인에서 앞 쪽 커밋을 기다리고 23505로 끝난다
     uniqueIndex('purchase_order_hold_key').on(t.holdId),
+    // 구매 세션이 끝났을 때 그 세션의 열린 주문을 찾는다(0011, ADR-0107 결정 2, BUILD_ORDER PRF-172). 조건을 두지 않는다:
+    // status를 조건에 넣으면 상태를 바꾸는 UPDATE가 모두 HOT 갱신에서 빠져 쓰기 비용이 더 크다(data.md §5.1)
+    index('purchase_order_session_idx').on(t.purchaseSessionId),
     check('purchase_order_status_check', sql`${t.status} in (${STATUS_LIST})`),
     check('purchase_order_amount_check', sql`${t.amount} >= 0`),
     check('purchase_order_event_seq_check', sql`${t.eventSeq} >= 1`),

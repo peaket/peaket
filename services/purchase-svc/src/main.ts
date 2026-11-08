@@ -13,6 +13,8 @@
 // payment-svc BatchGetPayments(주소 PEAKET_PAYMENT_GRPC_ADDR, 차단기 payment-svc-batch, 없으면 local·ci만 '기록 없음' 대역과 경고 한 줄)로 묻고, trade.payments 소비자와
 // 같은 결제 결과 반영 쓰임새(ApplyPaymentResult)로 반영한다. 그래서 그 쓰임새와 소비자 전용 풀은 소비자를 켜지 않은 local·ci에서도 만든다.
 // 잡기·미루기는 당기기 전용 일반 풀(연결 2개 [가정], purchase-svc-payment-pull)을 쓰고, 지표 payment_result_pull*를 /metrics에 붙인다.
+// purchase DB가 있으면 결제하지 않은 주문의 만료 판정(OrderExpiry, PRF-172, ADR-0107)을 만들어 구매 세션 종료·홀드 만료 고리에 꽂는다. 고리 전용 일반 풀(연결 4개 [가정], purchase-svc-order-expiry)을 쓰고
+// 지표 purchase_order_expir*·purchase_order_open_stale을 /metrics에 붙인다. 안전망 반복(OrderExpirySweep)은 릴레이 프로세스가 돈다.
 // 구매 세션은 좌석 Redis의 s:jti·s:session과 서버 고정 ECDH 개인키(PEAKET_PURCHASE_ECDH_KEY)로 확인한다(BUILD_ORDER PRF-136). 입장 토큰은 공개키 묶음
 // (PEAKET_ADMISSION_JWKS)과 발급자(PEAKET_ADMISSION_ISSUER)로 확인하고, 스냅샷 API가 입장 토큰의 첫 사용에 구매 세션을 연다(PRF-137).
 // 좌석맵 판은 환경 값 PEAKET_SEATMAP_DIR 폴더의 {eventId}.json이다(docs/features/seat-hold.md §2 '운영 좌석맵 판'). 30초 [가정]마다 읽은 회차를 다시 읽는다.
@@ -34,6 +36,7 @@ import {
   CONSENT_VERSION_ENV,
   type ContactRefs,
   DrizzleOrderAccepts,
+  DrizzleOrderExpiry,
   DrizzleOrderStore,
   DrizzleOrderWrites,
   DrizzlePaymentPull,
@@ -44,11 +47,14 @@ import {
   identityClientsFromEnv,
   InventoryOrderSeatPins,
   InventoryOrderSessions,
+  InventoryOrderExpiry,
   InventorySeatSlots,
   LoggerPaymentPullLog,
   LoggerSagaLog,
   LoggerTicketIssueLog,
   missingContactRefs,
+  OrderExpiry,
+  orderExpiryDatabaseOptions,
   OrderSagaRunner,
   PAYMENT_PULL_BREAKER,
   paymentConfirmsFromEnv,
@@ -56,6 +62,7 @@ import {
   paymentResultReaderFromEnv,
   PaymentResultPuller,
   PaymentStatusWaitTable,
+  PromOrderExpirySignals,
   PromOrderSignals,
   PromPaymentPullSignals,
   PromTicketIssueSignals,
@@ -164,6 +171,10 @@ const booking: BookingModuleDeps | undefined = database
       ...(paymentStatusReads && paymentStatusWaiters ? { paymentStatus: { reads: paymentStatusReads, waiters: paymentStatusWaiters } } : {}),
     }
   : undefined;
+// 주문 만료 고리(PRF-172): 판정기는 서비스 로거·지표로 만들므로 늦게 묶는다(그 전이면 부르지 않는다. 고리를 부르는 반복·요청은 듣기 시작한 뒤에만 돈다).
+// purchase DB 없이 뜬 파드는 판정기가 없어 고리가 아무것도 하지 않는다
+let orderExpiry: OrderExpiry | undefined;
+const onSessionEnded = (e: { readonly purchaseSessionId: string }): void => orderExpiry?.onSessionEnded(e);
 const service = await createService({
   name: SERVICE,
   module: AppModule.register({
@@ -173,6 +184,7 @@ const service = await createService({
     sessions,
     podId,
     signals,
+    onHoldsExpired: (e) => orderExpiry?.onHoldsExpired(e),
     ...(database ? { seatSales: new DrizzleSeatSales(database) } : {}),
     ...(booking ? { booking } : {}),
     admission: {
@@ -182,6 +194,7 @@ const service = await createService({
       index: new RedisSessionIndex(redis),
       keys: admissionKeys,
       issuer: admissionIssuer,
+      onSessionEnded,
     },
   }),
   purchaseSessions: sessions,
@@ -204,6 +217,21 @@ if (booking) {
   for (const w of identity.warnings) service.logger.warn({ dep: 'identity-svc' }, w);
   identityLate.recheck = identity.recheck;
   identityLate.contactRefs = identity.contactRefs;
+}
+// 결제하지 않은 주문의 만료 판정(OrderExpiry, BUILD_ORDER PRF-172, ADR-0107, docs/features/payment.md §2 '결제하지 않은 주문 만료의 첫 구현'): purchase DB가 있을 때 이 API 파드에서 만든다.
+// 구현에서 정한 것: 트랜잭션은 핫패스 풀이 아니라 고리 전용 일반 풀(orderExpiryDatabaseOptions, 연결 4개 [가정] = 고리 동시 수)을 쓰고 종료 때 닫는다(만료가 몰려도 홀드·주문 요청이 풀 대기 초과를 받지 않게).
+// 판정기에는 따로 켜는 반복이 없다(고리가 불릴 때만 돈다). 고리를 부르는 만료 반복·정리 반복·나가기 경로가 듣기 시작한 뒤에 돌므로 듣기 시작 뒤에 켜진 것과 같고, SIGTERM 때 멈춘다
+let orderExpiryDatabase: Database | undefined;
+if (database && databaseUrl) {
+  const expiryDb = createDatabase(orderExpiryDatabaseOptions(databaseUrl));
+  orderExpiryDatabase = expiryDb;
+  orderExpiry = new OrderExpiry({
+    store: new DrizzleOrderExpiry({ database: expiryDb, store: orderStore, clock: systemClock }),
+    inventory: new InventoryOrderExpiry({ sessions: sessionStore, holds: new RedisOrderHolds(redis, seatMap), clock: systemClock }),
+    signals: new PromOrderExpirySignals().register(service.metrics.registry),
+    clock: systemClock,
+    logger: service.logger,
+  });
 }
 // 주문 Saga 1단계 실행기(OrderSagaRunner, BUILD_ORDER PRF-165): purchase DB가 있을 때(booking이 있을 때) 이 API 파드에서 켠다.
 // 승인 명령(payment-svc ConfirmPayment)은 차단기로 감싸고, 주소(PEAKET_PAYMENT_GRPC_ADDR)가 없으면 local·ci만 '늘 접수' 대역과 경고 한 줄이다.
@@ -272,7 +300,8 @@ if (databaseUrl && database && sagaRunner && ticketRunner && paymentStatusWaiter
     database: consumerDb,
     store: orderStore,
     sessions: {
-      end: new EndPurchaseSession({ store: sessionStore, ended: new RedisSessionEndedLog(redis), clock: systemClock, signals, logger: service.logger }),
+      // 결제 확정(COMPLETED)도 모듈의 끝내기와 같은 고리를 지난다(그 세션의 다른 열린 주문을 다시 본다, PRF-172)
+      end: new EndPurchaseSession({ store: sessionStore, ended: new RedisSessionEndedLog(redis), clock: systemClock, signals, logger: service.logger, onEnded: onSessionEnded }),
       store: sessionStore,
     },
     saga: sagaRunner,
@@ -361,6 +390,9 @@ function shutdown(): void {
     .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), sagaRunner?.stop(), ticketRunner?.stop(), paymentStatusWaiters?.stop()]))
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'purchase-svc 종료 실패'))
+    // 주문 만료 판정기는 고리를 부르는 것들(만료·정리 반복, 소비자, 나가기 경로)이 멈춘 뒤에 멈춘다. 돌던 판정만 기다리고 줄에 남은 일은 버린다(안전망이 받친다). 전용 풀은 그 뒤에 닫는다
+    .then(() => orderExpiry?.stop())
+    .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, '주문 만료 판정기 멈추기 실패'))
     .finally(() => {
       // 서비스를 닫은 뒤(새 요청이 없다) identity-svc·payment-svc·ticket-svc 클라이언트와 차단기를 닫는다
       try {
@@ -388,7 +420,7 @@ function shutdown(): void {
         service.logger.error({ err: errorSummary(err) }, 'payment-svc 결과 당기기 클라이언트 닫기 실패');
       }
       // 소비자 전용 풀(결제 결과 반영도 쓴다)은 소비자와 당기기를 멈춘 뒤라, 발권·당기기 실행기 전용 풀은 실행기를 멈춘 뒤라 쓰는 연결이 없다
-      return Promise.all([redis.close(), database?.close(), consumerDatabase?.close(), ticketIssueDatabase?.close(), paymentPullDatabase?.close()]);
+      return Promise.all([redis.close(), database?.close(), consumerDatabase?.close(), ticketIssueDatabase?.close(), paymentPullDatabase?.close(), orderExpiryDatabase?.close()]);
     });
 }
 process.once('SIGTERM', shutdown);

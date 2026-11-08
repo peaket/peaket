@@ -1,6 +1,9 @@
 // booking 포트를 inventory의 좌석맵 판·구매 세션에 잇는 어댑터(BUILD_ORDER PRF-161). inventory 공개 면을 가져오지 않고
 // 필요한 메서드 모양만 받는다(조립은 app.module.ts·main.ts가 LayoutSeatMap·StoredPurchaseSessions·RedisPurchaseSessionStore를 넘긴다).
+import type { Clock } from '@peaket/platform';
 import {
+  type OrderExpiryInventory,
+  type OrderHoldQuery,
   type OrderPinInput,
   type OrderPinResult,
   type OrderReleaseInput,
@@ -254,6 +257,43 @@ export class InventoryPaymentResultSessions implements PaymentResultSessions {
   async unmarkPaying(purchaseSessionId: string): Promise<boolean> {
     try {
       return await this.source.store.setPaying(purchaseSessionId, false);
+    } catch (e) {
+      throw seatStoreErrorOf(e);
+    }
+  }
+}
+
+// ---- 결제하지 않은 주문의 만료(BUILD_ORDER PRF-172 설계 1) ----
+
+/** inventory의 세션 상태 읽기(PurchaseSessionStore.read, 운영 RedisPurchaseSessionStore)와 주문 좌석의 홀드 남음 읽기(운영 RedisOrderHolds.holdLeft)의 모양 */
+export interface OrderExpirySource {
+  /** 시간으로 거르지 않는다(최대 체류가 지났어도 키가 있으면 준다). 릴레이 프로세스에도 있는 읽기라 StoredPurchaseSessions(서버 ECDH 키가 든다)를 쓰지 않는다 */
+  sessions: { read(jti: string): Promise<{ readonly maxStayUntilMs: number } | undefined> };
+  holds: { holdLeft(eventId: string, holdId: string, seatIds: readonly string[]): Promise<boolean> };
+  /** 최대 체류 시각과 견주는 '지금' */
+  clock: Clock;
+}
+
+/**
+ * OrderExpiryInventory의 inventory 구현. sessionEnded는 세션 상태가 없거나 지금 ≥ 최대 체류 시각이면 true, holdRemains는 주문 항목 좌석의 홀드 Hash를 직접 읽는다(RedisOrderHolds.holdLeft).
+ * 주문 생성의 check는 쓰지 않는다: 구매 세션의 홀드 목록부터 읽어 세션을 끝낸 뒤에는 살아 있는 홀드도 NOT_FOUND로 답한다(docs/features/payment.md §2).
+ * 좌석 Redis 장애(SeatStoreUnavailable)는 OrderSeatStoreUnavailable로 던진다(끝났다·풀렸다로 보지 않는다). 그 밖의 오류는 그대로 던진다
+ */
+export class InventoryOrderExpiry implements OrderExpiryInventory {
+  constructor(private readonly source: OrderExpirySource) {}
+
+  async sessionEnded(purchaseSessionId: string): Promise<boolean> {
+    try {
+      const s = await this.source.sessions.read(purchaseSessionId);
+      return s === undefined || this.source.clock.now() >= s.maxStayUntilMs;
+    } catch (e) {
+      throw seatStoreErrorOf(e);
+    }
+  }
+
+  async holdRemains(q: OrderHoldQuery): Promise<boolean> {
+    try {
+      return await this.source.holds.holdLeft(q.eventId, q.holdId, q.seatIds ?? []);
     } catch (e) {
       throw seatStoreErrorOf(e);
     }

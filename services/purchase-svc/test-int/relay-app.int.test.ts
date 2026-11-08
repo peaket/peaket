@@ -23,6 +23,7 @@ import {
   createHotRedis,
   type Database,
   ensureOutboxPartitions,
+  fakeClock,
   type HotRedis,
   type LeaseApi,
   memoryLeaseApi,
@@ -66,6 +67,8 @@ const LEASE = { leaseDurationMs: 2_000, renewDeadlineMs: 1_500, retryPeriodMs: 1
 const REBUILD_TICK_MS = 200;
 /** 세대 올리기 감시 틱(기본 1초를 줄인다, PRF-168) */
 const EPOCH_WATCH_TICK_MS = 100;
+/** 주문 만료 안전망 반복 틱(기본 10분을 줄인다, PRF-172) */
+const ORDER_EXPIRY_TICK_MS = 300;
 /** 단일 노드 Valkey의 주 노드 표지(hold-lua.ts NODE_ID) */
 const STANDALONE = 'standalone';
 /** 승격 전 주 노드의 표지 흉내(클러스터 모양 '{CLUSTER MYID}:{cluster_my_epoch}') */
@@ -234,6 +237,7 @@ async function startRelay(o: {
     holder: o.pod,
     rebuildTickMs: REBUILD_TICK_MS,
     epochWatchTickMs: EPOCH_WATCH_TICK_MS,
+    orderExpirySweepTickMs: ORDER_EXPIRY_TICK_MS,
     streamSleep: shortSleep,
     seatMapRefreshMs: 60_000,
     stopTimeoutMs: STOP_TIMEOUT_MS,
@@ -358,6 +362,21 @@ async function putPinnedOrder(w: SaleWorld, seat: SeatRef): Promise<SeededOrder 
     [w.eventId, seat.seatId, o.accountId, token, new Date(now - 2 * MIN), new Date(now - MIN), o.holdId, o.psid],
   );
   return { ...o, token };
+}
+
+/** 만든 지 2시간 된 결제하지 않은 주문(CREATED, 항목 한 줄). 구매 세션 상태도 홀드도 없어 만료 조건이 모두 끝났다(안전망만 끝낼 수 있다: 고리는 API 파드의 몫) */
+async function putAbandonedOrder(w: SaleWorld, seat: SeatRef): Promise<SeededOrder> {
+  const createdAt = Date.now() - 2 * 60 * MIN;
+  const clock = fakeClock({ now: createdAt });
+  const o: SeededOrder = { orderId: uuidv7(clock), accountId: randomUUID(), holdId: uuidv7(clock), psid: randomUUID() };
+  await q(
+    `with o as (insert into purchase_order (id, account_id, event_id, status, amount, event_seq, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
+                values ($1, $2, $3, 'CREATED', 99000, 1, $4, 'consent-2026.11_v1', 'PICK', $5, $6, $7) returning id),
+          e as (insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) select id, 1, null, 'CREATED', 'T1', 'system:test', $5::timestamptz from o)
+     insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price) select id, 1, $8, 'R', 'SEC-A', 99000 from o`,
+    [o.orderId, o.accountId, w.eventId, randomUUID(), new Date(createdAt), o.holdId, o.psid, seat.seatId],
+  );
+  return o;
 }
 
 /** 지표 글에서 이름이 name인 표본 줄(HELP·TYPE 줄 빼고) */
@@ -511,7 +530,19 @@ describe('릴레이 프로세스 하나(리더)', () => {
     expect(counterOf(await relay.registry.metrics(), 'seat_epoch_bumps_total')).toBe(1);
   }, 60_000);
 
-  test('FND110_관리 포트 /metrics에 좌석 Stream 릴레이(seat_stream_relay_sent_total{topic="trade.seats"})·다시 만들기(seat_rebuild_total{result="rebuilt"})·세대 올리기 감시(seat_epoch_bumps_total, PRF-168)·Outbox 릴레이·정비 지표(retire-seat-events 마지막 성공, 주문 이력 검사)가 보인다', async () => {
+  test('PT41_ADR0107_리뷰 고침 M4: 주문 만료 안전망 반복이 리더에서 돈다: 만든 지 2시간 된 버려진 주문을 까닭 sweep으로 EXPIRED로 끝내고 이력·Outbox EXPIRED를 쓴다(서비스 역할 DB·좌석 Redis·좌석맵 판 배선) [ASVS v5.0.0-2.3.1] [ASVS v5.0.0-16.5.2]', async () => {
+    const w = await saleWorld();
+    const o = await putAbandonedOrder(w, w.refs[3]!);
+    const relay = await sharedRelay();
+
+    await until(async () => (await q<{ status: string }>('select status from purchase_order where id = $1', [o.orderId]))[0]?.status === 'EXPIRED', '안전망이 끝낸 주문', 15_000, 50);
+
+    const history = await q<{ seq: number; to_status: string; cause: string; actor: string }>('select seq, to_status, cause, actor from order_event where order_id = $1 order by seq desc limit 1', [o.orderId]);
+    expect(history).toEqual([{ seq: 2, to_status: 'EXPIRED', cause: 'T5', actor: 'system:order-expiry' }]);
+    expect(samples(await relay.registry.metrics(), 'purchase_order_expired_total').find((l) => l.includes('trigger="sweep"'))).toMatch(/ [1-9]\d*$/);
+  }, 60_000);
+
+  test('FND110_관리 포트 /metrics에 좌석 Stream 릴레이(seat_stream_relay_sent_total{topic="trade.seats"})·다시 만들기(seat_rebuild_total{result="rebuilt"})·세대 올리기 감시(seat_epoch_bumps_total, PRF-168)·주문 만료(purchase_order_expired_total·purchase_order_open_stale, PRF-172)·Outbox 릴레이·정비 지표(retire-seat-events 마지막 성공, 주문 이력 검사)가 보인다', async () => {
     const relay = await sharedRelay();
     const { managementPort } = await relay.listen('127.0.0.1');
     expect(managementPort).toBeGreaterThan(0);
@@ -540,6 +571,9 @@ describe('릴레이 프로세스 하나(리더)', () => {
     expect(samples(text, 'outbox_relay_is_leader').find((l) => l.includes('service="purchase-svc"'))).toMatch(/ 1$/);
     // 주문 이력 검사(정비 시간 창 일)의 지표는 돌기 전에도 레지스트리에 붙어 있다
     expect(text).toMatch(/^# TYPE order_history_mismatch gauge$/m);
+    // 주문 만료(PRF-172): 앞 시험의 안전망이 끝낸 주문 하나가 보이고, 게이지는 정비 일이 돌기 전 0이다
+    expect(samples(text, 'purchase_order_expired_total').find((l) => l.includes('trigger="sweep"'))).toMatch(/ [1-9]\d*$/);
+    expect(samples(text, 'purchase_order_open_stale')).toEqual(['purchase_order_open_stale 0']);
     // 지표 이름표에 회차 ID를 달지 않는다
     for (const e of sharedCatalog.events) expect(text).not.toContain(e.eventId);
   }, 60_000);

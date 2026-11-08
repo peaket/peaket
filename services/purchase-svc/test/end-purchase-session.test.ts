@@ -7,6 +7,7 @@ import { fakeClock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import {
   EndPurchaseSession,
+  type EndPurchaseSessionDeps,
   EndSessionError,
   MemoryPurchaseSessionStore,
   type PurchaseSessionStore,
@@ -31,7 +32,7 @@ interface WarnCall {
  * 메모리 조립 하나. 저장소는 호출을 적고 fail로 실패를 끼운다. 사건·색인은 RecordingSessionStartedLog 하나가 맡는다.
  * 정리 색인은 시작 사건 기록(appendStarted)에 기대지 않고 시험이 직접 채운다(점수 = 열린 시각 + 유휴 5분)
  */
-function world(o: { signals?: boolean; logger?: boolean } = {}) {
+function world(o: { signals?: boolean; logger?: boolean; onEnded?: EndPurchaseSessionDeps['onEnded'] } = {}) {
   const clock = fakeClock({ now: NOW, monotonic: 0 });
   const inner = new MemoryPurchaseSessionStore(clock);
   const log = new RecordingSessionStartedLog();
@@ -53,7 +54,7 @@ function world(o: { signals?: boolean; logger?: boolean } = {}) {
   const signals: Pick<SeatSignals, 'sessionEnded'> = { sessionEnded: (reason) => void metrics.push(reason) };
   const warns: WarnCall[] = [];
   const logger = { warn: (obj: object, msg: string) => void warns.push({ obj, msg }) };
-  const uc = new EndPurchaseSession({ store, ended: log, clock, ...(o.signals === false ? {} : { signals }), ...(o.logger === false ? {} : { logger }) });
+  const uc = new EndPurchaseSession({ store, ended: log, clock, ...(o.signals === false ? {} : { signals }), ...(o.logger === false ? {} : { logger }), ...(o.onEnded ? { onEnded: o.onEnded } : {}) });
 
   /** 구매 세션을 열고 정리 색인에 넣는다 */
   async function open(eventId = EVENT_A, jti = newJti()): Promise<string> {
@@ -305,6 +306,86 @@ describe('EndPurchaseSession.recordEnded: 정리 반복이 끝낸 세션의 사�
     expect(text).not.toContain(jti);
     expect(text).not.toContain('s:{');
     expect(text).not.toContain('down');
+    expect(w.metrics).toEqual(['IDLE']);
+  });
+});
+
+describe('EndPurchaseSession 주문 만료 고리 onEnded(BUILD_ORDER PRF-172, ADR-0107, docs/features/seat-hold.md §2)', () => {
+  /** 고리가 받은 값들. 부를 때의 세션 끝내기 호출 수도 적는다('끝낸 뒤'에 부르는지 본다) */
+  function hooked(onCall?: () => void) {
+    const seen: { purchaseSessionId: string; endCalls: number }[] = [];
+    const w = world({
+      onEnded: (e) => {
+        seen.push({ purchaseSessionId: e.purchaseSessionId, endCalls: w.calls.end.length });
+        onCall?.();
+      },
+    });
+    return { w, seen };
+  }
+
+  test.each(['LEFT', 'COMPLETED'] as const)('PT41_ADR0107_%s로 끝내면 세션을 끝낸 뒤 고리를 그 구매 세션 ID로 한 번 부른다 [ASVS v5.0.0-2.3.1]', async (reason) => {
+    const { w, seen } = hooked();
+    const jti = await w.open();
+    expect(await w.uc.execute({ sessionId: jti, reason })).toBe(true);
+    expect(seen).toEqual([{ purchaseSessionId: jti, endCalls: 1 }]);
+  });
+
+  test.each(['IDLE', 'MAX_STAY'] as const)('PT41_ADR0107_정리 반복이 %s로 끝낸 세션도 recordEnded가 고리를 한 번 부른다 [ASVS v5.0.0-2.3.1]', async (reason) => {
+    const { w, seen } = hooked();
+    const jti = await w.open();
+    w.inner.endSession(jti);
+    await w.uc.recordEnded({ eventId: EVENT_A, sessionId: jti, reason, endedAtMs: NOW });
+    expect(seen.map((s) => s.purchaseSessionId)).toEqual([jti]);
+  });
+
+  test('ADR0107_끝낼 세션이 없었거나 이미 끝났으면 고리를 부르지 않는다', async () => {
+    const { w, seen } = hooked();
+    expect(await w.uc.execute({ sessionId: newJti(), reason: 'LEFT' })).toBe(false);
+    expect(seen).toEqual([]);
+    const jti = await w.open();
+    expect(await w.uc.execute({ sessionId: jti, reason: 'LEFT' })).toBe(true);
+    expect(await w.uc.execute({ sessionId: jti, reason: 'LEFT' })).toBe(false);
+    expect(seen).toHaveLength(1);
+  });
+
+  test('ADR0107_회차가 달라 거절했거나 세션 지우기가 실패하면 끝낸 것이 아니므로 고리를 부르지 않는다', async () => {
+    const { w, seen } = hooked();
+    const jti = await w.open(EVENT_A);
+    await expect(w.uc.execute({ sessionId: jti, reason: 'LEFT', expectEventId: EVENT_B })).rejects.toBeInstanceOf(EndSessionError);
+    w.fail.end = new SeatStoreUnavailable(new Error('down'));
+    await expect(w.uc.execute({ sessionId: jti, reason: 'LEFT' })).rejects.toBeInstanceOf(SeatStoreUnavailable);
+    expect(seen).toEqual([]);
+  });
+
+  test('ADR0107_종료 사건 더하기가 실패해도 세션은 끝났으므로 고리를 부른다 [ASVS v5.0.0-16.5.2]', async () => {
+    const { w, seen } = hooked();
+    const jti = await w.open();
+    w.log.failEndedWith = new SeatStoreUnavailable(new Error('down'));
+    expect(await w.uc.execute({ sessionId: jti, reason: 'LEFT' })).toBe(true);
+    expect(seen.map((s) => s.purchaseSessionId)).toEqual([jti]);
+  });
+
+  test('ADR0107_고리가 던져도 execute의 결과는 그대로이고 사건·지표도 그대로다 [ASVS v5.0.0-16.5.2]', async () => {
+    const { w, seen } = hooked(() => {
+      throw new Error('hook down');
+    });
+    const jti = await w.open();
+    await expect(w.uc.execute({ sessionId: jti, reason: 'LEFT' })).resolves.toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(await w.inner.read(jti)).toBeUndefined();
+    expect(w.log.endedEntries).toHaveLength(1);
+    expect(w.metrics).toEqual(['LEFT']);
+  });
+
+  test('ADR0107_고리가 던져도 recordEnded는 던지지 않고 사건·지표는 그대로다 [ASVS v5.0.0-16.5.2]', async () => {
+    const { w, seen } = hooked(() => {
+      throw new Error('hook down');
+    });
+    const jti = await w.open();
+    w.inner.endSession(jti);
+    await expect(w.uc.recordEnded({ eventId: EVENT_A, sessionId: jti, reason: 'IDLE', endedAtMs: NOW })).resolves.toBeUndefined();
+    expect(seen).toHaveLength(1);
+    expect(w.log.endedEntries).toHaveLength(1);
     expect(w.metrics).toEqual(['IDLE']);
   });
 });

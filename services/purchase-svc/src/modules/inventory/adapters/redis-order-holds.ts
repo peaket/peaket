@@ -1,14 +1,16 @@
 // 주문 생성의 홀드 확인 운영 어댑터(OrderHoldReader, docs/features/payment.md §2 '주문 생성의 첫 구현' 홀드 확인, Lua 계약은 order-hold-lua.ts, BUILD_ORDER PRF-161).
 // 구매 세션의 홀드 목록(s:session:{jti}의 h:{holdId}, jti 슬롯)을 HGET 한 번으로 읽고, 좌석맵 판으로 색인을 붙인 뒤 회차 슬롯의 읽기 전용 Lua 한 번을 부른다.
 // 키에 넣는 값(jti·회차 ID·holdId)은 KEY_PART 모양을 다시 확인한다(해시 태그를 깨는 값이 키로 가지 않게. 모양이 틀리면 저장소를 부르지 않고 NOT_FOUND).
+// 주문 만료의 '홀드 남음' 읽기(holdLeft, BUILD_ORDER PRF-172)도 여기 둔다. 회차 ID가 좌석맵 판을 지나야 키가 되므로 모양을 따로 보지 않는다.
 import { type HotRedis, redisScript } from '@peaket/platform';
 import { KEY_PART, MAX_SEATS, SEAT_ID_PATTERN, SeatStoreUnavailable, type SeatRef } from '../domain/hold.js';
 import type { OrderHoldCheck, OrderHoldQuery, OrderHoldReader, SeatCallOptions, SeatMap } from '../domain/ports.js';
-import { ORDER_HOLD_LUA } from './order-hold-lua.js';
+import { ORDER_HOLD_LEFT_LUA, ORDER_HOLD_LUA } from './order-hold-lua.js';
 import { sessionKeys } from './redis-purchase-sessions.js';
 import { guard, seatKeys } from './redis-seat-store.js';
 
 const ORDER_HOLD = redisScript(ORDER_HOLD_LUA);
+const ORDER_HOLD_LEFT = redisScript(ORDER_HOLD_LEFT_LUA);
 
 const NOT_FOUND: OrderHoldCheck = { status: 'NOT_FOUND' };
 const STORE_UNAVAILABLE: OrderHoldCheck = { status: 'STORE_UNAVAILABLE' };
@@ -84,5 +86,22 @@ export class RedisOrderHolds implements OrderHoldReader {
       if (e instanceof SeatStoreUnavailable) return STORE_UNAVAILABLE;
       throw e;
     }
+  }
+
+  /**
+   * 주문 좌석에 그 holdId의 홀드가 남았나(주문 만료의 조건 ②, Lua 계약은 order-hold-lua.ts ORDER_HOLD_LEFT_LUA, BUILD_ORDER PRF-172).
+   * 구매 세션의 홀드 목록을 읽지 않으므로 세션이 끝난 뒤에도 살아 있는 홀드를 본다.
+   * 좌석을 모르거나(빈 목록) 좌석맵 판에 없는 좌석이 있으면 true(아직. 어느 키를 읽을지 몰라 풀렸다고 할 수 없다, 안전망이 다시 본다. 좌석 Redis를 부르지 않는다).
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족
+   * @throws Error 키 형이 틀림(PEAKET_CORRUPT_KEY)·스크립트가 모르는 값을 돌려줌
+   */
+  async holdLeft(eventId: string, holdId: string, seatIds: readonly string[]): Promise<boolean> {
+    if (seatIds.length === 0) return true;
+    const refs = await this.seatMap.resolve(eventId, seatIds);
+    if (refs.some((r) => r === undefined)) return true;
+    const keys = (refs as SeatRef[]).map((s) => seatKeys.hold(eventId, s.index));
+    const left = Number(await guard(this.redis.evalScript(ORDER_HOLD_LEFT, keys, [holdId], {})));
+    if (!Number.isSafeInteger(left) || left < 0) throw new Error('홀드 남음 Lua가 0 이상 정수가 아닌 값을 돌려줬다');
+    return left > 0;
   }
 }

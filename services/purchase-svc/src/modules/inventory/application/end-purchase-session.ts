@@ -1,5 +1,5 @@
 // 구매 세션 끝내기(BUILD_ORDER PRF-138, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'). 나가기(LEFT, 받는 층)와 결제 확정(COMPLETED, 결제 단계)이 부른다.
-// 차례: 세션 상태 지우기(store.end) → SESSION_ENDED 더하기(SessionEndedLog, 실패해도 끝난 것은 그대로, 로그 한 줄) → 지표.
+// 차례: 세션 상태 지우기(store.end) → SESSION_ENDED 더하기(SessionEndedLog, 실패해도 끝난 것은 그대로, 로그 한 줄) → 지표 → 주문 만료 고리(onEnded).
 import type { Clock } from '@peaket/platform';
 import type { PurchaseSessionStore, SeatSignals, SessionEndedLog } from '../domain/ports.js';
 import { assertJti } from '../domain/purchase-session.js';
@@ -15,6 +15,11 @@ export interface EndPurchaseSessionDeps {
   clock: Clock;
   signals?: Pick<SeatSignals, 'sessionEnded'>;
   logger?: EndSessionLogger;
+  /**
+   * 세션이 끝난 뒤 부를 고리(BUILD_ORDER PRF-172 설계 2, booking OrderExpiry.onSessionEnded를 잇는다, docs/features/seat-hold.md §2). 나가기·결제 확정(execute)과 정리 반복(IDLE·MAX_STAY)이 모두 지나는 recordEnded 끝에서 부른다.
+   * 던져도 세션 끝내기 결과는 그대로다(경고 한 줄). 없으면 부르지 않는다. 구매 세션 ID만 싣는다(booking은 구매 세션 ID로 주문을 찾는다)
+   */
+  onEnded?: (e: { readonly purchaseSessionId: string }) => void;
 }
 
 /** 끝내기 거절: 세션이 묶인 회차가 기대한 회차와 다르다(받는 층이 403으로 바꾼다) */
@@ -59,5 +64,11 @@ export class EndPurchaseSession {
       this.deps.logger?.warn({ errorName: err instanceof Error ? err.name : typeof err }, '구매 세션 종료 사건 더하기 실패');
     }
     this.deps.signals?.sessionEnded?.(e.reason);
+    try {
+      this.deps.onEnded?.({ purchaseSessionId: e.sessionId });
+    } catch (err) {
+      // 세션은 이미 끝났다. 주문 만료는 안전망이 받친다
+      this.deps.logger?.warn({ errorName: err instanceof Error ? err.name : typeof err }, '구매 세션 종료 고리 실패');
+    }
   }
 }

@@ -4,6 +4,7 @@ import type { HotRedis } from '@peaket/platform';
 import { BookingModule, type BookingModuleDeps } from './modules/booking/index.js';
 import {
   type AdmissionOptions,
+  type ExpirySweeperDeps,
   type HoldAttempts,
   InventoryModule,
   type PurchaseSessionAccess,
@@ -37,7 +38,7 @@ export class AppModule implements NestModule {
    */
   static register(
     o: (
-      | { redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals }
+      | { redis: HotRedis; seatMap: SeatMap & SeatMapIndex & SeatMapSections; attempts: HoldAttempts; podId: string; signals?: SeatSignals; onHoldsExpired?: ExpirySweeperDeps['onHoldsExpired'] }
       | { memory: true; store?: SeatStore; seatMap?: SeatMap & SeatMapSections; attempts?: HoldAttempts; signals?: SeatSignals }
     ) & {
       sessions: PurchaseSessionAccess;
@@ -64,6 +65,7 @@ export class AppModule implements NestModule {
             ...(o.admission ? { admission: o.admission } : {}),
             ...(o.seatSales ? { seatSales: o.seatSales } : {}),
             ...(o.signals ? { signals: o.signals } : {}),
+            ...(o.onHoldsExpired ? { onHoldsExpired: o.onHoldsExpired } : {}),
           })
         : InventoryModule.register({
             storage: 'memory',

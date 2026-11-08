@@ -33,7 +33,7 @@ sequenceDiagram
     participant TK as ticket-svc
     B->>G: POST /orders (holdId, 예매자 정보, 동의) + Idempotency-Key [구매 세션 요청 서명]
     G->>P: 전달
-    P->>P: 본인확인 상태 재확인(identity gRPC. 응답이 없으면 토큰의 ticket:buy·pid로 판정, ADR-0055), 예매 제한 사본 확인(s:rst:{account}, 제한 중이면 403), 금액 서버 계산, 무작위 orderId
+    P->>P: 본인확인 상태 재확인(identity gRPC. 응답이 없으면 토큰의 ticket:buy·pid로 판정, ADR-0055), 예매 제한 사본 확인(s:rst:{account}, 제한 중이면 403), 금액 서버 계산, UUIDv7 orderId
     P->>DB: 주문 생성(지금 상태 행 + 상태 이력 첫 행 + 멱등 기록 + Outbox, 한 트랜잭션)
     P-->>B: 201 Order(amount)
     B->>G: POST /orders/{id}/payments (결제수단) + Idempotency-Key [구매 세션 요청 서명]
@@ -174,6 +174,26 @@ sequenceDiagram
   - **지표**: `payment_result_pulled_total{type}`(당기기로 반영한 수. 1분 동안 0보다 크면 SEV3, ADR-0140 결정 4), `payment_result_pull_failures_total`(`BatchGetPayments` 실패. 1분 이어지면 SEV2), `payment_result_pull_batches_total`(부른 수)다(docs/observability.md 서비스 템플릿의 운영 확인 표).
   - **long polling·Saga와의 관계**: `AWAIT` 행은 long polling(`GetPaymentStatus`)이 보는 상태를 바꾸지 않는다(주문 상태는 RESERVED 그대로). 다시 만들기의 묶인 주문 찾기(PRF-167 `pinnedOrders`)는 RESERVE 행만 보므로 영향이 없다.
   - **넘긴 것**: payment-svc `BatchGetPayments` 서버(PRF-180 무렵의 payment-svc gRPC 서버), 승인 명령 기한 넘김(PRF-180), 취소 반영(PRF-173·환불 단계), P-T47의 300 TPS 측정(측정 창)이다.
+- **결제하지 않은 주문 만료의 첫 구현(추천 적용 2026-11-09, BUILD_ORDER PRF-172)**: §3의 T5·T6과 ADR-0107 결정 1·2·6을 purchase-svc가 실행한다. 세부는 정본에 없어 정했다. 시험은 P-T41이다(결제창을 닫고 떠남, 결제 시도를 만들지 않고 떠남, 만료 직전 접수, 사건 유실 뒤 안전망).
+  - **만료 판정 함수 `OrderExpiry.check(orderId)`(추천 적용 2026-11-09, BUILD_ORDER PRF-172)**: booking 모듈의 application 층에 둔다. 세 조건을 본다.
+    - ① 구매 세션 종료: inventory 포트 `PurchaseSessionStore`로 세션 상태를 읽어, 상태가 없거나 끝났으면 종료로 본다.
+    - ② 그 주문의 홀드가 모두 풀림: inventory의 새 읽기 전용 확인(`RedisOrderHolds.holdLeft`)이 주문 항목의 좌석마다 홀드 Hash의 `holdId`를 읽어, 그 주문 holdId의 홀드가 한 좌석도 남지 않았으면 풀린 것으로 본다. 주문 생성이 쓰는 `check`는 세션의 홀드 목록을 먼저 읽어 세션이 끝나면 살아 있는 홀드도 NOT_FOUND로 답하므로 쓰지 않는다. 좌석맵 판에 없어 색인을 모르는 좌석이 있으면 '아직'으로 본다(안전망이 다시 본다).
+    - ③ 활성 결제 시도 없음: 그 주문의 `payment_attempt` 가운데 status가 READY이고 만든 지 40분 [가정] 안인 행이 없다.
+    - Redis 읽기(①②)는 트랜잭션을 열기 전에 한다. DB 잠금을 쥔 채 Redis를 부르지 않기 위해서다. 그다음 한 트랜잭션에서 주문 행을 `FOR UPDATE`로 잠그고, 상태가 CREATED·AUTHENTICATED가 아니면 끝낸다. 트랜잭션 안에서는 상태와 결제 시도만 다시 본다(잠금 차례 '주문 행 → 결제 시도 행').
+    - 셋 다 끝났으면 조건부 전이 T5(CREATED → EXPIRED)·T6(AUTHENTICATED → EXPIRED)와 주문 이력·Outbox `EXPIRED`를 같은 트랜잭션에 쓴다. 결과는 `EXPIRED`·`NOT_YET{reason}`·`NOT_OPEN`이다.
+  - **세 사건을 받는 자리(추천 적용 2026-11-09, BUILD_ORDER PRF-172)**: 파드 안의 고리(한 모듈의 일이 끝난 뒤 다른 모듈의 함수를 부르게 꽂아 두는 자리)로 받는다. 고리는 API 파드에서 비동기로 돈다(요청과 만료 반복을 막지 않게, 파드마다 동시 4개 [가정], docs/verification.md §4.1). 실패는 경고 한 줄만 남기고 안전망이 받친다.
+    - 구매 세션 종료: inventory `EndPurchaseSession`의 선택 고리 `onEnded({ purchaseSessionId })`다. 나가기·결제 확정과 정리 반복이 끝낸 세션(IDLE·MAX_STAY)에서 끝낸 뒤에 부르고, 고리가 던져도 세션 끝내기 결과는 그대로다. booking은 그 세션의 열린 주문을 새 인덱스 `purchase_order_session_idx`로 찾는다(마이그레이션 0011, docs/data.md §4·§5.1).
+    - 홀드 해제·만료: inventory `ExpirySweeper`의 선택 고리 `onHoldsExpired({ eventId, holdIds })`다. 만료로 푼 좌석의 holdId를 넘기고, 한 묶음 안의 같은 holdId는 한 번만 넘긴다. booking은 고리 한 번에 한 문장(`hold_id = ANY`, 열린 주문만)으로 주문을 찾아, 열린 주문만 판정 줄에 넣는다(holdId마다 쓰기 DB를 부르지 않는다, 2026-11-09 코드 리뷰). 사용자 해제(홀드 해제 API)는 아직 코드가 없어(해제 Lua 없음) 이 단계는 만료만 잇고, 해제 단계(HOT-070)가 같은 고리를 부른다.
+    - 결제 시도 만료: 아래 안전망 반복이 READY 시도를 EXPIRED로 바꾼 뒤 그 주문의 check를 부른다.
+  - **안전망 반복 `OrderExpirySweep`(추천 적용 2026-11-09, BUILD_ORDER PRF-172)**: purchase 릴레이 리더의 `leaderLoops`(리더 파드 하나만 도는 반복)에서 10분 [가정]마다 돈다. DB는 서비스 역할(다시 만들기와 같은 풀)로, Redis는 좌석 Redis로 붙는다.
+    - ① READY 결제 시도 만료: `payment_attempt` 기본 키(UUIDv7) 범위로 만든 지 하루 안이고 40분 [가정] 지난 READY 행을 500건씩 `EXPIRED`로 바꾼다. 결제 시도 행만 바꾸는 조건부 UPDATE다. 바뀐 시도의 주문마다 check를 부르고, check가 '주문 행 → 결제 시도 행' 차례로 다시 잡는다.
+    - ② 주문 안전망: `purchase_order` 기본 키 범위로 만든 지 하루 안이고 90분 [가정] 지난 CREATED·AUTHENTICATED 주문을 500건씩 골라 check를 부른다. 세 조건을 그대로 본다(90분이면 보통 다 끝났다).
+    - ③ 하루 넘은 주문(정비 일 `order-expiry-stale`, 04:00~06:00 KST에 하루 한 번, 2026-11-09 코드 리뷰): 하루 안에 끝나지 못한 주문(망가진 좌석, 좌석맵 파일 없음, 릴레이가 오래 멈춤)을 그대로 두지 않는다. 기본 키 범위로 만든 지 1~30일 [가정]인 열린 주문을 1,000건씩 읽어 check를 부르고, 그래도 열린 수를 `purchase_order_open_stale`로 낸다. 30일이 지난 주문은 세지 않는다(회차 키 수명이 끝나 조건이 끝났으므로 그 전에 끝난다).
+    - 하루가 넘은 열린 주문은 경고 한 줄과 지표로 남긴다(정본은 하루 안만 읽는다, docs/data.md §5.1).
+  - **결제 접수와 경합(추천 적용 2026-11-09, BUILD_ORDER PRF-172)**: 만료 전이는 상태가 CREATED·AUTHENTICATED일 때만 바뀌는 조건부 UPDATE이고 주문 행 잠금 아래에서 돈다. 결제 접수(T3·T4)도 주문 행을 먼저 잠그므로 둘 중 하나만 이긴다. 만료된 주문의 결제 접수는 지금처럼 409 `order-expired`다(PRF-162, docs/data.md §5).
+  - **지표(추천 적용 2026-11-09, BUILD_ORDER PRF-172)**: `purchase_order_expired_total{trigger}`(`trigger`는 `session`·`hold`·`attempt`·`sweep`), `purchase_order_expiry_failures_total{stage}`(`stage`는 `hook`·`check`·`attempt`·`sweep`), `purchase_order_open_stale`(만든 지 1~30일 [가정]인데 아직 열린 주문 수, 게이지, 1 이상이면 SEV3)이다(docs/observability.md 서비스 템플릿의 운영 확인 표).
+  - **이력과 사건(추천 적용 2026-11-09, BUILD_ORDER PRF-172)**: T5·T6 이력의 `cause`는 §3 '주문 저장소의 첫 구현'대로 전이 번호다. Outbox `EXPIRED`는 계약에 있는 주문 사건이고, 소비자를 먼저 배포하는 계약 규칙을 따른다(docs/api/avro/README.md §3). 구매 세션은 이미 끝났으므로 건드리지 않는다.
+  - **넘긴 것**: 굿즈 재고 예약 만료(ADR-0107 결정 4, wbs 7.1.1, core-svc shop), 홀드 사용자 해제 Lua(HOT-070), T2 결제 시도 시작(PRF-190), 화면 문구다.
 - **결제 화면 행동 요약(추천 적용 2026-10-31, ADR-0171 결정 4)**: 브라우저는 주문서·결제 화면(SCR-011)에서 잰 행동 요약(openapi `BehaviorSummary`, 좌석 화면과 같은 필드)을 결제 시도 시작(`POST /v1/orders/{orderId}/payments`) 본문 `behavior`에 싣는다. 구간은 주문서 화면을 연 때부터 그 요청까지이고, 원시 좌표·키 값·입력한 글자는 싣지 않는다(ADR-0065 결정 9). 시험은 P-T51이다.
   - purchase-svc는 그 주문의 첫 결제 시도일 때만, 응답을 보낸 뒤 비동기로 `telemetry.behavior`에 `BehaviorSignal`(screen `PAYMENT`, `journeyId`, pid, 회차)을 낸다. 결제창을 닫고 같은 주문에서 다시 시도할 때 실려 온 요약은 버린다. 같은 멱등키로 다시 보낼 때는 처음 본문을 그대로 보낸다.
   - 결제사 선택과 결제창 값에는 쓰지 않는다. 망 정보(`netClass`·`asn`)와 기기 가명은 싣지 않는다(좌석 화면과 같다, docs/features/seat-hold.md §3).

@@ -1,8 +1,8 @@
 // purchase-svc의 릴레이 프로세스 시작(BUILD_ORDER PRF-164, docs/features/seat-hold.md §6 '릴레이 프로세스와 조립의 첫 구현', ADR-0116 결정 1·2).
 // 서비스와 같은 이미지를 다른 시작 명령으로 띄운다: node --import @peaket/platform/telemetry/register dist/relay.js
 // 배포는 `purchase-svc-outbox-relay` Deployment(복제 2, deploy/charts/peaket-service의 outboxRelay)다. Lease 리더 하나가 Outbox 릴레이·좌석 Stream 릴레이·
-// 다시 만들기 반복·세대 올리기 감시(PRF-168)·정비 일(공용 일, 주문 이력 검사, 회차 목록 빼기)을 함께 돈다. 조립은 relay-app.ts의 startPurchaseRelay이고, 이 파일은 연결을 만들고 닫는다.
-// - DB 셋: 릴레이 역할(PEAKET_OUTBOX_DATABASE_URL)·정비 역할(PEAKET_MAINTENANCE_DATABASE_URL) 각 연결 2개, 서비스 역할(PEAKET_DATABASE_URL, 다시 만들기)은
+// 다시 만들기 반복·세대 올리기 감시(PRF-168)·주문 만료 안전망(PRF-172)·정비 일(공용 일, 주문 이력 검사, 회차 목록 빼기)을 함께 돈다. 조립은 relay-app.ts의 startPurchaseRelay이고, 이 파일은 연결을 만들고 닫는다.
+// - DB 셋: 릴레이 역할(PEAKET_OUTBOX_DATABASE_URL)·정비 역할(PEAKET_MAINTENANCE_DATABASE_URL) 각 연결 2개, 서비스 역할(PEAKET_DATABASE_URL, 다시 만들기·주문 만료 안전망)은
 //   relay-app.ts relayServiceDatabaseOptions(일반 풀 모양·연결 4개 [가정], 다시 만들기가 세 읽기를 함께 보낸다, 리뷰 고침 H1)
 // - 좌석 Redis·좌석맵 판 폴더는 API(main.ts)와 같은 환경 값(PEAKET_SEAT_REDIS_URL 또는 PEAKET_SEAT_REDIS_CLUSTER_URLS, PEAKET_SEATMAP_DIR)
 // - Kafka 생산자 하나를 Outbox 보내기와 좌석 Stream 릴레이(거래 토픽)가 함께 쓴다(MSK IAM 세션 이름 purchase-svc-outbox-relay-<환경>)
@@ -31,8 +31,8 @@ const need = (name: string, what: string): string => {
   if (!v) throw new Error(`${name}가 없다(${what})`);
   return v;
 };
-// 다시 만들기의 서비스 역할 주소와 좌석맵 판 폴더(듣기 전에 본다. 빠지면 시작하지 않는다)
-const serviceDatabaseUrl = need('PEAKET_DATABASE_URL', '다시 만들기가 쓰는 purchase DB 서비스 역할 주소');
+// 다시 만들기·주문 만료 안전망의 서비스 역할 주소와 좌석맵 판 폴더(듣기 전에 본다. 빠지면 시작하지 않는다)
+const serviceDatabaseUrl = need('PEAKET_DATABASE_URL', '다시 만들기와 주문 만료 안전망이 쓰는 purchase DB 서비스 역할 주소');
 const seatMapDir = need('PEAKET_SEATMAP_DIR', '회차별 좌석맵 판 파일 {eventId}.json이 있는 폴더');
 // 좌석 Redis: 로컬·CI는 단일 노드 주소, 운영은 클러스터 시작 노드 주소들(쉼표). main.ts와 같은 규칙
 const clusterUrls = (process.env.PEAKET_SEAT_REDIS_CLUSTER_URLS ?? '')
@@ -53,7 +53,7 @@ const log = createPlatformLogger({
 });
 
 // 릴레이 역할(Outbox 읽기·sent_at 고치기만)과 정비 역할(PgBouncer를 거치지 않는 주소)을 따로 받는다(docs/data.md §4의 7번).
-// 다시 만들기는 서비스 역할이다(seat_rebuild·seat_sale·seat_hold·주문 표는 서비스 자신의 데이터, docs/features/seat-hold.md §6 'DB 역할')
+// 다시 만들기·주문 만료 안전망은 서비스 역할이다(seat_rebuild·seat_sale·seat_hold·주문 표는 서비스 자신의 데이터, docs/features/seat-hold.md §6 'DB 역할')
 const database = createDatabase({ url: config.outboxDatabaseUrl, applicationName: `${SERVICE}-outbox-relay`, max: 2 });
 const maintenanceDatabase = createDatabase({ url: config.maintenanceDatabaseUrl, applicationName: `${SERVICE}-maintenance`, max: 2 });
 const serviceDatabase = createDatabase(relayServiceDatabaseOptions(serviceDatabaseUrl));

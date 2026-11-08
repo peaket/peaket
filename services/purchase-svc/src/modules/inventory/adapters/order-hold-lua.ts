@@ -25,6 +25,25 @@
 // 정한 것(정본에 없음): 검사 2의 좌석 하나 안의 차례는 칸 없음 → holdId·owner·psid·kind 다름 → heldAt·exp 형식 → exp ≤ now → heldAt 다름이다.
 // 형식이 틀린 값은 견주지 않는다('-5'도 지난 시각이 아니라 망가진 값). 좌석 키가 하나도 없으면(#KEYS < 2) 'ERR PEAKET_BAD_INPUT'이다(앱이 막아 오지 않는다).
 
+// 주문 만료의 '홀드 남음' Lua 계약(docs/features/payment.md §2 '결제하지 않은 주문 만료의 첫 구현' 조건 ②, BUILD_ORDER PRF-172).
+// 첫 줄은 `#!lua flags=no-writes`다. KEYS는 모두 회차 해시 태그 {event:E} 하나의 슬롯이다.
+//   KEYS 1.. hold:{좌석 색인}(주문 항목의 좌석마다, 하나 이상)   ARGV 1 주문의 holdId
+// 좌석마다 홀드 Hash의 holdId 칸을 읽어 ARGV[1]과 같은 좌석 수(0 이상 정수)를 돌려준다. 구매 세션의 홀드 목록(jti 슬롯)은 보지 않는다(세션을 끝내면 목록이 지워져도 홀드는 살아 있다).
+// 구현에서 정한 것(정본에 없다): 시각은 보지 않는다(exp가 지났어도 만료 Lua가 풀기 전이면 남은 것이다. 풀 때 고리가 다시 부른다). 세대 키도 보지 않는다(홀드 Hash만이 근거다. 회차 키의 수명이 끝난 뒤 주문이 영영 '아직'으로 남지 않게).
+// 홀드 키가 hash가 아니면(키가 없으면 통과) 쓰는 Lua와 같은 'ERR PEAKET_CORRUPT_KEY {키}' 오류다. 좌석 키가 하나도 없으면 'ERR PEAKET_BAD_INPUT'이다(앱이 막아 오지 않는다).
+
+/** 주문 좌석의 홀드 남음 Lua 원문(위 계약). 첫 줄이 `#!lua flags=no-writes`다 */
+export const ORDER_HOLD_LEFT_LUA = `#!lua flags=no-writes
+if #KEYS < 1 then return redis.error_reply('ERR PEAKET_BAD_INPUT hold-left seats') end
+local left = 0
+for i = 1, #KEYS do
+  local ty = redis.call('TYPE', KEYS[i]).ok
+  if ty ~= 'none' and ty ~= 'hash' then return redis.error_reply('ERR PEAKET_CORRUPT_KEY ' .. KEYS[i]) end
+  if redis.call('HGET', KEYS[i], 'holdId') == ARGV[1] then left = left + 1 end
+end
+return left
+`;
+
 /** 홀드 확인 Lua 원문(위 계약). 첫 줄이 `#!lua flags=no-writes`다 */
 export const ORDER_HOLD_LUA = `#!lua flags=no-writes
 if #KEYS < 2 then return redis.error_reply('ERR PEAKET_BAD_INPUT order-hold seats') end

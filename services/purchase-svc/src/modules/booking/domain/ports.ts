@@ -1,5 +1,6 @@
 // booking 모듈의 포트(바깥 저장소·지표와 닿는 면, BUILD_ORDER PRF-160·PRF-161).
 import type { OrderEventMessage, OrderItem, OrderStatus, OrderRow, CreatedExtras, SeatAssignment, TransitionId } from './order.js';
+import type { OrderExpiryNotYetReason, OrderExpiryStage, OrderExpiryTransition, OrderExpiryTrigger } from './order-expiry.js';
 import type { OrderPaymentState, PaymentLedgerStatus, PaymentPullFailureCode, PaymentPullIgnoreReason, PaymentPullRunStage } from './payment-pull.js';
 import type {
   AppliedPaymentEventType,
@@ -184,6 +185,8 @@ export interface OrderHoldQuery {
   readonly accountId: string;
   /** 본문 holdId(모양은 보지 않은 글 그대로) */
   readonly holdId: string;
+  /** 주문 항목의 좌석 ID(만료 판정의 '홀드 남음' 확인 OrderExpiryInventory.holdRemains만 쓴다. 주문 생성의 check는 세션의 홀드 목록에서 읽으므로 쓰지 않는다, BUILD_ORDER PRF-172) */
+  readonly seatIds?: readonly string[];
 }
 
 /** 홀드 확인 결과 */
@@ -1351,4 +1354,128 @@ export interface PaymentPullSignals {
   batch(): void;
   /** 카운터 payment_result_pull_failures_total을 1 올린다(BatchGetPayments 실패. 1분 이어지면 SEV2, ADR-0140 결정 4) */
   failure(): void;
+}
+
+// ---- 결제하지 않은 주문의 만료와 안전망(ADR-0107 결정 1·2, BUILD_ORDER PRF-172 설계 1~5) ----
+
+/** 만료를 판정하고 다리를 부를 때 쓰는 주문 칸 */
+export interface OrderExpiryOrder {
+  readonly orderId: string;
+  readonly accountId: string;
+  readonly eventId: string;
+  readonly purchaseSessionId: string;
+  readonly holdId: string;
+  readonly status: OrderStatus;
+  /**
+   * 주문 항목의 좌석 ID(줄 번호 차례). OrderExpiryStore.order만 채운다(구현에서 정한 것: 목록 읽기는 찾은 주문을 check가 order로 다시 읽으므로 항목 표까지 읽지 않는다.
+   * 묶음 읽기의 실행 계획을 data.md §5.1 그대로 둔다)
+   */
+  readonly seatIds?: readonly string[];
+}
+
+/** 잠그고 다시 보며 전이하기의 입력. sessionEnded·holdRemains는 트랜잭션을 열기 전에 읽은 값이다(DB 잠금을 쥔 채 Redis를 부르지 않는다) */
+export interface OrderExpiryInput {
+  readonly orderId: string;
+  readonly sessionEnded: boolean;
+  readonly holdRemains: boolean;
+  /** order_event.actor(ORDER_EXPIRY_ACTOR) */
+  readonly actor: string;
+}
+
+/** 만료 판정의 결과. NOT_OPEN의 current는 지금 상태(주문이 없으면 없다) */
+export type OrderExpiryOutcome =
+  | { readonly status: 'EXPIRED'; readonly transition: OrderExpiryTransition; readonly seq: number }
+  | { readonly status: 'NOT_YET'; readonly reason: OrderExpiryNotYetReason }
+  | { readonly status: 'NOT_OPEN'; readonly current?: OrderStatus };
+
+/** READY에서 EXPIRED로 바꾼 결제 시도 하나 */
+export interface OrderExpiredAttempt {
+  readonly attemptId: string;
+  readonly orderId: string;
+}
+
+/** 묶음 읽기의 범위. 만든 시각을 UUIDv7 경계(플랫폼 uuidLowerBound)로 바꿔 기본 키 범위 [createdFromMs, createdBeforeMs)로 읽는다 */
+export interface OrderExpiryRange {
+  readonly createdFromMs: number;
+  readonly createdBeforeMs: number;
+  /** 1 ~ ORDER_EXPIRY_BATCH(500) */
+  readonly limit: number;
+}
+
+/** 만료 저장소(운영은 adapters/db/drizzle-order-expiry.ts DrizzleOrderExpiry). 주문 상태는 주문 전이 함수로만 바꾼다 */
+export interface OrderExpiryStore {
+  /** 주문 하나와 그 항목의 좌석 ID(잠그지 않는다). 없거나 소문자 UUID가 아니면 undefined */
+  order(orderId: string): Promise<OrderExpiryOrder | undefined>;
+  /** 그 구매 세션의 열린 주문(CREATED·AUTHENTICATED, 인덱스 purchase_order_session_idx). 없으면 [] */
+  openOrdersOfSession(purchaseSessionId: string): Promise<OrderExpiryOrder[]>;
+  /**
+   * 그 홀드들로 만든 열린 주문(CREATED·AUTHENTICATED) 한 문장(hold_id = any, hold_id 유일 인덱스. docs/data.md §5.1 '만료 고리의 열린 주문 찾기').
+   * 소문자 UUID가 아닌 holdId는 빼고 묻고, 남은 것이 없으면 DB에 가지 않고 []다
+   */
+  openOrdersOfHolds(holdIds: readonly string[]): Promise<OrderExpiryOrder[]>;
+  /**
+   * 트랜잭션 하나(read committed, 잠금 차례 주문 행 → 결제 시도 행): 주문 행을 FOR UPDATE로 잠그고, 활성 결제 시도(READY이고 만든 지 40분 [가정] 안)를 보고,
+   * expiryDecision이 EXPIRE면 전이 함수로 T5·T6(이력·Outbox EXPIRED)을 쓴다. 전이가 STALE이면 NOT_OPEN(current)이다.
+   * @throws RangeError 행위자 모양 틀림(전이 함수 그대로)
+   */
+  expireIfDue(input: OrderExpiryInput): Promise<OrderExpiryOutcome>;
+  /**
+   * READY 결제 시도 만료 묶음: 범위 안의 READY 행을 limit개까지 EXPIRED로 바꾼다(조건부 UPDATE 한 문장, FOR UPDATE SKIP LOCKED로 고른다. 결제 시도 행만 잠그고 주문 행은 건드리지 않는다).
+   * 바뀐 시도들을 돌려준다. 주문의 만료는 부르는 쪽이 그 주문마다 check로 다시 본다
+   * @throws RangeError 범위·limit이 틀림
+   */
+  expireReadyAttempts(range: OrderExpiryRange): Promise<OrderExpiredAttempt[]>;
+  /**
+   * 안전망 묶음 읽기(docs/data.md §5.1): 기본 키 범위 안의 CREATED·AUTHENTICATED 주문을 ID 차례로 limit개까지 읽는다. afterId를 주면 그 ID 뒤부터다
+   * (NOT_YET으로 남는 주문이 있어 커서로 넘어간다). 잠그지 않는다.
+   * @throws RangeError 범위·limit·afterId가 틀림
+   */
+  openOrderBatch(range: OrderExpiryRange & { readonly afterId?: string }): Promise<OrderExpiryOrder[]>;
+  /**
+   * 하루 넘은 주문 정비 일의 묶음 읽기(docs/features/payment.md §2 안전망 ③): openOrderBatch와 같은 문장이고 limit만 1 ~ ORDER_EXPIRY_STALE_BATCH(1,000)다.
+   * @throws RangeError 범위·limit·afterId가 틀림
+   */
+  staleOrderBatch(range: OrderExpiryRange & { readonly afterId?: string }): Promise<OrderExpiryOrder[]>;
+}
+
+/** inventory로 가는 만료 다리(운영은 adapters/inventory-bridges.ts InventoryOrderExpiry). 좌석 Redis를 읽으므로 트랜잭션 밖에서만 부른다 */
+export interface OrderExpiryInventory {
+  /**
+   * 구매 세션이 끝났나(세션 상태가 없거나 최대 체류 시각이 지났으면 true).
+   * @throws OrderSeatStoreUnavailable 좌석 Redis 일시 장애(끝났다고 보지 않는다)
+   */
+  sessionEnded(purchaseSessionId: string): Promise<boolean>;
+  /**
+   * 그 주문의 홀드가 아직 남았나(q.seatIds의 좌석 가운데 한 좌석이라도 홀드 Hash의 holdId가 q.holdId면 true). 구매 세션의 홀드 목록은 보지 않는다(세션을 끝내면 목록이 지워져도 홀드는 살아 있다).
+   * 좌석맵 판에 없는 좌석이 있거나 좌석을 모르면 true(아직, 안전망이 다시 본다).
+   * @throws OrderSeatStoreUnavailable 좌석 Redis 일시 장애(풀렸다고 보지 않는다)
+   */
+  holdRemains(q: OrderHoldQuery): Promise<boolean>;
+}
+
+/** 구매 세션 종료 고리의 값(inventory EndPurchaseSessionDeps.onEnded와 같은 모양) */
+export interface OrderExpirySessionEnded {
+  readonly purchaseSessionId: string;
+}
+
+/** 홀드 만료 고리의 값(inventory ExpirySweeperDeps.onHoldsExpired와 같은 모양) */
+export interface OrderExpiryHoldsExpired {
+  readonly eventId: string;
+  /** 같은 holdId는 한 번 */
+  readonly holdIds: readonly string[];
+}
+
+/** 주문 만료 지표(운영은 adapters/prom-order-expiry-signals.ts PromOrderExpirySignals, 이름은 설계 5). 던지지 않는다 */
+export interface OrderExpirySignals {
+  /** 카운터 purchase_order_expired_total{trigger}를 1 올린다 */
+  expired(trigger: OrderExpiryTrigger): void;
+  /** 카운터 purchase_order_expiry_failures_total{stage}를 1 올린다 */
+  failure(stage: OrderExpiryStage): void;
+  /** 게이지 purchase_order_open_stale을 count로 둔다(만든 지 1~30일 [가정]인데 아직 열린 주문 수. 1 이상이면 SEV3. 파드 사이 최댓값으로 본다) */
+  openStale(count: number): void;
+}
+
+/** 주문 만료 경고 로그(주문 ID·오류 이름만 싣는다. 오류 글·개인정보는 싣지 않는다) */
+export interface OrderExpiryLogger {
+  warn(obj: object, msg: string): void;
 }

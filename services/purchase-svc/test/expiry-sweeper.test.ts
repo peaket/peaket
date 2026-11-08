@@ -1272,3 +1272,121 @@ describe('C3 saleEvents의 회차 ID 모양 거르기 경고는 파드마다 60�
     for (const raw of ['bad{x}', 'a:b']) expect({ raw, found: text.includes(raw) }).toEqual({ raw, found: false });
   });
 });
+
+describe('ExpirySweeper 주문 만료 고리 onHoldsExpired(BUILD_ORDER PRF-172, ADR-0107, docs/features/seat-hold.md §5)', () => {
+  type HoldsExpired = { readonly eventId: string; readonly holdIds: readonly string[] };
+  /** 고리를 단 world. seen은 고리가 받은 값(그때의 복사본)이다 */
+  function hooked(onCall?: () => void) {
+    const w = world();
+    const seen: HoldsExpired[] = [];
+    const sweeper = w.sweeper('pod-a', {
+      onHoldsExpired: (e) => {
+        seen.push({ eventId: e.eventId, holdIds: [...e.holdIds] });
+        onCall?.();
+      },
+    });
+    /** 좌석의 홀드 ID(풀리기 전에 읽어 둔다) */
+    const holdIdOf = (eventId: string, seat: SeatRef) => w.ev(eventId).holds.get(seat.index)!.holdId;
+    return { w, seen, sweeper, holdIdOf };
+  }
+  const allHoldIds = (seen: HoldsExpired[]) => seen.flatMap((e) => [...e.holdIds]);
+
+  test('PT41_ADR0107_푼 홀드의 holdId를 회차와 함께 넘기고, 여러 좌석의 같은 holdId는 한 번만 싣는다 [ASVS v5.0.0-2.3.1]', async () => {
+    const { w, seen, sweeper, holdIdOf } = hooked();
+    const { eventId } = await w.openEvent();
+    await w.hold(eventId, [ref('A01'), ref('A02')], ACCOUNT_A);
+    await w.hold(eventId, [ref('B01')], ACCOUNT_B);
+    const a = holdIdOf(eventId, ref('A01'));
+    const b = holdIdOf(eventId, ref('B01'));
+    expect(holdIdOf(eventId, ref('A02'))).toBe(a);
+    w.clock.advance(HOLD_TTL_MS);
+    expect((await sweeper.tick()).events).toMatchObject([report(eventId, 'DRAINED', { batches: 1, released: 3 })]);
+    expect(seen.every((e) => e.eventId === eventId)).toBe(true);
+    expect(allHoldIds(seen).sort()).toEqual([a, b].sort());
+  });
+
+  test('ADR0107_풀 것이 없으면 고리를 부르지 않는다(틱에 만료된 홀드 없음)', async () => {
+    const { w, seen, sweeper } = hooked();
+    const { eventId } = await w.openEvent();
+    await w.hold(eventId, [ref('A01')]);
+    await sweeper.tick();
+    expect(seen).toEqual([]);
+  });
+
+  test('ADR0107_건너뛴 좌석(연장된 홀드)과 고아는 푼 것이 아니므로 그 holdId를 넘기지 않는다', async () => {
+    const { w, seen, sweeper, holdIdOf } = hooked();
+    const { eventId } = await w.openEvent();
+    await w.hold(eventId, [ref('A01')], ACCOUNT_A);
+    await w.hold(eventId, [ref('B01')], ACCOUNT_B);
+    const released = holdIdOf(eventId, ref('B01'));
+    w.clock.advance(HOLD_TTL_MS);
+    // A01은 연장됨: 만료 인덱스 점수는 지났는데 Hash exp는 1분 뒤
+    w.ev(eventId).holds.get(ref('A01').index)!.exp = w.clock.now() + 60_000;
+    // 색인 36은 고아(홀드 Hash 없음)
+    w.ev(eventId).expiry.set(36, NOW);
+    expect((await sweeper.tick()).events).toMatchObject([report(eventId, 'DRAINED', { batches: 1, released: 1, skipped: 1, orphans: 1 })]);
+    expect(allHoldIds(seen)).toEqual([released]);
+  });
+
+  test('ADR0107_연장된 홀드뿐이면(NO_PROGRESS) 고리를 부르지 않는다', async () => {
+    const { w, seen, sweeper } = hooked();
+    const { eventId } = await w.openEvent();
+    await w.hold(eventId, [ref('A01')]);
+    w.clock.advance(HOLD_TTL_MS);
+    w.ev(eventId).holds.get(ref('A01').index)!.exp = w.clock.now() + 60_000;
+    expect((await sweeper.tick()).events).toMatchObject([report(eventId, 'NO_PROGRESS', { batches: 1, skipped: 1 })]);
+    expect(seen).toEqual([]);
+  });
+
+  test('PT41_ADR0107_묶음이 여럿이어도 푼 홀드를 모두 넘기고 한 번의 부름에는 같은 holdId가 없다 [ASVS v5.0.0-2.3.1]', async () => {
+    const { w, seen, sweeper, holdIdOf } = hooked();
+    const seats = Array.from({ length: 250 }, (_, i) => bigSeat(i));
+    const { eventId } = await w.openEvent(seats, { seatCount: 250 });
+    await w.holdMany(eventId, seats);
+    const expected = [...new Set(seats.map((s) => holdIdOf(eventId, s)))].sort();
+    w.clock.advance(HOLD_TTL_MS);
+    expect((await sweeper.tick()).events).toMatchObject([report(eventId, 'DRAINED', { batches: 3, released: 250 })]);
+    for (const e of seen) expect(new Set(e.holdIds).size).toBe(e.holdIds.length);
+    expect([...new Set(allHoldIds(seen))].sort()).toEqual(expected);
+  });
+
+  test('ADR0107_회차가 여럿이면 회차마다 제 회차의 holdId만 넘긴다', async () => {
+    const { w, seen, sweeper, holdIdOf } = hooked();
+    const a = await w.openEvent();
+    const b = await w.openEvent();
+    await w.hold(a.eventId, [ref('A01')]);
+    await w.hold(b.eventId, [ref('A01')]);
+    const idA = holdIdOf(a.eventId, ref('A01'));
+    const idB = holdIdOf(b.eventId, ref('A01'));
+    w.clock.advance(HOLD_TTL_MS);
+    await sweeper.tick();
+    expect(seen.filter((e) => e.eventId === a.eventId).flatMap((e) => [...e.holdIds])).toEqual([idA]);
+    expect(seen.filter((e) => e.eventId === b.eventId).flatMap((e) => [...e.holdIds])).toEqual([idB]);
+  });
+
+  test('ADR0107_고리가 던져도 반복은 멈추지 않는다: 그 회차의 다음 묶음과 다른 회차를 그대로 돌고 결과도 그대로다 [ASVS v5.0.0-16.5.2]', async () => {
+    const { w, seen, sweeper } = hooked(() => {
+      throw new Error('hook down');
+    });
+    const seats = Array.from({ length: 150 }, (_, i) => bigSeat(i));
+    const big = await w.openEvent(seats, { seatCount: 150 });
+    const small = await w.openEvent();
+    await w.holdMany(big.eventId, seats);
+    await w.hold(small.eventId, [ref('A01')]);
+    w.clock.advance(HOLD_TTL_MS);
+    const t = await sweeper.tick();
+    expect(Object.fromEntries(t.events.map((x) => [x.eventId, [x.outcome, x.released]]))).toEqual({ [big.eventId]: ['DRAINED', 150], [small.eventId]: ['DRAINED', 1] });
+    // 회차마다 적어도 한 번 불렸고 그때마다 던졌다
+    expect(new Set(seen.map((e) => e.eventId)).size).toBe(2);
+    expect(w.ev(big.eventId).expiry.size).toBe(0);
+    expect(w.ev(small.eventId).expiry.size).toBe(0);
+  });
+
+  test('ADR0107_고리를 달지 않은 조립도 그대로 돈다', async () => {
+    const w = world();
+    const { eventId } = await w.openEvent();
+    await w.hold(eventId, [ref('A01')]);
+    w.clock.advance(HOLD_TTL_MS);
+    expect((await w.sweeper().tick()).events).toMatchObject([report(eventId, 'DRAINED', { batches: 1, released: 1 })]);
+  });
+});
