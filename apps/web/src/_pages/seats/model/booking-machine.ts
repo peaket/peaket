@@ -62,6 +62,7 @@ export const bookingMachine = setup({
   },
   guards: {
     hasPicks: ({ context }) => context.picks.length > 0,
+    isPicked: ({ context, event }) => event.type === 'TOGGLE' && context.picks.some((p) => p.seatId === event.seat.seatId),
   },
 }).createMachine({
   id: 'booking',
@@ -96,8 +97,8 @@ export const bookingMachine = setup({
     held: { on: { EXPIRED: { target: 'selecting', actions: assign({ picks: [], hold: null, notice: { kind: 'expired' } }) } } },
     /** 판매 일시 정지(423): 홀드 버튼을 막는다 */
     paused: { on: { TOGGLE: { actions: 'toggle' }, RESUME: 'selecting' } },
-    /** 판매 종료(410) */
-    saleEnded: { on: { TOGGLE: { actions: 'toggle' } } },
+    /** 판매 종료(410): 새로 고르지 못하고 고른 좌석을 풀 수만 있다(d5 §5.10) */
+    saleEnded: { on: { TOGGLE: { guard: 'isPicked', actions: 'toggle' } } },
     ended: { type: 'final' },
   },
 });

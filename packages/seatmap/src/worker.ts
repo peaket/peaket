@@ -47,6 +47,9 @@ async function failed(source: 'layout' | 'snapshot', res: Response): Promise<Fet
   return new FetchFailed(source, res.status, problem, res.headers.has('retry-after') && Number.isFinite(ra) && ra >= 0 ? ra : undefined);
 }
 
+/** 누름에 확대로 답한 뒤 이 시간 안의 누름(더블클릭의 두 번째)은 고르지 않는다 [가정](ADR-0236) */
+const AFTER_ZOOM_GUARD_MS = 300;
+
 /** 읽기 요청 시간 제한(docs/frontend.md §4.1 '시간 초과' 읽기 10초) */
 const READ_TIMEOUT_MS = 10_000;
 const timeoutSignal = (): AbortSignal => AbortSignal.timeout(READ_TIMEOUT_MS);
@@ -76,6 +79,23 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
   let pendingTiers: { tierRank?: string[]; tierNames?: Record<string, string> } | null = null;
   /** 기다리는 그리기(끌기·확대 메시지가 몰려도 프레임마다 한 번만 그린다, docs/frontend.md §3.5 '그리기') */
   let frame: Promise<void> | null = null;
+  /** 마우스가 있는 화면 점(떠나면 null). 카메라가 바뀌어도 같은 점으로 다시 판정한다(ADR-0236) */
+  let hoverPoint: { x: number; y: number } | null = null;
+  /** 화면에 알린 마지막 값 */
+  let hoverPosted = false;
+  /** 누름에 확대로 답한 시각 */
+  let zoomedAt = Number.NEGATIVE_INFINITY;
+  /** 마우스 올림 좌석을 맞춘다. 좌석이 바뀌었으면 true */
+  const syncHover = (): boolean => {
+    if (!engine) return false;
+    const changed = hoverPoint ? engine.hoverAt(hoverPoint.x, hoverPoint.y) : engine.clearHover();
+    const on = engine.hovered >= 0;
+    if (on !== hoverPosted) {
+      hoverPosted = on;
+      host.post({ type: 'hover', selectable: on });
+    }
+    return changed;
+  };
   const drawSoon = (): Promise<void> =>
     (frame ??= host.nextFrame().then(() => {
       frame = null;
@@ -94,6 +114,7 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
   /** 그리고 view를 알린다 */
   const draw = () => {
     if (!engine) return;
+    syncHover();
     engine.draw();
     notifyView();
   };
@@ -170,6 +191,8 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
         engine = null;
         listed = null;
         canvas = null;
+        hoverPoint = null;
+        hoverPosted = false;
         return;
       }
       if (m.type === 'viewport') {
@@ -210,14 +233,31 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
           }
           break;
         case 'pointer':
+          if (m.kind === 'move' || m.kind === 'leave') {
+            hoverPoint = m.kind === 'move' ? { x: m.x, y: m.y } : null;
+            if (syncHover()) await drawSoon();
+            break;
+          }
           if (m.kind !== 'up') break;
+          if (host.now() - zoomedAt < AFTER_ZOOM_GUARD_MS) {
+            host.post({ type: 'hit', seatIndex: -1, seatId: null, label: null, tier: null });
+            break;
+          }
           // 전체 배치도에서 구역을 누르면 그 구역으로 확대한다(seat-hold §10 '구역 누르기'). 같은 동작에서 좌석을 누른 것으로 보지 않는다
           if (engine.level() === 'overview') {
             const s = engine.sectionAt(m.x, m.y);
             if (s >= 0) {
               engine.focusSection(s);
+              zoomedAt = host.now();
               draw();
             }
+            host.post({ type: 'hit', seatIndex: -1, seatId: null, label: null, tier: null });
+            break;
+          }
+          // 좌석이 작아 고를 수 없는 배율이면 고르지 않고 그 자리를 확대한다(ADR-0236)
+          if (engine.zoomToSeat(m.x, m.y)) {
+            zoomedAt = host.now();
+            draw();
             host.post({ type: 'hit', seatIndex: -1, seatId: null, label: null, tier: null });
             break;
           }

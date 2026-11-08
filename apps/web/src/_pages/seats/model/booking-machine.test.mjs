@@ -92,6 +92,13 @@ test('SCR-010 일시 오류는 고른 좌석을 두고 다시 시도할 수 있�
   assert.equal(s.context.notice?.kind, 'error');
 });
 
+test('SCR-010 판매 종료 뒤에는 고른 좌석을 풀 수만 있고 새로 고르지 못한다(d5 §5.10 판매 종료)', () => {
+  const a = start();
+  assert.equal(send(a, { type: 'TOGGLE', seat: seat(1) }, { type: 'HOLD' }, { type: 'HOLD_SALE_ENDED' }).value, 'saleEnded');
+  assert.deepEqual(send(a, { type: 'TOGGLE', seat: seat(2) }).context.picks.map((p) => p.seatId), [seat(1).seatId]);
+  assert.deepEqual(send(a, { type: 'TOGGLE', seat: seat(1) }).context.picks, []);
+});
+
 test('SCR-010 모델 기반: 최단 경로로 모든 상태에 닿고, 인접 맵으로 모든 전이를 돈다', () => {
   const shortest = getShortestPaths(bookingMachine, opts);
   const reached = new Set(shortest.map((p) => p.state.value));

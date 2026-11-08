@@ -143,6 +143,30 @@ export function createGesture() {
   };
 }
 
+/** 예매 흐름이 새 좌석을 고를 수 있는 상태인가(booking-machine이 새 좌석의 TOGGLE을 받는 상태, ADR-0236) */
+export function canPick(value: unknown): boolean {
+  return value === 'selecting' || value === 'paused';
+}
+
+/** 마우스 올림 위치를 Worker에 보낸다: 누르지 않은 마우스·펜이고 고를 수 있는 동안만. 그렇지 않게 되면 한 번만 지운다(ADR-0236) */
+export function createHoverTracker(send: (m: { kind: 'move' | 'leave'; x: number; y: number }) => void, pickable: () => boolean) {
+  let tracked = false;
+  const stop = (): void => {
+    if (!tracked) return;
+    tracked = false;
+    send({ kind: 'leave', x: 0, y: 0 });
+  };
+  return {
+    move(x: number, y: number, e: { pointerType: string; buttons: number }): void {
+      if (e.pointerType !== 'touch' && e.buttons === 0 && pickable()) {
+        tracked = true;
+        send({ kind: 'move', x, y });
+      } else stop();
+    },
+    stop,
+  };
+}
+
 /** 줄 단위 휠 한 칸의 픽셀(Firefox deltaMode 1) */
 const LINE_PX = 16;
 

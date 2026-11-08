@@ -4,6 +4,7 @@
 // → seats(화면에 보이는 구역 하나라도 화면 폭의 1/3 이상 [가정]이면 보이는 구역의 좌석. 축소하면 다시 구역 면으로 합쳐진다).
 // seats에서 좌석이 24 CSS px 미만이면 구역 비트맵(캐시)을 늘려 그리고, 24px 이상(고를 수 있는 배율)이면 보이는 좌석만 바로 그린다.
 // 확대·축소는 카메라 행렬만 바꾼다(seat-hold §10). 미니맵(지금 보는 범위)은 seats 단계에서 캔버스 오른쪽 아래에 그린다.
+import { color } from '@peaket/ds/tokens';
 import { BitmapCache, scaleBucket } from './bitmaps';
 import { buildGrids, cameraFit, hitAtScreen, type Camera, type SectionGrid } from './grid';
 import { FLAG, decodeLayout, sectionOf, seatIdOf, type DecodedLayout, type SeatMapColumnsFile } from './layout';
@@ -23,6 +24,14 @@ export const SEATS_SECTION_RATIO = 1 / 3;
 export const ZOOM_STEP = 1.5;
 /** 가장 크게 확대한 좌석 크기(CSS px) [가정] */
 export const MAX_SEAT_PX = 64;
+/** 마우스를 올린 좌석의 크기 배수 [가정]. 좌석이 칸의 80%라 1.2배면 이웃 좌석을 덮지 않는다(ADR-0236) */
+export const HOVER_SCALE = 1.2;
+/** 마우스를 올린 좌석의 테두리 두께(CSS px) */
+export const HOVER_RING_PX = 2;
+/** 좌석과 테두리 사이의 바탕색 틈(CSS px). 내가 고른 좌석은 테두리와 색이 같거나 비슷해 틈이 있어야 보인다. 24px 좌석에서도 이웃을 덮지 않는 값이다 */
+export const HOVER_GAP_PX = 1;
+/** 고를 수 없는 배율에서 좌석을 눌렀을 때 확대해 맞추는 좌석 크기(CSS px) [가정] */
+export const SELECT_ZOOM_PX = 32;
 /** 미니맵 폭(CSS px)과 화면 가장자리 여백 [가정] */
 export const MINIMAP = { width: 120, margin: 12 } as const;
 
@@ -70,6 +79,8 @@ export class SeatMapEngine {
   }
   /** 스냅샷을 받았는가(받기 전은 loading) */
   hasState = false;
+  /** 마우스를 올린 고를 수 있는 좌석(없으면 -1) */
+  hovered = -1;
   cam: Camera = { scale: 1, tx: 0, ty: 0 };
   readonly cache = new BitmapCache();
   private o: EngineOptions;
@@ -266,11 +277,38 @@ export class SeatMapEngine {
     return { x: this.o.width - w - MINIMAP.margin, y: this.o.height - h - MINIMAP.margin, w, h };
   }
 
-  hit(px: number, py: number): { seatIndex: number; seatId: string | null; label: string | null; tier: string | null } {
+  /** 화면 점의 좌석(없으면 -1). 미니맵에 가려진 좌석은 없는 것으로 본다 */
+  private seatAt(px: number, py: number): number {
     const m = this.minimapRect();
-    // 미니맵을 누르면 그 밑(가려진) 좌석을 고르지 않는다
     const onMinimap = px >= m.x && px <= m.x + m.w && py >= m.y && py <= m.y + m.h;
-    const k = this.selectable() && !onMinimap ? hitAtScreen(this.L, this.grids, this.cam, px, py) : -1;
+    return onMinimap ? -1 : hitAtScreen(this.L, this.grids, this.cam, px, py);
+  }
+
+  /** 화면 점의 고를 수 있는 좌석을 마우스 올림 좌석으로 둔다. 바뀌었으면 true */
+  hoverAt(px: number, py: number): boolean {
+    const k = this.selectable() ? this.seatAt(px, py) : -1;
+    const next = k >= 0 && this.canSelect(k) ? k : -1;
+    if (next === this.hovered) return false;
+    this.hovered = next;
+    return true;
+  }
+
+  /** 마우스 올림 표시를 지운다. 바뀌었으면 true */
+  clearHover(): boolean {
+    if (this.hovered < 0) return false;
+    this.hovered = -1;
+    return true;
+  }
+
+  /** 좌석이 보이지만 고를 수 없는 배율에서 좌석을 눌렀으면 그 점을 고정해 고를 수 있는 배율로 확대한다. 확대했으면 true(ADR-0236) */
+  zoomToSeat(px: number, py: number): boolean {
+    if (this.level() !== 'seats' || this.selectable() || this.seatPx() < SEAT_DRAW_MIN_PX || this.seatAt(px, py) < 0) return false;
+    this.zoomBy(SELECT_ZOOM_PX / this.seatPx(), px, py);
+    return true;
+  }
+
+  hit(px: number, py: number): { seatIndex: number; seatId: string | null; label: string | null; tier: string | null } {
+    const k = this.selectable() ? this.seatAt(px, py) : -1;
     if (k < 0) return { seatIndex: -1, seatId: null, label: null, tier: null };
     const { section, offset } = sectionOf(this.L, k);
     const sec = this.L.file.sections[section]!;
@@ -387,7 +425,27 @@ export class SeatMapEngine {
         drawn++;
       }
     }
+    if (this.hovered >= 0 && seatPx >= MIN_SELECT_PX) this.drawHover(seatPx);
     return drawn;
+  }
+
+  /** 마우스를 올린 좌석을 다른 좌석 위에 키워 그리고 테두리를 두른다(ADR-0236) */
+  private drawHover(seatPx: number): void {
+    const { ctx, theme } = this.o;
+    const { cam, L } = this;
+    const k = this.hovered;
+    const size = seatPx * HOVER_SCALE;
+    const sx = cam.tx + L.x[k]! * cam.scale;
+    const sy = cam.ty + L.y[k]! * cam.scale;
+    this.paintSeat(ctx, k, sx, sy, size, theme);
+    const inner = size + HOVER_GAP_PX;
+    ctx.strokeStyle = overviewPalette(theme).bg;
+    ctx.lineWidth = HOVER_GAP_PX;
+    ctx.strokeRect(sx - inner / 2, sy - inner / 2, inner, inner);
+    const outer = size + 2 * HOVER_GAP_PX + HOVER_RING_PX;
+    ctx.strokeStyle = color[theme]['focus-ring'];
+    ctx.lineWidth = HOVER_RING_PX;
+    ctx.strokeRect(sx - outer / 2, sy - outer / 2, outer, outer);
   }
 
   private paintSeat(ctx: Ctx2D, k: number, sx: number, sy: number, size: number, theme: ColorMode): void {

@@ -1,7 +1,7 @@
 // SCR-010 좌석 화면을 실제 좌석맵에 잇는 규칙(BUILD_ORDER HOT-350 ①, ADR-0224, docs/frontend.md §4.2.2·§5.2).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clearAdmission, createGesture, errorPhase, readAdmission, seatmapLayoutUrl, snapshotUrl, tierNames, tierRank, wheelFactor } from './live.ts';
+import { canPick, clearAdmission, createGesture, createHoverTracker, errorPhase, readAdmission, seatmapLayoutUrl, snapshotUrl, tierNames, tierRank, wheelFactor } from './live.ts';
 
 const store = (o) => ({ getItem: (k) => (k in o ? o[k] : null) });
 
@@ -99,4 +99,33 @@ test('SCR-010 휠 배율은 아래로 축소·위로 확대이고 한 번에 2�
   assert.equal(wheelFactor(100000, 0), 0.5);
   // 줄 단위(Firefox deltaMode 1)는 픽셀로 환산한다
   assert.ok(Math.abs(wheelFactor(3, 1) - wheelFactor(48, 0)) < 1e-9);
+});
+
+test('SCR-010 지도를 눌러 표시가 바뀌는 상태(ADR-0236): 홀드 중·홀드 뒤·세션 끝에는 마우스 올림 표시를 하지 않는다', () => {
+  for (const v of ['selecting', 'paused']) assert.equal(canPick(v), true, v);
+  for (const v of ['holding', 'held', 'saleEnded', 'ended', undefined]) assert.equal(canPick(v), false, String(v));
+});
+
+test('SCR-010 마우스 올림 위치 보내기(ADR-0236): 누르지 않은 마우스·펜만 보내고, 끌거나 고를 수 없게 되면 한 번만 지운다', () => {
+  const sent = [];
+  let pickable = true;
+  const t = createHoverTracker((m) => sent.push(m), () => pickable);
+  const mouse = { pointerType: 'mouse', buttons: 0 };
+  t.move(1, 2, { pointerType: 'touch', buttons: 0 });
+  assert.deepEqual(sent, [], '터치는 올림이 없다');
+  t.stop();
+  assert.deepEqual(sent, [], '보낸 적이 없으면 지우지 않는다');
+  t.move(1, 2, mouse);
+  t.move(3, 4, { pointerType: 'pen', buttons: 0 });
+  assert.deepEqual(sent.map((m) => m.kind), ['move', 'move']);
+  t.move(5, 6, { pointerType: 'mouse', buttons: 1 });
+  t.move(7, 8, { pointerType: 'mouse', buttons: 1 });
+  assert.deepEqual(sent.map((m) => m.kind), ['move', 'move', 'leave'], '끌면 한 번만 지운다');
+  t.move(1, 2, mouse);
+  pickable = false;
+  t.move(3, 4, mouse);
+  assert.equal(sent.at(-1).kind, 'leave');
+  assert.equal(sent.filter((m) => m.kind === 'leave').length, 2);
+  t.stop();
+  assert.equal(sent.filter((m) => m.kind === 'leave').length, 2);
 });

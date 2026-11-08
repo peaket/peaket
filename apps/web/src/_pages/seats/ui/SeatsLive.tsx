@@ -13,7 +13,7 @@ import Link from 'next/link';
 import { ORIGINS } from '@/shared/config/origins';
 import { holdClock } from '@/shared/lib/hold-clock';
 import { AppShell } from '@/widgets/app-shell';
-import { clearAdmission, createGesture, errorPhase, readAdmission, seatmapLayoutUrl, snapshotUrl, tierNames, tierRank, wheelFactor, type GestureCommand, type SeatsPhase } from '../model/live';
+import { canPick, clearAdmission, createGesture, createHoverTracker, errorPhase, readAdmission, seatmapLayoutUrl, snapshotUrl, tierNames, tierRank, wheelFactor, type GestureCommand, type SeatsPhase } from '../model/live';
 import type { Booking, HoldResult } from '../model/booking-runtime';
 import type { BookingNotice, SeatPick } from '../model/booking-machine';
 import type { ListSection, OpenSection } from '../model/seat-list';
@@ -272,6 +272,9 @@ export function SeatsLive({ eventId }: { eventId: string }) {
             viewRef.current = m;
             // 카메라만 바뀌면 화면을 다시 그리지 않는다(끌 때마다 전체가 다시 그려지지 않게)
             setView((v) => (v && v.level === m.level && v.zoom === m.zoom && v.maxZoom === m.maxZoom && v.selectable === m.selectable ? v : m));
+          } else if (m.type === 'hover') {
+            // 고를 수 있는 좌석 위에서만 손 모양이다(ADR-0236)
+            canvas.style.cursor = m.selectable ? 'pointer' : '';
           } else if (m.type === 'hit' && m.seatIndex >= 0 && m.selectable && m.seatId && m.label) {
             b.pick({ seatId: m.seatId, label: m.label, tier: m.tier }, m.seatIndex);
           } else if (m.type === 'sectionList') setListSections(m.sections);
@@ -324,7 +327,18 @@ export function SeatsLive({ eventId }: { eventId: string }) {
         canvas.setPointerCapture(e.pointerId);
         gesture.down(e.pointerId, ...at(e));
       };
-      const onMove = (e: PointerEvent) => gesture.move(e.pointerId, ...at(e)).forEach(run);
+      // 마우스 올림 표시(ADR-0236): 누르지 않은 마우스·펜이고 좌석을 고르는 동안만 Worker에 위치를 알린다
+      const pickable = () => canPick(b.actor.getSnapshot().value);
+      const hover = createHoverTracker((m) => map.send({ type: 'pointer', ...m }), pickable);
+      const unsubscribe = b.subscribe(() => {
+        if (!pickable()) hover.stop();
+      });
+      cleanups.push(() => void unsubscribe());
+      const onMove = (e: PointerEvent) => {
+        const [x, y] = at(e);
+        gesture.move(e.pointerId, x, y).forEach(run);
+        hover.move(x, y, e);
+      };
       const onUp = (e: PointerEvent) => gesture.up(e.pointerId, ...at(e)).forEach(run);
       const onCancel = (e: PointerEvent) => gesture.cancel(e.pointerId);
       const onWheel = (e: WheelEvent) => {
@@ -340,6 +354,7 @@ export function SeatsLive({ eventId }: { eventId: string }) {
       canvas.addEventListener('pointerup', onUp);
       canvas.addEventListener('pointercancel', onCancel);
       canvas.addEventListener('lostpointercapture', onCancel);
+      canvas.addEventListener('pointerleave', hover.stop);
       canvas.addEventListener('wheel', onWheel, { passive: false });
 
       const resize = new ResizeObserver(() => {
