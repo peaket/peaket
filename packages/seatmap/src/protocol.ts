@@ -1,11 +1,16 @@
 // 메인 ↔ 좌석맵 Worker 메시지(docs/frontend.md §4.7 'Worker 메시지', BUILD_ORDER HOT-110). 받는 쪽이 Zod로 검사한다.
 // 메시지 종류는 type 칸이고, 누르기 종류는 pointer의 kind 칸이다(§4.7의 pointer{type}는 이 kind다).
 // 지금 있는 것(HOT-110·HOT-120): 첫 그림·카메라([+]·[−]·[전체 보기]·구역으로 확대)·누르기·고르기·테마, 단계 알림(view).
-// 구역 구독·연결 상태는 HOT-357, 홀드는 HOT-353, 목록 열기는 HOT-354에서 더한다.
+// 구역 구독·연결 상태는 HOT-357에서 더한다. 목록 열기(HOT-354, ADR-0227)는 listSections·listSection → sectionList·sectionState·stateChanged다.
 import { z } from 'zod';
 
 const int = z.number().int();
 const nonNeg = int.nonnegative();
+
+/** 접근성 목록의 좌석 상태 코드(states 배열의 값 = 이 배열의 색인). 휠체어석은 상태가 아니라 좌석의 속성이다(seats.wheelchair) */
+export const LIST_STATES = ['available', 'held-by-others', 'mine', 'sold', 'unavailable'] as const;
+const Bytes = z.custom<Uint8Array>((v) => v instanceof Uint8Array, { message: '바이트 배열이 아니다' });
+const Offsets = z.custom<Uint32Array>((v) => v instanceof Uint32Array, { message: '32비트 배열이 아니다' });
 
 /** 입장 토큰과 첫 요청의 클라이언트 임시 공개키(openapi seatmap-snapshot: X-Admission-Token, X-Client-Ephemeral-Key) */
 export const Admission = z.object({ token: z.string().min(1), ephemeralKey: z.string().min(1).optional() });
@@ -44,6 +49,10 @@ export const ToWorker = z.discriminatedUnion('type', [
   z.object({ type: z.literal('pointer'), kind: z.enum(['down', 'up', 'move']), x: z.number().min(-16_384).max(16_384), y: z.number().min(-16_384).max(16_384) }),
   z.object({ type: z.literal('select'), seatIndex: nonNeg }),
   z.object({ type: z.literal('theme'), theme: z.enum(['light', 'dark']) }),
+  /** 접근성 목록을 열었다: 구역 목록을 한 번 답한다 */
+  z.object({ type: z.literal('listSections') }),
+  /** 접근성 목록이 연 구역(닫으면 null). 그 구역의 상태 전체를 한 번 답하고, 그 뒤에는 바뀐 좌석만 보낸다 */
+  z.object({ type: z.literal('listSection'), section: nonNeg.nullable() }),
   z.object({ type: z.literal('dispose') }),
 ]);
 export type ToWorker = z.infer<typeof ToWorker>;
@@ -73,6 +82,20 @@ export const FromWorker = z.discriminatedUnion('type', [
     /** 세계 좌표(cm) → 화면(CSS px) = 세계 × scale + t. 화면이 좌석 팝오버 같은 겹침을 좌석 위에 둘 때 쓴다 */
     camera: z.object({ scale: z.number().positive(), tx: z.number(), ty: z.number() }),
   }),
+  /** 접근성 목록의 구역(이름과 남은 좌석 상태) */
+  z.object({ type: z.literal('sectionList'), sections: z.array(z.object({ section: nonNeg, name: z.string(), status: z.enum(['plenty', 'few', 'soldout']) })) }),
+  /** 목록이 구역을 열 때 한 번. 메인 스레드에는 좌석맵 파일이 없어 그 구역의 열·좌석 이름을 함께 싣는다(ADR-0227). tier는 tiers의 색인, wheelchair는 휠체어석의 구역 안 거리 */
+  z.object({
+    type: z.literal('sectionState'),
+    section: nonNeg,
+    version: nonNeg,
+    baseIndex: nonNeg,
+    states: Bytes,
+    seats: z.object({ seatId: z.array(z.string()), row: z.array(z.string()), number: z.array(z.string()), tier: z.array(nonNeg), wheelchair: z.array(nonNeg) }),
+    tiers: z.array(z.string()),
+  }),
+  /** 목록이 연 구역에서 바뀐 좌석만. 두 배열은 복사하지 않고 넘긴다(§5.2) */
+  z.object({ type: z.literal('stateChanged'), section: nonNeg, version: nonNeg, offsets: Offsets, states: Bytes }),
   /** source·status·problem·retryAfter: 파일·스냅샷 요청이 HTTP 오류로 끝났을 때(화면이 다음 동작을 고른다, HOT-350 ①, ADR-0224 결정 5) */
   z.object({ type: z.literal('error'), message: z.string(), source: z.enum(['layout', 'snapshot']).optional(), status: int.optional(), problem: z.string().optional(), retryAfter: z.number().nonnegative().optional() }),
 ]);

@@ -6,5 +6,5 @@ export { PATTERN_MIN_PX, seatState, seatStyle, drawSeat, contrastRatio, type Ctx
 export { SeatMapEngine, SEAT_CM, SEAT_DRAW_MIN_PX, MIN_SELECT_PX, SEATS_SECTION_RATIO, ZOOM_STEP, MAX_SEAT_PX, MINIMAP, type Level, type BitmapFactory } from './engine';
 export { BitmapCache, BITMAP_MAX_BYTES, CACHE_MAX_BYTES, scaleBucket } from './bitmaps';
 export { FEW_RATIO, STATUS_LABEL, sectionTiers, sectionTierMask, sectionStatus, tierFace, overviewPalette, pointInPolygon, type SectionStatus } from './overview';
-export { ToWorker, FromWorker, Admission } from './protocol';
+export { ToWorker, FromWorker, Admission, LIST_STATES } from './protocol';
 export { absoluteUrl, canUseWorker, createSeatMap, type SeatMapClient, type CreateOptions, type Mode } from './client';

@@ -20,6 +20,7 @@
     "@peaket/ds": "workspace:*",
     "@peaket/seatmap": "workspace:*",
     "@tanstack/react-query": "5.105.0",
+    "@tanstack/react-virtual": "3.14.23",
     "jose": "6.2.14",
     "next": "^16.4.3",
     "openid-client": "6.8.8",

@@ -16,10 +16,12 @@ import { clearAdmission, createGesture, errorPhase, readAdmission, seatmapLayout
 import type { Booking, HoldResult } from '../model/booking-runtime';
 import type { BookingNotice, SeatPick } from '../model/booking-machine';
 import { holdClock } from '../model/hold-clock';
+import type { ListSection, OpenSection } from '../model/seat-list';
 import { GoneState } from './GoneState';
 import { LiveSummary } from './LiveSummary';
 import { ZoneLegend } from './ZoneLegend';
 
+type SeatListView = typeof import('./SeatList').SeatList;
 const SEAT_LEGEND: readonly SeatStatus[] = ['available', 'held-by-others', 'mine', 'sold', 'unavailable', 'wheelchair'];
 /** [+]·[−] 배율(엔진 ZOOM_STEP과 같다. 좌석맵 패키지를 첫 묶음에 넣지 않으려고 글자로 둔다) */
 const ZOOM_STEP = 1.5;
@@ -120,6 +122,12 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<SeatMapClient | null>(null);
   const mainRef = useRef<HTMLElement>(null);
+  const listedRef = useRef<number | null>(null);
+  const [listOpen, setListOpen] = useState(false);
+  const [listView, setListView] = useState<SeatListView | null>(null);
+  const [listFailed, setListFailed] = useState(false);
+  const [listSections, setListSections] = useState<ListSection[] | null>(null);
+  const [openSection, setOpenSection] = useState<OpenSection | null>(null);
   const viewRef = useRef<View | null>(null);
   const sessionRef = useRef<PurchaseSigner | null>(null);
   const bookingRef = useRef<Booking | null>(null);
@@ -266,8 +274,20 @@ export function SeatsLive({ eventId }: { eventId: string }) {
             setView((v) => (v && v.level === m.level && v.zoom === m.zoom && v.maxZoom === m.maxZoom && v.selectable === m.selectable ? v : m));
           } else if (m.type === 'hit' && m.seatIndex >= 0 && m.selectable && m.seatId && m.label) {
             b.pick({ seatId: m.seatId, label: m.label, tier: m.tier }, m.seatIndex);
-          }
-          else if (m.type === 'error') onMapError(m);
+          } else if (m.type === 'sectionList') setListSections(m.sections);
+          else if (m.type === 'sectionState') {
+            // 그사이 닫거나 다른 구역을 열었으면 늦게 온 응답은 버린다(Worker가 지금 보내는 구역과 어긋나지 않게)
+            if (m.section === listedRef.current) setOpenSection({ section: m.section, baseIndex: m.baseIndex, states: m.states, seats: m.seats, tiers: m.tiers });
+          } else if (m.type === 'stateChanged') {
+            setOpenSection((o) => {
+              if (!o || o.section !== m.section) return o;
+              const states = o.states.slice();
+              m.offsets.forEach((offset, i) => {
+                states[offset] = m.states[i]!;
+              });
+              return { ...o, states };
+            });
+          } else if (m.type === 'error') onMapError(m);
         },
       });
       mapRef.current = map;
@@ -281,6 +301,11 @@ export function SeatsLive({ eventId }: { eventId: string }) {
       cleanups.push(() => {
         mapRef.current = null;
         map.dispose();
+        // 지도를 다시 만들면(다시 시도) 목록의 값도 새로 받는다
+        listedRef.current = null;
+        setListOpen(false);
+        setListSections(null);
+        setOpenSection(null);
       });
 
       const run = (c: GestureCommand) => {
@@ -377,6 +402,7 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   }, [isPaused]);
 
   const prices = useMemo(() => new Map((head?.tiers ?? []).map((t) => [t.tierId, t.price])), [head]);
+  const listTierNames = useMemo(() => new Map((head?.tiers ?? []).map((t) => [t.tierId, t.name])), [head]);
   const leave = useCallback(() => {
     void (async () => {
       await bookingRef.current?.leave();
@@ -392,6 +418,30 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   const heldNow = isHeld ? (bookingRef.current?.held() ?? null) : null;
   const holdTimer = heldLeft === null ? null : holdClock(heldLeft);
   const summaryPhase = booking?.value === 'holding' || booking?.value === 'held' || booking?.value === 'paused' || booking?.value === 'saleEnded' ? booking.value : 'selecting';
+  // 목록과 가상 스크롤은 연 사람만 받는다(첫 JS 예산, §5.8). 받지 못하면 그 자리에서 다시 시도한다(지도와 고른 좌석은 그대로다)
+  const loadListView = () => {
+    setListFailed(false);
+    import('./SeatList').then(
+      (m) => setListView(() => m.SeatList),
+      () => setListFailed(true),
+    );
+  };
+
+  const toggleList = () => {
+    if (listOpen) {
+      listedRef.current = null;
+      setListOpen(false);
+      setOpenSection(null);
+      mapRef.current?.send({ type: 'listSection', section: null });
+      return;
+    }
+    setListOpen(true);
+    if (!listView) loadListView();
+    if (!listSections) mapRef.current?.send({ type: 'listSections' });
+  };
+
+  const SeatListComponent = listView;
+
   // 자동 배정: 배정된 동안만 요약을 보이고, 홀드가 끝나면 고를 지도가 없으니 안내로 바꾼다
   const autoView = auto === 'done' && !isHeld ? 'expired' : auto;
   const showSummary = phase === 'ready' && booking && (auto === null || autoView === 'done');
@@ -462,12 +512,44 @@ export function SeatsLive({ eventId }: { eventId: string }) {
             <div className="col" style={{ gap: 8 }}>
               <div className="relative">
                 <div ref={hostRef} className="card-flat relative h-[420px] overflow-hidden md:h-[560px] lg:h-[600px]" />
+                {listOpen ? (
+                  // 지도는 밑에 그대로 둔다(크기가 0이 되면 Worker가 다시 그릴 값을 잃는다)
+                  <div className="card-flat absolute inset-0 z-[2] overflow-hidden" style={{ background: 'var(--surface)' }}>
+                    {SeatListComponent ? (
+                      <SeatListComponent
+                        sections={listSections}
+                        open={openSection}
+                        tierNames={listTierNames}
+                        prices={prices}
+                        onOpenSection={(section) => {
+                          listedRef.current = section;
+                          if (section === null) setOpenSection(null);
+                          mapRef.current?.send({ type: 'listSection', section });
+                        }}
+                        onSeat={(seat, seatIndex) => bookingRef.current?.pick(seat, seatIndex)}
+                      />
+                    ) : listFailed ? (
+                      <div className="state h-full" role="alert">
+                        <p className="t-md fw-b">좌석 목록을 불러오지 못했습니다</p>
+                        <button className="btn btn-outline btn-sm" type="button" onClick={loadListView}>
+                          다시 시도
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid h-full place-items-center" role="status">
+                        <span className="spinner muted" aria-hidden="true" />
+                        <span className="sr-only">좌석 목록을 불러오는 중</span>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
                 {phase === 'loading' ? (
                   <div className="absolute inset-0 grid place-items-center" role="status">
                     <span className="spinner muted" aria-hidden="true" />
                     <span className="sr-only">좌석맵을 불러오는 중</span>
                   </div>
                 ) : null}
+                {listOpen ? null : (
                 <div className="absolute top-2 right-2 flex flex-col-reverse items-end gap-1.5 md:top-2.5 md:right-2.5 lg:top-3 lg:right-3 lg:flex-row lg:items-center" role="group" aria-label="배치도 확대·축소">
                   <button className="btn btn-outline btn-sm" type="button" disabled={atFit} onClick={() => send({ type: 'fit' })}>
                     전체 보기
@@ -479,8 +561,16 @@ export function SeatsLive({ eventId }: { eventId: string }) {
                     <i className="ic ic-plus" aria-hidden="true" />
                   </button>
                 </div>
+                )}
               </div>
-              {view && !view.selectable ? <p className="hint px-4 text-center md:px-0" role="status">{view.level === 'seats' ? '조금 더 확대하면 좌석을 고를 수 있습니다' : '구역을 확대하면 좌석을 고를 수 있습니다'}</p> : null}
+              {phase === 'ready' ? (
+                <div className="row px-4 md:px-0">
+                  <button className="btn btn-outline btn-sm" type="button" aria-expanded={listOpen} onClick={toggleList}>
+                    {listOpen ? '지도로 보기' : '목록으로 보기'}
+                  </button>
+                </div>
+              ) : null}
+              {!listOpen && view && !view.selectable ? <p className="hint px-4 text-center md:px-0" role="status">{view.level === 'seats' ? '조금 더 확대하면 좌석을 고를 수 있습니다' : '구역을 확대하면 좌석을 고를 수 있습니다'}</p> : null}
             </div>
           </div>
         )}

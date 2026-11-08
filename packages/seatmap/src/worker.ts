@@ -1,9 +1,10 @@
 // 좌석맵 Worker 진입점(docs/frontend.md §5.2·§4.7, BUILD_ORDER HOT-110). 받은 메시지를 Zod로 검사하고 엔진(engine.ts)에 넘긴다.
 // 메인 스레드 대체(client.ts)도 같은 처리기를 쓴다. 캔버스 화소 크기(화면 크기 × dpr)는 두 길 모두 이 처리기가 맞춘다.
 import { SeatMapEngine, type BitmapFactory } from './engine';
-import type { SeatMapColumnsFile } from './layout';
-import type { Ctx2D } from './paint';
-import { FromWorker, ToWorker } from './protocol';
+import { FLAG, sectionOf, type SeatMapColumnsFile } from './layout';
+import { sectionStatus } from './overview';
+import { seatState, type Ctx2D } from './paint';
+import { FromWorker, LIST_STATES, ToWorker } from './protocol';
 import { decodeSnapshot } from './wire';
 
 export interface Host {
@@ -56,11 +57,19 @@ function layoutUrlAt(url: string, version: number): string | undefined {
   return m ? `${url.slice(0, m.index)}/${version}.json${url.slice(m.index + m[0].length)}` : undefined;
 }
 
+/** 좌석 하나의 목록 상태 코드(지도와 같은 판정, 휠체어·방금 놓은 좌석은 목록에서 가능으로 본다) */
+function listStateOf(e: SeatMapEngine, k: number): number {
+  const s = seatState(e.state[k]!, e.L.attr[k]!, e.isMine(k));
+  return LIST_STATES.indexOf(s === 'wheelchair' || s === 'recently-released' ? 'available' : s);
+}
+
 /** 메시지 하나를 처리하는 함수를 만든다(Worker와 메인 스레드 대체가 함께 쓴다) */
 export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTMLCanvasElement) => Ctx2D, bitmaps?: BitmapFactory) {
   let engine: SeatMapEngine | null = null;
   let canvas: Canvas | null = null;
   let lastView = '';
+  /** 접근성 목록이 연 구역 */
+  let listed: number | null = null;
   /** 로딩 중에 바뀐 화면 크기(엔진을 만들 때 쓴다) */
   let pendingViewport: { w: number; h: number; dpr: number } | null = null;
   /** 엔진이 생기기 전에 온 등급 차례·이름 */
@@ -159,6 +168,7 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
       if (m.type === 'dispose') {
         engine?.cache.clear();
         engine = null;
+        listed = null;
         canvas = null;
         return;
       }
@@ -225,12 +235,42 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
             const seats: number[] = [];
             for (let k = 0; k < engine.L.N; k++) if (engine.isMine(k)) seats.push(k);
             host.post({ type: 'selection', seatIndexes: seats });
+            if (listed !== null) {
+              const { section, offset } = sectionOf(engine.L, m.seatIndex);
+              if (section === listed) {
+                const offsets = Uint32Array.of(offset);
+                const states = Uint8Array.of(listStateOf(engine, m.seatIndex));
+                host.post({ type: 'stateChanged', section, version: engine.versions.version[section]!, offsets, states }, [offsets.buffer, states.buffer]);
+              }
+            }
           }
           break;
         case 'theme':
           engine.setTheme(m.theme);
           draw();
           break;
+        case 'listSections': {
+          const e = engine;
+          host.post({ type: 'sectionList', sections: e.L.file.sections.map((sec, section) => ({ section, name: sec.name, status: sectionStatus(e.L, e.state, section).status })) });
+          break;
+        }
+        case 'listSection': {
+          listed = m.section !== null && m.section < engine.L.S ? m.section : null;
+          if (listed === null) break;
+          const start = engine.L.sectionStart[listed]!;
+          const sec = engine.L.file.sections[listed]!;
+          const states = new Uint8Array(engine.L.sectionEnd[listed]! - start + 1);
+          for (let i = 0; i < states.length; i++) states[i] = listStateOf(engine, start + i);
+          const wheelchair: number[] = [];
+          sec.seats.flags.forEach((f, i) => {
+            if (f & FLAG.WHEELCHAIR) wheelchair.push(i);
+          });
+          host.post(
+            { type: 'sectionState', section: listed, version: engine.versions.version[listed]!, baseIndex: start, states, seats: { seatId: sec.seats.seatId, row: sec.seats.row, number: sec.seats.number, tier: sec.seats.tier, wheelchair }, tiers: engine.L.file.tiers },
+            [states.buffer],
+          );
+          break;
+        }
       }
     } catch (e) {
       fail(e);
