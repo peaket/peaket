@@ -25,7 +25,7 @@ export type ShopOrderDetail = ShopOrderSummary & ({
      * @minItems 1
      * @maxItems 20
      */
-  items?: ShopOrderItem[];
+  items: ShopOrderItem[];
   /** 처음 배송비(원). 택배가 아니면 0. docs/data.md merch_order에 칸이 아직 없다 */
   shippingFee?: number;
   /**
