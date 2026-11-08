@@ -76,6 +76,7 @@ export type ProblemType =
   | 'merge-invariant-violated'
   | 'merge-proposal-not-found'
   | 'next-invalid'
+  | 'nickname-check-limited'
   | 'nickname-invalid'
   | 'nickname-taken'
   | 'no-placement'
@@ -248,6 +249,7 @@ export const PROBLEM_TYPES = {
   'merge-invariant-violated': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다. 고객센터로 문의해 주세요" },
   'merge-proposal-not-found': { status: 404, title: "병합 제안이 없거나 시간이 지났습니다" },
   'next-invalid': { status: 400, title: "돌아갈 주소가 같은 출처 경로가 아닙니다" },
+  'nickname-check-limited': { status: 429, title: "닉네임 확인을 너무 많이 했습니다. 잠시 뒤 다시 시도해 주세요" },
   'nickname-invalid': { status: 400, title: "닉네임 꼴이 맞지 않습니다" },
   'nickname-taken': { status: 409, title: "이미 사용 중인 닉네임입니다" },
   'no-placement': { status: 409, title: "배치되지 않은 기기입니다" },

@@ -30,6 +30,7 @@ import {
   unlinkResultText,
 } from '@/features/login-methods';
 import { WebShellModal } from '@peaket/ds/WebShell';
+import { loginHrefAfterRefresh } from '@/shared/lib/token-refresh';
 import { REAUTH_START_UNAVAILABLE, reauthFailureText } from '@/shared/lib/reauth-failure';
 import { LiveMergeCard } from './LiveMergeCard';
 
@@ -49,7 +50,7 @@ export function LiveLoginMethods({ loginMethod, mergeProposal }: { loginMethod?:
   const [loadFailed, setLoadFailed] = useState(false);
   const [merge, setMerge] = useState<MergeState | null>(() => (isMergeProposalId(mergeProposal) ? { id: mergeProposal, view: null, phase: 'loading' } : null));
   const ids = useId();
-  const toLogin = () => window.location.assign(`/login?next=${encodeURIComponent('/my/settings/providers')}`);
+  const toLogin = () => window.location.assign(loginHrefAfterRefresh('/my/settings/providers'));
 
   const load = async () => {
     const r = await api.list();

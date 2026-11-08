@@ -1,5 +1,6 @@
 // 세션 컨텍스트의 포트: 저장소(트랜잭션 하나에서 쓰는 일), 토큰 서명, 기기 가명, 운영 신호.
 import type { InvRefLabel } from './inv-ref.js';
+import type { ConsentKind } from './signup.js';
 import type { ActiveSession, LiveSession, LoginVerdict, Provider, ReauthPurpose, ReauthStrength, TerminationReason } from './session.js';
 
 export interface CreateKeyRecord {
@@ -24,8 +25,29 @@ export interface SessionRow {
   absoluteExpiresAt: number;
   idleExpiresAt: number;
   terminatedAt: number | null;
+  /** 끝난 까닭(세션을 끝낼 때 적는다, ADR-0235 결정 1). 끝나지 않았거나 그 칸 전에 끝난 세션은 null */
+  terminatedReason: string | null;
   loginVerdict: LoginVerdict;
   refreshFamily: string;
+}
+
+/** 가입 마무리 상태(계정 행과 동의 행, ADR-0235 결정 3). 계정이 없으면 null */
+export interface SignupState {
+  status: AccountStatus;
+  nickname: string | null;
+  ageVerified: boolean;
+  consentKinds: string[];
+}
+
+/** 가입 마무리의 저장(한 트랜잭션, ADR-0203 결정 1, ADR-0235 결정 4) */
+export interface SignupRecord {
+  accountId: string;
+  nickname: string;
+  nicknameKey: string;
+  phone: string | null;
+  memberCode: string;
+  consents: ReadonlyArray<{ kind: ConsentKind; noticeVersion: string; channels: string | null }>;
+  now: number;
 }
 
 export interface NewSession {
@@ -128,6 +150,18 @@ export interface SessionTx {
   closureReasonOf(accountId: string): Promise<'UNDER_14' | null>;
   /** 계정 상태. 없으면 null */
   accountStatusOf(accountId: string): Promise<AccountStatus | null>;
+  /** 가입 마무리 상태. 계정이 없으면 null. 계정 잠금과 함께 쓰면 잠근 뒤의 값이다 */
+  signupStateOf(accountId: string): Promise<SignupState | null>;
+  /** 닉네임 키를 트랜잭션 끝까지 잠근다(같은 키는 한 번에 하나만, ADR-0203 결정 2). 키를 저장하기 전에 부른다 */
+  lockNicknameKey(key: string): Promise<void>;
+  /** 그 닉네임 키를 다른 계정이 쓰는가(계정을 지울 때 키도 지운다) */
+  nicknameKeyTaken(key: string): Promise<boolean>;
+  /** 그 회원 코드를 이미 쓰는 계정이 있는가 */
+  memberCodeTaken(code: string): Promise<boolean>;
+  /** 가입 마무리 쓰기: age_verified, 닉네임·키, 휴대폰 번호, 회원 코드, 동의 행. 부르는 쪽이 계정과 닉네임 키를 잠근 뒤 부른다 */
+  completeSignup(r: SignupRecord): Promise<void>;
+  /** before 때나 그 전에 만든 가입 전 ACTIVE 계정 ID(최대 limit개, 정비 signup-incomplete-purge) */
+  incompleteSignupsBefore(before: number, limit: number): Promise<string[]>;
   /**
    * 탈퇴 끝내기의 계정 쪽(identity §8 '탈퇴의 첫 구현'): DELETED·deleted_at, 프로필 칸 비우기, 로그인 수단 연결·기기 행·세션 생성 기억 지우기.
    * 세션 끝내기는 부르는 쪽이 terminateSessions로 한다
@@ -176,6 +210,10 @@ export interface SessionStore {
   refreshOwner(hash: Uint8Array): Promise<string | null>;
   /** 세션 한 줄을 잠그지 않고 읽는다(읽기만 하는 확인, GetVerificationStatus, BOT-025가 넘긴 것) */
   sessionOf(id: string): Promise<SessionRow | null>;
+  /** 가입 마무리 상태를 잠그지 않고 읽는다(계정 요약, ADR-0235 결정 3) */
+  signupStateOf(accountId: string): Promise<SignupState | null>;
+  /** 그 닉네임 키를 쓰는 계정이 있는가(닉네임 확인. 참고일 뿐이고 확정은 가입 마무리의 잠금이다) */
+  nicknameKeyTaken(key: string): Promise<boolean>;
   /** 그 계정의 살아 있는 세션(끝나지 않았고 만료 전)을 잠그지 않고 읽는다. 로그인한 기기 목록(GET /v1/identity/sessions, ADR-0209) */
   liveSessionsOf(accountId: string, now: number): Promise<LiveSession[]>;
   /** 절대 만료가 지났는데 화면용 기기 이름이 남은 세션의 그 칸을 비우고 비운 줄 수(정비 session-label-expired, ADR-0209 결정 1) */
@@ -260,6 +298,25 @@ export interface SessionSignals {
   mergeInvariantViolated(): void;
   /** 다른 기기의 세션을 끝냈다: 원격 로그아웃, 로그인 수단을 바꾼 뒤(identity_other_sessions_ended_total, ADR-0209 결정 6) */
   othersEnded(cause: 'remote_logout' | 'login_method_changed', count: number): void;
+  /** 가입 마무리를 끝냈다(identity_signup_completed_total, ADR-0235) */
+  signupCompleted(marketing: boolean): void;
+  /** 닉네임 확인이 요청 한도에 걸렸다(identity_nickname_check_limited_total, ADR-0235) */
+  nicknameCheckLimited(): void;
+}
+
+export const STAFF_ASSIGNMENTS = Symbol('identity.StaffAssignments');
+/** 지금 ASSIGNED인 현장 스태프 배정이 있는가(계정 요약, ADR-0235 결정 3). 배정 표를 만드는 단계(BUILD_ORDER GAT-210)가 채운다 */
+export interface StaffAssignments {
+  hasAssigned(accountId: string): Promise<boolean>;
+}
+/** 배정 표가 생기기 전의 값: 늘 없음 */
+export const noStaffAssignments: StaffAssignments = { hasAssigned: async () => false };
+
+export const NICKNAME_CHECK_LIMITS = Symbol('identity.NicknameCheckLimits');
+/** 닉네임 확인의 세션별 요청 수(세션·캐시 Redis id:nick, 1분 [가정], ADR-0235 결정 5). 저장소에 닿지 못하면 통과시킨다 */
+export interface NicknameCheckLimits {
+  /** 이번 요청을 받아도 되는가. 넘었으면 다시 보낼 때까지의 밀리초 */
+  allow(sessionId: string): Promise<{ allowed: true } | { allowed: false; retryAfterMs: number }>;
 }
 
 export const PUBLIC_KEYS = Symbol('identity.PublicKeys');

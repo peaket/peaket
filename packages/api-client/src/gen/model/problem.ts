@@ -9,6 +9,7 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ProblemEnded } from './problemEnded';
 import type { ProblemFraudHold } from './problemFraudHold';
 import type { ProblemLock } from './problemLock';
 
@@ -34,6 +35,8 @@ export interface Problem {
   holdRemainingSeconds?: number;
   /** 후기 쓰기의 409 review-already-written에만. 이 계정이 이 회차에 이미 쓴 후기 ID(수정으로 안내) */
   myReviewId?: string;
+  /** 토큰 갱신(POST /v1/identity/access-tokens)의 401 refresh-token-invalid에만. 쿠키의 토큰이 끝난 세션의 것이고 끝난 까닭을 알 때 그 까닭을 싣는다(세션 종료 사건 SessionTerminated.reason 가운데 팬에게 보이는 것, d5 §3.5, 추천 적용 2026-11-09, ADR-0235). 모르는 토큰·모양이 틀린 토큰·유휴·절대 만료에는 없다 */
+  ended?: ProblemEnded;
   /** 탈퇴(DELETE /v1/identity/account)의 409 '탈퇴 전 확인'에만. 그 계정에 부정 예매 연계정보 대조값 보관 행(docs/data.md restricted_ci_hold)이 살아 있을 때 상태와 끝 시각을 싣고, 화면(SCR-017)이 보관 안내를 보인다. RESTRICTED면 이용 제한 끝, CASE_OPEN이면 그 회차 공연일 + 30일 [가정](docs/features/identity.md §8(추천 적용 2026-10-31, ADR-0173)) */
   fraudHold?: ProblemFraudHold;
   /**

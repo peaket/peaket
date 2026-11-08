@@ -18,6 +18,7 @@ import { TextField } from '@peaket/ds/TextField';
 import { refreshFanSession, useFanSession } from '@/entities/me';
 import { VerifyFlowProvider, VerifyTrigger, VerifyWaitingStatus } from '@/features/identity-verify';
 import { isUnauthorizedError, problemName } from '@/shared/api/refresh';
+import { loginHrefAfterRefresh } from '@/shared/lib/token-refresh';
 import { ERRORS, nicknameProblem, toSignupInput, validateSignup, type NickCheck, type SignupForm as Form } from '../model/signup';
 
 const NICK_DEBOUNCE_MS = 300;
@@ -66,7 +67,7 @@ export function SignupForm({ next }: { next: string }) {
   // 비로그인은 로그인 화면으로, 처음 열 때 이미 가입을 마쳤으면 돌아갈 주소로(가입 취소 뒤에는 그대로 안내를 둔다)
   useEffect(() => {
     if (under14 || completedHere.current) return;
-    if (session.status === 'guest') location.replace(`/login?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`);
+    if (session.status === 'guest') location.replace(loginHrefAfterRefresh(`${location.pathname}${location.search}`));
     else if (session.status === 'member' && session.me.signupCompleted) location.replace(next);
   }, [session, next, under14]);
 
@@ -130,8 +131,13 @@ export function SignupForm({ next }: { next: string }) {
         completedHere.current = true;
         return true;
       }
+      // 만 14세 미만으로 정리 중인 계정: 로그인 화면이 아니라 이 화면의 안내를 보인다(d5 §5.5 '만 14세 미만', ADR-0235 결정 6)
+      if (name === 'under-14') {
+        setUnder14(true);
+        return false;
+      }
       if (isUnauthorizedError(e)) {
-        location.assign(`/login?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`);
+        location.assign(loginHrefAfterRefresh(`${location.pathname}${location.search}`));
         return false;
       }
       if (name === 'nickname-taken' || name === 'nickname-invalid') {

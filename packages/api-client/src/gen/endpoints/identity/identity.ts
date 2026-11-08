@@ -2445,6 +2445,11 @@ export type createIdentitySignupCompletionResponse401 = {
   status: 401
 }
 
+export type createIdentitySignupCompletionResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
 export type createIdentitySignupCompletionResponse409 = {
   data: ProblemResponse
   status: 409
@@ -2453,7 +2458,7 @@ export type createIdentitySignupCompletionResponse409 = {
 export type createIdentitySignupCompletionResponseSuccess = (createIdentitySignupCompletionResponse200) & {
   headers: Headers;
 };
-export type createIdentitySignupCompletionResponseError = (createIdentitySignupCompletionResponse400 | createIdentitySignupCompletionResponse401 | createIdentitySignupCompletionResponse409) & {
+export type createIdentitySignupCompletionResponseError = (createIdentitySignupCompletionResponse400 | createIdentitySignupCompletionResponse401 | createIdentitySignupCompletionResponse403 | createIdentitySignupCompletionResponse409) & {
   headers: Headers;
 };
 
@@ -2466,7 +2471,7 @@ export const getCreateIdentitySignupCompletionUrl = () => {
 }
 
 /**
- * FR-001, POL-023(추천 적용 2026-11-05, ADR-0203). 처음 로그인 때 만든 계정의 가입을 마친다. 고지 문안의 판과 동의 일시는 서버가 정해 consent에 남긴다(data.md). 마케팅 수신 채널은 docs/planning/03 §1.2의 기본값 [가정]. 휴대폰 번호는 휴대폰 번호 수집 동의가 있을 때만 받는다. 닉네임 규칙(ADR-0203 결정 2): NFC, 앞뒤 공백 제거, 문자소 2~12개, 글자·숫자·가운데 공백 한 칸·_·.·-만, 중복은 NFKC·대소문자 접기 키. 성공하면 새 팬 계정 요약. Cache-Control: no-store
+ * FR-001, POL-023(추천 적용 2026-11-05, ADR-0203). 처음 로그인 때 만든 계정의 가입을 마친다. 고지 문안의 판과 동의 일시는 서버가 정해 consent에 남긴다(data.md). 마케팅 수신 채널은 docs/planning/03 §1.2의 기본값 [가정]. 휴대폰 번호는 휴대폰 번호 수집 동의가 있을 때만 받는다. 닉네임 규칙(ADR-0203 결정 2): NFC, 앞뒤 공백 제거, 문자소 2~12개, 글자·숫자·가운데 공백 한 칸·_·.·-만, 보이지 않는 글자(제로폭·변형 선택자·한글 채움 문자)는 받지 않음, 중복은 NFKC·대소문자 접기 키. 성공하면 새 팬 계정 요약. Cache-Control: no-store
  * @summary 가입 마무리(SCR-005): 만 14세 이상 확인·필수·선택 동의·닉네임·휴대폰 번호(선택)
  */
 export const createIdentitySignupCompletion = async (signupCompletionInput: SignupCompletionInput, options?: Parameters<typeof orvalFetch>[1]): Promise<createIdentitySignupCompletionResponseSuccess> => {
@@ -2576,7 +2581,7 @@ export const getCreateIdentityNicknameCheckUrl = () => {
 }
 
 /**
- * FR-001(추천 적용 2026-11-05, ADR-0203 결정 3). 닉네임을 주소에 두지 않으려고 POST로 한다(guidelines §9). 참고용이고 확정은 가입 마무리의 409(nickname-taken)다. 세션마다 요청 한도 [가정], 넘으면 429와 Retry-After. Cache-Control: no-store
+ * FR-001(추천 적용 2026-11-05, ADR-0203 결정 3). 닉네임을 주소에 두지 않으려고 POST로 한다(guidelines §9). 참고용이고 확정은 가입 마무리의 409(nickname-taken)다. 세션마다 1분에 30번 [가정](ADR-0235 결정 5), 넘으면 429 nickname-check-limited와 Retry-After. Cache-Control: no-store
  * @summary 닉네임 확인(가입 완료 화면의 실시간 중복 검사)
  */
 export const createIdentityNicknameCheck = async (createIdentityNicknameCheckBody: CreateIdentityNicknameCheckBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createIdentityNicknameCheckResponseSuccess> => {

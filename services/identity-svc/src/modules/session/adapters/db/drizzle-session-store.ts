@@ -6,9 +6,9 @@ import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from 'driz
 import { accountWithdrawnMessage } from '../account-withdrawn-message.js';
 import { loginMethodChangedMessage } from '../login-method-message.js';
 import { accountMergedMessage } from '../account-merged-message.js';
-import type { AccountStatus, ContactKind, CreateKeyRecord, InvestigationRefsRow, RefreshRow, SessionRow, SessionStore, SessionTx } from '../../domain/ports.js';
+import type { AccountStatus, ContactKind, CreateKeyRecord, InvestigationRefsRow, RefreshRow, SessionRow, SessionStore, SessionTx, SignupRecord, SignupState } from '../../domain/ports.js';
 import { CREATE_KEY_TTL_MS, type LiveSession, type LoginVerdict, type Provider, type TerminationReason } from '../../domain/session.js';
-import { account, accountContactRef, accountHold, accountMerge, accountProvider, device, reauthTokenUse, refreshTokenHash, session, sessionCreateKey } from './schema.js';
+import { account, accountContactRef, accountHold, accountMerge, accountProvider, consent, device, reauthTokenUse, refreshTokenHash, session, sessionCreateKey } from './schema.js';
 
 /** 연락처 행을 다시 쓸 때의 옛 판 값(domain/inv-ref.ts nextRefPrev와 같은 규칙, BOT-046) */
 const refPrevSql = (given: string | null | undefined) =>
@@ -30,6 +30,15 @@ export async function writeContactRef(tx: DbTransaction, i: { accountId: string;
     .onConflictDoUpdate({ target: [accountContactRef.accountId, accountContactRef.kind], set: { ref: i.ref, refPrev: refPrevSql(i.refPrev), updatedAt: date(i.now) } });
 }
 const ms = (d: Date | null) => (d === null ? null : d.getTime());
+
+async function signupStateIn(db: DbTransaction | Database['db'], accountId: string): Promise<SignupState | null> {
+  const [a] = await db.select({ status: account.status, nickname: account.nickname, ageVerified: account.ageVerified }).from(account).where(eq(account.id, accountId)).limit(1);
+  if (!a) return null;
+  const kinds = await db.select({ kind: consent.kind }).from(consent).where(eq(consent.accountId, accountId));
+  return { status: a.status as AccountStatus, nickname: a.nickname, ageVerified: a.ageVerified, consentKinds: kinds.map((k) => k.kind) };
+}
+
+const nicknameKeyTakenIn = async (db: DbTransaction | Database['db'], key: string): Promise<boolean> => (await db.select({ id: account.id }).from(account).where(eq(account.nicknameKey, key)).limit(1)).length > 0;
 type SessionRecord = typeof session.$inferSelect;
 const rowOf = (r: SessionRecord): SessionRow => ({
   id: r.id,
@@ -38,6 +47,7 @@ const rowOf = (r: SessionRecord): SessionRow => ({
   absoluteExpiresAt: r.absoluteExpiresAt.getTime(),
   idleExpiresAt: r.idleExpiresAt.getTime(),
   terminatedAt: ms(r.terminatedAt),
+  terminatedReason: r.terminatedReason ?? null,
   loginVerdict: r.loginVerdict as LoginVerdict,
   refreshFamily: r.refreshFamily,
 });
@@ -82,6 +92,14 @@ export class DrizzleSessionStore implements SessionStore {
   async sessionOf(id: string): Promise<SessionRow | null> {
     const [r] = await this.database.db.select().from(session).where(eq(session.id, id));
     return r ? rowOf(r) : null;
+  }
+
+  signupStateOf(accountId: string): Promise<SignupState | null> {
+    return signupStateIn(this.database.db, accountId);
+  }
+
+  nicknameKeyTaken(key: string): Promise<boolean> {
+    return nicknameKeyTakenIn(this.database.db, key);
   }
 
   async liveSessionsOf(accountId: string, now: number): Promise<LiveSession[]> {
@@ -204,6 +222,11 @@ export class DrizzleSessionStore implements SessionStore {
         .set({ terminatedAt: at, deviceLabel: null })
         .where(and(inArray(session.id, ids), isNull(session.terminatedAt)))
         .returning({ id: session.id, accountId: session.accountId });
+      // 끝난 까닭을 사유별로 적는다(갱신 401의 ended, ADR-0235 결정 1). 모두 같은 트랜잭션이다
+      for (const reason of new Set(reasonOf.values())) {
+        const ofReason = ended.filter((e) => reasonOf.get(e.id) === reason).map((e) => e.id);
+        if (ofReason.length > 0) await tx.update(session).set({ terminatedReason: reason }).where(inArray(session.id, ofReason));
+      }
       // 끝난 세션의 리프레시 토큰 해시는 같은 트랜잭션에서 지운다(R-255, docs/data.md refresh_token_hash)
       await tx.delete(refreshTokenHash).where(inArray(refreshTokenHash.sessionId, ids));
       // 같은 트랜잭션의 마지막 쓰기로 세션 종료 사건을 적는다(ADR-0143 결정 3). 값은 공용 Avro 인코더(BUILD_ORDER BAS-030) 전까지 JSON이다
@@ -353,10 +376,12 @@ export class DrizzleSessionStore implements SessionStore {
         await tx
           .update(account)
           // 흡수 계정의 프로필은 병합 즉시 파기한다(POL-034, data-classification, 새 맥락 리뷰 중간 2). 회원 코드도 비운다(UNIQUE)
-          .set({ status: 'MERGED', mergedIntoAccountId: i.primaryAccountId, email: null, emailVerified: false, nickname: null, phone: null, memberCode: null, savedBookerName: null, savedBookerPhone: null })
+          .set({ status: 'MERGED', mergedIntoAccountId: i.primaryAccountId, email: null, emailVerified: false, nickname: null, nicknameKey: null, phone: null, memberCode: null, savedBookerName: null, savedBookerPhone: null })
           .where(eq(account.id, i.absorbedAccountId));
         // 흡수 계정의 연락처 가명도 지운다(프로필 파기, BOT-045)
         await tx.delete(accountContactRef).where(eq(accountContactRef.accountId, i.absorbedAccountId));
+        // 흡수 계정의 동의 행을 지운다(docs/data.md consent)
+        await tx.delete(consent).where(eq(consent.accountId, i.absorbedAccountId));
         // 병합 사슬을 한 단계로(흡수 계정을 가리키던 계정도 대표 계정으로, docs/data.md §4)
         await tx.update(account).set({ mergedIntoAccountId: i.primaryAccountId }).where(eq(account.mergedIntoAccountId, i.absorbedAccountId));
         await tx.insert(accountMerge).values({
@@ -426,19 +451,41 @@ export class DrizzleSessionStore implements SessionStore {
         // 프로필 칸을 비우고 DELETED로. 회원 코드도 비운다(UNIQUE). 계정 행과 ID는 다른 서비스의 법정 기록이 잇는 값이라 남긴다(docs/data.md §6)
         await tx
           .update(account)
-          .set({ status: 'DELETED', deletedAt: date(now), nickname: null, email: null, emailVerified: false, phone: null, memberCode: null, savedBookerName: null, savedBookerPhone: null, closureReason: null, closureStartedAt: null })
+          .set({ status: 'DELETED', deletedAt: date(now), nickname: null, nicknameKey: null, email: null, emailVerified: false, phone: null, memberCode: null, savedBookerName: null, savedBookerPhone: null, closureReason: null, closureStartedAt: null })
           .where(eq(account.id, accountId));
         await tx.delete(accountProvider).where(eq(accountProvider.accountId, accountId));
         await tx.delete(device).where(eq(device.accountId, accountId));
         await tx.execute(sql`delete from session_create_key where session_id in (select id from session where account_id = ${accountId})`);
         // 조사용 연락처 가명도 지운다(docs/data.md account_contact_ref '탈퇴 때 지운다', BOT-045)
         await tx.delete(accountContactRef).where(eq(accountContactRef.accountId, accountId));
+        // 가입 동의 행은 탈퇴 때 지운다(docs/data.md consent, 추천 적용 2026-10-26, ADR-0089)
+        await tx.delete(consent).where(eq(consent.accountId, accountId));
         // 대표 계정이 탈퇴하면 그 계정의 병합 이력도 함께 파기한다(data-classification '계정 연결 및 병합 감사 원장', 새 맥락 리뷰 중간 6)
         // 사슬 앞단(이 계정에 흡수된 계정이 대표였던 병합)도 함께 지운다. 사슬은 한 단계로 고쳐 두어 그 계정들은 이 계정을 바로 가리킨다(다시 검토 낮음 1)
         await tx
           .delete(accountMerge)
           .where(or(eq(accountMerge.primaryAccountId, accountId), inArray(accountMerge.primaryAccountId, tx.select({ id: account.id }).from(account).where(eq(account.mergedIntoAccountId, accountId)))));
       },
+      signupStateOf: (accountId) => signupStateIn(tx, accountId),
+      lockNicknameKey: async (key) => {
+        // 같은 키는 커밋·되돌림까지 기다린다(키 문자열의 64비트 해시로 잠근다. 해시가 겹치면 서로 기다릴 뿐 결과는 같다)
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`nickname:${key}`}, 0))`);
+      },
+      nicknameKeyTaken: (key) => nicknameKeyTakenIn(tx, key),
+      memberCodeTaken: async (code) => (await tx.select({ id: account.id }).from(account).where(eq(account.memberCode, code)).limit(1)).length > 0,
+      completeSignup: async (r: SignupRecord) => {
+        await tx.update(account).set({ ageVerified: true, nickname: r.nickname, nicknameKey: r.nicknameKey, phone: r.phone, memberCode: r.memberCode }).where(eq(account.id, r.accountId));
+        await tx.insert(consent).values(r.consents.map((c) => ({ id: uuidv7(this.clock), accountId: r.accountId, kind: c.kind, noticeVersion: c.noticeVersion, channels: c.channels, agreedAt: date(r.now) })));
+      },
+      incompleteSignupsBefore: async (before, limit) =>
+        (
+          await tx
+            .select({ id: account.id })
+            .from(account)
+            .where(and(eq(account.status, 'ACTIVE'), eq(account.ageVerified, false), lte(account.createdAt, date(before))))
+            .orderBy(asc(account.id))
+            .limit(limit)
+        ).map((r) => r.id),
       closuresStartedBefore: async (before, limit) =>
         (
           await tx

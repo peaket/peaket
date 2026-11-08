@@ -17,7 +17,9 @@ import {
   SESSION_STORE,
   type SessionSignals,
   type SessionStore,
+  type SignupState,
 } from '../domain/ports.js';
+import { signupCompleted } from '../domain/signup.js';
 import type { Provider } from '../domain/session.js';
 
 export interface MergePlan extends Pick<StoredMergeProposal, 'primaryAccountId' | 'absorbedAccountId' | 'status' | 'blockers' | 'sameKindProviders' | 'invariantViolated' | 'moved'> {}
@@ -37,7 +39,9 @@ export class MergePlanner {
   /** 지금 본인확인 상태로 고른 대표·흡수 계정(제안 만들기와 확정 직전에 같은 규칙) */
   async roles(i: { current: string; other: string }): Promise<{ primary: string; absorbed: string; bothVerified: boolean; primaryVerified: boolean }> {
     const [currentVerified, otherVerified] = await Promise.all([this.verifications.pidsOf(i.current), this.verifications.pidsOf(i.other)]).then((r) => r.map((x) => x.length > 0));
-    const c = choosePrimary({ current: i.current, other: i.other, currentVerified: currentVerified!, otherVerified: otherVerified! });
+    const [currentSignup, otherSignup] = await Promise.all([this.store.signupStateOf(i.current), this.store.signupStateOf(i.other)]);
+    const done = (s: SignupState | null) => s !== null && signupCompleted(s.ageVerified, s.consentKinds);
+    const c = choosePrimary({ current: i.current, other: i.other, currentVerified: currentVerified!, otherVerified: otherVerified!, currentSignupDone: done(currentSignup), otherSignupDone: done(otherSignup) });
     return { ...c, primaryVerified: c.primary === i.current ? currentVerified! : otherVerified! };
   }
 

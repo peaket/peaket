@@ -73,7 +73,7 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       const s = await login(k);
       const lost = ok(await k.refresh.run({ refreshToken: s.refreshToken }));
       ok(await k.refresh.run({ refreshToken: s.refreshToken }));
-      expect(await k.refresh.run({ refreshToken: lost.refreshToken })).toEqual({ result: 'REUSED' });
+      expect(await k.refresh.run({ refreshToken: lost.refreshToken })).toEqual({ result: 'REUSED', ended: 'REFRESH_REUSE' });
       expect(await t.isTerminated(s.sessionId)).toBe(true);
       expect(await t.terminations(s.accountId)).toEqual([[s.sessionId, 'REFRESH_REUSE']]);
       expect(k.signals.seen.at(-1)).toBe('refresh:fan:reused');
@@ -85,7 +85,7 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       const s = await login(k);
       ok(await k.refresh.run({ refreshToken: s.refreshToken }));
       k.clock.advance(31_000);
-      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED' });
+      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED', ended: 'REFRESH_REUSE' });
       expect(await t.isTerminated(s.sessionId)).toBe(true);
     });
 
@@ -95,7 +95,7 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       const s = await login(k);
       const r1 = ok(await k.refresh.run({ refreshToken: s.refreshToken }));
       ok(await k.refresh.run({ refreshToken: r1.refreshToken }));
-      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED' });
+      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED', ended: 'REFRESH_REUSE' });
     });
 
     test('I-T4_⑤_새토큰을한번쓴뒤바로앞토큰을유예안에쓰면_탈취다', async () => {
@@ -108,7 +108,7 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       ok(await k.refresh.run({ refreshToken: r1.refreshToken }));
       k.clock.advance(5_000);
       // 그 앞 토큰(s)은 첫 회전에서 10초 안이지만 이제 두 대 앞이다
-      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED' });
+      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'REUSED', ended: 'REFRESH_REUSE' });
       expect(await t.isTerminated(s.sessionId)).toBe(true);
     });
 
@@ -118,7 +118,8 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       expect(await k.refresh.run({ refreshToken: 'x'.repeat(43) })).toEqual({ result: 'INVALID' });
       const s = await login(k);
       await k.end.run({ sessionId: s.sessionId, accountId: s.accountId });
-      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'INVALID' });
+      // 끝난 세션의 토큰에는 끝난 까닭이 실린다(ADR-0235, I-T78)
+      expect(await k.refresh.run({ refreshToken: s.refreshToken })).toEqual({ result: 'INVALID', ended: 'LOGOUT' });
       const s2 = await login(k);
       k.clock.advance(14 * 24 * 3_600_000 + 1);
       expect(await k.refresh.run({ refreshToken: s2.refreshToken })).toEqual({ result: 'INVALID' });

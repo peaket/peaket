@@ -13,6 +13,8 @@ export const account = pgTable(
     status: text('status').notNull(),
     mergedIntoAccountId: uuid('merged_into_account_id'),
     nickname: text('nickname'),
+    // 닉네임을 NFKC·대소문자 접기로 맞춘 중복 판정 키(ADR-0203 결정 2). 닉네임을 지울 때 함께 지운다
+    nicknameKey: text('nickname_key'),
     email: text('email'),
     // 계정을 만들 때 제공자가 준 이메일 검증 여부. 가입 때 연결 제안의 대상은 true인 계정뿐이다(identity §2.1, BUILD_ORDER BOT-040)
     emailVerified: boolean('email_verified').notNull().default(false),
@@ -35,6 +37,26 @@ export const account = pgTable(
     check('account_locale_check', sql`${t.locale} in ('ko', 'en', 'ja', 'zh')`),
     check('account_merged_check', sql`(${t.status} = 'MERGED') = (${t.mergedIntoAccountId} is not null)`),
     check('account_closure_reason_check', sql`${t.closureReason} is null or ${t.closureReason} in ('UNDER_14')`),
+    uniqueIndex('account_nickname_key_key').on(t.nicknameKey).where(sql`${t.nicknameKey} is not null`),
+  ],
+);
+
+// 가입 때 동의 기록(docs/data.md consent, ADR-0203, ADR-0235). 탈퇴·병합되면 그 계정의 행을 지운다
+export const consent = pgTable(
+  'consent',
+  {
+    id: uuid('id').primaryKey(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => account.id),
+    kind: text('kind').notNull(),
+    noticeVersion: text('notice_version').notNull(),
+    channels: text('channels'),
+    agreedAt: at('agreed_at').notNull(),
+  },
+  (t) => [
+    unique('consent_account_kind_version_key').on(t.accountId, t.kind, t.noticeVersion),
+    check('consent_kind_check', sql`${t.kind} in ('TERMS', 'PRIVACY_REQUIRED', 'PRIVACY_PHONE', 'MARKETING')`),
   ],
 );
 
@@ -89,6 +111,8 @@ export const session = pgTable(
     absoluteExpiresAt: at('absolute_expires_at').notNull(),
     idleExpiresAt: at('idle_expires_at').notNull(),
     terminatedAt: at('terminated_at'),
+    // 끝난 까닭(asyncapi SessionTerminated.reason, 갱신 401의 ended, ADR-0235 결정 1)
+    terminatedReason: text('terminated_reason'),
     loginVerdict: text('login_verdict').notNull(),
     loginVerdictReason: text('login_verdict_reason'),
     loginVerdictAt: at('login_verdict_at'),

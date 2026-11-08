@@ -34,8 +34,19 @@ import { SessionsController } from './inbound/sessions.controller.js';
 import { EndDeviceSession } from './application/end-device-session.js';
 import { ListSessions } from './application/list-sessions.js';
 import { COOKIE_DOMAIN, TokenController } from './inbound/token.controller.js';
+import { AccountSummaryController } from './inbound/account-summary.controller.js';
+import { GetAccountSummary } from './application/get-account-summary.js';
+import { CompleteSignup } from './application/complete-signup.js';
+import { CheckNickname } from './application/check-nickname.js';
+import { CancelSignup } from './application/cancel-signup.js';
+import { MemoryNicknameCheckLimits } from './adapters/memory-nickname-check-limits.js';
+import { NICKNAME_CHECK_LIMITS, type NicknameCheckLimits, noStaffAssignments, STAFF_ASSIGNMENTS, type StaffAssignments } from './domain/ports.js';
 
 export interface SessionModuleOptions {
+  /** 닉네임 확인의 요청 수 저장소(세션·캐시 Redis id:nick, ADR-0235). 없으면 메모리(로컬·시험) */
+  nicknameCheckLimits?: NicknameCheckLimits;
+  /** 현장 스태프 배정 조회(BUILD_ORDER GAT-210이 채운다). 없으면 늘 없음 */
+  staffAssignments?: StaffAssignments;
   storage: 'database' | 'memory';
   signer: TokenSigner;
   /** 공개키 묶음(키 셋 셋) */
@@ -64,8 +75,14 @@ export class SessionModule {
       module: SessionModule,
       // 본인확인 컨텍스트가 계정 정리(ACCOUNT_CLOSURE)를 쓰므로 전역으로 내준다
       global: true,
-      controllers: [TokenController, AccountController, ProvidersController, MergeProposalsController, SessionsController],
+      controllers: [TokenController, AccountController, ProvidersController, MergeProposalsController, SessionsController, AccountSummaryController],
       providers: [
+        GetAccountSummary,
+        CompleteSignup,
+        CheckNickname,
+        CancelSignup,
+        o.nicknameCheckLimits ? { provide: NICKNAME_CHECK_LIMITS, useValue: o.nicknameCheckLimits } : { provide: NICKNAME_CHECK_LIMITS, useFactory: (clock: Clock) => new MemoryNicknameCheckLimits(clock), inject: [CLOCK] },
+        { provide: STAFF_ASSIGNMENTS, useValue: o.staffAssignments ?? noStaffAssignments },
         CloseAccount,
         { provide: ACCOUNT_CLOSURE, useExisting: CloseAccount },
         CreateSession,

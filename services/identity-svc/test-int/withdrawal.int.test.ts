@@ -98,8 +98,10 @@ test('BOT-020넘김_PostgreSQL에서_만14세미만정리는정리시작시각�
   expect(await q<{ status: string }>('select status from verification_attempt where account_id = $1', [a.accountId])).toEqual([{ status: 'UNDER_14' }]);
   // 정비 일: 끝난 세션의 해시는 이미 없고, 쓴 재인증 토큰 기록과 보존 기한이 지난 처리 기록을 지운다
   const tasks = identityMaintenanceTasks(database, clock);
-  expect(tasks.map((x) => x.name)).toEqual(['withdrawal-finish', 'refresh-hash-expired', 'reauth-use-expired', 'session-label-expired', 'conflict-attempt-purge', 'verification-record-purge', 'restricted-hold-expired', 'admin-known-source-expired', 'admin-login-step-expired', 'admin-refresh-hash-expired', 'admin-invite-expired', 'admin-account-request-expired', 'admin-reauth-expired', 'account-hold-closed']);
+  expect(tasks.map((x) => x.name)).toEqual(['withdrawal-finish', 'signup-incomplete-purge', 'refresh-hash-expired', 'reauth-use-expired', 'session-label-expired', 'conflict-attempt-purge', 'verification-record-purge', 'restricted-hold-expired', 'admin-known-source-expired', 'admin-login-step-expired', 'admin-refresh-hash-expired', 'admin-invite-expired', 'admin-account-request-expired', 'admin-reauth-expired', 'account-hold-closed']);
   clock.advance(366 * 86_400_000);
+  // 정비 signup-incomplete-purge가 앞 시험의 가입 전 계정을 지우며 Outbox에 쓴다: 민 날짜의 파티션을 만든다(BOT-047)
+  await ensureOutboxPartitions(database, clock);
   for (const task of tasks) await task.run();
   expect(await q('select 1 from reauth_token_use')).toHaveLength(0);
   expect(await q('select 1 from retention.verification_record')).toHaveLength(0);

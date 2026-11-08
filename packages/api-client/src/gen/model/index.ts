@@ -627,6 +627,7 @@ export * from './portoneCheckout';
 export * from './portoneCheckoutCustomer';
 export * from './preverifyResult';
 export * from './problem';
+export * from './problemEnded';
 export * from './problemFraudHold';
 export * from './problemFraudHoldState';
 export * from './problemLock';

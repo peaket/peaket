@@ -17,6 +17,8 @@ test('닉네임 규칙: NFC·앞뒤 공백, 문자소 2~12개, 글자·숫자·�
   // 한 글자에 결합 표시를 셋 넘게 붙이면 막고(문자소 수로는 안 보인다), UTF-16 64자를 넘으면 막는다
   assert.equal(nicknameProblem('a' + '́'.repeat(60) + 'b'), 'chars');
   assert.equal(nicknameProblem('नमस्ते'), null, '데바나가리 결합 글자는 받는다');
+  // I-T80_① 보이지 않는 글자로 중복 검사를 피하지 못하게 막는다(서버 규칙과 같다, ADR-0203 결정 2)
+  for (const bad of ['가͏나', '가나︀', '가나\u{E0100}', '가ㅤ나', 'ㅤㅤ', '가ﾠ나', 'ᅟ가나', '가ᅠ나', '가​나', '가­나']) assert.equal(nicknameProblem(bad), 'chars', JSON.stringify(bad));
   assert.equal(nicknameProblem(''), 'empty');
   assert.equal(nicknameProblem('   '), 'empty');
 });

@@ -2,6 +2,7 @@
 // 화면 컴포넌트(ui/VerifyFlow.tsx, _pages/verify-return)만 부른다. 규칙은 flow.ts와 docs/features/identity.md §5에 있다.
 import { ORIGINS } from '@/shared/config/origins';
 import { refreshLock } from '@/shared/lib/refresh-lock';
+import { loginHrefAfterRefresh } from '@/shared/lib/token-refresh';
 import { sleep } from '@/shared/lib/sleep';
 import { type AgencyWindow, type CallerEnv, type ChannelLike, createVerifyApi, type ReturnEnv, type StorageLike, VERIFY_CHANNEL, type VerifyApi } from './flow';
 
@@ -95,7 +96,7 @@ export function browserCallerEnv(api: VerifyApi = browserVerifyApi()): CallerEnv
     submitForm: submitAgencyForm,
     sleep,
     currentPath: () => `${location.pathname}${location.search}`,
-    goLogin: (next) => location.assign(`/login?next=${encodeURIComponent(next)}`),
+    goLogin: (next) => location.assign(loginHrefAfterRefresh(next)),
   };
 }
 

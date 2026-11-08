@@ -12,7 +12,7 @@ import { GetMergeProposal } from '../src/modules/session/application/get-merge-p
 import { MergeError } from '../src/modules/session/application/merge-error.js';
 import { MergePlanner } from '../src/modules/session/application/plan-merge.js';
 import { SetAccountHold } from '../src/modules/session/application/set-account-hold.js';
-import { BLOCKER_ORDER, type CheckResult } from '../src/modules/session/domain/merge.js';
+import { BLOCKER_ORDER, type CheckResult, choosePrimary } from '../src/modules/session/domain/merge.js';
 import { MergeProposal } from '@peaket/contracts/openapi/model';
 import { type AccountEraser, type AccountRow, type MergeChecker, MergeCheckUnavailable } from '../src/modules/session/domain/ports.js';
 import { ISSUER, kit, newKey } from './support.js';
@@ -75,6 +75,15 @@ describe('병합 제안(I-T31)', () => {
     expect(v).toMatchObject({ primaryAccountId: a.accountId, mergedAccountId: b.accountId, status: 'PROPOSED', blockers: [], moved: { providers: 1, tickets: 0, reviews: 0 } });
     // 화면 문구에 쓰는 값(BOT-043): 추가하려던 종류, 지금 계정이 남는 쪽인지, 남는 계정의 본인확인 여부
     expect(v).toMatchObject({ newProvider: 'google', requesterRole: 'PRIMARY', primaryVerified: false });
+  });
+
+  test('I-T31_둘다본인확인전이고가입은상대만마쳤으면_가입을마친상대가대표다(ADR-0235)', () => {
+    const r = choosePrimary({ current: 'b', other: 'a', currentVerified: false, otherVerified: false, currentSignupDone: false, otherSignupDone: true });
+    expect(r).toMatchObject({ primary: 'a', absorbed: 'b', bothVerified: false });
+    expect(choosePrimary({ current: 'b', other: 'a', currentVerified: false, otherVerified: false, currentSignupDone: true, otherSignupDone: true }).primary).toBe('b');
+    expect(choosePrimary({ current: 'b', other: 'a', currentVerified: false, otherVerified: false, currentSignupDone: false, otherSignupDone: false }).primary).toBe('b');
+    // 본인확인이 먼저다(POL-034)
+    expect(choosePrimary({ current: 'b', other: 'a', currentVerified: true, otherVerified: false, currentSignupDone: false, otherSignupDone: true }).primary).toBe('b');
   });
 
   test('I-T31_지금계정만본인확인을마쳤으면지금계정이대표이고_조회는PRIMARY와남는계정의본인확인참이다', async () => {

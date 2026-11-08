@@ -2,16 +2,16 @@
 // 실패하면 그 트랜잭션의 변경을 모두 되돌린다. 세션 종료 사건은 Outbox 대신 목록에 모은다.
 import { randomUUID } from 'node:crypto';
 import { CONTROL_TOPICS, type OutboxMessage, uuidv7 } from '@peaket/platform';
-import type { AccountRow, ContactKind, CreateKeyRecord, InvestigationRefsRow, NewSession, RefreshRow, SessionRow, SessionStore, SessionTx } from '../domain/ports.js';
+import type { AccountRow, ContactKind, CreateKeyRecord, InvestigationRefsRow, NewSession, RefreshRow, SessionRow, SessionStore, SessionTx, SignupRecord, SignupState } from '../domain/ports.js';
 import { nextRefPrev } from '../domain/inv-ref.js';
 import { type ActiveSession, CREATE_KEY_TTL_MS, type LiveSession, normalizeEmail, type Provider, sessionAlive, type TerminationReason } from '../domain/session.js';
 import { accountWithdrawnMessage } from './account-withdrawn-message.js';
 import { loginMethodChangedMessage } from './login-method-message.js';
 import { accountMergedMessage } from './account-merged-message.js';
 
-type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; mergedInto?: string; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number };
+type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; mergedInto?: string; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number; nickname?: string | null; nicknameKey?: string | null; ageVerified?: boolean; memberCode?: string | null; phone?: string | null };
 
-type StoredSession = NewSession & { terminatedAt: number | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean; lastActiveAt: number };
+type StoredSession = NewSession & { terminatedAt: number | null; terminatedReason: string | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean; lastActiveAt: number };
 
 interface State {
   accounts: Map<string, StoredAccount>;
@@ -28,9 +28,11 @@ interface State {
   merges: Map<string, { primaryAccountId: string; mergedAccountId: string; mergedProvider: string; moved: Record<string, number>; requestedAt: number; confirmedAt: number }>;
   /** 조사용 연락처 가명(account_contact_ref, BOT-045). 키는 계정 ID|종류 */
   contacts: Map<string, { accountId: string; kind: ContactKind; ref: string; refPrev?: string | null; updatedAt: number }>;
+  /** 동의 행(consent, BOT-047). 키는 계정 ID|종류|판 */
+  consents: Map<string, { accountId: string; kind: string; noticeVersion: string; channels: string | null; agreedAt: number }>;
 }
 
-const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [], reauthUses: new Map(), outbox: [], holds: new Map(), merges: new Map(), contacts: new Map() });
+const empty = (): State => ({ accounts: new Map(), providers: new Map(), devices: new Map(), sessions: new Map(), keys: new Map(), hashes: new Map(), events: [], reauthUses: new Map(), outbox: [], holds: new Map(), merges: new Map(), contacts: new Map(), consents: new Map() });
 const copy = <K, V extends object>(m: Map<K, V>) => new Map([...m].map(([k, v]) => [k, { ...v }]));
 const clone = (s: State): State => ({
   accounts: copy(s.accounts),
@@ -45,6 +47,7 @@ const clone = (s: State): State => ({
   holds: copy(s.holds),
   merges: copy(s.merges),
   contacts: copy(s.contacts),
+  consents: copy(s.consents),
 });
 const KIND_ORDER: readonly ContactKind[] = ['PHONE', 'EMAIL'];
 const providerKey = (p: Provider, id: string) => `${p}\u0000${id}`;
@@ -56,9 +59,17 @@ const row = (x: StoredSession): SessionRow => ({
   absoluteExpiresAt: x.absoluteExpiresAt,
   idleExpiresAt: x.idleExpiresAt,
   terminatedAt: x.terminatedAt,
+  terminatedReason: x.terminatedReason,
   loginVerdict: x.loginVerdict,
   refreshFamily: x.refreshFamily,
 });
+
+function signupStateIn(s: State, accountId: string): SignupState | null {
+  const a = s.accounts.get(accountId);
+  if (!a) return null;
+  return { status: a.status, nickname: a.nickname ?? null, ageVerified: a.ageVerified === true, consentKinds: [...s.consents.values()].filter((c) => c.accountId === accountId).map((c) => c.kind) };
+}
+const nicknameTakenIn = (s: State, key: string): boolean => [...s.accounts.values()].some((a) => a.nicknameKey === key);
 
 /** 세션 끝내기: 끝난 시각·기기 이름·해시를 모두 고친 뒤 사건을 적는다(PostgreSQL 저장소와 같은 차례, ADR-0116 결정 3) */
 function endIn(s: State, items: ReadonlyArray<{ id: string; reason: TerminationReason }>, now: number): void {
@@ -67,6 +78,7 @@ function endIn(s: State, items: ReadonlyArray<{ id: string; reason: TerminationR
     const x = s.sessions.get(id);
     if (x && x.terminatedAt === null) {
       x.terminatedAt = now;
+      x.terminatedReason = reason;
       // 끝난 세션의 화면용 기기 이름은 같은 트랜잭션에서 지운다(ADR-0209 결정 1)
       x.deviceLabel = null;
       ended.push({ x, reason });
@@ -204,6 +216,11 @@ export class MemorySessionStore implements SessionStore {
     );
   }
 
+  /** 시험용: 그 계정의 동의 행 */
+  consentsOf(accountId: string): { kind: string; noticeVersion: string; channels: string | null }[] {
+    return [...this.#state.consents.values()].filter((c) => c.accountId === accountId).map(({ kind, noticeVersion, channels }) => ({ kind, noticeVersion, channels }));
+  }
+
   /** 시험용: 계정 수 */
   accountCount(): number {
     return this.#state.accounts.size;
@@ -284,6 +301,14 @@ export class MemorySessionStore implements SessionStore {
       const x = this.#state.sessions.get(id.toLowerCase());
       return x ? row(x) : null;
     });
+  }
+
+  async signupStateOf(accountId: string): Promise<SignupState | null> {
+    return this.#serial(() => signupStateIn(this.#state, accountId));
+  }
+
+  async nicknameKeyTaken(key: string): Promise<boolean> {
+    return this.#serial(() => nicknameTakenIn(this.#state, key));
   }
 
   async purgeReauthUses(now: number): Promise<number> {
@@ -427,7 +452,9 @@ export class MemorySessionStore implements SessionStore {
           } else s.devices.set(d.id, { ...d, accountId: i.primaryAccountId });
         }
         const a = s.accounts.get(i.absorbedAccountId);
-        if (a) s.accounts.set(i.absorbedAccountId, { ...a, status: 'MERGED', mergedInto: i.primaryAccountId, email: null, emailVerified: false });
+        if (a) s.accounts.set(i.absorbedAccountId, { ...a, status: 'MERGED', mergedInto: i.primaryAccountId, email: null, emailVerified: false, nickname: null, nicknameKey: null, phone: null, memberCode: null });
+        // 흡수 계정의 동의 행을 지운다(data.md consent)
+        for (const [k, c] of s.consents) if (c.accountId === i.absorbedAccountId) s.consents.delete(k);
         for (const [k, x] of s.accounts) if (x.mergedInto === i.absorbedAccountId) s.accounts.set(k, { ...x, mergedInto: i.primaryAccountId });
         // 흡수 계정의 프로필은 파기한다: 연락처 가명 행도 지운다(BOT-045)
         for (const [k, c] of s.contacts) if (c.accountId === i.absorbedAccountId) s.contacts.delete(k);
@@ -466,6 +493,23 @@ export class MemorySessionStore implements SessionStore {
         if (a && a.status === 'ACTIVE') Object.assign(a, { status: 'WITHDRAWAL_PENDING', closureReason: reason, closureStartedAt: now });
       },
       accountStatusOf: async (accountId) => s.accounts.get(accountId)?.status ?? null,
+      signupStateOf: async (accountId) => signupStateIn(s, accountId),
+      lockNicknameKey: async () => {},
+      nicknameKeyTaken: async (key) => nicknameTakenIn(s, key),
+      memberCodeTaken: async (code) => [...s.accounts.values()].some((a) => a.memberCode === code),
+      completeSignup: async (r: SignupRecord) => {
+        const a = s.accounts.get(r.accountId);
+        if (!a) return;
+        if (nicknameTakenIn(s, r.nicknameKey)) throw new Error('nickname_key UNIQUE 위반');
+        Object.assign(a, { ageVerified: true, nickname: r.nickname, nicknameKey: r.nicknameKey, phone: r.phone, memberCode: r.memberCode });
+        for (const c of r.consents) s.consents.set(`${r.accountId}|${c.kind}|${c.noticeVersion}`, { accountId: r.accountId, kind: c.kind, noticeVersion: c.noticeVersion, channels: c.channels, agreedAt: r.now });
+      },
+      incompleteSignupsBefore: async (before, limit) =>
+        [...s.accounts.values()]
+          .filter((a) => a.status === 'ACTIVE' && !a.ageVerified && a.createdAt <= before)
+          .map((a) => a.id)
+          .sort()
+          .slice(0, limit),
       eraseAccount: async (accountId, now) => {
         const a = s.accounts.get(accountId);
         if (!a) return;
@@ -477,6 +521,7 @@ export class MemorySessionStore implements SessionStore {
         const chain = new Set([accountId, ...[...s.accounts.values()].filter((x) => x.mergedInto === accountId).map((x) => x.id)]);
         for (const [k, m] of s.merges) if (chain.has(m.primaryAccountId)) s.merges.delete(k);
         for (const [k, c] of s.contacts) if (c.accountId === accountId) s.contacts.delete(k);
+        for (const [k, c] of s.consents) if (c.accountId === accountId) s.consents.delete(k);
       },
       closuresStartedBefore: async (before, limit) =>
         [...s.accounts.values()]
@@ -508,7 +553,7 @@ export class MemorySessionStore implements SessionStore {
         s.outbox.push(accountWithdrawnMessage({ eventKey: randomUUID(), ...i }));
       },
       insertSession: async (r) => {
-        s.sessions.set(r.id, { ...r, terminatedAt: null, prevRefreshHash: null, rotatedAt: null, refreshUsed: false, lastActiveAt: r.createdAt });
+        s.sessions.set(r.id, { ...r, terminatedAt: null, terminatedReason: null, prevRefreshHash: null, rotatedAt: null, refreshUsed: false, lastActiveAt: r.createdAt });
       },
       getSessionForUpdate: async (id) => {
         const x = s.sessions.get(id.toLowerCase());

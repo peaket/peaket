@@ -99,6 +99,7 @@ erDiagram
         text status "ACTIVE|WITHDRAWAL_PENDING|MERGED|DELETED. WITHDRAWAL_PENDING은 탈퇴 유예(결제 결과 대기·가상계좌 지연 환급 동안, 탈퇴 요청 202). 새 예매·주문·양도 요청은 409이고 로그인·환불 계좌 입력·알림만 허용(docs/planning/03 §1.5 ⑧, 추천 적용 2026-10-20, ADR-0073)"
         uuid merged_into_account_id "MERGED일 때 대표 계정"
         text nickname
+        text nickname_key "UNIQUE(비어 있으면 제외), 닉네임의 전각·반각처럼 모양만 다른 글자를 한 모양으로 맞추고(유니코드 NFKC 정규화) 대소문자를 없앤 키. 중복 판정에만 쓴다. 닉네임을 지울 때 함께 지운다(추천 적용 2026-11-09, ADR-0203 결정 2, ADR-0235)"
         text email
         bool email_verified "계정을 만들 때 제공자가 준 이메일 검증 여부(네이버는 false). 가입 때 연결 제안의 대상은 true인 계정뿐이다(추천 적용 2026-11-04, BUILD_ORDER BOT-040)"
         text phone "optional"
@@ -162,7 +163,7 @@ erDiagram
         uuid id PK
         uuid account_id FK
         text kind "TERMS|PRIVACY_REQUIRED|PRIVACY_PHONE|MARKETING. 가입 화면(SCR-005 ②·③)과 계정 설정(SCR-017 ④)의 동의만 둔다. 예매·굿즈 택배 주문과 현장 스태프 배정의 동의는 그 기록의 consent_version과 시각으로 남긴다(추천 적용 2026-10-26, ADR-0089)"
-        text notice_version "동의한 고지 문안의 판. 새 판에 다시 동의하면 행을 더한다"
+        text notice_version "동의한 고지 문안의 판. 그 문안이 있는 문서의 시행일이다(TERMS는 이용약관, PRIVACY_REQUIRED·PRIVACY_PHONE은 개인정보 처리방침, MARKETING은 가입 화면 문구 [가정], ADR-0235 결정 4). 새 판에 다시 동의하면 행을 더한다"
         text channels "MARKETING만. 수신 채널(docs/planning/03 §1.2)"
         timestamptz agreed_at "선택 동의(PRIVACY_PHONE·MARKETING)를 철회하면 그 종류의 행을 지운다. 탈퇴하면 모두 지우고, 병합되면 흡수 계정의 행을 지운다(POL-034)"
     }
@@ -178,6 +179,7 @@ erDiagram
         timestamptz absolute_expires_at
         timestamptz idle_expires_at
         timestamptz terminated_at
+        text terminated_reason "optional, 끝난 까닭(asyncapi SessionTerminated.reason). 끝난 시각과 같은 트랜잭션에 적는다. 갱신 401의 ended로 보인다. 이 칸 전에 끝난 세션은 비어 있다(추천 적용 2026-11-09, ADR-0235)"
         text login_verdict "ALLOW|CHALLENGE|UNKNOWN, 로그인 때 trust-svc ScoreRisk(LOGIN) 판정. UNKNOWN은 trust-svc가 답하지 않음(서킷 열림·데드라인). 양도·환급·배상 계좌 입력에서 재인증이 '요청만 함'일 때 쓴다(docs/features/identity.md §7, 추천 적용 2026-10-30)"
         text login_verdict_reason "optional, CHALLENGE일 때의 사유 범주 코드(trust.proto ReasonCategory, 점수 원값 없음)"
         timestamptz login_verdict_at
@@ -2266,6 +2268,7 @@ erDiagram
 | `tr:hp:{pid}` | 문자열 | 허니팟 적중 표시. 값은 적중 시각과 회차다 | 세션·캐시 클러스터에 두고 trust-svc의 허니팟 기록 처리기가 로그인한 요청의 적중에만 쓴다. 수명 24시간 [가정]이다. 그 사람의 다음 로비 입장·사전 검증에서 `EXISTS`로 보고 확정 신호로 쓴다. 이미 판정을 통과해 기다리는 사람은 이것만으로 격리하지 않는다. 해시 태그는 pid다(추천 적용 2026-10-30, bot-defense §7) |
 | `tr:vb:{pid}:E` | 문자열 | 판정 근거 키. `CHALLENGE` 판정과 재평가 격리에만 쓴다. 값은 판정 키(`TrustVerdict.eventKey`), 기기 가명, 확정 신호 근거(차단 목록·허니팟), 사유 범주, 프로필 판, 판정 시각이다 | 세션·캐시 클러스터에 두고 trust-svc가 쓴다. 수명 30일 [가정]이다. 이의 처리(CS 화면의 사유 범주·확정 신호 여부)와 이의 인정 때 지울 차단 기기 키를 찾는 데 쓴다. 해시 태그는 pid다. 추가 검증으로 보낸 판정만 남기므로 대형 온세일에서도 많아야 수만 건 [추정]이다(추천 적용 2026-10-30, bot-defense §3.2·§12) |
 | `id:link:{proposal_id}` [보완] | Hash | 소셜 가입 때 기존 계정에 연결하자고 제안하는 임시 세션(새 제공자, sub, 검증 이메일, 대상 계정 ID, 보일 기존 제공자, 브라우저 묶음 값의 SHA-256(2026-11-04 '브라우저 지문'을 이렇게 정함), 인증 실패 횟수, 만든 시각, 새 계정 만들기에 쓴 멱등 키(`usedKey`, 쓴 뒤에만). docs/features/identity.md §2.1 '가입 때 연결 제안의 첫 구현') | 세션·캐시 클러스터에 저장한다. 유효 수명은 10분이다. 1회성 토큰으로 한 번만 쓰이고, 연결을 마치거나 만료되면 바로 지운다(POL-034). 새 계정 만들기는 지우지 않고 `usedKey`를 적어 남은 수명 동안 같은 키의 다시 보내기만 받는다(2026-11-05). |
+| `id:nick:{session_id}` | String(정수) | 닉네임 확인의 세션별 요청 수(1분 [가정], 추천 적용 2026-11-09, ADR-0235 결정 5). 닉네임 원문은 두지 않는다 | 닉네임 확인(`POST /v1/identity/nickname-checks`)이 쓴다. 수명 1분이다 |
 | `id:merge:{proposal_id}` [보완] | Hash | 본인인증으로 확인한 계정 병합 제안 세션(대표 계정 ID, 흡수 계정 ID, 옮길 항목의 통계 요약, 병합을 막는 사유(같은 종류의 로그인 수단으로 막으면 겹친 종류도, 소유자 결정 2026-11-05, OPEN[21] 추천 적용). 제안한 계정·세션, 추가하려던 제공자와 sub, 남는 계정의 본인확인 여부(화면 문구, BOT-043), 상태 PROPOSED·BLOCKED, 불변식 위반 표시, 만든 시각도, 2026-11-04 BOT-042, docs/features/identity.md §2.1 '계정 병합의 첫 구현') | 세션·캐시 클러스터에 저장한다. 유효 수명은 10분이며, 사용자의 최종 승인을 확인한 직후 지운다(POL-034). |
 | `id:wa:reg:{등록 ID의 SHA-256}`·`id:wa:rea:{재인증 단계의 SHA-256}` | 문자열(JSON) | 관리 계정 패스키 챌린지(32바이트 난수). 등록은 계정·세션·콘솔, 재인증은 여기에 작업 묶음·확인한 요소(password·totp)와 허용한 패스키 ID 목록을 함께 둔다(추천 적용 2026-11-05, BUILD_ORDER BOT-122, docs/features/identity.md §6 '관리 계정 패스키의 첫 구현', ADR-0206) | 세션·캐시 클러스터에 둔다. 수명은 5분 [가정]이다. 확인할 때 `GETDEL`로 꺼내며 지워 맞든 틀리든 한 번만 쓴다. 한 키만 다뤄 해시 태그를 두지 않는다. 값은 1KB [가정] 안팎이다 |
 
@@ -2292,6 +2295,7 @@ erDiagram
 | catalog 읽기 모델 캐시, 웹 앱 서버의 ISR·데이터 캐시 | A 다시 만든다 | 원본을 다시 읽는다 | 원본 DB와 원 서버 | 캐시가 없는 것으로 보고 원본을 읽는다. 화면은 그대로다 |
 | identity 사용자 세션 | B 사람이 다시 한다 | 리프레시 토큰으로 다시 받는다 | identity DB의 세션 참조와 리프레시 토큰 | 새 로그인은 Problem 503과 `Retry-After`로 다시 하게 한다 |
 | 계정 연결·병합 제안(`id:link:*`·`id:merge:*`, 10분) | B | 처음부터 다시 한다 | — | 다시 하라고 알린다 |
+| 닉네임 확인 요청 수(`id:nick:*`, 1분 [가정], 추천 적용 2026-11-09, ADR-0235) | A | 숫자가 사라지면 처음부터 다시 센다. 닿지 못하는 동안은 세지 않고 통과시킨다(참고용이고 확정은 가입 마무리의 409다) | — | 없다 |
 | 관리 계정 패스키 챌린지(`id:wa:*`, 5분 [가정], 추천 적용 2026-11-05, BOT-122) | B | 패스키 등록이나 재인증을 처음부터 다시 한다 | 확인은 챌린지가 있어야만 통과하므로, 잃으면 막히는 쪽이다 | 503 `admin-login-unavailable`과 `Retry-After`로 다시 하게 한다 |
 | 관리 계정 로그인의 출발지가 든 값: 계정 × 출발지 묶음 실패 수와 묶음 잠금, 계정의 출발지 수, 출발지의 계정 수와 출발지 경보(identity, docs/security/auth-controls.md §3.1, 기술 검토 중간-052). 계정에 묶인 값(계정 실패 수·2단계 실패 수·비밀번호 연속 실패 누계)은 여기 두지 않고 identity DB `admin_account`에 둔다(추천 적용 2026-10-30, auth-controls §3.1). 키는 `id:alf:*`이고 이름과 TTL은 docs/features/identity.md §6 '관리 계정 로그인 1단계와 실패 제한의 첫 구현'에 있다(추천 적용 2026-11-05, BUILD_ORDER BOT-111). 없는 이메일의 가짜 상태(`id:alf:{a:g:…}:state`, 30일 [가정])와 한 대상의 처리 중 임대(`…:busy`, 10초)도 여기 든다 | C 다른 층이 지킨다 | 묶음 실패 수와 출발지 계수가 처음부터 다시 세어지고 묶음 잠금·출발지 경보가 풀린다. 그동안 출발지 단위 통제가 잠시 약해진다(auth-controls §3.7) | identity DB `admin_account`의 계정 실패 수·2단계 실패 수·비밀번호 연속 실패 누계와 잠금(`lock_kind`·`locked_until`), 24시간 안 잠금 기록, 전체 실패율 경보 | 실패를 세지 못하면 그 로그인 시도를 받지 않고 Problem 503과 `Retry-After`로 다시 하게 한다 [가정] |
 | 스캐너 기기 승인·등록 코드(`id:devauth:*`·`scanner:enroll:*`) | B | 코드를 다시 받는다 | 기기 등록·배정 원장(DB) | 다시 받으라고 알린다 |
@@ -2422,6 +2426,7 @@ erDiagram
 | 구매 세션 종료(나가기·결제 확정·유휴·최대 체류)가 같은 세션의 요청 확인·일련번호 올리기·주문 생성(Paying 표시)과 겹침, 같은 세션을 정리 반복이 둘 이상의 파드에서 점검(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-138) | 끝내는 연산·유휴/최대 체류 점검·Paying 표시는 모두 jti 슬롯의 Lua 한 번이라 세션 상태를 읽고 바꾸는 사이가 없다. 일련번호 올리기 Lua는 세션이 없으면 거짓이라 끝난 세션의 요청은 401이다. 정리 점검은 회차별 임대(`s:{event:E}:sesweep`)를 잡은 파드 하나만 돌고, 임대가 겹쳐도 점검이 멱등이다(이미 없으면 GONE). 끝낸 뒤 사건을 더하지 못하면 최대 체류 시각의 입장 자리 정리가 덮는다 | S-T33 ⑥(LEFT 뒤 같은 대기표 재입장), Q-T11(자리 즉시 비움), PRF-138의 종료·점검 시험 |
 | 계정 병합 처리 도중 해당 계정의 동시 로그인 및 신규 주문 인입 | 흡수 대상 계정의 행을 비관적으로 잠그고(`FOR UPDATE`) MERGED 상태를 확인한다. 진행 중인 활성 구매 세션이나 결제 대기 주문이 있으면 병합 요청을 거부한다. 서비스별 데이터 이전은 고유 `merge_id` 멱등키로 제어한다 | identity 통합 테스트 (I-T31·I-T32) |
 | 팬의 원격 로그아웃·로그인 수단 바꾸기(추천 적용 2026-11-05, ADR-0180, ADR-0209, BUILD_ORDER BOT-044): 다른 기기 로그아웃이 그 기기의 토큰 갱신·새 로그인과 겹침, 두 탭이 같은 기기를 동시에 끔, 로그인 수단 추가·해제가 다른 기기의 로그인과 겹침 | 원격 로그아웃과 로그인 수단 바꾸기는 계정 행을 먼저 잠그고(`FOR UPDATE`) 그 계정의 살아 있는 세션 행을 `FOR UPDATE`로 읽은 뒤 끝낸다. 로그인(CreateSession)도 계정을 잠근 뒤 세션을 만들므로, 겹친 로그인은 끝낸 뒤에 만들어져 살아남거나(바꾸기 뒤의 새 로그인) 앞서 만들어져 함께 끝난다. 갱신은 세션 행을 `FOR UPDATE`로 잡고 끝난 세션이면 401이다. 세션 끝내기는 `terminated_at IS NULL`일 때만 바꾸므로 두 탭이 같은 기기를 끄면 사건은 한 번이다. 뒤 쪽은 목록에서 이미 빠져 404 `session-not-found`이고 재인증 토큰은 되돌려 쓰지 않는다. 잠금 차례는 늘 계정 → 세션이라 교착이 없다 | identity 단위·통합 시험(I-T74 ②④⑥, I-T75. 동시에 두 요청을 겹치는 시험은 없고, 차례로 두 번 끄면 뒤 쪽이 404인지를 본다) |
+| 가입 마무리(추천 적용 2026-11-09, ADR-0180, ADR-0203, ADR-0235, BUILD_ORDER BOT-047): 같은 계정이 두 번 보냄(여러 탭), 두 사람이 같은 닉네임을 동시에 고름 | 계정 행을 먼저 잠그고(`FOR UPDATE`) 가입을 마쳤는지 본다. 뒤에 온 요청은 앞이 커밋한 뒤 이미 마친 상태를 보고 409 `signup-already-completed`다. 닉네임은 그 키의 잠금(`pg_advisory_xact_lock`)으로 한 번에 하나씩 처리하고 잠근 뒤 키가 있는지 본다. 그래서 겹치면 뒤쪽이 409 `nickname-taken`을 받는다(UNIQUE 위반으로 트랜잭션이 깨지지 않는다). 잠금 차례는 늘 계정 → 닉네임 키다. `nickname_key`의 UNIQUE는 마지막 방어선이다 | identity 통합 시험(I-T79 동시 두 번, I-T80 동시 같은 닉네임) |
 | 관리 계정 패스키: 같은 챌린지·같은 서명을 두 요청이 동시에 내거나, 같은 계정에 패스키 등록이 동시에 오거나, 재인증 토큰 하나로 패스키 등록·지우기를 동시에 부름(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER BOT-122) | 챌린지는 Redis `GETDEL`로 꺼내 하나만 받는다. 서명 횟수는 읽은 값과 같을 때만 고친다(`UPDATE … WHERE sign_count = 읽은 값`). 동기화 패스키처럼 0인 채면 챌린지가 한 번만 쓰여 막는다. 등록은 `admin_account` 행을 `FOR UPDATE`로 잠근 뒤 10개 상한을 세고 넣으며, 자격 ID는 고유 색인이 둘째 넣기를 막는다. 재인증 토큰은 `admin_reauth.used_at`을 조건부로 적어 한 번만 받는다. 지우기도 계정 행을 잠근 뒤 '마지막 하나'를 센다 | identity 단위·통합 시험(`admin-passkey.test.ts`·`admin-passkey.int.test.ts`, I-T53) |
 | 남은 좌석 수를 숫자 하나에 두고 예매마다 1씩 빼면, 모든 예매가 그 한 칸 앞에 줄 서고, 동시에 고칠 때 두 장이 팔렸는데 하나만 줄어드는 갱신 유실이 생긴다(추천 적용 2026-11-03, ADR-0180) | 그런 숫자를 두지 않는다. 남은 좌석은 판매 대상 좌석 수에서 좌석 비트맵의 켜진 비트 수(잡히거나 팔린 좌석)를 빼서 그때그때 센다. 회차 판매 상태(`event_sale`)는 예매마다 빼는 값이 아니라 1초 [가정]마다 한 파드가 세어 판 번호 조건으로 쓴다(§2, docs/features/seat-hold.md §4). 좌석맵에는 구역마다 숫자 대신 대략의 남은 상태(많음·적음·매진)를 보인다(FR-009) | 회차 판매 상태 판정 S-T25, 좌석 샤드 처리량 S-T27, K2 불변식 자동 검사 |
 | 두 파드가 같은 회차의 판매 상태를 함께 판정해 판 번호가 거꾸로 가거나 같은 전이를 두 번 냄(추천 적용 2026-11-09, BUILD_ORDER PRF-144, ADR-0122) | 회차 임대(`s:{event:E}:salesweep`)를 잡은 파드 하나만 판정한다. 임대가 잠깐 겹쳐도 `event_sale` 쓰기가 판 번호 조건부 UPDATE라 진 쪽은 0행이고 이번 틱을 끝낸다 | 회차 판매 상태 판정 S-T25 ⑦ |

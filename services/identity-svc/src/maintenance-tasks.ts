@@ -3,7 +3,7 @@
 // 다른 계정 시도 기록 1년(BOT-020), 보존 전용 표의 연계정보 처리 기록 1년(docs/features/identity.md §5·§8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030)
 import type { Clock, Database, MaintenanceTask } from '@peaket/platform';
 import { AdminAccountStoreForMaintenance, DEFAULT_ADMIN_AUTH_CONFIG } from './modules/admin/index.js';
-import { ACCOUNT_HOLD_CLOSED_KEEP_MS, BackfillContactRefs, CloseInvRefBridge, DrizzleSessionStore, FinishWithdrawals, InvRefKeyRing, RotateContactRefs } from './modules/session/index.js';
+import { ACCOUNT_HOLD_CLOSED_KEEP_MS, BackfillContactRefs, CloseInvRefBridge, DrizzleSessionStore, FinishWithdrawals, InvRefKeyRing, PurgeIncompleteSignups, RotateContactRefs } from './modules/session/index.js';
 import { DrizzleVerificationStore, VerificationEraser } from './modules/verification/index.js';
 
 /** 관리 재인증 기록을 남기는 기간 [가정](docs/data.md admin_reauth, BOT-122) */
@@ -22,6 +22,8 @@ export function identityMaintenanceTasks(database: Database, clock: Clock, invRe
   const finish = new FinishWithdrawals(sessions, new VerificationEraser(verifications), clock);
   return [
     { name: 'withdrawal-finish', when: 'daily', run: (signal) => finish.run(signal) },
+    // 가입을 마치지 않고 30일 [가정] 지난 계정을 지운다(identity §8 '팬 계정 요약·세션 종료 사유·가입 마무리의 첫 구현', ADR-0235 결정 7, BOT-047)
+    { name: 'signup-incomplete-purge', when: 'daily', run: (signal) => new PurgeIncompleteSignups(sessions, clock).run(signal) },
     { name: 'refresh-hash-expired', when: 'daily', run: (signal) => sessions.purgeExpiredRefreshHashes(clock.now(), signal) },
     { name: 'reauth-use-expired', when: 'daily', run: () => sessions.purgeReauthUses(clock.now()) },
     // 유휴 만료로 끝난 세션의 화면용 기기 이름은 그 세션의 절대 만료 뒤 비운다(끝낸 세션은 끝낼 때 비운다, docs/data.md session.device_label, BOT-044, ADR-0209)

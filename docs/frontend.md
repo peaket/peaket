@@ -357,6 +357,9 @@ RADIO가 말하는 뷰 층·저장소 층·데이터 접근 층을 앱마다 이
 - **경로가 바뀔 때**: 새 화면의 h1로 초점을 옮기고 제목을 알린다. 스크롤은 맨 위로 올리고, 뒤로 가기 때의 위치는 브라우저 복원에 맡긴다(§5.11).
 - **주소에 담는 상태**: 후기 모달(`?reviews=all` 등), 검색 쿼리와 페이지, 관제 대시보드의 회차·탭(`?event=&tab=`), 법정 조치 탭이다. 뒤로 가기로 모달이 닫힌다(docs/design/d5 §4).
 - **세션이 끝났을 때**: 401과 세션 종료 사유(`SessionTerminated` 문구, docs/design/d5 §3.5)를 보인다. 다시 로그인하면 원래 주소로 돌아온다. 돌아갈 주소는 같은 출처 상대 경로만 받는다(§5.14 `safeNext()`).
+  - 사유는 토큰 갱신 401의 오류 본문 `ended`로 받는다(추천 적용 2026-11-09, ADR-0235). `refreshOnce`(shared/lib/token-refresh)가 허용 목록(팬 사유 일곱)으로 걸러 그 문서의 메모리에 둔다.
+  - 갱신이 거절된 뒤 로그인 화면으로 보내는 곳은 `loginHrefAfterRefresh(next)`로 `/login?next=&ended=` 주소를 만든다. 사유는 한 번 쓰면 지운다.
+  - 셸 머리의 계정 요약은 비로그인으로 그리기만 하고 로그인 화면으로 보내지 않는다(ADR-0202 결정 2). 이때는 안내가 없을 수 있다.
 - **새 판 안내**: 대기실·좌석·결제·티켓 화면에서는 새 판을 적용하지 않고, 그 밖의 화면에서 "새 버전이 있습니다 [새로고침]" 토스트를 보인다(docs/design/d5 §3.1, devops §6.6).
 
 ## 3. 데이터 모델(D)
@@ -1587,7 +1590,7 @@ allowBuilds:
 | FE-T15 | 미지원 기능 대체 | WebCrypto·IndexedDB·OffscreenCanvas를 없앤 브라우저. `AbortSignal.any`를 지운 페이지(Playwright가 페이지 스크립트보다 먼저 넣는 `addInitScript`로 지운다)에서 api-client의 읽기·쓰기를 부르고, 시간 초과와 화면 떠남을 일으킨다(기술 검토 중간-095). PR에서는 브라우저 지원 린트(`eslint-plugin-compat`과 MDN 자료 보조 규칙)가 목표 밖 API를 막는다(§1.5) | develop | §1.5 표대로. `AbortSignal.any`가 없어도 호출이 예외 없이 나가고, 시간 초과는 `TimeoutError`, 화면 떠남은 `AbortError`로 끝나며, 끝난 뒤 남은 사건 듣기가 0이다 |
 | FE-T16 | 헤더 값과 메서드 | 빌드한 앱과 배포 정책의 CSP·COOP·COEP·Permissions-Policy 스냅샷. 화면 배포마다 정적 경로·앱 서버 경로·`/_t/*`에 PUT·DELETE·TRACE 요청을 보낸 응답 스냅샷(기술 검토 낮음-099, docs/infra.md) | 출시 후보 | §5.14.1과 같다. 앱 서버 경로와 `/_t/*`의 PUT·DELETE는 405, 정적 경로는 CloudFront가 거절하고, 어느 경로든 TRACE와 허용 밖 메서드에 2xx 0 |
 | FE-T17 | 원격 위젯 | 무결성 불일치·시간 초과·계약 판 불일치 | develop | 그 칸만 대체 카드로 바뀐다 |
-| FE-T18 | 접근성 | axe(PR. axe는 WCAG 2.2 규칙을 기본으로 끄므로 `wcag22aa` 태그를 켠다), 키보드 완주(좌석·결제·양도), NVDA·VoiceOver·TalkBack 수동 확인(조합·시나리오마다 3회 [가정], NFR-020). 키보드 시나리오에 한 글자 단축키(꺼짐·입력 칸 초점, 2.1.4), Tab으로 옮긴 초점이 고정 머리·하단 바에 다 가려지지 않는지(2.4.11), 로그인 칸의 붙여넣기(3.3.8)를 더한다(추천 적용 2026-10-28, 기술 검토 높음-28). 인증 앱 코드 여섯 자리를 한 번에 붙여넣기, 이유가 있는 비활성 버튼(`aria-disabled`)에 Tab이 닿는지와 Enter·Space·클릭이 아무 일도 하지 않는지, 그 버튼의 `aria-describedby`가 가리키는 이유 글이 화면에 보이는지를 더한다. axe의 `aria-required-children`·`aria-required-parent`(SeatList `tree` 구조)와 `aria-prohibited-attr`(span·div에 붙인 `aria-label`)를 켠다. SeatList는 구현 전에 시안으로 NVDA·VoiceOver 완주를 한 번 돌린다(기술 검토 중간-098·100·101) | PR·메이저 릴리스 | 위반 0, 완주 100%, 단축키가 꺼졌거나 입력 칸에 초점이 있을 때 동작 0, 다 가려진 초점 0, 비활성 버튼의 동작 0과 이유 글 연결 100% |
+| FE-T18 | 접근성 | axe(PR. axe는 WCAG 2.2 규칙을 기본으로 끄므로 `wcag22aa` 태그를 켠다), 키보드 완주(좌석·결제·양도), NVDA·VoiceOver·TalkBack 수동 확인(조합·시나리오마다 3회 [가정], NFR-020. VoiceOver·iOS Safari 몫은 기기를 구할 때까지 미실행으로 적는다, ADR-0237). 키보드 시나리오에 한 글자 단축키(꺼짐·입력 칸 초점, 2.1.4), Tab으로 옮긴 초점이 고정 머리·하단 바에 다 가려지지 않는지(2.4.11), 로그인 칸의 붙여넣기(3.3.8)를 더한다(추천 적용 2026-10-28, 기술 검토 높음-28). 인증 앱 코드 여섯 자리를 한 번에 붙여넣기, 이유가 있는 비활성 버튼(`aria-disabled`)에 Tab이 닿는지와 Enter·Space·클릭이 아무 일도 하지 않는지, 그 버튼의 `aria-describedby`가 가리키는 이유 글이 화면에 보이는지를 더한다. axe의 `aria-required-children`·`aria-required-parent`(SeatList `tree` 구조)와 `aria-prohibited-attr`(span·div에 붙인 `aria-label`)를 켠다. SeatList는 구현 전에 시안으로 NVDA·VoiceOver 완주를 한 번 돌린다(기술 검토 중간-098·100·101) | PR·메이저 릴리스 | 위반 0, 완주 100%, 단축키가 꺼졌거나 입력 칸에 초점이 있을 때 동작 0, 다 가려진 초점 0, 비활성 버튼의 동작 0과 이유 글 연결 100% |
 | FE-T19 | 다국어 | 누락 키, 로케일별 초기 번들 크기, 대기실 셸 넷 | PR | 누락 0, 크기가 같다 |
 | FE-T20 | 스캐너 판정 | 관리형 기기 벤치, 판정 표 14행 | 측정 캠페인 | p95 150ms, 표대로 |
 | FE-T21 | 운영 묶음 검사 | 개발 도구·MSW·데모 막대(2인 승인 시연 버튼 포함, ADR-0095)·시뮬레이터·소스 맵 링크·비밀처럼 생긴 문자열, 허용 확장자 | 출시 후보 | 0건 |

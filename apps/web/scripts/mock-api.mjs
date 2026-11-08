@@ -468,7 +468,7 @@ function nicknameInvalid(raw) {
   const v = typeof raw === 'string' ? raw.normalize('NFC').trim() : '';
   if (v.length === 0 || v.length > 64) return true;
   if (!/^[\p{L}\p{M}\p{N}_.\-]+(?: [\p{L}\p{M}\p{N}_.\-]+)*$/u.test(v)) return true;
-  if (/[\u200D\uFE0E\uFE0F\u20E3]|\p{Extended_Pictographic}/u.test(v)) return true;
+  if (/\u20E3|\p{Default_Ignorable_Code_Point}|\p{Extended_Pictographic}/u.test(v)) return true;
   const gs = [...new Intl.Segmenter('ko', { granularity: 'grapheme' }).segment(v)].map((x) => x.segment);
   if (gs.some((g) => (g.match(/\p{M}/gu)?.length ?? 0) > 3)) return true;
   return gs.length < 2 || gs.length > 12;
@@ -654,9 +654,9 @@ export function startMockApi({
     const p = url.pathname;
     const unauthorized = () => send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
     if (p === '/__mock/state' && req.method === 'GET') {
-      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'order', 'accept', 'pay', 'ticketEvent', ...Object.keys(QUEUE_DEFAULTS)])) {
+      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'fanEnded', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'order', 'accept', 'pay', 'ticketEvent', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
-        if (v !== null && (v !== '' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers' || k === 'queueStateRetryAfter')) state[k] = v;
+        if (v !== null && (v !== '' || k === 'fanEnded' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers' || k === 'queueStateRetryAfter')) state[k] = v;
       }
       if (url.searchParams.has('queueOpenIn')) {
         const sec = Number(state.queueOpenIn);
@@ -712,7 +712,11 @@ export function startMockApi({
     }
     // 토큰 갱신(POST /v1/identity/access-tokens): 비로그인이면 401(갱신 거절 → 화면은 비로그인), 아니면 204. 없으면 404가 일시 장애로 읽혀
     // 화면이 비로그인 대신 '모름'으로 남는다(docs/frontend.md §4.1 '401', HOT-323)
-    if (p === '/v1/identity/access-tokens' && req.method === 'POST') return state.fan === 'guest' ? unauthorized() : send(204, undefined);
+    // fan=guest에 fanEnded=<팬 사유>를 더하면 401 본문에 끝난 까닭 ended를 싣는다(ADR-0235, 로그인 화면의 ?ended= 안내)
+    if (p === '/v1/identity/access-tokens' && req.method === 'POST') {
+      if (state.fan !== 'guest') return send(204, undefined);
+      return state.fanEnded ? send(401, { type: 'https://peaket.example/problems/refresh-token-invalid', title: '다시 로그인해 주세요', status: 401, ended: state.fanEnded }, 'application/problem+json') : unauthorized();
+    }
     const problem = (status, name, title, extra = {}, ext = {}) => send(status, { type: `https://peaket.example/problems/${name}`, title, status, ...ext }, 'application/problem+json', extra);
     const badRequest = () => send(400, { type: 'about:blank', title: 'Bad Request', status: 400 }, 'application/problem+json');
     if (p === '/v1/identity/nickname-checks' && req.method === 'POST') {
@@ -727,6 +731,7 @@ export function startMockApi({
     if (p === '/v1/identity/signup-completions' && req.method === 'POST') {
       void readJson(req).then((b) => {
         if (state.fan === 'guest') return unauthorized();
+        if (state.fan === 'closing') return problem(403, 'under-14', '만 14세 미만은 피켓을 이용할 수 없습니다');
         if (state.fan !== 'pending') return problem(409, 'signup-already-completed', '이미 가입을 마친 계정입니다');
         const c = b?.consents;
         const shapeOk =

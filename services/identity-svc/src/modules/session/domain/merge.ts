@@ -69,10 +69,14 @@ export interface StoredMergeProposal {
   expiresAt: number;
 }
 
-/** 대표 계정: 본인확인을 마친 쪽, 둘 다 아니면 지금 계정, 둘 다면 막는다(BOTH_VERIFIED, POL-034) */
-export function choosePrimary(i: { current: string; other: string; currentVerified: boolean; otherVerified: boolean }): { primary: string; absorbed: string; bothVerified: boolean } {
+/**
+ * 대표 계정(POL-034): 본인확인을 마친 쪽, 둘 다면 막는다(BOTH_VERIFIED). 둘 다 본인확인 전이면 가입을 마친 쪽이고, 그것도 같으면 지금 계정이다.
+ * 가입 전 계정이 가입을 마친 계정을 흡수하면 닉네임·동의·회원 코드가 사라지기 때문이다(ADR-0235 결정 9). 가입 여부를 주지 않으면 지금처럼 지금 계정이다
+ */
+export function choosePrimary(i: { current: string; other: string; currentVerified: boolean; otherVerified: boolean; currentSignupDone?: boolean; otherSignupDone?: boolean }): { primary: string; absorbed: string; bothVerified: boolean } {
   if (i.currentVerified && i.otherVerified) return { primary: i.current, absorbed: i.other, bothVerified: true };
   if (i.otherVerified) return { primary: i.other, absorbed: i.current, bothVerified: false };
+  if (!i.currentVerified && i.otherSignupDone === true && i.currentSignupDone === false) return { primary: i.other, absorbed: i.current, bothVerified: false };
   return { primary: i.current, absorbed: i.other, bothVerified: false };
 }
 

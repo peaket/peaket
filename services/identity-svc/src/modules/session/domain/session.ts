@@ -44,6 +44,10 @@ export function needsReverification(purpose: ReauthPurpose, strength: ReauthStre
  */
 export type TerminationReason = 'LOGOUT' | 'DEVICE_LIMIT' | 'REFRESH_REUSE' | 'DELETE' | 'MERGED' | 'LOGIN_METHOD_CHANGED';
 
+/** 화면이 받는 팬 세션 종료 사유(갱신 401의 ended, d5 §3.5, ADR-0235). 다른 값은 싣지 않는다 */
+export const FAN_ENDED_REASONS: readonly string[] = ['LOGOUT', 'ADMIN_FORCE', 'REFRESH_REUSE', 'DEVICE_LIMIT', 'MERGED', 'DELETE', 'LOGIN_METHOD_CHANGED'];
+export const fanEndedReason = (r: string | null | undefined): string | undefined => (r && FAN_ENDED_REASONS.includes(r) ? r : undefined);
+
 /** 만 14세 미만 정리를 시작하고 끝내기까지 두는 틈 [가정](결과 대화상자를 보일 틈, identity §8 '탈퇴의 첫 구현') */
 export const CLOSURE_GRACE_MS = 10 * 60_000;
 /** 탈퇴 뒤 남은 본인확인 기록을 정비가 다시 지우는 기간 [가정](늦어도 5일 안, identity §8) */

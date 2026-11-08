@@ -224,6 +224,8 @@ describe('탈퇴와 겹치는 로그인·갱신·본인확인(새 맥락 리뷰 
         ),
       purgeExpiredRefreshHashes: (n) => t.sessions.purgeExpiredRefreshHashes(n),
       purgeReauthUses: (n) => t.sessions.purgeReauthUses(n),
+      signupStateOf: (id) => t.sessions.signupStateOf(id),
+      nicknameKeyTaken: (key) => t.sessions.nicknameKeyTaken(key),
       investigationRefsOf: (ids, since) => t.sessions.investigationRefsOf(ids, since),
       accountsMissingEmailRef: (after, n) => t.sessions.accountsMissingEmailRef(after, n),
       contactRefsToRotate: (after, prefix, n) => t.sessions.contactRefsToRotate(after, prefix, n),

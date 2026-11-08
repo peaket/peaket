@@ -21,6 +21,7 @@ import { withdrawFraudHoldText } from '@/entities/appeal';
 import { formatWon } from '@/entities/production';
 import { afterWithdraw, browserWithdrawApi, type FraudHold, leaveForReauth, linkedProvidersQuietly, type Provider as WithdrawProvider, reauthFailureText, submitReauthForm, tabStore, untilText } from '@/features/account-withdraw';
 import { browserDevicesApi, type DeviceRow, endResultText, leaveForDeviceReauth, type LogoutScope, otherLoginsOf, type PendingLogout, toDeviceSessions } from '@/features/device-sessions';
+import { loginHrefAfterRefresh } from '@/shared/lib/token-refresh';
 import { useToast } from '@/shared/ui/toast';
 import { PROVIDER_INFO, type WithdrawQuote } from '../model/account';
 import { resumeDeviceLogout, returnOnMount } from '../model/devices';
@@ -138,7 +139,7 @@ export function SettingsFlows({
   };
   const shown = live && liveProvider ? PROVIDER_INFO[liveProvider] : provider;
   function toLogin() {
-    window.location.assign(`/login?next=${encodeURIComponent('/my/settings')}`);
+    window.location.assign(loginHrefAfterRefresh('/my/settings'));
   }
   const sorry = () => toast('지금은 탈퇴를 진행할 수 없습니다. 잠시 뒤 다시 시도해 주세요', 'ic-alert-circle');
   /** 원격 로그아웃의 '잠시 뒤 다시'(d5 §5.17 '원격 로그아웃 못 함') */

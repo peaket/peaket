@@ -239,6 +239,41 @@ test('가짜 API의 자동완성이 계약 Zod를 모르는 칸 없이 지나고
   assert.deepEqual(suggestions(ORIGIN, '없는말').items, []);
 });
 
+test('I-T79_⑦ 만 14세 미만으로 정리 중인 계정의 가입 마무리는 403 under-14다(ADR-0235)', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    await fetch(`${base}/__mock/state?fan=closing`);
+    const r = await fetch(`${base}/v1/identity/signup-completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(r.status, 403);
+    assert.ok((await r.json()).type.endsWith('/under-14'));
+  } finally {
+    server.close();
+  }
+});
+
+test('I-T78_⑤ 토큰 갱신 401은 fanEnded가 있으면 ended를 싣고 없으면 싣지 않는다(ADR-0235)', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  const close = () => new Promise((resolve) => server.close(resolve));
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    await fetch(`${base}/__mock/state?fan=guest&fanEnded=LOGIN_METHOD_CHANGED`);
+    const r = await fetch(`${base}/v1/identity/access-tokens`, { method: 'POST' });
+    assert.equal(r.status, 401);
+    assert.equal((await r.json()).ended, 'LOGIN_METHOD_CHANGED');
+    await fetch(`${base}/__mock/state?fanEnded=`);
+    const r2 = await fetch(`${base}/v1/identity/access-tokens`, { method: 'POST' });
+    assert.equal(r2.status, 401);
+    assert.equal((await r2.json()).ended, undefined);
+    await fetch(`${base}/__mock/state?fan=member`);
+    assert.equal((await fetch(`${base}/v1/identity/access-tokens`, { method: 'POST' })).status, 204);
+  } finally {
+    await close();
+  }
+});
+
 test('팬 계정 요약(GET /v1/identity/me, ADR-0202): 상태 fan=member·unverified·pending은 계약 모양 그대로, guest는 401', async () => {
   const server = await startMockApi({ port: 0 });
   const { port } = server.address();

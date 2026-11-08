@@ -3,13 +3,14 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { ACCOUNT_CLAIMS, type AccountClaims, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore, TOKEN_SIGNER, type TokenSigner } from '../domain/ports.js';
-import { decideRefresh, SESSION_IDLE_MS, sessionAlive } from '../domain/session.js';
+import { decideRefresh, fanEndedReason, SESSION_IDLE_MS, sessionAlive } from '../domain/session.js';
 import { newRefreshToken, refreshHash } from './create-session.js';
 
 export type RefreshResult =
   | { result: 'OK'; accountId: string; sessionId: string; accessToken: string; accessTokenExpiresAt: number; refreshToken: string; refreshTokenExpiresAt: number }
-  | { result: 'REUSED' }
-  | { result: 'INVALID' };
+  /** ended: 끝난 까닭(갱신 401의 ended, ADR-0235 결정 1). 재사용을 찾아낸 응답은 REFRESH_REUSE */
+  | { result: 'REUSED'; ended: 'REFRESH_REUSE' }
+  | { result: 'INVALID'; ended?: string };
 
 /** 쿠키 값 모양(256비트 base64url = 43자). 모양이 아니면 DB를 보지 않는다 */
 const SHAPE = /^[A-Za-z0-9_-]{43}$/;
@@ -40,12 +41,14 @@ export class RefreshSession {
       const s = await tx.findByRefreshHash(hash);
       if (!s) return { kind: 'invalid' as const };
       const decision = decideRefresh({ match: s.match, rotatedAt: s.rotatedAt, refreshUsed: s.refreshUsed, alive: sessionAlive(s, now) }, now);
-      if (decision === 'invalid') return { kind: 'invalid' as const };
+      // 끝난 세션의 토큰이 왔을 때만 까닭을 싣는다. 유휴·절대 만료는 끝낸 일이 아니므로 싣지 않는다(ADR-0235 결정 1)
+      if (decision === 'invalid') return { kind: 'invalid' as const, ended: s.terminatedAt !== null ? fanEndedReason(s.terminatedReason) : undefined };
       // 탈퇴·병합된 계정의 세션이 남아 있으면(로그인과 탈퇴가 겹침) 갱신하지 않고 그 세션을 끝낸다(새 맥락 리뷰 M1)
       const status = await tx.accountStatusOf(s.accountId);
       if (status === 'DELETED' || status === 'MERGED') {
-        await tx.terminateSessions([s.id], 'DELETE', now);
-        return { kind: 'invalid' as const };
+        const reason = status === 'MERGED' ? ('MERGED' as const) : ('DELETE' as const);
+        await tx.terminateSessions([s.id], reason, now);
+        return { kind: 'invalid' as const, ended: reason };
       }
       if (decision === 'reuse') {
         // 탈취로 본다: 그 패밀리의 모든 활성 세션을 끝내고 종료 사건을 낸다
@@ -66,11 +69,11 @@ export class RefreshSession {
     });
     if (r.kind === 'invalid') {
       this.signals.refreshed('fan', 'invalid');
-      return { result: 'INVALID' };
+      return r.ended ? { result: 'INVALID', ended: r.ended } : { result: 'INVALID' };
     }
     if (r.kind === 'reuse') {
       this.signals.refreshed('fan', 'reused');
-      return { result: 'REUSED' };
+      return { result: 'REUSED', ended: 'REFRESH_REUSE' };
     }
     this.signals.refreshed('fan', r.kind === 'rotate' ? 'rotated' : 'retried');
     const { access } = r;

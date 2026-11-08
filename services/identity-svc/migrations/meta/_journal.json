@@ -204,6 +204,13 @@
       "when": 1793879258408,
       "tag": "0028_fan_device_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794177333633,
+      "tag": "0029_fan_summary_signup",
+      "breakpoints": true
     }
   ]
 }

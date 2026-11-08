@@ -34,7 +34,8 @@ const MAX = 12;
 /** 계약 maxLength(FanAccountSummary·SignupCompletionInput의 nickname)와 같다 */
 const MAX_UNITS = 64;
 const MAX_MARKS = 3;
-const EMOJI_PARTS = /[\u200D\uFE0E\uFE0F\u20E3]|\p{Extended_Pictographic}/u;
+/** \uD0A4\uCEA1\u00B7\uADF8\uB9BC \uBB38\uC790\uC640 \uD654\uBA74\uC5D0 \uBCF4\uC774\uC9C0 \uC54A\uB294 \uAE00\uC790 \uC804\uBD80(\uC81C\uB85C\uD3ED, \uBCC0\uD615 \uC120\uD0DD\uC790, \uACB0\uD569 \uC790\uB9AC \uD45C\uC2DC, \uD55C\uAE00 \uCC44\uC6C0 \uBB38\uC790). \uAE00\uC790\uB85C \uBD84\uB958\uB418\uB294 \uAC83\uC774 \uC11E\uC5EC \uC788\uC5B4 ALLOWED\uB9CC\uC73C\uB85C\uB294 \uB9C9\uC9C0 \uBABB\uD55C\uB2E4(\uC11C\uBC84 domain/signup.ts\uC640 \uAC19\uB2E4) */
+const FORBIDDEN_PARTS = /\u20E3|\p{Default_Ignorable_Code_Point}|\p{Extended_Pictographic}/u;
 const ALLOWED = /^[\p{L}\p{M}\p{N}_.\-]+(?: [\p{L}\p{M}\p{N}_.\-]+)*$/u;
 const PHONE = /^(?:010[0-9]{8}|01[16789][0-9]{7,8})$/;
 
@@ -49,7 +50,7 @@ export function nicknameProblem(raw: string): 'empty' | 'length' | 'chars' | nul
   const v = normalizeNickname(raw);
   if (v === '') return 'empty';
   if (v.length > MAX_UNITS) return 'length';
-  if (!ALLOWED.test(v) || EMOJI_PARTS.test(v)) return 'chars';
+  if (!ALLOWED.test(v) || FORBIDDEN_PARTS.test(v)) return 'chars';
   const gs = graphemes(v);
   if (gs.some((g) => (g.match(/\p{M}/gu)?.length ?? 0) > MAX_MARKS)) return 'chars';
   return gs.length < MIN || gs.length > MAX ? 'length' : null;

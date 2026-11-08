@@ -93,6 +93,36 @@ test('I-T32·I-T34_PostgreSQL에서_확정은로그인수단을옮기고MERGED·
   expect(await q('select 1 from account_merge where primary_account_id = any($1::uuid[])', [[a.accountId, b.accountId]])).toHaveLength(0);
 });
 
+/** 가입을 마친 계정으로 만든다(가입 마무리의 저장과 같은 칸) */
+const finishSignup = async (accountId: string) => {
+  await q('update account set age_verified = true where id = $1', [accountId]);
+  for (const kind of ['TERMS', 'PRIVACY_REQUIRED']) await q("insert into consent (id, account_id, kind, notice_version, agreed_at) values (gen_random_uuid(), $1, $2, '2026-11-01', now())", [accountId, kind]);
+};
+
+test('I-T31_PostgreSQL에서_둘다본인확인전이고상대만가입을마쳤으면_가입을마친상대가대표이고동의행이남는다(ADR-0235)', async () => {
+  const t = await setup();
+  const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-su-k', email: null, deviceId: null });
+  const b = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-su-g', email: null, deviceId: null });
+  await finishSignup(b.accountId);
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-su-g' });
+  expect((await t.proposals.get(r.mergeProposalId!))?.primaryAccountId).toBe(b.accountId);
+  await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) });
+  expect(await q('select status from account where id = $1', [a.accountId])).toEqual([{ status: 'MERGED' }]);
+  expect(await q('select 1 from consent where account_id = $1', [b.accountId])).toHaveLength(2);
+});
+
+test('I-T31_PostgreSQL에서_제안뒤상대가가입을마쳐대표가바뀌면_확정은NOT_FOUND이고합치지않는다(ADR-0235)', async () => {
+  const t = await setup();
+  const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-su2-k', email: null, deviceId: null });
+  const b = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-su2-g', email: null, deviceId: null });
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-su2-g' });
+  expect((await t.proposals.get(r.mergeProposalId!))?.primaryAccountId).toBe(a.accountId);
+  await finishSignup(b.accountId);
+  const e = await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) }).catch((x: unknown) => x);
+  expect((e as { code?: string }).code).toBe('NOT_FOUND');
+  expect(await q('select status from account where id = $1', [b.accountId])).toEqual([{ status: 'ACTIVE' }]);
+});
+
 test('새맥락리뷰높음1_PostgreSQL에서_제안뒤흡수계정만본인확인을마쳤으면확정트랜잭션이대표가바뀐것을보고NOT_FOUND이며병합하지않는다', async () => {
   const t = await setup();
   const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-v-k', email: null, deviceId: null });

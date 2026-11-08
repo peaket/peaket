@@ -2,7 +2,7 @@
 // 본인확인·탈퇴·로그인 수단·로그인한 기기 흐름과 팬 API 클라이언트가 잠금(peaket.refresh) 안에서 부른다. 답이 없으면 잠금을 쥔 채 멈추므로 쓰기 한도로 끝낸다.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { refreshOnce } from './token-refresh.ts';
+import { loginHrefAfterRefresh, refreshOnce, takeSessionEndedReason } from './token-refresh.ts';
 
 const URL_ = 'https://api.test/v1/identity/access-tokens';
 const problem = (status) => new Response(JSON.stringify({ type: 'about:blank', status }), { status, headers: { 'content-type': 'application/problem+json' } });
@@ -52,4 +52,43 @@ test('토큰갱신이15초안에답하지않으면unavailable로끝낸다(쓰기
   t.mock.timers.tick(1);
   await flush();
   assert.equal(out, 'unavailable', '15초');
+});
+
+const rejectedWith = (body) => new Response(JSON.stringify(body), { status: 401, headers: { 'content-type': 'application/problem+json' } });
+
+test('I-T78_④ 갱신 거절의 ended가 허용 목록에 있으면 기억해 로그인 주소에 실리고, 한 번 쓰면 지워진다', async () => {
+  takeSessionEndedReason();
+  const out = await refreshOnce(async () => rejectedWith({ type: 'https://peaket.example/problems/refresh-token-invalid', status: 401, ended: 'LOGIN_METHOD_CHANGED' }), URL_);
+  assert.equal(out, 'rejected');
+  assert.equal(loginHrefAfterRefresh('/my/settings'), '/login?next=%2Fmy%2Fsettings&ended=LOGIN_METHOD_CHANGED');
+  assert.equal(loginHrefAfterRefresh('/my/settings'), '/login?next=%2Fmy%2Fsettings', '두 번째에는 사유가 없다');
+});
+
+test('I-T78_④ 팬 사유 일곱만 받고 모르는 값·본문이 깨진 거절은 사유 없이 보낸다', async () => {
+  for (const ended of ['LOGOUT', 'ADMIN_FORCE', 'REFRESH_REUSE', 'DEVICE_LIMIT', 'MERGED', 'DELETE', 'LOGIN_METHOD_CHANGED']) {
+    await refreshOnce(async () => rejectedWith({ status: 401, ended }), URL_);
+    assert.equal(takeSessionEndedReason(), ended);
+  }
+  for (const r of [() => rejectedWith({ status: 401, ended: 'ROLE_CHANGED' }), () => rejectedWith({ status: 401 }), () => new Response('not json', { status: 401 })]) {
+    await refreshOnce(async () => r(), URL_);
+    assert.equal(takeSessionEndedReason(), null);
+  }
+});
+
+test('I-T78_④ 사유 없는 두 번째 거절·모르는 값은 앞서 기억한 사유를 지우지 않는다', async () => {
+  takeSessionEndedReason();
+  await refreshOnce(async () => rejectedWith({ status: 401, ended: 'DEVICE_LIMIT' }), URL_);
+  await refreshOnce(async () => rejectedWith({ status: 401 }), URL_);
+  await refreshOnce(async () => new Response('not json', { status: 401 }), URL_);
+  await refreshOnce(async () => rejectedWith({ status: 401, ended: 'ROLE_CHANGED' }), URL_);
+  assert.equal(takeSessionEndedReason(), 'DEVICE_LIMIT');
+});
+
+test('I-T78_④ 갱신이 성공하거나 일시 장애면 앞서 기억한 사유를 쓰지 않는다', async () => {
+  await refreshOnce(async () => rejectedWith({ status: 401, ended: 'LOGOUT' }), URL_);
+  await refreshOnce(async () => new Response(null, { status: 204 }), URL_);
+  assert.equal(takeSessionEndedReason(), null, '살아 있는 세션의 갱신 뒤에는 지운다');
+  await refreshOnce(async () => rejectedWith({ status: 401, ended: 'LOGOUT' }), URL_);
+  await refreshOnce(async () => new Response(null, { status: 503 }), URL_);
+  assert.equal(takeSessionEndedReason(), 'LOGOUT', '일시 장애는 거절이 아니라 그대로 둔다');
 });

@@ -5,7 +5,8 @@
 // 대표 계정의 다른 세션 끝내기(LOGIN_METHOD_CHANGED: 흡수 계정의 수단이 옮겨 와 인증 요소가 바뀌었다. 제안한 세션이 대표 계정의 것이면 그 세션만 남긴다, ASVS 7.4.3, BOT-044, ADR-0209 결정 5) → 병합 사건.
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
-import { MERGE_PROPOSALS, type MergeProposals, MergeCheckUnavailable, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore } from '../domain/ports.js';
+import { MERGE_PROPOSALS, type MergeProposals, MergeCheckUnavailable, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore, type SignupState } from '../domain/ports.js';
+import { signupCompleted } from '../domain/signup.js';
 import { choosePrimary, sharedProviderKinds } from '../domain/merge.js';
 import { sessionAlive, WITHDRAWAL_REAUTH_ACT } from '../domain/session.js';
 import { otherLiveSessions } from './end-other-sessions.js';
@@ -82,9 +83,11 @@ export class ConfirmMerge {
         // 잠근 뒤 본인확인 기록으로 대표 계정을 다시 고른다(잠그기 전 확인과 이 사이에 끝난 본인확인, 새 맥락 리뷰 높음 1). 표를 보지 못하는 저장소는 앞의 확인만
         const [mine, theirs] = [await tx.verifiedOf(accountId), await tx.verifiedOf(other)];
         if (mine !== null && theirs !== null) {
-          const c = choosePrimary({ current: accountId, other, currentVerified: mine, otherVerified: theirs });
+          const [mySignup, theirSignup] = [await tx.signupStateOf(accountId), await tx.signupStateOf(other)];
+          const done = (s: SignupState | null) => s !== null && signupCompleted(s.ageVerified, s.consentKinds);
+          const c = choosePrimary({ current: accountId, other, currentVerified: mine, otherVerified: theirs, currentSignupDone: done(mySignup), otherSignupDone: done(theirSignup) });
           if (c.bothVerified) throw new MergeError('BLOCKED', '두 계정 모두 본인확인을 마쳤다', ['BOTH_VERIFIED']);
-          if (c.primary !== p.primaryAccountId) throw new MergeError('NOT_FOUND', '제안 뒤 본인확인으로 대표 계정이 바뀌었다');
+          if (c.primary !== p.primaryAccountId) throw new MergeError('NOT_FOUND', '제안 뒤 본인확인이나 가입 마무리로 대표 계정이 바뀌었다');
         }
         // 잠근 뒤에 탈퇴 유예에 들어간 계정은 막는 사유다(409, 제안은 남는다, BOT-042가 넘긴 것)
         if (statuses.includes('WITHDRAWAL_PENDING')) throw new MergeError('BLOCKED', '탈퇴 정리 중인 계정이 있다', ['WITHDRAWAL_IN_PROGRESS']);
