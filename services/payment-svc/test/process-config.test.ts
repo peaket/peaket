@@ -86,7 +86,7 @@ describe('loadSimulatorGatewayConfig', () => {
     expect(loadSimulatorGatewayConfig({ PEAKET_ENV: env, ...extra })).toBeUndefined();
   });
 
-  test.each(['demo', 'staging', 'prod', undefined])('PRF181_리뷰 고침 M4: 주소가 없으면 PEAKET_ENV=%s에서도 시작을 막지 않고 어댑터 없음이다(no_adapter 지표가 드러낸다) [ASVS v5.0.0-16.5.2]', (env) => {
+  test.each(['demo', 'staging', 'prod', undefined])('PRF181_리뷰 고침 M4: 주소가 없으면 PEAKET_ENV=%s에서도 읽는 함수는 어댑터 없음(undefined)을 돌려준다(시작 조건은 assertPgAdapters, BUILD_ORDER PRF-184) [ASVS v5.0.0-16.5.2]', (env) => {
     expect(loadSimulatorGatewayConfig(env === undefined ? {} : { PEAKET_ENV: env })).toBeUndefined();
   });
 
@@ -158,9 +158,9 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
     expect(m.indexOf('new SimulatorPaymentGateway('), '어댑터 < listen').toBeLessThan(m.indexOf('await service.listen()'));
   });
 
-  test('PRF181_리뷰 고침 M4: 어댑터 없이 켜면 환경을 가리지 않고 시작 때 경고 한 줄을 낸다 [ASVS v5.0.0-16.3.4]', () => {
+  test('PRF181_리뷰 고침 M4: 어댑터가 하나도 없이 켜지면(local·ci만, BUILD_ORDER PRF-184) 시작 때 경고 한 줄을 낸다 [ASVS v5.0.0-16.3.4]', () => {
     const m = main();
-    const warn = /if \(!simulator\) service\.logger\.warn\(\{ kind: 'payment-confirm-no-adapter' \}, '([^']*)'\)/.exec(m);
+    const warn = /if \(!simulator && !toss\) service\.logger\.warn\(\{ kind: 'payment-confirm-no-adapter' \}, '([^']*)'\)/.exec(m);
     expect(warn, '경고 한 줄').not.toBeNull();
     expect(warn![1]).not.toMatch(/local·ci일 때만/);
     expect(m.match(/service\.logger\.warn\(\{ kind: 'payment-confirm-no-adapter'/g)).toHaveLength(1);

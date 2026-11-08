@@ -9,7 +9,7 @@ import { describe, expect, test } from 'vitest';
 import { type ConfirmRunnerTimer, PaymentConfirmRunner, type PaymentConfirmRunnerDeps } from '../src/modules/payment/application/payment-confirm-runner.js';
 import type { PaymentLedgerStatus } from '../src/modules/payment/domain/confirm-command.js';
 import { CONFIRM_CALL_GUARD_MS, CONFIRM_LEASE_MS, type ConfirmFinish, type ConfirmJob, type ConfirmTarget, confirmRetryDelayMs, type PaymentConfirmOutcome } from '../src/modules/payment/domain/confirm-runner.js';
-import { CONFIRM_CALL_BUDGET_MS, type ConfirmResult, type PaymentGatewayPort, type PgCapabilities, type PgName } from '../src/modules/payment/domain/payment-gateway.js';
+import { CONFIRM_CALL_BUDGET_MS, type ConfirmResult, type FailureCategory, type PaymentGatewayPort, type PgCapabilities, type PgName } from '../src/modules/payment/domain/payment-gateway.js';
 import { PgCallGuards, type PgLimitKind, type PgSaturationReason } from '../src/modules/payment/domain/pg-call-guard.js';
 import type { FinishConfirmResult, MarkConfirmSentResult, PaymentConfirmJobs, PaymentConfirmLog, PaymentConfirmSignals, PaymentGateways, PgCallGuardLog, PgCallGuardSignals } from '../src/modules/payment/domain/ports.js';
 import { EVENT_ID, NOW, ORDER_ID, PAYMENT_ID, SECRET_PAYMENT_KEY, uuidAt } from './confirm-cases.js';
@@ -254,6 +254,10 @@ class FakeLog implements PaymentConfirmLog {
   readonly writeFaileds: unknown[] = [];
   readonly staleAnswers: unknown[] = [];
   readonly runErrors: { what: string; orderId?: string; err: unknown }[] = [];
+  readonly pgErrors: { pg: PgName; pgCode?: string }[] = [];
+  pgError(e: { pg: PgName; pgCode?: string }): void {
+    this.pgErrors.push(e);
+  }
   amountMismatch(e: { orderId: string }): void {
     this.amountMismatches.push(e);
   }
@@ -276,6 +280,10 @@ class FakeSignals implements PaymentConfirmSignals {
   readonly seconds: [PgName, number][] = [];
   readonly inFlights: number[] = [];
   writeFailures = 0;
+  readonly declineds: [PgName, FailureCategory][] = [];
+  declined(pg: PgName, category: FailureCategory): void {
+    this.declineds.push([pg, category]);
+  }
   outcome(pg: PgName, outcome: PaymentConfirmOutcome): void {
     this.outcomes.push([pg, outcome]);
   }
@@ -1130,6 +1138,71 @@ describe('리뷰 고침(BUILD_ORDER PRF-181, 코드 리뷰)', () => {
       await expect(f.runner.runJob(job())).resolves.toEqual({ kind: 'SKIPPED', reason: 'READ_FAILED' });
       expectNoGatewayCall(f);
     });
+  });
+});
+
+describe('P-T16 리뷰 고침(BUILD_ORDER PRF-184, 코드 리뷰): 결제사 오류의 관측', () => {
+  const pgError = (pgCode = 'UNAUTHORIZED_KEY'): ConfirmResult => answer({ outcome: 'DECLINED', failureCategory: 'PG_ERROR', pgCode });
+
+  test('P-T16_리뷰 고침 M7: DECLINED·PG_ERROR면 결제사 코드를 로그 한 줄로 남기고 건수를 센다 [ASVS v5.0.0-16.3.4]', async () => {
+    const f = setup();
+    f.gateway.answers = [pgError()];
+    await f.runner.runJob(job());
+    expect(f.log.pgErrors).toEqual([{ pg: 'SIMULATOR', pgCode: 'UNAUTHORIZED_KEY' }]);
+    expect(f.signals.declineds).toEqual([['SIMULATOR', 'PG_ERROR']]);
+  });
+
+  test('P-T16_리뷰 고침 M7: 로그는 채널당 1분에 한 줄이고 건수는 모두 센다 [ASVS v5.0.0-16.3.4]', async () => {
+    const f = setup();
+    f.gateway.answers = [pgError('A'), pgError('B'), pgError('C')];
+    await f.runner.runJob(job());
+    f.clock.advance(59_999);
+    await f.runner.runJob(job());
+    expect(f.log.pgErrors.map((e) => e.pgCode)).toEqual(['A']);
+    f.clock.advance(1);
+    await f.runner.runJob(job());
+    expect(f.log.pgErrors.map((e) => e.pgCode)).toEqual(['A', 'C']);
+    expect(f.signals.declineds).toHaveLength(3);
+  });
+
+  test('P-T16_리뷰 고침 M7: 로그 조절은 채널마다 따로다 [ASVS v5.0.0-16.3.4]', async () => {
+    const f = setup();
+    const toss = new FakeGateway('TOSS', f.order, f.clock);
+    f.gateways.adapters.set('TOSS', toss);
+    f.gateway.answers = [pgError('SIM')];
+    toss.answers = [pgError('TOSS_CODE')];
+    await f.runner.runJob(job());
+    f.jobs.put(target({ paymentId: OTHER_PAYMENT, pg: 'TOSS' }));
+    await f.runner.runJob(job({ paymentId: OTHER_PAYMENT, pg: 'TOSS' }));
+    expect(f.log.pgErrors).toEqual([
+      { pg: 'SIMULATOR', pgCode: 'SIM' },
+      { pg: 'TOSS', pgCode: 'TOSS_CODE' },
+    ]);
+  });
+
+  test.each(['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED'] as const)('P-T16_리뷰 고침 M7: DECLINED·%s는 건수만 세고 PG_ERROR 로그를 내지 않는다', async (failureCategory) => {
+    const f = setup();
+    f.gateway.answers = [answer({ outcome: 'DECLINED', failureCategory, pgCode: 'X' })];
+    await f.runner.runJob(job());
+    expect(f.log.pgErrors).toEqual([]);
+    expect(f.signals.declineds).toEqual([['SIMULATOR', failureCategory]]);
+  });
+
+  test('P-T16_리뷰 고침 M7: 범주 없는 DECLINED는 실행기가 쓰는 대로 PG_ERROR로 센다', async () => {
+    const f = setup();
+    f.gateway.answers = [answer({ outcome: 'DECLINED' })];
+    await f.runner.runJob(job());
+    expect(f.log.pgErrors).toEqual([{ pg: 'SIMULATOR' }]);
+    expect(f.signals.declineds).toEqual([['SIMULATOR', 'PG_ERROR']]);
+  });
+
+  test('P-T16_리뷰 고침 M7: 승인·UNKNOWN은 세지 않는다', async () => {
+    const f = setup();
+    f.gateway.answers = [answer({ outcome: 'UNKNOWN' })];
+    await f.runner.runJob(job());
+    await f.runner.runJob(job());
+    expect(f.log.pgErrors).toEqual([]);
+    expect(f.signals.declineds).toEqual([]);
   });
 });
 

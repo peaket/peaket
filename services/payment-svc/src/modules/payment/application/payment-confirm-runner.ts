@@ -38,6 +38,7 @@ import {
   CONFIRM_NO_ADAPTER_CONCURRENCY,
   CONFIRM_NO_ADAPTER_DELAY_MS,
   CONFIRM_NO_ADAPTER_WARN_INTERVAL_MS,
+  CONFIRM_PG_ERROR_LOG_INTERVAL_MS,
   CONFIRM_RUNNER_POLL_INTERVAL_MS,
   type ConfirmFinish,
   confirmGateOf,
@@ -123,6 +124,8 @@ export class PaymentConfirmRunner {
   #calls = 0;
   /** 마지막으로 어댑터 없음 경고를 낸 시각(epoch ms) */
   #lastNoAdapterWarnMs: number | undefined;
+  /** 채널마다 마지막으로 결제사 오류 로그를 낸 시각(epoch ms) */
+  readonly #lastPgErrorLogMs = new Map<PgName, number>();
   /** 만든 때(시작 파일, 요청 밖)의 비동기 맥락. 틱·호출이 이 맥락에서 돈다(끝난 요청의 남은 시간을 물려받지 않게) */
   readonly #scope = new AsyncResource('PaymentConfirmRunner');
 
@@ -404,6 +407,7 @@ export class PaymentConfirmRunner {
     }
     // 429: 첫 승인 호출만 상한을 낮춘다(낮추기 전에 나간 호출의 429는 옛 상한의 결과라 보지 않는다). 다시 보낸 호출은 그 호출의 다음 시도만 늦춘다(아래 RETRY)
     if (answer?.outcome === 'DECLINED' && answer.failureCategory === 'THROTTLED') guard.noteThrottled({ first: !resend, startedAtMs: startedMs });
+    if (answer?.outcome === 'DECLINED') this.#noteDeclined(target.pg, answer);
     const latencyMs = Math.max(0, Math.round(this.deps.clock.monotonicMs() - startedMs));
     this.#safe(() => this.deps.signals.callSeconds(target.pg, latencyMs / 1000));
 
@@ -440,6 +444,18 @@ export class PaymentConfirmRunner {
       // 삼킨다
     }
     return NO_TOKEN;
+  }
+
+  /** 거절을 범주별로 세고(범주가 없으면 실행기가 쓰는 PG_ERROR로), PG_ERROR면 채널당 1분에 한 줄 결제사 코드를 남긴다(키 폐기·IP 변경 등을 찾는 단서, BUILD_ORDER PRF-184 코드 리뷰) */
+  #noteDeclined(pg: PgName, answer: ConfirmResult): void {
+    const category = answer.failureCategory ?? 'PG_ERROR';
+    this.#safe(() => this.deps.signals.declined(pg, category));
+    if (category !== 'PG_ERROR') return;
+    const now = this.deps.clock.now();
+    const last = this.#lastPgErrorLogMs.get(pg);
+    if (last !== undefined && now - last < CONFIRM_PG_ERROR_LOG_INTERVAL_MS) return;
+    this.#lastPgErrorLogMs.set(pg, now);
+    this.#safe(() => this.deps.log.pgError({ pg, ...(answer.pgCode === undefined ? {} : { pgCode: answer.pgCode }) }));
   }
 
   /** 어댑터가 없다: 미루고 지표를 세며 파드당 1분에 경고 한 줄 */

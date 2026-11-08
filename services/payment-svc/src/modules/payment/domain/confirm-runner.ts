@@ -26,6 +26,8 @@ export const CONFIRM_RETRY_MAX_MS = 30_000;
 export const CONFIRM_NO_ADAPTER_DELAY_MS = 30_000;
 /** 어댑터 없음 경고 간격(파드당 1분에 한 줄) [가정] */
 export const CONFIRM_NO_ADAPTER_WARN_INTERVAL_MS = 60_000;
+/** 결제사 오류(PG_ERROR) 로그 간격(채널당 1분에 한 줄) [가정] */
+export const CONFIRM_PG_ERROR_LOG_INTERVAL_MS = 60_000;
 /** 어댑터가 없는 채널을 잡는 간격 1초 [가정](운영에는 그런 행이 없어 틱마다 묻지 않는다) */
 export const CONFIRM_NO_ADAPTER_CLAIM_INTERVAL_MS = 1_000;
 /** 어댑터가 없는 채널마다 동시 처리 8건 [가정](부르지 않고 미루기만 하므로 작게 잡는다) */

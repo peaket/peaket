@@ -1,7 +1,7 @@
 // 승인 명령 접수와 결과 조회의 포트(docs/features/payment.md §2 '승인 명령 접수의 첫 구현', BUILD_ORDER PRF-180).
 import type { ConfirmPaymentCommand, PaymentRecord, PaymentState } from './confirm-command.js';
 import type { ConfirmFinish, ConfirmJob, ConfirmTarget, PaymentConfirmOutcome, PaymentEventMessage } from './confirm-runner.js';
-import type { PaymentGatewayPort, PgName } from './payment-gateway.js';
+import type { FailureCategory, PaymentGatewayPort, PgName } from './payment-gateway.js';
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
 import type { PaymentUnknownQueryOutcome, ResolvedFinish, UnknownQueryJob } from './unknown-resolver.js';
 
@@ -151,12 +151,16 @@ export interface PaymentConfirmLog {
   staleAnswer(e: { readonly orderId: string }): void;
   /** 실행기 안의 예상 못 한 오류(what = claim·read·call). 어댑터가 safeErrorCode만 싣는다 */
   runError(e: { readonly what: 'claim' | 'read' | 'call'; readonly orderId?: string; readonly err: unknown }): void;
+  /** 결제사가 PG_ERROR로 거절했다(키 폐기·IP 변경 등을 찾는 단서, 채널당 1분에 한 줄, 실행기가 조절한다). 결제사와 결제사 코드만 싣고, 코드는 안전한 글자 모양일 때만 어댑터가 싣는다 */
+  pgError(e: { readonly pg: PgName; readonly pgCode?: string }): void;
 }
 
 /** 실행기 지표(docs/observability.md, BUILD_ORDER PRF-181). 던지지 않는다 */
 export interface PaymentConfirmSignals {
   /** payment_confirm_total{pg, outcome}를 1 올린다 */
   outcome(pg: PgName, outcome: PaymentConfirmOutcome): void;
+  /** payment_confirm_declined_total{pg, category}를 1 올린다(결제사가 거절로 답한 호출 수, BUILD_ORDER PRF-184) */
+  declined(pg: PgName, category: FailureCategory): void;
   /** payment_confirm_seconds{pg}에 결제사 호출 시간을 더한다(던진 호출도 잰다) */
   callSeconds(pg: PgName, seconds: number): void;
   /** payment_confirm_in_flight를 지금 돌고 있는 승인 호출 수로 둔다 */

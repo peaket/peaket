@@ -17,6 +17,7 @@ export { jsonPaymentEventCodec, TRADE_PAYMENTS_TOPIC } from './adapters/payment-
 export { paymentConfirmLog } from './adapters/payment-confirm-log.js';
 export { PromPaymentConfirmSignals } from './adapters/prom-payment-confirm-signals.js';
 export { StaticPaymentGateways } from './adapters/pg/payment-gateways.js';
+export { TossPaymentGateway, type TossGatewayOptions } from './adapters/pg/toss-gateway.js';
 export { AcceptPaymentCommand, type AcceptPaymentCommandDeps } from './application/accept-payment-command.js';
 export { BatchGetPaymentStates, type BatchGetPaymentStatesDeps } from './application/batch-get-payment-states.js';
 export { BATCH_GET_STATEMENT_TIMEOUT_MS, DrizzlePaymentStore, type DrizzlePaymentStoreOptions } from './adapters/db/drizzle-payment-store.js';

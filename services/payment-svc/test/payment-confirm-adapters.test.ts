@@ -76,6 +76,35 @@ describe('paymentConfirmLog', () => {
     expect(text).not.toContain(SECRET_PAYMENT_TOKEN);
   });
 
+  test('P-T16_리뷰 고침 M7: 결제사 오류는 warn 한 줄이고 결제사와 코드만 싣는다 [ASVS v5.0.0-16.3.4] [ASVS v5.0.0-16.2.5]', () => {
+    const { lines, logger } = realLogger();
+    paymentConfirmLog(logger).pgError({ pg: 'TOSS', pgCode: 'UNAUTHORIZED_KEY' });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ level: 'warn', kind: 'payment-confirm-pg-error', pg: 'TOSS', pgCode: 'UNAUTHORIZED_KEY' });
+    for (const key of ['orderId', 'paymentRef', 'paymentKey', 'amount']) expect(lines[0]).not.toHaveProperty(key);
+  });
+
+  test.each([
+    ['줄바꿈', 'A\nB'],
+    ['소문자·기호', 'test_sk_abc:def'],
+    ['65자', 'A'.repeat(65)],
+    ['빈 글', ''],
+    ['한글', '오류'],
+  ])('P-T16_리뷰 고침 M7: 결제사 코드가 안전한 글자 모양이 아니면(%s) 칸을 싣지 않는다 [ASVS v5.0.0-16.2.5]', (_n, pgCode) => {
+    const { lines, logger } = realLogger();
+    paymentConfirmLog(logger).pgError({ pg: 'TOSS', pgCode });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toHaveProperty('pgCode');
+    if (pgCode) expect(JSON.stringify(lines[0])).not.toContain(pgCode);
+  });
+
+  test('P-T16_리뷰 고침 M7: 결제사 코드가 없어도 한 줄을 낸다', () => {
+    const { lines, logger } = realLogger();
+    paymentConfirmLog(logger).pgError({ pg: 'TOSS' });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ kind: 'payment-confirm-pg-error', pg: 'TOSS' });
+  });
+
   test('PRF181_잡기 오류처럼 주문이 없으면 orderId 칸이 없다', () => {
     const { lines, logger } = realLogger();
     paymentConfirmLog(logger).runError({ what: 'claim', err: leakyError('40001') });
@@ -123,6 +152,20 @@ describe('PromPaymentConfirmSignals', () => {
     expect(values.find((v) => v.labels.pg === 'SIMULATOR' && v.labels.outcome === 'approved')!.value).toBe(2);
     expect(values.find((v) => v.labels.pg === 'TOSS' && v.labels.outcome === 'restart')!.value).toBe(1);
     expect(values.find((v) => v.labels.pg === 'TOSS' && v.labels.outcome === 'approved')!.value).toBe(0);
+  });
+
+  test('P-T16_리뷰 고침 M7: payment_confirm_declined_total은 결제사 셋 × 범주 여섯을 0으로 미리 보이고 건마다 오른다 [ASVS v5.0.0-16.3.4]', async () => {
+    const signals = new PromPaymentConfirmSignals();
+    const { named } = await metricsOf(signals);
+    const categories = ['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED'];
+    const before = (await named('payment_confirm_declined_total'))!;
+    expect(String(before.type)).toBe('counter');
+    expect(before.values.map((v) => `${v.labels.pg}/${v.labels.category}=${v.value}`).sort()).toEqual(PGS.flatMap((pg) => categories.map((c) => `${pg}/${c}=0`)).sort());
+    signals.declined('TOSS', 'PG_ERROR');
+    signals.declined('TOSS', 'PG_ERROR');
+    const values = (await named('payment_confirm_declined_total'))!.values;
+    for (const v of values) expect(Object.keys(v.labels).sort()).toEqual(['category', 'pg']);
+    expect(values.find((v) => v.labels.pg === 'TOSS' && v.labels.category === 'PG_ERROR')!.value).toBe(2);
   });
 
   test('PRF181_payment_confirm_seconds는 pg 이름표의 히스토그램이고 칸은 표준 목록(60초 포함)이다', async () => {

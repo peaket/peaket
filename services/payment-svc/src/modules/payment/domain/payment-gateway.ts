@@ -60,7 +60,8 @@ export type CheckoutValues = { toss: TossCheckoutValues } | { portone: PortoneCh
 export type ConfirmOutcome = 'APPROVED' | 'ALREADY_APPROVED' | 'IN_PROGRESS' | 'DECLINED' | 'WAITING_FOR_DEPOSIT' | 'UNKNOWN';
 
 /** 분석용 실패 범주(ADR-0052). UNKNOWN을 조회로 실패라 확정한 것과 결제사 오류는 PG_ERROR */
-export type FailureCategory = 'CARD_DECLINED' | 'USER_ABORTED' | 'VALIDATION' | 'EXPIRED' | 'PG_ERROR' | 'THROTTLED';
+export const FAILURE_CATEGORIES = ['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED'] as const;
+export type FailureCategory = (typeof FAILURE_CATEGORIES)[number];
 
 /** 결제 수단 연결값 계산용 카드 정보(payment §2.1 '결제 수단 연결값'). 가린 번호는 계산에만 쓰고 저장하지 않는다 */
 export interface ConfirmCard {

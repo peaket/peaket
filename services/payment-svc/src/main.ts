@@ -8,7 +8,7 @@ import 'reflect-metadata';
 import { hostname } from 'node:os';
 import { createDatabase, createService, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { loadPaymentServiceConfig, loadPgCallGuardConfig, loadSimulatorGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX } from './config.js';
+import { assertPgAdapters, loadPaymentServiceConfig, loadPgCallGuardConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
 import { SimulatorPaymentGateway } from './modules/payment/adapters/pg/simulator-gateway.js';
 import {
@@ -35,19 +35,27 @@ import {
   PromPaymentUnknownSignals,
   PromPgCallGuardSignals,
   StaticPaymentGateways,
+  TossPaymentGateway,
   UNKNOWN_QUERY_CONCURRENCY,
 } from './modules/payment/server.js';
 import { safeErrorCode } from './safe-error-code.js';
 
 const SERVICE = 'payment-svc';
 const config = loadPaymentServiceConfig(process.env);
-// 주소가 없으면 어댑터 없이 켠다(아래 경고 한 줄과 no_adapter 지표). 잘못된 주소·빠진 키는 여기서, 듣기 전에 시작 실패다
+// 잘못된 주소·빠진 키·환경과 어긋난 키 접두사는 여기서, 듣기 전에 시작 실패다. 어댑터 없이 켜지는 것은 local·ci뿐이다(아래 경고 한 줄과 no_adapter 지표, BUILD_ORDER PRF-184)
 const simulator = loadSimulatorGatewayConfig(process.env);
+const toss = loadTossGatewayConfig(process.env);
+assertPgAdapters(process.env, { simulator: simulator !== undefined, toss: toss !== undefined });
 const guardConfig = loadPgCallGuardConfig(process.env);
 // 어댑터마다 승인 묶음(연결 수 = 처음의 파드당 벌크헤드)과 조회 전용 묶음(연결 수 = 파드의 동시 조회 수) 둘. 승인 호출이 연결을 다 쥐어도 조회가 막히지 않는다. 연결 시간 초과 3초 [가정]. v0 모놀리스는 이 옵션을 쓰지 않는다(BUILD_ORDER PRF-183)
 const pgHttp = simulator ? createPgHttp({ connections: perPodBulkhead(PG_CHANNEL_BULKHEAD.SIMULATOR, guardConfig.podCount) }) : undefined;
 const pgQueryHttp = simulator ? createPgHttp({ connections: UNKNOWN_QUERY_CONCURRENCY }) : undefined;
-const gateways = new StaticPaymentGateways(simulator ? [new SimulatorPaymentGateway({ ...simulator, fetch: pgHttp!.fetch, queryFetch: pgQueryHttp!.fetch })] : []);
+const tossHttp = toss ? createPgHttp({ connections: perPodBulkhead(PG_CHANNEL_BULKHEAD.TOSS, guardConfig.podCount) }) : undefined;
+const tossQueryHttp = toss ? createPgHttp({ connections: UNKNOWN_QUERY_CONCURRENCY }) : undefined;
+const gateways = new StaticPaymentGateways([
+  ...(simulator ? [new SimulatorPaymentGateway({ ...simulator, fetch: pgHttp!.fetch, queryFetch: pgQueryHttp!.fetch })] : []),
+  ...(toss ? [new TossPaymentGateway({ ...toss, fetch: tossHttp!.fetch, queryFetch: tossQueryHttp!.fetch })] : []),
+]);
 
 const database = createDatabase({ url: config.databaseUrl, profile: 'hot', max: PAYMENT_HOT_POOL_MAX, applicationName: SERVICE });
 const batchDatabase = createDatabase({ url: config.databaseUrl, max: PAYMENT_BATCH_POOL_MAX, applicationName: `${SERVICE}-batch` });
@@ -69,7 +77,7 @@ confirmSignals.register(service.metrics.registry);
 unknownSignals.register(service.metrics.registry);
 guardSignals.register(service.metrics.registry);
 service.readiness.register('grpc');
-if (!simulator) service.logger.warn({ kind: 'payment-confirm-no-adapter' }, 'PEAKET_PG_SIM_URL이 없어 결제사 어댑터 없이 켰다(승인 명령은 미뤄지고 no_adapter 지표가 드러낸다)');
+if (!simulator && !toss) service.logger.warn({ kind: 'payment-confirm-no-adapter' }, '결제사 어댑터 설정이 없어 어댑터 없이 켰다(승인 명령은 미뤄지고 no_adapter 지표가 드러낸다)');
 
 await service.listen();
 const grpc = await startGrpcServer({
@@ -104,5 +112,5 @@ process.once('SIGTERM', () => {
   void Promise.all([grpc.close(), confirmRunner.stop(), unknownResolver.stop()])
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ code: safeErrorCode(err) }, 'payment-svc 종료 실패'))
-    .finally(() => Promise.all([database.close(), batchDatabase.close(), confirmDatabase.close(), pgHttp?.close(), pgQueryHttp?.close()]));
+    .finally(() => Promise.all([database.close(), batchDatabase.close(), confirmDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close()]));
 });
