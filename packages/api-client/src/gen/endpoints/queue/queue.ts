@@ -197,6 +197,11 @@ export const useCreateQueueLobbyParticipant = <TError = ErrorType<ProblemRespons
   status: 204
 }
 
+export type deleteMyQueueLobbyParticipantResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
 export type deleteMyQueueLobbyParticipantResponse404 = {
   data: ProblemResponse
   status: 404
@@ -207,10 +212,15 @@ export type deleteMyQueueLobbyParticipantResponse409 = {
   status: 409
 }
 
+export type deleteMyQueueLobbyParticipantResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type deleteMyQueueLobbyParticipantResponseSuccess = (deleteMyQueueLobbyParticipantResponse204) & {
   headers: Headers;
 };
-export type deleteMyQueueLobbyParticipantResponseError = (deleteMyQueueLobbyParticipantResponse404 | deleteMyQueueLobbyParticipantResponse409) & {
+export type deleteMyQueueLobbyParticipantResponseError = (deleteMyQueueLobbyParticipantResponse403 | deleteMyQueueLobbyParticipantResponse404 | deleteMyQueueLobbyParticipantResponse409 | deleteMyQueueLobbyParticipantResponse503) & {
   headers: Headers;
 };
 
@@ -243,7 +253,7 @@ export const deleteMyQueueLobbyParticipant = async (eventId: string, options?: P
 
 export const getDeleteMyQueueLobbyParticipantMutationKey = () => ['deleteMyQueueLobbyParticipant'] as const;
 
-export const getDeleteMyQueueLobbyParticipantMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getDeleteMyQueueLobbyParticipantMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMyQueueLobbyParticipant>>, TError,DeleteMyQueueLobbyParticipantMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteMyQueueLobbyParticipant>>, TError,DeleteMyQueueLobbyParticipantMutationVariables, TContext> => {
 
@@ -272,13 +282,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteMyQueueLobbyParticipantMutationResult = NonNullable<Awaited<ReturnType<typeof deleteMyQueueLobbyParticipant>>>
 
-    export type DeleteMyQueueLobbyParticipantMutationError = ErrorType<ProblemResponse>
+    export type DeleteMyQueueLobbyParticipantMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
     export type DeleteMyQueueLobbyParticipantMutationVariables = {eventId: string}
 
     /**
  * @summary 로비 참가 취소(다른 기기에서 다시 참가하기 전, ADR-0060)
  */
-export const useDeleteMyQueueLobbyParticipant = <TError = ErrorType<ProblemResponse>,
+export const useDeleteMyQueueLobbyParticipant = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMyQueueLobbyParticipant>>, TError,DeleteMyQueueLobbyParticipantMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteMyQueueLobbyParticipant>>,
@@ -536,10 +546,27 @@ export const useCreateQueueEntry = <TError = ErrorType<ProblemResponse | Problem
   status: 204
 }
 
+export type deleteMyQueueEntryResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type deleteMyQueueEntryResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type deleteMyQueueEntryResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type deleteMyQueueEntryResponseSuccess = (deleteMyQueueEntryResponse204) & {
   headers: Headers;
 };
-;
+export type deleteMyQueueEntryResponseError = (deleteMyQueueEntryResponse403 | deleteMyQueueEntryResponse404 | deleteMyQueueEntryResponse503) & {
+  headers: Headers;
+};
 
 export const getDeleteMyQueueEntryUrl = (eventId: string,) => {
 
@@ -550,7 +577,7 @@ export const getDeleteMyQueueEntryUrl = (eventId: string,) => {
 }
 
 /**
- * FR-007, POL-002, POL-007. 팬 쿠키로 부르므로 처음 기기가 없어도 된다(다른 기기에서 다시 참가, ADR-0060). 번호를 빠진 번호로 표시하고 1인 1순번 중복 확인 키를 지운다. 다시 진입하면 맨 뒤 순번
+ * FR-007, POL-002, POL-007. 팬 쿠키로 부르므로 처음 기기가 없어도 된다(다른 기기에서 다시 참가, ADR-0060). 번호를 빠진 번호로 표시하고 1인 1순번 중복 확인 키를 지운다. 다시 진입하면 맨 뒤 순번. 묶음·로비 참가자는 목록을 고정하기 전이면 목록에서 빼고, 고정한 뒤면 게시 때(게시 뒤면 바로) 그 번호를 빠진 번호로 돌린다(ADR-0233). 줄에 없어도 204이고, 입장 이력은 지우지 않는다
  * @summary 대기 취소
  */
 export const deleteMyQueueEntry = async (eventId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<deleteMyQueueEntryResponseSuccess> => {
@@ -570,7 +597,7 @@ export const deleteMyQueueEntry = async (eventId: string, options?: Parameters<t
 
 export const getDeleteMyQueueEntryMutationKey = () => ['deleteMyQueueEntry'] as const;
 
-export const getDeleteMyQueueEntryMutationOptions = <TError = ErrorType<unknown>,
+export const getDeleteMyQueueEntryMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMyQueueEntry>>, TError,DeleteMyQueueEntryMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteMyQueueEntry>>, TError,DeleteMyQueueEntryMutationVariables, TContext> => {
 
@@ -599,13 +626,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteMyQueueEntryMutationResult = NonNullable<Awaited<ReturnType<typeof deleteMyQueueEntry>>>
 
-    export type DeleteMyQueueEntryMutationError = ErrorType<unknown>
+    export type DeleteMyQueueEntryMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
     export type DeleteMyQueueEntryMutationVariables = {eventId: string}
 
     /**
  * @summary 대기 취소
  */
-export const useDeleteMyQueueEntry = <TError = ErrorType<unknown>,
+export const useDeleteMyQueueEntry = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMyQueueEntry>>, TError,DeleteMyQueueEntryMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteMyQueueEntry>>,

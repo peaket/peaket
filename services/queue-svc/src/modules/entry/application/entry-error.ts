@@ -10,6 +10,8 @@ export type EntryErrorCode =
   | 'ALREADY_ADMITTED'
   | 'ALREADY_WAITING'
   | 'LOBBY_CLOSED'
+  | 'LOBBY_PARTICIPANT_NOT_FOUND'
+  | 'ENTRY_CANCELLED'
   | 'IDENTITY_VERIFICATION_REQUIRED';
 
 export class EntryError extends Error {

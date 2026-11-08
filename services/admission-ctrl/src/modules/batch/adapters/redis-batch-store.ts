@@ -193,14 +193,18 @@ export class RedisBatchStore implements BatchStore {
     await this.redis.evalScript(CLEAR_REPAIR, [keys.batchDone(eventId)], [`repair:${batchNo}`, String(repairAtMs)]);
   }
 
-  async toRemoveAmong(eventId: string, hashes: readonly string[]): Promise<string[]> {
+  async toRemoveAmong(eventId: string, group: ShuffleGroup, hashes: readonly string[]): Promise<string[]> {
     const k = keys.verify(eventId);
+    // 100만 명이면 해시를 읽는 왕복이 1,000번이다. 돌릴 것이 없다는 것을 한 번에 알면 읽지 않는다: 묶음은 취소가 남긴 표시, 로비는 verify가 빈지(ADR-0233)
+    const d = keys.batchDone(eventId);
+    const any = group === 'lobby' ? await this.redis.command(['HLEN', k], { key: k }) : await this.redis.command(['HEXISTS', d, `orphan:${group}`], { key: d });
+    if (Number(any) === 0) return [];
     const out: string[] = [];
     for (let i = 0; i < hashes.length; i += CHUNK) {
       const chunk = hashes.slice(i, i + CHUNK);
       const vals = (await this.redis.command(['HMGET', k, ...chunk], { key: k })) as unknown[];
       chunk.forEach((h, j) => {
-        if (/^(VERIFYING|ORPHAN):/.test(str(vals[j]) ?? '')) out.push(h);
+        if (/^(VERIFYING|ORPHAN|BLOCKED):/.test(str(vals[j]) ?? '')) out.push(h);
       });
     }
     return out;

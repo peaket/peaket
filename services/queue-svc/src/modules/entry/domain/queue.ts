@@ -173,5 +173,29 @@ export function cookieValue(header: string | undefined, name: string): string | 
 /** 도착 시각 칸 번호(엣지가 찍은 시각의 100ms 칸) */
 export const arrivalSlotOf = (arrivalMs: number): number => Math.floor(arrivalMs / ARRIVAL_SLOT_MS);
 
+/** 사람 키(q:dup)에 든 기록(docs/data.md §3, ADR-0233). value는 읽은 값 그대로이고, plain은 취소 중 표시를 벗긴 원래 기록이다 */
+export type HeldRecord = { value: string; plain: string; requestId: string } & ({ kind: 'NUMBER'; seq: number; gen: number; ticketHash?: string } | { kind: 'BATCH'; tokenHash: string } | { kind: 'LOBBY'; tokenHash: string });
+
+const HELD_NUMBER = /^(\d+):(\d+):([^:]+):[^:]*:[^:]*(?::([0-9a-f]*))?$/;
+const HELD_BATCH = /^BATCH:1:([0-9a-f]+):([^:]+):[^:]*:[^:]*$/;
+const HELD_LOBBY = /^LOBBY:([0-9a-f]+):([^:]+)$/;
+const HELD_LEAVING = /^LEAVING:[^:]+:(.+)$/;
+
+/** 사람 키의 값을 읽는다. 선점 값(PENDING), 취소 표지(LEFT), 모르는 모양이면 null */
+export function parseHeld(value: string): HeldRecord | null {
+  const plain = HELD_LEAVING.exec(value)?.[1] ?? value;
+  const n = HELD_NUMBER.exec(plain);
+  if (n) return { kind: 'NUMBER', value, plain, requestId: n[3]!, seq: Number(n[1]), gen: Number(n[2]), ...(n[4] ? { ticketHash: n[4] } : {}) };
+  const b = HELD_BATCH.exec(plain);
+  if (b) return { kind: 'BATCH', value, plain, requestId: b[2]!, tokenHash: b[1]! };
+  const l = HELD_LOBBY.exec(plain);
+  return l ? { kind: 'LOBBY', value, plain, requestId: l[2]!, tokenHash: l[1]! } : null;
+}
+
+/** 취소 중 표지(그 기록을 취소가 잡았다) */
+export const leavingOf = (r: HeldRecord): string => `LEAVING:${r.requestId}:${r.plain}`;
+/** 취소 끝 표지(같은 요청 ID의 재전송을 '취소됨'으로 답한다) */
+export const leftOf = (r: HeldRecord): string => `LEFT:${r.requestId}`;
+
 /** 전체 범위 제어 상태의 회차 자리(q:{event:PLATFORM}:notice, docs/data.md §3) */
 export const PLATFORM_SCOPE = 'PLATFORM';

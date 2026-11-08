@@ -52,6 +52,15 @@ describe('publishBatch', () => {
     for (const h of members) expect(all[h]).toBe(Number(store.resultOf(h)?.value.split(':')[0]));
   });
 
+  test('Q-T68④ Q-T68⑦ 게시 때 묶음의 주인 없는 자리(ORPHAN)는 그 번호를 빠진 번호로 돌린다', async () => {
+    const m = ['a', 'b', 'c'].map(hash);
+    const { store, publish } = world({ members: m });
+    store.orphanForTest(E, m[1]!);
+    expect(await publish.run({ eventId: E })).toMatchObject({ status: 'PUBLISHED', count: 3 });
+    const seq = Number(store.resultOf(m[1]!)!.value.split(':')[0]);
+    expect(store.removedOf(E)).toEqual([seq]);
+  });
+
   test('FR-038 참가자가있으면_앞자리4096개파일을모두쓰고_빈앞자리는빈표다', async () => {
     const { files, publish } = world();
     await publish.run({ eventId: E });
@@ -331,6 +340,15 @@ describe('로비 셔플과 비콘 대기(HOT-040, ADR-0231)', () => {
     const w = await lobby({ members: m, verifying: [m[1]!] });
     await w.publish.run({ eventId: E, group: 'lobby' });
     const seq = Number(w.store.resultOf(m[1]!, 'lobby')!.value.split(':')[0]);
+    expect(w.store.removedOf(E)).toEqual([seq]);
+  });
+
+  test('Q-T68② 게시 때 주인 없는 자리(ORPHAN)인 로비 참가자의 번호는 빠진 번호로 돌린다', async () => {
+    const m = ['p', 'q', 'r'].map(hash);
+    const w = await lobby({ members: m });
+    w.store.orphanForTest(E, m[2]!);
+    await w.publish.run({ eventId: E, group: 'lobby' });
+    const seq = Number(w.store.resultOf(m[2]!, 'lobby')!.value.split(':')[0]);
     expect(w.store.removedOf(E)).toEqual([seq]);
   });
 

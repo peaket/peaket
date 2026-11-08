@@ -78,6 +78,24 @@ test('Q-T6 로비 게시: lobby_members·batch_done의 lobby를 읽어 q:lobby·
   expect(await cmd(keys.batchDone(E), ['HGET', keys.batchDone(E), 'pub:lobby'])).not.toBeNull();
 });
 
+test('Q-T68④ Q-T68⑦ 묶음 게시: 구간이 닫힌 뒤의 취소가 남긴 자리(ORPHAN)는 번호를 빠진 번호로 돌린다', async () => {
+  const E = `evt-orphan-int-${Date.now()}`;
+  const members = ['o1', 'o2', 'o3'].map(hash);
+  const opensAt = Date.now() - 1_000;
+  await cmd(keys.cfg(E), ['HSET', keys.cfg(E), 'opensAtMs', String(opensAt), 'startsAtMs', String(Date.now() + 3 * 86_400_000), 'lobbyShuffle', '0', 'openBatch', '1', 'rev', '1']);
+  await cmd(keys.batchMembers(E, 1), ['SADD', keys.batchMembers(E, 1), ...members]);
+  await cmd(keys.batchDone(E), ['HSET', keys.batchDone(E), '1', '11:3:1']);
+  await cmd(keys.verify(E), ['HSET', keys.verify(E), members[1]!, 'ORPHAN:1']);
+  await cmd(keys.batchDone(E), ['HSET', keys.batchDone(E), 'orphan:1', '1']);
+  const randomness = new TestRandomness(Buffer.alloc(32, 5));
+  const publish = new PublishBatchResults(new RedisBatchStore(redis), committedRecords(E, opensAt + 2_000), randomness, randomness, new LocalResultFiles(mkdtempSync(join(tmpdir(), 'batch-results-'))), fakeClock({ now: Date.now() }));
+  expect(await publish.run({ eventId: E })).toMatchObject({ status: 'PUBLISHED', count: 3 });
+  const seq = String(await cmd(keys.batchResult(members[1]!), ['GET', keys.batchResult(members[1]!)])).split(':')[0]!;
+  expect(Number(await cmd(keys.removed(E), ['GETBIT', keys.removed(E), seq]))).toBe(1);
+  const other = String(await cmd(keys.batchResult(members[0]!), ['GET', keys.batchResult(members[0]!)])).split(':')[0]!;
+  expect(Number(await cmd(keys.removed(E), ['GETBIT', keys.removed(E), other]))).toBe(0);
+});
+
 test('publishBatch_닫힘표시와참가자를읽어_사람별결과·결과파일·게시표시를쓰고_잃은자리는빠진번호다', async () => {
   const E = `evt-int-${Date.now()}`;
   const startsAt = Date.now() + 3 * 86_400_000;

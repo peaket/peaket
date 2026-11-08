@@ -5,9 +5,11 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type HotRedis, isRedisUnavailable, type RedisScript, redisScript } from '@peaket/platform';
 import { ALGORITHM, DRAND_CHAIN, type ShuffleGroup } from '@peaket/shuffle';
 import type { BatchedEntry, BatchOutcome, CommitRecord, EntryStore, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult, ShuffleCommitStore } from '../domain/ports.js';
-import { ARRIVAL_SLOT_INITIAL, BATCH_NO, QueueStoreUnavailable, RB05_CONFIRM_WAIT_MS, type ReasonCategory, REASONS } from '../domain/queue.js';
+import { ARRIVAL_SLOT_INITIAL, BATCH_NO, type HeldRecord, parseHeld, QueueStoreUnavailable, RB05_CONFIRM_WAIT_MS, type ReasonCategory, REASONS } from '../domain/queue.js';
 import {
   ADD_LOBBY_MEMBER_LUA,
+  LEAVE_MEMBER_LUA,
+  LEAVE_NUMBER_LUA,
   LOBBY_WINDOW_LUA,
   DROP_LOBBY_LUA,
   RECORD_LOBBY_LUA,
@@ -31,6 +33,7 @@ import {
   RECORD_LUA,
   RELEASE_LUA,
   REQUEST_REPAIR_LUA,
+  SWAP_HELD_LUA,
 } from './entry-lua.js';
 
 export const QUEUE_REDIS = Symbol('queue.QueueRedis');
@@ -70,6 +73,10 @@ export const keys = {
   lobbyResult: (tokenHash: string) => `q:lobby:{${tokenHash}}`,
   /** 셔플 공시 기록(ADR-0231 결정 6) */
   shuffle: (e: string) => `q:{event:${e}}:shuffle`,
+  /** 곧 입장 대기열 셋(ADR-0104·0183). 입장 확정이 쓰고 대기 취소가 뺀다(ADR-0233) */
+  soon: (e: string) => `q:{event:${e}}:soon`,
+  soonAt: (e: string) => `q:{event:${e}}:soon_at`,
+  soonFirst: (e: string) => `q:{event:${e}}:soon_first`,
 };
 
 // Lua 원문은 entry-lua.ts에 있다(측정 도구와 같은 원문)
@@ -97,6 +104,9 @@ const REMOVE_LOBBY_MEMBER = redisScript(REMOVE_LOBBY_MEMBER_LUA);
 const RECORD_LOBBY = redisScript(RECORD_LOBBY_LUA);
 const DROP_LOBBY = redisScript(DROP_LOBBY_LUA);
 const WRITE_COMMIT = redisScript(WRITE_COMMIT_LUA);
+const LEAVE_NUMBER = redisScript(LEAVE_NUMBER_LUA);
+const LEAVE_MEMBER = redisScript(LEAVE_MEMBER_LUA);
+const SWAP_HELD = redisScript(SWAP_HELD_LUA);
 
 const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 const reason = (v: unknown) => REASONS.find((x) => x === str(v ?? '')) as ReasonCategory | undefined;
@@ -173,7 +183,7 @@ export class RedisEntryStore implements EntryStore {
     const kind = str(r[0]);
     if (kind === 'RECORDED') return { kind, ...entry(r) };
     if (kind === 'BATCH') return { kind, ...batchEntry(r) };
-    if (kind === 'PROCEED' || kind === 'ADMITTED' || kind === 'BUSY') return { kind };
+    if (kind === 'PROCEED' || kind === 'ADMITTED' || kind === 'BUSY' || kind === 'LEFT') return { kind };
     throw new Error(`선점 Lua가 모르는 값을 돌려줬다: ${kind}`);
   }
 
@@ -236,8 +246,8 @@ export class RedisEntryStore implements EntryStore {
     return (await this.numberBatch({ ...common, items: [{ eligible, tokenHash }] }))[0]!;
   }
 
-  async record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number }): Promise<RecordResult> {
-    const args = [i.requestId, String(i.seq), String(i.gen), String(i.expireAtMs), i.jny, i.vr ?? ''];
+  async record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number; ticketHash?: string }): Promise<RecordResult> {
+    const args = [i.requestId, String(i.seq), String(i.gen), String(i.expireAtMs), i.jny, i.vr ?? '', i.ticketHash ?? ''];
     const r = (await guard(this.redis.evalScript(RECORD, [keys.dup(i.pid, i.eventId), keys.adm(i.pid, i.eventId)], args))) as unknown[];
     const kind = str(r[0]);
     if (kind === 'SAME') return { kind, ...entry(r) };
@@ -288,8 +298,8 @@ export class RedisEntryStore implements EntryStore {
     return { kind: 'RESULT', seq: Number(m[1]), gen: Number(m[2]) };
   }
 
-  async convertBatch(i: { pid: string; eventId: string; requestId: string; tokenHash: string; seq: number; gen: number; expireAtMs: number }): Promise<({ kind: 'RECORDED' } & RecordedEntry) | { kind: 'GONE' }> {
-    const args = [i.requestId, i.tokenHash, String(i.seq), String(i.gen), String(i.expireAtMs)];
+  async convertBatch(i: { pid: string; eventId: string; requestId: string; tokenHash: string; seq: number; gen: number; expireAtMs: number; ticketHash?: string }): Promise<({ kind: 'RECORDED' } & RecordedEntry) | { kind: 'GONE' }> {
+    const args = [i.requestId, i.tokenHash, String(i.seq), String(i.gen), String(i.expireAtMs), i.ticketHash ?? ''];
     const r = (await guard(this.redis.evalScript(CONVERT, [keys.dup(i.pid, i.eventId)], args))) as unknown[];
     return str(r[0]) === 'RECORDED' ? { kind: 'RECORDED', ...entry(r) } : { kind: 'GONE' };
   }
@@ -345,6 +355,38 @@ export class RedisEntryStore implements EntryStore {
 
   async dropLobbyRecord(i: { pid: string; eventId: string; requestId: string; tokenHash: string }): Promise<void> {
     await guard(this.redis.evalScript(DROP_LOBBY, [keys.dup(i.pid, i.eventId)], [`LOBBY:${i.tokenHash}:${i.requestId}`]));
+  }
+
+  async readHeld(i: { pid: string; eventId: string }): Promise<HeldRecord | null> {
+    const k = keys.dup(i.pid, i.eventId);
+    const v = await guard(this.redis.command(['GET', k], { key: k }));
+    return v === null || v === undefined ? null : parseHeld(str(v));
+  }
+
+  async leaveNumber(i: { eventId: string; seq: number; ticketHash?: string; expireAtMs: number }): Promise<void> {
+    const e = i.eventId;
+    await guard(this.redis.evalScript(LEAVE_NUMBER, [keys.removed(e), keys.verify(e), keys.soon(e), keys.soonAt(e), keys.soonFirst(e)], [String(i.seq), i.ticketHash ?? '', String(i.expireAtMs)]));
+  }
+
+  async leaveMember(i: { eventId: string; group: ShuffleGroup; tokenHash: string; closesAtMs?: number; verifyExpireAtMs: number }): Promise<'REMOVED' | 'FIXED' | 'CLOSED'> {
+    const e = i.eventId;
+    const members = i.group === 'lobby' ? keys.lobbyMembers(e) : keys.batchMembers(e, i.group);
+    const r = str(await guard(this.redis.evalScript(LEAVE_MEMBER, [keys.batchDone(e), members, keys.verify(e)], [String(i.group), i.tokenHash, String(i.verifyExpireAtMs), String(i.closesAtMs ?? 0)])));
+    if (r === 'REMOVED' || r === 'FIXED' || r === 'CLOSED') return r;
+    throw new Error(`참가 취소 Lua가 모르는 값을 돌려줬다: ${r}`);
+  }
+
+  async resultSeat(i: { group: ShuffleGroup; tokenHash: string }): Promise<{ seq: number; gen: number } | null> {
+    const k = i.group === 'lobby' ? keys.lobbyResult(i.tokenHash) : keys.batchResult(i.tokenHash);
+    const v = await guard(this.redis.command(['GET', k], { key: k }));
+    if (v === null || v === undefined) return null;
+    const m = RESULT.exec(str(v));
+    if (!m) throw new Error(`셔플 결과 값의 모양이 틀렸다: ${k}`);
+    return { seq: Number(m[1]), gen: Number(m[2]) };
+  }
+
+  async swapHeld(i: { pid: string; eventId: string; from: string; to: string }): Promise<boolean> {
+    return Number(await guard(this.redis.evalScript(SWAP_HELD, [keys.dup(i.pid, i.eventId)], [i.from, i.to]))) === 1;
   }
 }
 

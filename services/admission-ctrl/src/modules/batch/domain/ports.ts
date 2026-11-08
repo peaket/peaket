@@ -54,8 +54,8 @@ export interface BatchStore {
   confirmReplicated(eventId: string, group: ShuffleGroup, marker: string): Promise<boolean>;
   /** 다시 쓰기 표시를 본 값일 때만 지운다 */
   clearRepair(eventId: string, group: ShuffleGroup, repairAtMs: number): Promise<void>;
-  /** q:{event:E}:verify에서 값이 VERIFYING(§7)이거나 ORPHAN(목록 고정 뒤 되돌리기가 남긴 주인 없는 자리)인 해시들. 게시 때 그 번호를 빠진 번호로 돌린다 */
-  toRemoveAmong(eventId: string, hashes: readonly string[]): Promise<string[]>;
+  /** q:{event:E}:verify에서 값이 VERIFYING·BLOCKED(§7)이거나 ORPHAN(목록 고정 뒤 되돌리기·취소가 남긴 주인 없는 자리)인 해시들. 게시 때 그 번호를 빠진 번호로 돌린다. 돌릴 것이 없다는 것을 한 번에 알면 해시를 읽지 않는다(ADR-0233) */
+  toRemoveAmong(eventId: string, group: ShuffleGroup, hashes: readonly string[]): Promise<string[]>;
 }
 
 /** 일정에서 게시가 쓰는 값 */

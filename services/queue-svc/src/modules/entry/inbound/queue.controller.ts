@@ -1,7 +1,7 @@
 // 받는 층: 사전 검증 토큰 발급·대기열 진입(openapi /v1/queues/{eventId}/pre-verifications·entries, docs/features/queue-admission.md §3).
 // 팬 경로라 게이트웨이가 넘긴 신원(계정·pid)과 구매 권한(ticket:buy)을 쓴다. 진입은 사전 요청이 없도록 text/plain 본문도 받는다(ADR-0065 결정 6).
 // 응답은 캐시하지 않는다.
-import { Controller, HttpCode, Param, Post, Res } from '@nestjs/common';
+import { Controller, Delete, HttpCode, Param, Post, Res } from '@nestjs/common';
 import { AcceptTextPlain, ContractBody, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -9,6 +9,7 @@ import { EnterQueue } from '../application/enter-queue.js';
 import { EntryError } from '../application/entry-error.js';
 import { IssuePreverification } from '../application/issue-preverification.js';
 import { JoinLobby } from '../application/join-lobby.js';
+import { LeaveQueue } from '../application/leave-queue.js';
 import { ARRIVAL_COOKIE_NAME, ARRIVAL_UNSIGNED_HEADER, cookieValue, QueueStoreUnavailable } from '../domain/queue.js';
 
 // openapi 요청 본문 모양(계약 생성물의 작업별 스키마 이름이 operationId 정리(wbs 0.2.3) 뒤 바뀌므로 여기 같은 모양으로 둔다)
@@ -44,6 +45,9 @@ const PROBLEM: Record<EntryError['code'], { status: number; type: string; title:
   ALREADY_ADMITTED: { status: 409, type: 'already-admitted', title: '이 회차에 이미 입장했습니다' },
   ALREADY_WAITING: { status: 409, type: 'already-waiting', title: '이미 다른 곳에서 대기 중입니다' },
   LOBBY_CLOSED: { status: 409, type: 'lobby-closed', title: '로비가 닫혔습니다' },
+  LOBBY_PARTICIPANT_NOT_FOUND: { status: 404, type: 'lobby-participant-not-found', title: '로비 참가 기록이 없습니다' },
+  // 취소한 참가의 재전송(처음 기기, ADR-0233). 입장 확정의 빠진 번호와 같은 type이라 화면은 '다른 기기에서 취소'로 끝낸다
+  ENTRY_CANCELLED: { status: 410, type: 'queue-ticket-removed', title: '이 대기표는 더 쓸 수 없습니다' },
   IDENTITY_VERIFICATION_REQUIRED: { status: 403, type: 'identity-verification-required', title: '휴대폰 본인확인을 먼저 해 주세요' },
 };
 
@@ -73,7 +77,25 @@ export class QueueController {
     private readonly issuePreverification: IssuePreverification,
     private readonly enterQueue: EnterQueue,
     private readonly joinLobby: JoinLobby,
+    private readonly leaveQueue: LeaveQueue,
   ) {}
+
+  // 팬 쿠키로 부르므로 처음 기기가 없어도 된다(ADR-0060). 경로에 ID가 없고 호출자 pid의 참가만 지운다
+  @Delete('lobby-participants/me')
+  @Roles(['fan'], { scopes: ['ticket:buy'] })
+  @HttpCode(204)
+  async leaveLobby(@Param('eventId') eventId: string, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
+    void reply.header('cache-control', 'no-store');
+    await problem((async () => this.leaveQueue.lobby({ eventId, ...who(eventId, me) }))());
+  }
+
+  @Delete('entries/me')
+  @Roles(['fan'], { scopes: ['ticket:buy'] })
+  @HttpCode(204)
+  async leaveEntry(@Param('eventId') eventId: string, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
+    void reply.header('cache-control', 'no-store');
+    await problem((async () => this.leaveQueue.entry({ eventId, ...who(eventId, me) }))());
+  }
 
   @Post('lobby-participants')
   @Roles(['fan'], { scopes: ['ticket:buy'] })

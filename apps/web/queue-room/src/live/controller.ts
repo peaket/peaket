@@ -326,6 +326,8 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
       if (reply?.status === 410) {
         clearAllMine();
         if (reply.problem !== 'sold-out') store.clearAutoAssign();
+        // 취소한 참가의 재전송: 다른 기기에서 대기를 취소했다(ADR-0233)
+        if (reply.problem === 'queue-ticket-removed') return end('cancelled-elsewhere', { via: 'queue' });
         return end(reply.problem === 'sold-out' ? 'sold-out' : 'ended');
       }
       if (reply?.status === 429 || reply?.status === 503) {
@@ -357,11 +359,15 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
     const due = b.resultAtMs + spreadDelayMs(h, b.spreadSec);
     await wait(due - clock.now(), sig);
     let attempt = 0;
+    let missing = 0;
     while (!stopped(sig)) {
       const { reply } = await timed(() => net.getFile(`${urls.files}${b.resultPath}`, false, sig));
       if (stopped(sig)) return;
       const seq = reply?.status === 200 && reply.body && typeof reply.body === 'object' ? (reply.body as Record<string, unknown>)[h] : undefined;
       if (typeof seq === 'number' && Number.isInteger(seq) && seq >= 1) return enter(sig, entryRequestId, token);
+      // 게시한 파일은 바뀌지 않는다: 두 번 연달아 내 해시가 없으면 서버에 묻는다(취소됐으면 410, 잃은 참가면 맨 뒤 번호, ADR-0233)
+      if (reply?.status === 200 && ++missing >= 2) return enter(sig, entryRequestId, token);
+      if (reply?.status !== 200) missing = 0;
       await wait(resultRetryDelayMs(attempt++, env.random), sig);
     }
   }
@@ -919,7 +925,7 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
         env.navigate(urls.event);
         return true;
       }
-      // 취소하지 못했으면 대기를 이어 간다(계약에 없는 404도 실패로 본다)
+      // 취소하지 못했으면 대기를 이어 간다(404 queue-not-found도 실패로 본다)
       restart();
       return false;
     },

@@ -3,9 +3,9 @@
 import type { Clock } from '@peaket/platform';
 import type { ShuffleGroup } from '@peaket/shuffle';
 import type { BatchedEntry, BatchOutcome, CommitRecord, EntryStore, EventSchedules, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult, ShuffleCommitStore } from '../domain/ports.js';
-import { ARRIVAL_CARVE_MAX, ARRIVAL_CLOSE_AFTER_MS, ARRIVAL_FUTURE_MS, ARRIVAL_SLOT_INITIAL, ARRIVAL_SLOT_MS, ARRIVAL_WINDOW_SLOTS, BATCH_NO, type EventSchedule, type ReasonCategory, REASONS } from '../domain/queue.js';
+import { ARRIVAL_CARVE_MAX, ARRIVAL_CLOSE_AFTER_MS, ARRIVAL_FUTURE_MS, ARRIVAL_SLOT_INITIAL, ARRIVAL_SLOT_MS, ARRIVAL_WINDOW_SLOTS, BATCH_NO, type EventSchedule, type HeldRecord, parseHeld, type ReasonCategory, REASONS } from '../domain/queue.js';
 
-const RECORDED = /^(\d+):(\d+):([^:]+):([^:]*):([^:]*)$/;
+const RECORDED = /^(\d+):(\d+):([^:]+):([^:]*):([^:]*)(?::[0-9a-f]*)?$/;
 const BATCHED = /^BATCH:1:([0-9a-f]+):([^:]+):([^:]*):([^:]*)$/;
 const reason = (v: string | undefined) => REASONS.find((r) => r === v) as ReasonCategory | undefined;
 
@@ -48,6 +48,8 @@ export class MemoryEntryStore implements EntryStore {
   readonly #members = new Map<string, Set<string>>();
   readonly #lobby = new Map<string, Set<string>>();
   readonly #results = new Map<string, string>();
+  /** 곧 입장 대기열(회차 → 해시 → 번호). 입장 확정 메모리 저장소와는 따로이고 대기 취소 시험만 쓴다 */
+  readonly #soon = new Map<string, Map<string, number>>();
   /** 세대 키(회차 → 노드 표지 '{ID}:{설정 세대}')와 지금 노드 표지. 시험이 failoverForTest로 지금 노드를 바꾼다(ADR-0181) */
   readonly #epoch = new Map<string, string>();
   /** notice의 회차 판매 상태(saleState, ADR-0214) */
@@ -69,6 +71,12 @@ export class MemoryEntryStore implements EntryStore {
     return x.v;
   }
 
+  /** 기록 단계가 보는 값: 다른 요청의 취소 끝 표지는 빈 키와 같다(Lua의 OTHER_LEFT_IS_EMPTY, ADR-0233) */
+  #recordable(k: string, requestId: string): string | null {
+    const v = this.#dupOf(k);
+    return v !== null && v.startsWith('LEFT:') && v !== `LEFT:${requestId}` ? null : v;
+  }
+
   #doneOf(eventId: string): Map<string, string> {
     const m = this.#done.get(eventId) ?? new Map<string, string>();
     this.#done.set(eventId, m);
@@ -78,7 +86,12 @@ export class MemoryEntryStore implements EntryStore {
   async preempt(i: { pid: string; eventId: string; requestId: string; pendingTtlMs: number }): Promise<PreemptResult> {
     const k = `${i.pid}|${i.eventId}`;
     if (this.#adm.has(k)) return { kind: 'ADMITTED' };
-    const v = this.#dupOf(k);
+    let v = this.#dupOf(k);
+    // 대기 취소 표지(ADR-0233): 이 요청의 것이면 LEFT, 다른 요청의 LEFT는 빈 키, 다른 요청의 LEAVING은 BUSY
+    if (v !== null && v === `LEFT:${i.requestId}`) return { kind: 'LEFT' };
+    if (v !== null && v.startsWith(`LEAVING:${i.requestId}:`)) return { kind: 'LEFT' };
+    if (v !== null && v.startsWith('LEAVING:')) return { kind: 'BUSY' };
+    if (v !== null && v.startsWith('LEFT:')) v = null;
     if (v === null) {
       this.#dup.set(k, { v: `PENDING:${i.requestId}`, until: this.clock.now() + i.pendingTtlMs });
       return { kind: 'PROCEED' };
@@ -249,17 +262,17 @@ export class MemoryEntryStore implements EntryStore {
     return (await this.numberBatch({ ...common, items: [{ eligible, tokenHash }] }))[0]!;
   }
 
-  async record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number }): Promise<RecordResult> {
+  async record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number; ticketHash?: string }): Promise<RecordResult> {
     const k = `${i.pid}|${i.eventId}`;
     if (this.#adm.has(k)) return { kind: 'ADMITTED' };
-    const v = this.#dupOf(k);
+    const v = this.#recordable(k, i.requestId);
     if (v !== null && v !== `PENDING:${i.requestId}`) {
       const r = recorded(v, i.requestId);
       if (r) return { kind: 'SAME', ...r };
       const b = batched(v);
       return b?.requestId === i.requestId ? { kind: 'BATCH', tokenHash: b.tokenHash } : { kind: 'TAKEN' };
     }
-    this.#dup.set(k, { v: `${i.seq}:${i.gen}:${i.requestId}:${i.jny}:${i.vr ?? ''}`, until: i.expireAtMs });
+    this.#dup.set(k, { v: `${i.seq}:${i.gen}:${i.requestId}:${i.jny}:${i.vr ?? ''}${i.ticketHash ? `:${i.ticketHash}` : ''}`, until: i.expireAtMs });
     return { kind: 'RECORDED' };
   }
 
@@ -274,7 +287,7 @@ export class MemoryEntryStore implements EntryStore {
   }): Promise<{ kind: 'BATCHED'; tokenHash: string } | ({ kind: 'SAME' } & RecordedEntry) | { kind: 'ADMITTED' } | { kind: 'TAKEN' }> {
     const k = `${i.pid}|${i.eventId}`;
     if (this.#adm.has(k)) return { kind: 'ADMITTED' };
-    const v = this.#dupOf(k);
+    const v = this.#recordable(k, i.requestId);
     if (v !== null && v !== `PENDING:${i.requestId}`) {
       const b = batched(v);
       if (b?.requestId === i.requestId) return { kind: 'BATCHED', tokenHash: b.tokenHash };
@@ -298,7 +311,7 @@ export class MemoryEntryStore implements EntryStore {
     return { kind: 'REPAIRING' };
   }
 
-  async convertBatch(i: { pid: string; eventId: string; requestId: string; tokenHash: string; seq: number; gen: number; expireAtMs: number }): Promise<({ kind: 'RECORDED' } & RecordedEntry) | { kind: 'GONE' }> {
+  async convertBatch(i: { pid: string; eventId: string; requestId: string; tokenHash: string; seq: number; gen: number; expireAtMs: number; ticketHash?: string }): Promise<({ kind: 'RECORDED' } & RecordedEntry) | { kind: 'GONE' }> {
     const k = `${i.pid}|${i.eventId}`;
     const v = this.#dupOf(k);
     if (v === null) return { kind: 'GONE' };
@@ -307,7 +320,7 @@ export class MemoryEntryStore implements EntryStore {
       const r = recorded(v, i.requestId);
       return r ? { kind: 'RECORDED', ...r } : { kind: 'GONE' };
     }
-    this.#dup.set(k, { v: `${i.seq}:${i.gen}:${i.requestId}:${b.jny}:${b.vr ?? ''}`, until: i.expireAtMs });
+    this.#dup.set(k, { v: `${i.seq}:${i.gen}:${i.requestId}:${b.jny}:${b.vr ?? ''}${i.ticketHash ? `:${i.ticketHash}` : ''}`, until: i.expireAtMs });
     return { kind: 'RECORDED', seq: i.seq, gen: i.gen, jny: b.jny, ...(b.vr ? { vr: b.vr } : {}) };
   }
 
@@ -330,7 +343,7 @@ export class MemoryEntryStore implements EntryStore {
     if (v === null || !this.#own(v, i.requestId, false)) return 'COPIED';
     const to = `${i.to}|${i.eventId}`;
     if (this.#adm.has(to)) return 'ADMITTED';
-    const cur = this.#dupOf(to);
+    const cur = this.#recordable(to, i.requestId);
     if (cur !== null && !this.#own(cur, i.requestId, true)) return 'TAKEN';
     this.#dup.set(to, { v, until: this.#dup.get(from)!.until });
     return 'COPIED';
@@ -391,7 +404,7 @@ export class MemoryEntryStore implements EntryStore {
   async recordLobby(i: { pid: string; eventId: string; requestId: string; tokenHash: string; expireAtMs: number }): Promise<'RECORDED' | 'ADMITTED' | 'TAKEN'> {
     const k = `${i.pid}|${i.eventId}`;
     if (this.#adm.has(k)) return 'ADMITTED';
-    const v = this.#dupOf(k);
+    const v = this.#recordable(k, i.requestId);
     if (v !== null && v !== `PENDING:${i.requestId}`) return 'TAKEN';
     this.#dup.set(k, { v: `LOBBY:${i.tokenHash}:${i.requestId}`, until: i.expireAtMs });
     return 'RECORDED';
@@ -402,8 +415,73 @@ export class MemoryEntryStore implements EntryStore {
     if (this.#dupOf(k) === `LOBBY:${i.tokenHash}:${i.requestId}`) this.#dup.delete(k);
   }
 
+  async readHeld(i: { pid: string; eventId: string }): Promise<HeldRecord | null> {
+    const v = this.#dupOf(`${i.pid}|${i.eventId}`);
+    return v === null ? null : parseHeld(v);
+  }
+
+  async leaveNumber(i: { eventId: string; seq: number; ticketHash?: string; expireAtMs: number }): Promise<void> {
+    await this.markRemoved(i);
+    if (!i.ticketHash) return;
+    const m = this.#verify.get(i.eventId);
+    const v = m?.get(i.ticketHash);
+    if (v?.startsWith('VERIFYING:') || v?.startsWith('PASSED:')) m!.delete(i.ticketHash);
+    this.#soon.get(i.eventId)?.delete(i.ticketHash);
+  }
+
+  async leaveMember(i: { eventId: string; group: ShuffleGroup; tokenHash: string; closesAtMs?: number; verifyExpireAtMs: number }): Promise<'REMOVED' | 'FIXED' | 'CLOSED'> {
+    const fixed = this.#doneOf(i.eventId).has(String(i.group));
+    if (i.closesAtMs !== undefined && (fixed || this.clock.now() >= i.closesAtMs)) return 'CLOSED';
+    const m = this.#verify.get(i.eventId) ?? new Map<string, string>();
+    this.#verify.set(i.eventId, m);
+    if (!fixed) {
+      (i.group === 'lobby' ? this.#lobby : this.#members).get(i.eventId)?.delete(i.tokenHash);
+      m.delete(i.tokenHash);
+      return 'REMOVED';
+    }
+    const v = m.get(i.tokenHash);
+    if (!v?.startsWith('ORPHAN:') && !v?.startsWith('BLOCKED:')) m.set(i.tokenHash, `ORPHAN:${this.clock.now()}`);
+    this.#doneOf(i.eventId).set(`orphan:${i.group}`, '1');
+    return 'FIXED';
+  }
+
+  async resultSeat(i: { group: ShuffleGroup; tokenHash: string }): Promise<{ seq: number; gen: number } | null> {
+    const r = this.#results.get(i.tokenHash);
+    if (!r) return null;
+    const [seq, gen] = r.split(':').map(Number);
+    return { seq: seq!, gen: gen! };
+  }
+
+  async swapHeld(i: { pid: string; eventId: string; from: string; to: string }): Promise<boolean> {
+    const k = `${i.pid}|${i.eventId}`;
+    if (this.#dupOf(k) !== i.from) return false;
+    this.#dup.set(k, { v: i.to, until: this.#dup.get(k)!.until });
+    return true;
+  }
+
   closeLobbyForTest(eventId: string): void {
     this.#doneOf(eventId).set('lobby', '1:0:1');
+  }
+  closeListForTest(eventId: string, field: 'lobby' | '1', marker: string): void {
+    this.#doneOf(eventId).set(field, marker);
+  }
+  setVerifyForTest(eventId: string, hash: string, value: string): void {
+    const m = this.#verify.get(eventId) ?? new Map<string, string>();
+    m.set(hash, value);
+    this.#verify.set(eventId, m);
+  }
+  setResultForTest(tokenHash: string, seq: number, gen: number): void {
+    this.#results.set(tokenHash, `${seq}:${gen}`);
+  }
+  addSoonForTest(eventId: string, hash: string, seq: number): void {
+    const m = this.#soon.get(eventId) ?? new Map<string, number>();
+    m.set(hash, seq);
+    this.#soon.set(eventId, m);
+  }
+  /** 곧 입장 키 셋의 해시. 메모리에서는 한 표로 두어 셋이 같다 */
+  soonForTest(eventId: string): [string[], string[], string[]] {
+    const hashes = [...(this.#soon.get(eventId)?.keys() ?? [])];
+    return [hashes, hashes, hashes];
   }
   lobbyMembersForTest(eventId: string): string[] {
     return [...(this.#lobby.get(eventId) ?? [])];

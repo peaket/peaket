@@ -1,6 +1,6 @@
 // 진입 컨텍스트의 포트: 토큰 코덱, 회차 일정 사본, 위험 판정, 진입 저장소(대기열 Redis).
 import type { SeedSealer, ShuffleGroup } from '@peaket/shuffle';
-import type { EventSchedule, LobbyClaims, PreverifyClaims, ReasonCategory, TicketClaims } from './queue.js';
+import type { EventSchedule, HeldRecord, LobbyClaims, PreverifyClaims, ReasonCategory, TicketClaims } from './queue.js';
 
 export const QUEUE_TOKENS = Symbol('queue.QueueTokens');
 /** 사전 검증 토큰·대기표·참가 토큰의 HMAC 코덱. 읽기는 MAC·형식이 맞을 때만 클레임을 주고 아니면 null(만료는 부르는 쪽이 본다) */
@@ -129,6 +129,15 @@ export interface LobbySignals {
 }
 export const noLobbySignals: LobbySignals = { joinedBeforeUnlock: () => undefined, commitLate: () => undefined };
 
+export const LEAVE_SIGNALS = Symbol('queue.LeaveSignals');
+/** 대기 취소 지표의 경로 라벨(URL 템플릿, docs/observability.md §8) */
+export type LeaveRoute = '/v1/queues/{eventId}/lobby-participants/me' | '/v1/queues/{eventId}/entries/me';
+/** 대기 취소 지표(docs/observability.md §5, ADR-0233). 기록을 실제로 취소한 요청만 센다 */
+export interface LeaveSignals {
+  left(route: LeaveRoute): void;
+}
+export const noLeaveSignals: LeaveSignals = { left: () => undefined };
+
 export interface RiskInput {
   context: 'PREVERIFY' | 'LOBBY';
   eventId: string;
@@ -166,7 +175,9 @@ export type PreemptResult =
   | ({ kind: 'RECORDED' } & RecordedEntry)
   | ({ kind: 'BATCH' } & BatchedEntry)
   | { kind: 'ADMITTED' }
-  | { kind: 'BUSY' };
+  | { kind: 'BUSY' }
+  /** 이 요청 ID의 참가는 취소됐다(ADR-0233): 재전송에 새 번호를 주지 않는다 */
+  | { kind: 'LEFT' };
 export type RecordResult = { kind: 'RECORDED' } | ({ kind: 'SAME' } & RecordedEntry) | { kind: 'BATCH'; tokenHash: string } | { kind: 'ADMITTED' } | { kind: 'TAKEN' };
 /** 묶음 결과: 번호, 게시 전, 참가자인데 결과 키가 없음(다시 쓰기를 청했다), 참가자 목록에 없음(batchMissing) */
 export type BatchOutcome = { kind: 'RESULT'; seq: number; gen: number } | { kind: 'PENDING' } | { kind: 'REPAIRING' } | { kind: 'MISSING' };
@@ -256,9 +267,9 @@ export interface EntryStore {
    * WAIT로 받은 것을 확인한 뒤 표시를 지운다. 붙은 복제본이 없으면 바로 지운다
    */
   confirmRb05(i: { eventId: string }): Promise<Rb05Confirm>;
-  /** ③ enterRecord: q:adm이 있으면 ADMITTED. 값이 내 PENDING이거나 비었으면 {번호}:{세대}:{요청 ID}:{jny}:{vr}로 기록(수명 = 판매 종료). 같은 요청의 다른 기록이면 SAME(먼저 기록된 값),
-   * 같은 요청의 묶음 기록이면 BATCH(그 토큰 해시), 그 밖은 TAKEN */
-  record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number }): Promise<RecordResult>;
+  /** ③ enterRecord: q:adm이 있으면 ADMITTED. 값이 내 PENDING이거나 비었으면 {번호}:{세대}:{요청 ID}:{jny}:{vr}:{대기표 해시}로 기록(수명 = 판매 종료). 같은 요청의 다른 기록이면 SAME(먼저 기록된 값),
+   * 같은 요청의 묶음 기록이면 BATCH(그 토큰 해시), 그 밖은 TAKEN. ticketHash는 대기 취소가 soon·verify의 칸을 찾는 값이다(ADR-0233) */
+  record(i: { pid: string; eventId: string; requestId: string; seq: number; gen: number; jny: string; vr?: ReasonCategory; expireAtMs: number; ticketHash?: string }): Promise<RecordResult>;
   /** ③ enterBatchRecord(OPEN[14]): q:adm이 있으면 ADMITTED. 값이 내 PENDING이거나 비었으면 BATCH:1:{토큰 해시}:{요청 ID}:{jny}:{vr}(수명 = 판매 종료).
    * 같은 요청의 묶음 기록이 이미 있으면 그대로 둔다. 둘 다 BATCHED와 기록된 토큰 해시. 같은 요청의 번호 기록이 먼저 있으면 SAME(그 기록), 그 밖은 TAKEN */
   batchRecord(i: {
@@ -274,7 +285,7 @@ export interface EntryStore {
    * 참가자인데 결과가 없으면 결과 키를 장애 전환으로 잃은 것이라 batch_done의 repair:1(처음 청한 시각)을 쓴다 */
   batchResult(i: { eventId: string; tokenHash: string }): Promise<BatchOutcome>;
   /** 게시 뒤 같은 요청의 묶음 기록을 번호 기록으로 바꾼다. 이미 바뀌었으면 그 기록, 다른 값이면 GONE */
-  convertBatch(i: { pid: string; eventId: string; requestId: string; tokenHash: string; seq: number; gen: number; expireAtMs: number }): Promise<({ kind: 'RECORDED' } & RecordedEntry) | { kind: 'GONE' }>;
+  convertBatch(i: { pid: string; eventId: string; requestId: string; tokenHash: string; seq: number; gen: number; expireAtMs: number; ticketHash?: string }): Promise<({ kind: 'RECORDED' } & RecordedEntry) | { kind: 'GONE' }>;
   /** batchMissing: 결과에 없는 같은 요청의 묶음 기록을 지운다 */
   dropBatch(i: { pid: string; eventId: string; requestId: string; tokenHash: string }): Promise<void>;
   /**
@@ -301,4 +312,20 @@ export interface EntryStore {
   recordLobby(i: { pid: string; eventId: string; requestId: string; tokenHash: string; expireAtMs: number }): Promise<'RECORDED' | 'ADMITTED' | 'TAKEN'>;
   /** 값이 이 요청의 LOBBY 기록일 때만 지운다(두 키 처리의 되돌리기) */
   dropLobbyRecord(i: { pid: string; eventId: string; requestId: string; tokenHash: string }): Promise<void>;
+  /** 대기 취소가 읽는 사람 키의 기록. 비었거나 선점 값·취소 끝 표지면 null. 취소 중 표지면 원래 기록을 준다 */
+  readHeld(i: { pid: string; eventId: string }): Promise<HeldRecord | null>;
+  /** 사람 키의 값이 from일 때만 to로 바꾼다(수명은 그대로). 바꿨으면 true. 취소가 기록을 잡고, 끝내고, 되돌릴 때 쓴다(ADR-0233) */
+  swapHeld(i: { pid: string; eventId: string; from: string; to: string }): Promise<boolean>;
+  /**
+   * 대기 취소의 번호 돌리기(명세 leave, ADR-0233): Lua 하나로 빠진 번호 비트를 켜고, 해시가 있으면 곧 입장 대기열 셋에서 빼고 verify의 VERIFYING·PASSED를 지운다.
+   * expireAtMs는 비트맵 수명(판매 종료 + 1일)
+   */
+  leaveNumber(i: { eventId: string; seq: number; ticketHash?: string; expireAtMs: number }): Promise<void>;
+  /**
+   * 로비·묶음 참가의 취소: 표시(batch_done의 lobby·1)가 서기 전이면 목록에서 빼고 verify 칸을 지운다(REMOVED). 선 뒤면 목록을 바꾸지 않고 verify에 ORPHAN을 적고(BLOCKED는 그대로 둔다) batch_done에 orphan:{구간}을 남긴다(FIXED).
+   * closesAtMs를 주면 서버 시각이 그 값을 지났거나 표시가 섰을 때 아무것도 바꾸지 않고 CLOSED다(로비 참가 취소의 창). 목록 고정 확인과 쓰기가 한 Lua다
+   */
+  leaveMember(i: { eventId: string; group: ShuffleGroup; tokenHash: string; closesAtMs?: number; verifyExpireAtMs: number }): Promise<'REMOVED' | 'FIXED' | 'CLOSED'>;
+  /** 셔플 결과 키(q:lobby·q:batch)의 번호. 없으면 null */
+  resultSeat(i: { group: ShuffleGroup; tokenHash: string }): Promise<{ seq: number; gen: number } | null>;
 }

@@ -178,6 +178,7 @@ export class EnterQueue {
     const p1 = await this.store.preempt({ pid: old, eventId: i.eventId, requestId, pendingTtlMs: this.options.pendingTtlMs });
     if (p1.kind === 'ADMITTED') throw new EntryError('ALREADY_ADMITTED', '이 회차에 이미 입장했다(옛 pid)');
     if (p1.kind === 'BUSY') throw new EntryError('ALREADY_WAITING', '이미 대기 중이다(옛 pid)');
+    if (p1.kind === 'LEFT') throw new EntryError('ENTRY_CANCELLED', '이 요청 ID의 참가는 취소됐다(옛 pid)');
     let p2: PreemptResult;
     try {
       p2 = await this.store.preempt({ pid: i.pid, eventId: i.eventId, requestId, pendingTtlMs: this.options.pendingTtlMs });
@@ -186,9 +187,9 @@ export class EnterQueue {
       await this.#release(c, old);
       throw e;
     }
-    if (p2.kind === 'ADMITTED' || p2.kind === 'BUSY') {
+    if (p2.kind === 'ADMITTED' || p2.kind === 'BUSY' || p2.kind === 'LEFT') {
       await this.#release(c, old);
-      throw new EntryError(p2.kind === 'ADMITTED' ? 'ALREADY_ADMITTED' : 'ALREADY_WAITING', '새 pid 쪽이 거절했다');
+      throw new EntryError(p2.kind === 'ADMITTED' ? 'ALREADY_ADMITTED' : p2.kind === 'LEFT' ? 'ENTRY_CANCELLED' : 'ALREADY_WAITING', '새 pid 쪽이 거절했다');
     }
     // 앞 키는 옛 pid다. 옛 키에 이 요청의 값이 없고 새 키에만 있으면(장애 전환으로 옛 키의 쓰기를 잃음) 새 pid가 앞 키다
     const newLeads = p1.kind === 'PROCEED' && p2.kind !== 'PROCEED';
@@ -221,6 +222,8 @@ export class EnterQueue {
     const { i, schedule, requestId, keepUntil, saleEnd } = c;
     if (pre1.kind === 'ADMITTED') throw new EntryError('ALREADY_ADMITTED', '이 회차에 이미 입장했다');
     if (pre1.kind === 'BUSY') throw new EntryError('ALREADY_WAITING', '이미 대기 중이다');
+    // 취소한 참가의 재전송(처음 기기): 새 번호를 주지 않는다. 도착 시각 쿠키보다 앞서 끝나므로 원래 칸의 번호도 다시 받지 못한다(ADR-0233)
+    if (pre1.kind === 'LEFT') throw new EntryError('ENTRY_CANCELLED', '이 요청 ID의 참가는 취소됐다');
     // 응답을 잃은 재시도: 기록 값(번호·세대·jny·vr)으로 처음 대기표를 그대로 다시 만든다. 그 사이 사전 검증 토큰을 갱신했어도 같다
     if (pre1.kind === 'RECORDED') return this.#issue(c, pre1.seq, pre1.gen, pre1.jny, pre1.vr);
     if (pre1.kind === 'BATCH') return this.#batched(c, pre1, jny, vr, eligible, tokenHash, firstTry);
@@ -274,7 +277,8 @@ export class EnterQueue {
     }
 
     const { seq, gen } = num;
-    const rec = await this.store.record({ pid: c.pid, eventId: i.eventId, requestId, seq, gen, jny, ...(vr ? { vr } : {}), expireAtMs: saleEnd });
+    // 대기 취소에는 대기표가 없어, 대기표 해시를 사람 키의 번호 기록에 둔다(ADR-0233)
+    const rec = await this.store.record({ pid: c.pid, eventId: i.eventId, requestId, seq, gen, jny, ...(vr ? { vr } : {}), expireAtMs: saleEnd, ticketHash: this.tokens.hash(this.#ticket(c, seq, gen, jny, vr)) });
     if (rec.kind === 'RECORDED') return this.#issue(c, seq, gen, jny, vr);
     // 기록하지 못한 번호는 아무도 갖지 않으므로 빠진 번호로 돌린다
     await this.store.markRemoved({ eventId: i.eventId, seq, expireAtMs: keepUntil });
@@ -294,7 +298,7 @@ export class EnterQueue {
     // 묶음 기록은 그대로 두고 잠시 뒤 다시 오게 한다. admission-ctrl이 같은 입력으로 결과를 다시 쓴다
     if (res.kind === 'REPAIRING') throw new EntryError('BATCHING', '묶음 결과를 다시 쓰는 중이다', BATCH_REPAIR_RETRY_SEC);
     if (res.kind === 'RESULT') {
-      const conv = await this.store.convertBatch({ pid: c.pid, eventId: i.eventId, requestId, tokenHash: rec.tokenHash, seq: res.seq, gen: res.gen, expireAtMs: saleEnd });
+      const conv = await this.store.convertBatch({ pid: c.pid, eventId: i.eventId, requestId, tokenHash: rec.tokenHash, seq: res.seq, gen: res.gen, expireAtMs: saleEnd, ticketHash: this.tokens.hash(this.#ticket(c, res.seq, res.gen, rec.jny, rec.vr)) });
       if (conv.kind === 'RECORDED') return this.#issue(c, conv.seq, conv.gen, conv.jny, conv.vr);
       throw new EntryError('ALREADY_WAITING', '묶음 기록이 바뀌었다');
     }
@@ -384,12 +388,26 @@ export class EnterQueue {
     return rec ? drandRoundTimeMs(rec.round) + SHUFFLE_PUBLISH_MS : batchCloseAtOf(c.schedule) + BATCH_RESULT_DELAY_MS;
   }
 
+  /** 대기표 문자열. 같은 칸이면 같은 문자열이다(발급 시각을 넣지 않는다) */
+  #ticket(c: Ctx, seq: number, gen: number, jny: string, vr: ReasonCategory | undefined): string {
+    return this.tokens.ticket({ e: c.i.eventId, a: c.i.accountId, d: c.i.body.deviceId ?? '', s: seq, g: gen, seg: segmentOf(seq), rq: c.requestId, jny, ...(vr ? { vr } : {}) });
+  }
+
   async #issue(c: Ctx, seq: number, gen: number, jny: string, vr: ReasonCategory | undefined): Promise<EnterResult> {
-    const { i, requestId, keepUntil, saleEnd } = c;
-    const ticket = this.tokens.ticket({ e: i.eventId, a: i.accountId, d: i.body.deviceId ?? '', s: seq, g: gen, seg: segmentOf(seq), rq: requestId, jny, ...(vr ? { vr } : {}) });
+    const { i, keepUntil, saleEnd } = c;
+    const ticket = this.#ticket(c, seq, gen, jny, vr);
     const now = this.clock.now();
     // 고위험: 번호는 그대로 내고 빠진 번호·VERIFYING으로 기록해 추가 검증으로 보낸다(ADR-0062, 303 대신 본문 필드 ADR-0079 결정 4)
-    if (vr) await this.store.markVerifying({ eventId: i.eventId, seq, ticketHash: this.tokens.hash(ticket), atMs: now, reason: vr, expireAtMs: keepUntil, verifyExpireAtMs: saleEnd });
+    if (vr) {
+      const ticketHash = this.tokens.hash(ticket);
+      await this.store.markVerifying({ eventId: i.eventId, seq, ticketHash, atMs: now, reason: vr, expireAtMs: keepUntil, verifyExpireAtMs: saleEnd });
+      // 사람 키와 verify는 슬롯이 달라 한 Lua로 묶지 못한다. 쓴 뒤 기록을 다시 본다: 그사이 취소가 끝났거나 진행 중이면 되살린 표시를 지운다(취소는 사람 키를 잡은 뒤 verify를 지워 둘 중 하나는 본다, ADR-0233)
+      const held = await this.store.readHeld({ pid: c.pid, eventId: i.eventId });
+      if (!held || held.requestId !== c.requestId || held.value !== held.plain) {
+        await this.store.leaveNumber({ eventId: i.eventId, seq, ticketHash, expireAtMs: keepUntil });
+        throw new EntryError('ENTRY_CANCELLED', '기록한 뒤 취소됐다');
+      }
+    }
     return {
       kind: 'TICKET',
       queueTicket: ticket,

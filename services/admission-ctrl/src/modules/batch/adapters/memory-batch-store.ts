@@ -16,6 +16,7 @@ interface GroupState {
 export class MemoryBatchStore implements BatchStore {
   readonly #groups = new Map<string, GroupState>();
   readonly #removed = new Map<string, number[]>();
+  readonly #orphans = new Map<string, Set<string>>();
   readonly #results = new Map<string, { value: string; expireAtMs: number }>();
   #replicated = true;
   #writeCalls = 0;
@@ -52,9 +53,15 @@ export class MemoryBatchStore implements BatchStore {
   async markRemoved(eventId: string, seqs: readonly number[]): Promise<void> {
     this.#removed.set(eventId, [...(this.#removed.get(eventId) ?? []), ...seqs]);
   }
-  async toRemoveAmong(eventId: string, hashes: readonly string[]): Promise<string[]> {
-    const v = this.#of(eventId, 'lobby')?.verifying;
-    return hashes.filter((h) => v?.has(h));
+  async toRemoveAmong(eventId: string, _group: ShuffleGroup, hashes: readonly string[]): Promise<string[]> {
+    const lobby = this.#of(eventId, 'lobby')?.verifying;
+    return hashes.filter((h) => lobby?.has(h) || this.#orphans.get(eventId)?.has(h));
+  }
+  /** 대기 취소가 남긴 주인 없는 자리(verify의 ORPHAN)를 흉내 낸다 */
+  orphanForTest(eventId: string, hash: string): void {
+    const s = this.#orphans.get(eventId) ?? new Set<string>();
+    s.add(hash);
+    this.#orphans.set(eventId, s);
   }
   async confirmReplicated(): Promise<boolean> {
     return this.#replicated;

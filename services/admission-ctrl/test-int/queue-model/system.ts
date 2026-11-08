@@ -5,7 +5,7 @@
 //   장애 전환은 복제본 사본을 되살리고, 세대 키의 표지를 '다른 노드, 설정 세대 j만큼 낮음'으로 바꿔 새 주 노드를 흉내 낸다(이 노드는 늘 설정 세대 E).
 // - 사람 슬롯(q:dup·q:adm)은 사람마다 쓰기 하나 늦은 사본을 둔다.
 // - 리더의 묶음 게시 전 복제 확인(WAIT)은 복제본 사본에 같은 표시가 있는지로 본다. 게시 시각은 분산 창(첫 전진 문)이 지난 것으로 둔다(명세가 시간을 줄인 것).
-// - 이탈(leave)은 아직 구현이 없어(BUILD_ORDER HOT-060) 명세의 뜻(빠진 번호 켜기, 이 요청의 기록 지우기)을 저장소 호출로 흉내 낸다.
+// - 이탈(leave)은 운영 코드 LeaveQueue를 부른다(BUILD_ORDER HOT-060, ADR-0233). 대기 취소에는 대기표가 없어, 사람 키의 기록이 이 탭의 것일 때만 같은 호출이다. 사람 슬롯 장애 전환으로 기록을 잃었으면 명세의 뜻대로 그 번호만 돌린다.
 // - 경합 시험(SystemOptions.scheduler)은 운영 코드의 Redis 호출을 fast-check 스케줄러로 감싸고, 걸음마다 스케줄러를 직접 돌려 끝나는 순서를 섞는다.
 // 메서드 이름은 명세의 동작 이름이다. 결과로 탭 상태(명세 Tab)를 바꾸고, 불변식 ①~⑤와 입장 키 유지를 관측으로 센다(violations).
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
@@ -21,6 +21,7 @@ import type { AdmissionSignals } from '../../../queue-svc/src/modules/admission/
 import { HmacQueueTokens, QUEUE_TOKEN_KEY_ENV } from '../../../queue-svc/src/modules/entry/adapters/hmac-tokens.js';
 import { keys as entryKeys, RedisEntryStore } from '../../../queue-svc/src/modules/entry/adapters/redis-entry-store.js';
 import { RedisEventSchedules } from '../../../queue-svc/src/modules/entry/adapters/redis-event-schedules.js';
+import { LeaveQueue } from '../../../queue-svc/src/modules/entry/application/leave-queue.js';
 import { RedisBatchStore } from '../../src/modules/batch/adapters/redis-batch-store.js';
 import { PublishBatchResults } from '../../src/modules/batch/application/publish-batch-results.js';
 import type { BatchStore, SeedSource } from '../../src/modules/batch/domain/ports.js';
@@ -105,14 +106,6 @@ for _, e in ipairs(cjson.decode(ARGV[1])) do
 end
 return 1
 `);
-// 이탈 흉내(HOT-060 전): 이 요청의 번호 기록이나 묶음 기록일 때만 q:dup을 지운다
-const LEAVE_DUP = redisScript(`
-local v = redis.call('GET', KEYS[1])
-if not v then return 0 end
-local rq = string.match(v, '^%d+:%d+:([^:]+):') or string.match(v, '^BATCH:1:[0-9a-f]+:([^:]+):')
-if rq == ARGV[1] then redis.call('DEL', KEYS[1]) return 1 end
-return 0
-`);
 const EXPIRE_PENDING = redisScript(`
 local v = redis.call('GET', KEYS[1])
 if v and string.sub(v, 1, 8) == 'PENDING:' then redis.call('DEL', KEYS[1]) return 1 end
@@ -192,6 +185,7 @@ export class QueueSystem {
   readonly #redis: HotRedis;
   readonly #raw: HotRedis;
   readonly #entry: RedisEntryStore;
+  readonly #leave: LeaveQueue;
   readonly #adm: RedisAdmissionStore;
   readonly #leader: RedisLeaderStore;
   readonly #app: ConfirmAdmission;
@@ -248,6 +242,7 @@ export class QueueSystem {
       },
     });
     this.#app = new ConfirmAdmission(watched, new RedisEventSchedules(this.#redis, systemClock), tokens, signer, signals, systemClock);
+    this.#leave = new LeaveQueue(this.#entry, new RedisEventSchedules(this.#redis, systemClock));
     const real = new RedisBatchStore(this.#redis);
     // 게시 전 복제 확인: 구현의 표시 확인(WAIT 앞 Lua) + 복제본 사본에 같은 표시가 있는가(WAIT 흉내)
     const batches: BatchStore = Object.assign(Object.create(real) as BatchStore, {
@@ -464,11 +459,11 @@ export class QueueSystem {
     }
     return { marker: this.#field(this.current, keys.batchDone(this.eventId), '1'), pub: this.published(), removed, markerMine: this.markerMine(), pend: this.rb05Pending() };
   }
-  /** 사람 슬롯 값의 종류(명세 Slot.kind): q:dup은 NONE·PENDING·REC·BATCH, q:adm은 NONE·ADM */
+  /** 사람 슬롯 값의 종류(명세 Slot.kind): q:dup은 NONE·PENDING·REC·BATCH, q:adm은 NONE·ADM. 취소 끝 표지(LEFT)는 다른 요청에게 빈 키와 같아 NONE이다(ADR-0233. 취소한 탭은 명세에서 DONE이라 다시 오지 않는다) */
   async personKinds(p: number): Promise<{ dup: string; adm: string }> {
     const [dupK, admK] = this.#personKeys(p);
     const v = text((await this.#raw.command(['GET', dupK!], { key: dupK! })) ?? '');
-    const dup = v === '' ? 'NONE' : v.startsWith('PENDING:') ? 'PENDING' : v.startsWith('BATCH:1:') ? 'BATCH' : /^\d+:\d+:/.test(v) ? 'REC' : `?${v}`;
+    const dup = v === '' || v.startsWith('LEFT:') ? 'NONE' : v.startsWith('PENDING:') ? 'PENDING' : v.startsWith('BATCH:1:') ? 'BATCH' : /^\d+:\d+:/.test(v) ? 'REC' : `?${v}`;
     const adm = Number(await this.#raw.command(['EXISTS', admK!], { key: admK! })) === 1 ? 'ADM' : 'NONE';
     return { dup, adm };
   }
@@ -511,7 +506,7 @@ export class QueueSystem {
   }
   async enterRecord(k: K): Promise<void> {
     const t = this.tab(k);
-    const r = await this.#entry.record({ pid: `p${k[0]}`, eventId: this.eventId, requestId: this.#requestId(k), seq: t.seq, gen: t.gen, jny: JNY, expireAtMs: this.#saleEnd });
+    const r = await this.#entry.record({ pid: `p${k[0]}`, eventId: this.eventId, requestId: this.#requestId(k), seq: t.seq, gen: t.gen, jny: JNY, expireAtMs: this.#saleEnd, ticketHash: tokens.hash(this.#ticket(k, t.seq, t.gen)) });
     if (r.kind === 'RECORDED') this.#hold(k, t.seq, t.gen);
     else if (r.kind === 'ADMITTED' || r.kind === 'TAKEN') {
       await this.#entry.markRemoved({ eventId: this.eventId, seq: t.seq, expireAtMs: this.#keepUntil });
@@ -533,7 +528,7 @@ export class QueueSystem {
     const r = await this.#entry.batchResult({ eventId: this.eventId, tokenHash: h });
     const pid = `p${k[0]}`;
     if (r.kind === 'RESULT') {
-      const c = await this.#entry.convertBatch({ pid, eventId: this.eventId, requestId: this.#requestId(k), tokenHash: h, seq: r.seq, gen: r.gen, expireAtMs: this.#saleEnd });
+      const c = await this.#entry.convertBatch({ pid, eventId: this.eventId, requestId: this.#requestId(k), tokenHash: h, seq: r.seq, gen: r.gen, expireAtMs: this.#saleEnd, ticketHash: tokens.hash(this.#ticket(k, r.seq, r.gen)) });
       if (c.kind === 'RECORDED') {
         this.#hold(k, c.seq, c.gen);
         return 'RESULT';
@@ -560,8 +555,10 @@ export class QueueSystem {
   }
   async leave(k: K): Promise<void> {
     const t = this.tab(k);
-    await this.#entry.markRemoved({ eventId: this.eventId, seq: t.seq, expireAtMs: this.#keepUntil });
-    await this.#raw.evalScript(LEAVE_DUP, [entryKeys.dup(`p${k[0]}`, this.eventId)], [this.#requestId(k)]);
+    const pid = `p${k[0]}`;
+    const held = await this.#entry.readHeld({ pid, eventId: this.eventId });
+    if (held?.requestId === this.#requestId(k)) await this.#leave.entry({ eventId: this.eventId, pid });
+    else await this.#entry.leaveNumber({ eventId: this.eventId, seq: t.seq, ...(t.hash ? { ticketHash: t.hash } : {}), expireAtMs: this.#keepUntil });
     t.phase = 'DONE';
   }
   async windowEnds(): Promise<void> {
@@ -573,10 +570,13 @@ export class QueueSystem {
     if (can && st !== 'PUBLISHED') this.#violate(`publishBatch: 표시가 복제됐는데 게시 결과가 ${st}`);
     return st;
   }
+  #ticket(k: K, seq: number, gen: number): string {
+    return tokens.ticket({ e: this.eventId, a: accountOf(k[0]), d: '', s: seq, g: gen, seg: 0, rq: this.#requestId(k), jny: JNY });
+  }
   #hold(k: K, seq: number, gen: number): void {
     const t = this.tab(k);
     Object.assign(t, { phase: 'HELD', seq, gen });
-    t.ticket = tokens.ticket({ e: this.eventId, a: accountOf(k[0]), d: '', s: seq, g: gen, seg: 0, rq: this.#requestId(k), jny: JNY });
+    t.ticket = this.#ticket(k, seq, gen);
     t.hash = tokens.hash(t.ticket);
     const id = `${seq}:${gen}`;
     const was = this.ghost.issued.get(id);

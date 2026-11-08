@@ -36,14 +36,30 @@ local function nodeId()
   return valueOf(myId())
 end
 `;
-// 사람 슬롯 값 읽기: 번호 기록 {번호}:{세대}:{요청 ID}:{jny}:{vr}, 묶음 기록 BATCH:1:{토큰 해시}:{요청 ID}:{jny}:{vr}
-const RECORDED = `'^(%d+):(%d+):([^:]+):([^:]*):([^:]*)$'`;
+// 사람 슬롯 값 읽기: 번호 기록 {번호}:{세대}:{요청 ID}:{jny}:{vr}:{대기표 해시}, 묶음 기록 BATCH:1:{토큰 해시}:{요청 ID}:{jny}:{vr}.
+// 맨 뒤 대기표 해시는 대기 취소가 soon·verify의 칸을 찾는 값이다(ADR-0233). 해시가 없는 옛 값도 같은 패턴으로 읽는다
+const RECORDED = `'^(%d+):(%d+):([^:]+):([^:]*):([^:]*):?[0-9a-f]*$'`;
 const BATCHED = `'^BATCH:1:([0-9a-f]+):([^:]+):([^:]*):([^:]*)$'`;
+// 다른 요청의 취소 끝 표지(LEFT:{요청 ID})는 빈 키와 같다(ADR-0233). 같은 요청의 표지는 그대로 두어 늦게 온 기록이 취소를 되살리지 못하게 한다
+const OTHER_LEFT_IS_EMPTY = (rq: string) => `
+if v and string.sub(v, 1, 5) == 'LEFT:' and v ~= 'LEFT:' .. ${rq} then v = nil end`;
 
-// ① enterPreempt: 입장 키가 있으면 거절, 없으면 PENDING:{요청 ID}로 선점(같은 요청은 이어서, 기록이 끝났으면 그 기록)
+// ① enterPreempt: 입장 키가 있으면 거절, 없으면 PENDING:{요청 ID}로 선점(같은 요청은 이어서, 기록이 끝났으면 그 기록).
+// 대기 취소 표지(ADR-0233): LEFT:{요청 ID}·LEAVING:{요청 ID}:…가 이 요청의 것이면 LEFT(새 번호를 주지 않는다). LEFT가 다른 요청의 것이면 빈 키로 본다(다시 참가). LEAVING이 다른 요청의 것이면 BUSY
 export const PREEMPT_LUA = `
 if redis.call('EXISTS', KEYS[2]) == 1 then return {'ADMITTED'} end
 local v = redis.call('GET', KEYS[1])
+if v then
+  local gone = string.match(v, '^LEFT:([^:]+)$')
+  if gone then
+    if gone == ARGV[1] then return {'LEFT'} end
+    v = nil
+  else
+    local leaving = string.match(v, '^LEAVING:([^:]+):')
+    if leaving == ARGV[1] then return {'LEFT'} end
+    if leaving then return {'BUSY'} end
+  end
+end
 if not v then
   redis.call('SET', KEYS[1], 'PENDING:' .. ARGV[1], 'PX', ARGV[2])
   return {'PROCEED'}
@@ -326,7 +342,7 @@ return cfg
 // 같은 요청의 다른 기록이 있으면(같은 요청이 동시에 두 번) 먼저 기록된 값을, 같은 요청이 구간 안에서 먼저 묶음에 들었으면 그 토큰 해시를 돌려준다
 export const RECORD_LUA = `
 if redis.call('EXISTS', KEYS[2]) == 1 then return {'ADMITTED'} end
-local v = redis.call('GET', KEYS[1])
+local v = redis.call('GET', KEYS[1])${OTHER_LEFT_IS_EMPTY('ARGV[1]')}
 if v and v ~= 'PENDING:' .. ARGV[1] then
   local s, g, rq, jny, vr = string.match(v, ${RECORDED})
   if s and rq == ARGV[1] then return {'SAME', s, g, jny, vr} end
@@ -334,7 +350,9 @@ if v and v ~= 'PENDING:' .. ARGV[1] then
   if bh and brq == ARGV[1] then return {'BATCH', bh} end
   return {'TAKEN'}
 end
-redis.call('SET', KEYS[1], ARGV[2] .. ':' .. ARGV[3] .. ':' .. ARGV[1] .. ':' .. ARGV[5] .. ':' .. ARGV[6], 'PXAT', ARGV[4])
+local tail = ''
+if ARGV[7] and ARGV[7] ~= '' then tail = ':' .. ARGV[7] end
+redis.call('SET', KEYS[1], ARGV[2] .. ':' .. ARGV[3] .. ':' .. ARGV[1] .. ':' .. ARGV[5] .. ':' .. ARGV[6] .. tail, 'PXAT', ARGV[4])
 return {'RECORDED'}
 `;
 
@@ -343,7 +361,7 @@ return {'RECORDED'}
 // 와서 먼저 번호를 기록했으면 그 기록을 돌려준다(SAME)
 export const BATCH_RECORD_LUA = `
 if redis.call('EXISTS', KEYS[2]) == 1 then return {'ADMITTED'} end
-local v = redis.call('GET', KEYS[1])
+local v = redis.call('GET', KEYS[1])${OTHER_LEFT_IS_EMPTY('ARGV[1]')}
 if v and v ~= 'PENDING:' .. ARGV[1] then
   local bh, brq = string.match(v, ${BATCHED})
   if bh and brq == ARGV[1] then return {'BATCHED', bh} end
@@ -375,7 +393,9 @@ local v = redis.call('GET', KEYS[1])
 if not v then return {'GONE'} end
 local bh, brq, bjny, bvr = string.match(v, ${BATCHED})
 if bh and brq == ARGV[1] and bh == ARGV[2] then
-  redis.call('SET', KEYS[1], ARGV[3] .. ':' .. ARGV[4] .. ':' .. ARGV[1] .. ':' .. bjny .. ':' .. bvr, 'PXAT', ARGV[5])
+  local tail = ''
+  if ARGV[6] and ARGV[6] ~= '' then tail = ':' .. ARGV[6] end
+  redis.call('SET', KEYS[1], ARGV[3] .. ':' .. ARGV[4] .. ':' .. ARGV[1] .. ':' .. bjny .. ':' .. bvr .. tail, 'PXAT', ARGV[5])
   return {'RECORDED', ARGV[3], ARGV[4], bjny, bvr}
 end
 local s, g, rq, jny, vr = string.match(v, ${RECORDED})
@@ -406,7 +426,7 @@ return {}
 
 export const MIRROR_LUA = `
 if redis.call('EXISTS', KEYS[2]) == 1 then return 'ADMITTED' end
-local v = redis.call('GET', KEYS[1])
+local v = redis.call('GET', KEYS[1])${OTHER_LEFT_IS_EMPTY('ARGV[3]')}
 if v and v ~= 'PENDING:' .. ARGV[3] then
   local s, g, rq = string.match(v, ${RECORDED})
   local bh, brq = string.match(v, ${BATCHED})
@@ -480,13 +500,57 @@ return 1
 // 로비 참가 ④: q:dup이 내 PENDING이거나 비었을 때만 LOBBY 기록으로 바꾼다. KEYS: 1 q:dup, 2 q:adm. ARGV: 1 새 값, 2 요청 ID, 3 수명(판매 종료)
 export const RECORD_LOBBY_LUA = `
 if redis.call('EXISTS', KEYS[2]) == 1 then return 'ADMITTED' end
-local v = redis.call('GET', KEYS[1])
+local v = redis.call('GET', KEYS[1])${OTHER_LEFT_IS_EMPTY('ARGV[2]')}
 if v and v ~= 'PENDING:' .. ARGV[2] then return 'TAKEN' end
 redis.call('SET', KEYS[1], ARGV[1], 'PXAT', ARGV[3])
 return 'RECORDED'
 `;
 export const DROP_LOBBY_LUA = `
 if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('DEL', KEYS[1]) return 1 end
+return 0
+`;
+// 대기 취소의 번호 돌리기(명세 leave, ADR-0233): 빠진 번호 비트 켜기와 곧 입장 대기열에서 빼기가 한 Lua다. 입장 Lua는 비트를 먼저 보므로 이 뒤에는 곧 입장에 다시 들지 않는다.
+// VERIFYING·PASSED를 지워 취소한 대기표가 입장 확정에서 추가 검증 중이나 통과로 읽히지 않게 한다(BLOCKED·ORPHAN은 둔다).
+// KEYS: 1 removed, 2 verify, 3 soon, 4 soon_at, 5 soon_first. ARGV: 1 번호, 2 해시(없으면 빈 글자), 3 비트맵 수명
+export const LEAVE_NUMBER_LUA = `${EXTEND}
+redis.call('SETBIT', KEYS[1], ARGV[1], 1)
+extend(KEYS[1], ARGV[3])
+if ARGV[2] ~= '' then
+  local v = redis.call('HGET', KEYS[2], ARGV[2])
+  if v and (string.sub(v, 1, 10) == 'VERIFYING:' or string.sub(v, 1, 7) == 'PASSED:') then redis.call('HDEL', KEYS[2], ARGV[2]) end
+  redis.call('ZREM', KEYS[3], ARGV[2])
+  redis.call('ZREM', KEYS[4], ARGV[2])
+  redis.call('HDEL', KEYS[5], ARGV[2])
+end
+return 1
+`;
+// 로비·묶음 참가의 취소(ADR-0233): 표시가 서기 전이면 목록에서 빼고, 선 뒤면 목록을 바꾸지 않고 ORPHAN을 적는다. 게시는 결과 키를 쓴 뒤 ORPHAN을 읽고, 취소는 ORPHAN을 쓴 뒤 결과 키를 읽는다.
+// BLOCKED는 §7의 차단 사유라 덮지 않는다(게시가 BLOCKED도 돌린다). ORPHAN을 적으면 batch_done의 orphan:{구간}을 함께 써서, 게시가 묶음의 해시를 다 읽지 않고도 ORPHAN이 있는지 안다.
+// KEYS: 1 batch_done, 2 목록, 3 verify. ARGV: 1 표시 칸(lobby·1), 2 토큰 해시, 3 verify 수명, 4 창 끝(0이면 보지 않는다). 돌려주는 값: REMOVED·FIXED·CLOSED
+export const LEAVE_MEMBER_LUA = `${EXTEND}
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local fixed = redis.call('HEXISTS', KEYS[1], ARGV[1]) == 1
+if tonumber(ARGV[4]) > 0 and (fixed or now >= tonumber(ARGV[4])) then return 'CLOSED' end
+if not fixed then
+  redis.call('SREM', KEYS[2], ARGV[2])
+  redis.call('HDEL', KEYS[3], ARGV[2])
+  return 'REMOVED'
+end
+local v = redis.call('HGET', KEYS[3], ARGV[2])
+if not v or (string.sub(v, 1, 7) ~= 'ORPHAN:' and string.sub(v, 1, 8) ~= 'BLOCKED:') then
+  redis.call('HSET', KEYS[3], ARGV[2], 'ORPHAN:' .. string.format('%.0f', now))
+  extend(KEYS[3], ARGV[3])
+end
+redis.call('HSET', KEYS[1], 'orphan:' .. ARGV[1], '1')
+return 'FIXED'
+`;
+// 사람 키 바꾸기(ADR-0233): 값이 ARGV[1]일 때만 ARGV[2]로 바꾸고 수명은 그대로 둔다. KEYS: 1 q:dup
+export const SWAP_HELD_LUA = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')
+  return 1
+end
 return 0
 `;
 // 셔플 공시 기록 쓰기(ADR-0231 결정 6): 구간의 칸이 비어 있을 때만 쓰고 수명을 늘린다. 공시 시각은 파드 시계가 아니라 Redis 시각이다. 지금 값을 돌려준다.

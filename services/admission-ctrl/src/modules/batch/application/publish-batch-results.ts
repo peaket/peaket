@@ -141,12 +141,11 @@ export class PublishBatchResults {
     // 장애 전환으로 SADD를 잃으면 닫힌 크기보다 참가자가 적다. 남는 자리는 아무도 갖지 않으므로 빠진 번호로 돌린다
     const orphans = Array.from({ length: closed.size - members.length }, (_, k) => closed.first + members.length + k);
     if (orphans.length > 0) await this.store.markRemoved(i.eventId, orphans, saleEnd + DAY_MS);
-    // 로비는 게시 때 추가 검증 중(VERIFYING)인 참가자와 주인 없는 자리(ORPHAN)의 번호를 빠진 번호로 돌린다(§7, ADR-0231 결정 3). 셔플 전에 통과한 사람은 돌리지 않는다
-    if (n === 'lobby') {
-      const removed = new Set(await this.store.toRemoveAmong(i.eventId, members));
-      const seqs = entries.filter((e) => removed.has(e.tokenHash)).map((e) => e.seq);
-      if (seqs.length > 0) await this.store.markRemoved(i.eventId, seqs, saleEnd + DAY_MS);
-    }
+    // 게시 때 추가 검증 중(VERIFYING)·차단(BLOCKED)인 참가자와 주인 없는 자리(ORPHAN)의 번호를 빠진 번호로 돌린다(§7, ADR-0231 결정 3, ADR-0233). 셔플 전에 통과한 사람은 돌리지 않는다.
+    // 묶음 참가자의 사전 검증 토큰 해시에는 VERIFYING이 없고 취소가 남긴 ORPHAN만 있다. 결과 키를 쓴 뒤에 읽으므로 겹친 취소와 둘 중 하나는 번호를 돌린다
+    const removed = new Set(await this.store.toRemoveAmong(i.eventId, n, members));
+    const seqs = entries.filter((e) => removed.has(e.tokenHash)).map((e) => e.seq);
+    if (seqs.length > 0) await this.store.markRemoved(i.eventId, seqs, saleEnd + DAY_MS);
     if (pub !== null && repairAt !== null) {
       // 다시 쓰기: 결과 파일은 대기열 Redis 밖이라 그대로 두고, 게시 시각도 처음 값을 둔다
       await this.store.clearRepair(i.eventId, n, repairAt);

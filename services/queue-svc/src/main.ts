@@ -9,7 +9,7 @@ import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
 import { Es256AdmissionTokens, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots } from './modules/admission/index.js';
-import { AccountWithdrawnHandler, HmacArrivalCookies, HmacQueueTokens, PromArrivalSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
+import { AccountWithdrawnHandler, HmacArrivalCookies, HmacQueueTokens, PromArrivalSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
 import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates } from './modules/sale/index.js';
 
 const SERVICE = 'queue-svc';
@@ -40,14 +40,16 @@ const arrivalSignals = new PromArrivalSignals();
 // 시드 봉인(ADR-0231): 운영 KMS 어댑터는 BUILD_ORDER HOT-041이다. local·ci·demo는 시험 봉인(admission-ctrl과 같은 PEAKET_TEST_BATCH_RANDOMNESS)이고, 값이 없으면 봉인 없이 시작해 로비 참가와 공시는 503이다
 const sealer = process.env[TEST_SEAL_ENV] ? TestSeedSealer.fromEnv(process.env) : undefined;
 const lobbySignals = new PromLobbySignals();
+const leaveSignals = new PromLeaveSignals();
 const service = await createService({
   name: SERVICE,
-  module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: unavailableRisk, ...(sealer ? { sealer } : {}), lobbySignals, state: { ...(webOrigin ? { webOrigin } : {}), ...(process.env.PEAKET_BATCH_RESULT_DIR ? { resultDir: process.env.PEAKET_BATCH_RESULT_DIR } : {}) }, admission: { signer, signals }, ...(arrivals ? { arrivals } : {}), arrivalSignals }),
+  module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: unavailableRisk, ...(sealer ? { sealer } : {}), lobbySignals, leaveSignals, state: { ...(webOrigin ? { webOrigin } : {}), ...(process.env.PEAKET_BATCH_RESULT_DIR ? { resultDir: process.env.PEAKET_BATCH_RESULT_DIR } : {}) }, admission: { signer, signals }, ...(arrivals ? { arrivals } : {}), arrivalSignals }),
 });
 arrivalSignals.register(service.metrics.registry);
 if (!arrivals) service.logger.warn({ dep: 'edge-arrival-key' }, '도착 시각 쿠키 키(PEAKET_ARRIVAL_COOKIE_KEY)가 없어 진입 Degraded의 쿠키를 읽지 않는다');
 signals.register(service.metrics.registry);
 lobbySignals.register(service.metrics.registry);
+leaveSignals.register(service.metrics.registry);
 await service.listen();
 
 // 셔플 커밋 공시 일꾼(ADR-0231 결정 6): 봉인이 있으면 파드마다 돈다. 먼저 쓴 값 하나로 남는다

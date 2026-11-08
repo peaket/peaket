@@ -1,7 +1,7 @@
 // 대기실 상태 기계(오픈 뒤 경로, docs/frontend.md §3.4, ADR-0207)를 가짜 시계·가짜 응답으로 끝까지 돌린다(틀은 test/harness.mjs)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { harness, reply, sha, stateFile } from './harness.mjs';
+import { harness, reply, sha, START, stateFile } from './harness.mjs';
 
 test('SCR-008 사전 검증 토큰이 없으면 공연 상세로 간다', async () => {
   const h = harness({ handler: () => reply(500) });
@@ -85,6 +85,30 @@ test('SCR-008 묶음 진입: 202를 저장하고, 결과 공개 + 분산 지연 
   assert.deepEqual(h.store.read().ticket, { queueTicket: 'qt-b', seq: 1001, generation: 1, segment: 1 });
   assert.equal(h.store.read().entry, undefined);
 });
+
+for (const [label, file] of [
+  ['200인데 내 해시가 두 번 연달아 없으면', {}],
+  ['내 해시가 있어도', { [sha('pv')]: 1001 }],
+]) {
+  test(`SCR-008 Q-T68⑩ 묶음: ${label} 같은 요청 ID로 진입을 다시 보내고, 410 queue-ticket-removed면 다른 기기에서 취소로 끝낸다`, async () => {
+    const posts = [];
+    const h = harness({
+      rec: { entry: { entryRequestId: 'r1', token: 'pv', batching: { entryRequestId: 'r1', resultPath: '/v1/queues/e1/batch-results/abc.json', resultAtMs: START, spreadSec: 0 } } },
+      handler: ({ m, url, body }) => {
+        if (m === 'POST') {
+          posts.push(body.entryRequestId);
+          return reply(410, {}, { problem: 'queue-ticket-removed' });
+        }
+        return url.includes('batch-results') ? reply(200, file) : reply(404);
+      },
+    });
+    await h.start();
+    await h.run(60_000);
+    assert.deepEqual([h.last().state, h.last().via], ['cancelled-elsewhere', 'queue']);
+    assert.deepEqual(posts, ['r1']);
+    assert.equal(h.store.read()?.entry, undefined);
+  });
+}
 
 test('SCR-008 다시 열었을 때 진행 중인 묶음 진입이 있으면 batching부터, 대기표가 있으면 waiting부터', async () => {
   const h1 = harness({ rec: { entry: { entryRequestId: 'r1', token: 'pv', batching: { entryRequestId: 'r1', resultPath: '/v1/queues/e1/batch-results/abc.json', resultAtMs: 1_000_000 + 60_000, spreadSec: 1 } } }, handler: () => reply(404) });

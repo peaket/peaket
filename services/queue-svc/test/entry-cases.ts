@@ -63,6 +63,11 @@ function pausing(store: EntryStore, hooks: { beforeNumber?: () => Promise<void>;
     removeLobbyMember: (i) => store.removeLobbyMember(i),
     recordLobby: (i) => store.recordLobby(i),
     dropLobbyRecord: (i) => store.dropLobbyRecord(i),
+    readHeld: (i) => store.readHeld(i),
+    leaveNumber: (i) => store.leaveNumber(i),
+    leaveMember: (i) => store.leaveMember(i),
+    resultSeat: (i) => store.resultSeat(i),
+    swapHeld: (i) => store.swapHeld(i),
     number: async (i) => {
       await hooks.beforeNumber?.();
       return store.number(i);

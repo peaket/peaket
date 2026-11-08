@@ -2,7 +2,7 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import type { HotRedis } from '@peaket/platform';
 import { AdmissionModule, type AdmissionSignals, type AdmissionStore, type AdmissionTokens } from './modules/admission/index.js';
-import { type ArrivalCookies, type ArrivalSignals, EntryModule, type EventSchedules, type LobbySignals, type QueueTokens, type RiskPort, type SeedSealer } from './modules/entry/index.js';
+import { type ArrivalCookies, type ArrivalSignals, EntryModule, type EventSchedules, type LeaveSignals, type LobbySignals, type QueueTokens, type RiskPort, type SeedSealer } from './modules/entry/index.js';
 import { type ShuffleProofSource, StateModule, type StateSnapshots } from './modules/state/index.js';
 
 @Module({})
@@ -20,11 +20,12 @@ export class AppModule {
       /** 시드 봉인(운영 KMS는 BUILD_ORDER HOT-041)과 로비 지표 */
       sealer?: SeedSealer;
       lobbySignals?: LobbySignals;
+      leaveSignals?: LeaveSignals;
       /** 입장 확정: 운영은 입장 토큰 서명기를 꼭 넘긴다(시험은 저장소·서명기를 넘기지 않으면 새로 만든다) */
       admission?: { signer?: AdmissionTokens; signals?: AdmissionSignals; store?: AdmissionStore };
     },
   ): DynamicModule {
-    const entry = 'redis' in o ? EntryModule.register({ storage: 'redis', redis: o.redis, ...(o.waitRedis ? { waitRedis: o.waitRedis } : {}), tokens: o.tokens, risk: o.risk, ...(o.sealer ? { sealer: o.sealer } : {}), ...(o.lobbySignals ? { lobbySignals: o.lobbySignals } : {}), ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}) }) : EntryModule.register({ storage: 'memory', schedules: o.schedules, tokens: o.tokens, risk: o.risk, ...(o.sealer ? { sealer: o.sealer } : {}), ...(o.lobbySignals ? { lobbySignals: o.lobbySignals } : {}), ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}) });
+    const entry = 'redis' in o ? EntryModule.register({ storage: 'redis', redis: o.redis, ...(o.waitRedis ? { waitRedis: o.waitRedis } : {}), tokens: o.tokens, risk: o.risk, ...(o.sealer ? { sealer: o.sealer } : {}), ...(o.lobbySignals ? { lobbySignals: o.lobbySignals } : {}), ...(o.leaveSignals ? { leaveSignals: o.leaveSignals } : {}), ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}) }) : EntryModule.register({ storage: 'memory', schedules: o.schedules, tokens: o.tokens, risk: o.risk, ...(o.sealer ? { sealer: o.sealer } : {}), ...(o.lobbySignals ? { lobbySignals: o.lobbySignals } : {}), ...(o.leaveSignals ? { leaveSignals: o.leaveSignals } : {}), ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}) });
     const options = { ...(o.state?.webOrigin ? { webOrigin: o.state.webOrigin } : {}), ...(o.state?.autoTick !== undefined ? { autoTick: o.state.autoTick } : {}) };
     const resultDir = o.state?.resultDir ? { resultDir: o.state.resultDir } : {};
     const state = 'redis' in o ? StateModule.register({ storage: 'redis', redis: o.redis, options, ...resultDir }) : StateModule.register({ storage: 'memory', schedules: o.schedules, snapshots: o.snapshots, ...(o.state?.proofSource ? { proofSource: o.state.proofSource } : {}), options, ...resultDir });

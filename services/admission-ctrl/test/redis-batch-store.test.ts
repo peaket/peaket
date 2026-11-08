@@ -8,6 +8,44 @@ function fake(command: (args: string[]) => Promise<unknown>): HotRedis {
   return { command, evalScript: async () => 0, sendCommand: async () => null, close: async () => {} };
 }
 
+describe('게시 때 돌릴 번호 찾기(Q-T68④, ADR-0233)', () => {
+  const hashes = Array.from({ length: 2_500 }, (_, i) => `h${i}`);
+
+  test('묶음에 주인 없는 자리 표시가 없으면 해시를 읽지 않는다', async () => {
+    const seen: string[][] = [];
+    const store = new RedisBatchStore(
+      fake(async (args) => {
+        seen.push(args);
+        return 0;
+      }),
+    );
+    expect(await store.toRemoveAmong('e1', 1, hashes)).toEqual([]);
+    expect(seen).toEqual([['HEXISTS', keys.batchDone('e1'), 'orphan:1']]);
+  });
+
+  test('로비는 verify가 비어 있으면 해시를 읽지 않는다', async () => {
+    const seen: string[][] = [];
+    const store = new RedisBatchStore(
+      fake(async (args) => {
+        seen.push(args);
+        return 0;
+      }),
+    );
+    expect(await store.toRemoveAmong('e1', 'lobby', hashes)).toEqual([]);
+    expect(seen).toEqual([['HLEN', keys.verify('e1')]]);
+  });
+
+  test('표시가 있으면 나눠 읽고 VERIFYING·ORPHAN·BLOCKED를 고른다', async () => {
+    const store = new RedisBatchStore(
+      fake(async (args) => {
+        if (args[0] === 'HEXISTS') return 1;
+        return args.slice(2).map((h) => (h === 'h0' ? 'ORPHAN:1' : h === 'h1' ? 'BLOCKED:1:NETWORK' : h === 'h2' ? 'VERIFYING:1:NETWORK' : h === 'h3' ? 'PASSED:1' : null));
+      }),
+    );
+    expect(await store.toRemoveAmong('e1', 1, hashes)).toEqual(['h0', 'h1', 'h2']);
+  });
+});
+
 describe('참가자 읽기', () => {
   test('SSCAN을커서가0이될때까지부르고_겹친원소는한번만준다', async () => {
     const seen: string[][] = [];

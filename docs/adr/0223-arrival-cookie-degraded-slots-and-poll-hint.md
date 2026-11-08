@@ -1,6 +1,6 @@
 # ADR-0223: 도착 시각 쿠키는 시청자 요청 함수가 바로 응답해 주고, 진입 Degraded의 번호는 칸마다 Lua로 뗀다
 
-- **상태**: 채택(2026-11-09, 추천 적용. wbs 2.2.3 세부는 추천 적용이라는 승인 2026-10-28을 따른다). BUILD_ORDER HOT-020(wbs 2.2.3 ②). 결정 4는 소유자 결정 대기인 OPEN[25]의 판단 재료다. 같은 날 새 맥락 리뷰(높음 4, 중간 5, 낮음 7)로 결정 1·2·5·6·7·8·9·10을 고치고 결정 12를 더했다.
+- **상태**: 채택(2026-11-09, 추천 적용. wbs 2.2.3 세부는 추천 적용이라는 승인 2026-10-28을 따른다). BUILD_ORDER HOT-020(wbs 2.2.3 ②). 결정 4는 소유자 결정 대기인 OPEN[25]의 판단 재료다. 같은 날 새 맥락 리뷰(높음 4, 중간 5, 낮음 7)로 결정 1·2·5·6·7·8·9·10을 고치고 결정 12를 더했다. 2026-11-09: OPEN[24]·OPEN[25]·OPEN[26]은 소유자가 추천안으로 정했다(엣지 저장소 쓰기는 ADR-0234, HOT-012는 AWS 계정이 생겨 배포하는 단계, 명세 보강은 HOT-061). 본문의 '대기' 표시는 그때의 기록이다.
 - **관련**: ADR-0053 결정 2(도착 시각 쿠키), ADR-0065 결정 9(최초 방문 쿠키), ADR-0078 결정 2(S3 사본 고정), ADR-0110(입장 임박 구간의 만료 맞춤), ADR-0122(매진 처리), ADR-0179(진입 ② 파드별 묶음), ADR-0181·0186(장애 전환과 RB-05), ADR-0219 결정 1·4(엣지 매진 표시와 저장소 권한), [docs/features/queue-admission.md](../features/queue-admission.md) §4 '도착 시각 쿠키·진입 Degraded·비상 경로 힌트의 첫 구현'·§9·§10, [docs/data.md](../data.md) §3 `q:{event:E}:arr_slots`·`q:arr:{reqId}:E`·`q:{event:E}:notice`, [docs/infra.md](../infra.md) §4.1, [docs/security/secrets-and-keys.md](../security/secrets-and-keys.md), [docs/security/asvs/queue-admission.md](../security/asvs/queue-admission.md)
 - **관련 ID**: NFR-001, NFR-002, POL-029, Q-T16, Q-T17, Q-T29, Q-T65, Q-T66, G-01, G-03, ASVS v5.0.0-3.3.1, ASVS v5.0.0-9.1.1, ASVS v5.0.0-9.2.1, ASVS v5.0.0-9.2.2, ASVS v5.0.0-11.2.4, ASVS v5.0.0-13.3.2, ASVS v5.0.0-16.5.2
 

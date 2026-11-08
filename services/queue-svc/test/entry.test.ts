@@ -6,6 +6,7 @@ import { EnterQueue } from '../src/modules/entry/application/enter-queue.js';
 import { segmentOf } from '../src/modules/entry/domain/queue.js';
 import { arrivalSlotCases } from './arrival-slot-cases.js';
 import { batchCases } from './batch-cases.js';
+import { leaveCases } from './leave-cases.js';
 import { lobbyCases } from './lobby-cases.js';
 import { entryCases } from './entry-cases.js';
 import { type PidWorld, pidTransitionEntryCases } from './pid-transition-cases.js';
@@ -57,6 +58,30 @@ lobbyCases('메모리', async () => {
     members: async (eventId) => store.lobbyMembersForTest(eventId),
     dupValue: async (pid, eventId) => store.dupForTest(pid, eventId).value,
     verifying: async (eventId, hash) => store.verifyOf(eventId, hash),
+  };
+});
+
+leaveCases('메모리', async () => {
+  const clock = fakeClock({ now: Date.UTC(2026, 10, 9, 4, 0, 0) });
+  const store = new MemoryEntryStore(clock);
+  return {
+    store,
+    commits: new MemoryShuffleCommits(clock),
+    schedules: new MemoryEventSchedules(),
+    clock,
+    admit: async (pid, eventId, hash) => store.admitForTest(pid, eventId, hash),
+    closeList: async (eventId, field, marker) => store.closeListForTest(eventId, field, marker),
+    lobbyMembers: async (eventId) => store.lobbyMembersForTest(eventId),
+    batchMembers: async (eventId) => store.membersOf(eventId),
+    dupValue: async (pid, eventId) => store.dupForTest(pid, eventId).value,
+    setDup: async (pid, eventId, value) => store.setDupForTest(pid, eventId, value),
+    verifyOf: async (eventId, hash) => store.verifyOf(eventId, hash),
+    setVerify: async (eventId, hash, value) => store.setVerifyForTest(eventId, hash, value),
+    removed: async (eventId, seq) => store.isRemoved(eventId, seq),
+    setResult: async (tokenHash, _group, seq, gen) => store.setResultForTest(tokenHash, seq, gen),
+    addSoon: async (eventId, hash, seq) => store.addSoonForTest(eventId, hash, seq),
+    soonOf: async (eventId) => store.soonForTest(eventId),
+    markerOf: async (eventId, field) => store.markerOf(eventId, field),
   };
 });
 

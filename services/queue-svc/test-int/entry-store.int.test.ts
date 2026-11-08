@@ -6,6 +6,7 @@ import { RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-s
 import { type EventSchedule, QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
 import { arrivalSlotCases } from '../test/arrival-slot-cases.js';
 import { batchCases } from '../test/batch-cases.js';
+import { leaveCases } from '../test/leave-cases.js';
 import { lobbyCases } from '../test/lobby-cases.js';
 import { entryCases } from '../test/entry-cases.js';
 import { type PidWorld, pidTransitionEntryCases } from '../test/pid-transition-cases.js';
@@ -99,6 +100,41 @@ test('[Q-T16] 칸떼기를다시시작하면_건너뛴빈칸의범위를적어_�
 });
 
 pidTransitionEntryCases('Valkey Lua', valkeyWorld);
+leaveCases('Valkey Lua', async () => {
+  const schedules = new RedisEventSchedules(redis, systemClock);
+  const soonKeys = (e: string) => [`q:{event:${e}}:soon`, `q:{event:${e}}:soon_at`, `q:{event:${e}}:soon_first`] as const;
+  return {
+    store: new RedisEntryStore(redis),
+    commits: new RedisShuffleCommits(redis),
+    schedules: Object.assign(schedules, { set: writeSchedule }),
+    clock: systemClock,
+    admit: async (pid, eventId, hash) => void (await cmd(keys.adm(pid, eventId), ['SET', keys.adm(pid, eventId), hash])),
+    closeList: async (eventId, field, marker) => void (await cmd(keys.batchDone(eventId), ['HSET', keys.batchDone(eventId), field, marker])),
+    lobbyMembers: async (eventId) => (await cmd(keys.lobbyMembers(eventId), ['SMEMBERS', keys.lobbyMembers(eventId)])) as string[],
+    batchMembers: async (eventId) => (await cmd(keys.batchMembers(eventId), ['SMEMBERS', keys.batchMembers(eventId)])) as string[],
+    dupValue: async (pid, eventId) => (await cmd(keys.dup(pid, eventId), ['GET', keys.dup(pid, eventId)])) as string | null,
+    setDup: async (pid, eventId, value) => void (await cmd(keys.dup(pid, eventId), ['SET', keys.dup(pid, eventId), value])),
+    verifyOf: async (eventId, hash) => (await cmd(keys.verify(eventId), ['HGET', keys.verify(eventId), hash])) as string | null,
+    setVerify: async (eventId, hash, value) => void (await cmd(keys.verify(eventId), ['HSET', keys.verify(eventId), hash, value])),
+    removed: async (eventId, seq) => Number(await cmd(keys.removed(eventId), ['GETBIT', keys.removed(eventId), String(seq)])) === 1,
+    setResult: async (tokenHash, group, seq, gen) => {
+      const k = group === 'lobby' ? keys.lobbyResult(tokenHash) : keys.batchResult(tokenHash);
+      await cmd(k, ['SET', k, `${seq}:${gen}`]);
+    },
+    addSoon: async (eventId, hash, seq) => {
+      const [soon, at, first] = soonKeys(eventId);
+      await cmd(soon, ['ZADD', soon, String(seq), hash]);
+      await cmd(at, ['ZADD', at, '1', hash]);
+      await cmd(first, ['HSET', first, hash, '1']);
+    },
+    soonOf: async (eventId) => {
+      const [soon, at, first] = soonKeys(eventId);
+      return [(await cmd(soon, ['ZRANGE', soon, '0', '-1'])) as string[], (await cmd(at, ['ZRANGE', at, '0', '-1'])) as string[], (await cmd(first, ['HKEYS', first])) as string[]];
+    },
+    markerOf: async (eventId, field) => (await cmd(keys.batchDone(eventId), ['HGET', keys.batchDone(eventId), field])) as string | null,
+  };
+});
+
 lobbyCases('Valkey Lua', async () => {
   const schedules = new RedisEventSchedules(redis, systemClock);
   return {

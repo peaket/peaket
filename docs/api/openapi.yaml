@@ -50,6 +50,7 @@ x-peaket-problem-types:
     already-verified: { status: 409, title: "이미 본인확인을 마친 계정입니다" }
     already-waiting: { status: 409, title: "이미 다른 곳에서 대기 중입니다" }
     lobby-closed: { status: 409, title: "로비가 닫혔습니다" }
+    lobby-participant-not-found: { status: 404, title: "로비 참가 기록이 없습니다" }
     approval-reason-required: { status: 422, title: "승인 사유를 적어 주세요" }
     approval-scope-invalid: { status: 422, title: "요청 범위 밖의 대상입니다" }
     artist-exists: { status: 409, title: "같은 이름의 아티스트가 있습니다" }
@@ -2076,7 +2077,12 @@ paths:
       description: "FR-007, POL-002. 팬 쿠키로 부르므로 처음 기기가 없어도 된다. 이 사람(pid)의 참가 토큰을 무효로 하고 1인 1순번 중복 확인 키를 지운다. 셔플 전이라 다시 참가해도 불리하지 않다. 처음 기기는 다음 요청에서 취소를 안내받는다. 로비가 닫힌 뒤(T=0)에는 409이고 대기 취소(DELETE …/entries/me)를 쓴다"
       security: [{ fanCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/EventId' }]
-      responses: { '204': { description: 취소됨 }, '404': { $ref: '#/components/responses/Problem', description: 참가 토큰 없음 }, '409': { $ref: '#/components/responses/Problem', description: 로비가 닫힘 } }
+      responses:
+        '204': { description: 취소됨 }
+        '403': { $ref: '#/components/responses/Problem', description: "identity-verification-required: 본인확인 전(pid 없음)" }
+        '404': { $ref: '#/components/responses/Problem', description: "lobby-participant-not-found: 이 사람의 참가 기록이 없음(번호 기록·묶음 기록뿐인 경우 포함). queue-not-found: 로비를 켜지 않은 회차(ADR-0233)" }
+        '409': { $ref: '#/components/responses/Problem', description: "lobby-closed: 로비가 닫힘(오픈이 지났거나 목록을 고정함). 아무것도 바꾸지 않는다(ADR-0233)" }
+        '503': { $ref: '#/components/responses/ServiceUnavailable', description: "dependency-unavailable: 대기열 Redis를 잠시 쓸 수 없음. Retry-After 1초 [가정]. 사람 키가 남아 있어 같은 요청을 다시 보내면 끝난다(ADR-0233)" }
   /v1/queues/{eventId}/pre-verifications:
     post:
       operationId: createQueuePreVerification
@@ -2108,7 +2114,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: "preverify-invalid: 본문의 사전 검증 토큰의 서명·회차·계정·기기·만료가 맞지 않음(대기표를 내지 않는다, 사전 검증을 다시 받는다. 토큰 칸이 아예 없으면 본문 형식 오류 400). identity-verification-required: 본인확인 전(pid 없음). 추천 적용 2026-11-03" }
         '404': { $ref: '#/components/responses/Problem', description: "queue-not-found: 이 회차의 대기열이 열리지 않았다(회차 일정 사본이 없음, 추천 적용 2026-11-03)" }
         '409': { $ref: '#/components/responses/Problem', description: "already-waiting: 이미 대기 중(1인 1순번). already-admitted: 이 회차에 이미 입장함(ALREADY_ADMITTED, 다시 줄 설 수 없음, ADR-0062. 선점과 번호 기록 사이에 입장한 경우도 같다). queue-not-open: 오픈 전(추천 적용 2026-11-03)" }
-        '410': { description: "매진(엣지 정적 응답, Problem type sold-out, ADR-0081. 엣지 응답이 퍼지기 전에 원본에 온 진입도 queue-svc가 같은 sold-out으로 거절한다. 일시 매진(ALL_HELD)은 410이 아니고 번호를 발급한다, ADR-0122), 또는 그 회차의 판매 종료(공연 시작 24시간 전) 뒤 진입(Problem type sale-ended, 별칭 SALE_ENDED. 번호를 발급하지 않음, ADR-0064)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '410': { description: "매진(엣지 정적 응답, Problem type sold-out, ADR-0081. 엣지 응답이 퍼지기 전에 원본에 온 진입도 queue-svc가 같은 sold-out으로 거절한다. 일시 매진(ALL_HELD)은 410이 아니고 번호를 발급한다, ADR-0122), 또는 그 회차의 판매 종료(공연 시작 24시간 전) 뒤 진입(Problem type sale-ended, 별칭 SALE_ENDED. 번호를 발급하지 않음, ADR-0064). 또는 대기를 취소한 진입 요청 ID의 재전송(Problem type queue-ticket-removed. 새 번호를 주지 않음, ADR-0233)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '415': { $ref: '#/components/responses/Problem', description: "text/plain·application/json이 아닌 본문(ADR-0065)" }
         '429': { $ref: '#/components/responses/TooManyRequests', description: "기기당 로컬 한도 초과(게이트웨이 파드별 토큰 버킷, guidelines §6), 또는 queue-svc 파드의 자기 과부하(server-busy, 이상 파드 퇴출에 세어지지 않게 503 대신 429, docs/architecture.md §5)" }
         '503': { $ref: '#/components/responses/ServiceUnavailable', description: "차단기·Degraded(Retry-After). 오픈 직후 묶음 구간이 닫히기 전에 오픈 뒤 발급 토큰으로 온 진입도 503이고, Retry-After는 구간이 닫힐 때까지 남은 초의 올림이다(기술 검토 중간-028). 대기열 Redis가 잠시 안 되면 503 dependency-unavailable, Retry-After 1초 [가정]이다(추천 적용 2026-11-03). 묶음 참가자인데 결과 키를 장애 전환으로 잃었으면 503 batching, Retry-After 2초 [가정]이다(admission-ctrl이 같은 결과를 다시 쓴다). 대기열 Redis 장애 전환 뒤 RB-05가 건너뛸 번호를 적기 전이면 503 queue-recovering, Retry-After 1초 [가정]이다(번호를 내지 않고 선점을 푼다, 추천 적용 2026-11-03, ADR-0181)" }
@@ -2118,10 +2124,14 @@ paths:
       tags: [queue]
       x-peaket-roles: [fan]
       summary: 대기 취소
-      description: "FR-007, POL-002, POL-007. 팬 쿠키로 부르므로 처음 기기가 없어도 된다(다른 기기에서 다시 참가, ADR-0060). 번호를 빠진 번호로 표시하고 1인 1순번 중복 확인 키를 지운다. 다시 진입하면 맨 뒤 순번"
+      description: "FR-007, POL-002, POL-007. 팬 쿠키로 부르므로 처음 기기가 없어도 된다(다른 기기에서 다시 참가, ADR-0060). 번호를 빠진 번호로 표시하고 1인 1순번 중복 확인 키를 지운다. 다시 진입하면 맨 뒤 순번. 묶음·로비 참가자는 목록을 고정하기 전이면 목록에서 빼고, 고정한 뒤면 게시 때(게시 뒤면 바로) 그 번호를 빠진 번호로 돌린다(ADR-0233). 줄에 없어도 204이고, 입장 이력은 지우지 않는다"
       security: [{ fanCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/EventId' }]
-      responses: { '204': { description: 취소됨 } }
+      responses:
+        '204': { description: "취소됨(줄에 없어도 같다)" }
+        '403': { $ref: '#/components/responses/Problem', description: "identity-verification-required: 본인확인 전(pid 없음)" }
+        '404': { $ref: '#/components/responses/Problem', description: "queue-not-found: 그 회차의 대기열이 열리지 않았음(일정 사본이 없거나 회차 ID 모양이 틀림, ADR-0233)" }
+        '503': { $ref: '#/components/responses/ServiceUnavailable', description: "dependency-unavailable: 대기열 Redis를 잠시 쓸 수 없음. Retry-After 1초 [가정]. 사람 키가 남아 있어 같은 요청을 다시 보내면 끝난다(ADR-0233)" }
   /v1/queues/{eventId}/segment-states/{segment}.json:
     servers: [{ url: 'https://queue-files.peaket.example', description: "대기열 파일 배포(ADR-0058)" }]
     get:

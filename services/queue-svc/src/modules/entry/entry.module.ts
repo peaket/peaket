@@ -10,8 +10,9 @@ import { PurgeWithdrawnKeys } from './application/purge-withdrawn-keys.js';
 import { DEFAULT_ENTRY_OPTIONS, ENTRY_OPTIONS, EnterQueue, type EntryOptions } from './application/enter-queue.js';
 import { IssuePreverification } from './application/issue-preverification.js';
 import { JoinLobby } from './application/join-lobby.js';
+import { LeaveQueue } from './application/leave-queue.js';
 import { ShuffleCommits } from './application/shuffle-commits.js';
-import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, LOBBY_SIGNALS, type LobbySignals, noSealer, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, WITHDRAWN_KEYS } from './domain/ports.js';
+import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, LEAVE_SIGNALS, type LeaveSignals, LOBBY_SIGNALS, type LobbySignals, noSealer, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, WITHDRAWN_KEYS } from './domain/ports.js';
 import { QueueController } from './inbound/queue.controller.js';
 
 /** waitRedis: RB-05 복제 확인(WAIT) 전용 연결(ADR-0186). 없으면 공유 연결 */
@@ -25,6 +26,7 @@ export type EntryModuleOptions = ({ storage: 'redis'; redis: HotRedis; waitRedis
   /** 시드 봉인(운영 KMS 어댑터 전에는 local·ci·demo의 시험 봉인만, 없으면 공시 때 503) */
   sealer?: SeedSealer;
   lobbySignals?: LobbySignals;
+  leaveSignals?: LeaveSignals;
 };
 
 @Module({})
@@ -53,6 +55,7 @@ export class EntryModule {
         IssuePreverification,
         EnterQueue,
         JoinLobby,
+        LeaveQueue,
         ShuffleCommits,
         // 탈퇴 사건 처리기가 쓴다(BOT-037). Kafka 구독 실행은 HOT-010
         PurgeWithdrawnKeys,
@@ -62,6 +65,7 @@ export class EntryModule {
         { provide: ENTRY_OPTIONS, useValue: { ...DEFAULT_ENTRY_OPTIONS, ...o.options } },
         { provide: SEED_SEALER, useValue: o.sealer ?? noSealer },
         ...(o.lobbySignals ? [{ provide: LOBBY_SIGNALS, useValue: o.lobbySignals }] : []),
+        ...(o.leaveSignals ? [{ provide: LEAVE_SIGNALS, useValue: o.leaveSignals }] : []),
         ...(o.arrivals ? [{ provide: ARRIVAL_COOKIES, useValue: o.arrivals }] : []),
         ...(o.arrivalSignals ? [{ provide: ARRIVAL_SIGNALS, useValue: o.arrivalSignals }] : []),
       ],
