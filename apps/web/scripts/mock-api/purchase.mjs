@@ -3,6 +3,8 @@
 // 서버 키는 RFC 7515 부록 A.3의 공개된 시험 키다(운영·CI에서 쓰지 않는다).
 import { createHash, createHmac, createPrivateKey, createPublicKey, diffieHellman, hkdfSync, randomUUID, timingSafeEqual } from 'node:crypto';
 
+/** hold 상태 → 401 이름(docs/frontend.md §5.3 '401', HOT-361). seq-reused는 다시 보내도 같아 화면이 끝을 본다 */
+const AUTH_FAILURES = { 'session-ended': 'purchase-session-ended', 'signature-invalid': 'purchase-signature-invalid', 'admission-invalid': 'admission-token-invalid', 'seq-reused': 'purchase-seq-reused' };
 const SERVER_JWK = { kty: 'EC', crv: 'P-256', x: 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU', y: 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0', d: 'jpsQnnGQmL-YBIffH1136cspYG6-0iY7X1fCE9-E9LI' };
 const serverKey = createPrivateKey({ key: SERVER_JWK, format: 'jwk' });
 
@@ -96,6 +98,7 @@ export function createPurchaseMock({ now, state }) {
         const mode = state.hold;
         if (body?.auto && (mode === 'auto-unsupported' || mode === 'normal')) return problem(400, 'auto-assign-not-supported', '자동 배정을 아직 쓸 수 없습니다');
         if (body?.auto && mode === 'no-match') return problem(409, 'manual-selection-required', '희망 조건에 맞는 좌석이 없습니다');
+        if (AUTH_FAILURES[mode]) return problem(401, AUTH_FAILURES[mode], '구매 세션을 확인하지 못했습니다');
         if (mode === 'race') return problem(409, 'seat-already-held', '이미 선택된 좌석입니다', {}, { suggestedSeats: ['A-5-5', 'A-5-6'] });
         if (mode === 'recent') return problem(409, 'seat-recently-released', '방금 놓은 좌석입니다', {}, { recentlyReleasedSeats: body?.seatIds ?? [], reholdAvailableAt: new Date(now() + 30_000).toISOString() });
         if (mode === 'limit') return problem(422, 'purchase-limit-exceeded', '구매 한도를 넘었습니다');

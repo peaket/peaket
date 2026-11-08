@@ -142,6 +142,9 @@ test('SCR-010 홀드 실패 → 이벤트(§3.6 holding 행)', () => {
   assert.deepEqual(holdOutcome({ status: 403 }), { type: 'SESSION_ENDED' });
   assert.deepEqual(holdOutcome({ status: 401, type: 'purchase-session-ended' }), { type: 'SESSION_ENDED' });
   assert.deepEqual(holdOutcome({ status: 401, type: 'purchase-seq-reused' }), { type: 'SESSION_ENDED' });
+  // 서명 불일치·입장 토큰 무효도 다시 보내지 않고 끝낸다(docs/frontend.md §5.3 '401', HOT-361)
+  assert.deepEqual(holdOutcome({ status: 401, type: 'purchase-signature-invalid' }), { type: 'SESSION_ENDED' });
+  assert.deepEqual(holdOutcome({ status: 401, type: 'admission-token-invalid' }), { type: 'SESSION_ENDED' });
   assert.deepEqual(holdOutcome({ status: 401, type: 'about:blank' }), { type: 'REFRESH' });
   // 본문 없는 401은 ApiError가 http-401로 준다
   assert.deepEqual(holdOutcome({ status: 401, type: 'http-401' }), { type: 'REFRESH' });

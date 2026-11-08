@@ -8,7 +8,7 @@
 //   queueShuffle=normal|late|never|missing, 사전 검증(ADR-0211) queuePreverify=normal|identity|not-found|down|unauthorized, 매진 등급(ADR-0212) queueSoldOutTiers=tier-r,…
 //   검사 기록(ADR-0217): GET /__mock/requests(메서드·경로·출처·시각·끊긴 시각), logReset=1, 진입 멈춤 queueEntry=hang, 200 상태 파일 Retry-After queueStateRetryAfter=<초>
 //   좌석맵 파일(ADR-0216·0223) GET /v1/events/{회차}/seatmap-layouts/{1|2|3}.json(1은 8석 자리 파일, 2·3은 실제 배치). 입장 확정·대기 상태 파일은 판 2를 준다
-//   홀드·구매 세션 나가기(ADR-0225): 서명을 실제로 확인한다. hold=normal|race|recent|limit|paused|ended|down|no-match
+//   홀드·구매 세션 나가기(ADR-0225): 서명을 실제로 확인한다. hold=normal|race|recent|limit|paused|ended|down|no-match|session-ended|signature-invalid|admission-invalid|seq-reused
 //   좌석 스냅샷(ADR-0224) GET /v1/events/{회차}/seatmap-snapshot: 입장 토큰 필수, 첫 사용에 임시 공개키 필수. seatSnapshot=expired(이름 있는 401)|cookie(이름 없는 401)|down(503)|newer(판 3)
 //   예매 제한(ADR-0213) restriction=none|active|overdue|fraud(GET /v1/booking-restrictions/me), 알림 신청 subscribe=normal|limit|busy|ended(422·429·410)
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)

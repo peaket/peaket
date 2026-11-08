@@ -1,6 +1,6 @@
 // 구매 세션 서명기 세 엔진 검사(FE-T7 브라우저 칸, docs/frontend.md §5.3·§5.17, ADR-0221 결정 7). Chromium·WebKit·Firefox 실제 브라우저에서
 // ① 서버와 같은 시험 벡터, ② 브라우저 키 × 서버 키 합의 왕복(서버 쪽 식은 이 시험이 node:crypto로 따로 센다), ③ IndexedDB에 둔 추출 불가 키로
-// 다시 연 페이지의 MAC과 내보내기 거절, ④ 같은 문맥의 두 탭이 같은 jti로 동시에 보낼 때 서버가 받은 일련번호 차례(Web Locks ps:{jti})를 본다.
+// 다시 연 페이지의 MAC과 내보내기 거절, ④ 같은 문맥의 두 탭이 같은 jti로 동시에 보낼 때 서버가 받은 일련번호 차례(Web Locks ps:{jti})와 ⑤ 복제한 탭(FE-T6)을 본다.
 // 모듈은 packages/api-client/src/purchase의 원본을 타입만 지워 그대로 쓴다(purchase/server.mjs).
 import { createHash, createHmac, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync } from 'node:crypto';
 import { expect, test } from '@playwright/test';
@@ -121,6 +121,44 @@ test('FE-T7 두 탭이 같은 jti로 동시에 보내도 서버가 받은 일련
   expect(got.seqs).toEqual(Array.from({ length: 16 }, (_, i) => String(i + 1)));
   expect(got.maxInflight, '잠금이 응답까지 이어져야 한다').toBe(1);
   await other.close();
+});
+
+test('FE-T6 복제한 탭: 입장 저장값을 복사한 탭과 함께 사도 서버가 받은 일련번호는 거꾸로 가지 않고, 한 탭이 끝내면 다른 탭의 다음 요청은 세션 끝이다', async ({ page, context, request }) => {
+  const server = serverKey();
+  const jti = `clone-${test.info().project.name}-${Date.now()}`;
+  const key = 'peaket.admission.evt-clone';
+  await page.evaluate(([k, v]) => sessionStorage.setItem(k, v), [key, JSON.stringify({ admissionToken: token(jti), serverEcdhPublicKey: server.jwk })]);
+  // 탭을 복제하면 sessionStorage가 복사된다. Playwright에는 탭 복제가 없어 같은 값을 새 탭으로 옮겨 흉내 낸다(ADR-0218 결정 6)
+  const copied = await page.evaluate(() => Object.fromEntries(Object.entries(sessionStorage).filter(([k]) => k.startsWith('peaket.admission.'))));
+  expect(Object.keys(copied)).toEqual([key]);
+  const clone = await context.newPage();
+  await clone.goto('/');
+  await clone.evaluate((e) => Object.entries(e).forEach(([k, v]) => sessionStorage.setItem(k, v)), copied);
+  await request.delete('/sink');
+  const buy = (p) =>
+    p.evaluate(async (k) => {
+      const S = await import('/m/signer');
+      const s = await S.openPurchaseSession(JSON.parse(sessionStorage.getItem(k)));
+      window.__session = s;
+      // 사람이 누르듯 한 탭 안에서는 차례대로, 두 탭은 서로 겹쳐서 보낸다
+      for (let i = 0; i < 6; i++) {
+        await s.run(async (sign) => {
+          const h = await sign('POST', '/sink', new Uint8Array());
+          await fetch(`/sink?d=${Math.floor(Math.random() * 30)}`, { method: 'POST', headers: h });
+        });
+      }
+      return s.clientPublicKey;
+    }, key);
+  const [a, b] = await Promise.all([buy(page), buy(clone)]);
+  expect(a, '복제한 탭은 같은 구매 세션 키를 쓴다').toBe(b);
+  const got = await (await request.get('/sink')).json();
+  expect(got.seqs, '일련번호 역전 0').toEqual(Array.from({ length: 12 }, (_, i) => String(i + 1)));
+  expect(got.maxInflight).toBe(1);
+
+  await page.evaluate(() => window.__session.end());
+  const reason = await clone.evaluate(() => window.__session.run((sign) => sign('POST', '/sink', new Uint8Array())).then(() => 'sent', (e) => e.reason));
+  expect(reason, '끝낸 세션의 키는 다른 탭에서도 없다').toBe('ended');
+  await clone.close();
 });
 
 test('FE-T7 IndexedDB 지우기(세션 끝·만료 여유·로그아웃)와 Web Locks 기다림 취소', async ({ page }) => {
