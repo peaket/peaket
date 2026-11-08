@@ -9,8 +9,11 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { CommandStateDelivery } from './commandStateDelivery';
 import type { CommandStateDryRun } from './commandStateDryRun';
+import type { CommandStateParams } from './commandStateParams';
 import type { CommandStateState } from './commandStateState';
+import type { OpsActor } from './opsActor';
 
 export interface CommandState {
   commandId?: string;
@@ -21,4 +24,34 @@ export interface CommandState {
   ackedAt?: string;
   /** 만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062) */
   expiresAt?: string;
+  /** 명령 유형(Command.type과 같은 값) */
+  type?: string;
+  /**
+     * 회차 하나에 건 명령이면 그 회차. 범위가 여럿이거나 전체면 null이고 params로 본다
+     * @nullable
+     */
+  eventId?: string | null;
+  /** 실행 사유. 승인자에게 그대로 보인다 */
+  reason?: string;
+  /** 유형별 값. 상세에만 싣는다 */
+  params?: CommandStateParams;
+  requestedBy?: OpsActor;
+  createdAt?: string;
+  /**
+     * 두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)
+     * @nullable
+     */
+  approvalExpiresAt?: string | null;
+  /** 부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다 */
+  canApprove?: boolean;
+  /**
+     * 명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)
+     * @nullable
+     */
+  postReviewDueAt?: string | null;
+  /**
+     * 전파 상태. 제어 gRPC 명령은 ack 수, 설정형 명령은 적용 확인(ADR-0143). 상세에만 싣는다
+     * @nullable
+     */
+  delivery?: CommandStateDelivery;
 }

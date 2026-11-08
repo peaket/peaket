@@ -29,6 +29,16 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AdminInvitationAcceptance,
+  AdminInvitationAcceptanceCreate,
+  AdminInvitationCompletionCreate,
+  AdminInvitationPasskeyCreate,
+  AdminInvitationPasswordCreate,
+  AdminInvitationProgress,
+  AdminInvitationStepBody,
+  AdminInvitationTotpConfirmationCreate,
+  AdminInvitationTotpConfirmed,
+  AdminInvitationTotpEnrollment,
   AdminLoginDone,
   AdminLoginPasswordStep,
   AdminLoginSecondStep,
@@ -47,6 +57,7 @@ import type {
   CreatePartnerEventAttendeeExportBody,
   CreatePartnerEventCancellationBody,
   CreatePartnerEventStaffInvitationBody,
+  CreatePartnerMerchShipmentImportBody,
   CreatePartnerProductionImageBody,
   CreatePartnerProductionSaleReviewBody,
   CreatePartnerProductionSeatmapBody,
@@ -63,25 +74,50 @@ import type {
   ListPartnerArtists200,
   ListPartnerArtistsParams,
   ListPartnerEventAttendeeExportsParams,
+  ListPartnerEventAttendeesParams,
   ListPartnerEventFlagsParams,
   ListPartnerEventStaffParams,
+  ListPartnerMerchOrderItemsParams,
+  ListPartnerMerchOrderStatsParams,
   ListPartnerPlaces200,
   ListPartnerPlacesParams,
   ListPartnerProductSettlements200,
   ListPartnerProductSettlementsParams,
+  ListPartnerProductionsParams,
+  ListPartnerProductsParams,
   ListPartnerTeamAccountsParams,
   ListPartnerWebhookDeliveries200,
   ListPartnerWebhookDeliveriesParams,
   ListPartnerWebhooks200,
   ListPartnerWebhooksParams,
   LiveSnapshot,
+  PartnerAttendeePage,
+  PartnerEventCancellationStatus,
   PartnerEventCreate,
   PartnerEventCreated,
+  PartnerEventUpdate,
+  PartnerEventUpdated,
+  PartnerMerchDeliveryAddress,
+  PartnerMerchDeliveryExportCreate,
+  PartnerMerchItemState,
+  PartnerMerchOrderItemPage,
+  PartnerMerchOrderStatsPage,
+  PartnerMerchPickupCreate,
+  PartnerMerchPickupResult,
+  PartnerMerchReturnRejection,
+  PartnerMerchShipmentImportResult,
+  PartnerMerchShipmentInput,
+  PartnerProductPage,
   PartnerProductionCreate,
   PartnerProductionCreated,
+  PartnerProductionDetail,
+  PartnerProductionPage,
+  PartnerProductionUpdate,
   PartnerReauthPasswordStep,
   PartnerSalesReport,
+  PartnerSettlementExportCreate,
   PartnerTeamAccountPage,
+  PartnerTodoSummary,
   PayoutAccountChange,
   ProblemResponse,
   ProductionImage,
@@ -1678,7 +1714,132 @@ export const useCreatePartnerProduction = <TError = ErrorType<ProblemResponse>,
       > => {
       return useMutation(getCreatePartnerProductionMutationOptions(options), queryClient);
     }
-    export type createPartnerProductionEventResponse201 = {
+    export type listPartnerProductionsResponse200 = {
+  data: PartnerProductionPage
+  status: 200
+}
+
+export type listPartnerProductionsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listPartnerProductionsResponseSuccess = (listPartnerProductionsResponse200) & {
+  headers: Headers;
+};
+export type listPartnerProductionsResponseError = (listPartnerProductionsResponse401) & {
+  headers: Headers;
+};
+
+export const getListPartnerProductionsUrl = (params?: ListPartnerProductionsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/partner/productions?${stringifiedParams}` : `/v1/partner/productions`
+}
+
+/**
+ * FR-022, FR-052, SCR-062, docs/design/d5 §1.6 16번. 소속 파트너의 공연만 준다(요청 테넌트 = production.promoter_id, 요청마다 identity에서 받은 값만 쓰고 경로·쿼리의 파트너 값은 받지 않는다, authz-matrix §3.3). 판매 승인 필터의 일곱 값 가운데 재승인 대기는 saleReview=SUBMITTED&hasApprovalHistory=true, 변경 반려는 saleReview=REJECTED&hasApprovalHistory=true로 고른다(docs/planning/03 §2.14). '다음 할 일' 칸은 화면이 saleReview·saleStatus로 정한다. 판매 중지 사유는 코드만 싣는다(ADR-0123 결정 2). [가정] 정렬은 첫 오픈 시각 최근순(같으면 공연 ID)이고 기간 필터 from·to(KST 날짜)도 첫 오픈 시각으로 본다. [가정] 회차 판매 상태의 정본은 purchase-svc이므로 core-svc가 둔 읽기 사본으로 거르고, 공연 하나의 saleStatus는 회차 값 가운데 ON_SALE, ALL_HELD, UPCOMING, SOLD_OUT, ENDED 순으로 앞선 값이다. 커서 페이징(guidelines §3). Cache-Control: no-store
+ * @summary 내 공연 목록(SCR-062, 판매 승인·판매 상태·첫 오픈과 반려·판매 중지 사유)
+ */
+export const listPartnerProductions = async (params?: ListPartnerProductionsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listPartnerProductionsResponseSuccess> => {
+
+  return orvalFetch<listPartnerProductionsResponseSuccess>(getListPartnerProductionsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPartnerProductionsQueryKey = (params?: ListPartnerProductionsParams,) => {
+    return [
+    `/v1/partner/productions`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListPartnerProductionsQueryOptions = <TData = Awaited<ReturnType<typeof listPartnerProductions>>, TError = ErrorType<UnauthorizedResponse>>(params?: ListPartnerProductionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerProductions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPartnerProductionsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPartnerProductions>>> = ({ signal }) => listPartnerProductions(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPartnerProductions>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPartnerProductionsQueryResult = NonNullable<Awaited<ReturnType<typeof listPartnerProductions>>>
+export type ListPartnerProductionsQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useListPartnerProductions<TData = Awaited<ReturnType<typeof listPartnerProductions>>, TError = ErrorType<UnauthorizedResponse>>(
+ params: undefined |  ListPartnerProductionsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerProductions>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerProductions>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerProductions>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerProductions<TData = Awaited<ReturnType<typeof listPartnerProductions>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListPartnerProductionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerProductions>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerProductions>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerProductions>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerProductions<TData = Awaited<ReturnType<typeof listPartnerProductions>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListPartnerProductionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerProductions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 공연 목록(SCR-062, 판매 승인·판매 상태·첫 오픈과 반려·판매 중지 사유)
+ */
+
+export function useListPartnerProductions<TData = Awaited<ReturnType<typeof listPartnerProductions>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListPartnerProductionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerProductions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPartnerProductionsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createPartnerProductionEventResponse201 = {
   data: PartnerEventCreated
   status: 201
 }
@@ -2262,7 +2423,130 @@ export const useCreatePartnerEventCancellation = <TError = ErrorType<ProblemResp
       > => {
       return useMutation(getCreatePartnerEventCancellationMutationOptions(options), queryClient);
     }
-    export type createPartnerProductionSaleReviewResponse202 = {
+    export type getPartnerEventCancellationResponse200 = {
+  data: PartnerEventCancellationStatus
+  status: 200
+}
+
+export type getPartnerEventCancellationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getPartnerEventCancellationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getPartnerEventCancellationResponseSuccess = (getPartnerEventCancellationResponse200) & {
+  headers: Headers;
+};
+export type getPartnerEventCancellationResponseError = (getPartnerEventCancellationResponse401 | getPartnerEventCancellationResponse404) & {
+  headers: Headers;
+};
+
+export const getGetPartnerEventCancellationUrl = (eventId: string,) => {
+
+
+
+
+  return `/v1/partner/events/${encodeURIComponent(String(eventId))}/cancellation`
+}
+
+/**
+ * FR-055, POL-032·038, SCR-044, docs/design/d5 §1.6 16번. 소속 파트너 회차의 가장 최근 요청 하나를 준다(반려 뒤 다시 요청하면 새 요청). 미리보기(dryRun)·결제사별 몫·판정자·내부 판정 사유는 싣지 않고 배상은 대상 수·합계만이다(authz-matrix §4.1, transfer-refund §7.3). 허용 역할 [가정]: 정본 표는 요청(관리자)만 적었고 SCR-044가 실무자 보기를 두므로 두 역할이 본다. [가정] 판정 사유 칸 judgementSummary에는 내부 판정 사유 대신 팬 통지 사유 요약(fanNoticeReason)을 싣는다(내부 사유는 따로 둔다, ADR-0062). 판정 대기 기한은 요청 시각 + 1영업일이다. Cache-Control: no-store
+ * @summary 회차 취소·연기 요청 상태(SCR-044 ④, 판정·반려·환불 진행률, 금액은 합계만)
+ */
+export const getPartnerEventCancellation = async (eventId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerEventCancellationResponseSuccess> => {
+
+  return orvalFetch<getPartnerEventCancellationResponseSuccess>(getGetPartnerEventCancellationUrl(eventId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPartnerEventCancellationQueryKey = (eventId: string,) => {
+    return [
+    `/v1/partner/events/${eventId}/cancellation`
+    ] as const;
+    }
+
+
+export const getGetPartnerEventCancellationQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerEventCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerEventCancellation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPartnerEventCancellationQueryKey(eventId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPartnerEventCancellation>>> = ({ signal }) => getPartnerEventCancellation(eventId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: eventId !== null && eventId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPartnerEventCancellation>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPartnerEventCancellationQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerEventCancellation>>>
+export type GetPartnerEventCancellationQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetPartnerEventCancellation<TData = Awaited<ReturnType<typeof getPartnerEventCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerEventCancellation>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerEventCancellation>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerEventCancellation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerEventCancellation<TData = Awaited<ReturnType<typeof getPartnerEventCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerEventCancellation>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerEventCancellation>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerEventCancellation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerEventCancellation<TData = Awaited<ReturnType<typeof getPartnerEventCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerEventCancellation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 회차 취소·연기 요청 상태(SCR-044 ④, 판정·반려·환불 진행률, 금액은 합계만)
+ */
+
+export function useGetPartnerEventCancellation<TData = Awaited<ReturnType<typeof getPartnerEventCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerEventCancellation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPartnerEventCancellationQueryOptions(eventId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createPartnerProductionSaleReviewResponse202 = {
   data: void
   status: 202
 }
@@ -5198,7 +5482,132 @@ export const useCreatePartnerProduct = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getCreatePartnerProductMutationOptions(options), queryClient);
     }
-    export type createPartnerWebhookResponse201 = {
+    export type listPartnerProductsResponse200 = {
+  data: PartnerProductPage
+  status: 200
+}
+
+export type listPartnerProductsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listPartnerProductsResponseSuccess = (listPartnerProductsResponse200) & {
+  headers: Headers;
+};
+export type listPartnerProductsResponseError = (listPartnerProductsResponse401) & {
+  headers: Headers;
+};
+
+export const getListPartnerProductsUrl = (params?: ListPartnerProductsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/partner/products?${stringifiedParams}` : `/v1/partner/products`
+}
+
+/**
+ * FR-024, POL-016, SCR-023, docs/design/d5 §1.6 16번. 소속 파트너의 상품만 준다(product.promoter_id, authz-matrix §3.3). status는 저장 값(DRAFT·PUBLISHED·HIDDEN)과 판매 기간·재고로 계산한 값이다(docs/data.md product). 표시 가격(총금액 규칙, docs/design/d5 §5.15 ⑬)은 화면이 price·shippingFee·fulfillments로 그린다. [가정] 화면의 네 상태(판매 전·판매 중·품절·숨김) 밖에 초안 DRAFT와 판매 기간이 끝난 ENDED를 둔다. [가정] 연결 공연은 부가 상품이면 linked_event_id의 공연, 굿즈면 수령 시간대(pickup_slot)의 공연이고, 없으면 null이다. 정렬은 최근 고친 순 [가정]. 상품 고치기(SCR-023 [ 고치기 ])의 경로는 §1.6 16번에 없어 이 초안에 넣지 않았다. 커서 페이징. Cache-Control: no-store
+ * @summary 상품 목록(SCR-023 [상품 목록], 유형·상태·표시 가격의 재료·재고·판매 기간·연결 공연)
+ */
+export const listPartnerProducts = async (params?: ListPartnerProductsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listPartnerProductsResponseSuccess> => {
+
+  return orvalFetch<listPartnerProductsResponseSuccess>(getListPartnerProductsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPartnerProductsQueryKey = (params?: ListPartnerProductsParams,) => {
+    return [
+    `/v1/partner/products`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListPartnerProductsQueryOptions = <TData = Awaited<ReturnType<typeof listPartnerProducts>>, TError = ErrorType<UnauthorizedResponse>>(params?: ListPartnerProductsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerProducts>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPartnerProductsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPartnerProducts>>> = ({ signal }) => listPartnerProducts(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPartnerProducts>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPartnerProductsQueryResult = NonNullable<Awaited<ReturnType<typeof listPartnerProducts>>>
+export type ListPartnerProductsQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useListPartnerProducts<TData = Awaited<ReturnType<typeof listPartnerProducts>>, TError = ErrorType<UnauthorizedResponse>>(
+ params: undefined |  ListPartnerProductsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerProducts>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerProducts>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerProducts>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerProducts<TData = Awaited<ReturnType<typeof listPartnerProducts>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListPartnerProductsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerProducts>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerProducts>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerProducts>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerProducts<TData = Awaited<ReturnType<typeof listPartnerProducts>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListPartnerProductsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerProducts>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 상품 목록(SCR-023 [상품 목록], 유형·상태·표시 가격의 재료·재고·판매 기간·연결 공연)
+ */
+
+export function useListPartnerProducts<TData = Awaited<ReturnType<typeof listPartnerProducts>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListPartnerProductsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerProducts>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPartnerProductsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createPartnerWebhookResponse201 = {
   data: CreatePartnerWebhook201
   status: 201
 }
@@ -6382,3 +6791,2739 @@ export function useListPartnerEventAttendeeExports<TData = Awaited<ReturnType<ty
 
 
 
+export type getPartnerTodoSummaryResponse200 = {
+  data: PartnerTodoSummary
+  status: 200
+}
+
+export type getPartnerTodoSummaryResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getPartnerTodoSummaryResponseSuccess = (getPartnerTodoSummaryResponse200) & {
+  headers: Headers;
+};
+export type getPartnerTodoSummaryResponseError = (getPartnerTodoSummaryResponse401) & {
+  headers: Headers;
+};
+
+export const getGetPartnerTodoSummaryUrl = () => {
+
+
+
+
+  return `/v1/partner/todo-summary`
+}
+
+/**
+ * FR-022, FR-052, FR-062, FR-067, SCR-062, docs/design/d5 §1.6 16번. 소속 파트너 것만 센다(authz-matrix §3.3). 개수와 가장 이른 기한만 싣고 사람 단위 값은 없다. 세는 기준: 반려된 판매 승인은 saleReview REJECTED인 공연, 정산 이의 기한은 이의 기간 안의 NOTIFIED 정산서, 이상 표시는 status OPEN, 스태프 초대는 status INVITED이고 초대가 만료되지 않은 것. [가정] 네 값의 정본이 서로 다른 서비스(core·payment·ticket·identity)라 받는 서비스가 각각 물어 모으고, 한 곳이 답하지 않으면 그 칸만 null로 낸다. Cache-Control: no-store
+ * @summary 파트너 홈 할 일 카드(SCR-062: 반려된 판매 승인, 정산 이의 기한, 미처리 이상 표시, 수락 안 한 스태프 초대)
+ */
+export const getPartnerTodoSummary = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerTodoSummaryResponseSuccess> => {
+
+  return orvalFetch<getPartnerTodoSummaryResponseSuccess>(getGetPartnerTodoSummaryUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPartnerTodoSummaryQueryKey = () => {
+    return [
+    `/v1/partner/todo-summary`
+    ] as const;
+    }
+
+
+export const getGetPartnerTodoSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerTodoSummary>>, TError = ErrorType<UnauthorizedResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerTodoSummary>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPartnerTodoSummaryQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPartnerTodoSummary>>> = ({ signal }) => getPartnerTodoSummary({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPartnerTodoSummary>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPartnerTodoSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerTodoSummary>>>
+export type GetPartnerTodoSummaryQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useGetPartnerTodoSummary<TData = Awaited<ReturnType<typeof getPartnerTodoSummary>>, TError = ErrorType<UnauthorizedResponse>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerTodoSummary>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerTodoSummary>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerTodoSummary>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerTodoSummary<TData = Awaited<ReturnType<typeof getPartnerTodoSummary>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerTodoSummary>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerTodoSummary>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerTodoSummary>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerTodoSummary<TData = Awaited<ReturnType<typeof getPartnerTodoSummary>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerTodoSummary>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 파트너 홈 할 일 카드(SCR-062: 반려된 판매 승인, 정산 이의 기한, 미처리 이상 표시, 수락 안 한 스태프 초대)
+ */
+
+export function useGetPartnerTodoSummary<TData = Awaited<ReturnType<typeof getPartnerTodoSummary>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerTodoSummary>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPartnerTodoSummaryQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getPartnerProductionResponse200 = {
+  data: PartnerProductionDetail
+  status: 200
+}
+
+export type getPartnerProductionResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getPartnerProductionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getPartnerProductionResponseSuccess = (getPartnerProductionResponse200) & {
+  headers: Headers;
+};
+export type getPartnerProductionResponseError = (getPartnerProductionResponse401 | getPartnerProductionResponse404) & {
+  headers: Headers;
+};
+
+export const getGetPartnerProductionUrl = (productionId: string,) => {
+
+
+
+
+  return `/v1/partner/productions/${encodeURIComponent(String(productionId))}`
+}
+
+/**
+ * FR-022, FR-052, FR-055, SCR-063·021, docs/design/d5 §1.6 16번. 소속 파트너의 공연만 준다(다른 파트너 공연과 없는 공연은 같은 404, ADR-0198 결정 3, authz-matrix §3.5). 승인 이력이 있으면 등록 칸은 지금 고치는 내용(마지막 승인 내용에 변경분 production.pending_revision을 얹은 값)이고, 바뀐 항목 이름을 pendingRevisionFields로 알린다. 승인 뒤 더한 회차는 pending true로 함께 싣는다(ADR-0198 결정 3). 판매자 고지 미리보기는 GET /v1/partner/seller-profile을 쓴다. 공연 설명 글과 공연예술통합전산망 항목은 HOT-180이 등록 본문에 더할 때 여기에도 함께 더한다(ADR-0198 결정 1). ETag는 공연의 판이다(guidelines §12). [가정] production·event 표에 판 칸 version을 구현 때 더한다. Cache-Control: no-store
+ * @summary 공연 개요와 등록 정보(SCR-063 회차 허브, SCR-021 다시 열기)
+ */
+export const getPartnerProduction = async (productionId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerProductionResponseSuccess> => {
+
+  return orvalFetch<getPartnerProductionResponseSuccess>(getGetPartnerProductionUrl(productionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPartnerProductionQueryKey = (productionId: string,) => {
+    return [
+    `/v1/partner/productions/${productionId}`
+    ] as const;
+    }
+
+
+export const getGetPartnerProductionQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerProduction>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduction>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPartnerProductionQueryKey(productionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPartnerProduction>>> = ({ signal }) => getPartnerProduction(productionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: productionId !== null && productionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduction>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPartnerProductionQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerProduction>>>
+export type GetPartnerProductionQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetPartnerProduction<TData = Awaited<ReturnType<typeof getPartnerProduction>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduction>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerProduction>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerProduction>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerProduction<TData = Awaited<ReturnType<typeof getPartnerProduction>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduction>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerProduction>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerProduction>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerProduction<TData = Awaited<ReturnType<typeof getPartnerProduction>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduction>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 공연 개요와 등록 정보(SCR-063 회차 허브, SCR-021 다시 열기)
+ */
+
+export function useGetPartnerProduction<TData = Awaited<ReturnType<typeof getPartnerProduction>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProduction>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPartnerProductionQueryOptions(productionId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type updatePartnerProductionResponse200 = {
+  data: PartnerProductionDetail
+  status: 200
+}
+
+export type updatePartnerProductionResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type updatePartnerProductionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type updatePartnerProductionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type updatePartnerProductionResponse412 = {
+  data: ProblemResponse
+  status: 412
+}
+
+export type updatePartnerProductionResponse428 = {
+  data: ProblemResponse
+  status: 428
+}
+
+export type updatePartnerProductionResponseSuccess = (updatePartnerProductionResponse200) & {
+  headers: Headers;
+};
+export type updatePartnerProductionResponseError = (updatePartnerProductionResponse401 | updatePartnerProductionResponse404 | updatePartnerProductionResponse409 | updatePartnerProductionResponse412 | updatePartnerProductionResponse428) & {
+  headers: Headers;
+};
+
+export const getUpdatePartnerProductionUrl = (productionId: string,) => {
+
+
+
+
+  return `/v1/partner/productions/${encodeURIComponent(String(productionId))}`
+}
+
+/**
+ * FR-022, POL-030, SCR-021, docs/design/d5 §1.6 16번. 보낸 칸만 바꾼다. 소속 파트너의 공연만 고친다(다른 파트너 공연은 404). 회차·재입장·이미지·좌석맵·판매 정책은 각자 경로로 저장한다(ADR-0198 결정 1). 공연명·장르·관람 연령·러닝타임·아티스트·다른 이름은 재승인 대상이 아니다(재승인 대상은 가격·회차·좌석 등급·좌석맵·판매 정책, FR-052, docs/planning/03 §2.14 T7). 판매 중지 중에는 409다(SCR-021 '편집 잠김'). [가정] 첫 저장은 POST /v1/partner/productions로 하고(공연명·장르·아티스트와 회차 1개 이상이 필요하다, ADR-0198 결정 1), 그 전의 입력은 서버에 두지 않고 화면이 브라우저에 둔다. [가정] 승인 이력이 있는 공연의 공연장은 바꿀 수 없다(같은 공연장·배치본, ADR-0093). 승인된 공연의 칸을 바꾸면 공연 상세 캐시와 검색 읽기 모델을 함께 고친다. 본문 판정 순서는 PartnerProductionCreate와 같다. 동시 수정은 If-Match다(guidelines §12)
+ * @summary 공연 등록 정보 임시저장·수정(SCR-021 1단계 칸)
+ */
+export const updatePartnerProduction = async (productionId: string,
+    partnerProductionUpdate: PartnerProductionUpdate, options?: Parameters<typeof orvalFetch>[1]): Promise<updatePartnerProductionResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<updatePartnerProductionResponseSuccess>(getUpdatePartnerProductionUrl(productionId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerProductionUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdatePartnerProductionMutationKey = () => ['updatePartnerProduction'] as const;
+
+export const getUpdatePartnerProductionMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePartnerProduction>>, TError,UpdatePartnerProductionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePartnerProduction>>, TError,UpdatePartnerProductionMutationVariables, TContext> => {
+
+const mutationKey = getUpdatePartnerProductionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePartnerProduction>>, UpdatePartnerProductionMutationVariables> = (props) => {
+          const {productionId,data} = props ?? {};
+
+          return  updatePartnerProduction(productionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePartnerProductionMutationResult = NonNullable<Awaited<ReturnType<typeof updatePartnerProduction>>>
+    export type UpdatePartnerProductionMutationBody = BodyType<PartnerProductionUpdate>
+    export type UpdatePartnerProductionMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type UpdatePartnerProductionMutationVariables = {productionId: string;data: BodyType<PartnerProductionUpdate>}
+
+    /**
+ * @summary 공연 등록 정보 임시저장·수정(SCR-021 1단계 칸)
+ */
+export const useUpdatePartnerProduction = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePartnerProduction>>, TError,UpdatePartnerProductionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updatePartnerProduction>>,
+        TError,
+        UpdatePartnerProductionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdatePartnerProductionMutationOptions(options), queryClient);
+    }
+    export type updatePartnerEventResponse200 = {
+  data: PartnerEventUpdated
+  status: 200
+}
+
+export type updatePartnerEventResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type updatePartnerEventResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type updatePartnerEventResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type updatePartnerEventResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type updatePartnerEventResponse412 = {
+  data: ProblemResponse
+  status: 412
+}
+
+export type updatePartnerEventResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type updatePartnerEventResponse428 = {
+  data: ProblemResponse
+  status: 428
+}
+
+export type updatePartnerEventResponseSuccess = (updatePartnerEventResponse200) & {
+  headers: Headers;
+};
+export type updatePartnerEventResponseError = (updatePartnerEventResponse401 | updatePartnerEventResponse403 | updatePartnerEventResponse404 | updatePartnerEventResponse409 | updatePartnerEventResponse412 | updatePartnerEventResponse422 | updatePartnerEventResponse428) & {
+  headers: Headers;
+};
+
+export const getUpdatePartnerEventUrl = (eventId: string,) => {
+
+
+
+
+  return `/v1/partner/events/${encodeURIComponent(String(eventId))}`
+}
+
+/**
+ * FR-022, FR-052, POL-003·011·030·035·041, SCR-021, docs/design/d5 §1.6 16번. 보낸 칸만 바꾼다. 소속 파트너의 회차만 고친다(다른 파트너 회차는 404). 재입장은 PUT /v1/partner/events/{eventId}/entry-policy를 쓴다(구매자에게 불리한 변경 금지 규칙이 그 경로에 있다). 승인 이력이 없는 공연의 회차는 event 행을 바로 고친다. 승인 이력이 있는 공연의 회차는 재승인 대상이라 파트너 관리자만 고치고(docs/planning/03 §3 첫 행), event 행을 그대로 둔 채 production.pending_revision에 두며 응답 pending이 true다. APPROVED면 SUBMITTED로 바뀐다(§2.14 T7, 회차 더하기와 같은 규칙, ADR-0198 결정 3). 판정 순서와 오류는 PartnerEventCreate와 같다(바뀌는 값으로 다시 본다). 오픈 뒤에는 정렬 설정과 좌석 배정 방식을 바꾸지 못한다(SCR-021, POL-035 예외 열). [가정] 오픈 뒤의 오픈 시각·공연 시각 변경도 409이고, 연기는 POST /v1/partner/events/{eventId}/cancellation(kind POSTPONE)으로 한다. If-Match 값은 GET /v1/partner/productions/{productionId}의 그 회차 version이다
+ * @summary 회차 일정·정렬·배정·1인 한도 임시저장·수정(SCR-021 2·4단계)
+ */
+export const updatePartnerEvent = async (eventId: string,
+    partnerEventUpdate: PartnerEventUpdate, options?: Parameters<typeof orvalFetch>[1]): Promise<updatePartnerEventResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<updatePartnerEventResponseSuccess>(getUpdatePartnerEventUrl(eventId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerEventUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdatePartnerEventMutationKey = () => ['updatePartnerEvent'] as const;
+
+export const getUpdatePartnerEventMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePartnerEvent>>, TError,UpdatePartnerEventMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePartnerEvent>>, TError,UpdatePartnerEventMutationVariables, TContext> => {
+
+const mutationKey = getUpdatePartnerEventMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePartnerEvent>>, UpdatePartnerEventMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  updatePartnerEvent(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePartnerEventMutationResult = NonNullable<Awaited<ReturnType<typeof updatePartnerEvent>>>
+    export type UpdatePartnerEventMutationBody = BodyType<PartnerEventUpdate>
+    export type UpdatePartnerEventMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type UpdatePartnerEventMutationVariables = {eventId: string;data: BodyType<PartnerEventUpdate>}
+
+    /**
+ * @summary 회차 일정·정렬·배정·1인 한도 임시저장·수정(SCR-021 2·4단계)
+ */
+export const useUpdatePartnerEvent = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePartnerEvent>>, TError,UpdatePartnerEventMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updatePartnerEvent>>,
+        TError,
+        UpdatePartnerEventMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdatePartnerEventMutationOptions(options), queryClient);
+    }
+    export type listPartnerMerchOrderStatsResponse200 = {
+  data: PartnerMerchOrderStatsPage
+  status: 200
+}
+
+export type listPartnerMerchOrderStatsResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listPartnerMerchOrderStatsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listPartnerMerchOrderStatsResponseSuccess = (listPartnerMerchOrderStatsResponse200) & {
+  headers: Headers;
+};
+export type listPartnerMerchOrderStatsResponseError = (listPartnerMerchOrderStatsResponse400 | listPartnerMerchOrderStatsResponse401) & {
+  headers: Headers;
+};
+
+export const getListPartnerMerchOrderStatsUrl = (params?: ListPartnerMerchOrderStatsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/partner/merch-order-stats?${stringifiedParams}` : `/v1/partner/merch-order-stats`
+}
+
+/**
+ * FR-024, POL-016, SCR-023, docs/planning/03 §3 '굿즈·부가 상품 주문' 파트너 R(주문 현황), docs/design/d5 §1.6 16번. 소속 파트너의 주문(merch_order.promoter_id)만 센다. 개수만 내고 구매자 값은 없다. 반품은 판매자가 도착을 확인한 건(RETURN_RECEIVED와 그 뒤 상태)만 센다(SCR-023). items는 상품별 표이고 커서로 나눈다. totals·daily는 페이지마다 같은 값이다. [가정] 대상은 굿즈(ticket_linked 거짓)다(화면의 수령 방식이 택배·현장 수령 둘이다). [가정] from·to(KST 날짜)가 없으면 최근 30일이고 92일을 넘으면 400이다. 정렬은 주문 수 많은 순 [가정]. Cache-Control: no-store
+ * @summary 굿즈 주문 현황 집계(SCR-023: 타일·상품별 표·일자별 주문, 개인정보 없음)
+ */
+export const listPartnerMerchOrderStats = async (params?: ListPartnerMerchOrderStatsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listPartnerMerchOrderStatsResponseSuccess> => {
+
+  return orvalFetch<listPartnerMerchOrderStatsResponseSuccess>(getListPartnerMerchOrderStatsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPartnerMerchOrderStatsQueryKey = (params?: ListPartnerMerchOrderStatsParams,) => {
+    return [
+    `/v1/partner/merch-order-stats`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListPartnerMerchOrderStatsQueryOptions = <TData = Awaited<ReturnType<typeof listPartnerMerchOrderStats>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListPartnerMerchOrderStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderStats>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPartnerMerchOrderStatsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPartnerMerchOrderStats>>> = ({ signal }) => listPartnerMerchOrderStats(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderStats>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPartnerMerchOrderStatsQueryResult = NonNullable<Awaited<ReturnType<typeof listPartnerMerchOrderStats>>>
+export type ListPartnerMerchOrderStatsQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListPartnerMerchOrderStats<TData = Awaited<ReturnType<typeof listPartnerMerchOrderStats>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: undefined |  ListPartnerMerchOrderStatsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderStats>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerMerchOrderStats>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerMerchOrderStats>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerMerchOrderStats<TData = Awaited<ReturnType<typeof listPartnerMerchOrderStats>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListPartnerMerchOrderStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderStats>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerMerchOrderStats>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerMerchOrderStats>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerMerchOrderStats<TData = Awaited<ReturnType<typeof listPartnerMerchOrderStats>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListPartnerMerchOrderStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderStats>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 굿즈 주문 현황 집계(SCR-023: 타일·상품별 표·일자별 주문, 개인정보 없음)
+ */
+
+export function useListPartnerMerchOrderStats<TData = Awaited<ReturnType<typeof listPartnerMerchOrderStats>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListPartnerMerchOrderStatsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderStats>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPartnerMerchOrderStatsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listPartnerMerchOrderItemsResponse200 = {
+  data: PartnerMerchOrderItemPage
+  status: 200
+}
+
+export type listPartnerMerchOrderItemsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listPartnerMerchOrderItemsResponseSuccess = (listPartnerMerchOrderItemsResponse200) & {
+  headers: Headers;
+};
+export type listPartnerMerchOrderItemsResponseError = (listPartnerMerchOrderItemsResponse401) & {
+  headers: Headers;
+};
+
+export const getListPartnerMerchOrderItemsUrl = (params?: ListPartnerMerchOrderItemsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/partner/merch-order-items?${stringifiedParams}` : `/v1/partner/merch-order-items`
+}
+
+/**
+ * FR-024, POL-016·037, SCR-023, docs/planning/03 §2.13, docs/design/d5 §1.6 16번. 소속 파트너의 주문 항목만 준다(merch_order.promoter_id, authz-matrix §3.3). 상태 전이가 항목 단위라 한 줄이 항목 하나다(주문으로 묶는 값은 orderId). 택배 주문의 받는 분은 가린 이름·휴대폰만 싣고(김*민, 010-****-1234. docs/design/d5 SCR-027 명단과 같은 모양 [가정]) 주소는 싣지 않는다. 원문은 주문별 보기 GET /v1/partner/merch-orders/{orderId}/delivery다. 배송 완료 뒤 3개월이 지나면 recipient는 null이다(docs/planning/03 POL-023). 현장 수령·이용권 항목에는 받는 분 값이 없다(POL-016). 커서 페이징. Cache-Control: no-store
+ * @summary 배송·반품 처리 목록(SCR-023, 주문 항목 단위, 받는 분은 가린 값만)
+ */
+export const listPartnerMerchOrderItems = async (params?: ListPartnerMerchOrderItemsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listPartnerMerchOrderItemsResponseSuccess> => {
+
+  return orvalFetch<listPartnerMerchOrderItemsResponseSuccess>(getListPartnerMerchOrderItemsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPartnerMerchOrderItemsQueryKey = (params?: ListPartnerMerchOrderItemsParams,) => {
+    return [
+    `/v1/partner/merch-order-items`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListPartnerMerchOrderItemsQueryOptions = <TData = Awaited<ReturnType<typeof listPartnerMerchOrderItems>>, TError = ErrorType<UnauthorizedResponse>>(params?: ListPartnerMerchOrderItemsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderItems>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPartnerMerchOrderItemsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPartnerMerchOrderItems>>> = ({ signal }) => listPartnerMerchOrderItems(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderItems>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPartnerMerchOrderItemsQueryResult = NonNullable<Awaited<ReturnType<typeof listPartnerMerchOrderItems>>>
+export type ListPartnerMerchOrderItemsQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useListPartnerMerchOrderItems<TData = Awaited<ReturnType<typeof listPartnerMerchOrderItems>>, TError = ErrorType<UnauthorizedResponse>>(
+ params: undefined |  ListPartnerMerchOrderItemsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderItems>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerMerchOrderItems>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerMerchOrderItems>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerMerchOrderItems<TData = Awaited<ReturnType<typeof listPartnerMerchOrderItems>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListPartnerMerchOrderItemsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderItems>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerMerchOrderItems>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerMerchOrderItems>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerMerchOrderItems<TData = Awaited<ReturnType<typeof listPartnerMerchOrderItems>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListPartnerMerchOrderItemsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderItems>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 배송·반품 처리 목록(SCR-023, 주문 항목 단위, 받는 분은 가린 값만)
+ */
+
+export function useListPartnerMerchOrderItems<TData = Awaited<ReturnType<typeof listPartnerMerchOrderItems>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListPartnerMerchOrderItemsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerMerchOrderItems>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPartnerMerchOrderItemsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getPartnerMerchOrderDeliveryResponse200 = {
+  data: PartnerMerchDeliveryAddress
+  status: 200
+}
+
+export type getPartnerMerchOrderDeliveryResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getPartnerMerchOrderDeliveryResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getPartnerMerchOrderDeliveryResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type getPartnerMerchOrderDeliveryResponseSuccess = (getPartnerMerchOrderDeliveryResponse200) & {
+  headers: Headers;
+};
+export type getPartnerMerchOrderDeliveryResponseError = (getPartnerMerchOrderDeliveryResponse401 | getPartnerMerchOrderDeliveryResponse404 | getPartnerMerchOrderDeliveryResponse410) & {
+  headers: Headers;
+};
+
+export const getGetPartnerMerchOrderDeliveryUrl = (orderId: string,) => {
+
+
+
+
+  return `/v1/partner/merch-orders/${encodeURIComponent(String(orderId))}/delivery`
+}
+
+/**
+ * POL-016·023·037, FR-024, SCR-023, docs/planning/03 §3 '주문별 배송지는 동의 범위', docs/security/data-classification.md '파트너 제공 굿즈 배송 명단', docs/design/d5 §1.6 16번. 소속 파트너의 택배 주문만 준다. 동의 범위 항목(받는 분 이름·연락처·배송 주소)만 싣고 구매 계정·결제 값은 없다. 열람은 개인정보 접속기록에 남긴다(FR-064). 배송 완료 뒤 3개월(동의에 적은 보유 기간)이 지나면 410이다. [가정] 배송 완료 기록이 없으면 송장 등록일 + 14일을 배송 완료로 본다(settlement 정산 기준일과 같은 대체값). Cache-Control: no-store
+ * @summary 주문별 배송지 보기(받는 분 이름·연락처·주소, 제3자 제공 동의 범위)
+ */
+export const getPartnerMerchOrderDelivery = async (orderId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerMerchOrderDeliveryResponseSuccess> => {
+
+  return orvalFetch<getPartnerMerchOrderDeliveryResponseSuccess>(getGetPartnerMerchOrderDeliveryUrl(orderId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPartnerMerchOrderDeliveryQueryKey = (orderId: string,) => {
+    return [
+    `/v1/partner/merch-orders/${orderId}/delivery`
+    ] as const;
+    }
+
+
+export const getGetPartnerMerchOrderDeliveryQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPartnerMerchOrderDeliveryQueryKey(orderId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>> = ({ signal }) => getPartnerMerchOrderDelivery(orderId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: orderId !== null && orderId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPartnerMerchOrderDeliveryQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>>
+export type GetPartnerMerchOrderDeliveryQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetPartnerMerchOrderDelivery<TData = Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ orderId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerMerchOrderDelivery<TData = Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerMerchOrderDelivery<TData = Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 주문별 배송지 보기(받는 분 이름·연락처·주소, 제3자 제공 동의 범위)
+ */
+
+export function useGetPartnerMerchOrderDelivery<TData = Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerMerchOrderDelivery>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPartnerMerchOrderDeliveryQueryOptions(orderId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type putPartnerMerchOrderItemShipmentResponse200 = {
+  data: PartnerMerchItemState
+  status: 200
+}
+
+export type putPartnerMerchOrderItemShipmentResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type putPartnerMerchOrderItemShipmentResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type putPartnerMerchOrderItemShipmentResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type putPartnerMerchOrderItemShipmentResponse412 = {
+  data: ProblemResponse
+  status: 412
+}
+
+export type putPartnerMerchOrderItemShipmentResponse428 = {
+  data: ProblemResponse
+  status: 428
+}
+
+export type putPartnerMerchOrderItemShipmentResponseSuccess = (putPartnerMerchOrderItemShipmentResponse200) & {
+  headers: Headers;
+};
+export type putPartnerMerchOrderItemShipmentResponseError = (putPartnerMerchOrderItemShipmentResponse401 | putPartnerMerchOrderItemShipmentResponse404 | putPartnerMerchOrderItemShipmentResponse409 | putPartnerMerchOrderItemShipmentResponse412 | putPartnerMerchOrderItemShipmentResponse428) & {
+  headers: Headers;
+};
+
+export const getPutPartnerMerchOrderItemShipmentUrl = (itemId: string,) => {
+
+
+
+
+  return `/v1/partner/merch-order-items/${encodeURIComponent(String(itemId))}/shipment`
+}
+
+/**
+ * POL-016·037, SCR-023, docs/planning/03 §2.13 I3, docs/design/d5 §1.6 16번. 소속 파트너의 택배 항목만 받는다. READY면 SHIPPED로 바꾼다. 에스크로 주문의 송장 등록은 결제사 배송 정보 등록으로 이어진다(payment.md 에스크로). [가정] 잘못 넣은 송장은 SHIPPED에서 배송 완료 전까지 다시 보내 고친다(그래서 PUT이다). [가정] 결제사 배송 정보 등록은 커밋 뒤 작업으로 다시 시도하고, 그 실패로 이 응답을 실패시키지 않는다. [가정] 택배사 코드 목록은 택배 조회 연동 업체를 정할 때(wbs 7.1.1) 함께 정한다. docs/data.md tracking_no 한 칸에 택배사와 번호를 함께 담는다. 동시 수정은 If-Match이고 값은 목록의 version이다
+ * @summary 송장 등록·고치기(한 건)
+ */
+export const putPartnerMerchOrderItemShipment = async (itemId: string,
+    partnerMerchShipmentInput: PartnerMerchShipmentInput, options?: Parameters<typeof orvalFetch>[1]): Promise<putPartnerMerchOrderItemShipmentResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<putPartnerMerchOrderItemShipmentResponseSuccess>(getPutPartnerMerchOrderItemShipmentUrl(itemId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerMerchShipmentInput)
+  }
+);}
+
+
+
+
+
+export const getPutPartnerMerchOrderItemShipmentMutationKey = () => ['putPartnerMerchOrderItemShipment'] as const;
+
+export const getPutPartnerMerchOrderItemShipmentMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPartnerMerchOrderItemShipment>>, TError,PutPartnerMerchOrderItemShipmentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putPartnerMerchOrderItemShipment>>, TError,PutPartnerMerchOrderItemShipmentMutationVariables, TContext> => {
+
+const mutationKey = getPutPartnerMerchOrderItemShipmentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putPartnerMerchOrderItemShipment>>, PutPartnerMerchOrderItemShipmentMutationVariables> = (props) => {
+          const {itemId,data} = props ?? {};
+
+          return  putPartnerMerchOrderItemShipment(itemId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutPartnerMerchOrderItemShipmentMutationResult = NonNullable<Awaited<ReturnType<typeof putPartnerMerchOrderItemShipment>>>
+    export type PutPartnerMerchOrderItemShipmentMutationBody = BodyType<PartnerMerchShipmentInput>
+    export type PutPartnerMerchOrderItemShipmentMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type PutPartnerMerchOrderItemShipmentMutationVariables = {itemId: string;data: BodyType<PartnerMerchShipmentInput>}
+
+    /**
+ * @summary 송장 등록·고치기(한 건)
+ */
+export const usePutPartnerMerchOrderItemShipment = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPartnerMerchOrderItemShipment>>, TError,PutPartnerMerchOrderItemShipmentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof putPartnerMerchOrderItemShipment>>,
+        TError,
+        PutPartnerMerchOrderItemShipmentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPutPartnerMerchOrderItemShipmentMutationOptions(options), queryClient);
+    }
+    export type createPartnerMerchShipmentImportResponse200 = {
+  data: PartnerMerchShipmentImportResult
+  status: 200
+}
+
+export type createPartnerMerchShipmentImportResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerMerchShipmentImportResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerMerchShipmentImportResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerMerchShipmentImportResponse413 = {
+  data: ProblemResponse
+  status: 413
+}
+
+export type createPartnerMerchShipmentImportResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerMerchShipmentImportResponseSuccess = (createPartnerMerchShipmentImportResponse200) & {
+  headers: Headers;
+};
+export type createPartnerMerchShipmentImportResponseError = (createPartnerMerchShipmentImportResponse400 | createPartnerMerchShipmentImportResponse401 | createPartnerMerchShipmentImportResponse409 | createPartnerMerchShipmentImportResponse413 | createPartnerMerchShipmentImportResponse422) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerMerchShipmentImportUrl = () => {
+
+
+
+
+  return `/v1/partner/merch-shipment-imports`
+}
+
+/**
+ * POL-016·037, SCR-023, docs/design/d5 §1.6 16번. 소속 파트너의 항목만 반영한다(다른 파트너 항목은 없는 항목과 같은 NOT_FOUND 행). 행마다 PUT …/shipment와 같은 규칙으로 본다. [가정] CSV는 UTF-8이고 머리 줄이 itemId,carrier,trackingNo다(itemId는 배송 명단에 함께 내는 항목 번호). [가정] 5MB·5,000행까지, 행마다 따로 반영해 실패 행만 돌려준다. 올린 파일은 저장하지 않는다. 파일 자체를 읽지 못하면 422이고 어느 이유인지는 Problem detail에 적는다
+ * @summary 송장 CSV 묶음 등록(행별 결과)
+ */
+export const createPartnerMerchShipmentImport = async (createPartnerMerchShipmentImportBody: CreatePartnerMerchShipmentImportBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerMerchShipmentImportResponseSuccess> => {
+    const formData = new FormData();
+formData.append(`file`, createPartnerMerchShipmentImportBody.file);
+
+  return orvalFetch<createPartnerMerchShipmentImportResponseSuccess>(getCreatePartnerMerchShipmentImportUrl(),
+  {
+    ...options,
+    method: 'POST'
+    ,
+    body: formData
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerMerchShipmentImportMutationKey = () => ['createPartnerMerchShipmentImport'] as const;
+
+export const getCreatePartnerMerchShipmentImportMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchShipmentImport>>, TError,CreatePartnerMerchShipmentImportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchShipmentImport>>, TError,CreatePartnerMerchShipmentImportMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerMerchShipmentImportMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerMerchShipmentImport>>, CreatePartnerMerchShipmentImportMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerMerchShipmentImport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerMerchShipmentImportMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerMerchShipmentImport>>>
+    export type CreatePartnerMerchShipmentImportMutationBody = BodyType<CreatePartnerMerchShipmentImportBody>
+    export type CreatePartnerMerchShipmentImportMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreatePartnerMerchShipmentImportMutationVariables = {data: BodyType<CreatePartnerMerchShipmentImportBody>}
+
+    /**
+ * @summary 송장 CSV 묶음 등록(행별 결과)
+ */
+export const useCreatePartnerMerchShipmentImport = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchShipmentImport>>, TError,CreatePartnerMerchShipmentImportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerMerchShipmentImport>>,
+        TError,
+        CreatePartnerMerchShipmentImportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerMerchShipmentImportMutationOptions(options), queryClient);
+    }
+    export type createPartnerMerchOrderItemArrivalConfirmationResponse200 = {
+  data: PartnerMerchItemState
+  status: 200
+}
+
+export type createPartnerMerchOrderItemArrivalConfirmationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerMerchOrderItemArrivalConfirmationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerMerchOrderItemArrivalConfirmationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createPartnerMerchOrderItemArrivalConfirmationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerMerchOrderItemArrivalConfirmationResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerMerchOrderItemArrivalConfirmationResponseSuccess = (createPartnerMerchOrderItemArrivalConfirmationResponse200) & {
+  headers: Headers;
+};
+export type createPartnerMerchOrderItemArrivalConfirmationResponseError = (createPartnerMerchOrderItemArrivalConfirmationResponse400 | createPartnerMerchOrderItemArrivalConfirmationResponse401 | createPartnerMerchOrderItemArrivalConfirmationResponse404 | createPartnerMerchOrderItemArrivalConfirmationResponse409 | createPartnerMerchOrderItemArrivalConfirmationResponse422) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerMerchOrderItemArrivalConfirmationUrl = (itemId: string,) => {
+
+
+
+
+  return `/v1/partner/merch-order-items/${encodeURIComponent(String(itemId))}/arrival-confirmation`
+}
+
+/**
+ * POL-016·037, SCR-023, docs/planning/03 §2.13 I11, docs/design/d5 §1.6 16번. 소속 파트너의 항목만 받는다. 이 확인으로 PEAKET이 3영업일 안에 환급한다(I12). 티켓 연동 부가 상품은 CS가 확인하므로 받지 않는다(I11)
+ * @summary 반품 도착 확인(RETURN_REQUESTED → RETURN_RECEIVED)
+ */
+export const createPartnerMerchOrderItemArrivalConfirmation = async (itemId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerMerchOrderItemArrivalConfirmationResponseSuccess> => {
+
+  return orvalFetch<createPartnerMerchOrderItemArrivalConfirmationResponseSuccess>(getCreatePartnerMerchOrderItemArrivalConfirmationUrl(itemId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerMerchOrderItemArrivalConfirmationMutationKey = () => ['createPartnerMerchOrderItemArrivalConfirmation'] as const;
+
+export const getCreatePartnerMerchOrderItemArrivalConfirmationMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalConfirmation>>, TError,CreatePartnerMerchOrderItemArrivalConfirmationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalConfirmation>>, TError,CreatePartnerMerchOrderItemArrivalConfirmationMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerMerchOrderItemArrivalConfirmationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalConfirmation>>, CreatePartnerMerchOrderItemArrivalConfirmationMutationVariables> = (props) => {
+          const {itemId} = props ?? {};
+
+          return  createPartnerMerchOrderItemArrivalConfirmation(itemId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerMerchOrderItemArrivalConfirmationMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalConfirmation>>>
+
+    export type CreatePartnerMerchOrderItemArrivalConfirmationMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreatePartnerMerchOrderItemArrivalConfirmationMutationVariables = {itemId: string}
+
+    /**
+ * @summary 반품 도착 확인(RETURN_REQUESTED → RETURN_RECEIVED)
+ */
+export const useCreatePartnerMerchOrderItemArrivalConfirmation = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalConfirmation>>, TError,CreatePartnerMerchOrderItemArrivalConfirmationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalConfirmation>>,
+        TError,
+        CreatePartnerMerchOrderItemArrivalConfirmationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerMerchOrderItemArrivalConfirmationMutationOptions(options), queryClient);
+    }
+    export type createPartnerMerchOrderItemArrivalRejectionResponse200 = {
+  data: PartnerMerchItemState
+  status: 200
+}
+
+export type createPartnerMerchOrderItemArrivalRejectionResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerMerchOrderItemArrivalRejectionResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerMerchOrderItemArrivalRejectionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createPartnerMerchOrderItemArrivalRejectionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerMerchOrderItemArrivalRejectionResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerMerchOrderItemArrivalRejectionResponseSuccess = (createPartnerMerchOrderItemArrivalRejectionResponse200) & {
+  headers: Headers;
+};
+export type createPartnerMerchOrderItemArrivalRejectionResponseError = (createPartnerMerchOrderItemArrivalRejectionResponse400 | createPartnerMerchOrderItemArrivalRejectionResponse401 | createPartnerMerchOrderItemArrivalRejectionResponse404 | createPartnerMerchOrderItemArrivalRejectionResponse409 | createPartnerMerchOrderItemArrivalRejectionResponse422) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerMerchOrderItemArrivalRejectionUrl = (itemId: string,) => {
+
+
+
+
+  return `/v1/partner/merch-order-items/${encodeURIComponent(String(itemId))}/arrival-rejection`
+}
+
+/**
+ * POL-016, SCR-023, docs/planning/03 §2.13 I13, docs/design/d5 §1.6 16번. 소속 파트너의 항목만 받는다. DISPUTED로 바꾸고 CS 처리함 '분쟁 접수'를 만든다. [가정] 화면은 도착 확인 때 거절하므로 RETURN_REQUESTED도 받아 I11·I13을 한 트랜잭션으로 지나고, RETURN_RECEIVED는 환급을 시작하기 전까지만 받는다. 근거 글에는 구매자의 이름·연락처를 적지 않게 화면이 안내한다. 부가 상품은 받지 않는다(CS 확인)
+ * @summary 반품 거절(전자상거래법 §17②1·2호 사유와 근거, CS 분쟁 접수로 넘어감)
+ */
+export const createPartnerMerchOrderItemArrivalRejection = async (itemId: string,
+    partnerMerchReturnRejection: PartnerMerchReturnRejection, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerMerchOrderItemArrivalRejectionResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerMerchOrderItemArrivalRejectionResponseSuccess>(getCreatePartnerMerchOrderItemArrivalRejectionUrl(itemId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerMerchReturnRejection)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerMerchOrderItemArrivalRejectionMutationKey = () => ['createPartnerMerchOrderItemArrivalRejection'] as const;
+
+export const getCreatePartnerMerchOrderItemArrivalRejectionMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalRejection>>, TError,CreatePartnerMerchOrderItemArrivalRejectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalRejection>>, TError,CreatePartnerMerchOrderItemArrivalRejectionMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerMerchOrderItemArrivalRejectionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalRejection>>, CreatePartnerMerchOrderItemArrivalRejectionMutationVariables> = (props) => {
+          const {itemId,data} = props ?? {};
+
+          return  createPartnerMerchOrderItemArrivalRejection(itemId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerMerchOrderItemArrivalRejectionMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalRejection>>>
+    export type CreatePartnerMerchOrderItemArrivalRejectionMutationBody = BodyType<PartnerMerchReturnRejection>
+    export type CreatePartnerMerchOrderItemArrivalRejectionMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreatePartnerMerchOrderItemArrivalRejectionMutationVariables = {itemId: string;data: BodyType<PartnerMerchReturnRejection>}
+
+    /**
+ * @summary 반품 거절(전자상거래법 §17②1·2호 사유와 근거, CS 분쟁 접수로 넘어감)
+ */
+export const useCreatePartnerMerchOrderItemArrivalRejection = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalRejection>>, TError,CreatePartnerMerchOrderItemArrivalRejectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerMerchOrderItemArrivalRejection>>,
+        TError,
+        CreatePartnerMerchOrderItemArrivalRejectionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerMerchOrderItemArrivalRejectionMutationOptions(options), queryClient);
+    }
+    export type createPartnerMerchPickupResponse200 = {
+  data: PartnerMerchPickupResult
+  status: 200
+}
+
+export type createPartnerMerchPickupResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerMerchPickupResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerMerchPickupResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createPartnerMerchPickupResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerMerchPickupResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerMerchPickupResponseSuccess = (createPartnerMerchPickupResponse200) & {
+  headers: Headers;
+};
+export type createPartnerMerchPickupResponseError = (createPartnerMerchPickupResponse400 | createPartnerMerchPickupResponse401 | createPartnerMerchPickupResponse404 | createPartnerMerchPickupResponse409 | createPartnerMerchPickupResponse422) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerMerchPickupUrl = () => {
+
+
+
+
+  return `/v1/partner/merch-pickups`
+}
+
+/**
+ * POL-016, SCR-023, docs/planning/03 §2.13 I4, docs/design/d5 §1.6 16번. 소속 파트너 주문의 교환권만 받는다. READY 항목을 PICKED_UP으로 바꾸고 상품·옵션·수량만 돌려준다(이름·연락처 없음, POL-016). 교환권 값은 비밀값이라 본문으로 받고 주소에 넣지 않는다(guidelines §9). [가정] 교환권은 주문 하나에 하나이고 그 주문의 READY 항목을 모두 처리한다. 교환권 값의 모양은 팬 쪽 주문 조회 계약(d5 §1.6 2번)이 정한다
+ * @summary 현장 수령 확인(교환권 QR, 판매자에게 개인정보 없음)
+ */
+export const createPartnerMerchPickup = async (partnerMerchPickupCreate: PartnerMerchPickupCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerMerchPickupResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerMerchPickupResponseSuccess>(getCreatePartnerMerchPickupUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerMerchPickupCreate)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerMerchPickupMutationKey = () => ['createPartnerMerchPickup'] as const;
+
+export const getCreatePartnerMerchPickupMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchPickup>>, TError,CreatePartnerMerchPickupMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchPickup>>, TError,CreatePartnerMerchPickupMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerMerchPickupMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerMerchPickup>>, CreatePartnerMerchPickupMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerMerchPickup(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerMerchPickupMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerMerchPickup>>>
+    export type CreatePartnerMerchPickupMutationBody = BodyType<PartnerMerchPickupCreate>
+    export type CreatePartnerMerchPickupMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreatePartnerMerchPickupMutationVariables = {data: BodyType<PartnerMerchPickupCreate>}
+
+    /**
+ * @summary 현장 수령 확인(교환권 QR, 판매자에게 개인정보 없음)
+ */
+export const useCreatePartnerMerchPickup = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchPickup>>, TError,CreatePartnerMerchPickupMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerMerchPickup>>,
+        TError,
+        CreatePartnerMerchPickupMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerMerchPickupMutationOptions(options), queryClient);
+    }
+    export type createPartnerMerchDeliveryExportResponse200 = {
+  data: void
+  status: 200
+}
+
+export type createPartnerMerchDeliveryExportResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerMerchDeliveryExportResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createPartnerMerchDeliveryExportResponseSuccess = (createPartnerMerchDeliveryExportResponse200) & {
+  headers: Headers;
+};
+export type createPartnerMerchDeliveryExportResponseError = (createPartnerMerchDeliveryExportResponse401 | createPartnerMerchDeliveryExportResponse403) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerMerchDeliveryExportUrl = () => {
+
+
+
+
+  return `/v1/partner/merch-delivery-exports`
+}
+
+/**
+ * POL-016·023·037, FR-064, SCR-023, docs/security/data-classification.md '파트너 제공 굿즈 배송 명단', docs/design/d5 §1.6 16번. 파트너 관리자만 부른다. 소속 파트너의 택배 항목만 담고, 칸은 받는 분 이름·연락처·배송 주소·주문번호·상품이다(가리지 않는다). 사유와 건수를 접속기록에 남긴다. 배송 완료 뒤 3개월이 지난 건은 빼고, CSV·XLSX는 수식으로 읽힐 첫 글자를 막는다(guidelines §9). 기록과 응답 형태는 예매자 명단 내려받기와 같아 파일을 다시 돌려줄 수 없으므로 멱등 키를 받지 않는다. [가정] 재인증: 정본은 관리자·사유만 정했지만 여러 사람의 주소가 함께 나가므로 예매자 명단과 같이 비밀번호·TOTP·패스키 재인증 토큰(act BOOKER_EXPORT)을 요구한다. [가정] 형식은 예매자 명단과 같은 세 가지이고, 송장 묶음 등록에 쓰도록 항목 번호(itemId)를 함께 싣는다(개인정보 아님)
+ * @summary 배송 명단 내려받기(사유 필수, 건수·사유 접속기록, 동의 범위 항목만, 스트리밍)
+ */
+export const createPartnerMerchDeliveryExport = async (partnerMerchDeliveryExportCreate: PartnerMerchDeliveryExportCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerMerchDeliveryExportResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerMerchDeliveryExportResponseSuccess>(getCreatePartnerMerchDeliveryExportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerMerchDeliveryExportCreate)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerMerchDeliveryExportMutationKey = () => ['createPartnerMerchDeliveryExport'] as const;
+
+export const getCreatePartnerMerchDeliveryExportMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchDeliveryExport>>, TError,CreatePartnerMerchDeliveryExportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchDeliveryExport>>, TError,CreatePartnerMerchDeliveryExportMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerMerchDeliveryExportMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerMerchDeliveryExport>>, CreatePartnerMerchDeliveryExportMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerMerchDeliveryExport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerMerchDeliveryExportMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerMerchDeliveryExport>>>
+    export type CreatePartnerMerchDeliveryExportMutationBody = BodyType<PartnerMerchDeliveryExportCreate>
+    export type CreatePartnerMerchDeliveryExportMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type CreatePartnerMerchDeliveryExportMutationVariables = {data: BodyType<PartnerMerchDeliveryExportCreate>}
+
+    /**
+ * @summary 배송 명단 내려받기(사유 필수, 건수·사유 접속기록, 동의 범위 항목만, 스트리밍)
+ */
+export const useCreatePartnerMerchDeliveryExport = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerMerchDeliveryExport>>, TError,CreatePartnerMerchDeliveryExportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerMerchDeliveryExport>>,
+        TError,
+        CreatePartnerMerchDeliveryExportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerMerchDeliveryExportMutationOptions(options), queryClient);
+    }
+    export type listPartnerEventAttendeesResponse200 = {
+  data: PartnerAttendeePage
+  status: 200
+}
+
+export type listPartnerEventAttendeesResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listPartnerEventAttendeesResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listPartnerEventAttendeesResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type listPartnerEventAttendeesResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type listPartnerEventAttendeesResponseSuccess = (listPartnerEventAttendeesResponse200) & {
+  headers: Headers;
+};
+export type listPartnerEventAttendeesResponseError = (listPartnerEventAttendeesResponse401 | listPartnerEventAttendeesResponse403 | listPartnerEventAttendeesResponse404 | listPartnerEventAttendeesResponse410) & {
+  headers: Headers;
+};
+
+export const getListPartnerEventAttendeesUrl = (eventId: string,
+    params?: ListPartnerEventAttendeesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/partner/events/${encodeURIComponent(String(eventId))}/attendees?${stringifiedParams}` : `/v1/partner/events/${encodeURIComponent(String(eventId))}/attendees`
+}
+
+/**
+ * FR-027, POL-023, SCR-027, docs/planning/03 §3, authz-matrix §4.1, docs/design/d5 §1.6 16번. 파트너 관리자만 부른다. 소속 파트너의 회차만 보여 준다. 항목은 예매자 이름·휴대폰 번호·예매번호·회차·좌석·매수뿐이고, 이름은 가운데 글자, 휴대폰은 가운데 네 자리를 가린다(김*민, 010-****-1234, SCR-027). [가정] 두 글자 이름은 끝 글자를 가린다. 원문은 POST …/attendee-exports(사유·패스키 재인증)로만 받는다. 조회도 개인정보 접속기록에 남긴다(FR-064). 회차 종료 1개월 뒤 닫는다(연기 회차는 바뀐 회차 기준). [가정] 예매번호는 주문 ID이고, 대상은 환불되지 않은 표가 남은 확정 주문이며, 합계 칸은 필터와 상관없는 그 회차 전체다. 커서 페이징. Cache-Control: no-store
+ * @summary 예매자 명단 보기(SCR-027, 가린 값, 동의 범위 항목만)
+ */
+export const listPartnerEventAttendees = async (eventId: string,
+    params?: ListPartnerEventAttendeesParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listPartnerEventAttendeesResponseSuccess> => {
+
+  return orvalFetch<listPartnerEventAttendeesResponseSuccess>(getListPartnerEventAttendeesUrl(eventId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPartnerEventAttendeesQueryKey = (eventId: string,
+    params?: ListPartnerEventAttendeesParams,) => {
+    return [
+    `/v1/partner/events/${eventId}/attendees`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListPartnerEventAttendeesQueryOptions = <TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(eventId: string,
+    params?: ListPartnerEventAttendeesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPartnerEventAttendeesQueryKey(eventId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPartnerEventAttendees>>> = ({ signal }) => listPartnerEventAttendees(eventId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: eventId !== null && eventId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPartnerEventAttendeesQueryResult = NonNullable<Awaited<ReturnType<typeof listPartnerEventAttendees>>>
+export type ListPartnerEventAttendeesQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string,
+    params: undefined |  ListPartnerEventAttendeesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerEventAttendees>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerEventAttendees>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string,
+    params?: ListPartnerEventAttendeesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPartnerEventAttendees>>,
+          TError,
+          Awaited<ReturnType<typeof listPartnerEventAttendees>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string,
+    params?: ListPartnerEventAttendeesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 예매자 명단 보기(SCR-027, 가린 값, 동의 범위 항목만)
+ */
+
+export function useListPartnerEventAttendees<TData = Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string,
+    params?: ListPartnerEventAttendeesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventAttendees>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPartnerEventAttendeesQueryOptions(eventId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createPartnerEventSettlementExportResponse200 = {
+  data: void
+  status: 200
+}
+
+export type createPartnerEventSettlementExportResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerEventSettlementExportResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createPartnerEventSettlementExportResponseSuccess = (createPartnerEventSettlementExportResponse200) & {
+  headers: Headers;
+};
+export type createPartnerEventSettlementExportResponseError = (createPartnerEventSettlementExportResponse401 | createPartnerEventSettlementExportResponse404) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerEventSettlementExportUrl = (eventId: string,) => {
+
+
+
+
+  return `/v1/partner/events/${encodeURIComponent(String(eventId))}/settlement-exports`
+}
+
+/**
+ * FR-027, FR-062, POL-039, SCR-027, docs/planning/03 §3 '정산 리포트는 모두', docs/design/d5 §1.6 16번. 소속 파트너의 회차만 준다. 금액 항목은 판매 대금·환급·중개수수료·배상 상계·보증 충당·청구 내역과 결제사별 상태·지급 예정일·지급 결과다(FR-027). 계좌는 은행과 끝 4자리만, 배상은 대상 수와 합계만이고 사람 단위 값·결제사 내부 ID·결제사 오류 원문은 없다(authz-matrix §4.1, settlement §9). CSV·XLSX는 수식으로 읽힐 첫 글자를 막는다(guidelines §9). [가정] 개인정보가 없어 사유·재인증을 받지 않는다. 내보낸 기록(사람·형식·시각)을 남기므로 예매자 명단과 같은 POST이고 파일을 다시 돌려줄 수 없어 멱등 키를 받지 않는다. 판매 요약 탭의 내려받기는 §1.6 16번에 없어 이 초안에 넣지 않았다
+ * @summary 회차 정산 리포트 내보내기(CSV·XLSX·PDF, 스트리밍)
+ */
+export const createPartnerEventSettlementExport = async (eventId: string,
+    partnerSettlementExportCreate: PartnerSettlementExportCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerEventSettlementExportResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerEventSettlementExportResponseSuccess>(getCreatePartnerEventSettlementExportUrl(eventId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerSettlementExportCreate)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerEventSettlementExportMutationKey = () => ['createPartnerEventSettlementExport'] as const;
+
+export const getCreatePartnerEventSettlementExportMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerEventSettlementExport>>, TError,CreatePartnerEventSettlementExportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerEventSettlementExport>>, TError,CreatePartnerEventSettlementExportMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerEventSettlementExportMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerEventSettlementExport>>, CreatePartnerEventSettlementExportMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  createPartnerEventSettlementExport(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerEventSettlementExportMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerEventSettlementExport>>>
+    export type CreatePartnerEventSettlementExportMutationBody = BodyType<PartnerSettlementExportCreate>
+    export type CreatePartnerEventSettlementExportMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type CreatePartnerEventSettlementExportMutationVariables = {eventId: string;data: BodyType<PartnerSettlementExportCreate>}
+
+    /**
+ * @summary 회차 정산 리포트 내보내기(CSV·XLSX·PDF, 스트리밍)
+ */
+export const useCreatePartnerEventSettlementExport = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerEventSettlementExport>>, TError,CreatePartnerEventSettlementExportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerEventSettlementExport>>,
+        TError,
+        CreatePartnerEventSettlementExportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerEventSettlementExportMutationOptions(options), queryClient);
+    }
+    export type createPartnerAuthInvitationAcceptanceResponse201 = {
+  data: AdminInvitationAcceptance
+  status: 201
+}
+
+export type createPartnerAuthInvitationAcceptanceResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerAuthInvitationAcceptanceResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createPartnerAuthInvitationAcceptanceResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createPartnerAuthInvitationAcceptanceResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthInvitationAcceptanceResponseSuccess = (createPartnerAuthInvitationAcceptanceResponse201) & {
+  headers: Headers;
+};
+export type createPartnerAuthInvitationAcceptanceResponseError = (createPartnerAuthInvitationAcceptanceResponse400 | createPartnerAuthInvitationAcceptanceResponse410 | createPartnerAuthInvitationAcceptanceResponse429 | createPartnerAuthInvitationAcceptanceResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthInvitationAcceptanceUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/invitation-acceptances`
+}
+
+/**
+ * FR-021, POL-020, identity §6 '계정 발급 절차'·§13, SCR-020 ④, ADR-0206. 초대 토큰은 링크의 URL 조각(#token=)에만 있고 화면이 읽자마자 주소에서 지운 뒤 이 본문으로 보낸다(guidelines §9). 토큰이 맞으면 수락 단계 토큰 acceptanceStep을 준다. 뒤 단계는 세션과 재인증 토큰이 없으므로 이 값이 자격이다. 단계 토큰은 SHA-256만 저장하고 수명은 30분 [가정], 수락마다 하나이며 단계마다 바뀌지 않는다 [가정]. 링크로 다시 시작하면 앞서 저장한 비밀번호·대기 시드·TOTP·복구 코드·패스키를 지우고 처음부터 한다(남이 링크로 넣어 둔 값을 이어 쓰지 않게) [가정]. 없는 토큰, 쓴 토큰, 지난 토큰, 새 재초대로 무효가 된 토큰, 다른 콘솔의 계정(이 경로는 파트너 역할만), 지운 계정, 이미 활성인 계정은 모두 같은 410이다. 초대 토큰은 완료 때 지운다. gw-partner가 Origin을 확인한다. 공개 작업이라 Idempotency-Key를 받지 않는다(guidelines §4 공용 멱등 모듈). Cache-Control: no-store
+ * @summary 초대 수락 시작(초대 링크 토큰 확인, 다음 단계 토큰 받기)
+ */
+export const createPartnerAuthInvitationAcceptance = async (adminInvitationAcceptanceCreate: AdminInvitationAcceptanceCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthInvitationAcceptanceResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerAuthInvitationAcceptanceResponseSuccess>(getCreatePartnerAuthInvitationAcceptanceUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationAcceptanceCreate)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthInvitationAcceptanceMutationKey = () => ['createPartnerAuthInvitationAcceptance'] as const;
+
+export const getCreatePartnerAuthInvitationAcceptanceMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationAcceptance>>, TError,CreatePartnerAuthInvitationAcceptanceMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationAcceptance>>, TError,CreatePartnerAuthInvitationAcceptanceMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerAuthInvitationAcceptanceMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthInvitationAcceptance>>, CreatePartnerAuthInvitationAcceptanceMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerAuthInvitationAcceptance(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthInvitationAcceptanceMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthInvitationAcceptance>>>
+    export type CreatePartnerAuthInvitationAcceptanceMutationBody = BodyType<AdminInvitationAcceptanceCreate>
+    export type CreatePartnerAuthInvitationAcceptanceMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthInvitationAcceptanceMutationVariables = {data: BodyType<AdminInvitationAcceptanceCreate>}
+
+    /**
+ * @summary 초대 수락 시작(초대 링크 토큰 확인, 다음 단계 토큰 받기)
+ */
+export const useCreatePartnerAuthInvitationAcceptance = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationAcceptance>>, TError,CreatePartnerAuthInvitationAcceptanceMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthInvitationAcceptance>>,
+        TError,
+        CreatePartnerAuthInvitationAcceptanceMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthInvitationAcceptanceMutationOptions(options), queryClient);
+    }
+    export type createPartnerAuthInvitationPasswordResponse200 = {
+  data: AdminInvitationProgress
+  status: 200
+}
+
+export type createPartnerAuthInvitationPasswordResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerAuthInvitationPasswordResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createPartnerAuthInvitationPasswordResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerAuthInvitationPasswordResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createPartnerAuthInvitationPasswordResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthInvitationPasswordResponseSuccess = (createPartnerAuthInvitationPasswordResponse200) & {
+  headers: Headers;
+};
+export type createPartnerAuthInvitationPasswordResponseError = (createPartnerAuthInvitationPasswordResponse400 | createPartnerAuthInvitationPasswordResponse410 | createPartnerAuthInvitationPasswordResponse422 | createPartnerAuthInvitationPasswordResponse429 | createPartnerAuthInvitationPasswordResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthInvitationPasswordUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/invitation-passwords`
+}
+
+/**
+ * FR-021, POL-020, docs/security/auth-controls.md §4, SCR-020 ④. 15자 이상 256자 [가정] 이하이고 조합 규칙은 없다. 흔한 비밀번호·서비스 맥락 말·계정 맥락 말·유출 목록과 대조한다. 비밀번호는 응답에 싣지 않는다. 다음은 TOTP 등록이다. gw-partner가 Origin을 확인한다. Cache-Control: no-store
+ * @summary 초대 수락: 비밀번호 만들기
+ */
+export const createPartnerAuthInvitationPassword = async (adminInvitationPasswordCreate: AdminInvitationPasswordCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthInvitationPasswordResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerAuthInvitationPasswordResponseSuccess>(getCreatePartnerAuthInvitationPasswordUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationPasswordCreate)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthInvitationPasswordMutationKey = () => ['createPartnerAuthInvitationPassword'] as const;
+
+export const getCreatePartnerAuthInvitationPasswordMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationPassword>>, TError,CreatePartnerAuthInvitationPasswordMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationPassword>>, TError,CreatePartnerAuthInvitationPasswordMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerAuthInvitationPasswordMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthInvitationPassword>>, CreatePartnerAuthInvitationPasswordMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerAuthInvitationPassword(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthInvitationPasswordMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthInvitationPassword>>>
+    export type CreatePartnerAuthInvitationPasswordMutationBody = BodyType<AdminInvitationPasswordCreate>
+    export type CreatePartnerAuthInvitationPasswordMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthInvitationPasswordMutationVariables = {data: BodyType<AdminInvitationPasswordCreate>}
+
+    /**
+ * @summary 초대 수락: 비밀번호 만들기
+ */
+export const useCreatePartnerAuthInvitationPassword = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationPassword>>, TError,CreatePartnerAuthInvitationPasswordMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthInvitationPassword>>,
+        TError,
+        CreatePartnerAuthInvitationPasswordMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthInvitationPasswordMutationOptions(options), queryClient);
+    }
+    export type createPartnerAuthInvitationTotpEnrollmentResponse201 = {
+  data: AdminInvitationTotpEnrollment
+  status: 201
+}
+
+export type createPartnerAuthInvitationTotpEnrollmentResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerAuthInvitationTotpEnrollmentResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerAuthInvitationTotpEnrollmentResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createPartnerAuthInvitationTotpEnrollmentResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createPartnerAuthInvitationTotpEnrollmentResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthInvitationTotpEnrollmentResponseSuccess = (createPartnerAuthInvitationTotpEnrollmentResponse201) & {
+  headers: Headers;
+};
+export type createPartnerAuthInvitationTotpEnrollmentResponseError = (createPartnerAuthInvitationTotpEnrollmentResponse400 | createPartnerAuthInvitationTotpEnrollmentResponse409 | createPartnerAuthInvitationTotpEnrollmentResponse410 | createPartnerAuthInvitationTotpEnrollmentResponse429 | createPartnerAuthInvitationTotpEnrollmentResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthInvitationTotpEnrollmentUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/invitation-totp-enrollments`
+}
+
+/**
+ * FR-021, POL-020, identity §6 '관리 계정 TOTP와 로그인 2단계의 첫 구현'(BeginTotpEnrollment), SCR-020 ④. 비밀번호 단계 뒤에만 받는다. 새 시드를 admin_account.totp_pending_enc에 암호화해 두고 otpauth 주소를 이 응답에서만 준다. 화면이 QR로 그리고 secret 값을 설정 키로 보인다. 등록을 확인한 뒤에는 어떤 경로로도 시드를 다시 내지 않는다. 다시 부르면 새 시드로 바뀌고 옛 대기 시드는 무효다. gw-partner가 Origin을 확인한다. Cache-Control: no-store TOTP 확인을 마친 초대에서 다시 부르면 새 시드와 복구 코드를 내지 않고 409다.
+ * @summary 초대 수락: 인증 앱 등록 시작(otpauth 주소)
+ */
+export const createPartnerAuthInvitationTotpEnrollment = async (adminInvitationStepBody: AdminInvitationStepBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthInvitationTotpEnrollmentResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerAuthInvitationTotpEnrollmentResponseSuccess>(getCreatePartnerAuthInvitationTotpEnrollmentUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationStepBody)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthInvitationTotpEnrollmentMutationKey = () => ['createPartnerAuthInvitationTotpEnrollment'] as const;
+
+export const getCreatePartnerAuthInvitationTotpEnrollmentMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationTotpEnrollment>>, TError,CreatePartnerAuthInvitationTotpEnrollmentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationTotpEnrollment>>, TError,CreatePartnerAuthInvitationTotpEnrollmentMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerAuthInvitationTotpEnrollmentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthInvitationTotpEnrollment>>, CreatePartnerAuthInvitationTotpEnrollmentMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerAuthInvitationTotpEnrollment(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthInvitationTotpEnrollmentMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthInvitationTotpEnrollment>>>
+    export type CreatePartnerAuthInvitationTotpEnrollmentMutationBody = BodyType<AdminInvitationStepBody>
+    export type CreatePartnerAuthInvitationTotpEnrollmentMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthInvitationTotpEnrollmentMutationVariables = {data: BodyType<AdminInvitationStepBody>}
+
+    /**
+ * @summary 초대 수락: 인증 앱 등록 시작(otpauth 주소)
+ */
+export const useCreatePartnerAuthInvitationTotpEnrollment = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationTotpEnrollment>>, TError,CreatePartnerAuthInvitationTotpEnrollmentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthInvitationTotpEnrollment>>,
+        TError,
+        CreatePartnerAuthInvitationTotpEnrollmentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthInvitationTotpEnrollmentMutationOptions(options), queryClient);
+    }
+    export type createPartnerAuthInvitationTotpConfirmationResponse200 = {
+  data: AdminInvitationTotpConfirmed
+  status: 200
+}
+
+export type createPartnerAuthInvitationTotpConfirmationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerAuthInvitationTotpConfirmationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerAuthInvitationTotpConfirmationResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createPartnerAuthInvitationTotpConfirmationResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerAuthInvitationTotpConfirmationResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createPartnerAuthInvitationTotpConfirmationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthInvitationTotpConfirmationResponseSuccess = (createPartnerAuthInvitationTotpConfirmationResponse200) & {
+  headers: Headers;
+};
+export type createPartnerAuthInvitationTotpConfirmationResponseError = (createPartnerAuthInvitationTotpConfirmationResponse400 | createPartnerAuthInvitationTotpConfirmationResponse409 | createPartnerAuthInvitationTotpConfirmationResponse410 | createPartnerAuthInvitationTotpConfirmationResponse422 | createPartnerAuthInvitationTotpConfirmationResponse429 | createPartnerAuthInvitationTotpConfirmationResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthInvitationTotpConfirmationUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/invitation-totp-confirmations`
+}
+
+/**
+ * FR-021, POL-020, identity §6(ConfirmTotpEnrollment), SCR-020 ④. 코드가 맞으면 시드를 확정하고 복구 코드 10개 [가정]를 새로 만들어 이 응답에서 한 번만 준다. 서버는 PHC 해시만 두고 다시 내지 않는다. 화면은 메모리에 두었다가 패스키 단계 뒤에 보인다(d5의 순서: 비밀번호 → 인증 앱 → 패스키 → 복구 코드 보관 확인). 새로고침으로 잃으면 수락을 처음부터 다시 한다 [가정]. 틀린 코드는 5번 [가정]까지이고 넘으면 단계 토큰이 무효다. gw-partner가 Origin을 확인한다. Cache-Control: no-store
+ * @summary 초대 수락: 인증 앱 코드 확인(복구 코드는 이 응답에서 한 번만)
+ */
+export const createPartnerAuthInvitationTotpConfirmation = async (adminInvitationTotpConfirmationCreate: AdminInvitationTotpConfirmationCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthInvitationTotpConfirmationResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerAuthInvitationTotpConfirmationResponseSuccess>(getCreatePartnerAuthInvitationTotpConfirmationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationTotpConfirmationCreate)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthInvitationTotpConfirmationMutationKey = () => ['createPartnerAuthInvitationTotpConfirmation'] as const;
+
+export const getCreatePartnerAuthInvitationTotpConfirmationMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationTotpConfirmation>>, TError,CreatePartnerAuthInvitationTotpConfirmationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationTotpConfirmation>>, TError,CreatePartnerAuthInvitationTotpConfirmationMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerAuthInvitationTotpConfirmationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthInvitationTotpConfirmation>>, CreatePartnerAuthInvitationTotpConfirmationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerAuthInvitationTotpConfirmation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthInvitationTotpConfirmationMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthInvitationTotpConfirmation>>>
+    export type CreatePartnerAuthInvitationTotpConfirmationMutationBody = BodyType<AdminInvitationTotpConfirmationCreate>
+    export type CreatePartnerAuthInvitationTotpConfirmationMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthInvitationTotpConfirmationMutationVariables = {data: BodyType<AdminInvitationTotpConfirmationCreate>}
+
+    /**
+ * @summary 초대 수락: 인증 앱 코드 확인(복구 코드는 이 응답에서 한 번만)
+ */
+export const useCreatePartnerAuthInvitationTotpConfirmation = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationTotpConfirmation>>, TError,CreatePartnerAuthInvitationTotpConfirmationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthInvitationTotpConfirmation>>,
+        TError,
+        CreatePartnerAuthInvitationTotpConfirmationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthInvitationTotpConfirmationMutationOptions(options), queryClient);
+    }
+    export type createPartnerAuthInvitationPasskeyRegistrationResponse201 = {
+  data: AdminPasskeyRegistration
+  status: 201
+}
+
+export type createPartnerAuthInvitationPasskeyRegistrationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerAuthInvitationPasskeyRegistrationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerAuthInvitationPasskeyRegistrationResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createPartnerAuthInvitationPasskeyRegistrationResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createPartnerAuthInvitationPasskeyRegistrationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthInvitationPasskeyRegistrationResponseSuccess = (createPartnerAuthInvitationPasskeyRegistrationResponse201) & {
+  headers: Headers;
+};
+export type createPartnerAuthInvitationPasskeyRegistrationResponseError = (createPartnerAuthInvitationPasskeyRegistrationResponse400 | createPartnerAuthInvitationPasskeyRegistrationResponse409 | createPartnerAuthInvitationPasskeyRegistrationResponse410 | createPartnerAuthInvitationPasskeyRegistrationResponse429 | createPartnerAuthInvitationPasskeyRegistrationResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthInvitationPasskeyRegistrationUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/invitation-passkey-registrations`
+}
+
+/**
+ * FR-021, POL-020, I-T53 ①, ADR-0206. POST /v1/partner/auth/passkey-registrations와 같은 등록 옵션과 응답이다. 다른 점은 세션과 재인증 토큰 대신 acceptanceStep으로 부르는 것뿐이다. TOTP 확인 뒤에만 받는다. RP ID는 partner.peaket.example이고 사용자 확인 필수다. registrationId와 챌린지는 그 수락 단계에서 5분 [가정] 한 번이다. partner_member는 이 단계를 건너뛸 수 있고 partner_admin은 필수다(identity §6 'MFA' 행). gw-partner가 Origin을 확인한다. Cache-Control: no-store
+ * @summary 초대 수락: 패스키 등록 시작(등록 옵션)
+ */
+export const createPartnerAuthInvitationPasskeyRegistration = async (adminInvitationStepBody: AdminInvitationStepBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthInvitationPasskeyRegistrationResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerAuthInvitationPasskeyRegistrationResponseSuccess>(getCreatePartnerAuthInvitationPasskeyRegistrationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationStepBody)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthInvitationPasskeyRegistrationMutationKey = () => ['createPartnerAuthInvitationPasskeyRegistration'] as const;
+
+export const getCreatePartnerAuthInvitationPasskeyRegistrationMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationPasskeyRegistration>>, TError,CreatePartnerAuthInvitationPasskeyRegistrationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationPasskeyRegistration>>, TError,CreatePartnerAuthInvitationPasskeyRegistrationMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerAuthInvitationPasskeyRegistrationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthInvitationPasskeyRegistration>>, CreatePartnerAuthInvitationPasskeyRegistrationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerAuthInvitationPasskeyRegistration(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthInvitationPasskeyRegistrationMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthInvitationPasskeyRegistration>>>
+    export type CreatePartnerAuthInvitationPasskeyRegistrationMutationBody = BodyType<AdminInvitationStepBody>
+    export type CreatePartnerAuthInvitationPasskeyRegistrationMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthInvitationPasskeyRegistrationMutationVariables = {data: BodyType<AdminInvitationStepBody>}
+
+    /**
+ * @summary 초대 수락: 패스키 등록 시작(등록 옵션)
+ */
+export const useCreatePartnerAuthInvitationPasskeyRegistration = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationPasskeyRegistration>>, TError,CreatePartnerAuthInvitationPasskeyRegistrationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthInvitationPasskeyRegistration>>,
+        TError,
+        CreatePartnerAuthInvitationPasskeyRegistrationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthInvitationPasskeyRegistrationMutationOptions(options), queryClient);
+    }
+    export type createPartnerAuthInvitationPasskeyResponse201 = {
+  data: AdminPasskey
+  status: 201
+}
+
+export type createPartnerAuthInvitationPasskeyResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerAuthInvitationPasskeyResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerAuthInvitationPasskeyResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createPartnerAuthInvitationPasskeyResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerAuthInvitationPasskeyResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createPartnerAuthInvitationPasskeyResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthInvitationPasskeyResponseSuccess = (createPartnerAuthInvitationPasskeyResponse201) & {
+  headers: Headers;
+};
+export type createPartnerAuthInvitationPasskeyResponseError = (createPartnerAuthInvitationPasskeyResponse400 | createPartnerAuthInvitationPasskeyResponse409 | createPartnerAuthInvitationPasskeyResponse410 | createPartnerAuthInvitationPasskeyResponse422 | createPartnerAuthInvitationPasskeyResponse429 | createPartnerAuthInvitationPasskeyResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthInvitationPasskeyUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/invitation-passkeys`
+}
+
+/**
+ * FR-021, POL-020, I-T53 ①, ADR-0206. POST /v1/partner/auth/passkeys와 같은 확인이다: 출처는 파트너 콘솔, RP ID는 partner.peaket.example, 챌린지 일치, 사용자 확인 필수, 받는 서명 방식. 이유는 싣지 않는다. 등록해도 활성화는 POST /v1/partner/auth/invitation-completions에서 한다. 공개키와 자격 ID 원문은 응답에 싣지 않는다. gw-partner가 Origin을 확인한다. Cache-Control: no-store
+ * @summary 초대 수락: 패스키 등록 마치기(브라우저가 만든 자격 확인)
+ */
+export const createPartnerAuthInvitationPasskey = async (adminInvitationPasskeyCreate: AdminInvitationPasskeyCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthInvitationPasskeyResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerAuthInvitationPasskeyResponseSuccess>(getCreatePartnerAuthInvitationPasskeyUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationPasskeyCreate)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthInvitationPasskeyMutationKey = () => ['createPartnerAuthInvitationPasskey'] as const;
+
+export const getCreatePartnerAuthInvitationPasskeyMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationPasskey>>, TError,CreatePartnerAuthInvitationPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationPasskey>>, TError,CreatePartnerAuthInvitationPasskeyMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerAuthInvitationPasskeyMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthInvitationPasskey>>, CreatePartnerAuthInvitationPasskeyMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerAuthInvitationPasskey(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthInvitationPasskeyMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthInvitationPasskey>>>
+    export type CreatePartnerAuthInvitationPasskeyMutationBody = BodyType<AdminInvitationPasskeyCreate>
+    export type CreatePartnerAuthInvitationPasskeyMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthInvitationPasskeyMutationVariables = {data: BodyType<AdminInvitationPasskeyCreate>}
+
+    /**
+ * @summary 초대 수락: 패스키 등록 마치기(브라우저가 만든 자격 확인)
+ */
+export const useCreatePartnerAuthInvitationPasskey = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationPasskey>>, TError,CreatePartnerAuthInvitationPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthInvitationPasskey>>,
+        TError,
+        CreatePartnerAuthInvitationPasskeyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthInvitationPasskeyMutationOptions(options), queryClient);
+    }
+    export type createPartnerAuthInvitationCompletionResponse204 = {
+  data: void
+  status: 204
+}
+
+export type createPartnerAuthInvitationCompletionResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerAuthInvitationCompletionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerAuthInvitationCompletionResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createPartnerAuthInvitationCompletionResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createPartnerAuthInvitationCompletionResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthInvitationCompletionResponseSuccess = (createPartnerAuthInvitationCompletionResponse204) & {
+  headers: Headers;
+};
+export type createPartnerAuthInvitationCompletionResponseError = (createPartnerAuthInvitationCompletionResponse400 | createPartnerAuthInvitationCompletionResponse409 | createPartnerAuthInvitationCompletionResponse410 | createPartnerAuthInvitationCompletionResponse429 | createPartnerAuthInvitationCompletionResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthInvitationCompletionUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/invitation-completions`
+}
+
+/**
+ * FR-021, POL-020, identity §6, I-T53 ①, docs/planning/03 §2.7 A2. 비밀번호와 TOTP가 끝났고 partner_admin이면 패스키가 하나 이상 있어야 활성화된다(없으면 409이고 활성화되지 않는다). 한 트랜잭션에서 상태를 ACTIVE로 하고 초대 토큰 해시와 단계 토큰을 지운다. 세션은 만들지 않고 화면은 로그인으로 보낸다(TOTP를 처음부터 다시 거치게) [가정]. displayName을 보내면 초대 때의 표시 이름을 바꾼다(AdminInvitationCreate.displayName). 권한 부여 내역을 3년 남긴다(고시 제5조 제3항). gw-partner가 Origin을 확인한다
+ * @summary 초대 수락 마치기(복구 코드 보관 확인, 계정 활성화)
+ */
+export const createPartnerAuthInvitationCompletion = async (adminInvitationCompletionCreate: AdminInvitationCompletionCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthInvitationCompletionResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerAuthInvitationCompletionResponseSuccess>(getCreatePartnerAuthInvitationCompletionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationCompletionCreate)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthInvitationCompletionMutationKey = () => ['createPartnerAuthInvitationCompletion'] as const;
+
+export const getCreatePartnerAuthInvitationCompletionMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationCompletion>>, TError,CreatePartnerAuthInvitationCompletionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationCompletion>>, TError,CreatePartnerAuthInvitationCompletionMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerAuthInvitationCompletionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthInvitationCompletion>>, CreatePartnerAuthInvitationCompletionMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerAuthInvitationCompletion(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthInvitationCompletionMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthInvitationCompletion>>>
+    export type CreatePartnerAuthInvitationCompletionMutationBody = BodyType<AdminInvitationCompletionCreate>
+    export type CreatePartnerAuthInvitationCompletionMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthInvitationCompletionMutationVariables = {data: BodyType<AdminInvitationCompletionCreate>}
+
+    /**
+ * @summary 초대 수락 마치기(복구 코드 보관 확인, 계정 활성화)
+ */
+export const useCreatePartnerAuthInvitationCompletion = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthInvitationCompletion>>, TError,CreatePartnerAuthInvitationCompletionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthInvitationCompletion>>,
+        TError,
+        CreatePartnerAuthInvitationCompletionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthInvitationCompletionMutationOptions(options), queryClient);
+    }

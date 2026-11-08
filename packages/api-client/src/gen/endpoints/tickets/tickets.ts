@@ -32,6 +32,7 @@ import type {
   Cancellation,
   CancellationQuote,
   Compensation,
+  CompensationPage,
   CreateTicketAddon201,
   CreateTicketAddonBody,
   CreateTicketBoothRequestBody,
@@ -39,13 +40,20 @@ import type {
   CreateTicketDeviceKeyBody,
   CreateTicketTransferBody,
   CreateTransferRecipientLookupBody,
+  ListCompensationsParams,
+  ListTicketAddonsParams,
   ListTickets200,
   ListTicketsParams,
+  ListTransfersParams,
   ProblemResponse,
   RecipientLookupResult,
   RefundAccount,
+  Ticket,
+  TicketAddonPage,
   TooManyRequestsResponse,
-  TransferOffer
+  TransferOffer,
+  TransferOfferPage,
+  UnauthorizedResponse
 } from '../../model';
 
 import { orvalFetch } from '../../../orval-fetch';
@@ -1447,7 +1455,145 @@ export const useCreateTicketAddon = <TError = ErrorType<ProblemResponse>,
       > => {
       return useMutation(getCreateTicketAddonMutationOptions(options), queryClient);
     }
-    export type createCompensationAccountResponse202 = {
+    export type listTicketAddonsResponse200 = {
+  data: TicketAddonPage
+  status: 200
+}
+
+export type listTicketAddonsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listTicketAddonsResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type listTicketAddonsResponseSuccess = (listTicketAddonsResponse200) & {
+  headers: Headers;
+};
+export type listTicketAddonsResponseError = (listTicketAddonsResponse401 | listTicketAddonsResponse404) & {
+  headers: Headers;
+};
+
+export const getListTicketAddonsUrl = (ticketId: string,
+    params?: ListTicketAddonsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/tickets/${encodeURIComponent(String(ticketId))}/addons?${stringifiedParams}` : `/v1/tickets/${encodeURIComponent(String(ticketId))}/addons`
+}
+
+/**
+ * FR-014, POL-016, SCR-013 ⑫, docs/frontend.md §6.2 32번. 티켓의 지금 보유자만 읽는다. 새로 살 수 있는 부가 상품 목록은 GET /v1/shop/products?linkedEventId={eventId}다. 양도로 받은 티켓에는 그 상품이 양도 가능(product.transferable)일 때만 보인다 [가정]. 주문 항목을 티켓에 잇는 칸이 docs/data.md merch_order·merch_order_item에 아직 없다(더해야 한다, POL-016 §1.4 '연결 티켓' 행도 이 칸이 있어야 된다). Cache-Control: private, no-store
+ * @summary 이 티켓에 연동해 산 부가 상품 목록(월렛의 이용권 표시)
+ */
+export const listTicketAddons = async (ticketId: string,
+    params?: ListTicketAddonsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listTicketAddonsResponseSuccess> => {
+
+  return orvalFetch<listTicketAddonsResponseSuccess>(getListTicketAddonsUrl(ticketId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListTicketAddonsQueryKey = (ticketId: string,
+    params?: ListTicketAddonsParams,) => {
+    return [
+    `/v1/tickets/${ticketId}/addons`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListTicketAddonsQueryOptions = <TData = Awaited<ReturnType<typeof listTicketAddons>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(ticketId: string,
+    params?: ListTicketAddonsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTicketAddons>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTicketAddonsQueryKey(ticketId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTicketAddons>>> = ({ signal }) => listTicketAddons(ticketId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: ticketId !== null && ticketId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTicketAddons>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListTicketAddonsQueryResult = NonNullable<Awaited<ReturnType<typeof listTicketAddons>>>
+export type ListTicketAddonsQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useListTicketAddons<TData = Awaited<ReturnType<typeof listTicketAddons>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ ticketId: string,
+    params: undefined |  ListTicketAddonsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTicketAddons>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTicketAddons>>,
+          TError,
+          Awaited<ReturnType<typeof listTicketAddons>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListTicketAddons<TData = Awaited<ReturnType<typeof listTicketAddons>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ ticketId: string,
+    params?: ListTicketAddonsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTicketAddons>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTicketAddons>>,
+          TError,
+          Awaited<ReturnType<typeof listTicketAddons>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListTicketAddons<TData = Awaited<ReturnType<typeof listTicketAddons>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ ticketId: string,
+    params?: ListTicketAddonsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTicketAddons>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 이 티켓에 연동해 산 부가 상품 목록(월렛의 이용권 표시)
+ */
+
+export function useListTicketAddons<TData = Awaited<ReturnType<typeof listTicketAddons>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ ticketId: string,
+    params?: ListTicketAddonsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTicketAddons>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListTicketAddonsQueryOptions(ticketId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createCompensationAccountResponse202 = {
   data: Compensation
   status: 202
 }
@@ -1679,3 +1825,499 @@ export const useCreateCancellationAccount = <TError = ErrorType<ProblemResponse>
       > => {
       return useMutation(getCreateCancellationAccountMutationOptions(options), queryClient);
     }
+    export type getTicketResponse200 = {
+  data: Ticket
+  status: 200
+}
+
+export type getTicketResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getTicketResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getTicketResponseSuccess = (getTicketResponse200) & {
+  headers: Headers;
+};
+export type getTicketResponseError = (getTicketResponse401 | getTicketResponse404) & {
+  headers: Headers;
+};
+
+export const getGetTicketUrl = (ticketId: string,) => {
+
+
+
+
+  return `/v1/tickets/${encodeURIComponent(String(ticketId))}`
+}
+
+/**
+ * FR-012, FR-053, POL-037, SCR-013, docs/frontend.md §6.2 32번. 지금 보유자만 읽는다(ticket.account_id, authz-matrix §3.2). 남의 티켓과 없는 티켓은 같은 404다. 응답은 Ticket이고 상세에서만 seller를 더 싣는다(patch-Ticket). QR 서명 재료는 싣지 않는다(기기 안의 키로 만든다). Cache-Control: private, no-store
+ * @summary 내 티켓 상세(월렛 펼침)
+ */
+export const getTicket = async (ticketId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getTicketResponseSuccess> => {
+
+  return orvalFetch<getTicketResponseSuccess>(getGetTicketUrl(ticketId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTicketQueryKey = (ticketId: string,) => {
+    return [
+    `/v1/tickets/${ticketId}`
+    ] as const;
+    }
+
+
+export const getGetTicketQueryOptions = <TData = Awaited<ReturnType<typeof getTicket>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTicket>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTicketQueryKey(ticketId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTicket>>> = ({ signal }) => getTicket(ticketId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: ticketId !== null && ticketId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTicket>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetTicketQueryResult = NonNullable<Awaited<ReturnType<typeof getTicket>>>
+export type GetTicketQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetTicket<TData = Awaited<ReturnType<typeof getTicket>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ ticketId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTicket>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getTicket>>,
+          TError,
+          Awaited<ReturnType<typeof getTicket>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetTicket<TData = Awaited<ReturnType<typeof getTicket>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTicket>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getTicket>>,
+          TError,
+          Awaited<ReturnType<typeof getTicket>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetTicket<TData = Awaited<ReturnType<typeof getTicket>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTicket>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 티켓 상세(월렛 펼침)
+ */
+
+export function useGetTicket<TData = Awaited<ReturnType<typeof getTicket>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTicket>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetTicketQueryOptions(ticketId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listTransfersResponse200 = {
+  data: TransferOfferPage
+  status: 200
+}
+
+export type listTransfersResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listTransfersResponseSuccess = (listTransfersResponse200) & {
+  headers: Headers;
+};
+export type listTransfersResponseError = (listTransfersResponse401) & {
+  headers: Headers;
+};
+
+export const getListTransfersUrl = (params?: ListTransfersParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/transfers?${stringifiedParams}` : `/v1/transfers`
+}
+
+/**
+ * FR-060, POL-017, SCR-041, SCR-013, docs/frontend.md §6.2 32번. 세션 계정이 받는 사람으로 지정된 요청만 최근 순으로 준다(그래서 role은 늘 RECIPIENT다). 경로와 쿼리에 계정 값이 없다. 결제 금액과 결제자 연락처는 싣지 않는다(authz-matrix §4.1 '양도 요청'). 화면 칩 '받기 기다리는 중'은 status=OFFERED다. Cache-Control: private, no-store
+ * @summary 내가 받은 양도 요청 목록(월렛의 받기 카드)
+ */
+export const listTransfers = async (params?: ListTransfersParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listTransfersResponseSuccess> => {
+
+  return orvalFetch<listTransfersResponseSuccess>(getListTransfersUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListTransfersQueryKey = (params?: ListTransfersParams,) => {
+    return [
+    `/v1/transfers`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListTransfersQueryOptions = <TData = Awaited<ReturnType<typeof listTransfers>>, TError = ErrorType<UnauthorizedResponse>>(params?: ListTransfersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTransfers>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTransfersQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTransfers>>> = ({ signal }) => listTransfers(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTransfers>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListTransfersQueryResult = NonNullable<Awaited<ReturnType<typeof listTransfers>>>
+export type ListTransfersQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useListTransfers<TData = Awaited<ReturnType<typeof listTransfers>>, TError = ErrorType<UnauthorizedResponse>>(
+ params: undefined |  ListTransfersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTransfers>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTransfers>>,
+          TError,
+          Awaited<ReturnType<typeof listTransfers>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListTransfers<TData = Awaited<ReturnType<typeof listTransfers>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListTransfersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTransfers>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTransfers>>,
+          TError,
+          Awaited<ReturnType<typeof listTransfers>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListTransfers<TData = Awaited<ReturnType<typeof listTransfers>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListTransfersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTransfers>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내가 받은 양도 요청 목록(월렛의 받기 카드)
+ */
+
+export function useListTransfers<TData = Awaited<ReturnType<typeof listTransfers>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListTransfersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTransfers>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListTransfersQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listCompensationsResponse200 = {
+  data: CompensationPage
+  status: 200
+}
+
+export type listCompensationsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listCompensationsResponseSuccess = (listCompensationsResponse200) & {
+  headers: Headers;
+};
+export type listCompensationsResponseError = (listCompensationsResponse401) & {
+  headers: Headers;
+};
+
+export const getListCompensationsUrl = (params?: ListCompensationsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/compensations?${stringifiedParams}` : `/v1/compensations`
+}
+
+/**
+ * FR-056, POL-019, POL-032, ADR-0046 결정 5, docs/design/d5 §1.6 18번. 그 주문의 결제자 본인 건만 최근 순으로 준다. 계좌는 끝 4자리만 싣는다(data.md compensation.account_last4). Cache-Control: private, no-store
+ * @summary 내 배상 건 목록(SCR-055, SCR-013에서 잇는다)
+ */
+export const listCompensations = async (params?: ListCompensationsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listCompensationsResponseSuccess> => {
+
+  return orvalFetch<listCompensationsResponseSuccess>(getListCompensationsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCompensationsQueryKey = (params?: ListCompensationsParams,) => {
+    return [
+    `/v1/compensations`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListCompensationsQueryOptions = <TData = Awaited<ReturnType<typeof listCompensations>>, TError = ErrorType<UnauthorizedResponse>>(params?: ListCompensationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCompensations>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCompensationsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCompensations>>> = ({ signal }) => listCompensations(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCompensations>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListCompensationsQueryResult = NonNullable<Awaited<ReturnType<typeof listCompensations>>>
+export type ListCompensationsQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useListCompensations<TData = Awaited<ReturnType<typeof listCompensations>>, TError = ErrorType<UnauthorizedResponse>>(
+ params: undefined |  ListCompensationsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCompensations>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listCompensations>>,
+          TError,
+          Awaited<ReturnType<typeof listCompensations>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListCompensations<TData = Awaited<ReturnType<typeof listCompensations>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListCompensationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCompensations>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listCompensations>>,
+          TError,
+          Awaited<ReturnType<typeof listCompensations>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListCompensations<TData = Awaited<ReturnType<typeof listCompensations>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListCompensationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCompensations>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 배상 건 목록(SCR-055, SCR-013에서 잇는다)
+ */
+
+export function useListCompensations<TData = Awaited<ReturnType<typeof listCompensations>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListCompensationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCompensations>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListCompensationsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getCompensationResponse200 = {
+  data: Compensation
+  status: 200
+}
+
+export type getCompensationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getCompensationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getCompensationResponseSuccess = (getCompensationResponse200) & {
+  headers: Headers;
+};
+export type getCompensationResponseError = (getCompensationResponse401 | getCompensationResponse404) & {
+  headers: Headers;
+};
+
+export const getGetCompensationUrl = (compensationId: string,) => {
+
+
+
+
+  return `/v1/compensations/${encodeURIComponent(String(compensationId))}`
+}
+
+/**
+ * FR-056, POL-019, ADR-0046 결정 5, SCR-043, docs/design/d5 §1.6 18번. 그 주문의 결제자 본인만 읽는다. 남의 건과 없는 건은 같은 404다. Cache-Control: private, no-store
+ * @summary 내 배상 건 하나(SCR-043 사유·금액·결과)
+ */
+export const getCompensation = async (compensationId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getCompensationResponseSuccess> => {
+
+  return orvalFetch<getCompensationResponseSuccess>(getGetCompensationUrl(compensationId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCompensationQueryKey = (compensationId: string,) => {
+    return [
+    `/v1/compensations/${compensationId}`
+    ] as const;
+    }
+
+
+export const getGetCompensationQueryOptions = <TData = Awaited<ReturnType<typeof getCompensation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(compensationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCompensation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCompensationQueryKey(compensationId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCompensation>>> = ({ signal }) => getCompensation(compensationId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: compensationId !== null && compensationId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCompensation>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetCompensationQueryResult = NonNullable<Awaited<ReturnType<typeof getCompensation>>>
+export type GetCompensationQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetCompensation<TData = Awaited<ReturnType<typeof getCompensation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ compensationId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCompensation>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCompensation>>,
+          TError,
+          Awaited<ReturnType<typeof getCompensation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCompensation<TData = Awaited<ReturnType<typeof getCompensation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ compensationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCompensation>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCompensation>>,
+          TError,
+          Awaited<ReturnType<typeof getCompensation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCompensation<TData = Awaited<ReturnType<typeof getCompensation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ compensationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCompensation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 배상 건 하나(SCR-043 사유·금액·결과)
+ */
+
+export function useGetCompensation<TData = Awaited<ReturnType<typeof getCompensation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ compensationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCompensation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetCompensationQueryOptions(compensationId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+

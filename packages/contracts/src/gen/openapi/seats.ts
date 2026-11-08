@@ -18,7 +18,7 @@ import * as zod from 'zod';
  * @summary 좌석 비트맵 스냅샷(압축 바이트). 입장 토큰의 첫 사용 → 구매 세션 시작
  */
 export const GetEventSeatmapSnapshotParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const getEventSeatmapSnapshotQuerySectionMin = 0;
@@ -41,7 +41,7 @@ export const GetEventSeatmapSnapshotResponse = zod.unknown()
  * @summary 회차 좌석맵 파일(공연장 캔버스·무대·구역 도형·라벨 위치·좌석 좌표·등급). 인증 없음, CDN 장기 캐시
  */
 export const GetEventSeatmapLayoutParams = zod.object({
-  "eventId": zod.string(),
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다'),
   "layoutVersion": zod.int()
 })
 
@@ -127,7 +127,7 @@ export const GetEventSeatmapLayoutResponse = zod.object({
  * @summary 좌석 홀드(다중 좌석, 1인 한도 같은 Lua)
  */
 export const CreateEventHoldParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 
@@ -209,7 +209,7 @@ export const CreateEventHoldResponse = zod.object({
  * @summary 구매 세션 나가기(구매 화면을 나갈 때 세션을 끝냄)
  */
 export const DeleteEventPurchaseSessionParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 

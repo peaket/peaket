@@ -29,6 +29,8 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  Appeal,
+  AppealPage,
   BookingRestrictionStatus,
   CreateAppealBody,
   CreateInquiryMessageBody,
@@ -38,6 +40,7 @@ import type {
   InquiryCreated,
   InquiryMessage,
   InquiryPage,
+  ListAppealsParams,
   ListFraudAppealRequestsParams,
   ListInquiriesParams,
   ProblemResponse,
@@ -313,7 +316,7 @@ export function useListFraudAppealRequests<TData = Awaited<ReturnType<typeof lis
 
 
 export type createAppealResponse201 = {
-  data: void
+  data: Appeal
   status: 201
 }
 
@@ -417,7 +420,132 @@ export const useCreateAppeal = <TError = ErrorType<ProblemResponse>,
       > => {
       return useMutation(getCreateAppealMutationOptions(options), queryClient);
     }
-    export type createInquiryResponse201 = {
+    export type listAppealsResponse200 = {
+  data: AppealPage
+  status: 200
+}
+
+export type listAppealsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listAppealsResponseSuccess = (listAppealsResponse200) & {
+  headers: Headers;
+};
+export type listAppealsResponseError = (listAppealsResponse401) & {
+  headers: Headers;
+};
+
+export const getListAppealsUrl = (params?: ListAppealsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/appeals?${stringifiedParams}` : `/v1/appeals`
+}
+
+/**
+ * FR-059, FR-061, FR-073, POL-038, POL-046, ADR-0171, docs/features/transfer-refund.md §7.1 '소명이 들어오는 길', docs/design/d5 §1.6 18번. gw-fan → core-svc support 모듈이 자기 core DB appeal로 답한다. ops-svc는 팬 요청을 받지 않는다. 세션 계정의 것만 최근 제출 순으로 준다. 제출 전인 소명 요청은 여기 없다(예매 제한은 GET /v1/booking-restrictions/me, 부정 예매는 GET /v1/fraud-appeal-requests). 소명 본문은 화면이 다시 보이지 않아 싣지 않는다. Cache-Control: private, no-store
+ * @summary 내가 낸 소명 목록(SCR-042)
+ */
+export const listAppeals = async (params?: ListAppealsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listAppealsResponseSuccess> => {
+
+  return orvalFetch<listAppealsResponseSuccess>(getListAppealsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAppealsQueryKey = (params?: ListAppealsParams,) => {
+    return [
+    `/v1/appeals`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListAppealsQueryOptions = <TData = Awaited<ReturnType<typeof listAppeals>>, TError = ErrorType<UnauthorizedResponse>>(params?: ListAppealsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAppeals>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAppealsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAppeals>>> = ({ signal }) => listAppeals(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAppeals>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListAppealsQueryResult = NonNullable<Awaited<ReturnType<typeof listAppeals>>>
+export type ListAppealsQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useListAppeals<TData = Awaited<ReturnType<typeof listAppeals>>, TError = ErrorType<UnauthorizedResponse>>(
+ params: undefined |  ListAppealsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAppeals>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAppeals>>,
+          TError,
+          Awaited<ReturnType<typeof listAppeals>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAppeals<TData = Awaited<ReturnType<typeof listAppeals>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListAppealsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAppeals>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAppeals>>,
+          TError,
+          Awaited<ReturnType<typeof listAppeals>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAppeals<TData = Awaited<ReturnType<typeof listAppeals>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListAppealsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAppeals>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내가 낸 소명 목록(SCR-042)
+ */
+
+export function useListAppeals<TData = Awaited<ReturnType<typeof listAppeals>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListAppealsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAppeals>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListAppealsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createInquiryResponse201 = {
   data: InquiryCreated
   status: 201
 }
@@ -906,3 +1034,126 @@ export const useCreateInquiryMessage = <TError = ErrorType<UnauthorizedResponse 
       > => {
       return useMutation(getCreateInquiryMessageMutationOptions(options), queryClient);
     }
+    export type getAppealResponse200 = {
+  data: Appeal
+  status: 200
+}
+
+export type getAppealResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getAppealResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getAppealResponseSuccess = (getAppealResponse200) & {
+  headers: Headers;
+};
+export type getAppealResponseError = (getAppealResponse401 | getAppealResponse404) & {
+  headers: Headers;
+};
+
+export const getGetAppealUrl = (appealId: string,) => {
+
+
+
+
+  return `/v1/appeals/${encodeURIComponent(String(appealId))}`
+}
+
+/**
+ * FR-059, FR-061, POL-038, SCR-042, docs/design/d5 §5.24·§1.6 18번. 소명한 계정만 읽는다. 남의 소명과 없는 소명은 같은 404다(authz-matrix §3.2). FRAUD_CASE의 사유 범주·기한·잠금·조치 결과는 이 응답에 없고 화면이 GET /v1/fraud-appeal-requests를 읽는다. RECLAIM의 사유 범주와 기한은 support에 사본이 없어 null이다 [가정](d5 §1.6 18번의 남은 질문, 사본을 둘지는 소유자 판단). Cache-Control: private, no-store
+ * @summary 내가 낸 소명 하나의 상태와 결과
+ */
+export const getAppeal = async (appealId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getAppealResponseSuccess> => {
+
+  return orvalFetch<getAppealResponseSuccess>(getGetAppealUrl(appealId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAppealQueryKey = (appealId: string,) => {
+    return [
+    `/v1/appeals/${appealId}`
+    ] as const;
+    }
+
+
+export const getGetAppealQueryOptions = <TData = Awaited<ReturnType<typeof getAppeal>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(appealId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAppeal>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAppealQueryKey(appealId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAppeal>>> = ({ signal }) => getAppeal(appealId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: appealId !== null && appealId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAppeal>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetAppealQueryResult = NonNullable<Awaited<ReturnType<typeof getAppeal>>>
+export type GetAppealQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetAppeal<TData = Awaited<ReturnType<typeof getAppeal>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ appealId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAppeal>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAppeal>>,
+          TError,
+          Awaited<ReturnType<typeof getAppeal>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetAppeal<TData = Awaited<ReturnType<typeof getAppeal>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ appealId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAppeal>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAppeal>>,
+          TError,
+          Awaited<ReturnType<typeof getAppeal>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetAppeal<TData = Awaited<ReturnType<typeof getAppeal>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ appealId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAppeal>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내가 낸 소명 하나의 상태와 결과
+ */
+
+export function useGetAppeal<TData = Awaited<ReturnType<typeof getAppeal>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ appealId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAppeal>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetAppealQueryOptions(appealId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+

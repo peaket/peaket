@@ -40,12 +40,17 @@ import type {
   CreateIdentityVerificationResultBody,
   CreateStaffInvitationAcceptanceBody,
   CreateStaffInvitationLookupBody,
+  CreateStaffInvitationRejectionBody,
   CreateSubscriptionOptOutBody,
   DeleteIdentityAccountBody,
   DeviceApprovalView,
   FanAccountSummary,
   GetIdentityProviders200,
+  GetIdentityScannerSessions200,
   GetIdentitySessions200,
+  IdentityConsent,
+  IdentityProfile,
+  IdentityProfileUpdateInput,
   LinkProposal,
   ListSubscriptions200,
   ListWishes200,
@@ -55,6 +60,7 @@ import type {
   PushSubscriptionRegistered,
   SignupCompletionInput,
   StaffAssignment,
+  StaffAssignmentSelfPage,
   StaffInvitationView,
   SubscriptionState,
   VerificationResult,
@@ -105,6 +111,16 @@ export const getGetIdentityLinkProposalResponseMock = (overrideResponse: Partial
 export const getCreateIdentityLinkProposalSeparateAccountResponseMock = (overrideResponse: Partial<Extract<CreateIdentityLinkProposalSeparateAccount201, object>> = {}): CreateIdentityLinkProposalSeparateAccount201 => ({next: faker.string.alpha({length: {min: 10, max: 20}}), ...overrideResponse})
 
 export const getGetIdentityMergeProposalResponseMock = (overrideResponse: Partial<Extract<MergeProposal, object>> = {}): MergeProposal => ({proposalId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), primaryAccountId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), mergedAccountId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['PROPOSED','BLOCKED','CONFIRMED','MERGING','MERGED','CANCELLED'] as const), undefined]), moved: faker.helpers.arrayElement([{tickets: faker.helpers.arrayElement([faker.number.int(), undefined]), orders: faker.helpers.arrayElement([faker.number.int(), undefined]), wishes: faker.helpers.arrayElement([faker.number.int(), undefined]), reviews: faker.helpers.arrayElement([faker.number.int(), undefined]), subscriptions: faker.helpers.arrayElement([faker.number.int(), undefined]), addresses: faker.helpers.arrayElement([faker.number.int(), undefined]), providers: faker.helpers.arrayElement([faker.number.int(), undefined])}, undefined]), blockers: faker.helpers.arrayElement([faker.helpers.arrayElements(['ACTIVE_PURCHASE_SESSION','PENDING_PAYMENT','QUOTA_EXCEEDED','BOTH_VERIFIED','WITHDRAWAL_IN_PROGRESS','APPEAL_PENDING','ENTRY_STARTED','SAME_PROVIDER_KIND'] as const), undefined]), sameKindProviders: faker.helpers.arrayElement([faker.helpers.arrayElements(['kakao','naver','google'] as const), undefined]), expiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), newProvider: faker.helpers.arrayElement([faker.helpers.arrayElement(['kakao','naver','google'] as const), undefined]), requesterRole: faker.helpers.arrayElement([faker.helpers.arrayElement(['PRIMARY','MERGED'] as const), undefined]), primaryVerified: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), ...overrideResponse})
+
+export const getListStaffAssignmentsResponseMock = (overrideResponse: Partial<Extract<StaffAssignmentSelfPage, object>> = {}): StaffAssignmentSelfPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({assignmentId: faker.string.alpha({length: {min: 10, max: 20}}), eventId: faker.string.alpha({length: {min: 10, max: 20}}), role: faker.helpers.arrayElement(['gate_staff','gate_lead'] as const), status: faker.helpers.arrayElement(['ASSIGNED','REVOKED','ENDED'] as const), validFrom: faker.date.past().toISOString().slice(0, 19) + 'Z', validUntil: faker.date.past().toISOString().slice(0, 19) + 'Z', activeScannerDeviceName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+
+export const getGetIdentityProfileResponseMock = (overrideResponse: Partial<Extract<IdentityProfile, object>> = {}): IdentityProfile => ({nickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 64}}), null]), memberCode: faker.string.alpha({length: {min: 10, max: 20}}), verified: faker.datatype.boolean(), verifiedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), phoneMasked: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), savedBookerName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), savedBookerPhone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), consents: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({kind: faker.helpers.arrayElement(['TERMS','PRIVACY_REQUIRED','PRIVACY_PHONE','MARKETING'] as const), noticeVersion: faker.string.alpha({length: {min: 10, max: 20}}), channels: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), agreedAt: faker.date.past().toISOString().slice(0, 19) + 'Z'})), ...overrideResponse})
+
+export const getUpdateIdentityProfileResponseMock = (overrideResponse: Partial<Extract<IdentityProfile, object>> = {}): IdentityProfile => ({nickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 64}}), null]), memberCode: faker.string.alpha({length: {min: 10, max: 20}}), verified: faker.datatype.boolean(), verifiedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), phoneMasked: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), savedBookerName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), savedBookerPhone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), consents: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({kind: faker.helpers.arrayElement(['TERMS','PRIVACY_REQUIRED','PRIVACY_PHONE','MARKETING'] as const), noticeVersion: faker.string.alpha({length: {min: 10, max: 20}}), channels: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), agreedAt: faker.date.past().toISOString().slice(0, 19) + 'Z'})), ...overrideResponse})
+
+export const getPutIdentityConsentResponseMock = (overrideResponse: Partial<Extract<IdentityConsent, object>> = {}): IdentityConsent => ({kind: faker.helpers.arrayElement(['TERMS','PRIVACY_REQUIRED','PRIVACY_PHONE','MARKETING'] as const), noticeVersion: faker.string.alpha({length: {min: 10, max: 20}}), channels: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), agreedAt: faker.date.past().toISOString().slice(0, 19) + 'Z', ...overrideResponse})
+
+export const getGetIdentityScannerSessionsResponseMock = (overrideResponse: Partial<Extract<GetIdentityScannerSessions200, object>> = {}): GetIdentityScannerSessions200 => ({items: Array.from({ length: faker.number.int({min: 1, max: 1}) }, (_, i) => i + 1).map(() => ({sessionId: faker.string.uuid(), deviceName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), eventId: faker.string.alpha({length: {min: 10, max: 20}}), role: faker.helpers.arrayElement(['gate_staff','gate_lead'] as const), proxy: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), approvedAt: faker.date.past().toISOString().slice(0, 19) + 'Z', expiresAt: faker.date.past().toISOString().slice(0, 19) + 'Z', lastSeenAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null])})), ...overrideResponse})
 
 
 export const getCreateIdentityBoothReverificationMockHandler = (overrideResponse?: VerificationStart | ((info: Parameters<HttpResponseResolver<PathParams, CreateIdentityBoothReverificationBody>>[0]) => Promise<VerificationStart> | VerificationStart), options?: RequestHandlerOptions) => {
@@ -466,6 +482,96 @@ export const getCreateIdentityMergeProposalConfirmationMockHandler = (overrideRe
       })
   }, options)
 }
+
+export const getCreateStaffInvitationRejectionMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<PathParams, CreateStaffInvitationRejectionBody>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.post<PathParams, CreateStaffInvitationRejectionBody>('*/v1/staff-invitation-rejections', async (info: Parameters<HttpResponseResolver<PathParams, CreateStaffInvitationRejectionBody>>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
+
+export const getListStaffAssignmentsMockHandler = (overrideResponse?: StaffAssignmentSelfPage | ((info: Parameters<HttpResponseResolver>[0]) => Promise<StaffAssignmentSelfPage> | StaffAssignmentSelfPage), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/staff-assignments', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListStaffAssignmentsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getGetIdentityProfileMockHandler = (overrideResponse?: IdentityProfile | ((info: Parameters<HttpResponseResolver>[0]) => Promise<IdentityProfile> | IdentityProfile), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/identity/profile', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetIdentityProfileResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getUpdateIdentityProfileMockHandler = (overrideResponse?: IdentityProfile | ((info: Parameters<HttpResponseResolver<PathParams, IdentityProfileUpdateInput>>[0]) => Promise<IdentityProfile> | IdentityProfile), options?: RequestHandlerOptions) => {
+  return http.patch<PathParams, IdentityProfileUpdateInput>('*/v1/identity/profile', async (info: Parameters<HttpResponseResolver<PathParams, IdentityProfileUpdateInput>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getUpdateIdentityProfileResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getPutIdentityConsentMockHandler = (overrideResponse?: IdentityConsent | ((info: Parameters<HttpResponseResolver<{ kind: string }>>[0]) => Promise<IdentityConsent> | IdentityConsent), options?: RequestHandlerOptions) => {
+  return http.put<{ kind: string }>('*/v1/identity/consents/:kind', async (info: Parameters<HttpResponseResolver<{ kind: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getPutIdentityConsentResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getDeleteIdentityConsentMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ kind: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.delete<{ kind: string }>('*/v1/identity/consents/:kind', async (info: Parameters<HttpResponseResolver<{ kind: string }>>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
+
+export const getGetIdentityScannerSessionsMockHandler = (overrideResponse?: GetIdentityScannerSessions200 | ((info: Parameters<HttpResponseResolver>[0]) => Promise<GetIdentityScannerSessions200> | GetIdentityScannerSessions200), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/identity/scanner-sessions', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetIdentityScannerSessionsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getDeleteIdentityScannerSessionMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ sessionId: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.delete<{ sessionId: string }>('*/v1/identity/scanner-sessions/:sessionId', async (info: Parameters<HttpResponseResolver<{ sessionId: string }>>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
 export const getIdentityMock = () => [
   getCreateIdentityBoothReverificationMockHandler(),
   getCreateIdentityMinorContractCheckMockHandler(),
@@ -498,5 +604,13 @@ export const getIdentityMock = () => [
   getGetIdentityLinkProposalMockHandler(),
   getCreateIdentityLinkProposalSeparateAccountMockHandler(),
   getGetIdentityMergeProposalMockHandler(),
-  getCreateIdentityMergeProposalConfirmationMockHandler()
+  getCreateIdentityMergeProposalConfirmationMockHandler(),
+  getCreateStaffInvitationRejectionMockHandler(),
+  getListStaffAssignmentsMockHandler(),
+  getGetIdentityProfileMockHandler(),
+  getUpdateIdentityProfileMockHandler(),
+  getPutIdentityConsentMockHandler(),
+  getDeleteIdentityConsentMockHandler(),
+  getGetIdentityScannerSessionsMockHandler(),
+  getDeleteIdentityScannerSessionMockHandler()
 ]

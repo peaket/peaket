@@ -42,14 +42,20 @@ import type {
   CreateIdentityVerificationResultBody,
   CreateStaffInvitationAcceptanceBody,
   CreateStaffInvitationLookupBody,
+  CreateStaffInvitationRejectionBody,
   CreateSubscriptionOptOutBody,
   DeleteEventSubscriptionsParams,
   DeleteIdentityAccountBody,
   DeviceApprovalView,
   FanAccountSummary,
   GetIdentityProviders200,
+  GetIdentityScannerSessions200,
   GetIdentitySessions200,
+  IdentityConsent,
+  IdentityProfile,
+  IdentityProfileUpdateInput,
   LinkProposal,
+  ListStaffAssignmentsParams,
   ListSubscriptions200,
   ListSubscriptionsParams,
   ListWishes200,
@@ -63,6 +69,7 @@ import type {
   ServiceUnavailableResponse,
   SignupCompletionInput,
   StaffAssignment,
+  StaffAssignmentSelfPage,
   StaffInvitationView,
   SubscriptionState,
   TooManyRequestsResponse,
@@ -3652,4 +3659,913 @@ export const useCreateIdentityMergeProposalConfirmation = <TError = ErrorType<Pr
         TContext
       > => {
       return useMutation(getCreateIdentityMergeProposalConfirmationMutationOptions(options), queryClient);
+    }
+    export type createStaffInvitationRejectionResponse204 = {
+  data: void
+  status: 204
+}
+
+export type createStaffInvitationRejectionResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createStaffInvitationRejectionResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createStaffInvitationRejectionResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createStaffInvitationRejectionResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createStaffInvitationRejectionResponseSuccess = (createStaffInvitationRejectionResponse204) & {
+  headers: Headers;
+};
+export type createStaffInvitationRejectionResponseError = (createStaffInvitationRejectionResponse400 | createStaffInvitationRejectionResponse401 | createStaffInvitationRejectionResponse410 | createStaffInvitationRejectionResponse429) & {
+  headers: Headers;
+};
+
+export const getCreateStaffInvitationRejectionUrl = () => {
+
+
+
+
+  return `/v1/staff-invitation-rejections`
+}
+
+/**
+ * FR-046, POL-031, ADR-0051, docs/design/d5 §1.6 5번·§5.26. 토큰은 링크의 URL 조각에서 꺼내 본문으로 보낸다(주소에 두지 않는다, guidelines §9). 초대 이메일로만 가는 1회용 토큰을 가진 로그인 계정이면 거절할 수 있다 [가정](수락과 달리 본인확인과 이메일 일치를 보지 않는다. 거절은 아무 권한도 주지 않고, 수락 조건을 못 채운 사람도 거절할 수 있어야 해서다). 배정 상태를 EXPIRED로 끝내고 invite_email을 파기한다(거절을 따로 보이는 값은 응답 열거를 늘려 계약이 깨지므로 두지 않는다 [가정])(data-classification '현장 스태프 초대 이메일'). 같은 토큰을 다시 보내도 같은 204라 멱등 키를 받지 않는다(guidelines §4). 동의는 받지 않는다. Cache-Control: no-store
+ * @summary 현장 스태프 초대 거절(SCR-050 [수락하지 않기])
+ */
+export const createStaffInvitationRejection = async (createStaffInvitationRejectionBody: CreateStaffInvitationRejectionBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createStaffInvitationRejectionResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createStaffInvitationRejectionResponseSuccess>(getCreateStaffInvitationRejectionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createStaffInvitationRejectionBody)
+  }
+);}
+
+
+
+
+
+export const getCreateStaffInvitationRejectionMutationKey = () => ['createStaffInvitationRejection'] as const;
+
+export const getCreateStaffInvitationRejectionMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createStaffInvitationRejection>>, TError,CreateStaffInvitationRejectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createStaffInvitationRejection>>, TError,CreateStaffInvitationRejectionMutationVariables, TContext> => {
+
+const mutationKey = getCreateStaffInvitationRejectionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createStaffInvitationRejection>>, CreateStaffInvitationRejectionMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createStaffInvitationRejection(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateStaffInvitationRejectionMutationResult = NonNullable<Awaited<ReturnType<typeof createStaffInvitationRejection>>>
+    export type CreateStaffInvitationRejectionMutationBody = BodyType<CreateStaffInvitationRejectionBody>
+    export type CreateStaffInvitationRejectionMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse>
+    export type CreateStaffInvitationRejectionMutationVariables = {data: BodyType<CreateStaffInvitationRejectionBody>}
+
+    /**
+ * @summary 현장 스태프 초대 거절(SCR-050 [수락하지 않기])
+ */
+export const useCreateStaffInvitationRejection = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createStaffInvitationRejection>>, TError,CreateStaffInvitationRejectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createStaffInvitationRejection>>,
+        TError,
+        CreateStaffInvitationRejectionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateStaffInvitationRejectionMutationOptions(options), queryClient);
+    }
+    export type listStaffAssignmentsResponse200 = {
+  data: StaffAssignmentSelfPage
+  status: 200
+}
+
+export type listStaffAssignmentsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listStaffAssignmentsResponseSuccess = (listStaffAssignmentsResponse200) & {
+  headers: Headers;
+};
+export type listStaffAssignmentsResponseError = (listStaffAssignmentsResponse401) & {
+  headers: Headers;
+};
+
+export const getListStaffAssignmentsUrl = (params?: ListStaffAssignmentsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/staff-assignments?${stringifiedParams}` : `/v1/staff-assignments`
+}
+
+/**
+ * FR-046, POL-031, ADR-0051, docs/design/d5 §1.6 5번·§5.35. 세션 계정의 배정(ASSIGNED·ENDED·REVOKED)을 유효 시작이 늦은 순으로 준다. 초대 중(INVITED)과 거절·만료(EXPIRED)는 뺀다. 공연명·시작 시각·판매자 상호는 싣지 않고 화면이 eventId로 회차 공개 요약(GET /v1/events/{eventId})을 읽는다(소유자 결정 2026-10-30 open-items 78번의 DeviceApprovalView와 같은 방식). '진행 중'은 ASSIGNED이면서 지금이 validFrom과 validUntil 사이인 것으로 화면이 계산한다(data.md staff_assignment). Cache-Control: private, no-store
+ * @summary 내 현장 배정 목록(SCR-061)
+ */
+export const listStaffAssignments = async (params?: ListStaffAssignmentsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listStaffAssignmentsResponseSuccess> => {
+
+  return orvalFetch<listStaffAssignmentsResponseSuccess>(getListStaffAssignmentsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListStaffAssignmentsQueryKey = (params?: ListStaffAssignmentsParams,) => {
+    return [
+    `/v1/staff-assignments`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListStaffAssignmentsQueryOptions = <TData = Awaited<ReturnType<typeof listStaffAssignments>>, TError = ErrorType<UnauthorizedResponse>>(params?: ListStaffAssignmentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStaffAssignments>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListStaffAssignmentsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listStaffAssignments>>> = ({ signal }) => listStaffAssignments(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listStaffAssignments>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListStaffAssignmentsQueryResult = NonNullable<Awaited<ReturnType<typeof listStaffAssignments>>>
+export type ListStaffAssignmentsQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useListStaffAssignments<TData = Awaited<ReturnType<typeof listStaffAssignments>>, TError = ErrorType<UnauthorizedResponse>>(
+ params: undefined |  ListStaffAssignmentsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStaffAssignments>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listStaffAssignments>>,
+          TError,
+          Awaited<ReturnType<typeof listStaffAssignments>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListStaffAssignments<TData = Awaited<ReturnType<typeof listStaffAssignments>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListStaffAssignmentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStaffAssignments>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listStaffAssignments>>,
+          TError,
+          Awaited<ReturnType<typeof listStaffAssignments>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListStaffAssignments<TData = Awaited<ReturnType<typeof listStaffAssignments>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListStaffAssignmentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStaffAssignments>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 현장 배정 목록(SCR-061)
+ */
+
+export function useListStaffAssignments<TData = Awaited<ReturnType<typeof listStaffAssignments>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListStaffAssignmentsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStaffAssignments>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListStaffAssignmentsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getIdentityProfileResponse200 = {
+  data: IdentityProfile
+  status: 200
+}
+
+export type getIdentityProfileResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getIdentityProfileResponseSuccess = (getIdentityProfileResponse200) & {
+  headers: Headers;
+};
+export type getIdentityProfileResponseError = (getIdentityProfileResponse401) & {
+  headers: Headers;
+};
+
+export const getGetIdentityProfileUrl = () => {
+
+
+
+
+  return `/v1/identity/profile`
+}
+
+/**
+ * FR-017, POL-019, POL-023, SCR-017 ①·④·⑦, docs/design/d5 §1.6 18번. 페이지마다 부르는 GET /v1/identity/me에는 개인정보를 싣지 않으므로(ADR-0202) 계정 설정 화면만 쓰는 경로를 따로 둔다. 이메일은 화면이 쓰지 않아 싣지 않는다. 휴대폰 번호는 가린 값만 준다. 저장된 예매자 정보는 예매 화면의 입력을 미리 채우는 본인 값이라 원문이다(authz-matrix §4.1 팬(본인) 원문). Cache-Control: no-store
+ * @summary 내 프로필과 동의 상태(계정 설정)
+ */
+export const getIdentityProfile = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<getIdentityProfileResponseSuccess> => {
+
+  return orvalFetch<getIdentityProfileResponseSuccess>(getGetIdentityProfileUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetIdentityProfileQueryKey = () => {
+    return [
+    `/v1/identity/profile`
+    ] as const;
+    }
+
+
+export const getGetIdentityProfileQueryOptions = <TData = Awaited<ReturnType<typeof getIdentityProfile>>, TError = ErrorType<UnauthorizedResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityProfile>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIdentityProfileQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIdentityProfile>>> = ({ signal }) => getIdentityProfile({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getIdentityProfile>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetIdentityProfileQueryResult = NonNullable<Awaited<ReturnType<typeof getIdentityProfile>>>
+export type GetIdentityProfileQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useGetIdentityProfile<TData = Awaited<ReturnType<typeof getIdentityProfile>>, TError = ErrorType<UnauthorizedResponse>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityProfile>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIdentityProfile>>,
+          TError,
+          Awaited<ReturnType<typeof getIdentityProfile>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIdentityProfile<TData = Awaited<ReturnType<typeof getIdentityProfile>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityProfile>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIdentityProfile>>,
+          TError,
+          Awaited<ReturnType<typeof getIdentityProfile>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIdentityProfile<TData = Awaited<ReturnType<typeof getIdentityProfile>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityProfile>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 프로필과 동의 상태(계정 설정)
+ */
+
+export function useGetIdentityProfile<TData = Awaited<ReturnType<typeof getIdentityProfile>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityProfile>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetIdentityProfileQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type updateIdentityProfileResponse200 = {
+  data: IdentityProfile
+  status: 200
+}
+
+export type updateIdentityProfileResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type updateIdentityProfileResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type updateIdentityProfileResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type updateIdentityProfileResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type updateIdentityProfileResponse415 = {
+  data: ProblemResponse
+  status: 415
+}
+
+export type updateIdentityProfileResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type updateIdentityProfileResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type updateIdentityProfileResponseSuccess = (updateIdentityProfileResponse200) & {
+  headers: Headers;
+};
+export type updateIdentityProfileResponseError = (updateIdentityProfileResponse400 | updateIdentityProfileResponse401 | updateIdentityProfileResponse403 | updateIdentityProfileResponse409 | updateIdentityProfileResponse415 | updateIdentityProfileResponse422 | updateIdentityProfileResponse429) & {
+  headers: Headers;
+};
+
+export const getUpdateIdentityProfileUrl = () => {
+
+
+
+
+  return `/v1/identity/profile`
+}
+
+/**
+ * FR-017, POL-019, POL-023, ADR-0203 결정 2, I-T18, SCR-017 ⑦, docs/design/d5 §1.6 18번. 보낸 칸만 바꾼다. 혼자 바꾸는 자기 상태라 If-Match 없이 마지막 저장이 이긴다(guidelines §12 예외). 같은 요청을 다시 보내도 결과가 같아 멱등 키를 받지 않는다. 닉네임은 가입 마무리와 같은 규칙이다(NFC, 앞뒤 공백 제거, 문자소 2~12개, 중복은 NFKC·대소문자 접기). phone을 바꿀 때만 재인증 토큰이 필요하고(FAN_SENSITIVE, 5분 한 번), 휴대폰 번호 수집 동의(PRIVACY_PHONE)가 있어야 한다. 닉네임은 이미 낸 후기·양도 표시에 소급하지 않는다 [가정](후기 작성자 표시는 첫 글자만이다). Cache-Control: no-store phone은 연락처 값이고 소유를 확인하지 않는다. 양도 받는 사람 찾기(POST /v1/transfer-recipient-lookups)는 이 값이 아니라 본인확인을 마친 번호로만 찾는다 [가정](구현 단계가 지킨다).
+ * @summary 내 프로필 고치기(닉네임, 연락처, 저장된 예매자 정보)
+ */
+export const updateIdentityProfile = async (identityProfileUpdateInput: IdentityProfileUpdateInput, options?: Parameters<typeof orvalFetch>[1]): Promise<updateIdentityProfileResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<updateIdentityProfileResponseSuccess>(getUpdateIdentityProfileUrl(),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(identityProfileUpdateInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateIdentityProfileMutationKey = () => ['updateIdentityProfile'] as const;
+
+export const getUpdateIdentityProfileMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIdentityProfile>>, TError,UpdateIdentityProfileMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateIdentityProfile>>, TError,UpdateIdentityProfileMutationVariables, TContext> => {
+
+const mutationKey = getUpdateIdentityProfileMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateIdentityProfile>>, UpdateIdentityProfileMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateIdentityProfile(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateIdentityProfileMutationResult = NonNullable<Awaited<ReturnType<typeof updateIdentityProfile>>>
+    export type UpdateIdentityProfileMutationBody = BodyType<IdentityProfileUpdateInput>
+    export type UpdateIdentityProfileMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse>
+    export type UpdateIdentityProfileMutationVariables = {data: BodyType<IdentityProfileUpdateInput>}
+
+    /**
+ * @summary 내 프로필 고치기(닉네임, 연락처, 저장된 예매자 정보)
+ */
+export const useUpdateIdentityProfile = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIdentityProfile>>, TError,UpdateIdentityProfileMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateIdentityProfile>>,
+        TError,
+        UpdateIdentityProfileMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateIdentityProfileMutationOptions(options), queryClient);
+    }
+    export type putIdentityConsentResponse200 = {
+  data: IdentityConsent
+  status: 200
+}
+
+export type putIdentityConsentResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type putIdentityConsentResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type putIdentityConsentResponseSuccess = (putIdentityConsentResponse200) & {
+  headers: Headers;
+};
+export type putIdentityConsentResponseError = (putIdentityConsentResponse401 | putIdentityConsentResponse429) & {
+  headers: Headers;
+};
+
+export const getPutIdentityConsentUrl = (kind: 'MARKETING' | 'PRIVACY_PHONE',) => {
+
+
+
+
+  return `/v1/identity/consents/${encodeURIComponent(String(kind))}`
+}
+
+/**
+ * FR-017, POL-023, SCR-017 ④, docs/planning/03 §1.2, docs/design/d5 §1.6 18번. 선택 동의 둘만 받는다(필수 동의는 철회 대신 탈퇴다). 고지 문안의 판과 동의 일시는 서버가 정해 consent에 남긴다(가입 마무리와 같다, ADR-0203). 마케팅 수신 채널은 §1.2의 기본값 [가정]이다. 이미 같은 판의 동의가 있으면 그대로 200이라 멱등 키를 받지 않는다. 동의·거부 결과의 14일 안 통지는 알림이 맡는다(§1.2). Cache-Control: no-store
+ * @summary 선택 동의 켜기(마케팅 알림, 휴대폰 번호 수집)
+ */
+export const putIdentityConsent = async (kind: 'MARKETING' | 'PRIVACY_PHONE', options?: Parameters<typeof orvalFetch>[1]): Promise<putIdentityConsentResponseSuccess> => {
+
+  return orvalFetch<putIdentityConsentResponseSuccess>(getPutIdentityConsentUrl(kind),
+  {
+    ...options,
+    method: 'PUT'
+
+
+  }
+);}
+
+
+
+
+
+export const getPutIdentityConsentMutationKey = () => ['putIdentityConsent'] as const;
+
+export const getPutIdentityConsentMutationOptions = <TError = ErrorType<UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putIdentityConsent>>, TError,PutIdentityConsentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putIdentityConsent>>, TError,PutIdentityConsentMutationVariables, TContext> => {
+
+const mutationKey = getPutIdentityConsentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putIdentityConsent>>, PutIdentityConsentMutationVariables> = (props) => {
+          const {kind} = props ?? {};
+
+          return  putIdentityConsent(kind,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutIdentityConsentMutationResult = NonNullable<Awaited<ReturnType<typeof putIdentityConsent>>>
+
+    export type PutIdentityConsentMutationError = ErrorType<UnauthorizedResponse | TooManyRequestsResponse>
+    export type PutIdentityConsentMutationVariables = {kind: 'MARKETING' | 'PRIVACY_PHONE'}
+
+    /**
+ * @summary 선택 동의 켜기(마케팅 알림, 휴대폰 번호 수집)
+ */
+export const usePutIdentityConsent = <TError = ErrorType<UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putIdentityConsent>>, TError,PutIdentityConsentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof putIdentityConsent>>,
+        TError,
+        PutIdentityConsentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPutIdentityConsentMutationOptions(options), queryClient);
+    }
+    export type deleteIdentityConsentResponse204 = {
+  data: void
+  status: 204
+}
+
+export type deleteIdentityConsentResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type deleteIdentityConsentResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type deleteIdentityConsentResponseSuccess = (deleteIdentityConsentResponse204) & {
+  headers: Headers;
+};
+export type deleteIdentityConsentResponseError = (deleteIdentityConsentResponse401 | deleteIdentityConsentResponse429) & {
+  headers: Headers;
+};
+
+export const getDeleteIdentityConsentUrl = (kind: 'MARKETING' | 'PRIVACY_PHONE',) => {
+
+
+
+
+  return `/v1/identity/consents/${encodeURIComponent(String(kind))}`
+}
+
+/**
+ * FR-017, POL-023, data.md consent('선택 동의를 철회하면 그 종류의 행을 지운다'), docs/design/d5 §1.6 18번. 없어도 204다(멱등). PRIVACY_PHONE을 철회하면 계정의 휴대폰 번호(account.phone)도 비운다 [가정](수집 근거가 사라진다). 그러면 양도 받는 사람 찾기와 공연 당일 문자 알림에서 그 번호를 쓰지 못한다. 저장된 예매자 정보는 이 동의와 따로다 [가정]. Cache-Control: no-store
+ * @summary 선택 동의 철회(마케팅 알림, 휴대폰 번호 수집)
+ */
+export const deleteIdentityConsent = async (kind: 'MARKETING' | 'PRIVACY_PHONE', options?: Parameters<typeof orvalFetch>[1]): Promise<deleteIdentityConsentResponseSuccess> => {
+
+  return orvalFetch<deleteIdentityConsentResponseSuccess>(getDeleteIdentityConsentUrl(kind),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteIdentityConsentMutationKey = () => ['deleteIdentityConsent'] as const;
+
+export const getDeleteIdentityConsentMutationOptions = <TError = ErrorType<UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIdentityConsent>>, TError,DeleteIdentityConsentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteIdentityConsent>>, TError,DeleteIdentityConsentMutationVariables, TContext> => {
+
+const mutationKey = getDeleteIdentityConsentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteIdentityConsent>>, DeleteIdentityConsentMutationVariables> = (props) => {
+          const {kind} = props ?? {};
+
+          return  deleteIdentityConsent(kind,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteIdentityConsentMutationResult = NonNullable<Awaited<ReturnType<typeof deleteIdentityConsent>>>
+
+    export type DeleteIdentityConsentMutationError = ErrorType<UnauthorizedResponse | TooManyRequestsResponse>
+    export type DeleteIdentityConsentMutationVariables = {kind: 'MARKETING' | 'PRIVACY_PHONE'}
+
+    /**
+ * @summary 선택 동의 철회(마케팅 알림, 휴대폰 번호 수집)
+ */
+export const useDeleteIdentityConsent = <TError = ErrorType<UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIdentityConsent>>, TError,DeleteIdentityConsentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteIdentityConsent>>,
+        TError,
+        DeleteIdentityConsentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteIdentityConsentMutationOptions(options), queryClient);
+    }
+    export type getIdentityScannerSessionsResponse200 = {
+  data: GetIdentityScannerSessions200
+  status: 200
+}
+
+export type getIdentityScannerSessionsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getIdentityScannerSessionsResponseSuccess = (getIdentityScannerSessionsResponse200) & {
+  headers: Headers;
+};
+export type getIdentityScannerSessionsResponseError = (getIdentityScannerSessionsResponse401) & {
+  headers: Headers;
+};
+
+export const getGetIdentityScannerSessionsUrl = () => {
+
+
+
+
+  return `/v1/identity/scanner-sessions`
+}
+
+/**
+ * FR-046, POL-031, ADR-0051, SCR-017 ②, docs/features/identity.md §6.1 '세션 수', docs/design/d5 §1.6 18번, BUILD_ORDER GAT-230. 세션 계정의 끝나지 않은 스캐너 세션을 준다. 계정마다 1개뿐이라(I-T38) 나누지 않는다(guidelines §3). 스태프가 아니면 빈 items다. Cache-Control: no-store
+ * @summary 내 스캐너 세션 목록(휴대폰 쪽, SCR-017 로그인한 기기)
+ */
+export const getIdentityScannerSessions = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<getIdentityScannerSessionsResponseSuccess> => {
+
+  return orvalFetch<getIdentityScannerSessionsResponseSuccess>(getGetIdentityScannerSessionsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetIdentityScannerSessionsQueryKey = () => {
+    return [
+    `/v1/identity/scanner-sessions`
+    ] as const;
+    }
+
+
+export const getGetIdentityScannerSessionsQueryOptions = <TData = Awaited<ReturnType<typeof getIdentityScannerSessions>>, TError = ErrorType<UnauthorizedResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityScannerSessions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIdentityScannerSessionsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIdentityScannerSessions>>> = ({ signal }) => getIdentityScannerSessions({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getIdentityScannerSessions>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetIdentityScannerSessionsQueryResult = NonNullable<Awaited<ReturnType<typeof getIdentityScannerSessions>>>
+export type GetIdentityScannerSessionsQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useGetIdentityScannerSessions<TData = Awaited<ReturnType<typeof getIdentityScannerSessions>>, TError = ErrorType<UnauthorizedResponse>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityScannerSessions>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIdentityScannerSessions>>,
+          TError,
+          Awaited<ReturnType<typeof getIdentityScannerSessions>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIdentityScannerSessions<TData = Awaited<ReturnType<typeof getIdentityScannerSessions>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityScannerSessions>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIdentityScannerSessions>>,
+          TError,
+          Awaited<ReturnType<typeof getIdentityScannerSessions>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIdentityScannerSessions<TData = Awaited<ReturnType<typeof getIdentityScannerSessions>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityScannerSessions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 스캐너 세션 목록(휴대폰 쪽, SCR-017 로그인한 기기)
+ */
+
+export function useGetIdentityScannerSessions<TData = Awaited<ReturnType<typeof getIdentityScannerSessions>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentityScannerSessions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetIdentityScannerSessionsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type deleteIdentityScannerSessionResponse204 = {
+  data: void
+  status: 204
+}
+
+export type deleteIdentityScannerSessionResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type deleteIdentityScannerSessionResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type deleteIdentityScannerSessionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type deleteIdentityScannerSessionResponseSuccess = (deleteIdentityScannerSessionResponse204) & {
+  headers: Headers;
+};
+export type deleteIdentityScannerSessionResponseError = (deleteIdentityScannerSessionResponse401 | deleteIdentityScannerSessionResponse403 | deleteIdentityScannerSessionResponse404) & {
+  headers: Headers;
+};
+
+export const getDeleteIdentityScannerSessionUrl = (sessionId: string,) => {
+
+
+
+
+  return `/v1/identity/scanner-sessions/${encodeURIComponent(String(sessionId))}`
+}
+
+/**
+ * FR-046, POL-031, ADR-0051, SCR-017 ②, docs/features/identity.md §6.1, docs/design/d5 §5.17, BUILD_ORDER GAT-230. 다른 기기 로그아웃(DELETE /v1/identity/sessions/{sessionId})과 같은 재인증이다(작업 묶음 FAN_SENSITIVE, 5분 한 번, 404는 토큰을 쓰지 않는다). scanner_session.terminated_at을 적으면 스캐너 경로 가드의 세션 확인이 다음 요청부터 거절한다. 오프라인 기기에 남은 스캔 기록은 기기 자격으로 올린다(offline-gate §6.5). 휴대폰 로그아웃과는 따로다. Cache-Control: no-store
+ * @summary 내 스캐너 세션 끝내기(재인증 토큰 필요)
+ */
+export const deleteIdentityScannerSession = async (sessionId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<deleteIdentityScannerSessionResponseSuccess> => {
+
+  return orvalFetch<deleteIdentityScannerSessionResponseSuccess>(getDeleteIdentityScannerSessionUrl(sessionId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteIdentityScannerSessionMutationKey = () => ['deleteIdentityScannerSession'] as const;
+
+export const getDeleteIdentityScannerSessionMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIdentityScannerSession>>, TError,DeleteIdentityScannerSessionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteIdentityScannerSession>>, TError,DeleteIdentityScannerSessionMutationVariables, TContext> => {
+
+const mutationKey = getDeleteIdentityScannerSessionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteIdentityScannerSession>>, DeleteIdentityScannerSessionMutationVariables> = (props) => {
+          const {sessionId} = props ?? {};
+
+          return  deleteIdentityScannerSession(sessionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteIdentityScannerSessionMutationResult = NonNullable<Awaited<ReturnType<typeof deleteIdentityScannerSession>>>
+
+    export type DeleteIdentityScannerSessionMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type DeleteIdentityScannerSessionMutationVariables = {sessionId: string}
+
+    /**
+ * @summary 내 스캐너 세션 끝내기(재인증 토큰 필요)
+ */
+export const useDeleteIdentityScannerSession = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIdentityScannerSession>>, TError,DeleteIdentityScannerSessionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteIdentityScannerSession>>,
+        TError,
+        DeleteIdentityScannerSessionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteIdentityScannerSessionMutationOptions(options), queryClient);
     }

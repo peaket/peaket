@@ -25,4 +25,10 @@ export interface TransferOffer {
   expiresAt?: string;
   /** 결제자만 취소·환불 고지 문구 */
   payerOnlyNotice?: string;
+  eventId?: string;
+  /** 공연명 */
+  eventTitle?: string;
+  /** 회차 시작 */
+  eventStartsAt?: string;
+  seatLabel?: string;
 }

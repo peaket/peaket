@@ -9,6 +9,7 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { CompensationReason } from './compensationReason';
 import type { CompensationStatus } from './compensationStatus';
 
 /**
@@ -21,4 +22,8 @@ export interface Compensation {
   amount?: number;
   status?: CompensationStatus;
   accountLast4?: string;
+  eventId?: string;
+  /** 배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정] */
+  reason?: CompensationReason;
+  createdAt?: string;
 }

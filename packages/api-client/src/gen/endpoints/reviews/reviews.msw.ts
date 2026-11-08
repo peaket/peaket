@@ -52,6 +52,8 @@ export const getCreateReviewImageResponseMock = (overrideResponse: Partial<Extra
 
 export const getCreateReviewReportResponseMock = (overrideResponse: Partial<Extract<ContentReportResult, object>> = {}): ContentReportResult => ({reportId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
 
+export const getListReviewsResponseMock = (overrideResponse: Partial<Extract<ReviewPage, object>> = {}): ReviewPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({reviewId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), authorDisplay: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), attendedStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), rating: faker.helpers.arrayElement([faker.number.int({min: 1, max: 5}), undefined]), body: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), edited: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), mine: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), reportedByMe: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), images: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 3}) }, (_, i) => i + 1).map(() => ({imageId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), thumbnailUrl: faker.helpers.arrayElement([faker.internet.url(), undefined]), url: faker.helpers.arrayElement([faker.internet.url(), undefined]), alt: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), width: faker.helpers.arrayElement([faker.number.int(), undefined]), height: faker.helpers.arrayElement([faker.number.int(), undefined])})), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['VISIBLE','HIDDEN'] as const), undefined]), notice: faker.helpers.arrayElement([faker.helpers.arrayElement(['RIGHTS_TEMP','POLICY'] as const), undefined]), noticeUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), permalink: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+
 
 export const getListEventReviewsMockHandler = (overrideResponse?: ReviewPage | ((info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => Promise<ReviewPage> | ReviewPage), options?: RequestHandlerOptions) => {
   return http.get<{ eventId: string }>('*/v1/events/:eventId/reviews', async (info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => {
@@ -158,6 +160,18 @@ export const getCreateReviewReportMockHandler = (overrideResponse?: ContentRepor
       })
   }, options)
 }
+
+export const getListReviewsMockHandler = (overrideResponse?: ReviewPage | ((info: Parameters<HttpResponseResolver>[0]) => Promise<ReviewPage> | ReviewPage), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/reviews', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListReviewsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
 export const getReviewsMock = () => [
   getListEventReviewsMockHandler(),
   getCreateEventReviewMockHandler(),
@@ -167,5 +181,6 @@ export const getReviewsMock = () => [
   getUpdateReviewMockHandler(),
   getDeleteReviewMockHandler(),
   getCreateReviewImageMockHandler(),
-  getCreateReviewReportMockHandler()
+  getCreateReviewReportMockHandler(),
+  getListReviewsMockHandler()
 ]

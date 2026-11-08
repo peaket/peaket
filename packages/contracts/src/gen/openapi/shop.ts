@@ -19,17 +19,49 @@ import * as zod from 'zod';
  */
 export const listShopProductsQueryLimitMax = 100;
 
+export const listShopProductsQueryTypeMax = 32;
+
+export const listShopProductsQueryLinkedEventIdMax = 64;
+
 
 
 export const ListShopProductsQueryParams = zod.object({
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
-  "limit": zod.int().min(1).max(listShopProductsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+  "limit": zod.int().min(1).max(listShopProductsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)'),
+  "type": zod.string().max(listShopProductsQueryTypeMax).optional().describe('상품 유형(product_type.code)'),
+  "linkedEventId": zod.string().max(listShopProductsQueryLinkedEventIdMax).optional().describe('이 회차에 연동된 부가 상품만(SCR-013 ③ [부가 상품], /my/tickets/[ticketId]/addons)')
 })
 
-export const ListShopProductsResponse = zod.unknown()
+
+
+
+export const ListShopProductsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "productId": zod.uuid(),
+  "type": zod.string().describe('product_type.code(MERCH·PARKING·VIP·FAST_LANE 등, 목록이 늘 수 있어 열거로 닫지 않는다)'),
+  "name": zod.string(),
+  "imageUrl": zod.url().nullish().describe('대표 사진. 파생본 묶음의 기준 주소 [가정](docs/data.md product에 칸이 없어 attributes에 둔다)'),
+  "imageAlt": zod.string().nullish(),
+  "price": zod.int().describe('상품 가격(원)'),
+  "shippingFee": zod.int().nullish().describe('편도 배송비(원). 택배를 받지 않으면 null'),
+  "fulfillments": zod.array(zod.enum(['DELIVERY', 'PICKUP', 'WALLET'])).min(1).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('받을 수 있는 수령 방식'),
+  "sellerName": zod.string().describe('판매자 상호(POL-037)'),
+  "saleStatus": zod.enum(['UPCOMING', 'ON_SALE', 'SOLD_OUT', 'ENDED']).describe('판매 기간과 재고로 계산한다(data.md product.status). HIDDEN·DRAFT는 나오지 않는다'),
+  "limitedQuantity": zod.int().nullish().describe('한정 수량. 한정이 아니면 null'),
+  "remainingQuantity": zod.int().nullish().describe('남은 수량(근사). 한정이 아니면 null. 결제 전 주문이 잡은 수량을 뺀 값이다'),
+  "perAccountLimit": zod.int().nullish().describe('계정당 최대 수량(SCR-015 ⑦). attributes에 둔다 [가정]'),
+  "ticketHoldersOnly": zod.boolean().optional().describe('티켓 보유자 전용 상품(d5 §5.15). attributes에 둔다 [가정]'),
+  "linkedEventId": zod.string().nullish().describe('티켓 연동 부가 상품의 연결 회차'),
+  "linkedEventStartsAt": zod.iso.datetime({"offset":true}).nullish().describe('연결 회차 시작(카드의 \'10/25(일) 18:00 회차\')'),
+  "queueRequired": zod.boolean().optional().describe('인기 MD 오픈 상품. 참이면 대기열을 거쳐 주문하고 대기열 식별자는 productId다(GET·POST /v1/queues/{productId}/…, 주문은 입장 토큰 필요). attributes에 둔다 [가정]')
+}).describe('상품 한 줄(SCR-015 목록 카드). 개인 값은 싣지 않는다. 표시 가격은 화면이 price·shippingFee·fulfillments로 계산한다(d5 §5.15 ⑬)')).optional(),
+  "nextCursor": zod.string().nullish()
+})
 
 /**
- * FR-015, POL-016. 계정당 수량 제한. 인기 MD 오픈은 대기열 입장 토큰 필요. 한 주문은 한 판매자·한 수령 방식의 상품만 담는다(다르면 422). 택배 주문은 에스크로를 켠 결제 상점으로 결제해 신용카드 외 결제에서 결제대금예치를 고를 수 있고, 현장 수령은 에스크로를 켜지 않은 상점으로 결제한다(POL-014, 추천 적용 2026-10-14, ADR-0062). 본문은 수령 방식(fulfillment)으로 갈리는 MerchOrderCreate다. 택배만 배송지와 배송 정보 판매자 제공 동의를 받고, 현장 수령은 수령 시간대만 받는다(FR-015 인수 조건, SCR-015 ④·⑨, docs/design/d5 §5.15). 금액은 본문으로 받지 않고 서버가 상품 가격·배송비로 계산한다. 본문 모양은 추천 적용 2026-10-30(ADR-0089 '남는 한계'). 인증은 두 가지 가운데 하나다. 보통 상품은 팬 쿠키만, 대기열을 거치는 인기 MD 오픈 상품은 팬 쿠키와 대기열 입장 토큰을 함께 받는다(security의 두 번째 묶음). 인기 MD 오픈 상품에 입장 토큰이 없거나 만료면 401이다. 그 입장 토큰이 어떤 대기열 식별자를 쓰는지는 정하지 않았다(docs/frontend.md §6.2 31번, wbs 0.2.3). security 표기는 추천 적용 2026-10-30(이 작업 설명의 '인기 MD 오픈은 대기열 입장 토큰 필요'를 security에 맞춤)
+ * FR-015, POL-016. 계정당 수량 제한. 인기 MD 오픈은 대기열 입장 토큰 필요. 한 주문은 한 판매자·한 수령 방식의 상품만 담는다(다르면 422). 택배 주문은 에스크로를 켠 결제 상점으로 결제해 신용카드 외 결제에서 결제대금예치를 고를 수 있고, 현장 수령은 에스크로를 켜지 않은 상점으로 결제한다(POL-014, 추천 적용 2026-10-14, ADR-0062). 본문은 수령 방식(fulfillment)으로 갈리는 MerchOrderCreate다. 택배만 배송지와 배송 정보 판매자 제공 동의를 받고, 현장 수령은 수령 시간대만 받는다(FR-015 인수 조건, SCR-015 ④·⑨, docs/design/d5 §5.15). 금액은 본문으로 받지 않고 서버가 상품 가격·배송비로 계산한다. 본문 모양은 추천 적용 2026-10-30(ADR-0089 '남는 한계'). 인증은 두 가지 가운데 하나다. 보통 상품은 팬 쿠키만, 대기열을 거치는 인기 MD 오픈 상품은 팬 쿠키와 대기열 입장 토큰을 함께 받는다(security의 두 번째 묶음). 인기 MD 오픈 상품에 입장 토큰이 없거나 만료면 401이다. 인기 MD 대기열의 식별자는 상품 ID다(/v1/queues/{productId}/…, 상품 하나에 대기열 하나, 화면 주소 /shop/[productId]/queue와 같은 값) [가정]. 대기실 스크립트는 회차 대기실과 같이 주소에서 읽는다. 입장 토큰의 event 클레임이 그 상품 ID이고, core-svc shop 모듈이 토큰의 서명·만료·aud purchase, sub·sid가 요청 세션의 계정·세션과 같은지, event가 주문 항목의 queueRequired 상품과 같은지 본다(docs/features/seat-hold.md '입장 토큰 확인'과 같은 규칙). 다르면 401이다. 대기열 상품은 한 주문에 하나만 담는다(다르면 422) [가정]. 상품을 게시할 때 queue-svc 설정 사본(q:{event:E}:cfg)을 올린다: opensAtMs는 product.sale_starts_at, startsAtMs는 판매 종료 규칙(공연 시작 − 24시간)에 맞춰 product.sale_ends_at + 24시간 [가정]이다. 굿즈에는 구매 세션 사건이 없어, 입장 자리(q:{event:E}:slots)는 주문 생성 때 shop이 구매 세션 시작과 끝을 함께 알리거나 첫 사용 기한 5분 뒤에 풀린다 [가정, wbs 7.1.1]. security 표기는 추천 적용 2026-10-30(이 작업 설명의 '인기 MD 오픈은 대기열 입장 토큰 필요'를 security에 맞춤)
  * @summary 굿즈 주문(한정 재고 Redis 차감 → 승인 직전 PostgreSQL 확정, 수령 방식)
  */
 export const CreateShopOrderHeader = zod.object({
@@ -111,4 +143,451 @@ export const CreateShopOrderResponse = zod.object({
   "paymentStore": zod.enum(['STANDARD', 'ESCROW']).optional().describe('결제 상점(에스크로 여부). ESCROW(택배)면 결제창에서 결제대금예치를 고를 수 있고, 구매자가 골랐는지는 결제 승인 뒤 정해진다'),
   "stockReservedUntil": zod.iso.datetime({"offset":true}).optional().describe('한정 재고 예약이 끝나는 시각(주문 + 15분 [가정], 결제 접수 때 승인 기한까지 늘어난다). 그때까지 결제가 끝나지 않으면 주문이 만료되고 재고가 돌아간다(추천 적용 2026-10-28, ADR-0107)')
 })
+
+/**
+ * FR-014, FR-015, POL-016, docs/design/d5 §1.6 2번·§5.29. 세션 계정의 계정 묶음의 merch_order를 최근 순으로 커서로 준다. 결제를 끝내지 못하고 끝난 주문(status EXPIRED·FAILED)은 뺀다 [가정](과금이 없고 다시 주문하면 된다, 티켓 EXPIRED와 같은 규칙). Cache-Control: private, no-store
+ * @summary 내 굿즈·부가 상품 주문 목록(SCR-055 굿즈 탭)
+ */
+export const listShopOrdersQueryLimitMax = 100;
+
+
+
+export const ListShopOrdersQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listShopOrdersQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const listShopOrdersResponseItemsItemItemsMax = 20;
+
+
+
+export const ListShopOrdersResponse = zod.object({
+  "items": zod.array(zod.object({
+  "orderId": zod.string(),
+  "orderNumber": zod.string().describe('주문번호 [가정] 예매번호와 같은 꼴. 고객 문의의 orderRef와 같은 값. docs/data.md merch_order에 칸이 아직 없다'),
+  "fulfillment": zod.enum(['DELIVERY', 'PICKUP', 'WALLET']),
+  "status": zod.enum(['CREATED', 'AWAITING_DEPOSIT', 'PAID', 'EXPIRED', 'FAILED']).describe('merch_order.status(docs/planning/03 §2.13)'),
+  "paymentStore": zod.enum(['STANDARD', 'ESCROW']).optional().describe('결제 상점(merch_order.pg_store)'),
+  "escrow": zod.boolean().optional().describe('구매자가 결제대금예치를 골랐으면 true(결제 승인 뒤 정해진다). 화면의 <결제대금예치>'),
+  "totalAmount": zod.int().describe('결제 금액(원, 상품 + 배송비). docs/data.md merch_order에 칸이 아직 없다'),
+  "items": zod.array(zod.object({
+  "itemId": zod.string(),
+  "productId": zod.string(),
+  "name": zod.string().describe('주문 때 복사한 상품 이름(option_snapshot)'),
+  "quantity": zod.int(),
+  "status": zod.enum(['READY', 'SHIPPED', 'DELIVERED', 'PICKED_UP', 'LOCKED', 'RETURN_REQUESTED', 'RETURN_RECEIVED', 'DISPUTED', 'CANCELLED', 'REFUNDED']).describe('merch_order_item.status(docs/planning/03 §2.13). 화면 배지는 수령 방식과 함께 고른다(READY는 택배 \'배송 준비\', 현장 \'수령 대기\', 부가 상품 \'사용 가능\')')
+}).describe('굿즈 주문 항목의 목록용 줄')).min(1).max(listShopOrdersResponseItemsItemItemsMax),
+  "pickupWindow": zod.object({
+  "startsAt": zod.iso.datetime({"offset":true}).optional(),
+  "endsAt": zod.iso.datetime({"offset":true}).optional()
+}).nullish().describe('현장 수령이면 고른 시간대'),
+  "createdAt": zod.iso.datetime({"offset":true})
+}).describe('굿즈·부가 상품 주문 한 줄(SCR-055 목록)')).optional(),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
+ * FR-015, POL-014, POL-016, ADR-0044, ADR-0062, ADR-0107 결정 4, docs/frontend.md §6.2 30번. 티켓의 POST /v1/orders/{orderId}/payments와 같은 일을 하되, 입장 토큰과 구매 세션 서명을 받지 않는다. 그 둘은 좌석 구매 세션을 지키는 값인데 굿즈 주문에는 구매 세션이 없고, 인기 MD의 입장 토큰은 주문 생성(POST /v1/shop/orders)에서 이미 확인했기 때문이다 [가정]. 팬 쿠키로만 받고, 주문 계정이 세션 계정의 계정 묶음에 들 때만 처리한다(authz-matrix §3.2). 받는 곳은 gw-fan → core-svc shop 모듈 [가정]이다. 결제 상점은 주문의 paymentStore대로 고른다: ESCROW(택배)면 에스크로 상점 값과 TossCheckout.escrowProducts를 싣고 useEscrow는 넣지 않아 구매자가 고르게 한다(docs/features/payment.md §6, POL-014). 응답의 PaymentAttempt.holdExpiresAt은 싣지 않는다(좌석 홀드가 없다). 재고 예약 시각은 주문의 stockReservedUntil이고, 결제 시도 시작은 이 시각을 늘리지 않는다(결제 접수 때 승인 기한까지 늘어난다, ADR-0107 결정 4). 결제사 장애로 새 결제를 멈춰도 재고 예약 시간은 멈추지 않는다 [가정](ADR-0085의 시간 멈춤은 좌석 홀드 규칙이다). 접수 전의 이전 시도는 SUPERSEDED다(ADR-0044) ESCROW 주문은 토스페이먼츠로만 결제한다. 다른 결제사로 전환하면 구매자의 에스크로 선택권이 사라지므로, 토스를 쓸 수 없으면 503이다(payment.md 결제대금예치 선택권).
+ * @summary 굿즈 주문의 결제 시도 시작(결제사 선택, 결제창 값 발급)
+ */
+export const CreateShopOrderPaymentParams = zod.object({
+  "orderId": zod.string()
+})
+
+export const CreateShopOrderPaymentHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const createShopOrderPaymentBodyPayMethodMax = 32;
+
+
+
+export const CreateShopOrderPaymentBody = zod.object({
+  "payMethod": zod.string().max(createShopOrderPaymentBodyPayMethodMax).optional().describe('포트원 채널 선택에 쓰는 결제수단. 토스는 위젯 안에서 고르므로 뺀다. 32자 상한은 [가정]')
+}).strict()
+
+export const CreateShopOrderPaymentResponse = zod.object({
+  "attemptId": zod.string(),
+  "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).describe('결제사 선택기가 고른 결제사. SIMULATOR는 부하·시험 환경 전용'),
+  "switched": zod.boolean().optional().describe('결제사 전환(감내 모드)으로 대체 결제사가 골라졌으면 true. 화면이 안내 문구를 띄운다(CMP-027 pg-switched)'),
+  "holdExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('이 주문 홀드의 지금 만료 시각. 새 결제 일시 정지로 멈췄던 시간을 반영한다(ADR-0085)'),
+  "checkout": zod.union([zod.object({
+  "escrowProducts": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "name": zod.string().optional(),
+  "code": zod.string().optional(),
+  "unitPrice": zod.int().optional(),
+  "quantity": zod.int().optional()
+})).optional().describe('에스크로 상점 주문만. 주문 상품 목록. 칸 이름은 연동 때 토스페이먼츠 문서로 확인한다 [가정]'),
+  "clientKey": zod.string(),
+  "customerKey": zod.string(),
+  "orderId": zod.string(),
+  "orderName": zod.string(),
+  "amount": zod.int().describe('원 단위'),
+  "successUrl": zod.url(),
+  "failUrl": zod.url()
+}),zod.object({
+  "storeId": zod.string(),
+  "channelKey": zod.string(),
+  "paymentId": zod.string().describe('pay-{orderId}'),
+  "orderName": zod.string(),
+  "totalAmount": zod.int().describe('원 단위'),
+  "currency": zod.string().describe('결제 통화. SDK에 넘기는 값의 표기는 연동 때 포트원 문서로 확인한다'),
+  "redirectUrl": zod.url(),
+  "customer": zod.record(zod.string(), zod.string()).optional().describe('채널이 요구하는 구매자 항목만(이메일·휴대폰. SDK 필드 이름은 연동 때 확인)')
+})]).describe('결제사별 결제창 값. pg가 TOSS·SIMULATOR면 TossCheckout, PORTONE이면 PortoneCheckout이다. 2026-10-28에 키를 열어 둔 객체에서 결제사별 스키마로 바꿨다(payment.proto PrepareCheckoutResponse의 oneof와 같은 칸, 추천 적용 2026-10-28, 기술 검토 낮음-028)')
+}).describe('결제 시도(POL-036, ADR-0044). 결제창을 열기 직전에 만든다. 주문당 활성 시도는 1건이고 새 시도는 결제 접수 전의 이전 시도를 대체한다')
+
+/**
+ * FR-015, NFR-025, ADR-0015, ADR-0044, ADR-0107 결정 4, P-T42, docs/frontend.md §6.2 30번. 활성 결제 시도의 결제사와 대조하고(다르면 409) 토스는 amount, 포트원은 paymentId를 대조한 뒤 결제 참조를 저장하고 승인 명령을 낸다. 결제사 호출은 응답 밖이다(ADR-0015). 접수 때 재고 예약을 그 결제의 승인 기한(인증 + 10분)까지 늘린다. 재고 예약 만료 작업과 경합하면 하나만 이긴다(P-T42 ③). 승인 직전에 PostgreSQL product_stock을 조건부로 확정한다(data.md §4 5). 지금 payment-svc ConfirmPayment는 event_id가 필수이고 payment.event_id가 NOT NULL이라 굿즈 주문을 받지 못한다. LCH-010이 event_id 필수를 풀거나 다른 길을 정한 뒤에야 이 작업이 동작한다(docs/features/payment.md §2 '받는 주문', BUILD_ORDER LCH-010)
+ * @summary 굿즈 주문의 결제 접수(202). 결제사별 본문은 티켓과 같다
+ */
+export const CreateShopOrderPaymentAcceptanceParams = zod.object({
+  "orderId": zod.string()
+})
+
+export const CreateShopOrderPaymentAcceptanceHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const CreateShopOrderPaymentAcceptanceBody = zod.union([zod.object({
+  "pg": zod.enum(['TOSS', 'SIMULATOR']),
+  "paymentKey": zod.string().describe('토스 성공 URL의 paymentKey(SIMULATOR도 같은 형식). 1~200자 [가정]의 보이는 ASCII만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-05)'),
+  "amount": zod.int().describe('성공 URL의 금액. 서버 주문 금액과 대조')
+}).strict(),zod.object({
+  "pg": zod.enum(['PORTONE']),
+  "paymentId": zod.string().describe('결제 시도 응답의 paymentId와 같아야 한다. 세 칸 모두 1~200자 [가정]의 보이는 ASCII만 받고 아니면 400이다(서버 검사, 추천 적용 2026-11-05)'),
+  "paymentToken": zod.string().describe('수동 승인 API용 결제 토큰. 승인 결과가 정해지면 서버에서 지운다'),
+  "txId": zod.string().describe('결제 시도 ID. 승인 API에 검증용으로 넘긴다')
+}).strict()]).describe('결제 접수 본문. pg 값으로 갈린다(ADR-0044 결정 7). 허용 필드 밖의 값은 400')
+
+export const CreateShopOrderPaymentAcceptanceResponse = zod.void()
+
+/**
+ * FR-015, ADR-0044, docs/frontend.md §6.2 30번. 티켓의 GET /v1/orders/{orderId}/payment-status와 같은 규칙이다. 결과가 정해지면 바로, 아니면 25초 [가정]에 그때의 상태로 답한다. 이 경로에도 gw-fan 경로 시간 초과 27초 [가정]와 브라우저 시간 초과 30초를 준다(docs/infra.md §4.1). 입금 계좌 전체 번호는 입금 대기 응답인 이 경로에만 싣는다(구매자에게 입금처로 알리는 값이고 구매자 계좌가 아니다, authz-matrix §4.1 '결제 상태'). Cache-Control: private, no-store
+ * @summary 굿즈 결제 결과 long polling(최대 25초 [가정] 대기)
+ */
+export const GetShopOrderPaymentStatusParams = zod.object({
+  "orderId": zod.string()
+})
+
+export const GetShopOrderPaymentStatusResponse = zod.object({
+  "status": zod.enum(['ACCEPTED', 'AWAITING_DEPOSIT', 'PAID', 'FAILED', 'UNKNOWN']),
+  "stockReservedUntil": zod.iso.datetime({"offset":true}).nullish().describe('한정 재고 상품의 재고 예약이 끝나는 지금 시각(접수 뒤 승인 기한까지 늘어난 값). 한정 재고가 아니면 null'),
+  "virtualAccount": zod.object({
+  "bank": zod.string().optional(),
+  "accountNumber": zod.string().optional(),
+  "dueAt": zod.iso.datetime({"offset":true}).optional()
+}).optional().describe('가상계좌 입금 안내(입금 대기일 때만). 입금처 번호라 구매자의 계좌가 아니다. 입금 확정·만료 뒤에는 칸이 없다(authz-matrix §4.1 \'결제 상태\', data.md payment.virtual_account_no)'),
+  "reason": zod.string().optional().describe('FAILED일 때 실패 범주(payment §4). 결제사 오류 원문은 싣지 않는다'),
+  "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional().describe('결제 접수에서 고정된 결제사(ADR-0044)')
+}).describe('굿즈 결제 결과(GET /v1/shop/orders/{orderId}/payment-status). 티켓 PaymentStatus와 같은 뜻의 칸이고 상태 값만 굿즈 상태도에 맞춘다(docs/planning/03 §2.13). UNKNOWN은 결제사 답을 아직 모르는 동안이다(결제 원장 상태). 재고 예약이 끝난 주문은 이 응답 대신 409 order-expired다')
+
+/**
+ * FR-014, FR-015, POL-014, POL-016, POL-037, SCR-055, docs/design/d5 §1.6 2번·§5.29, docs/planning/03 §2.13. 구매 확정 상태는 escrow와 purchaseConfirmedAt으로 읽는다. 구매 확정은 구매자가 토스페이먼츠 이메일에서 하고, 3영업일 동안 고르지 않으면 자동 확정된다(결제사 상태). 그래서 PEAKET에 구매 확정을 쓰는 팬 경로는 없다. 배송 정보 등록도 팬 경로가 아니다: 판매자가 송장을 등록하고(SCR-023 [배송·반품 처리], d5 §1.6 16번) 그때 서버가 결제사에 배송 정보를 등록한다(payment §6). 팬은 items[].shipment로 읽기만 한다. Cache-Control: private, no-store
+ * @summary 내 굿즈·부가 상품 주문 상세(항목 상태, 배송, 교환권, 구매 확정 상태, 취소·반품 가능 여부)
+ */
+export const GetShopOrderParams = zod.object({
+  "orderId": zod.string()
+})
+
+export const getShopOrderResponseOneItemsMax = 20;
+
+export const getShopOrderResponseTwoItemsMax = 20;
+
+
+
+export const GetShopOrderResponse = zod.object({
+  "orderId": zod.string(),
+  "orderNumber": zod.string().describe('주문번호 [가정] 예매번호와 같은 꼴. 고객 문의의 orderRef와 같은 값. docs/data.md merch_order에 칸이 아직 없다'),
+  "fulfillment": zod.enum(['DELIVERY', 'PICKUP', 'WALLET']),
+  "status": zod.enum(['CREATED', 'AWAITING_DEPOSIT', 'PAID', 'EXPIRED', 'FAILED']).describe('merch_order.status(docs/planning/03 §2.13)'),
+  "paymentStore": zod.enum(['STANDARD', 'ESCROW']).optional().describe('결제 상점(merch_order.pg_store)'),
+  "escrow": zod.boolean().optional().describe('구매자가 결제대금예치를 골랐으면 true(결제 승인 뒤 정해진다). 화면의 <결제대금예치>'),
+  "totalAmount": zod.int().describe('결제 금액(원, 상품 + 배송비). docs/data.md merch_order에 칸이 아직 없다'),
+  "items": zod.array(zod.object({
+  "itemId": zod.string(),
+  "productId": zod.string(),
+  "name": zod.string().describe('주문 때 복사한 상품 이름(option_snapshot)'),
+  "quantity": zod.int(),
+  "status": zod.enum(['READY', 'SHIPPED', 'DELIVERED', 'PICKED_UP', 'LOCKED', 'RETURN_REQUESTED', 'RETURN_RECEIVED', 'DISPUTED', 'CANCELLED', 'REFUNDED']).describe('merch_order_item.status(docs/planning/03 §2.13). 화면 배지는 수령 방식과 함께 고른다(READY는 택배 \'배송 준비\', 현장 \'수령 대기\', 부가 상품 \'사용 가능\')')
+}).describe('굿즈 주문 항목의 목록용 줄')).min(1).max(getShopOrderResponseOneItemsMax),
+  "pickupWindow": zod.object({
+  "startsAt": zod.iso.datetime({"offset":true}).optional(),
+  "endsAt": zod.iso.datetime({"offset":true}).optional()
+}).nullish().describe('현장 수령이면 고른 시간대'),
+  "createdAt": zod.iso.datetime({"offset":true})
+}).describe('굿즈·부가 상품 주문 한 줄(SCR-055 목록)').and(zod.object({
+  "items": zod.array(zod.object({
+  "itemId": zod.string(),
+  "productId": zod.string(),
+  "name": zod.string().describe('주문 때 복사한 상품 이름(option_snapshot)'),
+  "quantity": zod.int(),
+  "status": zod.enum(['READY', 'SHIPPED', 'DELIVERED', 'PICKED_UP', 'LOCKED', 'RETURN_REQUESTED', 'RETURN_RECEIVED', 'DISPUTED', 'CANCELLED', 'REFUNDED']).describe('merch_order_item.status(docs/planning/03 §2.13). 화면 배지는 수령 방식과 함께 고른다(READY는 택배 \'배송 준비\', 현장 \'수령 대기\', 부가 상품 \'사용 가능\')')
+}).describe('굿즈 주문 항목의 목록용 줄').and(zod.object({
+  "unitPrice": zod.int().optional().describe('주문 때 가격(원)'),
+  "options": zod.record(zod.string(), zod.string()).optional().describe('고른 옵션(옵션 이름 → 값)'),
+  "shipment": zod.object({
+  "carrier": zod.string().optional().describe('택배사 코드 [가정](송장의 택배사)'),
+  "trackingNo": zod.string().optional(),
+  "deliveredAt": zod.iso.datetime({"offset":true}).nullish()
+}).nullish().describe('판매자가 등록한 배송 정보(읽기만). 송장 전이면 null'),
+  "pickedUpAt": zod.iso.datetime({"offset":true}).nullish(),
+  "cancellable": zod.boolean().optional().describe('지금 취소할 수 있다(READY이고 입장 시작 전). 화면 버튼의 기준(guidelines §11)이고 최종 판정은 서버다'),
+  "returnable": zod.boolean().optional().describe('지금 반품을 요청할 수 있다'),
+  "returnDueAt": zod.iso.datetime({"offset":true}).nullish().describe('단순 변심 반품 기한(받은 날 + 7일)'),
+  "defectReturnDueAt": zod.iso.datetime({"offset":true}).nullish().describe('상품 이상·설명과 다름의 반품 기한(받은 날 + 3개월)'),
+  "returnReason": zod.union([zod.literal('CHANGE_OF_MIND'),zod.literal('DEFECT_OR_MISMATCH'),zod.literal(null)]).nullish(),
+  "returnTrackingNo": zod.string().nullish()
+})).describe('굿즈 주문 항목의 상세 줄')).min(1).max(getShopOrderResponseTwoItemsMax),
+  "shippingFee": zod.int().optional().describe('처음 배송비(원). 택배가 아니면 0. docs/data.md merch_order에 칸이 아직 없다'),
+  "stockReservedUntil": zod.iso.datetime({"offset":true}).nullish().describe('결제 전 주문의 재고 예약이 끝나는 시각(merch_order.stock_reserved_until, ADR-0107)'),
+  "purchaseConfirmedAt": zod.iso.datetime({"offset":true}).nullish().describe('구매 확정 시각. escrow가 true이고 이 값이 null이면 구매 확정 전이다. 결제사 상태에서 오고 3영업일 무선택이면 자동 확정이다(merch_order.purchase_confirmed_at)'),
+  "delivery": zod.object({
+  "recipientName": zod.string().optional(),
+  "recipientPhoneMasked": zod.string().optional().describe('가린 연락처 [가정] 예 010-****-1234'),
+  "address": zod.string().optional().describe('우편번호·기본 주소·상세 주소(merch_order.delivery_address 한 칸)')
+}).nullish().describe('택배 주문의 배송지'),
+  "pickupVoucher": zod.object({
+  "code": zod.string().optional()
+}).nullish().describe('현장 수령 교환권(수령 전까지). 화면이 QR로 그린다. 값의 꼴과 수명은 wbs 7.1.1이 정한다 [가정]'),
+  "returnPolicy": zod.object({
+  "returnShippingFee": zod.int().optional().describe('단순 변심 반품 배송비(원)'),
+  "returnAddress": zod.string().optional()
+}).optional().describe('반품 대화상자 값(판매자가 정한 편도 금액과 주소, POL-016 §1.4)'),
+  "refunds": zod.array(zod.object({
+  "cancellationId": zod.string().optional(),
+  "itemIds": zod.array(zod.string()).optional(),
+  "refundAmount": zod.int().optional(),
+  "deductedShippingFee": zod.int().optional().describe('뺀 반품 배송비(원). 없으면 0'),
+  "refundDueAt": zod.iso.datetime({"offset":true}).nullish(),
+  "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
+  "refundAccountRequired": zod.boolean().optional().describe('가상계좌 결제의 환급에 계좌를 기다리는 건 [가정]')
+})).optional().describe('취소·환급 이력. docs/data.md에 굿즈 환급 기록 표가 아직 없다 [가정]'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('판매자 정보(CMP-058 receipt, 판매자는 상품을 등록한 파트너, POL-037)')
+})).describe('굿즈·부가 상품 주문 상세(GET /v1/shop/orders/{orderId}). 본인 주문만이라 배송지 주소는 원문이고 받는 분 연락처는 화면이 번호를 쓰지 않아 가린 값만 준다')
+
+/**
+ * FR-014, FR-015, POL-014, POL-016 §1.4, docs/planning/03 §2.13 I2, docs/design/d5 §5.29. 결제를 마친 주문의 READY 항목만 취소한다. 전액 환급이고(처음 배송비 포함, 공제 없음) 결제사에서 바로 취소한다. itemIds가 없으면 주문의 READY 항목 전부다. 에스크로 주문은 구매 확정 전에는 주문 전체만 취소한다(부분 취소 불가, payment §2.1 표). 결제 전 주문은 취소 대상이 아니다(재고 예약 만료나 입금 기한으로 끝난다). 재인증은 refundAccount를 보낼 때만 요구하고 작업 묶음은 FAN_HIGH_RISK다(돈이 나갈 계좌를 정하는 작업, ADR-0089, authz-matrix §6). 가상계좌 결제면 refundAccount가 필요하고, 저장하지 않고 결제사 취소 요청에 바로 넘긴다(POL-014). 여러 번 쌓일 수 있어 복수형이다(guidelines §10)
+ * @summary 굿즈·부가 상품 주문 취소(발송·수령 전, 부가 상품은 입장 시작 전)
+ */
+export const CreateShopOrderCancellationParams = zod.object({
+  "orderId": zod.string()
+})
+
+export const CreateShopOrderCancellationHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
+  "X-Reauth-Token": zod.string().optional().describe('refundAccount를 보낼 때 필수(guidelines §7)')
+})
+
+export const createShopOrderCancellationBodyItemIdsItemMax = 64;
+
+export const createShopOrderCancellationBodyItemIdsMax = 20;
+
+
+
+export const CreateShopOrderCancellationBody = zod.object({
+  "itemIds": zod.array(zod.string().max(createShopOrderCancellationBodyItemIdsItemMax)).min(1).max(createShopOrderCancellationBodyItemIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('취소할 항목. 없으면 READY 항목 전부'),
+  "refundAccount": zod.object({
+  "bankCode": zod.string(),
+  "accountNumber": zod.string(),
+  "holderName": zod.string()
+}).strict().optional().describe('가상계좌 결제일 때 필수. 저장하지 않고 결제사 취소 요청에 바로 넘긴다(POL-014). 보내면 X-Reauth-Token이 필수다')
+}).strict().describe('굿즈·부가 상품 주문 취소 본문(POL-016 §1.4)')
+
+export const CreateShopOrderCancellationResponse = zod.object({
+  "cancellationId": zod.string().optional(),
+  "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
+  "refundAmount": zod.int().optional()
+})
+
+/**
+ * FR-014, FR-015, POL-016 §1.4, docs/planning/03 §2.13 I7~I10, docs/design/d5 §5.29, 전자상거래법 §17. 항목 단위로 받고 그 항목을 RETURN_REQUESTED로 바꾼 뒤 바뀐 주문을 200으로 돌려준다(guidelines §12). 환급은 판매자가 반품을 받은 날부터 3영업일 안이라 이 요청 안에서 돈이 움직이지 않는다. 그래서 계좌를 받지 않는다(지연 환급과 같은 규칙, ADR-0050 결정 3). 가상계좌 결제의 환불 계좌는 환급을 실행할 때 알림으로 받는다 [가정]. 기한의 기준은 delivered_at·picked_up_at이고, 배송 완료 기록이 없으면 요청을 기한 안의 것으로 받는다(전자상거래법 §17⑤). '안 날부터 30일'은 서버가 알 수 없어 3개월만 본다. 입장이 시작된 부가 상품(LOCKED)은 DEFECT_OR_MISMATCH만 받는다(I10). 에스크로 주문은 구매 확정 전에는 주문 전체 항목만 받는다(ADR-0062). 여러 번 쌓일 수 있어 복수형이다
+ * @summary 굿즈·부가 상품 반품 요청(단순 변심 받은 날부터 7일, 상품 이상·설명과 다름 3개월)
+ */
+export const CreateShopOrderReturnParams = zod.object({
+  "orderId": zod.string()
+})
+
+export const CreateShopOrderReturnHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const createShopOrderReturnBodyItemIdsItemMax = 64;
+
+export const createShopOrderReturnBodyItemIdsMax = 20;
+
+export const createShopOrderReturnBodyReturnTrackingNoMax = 64;
+
+
+
+export const CreateShopOrderReturnBody = zod.object({
+  "itemIds": zod.array(zod.string().max(createShopOrderReturnBodyItemIdsItemMax)).min(1).max(createShopOrderReturnBodyItemIdsMax).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }),
+  "reason": zod.enum(['CHANGE_OF_MIND', 'DEFECT_OR_MISMATCH']).describe('단순 변심, 상품 이상·설명과 다름'),
+  "returnTrackingNo": zod.string().max(createShopOrderReturnBodyReturnTrackingNoMax).optional().describe('반품 송장(선택). 64자 상한은 [가정]')
+}).strict().describe('반품 요청 본문(docs/design/d5 §5.29 반품 대화상자). 계좌는 받지 않는다(환급이 나중이라 저장해야 하는데 저장하지 않는다, POL-014)')
+
+export const createShopOrderReturnResponseOneItemsMax = 20;
+
+export const createShopOrderReturnResponseTwoItemsMax = 20;
+
+
+
+export const CreateShopOrderReturnResponse = zod.object({
+  "orderId": zod.string(),
+  "orderNumber": zod.string().describe('주문번호 [가정] 예매번호와 같은 꼴. 고객 문의의 orderRef와 같은 값. docs/data.md merch_order에 칸이 아직 없다'),
+  "fulfillment": zod.enum(['DELIVERY', 'PICKUP', 'WALLET']),
+  "status": zod.enum(['CREATED', 'AWAITING_DEPOSIT', 'PAID', 'EXPIRED', 'FAILED']).describe('merch_order.status(docs/planning/03 §2.13)'),
+  "paymentStore": zod.enum(['STANDARD', 'ESCROW']).optional().describe('결제 상점(merch_order.pg_store)'),
+  "escrow": zod.boolean().optional().describe('구매자가 결제대금예치를 골랐으면 true(결제 승인 뒤 정해진다). 화면의 <결제대금예치>'),
+  "totalAmount": zod.int().describe('결제 금액(원, 상품 + 배송비). docs/data.md merch_order에 칸이 아직 없다'),
+  "items": zod.array(zod.object({
+  "itemId": zod.string(),
+  "productId": zod.string(),
+  "name": zod.string().describe('주문 때 복사한 상품 이름(option_snapshot)'),
+  "quantity": zod.int(),
+  "status": zod.enum(['READY', 'SHIPPED', 'DELIVERED', 'PICKED_UP', 'LOCKED', 'RETURN_REQUESTED', 'RETURN_RECEIVED', 'DISPUTED', 'CANCELLED', 'REFUNDED']).describe('merch_order_item.status(docs/planning/03 §2.13). 화면 배지는 수령 방식과 함께 고른다(READY는 택배 \'배송 준비\', 현장 \'수령 대기\', 부가 상품 \'사용 가능\')')
+}).describe('굿즈 주문 항목의 목록용 줄')).min(1).max(createShopOrderReturnResponseOneItemsMax),
+  "pickupWindow": zod.object({
+  "startsAt": zod.iso.datetime({"offset":true}).optional(),
+  "endsAt": zod.iso.datetime({"offset":true}).optional()
+}).nullish().describe('현장 수령이면 고른 시간대'),
+  "createdAt": zod.iso.datetime({"offset":true})
+}).describe('굿즈·부가 상품 주문 한 줄(SCR-055 목록)').and(zod.object({
+  "items": zod.array(zod.object({
+  "itemId": zod.string(),
+  "productId": zod.string(),
+  "name": zod.string().describe('주문 때 복사한 상품 이름(option_snapshot)'),
+  "quantity": zod.int(),
+  "status": zod.enum(['READY', 'SHIPPED', 'DELIVERED', 'PICKED_UP', 'LOCKED', 'RETURN_REQUESTED', 'RETURN_RECEIVED', 'DISPUTED', 'CANCELLED', 'REFUNDED']).describe('merch_order_item.status(docs/planning/03 §2.13). 화면 배지는 수령 방식과 함께 고른다(READY는 택배 \'배송 준비\', 현장 \'수령 대기\', 부가 상품 \'사용 가능\')')
+}).describe('굿즈 주문 항목의 목록용 줄').and(zod.object({
+  "unitPrice": zod.int().optional().describe('주문 때 가격(원)'),
+  "options": zod.record(zod.string(), zod.string()).optional().describe('고른 옵션(옵션 이름 → 값)'),
+  "shipment": zod.object({
+  "carrier": zod.string().optional().describe('택배사 코드 [가정](송장의 택배사)'),
+  "trackingNo": zod.string().optional(),
+  "deliveredAt": zod.iso.datetime({"offset":true}).nullish()
+}).nullish().describe('판매자가 등록한 배송 정보(읽기만). 송장 전이면 null'),
+  "pickedUpAt": zod.iso.datetime({"offset":true}).nullish(),
+  "cancellable": zod.boolean().optional().describe('지금 취소할 수 있다(READY이고 입장 시작 전). 화면 버튼의 기준(guidelines §11)이고 최종 판정은 서버다'),
+  "returnable": zod.boolean().optional().describe('지금 반품을 요청할 수 있다'),
+  "returnDueAt": zod.iso.datetime({"offset":true}).nullish().describe('단순 변심 반품 기한(받은 날 + 7일)'),
+  "defectReturnDueAt": zod.iso.datetime({"offset":true}).nullish().describe('상품 이상·설명과 다름의 반품 기한(받은 날 + 3개월)'),
+  "returnReason": zod.union([zod.literal('CHANGE_OF_MIND'),zod.literal('DEFECT_OR_MISMATCH'),zod.literal(null)]).nullish(),
+  "returnTrackingNo": zod.string().nullish()
+})).describe('굿즈 주문 항목의 상세 줄')).min(1).max(createShopOrderReturnResponseTwoItemsMax),
+  "shippingFee": zod.int().optional().describe('처음 배송비(원). 택배가 아니면 0. docs/data.md merch_order에 칸이 아직 없다'),
+  "stockReservedUntil": zod.iso.datetime({"offset":true}).nullish().describe('결제 전 주문의 재고 예약이 끝나는 시각(merch_order.stock_reserved_until, ADR-0107)'),
+  "purchaseConfirmedAt": zod.iso.datetime({"offset":true}).nullish().describe('구매 확정 시각. escrow가 true이고 이 값이 null이면 구매 확정 전이다. 결제사 상태에서 오고 3영업일 무선택이면 자동 확정이다(merch_order.purchase_confirmed_at)'),
+  "delivery": zod.object({
+  "recipientName": zod.string().optional(),
+  "recipientPhoneMasked": zod.string().optional().describe('가린 연락처 [가정] 예 010-****-1234'),
+  "address": zod.string().optional().describe('우편번호·기본 주소·상세 주소(merch_order.delivery_address 한 칸)')
+}).nullish().describe('택배 주문의 배송지'),
+  "pickupVoucher": zod.object({
+  "code": zod.string().optional()
+}).nullish().describe('현장 수령 교환권(수령 전까지). 화면이 QR로 그린다. 값의 꼴과 수명은 wbs 7.1.1이 정한다 [가정]'),
+  "returnPolicy": zod.object({
+  "returnShippingFee": zod.int().optional().describe('단순 변심 반품 배송비(원)'),
+  "returnAddress": zod.string().optional()
+}).optional().describe('반품 대화상자 값(판매자가 정한 편도 금액과 주소, POL-016 §1.4)'),
+  "refunds": zod.array(zod.object({
+  "cancellationId": zod.string().optional(),
+  "itemIds": zod.array(zod.string()).optional(),
+  "refundAmount": zod.int().optional(),
+  "deductedShippingFee": zod.int().optional().describe('뺀 반품 배송비(원). 없으면 0'),
+  "refundDueAt": zod.iso.datetime({"offset":true}).nullish(),
+  "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
+  "refundAccountRequired": zod.boolean().optional().describe('가상계좌 결제의 환급에 계좌를 기다리는 건 [가정]')
+})).optional().describe('취소·환급 이력. docs/data.md에 굿즈 환급 기록 표가 아직 없다 [가정]'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('판매자 정보(CMP-058 receipt, 판매자는 상품을 등록한 파트너, POL-037)')
+})).describe('굿즈·부가 상품 주문 상세(GET /v1/shop/orders/{orderId}). 본인 주문만이라 배송지 주소는 원문이고 받는 분 연락처는 화면이 번호를 쓰지 않아 가린 값만 준다')
+
+/**
+ * FR-014, FR-015, POL-016, POL-037, SCR-015, ADR-0101, docs/frontend.md §6.2 32번. 게시한(PUBLISHED) 상품만 답하고 DRAFT·HIDDEN은 404다. 개인 값은 싣지 않는다(티켓 보유 여부와 구매 한도 잔여는 주문 때 서버가 본다). 상품 화면은 웹 앱 서버가 이 경로로 그려 300초 ISR에 둔다(docs/frontend.md §2.5). 그 화면의 남은 수량은 늦으므로, 브라우저가 이 경로를 다시 읽어 얹는다 [가정]. 그래서 Cache-Control: public, max-age=0, s-maxage=5 [가정]다. queueRequired가 참이면 화면은 /shop/{productId}/queue로 보낸다
+ * @summary 굿즈·부가 상품 상세(옵션, 수령 방식과 시간대, 판매자 정보, 반품 조건, 남은 수량)
+ */
+export const GetShopProductParams = zod.object({
+  "productId": zod.string()
+})
+
+
+export const getShopProductResponseTwoOptionsMax = 10;
+
+
+
+export const GetShopProductResponse = zod.object({
+  "productId": zod.uuid(),
+  "type": zod.string().describe('product_type.code(MERCH·PARKING·VIP·FAST_LANE 등, 목록이 늘 수 있어 열거로 닫지 않는다)'),
+  "name": zod.string(),
+  "imageUrl": zod.url().nullish().describe('대표 사진. 파생본 묶음의 기준 주소 [가정](docs/data.md product에 칸이 없어 attributes에 둔다)'),
+  "imageAlt": zod.string().nullish(),
+  "price": zod.int().describe('상품 가격(원)'),
+  "shippingFee": zod.int().nullish().describe('편도 배송비(원). 택배를 받지 않으면 null'),
+  "fulfillments": zod.array(zod.enum(['DELIVERY', 'PICKUP', 'WALLET'])).min(1).refine(((v) => new Set(v.map((x) => JSON.stringify(x, (_k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+  ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  : val)))).size === v.length)).meta({ "uniqueItems": true }).describe('받을 수 있는 수령 방식'),
+  "sellerName": zod.string().describe('판매자 상호(POL-037)'),
+  "saleStatus": zod.enum(['UPCOMING', 'ON_SALE', 'SOLD_OUT', 'ENDED']).describe('판매 기간과 재고로 계산한다(data.md product.status). HIDDEN·DRAFT는 나오지 않는다'),
+  "limitedQuantity": zod.int().nullish().describe('한정 수량. 한정이 아니면 null'),
+  "remainingQuantity": zod.int().nullish().describe('남은 수량(근사). 한정이 아니면 null. 결제 전 주문이 잡은 수량을 뺀 값이다'),
+  "perAccountLimit": zod.int().nullish().describe('계정당 최대 수량(SCR-015 ⑦). attributes에 둔다 [가정]'),
+  "ticketHoldersOnly": zod.boolean().optional().describe('티켓 보유자 전용 상품(d5 §5.15). attributes에 둔다 [가정]'),
+  "linkedEventId": zod.string().nullish().describe('티켓 연동 부가 상품의 연결 회차'),
+  "linkedEventStartsAt": zod.iso.datetime({"offset":true}).nullish().describe('연결 회차 시작(카드의 \'10/25(일) 18:00 회차\')'),
+  "queueRequired": zod.boolean().optional().describe('인기 MD 오픈 상품. 참이면 대기열을 거쳐 주문하고 대기열 식별자는 productId다(GET·POST /v1/queues/{productId}/…, 주문은 입장 토큰 필요). attributes에 둔다 [가정]')
+}).describe('상품 한 줄(SCR-015 목록 카드). 개인 값은 싣지 않는다. 표시 가격은 화면이 price·shippingFee·fulfillments로 계산한다(d5 §5.15 ⑬)').and(zod.object({
+  "descriptionText": zod.string().nullish().describe('상품 설명 글'),
+  "schemaVersion": zod.int().optional().describe('유형 속성 스키마의 판(product.schema_version)'),
+  "attributes": zod.looseObject({
+
+}).optional().describe('유형마다 다른 속성(공개할 키만, ADR-0101). 화면이 유형 묶음의 설정으로 읽는다'),
+  "options": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "values": zod.array(zod.string()).optional()
+})).max(getShopProductResponseTwoOptionsMax).optional().describe('고를 옵션(옵션 ▾). 주문 본문 MerchOrderItemInput.options의 이름과 값이다 [가정]'),
+  "saleStartsAt": zod.iso.datetime({"offset":true}).nullish(),
+  "saleEndsAt": zod.iso.datetime({"offset":true}).nullish(),
+  "returnShippingFee": zod.int().nullish().describe('단순 변심 반품 배송비(원, 편도)'),
+  "transferable": zod.boolean().optional().describe('티켓과 함께 양도할 수 있다'),
+  "pickupSlots": zod.array(zod.object({
+  "pickupSlotId": zod.string(),
+  "eventId": zod.string().optional().describe('받는 회차'),
+  "startsAt": zod.iso.datetime({"offset":true}),
+  "endsAt": zod.iso.datetime({"offset":true}),
+  "ticketHoldersOnly": zod.boolean().optional().describe('티켓 소지자 전용(자격이 아니라 혜택, FR-015)')
+})).optional().describe('현장 수령 시간대(data.md pickup_slot). 끝난 시간대는 뺀다. 고른 값이 주문의 pickupSlotId다'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('판매자 정보(CMP-058 detail)')
+})).describe('상품 상세(GET /v1/shop/products/{productId}, SCR-015). 응답은 닫지 않으므로 유형별 칸은 attributes에 더해진다(ADR-0101)')
 

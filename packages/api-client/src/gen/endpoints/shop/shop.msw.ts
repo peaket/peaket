@@ -24,19 +24,60 @@ import type {
 } from 'msw';
 
 import type {
+  Cancellation,
   CreateShopOrder201,
-  MerchOrderCreate
+  CreateShopOrderPaymentBody,
+  MerchOrderCreate,
+  PaymentAccept,
+  PaymentAttempt,
+  PortoneCheckout,
+  ShopOrderCancellationInput,
+  ShopOrderDetail,
+  ShopOrderReturnInput,
+  ShopOrderSummaryPage,
+  ShopPaymentStatus,
+  ShopProduct,
+  ShopProductPage,
+  TossCheckout
 } from '../../model';
 
 
+export const getListShopProductsResponseMock = (overrideResponse: Partial<Extract<ShopProductPage, object>> = {}): ShopProductPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({productId: faker.string.uuid(), type: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), imageUrl: faker.helpers.arrayElement([faker.internet.url(), null]), imageAlt: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), price: faker.number.int(), shippingFee: faker.helpers.arrayElement([faker.number.int(), null]), fulfillments: faker.helpers.arrayElements(['DELIVERY','PICKUP','WALLET'] as const), sellerName: faker.string.alpha({length: {min: 10, max: 20}}), saleStatus: faker.helpers.arrayElement(['UPCOMING','ON_SALE','SOLD_OUT','ENDED'] as const), limitedQuantity: faker.helpers.arrayElement([faker.number.int(), null]), remainingQuantity: faker.helpers.arrayElement([faker.number.int(), null]), perAccountLimit: faker.helpers.arrayElement([faker.number.int(), null]), ticketHoldersOnly: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), linkedEventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), linkedEventStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), queueRequired: faker.helpers.arrayElement([faker.datatype.boolean(), undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+
 export const getCreateShopOrderResponseMock = (overrideResponse: Partial<Extract<CreateShopOrder201, object>> = {}): CreateShopOrder201 => ({orderId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), fulfillment: faker.helpers.arrayElement([faker.helpers.arrayElement(['DELIVERY','PICKUP'] as const), undefined]), paymentStore: faker.helpers.arrayElement([faker.helpers.arrayElement(['STANDARD','ESCROW'] as const), undefined]), stockReservedUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), ...overrideResponse})
 
+export const getListShopOrdersResponseMock = (overrideResponse: Partial<Extract<ShopOrderSummaryPage, object>> = {}): ShopOrderSummaryPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({orderId: faker.string.alpha({length: {min: 10, max: 20}}), orderNumber: faker.string.alpha({length: {min: 10, max: 20}}), fulfillment: faker.helpers.arrayElement(['DELIVERY','PICKUP','WALLET'] as const), status: faker.helpers.arrayElement(['CREATED','AWAITING_DEPOSIT','PAID','EXPIRED','FAILED'] as const), paymentStore: faker.helpers.arrayElement([faker.helpers.arrayElement(['STANDARD','ESCROW'] as const), undefined]), escrow: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), totalAmount: faker.number.int(), items: Array.from({ length: faker.number.int({min: 1, max: 20}) }, (_, i) => i + 1).map(() => ({itemId: faker.string.alpha({length: {min: 10, max: 20}}), productId: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), quantity: faker.number.int(), status: faker.helpers.arrayElement(['READY','SHIPPED','DELIVERED','PICKED_UP','LOCKED','RETURN_REQUESTED','RETURN_RECEIVED','DISPUTED','CANCELLED','REFUNDED'] as const)})), pickupWindow: faker.helpers.arrayElement([{startsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), endsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])},null,]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z'})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
 
-export const getListShopProductsMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+export const getCreateShopOrderPaymentResponseTossCheckoutMock = (overrideResponse: Partial<TossCheckout> = {}): TossCheckout => ({...{escrowProducts: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({id: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), code: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), unitPrice: faker.helpers.arrayElement([faker.number.int(), undefined]), quantity: faker.helpers.arrayElement([faker.number.int(), undefined])})), undefined]), clientKey: faker.string.alpha({length: {min: 10, max: 20}}), customerKey: faker.string.alpha({length: {min: 10, max: 20}}), orderId: faker.string.alpha({length: {min: 10, max: 20}}), orderName: faker.string.alpha({length: {min: 10, max: 20}}), amount: faker.number.int(), successUrl: faker.internet.url(), failUrl: faker.internet.url()}, ...overrideResponse});
+
+export const getCreateShopOrderPaymentResponsePortoneCheckoutMock = (overrideResponse: Partial<PortoneCheckout> = {}): PortoneCheckout => ({...{storeId: faker.string.alpha({length: {min: 10, max: 20}}), channelKey: faker.string.alpha({length: {min: 10, max: 20}}), paymentId: faker.string.alpha({length: {min: 10, max: 20}}), orderName: faker.string.alpha({length: {min: 10, max: 20}}), totalAmount: faker.number.int(), currency: faker.string.alpha({length: {min: 10, max: 20}}), redirectUrl: faker.internet.url(), customer: faker.helpers.arrayElement([{
+        [faker.string.alphanumeric(5)]: faker.string.alpha({length: {min: 10, max: 20}})
+      }, undefined])}, ...overrideResponse});
+
+export const getCreateShopOrderPaymentResponseMock = (overrideResponse: Partial<Extract<PaymentAttempt, object>> = {}): PaymentAttempt => ({attemptId: faker.string.alpha({length: {min: 10, max: 20}}), pg: faker.helpers.arrayElement(['TOSS','PORTONE','SIMULATOR'] as const), switched: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), holdExpiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), checkout: faker.helpers.arrayElement([{...getCreateShopOrderPaymentResponseTossCheckoutMock()},{...getCreateShopOrderPaymentResponsePortoneCheckoutMock()},]), ...overrideResponse})
+
+export const getGetShopOrderPaymentStatusResponseMock = (overrideResponse: Partial<Extract<ShopPaymentStatus, object>> = {}): ShopPaymentStatus => ({status: faker.helpers.arrayElement(['ACCEPTED','AWAITING_DEPOSIT','PAID','FAILED','UNKNOWN'] as const), stockReservedUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), virtualAccount: faker.helpers.arrayElement([{bank: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), accountNumber: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), dueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])}, undefined]), reason: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), pg: faker.helpers.arrayElement([faker.helpers.arrayElement(['TOSS','PORTONE','SIMULATOR'] as const), undefined]), ...overrideResponse})
+
+export const getGetShopOrderResponseMock = (): ShopOrderDetail => ({...{orderId: faker.string.alpha({length: {min: 10, max: 20}}), orderNumber: faker.string.alpha({length: {min: 10, max: 20}}), fulfillment: faker.helpers.arrayElement(['DELIVERY','PICKUP','WALLET'] as const), status: faker.helpers.arrayElement(['CREATED','AWAITING_DEPOSIT','PAID','EXPIRED','FAILED'] as const), paymentStore: faker.helpers.arrayElement([faker.helpers.arrayElement(['STANDARD','ESCROW'] as const), undefined]), escrow: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), totalAmount: faker.number.int(), items: Array.from({ length: faker.number.int({min: 1, max: 20}) }, (_, i) => i + 1).map(() => ({itemId: faker.string.alpha({length: {min: 10, max: 20}}), productId: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), quantity: faker.number.int(), status: faker.helpers.arrayElement(['READY','SHIPPED','DELIVERED','PICKED_UP','LOCKED','RETURN_REQUESTED','RETURN_RECEIVED','DISPUTED','CANCELLED','REFUNDED'] as const)})), pickupWindow: faker.helpers.arrayElement([{startsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), endsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])},null,]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z'},...{items: Array.from({ length: faker.number.int({min: 1, max: 20}) }, (_, i) => i + 1).map(() => ({...{itemId: faker.string.alpha({length: {min: 10, max: 20}}), productId: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), quantity: faker.number.int(), status: faker.helpers.arrayElement(['READY','SHIPPED','DELIVERED','PICKED_UP','LOCKED','RETURN_REQUESTED','RETURN_RECEIVED','DISPUTED','CANCELLED','REFUNDED'] as const)},...{unitPrice: faker.helpers.arrayElement([faker.number.int(), undefined]), options: faker.helpers.arrayElement([{
+        [faker.string.alphanumeric(5)]: faker.string.alpha({length: {min: 10, max: 20}})
+      }, undefined]), shipment: faker.helpers.arrayElement([{carrier: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), trackingNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), deliveredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null])},null,]), pickedUpAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), cancellable: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), returnable: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), returnDueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), defectReturnDueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), returnReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['CHANGE_OF_MIND','DEFECT_OR_MISMATCH'] as const), null]), returnTrackingNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null])},})), shippingFee: faker.helpers.arrayElement([faker.number.int(), undefined]), stockReservedUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), purchaseConfirmedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), delivery: faker.helpers.arrayElement([{recipientName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), recipientPhoneMasked: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), address: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])},null,]), pickupVoucher: faker.helpers.arrayElement([{code: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])},null,]), returnPolicy: faker.helpers.arrayElement([{returnShippingFee: faker.helpers.arrayElement([faker.number.int(), undefined]), returnAddress: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined]), refunds: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({cancellationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), itemIds: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), refundAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), deductedShippingFee: faker.helpers.arrayElement([faker.number.int(), undefined]), refundDueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['REQUESTED','REFUND_PENDING','REFUNDED','VOIDED'] as const), undefined]), refundAccountRequired: faker.helpers.arrayElement([faker.datatype.boolean(), undefined])})), undefined]), seller: faker.helpers.arrayElement([{legalName: faker.string.alpha({length: {min: 10, max: 20}}), representative: faker.string.alpha({length: {min: 10, max: 20}}), address: faker.string.alpha({length: {min: 10, max: 20}}), phone: faker.string.alpha({length: {min: 10, max: 20}}), email: faker.internet.email(), businessRegNo: faker.string.alpha({length: {min: 10, max: 20}}), mailOrderReportNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), exemptionBasis: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined])},})
+
+export const getCreateShopOrderCancellationResponseMock = (overrideResponse: Partial<Extract<Cancellation, object>> = {}): Cancellation => ({cancellationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['REQUESTED','REFUND_PENDING','REFUNDED','VOIDED'] as const), undefined]), refundAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), ...overrideResponse})
+
+export const getCreateShopOrderReturnResponseMock = (): ShopOrderDetail => ({...{orderId: faker.string.alpha({length: {min: 10, max: 20}}), orderNumber: faker.string.alpha({length: {min: 10, max: 20}}), fulfillment: faker.helpers.arrayElement(['DELIVERY','PICKUP','WALLET'] as const), status: faker.helpers.arrayElement(['CREATED','AWAITING_DEPOSIT','PAID','EXPIRED','FAILED'] as const), paymentStore: faker.helpers.arrayElement([faker.helpers.arrayElement(['STANDARD','ESCROW'] as const), undefined]), escrow: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), totalAmount: faker.number.int(), items: Array.from({ length: faker.number.int({min: 1, max: 20}) }, (_, i) => i + 1).map(() => ({itemId: faker.string.alpha({length: {min: 10, max: 20}}), productId: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), quantity: faker.number.int(), status: faker.helpers.arrayElement(['READY','SHIPPED','DELIVERED','PICKED_UP','LOCKED','RETURN_REQUESTED','RETURN_RECEIVED','DISPUTED','CANCELLED','REFUNDED'] as const)})), pickupWindow: faker.helpers.arrayElement([{startsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), endsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])},null,]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z'},...{items: Array.from({ length: faker.number.int({min: 1, max: 20}) }, (_, i) => i + 1).map(() => ({...{itemId: faker.string.alpha({length: {min: 10, max: 20}}), productId: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), quantity: faker.number.int(), status: faker.helpers.arrayElement(['READY','SHIPPED','DELIVERED','PICKED_UP','LOCKED','RETURN_REQUESTED','RETURN_RECEIVED','DISPUTED','CANCELLED','REFUNDED'] as const)},...{unitPrice: faker.helpers.arrayElement([faker.number.int(), undefined]), options: faker.helpers.arrayElement([{
+        [faker.string.alphanumeric(5)]: faker.string.alpha({length: {min: 10, max: 20}})
+      }, undefined]), shipment: faker.helpers.arrayElement([{carrier: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), trackingNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), deliveredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null])},null,]), pickedUpAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), cancellable: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), returnable: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), returnDueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), defectReturnDueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), returnReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['CHANGE_OF_MIND','DEFECT_OR_MISMATCH'] as const), null]), returnTrackingNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null])},})), shippingFee: faker.helpers.arrayElement([faker.number.int(), undefined]), stockReservedUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), purchaseConfirmedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), delivery: faker.helpers.arrayElement([{recipientName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), recipientPhoneMasked: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), address: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])},null,]), pickupVoucher: faker.helpers.arrayElement([{code: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])},null,]), returnPolicy: faker.helpers.arrayElement([{returnShippingFee: faker.helpers.arrayElement([faker.number.int(), undefined]), returnAddress: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined]), refunds: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({cancellationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), itemIds: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), refundAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), deductedShippingFee: faker.helpers.arrayElement([faker.number.int(), undefined]), refundDueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['REQUESTED','REFUND_PENDING','REFUNDED','VOIDED'] as const), undefined]), refundAccountRequired: faker.helpers.arrayElement([faker.datatype.boolean(), undefined])})), undefined]), seller: faker.helpers.arrayElement([{legalName: faker.string.alpha({length: {min: 10, max: 20}}), representative: faker.string.alpha({length: {min: 10, max: 20}}), address: faker.string.alpha({length: {min: 10, max: 20}}), phone: faker.string.alpha({length: {min: 10, max: 20}}), email: faker.internet.email(), businessRegNo: faker.string.alpha({length: {min: 10, max: 20}}), mailOrderReportNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), exemptionBasis: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined])},})
+
+export const getGetShopProductResponseMock = (): ShopProduct => ({...{productId: faker.string.uuid(), type: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), imageUrl: faker.helpers.arrayElement([faker.internet.url(), null]), imageAlt: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), price: faker.number.int(), shippingFee: faker.helpers.arrayElement([faker.number.int(), null]), fulfillments: faker.helpers.arrayElements(['DELIVERY','PICKUP','WALLET'] as const), sellerName: faker.string.alpha({length: {min: 10, max: 20}}), saleStatus: faker.helpers.arrayElement(['UPCOMING','ON_SALE','SOLD_OUT','ENDED'] as const), limitedQuantity: faker.helpers.arrayElement([faker.number.int(), null]), remainingQuantity: faker.helpers.arrayElement([faker.number.int(), null]), perAccountLimit: faker.helpers.arrayElement([faker.number.int(), null]), ticketHoldersOnly: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), linkedEventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), linkedEventStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), queueRequired: faker.helpers.arrayElement([faker.datatype.boolean(), undefined])},...{descriptionText: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), schemaVersion: faker.helpers.arrayElement([faker.number.int(), undefined]), attributes: faker.helpers.arrayElement([{}, undefined]), options: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), values: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined])})), undefined]), saleStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), saleEndsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), returnShippingFee: faker.helpers.arrayElement([faker.number.int(), null]), transferable: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), pickupSlots: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({pickupSlotId: faker.string.alpha({length: {min: 10, max: 20}}), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), startsAt: faker.date.past().toISOString().slice(0, 19) + 'Z', endsAt: faker.date.past().toISOString().slice(0, 19) + 'Z', ticketHoldersOnly: faker.helpers.arrayElement([faker.datatype.boolean(), undefined])})), undefined]), seller: faker.helpers.arrayElement([{legalName: faker.string.alpha({length: {min: 10, max: 20}}), representative: faker.string.alpha({length: {min: 10, max: 20}}), address: faker.string.alpha({length: {min: 10, max: 20}}), phone: faker.string.alpha({length: {min: 10, max: 20}}), email: faker.internet.email(), businessRegNo: faker.string.alpha({length: {min: 10, max: 20}}), mailOrderReportNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), exemptionBasis: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined])},})
+
+
+export const getListShopProductsMockHandler = (overrideResponse?: ShopProductPage | ((info: Parameters<HttpResponseResolver>[0]) => Promise<ShopProductPage> | ShopProductPage), options?: RequestHandlerOptions) => {
   return http.get('*/v1/shop/products', async (info: Parameters<HttpResponseResolver>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListShopProductsResponseMock(),
       { status: 200
       })
   }, options)
@@ -53,7 +94,109 @@ export const getCreateShopOrderMockHandler = (overrideResponse?: CreateShopOrder
       })
   }, options)
 }
+
+export const getListShopOrdersMockHandler = (overrideResponse?: ShopOrderSummaryPage | ((info: Parameters<HttpResponseResolver>[0]) => Promise<ShopOrderSummaryPage> | ShopOrderSummaryPage), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/shop/orders', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListShopOrdersResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateShopOrderPaymentMockHandler = (overrideResponse?: PaymentAttempt | ((info: Parameters<HttpResponseResolver<{ orderId: string }, CreateShopOrderPaymentBody>>[0]) => Promise<PaymentAttempt> | PaymentAttempt), options?: RequestHandlerOptions) => {
+  return http.post<{ orderId: string }, CreateShopOrderPaymentBody>('*/v1/shop/orders/:orderId/payments', async (info: Parameters<HttpResponseResolver<{ orderId: string }, CreateShopOrderPaymentBody>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateShopOrderPaymentResponseMock(),
+      { status: 201
+      })
+  }, options)
+}
+
+export const getCreateShopOrderPaymentAcceptanceMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ orderId: string }, PaymentAccept>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.post<{ orderId: string }, PaymentAccept>('*/v1/shop/orders/:orderId/payment-acceptance', async (info: Parameters<HttpResponseResolver<{ orderId: string }, PaymentAccept>>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 202
+      })
+  }, options)
+}
+
+export const getGetShopOrderPaymentStatusMockHandler = (overrideResponse?: ShopPaymentStatus | ((info: Parameters<HttpResponseResolver<{ orderId: string }>>[0]) => Promise<ShopPaymentStatus> | ShopPaymentStatus), options?: RequestHandlerOptions) => {
+  return http.get<{ orderId: string }>('*/v1/shop/orders/:orderId/payment-status', async (info: Parameters<HttpResponseResolver<{ orderId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetShopOrderPaymentStatusResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getGetShopOrderMockHandler = (overrideResponse?: ShopOrderDetail | ((info: Parameters<HttpResponseResolver<{ orderId: string }>>[0]) => Promise<ShopOrderDetail> | ShopOrderDetail), options?: RequestHandlerOptions) => {
+  return http.get<{ orderId: string }>('*/v1/shop/orders/:orderId', async (info: Parameters<HttpResponseResolver<{ orderId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetShopOrderResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateShopOrderCancellationMockHandler = (overrideResponse?: Cancellation | ((info: Parameters<HttpResponseResolver<{ orderId: string }, ShopOrderCancellationInput>>[0]) => Promise<Cancellation> | Cancellation), options?: RequestHandlerOptions) => {
+  return http.post<{ orderId: string }, ShopOrderCancellationInput>('*/v1/shop/orders/:orderId/cancellations', async (info: Parameters<HttpResponseResolver<{ orderId: string }, ShopOrderCancellationInput>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateShopOrderCancellationResponseMock(),
+      { status: 202
+      })
+  }, options)
+}
+
+export const getCreateShopOrderReturnMockHandler = (overrideResponse?: ShopOrderDetail | ((info: Parameters<HttpResponseResolver<{ orderId: string }, ShopOrderReturnInput>>[0]) => Promise<ShopOrderDetail> | ShopOrderDetail), options?: RequestHandlerOptions) => {
+  return http.post<{ orderId: string }, ShopOrderReturnInput>('*/v1/shop/orders/:orderId/returns', async (info: Parameters<HttpResponseResolver<{ orderId: string }, ShopOrderReturnInput>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateShopOrderReturnResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getGetShopProductMockHandler = (overrideResponse?: ShopProduct | ((info: Parameters<HttpResponseResolver<{ productId: string }>>[0]) => Promise<ShopProduct> | ShopProduct), options?: RequestHandlerOptions) => {
+  return http.get<{ productId: string }>('*/v1/shop/products/:productId', async (info: Parameters<HttpResponseResolver<{ productId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetShopProductResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
 export const getShopMock = () => [
   getListShopProductsMockHandler(),
-  getCreateShopOrderMockHandler()
+  getCreateShopOrderMockHandler(),
+  getListShopOrdersMockHandler(),
+  getCreateShopOrderPaymentMockHandler(),
+  getCreateShopOrderPaymentAcceptanceMockHandler(),
+  getGetShopOrderPaymentStatusMockHandler(),
+  getGetShopOrderMockHandler(),
+  getCreateShopOrderCancellationMockHandler(),
+  getCreateShopOrderReturnMockHandler(),
+  getGetShopProductMockHandler()
 ]

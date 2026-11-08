@@ -27,6 +27,7 @@ import type {
   Cancellation,
   CancellationQuote,
   Compensation,
+  CompensationPage,
   CreateTicketAddon201,
   CreateTicketAddonBody,
   CreateTicketBoothRequestBody,
@@ -37,17 +38,20 @@ import type {
   ListTickets200,
   RecipientLookupResult,
   RefundAccount,
-  TransferOffer
+  Ticket,
+  TicketAddonPage,
+  TransferOffer,
+  TransferOfferPage
 } from '../../model';
 
 
-export const getListTicketsResponseMock = (overrideResponse: Partial<Extract<ListTickets200, object>> = {}): ListTickets200 => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['ISSUED','ACTIVE','TRANSFER_PENDING','CANCEL_REQUESTED','REFUNDED','FLAGGED','VOIDED'] as const), undefined]), transferable: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), transferLocked: faker.datatype.boolean(), transferLockExpiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), transferDeadline: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), cancelDeadline: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+export const getListTicketsResponseMock = (overrideResponse: Partial<Extract<ListTickets200, object>> = {}): ListTickets200 => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['ISSUED','ACTIVE','TRANSFER_PENDING','CANCEL_REQUESTED','REFUNDED','FLAGGED','VOIDED'] as const), undefined]), transferable: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), transferLocked: faker.datatype.boolean(), transferLockExpiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), transferDeadline: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), cancelDeadline: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), eventTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), placeName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), entryOpensAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), receivedFromNickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), bookingNumber: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), enteredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), seller: faker.helpers.arrayElement([{legalName: faker.string.alpha({length: {min: 10, max: 20}}), representative: faker.string.alpha({length: {min: 10, max: 20}}), address: faker.string.alpha({length: {min: 10, max: 20}}), phone: faker.string.alpha({length: {min: 10, max: 20}}), email: faker.internet.email(), businessRegNo: faker.string.alpha({length: {min: 10, max: 20}}), mailOrderReportNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), exemptionBasis: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
 
-export const getCreateTicketTransferResponseMock = (overrideResponse: Partial<Extract<TransferOffer, object>> = {}): TransferOffer => ({offerId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), role: faker.helpers.arrayElement([faker.helpers.arrayElement(['SENDER','RECIPIENT'] as const), undefined]), counterpartNickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['OFFERED','ACCEPTED','REJECTED','WITHDRAWN','EXPIRED','RECLAIMED'] as const), undefined]), expiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), payerOnlyNotice: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
+export const getCreateTicketTransferResponseMock = (overrideResponse: Partial<Extract<TransferOffer, object>> = {}): TransferOffer => ({offerId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), role: faker.helpers.arrayElement([faker.helpers.arrayElement(['SENDER','RECIPIENT'] as const), undefined]), counterpartNickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['OFFERED','ACCEPTED','REJECTED','WITHDRAWN','EXPIRED','RECLAIMED'] as const), undefined]), expiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), payerOnlyNotice: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
 
 export const getCreateTransferRecipientLookupResponseMock = (overrideResponse: Partial<Extract<RecipientLookupResult, object>> = {}): RecipientLookupResult => ({recipientRef: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), nicknameMasked: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
 
-export const getGetTransferResponseMock = (overrideResponse: Partial<Extract<TransferOffer, object>> = {}): TransferOffer => ({offerId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), role: faker.helpers.arrayElement([faker.helpers.arrayElement(['SENDER','RECIPIENT'] as const), undefined]), counterpartNickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['OFFERED','ACCEPTED','REJECTED','WITHDRAWN','EXPIRED','RECLAIMED'] as const), undefined]), expiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), payerOnlyNotice: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
+export const getGetTransferResponseMock = (overrideResponse: Partial<Extract<TransferOffer, object>> = {}): TransferOffer => ({offerId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), role: faker.helpers.arrayElement([faker.helpers.arrayElement(['SENDER','RECIPIENT'] as const), undefined]), counterpartNickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['OFFERED','ACCEPTED','REJECTED','WITHDRAWN','EXPIRED','RECLAIMED'] as const), undefined]), expiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), payerOnlyNotice: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
 
 export const getGetTicketCancellationQuoteResponseMock = (overrideResponse: Partial<Extract<CancellationQuote, object>> = {}): CancellationQuote => ({ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), daysBefore: faker.helpers.arrayElement([faker.number.int(), undefined]), within24h: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), deductionRate: faker.helpers.arrayElement([faker.helpers.arrayElement([0,0.1,0.2,0.3,0.9] as const), undefined]), basis: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketPrice: faker.helpers.arrayElement([faker.number.int(), undefined]), deductionAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), refundAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), refundAfterEntryClose: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), ...overrideResponse})
 
@@ -55,9 +59,19 @@ export const getCreateTicketCancellationResponseMock = (overrideResponse: Partia
 
 export const getCreateTicketAddonResponseMock = (overrideResponse: Partial<Extract<CreateTicketAddon201, object>> = {}): CreateTicketAddon201 => ({orderId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), fulfillment: faker.helpers.arrayElement([faker.helpers.arrayElement(['WALLET'] as const), undefined]), stockReservedUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), ...overrideResponse})
 
-export const getCreateCompensationAccountResponseMock = (overrideResponse: Partial<Extract<Compensation, object>> = {}): Compensation => ({compensationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), orderId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), amount: faker.helpers.arrayElement([faker.number.int(), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['ACCOUNT_PENDING','REQUESTED','PAID','FAILED'] as const), undefined]), accountLast4: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
+export const getListTicketAddonsResponseMock = (overrideResponse: Partial<Extract<TicketAddonPage, object>> = {}): TicketAddonPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({orderId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), itemId: faker.string.alpha({length: {min: 10, max: 20}}), productId: faker.string.alpha({length: {min: 10, max: 20}}), name: faker.string.alpha({length: {min: 10, max: 20}}), quantity: faker.number.int(), status: faker.helpers.arrayElement(['READY','LOCKED','RETURN_REQUESTED','RETURN_RECEIVED','DISPUTED','CANCELLED','REFUNDED'] as const)})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+
+export const getCreateCompensationAccountResponseMock = (overrideResponse: Partial<Extract<Compensation, object>> = {}): Compensation => ({compensationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), orderId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), amount: faker.helpers.arrayElement([faker.number.int(), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['ACCOUNT_PENDING','REQUESTED','PAID','FAILED'] as const), undefined]), accountLast4: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), reason: faker.helpers.arrayElement([faker.helpers.arrayElement(['ORGANIZER','CONTENT_CHANGE'] as const), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), ...overrideResponse})
 
 export const getCreateCancellationAccountResponseMock = (overrideResponse: Partial<Extract<Cancellation, object>> = {}): Cancellation => ({cancellationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['REQUESTED','REFUND_PENDING','REFUNDED','VOIDED'] as const), undefined]), refundAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), ...overrideResponse})
+
+export const getGetTicketResponseMock = (overrideResponse: Partial<Extract<Ticket, object>> = {}): Ticket => ({ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['ISSUED','ACTIVE','TRANSFER_PENDING','CANCEL_REQUESTED','REFUNDED','FLAGGED','VOIDED'] as const), undefined]), transferable: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), transferLocked: faker.datatype.boolean(), transferLockExpiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), transferDeadline: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), cancelDeadline: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), eventTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), placeName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), entryOpensAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), receivedFromNickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), bookingNumber: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), enteredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), seller: faker.helpers.arrayElement([{legalName: faker.string.alpha({length: {min: 10, max: 20}}), representative: faker.string.alpha({length: {min: 10, max: 20}}), address: faker.string.alpha({length: {min: 10, max: 20}}), phone: faker.string.alpha({length: {min: 10, max: 20}}), email: faker.internet.email(), businessRegNo: faker.string.alpha({length: {min: 10, max: 20}}), mailOrderReportNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), exemptionBasis: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined]), ...overrideResponse})
+
+export const getListTransfersResponseMock = (overrideResponse: Partial<Extract<TransferOfferPage, object>> = {}): TransferOfferPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({offerId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), role: faker.helpers.arrayElement([faker.helpers.arrayElement(['SENDER','RECIPIENT'] as const), undefined]), counterpartNickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['OFFERED','ACCEPTED','REJECTED','WITHDRAWN','EXPIRED','RECLAIMED'] as const), undefined]), expiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), payerOnlyNotice: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+
+export const getListCompensationsResponseMock = (overrideResponse: Partial<Extract<CompensationPage, object>> = {}): CompensationPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({compensationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), orderId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), amount: faker.helpers.arrayElement([faker.number.int(), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['ACCOUNT_PENDING','REQUESTED','PAID','FAILED'] as const), undefined]), accountLast4: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), reason: faker.helpers.arrayElement([faker.helpers.arrayElement(['ORGANIZER','CONTENT_CHANGE'] as const), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+
+export const getGetCompensationResponseMock = (overrideResponse: Partial<Extract<Compensation, object>> = {}): Compensation => ({compensationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), orderId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), amount: faker.helpers.arrayElement([faker.number.int(), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['ACCOUNT_PENDING','REQUESTED','PAID','FAILED'] as const), undefined]), accountLast4: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), reason: faker.helpers.arrayElement([faker.helpers.arrayElement(['ORGANIZER','CONTENT_CHANGE'] as const), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), ...overrideResponse})
 
 
 export const getListTicketsMockHandler = (overrideResponse?: ListTickets200 | ((info: Parameters<HttpResponseResolver>[0]) => Promise<ListTickets200> | ListTickets200), options?: RequestHandlerOptions) => {
@@ -204,6 +218,18 @@ export const getCreateTicketAddonMockHandler = (overrideResponse?: CreateTicketA
   }, options)
 }
 
+export const getListTicketAddonsMockHandler = (overrideResponse?: TicketAddonPage | ((info: Parameters<HttpResponseResolver<{ ticketId: string }>>[0]) => Promise<TicketAddonPage> | TicketAddonPage), options?: RequestHandlerOptions) => {
+  return http.get<{ ticketId: string }>('*/v1/tickets/:ticketId/addons', async (info: Parameters<HttpResponseResolver<{ ticketId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListTicketAddonsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
 export const getCreateCompensationAccountMockHandler = (overrideResponse?: Compensation | ((info: Parameters<HttpResponseResolver<{ compensationId: string }, RefundAccount>>[0]) => Promise<Compensation> | Compensation), options?: RequestHandlerOptions) => {
   return http.post<{ compensationId: string }, RefundAccount>('*/v1/compensations/:compensationId/account', async (info: Parameters<HttpResponseResolver<{ compensationId: string }, RefundAccount>>[0]) => {
 
@@ -227,6 +253,54 @@ export const getCreateCancellationAccountMockHandler = (overrideResponse?: Cance
       })
   }, options)
 }
+
+export const getGetTicketMockHandler = (overrideResponse?: Ticket | ((info: Parameters<HttpResponseResolver<{ ticketId: string }>>[0]) => Promise<Ticket> | Ticket), options?: RequestHandlerOptions) => {
+  return http.get<{ ticketId: string }>('*/v1/tickets/:ticketId', async (info: Parameters<HttpResponseResolver<{ ticketId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetTicketResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getListTransfersMockHandler = (overrideResponse?: TransferOfferPage | ((info: Parameters<HttpResponseResolver>[0]) => Promise<TransferOfferPage> | TransferOfferPage), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/transfers', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListTransfersResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getListCompensationsMockHandler = (overrideResponse?: CompensationPage | ((info: Parameters<HttpResponseResolver>[0]) => Promise<CompensationPage> | CompensationPage), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/compensations', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListCompensationsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getGetCompensationMockHandler = (overrideResponse?: Compensation | ((info: Parameters<HttpResponseResolver<{ compensationId: string }>>[0]) => Promise<Compensation> | Compensation), options?: RequestHandlerOptions) => {
+  return http.get<{ compensationId: string }>('*/v1/compensations/:compensationId', async (info: Parameters<HttpResponseResolver<{ compensationId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetCompensationResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
 export const getTicketsMock = () => [
   getListTicketsMockHandler(),
   getCreateTicketDeviceKeyMockHandler(),
@@ -241,6 +315,11 @@ export const getTicketsMock = () => [
   getGetTicketCancellationQuoteMockHandler(),
   getCreateTicketCancellationMockHandler(),
   getCreateTicketAddonMockHandler(),
+  getListTicketAddonsMockHandler(),
   getCreateCompensationAccountMockHandler(),
-  getCreateCancellationAccountMockHandler()
+  getCreateCancellationAccountMockHandler(),
+  getGetTicketMockHandler(),
+  getListTransfersMockHandler(),
+  getListCompensationsMockHandler(),
+  getGetCompensationMockHandler()
 ]

@@ -18,7 +18,7 @@ import * as zod from 'zod';
  * @summary 로비 입장(참가 토큰 발급)
  */
 export const CreateQueueLobbyParticipantParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const CreateQueueLobbyParticipantBody = zod.object({
@@ -45,7 +45,7 @@ export const CreateQueueLobbyParticipantResponse = zod.object({
  * @summary 로비 참가 취소(다른 기기에서 다시 참가하기 전, ADR-0060)
  */
 export const DeleteMyQueueLobbyParticipantParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const DeleteMyQueueLobbyParticipantResponse = zod.void()
@@ -55,7 +55,7 @@ export const DeleteMyQueueLobbyParticipantResponse = zod.void()
  * @summary 사전 검증 토큰 발급(오픈 후 도착 경로의 사람 확인 통과 표시, 15분. 최초 발급 시각 유지, ADR-0041)
  */
 export const CreateQueuePreVerificationParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const createQueuePreVerificationBodyBehaviorSummaryWindowMsMin = 0;
@@ -102,7 +102,7 @@ export const CreateQueuePreVerificationResponse = zod.object({
  * @summary 대기열 진입(오픈 후, 대기표 발급)
  */
 export const CreateQueueEntryParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const CreateQueueEntryBody = zod.object({
@@ -126,7 +126,7 @@ export const CreateQueueEntryResponse = zod.object({
  * @summary 대기 취소
  */
 export const DeleteMyQueueEntryParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const DeleteMyQueueEntryResponse = zod.void()
@@ -136,7 +136,7 @@ export const DeleteMyQueueEntryResponse = zod.void()
  * @summary 구간별 대기 상태 파일(인증 없음, 쿠키 없음, CDN 1초 캐시. 입장 임박 구간은 다음 생성 시각까지)
  */
 export const GetQueueSegmentStateParams = zod.object({
-  "eventId": zod.string(),
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다'),
   "segment": zod.int()
 })
 
@@ -174,7 +174,7 @@ export const GetQueueSegmentStateResponse = zod.object({
  * @summary 셔플 결과 파일(참가 토큰 해시 앞자리별, 인증 없음, CDN 캐시. 공개 예정 시각 뒤 토큰 해시로 정한 0~8초에 받음, ADR-0058)
  */
 export const GetQueueShuffleResultParams = zod.object({
-  "eventId": zod.string(),
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다'),
   "hashPrefix": zod.string()
 })
 
@@ -188,7 +188,7 @@ export const GetQueueShuffleResultResponse = zod.record(zod.string(), zod.int().
  * @summary 동시 도착 묶음 결과 파일(사전 검증 토큰 해시 앞자리별, 인증 없음, CDN 캐시. 결과 공개 예정 시각 뒤 토큰 해시로 정한 분산 창 안에 받음, ADR-0041·0058)
  */
 export const GetQueueBatchResultParams = zod.object({
-  "eventId": zod.string(),
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다'),
   "hashPrefix": zod.string()
 })
 
@@ -202,7 +202,7 @@ export const GetQueueBatchResultResponse = zod.record(zod.string(), zod.int().mi
  * @summary 셔플 검증 정보(커밋, drand 체인·라운드와 값, 알고리즘 버전, 머클 루트, 비상 처리 여부와 사유, 온세일 윈도우 종료 뒤 시드 원본)
  */
 export const GetQueueShuffleProofParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const getQueueShuffleProofResponseLobbyOneCommitRegExp = new RegExp('^[0-9a-f]{64}$');
@@ -288,7 +288,7 @@ export const GetQueueShuffleProofResponse = zod.object({
  * @summary 입장 확정(첫 예매 요청, 입장 토큰 발급)
  */
 export const CreateQueueAdmissionParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const CreateQueueAdmissionBody = zod.object({
@@ -322,7 +322,7 @@ export const CreateQueueAdmissionResponse = zod.object({
  * @summary 추가 검증(챌린지 + 본인확인 재통과) 제출과 이의 제기
  */
 export const CreateQueueVerificationParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const createQueueVerificationBodyAppealMax = 4000;

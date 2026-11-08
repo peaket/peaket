@@ -74,7 +74,28 @@ export const ApprovalRequest = zod.object({
   "holderTicketIds": zod.array(zod.string()).optional().describe('그 가운데 받은 사람(사건 밖 계정)이 가진 표. 조사관이 받은 사람의 진술을 보고 넣은 표다'),
   "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional()
 })).max(approvalRequestFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
-}).describe('승인 업무 FRAUD_ACTION에 붙는 사건 요약(읽기 전용, POL-038 ⑪, SCR-046). 그 업무의 요청자와 승인 자격자만 상세를 받고(그 밖은 404) 그 상세에 늘 실린다(추천 적용 2026-10-31, ADR-0171). 승인자는 조사 경로(/v1/ops/fraud-cases 아래)를 부르지 않고 이것만 본다. 계정 수·근거 신호 범주·소명 결과·조사관 의견과, 범위를 줄이는 데 쓰는 대상 계정·표의 내부 ID(targets)만 싣고, 기기 가명·연락처 가명·IP 같은 연결 값은 싣지 않는다. 열람은 접속기록에 남는다(추천 적용 2026-10-31, ADR-0171 결정 7. targets는 (추천 적용 2026-10-31, ADR-0173))'),zod.null()]).optional().describe('FRAUD_ACTION에만, 읽기 전용. FRAUD_ACTION 상세는 요청자와 승인 자격자만 받으므로(그 밖은 404) 상세에는 늘 실리고, 다른 종류에는 null이다(추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다(POL-038 ⑪·공통, 추천 적용 2026-10-31, ADR-0171)')
+}).describe('승인 업무 FRAUD_ACTION에 붙는 사건 요약(읽기 전용, POL-038 ⑪, SCR-046). 그 업무의 요청자와 승인 자격자만 상세를 받고(그 밖은 404) 그 상세에 늘 실린다(추천 적용 2026-10-31, ADR-0171). 승인자는 조사 경로(/v1/ops/fraud-cases 아래)를 부르지 않고 이것만 본다. 계정 수·근거 신호 범주·소명 결과·조사관 의견과, 범위를 줄이는 데 쓰는 대상 계정·표의 내부 ID(targets)만 싣고, 기기 가명·연락처 가명·IP 같은 연결 값은 싣지 않는다. 열람은 접속기록에 남는다(추천 적용 2026-10-31, ADR-0171 결정 7. targets는 (추천 적용 2026-10-31, ADR-0173))'),zod.null()]).optional().describe('FRAUD_ACTION에만, 읽기 전용. FRAUD_ACTION 상세는 요청자와 승인 자격자만 받으므로(그 밖은 404) 상세에는 늘 실리고, 다른 종류에는 null이다(추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다(POL-038 ⑪·공통, 추천 적용 2026-10-31, ADR-0171)'),
+  "requestedBy": zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
+  "requestedAt": zod.iso.datetime({"offset":true}).optional(),
+  "closeReason": zod.string().nullish().describe('WITHDRAWN의 요청자 사유, EXPIRED의 TARGET_CHANGED·DEADLINE_PASSED(docs/data.md approval_request.close_reason)'),
+  "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·반려할 수 있는지(요청자 제외). 서버가 판정한다'),
+  "contractTerms": zod.object({
+  "current": zod.object({
+  "commissionRateBp": zod.int().optional(),
+  "guaranteeRateBp": zod.int().optional(),
+  "guaranteeKind": zod.enum(['DEPOSIT', 'PERFORMANCE_BOND']).optional(),
+  "validFrom": zod.iso.datetime({"offset":true}).optional(),
+  "validUntil": zod.iso.datetime({"offset":true}).nullish().describe('null이면 지금 조건'),
+  "approvalId": zod.string().nullish().describe('변경 승인 업무. 첫 계약은 null')
+}).optional().describe('계약 조건 한 기간(docs/data.md promoter_contract)'),
+  "requestedCommissionRateBp": zod.int().nullish(),
+  "requestedGuaranteeRateBp": zod.int().nullish(),
+  "requestedGuaranteeKind": zod.union([zod.literal('DEPOSIT'),zod.literal('PERFORMANCE_BOND'),zod.literal(null)]).nullish()
+}).nullish().describe('CONTRACT_TERMS_CHANGE에만. 지금 값과 바꿀 값. 다른 종류는 null이다')
 }).describe('승인 업무(POL-038)')
 
 export type ApprovalRequest = zod.input<typeof ApprovalRequest>;

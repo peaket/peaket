@@ -19,7 +19,29 @@ export const CommandState = zod.object({
 }).optional(),
   "approvals": zod.array(zod.string()).optional(),
   "ackedAt": zod.iso.datetime({"offset":true}).optional(),
-  "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)')
+  "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)'),
+  "type": zod.string().optional().describe('명령 유형(Command.type과 같은 값)'),
+  "eventId": zod.string().nullish().describe('회차 하나에 건 명령이면 그 회차. 범위가 여럿이거나 전체면 null이고 params로 본다'),
+  "reason": zod.string().optional().describe('실행 사유. 승인자에게 그대로 보인다'),
+  "params": zod.looseObject({
+
+}).optional().describe('유형별 값. 상세에만 싣는다'),
+  "requestedBy": zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
+  "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다'),
+  "postReviewDueAt": zod.iso.datetime({"offset":true}).nullish().describe('명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)'),
+  "delivery": zod.object({
+  "kind": zod.enum(['ACK', 'APPLY_CHECK']).optional(),
+  "ackedCount": zod.int().optional(),
+  "targetCount": zod.int().optional(),
+  "unackedTargets": zod.array(zod.string()).optional(),
+  "applyStatus": zod.union([zod.literal('OUTBOX_WAITING'),zod.literal('CHECKING'),zod.literal('CONFIRMED'),zod.literal('UNCONFIRMED'),zod.literal('UNKNOWN'),zod.literal(null)]).nullish().describe('APPLY_CHECK일 때만')
+}).nullish().describe('전파 상태. 제어 gRPC 명령은 ack 수, 설정형 명령은 적용 확인(ADR-0143). 상세에만 싣는다')
 })
 
 export type CommandState = zod.input<typeof CommandState>;

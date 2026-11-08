@@ -24,9 +24,12 @@ import type {
 } from 'msw';
 
 import type {
+  Compensation,
   CreateOrderBody,
   CreateOrderPaymentBody,
   Order,
+  OrderDetail,
+  OrderSummaryPage,
   PaymentAccept,
   PaymentAttempt,
   PaymentStatus,
@@ -37,7 +40,9 @@ import type {
 
 export const getCreateOrderResponseMock = (overrideResponse: Partial<Extract<Order, object>> = {}): Order => ({orderId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), amount: faker.helpers.arrayElement([faker.number.int(), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['CREATED','AUTHENTICATED','ACCEPTED','RESERVED','AWAITING_DEPOSIT','APPROVED','UNKNOWN','CONFIRMED','FAILED','COMPENSATED','PARTIALLY_REFUNDED','REFUNDED','EXPIRED'] as const), undefined]), items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({})), undefined]), ...overrideResponse})
 
-export const getCreateOrderPaymentResponseTossCheckoutMock = (overrideResponse: Partial<TossCheckout> = {}): TossCheckout => ({...{clientKey: faker.string.alpha({length: {min: 10, max: 20}}), customerKey: faker.string.alpha({length: {min: 10, max: 20}}), orderId: faker.string.alpha({length: {min: 10, max: 20}}), orderName: faker.string.alpha({length: {min: 10, max: 20}}), amount: faker.number.int(), successUrl: faker.internet.url(), failUrl: faker.internet.url()}, ...overrideResponse});
+export const getListOrdersResponseMock = (overrideResponse: Partial<Extract<OrderSummaryPage, object>> = {}): OrderSummaryPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({orderId: faker.string.alpha({length: {min: 10, max: 20}}), bookingNumber: faker.string.alpha({length: {min: 10, max: 20}}), eventId: faker.string.alpha({length: {min: 10, max: 20}}), eventTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), tiers: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 20}) }, (_, i) => i + 1).map(() => ({tierName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), quantity: faker.helpers.arrayElement([faker.number.int(), undefined])})), undefined]), amount: faker.number.int(), status: faker.helpers.arrayElement(['CREATED','AUTHENTICATED','ACCEPTED','RESERVED','AWAITING_DEPOSIT','APPROVED','UNKNOWN','CONFIRMED','FAILED','COMPENSATED','PARTIALLY_REFUNDED','REFUNDED','EXPIRED'] as const), issueDelayed: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), failureReason: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), refundPending: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), virtualAccount: faker.helpers.arrayElement([{bank: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), dueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])},null,]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z'})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+
+export const getCreateOrderPaymentResponseTossCheckoutMock = (overrideResponse: Partial<TossCheckout> = {}): TossCheckout => ({...{escrowProducts: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({id: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), code: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), unitPrice: faker.helpers.arrayElement([faker.number.int(), undefined]), quantity: faker.helpers.arrayElement([faker.number.int(), undefined])})), undefined]), clientKey: faker.string.alpha({length: {min: 10, max: 20}}), customerKey: faker.string.alpha({length: {min: 10, max: 20}}), orderId: faker.string.alpha({length: {min: 10, max: 20}}), orderName: faker.string.alpha({length: {min: 10, max: 20}}), amount: faker.number.int(), successUrl: faker.internet.url(), failUrl: faker.internet.url()}, ...overrideResponse});
 
 export const getCreateOrderPaymentResponsePortoneCheckoutMock = (overrideResponse: Partial<PortoneCheckout> = {}): PortoneCheckout => ({...{storeId: faker.string.alpha({length: {min: 10, max: 20}}), channelKey: faker.string.alpha({length: {min: 10, max: 20}}), paymentId: faker.string.alpha({length: {min: 10, max: 20}}), orderName: faker.string.alpha({length: {min: 10, max: 20}}), totalAmount: faker.number.int(), currency: faker.string.alpha({length: {min: 10, max: 20}}), redirectUrl: faker.internet.url(), customer: faker.helpers.arrayElement([{
         [faker.string.alphanumeric(5)]: faker.string.alpha({length: {min: 10, max: 20}})
@@ -46,6 +51,10 @@ export const getCreateOrderPaymentResponsePortoneCheckoutMock = (overrideRespons
 export const getCreateOrderPaymentResponseMock = (overrideResponse: Partial<Extract<PaymentAttempt, object>> = {}): PaymentAttempt => ({attemptId: faker.string.alpha({length: {min: 10, max: 20}}), pg: faker.helpers.arrayElement(['TOSS','PORTONE','SIMULATOR'] as const), switched: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), holdExpiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), checkout: faker.helpers.arrayElement([{...getCreateOrderPaymentResponseTossCheckoutMock()},{...getCreateOrderPaymentResponsePortoneCheckoutMock()},]), ...overrideResponse})
 
 export const getGetOrderPaymentStatusResponseMock = (overrideResponse: Partial<Extract<PaymentStatus, object>> = {}): PaymentStatus => ({status: faker.helpers.arrayElement([faker.helpers.arrayElement(['ACCEPTED','RESERVED','AWAITING_DEPOSIT','APPROVED','CONFIRMED','FAILED','UNKNOWN','COMPENSATED'] as const), undefined]), issueDelayed: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), virtualAccount: faker.helpers.arrayElement([{bank: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), accountNumber: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), dueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])}, undefined]), reason: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), pg: faker.helpers.arrayElement([faker.helpers.arrayElement(['TOSS','PORTONE','SIMULATOR'] as const), undefined]), ...overrideResponse})
+
+export const getGetOrderResponseCompensationMock = (overrideResponse: Partial<Compensation> = {}): Compensation => ({...{compensationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), orderId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), amount: faker.helpers.arrayElement([faker.number.int(), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['ACCOUNT_PENDING','REQUESTED','PAID','FAILED'] as const), undefined]), accountLast4: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), reason: faker.helpers.arrayElement([faker.helpers.arrayElement(['ORGANIZER','CONTENT_CHANGE'] as const), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])}, ...overrideResponse});
+
+export const getGetOrderResponseMock = (): OrderDetail => ({...{orderId: faker.string.alpha({length: {min: 10, max: 20}}), bookingNumber: faker.string.alpha({length: {min: 10, max: 20}}), eventId: faker.string.alpha({length: {min: 10, max: 20}}), eventTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), tiers: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 20}) }, (_, i) => i + 1).map(() => ({tierName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), quantity: faker.helpers.arrayElement([faker.number.int(), undefined])})), undefined]), amount: faker.number.int(), status: faker.helpers.arrayElement(['CREATED','AUTHENTICATED','ACCEPTED','RESERVED','AWAITING_DEPOSIT','APPROVED','UNKNOWN','CONFIRMED','FAILED','COMPENSATED','PARTIALLY_REFUNDED','REFUNDED','EXPIRED'] as const), issueDelayed: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), failureReason: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), refundPending: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), virtualAccount: faker.helpers.arrayElement([{bank: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), dueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])},null,]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z'},...{placeName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), entryOpensAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), seats: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 20}) }, (_, i) => i + 1).map(() => ({seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), tierName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), unitPrice: faker.helpers.arrayElement([faker.number.int(), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null])})), undefined]), payment: faker.helpers.arrayElement([{method: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), cardLast4: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[0-9]{4}$"), null]), pg: faker.helpers.arrayElement([faker.helpers.arrayElement(['TOSS','PORTONE','SIMULATOR'] as const), undefined])},null,]), cancellations: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({cancellationId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), requestedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), deductionAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), refundAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), refundDueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['REQUESTED','REFUND_PENDING','REFUNDED','VOIDED'] as const), undefined]), refundAccountRequired: faker.helpers.arrayElement([faker.datatype.boolean(), undefined])})), undefined]), compensation: faker.helpers.arrayElement([{...getGetOrderResponseCompensationMock()},null,]), seller: faker.helpers.arrayElement([{legalName: faker.string.alpha({length: {min: 10, max: 20}}), representative: faker.string.alpha({length: {min: 10, max: 20}}), address: faker.string.alpha({length: {min: 10, max: 20}}), phone: faker.string.alpha({length: {min: 10, max: 20}}), email: faker.internet.email(), businessRegNo: faker.string.alpha({length: {min: 10, max: 20}}), mailOrderReportNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), exemptionBasis: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined])},})
 
 
 export const getCreateOrderMockHandler = (overrideResponse?: Order | ((info: Parameters<HttpResponseResolver<PathParams, CreateOrderBody>>[0]) => Promise<Order> | Order), options?: RequestHandlerOptions) => {
@@ -56,6 +65,18 @@ export const getCreateOrderMockHandler = (overrideResponse?: Order | ((info: Par
     ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
     : getCreateOrderResponseMock(),
       { status: 201
+      })
+  }, options)
+}
+
+export const getListOrdersMockHandler = (overrideResponse?: OrderSummaryPage | ((info: Parameters<HttpResponseResolver>[0]) => Promise<OrderSummaryPage> | OrderSummaryPage), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/orders', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListOrdersResponseMock(),
+      { status: 200
       })
   }, options)
 }
@@ -93,9 +114,23 @@ export const getGetOrderPaymentStatusMockHandler = (overrideResponse?: PaymentSt
       })
   }, options)
 }
+
+export const getGetOrderMockHandler = (overrideResponse?: OrderDetail | ((info: Parameters<HttpResponseResolver<{ orderId: string }>>[0]) => Promise<OrderDetail> | OrderDetail), options?: RequestHandlerOptions) => {
+  return http.get<{ orderId: string }>('*/v1/orders/:orderId', async (info: Parameters<HttpResponseResolver<{ orderId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetOrderResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
 export const getOrdersMock = () => [
   getCreateOrderMockHandler(),
+  getListOrdersMockHandler(),
   getCreateOrderPaymentMockHandler(),
   getCreateOrderPaymentAcceptanceMockHandler(),
-  getGetOrderPaymentStatusMockHandler()
+  getGetOrderPaymentStatusMockHandler(),
+  getGetOrderMockHandler()
 ]

@@ -23,4 +23,14 @@ cursor?: CursorParameter;
  * @maximum 100
  */
 limit?: LimitParameter;
+/**
+ * 상품 유형(product_type.code)
+ * @maxLength 32
+ */
+type?: string;
+/**
+ * 이 회차에 연동된 부가 상품만(SCR-013 ③ [부가 상품], /my/tickets/[ticketId]/addons)
+ * @maxLength 64
+ */
+linkedEventId?: string;
 };

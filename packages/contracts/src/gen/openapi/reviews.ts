@@ -18,7 +18,7 @@ import * as zod from 'zod';
  * @summary 관람 후기 목록(후기 전체 모달, 정렬, '더 보기' 커서)
  */
 export const ListEventReviewsParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const listEventReviewsQuerySortDefault = `LATEST`;
@@ -71,7 +71,7 @@ export const ListEventReviewsResponse = zod.object({
  * @summary 관람 후기 쓰기(공연 종료 뒤, 그 회차 결제자, 회차당 하나)
  */
 export const CreateEventReviewParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const CreateEventReviewHeader = zod.object({
@@ -133,7 +133,7 @@ export const CreateEventReviewResponse = zod.object({
  * @summary 후기 요약(평균 별점·후기 수·최근 2개). 인증 없음, CDN 캐시
  */
 export const GetEventReviewSummaryParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const getEventReviewSummaryResponseRecentItemRatingMax = 5;
@@ -178,7 +178,7 @@ export const GetEventReviewSummaryResponse = zod.object({
  * @summary 후기 쓰기 자격 확인([후기 쓰기]를 누를 때)
  */
 export const GetEventReviewEligibilityParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const GetEventReviewEligibilityResponse = zod.object({
@@ -337,5 +337,53 @@ export const CreateReviewReportBody = zod.object({
 
 export const CreateReviewReportResponse = zod.object({
   "reportId": zod.string().optional()
+})
+
+/**
+ * FR-033, FR-070, POL-024, POL-044, ADR-0066, docs/design/d5 §1.6 18번. 세션 계정이 쓴 후기만 준다(경로와 쿼리에 계정 값이 없다). 이번에는 status=HIDDEN만 받는다(내 글 전체 목록은 범위 밖). 통보·같은 내용 차단과 불법 촬영물 신고 확인 중인 글은 남의 목록에서 빠지므로 글쓴이가 볼 곳은 이 목록과 공연 상세의 내 후기뿐이다. 신고한 계정과 신고 상세는 싣지 않는다(authz-matrix §4.1). 이의는 고객 문의(category MODERATION_APPEAL)로 받는다. Cache-Control: private, no-store
+ * @summary 내 후기 가운데 가려진 글 목록(내 차단 글 조회)
+ */
+export const listReviewsQueryLimitMax = 100;
+
+
+
+export const ListReviewsQueryParams = zod.object({
+  "status": zod.enum(['HIDDEN']),
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listReviewsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const listReviewsResponseItemsItemRatingMax = 5;
+
+export const listReviewsResponseItemsItemImagesMax = 3;
+
+
+
+export const ListReviewsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "reviewId": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "authorDisplay": zod.string().optional().describe('닉네임 첫 글자(grapheme) + \'**\'. 예: 김**'),
+  "attendedStartsAt": zod.iso.datetime({"offset":true}).optional().describe('관람 회차 일시'),
+  "rating": zod.int().min(1).max(listReviewsResponseItemsItemRatingMax).optional(),
+  "body": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "edited": zod.boolean().optional(),
+  "mine": zod.boolean().optional().describe('본인 후기. 팬 쿠키로 부른 목록·단건에서만 true가 될 수 있고 CDN 캐시 응답(요약)에는 늘 false'),
+  "reportedByMe": zod.boolean().optional().describe('이 계정이 이미 신고한 후기. 화면은 [신고함](비활성)으로 보인다. 팬 쿠키로 부른 목록·단건에서만 true가 될 수 있고 CDN 캐시 응답(요약)에는 늘 false(ADR-0066)'),
+  "images": zod.array(zod.object({
+  "imageId": zod.string().optional(),
+  "thumbnailUrl": zod.url().optional().describe('목록 파생본(240px [가정])'),
+  "url": zod.url().optional().describe('보기 파생본(긴 변 1,280px [가정])'),
+  "alt": zod.string().optional().describe('사진 설명. 비었으면 화면이 \'후기 사진 1/3\'으로 읽는다'),
+  "width": zod.int().optional(),
+  "height": zod.int().optional()
+}).describe('후기에 붙은 사진(ADR-0066). 메타데이터를 지운 파생본 2종만 있고 원본은 없다. 이름은 서버가 만든 ID')).max(listReviewsResponseItemsItemImagesMax).optional().describe('후기 사진(최대 3장 [가정], ADR-0066). 남에게 가린 후기에는 싣지 않는다'),
+  "status": zod.enum(['VISIBLE', 'HIDDEN']).optional().describe('HIDDEN(통보·같은 내용·불법 촬영물 신고 확인 중·신고 처리로 가림)은 본인에게 \'노출 제한\'으로 보인다. 신고 처리로 임시조치·노출 차단한 후기는 남에게도 본문·사진·별점 없이 notice만 있는 자리로 온다(ADR-0066)'),
+  "notice": zod.enum(['RIGHTS_TEMP', 'POLICY']).optional().describe('신고 처리로 가린 후기의 공시(정보통신망법 §44의2② 후단). RIGHTS_TEMP면 화면이 \'권리 침해 신고로 임시조치된 후기입니다(noticeUntil까지)\', POLICY면 \'운영정책에 따라 가려진 후기입니다\'를 보인다. 통보·같은 내용 차단과 불법 촬영물 신고 확인 중 가림은 남의 목록에서 빠지고 이 값이 없다(추천 적용 2026-10-19, ADR-0066)'),
+  "noticeUntil": zod.iso.datetime({"offset":true}).optional().describe('RIGHTS_TEMP의 끝 시각(30일 이내)'),
+  "permalink": zod.string().optional().describe('이 후기를 가리키는 같은 출처 주소(신고 모달의 신고기관 바로가기 때 복사, FR-016·FR-070). 형식은 docs/design/d5 SCR-016')
+}).describe('관람 후기(소유자 결정 2026-10-14, ADR-0063). 작성자는 닉네임 첫 글자와 \'**\', 관람 회차 일시만 싣고 이메일·전화번호·실명·계정 ID는 싣지 않는다. 본인 후기는 mine으로만 알린다(추천 적용 2026-10-14, ADR-0063)')).optional(),
+  "nextCursor": zod.string().nullish()
 })
 

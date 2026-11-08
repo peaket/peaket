@@ -850,7 +850,9 @@ STATIC_FILE_RE = re.compile(r'\.[a-z]+$')  # 확장자가 붙은 경로 = CDN이
 # If-Match 없이 마지막 저장이 이기는 자기 상태(guidelines §12 '동시 수정'의 예외 셋): (메서드, 경로) → 이유
 IF_MATCH_EXEMPT = {('PUT', '/v1/productions/{productionId}/wish'): '내 찜',
                    ('PUT', '/v1/scanner/shift/readiness'): '그 기기의 근무 준비',
-                   ('PATCH', '/v1/reviews/{reviewId}'): '작성자만 고치는 내 후기'}
+                   ('PATCH', '/v1/reviews/{reviewId}'): '작성자만 고치는 내 후기',
+                   ('PATCH', '/v1/identity/profile'): '내 프로필',
+                   ('PUT', '/v1/identity/consents/{kind}'): '내 선택 동의'}
 
 
 def check_api_contract(spec, rep):

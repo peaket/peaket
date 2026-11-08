@@ -19,4 +19,6 @@ export type GateStatusDevicesItem = {
   packageSeq?: number;
   lastSyncAt?: string;
   pendingUploads?: number;
+  /** 그 기기에 지금 현장 스태프가 로그인해 있는지(SCR-037 ⑦ '로그인', docs/design/d5 §1.6 16번). 끝나지 않고 만료되지 않은 스캐너 세션이 있으면 참이다. 사람을 가리키는 값은 싣지 않는다 [가정] */
+  staffLoggedIn?: boolean;
 };

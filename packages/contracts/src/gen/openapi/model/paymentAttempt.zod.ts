@@ -17,6 +17,13 @@ export const PaymentAttempt = zod.object({
   "switched": zod.boolean().optional().describe('결제사 전환(감내 모드)으로 대체 결제사가 골라졌으면 true. 화면이 안내 문구를 띄운다(CMP-027 pg-switched)'),
   "holdExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('이 주문 홀드의 지금 만료 시각. 새 결제 일시 정지로 멈췄던 시간을 반영한다(ADR-0085)'),
   "checkout": zod.union([zod.object({
+  "escrowProducts": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "name": zod.string().optional(),
+  "code": zod.string().optional(),
+  "unitPrice": zod.int().optional(),
+  "quantity": zod.int().optional()
+})).optional().describe('에스크로 상점 주문만. 주문 상품 목록. 칸 이름은 연동 때 토스페이먼츠 문서로 확인한다 [가정]'),
   "clientKey": zod.string(),
   "customerKey": zod.string(),
   "orderId": zod.string(),

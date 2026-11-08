@@ -12,6 +12,13 @@
 import * as zod from 'zod';
 
 export const TossCheckout = zod.object({
+  "escrowProducts": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "name": zod.string().optional(),
+  "code": zod.string().optional(),
+  "unitPrice": zod.int().optional(),
+  "quantity": zod.int().optional()
+})).optional().describe('에스크로 상점 주문만. 주문 상품 목록. 칸 이름은 연동 때 토스페이먼츠 문서로 확인한다 [가정]'),
   "clientKey": zod.string(),
   "customerKey": zod.string(),
   "orderId": zod.string(),

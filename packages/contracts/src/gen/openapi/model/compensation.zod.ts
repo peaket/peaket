@@ -16,7 +16,10 @@ export const Compensation = zod.object({
   "orderId": zod.string().optional(),
   "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
   "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
-  "accountLast4": zod.string().optional()
+  "accountLast4": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)')
 
 export type Compensation = zod.input<typeof Compensation>;

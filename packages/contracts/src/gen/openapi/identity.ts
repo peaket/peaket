@@ -144,7 +144,7 @@ export const CreateDeviceApprovalResponse = zod.void()
  * @summary 알림 신청 켜기(오픈 알림·취소표 알림, Web Push·이메일)
  */
 export const CreateEventSubscriptionParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const createEventSubscriptionBodyNightPushDefault = false;
@@ -173,7 +173,7 @@ export const CreateEventSubscriptionResponse = zod.object({
  * @summary 알림 신청 끄기(오픈 알림·취소표 알림)
  */
 export const DeleteEventSubscriptionsParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const DeleteEventSubscriptionsQueryParams = zod.object({
@@ -619,4 +619,171 @@ export const CreateIdentityMergeProposalConfirmationHeader = zod.object({
 })
 
 export const CreateIdentityMergeProposalConfirmationResponse = zod.void()
+
+/**
+ * FR-046, POL-031, ADR-0051, docs/design/d5 §1.6 5번·§5.26. 토큰은 링크의 URL 조각에서 꺼내 본문으로 보낸다(주소에 두지 않는다, guidelines §9). 초대 이메일로만 가는 1회용 토큰을 가진 로그인 계정이면 거절할 수 있다 [가정](수락과 달리 본인확인과 이메일 일치를 보지 않는다. 거절은 아무 권한도 주지 않고, 수락 조건을 못 채운 사람도 거절할 수 있어야 해서다). 배정 상태를 EXPIRED로 끝내고 invite_email을 파기한다(거절을 따로 보이는 값은 응답 열거를 늘려 계약이 깨지므로 두지 않는다 [가정])(data-classification '현장 스태프 초대 이메일'). 같은 토큰을 다시 보내도 같은 204라 멱등 키를 받지 않는다(guidelines §4). 동의는 받지 않는다. Cache-Control: no-store
+ * @summary 현장 스태프 초대 거절(SCR-050 [수락하지 않기])
+ */
+export const createStaffInvitationRejectionBodyInviteTokenMax = 128;
+
+
+
+export const CreateStaffInvitationRejectionBody = zod.object({
+  "inviteToken": zod.string().max(createStaffInvitationRejectionBodyInviteTokenMax).describe('링크의 토큰. 128자 상한은 [가정]')
+}).strict()
+
+export const CreateStaffInvitationRejectionResponse = zod.void()
+
+/**
+ * FR-046, POL-031, ADR-0051, docs/design/d5 §1.6 5번·§5.35. 세션 계정의 배정(ASSIGNED·ENDED·REVOKED)을 유효 시작이 늦은 순으로 준다. 초대 중(INVITED)과 거절·만료(EXPIRED)는 뺀다. 공연명·시작 시각·판매자 상호는 싣지 않고 화면이 eventId로 회차 공개 요약(GET /v1/events/{eventId})을 읽는다(소유자 결정 2026-10-30 open-items 78번의 DeviceApprovalView와 같은 방식). '진행 중'은 ASSIGNED이면서 지금이 validFrom과 validUntil 사이인 것으로 화면이 계산한다(data.md staff_assignment). Cache-Control: private, no-store
+ * @summary 내 현장 배정 목록(SCR-061)
+ */
+export const listStaffAssignmentsQueryLimitMax = 100;
+
+
+
+export const ListStaffAssignmentsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listStaffAssignmentsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const ListStaffAssignmentsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "assignmentId": zod.string(),
+  "eventId": zod.string(),
+  "role": zod.enum(['gate_staff', 'gate_lead']),
+  "status": zod.enum(['ASSIGNED', 'REVOKED', 'ENDED']),
+  "validFrom": zod.iso.datetime({"offset":true}),
+  "validUntil": zod.iso.datetime({"offset":true}),
+  "activeScannerDeviceName": zod.string().nullish().describe('지금 로그인한 스캐너 이름(예 동문-03). 없으면 null')
+}).describe('내 현장 배정 한 줄(SCR-061). 공연명·상호는 eventId로 회차 공개 요약에서 읽는다(DeviceApprovalView와 같다)')).optional(),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
+ * FR-017, POL-019, POL-023, SCR-017 ①·④·⑦, docs/design/d5 §1.6 18번. 페이지마다 부르는 GET /v1/identity/me에는 개인정보를 싣지 않으므로(ADR-0202) 계정 설정 화면만 쓰는 경로를 따로 둔다. 이메일은 화면이 쓰지 않아 싣지 않는다. 휴대폰 번호는 가린 값만 준다. 저장된 예매자 정보는 예매 화면의 입력을 미리 채우는 본인 값이라 원문이다(authz-matrix §4.1 팬(본인) 원문). Cache-Control: no-store
+ * @summary 내 프로필과 동의 상태(계정 설정)
+ */
+export const getIdentityProfileResponseNicknameMax = 64;
+
+
+
+export const GetIdentityProfileResponse = zod.object({
+  "nickname": zod.string().max(getIdentityProfileResponseNicknameMax).nullable(),
+  "memberCode": zod.string().describe('내 회원 코드(양도 받는 사람 찾기에 쓴다, 예 PK7-42Q9)'),
+  "verified": zod.boolean(),
+  "verifiedAt": zod.iso.datetime({"offset":true}).nullish().describe('휴대폰 본인확인 일시(SCR-017 ①)'),
+  "phoneMasked": zod.string().nullish().describe('가린 연락처 [가정] 예 010-****-1234. 없으면 null'),
+  "savedBookerName": zod.string().nullish().describe('저장된 예매자 성명'),
+  "savedBookerPhone": zod.string().nullish().describe('저장된 예매자 휴대폰 번호(숫자만). 예매 화면의 입력을 미리 채운다'),
+  "consents": zod.array(zod.object({
+  "kind": zod.enum(['TERMS', 'PRIVACY_REQUIRED', 'PRIVACY_PHONE', 'MARKETING']),
+  "noticeVersion": zod.string().describe('동의한 고지 문안의 판'),
+  "channels": zod.string().nullish().describe('MARKETING만. 수신 채널(docs/planning/03 §1.2)'),
+  "agreedAt": zod.iso.datetime({"offset":true})
+}).describe('동의 하나(data.md consent). 동의한 종류만 나온다'))
+}).describe('계정 설정의 프로필(GET /v1/identity/profile). 이메일과 연계정보는 싣지 않는다')
+
+/**
+ * FR-017, POL-019, POL-023, ADR-0203 결정 2, I-T18, SCR-017 ⑦, docs/design/d5 §1.6 18번. 보낸 칸만 바꾼다. 혼자 바꾸는 자기 상태라 If-Match 없이 마지막 저장이 이긴다(guidelines §12 예외). 같은 요청을 다시 보내도 결과가 같아 멱등 키를 받지 않는다. 닉네임은 가입 마무리와 같은 규칙이다(NFC, 앞뒤 공백 제거, 문자소 2~12개, 중복은 NFKC·대소문자 접기). phone을 바꿀 때만 재인증 토큰이 필요하고(FAN_SENSITIVE, 5분 한 번), 휴대폰 번호 수집 동의(PRIVACY_PHONE)가 있어야 한다. 닉네임은 이미 낸 후기·양도 표시에 소급하지 않는다 [가정](후기 작성자 표시는 첫 글자만이다). Cache-Control: no-store phone은 연락처 값이고 소유를 확인하지 않는다. 양도 받는 사람 찾기(POST /v1/transfer-recipient-lookups)는 이 값이 아니라 본인확인을 마친 번호로만 찾는다 [가정](구현 단계가 지킨다).
+ * @summary 내 프로필 고치기(닉네임, 연락처, 저장된 예매자 정보)
+ */
+export const UpdateIdentityProfileHeader = zod.object({
+  "X-Reauth-Token": zod.string().optional().describe('phone을 바꿀 때 필수(guidelines §7)')
+})
+
+export const updateIdentityProfileBodyNicknameMax = 64;
+
+export const updateIdentityProfileBodyPhoneRegExp = new RegExp('^(010[0-9]{8}|01[16789][0-9]{7,8})$');
+export const updateIdentityProfileBodySavedBookerNameMax = 50;
+
+export const updateIdentityProfileBodySavedBookerPhoneRegExp = new RegExp('^(010[0-9]{8}|01[16789][0-9]{7,8})$');
+
+
+export const UpdateIdentityProfileBody = zod.object({
+  "nickname": zod.string().min(1).max(updateIdentityProfileBodyNicknameMax).optional().describe('닉네임(규칙은 ADR-0203 결정 2, 서버가 다시 본다)'),
+  "phone": zod.string().regex(updateIdentityProfileBodyPhoneRegExp).nullish().describe('휴대폰 번호(숫자만, 010은 11자리). null이면 지운다. 재인증 필요'),
+  "savedBookerName": zod.string().min(1).max(updateIdentityProfileBodySavedBookerNameMax).nullish().describe('저장된 예매자 성명. null이면 지운다. 50자 상한은 [가정]'),
+  "savedBookerPhone": zod.string().regex(updateIdentityProfileBodySavedBookerPhoneRegExp).nullish().describe('저장된 예매자 휴대폰 번호. null이면 지운다')
+}).strict().describe('프로필 고치기 본문(보낸 칸만 바꾼다)')
+
+export const updateIdentityProfileResponseNicknameMax = 64;
+
+
+
+export const UpdateIdentityProfileResponse = zod.object({
+  "nickname": zod.string().max(updateIdentityProfileResponseNicknameMax).nullable(),
+  "memberCode": zod.string().describe('내 회원 코드(양도 받는 사람 찾기에 쓴다, 예 PK7-42Q9)'),
+  "verified": zod.boolean(),
+  "verifiedAt": zod.iso.datetime({"offset":true}).nullish().describe('휴대폰 본인확인 일시(SCR-017 ①)'),
+  "phoneMasked": zod.string().nullish().describe('가린 연락처 [가정] 예 010-****-1234. 없으면 null'),
+  "savedBookerName": zod.string().nullish().describe('저장된 예매자 성명'),
+  "savedBookerPhone": zod.string().nullish().describe('저장된 예매자 휴대폰 번호(숫자만). 예매 화면의 입력을 미리 채운다'),
+  "consents": zod.array(zod.object({
+  "kind": zod.enum(['TERMS', 'PRIVACY_REQUIRED', 'PRIVACY_PHONE', 'MARKETING']),
+  "noticeVersion": zod.string().describe('동의한 고지 문안의 판'),
+  "channels": zod.string().nullish().describe('MARKETING만. 수신 채널(docs/planning/03 §1.2)'),
+  "agreedAt": zod.iso.datetime({"offset":true})
+}).describe('동의 하나(data.md consent). 동의한 종류만 나온다'))
+}).describe('계정 설정의 프로필(GET /v1/identity/profile). 이메일과 연계정보는 싣지 않는다')
+
+/**
+ * FR-017, POL-023, SCR-017 ④, docs/planning/03 §1.2, docs/design/d5 §1.6 18번. 선택 동의 둘만 받는다(필수 동의는 철회 대신 탈퇴다). 고지 문안의 판과 동의 일시는 서버가 정해 consent에 남긴다(가입 마무리와 같다, ADR-0203). 마케팅 수신 채널은 §1.2의 기본값 [가정]이다. 이미 같은 판의 동의가 있으면 그대로 200이라 멱등 키를 받지 않는다. 동의·거부 결과의 14일 안 통지는 알림이 맡는다(§1.2). Cache-Control: no-store
+ * @summary 선택 동의 켜기(마케팅 알림, 휴대폰 번호 수집)
+ */
+export const PutIdentityConsentParams = zod.object({
+  "kind": zod.enum(['MARKETING', 'PRIVACY_PHONE'])
+})
+
+export const PutIdentityConsentResponse = zod.object({
+  "kind": zod.enum(['TERMS', 'PRIVACY_REQUIRED', 'PRIVACY_PHONE', 'MARKETING']),
+  "noticeVersion": zod.string().describe('동의한 고지 문안의 판'),
+  "channels": zod.string().nullish().describe('MARKETING만. 수신 채널(docs/planning/03 §1.2)'),
+  "agreedAt": zod.iso.datetime({"offset":true})
+}).describe('동의 하나(data.md consent). 동의한 종류만 나온다')
+
+/**
+ * FR-017, POL-023, data.md consent('선택 동의를 철회하면 그 종류의 행을 지운다'), docs/design/d5 §1.6 18번. 없어도 204다(멱등). PRIVACY_PHONE을 철회하면 계정의 휴대폰 번호(account.phone)도 비운다 [가정](수집 근거가 사라진다). 그러면 양도 받는 사람 찾기와 공연 당일 문자 알림에서 그 번호를 쓰지 못한다. 저장된 예매자 정보는 이 동의와 따로다 [가정]. Cache-Control: no-store
+ * @summary 선택 동의 철회(마케팅 알림, 휴대폰 번호 수집)
+ */
+export const DeleteIdentityConsentParams = zod.object({
+  "kind": zod.enum(['MARKETING', 'PRIVACY_PHONE'])
+})
+
+export const DeleteIdentityConsentResponse = zod.void()
+
+/**
+ * FR-046, POL-031, ADR-0051, SCR-017 ②, docs/features/identity.md §6.1 '세션 수', docs/design/d5 §1.6 18번, BUILD_ORDER GAT-230. 세션 계정의 끝나지 않은 스캐너 세션을 준다. 계정마다 1개뿐이라(I-T38) 나누지 않는다(guidelines §3). 스태프가 아니면 빈 items다. Cache-Control: no-store
+ * @summary 내 스캐너 세션 목록(휴대폰 쪽, SCR-017 로그인한 기기)
+ */
+export const getIdentityScannerSessionsResponseItemsMax = 1;
+
+
+
+export const GetIdentityScannerSessionsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "sessionId": zod.uuid().describe('끝내기(DELETE /v1/identity/scanner-sessions/{sessionId})에 쓴다'),
+  "deviceName": zod.string().nullable().describe('스캐너 이름(예 동문-03). scanner_session에 칸이 없어 승인 때 복사하거나 기기 원장에서 읽는다 [가정]. 모르면 null'),
+  "eventId": zod.string().describe('배정 회차. 화면이 회차 공개 요약을 읽는다'),
+  "role": zod.enum(['gate_staff', 'gate_lead']).describe('대리 승인이면 gate_staff'),
+  "proxy": zod.boolean().optional().describe('책임자 대리 승인'),
+  "approvedAt": zod.iso.datetime({"offset":true}),
+  "expiresAt": zod.iso.datetime({"offset":true}).describe('역할 유효 끝'),
+  "lastSeenAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('내 스캐너 세션(휴대폰 쪽). 스태프 토큰과 기기 키는 싣지 않는다')).max(getIdentityScannerSessionsResponseItemsMax)
+})
+
+/**
+ * FR-046, POL-031, ADR-0051, SCR-017 ②, docs/features/identity.md §6.1, docs/design/d5 §5.17, BUILD_ORDER GAT-230. 다른 기기 로그아웃(DELETE /v1/identity/sessions/{sessionId})과 같은 재인증이다(작업 묶음 FAN_SENSITIVE, 5분 한 번, 404는 토큰을 쓰지 않는다). scanner_session.terminated_at을 적으면 스캐너 경로 가드의 세션 확인이 다음 요청부터 거절한다. 오프라인 기기에 남은 스캔 기록은 기기 자격으로 올린다(offline-gate §6.5). 휴대폰 로그아웃과는 따로다. Cache-Control: no-store
+ * @summary 내 스캐너 세션 끝내기(재인증 토큰 필요)
+ */
+export const DeleteIdentityScannerSessionParams = zod.object({
+  "sessionId": zod.uuid()
+})
+
+export const DeleteIdentityScannerSessionHeader = zod.object({
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7)')
+})
+
+export const DeleteIdentityScannerSessionResponse = zod.void()
 

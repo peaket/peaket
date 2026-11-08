@@ -30,4 +30,9 @@ export interface PayoutBatch {
   /** 묶음 때 본 결제사 지급 가능 잔액. 토스페이먼츠는 잔액 API, 포트원은 operator가 콘솔에서 본 값이다. 포트원 값은 검증할 수 없어 지급을 미루는 쪽으로만 쓴다(ADR-0062) */
   pgBalance?: PayoutBatchPgBalance;
   status?: PayoutBatchStatus;
+  /**
+     * 승인 기한(지급일 전 영업일 15시, POL-039)
+     * @nullable
+     */
+  approvalDueAt?: string | null;
 }

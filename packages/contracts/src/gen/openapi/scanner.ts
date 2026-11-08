@@ -91,7 +91,7 @@ export const PutScannerShiftReadinessResponse = zod.void()
  * @summary 회차 목록 전체(티켓별 구역·좌석 표시·상태·유효 키·입장 상태, 폐기 keyId, 마지막 seq). 개인정보 없음
  */
 export const GetScannerEventPackageParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const GetScannerEventPackageResponse = zod.object({
@@ -125,7 +125,7 @@ export const GetScannerEventPackageResponse = zod.object({
  * @summary 변경분(after 다음 서버 일련번호부터: 키 등록·폐기, 티켓 상태, 다른 스캐너 입장 상태, 입장 정책, 기기 배치, 이상 표시, 이 기기 세션 종료)
  */
 export const GetScannerEventChangesParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const getScannerEventChangesQueryLimitMax = 5000;
@@ -197,7 +197,7 @@ export const CreateScannerScanResponse = zod.object({
  * @summary 이 회차 같은 파트너 기기 목록과 준비 상태(현장 책임자)
  */
 export const GetScannerEventDevicesParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const GetScannerEventDevicesResponse = zod.object({
@@ -211,7 +211,8 @@ export const GetScannerEventDevicesResponse = zod.object({
   "ready": zod.boolean().optional(),
   "packageSeq": zod.int().optional(),
   "lastSyncAt": zod.iso.datetime({"offset":true}).optional(),
-  "pendingUploads": zod.int().optional()
+  "pendingUploads": zod.int().optional(),
+  "staffLoggedIn": zod.boolean().optional().describe('그 기기에 지금 현장 스태프가 로그인해 있는지(SCR-037 ⑦ \'로그인\', docs/design/d5 §1.6 16번). 끝나지 않고 만료되지 않은 스캐너 세션이 있으면 참이다. 사람을 가리키는 값은 싣지 않는다 [가정]')
 })).optional(),
   "entriesByZone": zod.record(zod.string(), zod.int()).optional(),
   "rejectsByReason": zod.record(zod.string(), zod.int()).optional(),
@@ -226,7 +227,7 @@ export const GetScannerEventDevicesResponse = zod.object({
  * @summary 기기 배치(현장 책임자). 같은 파트너 기기만, 온라인에서만
  */
 export const PutScannerEventDevicePlacementParams = zod.object({
-  "eventId": zod.string(),
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다'),
   "deviceId": zod.string()
 })
 
@@ -246,7 +247,7 @@ export const PutScannerEventDevicePlacementResponse = zod.unknown()
  * @summary 이상 표시 목록(현장 책임자, 기기 배치 구역 우선)
  */
 export const ListScannerEventFlagsParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const listScannerEventFlagsQueryLimitMax = 100;

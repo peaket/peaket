@@ -31,7 +31,10 @@ import type {
 import type {
   CreateOrderBody,
   CreateOrderPaymentBody,
+  ListOrdersParams,
   Order,
+  OrderDetail,
+  OrderSummaryPage,
   PaymentAccept,
   PaymentAttempt,
   PaymentStatus,
@@ -215,7 +218,132 @@ export const useCreateOrder = <TError = ErrorType<UnauthorizedResponse | Problem
       > => {
       return useMutation(getCreateOrderMutationOptions(options), queryClient);
     }
-    export type createOrderPaymentResponse201 = {
+    export type listOrdersResponse200 = {
+  data: OrderSummaryPage
+  status: 200
+}
+
+export type listOrdersResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOrdersResponseSuccess = (listOrdersResponse200) & {
+  headers: Headers;
+};
+export type listOrdersResponseError = (listOrdersResponse401) & {
+  headers: Headers;
+};
+
+export const getListOrdersUrl = (params?: ListOrdersParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/orders?${stringifiedParams}` : `/v1/orders`
+}
+
+/**
+ * FR-047, FR-053, POL-032, docs/design/d5 §1.6 2번·§5.29. 세션 계정의 계정 묶음의 티켓 주문을 최근 순으로 커서로 준다(guidelines §3). 결제를 접수하지 않아 만료된 EXPIRED 주문은 빼고(d5 §5.29, ADR-0107), 티켓이 없는 주문(실패·결과 불명·입금 대기)은 넣는다. '전체' 탭은 이 목록과 GET /v1/shop/orders를 createdAt으로 섞어 그린다 [가정]. 티켓 주문은 purchase-svc, 굿즈 주문은 core-svc가 맡아 한 커서로 묶지 않는다. Cache-Control: private, no-store
+ * @summary 내 예매 주문 목록(SCR-055 예매 탭)
+ */
+export const listOrders = async (params?: ListOrdersParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOrdersResponseSuccess> => {
+
+  return orvalFetch<listOrdersResponseSuccess>(getListOrdersUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOrdersQueryKey = (params?: ListOrdersParams,) => {
+    return [
+    `/v1/orders`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOrdersQueryOptions = <TData = Awaited<ReturnType<typeof listOrders>>, TError = ErrorType<UnauthorizedResponse>>(params?: ListOrdersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOrders>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOrdersQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOrders>>> = ({ signal }) => listOrders(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOrders>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOrdersQueryResult = NonNullable<Awaited<ReturnType<typeof listOrders>>>
+export type ListOrdersQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useListOrders<TData = Awaited<ReturnType<typeof listOrders>>, TError = ErrorType<UnauthorizedResponse>>(
+ params: undefined |  ListOrdersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOrders>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOrders>>,
+          TError,
+          Awaited<ReturnType<typeof listOrders>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOrders<TData = Awaited<ReturnType<typeof listOrders>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListOrdersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOrders>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOrders>>,
+          TError,
+          Awaited<ReturnType<typeof listOrders>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOrders<TData = Awaited<ReturnType<typeof listOrders>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListOrdersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOrders>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 예매 주문 목록(SCR-055 예매 탭)
+ */
+
+export function useListOrders<TData = Awaited<ReturnType<typeof listOrders>>, TError = ErrorType<UnauthorizedResponse>>(
+ params?: ListOrdersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOrders>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOrdersQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOrderPaymentResponse201 = {
   data: PaymentAttempt
   status: 201
 }
@@ -624,6 +752,129 @@ export function useGetOrderPaymentStatus<TData = Awaited<ReturnType<typeof getOr
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetOrderPaymentStatusQueryOptions(orderId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getOrderResponse200 = {
+  data: OrderDetail
+  status: 200
+}
+
+export type getOrderResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getOrderResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOrderResponseSuccess = (getOrderResponse200) & {
+  headers: Headers;
+};
+export type getOrderResponseError = (getOrderResponse401 | getOrderResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOrderUrl = (orderId: string,) => {
+
+
+
+
+  return `/v1/orders/${encodeURIComponent(String(orderId))}`
+}
+
+/**
+ * FR-011, FR-053, POL-032, POL-037, SCR-012, SCR-055, docs/design/d5 §1.6 2번. 결제 결과 화면과 예매 확인서가 읽는다. 주문 계정이 세션 계정의 계정 묶음에 들어야 한다(authz-matrix §3.2). 결제 상태의 긴 기다림은 GET /v1/orders/{orderId}/payment-status가 맡고 이 경로는 바로 답한다. 카드번호와 계좌 전체는 싣지 않는다. 가상계좌 입금 번호는 입금 대기일 때 payment-status로 읽는다. Cache-Control: private, no-store
+ * @summary 내 예매 주문 상세(예매 확인서, 결제 결과 화면의 예매번호·결제 금액)
+ */
+export const getOrder = async (orderId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOrderResponseSuccess> => {
+
+  return orvalFetch<getOrderResponseSuccess>(getGetOrderUrl(orderId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOrderQueryKey = (orderId: string,) => {
+    return [
+    `/v1/orders/${orderId}`
+    ] as const;
+    }
+
+
+export const getGetOrderQueryOptions = <TData = Awaited<ReturnType<typeof getOrder>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrder>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOrderQueryKey(orderId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOrder>>> = ({ signal }) => getOrder(orderId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: orderId !== null && orderId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOrder>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOrderQueryResult = NonNullable<Awaited<ReturnType<typeof getOrder>>>
+export type GetOrderQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetOrder<TData = Awaited<ReturnType<typeof getOrder>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ orderId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrder>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOrder>>,
+          TError,
+          Awaited<ReturnType<typeof getOrder>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOrder<TData = Awaited<ReturnType<typeof getOrder>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrder>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOrder>>,
+          TError,
+          Awaited<ReturnType<typeof getOrder>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOrder<TData = Awaited<ReturnType<typeof getOrder>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrder>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 예매 주문 상세(예매 확인서, 결제 결과 화면의 예매번호·결제 금액)
+ */
+
+export function useGetOrder<TData = Awaited<ReturnType<typeof getOrder>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ orderId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrder>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOrderQueryOptions(orderId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

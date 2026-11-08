@@ -284,7 +284,7 @@ export const GetSearchSuggestionsResponse = zod.object({
  * @summary 회차 공개 요약과 공연 상세(ADR-0200). 인증 없음, CDN 캐시
  */
 export const GetEventParams = zod.object({
-  "eventId": zod.string()
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
 export const getEventResponseDescriptionTextMax = 20000;

@@ -9,6 +9,7 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { SellerInfo } from './sellerInfo';
 import type { TicketStatus } from './ticketStatus';
 
 export interface Ticket {
@@ -29,4 +30,32 @@ export interface Ticket {
   transferDeadline?: string;
   /** 공연 시작 시각(POL-032) */
   cancelDeadline?: string;
+  /** 공연명 */
+  eventTitle?: string;
+  /** 장소 */
+  placeName?: string;
+  /** 회차 시작 */
+  eventStartsAt?: string;
+  /**
+     * 입장 시작 시각
+     * @nullable
+     */
+  entryOpensAt?: string | null;
+  /**
+     * 받은 티켓의 보낸 분 닉네임. 받은 티켓이 아니면 null(authz-matrix §4.1 '양도 요청')
+     * @nullable
+     */
+  receivedFromNickname?: string | null;
+  /**
+     * 예매번호. 결제자 본인 티켓에만 싣고 받은 티켓은 null이다 [가정](받는 사람에게 결제 정보를 주지 않는 규칙, POL-017)
+     * @nullable
+     */
+  bookingNumber?: string | null;
+  /**
+     * 입장 시각(ScannedIn). 입장 전이면 null
+     * @nullable
+     */
+  enteredAt?: string | null;
+  /** 상세(GET /v1/tickets/{ticketId})에만. 판매자 정보(CMP-058 receipt) */
+  seller?: SellerInfo;
 }

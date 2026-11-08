@@ -36,6 +36,12 @@ describe('못 옮기는 제약의 위치', () => {
       'openapi:components.schemas.PartnerWebhookEvent.properties.data.oneOf[5].if',
       'openapi:components.schemas.PartnerWebhookEvent.properties.data.oneOf[5].then',
       'openapi:components.schemas.PartnerWebhookEvent.properties.data.oneOf[5].else',
+      // 빈 고치기 본문·빈 조회 조건(BAS-043). 그 경로를 구현하는 처리기가 400으로 거른다
+      'openapi:components.schemas.IdentityProfileUpdateInput.minProperties',
+      'openapi:components.schemas.PartnerProductionUpdate.minProperties',
+      'openapi:components.schemas.PartnerEventUpdate.minProperties',
+      'openapi:components.schemas.OpsFanLookupCreate.minProperties',
+      'openapi:components.schemas.NoticeTemplateUpdate.minProperties',
     ];
     expect([...untranslatedKeywords(read('openapi'), 'openapi'), ...untranslatedKeywords(read('asyncapi'), 'asyncapi')]).toEqual(known);
   });

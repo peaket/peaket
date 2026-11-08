@@ -9,8 +9,11 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { TossCheckoutEscrowProductsItem } from './tossCheckoutEscrowProductsItem';
 
 export interface TossCheckout {
+  /** 에스크로 상점 주문만. 주문 상품 목록. 칸 이름은 연동 때 토스페이먼츠 문서로 확인한다 [가정] */
+  escrowProducts?: TossCheckoutEscrowProductsItem[];
   clientKey: string;
   customerKey: string;
   orderId: string;

@@ -90,7 +90,57 @@ export const CreateAppealBody = zod.object({
   "body": zod.string().max(createAppealBodyBodyMax)
 }).strict()
 
-export const CreateAppealResponse = zod.void()
+export const createAppealResponseResultNoteMax = 1000;
+
+
+
+export const CreateAppealResponse = zod.object({
+  "appealId": zod.string(),
+  "kind": zod.enum(['RESTRICTION', 'RECLAIM', 'FRAUD_CASE']),
+  "targetId": zod.string().describe('소명 제출의 targetId'),
+  "status": zod.enum(['SUBMITTED', 'DECIDED', 'INVALID']).describe('INVALID는 대상 아님·기한 경과로 닫힘(화면 \'소명 닫힘\')'),
+  "result": zod.union([zod.literal('LIFTED'),zod.literal('KEPT'),zod.literal('NOT_RECLAIMED'),zod.literal('RECLAIMED'),zod.literal('ACCEPTED'),zod.literal('REJECTED'),zod.literal(null)]).nullish().describe('결정 결과(SCR-042 결과 배지)'),
+  "resultNote": zod.string().max(createAppealResponseResultNoteMax).nullish().describe('담당자가 적은 검토 사유(d5 §5.24 <제한 유지> + 사유). docs/data.md appeal에 칸이 아직 없다 [가정]. 1,000자 상한은 [가정]'),
+  "reasonCode": zod.string().nullish().describe('사유 범주 코드. RESTRICTION은 예매 제한 사본의 reasonCode, RECLAIM·FRAUD_CASE는 null [가정]'),
+  "dueAt": zod.iso.datetime({"offset":true}).nullish().describe('소명 기한. RESTRICTION만, RECLAIM·FRAUD_CASE는 null [가정]'),
+  "resultDueAt": zod.iso.datetime({"offset":true}).nullish().describe('결과 안내 예정일(예매 제한 소명 3영업일 [가정], d5 §5.24)'),
+  "submittedAt": zod.iso.datetime({"offset":true}),
+  "decidedAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('내가 낸 소명(data.md appeal). 본문, CS 건 ID, 담당자는 싣지 않는다')
+
+/**
+ * FR-059, FR-061, FR-073, POL-038, POL-046, ADR-0171, docs/features/transfer-refund.md §7.1 '소명이 들어오는 길', docs/design/d5 §1.6 18번. gw-fan → core-svc support 모듈이 자기 core DB appeal로 답한다. ops-svc는 팬 요청을 받지 않는다. 세션 계정의 것만 최근 제출 순으로 준다. 제출 전인 소명 요청은 여기 없다(예매 제한은 GET /v1/booking-restrictions/me, 부정 예매는 GET /v1/fraud-appeal-requests). 소명 본문은 화면이 다시 보이지 않아 싣지 않는다. Cache-Control: private, no-store
+ * @summary 내가 낸 소명 목록(SCR-042)
+ */
+export const listAppealsQueryLimitMax = 100;
+
+
+
+export const ListAppealsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listAppealsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const listAppealsResponseItemsItemResultNoteMax = 1000;
+
+
+
+export const ListAppealsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "appealId": zod.string(),
+  "kind": zod.enum(['RESTRICTION', 'RECLAIM', 'FRAUD_CASE']),
+  "targetId": zod.string().describe('소명 제출의 targetId'),
+  "status": zod.enum(['SUBMITTED', 'DECIDED', 'INVALID']).describe('INVALID는 대상 아님·기한 경과로 닫힘(화면 \'소명 닫힘\')'),
+  "result": zod.union([zod.literal('LIFTED'),zod.literal('KEPT'),zod.literal('NOT_RECLAIMED'),zod.literal('RECLAIMED'),zod.literal('ACCEPTED'),zod.literal('REJECTED'),zod.literal(null)]).nullish().describe('결정 결과(SCR-042 결과 배지)'),
+  "resultNote": zod.string().max(listAppealsResponseItemsItemResultNoteMax).nullish().describe('담당자가 적은 검토 사유(d5 §5.24 <제한 유지> + 사유). docs/data.md appeal에 칸이 아직 없다 [가정]. 1,000자 상한은 [가정]'),
+  "reasonCode": zod.string().nullish().describe('사유 범주 코드. RESTRICTION은 예매 제한 사본의 reasonCode, RECLAIM·FRAUD_CASE는 null [가정]'),
+  "dueAt": zod.iso.datetime({"offset":true}).nullish().describe('소명 기한. RESTRICTION만, RECLAIM·FRAUD_CASE는 null [가정]'),
+  "resultDueAt": zod.iso.datetime({"offset":true}).nullish().describe('결과 안내 예정일(예매 제한 소명 3영업일 [가정], d5 §5.24)'),
+  "submittedAt": zod.iso.datetime({"offset":true}),
+  "decidedAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('내가 낸 소명(data.md appeal). 본문, CS 건 ID, 담당자는 싣지 않는다')).optional(),
+  "nextCursor": zod.string().nullish()
+})
 
 /**
  * FR-069, FR-057, POL-038, 추천 적용 2026-10-19, ADR-0066. 로그인한 팬만. core-svc support 모듈이 문의와 첫 기록(FAN·MESSAGE)을 저장하고 CS 처리함 건을 만든다(유형 SELLER_DISPUTE는 DISPUTE, MINOR_CONTRACT_CANCEL은 MINOR_CONTRACT_CANCEL, 그 밖은 INQUIRY). dueAt은 결과 안내 기한이고(일반 문의 답변 3영업일 [가정], 분쟁 결과 10영업일), 분쟁 유형은 진행 경과 기한(3영업일)도 문의 상세에 보인다(전자상거래법 §20③, 시행령 §25의2). 관련 주문은 이 계정의 예매·굿즈 주문만 붙는다(아니면 422). 계정당 하루 10건 [가정]. 문의 기록은 닫힌 뒤 3년 보존한다(전자상거래법 시행령 §6①4호, 일반 문의는 해석)
@@ -225,4 +275,30 @@ export const CreateInquiryMessageResponse = zod.object({
   "body": zod.string().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('문의 기록 한 줄(ADR-0066)')
+
+/**
+ * FR-059, FR-061, POL-038, SCR-042, docs/design/d5 §5.24·§1.6 18번. 소명한 계정만 읽는다. 남의 소명과 없는 소명은 같은 404다(authz-matrix §3.2). FRAUD_CASE의 사유 범주·기한·잠금·조치 결과는 이 응답에 없고 화면이 GET /v1/fraud-appeal-requests를 읽는다. RECLAIM의 사유 범주와 기한은 support에 사본이 없어 null이다 [가정](d5 §1.6 18번의 남은 질문, 사본을 둘지는 소유자 판단). Cache-Control: private, no-store
+ * @summary 내가 낸 소명 하나의 상태와 결과
+ */
+export const GetAppealParams = zod.object({
+  "appealId": zod.string()
+})
+
+export const getAppealResponseResultNoteMax = 1000;
+
+
+
+export const GetAppealResponse = zod.object({
+  "appealId": zod.string(),
+  "kind": zod.enum(['RESTRICTION', 'RECLAIM', 'FRAUD_CASE']),
+  "targetId": zod.string().describe('소명 제출의 targetId'),
+  "status": zod.enum(['SUBMITTED', 'DECIDED', 'INVALID']).describe('INVALID는 대상 아님·기한 경과로 닫힘(화면 \'소명 닫힘\')'),
+  "result": zod.union([zod.literal('LIFTED'),zod.literal('KEPT'),zod.literal('NOT_RECLAIMED'),zod.literal('RECLAIMED'),zod.literal('ACCEPTED'),zod.literal('REJECTED'),zod.literal(null)]).nullish().describe('결정 결과(SCR-042 결과 배지)'),
+  "resultNote": zod.string().max(getAppealResponseResultNoteMax).nullish().describe('담당자가 적은 검토 사유(d5 §5.24 <제한 유지> + 사유). docs/data.md appeal에 칸이 아직 없다 [가정]. 1,000자 상한은 [가정]'),
+  "reasonCode": zod.string().nullish().describe('사유 범주 코드. RESTRICTION은 예매 제한 사본의 reasonCode, RECLAIM·FRAUD_CASE는 null [가정]'),
+  "dueAt": zod.iso.datetime({"offset":true}).nullish().describe('소명 기한. RESTRICTION만, RECLAIM·FRAUD_CASE는 null [가정]'),
+  "resultDueAt": zod.iso.datetime({"offset":true}).nullish().describe('결과 안내 예정일(예매 제한 소명 3영업일 [가정], d5 §5.24)'),
+  "submittedAt": zod.iso.datetime({"offset":true}),
+  "decidedAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('내가 낸 소명(data.md appeal). 본문, CS 건 ID, 담당자는 싣지 않는다')
 

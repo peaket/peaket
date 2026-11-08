@@ -39,7 +39,24 @@ export const ListTicketsResponse = zod.object({
   "transferLocked": zod.boolean().default(listTicketsResponseItemsItemTransferLockedDefault).describe('부정 예매 소명 요청으로 양도가 잠겼는지(POL-046 ③). 잠긴 동안 양도 요청만 409 transfer-locked이고, 결제자에게 돌려주기와 입장은 막지 않는다(추천 적용 2026-10-31, ADR-0171. 돌려주기를 막지 않는 것은 추천 적용 2026-10-31, ADR-0173 결정 3)'),
   "transferLockExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('양도 잠금의 최대 기한(소명 요청 + 14일 [가정], 연장 없음). 잠겼을 때만 싣고 아니면 null이다. 소명 인정·사건 정상 종료·조치 실행 끝·묶음에서 빠짐·입장 시작·조치 요청의 반려·만료가 먼저 오면 그때 풀린다(추천 적용 2026-10-31, ADR-0173)'),
   "transferDeadline": zod.iso.datetime({"offset":true}).optional(),
-  "cancelDeadline": zod.iso.datetime({"offset":true}).optional().describe('공연 시작 시각(POL-032)')
+  "cancelDeadline": zod.iso.datetime({"offset":true}).optional().describe('공연 시작 시각(POL-032)'),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "placeName": zod.string().optional().describe('장소'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시작 시각'),
+  "receivedFromNickname": zod.string().nullish().describe('받은 티켓의 보낸 분 닉네임. 받은 티켓이 아니면 null(authz-matrix §4.1 \'양도 요청\')'),
+  "bookingNumber": zod.string().nullish().describe('예매번호. 결제자 본인 티켓에만 싣고 받은 티켓은 null이다 [가정](받는 사람에게 결제 정보를 주지 않는 규칙, POL-017)'),
+  "enteredAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시각(ScannedIn). 입장 전이면 null'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('상세(GET /v1/tickets/{ticketId})에만. 판매자 정보(CMP-058 receipt)')
 })).optional(),
   "nextCursor": zod.string().nullish()
 })
@@ -116,7 +133,11 @@ export const CreateTicketTransferResponse = zod.object({
   "counterpartNickname": zod.string().optional(),
   "status": zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('48시간과 양도 마감 중 이른 때'),
-  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구')
+  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구'),
+  "eventId": zod.string().optional(),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "seatLabel": zod.string().optional()
 }).describe('양도 요청(POL-017, ADR-0046). 받는 사람에게는 결제 금액과 결제자 연락처를 싣지 않는다')
 
 /**
@@ -148,7 +169,11 @@ export const GetTransferResponse = zod.object({
   "counterpartNickname": zod.string().optional(),
   "status": zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('48시간과 양도 마감 중 이른 때'),
-  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구')
+  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구'),
+  "eventId": zod.string().optional(),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "seatLabel": zod.string().optional()
 }).describe('양도 요청(POL-017, ADR-0046). 받는 사람에게는 결제 금액과 결제자 연락처를 싣지 않는다')
 
 /**
@@ -283,6 +308,35 @@ export const CreateTicketAddonResponse = zod.object({
 })
 
 /**
+ * FR-014, POL-016, SCR-013 ⑫, docs/frontend.md §6.2 32번. 티켓의 지금 보유자만 읽는다. 새로 살 수 있는 부가 상품 목록은 GET /v1/shop/products?linkedEventId={eventId}다. 양도로 받은 티켓에는 그 상품이 양도 가능(product.transferable)일 때만 보인다 [가정]. 주문 항목을 티켓에 잇는 칸이 docs/data.md merch_order·merch_order_item에 아직 없다(더해야 한다, POL-016 §1.4 '연결 티켓' 행도 이 칸이 있어야 된다). Cache-Control: private, no-store
+ * @summary 이 티켓에 연동해 산 부가 상품 목록(월렛의 이용권 표시)
+ */
+export const ListTicketAddonsParams = zod.object({
+  "ticketId": zod.string()
+})
+
+export const listTicketAddonsQueryLimitMax = 100;
+
+
+
+export const ListTicketAddonsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listTicketAddonsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const ListTicketAddonsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "orderId": zod.string().nullish().describe('이 부가 상품의 주문. 받은 티켓에서는 결제자의 주문이라 null이다 [가정](POL-017, Ticket.bookingNumber와 같은 규칙)'),
+  "itemId": zod.string(),
+  "productId": zod.string(),
+  "name": zod.string().describe('주문 때 복사한 상품 이름'),
+  "quantity": zod.int(),
+  "status": zod.enum(['READY', 'LOCKED', 'RETURN_REQUESTED', 'RETURN_RECEIVED', 'DISPUTED', 'CANCELLED', 'REFUNDED']).describe('merch_order_item.status 가운데 부가 상품에 쓰는 값(READY \'사용 가능\', LOCKED \'입장 시작, 취소 불가\')')
+}).describe('티켓에 연동해 산 부가 상품(월렛에 이용권으로 보인다, FR-014)')).optional(),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
  * FR-056, POL-014, POL-019, ADR-0046 결정 5. 돈이 나갈 계좌를 정하는 작업이라 재인증을 요구한다(추천 적용 2026-10-26, ADR-0089)
  * @summary 배상금 받을 계좌 입력(결제자 본인). 저장하지 않고 송금 요청에 바로 넘김
  */
@@ -306,7 +360,10 @@ export const CreateCompensationAccountResponse = zod.object({
   "orderId": zod.string().optional(),
   "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
   "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
-  "accountLast4": zod.string().optional()
+  "accountLast4": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
 }).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)')
 
 /**
@@ -333,4 +390,121 @@ export const CreateCancellationAccountResponse = zod.object({
   "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
   "refundAmount": zod.int().optional()
 })
+
+/**
+ * FR-012, FR-053, POL-037, SCR-013, docs/frontend.md §6.2 32번. 지금 보유자만 읽는다(ticket.account_id, authz-matrix §3.2). 남의 티켓과 없는 티켓은 같은 404다. 응답은 Ticket이고 상세에서만 seller를 더 싣는다(patch-Ticket). QR 서명 재료는 싣지 않는다(기기 안의 키로 만든다). Cache-Control: private, no-store
+ * @summary 내 티켓 상세(월렛 펼침)
+ */
+export const GetTicketParams = zod.object({
+  "ticketId": zod.string()
+})
+
+export const getTicketResponseTransferLockedDefault = false;
+
+export const GetTicketResponse = zod.object({
+  "ticketId": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "seatLabel": zod.string().optional(),
+  "gateZone": zod.string().optional(),
+  "status": zod.enum(['ISSUED', 'ACTIVE', 'TRANSFER_PENDING', 'CANCEL_REQUESTED', 'REFUNDED', 'FLAGGED', 'VOIDED']).optional().describe('티켓 상태(docs/planning/03 §2.5, ScannerPackageTicket과 같은 값). Reissued·Transferred는 상태가 아니라 사건(이력)이고, ScannedIn·ScannedOut은 입장 상태(ScannerPackageTicket의 scanState)다'),
+  "transferable": zod.boolean().optional(),
+  "transferLocked": zod.boolean().default(getTicketResponseTransferLockedDefault).describe('부정 예매 소명 요청으로 양도가 잠겼는지(POL-046 ③). 잠긴 동안 양도 요청만 409 transfer-locked이고, 결제자에게 돌려주기와 입장은 막지 않는다(추천 적용 2026-10-31, ADR-0171. 돌려주기를 막지 않는 것은 추천 적용 2026-10-31, ADR-0173 결정 3)'),
+  "transferLockExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('양도 잠금의 최대 기한(소명 요청 + 14일 [가정], 연장 없음). 잠겼을 때만 싣고 아니면 null이다. 소명 인정·사건 정상 종료·조치 실행 끝·묶음에서 빠짐·입장 시작·조치 요청의 반려·만료가 먼저 오면 그때 풀린다(추천 적용 2026-10-31, ADR-0173)'),
+  "transferDeadline": zod.iso.datetime({"offset":true}).optional(),
+  "cancelDeadline": zod.iso.datetime({"offset":true}).optional().describe('공연 시작 시각(POL-032)'),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "placeName": zod.string().optional().describe('장소'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시작 시각'),
+  "receivedFromNickname": zod.string().nullish().describe('받은 티켓의 보낸 분 닉네임. 받은 티켓이 아니면 null(authz-matrix §4.1 \'양도 요청\')'),
+  "bookingNumber": zod.string().nullish().describe('예매번호. 결제자 본인 티켓에만 싣고 받은 티켓은 null이다 [가정](받는 사람에게 결제 정보를 주지 않는 규칙, POL-017)'),
+  "enteredAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시각(ScannedIn). 입장 전이면 null'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('상세(GET /v1/tickets/{ticketId})에만. 판매자 정보(CMP-058 receipt)')
+})
+
+/**
+ * FR-060, POL-017, SCR-041, SCR-013, docs/frontend.md §6.2 32번. 세션 계정이 받는 사람으로 지정된 요청만 최근 순으로 준다(그래서 role은 늘 RECIPIENT다). 경로와 쿼리에 계정 값이 없다. 결제 금액과 결제자 연락처는 싣지 않는다(authz-matrix §4.1 '양도 요청'). 화면 칩 '받기 기다리는 중'은 status=OFFERED다. Cache-Control: private, no-store
+ * @summary 내가 받은 양도 요청 목록(월렛의 받기 카드)
+ */
+export const listTransfersQueryLimitMax = 100;
+
+
+
+export const ListTransfersQueryParams = zod.object({
+  "status": zod.array(zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED'])).optional().describe('쉼표로 이은 상태(없으면 전체)'),
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listTransfersQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const ListTransfersResponse = zod.object({
+  "items": zod.array(zod.object({
+  "offerId": zod.string().optional(),
+  "ticketId": zod.string().optional(),
+  "role": zod.enum(['SENDER', 'RECIPIENT']).optional(),
+  "counterpartNickname": zod.string().optional(),
+  "status": zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']).optional(),
+  "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('48시간과 양도 마감 중 이른 때'),
+  "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구'),
+  "eventId": zod.string().optional(),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "seatLabel": zod.string().optional()
+}).describe('양도 요청(POL-017, ADR-0046). 받는 사람에게는 결제 금액과 결제자 연락처를 싣지 않는다')).optional(),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
+ * FR-056, POL-019, POL-032, ADR-0046 결정 5, docs/design/d5 §1.6 18번. 그 주문의 결제자 본인 건만 최근 순으로 준다. 계좌는 끝 4자리만 싣는다(data.md compensation.account_last4). Cache-Control: private, no-store
+ * @summary 내 배상 건 목록(SCR-055, SCR-013에서 잇는다)
+ */
+export const listCompensationsQueryLimitMax = 100;
+
+
+
+export const ListCompensationsQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listCompensationsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const ListCompensationsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "compensationId": zod.string().optional(),
+  "orderId": zod.string().optional(),
+  "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
+  "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
+  "accountLast4": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)')).optional(),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
+ * FR-056, POL-019, ADR-0046 결정 5, SCR-043, docs/design/d5 §1.6 18번. 그 주문의 결제자 본인만 읽는다. 남의 건과 없는 건은 같은 404다. Cache-Control: private, no-store
+ * @summary 내 배상 건 하나(SCR-043 사유·금액·결과)
+ */
+export const GetCompensationParams = zod.object({
+  "compensationId": zod.string()
+})
+
+export const GetCompensationResponse = zod.object({
+  "compensationId": zod.string().optional(),
+  "orderId": zod.string().optional(),
+  "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
+  "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
+  "accountLast4": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)')
 

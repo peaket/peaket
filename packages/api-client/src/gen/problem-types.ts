@@ -40,6 +40,7 @@ export type ProblemType =
   | 'duplicate-account'
   | 'duplicate-admission'
   | 'entry-started'
+  | 'escrow-partial-not-allowed'
   | 'event-schedule-invalid'
   | 'event-suspended'
   | 'first-partner-account-must-be-admin'
@@ -63,6 +64,9 @@ export type ProblemType =
   | 'invalid-seat'
   | 'investigation-source-expired'
   | 'investigator-required'
+  | 'invitation-invalid'
+  | 'invitation-step-invalid'
+  | 'invitation-step-out-of-order'
   | 'jwks-not-found'
   | 'last-login-method'
   | 'last-partner-admin'
@@ -71,6 +75,9 @@ export type ProblemType =
   | 'lobby-participant-not-found'
   | 'login-provider-not-linked'
   | 'manual-selection-required'
+  | 'merch-cancel-not-allowed'
+  | 'merch-item-state-conflict'
+  | 'merch-return-not-allowed'
   | 'merge-blocked'
   | 'merge-check-unavailable'
   | 'merge-invariant-violated'
@@ -133,6 +140,7 @@ export type ProblemType =
   | 'reauth-required'
   | 'reauth-step-invalid'
   | 'refresh-token-invalid'
+  | 'refund-account-required'
   | 'research-export-not-ready'
   | 'restriction-too-long'
   | 'retention-ended'
@@ -145,6 +153,7 @@ export type ProblemType =
   | 'sale-ended'
   | 'sale-not-suspended'
   | 'sale-paused'
+  | 'sale-setting-locked'
   | 'scale-change-closed'
   | 'seat-already-held'
   | 'seat-recently-released'
@@ -213,6 +222,7 @@ export const PROBLEM_TYPES = {
   'duplicate-account': { status: 409, title: "이미 다른 계정에서 본인확인한 분입니다. 그 계정으로 로그인해 주세요" },
   'duplicate-admission': { status: 409, title: "이미 다른 기기나 탭에서 입장했습니다" },
   'entry-started': { status: 409, title: "입장이 시작되어 할 수 없습니다" },
+  'escrow-partial-not-allowed': { status: 409, title: "구매를 확정한 뒤에 일부 상품을 취소·반품할 수 있습니다" },
   'event-schedule-invalid': { status: 422, title: "회차 일정이 맞지 않습니다" },
   'event-suspended': { status: 410, title: "판매가 중지된 공연입니다" },
   'first-partner-account-must-be-admin': { status: 422, title: "파트너사의 첫 계정은 관리자여야 합니다" },
@@ -236,6 +246,9 @@ export const PROBLEM_TYPES = {
   'invalid-seat': { status: 422, title: "고를 수 없는 좌석이 있습니다" },
   'investigation-source-expired': { status: 410, title: "조사 원천 보존 기간이 끝났습니다" },
   'investigator-required': { status: 403, title: "부정 거래 조사관만 할 수 있습니다" },
+  'invitation-invalid': { status: 410, title: "초대가 만료되었습니다" },
+  'invitation-step-invalid': { status: 410, title: "처음부터 다시 진행해 주세요" },
+  'invitation-step-out-of-order': { status: 409, title: "앞 단계를 먼저 마쳐 주세요" },
   'jwks-not-found': { status: 404, title: "없는 공개키 묶음입니다" },
   'last-login-method': { status: 409, title: "마지막 로그인 수단은 해제할 수 없습니다" },
   'last-partner-admin': { status: 409, title: "마지막 파트너 관리자는 바꿀 수 없습니다" },
@@ -244,6 +257,9 @@ export const PROBLEM_TYPES = {
   'lobby-participant-not-found': { status: 404, title: "로비 참가 기록이 없습니다" },
   'login-provider-not-linked': { status: 404, title: "연결된 로그인 수단이 아닙니다" },
   'manual-selection-required': { status: 409, title: "좌석을 직접 골라 주세요" },
+  'merch-cancel-not-allowed': { status: 409, title: "이미 보냈거나 받은 상품은 취소할 수 없습니다" },
+  'merch-item-state-conflict': { status: 409, title: "지금 주문 상태에서는 할 수 없습니다" },
+  'merch-return-not-allowed': { status: 409, title: "반품할 수 없는 상품이 있습니다" },
   'merge-blocked': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다" },
   'merge-check-unavailable': { status: 503, title: "잠시 뒤 다시 시도해 주세요" },
   'merge-invariant-violated': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다. 고객센터로 문의해 주세요" },
@@ -306,6 +322,7 @@ export const PROBLEM_TYPES = {
   'reauth-required': { status: 403, title: "다시 인증해 주세요" },
   'reauth-step-invalid': { status: 410, title: "처음부터 다시 인증해 주세요" },
   'refresh-token-invalid': { status: 401, title: "다시 로그인해 주세요" },
+  'refund-account-required': { status: 422, title: "환불받을 계좌를 입력해 주세요" },
   'research-export-not-ready': { status: 409, title: "연구용 내보내기를 아직 만드는 중입니다" },
   'restriction-too-long': { status: 422, title: "이용 제한은 1년을 넘길 수 없습니다" },
   'retention-ended': { status: 410, title: "보관 기간이 끝났습니다" },
@@ -318,6 +335,7 @@ export const PROBLEM_TYPES = {
   'sale-ended': { status: 410, title: "판매 시간이 끝났습니다" },
   'sale-not-suspended': { status: 409, title: "판매 중지된 공연이 아닙니다" },
   'sale-paused': { status: 423, title: "판매가 잠시 멈췄습니다" },
+  'sale-setting-locked': { status: 409, title: "지금은 바꿀 수 없는 항목입니다" },
   'scale-change-closed': { status: 409, title: "규모를 바꿀 수 있는 시각이 지났습니다" },
   'seat-already-held': { status: 409, title: "좌석이 이미 선택되었습니다" },
   'seat-recently-released': { status: 409, title: "방금 놓은 좌석은 잠시 뒤에 다시 고를 수 있습니다" },

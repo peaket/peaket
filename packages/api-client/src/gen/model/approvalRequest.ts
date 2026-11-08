@@ -9,12 +9,14 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { ApprovalRequestContractTerms } from './approvalRequestContractTerms';
 import type { ApprovalRequestFraudAction } from './approvalRequestFraudAction';
 import type { ApprovalRequestKind } from './approvalRequestKind';
 import type { ApprovalRequestRequestedRole } from './approvalRequestRequestedRole';
 import type { ApprovalRequestRequiredApprovals } from './approvalRequestRequiredApprovals';
 import type { ApprovalRequestStatus } from './approvalRequestStatus';
 import type { FraudCaseSummary } from './fraudCaseSummary';
+import type { OpsActor } from './opsActor';
 
 /**
  * 승인 업무(POL-038)
@@ -53,4 +55,18 @@ export interface ApprovalRequest {
   readonly summaryViewedAt?: string | null;
   /** FRAUD_ACTION에만, 읽기 전용. FRAUD_ACTION 상세는 요청자와 승인 자격자만 받으므로(그 밖은 404) 상세에는 늘 실리고, 다른 종류에는 null이다(추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다(POL-038 ⑪·공통, 추천 적용 2026-10-31, ADR-0171) */
   fraudCaseSummary?: FraudCaseSummary | null;
+  requestedBy?: OpsActor;
+  requestedAt?: string;
+  /**
+     * WITHDRAWN의 요청자 사유, EXPIRED의 TARGET_CHANGED·DEADLINE_PASSED(docs/data.md approval_request.close_reason)
+     * @nullable
+     */
+  closeReason?: string | null;
+  /** 부른 계정이 지금 승인·반려할 수 있는지(요청자 제외). 서버가 판정한다 */
+  canApprove?: boolean;
+  /**
+     * CONTRACT_TERMS_CHANGE에만. 지금 값과 바꿀 값. 다른 종류는 null이다
+     * @nullable
+     */
+  contractTerms?: ApprovalRequestContractTerms;
 }

@@ -33,6 +33,7 @@ import type {
   ContentReportResult,
   CreateReviewImageBody,
   ListEventReviewsParams,
+  ListReviewsParams,
   ProblemResponse,
   Review,
   ReviewEligibility,
@@ -1130,3 +1131,133 @@ export const useCreateReviewReport = <TError = ErrorType<UnauthorizedResponse | 
       > => {
       return useMutation(getCreateReviewReportMutationOptions(options), queryClient);
     }
+    export type listReviewsResponse200 = {
+  data: ReviewPage
+  status: 200
+}
+
+export type listReviewsResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listReviewsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listReviewsResponseSuccess = (listReviewsResponse200) & {
+  headers: Headers;
+};
+export type listReviewsResponseError = (listReviewsResponse400 | listReviewsResponse401) & {
+  headers: Headers;
+};
+
+export const getListReviewsUrl = (params: ListReviewsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/reviews?${stringifiedParams}` : `/v1/reviews`
+}
+
+/**
+ * FR-033, FR-070, POL-024, POL-044, ADR-0066, docs/design/d5 §1.6 18번. 세션 계정이 쓴 후기만 준다(경로와 쿼리에 계정 값이 없다). 이번에는 status=HIDDEN만 받는다(내 글 전체 목록은 범위 밖). 통보·같은 내용 차단과 불법 촬영물 신고 확인 중인 글은 남의 목록에서 빠지므로 글쓴이가 볼 곳은 이 목록과 공연 상세의 내 후기뿐이다. 신고한 계정과 신고 상세는 싣지 않는다(authz-matrix §4.1). 이의는 고객 문의(category MODERATION_APPEAL)로 받는다. Cache-Control: private, no-store
+ * @summary 내 후기 가운데 가려진 글 목록(내 차단 글 조회)
+ */
+export const listReviews = async (params: ListReviewsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listReviewsResponseSuccess> => {
+
+  return orvalFetch<listReviewsResponseSuccess>(getListReviewsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListReviewsQueryKey = (params?: ListReviewsParams,) => {
+    return [
+    `/v1/reviews`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListReviewsQueryOptions = <TData = Awaited<ReturnType<typeof listReviews>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params: ListReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listReviews>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListReviewsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listReviews>>> = ({ signal }) => listReviews(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listReviews>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListReviewsQueryResult = NonNullable<Awaited<ReturnType<typeof listReviews>>>
+export type ListReviewsQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListReviews<TData = Awaited<ReturnType<typeof listReviews>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: ListReviewsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listReviews>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listReviews>>,
+          TError,
+          Awaited<ReturnType<typeof listReviews>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListReviews<TData = Awaited<ReturnType<typeof listReviews>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: ListReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listReviews>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listReviews>>,
+          TError,
+          Awaited<ReturnType<typeof listReviews>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListReviews<TData = Awaited<ReturnType<typeof listReviews>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: ListReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listReviews>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 후기 가운데 가려진 글 목록(내 차단 글 조회)
+ */
+
+export function useListReviews<TData = Awaited<ReturnType<typeof listReviews>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: ListReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listReviews>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListReviewsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+

@@ -13,10 +13,16 @@ import * as zod from 'zod';
 
 export const listShopProductsParamsLimitMax = 100;
 
+export const listShopProductsParamsTypeMax = 32;
+
+export const listShopProductsParamsLinkedEventIdMax = 64;
+
 
 export const ListShopProductsParams = zod.object({
   "cursor": zod.string().optional(),
-  "limit": zod.int().min(1).max(listShopProductsParamsLimitMax).optional()
+  "limit": zod.int().min(1).max(listShopProductsParamsLimitMax).optional(),
+  "type": zod.string().max(listShopProductsParamsTypeMax).optional(),
+  "linkedEventId": zod.string().max(listShopProductsParamsLinkedEventIdMax).optional()
 })
 
 export type ListShopProductsParams = zod.input<typeof ListShopProductsParams>;

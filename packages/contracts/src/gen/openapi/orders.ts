@@ -52,6 +52,48 @@ export const CreateOrderResponse = zod.object({
 })
 
 /**
+ * FR-047, FR-053, POL-032, docs/design/d5 §1.6 2번·§5.29. 세션 계정의 계정 묶음의 티켓 주문을 최근 순으로 커서로 준다(guidelines §3). 결제를 접수하지 않아 만료된 EXPIRED 주문은 빼고(d5 §5.29, ADR-0107), 티켓이 없는 주문(실패·결과 불명·입금 대기)은 넣는다. '전체' 탭은 이 목록과 GET /v1/shop/orders를 createdAt으로 섞어 그린다 [가정]. 티켓 주문은 purchase-svc, 굿즈 주문은 core-svc가 맡아 한 커서로 묶지 않는다. Cache-Control: private, no-store
+ * @summary 내 예매 주문 목록(SCR-055 예매 탭)
+ */
+export const listOrdersQueryLimitMax = 100;
+
+
+
+export const ListOrdersQueryParams = zod.object({
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listOrdersQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const listOrdersResponseItemsItemTiersMax = 20;
+
+
+
+export const ListOrdersResponse = zod.object({
+  "items": zod.array(zod.object({
+  "orderId": zod.string(),
+  "bookingNumber": zod.string().describe('예매번호 [가정] 날짜 8자리 + 일련번호 5자리(화면 예 2026101400123). 고객 문의의 orderRef와 같은 값. docs/data.md purchase_order에 칸이 아직 없다'),
+  "eventId": zod.string(),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "tiers": zod.array(zod.object({
+  "tierName": zod.string().optional(),
+  "quantity": zod.int().optional()
+})).max(listOrdersResponseItemsItemTiersMax).optional().describe('등급별 매수(예 R석 2매). 20개 상한은 [가정]'),
+  "amount": zod.int().describe('결제 금액(원, 서버 계산)'),
+  "status": zod.enum(['CREATED', 'AUTHENTICATED', 'ACCEPTED', 'RESERVED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'CONFIRMED', 'FAILED', 'COMPENSATED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'EXPIRED']).describe('Order.status와 같은 값. 목록에는 EXPIRED가 나오지 않고 단건에는 나올 수 있다'),
+  "issueDelayed": zod.boolean().optional().describe('PaymentStatus.issueDelayed와 같은 뜻(결제 완료·티켓 발급 중, ADR-0106)'),
+  "failureReason": zod.string().nullish().describe('FAILED일 때 사유 코드(purchase_order.failure_reason). 입금 기한이 지나 끝난 주문도 FAILED이고(T17) 화면은 <주문 취소됨>을 보인다'),
+  "refundPending": zod.boolean().optional().describe('환급을 보류 중인 취소가 있다(<환급 보류>)'),
+  "virtualAccount": zod.object({
+  "bank": zod.string().optional(),
+  "dueAt": zod.iso.datetime({"offset":true}).optional()
+}).nullish().describe('입금 대기일 때 은행과 입금 기한만. 입금처 번호는 GET /v1/orders/{orderId}/payment-status로 읽는다'),
+  "createdAt": zod.iso.datetime({"offset":true})
+}).describe('예매 주문 한 줄(SCR-055 목록). 공연명·등급 표시 값은 주문 때 복사한 값으로 답한다 [가정]')).optional(),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
  * FR-011, POL-036, ADR-0044. 결제창을 열기 직전에 부른다. 선택 순서는 결제사 전환, 공연 지정, 플랫폼 기본. 접수 전의 이전 시도는 SUPERSEDED. 승인 요청을 보낸 주문은 409. 고른 결제사 채널이 서버 승인을 지원하지 않거나 비활성이면, 또 결제사 장애·채널 호출 상한으로 새 결제 진입을 멈춘 동안이면 503(새 결제 일시 정지, payment §2.2·§9. 이 동안 주문을 만들고 결제 접수 전인 홀드의 남은 시간은 멈춘다, ADR-0085). 구매 세션 요청 서명 필수
  * @summary 결제 시도 시작(결제사 선택, 결제창 값 발급)
  */
@@ -105,6 +147,13 @@ export const CreateOrderPaymentResponse = zod.object({
   "switched": zod.boolean().optional().describe('결제사 전환(감내 모드)으로 대체 결제사가 골라졌으면 true. 화면이 안내 문구를 띄운다(CMP-027 pg-switched)'),
   "holdExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('이 주문 홀드의 지금 만료 시각. 새 결제 일시 정지로 멈췄던 시간을 반영한다(ADR-0085)'),
   "checkout": zod.union([zod.object({
+  "escrowProducts": zod.array(zod.object({
+  "id": zod.string().optional(),
+  "name": zod.string().optional(),
+  "code": zod.string().optional(),
+  "unitPrice": zod.int().optional(),
+  "quantity": zod.int().optional()
+})).optional().describe('에스크로 상점 주문만. 주문 상품 목록. 칸 이름은 연동 때 토스페이먼츠 문서로 확인한다 [가정]'),
   "clientKey": zod.string(),
   "customerKey": zod.string(),
   "orderId": zod.string(),
@@ -173,4 +222,86 @@ export const GetOrderPaymentStatusResponse = zod.object({
   "reason": zod.string().optional(),
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional().describe('결제 접수에서 고정된 결제사(ADR-0044)')
 })
+
+/**
+ * FR-011, FR-053, POL-032, POL-037, SCR-012, SCR-055, docs/design/d5 §1.6 2번. 결제 결과 화면과 예매 확인서가 읽는다. 주문 계정이 세션 계정의 계정 묶음에 들어야 한다(authz-matrix §3.2). 결제 상태의 긴 기다림은 GET /v1/orders/{orderId}/payment-status가 맡고 이 경로는 바로 답한다. 카드번호와 계좌 전체는 싣지 않는다. 가상계좌 입금 번호는 입금 대기일 때 payment-status로 읽는다. Cache-Control: private, no-store
+ * @summary 내 예매 주문 상세(예매 확인서, 결제 결과 화면의 예매번호·결제 금액)
+ */
+export const GetOrderParams = zod.object({
+  "orderId": zod.string()
+})
+
+export const getOrderResponseOneTiersMax = 20;
+
+export const getOrderResponseTwoSeatsMax = 20;
+
+export const getOrderResponseTwoPaymentCardLast4RegExp = new RegExp('^[0-9]{4}$');
+
+
+export const GetOrderResponse = zod.object({
+  "orderId": zod.string(),
+  "bookingNumber": zod.string().describe('예매번호 [가정] 날짜 8자리 + 일련번호 5자리(화면 예 2026101400123). 고객 문의의 orderRef와 같은 값. docs/data.md purchase_order에 칸이 아직 없다'),
+  "eventId": zod.string(),
+  "eventTitle": zod.string().optional().describe('공연명'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
+  "tiers": zod.array(zod.object({
+  "tierName": zod.string().optional(),
+  "quantity": zod.int().optional()
+})).max(getOrderResponseOneTiersMax).optional().describe('등급별 매수(예 R석 2매). 20개 상한은 [가정]'),
+  "amount": zod.int().describe('결제 금액(원, 서버 계산)'),
+  "status": zod.enum(['CREATED', 'AUTHENTICATED', 'ACCEPTED', 'RESERVED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'CONFIRMED', 'FAILED', 'COMPENSATED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'EXPIRED']).describe('Order.status와 같은 값. 목록에는 EXPIRED가 나오지 않고 단건에는 나올 수 있다'),
+  "issueDelayed": zod.boolean().optional().describe('PaymentStatus.issueDelayed와 같은 뜻(결제 완료·티켓 발급 중, ADR-0106)'),
+  "failureReason": zod.string().nullish().describe('FAILED일 때 사유 코드(purchase_order.failure_reason). 입금 기한이 지나 끝난 주문도 FAILED이고(T17) 화면은 <주문 취소됨>을 보인다'),
+  "refundPending": zod.boolean().optional().describe('환급을 보류 중인 취소가 있다(<환급 보류>)'),
+  "virtualAccount": zod.object({
+  "bank": zod.string().optional(),
+  "dueAt": zod.iso.datetime({"offset":true}).optional()
+}).nullish().describe('입금 대기일 때 은행과 입금 기한만. 입금처 번호는 GET /v1/orders/{orderId}/payment-status로 읽는다'),
+  "createdAt": zod.iso.datetime({"offset":true})
+}).describe('예매 주문 한 줄(SCR-055 목록). 공연명·등급 표시 값은 주문 때 복사한 값으로 답한다 [가정]').and(zod.object({
+  "placeName": zod.string().optional(),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시작'),
+  "seats": zod.array(zod.object({
+  "seatLabel": zod.string().optional(),
+  "tierName": zod.string().optional(),
+  "unitPrice": zod.int().optional().describe('주문 때 가격(원)'),
+  "gateZone": zod.string().nullish().describe('입장 게이트 구역'),
+  "ticketId": zod.string().nullish()
+})).max(getOrderResponseTwoSeatsMax).optional().describe('좌석별 줄(order_item). ticketId는 발권 뒤에만 있다. 20개 상한은 [가정]'),
+  "payment": zod.object({
+  "method": zod.string().optional().describe('결제 수단 이름 코드 [가정]'),
+  "cardLast4": zod.string().regex(getOrderResponseTwoPaymentCardLast4RegExp).nullish().describe('카드 끝 4자리(d5 §5.29). 카드가 아니면 null. docs/data.md payment에 칸이 아직 없다 [가정]'),
+  "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional()
+}).nullish().describe('결제 수단 표시. 접수 전이면 null. 카드번호 전체는 어떤 칸에도 없다'),
+  "cancellations": zod.array(zod.object({
+  "cancellationId": zod.string().optional(),
+  "ticketId": zod.string().nullish(),
+  "requestedAt": zod.iso.datetime({"offset":true}).optional(),
+  "deductionAmount": zod.int().optional().describe('공제액(원)'),
+  "refundAmount": zod.int().optional().describe('환급액(원)'),
+  "refundDueAt": zod.iso.datetime({"offset":true}).nullish().describe('환급 예정일(3영업일)'),
+  "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
+  "refundAccountRequired": zod.boolean().optional().describe('환불 계좌를 기다리는 건(POST /v1/cancellations/{cancellationId}/account, SCR-060)')
+})).optional().describe('취소·환급 이력(order_cancellation)'),
+  "compensation": zod.union([zod.object({
+  "compensationId": zod.string().optional(),
+  "orderId": zod.string().optional(),
+  "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
+  "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
+  "accountLast4": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)'),zod.null()]).optional().describe('배상 건(SCR-043으로 잇는다). 없으면 null'),
+  "seller": zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).optional().describe('판매자 정보(CMP-058 receipt, 전자상거래법 §20②)')
+})).describe('예매 주문 상세(GET /v1/orders/{orderId}, 예매 확인서). 예매자 성명·휴대폰 번호는 화면이 쓰지 않아 싣지 않는다')
 

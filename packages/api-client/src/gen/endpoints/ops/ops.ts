@@ -34,7 +34,17 @@ import type {
   AdminAccountPage,
   AdminDesignation,
   AdminDesignationCreate,
+  AdminInvitationAcceptance,
+  AdminInvitationAcceptanceCreate,
+  AdminInvitationCompletionCreate,
   AdminInvitationCreate,
+  AdminInvitationPasskeyCreate,
+  AdminInvitationPasswordCreate,
+  AdminInvitationProgress,
+  AdminInvitationStepBody,
+  AdminInvitationTotpConfirmationCreate,
+  AdminInvitationTotpConfirmed,
+  AdminInvitationTotpEnrollment,
   AdminLoginDone,
   AdminLoginPasswordStep,
   AdminLoginSecondStep,
@@ -57,9 +67,11 @@ import type {
   ApprovalDecisionBody,
   ApprovalRequest,
   ApprovalRequestInput,
+  ApprovalRequestPage,
   CaseReply,
   Command,
   CommandState,
+  CommandStatePage,
   ComplianceDocument,
   ComplianceDocumentUpload,
   ComplianceNotice,
@@ -110,6 +122,7 @@ import type {
   DecisionRecordPage,
   DemandForecast,
   EventCancellationRequest,
+  EventCancellationRequestPage,
   EventReport,
   EventReportSummary,
   GetOpsEventLiveParams,
@@ -122,24 +135,66 @@ import type {
   InquiryMessage,
   ListOpsAdminAccountPermissionChangesParams,
   ListOpsAdminAccountsParams,
+  ListOpsApprovalRequestsParams,
   ListOpsArtists200,
   ListOpsArtistsParams,
   ListOpsCasesParams,
+  ListOpsCommandsParams,
   ListOpsComplianceAccessReviewsParams,
   ListOpsComplianceDataRequestsParams,
   ListOpsComplianceIncidentsParams,
   ListOpsComplianceNoticesParams,
   ListOpsDecisionsParams,
+  ListOpsEventBotReviewSamplesParams,
+  ListOpsEventCancellationsParams,
+  ListOpsFanCasesParams,
+  ListOpsFanOrdersParams,
+  ListOpsFanQueueEntriesParams,
+  ListOpsFanTicketsParams,
+  ListOpsFanTransfersParams,
+  ListOpsNoticeTemplatesParams,
+  ListOpsPartnerNoticesParams,
+  ListOpsPayoutBatchesParams,
   ListOpsPlaces200,
   ListOpsPlacesParams,
+  ListOpsPromoterContractTermsParams,
+  ListOpsPromotersParams,
   ListOpsReceivables200,
   ListOpsReceivablesParams,
+  ListOpsSaleReviewsParams,
   ListOpsScannerDevices200,
   ListOpsScannerDevicesParams,
   ListOpsSettlementsParams,
+  NoticeTemplate,
+  NoticeTemplateCreate,
+  NoticeTemplatePage,
+  NoticeTemplateUpdate,
+  OpsBotReview,
+  OpsBotReviewJudgement,
+  OpsBotReviewJudgementCreate,
+  OpsBotReviewSamplePage,
+  OpsFanDetail,
+  OpsFanLookupCreate,
+  OpsFanOrderPage,
+  OpsFanQueueEntryPage,
+  OpsFanSummary,
+  OpsFanTicketPage,
+  OpsFanTransferPage,
+  OpsFanUnmasking,
+  OpsFanUnmaskingCreate,
+  OpsPromoterCreate,
+  OpsPromoterDetail,
+  OpsPromoterPage,
   OpsReauthPasswordStep,
+  OpsSaleReviewPage,
+  PartnerNotice,
+  PartnerNoticeCreate,
+  PartnerNoticePage,
   PayoutBatch,
+  PayoutBatchPage,
   ProblemResponse,
+  PromoterContractTermChangeCreate,
+  PromoterContractTermsPage,
   PutOpsArtistAliasesBody,
   PutOpsPlaceAliasesBody,
   PutOpsProductionAliasesBody,
@@ -3030,7 +3085,142 @@ export const useCreateOpsCommand = <TError = ErrorType<ProblemResponse>,
       > => {
       return useMutation(getCreateOpsCommandMutationOptions(options), queryClient);
     }
-    export type createOpsCommandApprovalResponse200 = {
+    export type listOpsCommandsResponse200 = {
+  data: CommandStatePage
+  status: 200
+}
+
+export type listOpsCommandsResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsCommandsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsCommandsResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsCommandsResponseSuccess = (listOpsCommandsResponse200) & {
+  headers: Headers;
+};
+export type listOpsCommandsResponseError = (listOpsCommandsResponse400 | listOpsCommandsResponse401 | listOpsCommandsResponse403) & {
+  headers: Headers;
+};
+
+export const getListOpsCommandsUrl = (params?: ListOpsCommandsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/commands?${stringifiedParams}` : `/v1/ops/commands`
+}
+
+/**
+ * FR-030, POL-021, SCR-030, ADR-0100(관제 목록은 REST, SSE는 빨리 알리는 길이고 다시 붙으면 이 목록을 다시 읽는다). viewer는 목록만 본다(docs/design/d5 §3.3 메뉴 표). 목록 항목에는 dryRun과 params를 싣지 않는다(상세 GET /v1/ops/commands/{commandId}). 정렬은 만든 시각 최신순 [가정]. '내 승인 대기'는 state=PENDING_APPROVAL,REVERT_PENDING으로 읽고 항목의 canApprove로 고른다. 커서 페이징(guidelines §3). Cache-Control: no-store
+ * @summary 운영 명령 목록(적용 중 명령·승인 대기·이력)
+ */
+export const listOpsCommands = async (params?: ListOpsCommandsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsCommandsResponseSuccess> => {
+
+  return orvalFetch<listOpsCommandsResponseSuccess>(getListOpsCommandsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsCommandsQueryKey = (params?: ListOpsCommandsParams,) => {
+    return [
+    `/v1/ops/commands`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsCommandsQueryOptions = <TData = Awaited<ReturnType<typeof listOpsCommands>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListOpsCommandsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsCommands>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsCommandsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsCommands>>> = ({ signal }) => listOpsCommands(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsCommands>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsCommandsQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsCommands>>>
+export type ListOpsCommandsQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsCommands<TData = Awaited<ReturnType<typeof listOpsCommands>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: undefined |  ListOpsCommandsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsCommands>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsCommands>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsCommands>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsCommands<TData = Awaited<ReturnType<typeof listOpsCommands>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsCommandsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsCommands>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsCommands>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsCommands>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsCommands<TData = Awaited<ReturnType<typeof listOpsCommands>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsCommandsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsCommands>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 운영 명령 목록(적용 중 명령·승인 대기·이력)
+ */
+
+export function useListOpsCommands<TData = Awaited<ReturnType<typeof listOpsCommands>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsCommandsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsCommands>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsCommandsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsCommandApprovalResponse200 = {
   data: CommandState
   status: 200
 }
@@ -7482,10 +7672,15 @@ export type createOpsApprovalRequestResponse403 = {
   status: 403
 }
 
+export type createOpsApprovalRequestResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
 export type createOpsApprovalRequestResponseSuccess = (createOpsApprovalRequestResponse201) & {
   headers: Headers;
 };
-export type createOpsApprovalRequestResponseError = (createOpsApprovalRequestResponse403) & {
+export type createOpsApprovalRequestResponseError = (createOpsApprovalRequestResponse403 | createOpsApprovalRequestResponse422) & {
   headers: Headers;
 };
 
@@ -7498,7 +7693,7 @@ export const getCreateOpsApprovalRequestUrl = () => {
 }
 
 /**
- * FR-058, FR-059, FR-061, POL-038. 필요한 승인 인원은 서버가 정함. kind COMMANDER_ROLE_CHANGE는 이 경로로 만들지 않고 PUT /v1/ops/admin-accounts/{adminAccountId}/role의 202만 만든다(그 경로의 대상·역할 조건을 거치게 하려는 것이다, docs/security/authz-matrix.md §6.1). 이 경로로 보내면 422이고, requestedRole은 받지 않는다(추천 적용 2026-10-30). kind FRAUD_ACTION도 이 경로로 만들지 않고 POST /v1/ops/fraud-cases/{caseId}/action-requests만 만든다(조사관 지정과 사건 상태를 거치게 하려는 것이다, 보내면 422, 추천 적용 2026-10-31, ADR-0171)
+ * FR-058, FR-059, FR-061, POL-038. 필요한 승인 인원은 서버가 정함. kind COMMANDER_ROLE_CHANGE는 이 경로로 만들지 않고 PUT /v1/ops/admin-accounts/{adminAccountId}/role의 202만 만든다(그 경로의 대상·역할 조건을 거치게 하려는 것이다, docs/security/authz-matrix.md §6.1). 이 경로로 보내면 422이고, requestedRole은 받지 않는다(추천 적용 2026-10-30). kind FRAUD_ACTION도 이 경로로 만들지 않고 POST /v1/ops/fraud-cases/{caseId}/action-requests만 만든다(조사관 지정과 사건 상태를 거치게 하려는 것이다, 보내면 422, 추천 적용 2026-10-31, ADR-0171) kind CONTRACT_TERMS_CHANGE도 이 경로로 만들지 않고 POST /v1/ops/promoters/{promoterId}/contract-term-changes만 만든다(바꿀 값을 그 경로가 받는다, 보내면 422, ADR-0238)
  * @summary 승인 업무 요청(사유 필수, 증빙은 확인 사실만)
  */
 export const createOpsApprovalRequest = async (approvalRequestInput?: ApprovalRequestInput, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsApprovalRequestResponseSuccess> => {
@@ -7577,7 +7772,142 @@ export const useCreateOpsApprovalRequest = <TError = ErrorType<ProblemResponse>,
       > => {
       return useMutation(getCreateOpsApprovalRequestMutationOptions(options), queryClient);
     }
-    export type getOpsApprovalRequestResponse200 = {
+    export type listOpsApprovalRequestsResponse200 = {
+  data: ApprovalRequestPage
+  status: 200
+}
+
+export type listOpsApprovalRequestsResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsApprovalRequestsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsApprovalRequestsResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsApprovalRequestsResponseSuccess = (listOpsApprovalRequestsResponse200) & {
+  headers: Headers;
+};
+export type listOpsApprovalRequestsResponseError = (listOpsApprovalRequestsResponse400 | listOpsApprovalRequestsResponse401 | listOpsApprovalRequestsResponse403) & {
+  headers: Headers;
+};
+
+export const getListOpsApprovalRequestsUrl = (params?: ListOpsApprovalRequestsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/approval-requests?${stringifiedParams}` : `/v1/ops/approval-requests`
+}
+
+/**
+ * FR-058, FR-059, FR-061, POL-038, SCR-046, ADR-0100. 상세(GET /v1/ops/approval-requests/{approvalId})와 같은 범위만 싣는다: 요청자이거나 그 업무를 승인·반려할 수 있는 역할. kind FRAUD_ACTION은 요청자와 승인 자격자(POL-038 ⑪, ADR-0171)에게만 줄이 있고, 그 밖의 세션에는 줄이 없다. 승인 자격은 상세처럼 identity-svc GetAdminDesignations로 보고, 답이 없으면 FRAUD_ACTION 줄을 빼는 쪽으로 닫는다. 목록에서는 fraudCaseSummary를 null로 두고 approval_summary_view를 쓰지 않는다(열람 시각은 상세를 열 때만 남는다, ADR-0173). 정렬은 요청 시각 최신순 [가정]. 전체 건수는 주지 않는다(guidelines §3). Cache-Control: no-store
+ * @summary 승인 업무 목록(종류·상태·내 승인 대기로 거르기)
+ */
+export const listOpsApprovalRequests = async (params?: ListOpsApprovalRequestsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsApprovalRequestsResponseSuccess> => {
+
+  return orvalFetch<listOpsApprovalRequestsResponseSuccess>(getListOpsApprovalRequestsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsApprovalRequestsQueryKey = (params?: ListOpsApprovalRequestsParams,) => {
+    return [
+    `/v1/ops/approval-requests`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsApprovalRequestsQueryOptions = <TData = Awaited<ReturnType<typeof listOpsApprovalRequests>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListOpsApprovalRequestsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsApprovalRequests>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsApprovalRequestsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsApprovalRequests>>> = ({ signal }) => listOpsApprovalRequests(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsApprovalRequests>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsApprovalRequestsQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsApprovalRequests>>>
+export type ListOpsApprovalRequestsQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsApprovalRequests<TData = Awaited<ReturnType<typeof listOpsApprovalRequests>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: undefined |  ListOpsApprovalRequestsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsApprovalRequests>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsApprovalRequests>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsApprovalRequests>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsApprovalRequests<TData = Awaited<ReturnType<typeof listOpsApprovalRequests>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsApprovalRequestsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsApprovalRequests>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsApprovalRequests>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsApprovalRequests>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsApprovalRequests<TData = Awaited<ReturnType<typeof listOpsApprovalRequests>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsApprovalRequestsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsApprovalRequests>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 승인 업무 목록(종류·상태·내 승인 대기로 거르기)
+ */
+
+export function useListOpsApprovalRequests<TData = Awaited<ReturnType<typeof listOpsApprovalRequests>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsApprovalRequestsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsApprovalRequests>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsApprovalRequestsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getOpsApprovalRequestResponse200 = {
   data: ApprovalRequest
   status: 200
 }
@@ -8379,7 +8709,142 @@ export const useCreateOpsEventCancellation = <TError = ErrorType<ProblemResponse
       > => {
       return useMutation(getCreateOpsEventCancellationMutationOptions(options), queryClient);
     }
-    export type createOpsEventCancellationJudgementResponse200 = {
+    export type listOpsEventCancellationsResponse200 = {
+  data: EventCancellationRequestPage
+  status: 200
+}
+
+export type listOpsEventCancellationsResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsEventCancellationsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsEventCancellationsResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsEventCancellationsResponseSuccess = (listOpsEventCancellationsResponse200) & {
+  headers: Headers;
+};
+export type listOpsEventCancellationsResponseError = (listOpsEventCancellationsResponse400 | listOpsEventCancellationsResponse401 | listOpsEventCancellationsResponse403) & {
+  headers: Headers;
+};
+
+export const getListOpsEventCancellationsUrl = (params?: ListOpsEventCancellationsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/event-cancellations?${stringifiedParams}` : `/v1/ops/event-cancellations`
+}
+
+/**
+ * FR-055, POL-038, SCR-047, docs/planning/03 §3 '회차 취소·연기 요청·판정·확정' 행(viewer·CS는 읽기), ADR-0100. 목록 항목에는 dryRun과 progress.perPg를 싣지 않는다. 정렬은 요청 시각 최신순 [가정]. Cache-Control: no-store
+ * @summary 회차 취소·연기 요청 목록
+ */
+export const listOpsEventCancellations = async (params?: ListOpsEventCancellationsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsEventCancellationsResponseSuccess> => {
+
+  return orvalFetch<listOpsEventCancellationsResponseSuccess>(getListOpsEventCancellationsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsEventCancellationsQueryKey = (params?: ListOpsEventCancellationsParams,) => {
+    return [
+    `/v1/ops/event-cancellations`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsEventCancellationsQueryOptions = <TData = Awaited<ReturnType<typeof listOpsEventCancellations>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListOpsEventCancellationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsEventCancellations>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsEventCancellationsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsEventCancellations>>> = ({ signal }) => listOpsEventCancellations(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsEventCancellations>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsEventCancellationsQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsEventCancellations>>>
+export type ListOpsEventCancellationsQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsEventCancellations<TData = Awaited<ReturnType<typeof listOpsEventCancellations>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: undefined |  ListOpsEventCancellationsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsEventCancellations>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsEventCancellations>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsEventCancellations>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsEventCancellations<TData = Awaited<ReturnType<typeof listOpsEventCancellations>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsEventCancellationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsEventCancellations>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsEventCancellations>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsEventCancellations>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsEventCancellations<TData = Awaited<ReturnType<typeof listOpsEventCancellations>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsEventCancellationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsEventCancellations>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 회차 취소·연기 요청 목록
+ */
+
+export function useListOpsEventCancellations<TData = Awaited<ReturnType<typeof listOpsEventCancellations>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsEventCancellationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsEventCancellations>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsEventCancellationsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsEventCancellationJudgementResponse200 = {
   data: EventCancellationRequest
   status: 200
 }
@@ -10701,7 +11166,142 @@ export const useCreateOpsPayoutBatch = <TError = ErrorType<ProblemResponse>,
       > => {
       return useMutation(getCreateOpsPayoutBatchMutationOptions(options), queryClient);
     }
-    export type createOpsPayoutBatchPortoneExecutionResponse200 = {
+    export type listOpsPayoutBatchesResponse200 = {
+  data: PayoutBatchPage
+  status: 200
+}
+
+export type listOpsPayoutBatchesResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsPayoutBatchesResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsPayoutBatchesResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsPayoutBatchesResponseSuccess = (listOpsPayoutBatchesResponse200) & {
+  headers: Headers;
+};
+export type listOpsPayoutBatchesResponseError = (listOpsPayoutBatchesResponse400 | listOpsPayoutBatchesResponse401 | listOpsPayoutBatchesResponse403) & {
+  headers: Headers;
+};
+
+export const getListOpsPayoutBatchesUrl = (params?: ListOpsPayoutBatchesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/payout-batches?${stringifiedParams}` : `/v1/ops/payout-batches`
+}
+
+/**
+ * FR-062, POL-038, POL-039, SCR-049, ADR-0100. CS 담당자는 정산 화면을 쓰지 않아 403이다(소유자 결정 2026-10-30, open-items 72번, listOpsSettlements와 같다). 정렬은 지급일 최신순 [가정]. Cache-Control: no-store
+ * @summary 지급 묶음 목록(지급일·결제사·결제 상점·상태 거르기)
+ */
+export const listOpsPayoutBatches = async (params?: ListOpsPayoutBatchesParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsPayoutBatchesResponseSuccess> => {
+
+  return orvalFetch<listOpsPayoutBatchesResponseSuccess>(getListOpsPayoutBatchesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsPayoutBatchesQueryKey = (params?: ListOpsPayoutBatchesParams,) => {
+    return [
+    `/v1/ops/payout-batches`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsPayoutBatchesQueryOptions = <TData = Awaited<ReturnType<typeof listOpsPayoutBatches>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListOpsPayoutBatchesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPayoutBatches>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsPayoutBatchesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsPayoutBatches>>> = ({ signal }) => listOpsPayoutBatches(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsPayoutBatches>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsPayoutBatchesQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsPayoutBatches>>>
+export type ListOpsPayoutBatchesQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsPayoutBatches<TData = Awaited<ReturnType<typeof listOpsPayoutBatches>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: undefined |  ListOpsPayoutBatchesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPayoutBatches>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsPayoutBatches>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsPayoutBatches>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsPayoutBatches<TData = Awaited<ReturnType<typeof listOpsPayoutBatches>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsPayoutBatchesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPayoutBatches>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsPayoutBatches>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsPayoutBatches>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsPayoutBatches<TData = Awaited<ReturnType<typeof listOpsPayoutBatches>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsPayoutBatchesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPayoutBatches>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 지급 묶음 목록(지급일·결제사·결제 상점·상태 거르기)
+ */
+
+export function useListOpsPayoutBatches<TData = Awaited<ReturnType<typeof listOpsPayoutBatches>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsPayoutBatchesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPayoutBatches>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsPayoutBatchesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsPayoutBatchPortoneExecutionResponse200 = {
   data: void
   status: 200
 }
@@ -12296,3 +12896,4259 @@ export function useGetOpsWidget<TData = Awaited<ReturnType<typeof getOpsWidget>>
 
 
 
+export type getOpsCommandResponse200 = {
+  data: CommandState
+  status: 200
+}
+
+export type getOpsCommandResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getOpsCommandResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsCommandResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsCommandResponseSuccess = (getOpsCommandResponse200) & {
+  headers: Headers;
+};
+export type getOpsCommandResponseError = (getOpsCommandResponse401 | getOpsCommandResponse403 | getOpsCommandResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsCommandUrl = (commandId: string,) => {
+
+
+
+
+  return `/v1/ops/commands/${encodeURIComponent(String(commandId))}`
+}
+
+/**
+ * FR-030, POL-021, SCR-030, ADR-0100, ADR-0143. 승인자 화면에는 요청자·사유·dry-run 결과를 빼거나 더하지 않고 그대로 보인다(docs/design/d2 §3.5). 명령 확인의 정본은 이 응답의 상태다(ADR-0100). viewer는 목록만 보므로 부르지 못한다(d5 메뉴 표의 '목록만'을 상세 금지로 읽었다 [가정]). Cache-Control: no-store
+ * @summary 운영 명령 상세(승인자가 보는 요청자·사유·dry-run, 전파 상태)
+ */
+export const getOpsCommand = async (commandId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsCommandResponseSuccess> => {
+
+  return orvalFetch<getOpsCommandResponseSuccess>(getGetOpsCommandUrl(commandId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsCommandQueryKey = (commandId: string,) => {
+    return [
+    `/v1/ops/commands/${commandId}`
+    ] as const;
+    }
+
+
+export const getGetOpsCommandQueryOptions = <TData = Awaited<ReturnType<typeof getOpsCommand>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(commandId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsCommand>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsCommandQueryKey(commandId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsCommand>>> = ({ signal }) => getOpsCommand(commandId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: commandId !== null && commandId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsCommand>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsCommandQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsCommand>>>
+export type GetOpsCommandQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetOpsCommand<TData = Awaited<ReturnType<typeof getOpsCommand>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ commandId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsCommand>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsCommand>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsCommand>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsCommand<TData = Awaited<ReturnType<typeof getOpsCommand>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ commandId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsCommand>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsCommand>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsCommand>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsCommand<TData = Awaited<ReturnType<typeof getOpsCommand>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ commandId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsCommand>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 운영 명령 상세(승인자가 보는 요청자·사유·dry-run, 전파 상태)
+ */
+
+export function useGetOpsCommand<TData = Awaited<ReturnType<typeof getOpsCommand>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ commandId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsCommand>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsCommandQueryOptions(commandId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getOpsEventCancellationResponse200 = {
+  data: EventCancellationRequest
+  status: 200
+}
+
+export type getOpsEventCancellationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getOpsEventCancellationResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsEventCancellationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsEventCancellationResponseSuccess = (getOpsEventCancellationResponse200) & {
+  headers: Headers;
+};
+export type getOpsEventCancellationResponseError = (getOpsEventCancellationResponse401 | getOpsEventCancellationResponse403 | getOpsEventCancellationResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsEventCancellationUrl = (requestId: string,) => {
+
+
+
+
+  return `/v1/ops/event-cancellations/${encodeURIComponent(String(requestId))}`
+}
+
+/**
+ * FR-055, POL-038, SCR-047, ADR-0046, ADR-0100, 기술 검토 중간-045. 판정 전이면 fault·dryRun은 비어 있다. 일괄 환불 진행의 정본은 progress다. Cache-Control: no-store
+ * @summary 회차 취소·연기 요청 상세(파트너 요청, 판정, dry-run, 결제사별 진행)
+ */
+export const getOpsEventCancellation = async (requestId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsEventCancellationResponseSuccess> => {
+
+  return orvalFetch<getOpsEventCancellationResponseSuccess>(getGetOpsEventCancellationUrl(requestId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsEventCancellationQueryKey = (requestId: string,) => {
+    return [
+    `/v1/ops/event-cancellations/${requestId}`
+    ] as const;
+    }
+
+
+export const getGetOpsEventCancellationQueryOptions = <TData = Awaited<ReturnType<typeof getOpsEventCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(requestId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventCancellation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsEventCancellationQueryKey(requestId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsEventCancellation>>> = ({ signal }) => getOpsEventCancellation(requestId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: requestId !== null && requestId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsEventCancellation>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsEventCancellationQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsEventCancellation>>>
+export type GetOpsEventCancellationQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetOpsEventCancellation<TData = Awaited<ReturnType<typeof getOpsEventCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ requestId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventCancellation>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsEventCancellation>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsEventCancellation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsEventCancellation<TData = Awaited<ReturnType<typeof getOpsEventCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ requestId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventCancellation>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsEventCancellation>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsEventCancellation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsEventCancellation<TData = Awaited<ReturnType<typeof getOpsEventCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ requestId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventCancellation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 회차 취소·연기 요청 상세(파트너 요청, 판정, dry-run, 결제사별 진행)
+ */
+
+export function useGetOpsEventCancellation<TData = Awaited<ReturnType<typeof getOpsEventCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ requestId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventCancellation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsEventCancellationQueryOptions(requestId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listOpsSaleReviewsResponse200 = {
+  data: OpsSaleReviewPage
+  status: 200
+}
+
+export type listOpsSaleReviewsResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsSaleReviewsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsSaleReviewsResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsSaleReviewsResponseSuccess = (listOpsSaleReviewsResponse200) & {
+  headers: Headers;
+};
+export type listOpsSaleReviewsResponseError = (listOpsSaleReviewsResponse400 | listOpsSaleReviewsResponse401 | listOpsSaleReviewsResponse403) & {
+  headers: Headers;
+};
+
+export const getListOpsSaleReviewsUrl = (params?: ListOpsSaleReviewsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/sale-reviews?${stringifiedParams}` : `/v1/ops/sale-reviews`
+}
+
+/**
+ * FR-052, POL-037, SCR-048, docs/planning/03 §2.14·§3 '공연 판매 승인' 행(viewer·CS는 읽기), ADR-0093, ADR-0123, ADR-0100. 공연 단위다. status를 주지 않으면 SUBMITTED(승인 대기)만 준다 [가정]. 재승인 대기는 status SUBMITTED이고 reapproval이 true다. 정렬은 승인 요청 시각 오래된 순 [가정]. Cache-Control: no-store
+ * @summary 판매 승인 목록(승인 대기·승인됨·판매 중지 탭)
+ */
+export const listOpsSaleReviews = async (params?: ListOpsSaleReviewsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsSaleReviewsResponseSuccess> => {
+
+  return orvalFetch<listOpsSaleReviewsResponseSuccess>(getListOpsSaleReviewsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsSaleReviewsQueryKey = (params?: ListOpsSaleReviewsParams,) => {
+    return [
+    `/v1/ops/sale-reviews`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsSaleReviewsQueryOptions = <TData = Awaited<ReturnType<typeof listOpsSaleReviews>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListOpsSaleReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsSaleReviews>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsSaleReviewsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsSaleReviews>>> = ({ signal }) => listOpsSaleReviews(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsSaleReviews>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsSaleReviewsQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsSaleReviews>>>
+export type ListOpsSaleReviewsQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsSaleReviews<TData = Awaited<ReturnType<typeof listOpsSaleReviews>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: undefined |  ListOpsSaleReviewsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsSaleReviews>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsSaleReviews>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsSaleReviews>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsSaleReviews<TData = Awaited<ReturnType<typeof listOpsSaleReviews>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsSaleReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsSaleReviews>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsSaleReviews>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsSaleReviews>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsSaleReviews<TData = Awaited<ReturnType<typeof listOpsSaleReviews>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsSaleReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsSaleReviews>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 판매 승인 목록(승인 대기·승인됨·판매 중지 탭)
+ */
+
+export function useListOpsSaleReviews<TData = Awaited<ReturnType<typeof listOpsSaleReviews>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsSaleReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsSaleReviews>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsSaleReviewsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listOpsPromotersResponse200 = {
+  data: OpsPromoterPage
+  status: 200
+}
+
+export type listOpsPromotersResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsPromotersResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsPromotersResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsPromotersResponseSuccess = (listOpsPromotersResponse200) & {
+  headers: Headers;
+};
+export type listOpsPromotersResponseError = (listOpsPromotersResponse400 | listOpsPromotersResponse401 | listOpsPromotersResponse403) & {
+  headers: Headers;
+};
+
+export const getListOpsPromotersUrl = (params?: ListOpsPromotersParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/promoters?${stringifiedParams}` : `/v1/ops/promoters`
+}
+
+/**
+ * SCR-065, docs/design/d5 §1.6 9번, docs/planning/03 §3 '파트너사·계약' 행(CS는 읽기, viewer는 쓰지 않는다). q는 상호를 찾는 검색어다. 정렬은 상호 가나다순 [가정]. Cache-Control: no-store
+ * @summary 파트너사 목록
+ */
+export const listOpsPromoters = async (params?: ListOpsPromotersParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsPromotersResponseSuccess> => {
+
+  return orvalFetch<listOpsPromotersResponseSuccess>(getListOpsPromotersUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsPromotersQueryKey = (params?: ListOpsPromotersParams,) => {
+    return [
+    `/v1/ops/promoters`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsPromotersQueryOptions = <TData = Awaited<ReturnType<typeof listOpsPromoters>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListOpsPromotersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoters>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsPromotersQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsPromoters>>> = ({ signal }) => listOpsPromoters(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoters>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsPromotersQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsPromoters>>>
+export type ListOpsPromotersQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsPromoters<TData = Awaited<ReturnType<typeof listOpsPromoters>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: undefined |  ListOpsPromotersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoters>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsPromoters>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsPromoters>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsPromoters<TData = Awaited<ReturnType<typeof listOpsPromoters>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsPromotersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoters>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsPromoters>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsPromoters>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsPromoters<TData = Awaited<ReturnType<typeof listOpsPromoters>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsPromotersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoters>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 파트너사 목록
+ */
+
+export function useListOpsPromoters<TData = Awaited<ReturnType<typeof listOpsPromoters>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsPromotersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoters>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsPromotersQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsPromoterResponse201 = {
+  data: OpsPromoterDetail
+  status: 201
+}
+
+export type createOpsPromoterResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsPromoterResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsPromoterResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsPromoterResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsPromoterResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsPromoterResponseSuccess = (createOpsPromoterResponse201) & {
+  headers: Headers;
+};
+export type createOpsPromoterResponseError = (createOpsPromoterResponse400 | createOpsPromoterResponse401 | createOpsPromoterResponse403 | createOpsPromoterResponse409 | createOpsPromoterResponse422) & {
+  headers: Headers;
+};
+
+export const getCreateOpsPromoterUrl = () => {
+
+
+
+
+  return `/v1/ops/promoters`
+}
+
+/**
+ * SCR-065, docs/planning/03 §3 '파트너사·계약' 행, ADR-0060, ADR-0086. 관리 계정 초대의 promoterId는 여기에 등록된 파트너사여야 한다(422 unknown-promoter). 첫 계약 조건은 입력 한 번으로 정하고 승인 업무를 만들지 않는다(promoter_contract.approval_id는 NULL) [가정]. 이후 변경은 POST /v1/ops/promoters/{promoterId}/contract-term-changes의 2인 승인이다. 판매자 정보와 결제사 등록은 이 경로가 받지 않는다(판매 승인 요청과 결제사 등록 흐름, 따로 정한다). 감사 기록에 남긴다
+ * @summary 파트너사 등록(상호와 첫 계약 조건)
+ */
+export const createOpsPromoter = async (opsPromoterCreate: OpsPromoterCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsPromoterResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsPromoterResponseSuccess>(getCreateOpsPromoterUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(opsPromoterCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsPromoterMutationKey = () => ['createOpsPromoter'] as const;
+
+export const getCreateOpsPromoterMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsPromoter>>, TError,CreateOpsPromoterMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsPromoter>>, TError,CreateOpsPromoterMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsPromoterMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsPromoter>>, CreateOpsPromoterMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsPromoter(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsPromoterMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsPromoter>>>
+    export type CreateOpsPromoterMutationBody = BodyType<OpsPromoterCreate>
+    export type CreateOpsPromoterMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreateOpsPromoterMutationVariables = {data: BodyType<OpsPromoterCreate>}
+
+    /**
+ * @summary 파트너사 등록(상호와 첫 계약 조건)
+ */
+export const useCreateOpsPromoter = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsPromoter>>, TError,CreateOpsPromoterMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsPromoter>>,
+        TError,
+        CreateOpsPromoterMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsPromoterMutationOptions(options), queryClient);
+    }
+    export type getOpsPromoterResponse200 = {
+  data: OpsPromoterDetail
+  status: 200
+}
+
+export type getOpsPromoterResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getOpsPromoterResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsPromoterResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsPromoterResponseSuccess = (getOpsPromoterResponse200) & {
+  headers: Headers;
+};
+export type getOpsPromoterResponseError = (getOpsPromoterResponse401 | getOpsPromoterResponse403 | getOpsPromoterResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsPromoterUrl = (promoterId: string,) => {
+
+
+
+
+  return `/v1/ops/promoters/${encodeURIComponent(String(promoterId))}`
+}
+
+/**
+ * SCR-065, settlement §4.1·§10, transfer-refund §6, docs/security/authz-matrix.md §4.1. 결제사의 셀러·파트너 ID 원문은 싣지 않고 상태만 준다. 정산 계좌는 은행과 끝 4자리뿐이고, cs_agent·cs_lead에게는 payoutAccount를 null로 준다(authz-matrix §4.1 정산 계좌 행, open-items 72번). Cache-Control: no-store
+ * @summary 파트너사 상세(지금 계약 조건, 판매자 정보, 결제사 등록 상태, 정산 계좌 끝 4자리)
+ */
+export const getOpsPromoter = async (promoterId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsPromoterResponseSuccess> => {
+
+  return orvalFetch<getOpsPromoterResponseSuccess>(getGetOpsPromoterUrl(promoterId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsPromoterQueryKey = (promoterId: string,) => {
+    return [
+    `/v1/ops/promoters/${promoterId}`
+    ] as const;
+    }
+
+
+export const getGetOpsPromoterQueryOptions = <TData = Awaited<ReturnType<typeof getOpsPromoter>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(promoterId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsPromoter>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsPromoterQueryKey(promoterId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsPromoter>>> = ({ signal }) => getOpsPromoter(promoterId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: promoterId !== null && promoterId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsPromoter>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsPromoterQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsPromoter>>>
+export type GetOpsPromoterQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetOpsPromoter<TData = Awaited<ReturnType<typeof getOpsPromoter>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ promoterId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsPromoter>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsPromoter>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsPromoter>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsPromoter<TData = Awaited<ReturnType<typeof getOpsPromoter>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ promoterId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsPromoter>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsPromoter>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsPromoter>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsPromoter<TData = Awaited<ReturnType<typeof getOpsPromoter>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ promoterId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsPromoter>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 파트너사 상세(지금 계약 조건, 판매자 정보, 결제사 등록 상태, 정산 계좌 끝 4자리)
+ */
+
+export function useGetOpsPromoter<TData = Awaited<ReturnType<typeof getOpsPromoter>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ promoterId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsPromoter>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsPromoterQueryOptions(promoterId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listOpsPromoterContractTermsResponse200 = {
+  data: PromoterContractTermsPage
+  status: 200
+}
+
+export type listOpsPromoterContractTermsResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsPromoterContractTermsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsPromoterContractTermsResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsPromoterContractTermsResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type listOpsPromoterContractTermsResponseSuccess = (listOpsPromoterContractTermsResponse200) & {
+  headers: Headers;
+};
+export type listOpsPromoterContractTermsResponseError = (listOpsPromoterContractTermsResponse400 | listOpsPromoterContractTermsResponse401 | listOpsPromoterContractTermsResponse403 | listOpsPromoterContractTermsResponse404) & {
+  headers: Headers;
+};
+
+export const getListOpsPromoterContractTermsUrl = (promoterId: string,
+    params?: ListOpsPromoterContractTermsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/promoters/${encodeURIComponent(String(promoterId))}/contract-terms?${stringifiedParams}` : `/v1/ops/promoters/${encodeURIComponent(String(promoterId))}/contract-terms`
+}
+
+/**
+ * SCR-065 [계약] '변경 이력', docs/data.md promoter_contract, ADR-0086. 시작 시각 최신순이고 맨 앞이 지금 조건이다. Cache-Control: no-store
+ * @summary 계약 조건 변경 이력(수수료율·보증, 유효 기간과 승인 업무)
+ */
+export const listOpsPromoterContractTerms = async (promoterId: string,
+    params?: ListOpsPromoterContractTermsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsPromoterContractTermsResponseSuccess> => {
+
+  return orvalFetch<listOpsPromoterContractTermsResponseSuccess>(getListOpsPromoterContractTermsUrl(promoterId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsPromoterContractTermsQueryKey = (promoterId: string,
+    params?: ListOpsPromoterContractTermsParams,) => {
+    return [
+    `/v1/ops/promoters/${promoterId}/contract-terms`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsPromoterContractTermsQueryOptions = <TData = Awaited<ReturnType<typeof listOpsPromoterContractTerms>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(promoterId: string,
+    params?: ListOpsPromoterContractTermsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoterContractTerms>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsPromoterContractTermsQueryKey(promoterId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsPromoterContractTerms>>> = ({ signal }) => listOpsPromoterContractTerms(promoterId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: promoterId !== null && promoterId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoterContractTerms>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsPromoterContractTermsQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsPromoterContractTerms>>>
+export type ListOpsPromoterContractTermsQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsPromoterContractTerms<TData = Awaited<ReturnType<typeof listOpsPromoterContractTerms>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ promoterId: string,
+    params: undefined |  ListOpsPromoterContractTermsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoterContractTerms>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsPromoterContractTerms>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsPromoterContractTerms>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsPromoterContractTerms<TData = Awaited<ReturnType<typeof listOpsPromoterContractTerms>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ promoterId: string,
+    params?: ListOpsPromoterContractTermsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoterContractTerms>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsPromoterContractTerms>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsPromoterContractTerms>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsPromoterContractTerms<TData = Awaited<ReturnType<typeof listOpsPromoterContractTerms>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ promoterId: string,
+    params?: ListOpsPromoterContractTermsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoterContractTerms>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 계약 조건 변경 이력(수수료율·보증, 유효 기간과 승인 업무)
+ */
+
+export function useListOpsPromoterContractTerms<TData = Awaited<ReturnType<typeof listOpsPromoterContractTerms>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ promoterId: string,
+    params?: ListOpsPromoterContractTermsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPromoterContractTerms>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsPromoterContractTermsQueryOptions(promoterId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsPromoterContractTermChangeResponse202 = {
+  data: ApprovalRequest
+  status: 202
+}
+
+export type createOpsPromoterContractTermChangeResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsPromoterContractTermChangeResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsPromoterContractTermChangeResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsPromoterContractTermChangeResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsPromoterContractTermChangeResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsPromoterContractTermChangeResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsPromoterContractTermChangeResponseSuccess = (createOpsPromoterContractTermChangeResponse202) & {
+  headers: Headers;
+};
+export type createOpsPromoterContractTermChangeResponseError = (createOpsPromoterContractTermChangeResponse400 | createOpsPromoterContractTermChangeResponse401 | createOpsPromoterContractTermChangeResponse403 | createOpsPromoterContractTermChangeResponse404 | createOpsPromoterContractTermChangeResponse409 | createOpsPromoterContractTermChangeResponse422) & {
+  headers: Headers;
+};
+
+export const getCreateOpsPromoterContractTermChangeUrl = (promoterId: string,) => {
+
+
+
+
+  return `/v1/ops/promoters/${encodeURIComponent(String(promoterId))}/contract-term-changes`
+}
+
+/**
+ * SCR-065, SCR-046, POL-038, ADR-0060, docs/planning/03 §3 '파트너사·계약' 행. 승인 업무(kind CONTRACT_TERMS_CHANGE, targetRef 파트너사 ID)를 만들고 202로 돌려준다. 요청자가 아닌 commander가 POST /v1/ops/approval-requests/{approvalId}/approvals(재인증)로 승인하면 새 promoter_contract 행이 시작되고 promoter.commission_rate_bp가 바뀐다. 요청 자체에는 재인증을 받지 않는다(승인 쪽에서 본다, createOpsPayoutBatch와 같다). 바뀐 수수료율은 승인 뒤 판매 승인을 받는 공연부터 쓰고, 이미 고정된 공연은 바뀌지 않는다(ADR-0060). 칸은 바꿀 것만 보낸다. 바꿀 칸이 하나도 없으면 422다. POST /v1/ops/approval-requests로 이 종류를 만들면 바꿀 값을 실을 칸이 없으므로 이 경로만 만든다 [가정]
+ * @summary 수수료율·보증 변경 요청 → 승인 업무 CONTRACT_TERMS_CHANGE
+ */
+export const createOpsPromoterContractTermChange = async (promoterId: string,
+    promoterContractTermChangeCreate: PromoterContractTermChangeCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsPromoterContractTermChangeResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsPromoterContractTermChangeResponseSuccess>(getCreateOpsPromoterContractTermChangeUrl(promoterId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(promoterContractTermChangeCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsPromoterContractTermChangeMutationKey = () => ['createOpsPromoterContractTermChange'] as const;
+
+export const getCreateOpsPromoterContractTermChangeMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsPromoterContractTermChange>>, TError,CreateOpsPromoterContractTermChangeMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsPromoterContractTermChange>>, TError,CreateOpsPromoterContractTermChangeMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsPromoterContractTermChangeMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsPromoterContractTermChange>>, CreateOpsPromoterContractTermChangeMutationVariables> = (props) => {
+          const {promoterId,data} = props ?? {};
+
+          return  createOpsPromoterContractTermChange(promoterId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsPromoterContractTermChangeMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsPromoterContractTermChange>>>
+    export type CreateOpsPromoterContractTermChangeMutationBody = BodyType<PromoterContractTermChangeCreate>
+    export type CreateOpsPromoterContractTermChangeMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreateOpsPromoterContractTermChangeMutationVariables = {promoterId: string;data: BodyType<PromoterContractTermChangeCreate>}
+
+    /**
+ * @summary 수수료율·보증 변경 요청 → 승인 업무 CONTRACT_TERMS_CHANGE
+ */
+export const useCreateOpsPromoterContractTermChange = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsPromoterContractTermChange>>, TError,CreateOpsPromoterContractTermChangeMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsPromoterContractTermChange>>,
+        TError,
+        CreateOpsPromoterContractTermChangeMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsPromoterContractTermChangeMutationOptions(options), queryClient);
+    }
+    export type createOpsFanLookupResponse200 = {
+  data: OpsFanSummary
+  status: 200
+}
+
+export type createOpsFanLookupResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsFanLookupResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsFanLookupResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsFanLookupResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsFanLookupResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createOpsFanLookupResponseSuccess = (createOpsFanLookupResponse200) & {
+  headers: Headers;
+};
+export type createOpsFanLookupResponseError = (createOpsFanLookupResponse400 | createOpsFanLookupResponse401 | createOpsFanLookupResponse403 | createOpsFanLookupResponse404 | createOpsFanLookupResponse429) & {
+  headers: Headers;
+};
+
+export const getCreateOpsFanLookupUrl = () => {
+
+
+
+
+  return `/v1/ops/fan-lookups`
+}
+
+/**
+ * SCR-066, docs/planning/03 §3 '팬 조회' 행, identity §1, transfer-refund §7.3, guidelines §9·§12. 찾는 값이 주소와 로그에 남지 않게 GET 대신 POST …-lookups로 받는다(회원 코드를 본문으로 받는 POST /v1/transfer-recipient-lookups와 같다). 상태를 바꾸지 않는 읽기라 Idempotency-Key를 받지 않는다. 이름·전화로는 찾지 않는다(그런 칸을 두지 않는다). 찾는 값은 정확히 하나다(둘 이상이면 400). 응답은 가린 값만 싣는다. 조회는 관리 계정 접속기록과 대량 조회 점검(FR-064) 대상이다. 계정당 요청 한도 [가정]. Cache-Control: no-store
+ * @summary 팬 찾기(주문번호·예매번호·회원 코드 가운데 하나)
+ */
+export const createOpsFanLookup = async (opsFanLookupCreate: OpsFanLookupCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsFanLookupResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsFanLookupResponseSuccess>(getCreateOpsFanLookupUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(opsFanLookupCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsFanLookupMutationKey = () => ['createOpsFanLookup'] as const;
+
+export const getCreateOpsFanLookupMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsFanLookup>>, TError,CreateOpsFanLookupMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsFanLookup>>, TError,CreateOpsFanLookupMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsFanLookupMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsFanLookup>>, CreateOpsFanLookupMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsFanLookup(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsFanLookupMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsFanLookup>>>
+    export type CreateOpsFanLookupMutationBody = BodyType<OpsFanLookupCreate>
+    export type CreateOpsFanLookupMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse>
+    export type CreateOpsFanLookupMutationVariables = {data: BodyType<OpsFanLookupCreate>}
+
+    /**
+ * @summary 팬 찾기(주문번호·예매번호·회원 코드 가운데 하나)
+ */
+export const useCreateOpsFanLookup = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsFanLookup>>, TError,CreateOpsFanLookupMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsFanLookup>>,
+        TError,
+        CreateOpsFanLookupMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsFanLookupMutationOptions(options), queryClient);
+    }
+    export type getOpsFanResponse200 = {
+  data: OpsFanDetail
+  status: 200
+}
+
+export type getOpsFanResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getOpsFanResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsFanResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsFanResponseSuccess = (getOpsFanResponse200) & {
+  headers: Headers;
+};
+export type getOpsFanResponseError = (getOpsFanResponse401 | getOpsFanResponse403 | getOpsFanResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsFanUrl = (accountId: string,) => {
+
+
+
+
+  return `/v1/ops/fans/${encodeURIComponent(String(accountId))}`
+}
+
+/**
+ * SCR-066, docs/planning/03 §3 '팬 조회' 행, authz-matrix §4.1·§4.3, POL-023. 이름·전화·이메일은 서버가 가려서 준다(화면에서 가리는 것은 통제로 세지 않는다). 원문은 POST /v1/ops/fans/{accountId}/unmaskings로만 받는다. 조회는 관리 계정 접속기록과 대량 조회 점검(FR-064) 대상이다. Cache-Control: no-store
+ * @summary 팬 계정 요약(가린 값, 본인확인 상태, 로그인 수단, 병합 이력, 예매 제한)
+ */
+export const getOpsFan = async (accountId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsFanResponseSuccess> => {
+
+  return orvalFetch<getOpsFanResponseSuccess>(getGetOpsFanUrl(accountId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsFanQueryKey = (accountId: string,) => {
+    return [
+    `/v1/ops/fans/${accountId}`
+    ] as const;
+    }
+
+
+export const getGetOpsFanQueryOptions = <TData = Awaited<ReturnType<typeof getOpsFan>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(accountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsFan>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsFanQueryKey(accountId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsFan>>> = ({ signal }) => getOpsFan(accountId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: accountId !== null && accountId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsFan>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsFanQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsFan>>>
+export type GetOpsFanQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetOpsFan<TData = Awaited<ReturnType<typeof getOpsFan>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ accountId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsFan>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsFan>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsFan>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsFan<TData = Awaited<ReturnType<typeof getOpsFan>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ accountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsFan>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsFan>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsFan>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsFan<TData = Awaited<ReturnType<typeof getOpsFan>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ accountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsFan>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 팬 계정 요약(가린 값, 본인확인 상태, 로그인 수단, 병합 이력, 예매 제한)
+ */
+
+export function useGetOpsFan<TData = Awaited<ReturnType<typeof getOpsFan>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ accountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsFan>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsFanQueryOptions(accountId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsFanUnmaskingResponse200 = {
+  data: OpsFanUnmasking
+  status: 200
+}
+
+export type createOpsFanUnmaskingResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsFanUnmaskingResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsFanUnmaskingResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsFanUnmaskingResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsFanUnmaskingResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsFanUnmaskingResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsFanUnmaskingResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createOpsFanUnmaskingResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createOpsFanUnmaskingResponseSuccess = (createOpsFanUnmaskingResponse200) & {
+  headers: Headers;
+};
+export type createOpsFanUnmaskingResponseError = (createOpsFanUnmaskingResponse400 | createOpsFanUnmaskingResponse401 | createOpsFanUnmaskingResponse403 | createOpsFanUnmaskingResponse404 | createOpsFanUnmaskingResponse410 | createOpsFanUnmaskingResponse422 | createOpsFanUnmaskingResponse429 | createOpsFanUnmaskingResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsFanUnmaskingUrl = (accountId: string,) => {
+
+
+
+
+  return `/v1/ops/fans/${encodeURIComponent(String(accountId))}/unmaskings`
+}
+
+/**
+ * SCR-066, authz-matrix §4.3 '가린 값을 여는 절차', POL-023, NFR-017, FR-064. 서버는 사유가 없는 원문 요청을 거절한다. 연 기록(계정, 대상 팬, 고른 칸, 사유, 시각, 접속지)을 admin_data_access(action VIEW_UNMASKED, target_kind FAN_PROFILE)에 응답 전에 남기고, 기록하지 못하면 원문을 주지 않는다(503) [가정]. 원문 값 자체는 기록에 넣지 않는다. orderId를 주면 그 주문의 예매자 성명·휴대폰 번호(purchase_order.buyer_name·buyer_phone)를, 없으면 계정의 저장값을 연다. 상태를 바꾸지 않는 읽기라 Idempotency-Key를 받지 않고(POST /v1/ops/fraud-cases/{caseId}/ip-reveals와 같다), 재인증은 authz-matrix §6에 없어 받지 않는다. 계정당 하루 200회 [가정]를 넘으면 429다. 응답은 Cache-Control: no-store이고 화면은 메모리에만 둔다
+ * @summary 가린 값의 원문 열기(사유 필수, 접속기록에 남음)
+ */
+export const createOpsFanUnmasking = async (accountId: string,
+    opsFanUnmaskingCreate: OpsFanUnmaskingCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsFanUnmaskingResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsFanUnmaskingResponseSuccess>(getCreateOpsFanUnmaskingUrl(accountId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(opsFanUnmaskingCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsFanUnmaskingMutationKey = () => ['createOpsFanUnmasking'] as const;
+
+export const getCreateOpsFanUnmaskingMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsFanUnmasking>>, TError,CreateOpsFanUnmaskingMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsFanUnmasking>>, TError,CreateOpsFanUnmaskingMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsFanUnmaskingMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsFanUnmasking>>, CreateOpsFanUnmaskingMutationVariables> = (props) => {
+          const {accountId,data} = props ?? {};
+
+          return  createOpsFanUnmasking(accountId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsFanUnmaskingMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsFanUnmasking>>>
+    export type CreateOpsFanUnmaskingMutationBody = BodyType<OpsFanUnmaskingCreate>
+    export type CreateOpsFanUnmaskingMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreateOpsFanUnmaskingMutationVariables = {accountId: string;data: BodyType<OpsFanUnmaskingCreate>}
+
+    /**
+ * @summary 가린 값의 원문 열기(사유 필수, 접속기록에 남음)
+ */
+export const useCreateOpsFanUnmasking = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsFanUnmasking>>, TError,CreateOpsFanUnmaskingMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsFanUnmasking>>,
+        TError,
+        CreateOpsFanUnmaskingMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsFanUnmaskingMutationOptions(options), queryClient);
+    }
+    export type listOpsFanOrdersResponse200 = {
+  data: OpsFanOrderPage
+  status: 200
+}
+
+export type listOpsFanOrdersResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsFanOrdersResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsFanOrdersResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsFanOrdersResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type listOpsFanOrdersResponseSuccess = (listOpsFanOrdersResponse200) & {
+  headers: Headers;
+};
+export type listOpsFanOrdersResponseError = (listOpsFanOrdersResponse400 | listOpsFanOrdersResponse401 | listOpsFanOrdersResponse403 | listOpsFanOrdersResponse404) & {
+  headers: Headers;
+};
+
+export const getListOpsFanOrdersUrl = (accountId: string,
+    params?: ListOpsFanOrdersParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/fans/${encodeURIComponent(String(accountId))}/orders?${stringifiedParams}` : `/v1/ops/fans/${encodeURIComponent(String(accountId))}/orders`
+}
+
+/**
+ * SCR-066 [주문], docs/planning/03 §3 '팬 조회'·'좌석 홀드·주문·결제' 행. 예매자 성명·휴대폰 번호는 가린 값만 싣는다. 계정 묶음(대표 계정과 흡수 계정)의 주문을 함께 준다(identity §2.1). 정렬은 주문 시각 최신순 [가정]. Cache-Control: no-store operator·commander는 받지 않는다(docs/planning/03 §3의 표, authz-matrix §4.1).
+ * @summary 그 팬의 주문 원장(가린 값)
+ */
+export const listOpsFanOrders = async (accountId: string,
+    params?: ListOpsFanOrdersParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsFanOrdersResponseSuccess> => {
+
+  return orvalFetch<listOpsFanOrdersResponseSuccess>(getListOpsFanOrdersUrl(accountId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsFanOrdersQueryKey = (accountId: string,
+    params?: ListOpsFanOrdersParams,) => {
+    return [
+    `/v1/ops/fans/${accountId}/orders`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsFanOrdersQueryOptions = <TData = Awaited<ReturnType<typeof listOpsFanOrders>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(accountId: string,
+    params?: ListOpsFanOrdersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanOrders>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsFanOrdersQueryKey(accountId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsFanOrders>>> = ({ signal }) => listOpsFanOrders(accountId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: accountId !== null && accountId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsFanOrders>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsFanOrdersQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsFanOrders>>>
+export type ListOpsFanOrdersQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsFanOrders<TData = Awaited<ReturnType<typeof listOpsFanOrders>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params: undefined |  ListOpsFanOrdersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanOrders>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsFanOrders>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsFanOrders>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsFanOrders<TData = Awaited<ReturnType<typeof listOpsFanOrders>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanOrdersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanOrders>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsFanOrders>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsFanOrders>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsFanOrders<TData = Awaited<ReturnType<typeof listOpsFanOrders>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanOrdersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanOrders>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 그 팬의 주문 원장(가린 값)
+ */
+
+export function useListOpsFanOrders<TData = Awaited<ReturnType<typeof listOpsFanOrders>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanOrdersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanOrders>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsFanOrdersQueryOptions(accountId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listOpsFanTicketsResponse200 = {
+  data: OpsFanTicketPage
+  status: 200
+}
+
+export type listOpsFanTicketsResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsFanTicketsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsFanTicketsResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsFanTicketsResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type listOpsFanTicketsResponseSuccess = (listOpsFanTicketsResponse200) & {
+  headers: Headers;
+};
+export type listOpsFanTicketsResponseError = (listOpsFanTicketsResponse400 | listOpsFanTicketsResponse401 | listOpsFanTicketsResponse403 | listOpsFanTicketsResponse404) & {
+  headers: Headers;
+};
+
+export const getListOpsFanTicketsUrl = (accountId: string,
+    params?: ListOpsFanTicketsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/fans/${encodeURIComponent(String(accountId))}/tickets?${stringifiedParams}` : `/v1/ops/fans/${encodeURIComponent(String(accountId))}/tickets`
+}
+
+/**
+ * SCR-066 [티켓], docs/planning/03 §3 '팬 조회' 행. 입장 코드와 서명 키는 싣지 않는다. operator·commander는 §3 '티켓·월렛·양도' 행에 칸이 없지만 '팬 조회' 행과 d5 §7.14의 사용자에 맞춰 넣었다 [가정]. Cache-Control: no-store operator·commander는 받지 않는다(docs/planning/03 §3의 표, authz-matrix §4.1).
+ * @summary 그 팬의 티켓
+ */
+export const listOpsFanTickets = async (accountId: string,
+    params?: ListOpsFanTicketsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsFanTicketsResponseSuccess> => {
+
+  return orvalFetch<listOpsFanTicketsResponseSuccess>(getListOpsFanTicketsUrl(accountId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsFanTicketsQueryKey = (accountId: string,
+    params?: ListOpsFanTicketsParams,) => {
+    return [
+    `/v1/ops/fans/${accountId}/tickets`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsFanTicketsQueryOptions = <TData = Awaited<ReturnType<typeof listOpsFanTickets>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(accountId: string,
+    params?: ListOpsFanTicketsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTickets>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsFanTicketsQueryKey(accountId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsFanTickets>>> = ({ signal }) => listOpsFanTickets(accountId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: accountId !== null && accountId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTickets>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsFanTicketsQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsFanTickets>>>
+export type ListOpsFanTicketsQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsFanTickets<TData = Awaited<ReturnType<typeof listOpsFanTickets>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params: undefined |  ListOpsFanTicketsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTickets>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsFanTickets>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsFanTickets>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsFanTickets<TData = Awaited<ReturnType<typeof listOpsFanTickets>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanTicketsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTickets>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsFanTickets>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsFanTickets>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsFanTickets<TData = Awaited<ReturnType<typeof listOpsFanTickets>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanTicketsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTickets>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 그 팬의 티켓
+ */
+
+export function useListOpsFanTickets<TData = Awaited<ReturnType<typeof listOpsFanTickets>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanTicketsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTickets>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsFanTicketsQueryOptions(accountId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listOpsFanTransfersResponse200 = {
+  data: OpsFanTransferPage
+  status: 200
+}
+
+export type listOpsFanTransfersResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsFanTransfersResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsFanTransfersResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsFanTransfersResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type listOpsFanTransfersResponseSuccess = (listOpsFanTransfersResponse200) & {
+  headers: Headers;
+};
+export type listOpsFanTransfersResponseError = (listOpsFanTransfersResponse400 | listOpsFanTransfersResponse401 | listOpsFanTransfersResponse403 | listOpsFanTransfersResponse404) & {
+  headers: Headers;
+};
+
+export const getListOpsFanTransfersUrl = (accountId: string,
+    params?: ListOpsFanTransfersParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/fans/${encodeURIComponent(String(accountId))}/transfers?${stringifiedParams}` : `/v1/ops/fans/${encodeURIComponent(String(accountId))}/transfers`
+}
+
+/**
+ * SCR-066 [양도], transfer-refund §7.3, authz-matrix §4.1 양도 요청 행(결제자 이름·전화는 가려서). operator·commander를 넣은 까닭은 listOpsFanTickets와 같다 [가정]. Cache-Control: no-store operator·commander는 받지 않는다(docs/planning/03 §3의 표, authz-matrix §4.1).
+ * @summary 그 팬의 양도 요청(보낸 것·받은 것, 가린 값)
+ */
+export const listOpsFanTransfers = async (accountId: string,
+    params?: ListOpsFanTransfersParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsFanTransfersResponseSuccess> => {
+
+  return orvalFetch<listOpsFanTransfersResponseSuccess>(getListOpsFanTransfersUrl(accountId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsFanTransfersQueryKey = (accountId: string,
+    params?: ListOpsFanTransfersParams,) => {
+    return [
+    `/v1/ops/fans/${accountId}/transfers`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsFanTransfersQueryOptions = <TData = Awaited<ReturnType<typeof listOpsFanTransfers>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(accountId: string,
+    params?: ListOpsFanTransfersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTransfers>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsFanTransfersQueryKey(accountId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsFanTransfers>>> = ({ signal }) => listOpsFanTransfers(accountId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: accountId !== null && accountId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTransfers>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsFanTransfersQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsFanTransfers>>>
+export type ListOpsFanTransfersQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsFanTransfers<TData = Awaited<ReturnType<typeof listOpsFanTransfers>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params: undefined |  ListOpsFanTransfersParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTransfers>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsFanTransfers>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsFanTransfers>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsFanTransfers<TData = Awaited<ReturnType<typeof listOpsFanTransfers>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanTransfersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTransfers>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsFanTransfers>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsFanTransfers>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsFanTransfers<TData = Awaited<ReturnType<typeof listOpsFanTransfers>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanTransfersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTransfers>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 그 팬의 양도 요청(보낸 것·받은 것, 가린 값)
+ */
+
+export function useListOpsFanTransfers<TData = Awaited<ReturnType<typeof listOpsFanTransfers>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanTransfersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanTransfers>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsFanTransfersQueryOptions(accountId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listOpsFanQueueEntriesResponse200 = {
+  data: OpsFanQueueEntryPage
+  status: 200
+}
+
+export type listOpsFanQueueEntriesResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsFanQueueEntriesResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsFanQueueEntriesResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsFanQueueEntriesResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type listOpsFanQueueEntriesResponseSuccess = (listOpsFanQueueEntriesResponse200) & {
+  headers: Headers;
+};
+export type listOpsFanQueueEntriesResponseError = (listOpsFanQueueEntriesResponse400 | listOpsFanQueueEntriesResponse401 | listOpsFanQueueEntriesResponse403 | listOpsFanQueueEntriesResponse404) & {
+  headers: Headers;
+};
+
+export const getListOpsFanQueueEntriesUrl = (accountId: string,
+    params: ListOpsFanQueueEntriesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/fans/${encodeURIComponent(String(accountId))}/queue-entries?${stringifiedParams}` : `/v1/ops/fans/${encodeURIComponent(String(accountId))}/queue-entries`
+}
+
+/**
+ * SCR-066 [대기 참여], docs/planning/03 §3 '로비·대기열 참여' 행(CS는 본인 확인 요청 시에만, 관제 역할은 집계만). caseId는 그 계정이 낸 본인 확인 요청 문의·건(OpsFanDetail.selfRequestCaseIds의 값)이다. 없거나 그 계정의 건이 아니면 403이고, 거절은 보안 이벤트로 남긴다(authz-matrix §2 7). 순번·위험 점수·판정 근거는 싣지 않는다. Cache-Control: no-store
+ * @summary 그 팬의 대기 참여(본인 확인을 요청한 건이 있을 때만)
+ */
+export const listOpsFanQueueEntries = async (accountId: string,
+    params: ListOpsFanQueueEntriesParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsFanQueueEntriesResponseSuccess> => {
+
+  return orvalFetch<listOpsFanQueueEntriesResponseSuccess>(getListOpsFanQueueEntriesUrl(accountId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsFanQueueEntriesQueryKey = (accountId: string,
+    params?: ListOpsFanQueueEntriesParams,) => {
+    return [
+    `/v1/ops/fans/${accountId}/queue-entries`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsFanQueueEntriesQueryOptions = <TData = Awaited<ReturnType<typeof listOpsFanQueueEntries>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(accountId: string,
+    params: ListOpsFanQueueEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanQueueEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsFanQueueEntriesQueryKey(accountId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsFanQueueEntries>>> = ({ signal }) => listOpsFanQueueEntries(accountId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: accountId !== null && accountId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsFanQueueEntries>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsFanQueueEntriesQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsFanQueueEntries>>>
+export type ListOpsFanQueueEntriesQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsFanQueueEntries<TData = Awaited<ReturnType<typeof listOpsFanQueueEntries>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params: ListOpsFanQueueEntriesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanQueueEntries>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsFanQueueEntries>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsFanQueueEntries>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsFanQueueEntries<TData = Awaited<ReturnType<typeof listOpsFanQueueEntries>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params: ListOpsFanQueueEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanQueueEntries>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsFanQueueEntries>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsFanQueueEntries>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsFanQueueEntries<TData = Awaited<ReturnType<typeof listOpsFanQueueEntries>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params: ListOpsFanQueueEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanQueueEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 그 팬의 대기 참여(본인 확인을 요청한 건이 있을 때만)
+ */
+
+export function useListOpsFanQueueEntries<TData = Awaited<ReturnType<typeof listOpsFanQueueEntries>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params: ListOpsFanQueueEntriesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanQueueEntries>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsFanQueueEntriesQueryOptions(accountId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listOpsFanCasesResponse200 = {
+  data: CsCasePage
+  status: 200
+}
+
+export type listOpsFanCasesResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsFanCasesResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsFanCasesResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsFanCasesResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type listOpsFanCasesResponseSuccess = (listOpsFanCasesResponse200) & {
+  headers: Headers;
+};
+export type listOpsFanCasesResponseError = (listOpsFanCasesResponse400 | listOpsFanCasesResponse401 | listOpsFanCasesResponse403 | listOpsFanCasesResponse404) & {
+  headers: Headers;
+};
+
+export const getListOpsFanCasesUrl = (accountId: string,
+    params?: ListOpsFanCasesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/fans/${encodeURIComponent(String(accountId))}/cases?${stringifiedParams}` : `/v1/ops/fans/${encodeURIComponent(String(accountId))}/cases`
+}
+
+/**
+ * SCR-066 [문의·건], FR-057. GET /v1/ops/cases와 같은 모양이고 그 계정이 당사자인 건만 준다. cs_case에 계정 칸이 없어 target_ref로 잇는다: 문의(inquiry.account_id)와 소명(appeal.account_id)의 건이다 [가정]. 그 계정이 신고한 건(CONTENT_REPORT의 신고자)은 넣지 않고, 부정 거래 소명(FRAUD_CASE)은 지정된 조사관 밖으로 드러나지 않게 뺀다(authz-matrix §4.1). CS 담당자에게는 정산 건 가운데 정산 이의만 싣는 등 처리함과 같은 나눔을 쓴다(open-items 72번). Cache-Control: no-store
+ * @summary 그 팬의 문의·CS 처리함 건
+ */
+export const listOpsFanCases = async (accountId: string,
+    params?: ListOpsFanCasesParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsFanCasesResponseSuccess> => {
+
+  return orvalFetch<listOpsFanCasesResponseSuccess>(getListOpsFanCasesUrl(accountId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsFanCasesQueryKey = (accountId: string,
+    params?: ListOpsFanCasesParams,) => {
+    return [
+    `/v1/ops/fans/${accountId}/cases`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsFanCasesQueryOptions = <TData = Awaited<ReturnType<typeof listOpsFanCases>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(accountId: string,
+    params?: ListOpsFanCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanCases>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsFanCasesQueryKey(accountId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsFanCases>>> = ({ signal }) => listOpsFanCases(accountId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: accountId !== null && accountId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsFanCases>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsFanCasesQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsFanCases>>>
+export type ListOpsFanCasesQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsFanCases<TData = Awaited<ReturnType<typeof listOpsFanCases>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params: undefined |  ListOpsFanCasesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanCases>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsFanCases>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsFanCases>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsFanCases<TData = Awaited<ReturnType<typeof listOpsFanCases>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanCases>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsFanCases>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsFanCases>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsFanCases<TData = Awaited<ReturnType<typeof listOpsFanCases>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanCases>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 그 팬의 문의·CS 처리함 건
+ */
+
+export function useListOpsFanCases<TData = Awaited<ReturnType<typeof listOpsFanCases>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ accountId: string,
+    params?: ListOpsFanCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsFanCases>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsFanCasesQueryOptions(accountId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getOpsEventBotReviewResponse200 = {
+  data: OpsBotReview
+  status: 200
+}
+
+export type getOpsEventBotReviewResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getOpsEventBotReviewResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsEventBotReviewResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsEventBotReviewResponseSuccess = (getOpsEventBotReviewResponse200) & {
+  headers: Headers;
+};
+export type getOpsEventBotReviewResponseError = (getOpsEventBotReviewResponse401 | getOpsEventBotReviewResponse403 | getOpsEventBotReviewResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsEventBotReviewUrl = (eventId: string,) => {
+
+
+
+
+  return `/v1/ops/events/${encodeURIComponent(String(eventId))}/bot-review`
+}
+
+/**
+ * FR-049, POL-006, SCR-067, ADR-0174, docs/planning/03 §3 '봇 판정 표본 검토' 행, docs/features/bot-defense.md §13. reviewKind HUMAN_BASELINE(출시 뒤 실제 사람 기준 표본 검토, 두 묶음)이면 묶음별 진행 수와 결과 비율을 싣지 않고 interim은 null이다(그것으로 방금 본 세션의 묶음을 알 수 있어서, d5 §7.15). 표본이 아직 없으면 404다. 경로와 칸은 wbs 3.2.3이 정한다고 d5·bot-defense §20에 적혀 있어 이 초안이 먼저 정한다 [가정]. Cache-Control: no-store
+ * @summary 회차의 봇 표본 검토 진행(건수, 기한, 중간 결과)
+ */
+export const getOpsEventBotReview = async (eventId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsEventBotReviewResponseSuccess> => {
+
+  return orvalFetch<getOpsEventBotReviewResponseSuccess>(getGetOpsEventBotReviewUrl(eventId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsEventBotReviewQueryKey = (eventId: string,) => {
+    return [
+    `/v1/ops/events/${eventId}/bot-review`
+    ] as const;
+    }
+
+
+export const getGetOpsEventBotReviewQueryOptions = <TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsEventBotReviewQueryKey(eventId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsEventBotReview>>> = ({ signal }) => getOpsEventBotReview(eventId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: eventId !== null && eventId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsEventBotReviewQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsEventBotReview>>>
+export type GetOpsEventBotReviewQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsEventBotReview>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsEventBotReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsEventBotReview>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsEventBotReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 회차의 봇 표본 검토 진행(건수, 기한, 중간 결과)
+ */
+
+export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsEventBotReviewQueryOptions(eventId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type listOpsEventBotReviewSamplesResponse200 = {
+  data: OpsBotReviewSamplePage
+  status: 200
+}
+
+export type listOpsEventBotReviewSamplesResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsEventBotReviewSamplesResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsEventBotReviewSamplesResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsEventBotReviewSamplesResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type listOpsEventBotReviewSamplesResponseSuccess = (listOpsEventBotReviewSamplesResponse200) & {
+  headers: Headers;
+};
+export type listOpsEventBotReviewSamplesResponseError = (listOpsEventBotReviewSamplesResponse400 | listOpsEventBotReviewSamplesResponse401 | listOpsEventBotReviewSamplesResponse403 | listOpsEventBotReviewSamplesResponse410) & {
+  headers: Headers;
+};
+
+export const getListOpsEventBotReviewSamplesUrl = (eventId: string,
+    params?: ListOpsEventBotReviewSamplesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/events/${encodeURIComponent(String(eventId))}/bot-review-samples?${stringifiedParams}` : `/v1/ops/events/${encodeURIComponent(String(eventId))}/bot-review-samples`
+}
+
+/**
+ * FR-049, POL-006, SCR-067, ADR-0174, authz-matrix §4.1 봇 판정 범주 행. 개인 식별 정보(계정·이름·연락처·IP·기기 가명)와 판정 기준의 세부 가중치를 싣지 않는다. 서버가 정한 무작위 순서로 준다. HUMAN_BASELINE이면 riskBand·behaviorSummaryBand를 null로 두고 묶음과 판정을 싣지 않는다. status를 주지 않으면 아직 기록하지 않은 표본만 준다 [가정]. Cache-Control: no-store
+ * @summary 검토할 세션 표본(개인 식별 정보·판정 가중치 없음)
+ */
+export const listOpsEventBotReviewSamples = async (eventId: string,
+    params?: ListOpsEventBotReviewSamplesParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsEventBotReviewSamplesResponseSuccess> => {
+
+  return orvalFetch<listOpsEventBotReviewSamplesResponseSuccess>(getListOpsEventBotReviewSamplesUrl(eventId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsEventBotReviewSamplesQueryKey = (eventId: string,
+    params?: ListOpsEventBotReviewSamplesParams,) => {
+    return [
+    `/v1/ops/events/${eventId}/bot-review-samples`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsEventBotReviewSamplesQueryOptions = <TData = Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(eventId: string,
+    params?: ListOpsEventBotReviewSamplesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsEventBotReviewSamplesQueryKey(eventId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>> = ({ signal }) => listOpsEventBotReviewSamples(eventId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: eventId !== null && eventId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsEventBotReviewSamplesQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>>
+export type ListOpsEventBotReviewSamplesQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsEventBotReviewSamples<TData = Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ eventId: string,
+    params: undefined |  ListOpsEventBotReviewSamplesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsEventBotReviewSamples<TData = Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ eventId: string,
+    params?: ListOpsEventBotReviewSamplesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsEventBotReviewSamples<TData = Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ eventId: string,
+    params?: ListOpsEventBotReviewSamplesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 검토할 세션 표본(개인 식별 정보·판정 가중치 없음)
+ */
+
+export function useListOpsEventBotReviewSamples<TData = Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ eventId: string,
+    params?: ListOpsEventBotReviewSamplesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsEventBotReviewSamples>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsEventBotReviewSamplesQueryOptions(eventId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsBotReviewSampleJudgementResponse200 = {
+  data: OpsBotReviewJudgement
+  status: 200
+}
+
+export type createOpsBotReviewSampleJudgementResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsBotReviewSampleJudgementResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsBotReviewSampleJudgementResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsBotReviewSampleJudgementResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsBotReviewSampleJudgementResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsBotReviewSampleJudgementResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsBotReviewSampleJudgementResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsBotReviewSampleJudgementResponseSuccess = (createOpsBotReviewSampleJudgementResponse200) & {
+  headers: Headers;
+};
+export type createOpsBotReviewSampleJudgementResponseError = (createOpsBotReviewSampleJudgementResponse400 | createOpsBotReviewSampleJudgementResponse401 | createOpsBotReviewSampleJudgementResponse403 | createOpsBotReviewSampleJudgementResponse404 | createOpsBotReviewSampleJudgementResponse409 | createOpsBotReviewSampleJudgementResponse410 | createOpsBotReviewSampleJudgementResponse422) & {
+  headers: Headers;
+};
+
+export const getCreateOpsBotReviewSampleJudgementUrl = (sampleId: string,) => {
+
+
+
+
+  return `/v1/ops/bot-review-samples/${encodeURIComponent(String(sampleId))}/judgement`
+}
+
+/**
+ * FR-049, POL-006, SCR-067, ADR-0174. 표본마다 한 번이다. 기록은 세션 ID와 판정 결과·근거 종류만 남기고 메모 칸은 두지 않는다(POL-006, d5의 '그 밖(메모)'는 근거 종류 OTHER로 받는다 [가정]). ops-svc가 trust.proto TrustLabelService.ApplyLabel(출처 SAMPLE_REVIEW)로 반영한다(bot-defense §9·§12). reviewKind HUMAN_BASELINE에서 BOT이면 행동 요약 밖의 근거 evidenceKinds가 하나 이상 있어야 한다(없으면 422). UNDECIDED는 라벨을 만들지 않고 장부 계산에만 쓴다(판단 불가 라벨의 proto 반영은 wbs 3.2.3, ADR-0174) [가정]
+ * @summary 표본 판정 기록(세션 ID와 판정 결과·근거 종류만)
+ */
+export const createOpsBotReviewSampleJudgement = async (sampleId: string,
+    opsBotReviewJudgementCreate: OpsBotReviewJudgementCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsBotReviewSampleJudgementResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsBotReviewSampleJudgementResponseSuccess>(getCreateOpsBotReviewSampleJudgementUrl(sampleId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(opsBotReviewJudgementCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsBotReviewSampleJudgementMutationKey = () => ['createOpsBotReviewSampleJudgement'] as const;
+
+export const getCreateOpsBotReviewSampleJudgementMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsBotReviewSampleJudgement>>, TError,CreateOpsBotReviewSampleJudgementMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsBotReviewSampleJudgement>>, TError,CreateOpsBotReviewSampleJudgementMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsBotReviewSampleJudgementMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsBotReviewSampleJudgement>>, CreateOpsBotReviewSampleJudgementMutationVariables> = (props) => {
+          const {sampleId,data} = props ?? {};
+
+          return  createOpsBotReviewSampleJudgement(sampleId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsBotReviewSampleJudgementMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsBotReviewSampleJudgement>>>
+    export type CreateOpsBotReviewSampleJudgementMutationBody = BodyType<OpsBotReviewJudgementCreate>
+    export type CreateOpsBotReviewSampleJudgementMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreateOpsBotReviewSampleJudgementMutationVariables = {sampleId: string;data: BodyType<OpsBotReviewJudgementCreate>}
+
+    /**
+ * @summary 표본 판정 기록(세션 ID와 판정 결과·근거 종류만)
+ */
+export const useCreateOpsBotReviewSampleJudgement = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsBotReviewSampleJudgement>>, TError,CreateOpsBotReviewSampleJudgementMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsBotReviewSampleJudgement>>,
+        TError,
+        CreateOpsBotReviewSampleJudgementMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsBotReviewSampleJudgementMutationOptions(options), queryClient);
+    }
+    export type listOpsNoticeTemplatesResponse200 = {
+  data: NoticeTemplatePage
+  status: 200
+}
+
+export type listOpsNoticeTemplatesResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsNoticeTemplatesResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsNoticeTemplatesResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsNoticeTemplatesResponseSuccess = (listOpsNoticeTemplatesResponse200) & {
+  headers: Headers;
+};
+export type listOpsNoticeTemplatesResponseError = (listOpsNoticeTemplatesResponse400 | listOpsNoticeTemplatesResponse401 | listOpsNoticeTemplatesResponse403) & {
+  headers: Headers;
+};
+
+export const getListOpsNoticeTemplatesUrl = (params?: ListOpsNoticeTemplatesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/notice-templates?${stringifiedParams}` : `/v1/ops/notice-templates`
+}
+
+/**
+ * POL-021 명령 7, SCR-068, SCR-030, ADR-0060, ADR-0062. 명령 7의 파라미터 templateId는 status APPROVED인 템플릿만 받는다. 작은 목록이지만 guidelines §3대로 커서를 둔다. version은 PATCH의 If-Match에 쓰는 판이다(단건 GET이 없어 목록 칸으로 준다, guidelines §12). Cache-Control: no-store
+ * @summary 대기실 공지 템플릿 목록
+ */
+export const listOpsNoticeTemplates = async (params?: ListOpsNoticeTemplatesParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsNoticeTemplatesResponseSuccess> => {
+
+  return orvalFetch<listOpsNoticeTemplatesResponseSuccess>(getListOpsNoticeTemplatesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsNoticeTemplatesQueryKey = (params?: ListOpsNoticeTemplatesParams,) => {
+    return [
+    `/v1/ops/notice-templates`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsNoticeTemplatesQueryOptions = <TData = Awaited<ReturnType<typeof listOpsNoticeTemplates>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListOpsNoticeTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsNoticeTemplates>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsNoticeTemplatesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsNoticeTemplates>>> = ({ signal }) => listOpsNoticeTemplates(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsNoticeTemplates>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsNoticeTemplatesQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsNoticeTemplates>>>
+export type ListOpsNoticeTemplatesQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsNoticeTemplates<TData = Awaited<ReturnType<typeof listOpsNoticeTemplates>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: undefined |  ListOpsNoticeTemplatesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsNoticeTemplates>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsNoticeTemplates>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsNoticeTemplates>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsNoticeTemplates<TData = Awaited<ReturnType<typeof listOpsNoticeTemplates>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsNoticeTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsNoticeTemplates>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsNoticeTemplates>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsNoticeTemplates>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsNoticeTemplates<TData = Awaited<ReturnType<typeof listOpsNoticeTemplates>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsNoticeTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsNoticeTemplates>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 대기실 공지 템플릿 목록
+ */
+
+export function useListOpsNoticeTemplates<TData = Awaited<ReturnType<typeof listOpsNoticeTemplates>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsNoticeTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsNoticeTemplates>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsNoticeTemplatesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsNoticeTemplateResponse201 = {
+  data: NoticeTemplate
+  status: 201
+}
+
+export type createOpsNoticeTemplateResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsNoticeTemplateResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsNoticeTemplateResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsNoticeTemplateResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsNoticeTemplateResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsNoticeTemplateResponseSuccess = (createOpsNoticeTemplateResponse201) & {
+  headers: Headers;
+};
+export type createOpsNoticeTemplateResponseError = (createOpsNoticeTemplateResponse400 | createOpsNoticeTemplateResponse401 | createOpsNoticeTemplateResponse403 | createOpsNoticeTemplateResponse409 | createOpsNoticeTemplateResponse422) & {
+  headers: Headers;
+};
+
+export const getCreateOpsNoticeTemplateUrl = () => {
+
+
+
+
+  return `/v1/ops/notice-templates`
+}
+
+/**
+ * POL-021 명령 7, SCR-068, ADR-0060, ADR-0062. 검토 중(IN_REVIEW)으로 시작하고 승인 전에는 명령 7에서 고를 수 없다. 언어별 120자 [가정](NFC 기준). 바뀌는 값(시각·숫자·공연명·회사명)을 넣지 않는 작성 규칙은 사람이 승인할 때 본다. 감사 기록에 남긴다
+ * @summary 대기실 공지 템플릿 만들기(검토 중으로 시작)
+ */
+export const createOpsNoticeTemplate = async (noticeTemplateCreate: NoticeTemplateCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsNoticeTemplateResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsNoticeTemplateResponseSuccess>(getCreateOpsNoticeTemplateUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(noticeTemplateCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsNoticeTemplateMutationKey = () => ['createOpsNoticeTemplate'] as const;
+
+export const getCreateOpsNoticeTemplateMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNoticeTemplate>>, TError,CreateOpsNoticeTemplateMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsNoticeTemplate>>, TError,CreateOpsNoticeTemplateMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsNoticeTemplateMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsNoticeTemplate>>, CreateOpsNoticeTemplateMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsNoticeTemplate(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsNoticeTemplateMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsNoticeTemplate>>>
+    export type CreateOpsNoticeTemplateMutationBody = BodyType<NoticeTemplateCreate>
+    export type CreateOpsNoticeTemplateMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreateOpsNoticeTemplateMutationVariables = {data: BodyType<NoticeTemplateCreate>}
+
+    /**
+ * @summary 대기실 공지 템플릿 만들기(검토 중으로 시작)
+ */
+export const useCreateOpsNoticeTemplate = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNoticeTemplate>>, TError,CreateOpsNoticeTemplateMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsNoticeTemplate>>,
+        TError,
+        CreateOpsNoticeTemplateMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsNoticeTemplateMutationOptions(options), queryClient);
+    }
+    export type updateOpsNoticeTemplateResponse200 = {
+  data: NoticeTemplate
+  status: 200
+}
+
+export type updateOpsNoticeTemplateResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type updateOpsNoticeTemplateResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type updateOpsNoticeTemplateResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type updateOpsNoticeTemplateResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type updateOpsNoticeTemplateResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type updateOpsNoticeTemplateResponse412 = {
+  data: ProblemResponse
+  status: 412
+}
+
+export type updateOpsNoticeTemplateResponse428 = {
+  data: ProblemResponse
+  status: 428
+}
+
+export type updateOpsNoticeTemplateResponseSuccess = (updateOpsNoticeTemplateResponse200) & {
+  headers: Headers;
+};
+export type updateOpsNoticeTemplateResponseError = (updateOpsNoticeTemplateResponse400 | updateOpsNoticeTemplateResponse401 | updateOpsNoticeTemplateResponse403 | updateOpsNoticeTemplateResponse404 | updateOpsNoticeTemplateResponse409 | updateOpsNoticeTemplateResponse412 | updateOpsNoticeTemplateResponse428) & {
+  headers: Headers;
+};
+
+export const getUpdateOpsNoticeTemplateUrl = (templateId: string,) => {
+
+
+
+
+  return `/v1/ops/notice-templates/${encodeURIComponent(String(templateId))}`
+}
+
+/**
+ * SCR-068, ADR-0060, guidelines §12 '동시 수정'. 승인된 문장만 나가게 하려고, 승인한 템플릿의 제목이나 문구를 고치면 IN_REVIEW로 돌아가고 승인 칸을 비운다 [가정]. 지금 명령 7로 대기실에 걸린 템플릿은 고칠 수 없다(409) [가정]
+ * @summary 대기실 공지 템플릿 고치기(승인한 템플릿은 다시 검토 중이 된다)
+ */
+export const updateOpsNoticeTemplate = async (templateId: string,
+    noticeTemplateUpdate: NoticeTemplateUpdate, options?: Parameters<typeof orvalFetch>[1]): Promise<updateOpsNoticeTemplateResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<updateOpsNoticeTemplateResponseSuccess>(getUpdateOpsNoticeTemplateUrl(templateId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(noticeTemplateUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateOpsNoticeTemplateMutationKey = () => ['updateOpsNoticeTemplate'] as const;
+
+export const getUpdateOpsNoticeTemplateMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOpsNoticeTemplate>>, TError,UpdateOpsNoticeTemplateMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateOpsNoticeTemplate>>, TError,UpdateOpsNoticeTemplateMutationVariables, TContext> => {
+
+const mutationKey = getUpdateOpsNoticeTemplateMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateOpsNoticeTemplate>>, UpdateOpsNoticeTemplateMutationVariables> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  updateOpsNoticeTemplate(templateId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateOpsNoticeTemplateMutationResult = NonNullable<Awaited<ReturnType<typeof updateOpsNoticeTemplate>>>
+    export type UpdateOpsNoticeTemplateMutationBody = BodyType<NoticeTemplateUpdate>
+    export type UpdateOpsNoticeTemplateMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type UpdateOpsNoticeTemplateMutationVariables = {templateId: string;data: BodyType<NoticeTemplateUpdate>}
+
+    /**
+ * @summary 대기실 공지 템플릿 고치기(승인한 템플릿은 다시 검토 중이 된다)
+ */
+export const useUpdateOpsNoticeTemplate = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOpsNoticeTemplate>>, TError,UpdateOpsNoticeTemplateMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateOpsNoticeTemplate>>,
+        TError,
+        UpdateOpsNoticeTemplateMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateOpsNoticeTemplateMutationOptions(options), queryClient);
+    }
+    export type createOpsNoticeTemplateApprovalResponse200 = {
+  data: NoticeTemplate
+  status: 200
+}
+
+export type createOpsNoticeTemplateApprovalResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsNoticeTemplateApprovalResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsNoticeTemplateApprovalResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsNoticeTemplateApprovalResponse412 = {
+  data: ProblemResponse
+  status: 412
+}
+
+export type createOpsNoticeTemplateApprovalResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsNoticeTemplateApprovalResponse428 = {
+  data: ProblemResponse
+  status: 428
+}
+
+export type createOpsNoticeTemplateApprovalResponseSuccess = (createOpsNoticeTemplateApprovalResponse200) & {
+  headers: Headers;
+};
+export type createOpsNoticeTemplateApprovalResponseError = (createOpsNoticeTemplateApprovalResponse401 | createOpsNoticeTemplateApprovalResponse403 | createOpsNoticeTemplateApprovalResponse404 | createOpsNoticeTemplateApprovalResponse412 | createOpsNoticeTemplateApprovalResponse422 | createOpsNoticeTemplateApprovalResponse428) & {
+  headers: Headers;
+};
+
+export const getCreateOpsNoticeTemplateApprovalUrl = (templateId: string,) => {
+
+
+
+
+  return `/v1/ops/notice-templates/${encodeURIComponent(String(templateId))}/approvals`
+}
+
+/**
+ * POL-021 명령 7, SCR-068, ADR-0060, docs/planning/03 §3 '공지 관리' 행. ko·en·ja·zh 네 언어가 모두 있어야 승인한다(없으면 422). 승인하면 명령 7에서 고를 수 있다. 재인증: authz-matrix §6에 이 작업의 행이 없어, 승인 업무와 같은 작업 묶음 APPROVAL과 패스키 요소로 둔다 [가정]. 작성자 본인의 승인은 정본이 막지 않아 막지 않는다 [가정]. 상태 전이라 Idempotency-Key를 받지 않고, 이미 승인한 판을 다시 승인하면 같은 200이다(guidelines §4) If-Match로 검토한 판을 받아, 검토 뒤 고쳐진 문구를 승인하지 않는다(guidelines §12).
+ * @summary 대기실 공지 템플릿 승인(commander, 재인증)
+ */
+export const createOpsNoticeTemplateApproval = async (templateId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsNoticeTemplateApprovalResponseSuccess> => {
+
+  return orvalFetch<createOpsNoticeTemplateApprovalResponseSuccess>(getCreateOpsNoticeTemplateApprovalUrl(templateId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateOpsNoticeTemplateApprovalMutationKey = () => ['createOpsNoticeTemplateApproval'] as const;
+
+export const getCreateOpsNoticeTemplateApprovalMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNoticeTemplateApproval>>, TError,CreateOpsNoticeTemplateApprovalMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsNoticeTemplateApproval>>, TError,CreateOpsNoticeTemplateApprovalMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsNoticeTemplateApprovalMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsNoticeTemplateApproval>>, CreateOpsNoticeTemplateApprovalMutationVariables> = (props) => {
+          const {templateId} = props ?? {};
+
+          return  createOpsNoticeTemplateApproval(templateId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsNoticeTemplateApprovalMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsNoticeTemplateApproval>>>
+
+    export type CreateOpsNoticeTemplateApprovalMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type CreateOpsNoticeTemplateApprovalMutationVariables = {templateId: string}
+
+    /**
+ * @summary 대기실 공지 템플릿 승인(commander, 재인증)
+ */
+export const useCreateOpsNoticeTemplateApproval = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNoticeTemplateApproval>>, TError,CreateOpsNoticeTemplateApprovalMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsNoticeTemplateApproval>>,
+        TError,
+        CreateOpsNoticeTemplateApprovalMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsNoticeTemplateApprovalMutationOptions(options), queryClient);
+    }
+    export type listOpsPartnerNoticesResponse200 = {
+  data: PartnerNoticePage
+  status: 200
+}
+
+export type listOpsPartnerNoticesResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsPartnerNoticesResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsPartnerNoticesResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsPartnerNoticesResponseSuccess = (listOpsPartnerNoticesResponse200) & {
+  headers: Headers;
+};
+export type listOpsPartnerNoticesResponseError = (listOpsPartnerNoticesResponse400 | listOpsPartnerNoticesResponse401 | listOpsPartnerNoticesResponse403) & {
+  headers: Headers;
+};
+
+export const getListOpsPartnerNoticesUrl = (params?: ListOpsPartnerNoticesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/partner-notices?${stringifiedParams}` : `/v1/ops/partner-notices`
+}
+
+/**
+ * POL-022, SCR-068, observability §5. 정렬은 보낸 시각 최신순이다. Cache-Control: no-store
+ * @summary 파트너 긴급 공지 발송 이력
+ */
+export const listOpsPartnerNotices = async (params?: ListOpsPartnerNoticesParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsPartnerNoticesResponseSuccess> => {
+
+  return orvalFetch<listOpsPartnerNoticesResponseSuccess>(getListOpsPartnerNoticesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsPartnerNoticesQueryKey = (params?: ListOpsPartnerNoticesParams,) => {
+    return [
+    `/v1/ops/partner-notices`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsPartnerNoticesQueryOptions = <TData = Awaited<ReturnType<typeof listOpsPartnerNotices>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListOpsPartnerNoticesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPartnerNotices>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsPartnerNoticesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsPartnerNotices>>> = ({ signal }) => listOpsPartnerNotices(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsPartnerNotices>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsPartnerNoticesQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsPartnerNotices>>>
+export type ListOpsPartnerNoticesQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsPartnerNotices<TData = Awaited<ReturnType<typeof listOpsPartnerNotices>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: undefined |  ListOpsPartnerNoticesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPartnerNotices>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsPartnerNotices>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsPartnerNotices>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsPartnerNotices<TData = Awaited<ReturnType<typeof listOpsPartnerNotices>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsPartnerNoticesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPartnerNotices>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsPartnerNotices>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsPartnerNotices>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsPartnerNotices<TData = Awaited<ReturnType<typeof listOpsPartnerNotices>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsPartnerNoticesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPartnerNotices>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 파트너 긴급 공지 발송 이력
+ */
+
+export function useListOpsPartnerNotices<TData = Awaited<ReturnType<typeof listOpsPartnerNotices>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsPartnerNoticesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsPartnerNotices>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsPartnerNoticesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsPartnerNoticeResponse202 = {
+  data: PartnerNotice
+  status: 202
+}
+
+export type createOpsPartnerNoticeResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsPartnerNoticeResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsPartnerNoticeResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsPartnerNoticeResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsPartnerNoticeResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsPartnerNoticeResponseSuccess = (createOpsPartnerNoticeResponse202) & {
+  headers: Headers;
+};
+export type createOpsPartnerNoticeResponseError = (createOpsPartnerNoticeResponse400 | createOpsPartnerNoticeResponse401 | createOpsPartnerNoticeResponse403 | createOpsPartnerNoticeResponse409 | createOpsPartnerNoticeResponse422) & {
+  headers: Headers;
+};
+
+export const getCreateOpsPartnerNoticeUrl = () => {
+
+
+
+
+  return `/v1/ops/partner-notices`
+}
+
+/**
+ * POL-022, SCR-068, observability §5, ADR-0062. 템플릿 승인 없이 1인으로 보내고 감사 기록에 남긴다(재인증은 authz-matrix §6에 없어 받지 않는다). targetKind EVENT면 eventId가 필수이고 그 회차의 파트너사에만 보낸다. 제목은 말머리를 뺀 글이고 화면이 phase로 '[발생]'·'[진행]'·'[해결]'을 앞에 붙인다. 제목 40자 [가정], 본문 500자 [가정]. 팬 개인정보·개별 주문·봇 탐지 세부를 넣지 않는 규칙은 작성 안내로 지킨다. 다시 보내도 두 번 나가지 않게 Idempotency-Key를 받는다. 발송은 알림 쪽에 맡기므로 접수 202다
+ * @summary 파트너 긴급 공지 보내기(말머리·제목·본문, 1인, 감사 기록)
+ */
+export const createOpsPartnerNotice = async (partnerNoticeCreate: PartnerNoticeCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsPartnerNoticeResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsPartnerNoticeResponseSuccess>(getCreateOpsPartnerNoticeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(partnerNoticeCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsPartnerNoticeMutationKey = () => ['createOpsPartnerNotice'] as const;
+
+export const getCreateOpsPartnerNoticeMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsPartnerNotice>>, TError,CreateOpsPartnerNoticeMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsPartnerNotice>>, TError,CreateOpsPartnerNoticeMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsPartnerNoticeMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsPartnerNotice>>, CreateOpsPartnerNoticeMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsPartnerNotice(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsPartnerNoticeMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsPartnerNotice>>>
+    export type CreateOpsPartnerNoticeMutationBody = BodyType<PartnerNoticeCreate>
+    export type CreateOpsPartnerNoticeMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreateOpsPartnerNoticeMutationVariables = {data: BodyType<PartnerNoticeCreate>}
+
+    /**
+ * @summary 파트너 긴급 공지 보내기(말머리·제목·본문, 1인, 감사 기록)
+ */
+export const useCreateOpsPartnerNotice = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsPartnerNotice>>, TError,CreateOpsPartnerNoticeMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsPartnerNotice>>,
+        TError,
+        CreateOpsPartnerNoticeMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsPartnerNoticeMutationOptions(options), queryClient);
+    }
+    export type createOpsAuthInvitationAcceptanceResponse201 = {
+  data: AdminInvitationAcceptance
+  status: 201
+}
+
+export type createOpsAuthInvitationAcceptanceResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsAuthInvitationAcceptanceResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsAuthInvitationAcceptanceResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createOpsAuthInvitationAcceptanceResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createOpsAuthInvitationAcceptanceResponseSuccess = (createOpsAuthInvitationAcceptanceResponse201) & {
+  headers: Headers;
+};
+export type createOpsAuthInvitationAcceptanceResponseError = (createOpsAuthInvitationAcceptanceResponse400 | createOpsAuthInvitationAcceptanceResponse410 | createOpsAuthInvitationAcceptanceResponse429 | createOpsAuthInvitationAcceptanceResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuthInvitationAcceptanceUrl = () => {
+
+
+
+
+  return `/v1/ops/auth/invitation-acceptances`
+}
+
+/**
+ * FR-028, POL-020, identity §6·§13, SCR-028, ADR-0206. 파트너 수락 시작(POST /v1/partner/auth/invitation-acceptances)과 같은 규칙이고, 이 경로는 관제 역할 계정만 받는다. 관제 배포의 허용 IP에서만 받고(ADR-0144 결정 2) gw-ops가 Origin을 확인한다. Cache-Control: no-store
+ * @summary 운영자·CS 초대 수락 시작(초대 링크 토큰 확인, 다음 단계 토큰 받기)
+ */
+export const createOpsAuthInvitationAcceptance = async (adminInvitationAcceptanceCreate: AdminInvitationAcceptanceCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuthInvitationAcceptanceResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsAuthInvitationAcceptanceResponseSuccess>(getCreateOpsAuthInvitationAcceptanceUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationAcceptanceCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuthInvitationAcceptanceMutationKey = () => ['createOpsAuthInvitationAcceptance'] as const;
+
+export const getCreateOpsAuthInvitationAcceptanceMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationAcceptance>>, TError,CreateOpsAuthInvitationAcceptanceMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationAcceptance>>, TError,CreateOpsAuthInvitationAcceptanceMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsAuthInvitationAcceptanceMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuthInvitationAcceptance>>, CreateOpsAuthInvitationAcceptanceMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsAuthInvitationAcceptance(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuthInvitationAcceptanceMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuthInvitationAcceptance>>>
+    export type CreateOpsAuthInvitationAcceptanceMutationBody = BodyType<AdminInvitationAcceptanceCreate>
+    export type CreateOpsAuthInvitationAcceptanceMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreateOpsAuthInvitationAcceptanceMutationVariables = {data: BodyType<AdminInvitationAcceptanceCreate>}
+
+    /**
+ * @summary 운영자·CS 초대 수락 시작(초대 링크 토큰 확인, 다음 단계 토큰 받기)
+ */
+export const useCreateOpsAuthInvitationAcceptance = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationAcceptance>>, TError,CreateOpsAuthInvitationAcceptanceMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuthInvitationAcceptance>>,
+        TError,
+        CreateOpsAuthInvitationAcceptanceMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuthInvitationAcceptanceMutationOptions(options), queryClient);
+    }
+    export type createOpsAuthInvitationPasswordResponse200 = {
+  data: AdminInvitationProgress
+  status: 200
+}
+
+export type createOpsAuthInvitationPasswordResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsAuthInvitationPasswordResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsAuthInvitationPasswordResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsAuthInvitationPasswordResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createOpsAuthInvitationPasswordResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createOpsAuthInvitationPasswordResponseSuccess = (createOpsAuthInvitationPasswordResponse200) & {
+  headers: Headers;
+};
+export type createOpsAuthInvitationPasswordResponseError = (createOpsAuthInvitationPasswordResponse400 | createOpsAuthInvitationPasswordResponse410 | createOpsAuthInvitationPasswordResponse422 | createOpsAuthInvitationPasswordResponse429 | createOpsAuthInvitationPasswordResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuthInvitationPasswordUrl = () => {
+
+
+
+
+  return `/v1/ops/auth/invitation-passwords`
+}
+
+/**
+ * FR-028, POL-020, auth-controls §4, SCR-028. POST /v1/partner/auth/invitation-passwords와 같은 규칙이다. 관제 배포의 허용 IP에서만 받고 gw-ops가 Origin을 확인한다. Cache-Control: no-store
+ * @summary 운영자·CS 초대 수락: 비밀번호 만들기
+ */
+export const createOpsAuthInvitationPassword = async (adminInvitationPasswordCreate: AdminInvitationPasswordCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuthInvitationPasswordResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsAuthInvitationPasswordResponseSuccess>(getCreateOpsAuthInvitationPasswordUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationPasswordCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuthInvitationPasswordMutationKey = () => ['createOpsAuthInvitationPassword'] as const;
+
+export const getCreateOpsAuthInvitationPasswordMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationPassword>>, TError,CreateOpsAuthInvitationPasswordMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationPassword>>, TError,CreateOpsAuthInvitationPasswordMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsAuthInvitationPasswordMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuthInvitationPassword>>, CreateOpsAuthInvitationPasswordMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsAuthInvitationPassword(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuthInvitationPasswordMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuthInvitationPassword>>>
+    export type CreateOpsAuthInvitationPasswordMutationBody = BodyType<AdminInvitationPasswordCreate>
+    export type CreateOpsAuthInvitationPasswordMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreateOpsAuthInvitationPasswordMutationVariables = {data: BodyType<AdminInvitationPasswordCreate>}
+
+    /**
+ * @summary 운영자·CS 초대 수락: 비밀번호 만들기
+ */
+export const useCreateOpsAuthInvitationPassword = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationPassword>>, TError,CreateOpsAuthInvitationPasswordMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuthInvitationPassword>>,
+        TError,
+        CreateOpsAuthInvitationPasswordMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuthInvitationPasswordMutationOptions(options), queryClient);
+    }
+    export type createOpsAuthInvitationTotpEnrollmentResponse201 = {
+  data: AdminInvitationTotpEnrollment
+  status: 201
+}
+
+export type createOpsAuthInvitationTotpEnrollmentResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsAuthInvitationTotpEnrollmentResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsAuthInvitationTotpEnrollmentResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsAuthInvitationTotpEnrollmentResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createOpsAuthInvitationTotpEnrollmentResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createOpsAuthInvitationTotpEnrollmentResponseSuccess = (createOpsAuthInvitationTotpEnrollmentResponse201) & {
+  headers: Headers;
+};
+export type createOpsAuthInvitationTotpEnrollmentResponseError = (createOpsAuthInvitationTotpEnrollmentResponse400 | createOpsAuthInvitationTotpEnrollmentResponse409 | createOpsAuthInvitationTotpEnrollmentResponse410 | createOpsAuthInvitationTotpEnrollmentResponse429 | createOpsAuthInvitationTotpEnrollmentResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuthInvitationTotpEnrollmentUrl = () => {
+
+
+
+
+  return `/v1/ops/auth/invitation-totp-enrollments`
+}
+
+/**
+ * FR-028, POL-020, identity §6, SCR-028. POST /v1/partner/auth/invitation-totp-enrollments와 같은 규칙이다. 관제 배포의 허용 IP에서만 받고 gw-ops가 Origin을 확인한다. Cache-Control: no-store TOTP 확인을 마친 초대에서 다시 부르면 새 시드와 복구 코드를 내지 않고 409다.
+ * @summary 운영자·CS 초대 수락: 인증 앱 등록 시작(otpauth 주소)
+ */
+export const createOpsAuthInvitationTotpEnrollment = async (adminInvitationStepBody: AdminInvitationStepBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuthInvitationTotpEnrollmentResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsAuthInvitationTotpEnrollmentResponseSuccess>(getCreateOpsAuthInvitationTotpEnrollmentUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationStepBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuthInvitationTotpEnrollmentMutationKey = () => ['createOpsAuthInvitationTotpEnrollment'] as const;
+
+export const getCreateOpsAuthInvitationTotpEnrollmentMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationTotpEnrollment>>, TError,CreateOpsAuthInvitationTotpEnrollmentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationTotpEnrollment>>, TError,CreateOpsAuthInvitationTotpEnrollmentMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsAuthInvitationTotpEnrollmentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuthInvitationTotpEnrollment>>, CreateOpsAuthInvitationTotpEnrollmentMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsAuthInvitationTotpEnrollment(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuthInvitationTotpEnrollmentMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuthInvitationTotpEnrollment>>>
+    export type CreateOpsAuthInvitationTotpEnrollmentMutationBody = BodyType<AdminInvitationStepBody>
+    export type CreateOpsAuthInvitationTotpEnrollmentMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreateOpsAuthInvitationTotpEnrollmentMutationVariables = {data: BodyType<AdminInvitationStepBody>}
+
+    /**
+ * @summary 운영자·CS 초대 수락: 인증 앱 등록 시작(otpauth 주소)
+ */
+export const useCreateOpsAuthInvitationTotpEnrollment = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationTotpEnrollment>>, TError,CreateOpsAuthInvitationTotpEnrollmentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuthInvitationTotpEnrollment>>,
+        TError,
+        CreateOpsAuthInvitationTotpEnrollmentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuthInvitationTotpEnrollmentMutationOptions(options), queryClient);
+    }
+    export type createOpsAuthInvitationTotpConfirmationResponse200 = {
+  data: AdminInvitationTotpConfirmed
+  status: 200
+}
+
+export type createOpsAuthInvitationTotpConfirmationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsAuthInvitationTotpConfirmationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsAuthInvitationTotpConfirmationResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsAuthInvitationTotpConfirmationResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsAuthInvitationTotpConfirmationResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createOpsAuthInvitationTotpConfirmationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createOpsAuthInvitationTotpConfirmationResponseSuccess = (createOpsAuthInvitationTotpConfirmationResponse200) & {
+  headers: Headers;
+};
+export type createOpsAuthInvitationTotpConfirmationResponseError = (createOpsAuthInvitationTotpConfirmationResponse400 | createOpsAuthInvitationTotpConfirmationResponse409 | createOpsAuthInvitationTotpConfirmationResponse410 | createOpsAuthInvitationTotpConfirmationResponse422 | createOpsAuthInvitationTotpConfirmationResponse429 | createOpsAuthInvitationTotpConfirmationResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuthInvitationTotpConfirmationUrl = () => {
+
+
+
+
+  return `/v1/ops/auth/invitation-totp-confirmations`
+}
+
+/**
+ * FR-028, POL-020, identity §6, SCR-028. POST /v1/partner/auth/invitation-totp-confirmations와 같은 규칙이다. 관제 배포의 허용 IP에서만 받고 gw-ops가 Origin을 확인한다. Cache-Control: no-store
+ * @summary 운영자·CS 초대 수락: 인증 앱 코드 확인(복구 코드는 이 응답에서 한 번만)
+ */
+export const createOpsAuthInvitationTotpConfirmation = async (adminInvitationTotpConfirmationCreate: AdminInvitationTotpConfirmationCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuthInvitationTotpConfirmationResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsAuthInvitationTotpConfirmationResponseSuccess>(getCreateOpsAuthInvitationTotpConfirmationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationTotpConfirmationCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuthInvitationTotpConfirmationMutationKey = () => ['createOpsAuthInvitationTotpConfirmation'] as const;
+
+export const getCreateOpsAuthInvitationTotpConfirmationMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationTotpConfirmation>>, TError,CreateOpsAuthInvitationTotpConfirmationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationTotpConfirmation>>, TError,CreateOpsAuthInvitationTotpConfirmationMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsAuthInvitationTotpConfirmationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuthInvitationTotpConfirmation>>, CreateOpsAuthInvitationTotpConfirmationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsAuthInvitationTotpConfirmation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuthInvitationTotpConfirmationMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuthInvitationTotpConfirmation>>>
+    export type CreateOpsAuthInvitationTotpConfirmationMutationBody = BodyType<AdminInvitationTotpConfirmationCreate>
+    export type CreateOpsAuthInvitationTotpConfirmationMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreateOpsAuthInvitationTotpConfirmationMutationVariables = {data: BodyType<AdminInvitationTotpConfirmationCreate>}
+
+    /**
+ * @summary 운영자·CS 초대 수락: 인증 앱 코드 확인(복구 코드는 이 응답에서 한 번만)
+ */
+export const useCreateOpsAuthInvitationTotpConfirmation = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationTotpConfirmation>>, TError,CreateOpsAuthInvitationTotpConfirmationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuthInvitationTotpConfirmation>>,
+        TError,
+        CreateOpsAuthInvitationTotpConfirmationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuthInvitationTotpConfirmationMutationOptions(options), queryClient);
+    }
+    export type createOpsAuthInvitationPasskeyRegistrationResponse201 = {
+  data: AdminPasskeyRegistration
+  status: 201
+}
+
+export type createOpsAuthInvitationPasskeyRegistrationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsAuthInvitationPasskeyRegistrationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsAuthInvitationPasskeyRegistrationResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsAuthInvitationPasskeyRegistrationResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createOpsAuthInvitationPasskeyRegistrationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createOpsAuthInvitationPasskeyRegistrationResponseSuccess = (createOpsAuthInvitationPasskeyRegistrationResponse201) & {
+  headers: Headers;
+};
+export type createOpsAuthInvitationPasskeyRegistrationResponseError = (createOpsAuthInvitationPasskeyRegistrationResponse400 | createOpsAuthInvitationPasskeyRegistrationResponse409 | createOpsAuthInvitationPasskeyRegistrationResponse410 | createOpsAuthInvitationPasskeyRegistrationResponse429 | createOpsAuthInvitationPasskeyRegistrationResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuthInvitationPasskeyRegistrationUrl = () => {
+
+
+
+
+  return `/v1/ops/auth/invitation-passkey-registrations`
+}
+
+/**
+ * FR-028, POL-020, I-T53 ①, ADR-0206. POST /v1/ops/auth/passkey-registrations와 같은 등록 옵션과 응답이고, 세션과 재인증 토큰 대신 acceptanceStep으로 부른다. RP ID는 console.peaket.example이고 사용자 확인 필수다. operator·commander는 필수이고 viewer·cs_agent·cs_lead는 건너뛸 수 있다(identity §6 'MFA' 행). 관제 배포의 허용 IP에서만 받고 gw-ops가 Origin을 확인한다. Cache-Control: no-store
+ * @summary 운영자·CS 초대 수락: 패스키 등록 시작(등록 옵션)
+ */
+export const createOpsAuthInvitationPasskeyRegistration = async (adminInvitationStepBody: AdminInvitationStepBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuthInvitationPasskeyRegistrationResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsAuthInvitationPasskeyRegistrationResponseSuccess>(getCreateOpsAuthInvitationPasskeyRegistrationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationStepBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuthInvitationPasskeyRegistrationMutationKey = () => ['createOpsAuthInvitationPasskeyRegistration'] as const;
+
+export const getCreateOpsAuthInvitationPasskeyRegistrationMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationPasskeyRegistration>>, TError,CreateOpsAuthInvitationPasskeyRegistrationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationPasskeyRegistration>>, TError,CreateOpsAuthInvitationPasskeyRegistrationMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsAuthInvitationPasskeyRegistrationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuthInvitationPasskeyRegistration>>, CreateOpsAuthInvitationPasskeyRegistrationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsAuthInvitationPasskeyRegistration(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuthInvitationPasskeyRegistrationMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuthInvitationPasskeyRegistration>>>
+    export type CreateOpsAuthInvitationPasskeyRegistrationMutationBody = BodyType<AdminInvitationStepBody>
+    export type CreateOpsAuthInvitationPasskeyRegistrationMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreateOpsAuthInvitationPasskeyRegistrationMutationVariables = {data: BodyType<AdminInvitationStepBody>}
+
+    /**
+ * @summary 운영자·CS 초대 수락: 패스키 등록 시작(등록 옵션)
+ */
+export const useCreateOpsAuthInvitationPasskeyRegistration = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationPasskeyRegistration>>, TError,CreateOpsAuthInvitationPasskeyRegistrationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuthInvitationPasskeyRegistration>>,
+        TError,
+        CreateOpsAuthInvitationPasskeyRegistrationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuthInvitationPasskeyRegistrationMutationOptions(options), queryClient);
+    }
+    export type createOpsAuthInvitationPasskeyResponse201 = {
+  data: AdminPasskey
+  status: 201
+}
+
+export type createOpsAuthInvitationPasskeyResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsAuthInvitationPasskeyResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsAuthInvitationPasskeyResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsAuthInvitationPasskeyResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsAuthInvitationPasskeyResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createOpsAuthInvitationPasskeyResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createOpsAuthInvitationPasskeyResponseSuccess = (createOpsAuthInvitationPasskeyResponse201) & {
+  headers: Headers;
+};
+export type createOpsAuthInvitationPasskeyResponseError = (createOpsAuthInvitationPasskeyResponse400 | createOpsAuthInvitationPasskeyResponse409 | createOpsAuthInvitationPasskeyResponse410 | createOpsAuthInvitationPasskeyResponse422 | createOpsAuthInvitationPasskeyResponse429 | createOpsAuthInvitationPasskeyResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuthInvitationPasskeyUrl = () => {
+
+
+
+
+  return `/v1/ops/auth/invitation-passkeys`
+}
+
+/**
+ * FR-028, POL-020, I-T53 ①, ADR-0206. POST /v1/ops/auth/passkeys와 같은 확인이다: 출처는 관제 콘솔, RP ID는 console.peaket.example, 사용자 확인 필수. 관제 배포의 허용 IP에서만 받고 gw-ops가 Origin을 확인한다. Cache-Control: no-store
+ * @summary 운영자·CS 초대 수락: 패스키 등록 마치기
+ */
+export const createOpsAuthInvitationPasskey = async (adminInvitationPasskeyCreate: AdminInvitationPasskeyCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuthInvitationPasskeyResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsAuthInvitationPasskeyResponseSuccess>(getCreateOpsAuthInvitationPasskeyUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationPasskeyCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuthInvitationPasskeyMutationKey = () => ['createOpsAuthInvitationPasskey'] as const;
+
+export const getCreateOpsAuthInvitationPasskeyMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationPasskey>>, TError,CreateOpsAuthInvitationPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationPasskey>>, TError,CreateOpsAuthInvitationPasskeyMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsAuthInvitationPasskeyMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuthInvitationPasskey>>, CreateOpsAuthInvitationPasskeyMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsAuthInvitationPasskey(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuthInvitationPasskeyMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuthInvitationPasskey>>>
+    export type CreateOpsAuthInvitationPasskeyMutationBody = BodyType<AdminInvitationPasskeyCreate>
+    export type CreateOpsAuthInvitationPasskeyMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreateOpsAuthInvitationPasskeyMutationVariables = {data: BodyType<AdminInvitationPasskeyCreate>}
+
+    /**
+ * @summary 운영자·CS 초대 수락: 패스키 등록 마치기
+ */
+export const useCreateOpsAuthInvitationPasskey = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationPasskey>>, TError,CreateOpsAuthInvitationPasskeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuthInvitationPasskey>>,
+        TError,
+        CreateOpsAuthInvitationPasskeyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuthInvitationPasskeyMutationOptions(options), queryClient);
+    }
+    export type createOpsAuthInvitationCompletionResponse204 = {
+  data: void
+  status: 204
+}
+
+export type createOpsAuthInvitationCompletionResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsAuthInvitationCompletionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsAuthInvitationCompletionResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsAuthInvitationCompletionResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
+export type createOpsAuthInvitationCompletionResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createOpsAuthInvitationCompletionResponseSuccess = (createOpsAuthInvitationCompletionResponse204) & {
+  headers: Headers;
+};
+export type createOpsAuthInvitationCompletionResponseError = (createOpsAuthInvitationCompletionResponse400 | createOpsAuthInvitationCompletionResponse409 | createOpsAuthInvitationCompletionResponse410 | createOpsAuthInvitationCompletionResponse429 | createOpsAuthInvitationCompletionResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuthInvitationCompletionUrl = () => {
+
+
+
+
+  return `/v1/ops/auth/invitation-completions`
+}
+
+/**
+ * FR-028, POL-020, identity §6, I-T53 ①, docs/planning/03 §2.7 A2. POST /v1/partner/auth/invitation-completions와 같은 규칙이다. operator·commander는 패스키가 하나 이상 있어야 활성화된다(commander는 분실·보호 잠금 재초대로 이 경로를 지난다). 관제 배포의 허용 IP에서만 받고 gw-ops가 Origin을 확인한다
+ * @summary 운영자·CS 초대 수락 마치기(복구 코드 보관 확인, 계정 활성화)
+ */
+export const createOpsAuthInvitationCompletion = async (adminInvitationCompletionCreate: AdminInvitationCompletionCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuthInvitationCompletionResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsAuthInvitationCompletionResponseSuccess>(getCreateOpsAuthInvitationCompletionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(adminInvitationCompletionCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuthInvitationCompletionMutationKey = () => ['createOpsAuthInvitationCompletion'] as const;
+
+export const getCreateOpsAuthInvitationCompletionMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationCompletion>>, TError,CreateOpsAuthInvitationCompletionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationCompletion>>, TError,CreateOpsAuthInvitationCompletionMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsAuthInvitationCompletionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuthInvitationCompletion>>, CreateOpsAuthInvitationCompletionMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsAuthInvitationCompletion(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuthInvitationCompletionMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuthInvitationCompletion>>>
+    export type CreateOpsAuthInvitationCompletionMutationBody = BodyType<AdminInvitationCompletionCreate>
+    export type CreateOpsAuthInvitationCompletionMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreateOpsAuthInvitationCompletionMutationVariables = {data: BodyType<AdminInvitationCompletionCreate>}
+
+    /**
+ * @summary 운영자·CS 초대 수락 마치기(복구 코드 보관 확인, 계정 활성화)
+ */
+export const useCreateOpsAuthInvitationCompletion = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuthInvitationCompletion>>, TError,CreateOpsAuthInvitationCompletionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuthInvitationCompletion>>,
+        TError,
+        CreateOpsAuthInvitationCompletionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuthInvitationCompletionMutationOptions(options), queryClient);
+    }

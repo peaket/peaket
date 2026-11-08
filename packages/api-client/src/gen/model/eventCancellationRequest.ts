@@ -11,9 +11,11 @@
  */
 import type { EventCancellationRequestDryRun } from './eventCancellationRequestDryRun';
 import type { EventCancellationRequestFault } from './eventCancellationRequestFault';
+import type { EventCancellationRequestFaultOpinion } from './eventCancellationRequestFaultOpinion';
 import type { EventCancellationRequestKind } from './eventCancellationRequestKind';
 import type { EventCancellationRequestProgress } from './eventCancellationRequestProgress';
 import type { EventCancellationRequestStatus } from './eventCancellationRequestStatus';
+import type { OpsActor } from './opsActor';
 
 /**
  * 회차 취소 요청(ADR-0046 결정 4)
@@ -33,4 +35,30 @@ export interface EventCancellationRequest {
   /** 대상 주문 수, 환급 총액, 배상 대상 수와 총액, 결제사별 건수와 예상 소요 시간 */
   dryRun?: EventCancellationRequestDryRun;
   progress?: EventCancellationRequestProgress;
+  promoterId?: string;
+  /** 공연 제목 */
+  title?: string;
+  /**
+     * 파트너가 적은 사유(docs/data.md partner_reason). commander가 직접 낸 요청이면 그 사유
+     * @nullable
+     */
+  partnerReason?: string | null;
+  /**
+     * 파트너의 귀책 의견(참고값)
+     * @nullable
+     */
+  faultOpinion?: EventCancellationRequestFaultOpinion;
+  /**
+     * 증빙 참조값
+     * @nullable
+     */
+  evidenceRef?: string | null;
+  /**
+     * 연기일 때 바뀐 공연 시작 시각
+     * @nullable
+     */
+  newStartsAt?: string | null;
+  requestedAt?: string;
+  /** 판정한 commander. 관제 GET에만 싣고 파트너 응답에는 싣지 않는다 */
+  judgedBy?: OpsActor | null;
 }
