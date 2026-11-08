@@ -154,16 +154,22 @@ test('ST_T18_처리중에소비자를더띄워재조정해도_같은주문은순
   await kafka.createTopic(topic, 4);
   const evs = plan(run, 4, 200);
   const total = evs.flat().length;
+  // 뒤쪽 10%는 B가 파티션을 받은 것을 본 뒤에 넣는다. started는 합류 완료를 뜻하지 않아서, 느린 러너에서는 B가 들어오기 전에
+  // A가 앞쪽을 다 처리해 B가 받을 사건이 없었다(CI 42501264101, 2026-11-09)
+  const tail = evs.map((e) => e.slice(Math.floor(e.length * 0.9)));
+  const head = evs.map((e, p) => e.slice(0, e.length - tail[p]!.length));
   // 주문 열에 하나꼴로 세 번째 사건이 2초 걸린다(그 주문의 줄만 막힌다)
   const slow = { slow: (e: Ev) => e.seq === 3 && e.order.endsWith('7'), slowMs: 2_000 };
   const A = consumer(run, 'A', topic, 'st18-add', slow);
   await A.c.started;
   const sampler = commitSampler(run, topic, 'st18-add');
-  const producing = produceOver(topic, evs);
+  const producing = produceOver(topic, head);
   await until(async () => (await count(run)) >= total * 0.2, 60_000, '20% 반영');
   const B = consumer(run, 'B', topic, 'st18-add', slow);
   await B.c.started;
   await producing;
+  await until(async () => [...(await kafka.groupOwners('st18-add', topic)).values()].some((c) => c.includes('st18-B')), 120_000, 'B가 파티션을 받음');
+  await produceOver(topic, tail);
   await until(async () => (await count(run)) === total, 120_000, '전부 반영');
   const { samples, bad } = await sampler.finish();
   await Promise.all([A.c.stop(), B.c.stop()]);
