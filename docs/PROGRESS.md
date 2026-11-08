@@ -98,7 +98,7 @@
 - PRF-164: 판매를 연 기록(seat_rebuild 행)을 남기는 운영 코드는 판매 열기를 부르는 LCH-080이 생길 때까지 없어, 그 전 회차는 전체 유실 뒤 손으로 행을 넣어야 다시 만들어진다(SeatRebuildMarks.markOpened).
 - PRF-161: orders-e2e의 201 시험이 조사용 가명 호출 50ms 한도에 기대어, 통합 시험 전체 실행의 부하에서 가끔 refMissing true로 실패한다(2026-11-05 한 번, 따로 두 번 통과, test-int/orders-e2e.int.test.ts).
 - PRF-168: 통합 시험 전체 실행에서 Redis 호출 마감 100ms 시간 초과가 매번 다른 시험 2~5개에서 난다(파일 34개가 동시에 컨테이너를 띄우고, 클러스터 모드 Valkey 묶음이 늘었다. 따로 돌리면 통과). 통합 설정의 동시 파일 수를 줄이거나 시험용 마감을 늘린다(vitest.integration.config.mjs).
-- PRF-168: 좌석을 쓰는 Lua마다 CLUSTER MYID 한 번과 chk 쓰기가 더해졌으니 S-T27(홀드 Lua 처리량)을 PRF-220(측정 창 1)에서 다시 잰다. loadtest/poc의 좌석 키 이름 목록이 failed·rebuild·sessions·sessionSweep을 따라오지 못해 poc-seat 시험 하나가 실패한다(측정 전에 맞춘다).
+- PRF-168: 좌석을 쓰는 Lua마다 CLUSTER MYID 한 번과 chk 쓰기가 더해졌으니 S-T27(홀드 Lua 처리량)을 PRF-220(측정 창 1)에서 다시 잰다.
 - PRF-168: 접근 문자열에서 cluster 명령이 빠진 것을 시작 때 알아채는 확인(파드 준비 확인에서 노드 표지를 한 번 구하기)과, 운영에서 좌석 Redis가 단일 노드(standalone)면 시작을 거절하는 검사가 없다(복제본이 있는 비클러스터 주소면 장애 조치를 못 잡는다).
 - PRF-168: 쓰는 Lua가 올린 세대는 감시 반복이 bumps 차이로만 센다. 릴레이 리더가 바뀐 뒤 첫 확인은 기준만 잡아 그 사이 올린 수를 지표에서 놓친다(seat-epoch-watch.ts).
 - PRF-170: 실제 gRPC 채널과 차단기를 거친 업무 거절 코드(FAILED_PRECONDITION 등)가 차단기를 실패로 세지 않고 멈춤으로 가는지 함께 보는 시험이 없다(adapters/grpc-ticket-issue.ts, 차단기 판정은 platform CircuitBreaker).
@@ -144,3 +144,4 @@ OPEN[25]: 엣지 매진 표시를 쓰는 권한을 어떻게 줄지 정해 주�
 - 2026-11-06 PRF-170 발권 호출과 재시도 큐(R-353, wbs 2.7.1 ②, ADR-0106, 추천 적용): PRF-170을 넷으로 나눔. 모든 API 파드의 실행기가 큐를 SKIP LOCKED·임대로 잡아 IssueTickets, 성공은 T18 조건부·티켓 ID·큐 지움, 늘려 쉬기·멈춤, ISSUE_DELAYED·기한 넘김 한 번.
 - 2026-11-06 PRF-171 결제 결과 당기기(R-358, wbs 2.7.1 ②, ADR-0140, 추천 적용): 승인 명령 접수·중간 결과 뒤 Saga 작업 행을 AWAIT로 남기고(마이그레이션 0010), 모든 API 파드의 실행기가 5초 넘게 결과가 없는 주문을 BatchGetPayments로 물어 사건과 같은 처리기로 반영.
 - 2026-11-06 단계마다 develop 푸시(R-360, ADR-0222, 소유자 결정 "기다리지 않고 푸시", 문서만): 갈래는 단계를 커밋하면 곧바로 `develop`을 원격에 푸시하고 CI를 기다리지 않는다. 다음 단계를 시작할 때 직전 CI 결과를 보고 실패면 그것부터 고친다. `develop` 밖 푸시·강제 푸시·공개 게시는 여전히 묻는다. 고친 곳: architecture §8.5·§8.6, devops §2.2.5, 이 파일의 턴 규칙·다음 할 일. 이 커밋과 함께 그동안 쌓인 101커밋을 처음 올렸다.
+- 2026-11-09 측정 도구 좌석 키 목록 맞춤(R-361): CI loadtest-check의 ST27 대조 실패를 고쳤다(rebuild·failed·sessions·sessionSweep). 갈래 1은 메인 폴더가 다른 가지에 있어 worktree D:/ticketpass-lane1(가지 lane1/work)에서 돈다.

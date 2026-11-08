@@ -19,7 +19,11 @@ export const seatKeys = {
   fence: (e) => `s:{event:${e}}:fence`,
   section: (e, sectionId) => `s:{event:${e}}:sec:${sectionId}`,
   ctlEvents: () => 's:ctl:events',
+  rebuild: (e) => `s:{event:${e}}:rebuild`,
+  failed: (e, holdId) => `s:{event:${e}}:failed:${holdId}`,
   sweep: (e) => `s:{event:${e}}:sweep`,
+  sessions: (e) => `s:{event:${e}}:sessions`,
+  sessionSweep: (e) => `s:{event:${e}}:sesweep`,
 };
 
 /** 만료 1단계에서 한 번에 읽는 수이자 만료 Lua 한 번의 좌석 상한(domain/expiry.ts EXPIRY_BATCH_SIZE, ADR-0176 결정 3) */
