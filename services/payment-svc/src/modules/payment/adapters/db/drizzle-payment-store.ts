@@ -5,7 +5,7 @@
 import type { Database, DbTransaction } from '@peaket/platform';
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { type ConfirmPaymentCommand, type ConfirmPaymentRef, MIN_CALL_REMAINING_MS, PaymentDeadlineError, type PaymentLedgerStatus, type PaymentRecord, type PaymentState } from '../../domain/confirm-command.js';
-import { confirmIdemKey, type PgName } from '../../domain/payment-gateway.js';
+import { confirmIdemKey, type FailureCategory, type PgName } from '../../domain/payment-gateway.js';
 import type { CallBudget, NewPaymentValues, PaymentCommandStore, PaymentStateReader, StoreCommandResult } from '../../domain/ports.js';
 import { payment, paymentConfirmJob, paymentEvent } from './schema.js';
 
@@ -70,12 +70,18 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
       if (inserted.length === 0) {
         // 겹친 쪽은 앞 쪽이 커밋할 때까지 유일 확인에서 기다렸다가 0행을 받는다. READ COMMITTED의 다음 문장은 커밋된 행을 본다
         const [row] = await tx
-          .select({ paymentId: payment.id, orderId: payment.orderId, attemptId: payment.attemptId, pg: payment.pg, amount: payment.amount, status: payment.status, approvedAt: payment.approvedAt })
+          .select({ paymentId: payment.id, orderId: payment.orderId, attemptId: payment.attemptId, pg: payment.pg, amount: payment.amount, status: payment.status, approvedAt: payment.approvedAt, failureCategory: payment.failureCategory })
           .from(payment)
           .where(eq(payment.orderId, command.orderId));
         if (!row) throw new Error('유일 제약에 걸린 결제 행을 읽지 못했다');
-        const { approvedAt, ...rest } = row;
-        const record: PaymentRecord = { ...rest, pg: rest.pg as PgName, status: rest.status as PaymentLedgerStatus, ...(approvedAt ? { approvedAtMs: approvedAt.getTime() } : {}) };
+        const { approvedAt, failureCategory, ...rest } = row;
+        const record: PaymentRecord = {
+          ...rest,
+          pg: rest.pg as PgName,
+          status: rest.status as PaymentLedgerStatus,
+          ...(approvedAt ? { approvedAtMs: approvedAt.getTime() } : {}),
+          ...(failureCategory ? { failureCategory: failureCategory as FailureCategory } : {}),
+        };
         return { kind: 'EXISTING', record };
       }
 
@@ -105,6 +111,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
             status: payment.status,
             amount: payment.amount,
             approvedAt: payment.approvedAt,
+            failureCategory: payment.failureCategory,
             eventKey: lastExported.eventKey,
             eventSeq: lastExported.eventSeq,
           })
@@ -121,6 +128,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
       status: r.status as PaymentLedgerStatus,
       amount: r.amount,
       ...(r.approvedAt ? { approvedAtMs: r.approvedAt.getTime() } : {}),
+      ...(r.failureCategory ? { failureCategory: r.failureCategory as FailureCategory } : {}),
       ...(r.eventKey !== null && r.eventSeq !== null ? { lastEvent: { eventKey: r.eventKey, eventSeq: r.eventSeq } } : {}),
     }));
   }

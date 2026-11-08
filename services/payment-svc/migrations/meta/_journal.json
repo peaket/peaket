@@ -8,6 +8,13 @@
       "when": 1794163877328,
       "tag": "0000_payment",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794168149470,
+      "tag": "0001_payment_failure_category",
+      "breakpoints": true
     }
   ]
 }

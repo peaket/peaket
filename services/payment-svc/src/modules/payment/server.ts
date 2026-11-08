@@ -2,6 +2,13 @@
 // index.ts는 v0 모놀리스도 가져오는 공개 파일이라 결제 포트·시뮬레이터만 둔다. Nest·gRPC·Drizzle을 v0에 끌고 가지 않으려고 서버 쪽은 이 파일로 나눴다.
 export * from './domain/confirm-command.js';
 export * from './domain/ports.js';
+export * from './domain/confirm-runner.js';
+export { PaymentConfirmRunner, type ConfirmRunnerTimer, type ConfirmTickResult, type PaymentConfirmRunnerDeps } from './application/payment-confirm-runner.js';
+export { CONFIRM_RUNNER_DB_MAX, confirmRunnerDatabaseOptions, DrizzleConfirmJobs, type DrizzleConfirmJobsOptions } from './adapters/db/drizzle-confirm-jobs.js';
+export { jsonPaymentEventCodec, TRADE_PAYMENTS_TOPIC } from './adapters/payment-events.js';
+export { paymentConfirmLog } from './adapters/payment-confirm-log.js';
+export { PromPaymentConfirmSignals } from './adapters/prom-payment-confirm-signals.js';
+export { StaticPaymentGateways } from './adapters/pg/payment-gateways.js';
 export { AcceptPaymentCommand, type AcceptPaymentCommandDeps } from './application/accept-payment-command.js';
 export { BatchGetPaymentStates, type BatchGetPaymentStatesDeps } from './application/batch-get-payment-states.js';
 export { BATCH_GET_STATEMENT_TIMEOUT_MS, DrizzlePaymentStore, type DrizzlePaymentStoreOptions } from './adapters/db/drizzle-payment-store.js';

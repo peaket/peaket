@@ -1,11 +1,13 @@
 // payment DB 표 셋(payment·payment_event·payment_confirm_job)의 모양을 DB 없이 본다(docs/data.md §2 ERD·§4 '결제 표 마이그레이션', BUILD_ORDER PRF-180).
-// ① Drizzle 표 정의(schema.ts)를 getTableConfig로 읽어 정본과 같은지 보고, ② 마이그레이션 SQL(0000_payment.sql)을 글로 읽어 표 정의 ↔ SQL 일치를 보고,
+// 마이그레이션 0001(payment.failure_category, BUILD_ORDER PRF-181)까지 본다.
+// ① Drizzle 표 정의(schema.ts)를 getTableConfig로 읽어 정본과 같은지 보고, ② 마이그레이션 SQL(0000_payment.sql·0001_payment_failure_category.sql)을 글로 읽어 표 정의 ↔ SQL 일치를 보고,
 // ③ 마이그레이션 기록(meta)이 맞물리는지 본다(purchase-svc purchase-schema.test.ts와 같은 방식). 실제 PostgreSQL에 적용하는 것은 test-int가 본다.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { SQL } from 'drizzle-orm';
 import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
+import { PaymentEvent } from '@peaket/contracts/asyncapi';
 import { describe, expect, test } from 'vitest';
 import { payment, paymentConfirmJob, paymentEvent } from '../src/modules/payment/adapters/db/schema.js';
 import { PAYMENT_LEDGER_STATUSES } from '../src/modules/payment/domain/confirm-command.js';
@@ -13,6 +15,7 @@ import { PAYMENT_LEDGER_STATUSES } from '../src/modules/payment/domain/confirm-c
 const SERVICE = fileURLToPath(new URL('..', import.meta.url));
 const MIGRATIONS = join(SERVICE, 'migrations');
 const TAG = '0000_payment';
+const TAG_0001 = '0001_payment_failure_category';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
 const TZ = 'timestamp with time zone';
@@ -45,6 +48,10 @@ const TABLES = [payment, paymentEvent, paymentConfirmJob];
 const SHAPES = [paymentShape, eventShape, jobShape];
 const cols = (s: ReturnType<typeof shapeOf>): [string, string, boolean][] => s.columns.map((c) => [c.name, c.type, c.notNull]);
 const checkOf = (s: ReturnType<typeof shapeOf>, name: string): string => s.checks.find((k) => k.name === name)!.expr;
+/** 0000이 만든 모양(0001이 더한 칸과 CHECK를 뺀다) */
+const ADDED_COLUMN = 'failure_category';
+const ADDED_CHECK = 'payment_failure_category_check';
+const SHAPES_0000 = SHAPES.map((s) => ({ ...s, columns: s.columns.filter((c) => c.name !== ADDED_COLUMN), checks: s.checks.filter((k) => k.name !== ADDED_CHECK) }));
 
 describe('표 정의(schema.ts)', () => {
   test('PRF180_표는 payment·payment_event·payment_confirm_job 셋이고 기본 스키마에 있다', () => {
@@ -75,6 +82,7 @@ describe('표 정의(schema.ts)', () => {
       ['created_at', TZ, true],
       ['approved_at', TZ, false],
       ['status_changed_at', TZ, true],
+      ['failure_category', 'text', false],
     ]);
   });
 
@@ -148,13 +156,24 @@ describe('표 정의(schema.ts)', () => {
     expect(checkOf(jobShape, 'payment_confirm_job_attempts_check')).toBe('attempts >= 0');
   });
 
-  test('PRF180_CHECK 제약은 정본의 일곱뿐이다', () => {
+  test('PRF181_failure_category CHECK는 분석용 실패 범주 여섯 값이고 asyncapi PaymentEvent와 같은 값이다', () => {
+    const values = literalsOf(checkOf(paymentShape, ADDED_CHECK));
+    expect(values).toEqual(['CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED']);
+    expect(values).toEqual(PaymentEvent.shape.failureCategory.unwrap().options);
+  });
+
+  test('PRF181_failure_category는 비울 수 있고(FAILED일 때만 채운다) 기본값이 없다', () => {
+    expect(paymentShape.columns.find((c) => c.name === ADDED_COLUMN)).toEqual({ name: 'failure_category', type: 'text', notNull: false, hasDefault: false, primary: false });
+  });
+
+  test('PRF181_CHECK 제약은 0000의 일곱에 0001의 failure_category를 더한 여덟뿐이다', () => {
     expect(SHAPES.flatMap((s) => s.checks.map((k) => k.name))).toEqual([
       'payment_status_check',
       'payment_pg_check',
       'payment_amount_check',
       'payment_attempt_no_check',
       'payment_method_ref_card_bin_check',
+      'payment_failure_category_check',
       'payment_event_seq_check',
       'payment_confirm_job_attempts_check',
     ]);
@@ -190,14 +209,14 @@ describe('마이그레이션 SQL(0000_payment.sql)', () => {
   });
 
   test('PRF180_schema.ts의 열이 모두 SQL에 있고 그 밖의 열은 없다', () => {
-    for (const s of SHAPES) {
+    for (const s of SHAPES_0000) {
       const inSql = [...createTable(s.name).matchAll(/^\t"([a-z_]+)" /gm)].map((m) => m[1]!);
       expect(inSql, s.name).toEqual(s.columns.map((c) => c.name));
     }
   });
 
   test('PRF180_열 종류와 널 불허가 schema.ts와 같다', () => {
-    for (const s of SHAPES) {
+    for (const s of SHAPES_0000) {
       const c = canon(createTable(s.name));
       for (const col of s.columns) {
         expect(c, `${s.name}.${col.name}`).toContain(`${col.name} ${col.type}`);
@@ -208,7 +227,7 @@ describe('마이그레이션 SQL(0000_payment.sql)', () => {
   });
 
   test('PRF180_기본 키가 같은 이름·같은 열 차례로 SQL에 있다', () => {
-    for (const s of SHAPES) {
+    for (const s of SHAPES_0000) {
       const c = canon(createTable(s.name));
       for (const p of s.primaryKeys) expect(c, p.name).toContain(`constraint ${p.name} primary key(${p.columns.join(',')})`);
       for (const col of s.columns.filter((x) => x.primary)) expect(c, `${s.name}.${col.name}`).toContain(`${col.name} ${col.type} primary key not null`);
@@ -216,14 +235,14 @@ describe('마이그레이션 SQL(0000_payment.sql)', () => {
   });
 
   test('P-T53_schema.ts의 check 제약이 같은 이름·같은 식으로 SQL에 있다 [ASVS v5.0.0-2.2.1]', () => {
-    for (const s of SHAPES) {
+    for (const s of SHAPES_0000) {
       const c = canon(createTable(s.name));
       for (const k of s.checks) expect(c, k.name).toContain(`constraint ${k.name} check(${k.expr})`);
     }
   });
 
   test('P-T53_인덱스가 같은 이름·같은 표·같은 열·같은 유일 여부로 SQL에 있다 [ASVS v5.0.0-2.3.4]', () => {
-    for (const s of SHAPES) {
+    for (const s of SHAPES_0000) {
       for (const i of s.indexes) {
         const stmt = statements.find((x) => x.includes(`INDEX "${i.name}"`));
         expect(stmt, i.name).toBeDefined();
@@ -257,6 +276,33 @@ describe('마이그레이션 SQL(0000_payment.sql)', () => {
   });
 });
 
+describe('마이그레이션 SQL(0001_payment_failure_category.sql)', () => {
+  const sqlFile = readFileSync(join(MIGRATIONS, `${TAG_0001}.sql`), 'utf8').replace(/\r\n/g, '\n');
+  const noComments = sqlFile.replace(/^--.*$/gm, '');
+  const statements = noComments
+    .split(BREAKPOINT)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  test('PRF181_문은 칸 더하기와 CHECK 더하기 둘뿐이고 칸을 먼저 더한다', () => {
+    expect(statements.map((s) => /^ALTER TABLE "payment" ADD (COLUMN|CONSTRAINT) "[a-z_]+"/.exec(s)?.[0])).toEqual(['ALTER TABLE "payment" ADD COLUMN "failure_category"', 'ALTER TABLE "payment" ADD CONSTRAINT "payment_failure_category_check"']);
+  });
+
+  test('PRF181_칸의 종류와 널 허용이 schema.ts와 같다(NOT NULL·DEFAULT 없음)', () => {
+    const col = paymentShape.columns.find((c) => c.name === ADDED_COLUMN)!;
+    expect(canon(statements[0]!).replace(/;$/, '')).toBe(`alter table payment add column ${col.name} ${col.type}`);
+    expect(statements[0]).not.toMatch(/NOT NULL|DEFAULT/i);
+  });
+
+  test('P-T53_CHECK가 schema.ts와 같은 이름·같은 식으로 SQL에 있다 [ASVS v5.0.0-2.2.1]', () => {
+    expect(canon(statements[1]!).replace(/;$/, '')).toBe(`alter table payment add constraint ${ADDED_CHECK} check(${checkOf(paymentShape, ADDED_CHECK)})`);
+  });
+
+  test('PRF181_지우거나 바꾸는 문이 없고 표·인덱스를 더 만들지 않는다', () => {
+    expect(noComments).not.toMatch(/\b(DROP|TRUNCATE|DELETE FROM|UPDATE "|RENAME|CREATE (TABLE|INDEX|UNIQUE))\b/);
+  });
+});
+
 describe('마이그레이션 기록(migrations/meta)', () => {
   const journal = JSON.parse(readFileSync(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { dialect: string; entries: { idx: number; tag: string; when: number; breakpoints: boolean }[] };
   interface SnapTable {
@@ -266,29 +312,48 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     foreignKeys: Record<string, unknown>;
     indexes: Record<string, { isUnique: boolean }>;
   }
-  const snapshot = JSON.parse(readFileSync(join(MIGRATIONS, 'meta', '0000_snapshot.json'), 'utf8')) as { prevId: string; tables: Record<string, SnapTable> };
+  type Snapshot = { id: string; prevId: string; tables: Record<string, SnapTable> };
+  const snapshotOf = (file: string): Snapshot => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', file), 'utf8')) as Snapshot;
+  const snapshot = snapshotOf('0000_snapshot.json');
+  const latest = snapshotOf('0001_snapshot.json');
 
-  test('PRF180_기록은 0000_payment 하나이고 SQL 파일과 맞는다', () => {
+  test('PRF181_기록은 0000·0001 차례이고 SQL 파일과 맞는다', () => {
     expect(journal.dialect).toBe('postgresql');
-    expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([[0, TAG]]);
-    expect(journal.entries[0]!.breakpoints).toBe(true);
-    expect(journal.entries[0]!.when).toBeGreaterThan(0);
-    expect(existsSync(join(MIGRATIONS, `${TAG}.sql`))).toBe(true);
+    expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
+      [0, TAG],
+      [1, TAG_0001],
+    ]);
+    for (const e of journal.entries) {
+      expect(e.breakpoints, e.tag).toBe(true);
+      expect(e.when, e.tag).toBeGreaterThan(0);
+      expect(existsSync(join(MIGRATIONS, `${e.tag}.sql`)), e.tag).toBe(true);
+    }
+    expect(journal.entries[1]!.when).toBeGreaterThan(journal.entries[0]!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json']);
   });
 
   test('PRF180_첫 스냅샷은 앞이 없다', () => {
     expect(snapshot.prevId).toBe('00000000-0000-0000-0000-000000000000');
   });
 
-  test('PRF180_스냅샷의 표·열·기본 키·check가 schema.ts와 같다(Outbox는 손으로 쓴 SQL이라 스냅샷에 없다)', () => {
-    expect(Object.keys(snapshot.tables).sort()).toEqual(SHAPES.map((s) => `public.${s.name}`).sort());
+  test('PRF181_0001 스냅샷의 앞은 0000 스냅샷이다', () => {
+    expect(latest.prevId).toBe(snapshot.id);
+  });
+
+  test('PRF181_0000 스냅샷은 0001이 더한 칸과 CHECK를 모른다', () => {
+    const t = snapshot.tables['public.payment']!;
+    expect(Object.keys(t.columns)).toEqual(SHAPES_0000[0]!.columns.map((c) => c.name));
+    expect(Object.keys(t.checkConstraints)).toEqual(SHAPES_0000[0]!.checks.map((k) => k.name));
+  });
+
+  test('PRF181_마지막 스냅샷의 표·열·기본 키·check가 schema.ts와 같다(Outbox는 손으로 쓴 SQL이라 스냅샷에 없다)', () => {
+    expect(Object.keys(latest.tables).sort()).toEqual(SHAPES.map((s) => `public.${s.name}`).sort());
     for (const s of SHAPES) {
-      const t = snapshot.tables[`public.${s.name}`]!;
+      const t = latest.tables[`public.${s.name}`]!;
       expect(Object.entries(t.columns).map(([n, c]) => [n, c.type, c.notNull]), s.name).toEqual(cols(s));
       expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), s.name).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));
       expect(Object.keys(t.checkConstraints), s.name).toEqual(s.checks.map((k) => k.name));
@@ -297,9 +362,9 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     }
   });
 
-  test('PRF180_스냅샷의 외래 키 이름이 schema.ts와 같다', () => {
+  test('PRF181_마지막 스냅샷의 외래 키 이름이 schema.ts와 같다', () => {
     TABLES.forEach((table, i) => {
-      const t = snapshot.tables[`public.${SHAPES[i]!.name}`]!;
+      const t = latest.tables[`public.${SHAPES[i]!.name}`]!;
       expect(Object.keys(t.foreignKeys), SHAPES[i]!.name).toEqual(getTableConfig(table).foreignKeys.map((f) => f.getName()));
     });
   });

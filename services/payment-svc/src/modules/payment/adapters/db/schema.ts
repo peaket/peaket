@@ -12,6 +12,8 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () =>
 const STATUS_LIST = sql.raw("'ACCEPTED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'FAILED', 'PARTIAL_CANCELED', 'CANCELED'");
 /** 결제사 셋의 CHECK 목록 */
 const PG_LIST = sql.raw("'TOSS', 'PORTONE', 'SIMULATOR'");
+/** 분석용 실패 범주 여섯 값의 CHECK 목록(domain/payment-gateway.ts FailureCategory와 같은 값) */
+const FAILURE_CATEGORY_LIST = sql.raw("'CARD_DECLINED', 'USER_ABORTED', 'VALIDATION', 'EXPIRED', 'PG_ERROR', 'THROTTLED'");
 
 export const payment = pgTable(
   'payment',
@@ -45,6 +47,8 @@ export const payment = pgTable(
     createdAt: at('created_at').notNull().defaultNow(),
     approvedAt: at('approved_at'),
     statusChangedAt: at('status_changed_at').notNull(),
+    // 실패 범주. FAILED일 때만 채운다. ConfirmPayment 재전송의 답과 BatchGetPayments가 읽는다(BUILD_ORDER PRF-181, 마이그레이션 0001)
+    failureCategory: text('failure_category'),
   },
   (t) => [
     uniqueIndex('payment_order_id_key').on(t.orderId),
@@ -53,6 +57,7 @@ export const payment = pgTable(
     check('payment_amount_check', sql`${t.amount} > 0`),
     check('payment_attempt_no_check', sql`${t.attemptNo} >= 1`),
     check('payment_method_ref_card_bin_check', sql`(${t.paymentMethodRef} IS NULL) = (${t.cardBin} IS NULL)`),
+    check('payment_failure_category_check', sql`${t.failureCategory} IN (${FAILURE_CATEGORY_LIST})`),
   ],
 );
 

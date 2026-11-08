@@ -503,6 +503,7 @@
 | R-387 | 갈래 2 다음 할 일이 HOT-363 뒤 상태를 담지 않았다 | docs/lanes/lane2.md | 구간 1의 남은 단계와 그 선행 단계를 적었다 | 해소 |
 | R-388 | 로비 참가 토큰·입장 확정의 lobbyToken·커밋 공시·비콘 대기가 비어 있었다(PRF-060·090·110·BOT-025가 넘긴 것) | services/queue-svc(entry·admission), services/admission-ctrl(batch·leader), packages/shuffle, docs/api/openapi.yaml, packages/contracts·api-client 생성물, docs/features/queue-admission.md, docs/data.md, docs/observability.md, docs/security/secrets-and-keys.md·asvs/queue-admission.md, docs/adr/0230, docs/BUILD_ORDER.md, docs/wbs/wbs.md·wbs.csv, docs/PROGRESS.md(OPEN[27]), docs/lanes/lane3.md | 정본·ASVS 먼저 → 시험 먼저(실패 확인) → 구현 → 새 맥락 리뷰·재검토 | 수정 완료 |
 | R-390 | api-client 시험이 정본 openapi 해석에 기본 5초를 넘겨 develop CI가 실패했다(CI 42515928543) | packages/api-client/test/policy.test.ts | 시험 시간 한도 30초, 단정 그대로. 그 파일 26개 통과 | 수정 완료 |
+| R-391 | 승인 명령을 적어도 결제사를 부르는 쪽이 없어 결제가 끝나지 않았다. 만들며 찾은 것: 어댑터가 이미 승인된 결제와 프록시의 애매한 응답을 거절로 돌려줘 돈이 잡힌 채 좌석을 풀 수 있었고, 실패 범주를 둘 칸이 없었으며, 임대가 끊긴 뒤의 판정과 재전송 중 거절의 뜻이 정본에 없었다 | docs/features/payment.md §2·§2.1·§4·§4.2, docs/data.md, docs/verification.md §4.1, docs/observability.md, docs/security/asvs/payment.md, docs/BUILD_ORDER.md, services/payment-svc(실행기·저장소·시뮬레이터 어댑터·마이그레이션 0001·main.ts) | 뼈대 → 시험 먼저 → 구현 → 틀린 구현 18개 → 새 맥락 리뷰 → 고침. 단위 695, 통합 163 | 수정 완료 |
 
 ## 4. 숫자 일치표
 

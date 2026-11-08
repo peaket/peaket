@@ -2,9 +2,12 @@
 // - 플랫폼 외부 호출 클라이언트로 부른다: 추적 머리 없음, 리디렉트 안 따름, 남은 시간 안의 시간 초과(docs/observability.md §6).
 // - 읽기 시간 초과는 60초 [가정](payment §2.1 '읽기 시간 초과 권장'). 끊김·시간 초과·5xx는 결과 모름(UNKNOWN)이다.
 // - 결과 코드는 payment §2.1 '공통 결과 코드 정규화'와 '분석용 실패 범주'로 바꾼다. 대응표는 이 파일과 계약 시험이 정본이다.
-import { createExternalHttpClient, type Clock, type ExternalHttpClient } from '@peaket/platform';
+// - 승인 답의 읽기(PRF-181 코드 리뷰, PRF-184가 이 꼴을 물려받는다): 거절로 읽는 것은 JSON code가 있는 4xx뿐이다. 200이 아닌 2xx·3xx·408·JSON code가 없는 4xx와 그 밖은
+//   결제사가 무엇을 했는지 모르므로 UNKNOWN이다. 200 답은 주문 ID를 대조해 다르면 UNKNOWN이다.
+import { createExternalHttpClient, systemClock, type Clock, type ExternalHttpClient } from '@peaket/platform';
 import {
   CANCEL_IDEM_KEY,
+  CONFIRM_CALL_BUDGET_MS,
   confirmIdemKey,
   type CancelResult,
   type CheckoutAttempt,
@@ -14,6 +17,7 @@ import {
   type FailureCategory,
   type HeaderBag,
   type PaymentGatewayPort,
+  type PayMethodCategory,
   type PgCapabilities,
   type QueryResult,
   type QueryStatus,
@@ -29,6 +33,8 @@ export interface SimulatorGatewayOptions {
   clientKey: string;
   /** 읽기 시간 초과 상한(ms). 기본 60초 [가정] */
   readTimeoutMs?: number;
+  /** 승인 호출 + 뒤따르는 조회의 시간 합 상한(ms). 기본 CONFIRM_CALL_BUDGET_MS 70초 [가정] */
+  confirmBudgetMs?: number;
   /** 시험별로 바꾸는 호출 상한(초당). 기본 300 */
   callsPerSecond?: number;
   clock?: Clock;
@@ -46,6 +52,13 @@ const STATUS: Readonly<Record<string, QueryStatus>> = {
   ABORTED: 'FAILED',
   EXPIRED: 'EXPIRED',
 };
+/** 시뮬레이터 응답 method(토스와 같은 글) → 결제 수단 분류. 표에 없는 값은 비운다 */
+const METHOD_CATEGORY: ReadonlyMap<string, PayMethodCategory> = new Map<string, PayMethodCategory>([
+  ['카드', 'CARD'],
+  ['간편결제', 'EASY_PAY'],
+  ['계좌이체', 'TRANSFER'],
+]);
+const DEFAULT_READ_TIMEOUT_MS = 60_000;
 const USER_ABORTED = new Set(['PAY_PROCESS_CANCELED', 'PAY_PROCESS_ABORTED']);
 const VALIDATION = new Set(['INVALID_REQUEST', 'NOT_FOUND_PAYMENT', 'DUPLICATED_ORDER_ID', 'IDEMPOTENCY_KEY_REUSED']);
 
@@ -58,9 +71,11 @@ export class SimulatorPaymentGateway implements PaymentGatewayPort {
   readonly pg = 'SIMULATOR' as const;
   private readonly http: ExternalHttpClient;
   private readonly authorization: string;
+  private readonly clock: Clock;
 
   constructor(private readonly o: SimulatorGatewayOptions) {
-    this.http = createExternalHttpClient({ provider: 'pg-simulator', baseUrl: o.baseUrl, timeoutCapMs: o.readTimeoutMs ?? 60_000, clock: o.clock, fetch: o.fetch });
+    this.clock = o.clock ?? systemClock;
+    this.http = createExternalHttpClient({ provider: 'pg-simulator', baseUrl: o.baseUrl, timeoutCapMs: o.readTimeoutMs ?? DEFAULT_READ_TIMEOUT_MS, clock: o.clock, fetch: o.fetch });
     this.authorization = `Basic ${Buffer.from(`${o.secretKey}:`).toString('base64')}`;
   }
 
@@ -94,28 +109,34 @@ export class SimulatorPaymentGateway implements PaymentGatewayPort {
 
   async confirm(c: { orderId: string; paymentRef: string; amount: number; idemKey: string }): Promise<ConfirmResult> {
     if (c.idemKey !== confirmIdemKey(c.orderId)) throw new TypeError(`승인 멱등키는 confirm-{주문 ID}여야 한다: ${c.idemKey}`);
+    const startedMs = this.clock.monotonicMs();
     const r = await this.call('POST', '/v1/payments/confirm', {}, { paymentKey: c.paymentRef, orderId: c.orderId, amount: c.amount }, c.idemKey);
     const unknown: ConfirmResult = { outcome: 'UNKNOWN', paymentRef: c.paymentRef };
     if (r === 'NO_ANSWER' || r.status >= 500) return unknown;
     if (r.status === 200) {
+      // 다른 주문의 답을 이 주문의 결과로 쓰지 않는다
+      if (str(r.json?.orderId) !== c.orderId) return unknown;
       const status = str(r.json?.status);
       if (status === 'WAITING_FOR_DEPOSIT') return { outcome: 'WAITING_FOR_DEPOSIT', paymentRef: c.paymentRef, amount: num(r.json?.totalAmount) };
       if (status !== 'DONE') return unknown;
       return { outcome: 'APPROVED', ...this.approvedFields(c.paymentRef, r.json!) };
     }
-    const code = str(r.json?.code) ?? `HTTP_${r.status}`;
+    const code = str(r.json?.code);
+    // 결제사가 코드로 답한 4xx만 거절로 읽는다. 나머지(200이 아닌 2xx·3xx·408·JSON code가 없는 4xx)는 중간 장비의 답일 수 있어 결과를 가정하지 않는다
+    if (r.status < 400 || r.status === 408 || !code) return unknown;
     const declined = (failureCategory: FailureCategory): ConfirmResult => ({ outcome: 'DECLINED', paymentRef: c.paymentRef, failureCategory, pgCode: code });
     if (r.status === 429) return declined('THROTTLED');
     if (r.status === 409 || code === 'ALREADY_PROCESSING_REQUEST') return { outcome: 'IN_PROGRESS', paymentRef: c.paymentRef, pgCode: code };
     if (code === 'ALREADY_PROCESSED_PAYMENT') {
-      // 조회로 금액이 맞는지 본 뒤에만 승인과 똑같이 처리한다(payment §2.1 ALREADY_APPROVED)
-      const q = await this.call('GET', '/v1/payments/{paymentKey}', { paymentKey: c.paymentRef });
+      // 승인 + 조회의 합이 임대를 넘지 않게 남은 몫만 기다리고, 몫을 다 썼으면 부르지 않는다
+      const leftMs = (this.o.confirmBudgetMs ?? CONFIRM_CALL_BUDGET_MS) - (this.clock.monotonicMs() - startedMs);
+      if (leftMs < 1) return unknown;
+      const q = await this.call('GET', '/v1/payments/{paymentKey}', { paymentKey: c.paymentRef }, undefined, undefined, Math.min(leftMs, this.o.readTimeoutMs ?? DEFAULT_READ_TIMEOUT_MS));
       if (q === 'NO_ANSWER' || q.status !== 200) return unknown;
+      // 결제사가 이 주문을 승인한 것을 확인했을 때만 ALREADY_APPROVED다. 금액은 조회 값을 그대로 실어, 다르면 실행기가 UNKNOWN + SEV1을 쓴다(승인된 결제를 FAILED로 쓰지 않는다, payment §2.1 ALREADY_APPROVED)
       const s = str(q.json?.status);
-      if ((s === 'DONE' || s === 'PARTIAL_CANCELED') && num(q.json?.totalAmount) === c.amount && str(q.json?.orderId) === c.orderId) {
-        return { outcome: 'ALREADY_APPROVED', ...this.approvedFields(c.paymentRef, q.json!) };
-      }
-      return declined('VALIDATION');
+      if ((s !== 'DONE' && s !== 'PARTIAL_CANCELED') || str(q.json?.orderId) !== c.orderId) return unknown;
+      return { outcome: 'ALREADY_APPROVED', ...this.approvedFields(c.paymentRef, q.json!) };
     }
     if (r.status === 401 || r.status === 403) return declined('PG_ERROR');
     if (code === 'NOT_FOUND_PAYMENT_SESSION') return declined('EXPIRED');
@@ -175,15 +196,17 @@ export class SimulatorPaymentGateway implements PaymentGatewayPort {
   private approvedFields(paymentRef: string, json: Record<string, unknown>): Omit<ConfirmResult, 'outcome'> {
     const card = json.card as Record<string, unknown> | null | undefined;
     const maskedNumber = str(card?.number);
+    const method = METHOD_CATEGORY.get(str(json.method) ?? '');
     return {
       paymentRef,
       amount: num(json.totalAmount),
       approvedAt: str(json.approvedAt),
       ...(card && maskedNumber ? { card: { maskedNumber, issuerCode: str(card.issuerCode) ?? '', cardType: str(card.cardType) ?? '' } } : {}),
+      ...(method ? { method } : {}),
     };
   }
 
-  private async call(method: 'GET' | 'POST', path: string, params: Record<string, string>, body?: unknown, idemKey?: string): Promise<Reply> {
+  private async call(method: 'GET' | 'POST', path: string, params: Record<string, string>, body?: unknown, idemKey?: string, timeoutCapMs?: number): Promise<Reply> {
     try {
       const res = await this.http.request({
         method,
@@ -195,6 +218,7 @@ export class SimulatorPaymentGateway implements PaymentGatewayPort {
           ...(idemKey ? { 'idempotency-key': idemKey } : {}),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
+        ...(timeoutCapMs === undefined ? {} : { timeoutCapMs }),
       });
       const text = await res.text();
       let json: Record<string, unknown> | undefined;

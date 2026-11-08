@@ -1,9 +1,12 @@
 // 시뮬레이터 어댑터 시험: 공통 계약 묶음 + 시뮬레이터에서만 만들 수 있는 응답의 표준 결과(payment §2.1 '공통 결과 코드 정규화'·'분석용 실패 범주').
 // 시뮬레이터는 프로세스 안에서 루프백 무작위 포트로 띄우고, 어댑터는 실제 HTTP로 부른다(응답 유실·시간 초과를 네트워크로 만든다).
 import { randomBytes, randomUUID } from 'node:crypto';
+import { fakeClock } from '@peaket/platform';
 import { buildSimulatorApp, type SimulatorApp } from '@peaket/pg-simulator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SimulatorPaymentGateway, type SimulatorGatewayOptions } from '../src/modules/payment/adapters/pg/simulator-gateway.js';
+import { CONFIRM_LEASE_MS } from '../src/modules/payment/domain/confirm-runner.js';
+import { CONFIRM_CALL_BUDGET_MS } from '../src/modules/payment/domain/payment-gateway.js';
 import { pgAdapterContract, type PgContractHarness } from './pg-contract.js';
 
 interface Sim {
@@ -118,6 +121,11 @@ describe('시뮬레이터 어댑터의 표준 결과', () => {
     expect(c.card).toMatchObject({ issuerCode: '61', cardType: '신용', maskedNumber: expect.stringMatching(/^43301234\*{4}/) });
   });
 
+  it('PRF181_승인 결과에 결제 수단 분류가 든다(시뮬레이터 method 카드 → CARD, 사건의 payMethodCategory)', async () => {
+    const r = await ready();
+    expect((await sim.gateway().confirm(r)).method).toBe('CARD');
+  });
+
   it('처리 중 → IN_PROGRESS, 한도 초과 → DECLINED·THROTTLED', async () => {
     const r = await ready();
     await fault({ op: 'confirm', kind: 'in-progress' });
@@ -142,11 +150,13 @@ describe('시뮬레이터 어댑터의 표준 결과', () => {
     expect(await sim.gateway().query(r.paymentRef)).toMatchObject({ kind: 'FOUND', status: 'APPROVED' });
   });
 
-  it('이미 승인됐는데 금액이 다르면 DECLINED·VALIDATION(ALREADY_APPROVED로 보지 않는다)', async () => {
+  it('PRF181_리뷰 고침 H1: 이미 승인됐는데 금액이 다르면 거절이 아니라 조회 금액을 실은 ALREADY_APPROVED다(실행기가 UNKNOWN + SEV1을 쓴다) [ASVS v5.0.0-2.2.3]', async () => {
     const r = await ready();
     await sim.gateway().confirm(r);
     sim.clock.advance(15 * 24 * 3_600_000 + 1);
-    expect(await sim.gateway().confirm({ ...r, amount: 9_000 })).toMatchObject({ outcome: 'DECLINED', failureCategory: 'VALIDATION' });
+    const c = await sim.gateway().confirm({ ...r, amount: 9_000 });
+    expect(c).toMatchObject({ outcome: 'ALREADY_APPROVED', amount: r.amount });
+    expect(c.failureCategory).toBeUndefined();
   });
 
   it('구매자 이탈 → USER_ABORTED, 금액 불일치 → VALIDATION, 키 틀림 → PG_ERROR', async () => {
@@ -190,5 +200,130 @@ describe('시뮬레이터 어댑터의 표준 결과', () => {
     expect(g.parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, '{')).toBeNull();
     expect(g.parseWebhook({ 'tosspayments-webhook-transmission-id': 'wh_1' }, JSON.stringify({ eventType: 'DEPOSIT_CALLBACK', data: {} }))).toBeNull();
     expect(g.parseWebhook({ 'TossPayments-Webhook-Transmission-Id': 'wh_1' }, body)).toEqual({ dedupKey: 'SIMULATOR:wh_1', paymentRef: 'tsim_1', orderRef: 'o-123456' });
+  });
+});
+
+describe('리뷰 고침(BUILD_ORDER PRF-181, 코드 리뷰): 시뮬레이터가 만들 수 없는 답', () => {
+  const C = { orderId: 'order-review-1', paymentRef: 'tsim_review', amount: 10_000, idemKey: 'confirm-order-review-1' };
+  const UNKNOWN = { outcome: 'UNKNOWN', paymentRef: C.paymentRef };
+  type Scripted = { status: number; body?: unknown; raw?: string };
+  const already: Scripted = { status: 400, body: { code: 'ALREADY_PROCESSED_PAYMENT', message: '이미 처리된 결제입니다' } };
+  const payment = (over: Record<string, unknown> = {}): Scripted => ({ status: 200, body: { status: 'DONE', orderId: C.orderId, totalAmount: C.amount, approvedAt: '2026-11-02T10:00:00.000+09:00', ...over } });
+  const responseOf = (s: Scripted): Response => new Response(s.raw ?? (s.body === undefined ? null : JSON.stringify(s.body)), { status: s.status });
+
+  /** 정해 둔 답을 차례대로 주는 어댑터. calls는 보낸 '메서드 경로'다 */
+  function scripted(replies: Scripted[], o: Partial<SimulatorGatewayOptions> = {}) {
+    const calls: string[] = [];
+    const fetchStub: typeof fetch = async (input, init) => {
+      calls.push(`${init?.method} ${new URL(String(input)).pathname}`);
+      const next = replies.shift();
+      if (!next) throw new Error('답을 더 정하지 않았다');
+      return responseOf(next);
+    };
+    return { calls, gateway: new SimulatorPaymentGateway({ baseUrl: 'http://pg.test', secretKey: 'sim_sk_review', clientKey: 'sim_ck_review', fetch: fetchStub, ...o }) };
+  }
+
+  it.each(['DONE', 'PARTIAL_CANCELED'])('PRF181_리뷰 고침 H1: 조회가 %s인데 금액이 다르면 조회 금액을 실어 ALREADY_APPROVED다 [ASVS v5.0.0-2.2.3]', async (status) => {
+    const { gateway } = scripted([already, payment({ status, totalAmount: 9_000 })]);
+    await expect(gateway.confirm(C)).resolves.toMatchObject({ outcome: 'ALREADY_APPROVED', paymentRef: C.paymentRef, amount: 9_000 });
+  });
+
+  it('PRF181_리뷰 고침 H1: 승인 상태인데 조회에 금액이 없으면 금액 없는 ALREADY_APPROVED다(실행기가 UNKNOWN + SEV1을 쓴다) [ASVS v5.0.0-2.2.3]', async () => {
+    const { gateway } = scripted([already, payment({ totalAmount: undefined })]);
+    const c = await gateway.confirm(C);
+    expect(c.outcome).toBe('ALREADY_APPROVED');
+    expect(c.amount).toBeUndefined();
+  });
+
+  it.each(['IN_PROGRESS', 'WAITING_FOR_DEPOSIT', 'READY', 'CANCELED', 'ABORTED', 'EXPIRED', 'SOMETHING_NEW', undefined])('PRF181_리뷰 고침 H1: 조회가 %s이면 결과를 가정하지 않고 UNKNOWN이다 [ASVS v5.0.0-16.5.3]', async (status) => {
+    const { gateway } = scripted([already, payment({ status })]);
+    await expect(gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+  });
+
+  it('PRF181_리뷰 고침 H1: 승인 상태라도 조회의 주문 ID가 다르면 UNKNOWN이다(금액을 믿을 수 없다) [ASVS v5.0.0-2.2.3]', async () => {
+    const { gateway } = scripted([already, payment({ orderId: 'order-other', totalAmount: 9_000 })]);
+    await expect(gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+  });
+
+  it.each<[string, Scripted]>([
+    ['201 승인 모양', { status: 201, body: { status: 'DONE', orderId: C.orderId, totalAmount: C.amount } }],
+    ['202', { status: 202, body: { code: 'ACCEPTED' } }],
+    ['204 빈 답', { status: 204 }],
+    ['301', { status: 301, raw: '' }],
+    ['302 JSON code', { status: 302, body: { code: 'MOVED' } }],
+    ['304', { status: 304 }],
+    ['408 JSON code', { status: 408, body: { code: 'REQUEST_TIMEOUT' } }],
+    ['400 HTML', { status: 400, raw: '<html>bad gateway</html>' }],
+    ['401 HTML', { status: 401, raw: '<html>no</html>' }],
+    ['403 빈 답', { status: 403, raw: '' }],
+    ['404 JSON인데 code 없음', { status: 404, body: { message: '없음' } }],
+    ['409 HTML', { status: 409, raw: 'conflict' }],
+    ['429 HTML', { status: 429, raw: 'slow down' }],
+    ['400 JSON 배열', { status: 400, body: [{ code: 'REJECT_CARD_PAYMENT' }] }],
+    ['400 code 빈 글', { status: 400, body: { code: '' } }],
+    ['400 code가 글이 아님', { status: 400, body: { code: 42 } }],
+  ])('PRF181_리뷰 고침 H2: %s는 거절로 가정하지 않고 UNKNOWN이다 [ASVS v5.0.0-16.5.3]', async (_name, reply) => {
+    const { gateway } = scripted([reply]);
+    await expect(gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+  });
+
+  it('PRF181_리뷰 고침 H2: JSON code가 있는 4xx는 그대로 대응표대로다', async () => {
+    const declined = (status: number, code: string) => scripted([{ status, body: { code, message: 'x' } }]).gateway.confirm(C);
+    await expect(declined(403, 'REJECT_CARD_PAYMENT')).resolves.toMatchObject({ outcome: 'DECLINED', failureCategory: 'PG_ERROR', pgCode: 'REJECT_CARD_PAYMENT' });
+    await expect(declined(400, 'REJECT_CARD_PAYMENT')).resolves.toMatchObject({ outcome: 'DECLINED', failureCategory: 'CARD_DECLINED' });
+    await expect(declined(429, 'TOO_MANY_REQUESTS')).resolves.toMatchObject({ outcome: 'DECLINED', failureCategory: 'THROTTLED' });
+    await expect(declined(409, 'IDEMPOTENT_REQUEST_PROCESSING')).resolves.toMatchObject({ outcome: 'IN_PROGRESS' });
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['다른 주문 ID', { orderId: 'order-other' }],
+    ['주문 ID 없음', { orderId: undefined }],
+    ['입금 대기인데 다른 주문 ID', { status: 'WAITING_FOR_DEPOSIT', orderId: 'order-other' }],
+  ])('PRF181_리뷰 고침 L12: 200 답이 %s이면 UNKNOWN이다 [ASVS v5.0.0-2.2.3]', async (_name, over) => {
+    const { gateway } = scripted([payment(over)]);
+    await expect(gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+  });
+
+  it('PRF181_리뷰 고침 L12: 200 답의 주문 ID가 같으면 그대로 승인이다', async () => {
+    const { gateway } = scripted([payment()]);
+    await expect(gateway.confirm(C)).resolves.toMatchObject({ outcome: 'APPROVED', amount: C.amount });
+  });
+
+  it('PRF181_리뷰 고침 L7: 승인 + 조회의 시간 합 상한은 임대보다 짧고 읽기 시간 초과보다 길다 [가정]', () => {
+    expect(CONFIRM_CALL_BUDGET_MS).toBeLessThan(CONFIRM_LEASE_MS);
+    expect(CONFIRM_CALL_BUDGET_MS).toBeGreaterThan(60_000);
+  });
+
+  it('PRF181_리뷰 고침 L7: 뒤따르는 조회는 승인에 쓴 시간을 뺀 남은 몫까지만 기다린다 [ASVS v5.0.0-16.5.2]', async () => {
+    const fetchStub: typeof fetch = async (_input, init) => {
+      if (init?.method === 'POST') {
+        await new Promise((r) => setTimeout(r, 120));
+        return responseOf(already);
+      }
+      return new Promise<Response>((_res, rej) => init!.signal!.addEventListener('abort', () => rej(new Error('시간 초과'))));
+    };
+    const gateway = new SimulatorPaymentGateway({ baseUrl: 'http://pg.test', secretKey: 'sim_sk_review', clientKey: 'sim_ck_review', fetch: fetchStub, readTimeoutMs: 3_000, confirmBudgetMs: 300 });
+    const started = performance.now();
+    await expect(gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+    expect(performance.now() - started).toBeLessThan(1_500);
+  });
+
+  it('PRF181_리뷰 고침 L7: 승인에 몫을 다 썼으면 조회를 보내지 않고 UNKNOWN이다 [ASVS v5.0.0-16.5.2]', async () => {
+    const clock = fakeClock({ now: Date.parse('2026-11-09T00:00:00.000Z') });
+    const calls: string[] = [];
+    const fetchStub: typeof fetch = async (_input, init) => {
+      calls.push(String(init?.method));
+      clock.advance(CONFIRM_CALL_BUDGET_MS);
+      return responseOf(already);
+    };
+    const gateway = new SimulatorPaymentGateway({ baseUrl: 'http://pg.test', secretKey: 'sim_sk_review', clientKey: 'sim_ck_review', fetch: fetchStub, clock });
+    await expect(gateway.confirm(C)).resolves.toEqual(UNKNOWN);
+    expect(calls).toEqual(['POST']);
+  });
+
+  it('PRF181_리뷰 고침 L7: 몫이 남아 있으면 조회해 ALREADY_APPROVED다', async () => {
+    const { gateway, calls } = scripted([already, payment()]);
+    await expect(gateway.confirm(C)).resolves.toMatchObject({ outcome: 'ALREADY_APPROVED', amount: C.amount });
+    expect(calls).toEqual(['POST /v1/payments/confirm', `GET /v1/payments/${C.paymentRef}`]);
   });
 });

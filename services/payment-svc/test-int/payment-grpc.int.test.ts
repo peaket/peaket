@@ -94,6 +94,7 @@ const COLUMNS: Record<string, Record<string, [string, 'YES' | 'NO']>> = {
     created_at: ['timestamp with time zone', 'NO'],
     approved_at: ['timestamp with time zone', 'YES'],
     status_changed_at: ['timestamp with time zone', 'NO'],
+    failure_category: ['text', 'YES'],
   },
   payment_event: {
     payment_id: ['uuid', 'NO'],
@@ -135,14 +136,14 @@ const insertPayment = (over: Record<string, unknown> = {}) => {
 };
 
 describe('마이그레이션과 표 모양', () => {
-  test('PRF180_마이그레이션 0000을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 1개다', async () => {
+  test('PRF180_PRF181_마이그레이션(0000·0001)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 2개다', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
     expect(before).toEqual(['outbox', 'payment', 'payment_confirm_job', 'payment_event']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);
-    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('1');
+    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('2');
   });
 
   test.each(Object.keys(COLUMNS))('PRF180_%s 표의 칸 이름·종류·빈 값 허용이 docs/data.md ERD와 같다', async (table) => {

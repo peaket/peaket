@@ -1,5 +1,5 @@
 // payment-svc 앱 프로세스(dist/main.js, 운영 시작 명령과 같은 node --import @peaket/platform/telemetry/register)를 자식으로 띄워 실제 PostgreSQL 18에 붙인다(BUILD_ORDER PRF-180).
-// 정본: docs/features/payment.md §2 '승인 명령 접수의 첫 구현' 프로세스·지표·연결 풀, src/main.ts 머리 주석(풀 두 이름·종료 차례), docs/security/asvs/payment.md 16.2.5.
+// 정본: docs/features/payment.md §2 '승인 명령 접수의 첫 구현' 프로세스·지표·연결 풀, src/main.ts 머리 주석(풀 세 이름·종료 차례), docs/security/asvs/payment.md 16.2.5.
 // 약속:
 // - src/main.ts를 처음 부를 때 tsc로 빌드해 dist/main.js를 띄운다(지난 빌드를 돌리지 않게). @peaket/platform은 패키지 내보내기(dist)를 쓴다(CI는 turbo build 뒤에 이 시험을 돈다).
 // - 포트 셋(앱·관리·gRPC)은 시험이 빈 포트를 골라 환경 값으로 준다. 프로세스 하나를 시험들이 나눠 쓰고, SIGTERM 시험이 맨 뒤에 끝낸다.
@@ -142,7 +142,8 @@ async function poolWaitingOnLedger(call: () => Promise<unknown>): Promise<string
     pending = call().catch(() => undefined);
     await until(
       async () => {
-        names = (await admin.pool.query<{ application_name: string }>(`select application_name from pg_stat_activity where application_name like 'payment-svc%' and wait_event_type = 'Lock'`)).rows.map((r) => r.application_name);
+        // 승인 실행기(payment-svc-confirm)는 100ms마다 돌며 같은 잠금을 기다릴 수 있어 뺀다. 이 도우미는 요청 처리의 두 풀만 가린다(BUILD_ORDER PRF-181)
+        names = (await admin.pool.query<{ application_name: string }>(`select application_name from pg_stat_activity where application_name like 'payment-svc%' and application_name <> 'payment-svc-confirm' and wait_event_type = 'Lock'`)).rows.map((r) => r.application_name);
         return names.length > 0;
       },
       'payment 표 잠금을 기다리는 연결',
@@ -182,7 +183,7 @@ describe('payment-svc 앱 프로세스', () => {
     expect(outcomeCount(after, CONFIRMS, 'replayed') - outcomeCount(before, CONFIRMS, 'replayed')).toBe(1);
   }, 60_000);
 
-  test('P-T54_프로세스의 gRPC 포트로 BatchGetPayments를 답하고, 두 풀이 정해진 이름(payment-svc·payment-svc-batch)으로 붙어 있다', async () => {
+  test('P-T54_PRF181_프로세스의 gRPC 포트로 BatchGetPayments를 답하고, 세 풀이 정해진 이름(payment-svc·payment-svc-batch·payment-svc-confirm)으로 붙어 있다', async () => {
     const s = await service();
     const f = tossConfirm();
     await unary(s.client, 'ConfirmPayment', f.request);
@@ -190,7 +191,7 @@ describe('payment-svc 앱 프로세스', () => {
     expect(got.payments).toEqual([expect.objectContaining({ order_id: f.orderId, status: 'PAYMENT_STATUS_ACCEPTED' })]);
 
     const names = (await admin.pool.query<{ application_name: string }>(`select distinct application_name from pg_stat_activity where application_name like 'payment-svc%' order by 1`)).rows.map((r) => r.application_name);
-    expect(names).toEqual(['payment-svc', 'payment-svc-batch']);
+    expect(names).toEqual(['payment-svc', 'payment-svc-batch', 'payment-svc-confirm']);
   }, 60_000);
 
   test('P-T53_P-T54_승인 명령 쓰기는 핫패스 풀(payment-svc), 결과 조회는 일반 풀(payment-svc-batch)의 연결로 나간다(main.ts가 둘을 맞바꾸면 실패한다)', async () => {

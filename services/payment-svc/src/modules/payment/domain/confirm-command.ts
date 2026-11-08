@@ -60,7 +60,7 @@ export interface PaymentRecord {
   readonly status: PaymentLedgerStatus;
   /** 승인 시각(epoch ms). 비었으면 undefined */
   readonly approvedAtMs?: number;
-  /** 실패 범주. 지금 payment 표에 칸이 없어 비어 있다(PRF-181이 칸을 정한다) */
+  /** 실패 범주(payment.failure_category, 마이그레이션 0001). 실패가 아니면 undefined */
   readonly failureCategory?: FailureCategory;
 }
 
