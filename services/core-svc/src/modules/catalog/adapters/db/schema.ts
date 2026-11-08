@@ -21,6 +21,8 @@ export const promoter = pgTable('promoter', {
   email: text('email'),
   businessRegNo: text('business_reg_no'),
   mailOrderReportNo: text('mail_order_report_no'),
+  /** 통신판매업 신고 면제 사유(신고번호가 없을 때, openapi SellerInfo.exemptionBasis, ADR-0200 결정 4) */
+  exemptionBasis: text('exemption_basis'),
   verifiedAt: at('verified_at'),
 });
 

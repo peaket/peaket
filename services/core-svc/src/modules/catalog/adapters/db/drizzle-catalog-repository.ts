@@ -5,7 +5,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, DATABASE, type Database, type DbTransaction, IdempotencyStore } from '@peaket/platform';
 import { and, eq, gte, inArray, isNotNull, lte, ne, sql } from 'drizzle-orm';
 import type { CatalogRepository, EventSummaryRow, NewProduction, ProductionForUpdate, RegistrationTx, RequestOnce } from '../../domain/ports.js';
-import { type EventStatus, type Genre, isPublic, type SaleReview } from '../../domain/production.js';
+import { MAX_ARTISTS, MAX_PUBLIC_ROUNDS } from '../../domain/event-detail.js';
+import { type EventStatus, type Genre, isPublic, SALE_END_BEFORE_START_MS, type SaleReview } from '../../domain/production.js';
 import type { EventDraft, PendingEvent } from '../../domain/registration.js';
 import { artist, event, place, production, productionArtist, promoter, searchAlias, wish } from './schema.js';
 
@@ -71,18 +72,56 @@ export class DrizzleCatalogRepository implements CatalogRepository {
     // 회차 ID는 uuid 칸이다. 모양이 아닌 값은 DB 오류 대신 없음으로 답한다(없는 회차와 같은 404)
     if (!UUID.test(eventId)) return undefined;
     const rows = await this.db.db
-      .select({ e: event, p: production, sellerName: promoter.legalName })
+      .select({ e: event, p: production, s: promoter, place })
       .from(event)
       .innerJoin(production, eq(production.id, event.productionId))
       .innerJoin(promoter, eq(promoter.id, production.promoterId))
+      // 새 공연장 요청을 아직 잇지 않은 공연은 공연장이 없다
+      .leftJoin(place, eq(place.id, production.placeId))
       .where(eq(event.id, eventId))
       .limit(1);
     const r = rows[0];
     if (!r) return undefined;
+    const [artists, rounds] = await Promise.all([
+      this.db.db
+        .select({ artistId: artist.id, name: artist.name })
+        .from(productionArtist)
+        .innerJoin(artist, eq(artist.id, productionArtist.artistId))
+        .where(eq(productionArtist.productionId, r.p.id))
+        .orderBy(productionArtist.sortOrder, artist.id)
+        .limit(MAX_ARTISTS),
+      // 공개할 회차만 시작 순으로 읽는다(회차가 많은 공연도 상한만큼만). 이 회차는 아래에서 늘 넣는다
+      this.db.db
+        .select({ id: event.id, startsAt: event.startsAt, openAt: event.openAt, status: event.status })
+        .from(event)
+        .where(and(eq(event.productionId, r.p.id), ne(event.status, 'CANCELLED'), gte(event.startsAt, new Date(this.clock.now() + SALE_END_BEFORE_START_MS))))
+        .orderBy(event.startsAt, event.id)
+        .limit(MAX_PUBLIC_ROUNDS),
+    ]);
+    const self = { id: r.e.id, startsAt: r.e.startsAt, openAt: r.e.openAt, status: r.e.status };
     return {
-      event: { id: r.e.id, productionId: r.e.productionId, venueId: r.e.venueId, openAt: r.e.openAt, startsAt: r.e.startsAt, status: r.e.status as EventStatus },
-      production: { id: r.p.id, promoterId: r.p.promoterId, placeId: r.p.placeId, title: r.p.title, genre: r.p.genre as Genre, saleReview: r.p.saleReview as SaleReview, saleApprovedAt: r.p.saleApprovedAt },
-      sellerName: r.sellerName,
+      event: {
+        id: r.e.id,
+        productionId: r.e.productionId,
+        venueId: r.e.venueId,
+        openAt: r.e.openAt,
+        startsAt: r.e.startsAt,
+        status: r.e.status as EventStatus,
+        entryOpensAt: r.e.entryOpensAt,
+        endsAt: r.e.endsAt,
+        reentryAllowed: r.e.reentryAllowed,
+        lobbyMinutes: r.e.lobbyMinutes,
+        lobbyShuffle: r.e.lobbyShuffle,
+        openBatch: r.e.openBatch,
+        seatAssignment: r.e.seatAssignment as 'PICK' | 'AUTO',
+        perPersonLimit: r.e.perPersonLimit,
+      },
+      production: { id: r.p.id, promoterId: r.p.promoterId, placeId: r.p.placeId, title: r.p.title, genre: r.p.genre as Genre, saleReview: r.p.saleReview as SaleReview, saleApprovedAt: r.p.saleApprovedAt, ageRating: r.p.ageRating, runningMinutes: r.p.runningMinutes, description: r.p.description },
+      sellerName: r.s.legalName,
+      seller: { legalName: r.s.legalName, representative: r.s.representative, address: r.s.address, phone: r.s.phone, email: r.s.email, businessRegNo: r.s.businessRegNo, mailOrderReportNo: r.s.mailOrderReportNo, exemptionBasis: r.s.exemptionBasis },
+      place: r.place ? { id: r.place.id, name: r.place.name, address: r.place.address } : null,
+      artists,
+      rounds: (rounds.some((x) => x.id === self.id) ? rounds : [...rounds, self]).map((x) => ({ ...x, status: x.status as EventStatus })),
     };
   }
 

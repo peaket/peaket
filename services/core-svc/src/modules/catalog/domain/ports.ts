@@ -1,12 +1,39 @@
 // 도메인 층: 카탈로그 저장소 포트(어댑터가 구현한다).
+import type { RoundRow, SellerRow } from './event-detail.js';
 import type { CatalogEvent, Genre, Production } from './production.js';
 import type { EventDraft, PendingEvent } from './registration.js';
 
-/** 회차 공개 요약에 쓰는 한 줄(회차·공연·판매자 상호) */
+/** 회차 공개 요약에 쓰는 회차 칸 */
+export interface EventPublicFields {
+  entryOpensAt: Date | null;
+  endsAt: Date;
+  reentryAllowed: boolean;
+  lobbyMinutes: number;
+  lobbyShuffle: boolean;
+  openBatch: boolean;
+  seatAssignment: 'PICK' | 'AUTO';
+  perPersonLimit: number;
+}
+
+/** 공연 상세 응답에 쓰는 공연 칸 */
+export interface ProductionPublicFields {
+  ageRating: string | null;
+  runningMinutes: number | null;
+  description: string | null;
+}
+
+/** 회차 공개 요약·공연 상세에 쓰는 한 벌(회차·공연·판매자·공연장·아티스트·같은 공연의 회차) */
 export interface EventSummaryRow {
-  event: CatalogEvent;
-  production: Production;
+  event: CatalogEvent & EventPublicFields;
+  production: Production & ProductionPublicFields;
   sellerName: string;
+  seller: SellerRow;
+  /** 새 공연장 요청을 아직 잇지 않았으면 null */
+  place: { id: string; name: string; address: string } | null;
+  /** 보이는 순서 */
+  artists: { artistId: string; name: string }[];
+  /** 같은 공연의 회차(취소 포함, 시작 순이 아니어도 된다) */
+  rounds: RoundRow[];
 }
 
 /**

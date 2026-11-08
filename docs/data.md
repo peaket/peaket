@@ -620,7 +620,8 @@ erDiagram
         text phone
         text email
         text business_reg_no "사업자등록번호"
-        text mail_order_report_no "통신판매업 신고번호 또는 면제 근거"
+        text mail_order_report_no "통신판매업 신고번호"
+        text exemption_basis "신고 면제 사유(신고번호가 없을 때, openapi SellerInfo.exemptionBasis, 2026-11-09 HOT-306)"
         timestamptz verified_at "판매 승인 때 사업자 진위 확인"
         text toss_seller_id "토스페이먼츠 지급대행 셀러(ADR-0047)"
         text toss_seller_status "APPROVAL_REQUIRED|PARTIALLY_APPROVED|KYC_REQUIRED|APPROVED"

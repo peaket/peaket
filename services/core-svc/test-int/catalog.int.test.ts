@@ -66,6 +66,11 @@ describe('Drizzle 저장소', () => {
       production: { id: s.productionId, promoterId: s.promoterId, title: '겨울 콘서트', genre: '콘서트', saleReview: 'APPROVED' },
       sellerName: '(주)피켓공연',
     });
+    expect(row?.event).toMatchObject({ lobbyMinutes: 10, lobbyShuffle: true, openBatch: true, seatAssignment: 'PICK', perPersonLimit: 4, endsAt: new Date('2026-12-24T12:30:00Z') });
+    expect(row?.place).toMatchObject({ id: s.placeId, name: '피켓홀' });
+    expect(row?.seller).toMatchObject({ legalName: '(주)피켓공연', representative: null, exemptionBasis: null });
+    // 시계는 시스템 시각이라 2026-12-24 공연은 시험 날짜에 따라 판매 종료가 지났을 수 있다. 이 회차는 어느 쪽이든 늘 든다
+    expect(row?.rounds.map((x) => x.id)).toEqual([s.eventId]);
     expect(await repo.findEventSummary(randomUUID())).toBeUndefined();
     expect(await repo.findEventSummary('not-a-uuid')).toBeUndefined();
   });
@@ -133,7 +138,7 @@ describe('서비스 전체 경로(DB 저장소)', () => {
     const open = await seed();
     const r = await svc.http.inject({ method: 'GET', url: `/v1/events/${open.eventId}` });
     expect(r.statusCode).toBe(200);
-    expect(JSON.parse(r.payload)).toEqual({ eventId: open.eventId, productionId: open.productionId, title: '겨울 콘서트', startsAt: '2026-12-24T10:00:00.000Z', sellerName: '(주)피켓공연' });
+    expect(JSON.parse(r.payload)).toMatchObject({ eventId: open.eventId, productionId: open.productionId, title: '겨울 콘서트', startsAt: '2026-12-24T10:00:00.000Z', sellerName: '(주)피켓공연' });
     const suspended = await seed({ saleReview: 'SUSPENDED' });
     const draft = await seed({ saleReview: 'DRAFT', saleApprovedAt: null });
     expect((await svc.http.inject({ method: 'GET', url: `/v1/events/${suspended.eventId}` })).statusCode).toBe(410);

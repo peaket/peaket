@@ -1,0 +1,1 @@
+ALTER TABLE "promoter" ADD COLUMN "exemption_basis" text;

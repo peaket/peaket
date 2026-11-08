@@ -41,8 +41,24 @@ describe('회차 공개 요약', () => {
     expect(r.headers['x-peaket-cache-tag']).toBe(`event:${id},production:${repo.events.get(id)?.productionId}`);
     expect(r.headers['set-cookie']).toBeUndefined();
     const body = JSON.parse(r.payload);
-    expect(Object.keys(body).sort()).toEqual(['eventId', 'productionId', 'sellerName', 'startsAt', 'title']);
-    expect(GetEventResponse.parse(body)).toEqual({ eventId: id, productionId: repo.events.get(id)?.productionId, title: '겨울 콘서트', startsAt: STARTS.toISOString(), sellerName: '(주)피켓공연' });
+    expect(GetEventResponse.parse(body)).toMatchObject({ eventId: id, productionId: repo.events.get(id)?.productionId, title: '겨울 콘서트', sellerName: '(주)피켓공연', status: 'SCHEDULED', queueOrder: 'HYBRID', seatAssignment: 'PICK', perPersonLimit: 4, reentryAllowed: false, badges: ['HYBRID'] });
+    expect(body.seller).toBeUndefined();
+    expect(body.rounds.map((x: { eventId: string }) => x.eventId)).toContain(id);
+  });
+
+  test('공연상세칸을_공연·회차·공연장·아티스트·판매자에서_채운다', async () => {
+    const id = seed('APPROVED', new Date('2026-11-20T00:00:00Z'));
+    const placeId = randomUUID();
+    const artistId = randomUUID();
+    repo.details.set(id, {
+      place: { id: placeId, name: '피켓홀', address: '서울 어딘가 1' },
+      artists: [{ artistId, name: '별빛 앙상블' }],
+      production: { ageRating: '만 7세 이상', runningMinutes: 150, description: '설명 글' },
+      event: { lobbyShuffle: false, openBatch: true, seatAssignment: 'AUTO', perPersonLimit: 2, reentryAllowed: true, entryOpensAt: new Date('2026-12-24T09:00:00Z') },
+      seller: { representative: '김피켓', address: '서울 어딘가 1', phone: '02-0000-0000', email: 'seller@peaket.example', businessRegNo: '123-45-67890', mailOrderReportNo: '제2026-1호' },
+    });
+    const body = GetEventResponse.parse(JSON.parse((await get(id)).payload));
+    expect(body).toMatchObject({ genre: '콘서트', ageRating: '만 7세 이상', runningMinutes: 150, descriptionText: '설명 글', placeId, placeName: '피켓홀', placeAddress: '서울 어딘가 1', artists: [{ artistId, name: '별빛 앙상블' }], queueOrder: 'FIFO', lobbyOpensAt: null, seatAssignment: 'AUTO', perPersonLimit: 2, reentryAllowed: true, entryOpensAt: '2026-12-24T09:00:00.000Z', badges: ['FIFO', 'AUTO_SEAT'], saleEndsAt: '2026-12-23T10:00:00.000Z', seller: { legalName: '(주)피켓공연', representative: '김피켓', mailOrderReportNo: '제2026-1호' } });
   });
 
   test('[ASVS v5.0.0-8.1.1] 승인뒤바꾼내용의재승인대기·반려중에도_마지막승인내용으로공개는이어진다', async () => {
