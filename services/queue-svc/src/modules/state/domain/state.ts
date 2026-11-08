@@ -1,6 +1,6 @@
 // 대기 상태 파일의 규칙 값과 만들기(docs/features/queue-admission.md §4 '대기 상태 파일의 첫 구현', openapi QueueState, ADR-0110).
 // 파일 하나가 구간 하나(번호 1,000개)다. 같은 구간의 대기자가 같은 파일을 받으므로 사람별 값은 없다.
-import { type EventSchedule, saleEndOf, SEGMENT_SIZE, segmentOf } from '../../entry/index.js';
+import { type EventSchedule, saleEndOf, SEGMENT_SIZE, segmentOf, seatmapLayoutPathOf } from '../../entry/index.js';
 import { AVG_TICKETS_MAX, AVG_TICKETS_MIN, SEAT_COUNT_CLOCK_SKEW_MS } from '../../sale/index.js';
 
 /** 차례 진행 속도를 내는 창(1초 칸 수) [가정] */
@@ -209,10 +209,6 @@ function seatCountsOf(n: NoticeFields, generatedAtMs: number): Pick<QueueStateBo
   return { remainingSeats: left, avgTicketsPerOrder: ok ? avg : DEFAULT_AVG_TICKETS_PER_ORDER };
 }
 
-/** 그 회차 좌석맵 파일의 경로(docs/frontend.md §4.2.2). 회차 ID나 판 번호가 없으면 없다 */
-const seatmapPathOf = (eventId: string | undefined, schedule: EventSchedule): string | undefined =>
-  eventId !== undefined && schedule.layoutVersion !== undefined ? `/v1/events/${encodeURIComponent(eventId)}/seatmap-layouts/${schedule.layoutVersion}.json` : undefined;
-
 /** 회차의 모든 구간 파일. 구간 0부터 seq가 든 구간(seq가 0이면 구간 0) 뒤 AHEAD_SEGMENTS 구간까지. eventId는 좌석맵 경로에 쓴다(없으면 그 칸을 뺀다) */
 export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, generatedAtMs: number, platform: PlatformNotice = {}, eventId?: string): StateFile[] {
   const lastSegment = s.seq >= 1 ? segmentOf(s.seq) : 0;
@@ -228,7 +224,7 @@ export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, gener
   const soldOutTiers = [...(notice.soldOutTiers ?? [])];
   const banner = notice.banner || platform.banner;
   const admissionPaused = s.admit?.paused === true && (s.admit.untilMs === null || generatedAtMs < s.admit.untilMs);
-  const seatmapLayoutPath = seatmapPathOf(eventId, schedule);
+  const seatmapLayoutPath = eventId === undefined ? undefined : seatmapLayoutPathOf(eventId, schedule);
   const seatCounts = seatCountsOf(notice, generatedAtMs);
   const steps = s.calls
     // 경계 뒤 읽기 전에 일어난 전진도 serving에 들어 있으므로 위쪽은 자르지 않는다

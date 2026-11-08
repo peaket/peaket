@@ -87,6 +87,10 @@ export interface EventSchedule {
   layoutVersion?: number;
 }
 
+/** 그 회차 좌석맵 파일의 경로(docs/frontend.md §4.2.2, 대기 상태 파일과 입장 확정 응답이 같은 값을 쓴다). 판 번호가 없으면 없다 */
+export const seatmapLayoutPathOf = (eventId: string, schedule: Pick<EventSchedule, 'layoutVersion'>): string | undefined =>
+  schedule.layoutVersion !== undefined ? `/v1/events/${encodeURIComponent(eventId)}/seatmap-layouts/${schedule.layoutVersion}.json` : undefined;
+
 /** 대기열 Redis를 잠시 쓸 수 없다(마감 초과·연결 끊김·클러스터 재구성·장애 전환 중). 받는 층이 503과 Retry-After로 답한다 */
 export class QueueStoreUnavailable extends Error {
   constructor(cause?: unknown) {

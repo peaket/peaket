@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
-import { type EventSchedules, keepUntilOf, type QueueTokens, QueueStoreUnavailable, REASONS, saleEndOf } from '../../entry/index.js';
+import { type EventSchedules, keepUntilOf, type QueueTokens, QueueStoreUnavailable, REASONS, saleEndOf, seatmapLayoutPathOf } from '../../entry/index.js';
 import { ETA_MAX_AGE_MS, ETA_MAX_SEC } from '../domain/admission.js';
 import { ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, type AdmissionSignals, type AdmissionStore, type AdmissionTokens } from '../domain/ports.js';
 import { AdmissionError } from './admission-error.js';
@@ -28,7 +28,7 @@ export interface ConfirmInput {
 
 /** 200 본문(openapi AdmissionResult) */
 export type ConfirmResult =
-  | { status: 'ADMITTED'; admissionToken: string; purchaseSessionExpiresAt: string; serverTimeMs: number; verificationReason: null; serverEcdhPublicKey?: Record<string, string> }
+  | { status: 'ADMITTED'; admissionToken: string; purchaseSessionExpiresAt: string; serverTimeMs: number; verificationReason: null; seatmapLayoutPath?: string; serverEcdhPublicKey?: Record<string, string> }
   | { status: 'SOON'; retryAfterSeconds: number; serverTimeMs: number; verificationReason: null }
   | { status: 'NOT_YET'; retryAfterMs: number; serverTimeMs: number; verificationReason: null }
   | { status: 'VERIFYING'; verificationReason: string | null; serverTimeMs: number };
@@ -124,7 +124,8 @@ export class ConfirmAdmission {
         const ecdh = this.signer.serverEcdhPublicKey();
         // 입장 토큰의 exp(구매 세션이 끝나는 가장 늦은 때)를 화면이 토큰을 읽지 않고 알게 싣는다(BAS-042, ADR-0214 결정 8)
         const purchaseSessionExpiresAt = new Date(expiresAtMs).toISOString();
-        return { status: 'ADMITTED', admissionToken: token, purchaseSessionExpiresAt, serverTimeMs: now, verificationReason: null, ...(ecdh ? { serverEcdhPublicKey: ecdh } : {}) };
+        const seatmapLayoutPath = seatmapLayoutPathOf(i.eventId, schedule);
+        return { status: 'ADMITTED', admissionToken: token, purchaseSessionExpiresAt, serverTimeMs: now, verificationReason: null, ...(ecdh ? { serverEcdhPublicKey: ecdh } : {}), ...(seatmapLayoutPath ? { seatmapLayoutPath } : {}) };
       }
       await this.#release(i, claimed, hash, fresh, saleEnd);
       claimed = [];

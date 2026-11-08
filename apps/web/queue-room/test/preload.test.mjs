@@ -10,6 +10,10 @@ const REC = { preverifyToken: 'pv', ticket: { queueTicket: 'qt', seq: 1000, gene
 test('SCR-008 좌석맵 경로 검사: 이 회차의 /v1/events/{id}/seatmap-layouts/{이름}.json 같은 출처 경로만(ASVS 1.2.2)', () => {
   assert.equal(seatmapPath('e1', LAYOUT), LAYOUT);
   assert.equal(seatmapPath('e 1', '/v1/events/e%201/seatmap-layouts/1.json'), '/v1/events/e%201/seatmap-layouts/1.json');
+  // 판 번호는 계약(openapi SeatMapLayout.layoutVersion, 1 ~ 2^32 − 1)과 같다
+  assert.equal(seatmapPath('e1', '/v1/events/e1/seatmap-layouts/4294967295.json'), '/v1/events/e1/seatmap-layouts/4294967295.json');
+  assert.equal(seatmapPath('e1', '/v1/events/e1/seatmap-layouts/4294967296.json'), null);
+  assert.equal(seatmapPath('e1', '/v1/events/e1/seatmap-layouts/12345678901.json'), null);
   for (const bad of [
     'https://evil.example/v1/events/e1/seatmap-layouts/3.json',
     '//evil.example/v1/events/e1/seatmap-layouts/3.json',

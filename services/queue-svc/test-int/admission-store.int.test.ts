@@ -30,6 +30,7 @@ const str = (v: unknown) => (v === null || v === undefined ? null : String(v));
 async function writeSchedule(eventId: string, s: EventSchedule): Promise<void> {
   const key = k.cfg(eventId);
   await cmd(key, ['HSET', key, 'opensAtMs', String(s.opensAtMs), 'startsAtMs', String(s.startsAtMs), 'lobbyShuffle', s.lobbyShuffle ? '1' : '0', 'openBatch', s.openBatch ? '1' : '0', 'rev', '1']);
+  if (s.layoutVersion !== undefined) await cmd(key, ['HSET', key, 'layoutVersion', String(s.layoutVersion)]);
 }
 
 function harness() {

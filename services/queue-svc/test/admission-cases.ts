@@ -102,6 +102,18 @@ export function admissionCases(name: string, setup: () => Promise<AdmissionHarne
     return e as AdmissionError;
   };
 
+  test(`[${name}] Q-T64⑤ 일정 사본에 좌석맵 판이 있으면 입장 확정 응답에 그 회차의 좌석맵 파일 경로를 싣고, 없으면 그 칸을 뺀다`, async () => {
+    const a = await world({ schedule: { layoutVersion: 7 } });
+    const r = await a.confirm(a.ticket(150));
+    expect(r.status).toBe('ADMITTED');
+    if (r.status !== 'ADMITTED') return;
+    expect(r.seatmapLayoutPath).toBe(`/v1/events/${encodeURIComponent(a.eventId)}/seatmap-layouts/7.json`);
+    const b = await world();
+    const none = await b.confirm(b.ticket(150, { a: 'other-account' }), { accountId: 'other-account', pid: 'pid-other' });
+    expect(none.status).toBe('ADMITTED');
+    expect('seatmapLayoutPath' in none).toBe(false);
+  });
+
   test(`[${name}] 차례가 온 대기표는 ADMITTED와 입장 토큰(typ·iss·aud·jti·sid·event·jny·exp)을 받고, 자리·입장 수·1인 1순번 키가 남고 q:dup이 지워진다(Q-T60)`, async () => {
     const { h, eventId, ticket, confirm } = await world();
     await h.setDup(PID, eventId, `150:1:rq:${JNY}:`);

@@ -11,8 +11,8 @@ const SAFE = /^[A-Za-z0-9._~%-]+$/;
 export function seatmapPath(eventId: string, path: unknown): string | null {
   if (typeof path !== 'string') return null;
   // 판 이름은 계약의 정수 layoutVersion이다(퍼센트로 쓴 점·빗금 같은 것을 받지 않는다)
-  const m = /^\/v1\/events\/([^/?#]+)\/seatmap-layouts\/([1-9]\d{0,8})\.json$/.exec(path);
-  if (!m || !SAFE.test(m[1]!)) return null;
+  const m = /^\/v1\/events\/([^/?#]+)\/seatmap-layouts\/([1-9]\d{0,9})\.json$/.exec(path);
+  if (!m || !SAFE.test(m[1]!) || Number(m[2]) > 4_294_967_295) return null;
   return m[1] === encodeURIComponent(eventId) ? path : null;
 }
 
