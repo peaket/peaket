@@ -22,7 +22,8 @@ test('PEAKET_TEST_REPORT가없으면아무것도바꾸지않고_있으면화면�
 
 test('저장소의vitest설정은모두testReport를쓴다_새설정이빠뜨리면그패키지태그가조용히미실행이된다', () => {
   const root = fileURLToPath(new URL('../../../', import.meta.url));
-  const files = execFileSync('git', ['ls-files', '*vitest*.config.*'], { cwd: root, encoding: 'utf8' })
+  // CI 컨테이너는 저장소 소유자와 실행 사용자가 달라 git이 'dubious ownership'으로 멈춘다. 읽기 한 번이라 이 호출에만 허용한다
+  const files = execFileSync('git', ['-c', 'safe.directory=*', 'ls-files', '*vitest*.config.*'], { cwd: root, encoding: 'utf8' })
     .split(/\r?\n/)
     .map((x) => x.trim())
     .filter(Boolean);

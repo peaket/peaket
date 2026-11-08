@@ -469,12 +469,14 @@ test('I-T75_PostgreSQL에서_병합확정은대표계정의다른세션을LOGIN_
     "select topic, msg_key, payload from outbox where msg_key = any($1::text[]) and topic in ('control.sessions-terminated', 'identity.accounts-merged') order by seq",
     [[a.accountId, b.accountId]],
   );
-  expect(rows.map((x) => [x.topic, (JSON.parse(x.payload.toString()) as { sessionId?: string; reason?: string }).reason ?? null, (JSON.parse(x.payload.toString()) as { sessionId?: string }).sessionId ?? null]).sort((x, y) => (x[0] === y[0] ? 0 : x[0]! < y[0]! ? -1 : 1))).toEqual(
+  // 세션 종료 사건끼리의 차례는 정하지 않았다(UPDATE … RETURNING의 행 차례). 병합 사건이 마지막인지만 아래에서 본다
+  const byTopicThenReason = (x: (string | null)[], y: (string | null)[]) => `${x[0]}|${x[1]}`.localeCompare(`${y[0]}|${y[1]}`);
+  expect(rows.map((x) => [x.topic, (JSON.parse(x.payload.toString()) as { sessionId?: string; reason?: string }).reason ?? null, (JSON.parse(x.payload.toString()) as { sessionId?: string }).sessionId ?? null]).sort(byTopicThenReason)).toEqual(
     [
       ['control.sessions-terminated', 'MERGED', b.sessionId],
       ['control.sessions-terminated', 'LOGIN_METHOD_CHANGED', phone.sessionId],
       ['identity.accounts-merged', null, null],
-    ].sort((x, y) => (x[0] === y[0] ? 0 : x[0]! < y[0]! ? -1 : 1)),
+    ].sort(byTopicThenReason),
   );
   // 병합 사건이 마지막이다
   expect(rows.at(-1)!.topic).toBe('identity.accounts-merged');
