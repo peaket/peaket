@@ -2,6 +2,7 @@
 // queue-svc를 단순하게 흉내 낸 모형이다: 진입한 차례대로 순번을 주고, serving은 판매 중일 때만 queueRate(1초에 지나는 번호)로 나아간다.
 // 운영·CI에서는 쓰지 않는다(ADR-0199 결정 2). 상태 바꾸기는 /__mock/state의 queue* 칸이다(scripts/mock-api.mjs 머리 주석).
 import { createHash, randomUUID } from 'node:crypto';
+import { mockAdmissionToken } from './seatmap.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SEGMENT = 1000;
@@ -277,7 +278,7 @@ export function createQueueMock({ now, state, schedule = () => null }) {
             generatedAtMs: Math.floor(now() / 1000) * 1000,
             pollHintMs: 0,
             ...(seats === undefined ? {} : { remainingSeats: seats, avgTicketsPerOrder: 2 }),
-            seatmapLayoutPath: `/v1/events/${eventId}/seatmap-layouts/1.json`,
+            seatmapLayoutPath: `/v1/events/${eventId}/seatmap-layouts/2.json`,
           },
           undefined,
           { 'cache-control': 'public, max-age=1, stale-while-revalidate=2', ...(state.queueStateRetryAfter ? { 'retry-after': state.queueStateRetryAfter } : {}) },
@@ -318,10 +319,10 @@ export function createQueueMock({ now, state, schedule = () => null }) {
           e.lastAdmission = b;
           return send(200, {
             status: 'ADMITTED',
-            admissionToken: `adm.${randomUUID()}`,
+            admissionToken: mockAdmissionToken(randomUUID(), eventId, now()),
             purchaseSessionExpiresAt: new Date(now() + 45 * 60_000).toISOString(),
             serverEcdhPublicKey: { kty: 'EC', crv: 'P-256', x: 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU', y: 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0', kid: 'mock-ecdh-1' },
-            seatmapLayoutPath: `/v1/events/${eventId}/seatmap-layouts/1.json`,
+            seatmapLayoutPath: `/v1/events/${eventId}/seatmap-layouts/2.json`,
             serverTimeMs: now(),
           });
         });

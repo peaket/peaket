@@ -4,6 +4,7 @@ import { SeatMapEngine, type BitmapFactory } from './engine';
 import type { SeatMapColumnsFile } from './layout';
 import type { Ctx2D } from './paint';
 import { FromWorker, ToWorker } from './protocol';
+import { decodeSnapshot } from './wire';
 
 export interface Host {
   post(m: FromWorker, transfer?: Transferable[]): void;
@@ -15,15 +16,66 @@ export interface Host {
 
 type Canvas = { width: number; height: number };
 
+/** 파일·스냅샷 요청의 HTTP 오류(화면이 상태로 다음 동작을 고른다) */
+class FetchFailed extends Error {
+  readonly source: 'layout' | 'snapshot';
+  readonly status: number;
+  readonly problem: string | undefined;
+  readonly retryAfter: number | undefined;
+  constructor(source: 'layout' | 'snapshot', status: number, problem?: string, retryAfter?: number) {
+    super(`${source === 'layout' ? '좌석맵 파일' : '좌석 스냅샷'} ${status}`);
+    this.source = source;
+    this.status = status;
+    this.problem = problem;
+    this.retryAfter = retryAfter;
+  }
+}
+
+/** 응답 → FetchFailed(문제 유형은 type 주소의 끝, Retry-After는 초만 읽는다) */
+async function failed(source: 'layout' | 'snapshot', res: Response): Promise<FetchFailed> {
+  let problem: string | undefined;
+  if ((res.headers.get('content-type') ?? '').includes('json')) {
+    try {
+      const t = ((await res.json()) as { type?: unknown }).type;
+      if (typeof t === 'string') problem = t.split('/').filter(Boolean).pop();
+    } catch {
+      /* 본문을 읽지 못해도 상태로 가른다 */
+    }
+  }
+  const ra = Number(res.headers.get('retry-after'));
+  return new FetchFailed(source, res.status, problem, res.headers.has('retry-after') && Number.isFinite(ra) && ra >= 0 ? ra : undefined);
+}
+
+/** 읽기 요청 시간 제한(docs/frontend.md §4.1 '시간 초과' 읽기 10초) */
+const READ_TIMEOUT_MS = 10_000;
+const timeoutSignal = (): AbortSignal => AbortSignal.timeout(READ_TIMEOUT_MS);
+
+/** 좌석맵 파일 주소의 판 번호만 바꾼 주소(…/{layoutVersion}.json). 그 꼴이 아니면 undefined */
+function layoutUrlAt(url: string, version: number): string | undefined {
+  const m = /\/\d+\.json(?=$|[?#])/.exec(url);
+  return m ? `${url.slice(0, m.index)}/${version}.json${url.slice(m.index + m[0].length)}` : undefined;
+}
+
 /** 메시지 하나를 처리하는 함수를 만든다(Worker와 메인 스레드 대체가 함께 쓴다) */
 export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTMLCanvasElement) => Ctx2D, bitmaps?: BitmapFactory) {
   let engine: SeatMapEngine | null = null;
   let canvas: Canvas | null = null;
   let lastView = '';
+  /** 로딩 중에 바뀐 화면 크기(엔진을 만들 때 쓴다) */
+  let pendingViewport: { w: number; h: number; dpr: number } | null = null;
+  /** 엔진이 생기기 전에 온 등급 차례·이름 */
+  let pendingTiers: { tierRank?: string[]; tierNames?: Record<string, string> } | null = null;
+  /** 기다리는 그리기(끌기·확대 메시지가 몰려도 프레임마다 한 번만 그린다, docs/frontend.md §3.5 '그리기') */
+  let frame: Promise<void> | null = null;
+  const drawSoon = (): Promise<void> =>
+    (frame ??= host.nextFrame().then(() => {
+      frame = null;
+      draw();
+    }));
   /** 단계·배율이 바뀌었으면 view를 알린다 */
   const notifyView = () => {
     if (!engine) return;
-    const v = { type: 'view' as const, level: engine.level(), zoom: Math.round(engine.zoom() * 1000) / 1000, selectable: engine.selectable(), camera: { ...engine.cam } };
+    const v = { type: 'view' as const, level: engine.level(), zoom: Math.round(engine.zoom() * 1000) / 1000, maxZoom: Math.round(engine.maxZoom() * 1000) / 1000, selectable: engine.selectable(), camera: { ...engine.cam } };
     const key = JSON.stringify(v);
     if (key !== lastView) {
       lastView = key;
@@ -36,7 +88,12 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
     engine.draw();
     notifyView();
   };
-  const fail = (e: unknown) => host.post({ type: 'error', message: String((e as Error)?.message ?? e) });
+  const fail = (e: unknown) =>
+    host.post({
+      type: 'error',
+      message: String((e as Error)?.message ?? e),
+      ...(e instanceof FetchFailed ? { source: e.source, status: e.status, ...(e.problem ? { problem: e.problem } : {}), ...(e.retryAfter !== undefined ? { retryAfter: e.retryAfter } : {}) } : {}),
+    });
   const size = (w: number, h: number, dpr: number) => {
     if (!canvas) return;
     canvas.width = Math.round(w * dpr);
@@ -58,16 +115,37 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
           if (m.admission.ephemeralKey) headers['X-Client-Ephemeral-Key'] = m.admission.ephemeralKey;
         }
         const [layoutRes, snapRes] = await Promise.all([
-          host.fetch(m.layoutUrl, { credentials: 'omit' }),
-          m.snapshotUrl ? host.fetch(m.snapshotUrl, { credentials: 'include', headers, cache: 'no-store' }) : Promise.resolve(null),
+          host.fetch(m.layoutUrl, { credentials: 'omit', signal: timeoutSignal() }),
+          m.snapshotUrl ? host.fetch(m.snapshotUrl, { credentials: 'include', headers, cache: 'no-store', signal: timeoutSignal() }) : Promise.resolve(null),
         ]);
-        if (!layoutRes.ok) throw new Error(`좌석맵 파일 ${layoutRes.status}`);
-        if (snapRes && !snapRes.ok) throw new Error(`좌석 스냅샷 ${snapRes.status}`);
-        const file = (await layoutRes.json()) as SeatMapColumnsFile;
+        // 스냅샷을 먼저 본다: 401·403은 예매 시간이 끝난 것이라 좌석맵 파일 오류보다 앞선다
+        if (snapRes && !snapRes.ok) throw await failed('snapshot', snapRes);
+        if (!layoutRes.ok) throw await failed('layout', layoutRes);
+        let file = (await layoutRes.json()) as SeatMapColumnsFile;
+        const snapBytes = snapRes ? await snapRes.arrayBuffer() : undefined;
+        // 스냅샷의 판이 받은 좌석맵과 다르면 그 판의 파일을 한 번 다시 받는다(§4.4.2). 그래도 다르면 엔진이 오류로 알린다
+        if (snapBytes) {
+          const want = decodeSnapshot(snapBytes).layoutVersion;
+          const again = want === file.layoutVersion ? undefined : layoutUrlAt(m.layoutUrl, want);
+          if (again) {
+            const res = await host.fetch(again, { credentials: 'omit', signal: timeoutSignal() });
+            if (!res.ok) throw await failed('layout', res);
+            file = (await res.json()) as SeatMapColumnsFile;
+          }
+        }
         // 엔진은 파일을 다 받은 뒤에 만든다(그 전에 온 카메라·고르기는 무시한다)
         engine?.cache.clear();
-        const e = new SeatMapEngine({ ctx, width: m.width, height: m.height, dpr: m.dpr, theme: m.theme, bitmaps, tierRank: m.tierRank });
-        e.load(file, snapRes ? await snapRes.arrayBuffer() : undefined);
+        const e = new SeatMapEngine({
+          ctx,
+          width: pendingViewport?.w ?? m.width,
+          height: pendingViewport?.h ?? m.height,
+          dpr: pendingViewport?.dpr ?? m.dpr,
+          theme: m.theme,
+          bitmaps,
+          tierRank: pendingTiers?.tierRank ?? m.tierRank,
+          tierNames: pendingTiers?.tierNames ?? m.tierNames,
+        });
+        e.load(file, snapBytes);
         engine = e;
         lastView = '';
         engine.draw();
@@ -84,7 +162,11 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
         canvas = null;
         return;
       }
-      if (m.type === 'viewport') size(m.w, m.h, m.dpr);
+      if (m.type === 'viewport') {
+        size(m.w, m.h, m.dpr);
+        if (!engine) pendingViewport = { w: m.w, h: m.h, dpr: m.dpr };
+      }
+      if (m.type === 'tiers' && !engine) pendingTiers = { ...(m.tierRank ? { tierRank: m.tierRank } : {}), ...(m.tierNames ? { tierNames: m.tierNames } : {}) };
       if (!engine) return;
       switch (m.type) {
         case 'viewport':
@@ -97,6 +179,14 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
           break;
         case 'zoomBy':
           engine.zoomBy(m.factor, m.x, m.y);
+          await drawSoon();
+          break;
+        case 'pan':
+          engine.panBy(m.dx, m.dy);
+          await drawSoon();
+          break;
+        case 'tiers':
+          engine.setTiers(m.tierRank, m.tierNames);
           draw();
           break;
         case 'fit':

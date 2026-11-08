@@ -485,6 +485,50 @@ test('취소표 알림 신청(ADR-0213 결정 5): 처음 201·다시 200, 목록
   }
 });
 
+test('SCR-010 실제 배치 판(ADR-0224): 판 2·3은 계약 Zod를 지나고, 스냅샷은 입장 토큰이 있어야 하며 첫 사용에 임시 공개키가 있어야 한다', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  const event = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e04';
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    for (const v of [2, 3]) {
+      const body = await (await fetch(`${base}/v1/events/${event}/seatmap-layouts/${v}.json`)).json();
+      assert.deepEqual(GetEventSeatmapLayoutResponse.parse(body), body);
+      assert.equal(body.layoutVersion, v);
+      assert.equal(body.seatCount, 1440);
+    }
+    assert.equal((await fetch(`${base}/v1/events/${event}/seatmap-layouts/4.json`)).status, 404);
+    const url = `${base}/v1/events/${event}/seatmap-snapshot`;
+    assert.equal((await fetch(url)).status, 401);
+    assert.equal((await fetch(url, { headers: { 'x-admission-token': 'a.b.c' } })).status, 400);
+    const r = await fetch(url, { headers: { 'x-admission-token': 'a.b.c', 'x-client-ephemeral-key': 'pub' } });
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('content-type'), 'application/octet-stream');
+    assert.equal(r.headers.get('cache-control'), 'no-store');
+    const bin = Buffer.from(await r.arrayBuffer());
+    assert.equal(bin.readUInt32LE(2), 2);
+    assert.equal(bin.readUInt16LE(10), 6);
+    assert.equal(bin.length, 12 + 6 * 6 + 180);
+    // 같은 토큰의 다음 요청에는 임시 공개키가 없어도 된다
+    assert.equal((await fetch(url, { headers: { 'x-admission-token': 'a.b.c' } })).status, 200);
+    await fetch(`${base}/__mock/state?seatSnapshot=expired`);
+    assert.equal((await fetch(url, { headers: { 'x-admission-token': 'a.b.c' } })).status, 401);
+    await fetch(`${base}/__mock/state?seatSnapshot=cookie`);
+    const cookie = await fetch(url, { headers: { 'x-admission-token': 'a.b.c' } });
+    assert.equal(cookie.status, 401);
+    assert.equal((await cookie.json()).type, 'about:blank');
+    await fetch(`${base}/__mock/state?seatSnapshot=down`);
+    const down = await fetch(url, { headers: { 'x-admission-token': 'a.b.c' } });
+    assert.equal(down.status, 503);
+    assert.ok(down.headers.get('retry-after'));
+    await fetch(`${base}/__mock/state?seatSnapshot=newer`);
+    const newer = Buffer.from(await (await fetch(url, { headers: { 'x-admission-token': 'a.b.c' } })).arrayBuffer());
+    assert.equal(newer.readUInt32LE(2), 3);
+  } finally {
+    server.close();
+  }
+});
+
 test('좌석맵 파일(ADR-0216 결정 7): 대기 상태 파일이 주는 경로에 계약 모양 자리 파일을 immutable로 낸다(모르는 칸 없음), 틀린 경로는 404', async () => {
   const server = await startMockApi({ port: 0 });
   const { port } = server.address();

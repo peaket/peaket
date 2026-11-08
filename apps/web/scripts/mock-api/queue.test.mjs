@@ -69,6 +69,12 @@ test('진입 201 → 대기 상태 파일의 serving이 속도대로 나아가�
     const ok = await admit(m, { queueTicket: e.body.queueTicket });
     assert.equal(ok.body.status, 'ADMITTED');
     assert.deepEqual(CreateQueueAdmissionResponse.parse(ok.body), ok.body);
+    // 입장 토큰은 JWT 세 조각이고 본문에 jti·exp가 있다(좌석 화면의 서명기가 읽는다, ADR-0224)
+    const claims = JSON.parse(Buffer.from(ok.body.admissionToken.split('.')[1], 'base64url').toString());
+    assert.equal(ok.body.admissionToken.split('.').length, 3);
+    assert.match(claims.jti, /^[A-Za-z0-9_-]{1,64}$/);
+    assert.equal(typeof claims.exp, 'number');
+    assert.match(ok.body.seatmapLayoutPath, /\/seatmap-layouts\/2\.json$/);
     assert.ok(ok.body.admissionToken && ok.body.purchaseSessionExpiresAt && ok.body.serverEcdhPublicKey?.kty === 'EC' && ok.body.seatmapLayoutPath);
     assert.equal((await admit(m, { queueTicket: e.body.queueTicket })).body.status, 'ADMITTED', '응답을 잃고 같은 대기표로 다시 보내면 ADMITTED를 다시 준다(queue-svc와 같다)');
     assert.match((await admit(m, { queueTicket: 'nope' })).body.type, /queue-ticket-invalid$/);

@@ -7,7 +7,8 @@
 //   로비(ADR-0208): queueOpenIn(오픈까지 남은 초, 정한 순간에 고정한다. 빈 값이면 고정 자료 일정), queueLobby=normal|verify|other-device|identity|human-fail|busy|down|unauthorized,
 //   queueShuffle=normal|late|never|missing, 사전 검증(ADR-0211) queuePreverify=normal|identity|not-found|down|unauthorized, 매진 등급(ADR-0212) queueSoldOutTiers=tier-r,…
 //   검사 기록(ADR-0217): GET /__mock/requests(메서드·경로·출처·시각·끊긴 시각), logReset=1, 진입 멈춤 queueEntry=hang, 200 상태 파일 Retry-After queueStateRetryAfter=<초>
-//   좌석맵 자리 파일(ADR-0216) GET /v1/events/{회차}/seatmap-layouts/1.json(대기 상태 파일의 seatmapLayoutPath)
+//   좌석맵 파일(ADR-0216·0223) GET /v1/events/{회차}/seatmap-layouts/{1|2|3}.json(1은 8석 자리 파일, 2·3은 실제 배치). 입장 확정·대기 상태 파일은 판 2를 준다
+//   좌석 스냅샷(ADR-0224) GET /v1/events/{회차}/seatmap-snapshot: 입장 토큰 필수, 첫 사용에 임시 공개키 필수. seatSnapshot=expired(이름 있는 401)|cookie(이름 없는 401)|down(503)|newer(판 3)
 //   예매 제한(ADR-0213) restriction=none|active|overdue|fraud(GET /v1/booking-restrictions/me), 알림 신청 subscribe=normal|limit|busy|ended(422·429·410)
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
 // - 파생본 이미지 주소(/img/{이름}/{폭}.{avif|webp})에는 자리 그림(SVG)을 낸다
@@ -24,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createQueueMock, QUEUE_DEFAULTS } from './mock-api/queue.mjs';
+import { SEATMAP_VERSIONS, seatmapLayoutV, seatSnapshot } from './mock-api/seatmap.mjs';
 
 const CARDS = JSON.parse(readFileSync(new URL('./mock-api/cards.json', import.meta.url), 'utf8'));
 const KST = 9 * 60 * 60_000;
@@ -570,7 +572,9 @@ export function startMockApi({
   now = Date.now,
 } = {}) {
   const origin = `http://127.0.0.1:${port}`;
-  const state = { home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', restriction: 'none', subscribe: 'normal', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
+  /** 스냅샷을 이미 연 입장 토큰(첫 사용에만 임시 공개키가 있어야 한다) */
+  const openedSnapshots = new Set();
+  const state = { seatSnapshot: 'normal', home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', restriction: 'none', subscribe: 'normal', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
   /** queueOpenIn을 정한 순간에 고정한 오픈 시각(밀리초). 없으면 고정 자료 일정 */
   let openAtOverride;
   const scheduleOf = (eventId) => {
@@ -649,7 +653,7 @@ export function startMockApi({
     const p = url.pathname;
     const unauthorized = () => send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
     if (p === '/__mock/state' && req.method === 'GET') {
-      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify', 'restriction', 'subscribe', ...Object.keys(QUEUE_DEFAULTS)])) {
+      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
         if (v !== null && (v !== '' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers' || k === 'queueStateRetryAfter')) state[k] = v;
       }
@@ -675,8 +679,26 @@ export function startMockApi({
     const layout = /^\/v1\/events\/([^/]+)\/seatmap-layouts\/(\d+)\.json$/.exec(p);
     if (layout && req.method === 'GET') {
       const known = ID.test(layout[1]) && eventDetail(origin, layout[1], new Date(now()), openAtOverride) !== undefined;
-      if (!known || layout[2] !== '1') return send(404, { type: 'about:blank', title: 'Not Found', status: 404 }, 'application/problem+json');
-      return send(200, seatmapLayout(), 'application/json; charset=utf-8', { 'cache-control': 'public, max-age=31536000, immutable' });
+      const v = Number(layout[2]);
+      if (!known || (v !== 1 && !SEATMAP_VERSIONS.includes(v))) return send(404, { type: 'about:blank', title: 'Not Found', status: 404 }, 'application/problem+json');
+      return send(200, v === 1 ? seatmapLayout() : seatmapLayoutV(v), 'application/json; charset=utf-8', { 'cache-control': 'public, max-age=31536000, immutable' });
+    }
+    // 좌석 스냅샷(docs/frontend.md §4.4.2, ADR-0224): 입장 토큰을 처음 쓰는 요청에 임시 공개키가 있어야 한다
+    const seatSnap = /^\/v1\/events\/([^/]+)\/seatmap-snapshot$/.exec(p);
+    if (seatSnap && req.method === 'GET') {
+      const token = req.headers['x-admission-token'];
+      const expired = () => send(401, { type: 'https://peaket.example/problems/admission-token-invalid', title: '입장 토큰이 유효하지 않습니다', status: 401 }, 'application/problem+json');
+      if (!token) return expired();
+      if (state.seatSnapshot === 'expired') return expired();
+      if (state.seatSnapshot === 'cookie') return unauthorized();
+      if (state.seatSnapshot === 'down') return send(503, { type: 'https://peaket.example/problems/seat-store-unavailable', title: '잠시 후 다시 시도해 주세요', status: 503 }, 'application/problem+json', { 'retry-after': '1' });
+      if (!openedSnapshots.has(token)) {
+        if (!req.headers['x-client-ephemeral-key']) return send(400, { type: 'about:blank', title: 'Bad Request', status: 400 }, 'application/problem+json');
+        openedSnapshots.add(token);
+      }
+      res.writeHead(200, { ...cors, 'content-type': 'application/octet-stream', 'cache-control': 'no-store' });
+      res.end(seatSnapshot(state.seatSnapshot === 'newer' ? 3 : 2));
+      return;
     }
     const ev = /^\/v1\/events\/([^/]+)$/.exec(p);
     if (ev && req.method === 'GET') {

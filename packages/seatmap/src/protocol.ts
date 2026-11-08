@@ -1,7 +1,7 @@
 // 메인 ↔ 좌석맵 Worker 메시지(docs/frontend.md §4.7 'Worker 메시지', BUILD_ORDER HOT-110). 받는 쪽이 Zod로 검사한다.
 // 메시지 종류는 type 칸이고, 누르기 종류는 pointer의 kind 칸이다(§4.7의 pointer{type}는 이 kind다).
 // 지금 있는 것(HOT-110·HOT-120): 첫 그림·카메라([+]·[−]·[전체 보기]·구역으로 확대)·누르기·고르기·테마, 단계 알림(view).
-// 구역 구독·홀드 요청·연결 상태·목록 열기는 좌석 화면을 잇는 HOT-350에서 더한다.
+// 구역 구독·연결 상태는 HOT-357, 홀드는 HOT-353, 목록 열기는 HOT-354에서 더한다.
 import { z } from 'zod';
 
 const int = z.number().int();
@@ -20,6 +20,8 @@ export const ToWorker = z.discriminatedUnion('type', [
       admission: Admission.optional(),
       /** 등급 ID를 가격이 높은 차례로(회차 가격표). 없으면 좌석맵 파일 tiers 차례 */
       tierRank: z.array(z.string().min(1)).max(16).optional(),
+      /** 등급 ID → 화면 글자(회차 가격표, 예 'R석'). 없으면 좌석맵 파일의 ID를 그대로 쓴다 */
+      tierNames: z.record(z.string(), z.string().min(1).max(32)).optional(),
       /** 화면 크기(CSS px). 캔버스 화소 크기는 이 값 × dpr로 Worker가 맞춘다 */
       width: z.number().positive().max(16_384),
       height: z.number().positive().max(16_384),
@@ -31,6 +33,10 @@ export const ToWorker = z.discriminatedUnion('type', [
   z.object({ type: z.literal('camera'), zoom: z.number().positive().max(1_000), x: z.number().min(-1e7).max(1e7), y: z.number().min(-1e7).max(1e7) }),
   /** [+]·[−]·휠·핀치. x·y(화면 점, CSS px)를 그대로 두고 factor배(없으면 가운데) */
   z.object({ type: z.literal('zoomBy'), factor: z.number().positive().max(100), x: z.number().min(-16_384).max(16_384).optional(), y: z.number().min(-16_384).max(16_384).optional() }),
+  /** 등급 차례·이름을 나중에 준다(회차 가격표가 첫 그림보다 늦어도 그림을 늦추지 않는다). 엔진이 생기기 전에 오면 만들 때 쓴다 */
+  z.object({ type: z.literal('tiers'), tierRank: z.array(z.string().min(1)).max(16).optional(), tierNames: z.record(z.string(), z.string().min(1).max(32)).optional() }),
+  /** 끌기(화면 px만큼 옮긴다). 배치 밖 빈 곳이 보이지 않게 엔진이 묶는다 */
+  z.object({ type: z.literal('pan'), dx: z.number().min(-16_384).max(16_384), dy: z.number().min(-16_384).max(16_384) }),
   /** [전체 보기] */
   z.object({ type: z.literal('fit') }),
   /** 구역으로 확대(목록·등급 칩에서 구역을 고를 때) */
@@ -61,10 +67,13 @@ export const FromWorker = z.discriminatedUnion('type', [
     type: z.literal('view'),
     level: z.enum(['loading', 'overview', 'seats']),
     zoom: z.number().positive(),
+    /** 더 확대할 수 없는 배율(화면이 [+]를 막는다) */
+    maxZoom: z.number().positive(),
     selectable: z.boolean(),
     /** 세계 좌표(cm) → 화면(CSS px) = 세계 × scale + t. 화면이 좌석 팝오버 같은 겹침을 좌석 위에 둘 때 쓴다 */
     camera: z.object({ scale: z.number().positive(), tx: z.number(), ty: z.number() }),
   }),
-  z.object({ type: z.literal('error'), message: z.string() }),
+  /** source·status·problem·retryAfter: 파일·스냅샷 요청이 HTTP 오류로 끝났을 때(화면이 다음 동작을 고른다, HOT-350 ①, ADR-0224 결정 5) */
+  z.object({ type: z.literal('error'), message: z.string(), source: z.enum(['layout', 'snapshot']).optional(), status: int.optional(), problem: z.string().optional(), retryAfter: z.number().nonnegative().optional() }),
 ]);
 export type FromWorker = z.infer<typeof FromWorker>;

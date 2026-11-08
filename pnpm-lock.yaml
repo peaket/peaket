@@ -419,6 +419,9 @@ importers:
       '@peaket/ds':
         specifier: workspace:*
         version: link:../../packages/ds
+      '@peaket/seatmap':
+        specifier: workspace:*
+        version: link:../../packages/seatmap
       '@tanstack/react-query':
         specifier: 5.105.0
         version: 5.105.0(@types/react@19.3.0)(react@19.3.1)

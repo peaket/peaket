@@ -26,6 +26,8 @@ export interface CreateOptions {
   admission?: { token: string; ephemeralKey?: string };
   /** 등급 ID를 가격이 높은 차례로(회차 가격표) */
   tierRank?: string[];
+  /** 등급 ID → 화면 글자(회차 가격표) */
+  tierNames?: Record<string, string>;
   theme: 'light' | 'dark';
   onMessage(m: FromWorker): void;
   /** Worker를 만드는 함수(번들러가 정한 주소, 예: new Worker(new URL('@peaket/seatmap/worker', import.meta.url), { type: 'module' })) */
@@ -56,7 +58,8 @@ export function createSeatMap(o: CreateOptions): SeatMapClient {
   o = { ...o, layoutUrl: absoluteUrl(o.layoutUrl), snapshotUrl: o.snapshotUrl === undefined ? undefined : absoluteUrl(o.snapshotUrl) };
   const width = o.canvas.clientWidth || o.canvas.width;
   const height = o.canvas.clientHeight || o.canvas.height;
-  const dpr = globalThis.devicePixelRatio ?? 1;
+  // 메시지 검사 범위 안으로 자른다(브라우저 500% 확대 × 2배 화면이면 8을 넘는다, 저시력 사용자가 지도를 잃지 않게)
+  const dpr = Math.min(8, globalThis.devicePixelRatio ?? 1);
   const recv = (data: unknown) => {
     const m = FromWorker.safeParse(data);
     o.onMessage(m.success ? m.data : { type: 'error', message: `Worker 메시지가 틀렸다: ${m.error.issues[0]?.message}` });
@@ -66,7 +69,7 @@ export function createSeatMap(o: CreateOptions): SeatMapClient {
     worker.onmessage = (e) => recv(e.data);
     worker.onerror = (e) => o.onMessage({ type: 'error', message: e.message || 'Worker 오류' });
     const offscreen = o.canvas.transferControlToOffscreen();
-    worker.postMessage({ type: 'init', canvas: offscreen, layoutUrl: o.layoutUrl, snapshotUrl: o.snapshotUrl, admission: o.admission, tierRank: o.tierRank, width, height, dpr, theme: o.theme } satisfies ToWorker, [offscreen]);
+    worker.postMessage({ type: 'init', canvas: offscreen, layoutUrl: o.layoutUrl, snapshotUrl: o.snapshotUrl, admission: o.admission, tierRank: o.tierRank, tierNames: o.tierNames, width, height, dpr, theme: o.theme } satisfies ToWorker, [offscreen]);
     return { mode: 'worker', send: (m) => worker.postMessage(m), dispose: () => (worker.postMessage({ type: 'dispose' }), worker.terminate()) };
   }
   // 대체: 메인 스레드에서 같은 처리기를 돈다(캔버스 화소 크기도 처리기가 맞춘다)
@@ -80,6 +83,6 @@ export function createSeatMap(o: CreateOptions): SeatMapClient {
     (canvas) => (canvas as HTMLCanvasElement).getContext('2d') as unknown as Ctx2D,
     typeof OffscreenCanvas === 'function' ? offscreenBitmaps : elementBitmaps(),
   );
-  void handle({ type: 'init', canvas: o.canvas, layoutUrl: o.layoutUrl, snapshotUrl: o.snapshotUrl, admission: o.admission, tierRank: o.tierRank, width, height, dpr, theme: o.theme });
+  void handle({ type: 'init', canvas: o.canvas, layoutUrl: o.layoutUrl, snapshotUrl: o.snapshotUrl, admission: o.admission, tierRank: o.tierRank, tierNames: o.tierNames, width, height, dpr, theme: o.theme });
   return { mode: 'main-thread', send: (m) => void handle(m), dispose: () => void handle({ type: 'dispose' }) };
 }

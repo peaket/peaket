@@ -45,6 +45,8 @@ export interface EngineOptions {
   bitmaps?: BitmapFactory;
   /** 등급 ID를 가격이 높은 차례로(화면이 회차 가격표로 정한다). 없으면 좌석맵 파일 tiers 차례 */
   tierRank?: readonly string[];
+  /** 등급 ID → 화면 글자(회차 가격표). 없으면 파일의 ID를 그대로 쓴다 */
+  tierNames?: Readonly<Record<string, string>>;
 }
 
 export class SeatMapEngine {
@@ -64,7 +66,7 @@ export class SeatMapEngine {
   tierLabel(s: number): string {
     const ids: number[] = [];
     for (let t = 0; t < 16; t++) if ((this.tierMask[s]! >> t) & 1) ids.push(t);
-    return ids.sort((a, b) => this.rank[a]! - this.rank[b]! || a - b).map((t) => this.L.file.tiers[t]).join('·');
+    return ids.sort((a, b) => this.rank[a]! - this.rank[b]! || a - b).map((t) => { const id = this.L.file.tiers[t]!; return this.o.tierNames?.[id] ?? id; }).join('·');
   }
   /** 스냅샷을 받았는가(받기 전은 loading) */
   hasState = false;
@@ -76,18 +78,22 @@ export class SeatMapEngine {
     this.o = { ...o };
   }
 
-  load(file: SeatMapColumnsFile, snapshot?: ArrayBuffer | Uint8Array): void {
-    this.L = decodeLayout(file);
-    this.grids = buildGrids(this.L);
-    this.tiers = sectionTiers(this.L);
-    this.tierMask = sectionTierMask(this.L);
-    // 등급 색인 → 가격 차례(0이 가장 비싸다)
+  /** 등급 색인 → 가격 차례(0이 가장 비싸다) */
+  private applyRank(): void {
     const rank = this.o.tierRank;
     this.rank = Uint8Array.from(this.L.file.tiers, (t, i) => {
       if (!rank) return i;
       const r = rank.indexOf(t);
       return r < 0 ? 255 : r;
     });
+  }
+
+  load(file: SeatMapColumnsFile, snapshot?: ArrayBuffer | Uint8Array): void {
+    this.L = decodeLayout(file);
+    this.grids = buildGrids(this.L);
+    this.tiers = sectionTiers(this.L);
+    this.tierMask = sectionTierMask(this.L);
+    this.applyRank();
     this.state = new Uint8Array(this.L.N);
     this.mine = new Uint8Array(Math.ceil(this.L.N / 8));
     this.versions = { seatEpoch: 0, version: new Uint32Array(this.L.S) };
@@ -137,6 +143,11 @@ export class SeatMapEngine {
     return this.cam.scale / this.fitScale();
   }
 
+  /** 더 확대할 수 없는 배율(전체가 맞는 배율 대비) */
+  maxZoom(): number {
+    return this.maxScale() / this.fitScale();
+  }
+
   private maxScale(): number {
     return MAX_SEAT_PX / (SEAT_CM * 0.8);
   }
@@ -172,6 +183,20 @@ export class SeatMapEngine {
     const wx = (sx - this.cam.tx) / this.cam.scale;
     const wy = (sy - this.cam.ty) / this.cam.scale;
     this.place(this.cam.scale * factor, wx, wy, sx, sy);
+  }
+
+  /** 등급 차례·이름을 바꾼다(회차 가격표가 첫 그림보다 늦게 올 때). 구역 면 색이 바뀌므로 비트맵을 버린다 */
+  setTiers(tierRank?: readonly string[], tierNames?: Readonly<Record<string, string>>): void {
+    if (tierRank) this.o.tierRank = tierRank;
+    if (tierNames) this.o.tierNames = tierNames;
+    this.applyRank();
+    this.cache.clear();
+  }
+
+  /** 끌기: 화면 px만큼 옮긴다(배율은 그대로, place가 배치 밖 빈 곳이 보이지 않게 묶는다) */
+  panBy(dx: number, dy: number): void {
+    const { scale, tx, ty } = this.cam;
+    this.place(scale, -tx / scale, -ty / scale, dx, dy);
   }
 
   /** 구역 하나를 화면에 맞춘다(그 구역이 화면 폭의 1/3 이상이 되어 좌석 단계로 간다) */

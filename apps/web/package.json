@@ -17,6 +17,7 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "@peaket/ds": "workspace:*",
+    "@peaket/seatmap": "workspace:*",
     "zustand": "^5.0.16",
     "pretendard": "^1.3.9",
     "@grpc/grpc-js": "1.14.6",
