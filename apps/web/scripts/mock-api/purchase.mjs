@@ -89,6 +89,24 @@ export function createPurchaseMock({ now, state }) {
         if (!found || Date.parse(found.expiresAt) <= now()) return (io.problem(404, 'not-found', '찾을 수 없습니다'), true);
         return (io.send(200, found), true);
       }
+      const payStatus = /^\/v1\/orders\/([^/]+)\/payment-status$/.exec(p);
+      if (payStatus && req.method === 'GET') {
+        const { send, problem } = io;
+        const orderId = payStatus[1];
+        const mode = state.pay;
+        if (mode === 'gone' || ![...orders.values()].some((o) => o.order.orderId === orderId)) return (problem(404, 'not-found', '찾을 수 없습니다'), true);
+        if (mode === 'expired') return (problem(409, 'order-expired', '주문이 끝났습니다'), true);
+        const rec = accepted.get(orderId);
+        if (!rec) return (problem(409, 'payment-not-accepted', '결제를 접수하지 않았습니다'), true);
+        if (mode === 'unauthorized') return (io.send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json'), true);
+        const status = { checking: { status: 'RESERVED' }, issuing: { status: 'APPROVED', issueDelayed: true }, unknown: { status: 'UNKNOWN' }, compensated: { status: 'COMPENSATED' }, declined: { status: 'FAILED', reason: 'CARD_DECLINED' }, taken: { status: 'FAILED', reason: 'SEAT_TAKEN' }, deposit: { status: 'AWAITING_DEPOSIT', virtualAccount: { bank: '피켓은행', accountNumber: '123-45-678', dueAt: new Date(now() + 3_600_000).toISOString() } } }[mode];
+        rec.polls = (rec.polls ?? 0) + 1;
+        return (send(200, status ?? (rec.polls > 1 ? { status: 'CONFIRMED', pg: rec.pg } : { status: 'ACCEPTED', pg: rec.pg })), true);
+      }
+      if (p === '/v1/tickets' && req.method === 'GET') {
+        const eventId = 'e';
+        return (io.send(200, { items: [...accepted.keys()].map((id) => ({ ticketId: `t-${id}`, eventId: state.ticketEvent || eventId, seatLabel: 'A구역 1열 1번', gateZone: '동문', status: 'ISSUED' })) }), true);
+      }
       const acceptance = /^\/v1\/orders\/([^/]+)\/payment-acceptance$/.exec(p);
       if (acceptance && req.method === 'POST') {
         const { send, problem } = io;
