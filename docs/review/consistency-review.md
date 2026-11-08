@@ -502,6 +502,7 @@
 | R-386 | 34660fe3의 저장소가 this.clock을 읽어 회차 조회가 500이었다(타입 검사·통합 시험 실패 상태로 푸시) | services/core-svc/src/modules/catalog/adapters/db/drizzle-catalog-repository.ts, docs/lanes/lane2.md | 생성자 인자를 필드로 두었다 | 해소 |
 | R-387 | 갈래 2 다음 할 일이 HOT-363 뒤 상태를 담지 않았다 | docs/lanes/lane2.md | 구간 1의 남은 단계와 그 선행 단계를 적었다 | 해소 |
 | R-388 | 로비 참가 토큰·입장 확정의 lobbyToken·커밋 공시·비콘 대기가 비어 있었다(PRF-060·090·110·BOT-025가 넘긴 것) | services/queue-svc(entry·admission), services/admission-ctrl(batch·leader), packages/shuffle, docs/api/openapi.yaml, packages/contracts·api-client 생성물, docs/features/queue-admission.md, docs/data.md, docs/observability.md, docs/security/secrets-and-keys.md·asvs/queue-admission.md, docs/adr/0230, docs/BUILD_ORDER.md, docs/wbs/wbs.md·wbs.csv, docs/PROGRESS.md(OPEN[27]), docs/lanes/lane3.md | 정본·ASVS 먼저 → 시험 먼저(실패 확인) → 구현 → 새 맥락 리뷰·재검토 | 수정 완료 |
+| R-390 | api-client 시험이 정본 openapi 해석에 기본 5초를 넘겨 develop CI가 실패했다(CI 42515928543) | packages/api-client/test/policy.test.ts | 시험 시간 한도 30초, 단정 그대로. 그 파일 26개 통과 | 수정 완료 |
 
 ## 4. 숫자 일치표
 

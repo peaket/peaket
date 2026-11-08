@@ -119,7 +119,8 @@ describe('요청 정책', () => {
       }
     }
     expect(found.sort()).toEqual([...T0_TEXT_PLAIN_OPERATIONS].sort());
-  });
+    // openapi 파일이 커져 몰리는 러너에서 YAML 해석이 기본 5초를 넘긴다(CI 42515928543)
+  }, 30_000);
 
   it('쿠키를 쓰는 API는 include, 대기열 파일·정적 JSON·스캐너는 omit이다', () => {
     expect(credentialsFor('api')).toBe('include');
