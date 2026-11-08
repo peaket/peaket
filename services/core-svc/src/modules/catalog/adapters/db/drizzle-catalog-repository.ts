@@ -63,9 +63,9 @@ export class DrizzleCatalogRepository implements CatalogRepository {
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
-    @Inject(CLOCK) clock: Clock,
+    @Inject(CLOCK) private readonly clock: Clock,
   ) {
-    this.idempotency = new IdempotencyStore({ clock });
+    this.idempotency = new IdempotencyStore({ clock: this.clock });
   }
 
   async findEventSummary(eventId: string): Promise<EventSummaryRow | undefined> {
