@@ -3,3 +3,4 @@ export { AdmissionLeader } from './application/admission-leader.js';
 export { LeaderMetrics } from './application/leader-metrics.js';
 export { LeaderModule, type LeaderModuleOptions } from './leader.module.js';
 export type { Elector } from './domain/ports.js';
+export { PrometheusControlInputs } from './adapters/prometheus-control-inputs.js';

@@ -4,6 +4,7 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type HotRedis, type RedisScript, redisScript } from '@peaket/platform';
 import { ADMISSION_REDIS, WAIT_REDIS } from '../../batch/index.js';
 import { BATCH_RESULT_DELAY_MS, CALLS_KEEP_MS, DISPERSAL_MS, LATE_DISPERSAL_MS, RATIO_WINDOW_MAX_MS, RATIO_WINDOW_MIN_MS, RB05_CONFIRM_WAIT_MS, SCAN_BUDGET, SOON_STALE_MS } from '../domain/plan.js';
+import { isManualFixed, MEMORY_FIELDS } from '../domain/aimd.js';
 import type { ArrivalCloseInput, ArrivalCloseResult, CloseInput, CloseResult, Control, EventPlan, LeaderStore, Rb05Confirm, Rb05Input, Rb05Result, TickInput, TickResult } from '../domain/ports.js';
 import { ARRIVAL_CLOSE_LUA, BUMP_LUA, CLOSE_LUA, RB05_CLEAR_LUA, RB05_LUA, RB05_MARK_LUA, TICK_LUA } from './leader-lua.js';
 
@@ -33,6 +34,8 @@ export const keys = {
   notice: (e: string) => `q:{event:${e}}:notice`,
   /** 진행 중인 회차 목록(queue-svc가 일정 사본을 읽을 때 넣는다, ADR-0182 결정 2) */
   events: () => 'q:{admission}:events',
+  /** 회차와 무관한 리더 상태(명령 11 autoStopped, ADR-0226 결정 7) */
+  platformCtl: () => 'q:{admission}:ctl',
 };
 
 const BUMP = redisScript(BUMP_LUA);
@@ -46,6 +49,11 @@ const RB05_CLEAR = redisScript(RB05_CLEAR_LUA);
 const str = (v: unknown): string | null => (v === null || v === undefined ? null : Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 const int = (v: string | null | undefined): number | null => (v !== null && v !== undefined && /^\d{1,16}$/.test(v) ? Number(v) : null);
 const bit = (v: unknown): 0 | 1 => (Number(v) === 1 ? 1 : 0);
+/** pgKey·pgTps는 둘 다 맞을 때만 쓴다(틀리면 결제사 상한을 걸지 않는다, ADR-0226 결정 9) */
+function pgOf(key: string | null, tps: string | null): { pgKey?: string; pgTps?: number } {
+  const t = int(tps);
+  return key && /^[A-Za-z0-9_-]{1,32}$/.test(key) && t !== null && t >= 1 ? { pgKey: key, pgTps: t } : {};
+}
 
 function fieldsOf(raw: unknown): Record<string, string> {
   if (Array.isArray(raw)) {
@@ -82,19 +90,28 @@ export class RedisLeaderStore implements LeaderStore {
     if (f.lobbyShuffle === '0' && f.openBatch === '0') return null;
     const window = f.batchWindowMs === undefined ? undefined : int(f.batchWindowMs);
     if (window === null || (window !== undefined && (window < 1 || window > 60_000))) return null;
-    return { opensAtMs, startsAtMs, lobbyShuffle: f.lobbyShuffle === '1', openBatch: f.openBatch === '1', ...(window !== undefined ? { batchWindowMs: window } : {}) };
+    const pg = pgOf(f.pgKey ?? null, f.pgTps ?? null);
+    return { opensAtMs, startsAtMs, lobbyShuffle: f.lobbyShuffle === '1', openBatch: f.openBatch === '1', ...(window !== undefined ? { batchWindowMs: window } : {}), ...pg };
   }
 
   async control(eventId: string, nowMs: number): Promise<Control> {
     const k = keys.ctl(eventId);
-    const [target, until, admitPaused, admitUntil, salePaused, suspended] = ((await this.redis.command(['HMGET', k, 'target', 'targetUntil', 'admitPaused', 'admitPausedUntil', 'paused', 'suspended'], { key: k })) as unknown[]).map(str);
+    const raw = ((await this.redis.command(['HMGET', k, 'target', 'targetUntil', 'admitPaused', 'admitPausedUntil', 'paused', 'suspended', 'aimdResumeAt', 'pgKey', 'pgTps', ...MEMORY_FIELDS], { key: k })) as unknown[]).map(str);
+    const [target, until, admitPaused, admitUntil, salePaused, suspended, resumeAt, pgKey, pgTps] = raw;
+    const memory: Record<string, string | null> = {};
+    MEMORY_FIELDS.forEach((name, i) => (memory[name] = raw[9 + i] ?? null));
     const t = int(target);
-    const u = int(until);
-    const fixed = t !== null && (u === null || nowMs < u);
+    const operator = { value: t, untilMs: int(until), resumeAtMs: int(resumeAt) };
+    const manualEndedAt = int(memory.manualEndedAt);
     // 입장 일시정지·판매 일시정지(명령 3)·판매 중지 가운데 하나라도 참이면 serving 전진을 멈춘다(ADR-0123)
     const au = int(admitUntil);
     const admit = admitPaused === '1' && (au === null || nowMs < au);
-    return { ...(fixed ? { target: t } : {}), paused: admit || salePaused === '1' || suspended === '1' };
+    return { ...(t !== null && isManualFixed(operator, manualEndedAt, nowMs) ? { target: t } : {}), paused: admit || salePaused === '1' || suspended === '1', operator, memory, ...pgOf(pgKey ?? null, pgTps ?? null) };
+  }
+
+  async platformControl(): Promise<{ autoStopped: boolean }> {
+    const k = keys.platformCtl();
+    return { autoStopped: str(await this.redis.command(['HGET', k, 'autoStopped'], { key: k })) === '1' };
   }
 
   async bump(eventId: string, gen: number, keepUntilMs: number): Promise<'OK' | 'FENCED'> {
@@ -125,11 +142,12 @@ export class RedisLeaderStore implements LeaderStore {
       RATIO_WINDOW_MIN_MS,
       RATIO_WINDOW_MAX_MS,
       i.saleStateFallback,
+      ...Object.entries(i.fields ?? {}).flat(),
     ].map(String);
     const r = (await this.redis.evalScript(TICK, ks, args)) as unknown[];
     if (str(r[0]) === 'FENCED') return { kind: 'FENCED' };
     const n = (k: number) => Number(r[k]);
-    return { kind: 'OK', serving: n(1), advanced: n(2), slots: n(3), soon: n(4), inFlight: n(5), dropped: n(6), lobbyMarked: bit(r[7]), batchMarked: bit(r[8]), batchPublished: bit(r[9]), repair: bit(r[10]), ratio: n(11) / 1000, saleState: str(r[12])! };
+    return { kind: 'OK', serving: n(1), advanced: n(2), slots: n(3), soon: n(4), inFlight: n(5), dropped: n(6), lobbyMarked: bit(r[7]), batchMarked: bit(r[8]), batchPublished: bit(r[9]), repair: bit(r[10]), ratio: n(11) / 1000, saleState: str(r[12])!, waiting: n(13) };
   }
 
   async close(i: CloseInput): Promise<CloseResult> {

@@ -4,7 +4,7 @@ import 'reflect-metadata';
 import { createHotRedis, createService, inClusterLeaseApi, LeaseElector, type LeaseApi, memoryLeaseApi, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { LocalResultFiles, minReplicasOf, TestRandomness } from './modules/batch/index.js';
-import { AdmissionLeader, LeaderMetrics } from './modules/leader/index.js';
+import { AdmissionLeader, LeaderMetrics, PrometheusControlInputs } from './modules/leader/index.js';
 
 const SERVICE = 'admission-ctrl';
 
@@ -22,6 +22,11 @@ const randomness = TestRandomness.fromEnv(process.env);
 const resultDir = process.env.PEAKET_BATCH_RESULT_DIR;
 if (!resultDir) throw new Error('PEAKET_BATCH_RESULT_DIR가 없다(묶음 결과 파일을 쓸 곳. 운영의 회차별 S3 결과 파일은 BUILD_ORDER HOT-050)');
 
+// 자동 제어 입력(클러스터 안 Prometheus, ADR-0226 결정 13). 운영에서 빠지면 조용히 자동 제어가 꺼지지 않게 시작을 실패시키고, 로컬·CI는 꺼진 채 돈다. 주소가 http(s)가 아니거나 사용자 정보가 있으면 여기서 던져 시작이 실패한다
+const promUrl = process.env.PEAKET_PROMETHEUS_URL;
+if (!promUrl && clusterUrls.length > 0) throw new Error('PEAKET_PROMETHEUS_URL이 없다(자동 제어 입력을 읽을 클러스터 Prometheus 주소)');
+const controlInputs = promUrl ? new PrometheusControlInputs({ baseUrl: promUrl }) : undefined;
+
 const redisOptions = clusterUrls.length > 0 ? { clusterUrls } : { url };
 const redis = await createHotRedis(redisOptions);
 // WAIT는 그 연결을 막으므로 복제 확인(묶음 게시 전, RB-05 뒤 ADR-0186)은 따로 연결한다. 단일 노드에서 최소 복제본 수가 0이면 기다리지 않아 필요 없다
@@ -36,9 +41,10 @@ const elector = new LeaseElector({ api: leaseApi, identity: process.env.HOSTNAME
 
 const service = await createService({
   name: SERVICE,
-  module: AppModule.register({ redis, elector, metrics, batch: { seeds: randomness, beacon: randomness, files: new LocalResultFiles(resultDir), minReplicas, ...(waitRedis ? { waitRedis } : {}) } }),
+  module: AppModule.register({ redis, elector, metrics, ...(controlInputs ? { controlInputs } : {}), batch: { seeds: randomness, beacon: randomness, files: new LocalResultFiles(resultDir), minReplicas, ...(waitRedis ? { waitRedis } : {}) } }),
 });
 metrics.register(service.metrics.registry);
+if (!controlInputs) service.logger.warn({}, '자동 제어 입력이 없어(PEAKET_PROMETHEUS_URL) AIMD를 끈 채 돈다(로컬·CI)');
 await service.listen();
 const leader = service.app.get(AdmissionLeader);
 elector.start();

@@ -98,8 +98,8 @@ return {'OK'}
 // KEYS: 1 leader, 2 serving, 3 seq, 4 removed, 5 skipped, 6 serving_log, 7 calls, 8 call_req, 9 slots, 10 soon, 11 soon_at, 12 batch_done, 13 notice, 14 ctl, 15 soon_first
 // ARGV: 1 세대, 2 목표, 3 비율 하한, 4 오는 중 창 W(ms), 5 최대 전진, 6 회차 키 수명, 7 로비 셔플, 8 묶음, 9 묶음 구간 끝(ms), 10 곧 입장 낡음(ms), 11 전진 기록 보관(ms),
 //       12 분산 창(ms), 13 늦은 게시의 분산 창(ms), 14 공개 예정 = 구간 끝 + 이 값(ms), 15 한 번에 훑는 번호 상한, 16 전진 기록 수명(판매 종료),
-//       17·18 입장 비율 창의 처음·끝(불린 뒤 ms), 19 판매 상태를 모를 때의 값
-// 돌려주는 값: {'FENCED'} 또는 {'OK', serving, 유효 전진 수, 쓰는 자리, 곧 입장, 오는 중, 뺀 곧 입장, 로비 표시, 묶음 표시, 묶음 게시, 다시 쓰기 표시, 비율(천분율), 판매 상태}
+//       17·18 입장 비율 창의 처음·끝(불린 뒤 ms), 19 판매 상태를 모를 때의 값, 20~ ctl에 함께 쓸 자동 제어 칸(이름·값 쌍, ADR-0226 결정 2)
+// 돌려주는 값: {'FENCED'} 또는 {'OK', serving, 유효 전진 수, 쓰는 자리, 곧 입장, 오는 중, 뺀 곧 입장, 로비 표시, 묶음 표시, 묶음 게시, 다시 쓰기 표시, 비율(천분율), 판매 상태, 발급 − serving}
 export const TICK_LUA = `${EXTEND}${FENCE}
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
@@ -118,6 +118,7 @@ for i = 1, #stale, 500 do
 end
 local soon = redis.call('ZCARD', KEYS[10])
 redis.call('HSET', KEYS[14], 'targetNow', ARGV[2])
+for i = 20, #ARGV, 2 do redis.call('HSET', KEYS[14], ARGV[i], ARGV[i + 1]) end
 extend(KEYS[14], keep)
 -- 판매 상태 칸(queue-svc가 쓴 notice)의 수명도 회차 키 수명으로 늘린다(연기된 회차가 옛 판매 종료 + 1일에 saleState·soldOutLastSeq를 잃지 않게, HOT-010 리뷰). 없는 키는 만들지 않는다
 if redis.call('EXISTS', KEYS[13]) == 1 then extend(KEYS[13], keep) end
@@ -166,6 +167,7 @@ local state = ns[1] or ARGV[19]
 if state ~= 'ON_SALE' then adv = 0 end
 -- 첫 전진 문(ADR-0058 결정 4): 표시가 있는데 게시 + 분산 창이 지나지 않았으면 그 구간의 첫 번호 - 1을 넘지 않는다
 local cap = tonumber(redis.call('GET', KEYS[3]) or '0')
+local issued = cap
 local bd = redis.call('HMGET', KEYS[12], 'lobby', 'pub:lobby', '1', 'pub:1', 'repair:1')
 local function gate(marker, pub, late)
   if not marker then return end
@@ -219,7 +221,7 @@ if n > s then
 end
 extend(KEYS[1], keep)
 local function has(v) if v then return 1 end return 0 end
-return {'OK', n, valid, slots, soon, inflight, #stale, has(bd[1]), has(bd[3]), has(bd[4]), has(bd[5]), math.floor(ratio * 1000 + 0.5), state}
+return {'OK', n, valid, slots, soon, inflight, #stale, has(bd[1]), has(bd[3]), has(bd[4]), has(bd[5]), math.floor(ratio * 1000 + 0.5), state, math.max(0, issued - n)}
 `;
 
 // 진입 Degraded의 도착 시각 칸 닫기(ADR-0223 결정 7). 칸 끝 + 20초 [가정]이 지난 칸을 닫고 쓰지 않은 번호를 빠진 번호 비트맵에 켠다(온전한 바이트는 SETRANGE로).

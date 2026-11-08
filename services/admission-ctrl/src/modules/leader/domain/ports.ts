@@ -8,12 +8,22 @@ export interface EventPlan {
   openBatch: boolean;
   /** 오픈 직후 묶음 구간 길이(없으면 2초 [가정]) */
   batchWindowMs?: number;
+  /** 결제사 묶음 이름과 승인 상한(초당 건수). 둘 다 있을 때만 쓴다(ADR-0226 결정 9) */
+  pgKey?: string;
+  pgTps?: number;
 }
 
-/** 리더 상태 q:{event:E}:ctl에서 이 단계가 읽는 값: 운영자 목표(수동 고정 만료 전), 입장 일시정지·판매 일시정지·판매 중지 가운데 하나라도 참인가 */
+/** 리더 상태 q:{event:E}:ctl에서 읽는 값: 운영자 목표(고정 중일 때만 `target`), 일시정지 묶음, 운영자 칸과 자동 제어 기억(ADR-0226) */
 export interface Control {
   target?: number;
   paused: boolean;
+  /** 운영자 칸(값·고정 만료·복귀 확인). 없으면 없는 것으로 본다 */
+  operator?: import('./aimd.js').OperatorState;
+  /** 명령 6(대체 결제사 전환)이 쓴 결제사(둘 다 있을 때만 쓴다) */
+  pgKey?: string;
+  pgTps?: number;
+  /** 자동 제어 칸의 원문(aimd.ts memoryFromFields가 읽는다) */
+  memory?: Record<string, string | null>;
 }
 
 export interface TickInput {
@@ -38,6 +48,8 @@ export interface TickInput {
   openBatch: boolean;
   /** 묶음 구간 끝(묶음을 끈 회차는 쓰지 않는다) */
   closeAtMs: number;
+  /** ctl에 함께 쓸 자동 제어 칸(바뀐 칸만, 세대 확인 안에서 쓴다, ADR-0226 결정 2) */
+  fields?: Record<string, string>;
 }
 
 export type TickResult =
@@ -50,6 +62,8 @@ export type TickResult =
       slots: number;
       soon: number;
       inFlight: number;
+      /** 발급된 번호 − serving(줄 선 사람의 어림, 수요 판단에 쓴다) */
+      waiting: number;
       /** 낡아서 뺀 곧 입장 항목 수 */
       dropped: number;
       lobbyMarked: 0 | 1;
@@ -95,6 +109,8 @@ export interface LeaderStore {
   activeEvents(nowMs: number): Promise<string[]>;
   schedule(eventId: string): Promise<EventPlan | null>;
   control(eventId: string, nowMs: number): Promise<Control>;
+  /** q:{admission}:ctl의 명령 11(자동화 정지) */
+  platformControl(): Promise<{ autoStopped: boolean }>;
   /** 명세 acquire의 BUMP */
   bump(eventId: string, gen: number, keepUntilMs: number): Promise<'OK' | 'FENCED'>;
   /** 명세 plan·applyWrite의 ADVANCE(정리·빈자리·전진·기록을 Lua 하나로) */
@@ -122,6 +138,15 @@ export interface ArrivalCloseResult {
 }
 
 /** Lease 리더(플랫폼 LeaseElector). 리더가 아니면 세대가 없다 */
+/** 자동 제어의 판단 입력(ADR-0226 결정 4). 한 번 읽은 결과에서 회차별 입력을 꺼낸다 */
+export const CONTROL_INPUTS = Symbol('admission.ControlInputsReader');
+export interface ControlInputsReader {
+  read(): Promise<ControlSnapshot>;
+}
+export interface ControlSnapshot {
+  forEvent(eventId: string): import('./aimd.js').EventInputs;
+}
+
 export const ELECTOR = Symbol('admission.Elector');
 export interface Elector {
   generation(): number | undefined;

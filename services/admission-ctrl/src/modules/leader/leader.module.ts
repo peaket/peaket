@@ -5,7 +5,7 @@ import { ADMISSION_REDIS, BatchModule, type BatchModuleOptions, PublishBatchResu
 import { RedisLeaderStore } from './adapters/redis-leader-store.js';
 import { AdmissionLeader } from './application/admission-leader.js';
 import { LEADER_METRICS, type LeaderMetrics } from './application/leader-metrics.js';
-import { ELECTOR, type Elector, LEADER_STORE, PUBLISHER } from './domain/ports.js';
+import { CONTROL_INPUTS, type ControlInputsReader, ELECTOR, type Elector, LEADER_STORE, PUBLISHER } from './domain/ports.js';
 
 export interface LeaderModuleOptions {
   redis: HotRedis;
@@ -13,6 +13,8 @@ export interface LeaderModuleOptions {
   elector: Elector;
   batch: Omit<BatchModuleOptions, 'redis'>;
   metrics?: LeaderMetrics;
+  /** 자동 제어 입력(없으면 자동 제어를 끈다, ADR-0226 결정 13) */
+  controlInputs?: ControlInputsReader;
 }
 
 @Module({})
@@ -30,6 +32,7 @@ export class LeaderModule {
         { provide: ELECTOR, useValue: o.elector },
         { provide: PUBLISHER, useExisting: PublishBatchResults },
         ...(o.metrics ? [{ provide: LEADER_METRICS, useValue: o.metrics }] : []),
+        ...(o.controlInputs ? [{ provide: CONTROL_INPUTS, useValue: o.controlInputs }] : []),
       ],
       exports: [AdmissionLeader],
     };

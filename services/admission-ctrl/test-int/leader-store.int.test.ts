@@ -31,6 +31,8 @@ function tickOf(eventId: string, gen: number, o: Partial<TickInput> = {}): TickI
   return { eventId, gen, target: 5_000, ratioFloor: 0.2, saleStateFallback: 'ON_SALE', windowMs: 5_000, maxAdvance: 200, keepUntilMs: Date.now() + 2 * DAY, saleEndMs: Date.now() + DAY, lobbyShuffle: false, openBatch: false, closeAtMs: 0, ...o };
 }
 const serving = async (e: string) => Number((await cmd(keys.serving(e), ['GET', keys.serving(e)])) ?? 0);
+/** 이 시험들이 보는 것: 고정 중 목표와 일시정지(자동 제어 칸은 '자동 제어 칸' 묶음이 본다) */
+const brief = (c: { target?: number; paused: boolean }) => ({ ...(c.target !== undefined ? { target: c.target } : {}), paused: c.paused });
 const seqTo = (e: string, s: number) => cmd(keys.seq(e), ['SET', keys.seq(e), String(s)]);
 
 describe('도착 시각 칸 닫기(Q-T16, ADR-0223 결정 7)', () => {
@@ -325,15 +327,15 @@ test('진행중인회차목록은점수(판매종료+1일)가지난회차를지�
 test('리더상태는운영자목표와수동고정만료_입장일시정지·판매일시정지·판매중지를읽는다', async () => {
   const e = newEvent();
   const now = Date.now();
-  expect(await store.control(e, now)).toEqual({ paused: false });
+  expect(brief(await store.control(e, now))).toEqual({ paused: false });
   await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'target', '800', 'targetUntil', String(now + 60_000), 'admitPaused', '1']);
-  expect(await store.control(e, now)).toEqual({ target: 800, paused: true });
+  expect(brief(await store.control(e, now))).toEqual({ target: 800, paused: true });
   await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'targetUntil', String(now - 1), 'admitPaused', '0']);
-  expect(await store.control(e, now)).toEqual({ paused: false });
+  expect(brief(await store.control(e, now))).toEqual({ paused: false });
   // 판매 일시정지(명령 3)·판매 중지도 하나라도 참이면 serving 전진을 멈춘다(ADR-0123)
   for (const f of ['paused', 'suspended']) {
     await cmd(keys.ctl(e), ['HSET', keys.ctl(e), f, '1']);
-    expect(await store.control(e, now)).toEqual({ paused: true });
+    expect(brief(await store.control(e, now))).toEqual({ paused: true });
     await cmd(keys.ctl(e), ['HDEL', keys.ctl(e), f]);
   }
 });
@@ -396,9 +398,9 @@ test('입장일시정지는만료시각이지나면풀린다', async () => {
   const e = newEvent();
   const now = Date.now();
   await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'admitPaused', '1', 'admitPausedUntil', String(now + 60_000)]);
-  expect(await store.control(e, now)).toEqual({ paused: true });
+  expect(brief(await store.control(e, now))).toEqual({ paused: true });
   await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'admitPausedUntil', String(now - 1)]);
-  expect(await store.control(e, now)).toEqual({ paused: false });
+  expect(brief(await store.control(e, now))).toEqual({ paused: false });
 });
 
 describe('입장 비율(ADR-0104 결정 3)', () => {
@@ -526,4 +528,52 @@ test('[Q-T10] 한1초칸에여러번전진하고리더가바뀌어도_차례시�
   // 1초 칸 둘: 앞 리더의 30, 새 리더의 60
   expect(log.filter((_, i) => i % 2 === 1)).toEqual([30, 60]);
   expect(log[2]! - log[0]!).toBeGreaterThanOrEqual(1);
+});
+
+describe('자동 제어 칸(Q-T42, ADR-0226)', () => {
+  test('[Q-T42] 전진Lua는_바뀐자동제어칸을세대확인안에서쓰고_옛세대는쓰지못한다', async () => {
+    const e = newEvent();
+    const now = Date.now();
+    await seqTo(e, 50);
+    await store.bump(e, 3, now + DAY);
+    const r = await store.tick(tickOf(e, 3, { target: 2_500, fields: { aimdTarget: '2500', inputStale: '1', inputStaleAt: String(now), lastDecrease: '{"reason":"aimd"}' } }));
+    expect(r.kind === 'OK' && r.waiting).toBe(50 - (r.kind === 'OK' ? r.serving : 0));
+    expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'targetNow'])).toBe('2500');
+    expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'aimdTarget'])).toBe('2500');
+    expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'inputStale'])).toBe('1');
+    // 빈 글자는 없는 칸과 같다
+    await store.tick(tickOf(e, 3, { fields: { inputStale: '' } }));
+    expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'inputStale'])).toBe('');
+    await store.bump(e, 4, now + DAY);
+    expect((await store.tick(tickOf(e, 3, { fields: { aimdTarget: '1' } }))).kind).toBe('FENCED');
+    expect(await cmd(keys.ctl(e), ['HGET', keys.ctl(e), 'aimdTarget'])).toBe('2500');
+  });
+
+  test('[Q-T42] 리더상태읽기는_자동제어기억과운영자칸과결제사칸을돌려준다', async () => {
+    const e = newEvent();
+    const now = Date.now();
+    await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'target', '6000', 'targetUntil', String(now + 60_000), 'aimdResumeAt', String(now - 5), 'aimdTarget', '4000', 'inputStale', '1', 'inputStaleAt', String(now - 1), 'pgKey', 'toss', 'pgTps', '300']);
+    const c = await store.control(e, now);
+    expect(c).toMatchObject({ target: 6_000, paused: false, operator: { value: 6_000, untilMs: now + 60_000, resumeAtMs: now - 5 }, pgKey: 'toss', pgTps: 300 });
+    expect(c.memory?.aimdTarget).toBe('4000');
+    expect(c.memory?.inputStale).toBe('1');
+    // 버짓 감축이 끝낸 고정은 고정이 아니다
+    await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'manualEndedAt', String(now)]);
+    expect((await store.control(e, now + 1)).target).toBeUndefined();
+    // 틀린 결제사 칸은 없는 것으로 본다
+    await cmd(keys.ctl(e), ['HSET', keys.ctl(e), 'pgTps', 'abc']);
+    expect((await store.control(e, now + 1)).pgTps).toBeUndefined();
+  });
+
+  test('[Q-T67] 일정사본의결제사칸과_명령11칸을읽는다', async () => {
+    const e = newEvent();
+    await cmd(keys.cfg(e), ['HSET', keys.cfg(e), 'opensAtMs', '1000', 'startsAtMs', '2000', 'lobbyShuffle', '0', 'openBatch', '1', 'pgKey', 'portone', 'pgTps', '50']);
+    expect(await store.schedule(e)).toMatchObject({ pgKey: 'portone', pgTps: 50 });
+    await cmd(keys.cfg(e), ['HSET', keys.cfg(e), 'pgTps', '-1']);
+    expect((await store.schedule(e))?.pgTps).toBeUndefined();
+    expect(await store.platformControl()).toEqual({ autoStopped: false });
+    await cmd(keys.platformCtl(), ['HSET', keys.platformCtl(), 'autoStopped', '1']);
+    expect(await store.platformControl()).toEqual({ autoStopped: true });
+    await cmd(keys.platformCtl(), ['HDEL', keys.platformCtl(), 'autoStopped']);
+  });
 });

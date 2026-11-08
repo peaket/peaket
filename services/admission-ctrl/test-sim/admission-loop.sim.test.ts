@@ -20,6 +20,7 @@ import { HmacQueueTokens, QUEUE_TOKEN_KEY_ENV } from '../../queue-svc/src/module
 import { RedisEventSchedules } from '../../queue-svc/src/modules/entry/adapters/redis-event-schedules.js';
 import { keys, RedisLeaderStore } from '../src/modules/leader/adapters/redis-leader-store.js';
 import { AdmissionLeader } from '../src/modules/leader/application/admission-leader.js';
+import { ALL_JOURNEYS, type EventInputs, type Reading } from '../src/modules/leader/domain/aimd.js';
 import type { LeaderStore } from '../src/modules/leader/domain/ports.js';
 import { nextRunId, saveRun, SIM_DAY } from '../../queue-svc/test-sim/record.js';
 import { startValkey, type ValkeyContainer } from '../test-int/valkey.js';
@@ -103,7 +104,7 @@ async function runVariant(variant: 'new' | 'old', seed: number): Promise<Outcome
   // 바꾸기 전 식: 전진 입력의 오는 중 창만 0으로(오는 중을 빼지 않는다)
   const store: LeaderStore = variant === 'old' ? new Proxy(base, { get: (t, k) => (k === 'tick' ? (i: Parameters<LeaderStore['tick']>[0]) => t.tick({ ...i, windowMs: 0 }) : (Reflect.get(t, k) as unknown as (...a: unknown[]) => unknown)?.bind?.(t) ?? Reflect.get(t, k)) }) : base;
   const inFlight: number[] = [];
-  const leaderMetrics = { event: (_e: string, r: { inFlight: number }) => void inFlight.push(r.inFlight), loop: () => undefined, leader: () => undefined, fenced: () => undefined, publish: () => undefined, forget: () => undefined };
+  const leaderMetrics = { event: (_e: string, r: { inFlight: number }) => void inFlight.push(r.inFlight), control: () => undefined, openGaps: () => undefined, loop: () => undefined, leader: () => undefined, fenced: () => undefined, publish: () => undefined, forget: () => undefined };
   const leader = new AdmissionLeader(store, { run: async () => ({ status: 'NO_SCHEDULE' }) }, { generation: () => 1 }, systemClock, undefined, leaderMetrics as never);
   const admStore = new RedisAdmissionStore(redis);
   const measuredArrivals: number[] = [];
@@ -203,6 +204,48 @@ async function runVariant(variant: 'new' | 'old', seed: number): Promise<Outcome
   valkey.stop();
   return o;
 }
+
+// AIMD를 켠 짧은 시나리오(ADR-0226): 칸이 실제 Valkey를 왕복해도 증액이 일어나고, 합산 나누기가 자기 목표로 굳지 않는지 본다. 판정이 아니라 회귀 확인이라 장부에 쓰지 않는다
+test('[Q-T42] [Q-T67] AIMD를켠짧은시나리오_나눈값이자기목표로굳지않고_증액이실제Valkey를왕복한다', async () => {
+  const valkey: ValkeyContainer = await startValkey();
+  const redis: HotRedis = await createHotRedis({ url: valkey.url });
+  cleanup.push(() => valkey.stop(), () => redis.close().catch(() => undefined));
+  const cmd = (key: string, args: string[]) => redis.command(args, { key });
+  const now0 = Date.now();
+  const startsAt = now0 + 2 * 86_400_000;
+  const [a, b] = ['simaimd-a', 'simaimd-b'];
+  for (const e of [a, b]) {
+    await cmd(keys.cfg(e), ['HSET', keys.cfg(e), 'opensAtMs', String(now0 - 120_000), 'startsAtMs', String(startsAt), 'lobbyShuffle', '1', 'openBatch', '0', 'rev', '1']);
+    await cmd(keys.batchDone(e), ['HSET', keys.batchDone(e), 'lobby', '1:0:1', 'pub:lobby', String(now0 - 60_000)]);
+    await cmd(keys.events(), ['ZADD', keys.events(), String(startsAt), e]);
+    await cmd(keys.seq(e), ['SET', keys.seq(e), '400000']);
+  }
+  const healthy = (): EventInputs => {
+    const at = Math.floor(Date.now() / 5_000) * 5_000;
+    const budget = new Map<string, Reading>();
+    for (const j of ALL_JOURNEYS) for (const k of ['alert', 'burn50']) budget.set(`${j}:${k}`, { ok: true, value: 0, atMs: at });
+    return { latency: { ok: true, value: 0.02, atMs: at }, errors: { ok: true, value: 0, atMs: at }, seatStore: { ok: true, value: 0, atMs: at }, budget, pgCause: false };
+  };
+  const leader = new AdmissionLeader(new RedisLeaderStore(redis), { run: async () => ({ status: 'NO_SCHEDULE' }) }, { generation: () => 1 }, systemClock, undefined, undefined, { read: async () => ({ forEvent: healthy }) });
+  const ctlOf = async (e: string, f: string) => String((await cmd(keys.ctl(e), ['HGET', keys.ctl(e), f])) ?? '');
+  leader.start();
+  await sleep(4_000);
+  const shared = await ctlOf(a, 'targetNow');
+  const own = await ctlOf(a, 'aimdTarget');
+  await cmd(keys.events(), ['ZREM', keys.events(), b]);
+  await sleep(4_000);
+  const alone = await ctlOf(a, 'targetNow');
+  await sleep(31_000);
+  const raised = await ctlOf(a, 'aimdTarget');
+  await leader.stop();
+  await redis.close().catch(() => undefined);
+  valkey.stop();
+  console.log(JSON.stringify({ shared, own, alone, raised }));
+  expect(shared).toBe('2500');
+  expect(own).toBe('5000');
+  expect(alone).toBe('5000');
+  expect(Number(raised)).toBeGreaterThanOrEqual(5_100);
+}, 120_000);
 
 test('[실측] Q-T46 도착 지연을 넣은 입장 제어 루프(10분, 오는 중을 빼는 식과 빼지 않는 식, 공통 난수로 되풀이)', async () => {
   const results: Array<{ seed: number; pass: boolean }> = [];
