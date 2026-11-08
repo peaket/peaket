@@ -25,7 +25,7 @@ export class ShuffleProofController {
   @Roles(['public'])
   async proof(@Param('eventId') eventId: string, @Res({ passthrough: true }) reply: FastifyReply): Promise<Record<string, unknown>> {
     const schedule = KEY_PART.test(eventId) ? await this.schedules.get(eventId) : null;
-    if (!schedule) throw new ProblemError({ type: 'queue-not-found', status: 404, title: '이 회차의 셔플 정보가 없습니다' });
+    if (!schedule) throw new ProblemError({ type: 'queue-not-found', status: 404, title: '이 회차의 대기열이 열리지 않았습니다', detail: '이 회차의 셔플 정보가 없습니다' });
     void reply.header('cache-control', 'public, max-age=5');
     return shuffleProof(eventId, schedule, await this.source.read(eventId), this.clock.now());
   }
@@ -50,7 +50,7 @@ export class ShuffleProofController {
     if (body === null) {
       // 셔플 전. 대기열 파일 배포의 404 오류 캐시 1초 [가정]와 같게 둔다(ADR-0058)
       void reply.header('cache-control', 'public, max-age=1');
-      throw new ProblemError({ type: 'queue-not-found', status: 404, title: '결과 파일이 아직 없습니다' });
+      throw new ProblemError({ type: 'queue-not-found', status: 404, title: '이 회차의 대기열이 열리지 않았습니다', detail: '결과 파일이 아직 없습니다' });
     }
     void reply.header('content-type', 'application/json; charset=utf-8');
     void reply.header('cache-control', 'public, max-age=60');

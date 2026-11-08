@@ -1172,6 +1172,9 @@ importers:
       '@peaket/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@peaket/shuffle':
+        specifier: workspace:*
+        version: link:../../packages/shuffle
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
