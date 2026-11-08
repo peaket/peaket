@@ -231,6 +231,7 @@ export {
   PAYMENT_RESULT_TABLE,
   PAYMENT_RESULT_WRITES,
   TICKET_ISSUE_WINDOW_MS,
+  approvalIssueDueAtMs,
   ticketIssueDueAtMs,
   type AppliedPaymentEventType,
   type PayMethodCategory,

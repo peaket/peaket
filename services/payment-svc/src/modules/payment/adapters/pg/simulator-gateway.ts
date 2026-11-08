@@ -4,6 +4,7 @@
 // - 결과 코드는 payment §2.1 '공통 결과 코드 정규화'와 '분석용 실패 범주'로 바꾼다. 대응표는 이 파일과 계약 시험이 정본이다.
 // - 승인 답의 읽기(PRF-181 코드 리뷰, PRF-184가 이 꼴을 물려받는다): 거절로 읽는 것은 JSON code가 있는 4xx뿐이다. 200이 아닌 2xx·3xx·408·JSON code가 없는 4xx와 그 밖은
 //   결제사가 무엇을 했는지 모르므로 UNKNOWN이다. 200 답은 주문 ID를 대조해 다르면 UNKNOWN이다.
+// - 조회 답의 읽기(PRF-182 코드 리뷰, PRF-184가 이 꼴을 물려받는다): NOT_FOUND는 JSON code가 NOT_FOUND_PAYMENT인 404뿐이다. 그 밖의 404·JSON이 아닌 답은 UNKNOWN이다.
 import { createExternalHttpClient, systemClock, type Clock, type ExternalHttpClient } from '@peaket/platform';
 import {
   CANCEL_IDEM_KEY,
@@ -19,6 +20,7 @@ import {
   type PaymentGatewayPort,
   type PayMethodCategory,
   type PgCapabilities,
+  type QueryOptions,
   type QueryResult,
   type QueryStatus,
   type WebhookTrigger,
@@ -59,6 +61,8 @@ const METHOD_CATEGORY: ReadonlyMap<string, PayMethodCategory> = new Map<string, 
   ['계좌이체', 'TRANSFER'],
 ]);
 const DEFAULT_READ_TIMEOUT_MS = 60_000;
+/** 조회의 404가 '결제 없음'이라고 결제사가 답한 것임을 뜻하는 코드 */
+const NOT_FOUND_PAYMENT = 'NOT_FOUND_PAYMENT';
 const USER_ABORTED = new Set(['PAY_PROCESS_CANCELED', 'PAY_PROCESS_ABORTED']);
 const VALIDATION = new Set(['INVALID_REQUEST', 'NOT_FOUND_PAYMENT', 'DUPLICATED_ORDER_ID', 'IDEMPOTENCY_KEY_REUSED']);
 
@@ -145,17 +149,20 @@ export class SimulatorPaymentGateway implements PaymentGatewayPort {
     return declined('CARD_DECLINED');
   }
 
-  async query(paymentRef: string): Promise<QueryResult> {
-    const r = await this.call('GET', '/v1/payments/{paymentKey}', { paymentKey: paymentRef });
+  async query(paymentRef: string, options?: QueryOptions): Promise<QueryResult> {
+    const timeoutCapMs = options?.timeoutMs === undefined ? undefined : Math.min(options.timeoutMs, this.o.readTimeoutMs ?? DEFAULT_READ_TIMEOUT_MS);
+    const r = await this.call('GET', '/v1/payments/{paymentKey}', { paymentKey: paymentRef }, undefined, undefined, timeoutCapMs);
     if (r === 'NO_ANSWER') return { kind: 'UNKNOWN' };
-    if (r.status === 404) return { kind: 'NOT_FOUND' };
+    // 결제사의 정해진 코드일 때만 없음이다. 그 밖의 404는 중간 장비의 답일 수 있다(PRF-182 코드 리뷰, PRF-184가 이 꼴을 물려받는다)
+    if (r.status === 404) return str(r.json?.code) === NOT_FOUND_PAYMENT ? { kind: 'NOT_FOUND' } : { kind: 'UNKNOWN' };
     const status = STATUS[str(r.json?.status) ?? ''];
     const amount = num(r.json?.totalAmount);
     const balanceAmount = num(r.json?.balanceAmount);
     const orderRef = str(r.json?.orderId);
     if (r.status !== 200 || !status || amount === undefined || balanceAmount === undefined || !orderRef) return { kind: 'UNKNOWN' };
     const approvedAt = str(r.json?.approvedAt);
-    return { kind: 'FOUND', paymentRef, orderRef, status, amount, balanceAmount, ...(approvedAt ? { approvedAt } : {}) };
+    const method = METHOD_CATEGORY.get(str(r.json?.method) ?? '');
+    return { kind: 'FOUND', paymentRef, orderRef, status, amount, balanceAmount, ...(approvedAt ? { approvedAt } : {}), ...(method ? { method } : {}) };
   }
 
   async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string }): Promise<CancelResult> {

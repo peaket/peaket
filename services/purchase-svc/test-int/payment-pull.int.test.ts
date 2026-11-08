@@ -855,7 +855,8 @@ describe('PaymentResultPuller + 실제 ApplyPaymentResult(사건과 같은 반�
     expect(await orderRow(a.o.id)).toEqual({ status: 'APPROVED', failure_reason: null, payment_event_seq: '2' });
     expect(await historyCauses(a.o.id)).toEqual([...BEFORE_RESULT, 'T12', 'T13']);
     expect(await jobOf(a.o.id)).toBeUndefined();
-    expect(await issueJobOf(a.o.id)).toEqual({ event_id: a.o.eventId, attempts: 0, issue_due_at: new Date(approvedAt + ISSUE_WINDOW_MS) });
+    // T13(UNKNOWN을 푼 승인)의 발권 기한은 max(결제사 승인 시각, 반영 시각) + 30분이다(PRF-182, 늦게 푼 주문이 발권 전에 기한을 넘기지 않게)
+    expect(await issueJobOf(a.o.id)).toEqual({ event_id: a.o.eventId, attempts: 0, issue_due_at: new Date(s.clock.now() + ISSUE_WINDOW_MS) });
     expect(seen).toEqual({ pulled: ['UNKNOWN', 'APPROVED'], batches: 2, failures: 0 });
     expect(log.lines).toEqual([]);
   });

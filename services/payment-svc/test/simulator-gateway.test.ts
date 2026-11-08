@@ -321,6 +321,35 @@ describe('리뷰 고침(BUILD_ORDER PRF-181, 코드 리뷰): 시뮬레이터가 
     expect(calls).toEqual(['POST']);
   });
 
+  it.each<[string, Scripted]>([
+    ['다른 코드의 404', { status: 404, body: { code: 'ROUTE_NOT_FOUND', message: '경로 없음' } }],
+    ['code 없는 404', { status: 404, body: { message: '없음' } }],
+    ['HTML 404', { status: 404, raw: '<html>nginx</html>' }],
+    ['빈 404', { status: 404, raw: '' }],
+  ])('P-T3_리뷰 고침 H1: 조회의 %s는 없음으로 단정하지 않고 UNKNOWN이다(중간 장비의 답일 수 있다) [ASVS v5.0.0-16.5.3]', async (_name, reply) => {
+    const { gateway } = scripted([reply]);
+    await expect(gateway.query(C.paymentRef)).resolves.toEqual({ kind: 'UNKNOWN' });
+  });
+
+  it('P-T3_리뷰 고침 H1: 결제사의 정해진 코드(NOT_FOUND_PAYMENT)인 404만 NOT_FOUND다', async () => {
+    const { gateway } = scripted([{ status: 404, body: { code: 'NOT_FOUND_PAYMENT', message: '결제를 찾을 수 없습니다' } }]);
+    await expect(gateway.query(C.paymentRef)).resolves.toEqual({ kind: 'NOT_FOUND' });
+  });
+
+  it('P-T3_리뷰 고침 M6: 조회는 넘긴 시간 한도까지만 기다리고 넘으면 UNKNOWN이다 [ASVS v5.0.0-16.5.2]', async () => {
+    const fetchStub: typeof fetch = async (_input, init) => new Promise<Response>((_res, rej) => init!.signal!.addEventListener('abort', () => rej(new Error('시간 초과'))));
+    const gateway = new SimulatorPaymentGateway({ baseUrl: 'http://pg.test', secretKey: 'sim_sk_review', clientKey: 'sim_ck_review', fetch: fetchStub, readTimeoutMs: 5_000 });
+    const started = performance.now();
+    await expect(gateway.query(C.paymentRef, { timeoutMs: 50 })).resolves.toEqual({ kind: 'UNKNOWN' });
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
+  it('P-T3_리뷰 고침 L10: 조회 답에 결제 수단 분류를 싣는다(모르는 값은 비운다)', async () => {
+    const { gateway } = scripted([payment({ method: '간편결제', balanceAmount: C.amount }), payment({ method: '새 수단', balanceAmount: C.amount })]);
+    await expect(gateway.query(C.paymentRef)).resolves.toMatchObject({ kind: 'FOUND', method: 'EASY_PAY' });
+    await expect(gateway.query(C.paymentRef)).resolves.not.toHaveProperty('method');
+  });
+
   it('PRF181_리뷰 고침 L7: 몫이 남아 있으면 조회해 ALREADY_APPROVED다', async () => {
     const { gateway, calls } = scripted([already, payment()]);
     await expect(gateway.confirm(C)).resolves.toMatchObject({ outcome: 'ALREADY_APPROVED', amount: C.amount });

@@ -1,0 +1,385 @@
+// UNKNOWN 조회 실행기(docs/features/payment.md §2 'UNKNOWN 해소의 첫 구현'·§4.2 14번, docs/data.md §5, BUILD_ORDER PRF-182, 명세 specs/payment.qnt `query`).
+// PaymentConfirmRunner와 같은 꼴이다. 모든 API 파드가 1초 [가정]마다 빈자리만큼 UNKNOWN 행을 짧은 트랜잭션으로 잡고(next_query_at을 먼저 민다) 커밋한 뒤 잠금 밖에서 결제사를 부른다.
+// 틱은 잡기까지만 기다리고 조회를 기다리지 않는다. 행 하나의 차례:
+//   ① 어댑터가 없으면 건너뛴다(잡을 때 민 시각이 남아 있다, 지표 no_adapter, 파드당 1분에 경고 한 줄)
+//   ② gateway.query(결제 참조, 시간 한도 10초 [가정]). 실행기도 12초 [가정]로 감싼다. 어댑터가 던지거나 한도를 넘으면 조회 실패로 본다
+//   ③ 답 → decideQueryAnswer → RESOLVE면 resolve(한 트랜잭션, status = 'UNKNOWN' 조건)
+//      ASK_AGAIN이면 어긋난 답의 SEV1을 결제마다 한 번 내고(anomaly_logged_at 조건부 쓰기) 답을 본 시각 + 실제 간격을 쓴다
+// 1시간 [가정] 표시는 잡기와 별개의 1분 반복이다(markOverdueBatch 한 문장, 100건까지 [가정]). 빈자리가 없거나 잡기가 실패해도 돈다.
+// 틱·호출은 실행기를 만든 때(시작 파일, 요청 밖)의 비동기 맥락에서 돈다(PaymentConfirmRunner와 같은 까닭). 이 층은 어댑터를 가져오지 않는다(포트로만 쓴다, architecture §3.1).
+// 구현에서 정한 것(정본·설계에 없다):
+// - 임대 칸이 없다: 잡을 때 다음 조회 시각을 미는 것이 임대 노릇을 한다(조회 중 파드가 죽어도 그 간격 뒤 다시 잡힌다).
+// - query_attempts는 잡을 때 오른다(어댑터 없음·조회 실패로 끝나도 간격은 늘어난다).
+// - 멈춘 뒤에는 새로 잡지 않고, 잡았지만 부르지 않은 행은 그대로 둔다(밀어 둔 간격 뒤 다시 잡힌다). stop은 돌던 조회와 그 뒤 쓰기를 기다린다.
+// - 답 반영이 실패하면 다시 하지 않는다(승인 실행기의 finish와 다르다: 밀어 둔 간격 뒤 다시 조회해 같은 답을 쓰고, 조회는 멱등이다).
+// - SEV1 표시 쓰기가 실패하면 로그를 내지 않는다(다음 조회가 다시 낸다). 지표는 조회마다 오른다.
+// - 간격 쓰기가 실패하면 다시 하지 않는다(잡을 때 민 시각에 다시 잡힌다).
+// - 틱은 잡기 전에 빈자리를 먼저 쥔다(겹쳐 부른 틱이 상한을 넘겨 잡지 않게). 잡은 수만큼 남기고 나머지는 놓는다.
+import { AsyncResource } from 'node:async_hooks';
+import type { Clock } from '@peaket/platform';
+import type { PaymentGatewayPort, QueryResult } from '../domain/payment-gateway.js';
+import type { PaymentGateways, PaymentUnknownLog, PaymentUnknownQueries, PaymentUnknownSignals } from '../domain/ports.js';
+import {
+  decideQueryAnswer,
+  type PaymentUnknownQueryOutcome,
+  type QueryDecision,
+  UNKNOWN_NO_ADAPTER_WARN_INTERVAL_MS,
+  UNKNOWN_OVERDUE_BATCH,
+  UNKNOWN_OVERDUE_SWEEP_INTERVAL_MS,
+  UNKNOWN_QUERY_BATCH,
+  UNKNOWN_QUERY_CONCURRENCY,
+  UNKNOWN_QUERY_GUARD_MS,
+  UNKNOWN_QUERY_POLL_INTERVAL_MS,
+  UNKNOWN_QUERY_TIMEOUT_MS,
+  unknownQueryDelayMs,
+  type UnknownQueryJob,
+  type UnknownRunOutcome,
+} from '../domain/unknown-resolver.js';
+import { safeErrorCode } from '../../../safe-error-code.js';
+
+/** 반복 타이머(시험이 손으로 부르는 대역을 꽂는다. 기본은 unref한 setInterval·clearInterval) */
+export interface UnknownResolverTimer {
+  setInterval(fn: () => void, ms: number): unknown;
+  clearInterval(handle: unknown): void;
+}
+
+/** 실행기가 쓰는 포트와 설정 */
+export interface PaymentUnknownResolverDeps {
+  queries: PaymentUnknownQueries;
+  gateways: PaymentGateways;
+  log: PaymentUnknownLog;
+  signals: PaymentUnknownSignals;
+  clock: Clock;
+  /** 없으면 전역 setInterval·clearInterval(unref) */
+  timer?: UnknownResolverTimer;
+  /** 잡기 주기(기본 UNKNOWN_QUERY_POLL_INTERVAL_MS 1초 [가정]) */
+  pollIntervalMs?: number;
+  /** 파드의 동시 자리 수(기본 UNKNOWN_QUERY_CONCURRENCY 16 [가정]). 1 이상의 안전한 정수가 아니면 기본값으로 본다 */
+  concurrency?: number;
+  /** 실행기가 조회를 감싸는 한도(기본 UNKNOWN_QUERY_GUARD_MS 12초 [가정]) */
+  queryGuardMs?: number;
+}
+
+/** 틱 하나의 결과 */
+export interface UnknownTickResult {
+  /** 잡은 행 수(부르기 시작한 수이고, 끝난 수가 아니다) */
+  readonly claimed: number;
+}
+
+/** 1시간 표시 한 번의 결과 */
+export interface UnknownSweepResult {
+  /** 이번에 표시한 행 수 */
+  readonly marked: number;
+}
+
+/** 실행기 한도를 넘긴 조회(어댑터가 시간 한도를 지키지 않았다) */
+class UnknownQueryGuardTimeout extends Error {
+  constructor() {
+    super('단독 조회가 실행기 한도를 넘겼다');
+    this.name = 'UnknownQueryGuardTimeout';
+  }
+}
+
+/**
+ * UNKNOWN 조회 실행기. start()로 1초 반복을 켜고 stop()으로 끈다(돌던 조회와 그 뒤 쓰기를 기다린다).
+ * 같은 행을 두 파드가 잡지 않는다(SKIP LOCKED·먼저 밀기). 겹치면 payment 행 잠금과 status = 'UNKNOWN' 조건이 하나만 쓰게 한다.
+ */
+export class PaymentUnknownResolver {
+  /** 반복 타이머의 손잡이(켜지 않았으면 undefined) */
+  #handle: unknown;
+  /** 1시간 표시 반복의 손잡이 */
+  #sweepHandle: unknown;
+  #stopped = false;
+  /** 타이머가 시작한 틱이 도는 중인가(겹치지 않게 하나만) */
+  #ticking = false;
+  /** 타이머가 시작한 1시간 표시가 도는 중인가(겹치지 않게 하나만) */
+  #sweeping = false;
+  /** 돌고 있는 틱의 잡기와 행(stop·whenIdle이 기다린다) */
+  readonly #inflight = new Set<Promise<void>>();
+  /** 쥔 자리 수(호출과 그 뒤 쓰기, 잡기 전에 미리 쥔 것 포함) */
+  #held = 0;
+  /** 지금 돌고 있는 조회 수(지표) */
+  #calls = 0;
+  /** 마지막으로 어댑터 없음 경고를 낸 시각(epoch ms) */
+  #lastNoAdapterWarnMs: number | undefined;
+  /** 만든 때(시작 파일, 요청 밖)의 비동기 맥락. 틱·호출이 이 맥락에서 돈다(끝난 요청의 남은 시간을 물려받지 않게) */
+  readonly #scope = new AsyncResource('PaymentUnknownResolver');
+
+  constructor(readonly deps: PaymentUnknownResolverDeps) {}
+
+  /** 잡기 반복과 1시간 표시 반복을 켠다(이미 켰거나 멈췄으면 아무것도 하지 않는다). 앞 일이 끝나지 않았으면 그 회차를 건너뛴다 */
+  start(): void {
+    if (this.#handle !== undefined || this.#stopped) return;
+    this.#handle = this.#timer().setInterval(() => this.#loopTick(), this.deps.pollIntervalMs ?? UNKNOWN_QUERY_POLL_INTERVAL_MS);
+    this.#sweepHandle = this.#timer().setInterval(() => this.#loopSweep(), UNKNOWN_OVERDUE_SWEEP_INTERVAL_MS);
+  }
+
+  /** 반복을 끄고 돌던 일(조회와 그 뒤 쓰기, 1시간 표시)을 기다린다. 멈춘 뒤의 틱·표시·start는 아무것도 하지 않는다 */
+  async stop(): Promise<void> {
+    this.#stopped = true;
+    for (const handle of [this.#handle, this.#sweepHandle]) if (handle !== undefined) this.#timer().clearInterval(handle);
+    this.#handle = undefined;
+    this.#sweepHandle = undefined;
+    await this.whenIdle();
+  }
+
+  /** 1시간 표시 한 번(잡기와 별개다, 머리 주석). 표시한 행마다 SEV2 로그와 지표를 낸다. 던지지 않는다(실패는 log.runError(what overdue) 뒤 0) */
+  async sweepOverdue(): Promise<UnknownSweepResult> {
+    if (this.#stopped) return NOTHING_SWEPT;
+    const p = this.#scope.runInAsyncScope(() => this.#sweepOnce());
+    this.#track(p);
+    return p;
+  }
+
+  /**
+   * 틱 하나: 빈자리가 있으면 그만큼(한 번에 UNKNOWN_QUERY_BATCH까지) 잡고, 잡은 행을 시작만 시키고 돌아온다(조회를 기다리지 않는다).
+   * 빈자리가 0이거나 멈춘 뒤면 잡지 않고 claimed 0이다. 던지지 않는다(잡기 실패는 log.runError(what claim) 뒤 0)
+   */
+  async tick(): Promise<UnknownTickResult> {
+    if (this.#stopped) return NOTHING;
+    const p = this.#scope.runInAsyncScope(() => this.#tickOnce());
+    this.#track(p);
+    return p;
+  }
+
+  /** 지금 돌고 있는 행이 모두 끝나면 풀린다(시험과 stop이 쓴다) */
+  async whenIdle(): Promise<void> {
+    while (this.#inflight.size > 0) await Promise.allSettled([...this.#inflight]);
+  }
+
+  /** 잡은 행 하나를 돈다(머리 주석의 차례). 던지지 않는다. 빈자리를 쥐고 돌며(동시 상한), 멈춘 뒤면 부르지 않고 SKIPPED STOPPED다 */
+  async runJob(job: UnknownQueryJob): Promise<UnknownRunOutcome> {
+    this.#held += 1;
+    return this.#startHeld(job);
+  }
+
+  // ---- 안쪽 ----
+
+  #timer(): UnknownResolverTimer {
+    return this.deps.timer ?? DEFAULT_TIMER;
+  }
+
+  #concurrency(): number {
+    const c = this.deps.concurrency ?? UNKNOWN_QUERY_CONCURRENCY;
+    return Number.isSafeInteger(c) && c >= 1 ? c : UNKNOWN_QUERY_CONCURRENCY;
+  }
+
+  /** 반복 타이머의 틱: 앞 틱의 잡기가 아직 돌면 건너뛴다. 멈춘 뒤에는 돌지 않는다 */
+  #loopTick(): void {
+    if (this.#stopped || this.#ticking) return;
+    this.#ticking = true;
+    void this.tick().finally(() => {
+      this.#ticking = false;
+    });
+  }
+
+  /** 반복 타이머의 1시간 표시: 앞 표시가 아직 돌면 건너뛴다. 멈춘 뒤에는 돌지 않는다 */
+  #loopSweep(): void {
+    if (this.#stopped || this.#sweeping) return;
+    this.#sweeping = true;
+    void this.sweepOverdue().finally(() => {
+      this.#sweeping = false;
+    });
+  }
+
+  async #sweepOnce(): Promise<UnknownSweepResult> {
+    let orderIds: string[];
+    try {
+      orderIds = await this.deps.queries.markOverdueBatch(UNKNOWN_OVERDUE_BATCH);
+    } catch (err) {
+      this.#runError('overdue', err);
+      return NOTHING_SWEPT;
+    }
+    for (const orderId of orderIds) {
+      this.#safe(() => this.deps.log.overdue({ orderId }));
+      this.#safe(() => this.deps.signals.overdue());
+    }
+    return { marked: orderIds.length };
+  }
+
+  async #tickOnce(): Promise<UnknownTickResult> {
+    // 잡기 전에 빈자리를 쥔다(머리 주석 '구현에서 정한 것')
+    const reserved = Math.min(UNKNOWN_QUERY_BATCH, Math.max(0, this.#concurrency() - this.#held));
+    if (reserved === 0) return NOTHING;
+    this.#held += reserved;
+    let jobs: UnknownQueryJob[] = [];
+    try {
+      jobs = await this.deps.queries.claimDueQueries(reserved);
+    } catch (err) {
+      this.#runError('claim', err);
+    }
+    // 잡은 행마다 쥔 자리 하나를 넘기고 남은 자리는 놓는다. 조회를 기다리지 않는다
+    this.#held -= Math.max(0, reserved - jobs.length);
+    for (const job of jobs) void this.#startHeld(job);
+    return { claimed: jobs.length };
+  }
+
+  /** 자리를 이미 쥔 행을 시작한다(stop·whenIdle이 기다리게 적는다) */
+  #startHeld(job: UnknownQueryJob): Promise<UnknownRunOutcome> {
+    const p = this.#scope.runInAsyncScope(() => this.#runHeld(job));
+    this.#track(p);
+    return p;
+  }
+
+  /** 자리를 쥔 채 행 하나를 돈다. 끝나면(어느 갈래든) 자리를 놓는다 */
+  async #runHeld(job: UnknownQueryJob): Promise<UnknownRunOutcome> {
+    try {
+      return await this.#run(job);
+    } finally {
+      this.#held -= 1;
+    }
+  }
+
+  async #run(job: UnknownQueryJob): Promise<UnknownRunOutcome> {
+    if (this.#stopped) return STOPPED;
+
+    let gateway: PaymentGatewayPort | undefined;
+    try {
+      gateway = this.deps.gateways.of(job.pg);
+    } catch (err) {
+      this.#runError('gateway', err, job.orderId);
+      return this.#askedAgain(job, 'query_failed');
+    }
+    if (gateway === undefined) return this.#noAdapter(job);
+    if (this.#stopped) return STOPPED;
+
+    const answer = await this.#query(gateway, job);
+    const decision = decideQueryAnswer(answer, job, this.deps.clock.now());
+    if (decision.kind === 'ASK_AGAIN') {
+      await this.#reportAnomaly(job, decision);
+      await this.#reschedule(job);
+      return this.#askedAgain(job, decision.outcome);
+    }
+    return this.#resolve(job, decision);
+  }
+
+  /** 답을 본 시각 + 실제 간격을 쓴다(잡을 때 민 더 긴 시각을 줄인다). 던지지 않는다 */
+  async #reschedule(job: UnknownQueryJob): Promise<void> {
+    try {
+      await this.deps.queries.rescheduleQuery(job, this.deps.clock.now() + unknownQueryDelayMs(job.queryAttempts));
+    } catch (err) {
+      this.#runError('reschedule', err, job.orderId);
+    }
+  }
+
+  /** 단독 조회 한 번. 어댑터가 던지거나 실행기 한도를 넘으면 조회 실패 답으로 바꾼다 */
+  async #query(gateway: PaymentGatewayPort, job: UnknownQueryJob): Promise<QueryResult> {
+    this.#calls += 1;
+    this.#safe(() => this.deps.signals.inFlight(this.#calls));
+    try {
+      return await this.#guarded(gateway.query(job.paymentRef, { timeoutMs: UNKNOWN_QUERY_TIMEOUT_MS }));
+    } catch (err) {
+      this.#runError('call', err, job.orderId);
+      return QUERY_UNKNOWN;
+    } finally {
+      this.#calls -= 1;
+      this.#safe(() => this.deps.signals.inFlight(this.#calls));
+    }
+  }
+
+  /** 실행기 한도로 감싼다. 한도를 넘기면 UnknownQueryGuardTimeout으로 거절하고, 어댑터가 늦게 끝나도 자리는 이미 돌아갔다 */
+  async #guarded(work: Promise<QueryResult>): Promise<QueryResult> {
+    let handle: ReturnType<typeof setTimeout> | undefined;
+    const guard = new Promise<never>((_resolve, reject) => {
+      handle = setTimeout(() => reject(new UnknownQueryGuardTimeout()), this.deps.queryGuardMs ?? UNKNOWN_QUERY_GUARD_MS);
+      handle.unref();
+    });
+    try {
+      return await Promise.race([work, guard]);
+    } finally {
+      clearTimeout(handle);
+    }
+  }
+
+  /** 어긋난 답의 SEV1을 결제마다 한 번 낸다(표시를 이번에 쓴 행만 로그를 낸다). 던지지 않는다 */
+  async #reportAnomaly(job: UnknownQueryJob, decision: Extract<QueryDecision, { kind: 'ASK_AGAIN' }>): Promise<void> {
+    if (decision.anomaly === undefined || job.anomalyLogged) return;
+    let marked: boolean;
+    try {
+      marked = await this.deps.queries.markAnomalyLogged(job);
+    } catch (err) {
+      this.#runError('anomaly', err, job.orderId);
+      return;
+    }
+    if (!marked) return;
+    const e = { orderId: job.orderId };
+    if (decision.anomaly === 'amount') this.#safe(() => this.deps.log.amountMismatch(e));
+    else if (decision.anomaly === 'order') this.#safe(() => this.deps.log.orderMismatch(e));
+    else this.#safe(() => this.deps.log.cancelledAtPg(e));
+  }
+
+  /** 어댑터가 없다: 지표를 세고 파드당 1분에 경고 한 줄 */
+  #noAdapter(job: UnknownQueryJob): UnknownRunOutcome {
+    const now = this.deps.clock.now();
+    if (this.#lastNoAdapterWarnMs === undefined || now - this.#lastNoAdapterWarnMs >= UNKNOWN_NO_ADAPTER_WARN_INTERVAL_MS) {
+      this.#lastNoAdapterWarnMs = now;
+      this.#safe(() => this.deps.log.noAdapter({ pg: job.pg }));
+    }
+    return this.#askedAgain(job, 'no_adapter');
+  }
+
+  #askedAgain(job: UnknownQueryJob, outcome: PaymentUnknownQueryOutcome): UnknownRunOutcome {
+    this.#outcome(job, outcome);
+    return { kind: 'ASKED_AGAIN', outcome };
+  }
+
+  /** 답 반영(원장·사건·Outbox 한 트랜잭션). 던지면 다시 하지 않고 밀어 둔 간격 뒤의 조회에 맡긴다 */
+  async #resolve(job: UnknownQueryJob, decision: Extract<QueryDecision, { kind: 'RESOLVE' }>): Promise<UnknownRunOutcome> {
+    try {
+      const result = await this.deps.queries.resolve(job, decision.finish);
+      if (result === 'STALE') {
+        this.#safe(() => this.deps.log.staleAnswer({ orderId: job.orderId }));
+        return STALE;
+      }
+      this.#outcome(job, decision.outcome);
+      return { kind: 'RESOLVED', status: decision.finish.status, outcome: decision.outcome };
+    } catch (err) {
+      this.#safe(() => this.deps.signals.writeFailure());
+      this.#safe(() => this.deps.log.writeFailed({ orderId: job.orderId, code: safeErrorCode(err) }));
+      return WRITE_FAILED;
+    }
+  }
+
+  #outcome(job: UnknownQueryJob, outcome: PaymentUnknownQueryOutcome): void {
+    this.#safe(() => this.deps.signals.outcome(job.pg, outcome));
+  }
+
+  #runError(what: 'claim' | 'gateway' | 'call' | 'anomaly' | 'reschedule' | 'overdue', err: unknown, orderId?: string): void {
+    this.#safe(() => this.deps.log.runError(orderId === undefined ? { what, err } : { what, orderId, err }));
+  }
+
+  /** stop·whenIdle이 기다릴 일로 적고, 끝나면 뺀다 */
+  #track(p: Promise<unknown>): void {
+    const tracked: Promise<void> = p.then(noop, noop).finally(() => {
+      this.#inflight.delete(tracked);
+    });
+    this.#inflight.add(tracked);
+  }
+
+  /** 로그·지표는 던지지 않기로 했지만, 던져도 실행기를 막지 않는다 */
+  #safe(f: () => void): void {
+    try {
+      f();
+    } catch {
+      // 삼킨다
+    }
+  }
+}
+
+const noop = (): undefined => undefined;
+const NOTHING: UnknownTickResult = Object.freeze({ claimed: 0 });
+const NOTHING_SWEPT: UnknownSweepResult = Object.freeze({ marked: 0 });
+const STOPPED: UnknownRunOutcome = Object.freeze({ kind: 'SKIPPED', reason: 'STOPPED' });
+const STALE: UnknownRunOutcome = Object.freeze({ kind: 'STALE' });
+const WRITE_FAILED: UnknownRunOutcome = Object.freeze({ kind: 'WRITE_FAILED' });
+const QUERY_UNKNOWN: QueryResult = Object.freeze({ kind: 'UNKNOWN' });
+
+/** 기본 반복 타이머(프로세스를 붙잡지 않게 unref) */
+const DEFAULT_TIMER: UnknownResolverTimer = {
+  setInterval: (fn, ms) => {
+    const handle = setInterval(fn, ms);
+    handle.unref();
+    return handle;
+  },
+  clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+};

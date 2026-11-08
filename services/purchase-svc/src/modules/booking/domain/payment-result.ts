@@ -239,3 +239,13 @@ export function ticketIssueDueAtMs(occurredAt: string): number {
   if (!Number.isFinite(ms)) throw new RangeError('occurredAt이 날짜로 읽히지 않는다');
   return ms + TICKET_ISSUE_WINDOW_MS;
 }
+
+/**
+ * 승인 전이의 발권 기한 시각(epoch ms). T9·T16은 ticketIssueDueAtMs(occurredAt)다.
+ * T13(UNKNOWN → APPROVED)은 max(occurredAt, 반영 시각) + 30분이다: 결제사 승인 시각이 오래전이어도 우리가 승인을 안 것은 지금이라, 반영하자마자 기한 넘김이 되지 않게 한다(BUILD_ORDER PRF-182, 코드 리뷰).
+ * @throws RangeError occurredAt이 날짜로 읽히지 않음
+ */
+export function approvalIssueDueAtMs(transition: 'T9' | 'T13' | 'T16', occurredAt: string, appliedAtMs: number): number {
+  const due = ticketIssueDueAtMs(occurredAt);
+  return transition === 'T13' ? Math.max(due, appliedAtMs + TICKET_ISSUE_WINDOW_MS) : due;
+}

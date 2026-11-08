@@ -113,6 +113,29 @@ describe('승인 반영(T9·T13·T16): approve 한 트랜잭션 → 커밋 뒤 �
     expect(fx.approved[0]!.issueDueAtMs).not.toBe(APPLY_NOW + TICKET_ISSUE_WINDOW_MS);
   });
 
+  test('P-T3_리뷰 고침 M5: UNKNOWN을 푼 승인(T13)의 발권 기한은 반영 시각 + 30분이다(오래전에 승인된 결제가 반영하자마자 기한 넘김이 되지 않는다)', async () => {
+    expect(APPLY_NOW).toBeGreaterThan(OCCURRED_AT_MS);
+    fx.order = resultOrder({ status: 'UNKNOWN' });
+    await run();
+    expect(fx.approved.map((a) => [a.transition, a.issueDueAtMs])).toEqual([['T13', APPLY_NOW + TICKET_ISSUE_WINDOW_MS]]);
+  });
+
+  test('P-T3_리뷰 고침 M5: T13에서 사건 시각이 반영 시각보다 뒤면 사건 시각 + 30분이다(둘 가운데 늦은 쪽)', async () => {
+    const later = new Date(APPLY_NOW + 5 * MIN).toISOString();
+    fx.order = resultOrder({ status: 'UNKNOWN' });
+    await run(paymentEvent({ occurredAt: later }));
+    expect(fx.approved[0]!.issueDueAtMs).toBe(Date.parse(later) + TICKET_ISSUE_WINDOW_MS);
+  });
+
+  test('P-T3_리뷰 고침 M5: T9·T16의 발권 기한은 그대로 사건 시각 + 30분이다', async () => {
+    await run();
+    expect(fx.approved.map((a) => [a.transition, a.issueDueAtMs])).toEqual([['T9', DUE]]);
+    fx.reset();
+    fx.order = resultOrder({ status: 'AWAITING_DEPOSIT' });
+    await run();
+    expect(fx.approved.map((a) => [a.transition, a.issueDueAtMs])).toEqual([['T16', DUE]]);
+  });
+
   test('FR011_사건 회차가 아니라 주문의 회차·좌석을 쓴다(trade.payments의 eventId는 Kafka 키로 쓰는 회차다)', async () => {
     const otherEvent = '0190f3a1-7c2e-7c00-8000-0000000000c9';
     await run(paymentEvent({ eventId: otherEvent }));

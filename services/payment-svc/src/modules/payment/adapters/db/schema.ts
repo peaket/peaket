@@ -49,9 +49,23 @@ export const payment = pgTable(
     statusChangedAt: at('status_changed_at').notNull(),
     // 실패 범주. FAILED일 때만 채운다. ConfirmPayment 재전송의 답과 BatchGetPayments가 읽는다(BUILD_ORDER PRF-181, 마이그레이션 0001)
     failureCategory: text('failure_category'),
+    // 다음 단독 조회 시각. UNKNOWN일 때만 채운다(BUILD_ORDER PRF-182, 마이그레이션 0002)
+    nextQueryAt: at('next_query_at'),
+    // UNKNOWN 조회 실행기가 잡은 횟수. 다음 간격을 정한다
+    queryAttempts: integer('query_attempts').notNull().default(0),
+    // UNKNOWN이 1시간 [가정] 넘었다고 처음 알린 시각(두 번 알리지 않는다)
+    overdueAt: at('overdue_at'),
+    // 금액·주문 어긋남·결제사 쪽 취소의 SEV1을 낸 시각(결제마다 한 번, BUILD_ORDER PRF-182 코드 리뷰)
+    anomalyLoggedAt: at('anomaly_logged_at'),
   },
   (t) => [
     uniqueIndex('payment_order_id_key').on(t.orderId),
+    // UNKNOWN 조회 잡기. 끝난 행은 인덱스에 없다
+    index('payment_unknown_query_idx').on(t.nextQueryAt).where(sql`${t.status} = 'UNKNOWN'`),
+    // 1시간 표시(docs/data.md §5.1 상태 쓸기 작업)
+    index('payment_unknown_status_changed_idx').on(t.statusChangedAt).where(sql`${t.status} = 'UNKNOWN'`),
+    // UNKNOWN 행은 다음 조회 시각이 있어야 실행기가 잡는다(잡히지 않은 채 남는 행을 막는다)
+    check('payment_unknown_next_query_check', sql`${t.status} <> 'UNKNOWN' OR ${t.nextQueryAt} IS NOT NULL`),
     check('payment_status_check', sql`${t.status} IN (${STATUS_LIST})`),
     check('payment_pg_check', sql`${t.pg} IN (${PG_LIST})`),
     check('payment_amount_check', sql`${t.amount} > 0`),

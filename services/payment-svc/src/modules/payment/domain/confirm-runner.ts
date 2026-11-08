@@ -124,7 +124,7 @@ export interface PaymentEventMessage {
   readonly eventId: string;
   readonly orderId: string;
   readonly pg: PgName;
-  readonly type: 'APPROVED' | 'FAILED' | 'AWAITING_DEPOSIT' | 'UNKNOWN';
+  readonly type: 'APPROVED' | 'FAILED' | 'AWAITING_DEPOSIT' | 'UNKNOWN' | 'RESOLVED';
   readonly amount: number;
   readonly payMethodCategory?: PayMethodCategory;
   /** 결제 수단 연결값·라벨 키가 이 단계에 없어 늘 true(카드 BIN도 저장하지 않는다, BUILD_ORDER HOT-145) */

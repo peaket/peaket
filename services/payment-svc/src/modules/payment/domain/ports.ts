@@ -2,6 +2,7 @@
 import type { ConfirmPaymentCommand, PaymentRecord, PaymentState } from './confirm-command.js';
 import type { ConfirmFinish, ConfirmJob, ConfirmTarget, PaymentConfirmOutcome, PaymentEventMessage } from './confirm-runner.js';
 import type { PaymentGatewayPort, PgName } from './payment-gateway.js';
+import type { PaymentUnknownQueryOutcome, ResolvedFinish, UnknownQueryJob } from './unknown-resolver.js';
 
 /** 새 결제를 쓸 때 쓰임새가 만들어 넘기는 값 */
 export interface NewPaymentValues {
@@ -150,5 +151,75 @@ export interface PaymentConfirmSignals {
   /** payment_confirm_in_flight를 지금 돌고 있는 승인 호출 수로 둔다 */
   inFlight(count: number): void;
   /** payment_confirm_write_failures_total을 1 올린다(쓰기가 다시 해도 실패했을 때) */
+  writeFailure(): void;
+}
+
+// ---- UNKNOWN 해소(BUILD_ORDER PRF-182, docs/features/payment.md §2 'UNKNOWN 해소의 첫 구현') ----
+
+/** resolve 결과: APPLIED 원장·사건·Outbox를 커밋했다, STALE 원장이 UNKNOWN이 아니라 아무것도 쓰지 않았다 */
+export type ResolveUnknownResult = 'APPLIED' | 'STALE';
+
+/** UNKNOWN 조회 저장소(모든 쓰기는 READ COMMITTED, 문장 시간 한도 CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS) */
+export interface PaymentUnknownQueries {
+  /**
+   * 짧은 트랜잭션 하나에서 `status = 'UNKNOWN' AND next_query_at <= 지금`인 행을 `FOR UPDATE SKIP LOCKED`로 limit개 고르고(next_query_at 차례),
+   * 행마다 next_query_at = 지금 + unknownQueryClaimHoldMs(query_attempts + 1), query_attempts + 1을 쓴 뒤 커밋한다. 고른 차례로 돌려준다.
+   * @throws RangeError limit이 1 이상의 정수가 아님
+   */
+  claimDueQueries(limit: number): Promise<UnknownQueryJob[]>;
+
+  /**
+   * 답을 본 뒤 그대로 둘 때의 다음 조회 시각을 쓴다. 조건은 `status = 'UNKNOWN' AND next_query_at = 이 잡기가 쓴 값`이다(늦은 답이 다른 파드의 잡기를 덮어쓰지 않는다). 썼으면 true
+   */
+  rescheduleQuery(job: UnknownQueryJob, nextAtMs: number): Promise<boolean>;
+
+  /** `status = 'UNKNOWN' AND anomaly_logged_at IS NULL` 조건으로 anomaly_logged_at = 지금을 쓴다. 이번에 썼으면 true(그때만 SEV1 로그를 낸다) */
+  markAnomalyLogged(job: UnknownQueryJob): Promise<boolean>;
+
+  /**
+   * 잡기와 별개의 1시간 표시. 한 문장으로 `status = 'UNKNOWN' AND status_changed_at < 지금 − 1시간 AND overdue_at IS NULL`인 행을 `FOR UPDATE SKIP LOCKED`로 limit개까지 골라 overdue_at = 지금을 쓴다.
+   * @returns 이번에 표시한 행의 주문 ID(행마다 로그·지표를 낸다)
+   * @throws RangeError limit이 1 이상의 정수가 아님
+   */
+  markOverdueBatch(limit: number): Promise<string[]>;
+
+  /**
+   * 답 반영(명세 `query`). 한 트랜잭션: payment 행 FOR UPDATE → status가 UNKNOWN이 아니면 STALE
+   * → 다음 순번으로 결과 사건(exported true), 그다음 순번으로 RESOLVED 사건(exported true)
+   * → payment(status, status_changed_at = 지금, APPROVED는 approved_at, FAILED는 failure_category, pg_confirm_token 지움, next_query_at 비움)
+   * → Outbox `trade.payments`(키 = 회차 ID, 결과 사건, RESOLVED 차례, 트랜잭션의 마지막 문장).
+   */
+  resolve(job: UnknownQueryJob, finish: ResolvedFinish): Promise<ResolveUnknownResult>;
+}
+
+/** UNKNOWN 해소의 로그(주문 ID·결제사·오류 코드만 싣는다. 결제 키·토큰·금액은 싣지 않는다). 던지지 않는다 */
+export interface PaymentUnknownLog {
+  /** 조회 답의 금액이 원장과 다르다(SEV1, kind payment-unknown-amount-mismatch). 결제마다 한 번이다 */
+  amountMismatch(e: { readonly orderId: string }): void;
+  /** 조회 답의 주문 ID가 원장과 다르다(SEV1, kind payment-unknown-order-mismatch). 결제마다 한 번이다 */
+  orderMismatch(e: { readonly orderId: string }): void;
+  /** 승인을 기록한 적 없는 결제를 결제사가 취소했다(SEV1, kind payment-unknown-cancelled-at-pg, csCase PAYMENT_UNKNOWN). 주문 ID만 싣고 결제마다 한 번이다 */
+  cancelledAtPg(e: { readonly orderId: string }): void;
+  /** UNKNOWN이 1시간 [가정] 넘었다(SEV2, kind payment-unknown-overdue, csCase PAYMENT_UNKNOWN). 주문 ID만 싣는다 */
+  overdue(e: { readonly orderId: string }): void;
+  /** 결제사 어댑터가 없다(파드당 1분에 경고 한 줄, 실행기가 조절한다) */
+  noAdapter(e: { readonly pg: PgName }): void;
+  /** 답 반영 쓰기가 실패했다(밀어 둔 간격 뒤 다시 조회한다) */
+  writeFailed(e: { readonly orderId: string; readonly code: string }): void;
+  /** 답을 쓰려니 원장이 UNKNOWN이 아니었다(경고 한 줄) */
+  staleAnswer(e: { readonly orderId: string }): void;
+  /** 실행기 안의 예상 못 한 오류(what = claim·gateway·call·anomaly·reschedule·overdue). 어댑터가 safeErrorCode만 싣는다 */
+  runError(e: { readonly what: 'claim' | 'gateway' | 'call' | 'anomaly' | 'reschedule' | 'overdue'; readonly orderId?: string; readonly err: unknown }): void;
+}
+
+/** UNKNOWN 해소 지표(docs/observability.md, BUILD_ORDER PRF-182). 던지지 않는다 */
+export interface PaymentUnknownSignals {
+  /** payment_unknown_query_total{pg, outcome}를 1 올린다 */
+  outcome(pg: PgName, outcome: PaymentUnknownQueryOutcome): void;
+  /** payment_unknown_overdue_total을 1 올린다 */
+  overdue(): void;
+  /** payment_unknown_in_flight를 지금 돌고 있는 조회 수로 둔다 */
+  inFlight(count: number): void;
+  /** payment_unknown_write_failures_total을 1 올린다 */
   writeFailure(): void;
 }

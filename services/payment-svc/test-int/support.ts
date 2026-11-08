@@ -265,8 +265,8 @@ export async function putPayment(
   const amount = o.amount ?? 99_000;
   const status = o.status ?? 'ACCEPTED';
   await admin.pool.query(
-    `insert into payment (id, order_id, event_id, attempt_id, attempt_no, pg, pg_payment_ref, amount, status, idempotency_key, authenticated_at, created_at, approved_at, status_changed_at)
-     values ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, now(), now(), $10, now())`,
+    `insert into payment (id, order_id, event_id, attempt_id, attempt_no, pg, pg_payment_ref, amount, status, idempotency_key, authenticated_at, created_at, approved_at, status_changed_at, next_query_at)
+     values ($1, $2, $3, $4, 1, $5, $6, $7, $8::text, $9, now(), now(), $10, now(), case when $8::text = 'UNKNOWN' then now() end)`,
     [paymentId, orderId, newId(), newId(), pg, `ref-${orderId}`, amount, status, `confirm-${orderId}`, o.approvedAtMs === undefined ? null : new Date(o.approvedAtMs)],
   );
   const events: SeededEvent[] = [];

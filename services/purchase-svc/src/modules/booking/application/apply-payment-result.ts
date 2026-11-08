@@ -15,7 +15,7 @@ import {
   PAYMENT_RESULT_ACTOR,
   PAYMENT_RESULT_HOLD_LOG,
   PAYMENT_RESULT_SESSION_DONE_STATUSES,
-  ticketIssueDueAtMs,
+  approvalIssueDueAtMs,
   type PaymentEventType,
   type PaymentResultDecision,
   type PaymentResultEvent,
@@ -57,7 +57,7 @@ export interface ApplyPaymentResultDeps {
   /** 커밋 뒤 Saga 실행기 깨우기(실패 반영 뒤 RELEASE 작업) */
   saga: SagaWake;
   log: PaymentResultLog;
-  /** 보류 로그를 다시 남기지 않는 시간 창의 '지금'. 발권 기한 계산에는 쓰지 않는다(사건의 occurredAt을 쓴다) */
+  /** 보류 로그를 다시 남기지 않는 시간 창의 '지금'과 T13 발권 기한의 반영 시각. T9·T16의 발권 기한에는 쓰지 않는다(사건의 occurredAt을 쓴다) */
   clock: Clock;
   /**
    * 전이를 커밋한 뒤 부를 것(결제 결과 long polling의 기다림 깨우기, PaymentStatusWaiters.notify, BUILD_ORDER PRF-166). 던지지 않는다.
@@ -117,7 +117,7 @@ export class ApplyPaymentResult {
    * 결제 사건 하나를 주문에 반영한다.
    * - 결정이 SKIP이면 SKIPPED(로그 없음). 승인된 주문(PAYMENT_RESULT_SESSION_DONE_STATUSES)의 DUPLICATE·ALREADY_THERE면 구매 세션 끝내기만 다시 부른다(리뷰 L1)
    * - 결정이 HOLD이면 로그 한 줄(held, 같은 사건·까닭은 창 안에서 한 번) 뒤 PaymentResultHeld를 던진다
-   * - APPLY면 쓰기 갈래(approve: issueDueAtMs = ticketIssueDueAtMs(event.occurredAt), fail: release = 주문의 회차·계정·좌석, mark)로 한 트랜잭션.
+   * - APPLY면 쓰기 갈래(approve: issueDueAtMs = approvalIssueDueAtMs(전이, event.occurredAt, 지금), fail: release = 주문의 회차·계정·좌석, mark)로 한 트랜잭션.
    *   STALE PAYMENT_SEQ → SKIPPED DUPLICATE, STALE NOT_FOUND → HOLD IMPOSSIBLE, SOLD_MISMATCH → HOLD SOLD_MISMATCH(리뷰 M4),
    *   STALE STATUS → 다시 읽고 PAYMENT_RESULT_STALE_RETRIES번 더 정한다(그래도면 PaymentResultConflict)
    * - 커밋 뒤: APPROVE·MARK의 T10·T14(입금 대기)면 sessions.complete, FAIL이면 saga.kick과 sessions.unmarkPaying. T12(UNKNOWN)는 아무것도 하지 않는다 [정함: 결과가 정해지지 않았다].
@@ -169,7 +169,7 @@ export class ApplyPaymentResult {
     const base = { orderId: o.orderId, paymentEventSeq: event.eventSeq, actor: PAYMENT_RESULT_ACTOR };
     switch (d.write) {
       case 'APPROVE':
-        return this.deps.writes.approve({ ...base, transition: d.transition, eventId: o.eventId, seatIds: o.seatIds, issueDueAtMs: ticketIssueDueAtMs(event.occurredAt) });
+        return this.deps.writes.approve({ ...base, transition: d.transition, eventId: o.eventId, seatIds: o.seatIds, issueDueAtMs: approvalIssueDueAtMs(d.transition, event.occurredAt, this.deps.clock.now()) });
       case 'FAIL':
         return this.deps.writes.fail({
           ...base,

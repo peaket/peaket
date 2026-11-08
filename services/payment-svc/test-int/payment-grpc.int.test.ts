@@ -95,6 +95,10 @@ const COLUMNS: Record<string, Record<string, [string, 'YES' | 'NO']>> = {
     approved_at: ['timestamp with time zone', 'YES'],
     status_changed_at: ['timestamp with time zone', 'NO'],
     failure_category: ['text', 'YES'],
+    next_query_at: ['timestamp with time zone', 'YES'],
+    query_attempts: ['integer', 'NO'],
+    overdue_at: ['timestamp with time zone', 'YES'],
+    anomaly_logged_at: ['timestamp with time zone', 'YES'],
   },
   payment_event: {
     payment_id: ['uuid', 'NO'],
@@ -136,14 +140,14 @@ const insertPayment = (over: Record<string, unknown> = {}) => {
 };
 
 describe('마이그레이션과 표 모양', () => {
-  test('PRF180_PRF181_마이그레이션(0000·0001)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 2개다', async () => {
+  test('PRF180_PRF181_PRF182_마이그레이션(0000·0001·0002)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 3개다', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
     expect(before).toEqual(['outbox', 'payment', 'payment_confirm_job', 'payment_event']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);
-    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('2');
+    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('3');
   });
 
   test.each(Object.keys(COLUMNS))('PRF180_%s 표의 칸 이름·종류·빈 값 허용이 docs/data.md ERD와 같다', async (table) => {
@@ -154,19 +158,20 @@ describe('마이그레이션과 표 모양', () => {
     expect(Object.fromEntries(rows.map((r) => [r.column_name, [r.data_type, r.is_nullable]]))).toEqual(COLUMNS[table]);
   });
 
-  test('PRF180_payment_confirm_job.attempts 기본값은 0이고 payment.created_at·payment_confirm_job.created_at 기본값은 now()다', async () => {
+  test('PRF180_PRF182_payment_confirm_job.attempts와 payment.query_attempts 기본값은 0이고 payment.created_at·payment_confirm_job.created_at 기본값은 now()다', async () => {
     const rows = await q<{ table_name: string; column_name: string; column_default: string }>(
       `select table_name, column_name, column_default from information_schema.columns where table_schema = 'public' and column_default is not null and table_name in ('payment', 'payment_confirm_job') order by table_name, column_name`,
     );
     expect(rows).toEqual([
       { table_name: 'payment', column_name: 'created_at', column_default: 'now()' },
+      { table_name: 'payment', column_name: 'query_attempts', column_default: '0' },
       { table_name: 'payment_confirm_job', column_name: 'attempts', column_default: '0' },
       { table_name: 'payment_confirm_job', column_name: 'created_at', column_default: 'now()' },
     ]);
   });
 
   test('PRF180_CHECK: 상태 일곱 값과 결제사 셋만 받고, 금액 0 이하·순번 0·결제 수단 참조와 BIN의 짝이 어긋나면 23514로 거절한다 [ASVS v5.0.0-2.3.4]', async () => {
-    for (const status of ['ACCEPTED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'FAILED', 'PARTIAL_CANCELED', 'CANCELED']) await expect(insertPayment({ status }), status).resolves.toBeDefined();
+    for (const status of ['ACCEPTED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'FAILED', 'PARTIAL_CANCELED', 'CANCELED']) await expect(insertPayment({ status, ...(status === 'UNKNOWN' ? { next_query_at: new Date() } : {}) }), status).resolves.toBeDefined();
     for (const p of ['TOSS', 'PORTONE', 'SIMULATOR']) await expect(insertPayment({ pg: p }), p).resolves.toBeDefined();
     await expect(insertPayment({ payment_method_ref: 'r', card_bin: '123456' })).resolves.toBeDefined();
     const bads: Record<string, unknown>[] = [
@@ -412,7 +417,7 @@ describe('승인 명령 접수 ConfirmPayment', () => {
     const f = tossConfirm();
     const first = await confirm(f.request);
     const approvedAtMs = Date.parse('2026-11-09T02:03:04.567Z');
-    await q('update payment set status = $2, approved_at = $3 where order_id = $1', [f.orderId, status, approved ? new Date(approvedAtMs) : null]);
+    await q(`update payment set status = $2::text, approved_at = $3, next_query_at = case when $2::text = 'UNKNOWN' then now() end where order_id = $1`, [f.orderId, status, approved ? new Date(approvedAtMs) : null]);
     const before = await ledgerOf(admin, f.orderId);
 
     const reply = await confirm(f.request);

@@ -3,7 +3,11 @@
 export * from './domain/confirm-command.js';
 export * from './domain/ports.js';
 export * from './domain/confirm-runner.js';
+export * from './domain/unknown-resolver.js';
 export { PaymentConfirmRunner, type ConfirmRunnerTimer, type ConfirmTickResult, type PaymentConfirmRunnerDeps } from './application/payment-confirm-runner.js';
+export { PaymentUnknownResolver, type PaymentUnknownResolverDeps, type UnknownResolverTimer, type UnknownSweepResult, type UnknownTickResult } from './application/payment-unknown-resolver.js';
+export { PAYMENT_UNKNOWN_CS_CASE, paymentUnknownLog } from './adapters/payment-unknown-log.js';
+export { PromPaymentUnknownSignals } from './adapters/prom-payment-unknown-signals.js';
 export { CONFIRM_RUNNER_DB_MAX, confirmRunnerDatabaseOptions, DrizzleConfirmJobs, type DrizzleConfirmJobsOptions } from './adapters/db/drizzle-confirm-jobs.js';
 export { jsonPaymentEventCodec, TRADE_PAYMENTS_TOPIC } from './adapters/payment-events.js';
 export { paymentConfirmLog } from './adapters/payment-confirm-log.js';

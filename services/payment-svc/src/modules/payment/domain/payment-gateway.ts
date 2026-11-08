@@ -89,9 +89,25 @@ export interface ConfirmResult {
 export type QueryStatus = 'READY' | 'IN_PROGRESS' | 'APPROVED' | 'PARTIAL_CANCELED' | 'CANCELED' | 'FAILED' | 'EXPIRED' | 'WAITING_FOR_DEPOSIT';
 
 export type QueryResult =
-  | { kind: 'FOUND'; paymentRef: string; orderRef: string; status: QueryStatus; amount: number; balanceAmount: number; approvedAt?: string }
+  | {
+      kind: 'FOUND';
+      paymentRef: string;
+      orderRef: string;
+      status: QueryStatus;
+      amount: number;
+      balanceAmount: number;
+      approvedAt?: string;
+      /** 결제 수단 분류. 어댑터가 결제사 값을 분류해 싣는다. 모르면 비운다(BUILD_ORDER PRF-182, 코드 리뷰) */
+      method?: PayMethodCategory;
+    }
   | { kind: 'NOT_FOUND' }
   | { kind: 'UNKNOWN' };
+
+/** 단독 조회 한 번의 선택(BUILD_ORDER PRF-182, 코드 리뷰) */
+export interface QueryOptions {
+  /** 이 조회의 시간 한도(ms). 어댑터의 읽기 시간 초과를 넘지 않는 범위에서 쓴다. 없으면 읽기 시간 초과다 */
+  timeoutMs?: number;
+}
 
 /** 취소 표준 결과(payment §2.1 결제 취소 API) */
 export type CancelOutcome = 'CANCELLED' | 'CANCEL_PENDING' | 'REJECTED' | 'UNKNOWN';
@@ -118,7 +134,8 @@ export interface PaymentGatewayPort {
   checkout(order: CheckoutOrder, attempt: CheckoutAttempt, payMethod: string): CheckoutValues;
   /** idemKey는 confirm-{orderId}(ADR-0029 결정 4) */
   confirm(c: { orderId: string; paymentRef: string; amount: number; idemKey: string }): Promise<ConfirmResult>;
-  query(paymentRef: string): Promise<QueryResult>;
+  /** NOT_FOUND는 결제사가 정해진 코드로 '없다'고 답했을 때만이다. 그 밖의 404·JSON이 아닌 답은 중간 장비의 답일 수 있어 UNKNOWN이다 */
+  query(paymentRef: string, options?: QueryOptions): Promise<QueryResult>;
   /** idemKey는 cancel-{cancellationId}. amount 'ALL'은 전액 */
   cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string }): Promise<CancelResult>;
   /** 틀린 웹훅은 null */

@@ -7,15 +7,17 @@
 // - 로그는 자식의 표준 출력·오류를 모은 글이다. 결제 키·토큰이 없는지 본다(드라이버 오류 글에 문장 값이 실리는 길을 포함해).
 import 'reflect-metadata';
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as grpc from '@grpc/grpc-js';
+import { buildSimulatorApp } from '@peaket/pg-simulator';
 import { createDatabase, type Database, ensureOutboxPartitions, systemClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePayment } from '../scripts/migrate.mjs';
 import { freePort } from './kafka.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
-import { failure, issuedSecrets, ledgerOf, outcomeCount, paymentClient, type PaymentClient, portoneConfirm, tossConfirm, unary, until } from './support.js';
+import { failure, issuedSecrets, ledgerOf, newId, outcomeCount, paymentClient, type PaymentClient, portoneConfirm, tossConfirm, unary, until } from './support.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVICE_DIR = join(HERE, '..');
@@ -88,7 +90,7 @@ interface Service extends Running {
 
 let started: Promise<Service> | undefined;
 
-async function startService(): Promise<Service> {
+async function startService(extra: Record<string, string> = {}): Promise<Service> {
   const [appPort, managementPort, grpcPort] = [await freePort(), await freePort(), await freePort()];
   const running = spawnMain({
     PEAKET_DATABASE_URL: pgc!.url,
@@ -97,6 +99,7 @@ async function startService(): Promise<Service> {
     PEAKET_GRPC_HOST: '127.0.0.1',
     PEAKET_GRPC_PORT: String(grpcPort),
     PEAKET_LOG_LEVEL: 'info',
+    ...extra,
   });
   let gone: { code: number | null; signal: NodeJS.Signals | null } | undefined;
   void running.exited.then((e) => (gone = e));
@@ -114,7 +117,7 @@ async function startService(): Promise<Service> {
   return { ...running, managementPort, grpcPort, client, exitedAt: () => gone };
 }
 
-const service = (): Promise<Service> => (started ??= startService());
+const service = (): Promise<Service> => (started ??= startService({}));
 const metricsOf = async (s: Service) => (await fetch(`http://127.0.0.1:${s.managementPort}/metrics`)).text();
 
 afterAll(async () => {
@@ -268,4 +271,89 @@ describe('payment-svc 앱 프로세스', () => {
       10_000,
     );
   }, 60_000);
+});
+
+describe('프로세스 강제 종료 복구', () => {
+  test('P-T24_결제사 호출 중인 프로세스를 SIGKILL로 끝내면 새 프로세스가 잔해를 UNKNOWN으로 쓰고 단독 조회로 승인 1건에 이르며 승인 호출은 더 나가지 않는다 [ASVS v5.0.0-16.5.2] [ASVS v5.0.0-16.5.3] [ASVS v5.0.0-2.3.4]', async () => {
+    const secretKey = `sim_sk_${randomBytes(16).toString('hex')}`;
+    const simulator = buildSimulatorApp({ secretKey, confirmLatency: { kind: 'none' } });
+    let confirmCalls = 0;
+    simulator.addHook('onRequest', async (req) => {
+      if (req.method === 'POST' && req.url === '/v1/payments/confirm') confirmCalls += 1;
+    });
+    const url = await simulator.listen({ host: '127.0.0.1', port: 0 });
+    const auth = `Basic ${Buffer.from(`${secretKey}:`).toString('base64')}`;
+    const control = (method: string, path: string, body?: unknown) =>
+      fetch(`${url}${path}`, { method, headers: { authorization: auth, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const env = { PEAKET_PG_SIM_URL: url, PEAKET_PG_SIM_SECRET_KEY: secretKey, PEAKET_PG_SIM_CLIENT_KEY: 'sim_ck_test_client' };
+
+    let victim: Service | undefined;
+    let survivor: Service | undefined;
+    try {
+      const orderId = newId();
+      const amount = 39_000;
+      const paymentKey = ((await (await control('POST', '/sim/authenticate', { orderId, amount, orderName: '공연 티켓' })).json()) as { paymentKey: string }).paymentKey;
+      // 승인 응답을 5초 늦춰 프로세스가 호출 중일 때 끝낸다(시뮬레이터는 끊겨도 승인까지 간다: 요청이 결제사에 닿은 뒤 답을 잃은 경우다)
+      expect((await control('POST', '/sim/faults', { op: 'confirm', times: 1, orderId, kind: 'delay', ms: 5_000 })).status).toBe(204);
+      const f = tossConfirm({ pg: 'SIMULATOR', orderId, paymentKey, amount, authenticatedAtMs: Date.now() - 1_000 });
+
+      victim = await startService(env);
+      await unary(victim.client, 'ConfirmPayment', f.request);
+      await until(
+        async () => confirmCalls === 1 && (await ledgerOf(admin, orderId)).events.some((e) => e.type === 'CONFIRM_SENT'),
+        'CONFIRM_SENT 커밋과 시뮬레이터 승인 호출',
+        30_000,
+        20,
+      );
+
+      victim.client.close();
+      victim.child.kill('SIGKILL');
+      const gone = await victim.exited;
+      expect(gone.code === 0).toBe(false);
+
+      const crashed = await ledgerOf(admin, orderId);
+      expect(crashed.payments[0]).toMatchObject({ status: 'ACCEPTED' });
+      expect(crashed.jobs).toHaveLength(1);
+      expect(crashed.jobs[0]!.lease_owner).not.toBeNull();
+
+      // 임대(75초 [가정])를 기다리지 않고 지난 것으로 맞춘다. 프로세스 쪽 값이 아니라 DB 칸만 건드린다
+      await admin.pool.query(`update payment_confirm_job set lease_until = now() - interval '1 second' where payment_id = $1`, [crashed.payments[0]!.id]);
+
+      survivor = await startService(env);
+      await until(
+        async () => (await ledgerOf(admin, orderId)).payments[0]!.status === 'APPROVED',
+        '새 프로세스가 단독 조회로 승인을 쓴다',
+        60_000,
+        200,
+      );
+
+      const { payments, events, jobs } = await ledgerOf(admin, orderId);
+      expect(payments[0]!.approved_at).not.toBeNull();
+      expect(jobs).toEqual([]);
+      expect(events.map((e) => [e.type, e.exported])).toEqual([
+        ['ACCEPTED', false],
+        ['CONFIRM_SENT', false],
+        ['UNKNOWN', true],
+        ['APPROVED', true],
+        ['RESOLVED', true],
+      ]);
+      expect(confirmCalls).toBe(1);
+      const charges = (await (await control('GET', '/sim/ledger')).text())
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as { order_ref: string })
+        .filter((r) => r.order_ref === orderId);
+      expect(charges).toHaveLength(1);
+      const metrics = await metricsOf(survivor);
+      expect(metrics).toMatch(/^payment_confirm_total\{pg="SIMULATOR",outcome="restart".*\} 1/m);
+      expect(metrics).toMatch(/^payment_unknown_query_total\{pg="SIMULATOR",outcome="approved".*\} 1/m);
+      expect(survivor.output()).not.toContain(paymentKey);
+    } finally {
+      victim?.client.close();
+      if (victim && !victim.exitedAt()) victim.child.kill('SIGKILL');
+      survivor?.client.close();
+      if (survivor && !survivor.exitedAt()) survivor.child.kill('SIGKILL');
+      await simulator.close();
+    }
+  }, 180_000);
 });
