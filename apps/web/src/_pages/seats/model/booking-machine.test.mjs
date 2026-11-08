@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { getAdjacencyMap, getShortestPaths } from '@xstate/graph';
 import { createActor } from 'xstate';
 import { bookingMachine, holdIdempotencyKey, holdOutcome } from './booking-machine.ts';
-import { holdClock } from './hold-clock.ts';
+import { holdClock } from '../../../shared/lib/hold-clock.ts';
 
 const seat = (n) => ({ seatId: `A-1-${n}`, label: `A구역 1열 ${n}번`, tier: 'tier-r' });
 const start = (limit = 4) => createActor(bookingMachine, { input: { limit } }).start();

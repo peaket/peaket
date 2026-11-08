@@ -37,6 +37,9 @@ const seatDemoAdmission = () => ({
   }),
 });
 
+/** 결제 화면도 입장 저장값과 홀드가 있어야 머문다(없으면 대기실로 옮긴다). 홀드를 읽지 못해 '불러오지 못함'까지 잰다(회귀 방지다) */
+const checkoutDemoStorage = () => ({ ...seatDemoAdmission(), [`peaket.hold.${SEAT_DEMO_EVENT}`]: JSON.stringify({ holdId: 'lighthouse-hold', seatIds: ['A-1-1'], expiresAt: '2099-01-01T00:00:00Z' }) });
+
 /** @param {string} host */
 export function lighthousePages(host) {
   const at = (name, path) => `http://${host}:${portOf(app(name), 'prod')}${path}`;
@@ -45,7 +48,7 @@ export function lighthousePages(host) {
     { name: '공연 상세', url: at('web', '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01'), row: '홈·공연 상세·굿즈(ISR)' },
     { name: '대기실 셸', url: `http://${host}:${QUEUE_ROOM.port}${QUEUE_ROOM.path}`, row: '대기실 경량 페이지' },
     { name: '좌석 화면 데모', url: at('web', `/booking/${SEAT_DEMO_EVENT}/seats`), row: '좌석 화면', sessionStorage: seatDemoAdmission() },
-    { name: '결제 데모', url: at('web', '/booking/evt-lumen-1025/checkout'), row: '결제 화면' },
+    { name: '결제 데모', url: at('web', `/booking/${SEAT_DEMO_EVENT}/checkout`), row: '결제 화면', sessionStorage: checkoutDemoStorage() },
     { name: '월렛', url: at('web', '/my/tickets'), row: '월렛' },
     { name: '관제 대시보드 데모', url: at('console', '/'), row: '관제 콘솔' },
     { name: '파트너 판매 현황 데모', url: at('partner', '/events'), row: '파트너 콘솔' },

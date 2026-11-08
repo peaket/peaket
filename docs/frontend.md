@@ -611,7 +611,8 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | sessionStorage | `peaket.providers.merged` | 지금 계정이 계정 합치기로 흡수되어 흡수 안내로 떠난 시각(밀리초). 흡수 안내(`?ended=MERGED`)를 방금 흡수 확정을 받은 이 탭에만 보이려고 둔다(docs/features/identity.md §2.1 '계정 병합의 첫 구현' 화면, 2026-11-05, BOT-043이 넘긴 것) | 탭(남긴 지 1분 [가정] 안일 때만 믿는다) | 흡수 안내 화면이 열릴 때(늘 지운다). 로그아웃 정리는 이 표시를 남기기 전에 돈다 | 등급 밖(숫자) |
 | localStorage | `peaket.autoassign.{eventId}` | 희망 조건 `{v: 1, firstTierId, count, wheelchair, secondTierId?, allowSplit, savedAt}`(등급 ID는 공개 요약 `priceTiers`, 매수 상한은 `perPersonLimit`, ADR-0212) | 판매 종료까지 | 로그아웃, 배정 확정, 판매 종료 | 등급 밖 |
 | sessionStorage | `peaket.hold.{eventId}` | 지금 홀드(`holdId`, `seatIds`, `expiresAt`). 결제 화면이 `GET /v1/holds/{holdId}`로 다시 읽을 때 쓴다(ADR-0225) | 탭 | 홀드 만료·해제, 구매 세션 끝, 로그아웃 | 등급 밖 |
-| sessionStorage | `peaket.checkout.{holdId}` | 동의 체크, 고른 결제 수단(이름·전화는 없다) | 탭 | 결제 접수, 구매 세션 끝 | 등급 밖 |
+| sessionStorage | `peaket.checkout.{holdId}` | 동의 체크, 고른 결제 수단(이름·전화는 없다) | 탭 | 결제 접수, 구매 세션 끝, 홀드 만료(2026-11-09 HOT-355, ADR-0228) | 등급 밖 |
+| sessionStorage | `peaket.checkout.{holdId}.order` | 만든 주문 ID(새로고침해도 같은 주문으로 돌아온다, ADR-0228) | 탭 | 결제 접수, 구매 세션 끝, 홀드 만료 | 등급 밖 |
 | sessionStorage | `peaket.accept.{orderId}` | 결제 접수를 보낸 시각과 그 멱등키(결제사 값은 넣지 않는다) | 탭 | 결과 확정, 구매 세션 끝 | 등급 밖 |
 | localStorage | `peaket.recentSearches` | 검색어 최대 10개 [가정] | 사용자가 지울 때까지 | 하나씩·전체 지우기. 로그아웃 때는 지우지 않는다(비로그인 상태에서도 쓴다) | 수집 안 함(data-classification) |
 | localStorage | `peaket.wishQueue` | 오프라인 찜·해제 대기(공연 ID, 동작, 시각. 같은 공연은 마지막 동작 하나만 남긴다, ADR-0093, 기술 검토 낮음-060) | 보낼 때까지 | 보낸 뒤, 로그아웃 | 등급 밖 |

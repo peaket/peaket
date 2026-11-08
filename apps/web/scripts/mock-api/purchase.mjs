@@ -38,6 +38,10 @@ const readRaw = (req) =>
 export function createPurchaseMock({ now, state }) {
   /** token → { clientKey, seq } */
   const sessions = new Map();
+  /** holdId → 홀드 응답(주문·다시 읽기) */
+  const holds = new Map();
+  /** 멱등 키 → 주문 */
+  const orders = new Map();
 
   /** 스냅샷을 연 입장 토큰의 임시 공개키를 둔다. 처음이고 키가 없으면 false */
   function open(token, clientKey) {
@@ -76,6 +80,42 @@ export function createPurchaseMock({ now, state }) {
     open,
     /** 처리했으면 true */
     handle(req, p, url, io) {
+      const readHold = /^\/v1\/holds\/([^/]+)$/.exec(p);
+      if (readHold && req.method === 'GET') {
+        const found = holds.get(readHold[1]);
+        if (!sessions.get(req.headers['x-admission-token'])) return (io.problem(401, 'purchase-session-ended', '예매 시간이 끝났습니다'), true);
+        if (!found || Date.parse(found.expiresAt) <= now()) return (io.problem(404, 'not-found', '찾을 수 없습니다'), true);
+        return (io.send(200, found), true);
+      }
+      if (p === '/v1/orders' && req.method === 'POST') {
+        const { send, problem } = io;
+        void (async () => {
+          const raw = await readRaw(req);
+          const bad = verify(req, p + url.search, raw);
+          if (bad) return problem(401, bad, '요청 서명을 확인하지 못했습니다');
+          const body = JSON.parse(raw.toString('utf8') || 'null');
+          const key = String(req.headers['idempotency-key'] ?? '');
+          if (!key) return problem(400, 'invalid-request', '멱등 키가 없습니다');
+          const seen = orders.get(key);
+          if (seen) return seen.body === raw.toString('utf8') ? send(201, seen.order) : problem(422, 'idempotency-key-reused', '같은 키로 다른 요청을 보냈습니다');
+          const mode = state.order;
+          const held = holds.get(body?.holdId);
+          if (mode === 'hold-gone' || !held) return problem(404, 'not-found', '찾을 수 없습니다');
+          if (body?.consents?.provisionToSeller !== true || body?.consents?.salesTerms !== true) return problem(422, 'consent-required', '동의가 필요합니다');
+          if (mode === 'consent-outdated' || body?.consents?.consentVersion !== '2026-10-30') return problem(422, 'consent-version-outdated', '동의 문안이 바뀌었습니다');
+          if (mode === 'no-id') return problem(403, 'identity-verification-required', '본인확인이 필요합니다');
+          if (mode === 'restricted') return problem(403, 'booking-restricted', '예매가 제한되어 있습니다');
+          if (mode === 'other-tab') return problem(409, 'hold-already-ordered', '이미 주문을 만들었습니다');
+          if (mode === 'paused') return problem(423, 'sale-paused', '판매가 잠시 멈췄습니다');
+          if (mode === 'sale-ended') return problem(410, 'sale-ended', '판매가 끝났습니다');
+          if (mode === 'down') return problem(503, 'internal', '잠시 후 다시 시도해 주세요', { 'retry-after': '1' });
+          if (AUTH_FAILURES[mode]) return problem(401, AUTH_FAILURES[mode], '구매 세션을 확인하지 못했습니다');
+          const order = { orderId: randomUUID(), amount: held.totalAmount, status: 'CREATED', items: held.seats };
+          orders.set(key, { order, body: raw.toString('utf8') });
+          return send(201, order);
+        })().catch(() => io.problem(500, 'internal', '오류'));
+        return true;
+      }
       const hold = /^\/v1\/events\/([^/]+)\/holds$/.exec(p);
       const leave = /^\/v1\/events\/([^/]+)\/purchase-session$/.exec(p);
       if (!(hold && req.method === 'POST') && !(leave && req.method === 'DELETE')) return false;
@@ -107,7 +147,9 @@ export function createPurchaseMock({ now, state }) {
         if (mode === 'down') return problem(503, 'seat-store-unavailable', '잠시 후 다시 시도해 주세요', { 'retry-after': '1' });
         const seatIds = body?.auto ? ['B-1-3', 'B-1-4'] : (body?.seatIds ?? []);
         const seats = seatIds.map(seatOf);
-        return send(201, { holdId: randomUUID(), seatIds, expiresAt: new Date(now() + HOLD_MS).toISOString(), extendable: true, fencingToken: 1, seats, totalAmount: seats.reduce((n, s) => n + s.price, 0), ...(body?.auto ? { assignResult: 'FIRST' } : {}) });
+        const created = { holdId: randomUUID(), seatIds, expiresAt: new Date(now() + HOLD_MS).toISOString(), extendable: true, fencingToken: 1, seats, totalAmount: seats.reduce((n, s) => n + s.price, 0), ...(body?.auto ? { assignResult: 'FIRST' } : {}) };
+        holds.set(created.holdId, created);
+        return send(201, created);
       })().catch(() => problem(500, 'internal', '오류'));
       return true;
     },
