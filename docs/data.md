@@ -937,11 +937,13 @@ erDiagram
     payment ||--o{ webhook_receipt : "dedup key(PG별)"
     payment_entry_pause ||--o{ payment_entry_trial : "시험 재개로 받은 결제(ADR-0105)"
     payment ||--o{ payment_cancel : "부분·전액 취소"
+    payment ||--o| payment_confirm_job : "승인 명령(추천 적용 2026-11-09, BUILD_ORDER PRF-180)"
     payment {
         uuid id PK "UUIDv7(시간순). 표는 나누지 않는다(ADR-0114)"
         uuid order_id "UNIQUE. 승인 요청은 주문당 한 번(ADR-0114)"
         uuid event_id "회차. 결제를 만들 때 주문에서 복사, 바뀌지 않음. 정산 합계와 결제 사건의 회차(ADR-0086)"
         uuid attempt_id
+        int attempt_no "같은 주문의 결제 시도 순번(1부터). 승인 명령이 싣고 온 값이고 결제 사건 attemptNo가 쓴다(추천 적용 2026-11-09, BUILD_ORDER PRF-180)"
         text pg "TOSS|PORTONE|SIMULATOR(결제 시도에서 고정)"
         text pg_payment_ref "토스 paymentKey 또는 포트원 paymentId"
         text pg_confirm_token "포트원 paymentToken, 결과 확정 시 삭제"
@@ -966,6 +968,14 @@ erDiagram
         text type "결제 상태 전이 사건의 종류(trade.payments type과 같은 값)와 내부 표시(CONFIRM_SENT 등)"
         bool exported "밖으로 내보내는 사건인지. CONFIRM_SENT 같은 내부 표시는 내보내지 않는다(docs/features/payment.md §4.2 5번)"
         timestamptz occurred_at
+    }
+    payment_confirm_job {
+        uuid payment_id PK "FK payment. 승인 명령 하나(추천 적용 2026-11-09, BUILD_ORDER PRF-180). 끝난 명령은 행을 지운다"
+        timestamptz next_attempt_at "NOT NULL. 다음 시도 시각. 잡기 인덱스 (next_attempt_at)"
+        text lease_owner "실행기가 잡은 파드. 널 허용"
+        timestamptz lease_until "잡은 동안의 임대 끝. 널 허용"
+        int attempts "NOT NULL DEFAULT 0, 0 이상"
+        timestamptz created_at "NOT NULL DEFAULT now()"
     }
     payment_entry_pause {
         text pg PK "TOSS|PORTONE|SIMULATOR(새 결제 진입 정지 상태, ADR-0105)"
@@ -2385,6 +2395,14 @@ erDiagram
 - 열세 번째 마이그레이션(0012, 추천 적용 2026-11-09, BUILD_ORDER PRF-144): `event_sale`(회차마다 한 행. 판 번호 `version`은 1 이상, `status`·`previous_status`는 다섯 상태만 `CHECK`, 좌석 수 칸과 `reopen_count`는 0 이상)을 만들고 `seat_sale_pending_idx ON seat_sale (event_id, reserved_at) WHERE status = 'PENDING'`을 더한다(`reserved_at`까지 둔 것은 추천 적용 2026-11-09, BUILD_ORDER PRF-144, 코드 리뷰). 정본 칸에 `previous_status`·`sold_out_tiers`·`open_at`·`counted_at`을 더한 까닭은 같은 판을 다시 낼 때 그 판의 값이 필요하기 때문이다(docs/features/seat-hold.md §4 '판정의 첫 구현'). 인덱스의 까닭과 대가는 §5.1이다.
 - 마이그레이션 SQL은 `pnpm --filter @peaket/purchase-svc db:generate`(`scripts/db-generate.mjs`가 `tsconfig.drizzle.json`으로 drizzle-kit을 띄운다. 표 정의가 `@peaket/platform`의 `idempotencyRecordTable`을 가져와, 원본 경로를 읽으면 실패하므로 빌드된 패키지를 읽는다)로 만들고, 파티션·BRIN·트리거처럼 Drizzle 0.45가 나타내지 못하는 문장은 손으로 덧붙인다.
 
+**결제 표 마이그레이션(추천 적용 2026-11-09, BUILD_ORDER PRF-180, ADR-0114)**: payment DB의 첫 마이그레이션(`services/payment-svc/migrations/0000_payment.sql`)이 승인 명령 접수의 표를 만든다. 접수 규칙의 정본은 docs/features/payment.md §2 '승인 명령 접수의 첫 구현'이다.
+- `payment`: 위 ERD 칸 그대로이고 `status`는 일곱 값만, `pg`는 셋만(`CHECK`), `amount > 0`, `attempt_no >= 1`, `order_id` 유일(주문당 결제 1건)이다. `payment_method_ref`와 `card_bin`은 함께 있거나 함께 빈다(`CHECK`). `event_id`·`attempt_id`·`pg_payment_ref`·`idempotency_key`·`authenticated_at`·`status_changed_at`은 `NOT NULL`이다(승인 명령이 그 값을 싣고 온다). 표는 나누지 않는다(ADR-0114).
+- `payment_event`: 기본 키 `(payment_id, seq)`, `seq >= 1`, 결제에 외래 키를 건다. 접수의 내부 표시 행(`ACCEPTED`, `exported = false`)이 순번 1이다.
+- `payment_confirm_job`: 위 ERD 칸, 잡기 인덱스 `payment_confirm_job_next_idx (next_attempt_at)`, 결제에 외래 키를 건다. `order_saga_job`과 같은 꼴이고 끝난 명령은 행을 지워 작은 표로 둔다.
+- Outbox 부모 표: platform 템플릿 `0002_outbox.sql`과 같은 문장을 `0000`에 손으로 덧붙였다(일 파티션은 `ensureOutboxPartitions`가 만든다).
+- 다른 표(`webhook_receipt`·`payment_entry_pause`·`payment_cancel` 등)와 §5.1의 쓸기·정산 인덱스는 그것을 쓰는 단계가 더한다. 사건 소비자가 아직 없어 `held_event`도 두지 않는다.
+- 마이그레이션 SQL은 `pnpm --filter @peaket/payment-svc db:generate`(purchase-svc와 같은 `scripts/db-generate.mjs`)로 만들었다.
+
 ## 5. 동시성 제어가 필요한 지점
 
 | 동시성 경합 지점 | 제어 메커니즘 | 검증 및 보증 수단 |
@@ -2432,6 +2450,7 @@ erDiagram
 | 발권 재시도 큐를 두 파드가 함께 잡음(추천 적용 2026-11-05, ADR-0180, BUILD_ORDER PRF-170): 같은 큐 행을 두 실행기가 고름, 임대가 끝난 뒤 늦게 온 발권 답과 새 시도가 겹침, 발권 답과 보상이 겹침 | 잠금 차례는 '큐 행 → 주문 행'이다(성공 반영과 `ISSUE_DELAYED`가 큐 행을 먼저 잠근다. 보상(PRF-173)도 큐 행을 먼저 잠그고 지운 뒤 주문을 바꿔야 서로 기다리지 않는다, 2026-11-05 코드 리뷰). 잡기는 Saga 작업 행과 같은 꼴이다. 짧은 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 고른 행에 `lease_until`(지금 + 30초 [가정])을 쓰고 커밋한 뒤 잠금 밖에서 ticket-svc를 부르므로, 임대가 끝나기 전에는 다른 파드가 그 행을 집지 않는다. 임대가 끝나 두 파드가 같은 주문을 부르게 돼도 `IssueTickets`가 주문 ID로 멱등이라 티켓은 한 번만 생긴다. 성공 쓰기의 T18은 출발 상태가 APPROVED일 때만 바꾸는 조건부 갱신이라, 둘째 답이나 보상 뒤에 온 답은 상태를 바꾸지 않고 큐 행만 지운다(명세 `issueAck`). `ISSUE_DELAYED`·기한 넘김은 `delayed_at`·`overdue_at`을 같은 트랜잭션에 적어 다음 틱에 다시 고르지 않고, `ISSUE_DELAYED`의 `eventKey`가 주문마다 고정이라 두 파드가 함께 내도 받는 쪽이 한 번만 처리한다 | 발권 실행기 통합 시험(실제 PostgreSQL), P-T15(발권 gRPC 중복 전달), P-T39 |
 | 결과 당기기를 두 파드가 함께 잡음(추천 적용 2026-11-06, ADR-0180, BUILD_ORDER PRF-171): 같은 작업 행을 두 파드의 당기기가 고름, 당기기와 늦게 온 결과 사건이 같은 결과를 함께 반영하려 함, 당기기가 고른 `CONFIRM` 행을 Saga 실행기도 다시 돌림 | 짧은 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 고른 행에 `pull_next_at`(지금 + 5초 [가정])을 쓰고 커밋한 뒤 잠금 밖에서 `BatchGetPayments`를 부르므로, 다음 점검 시각 전에는 다른 파드가 그 행을 고르지 않는다(ADR-0140 결정 1). 두 길로 온 같은 결과는 사건과 같은 반영 함수가 같은 순번을 걸러(`payment_event_seq < 순번`, ADR-0146 결정 2) 한 번만 반영한다. 반영의 승인·실패 트랜잭션은 작업 행을 먼저 잡으므로(작업 행 → 주문 행) 겹친 Saga `CONFIRM` 실행은 0행이 되어 물러난다(위 결과 반영 행과 같다) | 결과 당기기 통합 시험(실제 PostgreSQL), P-T15(사건·당기기 두 길의 중복), P-T47 |
 | 주문 만료(추천 적용 2026-11-09, BUILD_ORDER PRF-172): 만료와 결제 접수가 겹침, 세 사건의 고리와 안전망이 같은 주문을 함께 판정함, READY 결제 시도의 만료와 결제 접수가 겹침 | 만료 판정은 주문 행을 `FOR UPDATE`로 잠근 뒤 상태와 결제 시도를 다시 보고, 상태가 CREATED·AUTHENTICATED일 때만 바뀌는 조건부 전이 T5·T6으로 끝낸다. 결제 접수(T3·T4)도 주문 행을 먼저 잠그므로 둘 중 하나만 이긴다(잠금 차례 '주문 행 → 결제 시도 행', 위 결제 접수 행). 접수가 이기면 만료는 `NOT_OPEN`으로 끝나고, 만료가 이기면 접수는 409 `order-expired`다(PRF-162). 같은 주문을 여러 번 판정해도 조건부 전이라 하나만 효과가 있다. READY 만료는 결제 시도 행만 바꾸는 조건부 UPDATE 한 문장이라 주문 행을 쥐지 않고, 그 뒤 판정이 '주문 행 → 결제 시도 행' 차례로 다시 잡는다. 시도가 먼저 만료되면 접수의 READY → ACCEPTED가 0행이라 409 `payment-attempt-mismatch`다. Redis 읽기는 트랜잭션을 열기 전에 한다(DB 잠금을 쥔 채 Redis를 부르지 않는다) | P-T41 ③(만료 직전 접수)·④(사건 유실 뒤 안전망), 만료 판정 통합 시험(실제 PostgreSQL) |
+| 승인 명령 접수(추천 적용 2026-11-09, BUILD_ORDER PRF-180, ADR-0180): 같은 주문의 `ConfirmPayment` 두 개가 겹침(Saga가 데드라인 뒤 다시 보냄, 두 파드), 한 주문을 다른 결제사로 부름 | `INSERT payment … ON CONFLICT (order_id) DO NOTHING`의 유일 제약이 하나만 받는다. 뒤 쪽은 앞 쪽이 커밋할 때까지 유일 확인에서 기다리고, 커밋되면 0행이라 있는 행을 읽어 같은 답을 준다. 원장·이력 첫 행·승인 명령은 한 트랜잭션이라 진 쪽은 아무것도 쓰지 않는다. 있는 행의 시도·결제사·금액이 요청과 다르면 `FAILED_PRECONDITION`으로 거절하고 SEV2 로그를 남긴다(결제사를 바꾸지 않는다) | P-T53(실제 PostgreSQL로 동시 두 요청 → 원장 1행·승인 명령 1행과 같은 답, 다른 결제사 거절) |
 | 좌석 상태 전이(`seat_hold`·`seat_sale`) UPDATE 과다로 인한 성능 저하 | `seat_hold`·`seat_sale`의 `status` 전이는 부분 유니크 인덱스의 조건 열을 바꾸므로 HOT(Heap-Only Tuples) 갱신이 되지 않는다(PostgreSQL 18 `relcache.c`가 인덱스 조건 열을 HOT를 막는 열에 넣는다). `fillfactor`는 인덱스 밖 열만 바꾸는 갱신(`purchase_quota.used` 등)에 쓴다. `seat_hold`는 표별 `autovacuum_vacuum_scale_factor`를 0.02 [가정](기본 0.2)로 낮춰 청소를 앞당긴다(추천 적용 2026-10-22, ADR-0083) | K3 데이터베이스 부하 튜닝(죽은 행 수·인덱스 크기) |
 
 데이터베이스 인덱스는 다음을 표준으로 만든다. 활성 판매의 유일 부분 인덱스 `seat_sale (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`(§2), 홀드 원장의 활성 홀드 유일 부분 인덱스 `seat_hold (event_id, seat_id) WHERE status = 'HELD'`, 회차·좌석별 등급 정본 `event_seat_price (event_id, seat_id)` 기본 키(2026-10-28 좌석 Redis 장애 때의 비상 홀드 경로를 없애 잠금 대상이 아니다, ADR-0121), 검색 읽기 모델 `search_term`의 띄어쓰기 없앤 값·낱자·초성에 둔 앞부분 일치용 B-tree 인덱스(`text_pattern_ops`)다(ADR-0094). 트랜잭션 격리 수준 실험(READ COMMITTED, REPEATABLE READ, SERIALIZABLE 환경에서 쓰기 스큐 재현)으로, 애플리케이션 계층의 비즈니스 로직에만 기대지 않고 데이터베이스의 물리 유니크 제약을 마지막 안전 방어선으로 둔 설계가 타당함을 보인다.
@@ -2448,6 +2467,8 @@ erDiagram
 | 좌석 비트맵 다시 만들기(purchase, RB-06) | 회차의 활성 판매(`seat_sale` PENDING·SOLD)와 만료 전 활성 홀드(`seat_hold` HELD, `expires_at > now()`)를 회차로 읽기. 2026-10-28 비상 홀드 경로(좌석 ID 순 `FOR UPDATE`)를 없애 그 쿼리와 만료 쓸기 인덱스 `seat_hold (expires_at) WHERE status = 'HELD'`는 만들지 않는다(추천 적용 2026-10-28, ADR-0121) | `seat_sale`·`seat_hold` 활성 부분 유일(회차 범위) | 부분 인덱스의 `Index Scan`(회차 하나, 만 건 단위) | 다시 만들기 시간, 읽은 행 수 |
 | 판매 확정·결제 접수(purchase) | 멱등 기록 표·주문·`seat_sale` INSERT, `purchase_quota` 조건부 UPDATE, 결제 시도 전이 | 정본 멱등 기록 표, 활성 부분 유일 둘. 새로 `purchase_quota` 기본 키 | 표에 바로 INSERT(주문 표는 나누지 않는다, ADR-0114), `Update → Index Scan using purchase_quota_pkey`(HOT 갱신) | 유일 위반(23505) 수를 표별 지표로, `n_tup_hot_upd / n_tup_upd` |
 | 결제 결과 조회(purchase·payment) | `WHERE id = $1`, `payment WHERE order_id = $1`, 결과 당기기 `payment WHERE order_id = ANY($1)`(주문 최대 100개 [가정], 쓰기 인스턴스, ADR-0140) | 기본 키, `payment (order_id)` 유일 인덱스(ADR-0114) | `Index Scan`(표를 나누지 않아 가지치기가 필요 없다) | 계획 시간(`track_planning`), long polling 동안 트랜잭션을 열지 않음. 당기기가 쓰기 인스턴스 CPU를 5%p [가정] 넘게 올리면 읽기 복제본 + 순번 확인으로 바꾼다(ADR-0140 되돌릴 조건) |
+| 승인 명령 접수(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-180) | `INSERT INTO payment … ON CONFLICT (order_id) DO NOTHING RETURNING id`, 처음이면 `payment_event`·`payment_confirm_job` INSERT, 0행이면 `payment WHERE order_id = $1` | `payment (order_id)` 유일 인덱스, 잡기 `payment_confirm_job (next_attempt_at)`(실행기가 쓴다, PRF-181) | 표에 바로 INSERT(표를 나누지 않는다, ADR-0114) | 다시 받은 수(`payment_confirm_commands_total{outcome="replayed"}`), 실행 시간 |
+| 결제 결과 당기기 서버(payment, 추천 적용 2026-11-09, BUILD_ORDER PRF-180, ADR-0140) | `select … from payment p left join lateral (select event_key, seq from payment_event e where e.payment_id = p.id and e.exported and e.type <> 'RESOLVED' order by e.seq desc limit 1) ev on true where p.order_id = any($1)`(주문 최대 100개 [가정], 쓰기 인스턴스, 문장 시간 한도 400ms [가정]) | `payment (order_id)` 유일 인덱스, `payment_event` 기본 키 `(payment_id, seq)` | `Nested Loop Left Join`(바깥 `Index Scan`, 안쪽 `Limit → Index Scan Backward`) | 안쪽 loops·Buffers, 실행 시간 |
 | 마이 티켓(ticket) | `WHERE account_id = $1 AND id < $2 ORDER BY id DESC LIMIT 50` | 새로 `ticket (account_id, id)` | `Limit → Index Scan Backward`(표를 나누지 않아 인덱스 하나만 찾는다, ADR-0114) | 실행 시간, 계획 시간 |
 | 스캐너 패키지(ticket) | 회차의 티켓 + 유효 기기 키 | 새로 `ticket (event_id) INCLUDE (seat_id, gate_zone, status, version)`, `device_key (ticket_id) INCLUDE (key_id, public_key) WHERE revoked_at IS NULL` | `Nested Loop Left Join`, 안쪽 Index Only Scan(loops ≈ 5만) | 안쪽 노드의 loops·Buffers(합계)·Heap Fetches, 맞춤 계획 강제(§5.2) |
 | 변경분(ticket) | `WHERE event_id = $1 AND seq > $2 ORDER BY seq LIMIT 5000` | 새로 `scanner_change` 기본 키 `(event_id, seq)` | `Limit → Index Scan`(정렬 없음) | 실행 시간 |

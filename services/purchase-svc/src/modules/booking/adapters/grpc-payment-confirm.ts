@@ -1,6 +1,7 @@
 // payment-svc 승인 명령 gRPC 클라이언트(PaymentService.ConfirmPayment, docs/api/proto/peaket/payment/v1/payment.proto, docs/architecture.md 시간 초과 표
 // '승인 명령 gRPC' 데드라인 200ms [가정], docs/features/payment.md §2 'Saga 1단계의 첫 구현', BUILD_ORDER PRF-165).
-// - 요청: order_id·attempt_id·pg(PgProvider)·payment_ref(toss{payment_key} | portone{payment_id, tx_id, payment_token})·amount(Money{krw}).
+// - 요청: order_id·attempt_id·pg(PgProvider)·payment_ref(toss{payment_key} | portone{payment_id, tx_id, payment_token})·amount(Money{krw})·
+//   event_id(주문의 회차)·authenticated_at(결제 시도의 인증 시각, Timestamp)·attempt_no(결제 시도 순번, BUILD_ORDER PRF-180).
 //   시뮬레이터는 toss 칸을 쓴다 [가정](proto에 시뮬레이터 전용 칸이 없다).
 // - 결과: 답을 받으면 ACCEPTED(결과가 UNSPECIFIED·UNKNOWN이면 받아 적었다고 볼 수 없어 REJECTED unexpected, 리뷰 낮음),
 //   DEADLINE_EXCEEDED 4·UNAVAILABLE 14·차단기 열림이면 RETRYABLE, 그 밖은 REJECTED. 던지지 않는다.
@@ -81,7 +82,17 @@ function requestOf(c: ConfirmCommand): Record<string, unknown> {
   const r = c.refs;
   const paymentRef =
     r.pg === 'PORTONE' ? { portone: { payment_id: r.paymentId, tx_id: r.txId, payment_token: r.paymentToken } } : { toss: { payment_key: r.paymentKey } };
-  return { order_id: c.orderId, attempt_id: c.attemptId, pg: PG_PROVIDER[c.pg], ...paymentRef, amount: { krw: c.amount } };
+  const at = c.authenticatedAtMs;
+  return {
+    order_id: c.orderId,
+    attempt_id: c.attemptId,
+    pg: PG_PROVIDER[c.pg],
+    ...paymentRef,
+    amount: { krw: c.amount },
+    event_id: c.eventId,
+    attempt_no: c.attemptNo,
+    ...(at !== undefined ? { authenticated_at: { seconds: Math.floor(at / 1000), nanos: (at % 1000) * 1_000_000 } } : {}),
+  };
 }
 
 export interface GrpcPaymentConfirmOptions {

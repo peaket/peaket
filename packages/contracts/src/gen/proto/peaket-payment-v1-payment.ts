@@ -228,6 +228,18 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "amount": {
                       "type": "peaket.common.v1.Money",
                       "id": 6
+                    },
+                    "event_id": {
+                      "type": "string",
+                      "id": 7
+                    },
+                    "authenticated_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 8
+                    },
+                    "attempt_no": {
+                      "type": "int32",
+                      "id": 9
                     }
                   }
                 },

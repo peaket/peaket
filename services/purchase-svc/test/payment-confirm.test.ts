@@ -21,11 +21,11 @@ import {
   paymentConfirmsFromEnv,
 } from '../src/modules/booking/index.js';
 import { ATTEMPT_ID, ORDER_ID, PAYMENT_KEY, PAYMENT_TOKEN, PORTONE_PAYMENT_ID, TX_ID } from './accept-cases.js';
-import { AMOUNT } from './order-cases.js';
+import { AMOUNT, EVENT, NOW } from './order-cases.js';
 
 /** 정상 승인 명령(토스) */
 function tossCommand(over: Partial<ConfirmCommand> = {}): ConfirmCommand {
-  return { orderId: ORDER_ID, attemptId: ATTEMPT_ID, pg: 'TOSS', refs: { pg: 'TOSS', paymentKey: PAYMENT_KEY }, amount: AMOUNT, deadlineMs: 200, ...over };
+  return { orderId: ORDER_ID, attemptId: ATTEMPT_ID, eventId: EVENT, attemptNo: 1, authenticatedAtMs: NOW, pg: 'TOSS', refs: { pg: 'TOSS', paymentKey: PAYMENT_KEY }, amount: AMOUNT, deadlineMs: 200, ...over };
 }
 const portoneCommand = (): ConfirmCommand =>
   tossCommand({ pg: 'PORTONE', refs: { pg: 'PORTONE', paymentId: PORTONE_PAYMENT_ID, txId: TX_ID, paymentToken: PAYMENT_TOKEN } });

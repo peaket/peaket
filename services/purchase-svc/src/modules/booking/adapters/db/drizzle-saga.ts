@@ -337,8 +337,10 @@ export class DrizzleSaga implements SagaJobs, SagaOrders, ReserveTx, SagaFailure
     if (!row) return undefined;
     const items = await db.execute(sql`select seat_id, tier, section_id from order_item where order_id = ${orderId}::uuid order by line_no`);
     const a = await db.execute(sql`
-      select id, pg, pg_order_ref, pg_payment_key, pg_tx_id, pg_payment_token, authenticated_at from payment_attempt
-      where order_id = ${orderId}::uuid and status = 'ACCEPTED'
+      select a.id, a.pg, a.pg_order_ref, a.pg_payment_key, a.pg_tx_id, a.pg_payment_token, a.authenticated_at,
+        (select count(*) from payment_attempt b where b.order_id = a.order_id and (b.created_at, b.id) <= (a.created_at, a.id)) as attempt_no
+      from payment_attempt a
+      where a.order_id = ${orderId}::uuid and a.status = 'ACCEPTED'
       limit 1`);
     const att = a.rows[0] as
       | {
@@ -349,6 +351,7 @@ export class DrizzleSaga implements SagaJobs, SagaOrders, ReserveTx, SagaFailure
           pg_tx_id: string | null;
           pg_payment_token: string | null;
           authenticated_at: Date | string | null;
+          attempt_no: number | string;
         }
       | undefined;
     let attempt: SagaAttemptView | undefined;
@@ -358,6 +361,7 @@ export class DrizzleSaga implements SagaJobs, SagaOrders, ReserveTx, SagaFailure
       attempt = {
         attemptId: att.id,
         pg,
+        attemptNo: Number(att.attempt_no),
         ...(att.pg_order_ref !== null ? { pgOrderRef: att.pg_order_ref } : {}),
         ...(refs ? { refs } : {}),
         ...(att.authenticated_at !== null ? { authenticatedAtMs: msOf(att.authenticated_at) } : {}),

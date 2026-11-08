@@ -475,7 +475,7 @@ describe('DrizzleSaga SagaOrders.read(주문 행·항목·ACCEPTED 결제 시도
       purchaseSessionId: a.o.purchaseSessionId,
       seatGen: 7,
       seats: a.o.items.map((it) => ({ seatId: it.seatId, tierId: it.tierId, sectionId: it.sectionId })),
-      attempt: { attemptId: a.attemptId, pg: 'TOSS', pgOrderRef: a.o.id, refs: a.refs, authenticatedAtMs: a.at },
+      attempt: { attemptId: a.attemptId, pg: 'TOSS', attemptNo: 1, pgOrderRef: a.o.id, refs: a.refs, authenticatedAtMs: a.at },
     });
   });
 
@@ -483,7 +483,22 @@ describe('DrizzleSaga SagaOrders.read(주문 행·항목·ACCEPTED 결제 시도
     const s = fresh();
     const refs = portoneRefs();
     const a = await accepted(s, { refs });
-    expect((await s.saga.read(a.o.id))?.attempt).toEqual({ attemptId: a.attemptId, pg: 'PORTONE', pgOrderRef: `pay-${a.o.id}`, refs, authenticatedAtMs: a.at });
+    expect((await s.saga.read(a.o.id))?.attempt).toEqual({ attemptId: a.attemptId, pg: 'PORTONE', attemptNo: 1, pgOrderRef: `pay-${a.o.id}`, refs, authenticatedAtMs: a.at });
+  });
+
+  test('P-T53_리뷰 고침 L9: 앞 시도가 대체된 뒤 접수된 시도의 순번은 2다(같은 주문의 시도를 만든 차례로 센다, ConfirmPaymentRequest.attempt_no)', async () => {
+    const s = fresh();
+    const o = await placed(s);
+    const first = await putAttempt(s, o);
+    await q(`update payment_attempt set status = 'SUPERSEDED' where id = $1`, [first]);
+    s.clock.advance(1_000);
+    const second = await putAttempt(s, o);
+    s.clock.advance(1_000);
+    const refs = tossRefs();
+    const input: AcceptInput = { orderId: o.id, attemptId: second, eventId: o.eventId, refs, seatGen: 1, actor: accountActor(o.accountId) };
+    expect(await s.accepts.accept(onceOf(o), input)).toEqual({ status: 'ACCEPTED' });
+
+    expect((await s.saga.read(o.id))?.attempt).toMatchObject({ attemptId: second, attemptNo: 2 });
   });
 
   test('구매 세션 ID가 UUID가 아닌 jti 모양(키 조각)이어도 그대로 읽는다(payment §2 좌석 묶기 입력의 구매 세션 ID)', async () => {

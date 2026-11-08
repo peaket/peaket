@@ -322,6 +322,9 @@ export class OrderSagaRunner {
         {
           orderId: order.orderId,
           attemptId: attempt.attemptId,
+          eventId: order.eventId,
+          attemptNo: attempt.attemptNo,
+          ...(authenticatedAtMs !== undefined ? { authenticatedAtMs } : {}),
           pg: attempt.pg,
           refs: confirmRefsOf(attempt),
           amount: order.amount,

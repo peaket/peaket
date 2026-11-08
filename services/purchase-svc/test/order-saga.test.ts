@@ -60,7 +60,7 @@ const KEEP_UNTIL = NOW + 3 * DAY;
 
 /** 토스 ACCEPTED 시도(2분 전에 인증) */
 function tossAttempt(over: Partial<SagaAttemptView> = {}): SagaAttemptView {
-  return { attemptId: ATTEMPT_ID, pg: 'TOSS', pgOrderRef: ORDER_ID, refs: { pg: 'TOSS', paymentKey: PAYMENT_KEY }, authenticatedAtMs: NOW - 2 * MIN, ...over };
+  return { attemptId: ATTEMPT_ID, pg: 'TOSS', pgOrderRef: ORDER_ID, refs: { pg: 'TOSS', paymentKey: PAYMENT_KEY }, authenticatedAtMs: NOW - 2 * MIN, attemptNo: 1, ...over };
 }
 
 /** ACCEPTED 주문(판 번호 SEAT_GEN) */
@@ -841,7 +841,7 @@ describe('CONFIRM 승인 명령', () => {
     fx.put(order, confirmJob());
     const out = await runner().confirmStep(confirmJob(), order);
     expect(out).toEqual({ kind: 'DONE' });
-    expect(fx.confirmCommands).toEqual([{ orderId: ORDER_ID, attemptId: ATTEMPT_ID, pg: 'TOSS', refs: { pg: 'TOSS', paymentKey: PAYMENT_KEY }, amount: AMOUNT, deadlineMs: 200 }]);
+    expect(fx.confirmCommands).toEqual([{ orderId: ORDER_ID, attemptId: ATTEMPT_ID, eventId: EVENT, attemptNo: 1, authenticatedAtMs: NOW - 2 * MIN, pg: 'TOSS', refs: { pg: 'TOSS', paymentKey: PAYMENT_KEY }, amount: AMOUNT, deadlineMs: 200 }]);
     expectInOrder(fx.calls, ['confirms.confirm', 'confirmSent.done']);
     expect(fx.doneOrders).toEqual([ORDER_ID]);
     expect(fx.jobRows.get(ORDER_ID)?.step).toBe('AWAIT');

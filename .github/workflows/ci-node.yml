@@ -83,6 +83,12 @@ jobs:
       - run: pnpm --filter @peaket/core-svc test:integration
         env:
           PEAKET_TEST_REPORT: test-report-int.json
+      # payment-svc의 승인 명령 접수·결과 조회를 실제 PostgreSQL 18로: 마이그레이션, 동시 ConfirmPayment, BatchGetPayments, 프로세스 시작(BUILD_ORDER PRF-180)
+      # 프로세스 시험은 dist를 띄우고 계약·플랫폼 패키지의 dist를 쓴다. 범위를 고른 실행(--affected)에서는 위 단계가 만들지 않았을 수 있어 여기서 만든다(캐시면 바로 끝난다)
+      - run: pnpm exec turbo run build --filter=@peaket/payment-svc...
+      - run: pnpm --filter @peaket/payment-svc test:integration
+        env:
+          PEAKET_TEST_REPORT: test-report-int.json
       # queue-svc의 진입 Lua를 실제 Valkey로: 1인 1순번(Q-T4), 선점 뒤 멈춤과 재시도(Q-T53), 입장 키 확인(FND-130) (BUILD_ORDER PRF-050), 동시 도착 묶음(Q-T24·Q-T52, PRF-060), 입장 확정 Lua(Q-T9·Q-T10·Q-T31, PRF-110)
       - run: pnpm --filter @peaket/queue-svc test:integration
         env:

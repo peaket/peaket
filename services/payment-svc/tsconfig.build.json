@@ -7,7 +7,9 @@
     "outDir": "dist",
     "declaration": true,
     "sourceMap": true,
-    "paths": {}
+    "paths": {},
+    "allowJs": false,
+    "checkJs": false
   },
   "include": ["src"]
 }

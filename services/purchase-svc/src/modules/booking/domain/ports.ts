@@ -555,6 +555,8 @@ export interface SagaAttemptView {
   readonly refs?: PaymentRefs;
   /** 결제창 인증 시각(epoch ms, 승인 기한의 기준). 비었으면 undefined */
   readonly authenticatedAtMs?: number;
+  /** 그 주문의 결제 시도를 만든 차례로 몇 번째인가(1부터, PaymentPullTarget.attemptNo와 같은 셈). 승인 명령의 attempt_no(BUILD_ORDER PRF-180) */
+  readonly attemptNo: number;
 }
 
 /** Saga가 보는 주문(주문 행·항목·ACCEPTED 결제 시도) */
@@ -794,6 +796,12 @@ export type ConfirmRefs =
 export interface ConfirmCommand {
   readonly orderId: string;
   readonly attemptId: string;
+  /** 회차(ConfirmPaymentRequest.event_id, BUILD_ORDER PRF-180). 주문의 event_id */
+  readonly eventId: string;
+  /** 결제 시도 순번(1부터, attempt_no. 결제 사건의 필수 칸 attemptNo) */
+  readonly attemptNo: number;
+  /** 결제창 인증 시각(epoch ms, authenticated_at). 결제 접수가 늘 적으므로 비는 일은 없고, 비면 칸을 빼고 보내 payment-svc가 INVALID_ARGUMENT로 거절한다 */
+  readonly authenticatedAtMs?: number;
   readonly pg: PaymentPg;
   readonly refs: ConfirmRefs;
   /** 서버 금액(원, Money.krw) */

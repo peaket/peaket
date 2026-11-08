@@ -11,7 +11,9 @@
     "paths": {
       "@peaket/platform": ["../../packages/platform/src/index.ts"],
       "@peaket/pg-simulator": ["../pg-simulator/src/index.ts"]
-    }
+    },
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "test-int", "scripts", "drizzle.config.ts"]
 }
