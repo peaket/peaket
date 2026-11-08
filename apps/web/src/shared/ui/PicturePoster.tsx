@@ -2,6 +2,7 @@
 // srcset은 파생본 폭 단계(320·640·960·1280)에서 바로 만든다. next/image의 getImageProps는 클라이언트 묶음을 키워(첫 화면 JS 예산 §5.8)
 // 쓰지 않는다. 이미지 최적화 경로(/_next/image)도 쓰지 않는다. 주소가 없으면(파생본이 아직 없다) 같은 비율의 빈 판에 이름만 보인다.
 import type { CSSProperties } from 'react';
+import { cx } from '@/shared/lib/cx';
 import { derivativeUrl, IMAGE_WIDTHS, type ImageFormat } from '@/shared/lib/image-loader';
 
 export interface PicturePosterProps {
@@ -35,7 +36,8 @@ export function PicturePoster({ src, alt, width, height, sizes, className, style
     );
   }
   return (
-    <picture className={className} style={{ display: 'block', aspectRatio: `${width}/${height}`, ...style }}>
+    // display는 클래스로 둔다. 인라인으로 두면 호출한 쪽의 hidden·md:block을 덮어 휴대폰에서 그림이 두 장 보인다
+    <picture className={cx('block', className)} style={{ aspectRatio: `${width}/${height}`, ...style }}>
       <source type="image/avif" srcSet={derivativeSrcSet(src, 'avif')} sizes={sizes} />
       <source type="image/webp" srcSet={derivativeSrcSet(src, 'webp')} sizes={sizes} />
       {/* eslint-disable-next-line @next/next/no-img-element -- 파생본을 CDN에서 바로 받는다(이미지 최적화 경로를 쓰지 않는다) */}

@@ -20,6 +20,23 @@ const app = (name) => {
   return a;
 };
 
+const SEAT_DEMO_EVENT = 'evt-lumen-1025';
+const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+
+/**
+ * 좌석 화면은 입장 저장값이 없으면 안내를 보이고 대기실로 옮긴다(d5 §5.10 '구매 세션 끝'). 대기실은 이 서버에 없어(운영은 CDN이 낸다) 404가 되고
+ * Lighthouse가 문서 오류로 멈춘다. 그래서 대기실을 지난 사람처럼 탭 저장소에 입장 저장값을 넣고 연다. 토큰은 시험용 모양뿐이고 서명은 아무도 보지 않는다.
+ * 좌석맵 파일과 스냅샷은 이 서버에 없어 화면은 '불러오지 못함'에 머문다(셸·첫 JS·지도 묶음까지 재는 회귀 방지다)
+ */
+const seatDemoAdmission = () => ({
+  [`peaket.admission.${SEAT_DEMO_EVENT}`]: JSON.stringify({
+    admissionToken: `${b64url({ alg: 'none' })}.${b64url({ jti: 'lighthouse-seat-demo', event: SEAT_DEMO_EVENT, exp: 4102444800 })}.x`,
+    // RFC 7515 A.3 공개키(가짜 API와 같은 시험 값)
+    serverEcdhPublicKey: { kty: 'EC', crv: 'P-256', x: 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU', y: 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0' },
+    seatmapLayoutPath: `/v1/events/${SEAT_DEMO_EVENT}/seatmap-layouts/2.json`,
+  }),
+});
+
 /** @param {string} host */
 export function lighthousePages(host) {
   const at = (name, path) => `http://${host}:${portOf(app(name), 'prod')}${path}`;
@@ -27,7 +44,7 @@ export function lighthousePages(host) {
     { name: '홈', url: at('web', '/'), row: '홈·공연 상세·굿즈(ISR)' },
     { name: '공연 상세', url: at('web', '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01'), row: '홈·공연 상세·굿즈(ISR)' },
     { name: '대기실 셸', url: `http://${host}:${QUEUE_ROOM.port}${QUEUE_ROOM.path}`, row: '대기실 경량 페이지' },
-    { name: '좌석 화면 데모', url: at('web', '/booking/evt-lumen-1025/seats'), row: '좌석 화면' },
+    { name: '좌석 화면 데모', url: at('web', `/booking/${SEAT_DEMO_EVENT}/seats`), row: '좌석 화면', sessionStorage: seatDemoAdmission() },
     { name: '결제 데모', url: at('web', '/booking/evt-lumen-1025/checkout'), row: '결제 화면' },
     { name: '월렛', url: at('web', '/my/tickets'), row: '월렛' },
     { name: '관제 대시보드 데모', url: at('console', '/'), row: '관제 콘솔' },

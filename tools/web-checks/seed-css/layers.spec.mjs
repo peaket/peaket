@@ -54,3 +54,13 @@ for (const app of APPS.filter((a) => DARK_FIRST_SCREEN.includes(a.name))) {
     });
   }
 }
+
+// 부품의 인라인 display가 유틸의 hidden을 덮지 않는다(2026-11-09 CI Lighthouse에서 찾음: 휴대폰 공연 상세에 포스터가 두 장 보이고 지연 로딩하는 쪽이 LCP가 됐다)
+const web = APPS.find((a) => a.name === 'web');
+for (const [label, width] of [['휴대폰', 412], ['데스크톱', 1280]]) {
+  test(`공연 상세 ${label} 폭: 히어로 포스터는 한 장만 보인다`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 823 });
+    await page.goto(`http://${HOST}:${portOf(web, 'prod')}${web.pages[1].path}`);
+    await expect(page.locator('main picture:not(#detail-body picture):visible')).toHaveCount(1);
+  });
+}

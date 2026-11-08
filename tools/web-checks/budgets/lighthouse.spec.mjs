@@ -6,7 +6,9 @@
 // 목표를 넘은 주소는 wbs 7.5.2까지 기준선 + 여유를 넘지 않게만 막는다.
 import { test, expect, chromium } from '@playwright/test';
 import lighthouse from 'lighthouse';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { HOST } from '../seed-css/apps.mjs';
 import { loadLoadTargets, loadTbtLimitMs } from '../lib/canon.mjs';
 import { lighthousePages } from './pages.mjs';
@@ -21,6 +23,29 @@ const DEBUG_PORT = 9333;
 /** NFR-012의 CLS 0.1(행에 CLS가 없을 때) */
 const NFR_012_CLS = 0.1;
 
+/** Lighthouse가 쓰는 그 puppeteer-core(새 패키지를 들이지 않는다). 탭 저장소는 탭마다 따로라 Lighthouse에 넘길 탭을 먼저 만들어 넣는다 */
+const puppeteer = createRequire(realpathSync(fileURLToPath(new URL('../node_modules/lighthouse/package.json', import.meta.url))))('puppeteer-core');
+
+/** 문서가 새로 열릴 때마다 탭 저장소를 채운 탭(Lighthouse가 저장소를 비우고 about:blank를 거쳐도 남는다) */
+async function tabWithSessionStorage(entries) {
+  const remote = await puppeteer.connect({ browserURL: `http://127.0.0.1:${DEBUG_PORT}`, defaultViewport: null });
+  const tab = await remote.newPage();
+  await tab.evaluateOnNewDocument((e) => {
+    try {
+      for (const [k, v] of Object.entries(e)) sessionStorage.setItem(k, v);
+    } catch {
+      /* about:blank에는 저장소가 없다 */
+    }
+  }, entries);
+  return {
+    tab,
+    async close() {
+      await tab.close();
+      await remote.disconnect();
+    },
+  };
+}
+
 let browser;
 test.beforeAll(async () => {
   browser = await chromium.launch({ args: [`--remote-debugging-port=${DEBUG_PORT}`] });
@@ -33,7 +58,9 @@ for (const page of lighthousePages(HOST)) {
   test(`§5.8 Lighthouse ${page.name}: 가운데 값의 LCP·CLS·총 차단 시간이 한도 안이다`, async () => {
     const runs = [];
     for (let i = 0; i < RUNS; i++) {
-      const r = await lighthouse(page.url, { port: DEBUG_PORT, output: 'json', logLevel: 'error', onlyCategories: ['performance'] });
+      const seeded = page.sessionStorage ? await tabWithSessionStorage(page.sessionStorage) : null;
+      const r = await lighthouse(page.url, { port: DEBUG_PORT, output: 'json', logLevel: 'error', onlyCategories: ['performance'] }, undefined, seeded?.tab);
+      await seeded?.close();
       expect(r?.lhr.runtimeError, `${page.url}: ${r?.lhr.runtimeError?.message}`).toBeUndefined();
       const a = r.lhr.audits;
       runs.push({ lcpMs: a['largest-contentful-paint'].numericValue, cls: a['cumulative-layout-shift'].numericValue, tbtMs: a['total-blocking-time'].numericValue });
