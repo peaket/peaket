@@ -4,8 +4,8 @@
 import { randomBytes } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
-import { commitment, drandRoundAfter, type ShuffleGroup } from '@peaket/shuffle';
-import { type CommitRecord, EVENT_SCHEDULES, type EventSchedules, LOBBY_SIGNALS, type LobbySignals, noLobbySignals, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, type ShuffleCommitStore } from '../domain/ports.js';
+import { ALGORITHM, commitment, DRAND_CHAIN, drandRoundAfter, type ShuffleGroup } from '@peaket/shuffle';
+import { type CommitRecord, EVENT_SCHEDULES, type EventSchedules, LOBBY_SIGNALS, type LobbySignals, noLobbySignals, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, SHUFFLE_DISCLOSURES, type ShuffleCommitStore, type ShuffleDisclosure, type ShuffleDisclosures } from '../domain/ports.js';
 import { BATCH_NO, COMMIT_SWEEP_MS, commitDueAtOf, type EventSchedule, fixAtOf, keepUntilOf, QueueStoreUnavailable } from '../domain/queue.js';
 
 /** 일꾼이 그 구간을 때가 지나고도 이만큼 못 만들었으면 늦은 공시로 센다(5초 주기 두 번 [가정]) */
@@ -24,7 +24,15 @@ export class ShuffleCommits {
     @Inject(EVENT_SCHEDULES) _schedules: EventSchedules,
     @Inject(CLOCK) private readonly clock: Clock,
     @Optional() @Inject(LOBBY_SIGNALS) private readonly signals: LobbySignals = noLobbySignals,
+    @Optional() @Inject(SHUFFLE_DISCLOSURES) private readonly disclosures?: ShuffleDisclosures,
+    @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
   ) {}
+
+  /** 공시 감사 기록(POL-005). 값 자체의 정본은 바뀌지 않는 q:{event:E}:shuffle이고, 이 줄은 공시한 사실을 시각과 함께 남긴다 */
+  #disclose(d: ShuffleDisclosure): void {
+    if (this.disclosures) this.disclosures.committed(d);
+    else this.logger?.info({ audit: 'shuffle_commit_disclosed', ...d }, '셔플 커밋 공시(POL-005)');
+  }
 
   #remember(key: string, rec: CommitRecord): void {
     this.#cache.delete(key);
@@ -59,6 +67,7 @@ export class ShuffleCommits {
     this.#remember(`${eventId}|${group}`, saved);
     // 이 호출이 쓴 기록일 때만 늦은 공시로 센다(공시 시각은 저장소 시각이다)
     if (saved.commit === commit && saved.atMs > commitDueAtOf(schedule) + LATE_MARGIN_MS) this.signals.commitLate();
+    if (saved.commit === commit) this.#disclose({ eventId, group, commit, chain: DRAND_CHAIN, round: saved.round, algorithm: ALGORITHM, atMs: saved.atMs });
     return saved;
   }
 }

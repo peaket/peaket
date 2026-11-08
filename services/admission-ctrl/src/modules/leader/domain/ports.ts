@@ -13,6 +13,8 @@ export interface EventPlan {
   pgTps?: number;
   /** 묶음 구간의 공시 라운드(q:{event:E}:shuffle의 round:1). 있으면 결과 공개 예정 시각을 정하고, 없으면 구간 끝 + 11초 [가정](ADR-0231 결정 8) */
   batchRound?: number;
+  /** 로비 구간의 공시 라운드(round:lobby). 있으면 로비 결과 공개 예정 시각을 정한다(없으면 늦었다고 보지 않는다, ADR-0232 결정 11) */
+  lobbyRound?: number;
 }
 
 /** 리더 상태 q:{event:E}:ctl에서 읽는 값: 운영자 목표(고정 중일 때만 `target`), 일시정지 묶음, 운영자 칸과 자동 제어 기억(ADR-0226) */
@@ -54,6 +56,8 @@ export interface TickInput {
   fields?: Record<string, string>;
   /** 묶음 결과 공개 예정 = 구간 끝 + 이 값(ms). 공시 라운드에서 정한다(없으면 11초 [가정], ADR-0231 결정 8) */
   batchResultDelayMs?: number;
+  /** 로비 결과 공개 예정 시각(ms, 공시 라운드 예정 + 5초 [가정]). 없으면 로비 게시를 늦었다고 보지 않는다(ADR-0232 결정 11) */
+  lobbyResultAtMs?: number;
 }
 
 export type TickResult =
@@ -164,5 +168,13 @@ export interface Elector {
 /** 게시(PublishBatchResults.run). 리더가 구간(묶음·로비)마다 부른다 */
 export interface Publisher {
   run(i: { eventId: string; group?: 'lobby' | number }): Promise<{ status: string; reason?: string; first?: boolean }>;
+  /** 리더를 잃으면 들고 있던 큰 목록을 비운다 */
+  forget?(): void;
 }
 export const PUBLISHER = Symbol('admission.Publisher');
+
+/** 시드 공개(RevealShuffleSeeds.run, 오픈 60분 뒤, ADR-0232 결정 7) */
+export interface SeedRevealer {
+  run(i: { eventId: string; group: 'lobby' | number; opensAtMs: number; expireAtMs: number }): Promise<{ status: string }>;
+}
+export const SEED_REVEALER = Symbol('admission.SeedRevealer');

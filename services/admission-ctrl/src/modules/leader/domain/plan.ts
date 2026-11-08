@@ -76,6 +76,13 @@ export const RB05_CHECK_MS = 1_000;
 /** RB-05 복제 확인의 WAIT 한도 [가정](queue-svc RB05_CONFIRM_WAIT_MS와 같다, ADR-0186) */
 export const RB05_CONFIRM_WAIT_MS = 500;
 
+/** 게시가 오류로 끝난 뒤 다시 부르는 간격 2초 [가정](ADR-0232 결정 12) */
+export const PUBLISH_RETRY_MS = 2_000;
+/** 멈춘 구간을 다시 보는 간격 5초 [가정]. RB-35로 풀리면 그때 이어서 게시한다 */
+export const STOPPED_RECHECK_MS = 5_000;
+/** 시드 공개를 보는 간격 5초 [가정](ADR-0232 결정 7) */
+export const SEED_REVEAL_CHECK_MS = 5_000;
+
 const DAY_MS = 24 * 3600_000;
 export const saleEndOf = (p: EventPlan): number => p.startsAtMs - DAY_MS;
 /** 회차 키 수명 = 판매 종료 + 1일 */

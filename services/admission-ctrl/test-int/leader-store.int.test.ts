@@ -271,6 +271,28 @@ test('로비셔플회차는로비표시가있는데로비게시가없으면_로�
   expect(await store.tick(tickOf(e, 1, { lobbyShuffle: true }))).toMatchObject({ serving: 50 });
 });
 
+test('[Q-T33] 로비 게시가 공개 예정보다 늦었으면 21초 전에는 로비 첫 번호를 넘지 않는다', async () => {
+  const e = newEvent();
+  await seqTo(e, 50);
+  const now = Date.now();
+  await cmd(keys.batchDone(e), ['HSET', keys.batchDone(e), 'lobby', '1:40:1', 'pub:lobby', String(now - 15_000)]);
+  await store.bump(e, 1, now + DAY);
+  // 게시 뒤 15초: 공개 예정보다 늦었으므로 8초가 아니라 21초를 기다린다
+  expect(await store.tick(tickOf(e, 1, { lobbyShuffle: true, lobbyResultAtMs: now - 20_000 }))).toMatchObject({ serving: 0, gated: 1 });
+  // 공개 예정 안이면 8초 뒤부터 나간다
+  const f = newEvent();
+  await seqTo(f, 50);
+  await cmd(keys.batchDone(f), ['HSET', keys.batchDone(f), 'lobby', '1:40:1', 'pub:lobby', String(now - 15_000)]);
+  await store.bump(f, 1, now + DAY);
+  expect(await store.tick(tickOf(f, 1, { lobbyShuffle: true, lobbyResultAtMs: now + 1_000 }))).toMatchObject({ serving: 50 });
+  // 공시 기록이 없으면(참가자 0명 게시) 늦었다고 보지 않는다
+  const g = newEvent();
+  await seqTo(g, 50);
+  await cmd(keys.batchDone(g), ['HSET', keys.batchDone(g), 'lobby', '1:40:1', 'pub:lobby', String(now - 15_000)]);
+  await store.bump(g, 1, now + DAY);
+  expect(await store.tick(tickOf(g, 1, { lobbyShuffle: true }))).toMatchObject({ serving: 50 });
+});
+
 test('리더는오픈이지나면로비표시를_구간끝이지나면묶음표시를진입Lua와같은모양으로쓰고_인원만큼카운터를뗀다', async () => {
   const e = newEvent();
   const now = Date.now();

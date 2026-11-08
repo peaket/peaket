@@ -56,7 +56,8 @@ test('Q-T6 로비 게시: lobby_members·batch_done의 lobby를 읽어 q:lobby·
   const E = `evt-lobby-int-${Date.now()}`;
   const startsAt = Date.now() + 3 * 24 * 3600_000;
   const members = ['l1', 'l2', 'l3', 'l4'].map(hash);
-  const opensAt = Date.now() - 20_000;
+  // 라운드 예정 시각 앞에 머클 루트를 공시하게, 지금 막 오픈한 회차로 둔다(ADR-0232 결정 5)
+  const opensAt = Date.now() - 1_000;
   await cmd(keys.cfg(E), ['HSET', keys.cfg(E), 'opensAtMs', String(opensAt), 'startsAtMs', String(startsAt), 'lobbyShuffle', '1', 'openBatch', '0', 'rev', '1']);
   await cmd(keys.lobbyMembers(E), ['SADD', keys.lobbyMembers(E), ...members]);
   await cmd(keys.batchDone(E), ['HSET', keys.batchDone(E), 'lobby', '1:4:1']);
@@ -81,7 +82,7 @@ test('publishBatch_닫힘표시와참가자를읽어_사람별결과·결과파�
   const E = `evt-int-${Date.now()}`;
   const startsAt = Date.now() + 3 * 86_400_000;
   const members = Array.from({ length: 2_500 }, (_, i) => hash(`m-${i}`));
-  const opensAt = Date.now() - 10_000;
+  const opensAt = Date.now() - 1_000;
   await cmd(keys.cfg(E), ['HSET', keys.cfg(E), 'opensAtMs', String(opensAt), 'startsAtMs', String(startsAt), 'lobbyShuffle', '0', 'openBatch', '1', 'rev', '1']);
   await cmd(keys.batchMembers(E, 1), ['SADD', keys.batchMembers(E, 1), ...members]);
   // 닫을 때 2,502명으로 셌는데 두 명의 SADD를 장애 전환으로 잃은 경우
@@ -152,6 +153,48 @@ test('복제확인은따로받은연결로쓰고기다린다_그연결이막혀�
   } finally {
     await waitRedis.close();
   }
+});
+
+test('[ASVS v5.0.0-16.5.2] POL-005 Q-T6 실제 Valkey: 공시 라운드 뒤에 쓴 머클 루트는 저장소 시각으로 잡혀 게시를 멈춘다', async () => {
+  const E = `evt-late-root-${Date.now()}`;
+  const startsAt = Date.now() + 3 * 24 * 3600_000;
+  const members = ['r1', 'r2'].map(hash);
+  const opensAt = Date.now() - 20_000;
+  await cmd(keys.cfg(E), ['HSET', keys.cfg(E), 'opensAtMs', String(opensAt), 'startsAtMs', String(startsAt), 'lobbyShuffle', '1', 'openBatch', '0', 'rev', '1']);
+  await cmd(keys.lobbyMembers(E), ['SADD', keys.lobbyMembers(E), ...members]);
+  await cmd(keys.batchDone(E), ['HSET', keys.batchDone(E), 'lobby', '1:2:1']);
+  await cmd(keys.shuffle(E), ['HSET', keys.shuffle(E), 'commit:lobby', '00'.repeat(32), 'round:lobby', String(drandRoundAfter(opensAt)), 'sealed:lobby', 'x', 'at:lobby', '0']);
+  const randomness = new TestRandomness(Buffer.alloc(32, 5));
+  const publish = new PublishBatchResults(new RedisBatchStore(redis), new RedisShuffleRecords(redis), randomness, randomness, new LocalResultFiles(mkdtempSync(join(tmpdir(), 'late-root-'))), fakeClock({ now: Date.now() }));
+  expect(await publish.run({ eventId: E, group: 'lobby' })).toEqual({ status: 'BEACON_STOPPED', reason: 'late_root', first: true });
+  expect(String(await cmd(keys.shuffle(E), ['HGET', keys.shuffle(E), 'stop:lobby']))).toMatch(/:late_root$/);
+  expect(await cmd(keys.batchDone(E), ['HGET', keys.batchDone(E), 'pub:lobby'])).toBeNull();
+});
+
+test('[ASVS v5.0.0-15.4.2] POL-005 머클루트·비콘·시드는 비어 있을 때만 쓰고, 게시 표시가 먼저 쓴 루트를 바꾸지 않는다', async () => {
+  const E = `evt-once-${Date.now()}`;
+  const store = new RedisBatchStore(redis);
+  const records = new RedisShuffleRecords(redis);
+  const expireAtMs = Date.now() + 60_000;
+  const before = Date.now();
+  const first = await store.markRoot(E, 'lobby', 'r1', expireAtMs);
+  const second = await store.markRoot(E, 'lobby', 'r2', expireAtMs);
+  // 공시 시각은 파드 시계가 아니라 저장소 시각이다
+  expect(first.root).toBe('r1');
+  expect(Math.abs(first.atMs - before)).toBeLessThan(5_000);
+  expect(second).toEqual(first);
+  expect(await store.earlyRootOf(E, 'lobby')).toEqual(first);
+  await store.markPublished(E, 'lobby', 3_000, 'r3');
+  expect((await store.published(E, 'lobby'))?.root).toBe('r1');
+  await records.recordBeacon(E, 'lobby', 'aa', 'bb', expireAtMs);
+  await records.recordBeacon(E, 'lobby', 'cc', 'dd', expireAtMs);
+  await records.reveal(E, 'lobby', 'ee', 4_000, expireAtMs);
+  await records.reveal(E, 'lobby', 'ff', 5_000, expireAtMs);
+  const k = keys.shuffle(E);
+  const [beacon, sig, seed, seedAt] = (await redis.command(['HMGET', k, 'beacon:lobby', 'sig:lobby', 'seed:lobby', 'seedAt:lobby'], { key: k })) as string[];
+  expect([beacon, sig, seed, seedAt]).toEqual(['aa', 'bb', 'ee', '4000']);
+  await redis.command(['HSET', k, 'commit:lobby', '00', 'round:lobby', '3', 'sealed:lobby', 'x', 'at:lobby', '9'], { key: k });
+  expect(await records.read(E, 'lobby')).toMatchObject({ seed: 'ee', seedAtMs: 4_000, beacon: 'aa', signature: 'bb' });
 });
 
 test('게시표시는비어있을때만쓴다_두번째게시가게시시각을늦춰분산창을다시닫지않는다', async () => {

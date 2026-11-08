@@ -42,7 +42,7 @@ const sealer = process.env[TEST_SEAL_ENV] ? TestSeedSealer.fromEnv(process.env) 
 const lobbySignals = new PromLobbySignals();
 const service = await createService({
   name: SERVICE,
-  module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: unavailableRisk, ...(sealer ? { sealer } : {}), lobbySignals, state: { ...(webOrigin ? { webOrigin } : {}) }, admission: { signer, signals }, ...(arrivals ? { arrivals } : {}), arrivalSignals }),
+  module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: unavailableRisk, ...(sealer ? { sealer } : {}), lobbySignals, state: { ...(webOrigin ? { webOrigin } : {}), ...(process.env.PEAKET_BATCH_RESULT_DIR ? { resultDir: process.env.PEAKET_BATCH_RESULT_DIR } : {}) }, admission: { signer, signals }, ...(arrivals ? { arrivals } : {}), arrivalSignals }),
 });
 arrivalSignals.register(service.metrics.registry);
 if (!arrivals) service.logger.warn({ dep: 'edge-arrival-key' }, '도착 시각 쿠키 키(PEAKET_ARRIVAL_COOKIE_KEY)가 없어 진입 Degraded의 쿠키를 읽지 않는다');

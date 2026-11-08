@@ -1,5 +1,5 @@
 // 시험용 묶음 기록과 결과 파일(Valkey 어댑터 redis-batch-store.ts와 같은 규칙). 구간(묶음 1·로비)마다 기록을 따로 둔다.
-import type { BatchEntry, BatchSchedule, BatchStore, BeaconStopReason, ClosedBatch, PublishedBatch, ResultFiles, ShuffleGroup, ShuffleRecord, ShuffleRecords } from '../domain/ports.js';
+import type { BatchEntry, BatchSchedule, BatchStore, BeaconStopReason, ClosedBatch, EarlyRoot, PublishedBatch, ResultFiles, ResultObjectStore, ShuffleGroup, ShuffleRecord, ShuffleRecords } from '../domain/ports.js';
 
 interface GroupState {
   startsAtMs: number;
@@ -8,6 +8,7 @@ interface GroupState {
   closed: ClosedBatch | null;
   publishedAt: number | null;
   root: string | null;
+  rootAtMs: number | null;
   repairAt: number | null;
   verifying: Set<string>;
 }
@@ -17,6 +18,11 @@ export class MemoryBatchStore implements BatchStore {
   readonly #removed = new Map<string, number[]>();
   readonly #results = new Map<string, { value: string; expireAtMs: number }>();
   #replicated = true;
+  #writeCalls = 0;
+  #memberCalls = 0;
+
+  /** 시계는 저장소 시각(Redis TIME)을 흉내 낸다 */
+  constructor(private readonly clock: { now(): number } = { now: () => Date.now() }) {}
 
   #key = (eventId: string, group: ShuffleGroup = 1) => `${eventId}|${group}`;
   #resultKey = (group: ShuffleGroup, hash: string) => `${group}|${hash}`;
@@ -32,6 +38,7 @@ export class MemoryBatchStore implements BatchStore {
     return this.#of(eventId, group)?.closed ?? null;
   }
   async members(eventId: string, group: ShuffleGroup): Promise<string[]> {
+    this.#memberCalls += 1;
     return [...new Set(this.#of(eventId, group)?.members ?? [])];
   }
   async published(eventId: string, group: ShuffleGroup): Promise<PublishedBatch | null> {
@@ -39,6 +46,7 @@ export class MemoryBatchStore implements BatchStore {
     return e && e.publishedAt !== null ? { atMs: e.publishedAt, root: e.root, repairAtMs: e.repairAt } : null;
   }
   async writeResults(group: ShuffleGroup, entries: readonly BatchEntry[], gen: number, expireAtMs: number): Promise<void> {
+    this.#writeCalls += 1;
     for (const e of entries) this.#results.set(this.#resultKey(group, e.tokenHash), { value: `${e.seq}:${gen}`, expireAtMs });
   }
   async markRemoved(eventId: string, seqs: readonly number[]): Promise<void> {
@@ -57,7 +65,16 @@ export class MemoryBatchStore implements BatchStore {
   }
   async markPublished(eventId: string, group: ShuffleGroup, atMs: number, root: string): Promise<void> {
     const e = this.#of(eventId, group);
-    if (e && e.publishedAt === null) Object.assign(e, { publishedAt: atMs, root });
+    if (e && e.publishedAt === null) Object.assign(e, { publishedAt: atMs, root: e.root ?? root });
+  }
+  async markRoot(eventId: string, group: ShuffleGroup, root: string): Promise<EarlyRoot> {
+    const e = this.#of(eventId, group)!;
+    if (e.root === null) Object.assign(e, { root, rootAtMs: this.clock.now() });
+    return { root: e.root!, atMs: e.rootAtMs! };
+  }
+  async earlyRootOf(eventId: string, group: ShuffleGroup): Promise<EarlyRoot | null> {
+    const e = this.#of(eventId, group);
+    return e?.root && e.rootAtMs !== null ? { root: e.root, atMs: e.rootAtMs } : null;
   }
   async clearRepair(eventId: string, group: ShuffleGroup, repairAtMs: number): Promise<void> {
     const e = this.#of(eventId, group);
@@ -67,7 +84,7 @@ export class MemoryBatchStore implements BatchStore {
   // 시험 도구
   setForTest(eventId: string, s: { startsAtMs: number; opensAtMs?: number; members: string[]; closed: ClosedBatch | null; group?: ShuffleGroup; verifying?: string[] }): void {
     const { group = 1, verifying = [], opensAtMs = 0, ...rest } = s;
-    this.#groups.set(this.#key(eventId, group), { ...rest, opensAtMs, publishedAt: null, root: null, repairAt: null, verifying: new Set(verifying) });
+    this.#groups.set(this.#key(eventId, group), { ...rest, opensAtMs, publishedAt: null, root: null, rootAtMs: null, repairAt: null, verifying: new Set(verifying) });
   }
   /** queue-svc가 결과 키를 잃은 참가자를 보고 쓰는 다시 쓰기 표시(HSETNX) */
   requestRepairForTest(eventId: string, atMs: number): void {
@@ -83,6 +100,16 @@ export class MemoryBatchStore implements BatchStore {
   setMembersForTest(eventId: string, members: string[]): void {
     const e = this.#of(eventId, 1);
     if (e) e.members = members;
+  }
+  setClosedForTest(eventId: string, closed: ClosedBatch, group: ShuffleGroup = 1): void {
+    const e = this.#of(eventId, group);
+    if (e) e.closed = closed;
+  }
+  writeCallsForTest(): number {
+    return this.#writeCalls;
+  }
+  membersCallsForTest(): number {
+    return this.#memberCalls;
   }
   publishedForTest(eventId: string, group: ShuffleGroup = 1): number | null {
     return this.#of(eventId, group)?.publishedAt ?? null;
@@ -114,6 +141,43 @@ export class MemoryShuffleRecords implements ShuffleRecords {
     if (this.#stops.has(key)) return false;
     this.#stops.set(key, { reason, atMs });
     return true;
+  }
+  async recordBeacon(eventId: string, group: ShuffleGroup, value: string, signature: string): Promise<void> {
+    const key = `${eventId}|${group}`;
+    const r = this.#m.get(key);
+    if (r && r.beacon === undefined) this.#m.set(key, { ...r, beacon: value, signature });
+  }
+  async reveal(eventId: string, group: ShuffleGroup, seed: string, atMs: number): Promise<void> {
+    const key = `${eventId}|${group}`;
+    const r = this.#m.get(key);
+    if (r && r.seed === undefined) this.#m.set(key, { ...r, seed, seedAtMs: atMs });
+  }
+}
+
+/** 객체 저장소 시험 대역(실제 S3 어댑터는 HOT-012) */
+export class MemoryResultObjects implements ResultObjectStore {
+  readonly #objects = new Map<string, { body: string; contentType: string; cacheControl: string }>();
+  #inFlight = 0;
+  #maxInFlight = 0;
+  constructor(private readonly o: { delayMs?: number; failKey?: string } = {}) {}
+
+  async put(i: { key: string; body: string; contentType: string; cacheControl: string }): Promise<void> {
+    this.#inFlight += 1;
+    this.#maxInFlight = Math.max(this.#maxInFlight, this.#inFlight);
+    if (this.o.delayMs) await new Promise((r) => setTimeout(r, this.o.delayMs));
+    this.#inFlight -= 1;
+    if (i.key === this.o.failKey) throw new Error('S3 503');
+    this.#objects.set(i.key, i);
+  }
+
+  get(key: string): { body: string; contentType: string; cacheControl: string } | undefined {
+    return this.#objects.get(key);
+  }
+  size(): number {
+    return this.#objects.size;
+  }
+  maxInFlight(): number {
+    return this.#maxInFlight;
   }
 }
 

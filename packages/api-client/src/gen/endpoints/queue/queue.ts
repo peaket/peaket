@@ -41,6 +41,7 @@ import type {
   ProblemResponse,
   QueueEntryRequest,
   QueueResultFile,
+  QueueShuffleProof,
   QueueState,
   QueueTicket,
   ServiceUnavailableResponse,
@@ -998,14 +999,21 @@ export function useGetQueueBatchResult<TData = Awaited<ReturnType<typeof getQueu
 
 
 export type getQueueShuffleProofResponse200 = {
-  data: void
+  data: QueueShuffleProof
   status: 200
+}
+
+export type getQueueShuffleProofResponse404 = {
+  data: ProblemResponse
+  status: 404
 }
 
 export type getQueueShuffleProofResponseSuccess = (getQueueShuffleProofResponse200) & {
   headers: Headers;
 };
-;
+export type getQueueShuffleProofResponseError = (getQueueShuffleProofResponse404) & {
+  headers: Headers;
+};
 
 export const getGetQueueShuffleProofUrl = (eventId: string,) => {
 
@@ -1041,7 +1049,7 @@ export const getGetQueueShuffleProofQueryKey = (eventId: string,) => {
     }
 
 
-export const getGetQueueShuffleProofQueryOptions = <TData = Awaited<ReturnType<typeof getQueueShuffleProof>>, TError = ErrorType<unknown>>(eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQueueShuffleProof>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+export const getGetQueueShuffleProofQueryOptions = <TData = Awaited<ReturnType<typeof getQueueShuffleProof>>, TError = ErrorType<ProblemResponse>>(eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQueueShuffleProof>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -1060,10 +1068,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetQueueShuffleProofQueryResult = NonNullable<Awaited<ReturnType<typeof getQueueShuffleProof>>>
-export type GetQueueShuffleProofQueryError = ErrorType<unknown>
+export type GetQueueShuffleProofQueryError = ErrorType<ProblemResponse>
 
 
-export function useGetQueueShuffleProof<TData = Awaited<ReturnType<typeof getQueueShuffleProof>>, TError = ErrorType<unknown>>(
+export function useGetQueueShuffleProof<TData = Awaited<ReturnType<typeof getQueueShuffleProof>>, TError = ErrorType<ProblemResponse>>(
  eventId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQueueShuffleProof>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getQueueShuffleProof>>,
@@ -1073,7 +1081,7 @@ export function useGetQueueShuffleProof<TData = Awaited<ReturnType<typeof getQue
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetQueueShuffleProof<TData = Awaited<ReturnType<typeof getQueueShuffleProof>>, TError = ErrorType<unknown>>(
+export function useGetQueueShuffleProof<TData = Awaited<ReturnType<typeof getQueueShuffleProof>>, TError = ErrorType<ProblemResponse>>(
  eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQueueShuffleProof>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getQueueShuffleProof>>,
@@ -1083,7 +1091,7 @@ export function useGetQueueShuffleProof<TData = Awaited<ReturnType<typeof getQue
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetQueueShuffleProof<TData = Awaited<ReturnType<typeof getQueueShuffleProof>>, TError = ErrorType<unknown>>(
+export function useGetQueueShuffleProof<TData = Awaited<ReturnType<typeof getQueueShuffleProof>>, TError = ErrorType<ProblemResponse>>(
  eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQueueShuffleProof>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -1091,7 +1099,7 @@ export function useGetQueueShuffleProof<TData = Awaited<ReturnType<typeof getQue
  * @summary 셔플 검증 정보(커밋, drand 체인·라운드와 값, 알고리즘 버전, 머클 루트, 비상 처리 여부와 사유, 온세일 윈도우 종료 뒤 시드 원본)
  */
 
-export function useGetQueueShuffleProof<TData = Awaited<ReturnType<typeof getQueueShuffleProof>>, TError = ErrorType<unknown>>(
+export function useGetQueueShuffleProof<TData = Awaited<ReturnType<typeof getQueueShuffleProof>>, TError = ErrorType<ProblemResponse>>(
  eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQueueShuffleProof>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {

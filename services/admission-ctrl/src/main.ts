@@ -23,7 +23,7 @@ const minReplicas = minReplicasOf(process.env.PEAKET_QUEUE_REDIS_MIN_REPLICAS, c
 const randomness = TestRandomness.fromEnv(process.env);
 const sealer = TestSeedSealer.fromEnv(process.env);
 const resultDir = process.env.PEAKET_BATCH_RESULT_DIR;
-if (!resultDir) throw new Error('PEAKET_BATCH_RESULT_DIR가 없다(묶음 결과 파일을 쓸 곳. 운영의 회차별 S3 결과 파일은 BUILD_ORDER HOT-050)');
+if (!resultDir) throw new Error('PEAKET_BATCH_RESULT_DIR가 없다(묶음 결과 파일을 쓸 곳. 운영의 회차별 S3 어댑터는 BUILD_ORDER HOT-012, ADR-0232)');
 
 // 자동 제어 입력(클러스터 안 Prometheus, ADR-0226 결정 13). 운영에서 빠지면 조용히 자동 제어가 꺼지지 않게 시작을 실패시키고, 로컬·CI는 꺼진 채 돈다. 주소가 http(s)가 아니거나 사용자 정보가 있으면 여기서 던져 시작이 실패한다
 const promUrl = process.env.PEAKET_PROMETHEUS_URL;

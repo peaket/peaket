@@ -252,6 +252,12 @@ export class QueueSystem {
     // 게시 전 복제 확인: 구현의 표시 확인(WAIT 앞 Lua) + 복제본 사본에 같은 표시가 있는가(WAIT 흉내)
     const batches: BatchStore = Object.assign(Object.create(real) as BatchStore, {
       confirmReplicated: async (e: string, n: number | 'lobby', marker: string) => (await real.confirmReplicated(e, n, marker)) && this.replicaMarker() === marker,
+      // 모델의 회차는 과거 일정이라 저장소 시각이 늘 라운드 뒤다. 공정성 공시의 시각은 모델 밖이다(명세는 공시를 뺀다)
+      markRoot: async (e: string, n: number | 'lobby', root: string, expireAtMs: number) => ({ ...(await real.markRoot(e, n, root, expireAtMs)), atMs: 0 }),
+      earlyRootOf: async (e: string, n: number | 'lobby') => {
+        const r = await real.earlyRootOf(e, n);
+        return r ? { ...r, atMs: 0 } : null;
+      },
     });
     const secret = createHash('sha256').update(`mbt-randomness-${run}`).digest();
     const beacon = async () => createHash('sha256').update(`beacon\0${secret.toString('hex')}`).digest();
@@ -268,8 +274,10 @@ export class QueueSystem {
         return { commit: '00'.repeat(32), round: drandRoundAfter(fixAt), sealed: 'x', atMs: 0 };
       },
       stop: async () => true,
+      recordBeacon: async () => undefined,
+      reveal: async () => undefined,
     };
-    this.#publisher = new PublishBatchResults(batches, records, seeds, { value: beacon }, { write: async () => undefined }, pastClock);
+    this.#publisher = new PublishBatchResults(batches, records, seeds, { round: async (...a: Parameters<typeof beacon>) => ({ value: (await beacon(...a))!, signature: '00' }) }, { write: async () => undefined }, pastClock);
   }
 
   persons(): number[] {

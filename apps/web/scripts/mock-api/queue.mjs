@@ -89,7 +89,7 @@ export function createQueueMock({ now, state, schedule = () => null }) {
      * @param {{ send: Function, problem: Function, readJson: (req: any) => Promise<any>, badRequest: () => void }} io
      */
     handle(req, p, io) {
-      const m = /^\/v1\/queues\/([A-Za-z0-9-]{1,64})\/(entries|entries\/me|admission|pre-verifications|lobby-participants|lobby-participants\/me|segment-states\/(\d{1,6})\.json|batch-results\/([0-9a-f]{3})\.json|shuffle-results\/([0-9a-f]{3})\.json)$/.exec(p);
+      const m = /^\/v1\/queues\/([A-Za-z0-9-]{1,64})\/(entries|entries\/me|admission|pre-verifications|lobby-participants|lobby-participants\/me|segment-states\/(\d{1,6})\.json|batch-results\/([0-9a-f]{3})\.json|shuffle-results\/([0-9a-f]{3})\.json|shuffle-proof)$/.exec(p);
       if (!m) return false;
       const e = ev(m[1]);
       const [, eventId, kind, segment, prefix, shufflePrefix] = m;
@@ -174,6 +174,32 @@ export function createQueueMock({ now, state, schedule = () => null }) {
         e.removed.add(e.lobby);
         e.lobby = null;
         send(204, undefined);
+        return true;
+      }
+
+      if (kind === 'shuffle-proof' && req.method === 'GET') {
+        if (!sched) return problem(404, 'queue-not-found', '이 회차의 셔플 정보가 없습니다'), true;
+        const t = now();
+        const opensAt = sched.openAtMs;
+        // 검증 화면용 공시 기록(ADR-0232). 커밋·비콘은 규격대로 맞지만, 결과 파일이 합성이라 머클 루트 대조는 일치로 나오지 않는다
+        const seedOf = (name) => sha(`seed-${name}`);
+        const bytes = (hex) => Buffer.from(hex, 'hex');
+        const hashBytes = (...parts) => parts.reduce((h, p) => h.update(p), createHash('sha256')).digest('hex');
+        const group = (name, path) => ({
+          chain: 'quicknet',
+          algorithm: 'v1',
+          fixedAt: new Date(name === 'lobby' ? opensAt : opensAt + 2000).toISOString(),
+          resultPathPrefix: `/v1/queues/${eventId}/${path}/`,
+          fileCount: 4096,
+          commit: hashBytes('PEAKET-shuffle-v1', eventId, bytes(seedOf(name))),
+          committedAt: new Date(opensAt - 600_000).toISOString(),
+          round: 8_000_000,
+          roundAt: new Date(opensAt + 3000).toISOString(),
+          ...(t >= opensAt ? { merkleRoot: sha(`root-${name}-${eventId}`), rootAt: new Date(opensAt + 1000).toISOString(), firstSeq: 1, participantCount: 1 } : {}),
+          ...(t >= opensAt + 3000 ? { beacon: hashBytes(bytes(sha(`sig-${name}`).repeat(2))), beaconSignature: sha(`sig-${name}`).repeat(2), publishedAt: new Date(opensAt + 3000).toISOString() } : {}),
+          ...(t >= opensAt + 3_600_000 ? { seed: seedOf(name), seedRevealedAt: new Date(opensAt + 3_600_000).toISOString() } : {}),
+        });
+        send(200, { eventId, opensAt: new Date(opensAt).toISOString(), seedRevealAt: new Date(opensAt + 3_600_000).toISOString(), lobby: group('lobby', 'shuffle-results'), batch: group('batch', 'batch-results') }, undefined, { 'cache-control': 'public, max-age=5' });
         return true;
       }
 

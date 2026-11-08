@@ -2,9 +2,10 @@
 // 리더 상태를 읽은 뒤 전진한다. FENCED를 받으면 그 세대로는 더 쓰지 않는다. 로비·묶음 닫기와 게시를 필요할 때 부른다.
 // 저장소(Lua)의 뜻은 test-int/leader-store.int.test.ts가 실제 Valkey로 본다.
 import { fakeClock } from '@peaket/platform';
-import { drandRoundAfter, drandRoundTimeMs } from '@peaket/shuffle';
+import { drandRoundAfter, drandRoundTimeMs, SEED_REVEAL_AFTER_MS } from '@peaket/shuffle';
 import { describe, expect, test } from 'vitest';
 import { AdmissionLeader } from '../src/modules/leader/application/admission-leader.js';
+import { SHUFFLE_PUBLISH_MS } from '../src/modules/leader/domain/plan.js';
 import type { ArrivalCloseResult, CloseInput, Control, ControlInputsReader, EventPlan, LeaderStore, Rb05Result, TickInput, TickResult } from '../src/modules/leader/domain/ports.js';
 import { ALL_JOURNEYS, type EventInputs, MEMORY_FIELDS, type Reading } from '../src/modules/leader/domain/aimd.js';
 import type { ControlEvent } from '../src/modules/leader/application/leader-metrics.js';
@@ -81,6 +82,7 @@ function world(o: { ids?: string[]; reader?: ControlInputsReader; plan?: Partial
     fenced: () => undefined,
     leaseFailure: () => undefined,
     publish: (status: string) => void seen.push(`publish:${status}`),
+    seedReveal: (status: string) => void seen.push(`reveal:${status}`),
     beaconStopped: (reason: string) => void seen.push(`beacon-stopped:${reason}`),
     forget: (e: string) => void seen.push(`forget:${e}`),
   };
@@ -259,6 +261,65 @@ describe('닫기와 게시', () => {
     expect(w.calls.some((c) => c.startsWith('close'))).toBe(false);
   });
 
+  test('[Q-T33] 로비 공시 라운드가 있으면 틱에 로비 공개 예정 시각을 넘긴다(라운드 예정 + 5초)', async () => {
+    const round = 8_000_000;
+    const w = world({ plan: { lobbyShuffle: true, lobbyRound: round } });
+    w.state.gen = 1;
+    await w.leader.tick();
+    expect(w.ticks[0]?.lobbyResultAtMs).toBe(drandRoundTimeMs(round) + SHUFFLE_PUBLISH_MS);
+    const none = world({ plan: { lobbyShuffle: true } });
+    none.state.gen = 1;
+    await none.leader.tick();
+    expect(none.ticks[0]?.lobbyResultAtMs).toBeUndefined();
+  });
+
+  test('[ASVS v5.0.0-16.5.2] 게시가 오류로 끝나면 2초가 지나기 전에는 다시 부르지 않는다(사람별 결과를 200ms마다 다시 쓰지 않게)', async () => {
+    const w = world({ tick: { batchMarked: 1, batchPublished: 0 } });
+    w.state.gen = 1;
+    let calls = 0;
+    w.publish.run = async () => {
+      calls += 1;
+      throw new Error('S3 503');
+    };
+    await w.leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    await w.leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls).toBe(1);
+    expect(w.seen).toContain('publish:ERROR');
+    w.clock.advance(2_001);
+    await w.leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls).toBe(2);
+  });
+
+  test('POL-005 오픈 60분이 지나면 켠 구간마다 시드 공개를 부르고, 주기는 5초에 한 번이다', async () => {
+    const w = world({ plan: { lobbyShuffle: true, openBatch: true, opensAtMs: T0 - SEED_REVEAL_AFTER_MS } });
+    w.state.gen = 1;
+    const seen: { group: unknown; opensAtMs: number }[] = [];
+    const leader = new AdmissionLeader(w.store, w.publish, { generation: () => 1 }, w.clock, undefined, undefined, undefined, { run: async (i) => (seen.push({ group: i.group, opensAtMs: i.opensAtMs }), { status: 'REVEALED' }) });
+    await leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen.map((s) => s.group).sort()).toEqual([1, 'lobby'].sort());
+    expect(seen[0]?.opensAtMs).toBe(T0 - SEED_REVEAL_AFTER_MS);
+    await leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen).toHaveLength(2);
+    w.clock.advance(5_001);
+    await leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen).toHaveLength(4);
+  });
+
+  test('POL-005 오픈 60분 전에는 시드 공개를 부르지 않는다', async () => {
+    const before = world({ plan: { lobbyShuffle: true, opensAtMs: T0 - SEED_REVEAL_AFTER_MS + 1_000 } });
+    const seen: unknown[] = [];
+    const leader = new AdmissionLeader(before.store, before.publish, { generation: () => 1 }, before.clock, undefined, undefined, undefined, { run: async (i) => (seen.push(i), { status: 'REVEALED' }) });
+    await leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen).toEqual([]);
+  });
+
   test('Q-T6 로비 표시가 섰고 게시 전이거나 다시쓰기 표시가 있으면 구간 lobby를 게시하고, 게시 뒤에는 부르지 않는다', async () => {
     const groups = async (tick: Record<string, unknown>) => {
       const w = world({ plan: { lobbyShuffle: true }, tick: { lobbyMarked: 1, batchMarked: 0, ...tick } });
@@ -339,6 +400,57 @@ describe('닫기와 게시', () => {
     await w.leader.tick();
     await w.leader.tick();
     expect(n).toBe(1);
+  });
+
+  test('POL-005 한 구간의 게시를 멈춰도 다른 구간은 계속 게시한다', async () => {
+    const w = world({ plan: { lobbyShuffle: true }, tick: { lobbyMarked: 1, lobbyPublished: 1, lobbyRepair: 1, batchMarked: 1, batchPublished: 0 } });
+    const seen: unknown[] = [];
+    w.publish.run = async (i) => {
+      const group = (i as { group?: unknown }).group;
+      seen.push(group);
+      if (group === 'lobby') throw new BatchMembersChanged('e1', 'lobby');
+      return { status: 'WAITING_BEACON' };
+    };
+    w.state.gen = 1;
+    await w.leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    await w.leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen.filter((g) => g === 'lobby')).toHaveLength(1);
+    expect(seen.filter((g) => g === 1)).toHaveLength(2);
+  });
+
+  test('POL-005 멈춘 구간은 매 주기 부르지 않고 5초에 한 번 다시 본다(RB-35로 풀리면 이어서 게시한다)', async () => {
+    const w = world({ tick: { batchMarked: 1, batchPublished: 0 } });
+    let calls = 0;
+    w.publish.run = async () => ((calls += 1), { status: 'BEACON_STOPPED', reason: 'beacon', first: false });
+    w.state.gen = 1;
+    await w.leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    await w.leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls).toBe(1);
+    w.clock.advance(5_001);
+    await w.leader.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls).toBe(2);
+  });
+
+  test('POL-005 리더를 잃거나 세대가 바뀌면 게시가 들고 있던 참가자 목록을 비운다', async () => {
+    const w = world();
+    let forgets = 0;
+    Object.assign(w.publish, { forget: () => void (forgets += 1) });
+    w.state.gen = 1;
+    await w.leader.tick();
+    const first = forgets;
+    await w.leader.tick();
+    expect(forgets).toBe(first);
+    w.state.gen = undefined;
+    await w.leader.tick();
+    expect(forgets).toBe(first + 1);
+    w.state.gen = 2;
+    await w.leader.tick();
+    expect(forgets).toBe(first + 2);
   });
 });
 

@@ -18,16 +18,19 @@ import {
   OPEN_GAP_CHECK_MS,
   OPEN_GAP_MS,
   PRE_OPEN_MS,
+  PUBLISH_RETRY_MS,
   RATE_CAP_PER_SEC,
   RATIO_FLOOR,
   RB05_CHECK_MS,
   RB05_SKIP_BASE,
   saleEndOf,
+  SEED_REVEAL_CHECK_MS,
   SHUFFLE_PUBLISH_MS,
+  STOPPED_RECHECK_MS,
   TICK_MS,
 } from '../domain/plan.js';
-import { CONTROL_INPUTS, type Control, type ControlInputsReader, type ControlSnapshot, ELECTOR, type Elector, type EventPlan, LEADER_STORE, type LeaderStore, PUBLISHER, type Publisher } from '../domain/ports.js';
-import { drandRoundTimeMs } from '@peaket/shuffle';
+import { CONTROL_INPUTS, type Control, type ControlInputsReader, type ControlSnapshot, ELECTOR, type Elector, type EventPlan, LEADER_STORE, type LeaderStore, PUBLISHER, type Publisher, SEED_REVEALER, type SeedRevealer } from '../domain/ports.js';
+import { drandRoundTimeMs, SEED_REVEAL_AFTER_MS } from '@peaket/shuffle';
 import { type ControlEvent, LEADER_METRICS, type LeaderMetrics } from './leader-metrics.js';
 
 /** 회차 목록·일정 사본을 파드 메모리에 두는 시간 1초 [가정](queue-svc 일정 캐시와 같다) */
@@ -77,6 +80,13 @@ export class AdmissionLeader {
   readonly #loggedAt = new Map<string, number>();
   /** 뒤에서 도는 게시(구간마다 하나) */
   readonly #publishing = new Map<string, Promise<void>>();
+  /** 게시가 오류로 끝난 구간의 다시 부를 시각(ADR-0232 결정 12) */
+  readonly #publishRetryAt = new Map<string, number>();
+  /** 회차마다 시드 공개를 마지막으로 본 시각과, 뒤에서 도는 시드 공개(구간마다 하나) */
+  readonly #revealAt = new Map<string, number>();
+  readonly #revealing = new Set<string>();
+  /** 게시가 들고 있는 목록이 어느 세대의 것인가 */
+  #heldGen: number | undefined;
   /** 회차마다 하나씩 뒤에서 도는 RB-05 복제 확인(WAIT가 0.5초까지 걸려 다른 회차의 전진을 막지 않게, ADR-0186) */
   readonly #confirming = new Map<string, Promise<void>>();
   /** 직전 주기의 값(나누기의 수요와 감축 확인의 예매 단계 인원, ADR-0226 결정 10) */
@@ -103,6 +113,7 @@ export class AdmissionLeader {
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
     @Optional() @Inject(LEADER_METRICS) private readonly metrics?: LeaderMetrics,
     @Optional() @Inject(CONTROL_INPUTS) private readonly inputs?: ControlInputsReader,
+    @Optional() @Inject(SEED_REVEALER) private readonly revealer?: SeedRevealer,
   ) {}
 
   start(): void {
@@ -129,6 +140,11 @@ export class AdmissionLeader {
     try {
       const gen = this.elector.generation();
       this.metrics?.leader(gen !== undefined);
+      // 세대가 바뀌면(리더를 잃거나 새로 얻음) 게시가 들고 있던 목록을 비운다(ADR-0232)
+      if (gen !== this.#heldGen) {
+        this.#heldGen = gen;
+        this.publish.forget?.();
+      }
       if (gen === undefined || this.#fencedGen === gen) return;
       if (this.#bumped.gen !== gen) {
         this.#bumped = { gen, events: new Set() };
@@ -242,6 +258,7 @@ export class AdmissionLeader {
         openBatch: plan.openBatch,
         closeAtMs,
         ...(plan.batchRound !== undefined ? { batchResultDelayMs: Math.max(0, drandRoundTimeMs(plan.batchRound) + SHUFFLE_PUBLISH_MS - closeAtMs) } : {}),
+        ...(plan.lobbyRound !== undefined ? { lobbyResultAtMs: drandRoundTimeMs(plan.lobbyRound) + SHUFFLE_PUBLISH_MS } : {}),
         fields: p.fields,
       });
       if (r.kind === 'FENCED') return this.#fence(gen, eventId);
@@ -271,6 +288,8 @@ export class AdmissionLeader {
       if (plan.openBatch && r.batchMarked === 1 && (r.batchPublished === 0 || r.repair === 1)) this.#startPublish(eventId, 1, gen);
       // 로비 결과도 같은 조건으로 게시한다(HOT-040, ADR-0231 결정 9). 구간마다 따로 돌아 로비 셔플이 묶음 게시를 막지 않는다
       if (plan.lobbyShuffle && r.lobbyMarked === 1 && (r.lobbyPublished === 0 || r.lobbyRepair === 1)) this.#startPublish(eventId, 'lobby', gen);
+      // 오픈 60분이 지나면 게시한 구간의 시드를 공개한다(POL-005, ADR-0232 결정 7). 게시 여부는 공개하는 쪽이 본다
+      if (now >= plan.opensAtMs + SEED_REVEAL_AFTER_MS) this.#startReveal(eventId, plan, gen, keepUntilMs, now);
     } catch (err) {
       this.#logError(eventId, now, err, 'admission-ctrl 리더: 회차 주기 실패(같은 회차는 10초에 한 번 남긴다)');
     }
@@ -349,30 +368,58 @@ export class AdmissionLeader {
 
   #startPublish(eventId: string, group: 'lobby' | number, gen: number): void {
     const key = `${eventId}:${group}`;
-    if (this.#stopped.has(eventId) || this.#publishing.has(key)) return;
+    if (this.#stopped.has(key) || this.#publishing.has(key)) return;
     if (this.elector.generation() !== gen || this.#fencedGen === gen) return;
+    // 오류 뒤에는 잠깐 쉰다(객체 저장소가 멈췄을 때 사람별 결과를 200ms마다 다시 쓰지 않게, ADR-0232 결정 12)
+    if ((this.#publishRetryAt.get(key) ?? Number.NEGATIVE_INFINITY) > this.clock.now()) return;
     this.#publishing.set(key, this.#publish(eventId, group).finally(() => this.#publishing.delete(key)));
+  }
+
+  /** 시드 공개는 큰 값을 다루지 않지만 KMS를 부를 수 있어 뒤에서 돌린다. 공개가 실패해도 다음 때 다시 한다 */
+  #startReveal(eventId: string, plan: EventPlan, gen: number, keepUntilMs: number, now: number): void {
+    if (!this.revealer || this.elector.generation() !== gen || this.#fencedGen === gen) return;
+    if (now - (this.#revealAt.get(eventId) ?? Number.NEGATIVE_INFINITY) < SEED_REVEAL_CHECK_MS) return;
+    this.#revealAt.set(eventId, now);
+    const groups: ('lobby' | number)[] = [...(plan.lobbyShuffle ? ['lobby' as const] : []), ...(plan.openBatch ? [1] : [])];
+    for (const group of groups) {
+      const key = `${eventId}:${group}`;
+      if (this.#revealing.has(key)) continue;
+      this.#revealing.add(key);
+      void this.revealer
+        .run({ eventId, group, opensAtMs: plan.opensAtMs, expireAtMs: keepUntilMs })
+        .then((r) => this.metrics?.seedReveal(r.status))
+        .catch((err: unknown) => {
+          this.metrics?.seedReveal('ERROR');
+          this.#logError(`${eventId}:reveal`, this.clock.now(), err, '셔플 시드 공개 실패(다음 주기에 다시, POL-005)');
+        })
+        .finally(() => this.#revealing.delete(key));
+    }
   }
 
   async #publish(eventId: string, group: 'lobby' | number): Promise<void> {
     try {
       const r = await this.publish.run({ eventId, group });
+      // 멈춘 구간은 매 주기 다시 부르지 않는다(RB-35로 풀리는 것만 드물게 본다)
+      if (r.status === 'BEACON_STOPPED') this.#publishRetryAt.set(`${eventId}:${group}`, this.clock.now() + STOPPED_RECHECK_MS);
+      else this.#publishRetryAt.delete(`${eventId}:${group}`);
       this.metrics?.publish(r.status);
       // 비콘 대기 상한을 넘겨 멈췄다: SEV1(RB-35). 지표는 멈춤을 처음 쓴 호출에서 한 번만 낸다(ADR-0231 결정 12)
       if (r.status === 'BEACON_STOPPED' && r.first) {
         this.metrics?.beaconStopped(r.reason ?? 'beacon');
-        this.logger?.error({ eventId, group, reason: r.reason }, '셔플 비콘 대기 상한을 넘겨 게시를 멈췄다(RB-35)');
+        this.logger?.error({ eventId, group, reason: r.reason }, '셔플 게시를 멈췄다(사유는 reason, RB-35)');
       }
       // 복제본이 계속 없으면 serving이 묶음 첫 번호 - 1에 머문다. 조용히 멈추지 않게 남긴다
       if (r.status === 'WAITING_REPLICA') this.#logError(`${eventId}:replica`, this.clock.now(), undefined, '묶음 게시 전 복제 확인이 안 돼 게시를 미뤘다(복제본 수 확인)');
     } catch (err) {
       if (err instanceof BatchMembersChanged) {
-        this.#stopped.add(eventId);
-        this.logger?.error({ err, eventId }, '묶음 참가자가 게시 뒤 바뀌어 그 회차의 게시를 멈췄다(결과 파일로 되살린다)');
+        // 그 구간만 멈춘다(다른 구간의 게시는 계속 돈다, ADR-0232 결정 5)
+        this.#stopped.add(`${eventId}:${group}`);
+        this.logger?.error({ err, eventId, group }, '묶음 참가자가 게시 뒤 바뀌어 그 구간의 게시를 멈췄다(결과 파일로 되살린다)');
         return;
       }
       this.metrics?.publish('ERROR');
-      this.#logError(`${eventId}:publish`, this.clock.now(), err, 'admission-ctrl 리더: 묶음 게시 실패(다음 주기에 다시)');
+      this.#publishRetryAt.set(`${eventId}:${group}`, this.clock.now() + PUBLISH_RETRY_MS);
+      this.#logError(`${eventId}:publish`, this.clock.now(), err, 'admission-ctrl 리더: 묶음 게시 실패(2초 뒤에 다시)');
     }
   }
 
@@ -391,12 +438,14 @@ export class AdmissionLeader {
     for (const e of [...this.#plans.keys()]) {
       if (live.has(e)) continue;
       this.#plans.delete(e);
-      this.#stopped.delete(e);
+      for (const k of [...this.#stopped]) if (k.startsWith(`${e}:`)) this.#stopped.delete(k);
       this.#saleStates.delete(e);
       this.#rb05At.delete(e);
       this.#last.delete(e);
       this.#lastTargets.delete(e);
       this.#rateCredit.delete(e);
+      this.#revealAt.delete(e);
+      for (const k of [...this.#publishRetryAt.keys()]) if (k.startsWith(`${e}:`)) this.#publishRetryAt.delete(k);
       // 다시 오면 세대부터 다시 올린다
       this.#bumped.events.delete(e);
       this.metrics?.forget(e);
@@ -409,7 +458,10 @@ export class AdmissionLeader {
   }
 
   #fence(gen: number, eventId: string): void {
-    if (this.#fencedGen !== gen) this.logger?.warn({ gen, eventId }, 'admission-ctrl 리더: 더 새 세대가 있어(FENCED) 이 세대의 쓰기를 멈춘다');
+    if (this.#fencedGen !== gen) {
+      this.logger?.warn({ gen, eventId }, 'admission-ctrl 리더: 더 새 세대가 있어(FENCED) 이 세대의 쓰기를 멈춘다');
+      this.publish.forget?.();
+    }
     this.#fencedGen = gen;
     this.metrics?.fenced();
   }

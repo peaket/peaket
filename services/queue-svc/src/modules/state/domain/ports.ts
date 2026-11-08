@@ -26,6 +26,19 @@ export interface StateMirrorSignals {
 
 export const STATE_SCHEDULES = Symbol('state.EventSchedules');
 
+export const SHUFFLE_PROOF_SOURCE = Symbol('state.ShuffleProofSource');
+/** 셔플 공시 기록과 게시 표시를 칸 원문으로 읽는다(ADR-0232 결정 8) */
+export interface ShuffleProofSource {
+  read(eventId: string): Promise<import('./proof.js').ProofFields>;
+}
+
+export type ResultFileKind = 'shuffle-results' | 'batch-results';
+export const RESULT_FILE_READER = Symbol('state.ResultFileReader');
+/** 결과 파일 읽기(local·ci·demo). 없으면 null이고 404가 된다 */
+export interface ResultFileReader {
+  read(eventId: string, kind: ResultFileKind, prefix: string): Promise<string | null>;
+}
+
 export const STATE_OPTIONS = Symbol('state.Options');
 export interface StateOptions {
   /** 대기열 파일의 교차 출처 허용(소비자 웹 하나, ADR-0065 결정 7) */

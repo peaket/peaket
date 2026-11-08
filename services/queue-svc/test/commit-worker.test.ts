@@ -57,6 +57,30 @@ describe('커밋 공시 일꾼', () => {
     expect(await w.store.read('pre', 'lobby')).not.toBeNull();
   });
 
+  test('POL-005 커밋을 처음 쓴 호출만 공시 감사 기록을 남긴다(커밋·체인·라운드·알고리즘 판)', async () => {
+    const w = world({ e1: {} });
+    await w.set();
+    const seen: unknown[] = [];
+    const commits = new ShuffleCommits(w.store, sealer, w.schedules, w.clock, undefined, { committed: (d) => void seen.push(d) });
+    const worker = new ShuffleCommitWorker(commits, w.schedules, async () => ['e1'], w.clock);
+    await worker.tickOnce();
+    await worker.tickOnce();
+    const lobby = await w.store.read('e1', 'lobby');
+    expect(seen).toHaveLength(2);
+    expect(seen).toContainEqual({ eventId: 'e1', group: 'lobby', commit: lobby!.commit, chain: 'quicknet', round: lobby!.round, algorithm: 'v1', atMs: lobby!.atMs });
+  });
+
+  test('POL-005 포트를 넘기지 않으면 정규 로그 줄 shuffle_commit_disclosed를 남긴다', async () => {
+    const w = world({ e1: {} });
+    await w.set();
+    const lines: Record<string, unknown>[] = [];
+    const logger = { info: (o: Record<string, unknown>) => void lines.push(o), warn: () => undefined, error: () => undefined };
+    const commits = new ShuffleCommits(w.store, sealer, w.schedules, w.clock, undefined, undefined, logger as never);
+    await new ShuffleCommitWorker(commits, w.schedules, async () => ['e1'], w.clock).tickOnce();
+    const lobby = await w.store.read('e1', 'lobby');
+    expect(lines).toContainEqual({ audit: 'shuffle_commit_disclosed', eventId: 'e1', group: 'lobby', commit: lobby!.commit, chain: 'quicknet', round: lobby!.round, algorithm: 'v1', atMs: lobby!.atMs });
+  });
+
   test('이미 쓴 구간은 다시 만들지 않는다(봉인을 부르지 않는다)', async () => {
     const w = world({ e1: {} });
     await w.set();

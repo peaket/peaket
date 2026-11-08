@@ -33,6 +33,8 @@ import type {
   PreverifyResult,
   QueueEntryRequest,
   QueueResultFile,
+  QueueShuffleProof,
+  QueueShuffleProofGroup,
   QueueState,
   QueueTicket
 } from '../../model';
@@ -53,6 +55,10 @@ export const getGetQueueShuffleResultResponseMock = (): QueueResultFile => ({
 export const getGetQueueBatchResultResponseMock = (): QueueResultFile => ({
         [faker.string.alphanumeric(5)]: faker.number.int({min: 1})
       })
+
+export const getGetQueueShuffleProofResponseQueueShuffleProofGroupMock = (overrideResponse: Partial<QueueShuffleProofGroup> = {}): QueueShuffleProofGroup => ({...{chain: faker.string.alpha({length: {min: 10, max: 20}}), algorithm: faker.string.alpha({length: {min: 10, max: 20}}), commit: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[0-9a-f]{64}$"), undefined]), committedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), fixedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), round: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), roundAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), merkleRoot: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[0-9a-f]{64}$"), undefined]), rootAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), firstSeq: faker.helpers.arrayElement([faker.number.int({min: 1}), undefined]), participantCount: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), beacon: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[0-9a-f]{64}$"), undefined]), beaconSignature: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[0-9a-f]+$"), undefined]), publishedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), resultPathPrefix: faker.string.alpha({length: {min: 10, max: 20}}), fileCount: faker.number.int({min: 0}), seed: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[0-9a-f]{64}$"), undefined]), seedRevealedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), stopped: faker.helpers.arrayElement([{reason: faker.helpers.arrayElement(['beacon','stale_round','late_commit','no_commit','late_root','members_changed','unknown'] as const), at: faker.date.past().toISOString().slice(0, 19) + 'Z'}, undefined])}, ...overrideResponse});
+
+export const getGetQueueShuffleProofResponseMock = (overrideResponse: Partial<Extract<QueueShuffleProof, object>> = {}): QueueShuffleProof => ({eventId: faker.string.alpha({length: {min: 10, max: 20}}), opensAt: faker.date.past().toISOString().slice(0, 19) + 'Z', seedRevealAt: faker.date.past().toISOString().slice(0, 19) + 'Z', lobby: faker.helpers.arrayElement([{...getGetQueueShuffleProofResponseQueueShuffleProofGroupMock()},null,]), batch: faker.helpers.arrayElement([{...getGetQueueShuffleProofResponseQueueShuffleProofGroupMock()},null,]), ...overrideResponse})
 
 export const getCreateQueueAdmissionResponseMock = (overrideResponse: Partial<Extract<AdmissionResult, object>> = {}): AdmissionResult => ({purchaseSessionExpiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), verificationReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['RAPID_REQUESTS','DEVICE_HISTORY','NETWORK','INTERACTION','HUMAN_CHECK','SHARED_PATTERN'] as const), null]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['NOT_YET','ADMITTED','SOON','VERIFYING'] as const), undefined]), admissionToken: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), retryAfterSeconds: faker.helpers.arrayElement([faker.number.int(), undefined]), serverTimeMs: faker.helpers.arrayElement([faker.number.int(), undefined]), retryAfterMs: faker.helpers.arrayElement([faker.number.int(), undefined]), serverEcdhPublicKey: faker.helpers.arrayElement([{kty: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), crv: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), x: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), y: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), kid: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined]), seatmapLayoutPath: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
 
@@ -149,11 +155,13 @@ export const getGetQueueBatchResultMockHandler = (overrideResponse?: QueueResult
   }, options)
 }
 
-export const getGetQueueShuffleProofMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+export const getGetQueueShuffleProofMockHandler = (overrideResponse?: QueueShuffleProof | ((info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => Promise<QueueShuffleProof> | QueueShuffleProof), options?: RequestHandlerOptions) => {
   return http.get<{ eventId: string }>('*/v1/queues/:eventId/shuffle-proof', async (info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetQueueShuffleProofResponseMock(),
       { status: 200
       })
   }, options)

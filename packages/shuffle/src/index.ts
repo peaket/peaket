@@ -65,6 +65,9 @@ export class TestSeedSealer implements SeedSealer {
 
 const aadOf = (eventId: string, group: ShuffleGroup): Buffer => Buffer.from(`${SEAL_PURPOSE}\0${eventId}\0${group}`, 'utf8');
 
+/** 시드 공개: 오픈 60분 뒤(POL-005, ADR-0232 결정 7) */
+export const SEED_REVEAL_AFTER_MS = 60 * 60_000;
+
 /** 알고리즘 판(커밋과 함께 공시한다) */
 export const ALGORITHM = 'v1';
 const COMMIT_DOMAIN = Buffer.from('PEAKET-shuffle-v1', 'utf8');

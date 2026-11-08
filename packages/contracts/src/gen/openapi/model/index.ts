@@ -475,6 +475,8 @@ export * from './putScannerEventDevicePlacementHeaders.zod.js';
 export * from './putScannerShiftReadinessBody.zod.js';
 export * from './queueEntryRequest.zod.js';
 export * from './queueResultFile.zod.js';
+export * from './queueShuffleProof.zod.js';
+export * from './queueShuffleProofGroup.zod.js';
 export * from './queueState.zod.js';
 export * from './queueTicket.zod.js';
 export * from './rankingFile.zod.js';

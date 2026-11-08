@@ -104,6 +104,21 @@ export const noSealer: SeedSealer = {
   open: () => Promise.reject(new Error('시드 봉인이 없다(운영 KMS 어댑터는 BUILD_ORDER HOT-041)')),
 };
 
+/** 커밋 공시 감사 기록(POL-005, ADR-0232 결정 10). 불변 감사 저장소에 잇는 일은 그 저장소 단계의 몫이다 */
+export interface ShuffleDisclosure {
+  eventId: string;
+  group: ShuffleGroup;
+  commit: string;
+  chain: string;
+  round: number;
+  algorithm: string;
+  atMs: number;
+}
+export const SHUFFLE_DISCLOSURES = Symbol('queue.ShuffleDisclosures');
+export interface ShuffleDisclosures {
+  committed(d: ShuffleDisclosure): void;
+}
+
 export const LOBBY_SIGNALS = Symbol('queue.LobbySignals');
 /** 로비 참가 지표(docs/observability.md §5) */
 export interface LobbySignals {

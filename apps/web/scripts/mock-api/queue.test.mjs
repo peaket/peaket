@@ -14,6 +14,7 @@ import {
   CreateQueueEntryResponse,
   GetQueueBatchResultResponse,
   GetQueueSegmentStateResponse,
+  GetQueueShuffleProofResponse,
 } from '@peaket/contracts/openapi/queue';
 import { startMockApi } from '../mock-api.mjs';
 
@@ -188,6 +189,25 @@ const json = (m, method, path, body) =>
     body: r.headers.get('content-type')?.includes('json') ? await r.json() : undefined,
   }));
 const join = (m, body = { humanCheckToken: 'sim.lobby.1', deviceId: 'dev-l' }) => json(m, 'POST', `/v1/queues/${EVENT}/lobby-participants`, CreateQueueLobbyParticipantBody.parse(body));
+
+test('FR-038 셔플 검증 정보: 계약 Zod를 지키고 오픈 뒤 머클 루트, 게시 뒤 비콘, 시드는 오픈 60분 뒤에 나온다', async () => {
+  const m = await boot();
+  try {
+    await m.state('queueReset=1&queueOpenIn=300');
+    const before = await m.get(`/v1/queues/${EVENT}/shuffle-proof`);
+    assert.equal(before.status, 200);
+    GetQueueShuffleProofResponse.parse(before.body);
+    assert.equal(before.body.lobby.merkleRoot, undefined);
+    m.tick(300_000 + 4000);
+    const pub = await m.get(`/v1/queues/${EVENT}/shuffle-proof`);
+    assert.ok(pub.body.lobby.merkleRoot && pub.body.lobby.publishedAt);
+    assert.equal(pub.body.lobby.seed, undefined);
+    m.tick(3_600_000);
+    assert.ok((await m.get(`/v1/queues/${EVENT}/shuffle-proof`)).body.lobby.seed);
+  } finally {
+    m.server.close();
+  }
+});
 
 test('로비(ADR-0208): queueOpenIn으로 오픈 전 회차 → 참가 201(계약 Zod) → 두 번째는 409 → 오픈 + 3초에 셔플 결과 게시 → 참가 토큰으로 입장 확정', async () => {
   const m = await boot();

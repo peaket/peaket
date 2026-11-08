@@ -3,6 +3,7 @@ import { type DynamicModule, Module } from '@nestjs/common';
 import type { HotRedis } from '@peaket/platform';
 import { ADMISSION_REDIS, MIN_REPLICAS, RedisBatchStore, RedisShuffleRecords, WAIT_REDIS } from './adapters/redis-batch-store.js';
 import { PublishBatchResults } from './application/publish-batch-results.js';
+import { RevealShuffleSeeds } from './application/reveal-shuffle-seeds.js';
 import { BATCH_STORE, BEACON, type Beacon, RESULT_FILES, type ResultFiles, SEED_SOURCE, type SeedSource, SHUFFLE_RECORDS, type ShuffleRecords } from './domain/ports.js';
 
 export interface BatchModuleOptions {
@@ -25,6 +26,7 @@ export class BatchModule {
       module: BatchModule,
       providers: [
         PublishBatchResults,
+        RevealShuffleSeeds,
         { provide: ADMISSION_REDIS, useValue: o.redis },
         { provide: MIN_REPLICAS, useValue: o.minReplicas ?? 0 },
         ...(o.waitRedis ? [{ provide: WAIT_REDIS, useValue: o.waitRedis }] : []),
@@ -34,7 +36,7 @@ export class BatchModule {
         { provide: BEACON, useValue: o.beacon },
         { provide: RESULT_FILES, useValue: o.files },
       ],
-      exports: [PublishBatchResults],
+      exports: [PublishBatchResults, RevealShuffleSeeds],
     };
   }
 }

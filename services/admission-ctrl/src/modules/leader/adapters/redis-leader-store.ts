@@ -93,8 +93,10 @@ export class RedisLeaderStore implements LeaderStore {
     if (window === null || (window !== undefined && (window < 1 || window > 60_000))) return null;
     const pg = pgOf(f.pgKey ?? null, f.pgTps ?? null);
     const shuffleKey = keys.shuffle(eventId);
-    const batchRound = int(str(await this.redis.command(['HGET', shuffleKey, 'round:1'], { key: shuffleKey })) ?? undefined);
-    return { opensAtMs, startsAtMs, lobbyShuffle: f.lobbyShuffle === '1', openBatch: f.openBatch === '1', ...(window !== undefined ? { batchWindowMs: window } : {}), ...(batchRound !== null ? { batchRound } : {}), ...pg };
+    const [round1, roundLobby] = ((await this.redis.command(['HMGET', shuffleKey, 'round:1', 'round:lobby'], { key: shuffleKey })) as unknown[]).map(str);
+    const batchRound = int(round1 ?? undefined);
+    const lobbyRound = int(roundLobby ?? undefined);
+    return { opensAtMs, startsAtMs, lobbyShuffle: f.lobbyShuffle === '1', openBatch: f.openBatch === '1', ...(window !== undefined ? { batchWindowMs: window } : {}), ...(batchRound !== null ? { batchRound } : {}), ...(lobbyRound !== null ? { lobbyRound } : {}), ...pg };
   }
 
   async control(eventId: string, nowMs: number): Promise<Control> {
@@ -145,6 +147,7 @@ export class RedisLeaderStore implements LeaderStore {
       RATIO_WINDOW_MIN_MS,
       RATIO_WINDOW_MAX_MS,
       i.saleStateFallback,
+      i.lobbyResultAtMs ?? 0,
       ...Object.entries(i.fields ?? {}).flat(),
     ].map(String);
     const r = (await this.redis.evalScript(TICK, ks, args)) as unknown[];

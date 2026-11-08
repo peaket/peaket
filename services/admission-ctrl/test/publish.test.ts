@@ -15,12 +15,12 @@ const SALE_END = START - 24 * 3600_000;
 
 function world(o: { members?: string[]; closed?: { first: number; size: number; gen: number } | null; beacon?: boolean } = {}) {
   const clock = fakeClock({ now: Date.parse('2026-11-03T03:00:05Z') });
-  const store = new MemoryBatchStore();
+  const store = new MemoryBatchStore(clock);
   const members = o.members ?? ['a', 'b', 'c', 'd', 'e'].map(hash);
   const opensAtMs = clock.now() - 3_000;
   store.setForTest(E, { startsAtMs: START, opensAtMs, members, closed: o.closed === undefined ? { first: 11, size: members.length, gen: 1 } : o.closed });
   const randomness = new TestRandomness(Buffer.alloc(32, 9));
-  const beacons = o.beacon === false ? { value: async () => null } : randomness;
+  const beacons = o.beacon === false ? { round: async () => null } : randomness;
   const files = new MemoryResultFiles();
   const records = new MemoryShuffleRecords();
   // 이 묶음 시험의 공시 기록(라운드는 지금 뒤라 비콘 대기 상한에 닿지 않는다)
@@ -50,6 +50,156 @@ describe('publishBatch', () => {
     expect(Object.keys(all).sort()).toEqual(sortHashes(members));
     for (const [prefix, body] of files.written(E)) for (const h of Object.keys(body)) expect(h.slice(0, 3)).toBe(prefix);
     for (const h of members) expect(all[h]).toBe(Number(store.resultOf(h)?.value.split(':')[0]));
+  });
+
+  test('FR-038 참가자가있으면_앞자리4096개파일을모두쓰고_빈앞자리는빈표다', async () => {
+    const { files, publish } = world();
+    await publish.run({ eventId: E });
+    expect(files.written(E).size).toBe(4096);
+    expect(files.written(E).get('000')).toEqual({});
+  });
+
+  test('POL-005 Q-T6 머클루트는_비콘을받기전에공시한다', async () => {
+    const w = world({ beacon: false });
+    expect(await w.publish.run({ eventId: E })).toEqual({ status: 'WAITING_BEACON' });
+    const root = merkleRoot(sortHashes(w.members).map((h) => Buffer.from(h, 'hex'))).toString('hex');
+    expect(await w.store.earlyRootOf(E, 1)).toEqual({ root, atMs: w.clock.now() });
+    expect(w.store.publishedForTest(E)).toBeNull();
+    expect(w.files.written(E).size).toBe(0);
+  });
+
+  test('[ASVS v5.0.0-15.4.2] POL-005 복제확인전에는_머클루트를공시하지않는다', async () => {
+    const w = world();
+    w.store.replicatedForTest(false);
+    expect(await w.publish.run({ eventId: E })).toEqual({ status: 'WAITING_REPLICA' });
+    expect(await w.store.earlyRootOf(E, 1)).toBeNull();
+  });
+
+  test('POL-005 Q-T6 공시한루트와_게시때다시센루트가다르면_게시를멈춘다', async () => {
+    const w = world({ beacon: false });
+    await w.publish.run({ eventId: E });
+    w.store.setMembersForTest(E, [...w.members.slice(0, 4), hash('z')]);
+    const again = new PublishBatchResults(w.store, w.records, w.randomness, w.randomness, w.files, w.clock);
+    expect(await again.run({ eventId: E })).toEqual({ status: 'BEACON_STOPPED', reason: 'members_changed', first: true });
+    expect((await w.records.read(E, 1))?.stopped?.reason).toBe('members_changed');
+    expect(w.store.publishedForTest(E)).toBeNull();
+    expect(await again.run({ eventId: E })).toEqual({ status: 'BEACON_STOPPED', reason: 'members_changed', first: false });
+  });
+
+  test('[ASVS v5.0.0-16.5.2] POL-005 Q-T6 머클루트를_공시라운드뒤에썼으면_게시를멈춘다(리더가죽었다가라운드뒤에처음돈경우)', async () => {
+    const w = world();
+    const rec = await w.records.read(E, 1);
+    w.clock.advance(drandRoundTimeMs(rec!.round) + 1 - w.clock.now());
+    expect(await w.publish.run({ eventId: E })).toEqual({ status: 'BEACON_STOPPED', reason: 'late_root', first: true });
+    expect((await w.records.read(E, 1))?.stopped?.reason).toBe('late_root');
+    expect(w.store.publishedForTest(E)).toBeNull();
+    expect(w.files.written(E).size).toBe(0);
+  });
+
+  test('[ASVS v5.0.0-16.5.2] 결과파일쓰기가실패한뒤다시부르면_사람별결과와셔플을되풀이하지않고파일만다시쓴다', async () => {
+    const w = world();
+    let fail = true;
+    let seeds = 0;
+    const files = { write: async (e: string, g: 1 | 'lobby' | number, m: ReadonlyMap<string, Record<string, number>>) => (fail ? Promise.reject(new Error('S3 503')) : w.files.write(e, g, m)) };
+    const seedSource = { seed: async (e: string, g: 1 | 'lobby' | number) => ((seeds += 1), w.randomness.seed(e, g)) };
+    const p = new PublishBatchResults(w.store, w.records, seedSource, w.randomness, files, w.clock);
+    await expect(p.run({ eventId: E })).rejects.toThrow('S3 503');
+    const writes = w.store.writeCallsForTest();
+    expect(writes).toBe(1);
+    fail = false;
+    expect(await p.run({ eventId: E })).toMatchObject({ status: 'PUBLISHED', count: 5 });
+    expect(w.store.writeCallsForTest()).toBe(writes);
+    expect(seeds).toBe(1);
+    expect(w.store.publishedForTest(E)).not.toBeNull();
+  });
+
+  test('공시때읽은참가자를게시까지쓰고_리더를잃어forget하면비운다(참가자를다시읽는다)', async () => {
+    const w = world();
+    let round: Awaited<ReturnType<typeof w.randomness.round>> = null;
+    const p = new PublishBatchResults(w.store, w.records, w.randomness, { round: async () => round }, w.files, w.clock);
+    expect(await p.run({ eventId: E })).toEqual({ status: 'WAITING_BEACON' });
+    expect(w.store.membersCallsForTest()).toBe(1);
+    round = await w.randomness.round(E, 1);
+    expect(await p.run({ eventId: E })).toMatchObject({ status: 'PUBLISHED' });
+    expect(w.store.membersCallsForTest()).toBe(1);
+
+    const other = world();
+    const q = new PublishBatchResults(other.store, other.records, other.randomness, { round: async () => null }, other.files, other.clock);
+    await q.run({ eventId: E });
+    q.forget();
+    const r = new PublishBatchResults(other.store, other.records, other.randomness, other.randomness, other.files, other.clock);
+    await r.run({ eventId: E });
+    expect(other.store.membersCallsForTest()).toBe(2);
+  });
+
+  /** 결과 파일 쓰기가 한 번 실패해 #pending이 남은 게시 */
+  async function failedOnce() {
+    const w = world();
+    const state = { fail: true };
+    const files = { write: async (e: string, g: 1 | 'lobby' | number, m: ReadonlyMap<string, Record<string, number>>) => (state.fail ? Promise.reject(new Error('S3 503')) : w.files.write(e, g, m)) };
+    const p = new PublishBatchResults(w.store, w.records, w.randomness, w.randomness, files, w.clock);
+    await expect(p.run({ eventId: E })).rejects.toThrow('S3 503');
+    state.fail = false;
+    return { ...w, p };
+  }
+
+  test('POL-005 닫힌 구간 표시가 바뀌면 들고 있던 결과를 버리고 처음부터 게시한다(옛 결과로 게시 표시를 쓰지 않는다)', async () => {
+    const w = await failedOnce();
+    w.store.setClosedForTest(E, { first: 11, size: 5, gen: 2 });
+    expect(await w.p.run({ eventId: E })).toMatchObject({ status: 'PUBLISHED', count: 5 });
+    expect(w.store.resultOf(w.members[0]!)?.value).toMatch(/:2$/);
+    expect(w.store.writeCallsForTest()).toBe(2);
+  });
+
+  test('POL-005 리더를 잃은 뒤 돌던 게시는 결과를 들고 남지 않고 게시 표시를 쓰지 않는다', async () => {
+    const w = world();
+    let once = true;
+    const seeds = {
+      seed: async (e: string, g: 1 | 'lobby' | number) => {
+        if (once) {
+          once = false;
+          p.forget();
+        }
+        return w.randomness.seed(e, g);
+      },
+    };
+    const p = new PublishBatchResults(w.store, w.records, seeds, w.randomness, w.files, w.clock);
+    expect(await p.run({ eventId: E })).toEqual({ status: 'ABANDONED' });
+    expect(w.store.publishedForTest(E)).toBeNull();
+    expect(w.files.written(E).size).toBe(0);
+    expect(await p.run({ eventId: E })).toMatchObject({ status: 'PUBLISHED' });
+  });
+
+  test('POL-005 파일을 다시 쓸 차례여도 멈춘 구간은 게시하지 않는다', async () => {
+    const w = await failedOnce();
+    await w.records.stop(E, 1, w.clock.now(), 'beacon', START);
+    expect(await w.p.run({ eventId: E })).toEqual({ status: 'BEACON_STOPPED', reason: 'beacon', first: false });
+    expect(w.store.publishedForTest(E)).toBeNull();
+    expect(w.files.written(E).size).toBe(0);
+  });
+
+  test('시험 비콘은 값이 서명의 SHA-256이다(검증 화면이 그대로 대조한다)', async () => {
+    const w = world();
+    const r = (await w.randomness.round(E, 1))!;
+    expect(createHash('sha256').update(Buffer.from(r.signature, 'hex')).digest('hex')).toBe(r.value.toString('hex'));
+  });
+
+  test('POL-005 Q-T6 게시할때_비콘값과서명을공시기록에남긴다', async () => {
+    const w = world();
+    await w.publish.run({ eventId: E });
+    const rec = await w.records.read(E, 1);
+    const round = (await w.randomness.round(E, 1))!;
+    expect(rec?.beacon).toBe(round.value.toString('hex'));
+    expect(rec?.signature).toBe(round.signature);
+  });
+
+  test('[ASVS v5.0.0-16.5.2] 결과파일쓰기가실패하면_게시표시를쓰지않는다', async () => {
+    const w = world();
+    const failing = new PublishBatchResults(w.store, w.records, w.randomness, w.randomness, { write: async () => Promise.reject(new Error('S3 503')) }, w.clock);
+    await expect(failing.run({ eventId: E })).rejects.toThrow('S3 503');
+    expect(w.store.publishedForTest(E)).toBeNull();
+    await w.publish.run({ eventId: E });
+    expect(w.store.publishedForTest(E)).not.toBeNull();
   });
 
   test('같은입력이면같은결과라_두번게시해도같고_이미게시했으면ALREADY다', async () => {
@@ -156,7 +306,7 @@ describe('로비 셔플과 비콘 대기(HOT-040, ADR-0231)', () => {
     if (!o.noRecord) records.setForTest(E, 'lobby', { commit: commitment(E, seed).toString('hex'), round: o.round ?? ROUND, sealed: await sealer.seal(E, 'lobby', seed), atMs: OPENS - 600_000 + (o.commitOffsetMs ?? 0) });
     const seeds = new CommittedSeedSource(records, sealer);
     const beaconValue = o.beacon === undefined ? Buffer.alloc(32, 6) : o.beacon;
-    const beacons = { value: async () => beaconValue };
+    const beacons = { round: async () => (beaconValue ? { value: beaconValue, signature: 'ab' } : null) };
     const files = new MemoryResultFiles();
     const publish = new PublishBatchResults(store, records, seeds, beacons, files, clock);
     return { clock, store, records, files, publish, members, seed };
@@ -197,7 +347,7 @@ describe('로비 셔플과 비콘 대기(HOT-040, ADR-0231)', () => {
     expect(await w.publish.run({ eventId: E, group: 'lobby' })).toEqual({ status: 'BEACON_STOPPED', reason: 'beacon', first: true });
     expect((await w.records.read(E, 'lobby'))?.stopped).toMatchObject({ reason: 'beacon' });
     // 값이 뒤늦게 와도(비콘을 바꿔도) 멈춤은 풀리지 않는다(RB-35 CLI만 푼다)
-    const again = new PublishBatchResults(w.store, w.records, new CommittedSeedSource(w.records, sealer), { value: async () => Buffer.alloc(32, 6) }, w.files, w.clock);
+    const again = new PublishBatchResults(w.store, w.records, new CommittedSeedSource(w.records, sealer), { round: async () => ({ value: Buffer.alloc(32, 6), signature: 'ab' }) }, w.files, w.clock);
     expect(await again.run({ eventId: E, group: 'lobby' })).toEqual({ status: 'BEACON_STOPPED', reason: 'beacon', first: false });
     expect(w.store.publishedForTest(E, 'lobby')).toBeNull();
   });
@@ -219,8 +369,8 @@ describe('로비 셔플과 비콘 대기(HOT-040, ADR-0231)', () => {
   test('Q-T27 두 리더가 겹쳐 같은 멈춤을 쓰면 first는 먼저 쓴 쪽만 참이다(SEV1은 한 번)', async () => {
     const w = await lobby({ round: ROUND - 3 });
     const before = await w.records.read(E, 'lobby');
-    const stale = { read: async () => before, stop: w.records.stop.bind(w.records) };
-    const a = new PublishBatchResults(w.store, stale, new CommittedSeedSource(w.records, sealer), { value: async () => Buffer.alloc(32, 6) }, w.files, w.clock);
+    const stale = { read: async () => before, stop: w.records.stop.bind(w.records), recordBeacon: w.records.recordBeacon.bind(w.records), reveal: w.records.reveal.bind(w.records) };
+    const a = new PublishBatchResults(w.store, stale, new CommittedSeedSource(w.records, sealer), { round: async () => ({ value: Buffer.alloc(32, 6), signature: 'ab' }) }, w.files, w.clock);
     expect(await a.run({ eventId: E, group: 'lobby' })).toMatchObject({ first: true });
     expect(await a.run({ eventId: E, group: 'lobby' })).toMatchObject({ first: false });
   });

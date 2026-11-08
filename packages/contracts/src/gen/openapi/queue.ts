@@ -205,7 +205,83 @@ export const GetQueueShuffleProofParams = zod.object({
   "eventId": zod.string()
 })
 
-export const GetQueueShuffleProofResponse = zod.unknown()
+export const getQueueShuffleProofResponseLobbyOneCommitRegExp = new RegExp('^[0-9a-f]{64}$');
+
+export const getQueueShuffleProofResponseLobbyOneMerkleRootRegExp = new RegExp('^[0-9a-f]{64}$');
+
+export const getQueueShuffleProofResponseLobbyOneParticipantCountMin = 0;
+
+export const getQueueShuffleProofResponseLobbyOneBeaconRegExp = new RegExp('^[0-9a-f]{64}$');
+export const getQueueShuffleProofResponseLobbyOneBeaconSignatureRegExp = new RegExp('^[0-9a-f]+$');
+export const getQueueShuffleProofResponseLobbyOneFileCountMin = 0;
+
+export const getQueueShuffleProofResponseLobbyOneSeedRegExp = new RegExp('^[0-9a-f]{64}$');
+export const getQueueShuffleProofResponseBatchOneCommitRegExp = new RegExp('^[0-9a-f]{64}$');
+
+export const getQueueShuffleProofResponseBatchOneMerkleRootRegExp = new RegExp('^[0-9a-f]{64}$');
+
+export const getQueueShuffleProofResponseBatchOneParticipantCountMin = 0;
+
+export const getQueueShuffleProofResponseBatchOneBeaconRegExp = new RegExp('^[0-9a-f]{64}$');
+export const getQueueShuffleProofResponseBatchOneBeaconSignatureRegExp = new RegExp('^[0-9a-f]+$');
+export const getQueueShuffleProofResponseBatchOneFileCountMin = 0;
+
+export const getQueueShuffleProofResponseBatchOneSeedRegExp = new RegExp('^[0-9a-f]{64}$');
+
+
+export const GetQueueShuffleProofResponse = zod.object({
+  "eventId": zod.string(),
+  "opensAt": zod.iso.datetime({"offset":true}).describe('판매 오픈 시각'),
+  "seedRevealAt": zod.iso.datetime({"offset":true}).describe('시드 공개 예정 시각(오픈 60분 뒤)'),
+  "lobby": zod.union([zod.object({
+  "chain": zod.string().describe('drand 체인 이름(quicknet)'),
+  "algorithm": zod.string().describe('알고리즘 판(v1)'),
+  "commit": zod.string().regex(getQueueShuffleProofResponseLobbyOneCommitRegExp).optional().describe('시드 해시(커밋)'),
+  "committedAt": zod.iso.datetime({"offset":true}).optional().describe('커밋을 공시한 시각'),
+  "fixedAt": zod.iso.datetime({"offset":true}).optional().describe('참가자 목록을 고정하는 시각(로비는 오픈, 묶음은 구간 끝)'),
+  "round": zod.int().min(1).optional().describe('공시한 drand 라운드'),
+  "roundAt": zod.iso.datetime({"offset":true}).optional().describe('그 라운드의 예정 시각'),
+  "merkleRoot": zod.string().regex(getQueueShuffleProofResponseLobbyOneMerkleRootRegExp).optional().describe('참가자 머클 루트. 목록을 고정한 뒤 비콘을 받기 전에 공시한다'),
+  "rootAt": zod.iso.datetime({"offset":true}).optional().describe('머클 루트를 공시한 시각'),
+  "firstSeq": zod.int().min(1).optional().describe('이 구간의 첫 번호'),
+  "participantCount": zod.int().min(getQueueShuffleProofResponseLobbyOneParticipantCountMin).optional().describe('참가자 수(목록을 고정한 때의 값)'),
+  "beacon": zod.string().regex(getQueueShuffleProofResponseLobbyOneBeaconRegExp).optional().describe('drand 라운드 값'),
+  "beaconSignature": zod.string().regex(getQueueShuffleProofResponseLobbyOneBeaconSignatureRegExp).optional().describe('drand 서명'),
+  "publishedAt": zod.iso.datetime({"offset":true}).optional().describe('결과를 게시한 시각'),
+  "resultPathPrefix": zod.string().describe('결과 파일 경로의 앞부분. 뒤에 \'{앞 세 자리}.json\'을 붙이면 파일 경로다(queue-files 배포)'),
+  "fileCount": zod.int().min(getQueueShuffleProofResponseLobbyOneFileCountMin).describe('결과 파일 수(16진 앞 세 자리, 4,096 [가정]). 참가자가 0명으로 닫힌 구간은 파일이 없어 0이다'),
+  "seed": zod.string().regex(getQueueShuffleProofResponseLobbyOneSeedRegExp).optional().describe('공개한 시드'),
+  "seedRevealedAt": zod.iso.datetime({"offset":true}).optional().describe('시드를 공개한 시각'),
+  "stopped": zod.object({
+  "reason": zod.enum(['beacon', 'stale_round', 'late_commit', 'no_commit', 'late_root', 'members_changed', 'unknown']),
+  "at": zod.iso.datetime({"offset":true})
+}).optional().describe('셔플을 멈춤(RB-35)')
+}).describe('셔플 구간 하나의 공시 기록(로비 lobby·동시 도착 묶음 batch). 아직 없는 값은 칸을 뺀다. 시드는 공개 시각(seedRevealAt)이 지나고 그 구간을 게시한 뒤에만 싣는다. 봉인 값은 싣지 않는다(ADR-0232)'),zod.null()]).describe('로비 셔플. 끈 회차는 null'),
+  "batch": zod.union([zod.object({
+  "chain": zod.string().describe('drand 체인 이름(quicknet)'),
+  "algorithm": zod.string().describe('알고리즘 판(v1)'),
+  "commit": zod.string().regex(getQueueShuffleProofResponseBatchOneCommitRegExp).optional().describe('시드 해시(커밋)'),
+  "committedAt": zod.iso.datetime({"offset":true}).optional().describe('커밋을 공시한 시각'),
+  "fixedAt": zod.iso.datetime({"offset":true}).optional().describe('참가자 목록을 고정하는 시각(로비는 오픈, 묶음은 구간 끝)'),
+  "round": zod.int().min(1).optional().describe('공시한 drand 라운드'),
+  "roundAt": zod.iso.datetime({"offset":true}).optional().describe('그 라운드의 예정 시각'),
+  "merkleRoot": zod.string().regex(getQueueShuffleProofResponseBatchOneMerkleRootRegExp).optional().describe('참가자 머클 루트. 목록을 고정한 뒤 비콘을 받기 전에 공시한다'),
+  "rootAt": zod.iso.datetime({"offset":true}).optional().describe('머클 루트를 공시한 시각'),
+  "firstSeq": zod.int().min(1).optional().describe('이 구간의 첫 번호'),
+  "participantCount": zod.int().min(getQueueShuffleProofResponseBatchOneParticipantCountMin).optional().describe('참가자 수(목록을 고정한 때의 값)'),
+  "beacon": zod.string().regex(getQueueShuffleProofResponseBatchOneBeaconRegExp).optional().describe('drand 라운드 값'),
+  "beaconSignature": zod.string().regex(getQueueShuffleProofResponseBatchOneBeaconSignatureRegExp).optional().describe('drand 서명'),
+  "publishedAt": zod.iso.datetime({"offset":true}).optional().describe('결과를 게시한 시각'),
+  "resultPathPrefix": zod.string().describe('결과 파일 경로의 앞부분. 뒤에 \'{앞 세 자리}.json\'을 붙이면 파일 경로다(queue-files 배포)'),
+  "fileCount": zod.int().min(getQueueShuffleProofResponseBatchOneFileCountMin).describe('결과 파일 수(16진 앞 세 자리, 4,096 [가정]). 참가자가 0명으로 닫힌 구간은 파일이 없어 0이다'),
+  "seed": zod.string().regex(getQueueShuffleProofResponseBatchOneSeedRegExp).optional().describe('공개한 시드'),
+  "seedRevealedAt": zod.iso.datetime({"offset":true}).optional().describe('시드를 공개한 시각'),
+  "stopped": zod.object({
+  "reason": zod.enum(['beacon', 'stale_round', 'late_commit', 'no_commit', 'late_root', 'members_changed', 'unknown']),
+  "at": zod.iso.datetime({"offset":true})
+}).optional().describe('셔플을 멈춤(RB-35)')
+}).describe('셔플 구간 하나의 공시 기록(로비 lobby·동시 도착 묶음 batch). 아직 없는 값은 칸을 뺀다. 시드는 공개 시각(seedRevealAt)이 지나고 그 구간을 게시한 뒤에만 싣는다. 봉인 값은 싣지 않는다(ADR-0232)'),zod.null()]).describe('동시 도착 묶음. 끈 회차는 null')
+}).describe('셔플 검증 정보(SCR-019, POL-005, ADR-0232)')
 
 /**
  * FR-008, POL-008·009. 대기표(또는 참가 토큰) 서명, 내 번호 ≤ serving, 빠진 번호(추가 검증 통과로 복귀한 대기표는 예외)·15분 만료 확인(복귀한 대기표는 차례와 통과 중 늦은 때부터, ADR-0062), 1인 1순번 재확인(사람별 입장 키, ADR-0056). 자리 없으면 SOON + retryAfterSeconds이고, 그 번호를 곧 입장 대기열에 넣는다. 자리는 '빈자리 수 > 곧 입장 대기열에서 내 번호보다 작은 번호의 수'일 때만 주므로 낮은 번호부터 들어간다. 곧 입장 대기열에 있는 동안은 15분 만료를 세지 않는다(추천 적용 2026-10-28, ADR-0104). 입장 자리 점수 = 첫 사용 기한 5분. 좌석 자동 배정 공연의 차례 직전 직접 확인(ADR-0043)에서 내 번호 > serving이면 NOT_YET + retryAfterMs(게이트웨이 레이트 리밋 적용)

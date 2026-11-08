@@ -3,7 +3,7 @@
 // 서명 검증(BLS12-381)은 BeaconVerifier 포트다. 라이브러리와 운영 조립은 BUILD_ORDER HOT-041이다(BLS 검증을 직접 짜지 않는다).
 import { createHash } from 'node:crypto';
 import { DRAND_CHAIN_HASH, type ShuffleGroup } from '@peaket/shuffle';
-import type { Beacon, ShuffleRecords } from '../domain/ports.js';
+import type { Beacon, BeaconRound, ShuffleRecords } from '../domain/ports.js';
 
 /** 라운드 서명 검증. drand 프로젝트의 공개 체인 정보(quicknet)로 검증한다 */
 export interface BeaconVerifier {
@@ -31,7 +31,7 @@ interface DrandBody {
 export class DrandBeacon implements Beacon {
   constructor(private readonly o: DrandBeaconOptions) {}
 
-  async value(eventId: string, group: ShuffleGroup): Promise<Buffer | null> {
+  async round(eventId: string, group: ShuffleGroup): Promise<BeaconRound | null> {
     const rec = await this.o.records.read(eventId, group);
     if (!rec) return null;
     for (const relay of this.o.relays) {
@@ -41,7 +41,11 @@ export class DrandBeacon implements Beacon {
     return null;
   }
 
-  async #fromRelay(relay: string, round: number): Promise<Buffer | null> {
+  async value(eventId: string, group: ShuffleGroup): Promise<Buffer | null> {
+    return (await this.round(eventId, group))?.value ?? null;
+  }
+
+  async #fromRelay(relay: string, round: number): Promise<BeaconRound | null> {
     try {
       const r = await this.o.http.get(`${relay}/${DRAND_CHAIN_HASH}/public/${round}`);
       if (r.status !== 200) return null;
@@ -51,7 +55,7 @@ export class DrandBeacon implements Beacon {
       // quicknet의 라운드 값은 SHA-256(서명)이다. 값과 서명이 어긋나면 검증 전에 버린다
       if (createHash('sha256').update(Buffer.from(b.signature, 'hex')).digest('hex') !== b.randomness) return null;
       if (!this.o.verifier.verify(round, b.signature)) return null;
-      return Buffer.from(b.randomness, 'hex');
+      return { value: Buffer.from(b.randomness, 'hex'), signature: b.signature };
     } catch {
       // 이 중계가 안 되면 다음 중계를 본다
       return null;

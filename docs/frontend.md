@@ -1350,6 +1350,8 @@ sequenceDiagram
 
 #### 5.14.1 화면 묶음별 헤더 값
 
+Worker 안의 요청에는 페이지의 `connect-src`가 걸리지 않는다. Worker는 자기 스크립트 응답의 CSP를 따르고, 지금 정적 자산 응답에는 CSP 머리가 없다. 그래서 셔플 검증의 Worker는 네트워크를 직접 쓰지 않고, 화면 쪽이 파일을 받아 넘긴다(ADR-0232 결정 9).
+
 모든 묶음에 공통으로 `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, `report-to csp`(보고를 받을 주소인 엔드포인트: `Reporting-Endpoints: csp="/_t/csp"`)를 둔다. HSTS와 `nosniff`는 배포·게이트웨이 정책이 붙인다(ADR-0065 결정 3). `{n}`은 요청마다 만드는 nonce, `{h}`는 인라인 스크립트 해시다. 소비자 웹 캐시 화면(A)은 응답 때 낸다: 앞 서버(`apps/web/server/csp-hash-server.mjs`)가 HTML을 다 받은 뒤 실행되는 인라인 스크립트마다 SHA-256을 내어 채운다(소유자 결정 2026-11-04, ADR-0193. Next.js 해시 방식(SRI)은 외부 스크립트에 `integrity`만 달고 App Router 인라인 스크립트는 덮지 못했다). 관제 콘솔(C)은 빌드 때 정한 해시다. 모든 묶음의 `connect-src`에 `'self'`가 있는 것은 같은 출처 `/_t/*` 전송 때문이다(ADR-0079 결정 14).
 
 스타일은 요소와 속성을 나눠 받는다(추천 적용 2026-10-28, ADR-0111). `<style>` 요소와 스타일시트 파일은 `style-src`(A는 `'self'`, B·E·F는 `'self'`와 nonce)로만 받는다. HTML 요소의 `style="…"` 속성은 묶음 A·B(그 위의 E·F 포함)에서 `style-src-attr 'unsafe-inline'`으로 받는다. SEED 부품이 여백·색·글자 크기를 CSS 변수(이름을 붙인 스타일 값)로 `style` 속성에 넣고 `next/image`도 `style` 속성을 내는데, Next.js가 이것을 서버에서 HTML로 그리기 때문이다. nonce는 속성에 걸리지 않고, React는 하이드레이션(서버가 보낸 HTML에 브라우저 쪽 React를 붙이는 일) 때 막힌 속성을 다시 넣지 않는다. 브라우저에서만 그리는 C·D·G와 React를 쓰지 않는 A′는 속성을 받지 않는다. 스크립트 허용 방식은 바꾸지 않는다. 이 값은 기본안이고 PoC FE-T30(wbs 2.10.1)으로 확정한다. 실패하면 서버가 그리는 부품은 클래스만 쓰는 쪽(ADR-0111 결정 5)으로 바꾼다.

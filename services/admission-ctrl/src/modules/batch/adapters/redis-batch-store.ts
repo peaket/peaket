@@ -5,7 +5,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type HotRedis, isRedisUnavailable, redisScript } from '@peaket/platform';
-import type { BatchEntry, BatchSchedule, BatchStore, BeaconStopReason, ClosedBatch, PublishedBatch, ShuffleGroup, ShuffleRecord, ShuffleRecords } from '../domain/ports.js';
+import type { BatchEntry, BatchSchedule, BatchStore, BeaconStopReason, ClosedBatch, EarlyRoot, PublishedBatch, ShuffleGroup, ShuffleRecord, ShuffleRecords } from '../domain/ports.js';
 
 export const ADMISSION_REDIS = Symbol('admission.QueueRedis');
 /** 게시 전 복제 확인의 최소 복제본 수(운영 1, 로컬·CI 0 [가정], PEAKET_QUEUE_REDIS_MIN_REPLICAS) */
@@ -62,6 +62,20 @@ return wrote
 const MARK_PUBLISHED = redisScript(`
 redis.call('HSETNX', KEYS[1], 'pub:' .. ARGV[1], ARGV[2])
 redis.call('HSETNX', KEYS[1], 'root:' .. ARGV[1], ARGV[3])
+return 1
+`);
+// 머클 루트 공시: 비어 있을 때만 쓰고 공시 시각은 저장소 시각이다. 파드 시계가 어긋나도 라운드 시각과 견줄 수 있게 한다(ADR-0232 결정 5). 남아 있는 값을 돌려준다
+const MARK_ROOT = redisScript(`
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2]) == 1 then redis.call('HSET', KEYS[1], ARGV[3], tostring(now)) end
+if redis.call('PEXPIRETIME', KEYS[1]) < tonumber(ARGV[4]) then redis.call('PEXPIREAT', KEYS[1], ARGV[4]) end
+return redis.call('HMGET', KEYS[1], ARGV[1], ARGV[3])
+`);
+// 공시 칸 두 개를 비어 있을 때만 쓴다(비콘·시드, ADR-0232). 첫 칸이 이미 있으면 둘 다 그대로 둔다. 수명은 늦은 쪽으로만 늘린다
+const WRITE_ONCE_PAIR = redisScript(`
+if redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2]) == 1 then redis.call('HSET', KEYS[1], ARGV[3], ARGV[4]) end
+if redis.call('PEXPIRETIME', KEYS[1]) < tonumber(ARGV[5]) then redis.call('PEXPIREAT', KEYS[1], ARGV[5]) end
 return 1
 `);
 // 본 값일 때만 지운다(그 사이 새로 청한 표시를 지우지 않게)
@@ -164,6 +178,17 @@ export class RedisBatchStore implements BatchStore {
     await this.redis.evalScript(MARK_PUBLISHED, [k], [String(batchNo), String(atMs), root]);
   }
 
+  async markRoot(eventId: string, batchNo: ShuffleGroup, root: string, expireAtMs: number): Promise<EarlyRoot> {
+    const r = (await this.redis.evalScript(MARK_ROOT, [keys.batchDone(eventId)], [`root:${batchNo}`, root, `rootAt:${batchNo}`, String(expireAtMs)])) as unknown[];
+    return { root: str(r[0])!, atMs: Number(str(r[1])) };
+  }
+
+  async earlyRootOf(eventId: string, batchNo: ShuffleGroup): Promise<EarlyRoot | null> {
+    const k = keys.batchDone(eventId);
+    const [root, at] = ((await this.redis.command(['HMGET', k, `root:${batchNo}`, `rootAt:${batchNo}`], { key: k })) as unknown[]).map(str);
+    return root && at ? { root, atMs: Number(at) } : null;
+  }
+
   async clearRepair(eventId: string, batchNo: ShuffleGroup, repairAtMs: number): Promise<void> {
     await this.redis.evalScript(CLEAR_REPAIR, [keys.batchDone(eventId)], [`repair:${batchNo}`, String(repairAtMs)]);
   }
@@ -189,12 +214,21 @@ export class RedisShuffleRecords implements ShuffleRecords {
 
   async read(eventId: string, group: ShuffleGroup): Promise<ShuffleRecord | null> {
     const k = keys.shuffle(eventId);
-    const [commit, round, sealed, at, stop] = ((await this.redis.command(['HMGET', k, `commit:${group}`, `round:${group}`, `sealed:${group}`, `at:${group}`, `stop:${group}`], { key: k })) as unknown[]).map(str);
+    const [commit, round, sealed, at, stop, beacon, signature, seed, seedAt] = ((await this.redis.command(['HMGET', k, `commit:${group}`, `round:${group}`, `sealed:${group}`, `at:${group}`, `stop:${group}`, `beacon:${group}`, `sig:${group}`, `seed:${group}`, `seedAt:${group}`], { key: k })) as unknown[]).map(str);
     if (!commit || !round || !sealed || !at) return null;
-    if (!stop) return { commit, round: Number(round), sealed, atMs: Number(at) };
+    const rec: ShuffleRecord = { commit, round: Number(round), sealed, atMs: Number(at), ...(beacon && signature ? { beacon, signature } : {}), ...(seed && seedAt ? { seed, seedAtMs: Number(seedAt) } : {}) };
+    if (!stop) return rec;
     // 값이 있으면 모양이 틀려도 멈춘 것으로 본다(모르는 값을 '멈춤 아님'으로 읽으면 RB-35 없이 게시가 다시 돈다)
-    const m = /^(\d+):(beacon|stale_round|late_commit|no_commit)$/.exec(stop);
-    return { commit, round: Number(round), sealed, atMs: Number(at), stopped: m ? { atMs: Number(m[1]), reason: m[2] as BeaconStopReason } : { atMs: 0, reason: 'unknown' } };
+    const m = /^(\d+):(beacon|stale_round|late_commit|no_commit|late_root|members_changed)$/.exec(stop);
+    return { ...rec, stopped: m ? { atMs: Number(m[1]), reason: m[2] as BeaconStopReason } : { atMs: 0, reason: 'unknown' } };
+  }
+
+  async recordBeacon(eventId: string, group: ShuffleGroup, value: string, signature: string, expireAtMs: number): Promise<void> {
+    await this.redis.evalScript(WRITE_ONCE_PAIR, [keys.shuffle(eventId)], [`beacon:${group}`, value, `sig:${group}`, signature, String(expireAtMs)]);
+  }
+
+  async reveal(eventId: string, group: ShuffleGroup, seed: string, atMs: number, expireAtMs: number): Promise<void> {
+    await this.redis.evalScript(WRITE_ONCE_PAIR, [keys.shuffle(eventId)], [`seed:${group}`, seed, `seedAt:${group}`, String(atMs), String(expireAtMs)]);
   }
 
   async stop(eventId: string, group: ShuffleGroup, atMs: number, reason: BeaconStopReason, expireAtMs: number): Promise<boolean> {

@@ -98,7 +98,7 @@ return {'OK'}
 // KEYS: 1 leader, 2 serving, 3 seq, 4 removed, 5 skipped, 6 serving_log, 7 calls, 8 call_req, 9 slots, 10 soon, 11 soon_at, 12 batch_done, 13 notice, 14 ctl, 15 soon_first
 // ARGV: 1 세대, 2 목표, 3 비율 하한, 4 오는 중 창 W(ms), 5 최대 전진, 6 회차 키 수명, 7 로비 셔플, 8 묶음, 9 묶음 구간 끝(ms), 10 곧 입장 낡음(ms), 11 전진 기록 보관(ms),
 //       12 분산 창(ms), 13 늦은 게시의 분산 창(ms), 14 공개 예정 = 구간 끝 + 이 값(ms), 15 한 번에 훑는 번호 상한, 16 전진 기록 수명(판매 종료),
-//       17·18 입장 비율 창의 처음·끝(불린 뒤 ms), 19 판매 상태를 모를 때의 값, 20~ ctl에 함께 쓸 자동 제어 칸(이름·값 쌍, ADR-0226 결정 2)
+//       17·18 입장 비율 창의 처음·끝(불린 뒤 ms), 19 판매 상태를 모를 때의 값, 20 로비 결과 공개 예정 시각(ms, 0이면 늦었다고 보지 않는다, ADR-0232 결정 11), 21~ ctl에 함께 쓸 자동 제어 칸(이름·값 쌍, ADR-0226 결정 2)
 // 돌려주는 값: {'FENCED'} 또는 {'OK', serving, 유효 전진 수, 쓰는 자리, 곧 입장, 오는 중, 뺀 곧 입장, 로비 표시, 묶음 표시, 묶음 게시, 다시 쓰기 표시, 비율(천분율), 판매 상태, 발급 − serving}
 export const TICK_LUA = `${EXTEND}${FENCE}
 local t = redis.call('TIME')
@@ -118,7 +118,7 @@ for i = 1, #stale, 500 do
 end
 local soon = redis.call('ZCARD', KEYS[10])
 redis.call('HSET', KEYS[14], 'targetNow', ARGV[2])
-for i = 20, #ARGV, 2 do redis.call('HSET', KEYS[14], ARGV[i], ARGV[i + 1]) end
+for i = 21, #ARGV, 2 do redis.call('HSET', KEYS[14], ARGV[i], ARGV[i + 1]) end
 extend(KEYS[14], keep)
 -- 판매 상태 칸(queue-svc가 쓴 notice)의 수명도 회차 키 수명으로 늘린다(연기된 회차가 옛 판매 종료 + 1일에 saleState·soldOutLastSeq를 잃지 않게, HOT-010 리뷰). 없는 키는 만들지 않는다
 if redis.call('EXISTS', KEYS[13]) == 1 then extend(KEYS[13], keep) end
@@ -176,7 +176,10 @@ local function gate(marker, pub, late)
   if pub and late then wait = tonumber(ARGV[13]) end
   if not pub or now < tonumber(pub) + wait then cap = math.min(cap, first - 1) end
 end
-if ARGV[7] == '1' then gate(bd[1], bd[2], false) end
+if ARGV[7] == '1' then
+  local lobbyAt = tonumber(ARGV[20])
+  gate(bd[1], bd[2], lobbyAt > 0 and bd[2] and tonumber(bd[2]) > lobbyAt)
+end
 if ARGV[8] == '1' then
   local resultAt = tonumber(ARGV[9]) + tonumber(ARGV[14])
   gate(bd[3], bd[4], bd[4] and tonumber(bd[4]) > resultAt)

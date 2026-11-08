@@ -11,7 +11,7 @@ servers:
   - url: https://queue.peaket.example
     description: gw-queue (로비·대기열·입장 확정). 대기열 API 배포(CloudFront). 대기 상태·셔플 결과 파일은 queue-files 호스트(대기열 파일 배포, ADR-0058). 게이트웨이마다 호스트를 따로 둔다(추천 적용 2026-10-09, R-11). 교차 출처 응답은 Access-Control-Allow-Origin https://www.peaket.example에 Allow-Credentials true, Vary Origin, Expose-Headers Retry-After·Date·X-Trace-Id를 낸다(추천 적용 2026-10-15, ADR-0065 결정 7. Date는 브라우저 시계 보정, 추천 적용 2026-10-21, ADR-0079 결정 3. X-Trace-Id는 기술 검토 낮음-023. 전체 규칙은 guidelines §9 'CORS 응답 헤더')
   - url: https://queue-files.peaket.example
-    description: 대기열 파일 배포(CloudFront, 인증·쿠키 없음). 대기 상태 파일, 셔플 결과 파일, 묶음 결과 파일. 원본 gw-queue, 대체 원본 S3(ADR-0058). 소비자 웹 스크립트가 읽도록 이 배포와 S3 대체 원본은 Access-Control-Allow-Origin https://www.peaket.example과 Access-Control-Expose-Headers Retry-After를 내고 Credentials는 두지 않는다(추천 적용 2026-10-15, ADR-0065 결정 7). CDN이 캐시한 응답의 Date는 원본이 만든 시각 그대로라 노출하지 않는다(ADR-0110, 기술 검토 중간-036). Retry-After는 503의 재시도 하한으로만 쓰고, 폴링 힌트는 대기 상태 파일 본문의 pollHintMs다(기술 검토 중간-032)
+    description: 대기열 파일 배포(CloudFront, 인증·쿠키 없음). 대기 상태 파일, 셔플 결과 파일, 묶음 결과 파일. 대기 상태 파일은 원본 gw-queue, 대체 원본 S3(ADR-0058). 결과 파일의 원본은 S3 하나(ADR-0232). 소비자 웹 스크립트가 읽도록 이 배포와 S3 대체 원본은 Access-Control-Allow-Origin https://www.peaket.example과 Access-Control-Expose-Headers Retry-After를 내고 Credentials는 두지 않는다(추천 적용 2026-10-15, ADR-0065 결정 7). CDN이 캐시한 응답의 Date는 원본이 만든 시각 그대로라 노출하지 않는다(ADR-0110, 기술 검토 중간-036). Retry-After는 503의 재시도 하한으로만 쓰고, 폴링 힌트는 대기 상태 파일 본문의 pollHintMs다(기술 검토 중간-032)
   - url: https://api.peaket.example
     description: gw-fan. 교차 출처 응답은 Access-Control-Expose-Headers에 Date를 더해 브라우저가 서버 시각을 읽게 한다(추천 적용 2026-10-21, ADR-0079 결정 3). X-Trace-Id·ETag도 노출하고, 사전 요청 응답의 Access-Control-Allow-Headers에 If-Match를 더한다(기술 검토 낮음-023·030, 전체 규칙은 guidelines §9 'CORS 응답 헤더')
   - url: https://partner-api.peaket.example
@@ -1380,6 +1380,40 @@ components:
     QueueEntryRequest: { description: "대기열 진입 본문(POST /v1/queues/{eventId}/entries). application/json과 text/plain(JSON 글자, T=0 사전 요청 없음) 두 표현이 같은 이 스키마를 쓴다(BAS-040)", additionalProperties: false, type: object, required: [preverifyToken], properties: { preverifyToken: { type: string }, deviceId: { type: string }, entryRequestId: { type: string, format: uuid, description: "진입 시도 하나에 브라우저가 만든 UUID. 응답을 못 받아 다시 보낼 때 같은 값을 쓰면 이어서 처리하고, 이미 번호를 기록했으면 같은 번호의 대기표를 다시 준다. 1인 1순번 선점 값 PENDING:{요청 ID}에 쓴다(헤더가 아니라 본문이라 사전 요청이 없다, 추천 적용 2026-10-28, 기술 검토 중간-035)" } } }
     AdmissionRequest: { description: "입장 확정 본문(POST /v1/queues/{eventId}/admission). application/json과 text/plain(JSON 글자, T=0 사전 요청 없음) 두 표현이 같은 이 스키마를 쓴다(BAS-040)", additionalProperties: false, type: object, properties: { queueTicket: { type: string }, lobbyToken: { type: string }, priorityGrantId: { type: string, format: uuid, description: "우선 구매(이의가 인정된 부정 예매 표 취소의 되돌림, POL-046 ⑦)의 권리 ID(GET /v1/fraud-appeal-requests의 priorityPurchases). 대기표·참가 토큰 대신 보낸다. 그 계정의 OFFERED 권리이고 만료 전이면 대기 번호·15분 만료 없이 입장 토큰(클레임 prio)을 주고 입장 자리 수에 세지 않는다. 이때 queue-svc가 새 여정 ID(jny)를 만든다. 판매 종료 뒤에도 받는다(판매 종료 규칙의 예외, 추천 적용 2026-10-31, ADR-0171)" }, firstEtaSec: { type: number, description: "선택. 대기 화면이 이 대기에서 처음 보인 예상 대기(초, 1~86,400). firstEtaAtMs와 함께 오면 queue-svc가 그 대기표가 처음 자리를 잡을 때 (차례 시각 − firstEtaAtMs) ÷ firstEtaSec을 예상 대기 오차 지표(queue_eta_error_ratio)에 넣는다. 관측용이라 서버는 모양을 묻지 않고(입장을 400으로 막지 않는다) 숫자가 아니거나 범위 밖이면 버리며, 판정에 쓰지 않는다(추천 적용 2026-11-03, ADR-0183)" }, firstEtaAtMs: { type: number, description: "선택. firstEtaSec을 처음 보인 때의 보정된 서버 시각(유닉스 밀리초, ADR-0110). 미래이거나 이틀보다 앞이면 버린다" } } }
     QueueResultFile: { type: object, description: "셔플 결과 파일과 동시 도착 묶음 결과 파일의 본문: 토큰 해시 → 순번의 평평한 표다(docs/features/queue-admission.md §3 '결과 게시', ADR-0058, BUILD_ORDER BAS-042). 키는 SHA-256(UTF-8(토큰))의 소문자 16진 64자이고(셔플은 참가 토큰, 묶음은 사전 검증 토큰), 파일 이름의 hashPrefix는 그 앞 세 자리다(파일 4,096개 [가정]). 순번은 1부터다. 받는 시각의 분산은 응답의 spreadSec·shuffleSpreadSec 안에서 토큰 해시로 정한다", additionalProperties: { type: integer, minimum: 1 } }
+    QueueShuffleProofGroup:
+      type: object
+      description: "셔플 구간 하나의 공시 기록(로비 lobby·동시 도착 묶음 batch). 아직 없는 값은 칸을 뺀다. 시드는 공개 시각(seedRevealAt)이 지나고 그 구간을 게시한 뒤에만 싣는다. 봉인 값은 싣지 않는다(ADR-0232)"
+      required: [chain, algorithm, resultPathPrefix, fileCount]
+      properties:
+        chain: { type: string, description: "drand 체인 이름(quicknet)" }
+        algorithm: { type: string, description: "알고리즘 판(v1)" }
+        commit: { type: string, pattern: '^[0-9a-f]{64}$', description: "시드 해시(커밋)" }
+        committedAt: { type: string, format: date-time, description: "커밋을 공시한 시각" }
+        fixedAt: { type: string, format: date-time, description: "참가자 목록을 고정하는 시각(로비는 오픈, 묶음은 구간 끝)" }
+        round: { type: integer, minimum: 1, description: "공시한 drand 라운드" }
+        roundAt: { type: string, format: date-time, description: "그 라운드의 예정 시각" }
+        merkleRoot: { type: string, pattern: '^[0-9a-f]{64}$', description: "참가자 머클 루트. 목록을 고정한 뒤 비콘을 받기 전에 공시한다" }
+        rootAt: { type: string, format: date-time, description: "머클 루트를 공시한 시각" }
+        firstSeq: { type: integer, minimum: 1, description: "이 구간의 첫 번호" }
+        participantCount: { type: integer, minimum: 0, description: "참가자 수(목록을 고정한 때의 값)" }
+        beacon: { type: string, pattern: '^[0-9a-f]{64}$', description: "drand 라운드 값" }
+        beaconSignature: { type: string, pattern: '^[0-9a-f]+$', description: "drand 서명" }
+        publishedAt: { type: string, format: date-time, description: "결과를 게시한 시각" }
+        resultPathPrefix: { type: string, description: "결과 파일 경로의 앞부분. 뒤에 '{앞 세 자리}.json'을 붙이면 파일 경로다(queue-files 배포)" }
+        fileCount: { type: integer, minimum: 0, description: "결과 파일 수(16진 앞 세 자리, 4,096 [가정]). 참가자가 0명으로 닫힌 구간은 파일이 없어 0이다" }
+        seed: { type: string, pattern: '^[0-9a-f]{64}$', description: "공개한 시드" }
+        seedRevealedAt: { type: string, format: date-time, description: "시드를 공개한 시각" }
+        stopped: { type: object, required: [reason, at], description: "셔플을 멈춤(RB-35)", properties: { reason: { type: string, enum: [beacon, stale_round, late_commit, no_commit, late_root, members_changed, unknown] }, at: { type: string, format: date-time } } }
+    QueueShuffleProof:
+      type: object
+      description: "셔플 검증 정보(SCR-019, POL-005, ADR-0232)"
+      required: [eventId, opensAt, seedRevealAt, lobby, batch]
+      properties:
+        eventId: { type: string }
+        opensAt: { type: string, format: date-time, description: "판매 오픈 시각" }
+        seedRevealAt: { type: string, format: date-time, description: "시드 공개 예정 시각(오픈 60분 뒤)" }
+        lobby: { oneOf: [{ $ref: '#/components/schemas/QueueShuffleProofGroup' }, { type: 'null' }], description: "로비 셔플. 끈 회차는 null" }
+        batch: { oneOf: [{ $ref: '#/components/schemas/QueueShuffleProofGroup' }, { type: 'null' }], description: "동시 도착 묶음. 끈 회차는 null" }
     BatchingResponse: { type: object, description: "202 BATCHING 본문(ADR-0041·0058)", properties: { entryRequestId: { type: string, format: uuid, description: "이 묶음 참가의 진입 요청 ID(본문에 없었으면 queue-svc가 만든 값). 결과 뒤 이 값으로 진입을 다시 보낸다(묶음 기록은 같은 요청 ID로만 잇는다. 화면은 이 값을 localStorage에 둔다, 추천 적용 2026-11-03)" }, resultPath: { type: string, description: "queue-files의 묶음 결과 파일 경로(/v1/queues/{eventId}/batch-results/{hashPrefix}.json)" }, resultAt: { type: string, format: date-time, description: "결과 공개 예정 시각(공시 drand 라운드의 예정 시각 + 게시 목표 5초 [가정], ADR-0231)" }, spreadSec: { type: integer, description: "분산 창(초, 8 [가정])" }, serverTimeMs: { type: integer, format: int64, description: "서버 시각(유닉스 밀리초). 시계 보정 표본(ADR-0110)" } } }
     RecipientLookupResult: { type: object, description: "양도 받는 사람 확인 결과(FR-013)", properties: { recipientRef: { type: string, description: "불투명 참조값(10분 [가정], 양도 요청 한 번에만 쓴다)" }, nicknameMasked: { type: string, description: 닉네임 일부 } } }
     Genre: { type: string, enum: [콘서트, 뮤지컬, 연극, 클래식, 페스티벌, 팬미팅, 기타], description: "장르 정본 목록. 파트너 등록(SCR-021 1단계)·검색 필터·홈 장르 바로가기·장르별 랭킹이 같은 값을 쓴다(추천 적용 2026-10-14, ADR-0063)" }
@@ -2131,7 +2165,9 @@ paths:
       summary: "셔플 검증 정보(커밋, drand 체인·라운드와 값, 알고리즘 버전, 머클 루트, 비상 처리 여부와 사유, 온세일 윈도우 종료 뒤 시드 원본)"
       description: "FR-038, POL-005, SCR-019"
       parameters: [{ $ref: '#/components/parameters/EventId' }]
-      responses: { '200': { description: proof } }
+      responses:
+        '200': { description: "검증 정보(값이 아직 없는 칸은 빠진다. 끈 구간은 null, 추천 적용 2026-11-09, ADR-0232). 공개 캐시 5초 [가정]", content: { application/json: { schema: { $ref: '#/components/schemas/QueueShuffleProof' } } } }
+        '404': { $ref: '#/components/responses/Problem', description: "queue-not-found: 없는 회차" }
   /v1/queues/{eventId}/admission:
     post:
       operationId: createQueueAdmission
