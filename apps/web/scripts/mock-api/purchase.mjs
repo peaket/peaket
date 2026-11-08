@@ -42,6 +42,8 @@ export function createPurchaseMock({ now, state }) {
   const holds = new Map();
   /** 멱등 키 → 주문 */
   const orders = new Map();
+  /** 접수한 주문 → { at, pg } */
+  const accepted = new Map();
 
   /** 스냅샷을 연 입장 토큰의 임시 공개키를 둔다. 처음이고 키가 없으면 false */
   function open(token, clientKey) {
@@ -86,6 +88,29 @@ export function createPurchaseMock({ now, state }) {
         if (!sessions.get(req.headers['x-admission-token'])) return (io.problem(401, 'purchase-session-ended', '예매 시간이 끝났습니다'), true);
         if (!found || Date.parse(found.expiresAt) <= now()) return (io.problem(404, 'not-found', '찾을 수 없습니다'), true);
         return (io.send(200, found), true);
+      }
+      const acceptance = /^\/v1\/orders\/([^/]+)\/payment-acceptance$/.exec(p);
+      if (acceptance && req.method === 'POST') {
+        const { send, problem } = io;
+        void (async () => {
+          const raw = await readRaw(req);
+          const bad = verify(req, p + url.search, raw);
+          if (bad) return problem(401, bad, '요청 서명을 확인하지 못했습니다');
+          const body = JSON.parse(raw.toString('utf8') || 'null');
+          const orderId = acceptance[1];
+          const order = [...orders.values()].find((o) => o.order.orderId === orderId)?.order;
+          const mode = state.accept;
+          if (!order) return problem(404, 'not-found', '찾을 수 없습니다');
+          if (accepted.has(orderId)) return problem(409, 'payment-already-accepted', '이미 접수했습니다');
+          if (mode === 'mismatch' || (body?.pg !== 'PORTONE' && body?.amount !== order.amount)) return problem(400, 'invalid-request', '금액이 맞지 않습니다');
+          if (mode === 'already') return problem(409, 'payment-already-accepted', '이미 접수했습니다');
+          if (mode === 'attempt') return problem(409, 'payment-attempt-mismatch', '결제 시도가 맞지 않습니다');
+          if (mode === 'expired') return problem(409, 'order-expired', '주문이 끝났습니다');
+          if (mode === 'down') return problem(503, 'internal', '잠시 후 다시 시도해 주세요', { 'retry-after': '1' });
+          accepted.set(orderId, { at: now(), pg: body?.pg ?? 'TOSS' });
+          return send(202, { orderId, status: 'ACCEPTED' });
+        })().catch(() => io.problem(500, 'internal', '오류'));
+        return true;
       }
       if (p === '/v1/orders' && req.method === 'POST') {
         const { send, problem } = io;
