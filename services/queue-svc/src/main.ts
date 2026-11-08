@@ -8,7 +8,7 @@ import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
 import { Es256AdmissionTokens, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots } from './modules/admission/index.js';
-import { AccountWithdrawnHandler, HmacQueueTokens, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
+import { AccountWithdrawnHandler, HmacArrivalCookies, HmacQueueTokens, PromArrivalSignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnDue, unavailableRisk, WithdrawnDueWorker } from './modules/entry/index.js';
 import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates } from './modules/sale/index.js';
 
 const SERVICE = 'queue-svc';
@@ -33,7 +33,15 @@ const waitRedis = clusterUrls.length > 0 ? await createHotRedis({ clusterUrls })
 const webOrigin = process.env.PEAKET_WEB_ORIGIN;
 // Kafka 소비자 설정은 듣기 전에 읽는다(브로커 주소가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다)
 const kafka = kafkaConsumersFromEnv(process.env);
-const service = await createService({ name: SERVICE, module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: unavailableRisk, state: { ...(webOrigin ? { webOrigin } : {}) }, admission: { signer, signals } }) });
+// 도착 시각 쿠키 키(ADR-0223): 없으면 쿠키를 읽지 않는다(그 환경은 쿠키 없는 일반 진입뿐이다, 시작에는 실패하지 않는다)
+const arrivals = HmacArrivalCookies.fromEnv(process.env);
+const arrivalSignals = new PromArrivalSignals();
+const service = await createService({
+  name: SERVICE,
+  module: AppModule.register({ redis, ...(waitRedis ? { waitRedis } : {}), tokens, risk: unavailableRisk, state: { ...(webOrigin ? { webOrigin } : {}) }, admission: { signer, signals }, ...(arrivals ? { arrivals } : {}), arrivalSignals }),
+});
+arrivalSignals.register(service.metrics.registry);
+if (!arrivals) service.logger.warn({ dep: 'edge-arrival-key' }, '도착 시각 쿠키 키(PEAKET_ARRIVAL_COOKIE_KEY)가 없어 진입 Degraded의 쿠키를 읽지 않는다');
 signals.register(service.metrics.registry);
 await service.listen();
 

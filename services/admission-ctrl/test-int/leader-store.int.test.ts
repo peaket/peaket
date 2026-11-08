@@ -33,6 +33,113 @@ function tickOf(eventId: string, gen: number, o: Partial<TickInput> = {}): TickI
 const serving = async (e: string) => Number((await cmd(keys.serving(e), ['GET', keys.serving(e)])) ?? 0);
 const seqTo = (e: string, s: number) => cmd(keys.seq(e), ['SET', keys.seq(e), String(s)]);
 
+describe('도착 시각 칸 닫기(Q-T16, ADR-0223 결정 7)', () => {
+  const bitOf = async (e: string, n: number) => Number(await cmd(keys.removed(e), ['GETBIT', keys.removed(e), String(n)]));
+  const hset = (e: string, ...args: (string | number)[]) => cmd(keys.arrSlots(e), ['HSET', keys.arrSlots(e), ...args.map(String)]);
+  const close = (e: string, gen = 1) => store.closeArrivalSlots({ eventId: e, gen, keepUntilMs: Date.now() + DAY });
+  const slotAgo = (ms: number) => Math.floor((Date.now() - ms) / 100);
+
+  test('[Q-T16] 칸끝+20초가지난칸의_쓰지않은번호만빠진번호로돌리고_쓴번호는두며_닫음표시를옮긴다', async () => {
+    const e = newEvent();
+    const k = slotAgo(25_000);
+    await hset(e, 'next', k + 2, 'first', k, 'gen', 1, `${k}:base`, 10, `${k}:size`, 20, `${k}:used`, 5, `${k + 1}:base`, 30, `${k + 1}:size`, 10, `${k + 1}:used`, 0);
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 2, returned: 15 + 10 });
+    // 칸 k: 10~14(쓴 번호)는 그대로, 15~29는 켜졌다. 바이트 경계를 걸치는 범위다
+    for (const n of [10, 11, 12, 13, 14]) expect(await bitOf(e, n), `번호 ${n}`).toBe(0);
+    for (const n of [15, 16, 23, 24, 29]) expect(await bitOf(e, n), `번호 ${n}`).toBe(1);
+    for (const n of [30, 39]) expect(await bitOf(e, n), `번호 ${n}`).toBe(1);
+    expect(await bitOf(e, 40)).toBe(0);
+    expect(String(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), 'closed_upto']))).toBe(String(k + 1));
+    expect((await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), `${k}:base`]))).toBeNull();
+    expect(await close(e)).toEqual({ kind: 'NONE', slots: 0, returned: 0 });
+  });
+
+  test('[Q-T16] 칸끝+20초가지나지않은칸은_닫지않는다', async () => {
+    const e = newEvent();
+    const k = slotAgo(15_000);
+    await hset(e, 'next', k + 1, 'first', k, 'gen', 1, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 0);
+    expect(await close(e)).toEqual({ kind: 'NONE', slots: 0, returned: 0 });
+    expect(await bitOf(e, 1)).toBe(0);
+  });
+
+  test('[Q-T16] 진입Lua가적은잃은칸(lost_upto이하)은_돌려주지않고기록만지운다', async () => {
+    const e = newEvent();
+    const k = slotAgo(25_000);
+    await hset(e, 'next', k + 2, 'first', k, 'gen', 2, 'lost_upto', k, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 2, `${k + 1}:base`, 16, `${k + 1}:size`, 8, `${k + 1}:used`, 0);
+    await cmd(keys.skipped(e), ['RPUSH', keys.skipped(e), '1:100:1']);
+    expect(await close(e, 1)).toEqual({ kind: 'OK', slots: 2, returned: 8 });
+    expect(await bitOf(e, 3)).toBe(0);
+    expect(await bitOf(e, 16)).toBe(1);
+    expect(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), `${k}:base`])).toBeNull();
+  });
+
+  test('[Q-T16] 진입Lua보다리더가먼저돌아도_세대가바뀐칸은_돌려주지않고기록만지운다', async () => {
+    const e = newEvent();
+    const k = slotAgo(25_000);
+    // RB-05가 건너뛴 뒤(세대 2)인데 칸 기록은 세대 1이다. used는 복제 지연으로 줄었을 수 있다
+    await hset(e, 'next', k + 1, 'first', k, 'gen', 1, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 2);
+    await cmd(keys.skipped(e), ['RPUSH', keys.skipped(e), '200:300:1']);
+    expect(await close(e, 1)).toEqual({ kind: 'OK', slots: 1, returned: 0 });
+    expect(await bitOf(e, 3)).toBe(0);
+    expect(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), `${k}:base`])).toBeNull();
+    expect(String(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), 'lost_upto']))).toBe(String(k));
+  });
+
+  test('[Q-T16] 장애전환뒤RB-05전이거나_복제확인전(pend)이면_닫지않는다', async () => {
+    for (const fields of [
+      ['node', 'old-primary'],
+      ['node', 'standalone', 'pend', '1'],
+    ]) {
+      const e = newEvent();
+      const k = slotAgo(25_000);
+      await hset(e, 'next', k + 1, 'first', k, 'gen', 1, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 2);
+      await cmd(keys.epoch(e), ['HSET', keys.epoch(e), ...fields]);
+      expect(await close(e, 1)).toEqual({ kind: 'RB05', slots: 0, returned: 0 });
+      expect(await bitOf(e, 3)).toBe(0);
+      expect(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), `${k}:base`])).not.toBeNull();
+    }
+  });
+
+  test('[Q-T16] 옛세대리더는_FENCED이고아무것도쓰지않는다', async () => {
+    const e = newEvent();
+    const k = slotAgo(25_000);
+    expect(await store.bump(e, 5, Date.now() + DAY)).toBe('OK');
+    await hset(e, 'next', k + 1, 'first', k, 'gen', 1, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 0);
+    expect((await close(e, 4)).kind).toBe('FENCED');
+    expect(await bitOf(e, 1)).toBe(0);
+  });
+
+  test('[Q-T16] 칸떼기를다시시작해건너뛴빈칸은_한번에넘어가고_그앞뒤칸기록은돌려준다', async () => {
+    const e = newEvent();
+    const k = slotAgo(80_000);
+    // k·k+1은 쉬기 전의 칸이라 기록이 남아 있다. k+2~k+499는 비었고, k+500에서 다시 시작했다
+    await hset(e, 'next', k + 501, 'first', k + 500, 'gen', 1, 'gap_from', k + 2, 'gap_to', k + 499, `${k}:base`, 1, `${k}:size`, 8, `${k}:used`, 0, `${k + 1}:base`, 9, `${k + 1}:size`, 8, `${k + 1}:used`, 0, `${k + 500}:base`, 17, `${k + 500}:size`, 8, `${k + 500}:used`, 0);
+    await cmd(keys.arrSlots(e), ['HSET', keys.arrSlots(e), 'closed_upto', String(k - 1)]);
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 3, returned: 24 });
+    expect(await bitOf(e, 1)).toBe(1);
+    expect(await bitOf(e, 17)).toBe(1);
+  });
+
+  test('[Q-T16] 빈칸범위밖에는_칸기록이있으면건너뛰지않는다', async () => {
+    const e = newEvent();
+    const k = slotAgo(80_000);
+    // first가 앞으로 옮겨졌어도 빈 칸 범위가 없으면 그 앞의 칸 기록을 돌려준다
+    await hset(e, 'next', k + 101, 'first', k + 100, 'gen', 1, 'closed_upto', k - 1, `${k + 50}:base`, 1, `${k + 50}:size`, 8, `${k + 50}:used`, 0, `${k + 100}:base`, 9, `${k + 100}:size`, 8, `${k + 100}:used`, 0);
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 2, returned: 16 });
+  });
+
+  test('[Q-T16] 칸이많으면_한번에200칸만닫고_다음에잇는다', async () => {
+    const e = newEvent();
+    const k = slotAgo(60_000);
+    const n = 250;
+    const args: (string | number)[] = ['next', k + n, 'first', k, 'gen', 1];
+    for (let i = 0; i < n; i++) args.push(`${k + i}:base`, 1 + i * 8, `${k + i}:size`, 8, `${k + i}:used`, 0);
+    await hset(e, ...args);
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 200, returned: 1600 });
+    expect(await close(e)).toEqual({ kind: 'OK', slots: 50, returned: 400 });
+  });
+});
+
 test('[Q-T30] 새리더가세대를올리면_옛세대의전진은FENCED이고아무것도쓰지않는다', async () => {
   const e = newEvent();
   await seqTo(e, 1_000);

@@ -4,8 +4,8 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type HotRedis, type RedisScript, redisScript } from '@peaket/platform';
 import { ADMISSION_REDIS, WAIT_REDIS } from '../../batch/index.js';
 import { BATCH_RESULT_DELAY_MS, CALLS_KEEP_MS, DISPERSAL_MS, LATE_DISPERSAL_MS, RATIO_WINDOW_MAX_MS, RATIO_WINDOW_MIN_MS, RB05_CONFIRM_WAIT_MS, SCAN_BUDGET, SOON_STALE_MS } from '../domain/plan.js';
-import type { CloseInput, CloseResult, Control, EventPlan, LeaderStore, Rb05Confirm, Rb05Input, Rb05Result, TickInput, TickResult } from '../domain/ports.js';
-import { BUMP_LUA, CLOSE_LUA, RB05_CLEAR_LUA, RB05_LUA, RB05_MARK_LUA, TICK_LUA } from './leader-lua.js';
+import type { ArrivalCloseInput, ArrivalCloseResult, CloseInput, CloseResult, Control, EventPlan, LeaderStore, Rb05Confirm, Rb05Input, Rb05Result, TickInput, TickResult } from '../domain/ports.js';
+import { ARRIVAL_CLOSE_LUA, BUMP_LUA, CLOSE_LUA, RB05_CLEAR_LUA, RB05_LUA, RB05_MARK_LUA, TICK_LUA } from './leader-lua.js';
 
 export const keys = {
   leader: (e: string) => `q:{event:${e}}:leader`,
@@ -27,6 +27,8 @@ export const keys = {
   batchMembers: (e: string) => `q:{event:${e}}:batch_members:1`,
   lobbyMembers: (e: string) => `q:{event:${e}}:lobby_members`,
   epoch: (e: string) => `q:{event:${e}}:epoch`,
+  /** 진입 Degraded의 도착 시각 칸(진입 Lua가 떼고 리더가 닫는다, ADR-0223) */
+  arrSlots: (e: string) => `q:{event:${e}}:arr_slots`,
   /** 대기 화면에 싣는 제어 상태(queue-svc가 쓴다): 판매 상태 saleState, soldOutLastSeq(ADR-0122) */
   notice: (e: string) => `q:{event:${e}}:notice`,
   /** 진행 중인 회차 목록(queue-svc가 일정 사본을 읽을 때 넣는다, ADR-0182 결정 2) */
@@ -36,6 +38,7 @@ export const keys = {
 const BUMP = redisScript(BUMP_LUA);
 const TICK = redisScript(TICK_LUA);
 const CLOSE = redisScript(CLOSE_LUA);
+const ARRIVAL_CLOSE = redisScript(ARRIVAL_CLOSE_LUA);
 const RB05 = redisScript(RB05_LUA);
 const RB05_MARK = redisScript(RB05_MARK_LUA);
 const RB05_CLEAR = redisScript(RB05_CLEAR_LUA);
@@ -135,6 +138,12 @@ export class RedisLeaderStore implements LeaderStore {
     const args = [i.gen, i.keepUntilMs, i.opensAtMs, i.closeAtMs, i.lobbyShuffle ? 1 : 0, i.openBatch ? 1 : 0].map(String);
     const r = (await this.redis.evalScript(CLOSE, ks, args)) as unknown[];
     return str(r[0]) as CloseResult;
+  }
+
+  async closeArrivalSlots(i: ArrivalCloseInput): Promise<ArrivalCloseResult> {
+    const e = i.eventId;
+    const r = (await this.redis.evalScript(ARRIVAL_CLOSE, [keys.leader(e), keys.arrSlots(e), keys.removed(e), keys.skipped(e), keys.epoch(e)], [String(i.gen), String(i.keepUntilMs)])) as unknown[];
+    return { kind: str(r[0]) as ArrivalCloseResult['kind'], slots: Number(r[1] ?? 0), returned: Number(r[2] ?? 0) };
   }
 
   async rb05(i: Rb05Input): Promise<Rb05Result> {

@@ -2,6 +2,7 @@
 import { createHotRedis, type HotRedis } from '@peaket/platform';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { RedisEntryStore, keys } from '../src/modules/entry/adapters/redis-entry-store.js';
+import { RedisStateMirrorLease } from '../src/modules/state/adapters/redis-state-mirror-lease.js';
 import { RedisStateSnapshots } from '../src/modules/state/adapters/redis-state-snapshots.js';
 import { AHEAD_SEGMENTS, buildStateFiles, type QueueStateBody } from '../src/modules/state/domain/state.js';
 import { newEvent, openSchedule } from '../test/support.js';
@@ -53,6 +54,32 @@ test('회차슬롯Lua하나로_seq·serving·빠진번호비트맵(바이트)·�
   expect(files[0]!.removedUpToServing).toBe(3);
 });
 
+test('[Q-T66] notice의stateDegraded를_회차와전체범위에서읽어_파일의폴링힌트가2배가된다', async () => {
+  const snapshots = new RedisStateSnapshots(redis);
+  const e = newEvent();
+  await cmd(keys.notice(e), ['HSET', keys.notice(e), 'stateDegraded', '1']);
+  const s = await snapshots.read(e);
+  expect(s.notice?.stateDegraded).toBe(true);
+  const f = JSON.parse(buildStateFiles(s, openSchedule(Date.now()), Date.now())[0]!.body) as QueueStateBody;
+  expect(f.pollHintMs).toBe(1000);
+  const p = keys.notice('PLATFORM');
+  await cmd(p, ['HSET', p, 'stateDegraded', '1']);
+  try {
+    expect((await snapshots.readPlatform()).stateDegraded).toBe(true);
+  } finally {
+    await cmd(p, ['HDEL', p, 'stateDegraded']);
+  }
+});
+
+test('[Q-T66] 같은초의사본쓰기는_파드하나만잡고_수명이지나면다시잡는다', async () => {
+  const lease = new RedisStateMirrorLease(redis);
+  const e = newEvent();
+  expect(await lease.claim(e)).toBe(true);
+  expect(await lease.claim(e)).toBe(false);
+  await new Promise((r) => setTimeout(r, 950));
+  expect(await lease.claim(e)).toBe(true);
+});
+
 test('아무것도없는회차는_seq·serving0과빈비트맵이고_판매상태칸·입장일시정지도없다', async () => {
   const s = await new RedisStateSnapshots(redis).read(newEvent());
   expect(s).toEqual({
@@ -62,7 +89,7 @@ test('아무것도없는회차는_seq·serving0과빈비트맵이고_판매상�
     skipped: [],
     servingLog: [],
     calls: [],
-    notice: { soldOutTiers: [], paused: false, suspended: false },
+    notice: { soldOutTiers: [], paused: false, suspended: false, stateDegraded: false },
     admit: { paused: false, untilMs: null },
   });
 });

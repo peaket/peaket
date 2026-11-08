@@ -84,14 +84,14 @@ test('대기상태파일읽기는_notice의제어칸(paused·suspended·banner)�
   await cmd(keys.ctl(eventId), ['HSET', keys.ctl(eventId), 'admitPaused', '1', 'admitPausedUntil', '1893456000000']);
   const r = new RedisStateSnapshots(redis);
   const snap = await r.read(eventId);
-  expect(snap.notice).toEqual({ soldOutTiers: [], paused: true, suspended: false, banner: '안내' });
+  expect(snap.notice).toEqual({ soldOutTiers: [], paused: true, suspended: false, stateDegraded: false, banner: '안내' });
   expect(snap.admit).toEqual({ paused: true, untilMs: 1893456000000 });
   expect((await r.read(newEvent())).admit).toEqual({ paused: false, untilMs: null });
 
-  expect(await r.readPlatform()).toEqual({ paused: false, suspended: false });
+  expect(await r.readPlatform()).toEqual({ paused: false, suspended: false, stateDegraded: false });
   const pk = keys.notice(PLATFORM_SCOPE);
   await cmd(pk, ['HSET', pk, 'suspended', '1', 'banner', '전체 공지']);
-  expect(await r.readPlatform()).toEqual({ paused: false, suspended: true, banner: '전체 공지' });
+  expect(await r.readPlatform()).toEqual({ paused: false, suspended: true, stateDegraded: false, banner: '전체 공지' });
   await cmd(pk, ['DEL', pk]);
 });
 

@@ -4,10 +4,11 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { type HotRedis, isRedisUnavailable, type RedisScript, redisScript } from '@peaket/platform';
 import type { BatchedEntry, BatchOutcome, EntryStore, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
-import { BATCH_NO, QueueStoreUnavailable, RB05_CONFIRM_WAIT_MS, type ReasonCategory, REASONS } from '../domain/queue.js';
+import { ARRIVAL_SLOT_INITIAL, BATCH_NO, QueueStoreUnavailable, RB05_CONFIRM_WAIT_MS, type ReasonCategory, REASONS } from '../domain/queue.js';
 import {
   BATCH_RECORD_LUA,
   BATCH_STATE_LUA,
+  CLAIM_ARRIVAL_LUA,
   CONVERT_LUA,
   DROP_BATCH_LUA,
   DROP_OWN_LUA,
@@ -50,6 +51,12 @@ export const keys = {
   notice: (e: string) => `q:{event:${e}}:notice`,
   /** 리더 상태(입장 일시정지 admitPaused 등, admission-ctrl이 쓴다) */
   ctl: (e: string) => `q:{event:${e}}:ctl`,
+  /** 대기 상태 파일의 S3 사본을 이번 초에 쓰는 파드(ADR-0223 결정 9) */
+  mirror: (e: string) => `q:{event:${e}}:mirror`,
+  /** 도착 시각 칸(진입 Degraded, ADR-0223) */
+  arrSlots: (e: string) => `q:{event:${e}}:arr_slots`,
+  /** 도착 시각 쿠키 요청 ID 한 번만 받기(요청 ID로 샤드 전체에 흩는다, ADR-0053 결정 2) */
+  arr: (reqId: string, e: string) => `q:arr:{${reqId}}:${e}`,
   /** 묶음 결과(회차 태그 없이 토큰 해시로 흩어 둔다, q:lobby:{hash}와 같음) */
   batchResult: (tokenHash: string) => `q:batch:{${tokenHash}}`,
 };
@@ -58,6 +65,7 @@ export const keys = {
 const PREEMPT = redisScript(PREEMPT_LUA);
 const RELEASE = redisScript(RELEASE_LUA);
 const NUMBER_BATCH = redisScript(NUMBER_BATCH_LUA);
+const CLAIM_ARRIVAL = redisScript(CLAIM_ARRIVAL_LUA);
 const RB05 = redisScript(RB05_LUA);
 const RB05_MARK = redisScript(RB05_MARK_LUA);
 const RB05_CLEAR = redisScript(RB05_CLEAR_LUA);
@@ -158,6 +166,7 @@ export class RedisEntryStore implements EntryStore {
 
   async numberBatch(i: NumberBatchInput): Promise<NumberResult[]> {
     const e = i.eventId;
+    const arrival = i.items.some((it) => it.arrivalSlot !== undefined);
     const args = [
       String(i.expireAtMs),
       String(i.opensAtMs ?? 0),
@@ -167,8 +176,11 @@ export class RedisEntryStore implements EntryStore {
       String(i.batchExpireAtMs ?? i.expireAtMs),
       String(i.items.length),
       ...i.items.flatMap((it) => [it.eligible ? '1' : '0', it.tokenHash ?? '']),
+      // 쿠키가 있는 요청이 있을 때만 칸 인수를 뒤에 붙인다(ADR-0223 결정 6)
+      ...(arrival ? [String(i.arrivalInitial ?? ARRIVAL_SLOT_INITIAL), ...i.items.map((it) => (it.arrivalSlot === undefined ? '' : String(it.arrivalSlot)))] : []),
     ];
-    const r = (await guard(this.redis.evalScript(NUMBER_BATCH, [keys.seq(e), keys.skipped(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e), keys.epoch(e), keys.notice(e)], args))) as unknown[];
+    const ks = [keys.seq(e), keys.skipped(e), keys.batchDone(e), keys.batchMembers(e), keys.lobbyMembers(e), keys.epoch(e), keys.notice(e), ...(arrival ? [keys.arrSlots(e)] : [])];
+    const r = (await guard(this.redis.evalScript(NUMBER_BATCH, ks, args))) as unknown[];
     const head = str(r[0]);
     if (head === 'RB05') return i.items.map(() => ({ kind: 'RECOVERING' }));
     if (head === 'EARLY') return i.items.map(() => ({ kind: 'EARLY' }));
@@ -179,6 +191,9 @@ export class RedisEntryStore implements EntryStore {
       const kind = str(r[2 + 2 * k]);
       const v = Number(r[3 + 2 * k]);
       if (kind === 'N') return { kind: 'NUMBERED', seq: v, gen };
+      if (kind === 'S') return { kind: 'NUMBERED', seq: v, gen, arrival: 'slot' };
+      if (kind === 'L') return { kind: 'NUMBERED', seq: v, gen, arrival: 'late' };
+      if (kind === 'O') return { kind: 'NUMBERED', seq: v, gen, arrival: 'overflow' };
       if (kind === 'B') return { kind: 'BATCHING' };
       if (kind === 'W') return { kind: 'WAIT', retryAfterSeconds: v };
       throw new Error(`번호 Lua가 모르는 값을 돌려줬다: ${kind}`);
@@ -276,6 +291,10 @@ export class RedisEntryStore implements EntryStore {
 
   async dropOwn(i: { pid: string; eventId: string; requestId: string }): Promise<void> {
     await guard(this.redis.evalScript(DROP_OWN, [keys.dup(i.pid, i.eventId)], [i.requestId]));
+  }
+
+  async claimArrival(i: { eventId: string; reqId: string; requestId: string; ttlMs: number }): Promise<boolean> {
+    return Number(await guard(this.redis.evalScript(CLAIM_ARRIVAL, [keys.arr(i.reqId, i.eventId)], [i.requestId, String(i.ttlMs)]))) === 1;
   }
 
   async markRemoved(i: { eventId: string; seq: number; expireAtMs: number }): Promise<void> {

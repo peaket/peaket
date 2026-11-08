@@ -28,3 +28,8 @@ test('리더의RB05·복제확인·노드표지·수명늘리기Lua는_queue-svc
   const leader = read('../src/modules/leader/adapters/leader-lua.ts');
   for (const name of ['EXTEND', 'NODE_ID', 'RB05_LUA', 'RB05_MARK_LUA', 'RB05_CLEAR_LUA']) expect(block(leader, name)).toBe(block(queue, name));
 });
+
+test('[Q-T16] 리더의칸닫기시간과_진입Lua의칸닫기시간은_같은값이다', () => {
+  const close = /ARRIVAL_CLOSE_AFTER_MS = ([\d_]+)/;
+  expect(close.exec(read('../src/modules/leader/adapters/leader-lua.ts'))?.[1]).toBe(close.exec(read('../../queue-svc/src/modules/entry/adapters/entry-lua.ts'))?.[1]);
+});

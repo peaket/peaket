@@ -71,6 +71,7 @@ function pausing(store: EntryStore, hooks: { beforeNumber?: () => Promise<void>;
       return store.record(i);
     },
     markRemoved: (i) => store.markRemoved(i),
+    claimArrival: (i) => store.claimArrival(i),
     markVerifying: (i) => store.markVerifying(i),
     rb05: (i) => store.rb05(i),
     confirmRb05: (i) => store.confirmRb05(i),

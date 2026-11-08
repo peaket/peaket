@@ -1,6 +1,12 @@
 // 진입 3단계와 묶음의 Lua 원문(docs/features/queue-admission.md §3·'묶음의 첫 구현', docs/data.md §3). 문자열만 두고 아무것도 가져오지 않는다.
 // 운영 어댑터(redis-entry-store.ts)와 성능 측정 도구(loadtest/poc/run.mjs가 이 파일을 읽어 측정 이미지의 lua/ 폴더에 쓴다)가 같은 원문을 쓰게 하려는 것이다.
 // 이름은 명세 specs/queue.qnt의 동작 이름이다.
+// 측정 도구가 이 파일을 그대로 읽으므로 값은 domain/queue.ts를 가져오지 않고 아래에 옮겨 둔다(시험이 견준다).
+export const ARRIVAL_SLOT_MS = 100;
+export const ARRIVAL_CLOSE_AFTER_MS = 20_000;
+export const ARRIVAL_FUTURE_MS = 5_000;
+export const ARRIVAL_WINDOW_SLOTS = 100;
+export const ARRIVAL_CARVE_MAX = 100_000;
 
 // 회차 키의 수명은 부를 때마다 더 늦은 쪽으로만 늘린다(회차 연기로 판매 종료가 늦춰져도 옛 일정에 사라지지 않게. 당기지는 않는다).
 // 수명이 없는 키(-1, 예: RB-05의 INCRBY로 먼저 생긴 카운터)에도 건다. 없는 키(-2)는 PEXPIREAT이 아무 일도 하지 않는다
@@ -68,6 +74,10 @@ return 0
 // KEYS: 1 seq, 2 skipped, 3 batch_done, 4 batch_members:1, 5 lobby_members, 6 epoch, 7 notice
 // ARGV: 1 회차 키 수명, 2 오픈 시각, 3 묶음 구간 끝, 4 로비 셔플, 5 묶음, 6 참가자 목록 수명, 7 요청 수 n, 그 뒤 요청마다 (묶음 대상 여부, 토큰 해시).
 // 돌려주는 값: 장애 전환 뒤 RB-05 전이면 {'RB05'}, 서버 시각으로 오픈 전이면 {'EARLY'}, 매진·판매 종료면 {'SOLD_OUT'}·{'ENDED'}, 아니면 {'OK', 세대, 요청마다 (종류, 값)}. 종류 N = 번호(값), B = 묶음에 넣음, W = 기다림(값 = Retry-After 초)
+// 진입 Degraded(ADR-0223 결정 6): KEYS[8] = arr_slots이고, 요청 인수 뒤에 ARGV[8 + 2n] = 칸의 첫 크기, 그 뒤 요청마다 칸 번호(없으면 빈 글). 둘 다 없으면(측정 도구, 쿠키 없는 묶음) 예전과 같다.
+// 쿠키가 있는 요청의 종류: S = 칸 안의 번호, L = 칸이 닫혔거나 없어 카운터 끝, O = 구간이 차서 카운터 끝(값은 모두 번호).
+// 세대가 바뀌면(장애 전환) lost_upto를 적어 옛 칸을 쓰지 않는다. 칸의 used를 잃었을 수 있어 그 칸에서 번호를 다시 주면 같은 세대에서 겹칠 수 있다.
+// 한 Lua에서 떼는 양은 ARRIVAL_CARVE_MAX까지다(RB-05가 건너뛰는 12만 [가정]보다 작아야 잃은 칸의 번호가 건너뛴 구간 안에 든다). 남은 칸은 다음 호출이 뗀다
 export const NUMBER_BATCH_LUA = `${EXTEND}${NODE_ID}
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
@@ -126,14 +136,112 @@ if ARGV[5] == '1' then
     if size > 0 then redis.call('INCRBY', KEYS[1], size) end
   end
 end
-local last = redis.call('INCRBY', KEYS[1], n)
+local arr = KEYS[8]
+local initial = arr and tonumber(ARGV[8 + 2 * n])
+local kinds = {}
+local values = {}
+local tail = n
+if initial then
+  tail = 0
+  local a = redis.call('HMGET', arr, 'next', 'gen', 'closed_upto', 'first', 'lost_upto')
+  local nxt, agen, closed, first, lost = tonumber(a[1]), tonumber(a[2]), tonumber(a[3]) or -1, tonumber(a[4]), tonumber(a[5]) or -1
+  if nxt and not first then first = nxt end
+  if agen and agen ~= gen then
+    if nxt and nxt - 1 > lost then lost = nxt - 1 end
+    redis.call('HSET', arr, 'gen', gen, 'lost_upto', lost)
+  end
+  local carved = 0
+  -- k칸까지 차례로 뗀다. 처음 100칸은 첫 크기, 그 뒤는 직전 100칸이 쓴 번호 최댓값 × 1.5. 직전 칸이 모두 비면 빈 칸을 건너뛰고 k를 새 첫 칸으로 삼아 첫 크기로 다시 뗀다
+  local function carve(k)
+    if not nxt then
+      nxt = k
+      first = k
+      redis.call('HSET', arr, 'next', nxt, 'first', first, 'gen', gen)
+    end
+    if k < nxt then return end
+    local j = nxt
+    while j <= k and carved < ${ARRIVAL_CARVE_MAX} do
+      local desired = initial
+      if j - first >= ${ARRIVAL_WINDOW_SLOTS} then
+        local flds = {}
+        for m = j - ${ARRIVAL_WINDOW_SLOTS}, j - 1 do flds[#flds + 1] = m .. ':used' end
+        local used = redis.call('HMGET', arr, unpack(flds))
+        local mx = 0
+        for m = 1, #used do
+          local x = tonumber(used[m])
+          if x and x > mx then mx = x end
+        end
+        desired = math.ceil(mx * 1.5)
+        if desired == 0 then
+          -- 건너뛰는 빈 칸의 범위를 적는다. 이 범위에는 칸 기록이 없어 리더가 훑지 않는다(그 앞 칸의 기록은 남아 있을 수 있다)
+          if k > j then redis.call('HSET', arr, 'gap_from', j, 'gap_to', k - 1) end
+          j = k
+          first = k
+          desired = initial
+          redis.call('HSET', arr, 'first', first)
+        end
+      end
+      -- 남은 몫보다 크면 칸을 자르지 않고 멈춘다(작게 잘린 칸은 일찍 차서 넘침이 는다). 다음 호출이 온전한 크기로 뗀다. 한 호출의 첫 칸만 상한까지 줄인다
+      if carved > 0 and desired > ${ARRIVAL_CARVE_MAX} - carved then break end
+      local size = math.min(desired, ${ARRIVAL_CARVE_MAX})
+      local s = tonumber(redis.call('GET', KEYS[1]) or '0')
+      redis.call('HSET', arr, j .. ':base', s + 1, j .. ':size', size, j .. ':used', 0)
+      redis.call('INCRBY', KEYS[1], size)
+      carved = carved + size
+      j = j + 1
+    end
+    nxt = j
+    redis.call('HSET', arr, 'next', nxt)
+  end
+  for i = 1, n do
+    local slot = tonumber(ARGV[8 + 2 * n + i])
+    if not slot then
+      tail = tail + 1
+      kinds[i] = 'N'
+    elseif slot <= closed or slot <= lost or slot * ${ARRIVAL_SLOT_MS} > now + ${ARRIVAL_FUTURE_MS} or (slot + 1) * ${ARRIVAL_SLOT_MS} + ${ARRIVAL_CLOSE_AFTER_MS} <= now then
+      tail = tail + 1
+      kinds[i] = 'L'
+    else
+      carve(slot)
+      local f = redis.call('HMGET', arr, slot .. ':base', slot .. ':size', slot .. ':used')
+      if not f[1] then
+        tail = tail + 1
+        kinds[i] = 'L'
+      elseif tonumber(f[3]) >= tonumber(f[2]) then
+        tail = tail + 1
+        kinds[i] = 'O'
+      else
+        kinds[i] = 'S'
+        values[i] = tonumber(f[1]) + tonumber(f[3])
+        redis.call('HINCRBY', arr, slot .. ':used', 1)
+      end
+    end
+  end
+  extend(arr, ARGV[6])
+end
+local last = 0
+if tail > 0 then last = redis.call('INCRBY', KEYS[1], tail) end
+local at = last - tail
 for i = 1, n do
-  out[#out + 1] = 'N'
-  out[#out + 1] = last - n + i
+  if kinds[i] == 'S' then
+    out[#out + 1] = 'S'
+    out[#out + 1] = values[i]
+  else
+    at = at + 1
+    out[#out + 1] = kinds[i] or 'N'
+    out[#out + 1] = at
+  end
 end
 extend(KEYS[1], ARGV[1])
 extend(KEYS[3], ARGV[1])
 return out
+`;
+
+// 도착 시각 쿠키의 요청 ID를 잡는다(ADR-0223 결정 5). 비었으면 진입 요청 ID로 잡고, 이미 같은 진입 요청이면 받아 준다. 돌려주는 값: 1 받음, 0 다른 진입 요청이 썼다. KEYS: 1 q:arr:{요청 ID}:E, ARGV: 1 진입 요청 ID, 2 수명 밀리초
+export const CLAIM_ARRIVAL_LUA = `
+if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then return 1 end
+if redis.call('GET', KEYS[1]) == ARGV[1] then return 1 end
+return 0
 `;
 
 // RB-05(docs/infra.md, ADR-0181): 세대 키가 지금 노드 표지와 같으면(다른 파드가 먼저 했다) 아무것도 하지 않는다. 다르면 서버 시각으로 오픈 전이고

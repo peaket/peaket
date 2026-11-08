@@ -9,7 +9,7 @@ import { RedisWithdrawnKeys } from './adapters/redis-withdrawn-keys.js';
 import { PurgeWithdrawnKeys } from './application/purge-withdrawn-keys.js';
 import { DEFAULT_ENTRY_OPTIONS, ENTRY_OPTIONS, EnterQueue, type EntryOptions } from './application/enter-queue.js';
 import { IssuePreverification } from './application/issue-preverification.js';
-import { ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, WITHDRAWN_KEYS } from './domain/ports.js';
+import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, WITHDRAWN_KEYS } from './domain/ports.js';
 import { QueueController } from './inbound/queue.controller.js';
 
 /** waitRedis: RB-05 복제 확인(WAIT) 전용 연결(ADR-0186). 없으면 공유 연결 */
@@ -17,6 +17,9 @@ export type EntryModuleOptions = ({ storage: 'redis'; redis: HotRedis; waitRedis
   tokens: QueueTokens;
   risk: RiskPort;
   options?: Partial<EntryOptions>;
+  /** 도착 시각 쿠키 읽기(키 환경 값이 없으면 넘기지 않는다: 쿠키 없는 일반 진입뿐이다, ADR-0223) */
+  arrivals?: ArrivalCookies;
+  arrivalSignals?: ArrivalSignals;
 };
 
 @Module({})
@@ -48,6 +51,8 @@ export class EntryModule {
         { provide: QUEUE_TOKENS, useValue: o.tokens },
         { provide: RISK, useValue: o.risk },
         { provide: ENTRY_OPTIONS, useValue: { ...DEFAULT_ENTRY_OPTIONS, ...o.options } },
+        ...(o.arrivals ? [{ provide: ARRIVAL_COOKIES, useValue: o.arrivals }] : []),
+        ...(o.arrivalSignals ? [{ provide: ARRIVAL_SIGNALS, useValue: o.arrivalSignals }] : []),
       ],
       exports: [PurgeWithdrawnKeys],
     };

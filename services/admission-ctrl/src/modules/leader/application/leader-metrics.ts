@@ -15,9 +15,17 @@ export class LeaderMetrics {
   readonly #leaseFailures = new Counter({ name: 'admission_lease_renew_failures_total', help: 'Lease 읽기·만들기·고치기 실패 수', registers: [] });
   readonly #publish = new Counter({ name: 'admission_batch_publish_total', help: '묶음 게시 호출 결과(PUBLISHED·REPAIRED·ALREADY·NOT_CLOSED·WAITING_BEACON·WAITING_REPLICA·NO_SCHEDULE)', labelNames: ['status'] as const, registers: [] });
 
+  readonly #arrivalSlots = new Counter({ name: 'admission_arrival_slots_closed_total', help: '진입 Degraded의 도착 시각 칸을 닫은 수', registers: [] });
+  readonly #arrivalNumbers = new Counter({ name: 'admission_arrival_numbers_returned_total', help: '닫은 도착 시각 칸에서 빠진 번호로 돌린 번호 수', registers: [] });
+
   register(registry: Registry): this {
-    for (const m of [this.#inFlight, this.#ratio, this.#soon, this.#dropped, this.#loop, this.#leader, this.#fenced, this.#leaseFailures, this.#publish]) registry.registerMetric(m);
+    for (const m of [this.#inFlight, this.#ratio, this.#soon, this.#dropped, this.#loop, this.#leader, this.#fenced, this.#leaseFailures, this.#publish, this.#arrivalSlots, this.#arrivalNumbers]) registry.registerMetric(m);
     return this;
+  }
+
+  arrival(slots: number, returned: number): void {
+    if (slots > 0) this.#arrivalSlots.inc(slots);
+    if (returned > 0) this.#arrivalNumbers.inc(returned);
   }
 
   event(eventId: string, r: Extract<TickResult, { kind: 'OK' }>): void {

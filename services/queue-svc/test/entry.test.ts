@@ -4,6 +4,7 @@ import { expect, test } from 'vitest';
 import { MemoryEntryStore, MemoryEventSchedules } from '../src/modules/entry/adapters/memory-entry-store.js';
 import { EnterQueue } from '../src/modules/entry/application/enter-queue.js';
 import { segmentOf } from '../src/modules/entry/domain/queue.js';
+import { arrivalSlotCases } from './arrival-slot-cases.js';
 import { batchCases } from './batch-cases.js';
 import { entryCases } from './entry-cases.js';
 import { type PidWorld, pidTransitionEntryCases } from './pid-transition-cases.js';
@@ -36,6 +37,11 @@ const memoryWorld = async (): Promise<PidWorld> => {
 };
 
 entryCases('메모리', memoryWorld);
+arrivalSlotCases('메모리', async () => {
+  const clock = fakeClock({ now: Date.UTC(2026, 10, 9, 1, 0, 0) });
+  const store = new MemoryEntryStore(clock);
+  return { store, now: () => clock.now(), counter: async (e) => store.counterOf(e), failover: async (e) => store.failoverForTest(e), setUsed: async (e, slot, used) => store.setArrivalUsedForTest(e, slot, used) };
+});
 pidTransitionEntryCases('메모리', memoryWorld);
 
 batchCases('메모리', async () => {

@@ -1,9 +1,11 @@
 // 받는 층: 사전 검증·진입 경로(openapi /v1/queues/{eventId}/pre-verifications·entries, ADR-0065 결정 6, [ASVS v5.0.0-3.5.2])
 import 'reflect-metadata';
 import { createService, fakeClock } from '@peaket/platform';
+import { createHmac } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import { HmacArrivalCookies } from '../src/modules/entry/adapters/arrival-cookie.js';
 import { MemoryEventSchedules } from '../src/modules/entry/adapters/memory-entry-store.js';
 import { ACCOUNT, DEVICE, newEvent, newRequest, openSchedule, PID, preverifyToken, recordingRisk, tokens } from './support.js';
 
@@ -194,5 +196,63 @@ describe('대기열 Redis 일시 장애', () => {
     } finally {
       await down.close();
     }
+  });
+});
+
+describe('도착 시각 쿠키(받는 층, ADR-0223)', () => {
+  const KEY = 'K'.repeat(43);
+  let cookieSvc: Awaited<ReturnType<typeof createService>>;
+  const signals = { cookie: [] as string[], number: [] as string[] };
+  const cookieSchedules = new MemoryEventSchedules();
+
+  beforeAll(async () => {
+    cookieSvc = await createService({
+      name: 'queue-svc',
+      module: AppModule.register({
+        memory: true,
+        schedules: cookieSchedules,
+        tokens,
+        risk: recordingRisk(),
+        arrivals: new HmacArrivalCookies([{ kid: 'k1', key: KEY }]),
+        arrivalSignals: { cookie: (r) => signals.cookie.push(r), number: (p) => signals.number.push(p) },
+      }),
+      env: { PEAKET_ENV: 'ci' },
+      clock: fakeClock({ now: NOW }),
+      logDestination: quiet,
+    });
+  });
+  afterAll(async () => {
+    await cookieSvc?.close();
+  });
+
+  const post = (id: string, headers: Record<string, string>) =>
+    cookieSvc.http.inject({
+      method: 'POST',
+      url: `/v1/queues/${id}/entries`,
+      headers: { ...fan(), 'content-type': 'text/plain;charset=UTF-8', ...headers },
+      payload: JSON.stringify({ preverifyToken: preverifyToken(cookieSvc.clock, id), deviceId: DEVICE, entryRequestId: newRequest() }),
+    });
+  const cookieFor = (id: string) => {
+    const head = `v1.k1.${id}.${NOW}.${Buffer.from('rid-1').toString('base64url')}.s-1`;
+    return `${head}.${createHmac('sha256', KEY).update(`PEAKET-arrival-v1.${head}`).digest('base64url')}`;
+  };
+
+  test('[Q-T29] 받는층은_Cookie머리의도착시각쿠키를_게이트웨이가확인한세션과함께넘긴다', async () => {
+    const id = newEvent();
+    await cookieSchedules.set(id, openSchedule(NOW, { openBatch: false }));
+    signals.cookie.length = 0;
+    const r = await post(id, { cookie: `other=1; __Host-peaket_arr=${cookieFor(id)}` });
+    expect(r.statusCode).toBe(201);
+    expect(signals.cookie).toEqual(['ok']);
+    expect(signals.number).toEqual(['slot']);
+  });
+
+  test('[Q-T16] 엣지가서명없이보낸표시머리는_쿠키없음으로센다', async () => {
+    const id = newEvent();
+    await cookieSchedules.set(id, openSchedule(NOW, { openBatch: false }));
+    signals.cookie.length = 0;
+    const r = await post(id, { 'x-peaket-arrival': 'unsigned' });
+    expect(r.statusCode).toBe(201);
+    expect(signals.cookie).toEqual(['absent']);
   });
 });

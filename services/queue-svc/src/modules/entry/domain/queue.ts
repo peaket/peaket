@@ -107,5 +107,39 @@ export const batchCloseAtOf = (s: EventSchedule): number => s.opensAtMs + (s.bat
 /** 회차 단위 키의 만료 시각 */
 export const keepUntilOf = (s: EventSchedule): number => saleEndOf(s) + KEEP_AFTER_SALE_END_MS;
 
+/** 도착 시각 쿠키 수명 10분 [가정](ADR-0053 결정 2) */
+export const ARRIVAL_COOKIE_TTL_MS = 600_000;
+/** 도착 시각이 지금보다 앞설 수 있는 시간 5초 [가정](엣지 시계 차이, ADR-0223) */
+export const ARRIVAL_FUTURE_MS = 5_000;
+/** 도착 시각 칸 100ms [가정](docs/features/queue-admission.md §9) */
+export const ARRIVAL_SLOT_MS = 100;
+/** 칸을 닫는 시간: 칸 끝 + 20초 [가정]. 다시 보내기 최댓값(15초 × 1.2 = 18초)과 왕복 여유를 덮는다(ADR-0223) */
+export const ARRIVAL_CLOSE_AFTER_MS = 20_000;
+/** 첫 칸 크기: 회차 하나의 진입 상한 초당 20만 건 × 0.1초 × 1.5 [가정](ADR-0181처럼 상한을 쓴다, ADR-0223 결정 6) */
+export const ARRIVAL_SLOT_INITIAL = 30_000;
+/** 처음 칸부터 첫 크기를 쓰는 칸 수이자, 그 뒤 크기를 보는 직전 칸 수(10초) [가정] */
+export const ARRIVAL_WINDOW_SLOTS = 100;
+/** 한 Lua에서 떼는 번호 수의 상한 [가정]. RB-05가 건너뛰는 양(RB05_SKIP_BASE 12만)보다 작아야 장애 전환으로 잃은 칸의 번호가 건너뛴 구간 안에 든다(ADR-0223 결정 6) */
+export const ARRIVAL_CARVE_MAX = 100_000;
+
+/** 도착 시각 쿠키 이름(__Host-: Domain 없음·Path=/·Secure, ASVS v5.0.0-3.3.3) */
+export const ARRIVAL_COOKIE_NAME = '__Host-peaket_arr';
+/** 엣지가 Degraded인데 서명 없이 원본으로 보낸 요청에 다는 머리. 값 unsigned(바깥이 보낸 같은 머리는 엣지가 지운다, ADR-0223) */
+export const ARRIVAL_UNSIGNED_HEADER = 'x-peaket-arrival';
+
+/** Cookie 머리에서 쿠키 값 하나를 찾는다(같은 이름이 여럿이면 앞의 것). 없으면 undefined */
+export function cookieValue(header: string | undefined, name: string): string | undefined {
+  if (!header) return undefined;
+  const prefix = `${name}=`;
+  for (const part of header.split(';')) {
+    const t = part.trim();
+    if (t.startsWith(prefix)) return t.slice(prefix.length);
+  }
+  return undefined;
+}
+
+/** 도착 시각 칸 번호(엣지가 찍은 시각의 100ms 칸) */
+export const arrivalSlotOf = (arrivalMs: number): number => Math.floor(arrivalMs / ARRIVAL_SLOT_MS);
+
 /** 전체 범위 제어 상태의 회차 자리(q:{event:PLATFORM}:notice, docs/data.md §3) */
 export const PLATFORM_SCOPE = 'PLATFORM';

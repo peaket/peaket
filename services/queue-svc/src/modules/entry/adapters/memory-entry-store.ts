@@ -2,7 +2,7 @@
 // 서버 시각은 주입한 시계다(Lua는 Redis TIME을 쓴다).
 import type { Clock } from '@peaket/platform';
 import type { BatchedEntry, BatchOutcome, EntryStore, EventSchedules, NumberBatchInput, NumberInput, NumberResult, Rb05Confirm, Rb05Input, Rb05Result, PreemptResult, RecordedEntry, RecordResult } from '../domain/ports.js';
-import { BATCH_NO, type EventSchedule, type ReasonCategory, REASONS } from '../domain/queue.js';
+import { ARRIVAL_CARVE_MAX, ARRIVAL_CLOSE_AFTER_MS, ARRIVAL_FUTURE_MS, ARRIVAL_SLOT_INITIAL, ARRIVAL_SLOT_MS, ARRIVAL_WINDOW_SLOTS, BATCH_NO, type EventSchedule, type ReasonCategory, REASONS } from '../domain/queue.js';
 
 const RECORDED = /^(\d+):(\d+):([^:]+):([^:]*):([^:]*)$/;
 const BATCHED = /^BATCH:1:([0-9a-f]+):([^:]+):([^:]*):([^:]*)$/;
@@ -24,7 +24,19 @@ function batched(v: string): (BatchedEntry & { requestId: string }) | null {
   return { tokenHash: m[1]!, requestId: m[2]!, jny: m[3]!, ...(vr ? { vr } : {}) };
 }
 
+/** q:{event:E}:arr_slots */
+interface ArrivalState {
+  next?: number;
+  first?: number;
+  gen?: number;
+  closed: number;
+  lost: number;
+  slots: Map<number, { base: number; size: number; used: number }>;
+}
+
 export class MemoryEntryStore implements EntryStore {
+  readonly #arr = new Map<string, ArrivalState>();
+  readonly #arrClaims = new Map<string, string>();
   readonly #dup = new Map<string, { v: string; until: number }>();
   readonly #adm = new Map<string, string>();
   readonly #seq = new Map<string, number>();
@@ -119,9 +131,87 @@ export class MemoryEntryStore implements EntryStore {
         if (members.size > 0) this.#seq.set(i.eventId, seqOf() + members.size);
       }
     }
-    const first = seqOf() + 1;
-    this.#seq.set(i.eventId, seqOf() + i.items.length);
-    return i.items.map((_, k) => ({ kind: 'NUMBERED', seq: first + k, gen }));
+    const arrival = i.items.some((it) => it.arrivalSlot !== undefined);
+    if (!arrival) {
+      const first = seqOf() + 1;
+      this.#seq.set(i.eventId, seqOf() + i.items.length);
+      return i.items.map((_, k) => ({ kind: 'NUMBERED', seq: first + k, gen }));
+    }
+    // 진입 Degraded의 도착 시각 칸(Lua NUMBER_BATCH_LUA와 같은 규칙, ADR-0223 결정 6)
+    const initial = i.arrivalInitial ?? ARRIVAL_SLOT_INITIAL;
+    const st = this.#arrOf(i.eventId);
+    if (st.gen !== undefined && st.gen !== gen) {
+      if (st.next !== undefined && st.next - 1 > st.lost) st.lost = st.next - 1;
+      st.gen = gen;
+    }
+    const carved = { n: 0 };
+    const out: (NumberResult | null)[] = i.items.map((it) => {
+      const k = it.arrivalSlot;
+      if (k === undefined) return null;
+      if (k <= st.closed || k <= st.lost || k * ARRIVAL_SLOT_MS > now + ARRIVAL_FUTURE_MS || (k + 1) * ARRIVAL_SLOT_MS + ARRIVAL_CLOSE_AFTER_MS <= now) return { kind: 'NUMBERED', seq: 0, gen, arrival: 'late' };
+      this.#carve(i.eventId, st, k, gen, initial, carved);
+      const s = st.slots.get(k);
+      if (!s) return { kind: 'NUMBERED', seq: 0, gen, arrival: 'late' };
+      if (s.used >= s.size) return { kind: 'NUMBERED', seq: 0, gen, arrival: 'overflow' };
+      const seq = s.base + s.used;
+      s.used++;
+      return { kind: 'NUMBERED', seq, gen, arrival: 'slot' };
+    });
+    return out.map((r) => {
+      if (r && r.kind === 'NUMBERED' && r.arrival === 'slot') return r;
+      const seq = seqOf() + 1;
+      this.#seq.set(i.eventId, seq);
+      return r && r.kind === 'NUMBERED' ? { ...r, seq } : { kind: 'NUMBERED', seq, gen };
+    });
+  }
+
+  #arrOf(eventId: string): ArrivalState {
+    const s = this.#arr.get(eventId) ?? { closed: -1, lost: -1, slots: new Map() };
+    this.#arr.set(eventId, s);
+    return s;
+  }
+
+  /** k칸까지 차례로 뗀다. 처음 100칸은 첫 크기, 그 뒤는 직전 100칸이 쓴 번호 최댓값 × 1.5. 직전 칸이 모두 비면 빈 칸을 건너뛰고 k를 새 첫 칸으로 삼아 첫 크기로 다시 뗀다. 한 번에 떼는 양은 ARRIVAL_CARVE_MAX까지다 */
+  #carve(eventId: string, st: ArrivalState, k: number, gen: number, initial: number, carved: { n: number }): void {
+    if (st.next === undefined) {
+      st.next = k;
+      st.first = k;
+      st.gen = gen;
+    }
+    if (k < st.next) return;
+    let j = st.next;
+    while (j <= k && carved.n < ARRIVAL_CARVE_MAX) {
+      let desired = initial;
+      if (j - st.first! >= ARRIVAL_WINDOW_SLOTS) {
+        let mx = 0;
+        for (let m = j - ARRIVAL_WINDOW_SLOTS; m < j; m++) mx = Math.max(mx, st.slots.get(m)?.used ?? 0);
+        desired = Math.ceil(mx * 1.5);
+        if (desired === 0) {
+          j = k;
+          st.first = k;
+          desired = initial;
+        }
+      }
+      // 남은 몫보다 크면 칸을 자르지 않고 멈춘다. 다음 호출이 온전한 크기로 뗀다. 한 호출의 첫 칸만 상한까지 줄인다
+      if (carved.n > 0 && desired > ARRIVAL_CARVE_MAX - carved.n) break;
+      const size = Math.min(desired, ARRIVAL_CARVE_MAX);
+      const base = (this.#seq.get(eventId) ?? 0) + 1;
+      st.slots.set(j, { base, size, used: 0 });
+      this.#seq.set(eventId, base + size - 1);
+      carved.n += size;
+      j++;
+    }
+    st.next = j;
+  }
+
+  async claimArrival(i: { eventId: string; reqId: string; requestId: string; ttlMs: number }): Promise<boolean> {
+    const k = `${i.reqId}|${i.eventId}`;
+    const v = this.#arrClaims.get(k);
+    if (v === undefined) {
+      this.#arrClaims.set(k, i.requestId);
+      return true;
+    }
+    return v === i.requestId;
   }
 
   async rb05(i: Rb05Input): Promise<Rb05Result> {
@@ -291,6 +381,11 @@ export class MemoryEntryStore implements EntryStore {
   }
   skippedOf(eventId: string): string[] {
     return [...(this.#skipped.get(eventId) ?? [])];
+  }
+  /** 칸의 쓴 번호 수를 바로 넣는다(큰 수를 요청으로 채우지 않으려고) */
+  setArrivalUsedForTest(eventId: string, slot: number, used: number): void {
+    const s = this.#arrOf(eventId).slots.get(slot);
+    if (s) s.used = used;
   }
   addSkippedForTest(eventId: string, line: string): void {
     this.#skipped.set(eventId, [...(this.#skipped.get(eventId) ?? []), line]);

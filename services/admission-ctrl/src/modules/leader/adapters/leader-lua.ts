@@ -222,6 +222,69 @@ local function has(v) if v then return 1 end return 0 end
 return {'OK', n, valid, slots, soon, inflight, #stale, has(bd[1]), has(bd[3]), has(bd[4]), has(bd[5]), math.floor(ratio * 1000 + 0.5), state}
 `;
 
+// 진입 Degraded의 도착 시각 칸 닫기(ADR-0223 결정 7). 칸 끝 + 20초 [가정]이 지난 칸을 닫고 쓰지 않은 번호를 빠진 번호 비트맵에 켠다(온전한 바이트는 SETRANGE로).
+// 진입 Lua처럼 맨 앞에서 세대 키를 본다. 장애 전환 뒤 RB-05 전이거나 복제 확인 전(pend)이면 칸이 낡았을 수 있어 아무것도 쓰지 않는다.
+// 칸 기록의 세대가 지금 세대와 다르면 lost_upto를 먼저 적는다. lost_upto 이하의 칸은 used를 잃었을 수 있어 돌려주지 않고 기록만 지운다(돌려주면 받은 사람의 번호가 빠진 번호가 된다).
+// 한 번에 200칸·20만 번호 [가정]까지만 하고 다음 주기에 잇는다.
+// KEYS: 1 leader, 2 arr_slots, 3 removed, 4 skipped, 5 epoch. ARGV: 1 세대, 2 회차 키 수명. 돌려주는 값: {'FENCED'}, {'RB05', 0, 0}, {'NONE', 0, 0}, {'OK', 닫은 칸 수, 돌려준 번호 수}
+export const ARRIVAL_CLOSE_AFTER_MS = 20_000;
+export const ARRIVAL_CLOSE_LUA = `${EXTEND}${NODE_ID}${FENCE}
+extend(KEYS[1], ARGV[2])
+local function setBits(a, b)
+  while a <= b and a % 8 ~= 0 do redis.call('SETBIT', KEYS[3], a, 1); a = a + 1 end
+  while a <= b and (b + 1) % 8 ~= 0 do redis.call('SETBIT', KEYS[3], b, 1); b = b - 1 end
+  if a <= b then redis.call('SETRANGE', KEYS[3], a / 8, string.rep('\\255', (b - a + 1) / 8)) end
+end
+local a = redis.call('HMGET', KEYS[2], 'next', 'first', 'closed_upto', 'lost_upto', 'gen', 'gap_from', 'gap_to')
+if not a[1] then return {'NONE', 0, 0} end
+local node = nodeId()
+local ep = redis.call('HMGET', KEYS[5], 'node', 'pend')
+if not ep[1] then
+  redis.call('HSET', KEYS[5], 'node', node)
+  extend(KEYS[5], ARGV[2])
+elseif ep[1] ~= node or ep[2] then
+  return {'RB05', 0, 0}
+end
+local nxt, first = tonumber(a[1]), tonumber(a[2])
+local closed = tonumber(a[3]) or (first - 1)
+local lost = tonumber(a[4]) or -1
+local gen = redis.call('LLEN', KEYS[4]) + 1
+if tonumber(a[5]) ~= gen then
+  if nxt - 1 > lost then lost = nxt - 1 end
+  redis.call('HSET', KEYS[2], 'gen', gen, 'lost_upto', lost)
+end
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local limit = math.min(nxt - 1, math.floor((now - ${ARRIVAL_CLOSE_AFTER_MS}) / 100) - 1)
+if limit <= closed then return {'NONE', 0, 0} end
+local gapFrom, gapTo = tonumber(a[6]), tonumber(a[7])
+local j, scanned, slots, returned = closed, 0, 0, 0
+while j < limit and scanned < 200 and returned < 200000 do
+  j = j + 1
+  if gapFrom and j >= gapFrom and j <= gapTo then
+    -- 칸 떼기를 다시 시작할 때 건너뛴 빈 칸: 칸 기록이 없다(first 앞 전부를 건너뛰지 않는다. 쉬기 전 칸의 기록이 남아 있을 수 있다)
+    j = math.min(gapTo, limit)
+  else
+    scanned = scanned + 1
+    local f = redis.call('HMGET', KEYS[2], j .. ':base', j .. ':size', j .. ':used')
+    if f[1] then
+      slots = slots + 1
+      if j > lost then
+        local b, s, u = tonumber(f[1]), tonumber(f[2]), tonumber(f[3])
+        if u < s then
+          setBits(b + u, b + s - 1)
+          returned = returned + s - u
+        end
+      end
+      redis.call('HDEL', KEYS[2], j .. ':base', j .. ':size', j .. ':used')
+    end
+  end
+end
+redis.call('HSET', KEYS[2], 'closed_upto', j)
+extend(KEYS[3], ARGV[2])
+return {'OK', slots, returned}
+`;
+
 // 명세 plan·applyWrite의 CLOSE(ADR-0182 결정 6): 서버 시각으로 오픈이 지나면 로비 표시를, 구간 끝이 지나면 묶음 표시를 진입 Lua와 같은 뜻으로 쓴다
 // (HSETNX, {첫 번호}:{크기}:{대기표 세대}, 인원만큼 INCRBY). 진입 Lua처럼 맨 앞에서 세대 키를 견주고, 다르면 쓰지 않고 RB05를 돌려준다.
 // KEYS: 1 leader, 2 seq, 3 skipped, 4 batch_done, 5 batch_members:1, 6 lobby_members, 7 epoch

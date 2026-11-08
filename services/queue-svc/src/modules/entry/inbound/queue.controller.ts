@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { EnterQueue } from '../application/enter-queue.js';
 import { EntryError } from '../application/entry-error.js';
 import { IssuePreverification } from '../application/issue-preverification.js';
-import { QueueStoreUnavailable } from '../domain/queue.js';
+import { ARRIVAL_COOKIE_NAME, ARRIVAL_UNSIGNED_HEADER, cookieValue, QueueStoreUnavailable } from '../domain/queue.js';
 
 // openapi 요청 본문 모양(계약 생성물의 작업별 스키마 이름이 operationId 정리(wbs 0.2.3) 뒤 바뀌므로 여기 같은 모양으로 둔다)
 const BehaviorSummary = z
@@ -85,7 +85,9 @@ export class QueueController {
   @HttpCode(201)
   async enter(@Param('eventId') eventId: string, @ContractBody(EntryBody) body: z.output<typeof EntryBody>, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply) {
     void reply.header('cache-control', 'no-store');
-    const { kind, ...out } = await problem((async () => this.enterQueue.run({ accountId: me.accountId, eventId, body, ...who(eventId, me) }))());
+    const arrivalCookie = cookieValue(reply.request.headers.cookie, ARRIVAL_COOKIE_NAME);
+    const arrivalUnsigned = reply.request.headers[ARRIVAL_UNSIGNED_HEADER] === 'unsigned';
+    const { kind, ...out } = await problem((async () => this.enterQueue.run({ accountId: me.accountId, sessionId: me.sessionId, eventId, body, ...who(eventId, me), ...(arrivalCookie ? { arrivalCookie } : {}), ...(arrivalUnsigned ? { arrivalUnsigned } : {}) }))());
     // 동시 도착 구간 묶음에 넣었으면 202 BATCHING(결과 파일 경로·공개 예정 시각·분산 창, ADR-0041·0058)
     if (kind === 'BATCHING') void reply.code(202);
     return out;

@@ -15,7 +15,7 @@ local bits = redis.call('GETRANGE', KEYS[3], 0, math.floor(seq / 8))
 local skipped = redis.call('LRANGE', KEYS[4], 0, -1)
 local log = redis.call('ZRANGE', KEYS[5], -tonumber(ARGV[1]), -1, 'WITHSCORES')
 local calls = redis.call('ZRANGE', KEYS[6], -tonumber(ARGV[2]), -1, 'WITHSCORES')
-local notice = redis.call('HMGET', KEYS[7], 'saleState', 'soldOutTiers', 'paused', 'suspended', 'banner', 'remainingSeats', 'seatsAtMs', 'avgTicketsPerOrder')
+local notice = redis.call('HMGET', KEYS[7], 'saleState', 'soldOutTiers', 'paused', 'suspended', 'banner', 'remainingSeats', 'seatsAtMs', 'avgTicketsPerOrder', 'stateDegraded')
 local admit = redis.call('HMGET', KEYS[8], 'admitPaused', 'admitPausedUntil')
 return {seq, serving, bits, skipped, log, calls, notice, admit}
 `);
@@ -45,9 +45,9 @@ const decimal = (v: string | undefined): number | undefined => {
   return Number.isFinite(n) ? n : undefined;
 };
 
-/** notice의 [saleState, soldOutTiers, paused, suspended, banner, remainingSeats, seatsAtMs, avgTicketsPerOrder] */
+/** notice의 [saleState, soldOutTiers, paused, suspended, banner, remainingSeats, seatsAtMs, avgTicketsPerOrder, stateDegraded] */
 function noticeOf(r: unknown): NoticeFields {
-  const [saleState, tiers, paused, suspended, banner, left, at, avg] = ((r as unknown[]) ?? []).map(opt);
+  const [saleState, tiers, paused, suspended, banner, left, at, avg, stateDegraded] = ((r as unknown[]) ?? []).map(opt);
   const remainingSeats = count(left);
   const seatsAtMs = count(at);
   const avgTicketsPerOrder = decimal(avg);
@@ -56,6 +56,7 @@ function noticeOf(r: unknown): NoticeFields {
     soldOutTiers: tiersOf(tiers),
     paused: paused === '1',
     suspended: suspended === '1',
+    stateDegraded: stateDegraded === '1',
     ...(banner ? { banner } : {}),
     ...(remainingSeats !== undefined ? { remainingSeats } : {}),
     ...(seatsAtMs !== undefined ? { seatsAtMs } : {}),
@@ -107,8 +108,8 @@ export class RedisStateSnapshots implements StateSnapshots {
 
   async readPlatform(): Promise<PlatformNotice> {
     const k = keys.notice(PLATFORM_SCOPE);
-    const r = await guard(this.redis.command(['HMGET', k, 'paused', 'suspended', 'banner'], { key: k }));
-    const [paused, suspended, banner] = ((r as unknown[]) ?? []).map(opt);
-    return { paused: paused === '1', suspended: suspended === '1', ...(banner ? { banner } : {}) };
+    const r = await guard(this.redis.command(['HMGET', k, 'paused', 'suspended', 'banner', 'stateDegraded'], { key: k }));
+    const [paused, suspended, banner, stateDegraded] = ((r as unknown[]) ?? []).map(opt);
+    return { paused: paused === '1', suspended: suspended === '1', stateDegraded: stateDegraded === '1', ...(banner ? { banner } : {}) };
   }
 }

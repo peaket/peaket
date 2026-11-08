@@ -2,7 +2,7 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import type { HotRedis } from '@peaket/platform';
 import { AdmissionModule, type AdmissionSignals, type AdmissionStore, type AdmissionTokens } from './modules/admission/index.js';
-import { EntryModule, type EventSchedules, type QueueTokens, type RiskPort } from './modules/entry/index.js';
+import { type ArrivalCookies, type ArrivalSignals, EntryModule, type EventSchedules, type QueueTokens, type RiskPort } from './modules/entry/index.js';
 import { StateModule, type StateSnapshots } from './modules/state/index.js';
 
 @Module({})
@@ -14,11 +14,14 @@ export class AppModule {
       risk: RiskPort;
       /** 대기 상태 파일: 교차 출처 허용과 매초 다시 만들기(시험은 끈다) */
       state?: { webOrigin?: string; autoTick?: boolean };
+      /** 진입 Degraded의 도착 시각 쿠키 읽기와 그 지표(ADR-0223) */
+      arrivals?: ArrivalCookies;
+      arrivalSignals?: ArrivalSignals;
       /** 입장 확정: 운영은 입장 토큰 서명기를 꼭 넘긴다(시험은 저장소·서명기를 넘기지 않으면 새로 만든다) */
       admission?: { signer?: AdmissionTokens; signals?: AdmissionSignals; store?: AdmissionStore };
     },
   ): DynamicModule {
-    const entry = 'redis' in o ? EntryModule.register({ storage: 'redis', redis: o.redis, ...(o.waitRedis ? { waitRedis: o.waitRedis } : {}), tokens: o.tokens, risk: o.risk }) : EntryModule.register({ storage: 'memory', schedules: o.schedules, tokens: o.tokens, risk: o.risk });
+    const entry = 'redis' in o ? EntryModule.register({ storage: 'redis', redis: o.redis, ...(o.waitRedis ? { waitRedis: o.waitRedis } : {}), tokens: o.tokens, risk: o.risk, ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}) }) : EntryModule.register({ storage: 'memory', schedules: o.schedules, tokens: o.tokens, risk: o.risk, ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}) });
     const options = { ...(o.state?.webOrigin ? { webOrigin: o.state.webOrigin } : {}), ...(o.state?.autoTick !== undefined ? { autoTick: o.state.autoTick } : {}) };
     const state = 'redis' in o ? StateModule.register({ storage: 'redis', redis: o.redis, options }) : StateModule.register({ storage: 'memory', schedules: o.schedules, snapshots: o.snapshots, options });
     const a = o.admission ?? {};

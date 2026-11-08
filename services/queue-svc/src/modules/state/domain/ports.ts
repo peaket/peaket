@@ -9,6 +9,21 @@ export interface StateSnapshots {
   readPlatform(): Promise<PlatformNotice>;
 }
 
+export const STATE_MIRROR_STORE = Symbol('state.MirrorStore');
+export const STATE_MIRROR_LEASE = Symbol('state.MirrorLease');
+export const STATE_MIRROR_SIGNALS = Symbol('state.MirrorSignals');
+/** S3 대체 원본 사본 쓰기(실제 어댑터는 BUILD_ORDER HOT-012). 실패하면 던진다 */
+export interface StateMirrorStore {
+  put(i: { key: string; body: string; contentType: string; cacheControl: string; expiresAtMs?: number }): Promise<void>;
+}
+/** 이번 초 경계에 사본을 쓸 파드 하나를 고른다(SET q:{event:E}:mirror NX PX 900 [가정]). 대기열 Redis가 잠시 안 되면 던진다 */
+export interface StateMirrorLease {
+  claim(eventId: string, boundaryMs: number): Promise<boolean>;
+}
+export interface StateMirrorSignals {
+  failed(): void;
+}
+
 export const STATE_SCHEDULES = Symbol('state.EventSchedules');
 
 export const STATE_OPTIONS = Symbol('state.Options');

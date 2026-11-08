@@ -62,10 +62,12 @@ export interface NoticeFields {
   remainingSeats?: number;
   seatsAtMs?: number;
   avgTicketsPerOrder?: number;
+  /** 상태 조회 Degraded 표시(명령 6이 쓴다, ADR-0223 결정 8). 켜지면 pollHintMs가 거리별 주기의 2배다 */
+  stateDegraded?: boolean;
 }
 
-/** 전체 범위 q:{event:PLATFORM}:notice(일시정지·판매 중지·공지 배너) */
-export type PlatformNotice = Pick<NoticeFields, 'paused' | 'suspended' | 'banner'>;
+/** 전체 범위 q:{event:PLATFORM}:notice(일시정지·판매 중지·공지 배너·상태 조회 Degraded) */
+export type PlatformNotice = Pick<NoticeFields, 'paused' | 'suspended' | 'banner' | 'stateDegraded'>;
 
 export type SaleStatus = 'ON_SALE' | 'PAUSED' | 'ALL_HELD' | 'TIER_SOLD_OUT' | 'SOLD_OUT' | 'ENDED';
 
@@ -111,7 +113,16 @@ export interface StateFile {
   body: string;
   imminent: boolean;
   generatedAtMs: number;
+  /** S3 사본을 쓰는 주기(거리별 캐시 수명): 입장 임박 1초, 1~5분 5초, 그 밖 10초 [가정](ADR-0223 결정 9) */
+  mirrorEveryMs: number;
 }
+
+/** 거리별 구간: 입장 임박(1분 이내), 1~5분, 그 밖(queue-admission §4 표) */
+type Distance = 'near' | 'mid' | 'far';
+const MID_WAIT_S = 300;
+/** 상태 조회 Degraded의 pollHintMs: 거리별 주기의 2배(§4 '폴링 힌트') */
+const POLL_HINT_MS: Record<Distance, number> = { near: 1_000, mid: 10_000, far: 40_000 };
+const MIRROR_EVERY_MS: Record<Distance, number> = { near: 1_000, mid: 5_000, far: 10_000 };
 
 /** 파일을 만드는 초 경계(밀리초) */
 export const boundaryOf = (ms: number): number => Math.floor(ms / 1000) * 1000;
@@ -243,9 +254,21 @@ export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, gener
     }
   }
 
+  const degraded = notice.stateDegraded === true || platform.stateDegraded === true;
+  // 화면(queue-file.ts nextDelayMs)과 같은 잣대: 속도가 0이면 serving 구간 + 1까지가 임박이다. 속도가 있으면 그 구간 첫 번호까지 예상 대기로 가른다
+  const screenServingSegment = segmentOf(Math.max(1, s.serving));
+  const distanceOf = (seg: number, near: boolean): Distance => {
+    if (near) return 'near';
+    if (rate <= 0) return seg <= screenServingSegment + 1 ? 'near' : 'far';
+    const first = seg * SEGMENT_SIZE + 1;
+    const ahead = Math.max(0, first - s.serving - 1 - (removed.upTo(first - 1) - removed.upTo(s.serving)));
+    return ahead / rate <= MID_WAIT_S ? 'mid' : 'far';
+  };
+
   const files: StateFile[] = [];
   for (let seg = 0; seg <= maxSegment; seg++) {
     const near = imminent.has(seg);
+    const distance = distanceOf(seg, near);
     const body: QueueStateBody = {
       serving: s.serving,
       servingRate: rate,
@@ -259,10 +282,10 @@ export function buildStateFiles(s: StateSnapshot, schedule: EventSchedule, gener
       removedBeforeSegment: removed.before(seg),
       removedBitmap: Buffer.from(removed.bitsOf(seg)).toString('base64'),
       generatedAtMs,
-      pollHintMs: 0,
+      pollHintMs: degraded ? POLL_HINT_MS[distance] : 0,
       ...(near ? { servingSteps: steps } : {}),
     };
-    files.push({ body: JSON.stringify(body), imminent: near, generatedAtMs });
+    files.push({ body: JSON.stringify(body), imminent: near, generatedAtMs, mirrorEveryMs: MIRROR_EVERY_MS[distance] });
   }
   return files;
 }

@@ -4,6 +4,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { RedisEntryStore, keys } from '../src/modules/entry/adapters/redis-entry-store.js';
 import { RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-schedules.js';
 import { type EventSchedule, QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
+import { arrivalSlotCases } from '../test/arrival-slot-cases.js';
 import { batchCases } from '../test/batch-cases.js';
 import { entryCases } from '../test/entry-cases.js';
 import { type PidWorld, pidTransitionEntryCases } from '../test/pid-transition-cases.js';
@@ -74,6 +75,28 @@ const valkeyWorld = async (): Promise<PidWorld> => {
 };
 
 entryCases('Valkey Lua', valkeyWorld);
+arrivalSlotCases('Valkey Lua', async () => ({
+  store: new RedisEntryStore(redis),
+  now: () => Date.now(),
+  counter: async (e) => Number((await cmd(keys.seq(e), ['GET', keys.seq(e)])) ?? 0),
+  failover: async (e) => void (await cmd(keys.epoch(e), ['HSET', keys.epoch(e), 'node', 'old-primary'])),
+  setUsed: async (e, slot, used) => void (await cmd(keys.arrSlots(e), ['HSET', keys.arrSlots(e), `${slot}:used`, String(used)])),
+}));
+
+test('[Q-T16] 칸떼기를다시시작하면_건너뛴빈칸의범위를적어_리더가훑지않게한다', async () => {
+  const store = new RedisEntryStore(redis);
+  const e = newEvent();
+  const k = Math.floor(Date.now() / 100) - 95;
+  const at = Date.now() + 86_400_000;
+  await store.numberBatch({ eventId: e, expireAtMs: at, arrivalInitial: 1, items: [{ arrivalSlot: k }] });
+  await store.numberBatch({ eventId: e, expireAtMs: at, arrivalInitial: 1, items: [{ arrivalSlot: k + 140 }] });
+  const field = async (f: string) => String(await cmd(keys.arrSlots(e), ['HGET', keys.arrSlots(e), f]));
+  // k..k+100까지 뗀 뒤 k+101부터 창이 비어 k+140으로 다시 시작했다
+  expect(await field('first')).toBe(String(k + 140));
+  expect(await field('gap_from')).toBe(String(k + 101));
+  expect(await field('gap_to')).toBe(String(k + 139));
+});
+
 pidTransitionEntryCases('Valkey Lua', valkeyWorld);
 
 batchCases('Valkey Lua', async () => {

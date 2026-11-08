@@ -101,9 +101,24 @@ export interface LeaderStore {
   tick(i: TickInput): Promise<TickResult>;
   /** 명세 plan·applyWrite의 CLOSE(로비·묶음 표시) */
   close(i: CloseInput): Promise<CloseResult>;
+  /** 진입 Degraded의 도착 시각 칸 닫기: 칸 끝 + 20초 [가정]이 지난 칸을 닫고 쓰지 않은 번호를 빠진 번호로 돌린다(ADR-0223 결정 7) */
+  closeArrivalSlots(i: ArrivalCloseInput): Promise<ArrivalCloseResult>;
   rb05(i: Rb05Input): Promise<Rb05Result>;
   /** RB-05 복제 확인(ADR-0186): 표시 → 붙은 온라인 복제본 수만큼 WAIT → 지우기. queue-svc 진입 저장소와 같은 순서다 */
   confirmRb05(i: { eventId: string }): Promise<Rb05Confirm>;
+}
+
+export interface ArrivalCloseInput {
+  eventId: string;
+  gen: number;
+  /** 회차 키의 수명(빠진 번호 비트맵·리더 키) */
+  keepUntilMs: number;
+}
+/** slots: 이번에 닫은 칸 수, returned: 빠진 번호로 돌린 번호 수. RB05: 장애 전환 뒤 RB-05 전이거나 복제 확인 전이라 쓰지 않았다(다음 주기에 다시) */
+export interface ArrivalCloseResult {
+  kind: 'OK' | 'NONE' | 'FENCED' | 'RB05';
+  slots: number;
+  returned: number;
 }
 
 /** Lease 리더(플랫폼 LeaseElector). 리더가 아니면 세대가 없다 */

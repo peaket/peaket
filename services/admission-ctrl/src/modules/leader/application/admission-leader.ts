@@ -147,6 +147,10 @@ export class AdmissionLeader {
       // 장애 전환 뒤 새 진입이 오지 않으면(조용한 회차) RB-05가 돌지 않아, 잃은 번호를 든 대기자는 카운터가 그 번호에 닿지 못해 차례가 오지 않는다.
       // 그래서 리더가 회차마다 1초에 한 번 RB-05를 부른다(세대 키가 같으면 Lua가 바로 끝난다, 명세 rb05의 공정성, ADR-0184)
       if (now - (this.#rb05At.get(eventId) ?? Number.NEGATIVE_INFINITY) >= RB05_CHECK_MS) await this.#rb05(eventId, plan, keepUntilMs, closeAtMs, now);
+      // 진입 Degraded의 도착 시각 칸을 닫는다(칸 끝 + 20초 [가정], 쓰지 않은 번호를 빠진 번호로 돌린다, ADR-0223 결정 7). 칸이 없으면 Lua가 바로 끝난다
+      const arrival = await this.store.closeArrivalSlots({ eventId, gen, keepUntilMs });
+      if (arrival.kind === 'FENCED') return this.#fence(gen, eventId);
+      if (arrival.kind === 'OK') this.metrics?.arrival(arrival.slots, arrival.returned);
       // 묶음이 닫혔고 게시 전이거나 다시 쓰기 표시가 있으면 게시를 부른다(비콘이 아직이면 다음 주기에 다시). 큰 묶음의 게시는 몇 초 걸리므로
       // 뒤에서 돌려 다른 회차의 전진을 막지 않는다. 게시는 세대를 확인하지 않으므로 지금도 같은 세대의 리더일 때만 시작한다
       if (plan.openBatch && r.batchMarked === 1 && (r.batchPublished === 0 || r.repair === 1) && !this.#stopped.has(eventId) && !this.#publishing.has(eventId)) {

@@ -5,8 +5,12 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
-import { type BatchedEntry, ENTRY_STORE, EVENT_SCHEDULES, type EntryStore, type EventSchedules, type PreemptResult, QUEUE_TOKENS, type QueueTokens } from '../domain/ports.js';
+import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, type BatchedEntry, ENTRY_STORE, EVENT_SCHEDULES, type EntryStore, type EventSchedules, type PreemptResult, QUEUE_TOKENS, type QueueTokens } from '../domain/ports.js';
 import {
+  ARRIVAL_COOKIE_TTL_MS,
+  ARRIVAL_FUTURE_MS,
+  ARRIVAL_SLOT_INITIAL,
+  arrivalSlotOf,
   BATCH_REPAIR_RETRY_SEC,
   BATCH_RESULT_DELAY_MS,
   BATCH_SPREAD_SEC,
@@ -36,6 +40,8 @@ export interface EntryOptions {
   batchMax?: number;
   /** RB-05가 건너뛰는 양의 바탕 값(ADR-0181, 없으면 12만 [가정]. 시험이 줄인다) */
   rb05SkipBase?: number;
+  /** 도착 시각 칸의 첫 크기(ADR-0223, 없으면 3만 [가정]. 시험이 줄인다) */
+  arrivalSlotInitial?: number;
 }
 export const DEFAULT_ENTRY_OPTIONS: EntryOptions = { pendingTtlMs: PENDING_TTL_MS, batchWindowMs: NUMBER_BATCH_WINDOW_MS, batchMax: NUMBER_BATCH_MAX };
 
@@ -44,6 +50,12 @@ export interface EnterInput {
   pid: string;
   /** pid 키 전환 기간의 옛 pid(게이트웨이 머리 X-User-Pid-Prev). 있고 pid와 다르면 두 키로 처리한다 */
   pidPrev?: string;
+  /** 게이트웨이가 확인한 세션 ID(도착 시각 쿠키의 sid와 견준다) */
+  sessionId?: string;
+  /** 도착 시각 쿠키 값(`__Host-peaket_arr`, 진입 Degraded, ADR-0223) */
+  arrivalCookie?: string;
+  /** 엣지가 Degraded인데 서명 없이 보낸 요청(머리 x-peaket-arrival: unsigned) */
+  arrivalUnsigned?: boolean;
   eventId: string;
   body: { preverifyToken: string; deviceId?: string; entryRequestId?: string };
 }
@@ -98,8 +110,39 @@ export class EnterQueue {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(ENTRY_OPTIONS) private readonly options: EntryOptions,
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: PlatformLogger,
+    @Optional() @Inject(ARRIVAL_COOKIES) private readonly arrivals?: ArrivalCookies,
+    @Optional() @Inject(ARRIVAL_SIGNALS) private readonly signals?: ArrivalSignals,
   ) {
     this.#numbers = new NumberBatcher(store, options.batchWindowMs ?? NUMBER_BATCH_WINDOW_MS, options.batchMax ?? NUMBER_BATCH_MAX);
+  }
+
+  /**
+   * 도착 시각 쿠키를 받아 칸 번호를 돌려준다(ADR-0053 결정 2, ADR-0223 결정 5). 쿠키가 없거나 어긋나면 undefined(일반 진입).
+   * MAC을 먼저 보고 회차·sid·수명을 본 뒤 요청 ID를 잡는다. 대기열 Redis가 잠시 안 되면 503으로 끝내 같은 진입 요청 ID로 다시 오게 한다(§4 HOT-020 절).
+   * 쿠키를 넘기지 않고 맨 뒤 번호로 보내면 그 사람의 도착 순서를 잃는다
+   */
+  async #arrivalSlot(c: Ctx): Promise<number | undefined> {
+    const raw = c.i.arrivalCookie;
+    if (!raw) {
+      if (c.i.arrivalUnsigned) this.signals?.cookie('absent');
+      return undefined;
+    }
+    if (!this.arrivals) return undefined;
+    const v = this.arrivals.read(raw);
+    const now = this.clock.now();
+    if (!v || v.e !== c.i.eventId || v.sid !== c.i.sessionId || now - v.t > ARRIVAL_COOKIE_TTL_MS || v.t - now > ARRIVAL_FUTURE_MS) {
+      this.signals?.cookie('invalid');
+      return undefined;
+    }
+    let claimed: boolean;
+    try {
+      claimed = await this.store.claimArrival({ eventId: c.i.eventId, reqId: v.rid, requestId: c.requestId, ttlMs: ARRIVAL_COOKIE_TTL_MS });
+    } catch (e) {
+      if (e instanceof QueueStoreUnavailable) this.signals?.cookie('unavailable');
+      throw e;
+    }
+    this.signals?.cookie(claimed ? 'ok' : 'reused');
+    return claimed ? arrivalSlotOf(v.t) : undefined;
   }
 
   async run(i: EnterInput): Promise<EnterOutcome> {
@@ -177,6 +220,8 @@ export class EnterQueue {
     if (pre1.kind === 'RECORDED') return this.#issue(c, pre1.seq, pre1.gen, pre1.jny, pre1.vr);
     if (pre1.kind === 'BATCH') return this.#batched(c, pre1, jny, vr, eligible, tokenHash, firstTry);
 
+    // 진입 Degraded의 도착 시각 쿠키는 번호를 받기 직전에 한 번만 받는다(응답을 잃은 재시도는 RECORDED로 위에서 끝났다)
+    const arrivalSlot = await this.#arrivalSlot(c);
     // ②는 파드별 묶음으로 보낸다(같은 회차의 요청을 2ms 모아 Lua 한 번, ADR-0179)
     const num = await this.#numbers.take(
       {
@@ -187,9 +232,11 @@ export class EnterQueue {
         lobbyShuffle: schedule.lobbyShuffle,
         openBatch: schedule.openBatch,
         batchExpireAtMs: saleEnd,
+        arrivalInitial: this.options.arrivalSlotInitial ?? ARRIVAL_SLOT_INITIAL,
       },
-      { eligible, tokenHash },
+      { eligible, tokenHash, ...(arrivalSlot !== undefined ? { arrivalSlot } : {}) },
     );
+    if (num.kind === 'NUMBERED' && num.arrival) this.signals?.number(num.arrival);
     if (num.kind === 'RECOVERING') {
       // 장애 전환 뒤 RB-05 전이라 번호를 받지 않았다(OPEN[13], ADR-0181). 선점을 풀고 RB-05를 돈 뒤 다시 오게 한다
       await this.#release(c);

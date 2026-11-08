@@ -27,6 +27,8 @@ jobs:
           npm install --global "$pm"
       - run: pnpm install --frozen-lockfile
       - run: node --test "tools/ci/*.test.mjs"
+      # 엣지 저장소 맞추기 도구(ADR-0223 결정 10)
+      - run: node --test "tools/edge/*.test.mjs"
       # 성능 장부 도구: 명령줄 시험(점검 판정·지연 대조·증거 수준·야간 비교 D-T40)과 자체 시험(docs/perf-ledger.md)
       - run: node --test "tools/perf-ledger/*.test.mjs"
       - run: python3 -I -X utf8 tools/perf-ledger/collect.py --selftest

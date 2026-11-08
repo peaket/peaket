@@ -4,14 +4,14 @@
 import { fakeClock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { AdmissionLeader } from '../src/modules/leader/application/admission-leader.js';
-import type { CloseInput, EventPlan, LeaderStore, Rb05Result, TickInput, TickResult } from '../src/modules/leader/domain/ports.js';
+import type { ArrivalCloseResult, CloseInput, EventPlan, LeaderStore, Rb05Result, TickInput, TickResult } from '../src/modules/leader/domain/ports.js';
 import { BatchMembersChanged } from '../src/modules/batch/application/publish-batch-results.js';
 
 const T0 = Date.UTC(2026, 10, 3, 3, 0, 0);
 const DAY = 86_400_000;
 const OK: TickResult = { kind: 'OK', serving: 0, advanced: 0, slots: 0, soon: 0, inFlight: 0, dropped: 0, lobbyMarked: 1, batchMarked: 1, batchPublished: 1, repair: 0, ratio: 1, saleState: 'ON_SALE' };
 
-function world(o: { plan?: Partial<EventPlan>; tick?: Partial<TickResult> | TickResult; bump?: 'OK' | 'FENCED'; close?: 'OK' | 'NONE' | 'FENCED' | 'RB05' | 'EARLY'; ctl?: { target?: number; paused: boolean } } = {}) {
+function world(o: { plan?: Partial<EventPlan>; tick?: Partial<TickResult> | TickResult; bump?: 'OK' | 'FENCED'; close?: 'OK' | 'NONE' | 'FENCED' | 'RB05' | 'EARLY'; arrival?: ArrivalCloseResult; ctl?: { target?: number; paused: boolean } } = {}) {
   const clock = fakeClock({ now: T0 });
   const calls: string[] = [];
   const ticks: TickInput[] = [];
@@ -22,6 +22,7 @@ function world(o: { plan?: Partial<EventPlan>; tick?: Partial<TickResult> | Tick
     bump: o.bump ?? 'OK',
     tick: { ...OK, ...o.tick } as TickResult,
     close: o.close ?? 'OK',
+    arrival: o.arrival ?? ({ kind: 'NONE', slots: 0, returned: 0 } as ArrivalCloseResult),
     rb05: { kind: 'DONE' } as Rb05Result,
     confirm: 'CONFIRMED' as 'CONFIRMED' | 'WAITING' | 'NONE',
   };
@@ -57,6 +58,10 @@ function world(o: { plan?: Partial<EventPlan>; tick?: Partial<TickResult> | Tick
       calls.push(`confirm:${i.eventId}`);
       return state.confirm;
     },
+    closeArrivalSlots: async (i) => {
+      calls.push(`arrival:${i.eventId}:${i.gen}`);
+      return state.arrival;
+    },
   };
   const published: string[] = [];
   const publish = { run: async (i: { eventId: string }) => (published.push(i.eventId), { status: 'PUBLISHED' }) };
@@ -84,7 +89,7 @@ describe('교체 순서', () => {
     await w.leader.tick();
     await w.leader.tick();
     // RB-05 확인은 회차마다 1초에 한 번이라 두 번째 주기에는 없다
-    expect(w.calls.filter((c) => c !== 'events')).toEqual(['bump:e1:3', 'control', 'tick:e1:3', 'rb05:e1', 'control', 'tick:e1:3']);
+    expect(w.calls.filter((c) => c !== 'events')).toEqual(['bump:e1:3', 'control', 'tick:e1:3', 'rb05:e1', 'arrival:e1:3', 'control', 'tick:e1:3', 'arrival:e1:3']);
   });
 
   test('[Q-T30] FENCED를받으면_그세대로는더쓰지않고_새세대가오면세대부터다시올린다', async () => {
@@ -165,6 +170,20 @@ describe('닫기와 게시', () => {
     c.state.gen = 1;
     await c.leader.tick();
     expect(c.calls.filter((x) => x.startsWith('rb05'))).toEqual(['rb05:e1']);
+  });
+
+  test('[Q-T16] 리더는_주기마다도착시각칸닫기를부르고_FENCED면그세대를멈춘다', async () => {
+    const w = world();
+    w.state.gen = 1;
+    await w.leader.tick();
+    expect(w.calls.filter((c) => c.startsWith('arrival'))).toEqual(['arrival:e1:1']);
+    const fenced = world({ arrival: { kind: 'FENCED', slots: 0, returned: 0 } });
+    fenced.state.gen = 1;
+    await fenced.leader.tick();
+    fenced.calls.length = 0;
+    fenced.clock.advance(1_000);
+    await fenced.leader.tick();
+    expect(fenced.calls.filter((c) => c.startsWith('tick'))).toEqual([]);
   });
 
   test('[Q-T13] RB05가건너뛰었거나_확인전이면_이어서복제를확인하고_확인이안되면회차마다10초에한번경고한다(ADR-0186)', async () => {

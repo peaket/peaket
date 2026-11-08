@@ -12,6 +12,29 @@ export interface QueueTokens {
   hash(token: string): string;
 }
 
+/** 도착 시각 쿠키에서 읽은 칸(ADR-0223 결정 3): 회차, 도착 시각, CloudFront 요청 ID, sid */
+export interface ArrivalClaims {
+  kid: string;
+  e: string;
+  /** 엣지가 찍은 도착 시각(밀리초) */
+  t: number;
+  rid: string;
+  sid: string;
+}
+export const ARRIVAL_COOKIES = Symbol('queue.ArrivalCookies');
+/** 도착 시각 쿠키 읽기. MAC·형식이 맞을 때만 칸을 주고 아니면 null(회차·시각·sid는 부르는 쪽이 본다) */
+export interface ArrivalCookies {
+  read(value: string): ArrivalClaims | null;
+}
+
+export const ARRIVAL_SIGNALS = Symbol('queue.ArrivalSignals');
+/** 도착 시각 쿠키와 칸 번호의 결과를 센다(Q-T16의 장부, docs/observability.md §5) */
+export interface ArrivalSignals {
+  /** absent: 엣지가 Degraded인데 서명 없이 보냈다(키를 읽지 못함 등). unavailable: 요청 ID를 잡지 못해 503으로 다시 오게 했다 */
+  cookie(result: 'ok' | 'invalid' | 'reused' | 'absent' | 'unavailable'): void;
+  number(path: 'slot' | 'late' | 'overflow'): void;
+}
+
 export const WITHDRAWN_KEYS = Symbol('queue.WithdrawnKeys');
 /** 탈퇴 계정의 사람 키(q:dup·q:adm) 만료 당기기(docs/features/queue-admission.md §3 '탈퇴 계정의 사람 키', BOT-037) */
 export interface WithdrawnKeys {
@@ -100,7 +123,8 @@ export type RecordResult = { kind: 'RECORDED' } | ({ kind: 'SAME' } & RecordedEn
 export type BatchOutcome = { kind: 'RESULT'; seq: number; gen: number } | { kind: 'PENDING' } | { kind: 'REPAIRING' } | { kind: 'MISSING' };
 /** ② 회차 슬롯의 결과: 번호, 묶음에 넣음(202), 묶음 구간이라 기다림(503), 서버 시각으로 아직 오픈 전 */
 export type NumberResult =
-  | { kind: 'NUMBERED'; seq: number; gen: number }
+  /** arrival: 쿠키가 있는 요청의 번호 길. slot = 칸 안의 번호, late = 칸이 닫혔거나 없어 카운터 끝, overflow = 구간이 차서 카운터 끝(ADR-0223 결정 6) */
+  | { kind: 'NUMBERED'; seq: number; gen: number; arrival?: 'slot' | 'late' | 'overflow' }
   | { kind: 'BATCHING' }
   | { kind: 'WAIT'; retryAfterSeconds: number }
   | { kind: 'EARLY' }
@@ -144,15 +168,21 @@ export interface NumberInput {
   tokenHash?: string;
   /** 묶음 참가자 목록의 만료 시각(판매 종료). 없으면 expireAtMs */
   batchExpireAtMs?: number;
+  /** 진입 Degraded의 도착 시각 칸(쿠키를 받은 요청만, ADR-0223 결정 6) */
+  arrivalSlot?: number;
+  /** 도착 시각 칸의 첫 크기 */
+  arrivalInitial?: number;
 }
 
 /** ② 파드별 묶음의 요청 하나(ADR-0179) */
 export interface NumberItem {
   eligible?: boolean;
   tokenHash?: string;
+  /** 쿠키를 받은 요청의 도착 시각 칸(없으면 일반 번호) */
+  arrivalSlot?: number;
 }
 /** ② 파드별 묶음: 회차 공통 값과 요청들(묶음 안 순서대로 번호를 나눠 준다) */
-export type NumberBatchInput = Omit<NumberInput, 'eligible' | 'tokenHash'> & { items: NumberItem[] };
+export type NumberBatchInput = Omit<NumberInput, 'eligible' | 'tokenHash' | 'arrivalSlot'> & { items: NumberItem[] };
 
 export const ENTRY_STORE = Symbol('queue.EntryStore');
 /**
@@ -206,6 +236,8 @@ export interface EntryStore {
   mirror(i: { from: string; to: string; eventId: string; requestId: string }): Promise<'COPIED' | 'TAKEN' | 'ADMITTED'>;
   /** 값이 이 요청의 것(선점·번호 기록·묶음 기록)이면 지운다. 옮겨 쓰기가 막혔을 때 앞 키를 되돌린다 */
   dropOwn(i: { pid: string; eventId: string; requestId: string }): Promise<void>;
+  /** 도착 시각 쿠키의 요청 ID를 잡는다(q:arr:{reqId}:E, 값은 진입 요청 ID, 수명 ttlMs). 같은 진입 요청 ID면 다시 받고, 다른 진입 요청이면 false(ADR-0223 결정 5) */
+  claimArrival(i: { eventId: string; reqId: string; requestId: string; ttlMs: number }): Promise<boolean>;
   /** 번호를 빠진 번호 비트맵에 켠다. 회차 키의 수명은 부를 때마다 더 늦은 쪽으로만 늘린다 */
   markRemoved(i: { eventId: string; seq: number; expireAtMs: number }): Promise<void>;
   /** 고위험 진입: 빠진 번호 비트를 켜고 q:{event:E}:verify에 대기표 해시를 VERIFYING으로 쓴다(이미 있으면 그대로). 비트맵 수명은 expireAtMs, verify는 verifyExpireAtMs(판매 종료) */
