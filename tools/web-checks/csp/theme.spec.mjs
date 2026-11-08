@@ -39,6 +39,7 @@ async function look(page, path) {
     const rgb = (bg.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number);
     const lum = rgb.length === 3 ? (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255 : -1;
     return {
+      osScheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
       user: document.documentElement.dataset.seedUserColorScheme ?? null,
       scheme: getComputedStyle(document.documentElement).colorScheme,
       shellScheme: getComputedStyle(shell).colorScheme,
@@ -60,6 +61,10 @@ for (const path of PAGES) {
       if (gap) await ctx.close();
       test.skip(gap !== null, gap ?? '');
       const r = await look(page, path);
+      // CI의 Playwright Firefox도 다크 흉내가 화면에 닿지 않는다(CI 42505593522). 볼 수 없는 모드는 통과로 세지 않고 까닭을 남긴다. 나머지 두 엔진은 그대로 실패한다
+      if (browserName === 'firefox' && r.osScheme !== scheme) await ctx.close();
+      test.skip(browserName === 'firefox' && r.osScheme !== scheme, `이 Firefox는 prefers-color-scheme ${scheme} 흉내가 화면에 닿지 않는다`);
+      expect(r.osScheme, '색 모드 흉내가 먹어야 시험이 뜻이 있다').toBe(scheme);
       expect(r.user).toBe(scheme);
       expect(r.scheme).toBe(scheme);
       // 셸 루트(.pk)도 같은 color-scheme이라 화면 안 입력 칸·목록·스크롤 상자가 바탕과 맞게 그려진다

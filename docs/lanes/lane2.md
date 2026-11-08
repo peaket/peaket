@@ -41,6 +41,7 @@
 - HOT-300: 캐시 화면(`/` 등)의 뒤쪽 다시 만들기가 'client rendering was requested outside a Suspense boundary'(Next.js 'Render in Browser')로 실패해 `/`가 STALE로 남는다(만든 HTML은 200으로 계속 나간다). 프리렌더가 멈춘 자리가 루트에 Suspense 없이 남는 경우인데 무엇이 멈추는지는 아직 못 찾았다. 홈 데이터가 cacheLife 60초라 운영에서 홈이 새로 만들어지지 않을 수 있다(apps/web src/_pages/home, src/_app/layouts/CachedRootLayout.tsx, CI 실행 42089422611 seed-css 로그)
 - HOT-353: 좌석 화면 요약이 모든 폭에서 아래 띠다. d5 §5.10의 데스크톱 오른쪽 패널(범례·선택 요약·타이머·버튼)과 등급 칩·연석 찾기·[목록으로 보기]·[자동 좌석 배정] 전환, 무활동 경고는 아직 없다(apps/web _pages/seats, 미리보기 SeatsPreview에 그림이 있다)
 - HOT-353: 경합 패배의 좌석 흔들림(`motion.seat-shake`)과 '다른 분 선택' 표시는 실시간과 함께 HOT-357에서 한다
+- FE-T35(R-378): CI의 Playwright Firefox에서 다크 흉내가 화면에 닿지 않아 Firefox의 어두운 모드 두 건은 건너뛴다. 원인을 찾아 다시 켠다(Chromium·WebKit은 본다, tools/web-checks/csp/theme.spec.mjs)
 - HOT-354: 좌석 목록의 NVDA·VoiceOver 완주 시험(FE-T18 수동 칸)은 사람이 한다. [자동 좌석 배정] 버튼은 HOT-080 뒤, 실시간 델타의 `stateChanged`는 HOT-357이다(ADR-0227)
 - 성능 예산(R-374): 검사 틀의 홈은 빌드 때 원본이 없어 빈 피드이고 브라우저가 랭킹 파일을 못 받아 섹션이 접혀 CLS 0.144가 난다(실제 데이터에서는 그 섹션이 화면 아래다). 빌드 때 가짜 API를 붙이거나 랭킹 파일을 같은 출처로 주면 기준선을 뺀다. CI 러너에서 같은 빌드의 한 주소가 세 번 사이에 ±20% 흔들려(결제 데모 6.8~8.1초, R-376) 기준선 + 10%가 빠듯하다. wbs 7.5.2에서 재는 횟수나 여유를 다시 정한다(tools/web-checks/budgets/lighthouse-baseline.json)
 
@@ -92,3 +93,4 @@
 - 2026-11-09 HOT-361 구매 세션 401과 복제 탭(R-375): 이름 있는 401 네 가지가 키와 입장 저장값을 지우고 '예매 시간이 끝났습니다'로 가는 것을 화면에서 봤고, 복제한 탭의 일련번호 역전 0을 세 엔진으로 봤다. 제품 코드는 바뀌지 않았다.
 - 2026-11-09 Lighthouse 기준선 다시 잡음(R-376): 실제 화면을 이은 뒤 CI에서 잰 값으로 다섯 주소를 고쳤다. 앞의 두 커밋(R-374·375)의 정합 점검 행 칸 수가 틀려 이 커밋 본문에 바로잡아 적었다.
 - 2026-11-09 HOT-354 접근성 좌석 목록(R-377, ADR-0227): 구역 → 열 → 좌석 ARIA 트리와 가상 스크롤, Worker의 구역 자료·바뀐 좌석 메시지, 고르기는 지도와 같은 예매 흐름. 키보드·axe 확인, NVDA·VoiceOver 완주는 사람 몫으로 남겼다.
+- 2026-11-09 CI FE-T35 Firefox(R-378): 성능 예산이 처음 통과해 그 뒤 csp 단계가 돌면서 드러났다. 흉내가 닿지 않는 Firefox의 어두운 모드는 까닭을 남기고 건너뛴다.
