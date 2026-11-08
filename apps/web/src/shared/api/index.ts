@@ -7,14 +7,14 @@
 //   주소는 PEAKET_API_ORIGIN(앱 서버가 gw-fan을 부르는 주소). 없으면 부르지 않고 빈 피드로 그린다. 빌드가 아닌 실행 중에 없으면 경고를 남긴다(배포 설정 누락).
 // - 브라우저: 개인 값(찜·알림)을 부른다. 팬 API는 NEXT_PUBLIC_API_ORIGIN(ORIGINS.api), 같은 출처 정적 파일(www)은 지금 출처다.
 //   팬 요청이 401이면 토큰을 한 번 갱신하고 다시 보낸다(§4.1 '401', withFanRefresh).
-import { createApiClient, setOrvalClient } from '@peaket/api-client';
+import { createApiClient, setOrvalClient, type ApiClient } from '@peaket/api-client';
 import { ORIGINS } from '@/shared/config/origins';
 import { refreshLock } from '@/shared/lib/refresh-lock';
 import { refreshOnce, type RefreshResult } from '@/shared/lib/token-refresh';
 import { isUnauthorizedError, retryOnceAfterRefresh } from './refresh';
 
 let serverReady = false;
-let browserReady = false;
+let browserClient: ApiClient | null = null;
 let warned = false;
 
 /** 서버에서 부를 API 주소. 없으면 undefined(부르지 않는다) */
@@ -43,12 +43,17 @@ export function ensureServerApi(): boolean {
 /** 브라우저 쪽 클라이언트(앱이 쓰는 호스트 전부)를 한 번 꽂는다. 서버에서 부르면 false */
 export function ensureBrowserApi(): boolean {
   if (typeof window === 'undefined') return false;
-  if (!browserReady) {
+  if (!browserClient) {
     const hosts = { api: ORIGINS.api, queue: ORIGINS.queue, 'queue-files': ORIGINS.queueFiles, www: window.location.origin };
-    setOrvalClient(createApiClient({ baseUrls: Object.fromEntries(Object.entries(hosts).filter(([, v]) => v)) }));
-    browserReady = true;
+    browserClient = createApiClient({ baseUrls: Object.fromEntries(Object.entries(hosts).filter(([, v]) => v)) });
+    setOrvalClient(browserClient);
   }
   return true;
+}
+
+/** 브라우저 쪽 클라이언트(구매 세션 쓰기처럼 생성 함수로 부르지 않는 호출, ADR-0221 결정 5). 서버에서 부르면 null */
+export function browserApiClient(): ApiClient | null {
+  return ensureBrowserApi() ? browserClient : null;
 }
 
 /** 팬 API를 부를 수 있는가(개발 서버에서 주소를 넣지 않았으면 개인 값은 비로그인처럼 둔다) */

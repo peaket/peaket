@@ -8,6 +8,7 @@
 //   queueShuffle=normal|late|never|missing, 사전 검증(ADR-0211) queuePreverify=normal|identity|not-found|down|unauthorized, 매진 등급(ADR-0212) queueSoldOutTiers=tier-r,…
 //   검사 기록(ADR-0217): GET /__mock/requests(메서드·경로·출처·시각·끊긴 시각), logReset=1, 진입 멈춤 queueEntry=hang, 200 상태 파일 Retry-After queueStateRetryAfter=<초>
 //   좌석맵 파일(ADR-0216·0223) GET /v1/events/{회차}/seatmap-layouts/{1|2|3}.json(1은 8석 자리 파일, 2·3은 실제 배치). 입장 확정·대기 상태 파일은 판 2를 준다
+//   홀드·구매 세션 나가기(ADR-0225): 서명을 실제로 확인한다. hold=normal|race|recent|limit|paused|ended|down|no-match
 //   좌석 스냅샷(ADR-0224) GET /v1/events/{회차}/seatmap-snapshot: 입장 토큰 필수, 첫 사용에 임시 공개키 필수. seatSnapshot=expired(이름 있는 401)|cookie(이름 없는 401)|down(503)|newer(판 3)
 //   예매 제한(ADR-0213) restriction=none|active|overdue|fraud(GET /v1/booking-restrictions/me), 알림 신청 subscribe=normal|limit|busy|ended(422·429·410)
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
@@ -25,6 +26,7 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createQueueMock, QUEUE_DEFAULTS } from './mock-api/queue.mjs';
+import { createPurchaseMock } from './mock-api/purchase.mjs';
 import { SEATMAP_VERSIONS, seatmapLayoutV, seatSnapshot } from './mock-api/seatmap.mjs';
 
 const CARDS = JSON.parse(readFileSync(new URL('./mock-api/cards.json', import.meta.url), 'utf8'));
@@ -572,9 +574,7 @@ export function startMockApi({
   now = Date.now,
 } = {}) {
   const origin = `http://127.0.0.1:${port}`;
-  /** 스냅샷을 이미 연 입장 토큰(첫 사용에만 임시 공개키가 있어야 한다) */
-  const openedSnapshots = new Set();
-  const state = { seatSnapshot: 'normal', home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', restriction: 'none', subscribe: 'normal', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
+  const state = { hold: 'normal', seatSnapshot: 'normal', home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', restriction: 'none', subscribe: 'normal', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
   /** queueOpenIn을 정한 순간에 고정한 오픈 시각(밀리초). 없으면 고정 자료 일정 */
   let openAtOverride;
   const scheduleOf = (eventId) => {
@@ -582,6 +582,7 @@ export function startMockApi({
     return d ? { openAtMs: Date.parse(d.openAt), lobbyOpensAtMs: d.lobbyOpensAt ? Date.parse(d.lobbyOpensAt) : null } : null;
   };
   const queue = createQueueMock({ now, state, schedule: scheduleOf });
+  const purchase = createPurchaseMock({ now, state });
   /** 본인확인 건(건 ID → 목적·돌아갈 주소·상태) */
   const attempts = new Map();
   /** 결과 확정(identity-svc confirm-verification.ts의 차례): 정리 중 → 기관 값 → 기록 없는 REVERIFY → 만 나이 → 다른 계정 → 같은 사람 */
@@ -653,7 +654,7 @@ export function startMockApi({
     const p = url.pathname;
     const unauthorized = () => send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
     if (p === '/__mock/state' && req.method === 'GET') {
-      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', ...Object.keys(QUEUE_DEFAULTS)])) {
+      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
         if (v !== null && (v !== '' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers' || k === 'queueStateRetryAfter')) state[k] = v;
       }
@@ -692,10 +693,7 @@ export function startMockApi({
       if (state.seatSnapshot === 'expired') return expired();
       if (state.seatSnapshot === 'cookie') return unauthorized();
       if (state.seatSnapshot === 'down') return send(503, { type: 'https://peaket.example/problems/seat-store-unavailable', title: '잠시 후 다시 시도해 주세요', status: 503 }, 'application/problem+json', { 'retry-after': '1' });
-      if (!openedSnapshots.has(token)) {
-        if (!req.headers['x-client-ephemeral-key']) return send(400, { type: 'about:blank', title: 'Bad Request', status: 400 }, 'application/problem+json');
-        openedSnapshots.add(token);
-      }
+      if (!purchase.open(token, req.headers['x-client-ephemeral-key'])) return send(400, { type: 'about:blank', title: 'Bad Request', status: 400 }, 'application/problem+json');
       res.writeHead(200, { ...cors, 'content-type': 'application/octet-stream', 'cache-control': 'no-store' });
       res.end(seatSnapshot(state.seatSnapshot === 'newer' ? 3 : 2));
       return;
@@ -808,6 +806,7 @@ export function startMockApi({
     }
     // 대기열(진입·묶음 결과·대기 상태 파일·입장 확정·대기 취소, scripts/mock-api/queue.mjs)
     if (queue.handle(req, p, { send, problem, readJson, badRequest })) return;
+    if (purchase.handle(req, p, url, { send, problem })) return;
     if (p === '/v1/wishes' && req.method === 'GET') {
       if (state.fan === 'guest') return unauthorized();
       const raw = url.searchParams.get('productionIds');

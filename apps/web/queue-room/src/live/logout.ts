@@ -23,7 +23,7 @@ export interface LogoutDeps {
 const LOCAL_PREFIXES = ['peaket.queue.', 'peaket.autoassign.'];
 const LOCAL_KEYS = ['peaket.clock', 'peaket.wishQueue'];
 // 결제 초안(peaket.checkout.*)은 §5.14.4 2번의 '결제 초안'이다
-const SESSION_PREFIXES = ['peaket.queue.', 'peaket.admission.', 'peaket.checkout.'];
+const SESSION_PREFIXES = ['peaket.queue.', 'peaket.admission.', 'peaket.checkout.', 'peaket.hold.'];
 const SESSION_KEYS = ['peaket.withdraw.reauth', 'peaket.providers.pending', 'peaket.verify.return'];
 const DATABASES = ['peaket-purchase', 'peaket-push'];
 const WALLET_DB = 'peaket-wallet';

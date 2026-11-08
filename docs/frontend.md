@@ -491,7 +491,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 
 ### 3.6 예매 흐름과 결제 결과
 
-**예매 흐름 기계**(XState, 좌석 화면 → 결제 → 결과)
+**예매 흐름 기계**(XState, 좌석 화면 → 결제 → 결과. 2026-11-09 HOT-353: `selecting`·`holding`·`held`와 일시 정지·판매 종료, 요청 결과를 이벤트로 넣는다. 자동 배정은 고른 좌석 없이 희망 조건으로 첫 홀드를 보낸다, ADR-0225)
 
 | 상태 | 화면 | 다음 |
 | --- | --- | --- |
@@ -610,6 +610,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | sessionStorage | `peaket.devices.reauth` | 원격 로그아웃 재인증으로 떠날 때의 할 일(끝낼 세션 ID, 토스트에 보일 기기 이름, 범위(그 기기 `device`·이 기기의 다른 로그인 `others`), 떠난 시각. 토큰은 넣지 않는다, docs/features/identity.md §8 '로그인한 기기와 다른 세션 끝내기의 첫 구현', 추천 적용 2026-11-05, ADR-0209) | 탭(남긴 지 10분 [가정] 안일 때만 믿는다) | 재인증에서 돌아왔을 때(늘 지운다. 탈퇴 재인증 표시와 함께 있으면 나중에 남긴 쪽만 잇는다), 로그아웃 | 등급 밖 |
 | sessionStorage | `peaket.providers.merged` | 지금 계정이 계정 합치기로 흡수되어 흡수 안내로 떠난 시각(밀리초). 흡수 안내(`?ended=MERGED`)를 방금 흡수 확정을 받은 이 탭에만 보이려고 둔다(docs/features/identity.md §2.1 '계정 병합의 첫 구현' 화면, 2026-11-05, BOT-043이 넘긴 것) | 탭(남긴 지 1분 [가정] 안일 때만 믿는다) | 흡수 안내 화면이 열릴 때(늘 지운다). 로그아웃 정리는 이 표시를 남기기 전에 돈다 | 등급 밖(숫자) |
 | localStorage | `peaket.autoassign.{eventId}` | 희망 조건 `{v: 1, firstTierId, count, wheelchair, secondTierId?, allowSplit, savedAt}`(등급 ID는 공개 요약 `priceTiers`, 매수 상한은 `perPersonLimit`, ADR-0212) | 판매 종료까지 | 로그아웃, 배정 확정, 판매 종료 | 등급 밖 |
+| sessionStorage | `peaket.hold.{eventId}` | 지금 홀드(`holdId`, `seatIds`, `expiresAt`). 결제 화면이 `GET /v1/holds/{holdId}`로 다시 읽을 때 쓴다(ADR-0225) | 탭 | 홀드 만료·해제, 구매 세션 끝, 로그아웃 | 등급 밖 |
 | sessionStorage | `peaket.checkout.{holdId}` | 동의 체크, 고른 결제 수단(이름·전화는 없다) | 탭 | 결제 접수, 구매 세션 끝 | 등급 밖 |
 | sessionStorage | `peaket.accept.{orderId}` | 결제 접수를 보낸 시각과 그 멱등키(결제사 값은 넣지 않는다) | 탭 | 결과 확정, 구매 세션 끝 | 등급 밖 |
 | localStorage | `peaket.recentSearches` | 검색어 최대 10개 [가정] | 사용자가 지울 때까지 | 하나씩·전체 지우기. 로그아웃 때는 지우지 않는다(비로그인 상태에서도 쓴다) | 수집 안 함(data-classification) |

@@ -3,15 +3,21 @@
 // 대기실이 탭 저장소에 둔 입장 저장값을 읽어 구매 세션 키를 열고(첫 스냅샷에 임시 공개키를 싣는다), 좌석맵 Worker에 좌석맵 파일·스냅샷을 맡긴다.
 // 좌석맵 패키지·서명기는 늦게 가져온다(첫 JS 예산, §5.8). 캔버스는 효과 안에서 만든다: OffscreenCanvas로 넘긴 캔버스는 다시 넘길 수 없어 다시 시도·Strict Mode마다 새로 만든다.
 // 고른 좌석의 홀드·요약은 HOT-353, 접근성 목록은 HOT-354, 실시간은 HOT-357에서 잇는다.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { PriceTierLegend } from '@peaket/ds/PriceTierLegend';
 import { SeatLegend, type SeatStatus } from '@peaket/ds/SeatStatusBadge';
 import type { FromWorker, SeatMapClient } from '@peaket/seatmap';
 import type { PurchaseSigner } from '@peaket/api-client/purchase';
+import Link from 'next/link';
 import { ORIGINS } from '@/shared/config/origins';
 import { AppShell } from '@/widgets/app-shell';
 import { clearAdmission, createGesture, errorPhase, readAdmission, seatmapLayoutUrl, snapshotUrl, tierNames, tierRank, wheelFactor, type GestureCommand, type SeatsPhase } from '../model/live';
+import type { Booking, HoldResult } from '../model/booking-runtime';
+import type { BookingNotice, SeatPick } from '../model/booking-machine';
+import { holdClock } from '../model/hold-clock';
 import { GoneState } from './GoneState';
+import { LiveSummary } from './LiveSummary';
 import { ZoneLegend } from './ZoneLegend';
 
 const SEAT_LEGEND: readonly SeatStatus[] = ['available', 'held-by-others', 'mine', 'sold', 'unavailable', 'wheelchair'];
@@ -19,6 +25,28 @@ const SEAT_LEGEND: readonly SeatStatus[] = ['available', 'held-by-others', 'mine
 const ZOOM_STEP = 1.5;
 /** Retry-After가 있는 503·429를 스스로 다시 받는 횟수 [가정] */
 const AUTO_RETRY_MAX = 3;
+/** 일시 정지 뒤 다시 홀드를 받기까지 [가정] */
+const PAUSED_RETRY_MS = 10_000;
+/** 회차 요약이 오기 전의 1인 매수 한도 [가정](서버가 422로 다시 본다) */
+const DEFAULT_LIMIT = 4;
+
+const holdKey = (eventId: string) => `peaket.hold.${eventId}`;
+/** 결제 화면이 홀드를 다시 읽을 값(docs/frontend.md §3.12) */
+function clearHold(eventId: string): void {
+  try {
+    sessionStorage.removeItem(holdKey(eventId));
+  } catch {
+    /* 저장소를 못 쓰면 지울 것도 없다 */
+  }
+}
+
+function saveHold(eventId: string, h: HoldResult): void {
+  try {
+    sessionStorage.setItem(holdKey(eventId), JSON.stringify({ holdId: h.holdId, seatIds: h.seatIds, expiresAt: h.expiresAt }));
+  } catch {
+    /* 저장하지 못해도 이 화면에서 결제로 넘어간다 */
+  }
+}
 /** 예매 시간이 끝났을 때 안내를 보이고 대기실로 옮기기까지 [가정](d5 §5.10 '버튼 없이 넘어가는 중') */
 const LEAVE_AFTER_MS = 2500;
 
@@ -26,6 +54,10 @@ interface Head {
   title: string;
   subtitle: string;
   tiers: { tierId: string; name: string; price: number }[];
+  /** 1인 매수 한도 */
+  limit: number;
+  /** 자동 배정 공연 */
+  auto: boolean;
 }
 type View = Extract<FromWorker, { type: 'view' }>;
 
@@ -43,13 +75,42 @@ async function loadHead(eventId: string, signal: AbortSignal): Promise<Head | nu
     if (!ensureBrowserApi()) return null;
     const { data: e } = await getEvent(eventId, { signal });
     const tiers = (e.priceTiers ?? []).flatMap((t) => (t.tierId && t.name && typeof t.price === 'number' ? [{ tierId: t.tierId, name: t.name, price: t.price }] : []));
-    return { title: e.title ?? '좌석 선택', subtitle: [dateText(e.startsAt), e.placeName].filter(Boolean).join(' · '), tiers: [...tiers].sort((a, b) => b.price - a.price) };
+    return { title: e.title ?? '좌석 선택', subtitle: [dateText(e.startsAt), e.placeName].filter(Boolean).join(' · '), tiers: [...tiers].sort((a, b) => b.price - a.price), limit: e.perPersonLimit ?? DEFAULT_LIMIT, auto: e.seatAssignment === 'AUTO' };
   } catch {
     return null;
   }
 }
 
 const themeNow = (): 'light' | 'dark' => (document.documentElement.dataset.seedUserColorScheme === 'dark' ? 'dark' : 'light');
+
+/** 자동 배정 공연의 진행·실패(d5 §5.10 ⑦) */
+function AutoState({ kind, eventId, seats }: { kind: 'assigning' | 'done' | 'expired' | 'unavailable' | 'no-match' | 'wish-error'; eventId: string; seats: string[] }) {
+  const text =
+    kind === 'assigning'
+      ? '좌석을 배정하는 중'
+      : kind === 'done'
+        ? '배정 결과'
+        : kind === 'expired'
+          ? '홀드 시간이 끝나 좌석이 풀렸습니다. 요금은 청구되지 않습니다'
+          : kind === 'no-match'
+            ? '희망 조건에 맞는 좌석이 없습니다'
+            : kind === 'wish-error'
+              ? '희망 조건을 다시 골라 주세요'
+              : '자동 좌석 배정을 지금 쓸 수 없습니다';
+  return (
+    <section className="state" role={kind === 'assigning' || kind === 'done' ? 'status' : 'alert'} style={{ padding: '96px 24px 24px' }}>
+      <h1 className="sr-only">좌석 선택</h1>
+      {kind === 'assigning' ? <span className="spinner tx-link" aria-hidden="true" /> : kind === 'done' ? null : <i className="ic ic-alert" aria-hidden="true" />}
+      <h2 className="t-lg">{text}</h2>
+      {kind === 'done' ? <strong className="t-xl">{seats.join(', ')}</strong> : null}
+      {kind === 'assigning' || kind === 'done' ? null : (
+        <Link className="btn btn-primary" href={`/events/${encodeURIComponent(eventId)}`}>
+          공연 정보로 돌아가기
+        </Link>
+      )}
+    </section>
+  );
+}
 
 export function SeatsLive({ eventId }: { eventId: string }) {
   const [phase, setPhase] = useState<SeatsPhase>('loading');
@@ -61,6 +122,10 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   const mainRef = useRef<HTMLElement>(null);
   const viewRef = useRef<View | null>(null);
   const sessionRef = useRef<PurchaseSigner | null>(null);
+  const bookingRef = useRef<Booking | null>(null);
+  const [booking, setBooking] = useState<{ value: string; picks: SeatPick[]; notice: BookingNotice | null; limit: number } | null>(null);
+  const [auto, setAuto] = useState<'assigning' | 'done' | 'unavailable' | 'no-match' | 'wish-error' | null>(null);
+  const [heldLeft, setHeldLeft] = useState<number | null>(null);
   /** 이번 화면에서 401로 토큰을 갱신했는가(한 번만) */
   const refreshedRef = useRef(false);
   const autoRetriesRef = useRef(0);
@@ -80,7 +145,7 @@ export function SeatsLive({ eventId }: { eventId: string }) {
       const adm = readAdmission(eventId, sessionStorage);
       if (!adm) return setPhase('ended');
       const layoutUrl = seatmapLayoutUrl(eventId, adm.seatmapLayoutPath);
-      if (!layoutUrl || !ORIGINS.api) return setPhase('failed');
+      if (!ORIGINS.api) return setPhase('failed');
 
       // 입장 토큰을 처음 쓰기 전에 구매 세션 키를 연다(첫 스냅샷의 임시 공개키, ADR-0221 결정 3)
       const { PurchaseKeyError, openPurchaseSession } = await import('@peaket/api-client/purchase');
@@ -101,6 +166,53 @@ export function SeatsLive({ eventId }: { eventId: string }) {
       // 회차 요약을 기다리지 않고 그린다(첫 그림 예산 §5.2). 오면 머리와 지도의 등급 차례·글자를 고친다
       const headLoad = loadHead(eventId, abort.signal);
       void headLoad.then((h) => live && h && setHead(h));
+      // 예매 흐름(요청·기계)도 늦게 가져온다
+      const [{ createBooking, readWish }, api] = await Promise.all([import('../model/booking-runtime'), import('@/shared/api')]);
+      const client = api.browserApiClient();
+      if (!live) return;
+      if (!client) return setPhase('failed');
+      let toggle: (seatIndex: number) => void = () => undefined;
+      const b = createBooking({
+        eventId,
+        session: sessionRef.current!,
+        client,
+        toggleOnMap: (i) => toggle(i),
+        refreshToken: api.refreshFanToken,
+        limit: DEFAULT_LIMIT,
+        saveHold: (h) => saveHold(eventId, h),
+        clearHold: () => clearHold(eventId),
+      });
+      bookingRef.current = b;
+      const sync = () => {
+        const s = b.actor.getSnapshot();
+        setBooking({ value: String(s.value), picks: s.context.picks, notice: s.context.notice, limit: s.context.limit });
+        if (s.value === 'ended') setPhase('ended');
+        const f = b.autoFailure();
+        if (f) setAuto(f);
+      };
+      const off = b.subscribe(sync);
+      sync();
+      cleanups.push(() => {
+        off();
+        b.dispose();
+        bookingRef.current = null;
+      });
+      void headLoad.then((h) => live && h && b.setLimit(h.limit));
+
+      // 자동 배정 공연은 좌석맵이 없다(일정 사본에 판 번호가 없어 경로가 없다): 희망 조건으로 바로 홀드한다
+      if (!layoutUrl) {
+        const h = await headLoad;
+        if (!live) return;
+        if (!h?.auto) return setPhase('failed');
+        setAuto('assigning');
+        setPhase('ready');
+        await b.autoHold(readWish(eventId, localStorage));
+        if (live && b.actor.getSnapshot().value === 'held') {
+          setAuto('done');
+          localStorage.removeItem(`peaket.autoassign.${eventId}`);
+        }
+        return;
+      }
       const { createSeatMap } = await import('@peaket/seatmap');
       if (!live) return;
 
@@ -152,11 +264,14 @@ export function SeatsLive({ eventId }: { eventId: string }) {
             viewRef.current = m;
             // 카메라만 바뀌면 화면을 다시 그리지 않는다(끌 때마다 전체가 다시 그려지지 않게)
             setView((v) => (v && v.level === m.level && v.zoom === m.zoom && v.maxZoom === m.maxZoom && v.selectable === m.selectable ? v : m));
-          } else if (m.type === 'hit' && m.seatIndex >= 0) map.send({ type: 'select', seatIndex: m.seatIndex });
+          } else if (m.type === 'hit' && m.seatIndex >= 0 && m.selectable && m.seatId && m.label) {
+            b.pick({ seatId: m.seatId, label: m.label, tier: m.tier }, m.seatIndex);
+          }
           else if (m.type === 'error') onMapError(m);
         },
       });
       mapRef.current = map;
+      toggle = (seatIndex) => map.send({ type: 'select', seatIndex });
       void headLoad.then((h) => {
         if (!live || !h || h.tiers.length === 0) return;
         const rank = tierRank(h.tiers);
@@ -226,23 +341,85 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   useEffect(() => {
     if (phase !== 'ended' && phase !== 'invalid') return;
     clearAdmission(eventId, sessionStorage);
+    clearHold(eventId);
     // 끝난 구매 세션의 키도 지운다(§5.3 '401'). 뒤로 가기로 되돌아오지 않게 지금 기록을 바꾼다
     void sessionRef.current?.end().catch(() => undefined);
     const t = setTimeout(() => window.location.replace(`/queue/${encodeURIComponent(eventId)}`), LEAVE_AFTER_MS);
     return () => clearTimeout(t);
   }, [phase, eventId]);
 
+  // 홀드 타이머: 응답의 서버 시각으로 정한 마감까지(단조 시계, 끝나면 좌석을 비운다)
+  const isHeld = booking?.value === 'held';
+  useEffect(() => {
+    if (!isHeld) {
+      setHeldLeft(null);
+      return;
+    }
+    const tick = () => {
+      const h = bookingRef.current?.held();
+      if (!h) return;
+      // 기기가 잠든 사이 단조 시계가 멈출 수 있어 벽시계와 함께 보고 더 이른 쪽을 쓴다
+      const left = Math.min(h.deadlineMono - performance.now(), h.deadlineWall - Date.now());
+      setHeldLeft(left);
+      if (left <= 0) bookingRef.current?.expire();
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [isHeld]);
+
+  // 일시 정지: 재개를 알려 주는 길이 아직 없어 잠시 뒤 다시 홀드할 수 있게 한다(서버가 여전히 423이면 돌아온다)
+  const isPaused = booking?.value === 'paused';
+  useEffect(() => {
+    if (!isPaused) return;
+    const t = setTimeout(() => bookingRef.current?.resume(), PAUSED_RETRY_MS);
+    return () => clearTimeout(t);
+  }, [isPaused]);
+
+  const prices = useMemo(() => new Map((head?.tiers ?? []).map((t) => [t.tierId, t.price])), [head]);
+  const leave = useCallback(() => {
+    void (async () => {
+      await bookingRef.current?.leave();
+      clearAdmission(eventId, sessionStorage);
+      window.location.assign(`/events/${encodeURIComponent(eventId)}`);
+    })();
+  }, [eventId]);
   const send = useCallback((m: Parameters<SeatMapClient['send']>[0]) => mapRef.current?.send(m), []);
   const atFit = !view || view.zoom <= 1;
   const atMax = !view || view.zoom >= view.maxZoom;
   const seatLevel = view?.level === 'seats';
   const gone = phase === 'ended' || phase === 'invalid';
+  const heldNow = isHeld ? (bookingRef.current?.held() ?? null) : null;
+  const holdTimer = heldLeft === null ? null : holdClock(heldLeft);
+  const summaryPhase = booking?.value === 'holding' || booking?.value === 'held' || booking?.value === 'paused' || booking?.value === 'saleEnded' ? booking.value : 'selecting';
+  // 자동 배정: 배정된 동안만 요약을 보이고, 홀드가 끝나면 고를 지도가 없으니 안내로 바꾼다
+  const autoView = auto === 'done' && !isHeld ? 'expired' : auto;
+  const showSummary = phase === 'ready' && booking && (auto === null || autoView === 'done');
+  const bottomBar =
+    showSummary && booking ? (
+      <div className="sticky bottom-0 z-10">
+        <LiveSummary
+          picks={booking.picks}
+          prices={prices}
+          limit={booking.limit}
+          phase={summaryPhase}
+          notice={booking.notice}
+          held={heldNow ? { labels: heldNow.seats?.map((x) => x.label) ?? heldNow.seatIds, total: heldNow.totalAmount ?? 0 } : null}
+          checkoutHref={`/booking/${encodeURIComponent(eventId)}/checkout`}
+          oneMinute={heldLeft !== null && heldLeft <= 60_000}
+          onHold={() => void bookingRef.current?.hold()}
+          onLeave={leave}
+        />
+      </div>
+    ) : null;
 
   return (
-    <AppShell variant="focus" focus={{ title: head?.title ?? '좌석 선택', subtitle: head?.subtitle ?? '', closeHref: `/events/${encodeURIComponent(eventId)}` }}>
+    <AppShell variant="focus" bottomBar={bottomBar} focus={{ title: head?.title ?? '좌석 선택', subtitle: head?.subtitle ?? '', closeHref: `/events/${encodeURIComponent(eventId)}`, hold: holdTimer }}>
       <main ref={mainRef} className="page-main" id="main" tabIndex={-1}>
         {gone ? (
           <GoneState kind={phase} />
+        ) : autoView ? (
+          <AutoState kind={autoView} eventId={eventId} seats={heldNow?.seats?.map((x) => x.label) ?? []} />
         ) : phase === 'failed' ? (
           <section className="state" role="alert" style={{ padding: '96px 24px 24px' }}>
             <h1 className="sr-only">좌석 선택</h1>
@@ -268,6 +445,16 @@ export function SeatsLive({ eventId }: { eventId: string }) {
         ) : (
           <div className="col gap-3 pt-3 pb-4 md:gap-3.5 md:px-6 md:pt-4 md:pb-6 lg:mx-auto lg:w-full lg:max-w-[1280px] lg:gap-4 lg:px-8 lg:pt-6 lg:pb-8">
             <h1 className="t-xl px-4 max-lg:sr-only md:px-0">좌석 선택</h1>
+            {booking?.value === 'paused' ? (
+              <NoticeBanner tone="danger" icon="pause" role="alert" title="판매가 잠시 멈췄습니다." className="mx-4 md:mx-0">
+                고른 좌석은 홀드 시간 동안 유지됩니다
+              </NoticeBanner>
+            ) : null}
+            {booking?.value === 'saleEnded' ? (
+              <NoticeBanner tone="warning" icon="calendar" role="alert" className="mx-4 md:mx-0">
+                판매 시간이 끝나 좌석을 새로 고를 수 없습니다. 이미 고른 좌석은 남은 시간 안에 결제할 수 있습니다
+              </NoticeBanner>
+            ) : null}
             <div className="col gap-1.5 px-4 md:flex-row md:flex-wrap md:items-center md:gap-x-7 md:gap-y-2 md:px-0">
               {head && head.tiers.length > 0 ? <PriceTierLegend tiers={head.tiers} variant={seatLevel ? 'plain' : 'swatch'} /> : null}
               {seatLevel ? <SeatLegend statuses={SEAT_LEGEND} /> : <ZoneLegend size="sm" />}

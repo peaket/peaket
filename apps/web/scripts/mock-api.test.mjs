@@ -1,5 +1,6 @@
 // 계약 모양 가짜 API의 응답이 계약 Zod(@peaket/contracts 생성물)를 지나는지(ADR-0199 결정 2, BUILD_ORDER HOT-300).
 // 계약이 바뀌면 이 시험이 고정 자료(mock-api/cards.json)도 함께 고치게 한다.
+import { createHash, createHmac, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync } from 'node:crypto';
 import { request } from 'node:http';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,7 +24,7 @@ import {
 } from '@peaket/contracts/openapi/identity';
 import { GetEventReviewSummaryResponse } from '@peaket/contracts/openapi/reviews';
 import { GetMyBookingRestrictionResponse } from '@peaket/contracts/openapi/support';
-import { GetEventSeatmapLayoutResponse } from '@peaket/contracts/openapi/seats';
+import { CreateEventHoldResponse, GetEventSeatmapLayoutResponse } from '@peaket/contracts/openapi/seats';
 import { GetSearchSuggestionsResponse, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
 import { ARTISTS, INITIAL_WISHES, searchResults, suggestions, suggestQueryOk, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
 
@@ -524,6 +525,61 @@ test('SCR-010 실제 배치 판(ADR-0224): 판 2·3은 계약 Zod를 지나고, 
     await fetch(`${base}/__mock/state?seatSnapshot=newer`);
     const newer = Buffer.from(await (await fetch(url, { headers: { 'x-admission-token': 'a.b.c' } })).arrayBuffer());
     assert.equal(newer.readUInt32LE(2), 3);
+  } finally {
+    server.close();
+  }
+});
+
+test('SCR-010 홀드(ADR-0225): 서명을 실제로 확인한다: 서명기로 만든 요청은 201이고 계약 Zod를 지나며, 틀린 MAC·재사용 번호는 401, 모드별 Problem을 낸다', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  const event = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e04';
+  const base = `http://127.0.0.1:${port}`;
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const token = `${b64({ alg: 'ES256' })}.${b64({ jti: 'mock-jti-1', exp: Math.floor(Date.now() / 1000) + 900 })}.c2ln`;
+  // 서명은 이 시험이 서버 식대로 따로 만든다(브라우저 서명기와 가짜 API의 잇기는 브라우저 확인이 본다)
+  const client = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const cj = client.publicKey.export({ format: 'jwk' });
+  const clientPublicKey = Buffer.concat([Buffer.from([4]), Buffer.from(cj.x, 'base64url'), Buffer.from(cj.y, 'base64url')]).toString('base64url');
+  const serverPub = createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU', y: 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0' }, format: 'jwk' });
+  const key = Buffer.from(hkdfSync('sha256', diffieHellman({ privateKey: client.privateKey, publicKey: serverPub }), Buffer.from('mock-jti-1'), Buffer.from('PEAKET-purchase-v1'), 32));
+  let seq = 0;
+  const signed = (method, path, body) => {
+    seq += 1;
+    const input = `${method}
+${path}
+${seq}
+${createHash('sha256').update(body).digest('base64url')}`;
+    return { 'x-admission-token': token, 'x-purchase-seq': String(seq), 'x-purchase-mac': createHmac('sha256', key).update(input).digest('base64url') };
+  };
+  try {
+    assert.equal((await fetch(`${base}/v1/events/${event}/seatmap-snapshot`, { headers: { 'x-admission-token': token, 'x-client-ephemeral-key': clientPublicKey } })).status, 200);
+    const url = `/v1/events/${event}/holds`;
+    const post = async (bodyObj, tamper) => {
+      const body = JSON.stringify(bodyObj);
+      const h = signed('POST', url, body);
+      return fetch(base + url, { method: 'POST', headers: { 'content-type': 'application/json', ...h, ...tamper } , body });
+    };
+    const ok = await post({ seatIds: ['A-1-3', 'A-1-4'] });
+    assert.equal(ok.status, 201);
+    assert.ok(CreateEventHoldResponse.safeParse(await ok.json()).success);
+    assert.equal((await post({ seatIds: ['A-1-5'] }, { 'x-purchase-mac': 'AAAA' })).status, 401);
+    const tampered = await post({ seatIds: ['A-1-5'] }, { 'x-purchase-seq': '1' });
+    assert.equal((await tampered.json()).type.split('/').pop(), 'purchase-signature-invalid');
+    // 올바른 MAC이지만 이미 쓴 번호
+    seq = 0;
+    const replay = await post({ seatIds: ['A-1-5'] });
+    assert.equal((await replay.json()).type.split('/').pop(), 'purchase-seq-reused');
+    seq = 100;
+    for (const [mode, status, type] of [['race', 409, 'seat-already-held'], ['recent', 409, 'seat-recently-released'], ['limit', 422, 'purchase-limit-exceeded'], ['paused', 423, 'sale-paused'], ['ended', 410, 'sale-ended']]) {
+      await fetch(`${base}/__mock/state?hold=${mode}`);
+      const r = await post({ seatIds: ['A-1-6'] });
+      assert.equal(r.status, status, mode);
+      assert.equal((await r.json()).type.split('/').pop(), type);
+    }
+    await fetch(`${base}/__mock/state?hold=normal`);
+    const leave = await fetch(`${base}/v1/events/${event}/purchase-session`, { method: 'DELETE', headers: signed('DELETE', `/v1/events/${event}/purchase-session`, '') });
+    assert.equal(leave.status, 204);
   } finally {
     server.close();
   }

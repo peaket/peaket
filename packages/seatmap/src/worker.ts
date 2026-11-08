@@ -211,7 +211,11 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
             host.post({ type: 'hit', seatIndex: -1, seatId: null, label: null, tier: null });
             break;
           }
-          host.post({ type: 'hit', ...engine.hit(m.x, m.y) });
+          {
+            const h = engine.hit(m.x, m.y);
+            // 화면이 한도를 세려면 고를 수 있는 좌석인지 알아야 한다(판매·선택 불가·판매 제외는 select를 무시한다)
+            host.post({ type: 'hit', ...h, ...(h.seatIndex >= 0 ? { selectable: engine.canSelect(h.seatIndex) } : {}) });
+          }
           break;
         case 'select':
           // 고를 수 있는 좌석만(가능 상태, 판매 제외 아님). 이미 고른 좌석은 풀 수 있다

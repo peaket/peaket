@@ -216,7 +216,7 @@ describe('Worker 처리기(메인 스레드 대체와 같은 코드)', () => {
     await handle(init);
     await handle({ type: 'camera', zoom: 20, x: layout.sections[2]!.seats.x[0]!, y: layout.sections[2]!.seats.y[0]! });
     await handle({ type: 'pointer', kind: 'up', x: 200, y: 150 });
-    expect(posted.at(-1)).toEqual({ type: 'hit', seatIndex: 400, seatId: 'S2-R0-0', label: '3구역 1열 1번', tier: 'S' });
+    expect(posted.at(-1)).toEqual({ type: 'hit', seatIndex: 400, seatId: 'S2-R0-0', label: '3구역 1열 1번', tier: 'S', selectable: true });
     await handle({ type: 'select', seatIndex: 400 });
     expect(posted.at(-1)).toEqual({ type: 'selection', seatIndexes: [400] });
     await handle({ type: 'camera', zoom: -1, x: 0, y: 0 });

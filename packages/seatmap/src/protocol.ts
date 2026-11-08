@@ -60,7 +60,7 @@ export const FromWorker = z.discriminatedUnion('type', [
     sectionCount: nonNeg,
   }),
   /** 누른 좌석. 고를 수 없는 배율이거나 좌석이 없으면 seatIndex -1. 가격은 회차 가격표가 있는 좌석 화면(HOT-350)이 등급으로 찾는다 */
-  z.object({ type: z.literal('hit'), seatIndex: int, seatId: z.string().nullable(), label: z.string().nullable(), tier: z.string().nullable() }),
+  z.object({ type: z.literal('hit'), seatIndex: int, seatId: z.string().nullable(), label: z.string().nullable(), tier: z.string().nullable(), selectable: z.boolean().optional() }),
   z.object({ type: z.literal('selection'), seatIndexes: z.array(nonNeg) }),
   /** 그린 단계가 바뀌거나 배율이 바뀔 때(화면이 '구역을 확대하면 좌석을 고를 수 있습니다' 안내와 [+]·[−] 상태를 고른다, CMP-021 onZoomChange) */
   z.object({
