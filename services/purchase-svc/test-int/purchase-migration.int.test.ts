@@ -62,17 +62,38 @@ const count = async (text: string, params: unknown[]): Promise<number> => Number
 const salesOf = (e: string, s: string) => count('select count(*) as n from seat_sale where event_id = $1 and seat_id = $2', [e, s]);
 
 describe('마이그레이션과 표 모양', () => {
-  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 12(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐, 0008 주문의 묶은 시각, 0009 발권 큐 임대·표시 칸, 0010 작업 단계 AWAIT·다음 당기기 점검 시각, 0011 열린 주문 부분 인덱스)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('마이그레이션을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 마이그레이션 파일 수 13(0000 좌석 표, 0001 보류 표, 0002 다시 만들기 표·원장 칸, 0003 주문 표·Outbox, 0004 주문의 홀드·구매 세션 칸, 0005 결제 참조 칸·판 번호·Saga 작업 표, 0006 실패 사유·작업 단계 CHECK, 0007 발권 재시도 큐, 0008 주문의 묶은 시각, 0009 발권 큐 임대·표시 칸, 0010 작업 단계 AWAIT·다음 당기기 점검 시각, 0011 열린 주문 부분 인덱스, 0012 회차 판매 상태 표·결제 중 부분 인덱스)과 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') order by relname`)).rows.map((r) => r.relname);
     const before = await tables();
     // 0003이 만든 주문 표 다섯과 Outbox 부모 표(PRF-160), 0005가 만든 Saga 작업 표(PRF-162), 0007이 만든 발권 재시도 큐(PRF-163)가 있다
     expect(before).toEqual(
-      expect.arrayContaining(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'outbox', 'order_saga_job', 'ticket_issue_job']),
+      expect.arrayContaining(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'outbox', 'order_saga_job', 'ticket_issue_job', 'event_sale']),
     );
     await migratePurchase(url);
     await migratePurchase(url);
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(12);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(13);
+  });
+
+  test('ST25_ADR0122_0012(PRF-144, data.md §4 열세 번째 마이그레이션·§5.1): seat_sale_pending_idx는 seat_sale (event_id, reserved_at)의 PENDING 부분 인덱스이고(리뷰 고침 L11), event_sale은 다섯 상태·판 번호 1 이상·음수 아닌 셈을 CHECK로 거절하며 매진 등급 기본값은 빈 배열이다 [ASVS v5.0.0-2.3.4]', async () => {
+    const idx = await q<{ indexdef: string }>(`select indexdef from pg_indexes where schemaname = 'public' and tablename = 'seat_sale' and indexname = 'seat_sale_pending_idx'`);
+    expect(idx.rows).toHaveLength(1);
+    expect(idx.rows[0]!.indexdef).toBe(`CREATE INDEX seat_sale_pending_idx ON public.seat_sale USING btree (event_id, reserved_at) WHERE (status = 'PENDING'::text)`);
+
+    const ok = id();
+    await q(`insert into event_sale (event_id, status, version, sellable_seats, available, held, paying, changed_at, counted_at) values ($1, 'ON_SALE', 1, 10, 10, 0, 0, now(), now())`, [ok]);
+    expect((await q<{ sold_out_tiers: string[]; reopen_count: number }>('select sold_out_tiers, reopen_count from event_sale where event_id = $1', [ok])).rows).toEqual([{ sold_out_tiers: [], reopen_count: 0 }]);
+
+    const insert = (over: { status?: string; previous?: string | null; version?: number; available?: number; held?: number; paying?: number; sellable?: number; reopen?: number }) =>
+      q(
+        `insert into event_sale (event_id, status, previous_status, version, sellable_seats, available, held, paying, reopen_count, changed_at, counted_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())`,
+        [id(), over.status ?? 'ON_SALE', over.previous ?? null, over.version ?? 1, over.sellable ?? 10, over.available ?? 0, over.held ?? 0, over.paying ?? 0, over.reopen ?? 0],
+      );
+    for (const status of ['UPCOMING', 'ON_SALE', 'ALL_HELD', 'SOLD_OUT', 'ENDED']) await expect(insert({ status })).resolves.toBeDefined();
+    for (const bad of [{ status: 'SOLD' }, { previous: 'SOLD' }, { version: 0 }, { available: -1 }, { held: -1 }, { paying: -1 }, { sellable: -1 }, { reopen: -1 }]) {
+      await expect(insert(bad), JSON.stringify(bad)).rejects.toMatchObject({ code: '23514' });
+    }
   });
 
   test('PT41_ADR0107_리뷰 고침 M1: 0011(PRF-172, data.md §4 열두 번째 마이그레이션·§5.1): purchase_order_session_idx는 purchase_order (purchase_session_id)의 유일이 아닌 조건 없는 인덱스다(status를 조건에 넣으면 상태를 바꾸는 UPDATE가 모두 HOT 갱신에서 빠진다) [ASVS v5.0.0-2.3.4]', async () => {
@@ -250,7 +271,7 @@ describe('마이그레이션과 표 모양', () => {
     ]);
   });
 
-  test('인덱스는 기본 키와 활성 상태 유일 부분 인덱스뿐이고(seat_rebuild는 기본 키만), 활성 인덱스는 유일하며 WHERE 조건이 있다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('인덱스는 기본 키와 활성 상태 유일 부분 인덱스, 0012가 더한 결제 중 부분 인덱스뿐이고(seat_rebuild는 기본 키만), 활성 인덱스는 유일하며 WHERE 조건이 있다 [ASVS v5.0.0-2.3.4]', async () => {
     const r = await q<{ tablename: string; indexname: string; indexdef: string }>(
       `select tablename, indexname, indexdef from pg_indexes where schemaname = 'public' and tablename in ('seat_sale', 'purchase_quota', 'seat_hold', 'seat_rebuild') order by tablename, indexname`,
     );
@@ -260,6 +281,7 @@ describe('마이그레이션과 표 모양', () => {
       'seat_hold.seat_hold_pkey',
       'seat_rebuild.seat_rebuild_pkey',
       'seat_sale.seat_sale_active_key',
+      'seat_sale.seat_sale_pending_idx',
       'seat_sale.seat_sale_pkey',
     ]);
     const def = (name: string) => r.rows.find((x) => x.indexname === name)!.indexdef;

@@ -942,6 +942,62 @@ describe('parseEventSeatMapFile: tierPrices를 config.tierPrices에 싣는다', 
   });
 });
 
+describe('LayoutSeatMap.saleLayout: 판매 상태 판정의 판매 대상 좌석표(BUILD_ORDER PRF-144, seat-hold §4)', () => {
+  test('ST25_ADR0122_ 판매 제외석을 빼고 등급별로 모은다. 등급은 ID 문자 코드 순이고 sellableSeats는 색인 수의 합이다', async () => {
+    const { map } = setup();
+    expect(await map.saleLayout(EVENT)).toEqual({
+      sellableSeats: 4,
+      tiers: [
+        { tierId: 'R', indexes: [0] },
+        { tierId: 'S', indexes: [10, 11] },
+        { tierId: 'VIP', indexes: [1] },
+      ],
+    });
+  });
+
+  test('ST25_ADR0122_ 파일에 적힌 차례와 관계없이 색인은 등급 안에서 오름차순이다(구역이 뒤섞여도)', async () => {
+    const { source, map } = setup();
+    source.files.set('ev-2', file([section('SEC-A', 0, 1, [seat('A01', 0), seat('A02', 1)]), section('SEC-B', 2, 3, [seat('B01', 2, { tierId: 'S' }), seat('B02', 3)])]));
+    source.files.set('ev-3', file([section('SEC-A', 0, 1, [seat('A02', 1), seat('A01', 0)])]));
+    expect((await map.saleLayout('ev-2'))?.tiers).toEqual([
+      { tierId: 'R', indexes: [0, 1, 3] },
+      { tierId: 'S', indexes: [2] },
+    ]);
+    expect((await map.saleLayout('ev-3'))?.tiers).toEqual([{ tierId: 'R', indexes: [0, 1] }]);
+  });
+
+  test('ST25_ADR0122_ 판이 없는 회차는 undefined이고 던지지 않는다', async () => {
+    const { map } = setup();
+    await expect(map.saleLayout('ev-none')).resolves.toBeUndefined();
+  });
+
+  test('ST25_ADR0122_ 판마다 한 번만 만든다(같은 판이면 같은 객체, 파일도 다시 읽지 않는다)', async () => {
+    const { source, map } = setup();
+    const a = await map.saleLayout(EVENT);
+    const b = await map.saleLayout(EVENT);
+    expect(b).toBe(a);
+    expect(source.count(EVENT)).toBe(1);
+    await map.refresh();
+    expect(await map.saleLayout(EVENT)).toBe(a);
+  });
+
+  test('ST25_ADR0122_ 판이 바뀌면 새로 만든다(판매 제외석이 달라지고 좌석이 늘어난 표)', async () => {
+    const { source, map } = setup();
+    const before = await map.saleLayout(EVENT);
+    source.files.set(EVENT, file([section('SEC-A', 0, 3, [seat('A01', 0), seat('A02', 1, { unavailable: true }), seat('A03', 2), seat('A04', 3)]), secB()], {}, { layoutVersion: 8 }));
+    await map.refresh();
+    const after = await map.saleLayout(EVENT);
+    expect(after).not.toBe(before);
+    expect(after).toEqual({
+      sellableSeats: 5,
+      tiers: [
+        { tierId: 'R', indexes: [0, 2, 3] },
+        { tierId: 'S', indexes: [10, 11] },
+      ],
+    });
+  });
+});
+
 describe('LayoutSeatMap: 가격만 바뀐 판 파일도 새 판으로 본다', () => {
   test('FR011_NFR003_판 번호·1인 한도·판매 종료가 같고 tierPrices만 바뀐 파일을 다시 읽으면 config.tierPrices가 새 값이다', async () => {
     const { source, map } = setup();

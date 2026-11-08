@@ -23,7 +23,7 @@ export class RedisSweepLeases implements SweepLeases {
 
   async acquire(eventId: string, owner: string, ttlMs: number, lane: SweepLane = 'expiry'): Promise<boolean> {
     assertSweepLeaseArgs(eventId, owner, ttlMs);
-    const key = lane === 'session' ? seatKeys.sessionSweep(eventId) : seatKeys.sweep(eventId);
+    const key = lane === 'session' ? seatKeys.sessionSweep(eventId) : lane === 'sale' ? seatKeys.saleSweep(eventId) : seatKeys.sweep(eventId);
     const r = str(await guard(this.redis.evalScript(SWEEP_LEASE, [key], [owner, String(ttlMs)])));
     if (r === '1') return true;
     if (r === '0') return false;

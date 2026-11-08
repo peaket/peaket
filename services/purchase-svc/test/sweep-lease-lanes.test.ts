@@ -9,7 +9,7 @@ import { newEvent } from './hold-cases.js';
 
 const NOW = Date.parse('2026-11-04T03:00:00.000Z');
 const TTL = 3000;
-const LANES: SweepLane[] = ['expiry', 'session'];
+const LANES: SweepLane[] = ['expiry', 'session', 'sale'];
 
 function world() {
   const clock = fakeClock({ now: NOW, monotonic: 0 });
@@ -49,6 +49,17 @@ describe('MemorySweepLeases: 줄 둘은 서로 막지 않는다', () => {
     expect(await leases.acquire(e, 'pod-b', TTL, 'expiry')).toBe(false);
     expect(await leases.acquire(e, 'pod-b', TTL)).toBe(false);
     expect(await leases.acquire(e, 'pod-a', TTL, 'expiry')).toBe(true);
+  });
+
+  test('ST25_ADR0122_ 판매 상태 판정 줄(sale)은 만료·정리 줄과 서로 막지 않는다: 한 파드가 다른 두 줄을 잡고 있어도 다른 파드가 잡고, 같은 줄은 못 잡는다 [ASVS v5.0.0-15.4.2]', async () => {
+    const { leases } = world();
+    const e = newEvent();
+    expect(await leases.acquire(e, 'pod-a', TTL, 'expiry')).toBe(true);
+    expect(await leases.acquire(e, 'pod-a', TTL, 'session')).toBe(true);
+    expect(await leases.acquire(e, 'pod-b', TTL, 'sale')).toBe(true);
+    expect(await leases.acquire(e, 'pod-a', TTL, 'sale')).toBe(false);
+    expect(await leases.acquire(e, 'pod-b', TTL, 'expiry')).toBe(false);
+    expect(await leases.acquire(e, 'pod-b', TTL, 'session')).toBe(false);
   });
 
   test('QT11_NFR025_ 줄은 회차마다 따로다: 한 회차의 정리 임대는 다른 회차의 정리 임대를 막지 않는다', async () => {
@@ -136,6 +147,16 @@ describe('RedisSweepLeases: 줄마다 다른 키 하나로 임대 Lua 한 번(�
       { keys: [`s:{event:${e}}:sweep`], args: ['pod-a', '3000'] },
     ]);
     expect(f.commands()).toBe(0);
+  });
+
+  test('ST25_ADR0122_ sale 줄은 s:{event:E}:salesweep 하나만 KEYS로 넘기고, 키 이름 도우미(seatKeys.saleSweep)와 같으며 그 회차의 다른 키와 같은 슬롯이다', async () => {
+    const f = fake(1);
+    const e = newEvent();
+    expect(await new RedisSweepLeases(f.redis).acquire(e, 'pod-a', TTL, 'sale')).toBe(true);
+    expect(f.evals).toEqual([{ keys: [`s:{event:${e}}:salesweep`], args: ['pod-a', '3000'] }]);
+    expect(f.commands()).toBe(0);
+    expect(seatKeys.saleSweep(e)).toBe(`s:{event:${e}}:salesweep`);
+    expect(slotOf(seatKeys.saleSweep(e))).toBe(slotOf(seatKeys.bitmap(e)));
   });
 
   test('QT11_NFR025_ 키 이름 도우미도 같다(seatKeys.sessionSweep·seatKeys.sweep). 두 키는 같은 회차 해시 태그라 같은 슬롯이다', () => {

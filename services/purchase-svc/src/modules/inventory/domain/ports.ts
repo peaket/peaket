@@ -11,6 +11,7 @@ import type { ReserveInput, ReserveResult, SeatSaleOrder, SeatSaleRelease } from
 import type { LedgerHoldEvent, SeatStreamEntry, StreamDropReason, TradeTopic } from './seat-event.js';
 import type { PinInput, PinResult, ReleaseFailedInput, ReleaseFailedResult, RetireResult } from './pin.js';
 import type { RebuildFinishInput, RebuildHold, RebuildLedgerRow, RebuildPinnedOrder, RebuildSale, RebuildSaleOrder, RebuildSeat, RebuildStep } from './rebuild.js';
+import type { EventSaleRow, SaleLayout, SaleSeatCounts, SaleStatus } from './sale-state.js';
 
 /** 요청 처리 중 좌석 Redis 호출 하나의 선택값(BUILD_ORDER PRF-135, guidelines §5) */
 export interface SeatCallOptions {
@@ -207,8 +208,8 @@ export interface SweepLeases {
   acquire(eventId: string, owner: string, ttlMs: number, lane?: SweepLane): Promise<boolean>;
 }
 
-/** 임대 줄: 'expiry'(기본, 만료 반복 s:{event:E}:sweep)와 'session'(구매 세션 정리 반복 s:{event:E}:sesweep, BUILD_ORDER PRF-138) */
-export type SweepLane = 'expiry' | 'session';
+/** 임대 줄: 'expiry'(기본, 만료 반복 s:{event:E}:sweep), 'session'(구매 세션 정리 반복 s:{event:E}:sesweep, BUILD_ORDER PRF-138), 'sale'(판매 상태 판정 s:{event:E}:salesweep, BUILD_ORDER PRF-144) */
+export type SweepLane = 'expiry' | 'session' | 'sale';
 
 export const SEAT_SNAPSHOTS = Symbol('purchase.SeatSnapshots');
 /** 스냅샷 읽기 입력(SeatSnapshots.read) */
@@ -299,6 +300,188 @@ export interface SeatMapIndex {
    */
   byIndex(eventId: string, indexes: readonly number[]): Promise<(SeatRef | undefined)[]>;
 }
+
+/**
+ * 좌석맵 판의 판매 대상 좌석표(BUILD_ORDER PRF-144, 판매 상태 판정이 등급별 가용을 셀 때 쓴다). SeatMap과 같은 객체가 맡는다(LayoutSeatMap)
+ */
+export interface SeatMapTiers {
+  /**
+   * 그 회차의 판매 대상 좌석(판매 제외석을 뺀 좌석)의 색인을 등급별로 모은 표. 판마다 한 번 만들어 둔다.
+   * @returns 등급은 등급 ID 문자 코드 순, 색인은 오름차순. 그 회차의 판이 없으면 undefined. 던지지 않는다
+   */
+  saleLayout(eventId: string): Promise<SaleLayout | undefined>;
+}
+
+/** 좌석 Redis 셈 읽기의 결과(SaleCountsReader.read) */
+export type SaleCountsRead =
+  /** 세대 키의 epoch 칸이 없다(다시 만들기 중이거나 준비 전). 아무것도 읽지 않았다 */
+  | { kind: 'NOT_READY' }
+  | {
+      kind: 'OK';
+      /** 좌석 비트맵 바이트(Redis 비트맵 그대로). 키가 없거나 짧으면 그만큼 짧다(모자란 곳은 0으로 본다, tierAvailability) */
+      bitmap: Buffer;
+      /** 만료 인덱스 s:{event:E}:expiry의 수(ZCARD, 0 이상) */
+      held: number;
+    };
+
+/** 만료 인덱스 한 쪽(SaleCountsReader.holdIndexes). 쪽이 꽉 찼는지는 indexes 길이 + badMembers로 본다 */
+export interface SaleHoldPage {
+  /** 좌석 색인(순위 차례) */
+  indexes: number[];
+  /** 정수가 아니라 건너뛴 멤버 수 */
+  badMembers: number;
+}
+
+/**
+ * 판매 상태 판정의 좌석 Redis 읽기(BUILD_ORDER PRF-144, 운영 어댑터 RedisSaleCounts, Lua 계약은 adapters/sale-count-lua.ts). 아무것도 쓰지 않는다.
+ */
+export interface SaleCountsReader {
+  /**
+   * 세대 키 확인과 비트맵·만료 인덱스 수를 한 원자 연산으로 읽는다(읽기 전용 Lua 한 번).
+   * @param eventId 회차 ID(KEY_PART 모양)
+   * @throws RangeError eventId가 KEY_PART가 아님(아무것도 부르지 않는다)
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애
+   * @throws Error 모르는 답, 키 형이 틀림(WRONGTYPE)
+   */
+  read(eventId: string): Promise<SaleCountsRead>;
+  /**
+   * 만료 인덱스를 순위로 읽어 좌석 색인을 돌려준다(ZRANGE s:{event:E}:expiry start start + count − 1, 한 번에 끝나는 작은 명령. 원자성이 필요 없다).
+   * @param start 시작 순위(0 이상의 정수)
+   * @param count 읽을 수(1 ~ SALE_TIER_SCAN_PAGE의 정수)
+   * @returns 그 쪽의 색인과 건너뛴 멤버 수(앞 0 없는 0 이상의 10진 정수 글이 아닌 멤버는 던지지 않고 건너뛴다. 멤버 하나 때문에 회차 틱 전체가 실패하지 않게, 리뷰 고침 L12). 끝을 지나면 둘 다 빈 값이다
+   * @throws RangeError 인자가 위 범위가 아님, eventId가 KEY_PART가 아님(아무것도 부르지 않는다)
+   * @throws SeatStoreUnavailable 좌석 Redis 일시 장애
+   */
+  holdIndexes(eventId: string, start: number, count: number): Promise<SaleHoldPage>;
+}
+
+/**
+ * 판매 상태 판정의 결제 중 셈(BUILD_ORDER PRF-144, 운영 구현은 booking 모듈의 DrizzleSalePaying이고 main.ts가 잇는다).
+ * booking 표를 읽으므로 inventory는 이 포트만 정한다.
+ */
+export interface SalePayingSeats {
+  /**
+   * 그 회차의 결제 중(주문 RESERVED이고 판매 예약한 지(reserved_at) 승인 기한 10분 [가정](booking 구현의 SALE_APPROVAL_WINDOW_MS) 안인 seat_sale PENDING) 좌석을 등급별로 센다.
+   * pending_until은 가상계좌 기한이라 보지 않는다. AWAITING_DEPOSIT·UNKNOWN 주문의 PENDING은 세지 않는다(ADR-0122 결정 2).
+   * @param nowMs 지금(epoch ms)
+   * @returns 등급 ID → 좌석 수(0은 넣지 않는다)
+   * @throws purchase DB 오류
+   */
+  payingByTier(eventId: string, nowMs: number): Promise<ReadonlyMap<string, number>>;
+}
+
+/** 새 행(EventSaleStore.create): status ON_SALE, version 1, previous_status 비움, soldOutTiers 빈 배열로 만든다 */
+export interface EventSaleCreate extends SaleSeatCounts {
+  eventId: string;
+  sellableSeats: number;
+  /** changed_at·counted_at(epoch ms) */
+  nowMs: number;
+  /** 첫 사건에 실을 평균 구매 매수(없으면 칸을 뺀다) */
+  avgTicketsPerOrder?: number;
+}
+
+/** 판 올리기(EventSaleStore.applyChange) */
+export interface EventSaleChange extends SaleSeatCounts {
+  eventId: string;
+  /** 읽은 판 번호(이 값일 때만 쓴다) */
+  expectedVersion: number;
+  status: SaleStatus;
+  /** 바뀌기 전 상태(그 행의 지금 status). 상태가 그대로이고 매진 등급만 바뀐 판이면 지금 값을 그대로 둔다 */
+  previousStatus?: SaleStatus;
+  /** 정렬한 매진 등급 */
+  soldOutTiers: readonly string[];
+  reopenCount: number;
+  /** changed_at·counted_at, status가 SOLD_OUT이면 first_sold_out_at의 후보(coalesce)(epoch ms) */
+  nowMs: number;
+  avgTicketsPerOrder?: number;
+}
+
+/** 같은 판 다시 내기(EventSaleStore.republish) */
+export interface EventSaleRepublish extends SaleSeatCounts {
+  eventId: string;
+  /** 읽은 판 번호(이 값일 때만 쓴다) */
+  expectedVersion: number;
+  /** counted_at(epoch ms) */
+  nowMs: number;
+  avgTicketsPerOrder?: number;
+}
+
+/**
+ * 회차 판매 상태 표 event_sale과 그 사건(BUILD_ORDER PRF-144, 운영 어댑터 DrizzleEventSale, docs/data.md §2·§5.1).
+ * 쓰는 세 메서드는 모두 트랜잭션 하나이고, 행과 Outbox `trade.seats` EventSaleChanged(키 = 회차 ID, 값 = saleChangedPayload)를 함께 쓴다(Outbox가 마지막 문장).
+ */
+export interface EventSaleStore {
+  /**
+   * @returns 그 회차의 행(PK 읽기). 없으면 undefined
+   * @throws purchase DB 오류
+   */
+  read(eventId: string): Promise<EventSaleRow | undefined>;
+  /**
+   * 활성 판매 행(`seat_sale` status PENDING·SOLD) 수(인덱스 seat_sale_active_key). 거짓 매진 막기가 켜진 비트 수와 견준다.
+   * @throws purchase DB 오류
+   */
+  activeSaleCount(eventId: string): Promise<number>;
+  /**
+   * SOLD 행의 좌석 수·서로 다른 주문 수로 avgTicketsOf를 계산한다. 캐시하지 않는다(부르는 쪽이 1분 둔다).
+   * @returns 주문이 100건 [가정] 미만이면 undefined
+   * @throws purchase DB 오류
+   */
+  avgTicketsPerOrder(eventId: string): Promise<number | undefined>;
+  /**
+   * 행을 만들고(`INSERT … ON CONFLICT DO NOTHING RETURNING`) 넣은 행에서만 첫 사건을 Outbox에 쓴다.
+   * @returns 넣은 행. 이미 있어 넣지 않았으면 undefined(Outbox도 쓰지 않는다)
+   * @throws purchase DB 오류
+   */
+  create(input: EventSaleCreate): Promise<EventSaleRow | undefined>;
+  /**
+   * `UPDATE … SET status, previous_status, version = version + 1, available, held, paying, sold_out_tiers, first_sold_out_at = coalesce(first_sold_out_at, 매진 시각), reopen_count, changed_at = now, counted_at = now WHERE event_id AND version = expectedVersion` + Outbox.
+   * @returns 바꾼 행. 0행이면 undefined(다른 파드에 짐, Outbox도 쓰지 않는다)
+   * @throws purchase DB 오류
+   */
+  applyChange(input: EventSaleChange): Promise<EventSaleRow | undefined>;
+  /**
+   * `UPDATE … SET available, held, paying, counted_at = now WHERE event_id AND version = expectedVersion RETURNING …` + Outbox(같은 version·eventKey·changedAt·previousStatus, 셈과 countedAt은 지금).
+   * @returns 바꾼 행. 0행이면 undefined(건너뜀, Outbox도 쓰지 않는다)
+   * @throws purchase DB 오류
+   */
+  republish(input: EventSaleRepublish): Promise<EventSaleRow | undefined>;
+}
+
+/** 판정 실패 단계(지표 tick_failures_total의 stage): 임대·회차 목록, 좌석맵 판·좌석 Redis 읽기·활성 판매 대조, 결제 중 읽기, event_sale 읽기·쓰기, 평균 읽기(avg는 그 칸만 빼고 틱은 이어 간다) */
+export type SaleTickStage = 'lease' | 'counts' | 'paying' | 'write' | 'avg';
+/** 건너뛴 까닭(지표 skipped_total의 reason): 좌석맵 판 없음·세대 키 없음(회차 틱), 앞 틱과 겹침(틱), 만료 인덱스의 정수가 아닌 멤버(멤버 수) */
+export type SaleSkipReason = 'no_config' | 'not_ready' | 'overlapped' | 'bad_member';
+
+/**
+ * 판매 상태 판정 지표(BUILD_ORDER PRF-144, 운영은 adapters/prom-sale-state-signals.ts, 이름·뜻은 docs/observability.md). 부른 쪽을 막거나 던지지 않는다
+ */
+export interface SaleStateSignals {
+  /** purchase_event_sale_transitions_total{to}를 1 올린다(상태가 바뀐 때만. 매진 등급만 바뀐 판은 세지 않는다) */
+  transition(to: SaleStatus): void;
+  /** purchase_event_sale_republished_total을 1 올린다 */
+  republished(): void;
+  /** purchase_event_sale_guard_blocked_total을 1 올린다 */
+  guardBlocked(): void;
+  /** purchase_event_sale_tick_failures_total{stage}를 1 올린다 */
+  tickFailure(stage: SaleTickStage): void;
+  /** purchase_event_sale_skipped_total{reason}을 count(기본 1)만큼 올린다 */
+  skipped(reason: SaleSkipReason, count?: number): void;
+  /** purchase_event_sale_all_held_seconds: 이 파드가 맡은 회차 가운데 ALL_HELD가 가장 오래 이어진 시간(초, 없으면 0). 회차 목록을 읽은 틱의 끝에 낸다 */
+  allHeldSeconds(seconds: number): void;
+  /** purchase_event_sale_tick_seconds: 틱 하나가 걸린 시간(초). 겹쳐 건너뛴 틱은 내지 않는다 */
+  tickSeconds(seconds: number): void;
+}
+
+/** 지표를 버리는 구현(시험·지표를 달지 않은 조립의 기본값) */
+export const noSaleStateSignals: SaleStateSignals = {
+  transition: () => undefined,
+  republished: () => undefined,
+  guardBlocked: () => undefined,
+  tickFailure: () => undefined,
+  skipped: () => undefined,
+  allHeldSeconds: () => undefined,
+  tickSeconds: () => undefined,
+};
 
 /** 구매 세션 하나의 상태(docs/data.md §3 s:session:{sid}의 일부) */
 export interface PurchaseSessionInfo {

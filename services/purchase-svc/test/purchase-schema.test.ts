@@ -19,6 +19,8 @@
 //    schema.ts·도메인 SAGA_STEPS와 같은지, 새 인덱스가 없는지 본다(data.md §4 열한 번째 마이그레이션·§5.1, docs/features/payment.md §2 '결제 결과 당기기의 첫 구현').
 // ⑪ 0011 SQL이 구매 세션 인덱스(purchase_order_session_idx, 조건 없음) 하나만 만드는지, schema.ts·0011 스냅샷과 같은지 본다(data.md §4·§5.1, BUILD_ORDER PRF-172, ADR-0107).
 //    purchase_order 인덱스의 단정은 그 마이그레이션 시점의 스냅샷으로 본다(0011 앞까지는 hold_id 유일 인덱스 하나다).
+// ⑫ 0012 SQL이 회차 판매 상태 표 event_sale과 결제 중 셈 부분 인덱스 seat_sale_pending_idx만 만드는지, schema.ts·0012 스냅샷·도메인 SALE_STATUSES와 같은지 본다(data.md §2·§4·§5.1, BUILD_ORDER PRF-144, ADR-0122).
+//    seat_sale 인덱스의 단정도 그 시점의 스냅샷으로 본다(0012 앞까지는 활성 유일 인덱스 하나다).
 // 실제 PostgreSQL에서 돌려 보는 것은 test-int/purchase-migration.int.test.ts(주문 표는 test-int/order-store.int.test.ts)다.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,7 +30,8 @@ import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { describe, expect, test } from 'vitest';
 import { orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob } from '../src/modules/booking/adapters/db/schema.js';
 import { SAGA_STEPS } from '../src/modules/booking/domain/saga.js';
-import { purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
+import { eventSale, purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
+import { SALE_STATUSES } from '../src/modules/inventory/domain/sale-state.js';
 import { SEAT_SALE_STATUSES } from '../src/modules/inventory/domain/seat-sale.js';
 
 const MIGRATIONS = join(fileURLToPath(new URL('..', import.meta.url)), 'migrations');
@@ -58,14 +61,19 @@ const AWAIT_TAG = '0010_saga_await_pull';
 /** 구매 세션이 끝날 때 그 세션의 주문을 찾는 조건 없는 인덱스(BUILD_ORDER PRF-172, ADR-0107, docs/data.md §5.1 '만료 고리의 열린 주문 찾기') */
 const SESSION_TAG = '0011_order_session_idx';
 const SESSION_INDEX = 'purchase_order_session_idx';
+/** 회차 판매 상태 표 event_sale과 결제 중 셈 부분 인덱스(BUILD_ORDER PRF-144, ADR-0122) */
+const EVENT_SALE_TAG = '0012_event_sale';
+const PENDING_INDEX = 'seat_sale_pending_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
 
-/** 그 마이그레이션 시점(스냅샷)의 purchase_order 인덱스 이름들. 지금 schema.ts가 아니라 그때의 모양을 본다 */
-const orderIndexesAt = (idx: string): string[] => {
+/** 그 마이그레이션 시점(스냅샷)의 표 인덱스 이름들. 지금 schema.ts가 아니라 그때의 모양을 본다 */
+const indexesAt = (idx: string, table: string): string[] => {
   const snap = JSON.parse(readFileSync(join(MIGRATIONS, 'meta', `${idx}_snapshot.json`), 'utf8')) as { tables: Record<string, { indexes?: Record<string, unknown> }> };
-  return Object.keys(snap.tables['public.purchase_order']!.indexes ?? {});
+  return Object.keys(snap.tables[`public.${table}`]!.indexes ?? {});
 };
+/** 그 마이그레이션 시점의 purchase_order 인덱스 이름들 */
+const orderIndexesAt = (idx: string): string[] => indexesAt(idx, 'purchase_order');
 
 /**
  * SQL 글을 견주기 좋게 줄인다: 표 이름 한정자("t".)와 따옴표를 지우고, 따옴표 밖 글만 소문자로, 공백을 접고, 괄호·쉼표 둘레 공백을 없앤다.
@@ -108,7 +116,9 @@ const sale = shapeOf(seatSale);
 const quota = shapeOf(purchaseQuota);
 const hold = shapeOf(seatHold);
 const rebuild = shapeOf(seatRebuild);
+/** 0000·0002가 만든 좌석 표 넷. 0012의 event_sale은 따로 본다(아래 eventSaleShape) */
 const SHAPES = [sale, quota, hold, rebuild];
+const eventSaleShape = shapeOf(eventSale);
 
 const TZ = 'timestamp with time zone';
 /** [열 이름, 종류, 널 불허] */
@@ -190,18 +200,17 @@ describe('표 정의(schema.ts)', () => {
     for (const s of [sale, quota, hold]) expect(s.columns.filter((c) => c.primary), s.name).toEqual([]);
   });
 
-  test('활성 판매 유일 부분 인덱스: seat_sale_active_key는 (event_id, seat_id) WHERE status IN (PENDING, SOLD)다 [ASVS v5.0.0-2.3.4]', () => {
-    expect(sale.indexes).toEqual([
-      { name: 'seat_sale_active_key', unique: true, columns: ['event_id', 'seat_id'], where: canon("status IN ('PENDING','SOLD')") },
-    ]);
+  test('활성 판매 유일 부분 인덱스: seat_sale_active_key는 (event_id, seat_id) WHERE status IN (PENDING, SOLD)이고 0011까지 seat_sale의 인덱스는 이것 하나다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(sale.indexes.find((i) => i.name === 'seat_sale_active_key')).toEqual({ name: 'seat_sale_active_key', unique: true, columns: ['event_id', 'seat_id'], where: canon("status IN ('PENDING','SOLD')") });
+    expect(indexesAt('0011', 'seat_sale')).toEqual(['seat_sale_active_key']);
   });
 
   test('활성 홀드 유일 부분 인덱스: seat_hold_active_key는 (event_id, seat_id) WHERE status = HELD다 [ASVS v5.0.0-2.3.4]', () => {
     expect(hold.indexes).toEqual([{ name: 'seat_hold_active_key', unique: true, columns: ['event_id', 'seat_id'], where: canon("status = 'HELD'") }]);
   });
 
-  test('인덱스는 이 둘뿐이다: 주문 ID만으로 찾는 인덱스 같은 것을 더 두지 않는다(쓰기가 많은 표는 인덱스를 아낀다. 원장의 hold_id·seat_rebuild에도 두지 않는다) [ASVS v5.0.0-2.3.4]', () => {
-    expect(sale.indexes.map((i) => i.name)).toEqual(['seat_sale_active_key']);
+  test('인덱스는 활성 유일 둘과 0012의 결제 중 셈 인덱스뿐이다: 주문 ID만으로 찾는 인덱스 같은 것을 더 두지 않는다(쓰기가 많은 표는 인덱스를 아낀다. 원장의 hold_id·seat_rebuild에도 두지 않는다) (ADR0122) [ASVS v5.0.0-2.3.4]', () => {
+    expect(sale.indexes.map((i) => i.name)).toEqual(['seat_sale_active_key', PENDING_INDEX]);
     expect(quota.indexes).toEqual([]);
     expect(hold.indexes.map((i) => i.name)).toEqual(['seat_hold_active_key']);
     expect(rebuild.indexes).toEqual([]);
@@ -250,8 +259,14 @@ const rebuildBody = rebuildFile
   .filter((l) => !/^\s*--(?!>)/.test(l))
   .join('\n');
 const rebuildStatements = statementsOf(rebuildFile);
-/** schema.ts의 표를 만들고 바꾸는 문 모두(0000 → 0002 차례. 0001은 보류·통계 표다) */
-const seatStatements = [...statements, ...rebuildStatements];
+const eventSaleFile = readFileSync(join(MIGRATIONS, `${EVENT_SALE_TAG}.sql`), 'utf8');
+const eventSaleBody = eventSaleFile
+  .split('\n')
+  .filter((l) => !/^\s*--(?!>)/.test(l))
+  .join('\n');
+const eventSaleStatements = statementsOf(eventSaleFile);
+/** schema.ts의 표를 만들고 바꾸는 문 모두(0000 → 0002 → 0012 차례. 0001은 보류·통계 표다) */
+const seatStatements = [...statements, ...rebuildStatements, ...eventSaleStatements];
 const createTable = (name: string): string => {
   const s = seatStatements.find((x) => new RegExp(`^CREATE TABLE "${name}" `).test(x));
   expect(s, `${name}을 만드는 문이 있어야 한다`).toBeDefined();
@@ -274,7 +289,7 @@ describe('마이그레이션 SQL 파일(0000_purchase_seat_tables.sql)', () => {
     expect(sqlBody.split(BREAKPOINT)).toHaveLength(5);
   });
 
-  test('0000은 seat_sale·purchase_quota·seat_hold를 만들고, 0002가 만드는 seat_rebuild와 합치면 schema.ts의 표와 같다', () => {
+  test('0000은 seat_sale·purchase_quota·seat_hold를 만들고, 0002가 만드는 seat_rebuild와 합치면 schema.ts의 좌석 표 넷과 같다(event_sale은 0012가 만든다)', () => {
     const created = [...sqlBody.matchAll(/CREATE TABLE "([a-z_]+)"/g)].map((m) => m[1]).sort();
     expect(created).toEqual(['purchase_quota', 'seat_hold', 'seat_sale']);
     const all = [...`${sqlBody}\n${rebuildBody}`.matchAll(/CREATE TABLE "([a-z_]+)"/g)].map((m) => m[1]).sort();
@@ -301,7 +316,7 @@ describe('마이그레이션 SQL 파일(0000_purchase_seat_tables.sql)', () => {
     expect([...sqlBody.matchAll(/\bDEFAULT\b/gi)]).toHaveLength(2);
   });
 
-  test('schema.ts의 인덱스가 같은 이름·같은 표·같은 열·같은 WHERE 조건의 유일 인덱스로 SQL에 있다 [ASVS v5.0.0-2.3.4]', () => {
+  test('schema.ts의 인덱스가 같은 이름·같은 표·같은 열·같은 WHERE 조건으로 SQL에 있다(유일 인덱스는 UNIQUE로, 0012의 seat_sale_pending_idx는 일반 인덱스로) [ASVS v5.0.0-2.3.4]', () => {
     for (const s of SHAPES) {
       for (const i of s.indexes) {
         const stmt = seatStatements.find((x) => x.includes(`INDEX "${i.name}"`));
@@ -374,7 +389,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
   };
 
-  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141)·0002(다시 만들기 표·원장 칸, PRF-143)·0003(주문 표·Outbox, PRF-160)·0004(주문의 홀드·구매 세션 칸, PRF-161)·0005(결제 접수, PRF-162)·0006(Saga 1단계, PRF-165)·0007(발권 재시도 큐, PRF-163)·0008(주문의 묶은 시각, PRF-167)·0009(발권 큐의 임대·알림 시각, PRF-170)·0010(결제 결과 당기기의 AWAIT·pull_next_at, PRF-171)·0011(열린 주문 부분 인덱스, PRF-172) 차례이고 tag가 SQL 파일 이름과 맞으며 when이 차례대로 커진다 (ADR0140) (ADR0107) [ASVS v5.0.0-2.3.4]', () => {
+  test('_journal.json은 0000(좌석 표)·0001(보류 표, PRF-141)·0002(다시 만들기 표·원장 칸, PRF-143)·0003(주문 표·Outbox, PRF-160)·0004(주문의 홀드·구매 세션 칸, PRF-161)·0005(결제 접수, PRF-162)·0006(Saga 1단계, PRF-165)·0007(발권 재시도 큐, PRF-163)·0008(주문의 묶은 시각, PRF-167)·0009(발권 큐의 임대·알림 시각, PRF-170)·0010(결제 결과 당기기의 AWAIT·pull_next_at, PRF-171)·0011(열린 주문 부분 인덱스, PRF-172)·0012(회차 판매 상태, PRF-144) 차례이고 tag가 SQL 파일 이름과 맞으며 when이 차례대로 커진다 (ADR0140) (ADR0107) (ADR0122) [ASVS v5.0.0-2.3.4]', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
@@ -389,6 +404,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [9, LEASE_TAG],
       [10, AWAIT_TAG],
       [11, SESSION_TAG],
+      [12, EVENT_SALE_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -413,6 +429,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       `${LEASE_TAG}.sql`,
       `${AWAIT_TAG}.sql`,
       `${SESSION_TAG}.sql`,
+      `${EVENT_SALE_TAG}.sql`,
     ]);
   });
 
@@ -435,7 +452,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     .sort();
   const snapshotOf = (f: string) => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', f), 'utf8')) as Snapshot;
 
-  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011)', () => {
+  test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 → 0012)', () => {
     expect(snapshotFiles).toEqual(journal.entries.map((e) => `${String(e.idx).padStart(4, '0')}_snapshot.json`));
     let prev = '00000000-0000-0000-0000-000000000000';
     for (const f of snapshotFiles) {
@@ -449,11 +466,11 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt, orderSagaJob, ticketIssueJob];
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
 
-  test('마지막 스냅샷(0011_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 주문 표 일곱)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0011_snapshot.json');
+  test('마지막 스냅샷(0012_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 일곱)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0012_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
-    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, ...ORDER_SHAPES].map((s) => `public.${s.name}`).sort());
-    for (const s of [...SHAPES, ...ORDER_SHAPES]) {
+    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES].map((s) => `public.${s.name}`).sort());
+    for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES]) {
       const t = snap.tables[`public.${s.name}`]!;
       expect(Object.entries(t.columns).map(([n, c]) => [n, c.type, c.notNull]), s.name).toEqual(cols(s));
       expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), `${s.name} 열 기본 키`).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));
@@ -461,7 +478,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     }
   });
 
-  test('마지막 스냅샷(0011)의 주문 표 일곱은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160, 0004의 purchase_order_hold_key는 PRF-161, 0005의 order_saga_job은 PRF-162, 0007의 ticket_issue_job은 PRF-163, 0009·0010은 인덱스를 더하지 않는다 PRF-170·PRF-171, 0011의 purchase_order_session_idx는 PRF-172) [ASVS v5.0.0-2.3.4]', () => {
+  test('마지막 스냅샷의 주문 표 일곱은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160, 0004의 purchase_order_hold_key는 PRF-161, 0005의 order_saga_job은 PRF-162, 0007의 ticket_issue_job은 PRF-163, 0009·0010은 인덱스를 더하지 않는다 PRF-170·PRF-171, 0011의 purchase_order_session_idx는 PRF-172) [ASVS v5.0.0-2.3.4]', () => {
     const snap = snapshotOf(snapshotFiles.at(-1)!);
     expect(ORDER_SHAPES.map((s) => s.name)).toEqual(['purchase_order', 'order_item', 'order_event', 'order_idempotency', 'payment_attempt', 'order_saga_job', 'ticket_issue_job']);
     ORDER_TABLES.forEach((table, i) => {
@@ -1027,11 +1044,118 @@ describe('마이그레이션 SQL 파일(0011_order_session_idx.sql, PRF-172)', (
   test('리뷰 고침 M1_옛 이름의 파일·저널 항목이 남지 않는다(커밋 전이라 파일을 고쳤다) (ADR0107)', () => {
     expect(existsSync(join(MIGRATIONS, '0011_order_open_session_idx.sql'))).toBe(false);
     const journal = JSON.parse(readFileSync(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] };
-    expect(journal.entries.at(-1)!.tag).toBe(SESSION_TAG);
+    expect(journal.entries[11]!.tag).toBe(SESSION_TAG);
+    expect(journal.entries.map((e) => e.tag)).not.toContain('0011_order_open_session_idx');
   });
 
   test('쓰기가 많은 주문 표의 인덱스는 0004의 유일 인덱스와 0011의 구매 세션 인덱스 둘뿐이다(예외를 더 늘리지 않는다, data.md §5.1) (ADR0107) [ASVS v5.0.0-2.3.4]', () => {
     expect(orderShape.indexes.map((i) => i.name)).toEqual(['purchase_order_hold_key', SESSION_INDEX]);
     expect(orderIndexesAt('0011')).toEqual(['purchase_order_hold_key', SESSION_INDEX]);
+  });
+});
+
+/** 0012(회차 판매 상태 판정, PRF-144, ADR-0122): event_sale 표와 seat_sale_pending_idx */
+describe('마이그레이션 SQL 파일(0012_event_sale.sql, PRF-144)', () => {
+  const STATUS_LIST = "'UPCOMING','ON_SALE','ALL_HELD','SOLD_OUT','ENDED'";
+  type SnapTable = { columns: Record<string, unknown>; indexes?: Record<string, { isUnique: boolean; where?: string; columns: { expression: string }[]; concurrently: boolean; method: string }>; foreignKeys?: Record<string, unknown>; checkConstraints?: Record<string, unknown> };
+  const snap = (idx: string) => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', `${idx}_snapshot.json`), 'utf8')) as { tables: Record<string, SnapTable> };
+
+  test('ST25_ADR0122_ 문 둘뿐이다: event_sale을 만들고 seat_sale에 일반 부분 인덱스 하나를 만든다(다른 표를 바꾸거나 지우는 문·UNIQUE·CONCURRENTLY가 없고 트랜잭션 안에서 돈다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(eventSaleStatements).toHaveLength(2);
+    expect(eventSaleStatements[0]).toMatch(/^CREATE TABLE "event_sale" /);
+    expect(eventSaleStatements[1]).toMatch(/^CREATE INDEX "seat_sale_pending_idx" ON "seat_sale" /);
+    expect(eventSaleBody).not.toMatch(/\b(ALTER|DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME)\b/i);
+    expect(eventSaleBody).not.toMatch(/\bUNIQUE\b|CONCURRENTLY|PARTITION/i);
+    expect(eventSaleFile).not.toMatch(/^--\s*peaket:no-transaction\s*$/m);
+    expect(eventSaleBody.split(BREAKPOINT)).toHaveLength(2);
+  });
+
+  test('ST25_ADR0122_ event_sale의 열 이름·종류·널 허용이 정본과 같다(previous_status·open_at·first_sold_out_at만 비울 수 있다) [ASVS v5.0.0-2.3.4]', () => {
+    expect(cols(eventSaleShape)).toEqual([
+      ['event_id', 'uuid', true],
+      ['status', 'text', true],
+      ['previous_status', 'text', false],
+      ['version', 'bigint', true],
+      ['sellable_seats', 'integer', true],
+      ['available', 'integer', true],
+      ['held', 'integer', true],
+      ['paying', 'integer', true],
+      ['sold_out_tiers', 'text[]', true],
+      ['open_at', TZ, false],
+      ['first_sold_out_at', TZ, false],
+      ['reopen_count', 'integer', true],
+      ['changed_at', TZ, true],
+      ['counted_at', TZ, true],
+    ]);
+    expect(getTableConfig(eventSale).schema).toBeUndefined();
+  });
+
+  test('ST25_ADR0122_ 기본 키는 회차 하나이고(회차마다 한 행), 기본값은 sold_out_tiers(빈 배열)·reopen_count(0) 둘이며 인덱스·외래 키는 없다 [ASVS v5.0.0-2.3.4]', () => {
+    expect(eventSaleShape.columns.filter((c) => c.primary).map((c) => c.name)).toEqual(['event_id']);
+    expect(eventSaleShape.primaryKeys).toEqual([]);
+    expect(eventSaleShape.columns.filter((c) => c.hasDefault).map((c) => c.name)).toEqual(['sold_out_tiers', 'reopen_count']);
+    expect(eventSaleShape.indexes).toEqual([]);
+    expect(getTableConfig(eventSale).foreignKeys).toEqual([]);
+    const c = canon(eventSaleStatements[0]!);
+    expect(c).toContain('event_id uuid primary key not null');
+    expect((c.match(/primary key/g) ?? []).length).toBe(1);
+    expect([...eventSaleBody.matchAll(/\bDEFAULT\b/gi)]).toHaveLength(2);
+    expect(c).toContain("sold_out_tiers text[] default '{}'::text[] not null");
+    expect(c).toContain('reopen_count integer default 0 not null');
+  });
+
+  test('ST25_ADR0122_ CHECK 넷의 이름·식이 정본과 같다: 상태 다섯(지금·앞 상태), 판 번호 1 이상, 셈과 reopen_count 0 이상 [ASVS v5.0.0-2.3.2]', () => {
+    expect(eventSaleShape.checks).toEqual([
+      { name: 'event_sale_status_check', expr: canon(`status in (${STATUS_LIST})`) },
+      { name: 'event_sale_previous_status_check', expr: canon(`previous_status in (${STATUS_LIST})`) },
+      { name: 'event_sale_version_check', expr: canon('version >= 1') },
+      { name: 'event_sale_counts_check', expr: canon('sellable_seats >= 0 and available >= 0 and held >= 0 and paying >= 0 and reopen_count >= 0') },
+    ]);
+  });
+
+  test('ST25_ADR0122_ 상태 CHECK의 값 목록은 도메인 SALE_STATUSES와 같은 값·차례다 [ASVS v5.0.0-2.3.2]', () => {
+    for (const i of [0, 1]) expect(literalsOf(eventSaleShape.checks[i]!.expr)).toEqual([...SALE_STATUSES]);
+  });
+
+  test('ST25_ADR0122_ SQL의 만드는 문이 schema.ts의 열·CHECK와 같다 [ASVS v5.0.0-2.3.4]', () => {
+    const body = eventSaleStatements[0]!;
+    expect([...body.matchAll(/^\t"([a-z_]+)" /gm)].map((m) => m[1])).toEqual(eventSaleShape.columns.map((c) => c.name));
+    const c = canon(body);
+    for (const col of eventSaleShape.columns) expect(c, col.name).toContain(`${col.name} ${col.type}`);
+    for (const k of eventSaleShape.checks) expect(c, k.name).toContain(`constraint ${k.name} check(${k.expr})`);
+    expect((c.match(/constraint /g) ?? []).length).toBe(eventSaleShape.checks.length);
+  });
+
+  test('ST25_ADR0122_ 리뷰 고침 L11: 결제 중 셈 인덱스 seat_sale_pending_idx는 seat_sale (event_id, reserved_at) WHERE status = PENDING의 btree 일반 인덱스다(승인 기한 조건까지 인덱스로 거른다, SQL·schema.ts) [ASVS v5.0.0-2.3.4]', () => {
+    expect(sale.indexes.find((i) => i.name === PENDING_INDEX)).toEqual({ name: PENDING_INDEX, unique: false, columns: ['event_id', 'reserved_at'], where: canon("status = 'PENDING'") });
+    expect(canon(eventSaleStatements[1]!).replace(/;$/, '')).toBe(`create index ${PENDING_INDEX} on seat_sale using btree(event_id,reserved_at)where ${canon("status = 'PENDING'")}`);
+  });
+
+  test('ST25_ADR0122_ 0011 → 0012 스냅샷: event_sale 표 하나가 새로 생기고 seat_sale에 그 인덱스 하나만 늘었다(seat_sale의 열·활성 유일 인덱스·외래 키·check와 다른 표는 같다) [ASVS v5.0.0-2.3.4]', () => {
+    const before = snap('0011').tables;
+    const after = snap('0012').tables;
+    expect(Object.keys(after).filter((n) => !(n in before))).toEqual(['public.event_sale']);
+    expect(Object.keys(before).filter((n) => !(n in after))).toEqual([]);
+    for (const name of Object.keys(before)) {
+      if (name === 'public.seat_sale') continue;
+      expect(after[name], name).toEqual(before[name]);
+    }
+    const b = before['public.seat_sale']!;
+    const a = after['public.seat_sale']!;
+    expect(a.columns, '열').toEqual(b.columns);
+    expect(a.foreignKeys, '외래 키').toEqual(b.foreignKeys);
+    expect(a.checkConstraints, 'check').toEqual(b.checkConstraints);
+    expect(Object.keys(a.indexes ?? {})).toEqual(['seat_sale_active_key', PENDING_INDEX]);
+    expect(a.indexes!['seat_sale_active_key'], '활성 유일 인덱스').toEqual(b.indexes!['seat_sale_active_key']);
+    const added = a.indexes![PENDING_INDEX]!;
+    expect({ unique: added.isUnique, columns: added.columns.map((c) => c.expression), where: canon(added.where!), concurrently: added.concurrently, method: added.method }).toEqual({
+      unique: false,
+      columns: ['event_id', 'reserved_at'],
+      where: canon("status = 'PENDING'"),
+      concurrently: false,
+      method: 'btree',
+    });
+    expect(Object.keys(after['public.event_sale']!.checkConstraints ?? {})).toEqual(eventSaleShape.checks.map((k) => k.name));
+    expect(after['public.event_sale']!.indexes ?? {}).toEqual({});
   });
 });

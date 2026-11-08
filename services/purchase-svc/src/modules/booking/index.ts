@@ -6,6 +6,7 @@ import { orderHistoryCheckTask as historyTaskOf, type OrderHistoryTaskDeps } fro
 export { DrizzleOrderStore, checkOrderHistory, type DrizzleOrderStoreOptions } from './adapters/db/drizzle-orders.js';
 export { DrizzleOrderAccepts, type DrizzleOrderAcceptsOptions } from './adapters/db/drizzle-order-accepts.js';
 export { DrizzleOrderExpiry, orderExpiryDatabaseOptions, type DrizzleOrderExpiryOptions } from './adapters/db/drizzle-order-expiry.js';
+export { DrizzleSalePaying, type DrizzleSalePayingOptions } from './adapters/db/drizzle-sale-paying.js';
 export { PromOrderExpirySignals } from './adapters/prom-order-expiry-signals.js';
 export { OrderExpiry, type OrderExpiryDeps } from './application/order-expiry.js';
 export { OrderExpirySweep, type OrderExpirySweepDeps, type OrderExpirySweepReport } from './application/order-expiry-sweep.js';

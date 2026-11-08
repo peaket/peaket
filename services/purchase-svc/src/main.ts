@@ -24,6 +24,7 @@
 // 가장 먼저 멈추고(둘 다 결제 결과를 반영해 뒤의 셋을 깨운다), 그다음 Saga·발권 실행기·기다림 표(돌던 호출과 그 뒤 쓰기를 기다린다)를, 서비스를 닫은 뒤
 // gRPC 클라이언트·차단기와 연결을 닫는다.
 // 오류 로그에는 플랫폼 errorSummary(이름·글, 쿼리 매개변수 값은 뺀다)만 싣는다.
+// purchase DB가 있으면 회차 판매 상태 판정(SaleStateJudge, PRF-144, ADR-0122)도 듣기 시작한 뒤 켜고 SIGTERM 때 끈다. 판정 전용 일반 풀(연결 2개 [가정], purchase-svc-sale-state)을 쓰고 지표 purchase_event_sale_*를 /metrics에 붙인다.
 // 좌석 Stream 릴레이·다시 만들기 반복·정비 일은 이 파일이 아니라 릴레이 프로세스(src/relay.ts, purchase-svc-outbox-relay 배포)가 돈다.
 // HoldAttempt 보내기(BAS-030)는 아직 없어 시도 기록은 버린다.
 import 'reflect-metadata';
@@ -42,6 +43,7 @@ import {
   DrizzlePaymentPull,
   DrizzlePaymentStatus,
   DrizzleSaga,
+  DrizzleSalePaying,
   DrizzleTicketIssue,
   type IdentityRecheck,
   identityClientsFromEnv,
@@ -76,20 +78,26 @@ import {
   unavailableIdentityRecheck,
 } from './modules/booking/index.js';
 import {
+  DrizzleEventSale,
   DrizzleSeatHoldLedger,
   DrizzleSeatSales,
   EndPurchaseSession,
   ExpirySweeper,
   FileSeatMapSource,
   LayoutSeatMap,
+  PromSaleStateSignals,
   PromSeatSignals,
   RedisOrderHolds,
   RedisPurchaseSessionStore,
+  RedisSaleCounts,
   RedisSeatSlots,
   RedisSeatStore,
   RedisSessionEndedLog,
   RedisSessionIndex,
   RedisSessionStartedLog,
+  RedisSweepLeases,
+  SaleStateJudge,
+  saleStateDatabaseOptions,
   SessionSweeper,
   ServerEcdhKey,
   StoredPurchaseSessions,
@@ -349,9 +357,31 @@ if (databaseUrl && applyPaymentResult) {
     clock: systemClock,
   });
 }
+// 회차 판매 상태 판정(SaleStateJudge, BUILD_ORDER PRF-144, ADR-0122, docs/features/seat-hold.md §4 '판정의 첫 구현'): purchase DB가 있을 때 이 API 파드에서 켠다.
+// event_sale·seat_sale 읽기와 쓰기는 핫패스 풀이 아니라 판정 전용 일반 풀(saleStateDatabaseOptions, 연결 2개 [가정])이고 종료 때 닫는다. 결제 중 셈은 booking의 DrizzleSalePaying을 잇는다.
+// 듣기 시작한 뒤 1초 반복을 켜고 SIGTERM 때 만료 반복과 함께 끈다
+let saleStateDatabase: Database | undefined;
+let saleStateJudge: SaleStateJudge | undefined;
+if (database && databaseUrl) {
+  const saleDb = createDatabase(saleStateDatabaseOptions(databaseUrl));
+  saleStateDatabase = saleDb;
+  saleStateJudge = new SaleStateJudge({
+    events: new RedisSeatStore(redis, service.logger),
+    counts: new RedisSaleCounts(redis),
+    paying: new DrizzleSalePaying({ database: saleDb }),
+    store: new DrizzleEventSale({ database: saleDb, clock: systemClock }),
+    seatMap,
+    leases: new RedisSweepLeases(redis),
+    signals: new PromSaleStateSignals().register(service.metrics.registry),
+    clock: systemClock,
+    podId,
+    logger: service.logger,
+  });
+}
 await service.listen();
 const sweeper = service.app.get(ExpirySweeper);
 sweeper.start();
+saleStateJudge?.start();
 sagaRunner?.start();
 ticketRunner?.start();
 paymentPuller?.start();
@@ -387,7 +417,7 @@ function shutdown(): void {
     (consumers?.stop() ?? Promise.resolve()).catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)')),
     paymentPuller?.stop(),
   ])
-    .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), sagaRunner?.stop(), ticketRunner?.stop(), paymentStatusWaiters?.stop()]))
+    .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), paymentStatusWaiters?.stop()]))
     .then(() => service.close())
     .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'purchase-svc 종료 실패'))
     // 주문 만료 판정기는 고리를 부르는 것들(만료·정리 반복, 소비자, 나가기 경로)이 멈춘 뒤에 멈춘다. 돌던 판정만 기다리고 줄에 남은 일은 버린다(안전망이 받친다). 전용 풀은 그 뒤에 닫는다
@@ -420,7 +450,7 @@ function shutdown(): void {
         service.logger.error({ err: errorSummary(err) }, 'payment-svc 결과 당기기 클라이언트 닫기 실패');
       }
       // 소비자 전용 풀(결제 결과 반영도 쓴다)은 소비자와 당기기를 멈춘 뒤라, 발권·당기기 실행기 전용 풀은 실행기를 멈춘 뒤라 쓰는 연결이 없다
-      return Promise.all([redis.close(), database?.close(), consumerDatabase?.close(), ticketIssueDatabase?.close(), paymentPullDatabase?.close(), orderExpiryDatabase?.close()]);
+      return Promise.all([redis.close(), database?.close(), consumerDatabase?.close(), ticketIssueDatabase?.close(), paymentPullDatabase?.close(), orderExpiryDatabase?.close(), saleStateDatabase?.close()]);
     });
 }
 process.once('SIGTERM', shutdown);

@@ -3,7 +3,8 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Clock } from '@peaket/platform';
 import { KEY_PART, type SeatRef } from '../domain/hold.js';
-import type { EventSeatConfig, SeatMap, SeatMapIndex, SeatMapSections } from '../domain/ports.js';
+import type { EventSeatConfig, SeatMap, SeatMapIndex, SeatMapSections, SeatMapTiers } from '../domain/ports.js';
+import type { SaleLayout } from '../domain/sale-state.js';
 import { type ParsedSeatMap, parseEventSeatMapFile, SeatMapFileError, type SectionRange } from '../domain/seat-layout.js';
 
 /** 판 파일의 출처(지금은 폴더의 {eventId}.json. 회차 설정을 core에서 받는 길은 LCH-080) */
@@ -91,6 +92,8 @@ interface Entry {
   stamp: string | undefined;
   /** 판 번호·1인 한도·판매 종료·등급 가격으로 만든 같은 판 표시: 같으면 좌석 표를 다시 만들지 않는다 */
   signature: string;
+  /** 판매 상태 판정의 좌석표(처음 부를 때 만들어 판마다 한 번만, BUILD_ORDER PRF-144) */
+  saleLayout?: SaleLayout;
 }
 
 const MISSING_TTL_MS = 1000;
@@ -110,11 +113,25 @@ function signatureOf(raw: unknown): string | undefined {
   return `${v}|${o.perAccountLimit}|${o.saleEndsAt}|${prices}`;
 }
 
+/** 판의 판매 대상 좌석(byId, 판매 제외석 없음)을 등급별로 모은다. 등급은 등급 ID 문자 코드 순, 색인은 오름차순이다 */
+function saleLayoutOf(parsed: ParsedSeatMap): SaleLayout {
+  const byTier = new Map<string, number[]>();
+  for (const seat of parsed.byId.values()) {
+    const list = byTier.get(seat.tierId);
+    if (list) list.push(seat.index);
+    else byTier.set(seat.tierId, [seat.index]);
+  }
+  const tiers = [...byTier]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([tierId, indexes]) => ({ tierId, indexes: indexes.sort((a, b) => a - b) }));
+  return { sellableSeats: parsed.byId.size, tiers };
+}
+
 /**
- * SeatMap·SeatMapIndex·SeatMapSections의 운영 구현. 처음 부를 때만 파일을 읽고(같은 회차의 동시 요청은 한 번만 읽는다), 없음/틀림은 missingTtlMs 동안 기억한다.
+ * SeatMap·SeatMapIndex·SeatMapSections·SeatMapTiers의 운영 구현. 처음 부를 때만 파일을 읽고(같은 회차의 동시 요청은 한 번만 읽는다), 없음/틀림은 missingTtlMs 동안 기억한다.
  * refresh()가 읽은 회차를 다시 읽어 바꾼다(실패하면 이전 판을 그대로 둔다. 판 번호와 설정이 같으면 좌석 표를 다시 만들지 않는다).
  */
-export class LayoutSeatMap implements SeatMap, SeatMapIndex, SeatMapSections {
+export class LayoutSeatMap implements SeatMap, SeatMapIndex, SeatMapSections, SeatMapTiers {
   readonly #entries = new Map<string, Entry>();
   /** 없음/틀림을 기억하는 회차 → 기억이 끝나는 시각(주입 Clock) */
   readonly #missing = new Map<string, number>();
@@ -139,6 +156,13 @@ export class LayoutSeatMap implements SeatMap, SeatMapIndex, SeatMapSections {
 
   async sections(eventId: string): Promise<readonly SectionRange[] | undefined> {
     return (await this.#get(eventId))?.parsed.sections;
+  }
+
+  async saleLayout(eventId: string): Promise<SaleLayout | undefined> {
+    const e = await this.#get(eventId);
+    if (!e) return undefined;
+    e.saleLayout ??= saleLayoutOf(e.parsed);
+    return e.saleLayout;
   }
 
   /** 읽은 회차를 모두 다시 읽어 바꾼다. 던지지 않는다(실패는 로그 한 줄이고 이전 판을 그대로 둔다) */

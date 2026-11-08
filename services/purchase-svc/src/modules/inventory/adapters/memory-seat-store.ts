@@ -126,6 +126,8 @@ export class MemorySeatEvent {
   sweep: { owner: string; expiresAtMs: number } | undefined;
   /** 구매 세션 정리 반복의 회차별 임대 s:{event:E}:sesweep(BUILD_ORDER PRF-138). 모양은 sweep과 같다 */
   sessionSweep: { owner: string; expiresAtMs: number } | undefined;
+  /** 판매 상태 판정의 회차별 임대 s:{event:E}:salesweep(BUILD_ORDER PRF-144). 모양은 sweep과 같다 */
+  saleSweep: { owner: string; expiresAtMs: number } | undefined;
 }
 
 /** MemorySeatStore 생성자 선택(BUILD_ORDER PRF-168) */

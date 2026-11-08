@@ -85,6 +85,13 @@
       "when": 1794240000000,
       "tag": "0011_order_session_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794243600000,
+      "tag": "0012_event_sale",
+      "breakpoints": true
     }
   ]
 }

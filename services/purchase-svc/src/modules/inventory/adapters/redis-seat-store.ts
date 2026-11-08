@@ -175,6 +175,8 @@ export const seatKeys = {
   sweep: (e: string) => `s:{event:${e}}:sweep`,
   /** 구매 세션 정리 색인(정렬 집합, 멤버 jti, 점수 = 다음에 볼 시각, BUILD_ORDER PRF-138) */
   sessions: (e: string) => `s:{event:${e}}:sessions`,
+  /** 판매 상태 판정의 회차별 임대(값 = 잡은 파드 ID, BUILD_ORDER PRF-144) */
+  saleSweep: (e: string) => `s:{event:${e}}:salesweep`,
   /** 구매 세션 정리 반복의 회차별 임대(BUILD_ORDER PRF-138) */
   sessionSweep: (e: string) => `s:{event:${e}}:sesweep`,
 };

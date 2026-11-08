@@ -24,10 +24,11 @@ export class MemorySweepLeases implements SweepLeases {
     assertSweepLeaseArgs(eventId, owner, ttlMs);
     const ev = this.db.event(eventId);
     const now = this.clock.now();
-    const cur = lane === 'session' ? ev.sessionSweep : ev.sweep;
+    const cur = lane === 'session' ? ev.sessionSweep : lane === 'sale' ? ev.saleSweep : ev.sweep;
     if (cur && now < cur.expiresAtMs && cur.owner !== owner) return false;
     const next = { owner, expiresAtMs: now + ttlMs };
     if (lane === 'session') ev.sessionSweep = next;
+    else if (lane === 'sale') ev.saleSweep = next;
     else ev.sweep = next;
     return true;
   }

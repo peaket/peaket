@@ -2,7 +2,7 @@
 // seat_sale(활성 판매), purchase_quota(1인 한도 행), seat_hold(홀드 원장). 주문·결제 표는 그 단계(PRF-160)가 더한다.
 // seat_hold는 회차 ID 범위 월 파티션 표다. Drizzle 0.45에는 파티션 선언이 없어 여기는 부모 표 모양만 적고, 파티션 선언은 손으로 고친 마이그레이션 SQL에만 있다.
 import { sql } from 'drizzle-orm';
-import { bigint, check, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, check, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -25,6 +25,11 @@ export const seatSale = pgTable(
     uniqueIndex('seat_sale_active_key')
       .on(t.eventId, t.seatId)
       .where(sql`${t.status} in ('PENDING', 'SOLD')`),
+    // 결제 중 셈(회차의 PENDING, ADR-0122 결정 3, BUILD_ORDER PRF-144). status UPDATE는 이미 위 활성 유일 부분 인덱스 때문에 HOT 갱신이 아니라 HOT을 더 잃지 않는다
+    // reserved_at까지 두어 승인 기한 조건을 인덱스로 거른다(입금 대기·결과 모름으로 오래 남은 PENDING을 틱마다 읽지 않게, 리뷰 고침 L11)
+    index('seat_sale_pending_idx')
+      .on(t.eventId, t.reservedAt)
+      .where(sql`${t.status} = 'PENDING'`),
     check('seat_sale_status_check', sql`${t.status} in ('PENDING', 'SOLD', 'RETURNED')`),
   ],
 );
@@ -71,6 +76,40 @@ export const seatHold = pgTable(
       .where(sql`${t.status} = 'HELD'`),
     check('seat_hold_status_check', sql`${t.status} in ('HELD', 'RELEASED', 'EXPIRED')`),
     check('seat_hold_kind_check', sql`${t.kind} in ('FAN', 'PRIORITY')`),
+  ],
+);
+
+/** 회차마다 한 행: 회차 판매 상태와 판 번호(docs/data.md §2 event_sale, docs/features/seat-hold.md §4 '판정의 첫 구현', ADR-0122, BUILD_ORDER PRF-144) */
+export const eventSale = pgTable(
+  'event_sale',
+  {
+    eventId: uuid('event_id').primaryKey(),
+    status: text('status').notNull(),
+    // 바뀌기 전 상태(같은 판을 다시 낼 때 그 판의 값으로 싣는다). 첫 행은 비운다
+    previousStatus: text('previous_status'),
+    version: bigint('version', { mode: 'number' }).notNull(),
+    sellableSeats: integer('sellable_seats').notNull(),
+    available: integer('available').notNull(),
+    held: integer('held').notNull(),
+    paying: integer('paying').notNull(),
+    // 매진인 등급 ID(정렬). 집합이 바뀌면 판 번호를 올린다(ADR-0214 결정 3)
+    soldOutTiers: text('sold_out_tiers')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    // UPCOMING이면 오픈 시각(LCH-080이 쓴다)
+    openAt: at('open_at'),
+    firstSoldOutAt: at('first_sold_out_at'),
+    reopenCount: integer('reopen_count').notNull().default(0),
+    changedAt: at('changed_at').notNull(),
+    // 셈을 쓴 시각. 지금과의 차이로 같은 판을 다시 낼지 가른다
+    countedAt: at('counted_at').notNull(),
+  },
+  (t) => [
+    check('event_sale_status_check', sql`${t.status} in ('UPCOMING', 'ON_SALE', 'ALL_HELD', 'SOLD_OUT', 'ENDED')`),
+    check('event_sale_previous_status_check', sql`${t.previousStatus} in ('UPCOMING', 'ON_SALE', 'ALL_HELD', 'SOLD_OUT', 'ENDED')`),
+    check('event_sale_version_check', sql`${t.version} >= 1`),
+    check('event_sale_counts_check', sql`${t.sellableSeats} >= 0 and ${t.available} >= 0 and ${t.held} >= 0 and ${t.paying} >= 0 and ${t.reopenCount} >= 0`),
   ],
 );
 

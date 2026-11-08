@@ -56,7 +56,7 @@ export { MemoryPurchaseSessionStore, RecordingSessionStartedLog } from './adapte
 export { MemoryPurchaseSessions, type MemoryPurchaseSession, type PurchaseSessionAccess } from './adapters/memory-purchase-sessions.js';
 export { DrizzleSeatHoldLedger } from './adapters/db/drizzle-seat-hold-ledger.js';
 export { DrizzleSeatSales } from './adapters/db/drizzle-seat-sales.js';
-export { purchaseQuota, seatHold, seatRebuild, seatSale } from './adapters/db/schema.js';
+export { eventSale, purchaseQuota, seatHold, seatRebuild, seatSale } from './adapters/db/schema.js';
 export { FileSeatMapSource, LayoutSeatMap, type LayoutSeatMapOptions, type SeatMapSource } from './adapters/layout-seat-map.js';
 export { MemorySeatMap, type MemorySeatDef } from './adapters/memory-seat-map.js';
 export {
@@ -95,6 +95,41 @@ export {
   type SeatStreamTickGuard,
 } from './application/seat-stream-relay.js';
 export { SNAPSHOT_LUA } from './adapters/snapshot-lua.js';
+export { SALE_COUNT_LUA } from './adapters/sale-count-lua.js';
+export { RedisSaleCounts } from './adapters/redis-sale-counts.js';
+export { DrizzleEventSale, saleStateDatabaseOptions, type DrizzleEventSaleOptions } from './adapters/db/drizzle-event-sale.js';
+export { PromSaleStateSignals } from './adapters/prom-sale-state-signals.js';
+export { SaleStateJudge, type SaleEventReport, type SaleStateJudgeDeps, type SaleTickOutcome, type SaleTickReport } from './application/sale-state-judge.js';
+export {
+  ALL_HELD_AFTER_MS,
+  AVG_CACHE_MS,
+  AVG_MIN_ORDERS,
+  NEW_SALE_MEMO,
+  SALE_JUDGE_CONCURRENCY,
+  SALE_REPUBLISH_MS,
+  SALE_STATUSES,
+  SALE_TICK_MS,
+  SALE_TIER_SCAN_PAGE,
+  SALE_WARN_INTERVAL_MS,
+  avgTicketsOf,
+  decideSale,
+  saleChangedPayload,
+  saleEventKey,
+  tierAvailability,
+  type EventSaleChangedMessage,
+  type EventSaleRow,
+  type SaleCounts,
+  type SaleDecideInput,
+  type SaleDecision,
+  type SaleDecisionReason,
+  type SaleLayout,
+  type SaleMemo,
+  type SaleRowView,
+  type SaleSeatCounts,
+  type SaleStatus,
+  type SaleTierCounts,
+  type SaleTierIndexes,
+} from './domain/sale-state.js';
 export { RedisSweepLeases } from './adapters/redis-sweep-leases.js';
 export { PURCHASE_ECDH_KEY_ENV, ServerEcdhKey, type ServerEcdhJwk } from './adapters/server-ecdh.js';
 export { ADMISSION_TOKEN_HEADER, admissionJtiOf, StoredPurchaseSessions, type StoredPurchaseSessionsDeps } from './adapters/stored-purchase-sessions.js';
@@ -316,8 +351,21 @@ export {
   SEAT_STORE,
   SESSION_STARTED_LOG,
   SWEEP_LEASES,
+  noSaleStateSignals,
   noSeatSignals,
+  type EventSaleChange,
+  type EventSaleCreate,
+  type EventSaleRepublish,
+  type EventSaleStore,
   type EventSeatConfig,
+  type SaleCountsRead,
+  type SaleHoldPage,
+  type SaleCountsReader,
+  type SalePayingSeats,
+  type SaleSkipReason,
+  type SaleStateSignals,
+  type SaleTickStage,
+  type SeatMapTiers,
   type HoldAttemptRecord,
   type HoldAttemptResult,
   type HoldAttempts,
