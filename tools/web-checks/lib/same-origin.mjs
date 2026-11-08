@@ -13,6 +13,8 @@ import { staticAppHeaders } from '../../../packages/config/headers/security-head
 import { CHECK_MOCK_ORIGIN } from '../queue-room/origins.mjs';
 
 export const SAME_ORIGIN_PORT = 4130;
+const SEAT_PRELOAD_PATH = '/_q/seat-preload.json';
+const SEAT_PRELOAD_FILE = fileURLToPath(new URL('../../../apps/web/.next/seat-preload.json', import.meta.url));
 export const QUEUE_ROOM_CHECK_DIR = fileURLToPath(new URL('../../../apps/web/queue-room/dist-check/', import.meta.url));
 /** 검사 빌드가 부르는 가짜 API(대기열·대기열 파일·팬 API 한 곳, queue-room/build.mjs) */
 export const MOCK_ORIGIN = CHECK_MOCK_ORIGIN;
@@ -64,7 +66,8 @@ export function startSameOrigin({ port = SAME_ORIGIN_PORT, host = DEFAULT_HOST, 
     if (route === 'web') return proxy(req, res, web);
     if (route === 'static') return proxy(req, res, staticOrigin);
     const rewrite = QR.rewrites.find(([re]) => re.test(path));
-    const file = rewrite ? resolve(queueRoomRoot, rewrite[1]) : fileFor(queueRoomRoot, path, QR.base);
+    // 좌석 화면 자산 목록은 웹 빌드가 만든다(운영에서는 배포가 /_q/로 올린다, HOT-352). 웹을 빌드하지 않은 검사에서는 없고 대기실은 건너뛴다
+    const file = path === SEAT_PRELOAD_PATH ? SEAT_PRELOAD_FILE : rewrite ? resolve(queueRoomRoot, rewrite[1]) : fileFor(queueRoomRoot, path, QR.base);
     if (!file || !(await isFile(file))) {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
       res.end('없음');

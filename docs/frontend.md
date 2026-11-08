@@ -1046,7 +1046,7 @@ function nextDelayMs(s: QueueView, net: NetState, vis: DocumentVisibilityState):
 - 차례 1분 [가정] 전에 팬 토큰을 미리 갱신한다. 좌석 화면 자원(좌석맵 파일과 좌석 화면 자산 목록 `/_q/seat-preload.json`의 파일)은 `fetch(…, {priority: "low"})`로 미리 받는다. 좌석맵 파일 경로는 대기 상태 파일의 `seatmapLayoutPath`다(ADR-0207). Safari는 `<link rel="prefetch">`를 지원하지 않으므로 `fetch`로 HTTP 캐시를 미리 채운다.
   - 정한 값(ADR-0216 결정 2~5): 예상 대기 60초 [가정] 안에 리더 탭(보이는 탭)만 받는다. 차례가 온 뒤에는 받지 않는다. 같은 경로는 페이지마다 한 번, 경로가 바뀌면 다시 받고, 실패해도 다시 받지 않는다.
   - 좌석맵은 `/v1/events/{이 회차 ID}/seatmap-layouts/{판 번호}.json` 꼴의 같은 출처 경로만 받는다(ASVS 1.2.2, 판 번호는 정수 `layoutVersion`). 좌석 화면 Worker와 같은 `credentials: 'omit'`이다.
-  - `/_q/seat-preload.json`은 `{v: 1, assets: string[]}`이고 `/_next/static/` 아래 `.js`·`.css`만 받는다(`same-origin`, 목록은 `cache: 'no-cache'`). 404면 건너뛴다. 이 목록은 좌석 화면 빌드(HOT-352)가 만든다.
+  - `/_q/seat-preload.json`은 `{v: 1, assets: string[]}`이고 `/_next/static/` 아래 `.js`·`.css`만 받는다(`same-origin`, 목록은 `cache: 'no-cache'`). 404면 건너뛴다. 이 목록은 소비자 웹 빌드가 `<distDir>/seat-preload.json`으로 만들고(공통 런타임과 좌석 경로의 첫 화면 JS·CSS, `next.config.ts` 컴파일 직후, HOT-352), 배포가 `/_q/seat-preload.json`으로 올린다. 늦게 가져오는 묶음(좌석맵 패키지·서명기·Worker)은 매니페스트에 이름이 없어 담지 못한다.
   - `priority`를 모르는 엔진은 이 칸을 무시하고 보통 우선순위로 받는다.
 - 차례가 가까울 때의 알림: 탭 제목 카운트다운, 짧은 효과음(사용자가 [차례 알림 받기]를 누른 동작으로 오디오를 열어 둔다), 웹 푸시(권한이 있을 때 서버가 보낸다). 백그라운드 탭은 타이머가 제한되어 늦게 알아챌 수 있다. 그래서 15분 유예가 있다(POL-008).
   - 정한 값(ADR-0212 결정 4): 탭 제목은 숨긴 탭이고 예상 대기 5분 [가정] 안이면 `(약 N분)`·`(N초)`를 앞에 붙인다(버튼과 관계없이). 알림음·브라우저 알림은 켠 뒤 예상 대기 60초 [가정] 안이거나 차례 도래 유예·곧 입장이 되면 한 번이고, 브라우저 알림은 탭이 숨겨져 있고 권한이 있을 때만 띄운다. 켠 상태는 저장하지 않는다. 웹 푸시 구독은 GAT-250(알림 서비스) 뒤에 잇는다.

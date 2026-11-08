@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { NextConfig } from 'next';
 import { seedLayeredAlias } from '@peaket/ds/seed-layered-alias';
 import { hideSourceMaps } from './scripts/hide-source-maps.mjs';
+import { writeSeatPreload } from './scripts/seat-preload.mjs';
 
 // SEED CSS 층 PoC 빌드(FE-T36, tools/web-checks/seed-css/). 이때만 page.poc.tsx가 경로가 된다(운영 빌드에는 탐침 화면이 없다)
 const seedCssPoc = process.env.PEAKET_POC === 'seed-css';
@@ -30,6 +31,8 @@ const config: NextConfig = {
   compiler: {
     runAfterProductionCompile: async ({ distDir }) => {
       hideSourceMaps({ distDir });
+      // 좌석 화면 자산 목록(대기실이 차례 전에 받는다, ADR-0216 결정 3). PoC 빌드에도 같은 경로가 있어 함께 만든다
+      writeSeatPreload({ distDir });
     },
   },
   // next dev가 앱 폴더에 AGENTS.md를 만들지 않게 한다(저장소 규칙은 뿌리 CLAUDE.md·docs가 정한다)
