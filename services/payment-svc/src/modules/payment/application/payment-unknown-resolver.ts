@@ -14,10 +14,14 @@
 // - 답 반영이 실패하면 다시 하지 않는다(승인 실행기의 finish와 다르다: 밀어 둔 간격 뒤 다시 조회해 같은 답을 쓰고, 조회는 멱등이다).
 // - SEV1 표시 쓰기가 실패하면 로그를 내지 않는다(다음 조회가 다시 낸다). 지표는 조회마다 오른다.
 // - 간격 쓰기가 실패하면 다시 하지 않는다(잡을 때 민 시각에 다시 잡힌다).
-// - 틱은 잡기 전에 빈자리를 먼저 쥔다(겹쳐 부른 틱이 상한을 넘겨 잡지 않게). 잡은 수만큼 남기고 나머지는 놓는다.
+// - 틱은 잡기 전에 빈자리와 토큰을 먼저 쥔다(겹쳐 부른 틱이 상한을 넘겨 잡지 않게). 잡은 수만큼 남기고 나머지는 돌려준다.
+// - 결제사 호출 보호(BUILD_ORDER PRF-183): 조회 한 번이 채널 토큰 하나를 쓴다(벌크헤드는 잡지 않는다). 틱은 채널마다 토큰을 미리 빼고 그 수만큼만 잡으며(코드 리뷰), 부르지 않은 행의 토큰은 돌려준다. 바로 돌리는 runJob은 토큰이 없으면 부르지 않고 다음 조회 시각을 1초 [가정] 뒤로 쓰며 잡을 때 올린 횟수를 되돌린다(부르지 않은 조회로 간격이 늘지 않게).
+//   조회의 429는 어댑터가 throttled로 알리면 지표로만 센다(상한은 그대로다, 다음 시도는 조회 간격이 늦춘다).
+// - 빈자리는 어댑터가 있는 채널끼리 나눈다(앞 채널이 뒤 채널을 굶기지 않게). 어댑터가 없는 채널은 그 뒤 남은 자리로 잡아 no_adapter로 드러낸다(운영에는 그런 행이 없다). 틱은 채널마다 독립이다(한 채널의 느린 잡기가 다른 채널을 막지 않는다).
 import { AsyncResource } from 'node:async_hooks';
 import type { Clock } from '@peaket/platform';
-import type { PaymentGatewayPort, QueryResult } from '../domain/payment-gateway.js';
+import type { PaymentGatewayPort, PgName, QueryResult } from '../domain/payment-gateway.js';
+import { PG_NAMES, type PgCallGuard, type PgCallGuards } from '../domain/pg-call-guard.js';
 import type { PaymentGateways, PaymentUnknownLog, PaymentUnknownQueries, PaymentUnknownSignals } from '../domain/ports.js';
 import {
   decideQueryAnswer,
@@ -29,6 +33,7 @@ import {
   UNKNOWN_QUERY_BATCH,
   UNKNOWN_QUERY_CONCURRENCY,
   UNKNOWN_QUERY_GUARD_MS,
+  UNKNOWN_QUERY_NO_TOKEN_DELAY_MS,
   UNKNOWN_QUERY_POLL_INTERVAL_MS,
   UNKNOWN_QUERY_TIMEOUT_MS,
   unknownQueryDelayMs,
@@ -50,6 +55,8 @@ export interface PaymentUnknownResolverDeps {
   log: PaymentUnknownLog;
   signals: PaymentUnknownSignals;
   clock: Clock;
+  /** 채널별 호출 보호기(승인 실행기와 같은 것을 넘긴다. 토큰을 함께 쓴다) */
+  guards: PgCallGuards;
   /** 없으면 전역 setInterval·clearInterval(unref) */
   timer?: UnknownResolverTimer;
   /** 잡기 주기(기본 UNKNOWN_QUERY_POLL_INTERVAL_MS 1초 [가정]) */
@@ -72,6 +79,11 @@ export interface UnknownSweepResult {
   readonly marked: number;
 }
 
+/** 이 행 몫으로 미리 뺀 토큰. 호출 직전에 false가 되고, 끝날 때 true로 남아 있으면 돌려준다 */
+interface TokenHold {
+  held: boolean;
+}
+
 /** 실행기 한도를 넘긴 조회(어댑터가 시간 한도를 지키지 않았다) */
 class UnknownQueryGuardTimeout extends Error {
   constructor() {
@@ -90,8 +102,8 @@ export class PaymentUnknownResolver {
   /** 1시간 표시 반복의 손잡이 */
   #sweepHandle: unknown;
   #stopped = false;
-  /** 타이머가 시작한 틱이 도는 중인가(겹치지 않게 하나만) */
-  #ticking = false;
+  /** 잡기가 도는 채널(겹치지 않게 채널마다 하나만, 한 채널이 느려도 다른 채널의 틱은 돈다) */
+  readonly #claiming = new Set<PgName>();
   /** 타이머가 시작한 1시간 표시가 도는 중인가(겹치지 않게 하나만) */
   #sweeping = false;
   /** 돌고 있는 틱의 잡기와 행(stop·whenIdle이 기다린다) */
@@ -150,7 +162,7 @@ export class PaymentUnknownResolver {
   /** 잡은 행 하나를 돈다(머리 주석의 차례). 던지지 않는다. 빈자리를 쥐고 돌며(동시 상한), 멈춘 뒤면 부르지 않고 SKIPPED STOPPED다 */
   async runJob(job: UnknownQueryJob): Promise<UnknownRunOutcome> {
     this.#held += 1;
-    return this.#startHeld(job);
+    return this.#startHeld(job, { held: false });
   }
 
   // ---- 안쪽 ----
@@ -164,13 +176,10 @@ export class PaymentUnknownResolver {
     return Number.isSafeInteger(c) && c >= 1 ? c : UNKNOWN_QUERY_CONCURRENCY;
   }
 
-  /** 반복 타이머의 틱: 앞 틱의 잡기가 아직 돌면 건너뛴다. 멈춘 뒤에는 돌지 않는다 */
+  /** 반복 타이머의 틱: 잡기가 도는 채널은 그 틱 안에서 건너뛴다. 멈춘 뒤에는 돌지 않는다 */
   #loopTick(): void {
-    if (this.#stopped || this.#ticking) return;
-    this.#ticking = true;
-    void this.tick().finally(() => {
-      this.#ticking = false;
-    });
+    if (this.#stopped) return;
+    void this.tick();
   }
 
   /** 반복 타이머의 1시간 표시: 앞 표시가 아직 돌면 건너뛴다. 멈춘 뒤에는 돌지 않는다 */
@@ -198,52 +207,143 @@ export class PaymentUnknownResolver {
   }
 
   async #tickOnce(): Promise<UnknownTickResult> {
-    // 잡기 전에 빈자리를 쥔다(머리 주석 '구현에서 정한 것')
-    const reserved = Math.min(UNKNOWN_QUERY_BATCH, Math.max(0, this.#concurrency() - this.#held));
-    if (reserved === 0) return NOTHING;
-    this.#held += reserved;
+    const adapted: [PgName, PgCallGuard][] = [];
+    const bare: PgName[] = [];
+    for (const pg of PG_NAMES) {
+      try {
+        const guard = this.deps.guards.of(pg);
+        if (guard === undefined) bare.push(pg);
+        else adapted.push([pg, guard]);
+      } catch (err) {
+        // 어댑터 결함: 그 채널만 건너뛴다(행은 표에서 기다린다)
+        this.#runError('claim', err);
+      }
+    }
+    const called = await Promise.all(this.#split(adapted.map(([pg]) => pg)).map(([pg, share], i) => this.#turn(pg, () => this.#claimAdapted(pg, adapted[i]![1], share))));
+    if (this.#stopped) return this.#tickResult(called);
+    // 어댑터가 있는 채널이 못 잡고 남긴 자리로 잡는다
+    const skipped = await Promise.all(this.#split(bare).map(([pg, share]) => this.#turn(pg, () => this.#claimBare(pg, share))));
+    return this.#tickResult([...called, ...skipped]);
+  }
+
+  #tickResult(counts: readonly number[]): UnknownTickResult {
+    return { claimed: counts.reduce((a, b) => a + b, 0) };
+  }
+
+  /** 지금 빈자리를 채널들에 고르게 나눈다(앞 채널이 뒤 채널을 굶기지 않게) */
+  #split(pgs: readonly PgName[]): [PgName, number][] {
+    let free = Math.max(0, this.#concurrency() - this.#held);
+    return pgs.map((pg, i) => {
+      const share = Math.ceil(free / (pgs.length - i));
+      free -= share;
+      return [pg, share];
+    });
+  }
+
+  /** 그 채널의 잡기가 돌고 있지 않을 때만 work를 돌리고, 끝나면 표시를 지운다 */
+  async #turn(pg: PgName, work: () => Promise<number>): Promise<number> {
+    if (this.#claiming.has(pg)) return 0;
+    this.#claiming.add(pg);
+    try {
+      return await work();
+    } finally {
+      this.#claiming.delete(pg);
+    }
+  }
+
+  /** 어댑터가 있는 채널 하나: 몫과 쓸 수 있는 토큰 가운데 작은 수만큼 토큰과 자리를 쥐고, 잡은 수만큼 남기고 나머지는 돌려준다 */
+  async #claimAdapted(pg: PgName, guard: PgCallGuard, share: number): Promise<number> {
+    const want = Math.min(UNKNOWN_QUERY_BATCH, share);
+    if (want === 0) return 0;
+    const reserved = guard.takeQueryTokens(want);
+    if (reserved === 0) {
+      await this.#noteBlockedIfWaiting(pg, guard);
+      return 0;
+    }
+    const jobs = await this.#claim(pg, reserved);
+    guard.refundTokens(Math.max(0, reserved - jobs.length));
+    for (const job of jobs) void this.#startHeld(job, { held: true });
+    return jobs.length;
+  }
+
+  /** 어댑터가 없는 채널 하나: 몫만큼 잡아 지표로 드러낸다(부르지 않으므로 토큰을 쓰지 않는다) */
+  async #claimBare(pg: PgName, share: number): Promise<number> {
+    const want = Math.min(UNKNOWN_QUERY_BATCH, share);
+    if (want === 0) return 0;
+    const jobs = await this.#claim(pg, want);
+    for (const job of jobs) void this.#startHeld(job, { held: false });
+    return jobs.length;
+  }
+
+  /** 잡기 전에 자리를 쥐고 잡은 행마다 쥔 자리 하나를 넘기며 남은 자리는 놓는다. 잡기가 실패하면 빈 목록이다 */
+  async #claim(pg: PgName, count: number): Promise<UnknownQueryJob[]> {
+    this.#held += count;
     let jobs: UnknownQueryJob[] = [];
     try {
-      jobs = await this.deps.queries.claimDueQueries(reserved);
+      jobs = await this.deps.queries.claimDueQueries(pg, count);
     } catch (err) {
       this.#runError('claim', err);
     }
-    // 잡은 행마다 쥔 자리 하나를 넘기고 남은 자리는 놓는다. 조회를 기다리지 않는다
-    this.#held -= Math.max(0, reserved - jobs.length);
-    for (const job of jobs) void this.#startHeld(job);
-    return { claimed: jobs.length };
+    this.#held -= Math.max(0, count - jobs.length);
+    return jobs;
+  }
+
+  /** 기다리는 행이 있을 때만 토큰에 막힌 것으로 센다. 확인이 실패하면 세지 않는다 */
+  async #noteBlockedIfWaiting(pg: PgName, guard: PgCallGuard): Promise<void> {
+    try {
+      if (await this.deps.queries.hasDueQueries(pg)) guard.noteBlocked('token');
+    } catch (err) {
+      this.#runError('claim', err);
+    }
   }
 
   /** 자리를 이미 쥔 행을 시작한다(stop·whenIdle이 기다리게 적는다) */
-  #startHeld(job: UnknownQueryJob): Promise<UnknownRunOutcome> {
-    const p = this.#scope.runInAsyncScope(() => this.#runHeld(job));
+  #startHeld(job: UnknownQueryJob, hold: TokenHold): Promise<UnknownRunOutcome> {
+    const p = this.#scope.runInAsyncScope(() => this.#runHeld(job, hold));
     this.#track(p);
     return p;
   }
 
-  /** 자리를 쥔 채 행 하나를 돈다. 끝나면(어느 갈래든) 자리를 놓는다 */
-  async #runHeld(job: UnknownQueryJob): Promise<UnknownRunOutcome> {
+  /** 자리를 쥔 채 행 하나를 돈다. 끝나면(어느 갈래든) 쓰지 않은 토큰을 돌려주고 자리를 놓는다 */
+  async #runHeld(job: UnknownQueryJob, hold: TokenHold): Promise<UnknownRunOutcome> {
     try {
-      return await this.#run(job);
+      return await this.#run(job, hold);
     } finally {
+      if (hold.held) this.#guardOf(job.pg)?.refundTokens();
       this.#held -= 1;
     }
   }
 
-  async #run(job: UnknownQueryJob): Promise<UnknownRunOutcome> {
+  /** 그 채널의 보호기. 어댑터가 없거나 만들지 못하면 undefined */
+  #guardOf(pg: PgName): PgCallGuard | undefined {
+    try {
+      return this.deps.guards.of(pg);
+    } catch {
+      return undefined;
+    }
+  }
+
+  async #run(job: UnknownQueryJob, hold: TokenHold): Promise<UnknownRunOutcome> {
     if (this.#stopped) return STOPPED;
 
     let gateway: PaymentGatewayPort | undefined;
+    let guard: PgCallGuard | undefined;
     try {
       gateway = this.deps.gateways.of(job.pg);
+      if (gateway !== undefined) guard = this.deps.guards.of(job.pg);
     } catch (err) {
       this.#runError('gateway', err, job.orderId);
       return this.#askedAgain(job, 'query_failed');
     }
     if (gateway === undefined) return this.#noAdapter(job);
     if (this.#stopped) return STOPPED;
+    // 토큰을 못 얻었거나 보호기가 없으면 상한 없이 부르지 않는다. 틱이 잡은 행은 토큰을 미리 뺐다
+    if (guard === undefined || (!hold.held && !guard.tryTakeToken())) return this.#noToken(job);
 
+    hold.held = false;
     const answer = await this.#query(gateway, job);
+    // 조회의 429는 그 조회의 다음 시도만 늦추고 상한은 그대로다(지표로만 센다)
+    if (answer.kind === 'UNKNOWN' && answer.throttled === true) guard.noteThrottled({ first: false });
     const decision = decideQueryAnswer(answer, job, this.deps.clock.now());
     if (decision.kind === 'ASK_AGAIN') {
       await this.#reportAnomaly(job, decision);
@@ -260,6 +360,16 @@ export class PaymentUnknownResolver {
     } catch (err) {
       this.#runError('reschedule', err, job.orderId);
     }
+  }
+
+  /** 토큰이 없다: 부르지 않고 다음 조회 시각만 짧게 쓰며 잡을 때 올린 횟수를 되돌린다. 쓰기가 실패하면 잡을 때 민 시각에 다시 잡힌다. 던지지 않는다 */
+  async #noToken(job: UnknownQueryJob): Promise<UnknownRunOutcome> {
+    try {
+      await this.deps.queries.rescheduleQuery(job, this.deps.clock.now() + UNKNOWN_QUERY_NO_TOKEN_DELAY_MS, { refundAttempt: true });
+    } catch (err) {
+      this.#runError('reschedule', err, job.orderId);
+    }
+    return NO_TOKEN;
   }
 
   /** 단독 조회 한 번. 어댑터가 던지거나 실행기 한도를 넘으면 조회 실패 답으로 바꾼다 */
@@ -370,6 +480,7 @@ const noop = (): undefined => undefined;
 const NOTHING: UnknownTickResult = Object.freeze({ claimed: 0 });
 const NOTHING_SWEPT: UnknownSweepResult = Object.freeze({ marked: 0 });
 const STOPPED: UnknownRunOutcome = Object.freeze({ kind: 'SKIPPED', reason: 'STOPPED' });
+const NO_TOKEN: UnknownRunOutcome = Object.freeze({ kind: 'SKIPPED', reason: 'NO_TOKEN' });
 const STALE: UnknownRunOutcome = Object.freeze({ kind: 'STALE' });
 const WRITE_FAILED: UnknownRunOutcome = Object.freeze({ kind: 'WRITE_FAILED' });
 const QUERY_UNKNOWN: QueryResult = Object.freeze({ kind: 'UNKNOWN' });

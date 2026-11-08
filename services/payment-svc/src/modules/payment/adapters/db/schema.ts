@@ -101,11 +101,18 @@ export const paymentConfirmJob = pgTable(
     paymentId: uuid('payment_id')
       .primaryKey()
       .references(() => payment.id),
+    // 결제사 채널. 접수 때 원장의 pg를 그대로 쓴다. 잡기가 payment를 조인하지 않고 채널의 행만 본다(BUILD_ORDER PRF-183 코드 리뷰, 마이그레이션 0003)
+    pg: text('pg').notNull(),
     nextAttemptAt: at('next_attempt_at').notNull(),
     leaseOwner: text('lease_owner'),
     leaseUntil: at('lease_until'),
     attempts: integer('attempts').notNull().default(0),
     createdAt: at('created_at').notNull().defaultNow(),
   },
-  (t) => [index('payment_confirm_job_next_idx').on(t.nextAttemptAt), check('payment_confirm_job_attempts_check', sql`${t.attempts} >= 0`)],
+  (t) => [
+    // 채널별 잡기(다른 채널의 쌓인 행을 지나가지 않는다)
+    index('payment_confirm_job_claim_idx').on(t.pg, t.nextAttemptAt, t.paymentId),
+    check('payment_confirm_job_attempts_check', sql`${t.attempts} >= 0`),
+    check('payment_confirm_job_pg_check', sql`${t.pg} IN (${PG_LIST})`),
+  ],
 );

@@ -258,7 +258,6 @@ describe('리뷰 고침(BUILD_ORDER PRF-181, 코드 리뷰): 시뮬레이터가 
     ['403 빈 답', { status: 403, raw: '' }],
     ['404 JSON인데 code 없음', { status: 404, body: { message: '없음' } }],
     ['409 HTML', { status: 409, raw: 'conflict' }],
-    ['429 HTML', { status: 429, raw: 'slow down' }],
     ['400 JSON 배열', { status: 400, body: [{ code: 'REJECT_CARD_PAYMENT' }] }],
     ['400 code 빈 글', { status: 400, body: { code: '' } }],
     ['400 code가 글이 아님', { status: 400, body: { code: 42 } }],
@@ -328,6 +327,68 @@ describe('리뷰 고침(BUILD_ORDER PRF-181, 코드 리뷰): 시뮬레이터가 
     ['빈 404', { status: 404, raw: '' }],
   ])('P-T3_리뷰 고침 H1: 조회의 %s는 없음으로 단정하지 않고 UNKNOWN이다(중간 장비의 답일 수 있다) [ASVS v5.0.0-16.5.3]', async (_name, reply) => {
     const { gateway } = scripted([reply]);
+    await expect(gateway.query(C.paymentRef)).resolves.toEqual({ kind: 'UNKNOWN' });
+  });
+
+  it.each<[string, Scripted]>([
+    ['HTML', { status: 429, raw: 'slow down' }],
+    ['빈 답', { status: 429, raw: '' }],
+    ['JSON인데 code 없음', { status: 429, body: { message: '많다' } }],
+  ])('P-T34_리뷰 고침 낮음: 승인의 429는 JSON code가 없어도(%s) 한도 초과다(조회와 같이 판정을 앞에 둔다) [ASVS v5.0.0-2.3.2]', async (_name, reply) => {
+    const { gateway } = scripted([reply]);
+    await expect(gateway.confirm(C)).resolves.toEqual({ outcome: 'DECLINED', paymentRef: C.paymentRef, failureCategory: 'THROTTLED' });
+  });
+
+  it('P-T40_리뷰 고침 M4: 조회는 조회 전용 연결 묶음으로, 승인은 승인 묶음으로 나간다(승인 호출이 연결을 다 쥐어도 조회가 막히지 않는다) [ASVS v5.0.0-13.2.6]', async () => {
+    const routed: string[] = [];
+    const stub =
+      (name: string, reply: Scripted): typeof fetch =>
+      async (input, init) => {
+        routed.push(`${name} ${init?.method} ${new URL(String(input)).pathname}`);
+        return responseOf(reply);
+      };
+    const gateway = new SimulatorPaymentGateway({
+      baseUrl: 'http://pg.test',
+      secretKey: 'sim_sk_review',
+      clientKey: 'sim_ck_review',
+      fetch: stub('승인', { status: 200, body: { status: 'DONE', orderId: C.orderId, totalAmount: C.amount } }),
+      queryFetch: stub('조회', { status: 404, body: { code: 'NOT_FOUND_PAYMENT', message: '없음' } }),
+    });
+
+    await gateway.confirm(C);
+    await gateway.query(C.paymentRef);
+
+    expect(routed).toEqual(['승인 POST /v1/payments/confirm', `조회 GET /v1/payments/${C.paymentRef}`]);
+  });
+
+  it('P-T40_리뷰 고침 M4: 승인 뒤 어댑터 안의 조회도 조회 묶음으로 나간다 [ASVS v5.0.0-13.2.6]', async () => {
+    const routed: string[] = [];
+    const stub =
+      (name: string, reply: Scripted): typeof fetch =>
+      async (_input, init) => {
+        routed.push(`${name} ${init?.method}`);
+        return responseOf(reply);
+      };
+    const gateway = new SimulatorPaymentGateway({ baseUrl: 'http://pg.test', secretKey: 'sim_sk_review', clientKey: 'sim_ck_review', fetch: stub('승인', already), queryFetch: stub('조회', payment()) });
+
+    await expect(gateway.confirm(C)).resolves.toMatchObject({ outcome: 'ALREADY_APPROVED' });
+
+    expect(routed).toEqual(['승인 POST', '조회 GET']);
+  });
+
+  it('P-T40_리뷰 고침 M4: 조회 묶음을 주지 않으면 fetch 하나로 모두 나간다(v0와 시험)', async () => {
+    const { calls, gateway } = scripted([{ status: 404, body: { code: 'NOT_FOUND_PAYMENT', message: '없음' } }]);
+    await gateway.query(C.paymentRef);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('P-T40_조회의 429는 결과 모름이고 한도 초과임을 표시한다(지표에 세고 상한은 낮추지 않는다) [ASVS v5.0.0-2.3.2]', async () => {
+    const { gateway } = scripted([{ status: 429, body: { code: 'TOO_MANY_REQUESTS', message: '요청이 너무 많습니다' } }]);
+    await expect(gateway.query(C.paymentRef)).resolves.toEqual({ kind: 'UNKNOWN', throttled: true });
+  });
+
+  it('P-T40_조회의 5xx는 한도 초과 표시 없이 결과 모름이다', async () => {
+    const { gateway } = scripted([{ status: 503, body: { code: 'PG_ERROR', message: '오류' } }]);
     await expect(gateway.query(C.paymentRef)).resolves.toEqual({ kind: 'UNKNOWN' });
   });
 

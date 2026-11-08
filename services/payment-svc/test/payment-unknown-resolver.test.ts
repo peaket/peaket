@@ -13,7 +13,8 @@ import { paymentUnknownLog } from '../src/modules/payment/adapters/payment-unkno
 import { PromPaymentUnknownSignals } from '../src/modules/payment/adapters/prom-payment-unknown-signals.js';
 import { PaymentUnknownResolver, type PaymentUnknownResolverDeps, type UnknownResolverTimer } from '../src/modules/payment/application/payment-unknown-resolver.js';
 import type { PaymentGatewayPort, PgName, QueryResult } from '../src/modules/payment/domain/payment-gateway.js';
-import type { PaymentGateways, PaymentUnknownLog, PaymentUnknownQueries, PaymentUnknownSignals, ResolveUnknownResult } from '../src/modules/payment/domain/ports.js';
+import { PgCallGuards, type PgLimitKind, type PgSaturationReason } from '../src/modules/payment/domain/pg-call-guard.js';
+import type { PaymentGateways, PaymentUnknownLog, PaymentUnknownQueries, PaymentUnknownSignals, PgCallGuardLog, PgCallGuardSignals, ResolveUnknownResult } from '../src/modules/payment/domain/ports.js';
 import { PAYMENT_UNKNOWN_QUERY_OUTCOMES, type PaymentUnknownQueryOutcome, type ResolvedFinish, type UnknownQueryJob } from '../src/modules/payment/domain/unknown-resolver.js';
 import { EVENT_ID, NOW, ORDER_ID, PAYMENT_ID, SECRET_PAYMENT_KEY, uuidAt } from './confirm-cases.js';
 
@@ -76,13 +77,20 @@ function play<T>(s: Script<T>): T {
 }
 
 class FakeQueries implements PaymentUnknownQueries {
+  /** SIMULATOR 채널의 잡기 limit */
   readonly limits: number[] = [];
+  /** 그 밖의 채널의 잡기 인자 */
+  readonly otherLimits: [PgName, number][] = [];
+  /** 있으면 그 밖의 채널의 잡기가 이 약속을 기다린다 */
+  otherGate: Promise<void> | undefined;
+  /** hasDueQueries의 답(채널별, 없으면 true) */
+  readonly due = new Map<PgName, boolean>();
   claims: Script<UnknownQueryJob[]>[] = [];
   readonly resolved: { job: UnknownQueryJob; finish: ResolvedFinish }[] = [];
   resolveResults: Script<ResolveUnknownResult>[] = [];
   readonly anomalies: UnknownQueryJob[] = [];
   anomalyResults: Script<boolean>[] = [];
-  readonly rescheduled: { job: UnknownQueryJob; nextAtMs: number }[] = [];
+  readonly rescheduled: { job: UnknownQueryJob; nextAtMs: number; o?: unknown }[] = [];
   rescheduleResults: Script<boolean>[] = [];
   readonly sweepLimits: number[] = [];
   sweeps: Script<string[]>[] = [];
@@ -95,9 +103,9 @@ class FakeQueries implements PaymentUnknownQueries {
     const next = this.anomalyResults.shift();
     return next === undefined ? true : play(next);
   }
-  async rescheduleQuery(j: UnknownQueryJob, nextAtMs: number): Promise<boolean> {
+  async rescheduleQuery(j: UnknownQueryJob, nextAtMs: number, o?: unknown): Promise<boolean> {
     this.order.push('reschedule');
-    this.rescheduled.push({ job: j, nextAtMs });
+    this.rescheduled.push({ job: j, nextAtMs, ...(o === undefined ? {} : { o }) });
     const next = this.rescheduleResults.shift();
     return next === undefined ? true : play(next);
   }
@@ -108,11 +116,19 @@ class FakeQueries implements PaymentUnknownQueries {
     return next === undefined ? [] : play(next);
   }
 
-  async claimDueQueries(limit: number): Promise<UnknownQueryJob[]> {
+  async claimDueQueries(pg: PgName, limit: number): Promise<UnknownQueryJob[]> {
+    if (pg !== 'SIMULATOR') {
+      this.otherLimits.push([pg, limit]);
+      if (this.otherGate) await this.otherGate;
+      return [];
+    }
     this.order.push('claim');
     this.limits.push(limit);
     const next = this.claims.shift();
     return next === undefined ? [] : play(next);
+  }
+  async hasDueQueries(pg: PgName): Promise<boolean> {
+    return this.due.get(pg) ?? true;
   }
   async resolve(j: UnknownQueryJob, finish: ResolvedFinish): Promise<ResolveUnknownResult> {
     this.order.push('resolve');
@@ -122,8 +138,13 @@ class FakeQueries implements PaymentUnknownQueries {
   }
 }
 
-class FakeGateway implements Pick<PaymentGatewayPort, 'pg' | 'query'> {
+class FakeGateway implements Pick<PaymentGatewayPort, 'pg' | 'query' | 'capabilities'> {
   readonly pg: PgName = 'SIMULATOR';
+  /** capabilities().callsPerSecond */
+  rps = 300;
+  capabilities() {
+    return { serverConfirm: true, confirmDeadlineMs: 600_000, partialCancel: true, webhookSignature: false, idempotencyRetentionMs: 86_400_000, callsPerSecond: this.rps, redirectCheckout: false };
+  }
   readonly queried: string[] = [];
   readonly options: unknown[] = [];
   answers = new Map<string, () => Promise<QueryResult> | QueryResult>();
@@ -189,6 +210,19 @@ class FakeSignals implements PaymentUnknownSignals {
   }
 }
 
+class FakeGuardSignals implements PgCallGuardSignals {
+  readonly throttleds: [PgName, boolean][] = [];
+  readonly saturateds: [PgName, PgSaturationReason][] = [];
+  throttled(pg: PgName, first: boolean): void {
+    this.throttleds.push([pg, first]);
+  }
+  limit(_pg: PgName, _kind: PgLimitKind, _value: number): void {}
+  inflight(_pg: PgName, _count: number): void {}
+  saturated(pg: PgName, reason: PgSaturationReason): void {
+    this.saturateds.push([pg, reason]);
+  }
+}
+
 function setup(over: Partial<PaymentUnknownResolverDeps> = {}) {
   const order: string[] = [];
   const queries = new FakeQueries(order);
@@ -198,8 +232,11 @@ function setup(over: Partial<PaymentUnknownResolverDeps> = {}) {
   const clock: FakeClock = fakeClock({ now: NOW });
   const timer = new FakeTimer();
   const gateways: PaymentGateways = { of: (pg) => (pg === 'SIMULATOR' ? (gateway as unknown as PaymentGatewayPort) : undefined) };
-  const resolver = new PaymentUnknownResolver({ queries, gateways, log, signals, clock, timer, ...over });
-  return { order, queries, gateway, log, signals, clock, timer, resolver };
+  const guardSignals = new FakeGuardSignals();
+  const guardLog: PgCallGuardLog = { throttledFirst: () => undefined };
+  const guards = new PgCallGuards({ gateways, podCount: 1, clock, signals: guardSignals, log: guardLog });
+  const resolver = new PaymentUnknownResolver({ queries, gateways, log, signals, clock, timer, guards, ...over });
+  return { order, queries, gateway, log, signals, clock, timer, guards, guardSignals, resolver };
 }
 
 describe('tick', () => {
@@ -606,7 +643,8 @@ describe('start·stop', () => {
   test('PRF182_start는 1초 주기로 켜고 앞 틱의 잡기가 끝나지 않았으면 건너뛴다', async () => {
     const { queries, timer, resolver } = setup();
     const held = deferred<UnknownQueryJob[]>();
-    queries.claimDueQueries = async (limit: number) => {
+    queries.claimDueQueries = async (pg: PgName, limit: number) => {
+      if (pg !== 'SIMULATOR') return [];
       queries.limits.push(limit);
       return held.promise;
     };
@@ -692,6 +730,212 @@ describe('start·stop', () => {
     await resolver.whenIdle();
 
     expect(contexts).toEqual([undefined]);
+  });
+});
+
+describe('결제사 호출 보호(BUILD_ORDER PRF-183)', () => {
+  /** 토큰을 모두 쓰고 쓴 수를 돌려준다(시험이 끝나지 않는 일이 없게 반복에 상한을 둔다) */
+  const drain = (guards: PgCallGuards): number => {
+    let n = 0;
+    while (n < 10_000 && guards.of('SIMULATOR')!.tryTakeToken()) n += 1;
+    return n;
+  };
+
+  test('P-T34_조회 한 번이 토큰 하나를 쓴다 [ASVS v5.0.0-2.3.2] [ASVS v5.0.0-2.4.1]', async () => {
+    const { guards, resolver } = setup();
+    await resolver.runJob(job());
+    expect(drain(guards)).toBe(59);
+  });
+
+  test('P-T40_토큰이 없으면 부르지 않고 다음 조회 시각만 짧게 쓰며 잡을 때 올린 횟수를 되돌린다 [ASVS v5.0.0-2.4.1] [ASVS v5.0.0-16.5.2]', async () => {
+    const { queries, gateway, signals, guards, resolver } = setup();
+    drain(guards);
+
+    await expect(resolver.runJob(job())).resolves.toEqual({ kind: 'SKIPPED', reason: 'NO_TOKEN' });
+
+    expect(gateway.queried).toEqual([]);
+    expect(queries.rescheduled).toEqual([{ job: job(), nextAtMs: NOW + 1_000, o: { refundAttempt: true } }]);
+    expect(signals.outcomes).toEqual([]);
+  });
+
+  test('P-T40_간격 쓰기가 던져도 던지지 않고 오류를 남긴다(잡을 때 민 시각에 다시 잡힌다) [ASVS v5.0.0-16.3.4]', async () => {
+    const { queries, log, guards, resolver } = setup();
+    drain(guards);
+    const err = new Error('쓰기 실패');
+    queries.rescheduleResults = [throws(err)];
+
+    await expect(resolver.runJob(job())).resolves.toEqual({ kind: 'SKIPPED', reason: 'NO_TOKEN' });
+
+    expect(log.of('runError')).toEqual([{ what: 'reschedule', orderId: ORDER_ID, err }]);
+  });
+
+  test('P-T40_답을 본 뒤의 간격 쓰기는 횟수를 되돌리지 않는다(실제로 물었다)', async () => {
+    const { queries, gateway, resolver } = setup();
+    gateway.fallback = () => ({ kind: 'UNKNOWN' });
+    await resolver.runJob(job());
+    expect(queries.rescheduled).toEqual([{ job: job(), nextAtMs: NOW + 5_000 }]);
+  });
+
+  test('P-T40_조회의 429는 상한을 낮추지 않고 지표만 센다(first false)이고 다시 묻는다 [ASVS v5.0.0-2.3.2]', async () => {
+    const { gateway, signals, guards, guardSignals, resolver } = setup();
+    gateway.fallback = () => ({ kind: 'UNKNOWN', throttled: true });
+    const before = guards.of('SIMULATOR')!.limits();
+
+    await expect(resolver.runJob(job())).resolves.toEqual({ kind: 'ASKED_AGAIN', outcome: 'query_failed' });
+
+    expect(guards.of('SIMULATOR')!.limits()).toEqual(before);
+    expect(guardSignals.throttleds).toEqual([['SIMULATOR', false]]);
+    expect(signals.outcomes).toEqual([['SIMULATOR', 'query_failed']]);
+  });
+
+  test('P-T40_벌크헤드와 상관없이 돈다(벌크헤드는 승인 호출만 잡는다) [ASVS v5.0.0-15.1.3]', async () => {
+    const { queries, guards, resolver } = setup();
+    const guard = guards.of('SIMULATOR')!;
+    for (let i = 0; i < guard.limits().concurrency; i += 1) guard.holdOne();
+    expect(guard.available()).toBe(0);
+    queries.claims = [[job()]];
+    await expect(resolver.tick()).resolves.toEqual({ claimed: 1 });
+    await resolver.whenIdle();
+    expect(queries.resolved).toHaveLength(1);
+  });
+
+  test('PRF183_어댑터가 없으면 토큰을 찾지 않고 지금처럼 건너뛴다', async () => {
+    const { resolver, signals } = setup({ gateways: { of: () => undefined } });
+    await expect(resolver.runJob(job())).resolves.toEqual({ kind: 'ASKED_AGAIN', outcome: 'no_adapter' });
+    expect(signals.outcomes).toEqual([['SIMULATOR', 'no_adapter']]);
+  });
+
+  test('PRF183_보호기를 만들지 못하면 조회 실패로 다시 묻는다 [ASVS v5.0.0-16.5.2]', async () => {
+    const { log, signals, resolver } = setup({
+      guards: {
+        of: () => {
+          throw new Error('어댑터 결함');
+        },
+      } as unknown as PgCallGuards,
+    });
+    await expect(resolver.runJob(job())).resolves.toEqual({ kind: 'ASKED_AGAIN', outcome: 'query_failed' });
+    expect(log.of('runError')).toHaveLength(1);
+    expect(signals.outcomes).toEqual([['SIMULATOR', 'query_failed']]);
+  });
+
+  describe('리뷰 고침(코드 리뷰)', () => {
+    /** 남은 토큰 수(뺀 뒤 돌려준다) */
+    const tokensLeft = (guards: PgCallGuards): number => {
+      const n = drain(guards);
+      guards.of('SIMULATOR')!.refundTokens(n);
+      return n;
+    };
+
+    test('P-T40_리뷰 고침 M6: 조회 잡기 수는 조회가 쓸 수 있는 토큰 수로 제한한다 [ASVS v5.0.0-2.4.1]', async () => {
+      const { queries, gateway, resolver } = setup();
+      gateway.rps = 20;
+      await resolver.tick();
+      expect(queries.limits).toEqual([4]);
+    });
+
+    test('P-T40_리뷰 고침 M6: 잡은 수만큼 토큰을 미리 빼고 못 잡은 수는 돌려주며, 조회마다 토큰은 하나다 [ASVS v5.0.0-2.3.2] [ASVS v5.0.0-2.4.1]', async () => {
+      const { queries, gateway, guards, resolver } = setup();
+      queries.claims = [[job()]];
+      await resolver.tick();
+      await resolver.whenIdle();
+      expect(gateway.queried).toHaveLength(1);
+      expect(tokensLeft(guards)).toBe(59);
+    });
+
+    test('P-T40_리뷰 고침 M6: 틱이 잡은 행은 호출 앞에서 토큰을 다시 찾지 않는다 [ASVS v5.0.0-2.4.1]', async () => {
+      const { queries, gateway, guards, resolver } = setup();
+      const claim = deferred<UnknownQueryJob[]>();
+      const original = queries.claimDueQueries.bind(queries);
+      queries.claimDueQueries = async (pg: PgName, limit: number) => (pg === 'SIMULATOR' ? claim.promise : original(pg, limit));
+      const ticking = resolver.tick();
+      await flush();
+      drain(guards);
+      claim.resolve([job()]);
+      await ticking;
+      await resolver.whenIdle();
+      expect(gateway.queried).toHaveLength(1);
+      expect(queries.rescheduled).toEqual([]);
+    });
+
+    test('P-T40_리뷰 고침 M6: 미리 뺐지만 멈춰서 부르지 않은 행의 토큰은 돌려준다 [ASVS v5.0.0-2.4.1]', async () => {
+      const { queries, guards, resolver } = setup();
+      const claim = deferred<UnknownQueryJob[]>();
+      const original = queries.claimDueQueries.bind(queries);
+      queries.claimDueQueries = async (pg: PgName, limit: number) => (pg === 'SIMULATOR' ? claim.promise : original(pg, limit));
+      const ticking = resolver.tick();
+      await flush();
+      const stopping = resolver.stop();
+      claim.resolve([job()]);
+      await ticking;
+      await stopping;
+      expect(tokensLeft(guards)).toBe(60);
+    });
+
+    test('P-T40_리뷰 고침 M6: 잡기가 던지면 미리 뺀 토큰을 모두 돌려준다 [ASVS v5.0.0-16.5.2]', async () => {
+      const { queries, guards, resolver } = setup();
+      queries.claims = [throws(new Error('연결 실패'))];
+      await resolver.tick();
+      expect(tokensLeft(guards)).toBe(60);
+    });
+
+    test('P-T40_리뷰 고침 M6: 토큰이 없으면 잡지 않고, 기다리는 행이 있을 때만 saturated를 센다 [ASVS v5.0.0-2.4.1] [ASVS v5.0.0-16.3.4]', async () => {
+      const a = setup();
+      drain(a.guards);
+      a.guardSignals.saturateds.length = 0;
+      await expect(a.resolver.tick()).resolves.toEqual({ claimed: 0 });
+      expect(a.queries.limits).toEqual([]);
+      expect(a.guardSignals.saturateds).toEqual([['SIMULATOR', 'token']]);
+
+      const b = setup();
+      drain(b.guards);
+      b.guardSignals.saturateds.length = 0;
+      b.queries.due.set('SIMULATOR', false);
+      await b.resolver.tick();
+      expect(b.guardSignals.saturateds).toEqual([]);
+    });
+
+    test('P-T40_리뷰 고침 H1: 조회도 채널마다 따로 잡아 한 채널의 잡기가 늦어도 다른 채널은 돈다 [ASVS v5.0.0-15.1.3]', async () => {
+      const adapter = new FakeGateway([]) as unknown as PaymentGatewayPort;
+      const gateways: PaymentGateways = { of: (pg) => (pg === 'PORTONE' ? undefined : adapter) };
+      const guards = new PgCallGuards({ gateways, podCount: 1, clock: fakeClock({ now: NOW }), signals: new FakeGuardSignals(), log: { throttledFirst: () => undefined } });
+      const { queries, timer, resolver } = setup({ gateways, guards });
+      const gate = deferred();
+      queries.otherGate = gate.promise;
+      resolver.start();
+      timer.fire();
+      await flush();
+      timer.fire();
+      await flush();
+      expect(queries.limits).toHaveLength(2);
+      gate.resolve();
+      await resolver.stop();
+    });
+
+    test('P-T40_리뷰 고침 M6: 어댑터가 없는 채널의 행도 빈자리만큼 잡아 no_adapter로 드러낸다(토큰을 쓰지 않는다) [ASVS v5.0.0-16.5.2]', async () => {
+      const { queries, resolver } = setup({ concurrency: 4 });
+      await resolver.tick();
+      expect(queries.otherLimits).toEqual([
+        ['TOSS', 2],
+        ['PORTONE', 2],
+      ]);
+    });
+
+    test('P-T40_리뷰 고침 H1: 어댑터가 있는 채널들은 빈자리를 나눠 잡아 앞 채널이 뒤 채널을 굶기지 않는다 [ASVS v5.0.0-15.1.3]', async () => {
+      const seen: [PgName, number][] = [];
+      const gateways: PaymentGateways = { of: () => new FakeGateway([]) as unknown as PaymentGatewayPort };
+      const guards = new PgCallGuards({ gateways, podCount: 1, clock: fakeClock({ now: NOW }), signals: new FakeGuardSignals(), log: { throttledFirst: () => undefined } });
+      const { queries, resolver } = setup({ gateways, guards, concurrency: 16 });
+      queries.claimDueQueries = async (pg: PgName, limit: number) => {
+        seen.push([pg, limit]);
+        return [];
+      };
+      await resolver.tick();
+      expect(seen).toEqual([
+        ['TOSS', 6],
+        ['PORTONE', 5],
+        ['SIMULATOR', 5],
+      ]);
+    });
   });
 });
 
@@ -792,6 +1036,6 @@ describe('저장소 입력 검사', () => {
   const store = () => new DrizzleConfirmJobs({ database: {} as Database, clock: systemClock });
 
   test.each([0, -1, 1.5, Number.NaN])('PRF182_claimDueQueries의 limit이 %s이면 RangeError다', async (limit) => {
-    await expect(store().claimDueQueries(limit)).rejects.toBeInstanceOf(RangeError);
+    await expect(store().claimDueQueries('SIMULATOR', limit)).rejects.toBeInstanceOf(RangeError);
   });
 });

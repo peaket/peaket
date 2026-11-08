@@ -3,7 +3,8 @@
 // - 읽기 시간 초과는 60초 [가정](payment §2.1 '읽기 시간 초과 권장'). 끊김·시간 초과·5xx는 결과 모름(UNKNOWN)이다.
 // - 결과 코드는 payment §2.1 '공통 결과 코드 정규화'와 '분석용 실패 범주'로 바꾼다. 대응표는 이 파일과 계약 시험이 정본이다.
 // - 승인 답의 읽기(PRF-181 코드 리뷰, PRF-184가 이 꼴을 물려받는다): 거절로 읽는 것은 JSON code가 있는 4xx뿐이다. 200이 아닌 2xx·3xx·408·JSON code가 없는 4xx와 그 밖은
-//   결제사가 무엇을 했는지 모르므로 UNKNOWN이다. 200 답은 주문 ID를 대조해 다르면 UNKNOWN이다.
+//   결제사가 무엇을 했는지 모르므로 UNKNOWN이다. 200 답은 주문 ID를 대조해 다르면 UNKNOWN이다. 다만 429는 code와 상관없이 한도 초과다(PRF-183 코드 리뷰, 조회와 같다. 처리되지 않은 요청이라 재전송으로 넘긴다).
+// - 연결 묶음(PRF-183 코드 리뷰): 승인·취소는 fetch, 조회(GET)는 queryFetch로 나간다(승인 호출이 연결을 다 쥐어도 조회가 막히지 않게). queryFetch가 없으면 fetch 하나다.
 // - 조회 답의 읽기(PRF-182 코드 리뷰, PRF-184가 이 꼴을 물려받는다): NOT_FOUND는 JSON code가 NOT_FOUND_PAYMENT인 404뿐이다. 그 밖의 404·JSON이 아닌 답은 UNKNOWN이다.
 import { createExternalHttpClient, systemClock, type Clock, type ExternalHttpClient } from '@peaket/platform';
 import {
@@ -41,6 +42,8 @@ export interface SimulatorGatewayOptions {
   callsPerSecond?: number;
   clock?: Clock;
   fetch?: typeof fetch;
+  /** 조회(GET) 전용 연결 묶음의 fetch. 없으면 fetch를 쓴다 */
+  queryFetch?: typeof fetch;
 }
 
 const TRANSMISSION_ID = 'tosspayments-webhook-transmission-id';
@@ -74,12 +77,15 @@ const num = (v: unknown): number | undefined => (typeof v === 'number' && Number
 export class SimulatorPaymentGateway implements PaymentGatewayPort {
   readonly pg = 'SIMULATOR' as const;
   private readonly http: ExternalHttpClient;
+  private readonly queryHttp: ExternalHttpClient;
   private readonly authorization: string;
   private readonly clock: Clock;
 
   constructor(private readonly o: SimulatorGatewayOptions) {
     this.clock = o.clock ?? systemClock;
-    this.http = createExternalHttpClient({ provider: 'pg-simulator', baseUrl: o.baseUrl, timeoutCapMs: o.readTimeoutMs ?? DEFAULT_READ_TIMEOUT_MS, clock: o.clock, fetch: o.fetch });
+    const client = (f: typeof fetch | undefined) => createExternalHttpClient({ provider: 'pg-simulator', baseUrl: o.baseUrl, timeoutCapMs: o.readTimeoutMs ?? DEFAULT_READ_TIMEOUT_MS, clock: o.clock, fetch: f });
+    this.http = client(o.fetch);
+    this.queryHttp = o.queryFetch === undefined ? this.http : client(o.queryFetch);
     this.authorization = `Basic ${Buffer.from(`${o.secretKey}:`).toString('base64')}`;
   }
 
@@ -126,10 +132,11 @@ export class SimulatorPaymentGateway implements PaymentGatewayPort {
       return { outcome: 'APPROVED', ...this.approvedFields(c.paymentRef, r.json!) };
     }
     const code = str(r.json?.code);
+    // 429는 어디서 왔든 결제사까지 처리되지 않은 요청이다. 재전송 다음 시도만 늦춘다(조회의 429와 같다)
+    if (r.status === 429) return { outcome: 'DECLINED', paymentRef: c.paymentRef, failureCategory: 'THROTTLED', ...(code ? { pgCode: code } : {}) };
     // 결제사가 코드로 답한 4xx만 거절로 읽는다. 나머지(200이 아닌 2xx·3xx·408·JSON code가 없는 4xx)는 중간 장비의 답일 수 있어 결과를 가정하지 않는다
     if (r.status < 400 || r.status === 408 || !code) return unknown;
     const declined = (failureCategory: FailureCategory): ConfirmResult => ({ outcome: 'DECLINED', paymentRef: c.paymentRef, failureCategory, pgCode: code });
-    if (r.status === 429) return declined('THROTTLED');
     if (r.status === 409 || code === 'ALREADY_PROCESSING_REQUEST') return { outcome: 'IN_PROGRESS', paymentRef: c.paymentRef, pgCode: code };
     if (code === 'ALREADY_PROCESSED_PAYMENT') {
       // 승인 + 조회의 합이 임대를 넘지 않게 남은 몫만 기다리고, 몫을 다 썼으면 부르지 않는다
@@ -153,6 +160,8 @@ export class SimulatorPaymentGateway implements PaymentGatewayPort {
     const timeoutCapMs = options?.timeoutMs === undefined ? undefined : Math.min(options.timeoutMs, this.o.readTimeoutMs ?? DEFAULT_READ_TIMEOUT_MS);
     const r = await this.call('GET', '/v1/payments/{paymentKey}', { paymentKey: paymentRef }, undefined, undefined, timeoutCapMs);
     if (r === 'NO_ANSWER') return { kind: 'UNKNOWN' };
+    // 조회의 429는 다음 시도만 늦춘다. 표시만 실어 지표에 세게 한다(BUILD_ORDER PRF-183, PRF-184가 이 꼴을 물려받는다)
+    if (r.status === 429) return { kind: 'UNKNOWN', throttled: true };
     // 결제사의 정해진 코드일 때만 없음이다. 그 밖의 404는 중간 장비의 답일 수 있다(PRF-182 코드 리뷰, PRF-184가 이 꼴을 물려받는다)
     if (r.status === 404) return str(r.json?.code) === NOT_FOUND_PAYMENT ? { kind: 'NOT_FOUND' } : { kind: 'UNKNOWN' };
     const status = STATUS[str(r.json?.status) ?? ''];
@@ -215,7 +224,7 @@ export class SimulatorPaymentGateway implements PaymentGatewayPort {
 
   private async call(method: 'GET' | 'POST', path: string, params: Record<string, string>, body?: unknown, idemKey?: string, timeoutCapMs?: number): Promise<Reply> {
     try {
-      const res = await this.http.request({
+      const res = await (method === 'GET' ? this.queryHttp : this.http).request({
         method,
         path,
         params,

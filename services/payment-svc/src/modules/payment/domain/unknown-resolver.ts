@@ -35,6 +35,8 @@ export const UNKNOWN_OVERDUE_SWEEP_INTERVAL_MS = 60_000;
 export const UNKNOWN_OVERDUE_BATCH = 100;
 /** 어댑터 없음 경고 간격(파드당 1분에 한 줄) [가정] */
 export const UNKNOWN_NO_ADAPTER_WARN_INTERVAL_MS = 60_000;
+/** 토큰이 없어 부르지 못한 행의 다음 조회까지 1초 [가정](잡기 주기와 같다, BUILD_ORDER PRF-183) */
+export const UNKNOWN_QUERY_NO_TOKEN_DELAY_MS = 1_000;
 
 /** payment_event·trade.payments의 UNKNOWN 해소 기록(ADR-0073). 결과는 결과 사건이 따로 나간다 */
 export const RESOLVED_EVENT_TYPE = 'RESOLVED';
@@ -76,7 +78,7 @@ export type UnknownRunOutcome =
   | { readonly kind: 'RESOLVED'; readonly status: ResolvedFinish['status']; readonly outcome: 'approved' | 'failed' | 'waiting' }
   | { readonly kind: 'ASKED_AGAIN'; readonly outcome: PaymentUnknownQueryOutcome }
   | { readonly kind: 'STALE' }
-  | { readonly kind: 'SKIPPED'; readonly reason: 'STOPPED' }
+  | { readonly kind: 'SKIPPED'; readonly reason: 'STOPPED' | 'NO_TOKEN' }
   | { readonly kind: 'WRITE_FAILED' };
 
 const STILL_PROCESSING: QueryDecision = { kind: 'ASK_AGAIN', outcome: 'still_processing' };

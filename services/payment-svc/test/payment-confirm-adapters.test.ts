@@ -244,7 +244,7 @@ describe('DrizzleConfirmJobs(DB에 가기 전)', () => {
     return { database, options };
   }
   const clock = { now: () => NOW, monotonicMs: () => 0 };
-  const job: ConfirmJob = { paymentId: PAYMENT_ID, attempts: 1, owner: 'p', leaseUntilMs: NOW + 1, hadPreviousOwner: false };
+  const job: ConfirmJob = { paymentId: PAYMENT_ID, pg: 'SIMULATOR', attempts: 1, owner: 'p', leaseUntilMs: NOW + 1, hadPreviousOwner: false };
   const target: ConfirmTarget = {
     paymentId: PAYMENT_ID,
     orderId: ORDER_ID,
@@ -268,13 +268,27 @@ describe('DrizzleConfirmJobs(DB에 가기 전)', () => {
     ['owner 빈 글', 1, '', 1],
   ])('PRF181_claimDue %s는 DB에 가기 전에 RangeError다', async (_name, limit, owner, leaseMs) => {
     const d = fakeDatabase();
-    const err = await rejectedBy(new DrizzleConfirmJobs({ database: d.database, clock }).claimDue(limit, owner, leaseMs));
+    const err = await rejectedBy(new DrizzleConfirmJobs({ database: d.database, clock }).claimDue('SIMULATOR', limit, owner, leaseMs));
+    expect(err).toBeInstanceOf(RangeError);
+    expect(d.options).toEqual([]);
+  });
+
+  test.each([
+    ['limit 0', 0, 'p', 1, 1],
+    ['leaseMs 0', 1, 'p', 0, 1],
+    ['deadlineMs 0', 1, 'p', 1, 0],
+    ['deadlineMs 소수', 1, 'p', 1, 0.5],
+    ['owner 빈 글', 1, '', 1, 1],
+  ])('P-T40_리뷰 고침 M5: claimExpired %s는 DB에 가기 전에 RangeError다', async (_name, limit, owner, leaseMs, deadlineMs) => {
+    const d = fakeDatabase();
+    const err = await rejectedBy(new DrizzleConfirmJobs({ database: d.database, clock }).claimExpired('SIMULATOR', limit, owner, leaseMs, deadlineMs));
     expect(err).toBeInstanceOf(RangeError);
     expect(d.options).toEqual([]);
   });
 
   test.each<[string, (j: DrizzleConfirmJobs) => Promise<unknown>]>([
-    ['claimDue', (j) => j.claimDue(1, 'p', 1)],
+    ['claimDue', (j) => j.claimDue('SIMULATOR', 1, 'p', 1)],
+    ['claimExpired', (j) => j.claimExpired('SIMULATOR', 1, 'p', 1, 1)],
     ['markSent', (j) => j.markSent(job)],
     ['finish', (j) => j.finish(target, { status: 'UNKNOWN', result: 'UNKNOWN' })],
     ['reschedule', (j) => j.reschedule(job, NOW, { countRetry: false })],

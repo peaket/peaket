@@ -2,6 +2,7 @@
 import type { ConfirmPaymentCommand, PaymentRecord, PaymentState } from './confirm-command.js';
 import type { ConfirmFinish, ConfirmJob, ConfirmTarget, PaymentConfirmOutcome, PaymentEventMessage } from './confirm-runner.js';
 import type { PaymentGatewayPort, PgName } from './payment-gateway.js';
+import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
 import type { PaymentUnknownQueryOutcome, ResolvedFinish, UnknownQueryJob } from './unknown-resolver.js';
 
 /** 새 결제를 쓸 때 쓰임새가 만들어 넘기는 값 */
@@ -77,12 +78,22 @@ export type FinishConfirmResult = 'APPLIED' | 'STALE';
  */
 export interface PaymentConfirmJobs {
   /**
-   * 짧은 트랜잭션 하나에서 `next_attempt_at <= 지금 AND (lease_until IS NULL OR lease_until < 지금)`인 행을 `FOR UPDATE SKIP LOCKED`로 limit개 골라
+   * 짧은 트랜잭션 하나에서 그 결제사의 `next_attempt_at <= 지금 AND (lease_until IS NULL OR lease_until < 지금)`인 행을 `payment_confirm_job_claim_idx`로 `FOR UPDATE SKIP LOCKED`(결제 표는 조인하지 않는다)로 limit개 골라
    * lease_owner = owner, lease_until = 지금 + leaseMs를 쓰고 커밋한다(attempts는 올리지 않는다). 고른 차례(next_attempt_at, 같으면 payment_id)로 돌려준다.
    * hadPreviousOwner는 쓰기 전의 lease_owner가 차 있었는가다.
    * @throws RangeError limit·leaseMs가 1 이상의 정수가 아님, owner가 빈 글
    */
-  claimDue(limit: number, owner: string, leaseMs: number): Promise<ConfirmJob[]>;
+  claimDue(pg: PgName, limit: number, owner: string, leaseMs: number): Promise<ConfirmJob[]>;
+
+  /**
+   * 승인 기한이 지난 행만 limit개 잡는다(벌크헤드·토큰과 상관없이 부르지 않고 끝내는 길, BUILD_ORDER PRF-183 코드 리뷰). 조건은 claimDue에 `payment.authenticated_at <= 지금 − deadlineMs`를 더한 것이고 명령 행만 잠근다.
+   * 표 앞쪽 CONFIRM_EXPIRED_SCAN행만 원장과 대조한다.
+   * @throws RangeError limit·leaseMs·deadlineMs가 1 이상의 정수가 아님, owner가 빈 글
+   */
+  claimExpired(pg: PgName, limit: number, owner: string, leaseMs: number, deadlineMs: number): Promise<ConfirmJob[]>;
+
+  /** 그 채널에 지금 잡을 수 있는 행이 있는가(여유가 0인 틱에서 상한에 막혔는지 가린다) */
+  hasDue(pg: PgName): Promise<boolean>;
 
   /** 원장 행과 CONFIRM_SENT 표시 유무를 한 문장으로 읽는다. 행이 없으면 undefined */
   read(paymentId: string): Promise<ConfirmTarget | undefined>;
@@ -162,16 +173,20 @@ export type ResolveUnknownResult = 'APPLIED' | 'STALE';
 /** UNKNOWN 조회 저장소(모든 쓰기는 READ COMMITTED, 문장 시간 한도 CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS) */
 export interface PaymentUnknownQueries {
   /**
-   * 짧은 트랜잭션 하나에서 `status = 'UNKNOWN' AND next_query_at <= 지금`인 행을 `FOR UPDATE SKIP LOCKED`로 limit개 고르고(next_query_at 차례),
+   * 짧은 트랜잭션 하나에서 그 결제사의 `status = 'UNKNOWN' AND next_query_at <= 지금`인 행을 `FOR UPDATE SKIP LOCKED`로 limit개 고르고(next_query_at 차례),
    * 행마다 next_query_at = 지금 + unknownQueryClaimHoldMs(query_attempts + 1), query_attempts + 1을 쓴 뒤 커밋한다. 고른 차례로 돌려준다.
    * @throws RangeError limit이 1 이상의 정수가 아님
    */
-  claimDueQueries(limit: number): Promise<UnknownQueryJob[]>;
+  claimDueQueries(pg: PgName, limit: number): Promise<UnknownQueryJob[]>;
+
+  /** 그 채널에 지금 조회할 행이 있는가(토큰이 없는 틱에서 상한에 막혔는지 가린다) */
+  hasDueQueries(pg: PgName): Promise<boolean>;
 
   /**
-   * 답을 본 뒤 그대로 둘 때의 다음 조회 시각을 쓴다. 조건은 `status = 'UNKNOWN' AND next_query_at = 이 잡기가 쓴 값`이다(늦은 답이 다른 파드의 잡기를 덮어쓰지 않는다). 썼으면 true
+   * 답을 본 뒤 그대로 둘 때의 다음 조회 시각을 쓴다. 조건은 `status = 'UNKNOWN' AND next_query_at = 이 잡기가 쓴 값`이다(늦은 답이 다른 파드의 잡기를 덮어쓰지 않는다). 썼으면 true.
+   * refundAttempt가 참이면 잡을 때 올린 query_attempts를 1 되돌린다(토큰이 없어 부르지 않은 행의 간격이 늘지 않게, BUILD_ORDER PRF-183)
    */
-  rescheduleQuery(job: UnknownQueryJob, nextAtMs: number): Promise<boolean>;
+  rescheduleQuery(job: UnknownQueryJob, nextAtMs: number, o?: { readonly refundAttempt?: boolean }): Promise<boolean>;
 
   /** `status = 'UNKNOWN' AND anomaly_logged_at IS NULL` 조건으로 anomaly_logged_at = 지금을 쓴다. 이번에 썼으면 true(그때만 SEV1 로그를 낸다) */
   markAnomalyLogged(job: UnknownQueryJob): Promise<boolean>;
@@ -222,4 +237,24 @@ export interface PaymentUnknownSignals {
   inFlight(count: number): void;
   /** payment_unknown_write_failures_total을 1 올린다 */
   writeFailure(): void;
+}
+
+// ---- 결제사 호출 보호(BUILD_ORDER PRF-183, docs/features/payment.md §2 '결제사 호출 보호의 첫 구현') ----
+
+/** 호출 보호 지표(docs/observability.md 같은 줄). 던지지 않는다 */
+export interface PgCallGuardSignals {
+  /** pg_throttled_total{pg, first}를 1 올린다 */
+  throttled(pg: PgName, first: boolean): void;
+  /** payment_pg_limit{pg, kind}를 둔다 */
+  limit(pg: PgName, kind: PgLimitKind, value: number): void;
+  /** payment_pg_inflight{pg}를 돌고 있는 승인 호출 수로 둔다 */
+  inflight(pg: PgName, count: number): void;
+  /** payment_pg_saturated_total{pg, reason}를 1 올린다 */
+  saturated(pg: PgName, reason: PgSaturationReason): void;
+}
+
+/** 호출 보호의 로그(결제사와 낮춘 뒤 상한만 싣는다). 던지지 않는다 */
+export interface PgCallGuardLog {
+  /** 첫 승인 호출이 429를 받아 상한을 낮췄다(SEV2, kind pg-throttled-first) */
+  throttledFirst(e: { readonly pg: PgName; readonly rps: number; readonly concurrency: number }): void;
 }

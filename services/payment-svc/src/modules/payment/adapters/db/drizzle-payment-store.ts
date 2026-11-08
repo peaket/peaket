@@ -86,7 +86,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
       }
 
       await tx.insert(paymentEvent).values({ paymentId: values.paymentId, seq: 1, eventKey: values.eventKey, type: 'ACCEPTED', exported: false, occurredAt: now });
-      await tx.insert(paymentConfirmJob).values({ paymentId: values.paymentId, nextAttemptAt: now, createdAt: now });
+      await tx.insert(paymentConfirmJob).values({ paymentId: values.paymentId, pg: command.pg, nextAttemptAt: now, createdAt: now });
       return { kind: 'CREATED', record: { paymentId: values.paymentId, orderId: command.orderId, attemptId: command.attemptId, pg: command.pg, amount: command.amount, status: 'ACCEPTED' } };
     }, CONFIRM_TRANSACTION);
   }

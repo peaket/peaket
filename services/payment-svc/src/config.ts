@@ -7,6 +7,10 @@ export const DEFAULT_PAYMENT_GRPC_PORT = 50051;
 export const PAYMENT_HOT_POOL_MAX = 16;
 /** 파드마다 일반 풀 연결 4개 [가정](BatchGetPayments, applicationName payment-svc-batch) */
 export const PAYMENT_BATCH_POOL_MAX = 4;
+/** local·ci에서 PEAKET_PAYMENT_POD_COUNT가 비었을 때의 파드 수 1개 [가정] */
+export const DEFAULT_PAYMENT_POD_COUNT = 1;
+/** PEAKET_PAYMENT_POD_COUNT의 상한 1000 [가정](값을 잘못 넣어 파드당 상한이 0에 가까워지는 일을 막는다) */
+export const MAX_PAYMENT_POD_COUNT = 1_000;
 
 export interface PaymentServiceConfig {
   /** PEAKET_DATABASE_URL */
@@ -42,6 +46,26 @@ export function loadSimulatorGatewayConfig(env: Record<string, string | undefine
   const clientKey = env.PEAKET_PG_SIM_CLIENT_KEY;
   if (!clientKey) throw new Error('PEAKET_PG_SIM_CLIENT_KEY가 없다(PEAKET_PG_SIM_URL이 있으면 있어야 한다)');
   return { baseUrl, secretKey, clientKey };
+}
+
+export interface PgCallGuardConfig {
+  /** PEAKET_PAYMENT_POD_COUNT: 그 서비스의 최대 복제 수(local·ci에서 비면 1 [가정]) */
+  readonly podCount: number;
+}
+
+/**
+ * 결제사 호출 보호 설정을 읽는다(BUILD_ORDER PRF-183). 파드 수를 1로 잘못 보면 결제사 상한을 파드 수 배로 넘기므로 local·ci 밖에서는 반드시 받는다.
+ * @throws Error local·ci 밖에서 PEAKET_PAYMENT_POD_COUNT가 비어 있음, 1~MAX_PAYMENT_POD_COUNT의 정수가 아님(시작 실패)
+ */
+export function loadPgCallGuardConfig(env: Record<string, string | undefined>): PgCallGuardConfig {
+  const raw = env.PEAKET_PAYMENT_POD_COUNT?.trim();
+  if (!raw) {
+    if (env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci') return { podCount: DEFAULT_PAYMENT_POD_COUNT };
+    throw new Error('PEAKET_PAYMENT_POD_COUNT가 없다(local·ci 밖에서는 그 서비스의 최대 복제 수를 넣는다)');
+  }
+  const podCount = Number(raw);
+  if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(podCount) || podCount < 1 || podCount > MAX_PAYMENT_POD_COUNT) throw new Error(`PEAKET_PAYMENT_POD_COUNT가 1~${MAX_PAYMENT_POD_COUNT}의 정수가 아니다: ${raw}`);
+  return { podCount };
 }
 
 /** 외부 호출 클라이언트가 받는 주소 모양인지 본다(잘못된 주소가 듣기 시작한 뒤에 드러나지 않게). 값에 비밀번호가 있을 수 있어 글에 싣지 않는다 */

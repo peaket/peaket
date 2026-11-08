@@ -114,7 +114,25 @@ async function startService(extra: Record<string, string> = {}): Promise<Service
   await until(live, '준비 프로브 /ready', 60_000, 100);
   const client = paymentClient(`127.0.0.1:${grpcPort}`);
   await new Promise<void>((resolve, reject) => client.waitForReady(new Date(Date.now() + 20_000), (e) => (e ? reject(e) : resolve())));
+  await warmHotPool(client);
   return { ...running, managementPort, grpcPort, client, exitedAt: () => gone };
+}
+
+/**
+ * 핫패스 풀의 첫 연결을 맺어 둔다. 핫패스 풀은 연결을 100ms만 기다리는데 첫 연결이 그보다 오래 걸리면 첫 ConfirmPayment가 UNAVAILABLE을 받는다(운영의 '풀 대기 초과'와 같은 답이고 시험할 것이 아니다).
+ * UNAVAILABLE만 정해진 횟수로 다시 하고, 뒤의 시험은 이미 맺어진 연결로 돈다. 쓰는 주문은 토스라 시뮬레이터 호출을 만들지 않는다.
+ */
+async function warmHotPool(client: PaymentClient): Promise<void> {
+  const f = tossConfirm();
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await unary(client, 'ConfirmPayment', f.request);
+      return;
+    } catch (e) {
+      if ((e as { code?: number }).code !== grpc.status.UNAVAILABLE || attempt >= 50) throw e;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
 }
 
 const service = (): Promise<Service> => (started ??= startService({}));

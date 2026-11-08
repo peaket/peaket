@@ -17,6 +17,9 @@ const MIGRATIONS = join(SERVICE, 'migrations');
 const TAG = '0000_payment';
 const TAG_0001 = '0001_payment_failure_category';
 const TAG_0002 = '0002_payment_unknown_query';
+const TAG_0003 = '0003_payment_confirm_job_pg';
+const JOB_PG_CHECK = 'payment_confirm_job_pg_check';
+const JOB_CLAIM_INDEX = 'payment_confirm_job_claim_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
 const TZ = 'timestamp with time zone';
@@ -58,9 +61,10 @@ const ADDED_OVERDUE_INDEX_0002 = 'payment_unknown_status_changed_idx';
 const ADDED_CHECK_0002 = 'payment_unknown_next_query_check';
 const SHAPES_0000 = SHAPES.map((s) => ({
   ...s,
-  columns: s.columns.filter((c) => c.name !== ADDED_COLUMN && !ADDED_COLUMNS_0002.includes(c.name)),
-  checks: s.checks.filter((k) => k.name !== ADDED_CHECK && k.name !== ADDED_CHECK_0002),
-  indexes: s.indexes.filter((i) => i.name !== ADDED_INDEX_0002 && i.name !== ADDED_OVERDUE_INDEX_0002),
+  columns: s.columns.filter((c) => c.name !== ADDED_COLUMN && !ADDED_COLUMNS_0002.includes(c.name) && !(s.name === 'payment_confirm_job' && c.name === 'pg')),
+  checks: s.checks.filter((k) => k.name !== ADDED_CHECK && k.name !== ADDED_CHECK_0002 && k.name !== JOB_PG_CHECK),
+  // 0003이 잡기 색인을 바꾼다(0000은 next_attempt_at 하나짜리다)
+  indexes: s.name === 'payment_confirm_job' ? [{ name: 'payment_confirm_job_next_idx', unique: false, columns: ['next_attempt_at'] }] : s.indexes.filter((i) => i.name !== ADDED_INDEX_0002 && i.name !== ADDED_OVERDUE_INDEX_0002),
 }));
 
 describe('표 정의(schema.ts)', () => {
@@ -114,6 +118,7 @@ describe('표 정의(schema.ts)', () => {
   test('PRF180_payment_confirm_job의 열이 ERD와 같다(임대 두 칸만 비울 수 있다)', () => {
     expect(cols(jobShape)).toEqual([
       ['payment_id', 'uuid', true],
+      ['pg', 'text', true],
       ['next_attempt_at', TZ, true],
       ['lease_owner', 'text', false],
       ['lease_until', TZ, false],
@@ -144,7 +149,7 @@ describe('표 정의(schema.ts)', () => {
       { name: ADDED_OVERDUE_INDEX_0002, unique: false, columns: ['status_changed_at'] },
     ]);
     expect(eventShape.indexes).toEqual([]);
-    expect(jobShape.indexes).toEqual([{ name: 'payment_confirm_job_next_idx', unique: false, columns: ['next_attempt_at'] }]);
+    expect(jobShape.indexes).toEqual([{ name: JOB_CLAIM_INDEX, unique: false, columns: ['pg', 'next_attempt_at', 'payment_id'] }]);
   });
 
   test('P-T53_이력과 승인 명령은 결제에 외래 키를 건다(결제 없는 행이 남지 않는다) [ASVS v5.0.0-2.3.3]', () => {
@@ -211,7 +216,7 @@ describe('표 정의(schema.ts)', () => {
     expect(checkOf(paymentShape, 'payment_unknown_next_query_check')).toBe("status <> 'UNKNOWN' or next_query_at is not null");
   });
 
-  test('PRF181_PRF182_CHECK 제약은 0000의 일곱에 0001의 failure_category와 0002의 다음 조회 시각을 더한 아홉뿐이다', () => {
+  test('PRF181_PRF182_PRF183_CHECK 제약은 0000의 일곱에 0001의 failure_category, 0002의 다음 조회 시각, 0003의 명령 행 결제사를 더한 열뿐이다', () => {
     expect(SHAPES.flatMap((s) => s.checks.map((k) => k.name))).toEqual([
       'payment_unknown_next_query_check',
       'payment_status_check',
@@ -222,6 +227,7 @@ describe('표 정의(schema.ts)', () => {
       'payment_failure_category_check',
       'payment_event_seq_check',
       'payment_confirm_job_attempts_check',
+      JOB_PG_CHECK,
     ]);
   });
 });
@@ -388,6 +394,47 @@ describe('마이그레이션 SQL(0002_payment_unknown_query.sql)', () => {
   });
 });
 
+describe('마이그레이션 SQL(0003_payment_confirm_job_pg.sql)', () => {
+  const file = join(MIGRATIONS, `${TAG_0003}.sql`);
+  const sqlFile = existsSync(file) ? readFileSync(file, 'utf8').replace(/\r\n/g, '\n') : '';
+  const noComments = sqlFile.replace(/^--.*$/gm, '');
+  const statements = noComments
+    .split(BREAKPOINT)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const canonOf = (needle: string): string => canon(statements.find((s) => s.includes(needle)) ?? '').replace(/;$/, '');
+
+  test('P-T40_리뷰 고침 H1: 문은 옛 잡기 색인 지우기, 칸 더하기, CHECK 더하기, 새 잡기 색인 만들기 넷이다', () => {
+    expect(statements.map((s) => /^(DROP INDEX "[a-z_]+"|ALTER TABLE "payment_confirm_job" ADD (COLUMN|CONSTRAINT) "[a-z_]+"|CREATE INDEX "[a-z_]+")/.exec(s)?.[0]).sort()).toEqual(
+      [
+        'ALTER TABLE "payment_confirm_job" ADD COLUMN "pg"',
+        `ALTER TABLE "payment_confirm_job" ADD CONSTRAINT "${JOB_PG_CHECK}"`,
+        `CREATE INDEX "${JOB_CLAIM_INDEX}"`,
+        'DROP INDEX "payment_confirm_job_next_idx"',
+      ].sort(),
+    );
+  });
+
+  test('P-T40_리뷰 고침 H1: 칸은 text NOT NULL이고 기본값이 없다(원장의 결제사를 접수 때 그대로 쓴다)', () => {
+    expect(canonOf('ADD COLUMN "pg"')).toBe('alter table payment_confirm_job add column pg text not null');
+  });
+
+  test('P-T40_리뷰 고침 H1: CHECK는 결제사 셋이고 schema.ts와 같은 이름·식이다 [ASVS v5.0.0-2.2.1]', () => {
+    expect(checkOf(jobShape, JOB_PG_CHECK)).toBe("pg in('TOSS','PORTONE','SIMULATOR')");
+    expect(canonOf(`ADD CONSTRAINT "${JOB_PG_CHECK}"`)).toBe(`alter table payment_confirm_job add constraint ${JOB_PG_CHECK} check(${checkOf(jobShape, JOB_PG_CHECK)})`);
+  });
+
+  test('P-T40_리뷰 고침 H1: 잡기 색인은 (pg, next_attempt_at, payment_id)다(채널마다 그 채널의 행만 본다) [ASVS v5.0.0-15.1.3]', () => {
+    expect(jobShape.indexes).toEqual([{ name: JOB_CLAIM_INDEX, unique: false, columns: ['pg', 'next_attempt_at', 'payment_id'] }]);
+    expect(canonOf(`CREATE INDEX "${JOB_CLAIM_INDEX}"`)).toBe(`create index ${JOB_CLAIM_INDEX} on payment_confirm_job using btree(pg,next_attempt_at,payment_id)`);
+  });
+
+  test('P-T40_리뷰 고침 H1: 표에 행이 없는 전제를 머리 주석에 적고, 표를 지우거나 다른 표를 건드리지 않는다', () => {
+    expect(sqlFile).toMatch(/행이 없다/);
+    expect(noComments).not.toMatch(/\b(TRUNCATE|DELETE FROM|UPDATE "|RENAME|CREATE TABLE|DROP TABLE)\b/);
+  });
+});
+
 describe('마이그레이션 기록(migrations/meta)', () => {
   const journal = JSON.parse(readFileSync(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { dialect: string; entries: { idx: number; tag: string; when: number; breakpoints: boolean }[] };
   interface SnapTable {
@@ -401,14 +448,16 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const snapshotOf = (file: string): Snapshot => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', file), 'utf8')) as Snapshot;
   const snapshot = snapshotOf('0000_snapshot.json');
   const second = snapshotOf('0001_snapshot.json');
-  const latest = snapshotOf('0002_snapshot.json');
+  const third = snapshotOf('0002_snapshot.json');
+  const latest = snapshotOf('0003_snapshot.json');
 
-  test('PRF182_기록은 0000·0001·0002 차례이고 SQL 파일과 맞는다', () => {
+  test('PRF182_PRF183_기록은 0000·0001·0002·0003 차례이고 SQL 파일과 맞는다', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
       [1, TAG_0001],
       [2, TAG_0002],
+      [3, TAG_0003],
     ]);
     for (const e of journal.entries) {
       expect(e.breakpoints, e.tag).toBe(true);
@@ -417,11 +466,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     }
     expect(journal.entries[1]!.when).toBeGreaterThan(journal.entries[0]!.when);
     expect(journal.entries[2]!.when).toBeGreaterThan(journal.entries[1]!.when);
+    expect(journal.entries[3]!.when).toBeGreaterThan(journal.entries[2]!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json']);
   });
 
   test('PRF180_첫 스냅샷은 앞이 없다', () => {
@@ -433,7 +483,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   });
 
   test('PRF182_0002 스냅샷의 앞은 0001 스냅샷이다', () => {
-    expect(latest.prevId).toBe(second.id);
+    expect(third.prevId).toBe(second.id);
+  });
+
+  test('P-T40_리뷰 고침 H1: 0003 스냅샷의 앞은 0002 스냅샷이고, 0002는 명령 행의 결제사 칸을 모른다', () => {
+    expect(latest.prevId).toBe(third.id);
+    expect(Object.keys(third.tables['public.payment_confirm_job']!.columns)).not.toContain('pg');
   });
 
   test('PRF182_0001 스냅샷은 0002가 더한 칸과 인덱스를 모른다', () => {

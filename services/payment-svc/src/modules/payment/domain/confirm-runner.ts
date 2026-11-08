@@ -14,8 +14,6 @@ import type { ConfirmResult, FailureCategory, PayMethodCategory, PgName } from '
 
 /** 잡기 주기 100ms [가정] */
 export const CONFIRM_RUNNER_POLL_INTERVAL_MS = 100;
-/** 파드당 동시 승인 호출 32건 [가정](PRF-183이 채널별 벌크헤드로 바꾼다) */
-export const CONFIRM_RUNNER_CONCURRENCY = 32;
 /** 임대 75초 [가정](읽기 시간 초과 60초 + 답 반영 여유) */
 export const CONFIRM_LEASE_MS = 75_000;
 /** 처리 중 재전송의 첫 간격 1초 [가정] */
@@ -28,10 +26,20 @@ export const CONFIRM_RETRY_MAX_MS = 30_000;
 export const CONFIRM_NO_ADAPTER_DELAY_MS = 30_000;
 /** 어댑터 없음 경고 간격(파드당 1분에 한 줄) [가정] */
 export const CONFIRM_NO_ADAPTER_WARN_INTERVAL_MS = 60_000;
+/** 어댑터가 없는 채널을 잡는 간격 1초 [가정](운영에는 그런 행이 없어 틱마다 묻지 않는다) */
+export const CONFIRM_NO_ADAPTER_CLAIM_INTERVAL_MS = 1_000;
+/** 어댑터가 없는 채널마다 동시 처리 8건 [가정](부르지 않고 미루기만 하므로 작게 잡는다) */
+export const CONFIRM_NO_ADAPTER_CONCURRENCY = 8;
 /** 답 반영 쓰기가 실패했을 때 다시 하기 전에 쉬는 시간(ms): 100ms·400ms 두 번 [가정] */
 export const CONFIRM_FINISH_RETRY_DELAYS_MS: readonly number[] = Object.freeze([100, 400]);
 /** 실행기 트랜잭션의 문장 시간 한도 5초 [가정](요청 밖이라 남은 시간이 없다. 발권 실행기 SAGA_STATEMENT_TIMEOUT_MS와 같은 값) */
 export const CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS = 5_000;
+/** 실행기가 승인 호출을 감싸는 한도 72초 [가정](어댑터의 시간 합 상한 70초 + 여유. 임대 75초보다 짧아 호출 중인 행을 다음 실행기가 잔해로 잡지 않는다) */
+export const CONFIRM_CALL_GUARD_MS = 72_000;
+/** 기한 지난 행을 틱마다 채널당 잡는 수(동시에도 이만큼까지) 50건 [가정](BUILD_ORDER PRF-183 코드 리뷰) */
+export const CONFIRM_EXPIRED_BATCH = 50;
+/** 기한 지난 행을 찾으려고 표 앞쪽에서 살펴보는 행 수 500건 [가정](밀린 표에서 틱마다 표 전체를 조인하지 않게) */
+export const CONFIRM_EXPIRED_SCAN = 500;
 
 /** payment_event의 내부 표시: 결제사 승인 호출 앞에 남긴다(exported = false, payment §4.2 5번) */
 export const CONFIRM_SENT_EVENT_TYPE = 'CONFIRM_SENT';
@@ -43,6 +51,8 @@ export type PaymentConfirmOutcome = (typeof PAYMENT_CONFIRM_OUTCOMES)[number];
 /** 잡은 승인 명령 한 행(claimDue의 결과) */
 export interface ConfirmJob {
   readonly paymentId: string;
+  /** 잡은 채널(claimDue의 pg, 보호기를 고른다) */
+  readonly pg: PgName;
   /** 지금까지 결제사 답(처리 중·한도 초과)으로 다시 미룬 횟수(0부터). 잡기·어댑터 없음·읽기 실패로는 오르지 않는다 */
   readonly attempts: number;
   /** 이 잡기가 쓴 lease_owner */
@@ -155,7 +165,7 @@ export interface BuildPaymentEventInput {
  * - FINISHED: 원장·사건·Outbox·명령 행 지움을 커밋했다
  * - STALE: 답을 쓰려니 원장이 ACCEPTED가 아니었다(늦은 답). 원장은 그대로 두고 명령 행만 지웠다
  * - RETRY: 명령 행을 미뤘다
- * - SKIPPED: 아무것도 쓰지 않았다. LEASE_LOST는 임대를 잃음, RELEASED는 멈춘 뒤라 임대를 놓음, READ_FAILED는 원장을 읽지 못해 임대를 그대로 둠(임대가 끝나면 다시 잡힌다)
+ * - SKIPPED: 아무것도 쓰지 않았다. LEASE_LOST는 임대를 잃음, RELEASED는 멈춘 뒤라 임대를 놓음, READ_FAILED는 원장을 읽지 못해 임대를 그대로 둠(임대가 끝나면 다시 잡힌다), NO_TOKEN은 토큰을 못 얻어 임대를 놓음(다음 틱에 다시 잡힌다, attempts는 오르지 않는다)
  * - WRITE_FAILED: 쓰기가 다시 해도 실패했다. 행을 그대로 두어 임대가 끝나면 다시 잡힌다
  */
 export type ConfirmRunOutcome =
@@ -163,7 +173,7 @@ export type ConfirmRunOutcome =
   | { readonly kind: 'FINISHED'; readonly status: ConfirmFinish['status']; readonly outcome: PaymentConfirmOutcome }
   | { readonly kind: 'STALE' }
   | { readonly kind: 'RETRY'; readonly outcome: 'in_progress' | 'no_adapter'; readonly nextAtMs: number }
-  | { readonly kind: 'SKIPPED'; readonly reason: 'LEASE_LOST' | 'RELEASED' | 'READ_FAILED' }
+  | { readonly kind: 'SKIPPED'; readonly reason: 'LEASE_LOST' | 'RELEASED' | 'READ_FAILED' | 'NO_TOKEN' }
   | { readonly kind: 'WRITE_FAILED'; readonly stage: 'mark' | 'finish' | 'reschedule' | 'drop' };
 
 const DROP_JOB: ConfirmGate = { kind: 'DROP_JOB' };

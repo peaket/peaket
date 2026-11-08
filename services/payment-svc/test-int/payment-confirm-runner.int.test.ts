@@ -27,11 +27,15 @@ import {
   CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS,
   type ConfirmJob,
   DrizzleConfirmJobs,
+  type PaymentGateways,
   PaymentConfirmRunner,
   type PaymentConfirmRunnerDeps,
   paymentConfirmLog,
   paymentEventKey,
+  PgCallGuards,
+  pgCallGuardLog,
   PromPaymentConfirmSignals,
+  PromPgCallGuardSignals,
   StaticPaymentGateways,
   TRADE_PAYMENTS_TOPIC,
 } from '../src/modules/payment/server.js';
@@ -230,11 +234,15 @@ async function buildHarness(): Promise<Harness> {
   const logger = createPlatformLogger({ service: 'payment-svc', env: 'local', version: 'test', clock: s.clock, level: 'info', destination });
   const metrics = new PlatformMetrics('payment-svc');
   const signals = new PromPaymentConfirmSignals().register(metrics.registry);
+  const guardSignals = new PromPgCallGuardSignals().register(metrics.registry);
+  const guardLog = pgCallGuardLog(logger);
   const log = paymentConfirmLog(logger);
   const jobs = new DrizzleConfirmJobs({ database: runnerDb, clock: s.clock });
   const otherJobs = new DrizzleConfirmJobs({ database: otherRunnerDb, clock: s.clock });
   const gateways = new StaticPaymentGateways([sim.gateway()]);
-  const deps = (pod: string, o: Partial<PaymentConfirmRunnerDeps> = {}): PaymentConfirmRunnerDeps => ({ jobs, gateways, log, signals, clock: s.clock, podId: pod, ...o });
+  // 실행기마다 새 보호기(시계가 멈춰 있어 토큰이 차지 않고, 앞 시험의 429가 상한을 낮춘 채 남지 않게)
+  const guardsFor = (g: PaymentGateways): PgCallGuards => new PgCallGuards({ gateways: g, podCount: 1, clock: s.clock, signals: guardSignals, log: guardLog });
+  const deps = (pod: string, o: Partial<PaymentConfirmRunnerDeps> = {}): PaymentConfirmRunnerDeps => ({ jobs, gateways, log, signals, clock: s.clock, podId: pod, guards: guardsFor(o.gateways ?? gateways), ...o });
   const silent = { setInterval: () => 0, clearInterval: () => {} };
   return { stack: s, clock: s.clock, jobs, otherJobs, logs, metrics: () => metrics.registry.metrics(), gateways, deps, runner: (pod, o = {}) => new PaymentConfirmRunner({ ...deps(pod), timer: silent, ...o }) };
 }
@@ -705,7 +713,7 @@ describe('리뷰 고침(BUILD_ORDER PRF-181, 코드 리뷰)', () => {
     const h = await harness();
     const f = await accepted();
 
-    const [claimed] = await h.jobs.claimDue(1, 'pod-a', CONFIRM_LEASE_MS);
+    const [claimed] = await h.jobs.claimDue('SIMULATOR', 1, 'pod-a', CONFIRM_LEASE_MS);
     expect(claimed).toMatchObject({ attempts: 0, hadPreviousOwner: false });
     expect((await ledger(f)).jobs[0]).toMatchObject({ attempts: 0 });
     await h.jobs.release(claimed!);
@@ -929,7 +937,7 @@ describe('잡기', () => {
     const h = await harness();
     const fs = await Promise.all(Array.from({ length: 20 }, () => accepted()));
 
-    const [a, b] = await Promise.all([h.jobs.claimDue(20, 'pod-a', CONFIRM_LEASE_MS), h.otherJobs.claimDue(20, 'pod-b', CONFIRM_LEASE_MS)]);
+    const [a, b] = await Promise.all([h.jobs.claimDue('SIMULATOR', 20, 'pod-a', CONFIRM_LEASE_MS), h.otherJobs.claimDue('SIMULATOR', 20, 'pod-b', CONFIRM_LEASE_MS)]);
 
     const ids = [...a, ...b].map((j) => j.paymentId);
     expect(ids).toHaveLength(20);
@@ -940,19 +948,19 @@ describe('잡기', () => {
     expect(rows).toHaveLength(20);
     expect(rows.every((r) => r.attempts === 0 && r.lease_until.getTime() === h.clock.now() + CONFIRM_LEASE_MS)).toBe(true);
 
-    expect(await h.jobs.claimDue(20, 'pod-c', CONFIRM_LEASE_MS)).toEqual([]);
+    expect(await h.jobs.claimDue('SIMULATOR', 20, 'pod-c', CONFIRM_LEASE_MS)).toEqual([]);
   });
 
   test('PRF181_임대 경계: lease_until과 같은 시각에는 잡히지 않고 1ms 지나면 앞 소유자 표시와 함께 잡힌다', async () => {
     const h = await harness();
     const f = await accepted();
-    expect(await h.jobs.claimDue(1, 'pod-a', CONFIRM_LEASE_MS)).toHaveLength(1);
+    expect(await h.jobs.claimDue('SIMULATOR', 1, 'pod-a', CONFIRM_LEASE_MS)).toHaveLength(1);
 
     h.clock.advance(CONFIRM_LEASE_MS);
-    expect(await h.jobs.claimDue(1, 'pod-b', CONFIRM_LEASE_MS)).toEqual([]);
+    expect(await h.jobs.claimDue('SIMULATOR', 1, 'pod-b', CONFIRM_LEASE_MS)).toEqual([]);
 
     h.clock.advance(1);
-    expect(await h.jobs.claimDue(1, 'pod-b', CONFIRM_LEASE_MS)).toEqual([expect.objectContaining({ paymentId: f.paymentId, owner: 'pod-b', attempts: 0, hadPreviousOwner: true })]);
+    expect(await h.jobs.claimDue('SIMULATOR', 1, 'pod-b', CONFIRM_LEASE_MS)).toEqual([expect.objectContaining({ paymentId: f.paymentId, owner: 'pod-b', attempts: 0, hadPreviousOwner: true })]);
   });
 
   test('PRF181_잡기는 기한이 된 행만 limit개, next_attempt_at 차례로 돌려주고 틀린 인자는 RangeError다', async () => {
@@ -963,11 +971,11 @@ describe('잡기', () => {
     await q('update payment_confirm_job set next_attempt_at = $2 where payment_id = $1', [late.paymentId, new Date(now - 1_000)]);
     await q('update payment_confirm_job set next_attempt_at = $2 where payment_id = $1', [future.paymentId, new Date(now + 1)]);
 
-    expect((await h.jobs.claimDue(1, 'pod-a', CONFIRM_LEASE_MS)).map((j) => j.paymentId)).toEqual([early.paymentId]);
-    expect((await h.jobs.claimDue(5, 'pod-a', CONFIRM_LEASE_MS)).map((j) => j.paymentId)).toEqual([late.paymentId]);
-    await expect(h.jobs.claimDue(0, 'pod-a', CONFIRM_LEASE_MS)).rejects.toBeInstanceOf(RangeError);
-    await expect(h.jobs.claimDue(1, '', CONFIRM_LEASE_MS)).rejects.toBeInstanceOf(RangeError);
-    await expect(h.jobs.claimDue(1, 'pod-a', 0)).rejects.toBeInstanceOf(RangeError);
+    expect((await h.jobs.claimDue('SIMULATOR', 1, 'pod-a', CONFIRM_LEASE_MS)).map((j) => j.paymentId)).toEqual([early.paymentId]);
+    expect((await h.jobs.claimDue('SIMULATOR', 5, 'pod-a', CONFIRM_LEASE_MS)).map((j) => j.paymentId)).toEqual([late.paymentId]);
+    await expect(h.jobs.claimDue('SIMULATOR', 0, 'pod-a', CONFIRM_LEASE_MS)).rejects.toBeInstanceOf(RangeError);
+    await expect(h.jobs.claimDue('SIMULATOR', 1, '', CONFIRM_LEASE_MS)).rejects.toBeInstanceOf(RangeError);
+    await expect(h.jobs.claimDue('SIMULATOR', 1, 'pod-a', 0)).rejects.toBeInstanceOf(RangeError);
   });
 
   test('PRF181_markSent는 표시를 한 번만 쓰고 임대를 잃었거나 원장이 ACCEPTED가 아니면 쓰지 않으며, 미루기·놓기·지우기도 임대를 잃으면 false다 [ASVS v5.0.0-2.3.4]', async () => {
@@ -976,7 +984,7 @@ describe('잡기', () => {
     expect(await h.jobs.read(newId())).toBeUndefined();
     await expect(h.jobs.read(f.paymentId)).resolves.toMatchObject({ paymentId: f.paymentId, orderId: f.orderId, eventId: f.eventId, attemptNo: 1, pg: 'SIMULATOR', paymentRef: f.paymentKey, amount: f.amount, status: 'ACCEPTED', authenticatedAtMs: f.authenticatedAtMs, confirmSent: false });
 
-    const [mine] = await h.jobs.claimDue(1, 'pod-a', CONFIRM_LEASE_MS);
+    const [mine] = await h.jobs.claimDue('SIMULATOR', 1, 'pod-a', CONFIRM_LEASE_MS);
     expect(await h.jobs.markSent(mine!)).toBe('MARKED');
     expect(await h.jobs.markSent(mine!)).toBe('ALREADY');
     const { events } = await ledger(f);
@@ -988,7 +996,7 @@ describe('잡기', () => {
     await expect(h.jobs.read(f.paymentId)).resolves.toMatchObject({ confirmSent: true });
 
     h.clock.advance(CONFIRM_LEASE_MS + 1);
-    const [theirs] = await h.jobs.claimDue(1, 'pod-b', CONFIRM_LEASE_MS);
+    const [theirs] = await h.jobs.claimDue('SIMULATOR', 1, 'pod-b', CONFIRM_LEASE_MS);
     const lost: ConfirmJob = mine!;
     expect(await h.jobs.markSent(lost)).toBe('LEASE_LOST');
     expect(await h.jobs.reschedule(lost, h.clock.now() + 1_000, { countRetry: true })).toBe(false);
@@ -1046,7 +1054,7 @@ describe('임대 잔해', () => {
   test('P-T24_CONFIRM_SENT 커밋 직후 죽으면(호출 전일 수 있어도 구분할 수 없다) 다음 실행기는 부르지 않고 UNKNOWN이다 [ASVS v5.0.0-16.5.3]', async () => {
     const h = await harness();
     const f = await accepted();
-    const [job] = await h.jobs.claimDue(1, 'pod-dead', CONFIRM_LEASE_MS);
+    const [job] = await h.jobs.claimDue('SIMULATOR', 1, 'pod-dead', CONFIRM_LEASE_MS);
     expect(await h.jobs.markSent(job!)).toBe('MARKED');
 
     h.clock.advance(CONFIRM_LEASE_MS + 1);
@@ -1063,7 +1071,7 @@ describe('임대 잔해', () => {
   test('P-T24_CONFIRM_SENT 없는 잔해는 이어서 표시를 쓰고 승인한다(호출이 나가지 않았음이 확실하다)', async () => {
     const h = await harness();
     const f = await accepted();
-    await h.jobs.claimDue(1, 'pod-dead', CONFIRM_LEASE_MS);
+    await h.jobs.claimDue('SIMULATOR', 1, 'pod-dead', CONFIRM_LEASE_MS);
 
     h.clock.advance(CONFIRM_LEASE_MS + 1);
     await drive(h.runner('pod-b'));
@@ -1078,7 +1086,7 @@ describe('임대 잔해', () => {
   test('P-T24_임대가 살아 있으면 다른 실행기가 잡지 않는다(호출 중인 명령에 끼어들지 않는다)', async () => {
     const h = await harness();
     const f = await accepted();
-    await h.jobs.claimDue(1, 'pod-a', CONFIRM_LEASE_MS);
+    await h.jobs.claimDue('SIMULATOR', 1, 'pod-a', CONFIRM_LEASE_MS);
     await q(`insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at) values ($1, 2, $2, 'CONFIRM_SENT', false, now())`, [f.paymentId, paymentEventKey(f.paymentId, 2)]);
 
     h.clock.advance(CONFIRM_LEASE_MS - 1);
@@ -1218,7 +1226,7 @@ async function planOnBigTable(s: { text: string; values: unknown[] }): Promise<R
       `insert into payment (id, order_id, event_id, attempt_id, attempt_no, pg, pg_payment_ref, amount, status, idempotency_key, authenticated_at, status_changed_at)
        select gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 1, 'SIMULATOR', 'big', 1, 'ACCEPTED', 'k', now(), now() from generate_series(1, 20000)`,
     );
-    await client.query(`insert into payment_confirm_job (payment_id, next_attempt_at) select id, now() + interval '30 days' from payment where pg_payment_ref = 'big'`);
+    await client.query(`insert into payment_confirm_job (payment_id, pg, next_attempt_at) select id, pg, now() + interval '30 days' from payment where pg_payment_ref = 'big'`);
     await client.query('analyze payment');
     await client.query('analyze payment_confirm_job');
     const r = await client.query<{ 'QUERY PLAN': [{ Plan: Record<string, unknown> }] }>(`explain (format json) ${s.text}`, s.values);
@@ -1230,23 +1238,38 @@ async function planOnBigTable(s: { text: string; values: unknown[] }): Promise<R
 }
 
 describe('문장과 트랜잭션', () => {
-  test('PRF181_잡기 문장은 큰 표에서 next_attempt_at 인덱스를 타고 명령 표를 통째로 읽지 않으며 FOR UPDATE SKIP LOCKED다', async () => {
+  test('P-T40_리뷰 고침 H1: 잡기 문장은 결제 표를 읽지 않고 (pg, next_attempt_at, payment_id) 색인으로 그 채널의 행만 고른다 [ASVS v5.0.0-15.1.3]', async () => {
     const h = await harness();
     await accepted();
-    const statements = await statementsDuring(() => h.jobs.claimDue(1, 'pod-plan', CONFIRM_LEASE_MS));
+    const statements = await statementsDuring(() => h.jobs.claimDue('SIMULATOR', 1, 'pod-plan', CONFIRM_LEASE_MS));
+    const claim = statements.find((s) => /skip locked/i.test(s.text));
+    expect(claim, JSON.stringify(statements.map((s) => s.text))).toBeDefined();
+    expect(claim!.text).not.toMatch(/\bjoin payment\b/i);
+
+    const nodes = await planOnBigTable(claim!);
+
+    expect(nodes.map((n) => n['Index Name']).filter(Boolean)).toContain('payment_confirm_job_claim_idx');
+    expect(nodes.filter((n) => n['Relation Name'] === 'payment')).toEqual([]);
+    expect(nodes.filter((n) => n['Node Type'] === 'Seq Scan')).toEqual([]);
+  }, 60_000);
+
+  test('PRF181_잡기 문장은 큰 표에서 잡기 인덱스를 타고 명령 표를 통째로 읽지 않으며 FOR UPDATE SKIP LOCKED다', async () => {
+    const h = await harness();
+    await accepted();
+    const statements = await statementsDuring(() => h.jobs.claimDue('SIMULATOR', 1, 'pod-plan', CONFIRM_LEASE_MS));
     const claim = statements.find((s) => /for update skip locked/i.test(s.text));
     expect(claim, JSON.stringify(statements.map((s) => s.text))).toBeDefined();
 
     const nodes = await planOnBigTable(claim!);
 
-    expect(nodes.map((n) => n['Index Name']).filter(Boolean)).toContain('payment_confirm_job_next_idx');
-    expect(nodes.filter((n) => n['Node Type'] === 'Seq Scan' && n['Relation Name'] === 'payment_confirm_job')).toEqual([]);
+    expect(nodes.map((n) => n['Index Name']).filter(Boolean)).toContain('payment_confirm_job_claim_idx');
+    expect(nodes.filter((n) => n['Node Type'] === 'Seq Scan' && (n['Relation Name'] === 'payment_confirm_job' || n['Relation Name'] === 'payment'))).toEqual([]);
   }, 60_000);
 
   test('PRF181_잡기 트랜잭션은 READ COMMITTED이고 문장 시간 한도 5초를 건다', async () => {
     const h = await harness();
     await accepted();
-    const statements = await statementsDuring(() => h.jobs.claimDue(1, 'pod-plan', CONFIRM_LEASE_MS));
+    const statements = await statementsDuring(() => h.jobs.claimDue('SIMULATOR', 1, 'pod-plan', CONFIRM_LEASE_MS));
     expect(statements.some((s) => /isolation level read committed/i.test(s.text)), JSON.stringify(statements.map((s) => s.text))).toBe(true);
     const limit = statements.find((s) => s.text.includes("set_config('statement_timeout'"));
     expect(limit, JSON.stringify(statements.map((s) => s.text))).toBeDefined();
@@ -1256,7 +1279,7 @@ describe('문장과 트랜잭션', () => {
   test('PRF181_답 반영은 payment 행 잠금을 기다린 뒤 상태를 본다(잠금 없이 읽으면 겹친 쓰기를 덮는다) [ASVS v5.0.0-2.3.4]', async () => {
     const h = await harness();
     const f = await accepted();
-    expect(await h.jobs.claimDue(1, 'pod-a', CONFIRM_LEASE_MS)).toHaveLength(1);
+    expect(await h.jobs.claimDue('SIMULATOR', 1, 'pod-a', CONFIRM_LEASE_MS)).toHaveLength(1);
     const target = (await h.jobs.read(f.paymentId))!;
     const holder = await admin.pool.connect();
     try {

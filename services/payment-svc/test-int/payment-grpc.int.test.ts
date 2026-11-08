@@ -110,6 +110,7 @@ const COLUMNS: Record<string, Record<string, [string, 'YES' | 'NO']>> = {
   },
   payment_confirm_job: {
     payment_id: ['uuid', 'NO'],
+    pg: ['text', 'NO'],
     next_attempt_at: ['timestamp with time zone', 'NO'],
     lease_owner: ['text', 'YES'],
     lease_until: ['timestamp with time zone', 'YES'],
@@ -140,14 +141,14 @@ const insertPayment = (over: Record<string, unknown> = {}) => {
 };
 
 describe('마이그레이션과 표 모양', () => {
-  test('PRF180_PRF181_PRF182_마이그레이션(0000·0001·0002)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 3개다', async () => {
+  test('PRF180_PRF181_PRF182_PRF183_마이그레이션(0000~0003)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 4개다', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
     expect(before).toEqual(['outbox', 'payment', 'payment_confirm_job', 'payment_event']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);
-    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('3');
+    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('4');
   });
 
   test.each(Object.keys(COLUMNS))('PRF180_%s 표의 칸 이름·종류·빈 값 허용이 docs/data.md ERD와 같다', async (table) => {
@@ -189,7 +190,9 @@ describe('마이그레이션과 표 모양', () => {
     const id = newId();
     await insertPayment({ id });
     await expect(q(`insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at) values ($1, 0, $2, 'X', false, now())`, [id, newId()])).rejects.toMatchObject({ code: '23514' });
-    await expect(q(`insert into payment_confirm_job (payment_id, next_attempt_at, attempts) values ($1, now(), -1)`, [id])).rejects.toMatchObject({ code: '23514' });
+    await expect(q(`insert into payment_confirm_job (payment_id, pg, next_attempt_at, attempts) values ($1, 'TOSS', now(), -1)`, [id])).rejects.toMatchObject({ code: '23514', constraint: 'payment_confirm_job_attempts_check' });
+    await expect(q(`insert into payment_confirm_job (payment_id, pg, next_attempt_at) values ($1, 'BANK', now())`, [id])).rejects.toMatchObject({ code: '23514', constraint: 'payment_confirm_job_pg_check' });
+    await expect(q(`insert into payment_confirm_job (payment_id, next_attempt_at) values ($1, now())`, [id])).rejects.toMatchObject({ code: '23502' });
   });
 
   test('PRF180_유일·외래 키: 한 주문에 결제 1건, 이력은 (결제, 순번)마다 1행, 승인 명령은 결제마다 1행이고 없는 결제를 가리키면 23503이다 [ASVS v5.0.0-2.3.4]', async () => {
@@ -203,19 +206,19 @@ describe('마이그레이션과 표 모양', () => {
     await expect(putEvent(id, 1)).rejects.toMatchObject({ code: '23505', constraint: 'payment_event_payment_id_seq_pk' });
     await expect(putEvent(newId(), 1)).rejects.toMatchObject({ code: '23503' });
 
-    const putJob = (paymentId: string) => q('insert into payment_confirm_job (payment_id, next_attempt_at) values ($1, now())', [paymentId]);
+    const putJob = (paymentId: string) => q(`insert into payment_confirm_job (payment_id, pg, next_attempt_at) values ($1, 'TOSS', now())`, [paymentId]);
     await putJob(id);
     await expect(putJob(id)).rejects.toMatchObject({ code: '23505' });
     await expect(putJob(newId())).rejects.toMatchObject({ code: '23503' });
   });
 
-  test('PRF180_인덱스: payment (order_id) 유일, 승인 명령 잡기 (next_attempt_at), Outbox 미전송 부분 인덱스가 정본 그대로다', async () => {
+  test('PRF180_PRF183_인덱스: payment (order_id) 유일, 승인 명령 잡기 (pg, next_attempt_at, payment_id), Outbox 미전송 부분 인덱스가 정본 그대로다', async () => {
     const indexes = await q<{ indexname: string; indexdef: string }>(
-      `select indexname, indexdef from pg_indexes where schemaname = 'public' and indexname in ('payment_order_id_key', 'payment_confirm_job_next_idx', 'outbox_unsent_idx') order by indexname`,
+      `select indexname, indexdef from pg_indexes where schemaname = 'public' and indexname in ('payment_order_id_key', 'payment_confirm_job_next_idx', 'payment_confirm_job_claim_idx', 'outbox_unsent_idx') order by indexname`,
     );
     expect(indexes).toEqual([
       { indexname: 'outbox_unsent_idx', indexdef: 'CREATE INDEX outbox_unsent_idx ON ONLY public.outbox USING btree (seq) WHERE (sent_at IS NULL)' },
-      { indexname: 'payment_confirm_job_next_idx', indexdef: 'CREATE INDEX payment_confirm_job_next_idx ON public.payment_confirm_job USING btree (next_attempt_at)' },
+      { indexname: 'payment_confirm_job_claim_idx', indexdef: 'CREATE INDEX payment_confirm_job_claim_idx ON public.payment_confirm_job USING btree (pg, next_attempt_at, payment_id)' },
       { indexname: 'payment_order_id_key', indexdef: 'CREATE UNIQUE INDEX payment_order_id_key ON public.payment USING btree (order_id)' },
     ]);
   });

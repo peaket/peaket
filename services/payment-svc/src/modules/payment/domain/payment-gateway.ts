@@ -12,7 +12,7 @@ export interface PgCapabilities {
   webhookSignature: boolean;
   /** 결제사의 멱등키 보관 시간. 코드에 고정하지 않고 여기서 받는다(기술 검토 낮음-070) */
   idempotencyRetentionMs: number;
-  /** 채널별 호출 상한(초당). 어댑터 계층의 토큰 버킷이 쓴다 */
+  /** 채널별 호출 상한(초당). 실행기 앞의 채널 토큰 버킷이 쓴다(domain/pg-call-guard.ts, BUILD_ORDER PRF-183) */
   callsPerSecond: number;
   redirectCheckout: boolean;
 }
@@ -101,7 +101,8 @@ export type QueryResult =
       method?: PayMethodCategory;
     }
   | { kind: 'NOT_FOUND' }
-  | { kind: 'UNKNOWN' };
+  /** throttled는 결제사가 429로 답했을 때만 참이다(pg_throttled_total에 세고 상한은 낮추지 않는다, BUILD_ORDER PRF-183) */
+  | { kind: 'UNKNOWN'; throttled?: true };
 
 /** 단독 조회 한 번의 선택(BUILD_ORDER PRF-182, 코드 리뷰) */
 export interface QueryOptions {

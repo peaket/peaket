@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
-import { DEFAULT_PAYMENT_GRPC_PORT, loadPaymentServiceConfig, loadSimulatorGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX } from '../src/config.js';
+import { DEFAULT_PAYMENT_GRPC_PORT, loadPaymentServiceConfig, loadPgCallGuardConfig, loadSimulatorGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX } from '../src/config.js';
 
 const SRC = fileURLToPath(new URL('../src', import.meta.url));
 const URL_WITH_PASSWORD = 'postgres://payment_svc:hunter2@pgbouncer:6432/payment';
@@ -163,26 +163,58 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
     const warn = /if \(!simulator\) service\.logger\.warn\(\{ kind: 'payment-confirm-no-adapter' \}, '([^']*)'\)/.exec(m);
     expect(warn, '경고 한 줄').not.toBeNull();
     expect(warn![1]).not.toMatch(/local·ci일 때만/);
-    expect(m.match(/service\.logger\.warn\(/g)).toHaveLength(1);
+    expect(m.match(/service\.logger\.warn\(\{ kind: 'payment-confirm-no-adapter'/g)).toHaveLength(1);
   });
 
   test('PRF181_main.ts는 실행기에 포트 전부와 파드 이름을 넘긴다', () => {
     const at = main().indexOf('new PaymentConfirmRunner(');
     expect(at, 'new PaymentConfirmRunner').toBeGreaterThan(-1);
     const call = /new PaymentConfirmRunner\(\{([\s\S]*?)\}\)/.exec(main())![1]!;
-    for (const key of ['jobs', 'gateways', 'log', 'signals', 'clock', 'podId']) expect(call, key).toMatch(new RegExp(`\\b${key}\\b`));
+    for (const key of ['jobs', 'gateways', 'log', 'signals', 'clock', 'podId', 'guards']) expect(call, key).toMatch(new RegExp(`\\b${key}\\b`));
+  });
+
+  test('PRF183_main.ts는 어댑터 등록부와 파드 수로 보호기 하나를 만들어 두 실행기에 함께 넘긴다(승인과 조회가 같은 버킷을 쓴다) [ASVS v5.0.0-2.3.2]', () => {
+    const m = main();
+    const call = /new PgCallGuards\(\{([\s\S]*?)\}\)/.exec(m)![1]!;
+    for (const key of ['gateways', 'podCount', 'clock', 'signals', 'log']) expect(call, key).toMatch(new RegExp(`\\b${key}\\b`));
+    expect(m.match(/new PgCallGuards\(/g)).toHaveLength(1);
+    expect(/new PaymentConfirmRunner\(\{([\s\S]*?)\}\)/.exec(m)![1]).toMatch(/\bguards\b/);
+    expect(/new PaymentUnknownResolver\(\{([\s\S]*?)\}\)/.exec(m)![1]).toMatch(/\bguards\b/);
+    expect(m).toMatch(/\bpgCallGuardLog\(service\.logger\)/);
+    expect(m).toMatch(/\bnew PromPgCallGuardSignals\(/);
+  });
+
+  test('PRF183_main.ts는 어댑터에 벌크헤드 이하의 연결 묶음을 주입하고 종료 때 닫는다 [ASVS v5.0.0-13.2.6]', () => {
+    const m = main();
+    expect(/createPgHttp\(\{([\s\S]*?)\}\)/.exec(m)![1]).toMatch(/connections:\s*perPodBulkhead\(PG_CHANNEL_BULKHEAD\.SIMULATOR,\s*\w+\.podCount\)/);
+    expect(/new SimulatorPaymentGateway\(\{([\s\S]*?)\}\)/.exec(m)![1]).toMatch(/\bfetch:\s*\w+[?!]?\.fetch\b/);
+    expect(shutdown()).toMatch(/pgHttp\??\.close\(\)/);
+  });
+
+  test('P-T40_리뷰 고침 H2: 파드 수는 듣기 전에 읽는다(local·ci 밖에서 비어 있으면 듣기 전에 시작 실패) [ASVS v5.0.0-16.5.3]', () => {
+    const m = main();
+    expect(m.indexOf('loadPgCallGuardConfig(process.env)'), '설정 읽기').toBeGreaterThan(-1);
+    expect(m.indexOf('loadPgCallGuardConfig(process.env)'), '설정 읽기 < listen').toBeLessThan(m.indexOf('await service.listen()'));
+    expect(m).not.toMatch(/warnPodCountMissing/);
+  });
+
+  test('P-T40_리뷰 고침 M4: main.ts는 조회 전용 연결 묶음(연결 16 [가정])을 따로 만들어 어댑터에 주고 종료 때 닫는다 [ASVS v5.0.0-13.2.6]', () => {
+    const m = main();
+    expect(m).toMatch(/createPgHttp\(\{\s*connections:\s*UNKNOWN_QUERY_CONCURRENCY\s*\}\)/);
+    expect(/new SimulatorPaymentGateway\(\{([\s\S]*?)\}\)/.exec(m)![1]).toMatch(/\bqueryFetch:\s*\w+[?!]?\.fetch\b/);
+    expect(shutdown()).toMatch(/pgQueryHttp\??\.close\(\)/);
   });
 
   test('PRF181_main.ts는 실행기 지표를 서비스 레지스트리에 붙이고 플랫폼 로거로 로그를 잇는다', () => {
     expect(main()).toMatch(/\bnew PromPaymentConfirmSignals\(/);
-    expect([...main().matchAll(/\.register\(service\.metrics\.registry\)/g)]).toHaveLength(3);
+    expect([...main().matchAll(/\.register\(service\.metrics\.registry\)/g)]).toHaveLength(4);
     expect(main()).toMatch(/\bpaymentConfirmLog\(service\.logger\)/);
   });
 
   test('PRF182_main.ts는 UNKNOWN 조회 실행기에 승인 실행기의 저장소(전용 풀)와 포트 전부를 넘기고 지표·로그를 잇는다', () => {
     const call = /new PaymentUnknownResolver\(\{([\s\S]*?)\}\)/.exec(main())![1]!;
     expect(call).toMatch(/\bqueries:\s*confirmJobs\b/);
-    for (const key of ['gateways', 'log', 'signals', 'clock']) expect(call, key).toMatch(new RegExp(`\\b${key}\\b`));
+    for (const key of ['gateways', 'log', 'signals', 'clock', 'guards']) expect(call, key).toMatch(new RegExp(`\\b${key}\\b`));
     expect(main()).toMatch(/\bnew PromPaymentUnknownSignals\(/);
     expect(main()).toMatch(/\bunknownSignals\.register\(service\.metrics\.registry\)/);
     expect(main()).toMatch(/\bpaymentUnknownLog\(service\.logger\)/);
@@ -213,7 +245,7 @@ describe('운영 조립: 승인 실행기(글 검사)', () => {
     expect(m.indexOf('new PaymentConfirmRunner('), '만들기 < 켜기').toBeLessThan(start);
     expect(m.indexOf('await service.listen()'), 'listen < 켜기').toBeLessThan(start);
     expect(m.lastIndexOf('.register(service.metrics.registry)', start), '지표 붙이기 < 켜기').toBeGreaterThan(-1);
-    expect([...m.slice(0, start).matchAll(/\.register\(service\.metrics\.registry\)/g)], '지표 셋 다 켜기 앞').toHaveLength(3);
+    expect([...m.slice(0, start).matchAll(/\.register\(service\.metrics\.registry\)/g)], '지표 넷 다 켜기 앞').toHaveLength(4);
   });
 
   test('PRF181_SIGTERM: 준비 상태를 내린 뒤 실행기를 멈추고(돌던 호출을 기다린다), 그 뒤에 서비스와 전용 풀을 닫는다 [ASVS v5.0.0-2.3.3]', () => {

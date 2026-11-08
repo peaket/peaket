@@ -1,16 +1,17 @@
 // 승인 실행기(application/payment-confirm-runner.ts PaymentConfirmRunner, docs/features/payment.md §2 '승인 실행기의 첫 구현', docs/data.md §5 '승인 실행기',
 // 명세 specs/payment.qnt `send`·`expireCommand`·`respond`·`timeout`·`restart`, BUILD_ORDER PRF-181)를 메모리 대역 포트로 본다.
 // - runJob: 행 하나의 차례 전부(원장 아님 → 지우기, 임대 잔해, 어댑터 없음, 승인 기한, 표시 → 호출, 답 반영, 다시 보내기, 쓰기 실패)
-// - tick: 빈자리만큼 잡기, 호출을 기다리지 않음, 동시 상한 32
+// - tick: 채널의 여유만큼 잡기, 호출을 기다리지 않음, 동시 상한(이 파일의 시험용 벌크헤드 32)
 // - start·stop·whenIdle: 100ms 반복, 틱 겹침 없음, stop이 돌던 호출과 그 뒤 쓰기를 기다림, 멈춘 뒤 임대 놓기
 // 실제 PostgreSQL·시뮬레이터로 도는 것(한 트랜잭션, SKIP LOCKED, 임대 잔해)은 test-int가 본다.
 import { Deadline, fakeClock, type FakeClock, type RequestContext, requestContext, runInRequestContext } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { type ConfirmRunnerTimer, PaymentConfirmRunner, type PaymentConfirmRunnerDeps } from '../src/modules/payment/application/payment-confirm-runner.js';
 import type { PaymentLedgerStatus } from '../src/modules/payment/domain/confirm-command.js';
-import { type ConfirmFinish, type ConfirmJob, type ConfirmTarget, confirmRetryDelayMs, type PaymentConfirmOutcome } from '../src/modules/payment/domain/confirm-runner.js';
-import type { ConfirmResult, PaymentGatewayPort, PgCapabilities, PgName } from '../src/modules/payment/domain/payment-gateway.js';
-import type { FinishConfirmResult, MarkConfirmSentResult, PaymentConfirmJobs, PaymentConfirmLog, PaymentConfirmSignals, PaymentGateways } from '../src/modules/payment/domain/ports.js';
+import { CONFIRM_CALL_GUARD_MS, CONFIRM_LEASE_MS, type ConfirmFinish, type ConfirmJob, type ConfirmTarget, confirmRetryDelayMs, type PaymentConfirmOutcome } from '../src/modules/payment/domain/confirm-runner.js';
+import { CONFIRM_CALL_BUDGET_MS, type ConfirmResult, type PaymentGatewayPort, type PgCapabilities, type PgName } from '../src/modules/payment/domain/payment-gateway.js';
+import { PgCallGuards, type PgLimitKind, type PgSaturationReason } from '../src/modules/payment/domain/pg-call-guard.js';
+import type { FinishConfirmResult, MarkConfirmSentResult, PaymentConfirmJobs, PaymentConfirmLog, PaymentConfirmSignals, PaymentGateways, PgCallGuardLog, PgCallGuardSignals } from '../src/modules/payment/domain/ports.js';
 import { EVENT_ID, NOW, ORDER_ID, PAYMENT_ID, SECRET_PAYMENT_KEY, uuidAt } from './confirm-cases.js';
 
 const POD = 'payment-svc-pod-1';
@@ -36,7 +37,7 @@ const target = (over: Partial<ConfirmTarget> = {}): ConfirmTarget => ({
   ...over,
 });
 
-const job = (over: Partial<ConfirmJob> = {}): ConfirmJob => ({ paymentId: PAYMENT_ID, attempts: 0, owner: POD, leaseUntilMs: NOW + 75_000, hadPreviousOwner: false, ...over });
+const job = (over: Partial<ConfirmJob> = {}): ConfirmJob => ({ paymentId: PAYMENT_ID, pg: 'SIMULATOR', attempts: 0, owner: POD, leaseUntilMs: NOW + 75_000, hadPreviousOwner: false, ...over });
 const jobN = (i: number): ConfirmJob => job({ paymentId: uuidAt(100 + i) });
 const answer = (over: Partial<ConfirmResult> & Pick<ConfirmResult, 'outcome'>): ConfirmResult => ({ paymentRef: SECRET_PAYMENT_KEY, ...over });
 
@@ -94,10 +95,23 @@ class FakeTimer implements ConfirmRunnerTimer {
 }
 
 class FakeJobs implements PaymentConfirmJobs {
+  /** SIMULATOR 채널의 잡기 인자 */
   readonly claimArgs: [number, string, number][] = [];
-  /** 차례대로 답한다. 없으면 claimFn, 그것도 없으면 빈 목록 */
+  /** 그 밖의 채널의 잡기 인자 */
+  readonly otherClaimArgs: [PgName, number][] = [];
+  /** 그 밖의 채널의 답(차례대로, 없으면 빈 목록) */
+  readonly otherClaims = new Map<PgName, ConfirmJob[][]>();
+  /** SIMULATOR 채널의 답. 차례대로 답한다. 없으면 claimFn, 그것도 없으면 빈 목록 */
   claims: Script<ConfirmJob[]>[] = [];
   claimFn: ((limit: number) => ConfirmJob[]) | undefined;
+  /** 있으면 그 밖의 채널의 잡기가 이 약속을 기다린다 */
+  otherClaimGate: Promise<void> | undefined;
+  /** 기한 지난 행 잡기의 인자 */
+  readonly expiredArgs: [PgName, number, string, number, number][] = [];
+  /** 기한 지난 행 잡기의 답(채널별, 차례대로, 없으면 빈 목록) */
+  readonly expiredClaims = new Map<PgName, Script<ConfirmJob[]>[]>();
+  /** hasDue의 답(채널별, 없으면 true) */
+  readonly due = new Map<PgName, boolean>();
   readonly targets = new Map<string, Script<ConfirmTarget | undefined>>();
   readonly reads: string[] = [];
   markResults: Script<MarkConfirmSentResult>[] = [];
@@ -117,12 +131,25 @@ class FakeJobs implements PaymentConfirmJobs {
     this.targets.set(t.paymentId, t);
   }
 
-  async claimDue(limit: number, owner: string, leaseMs: number): Promise<ConfirmJob[]> {
+  async claimDue(pg: PgName, limit: number, owner: string, leaseMs: number): Promise<ConfirmJob[]> {
+    if (pg !== 'SIMULATOR') {
+      this.otherClaimArgs.push([pg, limit]);
+      if (this.otherClaimGate) await this.otherClaimGate;
+      return this.otherClaims.get(pg)?.shift() ?? [];
+    }
     this.order.push('jobs.claimDue');
     this.claimArgs.push([limit, owner, leaseMs]);
     const next = this.claims.shift();
     if (next !== undefined) return play(next);
     return this.claimFn?.(limit) ?? [];
+  }
+  async claimExpired(pg: PgName, limit: number, owner: string, leaseMs: number, deadlineMs: number): Promise<ConfirmJob[]> {
+    this.expiredArgs.push([pg, limit, owner, leaseMs, deadlineMs]);
+    const next = this.expiredClaims.get(pg)?.shift();
+    return next === undefined ? [] : play(next);
+  }
+  async hasDue(pg: PgName): Promise<boolean> {
+    return this.due.get(pg) ?? true;
   }
   async read(paymentId: string): Promise<ConfirmTarget | undefined> {
     this.order.push('jobs.read');
@@ -173,6 +200,8 @@ class FakeGateway implements PaymentGatewayPort {
   peak = 0;
   /** 있으면 capabilities()가 던진다 */
   capabilitiesFailure: unknown;
+  /** capabilities().callsPerSecond */
+  rps = 300;
 
   constructor(
     readonly pg: PgName,
@@ -182,7 +211,7 @@ class FakeGateway implements PaymentGatewayPort {
 
   capabilities(): PgCapabilities {
     if (this.capabilitiesFailure !== undefined) throw this.capabilitiesFailure;
-    return { serverConfirm: true, confirmDeadlineMs: this.deadlineMs, partialCancel: true, webhookSignature: false, idempotencyRetentionMs: 86_400_000, callsPerSecond: 300, redirectCheckout: false };
+    return { serverConfirm: true, confirmDeadlineMs: this.deadlineMs, partialCancel: true, webhookSignature: false, idempotencyRetentionMs: 86_400_000, callsPerSecond: this.rps, redirectCheckout: false };
   }
   async confirm(c: { orderId: string; paymentRef: string; amount: number; idemKey: string }): Promise<ConfirmResult> {
     this.order.push('gateway.confirm');
@@ -261,7 +290,36 @@ class FakeSignals implements PaymentConfirmSignals {
   }
 }
 
-function setup(over: Partial<PaymentConfirmRunnerDeps> = {}) {
+class FakeGuardSignals implements PgCallGuardSignals {
+  readonly throttleds: [PgName, boolean][] = [];
+  readonly limits: [PgName, PgLimitKind, number][] = [];
+  readonly inflights: [PgName, number][] = [];
+  readonly saturateds: [PgName, PgSaturationReason][] = [];
+  throttled(pg: PgName, first: boolean): void {
+    this.throttleds.push([pg, first]);
+  }
+  limit(pg: PgName, kind: PgLimitKind, value: number): void {
+    this.limits.push([pg, kind, value]);
+  }
+  inflight(pg: PgName, count: number): void {
+    this.inflights.push([pg, count]);
+  }
+  saturated(pg: PgName, reason: PgSaturationReason): void {
+    this.saturateds.push([pg, reason]);
+  }
+}
+
+class FakeGuardLog implements PgCallGuardLog {
+  readonly lines: { pg: PgName; rps: number; concurrency: number }[] = [];
+  throttledFirst(e: { pg: PgName; rps: number; concurrency: number }): void {
+    this.lines.push(e);
+  }
+}
+
+/** 이 파일의 시험용 벌크헤드(옛 파드 상한 32와 같은 값이라 여유 계산을 그대로 본다) */
+const TEST_BULKHEAD = 32;
+
+function setup(over: Partial<PaymentConfirmRunnerDeps> = {}, guardOver: { bulkhead?: number; bulkheads?: Partial<Record<PgName, number>>; podCount?: number } = {}) {
   const order: string[] = [];
   const clock = fakeClock({ now: NOW });
   const jobs = new FakeJobs(order);
@@ -272,6 +330,10 @@ function setup(over: Partial<PaymentConfirmRunnerDeps> = {}) {
   const signals = new FakeSignals();
   const timer = new FakeTimer();
   const sleeps: number[] = [];
+  const guardSignals = new FakeGuardSignals();
+  const guardLog = new FakeGuardLog();
+  const bulkhead = guardOver.bulkhead ?? TEST_BULKHEAD;
+  const guards = new PgCallGuards({ gateways, podCount: guardOver.podCount ?? 1, clock, signals: guardSignals, log: guardLog, bulkheads: { SIMULATOR: bulkhead, TOSS: bulkhead, ...guardOver.bulkheads } });
   const deps: PaymentConfirmRunnerDeps = {
     jobs,
     gateways,
@@ -279,6 +341,7 @@ function setup(over: Partial<PaymentConfirmRunnerDeps> = {}) {
     signals,
     clock,
     podId: POD,
+    guards,
     timer,
     sleep: (ms) => {
       sleeps.push(ms);
@@ -286,7 +349,7 @@ function setup(over: Partial<PaymentConfirmRunnerDeps> = {}) {
     },
     ...over,
   };
-  return { order, clock, jobs, gateway, gateways, log, signals, timer, sleeps, deps, runner: new PaymentConfirmRunner(deps) };
+  return { order, clock, jobs, gateway, gateways, log, signals, timer, sleeps, guards, guardSignals, guardLog, deps, runner: new PaymentConfirmRunner(deps) };
 }
 type Fixture = ReturnType<typeof setup>;
 
@@ -552,7 +615,7 @@ describe('runJob ⑤⑥: 표시와 호출(send)', () => {
     f.gateways.adapters.set('TOSS', toss);
     f.jobs.put(target({ pg: 'TOSS' }));
     toss.latencyMs = 40;
-    await f.runner.runJob(job());
+    await f.runner.runJob(job({ pg: 'TOSS' }));
     expect(toss.calls).toHaveLength(1);
     expect(f.gateway.calls).toEqual([]);
     expect(f.signals.outcomes).toEqual([['TOSS', 'approved']]);
@@ -771,7 +834,7 @@ describe('로그에 결제 값을 싣지 않는다', () => {
 });
 
 describe('tick: 빈자리만큼 잡기', () => {
-  test('PRF181_빈자리 32건·파드 이름·임대 75초로 잡고 잡은 수를 돌려준다', async () => {
+  test('PRF181_여유 32건(시험용 벌크헤드)·파드 이름·임대 75초로 잡고 잡은 수를 돌려준다', async () => {
     const f = setup();
     f.jobs.claims = [[job(), job({ paymentId: OTHER_PAYMENT })]];
     await expect(f.runner.tick()).resolves.toEqual({ claimed: 2 });
@@ -801,16 +864,10 @@ describe('tick: 빈자리만큼 잡기', () => {
     expect(f.jobs.finished).toHaveLength(1);
   });
 
-  test('PRF181_concurrency·leaseMs 설정을 넘긴다', async () => {
-    const f = setup({ concurrency: 2, leaseMs: 9000 });
+  test('PRF183_채널 벌크헤드와 leaseMs 설정을 넘긴다', async () => {
+    const f = setup({ leaseMs: 9000 }, { bulkhead: 2 });
     await f.runner.tick();
     expect(f.jobs.claimArgs).toEqual([[2, POD, 9000]]);
-  });
-
-  test.each([0, -1, 1.5, Number.NaN])('PRF181_concurrency %d는 기본값 32로 본다', async (concurrency) => {
-    const f = setup({ concurrency });
-    await f.runner.tick();
-    expect(f.jobs.claimArgs[0]![0]).toBe(32);
   });
 
   test('PRF181_잡기가 던지면 runError(claim) 뒤 claimed 0이고 던지지 않는다 [ASVS v5.0.0-16.3.4]', async () => {
@@ -1072,6 +1129,546 @@ describe('리뷰 고침(BUILD_ORDER PRF-181, 코드 리뷰)', () => {
       };
       await expect(f.runner.runJob(job())).resolves.toEqual({ kind: 'SKIPPED', reason: 'READ_FAILED' });
       expectNoGatewayCall(f);
+    });
+  });
+});
+
+describe('결제사 호출 보호(BUILD_ORDER PRF-183)', () => {
+  const declined429 = answer({ outcome: 'DECLINED', failureCategory: 'THROTTLED' });
+  const guardOf = (f: Fixture) => f.guards.of('SIMULATOR')!;
+  /** 토큰을 모두 쓴다 */
+  const drainTokens = (f: Fixture): void => {
+    for (let i = 0; i < 10_000 && guardOf(f).tryTakeToken(); i += 1);
+  };
+
+  describe('틱: 채널별 잡기', () => {
+    test('P-T40_여유가 토큰 수이면 승인이 쓸 수 있는 토큰 수만큼만 잡는다(나머지는 표에서 기다린다) [ASVS v5.0.0-2.3.2] [ASVS v5.0.0-2.4.1]', async () => {
+      const f = setup();
+      f.gateway.rps = 50;
+      await f.runner.tick();
+      expect(f.jobs.claimArgs).toEqual([[9, POD, 75_000]]);
+    });
+
+    test('P-T40_여유가 벌크헤드 빈자리이면 그만큼만 잡는다 [ASVS v5.0.0-13.2.6] [ASVS v5.0.0-15.1.3]', async () => {
+      const f = setup({}, { bulkhead: 3 });
+      await f.runner.tick();
+      expect(f.jobs.claimArgs).toEqual([[3, POD, 75_000]]);
+    });
+
+    test('P-T40_파드 수로 나눈 값을 쓴다 [ASVS v5.0.0-2.3.2]', async () => {
+      const f = setup({}, { podCount: 12, bulkhead: 600 });
+      await f.runner.tick();
+      // 300 ÷ 12 = 초당 25건, 묶음 200ms치 5개에서 조회 몫 10%를 뺀 4개
+      expect(f.jobs.claimArgs).toEqual([[4, POD, 75_000]]);
+    });
+
+    test('P-T40_채널은 서로 나뉜다(한 채널의 벌크헤드가 차도 다른 채널은 잡는다) [ASVS v5.0.0-15.1.3]', async () => {
+      const f = setup({}, { bulkheads: { SIMULATOR: 1, TOSS: 4 } });
+      const toss = new FakeGateway('TOSS', f.order, f.clock);
+      f.gateways.adapters.set('TOSS', toss);
+      const gate = deferred();
+      f.gateway.gate = gate.promise;
+      f.jobs.claims = [[job()]];
+      await f.runner.tick();
+      await flush();
+      expect(f.jobs.otherClaimArgs).toContainEqual(['TOSS', 4]);
+      await f.runner.tick();
+      expect(f.jobs.claimArgs).toHaveLength(1);
+      expect(f.jobs.otherClaimArgs.filter(([pg]) => pg === 'TOSS')).toHaveLength(2);
+      gate.resolve();
+      await f.runner.whenIdle();
+    });
+
+    test('P-T40_잡은 행은 그 채널의 보호기로 돈다(토큰은 그 채널에서 쓴다)', async () => {
+      const f = setup({}, { bulkheads: { TOSS: 4 } });
+      const toss = new FakeGateway('TOSS', f.order, f.clock);
+      toss.rps = 100;
+      f.gateways.adapters.set('TOSS', toss);
+      f.jobs.otherClaims.set('TOSS', [[job({ paymentId: OTHER_PAYMENT, pg: 'TOSS' })]]);
+      f.jobs.put(target({ paymentId: OTHER_PAYMENT, pg: 'TOSS' }));
+      await f.runner.tick();
+      await f.runner.whenIdle();
+      expect(toss.calls).toHaveLength(1);
+      expect(f.guards.of('TOSS')!.available()).toBe(4);
+      let left = 0;
+      while (left < 10_000 && f.guards.of('TOSS')!.tryTakeToken()) left += 1;
+      expect(left).toBe(19);
+    });
+
+    test('P-T40_여유가 0이면 잡지 않고 막힌 까닭을 센다(토큰) [ASVS v5.0.0-2.4.1]', async () => {
+      const f = setup();
+      drainTokens(f);
+      f.guardSignals.saturateds.length = 0;
+      await expect(f.runner.tick()).resolves.toEqual({ claimed: 0 });
+      expect(f.jobs.claimArgs).toEqual([]);
+      expect(f.guardSignals.saturateds).toEqual([['SIMULATOR', 'token']]);
+    });
+
+    test('P-T40_여유가 0이면 잡지 않고 막힌 까닭을 센다(벌크헤드) [ASVS v5.0.0-15.1.3]', async () => {
+      const f = setup({}, { bulkhead: 1 });
+      const gate = deferred();
+      f.gateway.gate = gate.promise;
+      f.jobs.claims = [[job()]];
+      await f.runner.tick();
+      await flush();
+      await f.runner.tick();
+      expect(f.jobs.claimArgs).toHaveLength(1);
+      expect(f.guardSignals.saturateds).toEqual([['SIMULATOR', 'bulkhead']]);
+      gate.resolve();
+      await f.runner.whenIdle();
+    });
+
+    test('P-T40_겹쳐 부른 틱이 벌크헤드를 넘겨 잡지 않는다(잡기 전에 자리를 쥔다) [ASVS v5.0.0-13.2.6]', async () => {
+      const f = setup({}, { bulkhead: 3 });
+      const a = f.runner.tick();
+      const b = f.runner.tick();
+      await Promise.all([a, b]);
+      await f.runner.whenIdle();
+      expect(f.jobs.claimArgs).toEqual([[3, POD, 75_000]]);
+    });
+
+    test('P-T40_틱의 잡기가 던져도 그 채널의 쥔 자리를 놓는다', async () => {
+      const f = setup({}, { bulkhead: 3 });
+      f.jobs.claims = [throws(dbError())];
+      await f.runner.tick();
+      await f.runner.whenIdle();
+      expect(guardOf(f).available()).toBe(3);
+    });
+
+    test('P-T40_잡은 수만큼 자리를 남기고 나머지는 놓는다, 끝나면 모두 돌아온다', async () => {
+      const f = setup({}, { bulkhead: 5 });
+      f.jobs.claims = [[job()]];
+      await f.runner.tick();
+      await f.runner.whenIdle();
+      expect(guardOf(f).available()).toBe(5);
+    });
+
+    test('PRF183_채널의 보호기를 만들지 못하면(capabilities가 던짐) 그 채널만 건너뛰고 오류를 남긴다 [ASVS v5.0.0-16.5.2]', async () => {
+      const f = setup();
+      const toss = new FakeGateway('TOSS', f.order, f.clock);
+      toss.capabilitiesFailure = new Error('어댑터 결함');
+      f.gateways.adapters.set('TOSS', toss);
+      f.jobs.claims = [[job()]];
+      await expect(f.runner.tick()).resolves.toEqual({ claimed: 1 });
+      await f.runner.whenIdle();
+      expect(f.gateway.calls).toHaveLength(1);
+      expect(f.log.runErrors.map((e) => e.what)).toEqual(['claim']);
+      expect(f.jobs.otherClaimArgs.filter(([pg]) => pg === 'TOSS')).toEqual([]);
+    });
+  });
+
+  describe('어댑터가 없는 채널', () => {
+    test('PRF183_1초에 한 번, 8건까지 잡아 지금처럼 부르지 않고 미룬다 [ASVS v5.0.0-16.5.2]', async () => {
+      const f = setup();
+      f.jobs.otherClaims.set('TOSS', [[job({ paymentId: OTHER_PAYMENT, pg: 'TOSS' })]]);
+      f.jobs.put(target({ paymentId: OTHER_PAYMENT, pg: 'TOSS' }));
+      await f.runner.tick();
+      await f.runner.whenIdle();
+      expect(f.jobs.otherClaimArgs).toEqual([
+        ['TOSS', 8],
+        ['PORTONE', 8],
+      ]);
+      expect(f.signals.outcomes).toEqual([['TOSS', 'no_adapter']]);
+      expect(f.jobs.rescheduled).toHaveLength(1);
+      expect(f.gateway.calls).toEqual([]);
+
+      await f.runner.tick();
+      expect(f.jobs.otherClaimArgs).toHaveLength(2);
+      f.clock.advance(1_000);
+      await f.runner.tick();
+      expect(f.jobs.otherClaimArgs).toHaveLength(4);
+    });
+
+    test('PRF183_채널의 동시 처리가 8건에 닿으면 그 채널은 더 잡지 않는다', async () => {
+      const f = setup();
+      const hold = deferred<boolean>();
+      f.jobs.rescheduleResults = Array.from({ length: 8 }, () => hold.promise);
+      f.jobs.otherClaims.set('TOSS', [Array.from({ length: 8 }, (_, i) => job({ paymentId: uuidAt(300 + i), pg: 'TOSS' }))]);
+      for (let i = 0; i < 8; i++) f.jobs.put(target({ paymentId: uuidAt(300 + i), pg: 'TOSS' }));
+      await f.runner.tick();
+      await flush();
+      f.clock.advance(1_000);
+      await f.runner.tick();
+      expect(f.jobs.otherClaimArgs.filter(([pg]) => pg === 'TOSS')).toEqual([['TOSS', 8]]);
+      hold.resolve(true);
+      await f.runner.whenIdle();
+    });
+  });
+
+  describe('토큰', () => {
+    test('P-T40_토큰을 못 얻으면(경합) 부르지 않고 표시도 쓰지 않으며 임대를 놓는다(attempts 안 오름) [ASVS v5.0.0-2.3.2] [ASVS v5.0.0-2.4.1]', async () => {
+      const f = setup();
+      drainTokens(f);
+      await expect(f.runner.runJob(job())).resolves.toEqual({ kind: 'SKIPPED', reason: 'NO_TOKEN' });
+      expect(f.order).toEqual(['jobs.read', 'jobs.release']);
+      expect(f.jobs.released).toEqual([job()]);
+      expect(f.jobs.marked).toEqual([]);
+      expect(f.jobs.rescheduled).toEqual([]);
+      expectNoGatewayCall(f);
+      expect(f.signals.outcomes).toEqual([]);
+    });
+
+    test('P-T40_앞 소유자가 있어도 표시가 없으면 임대를 놓는다(호출이 나가지 않았음이 확실하다) [ASVS v5.0.0-2.3.4]', async () => {
+      const f = setup();
+      drainTokens(f);
+      await expect(f.runner.runJob(job({ hadPreviousOwner: true }))).resolves.toEqual({ kind: 'SKIPPED', reason: 'NO_TOKEN' });
+      expect(f.jobs.released).toEqual([job({ hadPreviousOwner: true })]);
+    });
+
+    test('P-T40_임대 놓기가 던져도 던지지 않는다', async () => {
+      const f = setup();
+      drainTokens(f);
+      f.jobs.releaseResults = [throws(dbError())];
+      await expect(f.runner.runJob(job())).resolves.toEqual({ kind: 'SKIPPED', reason: 'NO_TOKEN' });
+    });
+
+    test('P-T40_토큰을 못 얻어도 자리를 돌려준다', async () => {
+      const f = setup({}, { bulkhead: 1 });
+      drainTokens(f);
+      await f.runner.runJob(job());
+      expect(guardOf(f).limits().concurrency).toBe(1);
+      f.clock.advance(1_000);
+      expect(guardOf(f).available()).toBe(1);
+    });
+
+    test('P-T40_토큰은 표시를 쓰기 전에 쓴다(먼저 쓰면 부르지 않았는데 다음 시도가 재전송이 된다)', async () => {
+      const f = setup();
+      const before = guardOf(f).available();
+      const mark = deferred<MarkConfirmSentResult>();
+      f.jobs.markResults = [mark.promise];
+      const run = later(f.runner.runJob(job()));
+      await flush();
+      expect(f.jobs.marked).toHaveLength(1);
+      // 자리 하나를 쥐고 토큰 하나를 썼다(벌크헤드 32 - 1 = 31, 토큰 60 - 1 = 59)
+      expect(before).toBe(32);
+      let tokens = 0;
+      while (tokens < 10_000 && guardOf(f).tryTakeToken()) tokens += 1;
+      expect(tokens).toBe(59);
+      mark.resolve('MARKED');
+      await run;
+    });
+
+    test('P-T40_재전송도 토큰을 쓴다 [ASVS v5.0.0-2.3.2]', async () => {
+      const f = setup();
+      f.jobs.put(target({ confirmSent: true }));
+      await f.runner.runJob(job({ attempts: 1 }));
+      let tokens = 0;
+      while (tokens < 10_000 && guardOf(f).tryTakeToken()) tokens += 1;
+      expect(tokens).toBe(59);
+    });
+
+    test('P-T6_기한이 지난 명령은 토큰을 쓰지 않고 끝낸다(재시도 큐의 명령도 기한 안에서만 나간다) [ASVS v5.0.0-16.5.3]', async () => {
+      const f = setup();
+      f.clock.advance(DUE - NOW);
+      const tokens = guardOf(f).available();
+      await expect(f.runner.runJob(job())).resolves.toMatchObject({ kind: 'FINISHED', status: 'FAILED', outcome: 'expired' });
+      expect(guardOf(f).available()).toBe(tokens);
+    });
+
+    test('PRF183_어댑터가 없으면 토큰을 찾지 않고 미룬다', async () => {
+      const f = setup();
+      f.gateways.adapters.clear();
+      await expect(f.runner.runJob(job())).resolves.toMatchObject({ kind: 'RETRY', outcome: 'no_adapter' });
+    });
+  });
+
+  describe('첫 호출 429', () => {
+    test('P-T34_첫 승인 호출의 429: 상한을 절반으로 낮추고 SEV2 로그 한 줄과 지표를 내며, 그 명령은 다음 시도만 늦춘다 [ASVS v5.0.0-2.3.2] [ASVS v5.0.0-16.3.4]', async () => {
+      const f = setup({}, { bulkhead: 32 });
+      f.gateway.answers = [declined429];
+      await expect(f.runner.runJob(job())).resolves.toEqual({ kind: 'RETRY', outcome: 'in_progress', nextAtMs: NOW + 1000 });
+      expect(guardOf(f).limits()).toEqual({ rps: 150, concurrency: 16 });
+      expect(f.guardSignals.throttleds).toEqual([['SIMULATOR', true]]);
+      expect(f.guardLog.lines).toEqual([{ pg: 'SIMULATOR', rps: 150, concurrency: 16 }]);
+      expect(f.jobs.finished).toEqual([]);
+    });
+
+    test('P-T40_다시 보낸 호출의 429는 상한을 그대로 두고 그 호출의 다음 시도만 늦춘다 [ASVS v5.0.0-2.3.2]', async () => {
+      const f = setup({}, { bulkhead: 32 });
+      f.jobs.put(target({ confirmSent: true }));
+      f.gateway.answers = [declined429];
+      await expect(f.runner.runJob(job({ attempts: 1 }))).resolves.toMatchObject({ kind: 'RETRY', outcome: 'in_progress' });
+      expect(guardOf(f).limits()).toEqual({ rps: 300, concurrency: 32 });
+      expect(f.guardSignals.throttleds).toEqual([['SIMULATOR', false]]);
+      expect(f.guardLog.lines).toEqual([]);
+    });
+
+    test('P-T40_표시를 먼저 쓰려다 ALREADY를 받은 호출(겹침)의 429도 첫 호출이 아니다', async () => {
+      const f = setup({}, { bulkhead: 32 });
+      f.jobs.markResults = ['ALREADY'];
+      f.gateway.answers = [declined429];
+      await f.runner.runJob(job());
+      expect(guardOf(f).limits()).toEqual({ rps: 300, concurrency: 32 });
+      expect(f.guardSignals.throttleds).toEqual([['SIMULATOR', false]]);
+    });
+
+    test('P-T34_몰린 첫 호출 429는 5초 안에 한 번만 낮춘다 [ASVS v5.0.0-2.4.1]', async () => {
+      const f = setup({}, { bulkhead: 32 });
+      f.gateway.answers = [declined429, declined429];
+      await f.runner.runJob(job());
+      await f.runner.runJob(job({ paymentId: OTHER_PAYMENT }));
+      expect(guardOf(f).limits()).toEqual({ rps: 150, concurrency: 16 });
+      expect(f.guardLog.lines).toHaveLength(1);
+      expect(f.guardSignals.throttleds).toHaveLength(2);
+    });
+
+    test('P-T34_낮춘 뒤의 틱은 낮춘 여유만큼만 잡는다 [ASVS v5.0.0-2.3.2]', async () => {
+      const f = setup({}, { bulkhead: 32 });
+      f.gateway.answers = [declined429];
+      await f.runner.runJob(job());
+      await f.runner.tick();
+      expect(f.jobs.claimArgs).toEqual([[16, POD, 75_000]]);
+    });
+
+    test('P-T34_한도 초과가 아닌 거절은 상한을 건드리지 않는다', async () => {
+      const f = setup({}, { bulkhead: 32 });
+      f.gateway.answers = [answer({ outcome: 'DECLINED', failureCategory: 'CARD_DECLINED' })];
+      await f.runner.runJob(job());
+      expect(guardOf(f).limits()).toEqual({ rps: 300, concurrency: 32 });
+      expect(f.guardSignals.throttleds).toEqual([]);
+    });
+
+    test('P-T40_호출 중인 수를 채널 지표로 둔다(호출 중 1, 끝나면 0)', async () => {
+      const f = setup();
+      const gate = deferred();
+      f.gateway.gate = gate.promise;
+      const run = later(f.runner.runJob(job()));
+      await flush();
+      expect(f.guardSignals.inflights.at(-1)).toEqual(['SIMULATOR', 1]);
+      gate.resolve();
+      await run;
+      expect(f.guardSignals.inflights.at(-1)).toEqual(['SIMULATOR', 0]);
+    });
+
+    test('PRF183_로그와 지표에 결제 값이 실리지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
+      const f = setup();
+      f.gateway.answers = [declined429];
+      await f.runner.runJob(job());
+      const text = JSON.stringify({ lines: f.guardLog.lines, t: f.guardSignals.throttleds });
+      expect(text).not.toContain(SECRET_PAYMENT_KEY);
+      expect(text).not.toContain(ORDER_ID);
+      expect(text).not.toContain(String(AMOUNT));
+    });
+  });
+
+  describe('리뷰 고침(코드 리뷰)', () => {
+    /** 남은 토큰 수(한 번 빼면 다시 돌려준다, 반복 상한을 둔다) */
+    const tokensLeft = (f: Fixture): number => {
+      let n = 0;
+      while (n < 10_000 && guardOf(f).tryTakeToken()) n += 1;
+      guardOf(f).refundTokens(n);
+      return n;
+    };
+
+    describe('H1: 채널 사이 굶음', () => {
+      test('P-T40_리뷰 고침 H1: 한 채널의 잡기가 늦어도 다른 채널의 틱은 돈다(채널별 진행 중 표시) [ASVS v5.0.0-15.1.3]', async () => {
+        const f = setup({}, { bulkheads: { TOSS: 4 } });
+        f.gateways.adapters.set('TOSS', new FakeGateway('TOSS', f.order, f.clock));
+        const gate = deferred();
+        f.jobs.otherClaimGate = gate.promise;
+        f.runner.start();
+        f.timer.fire();
+        await flush();
+        f.timer.fire();
+        await flush();
+        expect(f.jobs.claimArgs).toHaveLength(2);
+        expect(f.jobs.otherClaimArgs.filter(([pg]) => pg === 'TOSS')).toHaveLength(1);
+        gate.resolve();
+        await f.runner.stop();
+      });
+    });
+
+    describe('H3: 낮추기', () => {
+      test('P-T34_리뷰 고침 H3: 낮추기 전에 보낸 호출의 429는 쿨다운이 지나 도착해도 다시 낮추지 않는다 [ASVS v5.0.0-2.3.2]', async () => {
+        const f = setup({}, { bulkhead: 32 });
+        const slow = deferred<ConfirmResult>();
+        f.gateway.answers = [slow.promise, declined429];
+        const first = later(f.runner.runJob(job()));
+        await flush();
+        f.clock.advance(1);
+        await f.runner.runJob(job({ paymentId: OTHER_PAYMENT }));
+        expect(guardOf(f).limits()).toEqual({ rps: 150, concurrency: 16 });
+        f.clock.advance(5_000);
+
+        slow.resolve(declined429);
+        await first;
+
+        expect(guardOf(f).limits()).toEqual({ rps: 150, concurrency: 16 });
+        expect(f.guardLog.lines).toHaveLength(1);
+        expect(f.guardSignals.throttleds).toHaveLength(2);
+      });
+    });
+
+    describe('M5: 기한 지난 행', () => {
+      test('P-T40_리뷰 고침 M5: 자리가 모두 차도 기한 지난 행을 잡아 부르지 않고 끝낸다 [ASVS v5.0.0-15.1.3] [ASVS v5.0.0-16.5.3]', async () => {
+        const f = setup({}, { bulkhead: 1 });
+        const gate = deferred();
+        f.gateway.gate = gate.promise;
+        f.jobs.claims = [[job()]];
+        await f.runner.tick();
+        await flush();
+        expect(f.gateway.calls).toHaveLength(1);
+
+        const tokens = tokensLeft(f);
+        f.jobs.put(target({ paymentId: OTHER_PAYMENT, authenticatedAtMs: NOW - DEADLINE_MS }));
+        f.jobs.expiredClaims.set('SIMULATOR', [[job({ paymentId: OTHER_PAYMENT })]]);
+        await expect(f.runner.tick()).resolves.toEqual({ claimed: 1 });
+        await flush();
+
+        expect(f.jobs.expiredArgs.at(-1)).toEqual(['SIMULATOR', 50, POD, 75_000, DEADLINE_MS]);
+        expect(f.jobs.finished.map((x) => [x.target.paymentId, x.finish])).toEqual([[OTHER_PAYMENT, { status: 'FAILED', failureCategory: 'EXPIRED' }]]);
+        expect(f.gateway.calls).toHaveLength(1);
+        expect(tokensLeft(f)).toBe(tokens);
+        gate.resolve();
+        await f.runner.whenIdle();
+      });
+
+      test('P-T40_리뷰 고침 M5: 채널마다 동시 50건까지 잡고 끝난 만큼 다시 잡는다', async () => {
+        const f = setup();
+        const finish = deferred<FinishConfirmResult>();
+        f.jobs.finishResults = Array.from({ length: 20 }, () => finish.promise);
+        f.clock.advance(DUE - NOW);
+        f.jobs.expiredClaims.set('SIMULATOR', [Array.from({ length: 20 }, (_, i) => jobN(i)), []]);
+        await f.runner.tick();
+        await flush();
+        await f.runner.tick();
+        expect(f.jobs.expiredArgs.map((a) => a[1])).toEqual([50, 30]);
+        finish.resolve('APPLIED');
+        await f.runner.whenIdle();
+        await f.runner.tick();
+        expect(f.jobs.expiredArgs.at(-1)![1]).toBe(50);
+      });
+
+      test('P-T40_리뷰 고침 M5: 기한은 그 어댑터의 capabilities에서 받고, 어댑터가 없는 채널은 묻지 않는다', async () => {
+        const f = setup();
+        f.gateway.deadlineMs = 60_000;
+        await f.runner.tick();
+        expect(f.jobs.expiredArgs).toEqual([['SIMULATOR', 50, POD, 75_000, 60_000]]);
+      });
+
+      test('P-T40_리뷰 고침 M5: 기한 지난 행의 잡기가 던져도 그 채널의 승인 잡기는 돈다 [ASVS v5.0.0-16.3.4]', async () => {
+        const f = setup();
+        f.jobs.expiredClaims.set('SIMULATOR', [throws(dbError())]);
+        f.jobs.claims = [[job()]];
+        await expect(f.runner.tick()).resolves.toEqual({ claimed: 1 });
+        await f.runner.whenIdle();
+        expect(f.gateway.calls).toHaveLength(1);
+        expect(f.log.runErrors.map((e) => e.what)).toEqual(['claim']);
+      });
+
+      test('P-T40_리뷰 고침 M5: 멈춘 뒤에 잡힌 기한 지난 행은 임대를 놓고 끝내지 않는다', async () => {
+        const f = setup();
+        const claim = deferred<ConfirmJob[]>();
+        f.jobs.expiredClaims.set('SIMULATOR', [claim.promise]);
+        const ticking = later(f.runner.tick());
+        await flush();
+        const stopping = later(f.runner.stop());
+        claim.resolve([job()]);
+        await ticking;
+        await stopping;
+        expect(f.jobs.finished).toEqual([]);
+        expect(f.jobs.released).toEqual([job()]);
+      });
+    });
+
+    describe('M6: 토큰 예약', () => {
+      test('P-T40_리뷰 고침 M6: 잡은 수만큼 토큰을 미리 빼고 못 잡은 수는 돌려주며, 부른 호출마다 토큰은 하나다 [ASVS v5.0.0-2.3.2] [ASVS v5.0.0-2.4.1]', async () => {
+        const f = setup();
+        f.jobs.claims = [[job()]];
+        await f.runner.tick();
+        await f.runner.whenIdle();
+        expect(f.gateway.calls).toHaveLength(1);
+        expect(tokensLeft(f)).toBe(59);
+      });
+
+      test('P-T40_리뷰 고침 M6: 틱이 잡은 행은 호출 앞에서 토큰을 다시 찾지 않는다(겹친 틱이 토큰을 다 써도 부른다) [ASVS v5.0.0-2.4.1]', async () => {
+        const f = setup();
+        const mark = deferred<MarkConfirmSentResult>();
+        f.jobs.markResults = [mark.promise];
+        f.jobs.claims = [[job()]];
+        await f.runner.tick();
+        await flush();
+        drainTokens(f);
+        mark.resolve('MARKED');
+        await f.runner.whenIdle();
+        expect(f.gateway.calls).toHaveLength(1);
+        expect(f.jobs.released).toEqual([]);
+      });
+
+      test.each<[string, Partial<ConfirmTarget>]>([
+        ['원장이 바뀐 행', { status: 'APPROVED' }],
+        ['기한이 지난 행', { authenticatedAtMs: NOW - DEADLINE_MS }],
+      ])('P-T40_리뷰 고침 M6: 미리 뺐지만 부르지 않은 %s의 토큰은 돌려준다 [ASVS v5.0.0-2.4.1]', async (_name, over) => {
+        const f = setup();
+        f.jobs.put(target(over));
+        f.jobs.claims = [[job()]];
+        await f.runner.tick();
+        await f.runner.whenIdle();
+        expect(f.gateway.calls).toEqual([]);
+        expect(tokensLeft(f)).toBe(60);
+      });
+
+      test('P-T40_리뷰 고침 M6: 임대를 잃어 부르지 못한 행의 토큰도 돌려준다', async () => {
+        const f = setup();
+        f.jobs.markResults = ['LEASE_LOST'];
+        f.jobs.claims = [[job()]];
+        await f.runner.tick();
+        await f.runner.whenIdle();
+        expect(tokensLeft(f)).toBe(60);
+      });
+
+      test('P-T40_리뷰 고침 M6: 잡기가 던지면 미리 뺀 토큰을 모두 돌려준다 [ASVS v5.0.0-16.5.2]', async () => {
+        const f = setup();
+        f.jobs.claims = [throws(dbError())];
+        await f.runner.tick();
+        expect(tokensLeft(f)).toBe(60);
+      });
+
+      test('P-T40_리뷰 고침 M6: 승인 잡기는 버킷의 마지막 10%를 남긴다(조회 몫) [ASVS v5.0.0-2.4.1]', async () => {
+        const f = setup({}, { bulkhead: 600 });
+        await f.runner.tick();
+        expect(f.jobs.claimArgs).toEqual([[54, POD, 75_000]]);
+      });
+
+      test('P-T40_리뷰 고침 M6: 표에 기다리는 행이 없으면 여유가 0이어도 saturated가 오르지 않는다 [ASVS v5.0.0-16.3.4]', async () => {
+        const f = setup();
+        drainTokens(f);
+        f.guardSignals.saturateds.length = 0;
+        f.jobs.due.set('SIMULATOR', false);
+        await f.runner.tick();
+        expect(f.jobs.claimArgs).toEqual([]);
+        expect(f.guardSignals.saturateds).toEqual([]);
+      });
+
+      test('P-T40_리뷰 고침 M6: 대기 행을 확인하다 던져도 지표를 올리지 않고 틱은 던지지 않는다 [ASVS v5.0.0-16.5.2]', async () => {
+        const f = setup();
+        drainTokens(f);
+        f.guardSignals.saturateds.length = 0;
+        f.jobs.hasDue = async () => {
+          throw dbError();
+        };
+        await expect(f.runner.tick()).resolves.toEqual({ claimed: 0 });
+        expect(f.guardSignals.saturateds).toEqual([]);
+        expect(f.log.runErrors.map((e) => e.what)).toEqual(['claim']);
+      });
+    });
+
+    describe('낮음: 승인 호출의 실행기 한도', () => {
+      test('P-T40_리뷰 고침 낮음: 답하지 않는 어댑터도 실행기 한도에서 자리를 돌려주고 결과를 가정하지 않는다 [ASVS v5.0.0-16.5.2] [ASVS v5.0.0-16.5.3]', async () => {
+        const f = setup({ confirmGuardMs: 20 }, { bulkhead: 1 });
+        f.gateway.answers = [new Promise<ConfirmResult>(() => {})];
+        f.jobs.claims = [[job()]];
+        await f.runner.tick();
+        await f.runner.whenIdle();
+        expect(f.jobs.finished[0]!.finish).toMatchObject({ status: 'UNKNOWN', result: 'UNKNOWN' });
+        expect(f.log.runErrors.map((e) => [e.what, e.orderId])).toEqual([['call', ORDER_ID]]);
+        expect(guardOf(f).available()).toBe(1);
+      });
+
+      test('P-T40_리뷰 고침 낮음: 실행기 한도는 어댑터의 시간 합 상한보다 길고 임대보다 짧다', () => {
+        expect(CONFIRM_CALL_GUARD_MS).toBeGreaterThan(CONFIRM_CALL_BUDGET_MS);
+        expect(CONFIRM_CALL_GUARD_MS).toBeLessThan(CONFIRM_LEASE_MS);
+      });
     });
   });
 });

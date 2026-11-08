@@ -12,6 +12,7 @@ import type { PaymentLedgerStatus } from '../../domain/confirm-command.js';
 import {
   buildPaymentEvent,
   type BuildPaymentEventInput,
+  CONFIRM_EXPIRED_SCAN,
   CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS,
   CONFIRM_SENT_EVENT_TYPE,
   type ConfirmFinish,
@@ -102,7 +103,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     this.#codec = o.codec ?? jsonPaymentEventCodec;
   }
 
-  async claimDue(limit: number, owner: string, leaseMs: number): Promise<ConfirmJob[]> {
+  async claimDue(pg: PgName, limit: number, owner: string, leaseMs: number): Promise<ConfirmJob[]> {
     if (!isPositiveInt(limit)) throw new RangeError(`limit은 1 이상의 정수다: ${String(limit)}`);
     if (!isPositiveInt(leaseMs)) throw new RangeError(`leaseMs는 1 이상의 정수다: ${String(leaseMs)}`);
     if (owner === '') throw new RangeError('owner가 빈 글이다');
@@ -113,7 +114,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       tx.execute(sql`
         with picked as (
           select payment_id, lease_owner from payment_confirm_job
-          where next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until < ${at}::timestamptz)
+          where pg = ${pg} and next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until < ${at}::timestamptz)
           order by next_attempt_at, payment_id
           limit ${limit}::int
           for update skip locked)
@@ -123,10 +124,55 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
         where j.payment_id = p.payment_id
         returning j.payment_id::text as payment_id, j.attempts, j.next_attempt_at, p.lease_owner as previous_owner`),
     );
-    // RETURNING의 차례는 정해지지 않아 고른 차례(next_attempt_at, 같으면 payment_id)로 다시 맞춘다
-    return (r.rows as ClaimRow[])
+    return this.#jobsOf(r.rows as ClaimRow[], pg, owner, leaseUntilMs);
+  }
+
+  async claimExpired(pg: PgName, limit: number, owner: string, leaseMs: number, deadlineMs: number): Promise<ConfirmJob[]> {
+    if (!isPositiveInt(limit)) throw new RangeError(`limit은 1 이상의 정수다: ${String(limit)}`);
+    if (!isPositiveInt(leaseMs)) throw new RangeError(`leaseMs는 1 이상의 정수다: ${String(leaseMs)}`);
+    if (!isPositiveInt(deadlineMs)) throw new RangeError(`deadlineMs는 1 이상의 정수다: ${String(deadlineMs)}`);
+    if (owner === '') throw new RangeError('owner가 빈 글이다');
+    const now = this.o.clock.now();
+    const at = new Date(now);
+    const leaseUntilMs = now + leaseMs;
+    const r = await this.#tx((tx) =>
+      // 앞쪽 CONFIRM_EXPIRED_SCAN행만 원장과 대조한다(밀린 표에서 틱마다 표 전체를 조인하지 않게). 기한은 next_attempt_at과 거의 같은 차례로 지나므로 기한 지난 행은 앞쪽에 있다
+      tx.execute(sql`
+        with head as (
+          select payment_id from payment_confirm_job
+          where pg = ${pg} and next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until < ${at}::timestamptz)
+          order by next_attempt_at, payment_id
+          limit ${CONFIRM_EXPIRED_SCAN}::int),
+        picked as (
+          select j.payment_id, j.lease_owner from head h
+          join payment_confirm_job j on j.payment_id = h.payment_id
+          join payment p on p.id = h.payment_id
+          where p.authenticated_at <= ${new Date(now - deadlineMs)}::timestamptz
+            and j.next_attempt_at <= ${at}::timestamptz and (j.lease_until is null or j.lease_until < ${at}::timestamptz)
+          order by j.next_attempt_at, j.payment_id
+          limit ${limit}::int
+          for update of j skip locked)
+        update payment_confirm_job j
+        set lease_owner = ${owner}, lease_until = ${new Date(leaseUntilMs)}::timestamptz
+        from picked p
+        where j.payment_id = p.payment_id
+        returning j.payment_id::text as payment_id, j.attempts, j.next_attempt_at, p.lease_owner as previous_owner`),
+    );
+    return this.#jobsOf(r.rows as ClaimRow[], pg, owner, leaseUntilMs);
+  }
+
+  async hasDue(pg: PgName): Promise<boolean> {
+    const at = new Date(this.o.clock.now());
+    const r = await this.o.database.db.execute(sql`
+      select exists (select 1 from payment_confirm_job where pg = ${pg} and next_attempt_at <= ${at}::timestamptz and (lease_until is null or lease_until < ${at}::timestamptz)) as due`);
+    return (r.rows[0] as { due: boolean }).due;
+  }
+
+  /** RETURNING의 차례는 정해지지 않아 고른 차례(next_attempt_at, 같으면 payment_id)로 다시 맞춘다 */
+  #jobsOf(rows: ClaimRow[], pg: PgName, owner: string, leaseUntilMs: number): ConfirmJob[] {
+    return rows
       .sort((a, b) => msOf(a.next_attempt_at) - msOf(b.next_attempt_at) || (a.payment_id < b.payment_id ? -1 : a.payment_id > b.payment_id ? 1 : 0))
-      .map((row) => ({ paymentId: row.payment_id, attempts: Number(row.attempts), owner, leaseUntilMs, hadPreviousOwner: row.previous_owner !== null }));
+      .map((row) => ({ paymentId: row.payment_id, pg, attempts: Number(row.attempts), owner, leaseUntilMs, hadPreviousOwner: row.previous_owner !== null }));
   }
 
   async read(paymentId: string): Promise<ConfirmTarget | undefined> {
@@ -227,7 +273,13 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     return r.rows.length > 0;
   }
 
-  async claimDueQueries(limit: number): Promise<UnknownQueryJob[]> {
+  async hasDueQueries(pg: PgName): Promise<boolean> {
+    const r = await this.o.database.db.execute(sql`
+      select exists (select 1 from payment where status = 'UNKNOWN' and pg = ${pg} and next_query_at <= ${new Date(this.o.clock.now())}::timestamptz) as due`);
+    return (r.rows[0] as { due: boolean }).due;
+  }
+
+  async claimDueQueries(pg: PgName, limit: number): Promise<UnknownQueryJob[]> {
     if (!isPositiveInt(limit)) throw new RangeError(`limit은 1 이상의 정수다: ${String(limit)}`);
     const now = this.o.clock.now();
     return this.#tx(async (tx) => {
@@ -235,7 +287,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       const r = await tx.execute(sql`
         select id::text as id, order_id::text as order_id, event_id::text as event_id, attempt_no, pg, pg_payment_ref, amount, anomaly_logged_at, query_attempts
         from payment
-        where status = 'UNKNOWN' and next_query_at <= ${new Date(now)}::timestamptz
+        where status = 'UNKNOWN' and pg = ${pg} and next_query_at <= ${new Date(now)}::timestamptz
         order by next_query_at
         limit ${limit}::int
         for update skip locked`);
@@ -267,10 +319,10 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     });
   }
 
-  async rescheduleQuery(job: UnknownQueryJob, nextAtMs: number): Promise<boolean> {
+  async rescheduleQuery(job: UnknownQueryJob, nextAtMs: number, o?: { readonly refundAttempt?: boolean }): Promise<boolean> {
     const r = await this.#tx((tx) =>
       tx.execute(sql`
-        update payment set next_query_at = ${new Date(nextAtMs)}::timestamptz
+        update payment set next_query_at = ${new Date(nextAtMs)}::timestamptz, query_attempts = query_attempts - ${o?.refundAttempt ? 1 : 0}::int
         where id = ${job.paymentId}::uuid and status = 'UNKNOWN' and next_query_at = ${new Date(job.claimedNextQueryAtMs)}::timestamptz
         returning id`),
     );

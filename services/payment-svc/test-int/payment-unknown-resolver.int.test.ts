@@ -29,6 +29,9 @@ import {
   paymentUnknownLog,
   PromPaymentConfirmSignals,
   PromPaymentUnknownSignals,
+  PgCallGuards,
+  pgCallGuardLog,
+  PromPgCallGuardSignals,
   StaticPaymentGateways,
   TRADE_PAYMENTS_TOPIC,
   UNKNOWN_OVERDUE_MS,
@@ -207,7 +210,8 @@ async function buildHarness(): Promise<Harness> {
   const jobs = new DrizzleConfirmJobs({ database: runnerDb, clock: s.clock });
   const otherJobs = new DrizzleConfirmJobs({ database: otherRunnerDb, clock: s.clock });
   const silent = { setInterval: () => 0, clearInterval: () => {} };
-  const confirmRunner = new PaymentConfirmRunner({ jobs, gateways, log: paymentConfirmLog(logger), signals: confirmSignals, clock: s.clock, podId: 'pod-confirm', timer: silent });
+  const guards = (): PgCallGuards => new PgCallGuards({ gateways, podCount: 1, clock: s.clock, signals: new PromPgCallGuardSignals(), log: pgCallGuardLog(logger) });
+  const confirmRunner = new PaymentConfirmRunner({ jobs, gateways, log: paymentConfirmLog(logger), signals: confirmSignals, clock: s.clock, podId: 'pod-confirm', timer: silent, guards: guards() });
   const log = paymentUnknownLog(logger);
   return {
     stack: s,
@@ -215,7 +219,7 @@ async function buildHarness(): Promise<Harness> {
     logs,
     metrics: () => metrics.registry.metrics(),
     confirmRunner,
-    resolver: (o = {}, db = 'a') => new PaymentUnknownResolver({ queries: db === 'a' ? jobs : otherJobs, gateways, log, signals, clock: s.clock, timer: silent, ...o }),
+    resolver: (o = {}, db = 'a') => new PaymentUnknownResolver({ queries: db === 'a' ? jobs : otherJobs, gateways, log, signals, clock: s.clock, timer: silent, guards: guards(), ...o }),
   };
 }
 
@@ -483,7 +487,8 @@ describe('겹침과 쓰기', () => {
       await sim.fault(f.orderId, { kind: 'drop', applied: true });
       list.push(f);
     }
-    while ((await drive(h.confirmRunner)) > 0);
+    // 토큰 묶음에 맞춰 여러 틱에 나눠 잡는다(끝나지 않는 일이 없게 틱 수에 상한을 둔다)
+    for (let i = 0; i < 50 && (await drive(h.confirmRunner)) > 0; i += 1);
     h.clock.advance(UNKNOWN_QUERY_BASE_MS);
 
     const a = h.resolver();
@@ -638,7 +643,7 @@ describe('리뷰 고침', () => {
     const h = await harness();
     await unknownPayment();
     const jobs = new DrizzleConfirmJobs({ database: runnerDb, clock: h.clock });
-    const [job] = await jobs.claimDueQueries(1);
+    const [job] = await jobs.claimDueQueries('SIMULATOR', 1);
 
     await expect(jobs.markAnomalyLogged(job!)).resolves.toBe(true);
     await expect(jobs.markAnomalyLogged(job!)).resolves.toBe(false);
@@ -687,9 +692,9 @@ describe('리뷰 고침', () => {
     const h = await harness();
     await unknownPayment();
     const jobs = new DrizzleConfirmJobs({ database: runnerDb, clock: h.clock });
-    const [slow] = await jobs.claimDueQueries(1);
+    const [slow] = await jobs.claimDueQueries('SIMULATOR', 1);
     h.clock.advance(15_000);
-    const [other] = await jobs.claimDueQueries(1);
+    const [other] = await jobs.claimDueQueries('SIMULATOR', 1);
     expect(other!.paymentId).toBe(slow!.paymentId);
 
     await expect(jobs.rescheduleQuery(slow!, h.clock.now() + 5_000)).resolves.toBe(false);
@@ -862,7 +867,7 @@ describe('문장', () => {
   test('PRF182_잡기 문장은 끝난 행이 많은 표에서 부분 인덱스를 타고 표를 통째로 읽지 않으며 FOR UPDATE SKIP LOCKED다', async () => {
     const h = await harness();
     await unknownPayment();
-    const s = await statementsDuring(() => new DrizzleConfirmJobs({ database: runnerDb, clock: h.clock }).claimDueQueries(16));
+    const s = await statementsDuring(() => new DrizzleConfirmJobs({ database: runnerDb, clock: h.clock }).claimDueQueries('SIMULATOR', 16));
     const claim = s.find((x) => /for update skip locked/i.test(x.text));
     expect(claim, JSON.stringify(s.map((x) => x.text))).toBeDefined();
 
