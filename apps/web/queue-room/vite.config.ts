@@ -53,6 +53,8 @@ export default defineConfig(() => ({
   },
   preview: { port: 3004, strictPort: true },
   plugins: [cloudFrontShellRewrite()],
+  // 대기실 CSS는 Tailwind를 쓰지 않는다. 비워 두지 않으면 Vite가 폴더 위쪽의 apps/web/postcss.config.mjs를 찾아 읽어, 웹 앱 의존성 없이 설치하는 CI에서 빌드가 실패한다
+  css: { postcss: { plugins: [] } },
   build: {
     target: 'es2022',
     // 링크 없는 숨김 소스 맵: .map은 만들되 JS에 sourceMappingURL을 넣지 않고 올리지 않는다(docs/frontend.md §5.18, FE-T21, BAS-220)

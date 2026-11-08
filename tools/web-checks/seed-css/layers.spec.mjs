@@ -27,14 +27,16 @@ for (const app of APPS) {
 }
 
 // SEED base의 :root·[data-seed-color-mode="system"]{color-scheme: light dark}가 밝은 화면의 맨 바깥(스크롤바·입력 칸)을
-// 운영체제 다크에 따라 어둡게 그리지 않는지(리뷰 2026-11-04 중간 4 재현). 키트 테마(.pk·.pk.dark)를 따르고, 스캐너는 light only다
+// 운영체제 다크에 따라 어둡게 그리지 않는지(리뷰 2026-11-04 중간 4 재현). 키트 테마(.pk·.pk.dark)를 따르고, 스캐너는 light only다.
+// 소비자 웹만 SEED 색 모드 스크립트를 실어 운영체제 다크를 키트 테마로 따른다(HOT-291, packages/ds ds.css). 설치한 정식 Firefox(BiDi)는 다크 흉내가 먹지 않아 그 브라우저가 본 값으로 견준다
 for (const app of APPS) {
-  test(`SEED base를 실어도 ${app.name} 루트 color-scheme은 키트 테마를 따른다(운영체제 다크에서도)`, async ({ page }) => {
+  test(`SEED base를 실어도 ${app.name} 루트 color-scheme은 키트 테마를 따른다(운영체제 다크에서도)`, async ({ page, browserName }) => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.goto(`http://${HOST}:${portOf(app, 'poc')}${app.probe}`);
     await expect(page.locator('[data-probe="seed-only"]')).toBeVisible();
-    const scheme = await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme);
-    expect(scheme).toBe(app.name === 'scanner' ? 'light only' : 'light');
+    const { scheme, osDark } = await page.evaluate(() => ({ scheme: getComputedStyle(document.documentElement).colorScheme, osDark: matchMedia('(prefers-color-scheme: dark)').matches }));
+    if (browserName === 'chromium') expect(osDark, '다크 흉내가 먹어야 시험이 뜻이 있다').toBe(true);
+    expect(scheme).toBe(app.name === 'scanner' ? 'light only' : app.name === 'web' && osDark ? 'dark' : 'light');
   });
 }
 

@@ -37,6 +37,8 @@
 - HOT-343: 숨긴 탭 제목의 `(N초)`는 폴링마다(숨긴 탭 5초 이상) 바뀐다. 마지막 60초는 1초마다 고칠지(브라우저의 숨긴 탭 타이머 제한 안에서) 본다(apps/web/queue-room/src/main.ts applyTitle)
 - HOT-343 확인 중: 웹 좌석 화면(개발 서버 3000, `/booking/[eventId]/seats`)에서 'Encountered a script tag while rendering React component'와 'Could not validate `instant`' 오류가 콘솔에 났다. 좌석 화면을 잇는 HOT-350에서 본다
 - HOT-344: 대기실 매진 화면(신청 버튼·결과·다시 그리기)과 앞 인원 숫자 굴림의 화면 조립은 DOM 시험이 없고 브라우저 확인만 덮는다(상태 기계·신청 상태·굴림 자리는 단위 시험). 대기실 화면 시험 틀(작은 DOM 대역이나 Playwright 한 벌)을 둘지 본다(apps/web/queue-room/src/screens/soldout.ts·queue.ts)
+- HOT-291: 소비자 웹 첫 화면 CSS가 Pretendard 동적 서브셋의 `@font-face` 92개로 34.2kB → 49.1kB(gzip, 나머지 33.9kB)가 됐다(기준선 고침, §5.8 예산 25kB). 글꼴 목록을 첫 화면 CSS에서 떼어 막지 않게 싣거나 wbs 7.5.2(LCH-200)에서 예산을 다시 정한다(apps/web/src/_app/styles/globals.css, tools/web-checks/seed-css/css-baseline.json)
+- HOT-300: 캐시 화면(`/` 등)의 뒤쪽 다시 만들기가 'client rendering was requested outside a Suspense boundary'(Next.js 'Render in Browser')로 실패해 `/`가 STALE로 남는다(만든 HTML은 200으로 계속 나간다). 프리렌더가 멈춘 자리가 루트에 Suspense 없이 남는 경우인데 무엇이 멈추는지는 아직 못 찾았다. 홈 데이터가 cacheLife 60초라 운영에서 홈이 새로 만들어지지 않을 수 있다(apps/web src/_pages/home, src/_app/layouts/CachedRootLayout.tsx, CI 실행 42089422611 seed-css 로그)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3). 지난 병렬 세션 기록(PRF-010~120)은 [docs/progress-archive.md](../progress-archive.md)에 있다.
@@ -76,3 +78,4 @@
 - 2026-11-06 HOT-347 대기실 T=0 세 엔진 검사(ADR-0217): 운영 빌드에 출처만 바꾼 대기실 검사 빌드와 같은 출처 검사 틀(4130), 가짜 API 검사 기록(사전 요청·간격·끊긴 시각)으로 FE-T3·FE-T15·FE-T4를 Chromium·WebKit·Firefox에서 본다. CI 화면 잡에 queue-room을 더했다.
 - 2026-11-06 HOT-348 대기실 여러 탭 세 엔진 검사(ADR-0218): 한 문맥의 탭 셋과 탭마다의 fetch 세기로 리더 하나·숨긴 뒤 1.5초 안 넘김·모두 숨김·방송 끊김(리더 방송만 도중에 막음)·숨긴 채 차례를 Chromium·WebKit·Firefox에서 본다. 복제 탭 구매는 HOT-360.
 - 2026-11-06 HOT-349 React 대기 패널(ADR-0220): ds QueuePanel(CMP-015)을 셸의 패널 자리와 같은 마크업으로 만들고, 대기실 화면 CSS를 ds(queue-room-screens.css)로 옮겨 한 곳에 두었다. 셸 화면의 패널 자리를 부품 마크업으로 바꿔 같은 기준 이미지와 견준다. HOT-344 뒤 깨진 FE-T40 틀의 앞 인원 확인과 숫자 글자 나눔을 고쳤다.
+- 2026-11-09 CI 웹 잡 고침(R-363): 대기실 빌드가 위쪽 웹 앱 PostCSS 설정을 읽지 않게 하고(HOT-349 뒤 CI 빌드 실패), HOT-291의 글꼴 목록으로 는 웹 첫 CSS 기준선을 49.1kB로, 운영체제 다크를 따르는 웹의 color-scheme 기대를 고쳤다.
