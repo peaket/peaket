@@ -165,3 +165,4 @@ OPEN[27]: 로비 추첨의 drand 비콘 서명 검증(BUILD_ORDER HOT-041, ADR-0
 - 2026-11-09 PRF-180 ① payment-svc 프로세스와 승인 명령 접수(R-389, wbs 2.7.2 ①, ADR-0140, P-T53·P-T54, 추천 적용): 원래 PRF-180을 다섯으로 나눔. 마이그레이션 0000, gRPC ConfirmPayment(주문당 1건 멱등, 원장·승인 명령 한 트랜잭션)와 BatchGetPayments, 릴레이. 결제사 호출은 PRF-181부터.
 - 2026-11-09 api-client 시험 시간 한도(R-390, FE-T3): 정본 openapi 해석이 몰리는 러너에서 기본 5초를 넘겨 CI가 실패했다. 그 시험의 한도를 30초로 늘렸다.
 - 2026-11-09 PRF-181 승인 실행기(R-391, wbs 2.7.2 ②, 명세 send·expireCommand·respond·timeout·restart, P-T6·P-T24, 추천 적용): API 파드가 승인 명령을 SKIP LOCKED·임대로 잡아 CONFIRM_SENT 뒤 결제사를 부르고 답을 원장·사건·Outbox에 한 트랜잭션으로 쓴다. 답을 모르면 UNKNOWN(0001).
+- 2026-11-09 핫패스 풀 시험 시간 경쟁 고침(R-392, FND-070): 연결 하나짜리 풀로 첫 요청을 보내는 시험이 몰리는 러너에서 첫 연결 동안 429를 받았다. 요청 전에 연결을 맺어 둔다.
