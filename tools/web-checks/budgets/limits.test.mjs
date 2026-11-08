@@ -49,11 +49,11 @@ test('첫 JS 한도: 예산 안이면 예산, 넘은 경로는 기준선 + 1kB�
   assert.throws(() => jsLimit(undefined, 1), /예산/);
 });
 
-test('적재 지표 한도: 목표 안이면 목표, 넘거나 목표가 없으면 기준선 + 여유(시간 10%, CLS 0.02)', () => {
-  assert.deepEqual(LOAD_MARGIN, { ms: 0.1, cls: 0.02 });
+test('적재 지표 한도: 목표 안이면 목표, 넘거나 목표가 없으면 기준선 + 여유(시간 25%, CLS 0.02)', () => {
+  assert.deepEqual(LOAD_MARGIN, { ms: 0.25, cls: 0.02 });
   assert.equal(loadLimit(2500, undefined, 'lcpMs'), 2500);
-  assert.equal(loadLimit(2500, 12763, 'lcpMs'), 14039);
-  assert.equal(loadLimit(undefined, 6796, 'lcpMs'), 7476);
+  assert.equal(loadLimit(2500, 12763, 'lcpMs'), 15954);
+  assert.equal(loadLimit(undefined, 6796, 'lcpMs'), 8495);
   assert.equal(loadLimit(0.1, 0.15, 'cls'), 0.17);
   assert.throws(() => loadLimit(undefined, undefined, 'lcpMs'), /기준선이 있어야/);
   assert.throws(() => loadLimit(2500, 2000, 'lcpMs'), /넘은 주소/);

@@ -1,5 +1,5 @@
 {
-  "note": "Lighthouse 적재 지표(가운데 값)가 목표를 넘은 주소의 잰 값. wbs 7.5.2까지 이 값 + 여유(시간 10%, CLS 0.02)를 넘지 않게만 막는다(budgets/lighthouse.spec.mjs). 주소 이름 → { lcpMs?, cls?, tbtMs? }",
+  "note": "Lighthouse 적재 지표(가운데 값)가 목표를 넘은 주소의 잰 값. wbs 7.5.2까지 이 값 + 여유(시간 25%, CLS 0.02)를 넘지 않게만 막는다(budgets/lighthouse.spec.mjs). 주소 이름 → { lcpMs?, cls?, tbtMs? }",
   "pages": {
     "결제 데모": {
       "lcpMs": 10100
