@@ -35,16 +35,6 @@ export function timeText(ms: number): string {
   return `${k.hh}:${k.mm}`;
 }
 
-/** '19:50:03'(짧은 구간을 보이는 곳) */
-export function timeSecText(ms: number): string {
-  return `${timeText(ms)}:${String(new Date(ms + KST_MS).getUTCSeconds()).padStart(2, '0')}`;
-}
-
-/** '11/20(금) 20:00:03' */
-export function dateTimeSecText(ms: number): string {
-  return `${dateTimeText(ms)}:${String(new Date(ms + KST_MS).getUTCSeconds()).padStart(2, '0')}`;
-}
-
 /** 한국 날짜 'YYYY-MM-DD' */
 export function kstDate(ms: number): string {
   return new Date(ms + KST_MS).toISOString().slice(0, 10);

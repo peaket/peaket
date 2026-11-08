@@ -191,4 +191,5 @@ test('서비스 코드의 이름 붙은 오류는 모두 목록에 있고 상태
   expect(missing).toEqual([]);
   expect(status).toEqual([]);
   expect(titles).toEqual(KNOWN_TITLE_DIFFS);
-});
+  // 정본 openapi와 서비스 코드 전체를 읽어 몰리는 러너에서 기본 5초를 넘긴다(CI 42529879827)
+}, 30_000);

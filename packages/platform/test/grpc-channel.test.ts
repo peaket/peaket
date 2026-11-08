@@ -167,20 +167,23 @@ describe('실제 호출', () => {
     const c = client({ timeoutCapMs: 1000 });
     const ctx = (ms: number) =>
       ({ traceId: '0'.repeat(32), deadline: Deadline.after(ms, systemClock), route: '/x', method: 'POST', log: { dependency: vi.fn() } }) as unknown as RequestContext;
+    // 기한은 호출이 끝나기 전에 정해진다. 그래서 상한은 끝난 시각에서 재야 러너가 밀려도(CI 42529879827, 323 > 320) 여유 없이 볼 수 있다
     const deadlineOf = async (fn: () => Promise<unknown>) => {
       const t0 = Date.now();
       await fn();
+      const t1 = Date.now();
       const d = a.seen.at(-1)!.deadline;
-      return (d instanceof Date ? d.getTime() : d) - t0;
+      const at = d instanceof Date ? d.getTime() : d;
+      return { fromStart: at - t0, fromEnd: at - t1 };
     };
     const inCtx = await deadlineOf(() => runInRequestContext(ctx(300), () => unary(c)));
-    expect(inCtx).toBeGreaterThan(0);
-    expect(inCtx).toBeLessThanOrEqual(300 + 20);
+    expect(inCtx.fromStart).toBeGreaterThan(0);
+    expect(inCtx.fromEnd).toBeLessThanOrEqual(300);
     const noCtx = await deadlineOf(() => unary(c));
-    expect(noCtx).toBeGreaterThan(300);
-    expect(noCtx).toBeLessThanOrEqual(1000 + 20);
+    expect(noCtx.fromStart).toBeGreaterThan(300);
+    expect(noCtx.fromEnd).toBeLessThanOrEqual(1000);
     const shorter = await deadlineOf(() => runInRequestContext(ctx(5000), () => unary(c, { deadline: Date.now() + 100 })));
-    expect(shorter).toBeLessThanOrEqual(100 + 20);
+    expect(shorter.fromEnd).toBeLessThanOrEqual(100);
   });
 
   test('FND100_호출span을열고_추적머리를싣고_소요를정규로그줄dep에더한다', async () => {

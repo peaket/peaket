@@ -354,8 +354,16 @@ describe('새 맥락 리뷰 재현(BAS-210)', () => {
     for (const hint of [{ retryAfterHeader: '3' }, { body: { pollHintMs: 200 } }] as const) {
       const floor = 'retryAfterHeader' in hint ? 3000 : 200;
       const bins = new Array<number>(10).fill(0);
+      // 씨앗을 고정한 균등 난수(mulberry32). Math.random이면 칸마다 ±3.3표준편차를 우연히 벗어나 가끔 실패한다(CI 42528011764, 895 < 900)
+      let state = 20261109;
+      const random = () => {
+        state = (state + 0x6d2b79f5) | 0;
+        let t = Math.imul(state ^ (state >>> 15), 1 | state);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
       for (let i = 0; i < 10_000; i++) {
-        const d = retryDelayMs({ ...hint, attempt: 0, random: Math.random, nowMs: 0 });
+        const d = retryDelayMs({ ...hint, attempt: 0, random, nowMs: 0 });
         expect(d).toBeGreaterThanOrEqual(floor);
         expect(d).toBeLessThanOrEqual(floor * 1.2);
         bins[Math.min(9, Math.floor(((d - floor) / (floor * 0.2)) * 10))]!++;
