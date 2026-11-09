@@ -1,5 +1,6 @@
 // 공연 등록 위저드의 입력 값과 규칙(SCR-021, d5 §6.4, ADR-0118, ADR-0198, ADR-0245). React·브라우저를 모르는 순수 함수만 둔다.
 // 서버가 다시 검사한다. 여기 검사는 등록 전에 그 칸에서 바로 알려 주려는 것이다.
+import { validateDoc, type PeaketDoc } from '../../../features/rich-text/doc.ts';
 
 export type QueueOrder = 'HYBRID' | 'PREQUEUE_SHUFFLE' | 'FIFO';
 export type SeatAssignment = 'PICK' | 'AUTO';
@@ -32,6 +33,8 @@ export interface WizardDraft {
   aliases: string[];
   producer: string;
   notice: string;
+  /** 공연 설명 구조 문서. 글자가 없으면 null(ADR-0247) */
+  description: PeaketDoc | null;
   rounds: RoundDraft[];
   queueOrder: QueueOrder;
   seatAssignment: SeatAssignment;
@@ -66,6 +69,7 @@ export function emptyDraft(): WizardDraft {
     aliases: [],
     producer: '',
     notice: '',
+    description: null,
     rounds: [blankRound('r1')],
     queueOrder: 'HYBRID',
     seatAssignment: 'PICK',
@@ -90,6 +94,14 @@ function textIssue(value: string, label: string, max: number): string | null {
   return value.trim().length > max ? `${label}은(는) ${max.toLocaleString('en-US')}자까지 적을 수 있습니다` : null;
 }
 
+function descriptionIssue(doc: PeaketDoc): string | null {
+  const errs = validateDoc(doc);
+  if (errs.length === 0) return null;
+  if (errs.some((e) => e.includes('글자는'))) return '공연 설명은 줄바꿈을 포함해 20,000자까지 적을 수 있습니다';
+  if (errs.some((e) => e.includes('블록은') || e.includes('노드는'))) return '공연 설명의 문단과 줄이 너무 많습니다. 줄여 주세요';
+  return errs.some((e) => e.includes('저장할 수 없는')) ? '공연 설명에 저장할 수 없는 글자가 있습니다' : '공연 설명에 저장할 수 없는 서식이 있습니다';
+}
+
 function validateBasic(d: WizardDraft): FieldError[] {
   const errs: FieldError[] = [];
   const add = (field: string, message: string) => errs.push({ step: 1, field, message });
@@ -108,6 +120,8 @@ function validateBasic(d: WizardDraft): FieldError[] {
   required('producer', d.producer, '기획사·제작사', 200);
   const noticeIssue = textIssue(d.notice, '안내 사항', 1000);
   if (noticeIssue) add('notice', noticeIssue);
+  const docIssue = d.description ? descriptionIssue(d.description) : null;
+  if (docIssue) add('description', docIssue);
 
   if (d.place === null) add('place', '공연장을 찾아 고르거나 새 공연장을 요청해 주세요');
   else if (d.place.kind === 'new') {
@@ -191,6 +205,7 @@ export function toCreateBody(d: WizardDraft) {
     ...(d.place?.kind === 'new' ? { newPlace: { name: d.place.name.trim(), address: d.place.address.trim() } } : {}),
     artists: d.artists.map((a) => (a.artistId ? { artistId: a.artistId } : { name: a.name.trim() })),
     ...(aliases.length > 0 ? { aliases } : {}),
+    ...(d.description ? { description: d.description } : {}),
     kopisFields: { producer: d.producer.trim(), ...(notice ? { notice } : {}) },
     events: d.rounds.map((r) => ({
       openAt: toInstant(r.openAt),
@@ -308,9 +323,15 @@ function isRound(v: unknown): boolean {
   );
 }
 
+/** 모양만 본다. 상한을 넘긴 글도 임시저장은 잃지 않는다(ADR-0247 결정 3). 칸이 없으면 설명이 생기기 전의 임시저장이다 */
+function isDescription(v: unknown): boolean {
+  return v === null || v === undefined || validateDoc(v, 'shape').length === 0;
+}
+
 function isDraft(v: unknown): v is WizardDraft {
   if (!isRecord(v)) return false;
   return (
+    isDescription(v.description) &&
     [v.title, v.genre, v.ageRating, v.runningMinutes, v.producer, v.notice].every(isStr) &&
     isPlace(v.place) &&
     Array.isArray(v.artists) &&
@@ -334,7 +355,7 @@ export function parseDraft(raw: string | null): WizardDraft | null {
   if (raw === null) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
-    return isRecord(parsed) && parsed.v === DRAFT_VERSION && isDraft(parsed.draft) ? parsed.draft : null;
+    return isRecord(parsed) && parsed.v === DRAFT_VERSION && isDraft(parsed.draft) ? { ...parsed.draft, description: parsed.draft.description ?? null } : null;
   } catch {
     return null;
   }

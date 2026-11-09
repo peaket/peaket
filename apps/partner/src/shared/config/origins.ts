@@ -3,3 +3,6 @@
 const DEV = process.env.NODE_ENV === 'development';
 
 export const PARTNER_API_ORIGIN = process.env.NEXT_PUBLIC_PARTNER_API_ORIGIN || (DEV ? '' : 'https://partner-api.peaket.example');
+
+/** CSP connect-src에 넣을 출처. 위저드가 부르는 주소와 늘 같게 한다(개발 서버에서 값이 없으면 기본값을 쓴다) */
+export const partnerCspOrigins = PARTNER_API_ORIGIN ? { partnerApi: PARTNER_API_ORIGIN } : undefined;

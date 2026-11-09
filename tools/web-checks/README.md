@@ -19,7 +19,7 @@ pnpm run seed-css                           # FE-T36(서버는 설정이 띄운�
 pnpm --filter @peaket/queue-room build      # (뿌리에서) 대기실 셸 빌드
 node lib/docker.mjs visual                  # FE-T40을 컨테이너에서. 기준 이미지를 바꿀 때만 --update-snapshots
 node lib/docker.mjs seatmap                 # K5 PoC를 컨테이너의 세 엔진으로(이 PC Chromium만: pnpm exec playwright test -c playwright.seatmap.config.mjs)
-node lib/docker.mjs rich-text               # FE-T41을 컨테이너의 세 엔진으로(파트너 PoC 서버 4122를 이 PC에서 먼저, rich-text/RESULT.md)
+node lib/docker.mjs rich-text               # FE-T41(위저드의 공연 설명 편집기)을 컨테이너의 세 엔진으로(파트너 서버 4122를 이 PC에서 먼저, rich-text/RESULT.md)
 node lib/docker.mjs purchase                # FE-T7 구매 세션 서명기를 컨테이너의 세 엔진으로(이 PC: PEAKET_FIREFOX=system pnpm run purchase)
 ```
 

@@ -546,6 +546,18 @@ export function ageOnKst(birth, now) {
   return ty - y - (tm < mo || (tm === mo && td < d) ? 1 : 0);
 }
 
+/** 서식 있는 공연 설명(/__mock/state?detail=rich, HOT-185 화면 확인) */
+const RICH_DESCRIPTION = {
+  v: 1,
+  blocks: [
+    { t: 'h', level: 2, c: [{ t: 'text', v: '공연 소개' }] },
+    { t: 'p', c: [{ t: 'text', v: '서식이 있는 ' }, { t: 'text', v: '공연 설명', b: true }, { t: 'text', v: '입니다.' }, { t: 'br' }, { t: 'text', v: '<b>태그</b>는 글자로 보입니다.' }] },
+    { t: 'h', level: 3, c: [{ t: 'text', v: '관람 안내' }] },
+    { t: 'ul', items: [[{ t: 'text', v: '공연 시간 약 120분' }], [{ t: 'text', v: '인터미션 없음' }]] },
+    { t: 'ol', items: [[{ t: 'text', v: '입장' }], [{ t: 'text', v: '착석' }]] },
+  ],
+};
+
 /** JSON 본문(64KB까지). 깨졌으면 undefined */
 function readJson(req) {
   return new Promise((resolve) => {
@@ -707,6 +719,7 @@ export function startMockApi({
     if (ev && req.method === 'GET') {
       const d = ID.test(ev[1]) ? eventDetail(origin, ev[1], new Date(now()), openAtOverride) : undefined;
       if (d && state.detail === 'suspended') return send(410, { type: 'https://peaket.example/problems/event-suspended', title: '판매가 중지된 공연입니다', status: 410 }, 'application/problem+json');
+      if (d && state.detail === 'rich') d.description = RICH_DESCRIPTION;
       // 캐시 태그는 회차·공연 둘이고 소문자다(core-svc event-summary.controller.ts와 같다, ADR-0200 결정 5)
       const tags = d ? `event:${d.eventId.toLowerCase()},production:${d.productionId.toLowerCase()}` : '';
       return d ? send(200, d, undefined, { 'cache-control': 'public, max-age=300, stale-if-error=86400', 'x-peaket-cache-tag': tags }) : send(404, { type: 'https://peaket.example/problems/not-found', title: '찾을 수 없습니다', status: 404 }, 'application/problem+json');

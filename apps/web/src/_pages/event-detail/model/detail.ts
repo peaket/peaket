@@ -3,6 +3,7 @@
 // 날짜·시각은 한국 시각으로 쓴다. 이 파일은 순수 함수만 둔다(node --test가 바로 불러 본다). 값은 서버 → 클라이언트로 넘길 수 있게 평평하다.
 import type { EventPublicSummary } from '@peaket/api-client/model';
 import { dateTimeText, parseTime, timeText } from '../../../shared/lib/kst.ts';
+import { toDescriptionBlocks, type DescriptionBlock } from './description.ts';
 
 export type SortMode = 'HYBRID' | 'PREQUEUE_SHUFFLE' | 'FIFO';
 export type SeatMode = 'PICK' | 'AUTO';
@@ -68,6 +69,8 @@ export interface EventDetail {
   seller?: DetailSeller;
   /** 설명 글자판의 문단(빈 줄로 나눈다). 글자로만 그린다 */
   description: string[];
+  /** 구조 문서로 그릴 설명. 없거나 모르는 내용이 있으면 null이고 글자판 문단을 그린다(ADR-0247) */
+  descriptionBlocks: DescriptionBlock[] | null;
   detailImages: { url: string; alt: string }[];
   artists: string[];
   /** 상세정보 섹션을 보이는가(설명 글·상세 이미지가 모두 없으면 숨긴다, d5 §5.2 '상세정보 없음') */
@@ -144,6 +147,7 @@ export function toEventDetail(e: EventPublicSummary): EventDetail | undefined {
 
   const place = { ...(e.placeId ? { id: e.placeId } : {}), name: e.placeName ?? '', ...(e.placeAddress ? { address: e.placeAddress } : {}) };
   const description = paragraphs(e.descriptionText);
+  const descriptionBlocks = toDescriptionBlocks(e.description);
   const detailImages = (e.detailImages ?? []).filter((i) => i.url && i.alt).map((i) => ({ url: i.url, alt: i.alt }));
   const transferDeadline = Math.min(startsAtMs - 2 * HOUR, entryOpensAtMs ?? Number.POSITIVE_INFINITY);
   const s = seller(e.seller);
@@ -176,9 +180,10 @@ export function toEventDetail(e: EventPublicSummary): EventDetail | undefined {
     sellerName: s?.legalName ?? e.sellerName ?? '',
     ...(s ? { seller: s } : {}),
     description,
+    descriptionBlocks,
     detailImages,
     artists: (e.artists ?? []).flatMap((a) => (a.name ? [a.name] : [])),
-    hasDetail: description.length > 0 || detailImages.length > 0,
+    hasDetail: description.length > 0 || descriptionBlocks !== null || detailImages.length > 0,
   };
 }
 

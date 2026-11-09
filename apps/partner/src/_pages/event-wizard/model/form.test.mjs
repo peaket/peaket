@@ -241,3 +241,43 @@ test('리뷰 재현: 가능한 시각이 다른 날이면 날짜도 보인다', 
   assert.match(problemToErrors(p('2026-11-20T15:03:00Z'), d)[0].message, /가능: 11\/21 00:03\)/);
   assert.match(problemToErrors(p('2026-11-20T14:59:00Z'), d)[0].message, /가능: 23:59\)/);
 });
+
+const DOC = { v: 1, blocks: [{ t: 'p', c: [{ t: 'text', v: '소개' }] }] };
+
+test('ADR-0244 공연 설명은 적었을 때만 등록 본문에 싣는다', () => {
+  assert.deepEqual(toCreateBody(filled({ description: DOC })).description, DOC);
+  assert.equal('description' in toCreateBody(filled({ description: null })), false);
+});
+
+test('ADR-0244 공연 설명 상한을 그 칸에서 알린다', () => {
+  assert.deepEqual(validateStep(filled({ description: DOC }), 1), []);
+  const long = { v: 1, blocks: [{ t: 'p', c: [{ t: 'text', v: '가'.repeat(20_001) }] }] };
+  const [e] = validateStep(filled({ description: long }), 1);
+  assert.equal(e.field, 'description');
+  assert.match(e.message, /20,000자/);
+  const many = { v: 1, blocks: Array.from({ length: 201 }, () => ({ t: 'p', c: [{ t: 'text', v: 'a' }] })) };
+  assert.equal(validateStep(filled({ description: many }), 1)[0].field, 'description');
+  const bad = { v: 1, blocks: [{ t: 'p', c: [{ t: 'text', v: 'a\u0000' }] }] };
+  assert.match(validateStep(filled({ description: bad }), 1)[0].message, /저장할 수 없는/);
+});
+
+test('ADR-0247 임시저장: 설명을 되살리고, 상한을 넘긴 설명도 잃지 않는다', () => {
+  const long = { v: 1, blocks: [{ t: 'p', c: [{ t: 'text', v: '가'.repeat(20_001) }] }] };
+  assert.deepEqual(parseDraft(serializeDraft(filled({ description: DOC }))).description, DOC);
+  assert.deepEqual(parseDraft(serializeDraft(filled({ description: long }))).description, long);
+  assert.equal(parseDraft(serializeDraft(filled({ description: null }))).description, null);
+  assert.equal(parseDraft(serializeDraft(filled({ description: 'x' }))), null);
+  assert.equal(parseDraft(serializeDraft(filled({ description: { v: 2, blocks: [] } }))), null);
+});
+
+test('리뷰 재현: 설명 칸이 생기기 전의 임시저장도 살린다', () => {
+  const { description, ...old } = filled();
+  assert.equal(description, null);
+  const restored = parseDraft(JSON.stringify({ v: 1, draft: old }));
+  assert.equal(restored.title, '겨울 콘서트');
+  assert.equal(restored.description, null);
+});
+
+test('리뷰 재현: 모르는 노드가 든 설명은 복원하지 않는다(편집기가 깨지지 않게)', () => {
+  assert.equal(parseDraft(serializeDraft(filled({ description: { v: 1, blocks: [{ t: 'video' }] } }))), null);
+});

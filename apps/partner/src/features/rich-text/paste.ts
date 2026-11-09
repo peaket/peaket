@@ -1,25 +1,58 @@
 // 붙여넣은 HTML을 편집기가 해석하기 전에 걷어 낼 것(FE-T41 PoC, BUILD_ORDER HOT-322).
 // 보안은 저장할 때 허용 노드 다섯만 남기는 구조 문서(doc.ts)가 맡는다. 이 단계는 해석 중에 CSP 위반 보고가 나지 않게 하려는 것이다:
 // Chromium은 해석만 하는 문서에서도 <style>·이벤트 속성(on…)을 막고 위반을 보고한다(Word 글에는 <style>이 늘 들어 있다).
-// 그래서 해석 전에 <style>·<script>·<meta>·<link>·주석·<img>와 on…·style 속성을 지운다. 정규식은 해석기 대신이 아니라 보고를 줄이는 거름이다.
+// 그래서 해석 전에 <style>·<script>·<meta>·<link>·주석·<img>와 on… 속성을 지운다. style 속성은 굵기 값만 남긴다(Google 문서는 굵기를 style로만 알린다).
+// 정규식은 해석기 대신이 아니라 보고를 줄이는 거름이다. 닫는 꼬리표가 없는 큰 입력에서도 입력 크기에 비례해 끝나게 쓴다.
 
-const BLOCKS = /<(style|script|template|noscript|iframe|object)\b[\s\S]*?<\/\1\s*>/gi;
+const BLOCK_NAMES = ['style', 'script', 'template', 'noscript', 'iframe', 'object'];
+const BLOCK_OPEN = new RegExp(`<(${BLOCK_NAMES.join('|')})\\b`, 'gi');
+const BLOCK_CLOSE = new Map(BLOCK_NAMES.map((n) => [n, new RegExp(`</${n}\\s*>`, 'gi')]));
+const COMMENT_OPEN = /<!--/g;
+const COMMENT_CLOSE = /-->/g;
 /** 짝 없이 남은 여는·닫는 꼬리표(<scr<script></script>ipt> 같은 것을 걷은 뒤 남는 것)와 빈 꼬리표 */
-const LONE = /<\/?(?:style|script|template|noscript|iframe|object|meta|link|img|base|input)\b(?:"[^"]*"|'[^']*'|[^'">])*>/gi;
-const COMMENTS = /<!--[\s\S]*?-->/g;
+const LONE = /<\/?(?:style|script|template|noscript|iframe|object|meta|link|img|base|input)\b(?:"[^"]*"|'[^']*'|[^'"<>])*>/gi;
 /** 여는 꼬리표(따옴표 안의 >는 꼬리표 끝이 아니다) */
-const TAG = /<([a-z][a-z0-9-]*)((?:"[^"]*"|'[^']*'|[^'">])*)>/gi;
+const TAG = /<([a-z][a-z0-9-]*)((?:"[^"]*"|'[^']*'|[^'"<>])*)>/gi;
 /** 꼬리표 안의 속성 하나(따옴표 값을 통째로) */
 const ATTR = /\s+([^\s"'=<>\/]+)(\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?/g;
 /** 이만큼 되풀이해도 바뀌면 멈춘다(걷은 자리에서 꼬리표가 되살아나는 것을 막는다) */
 const MAX_ROUNDS = 8;
 
-const keepAttrs = (attrs: string): string => attrs.replace(ATTR, (m: string, name: string) => (/^(?:on|style$)/i.test(name) ? '' : m));
+const FONT_WEIGHT = /(?:^|;)\s*font-weight\s*:\s*([a-z0-9]+)\s*(?:;|$)/i;
+
+function keepAttrs(attrs: string): string {
+  return attrs.replace(ATTR, (m: string, name: string, value: string | undefined) => {
+    if (/^on/i.test(name)) return '';
+    if (!/^style$/i.test(name)) return m;
+    const weight = FONT_WEIGHT.exec((value ?? '').replace(/^\s*=\s*/, '').replace(/^["']|["']$/g, ''));
+    return weight ? ` style="font-weight:${weight[1]}"` : '';
+  });
+}
+
+/** 여는 표시부터 짝이 되는 닫는 표시까지 지운다. 닫는 표시가 더 없는 이름은 다시 찾지 않는다 */
+function removeBetween(html: string, open: RegExp, closeFor: (m: RegExpExecArray) => RegExp): string {
+  const closed = new Set<RegExp>();
+  let out = '';
+  let at = 0;
+  open.lastIndex = 0;
+  for (let m = open.exec(html); m; m = open.exec(html)) {
+    const close = closeFor(m);
+    if (closed.has(close)) continue;
+    close.lastIndex = open.lastIndex;
+    if (close.exec(html) === null) {
+      closed.add(close);
+      continue;
+    }
+    out += html.slice(at, m.index);
+    at = close.lastIndex;
+    open.lastIndex = at;
+  }
+  return out + html.slice(at);
+}
 
 function strip(html: string): string {
-  return html
-    .replace(COMMENTS, '')
-    .replace(BLOCKS, '')
+  const noComments = removeBetween(html, COMMENT_OPEN, () => COMMENT_CLOSE);
+  return removeBetween(noComments, BLOCK_OPEN, (m) => BLOCK_CLOSE.get(m[1]!.toLowerCase())!)
     .replace(LONE, '')
     .replace(TAG, (_m: string, name: string, attrs: string) => `<${name}${keepAttrs(attrs)}>`);
 }
@@ -60,4 +93,35 @@ export function pasteHtml(html: string): unknown | null {
   }
   if (blocked) return null;
   return policy ? policy.createHTML(html) : precleanPastedHtml(html);
+}
+
+const LIST_ITEM_BLOCKS = new Set(['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE']);
+const hasContent = (n: Node | null): boolean => n !== null && n.nodeName !== 'BR' && (n.nodeType !== 3 || (n.textContent ?? '').trim() !== '');
+
+/**
+ * 해석한 문서(화면에 붙이지 않는다)의 목록을 저장될 모양으로 바꾼다(ADR-0247 결정 2): 안쪽 목록은 펼치고, 번호 시작은 지우고, 항목 안의 블록은 줄로 푼다.
+ * 구조 문서의 목록은 한 단계이고 항목은 글자 줄이라, 그대로 두면 편집기에 보인 모양이 저장되지 않는다.
+ */
+export function normalizePastedLists(root: Document): void {
+  root.querySelectorAll('ol[start]').forEach((ol) => ol.removeAttribute('start'));
+  root.querySelectorAll('li[value]').forEach((li) => li.removeAttribute('value'));
+  for (let nested = root.querySelector('li ul, li ol'); nested; nested = root.querySelector('li ul, li ol')) {
+    const owner = nested.parentElement!.closest('li')!;
+    let after: Element = owner;
+    for (const item of Array.from(nested.children)) {
+      if (item.tagName !== 'LI') continue;
+      after.after(item);
+      after = item;
+    }
+    nested.remove();
+    if ((owner.textContent ?? '').trim() === '') owner.remove();
+  }
+  root.querySelectorAll('li').forEach((li) => {
+    for (const block of Array.from(li.children)) {
+      if (!LIST_ITEM_BLOCKS.has(block.tagName)) continue;
+      if (hasContent(block.previousSibling)) block.before(root.createElement('br'));
+      if (hasContent(block.nextSibling)) block.after(root.createElement('br'));
+      block.replaceWith(...Array.from(block.childNodes));
+    }
+  });
 }

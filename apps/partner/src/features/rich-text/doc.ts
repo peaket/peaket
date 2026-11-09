@@ -1,8 +1,8 @@
 // 공연 설명 구조 문서(CMP-070, docs/design/d2 CMP-070, docs/frontend.md §5.14.3, asvs/catalog-review 1.3.1, BUILD_ORDER HOT-322 FE-T41).
 // HTML이 아니라 허용 노드 다섯만 담은 JSON으로 저장하고, 보여 줄 때 노드마다 React 요소로 그린다(HTML을 넣지 않는다).
 // 허용 노드: 문단 p · 줄바꿈 br · 강조(글자 노드의 b) · 목록 ul·ol(항목은 글자 줄, 안쪽 목록은 펼친다) · 제목 h(단계 2·3).
-// 편집기(Lexical·Tiptap)가 꺼낸 JSON을 이 문서로 바꾼다. 그 밖의 노드(표·인용·코드·링크·그림)는 글자로 낮추거나 버리고, 속성(스타일·주소)은 버린다.
-// 서버(core-svc)는 같은 규칙을 Zod로 다시 본다(HOT-180). 순수 함수라 node --test가 바로 돌린다.
+// 편집기(Lexical)가 꺼낸 JSON을 이 문서로 바꾸고, 다시 열 때는 되돌린다. 그 밖의 노드(표·인용·코드·링크·그림)는 글자로 낮추거나 버리고, 속성(스타일·주소)은 버린다.
+// 서버(core-svc)는 같은 규칙을 Zod로 다시 본다(ADR-0244). 순수 함수라 node --test가 바로 돌린다.
 
 export type Inline = { t: 'text'; v: string; b?: true } | { t: 'br' };
 export type Block = { t: 'p'; c: Inline[] } | { t: 'h'; level: 2 | 3; c: Inline[] } | { t: 'ul' | 'ol'; items: Inline[][] };
@@ -64,7 +64,7 @@ function lexBlocks(n: Json, depth = 0): Block[] {
       // 인용·코드·표 등: 안쪽에 블록이 있으면 그 블록들, 없으면 글자를 문단 하나로
       const kids = arr(n.children).map(obj);
       if (kids.some((k) => ['paragraph', 'heading', 'list', 'quote', 'table', 'tablerow', 'tablecell', 'code'].includes(String(k.type)))) return kids.flatMap((k) => lexBlocks(k, depth + 1));
-      return [{ t: 'p', c: tidy(kids.flatMap(lexInline)) }];
+      return [{ t: 'p', c: tidy(kids.flatMap((k) => lexInline(k))) }];
     }
   }
 }
@@ -75,7 +75,7 @@ function lexItems(list: Json, depth: number): Inline[][] {
     const item = obj(x);
     const kids = arr(item.children).map(obj);
     const nested = kids.filter((k) => k.type === 'list');
-    const own = tidy(kids.filter((k) => k.type !== 'list').flatMap(lexInline));
+    const own = tidy(kids.filter((k) => k.type !== 'list').flatMap((k) => lexInline(k)));
     return [...(own.length > 0 || nested.length === 0 ? [own] : []), ...nested.flatMap((l) => lexItems(l, depth + 1))];
   });
 }
@@ -84,60 +84,30 @@ export function fromLexical(state: unknown): PeaketDoc {
   return { v: 1, blocks: arr(obj(obj(state).root).children).flatMap((x) => lexBlocks(obj(x))) };
 }
 
-// ── Tiptap(editor.getJSON(), ProseMirror) ──
-function ttInline(n: Json, depth = 0): Inline[] {
-  if (depth > MAX_DEPTH) return [];
-  switch (n.type) {
-    case 'text':
-      return [{ t: 'text', v: String(n.text ?? ''), ...(arr(n.marks).some((m) => obj(m).type === 'bold') ? { b: true as const } : {}) }];
-    case 'hardBreak':
-      return [{ t: 'br' }];
-    default:
-      // 그림 등 글자 없는 것은 버리고, 그 밖은 안쪽 글자만
-      return arr(n.content).flatMap((x) => ttInline(obj(x), depth + 1));
-  }
-}
+const LEX_ELEMENT = { direction: null, format: '', indent: 0, version: 1 };
 
-function ttBlocks(n: Json, depth = 0): Block[] {
-  if (depth > MAX_DEPTH) return [];
-  switch (n.type) {
-    case 'paragraph':
-      return [{ t: 'p', c: tidy(arr(n.content).flatMap((x) => ttInline(obj(x)))) }];
-    case 'heading':
-      return [{ t: 'h', level: Number(obj(n.attrs).level) <= 2 ? 2 : 3, c: tidy(arr(n.content).flatMap((x) => ttInline(obj(x)))) }];
-    case 'bulletList':
-    case 'orderedList':
-      return [{ t: n.type === 'orderedList' ? 'ol' : 'ul', items: ttItems(n, depth + 1) }];
-    case 'horizontalRule':
-      return [];
-    case 'codeBlock':
-      return [{ t: 'p', c: tidy(arr(n.content).flatMap((x) => ttInline(obj(x)))) }];
-    default: {
-      const kids = arr(n.content).map(obj);
-      if (kids.some((k) => k.type !== 'text' && k.type !== 'hardBreak')) return kids.flatMap((k) => ttBlocks(k, depth + 1));
-      return [{ t: 'p', c: tidy(kids.flatMap(ttInline)) }];
-    }
-  }
-}
-
-function ttItems(list: Json, depth: number): Inline[][] {
-  if (depth > MAX_DEPTH) return [];
-  return arr(list.content).flatMap((x) => {
-    const item = obj(x);
-    const kids = arr(item.content).map(obj);
-    const nested = kids.filter((k) => k.type === 'bulletList' || k.type === 'orderedList');
-    const own: Inline[] = [];
-    for (const k of kids.filter((k) => !nested.includes(k))) {
-      if (own.length > 0) own.push({ t: 'br' });
-      own.push(...arr(k.content).flatMap((y) => ttInline(obj(y))));
-    }
-    const line = tidy(own);
-    return [...(line.length > 0 || nested.length === 0 ? [line] : []), ...nested.flatMap((l) => ttItems(l, depth + 1))];
+function toLexInline(c: unknown): Json[] {
+  return arr(c).flatMap((x): Json[] => {
+    const n = obj(x);
+    if (n.t === 'br') return [{ type: 'linebreak', version: 1 }];
+    if (n.t !== 'text' || typeof n.v !== 'string') return [];
+    return [{ type: 'text', text: n.v, format: n.b === true ? LEX_BOLD : 0, detail: 0, mode: 'normal', style: '', version: 1 }];
   });
 }
 
-export function fromTiptap(json: unknown): PeaketDoc {
-  return { v: 1, blocks: arr(obj(json).content).flatMap((x) => ttBlocks(obj(x))) };
+function toLexBlock(x: unknown): Json[] {
+  const b = obj(x);
+  if (b.t === 'p') return [{ ...LEX_ELEMENT, type: 'paragraph', textFormat: 0, textStyle: '', children: toLexInline(b.c) }];
+  if (b.t === 'h') return [{ ...LEX_ELEMENT, type: 'heading', tag: b.level === 3 ? 'h3' : 'h2', children: toLexInline(b.c) }];
+  if (b.t !== 'ul' && b.t !== 'ol') return [];
+  const children = arr(b.items).map((line, i) => ({ ...LEX_ELEMENT, type: 'listitem', value: i + 1, children: toLexInline(line) }));
+  return [{ ...LEX_ELEMENT, type: 'list', listType: b.t === 'ol' ? 'number' : 'bullet', start: 1, tag: b.t, children }];
+}
+
+/** 구조 문서 → 편집기 상태(다시 열 때). 그릴 블록이 없으면 null(빈 편집기로 시작한다) */
+export function toLexical(doc: unknown): { root: Json } | null {
+  const children = arr(obj(doc).blocks).flatMap(toLexBlock);
+  return children.length > 0 ? { root: { ...LEX_ELEMENT, type: 'root', children } } : null;
 }
 
 // ── 검사(저장 전·서버와 같은 규칙) ──
@@ -145,7 +115,7 @@ function extraKeys(n: Json, allowed: string[]): string[] {
   return Object.keys(n).filter((k) => !allowed.includes(k));
 }
 
-function checkInline(n: unknown, at: string, errs: string[]): number {
+function checkInline(n: unknown, at: string, errs: string[], shapeOnly: boolean): number {
   const o = obj(n);
   if (o.t === 'br') {
     for (const k of extraKeys(o, ['t'])) errs.push(`${at}: 모르는 속성 ${k}`);
@@ -157,20 +127,21 @@ function checkInline(n: unknown, at: string, errs: string[]): number {
   }
   for (const k of extraKeys(o, ['t', 'v', 'b'])) errs.push(`${at}: 모르는 속성 ${k}`);
   if (typeof o.v !== 'string') errs.push(`${at}: 글자가 아니다`);
-  else if (/\p{Cs}/u.test(o.v) || o.v.includes('\u0000')) errs.push(`${at}: 저장할 수 없는 글자가 있다`);
+  else if (!shapeOnly && (/\p{Cs}/u.test(o.v) || o.v.includes('\u0000'))) errs.push(`${at}: 저장할 수 없는 글자가 있다`);
   if (o.b !== undefined && o.b !== true) errs.push(`${at}: 굵기는 true만`);
   return typeof o.v === 'string' ? o.v.length : 0;
 }
 
-/** 허용 노드 다섯 밖의 노드·속성, 모양(배열 칸), 상한을 본다. 빈 목록이면 통과. 재귀하지 않는다(서버 Zod가 같은 규칙) */
-export function validateDoc(doc: unknown): string[] {
+/** 허용 노드 다섯 밖의 노드·속성, 모양(배열 칸), 상한을 본다. 빈 목록이면 통과. 재귀하지 않는다(서버 Zod가 같은 규칙). 'shape'이면 노드와 모양만 본다(임시저장 복원) */
+export function validateDoc(doc: unknown, mode?: 'shape'): string[] {
+  const shapeOnly = mode === 'shape';
   const d = obj(doc);
   const errs: string[] = [];
   if (d.v !== 1) return ['v: 판은 1'];
   for (const k of extraKeys(d, ['v', 'blocks'])) errs.push(`문서: 모르는 속성 ${k}`);
   if (!Array.isArray(d.blocks)) return [...errs, '문서: blocks는 배열'];
   const blocks: unknown[] = d.blocks;
-  if (blocks.length > MAX_BLOCKS) errs.push(`문서: 블록은 ${MAX_BLOCKS}개까지`);
+  if (!shapeOnly && blocks.length > MAX_BLOCKS) errs.push(`문서: 블록은 ${MAX_BLOCKS}개까지`);
   let chars = 0;
   let nodes = 0;
   blocks.forEach((b, i) => {
@@ -182,7 +153,7 @@ export function validateDoc(doc: unknown): string[] {
       if (!Array.isArray(o.c)) errs.push(`${at}: c는 배열`);
       else {
         nodes += o.c.length;
-        o.c.forEach((n, j) => (chars += checkInline(n, `${at}.c[${j}]`, errs)));
+        o.c.forEach((n, j) => (chars += checkInline(n, `${at}.c[${j}]`, errs, shapeOnly)));
       }
     } else if (o.t === 'ul' || o.t === 'ol') {
       for (const k of extraKeys(o, ['t', 'items'])) errs.push(`${at}: 모르는 속성 ${k}`);
@@ -192,11 +163,12 @@ export function validateDoc(doc: unknown): string[] {
           if (!Array.isArray(ln)) errs.push(`${at}.items[${j}]: 줄은 배열`);
           else {
             nodes += ln.length + 1;
-            ln.forEach((n, k) => (chars += checkInline(n, `${at}.items[${j}][${k}]`, errs)));
+            ln.forEach((n, k) => (chars += checkInline(n, `${at}.items[${j}][${k}]`, errs, shapeOnly)));
           }
         });
     } else errs.push(`${at}: 모르는 노드 ${String(o.t)}`);
   });
+  if (shapeOnly) return errs;
   // 서버는 글자판 전체(블록 사이 빈 줄 포함)로 잰다(ADR-0244). 블록 사이 두 글자를 더한다
   const gaps = Math.max(0, blocks.length - 1) * 2;
   const lineBreaks = blocks.reduce<number>((sum, b) => {
@@ -209,8 +181,13 @@ export function validateDoc(doc: unknown): string[] {
   return errs;
 }
 
-/** 글자만(블록·목록 항목·줄바꿈마다 줄을 바꾼다). 편집기 화면과 다시 그린 화면을 견줄 때 쓴다 */
-export function docText(doc: PeaketDoc): string {
+/** 글자판(서버와 같다, ADR-0244): 블록 사이는 빈 줄, 목록 항목·줄바꿈은 줄바꿈이다. 길이 상한은 이 글로 잰다 */
+export function docPlainText(doc: PeaketDoc): string {
   const line = (c: Inline[]) => c.map((n) => (n.t === 'br' ? '\n' : n.v)).join('');
-  return doc.blocks.flatMap((b) => ('items' in b ? b.items.map(line) : [line(b.c)])).join('\n');
+  return doc.blocks.map((b) => ('items' in b ? b.items.map(line).join('\n') : line(b.c))).join('\n\n');
+}
+
+/** 글자가 없는 문서는 설명이 없는 것이다(ADR-0244 결정 5) */
+export function isEmptyDoc(doc: PeaketDoc): boolean {
+  return docPlainText(doc).trim() === '';
 }

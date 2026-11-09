@@ -6,7 +6,7 @@
 //   node lib/docker.mjs seatmap                       5만 석 좌석맵 PoC(K5) 네 프로젝트
 //   node lib/docker.mjs budgets                       성능 예산(첫 JS·Lighthouse). 서버는 이 PC에서 `node seed-css/serve-all.mjs --budgets`로 먼저 띄운다
 //   node lib/docker.mjs seatmap-pkg                   @peaket/seatmap 세 엔진 검사(HOT-120). 시연 페이지는 먼저 `pnpm --filter @peaket/seatmap demo:build`
-//   node lib/docker.mjs rich-text                     서식 글 편집기 PoC(FE-T41, HOT-322) 세 엔진. 파트너 PoC 서버(4122)는 이 PC에서 먼저 띄운다(README)
+//   node lib/docker.mjs rich-text                     공연 설명 편집기(FE-T41, ADR-0247) 세 엔진. 파트너 서버(4122)는 이 PC에서 먼저 띄운다(README)
 //   node lib/docker.mjs purchase                      구매 세션 서명기(FE-T7, HOT-360 ①) 세 엔진. 빌드가 없다(원본을 타입만 지워 낸다)
 // 기준 이미지는 CI와 같은 이 이미지에서만 찍는다(브라우저 그리기는 OS·판·글꼴에 따라 다르다, d2 §1).
 // 컨테이너는 이 패키지를 node_modules 없이 옮겨 리눅스용으로 다시 설치한다. 결과는 reports/docker-<mode>/에 둔다.

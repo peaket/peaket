@@ -19,6 +19,7 @@ const FIELD_IDS: Record<string, string> = {
   producer: 'w-prod',
   aliases: 'w-alias',
   notice: 'w-notice',
+  description: 'w-desc',
   rounds: 'r-add',
   queueOrder: 'n-ord',
   perPersonLimit: 'n-limit-l',

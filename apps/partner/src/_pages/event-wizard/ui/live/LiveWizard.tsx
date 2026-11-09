@@ -96,6 +96,8 @@ export function LiveWizard() {
   /** 다른 탭이 등록했거나 초안을 지웠다 */
   const [closed, setClosed] = useState(false);
   const sending = useRef(false);
+  /** 값이 밖에서 바뀌면(복원·다른 탭·처음부터) 편집기를 새로 그린다. 편집기는 처음 내용만 읽는다 */
+  const [editorKey, setEditorKey] = useState(0);
 
   const flush = useCallback(() => {
     const result = keeper.flush();
@@ -109,6 +111,7 @@ export function LiveWizard() {
     if (stored) {
       setDraft(stored);
       setRestored(true);
+      setEditorKey((k) => k + 1);
     }
   }, [keeper]);
 
@@ -130,12 +133,15 @@ export function LiveWizard() {
   useEffect(
     () =>
       watchOtherTabs((other) => {
+        const before = JSON.stringify(keeper.value().description);
         const result = keeper.fromOtherTab(other);
         if (result === 'closed') setClosed(true);
         else if (result === 'adopted') {
           setDraft(keeper.value());
           setRestored(false);
           setErrors([]);
+          // 설명이 바뀌었을 때만 다시 그린다(다시 그리면 입력 중인 초점과 실행 취소 기록이 사라진다)
+          if (JSON.stringify(keeper.value().description) !== before) setEditorKey((k) => k + 1);
         }
       }),
     [keeper],
@@ -227,6 +233,7 @@ export function LiveWizard() {
     const fresh = emptyDraft();
     keeper.reset(fresh);
     setDraft(fresh);
+    setEditorKey((k) => k + 1);
     setRestored(false);
     setCreated(null);
     setClosed(false);
@@ -287,9 +294,9 @@ export function LiveWizard() {
           }}
         />
         {/* 하단 고정 막대에 초점 칸이 가리지 않게 여유를 둔다(WCAG 2.4.11). 등록 중에는 입력을 잠근다 */}
-        <div ref={body} tabIndex={-1} className="[&_:is(input,select,textarea,button,a)]:scroll-mb-28" style={{ outline: 'none' }} onFocusCapture={(e) => e.target.scrollIntoView({ block: 'nearest' })}>
+        <div ref={body} tabIndex={-1} className="[&_:is(input,select,textarea,button,a)]:scroll-mb-28 [&_[contenteditable]]:scroll-mb-28" style={{ outline: 'none' }} onFocusCapture={(e) => e.target.scrollIntoView({ block: 'nearest' })}>
           <fieldset disabled={submitting} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-            {step === 1 ? <LiveStepBasic {...props} onApiError={onApiError} /> : step === 2 ? <LiveStepRounds {...props} /> : step === 3 ? <SeatmapNotice /> : <LiveStepPolicy {...props} />}
+            {step === 1 ? <LiveStepBasic {...props} onApiError={onApiError} editorKey={editorKey} /> : step === 2 ? <LiveStepRounds {...props} /> : step === 3 ? <SeatmapNotice /> : <LiveStepPolicy {...props} />}
           </fieldset>
         </div>
       </div>

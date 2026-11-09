@@ -1,10 +1,22 @@
 // 1단계 기본 정보(실제 입력, ADR-0245). 배치는 퍼블리싱 화면(StepBasic)과 같다. 공연 설명은 HOT-185, 이미지는 HOT-190이 잇는다.
-import { useState, type KeyboardEvent } from 'react';
+import dynamic from 'next/dynamic';
+import { useCallback, useState, type KeyboardEvent } from 'react';
+import { isEmptyDoc, type PeaketDoc } from '@/features/rich-text/doc';
 import { GENRES, kopisRows } from '../../model/fixtures';
 import { ALIAS_MAX, ARTIST_MAX, kopisStatus, type PlaceChoice } from '../../model/form';
 import { searchArtists, searchPlaces, type NameHit } from '../../model/wizard-api';
 import { NameSearch } from '../parts/NameSearch';
 import { errorAttrs, FieldLabel, FieldMessage, TextField, type StepProps } from './fields';
+
+// 편집기는 이 단계에 들어올 때 늦게 싣는다(docs/frontend.md §5.6, 90KB)
+const DescriptionEditor = dynamic(() => import('@/features/rich-text/LexicalEditor'), {
+  ssr: false,
+  loading: () => (
+    <p className="t-sm muted" role="status">
+      편집기를 불러오는 중입니다
+    </p>
+  ),
+});
 
 const KOPIS_BADGE = { 입력됨: 'badge badge-success', '입력 필요': 'badge badge-warning', 자동: 'badge', '비어 있음': 'badge' } as const;
 const CHIP_STYLE = { gap: 8, padding: '4px 4px 4px 12px', borderRadius: 'var(--r-md)', background: 'var(--surface-muted)' } as const;
@@ -241,8 +253,9 @@ function AliasField({ draft, update, errorOf }: StepProps) {
   );
 }
 
-export function LiveStepBasic(props: StepProps & { onApiError: (e: unknown) => void }) {
-  const { draft, update, errorOf } = props;
+export function LiveStepBasic(props: StepProps & { onApiError: (e: unknown) => void; editorKey: number }) {
+  const { draft, update, errorOf, editorKey } = props;
+  const onDescription = useCallback((doc: PeaketDoc) => update({ description: isEmptyDoc(doc) ? null : doc }, 'description'), [update]);
   const status = kopisStatus(draft);
   const genreError = errorOf('genre');
   const noticeError = errorOf('notice');
@@ -286,6 +299,12 @@ export function LiveStepBasic(props: StepProps & { onApiError: (e: unknown) => v
           <AliasField {...props} />
         </div>
         <div className="field">
+          <span className="label" id="w-desc-l">
+            공연 설명 <span className="opt">(선택)</span>
+          </span>
+          <DescriptionEditor key={editorKey} id="w-desc" labelledBy="w-desc-l" initial={draft.description} onChange={onDescription} error={errorOf('description')} />
+        </div>
+        <div className="field">
           <FieldLabel htmlFor="w-notice">안내 사항</FieldLabel>
           <textarea
             className={noticeError ? 'textarea is-error' : 'textarea'}
@@ -301,7 +320,7 @@ export function LiveStepBasic(props: StepProps & { onApiError: (e: unknown) => v
           </span>
           <FieldMessage id="w-notice" error={noticeError} />
         </div>
-        <p className="hint">공연 설명과 포스터·상세 이미지는 아직 이 화면에서 입력할 수 없습니다. 판매 승인을 요청하기 전에 넣게 됩니다.</p>
+        <p className="hint">포스터·상세 이미지는 아직 이 화면에서 입력할 수 없습니다. 판매 승인을 요청하기 전에 넣게 됩니다.</p>
       </section>
 
       <section className="card pad-lg col lg:col-span-6 xl:col-span-1" style={{ gap: 12 }} aria-labelledby="h-kopis">

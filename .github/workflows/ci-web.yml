@@ -145,6 +145,41 @@ jobs:
           path: tools/web-checks/reports/
           retention-days: 7
 
+  # 공연 설명 편집기 FE-T41(ADR-0204, ADR-0247): 파트너 콘솔을 빌드해 실제 위저드(/events/new)의 묶음 B CSP·Trusted Types 보고 모드에서
+  # Word 글 붙여넣기, 구조 문서 저장, 키보드, 늦게 싣는 덩어리 90KB를 Chromium·WebKit·Firefox로 본다
+  rich-text:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile --filter "@peaket/partner..."
+      - run: node rich-text/build.mjs
+        working-directory: tools/web-checks
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/web-checks
+      - run: pnpm run rich-text
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rich-text-reports
+          path: tools/web-checks/reports/
+          retention-days: 7
+
   # ds 부품 검사(BAS-180): Storybook의 모든 이야기 × 라이트·다크 axe(FE-T18, WCAG 2.2 AA까지)와, 이유 있는 비활성 버튼·대화상자·탭·입력의
   # 동작을 Chromium·WebKit·Firefox로 본다(tools/web-checks/ds/)
   ds:

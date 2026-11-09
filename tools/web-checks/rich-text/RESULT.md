@@ -1,5 +1,7 @@
 # FE-T41 서식 글 편집기 PoC 결과(BUILD_ORDER HOT-322, ADR-0204)
 
+> 2026-11-09 HOT-185(ADR-0247): 이 시험은 실제 위저드(`/events/new`)로 옮겼고 CI 잡 `rich-text`가 세 엔진으로 돈다. PoC 화면과 Tiptap은 걷었다. 아래는 편집기를 고를 때 잰 값이고, 화면 주소·명령은 그때의 것이다.
+
 - 날짜: 2026-11-05
 - 빌드: 파트너 콘솔 PoC 빌드(`PEAKET_POC=rich-text`, `apps/partner/.next-rich-text`). 화면은 `/poc/rich-text?editor=lexical|tiptap`이다.
 - 헤더: `apps/partner/proxy.ts`가 그 경로에만 묶음 B CSP와 Trusted Types 보고 모드(`require-trusted-types-for 'script'`)를 단다.

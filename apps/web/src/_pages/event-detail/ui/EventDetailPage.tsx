@@ -20,6 +20,7 @@ import { loadEvent, popularEventIds } from '../api/load-event';
 import { AUTO_SEAT_NOTE, brokerNotice, LEGAL_RESALE_NOTICE, SORT_NOTICE } from '../model/content';
 import { jsonLdText, offerAvailability, type EventDetail } from '../model/detail';
 import { BookingBar, BookingFacts, BookingPanelCta, BookingPreverifyCard, BookingProvider, type BookingData } from './Booking';
+import { DescriptionDoc } from './DescriptionDoc';
 import { DetailCollapse, DetailImage, SectionTabs, WishButton } from './DetailClient';
 import { DetailModalsProvider, DetailModalTrigger } from './DetailModals';
 import { DetailPersonalProvider } from './DetailPersonal';
@@ -130,11 +131,15 @@ export async function EventDetailPage({ params }: Props) {
                             상세정보
                           </h2>
                           <DetailCollapse>
-                            {d.description.map((p, i) => (
-                              <p key={i} className="prose muted" style={{ whiteSpace: 'pre-line' }}>
-                                {p}
-                              </p>
-                            ))}
+                            {d.descriptionBlocks ? (
+                              <DescriptionDoc blocks={d.descriptionBlocks} />
+                            ) : (
+                              d.description.map((p, i) => (
+                                <p key={i} className="prose muted" style={{ whiteSpace: 'pre-line' }}>
+                                  {p}
+                                </p>
+                              ))
+                            )}
                             {d.detailImages.map((img, i) => (
                               <DetailImage key={img.url} url={img.url} alt={img.alt} index={i} total={d.detailImages.length} />
                             ))}
